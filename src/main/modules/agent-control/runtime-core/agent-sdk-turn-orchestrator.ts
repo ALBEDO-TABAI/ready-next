@@ -1,5 +1,6 @@
 import { MemorySession } from '@openai/agents'
 import { randomUUID } from 'crypto'
+import type { CanonicalAssistantMessageReceipt } from '../../../../shared/ipc-contracts/canonical-message'
 import {
   normalizeAIConfig,
   resolveAIConfigCapabilities,
@@ -21,6 +22,7 @@ import {
   computeCapabilityFloors,
   enforceCapabilityFloors
 } from '../domain-adapters/capability-floors'
+import { buildPreparedSkillTurnTruth, preparedSkillDigest } from '../skills/prepared-skill-turn'
 import type { CheckInRecord } from '../quality/task-adjudicator'
 import { loadScopeSessionSnapshot } from '../session/scope-session-snapshot'
 import { beginBackgroundTaskTerminalReminderRun } from '../system-reminders/background-task-terminal-reminder'
@@ -63,14 +65,14 @@ import type {
 import {
   finalizeRunOutcome,
   reconcileTerminalTaskBudgetRuntime,
-  writeRunCloseMetric
+  writeRunCloseMetric,
+  type RunFinalizerDeps,
 } from './run-finalizer'
 import type { TurnTerminalReason } from './turn-frame'
 import {
   buildExecutionTurnResult,
   finalizeAgentSdkTurnLifecycle,
   handleAgentSdkTurnError,
-  persistRunMetaSnapshot,
   recordAdmissionRejection
 } from './agent-sdk-turn-closeout'
 import type { TurnOrchestratorHost } from './agent-sdk-turn-context'
@@ -180,7 +182,7 @@ export class AgentSdkTurnOrchestrator {
           })
     if (checkpointLoad.status === 'invalid') {
       const userMessage = '续跑检查点无法验证，已停止恢复以避免从头重复执行。'
-      await this.recordAdmissionRejection({
+      await recordAdmissionRejection(this.host, {
         name,
         runId,
         taskId,
@@ -190,7 +192,7 @@ export class AgentSdkTurnOrchestrator {
         finalText: '',
         firstMessageText: messageToText(content as RunMessage)
       })
-      return this.buildResult({
+      return buildExecutionTurnResult(this.host, {
         success: false,
         error: `${userMessage} (${checkpointLoad.reason})`,
         finalText: '',
@@ -209,7 +211,7 @@ export class AgentSdkTurnOrchestrator {
     if (budgetCheckpointFlightKey) {
       ownsBudgetCheckpointFlight = acquireBudgetCheckpointFlight(budgetCheckpointFlightKey)
       if (!ownsBudgetCheckpointFlight) {
-        await this.recordAdmissionRejection({
+        await recordAdmissionRejection(this.host, {
           name,
           runId,
           taskId,
@@ -219,7 +221,7 @@ export class AgentSdkTurnOrchestrator {
           finalText: '这项任务已经在继续执行，请等待当前续跑完成。',
           firstMessageText: messageToText(content as RunMessage)
         })
-        return this.buildResult({
+        return buildExecutionTurnResult(this.host, {
           success: true,
           finalText: '这项任务已经在继续执行，请等待当前续跑完成。',
           cancelled: false,
@@ -237,17 +239,19 @@ export class AgentSdkTurnOrchestrator {
     if (!begin.ok) {
       if (ownsBudgetCheckpointFlight) releaseBudgetCheckpointFlight(budgetCheckpointFlightKey)
       const rejection = resolveBeginRunRejection(begin.reason)
-      await this.recordAdmissionRejection({
-        name,
-        runId,
-        taskId,
-        scopeId: sessionId || null,
-        status: rejection.status,
-        terminalReason: rejection.terminalReason,
-        finalText: '',
-        firstMessageText: messageToText(content as RunMessage)
-      })
-      return this.buildResult({
+      if (begin.reason !== 'active_owner_exists') {
+        await recordAdmissionRejection(this.host, {
+          name,
+          runId,
+          taskId,
+          scopeId: sessionId || null,
+          status: rejection.status,
+          terminalReason: rejection.terminalReason,
+          finalText: '',
+          firstMessageText: messageToText(content as RunMessage)
+        })
+      }
+      return buildExecutionTurnResult(this.host, {
         success: false,
         error: begin.message,
         finalText: '',
@@ -268,6 +272,15 @@ export class AgentSdkTurnOrchestrator {
       })
     }
     const { session, runHandle, abortController, runGeneration } = begin
+    // This remains the only committed/shared SDK session until the canonical
+    // core closeout succeeds.  Checkpoint restore is a run-local seed only.
+    const committedPublicSession = runHandle.capturedSession
+    const checkpointRepository = this.host.runtime?.getAgentSessionCheckpointRepository?.()
+    const durableCheckpoint = checkpointRepository
+      && this.host.runtime?.getTaskProjectionStoreForFinalize?.()?.get(taskId)
+      ? checkpointRepository.current(taskId, 'suspension')
+        || checkpointRepository.current(taskId, 'clean_base')
+      : null
     const finishBackgroundTaskTerminalReminderRun = beginBackgroundTaskTerminalReminderRun(
       sessionId,
       taskId
@@ -292,8 +305,14 @@ export class AgentSdkTurnOrchestrator {
         sessionId: name,
         initialItems: checkpointRestore.sessionSnapshot
       })
-      session.sdkSession = restoredSession
       runHandle.capturedSession = restoredSession
+    } else if (durableCheckpoint) {
+      const restoredSession = new MemorySession({
+        sessionId: `${name}:checkpoint:${durableCheckpoint.checkpointId}`,
+        initialItems: durableCheckpoint.finalInput,
+      })
+      runHandle.capturedSession = restoredSession
+      sessionRestoreNotice = '已从上一个完整操作边界恢复任务。'
     }
 
     const isCurrentRun = (): boolean => {
@@ -305,7 +324,8 @@ export class AgentSdkTurnOrchestrator {
     const emitOutputForRun = (
       chunk: string,
       type: string,
-      projectionPatch?: Record<string, unknown> | null
+      projectionPatch?: Record<string, unknown> | null,
+      canonicalReceipt?: CanonicalAssistantMessageReceipt,
     ): void => {
       const safeChunk =
         type === 'text'
@@ -328,7 +348,8 @@ export class AgentSdkTurnOrchestrator {
         taskId,
         chunk: safeChunk,
         type,
-        projectionPatch: projectionPatch || null
+        projectionPatch: projectionPatch || null,
+        ...(canonicalReceipt || {}),
       })
     }
     // P0-1 (2026-07-02 P0 visibility batch) — response-boundary release for
@@ -470,12 +491,17 @@ export class AgentSdkTurnOrchestrator {
           projection: TaskProjectionRecord
           now: Date
         }) => this.host.learnSiteCardsFromCheckIn(input),
+        commitCanonicalCoreCloseout: this.host.runtime
+          ? (input: Parameters<NonNullable<RunFinalizerDeps['commitCanonicalCoreCloseout']>>[0]) =>
+              this.host.runtime!.commitCanonicalCoreCloseout(input)
+          : undefined,
         writeProjectionTerminalPatch: (
           patch: Record<string, unknown> | null,
           terminalReason: string,
-          status: string
+          status: string,
+          canonicalReceipt?: CanonicalAssistantMessageReceipt,
         ) => {
-          emitOutputForRun('', 'done', patch)
+          emitOutputForRun('', 'done', patch, canonicalReceipt)
           emitStatusForRun(status, terminalReason as TurnTerminalReason)
         },
         writeRunCloseMetric
@@ -505,17 +531,18 @@ export class AgentSdkTurnOrchestrator {
                 {
                   kind: params.status === 'cancelled' ? 'cancelled' : 'error',
                   ...base,
-                  terminalReason: params.terminalReason
+                  terminalReason: params.terminalReason,
+                  finalText: params.finalText,
                 },
                 deps
               )
       const terminalReason = finalized.terminalReason as TurnTerminalReason
       const cancelled = finalized.status === 'cancelled'
       const success = finalized.status !== 'error'
-      return this.buildResult({
+      return buildExecutionTurnResult(this.host, {
         success,
         error: success ? undefined : params.error,
-        finalText: params.finalText,
+        finalText: finalized.canonicalMessage?.content ?? params.finalText,
         cancelled,
         taskId,
         usedTools,
@@ -524,7 +551,9 @@ export class AgentSdkTurnOrchestrator {
         terminalReason,
         taskBudgetRuntime: effectiveBudgetRuntime,
         providerDiagnostics: effectiveProviderDiagnostics,
-        usage: runMetaUsage
+        usage: runMetaUsage,
+        canonicalMessage: finalized.canonicalMessage,
+        canonicalMessageDigest: finalized.canonicalMessageDigest,
       })
     }
     let checkpointRequiredCapabilityGroups: string[] = []
@@ -576,23 +605,21 @@ export class AgentSdkTurnOrchestrator {
           configDetail.reason === 'json_corrupt'
             ? 'AI 配置已损坏（JSON 解析失败），请前往设置页重置'
             : 'AI 配置读取失败（数据库错误），请稍后重试或检查日志'
-        emitOutput(userMessage, 'error')
         return finalizeEarlyReturn({
           status: 'error',
           terminalReason:
             configDetail.reason === 'json_corrupt' ? 'blocked_config' : 'persistence_failed',
           error: userMessage,
-          finalText: ''
+          finalText: userMessage
         })
       }
       if (!configDetail.config?.apiKey) {
         const userMessage = '未配置 API Key，请前往设置页配置'
-        emitOutput(userMessage, 'error')
         return finalizeEarlyReturn({
           status: 'error',
           terminalReason: 'blocked_config',
           error: userMessage,
-          finalText: ''
+          finalText: userMessage
         })
       }
 
@@ -673,6 +700,7 @@ export class AgentSdkTurnOrchestrator {
         content: content as RunMessage,
         effectiveExecutionOptions,
         checkpointRestore,
+        durableCheckpoint,
         activeFrame,
         sessionId,
         runId,
@@ -687,18 +715,21 @@ export class AgentSdkTurnOrchestrator {
       const {
         skillCatalogSnapshot,
         skillHintRelevanceForTurn,
-        authorization,
         documentTargetGuard,
         requiresLocalDocumentExcerpt,
         preferCurrentDocumentRead,
         requiresLocalDocumentWrite,
         providerContent,
-        recentBrowserWorkIntent,
         requestedCapabilityConflicts,
-        preNarrowingToolDefinitions,
         turnFollowup
       } = preparedTurn
-      let { toolDefinitions } = preparedTurn
+      let {
+        authorization,
+        skillSurface,
+        skillIdentity,
+        preNarrowingToolDefinitions,
+        toolDefinitions,
+      } = preparedTurn
       if (preparedTurn.documentTargetHydration) await preparedTurn.documentTargetHydration
       if (capabilities) {
         const providerToolsBlocked = requestedCapabilityConflicts.some(
@@ -774,17 +805,36 @@ export class AgentSdkTurnOrchestrator {
         )
       }
       toolDefinitions = floorEnforcement.definitions
+      const requestAnchorDigest = this.host.runtime
+        ?.getTaskProjectionStoreForFinalize?.()
+        ?.get(taskId)
+        ?.requestAnchor
+        ?.snapshotDigest
+        || preparedSkillDigest({
+          requestEnvelope: effectiveExecutionOptions?.requestEnvelope ?? null,
+          pureUserTurnText,
+        })
+      const preparedSkillTurn = buildPreparedSkillTurnTruth({
+        identity: skillIdentity,
+        authorization,
+        requestOrResourceAnchorDigest: requestAnchorDigest,
+        floors: turnCapabilityFloors,
+        surface: skillSurface,
+      })
       preparedTurnState = {
         actionAnnouncementSteered,
         criteriaSelfCheckInjected,
         fileReadExcerptCheckpointForRecovery,
         finalText,
         hasSuccessfulDocumentTargetMutation,
+        hasSuccessfulLocalDocumentSourceRead: false,
         hasSuccessfulLocalDocumentSourceReadForRecovery,
         hasSuccessfulToolProgress,
+        lastDocumentSaveFailure: null,
         lastDocumentSaveSuccessText,
         lastRollingCheckpointToolCalls,
         longSkillCheckpoint,
+        newDocumentNeedsSave: false,
         observedDocumentMutationConflict,
         observedDocumentMutationMissingTarget,
         observedDocumentMutationTarget,
@@ -815,6 +865,7 @@ export class AgentSdkTurnOrchestrator {
         toolDefinitions,
         abortController,
         runHandle,
+        committedPublicSession,
         session,
         isCurrentRun,
         toolArgsByName,
@@ -845,8 +896,7 @@ export class AgentSdkTurnOrchestrator {
           }
           return finalizeBudgetCheckpointReturn(checkpointText)
         },
-        buildResult: (params) => this.buildResult(params),
-        recentBrowserWorkIntent,
+        buildResult: (params) => buildExecutionTurnResult(this.host, params),
         requestedCapabilityConflicts,
         turnFollowup,
         useTextToolBridge,
@@ -857,6 +907,8 @@ export class AgentSdkTurnOrchestrator {
         providerContent,
         capabilities,
         authorization,
+        skillSurface,
+        preparedSkillTurn,
         activeFrame,
         contextWindowTokens,
         maxOutputTokens,
@@ -919,7 +971,7 @@ export class AgentSdkTurnOrchestrator {
         finalizeBudgetCheckpointReturn,
         buildLocalDocumentWriteBudgetCheckpoint,
         buildToolProgressBudgetCheckpoint,
-        buildResult: (params) => this.buildResult(params)
+        buildResult: (params) => buildExecutionTurnResult(this.host, params)
       })
     } finally {
       this.host.dynamicDelivery.close(runId)
@@ -944,56 +996,5 @@ export class AgentSdkTurnOrchestrator {
         budgetCheckpointFlightKey
       })
     }
-  }
-
-  // Review-team A1: admission rejections exit before the try/finally net, so
-  // they must write their own terminal run_meta row — a rejected request has
-  // a real runId the caller observes, and "no row" reads as a silent run.
-  private async recordAdmissionRejection(params: {
-    name: string
-    runId: string
-    taskId: string
-    scopeId: string | null
-    status: string
-    terminalReason: TurnTerminalReason
-    finalText: string
-    firstMessageText: string
-  }): Promise<void> {
-    await recordAdmissionRejection(this.host, params)
-  }
-
-  private async persistRunMetaSnapshot(params: {
-    agentName: string
-    runId: string
-    taskId: string
-    scopeId: string | null
-    status: string
-    terminalReason: TurnTerminalReason | null
-    taskBudgetRuntime: TaskBudgetRuntime | null
-    providerDiagnostics: AgentSdkProviderDiagnostics | null
-    continuationRef: Record<string, unknown> | null
-    usage: ReadyAgentSdkRunResult['usage'] | null
-    firstMessageText: string
-    finalText: string
-  }): Promise<void> {
-    await persistRunMetaSnapshot(this.host, params)
-  }
-
-  private buildResult(params: {
-    success: boolean
-    finalText: string
-    cancelled: boolean
-    taskId: string
-    usedTools: string[]
-    transcriptEvents: TurnTranscriptEvent[]
-    projectionPatches: Record<string, unknown>[]
-    terminalReason: TurnTerminalReason
-    taskBudgetRuntime?: TaskBudgetRuntime | null
-    providerDiagnostics?: AgentSdkProviderDiagnostics | null
-    usage?: ReadyAgentSdkRunResult['usage'] | null
-    error?: string
-    scopeRunAuthority?: ExecutionTurnResult['scopeRunAuthority']
-  }): ExecutionTurnResult {
-    return buildExecutionTurnResult(this.host, params)
   }
 }

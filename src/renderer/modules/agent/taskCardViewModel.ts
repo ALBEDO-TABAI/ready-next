@@ -49,6 +49,7 @@ export interface TaskCardRunLike {
   taskType?: TaskProjectionRecordData['taskType']
   module?: TaskProjectionRecordData['module'] | null
   interactionState?: TaskProjectionRecordData['interactionState']
+  humanTakeoverRef?: TaskProjectionRecordData['humanTakeoverRef']
   budgetUsagePercent?: number | null
   stepBudget?: {
     stepId?: string | null

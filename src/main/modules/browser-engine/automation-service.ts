@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import type { BrowserHostView, BrowserRect } from './host-types'
 import type {
   BrowserCDPErrorCode,
@@ -46,6 +47,7 @@ export interface BrowserExecutionDeadlineOptions {
 
 const DEFAULT_BROWSER_JS_TIMEOUT_MS = 10_000
 const DEFAULT_BROWSER_CDP_TIMEOUT_MS = 15_000
+const BROWSER_BOOT_INCARNATION_ID = randomUUID()
 
 async function withBrowserExecutionDeadline<T>(
   label: string,
@@ -90,7 +92,20 @@ async function withBrowserExecutionDeadline<T>(
 }
 
 export class BrowserAutomationService {
+  private readonly physicalTargetTokens = new WeakMap<object, string>()
+  private nextPhysicalTargetSequence = 1
+
   constructor(private readonly host: BrowserAutomationHost) {}
+
+  getPhysicalTargetToken(tabId: string | null): string {
+    const { view } = this.host.resolveTabView(tabId)
+    const physicalTarget = view.webContents as unknown as object
+    const current = this.physicalTargetTokens.get(physicalTarget)
+    if (current) return current
+    const token = `${BROWSER_BOOT_INCARNATION_ID}:${this.nextPhysicalTargetSequence++}`
+    this.physicalTargetTokens.set(physicalTarget, token)
+    return token
+  }
 
   private resolveViewBounds(view: BrowserHostView): BrowserRect {
     const hostBounds = this.host.getViewBounds()
@@ -242,6 +257,12 @@ export class BrowserAutomationService {
     }
   }
 
+  async retainTrustedInputSequence(tabId: string | null): Promise<() => void> {
+    if (this.host.cdpSession) return this.host.cdpSession.retainAttachment(tabId)
+    await this.ensureDebugger(tabId)
+    return () => undefined
+  }
+
   async normalizedToCss(tabId: string | null, x: number, y: number): Promise<{ x: number; y: number; width: number; height: number }> {
     const metrics = await this.getViewportMetrics(tabId)
     const clamp = (value: number) => Math.max(0, Math.min(999, Number.isFinite(value) ? value : 0))
@@ -309,6 +330,7 @@ export class BrowserAutomationService {
         autoRepeat: payload.autoRepeat,
         unmodifiedText: payload.unmodifiedText,
         location: payload.location,
+        commands: payload.commands,
       })
       const resolvedTabId = this.host.resolveTabView(tabId).tabId
       this.host.onTrustedInput?.({ tabId: resolvedTabId, kind: 'key', type: payload.type })
@@ -630,7 +652,7 @@ export class BrowserAutomationService {
 
   async setFileInputFiles(
     tabId: string | null,
-    payload: { files: string[]; selector?: string; target?: string; x?: number; y?: number },
+    payload: { files: string[]; selector?: string; targetToken?: string; frameDocumentToken?: string; backendDOMNodeId?: number },
   ): Promise<{ ok: boolean; targetDescription: string; inputFound: boolean; filesAssigned?: boolean; assignedFileNames?: string[] }> {
     const { view } = this.host.resolveTabView(tabId)
     await this.ensureDebugger(tabId)
@@ -641,9 +663,53 @@ export class BrowserAutomationService {
 
     const marker = `ready-upload-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
     const selector = typeof payload.selector === 'string' ? payload.selector.trim() : ''
-    const target = typeof payload.target === 'string' ? payload.target.trim() : ''
-    const x = Number.isFinite(Number(payload.x)) ? Number(payload.x) : null
-    const y = Number.isFinite(Number(payload.y)) ? Number(payload.y) : null
+    const targetToken = typeof payload.targetToken === 'string' ? payload.targetToken.trim() : ''
+    const frameDocumentToken = typeof payload.frameDocumentToken === 'string' ? payload.frameDocumentToken.trim() : ''
+    const backendDOMNodeId = Number.isInteger(payload.backendDOMNodeId) && Number(payload.backendDOMNodeId) > 0
+      ? Number(payload.backendDOMNodeId)
+      : 0
+
+    if (backendDOMNodeId) {
+      const described = await this.sendCdpCommand(tabId, 'DOM.describeNode', {
+        backendNodeId: backendDOMNodeId,
+        depth: 0,
+      }) as { node?: { nodeName?: unknown; attributes?: unknown } } | null
+      const attributes = Array.isArray(described?.node?.attributes) ? described.node.attributes.map(String) : []
+      const attribute = (name: string): string => {
+        for (let index = 0; index + 1 < attributes.length; index += 2) {
+          if (attributes[index].toLowerCase() === name) return attributes[index + 1]
+        }
+        return ''
+      }
+      if (String(described?.node?.nodeName || '').toLowerCase() !== 'input' || attribute('type').toLowerCase() !== 'file') {
+        return { ok: false, targetDescription: `backend:${backendDOMNodeId}`, inputFound: false, filesAssigned: false, assignedFileNames: [] }
+      }
+      await this.sendCdpCommand(tabId, 'DOM.setFileInputFiles', { backendNodeId: backendDOMNodeId, files })
+      const resolved = await this.sendCdpCommand(tabId, 'DOM.resolveNode', { backendNodeId: backendDOMNodeId }) as { object?: { objectId?: unknown } } | null
+      const objectId = String(resolved?.object?.objectId || '')
+      const readback = objectId
+        ? await this.sendCdpCommand(tabId, 'Runtime.callFunctionOn', {
+            objectId,
+            functionDeclaration: `function() {
+              const names = Array.from(this.files || []).map((file) => String(file.name || ''));
+              return {
+                names,
+                description: String(this.getAttribute('aria-label') || this.getAttribute('title') || this.getAttribute('name') || this.id || 'input:file')
+              };
+            }`,
+            returnByValue: true,
+          }) as { result?: { value?: { names?: unknown; description?: unknown } } }
+        : null
+      if (objectId) await this.sendCdpCommand(tabId, 'Runtime.releaseObject', { objectId }).catch(() => undefined)
+      const names = Array.isArray(readback?.result?.value?.names) ? readback.result.value.names.map(String) : []
+      return {
+        ok: true,
+        targetDescription: String(readback?.result?.value?.description || `backend:${backendDOMNodeId}`),
+        inputFound: true,
+        filesAssigned: names.length > 0,
+        assignedFileNames: names,
+      }
+    }
 
     const markResult = await this.executeJS(tabId, `
       (() => {
@@ -654,16 +720,6 @@ export class BrowserAutomationService {
           })
         }
         const normalize = (s) => String(s || '').replace(/\\s+/g, ' ').trim()
-        const visible = (el) => {
-          if (!(el instanceof HTMLElement)) return false
-          const rect = el.getBoundingClientRect()
-          const style = getComputedStyle(el)
-          return rect.width >= 6 &&
-            rect.height >= 6 &&
-            style.display !== 'none' &&
-            style.visibility !== 'hidden' &&
-            Number(style.opacity || '1') > 0
-        }
         const toInput = (node) => {
           if (!node) return null
           if (node instanceof HTMLInputElement && node.type === 'file') return node
@@ -684,46 +740,21 @@ export class BrowserAutomationService {
           }
           return null
         }
-        const chooseByTarget = (text) => {
-          const wanted = normalize(text).toLowerCase()
-          if (!wanted) return null
-          const inputs = Array.from(document.querySelectorAll('input[type="file"]'))
-          let best = null
-          let bestScore = -1
-          for (const input of inputs) {
-            const label = [
-              input.getAttribute('aria-label'),
-              input.getAttribute('title'),
-              input.getAttribute('name'),
-              input.getAttribute('id'),
-              input.closest('label')?.textContent,
-              input.parentElement?.textContent,
-            ].map(normalize).join(' ').toLowerCase()
-            let score = 0
-            if (label.includes(wanted)) score += 10
-            if (visible(input)) score += 3
-            if (score > bestScore) {
-              best = input
-              bestScore = score
-            }
-          }
-          return best
-        }
         clearMarker()
         let input = null
         const selector = ${JSON.stringify(selector)}
-        const target = ${JSON.stringify(target)}
-        const pointX = ${x === null ? 'null' : JSON.stringify(x)}
-        const pointY = ${y === null ? 'null' : JSON.stringify(y)}
-        if (selector) input = toInput(document.querySelector(selector))
-        if (!input && target) input = chooseByTarget(target)
-        if (!input && Number.isFinite(pointX) && Number.isFinite(pointY)) {
-          const node = document.elementFromPoint(pointX, pointY)
-          input = toInput(node)
+        const targetToken = ${JSON.stringify(targetToken)}
+        const expectedDocumentToken = ${JSON.stringify(frameDocumentToken)}
+        if (targetToken) {
+          const state = globalThis.__readyBrowserTargetIdentityV3
+          if (!state || state.document !== document || state.documentToken !== expectedDocumentToken) {
+            return { ok: false, targetDescription: targetToken, inputFound: false, reason: 'stale_target_document' }
+          }
+          input = toInput(state.nodesByToken instanceof Map ? state.nodesByToken.get(targetToken) : null)
         }
-        if (!input) input = document.querySelector('input[type="file"]')
+        if (!input && selector) input = toInput(document.querySelector(selector))
         if (!(input instanceof HTMLInputElement)) {
-          return { ok: false, targetDescription: target || selector || 'input[type=file]', inputFound: false }
+          return { ok: false, targetDescription: targetToken || selector || 'explicit file input', inputFound: false }
         }
         input.setAttribute('data-ready-upload-target', marker)
         return {
@@ -734,7 +765,7 @@ export class BrowserAutomationService {
             normalize(input.getAttribute('name')) ||
             normalize(input.getAttribute('id')) ||
             normalize(input.closest('label')?.textContent) ||
-            target || selector || 'input[type=file]',
+            targetToken || selector || 'explicit file input',
           inputFound: true,
         }
       })()
@@ -743,7 +774,7 @@ export class BrowserAutomationService {
     if (!markResult?.inputFound) {
       return {
         ok: false,
-        targetDescription: markResult?.targetDescription || target || selector || 'input[type=file]',
+        targetDescription: markResult?.targetDescription || targetToken || selector || 'explicit file input',
         inputFound: false,
         filesAssigned: false,
         assignedFileNames: [],
@@ -761,7 +792,7 @@ export class BrowserAutomationService {
       if (!nodeId) {
         return {
           ok: false,
-          targetDescription: markResult?.targetDescription || target || selector || 'input[type=file]',
+          targetDescription: markResult?.targetDescription || targetToken || selector || 'explicit file input',
           inputFound: false,
           filesAssigned: false,
           assignedFileNames: [],
@@ -779,7 +810,7 @@ export class BrowserAutomationService {
       `) as { assigned?: boolean; names?: string[] } | null
       return {
         ok: true,
-        targetDescription: markResult?.targetDescription || target || selector || 'input[type=file]',
+        targetDescription: markResult?.targetDescription || targetToken || selector || 'explicit file input',
         inputFound: true,
         filesAssigned: Boolean(assignmentResult?.assigned),
         assignedFileNames: Array.isArray(assignmentResult?.names) ? assignmentResult.names.map((item) => String(item || '')) : [],
@@ -816,9 +847,6 @@ export class BrowserAutomationService {
       inputResult = await this.setFileInputFiles(tabId, {
         files,
         selector,
-        target: bestTarget?.label,
-        x,
-        y,
       })
     } catch {
       inputResult = null

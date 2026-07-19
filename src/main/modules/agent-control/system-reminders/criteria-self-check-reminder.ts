@@ -65,7 +65,7 @@ export function registerCriteriaSelfCheckReminder(
   if (!text) return false
   registry.register({
     topic: 'criteria-self-check',
-    // 低于 active-plan-step(80)：先看到当前步骤，再看到整体验收标准。
+    // 在普通运行提醒之后注入整体验收标准。
     priority: 70,
     conflictsWith: [],
     text,

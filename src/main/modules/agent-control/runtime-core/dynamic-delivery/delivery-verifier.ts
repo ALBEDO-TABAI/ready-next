@@ -5,6 +5,8 @@ import type { ReadyAgentSdkRunParams, ReadyAgentSdkRunResult } from '../agent-sd
 import { logAgentMetric } from '../../metrics'
 import type { SealedDeliveryCandidate } from './seal-delivery-candidate'
 
+const MAX_VERIFIER_OUTPUT_TOKENS = 512
+
 export interface DeliveryVerificationVerdict {
   version: 1
   verdict: 'accept' | 'repair' | 'block'
@@ -91,7 +93,7 @@ export async function verifyDeliveryCandidate(input: {
     signal: input.signal,
     maxTurns: 1,
     contextWindowTokens: input.contextWindowTokens,
-    maxOutputTokens: input.maxOutputTokens,
+    maxOutputTokens: Math.min(input.maxOutputTokens, MAX_VERIFIER_OUTPUT_TOKENS),
     onTextDelta: () => undefined,
   })
   const verdict = parseDeliveryVerification(result.finalText)

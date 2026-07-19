@@ -71,6 +71,17 @@ export interface TrustedFolderReference {
   path: string
 }
 
+export interface TrustedRequestEnvironment {
+  workbenchMode?: 'browser' | 'document' | 'rss' | 'calendar'
+  browserPageRef?: {
+    tabId: string
+    physicalTargetToken: string
+    mainFrameId: string
+    mainFrameDocumentToken: string
+    profileId?: string | null
+  } | null
+}
+
 export interface RequestEnvelope {
   rawUserText: string
   pureUserText: string
@@ -84,6 +95,8 @@ export interface RequestEnvelope {
     hasAttachments: boolean
     hasBootstrapContext: boolean
     workspaceRoots?: string[]
+    workbenchMode?: TrustedRequestEnvironment['workbenchMode']
+    browserPageRef?: TrustedRequestEnvironment['browserPageRef']
   }
   provenanceSummary: {
     countsBySource: Record<InputChunkSource, number>
@@ -507,6 +520,7 @@ export function buildRequestEnvelope(params: {
   workspaceRoots?: string[]
   contextRefIds?: string[]
   trustedFolderReferences?: TrustedFolderReference[]
+  trustedEnvironment?: TrustedRequestEnvironment
 }): RequestEnvelope {
   const rawUserText = String(params.userText || '')
   const pureUserText = extractPureUserInput(rawUserText)
@@ -606,6 +620,12 @@ export function buildRequestEnvelope(params: {
         || rawUserText.includes('## 自动跨会话回看')
         || rawUserText.includes('## L2 按需规则'),
       ...(workspaceRoots.length > 0 ? { workspaceRoots } : {}),
+      ...(params.trustedEnvironment?.workbenchMode
+        ? { workbenchMode: params.trustedEnvironment.workbenchMode }
+        : {}),
+      ...(params.trustedEnvironment?.browserPageRef
+        ? { browserPageRef: { ...params.trustedEnvironment.browserPageRef } }
+        : {}),
     },
     provenanceSummary: {
       countsBySource,

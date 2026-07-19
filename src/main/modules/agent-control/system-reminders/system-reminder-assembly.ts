@@ -26,9 +26,6 @@ const DEFAULT_CONFLICTS: Record<ReminderTopic, ReadonlyArray<ReminderTopic>> = {
   'current-date': [],
   // S2-2 — background task terminal summaries; no conflicts.
   'background-task-terminal': [],
-  // S4-3 — active plan step re-injection; no conflicts.
-  'active-plan-step': [],
-  'browser-action-session': [],
   // D2 — 验收标准事中自检（每 run 首次模型调用注入一次）；no conflicts.
   'criteria-self-check': [],
   // P2-1 — L1 技能目录；纯清单，no conflicts。
@@ -36,6 +33,7 @@ const DEFAULT_CONFLICTS: Record<ReminderTopic, ReadonlyArray<ReminderTopic>> = {
   // P3-2 — 脚本执行同意缺失提醒；selected 轮独立文案，no conflicts。
   'skill-shell-consent': [],
   'tool-capability-conflict': [],
+  'browser-observation-required': [],
 }
 
 export function composeSystemReminder(

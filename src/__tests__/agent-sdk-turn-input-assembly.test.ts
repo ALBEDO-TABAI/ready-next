@@ -108,10 +108,8 @@ test('browser discipline is absent without a final browser group and present exa
     toolDefinition('browser_eval', 'browser_interaction'),
   ])
   assert.equal((withBrowser.instructions.match(/# 浏览器交互纪律/g) || []).length, 1)
-  assert.match(withBrowser.instructions, /本轮可用 browser_collect/)
-  assert.match(withBrowser.instructions, /本轮已开放列出的 Browser Power 工具/)
-  assert.match(withBrowser.instructions, /browser_download/)
-  assert.match(withBrowser.instructions, /browser_download/)
+  assert.match(withBrowser.instructions, /只使用本轮实际开放的工具和 schema/)
+  assert.doesNotMatch(withBrowser.instructions, /browser_download/)
 })
 
 test('tool availability follows the final tool definitions even when the text bridge exposes no SDK tools', () => {

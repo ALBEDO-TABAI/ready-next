@@ -9,7 +9,6 @@ import { AgentManager } from './agent-manager'
 // (`agent:getCapabilityRuntimeSnapshot` payload type) moved into
 // `agentRuntimeGroup`.
 import { BrowserController } from '../browser-engine/ipc-handler'
-import { makeNoteCollectProjectionSink } from './browser-collection-projection-sink'
 import { readFileSync, statSync } from 'fs'
 import { basename, extname } from 'path'
 import { AgentControlRuntime } from '../agent-control/runtime-core/runtime'
@@ -85,7 +84,6 @@ import { getSpecialistContentEditProposalStore } from '../agent-control/agents/s
 import { resolveSpecialistFoundationSemanticJudge } from '../agent-control/agents/specialist-foundation-semantic-judge-provider'
 import { logAgentMetric } from '../agent-control/metrics'
 import { KNOWLEDGE_SYSTEM_SETTING_KEY, isKnowledgeSystemEnabled } from '../agent-control/knowledge/knowledge-truth-source'
-import { learnSiteCardFromFailure } from '../agent-control/knowledge/site-card-learning'
 import { getLastMaintenanceRoundStatus } from '../agent-control/maintenance/maintenance-llm-round'
 import { isRendererAgentMetricName } from '../../../shared/renderer-agent-metrics'
 // Stage V V2.1c — `SendScopedUserMessage` import retired: the only call
@@ -620,24 +618,6 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
   } else if (browserController) {
     runtime.getOrchestrator().setBrowserController(browserController)
   }
-  // Wire the note_collect → chat task-projection sink (plan §3.3). setting it
-  // re-projects any already-running/resumed collection so its card appears.
-  if (browserController) {
-    browserController.setTaskProjectionSink(makeNoteCollectProjectionSink(runtime))
-    browserController.setSiteCardLearningSink({
-      learnFromVisibleCollectFailure: (signal) => {
-        try {
-          learnSiteCardFromFailure(runtime!.getBeliefCardStore(), signal)
-        } catch (error) {
-          logAgentMetric('site_card_learning_failed', {
-            domain: signal.domain,
-            failureKind: signal.failureKind,
-            error: error instanceof Error ? error.message : String(error),
-          })
-        }
-      },
-    })
-  }
   // B Phase 1 PR2 T1-7: wire `skill_ask_user` to push questions to the
   // renderer. The bridge keeps the handler independent of electron so it can
   // be unit-tested under `tsx --test`.
@@ -1163,6 +1143,7 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
     suspendRun: (payload) => runtime!.suspendRun(payload),
     resumeRun: (payload) => runtime!.resumeRun(payload),
     respondToInteraction: (payload) => runtime!.respondToInteraction(payload),
+    completeHumanTakeover: (payload) => runtime!.completeHumanTakeover(payload),
   })
 
   // Stage V V2.1g — `agent:attachSessionRecallContext`,

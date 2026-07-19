@@ -7,10 +7,118 @@
 import { BrowserController } from '../browser-engine/ipc-handler'
 import { ToolDomainError } from './tool-errors'
 import { ACTION_CONFIRMATION_ERROR_KINDS } from '../agent-control/contracts/error-kinds'
-import { BROWSER_DESTRUCTIVE_TARGET_REGEX_SOURCES } from '../agent-control/safety/action-confirmation-policy'
+
+export interface BrowserBlockingChallengeProbe {
+  blocked: boolean
+  blockerCount: number
+  matchedKinds: string[]
+  pageError: boolean
+  emptyShell: boolean
+}
+
+export function buildBrowserBlockingChallengeProbeJs(): string {
+  return `(() => {
+    const __READY_BLOCKING_CHALLENGE_PROBE__ = true;
+    const visible = (node) => {
+      if (!(node instanceof Element)) return false;
+      const rect = node.getBoundingClientRect();
+      if (!(rect.width > 0 && rect.height > 0)) return false;
+      const style = getComputedStyle(node);
+      return style.display !== 'none'
+        && style.visibility !== 'hidden'
+        && Number(style.opacity || '1') > 0
+        && style.pointerEvents !== 'none';
+    };
+    const selector = 'dialog,[role="dialog"],[aria-modal="true"]';
+    const viewportWidth = Math.max(1, window.innerWidth || document.documentElement.clientWidth || 1);
+    const viewportHeight = Math.max(1, window.innerHeight || document.documentElement.clientHeight || 1);
+    const centerX = viewportWidth / 2;
+    const centerY = viewportHeight / 2;
+    const candidates = Array.from(document.querySelectorAll(selector)).filter((node) => {
+      if (!visible(node)) return false;
+      const rect = node.getBoundingClientRect();
+      const coversCenter = rect.left <= centerX && rect.right >= centerX && rect.top <= centerY && rect.bottom >= centerY;
+      return coversCenter && rect.width * rect.height >= viewportWidth * viewportHeight * 0.2;
+    });
+    const bodyText = String(document.body && (document.body.innerText || document.body.textContent) || '')
+      .replace(/\\s+/g, ' ').trim();
+    let pageError = String(location.protocol || '').toLowerCase() === 'chrome-error:';
+    if (!pageError) {
+      pageError = false;
+    }
+    const interactiveCount = document.querySelectorAll('a[href],button,input,textarea,select,[role="button"],[role="link"]').length;
+    const emptyShell = document.readyState === 'complete' && bodyText.length === 0 && interactiveCount === 0;
+    return {
+      blocked: false,
+      blockerCount: candidates.length,
+      matchedKinds: [],
+      pageError,
+      emptyShell
+    };
+  })()`
+}
+
+export function normalizeBrowserBlockingChallengeProbe(value: unknown): BrowserBlockingChallengeProbe {
+  const record = value && typeof value === 'object' ? value as Record<string, unknown> : {}
+  const matchedKinds = Array.isArray(record.matchedKinds)
+    ? Array.from(new Set(record.matchedKinds.map((kind) => String(kind)).filter(Boolean))).slice(0, 4)
+    : []
+  return {
+    blocked: record.blocked === true && matchedKinds.length > 0,
+    blockerCount: Math.max(0, Math.floor(Number(record.blockerCount || 0))),
+    matchedKinds,
+    pageError: record.pageError === true,
+    emptyShell: record.emptyShell === true,
+  }
+}
 
 function buildBrowserDomTargetLibraryJs(): string {
   return `
+    const READY_TARGET_STATE_KEY = '__readyBrowserTargetIdentityV3';
+    function readyTargetState() {
+      let state = globalThis[READY_TARGET_STATE_KEY];
+      if (!state || state.document !== document || !(state.nodesByToken instanceof Map) || !(state.tokenByNode instanceof WeakMap)) {
+        const bytes = new Uint32Array(4);
+        try { globalThis.crypto.getRandomValues(bytes); } catch {
+          for (let i = 0; i < bytes.length; i += 1) bytes[i] = Math.floor(Math.random() * 0xffffffff);
+        }
+        const documentToken = Array.from(bytes).map((value) => value.toString(36)).join('-');
+        state = {
+          document,
+          documentToken,
+          nextTargetSequence: 1,
+          nodesByToken: new Map(),
+          tokenByNode: new WeakMap()
+        };
+        globalThis[READY_TARGET_STATE_KEY] = state;
+      }
+      return state;
+    }
+    function readyFrameDocumentToken() {
+      return readyTargetState().documentToken;
+    }
+    function readyStableTargetToken(el) {
+      if (!(el instanceof Element)) return '';
+      const state = readyTargetState();
+      let token = state.tokenByNode.get(el);
+      if (!token) {
+        token = 'h' + (state.nextTargetSequence++).toString(36);
+        state.tokenByNode.set(el, token);
+        state.nodesByToken.set(token, el);
+      }
+      return token;
+    }
+    function readyResolveTargetToken(nodeId, expectedDocumentToken) {
+      const state = readyTargetState();
+      if (expectedDocumentToken && state.documentToken !== expectedDocumentToken) return null;
+      if (!/^h[0-9a-z]+$/i.test(String(nodeId || ''))) return null;
+      const el = state.nodesByToken.get(String(nodeId)) || null;
+      if (!(el instanceof Element) || !el.isConnected || el.ownerDocument !== document) {
+        state.nodesByToken.delete(String(nodeId));
+        return null;
+      }
+      return el;
+    }
     const READY_AGENT_TARGET_SELECTOR = [
       'a[href]',
       'button',
@@ -27,31 +135,6 @@ function buildBrowserDomTargetLibraryJs(): string {
       'h4',
       'h5',
       'h6'
-    ].join(',');
-    // D13-b：pointer 收集的"祖先已覆盖"判断只能看真正可交互的语义祖先。
-    // 拿整张 READY_AGENT_TARGET_SELECTOR 判会把 [role] 容器（微前端页面
-    // 通篇 role=main/region/dialog/tabpanel）下的全部 pointer 按钮误杀——
-    // 真机第七轮「发布」不可见的根因。
-    const READY_INTERACTIVE_ANCESTOR_SELECTOR = [
-      'a[href]',
-      'button',
-      'input',
-      'textarea',
-      'select',
-      'summary',
-      '[contenteditable="true"]',
-      '[contenteditable=""]',
-      '[role="button"]',
-      '[role="link"]',
-      '[role="menuitem"]',
-      '[role="option"]',
-      '[role="tab"]',
-      '[role="checkbox"]',
-      '[role="radio"]',
-      '[role="switch"]',
-      '[role="combobox"]',
-      '[role="listbox"]',
-      '[role="slider"]'
     ].join(',');
     function readyCleanText(value) {
       return String(value || '').replace(/\\s+/g, ' ').trim();
@@ -76,20 +159,14 @@ function buildBrowserDomTargetLibraryJs(): string {
       if (title) return title;
       const placeholder = readyCleanText(el.getAttribute('placeholder'));
       if (placeholder) return placeholder;
-      // D18-d：富文本编辑器（tiptap/ProseMirror）用 data-placeholder 而非
-      // placeholder 属性——空编辑器此前名字为空串，模型在 map 里认不出
-      // "正文该填哪"（第十六轮实锚：模型只反复 fill 有名字的标题 target）。
       const dataPlaceholder = readyCleanText(el.getAttribute('data-placeholder') || el.getAttribute('aria-placeholder'));
       if (dataPlaceholder) return dataPlaceholder;
       const alt = readyCleanText(el.getAttribute('alt'));
       if (alt) return alt;
       const name = readyCleanText(el.getAttribute('name'));
       if (name) return name;
-      if (el instanceof HTMLInputElement && el.type === 'file') return 'file input';
-      if (el.isContentEditable) return 'contenteditable 编辑区';
-      // D14-c：自定义元素 host 在 closed shadow 下可能读不到任何渲染文本，
-      // 标签名是模型唯一可用的把手（如 xhs-publish-btn）。
-      if (el.tagName && el.tagName.indexOf('-') !== -1) return el.tagName.toLowerCase();
+      if (el instanceof HTMLInputElement && el.type === 'file') return 'input:file';
+      if (el.isContentEditable) return 'contenteditable';
       return '';
     }
     function readyRoleFor(el) {
@@ -111,17 +188,6 @@ function buildBrowserDomTargetLibraryJs(): string {
         return 'textbox';
       }
       if (el.isContentEditable) return 'textbox';
-      // D14（2026-07-04 R1 真机实锚，XHS <xhs-publish-btn>）：Web Component
-      // host 的真实控件藏在 shadow root 里，语义/cursor 信号都在影子内侧，
-      // host 自身全无标记。自定义元素（标签名带 '-'）按可点击 widget 对待。
-      if (tag.indexOf('-') !== -1) return 'clickable';
-      // D10-c（2026-07-04 真机实锚，XHS creator "写长文"）：React 委托型
-      // 控件是零语义标记的 span/div，唯一可观测信号是 cursor:pointer。
-      // 给它专属 role 'clickable'，避免落进 'generic' 被 page-map 去噪层
-      // 当 wrapper 抬走。
-      try {
-        if (window.getComputedStyle(el).cursor === 'pointer') return 'clickable';
-      } catch {}
       return 'generic';
     }
     function readyStatesFor(el) {
@@ -129,6 +195,7 @@ function buildBrowserDomTargetLibraryJs(): string {
       if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement || el instanceof HTMLButtonElement) {
         if (el.disabled) states.disabled = true;
       }
+      if (el.getAttribute('aria-disabled') === 'true') states.disabled = true;
       const expanded = el.getAttribute('aria-expanded');
       if (expanded) states.expanded = expanded;
       const checked = el.getAttribute('aria-checked');
@@ -139,101 +206,103 @@ function buildBrowserDomTargetLibraryJs(): string {
       if (el instanceof HTMLInputElement && el.type === 'password') states.password = true;
       return states;
     }
+    function readyVisibleFor(el) {
+      try {
+        if (!readyRenderedFor(el)) return false;
+        const rect = el.getBoundingClientRect();
+        const viewportWidth = Number(window.innerWidth || document.documentElement?.clientWidth || 0);
+        const viewportHeight = Number(window.innerHeight || document.documentElement?.clientHeight || 0);
+        if (!(viewportWidth > 0 && viewportHeight > 0)) return false;
+        if (rect.right <= 0 || rect.bottom <= 0 || rect.left >= viewportWidth || rect.top >= viewportHeight) return false;
+        const style = window.getComputedStyle(el);
+        return Boolean(
+          style &&
+          style.display !== 'none' &&
+          style.visibility !== 'hidden' &&
+          Number(style.opacity || '1') > 0
+        );
+      } catch { return false; }
+    }
+    function readyRenderedFor(el) {
+      try {
+        if (el.hidden || el.getAttribute('aria-hidden') === 'true') return false;
+        const rect = el.getBoundingClientRect();
+        if (!(rect.width > 0 && rect.height > 0)) return false;
+        const style = window.getComputedStyle(el);
+        return Boolean(
+          style &&
+          style.display !== 'none' &&
+          style.visibility !== 'hidden' &&
+          Number(style.opacity || '1') > 0
+        );
+      } catch { return false; }
+    }
+    function readyEditableFor(el) {
+      if (el instanceof HTMLInputElement) {
+        const type = String(el.type || 'text').toLowerCase();
+        return !['button', 'submit', 'reset', 'checkbox', 'radio', 'file', 'range', 'color', 'image', 'hidden'].includes(type)
+          && !el.readOnly;
+      }
+      if (el instanceof HTMLTextAreaElement) return !el.readOnly;
+      if (el.isContentEditable) return true;
+      const role = String(el.getAttribute('role') || '').toLowerCase();
+      return role === 'textbox' || role === 'searchbox';
+    }
     function readyTargetElements() {
-      const semantic = Array.from(document.querySelectorAll(READY_AGENT_TARGET_SELECTOR));
-      const semanticSet = new Set(semantic);
-      return semantic
-        .concat(readyPointerClickableElements(semanticSet))
-        .concat(readyCustomElementHosts(semanticSet));
+      return Array.from(document.querySelectorAll(READY_AGENT_TARGET_SELECTOR));
     }
-    // D14（2026-07-04 R1 真机实锚，XHS 发布按钮 <xhs-publish-btn>）：Web
-    // Component host 在 light DOM 可枚举，但语义选择器不认、pointer 扫描的
-    // 标签清单不含自定义标签、cursor 信号又在影子内侧——三层全盲。host 自身
-    // 就是可点击表面（rect 有效，Chrome 的 innerText 含 shadow 渲染文本）。
-    // D14-c（第九轮实锚）：首版用 scanned>=6000 文档序扫描配额，publish 页
-    // 前部烧光预算、DOM 尾部的发布按钮永远轮不到——复犯 D13 尾部偏置定律。
-    // 现在便宜的 dash 标签判断走完整棵树（O(1) 字符串查），贵检查只对
-    // custom 候选做（超 200 时头尾各 100），产出超 16 时保头 10 + 尾 6。
-    function readyCustomElementHosts(semanticSet) {
-      const nodes = document.querySelectorAll('*');
-      const hosts = [];
-      for (let i = 0; i < nodes.length; i++) {
-        const el = nodes[i];
-        if (el.tagName && el.tagName.indexOf('-') !== -1 && !semanticSet.has(el)) hosts.push(el);
-      }
-      const candidates = hosts.length > 200
-        ? hosts.slice(0, 100).concat(hosts.slice(hosts.length - 100))
-        : hosts;
-      const out = [];
-      for (const el of candidates) {
-        let style;
-        try { style = window.getComputedStyle(el); } catch { continue; }
-        if (!style || style.display === 'none' || style.visibility === 'hidden') continue;
-        const rect = el.getBoundingClientRect();
-        if (!(rect.width >= 8 && rect.height >= 8)) continue;
-        if (rect.width * rect.height > Math.max(1, (window.innerWidth || 1) * (window.innerHeight || 1)) * 0.5) continue;
-        // 空文本不再淘汰：closed shadow root 的 host 从 light 侧可能读不到
-        // 渲染文本，名字由 readyLabelFor 的自定义标签回退兜底。
-        const text = readyCleanText(el.innerText || el.textContent || el.getAttribute('aria-label') || el.getAttribute('title') || '');
-        if (text.length > 40) continue;
-        if (el.closest && el.closest(READY_INTERACTIVE_ANCESTOR_SELECTOR)) continue;
-        out.push(el);
-      }
-      if (out.length > 16) return out.slice(0, 10).concat(out.slice(out.length - 6));
-      return out;
-    }
-    // D10-c：cursor:pointer 视觉可点击收集级——语义选择器漏掉的委托型控件
-    // （span/div tab、卡片按钮）。只收 pointer 边界元素（父级非 pointer，
-    // 一个控件收敛成一个目标）、可见、短文本、未被语义集覆盖；上限 40 个
-    // 防 map 膨胀。枚举顺序确定（文档序），probe/act 按 index 重定位一致。
-    function readyPointerClickableElements(semanticSet) {
-      const out = [];
-      let scanned = 0;
-      for (const el of document.querySelectorAll('div,span,li,p,img,svg')) {
-        if (out.length >= 120 || scanned >= 8000) break;
-        scanned += 1;
-        if (semanticSet.has(el)) continue;
-        let style;
-        try { style = window.getComputedStyle(el); } catch { continue; }
-        if (!style || style.cursor !== 'pointer') continue;
-        const parent = el.parentElement;
-        if (parent) {
-          try { if (window.getComputedStyle(parent).cursor === 'pointer') continue; } catch {}
-        }
-        const rect = el.getBoundingClientRect();
-        if (!(rect.width >= 8 && rect.height >= 8)) continue;
-        if (rect.width * rect.height > Math.max(1, (window.innerWidth || 1) * (window.innerHeight || 1)) * 0.5) continue;
-        if (style.display === 'none' || style.visibility === 'hidden') continue;
-        const text = readyCleanText(el.innerText || el.textContent || el.getAttribute('aria-label') || '');
-        if (!text || text.length > 40) continue;
-        if (el.closest && el.closest(READY_INTERACTIVE_ANCESTOR_SELECTOR)) continue;
-        out.push(el);
-      }
-      // D13（真机第六轮实锚，XHS 发布设置页）：主行动按钮（发布/发送）
-      // 几乎总在 DOM 尾部，纯文档序 cap 会被页面前部的 pointer 设置行
-      // 吃光名额。超过 40 个时保留头 28 + 尾 12——头部导航/tab 与底部
-      // CTA 双端都在。规则确定性（probe/act 重枚举索引一致）。
-      if (out.length > 40) {
-        return out.slice(0, 28).concat(out.slice(out.length - 12));
-      }
-      return out;
-    }
-    function readyTargetRecord(el, index) {
+    function readyTargetRecord(el, index, targetIndexByElement) {
       const rect = el.getBoundingClientRect();
       const box = rect && Number.isFinite(rect.width) && Number.isFinite(rect.height)
         ? { x: Math.round(rect.x), y: Math.round(rect.y), width: Math.round(rect.width), height: Math.round(rect.height) }
         : undefined;
+      const ancestorStableNodeTokens = [];
+      let ancestor = el.parentElement;
+      while (ancestor) {
+        const ancestorIndex = targetIndexByElement && targetIndexByElement.get(ancestor);
+        if (Number.isInteger(ancestorIndex)) ancestorStableNodeTokens.unshift(readyStableTargetToken(ancestor));
+        ancestor = ancestor.parentElement;
+      }
+      const states = Object.assign(
+        readyStatesFor(el),
+        el instanceof HTMLInputElement && el.type === 'file' ? { fileInput: true } : {}
+      );
+      const form = el.closest && el.closest('form');
+      const ancestorContext = [];
+      let contextNode = el.parentElement;
+      while (contextNode && ancestorContext.length < 4) {
+        const role = readyRoleFor(contextNode);
+        const name = readyLabelFor(contextNode);
+        if (role || name) ancestorContext.unshift(role + ':' + name.slice(0, 80));
+        contextNode = contextNode.parentElement;
+      }
+      const href = String(
+        (String(el.tagName || '').toLowerCase() === 'a' && typeof el.href === 'string' ? el.href : '')
+        || (el.getAttribute && el.getAttribute('href'))
+        || ''
+      );
       return {
         role: readyRoleFor(el),
         name: readyLabelFor(el),
         value: el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement ? readyCleanText(el.value).slice(0, 160) : undefined,
-        states: Object.assign(
-          readyStatesFor(el),
-          el instanceof HTMLInputElement && el.type === 'file' ? { fileInput: true } : {}
-        ),
-        backendDOMNodeId: index + 1,
+        states,
+        stableNodeToken: readyStableTargetToken(el),
+        parentStableNodeToken: ancestorStableNodeTokens.length > 0
+          ? ancestorStableNodeTokens[ancestorStableNodeTokens.length - 1]
+          : undefined,
+        ancestorStableNodeTokens,
         frameId: '0',
-        box
+        frameDocumentToken: readyFrameDocumentToken(),
+        box,
+        rendered: readyRenderedFor(el),
+        visible: readyVisibleFor(el),
+        enabled: !Boolean(states.disabled),
+        editable: readyEditableFor(el),
+        href,
+        inputType: el instanceof HTMLInputElement ? String(el.type || 'text').toLowerCase() : '',
+        autocomplete: String(el.getAttribute && el.getAttribute('autocomplete') || '').toLowerCase(),
+        formAction: form ? String(form.getAttribute('action') || form.action || '') : '',
+        ancestorContext: ancestorContext.join(' > ')
       };
     }
   `
@@ -244,7 +313,8 @@ export function buildBrowserPageMapProbeJs(): string {
     const __READY_AGENT_PAGE_MAP__ = true;
     ${buildBrowserDomTargetLibraryJs()}
     const elements = readyTargetElements();
-    const rawTargets = elements.map((el, index) => readyTargetRecord(el, index));
+    const targetIndexByElement = new Map(elements.map((el, index) => [el, index]));
+    const rawTargets = elements.map((el, index) => readyTargetRecord(el, index, targetIndexByElement));
     const clean = (value) => String(value || '').replace(/\\s+/g, ' ').trim();
     const visible = (el) => {
       if (!(el instanceof Element)) return false;
@@ -276,13 +346,6 @@ export function buildBrowserPageMapProbeJs(): string {
         hidden: !visible(frame)
       };
     });
-    const shadowRoots = Array.from(document.querySelectorAll('*')).filter((el) => Boolean(el.shadowRoot)).slice(0, 20).map((el, index) => ({
-      index,
-      host: String(el.tagName || '').toLowerCase(),
-      label: clean(el.getAttribute('aria-label') || el.getAttribute('title') || el.id || ''),
-      childCount: el.shadowRoot ? el.shadowRoot.childElementCount : 0,
-      hidden: !visible(el)
-    }));
     const hiddenLoaded = Array.from(document.querySelectorAll('button,a,input,textarea,select,[role],section,article,dialog,[hidden],[aria-hidden="true"]'))
       .filter((el) => !visible(el) && clean(el.textContent || el.getAttribute('aria-label') || el.getAttribute('title') || el.getAttribute('placeholder')).length > 0)
       .slice(0, 20)
@@ -293,32 +356,34 @@ export function buildBrowserPageMapProbeJs(): string {
         reason: el.hasAttribute('hidden') ? 'hidden_attribute' : el.getAttribute('aria-hidden') === 'true' ? 'aria_hidden' : 'css_hidden'
       }));
     return {
-      identity: { url: String(location.href || ''), title: String(document.title || '') },
+      identity: {
+        url: String(location.href || ''),
+        title: String(document.title || ''),
+        frameDocumentToken: readyFrameDocumentToken()
+      },
       viewport: { width: Math.round(window.innerWidth || 0), height: Math.round(window.innerHeight || 0) },
       bodyText: String(document.body?.innerText || '').slice(0, 4000),
       rawRoots: [{ role: 'generic', name: '', children: rawTargets }],
-      structureHints: { iframes, shadowRoots, hiddenLoaded },
+      structureHints: { iframes, hiddenLoaded },
       riskFlags: {
         fileInputCount: document.querySelectorAll('input[type="file"]').length,
         passwordInputCount: document.querySelectorAll('input[type="password"]').length,
         externalLinkCount: externalLinks,
         iframeCount: document.querySelectorAll('iframe').length,
-        shadowHostCount: Array.from(document.querySelectorAll('*')).filter((el) => Boolean(el.shadowRoot)).length
+        shadowHostCount: null
       }
     };
   })()`
 }
 
-export function buildBrowserTargetProbeJs(nodeId: string): string {
+export function buildBrowserTargetProbeJs(nodeId: string, frameDocumentToken?: string): string {
   return `(() => {
     const __READY_AGENT_TARGET_PROBE__ = true;
     ${buildBrowserDomTargetLibraryJs()}
     const nodeId = ${JSON.stringify(nodeId)};
-    const nodeIndex = /^\\d+$/.test(nodeId) ? Number(nodeId) - 1 : -1;
-    const elements = readyTargetElements();
-    const el = nodeIndex >= 0 ? elements[nodeIndex] : null;
+    const el = readyResolveTargetToken(nodeId, ${JSON.stringify(frameDocumentToken || '')});
     if (!el) return { matchCount: 0 };
-    const record = readyTargetRecord(el, nodeIndex);
+    const record = readyTargetRecord(el, -1);
     const disabled = Boolean(record.states && record.states.disabled === true);
     const rect = el.getBoundingClientRect();
     return {
@@ -339,16 +404,104 @@ export function buildBrowserTargetProbeJs(nodeId: string): string {
   })()`
 }
 
-export function buildBrowserTargetReadJs(nodeId: string): string {
+/**
+ * Focus an already-resolved page-map target without synthesizing a pointer
+ * click. Background WebContentsViews can retain a real viewport while parked
+ * outside the window, but Chromium will not deliver pointer input to them.
+ * The target is resolved again from the current DOM, guarded again at the
+ * moment of focus, and must become the exact active element before typing.
+ */
+export function buildBrowserTargetFocusJs(nodeId: string, allowPasswordFill: boolean, frameDocumentToken?: string): string {
+  return `(() => {
+    const __READY_AGENT_TARGET_FOCUS__ = true;
+    ${buildBrowserDomTargetLibraryJs()}
+    ${buildInputGuardSnippetJs(allowPasswordFill)}
+    const nodeId = ${JSON.stringify(nodeId)};
+    const el = readyResolveTargetToken(nodeId, ${JSON.stringify(frameDocumentToken || '')});
+    if (!el) return { ok: false, reason: 'target_not_found' };
+    const guard = readyInputGuard(el);
+    if (guard) return guard;
+    const states = readyStatesFor(el);
+    const label = readyInputSemanticsLabel(el);
+    const tag = String(el.tagName || '').toLowerCase();
+    if (!readyRenderedFor(el)) return { ok: false, reason: 'target_not_rendered', kind: 'none', tag, label };
+    if (states.disabled === true) return { ok: false, reason: 'target_disabled', kind: 'non_editable', tag, label };
+    if (!readyEditableFor(el)) return { ok: false, reason: 'target_not_editable', kind: 'non_editable', tag, label };
+    try {
+      el.focus({ preventScroll: true });
+    } catch {
+      return { ok: false, reason: 'focus_failed', kind: 'none', tag, label };
+    }
+    return {
+      ok: document.activeElement === el,
+      reason: document.activeElement === el ? null : 'focus_not_acquired',
+      kind: document.activeElement === el ? 'editable' : 'none',
+      tag,
+      label,
+    };
+  })()`
+}
+
+export function buildBrowserTargetFormSubmitJs(nodeId: string, frameDocumentToken?: string): string {
+  return `(() => {
+    const __READY_AGENT_TARGET_SUBMIT__ = true;
+    ${buildBrowserDomTargetLibraryJs()}
+    const nodeId = ${JSON.stringify(nodeId)};
+    const el = readyResolveTargetToken(nodeId, ${JSON.stringify(frameDocumentToken || '')});
+    if (!el) return { ok: false, reason: 'target_not_found', delivery: 'not_delivered' };
+    const form = el instanceof HTMLInputElement || el instanceof HTMLButtonElement
+      ? el.form
+      : el.closest && el.closest('form');
+    if (!(form instanceof HTMLFormElement)) return { ok: false, reason: 'form_not_found', delivery: 'not_delivered' };
+    if (typeof form.requestSubmit !== 'function') return { ok: false, reason: 'request_submit_unavailable', delivery: 'not_delivered' };
+    let submitCount = 0;
+    let invalidCount = 0;
+    let trustedSubmitCount = 0;
+    const onSubmit = (event) => {
+      if (event.target !== form) return;
+      submitCount += 1;
+      if (event.isTrusted) trustedSubmitCount += 1;
+    };
+    const onInvalid = (event) => {
+      if (event.target instanceof Element && form.contains(event.target)) invalidCount += 1;
+    };
+    form.addEventListener('submit', onSubmit, true);
+    form.addEventListener('invalid', onInvalid, true);
+    try {
+      const exactSubmitter = (
+        (el instanceof HTMLButtonElement && el.type === 'submit')
+        || (el instanceof HTMLInputElement && (el.type === 'submit' || el.type === 'image'))
+      ) && !el.disabled && el.getAttribute('aria-disabled') !== 'true'
+        ? el
+        : null;
+      const candidates = Array.from(form.querySelectorAll('button:not([type]),button[type="submit"],input[type="submit"],input[type="image"]'))
+        .filter((node) => !node.disabled && node.getAttribute('aria-disabled') !== 'true');
+      form.requestSubmit(exactSubmitter || (candidates.length === 1 ? candidates[0] : undefined));
+    } catch (error) {
+      return { ok: false, reason: 'request_submit_failed', message: String(error && error.message || error), delivery: 'unknown' };
+    } finally {
+      form.removeEventListener('submit', onSubmit, true);
+      form.removeEventListener('invalid', onInvalid, true);
+    }
+    return {
+      ok: submitCount > 0,
+      submitted: submitCount > 0,
+      delivery: submitCount > 0 ? 'delivered' : 'not_delivered',
+      submitCount,
+      trustedSubmitCount,
+      invalidCount,
+    };
+  })()`
+}
+
+export function buildBrowserTargetReadJs(nodeId: string, frameDocumentToken?: string): string {
   return `(() => {
     const __READY_AGENT_TARGET_READ__ = true;
     ${buildBrowserDomTargetLibraryJs()}
     const nodeId = ${JSON.stringify(nodeId)};
-    const nodeIndex = /^\\d+$/.test(nodeId) ? Number(nodeId) - 1 : -1;
-    const elements = readyTargetElements();
-    const el = nodeIndex >= 0 ? elements[nodeIndex] : null;
+    const el = readyResolveTargetToken(nodeId, ${JSON.stringify(frameDocumentToken || '')});
     if (!el) return { matchCount: 0, content: '' };
-    const record = readyTargetRecord(el, nodeIndex);
+    const record = readyTargetRecord(el, -1);
     const chunks = [
       el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement
         ? String(el.value || '')
@@ -365,27 +518,221 @@ export function buildBrowserTargetReadJs(nodeId: string): string {
   })()`
 }
 
-/**
- * EP1-I3 live-target net — ONE in-page semantics library shared by every
- * enforcement point (selector click, coordinate click/type, selector type,
- * smart type, focused-field key guard). Defines:
+const BROWSER_BACKEND_TARGET_FUNCTION = `function(operation, allowPasswordFill, roleHint) {
+  const __READY_AGENT_BACKEND_TARGET__ = true;
+  const __READY_AGENT_TARGET_FOCUS__ = operation === 'focus';
+  const __READY_AGENT_TARGET_SELECT_ALL__ = operation === 'select_all';
+  const __READY_AGENT_TARGET_SUBMIT__ = operation === 'submit';
+  const el = this;
+  if (!(el instanceof Element) || !el.isConnected) return { matchCount: 0 };
+  const clean = (value) => String(value || '').replace(/\\s+/g, ' ').trim();
+  const label = (() => {
+    const aria = clean(el.getAttribute('aria-label'));
+    if (aria) return aria;
+    const labelledBy = clean(el.getAttribute('aria-labelledby'));
+    if (labelledBy) {
+      const text = labelledBy.split(/\\s+/).map((id) => clean(document.getElementById(id)?.textContent)).filter(Boolean).join(' ');
+      if (text) return text;
+    }
+    const id = clean(el.getAttribute('id'));
+    if (id) {
+      const owner = document.querySelector('label[for="' + CSS.escape(id) + '"]');
+      const text = clean(owner?.textContent);
+      if (text) return text;
+    }
+    return clean(el.innerText || el.textContent || el.getAttribute('title') || el.getAttribute('placeholder') || el.getAttribute('name')).slice(0, 160);
+  })();
+  const tag = String(el.tagName || '').toLowerCase();
+  const explicitRole = clean(el.getAttribute('role')).toLowerCase();
+  const role = explicitRole
+    || (tag === 'a' ? 'link'
+      : tag === 'button' || tag === 'summary' ? 'button'
+        : tag === 'textarea' ? 'textbox'
+          : tag === 'select' ? 'combobox'
+            : /^h[1-6]$/.test(tag) ? 'heading'
+              : tag === 'input'
+                ? (String(el.getAttribute('type') || 'text').toLowerCase() === 'search' ? 'searchbox' : 'textbox')
+                : el.isContentEditable ? 'textbox' : clean(roleHint) || 'generic');
+  const inputType = el instanceof HTMLInputElement ? String(el.type || 'text').toLowerCase() : '';
+  const disabled = Boolean(el.disabled) || el.getAttribute('aria-disabled') === 'true';
+  const password = inputType === 'password';
+  const fileInput = inputType === 'file';
+  const editable = el instanceof HTMLTextAreaElement
+    ? !el.readOnly && !disabled
+    : el instanceof HTMLInputElement
+      ? !['button', 'submit', 'reset', 'checkbox', 'radio', 'file', 'range', 'color', 'image', 'hidden'].includes(inputType) && !el.readOnly && !disabled
+      : el.isContentEditable === true || role === 'textbox' || role === 'searchbox';
+  const rect = el.getBoundingClientRect();
+  const style = getComputedStyle(el);
+  const rendered = rect.width > 0 && rect.height > 0
+    && !el.hidden && el.getAttribute('aria-hidden') !== 'true'
+    && style.display !== 'none' && style.visibility !== 'hidden' && Number(style.opacity || '1') > 0;
+  const visible = rendered
+    && rect.right > 0 && rect.bottom > 0
+    && rect.left < Math.max(1, window.innerWidth || 1)
+    && rect.top < Math.max(1, window.innerHeight || 1);
+  const states = {};
+  if (disabled) states.disabled = true;
+  if (password) states.password = true;
+  if (fileInput) states.fileInput = true;
+  for (const key of ['expanded', 'checked', 'selected']) {
+    const value = el.getAttribute('aria-' + key);
+    if (value !== null) states[key] = value;
+  }
+  const form = el.closest && el.closest('form');
+  const ancestorContext = [];
+  let ancestor = el.parentElement;
+  while (ancestor && ancestorContext.length < 4) {
+    const ancestorRole = clean(ancestor.getAttribute('role'));
+    const ancestorName = clean(ancestor.getAttribute('aria-label') || ancestor.getAttribute('title'));
+    if (ancestorRole || ancestorName) ancestorContext.unshift(ancestorRole + ':' + ancestorName.slice(0, 80));
+    ancestor = ancestor.parentElement;
+  }
+  const target = {
+    role,
+    name: label,
+    value: el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement ? clean(el.value).slice(0, 160) : undefined,
+    states,
+    frameId: '0',
+    box: { x: Math.round(rect.x), y: Math.round(rect.y), width: Math.round(rect.width), height: Math.round(rect.height) },
+    rendered,
+    visible,
+    enabled: !disabled,
+    editable,
+    href: el instanceof HTMLAnchorElement ? String(el.href || '') : String(el.getAttribute('href') || ''),
+    inputType,
+    autocomplete: String(el.getAttribute('autocomplete') || '').toLowerCase(),
+    formAction: form ? String(form.getAttribute('action') || form.action || '') : '',
+    ancestorContext: ancestorContext.join(' > '),
+  };
+  if (operation === 'focus') {
+    if (fileInput) return { ok: false, errorKind: 'file_input_requires_upload', liveTargetKind: 'file' };
+    if (password && !allowPasswordFill) return { ok: false, errorKind: 'credential_confirmation_required', liveTargetKind: 'password' };
+    if (!rendered) return { ok: false, reason: 'target_not_rendered', kind: 'none', tag, label };
+    if (disabled) return { ok: false, reason: 'target_disabled', kind: 'non_editable', tag, label };
+    if (!editable) return { ok: false, reason: 'target_not_editable', kind: 'non_editable', tag, label };
+    try { el.focus({ preventScroll: true }); } catch { return { ok: false, reason: 'focus_failed', kind: 'none', tag, label }; }
+    const focused = document.activeElement === el;
+    return { ok: focused, reason: focused ? null : 'focus_not_acquired', kind: focused ? 'editable' : 'none', tag, label };
+  }
+  if (operation === 'select_all') {
+    if (document.activeElement !== el) return { ok: false, reason: 'focus_not_acquired' };
+    if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
+      try {
+        el.setSelectionRange(0, String(el.value || '').length);
+        return { ok: true, kind: 'text_control' };
+      } catch {
+        return { ok: false, reason: 'selection_failed' };
+      }
+    }
+    if (el instanceof HTMLElement && el.isContentEditable) {
+      try {
+        const range = document.createRange();
+        range.selectNodeContents(el);
+        const selected = window.getSelection();
+        if (!selected) return { ok: false, reason: 'selection_unavailable' };
+        selected.removeAllRanges();
+        selected.addRange(range);
+        return { ok: true, kind: 'contenteditable' };
+      } catch {
+        return { ok: false, reason: 'selection_failed' };
+      }
+    }
+    return { ok: false, reason: 'exact_editable_selection_unavailable' };
+  }
+  if (operation === 'read') {
+    const chunks = [target.value || '', String(el.innerText || ''), String(el.textContent || ''), label]
+      .map(clean).filter(Boolean);
+    return { matchCount: 1, content: Array.from(new Set(chunks)).join('\\n'), target };
+  }
+  if (operation === 'submit') {
+    const submitForm = el instanceof HTMLInputElement || el instanceof HTMLButtonElement
+      ? el.form
+      : el.closest && el.closest('form');
+    if (!(submitForm instanceof HTMLFormElement)) return { ok: false, reason: 'form_not_found', delivery: 'not_delivered' };
+    if (typeof submitForm.requestSubmit !== 'function') return { ok: false, reason: 'request_submit_unavailable', delivery: 'not_delivered' };
+    let submitCount = 0;
+    let invalidCount = 0;
+    let trustedSubmitCount = 0;
+    const onSubmit = (event) => {
+      if (event.target !== submitForm) return;
+      submitCount += 1;
+      if (event.isTrusted) trustedSubmitCount += 1;
+    };
+    const onInvalid = (event) => {
+      if (event.target instanceof Element && submitForm.contains(event.target)) invalidCount += 1;
+    };
+    submitForm.addEventListener('submit', onSubmit, true);
+    submitForm.addEventListener('invalid', onInvalid, true);
+    try {
+      const exactSubmitter = (
+        (el instanceof HTMLButtonElement && el.type === 'submit')
+        || (el instanceof HTMLInputElement && (el.type === 'submit' || el.type === 'image'))
+      ) && !el.disabled && el.getAttribute('aria-disabled') !== 'true'
+        ? el
+        : null;
+      const candidates = Array.from(submitForm.querySelectorAll('button:not([type]),button[type="submit"],input[type="submit"],input[type="image"]'))
+        .filter((node) => !node.disabled && node.getAttribute('aria-disabled') !== 'true');
+      submitForm.requestSubmit(exactSubmitter || (candidates.length === 1 ? candidates[0] : undefined));
+    } catch (error) {
+      return { ok: false, reason: 'request_submit_failed', message: String(error && error.message || error), delivery: 'unknown' };
+    } finally {
+      submitForm.removeEventListener('submit', onSubmit, true);
+      submitForm.removeEventListener('invalid', onInvalid, true);
+    }
+    return {
+      ok: submitCount > 0,
+      submitted: submitCount > 0,
+      delivery: submitCount > 0 ? 'delivered' : 'not_delivered',
+      submitCount,
+      trustedSubmitCount,
+      invalidCount,
+    };
+  }
+  return {
+    matchCount: 1,
+    disabled,
+    target,
+    clickPoint: {
+      x: rect.left + rect.width / 2,
+      y: rect.top + rect.height / 2,
+      vw: Number(window.innerWidth || 0),
+      vh: Number(window.innerHeight || 0),
+      hostShadow: el.shadowRoot ? 'open' : null,
+      rect: { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
+    },
+  };
+}`
+
+export async function callBrowserBackendTarget(
+  controller: BrowserController,
+  tabId: string | null,
+  backendDOMNodeId: number,
+  operation: 'probe' | 'focus' | 'select_all' | 'read' | 'submit',
+  options: { allowPasswordFill?: boolean; roleHint?: string } = {},
+): Promise<unknown> {
+  return controller.callFunctionOnBackendNode(
+    tabId,
+    backendDOMNodeId,
+    BROWSER_BACKEND_TARGET_FUNCTION,
+    [operation, options.allowPasswordFill === true, options.roleHint || ''],
+  )
+}
+
+/** Shared structural target helpers used by selector, coordinate and focused
+ * input probes. Labels are returned for grounding only; policy never branches
+ * on their language or wording. Defines:
  *
  *   readyAriaLabelledbyText(el) — resolves aria-labelledby references
  *   readyInputSemanticsLabel(el) — what the FIELD IS: placeholder /
  *     aria-label / aria-labelledby / name / id / title / associated <label>.
- *     Deliberately NOT value/textContent — a chat draft mentioning「验证码」
- *     must not trip the net.
+ *     Deliberately NOT value/textContent, so current user text cannot change
+ *     the structural classification of an input.
  *   readyClickSemanticsLabel(el) — what the CLICK will press: climbs to the
- *     nearest clickable owner (clicks bubble — an icon/span inside a
- *     「确认支付」button still presses the button) and reads its
- *     text/aria-label/aria-labelledby/value/title.
- *
- * Destructive browser-target patterns are generated from the policy module
- * (single source).
+ *     nearest clickable owner and reads its accessible description.
  */
 export function buildTargetSemanticsLibraryJs(): string {
   return `
-    const READY_DESTRUCTIVE_TARGET_PATTERNS = [${BROWSER_DESTRUCTIVE_TARGET_REGEX_SOURCES.map((src) => `new RegExp(${JSON.stringify(src)}, 'i')`).join(', ')}];
     function readyAriaLabelledbyText(el) {
       try {
         const ref = el && el.getAttribute ? el.getAttribute('aria-labelledby') : null;
@@ -454,25 +801,20 @@ export function buildInputGuardSnippetJs(allowPasswordFill: boolean): string {
     const __READY_LIVE_TARGET_GUARD__ = true;
     ${buildTargetSemanticsLibraryJs()}
     function readyInputGuard(el) {
-      const label = readyInputSemanticsLabel(el);
-      if (label && READY_DESTRUCTIVE_TARGET_PATTERNS.some((p) => p.test(label))) {
-        return { __readyDestructiveTargetBlocked: true, label: label.slice(0, 80) };
+      if (el instanceof HTMLInputElement && String(el.type || '').toLowerCase() === 'file') {
+        return { ok: false, errorKind: 'file_input_requires_upload', liveTargetKind: 'file' };
       }
       if (readyIsPasswordField(el) && !${JSON.stringify(allowPasswordFill)}) {
-        return { __readyPasswordFillBlocked: true };
+        return { ok: false, errorKind: 'credential_confirmation_required', liveTargetKind: 'password' };
       }
       return null;
     }
   `
 }
 
-/**
- * EP1-I3 live-target net — best-effort target probe for coordinate actions
- * (click_at / type_at). Returns `{ label, inputLabel, password }` for the
- * clickable owner under the CSS point. Callers refuse destructive-grant /
- * unconfirmed-password targets and proceed on empty probes. Probe exceptions
- * fail closed because the target guard did not actually run.
- */
+/** Best-effort structural target probe for coordinate actions. A visual click
+ * remains usable when the probe is unavailable; coordinate typing still fails
+ * closed because its text destination cannot then be verified. */
 function buildClickPointLabelProbeJs(cssX: number, cssY: number): string {
   return `(() => {
     const __READY_CLICK_POINT_LABEL_PROBE__ = true;
@@ -484,6 +826,8 @@ function buildClickPointLabelProbeJs(cssX: number, cssY: number): string {
       label: readyClickSemanticsLabel(start),
       inputLabel: readyInputSemanticsLabel(owner),
       password: readyIsPasswordField(owner),
+      fileInput: owner instanceof HTMLInputElement && String(owner.type || '').toLowerCase() === 'file',
+      inputType: owner instanceof HTMLInputElement ? String(owner.type || 'text').toLowerCase() : '',
       // editable → the click only FOCUSES a field (judge by field semantics,
       // which exclude the current value); non-editable → the click is an
       // action (judge by the click/caption label, value included).
@@ -553,11 +897,11 @@ export async function probeCoordinateTargetOrThrow(
   try {
     return await controller.executeJS(tabId, buildClickPointLabelProbeJs(point.cssX, point.cssY))
   } catch (error) {
+    if (detail.action === 'click') return null
     const message = error instanceof Error ? error.message : String(error)
-    const actionLabel = detail.action === 'click' ? '点击' : '输入'
     throw new ToolDomainError(
       ACTION_CONFIRMATION_ERROR_KINDS.deniedPendingConfirmation.code,
-      `无法确认坐标${actionLabel}目标是否安全，已拒绝执行。请改用明确 selector/target_id，或引导用户亲自完成。`,
+      `无法确认坐标输入目标是否安全，已拒绝执行。请改用明确 selector/target_id，或引导用户亲自完成。`,
       {
         x: detail.x,
         y: detail.y,
@@ -568,11 +912,8 @@ export async function probeCoordinateTargetOrThrow(
   }
 }
 
-/**
- * EP1-I3 live-target net — probe of the currently FOCUSED field, used by the
- * send-keys guard: printable keystrokes land in whatever already has focus,
- * which can be a captcha/password field no argument ever named.
- */
+/** Probe of the currently focused field. Printable keystrokes land in the
+ * existing focus owner, so password inputs remain a structural special case. */
 export function buildFocusedFieldProbeJs(): string {
   return `(() => {
     const __READY_FOCUSED_FIELD_PROBE__ = true;
@@ -588,7 +929,7 @@ export function buildFocusedFieldProbeJs(): string {
 
 /**
  * D18-c（真机第十四轮实锚）：type_at 的聚焦点击落在不可聚焦位置时，焦点
- * 滞留在上一个控件（XHS 标题框），正文全文打进标题、模型毫无感知烧掉
+ * 滞留在上一个控件，导致正文打进错误字段且模型无法感知。
  * 4 分钟。打字前探测点击后的真实焦点：kind=none（焦点回落 body）必须
  * 响亮拒绝打字；kind=frame（跨帧编辑器）无法验证放行；kind=editable /
  * non_editable 按可编辑性裁决。
@@ -598,12 +939,14 @@ export function buildFocusedEditableProbeJs(): string {
     const __READY_FOCUSED_EDITABLE_PROBE__ = true;
     ${buildTargetSemanticsLibraryJs()}
     const el = document.activeElement;
+    const documentFocused = document.hasFocus();
+    const documentReady = document.readyState === 'interactive' || document.readyState === 'complete';
     if (!el || el === document.body || el === document.documentElement) {
-      return { kind: 'none', tag: el === document.body ? 'body' : 'html', label: '', password: false };
+      return { kind: 'none', tag: el === document.body ? 'body' : 'html', label: '', password: false, documentFocused, documentReady };
     }
     const tag = String(el.tagName || '').toLowerCase();
     if (tag === 'iframe' || tag === 'frame' || tag === 'webview' || tag === 'object' || tag === 'embed') {
-      return { kind: 'frame', tag, label: '', password: false };
+      return { kind: 'frame', tag, label: '', password: false, documentFocused, documentReady };
     }
     const editable = readyIsEditableField(el);
     // D18-d：容量与形态信号——maxLength 装不下长文本的字段（标题框）与
@@ -617,6 +960,8 @@ export function buildFocusedEditableProbeJs(): string {
       password: readyIsPasswordField(el),
       maxLength: rawMax > 0 ? rawMax : null,
       singleLine: el instanceof HTMLInputElement,
+      documentFocused,
+      documentReady,
     };
   })()`
 }
@@ -625,7 +970,7 @@ export function buildFocusedEditableProbeJs(): string {
  * D18-c：打完字回读文本真实落点（焦点元素身份 + 内容头部），让"打进了
  * 哪个框"在同一次工具结果里可见。密码框不回显内容。
  */
-export function buildTypedIntoProbeJs(): string {
+export function buildTypedIntoProbeJs(expectedText?: string): string {
   return `(() => {
     const __READY_TYPED_INTO_PROBE__ = true;
     ${buildTargetSemanticsLibraryJs()}
@@ -638,12 +983,18 @@ export function buildTypedIntoProbeJs(): string {
       if ('value' in el && typeof el.value === 'string') text = el.value;
       else text = String(el.innerText || el.textContent || '');
     }
+    const expected = ${expectedText === undefined ? 'null' : JSON.stringify(expectedText)};
+    const normalizeExact = (value) => String(value ?? '')
+      .normalize('NFC')
+      .replace(/\\r\\n?/g, '\\n')
+      .trim();
     return {
       tag,
       label: readyInputSemanticsLabel(el),
       password,
       textHead: password ? '' : text.replace(/\\s+/g, ' ').trim().slice(0, 80),
       textLength: password ? 0 : text.length,
+      textMatchesExpected: password || expected === null ? null : normalizeExact(text) === normalizeExact(expected),
     };
   })()`
 }
@@ -653,23 +1004,17 @@ export function buildTypedIntoProbeJs(): string {
  * (ToolDomainError flows through the browser catch to the dispatcher).
  */
 export function throwIfLiveTargetGuardBlocked(result: unknown, detail: Record<string, unknown>): void {
-  if (!result || typeof result !== 'object') return
-  const marker = result as { __readyDestructiveTargetBlocked?: unknown; __readyPasswordFillBlocked?: unknown; label?: unknown }
-  if (marker.__readyDestructiveTargetBlocked === true) {
-    const label = String(marker.label || '')
-    throw new ToolDomainError(
-      'grant_required',
-      `目标「${label.slice(0, 80)}」命中浏览器破坏性动作清单，需要用户授予该目标的 Power grant 后才能执行。`,
-      { ...detail, label },
-    )
-  }
-  if (marker.__readyPasswordFillBlocked === true) {
-    throw new ToolDomainError(
-      ACTION_CONFIRMATION_ERROR_KINDS.deniedPendingConfirmation.code,
-      '目标是密码输入框。请在调用参数中说明目标（如「登录密码输入框」），经用户确认后执行。',
-      { ...detail, ruleId: 'm3-login-existing-account' },
-    )
-  }
+  if (!result || typeof result !== 'object' || Array.isArray(result)) return
+  const record = result as Record<string, unknown>
+  const errorKind = String(record.errorKind || '')
+  if (errorKind !== 'credential_confirmation_required' && errorKind !== 'file_input_requires_upload') return
+  throw new ToolDomainError(
+    errorKind,
+    errorKind === 'credential_confirmation_required'
+      ? 'The live target is a password field and requires a one-shot typed confirmation.'
+      : 'The live target is a file input; use browser_upload with a bound attachment.',
+    { ...detail, liveTargetKind: record.liveTargetKind || null },
+  )
 }
 
 export function buildBrowserActionDeltaJs(): string {

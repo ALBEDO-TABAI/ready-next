@@ -1,8 +1,7 @@
 import { mkdir, readFile, writeFile } from 'fs/promises'
 import { tmpdir } from 'os'
 import { join } from 'path'
-import { MemorySession } from '@openai/agents'
-import type { AgentInputItem } from '@openai/agents'
+import type { AgentInputItem, MemorySession } from '@openai/agents'
 import type { TaskBudgetRuntime } from '../contracts/run-contracts'
 import type { TurnTerminalReason } from './turn-frame'
 import { normalizeSessionSnapshotForSeed } from '../compaction/compact-agent-input'
@@ -20,16 +19,12 @@ import type {
 } from './agent-sdk-types'
 import {
   MAX_ORPHAN_RUNS,
-  PREEMPT_SETTLE_TIMEOUT_MS,
   asRecord,
   continuationRunStatePath,
-  errorMessage,
   nonEmptyString,
-  raceWithTimeout,
   safeContinuationPathSegment,
   stringField
 } from './agent-sdk-utils'
-import { log } from './agent-sdk-provider'
 import { AgentSdkSessionManager } from './agent-sdk-session'
 import { AgentSdkCompactor } from './agent-sdk-compactor'
 import type { AbortInitiator } from '../contracts/run-contracts-internal'
@@ -118,9 +113,8 @@ export class AgentSdkRunLifecycle {
     }
 
     let started: Extract<BeginRunResult, { ok: true }> | null = null
-    let capturedOld: RunHandle | null = null
-    let myGeneration = 0
     let blockedByOrphans = false
+    let activeOwnerRunId: string | null = null
 
     await this.host.sessionManager.withSessionLock(params.name, async () => {
       const session = this.host.sessionManager.get(params.name)
@@ -148,22 +142,10 @@ export class AgentSdkRunLifecycle {
         }
         return
       }
-
-      capturedOld = session.currentRun
-      try {
-        this.host.cancelPendingToolActions?.(params.name, params.sessionId)
-      } catch (error) {
-        log(`preempt cancelPendingToolActions failed: ${errorMessage(error)}`)
-      }
-      session.generation += 1
-      myGeneration = session.generation
-      if (capturedOld.abortController) {
-        capturedOld.abortController.abort(
-          createInitiatorAbort(capturedOld, 'preempted', 'process_restarted')
-        )
-        capturedOld.abortController = null
-      }
-      log(`preempted previous SDK run agent=${params.name}`)
+      // A second ingress for the same owner key is never implicit authority to
+      // cancel, bump generation, or clone partial history.  Explicit user stop
+      // settles the old owner before a later beginRun can succeed.
+      activeOwnerRunId = session.currentRun.runId
     })
 
     if (started) return started
@@ -176,51 +158,12 @@ export class AgentSdkRunLifecycle {
       }
     }
 
-    const oldRun = capturedOld as RunHandle | null
-    if (oldRun) {
-      await raceWithTimeout(oldRun.settled, PREEMPT_SETTLE_TIMEOUT_MS)
+    return {
+      ok: false,
+      reason: 'active_owner_exists',
+      message: '当前任务仍在运行，新消息已保留给当前任务。',
+      currentRunId: activeOwnerRunId,
     }
-
-    return this.host.sessionManager.withSessionLock(params.name, async () => {
-      let session = this.host.sessionManager.get(params.name)
-      if (!session || session.generation !== myGeneration) {
-        return {
-          ok: false,
-          reason: 'superseded',
-          message: '本轮已被更新的发送接管。',
-          currentRunId: session?.currentRun?.runId ?? null
-        }
-      }
-      if (oldRun && session.currentRun === oldRun) {
-        const carried = normalizeSessionSnapshotForSeed(await oldRun.capturedSession.getItems())
-        session = {
-          sdkSession: new MemorySession({ sessionId: params.name, initialItems: carried }),
-          systemPrompt: session.systemPrompt,
-          generation: session.generation,
-          currentRun: null,
-          orphanCount: session.orphanCount + 1,
-          pendingCompact: session.pendingCompact,
-          contextWindowTokens: session.contextWindowTokens,
-          lastUsageTokens: session.lastUsageTokens
-        }
-        this.host.sessionManager.set(params.name, session)
-      }
-      const abortController = new AbortController()
-      const runHandle = this.createRunHandle({
-        runId: params.runId,
-        runGeneration: session.generation,
-        abortController,
-        capturedSession: session.sdkSession
-      })
-      session.currentRun = runHandle
-      return {
-        ok: true,
-        session,
-        runHandle,
-        abortController,
-        runGeneration: session.generation
-      }
-    })
   }
 
   async finalizeRun(name: string, session: AgentSdkSession, runHandle: RunHandle): Promise<void> {

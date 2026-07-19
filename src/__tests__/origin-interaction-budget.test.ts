@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { OriginInteractionBudget } from '../main/modules/browser-engine/origin-interaction-budget'
+import { OriginInteractionBudget, scopedOriginInteractionKey } from '../main/modules/browser-engine/origin-interaction-budget'
 
 test('serializes writes for one origin but not unrelated origins', async () => {
   const budget = new OriginInteractionBudget()
@@ -44,4 +44,27 @@ test('honors Retry-After and blocks all later writes after a challenge', async (
   const resumed = await budget.runWrite('https://example.com/', async () => 'ok')
   assert.equal(resumed.gate.ok, true)
   assert.equal(resumed.value, 'ok')
+})
+
+test('challenge state is isolated by browser profile and conversation scope', async () => {
+  const budget = new OriginInteractionBudget()
+  const blockedKey = scopedOriginInteractionKey({ profile: 'account-a', scopeId: 'scope-a', origin: 'https://example.com' })
+  const otherProfile = scopedOriginInteractionKey({ profile: 'account-b', scopeId: 'scope-a', origin: 'https://example.com' })
+  const otherScope = scopedOriginInteractionKey({ profile: 'account-a', scopeId: 'scope-b', origin: 'https://example.com' })
+  budget.record(blockedKey, { challenge: true })
+
+  assert.equal((await budget.runWrite(blockedKey, async () => 'blocked')).gate.ok, false)
+  assert.equal((await budget.runWrite(otherProfile, async () => 'profile-ok')).value, 'profile-ok')
+  assert.equal((await budget.runWrite(otherScope, async () => 'scope-ok')).value, 'scope-ok')
+})
+
+test('local locator and validation failures never create an origin cooldown', () => {
+  let now = 10_000
+  const budget = new OriginInteractionBudget(() => now)
+  budget.record('https://example.com/', { actionSucceeded: false })
+  now += 1
+  const state = budget.record('https://example.com/', { actionSucceeded: false })
+  assert.equal(state.consecutiveFailures, 0)
+  assert.equal(state.cooldownUntil, 0)
+  assert.equal(state.challengeBlocked, false)
 })

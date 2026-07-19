@@ -401,6 +401,7 @@ export class SkillsRuntimeManager {
       hostRequirements: definition.hostRequirements,
       childLoop: definition.childLoop,
       allowedTools: definition.source === 'embedded' ? definition.allowedTools : undefined,
+      capabilitySurface: definition.source === 'embedded' ? definition.capabilitySurface : undefined,
       configuration: definition.configuration,
     }
   }

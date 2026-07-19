@@ -1,13 +1,13 @@
 import { createEmptyScopeRunState, deriveScopeRunStatePatch, getActiveScopeRunState, isForegroundBusyScopeRunState, isScopeRunPhase, mergeArtifacts, phaseToToolTraceStatus } from './scopeRunState'
-import { persistAssistantMessage, extractAttachmentsFromMeta } from './messageComposer'
+import { extractAttachmentsFromMeta } from './messageComposer'
 import { executeModuleToolAction, handleModuleToolAction } from './moduleExecutor'
 import { cancelAllPendingWidgetWrites } from './documentActions'
 import type { Agent, AgentMessage, ConversationScope, ScopeRunState } from './types'
 import { useMode } from '../../stores/useMode'
-import { extractSkillCommandFromText, runSkillCommand } from './commandHandlers'
 import { mapBackendErrorToFriendly } from './error-message-mapping'
 import { emitRendererAgentMetric } from './rendererMetrics'
-import { mapScopeRunPhaseToSessionState } from '../../stores/agent-store-helpers'
+import { mapScopeRunPhaseToSessionState, rebuildAgentMessageFromRow } from '../../stores/agent-store-helpers'
+import type { CanonicalAssistantMessage } from '../../../shared/ipc-contracts/canonical-message'
 
 interface AgentStoreLike {
   getState: () => any
@@ -147,76 +147,6 @@ function generateResponseSegmentId(): string {
   return `response-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
 }
 
-function buildTaskSnapshotMeta(scopeId: string, scope: ConversationScope | null, runState: ScopeRunState | null): Record<string, unknown> | undefined {
-  if (!runState) return undefined
-  return {
-    runId: runState.requestId,
-    executionAgentId: runState.executionBinding?.effectiveAgentId ?? null,
-    displayNameSnapshot: runState.executionAgentDisplayName ?? runState.executionBinding?.effectiveAgentId ?? runState.agent,
-    executionMaterialHash: runState.executionBinding?.executionMaterialHash ?? null,
-    taskSnapshot: {
-      scopeId,
-      agent: runState.agent,
-      ownerAgentId: runState.ownerAgentId ?? null,
-      executionBinding: runState.executionBinding ?? null,
-      taskId: runState.taskId || null,
-      title: scope?.title || '任务',
-      taskTitle: runState.taskTitle || null,
-      taskSummary: runState.taskSummary || null,
-      steps: runState.steps || [],
-      currentStepId: runState.currentStepId || null,
-      waitingFor: runState.waitingFor || 'none',
-      resumableActions: runState.resumableActions || [],
-      recentArtifacts: runState.recentArtifacts || [],
-      taskContinuation: runState.taskContinuation || null,
-      progress: runState.progress || null,
-      memoryCapture: runState.memoryCapture || null,
-      blockedReason: runState.blockedReason || null,
-      error: runState.error || null,
-      updatedAt: runState.updatedAt || new Date().toISOString(),
-      responseMessageId: runState.responseMessageId || null,
-      phase: runState.phase,
-      terminalReason: runState.terminalReason || null,
-      // 整轮 toolTrace 是兜底显示面：保留 toolName、刻意剥离 detail —— L3
-      // 详情由逐消息段快照（buildToolTraceSnapshotMeta）承载，避免消息 meta
-      // 随长任务成倍膨胀。
-      toolTrace: (runState.toolTrace || []).map((event) => ({
-        id: event.id,
-        kind: event.kind,
-        text: event.text,
-        timestamp: event.timestamp instanceof Date ? event.timestamp.toISOString() : String(event.timestamp),
-        ...(event.toolName ? { toolName: event.toolName } : {}),
-      })),
-    },
-  }
-}
-
-function buildToolTraceSnapshotMeta(runState: ScopeRunState | null): Record<string, unknown> | undefined {
-  if (!runState) return undefined
-  const startIndex = Math.max(0, runState.responseSegmentToolTraceStart || 0)
-  const toolTraceSnapshot = (runState.toolTrace || []).slice(startIndex).map((event) => ({
-    id: event.id,
-    kind: event.kind,
-    text: event.text,
-    timestamp: event.timestamp instanceof Date ? event.timestamp.toISOString() : String(event.timestamp),
-    ...(event.toolName ? { toolName: event.toolName } : {}),
-    ...(event.detail ? { detail: event.detail } : {}),
-  }))
-
-  if (toolTraceSnapshot.length === 0) return undefined
-  return { toolTraceSnapshot }
-}
-
-function buildResponseSegmentMeta(scopeId: string, scope: ConversationScope | null, runState: ScopeRunState | null): Record<string, unknown> | undefined {
-  const taskMeta = buildTaskSnapshotMeta(scopeId, scope, runState)
-  const toolMeta = buildToolTraceSnapshotMeta(runState)
-  if (!taskMeta && !toolMeta) return undefined
-  return {
-    ...(taskMeta || {}),
-    ...(toolMeta || {}),
-  }
-}
-
 /**
  * EP2 P0-2 follow-up — the REAL send path creates the reply message BEFORE
  * the first chunk arrives, so the live cache may have no twin yet: a bare
@@ -235,6 +165,7 @@ export function upsertStreamedSegmentCache(
   chunk: string,
   accumulated: string,
   agent: string,
+  runId?: string | null,
 ): void {
   const cachedTwin = (state.scopeLiveMessages?.[scopeId] || [])
     .some((item) => item.id === messageId)
@@ -248,7 +179,11 @@ export function upsertStreamedSegmentCache(
     content: accumulated,
     type: 'agent',
     timestamp: new Date(),
-    meta: { transient: true },
+    meta: {
+      transient: true,
+      ...(runId ? { runId } : {}),
+      scopeId,
+    },
   })
 }
 
@@ -312,35 +247,10 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
   // Keyed by `${scopeId}::${requestId}` — at most one watchdog per
   // in-flight send. Cleared by any terminal-event handler below.
   const infrastructureWatchdogs = new Map<string, InfrastructureWatchdog>()
-  const backendRecoveredResponseRequests = new Set<string>()
-  const backendRecoveredResponseLimit = 256
   let lastInfrastructureToastAt = 0
 
   function watchdogKey(scopeId: string, requestId: string): string {
     return `${scopeId}::${requestId}`
-  }
-
-  function isRecoverableUndeliveredAnswerErrorKind(errorKind: unknown): boolean {
-    return errorKind === 'proof_gap' || errorKind === 'adjudication_degraded' || errorKind === 'delivery_failed'
-  }
-
-  function markBackendRecoveredResponse(scopeId: string, requestId: string): void {
-    if (!scopeId || !requestId) return
-    backendRecoveredResponseRequests.add(watchdogKey(scopeId, requestId))
-    while (backendRecoveredResponseRequests.size > backendRecoveredResponseLimit) {
-      const oldest = backendRecoveredResponseRequests.values().next().value
-      if (!oldest) break
-      backendRecoveredResponseRequests.delete(oldest)
-    }
-  }
-
-  function isBackendRecoveredResponse(scopeId: string, requestId: string | null | undefined, errorKind: unknown): boolean {
-    return Boolean(
-      scopeId
-      && requestId
-      && backendRecoveredResponseRequests.has(watchdogKey(scopeId, requestId))
-      && isRecoverableUndeliveredAnswerErrorKind(errorKind)
-    )
   }
 
   function clearInfrastructureWatchdogForScope(scopeId: string): void {
@@ -630,12 +540,74 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
   function completeScopeRunAfterSendSuccess(
     scopeId: string,
     requestId: string,
-    options?: { backendRecoveredResponse?: boolean },
+    options?: {
+      canonicalMessage?: CanonicalAssistantMessage | null
+      canonicalMessageDigest?: string | null
+      acceptedAsSteering?: boolean
+      ownerRunId?: string | null
+      previousOwnerRun?: ScopeRunState | null
+    },
   ): void {
-    clearInfrastructureWatchdog(scopeId, requestId)
-    if (options?.backendRecoveredResponse) {
-      markBackendRecoveredResponse(scopeId, requestId)
+    if (options?.acceptedAsSteering) {
+      clearInfrastructureWatchdog(scopeId, requestId)
+      store.setState((state: any) => {
+        const sessionId = sessionKeyForScopeId(state, scopeId)
+        const currentSlice = normalizeSessionSlice(state.sessions?.[sessionId])
+        const currentRun = currentSlice.scopeRunStates[scopeId] || getScopeRunStateFromState(state, scopeId)
+        const ownerRunId = options.ownerRunId || options.previousOwnerRun?.requestId || currentRun?.requestId || null
+        const restoredRun = currentRun?.requestId !== requestId
+          ? currentRun
+          : options.previousOwnerRun?.requestId === ownerRunId
+            ? options.previousOwnerRun
+            : currentRun && ownerRunId
+              ? {
+                ...currentRun,
+                requestId: ownerRunId,
+                responseMessageId: null,
+                responseBuffer: '',
+                terminalReason: null,
+                updatedAt: new Date().toISOString(),
+              }
+              : currentRun
+        const isFakeTransient = (message: AgentMessage): boolean => {
+          const meta = (message.meta || {}) as Record<string, unknown>
+          return meta.transient === true && meta.runId === requestId
+        }
+        const nextMessages = (currentSlice.messages || state.messages || []).filter((message: AgentMessage) => !isFakeTransient(message))
+        const nextLive = Array.isArray(state.scopeLiveMessages?.[scopeId])
+          ? state.scopeLiveMessages[scopeId].filter((message: AgentMessage) => !isFakeTransient(message))
+          : []
+        const ownerStillBusy = isForegroundBusyScopeRunState(restoredRun)
+        return {
+          ...withSessionSliceAndActiveRuntimeMirror(state, sessionId, {
+            messages: nextMessages,
+            scopeRunStates: restoredRun
+              ? { ...currentSlice.scopeRunStates, [scopeId]: restoredRun }
+              : currentSlice.scopeRunStates,
+            isStreaming: ownerStillBusy,
+            foregroundBusy: ownerStillBusy,
+            composerLocked: ownerStillBusy,
+            streamingMessageId: ownerStillBusy ? restoredRun?.responseMessageId || null : null,
+            streamingRequestId: ownerStillBusy ? ownerRunId : null,
+          }),
+          scopeLiveMessages: {
+            ...(state.scopeLiveMessages || {}),
+            [scopeId]: nextLive,
+          },
+        }
+      })
+      return
     }
+
+    if (!options?.canonicalMessage) {
+      emitRendererAgentMetric('renderer_send_success_without_canonical_terminal', {
+        scopeId,
+        requestId,
+      })
+      return
+    }
+
+    clearInfrastructureWatchdog(scopeId, requestId)
     let persistedRunState: ScopeRunState | null = null
     store.setState((state: any) => {
       const sessionId = sessionKeyForScopeId(state, scopeId)
@@ -653,35 +625,12 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
       if (!previous && activeRequestId !== requestId) return {}
 
       const nextRun = previous
-        ? options?.backendRecoveredResponse
-          ? {
-            ...finalizeDoneRunState({
-              ...previous,
-              terminalReason: null,
-              blockedReason: null,
-              error: null,
-              softError: null,
-            }, scopeId),
-            terminalReason: 'done' as const,
-          }
-          : previous.terminalReason
-            ? { ...previous, scopeId, updatedAt: new Date().toISOString() }
-            : finalizeDoneRunState(previous, scopeId)
+        ? previous.terminalReason
+          ? { ...previous, scopeId, updatedAt: new Date().toISOString() }
+          : finalizeDoneRunState(previous, scopeId)
         : null
       persistedRunState = nextRun
-      const messages = options?.backendRecoveredResponse
-        ? (currentSlice.messages || state.messages || []).filter((message: AgentMessage) => {
-          const meta = (message.meta || {}) as Record<string, unknown>
-          return !(
-            message.type === 'system'
-            && meta.runtimeTerminalError === true
-            && meta.scopeId === scopeId
-            && meta.requestId === requestId
-          )
-        })
-        : undefined
       return withSessionSliceAndActiveRuntimeMirror(state, sessionId, {
-        ...(messages ? { messages } : {}),
         scopeRunStates: nextRun
           ? {
             ...currentSlice.scopeRunStates,
@@ -696,9 +645,15 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
       })
     })
 
-    if (persistedRunState) {
+    if (persistedRunState && options?.canonicalMessage) {
       const state = store.getState()
-      void persistAssistantMessageForRun(scopeId, getScopeRunStateFromState(state, scopeId) || persistedRunState)
+      const latestRunState = getScopeRunStateFromState(state, scopeId) || persistedRunState
+      void reconcileCanonicalTerminalMessage(
+        scopeId,
+        latestRunState,
+        options.canonicalMessage,
+        options.canonicalMessageDigest,
+      )
     }
   }
 
@@ -781,117 +736,122 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
     modeStore.setReadySubMode(mode)
   }
 
-  /**
-   * 渠道 scope 的 assistant 持久化唯一属主是 main（remote-channel-service
-   * onSuccess）——renderer 再写就是 DB 双行（2026-07-05 真机实锚：微信
-   * 回复本地显示两条）。renderer 对渠道 run 只做展示（瞬影段随
-   * message_added 去重收敛）。
-   */
-  function isChannelSourcedScope(scope: ConversationScope | null): boolean {
-    return Boolean(scope && (scope as { sourceKind?: string }).sourceKind === 'channel')
-  }
-
-  async function persistAssistantMessageForRun(scopeId: string, runState: ScopeRunState | null): Promise<void> {
-    if (!runState?.responseMessageId) return
-    const state = store.getState()
-    const currentScope = (state.scopes.find((item: ConversationScope) => item.id === scopeId) || state.currentScope || null) as ConversationScope | null
-    if (isChannelSourcedScope(currentScope)) return
-    const currentMessage = state.messages.find((item: AgentMessage) => item.id === runState.responseMessageId)
-    const content = currentMessage?.content || runState.responseBuffer || ''
-    const snapshotMeta = buildResponseSegmentMeta(scopeId, currentScope, runState)
-    if (snapshotMeta) {
-      store.setState((current: any) => {
-        const messages = current.messages.map((item: AgentMessage) =>
-          item.id === runState.responseMessageId
-            ? { ...item, meta: { ...(item.meta || {}), ...snapshotMeta } }
-            : item,
-        )
-        return withActiveSessionMessagesMirror(current, messages)
-      })
-    }
-    const result = await persistAssistantMessage(scopeId, runState.responseMessageId, content, currentScope, snapshotMeta)
-    if (!result.success) {
-      emitRendererAgentMetric('renderer_assistant_persistence_failed', {
+  async function reconcileCanonicalTerminalMessage(
+    scopeId: string,
+    runState: ScopeRunState | null,
+    expected: CanonicalAssistantMessage,
+    canonicalMessageDigest: string | null | undefined,
+  ): Promise<boolean> {
+    if (
+      !expected?.id ||
+      expected.conversationId !== scopeId ||
+      expected.role !== 'assistant'
+    ) {
+      emitRendererAgentMetric('renderer_canonical_terminal_invalid', {
         scopeId,
-        responseMessageId: runState.responseMessageId,
-        error: result.error || 'assistant persist failed',
+        messageId: expected?.id || null,
+        conversationId: expected?.conversationId || null,
       })
+      return false
     }
-  }
 
-  function sealResponseSegment(scopeId: string, runState: ScopeRunState | null): void {
-    if (!runState?.responseMessageId) return
-    const state = store.getState()
-    const currentScope = (state.scopes.find((item: ConversationScope) => item.id === scopeId) || state.currentScope || null) as ConversationScope | null
-    if (isChannelSourcedScope(currentScope)) return
-    const currentMessage = state.messages.find((item: AgentMessage) => item.id === runState.responseMessageId)
-    const content = currentMessage?.content || runState.responseBuffer || ''
-    if (!content.trim()) return
-    const segmentMeta = buildResponseSegmentMeta(scopeId, currentScope, runState)
-    if (segmentMeta) {
-      store.setState((current: any) => {
-        const messages = current.messages.map((item: AgentMessage) =>
-          item.id === runState.responseMessageId
-            ? { ...item, meta: { ...(item.meta || {}), ...segmentMeta } }
-            : item,
-        )
-        return withActiveSessionMessagesMirror(current, messages)
-      })
-    }
-    void persistAssistantMessage(scopeId, runState.responseMessageId, content, currentScope, segmentMeta)
-      .then((result) => {
-        if (result.success) return
-        emitRendererAgentMetric('renderer_assistant_persistence_failed', {
+    let canonicalRow: CanonicalAssistantMessage = expected
+    const getMessages = window.electronAPI?.agent?.getConversationScopeMessages
+    if (typeof getMessages === 'function') {
+      try {
+        const result = await getMessages(scopeId)
+        const persisted = result.success && Array.isArray(result.data)
+          ? result.data.find((item) => item.id === expected.id)
+          : null
+        if (persisted?.role === 'assistant' && persisted.conversationId === scopeId) {
+          canonicalRow = {
+            id: persisted.id,
+            conversationId: persisted.conversationId,
+            role: 'assistant',
+            content: persisted.content,
+            timestamp: persisted.timestamp,
+            meta: persisted.meta || {},
+          }
+          if (
+            persisted.content !== expected.content ||
+            persisted.timestamp !== expected.timestamp
+          ) {
+            emitRendererAgentMetric('renderer_canonical_terminal_mismatch', {
+              scopeId,
+              messageId: expected.id,
+              canonicalMessageDigest: canonicalMessageDigest || null,
+            })
+          }
+        } else {
+          emitRendererAgentMetric('renderer_canonical_terminal_readback_missing', {
+            scopeId,
+            messageId: expected.id,
+            canonicalMessageDigest: canonicalMessageDigest || null,
+          })
+        }
+      } catch (error) {
+        emitRendererAgentMetric('renderer_canonical_terminal_readback_failed', {
           scopeId,
-          responseMessageId: runState.responseMessageId,
-          error: result.error || 'assistant persist failed',
+          messageId: expected.id,
+          error: error instanceof Error ? error.message : String(error),
         })
-      })
-  }
+      }
+    }
 
-  async function maybeAutoExecuteAssistantSkillCommand(scopeId: string, runState: ScopeRunState | null): Promise<void> {
-    if (!runState?.responseMessageId) return
-    const state = store.getState()
-    if (state.currentScopeId !== scopeId) return
-    const currentMessage = state.messages.find((item: AgentMessage) => item.id === runState.responseMessageId)
-    const content = String(currentMessage?.content || runState.responseBuffer || '')
-    const command = extractSkillCommandFromText(content)
-    if (!command) return
-
-    const responseIndex = state.messages.findIndex((item: AgentMessage) => item.id === runState.responseMessageId)
-    const sourceMessages = responseIndex >= 0 ? state.messages.slice(0, responseIndex) : state.messages
-    const latestUserWithAttachments = [...sourceMessages]
-      .reverse()
-      .find((item: AgentMessage) => item.type === 'user' && Array.isArray(item.attachments) && item.attachments.length > 0)
-    const attachments = latestUserWithAttachments?.attachments || []
-
-    const result = await runSkillCommand(command, attachments)
-    if (!result.handled) return
-
-    const appended = `\n\n[系统已自动执行技能命令]\n${result.text}`
-    store.setState((current: any) => {
-      const messages = current.messages.map((item: AgentMessage) =>
-        item.id === runState.responseMessageId ? { ...item, content: `${item.content}${appended}` } : item,
+    store.setState((state: any) => {
+      const sessionId = sessionKeyForScopeId(state, scopeId)
+      const currentSlice = normalizeSessionSlice(state.sessions?.[sessionId])
+      const previous = currentSlice.scopeRunStates[scopeId] || getScopeRunStateFromState(state, scopeId) || runState
+      const transientResponseId = previous?.responseMessageId || runState?.responseMessageId || null
+      const ownerRunId = previous?.requestId || runState?.requestId || null
+      const scope = state.scopes.find((item: ConversationScope) => item.id === scopeId) || state.currentScope || null
+      const canonicalMessage = rebuildAgentMessageFromRow(
+        canonicalRow,
+        previous?.executionBinding?.effectiveAgentId || scope?.agent || previous?.agent || 'butler',
       )
-      const sessionId = sessionKeyForScopeId(current, scopeId)
-      const slice = normalizeSessionSlice(current.sessions?.[sessionId])
+      const existingMessages = currentSlice.messages || []
+      const nextMessages = existingMessages
+        .filter((item: AgentMessage) => {
+          if (item.id === canonicalMessage.id) return false
+          if (transientResponseId && transientResponseId !== canonicalMessage.id && item.id === transientResponseId) return false
+          const meta = (item.meta || {}) as Record<string, unknown>
+          return !(ownerRunId && meta.transient === true && meta.runId === ownerRunId)
+        })
+        .concat(canonicalMessage)
+        .sort((left: AgentMessage, right: AgentMessage) => left.timestamp.getTime() - right.timestamp.getTime())
+      const nextRun = previous
+        ? {
+          ...previous,
+          responseMessageId: canonicalMessage.id,
+          responseBuffer: canonicalMessage.content,
+          latestText: canonicalMessage.content.slice(-500),
+          updatedAt: new Date().toISOString(),
+        }
+        : previous
+      const live = Array.isArray(state.scopeLiveMessages?.[scopeId])
+        ? state.scopeLiveMessages[scopeId]
+        : []
+      const nextLive = live.filter((item: AgentMessage) => {
+        if (item.id === canonicalMessage.id) return false
+        if (transientResponseId && transientResponseId !== canonicalMessage.id && item.id === transientResponseId) return false
+        const meta = (item.meta || {}) as Record<string, unknown>
+        return !(ownerRunId && meta.transient === true && meta.runId === ownerRunId)
+      })
       return {
-        ...withSessionSliceAndActiveRuntimeMirror(current, sessionId, {
-          messages,
-          scopeRunStates: {
-            ...slice.scopeRunStates,
-            [scopeId]: slice.scopeRunStates[scopeId]
-            ? {
-              ...slice.scopeRunStates[scopeId],
-              responseBuffer: `${slice.scopeRunStates[scopeId].responseBuffer || ''}${appended}`,
-              latestText: result.text.slice(-500),
-              updatedAt: new Date().toISOString(),
-            }
-            : slice.scopeRunStates[scopeId],
-          },
+        ...withSessionSliceAndActiveRuntimeMirror(state, sessionId, {
+          messages: nextMessages,
+          scopeRunStates: nextRun
+            ? { ...currentSlice.scopeRunStates, [scopeId]: nextRun }
+            : currentSlice.scopeRunStates,
+          streamingMessageId: null,
         }),
+        scopeLiveMessages: {
+          ...(state.scopeLiveMessages || {}),
+          [scopeId]: nextLive,
+        },
       }
     })
+    return true
   }
 
   function initAgentListeners(): () => void {
@@ -909,27 +869,30 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
         // Stage X2.6 — any terminal event for this scope clears the
         // infrastructure-timeout watchdog so it doesn't fire a false
         // positive after a normal completion.
-        const runStateForClear = getScopeRunStateFromState(store.getState(), scopeId)
-        clearInfrastructureWatchdog(scopeId, runStateForClear?.requestId || (typeof data.runId === 'string' ? data.runId : null))
-        const runState = runStateForClear
+        const runState = getScopeRunStateFromState(store.getState(), scopeId)
         void (async () => {
-          let finalized = false
-          const finalize = () => {
-            finalizeScopeRunAfterStreamDone(scopeId, getScopeRunStateFromState(store.getState(), scopeId) || runState)
-            finalized = true
-          }
           try {
-            await maybeAutoExecuteAssistantSkillCommand(scopeId, runState)
-            finalize()
-            await persistAssistantMessageForRun(scopeId, getScopeRunStateFromState(store.getState(), scopeId) || runState)
+            if (data.canonicalMessage) {
+              clearInfrastructureWatchdog(scopeId, runState?.requestId || (typeof data.runId === 'string' ? data.runId : null))
+              await reconcileCanonicalTerminalMessage(
+                scopeId,
+                runState,
+                data.canonicalMessage,
+                data.canonicalMessageDigest,
+              )
+              finalizeScopeRunAfterStreamDone(scopeId, getScopeRunStateFromState(store.getState(), scopeId) || runState)
+              return
+            }
+            emitRendererAgentMetric('renderer_done_without_canonical_terminal', {
+              scopeId,
+              requestId: runState?.requestId || (typeof data.runId === 'string' ? data.runId : null),
+            })
           } catch (error) {
             emitRendererAgentMetric('renderer_assistant_done_finalize_failed', {
               scopeId,
               responseMessageId: runState?.responseMessageId || null,
               error: error instanceof Error ? error.message : String(error),
             })
-          } finally {
-            if (!finalized) finalize()
           }
         })()
         return
@@ -956,9 +919,6 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
       let chunkForDisplay = nextBuffer.startsWith(previousBuffer) ? nextBuffer.slice(previousBuffer.length) : data.chunk
 
       if (shouldStartNewSegment) {
-        if (runState?.responseSegmentBreakPending) {
-          sealResponseSegment(scopeId, runState)
-        }
         targetResponseMessageId = generateResponseSegmentId()
         nextBuffer = collapseAdjacentDuplicateAssistantTail(data.chunk)
         chunkForDisplay = nextBuffer
@@ -972,7 +932,11 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
           content: chunkForDisplay,
           type: 'agent',
           timestamp: new Date(),
-          meta: { transient: true },
+          meta: {
+            transient: true,
+            runId: runState?.requestId || (typeof data.runId === 'string' ? data.runId : null),
+            scopeId,
+          },
         })
         if (scopeId === currentState.currentScopeId) {
           currentState.addMessage({
@@ -990,7 +954,15 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
           ))
         }
       } else if (targetResponseMessageId) {
-        upsertStreamedSegmentCache(currentState, scopeId, targetResponseMessageId, chunkForDisplay, nextBuffer, executionAgentId)
+        upsertStreamedSegmentCache(
+          currentState,
+          scopeId,
+          targetResponseMessageId,
+          chunkForDisplay,
+          nextBuffer,
+          executionAgentId,
+          runState?.requestId || (typeof data.runId === 'string' ? data.runId : null),
+        )
         if (
           chunkForDisplay &&
           scopeId === currentState.currentScopeId &&
@@ -1073,11 +1045,6 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
       if (!recoverable) {
         clearInfrastructureWatchdog(scopeId, runState?.requestId || (typeof data.runId === 'string' ? data.runId : null))
       }
-      const requestId = runState?.requestId || (typeof data.runId === 'string' ? data.runId : null)
-      if (!recoverable && isBackendRecoveredResponse(scopeId, requestId, data.errorKind)) {
-        return
-      }
-
       if (recoverable) {
         const friendly = mapBackendErrorToFriendly({
           error: data.error,
@@ -1182,27 +1149,6 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
         // tooltrace mirror is recomputed when the user switches to it.
         ...(state.currentScopeId === scopeId ? { toolTraceStatus: 'error' as const } : {}),
       }))
-      // The system-message error capsule is part of the visible
-      // transcript, so it only renders for the active scope. The
-      // originating session (when parked) still gets phase=error in its
-      // scope run state below, which the projection card surfaces when
-      // the user returns to the tab.
-      if (state.currentScopeId === scopeId) {
-        state.addMessage({
-          id: `error-${Date.now()}`,
-          agent: data.agent,
-          content: friendly.friendlyMessage,
-          type: 'system',
-          timestamp: new Date(),
-          meta: {
-            runtimeTerminalError: true,
-            scopeId,
-            requestId: runState?.requestId || (typeof data.runId === 'string' ? data.runId : null),
-            errorKind: data.errorKind || 'unknown',
-          },
-        })
-      }
-
       upsertScopeRunState(scopeId, (previous) => ({
         scopeId,
         agent: previous?.agent || data.agent,
@@ -1246,7 +1192,6 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
         error: friendly.friendlyMessage,
         softError: null,
       }))
-      void persistAssistantMessageForRun(scopeId, runState)
     })
 
     let toolActionQueue: Promise<void> = Promise.resolve()
@@ -1794,14 +1739,6 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
               ? { toolTraceStatus: phaseToToolTraceStatus(latestRunState?.phase || event.phase, latestRunState?.terminalReason || event.terminalReason) }
               : {}),
           }))
-        }
-        if (
-          event.terminalReason ||
-          event.phase === 'done' ||
-          event.phase === 'error' ||
-          event.phase === 'cancelled'
-        ) {
-          void persistAssistantMessageForRun(event.scopeId, store.getState().scopeRunStates[event.scopeId] || null)
         }
       })
       : () => { /* older test stubs */ }

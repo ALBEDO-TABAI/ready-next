@@ -29,6 +29,7 @@ import {
 import { ToolDomainError } from '../main/modules/tools/tool-errors'
 import { buildExplicitNoSkillAuthorization } from '../main/modules/agent-control/skills/skill-tool-authorization'
 import type { BrowserController } from '../main/modules/browser-engine/ipc-handler'
+import { attachBrowserWorkflowFixture } from './utils/browser-workflow-fixture'
 
 test('tool-envelope-pilot declares transitive sqlite ABI guard', (t) => {
   skipIfSqliteUnavailable(t, 'tool-envelope-pilot transitive sqlite load')
@@ -53,26 +54,46 @@ function modelContext(overrides: Partial<ToolContext> = {}): ToolContext {
   } as ToolContext
 }
 
+function browserModelContext(controller: BrowserController): ToolContext {
+  const fixture = attachBrowserWorkflowFixture(controller)
+  return modelContext({
+    browserController: fixture.controller,
+    scopeId: 'envelope-pilot-test',
+    runId: fixture.context.ownerRunId,
+    taskId: fixture.context.parentTaskId,
+    browserWorkflowRoute: {
+      browserTaskId: fixture.context.browserTaskId,
+      requestAnchorSnapshotDigest: 'request-anchor-envelope-pilot-test',
+    },
+  })
+}
+
 // ---------------------------------------------------------------------------
 // 1. Browser-domain pilot
 // ---------------------------------------------------------------------------
 
-test('browser pilot: successful browser_task carries an ok envelope, legacy text untouched', async () => {
+test('browser pilot: successful browser_task carries an ok envelope and structured result', async () => {
   const controller = {
-    getTask: async () => null,
+    getTask: async () => ({
+      taskId: 'browser-task-99',
+      kind: 'note_collect',
+      status: 'completed',
+      progress: { total: 1, completed: 1, failed: 0, currentLabel: null },
+      result: { items: [] },
+    }),
   } as unknown as BrowserController
   const output = await executeToolCall(
     'browser_task',
     { task_id: 'browser-task-99' },
-    modelContext({ browserController: controller }),
+    browserModelContext(controller),
   )
   assert.ok(output.envelope, 'envelope must be attached at the dispatch exit')
   assert.equal(output.envelope?.ok, true)
   assert.equal(output.envelope?.kind, 'ok')
-  // Legacy contract untouched: plain-string browser results stay text-shaped.
-  assert.match(output.text, /"status":\s*"missing"/)
-  assert.equal(output.shape, 'text')
-  assert.equal(output.data, null)
+  assert.match(output.text, /"status":\s*"completed"/)
+  assert.equal(output.shape, 'json')
+  assert.equal(output.data?.ok, true)
+  assert.equal(output.data?.status, 'completed')
 })
 
 test('browser pilot: thrown ToolDomainError surfaces with a correctly mapped error envelope', async () => {
@@ -84,7 +105,7 @@ test('browser pilot: thrown ToolDomainError surfaces with a correctly mapped err
   const output = await executeToolCall(
     'browser_task',
     { task_id: 'browser-task-x' },
-    modelContext({ browserController: controller }),
+    browserModelContext(controller),
   )
   assert.equal(output.data?.errorKind, 'not_found', 'legacy errorKind preserved')
   assert.equal(output.envelope?.ok, false)

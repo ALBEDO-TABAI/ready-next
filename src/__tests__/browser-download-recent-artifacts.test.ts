@@ -26,9 +26,34 @@ function createScope(): ConversationScope {
 }
 
 function createDownloadController() {
+  let actionSequence = 0
+  let observationSequence = 0
   return {
     executeJS: async () => 'https://example.test/page',
     getActiveTab: () => ({ id: 'tab-1' }),
+    beginBrowserWorkflowAction: (input: Record<string, unknown>) => ({
+      actionId: `action-${++actionSequence}`,
+      actionSeq: actionSequence,
+      identity: input.identity,
+    }),
+    settleBrowserWorkflowAction: (_taskId: string, actionId: string, outcome: unknown) => ({
+      receiptId: `receipt-${actionId}`,
+      outcome,
+    }),
+    recordBrowserWorkflowObservation: (input: Record<string, unknown>) => ({
+      receiptId: `observation-${++observationSequence}`,
+      observationSeq: observationSequence,
+      operationId: input.operationId,
+      ownerRunId: input.ownerRunId,
+      observedAfterActionSeq: actionSequence,
+      identity: input.identity,
+      searchActionId: null,
+      queryDigest: null,
+      causalActions: [],
+      resultDigest: input.resultDigest,
+      resourceId: `resource-${observationSequence}`,
+      observedAt: new Date(0).toISOString(),
+    }),
     downloadUrlToDirectory: async (payload: {
       url: string
       targetDir: string
@@ -76,13 +101,18 @@ test('browser_download registers downloaded images as recent artifacts', async (
       undefined,
       undefined,
       undefined,
-      { workspaceRoots: [dir] },
+      {
+        ownerRunId: 'run-download-artifacts',
+        browserTaskId: 'browser-task-download-artifacts',
+        parentTaskId: 'task-download-artifacts',
+        workspaceRoots: [dir],
+      },
     )
 
     assert.equal(typeof output, 'object')
     if (typeof output === 'string') return
     const artifacts = output.projectionPatch?.recentArtifacts as Array<{ path?: string; kind?: string }> | undefined
-    assert.equal(artifacts?.length, 4)
+    assert.equal(artifacts?.length, 4, JSON.stringify(output))
     assert.deepEqual(artifacts?.map((artifact) => artifact.kind), ['image', 'image', 'image', 'image'])
     assert.equal(output.contextModifier?.activeFrame?.discoveredHandles?.length, 4)
     for (const artifact of artifacts || []) {
@@ -120,7 +150,12 @@ test('downloaded media flows through projection recentArtifacts into send-im att
       undefined,
       undefined,
       undefined,
-      { workspaceRoots: [dir] },
+      {
+        ownerRunId: 'run-download-send-im',
+        browserTaskId: 'browser-task-download-send-im',
+        parentTaskId: 'task-download-send-im',
+        workspaceRoots: [dir],
+      },
     )
     assert.equal(typeof downloadOutput, 'object')
     if (typeof downloadOutput === 'string') return
@@ -170,7 +205,7 @@ test('downloaded media flows through projection recentArtifacts into send-im att
       },
     )
 
-    assert.equal(sendOutput.data?.status, 'done')
+    assert.equal(sendOutput.data?.status, 'done', JSON.stringify({ downloadOutput, sendOutput }))
     assert.equal(sentPayloads.length, 1)
     assert.equal(sentPayloads[0]?.attachments?.length, 4)
     assert.deepEqual(

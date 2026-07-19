@@ -105,9 +105,15 @@ test('timeout_tool — client signal "tool-timeout"', () => {
   )
 })
 
-test('transient — HTTP 500/502/503/504/408/425', () => {
-  for (const httpStatus of [408, 425, 500, 502, 503, 504]) {
+test('transient — retryable request and server statuses include gateway 520–524', () => {
+  for (const httpStatus of [408, 425, 500, 502, 503, 504, 520, 521, 522, 523, 524, 599]) {
     expectCode({ httpStatus, errorBody: 'Server Error' }, 'transient')
+  }
+})
+
+test('unknown — protocol and capability 5xx are not replayed', () => {
+  for (const httpStatus of [501, 505]) {
+    expectCode({ httpStatus, errorBody: 'Protocol capability is unsupported' }, 'unknown')
   }
 })
 

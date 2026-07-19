@@ -8,16 +8,27 @@ import { DeliveryOutputBuffer } from '../main/modules/agent-control/runtime-core
 const user = (text: string): AgentInputItem => ({ role: 'user', content: text } as AgentInputItem)
 const assistant = (text: string): AgentInputItem => ({ role: 'assistant', content: text } as AgentInputItem)
 
-test('candidate stays outside the committed session until acceptance', async () => {
+test('candidate stays outside the committed session until core commit', async () => {
   const committed = new MemorySession({ sessionId: 'committed', initialItems: [user('request')] })
   const tx = await CandidateSessionTransaction.create(committed, 'working')
   await tx.workingSession.addItems([assistant('rejected candidate')])
   assert.equal(JSON.stringify(await committed.getItems()).includes('rejected candidate'), false)
   assert.equal(JSON.stringify(tx.buildSanitizedCheckpoint()).includes('rejected candidate'), false)
 
-  const delta = await tx.commitAccepted()
+  const delta = await tx.prepareAccepted()
   assert.equal(JSON.stringify(delta).includes('rejected candidate'), true)
+  assert.equal(JSON.stringify(await committed.getItems()).includes('rejected candidate'), false)
+  await tx.commitPrepared()
   assert.equal(JSON.stringify(await committed.getItems()).includes('rejected candidate'), true)
+})
+
+test('prepared acceptance can still be aborted without touching committed history', async () => {
+  const committed = new MemorySession({ sessionId: 'committed-prepared-abort', initialItems: [user('request')] })
+  const tx = await CandidateSessionTransaction.create(committed, 'working-prepared-abort')
+  await tx.workingSession.addItems([assistant('verified but not committed')])
+  await tx.prepareAccepted()
+  tx.abortCandidate()
+  assert.doesNotMatch(JSON.stringify(await committed.getItems()), /verified but not committed/)
 })
 
 test('abort and sanitized checkpoint never persist rejected candidate', async () => {

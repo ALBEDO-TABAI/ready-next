@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import {
   createEmptyScopeRunState,
   getActiveScopeRunState,
+  isActiveScopePhase,
   isForegroundBusyScopeRunState,
   isStreamingScopeRunState,
   normalizeTerminalReason,
@@ -22,6 +23,7 @@ import { boundedCancelWithFallback } from '../modules/agent/boundedCancelWithFal
 import { createAgentRuntimeDriver, syncActiveScopeRunAliases } from '../modules/agent/runtimeDriver'
 import { installAgentPanelTestHarness } from '../modules/agent/agentPanelTestHarness'
 import { computeDesiredRoots, useWorkspace } from './useWorkspace'
+import { useMode } from './useMode'
 import { MAX_AGENT_SESSIONS } from '../../shared/agent-session-limits'
 import { DEFAULT_DELIVERY_MODE, DELIVERY_MODE_SETTING_KEY, isDeliveryMode, type DeliveryMode } from '../../shared/dynamic-delivery'
 
@@ -1178,8 +1180,8 @@ export const useAgent = create<AgentState>((set, get) => ({
     await cancelPendingAskUserQuestionsForCurrentScope({ timeoutMs: 2000 })
 
     const stateBeforeSend = get()
-    const runBeforeSend = getActiveScopeRunState(
-      stateBeforeSend.scopeRunStates,
+    const runBeforeSend = getScopeRunStateForScope(
+      stateBeforeSend,
       stateBeforeSend.currentScopeId,
     )
     const foregroundBusyBeforeSend = runBeforeSend
@@ -1524,51 +1526,52 @@ export const useAgent = create<AgentState>((set, get) => ({
       }
     }
 
-    const activeRunBeforeNewSend = getActiveScopeRunState(get().scopeRunStates, activeScopeId)
-    const shouldKillForegroundRun = activeRunBeforeNewSend
-      ? isForegroundBusyScopeRunState(activeRunBeforeNewSend)
-      : get().isStreaming
-    if (typeof window !== 'undefined' && window.electronAPI && shouldKillForegroundRun) {
-      await window.electronAPI.agent.kill(activeAgentName, activeScopeId).catch(console.error)
-    }
-
-    setIsStreaming(true)
     const requestId = generateId('req')
+    const ownerCandidate = getScopeRunStateForScope(get(), activeScopeId)
+    const previousOwnerRun = ownerCandidate
+      && !ownerCandidate.terminalReason
+      && isActiveScopePhase(ownerCandidate.phase)
+      ? ownerCandidate
+      : null
+    const ownsOptimisticRun = !previousOwnerRun?.requestId
+    const responseId = previousOwnerRun?.responseMessageId || generateId('response')
 
-    const responseId = generateId('response')
-    addMessage({
-      id: responseId,
-      agent: activeAgentName,
-      content: '',
-      type: 'agent',
-      timestamp: new Date(),
-      meta: { transient: true },
-    })
-    set((state) => {
-      const sessionKey = sessionKeyForScopeId(state, activeScopeId)
-      const slice = normalizeSessionSlice(state.sessions[sessionKey])
-      return withSessionSliceAndActiveMirror(state, sessionKey, {
-        streamingMessageId: responseId,
-        streamingRequestId: requestId,
-        isStreaming: true,
-        foregroundBusy: true,
-        composerLocked: true,
-        scopeRunStates: {
-          ...slice.scopeRunStates,
-          [activeScopeId]: {
-          ...createEmptyScopeRunState({
-            scopeId: activeScopeId,
-            agent: activeAgentName,
-            requestId,
-            phase: 'planning',
-            responseMessageId: responseId,
-          }),
-          startedAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-        },
-      },
+    if (ownsOptimisticRun) {
+      setIsStreaming(true)
+      addMessage({
+        id: responseId,
+        agent: activeAgentName,
+        content: '',
+        type: 'agent',
+        timestamp: new Date(),
+        meta: { transient: true, runId: requestId, scopeId: activeScopeId },
       })
-    })
+      set((state) => {
+        const sessionKey = sessionKeyForScopeId(state, activeScopeId)
+        const slice = normalizeSessionSlice(state.sessions[sessionKey])
+        return withSessionSliceAndActiveMirror(state, sessionKey, {
+          streamingMessageId: responseId,
+          streamingRequestId: requestId,
+          isStreaming: true,
+          foregroundBusy: true,
+          composerLocked: true,
+          scopeRunStates: {
+            ...slice.scopeRunStates,
+            [activeScopeId]: {
+              ...createEmptyScopeRunState({
+                scopeId: activeScopeId,
+                agent: activeAgentName,
+                requestId,
+                phase: 'planning',
+                responseMessageId: responseId,
+              }),
+              startedAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+            },
+          },
+        })
+      })
+    }
 
     // Stage X2.6 — arm the infrastructure-timeout watchdog. The runtime
     // driver auto-clears the watchdog on any terminal IPC (onError /
@@ -1578,7 +1581,9 @@ export const useAgent = create<AgentState>((set, get) => ({
     // originating session and surfaces a "Ready lost track of this
     // request; recovered automatically" toast. See plan §7.2 last
     // paragraph.
-    agentRuntimeDriver.armInfrastructureWatchdog(activeScopeId, requestId)
+    if (ownsOptimisticRun) {
+      agentRuntimeDriver.armInfrastructureWatchdog(activeScopeId, requestId)
+    }
 
     try {
       if (typeof window !== 'undefined' && window.electronAPI) {
@@ -1606,6 +1611,7 @@ export const useAgent = create<AgentState>((set, get) => ({
               message: finalMessage,
               requestId,
               deliveryMode,
+              environmentHint: { workbenchMode: useMode.getState().workbenchMode },
               ...(workspaceRoots.length > 0 ? { workspaceRoots } : {}),
               userMessage: {
                 id: userMsgId,
@@ -1656,6 +1662,31 @@ export const useAgent = create<AgentState>((set, get) => ({
           // immediate failure (no terminal-event flow). Clear the
           // infrastructure watchdog explicitly since the auto-clear
           // path only fires on IPC terminal events.
+          if (!ownsOptimisticRun) {
+            if (result.persistence?.message !== 'persisted') {
+              set((state) => ({
+                attachments: [
+                  ...currentAttachments,
+                  ...state.attachments.filter((attachment) => (
+                    !currentAttachments.some((candidate) => isSameAttachmentPoolEntry(candidate, attachment))
+                  )),
+                ],
+              }))
+            }
+            emitRendererAgentMetric('renderer_steering_send_failed', {
+              scopeId: activeScopeId,
+              ownerRunId: previousOwnerRun?.requestId || null,
+              errorKind: result.errorKind || 'unknown',
+              messageStatus: result.persistence?.message || null,
+            })
+            const preserveInput = result.persistence?.message !== 'persisted'
+            return {
+              success: false,
+              shouldClearInput: !preserveInput,
+              preserveInput,
+              errorKind: result.errorKind || 'unknown',
+            }
+          }
           agentRuntimeDriver.clearInfrastructureWatchdog(activeScopeId, requestId)
           if (get().streamingRequestId !== requestId) {
             return { success: false, shouldClearInput: false, preserveInput: true, errorKind: result.errorKind || 'stale_request' }
@@ -1737,18 +1768,15 @@ export const useAgent = create<AgentState>((set, get) => ({
             errorKind: result.errorKind || 'unknown',
           }
         }
-        const backendResponseText = typeof result.responseText === 'string'
-          ? result.responseText.trim()
-          : ''
-        const streamedResponseText = String(
-          get().messages.find((message) => message.id === responseId)?.content || ''
-        ).trim()
-        const insertedBackendResponse = Boolean(backendResponseText && !streamedResponseText)
-        if (insertedBackendResponse) {
-          get().appendToMessage(responseId, backendResponseText)
-        }
+        const canonicalMessage = result.canonicalMessage?.role === 'assistant'
+          ? result.canonicalMessage
+          : null
         agentRuntimeDriver.completeScopeRunAfterSendSuccess(activeScopeId, requestId, {
-          backendRecoveredResponse: insertedBackendResponse,
+          canonicalMessage,
+          canonicalMessageDigest: result.canonicalMessageDigest || null,
+          acceptedAsSteering: result.acceptedAsSteering === true,
+          ownerRunId: result.ownerRunId || null,
+          previousOwnerRun,
         })
         set({ pendingContinuationIntent: null, pendingContinuationDraftAnchor: null })
         // Stream data arrives via onStream listener
@@ -1789,6 +1817,22 @@ export const useAgent = create<AgentState>((set, get) => ({
       // (e.g. preload not available, network refused before IPC). Clear
       // the watchdog so it doesn't fire 60s later after a long-since
       // failed send.
+      if (!ownsOptimisticRun) {
+        set((state) => ({
+          attachments: [
+            ...currentAttachments,
+            ...state.attachments.filter((attachment) => (
+              !currentAttachments.some((candidate) => isSameAttachmentPoolEntry(candidate, attachment))
+            )),
+          ],
+        }))
+        emitRendererAgentMetric('renderer_steering_send_failed', {
+          scopeId: activeScopeId,
+          ownerRunId: previousOwnerRun?.requestId || null,
+          errorKind: 'ipc_exception',
+        })
+        return { success: false, shouldClearInput: false, preserveInput: true, errorKind: 'unknown' }
+      }
       agentRuntimeDriver.clearInfrastructureWatchdog(activeScopeId, requestId)
       if (get().streamingRequestId !== requestId) {
         return { success: false, shouldClearInput: false, preserveInput: true, errorKind: 'stale_request' }

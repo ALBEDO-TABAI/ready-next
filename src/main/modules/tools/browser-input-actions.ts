@@ -9,16 +9,19 @@
 import type { BrowserController } from '../browser-engine/ipc-handler'
 import { ToolDomainError } from './tool-errors'
 import { ACTION_CONFIRMATION_ERROR_KINDS } from '../agent-control/contracts/error-kinds'
-import { matchBrowserDestructiveTarget } from '../agent-control/safety/action-confirmation-policy'
 import {
+  buildBrowserTargetFocusJs,
   buildFocusedEditableProbeJs,
-  buildFocusedFieldProbeJs,
   buildInputGuardSnippetJs,
   buildTargetSemanticsLibraryJs,
   buildTypedIntoProbeJs,
   probeCoordinateTargetOrThrow,
   throwIfLiveTargetGuardBlocked,
 } from './browser-probe'
+import {
+  requireBrowserInputReadiness,
+  type BrowserInputDocumentState,
+} from '../browser-engine/browser-input-readiness'
 
 export const BROWSER_V2_STOP_LOADING_TIMEOUT_MS = 15_000
 const BROWSER_V3_ACTION_SETTLE_MS = 220
@@ -207,26 +210,65 @@ function normalizeKeyLabel(key: string): string {
   return key.charAt(0).toUpperCase() + key.slice(1)
 }
 
+async function retainTrustedInputSequence(
+  controller: BrowserController,
+  tabId: string | null,
+): Promise<() => void> {
+  const retain = controller.retainTrustedInputSequence
+  return typeof retain === 'function'
+    ? retain.call(controller, tabId)
+    : () => undefined
+}
+
 export async function dispatchClickAt(
   controller: BrowserController,
   tabId: string | null,
   x: number,
   y: number,
-): Promise<{ nx: number; ny: number; cssX: number; cssY: number; width: number; height: number }> {
+): Promise<{
+  nx: number
+  ny: number
+  cssX: number
+  cssY: number
+  width: number
+  height: number
+  deliveryObserved: 'delivered' | 'not_delivered' | 'unknown'
+}> {
+  await requireBrowserInputReadiness(controller, tabId, 'trusted_pointer')
   const point = await resolveCssPoint(controller, tabId, x, y)
+  const deliveryToken = String(await controller.executeJS(tabId, `(() => {
+    const __READY_AGENT_INPUT_DELIVERY_PROBE__ = true;
+    const token = 'click-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2);
+    const previous = globalThis.__readyClickDeliveryProbe;
+    if (previous && typeof previous.cleanup === 'function') previous.cleanup();
+    const state = { token, count: 0 };
+    const onClick = () => { state.count += 1; };
+    state.cleanup = () => document.removeEventListener('click', onClick, true);
+    document.addEventListener('click', onClick, true);
+    globalThis.__readyClickDeliveryProbe = state;
+    return token;
+  })()`).catch(() => '') || '')
   await controller.dispatchMouse(tabId, { type: 'mouseMoved', x: point.cssX, y: point.cssY, button: 'none', buttons: 0 })
   await controller.dispatchMouse(tabId, { type: 'mousePressed', x: point.cssX, y: point.cssY, button: 'left', buttons: 1, clickCount: 1 })
   await controller.dispatchMouse(tabId, { type: 'mouseReleased', x: point.cssX, y: point.cssY, button: 'left', buttons: 0, clickCount: 1 })
-  return point
+  const deliveryCount = deliveryToken
+    ? await controller.executeJS(tabId, `(() => {
+        const state = globalThis.__readyClickDeliveryProbe;
+        if (!state || state.token !== ${JSON.stringify(deliveryToken)}) return null;
+        if (typeof state.cleanup === 'function') state.cleanup();
+        return Number(state.count || 0);
+      })()`).catch(() => null)
+    : null
+  return {
+    ...point,
+    deliveryObserved: typeof deliveryCount === 'number'
+      ? deliveryCount > 0 ? 'delivered' : 'not_delivered'
+      : 'unknown',
+  }
 }
 
-// EP1-I3 live-target net — ONE guarded entry per primitive action, shared by
-// the top-level tools AND the workflow substeps (internal_browser_workflow is not
-// in the dispatch confirmation policy, so its inner click/type carry no
-// semantics the gate can see — they MUST re-check at the execution layer).
-
-/** Guarded CSS-selector click: judges the clickable owner's label (the click
- * bubbles), refuses destructive-grant targets without clicking. */
+/** CSS-selector click that resolves a visible owner and uses trusted pointer
+ * input. Accessible labels are returned as grounding, never policy input. */
 export async function runGuardedSelectorClick(
   controller: BrowserController,
   tabId: string | null,
@@ -235,15 +277,11 @@ export async function runGuardedSelectorClick(
 ): Promise<string> {
   const probeJs = `
     (function() {
-      const __READY_DESTRUCTIVE_TARGET_CHECK__ = true;
       ${buildTargetSemanticsLibraryJs()}
       const el = document.querySelector(${JSON.stringify(selector)});
       if (!el) return ${JSON.stringify(`Element not found: ${selector}`)};
       const owner = readyClickableOwner(el);
       const label = readyIsEditableField(owner) ? '' : readyClickSemanticsLabel(el);
-      if (label && READY_DESTRUCTIVE_TARGET_PATTERNS.some((p) => p.test(label))) {
-        return { __readyDestructiveTargetBlocked: true, label: label.slice(0, 80) };
-      }
       const rect = el.getBoundingClientRect();
       return {
         ok: rect.width > 0 && rect.height > 0,
@@ -274,15 +312,13 @@ export async function runGuardedSelectorClick(
     ok: true,
     selector,
     trustedInput: true,
+    delivery: clicked.deliveryObserved,
     target: { label: String(point.label || ''), tag: String(point.tag || '') },
     point: { x: clicked.cssX, y: clicked.cssY },
   })
 }
 
-/** Guarded coordinate click: probes the target under the point. Clicking a
- * non-editable target (button/link) is an action requiring a grant when it
- * matches the destructive list; clicking an editable field just focuses it
- * and is allowed (value never judged). */
+/** Coordinate click with best-effort structural grounding and trusted input. */
 export async function runGuardedCoordinateClick(
   controller: BrowserController,
   tabId: string | null,
@@ -296,6 +332,7 @@ export async function runGuardedCoordinateClick(
   cssY: number
   width: number
   height: number
+  deliveryObserved: 'delivered' | 'not_delivered' | 'unknown'
   /** D18-b：点下真实元素的语义标签（第十三轮实锚：模型把 CSS 像素当归一
    * 化坐标传给 click_at，点偏后自己看不出来——把"点到了什么"回给它闭环自纠）。
    * D18-c 补 tag：空 label 的命中可能是无名编辑器而非脱靶。
@@ -309,6 +346,8 @@ export async function runGuardedCoordinateClick(
     url?: string
   } | null
 }> {
+  const releaseInputSequence = await retainTrustedInputSequence(controller, tabId)
+  try {
   const probePoint = await resolveCoordinateProbePointOrThrow(controller, tabId, x, y, 'click')
   const probe = probePoint
     ? await probeCoordinateTargetOrThrow(controller, tabId, probePoint, { x, y, action: 'click' })
@@ -341,24 +380,16 @@ export async function runGuardedCoordinateClick(
         : null,
       ...(typeof p.url === 'string' && p.url ? { url: p.url } : {}),
     }
-    if (p.editable !== true) {
-      const destructiveHit = matchBrowserDestructiveTarget(String(p.label || ''))
-      if (destructiveHit) {
-        throw new ToolDomainError(
-          'grant_required',
-          `坐标点击目标「${String(p.label || '').slice(0, 80)}」命中浏览器破坏性动作清单（${destructiveHit.reason}），需要用户授予该目标的 Power grant 后才能执行。`,
-          { x, y, ruleId: destructiveHit.ruleId },
-        )
-      }
-    }
   }
   const point = await dispatchClickAt(controller, tabId, x, y)
   await settleAfterAction(controller, tabId, abortSignal)
   return { ...point, pointTarget }
+  } finally {
+    releaseInputSequence()
+  }
 }
 
-/** Guarded CSS-selector type: in-page field-semantics guard (no value),
- * refuses destructive-grant fields and unconfirmed password fields. */
+/** CSS-selector type with structural file/password checks and trusted input. */
 export async function runGuardedSelectorType(
   controller: BrowserController,
   tabId: string | null,
@@ -407,20 +438,20 @@ export async function runGuardedSelectorType(
   return JSON.stringify({ ok: typed.typed, selector, trustedInput: true, ...typed })
 }
 
-/** Guarded coordinate type: probes the field under the point. Non-editable
- * target → the focusing click is itself an action checked against the
- * destructive target list; editable field → judge by field semantics
- * (no value) + password. */
+/** Coordinate type verifies a real editable destination and handles file and
+ * password inputs by their structural type, never by visible wording. */
 export interface GuardedCoordinateTypeResult {
-  nx: number
-  ny: number
+  nx: number | null
+  ny: number | null
   cssX: number
   cssY: number
   width: number
   height: number
   /** false = 聚焦点击后焦点不在可编辑控件上，已拒绝打字（响亮失败，不静默误灌） */
   typed: boolean
-  skipReason: 'focus_not_editable' | 'text_exceeds_field_capacity' | 'multiline_into_single_line' | null
+  textDelivery: 'delivered' | 'not_delivered' | 'unknown'
+  submitDelivery: 'not_requested' | 'not_delivered' | 'delivered' | 'unknown'
+  skipReason: 'focus_not_editable' | 'selection_unavailable' | 'text_exceeds_field_capacity' | 'multiline_into_single_line' | null
   /** 聚焦点击后的真实焦点身份（frame = 跨帧编辑器，无法验证，放行） */
   focusTarget: {
     kind: 'editable' | 'non_editable' | 'none' | 'frame' | 'unknown'
@@ -429,69 +460,43 @@ export interface GuardedCoordinateTypeResult {
     maxLength: number | null
   } | null
   /** 打完字的落点回读（密码框不回显内容；probe 失败为 null） */
-  typedInto: { tag: string; label: string; textHead: string; textLength: number } | null
+  typedInto: { tag: string; label: string; textHead: string; textLength: number; textMatchesExpected: boolean | null } | null
 }
 
-export async function runGuardedCoordinateType(
+type GuardedTypePoint = Pick<GuardedCoordinateTypeResult, 'nx' | 'ny' | 'cssX' | 'cssY' | 'width' | 'height'>
+type GuardedTypeOptions = {
+  clearBefore: boolean
+  pressEnter: boolean
+  useShiftEnter: boolean
+  allowPasswordFill: boolean
+}
+type BrowserFrameScriptRunner = (code: string) => Promise<unknown>
+
+async function runGuardedPostFocusType(
   controller: BrowserController,
   tabId: string | null,
-  x: number,
-  y: number,
+  point: GuardedTypePoint,
   text: string,
-  opts: { clearBefore: boolean; pressEnter: boolean; useShiftEnter: boolean; allowPasswordFill: boolean },
+  opts: GuardedTypeOptions,
+  runProbe: BrowserFrameScriptRunner,
+  requireConfirmedEditableFocus: boolean,
+  focusConfirmed: boolean,
   abortSignal?: AbortSignal,
 ): Promise<GuardedCoordinateTypeResult> {
-  const probePoint = await resolveCoordinateProbePointOrThrow(controller, tabId, x, y, 'type')
-  const probe = probePoint
-    ? await probeCoordinateTargetOrThrow(controller, tabId, probePoint, { x, y, action: 'type' })
-    : null
-  if (probe && typeof probe === 'object') {
-    const p = probe as { label?: unknown; inputLabel?: unknown; password?: unknown; editable?: unknown }
-    // A password field is editable by definition; treat password===true as
-    // editable even if the probe failed to set the flag.
-    const editable = p.editable === true || p.password === true
-    if (!editable) {
-      // The focusing click lands on a button/link → the click is the action.
-      const clickLabel = String(p.label || '')
-      const clickHit = matchBrowserDestructiveTarget(clickLabel)
-      if (clickHit) {
-        throw new ToolDomainError(
-          'grant_required',
-          `坐标输入会先点击目标「${clickLabel.slice(0, 80)}」，命中浏览器破坏性动作清单（${clickHit.reason}），需要用户授予该目标的 Power grant 后才能执行。`,
-          { x, y, ruleId: clickHit.ruleId },
-        )
-      }
-    } else {
-      // Editable field: judge by field semantics (NOT its current value — a
-      // draft containing「提交订单」must not false-trip), then password.
-      const inputLabel = String(p.inputLabel || '')
-      const fieldHit = matchBrowserDestructiveTarget(inputLabel)
-      if (fieldHit) {
-        throw new ToolDomainError(
-          'grant_required',
-          `坐标输入目标「${inputLabel.slice(0, 80)}」命中浏览器破坏性动作清单（${fieldHit.reason}），需要用户授予该目标的 Power grant 后才能执行。`,
-          { x, y, ruleId: fieldHit.ruleId },
-        )
-      }
-      if (p.password === true && !opts.allowPasswordFill) {
-        throw new ToolDomainError(
-          ACTION_CONFIRMATION_ERROR_KINDS.deniedPendingConfirmation.code,
-          '坐标输入目标是密码输入框。请在调用参数中说明目标（如「登录密码输入框」），经用户确认后执行。',
-          { x, y, ruleId: 'm3-login-existing-account' },
-        )
-      }
-    }
-  }
-  const point = await dispatchClickAt(controller, tabId, x, y)
-  // D18-c（真机第十四轮实锚）：聚焦点击落在死区/不可聚焦位置时，焦点滞留
-  // 上一个控件或回落 body——旧实现照打不误，正文全文灌进 XHS 标题框且模型
-  // 毫无感知。打字前验真实焦点：不可编辑 → 拒绝打字并回报点到了什么；
-  // 跨帧（iframe 编辑器）无法验证 → 放行但标注 kind=frame。
-  const focusProbe = await controller.executeJS(tabId, buildFocusedEditableProbeJs()).catch(() => null)
+  const focusProbe = await runProbe(buildFocusedEditableProbeJs()).catch(() => null)
   let focusTarget: GuardedCoordinateTypeResult['focusTarget'] = null
   let focusSingleLine = false
+  let inputDocumentState: BrowserInputDocumentState | undefined
   if (focusProbe && typeof focusProbe === 'object') {
-    const f = focusProbe as { kind?: unknown; tag?: unknown; label?: unknown; maxLength?: unknown; singleLine?: unknown }
+    const f = focusProbe as {
+      kind?: unknown
+      tag?: unknown
+      label?: unknown
+      maxLength?: unknown
+      singleLine?: unknown
+      documentFocused?: unknown
+      documentReady?: unknown
+    }
     const kind = ['editable', 'non_editable', 'none', 'frame'].includes(String(f.kind))
       ? String(f.kind) as 'editable' | 'non_editable' | 'none' | 'frame'
       : 'unknown'
@@ -503,41 +508,236 @@ export async function runGuardedCoordinateType(
       maxLength: Number.isFinite(maxLength) && maxLength > 0 ? maxLength : null,
     }
     focusSingleLine = f.singleLine === true
+    if (typeof f.documentFocused === 'boolean' && typeof f.documentReady === 'boolean') {
+      inputDocumentState = {
+        ready: f.documentReady,
+        focused: f.documentFocused,
+        activeElementEditable: kind === 'editable',
+      }
+    }
   }
-  if (focusTarget && (focusTarget.kind === 'none' || focusTarget.kind === 'non_editable')) {
-    return { ...point, typed: false, skipReason: 'focus_not_editable', focusTarget, typedInto: null }
+  const uneditableFocus = focusTarget && (focusTarget.kind === 'none' || focusTarget.kind === 'non_editable')
+  const unconfirmedTargetFocus = requireConfirmedEditableFocus && (!focusConfirmed || focusTarget?.kind !== 'editable')
+  if (uneditableFocus || unconfirmedTargetFocus) {
+    return { ...point, typed: false, textDelivery: 'not_delivered', submitDelivery: opts.pressEnter ? 'not_delivered' : 'not_requested', skipReason: 'focus_not_editable', focusTarget, typedInto: null }
   }
-  // D18-d（第十六轮实锚）：容量硬拒——64 字上限的标题框装不下 500 字正文，
-  // 打进去必然是错框；单行 input 也装不下多段文本。只报不拒已被证明救不了
-  // 模型的坐标微调循环，这里必须机械拒绝。
   if (focusTarget?.maxLength != null && text.length > focusTarget.maxLength) {
-    return { ...point, typed: false, skipReason: 'text_exceeds_field_capacity', focusTarget, typedInto: null }
+    return { ...point, typed: false, textDelivery: 'not_delivered', submitDelivery: opts.pressEnter ? 'not_delivered' : 'not_requested', skipReason: 'text_exceeds_field_capacity', focusTarget, typedInto: null }
   }
   if (focusSingleLine && text.includes('\n')) {
-    return { ...point, typed: false, skipReason: 'multiline_into_single_line', focusTarget, typedInto: null }
+    return { ...point, typed: false, textDelivery: 'not_delivered', submitDelivery: opts.pressEnter ? 'not_delivered' : 'not_requested', skipReason: 'multiline_into_single_line', focusTarget, typedInto: null }
   }
+  await requireBrowserInputReadiness(controller, tabId, 'direct_text', inputDocumentState)
+  const textProbeToken = String(await runProbe(`(() => {
+    const __READY_AGENT_INPUT_DELIVERY_PROBE__ = true;
+    const token = 'text-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2);
+    const previous = globalThis.__readyTextDeliveryProbe;
+    if (previous && typeof previous.cleanup === 'function') previous.cleanup();
+    const target = document.activeElement;
+    const readValue = () => {
+      if (!target) return null;
+      if ('value' in target) return String(target.value ?? '');
+      return String(target.textContent ?? '');
+    };
+    const state = { token, count: 0, target, before: readValue() };
+    const onInput = (event) => { if (event && event.target === target) state.count += 1; };
+    state.cleanup = () => document.removeEventListener('input', onInput, true);
+    document.addEventListener('input', onInput, true);
+    globalThis.__readyTextDeliveryProbe = state;
+    return token;
+  })()`).catch(() => '') || '')
+  const submitProbeToken = opts.pressEnter
+    ? String(await runProbe(`(() => {
+        const __READY_AGENT_INPUT_DELIVERY_PROBE__ = true;
+        const token = 'submit-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2);
+        const key = '__readySubmitDeliveryProbe';
+        const previous = globalThis[key];
+        if (previous && typeof previous.cleanup === 'function') previous.cleanup();
+        const state = { token, keydown: 0, submit: 0 };
+        const onKey = (event) => { if (event && event.key === 'Enter') state.keydown += 1; };
+        const onSubmit = () => { state.submit += 1; };
+        state.cleanup = () => {
+          document.removeEventListener('keydown', onKey, true);
+          document.removeEventListener('submit', onSubmit, true);
+        };
+        document.addEventListener('keydown', onKey, true);
+        document.addEventListener('submit', onSubmit, true);
+        globalThis[key] = state;
+        return token;
+      })()`).catch(() => '') || '')
+    : ''
   if (opts.clearBefore) {
-    await clearFocusedInput(controller, tabId)
+    const selection = await runProbe(`(() => {
+      const __READY_AGENT_TARGET_SELECT_ALL__ = true;
+      const el = document.activeElement;
+      if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
+        try {
+          el.setSelectionRange(0, String(el.value || '').length);
+          return { ok: true, kind: 'text_control' };
+        } catch {
+          return { ok: false, reason: 'selection_failed' };
+        }
+      }
+      if (el instanceof HTMLElement && el.isContentEditable) {
+        try {
+          const range = document.createRange();
+          range.selectNodeContents(el);
+          const selected = window.getSelection();
+          if (!selected) return { ok: false, reason: 'selection_unavailable' };
+          selected.removeAllRanges();
+          selected.addRange(range);
+          return { ok: true, kind: 'contenteditable' };
+        } catch {
+          return { ok: false, reason: 'selection_failed' };
+        }
+      }
+      return { ok: false, reason: 'exact_editable_selection_unavailable' };
+    })()`).catch(() => null) as { ok?: unknown; reason?: unknown } | null
+    if (selection?.ok !== true) {
+      return {
+        ...point,
+        typed: false,
+        textDelivery: 'not_delivered',
+        submitDelivery: opts.pressEnter ? 'not_delivered' : 'not_requested',
+        skipReason: 'selection_unavailable',
+        focusTarget,
+        typedInto: null,
+      }
+    }
   }
   await controller.typeTextDirectly(tabId, text, { useShiftEnterForNewline: opts.useShiftEnter })
   if (opts.pressEnter) {
-    await sendKeyStroke(controller, tabId, 'Enter')
+    await sendKeyStroke(controller, tabId, 'Enter', undefined, inputDocumentState)
   }
   await settleAfterAction(controller, tabId, abortSignal)
-  // D18-c：回读文本真实落点——"打进了哪个框、现在框里是什么"在同一次
-  // 工具结果里可见，错灌一目了然（第十四轮：正文进标题烧了 4 分钟盲试）。
-  const typedProbe = await controller.executeJS(tabId, buildTypedIntoProbeJs()).catch(() => null)
+  const typedProbe = await runProbe(buildTypedIntoProbeJs(text)).catch(() => null)
   let typedInto: GuardedCoordinateTypeResult['typedInto'] = null
   if (typedProbe && typeof typedProbe === 'object') {
-    const t = typedProbe as { tag?: unknown; label?: unknown; textHead?: unknown; textLength?: unknown }
+    const t = typedProbe as { tag?: unknown; label?: unknown; textHead?: unknown; textLength?: unknown; textMatchesExpected?: unknown }
     typedInto = {
       tag: String(t.tag || '').slice(0, 32),
       label: String(t.label || '').slice(0, 120),
       textHead: String(t.textHead || ''),
       textLength: Number(t.textLength) || 0,
+      textMatchesExpected: typeof t.textMatchesExpected === 'boolean' ? t.textMatchesExpected : null,
     }
   }
-  return { ...point, typed: true, skipReason: null, focusTarget, typedInto }
+  let textDelivery: GuardedCoordinateTypeResult['textDelivery'] = 'unknown'
+  if (textProbeToken) {
+    const delivery = await runProbe(`(() => {
+      const state = globalThis.__readyTextDeliveryProbe;
+      if (!state || state.token !== ${JSON.stringify(textProbeToken)}) return null;
+      if (typeof state.cleanup === 'function') state.cleanup();
+      const target = state.target;
+      const after = !target ? null : ('value' in target ? String(target.value ?? '') : String(target.textContent ?? ''));
+      return { count: Number(state.count || 0), changed: after !== state.before };
+    })()`).catch(() => null) as { count?: unknown; changed?: unknown } | null
+    if (delivery) {
+      textDelivery = Number(delivery.count || 0) > 0 || delivery.changed === true
+        ? 'delivered'
+        : 'not_delivered'
+    }
+  }
+  let submitDelivery: GuardedCoordinateTypeResult['submitDelivery'] = opts.pressEnter ? 'unknown' : 'not_requested'
+  if (opts.pressEnter && submitProbeToken) {
+    const delivery = await runProbe(`(() => {
+      const state = globalThis.__readySubmitDeliveryProbe;
+      if (!state || state.token !== ${JSON.stringify(submitProbeToken)}) return null;
+      if (typeof state.cleanup === 'function') state.cleanup();
+      return { keydown: Number(state.keydown || 0), submit: Number(state.submit || 0) };
+    })()`).catch(() => null) as { keydown?: unknown; submit?: unknown } | null
+    if (Number(delivery?.keydown || 0) > 0 || Number(delivery?.submit || 0) > 0) submitDelivery = 'delivered'
+  }
+  return { ...point, typed: true, textDelivery, submitDelivery, skipReason: null, focusTarget, typedInto }
+}
+
+/**
+ * Type into an already live-resolved page-map target. The target's frame is
+ * responsible for focus and both readback probes; only keyboard text is sent
+ * through CDP, so a parked background view does not depend on pointer focus.
+ */
+export async function runGuardedTargetType(
+  controller: BrowserController,
+  tabId: string | null,
+  nodeId: string,
+  frameDocumentToken: string,
+  point: { x: number | null; y: number | null; cssX: number; cssY: number; width: number; height: number },
+  text: string,
+  opts: GuardedTypeOptions,
+  runInTargetFrame: BrowserFrameScriptRunner,
+  abortSignal?: AbortSignal,
+): Promise<GuardedCoordinateTypeResult> {
+  const resultPoint: GuardedTypePoint = {
+    nx: point.x,
+    ny: point.y,
+    cssX: point.cssX,
+    cssY: point.cssY,
+    width: point.width,
+    height: point.height,
+  }
+  const releaseInputSequence = await retainTrustedInputSequence(controller, tabId)
+  try {
+    const focused = await runInTargetFrame(buildBrowserTargetFocusJs(nodeId, opts.allowPasswordFill, frameDocumentToken)).catch(() => null)
+    throwIfLiveTargetGuardBlocked(focused, { targetId: nodeId })
+    return await runGuardedPostFocusType(
+      controller,
+      tabId,
+      resultPoint,
+      text,
+      opts,
+      runInTargetFrame,
+      true,
+      Boolean(focused && typeof focused === 'object' && (focused as { ok?: unknown }).ok === true),
+      abortSignal,
+    )
+  } finally {
+    releaseInputSequence()
+  }
+}
+
+export async function runGuardedCoordinateType(
+  controller: BrowserController,
+  tabId: string | null,
+  x: number,
+  y: number,
+  text: string,
+  opts: GuardedTypeOptions,
+  abortSignal?: AbortSignal,
+): Promise<GuardedCoordinateTypeResult> {
+  const releaseInputSequence = await retainTrustedInputSequence(controller, tabId)
+  try {
+  const probePoint = await resolveCoordinateProbePointOrThrow(controller, tabId, x, y, 'type')
+  const probe = probePoint
+    ? await probeCoordinateTargetOrThrow(controller, tabId, probePoint, { x, y, action: 'type' })
+    : null
+  if (probe && typeof probe === 'object') {
+    const live = probe as { password?: unknown; fileInput?: unknown }
+    if (live.fileInput === true) {
+      throw new ToolDomainError('file_input_requires_upload', 'The live target is a file input; use browser_upload with a bound attachment.')
+    }
+    if (live.password === true && !opts.allowPasswordFill) {
+      throw new ToolDomainError('credential_confirmation_required', 'The live target is a password field and requires a one-shot typed confirmation.')
+    }
+  }
+  const point = await dispatchClickAt(controller, tabId, x, y)
+  // D18-c（真机第十四轮实锚）：聚焦点击落在死区/不可聚焦位置时，焦点滞留
+  // 上一个控件或回落 body——旧实现照打不误，正文全文灌进站点标题框且模型
+  // 毫无感知。打字前验真实焦点：不可编辑 → 拒绝打字并回报点到了什么；
+  // 跨帧（iframe 编辑器）无法验证 → 放行但标注 kind=frame。
+  return await runGuardedPostFocusType(
+    controller,
+    tabId,
+    point,
+    text,
+    opts,
+    (code) => controller.executeJS(tabId, code),
+    false,
+    true,
+    abortSignal,
+  )
+  } finally {
+    releaseInputSequence()
+  }
 }
 
 export async function sendKeyStroke(
@@ -545,47 +745,34 @@ export async function sendKeyStroke(
   tabId: string | null,
   key: string,
   modifiers?: unknown,
-): Promise<void> {
+  documentState?: BrowserInputDocumentState,
+): Promise<'delivered' | 'not_delivered' | 'unknown'> {
+  await requireBrowserInputReadiness(controller, tabId, 'trusted_keyboard', documentState)
   const keyLabel = normalizeKeyLabel(key)
   const code = keyToCode(key)
   const vk = keyToVirtualCode(keyLabel)
   const mask = modifiersToMask(modifiers)
-  const text = keyLabel.length === 1 ? keyLabel : keyLabel.toLowerCase() === 'enter' ? '\r' : undefined
+  const commandModifierMask = 0b0111 // Alt | Control | Meta
+  const text = (mask & commandModifierMask) === 0
+    ? keyLabel.length === 1
+      ? keyLabel
+      : keyLabel.toLowerCase() === 'enter' ? '\r' : undefined
+    : undefined
+  const deliveryToken = String(await controller.executeJS(tabId, `(() => {
+    const __READY_AGENT_INPUT_DELIVERY_PROBE__ = true;
+    const token = 'key-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2);
+    const previous = globalThis.__readyKeyDeliveryProbe;
+    if (previous && typeof previous.cleanup === 'function') previous.cleanup();
+    const state = { token, count: 0 };
+    const onKey = (event) => { if (event && event.key === ${JSON.stringify(keyLabel)}) state.count += 1; };
+    state.cleanup = () => document.removeEventListener('keydown', onKey, true);
+    document.addEventListener('keydown', onKey, true);
+    globalThis.__readyKeyDeliveryProbe = state;
+    return token;
+  })()`).catch(() => '') || '')
 
-  // EP1-I3 live-target net — send-keys is a keyboard bypass: a printable
-  // keystroke lands in whatever field already has FOCUS, so character-by-
-  // character typing could feed a captcha/password field no argument ever
-  // named. Guard text-producing keys: a single char with NO command modifier
-  // (Alt/Ctrl/Meta = bits 1|2|4) inserts a character — Shift (bit 8) is a
-  // text modifier (Shift+a → 'A') so it must STILL be guarded. Command-key
-  // combos (Ctrl+c / Meta+v / etc.) are shortcuts, and Enter/Tab/Escape are
-  // navigation — those pass (pressing Enter after the USER typed their
-  // credential is the user's own action completing). Both the
-  // browser_press_key tool and the workflow send_keys substep funnel through
-  // here. Best-effort probe: empty/failed probe proceeds (visual channel).
-  const COMMAND_MODIFIER_MASK = 0b0111 // Alt | Control | Meta
-  if (keyLabel.length === 1 && (mask & COMMAND_MODIFIER_MASK) === 0) {
-    const focusedProbe = await controller.executeJS(tabId, buildFocusedFieldProbeJs()).catch(() => null)
-    if (focusedProbe && typeof focusedProbe === 'object') {
-      const probed = focusedProbe as { inputLabel?: unknown; password?: unknown }
-      const inputLabel = String(probed.inputLabel || '')
-      const destructiveHit = matchBrowserDestructiveTarget(inputLabel)
-      if (destructiveHit) {
-        throw new ToolDomainError(
-          'grant_required',
-          `当前焦点字段「${inputLabel.slice(0, 80)}」命中浏览器破坏性动作清单（${destructiveHit.reason}），需要用户授予该目标的 Power grant 后才能逐键输入。`,
-          { key: keyLabel, ruleId: destructiveHit.ruleId },
-        )
-      }
-      if (probed.password === true) {
-        throw new ToolDomainError(
-          ACTION_CONFIRMATION_ERROR_KINDS.deniedPendingConfirmation.code,
-          '当前焦点是密码输入框，不能逐键代输。请改用 browser_type 并在参数中说明目标（如「登录密码输入框」），经用户确认后执行。',
-          { key: keyLabel, ruleId: 'm3-login-existing-account' },
-        )
-      }
-    }
-  }
+  const releaseInputSequence = await retainTrustedInputSequence(controller, tabId)
+  try {
 
   const modifierTriples: Array<{ key: string; code: string; vk: number; bit: number }> = [
     { key: 'Alt', code: 'AltLeft', vk: 18, bit: 1 },
@@ -639,23 +826,67 @@ export async function sendKeyStroke(
       isKeypad: false,
     })
   }
+  const deliveryCount = deliveryToken
+    ? await controller.executeJS(tabId, `(() => {
+        const state = globalThis.__readyKeyDeliveryProbe;
+        if (!state || state.token !== ${JSON.stringify(deliveryToken)}) return null;
+        if (typeof state.cleanup === 'function') state.cleanup();
+        return Number(state.count || 0);
+      })()`).catch(() => null)
+    : null
+  return typeof deliveryCount === 'number'
+    ? deliveryCount > 0 ? 'delivered' : 'not_delivered'
+    : 'unknown'
+  } finally {
+    releaseInputSequence()
+  }
 }
 
 export async function clearFocusedInput(controller: BrowserController, tabId: string | null): Promise<void> {
+  const releaseInputSequence = await retainTrustedInputSequence(controller, tabId)
+  try {
   const selectAllMask = process.platform === 'darwin' ? 4 : 2
   await controller.dispatchKey(tabId, {
     type: 'rawKeyDown',
     key: 'a',
     code: 'KeyA',
+    windowsVirtualKeyCode: 65,
+    nativeVirtualKeyCode: 65,
     modifiers: selectAllMask,
+    isKeypad: false,
+    commands: process.platform === 'darwin' ? ['selectAll'] : undefined,
   })
   await controller.dispatchKey(tabId, {
     type: 'keyUp',
     key: 'a',
     code: 'KeyA',
+    windowsVirtualKeyCode: 65,
+    nativeVirtualKeyCode: 65,
     modifiers: selectAllMask,
+    isKeypad: false,
   })
-  await sendKeyStroke(controller, tabId, 'Backspace')
+  await controller.dispatchKey(tabId, {
+    type: 'rawKeyDown',
+    key: 'Backspace',
+    code: 'Backspace',
+    windowsVirtualKeyCode: 8,
+    nativeVirtualKeyCode: 8,
+    modifiers: 0,
+    isKeypad: false,
+    commands: process.platform === 'darwin' ? ['deleteBackward'] : undefined,
+  })
+  await controller.dispatchKey(tabId, {
+    type: 'keyUp',
+    key: 'Backspace',
+    code: 'Backspace',
+    windowsVirtualKeyCode: 8,
+    nativeVirtualKeyCode: 8,
+    modifiers: 0,
+    isKeypad: false,
+  })
+  } finally {
+    releaseInputSequence()
+  }
 }
 
 export async function waitForLoadingStop(
@@ -861,71 +1092,119 @@ export function buildSmartTypeProbeJs(options: {
           return p ? (p.textContent || '') : ''
         })()
         attrs.push(label)
-        return normalize(attrs.join(' | '))
+        return [...new Set(attrs.map(normalize).filter(Boolean))]
       }
 
-      const score = (el) => {
-        const merged = textFields(el)
+      const describe = (el, documentOrder) => {
+        const fields = textFields(el)
         const rect = el.getBoundingClientRect()
-        let s = 0
-
-        // D18-d（真机第十六轮实锚）：容量与形态匹配。上一轮评分器把
-        // maxlength=64 的标题 textarea（52.19 分）排在正文 contenteditable
-        // 前面，500 字三段正文灌进标题。装不下的字段直接出局；多段长文
-        // 强偏向富文本编辑器。
-        const capacity = (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) ? Number(el.maxLength) : -1;
-        if (capacity > 0 && text.length > capacity) return -1000;
-        if (el instanceof HTMLInputElement && text.includes('\\n')) return -1000;
-        const isMultiParagraph = text.includes('\\n') || text.length > 120;
-        if (isMultiParagraph && isRichEditable(el)) s += 40;
-
-        if (target) {
-          if (merged === target) s += 120
-          if (merged.includes(target)) s += 70
-          let tokenHit = 0
-          for (const t of targetTokens) {
-            if (merged.includes(t)) tokenHit += 1
-          }
-          s += tokenHit * 12
-        } else {
-          s += 20
-        }
-
-        if (/search|message|ask|prompt|chat|gemini|输入|搜索|提问|发送/.test(merged)) s += 30
-        if (el instanceof HTMLTextAreaElement) s += 18
-        if (isRichEditable(el)) s += 14
-        if ((el.getAttribute('role') || '').toLowerCase() === 'searchbox') s += 18
-
+        const capacity = (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) ? Number(el.maxLength) : -1
+        const multiline = el instanceof HTMLTextAreaElement || isRichEditable(el)
+        const focused = document.activeElement === el
+        let structuralScore = focused ? 40 : 0
+        if (multiline && (text.includes('\\n') || text.length > 120)) structuralScore += 24
         const area = Math.max(1, rect.width * rect.height)
-        s += Math.min(28, area / 18000)
+        structuralScore += Math.min(20, area / 18000)
         const fromBottom = Math.max(0, window.innerHeight - rect.bottom)
-        s += Math.max(0, 10 - Math.min(10, fromBottom / 70))
-        return s
+        structuralScore += Math.max(0, 8 - Math.min(8, fromBottom / 80))
+        return {
+          el,
+          fields,
+          label: fields[0] || '',
+          rect,
+          capacity,
+          multiline,
+          focused,
+          structuralScore,
+          documentOrder,
+          tag: String(el.tagName || '').toLowerCase(),
+          role: String(el.getAttribute('role') || '').toLowerCase(),
+          targetName: String(el.getAttribute('name') || el.getAttribute('id') || el.getAttribute('aria-label') || el.tagName || ''),
+        }
+      }
+
+      const described = candidates
+        .map((el, index) => describe(el, index))
+        .filter((candidate) => {
+          if (candidate.capacity > 0 && text.length > candidate.capacity) return false
+          if (!candidate.multiline && text.includes('\\n')) return false
+          return true
+        })
+
+      const publicCandidate = (candidate) => ({
+        label: candidate.label,
+        target: candidate.targetName,
+        tag: candidate.tag,
+        role: candidate.role,
+        focused: candidate.focused,
+        multiline: candidate.multiline,
+        maxLength: candidate.capacity > 0 ? candidate.capacity : null,
+      })
+      const rankedCandidates = [...described].sort((a, b) =>
+        Number(b.focused) - Number(a.focused) ||
+        b.structuralScore - a.structuralScore ||
+        a.documentOrder - b.documentOrder
+      )
+
+      if (rankedCandidates.length === 0) {
+        return JSON.stringify({
+          ok: false,
+          errorKind: 'input_target_incompatible',
+          target,
+          candidates: candidates.map((el, index) => publicCandidate(describe(el, index))).slice(0, 8),
+        })
+      }
+
+      const matchRank = (candidate) => {
+        if (!target) return { tier: 0, tokenHits: 0 }
+        if (candidate.fields.some((field) => field === target)) return { tier: 3, tokenHits: targetTokens.length }
+        if (candidate.fields.some((field) => field.includes(target))) return { tier: 2, tokenHits: targetTokens.length }
+        const merged = candidate.fields.join(' ')
+        const tokenHits = targetTokens.filter((token) => merged.includes(token)).length
+        return { tier: tokenHits > 0 ? 1 : 0, tokenHits }
       }
 
       let best = null
-      let bestScore = -1
-      for (const el of candidates) {
-        const sc = score(el)
-        if (sc > bestScore) {
-          best = el
-          bestScore = sc
+      if (rankedCandidates.length === 1) {
+        best = rankedCandidates[0]
+      } else if (target) {
+        const matched = rankedCandidates
+          .map((candidate) => ({ candidate, ...matchRank(candidate) }))
+          .filter((item) => item.tier > 0)
+        const bestTier = Math.max(0, ...matched.map((item) => item.tier))
+        const bestTokenHits = Math.max(0, ...matched.filter((item) => item.tier === bestTier).map((item) => item.tokenHits))
+        const strongest = matched.filter((item) => item.tier === bestTier && item.tokenHits === bestTokenHits)
+        if (strongest.length === 1) {
+          best = strongest[0].candidate
+        } else if (strongest.length > 1) {
+          const focused = strongest.filter((item) => item.candidate.focused)
+          if (focused.length === 1) best = focused[0].candidate
         }
+      } else {
+        const focused = rankedCandidates.filter((candidate) => candidate.focused)
+        if (focused.length === 1) best = focused[0]
       }
 
-      if (!best) return 'Smart target not found: score failed'
+      if (!best) {
+        return JSON.stringify({
+          ok: false,
+          errorKind: 'ambiguous_input_target',
+          target,
+          candidates: rankedCandidates.map(publicCandidate).slice(0, 8),
+        })
+      }
 
-      // EP1-I3 live-target net — the scorer may have resolved a captcha or
-      // password field the args never named.
-      const __readyGuard = readyInputGuard(best)
+      // The scorer may have resolved a structural password or file input that
+      // the arguments never named.
+      const __readyGuard = readyInputGuard(best.el)
       if (__readyGuard) return __readyGuard
 
-      const idName = best.getAttribute('name') || best.getAttribute('id') || best.getAttribute('aria-label') || best.tagName
-      const rect = best.getBoundingClientRect()
+      const rect = best.rect
       return {
         ok: rect.width > 0 && rect.height > 0,
-        target: String(idName || ''),
-        score: bestScore,
+        target: best.targetName,
+        score: best.structuralScore,
+        inputType: best.el instanceof HTMLInputElement ? String(best.el.type || 'text').toLowerCase() : '',
         x: rect.left + rect.width / 2,
         y: rect.top + rect.height / 2,
         width: Number(window.innerWidth || 0),

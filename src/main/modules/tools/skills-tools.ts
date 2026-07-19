@@ -593,6 +593,18 @@ function getSkillActionToolDefs(opts?: {
   })
 }
 
+/** Current registry ownership/visibility for a durably saved skill identity.
+ * This never reads a session hint or user text. The saved identity supplies
+ * the exact skill scope that an armed hint represented on the original turn. */
+export function getSkillActionOwnersForTrustedResume(
+  skillId: string,
+): ReadonlyMap<string, string> {
+  return new Map(getSkillActionToolDefs({
+    referenceHintSkillId: skillId,
+    activeSkillId: skillId,
+  }).map((definition) => [definition.name, definition.skillId || '']))
+}
+
 function staticSkillActionToToolDef(entry: NonNullable<ReturnType<typeof getStaticSkillActionDefByToolName>>): SkillToolDef {
   return {
     name: entry.toolName,

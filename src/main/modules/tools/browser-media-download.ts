@@ -1,11 +1,8 @@
 /**
  * P3 Phase B1（2026-07-03，纯移动拆分）— browser-tools 媒体下载簇。
  *
- * 从 browser-tools.ts 1511-1958 逐字搬出：文件名推断/安全落盘/pinimg
- * 归一与 originals 升级/媒体 URL 判定/下载执行（session 优先、fetch 兜底、
- * Referer/UA 头修正、Pinterest 变体回退）。行为零变更；browser-tools 保留
- * `pinimgOriginalsUrl`/`normalizeDownloadTargets` 门面再导出，外部消费者
- * 零改动。
+ * 从 browser-tools.ts 拆出的文件名推断、安全落盘、媒体 URL 判定和
+ * 下载执行。输入 URL 只做精确去重，不按站点猜测或合成新 URL。
  */
 import { access, mkdir, open, rename, statfs, unlink } from 'fs/promises'
 import { constants as fsConstants, existsSync, realpathSync } from 'fs'
@@ -16,6 +13,7 @@ import type { BrowserController } from '../browser-engine/ipc-handler'
 import type { BrowserResourceKind } from '../browser-engine/resource-sniffer'
 import { broadcastDirectoryChanged } from '../document-engine/ipc/directory-change-broadcast'
 import { createToolExecutionOutput, type ToolExecutionOutput } from '../agent-control/tools-runtime/tool-result-types'
+import type { BrowserMutationBoundary } from './browser-action-executor'
 
 export function expandHomePath(input: string): string {
   const raw = String(input || '').trim()
@@ -51,8 +49,8 @@ function isDangerouslyBroadFilesystemRoot(value: string): boolean {
 
 export function resolveAuthorizedBrowserDownloadDirectory(
   requested: unknown,
-  options: { currentUserText?: string | null; trustedRoots?: readonly string[] } = {},
-): { ok: true; directory: string; authority: 'ready_default' | 'user_instruction' | 'task_resource' } | {
+  options: { trustedRoots?: readonly string[] } = {},
+): { ok: true; directory: string; authority: 'ready_default' | 'task_resource' } | {
   ok: false
   errorCode: 'download_directory_not_authorized'
   requested: string
@@ -68,20 +66,13 @@ export function resolveAuthorizedBrowserDownloadDirectory(
       return { ok: true, directory, authority: 'task_resource' }
     }
   }
-  const userText = String(options.currentUserText || '')
-  if (
-    !isDangerouslyBroadFilesystemRoot(directory)
-    && ((raw.length >= 4 && userText.includes(raw)) || (directory.length >= 4 && userText.includes(directory)))
-  ) {
-    return { ok: true, directory, authority: 'user_instruction' }
-  }
   return { ok: false, errorCode: 'download_directory_not_authorized', requested: raw }
 }
 
 export function resolveAuthorizedBrowserOutputPath(
   requested: unknown,
-  options: { currentUserText?: string | null; trustedRoots?: readonly string[] } = {},
-): { ok: true; path: string; authority: 'ready_default' | 'user_instruction' | 'task_resource' } | {
+  options: { trustedRoots?: readonly string[] } = {},
+): { ok: true; path: string; authority: 'ready_default' | 'task_resource' } | {
   ok: false
   errorCode: 'output_path_not_authorized'
   requested: string
@@ -224,103 +215,6 @@ function buildDownloadedArtifacts(results: Array<Record<string, unknown>>, direc
         },
       }
     })
-}
-
-/** Pinterest serves the same pin at multiple resolutions via a leading PATH
- *  segment (/236x/, /474x/, /564x/, /736x/, /1200x/, /originals/). The grid
- *  lazy-loads thumbnails, so an ad-hoc collect→download mixes thumbnails with
- *  duplicates of the same pin. We collapse resolution variants by a
- *  size-independent fingerprint and prefer the /originals/ variant. */
-const PINIMG_SIZE_SEGMENT = /^(originals|\d+x(\d+)?)$/i
-
-function isPinimgHost(host: string): boolean {
-  return /(^|\.)pinimg\.com$/i.test(host)
-}
-
-/** Size-independent identity of a pinimg image (host + path minus the leading
- *  size segment). null for non-pinimg or unexpected URL shapes. */
-function pinimgFingerprint(rawUrl: string): string | null {
-  try {
-    const url = new URL(rawUrl)
-    if (!isPinimgHost(url.hostname)) return null
-    const segments = url.pathname.split('/').filter(Boolean)
-    if (segments.length < 2 || !PINIMG_SIZE_SEGMENT.test(segments[0])) return null
-    return `${url.hostname.toLowerCase()}/${segments.slice(1).join('/').toLowerCase()}`
-  } catch {
-    // silent-catch: malformed URL has no pinimg fingerprint; caller dedupes by raw string.
-    return null
-  }
-}
-
-/** Upgrade a pinimg thumbnail URL to its /originals/ variant; null when the URL
- *  is not an upgradeable pinimg URL. */
-export function pinimgOriginalsUrl(rawUrl: string): string | null {
-  try {
-    const url = new URL(rawUrl)
-    if (!isPinimgHost(url.hostname)) return null
-    const segments = url.pathname.split('/').filter(Boolean)
-    if (segments.length < 2 || !PINIMG_SIZE_SEGMENT.test(segments[0])) return null
-    if (segments[0].toLowerCase() === 'originals') return null
-    segments[0] = 'originals'
-    url.pathname = `/${segments.join('/')}`
-    return url.toString()
-  } catch {
-    // silent-catch: malformed URL is simply not an upgradeable pinimg URL.
-    return null
-  }
-}
-
-export interface NormalizedDownloadTarget {
-  /** Preferred URL to download (/originals/ variant for pinimg thumbnails). */
-  url: string
-  /** Pre-upgrade URL, retried only if the preferred one fails to fetch. */
-  fallbackUrl: string | null
-}
-
-/** Dedupe a raw URL list; for Pinterest images upgrade to /originals/ and
- *  collapse resolution variants of the same pin. Non-pinimg URLs dedupe by
- *  exact string. First occurrence determines output order; the preferred URL is
- *  always the /originals/ variant and the fetch-fallback is a thumbnail variant
- *  if ANY non-originals variant of the same pin appears — regardless of order
- *  (so an `/originals/`-first list still has a 403/404 fallback). */
-export function normalizeDownloadTargets(urls: string[]): NormalizedDownloadTarget[] {
-  const order: string[] = []
-  const byKey = new Map<string, NormalizedDownloadTarget>()
-  for (const raw of urls) {
-    const fingerprint = pinimgFingerprint(raw)
-    const dedupeKey = fingerprint ?? raw
-    const originals = pinimgOriginalsUrl(raw)
-    const existing = byKey.get(dedupeKey)
-    if (!existing) {
-      order.push(dedupeKey)
-      byKey.set(dedupeKey, originals
-        ? { url: originals, fallbackUrl: raw }          // thumbnail → originals, keep thumbnail as fallback
-        : { url: raw, fallbackUrl: null })              // originals (or non-pinimg) seen first
-      continue
-    }
-    // Same pin seen again at a different size. Keep the originals as preferred;
-    // if we don't yet have a thumbnail fallback, adopt this non-originals variant.
-    if (!existing.fallbackUrl && originals && originals !== raw) {
-      existing.fallbackUrl = raw
-    }
-  }
-  return order.map((key) => byKey.get(key)!)
-}
-
-/** Count URLs that look like image-board CDN assets (Pinterest pinimg). A batch
- *  dominated by these is a board/gallery harvest that must go through the
- *  structured image_gallery collection, not raw manual download. */
-export function imageBoardHarvestUrlCount(urls: string[]): number {
-  let count = 0
-  for (const raw of urls) {
-    try {
-      if (isPinimgHost(new URL(String(raw)).hostname)) count += 1
-    } catch {
-      // silent-catch: unparseable URL 不计入 image-board 统计。
-      // ignore unparseable urls
-    }
-  }
-  return count
 }
 
 function looksLikeMediaDownloadUrl(url: string): boolean {
@@ -511,16 +405,16 @@ export async function downloadUrlsToDirectory(
     referer?: string | null
     maxTotalBytes?: number
     abortSignal?: AbortSignal
+    mutationBoundary: BrowserMutationBoundary
   },
 ): Promise<string | ToolExecutionOutput> {
   const rawUrls = params.urls
     .map((item) => String(item || '').trim())
     .filter((item) => item.length > 0)
-  // Pinterest dedupe/originals-upgrade BEFORE the 100 cap so the cap counts
-  // distinct pins, not resolution variants of the same pin.
-  const targets = normalizeDownloadTargets(rawUrls).slice(0, 100)
+  const targets = [...new Set(rawUrls)].slice(0, 100)
   if (targets.length === 0) return 'Error: urls is required and must be a non-empty array'
 
+  return await params.mutationBoundary.invokeTransport(async () => {
   const tabId = params.tabId || null
   const directory = expandHomePath(params.directory || '~/Documents')
   const filenamePrefix = sanitizeFilename(String(params.filenamePrefix || '').trim(), 'download')
@@ -530,6 +424,7 @@ export async function downloadUrlsToDirectory(
     await access(directory, fsConstants.W_OK)
   } catch {
     // silent-catch: 目录不可写以结构化错误文本返回给模型。
+    params.mutationBoundary.recordMechanicalFact({ delivery: 'not_delivered' })
     return `Error: target directory is not writable: ${directory}`
   }
 
@@ -538,6 +433,7 @@ export async function downloadUrlsToDirectory(
     disk = await statfs(directory)
   } catch (error) {
     // silent-catch: capacity lookup failure is returned verbatim and prevents the download.
+    params.mutationBoundary.recordMechanicalFact({ delivery: 'not_delivered' })
     return `Error: cannot read download disk capacity: ${error instanceof Error ? error.message : String(error)}`
   }
   const availableBytes = Math.max(0, Number(disk.bavail) * Number(disk.bsize))
@@ -547,7 +443,10 @@ export async function downloadUrlsToDirectory(
     ? Number(params.maxTotalBytes)
     : diskBudget
   const taskByteBudget = Math.min(diskBudget, requestedBudget)
-  if (taskByteBudget <= 0) return 'Error: download_disk_budget_unavailable'
+  if (taskByteBudget <= 0) {
+    params.mutationBoundary.recordMechanicalFact({ delivery: 'not_delivered' })
+    return 'Error: download_disk_budget_unavailable'
+  }
 
   let referer = String(params.referer || '').trim()
   if (!referer) {
@@ -562,7 +461,7 @@ export async function downloadUrlsToDirectory(
   const results: Array<Record<string, unknown>> = []
   let consumedBytes = 0
   for (let index = 0; index < targets.length; index += 1) {
-    const { url, fallbackUrl } = targets[index]
+    const url = targets[index]
     if (params.abortSignal?.aborted) {
       results.push({ url: url.slice(0, 2048), success: false, error: 'download_aborted' })
       break
@@ -606,30 +505,24 @@ export async function downloadUrlsToDirectory(
       continue
     }
     let finalResult: Awaited<ReturnType<BrowserController['downloadUrlToDirectory']>> | null = null
-    let downloadedUrl = url
-    for (const candidate of [url, fallbackUrl].filter((value): value is string => Boolean(value))) {
-      try {
-        const sessionResult = await controller.downloadUrlToDirectory({
-          url: candidate,
-          targetDir: directory,
-          tabId,
-          sourcePageUrl: referer || null,
-          suggestedName: filenamePrefix ? `${filenamePrefix}-${index + 1}` : null,
-          downloadHeaders: downloadHeadersForTarget(candidate),
-          maxBytes: remainingBudget,
-          signal: params.abortSignal,
-        })
-        finalResult = sessionResult
-        downloadedUrl = candidate
-        if (sessionResult.success) break
-      } catch (error) {
-        // silent-catch: each session failure is retained in finalResult and returned for this URL.
-        finalResult = { success: false, error: error instanceof Error ? error.message : String(error) }
-      }
+    try {
+      finalResult = await controller.downloadUrlToDirectory({
+        url,
+        targetDir: directory,
+        tabId,
+        sourcePageUrl: referer || null,
+        suggestedName: filenamePrefix ? `${filenamePrefix}-${index + 1}` : null,
+        downloadHeaders: downloadHeadersForTarget(url),
+        maxBytes: remainingBudget,
+        signal: params.abortSignal,
+      })
+    } catch (error) {
+      // silent-catch: the per-URL transport failure is retained in the structured result.
+      finalResult = { success: false, error: error instanceof Error ? error.message : String(error) }
     }
     if (!finalResult?.success) {
       results.push({
-        url: downloadedUrl,
+        url,
         success: false,
         error: finalResult?.error || 'browser_session_download_failed',
         via: 'browser_session',
@@ -639,7 +532,7 @@ export async function downloadUrlsToDirectory(
     }
     consumedBytes += Number(finalResult.size || 0)
     results.push({
-      url: downloadedUrl,
+      url,
       success: true,
       path: finalResult.savePath,
       filename: finalResult.filename,
@@ -652,6 +545,9 @@ export async function downloadUrlsToDirectory(
   }
 
   const successCount = results.filter((item) => item.success === true).length
+  params.mutationBoundary.recordMechanicalFact(successCount > 0
+    ? { delivery: 'delivered', effect: 'download' }
+    : { delivery: 'not_delivered' })
   // EP2 dogfood gap 4 — tool writes must surface in the file tree
   // immediately, even for directories the renderer never expanded.
   if (successCount > 0) {
@@ -685,5 +581,6 @@ export async function downloadUrlsToDirectory(
         })),
       },
     },
+  })
   })
 }

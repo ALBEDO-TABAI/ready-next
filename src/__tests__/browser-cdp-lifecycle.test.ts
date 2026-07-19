@@ -107,6 +107,20 @@ test('concurrent standalone CDP commands detach only after the final command set
   assert.equal(harness.detachCalls, 1)
 })
 
+test('retained CDP attachment keeps a trusted input sequence on one debugger session', async () => {
+  const harness = createHarness()
+  const release = await harness.service.retainAttachment('tab-1')
+
+  await harness.service.sendCommand('tab-1', 'Input.dispatchMouseEvent')
+  await harness.service.sendCommand('tab-1', 'Input.dispatchMouseEvent')
+  await harness.service.sendCommand('tab-1', 'Input.insertText')
+
+  assert.equal(harness.attachCalls, 1)
+  assert.equal(harness.detachCalls, 0)
+  release()
+  assert.equal(harness.detachCalls, 1)
+})
+
 test('failed domain enable rolls back its reservation and debugger attachment', async () => {
   const harness = createHarness(false, async (method) => {
     if (method === 'Network.enable') throw new Error('enable failed')

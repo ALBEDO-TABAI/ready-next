@@ -21,8 +21,10 @@ test('browser lease transitions push the existing supervision snapshot to the re
   assert.match(supervisionHook, /applyLeaseSnapshotToSupervisionState/)
 })
 
-test('user-view takeover wiring stays separate from the agent-tab control gate', () => {
+test('user-view takeover stays separate while agent-view input takes over immediately', () => {
   const ipcHandler = readWorkspaceFile('src/main/modules/browser-engine/ipc-handler.ts')
+  const ipcSupervision = readWorkspaceFile('src/main/modules/browser-engine/ipc-supervision.ts')
+  const preload = readWorkspaceFile('src/preload/index.ts')
 
   assert.match(ipcHandler, /attachUserViewLeaseTakeover/)
   assert.match(ipcHandler, /shouldRecordUserViewTabSwitch/)
@@ -31,7 +33,15 @@ test('user-view takeover wiring stays separate from the agent-tab control gate',
   assert.match(ipcHandler, /source: 'tab-switch'/)
   assert.match(ipcHandler, /nextTab\?\.owner !== 'agent'/)
   assert.match(ipcHandler, /attachAgentTabSupervision/)
-  assert.match(ipcHandler, /this\.agentTabControlGate\.requestInterruption\(\)/)
+  assert.match(ipcHandler, /beginAgentTabUserTakeover\(\{/)
+  assert.match(ipcHandler, /recordUserSignal\(\{ surface: selected\.surface, source: 'explicit-button' \}\)/)
+  assert.match(ipcHandler, /leaseService\.getLease\(surface\)\?\.tabId === tabId/)
+  assert.match(ipcHandler, /token\.startsWith\('foreground-workflow:'\)/)
+  assert.doesNotMatch(ipcHandler, /task\.kind === 'site_research'/)
+  const agentTabSupervision = ipcHandler.match(/private attachAgentTabSupervision[\s\S]*?private isAgentActivelyDrivingTab/)?.[0] || ''
+  assert.doesNotMatch(agentTabSupervision, /preventDefault/)
+  assert.doesNotMatch(ipcSupervision, /confirmAgentInterruption|dismissAgentInterruption/)
+  assert.doesNotMatch(preload, /confirmAgentInterruption|dismissAgentInterruption/)
   assert.doesNotMatch(ipcHandler, /recordUserViewTakeoverSignal\([\s\S]{0,300}agentTabControlGate/)
 })
 

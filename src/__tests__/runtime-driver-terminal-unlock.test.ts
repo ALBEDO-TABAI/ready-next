@@ -106,6 +106,14 @@ const captured: CapturedHandlers = {
 
 const infrastructureTimeoutReports: Array<{ scopeId: string; requestId: string; elapsedMs?: number }> = []
 let infrastructureTimeoutReportResult: unknown = { success: true, data: { state: 'not_found' } }
+let conversationScopeMessages: Array<{
+  id: string
+  conversationId: string
+  role: string
+  content: string
+  timestamp: string
+  meta: Record<string, unknown>
+}> = []
 
 function register<K extends keyof CapturedHandlers>(slot: K) {
   return (cb: Handler) => {
@@ -138,6 +146,7 @@ const electronAPIStub = {
     kill: async () => ({ success: true }),
     newSession: async () => ({ success: true }),
     createLocalScope: async () => ({ success: true }),
+    getConversationScopeMessages: async () => ({ success: true, data: conversationScopeMessages }),
     sendScoped: async () => ({ success: true }),
     send: async () => ({ success: true }),
   },
@@ -174,7 +183,19 @@ type DriverApi = {
   completeScopeRunAfterSendSuccess: (
     scopeId: string,
     requestId: string,
-    options?: { backendRecoveredResponse?: boolean },
+    options?: {
+      canonicalMessage?: {
+        id: string
+        conversationId: string
+        role: 'assistant'
+        content: string
+        timestamp: string
+        meta: Record<string, unknown>
+      } | null
+      acceptedAsSteering?: boolean
+      ownerRunId?: string | null
+      previousOwnerRun?: SessionSlice['scopeRunStates'][string] | null
+    },
   ) => void
 }
 const driverApi = driver as unknown as DriverApi
@@ -747,7 +768,7 @@ test('X2.6 — runtime liveness extends the bootstrap watchdog window', async ()
   assert.equal(getSessionSlice(state, 'session-A').scopeRunStates['scope-A']?.phase, 'planning')
 })
 
-test('sendScoped success fallback unlocks a completed run with stale composer locks', () => {
+test('sendScoped success without a canonical terminal cannot unlock or finalize a run', () => {
   seedTwoSessions({
     activeSessionId: 'session-A',
     lockedSessionId: 'session-A',
@@ -794,16 +815,16 @@ test('sendScoped success fallback unlocks a completed run with stale composer lo
 
   const state = useAgent.getState()
   const afterSlice = getSessionSlice(state, 'session-A')
-  assert.equal(afterSlice.isStreaming, false, 'success fallback clears stale session streaming flag')
-  assert.equal(afterSlice.foregroundBusy, false, 'success fallback clears stale foreground lock')
-  assert.equal(afterSlice.composerLocked, false, 'success fallback unlocks the composer')
-  assert.equal(afterSlice.streamingRequestId, null, 'success fallback hides the Stop button')
-  assert.equal(state.isStreaming, false, 'active mirror streaming flag is cleared')
-  assert.equal(state.composerLocked, false, 'active mirror composer lock is cleared')
+  assert.equal(afterSlice.isStreaming, true, 'missing canonical terminal keeps session streaming')
+  assert.equal(afterSlice.foregroundBusy, true, 'missing canonical terminal keeps foreground ownership')
+  assert.equal(afterSlice.composerLocked, true, 'missing canonical terminal cannot unlock the composer')
+  assert.equal(afterSlice.streamingRequestId, 'req-A', 'missing canonical terminal keeps the owner identity')
+  assert.equal(state.isStreaming, true, 'active mirror remains owned')
+  assert.equal(state.composerLocked, true, 'active mirror remains locked')
   assert.equal(afterSlice.scopeRunStates['scope-A']?.terminalReason, 'done')
 })
 
-test('backend recovered response clears same-run proof-gap interruption UI', () => {
+test('accepted steering restores the existing owner and removes only the fake request placeholder', () => {
   seedTwoSessions({
     activeSessionId: 'session-A',
     lockedSessionId: 'session-A',
@@ -812,45 +833,125 @@ test('backend recovered response clears same-run proof-gap interruption UI', () 
     requestId: 'req-A',
   })
 
-  fireOnError({
+  const before = useAgent.getState()
+  const ownerRun = getSessionSlice(before, 'session-A').scopeRunStates['scope-A']
+  const fakeRun = {
+    ...ownerRun,
+    requestId: 'req-steering-ui',
+    phase: 'planning' as const,
+    responseMessageId: 'response-steering-ui',
+    responseBuffer: '',
+  }
+  const fakeMessage = {
+    id: 'response-steering-ui',
     agent: 'butler',
-    sessionId: 'session-A',
-    scopeId: 'scope-A',
-    runId: 'req-A',
-    error: 'proof_gap',
-    type: 'runtime',
-    errorKind: 'proof_gap',
-    recoverable: false,
-  })
-
-  useAgent.getState().addMessage({
-    id: 'response-A',
-    agent: 'butler',
-    content: '刚才的结果没有成功显示，我重新发一次：广州一周天气。',
+    content: '',
     type: 'agent',
     timestamp: new Date(),
+    meta: { transient: true, runId: 'req-steering-ui', scopeId: 'scope-A' },
+  } as const
+  const ownerMessage = {
+    id: 'response-owner',
+    agent: 'butler',
+    content: '原任务正在执行',
+    type: 'agent',
+    timestamp: new Date(),
+    meta: { transient: true, runId: 'req-A', scopeId: 'scope-A' },
+  } as const
+  useAgent.setState({
+    messages: [ownerMessage, fakeMessage],
+    sessions: {
+      ...before.sessions,
+      'session-A': {
+        ...getSessionSlice(before, 'session-A'),
+        messages: [ownerMessage, fakeMessage],
+        streamingRequestId: 'req-steering-ui',
+        streamingMessageId: 'response-steering-ui',
+        scopeRunStates: { 'scope-A': fakeRun },
+      },
+    },
+    scopeRunStates: { 'scope-A': fakeRun },
+    streamingRequestId: 'req-steering-ui',
+    streamingMessageId: 'response-steering-ui',
   })
-  driverApi.completeScopeRunAfterSendSuccess('scope-A', 'req-A', { backendRecoveredResponse: true })
+
+  driverApi.completeScopeRunAfterSendSuccess('scope-A', 'req-steering-ui', {
+    acceptedAsSteering: true,
+    ownerRunId: 'req-A',
+    previousOwnerRun: ownerRun,
+  })
 
   const state = useAgent.getState()
   const slice = getSessionSlice(state, 'session-A')
-  assert.equal(
-    state.messages.some((message: { type: string; content: string }) =>
-      message.type === 'system' && message.content.includes('这轮还没完整完成')
-    ),
-    false,
-    'stale interruption prompt is removed',
-  )
-  assert.equal(
-    state.messages.some((message: { type: string; content: string }) =>
-      message.type === 'agent' && message.content.includes('广州一周天气')
-    ),
-    true,
-    'recovered answer remains visible',
-  )
-  assert.equal(slice.scopeRunStates['scope-A']?.phase, 'done')
-  assert.equal(slice.scopeRunStates['scope-A']?.terminalReason, 'done')
-  assert.equal(slice.scopeRunStates['scope-A']?.error, null)
+  assert.equal(slice.scopeRunStates['scope-A']?.requestId, 'req-A')
+  assert.equal(slice.streamingRequestId, 'req-A')
+  assert.equal(slice.isStreaming, true)
+  assert.equal(slice.composerLocked, true)
+  assert.equal(slice.messages.some((message) => message.id === 'response-steering-ui'), false)
+  assert.equal(slice.messages.some((message) => message.id === 'response-owner'), true)
+})
+
+test('sendMessage routes a follow-up into the active owner without replacing its renderer run', async () => {
+  seedTwoSessions({
+    activeSessionId: 'session-A',
+    lockedSessionId: 'session-A',
+    lockedScopeId: 'scope-A',
+    otherScopeId: 'scope-B',
+    requestId: 'req-A',
+  })
+  const scope = {
+    id: 'scope-A',
+    agent: 'butler',
+    title: 'Scope A',
+    sourceKind: 'local' as const,
+    sourceId: 'app',
+    threadKey: 'scope-A',
+    meta: {},
+    createdAt: '2026-07-18T10:00:00.000Z',
+    updatedAt: '2026-07-18T10:00:00.000Z',
+  }
+  const liveSessionOwner = getSessionSlice(useAgent.getState(), 'session-A').scopeRunStates['scope-A']
+  useAgent.setState({
+    currentScope: scope,
+    currentScopeId: scope.id,
+    scopes: [scope],
+    scopeRunStates: {
+      'scope-A': {
+        ...liveSessionOwner,
+        requestId: 'req-stale-top-level',
+        phase: 'done',
+        terminalReason: 'done',
+      },
+    },
+  })
+  const previousSendScoped = electronAPIStub.agent.sendScoped
+  ;(electronAPIStub.agent as any).sendScoped = async () => ({
+    success: true,
+    acceptedAsSteering: true,
+    ownerRunId: 'req-A',
+    persistence: { message: 'persisted' },
+  })
+  try {
+    const result = await useAgent.getState().sendMessage('补充要求：同时核对第三项')
+    assert.equal(result.success, true)
+    const state = useAgent.getState()
+    const slice = getSessionSlice(state, 'session-A')
+    assert.equal(slice.scopeRunStates['scope-A']?.requestId, 'req-A')
+    assert.equal(slice.streamingRequestId, 'req-A')
+    assert.equal(slice.isStreaming, true)
+    assert.equal(slice.composerLocked, true)
+    assert.equal(
+      slice.messages.filter((message) => message.type === 'agent' && String(message.content || '') === '').length,
+      0,
+      'steering ingress must not create an empty assistant placeholder',
+    )
+    assert.equal(
+      state.messages.some((message) => message.type === 'user' && message.content.includes('同时核对第三项')),
+      true,
+    )
+  } finally {
+    ;(electronAPIStub.agent as any).sendScoped = previousSendScoped
+  }
 })
 
 test('done stream resolves session-slice run when the top-level mirror is stale', async () => {
@@ -909,10 +1010,21 @@ test('done stream resolves session-slice run when the top-level mirror is stale'
     }
   })
 
+  const canonical = {
+    id: 'assistant:scope-A:req-A:terminal',
+    conversationId: 'scope-A',
+    role: 'assistant' as const,
+    content: '已完成',
+    timestamp: '2026-06-25T04:55:00.000Z',
+    meta: { runId: 'req-A' },
+  }
+  conversationScopeMessages = [canonical]
   fireOnStream({
     type: 'done',
     agent: 'butler',
     runId: 'req-A',
+    canonicalMessage: canonical,
+    canonicalMessageDigest: 'digest-req-A',
   })
 
   await new Promise((resolve) => setTimeout(resolve, 20))
@@ -931,6 +1043,82 @@ test('done stream resolves session-slice run when the top-level mirror is stale'
   assert.equal(slice.streamingRequestId, null, 'done stream hides Stop button')
   assert.equal(state.scopeRunStates['scope-A']?.requestId, 'req-A', 'active mirror is refreshed from the session-slice run')
   assert.equal(state.scopeRunStates['scope-A']?.phase, 'done')
+  conversationScopeMessages = []
+})
+
+test('canonical done readback replaces the transient response exactly once', async () => {
+  seedTwoSessions({
+    activeSessionId: 'session-A',
+    lockedSessionId: 'session-A',
+    lockedScopeId: 'scope-A',
+    otherScopeId: 'scope-B',
+    requestId: 'req-A',
+  })
+
+  const before = useAgent.getState()
+  const slice = getSessionSlice(before, 'session-A')
+  const transient = {
+    id: 'msg-1',
+    agent: 'butler',
+    content: '流式瞬影',
+    type: 'agent' as const,
+    timestamp: new Date('2026-07-18T10:00:00.000Z'),
+    meta: { transient: true, runId: 'req-A', scopeId: 'scope-A' },
+  }
+  const earlierTransient = {
+    ...transient,
+    id: 'msg-0',
+    content: '更早的流式瞬影',
+  }
+  const run = {
+    ...slice.scopeRunStates['scope-A'],
+    responseMessageId: transient.id,
+    responseBuffer: transient.content,
+  }
+  useAgent.setState({
+    messages: [earlierTransient, transient],
+    sessions: {
+      ...before.sessions,
+      'session-A': {
+        ...slice,
+        messages: [earlierTransient, transient],
+        scopeRunStates: { ...slice.scopeRunStates, 'scope-A': run },
+      },
+    },
+    scopeRunStates: { 'scope-A': run },
+  })
+
+  const canonical = {
+    id: 'assistant:task-A:req-A:terminal',
+    conversationId: 'scope-A',
+    role: 'assistant' as const,
+    content: '已提交的唯一终稿',
+    timestamp: '2026-07-18T10:00:01.000Z',
+    meta: { runId: 'req-A' },
+  }
+  conversationScopeMessages = [canonical]
+
+  const payload = {
+    type: 'done',
+    agent: 'butler',
+    sessionId: 'session-A',
+    runId: 'req-A',
+    chunk: '',
+    canonicalMessage: canonical,
+    canonicalMessageDigest: 'digest-A',
+  }
+  fireOnStream(payload)
+  fireOnStream(payload)
+  await new Promise((resolve) => setTimeout(resolve, 20))
+
+  const state = useAgent.getState()
+  const afterSlice = getSessionSlice(state, 'session-A')
+  assert.equal(afterSlice.messages.filter((message) => message.id === canonical.id).length, 1)
+  assert.equal(afterSlice.messages.some((message) => message.id === transient.id), false)
+  assert.equal(afterSlice.messages.some((message) => message.id === earlierTransient.id), false)
+  assert.equal(afterSlice.scopeRunStates['scope-A']?.responseMessageId, canonical.id)
+  assert.equal(afterSlice.scopeRunStates['scope-A']?.responseBuffer, canonical.content)
+  conversationScopeMessages = []
 })
 
 test('scope run events ignore stale non-started run ids but allow takeover and started handoff', () => {

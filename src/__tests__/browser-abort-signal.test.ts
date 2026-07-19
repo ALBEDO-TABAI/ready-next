@@ -3,6 +3,7 @@ import test from 'node:test'
 
 import { executeBrowserTool } from '../main/modules/tools/browser-tools'
 import type { BrowserController } from '../main/modules/browser-engine/ipc-handler'
+import { attachBrowserWorkflowFixture } from './utils/browser-workflow-fixture'
 import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
 
 test('browser-abort-signal declares transitive sqlite ABI guard', (t) => {
@@ -10,32 +11,49 @@ test('browser-abort-signal declares transitive sqlite ABI guard', (t) => {
 })
 
 test('pre-aborted browser write returns a structured cancellation result', async () => {
-  const controller = {
+  const fixture = attachBrowserWorkflowFixture({
     getActiveTab: () => null,
-  } as unknown as BrowserController
+    getTabList: () => [],
+  } as unknown as BrowserController)
   const abort = new AbortController()
   abort.abort()
 
-  const output = await executeBrowserTool('browser_navigate', { action: 'reload' }, controller, abort.signal)
+  const output = await executeBrowserTool(
+    'browser_navigate',
+    { action: 'reload' },
+    fixture.controller,
+    abort.signal,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    fixture.context,
+  )
   assert.equal(typeof output === 'string' ? null : output.data?.errorKind, 'origin_budget_aborted')
 })
 
-test('browser_eval rethrows a mid-execution AbortError instead of formatting fallback text', async () => {
+test('browser tool execution rethrows a mid-execution AbortError instead of formatting fallback text', async () => {
   const abortError = new Error('mid execution abort')
   abortError.name = 'AbortError'
-  const controller = {
+  const fixture = attachBrowserWorkflowFixture({
     getActiveTab: () => ({ id: 'tab-gemini', url: 'https://gemini.google.com', active: true }),
     getTabList: () => [{ id: 'tab-gemini', url: 'https://gemini.google.com', active: true }],
-    executeJS: async () => {
+    getPageContent: async () => {
       throw abortError
     },
-  } as unknown as BrowserController
+  } as unknown as BrowserController)
 
   await assert.rejects(
     () => executeBrowserTool(
-      'browser_eval',
-      { code: 'document.title', purpose: 'read title', world: 'main', tab_id: 'tab-gemini' },
-      controller,
+      'browser_read',
+      { tab_id: 'tab-gemini' },
+      fixture.controller,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      fixture.context,
     ),
     (error: unknown) => error instanceof Error && error.name === 'AbortError',
   )

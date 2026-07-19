@@ -3,10 +3,10 @@ import { classifyFollowupIntent } from '../../../../shared/agent-followup-intent
 import type {
   ExecutionTurnResult,
   TaskBudgetRuntime,
+  TaskType,
   TurnTranscriptEvent
 } from '../contracts/run-contracts'
 import { registerActionAnnouncementSteerReminder } from '../system-reminders/action-announcement-steer-reminder'
-import { getActivePlanForScope } from '../system-reminders/active-plan-step-reminder'
 import { createSystemReminderRegistry } from '../system-reminders/system-reminder-registry'
 import { createTaskBudgetRuntime } from '../task-projection/run-budget-policy'
 import {
@@ -15,11 +15,9 @@ import {
   evaluateActionAnnouncementGuard
 } from './action-announcement-guard'
 import { mergeProjectionPatches } from './agent-sdk-document-utils'
-import { resolveTaskTypeFromBrowserWorkflowText } from './agent-sdk-foundation-utils'
 import { resolveSkillHintRelevanceForTurn } from './agent-sdk-skill-intent-utils'
 import { buildExecutionTurnResult } from './agent-sdk-turn-closeout'
 import type { TurnOrchestratorHost } from './agent-sdk-turn-context'
-import type { BrowserWorkIntent } from '../../../../shared/browser-work-intent'
 import type {
   AgentSdkBudgetCheckpointRestore,
   AgentSdkExecutionOptions,
@@ -62,8 +60,7 @@ export interface AgentSdkTurnGuardContext {
   checkpointRestore: AgentSdkBudgetCheckpointRestore | null
   skillHintRelevanceForTurn: ReturnType<typeof resolveSkillHintRelevanceForTurn>
   turnFollowup: ReturnType<typeof classifyFollowupIntent>
-  recentBrowserWorkIntent: BrowserWorkIntent
-  inferredSdkTaskType: ReturnType<typeof resolveTaskTypeFromBrowserWorkflowText>
+  turnTaskType: TaskType
   allowedToolNames: string[]
   requiredCapabilityGroups: string[]
   runHandle: RunHandle
@@ -106,8 +103,7 @@ export function createAgentSdkTurnGuards(ctx: AgentSdkTurnGuardContext): {
     checkpointRestore,
     skillHintRelevanceForTurn,
     turnFollowup,
-    recentBrowserWorkIntent,
-    inferredSdkTaskType,
+    turnTaskType,
     allowedToolNames,
     requiredCapabilityGroups,
     runHandle,
@@ -125,11 +121,8 @@ export function createAgentSdkTurnGuards(ctx: AgentSdkTurnGuardContext): {
       usedTools.length > 0 ||
       // NOTE: a bare executionOptions.taskId is NOT a task signal — the
       // host injects one for every turn (review batch-1 finding). Task
-      // reference now requires continuation/budget state, collection
-      // intent continuity, an active plan, or a follow-up that points
+      // reference now requires continuation/budget state or a follow-up that points
       // back at prior work.
-      getActivePlanForScope(sessionId) ||
-      recentBrowserWorkIntent.kind !== 'observe' ||
       turnFollowup.kind === 'continue_task' ||
       turnFollowup.kind === 'correction' ||
       turnFollowup.kind === 'status_query' ||
@@ -166,7 +159,7 @@ export function createAgentSdkTurnGuards(ctx: AgentSdkTurnGuardContext): {
     }
 
     const checkpointBudgetRuntime =
-      state.liveTaskBudgetRuntime || createTaskBudgetRuntime(inferredSdkTaskType || 'short_task')
+      state.liveTaskBudgetRuntime || createTaskBudgetRuntime(turnTaskType)
     state.liveTaskBudgetRuntime = checkpointBudgetRuntime
     state.runMetaBudgetRuntime = checkpointBudgetRuntime
     const checkpoint = await host.runLifecycle.writeBudgetCheckpointState({
@@ -266,7 +259,7 @@ export function createAgentSdkTurnGuards(ctx: AgentSdkTurnGuardContext): {
     }
 
     const checkpointBudgetRuntime =
-      state.liveTaskBudgetRuntime || createTaskBudgetRuntime(inferredSdkTaskType || 'short_task')
+      state.liveTaskBudgetRuntime || createTaskBudgetRuntime(turnTaskType)
     state.liveTaskBudgetRuntime = checkpointBudgetRuntime
     state.runMetaBudgetRuntime = checkpointBudgetRuntime
     const checkpoint = await host.runLifecycle.writeBudgetCheckpointState({

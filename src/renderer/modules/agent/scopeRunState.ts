@@ -599,12 +599,6 @@ function parseSkillProgress(input: unknown): ScopeRunSkillProgress | null {
   const handoffRecord = record.handoff && typeof record.handoff === 'object' && !Array.isArray(record.handoff)
     ? record.handoff as Record<string, unknown>
     : null
-  const browserConsentRecord = record.browserCollectionConsent && typeof record.browserCollectionConsent === 'object' && !Array.isArray(record.browserCollectionConsent)
-    ? record.browserCollectionConsent as Record<string, unknown>
-    : null
-  const browserActionSessionRecord = record.browserActionSession && typeof record.browserActionSession === 'object' && !Array.isArray(record.browserActionSession)
-    ? record.browserActionSession as Record<string, unknown>
-    : null
   const readHandoffString = (key: string): string | null => {
     const value = handoffRecord?.[key]
     return typeof value === 'string' && value.trim() ? value.trim() : null
@@ -639,32 +633,6 @@ function parseSkillProgress(input: unknown): ScopeRunSkillProgress | null {
       updatedAt: readHandoffString('updatedAt'),
     } satisfies ScopeRunSkillProgress['handoff']
     : null
-  const browserConsentKind = browserConsentRecord?.consentKind
-  const browserCollectionConsent = browserConsentRecord
-    && typeof browserConsentRecord.requestId === 'string'
-    && browserConsentRecord.requestId.trim()
-    && browserConsentKind === 'partial_collection'
-    && typeof browserConsentRecord.sourceTaskId === 'string'
-    && browserConsentRecord.sourceTaskId.trim()
-    ? {
-      requestId: browserConsentRecord.requestId.trim(),
-      consentKind: browserConsentKind,
-      sourceTaskId: browserConsentRecord.sourceTaskId.trim(),
-      targetHost: typeof browserConsentRecord.targetHost === 'string' && browserConsentRecord.targetHost.trim()
-        ? browserConsentRecord.targetHost.trim()
-        : null,
-      warningText: typeof browserConsentRecord.warningText === 'string' && browserConsentRecord.warningText.trim()
-        ? browserConsentRecord.warningText.trim()
-        : null,
-      message: typeof browserConsentRecord.message === 'string' && browserConsentRecord.message.trim()
-        ? browserConsentRecord.message.trim()
-        : null,
-      createdAt: typeof browserConsentRecord.createdAt === 'string' && browserConsentRecord.createdAt.trim()
-        ? browserConsentRecord.createdAt.trim()
-        : null,
-    } satisfies ScopeRunSkillProgress['browserCollectionConsent']
-    : null
-  const browserActionSession = parseBrowserActionSessionProgress(browserActionSessionRecord)
   return {
     stage: readString('stage'),
     completed: readNumber('completed'),
@@ -677,69 +645,6 @@ function parseSkillProgress(input: unknown): ScopeRunSkillProgress | null {
     detail: readString('detail'),
     activityUpdatedAt: readString('activityUpdatedAt'),
     ...(handoff ? { handoff } : {}),
-    ...(browserCollectionConsent ? { browserCollectionConsent } : {}),
-    ...(browserActionSession ? { browserActionSession } : {}),
-  }
-}
-
-function parseBrowserActionSessionProgress(
-  record: Record<string, unknown> | null,
-): ScopeRunSkillProgress['browserActionSession'] | null {
-  if (!record) return null
-  const readString = (key: string): string | null => {
-    const value = record[key]
-    return typeof value === 'string' && value.trim() ? value.trim() : null
-  }
-  const status = record.transactionStatus === 'confirmed' ? 'confirmed' : 'active'
-  const followed = record.lastFollowedTab && typeof record.lastFollowedTab === 'object' && !Array.isArray(record.lastFollowedTab)
-    ? record.lastFollowedTab as Record<string, unknown>
-    : null
-  const confirmationRecord = record.confirmation && typeof record.confirmation === 'object' && !Array.isArray(record.confirmation)
-    ? record.confirmation as Record<string, unknown>
-    : null
-  const rawSource = confirmationRecord?.source
-  type BrowserActionSessionConfirmationSource =
-    NonNullable<NonNullable<ScopeRunSkillProgress['browserActionSession']>['confirmation']>['source']
-  const source: BrowserActionSessionConfirmationSource | null =
-    rawSource === 'page_text' || rawSource === 'public_url' || rawSource === 'network' || rawSource === 'site_strategy'
-      ? rawSource
-      : null
-  const confirmation = confirmationRecord?.confirmed === true
-    && source
-    && typeof confirmationRecord.signal === 'string'
-    && confirmationRecord.signal.trim()
-    && typeof confirmationRecord.observedAt === 'string'
-    ? {
-      confirmed: true as const,
-      source,
-      signal: confirmationRecord.signal.trim(),
-      urlHash: typeof confirmationRecord.urlHash === 'string' ? confirmationRecord.urlHash : null,
-      resourceIdHash: typeof confirmationRecord.resourceIdHash === 'string' ? confirmationRecord.resourceIdHash : null,
-      statusCode: Number.isFinite(Number(confirmationRecord.statusCode)) ? Number(confirmationRecord.statusCode) : null,
-      textHash: typeof confirmationRecord.textHash === 'string' ? confirmationRecord.textHash : null,
-      observedAt: confirmationRecord.observedAt,
-    }
-    : null
-  return {
-    targetTabId: readString('targetTabId'),
-    targetFrameId: readString('targetFrameId'),
-    frameUrl: readString('frameUrl'),
-    frameOrigin: readString('frameOrigin'),
-    currentUrl: readString('currentUrl'),
-    origin: readString('origin'),
-    lastAction: readString('lastAction'),
-    lastFollowedTab: followed && typeof followed.tabId === 'string' && followed.tabId.trim()
-      ? {
-        tabId: followed.tabId.trim(),
-        url: typeof followed.url === 'string' && followed.url.trim() ? followed.url.trim() : null,
-        title: typeof followed.title === 'string' && followed.title.trim() ? followed.title.trim() : null,
-        reason: typeof followed.reason === 'string' && followed.reason.trim() ? followed.reason.trim() : null,
-      }
-      : null,
-    transactionStatus: status,
-    confirmation,
-    nextSuggestedAction: readString('nextSuggestedAction'),
-    updatedAt: readString('updatedAt') || new Date().toISOString(),
   }
 }
 

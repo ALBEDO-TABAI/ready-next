@@ -1281,8 +1281,6 @@ export default function BrowserMode({
                       controlState={agentSupervision.controlState}
                       tasks={agentSupervision.tasks}
                       requestInterruption={agentSupervision.requestInterruption}
-                      confirmInterruption={agentSupervision.confirmInterruption}
-                      dismissInterruption={agentSupervision.dismissInterruption}
                       surfaces={agentSupervision.surfaces}
                       activeWriteSurface={agentSupervision.activeWriteSurface}
                       variant="collapsedRail"
@@ -1312,8 +1310,6 @@ export default function BrowserMode({
                         controlState={agentSupervision.controlState}
                         tasks={agentSupervision.tasks}
                         requestInterruption={agentSupervision.requestInterruption}
-                        confirmInterruption={agentSupervision.confirmInterruption}
-                        dismissInterruption={agentSupervision.dismissInterruption}
                         surfaces={agentSupervision.surfaces}
                         activeWriteSurface={agentSupervision.activeWriteSurface}
                         variant="pane"

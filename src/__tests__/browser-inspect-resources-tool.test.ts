@@ -4,6 +4,7 @@ import test from 'node:test'
 import { executeBrowserTool } from '../main/modules/tools/browser-tools'
 import type { BrowserController } from '../main/modules/browser-engine/ipc-handler'
 import type { BrowserNetworkEventRecord } from '../main/modules/browser-engine/network-observer-service'
+import { attachBrowserWorkflowFixture } from './utils/browser-workflow-fixture'
 import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
 
 function parseToolOutput(out: unknown): Record<string, unknown> {
@@ -16,7 +17,7 @@ function parseToolOutput(out: unknown): Record<string, unknown> {
   return JSON.parse(String(out)) as Record<string, unknown>
 }
 
-test('browser_resources returns deduped candidates with safe download headers', async (t) => {
+test('browser_resources reads the grounded tab without hidden navigation and returns deduped candidates', async (t) => {
   if (skipIfSqliteUnavailable(t, 'browser-inspect-resources-tool transitive sqlite load')) return
   const callOrder: string[] = []
   const networkEvents: BrowserNetworkEventRecord[] = [
@@ -29,7 +30,7 @@ test('browser_resources returns deduped candidates with safe download headers', 
       resourceType: 'Media',
     },
   ]
-  const controller = {
+  const fixture = attachBrowserWorkflowFixture({
     getActiveTab: () => ({ id: 'tab-1', url: 'https://www.douyin.com/video/7650355790565395731', title: 'Video', active: true }),
     getTabList: () => [{ id: 'tab-1', url: 'https://www.douyin.com/video/7650355790565395731', title: 'Video', active: true }],
     startNetworkObserver: async () => {
@@ -68,22 +69,27 @@ test('browser_resources returns deduped candidates with safe download headers', 
         ],
       }
     },
-  } as unknown as BrowserController
+  } as unknown as BrowserController)
 
   const out = await executeBrowserTool(
     'browser_resources',
     {
-      url: 'https://www.douyin.com/video/7650355790565395731',
       kinds: ['video'],
       wait_ms: 0,
       max_candidates: 5,
     },
-    controller,
+    fixture.controller,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    fixture.context,
   )
   const parsed = parseToolOutput(out)
   const candidates = parsed.candidates as Array<Record<string, unknown>>
 
-  assert.deepEqual(callOrder, ['observe', 'navigate', 'probe', 'stop'])
+  assert.deepEqual(callOrder, ['observe', 'probe', 'stop'])
   assert.equal(parsed.ok, true)
   assert.equal(parsed.candidateCount, 1)
   assert.equal(candidates[0].kind, 'video')
@@ -106,7 +112,7 @@ test('browser_download uses current-tab resource inspection before external pars
       resourceType: 'Media',
     },
   ]
-  const controller = {
+  const fixture = attachBrowserWorkflowFixture({
     getActiveTab: () => ({ id: 'tab-1', url: 'https://www.douyin.com/video/7650355790565395731', title: 'Video', active: true }),
     getTabList: () => [{ id: 'tab-1', url: 'https://www.douyin.com/video/7650355790565395731', title: 'Video', active: true }],
     startNetworkObserver: async () => ({
@@ -118,7 +124,7 @@ test('browser_download uses current-tab resource inspection before external pars
       url: 'https://www.douyin.com/video/7650355790565395731',
       resources: [],
     }),
-  } as unknown as BrowserController
+  } as unknown as BrowserController)
 
   const out = await executeBrowserTool(
     'browser_download',
@@ -127,7 +133,13 @@ test('browser_download uses current-tab resource inspection before external pars
       page_url: 'https://www.douyin.com/video/7650355790565395731',
       tab_id: 'tab-1',
     },
-    controller,
+    fixture.controller,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    fixture.context,
   )
   const parsed = parseToolOutput(out)
   const video = parsed.video as Record<string, unknown>
@@ -140,7 +152,7 @@ test('browser_download uses current-tab resource inspection before external pars
 
 test('browser_resources extracts Douyin video candidates from detail API response bodies', async () => {
   const detailUrl = 'https://www.douyin.com/aweme/v1/web/aweme/detail/?aweme_id=7650355790565395731'
-  const controller = {
+  const fixture = attachBrowserWorkflowFixture({
     getActiveTab: () => ({ id: 'tab-1', url: 'https://www.douyin.com/video/7650355790565395731', title: 'Video', active: true }),
     getTabList: () => [{ id: 'tab-1', url: 'https://www.douyin.com/video/7650355790565395731', title: 'Video', active: true }],
     startNetworkObserver: async () => ({
@@ -184,12 +196,18 @@ test('browser_resources extracts Douyin video candidates from detail API respons
       url: 'https://www.douyin.com/video/7650355790565395731',
       resources: [],
     }),
-  } as unknown as BrowserController
+  } as unknown as BrowserController)
 
   const out = await executeBrowserTool(
     'browser_resources',
     { tab_id: 'tab-1', kinds: ['video'], wait_ms: 0 },
-    controller,
+    fixture.controller,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    fixture.context,
   )
   const parsed = parseToolOutput(out)
   const candidates = parsed.candidates as Array<Record<string, unknown>>
@@ -203,7 +221,7 @@ test('browser_resources extracts Douyin video candidates from detail API respons
 test('browser_resources classifies YouTube googlevideo playback URLs by query mime', async () => {
   const videoUrl = 'https://rr1---sn-googlevideo.com/videoplayback?expire=1&mime=video%2Fmp4&itag=18'
   const audioUrl = 'https://rr1---sn-googlevideo.com/videoplayback?expire=1&mime=audio%2Fmp4&itag=140'
-  const controller = {
+  const fixture = attachBrowserWorkflowFixture({
     getActiveTab: () => ({ id: 'tab-1', url: 'https://www.youtube.com/shorts/vzqbgZjBsi4', title: 'Short', active: true }),
     getTabList: () => [{ id: 'tab-1', url: 'https://www.youtube.com/shorts/vzqbgZjBsi4', title: 'Short', active: true }],
     startNetworkObserver: async () => ({
@@ -232,12 +250,18 @@ test('browser_resources classifies YouTube googlevideo playback URLs by query mi
       url: 'https://www.youtube.com/shorts/vzqbgZjBsi4',
       resources: [],
     }),
-  } as unknown as BrowserController
+  } as unknown as BrowserController)
 
   const out = await executeBrowserTool(
     'browser_resources',
     { tab_id: 'tab-1', kinds: ['video'], wait_ms: 0 },
-    controller,
+    fixture.controller,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    fixture.context,
   )
   const parsed = parseToolOutput(out)
   const candidates = parsed.candidates as Array<Record<string, unknown>>
@@ -254,7 +278,7 @@ test('browser_resources extracts YouTube player response candidates and prefers 
   const videoOnlyUrl = 'https://rr1---sn-googlevideo.com/videoplayback?expire=1&mime=video%2Fmp4&itag=137'
   const audioOnlyUrl = 'https://rr1---sn-googlevideo.com/videoplayback?expire=1&mime=audio%2Fmp4&itag=140'
   const playerUrl = 'https://www.youtube.com/youtubei/v1/player?prettyPrint=false'
-  const controller = {
+  const fixture = attachBrowserWorkflowFixture({
     getActiveTab: () => ({ id: 'tab-1', url: 'https://www.youtube.com/shorts/vzqbgZjBsi4', title: 'Short', active: true }),
     getTabList: () => [{ id: 'tab-1', url: 'https://www.youtube.com/shorts/vzqbgZjBsi4', title: 'Short', active: true }],
     startNetworkObserver: async () => ({
@@ -309,12 +333,18 @@ test('browser_resources extracts YouTube player response candidates and prefers 
       url: 'https://www.youtube.com/shorts/vzqbgZjBsi4',
       resources: [],
     }),
-  } as unknown as BrowserController
+  } as unknown as BrowserController)
 
   const out = await executeBrowserTool(
     'browser_resources',
     { tab_id: 'tab-1', kinds: ['video'], wait_ms: 0, max_candidates: 5 },
-    controller,
+    fixture.controller,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    fixture.context,
   )
   const parsed = parseToolOutput(out)
   const candidates = parsed.candidates as Array<Record<string, unknown>>
@@ -334,7 +364,7 @@ test('browser_resources extracts YouTube player response candidates and prefers 
 })
 
 test('browser_resources gives generic discovery guidance when no candidate is loaded yet', async () => {
-  const controller = {
+  const fixture = attachBrowserWorkflowFixture({
     getActiveTab: () => ({ id: 'tab-1', url: 'https://www.youtube.com/shorts/vzqbgZjBsi4', title: 'Short', active: true }),
     getTabList: () => [{ id: 'tab-1', url: 'https://www.youtube.com/shorts/vzqbgZjBsi4', title: 'Short', active: true }],
     startNetworkObserver: async () => ({
@@ -346,12 +376,18 @@ test('browser_resources gives generic discovery guidance when no candidate is lo
       url: 'https://www.youtube.com/shorts/vzqbgZjBsi4',
       resources: [],
     }),
-  } as unknown as BrowserController
+  } as unknown as BrowserController)
 
   const out = await executeBrowserTool(
     'browser_resources',
     { tab_id: 'tab-1', kinds: ['video'], wait_ms: 0 },
-    controller,
+    fixture.controller,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    fixture.context,
   )
   const parsed = parseToolOutput(out)
 

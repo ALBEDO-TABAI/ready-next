@@ -70,9 +70,6 @@ export interface TaskInteractionHandlers {
   handleContinueDetachedTask: (scopeId: string, taskId?: string | null) => void
   handleCancelChildRun: (scopeId: string, childRunId: string) => Promise<void>
   handleContinueChildRun: (scopeId: string, childRunId: string) => Promise<void>
-  handleResumeBrowserTask: (scopeId: string, taskId: string) => Promise<void>
-  handleCancelBrowserTask: (scopeId: string, taskId: string) => Promise<void>
-  handleConfirmBrowserCollectionConsent: (scopeId: string, requestId: string) => Promise<void>
   handleResumeTask: (scopeId: string) => Promise<void>
   handleRetryTask: (scopeId: string) => Promise<void>
   handleOpenTaskArtifact: (path: string) => Promise<void>
@@ -190,6 +187,16 @@ export function useTaskInteractionHandlers(
       const run =
         useAgent.getState().scopeRunStates[scopeId] ||
         mergedTaskRuns.find((item) => item.scopeId === scopeId)
+      const projectedRun = mergedTaskRuns.find((item) => item.scopeId === scopeId)
+      if (projectedRun?.interactionState === 'human_takeover') {
+        const takeover = projectedRun.humanTakeoverRef
+        if (!projectedRun.taskId || !takeover || takeover.state !== 'pending') return
+        await window.electronAPI.agent.completeHumanTakeover({
+          taskId: projectedRun.taskId,
+          takeoverId: takeover.takeoverId,
+        })
+        return
+      }
       const responseText = window.prompt('补交结果', run?.taskSummary || '人工步骤已完成，请继续。')
       if (responseText == null) return
       const trimmed = responseText.trim()
@@ -299,59 +306,6 @@ export function useTaskInteractionHandlers(
     void refreshPersistedScopeRuns()
     void refreshPersistedTaskProjections()
   }, [buildRunContinuationIntent, currentScopeId, loadConversation, mergedTaskRuns, refreshPersistedScopeRuns, refreshPersistedTaskProjections])
-
-  const handleResumeBrowserTask = useCallback(async (scopeId: string, taskId: string) => {
-    const normalizedTaskId = String(taskId || '').trim()
-    if (!normalizedTaskId || !window.electronAPI?.browser?.resumeTask) return
-    if (currentScopeId !== scopeId) {
-      void loadConversation(scopeId)
-    }
-    const resumeResult = await window.electronAPI.browser.resumeTask({ taskId: normalizedTaskId }).catch(() => null)
-    recordTaskActionTestEvent({
-      action: 'resume-browser-task',
-      observed: 'browser.resumeTask',
-      scopeId,
-      taskId: normalizedTaskId,
-      success: resumeResult?.success === true,
-    })
-    void refreshPersistedTaskProjections()
-  }, [currentScopeId, loadConversation, refreshPersistedTaskProjections])
-
-  const handleCancelBrowserTask = useCallback(async (scopeId: string, taskId: string) => {
-    const normalizedTaskId = String(taskId || '').trim()
-    if (!normalizedTaskId || !window.electronAPI?.browser?.cancelTask) return
-    if (currentScopeId !== scopeId) {
-      void loadConversation(scopeId)
-    }
-    const cancelResult = await window.electronAPI.browser.cancelTask({ taskId: normalizedTaskId }).catch(() => null)
-    recordTaskActionTestEvent({
-      action: 'cancel-browser-task',
-      observed: 'browser.cancelTask',
-      scopeId,
-      taskId: normalizedTaskId,
-      success: cancelResult?.success === true,
-    })
-    void refreshPersistedTaskProjections()
-  }, [currentScopeId, loadConversation, refreshPersistedTaskProjections])
-
-  const handleConfirmBrowserCollectionConsent = useCallback(async (scopeId: string, requestId: string) => {
-    const normalizedRequestId = String(requestId || '').trim()
-    if (!normalizedRequestId || !window.electronAPI?.browser?.confirmCollectionConsent) return
-    if (currentScopeId !== scopeId) {
-      void loadConversation(scopeId)
-    }
-    const result = await window.electronAPI.browser.confirmCollectionConsent({
-      requestId: normalizedRequestId,
-    }).catch(() => null)
-    recordTaskActionTestEvent({
-      action: 'confirm-browser-collection-consent',
-      observed: 'browser.confirmCollectionConsent',
-      scopeId,
-      taskId: normalizedRequestId,
-      success: result?.success === true,
-    })
-    void refreshPersistedTaskProjections()
-  }, [currentScopeId, loadConversation, refreshPersistedTaskProjections])
 
   const handleResumeTask = useCallback(async (scopeId: string) => {
     const run =
@@ -472,9 +426,6 @@ export function useTaskInteractionHandlers(
     handleContinueDetachedTask,
     handleCancelChildRun,
     handleContinueChildRun,
-    handleResumeBrowserTask,
-    handleCancelBrowserTask,
-    handleConfirmBrowserCollectionConsent,
     handleResumeTask,
     handleRetryTask,
     handleOpenTaskArtifact,

@@ -41,12 +41,6 @@ function extractAdapterSequence(source: string, file: string): string[] {
 }
 
 const LIVE_WIRES = [
-  // BrowserTaskPlanner 闭包组
-  'getSessionAttachmentHints',
-  'getSessionAttachmentResourceList',
-  'getSessionAttachmentResources',
-  'getIncomingAttachmentHints',
-  'getTabContext',
   // SkillContextOrchestrator 装配
   'resolveSkillToolByAction',
   'resolveSkillToolByName',
@@ -91,7 +85,6 @@ test('DomainAdapterHost mirrors the engine adapter assembly sequence (Research f
     assert.deepEqual(hostSeq, [
       'ResearchDomainAdapter',
       'MapDomainAdapter',
-      'BrowserDomainAdapter',
       'DocumentDomainAdapter',
       'SkillDomainAdapter',
       'RSSDomainAdapter',

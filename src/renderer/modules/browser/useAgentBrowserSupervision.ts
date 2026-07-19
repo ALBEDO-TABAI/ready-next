@@ -6,13 +6,13 @@ import type { BrowserSupervisionVisibleTaskStatus } from '../../../shared/browse
 
 /**
  * Polls the agent-browser supervision state (plan §3.6): the control-gate state
- * + active background note-collection tasks. Polling remains the fallback; the
+ * + active agent-view browser tasks. Polling remains the fallback; the
  * lease snapshot also has a push path so ownership chips update immediately
  * when the user takes over the visible browser surface.
  */
 
-/** Agent-browser control-gate state (plan §3.6). */
-export type AgentBrowserControlState = 'active' | 'pending_confirm' | 'frozen'
+/** Agent-browser control-gate state. */
+export type AgentBrowserControlState = 'active' | 'frozen'
 export type AgentBrowserSurface = 'user-view' | 'agent-view'
 export type BrowserLeaseState = 'idle' | 'held' | 'takeover' | 'expired'
 
@@ -25,7 +25,7 @@ export interface BrowserLeaseSurfaceSnapshot {
   leaseId: string | null
 }
 
-/** A background note-collection task surfaced to the supervision panel. */
+/** An agent-view browser task surfaced to the supervision panel. */
 export interface AgentBrowserCollectionTask {
   taskId: string
   kind: string
@@ -131,8 +131,6 @@ export function applyLeaseSnapshotToSupervisionState(
 
 export function useAgentBrowserSupervision(): AgentBrowserSupervisionState & {
   requestInterruption: () => Promise<void>
-  confirmInterruption: () => Promise<void>
-  dismissInterruption: () => Promise<void>
 } {
   const [state, setState] = useState<AgentBrowserSupervisionState>(EMPTY)
   const mounted = useRef(true)
@@ -163,8 +161,8 @@ export function useAgentBrowserSupervision(): AgentBrowserSupervisionState & {
     mounted.current = true
     void refresh()
     const id = window.setInterval(refresh, POLL_MS)
-    // Push: refresh immediately when the control gate changes (e.g. the user
-    // touches the agent tab → pending_confirm) instead of waiting for the poll.
+    // Push: refresh immediately when the user takes over instead of waiting for
+    // the next poll.
     const off = window.electronAPI?.browser?.onAgentControlChanged?.(() => {
       void refresh()
     })
@@ -181,12 +179,7 @@ export function useAgentBrowserSupervision(): AgentBrowserSupervisionState & {
   }, [refresh])
 
   const requestInterruption = useCallback(async () => {
-    await window.electronAPI?.browser?.requestAgentInterruption?.()
-    await refresh()
-  }, [refresh])
-
-  const confirmInterruption = useCallback(async () => {
-    const result = await window.electronAPI?.browser?.confirmAgentInterruption?.()
+    const result = await window.electronAPI?.browser?.requestAgentInterruption?.()
     if (result?.frozen && result.takeoverTabId) {
       const api = window.electronAPI?.browser
       if (api) {
@@ -197,10 +190,5 @@ export function useAgentBrowserSupervision(): AgentBrowserSupervisionState & {
     await refresh()
   }, [refresh])
 
-  const dismissInterruption = useCallback(async () => {
-    await window.electronAPI?.browser?.dismissAgentInterruption?.()
-    await refresh()
-  }, [refresh])
-
-  return { ...state, requestInterruption, confirmInterruption, dismissInterruption }
+  return { ...state, requestInterruption }
 }

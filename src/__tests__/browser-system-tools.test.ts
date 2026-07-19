@@ -7,10 +7,11 @@ import { tmpdir } from 'node:os'
 import type { BrowserController } from '../main/modules/browser-engine/ipc-handler'
 import { readBrowserSessionStatus } from '../main/modules/browser-engine/browser-session-status'
 import { executeBrowserTool } from '../main/modules/tools/browser-tools'
-import type {
-  BrowserSensitiveOperation,
-  BrowserTaskEnvelope,
-} from '../shared/browser-task-envelope'
+import { browserInvocationArgsDigest } from '../main/modules/tools/browser-task-envelope-binding'
+import { browserSnapshotService } from '../main/modules/browser-engine/browser-snapshot-service'
+import type { BrowserOperationId, BrowserPublicToolName } from '../shared/browser-capability-registry'
+import type { BrowserTaskEnvelope } from '../shared/browser-task-envelope'
+import type { BrowserPermissionSuspensionRequest } from '../shared/browser-workflow-control'
 
 function dataOf(result: Awaited<ReturnType<typeof executeBrowserTool>>): Record<string, unknown> {
   if (typeof result === 'string') return JSON.parse(result) as Record<string, unknown>
@@ -18,31 +19,77 @@ function dataOf(result: Awaited<ReturnType<typeof executeBrowserTool>>): Record<
 }
 
 function taskContext(params: {
-  instruction: string
+  toolName: BrowserPublicToolName
+  operationId: BrowserOperationId
+  args: Record<string, unknown>
   tabId?: string
   origin?: string
-  operations?: BrowserSensitiveOperation[]
+  requestPowerConfirmation?: (details: Record<string, unknown>) => Promise<boolean>
+  confirmedBrowserPermissionRequest?: BrowserPermissionSuspensionRequest | null
 }) {
   const taskEnvelope: BrowserTaskEnvelope = {
-    version: 1,
+    version: 3,
     scopeId: 'scope-1',
     runId: 'run-1',
-    taskId: 'task-1',
+    parentTaskId: 'parent-task-1',
+    browserTaskId: 'browser-child-1',
     agentId: 'ready',
-    primaryInstruction: params.instruction,
-    allowedToolNames: ['browser_session', 'browser_permission'],
-    allowedEffects: ['observe'],
-    allowedSensitiveOperations: params.operations || [],
+    toolName: params.toolName,
+    operationId: params.operationId,
+    argsDigest: browserInvocationArgsDigest(params.toolName, params.operationId, params.args),
     tabId: params.tabId || 'tab-1',
     origin: params.origin || 'https://example.test',
-    destination: null,
-    workspaceRoots: [],
     createdAt: Date.now(),
   }
   return {
     ownerRunId: 'run-1',
-    parentTaskId: 'task-1',
+    parentTaskId: 'parent-task-1',
+    browserTaskId: 'browser-child-1',
     taskEnvelope,
+    requestPowerConfirmation: params.requestPowerConfirmation,
+    confirmedBrowserPermissionRequest: params.confirmedBrowserPermissionRequest,
+  }
+}
+
+function pendingPermissionReadback(overrides: Record<string, unknown> = {}) {
+  return {
+    requestId: 'site-request-1',
+    state: 'pending',
+    applied: false,
+    decision: null,
+    permission: 'geolocation',
+    origin: 'https://example.test',
+    requestingUrl: 'https://example.test/page',
+    createdAt: '2026-07-19T00:00:00.000Z',
+    appliedAt: null,
+    target: {
+      partition: 'persist:browser',
+      parentTaskId: 'parent-task-1',
+      ownerRunId: 'previous-owner-run',
+      browserTaskId: 'browser-child-1',
+      surface: 'user-view',
+      scopeId: 'scope-1',
+      profileId: null,
+      sessionId: null,
+      tabId: 'tab-1',
+      physicalTargetToken: 'physical-tab-1',
+    },
+    ...overrides,
+  }
+}
+
+function workflowJournalFixture() {
+  let actionSeq = 0
+  return {
+    beginBrowserWorkflowAction: (input: Record<string, unknown>) => ({
+      actionId: `action-${++actionSeq}`,
+      actionSeq,
+      identity: input.identity,
+    }),
+    settleBrowserWorkflowAction: (_taskId: string, actionId: string, outcome: unknown) => ({
+      receiptId: `receipt-${actionId}`,
+      outcome,
+    }),
   }
 }
 
@@ -56,8 +103,17 @@ test('browser_network keeps one trace across start, list, details and stop with 
     responseHeaders: { Authorization: 'Bearer secret', 'Content-Type': 'application/json' },
   }]
   const controller = {
+    ...workflowJournalFixture(),
     getActiveTab: () => ({ id: 'tab-1', title: 'Fixture', url: 'https://example.test', active: true }),
     getTabList: () => [{ id: 'tab-1', title: 'Fixture', url: 'https://example.test', active: true }],
+    getPhysicalTargetToken: () => 'physical-tab-1',
+    executeJS: async () => ({
+      url: 'https://example.test',
+      title: 'Fixture',
+      timeOrigin: 1234,
+      mutationRevision: 0,
+      frameDocumentToken: 'document-1',
+    }),
     startNetworkObserver: async () => ({
       id: 'trace-1',
       events: () => events,
@@ -65,7 +121,19 @@ test('browser_network keeps one trace across start, list, details and stop with 
     }),
   } as unknown as BrowserController
 
-  const started = dataOf(await executeBrowserTool('browser_network', { action: 'start' }, controller))
+  await browserSnapshotService.capture(controller, 'tab-1', 10_000, async () => ({ targets: [] }), { force: true })
+  const startArgs = { action: 'start' }
+  const started = dataOf(await executeBrowserTool(
+    'browser_network',
+    startArgs,
+    controller,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    taskContext({ toolName: 'browser_network', operationId: 'network_start', args: startArgs }),
+  ))
   assert.equal(started.ok, true)
   assert.equal(started.traceId, 'trace-1')
 
@@ -78,7 +146,18 @@ test('browser_network keeps one trace across start, list, details and stop with 
   const details = dataOf(await executeBrowserTool('browser_network', { action: 'details', request_id: 'req-1' }, controller))
   assert.equal((details.event as Record<string, unknown>).requestId, 'req-1')
 
-  const stoppedResult = dataOf(await executeBrowserTool('browser_network', { action: 'stop' }, controller))
+  const stopArgs = { action: 'stop' }
+  const stoppedResult = dataOf(await executeBrowserTool(
+    'browser_network',
+    stopArgs,
+    controller,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    taskContext({ toolName: 'browser_network', operationId: 'network_stop', args: stopArgs }),
+  ))
   assert.equal(stoppedResult.running, false)
   assert.equal(stopped, 1)
 
@@ -117,6 +196,7 @@ test('browser_session status reports login/profile counts without exposing cooki
 test('browser_session switches to an isolated named profile while preserving opener binding', async () => {
   let createArgs: Record<string, unknown> | null = null
   const controller = {
+    ...workflowJournalFixture(),
     getActiveTab: () => ({ id: 'tab-1', title: 'Account', url: 'https://example.test/account', active: true }),
     getTabList: () => [{ id: 'tab-1', title: 'Account', url: 'https://example.test/account', active: true }],
     createTab: async (url: string, options: Record<string, unknown>) => {
@@ -125,12 +205,15 @@ test('browser_session switches to an isolated named profile while preserving ope
     },
   } as unknown as BrowserController
 
-  const switched = dataOf(await executeBrowserTool('browser_session', {
+  const args = {
     action: 'switch_profile',
     profile: 'work',
-  }, controller, undefined, undefined, undefined, '切换到 work 浏览器 profile', undefined, taskContext({
-    instruction: '切换到 work 浏览器 profile',
-    operations: ['session.switch_profile'],
+  }
+  const switched = dataOf(await executeBrowserTool('browser_session', args, controller, undefined, undefined, undefined, undefined, undefined, taskContext({
+    toolName: 'browser_session',
+    operationId: 'session_switch_profile',
+    args,
+    requestPowerConfirmation: async () => true,
   })))
   assert.equal(switched.ok, true)
   assert.equal(switched.profile, 'work')
@@ -165,24 +248,38 @@ test('browser_archive only writes through an authorized task root', async () => 
   try {
     let archived: Record<string, unknown> | null = null
     const controller = {
+      ...workflowJournalFixture(),
       getActiveTab: () => ({ id: 'tab-1', title: 'Fixture', url: 'https://example.test', active: true }),
       getTabList: () => [{ id: 'tab-1', title: 'Fixture', url: 'https://example.test', active: true }],
+      getPhysicalTargetToken: () => 'physical-tab-1',
+      executeJS: async () => ({
+        url: 'https://example.test',
+        title: 'Fixture',
+        timeOrigin: 1234,
+        mutationRevision: 0,
+        frameDocumentToken: 'document-1',
+      }),
       archivePage: async (tabId: string | null, path: string, format: string) => {
         archived = { tabId, path, format }
         return { success: true, path, format }
       },
     } as unknown as BrowserController
     const path = join(root, 'page.mhtml')
+    const args = { format: 'mhtml', path, tab_id: 'tab-1' }
+    await browserSnapshotService.capture(controller, 'tab-1', 10_000, async () => ({ targets: [] }), { force: true })
     const result = dataOf(await executeBrowserTool(
       'browser_archive',
-      { format: 'mhtml', path, tab_id: 'tab-1' },
+      args,
       controller,
       undefined,
       undefined,
       undefined,
       undefined,
       undefined,
-      { workspaceRoots: [root] },
+      {
+        ...taskContext({ toolName: 'browser_archive', operationId: 'archive', args }),
+        workspaceRoots: [root],
+      },
     ))
     assert.equal(result.ok, true)
     assert.deepEqual(archived, { tabId: 'tab-1', path, format: 'mhtml' })
@@ -191,40 +288,58 @@ test('browser_archive only writes through an authorized task root', async () => 
   }
 })
 
-test('browser_permission changes ordinary origin permissions but requires takeover for media allow', async () => {
-  const decisions: Array<Record<string, unknown>> = []
+test('browser_permission allow suspends for the exact request and applies only with its exact confirmation', async () => {
+  let writes = 0
+  const pending = pendingPermissionReadback()
   const controller = {
+    ...workflowJournalFixture(),
     getActiveTab: () => ({ id: 'tab-1', title: 'Fixture', url: 'https://example.test/page', active: true }),
     getTabList: () => [{ id: 'tab-1', title: 'Fixture', url: 'https://example.test/page', active: true }],
-    getBrowserPermission: (origin: string, permission: string) => ({ origin, permission, decision: 'ask' }),
-    setBrowserPermission: (origin: string, permission: string, decision: string) => {
-      decisions.push({ origin, permission, decision })
-      return { origin, permission, decision }
+    getPhysicalTargetToken: () => 'physical-tab-1',
+    getBrowserPermission: (requestId: string) => requestId === 'site-request-1'
+      ? pending
+      : pendingPermissionReadback({ requestId, state: 'expired', target: null }),
+    setBrowserPermission: (requestId: string, decision: string) => {
+      writes += 1
+      return {
+        ...pending,
+        requestId,
+        state: 'applied',
+        applied: true,
+        decision,
+        appliedAt: '2026-07-19T00:01:00.000Z',
+      }
     },
   } as unknown as BrowserController
 
-  const allowed = dataOf(await executeBrowserTool('browser_permission', {
+  const allowedArgs = {
     action: 'set',
+    site_request_id: 'site-request-1',
     permission: 'geolocation',
     decision: 'allow',
-  }, controller, undefined, undefined, undefined, '允许当前网站使用定位权限', undefined, taskContext({
-    instruction: '允许当前网站使用定位权限',
-    operations: ['permission.set'],
+  }
+  const awaiting = dataOf(await executeBrowserTool('browser_permission', allowedArgs, controller, undefined, undefined, undefined, undefined, undefined, taskContext({
+    toolName: 'browser_permission',
+    operationId: 'permission_set',
+    args: allowedArgs,
   })))
-  assert.equal(allowed.ok, true)
-  assert.deepEqual(decisions, [{ origin: 'https://example.test', permission: 'geolocation', decision: 'allow' }])
+  assert.equal(awaiting.ok, false)
+  assert.equal(awaiting.errorKind, 'browser_permission_confirmation_required')
+  assert.equal(writes, 0)
+  const confirmation = awaiting.browserSuspensionRequest as BrowserPermissionSuspensionRequest
+  assert.equal(confirmation.actionIntent.siteRequestId, 'site-request-1')
+  assert.equal(confirmation.target.ownerRunId, 'previous-owner-run')
 
-  const media = dataOf(await executeBrowserTool('browser_permission', {
-    action: 'set',
-    permission: 'media',
-    decision: 'allow',
-  }, controller, undefined, undefined, undefined, '允许当前网站使用摄像头和麦克风权限', undefined, taskContext({
-    instruction: '允许当前网站使用摄像头和麦克风权限',
-    operations: ['permission.set'],
+  const applied = dataOf(await executeBrowserTool('browser_permission', allowedArgs, controller, undefined, undefined, undefined, undefined, undefined, taskContext({
+    toolName: 'browser_permission',
+    operationId: 'permission_set',
+    args: allowedArgs,
+    confirmedBrowserPermissionRequest: confirmation,
   })))
-  assert.equal(media.ok, false)
-  assert.equal(media.errorKind, 'human_takeover_required')
-  assert.equal(decisions.length, 1)
+  assert.equal(applied.ok, true)
+  assert.equal(applied.state, 'applied')
+  assert.equal(applied.requestId, 'site-request-1')
+  assert.equal(writes, 1)
 })
 
 test('browser task envelope blocks a model-expanded permission mutation', async () => {
@@ -234,53 +349,118 @@ test('browser task envelope blocks a model-expanded permission mutation', async 
     getTabList: () => [{ id: 'tab-1', title: 'One', url: 'https://one.test/page', active: true }],
     setBrowserPermission: () => { writes += 1; return {} },
   } as unknown as BrowserController
+  const actualArgs = { action: 'set', site_request_id: 'site-request-1', decision: 'allow', tab_id: 'tab-1' }
+  const admittedArgs = { action: 'status', site_request_id: 'site-request-1', tab_id: 'tab-1' }
   const denied = dataOf(await executeBrowserTool(
     'browser_permission',
-    { action: 'set', permission: 'geolocation', decision: 'allow', tab_id: 'tab-1' },
+    actualArgs,
     controller,
     undefined,
     undefined,
     undefined,
-    '查看当前网站的定位权限',
     undefined,
-    taskContext({ instruction: '查看当前网站的定位权限', tabId: 'tab-1', origin: 'https://one.test' }),
+    undefined,
+    taskContext({
+      toolName: 'browser_permission',
+      operationId: 'permission_status',
+      args: admittedArgs,
+      tabId: 'tab-1',
+      origin: 'https://one.test',
+      requestPowerConfirmation: async () => true,
+    }),
   ))
-  assert.equal(denied.errorKind, 'browser_task_intent_mismatch')
+  assert.equal(denied.errorKind, 'browser_task_invocation_mismatch')
   assert.equal(writes, 0)
 })
 
-test('browser_permission resolves the explicitly bound tab and rejects a different origin', async () => {
+test('browser_permission status requires an exact live request bound to the same task and tab', async () => {
   const reads: string[] = []
+  const pending = pendingPermissionReadback({
+    target: {
+      ...(pendingPermissionReadback().target as Record<string, unknown>),
+      tabId: 'tab-2',
+      physicalTargetToken: 'physical-tab-2',
+    },
+  })
   const controller = {
     getActiveTab: () => ({ id: 'tab-1', title: 'One', url: 'https://one.test/page', active: true }),
     getTabList: () => [
       { id: 'tab-1', title: 'One', url: 'https://one.test/page', active: true },
       { id: 'tab-2', title: 'Two', url: 'https://two.test/settings', active: false },
     ],
-    getBrowserPermission: (origin: string) => { reads.push(origin); return { origin, decision: 'ask' } },
-    setBrowserPermission: () => ({ decision: 'allow' }),
+    getPhysicalTargetToken: (tabId: string) => tabId === 'tab-2' ? 'physical-tab-2' : 'physical-tab-1',
+    getBrowserPermission: (requestId: string) => { reads.push(requestId); return pending },
   } as unknown as BrowserController
-  const status = dataOf(await executeBrowserTool('browser_permission', {
-    action: 'status', permission: 'geolocation', tab_id: 'tab-2',
-  }, controller))
-  assert.equal(status.ok, true)
-  assert.equal(reads[0], 'https://two.test')
-
-  const denied = dataOf(await executeBrowserTool(
+  const statusArgs = { action: 'status', site_request_id: 'site-request-1', tab_id: 'tab-2' }
+  const status = dataOf(await executeBrowserTool(
     'browser_permission',
-    { action: 'set', permission: 'geolocation', decision: 'allow', tab_id: 'tab-2', origin: 'https://one.test' },
+    statusArgs,
     controller,
     undefined,
     undefined,
     undefined,
-    '允许 two.test 使用定位权限',
+    undefined,
     undefined,
     taskContext({
-      instruction: '允许 two.test 使用定位权限',
+      toolName: 'browser_permission',
+      operationId: 'permission_status',
+      args: statusArgs,
       tabId: 'tab-2',
       origin: 'https://two.test',
-      operations: ['permission.set'],
     }),
   ))
-  assert.equal(denied.errorKind, 'browser_task_origin_mismatch')
+  assert.equal(status.ok, true)
+  assert.equal(status.requestId, 'site-request-1')
+  assert.equal(reads[0], 'site-request-1')
+
+  const deniedArgs = { action: 'status', site_request_id: 'site-request-1', tab_id: 'tab-1' }
+  const denied = dataOf(await executeBrowserTool(
+    'browser_permission',
+    deniedArgs,
+    controller,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    taskContext({
+      toolName: 'browser_permission',
+      operationId: 'permission_status',
+      args: deniedArgs,
+      tabId: 'tab-1',
+      origin: 'https://one.test',
+    }),
+  ))
+  assert.equal(denied.errorKind, 'browser_permission_request_target_mismatch')
+})
+
+test('browser_permission reports a missing live callback as expired and never writes it', async () => {
+  let writes = 0
+  const controller = {
+    getActiveTab: () => ({ id: 'tab-1', title: 'Fixture', url: 'https://example.test/page', active: true }),
+    getTabList: () => [{ id: 'tab-1', title: 'Fixture', url: 'https://example.test/page', active: true }],
+    getPhysicalTargetToken: () => 'physical-tab-1',
+    getBrowserPermission: (requestId: string) => pendingPermissionReadback({
+      requestId,
+      state: 'expired',
+      target: null,
+    }),
+    setBrowserPermission: () => { writes += 1; return pendingPermissionReadback() },
+  } as unknown as BrowserController
+  const args = { action: 'set', site_request_id: 'old-request', decision: 'deny', tab_id: 'tab-1' }
+  const expired = dataOf(await executeBrowserTool(
+    'browser_permission',
+    args,
+    controller,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    taskContext({ toolName: 'browser_permission', operationId: 'permission_set', args }),
+  ))
+  assert.equal(expired.ok, false)
+  assert.equal(expired.errorKind, 'browser_permission_request_expired')
+  assert.equal(expired.applied, false)
+  assert.equal(writes, 0)
 })

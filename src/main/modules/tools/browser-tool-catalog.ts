@@ -24,47 +24,47 @@ export type BrowserToolDef = {
 }
 
 const DESCRIPTIONS: Record<BrowserPublicToolName, string> = {
-  browser_tabs: '列出、打开、切换或关闭浏览器标签页；返回标签、来源页和当前任务绑定。',
-  browser_navigate: '在绑定标签页打开地址、后退、前进或刷新，并保留任务与标签绑定。',
-  browser_search: '在外部搜索引擎或当前站点内搜索，并在绑定标签页打开结果页。',
-  browser_snapshot: '读取当前文档的紧凑可访问结构与稳定目标引用；后续定位优先使用这些引用。',
-  browser_find: '在当前页面快照中按文本、角色或用途查找目标，不重复扫描整页。',
-  browser_read: '读取当前页正文、指定区域或目标引用对应的内容。',
-  browser_screenshot: '返回当前页面的真实截图；可按需附加内部视觉分析。',
-  browser_wait: '等待页面就绪、选择器、文本、URL、网络安静或内容稳定。',
-  browser_click: '按目标引用、语义、选择器或坐标点击；动作后返回可核验结果。',
-  browser_type: '在目标输入区输入内容；自动选择快速填充或逐键输入，可按要求提交。',
-  browser_fill_form: '一次填写多个表单字段，并逐项核验写入结果。',
-  browser_select: '在下拉框、列表框或可选择控件中选择一个或多个值。',
-  browser_hover: '把可信鼠标移动到目标上，触发展开或提示状态。',
-  browser_scroll: '滚动页面或指定容器，并核验滚动是否生效。',
-  browser_press_key: '发送按键或组合键，例如 Enter、Escape、Tab、Meta+L。',
-  browser_drag: '在两个目标或坐标之间执行可信拖拽并核验结果。',
-  browser_upload: '把当前任务明确提供的一个或多个附件上传到页面。',
-  browser_dialog: '读取并处理当前页面的 alert、confirm、prompt 或离开页面提示。',
-  browser_request_takeover: '验证码、安全验证、Passkey 或需要人工判断时请求用户接管，并保留续跑点。',
-  browser_research: '在当前登录站点或指定 URL 集中逐项研究，保留查询覆盖、来源证据、详情正文与续跑断点；调用后不得逐关键词另开标签页回退。',
-  browser_collect: '采集图片、结构化内容、长列表或逐篇详情；长任务返回可续跑句柄。',
-  browser_download: '通过当前浏览器会话流式下载 URL、页面资源或采集结果，并校验文件。',
-  browser_archive: '把当前页面归档为 PDF、MHTML、HTML 或 Markdown。',
-  browser_task: '查询、继续、取消后台浏览器任务或读取完整/部分结果。',
-  browser_status: '读取当前页面、标签绑定、动作结果、上传/提交状态与恢复建议。',
-  browser_console: '读取或清空当前页面的受限控制台日志。',
-  browser_network: '采集或读取当前页面的受限网络请求、响应摘要与时间线。',
-  browser_resources: '发现当前页的图片、音视频、文档和流媒体资源及其证据。',
-  browser_eval: '在绑定页面执行高级 JavaScript；效果由代码和输出通道推导，不接受模型自报。',
-  browser_cdp: '调用受控 Chrome DevTools Protocol 方法；权限由方法和参数推导。',
-  browser_session: '查看登录态，清理当前站点数据，或切换已配置的受控会话配置。',
-  browser_permission: '查看、设置或重置当前站点的受控浏览器权限。',
+  browser_tabs: '标签页：list/open/switch/close。',
+  browser_navigate: '绑定页：open/back/forward/reload。',
+  browser_search: '外部或站内搜索并打开结果页。',
+  browser_snapshot: '读取紧凑页面图和稳定 target_id。',
+  browser_find: '在缓存页面图中查找目标。',
+  browser_read: '读取页面、区域或目标正文。',
+  browser_screenshot: '截取当前真实页面。',
+  browser_wait: '等待时间、页面、文本、URL 或稳定状态。',
+  browser_click: '按引用、语义、选择器或坐标点击。',
+  browser_type: '向快照中 editable:true 的精确输入目标写入文本，可提交。',
+  browser_fill_form: '批量填写并核验表单字段。',
+  browser_select: '选择下拉框或列表值。',
+  browser_hover: '移动可信指针到目标。',
+  browser_scroll: '滚动页面或容器。',
+  browser_press_key: '发送按键或组合键。',
+  browser_drag: '在两个目标或坐标间拖拽。',
+  browser_upload: '上传任务中明确提供的附件。',
+  browser_dialog: '读取或处理页面对话框。',
+  browser_request_takeover: '请求用户接管验证步骤并保留续跑点。',
+  browser_research: '管理研究项；start 需 work_items，evidence 需 evidence_bindings。',
+  browser_collect: '采集图片、结构内容或长列表。',
+  browser_download: '下载 URL、页面或媒体并校验文件。',
+  browser_archive: '归档当前页为指定格式。',
+  browser_task: '读取后台浏览器任务或结果。',
+  browser_status: '读取页面绑定与最近动作状态。',
+  browser_console: '读取或清空受限控制台日志。',
+  browser_network: '采集或读取受限网络摘要。',
+  browser_resources: '发现页面媒体、文档和流资源。',
+  browser_eval: '高级 JavaScript 兜底；结构化工具无法完成时使用，可能需要用户确认。',
+  browser_cdp: '高级 CDP 诊断兜底；结构化工具无法完成时使用，未知方法需要用户确认。',
+  browser_session: '查看、清理或切换受控会话。',
+  browser_permission: '按精确站点请求处理运行期权限。',
 }
 
-export const BROWSER_INTERACTION_TOOL_NAMES = BROWSER_TOOL_SURFACE_MANIFEST
-  .filter((entry) => entry.layer === 'read' || entry.layer === 'interaction')
-  .map((entry) => entry.name)
-
-export const BROWSER_CONTENT_TASK_TOOL_NAMES = BROWSER_TOOL_SURFACE_MANIFEST
-  .filter((entry) => entry.layer === 'long_task' || entry.layer === 'advanced')
-  .map((entry) => entry.name)
+/**
+ * Compatibility capability-group names. Browser activation exposes the full
+ * typed surface; privileged operations remain governed by their structured
+ * effect profile and scoped authorization, never by a natural-language intent subset.
+ */
+export const BROWSER_INTERACTION_TOOL_NAMES = [...BROWSER_PUBLIC_TOOL_NAMES]
+export const BROWSER_CONTENT_TASK_TOOL_NAMES: BrowserPublicToolName[] = []
 
 export const BROWSER_TOOLS: BrowserToolDef[] = BROWSER_PUBLIC_TOOL_NAMES.map((name) => {
   const surface = BROWSER_TOOL_SURFACE_MANIFEST.find((entry) => entry.name === name)
@@ -85,18 +85,6 @@ export const BROWSER_TOOLS: BrowserToolDef[] = BROWSER_PUBLIC_TOOL_NAMES.map((na
 function browserWireSchema(name: BrowserPublicToolName): Record<string, unknown> {
   const schema = z.toJSONSchema(BROWSER_TOOL_SCHEMAS[name as BrowserToolSchemaName]) as Record<string, unknown>
   const { $schema: _schema, ...wire } = schema
-  if (name === 'browser_research') {
-    wire.allOf = [
-      {
-        if: { properties: { scope: { const: 'current_site' } }, required: ['scope'] },
-        then: { required: ['queries'] },
-      },
-      {
-        if: { properties: { scope: { const: 'url_set' } }, required: ['scope'] },
-        then: { required: ['urls'] },
-      },
-    ]
-  }
   if (name === 'browser_navigate') {
     wire.allOf = [{
       if: {
@@ -121,11 +109,40 @@ function browserWireSchema(name: BrowserPublicToolName): Record<string, unknown>
       { if: { properties: { condition: { const: 'url' } }, required: ['condition'] }, then: { required: ['url'] } },
     ]
   }
+  if (name === 'browser_upload') {
+    wire.allOf = [
+      { anyOf: [{ required: ['target_id'] }, { required: ['selector'] }] },
+      {
+        oneOf: [
+          { required: ['attachment_id'] },
+          { required: ['attachment_ids'] },
+          { required: ['attachment_name'] },
+          { properties: { latest: { const: true } }, required: ['latest'] },
+        ],
+      },
+    ]
+  }
+  if (name === 'browser_research') {
+    wire.allOf = [
+      {
+        if: {
+          anyOf: [
+            { properties: { action: { const: 'start' } }, required: ['action'] },
+            { not: { required: ['action'] } },
+          ],
+        },
+        then: { required: ['work_items'] },
+      },
+      {
+        if: { properties: { action: { const: 'evidence' } }, required: ['action'] },
+        then: { required: ['evidence_bindings'] },
+      },
+    ]
+  }
   if (name === 'browser_download') {
     wire.allOf = [
       { if: { properties: { mode: { const: 'urls' } }, required: ['mode'] }, then: { required: ['urls'] } },
-      { if: { properties: { mode: { const: 'collected' } }, required: ['mode'] }, then: { required: ['source_task_id'] } },
-      { if: { properties: { mode: { enum: ['page', 'media', 'gallery'] } }, required: ['mode'] }, then: { required: ['url'] } },
+      { if: { properties: { mode: { enum: ['page', 'media'] } }, required: ['mode'] }, then: { required: ['url'] } },
       {
         if: { properties: { mode: { const: 'resolve' } }, required: ['mode'] },
         then: {
@@ -139,7 +156,18 @@ function browserWireSchema(name: BrowserPublicToolName): Record<string, unknown>
       },
     ]
   }
-  return wire
+  return compactProviderSchema(wire) as Record<string, unknown>
+}
+
+function compactProviderSchema(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map((item) => compactProviderSchema(item))
+  if (!value || typeof value !== 'object') return value
+  const compact: Record<string, unknown> = {}
+  for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
+    if (key === 'description' || key === 'title') continue
+    compact[key] = compactProviderSchema(item)
+  }
+  return compact
 }
 
 export function getBrowserAnthropicTools(): Array<Record<string, unknown>> {

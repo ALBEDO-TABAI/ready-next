@@ -92,24 +92,6 @@ describe('BrowserCapabilityService', () => {
     assert.ok(script.includes('.sort((a, b) => b.area - a.area)'))
   })
 
-  it('waits for a complex condition before extracting from a target url', async () => {
-    const { host, calls } = createCapabilityHost()
-    const service = new BrowserCapabilityService(host as any)
-
-    const result = await service.extractStructuredFromUrl('https://example.com/feed', {
-      openMode: 'prefer_reuse',
-      wait: {
-        condition: 'content_stable',
-        timeoutMs: 2000,
-        checkIntervalMs: 100,
-      },
-      template: 'article_list',
-    })
-
-    assert.strictEqual(calls[0]?.type, 'open')
-    assert.strictEqual(result.items.length, 2)
-  })
-
   it('scrolls and collects structured items until the page stops growing', async () => {
     const { host } = createCapabilityHost()
     const service = new BrowserCapabilityService(host as any)
@@ -125,6 +107,27 @@ describe('BrowserCapabilityService', () => {
     assert.strictEqual(result.reachedEnd, true)
     assert.strictEqual(result.scrolls, 3)
     assert.equal((host as any).dispatchMouse instanceof Function, true)
+  })
+
+  it('stops scrolling immediately after the owning run is aborted', async () => {
+    const { host, calls } = createCapabilityHost()
+    const controller = new AbortController()
+    ;(host as any).dispatchMouse = async (_tabId: string | null, payload: Record<string, unknown>) => {
+      calls.push({ type: 'mouse', payload })
+      controller.abort(new Error('owner_stopped'))
+    }
+    const service = new BrowserCapabilityService(host as any)
+
+    await assert.rejects(
+      service.scrollCollect('tab-1', {
+        template: 'card_list',
+        maxScrolls: 8,
+        stableRounds: 2,
+        limit: 20,
+      }, controller.signal),
+      /owner_stopped/,
+    )
+    assert.equal(calls.filter((call) => call.type === 'mouse').length, 1)
   })
 
   it('resumes a batch download without requesting an already hashed successful URL again', async () => {

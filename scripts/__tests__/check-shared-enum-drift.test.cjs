@@ -593,18 +593,6 @@ export function bad(deniedOutput) { return deniedOutput('confirmation_expired', 
   assert.match(result.stderr, /local_error_kind_literal/)
 })
 
-test('shared enum drift gate fails when browser tools copy action-confirmation literals', (t) => {
-  const root = makeHarnessRoot(t)
-  writeFile(root, 'src/main/modules/tools/browser-act-tools.ts', `
-import { ACTION_CONFIRMATION_ERROR_KINDS } from '../agent-control/contracts/error-kinds'
-export function manual(ToolDomainError) { throw new ToolDomainError('denied_manual_only', 'manual') }
-export function password(ToolDomainError) { throw new ToolDomainError('denied_pending_confirmation', 'password') }
-`)
-  const result = runIn(root)
-  assert.equal(result.status, 1)
-  assert.match(result.stderr, /local_error_kind_literal/)
-})
-
 test('shared enum drift gate fails when tool-result-envelope copies an action-confirmation object key', (t) => {
   const root = makeHarnessRoot(t)
   writeFile(root, 'src/main/modules/tools/tool-result-envelope.ts', `
@@ -614,26 +602,6 @@ export const map = { denied_manual_only: 'denied_by_policy' }
   const result = runIn(root)
   assert.equal(result.status, 1)
   assert.match(result.stderr, /local_error_kind_literal/)
-})
-
-test('shared enum drift gate fails when action-confirmation target misses registry import', (t) => {
-  const root = makeHarnessRoot(t)
-  writeFile(root, 'src/main/modules/tools/browser-act-tools.ts', `
-export const value = 'no action confirmation constants here'
-`)
-  const result = runIn(root)
-  assert.equal(result.status, 1)
-  assert.match(result.stderr, /error_kind_registry_not_imported/)
-})
-
-test('shared enum drift gate fails when action-confirmation target uses the registry without importing it', (t) => {
-  const root = makeHarnessRoot(t)
-  writeFile(root, 'src/main/modules/tools/browser-act-tools.ts', `
-export const manualOnly = ACTION_CONFIRMATION_ERROR_KINDS.deniedManualOnly.code
-`)
-  const result = runIn(root)
-  assert.equal(result.status, 1)
-  assert.match(result.stderr, /error_kind_registry_not_imported/)
 })
 
 test('shared enum drift gate fails when specialist blueprint codes are registered in the wrong family', (t) => {

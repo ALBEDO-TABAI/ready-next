@@ -27,9 +27,24 @@ export interface RawAxNode {
   /** e.g. { checked: true, expanded: false, disabled: true, selected: true } */
   states?: Record<string, boolean | string | undefined>
   backendDOMNodeId?: number
+  parentBackendDOMNodeId?: number
+  ancestorBackendDOMNodeIds?: number[]
+  stableNodeToken?: string
+  parentStableNodeToken?: string
+  ancestorStableNodeTokens?: string[]
   frameId?: string
+  frameDocumentToken?: string
   /** viewport-space box, when the node is laid out and visible */
   box?: { x: number; y: number; width: number; height: number }
+  rendered?: boolean
+  visible?: boolean
+  enabled?: boolean
+  editable?: boolean
+  href?: string
+  inputType?: string
+  autocomplete?: string
+  formAction?: string
+  ancestorContext?: string
   ignored?: boolean
   children?: RawAxNode[]
 }
@@ -40,8 +55,29 @@ export interface PageMapTarget {
   name: string
   value?: string
   states?: Record<string, boolean | string>
+  frameId: string
+  frameDocumentToken?: string
+  stableNodeToken?: string
+  backendDOMNodeId?: number
+  parentTargetId?: string
+  ancestorTargetIds?: string[]
   box?: { x: number; y: number; width: number; height: number }
+  rendered: boolean
+  visible: boolean
+  enabled: boolean
+  editable: boolean
+  fingerprint: BrowserTargetFingerprint
   unstable?: boolean
+}
+
+export interface BrowserTargetFingerprint {
+  role: string
+  name: string
+  href: string
+  inputType: string
+  autocomplete: string
+  formAction: string
+  ancestorContext: string
 }
 
 export interface PageMap {
@@ -74,10 +110,18 @@ const TARGET_ROLES = new Set([
   'switch',
   'slider',
   'listbox',
+  'dialog',
+  'form',
+  'menu',
+  'region',
   'heading',
   'disclosure-triangle',
   'DisclosureTriangle',
 ])
+
+export function isBrowserPageMapTargetRole(role: string): boolean {
+  return TARGET_ROLES.has(String(role || '').trim())
+}
 
 interface CleanNode {
   role: string
@@ -85,8 +129,23 @@ interface CleanNode {
   value?: string
   states?: Record<string, boolean | string>
   backendDOMNodeId?: number
+  parentBackendDOMNodeId?: number
+  ancestorBackendDOMNodeIds?: number[]
+  stableNodeToken?: string
+  parentStableNodeToken?: string
+  ancestorStableNodeTokens?: string[]
   frameId?: string
+  frameDocumentToken?: string
   box?: { x: number; y: number; width: number; height: number }
+  rendered?: boolean
+  visible?: boolean
+  enabled?: boolean
+  editable?: boolean
+  href?: string
+  inputType?: string
+  autocomplete?: string
+  formAction?: string
+  ancestorContext?: string
   children: CleanNode[]
 }
 
@@ -129,8 +188,23 @@ function denoise(node: RawAxNode): CleanNode[] {
     value: cleanName(node.value) || undefined,
     states: normalizeStates(node.states),
     backendDOMNodeId: node.backendDOMNodeId,
+    parentBackendDOMNodeId: node.parentBackendDOMNodeId,
+    ancestorBackendDOMNodeIds: node.ancestorBackendDOMNodeIds,
+    stableNodeToken: node.stableNodeToken,
+    parentStableNodeToken: node.parentStableNodeToken,
+    ancestorStableNodeTokens: node.ancestorStableNodeTokens,
     frameId: node.frameId,
+    frameDocumentToken: node.frameDocumentToken,
     box: node.box,
+    rendered: node.rendered,
+    visible: node.visible,
+    enabled: node.enabled,
+    editable: node.editable,
+    href: cleanName(node.href),
+    inputType: cleanName(node.inputType).toLowerCase(),
+    autocomplete: cleanName(node.autocomplete).toLowerCase(),
+    formAction: cleanName(node.formAction),
+    ancestorContext: cleanName(node.ancestorContext),
     children,
   }
   return [cleaned]
@@ -141,27 +215,73 @@ function assignTargets(
   generation: number,
   targets: PageMapTarget[],
   structuralPath: number[],
+  ancestorTargetIds: string[] = [],
+  inheritedFrameId = '0',
 ): void {
   nodes.forEach((node, index) => {
     const path = [...structuralPath, index]
-    if (TARGET_ROLES.has(node.role) && (node.name || node.value)) {
-      const stable = node.backendDOMNodeId !== undefined
-      const frameId = node.frameId ?? '0'
+    const frameId = node.frameId ?? inheritedFrameId
+    let currentTargetId: string | null = null
+    if (
+      isBrowserPageMapTargetRole(node.role)
+      && (node.name || node.value || node.backendDOMNodeId !== undefined || node.stableNodeToken)
+    ) {
+      const stableNodeToken = node.backendDOMNodeId !== undefined
+        ? `b${node.backendDOMNodeId}`
+        : String(node.stableNodeToken || '')
+      const stable = stableNodeToken.length > 0
       const targetId = stable
-        ? `${generation}:${frameId}:${node.backendDOMNodeId}`
+        ? `${generation}:${frameId}:${stableNodeToken}`
         : `${generation}:${frameId}:p${path.join('.')}`
+      currentTargetId = targetId
+      const declaredAncestorIds = Array.isArray(node.ancestorBackendDOMNodeIds)
+        ? node.ancestorBackendDOMNodeIds.map((id) => `${generation}:${frameId}:b${id}`)
+        : Array.isArray(node.ancestorStableNodeTokens)
+          ? node.ancestorStableNodeTokens.map((token) => `${generation}:${frameId}:${token}`)
+        : ancestorTargetIds
+      const declaredParentId = node.parentBackendDOMNodeId !== undefined
+        ? `${generation}:${frameId}:b${node.parentBackendDOMNodeId}`
+        : node.parentStableNodeToken
+          ? `${generation}:${frameId}:${node.parentStableNodeToken}`
+          : declaredAncestorIds.at(-1)
       const target: PageMapTarget = {
         targetId,
         role: node.role,
         name: node.name,
+        frameId,
+        ...(node.frameDocumentToken ? { frameDocumentToken: node.frameDocumentToken } : {}),
+        ...(node.stableNodeToken ? { stableNodeToken: node.stableNodeToken } : {}),
+        ...(node.backendDOMNodeId !== undefined ? { backendDOMNodeId: node.backendDOMNodeId } : {}),
+        rendered: node.rendered ?? (node.box ? node.box.width > 0 && node.box.height > 0 : true),
+        visible: node.visible ?? (node.box ? node.box.width > 0 && node.box.height > 0 : true),
+        enabled: node.enabled ?? node.states?.disabled !== true,
+        editable: node.editable ?? (node.role === 'textbox' || node.role === 'searchbox'),
+        fingerprint: {
+          role: node.role,
+          name: node.name,
+          href: node.href || '',
+          inputType: node.inputType || '',
+          autocomplete: node.autocomplete || '',
+          formAction: node.formAction || '',
+          ancestorContext: node.ancestorContext || '',
+        },
       }
+      if (declaredParentId) target.parentTargetId = declaredParentId
+      if (declaredAncestorIds.length > 0) target.ancestorTargetIds = declaredAncestorIds
       if (node.value) target.value = node.value
       if (node.states) target.states = node.states
       if (node.box) target.box = node.box
       if (!stable) target.unstable = true
       targets.push(target)
     }
-    assignTargets(node.children, generation, targets, path)
+    assignTargets(
+      node.children,
+      generation,
+      targets,
+      path,
+      currentTargetId ? [...ancestorTargetIds, currentTargetId] : ancestorTargetIds,
+      frameId,
+    )
   })
 }
 
@@ -191,6 +311,18 @@ export function buildPageMap(rawRoots: RawAxNode[], options: BuildPageMapOptions
 
   const targets: PageMapTarget[] = []
   assignTargets(cleaned, options.generation, targets, [])
+  const targetIds = new Set(targets.map((target) => target.targetId))
+  for (const target of targets) {
+    const ancestry = (target.ancestorTargetIds || [])
+      .filter((targetId) => targetId !== target.targetId && targetIds.has(targetId))
+    if (ancestry.length > 0) {
+      target.ancestorTargetIds = ancestry
+      target.parentTargetId = ancestry.at(-1)
+    } else {
+      delete target.ancestorTargetIds
+      delete target.parentTargetId
+    }
+  }
 
   const lines: string[] = []
   renderLines(cleaned, 0, lines)
@@ -198,29 +330,17 @@ export function buildPageMap(rawRoots: RawAxNode[], options: BuildPageMapOptions
   let truncated = false
   if (Buffer.byteLength(text, 'utf8') > maxBytes) {
     truncated = true
-    // D13（2026-07-04 真机实锚）：砍尾式截断会把 DOM 尾部的主行动按钮
-    // （发布/发送/提交——几乎总在页面底部）砍成第一个牺牲品。改为中段
-    // 截断：头部 ~75% 预算 + 尾部 ~20% 预算，行边界切割，永不半行。
-    const marker = '… (truncated middle) …'
-    const tailBudget = Math.max(256, Math.floor(maxBytes * 0.2))
-    const headBudget = Math.max(256, maxBytes - tailBudget - Buffer.byteLength(marker, 'utf8') - 2)
-    const head: string[] = []
-    let headBytes = 0
+    const marker = '… (more targets available through browser_find cursor) …'
+    const pageBudget = Math.max(0, maxBytes - Buffer.byteLength(marker, 'utf8') - 1)
+    const page: string[] = []
+    let pageBytes = 0
     for (const line of lines) {
       const cost = Buffer.byteLength(line, 'utf8') + 1
-      if (headBytes + cost > headBudget) break
-      head.push(line)
-      headBytes += cost
+      if (pageBytes + cost > pageBudget) break
+      page.push(line)
+      pageBytes += cost
     }
-    const tail: string[] = []
-    let tailBytes = 0
-    for (let i = lines.length - 1; i > head.length - 1; i--) {
-      const cost = Buffer.byteLength(lines[i], 'utf8') + 1
-      if (tailBytes + cost > tailBudget) break
-      tail.unshift(lines[i])
-      tailBytes += cost
-    }
-    text = [...head, marker, ...tail].join('\n')
+    text = [...page, marker].join('\n')
   }
 
   return {

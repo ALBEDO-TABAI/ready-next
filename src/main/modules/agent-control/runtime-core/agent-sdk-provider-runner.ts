@@ -132,11 +132,17 @@ export async function runWithOpenAIAgentsSdk(
       const result = await compactAgentInputItems(modelData.input, {
         windowTokens: params.contextWindowTokens
       })
+      const filteredItems = params.callModelInputFilter
+        ? await params.callModelInputFilter(result.items, {
+            sourceItems: modelData.input,
+            compacted: result.compacted,
+          })
+        : result.items
       pendingRequestBills.push({
         beforeInput: modelData.input,
         compacted: result.compacted,
       })
-      if (!result.compacted) return modelData
+      if (!result.compacted && filteredItems === modelData.input) return modelData
       logAgentMetric('agent_sdk_auto_context_compacted', {
         agentName: params.agentName,
         sessionId: params.sessionId || null,
@@ -154,7 +160,7 @@ export async function runWithOpenAIAgentsSdk(
       log(
         `auto context compacted agent=${params.agentName} run=${params.runId} before=${result.report.beforeTokens} after=${result.report.afterTokens} dropped=${result.report.droppedItems} truncated=${result.report.truncatedToolResults}`
       )
-      return { ...modelData, input: result.items }
+      return { ...modelData, input: filteredItems }
     },
     toolExecution: {
       maxFunctionToolConcurrency: 1
@@ -207,13 +213,33 @@ export async function runWithOpenAIAgentsSdk(
       visionItems: bill.visionItems
     })
   })
-  const lastResponse = rawResponses[rawResponses.length - 1]
   return {
     finalText: typeof stream.finalOutput === 'string' ? stream.finalOutput : '',
     iterationsUsed: rawResponses.length,
-    usage: usageFromModelResponse(lastResponse),
+    usage: usageFromModelResponses(rawResponses),
     lastResponseId: stream.lastResponseId
   }
+}
+
+/** One SDK run may call the provider multiple times around tool execution.
+ * Budgets and performance evidence must count every request, not only the
+ * final response. */
+export function usageFromModelResponses(
+  responses: readonly ModelResponse[]
+): ReadyAgentSdkRunResult['usage'] {
+  let inputTokens = 0
+  let outputTokens = 0
+  let totalTokens = 0
+  let sawUsage = false
+  for (const response of responses) {
+    const current = usageFromModelResponse(response)
+    if (!current) continue
+    sawUsage = true
+    inputTokens += current.inputTokens
+    outputTokens += current.outputTokens
+    totalTokens += current.totalTokens
+  }
+  return sawUsage ? { inputTokens, outputTokens, totalTokens } : undefined
 }
 
 export function usageFromModelResponse(

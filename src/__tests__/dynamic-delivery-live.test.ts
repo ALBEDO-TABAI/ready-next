@@ -3,6 +3,7 @@ import test, { type TestContext } from 'node:test'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
+import { canonicalCoreCloseoutTestPort } from './helpers/canonical-core-closeout-test-port'
 
 import { AgentSdkRuntime } from '../main/modules/agent-control/runtime-core/agent-sdk-runtime'
 import { buildRequestEnvelope } from '../main/modules/agent-control/contracts/request-envelope'
@@ -76,6 +77,9 @@ async function runScenario(
     },
   }
   runtime.setRuntime({
+    ...canonicalCoreCloseoutTestPort((input) => {
+      if (input.deliveryState) row = { ...row, deliveryState: input.deliveryState }
+    }),
     getTaskProjection: () => row,
     getTaskProjectionStore: () => store,
     getTaskProjectionStoreForFinalize: () => store,

@@ -89,7 +89,11 @@ function CardRow({
               {statusLabel[card.status]}
             </Pill>
             <Pill>{scopeLabel(card.scopeId)}</Pill>
-            {card.isSiteCard && <Pill tone={card.siteRiskLevel === 'high' ? 'red' : 'green'}>{card.siteRiskLevel === 'high' ? '高风险站点' : '低风险站点'}</Pill>}
+            {card.isSiteCard && (
+              <Pill tone={card.siteRiskLevel === 'high' ? 'red' : card.siteRiskLevel === 'low' ? 'green' : 'neutral'}>
+                {card.siteRiskLevel === 'high' ? '高风险站点' : card.siteRiskLevel === 'low' ? '低风险站点' : '风险未声明'}
+              </Pill>
+            )}
             {card.isRiskSuggestion && <Pill tone="red">风险变更建议</Pill>}
           </div>
           <div className="text-[13px] font-medium leading-5" style={{ color: 'var(--text-title)' }}>
@@ -263,7 +267,7 @@ export default function BeliefCardsPanel({
               </h4>
             </div>
             <div className="text-[12px] leading-5" style={{ color: 'var(--text-muted)' }}>
-              站点卡 {snapshot.summary.siteCards} 张，高风险 {snapshot.summary.highRiskSiteCards} 张，风险变更建议 {snapshot.summary.riskSuggestions} 张。风险等级只按代码权威判断，卡片正文不能改拦截规则。
+              站点卡 {snapshot.summary.siteCards} 张，已持久声明高风险 {snapshot.summary.highRiskSiteCards} 张，风险变更建议 {snapshot.summary.riskSuggestions} 张。未声明的卡片保持未知，不再按站点名单推断。
             </div>
             {highRiskSites.length > 0 && (
               <div className="flex flex-wrap gap-2 mt-3">

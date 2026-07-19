@@ -43,18 +43,10 @@ test('fresh distinct action after a continuable task → NOT relevant (full brow
   assert.equal(decision.reason, 'unrelated_turn')
 })
 
-test('a skill-resume follow-up with NO browser intent keeps skill context (continuable_task)', () => {
-  // "跑 finalize" is a VEA skill continuation with no browser-work intent — it
-  // must keep the reduced skill surface (browser task tools suppressed).
+test('a continuable projection alone cannot authorize skill context from operation wording', () => {
   const decision = relevance('跑 finalize', [continuableCollection])
-  assert.equal(decision.relevant, true)
-  assert.equal(decision.reason, 'continuable_task')
-})
-
-test('a follow-up-like turn with a continuable task still keeps skill context relevant', () => {
-  const decision = relevance('好的，就按这个继续', [continuableCollection])
-  assert.equal(decision.relevant, true)
-  assert.equal(decision.reason, 'continuable_task')
+  assert.equal(decision.relevant, false)
+  assert.equal(decision.reason, 'unrelated_turn')
 })
 
 test('genuine resume via continuationIntent stays relevant regardless of text shape', () => {

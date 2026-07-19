@@ -89,16 +89,10 @@ export function dynamicDeliveryVerifierLabel(
 const CAPSULE_SHELL_STYLE: React.CSSProperties = {
   borderRadius: 12,
   border: 0,
-  background: 'color-mix(in srgb, var(--surface-card-bg) 20%, transparent)',
+  background: 'transparent',
   display: 'flex',
   flexDirection: 'column',
   overflow: 'hidden',
-}
-
-const TASK_CARD_SHELL_STYLE: React.CSSProperties = {
-  ...CAPSULE_SHELL_STYLE,
-  border: '1px solid color-mix(in srgb, var(--border-default) 82%, transparent)',
-  background: 'color-mix(in srgb, var(--surface-card-bg) 44%, transparent)',
 }
 
 const CAPSULE_HEADER_STYLE: React.CSSProperties = {
@@ -142,9 +136,6 @@ export function TaskCard({
   onContinueDetachedTask,
   onCancelChildRun,
   onContinueChildRun,
-  onResumeBrowserTask,
-  onCancelBrowserTask,
-  onConfirmBrowserCollectionConsent,
   dismissible = false,
   onDismiss,
 }: {
@@ -181,9 +172,6 @@ export function TaskCard({
   onContinueDetachedTask?: (scopeId: string, taskId?: string | null) => void
   onCancelChildRun?: (scopeId: string, childRunId: string) => void
   onContinueChildRun?: (scopeId: string, childRunId: string) => void
-  onResumeBrowserTask?: (scopeId: string, taskId: string) => void
-  onCancelBrowserTask?: (scopeId: string, taskId: string) => void
-  onConfirmBrowserCollectionConsent?: (scopeId: string, requestId: string) => void
   /** Presentation-only removal. It never stops the underlying task. */
   dismissible?: boolean
   onDismiss?: () => void
@@ -223,21 +211,6 @@ export function TaskCard({
   const childRunId = run.taskContinuation?.childRunId || null
   const isAgentHandoff = isInternalAgentHandoffTask(run)
   const shouldShowOpenScopeButton = Boolean(compact && run.scopeId !== sessionId)
-  const browserTaskId = (() => {
-    if (run.module !== 'browser') return null
-    const continuationTaskId = typeof run.taskContinuation?.detachedTaskId === 'string'
-      && run.taskContinuation.detachedTaskId.startsWith('browser-task-')
-      ? run.taskContinuation.detachedTaskId
-      : null
-    if (continuationTaskId) return continuationTaskId
-    return typeof run.taskId === 'string' && run.taskId.startsWith('browser-task-')
-      ? run.taskId
-      : null
-  })()
-  const browserCollectionConsent = run.module === 'browser'
-    ? run.progress?.browserCollectionConsent || null
-    : null
-  const browserCollectionConsentLabel = '确认部分采集'
   const progressLabel = formatTaskProgressLabel(run.progress)
   const progressValue = progressPercent(run.progress)
   const progressLabelAlreadyHasPercent = Boolean(progressLabel && /\d+%/.test(progressLabel))
@@ -298,23 +271,16 @@ export function TaskCard({
   const showContinueDetached = isDetachedTask && run.canResume === true && resumableActions.includes('continue')
   const showContinueChild = Boolean(childRunId) && run.canResume === true && resumableActions.includes('continue')
   const showCancelChild = Boolean(childRunId) && resumableActions.includes('cancel')
-  const showResumeBrowser = Boolean(browserTaskId) && run.canResume === true && resumableActions.includes('continue')
-  const showCancelBrowser = Boolean(browserTaskId)
-    && resumableActions.includes('cancel')
-    && !hasTerminalTaskStatus
-    && taskRuntimeState.visualState === 'background_running'
-  const showConsentButton = Boolean(browserCollectionConsent?.requestId)
-  /* Stage Q — generic 继续运行：suspended + canResume，且 child/detached/
-     browser 各自的精确按钮优先；waitingFor/resumable 残余条件保持旧动作行
+  /* Stage Q — generic 继续运行：suspended + canResume，且 child/detached
+     各自的精确按钮优先；waitingFor/resumable 残余条件保持动作行
      外层门的语义（waitingFor='none' 且无可恢复动作时不出现）。 */
   const showGenericResume = run.interactionState === 'suspended'
     && run.canResume === true
     && !childRunId
     && !isDetachedTask
-    && !browserTaskId
     && (run.waitingFor !== 'none' || resumableActions.length > 0)
   const showContinueInput = !isAgentHandoff && (run.waitingFor === 'input' || run.waitingFor === 'clarification')
-  const showConfirmationPair = run.waitingFor === 'confirmation' && !browserCollectionConsent
+  const showConfirmationPair = run.waitingFor === 'confirmation'
   const showAgentResult = run.waitingFor === 'agent_result'
   const showRetry = run.canResume === true && resumableActions.includes('retry')
   const hasActionRow = showSuspendButton
@@ -322,9 +288,6 @@ export function TaskCard({
     || showContinueDetached
     || showContinueChild
     || showCancelChild
-    || showResumeBrowser
-    || showCancelBrowser
-    || showConsentButton
     || showGenericResume
     || showContinueInput
     || showConfirmationPair
@@ -370,7 +333,7 @@ export function TaskCard({
         suppressHeaderClickRef.current = false
       }}
       style={{
-        ...TASK_CARD_SHELL_STYLE,
+        ...CAPSULE_SHELL_STYLE,
         position: 'relative',
         touchAction: dismissible ? 'pan-y' : undefined,
         transform: swipeOffset ? `translateX(${swipeOffset}px)` : undefined,
@@ -811,44 +774,6 @@ export function TaskCard({
               style={{ ...TASK_ACTION_BUTTON_STYLE }}
             >
               取消
-            </button>
-          )}
-          {showResumeBrowser && browserTaskId && (
-            <button
-              type="button"
-              data-ready-task-action="resume-browser-task"
-              data-ready-task-scope-id={run.scopeId || undefined}
-              data-ready-task-id={browserTaskId}
-              onClick={() => onResumeBrowserTask?.(run.scopeId, browserTaskId)}
-              style={{ ...TASK_ACTION_BUTTON_STYLE }}
-            >
-              继续浏览器采集
-            </button>
-          )}
-          {showCancelBrowser && browserTaskId && (
-            <button
-              type="button"
-              data-ready-task-action="cancel-browser-task"
-              data-ready-task-scope-id={run.scopeId || undefined}
-              data-ready-task-id={browserTaskId}
-              onClick={() => onCancelBrowserTask?.(run.scopeId, browserTaskId)}
-              style={{ ...TASK_ACTION_BUTTON_STYLE }}
-            >
-              停止采集
-            </button>
-          )}
-          {showConsentButton && browserCollectionConsent?.requestId && (
-            <button
-              type="button"
-              data-ready-task-action="confirm-browser-collection-consent"
-              data-ready-task-scope-id={run.scopeId || undefined}
-              data-ready-task-id={run.taskId || undefined}
-              data-ready-task-consent-kind={browserCollectionConsent.consentKind}
-              data-ready-task-consent-request-id={browserCollectionConsent.requestId}
-              onClick={() => onConfirmBrowserCollectionConsent?.(run.scopeId, browserCollectionConsent.requestId)}
-              style={{ ...TASK_ACTION_BUTTON_STYLE }}
-            >
-              {browserCollectionConsentLabel}
             </button>
           )}
           {showGenericResume && (

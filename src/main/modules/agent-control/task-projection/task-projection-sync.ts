@@ -703,6 +703,7 @@ async function syncParentProjectionFromChild(
   if (!child.parentTaskId) return
   const parent = await store.get(child.parentTaskId)
   if (!parent) return
+  if (parent.requestAnchor) return
   const nextSteps = mergeChildTaskIntoParentSteps(parent, child)
   if (!nextSteps) return
   const childKeepsParentOpen = child.status === 'running' || child.status === 'blocked'
@@ -886,12 +887,16 @@ export async function syncTaskProjection(
   const taskId = resolveTaskId(summary, payload, truthPatch, contract)
   if (!taskId) return null
   const previous = await store.get(taskId)
+  if (previous?.requestAnchor) return previous
   let next = buildTaskProjectionRecord(summary, payload, previous, projectionTruth)
   if (!next) return null
 
   if (previous) {
     if (shouldSkipProjectionWrite(previous, next, payload)) return previous
-    await store.update(taskId, next)
+    await store.update(taskId, next, { browserParentBoundary: 'unbound_only' })
+    const committed = await store.get(taskId)
+    if (committed?.requestAnchor) return committed
+    if (committed) next = committed
   } else {
     try {
       await store.create(next)
@@ -899,10 +904,14 @@ export async function syncTaskProjection(
       if (!isTaskProjectionUniqueRace(error)) throw error
       const concurrentPrevious = await store.get(taskId)
       if (!concurrentPrevious) throw error
+      if (concurrentPrevious.requestAnchor) return concurrentPrevious
       next = buildTaskProjectionRecord(summary, payload, concurrentPrevious, projectionTruth)
       if (!next) return null
       if (shouldSkipProjectionWrite(concurrentPrevious, next, payload)) return concurrentPrevious
-      await store.update(taskId, next)
+      await store.update(taskId, next, { browserParentBoundary: 'unbound_only' })
+      const committed = await store.get(taskId)
+      if (committed?.requestAnchor) return committed
+      if (committed) next = committed
     }
   }
   if (

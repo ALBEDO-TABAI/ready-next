@@ -3,6 +3,58 @@ import test from 'node:test'
 
 import { TaskProjectionRepository } from '../main/modules/repositories/task-projection-repository'
 
+test('bound Browser Parents reject ordinary writes and silently yield unbound-only syncs', () => {
+  const repository = new TaskProjectionRepository({
+    getRawDb() {
+      return {
+        prepare(sql: string) { throw new Error(`unexpected SQL: ${sql}`) },
+      } as any
+    },
+  } as any)
+  repository.get = (() => ({
+    taskId: 'parent-1',
+    scopeId: 'scope-1',
+    runId: 'run-1',
+    taskOrigin: 'user',
+    taskType: 'short_task',
+    module: 'browser',
+    taskTitle: 'Browser task',
+    taskSummary: 'Running',
+    status: 'running',
+    interactionState: 'running',
+    waitingFor: 'none',
+    steps: [],
+    currentStepId: null,
+    budget: null,
+    recoveryHistory: [],
+    blockedReason: null,
+    resumableActions: [],
+    continuationRef: null,
+    progress: null,
+    recentArtifacts: [],
+    requestAnchor: {
+      sourceMessageId: 'message-1',
+      sourceRef: 'message:message-1',
+      requestSnapshot: '在浏览器中完成任务',
+      requestDigest: 'digest-1',
+      resources: [],
+      createdAt: '2026-04-16T11:00:00.000Z',
+    },
+    createdAt: '2026-04-16T11:00:00.000Z',
+    updatedAt: '2026-04-16T11:00:00.000Z',
+  } as any)) as typeof repository.get
+
+  assert.doesNotThrow(() => repository.update(
+    'parent-1',
+    { taskSummary: 'stale generic update' },
+    { browserParentBoundary: 'unbound_only' },
+  ))
+  assert.throws(
+    () => repository.update('parent-1', { taskSummary: 'unauthorized update' }),
+    /bound Browser Parent requires workflow unit-of-work/,
+  )
+})
+
 test('TaskProjectionRepository persists and updates structured task projection records', async () => {
   const rows = new Map<string, Record<string, unknown>>()
   const repository = new TaskProjectionRepository({
@@ -12,36 +64,15 @@ test('TaskProjectionRepository persists and updates structured task projection r
         close() {},
         prepare(sql: string) {
           if (sql.includes('INSERT INTO task_projections')) {
+            const columns = sql
+              .slice(sql.indexOf('(') + 1, sql.indexOf(')'))
+              .split(',')
+              .map((column) => column.trim())
             return {
               run(...params: unknown[]) {
-                rows.set(String(params[0]), {
-                  task_id: params[0],
-                  scope_id: params[1],
-                  run_id: params[2],
-                  parent_task_id: params[3],
-                  parent_step_id: params[4],
-                  task_type: params[5],
-                  module: params[6],
-                  task_title: params[7],
-                  task_summary: params[8],
-                  status: params[9],
-                  interaction_state: params[10],
-                  waiting_for: params[11],
-                  steps_json: params[12],
-                  current_step_id: params[13],
-                  budget_json: params[14],
-                  budget_usage_percent: params[15],
-                  budget_warning_level: params[16],
-                  recovery_history_json: params[17],
-                  degradation_reason: params[18],
-                  blocked_reason: params[19],
-                  resumable_actions_json: params[20],
-                  continuation_ref_json: params[21],
-                  progress_json: params[22],
-                  recent_artifacts_json: params[23],
-                  created_at: params[24],
-                  updated_at: params[25],
-                })
+                const row: Record<string, unknown> = {}
+                columns.forEach((column, index) => { row[column] = params[index] })
+                rows.set(String(row.task_id), row)
                 return { changes: 1 }
               },
               get() {
@@ -216,36 +247,15 @@ test('TaskProjectionRepository supports child-task lookup by parent task id', as
         close() {},
         prepare(sql: string) {
           if (sql.includes('INSERT INTO task_projections')) {
+            const columns = sql
+              .slice(sql.indexOf('(') + 1, sql.indexOf(')'))
+              .split(',')
+              .map((column) => column.trim())
             return {
               run(...params: unknown[]) {
-                rows.set(String(params[0]), {
-                  task_id: params[0],
-                  scope_id: params[1],
-                  run_id: params[2],
-                  parent_task_id: params[3],
-                  parent_step_id: params[4],
-                  task_type: params[5],
-                  module: params[6],
-                  task_title: params[7],
-                  task_summary: params[8],
-                  status: params[9],
-                  interaction_state: params[10],
-                  waiting_for: params[11],
-                  steps_json: params[12],
-                  current_step_id: params[13],
-                  budget_json: params[14],
-                  budget_usage_percent: params[15],
-                  budget_warning_level: params[16],
-                  recovery_history_json: params[17],
-                  degradation_reason: params[18],
-                  blocked_reason: params[19],
-                  resumable_actions_json: params[20],
-                  continuation_ref_json: params[21],
-                  progress_json: params[22],
-                  recent_artifacts_json: params[23],
-                  created_at: params[24],
-                  updated_at: params[25],
-                })
+                const row: Record<string, unknown> = {}
+                columns.forEach((column, index) => { row[column] = params[index] })
+                rows.set(String(row.task_id), row)
                 return { changes: 1 }
               },
               get() {

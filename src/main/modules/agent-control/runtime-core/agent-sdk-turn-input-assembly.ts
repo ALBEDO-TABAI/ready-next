@@ -14,7 +14,7 @@ import type {
 } from '../contracts/run-contracts'
 import { assertCurrentMessageCapability } from '../domain-adapters/message-capability-filter'
 import type { RequestedCapabilityConflict } from '../domain-adapters/capability-resolver'
-import { loadBrowserDisciplineText } from '../domain-adapters/browser-discipline-asset'
+import { buildBrowserDisciplineBundle } from '../domain-adapters/browser-discipline-asset'
 import { logAgentMetric } from '../metrics'
 import type { SkillToolAuthorization } from '../skills/skill-tool-authorization'
 import { buildCurrentDateReminderText } from '../system-reminders/current-date-reminder'
@@ -49,7 +49,7 @@ export interface AgentSdkTurnInputAssemblyContext {
   providerContent: RunMessage
   useTextToolBridge: boolean
   toolDefinitions: ToolDefinition[]
-  latentSkillToolDefinitions?: ToolDefinition[]
+  latentToolDefinitions?: ToolDefinition[]
   toolBridgeRuntimeContext: ToolBridgeRuntimeContext
   hasVeaPipelineTool: boolean
   hasMapAmbiguityQuestionTools: boolean
@@ -96,7 +96,7 @@ export function assembleAgentSdkTurnInput(
     providerContent,
     useTextToolBridge,
     toolDefinitions,
-    latentSkillToolDefinitions = [],
+    latentToolDefinitions = [],
     toolBridgeRuntimeContext,
     hasVeaPipelineTool,
     hasMapAmbiguityQuestionTools,
@@ -113,7 +113,7 @@ export function assembleAgentSdkTurnInput(
   } = ctx
   const sdkToolDefinitions = Array.from(
     new Map(
-      [...toolDefinitions, ...latentSkillToolDefinitions]
+      [...toolDefinitions, ...latentToolDefinitions]
         .map((definition) => [definition.name, definition]),
     ).values(),
   )
@@ -171,7 +171,12 @@ export function assembleAgentSdkTurnInput(
         hasBrowserPowerTools
           ? '本轮已开放列出的 Browser Power 工具；安全等级、授权与审计仍由代码执行。'
           : '本轮未开放 Browser Power 工具；不要声称可用自由脚本或 Power 能力。',
-        loadBrowserDisciplineText()
+        buildBrowserDisciplineBundle({
+          definitions: toolDefinitions.filter((definition) => definition.domain === 'browser'),
+          requestEnvelope: toolBridgeRuntimeContext.requestEnvelope,
+          activation: 'initial',
+          includeCompleteTextCatalog: false,
+        }).text,
       ].filter(Boolean).join('\n')
     : ''
 

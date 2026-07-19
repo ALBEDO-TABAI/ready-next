@@ -23,6 +23,10 @@ export interface DeliveryRunContext {
   usage: RunUsageAccumulator
   canonicalReceiptItems: AgentInputItem[]
   evidenceResources: VerifierResourceBundle['items']
+  pendingAcceptance: {
+    acceptedText: string
+    nextState: DeliveryStateV1
+  } | null
 }
 
 export class DeliveryRunContextStore {

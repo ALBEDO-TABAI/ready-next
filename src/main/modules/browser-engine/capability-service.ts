@@ -11,35 +11,19 @@ import type {
   BrowserAggregateOptions,
   BrowserExtractStructuredOptions,
   BrowserExtractStructuredResult,
-  BrowserOpenTargetMode,
-  BrowserOpenTargetResult,
   BrowserScrollCollectOptions,
   BrowserScrollCollectResult,
   BrowserStructuredItem,
   BrowserWaitForConditionOptions,
 } from './capability-types'
-import { BrowserActionExecutor } from '../tools/browser-action-executor'
-import type { ToolExecutionOutput } from '../agent-control/tools-runtime/tool-result-types'
-import type { BrowserLeaseGate } from './agent-browser-lease-gate'
 
 interface BrowserCapabilityHost {
-  openForCaptureTarget(url: string): Promise<{ success: boolean; tabId?: string; reused?: boolean; error?: string }>
-  createTab(url: string): Promise<{ success: boolean; tabId?: string; error?: string }>
-  navigate(tabId: string | null, url: string): Promise<{ success: boolean; error?: string }>
   getActiveTab(): { id: string; url: string } | undefined
   executeJS(tabId: string | null, code: string): Promise<unknown>
   dispatchMouse?(
     tabId: string | null,
     payload: Record<string, unknown>,
   ): Promise<void>
-  captureLiveTabPage?(
-    url: string,
-    options?: { timeoutMs?: number; settleMs?: number; script?: string },
-  ): Promise<unknown | null>
-  captureBackgroundPage?(
-    url: string,
-    options?: { timeoutMs?: number; settleMs?: number; script?: string },
-  ): Promise<unknown>
   downloadUrlToDirectory?(
     payload: BrowserDownloadUrlToDirectoryPayload,
   ): Promise<BrowserDownloadUrlToDirectoryResult>
@@ -54,22 +38,25 @@ interface ScrollMetrics {
   maxScroll: number
 }
 
-const capabilityActionExecutor = new BrowserActionExecutor()
-
-function outputRecord(output: string | ToolExecutionOutput): Record<string, unknown> {
-  if (typeof output !== 'string') return output.data || {}
-  try {
-    const parsed = JSON.parse(output) as unknown
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
-      ? parsed as Record<string, unknown>
-      : {}
-  } catch {
-    return {}
-  }
+function throwIfAborted(signal?: AbortSignal): void {
+  if (!signal?.aborted) return
+  throw signal.reason instanceof Error ? signal.reason : new Error('browser_capability_aborted')
 }
 
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms))
+function delay(ms: number, signal?: AbortSignal): Promise<void> {
+  throwIfAborted(signal)
+  if (!signal) return new Promise((resolve) => setTimeout(resolve, ms))
+  return new Promise((resolve, reject) => {
+    const onAbort = () => {
+      clearTimeout(timer)
+      reject(signal.reason instanceof Error ? signal.reason : new Error('browser_capability_aborted'))
+    }
+    const timer = setTimeout(() => {
+      signal.removeEventListener('abort', onAbort)
+      resolve()
+    }, ms)
+    signal.addEventListener('abort', onAbort, { once: true })
+  })
 }
 
 function expandHomePath(input: string): string {
@@ -332,15 +319,15 @@ export class BrowserCapabilityService {
   private async waitForScrollSettled(
     tabId: string | null,
     before: ScrollMetrics,
-    signal: AbortSignal,
+    signal?: AbortSignal,
     timeoutMs = 1_200,
   ): Promise<ScrollMetrics> {
     const startedAt = Date.now()
     let last = before
     let stableReads = 0
     while (Date.now() - startedAt < timeoutMs) {
-      if (signal.aborted) throw signal.reason instanceof Error ? signal.reason : new Error('browser_scroll_aborted')
-      await delay(50)
+      throwIfAborted(signal)
+      await delay(50, signal)
       const next = await this.readScrollMetrics(tabId)
       const unchanged = Math.abs(next.y - last.y) < 1 && next.height === last.height
       stableReads = unchanged ? stableReads + 1 : 0
@@ -357,64 +344,11 @@ export class BrowserCapabilityService {
     return this.host.getActiveTab()
   }
 
-  async openTarget(
-    url: string,
-    mode: BrowserOpenTargetMode = 'prefer_reuse',
-    leaseGate?: BrowserLeaseGate,
-  ): Promise<BrowserOpenTargetResult> {
-    if (leaseGate) {
-      const output = await capabilityActionExecutor.execute({
-        toolName: 'browser_tabs',
-        args: { action: 'open', url },
-        origin: url,
-        leaseGate,
-        dispatch: async () => JSON.stringify(await this.openTarget(url, mode)),
-      })
-      return outputRecord(output) as unknown as BrowserOpenTargetResult
-    }
-    if (mode === 'current_tab') {
-      const activeTab = this.host.getActiveTab()
-      const result = await this.host.navigate(activeTab?.id || null, url)
-      return result.success
-        ? { success: true, tabId: activeTab?.id || undefined, reused: Boolean(activeTab?.id), url }
-        : { success: false, error: result.error }
-    }
-
-    if (mode === 'new_tab') {
-      const created = await this.host.createTab(url)
-      return created.success
-        ? { success: true, tabId: created.tabId, reused: false, url }
-        : { success: false, error: created.error }
-    }
-
-    const reusable = await this.host.openForCaptureTarget(url)
-    if (reusable.success) {
-      return { success: true, tabId: reusable.tabId, reused: reusable.reused, url }
-    }
-
-    const created = await this.host.createTab(url)
-    return created.success
-      ? { success: true, tabId: created.tabId, reused: false, url }
-      : { success: false, error: created.error || reusable.error }
-  }
-
-  async navigateTargetTab(tabId: string, url: string, leaseGate?: BrowserLeaseGate): Promise<BrowserOpenTargetResult> {
-    const output = await capabilityActionExecutor.execute({
-      toolName: 'browser_navigate',
-      args: { action: 'goto', tab_id: tabId, url },
-      origin: url,
-      leaseGate,
-      dispatch: async () => {
-        const result = await this.host.navigate(tabId, url)
-        return JSON.stringify(result.success
-          ? { success: true, tabId, reused: true, url }
-          : { success: false, tabId, reused: true, url, error: result.error })
-      },
-    })
-    return outputRecord(output) as unknown as BrowserOpenTargetResult
-  }
-
-  async waitForCondition(tabId: string | null, options: BrowserWaitForConditionOptions): Promise<{ matched: boolean; elapsedMs: number; value?: unknown }> {
+  async waitForCondition(
+    tabId: string | null,
+    options: BrowserWaitForConditionOptions,
+    signal?: AbortSignal,
+  ): Promise<{ matched: boolean; elapsedMs: number; value?: unknown }> {
     const startedAt = Date.now()
     const timeoutMs = Math.max(500, Math.min(60_000, Number(options.timeoutMs || 8_000)))
     const checkIntervalMs = Math.max(50, Math.min(2_000, Number(options.checkIntervalMs || 250)))
@@ -423,6 +357,7 @@ export class BrowserCapabilityService {
     let lastValue: unknown = null
 
     while (Date.now() - startedAt <= timeoutMs) {
+      throwIfAborted(signal)
       const result = await this.host.executeJS(
         tabId,
         `
@@ -474,7 +409,7 @@ export class BrowserCapabilityService {
         return { matched: true, elapsedMs: Date.now() - startedAt, value: result?.value }
       }
 
-      await delay(checkIntervalMs)
+      await delay(checkIntervalMs, signal)
     }
 
     return { matched: false, elapsedMs: Date.now() - startedAt, value: lastValue }
@@ -510,94 +445,39 @@ export class BrowserCapabilityService {
    * NOTE: the humanized-input migration (WP5) will route this through the
    * unified write channel; today it is a single instant scroll step.
    */
-  async scrollViewportOnce(tabId: string | null, leaseGate?: BrowserLeaseGate): Promise<{ scrollY: number; atBottom: boolean }> {
+  async scrollViewportOnce(tabId: string | null, signal?: AbortSignal): Promise<{ scrollY: number; atBottom: boolean }> {
     if (!this.host.dispatchMouse) throw new Error('browser_trusted_scroll_unavailable')
+    throwIfAborted(signal)
     const before = await this.readScrollMetrics(tabId)
-    const output = await capabilityActionExecutor.execute({
-      toolName: 'browser_scroll',
-      args: { tab_id: tabId, direction: 'down', amount: 'viewport' },
-      origin: before.url,
-      leaseGate,
-      deadlineMs: 4_000,
-      dispatch: async (_invocation, signal) => {
-        await this.host.dispatchMouse?.(tabId, {
-          type: 'mouseWheel',
-          x: before.x,
-          y: Math.max(1, Math.round(before.viewport / 2)),
-          deltaX: 0,
-          deltaY: Math.max(1, Math.round(before.viewport * 0.9)),
-        })
-        const after = await this.waitForScrollSettled(tabId, before, signal)
-        return JSON.stringify({
-          ok: true,
-          trustedInput: true,
-          scrollY: after.y,
-          atBottom: after.y >= after.maxScroll - 2 || after.y === before.y,
-        })
-      },
+    throwIfAborted(signal)
+    await this.host.dispatchMouse(tabId, {
+      type: 'mouseWheel',
+      x: before.x,
+      y: Math.max(1, Math.round(before.viewport / 2)),
+      deltaX: 0,
+      deltaY: Math.max(1, Math.round(before.viewport * 0.9)),
     })
-    const record = outputRecord(output)
-    if (record.ok !== true) throw new Error(String(record.errorKind || record.message || 'browser_trusted_scroll_failed'))
-    return { scrollY: Number(record.scrollY || 0), atBottom: record.atBottom === true }
+    const after = await this.waitForScrollSettled(tabId, before, signal)
+    return {
+      scrollY: after.y,
+      atBottom: after.y >= after.maxScroll - 2 || after.y === before.y,
+    }
   }
 
-  async captureFromUrl(url: string, options: { customScript: string; timeoutMs?: number; settleMs?: number; preferReuse?: boolean }): Promise<unknown | null> {
-    if (options.preferReuse !== false && typeof this.host.captureLiveTabPage === 'function') {
-      try {
-        const snapshot = await this.host.captureLiveTabPage(url, {
-          timeoutMs: options.timeoutMs,
-          settleMs: options.settleMs,
-          script: options.customScript,
-        })
-        if (snapshot) return snapshot
-      } catch {
-        // fall through to background capture
-      }
-    }
-
-    if (typeof this.host.captureBackgroundPage === 'function') {
-      return this.host.captureBackgroundPage(url, {
-        timeoutMs: options.timeoutMs,
-        settleMs: options.settleMs,
-        script: options.customScript,
-      })
-    }
-
-    const opened = await this.openTarget(url, 'prefer_reuse')
-    if (!opened.success) return null
-    return this.host.executeJS(opened.tabId || null, options.customScript)
-  }
-
-  async extractStructuredFromUrl(url: string, options: BrowserExtractStructuredOptions): Promise<BrowserExtractStructuredResult> {
-    if (options.customScript) {
-      const raw = await this.captureFromUrl(url, {
-        customScript: options.customScript,
-        timeoutMs: options.timeoutMs,
-        settleMs: options.settleMs,
-        preferReuse: options.openMode !== 'new_tab',
-      })
-      return {
-        template: options.template,
-        items: normalizeStructuredItems(url, raw),
-        sourceUrl: url,
-      }
-    }
-
-    const opened = await this.openTarget(url, options.openMode || 'prefer_reuse')
-    if (!opened.success) {
-      throw new Error(opened.error || 'Failed to open target page')
-    }
-    return this.extractStructured(opened.tabId || null, options)
-  }
-
-  async scrollCollect(tabId: string | null, options: BrowserScrollCollectOptions): Promise<BrowserScrollCollectResult> {
+  async scrollCollect(
+    tabId: string | null,
+    options: BrowserScrollCollectOptions,
+    signal?: AbortSignal,
+  ): Promise<BrowserScrollCollectResult> {
     const maxScrolls = Math.max(1, Math.min(200, Number(options.maxScrolls || 24)))
     const stableRounds = Math.max(1, Math.min(8, Number(options.stableRounds || 2)))
     let unchangedRounds = 0
     let scrolls = 0
+    throwIfAborted(signal)
     let previous = await this.readScrollMetrics(tabId)
     while (scrolls < maxScrolls && unchangedRounds < stableRounds) {
-      const scroll = await this.scrollViewportOnce(tabId)
+      throwIfAborted(signal)
+      const scroll = await this.scrollViewportOnce(tabId, signal)
       scrolls += 1
       const next = await this.readScrollMetrics(tabId)
       const unchanged = next.height === previous.height && next.y === previous.y
@@ -609,9 +489,10 @@ export class BrowserCapabilityService {
           timeoutMs: Math.max(500, Math.min(3_000, Number(options.scrollDelayMs || 1_200))),
           checkIntervalMs: 100,
           stableIterations: 2,
-        })
+        }, signal)
       }
     }
+    throwIfAborted(signal)
     const rawItems = await this.host.executeJS(
       tabId,
       buildStructuredExtractionScript({ ...options, wait: undefined }),

@@ -1,4 +1,5 @@
 import { buildContextUsageSnapshot } from '../../../../shared/context-usage-types'
+import type { CanonicalAssistantMessageReceipt } from '../../../../shared/ipc-contracts/canonical-message'
 import type {
   ExecutionTurnResult,
   RunMessage,
@@ -210,7 +211,7 @@ export async function persistRunMetaSnapshot(
 }
 
 export function buildExecutionTurnResult(
-  host: TurnOrchestratorHost,
+  _host: TurnOrchestratorHost,
   params: {
     success: boolean
     finalText: string
@@ -225,10 +226,11 @@ export function buildExecutionTurnResult(
     usage?: ReadyAgentSdkRunResult['usage'] | null
     error?: string
     scopeRunAuthority?: ExecutionTurnResult['scopeRunAuthority']
+    canonicalMessage?: ExecutionTurnResult['canonicalMessage']
+    canonicalMessageDigest?: string
   }
 ): ExecutionTurnResult {
-  const taskType =
-    params.taskBudgetRuntime?.taskType || host.resolveTaskTypeFromTools(params.usedTools)
+  const taskType = params.taskBudgetRuntime?.taskType
   const budgetDiagnostics = taskBudgetDiagnostics(params.taskBudgetRuntime || null)
   const contextUsage = buildContextUsageSnapshot({
     inputTokens: params.usage?.inputTokens ?? null,
@@ -269,7 +271,9 @@ export function buildExecutionTurnResult(
       transcriptEvents: params.transcriptEvents
     },
     terminalReason: params.terminalReason,
-    scopeRunAuthority: params.scopeRunAuthority
+    scopeRunAuthority: params.scopeRunAuthority,
+    canonicalMessage: params.canonicalMessage,
+    canonicalMessageDigest: params.canonicalMessageDigest,
   }
 }
 
@@ -302,7 +306,8 @@ export interface TurnErrorCloseoutContext {
   emitOutputForRun: (
     chunk: string,
     type: string,
-    projectionPatch?: Record<string, unknown> | null
+    projectionPatch?: Record<string, unknown> | null,
+    canonicalReceipt?: CanonicalAssistantMessageReceipt,
   ) => void
   emitOutput: (
     chunk: string,
@@ -374,11 +379,6 @@ export async function handleAgentSdkTurnError(
               ? 'main_no_progress_timeout'
               : 'cancelled_runtime'
     const latestRunId = host.sessionManager.get(name)?.currentRun?.runId
-    if (!deliveryWallClockExceeded && abortInitiator === 'user_stop')
-      emitOutputForRun('已手动停止，进度已保存至当前会话。', 'text')
-    if (deliveryWallClockExceeded) {
-      emitRuntimeError(error, terminalReason)
-    }
     if (!deliveryWallClockExceeded && abortInitiator === 'manual_suspend') {
       return finalizeEarlyReturn({
         status: 'checkpoint',
@@ -388,7 +388,14 @@ export async function handleAgentSdkTurnError(
         providerDiagnostics: runMetaProviderDiagnostics
       })
     }
-    await finalizeRunOutcome(
+    const terminalText = preemptedByNewerSend
+      ? ''
+      : deliveryWallClockExceeded
+        ? '任务因运行时间达到上限而停止。'
+        : abortInitiator === 'user_stop'
+          ? '已手动停止，进度已保存至当前会话。'
+          : '任务已停止。'
+    const finalized = await finalizeRunOutcome(
       {
         kind: deliveryWallClockExceeded
           ? 'error'
@@ -402,6 +409,7 @@ export async function handleAgentSdkTurnError(
         toolCallsUsed: usedTools.length,
         initiator: abortInitiator,
         terminalReason,
+        finalText: terminalText,
         projectionPatch: mergeProjectionPatches(projectionPatches),
         taskBudgetRuntime: runMetaBudgetRuntime,
         providerDiagnostics: runMetaProviderDiagnostics,
@@ -411,17 +419,21 @@ export async function handleAgentSdkTurnError(
         runMetaRepository: host.getRunMetaRepositoryForFinalize(),
         taskProjectionStore: host.runtime?.getTaskProjectionStoreForFinalize?.() ?? null,
         learnFromCheckIn: (input) => host.learnSiteCardsFromCheckIn(input),
-        writeProjectionTerminalPatch: (projectionPatch, reason, status) => {
-          emitOutputForRun('', 'done', projectionPatch)
+        commitCanonicalCoreCloseout: host.runtime
+          ? (input) => host.runtime!.commitCanonicalCoreCloseout(input)
+          : undefined,
+        writeProjectionTerminalPatch: (projectionPatch, reason, status, canonicalReceipt) => {
+          emitOutputForRun('', 'done', projectionPatch, canonicalReceipt)
           emitStatusForRun(status, reason as TurnTerminalReason)
         },
         writeRunCloseMetric
       }
     )
+    if (deliveryWallClockExceeded) emitRuntimeError(error, terminalReason)
     return buildResult({
       success: !deliveryWallClockExceeded,
       ...(deliveryWallClockExceeded ? { error: 'delivery_wall_clock_exceeded' } : {}),
-      finalText: '',
+      finalText: finalized.canonicalMessage?.content ?? terminalText,
       cancelled: !deliveryWallClockExceeded,
       taskId,
       usedTools,
@@ -437,7 +449,9 @@ export async function handleAgentSdkTurnError(
             reason: 'preempted_by_same_user',
             currentRunId: latestRunId && latestRunId !== runId ? latestRunId : null
           }
-        : undefined
+        : undefined,
+      canonicalMessage: finalized.canonicalMessage,
+      canonicalMessageDigest: finalized.canonicalMessageDigest,
     })
   }
 
@@ -467,7 +481,6 @@ export async function handleAgentSdkTurnError(
     if (!contentIssue) {
       const fallbackText =
         finalText || `已完成并保存到 ${ctx.documentTargetGuardForRecovery.targetName}。`
-      if (!finalText) emitOutput(fallbackText, 'text')
       return finalizeEarlyReturn({
         status: 'done',
         terminalReason: 'done',
@@ -499,9 +512,8 @@ export async function handleAgentSdkTurnError(
     return finalizeBudgetCheckpointReturn(ctx.buildToolProgressBudgetCheckpoint(usedTools))
   }
   const failure = classifySdkRuntimeError(error)
-  emitOutput(`${failure.userMessagePrefix}: ${message}`, 'error')
-  emitRuntimeError(error, failure.terminalReason)
-  await finalizeRunOutcome(
+  const failureText = `${failure.userMessagePrefix}: ${message}`
+  const finalized = await finalizeRunOutcome(
     {
       kind: 'error',
       runId,
@@ -511,6 +523,7 @@ export async function handleAgentSdkTurnError(
       toolCallsUsed: usedTools.length,
       initiator: 'error',
       terminalReason: failure.terminalReason,
+      finalText: failureText,
       projectionPatch: mergeProjectionPatches(projectionPatches),
       taskBudgetRuntime: runMetaBudgetRuntime,
       providerDiagnostics: runMetaProviderDiagnostics,
@@ -520,17 +533,21 @@ export async function handleAgentSdkTurnError(
       runMetaRepository: host.getRunMetaRepositoryForFinalize(),
       taskProjectionStore: host.runtime?.getTaskProjectionStoreForFinalize?.() ?? null,
       learnFromCheckIn: (input) => host.learnSiteCardsFromCheckIn(input),
-      writeProjectionTerminalPatch: (projectionPatch, reason, status) => {
-        emitOutputForRun('', 'done', projectionPatch)
+      commitCanonicalCoreCloseout: host.runtime
+        ? (input) => host.runtime!.commitCanonicalCoreCloseout(input)
+        : undefined,
+      writeProjectionTerminalPatch: (projectionPatch, reason, status, canonicalReceipt) => {
+        emitOutputForRun('', 'done', projectionPatch, canonicalReceipt)
         emitStatusForRun(status, reason as TurnTerminalReason)
       },
       writeRunCloseMetric
     }
   )
+  emitRuntimeError(error, failure.terminalReason)
   return buildResult({
     success: false,
     error: message,
-    finalText: '',
+    finalText: finalized.canonicalMessage?.content ?? failureText,
     cancelled: false,
     taskId,
     usedTools,
@@ -539,7 +556,9 @@ export async function handleAgentSdkTurnError(
     terminalReason: failure.terminalReason,
     taskBudgetRuntime: runMetaBudgetRuntime,
     providerDiagnostics: runMetaProviderDiagnostics,
-    usage: runMetaUsage
+    usage: runMetaUsage,
+    canonicalMessage: finalized.canonicalMessage,
+    canonicalMessageDigest: finalized.canonicalMessageDigest,
   })
 }
 

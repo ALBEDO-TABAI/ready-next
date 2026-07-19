@@ -1,25 +1,12 @@
 import { existsSync } from 'fs'
 import { join } from 'path'
-import {
-  classifyFollowupIntent,
-  followupConsultsRecalledContext,
-  hasContinuableTaskRef,
-  type FollowupTaskRef
-} from '../../../../shared/agent-followup-intent'
+import type { FollowupTaskRef } from '../../../../shared/agent-followup-intent'
 import type { CapabilityGroupId } from '../../../../shared/ai-capability-groups'
-import {
-  resolveBrowserCollectionIntent
-} from '../../../../shared/browser-collection-intent'
-import { resolveBrowserWorkIntent } from '../../../../shared/browser-work-intent'
-import {
-  isBrowserTransactionIntent,
-  resolveBrowserWorkflowIntent
-} from '../../../../shared/browser-workflow-intent'
 import {
   hasExplicitDocumentWidgetCreateIntent,
   inferDocumentWidgetTaskKind
 } from '../../claude-bridge/tool-policy-heuristics'
-import { PRIMITIVE_TOOL_DEFS } from '../../tools/skill-primitives/tool-defs'
+import { PRIMITIVE_TOOL_DEFS, PRIMITIVE_TOOL_NAME_SET } from '../../tools/skill-primitives/tool-defs'
 import {} from '../compaction/compact-agent-input'
 import { buildRequestEnvelope } from '../contracts/request-envelope'
 import type { RunMessage } from '../contracts/run-contracts'
@@ -90,7 +77,6 @@ export function allowedPrimitiveToolsForSdkSkillTurn(
     allowAskUser?: boolean
   } = {}
 ): string[] {
-  if (options.skillId === 'tag-forge') return []
   const safeSkillPrimitives = new Set([
     'skill_write_artifact',
     'skill_read_artifact',
@@ -106,6 +92,30 @@ export function allowedPrimitiveToolsForSdkSkillTurn(
   return PRIMITIVE_TOOL_DEFS.map((definition) => definition.name).filter((name) =>
     safeSkillPrimitives.has(name)
   )
+}
+
+export function resolveManifestBoundSkillTools(
+  skill: unknown,
+  fallbackTypedActions: ReadonlyArray<string>,
+  fallbackPrimitives: ReadonlyArray<string>,
+): { typedActions: string[]; primitives: string[] } {
+  const rawAllowedTools = skill && typeof skill === 'object'
+    ? (skill as { allowedTools?: unknown }).allowedTools
+    : null
+  const declared = [...new Set(
+    (Array.isArray(rawAllowedTools) ? rawAllowedTools : [])
+      .filter((name): name is string => typeof name === 'string' && name.length > 0),
+  )]
+  if (declared.length === 0) {
+    return {
+      typedActions: [...new Set(fallbackTypedActions)],
+      primitives: [...new Set(fallbackPrimitives)],
+    }
+  }
+  return {
+    typedActions: declared.filter((name) => !PRIMITIVE_TOOL_NAME_SET.has(name)),
+    primitives: declared.filter((name) => PRIMITIVE_TOOL_NAME_SET.has(name)),
+  }
 }
 
 export function shouldSuppressSkillAskUserForArtifactDelivery(textCandidates: string[]): boolean {
@@ -130,83 +140,8 @@ export function shouldSuppressSkillAskUserForArtifactDelivery(textCandidates: st
   return true
 }
 
-export function messageHasBrowserCollectionIntent(
-  message: RunMessage,
-  requestEnvelope?: unknown
-): boolean {
-  const fullText = messageToText(message)
-  const envelopePrimary = parseEnvelopeResourceReferences(requestEnvelope).primaryInstruction
-  const primary = envelopePrimary || primaryInstructionText(message)
-  const hasActiveTaskContext = hasRecalledTaskContext(fullText)
-  const primaryIntent = resolveBrowserWorkflowIntent(primary)
-  const fullIntent = followupConsultsRecalledContext(primary, { hasActiveTaskContext })
-    ? resolveBrowserWorkflowIntent(`${primary}\n${fullText}`)
-    : primaryIntent
-  if (isBrowserTransactionIntent(primaryIntent) || isBrowserTransactionIntent(fullIntent)) {
-    return false
-  }
-  if (fullText.includes('### 浏览页面引用')) return true
-  if (resolveBrowserCollectionIntent(primary)) {
-    const negated = classifyFollowupIntent(primary, { hasActiveTaskContext })
-    if (negated.negations.includes('collection')) return false
-    return true
-  }
-  if (
-    followupConsultsRecalledContext(primary, { hasActiveTaskContext }) &&
-    resolveBrowserCollectionIntent(fullText)
-  )
-    return true
-  return false
-}
-
-/**
- * Persistent collection is opt-in. A page reference or platform/account name
- * only proves that browser observation is relevant; it must never authorize a
- * collection write task by itself.
- */
-export function messageHasExplicitBrowserCollectionIntent(
-  message: RunMessage,
-  requestEnvelope?: unknown
-): boolean {
-  const fullText = messageToText(message)
-  const envelopePrimary = parseEnvelopeResourceReferences(requestEnvelope).primaryInstruction
-  const primary = envelopePrimary || primaryInstructionText(message)
-  const hasActiveTaskContext = hasRecalledTaskContext(fullText)
-  const primaryWorkIntent = resolveBrowserWorkIntent(primary)
-  const fullWorkIntent = followupConsultsRecalledContext(primary, { hasActiveTaskContext })
-    ? resolveBrowserWorkIntent(`${primary}\n${fullText}`)
-    : primaryWorkIntent
-  if (!primaryWorkIntent.persistenceRequested && !fullWorkIntent.persistenceRequested) return false
-  const negated = classifyFollowupIntent(primary, { hasActiveTaskContext })
-  return !negated.negations.includes('collection')
-}
-
 export function hasRecalledTaskContext(fullText: string): boolean {
   return fullText.includes('## 最近会话摘要') || fullText.includes('### 浏览页面引用')
-}
-
-export function messageHasBrowserBatchCollectionIntent(
-  message: RunMessage,
-  requestEnvelope?: unknown
-): boolean {
-  const fullText = messageToText(message)
-  const envelopePrimary = parseEnvelopeResourceReferences(requestEnvelope).primaryInstruction
-  const primary = envelopePrimary || primaryInstructionText(message)
-  if (resolveBrowserWorkIntent(primary).batchScope === 'explicit_all_items') {
-    const negated = classifyFollowupIntent(primary, {
-      hasActiveTaskContext: hasRecalledTaskContext(fullText)
-    })
-    if (negated.negations.includes('collection')) return false
-    return true
-  }
-  if (
-    followupConsultsRecalledContext(primary, {
-      hasActiveTaskContext: hasRecalledTaskContext(fullText)
-    }) &&
-    resolveBrowserWorkIntent(fullText).batchScope === 'explicit_all_items'
-  )
-    return true
-  return false
 }
 
 function extractRawExplicitMentionCandidate(rawUserText: string | null): string {
@@ -300,23 +235,6 @@ export function resolveSkillHintRelevanceForTurn(params: {
   }
   const referenceHint = resolveReferenceHintSnapshot(params.orchestrator, params.sessionId)
   if (!referenceHint) return { relevant: false, reason: 'no_reference_hint' }
-  // P1 fix (2026-07-03, live regression) — a continuable task keeps the reduced
-  // skill/collection continuation surface warm UNLESS the new turn starts its
-  // OWN concrete browser action (a publish/upload/submit transaction or a
-  // collection/download). Before, ANY turn with a reference hint + continuable
-  // task hit continuable_task, so a fresh "把这条视频下载到X" after a paused
-  // collection got the 12-tool skill set and lost
-  // browser_download / browser_eval / resolve_video — the
-  // agent then reported it "lacked the tools". A skill-resume follow-up with no
-  // browser intent (e.g. "跑 finalize") still keeps the skill surface; genuine
-  // resumes also come through the continuationIntent branch above.
-  const startsFreshBrowserWork = userTextCandidates.some((text) => {
-    const kind = resolveBrowserWorkflowIntent(text).kind
-    return kind === 'transaction' || kind === 'collection'
-  })
-  if (params.taskRefs && hasContinuableTaskRef(params.taskRefs) && !startsFreshBrowserWork) {
-    return { relevant: true, reason: 'continuable_task' }
-  }
   for (const text of userTextCandidates) {
     if (
       shouldDisplayReferenceSkillHintForLatestUserText({
@@ -411,9 +329,7 @@ function resolveAuthorizationPreferredToolNames(
 interface SdkDefaultIntentSurface {
   intentGroupModes: Partial<Record<CapabilityGroupId, boolean>>
   requestedIntentGroupIds: CapabilityGroupId[]
-  browserIntentNegated: boolean
   forceDocumentTool: boolean
-  allowBrowserTools: boolean
   preferredSkillToolNames: string[] | null
   documentWidgetTaskKind: ReturnType<typeof inferDocumentWidgetTaskKind>
   explicitWidgetCreateIntent: boolean
@@ -423,7 +339,6 @@ export function resolveSdkDefaultIntentSurface(params: {
   message: RunMessage
   requestEnvelope?: unknown
   authorization: SkillToolAuthorization
-  browserDecisionMode: import('../../../../shared/browser-agent-task').BrowserTaskDecisionMode
   requiredCapabilityGroupIds?: readonly CapabilityGroupId[]
 }): SdkDefaultIntentSurface {
   const envelopeRefs = parseEnvelopeResourceReferences(params.requestEnvelope)
@@ -476,39 +391,26 @@ export function resolveSdkDefaultIntentSurface(params: {
     requiredCapabilityGroupIds: params.requiredCapabilityGroupIds,
     mapSemanticIntent
   })
-  const browserIntentNegated = classifyFollowupIntent(userInstructionText, {
-    hasActiveTaskContext: false,
-  }).negations.includes('browser')
   const intentGroupModes = {
     ...intentModes.intentGroupModes,
-    ...(browserIntentNegated
-      ? { browser_interaction: false, browser_content_tasks: false }
-      : {}),
+    // Browser is admitted only by trusted environment context or the
+    // structured use_browser tool in the SDK executor.
+    browser_interaction: false,
+    browser_content_tasks: false,
   }
   const requestedIntentGroupIds = Array.from(new Set([
     ...Object.entries(intentGroupModes)
-      .filter(([, enabled]) => enabled === true)
+      .filter(([groupId, enabled]) =>
+        enabled === true
+        && groupId !== 'browser_interaction'
+        && groupId !== 'browser_content_tasks')
       .map(([groupId]) => groupId as CapabilityGroupId),
-    ...(!browserIntentNegated && (
-      params.browserDecisionMode === 'browser_workflow'
-      || params.browserDecisionMode === 'browser_upload_workflow'
-    )
-      ? ['browser_interaction'] as const
-      : []),
   ]))
 
   return {
     intentGroupModes,
     requestedIntentGroupIds,
-    browserIntentNegated,
     forceDocumentTool: intentModes.forceDocumentTool,
-    allowBrowserTools:
-      !browserIntentNegated && (
-        params.browserDecisionMode === 'browser_workflow' ||
-        params.browserDecisionMode === 'browser_upload_workflow' ||
-        intentGroupModes.browser_interaction === true ||
-        intentGroupModes.browser_content_tasks === true
-      ),
     preferredSkillToolNames,
     documentWidgetTaskKind,
     explicitWidgetCreateIntent

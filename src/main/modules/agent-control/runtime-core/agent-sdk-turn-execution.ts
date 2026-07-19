@@ -1,7 +1,6 @@
-import type { ModelProvider } from '@openai/agents'
+import { type AgentInputItem, type ModelProvider } from '@openai/agents'
 import { classifyFollowupIntent } from '../../../../shared/agent-followup-intent'
 import { resolveAIConfigCapabilities } from '../../../../shared/ai-providers'
-import { resolveBrowserWorkflowIntent } from '../../../../shared/browser-workflow-intent'
 import { buildAgentSpawnContextFromAIConfig } from '../../skills-runtime/agent-context-source'
 import { appendToolCapabilityLog } from '../../tools/tool-event-log'
 import type {
@@ -11,45 +10,18 @@ import type {
   TurnTranscriptEvent
 } from '../contracts/run-contracts'
 import { computeCapabilityFloors } from '../domain-adapters/capability-floors'
-import { logAgentMetric } from '../metrics'
-import {
-  collectToolOutputProofs,
-  createTaskProofSink,
-  isNonterminalToolOutput,
-  isSuccessfulToolOutput,
-} from '../quality/proof-collector'
+import { createTaskProofSink } from '../quality/proof-collector'
 import type { SkillToolAuthorization } from '../skills/skill-tool-authorization'
-import { consumeToolCallBudget } from '../task-projection/run-budget-policy'
+import { resolveSkillSurfaceComposition } from '../skills/skill-surface-composition'
+import { buildPreparedSkillTurnTruth } from '../skills/prepared-skill-turn'
 import { prependSystemReminderInput } from '../system-reminders/background-task-terminal-reminder'
 import type { ToolDefinition } from '../tools-runtime/tool-definition'
-import { normalizeToolExecutionOutput } from '../tools-runtime/tool-result-types'
-import { applyContextModifier, createEmptyActiveFrameContext } from '../tools-runtime/tool-runtime'
-import {
-  DOCUMENT_TARGET_MUTATION_TOOL_NAMES,
-  documentSaveSucceeded,
-  documentToolMutatedContent,
-  isDocumentToolFailure,
-  isSameObservedDocumentTarget,
-  readDocumentToolTarget
-} from './agent-sdk-document-utils'
+import { createEmptyActiveFrameContext } from '../tools-runtime/tool-runtime'
 import {
   resolveAgentSdkTaskBudgetRuntime,
   resolveSourceMessageProvenance,
-  resolveTaskTypeFromBrowserWorkflowText,
-  resolveTaskTypeFromToolDefinitions
 } from './agent-sdk-foundation-utils'
-import {
-  messageToText,
-  parseEnvelopeResourceReferences,
-} from './agent-sdk-input-context-utils'
-import { readStructuredResultRecord } from './agent-sdk-provider-utils'
-import {
-  buildFileReadExcerptCheckpoint,
-  buildTerminalFailureProjectionPatch,
-  extractLongSkillCheckpoint,
-  isLocalDocumentSourceReadFailure,
-  isLocalDocumentSourceReadTool
-} from './agent-sdk-runtime-outcome-utils'
+import { messageToText, parseEnvelopeResourceReferences } from './agent-sdk-input-context-utils'
 import {
   resolveSkillHintRelevanceForTurn,
   skillContextMessagesToInstruction
@@ -58,12 +30,17 @@ import { buildExecutionTurnResult } from './agent-sdk-turn-closeout'
 import { finalizeAgentSdkPreparedTurnResult } from './agent-sdk-turn-completion'
 import type { TurnOrchestratorHost } from './agent-sdk-turn-context'
 import { armDynamicDeliveryDeadline } from './dynamic-delivery/delivery-deadline'
+import { DeliveryOutputBuffer } from './dynamic-delivery/delivery-output-buffer'
+import { buildSanitizedCheckpointFromSession } from './dynamic-delivery/candidate-session-fork'
 import { getEphemeralExecutionStore } from '../../tools/skill-primitives/ephemeral-execution-store'
 import { getAskUserQuestionsStore } from '../../tools/builtins/ask-user-questions-store'
 import { createAgentSdkTurnGuards } from './agent-sdk-turn-guards'
 import { assembleAgentSdkTurnInput } from './agent-sdk-turn-input-assembly'
 import type { AgentSdkPreparedTurnContext } from './agent-sdk-turn-execution-types'
 import { executeAgentSdkModelToolLoop } from './agent-sdk-turn-model-loop'
+import { AgentSessionInputController } from './agent-session-input-controller'
+import { browserSurfaceActiveForDefinitions, prepareBrowserWorkflowTurnState } from './agent-sdk-browser-turn-control'
+import { createAgentSdkToolResultRecorder } from './agent-sdk-turn-tool-result-recorder'
 import type {
   AgentSdkBudgetCheckpointRestore,
   AgentSdkExecutionOptions,
@@ -78,8 +55,10 @@ import type {
 } from './agent-sdk-types'
 import type { TurnTerminalReason } from './turn-frame'
 import { mergeRunUsage } from './run-usage-accumulator'
-import { installSameRunSkillActivation } from './same-run-skill-activation'
-import { captureResearchSearchDelivery } from './research-result-delivery'
+import {
+  activateBrowserCapabilityForCurrentRun,
+  installSameRunSkillActivation,
+} from './same-run-skill-activation'
 import {
   isReadOnlyResearchSkillToolSet,
   resolveActiveSkillAllowedTools,
@@ -109,6 +88,7 @@ export async function executeAgentSdkPreparedTurn(
     toolDefinitions,
     abortController,
     runHandle,
+    committedPublicSession,
     session,
     isCurrentRun,
     toolArgsByName,
@@ -122,7 +102,6 @@ export async function executeAgentSdkPreparedTurn(
     finalizeEarlyReturn: finalizeEarlyReturnFromContext,
     finalizeBudgetCheckpointReturn: finalizeBudgetCheckpointReturnFromContext,
     buildResult,
-    recentBrowserWorkIntent,
     requestedCapabilityConflicts,
     turnFollowup,
     useTextToolBridge,
@@ -133,6 +112,8 @@ export async function executeAgentSdkPreparedTurn(
     providerContent,
     capabilities,
     authorization,
+    skillSurface,
+    preparedSkillTurn,
     contextWindowTokens,
     maxOutputTokens,
     agentContext,
@@ -148,11 +129,14 @@ export async function executeAgentSdkPreparedTurn(
     fileReadExcerptCheckpointForRecovery,
     finalText,
     hasSuccessfulDocumentTargetMutation,
+    hasSuccessfulLocalDocumentSourceRead,
     hasSuccessfulLocalDocumentSourceReadForRecovery,
     hasSuccessfulToolProgress,
+    lastDocumentSaveFailure,
     lastDocumentSaveSuccessText,
     lastRollingCheckpointToolCalls,
     longSkillCheckpoint,
+    newDocumentNeedsSave,
     observedDocumentMutationConflict,
     observedDocumentMutationMissingTarget,
     observedDocumentMutationTarget,
@@ -170,11 +154,14 @@ export async function executeAgentSdkPreparedTurn(
       fileReadExcerptCheckpointForRecovery,
       finalText,
       hasSuccessfulDocumentTargetMutation,
+      hasSuccessfulLocalDocumentSourceRead,
       hasSuccessfulLocalDocumentSourceReadForRecovery,
       hasSuccessfulToolProgress,
+      lastDocumentSaveFailure,
       lastDocumentSaveSuccessText,
       lastRollingCheckpointToolCalls,
       longSkillCheckpoint,
+      newDocumentNeedsSave,
       observedDocumentMutationConflict,
       observedDocumentMutationMissingTarget,
       observedDocumentMutationTarget,
@@ -193,11 +180,14 @@ export async function executeAgentSdkPreparedTurn(
       fileReadExcerptCheckpointForRecovery,
       finalText,
       hasSuccessfulDocumentTargetMutation,
+      hasSuccessfulLocalDocumentSourceRead,
       hasSuccessfulLocalDocumentSourceReadForRecovery,
       hasSuccessfulToolProgress,
+      lastDocumentSaveFailure,
       lastDocumentSaveSuccessText,
       lastRollingCheckpointToolCalls,
       longSkillCheckpoint,
+      newDocumentNeedsSave,
       observedDocumentMutationConflict,
       observedDocumentMutationMissingTarget,
       observedDocumentMutationTarget,
@@ -246,6 +236,9 @@ export async function executeAgentSdkPreparedTurn(
   try {
     const latentSkillToolDefinitions = host.toolExecutor.listLatentSkillToolDefinitions()
       .filter((definition) => !toolDefinitions.some((visible) => visible.name === definition.name))
+    const latentBrowserToolDefinitions = host.toolExecutor.listLatentBrowserToolDefinitions()
+      .filter((definition) => !toolDefinitions.some((visible) => visible.name === definition.name))
+    const latentToolDefinitions = [...latentSkillToolDefinitions, ...latentBrowserToolDefinitions]
     const hasVeaPipelineTool = toolDefinitions.some(
       (definition) => definition.name === 'skill_video_expert_pipeline'
     )
@@ -264,7 +257,7 @@ export async function executeAgentSdkPreparedTurn(
         `floors=${turnCapabilityFloors.reasons.join(',') || 'none'}`
       ].join(' ')
     )
-    const definitionByName = new Map([...toolDefinitions, ...latentSkillToolDefinitions]
+    const definitionByName = new Map([...toolDefinitions, ...latentToolDefinitions]
       .map((definition) => [definition.name, definition] as const))
     const requiredCapabilityGroups = Array.from(
       new Set(toolDefinitions.map((definition) => definition.groupId))
@@ -277,28 +270,30 @@ export async function executeAgentSdkPreparedTurn(
     checkpointRequiredToolNames.splice(0, checkpointRequiredToolNames.length, ...allowedToolNames)
     const taskProofStore = host.runtime?.getTaskProjectionStoreForFinalize?.() ?? null
     const taskProofSink = taskProofStore ? createTaskProofSink(taskProofStore) : null
-    const inferredSdkTaskType =
-      resolveTaskTypeFromBrowserWorkflowText(pureUserTurnText) ||
-      resolveTaskTypeFromToolDefinitions(toolDefinitions)
-    if (resolveBrowserWorkflowIntent(pureUserTurnText).kind === 'collection') {
-      projectionPatches.push({ browserCollectionRequired: true })
-    }
     const readOnlyResearchSkill = isReadOnlyResearchSkillToolSet(
       resolveActiveSkillAllowedTools(authorization),
     )
+    const explicitSkillTaskType = readOnlyResearchSkill ? 'research' : null
     let liveTaskBudgetRuntime = resolveAgentSdkTaskBudgetRuntime({
       options: effectiveExecutionOptions,
-      inferredTaskType: inferredSdkTaskType,
-      forceInferredTaskType: readOnlyResearchSkill,
+      explicitTaskType: explicitSkillTaskType,
+      overrideTaskType: readOnlyResearchSkill,
     })
+    const turnTaskType = liveTaskBudgetRuntime?.taskType ?? explicitSkillTaskType ?? 'short_task'
     runMetaBudgetRuntime = liveTaskBudgetRuntime
-    let lastDocumentSaveFailure: string | null = null
-    let newDocumentNeedsSave = false
-    let hasSuccessfulLocalDocumentSourceRead = false
     const sourceMessageProvenance = resolveSourceMessageProvenance({
       sourceMessageId: effectiveExecutionOptions?.sourceMessageId,
       requestEnvelope: effectiveExecutionOptions?.requestEnvelope
     })
+    const browserTurnState = await prepareBrowserWorkflowTurnState({
+      runtime: host.runtime,
+      capturedSession: runHandle.capturedSession,
+      taskId,
+      runId,
+      sessionId,
+      browserSurfaceActive: browserSurfaceActiveForDefinitions(toolDefinitions),
+    })
+    const { ownerLocalSession, ownerSessionSeed } = browserTurnState
     const preparedDelivery = await host.dynamicDelivery.prepareOwnerInput({
       mode: deliveryMode,
       runId,
@@ -308,11 +303,11 @@ export async function executeAgentSdkPreparedTurn(
       ownerSystemPrompt: session.systemPrompt,
       requestEnvelope: effectiveExecutionOptions?.requestEnvelope,
       intentClassification: effectiveExecutionOptions?.intentClassification,
-      inferredTaskType: liveTaskBudgetRuntime?.taskType ?? inferredSdkTaskType ?? 'short_task',
+      inferredTaskType: turnTaskType,
       liveBudget: liveTaskBudgetRuntime,
       ownerBinding: effectiveExecutionOptions?.executionBinding ?? null,
       ownerProfile: effectiveExecutionOptions?.executionProfile ?? null,
-      committedSession: runHandle.capturedSession,
+      committedSession: ownerLocalSession,
       model,
       provider,
       contextWindowTokens,
@@ -325,16 +320,17 @@ export async function executeAgentSdkPreparedTurn(
     if (preparedDelivery.usage) {
       runMetaUsage = mergeRunUsage(runMetaUsage as never, preparedDelivery.usage) as ReadyAgentSdkRunResult['usage']
     }
-    if (preparedDelivery.emitOutput) {
-      const buffer = preparedDelivery.emitOutput
-      emitOutput = (chunk, type, projectionPatch) => {
-        if (type === 'text') {
-          if (chunk.trim()) deliveryDeadline.noteProgress('text_delta')
-          buffer.append(chunk)
-          return
-        }
-        realEmitOutput(chunk, type, projectionPatch)
+    // Assistant wording is a candidate until the canonical core transaction
+    // commits.  All delivery modes, including single_path, therefore buffer
+    // text while tool/status progress remains live.
+    const candidateOutputBuffer = preparedDelivery.emitOutput ?? new DeliveryOutputBuffer()
+    emitOutput = (chunk, type, projectionPatch) => {
+      if (type === 'text') {
+        if (chunk.trim()) deliveryDeadline.noteProgress('text_delta')
+        candidateOutputBuffer.append(chunk)
+        return
       }
+      realEmitOutput(chunk, type, projectionPatch)
     }
     const toolBridgeRuntimeContext: ToolBridgeRuntimeContext = {
       agentName: name,
@@ -351,7 +347,11 @@ export async function executeAgentSdkPreparedTurn(
       allowedToolNames,
       definitionByName,
       authorization,
+      preparedSkillTurn,
+      ...browserTurnState.runtimeFields,
       sameRunActivatedSkillId: null,
+      skillSurfaceComposition: skillSurface.composition,
+      exclusiveScopeRef: skillSurface.exclusiveScopeRef,
       useTextToolBridge,
       activeFrame,
       documentTargetGuard,
@@ -364,150 +364,96 @@ export async function executeAgentSdkPreparedTurn(
         transcriptEvents.push({ kind: 'tool_action', tool: toolName, args })
         host.emit('toolAction', { agent: name, sessionId, runId, tool: toolName, args })
       },
-      recordToolResult: (toolName, output) => {
-        usedTools.push(toolName)
-        // A real tool result pays off the steer; later action promises are fresh.
-        if (actionAnnouncementSteered) {
-          actionAnnouncementSteered = false
-        }
-        if (toolBridgeRuntimeContext.taskBudgetRuntime) {
-          const previousWarning = toolBridgeRuntimeContext.taskBudgetRuntime.warningLevel
-          const nextRuntime = consumeToolCallBudget(toolBridgeRuntimeContext.taskBudgetRuntime)
-          toolBridgeRuntimeContext.taskBudgetRuntime = nextRuntime
-          liveTaskBudgetRuntime = nextRuntime
-          runMetaBudgetRuntime = nextRuntime
-          const nextWarning = nextRuntime.warningLevel
-          if (
-            nextWarning !== 'none' &&
-            nextWarning !== previousWarning &&
-            !toolBridgeRuntimeContext.budgetWarningMessages.includes(nextWarning)
-          ) {
-            toolBridgeRuntimeContext.budgetWarningMessages.push(nextWarning)
-            projectionPatches.push({
-              budgetWarningLevel: nextWarning
-            })
-          }
-        }
-        const normalized = normalizeToolExecutionOutput(output)
-        const resultRecordedAt = new Date()
-        const researchDelivery = captureResearchSearchDelivery(
-          toolName,
-          normalized,
-          resultRecordedAt,
-        )
-        if (researchDelivery) {
-          toolBridgeRuntimeContext.latestResearchSearchDelivery = researchDelivery
-        }
-        if (taskProofSink) {
-          try {
-            const proofs = collectToolOutputProofs(toolName, normalized, resultRecordedAt, { runId })
-            taskProofSink.append(taskId, proofs)
-          } catch (error) {
-            logAgentMetric('proof_collect_failed', {
-              taskId,
-              toolName,
-              reason: error instanceof Error ? error.message : String(error)
-            })
-          }
-        }
-        const argsQueue = toolArgsByName.get(toolName)
-        host.learnSiteCardFromToolFailure(toolName, argsQueue?.shift(), normalized)
-        const structuredData = readStructuredResultRecord(normalized)
-        const documentToolFailed = isDocumentToolFailure(normalized)
-        const sourceReadFailed = isLocalDocumentSourceReadFailure(toolName, normalized.text)
-        const structuredStatus =
-          typeof structuredData.status === 'string'
-            ? structuredData.status.trim().toLowerCase()
-            : ''
-        const toolReportedNonterminal = isNonterminalToolOutput(normalized)
-        const toolReportedFailure =
-          !toolReportedNonterminal && (
-          !isSuccessfulToolOutput(normalized) ||
-          documentToolFailed ||
-          structuredData.ok === false ||
-          typeof structuredData.errorKind === 'string' ||
-          structuredStatus === 'error' ||
-          structuredStatus === 'failed' ||
-          sourceReadFailed)
-        if (!toolReportedFailure && !toolReportedNonterminal) {
-          hasSuccessfulToolProgress = true
-          deliveryDeadline.noteProgress('tool_result')
-        }
-        if (isLocalDocumentSourceReadTool(toolName) && !toolReportedFailure) {
-          hasSuccessfulLocalDocumentSourceRead = true
-          hasSuccessfulLocalDocumentSourceReadForRecovery = true
-        }
-        const documentToolChangedContent =
-          DOCUMENT_TARGET_MUTATION_TOOL_NAMES.has(toolName) &&
-          !documentToolFailed &&
-          documentToolMutatedContent(normalized)
-        if (documentToolChangedContent) {
-          hasSuccessfulDocumentTargetMutation = true
-          const documentTarget = readDocumentToolTarget(normalized)
-          if (documentTarget) {
-            if (!observedDocumentMutationTarget) {
-              observedDocumentMutationTarget = documentTarget
-            } else if (
-              isSameObservedDocumentTarget(observedDocumentMutationTarget, documentTarget)
-            ) {
-              observedDocumentMutationTarget = documentTarget
-            } else {
-              observedDocumentMutationConflict = true
-            }
-          } else {
-            observedDocumentMutationMissingTarget = true
-          }
-        }
-        if (documentToolChangedContent && usedTools.includes('document_new_tab')) {
-          newDocumentNeedsSave = true
-        }
-        if (toolName === 'document_save_tab') {
-          lastDocumentSaveFailure = documentToolFailed
-            ? normalized.text || 'document_save_tab failed'
-            : null
-          if (!documentToolFailed && documentSaveSucceeded(normalized)) {
-            lastDocumentSaveSuccessText = normalized.text
-            newDocumentNeedsSave = false
-            const savedDocumentTarget = readDocumentToolTarget(normalized)
-            if (
-              savedDocumentTarget &&
-              observedDocumentMutationTarget &&
-              isSameObservedDocumentTarget(observedDocumentMutationTarget, savedDocumentTarget)
-            ) {
-              observedDocumentMutationTarget = savedDocumentTarget
-            }
-          }
-        }
-        if (toolName === 'file_read_excerpt' && !toolReportedFailure) {
-          fileReadExcerptCheckpointForRecovery = buildFileReadExcerptCheckpoint(normalized)
-        }
-        applyContextModifier(toolBridgeRuntimeContext, normalized)
-        longSkillCheckpoint = extractLongSkillCheckpoint(toolName, normalized, longSkillCheckpoint)
-        if (normalized.projectionPatch) {
-          projectionPatches.push(normalized.projectionPatch)
-        }
-        if (toolReportedFailure) {
-          projectionPatches.push(buildTerminalFailureProjectionPatch(toolName, structuredData))
-        }
-      },
+      recordToolResult: createAgentSdkToolResultRecorder({
+        runtimeContext: () => toolBridgeRuntimeContext,
+        state: ctx.state,
+        syncBefore: syncState,
+        syncAfter: syncLocalState,
+        setLiveTaskBudgetRuntime: (runtime) => { liveTaskBudgetRuntime = runtime },
+        usedTools,
+        projectionPatches,
+        toolArgsByName,
+        taskProofSink,
+        host,
+        runId,
+        taskId,
+        noteProgress: () => deliveryDeadline.noteProgress('tool_result'),
+      }),
       agentContext,
-      runHandle,
+      runHandle: { ...runHandle, capturedSession: ownerModelSession },
       taskBudgetRuntime: liveTaskBudgetRuntime,
       budgetWarningMessages: []
     }
     installSameRunSkillActivation({
       runtimeContext: toolBridgeRuntimeContext,
       latentDefinitions: latentSkillToolDefinitions,
-      resolveAuthorization: () => host.resolveSkillAuthorizationForTurn(
+      resolvePreparedSkill: () => host.resolvePreparedSkillTurnForTurn(
         content as RunMessage, sessionId, effectiveExecutionOptions?.requestEnvelope, false, true,
       ),
+      resolveComposition: (nextAuthorization) => resolveSkillSurfaceComposition(nextAuthorization, runId),
+      buildPreparedTruth: ({ authorization: nextAuthorization, identity, surface }) => {
+        const floors = computeCapabilityFloors({
+          authorization: nextAuthorization,
+          hasLocalDocumentResource: parseEnvelopeResourceReferences(
+            effectiveExecutionOptions?.requestEnvelope,
+          ).resources.some((resource) =>
+            resource.kind === 'folder_reference' || resource.source === 'folder_reference'),
+          hasCurrentDocumentContext: Boolean(documentTargetGuard),
+        })
+        return buildPreparedSkillTurnTruth({
+          identity,
+          authorization: nextAuthorization,
+          requestOrResourceAnchorDigest: preparedSkillTurn.requestOrResourceAnchorDigest,
+          floors,
+          surface,
+        })
+      },
+      resolveExclusiveFloorToolNames: (nextAuthorization) => computeCapabilityFloors({
+        authorization: nextAuthorization,
+        hasLocalDocumentResource: parseEnvelopeResourceReferences(
+          effectiveExecutionOptions?.requestEnvelope,
+        ).resources.some((resource) =>
+          resource.kind === 'folder_reference' || resource.source === 'folder_reference'),
+        hasCurrentDocumentContext: Boolean(documentTargetGuard),
+      }).toolNames,
       allowedToolNames, definitionByName, requiredCapabilityGroups,
       checkpointRequiredCapabilityGroups, checkpointRequiredToolNames,
-      hasFolderResource: parseEnvelopeResourceReferences(
-        effectiveExecutionOptions?.requestEnvelope,
-      ).resources.some((resource) =>
-        resource.kind === 'folder_reference' || resource.source === 'folder_reference'),
     })
+    toolBridgeRuntimeContext.activateBrowserForCurrentRun = () =>
+      activateBrowserCapabilityForCurrentRun({
+        runtimeContext: toolBridgeRuntimeContext,
+        latentDefinitions: latentBrowserToolDefinitions,
+        allowedToolNames,
+        definitionByName,
+        requiredCapabilityGroups,
+        checkpointRequiredCapabilityGroups,
+        checkpointRequiredToolNames,
+      })
+    const checkpointRepository = host.runtime?.getAgentSessionCheckpointRepository?.() ?? null
+    const modelInputController = checkpointRepository
+      ? new AgentSessionInputController(
+          checkpointRepository,
+          toolBridgeRuntimeContext,
+          effectiveExecutionOptions?.requestEnvelope,
+        )
+      : null
+    if (modelInputController) {
+      toolBridgeRuntimeContext.ensureBrowserWorkflowRoute = () =>
+        modelInputController.ensureBrowserWorkflowRoute()
+    }
+    const buildOwnerCheckpointSnapshot = async (): Promise<AgentInputItem[]> => {
+      const providerBoundary = modelInputController?.latestFilteredInput()
+      if (providerBoundary) return providerBoundary
+      if (toolBridgeRuntimeContext.browserWorkflowRoute) {
+        throw new Error('browser_route_clean_boundary_missing')
+      }
+      const dynamicSnapshot = await host.dynamicDelivery.buildSanitizedCheckpoint(runId)
+      if (dynamicSnapshot) return dynamicSnapshot
+      return buildSanitizedCheckpointFromSession({
+        committedBase: ownerSessionSeed,
+        workingSession: ownerModelSession,
+      })
+    }
     const skillContextMessages: Array<{
       role: string
       content: string | Array<Record<string, unknown>>
@@ -528,8 +474,64 @@ export async function executeAgentSdkPreparedTurn(
       })
     }
     const skillContextInstruction = skillContextMessagesToInstruction(skillContextMessages)
+    const finishBrowserSuspension = async (input: {
+      reason: 'budget' | 'steering' | 'manual'
+      terminalReason: Extract<
+        TurnTerminalReason,
+        'checkpoint_budget' | 'checkpoint_steered' | 'checkpoint_user_input'
+      >
+      message: string
+    }): Promise<ExecutionTurnResult | null> => {
+      if (modelInputController && toolBridgeRuntimeContext.browserWorkflowRoute) {
+        const checkpoint = await modelInputController.persistSuspension(input.reason)
+        runMetaContinuationRef = {
+          kind: 'browser_checkpoint',
+          checkpointId: checkpoint.checkpointId,
+          browserTaskId: checkpoint.browserTaskId,
+          suspensionReason: input.reason,
+        }
+        const projectionPatch = {
+          status: 'recoverable_paused',
+          interactionState: 'suspended',
+          waitingFor: 'none',
+          blockedReason: `browser_${input.reason}_checkpoint`,
+          resumableActions: ['continue', 'cancel'],
+          canResume: true,
+          continuationRef: runMetaContinuationRef,
+          ...(input.reason === 'budget' ? { budgetWarningLevel: 'exhausted' } : {}),
+        }
+        projectionPatches.push(projectionPatch)
+        finalText = input.message
+        if (finalText) emitOutput(finalText, 'text', projectionPatch)
+        return finalizeEarlyReturn({
+          status: 'checkpoint',
+          terminalReason: input.terminalReason,
+          finalText,
+          taskBudgetRuntime: liveTaskBudgetRuntime,
+          providerDiagnostics: runMetaProviderDiagnostics,
+        })
+      }
+      return null
+    }
+    const finishSteeringCheckpointIfNeeded = async (): Promise<ExecutionTurnResult | null> => {
+      if (
+        !toolBridgeRuntimeContext.browserWorkflowRoute
+        || !host.runtime?.getAgentSessionCheckpointRepository().hasPendingSteering(taskId)
+      ) return null
+      return finishBrowserSuspension({
+        reason: 'steering',
+        terminalReason: 'checkpoint_steered',
+        message: '',
+      })
+    }
     const finishBudgetCheckpointIfNeeded = async (): Promise<ExecutionTurnResult | null> => {
       if (!liveTaskBudgetRuntime || liveTaskBudgetRuntime.warningLevel !== 'exhausted') return null
+      const browserCheckpoint = await finishBrowserSuspension({
+        reason: 'budget',
+        terminalReason: 'checkpoint_budget',
+        message: '本轮工具预算已用完，我已保存续跑检查点，可以继续。',
+      })
+      if (browserCheckpoint) return browserCheckpoint
       const checkpoint = await host.runLifecycle.writeBudgetCheckpointState({
         agentName: name,
         sessionId,
@@ -542,7 +544,7 @@ export async function executeAgentSdkPreparedTurn(
         requiredToolNames: allowedToolNames,
         lastUserMessage: pureUserTurnText,
         resumeKind: 'paused',
-        sessionSnapshotOverride: await host.dynamicDelivery.buildSanitizedCheckpoint(runId)
+        sessionSnapshotOverride: await buildOwnerCheckpointSnapshot()
       })
       runMetaContinuationRef =
         checkpoint.projectionPatch.taskContinuation &&
@@ -560,6 +562,17 @@ export async function executeAgentSdkPreparedTurn(
         taskBudgetRuntime: liveTaskBudgetRuntime,
         providerDiagnostics: runMetaProviderDiagnostics
       })
+    }
+    const finishBrowserObservationCheckpoint = async (
+      message = '页面动作已完成，但本轮还没有取得可验证的新页面状态。我已保存现场，继续时只会先观察，不会重复之前的动作。',
+    ): Promise<ExecutionTurnResult> => {
+      const checkpoint = await finishBrowserSuspension({
+        reason: 'manual',
+        terminalReason: 'checkpoint_user_input',
+        message,
+      })
+      if (!checkpoint) throw new Error('browser_observation_checkpoint_unavailable')
+      return checkpoint
     }
     const { maybeHandleSkillClarificationGuard, maybeHandleActionAnnouncementGuard } =
       createAgentSdkTurnGuards({
@@ -630,8 +643,7 @@ export async function executeAgentSdkPreparedTurn(
         checkpointRestore,
         skillHintRelevanceForTurn,
         turnFollowup,
-        recentBrowserWorkIntent,
-        inferredSdkTaskType,
+        turnTaskType,
         allowedToolNames,
         requiredCapabilityGroups,
         runHandle,
@@ -652,7 +664,7 @@ export async function executeAgentSdkPreparedTurn(
       providerContent,
       useTextToolBridge,
       toolDefinitions,
-      latentSkillToolDefinitions,
+      latentToolDefinitions,
       toolBridgeRuntimeContext,
       hasVeaPipelineTool,
       hasMapAmbiguityQuestionTools,
@@ -787,14 +799,18 @@ export async function executeAgentSdkPreparedTurn(
       sdkTools,
       contextWindowTokens,
       maxOutputTokens,
-      inferredSdkTaskType,
+      turnTaskType,
       requiredCapabilityGroups,
       usedTools,
-      emitOutput,
-      emitHeartbeat,
-      checkpointSnapshotProvider: () => host.dynamicDelivery.buildSanitizedCheckpoint(runId),
+      emitOutput, emitHeartbeat,
+      candidateOutputBuffer,
+      checkpointSnapshotProvider: buildOwnerCheckpointSnapshot,
+      callModelInputFilter: modelInputController
+        ? (items, context) => modelInputController.filter(items, context)
+        : undefined,
       nativeTextToolBoundaryFlush,
       finishBudgetCheckpointIfNeeded,
+      finishBrowserObservationCheckpoint,
       maybeHandleSkillClarificationGuard,
       maybeHandleActionAnnouncementGuard,
       finalizeEarlyReturn
@@ -875,6 +891,8 @@ export async function executeAgentSdkPreparedTurn(
       projectionPatches,
       transcriptEvents,
       runHandle,
+      committedPublicSession,
+      committedOwnerSession: ownerLocalSession,
       deliveryDecision,
       deliveryRealEmitOutput: realEmitOutput,
       model,
@@ -886,6 +904,7 @@ export async function executeAgentSdkPreparedTurn(
       emitOutputForRun,
       emitStatusForRun,
       finishBudgetCheckpointIfNeeded,
+      finishSteeringCheckpointIfNeeded,
       finalizeEarlyReturn,
       buildResult
     })

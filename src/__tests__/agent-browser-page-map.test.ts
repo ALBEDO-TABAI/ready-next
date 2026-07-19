@@ -39,7 +39,7 @@ describe('agent-browser page map', () => {
     ]
     const map = buildPageMap(roots, { generation: 7, viewport })
     assert.equal(map.targets.length, 1)
-    assert.equal(map.targets[0].targetId, '7:0:42')
+    assert.equal(map.targets[0].targetId, '7:0:b42')
     // truthy state kept, false state dropped (denoise)
     assert.deepEqual(map.targets[0].states, { expanded: true })
   })
@@ -51,8 +51,50 @@ describe('agent-browser page map', () => {
     ]
     const map = buildPageMap(roots, { generation: 3, viewport })
     const ids = map.targets.map((t) => t.targetId)
-    assert.deepEqual(ids, ['3:0:10', '3:0:20'])
+    assert.deepEqual(ids, ['3:0:b10', '3:0:b20'])
     assert.notEqual(ids[0], ids[1], 'same-name buttons must get distinct ids')
+  })
+
+  it('keeps frame and nearest target ancestry for strict within lookups', () => {
+    const map = buildPageMap([{
+      role: 'listbox',
+      name: '城市',
+      backendDOMNodeId: 10,
+      frameId: 'frame-a',
+      children: [{
+        role: 'option',
+        name: '新加坡',
+        backendDOMNodeId: 11,
+      }],
+    }], { generation: 4, viewport })
+
+    assert.equal(map.targets[0]?.targetId, '4:frame-a:b10')
+    assert.equal(map.targets[0]?.role, 'listbox')
+    assert.equal(map.targets[0]?.name, '城市')
+    assert.equal(map.targets[0]?.backendDOMNodeId, 10)
+    assert.equal(map.targets[1]?.frameId, 'frame-a')
+    assert.equal(map.targets[1]?.parentTargetId, '4:frame-a:b10')
+    assert.deepEqual(map.targets[1]?.ancestorTargetIds, ['4:frame-a:b10'])
+  })
+
+  it('retains ancestry declared by the real flat DOM probe', () => {
+    const map = buildPageMap([{
+      role: 'generic',
+      children: [
+        { role: 'listbox', name: '地区', backendDOMNodeId: 1, frameId: '0' },
+        {
+          role: 'option',
+          name: '亚洲',
+          backendDOMNodeId: 2,
+          parentBackendDOMNodeId: 1,
+          ancestorBackendDOMNodeIds: [1],
+          frameId: '0',
+        },
+      ],
+    }], { generation: 5, viewport })
+
+    assert.equal(map.targets[1]?.parentTargetId, '5:0:b1')
+    assert.deepEqual(map.targets[1]?.ancestorTargetIds, ['5:0:b1'])
   })
 
   it('marks targets without a backendDOMNodeId as unstable with a structural fallback id', () => {
@@ -71,11 +113,11 @@ describe('agent-browser page map', () => {
     const map = buildPageMap([{ role: 'generic', children }], { generation: 1, viewport, maxBytes: 2_000 })
     assert.equal(map.truncated, true)
     assert.ok(Buffer.byteLength(map.text, 'utf8') <= 2_100)
-    assert.ok(map.text.includes('… (truncated middle) …'))
+    assert.ok(map.text.includes('… (more targets available through browser_find cursor) …'))
     assert.ok(!map.text.includes('<'), 'must not contain HTML angle brackets')
   })
 
-  it('中段截断保住 DOM 尾部主行动按钮（D13：发布/发送在页面底部）', () => {
+  it('text output is prefix-paged while the complete target set stays queryable', () => {
     const children: RawAxNode[] = [
       ...Array.from({ length: 400 }, (_, i) => ({
         role: 'button',
@@ -86,7 +128,7 @@ describe('agent-browser page map', () => {
     ]
     const map = buildPageMap([{ role: 'generic', children }], { generation: 1, viewport, maxBytes: 4_000 })
     assert.equal(map.truncated, true)
-    assert.match(map.text, /- clickable "发布"/, '尾部 CTA 必须活过截断')
+    assert.doesNotMatch(map.text, /- clickable "发布"/, '文本页不应偷偷拼接尾部样本')
     assert.match(map.text, /设置项 0/, '头部内容保留')
     assert.ok(map.targets.some((t) => t.name === '发布'), 'targets 数组不受文本截断影响')
   })
@@ -100,13 +142,13 @@ describe('agent-browser page map', () => {
     ], { generation: 5, viewport })
     const target = map.targets.find((t) => t.name === '写长文')
     assert.ok(target, 'cursor:pointer 控件必须成为可行动目标')
-    assert.equal(target!.targetId, '5:0:3')
-    assert.equal(map.targets.length, 1, '无名 clickable 不进目标')
+    assert.equal(target!.targetId, '5:0:b3')
+    assert.equal(map.targets.length, 2, '有真实 backend identity 的无名控件仍可通过 role/ref 定位')
     assert.match(map.text, /- clickable "写长文"/)
   })
 
   it('parseTargetId round-trips and rejects malformed ids', () => {
-    assert.deepEqual(parseTargetId('7:0:42'), { generation: 7, frameId: '0', node: '42' })
+    assert.deepEqual(parseTargetId('7:0:b42'), { generation: 7, frameId: '0', node: 'b42' })
     assert.deepEqual(parseTargetId('2:0:p1.3'), { generation: 2, frameId: '0', node: 'p1.3' })
     assert.equal(parseTargetId('garbage'), null)
   })

@@ -9,18 +9,23 @@ test('browser-surface-gate declares transitive sqlite ABI guard', (t) => {
   skipIfSqliteUnavailable(t, 'browser-surface-gate transitive sqlite load')
 })
 
-function controller(): BrowserController & { goBackCalls: number } {
-  const mock: Partial<BrowserController> & { goBackCalls: number } = {
+function controller(): BrowserController & { goBackCalls: number; readCalls: number } {
+  const mock: Partial<BrowserController> & { goBackCalls: number; readCalls: number } = {
     goBackCalls: 0,
+    readCalls: 0,
     getActiveTab: () => ({ id: 'tab-1', title: 'T', url: 'https://example.test', active: true }) as never,
     getTabList: () => [{ id: 'tab-1', title: 'T', url: 'https://example.test', active: true }],
-    getPageContent: async () => 'page text',
+    getPageContent: async function () {
+      this.readCalls += 1
+      return 'page text'
+    },
+    executeJS: async () => ({ blocked: false, blockerCount: 0, matchedKinds: [] }),
     goBack() {
       this.goBackCalls += 1
       return { success: true }
     },
   }
-  return mock as BrowserController & { goBackCalls: number }
+  return mock as BrowserController & { goBackCalls: number; readCalls: number }
 }
 
 function ctx(browserController: BrowserController): ToolContext {
@@ -39,14 +44,16 @@ function textOf(out: unknown): string {
   return typeof out === 'string' ? out : JSON.stringify(out)
 }
 
-test('tool-executor refuses browser writes without a code-derived turn surface', async () => {
+test('tool-executor refuses browser writes without a durable workflow route', async () => {
   const c = controller()
   const out = await executeToolCall('browser_navigate', { action: 'back' }, ctx(c))
-  assert.match(textOf(out), /browser_surface_undeclared/)
-  assert.equal(c.goBackCalls, 0, 'browser write must not dispatch without a surface binding')
+  assert.match(textOf(out), /browser_workflow_route_required/)
+  assert.equal(c.goBackCalls, 0, 'browser write must not dispatch without a workflow route')
 })
 
-test('tool-executor allows browser reads without a write surface', async () => {
-  const out = await executeToolCall('browser_read', {}, ctx(controller()))
-  assert.match(textOf(out), /page text/)
+test('tool-executor refuses browser reads without the same durable workflow route', async () => {
+  const c = controller()
+  const out = await executeToolCall('browser_read', {}, ctx(c))
+  assert.match(textOf(out), /browser_workflow_route_required/)
+  assert.equal(c.readCalls, 0, 'browser read must not dispatch without a workflow route')
 })

@@ -11,6 +11,7 @@ import { buildTaskProjectionRecord } from '../main/modules/agent-control/task-pr
 import type { ScopeRunEventPayload, ScopeRunSummary } from '../main/modules/agent-control/contracts/types'
 import type { TaskProjectionRecord } from '../main/modules/agent-control/contracts/run-contracts'
 import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
+import { canonicalCoreCloseoutTestPort } from './helpers/canonical-core-closeout-test-port'
 
 interface Statement {
   run(...params: unknown[]): unknown
@@ -168,6 +169,7 @@ test('AgentSdkRuntime manual suspend abort returns checkpoint without writing ca
     },
   } satisfies Partial<AgentSdkRuntimeDeps>)
   runtime.setRuntime({
+    ...canonicalCoreCloseoutTestPort(),
     getRunMetaRepository: () => repository,
   } as never)
   runtime.newSession('butler::scope-manual-suspend', 'system prompt')

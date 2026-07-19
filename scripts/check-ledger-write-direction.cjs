@@ -25,14 +25,27 @@ const DIRECT_ANSWER_HISTORY_MIGRATION_MARKER =
 const OWNERS = {
   task_projections: [
     'src/main/modules/repositories/task-projection-repository.ts',
+    'src/main/modules/repositories/agent-session-checkpoint-closeout.ts',
+    'src/main/modules/repositories/agent-session-checkpoint-resume.ts',
+    'src/main/modules/repositories/agent-session-checkpoint-route.ts',
+    'src/main/modules/repositories/agent-session-checkpoint-steering.ts',
+    'src/main/modules/repositories/agent-session-checkpoint-store.ts',
     'src/main/modules/migrations.ts',
   ],
   run_meta: [
     'src/main/modules/agent-control/task-projection/run-meta-repository.ts',
+    'src/main/modules/repositories/agent-session-checkpoint-closeout.ts',
+    'src/main/modules/repositories/agent-session-checkpoint-resume.ts',
+    'src/main/modules/repositories/agent-session-checkpoint-store.ts',
     'src/main/modules/migrations.ts',
   ],
   browser_tasks: [
     'src/main/modules/browser-engine/',
+    'src/main/modules/repositories/agent-session-checkpoint-closeout.ts',
+    'src/main/modules/repositories/agent-session-checkpoint-journal.ts',
+    'src/main/modules/repositories/agent-session-checkpoint-resume.ts',
+    'src/main/modules/repositories/agent-session-checkpoint-route.ts',
+    'src/main/modules/repositories/agent-session-checkpoint-store.ts',
     'src/main/modules/migrations.ts',
   ],
   skill_task_runs: [

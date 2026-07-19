@@ -1,8 +1,5 @@
 // Stage U U5.1b barrel re-export. New imports may use this subdir entry; existing deep imports remain valid.
 export * from './browser-action-heuristics'
-export * from './browser-domain-adapter'
-export * from './browser-domain-orchestrator'
-export * from './browser-task-planner'
 export * from './calendar-domain-adapter'
 export * from './capability-resolver'
 export * from './capability-runtime-snapshot'

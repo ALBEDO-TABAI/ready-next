@@ -1,9 +1,12 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { createElement } from 'react'
+import { renderToStaticMarkup } from 'react-dom/server'
 import type { ScopeRunState } from '../renderer/stores/useAgent'
 import {
   buildRunDurationMeterModel,
   formatRunDuration,
+  RunDurationMeter,
 } from '../renderer/components/agent/chat-panel/RunDurationMeter'
 
 function run(overrides: Partial<ScopeRunState>): ScopeRunState {
@@ -101,4 +104,17 @@ test('checkpoint says waiting only when a real continuation or user wait exists'
 test('empty or idle run does not render a duration model', () => {
   assert.equal(buildRunDurationMeterModel(null, Date.now()), null)
   assert.equal(buildRunDurationMeterModel(run({ phase: 'idle', startedAt: null }), Date.now()), null)
+})
+
+test('duration meter keeps its status and timer without an outer box', () => {
+  const markup = renderToStaticMarkup(createElement(RunDurationMeter, {
+    run: run({ phase: 'done', updatedAt: '2026-06-27T03:00:09.000Z' }),
+  }))
+  const meter = markup.match(/<div data-agent-run-duration-meter="true"[^>]*style="([^"]*)"/)
+  assert.ok(meter, `duration meter rendered: ${markup}`)
+  assert.doesNotMatch(meter[1], /(?:^|;)border:/)
+  assert.doesNotMatch(meter[1], /(?:^|;)background:/)
+  assert.doesNotMatch(meter[1], /backdrop-filter/)
+  assert.match(markup, /本轮用时/)
+  assert.match(markup, /00:09/)
 })

@@ -12,6 +12,15 @@ export interface BrowserRect {
   height: number
 }
 
+export function parkedBrowserHostBounds(bounds: BrowserRect): BrowserRect {
+  return {
+    x: -100000,
+    y: -100000,
+    width: Math.max(1, Math.round(bounds.width)),
+    height: Math.max(1, Math.round(bounds.height)),
+  }
+}
+
 export type { BrowserViewBoundsUpdate }
 
 export interface PreviewTabState {

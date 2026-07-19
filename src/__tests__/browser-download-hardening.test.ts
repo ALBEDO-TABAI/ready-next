@@ -13,7 +13,9 @@ import {
 } from '../main/modules/browser-engine/download-service'
 import type { BrowserController } from '../main/modules/browser-engine/ipc-handler'
 import {
+  DEFAULT_BROWSER_DOWNLOAD_DIRECTORY,
   downloadPageScopedUrlToDirectory,
+  downloadUrlsToDirectory,
   resolveAuthorizedBrowserDownloadDirectory,
 } from '../main/modules/tools/browser-media-download'
 
@@ -34,7 +36,7 @@ test('download redirect policy permits explicit local tasks but rejects public-t
 test('download directory authority accepts task roots and rejects invented absolute paths', () => {
   assert.equal(resolveAuthorizedBrowserDownloadDirectory('/tmp/invented-by-model').ok, false)
   const explicit = resolveAuthorizedBrowserDownloadDirectory('/tmp/user-picked', {
-    currentUserText: '请保存到 /tmp/user-picked',
+    trustedRoots: ['/tmp/user-picked'],
   })
   assert.equal(explicit.ok, true)
   const taskBound = resolveAuthorizedBrowserDownloadDirectory('/tmp/task-root/assets', {
@@ -49,6 +51,54 @@ test('download directory authority accepts task roots and rejects invented absol
   assert.equal(resolveAuthorizedBrowserDownloadDirectory('/tmp/from-packaged-cwd', {
     trustedRoots: ['/'],
   }).ok, false)
+})
+
+test('download directory authority uses the Ready-owned default when no path is supplied', () => {
+  const resolved = resolveAuthorizedBrowserDownloadDirectory(undefined)
+  assert.equal(resolved.ok, true)
+  if (resolved.ok) {
+    assert.equal(resolved.authority, 'ready_default')
+    assert.equal(resolved.directory, DEFAULT_BROWSER_DOWNLOAD_DIRECTORY)
+  }
+})
+
+test('browser downloads preserve exact URLs and only remove exact duplicates', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'ready-download-url-'))
+  const requested: string[] = []
+  try {
+    const output = await downloadUrlsToDirectory({
+      executeJS: async () => 'https://source.example.test/page',
+      downloadUrlToDirectory: async (params) => {
+        requested.push(params.url)
+        return {
+          success: true,
+          savePath: join(directory, `asset-${requested.length}.jpg`),
+          filename: `asset-${requested.length}.jpg`,
+          size: 3,
+          mimeType: 'image/jpeg',
+        }
+      },
+    } as unknown as BrowserController, {
+      urls: [
+        'https://cdn.example.test/474x/a.jpg',
+        'https://cdn.example.test/474x/a.jpg',
+        'https://cdn.example.test/originals/a.jpg',
+      ],
+      directory,
+      mutationBoundary: {
+        invokeTransport: async (run: () => unknown) => await run(),
+        recordMechanicalFact: () => undefined,
+      } as never,
+    })
+    const body = JSON.parse(typeof output === 'string' ? output : output.text) as { success: number }
+    assert.equal(body.success, 2)
+    assert.deepEqual(requested, [
+      'https://cdn.example.test/474x/a.jpg',
+      'https://cdn.example.test/originals/a.jpg',
+    ])
+  } finally {
+    await rm(directory, { recursive: true, force: true })
+  }
 })
 
 function pageStreamController(chunks: Buffer[]): BrowserController {

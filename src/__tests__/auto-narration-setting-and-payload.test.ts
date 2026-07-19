@@ -167,19 +167,42 @@ describe('auto narration setting and browser task payload', () => {
         progress: { total: 2, completed: 0, failed: 2, currentLabel: null },
         result: {
           failed: [
-            { url: 'https://example.com/retry', reason: 'timeout' },
+            { url: 'https://example.com/retry', reason: 'timeout', retryable: true },
             { url: 'https://example.com/manual', reason: 'permission_denied', attempts: 2, retryable: false },
           ],
         },
       }),
+      beginBrowserWorkflowAction: (input: Record<string, unknown>) => ({
+        actionId: 'action-browser-task-payload',
+        actionSeq: 1,
+        identity: input.identity,
+      }),
+      settleBrowserWorkflowAction: (_taskId: string, actionId: string, outcome: Record<string, unknown>) => ({
+        receiptId: 'receipt-browser-task-payload',
+        actionId,
+        actionSeq: 1,
+        outcome,
+      }),
+      recordBrowserWorkflowObservation: () => ({ receiptId: 'observation-browser-task-payload' }),
     } as Partial<BrowserController> as BrowserController
 
     const raw = await executeBrowserTool(
       'browser_task',
       { task_id: 'browser-task-failure-payload-s2-4' },
       controller,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      {
+        ownerRunId: 'run-browser-task-payload',
+        browserTaskId: 'browser-workflow-task-payload',
+        parentTaskId: 'parent-browser-task-payload',
+        inputSource: 'trusted_internal',
+      },
     )
-    const payload = JSON.parse(raw) as {
+    const payload = (typeof raw === 'string' ? JSON.parse(raw) : raw.data) as {
       failedItems?: Array<{ url: string; reason: string; attempts: number; retryable: boolean }>
       suggestedNextAction?: string
     }

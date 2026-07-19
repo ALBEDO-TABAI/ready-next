@@ -15,16 +15,14 @@ import type {
   BrowserScrollCollectOptions,
   BrowserScrollCollectResult,
   BrowserStructuredItem,
-  BrowserStartTaskRequest,
   BrowserWaitForConditionOptions,
-  BrowserCapabilityTaskKind,
 } from './capability-types'
-import { BrowserContentTaskRunner, type BrowserSiteCardLearningSink, type BrowserTaskProjectionSink } from './content-task-runner'
-import { registerWaitingHumanBrowserTaskResumePort } from './task-event-bridge'
-import { ScopedBrowserFacade } from './scoped-browser-facade'
-import type { BrowserCollectionTarget } from './collection-targets'
 import { AgentInputPassthroughRegistry } from './agent-input-passthrough'
-import { AgentTabControlGate } from './agent-tab-control-gate'
+import {
+  beginAgentTabUserTakeover,
+  createAgentTabUserInputTakeoverHandlers,
+  persistAgentTabUserTakeover,
+} from './agent-tab-control-gate'
 import { getBrowserWriteLeaseService } from './agent-browser-lease-singleton'
 import { BrowserFileChooserGuard } from './file-chooser-guard'
 import { agentBrowserError, isAgentBrowserError, type AgentBrowserStructuredError, type AgentBrowserSurface } from './agent-browser-errors'
@@ -33,7 +31,6 @@ import {
   recordUserViewTakeoverSignal,
   shouldRecordUserViewTabSwitch,
 } from './user-view-takeover-bridge'
-import { isHighControlPlatformText } from '../../../shared/browser-collection-intent'
 import type {
   BrowserCDPErrorCode,
   BrowserKeyEventPayload,
@@ -58,6 +55,7 @@ import {
   type BrowserTaskDiagnosticsSnapshot,
 } from './diagnostics-service'
 import { BrowserHostLayoutService } from './host-layout-service'
+import type { BrowserHostPresentationState } from './host-layout-service'
 import {
   BROWSER_HOST_KIND,
   type BrowserHostView,
@@ -86,6 +84,13 @@ import { buildBrowserLeaseSupervisionSnapshot } from './browser-lease-supervisio
 import { BrowserPreviewService } from './preview-service'
 import { BrowserPageBackgroundService } from './page-background-service'
 import { BrowserSessionPolicyService } from './session-policy-service'
+import {
+  resolveAgentPermissionRequestBinding,
+  sameBrowserPermissionRequestBinding,
+  type BrowserPermissionRequestBinding,
+  type BrowserSitePermissionNotice,
+  type BrowserSitePermissionRequestReadback,
+} from './browser-permission-policy'
 import { BrowserTabLifecycleService } from './tab-lifecycle-service'
 import {
   downloadRemoteMediaDropUrls,
@@ -93,22 +98,28 @@ import {
 } from './remote-media-drop-cache'
 import { type BrowserTabMetaRecord, BrowserTabMetaService } from './tab-meta-service'
 import { BrowserTabShellService } from './tab-shell-service'
-import { BrowserTaskPersistenceService } from './task-persistence-service'
+import {
+  BrowserTaskPersistenceService,
+  type BrowserResearchAssessment,
+  type BrowserResearchEvidenceBindingInput,
+  type VerifiedBrowserWorkflowEvidence,
+  type BrowserResearchWorkItemInput,
+  type BeginBrowserWorkflowActionInput,
+  type BrowserWorkflowActiveAction,
+  type BrowserWorkflowObservationReceipt,
+  type BrowserWorkflowObservationResource,
+  type RecordBrowserWorkflowObservationInput,
+  type SettledBrowserWorkflowAction,
+} from './task-persistence-service'
+import type { BrowserActionOutcome } from '../../../shared/browser-action-outcome'
 import { BrowserUtilityMenuService } from './utility-menu-service'
 import { BrowserWindowOpenService } from './window-open-service'
-import { BrowserCollectionConsentStore } from './browser-collection-consent'
-import { resolveHighControlCollectionTarget, resolveSourceCollectionTarget } from './collection-routing'
-import { collectionTaskIdToCancel, selectLinkedCollectionExecution } from './collection-task-lifecycle'
 import { withHtmlInCanvasWebPreferences } from '../app-control/html-in-canvas-feature'
 import { getReadyBoardService } from '../board-engine/ipc-handler'
 import {
   isAllowedBrowserURL,
   toOAuthCompatibleUserAgent,
 } from './popup-policy'
-import {
-  BrowserWorkflowSessionStore,
-  type BrowserWorkflowSession,
-} from './browser-workflow-session'
 import type { BrowserUtilityMenuRequest } from '../../../shared/browser-utility-menu'
 import { mapBrowserAgentPointerToOverlay } from '../../../shared/browser-agent-pointer'
 import { READY_BROWSER_BLANK_URL } from '../../../shared/browser-defaults'
@@ -120,6 +131,27 @@ import type { RegisterDormantBrowserTabsRequest, RegisterDormantBrowserTabsResul
 import { browserSnapshotService } from './browser-snapshot-service'
 import { disposeBrowserPageMapAmbiguity } from './browser-page-map-ambiguity-cache'
 import { BrowserVisibilityRuntime } from './browser-visibility-runtime'
+import type {
+  BrowserHumanTakeoverIntentPort,
+  BrowserHumanTakeoverPhysicalTarget,
+  BrowserWorkflowWriteAdmissionPort,
+  BrowserWorkflowWriteTarget,
+} from '../../../shared/browser-workflow-control'
+
+function sameBrowserWorkflowWriteTarget(
+  left: BrowserWorkflowWriteTarget,
+  right: BrowserWorkflowWriteTarget,
+): boolean {
+  return left.parentTaskId === right.parentTaskId
+    && left.ownerRunId === right.ownerRunId
+    && left.browserTaskId === right.browserTaskId
+    && left.surface === right.surface
+    && left.scopeId === right.scopeId
+    && left.profileId === right.profileId
+    && left.sessionId === right.sessionId
+    && left.tabId === right.tabId
+    && left.physicalTargetToken === right.physicalTargetToken
+}
 
 interface Tab extends BrowserTabMetaRecord {
   id: string
@@ -141,6 +173,14 @@ interface Tab extends BrowserTabMetaRecord {
     entries: Electron.NavigationEntry[]
     index: number
   } | null
+}
+
+interface BrowserWorkflowJournalUnitOfWorkPort {
+  beginAction(input: BeginBrowserWorkflowActionInput): BrowserWorkflowActiveAction
+  settleAction(taskId: string, actionId: string, outcome: BrowserActionOutcome): SettledBrowserWorkflowAction
+  recordObservation(input: RecordBrowserWorkflowObservationInput): BrowserWorkflowObservationReceipt
+  upsertResearchWorkItems(taskId: string, ownerRunId: string, inputs: BrowserResearchWorkItemInput[]): BrowserResearchAssessment
+  bindResearchEvidence(taskId: string, ownerRunId: string, bindings: BrowserResearchEvidenceBindingInput[]): BrowserResearchAssessment
 }
 
 export type BrowserTabOwner = 'manual' | 'agent'
@@ -192,21 +232,14 @@ export class BrowserController {
   private readonly fileChooserGuard: BrowserFileChooserGuard
   private readonly networkObserverService: BrowserNetworkObserverService
   private readonly automationService: BrowserAutomationService
-  private readonly collectionConsentStore = new BrowserCollectionConsentStore()
   private readonly capabilityService: BrowserCapabilityService
-  private readonly contentTaskRunner: BrowserContentTaskRunner
-  /** Freeze-then-confirm supervision gate for the background agent tab (plan §3.6). */
-  private readonly agentTabControlGate = new AgentTabControlGate()
+  private readonly taskPersistenceService = new BrowserTaskPersistenceService()
   /** D18-d：agent 自注入输入直通登记（automation-service 派发前登记，两个 before-*-event 守卫凭此放行自家输入） */
   readonly agentInputPassthrough = new AgentInputPassthroughRegistry()
-  /** R18：监督 listener 去重（重复 ensure 曾按次叠挂）+ pending 胶囊 TTL 过期推送定时器 */
+  /** Agent-tab supervision listener de-duplication. */
   private readonly supervisedAgentTabWebContentsIds = new Set<number>()
-  private pendingConfirmExpiryTimer: NodeJS.Timeout | null = null
   /** The dedicated background tab the collector sub-agent drives (plan §3.5/§3.9). */
   private agentTabId: string | null = null
-  private foregroundAgentTabId: string | null = null
-  private readonly workflowSessionStore = new BrowserWorkflowSessionStore()
-  private releaseForegroundWorkflowBoundsLock: (() => void) | null = null
   private readonly tabLifecycleService: BrowserTabLifecycleService
   private readonly tabMetaService: BrowserTabMetaService<Tab>
   private readonly tabShellService: BrowserTabShellService
@@ -216,6 +249,15 @@ export class BrowserController {
   private readonly utilityMenuService: BrowserUtilityMenuService
   private readonly windowOpenService: BrowserWindowOpenService
   private readonly userViewTakeoverWebContentsIds = new Set<number>()
+  private humanTakeoverIntentPort: BrowserHumanTakeoverIntentPort | null = null
+  private workflowWriteAdmissionPort: BrowserWorkflowWriteAdmissionPort | null = null
+  private workflowJournalUnitOfWork: BrowserWorkflowJournalUnitOfWorkPort | null = null
+  private readonly workflowPhysicalBindings = new Map<string, BrowserWorkflowWriteTarget>()
+  private readonly pendingFileChooserNotices = new Map<string, Array<{
+    target: BrowserPermissionRequestBinding
+    notice: BrowserSitePermissionNotice
+  }>>()
+  private readonly pendingPhysicalTakeovers = new Set<string>()
   private p7cLiveProofLeaseId: string | null = null
 
   publishAgentBrowserAction(event: { phase: 'start' | 'finish' | 'abort' }): void {
@@ -310,6 +352,7 @@ export class BrowserController {
           return ''
         }
       },
+      onIntercepted: (tabId, url) => this.recordFileChooserIntercepted(tabId, url),
       log: (message) => this.logBrowserDiag(message),
     })
     this.networkObserverService = new BrowserNetworkObserverService(this.cdpSessionService)
@@ -383,50 +426,11 @@ export class BrowserController {
       },
     })
     this.capabilityService = new BrowserCapabilityService({
-      openForCaptureTarget: (url) => this.openForCaptureTarget(url),
-      createTab: (url) => this.createTab(url),
-      navigate: (tabId, url) => this.navigate(tabId, url),
       getActiveTab: () => this.getActiveTab(),
       executeJS: (tabId, code) => this.executeJS(tabId, code),
       dispatchMouse: (tabId, payload) => this.dispatchMouse(tabId, payload as unknown as BrowserMouseEventPayload),
       downloadUrlToDirectory: (payload) => this.downloadUrlToDirectory(payload),
-      captureLiveTabPage: (url, options) => this.captureLiveTabPage(url, options),
-      captureBackgroundPage: (url, options) => this.captureBackgroundPage(url, options),
     })
-    this.contentTaskRunner = new BrowserContentTaskRunner(
-      this.capabilityService,
-      new BrowserTaskPersistenceService(),
-      getBrowserWriteLeaseService(),
-      // The collector facade is built per-task here (the controller owns
-      // executeBrowserTool + the control gate); executeBrowserTool is imported
-      // lazily to avoid a static cycle with tools/browser-tools (plan §3.4).
-      ({ agentTabId, leaseId, surface }) => {
-        const releaseLayoutLock = this.acquireTabBoundsLock(agentTabId, `collection:${leaseId}`)
-        return {
-          facade: new ScopedBrowserFacade({
-          agentTabId,
-          leaseService: getBrowserWriteLeaseService(),
-          leaseId,
-          controlGate: this.agentTabControlGate,
-          surface,
-          execute: async (toolName, args, gateSurface, gateLeaseId) => {
-            const { executeBrowserTool } = await import('../tools/browser-tools')
-            const output = await executeBrowserTool(toolName, args, this, undefined, undefined, {
-              service: getBrowserWriteLeaseService(),
-              surface: gateSurface,
-              leaseId: gateLeaseId,
-            })
-            return typeof output === 'string' ? output : output.text
-          },
-          }),
-          // Only a CONFIRMED freeze cancels the background task; pending_confirm
-          // blocks writes (via the facade's isWriteBlocked) but must not cancel
-          // before the user confirms (Codex result-review #1 residual).
-          isControlFrozen: () => this.agentTabControlGate.isFrozen(),
-          releaseLayoutLock,
-        }
-      },
-    )
     this.tabMetaService = new BrowserTabMetaService({
       tabs: this.tabs,
       getActiveTabId: () => this.activeTabId,
@@ -520,10 +524,10 @@ export class BrowserController {
       resolveOriginDomain: (webContentsId) => this.resolveOriginDomainForWebContentsId(webContentsId),
       isPreviewWebContentsId: (webContentsId) => this.previewService.matchesWebContentsId(webContentsId),
       getMainWindow: () => (this.mainWindow && !this.mainWindow.isDestroyed() ? this.mainWindow : null),
-      isAgentDriveActive: () => {
-        const leaseService = getBrowserWriteLeaseService()
-        return leaseService.getLease('user-view') !== null || leaseService.getLease('agent-view') !== null
-      },
+      resolveAgentPermissionBinding: (webContentsId, partition) => (
+        this.resolveAgentPermissionBinding(webContentsId, partition)
+      ),
+      isAgentPermissionBindingLive: (binding) => this.isAgentPermissionBindingLive(binding),
       logDiagnostics: (message) => this.diagnosticsService.log(message),
     })
     this.utilityMenuService = new BrowserUtilityMenuService({
@@ -574,6 +578,7 @@ export class BrowserController {
     })
     getBrowserWriteLeaseService().onTransition((transition) => {
       this.notifyBrowserLeaseChanged()
+      if (transition.surface === 'agent-view') this.notifyAgentControlChanged()
       this.performanceRuntime.reconcile()
       // D16 — 写租约离开 held（释放/接管/过期）即解除文件选择器拦截，
       // 用户随后的原生选择器行为不受 agent 遗留影响。
@@ -583,7 +588,6 @@ export class BrowserController {
         void this.fileChooserGuard.disarmAll()
       }
     })
-    void this.contentTaskRunner.resumePendingTasks()
   }
 
   private logBrowserDiag(message: string): void {
@@ -599,6 +603,8 @@ export class BrowserController {
   private disposeTabRuntimeResources(tabId: string): void {
     this.dialogService.clear(tabId)
     this.fileChooserGuard.disposeTab(tabId)
+    this.sessionPolicyService.expireSitePermissionRequestsForTab(tabId)
+    this.pendingFileChooserNotices.delete(tabId)
     browserSnapshotService.disposeTab(this, tabId)
     disposeBrowserPageMapAmbiguity(tabId)
     this.cdpSessionService.disposeTab(tabId)
@@ -641,6 +647,79 @@ export class BrowserController {
     return null
   }
 
+  private partitionForTab(tabId: string): string | null {
+    const tab = this.tabs.get(tabId)
+    if (!tab) return null
+    const profile = String(tab.profile || '').trim().toLowerCase()
+    return profile ? `persist:browser-profile-${profile}` : 'persist:browser'
+  }
+
+  private resolveAgentPermissionBinding(
+    webContentsId: number | undefined,
+    partition: string,
+  ): BrowserPermissionRequestBinding | null {
+    const tabId = this.getTabIdForWebContents(webContentsId)
+    return tabId ? this.resolveAgentPermissionBindingForTab(tabId, partition) : null
+  }
+
+  private resolveAgentPermissionBindingForTab(
+    tabId: string,
+    partition: string,
+  ): BrowserPermissionRequestBinding | null {
+    if (this.partitionForTab(tabId) !== partition) return null
+    const workflowTarget = this.workflowPhysicalBindings.get(tabId) || null
+    const lease = workflowTarget
+      ? getBrowserWriteLeaseService().getLease(workflowTarget.surface)
+      : null
+    return resolveAgentPermissionRequestBinding({
+      partition,
+      tabId,
+      physicalTargetToken: this.getPhysicalTargetToken(tabId) || null,
+      workflowTarget,
+      lease,
+      writeAdmitted: workflowTarget ? this.isBrowserWorkflowWriteAdmitted(workflowTarget) : false,
+    })
+  }
+
+  private isAgentPermissionBindingLive(binding: BrowserPermissionRequestBinding): boolean {
+    return this.partitionForTab(binding.tabId) === binding.partition
+      && this.getPhysicalTargetToken(binding.tabId) === binding.physicalTargetToken
+  }
+
+  private recordFileChooserIntercepted(tabId: string, url: string): void {
+    const partition = this.partitionForTab(tabId)
+    const target = partition ? this.resolveAgentPermissionBindingForTab(tabId, partition) : null
+    if (!target) return
+    const records = this.pendingFileChooserNotices.get(tabId) || []
+    records.push({
+      target,
+      notice: {
+        kind: 'file_chooser_intercepted',
+        permission: '',
+        origin: url || tabId,
+        at: new Date().toISOString(),
+        guidance: 'The page opened a native file chooser. Use browser_find and browser_upload on this exact tab instead of waiting for the native dialog.',
+      },
+    })
+    this.pendingFileChooserNotices.set(tabId, records.slice(-4))
+  }
+
+  consumeBrowserSiteNotices(target: BrowserWorkflowWriteTarget): BrowserSitePermissionNotice[] {
+    if (!this.isBrowserWorkflowWriteAdmitted(target)) return []
+    const notices = this.sessionPolicyService.consumeSitePermissionNotices(target)
+    const fileChooserRecords = this.pendingFileChooserNotices.get(target.tabId) || []
+    this.pendingFileChooserNotices.delete(target.tabId)
+    for (const record of fileChooserRecords) {
+      if (
+        sameBrowserPermissionRequestBinding(record.target, {
+          partition: record.target.partition,
+          ...target,
+        })
+      ) notices.push(record.notice)
+    }
+    return notices
+  }
+
   private syncPopupContextForTab(tabId: string): void {
     const tab = this.tabs.get(tabId)
     const webContents = tab?.view?.webContents
@@ -680,6 +759,11 @@ export class BrowserController {
   }
 
   hideHost(view: BrowserHostView): void {
+    const tabId = this.getTabIdForWebContents(view.webContents.id)
+    if (tabId && this.isAgentActivelyDrivingTab(tabId)) {
+      this.hostLayoutService.parkHost(view, this.currentBoundsForTab(tabId))
+      return
+    }
     this.hostLayoutService.hideHost(view)
   }
 
@@ -824,7 +908,6 @@ export class BrowserController {
           })
           this.syncPopupContextForTab(result.tabId)
           this.attachAgentTabSupervision(result.tabId)
-          this.adoptForegroundWorkflowPopup(context.sourceTabId || null, result.tabId)
         }
 
         this.sendToRenderer('browser:tabOpened', this.tabMetaService.buildTabPayload(tab))
@@ -1066,6 +1149,114 @@ export class BrowserController {
     return this.automationService.getTabContext(tabId)
   }
 
+  getPhysicalTargetToken(tabId: string | null): string {
+    return this.automationService.getPhysicalTargetToken(tabId)
+  }
+
+  setHumanTakeoverIntentPort(port: BrowserHumanTakeoverIntentPort | null): void {
+    this.humanTakeoverIntentPort = port
+  }
+
+  setBrowserWorkflowWriteAdmissionPort(port: BrowserWorkflowWriteAdmissionPort | null): void {
+    this.workflowWriteAdmissionPort = port
+  }
+
+  setBrowserWorkflowJournalUnitOfWork(port: BrowserWorkflowJournalUnitOfWorkPort | null): void {
+    this.workflowJournalUnitOfWork = port
+  }
+
+  /** Bind the physical Browser target to the durable Parent/child owner while
+   * that owner is live. The returned cleanup is identity guarded so an older
+   * run cannot erase a newer binding for the same tab. */
+  bindBrowserWorkflowPhysicalTarget(input: BrowserWorkflowWriteTarget): () => void {
+    const binding = { ...input }
+    this.workflowPhysicalBindings.set(input.tabId, binding)
+    return () => {
+      if (this.workflowPhysicalBindings.get(input.tabId) === binding) {
+        this.workflowPhysicalBindings.delete(input.tabId)
+      }
+    }
+  }
+
+  isBrowserWorkflowWriteAdmitted(input: BrowserWorkflowWriteTarget): boolean {
+    const current = this.workflowPhysicalBindings.get(input.tabId)
+    if (!current || !sameBrowserWorkflowWriteTarget(current, input)) return false
+    if (this.pendingPhysicalTakeovers.has(input.tabId)) return false
+    if (this.getPhysicalTargetToken(input.tabId) !== input.physicalTargetToken) return false
+    if (!this.workflowWriteAdmissionPort) return false
+    return this.workflowWriteAdmissionPort(input)
+  }
+
+  /** Apply the already-committed durable fence to the matching native target.
+   * This is deliberately scoped to one physical tab; unrelated tabs sharing a
+   * coarse surface remain available. */
+  fenceBrowserWorkflowPhysicalTarget(input: BrowserWorkflowWriteTarget): boolean {
+    const current = this.workflowPhysicalBindings.get(input.tabId)
+    if (!current || !sameBrowserWorkflowWriteTarget(current, input)) return false
+    if (this.getPhysicalTargetToken(input.tabId) !== input.physicalTargetToken) return false
+    this.workflowPhysicalBindings.delete(input.tabId)
+    const leases = getBrowserWriteLeaseService()
+    if (leases.getLease(input.surface)?.tabId === input.tabId) {
+      leases.recordUserSignal({ surface: input.surface, source: 'explicit-button' })
+      leases.clearTakeover(input.surface)
+    }
+    const tab = this.tabs.get(input.tabId)
+    if (tab) {
+      this.updateTabRuntimeState(input.tabId, { owner: 'manual', activity: 'attention' })
+      this.syncPopupContextForTab(input.tabId)
+      if (this.agentTabId === input.tabId) this.agentTabId = null
+    }
+    this.notifyAgentControlChanged()
+    return true
+  }
+
+  beginBrowserWorkflowAction(input: BeginBrowserWorkflowActionInput) {
+    if (!this.workflowJournalUnitOfWork) throw new Error('browser_workflow_journal_unit_of_work_unavailable')
+    return this.workflowJournalUnitOfWork.beginAction(input)
+  }
+
+  settleBrowserWorkflowAction(taskId: string, actionId: string, outcome: BrowserActionOutcome): SettledBrowserWorkflowAction {
+    if (!this.workflowJournalUnitOfWork) throw new Error('browser_workflow_journal_unit_of_work_unavailable')
+    return this.workflowJournalUnitOfWork.settleAction(taskId, actionId, outcome)
+  }
+
+  recordBrowserWorkflowObservation(input: RecordBrowserWorkflowObservationInput): BrowserWorkflowObservationReceipt {
+    if (!this.workflowJournalUnitOfWork) throw new Error('browser_workflow_journal_unit_of_work_unavailable')
+    return this.workflowJournalUnitOfWork.recordObservation(input)
+  }
+
+  readHighestBrowserWorkflowObservation(taskId: string): BrowserWorkflowObservationReceipt | null {
+    return this.taskPersistenceService.readHighestObservation(taskId)
+  }
+
+  readBrowserWorkflowObservationResource(taskId: string, resourceId: string): BrowserWorkflowObservationResource | null {
+    return this.taskPersistenceService.readObservationResource(taskId, resourceId)
+  }
+
+  listBrowserWorkflowObservationResources(taskId: string): BrowserWorkflowObservationResource[] {
+    return this.taskPersistenceService.listObservationResources(taskId)
+  }
+
+  readVerifiedBrowserWorkflowEvidence(taskId: string): VerifiedBrowserWorkflowEvidence {
+    return this.taskPersistenceService.readVerifiedWorkflowEvidence(taskId)
+  }
+
+  getBrowserInputEnvironment(tabId: string | null): {
+    mainWindowForeground: boolean
+    hostPresentation: BrowserHostPresentationState
+    tabActive: boolean
+  } {
+    const resolved = this.resolveTabView(tabId)
+    return {
+      mainWindowForeground: !this.mainWindow.isDestroyed()
+        && this.mainWindow.isVisible()
+        && !this.mainWindow.isMinimized()
+        && this.mainWindow.isFocused(),
+      hostPresentation: this.hostLayoutService.getHostPresentationState(resolved.view),
+      tabActive: resolved.tabId === this.activeTabId,
+    }
+  }
+
   async waitForCondition(
     tabId: string | null,
     options: BrowserWaitForConditionOptions,
@@ -1080,153 +1271,46 @@ export class BrowserController {
     return this.capabilityService.extractStructured(tabId, options)
   }
 
-  async extractStructuredFromUrl(
-    url: string,
-    options: BrowserExtractStructuredOptions,
-  ): Promise<BrowserExtractStructuredResult> {
-    return this.capabilityService.extractStructuredFromUrl(url, options)
-  }
-
   async scrollCollect(
     tabId: string | null,
     options: BrowserScrollCollectOptions,
+    signal?: AbortSignal,
   ): Promise<BrowserScrollCollectResult> {
-    return this.capabilityService.scrollCollect(tabId, options)
+    return this.capabilityService.scrollCollect(tabId, options, signal)
   }
 
   aggregateResults(items: BrowserStructuredItem[], options?: BrowserAggregateOptions): BrowserStructuredItem[] {
     return this.capabilityService.aggregateResults(items, options)
   }
 
-  async startTask(request: BrowserStartTaskRequest): Promise<BrowserCapabilityTaskHandle> {
-    return this.contentTaskRunner.startTask(request)
-  }
-
-  async startVisibleCollection(payload: Record<string, unknown>, scopeId?: string): Promise<BrowserCapabilityTaskHandle> {
-    const requestedTabId = typeof payload.tabId === 'string' ? payload.tabId : null
-    const tabUrl = requestedTabId ? this.tabs.get(requestedTabId)?.url || '' : ''
-    const activeTab = this.getActiveTab()
-    const targetUrl = String(payload.url || tabUrl || activeTab?.url || '').trim()
-    const highControl = payload.highControl === true || isHighControlPlatformText(targetUrl || tabUrl || activeTab?.url || '')
-    const visibleTarget = resolveHighControlCollectionTarget({
-      highControl,
-      requestedTabId,
-      activeTabId: activeTab?.id || null,
-      activeTabUrl: activeTab?.url || null,
-    })
-    const executionTarget = visibleTarget ?? {
-      tabId: await this.ensureAgentTab(),
-      surface: 'agent-view' as AgentBrowserSurface,
-      usesVisibleTab: false,
-    }
-    return this.contentTaskRunner.startTask({
-      kind: 'visible_collect',
-      payload: {
-        ...payload,
-        url: targetUrl || undefined,
-        tabId: executionTarget.tabId,
-        surface: executionTarget.surface,
-        leaseId: undefined,
-        ...(scopeId && scopeId.trim() ? { scopeId: scopeId.trim() } : {}),
-      },
-    })
-  }
-
-  createSyntheticVisibleCollection(payload: {
-    targets: BrowserCollectionTarget[]
-    targetUrl?: string
-    outputRootDir?: string
-    sourceMessageIds?: string[]
-    ownerAgentId?: string
-    ownerRunId?: string
-    parentTaskId?: string
-    executionBinding?: import('../../../shared/agent-execution-profile').TaskExecutionBinding
-  }, scopeId?: string): BrowserCapabilityTaskHandle {
-    return this.contentTaskRunner.createSyntheticVisibleCollection({
-      ...payload,
-      scopeId: scopeId?.trim() || undefined,
-    })
-  }
-
   async getTask(taskId: string): Promise<BrowserCapabilityTaskHandle | null> {
-    return this.contentTaskRunner.getTask(taskId)
-  }
-
-  /** EP2 dogfood gap 1 — the download-redirect guard needs to discover this
-   *  scope's image_gallery source tasks. */
-  async listTasksByKind(kind: BrowserCapabilityTaskKind): Promise<BrowserCapabilityTaskHandle[]> {
-    return this.contentTaskRunner.listTasks(kind)
-  }
-
-  /** EP2 dogfood gap 3 — passthrough to the execution-ledger owner. */
-  async recordCollectedMediaDownload(taskId: string, summary: {
-    discovered: number
-    saved: number
-    failed: number
-    remaining: number
-    directory: string
-    expectedTotal?: number | null
-  }): Promise<BrowserCapabilityTaskHandle | null> {
-    return this.contentTaskRunner.recordCollectedMediaDownload(taskId, summary)
+    return this.taskPersistenceService.getTask(taskId)
   }
 
   getTaskPayload(taskId: string): Record<string, unknown> | null {
-    return this.contentTaskRunner.getTaskPayload(taskId)
+    return this.taskPersistenceService.getTaskPayload(taskId)
   }
 
-  rebindTaskExecution(taskId: string, input: {
-    ownerRunId?: string | null
-    parentTaskId?: string | null
-    executionBinding?: import('../../../shared/agent-execution-profile').TaskExecutionBinding | null
-  }): boolean {
-    return this.contentTaskRunner.patchTaskPayload(taskId, {
-      ...(input.ownerRunId ? { ownerRunId: input.ownerRunId } : {}),
-      ...(input.parentTaskId ? { parentTaskId: input.parentTaskId } : {}),
-      ...(input.executionBinding ? { executionBinding: input.executionBinding } : {}),
-    })
+  upsertBrowserResearchWorkItems(
+    taskId: string,
+    ownerRunId: string,
+    workItems: BrowserResearchWorkItemInput[],
+  ): BrowserResearchAssessment {
+    if (!this.workflowJournalUnitOfWork) throw new Error('browser_workflow_journal_unit_of_work_unavailable')
+    return this.workflowJournalUnitOfWork.upsertResearchWorkItems(taskId, ownerRunId, workItems)
   }
 
-  async findCollectionTaskBySourceTaskId(sourceTaskId: string): Promise<BrowserCapabilityTaskHandle | null> {
-    const sourceId = sourceTaskId.trim()
-    if (!sourceId) return null
-    const tasks = [
-      ...(await this.contentTaskRunner.listTasks('card_loop')),
-      ...(await this.contentTaskRunner.listTasks('note_collect')),
-    ]
-    const matches = tasks.filter((task) => {
-      const payload = this.contentTaskRunner.getTaskPayload(task.taskId)
-      const plan = payload?.plan && typeof payload.plan === 'object' ? payload.plan as Record<string, unknown> : null
-      const result = task.result && typeof task.result === 'object' ? task.result as Record<string, unknown> : null
-      const status = task.status
-      if (status === 'cancelled' || status === 'failed') return false
-      return plan?.sourceTaskId === sourceId || result?.sourceTaskId === sourceId
-    })
-    return selectLinkedCollectionExecution(matches)
+  bindBrowserResearchEvidence(
+    taskId: string,
+    ownerRunId: string,
+    bindings: BrowserResearchEvidenceBindingInput[],
+  ): BrowserResearchAssessment {
+    if (!this.workflowJournalUnitOfWork) throw new Error('browser_workflow_journal_unit_of_work_unavailable')
+    return this.workflowJournalUnitOfWork.bindResearchEvidence(taskId, ownerRunId, bindings)
   }
 
-  async resumeTask(taskId: string): Promise<BrowserCapabilityTaskHandle | null> {
-    const current = await this.contentTaskRunner.getTask(taskId)
-    if (current?.kind === 'note_collect' || current?.kind === 'card_loop' || current?.kind === 'site_research') {
-      const payload = this.contentTaskRunner.getTaskPayload(taskId)
-      if (payload) {
-        const agentTabId = await this.ensureAgentTab()
-        const rebound = this.contentTaskRunner.patchTaskPayload(taskId, {
-          agentTabId,
-          surface: current.kind === 'site_research' ? 'agent-view' : payload.surface || 'agent-view',
-        })
-        if (!rebound) throw new Error('browser_task_resume_payload_conflict')
-      }
-    }
-    return this.contentTaskRunner.resumeTask(taskId)
-  }
-
-  async cancelTask(taskId: string): Promise<BrowserCapabilityTaskHandle | null> {
-    const sourceTask = await this.contentTaskRunner.getTask(taskId)
-    if (!sourceTask) return null
-    const linkedExecution = sourceTask.kind === 'visible_collect'
-      ? await this.findCollectionTaskBySourceTaskId(taskId)
-      : null
-    return this.contentTaskRunner.cancelTask(collectionTaskIdToCancel(sourceTask, linkedExecution))
+  assessBrowserResearch(taskId: string): BrowserResearchAssessment {
+    return this.taskPersistenceService.assessResearch(taskId)
   }
 
   /**
@@ -1235,11 +1319,11 @@ export class BrowserController {
    * tag it owner:'agent', and restore whatever tab the user had active so the
    * agent never preempts the visible browser.
    */
-  async ensureAgentTab(): Promise<string> {
+  async ensureAgentTab(profile?: string | null): Promise<string> {
+    const requestedProfile = String(profile || '').trim() || null
     if (this.agentTabId) {
       const agentTab = this.tabs.get(this.agentTabId)
-      if (agentTab?.owner === 'agent') {
-        this.agentTabControlGate.reset()
+      if (agentTab?.owner === 'agent' && (agentTab.profile || null) === requestedProfile) {
         this.updateTabRuntimeState(this.agentTabId, { activity: 'running' })
         return this.agentTabId
       }
@@ -1249,12 +1333,11 @@ export class BrowserController {
     // (Codex result-review #4). Belt-and-suspenders: if the host ever activates
     // it anyway, restore the user's tab.
     const previousActive = this.activeTabId
-    const created = await this.createTab(READY_BROWSER_BLANK_URL, { background: true })
+    const created = await this.createTab(READY_BROWSER_BLANK_URL, { background: true, profile: requestedProfile })
     if (!created.success || !created.tabId) {
       throw new Error(created.error || 'failed to create agent tab')
     }
     this.agentTabId = created.tabId
-    this.agentTabControlGate.reset()
     this.updateTabRuntimeState(created.tabId, { owner: 'agent', activity: 'running' })
     this.syncPopupContextForTab(created.tabId)
     if (previousActive && this.activeTabId === created.tabId && this.tabs.has(previousActive)) {
@@ -1264,181 +1347,14 @@ export class BrowserController {
     return created.tabId
   }
 
-  private async ensureForegroundAgentTab(): Promise<string> {
-    if (this.foregroundAgentTabId) {
-      const foregroundTab = this.tabs.get(this.foregroundAgentTabId)
-      if (foregroundTab?.owner === 'agent') {
-        this.agentTabControlGate.reset()
-        this.updateTabRuntimeState(this.foregroundAgentTabId, {
-          required: true,
-          activity: 'running',
-          lastAuditedAt: Date.now(),
-        })
-        this.syncPopupContextForTab(this.foregroundAgentTabId)
-        this.attachAgentTabSupervision(this.foregroundAgentTabId)
-        return this.foregroundAgentTabId
-      }
-    }
-
-    const previousActive = this.activeTabId
-    const created = await this.createTab(READY_BROWSER_BLANK_URL, { background: true })
-    if (!created.success || !created.tabId) {
-      throw new Error(created.error || 'failed to create foreground agent tab')
-    }
-    this.foregroundAgentTabId = created.tabId
-    this.agentTabControlGate.reset()
-    this.updateTabRuntimeState(created.tabId, {
-      owner: 'agent',
-      required: true,
-      activity: 'running',
-      lastAuditedAt: Date.now(),
-    })
-    this.syncPopupContextForTab(created.tabId)
-    if (previousActive && this.activeTabId === created.tabId && this.tabs.has(previousActive)) {
-      this.switchTab(previousActive)
-    }
-    this.attachAgentTabSupervision(created.tabId)
-    return created.tabId
-  }
-
-  private getForegroundAgentLaneStartBlocker(runId: string): AgentBrowserStructuredError | null {
-    const leaseService = getBrowserWriteLeaseService()
-    const state = leaseService.getState('agent-view')
-    const lease = leaseService.getLease('agent-view')
-    if (state === 'held' && lease?.runId !== runId) {
-      return agentBrowserError(
-        'lease_held',
-        `Surface agent-view is already locked by task ${lease?.taskId || 'unknown'}.`,
-        { surface: 'agent-view', heldBy: lease?.taskId ?? null, leaseId: lease?.leaseId ?? null },
-      )
-    }
-    if (state === 'takeover') {
-      return agentBrowserError(
-        'lease_takeover',
-        'Surface agent-view is under user takeover; foreground workflow is blocked.',
-        { surface: 'agent-view' },
-      )
-    }
-    return null
-  }
-
-  async beginForegroundBrowserWorkflowSession(params: {
-    runId: string
-    taskId?: string
-    lane?: AgentBrowserSurface
-  }): Promise<{ ok: true; session: BrowserWorkflowSession } | { ok: false; error: AgentBrowserStructuredError }> {
-    const lane = params.lane ?? 'agent-view'
-    const sourceUserTabId = this.activeTabId
-    if (lane === 'agent-view') {
-      const blocker = this.getForegroundAgentLaneStartBlocker(params.runId)
-      if (blocker) return { ok: false, error: blocker }
-    }
-    const boundTabId = lane === 'agent-view'
-      ? await this.ensureForegroundAgentTab()
-      : sourceUserTabId
-    if (!boundTabId) {
-      return {
-        ok: false,
-        error: {
-          ok: false,
-          errorCode: 'browser_surface_binding_violation',
-          message: 'Browser workflow has no tab to bind.',
-          detail: { surface: lane },
-        },
-      }
-    }
-
-    const result = this.workflowSessionStore.startForeground({
-      runId: params.runId,
-      taskId: params.taskId || params.runId,
-      lane,
-      boundTabId,
-      sourceUserTabId,
-      frameUrl: this.tabs.get(sourceUserTabId || '')?.url || null,
-    })
-    if (result.ok) {
-      if (lane === 'agent-view') {
-        this.releaseForegroundWorkflowBoundsLock?.()
-        this.releaseForegroundWorkflowBoundsLock = this.acquireTabBoundsLock(boundTabId, `foreground-workflow:${params.runId}`)
-      }
-      this.notifyBrowserLeaseChanged()
-      this.sendToRenderer('browser:agentControlChanged', { state: this.agentTabControlGate.getState() })
-    }
-    return result
-  }
-
-  updateForegroundBrowserWorkflowTarget(runId: string, boundTabId: string, reason?: string): BrowserWorkflowSession | null {
-    const updated = this.workflowSessionStore.updateBoundTab(runId, boundTabId, reason)
-    if (updated?.lane === 'agent-view') {
-      this.foregroundAgentTabId = boundTabId
-      this.updateTabRuntimeState(boundTabId, {
-        owner: 'agent',
-        required: true,
-        activity: 'running',
-        lastAuditedAt: Date.now(),
-      })
-      this.syncPopupContextForTab(boundTabId)
-      this.attachAgentTabSupervision(boundTabId)
-      this.sendToRenderer('browser:agentControlChanged', { state: this.agentTabControlGate.getState() })
-    }
-    return updated
-  }
-
-  closeForegroundBrowserWorkflowSession(
-    runId: string,
-    closeKind: 'workflow_completed' | 'workflow_failed' | 'user_interrupted',
-    reason?: string,
-  ): BrowserWorkflowSession | null {
-    const session = this.workflowSessionStore.close(runId, reason || closeKind)
-    if (!session) return null
-    if (session.lane === 'agent-view') {
-      this.updateTabRuntimeState(session.boundTabId, {
-        required: false,
-        activity: closeKind === 'user_interrupted' ? 'attention' : 'idle',
-        lastAuditedAt: Date.now(),
-      })
-      this.releaseForegroundWorkflowBoundsLock?.()
-      this.releaseForegroundWorkflowBoundsLock = null
-    }
-    this.notifyBrowserLeaseChanged()
-    this.sendToRenderer('browser:agentControlChanged', { state: this.agentTabControlGate.getState() })
-    publishBrowserAgentActionLifecycle(closeKind === 'workflow_completed' ? 'finish' : 'abort')
-    return session
-  }
-
-  getActiveForegroundBrowserWorkflowSession(): BrowserWorkflowSession | null {
-    return this.workflowSessionStore.getActiveForeground()
-  }
-
-  private adoptForegroundWorkflowPopup(sourceTabId: string | null, nextTabId: string): void {
-    const activeSession = this.workflowSessionStore.getActiveForeground()
-    if (!activeSession || activeSession.boundTabId !== sourceTabId) return
-    this.updateTabRuntimeState(activeSession.boundTabId, {
-      required: false,
-      activity: 'idle',
-      lastAuditedAt: Date.now(),
-    })
-    this.updateForegroundBrowserWorkflowTarget(activeSession.runId, nextTabId, 'agent_popup_followed')
-  }
-
   /**
-   * Wire real user interaction with the agent tab to the freeze-confirm flow
-   * (Codex result-review #2). D18-d 修正（真机第十六轮实锚）：旧假设
-   * "agent 的 CDP 写入不触发 before-input-event"不成立——Input.dispatchKey/
-   * MouseEvent 注入的事件同样进这里，曾把 agent 自己的键击当用户接管
-   * （凭空 pending_confirm + 吞键致模型修复静默失效 + 被吞 Meta 组合键
-   * 落穿应用菜单触发窗口缩放）。现经 agentInputPassthrough 登记直通：
-   * 命中登记的输入是 agent 自己的，放行；未命中的才是真实用户接管：
-   * raise the interruption (→ pending_confirm), notify the renderer, and BLOCK
-   * the keystroke until the user explicitly confirms (the second confirmation).
-   * Once frozen (confirmed), input passes through — the user has control.
+   * A real user key or mouse action on an actively driven agent tab takes over
+   * immediately. Agent-injected CDP input is identified by
+   * `agentInputPassthrough` and still passes without changing ownership.
    *
-   * R18（真机第十七轮实锚）两处收口：
-   * 1. 监督只在 agent 真正驱动该 tab 时生效——listener 挂上后永不摘除，
-   *    run 结束后用户亲手点页面（如「发布」）曾被无差别 preventDefault +
-   *    弹「等待确认」，用户视角就是"按钮点不动"。驱动判据取
-   *    isAgentActivelyDrivingTab（bounds-lock 令牌 + 活跃前台 workflow 会话）。
-   * 2. 重复 ensure 不再叠挂 listener（supervisedAgentTabWebContentsIds 去重）。
+   * The user event is never cancelled: the synchronous part of
+   * requestAgentInterruption freezes the gate and flips the write lease before
+   * this handler returns, then task cancellation continues asynchronously.
    */
   private attachAgentTabSupervision(tabId: string): void {
     const webContents = this.tabs.get(tabId)?.view?.webContents
@@ -1447,35 +1363,18 @@ export class BrowserController {
     webContents.once('destroyed', () => {
       this.supervisedAgentTabWebContentsIds.delete(webContents.id)
     })
-    const blockUserInputUntilConfirmed = (event: { preventDefault: () => void }): void => {
-      const state = this.agentTabControlGate.getState()
-      if (state === 'frozen') return // user has taken over — allow input through
-      if (state === 'active') {
-        if (this.agentTabControlGate.requestInterruption()) {
-          this.schedulePendingConfirmExpiryPush()
-        }
-        this.notifyAgentControlChanged()
-      }
-      event.preventDefault() // agent still controls until the 2nd confirmation
-    }
+    const inputTakeover = createAgentTabUserInputTakeoverHandlers({
+      isActivelyDriven: () => this.isAgentActivelyDrivingTab(tabId),
+      isFrozen: () => this.pendingPhysicalTakeovers.has(tabId),
+      isAgentKey: (key) => this.agentInputPassthrough.matchKey(key),
+      isAgentMouse: () => this.agentInputPassthrough.matchMouse(),
+      takeOver: () => { void this.requestAgentInterruption(tabId, 'physical_input') },
+    })
     webContents.on('before-input-event', (event, input) => {
-      if (input.type !== 'keyDown' && input.type !== 'keyUp' && input.type !== 'char') return
-      if (!this.isAgentActivelyDrivingTab(tabId)) return
-      if (this.agentInputPassthrough.matchKey(input.key || '')) return
-      blockUserInputUntilConfirmed(event)
+      inputTakeover.onKeyboardInput(event, input)
     })
     webContents.on('before-mouse-event', (event, mouse) => {
-      if (
-        mouse.type !== 'mouseDown'
-        && mouse.type !== 'mouseUp'
-        && mouse.type !== 'mouseWheel'
-        && mouse.type !== 'contextMenu'
-      ) {
-        return
-      }
-      if (!this.isAgentActivelyDrivingTab(tabId)) return
-      if (this.agentInputPassthrough.matchMouse()) return
-      blockUserInputUntilConfirmed(event)
+      inputTakeover.onMouseInput(event, mouse)
     })
   }
 
@@ -1486,33 +1385,21 @@ export class BrowserController {
    * 监督闸随之松手，用户在 agent 遗留页面上的输入不再被吞。
    */
   private isAgentActivelyDrivingTab(tabId: string): boolean {
+    const leaseService = getBrowserWriteLeaseService()
+    for (const surface of ['user-view', 'agent-view'] as const) {
+      if (leaseService.getLease(surface)?.tabId === tabId) return true
+    }
     const locked = this.frozenBoundsByTab.get(tabId)
     if (locked) {
       for (const token of locked.tokens) {
         if (token.startsWith('foreground-workflow:') || token.startsWith('collection:')) return true
       }
     }
-    const foreground = this.workflowSessionStore.getActiveForeground()
-    return Boolean(foreground && foreground.boundTabId === tabId)
-  }
-
-  /**
-   * R18：pending_confirm 的 45s TTL 是惰性回落（只在 getState 读取时发生），
-   * renderer 胶囊只吃 agentControlChanged 推送——不安排过期推送的话，主进程
-   * 早已自愈而屏上「等待确认」永远挂着（第十七轮截图实锚）。
-   */
-  private schedulePendingConfirmExpiryPush(): void {
-    if (this.pendingConfirmExpiryTimer) clearTimeout(this.pendingConfirmExpiryTimer)
-    this.pendingConfirmExpiryTimer = setTimeout(() => {
-      this.pendingConfirmExpiryTimer = null
-      // getState() 内部 reconcile：TTL 已过则 pending→active，推送即修正显示
-      this.notifyAgentControlChanged()
-    }, this.agentTabControlGate.getPendingConfirmTtlMs() + 1_000)
-    this.pendingConfirmExpiryTimer.unref?.()
+    return false
   }
 
   private notifyAgentControlChanged(): void {
-    this.sendToRenderer('browser:agentControlChanged', { state: this.agentTabControlGate.getState() })
+    this.sendToRenderer('browser:agentControlChanged', { state: this.getAgentControlState() })
   }
 
   private notifyBrowserLeaseChanged(): void {
@@ -1529,6 +1416,10 @@ export class BrowserController {
       if (this.agentInputPassthrough.matchKey(input.key || '')) return
       const tab = this.tabs.get(tabId)
       if (!tab || tab.owner === 'agent') return
+      if (this.workflowPhysicalBindings.has(tabId)) {
+        void this.requestAgentInterruption(tabId, 'physical_input')
+        return
+      }
       recordUserViewTakeoverSignal({
         service: getBrowserWriteLeaseService(),
         activeTabId: this.activeTabId,
@@ -1546,157 +1437,109 @@ export class BrowserController {
     return tab?.owner === 'agent' ? this.agentTabId : null
   }
 
-  /** Agent-owned browser collection tasks (for the supervision panel). */
+  /** Agent-view browser tasks (for supervision and immediate takeover). */
   async listAgentCollectionTasks(): Promise<BrowserCapabilityTaskHandle[]> {
-    const [visible, notes, cardLoop] = await Promise.all([
-      this.contentTaskRunner.listTasks('visible_collect'),
-      this.contentTaskRunner.listTasks('note_collect'),
-      this.contentTaskRunner.listTasks('card_loop'),
-    ])
-    return [...visible, ...notes, ...cardLoop]
-      .filter((task) => {
-        const payload = this.contentTaskRunner.getTaskPayload(task.taskId)
-        return payload?.surface === 'agent-view'
-      })
-      .sort((a, b) => String(b.updatedAt || b.createdAt || '').localeCompare(String(a.updatedAt || a.createdAt || '')))
-  }
-
-  /** Wire the chat task-projection sink (set by setupAgentIPC, plan §3.3). */
-  setTaskProjectionSink(sink: BrowserTaskProjectionSink | null): void {
-    this.contentTaskRunner.setTaskProjectionSink(sink)
-  }
-
-  setSiteCardLearningSink(sink: BrowserSiteCardLearningSink | null): void {
-    this.contentTaskRunner.setSiteCardLearningSink(sink)
+    return []
   }
 
   /**
-   * Start a background note-collection task on the agent tab (plan §3.3). The
-   * caller supplies the validated note list (the main agent plans 判断题); the
-   * task acquires its own agent-view lease and runs the deterministic engine.
+   * Freeze and transfer agent-view control in one action. Everything before the
+   * first await is synchronous so a real key/mouse event can continue to the
+   * page after the lease has already rejected further agent writes.
    */
-  async startNoteCollection(plan: Record<string, unknown>, scopeId?: string): Promise<BrowserCapabilityTaskHandle> {
-    // Global concurrency cap (Codex result-review #5): bound how many background
-    // collections run at once. High-control platforms get a cap of 1 so same-
-    // domain collections serialize (the per-domain rate control), on top of the
-    // per-note pacing the runner already applies.
-    const isHighControl = isHighControlPlatformText(JSON.stringify(plan))
-    const cap = isHighControl ? 1 : 2
-    const active = (await this.contentTaskRunner.listTasks('note_collect'))
-      .filter((task) => task.status === 'running' || task.status === 'queued')
-    if (active.length >= cap) {
-      throw new Error(
-        `已有 ${active.length} 个后台采集任务在运行（上限 ${cap}${isHighControl ? '，高风控平台限单并发' : ''}），请等当前任务完成后再发起。`,
-      )
+  async requestAgentInterruption(
+    requestedTabId?: string | null,
+    source: BrowserHumanTakeoverPhysicalTarget['source'] = 'supervision_button',
+  ): Promise<{
+    state: 'active' | 'frozen'
+    frozen: boolean
+    takeoverTabId?: string | null
+  }> {
+    const leaseService = getBrowserWriteLeaseService()
+    const leases = (['agent-view', 'user-view'] as const)
+      .map((surface) => ({ surface, lease: leaseService.getLease(surface) }))
+      .filter((entry): entry is {
+        surface: 'agent-view' | 'user-view'
+        lease: NonNullable<ReturnType<typeof leaseService.getLease>>
+      } => Boolean(entry.lease))
+    const selected = requestedTabId
+      ? leases.find((entry) => entry.lease.tabId === requestedTabId) || null
+      : leases.find((entry) => entry.lease.tabId === this.agentTabId)
+        || leases[0]
+        || null
+    const takeoverTabId = requestedTabId || selected?.lease.tabId || this.agentTabId
+    const binding = takeoverTabId ? this.workflowPhysicalBindings.get(takeoverTabId) || null : null
+    const physicalTargetToken = takeoverTabId ? this.getPhysicalTargetToken(takeoverTabId) : ''
+    if (
+      !selected
+      || !takeoverTabId
+      || !binding
+      || binding.surface !== selected.surface
+      || !physicalTargetToken
+      || !this.humanTakeoverIntentPort
+    ) {
+      return { state: this.getAgentControlState(), frozen: false, takeoverTabId: takeoverTabId || null }
     }
-    const agentTabId = await this.ensureAgentTab()
-    const ownership = {
-      ...(typeof plan.ownerAgentId === 'string' && plan.ownerAgentId.trim() ? { ownerAgentId: plan.ownerAgentId.trim() } : {}),
-      ...(typeof plan.ownerRunId === 'string' && plan.ownerRunId.trim() ? { ownerRunId: plan.ownerRunId.trim() } : {}),
-      ...(typeof plan.parentTaskId === 'string' && plan.parentTaskId.trim() ? { parentTaskId: plan.parentTaskId.trim() } : {}),
-      ...(plan.executionBinding && typeof plan.executionBinding === 'object' ? { executionBinding: plan.executionBinding } : {}),
-    }
-    return this.contentTaskRunner.startTask({
-      kind: 'note_collect',
-      payload: {
-        agentTabId,
-        surface: 'agent-view' as AgentBrowserSurface,
-        plan,
-        ...ownership,
-        // Bind the task to the dispatching conversation so it projects into
-        // that chat (plan §3.2); absent for non-chat callers (skip projection).
-        ...(scopeId && scopeId.trim() ? { scopeId: scopeId.trim() } : {}),
+    const frozen = beginAgentTabUserTakeover({
+      isTakenOver: () => leaseService.getState(selected.surface) === 'takeover',
+      fenceGroundedTasks: () => {},
+      recordLeaseTakeover: () => {
+        leaseService.recordUserSignal({ surface: selected.surface, source: 'explicit-button' })
       },
     })
-  }
-
-  async startCardLoopCollection(plan: Record<string, unknown>, scopeId?: string): Promise<BrowserCapabilityTaskHandle> {
-    const withStrategy: Record<string, unknown> = { ...plan, strategy: 'card_loop' }
-    const isHighControl = isHighControlPlatformText(JSON.stringify(withStrategy))
-    const cap = isHighControl ? 1 : 2
-    const active = (await this.contentTaskRunner.listTasks('card_loop'))
-      .filter((task) => task.status === 'running' || task.status === 'queued')
-    if (active.length >= cap) {
-      throw new Error(
-        `已有 ${active.length} 个逐张点开采集任务在运行（上限 ${cap}${isHighControl ? '，高风控平台限单并发' : ''}），请等当前任务完成后再发起。`,
-      )
+    if (!frozen) {
+      return { state: this.getAgentControlState(), frozen: true, takeoverTabId }
     }
-    const sourceTaskId = typeof withStrategy.sourceTaskId === 'string' ? withStrategy.sourceTaskId.trim() : ''
-    const sourcePayload = sourceTaskId ? this.contentTaskRunner.getTaskPayload(sourceTaskId) : null
-    const sourceTarget = resolveSourceCollectionTarget({ highControl: isHighControl, sourcePayload })
-    const agentTabId = sourceTarget?.tabId ?? await this.ensureAgentTab()
-    const surface = sourceTarget?.surface ?? 'agent-view'
-    const ownership = {
-      ...(typeof withStrategy.ownerAgentId === 'string' && withStrategy.ownerAgentId.trim() ? { ownerAgentId: withStrategy.ownerAgentId.trim() } : {}),
-      ...(typeof withStrategy.ownerRunId === 'string' && withStrategy.ownerRunId.trim() ? { ownerRunId: withStrategy.ownerRunId.trim() } : {}),
-      ...(typeof withStrategy.parentTaskId === 'string' && withStrategy.parentTaskId.trim() ? { parentTaskId: withStrategy.parentTaskId.trim() } : {}),
-      ...(withStrategy.executionBinding && typeof withStrategy.executionBinding === 'object' ? { executionBinding: withStrategy.executionBinding } : {}),
-    }
-    return this.contentTaskRunner.startTask({
-      kind: 'card_loop',
-      payload: {
-        agentTabId,
-        surface,
-        plan: withStrategy,
-        ...ownership,
-        ...(scopeId && scopeId.trim() ? { scopeId: scopeId.trim() } : {}),
-      },
-    })
-  }
 
-  /** Supervision (plan §3.6): two-step interrupt of the agent's browser control. */
-  requestAgentInterruption(): { state: ReturnType<AgentTabControlGate['getState']>; pending: boolean } {
-    const pending = this.agentTabControlGate.requestInterruption()
-    if (pending) this.schedulePendingConfirmExpiryPush()
+    this.pendingPhysicalTakeovers.add(takeoverTabId)
     this.notifyAgentControlChanged()
-    return { state: this.agentTabControlGate.getState(), pending }
-  }
-
-  async confirmAgentInterruption(): Promise<{ state: ReturnType<AgentTabControlGate['getState']>; frozen: boolean; takeoverTabId?: string | null }> {
-    const frozen = this.agentTabControlGate.confirmInterruption()
-    // Don't wait for the next loop tick: on confirm, immediately cancel the
-    // running collection tasks so "确认后立即中断" is real (Codex result-review
-    // #1). The freeze probe is still the backstop for the in-flight note.
-    if (frozen) {
-      const tasks = [
-        ...(await this.contentTaskRunner.listTasks('visible_collect')),
-        ...(await this.contentTaskRunner.listTasks('note_collect')),
-        ...(await this.contentTaskRunner.listTasks('card_loop')),
-      ].filter((task) => {
-        const payload = this.contentTaskRunner.getTaskPayload(task.taskId)
-        return payload?.surface === 'agent-view'
-          && (task.status === 'queued' || task.status === 'running' || task.status === 'paused')
-      })
-      await Promise.all(tasks.map((task) => this.contentTaskRunner.cancelTask(task.taskId)))
-      const foreground = this.workflowSessionStore.getActiveForeground()
-      const takeoverTabId = foreground?.boundTabId || this.agentTabId
-      if (takeoverTabId && this.tabs.has(takeoverTabId)) {
-        this.updateTabRuntimeState(takeoverTabId, { owner: 'manual', activity: 'attention' })
-        this.syncPopupContextForTab(takeoverTabId)
-        if (takeoverTabId === this.agentTabId) this.agentTabId = null
-        if (takeoverTabId === this.foregroundAgentTabId) this.foregroundAgentTabId = null
-      }
-      if (foreground) {
-        this.workflowSessionStore.close(foreground.runId, 'user_takeover_confirmed')
-        this.releaseForegroundWorkflowBoundsLock?.()
-        this.releaseForegroundWorkflowBoundsLock = null
-        this.notifyBrowserLeaseChanged()
-      }
+    const persisted = await persistAgentTabUserTakeover({
+      persist: async () => {
+        await this.humanTakeoverIntentPort!({
+          parentTaskId: binding.parentTaskId,
+          ownerRunId: binding.ownerRunId,
+          browserTaskId: binding.browserTaskId,
+          surface: binding.surface,
+          scopeId: binding.scopeId,
+          profileId: this.tabs.get(takeoverTabId)?.profile || null,
+          sessionId: binding.sessionId,
+          tabId: takeoverTabId,
+          physicalTargetToken,
+          source,
+        })
+      },
+      onPersisted: () => {},
+      onPersistenceFailure: (error) => {
+        this.logBrowserDiag(`[browser-takeover] durable intent failed; retaining physical fence tab=${takeoverTabId} error=${error instanceof Error ? error.message : String(error)}`)
+      },
+    })
+    if (!persisted) {
       this.notifyAgentControlChanged()
-      return { state: this.agentTabControlGate.getState(), frozen, takeoverTabId }
+      return { state: 'frozen', frozen: true, takeoverTabId }
     }
+
+    if (takeoverTabId && this.tabs.has(takeoverTabId)) {
+      this.updateTabRuntimeState(takeoverTabId, { owner: 'manual', activity: 'attention' })
+      this.syncPopupContextForTab(takeoverTabId)
+      if (takeoverTabId === this.agentTabId) this.agentTabId = null
+    }
+    // The durable target fence above is now authoritative. Release the coarse
+    // surface takeover so an unrelated tab on the same surface remains usable;
+    // the old owner retains a stale lease id and therefore cannot write again.
+    leaseService.clearTakeover(selected.surface)
+    this.pendingPhysicalTakeovers.delete(takeoverTabId)
     this.notifyAgentControlChanged()
-    return { state: this.agentTabControlGate.getState(), frozen, takeoverTabId: null }
+
+    return { state: 'frozen', frozen: true, takeoverTabId }
   }
 
-  dismissAgentInterruption(): { state: ReturnType<AgentTabControlGate['getState']> } {
-    this.agentTabControlGate.dismissInterruption()
-    this.notifyAgentControlChanged()
-    return { state: this.agentTabControlGate.getState() }
-  }
-
-  getAgentControlState(): ReturnType<AgentTabControlGate['getState']> {
-    return this.agentTabControlGate.getState()
+  getAgentControlState(): 'active' | 'frozen' {
+    const leases = getBrowserWriteLeaseService()
+    return this.pendingPhysicalTakeovers.size > 0
+      || leases.getState('agent-view') === 'takeover'
+      || leases.getState('user-view') === 'takeover'
+      ? 'frozen'
+      : 'active'
   }
 
   getBrowserLeaseSnapshot(): BrowserLeaseSupervisionSnapshot {
@@ -2158,12 +2001,25 @@ export class BrowserController {
     return { success: true, origin, cleared: Array.from(requested) }
   }
 
-  getBrowserPermission(origin: string, permission: string): Record<string, unknown> {
-    return this.sessionPolicyService.getPermissionDecision(permission, origin)
+  getBrowserPermission(siteRequestId: string): BrowserSitePermissionRequestReadback {
+    return this.sessionPolicyService.getSitePermissionRequest(siteRequestId)
   }
 
-  setBrowserPermission(origin: string, permission: string, decision: 'allow' | 'deny' | 'ask'): Record<string, unknown> {
-    return this.sessionPolicyService.setPermissionDecision(permission, origin, decision)
+  setBrowserPermission(
+    siteRequestId: string,
+    decision: 'allow' | 'deny',
+  ): BrowserSitePermissionRequestReadback {
+    return this.sessionPolicyService.applySitePermissionRequest(siteRequestId, decision)
+  }
+
+  resetBrowserPermission(
+    tabId: string,
+    origin: string,
+    permission: string,
+  ): Record<string, unknown> {
+    const partition = this.partitionForTab(tabId)
+    if (!partition) return { permission, origin, decision: 'ask', source: 'expired_tab' }
+    return this.sessionPolicyService.resetPermissionDecision(partition, permission, origin)
   }
 
   /**
@@ -2239,6 +2095,10 @@ export class BrowserController {
    */
   async getViewportMetrics(tabId: string | null): Promise<BrowserViewportMetrics> {
     return this.automationService.getViewportMetrics(tabId)
+  }
+
+  async retainTrustedInputSequence(tabId: string | null): Promise<() => void> {
+    return this.automationService.retainTrustedInputSequence(tabId)
   }
 
   /**
@@ -2563,18 +2423,6 @@ export class BrowserController {
     }
   }
 
-  async captureFromUrl(
-    url: string,
-    options: {
-      customScript: string
-      timeoutMs?: number
-      settleMs?: number
-      preferReuse?: boolean
-    },
-  ): Promise<unknown | null> {
-    return this.capabilityService.captureFromUrl(url, options)
-  }
-
   /**
    * Get the HTML content of a page (document.documentElement.outerHTML), truncated to 50K chars.
    */
@@ -2598,9 +2446,9 @@ export class BrowserController {
     payload: {
       files: string[]
       selector?: string
-      target?: string
-      x?: number
-      y?: number
+      targetToken?: string
+      frameDocumentToken?: string
+      backendDOMNodeId?: number
     },
   ): Promise<{ ok: boolean; targetDescription: string; inputFound: boolean; filesAssigned?: boolean; assignedFileNames?: string[] }> {
     return this.automationService.setFileInputFiles(tabId, payload)
@@ -2632,6 +2480,22 @@ export class BrowserController {
       this.performanceRuntime.reconcile()
     }
     return this.tabShellService.navigate(tabId, url)
+  }
+
+  materializeBrowserTab(
+    tabId: string,
+    options: { preserveViewport?: boolean } = {},
+  ): { success: boolean; tabId?: string; error?: string } {
+    const result = this.tabLifecycleService.materializeTab(tabId, { activate: false })
+    if (result.success) {
+      if (options.preserveViewport) {
+        const view = this.tabs.get(tabId)?.view
+        if (!view) return { success: false, error: 'Tab could not be materialized' }
+        this.hostLayoutService.parkHost(view, this.currentBoundsForTab(tabId))
+      }
+      this.performanceRuntime.reconcile()
+    }
+    return result
   }
 
   /**
@@ -2830,6 +2694,38 @@ export class BrowserController {
     return this.cdpSessionService.sendCommand(tabId, method, params, options)
   }
 
+  async callFunctionOnBackendNode(
+    tabId: string | null,
+    backendDOMNodeId: number,
+    functionDeclaration: string,
+    args: unknown[] = [],
+  ): Promise<unknown> {
+    const resolved = await this.sendCdpCommand(tabId, 'DOM.resolveNode', {
+      backendNodeId: backendDOMNodeId,
+    }) as { object?: { objectId?: unknown } } | null
+    const objectId = String(resolved?.object?.objectId || '')
+    if (!objectId) throw Object.assign(new Error('backend_node_not_resolved'), { code: 'BACKEND_NODE_NOT_RESOLVED' })
+    try {
+      const called = await this.sendCdpCommand(tabId, 'Runtime.callFunctionOn', {
+        objectId,
+        functionDeclaration,
+        arguments: args.map((value) => ({ value })),
+        returnByValue: true,
+        awaitPromise: true,
+      }) as {
+        result?: { value?: unknown }
+        exceptionDetails?: { text?: unknown; exception?: { description?: unknown } }
+      } | null
+      if (called?.exceptionDetails) {
+        const message = String(called.exceptionDetails.exception?.description || called.exceptionDetails.text || 'backend_node_call_failed')
+        throw Object.assign(new Error(message), { code: 'BACKEND_NODE_CALL_FAILED' })
+      }
+      return called?.result?.value
+    } finally {
+      await this.sendCdpCommand(tabId, 'Runtime.releaseObject', { objectId }).catch(() => undefined)
+    }
+  }
+
   /**
    * D16 — tool-executor 在 agent 写租约生效的写动作前调用，武装该 tab 的
    * 文件选择器拦截（幂等、best-effort）。解除由租约转移监听统一处理。
@@ -2838,36 +2734,6 @@ export class BrowserController {
     await this.fileChooserGuard.arm(tabId)
   }
 
-  async confirmCollectionConsent(payload: {
-    requestId?: string
-  }): Promise<{ success: boolean; data?: unknown; error?: string }> {
-    const requestId = String(payload?.requestId || '').trim()
-    if (!requestId) return { success: false, error: 'Missing requestId' }
-    const record = this.collectionConsentStore.confirmPendingRequest(requestId)
-    if (!record) return { success: false, error: 'Collection consent request not found' }
-    await this.contentTaskRunner.resolveCollectionConsentProjection({
-      scopeId: record.scopeId,
-      sourceTaskId: record.sourceTaskId,
-      requestId,
-    })
-    return { success: true, data: record }
-  }
-
-  async resumeBrowserTask(payload: { taskId?: string }): Promise<{ success: boolean; data?: unknown; error?: string }> {
-    const taskId = String(payload?.taskId || '').trim()
-    if (!taskId) return { success: false, error: 'Missing taskId' }
-    const task = await this.resumeTask(taskId)
-    if (!task) return { success: false, error: 'Browser task not found' }
-    return { success: true, data: task }
-  }
-
-  async cancelBrowserTask(payload: { taskId?: string }): Promise<{ success: boolean; data?: unknown; error?: string }> {
-    const taskId = String(payload?.taskId || '').trim()
-    if (!taskId) return { success: false, error: 'Missing taskId' }
-    const task = await this.cancelTask(taskId)
-    if (!task) return { success: false, error: 'Browser task not found' }
-    return { success: true, data: task }
-  }
 }
 
 export function setupBrowserIPC(
@@ -2876,10 +2742,6 @@ export function setupBrowserIPC(
   options?: { preloadPath?: string; rendererFile?: string },
 ): BrowserController {
   const controller = new BrowserController(mainWindow, useMock)
-  registerWaitingHumanBrowserTaskResumePort({
-    getTask: (taskId) => controller.getTask(taskId),
-    resumeTask: (taskId) => controller.resumeTask(taskId),
-  })
   const browserDataService = new BrowserDataService()
   setupBrowserShellIPC(controller)
   setupBrowserSupervisionIPC(controller)
@@ -2939,15 +2801,6 @@ export function setupBrowserIPC(
     getMainWindow: () => controller.getMainWindow(),
     preloadPath: options?.preloadPath || join(__dirname, '../preload/index.mjs'),
     rendererFile: options?.rendererFile || join(__dirname, '../renderer/index.html'),
-  })
-  ipcMain.handle('browser:confirmCollectionConsent', (_, payload: { requestId?: string }) => {
-    return controller.confirmCollectionConsent(payload)
-  })
-  ipcMain.handle('browser:resumeTask', (_, payload: { taskId?: string }) => {
-    return controller.resumeBrowserTask(payload)
-  })
-  ipcMain.handle('browser:cancelTask', (_, payload: { taskId?: string }) => {
-    return controller.cancelBrowserTask(payload)
   })
 
   return controller

@@ -13,7 +13,7 @@
  * Pure-ish module — only depends on the lease service + classification.
  */
 
-import { classifyBrowserToolCall } from './browser-tool-write-classification'
+import { resolveBrowserCapability } from '../../../shared/browser-capability-registry'
 import { isAgentBrowserError } from './agent-browser-errors'
 import type { AgentBrowserSurface } from './agent-browser-errors'
 import type { BrowserWriteLeaseService } from './browser-write-lease'
@@ -43,8 +43,8 @@ export function beginLeaseGate(
 ): LeaseGateHandle {
   if (!gate) return { deniedMessage: null, begin: () => null, end: NOOP }
 
-  const effect = classifyBrowserToolCall(toolName, args)
-  if (effect === 'read') return { deniedMessage: null, begin: () => null, end: NOOP }
+  const capability = resolveBrowserCapability(toolName, args)
+  if (!capability?.requiresPageLease) return { deniedMessage: null, begin: () => null, end: NOOP }
 
   const denied = gate.service.checkWrite({ surface: gate.surface, leaseId: gate.leaseId })
   if (denied && isAgentBrowserError(denied)) {
@@ -55,9 +55,9 @@ export function beginLeaseGate(
   return {
     deniedMessage: null,
     begin: () => {
-      if (correlationId) return null
       const boundaryDenied = gate.service.checkWrite({ surface: gate.surface, leaseId: gate.leaseId })
       if (boundaryDenied) return JSON.stringify(boundaryDenied)
+      if (correlationId) return null
       correlationId = gate.service.beginAgentAction(gate.surface)
       return null
     },

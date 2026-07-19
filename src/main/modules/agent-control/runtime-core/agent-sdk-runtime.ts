@@ -116,12 +116,16 @@ import { logAgentMetric } from '../metrics'
 import { TOOL_ERROR_METRICS } from '../tools-runtime/tool-error-metrics'
 import type { BrowserTaskDecisionMode } from '../../../../shared/browser-agent-task'
 import { defaultToolRegistry } from '../tools-runtime/tool-registry'
+import { getSkillsRuntimeManager } from '../../skills-runtime/runtime-manager'
 import type { ToolDefinition } from '../tools-runtime/tool-definition'
+import type { PreparedSkillTurnTruth } from '../contracts/browser-workflow-control'
 import {
   buildExplicitNoSkillAuthorization,
   buildSelectedSkillToolAuthorization,
   type SkillToolAuthorization,
 } from '../skills/skill-tool-authorization'
+import { resolveCurrentLegalAuthorizationForSavedSkill } from '../skills/prepared-skill-turn'
+import { getSkillActionOwnersForTrustedResume } from '../../tools/skills-tools'
 import { resolveCapabilityResolution } from '../domain-adapters/capability-resolver'
 import { resolveActiveSkillAllowedTools } from '../domain-adapters/run-capability-controller'
 import { buildRequestEnvelope } from '../contracts/request-envelope'
@@ -132,12 +136,6 @@ import {
   classifyMapSemanticIntentFallback,
 } from '../map-semantic-intent'
 import { resolvePolicyConflictFacts } from '../policy-arbitration'
-import {
-  resolveBrowserCollectionIntent,
-  isBrowserCollectionSubsetTool,
-  resolveBrowserBatchCollectionIntent,
-  isBrowserBatchCollectionWorkflowTool,
-} from '../../../../shared/browser-collection-intent'
 import { hasLocalSendImFileIntent } from '../../../../shared/remote-im-file-intent'
 import { classifyFollowupIntent, followupConsultsRecalledContext, detectNegationReleases, hasContinuableTaskRef, type FollowupTaskRef } from '../../../../shared/agent-followup-intent'
 import { isRetryOnlyTurn } from '../skills/skill-detection-inputs'
@@ -222,13 +220,6 @@ import {
   registerBackgroundTaskTerminalReminder,
 } from '../system-reminders/background-task-terminal-reminder'
 import {
-  buildActivePlanReminderText,
-  clearActivePlanForScope,
-  configureActivePlanPersistence,
-  getActivePlanForScope,
-  noteToolResultForActivePlan,
-} from '../system-reminders/active-plan-step-reminder'
-import {
   loadScopeSessionSnapshot,
   writeScopeSessionSnapshot,
 } from '../session/scope-session-snapshot'
@@ -306,8 +297,6 @@ import {
   isLocalSendImRetryFollowup,
   isSameObservedDocumentTarget,
   mapToolFailureClose,
-  messageHasBrowserBatchCollectionIntent,
-  messageHasBrowserCollectionIntent,
   messageToText,
   nonEmptyString,
   normalizeExplicitDocumentTargetToolArgs,
@@ -326,13 +315,11 @@ import {
   resolveAgentSdkMaxTurns,
   resolveAgentSdkProviderDiagnostics,
   resolveAgentSdkTaskBudgetRuntime,
-  resolveBrowserDecisionMode,
   resolveConfiguredModelDef,
   resolveDocumentTargetGuard,
-  resolveSdkDefaultIntentSurface,
   resolveSkillHintRelevanceForTurn,
+  resolveManifestBoundSkillTools,
   resolveSourceMessageProvenance,
-  resolveTaskTypeFromToolDefinitions,
   resolveToolFailurePageUrl,
   restoreCheckpointToolSurface,
   safeContinuationPathSegment,
@@ -406,6 +393,16 @@ interface MapPlaceAmbiguityPrompt {
 }
 
 const MAP_PLACE_AMBIGUITY_QUESTION_ID = 'map_place_choice'
+
+function registeredSkillOrFallback(skillId: string, fallback: unknown): unknown {
+  try {
+    return getSkillsRuntimeManager().listSkills()
+      .find((candidate) => candidate.id === skillId) ?? fallback
+  } catch {
+    // silent-catch: early boot and lightweight test hosts may not have Electron app paths yet.
+    return fallback
+  }
+}
 
 function truncateForQuestionOption(value: string, maxLength: number): string {
   const text = value.trim()
@@ -667,6 +664,8 @@ export class AgentSdkRuntime extends EventEmitter {
         self.compactCapturedSession(name, runHandle, baseItems, reason, windowTokens),
       getRunMetaRepositoryForFinalize: () => self.getRunMetaRepositoryForFinalize(),
       hasBrowserController: () => self.hasBrowserController(),
+      readVerifiedBrowserWorkflowEvidence: (browserTaskId) =>
+        self.browserController?.readVerifiedBrowserWorkflowEvidence(browserTaskId) ?? null,
       hasPendingTaskProjection: (scopeId) => self.hasPendingTaskProjection(scopeId),
       learnSiteCardFromToolFailure: (toolName, args, output) =>
         self.learnSiteCardFromToolFailure(toolName, args, output),
@@ -675,7 +674,10 @@ export class AgentSdkRuntime extends EventEmitter {
       resolveMapPlaceAmbiguityIfNeeded: (params) => self.resolveMapPlaceAmbiguityIfNeeded(params),
       resolveSkillAuthorizationForTurn: (message, sessionId, requestEnvelope, forceLocalSendImIntent, skillHintRelevantForTurn) =>
         self.resolveSkillAuthorizationForTurn(message, sessionId, requestEnvelope, forceLocalSendImIntent, skillHintRelevantForTurn),
-      resolveTaskTypeFromTools: (usedTools) => self.resolveTaskTypeFromTools(usedTools),
+      resolvePreparedSkillTurnForTurn: (message, sessionId, requestEnvelope, forceLocalSendImIntent, skillHintRelevantForTurn) =>
+        self.resolvePreparedSkillTurnForTurn(message, sessionId, requestEnvelope, forceLocalSendImIntent, skillHintRelevantForTurn),
+      resolveSavedSkillAuthorizationForResume: (saved) =>
+        self.resolveSavedSkillAuthorizationForResume(saved),
       emit: (event, ...args) => self.emit(event, ...args),
     })
   }
@@ -725,11 +727,6 @@ export class AgentSdkRuntime extends EventEmitter {
 
   setRuntime(runtime: AgentControlRuntime): void {
     this.runtime = runtime
-    configureActivePlanPersistence({
-      load: (scope) => runtime.getPersistedActivePlan(scope),
-      save: (scope, plan) => runtime.persistActivePlan(scope, plan),
-      remove: (scope) => runtime.persistActivePlan(scope, null),
-    })
   }
 
   private getRunMetaRepositoryForFinalize(): RunMetaRepositoryLike | null {
@@ -1116,10 +1113,6 @@ export class AgentSdkRuntime extends EventEmitter {
             .flatMap((text) => orchestrator.buildPreferredSkillToolNames?.(text, sessionId) || [])
             .filter((toolName) => toolName.startsWith('skill_') && !PRIMITIVE_TOOL_NAME_SET.has(toolName)),
         )
-        if (typedRefSkillId === 'video-expert-analyzer') {
-          typedRefActionNames.add('skill_video_expert_pipeline')
-          typedRefActionNames.add('skill_video_expert_ai_analyze')
-        }
         const typedRefActions = Array.from(typedRefActionNames)
         // P3-2 — shell only when the skill has scripts AND (embedded OR user-consented).
         const typedRefAllowRunShell = resolveSkillShellAllowed({
@@ -1128,15 +1121,20 @@ export class AgentSdkRuntime extends EventEmitter {
           hasConsent: getSkillShellConsent(typedRefSkillId),
         })
         const typedRefAllowAskUser = !shouldSuppressSkillAskUserForArtifactDelivery(typedRefPreferredTexts)
-        log(`[skill_authorization] source=typed_ref skill=${typedRefSkillId}`)
-        return buildSelectedSkillToolAuthorization({
-          skillId: typedRefSkillId,
-          allowedTypedActions: typedRefActions,
-          allowedPrimitives: allowedPrimitiveToolsForSdkSkillTurn({
+        const typedRefManifestTools = resolveManifestBoundSkillTools(
+          registeredSkillOrFallback(typedRefSkillId, matchedSkill),
+          typedRefActions,
+          allowedPrimitiveToolsForSdkSkillTurn({
             skillId: typedRefSkillId,
             allowRunShell: typedRefAllowRunShell,
             allowAskUser: typedRefAllowAskUser,
           }),
+        )
+        log(`[skill_authorization] source=typed_ref skill=${typedRefSkillId}`)
+        return buildSelectedSkillToolAuthorization({
+          skillId: typedRefSkillId,
+          allowedTypedActions: typedRefManifestTools.typedActions,
+          allowedPrimitives: typedRefManifestTools.primitives,
           source: 'explicit',
           reason: 'typed_ref:explicit_user_mention',
         })
@@ -1180,10 +1178,6 @@ export class AgentSdkRuntime extends EventEmitter {
     if (localSendImIntent) {
       typedActionNames.add('skill_send_im_file')
     }
-    if (explicitSkillId === 'video-expert-analyzer' || referenceHint?.id === 'video-expert-analyzer') {
-      typedActionNames.add('skill_video_expert_pipeline')
-      typedActionNames.add('skill_video_expert_ai_analyze')
-    }
     const typedActions = Array.from(typedActionNames)
     const skillId = explicitSkillId || (skillHintRelevantForTurn ? referenceHint?.id || null : null)
     if (!skillId) return buildExplicitNoSkillAuthorization('no_skill_signal')
@@ -1194,31 +1188,103 @@ export class AgentSdkRuntime extends EventEmitter {
       hasConsent: getSkillShellConsent(skillId),
     })
     const allowAskUser = !shouldSuppressSkillAskUserForArtifactDelivery(userTextCandidates)
+    const selectedSkillCandidate = explicitSkill
+      ?? (orchestrator.findExplicitlyRequestedSkills?.(`@[${skillId}]`) || [])
+        .find((candidate) => (candidate.id || candidate.skillId) === skillId)
+    const selectedSkill = registeredSkillOrFallback(skillId, selectedSkillCandidate)
+    const manifestTools = resolveManifestBoundSkillTools(
+      selectedSkill,
+      typedActions,
+      allowedPrimitiveToolsForSdkSkillTurn({ skillId, allowRunShell, allowAskUser }),
+    )
 
     // P1-2 — 文本候选（正则启发式）是兜底信源；typed ref 未命中才走到这里。
     log(`[skill_authorization] source=text_fallback skill=${skillId}`)
     return buildSelectedSkillToolAuthorization({
       skillId,
-      allowedTypedActions: typedActions,
-      allowedPrimitives: allowedPrimitiveToolsForSdkSkillTurn({ skillId, allowRunShell, allowAskUser }),
+      allowedTypedActions: manifestTools.typedActions,
+      allowedPrimitives: manifestTools.primitives,
       source: explicitSkillId ? 'explicit' : 'active_task',
       reason: explicitSkillId ? 'explicit_user_mention' : 'reference_hint',
     })
   }
 
-
-  private resolveTaskTypeFromTools(usedTools: string[]): TaskType {
-    if (usedTools.length === 0) return 'direct_answer'
-    if (usedTools.some((name) =>
-      name.startsWith('web_')
-      || name === 'present_file'
-      || name === 'browser_collect'
-      || name === 'browser_search',
-    )) {
-      return 'research'
+  private resolvePreparedSkillTurnForTurn(
+    message: RunMessage,
+    sessionId?: string,
+    requestEnvelope?: unknown,
+    forceLocalSendImIntent = false,
+    skillHintRelevantForTurn = false,
+  ): {
+    authorization: SkillToolAuthorization
+    identity: import('../skills/skill-turn-identity').SkillTurnIdentity
+  } {
+    const authorization = this.resolveSkillAuthorizationForTurn(
+      message,
+      sessionId,
+      requestEnvelope,
+      forceLocalSendImIntent,
+      skillHintRelevantForTurn,
+    )
+    if (authorization.mode === 'none') {
+      return { authorization, identity: { mode: 'none', reason: authorization.reason } }
     }
-    return 'multi_step_task'
+    return {
+      authorization,
+      identity: {
+        mode: 'skill',
+        relation: authorization.source === 'explicit' ? 'new' : 'resume',
+        skillId: authorization.skillId,
+        skillName: authorization.skillId,
+        confidence: authorization.source === 'explicit'
+          ? 'explicit'
+          : authorization.source === 'trusted_resume'
+            ? 'trusted_handle'
+            : 'hint',
+        source: authorization.source === 'explicit'
+          ? 'explicit_user_mention'
+          : authorization.source === 'trusted_resume'
+            ? 'run_state_resource'
+            : 'reference_hint',
+        contextText: skillAuthorizationTextCandidates(message, requestEnvelope).join('\n'),
+      },
+    }
   }
+
+  private resolveSavedSkillAuthorizationForResume(
+    saved: PreparedSkillTurnTruth,
+  ): SkillToolAuthorization {
+    const skillId = saved.identity.mode === 'skill' ? saved.identity.skillId : null
+    const skill = skillId
+      ? getSkillsRuntimeManager().listSkills()
+          .find((candidate) => candidate.id === skillId && candidate.manifestValid !== false) ?? null
+      : null
+    const allowRunShell = Boolean(skillId && skill && resolveSkillShellAllowed({
+      hasScripts: explicitReferenceSkillHasScripts(skill, saved.authorizedTypedActions),
+      isEmbedded: isEmbeddedSkill(skillId),
+      hasConsent: getSkillShellConsent(skillId),
+    }))
+    const registryActionOwners = skillId
+      ? getSkillActionOwnersForTrustedResume(skillId)
+      : new Map<string, string>()
+    const manifestTools = resolveManifestBoundSkillTools(
+      skill,
+      [...registryActionOwners.keys()],
+      allowedPrimitiveToolsForSdkSkillTurn({
+        skillId: skillId || undefined,
+        allowRunShell,
+        allowAskUser: true,
+      }),
+    )
+    return resolveCurrentLegalAuthorizationForSavedSkill({
+      saved,
+      skillPresent: saved.identity.mode === 'none' || Boolean(skill),
+      currentActionOwners: new Map(manifestTools.typedActions.map((name) => [name, skillId || ''])),
+      currentAllowedPrimitives: new Set(manifestTools.primitives),
+    })
+  }
+
+
 }
 
 // ─── V3 Phase 1 barrel re-exports (backward compatibility) ───

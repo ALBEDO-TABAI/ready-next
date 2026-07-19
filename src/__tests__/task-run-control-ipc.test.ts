@@ -56,7 +56,9 @@ test('task run control actions are exposed through runtime, IPC, preload, render
   assert.match(rendererTypes, /responseText\?: string \| null/)
 
   assert.match(agentStore, /pendingContinuationIntent:/)
-  assert.match(agentStore, /result\.responseText/)
+  assert.match(agentStore, /result\.canonicalMessage/)
+  assert.match(agentStore, /result\.canonicalMessageDigest/)
+  assert.doesNotMatch(agentStore, /result\.responseText/)
   assert.match(agentStore, /setComposerDraft:/)
   assert.match(agentStore, /agent:\s*currentAgent/)
   assert.match(agentStore, /continuationIntent:\s*pendingContinuationIntent \|\| undefined/)

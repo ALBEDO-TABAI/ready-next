@@ -19,8 +19,8 @@ test.beforeEach(() => {
   __clearBrowserPowerPolicyForTests()
 })
 
-test('Power mode is enabled by explicit current-user browser resource intent', () => {
-  assert.equal(browserPowerModeEnabled('帮我嗅探并下载这个网页里的视频'), true)
+test('Power mode is never enabled by matching current-user wording', () => {
+  assert.equal(browserPowerModeEnabled('帮我嗅探并下载这个网页里的视频'), false)
   assert.equal(browserPowerModeEnabled('普通闲聊'), false)
 })
 
@@ -29,11 +29,10 @@ test('Power mode can be enabled by the global settings reader', () => {
   assert.equal(browserPowerModeEnabled('普通闲聊'), true)
 })
 
-test('non-destructive Power effects can be allowed by current user text', () => {
+test('non-destructive Power effects are allowed by their typed effect profile', () => {
   const decision = resolveBrowserPowerAuthorization({
     toolName: 'browser_eval',
     effects: ['observe', 'page_mutation'],
-    currentUserText: '用 web-access / Power Browser 帮我看一下这个页面',
   })
   assert.equal(decision.action, 'allow')
   assert.equal(decision.grantId, 'current-user-nondestructive-power')
@@ -77,7 +76,7 @@ test('obfuscated eval and unknown CDP methods fail into an explicitly privileged
   assert.deepEqual(inferBrowserPowerEffects({
     toolName: 'browser_eval',
     args: { code: "globalThis[['f','e','t','c','h'].join('')]('/checkout',{method:'POST'})" },
-  }), ['observe', 'access_control_circumvention'])
+  }), ['observe', 'page_mutation', 'access_control_circumvention'])
   assert.deepEqual(inferBrowserPowerEffects({
     toolName: 'browser_cdp',
     args: { method: 'Experimental.doAnything', params: {} },

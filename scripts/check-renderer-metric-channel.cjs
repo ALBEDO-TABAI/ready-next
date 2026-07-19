@@ -7,7 +7,8 @@ const REQUIRED_METRICS = [
   'renderer_send_persistence_failed',
   'renderer_attachment_input_failed',
   'renderer_friendly_error_surfaced',
-  'renderer_assistant_persistence_failed',
+  'renderer_send_success_without_canonical_terminal',
+  'renderer_steering_send_failed',
 ]
 
 function checkRendererMetricChannel(options = {}) {

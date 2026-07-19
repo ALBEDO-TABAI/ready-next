@@ -137,18 +137,6 @@ test('browser ownership prioritizes takeover lease state over active write surfa
   assert.equal(status.tone, 'warning')
 })
 
-test('browser ownership prioritizes pending confirmation over background task state', () => {
-  const status = resolveBrowserOwnershipStatus({
-    activeTab: { id: 'tab-user', owner: 'manual' },
-    agentTabId: 'tab-agent',
-    activeAgentTaskCount: 1,
-    controlState: 'pending_confirm',
-  })
-  assert.equal(status.kind, 'pending-confirm')
-  assert.equal(status.label, '等待确认')
-  assert.equal(status.tone, 'warning')
-})
-
 test('browser ownership prioritizes frozen takeover state', () => {
   const status = resolveBrowserOwnershipStatus({
     activeTab: { id: 'tab-agent', owner: 'agent' },

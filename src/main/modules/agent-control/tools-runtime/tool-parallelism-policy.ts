@@ -225,9 +225,11 @@ export function getToolResourceTag(toolName: string): ToolResourceTag {
   // Interactive: phase 1 does network resolve, phase 2 drives a host download +
   // install, neither parallel-safe.
   if (normalized === 'install_skill') return { domain: 'skill_install', accessMode: 'interactive' }
-  // P2-2 — use_skill = L1 catalog activation front door (no skill_ prefix so it survives
-  // filterToolsByAuthorization on mode:'none' turns). Dispatch keys on domain 'skill_activation'.
-  if (normalized === 'use_skill') return { domain: 'skill_activation', accessMode: 'interactive' }
+  // Activation front doors have no skill_ / browser_ prefix so they survive
+  // capability filtering while still dispatching through one activation domain.
+  if (normalized === 'use_skill' || normalized === 'use_browser') {
+    return { domain: 'skill_activation', accessMode: 'interactive' }
+  }
   // mcp_install group — MCP server 两阶段安装前门，同 install_skill 命名策略
   // （无 mcp_ 前缀：mcp_ 是外部 MCP 工具的 dispatch/确认闸保留前缀）。
   if (normalized === 'install_mcp_server') return { domain: 'mcp_install', accessMode: 'interactive' }

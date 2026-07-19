@@ -22,6 +22,7 @@ import {
 import {
   resolveEnabledSdkToolsForRequest,
   runWithOpenAIAgentsSdk,
+  usageFromModelResponses,
 } from '../main/modules/agent-control/runtime-core/agent-sdk-provider-runner'
 import { ReadyOpenAICompatibleModel } from '../main/modules/agent-control/runtime-core/agent-sdk-provider'
 import {
@@ -199,6 +200,19 @@ test('provider usage emits estimate reconciliation with ratio and vision count',
   } finally {
     __setMetricSinkForTests(null)
   }
+})
+
+test('SDK run usage counts every provider request around tool execution', () => {
+  const usage = usageFromModelResponses([
+    { usage: { inputTokens: 100, outputTokens: 10, totalTokens: 110 } },
+    { usage: { inputTokens: 140, outputTokens: 20, totalTokens: 160 } },
+  ] as never)
+  assert.deepEqual(usage, {
+    inputTokens: 240,
+    outputTokens: 30,
+    totalTokens: 270,
+  })
+  assert.equal(usageFromModelResponses([]), undefined)
 })
 
 test('compacted requests reconcile provider usage against the wire bill, not the diagnostic pre-compaction bill', () => {

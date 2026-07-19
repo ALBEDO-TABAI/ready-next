@@ -18,6 +18,7 @@ import { AgentSdkRuntime, type AgentSdkRuntimeDeps } from '../../main/modules/ag
 import { createToolExecutionOutput } from '../../main/modules/agent-control/tools-runtime/tool-result-types'
 import { createTaskBudgetRuntime } from '../../main/modules/agent-control/task-projection/run-budget-policy'
 import { ScriptedAgentRunner } from '../helpers/scripted-agent-runner'
+import { canonicalCoreCloseoutTestPort } from '../helpers/canonical-core-closeout-test-port'
 import {
   clearScopeSessionSnapshot,
   scopeSessionSnapshotPath,
@@ -64,6 +65,7 @@ function buildRuntime(deps: Partial<AgentSdkRuntimeDeps>): {
     ...deps,
   })
   runtime.setRuntime({
+    ...canonicalCoreCloseoutTestPort(),
     getRunMetaRepository: () => repository,
     publishScopeRunEvent: () => undefined,
     getConversationScope: () => null,

@@ -101,12 +101,16 @@ function fakeProjectionDb() {
             run: () => undefined, all: () => [],
           }
         }
+        if (normalized.startsWith('SELECT id FROM browser_tasks WHERE parent_task_id = ?')) {
+          return { get: () => undefined, run: () => undefined, all: () => [] }
+        }
         if (normalized.startsWith('UPDATE task_projections SET')) {
           const setColumns = normalized.slice('UPDATE task_projections SET '.length, normalized.indexOf(' WHERE')).split(',').map((part) => part.trim().split(' ')[0])
           return {
             run: (...params: unknown[]) => {
               const row = rows.get(String(params[params.length - 1]))
               if (row) setColumns.forEach((column, index) => { row[column] = params[index] })
+              return { changes: row ? 1 : 0 }
             },
             all: () => [], get: () => undefined,
           }

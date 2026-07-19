@@ -26,7 +26,7 @@ function fm(over: Partial<BeliefCardFrontmatter> = {}): BeliefCardFrontmatter {
   }
 }
 
-test('belief-card settings snapshot surfaces staged, agent-scoped, site risk, and risk suggestions', () => {
+test('belief-card settings snapshot surfaces staged, agent-scoped, site cards, and risk suggestions without a site denylist', () => {
   const root = makeRoot()
   try {
     const store = new BeliefCardStore({ memoryRoot: root })
@@ -52,12 +52,12 @@ test('belief-card settings snapshot surfaces staged, agent-scoped, site risk, an
     assert.equal(snapshot.summary.active, 1)
     assert.equal(snapshot.summary.agentScoped, 1)
     assert.equal(snapshot.summary.siteCards, 1)
-    assert.equal(snapshot.summary.highRiskSiteCards, 1)
+    assert.equal(snapshot.summary.highRiskSiteCards, 0)
     assert.equal(snapshot.summary.riskSuggestions, 1)
     assert.equal(snapshot.cards[0].status, 'staged', '待确认卡优先展示')
     const site = snapshot.cards.find((card) => card.site === 'xiaohongshu.com')
-    assert.equal(site?.siteRiskLevel, 'high')
-    assert.equal(site?.siteRiskAuthority, 'code')
+    assert.equal(site?.siteRiskLevel, null)
+    assert.equal(site?.siteRiskAuthority, null)
   } finally {
     rmSync(root, { recursive: true, force: true })
   }

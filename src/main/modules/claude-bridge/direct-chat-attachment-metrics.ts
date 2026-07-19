@@ -5,7 +5,7 @@ import { logAgentMetric } from '../agent-control/metrics'
  *
  * `DirectChatEngine.getSessionAttachmentResources` is invoked on a polling
  * cadence by the renderer (every ~2s during active sessions, plus from
- * `BrowserTaskPlanner.decideTask` on every message). If the underlying
+ * structured request-envelope assembly on every message). If the underlying
  * `chatRepository.listConversationAttachments` call starts erroring (DB
  * lock, disk full, etc.) and we emit a metric on every miss, the rotating
  * log fills up in seconds.
@@ -18,7 +18,7 @@ import { logAgentMetric } from '../agent-control/metrics'
  * Lives in its own module (no Electron deps) so it can be unit-tested
  * under plain Node, matching the 2.4a precedent of `direct-chat-ai-config.ts`.
  *
- * **Scope**: BrowserTaskPlanner intentionally still consumes the legacy
+ * **Scope**: request-envelope assembly intentionally still consumes the legacy
  * `getSessionAttachmentResources(): []` shape, so on DB errors it sees
  * "0 attachments" — that's the known compromise documented in plan §5.3.
  * The metric is the only visibility this stage adds; full migration to a

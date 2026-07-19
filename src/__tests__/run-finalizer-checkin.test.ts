@@ -79,7 +79,7 @@ function budgetRuntime(taskType: TaskProjectionRecord['taskType']) {
   }
 }
 
-test('every RunOutcome.kind produces a CheckIn through the real funnel (enumerated, no hardcoded count)', async () => {
+test('only terminal RunOutcome kinds produce a CheckIn; checkpoints stay resumable', async () => {
   for (const kind of ALL_KINDS) {
     const store = fakeStore({ taskId: `task-${kind}`, proofRefs: [collectToolResultProof('t', 'ok', NOW)] })
     await finalizeRunOutcome(outcomeOf(kind, `task-${kind}`), {
@@ -87,8 +87,9 @@ test('every RunOutcome.kind produces a CheckIn through the real funnel (enumerat
       taskProjectionStore: store,
       now: () => NOW,
     })
-    const checkins = store.rows.get(`task-${kind}`)!.checkins as CheckInRecord[]
-    assert.equal(checkins.length, 1, `${kind} must produce exactly one CheckIn`)
+    const checkins = (store.rows.get(`task-${kind}`)!.checkins ?? []) as CheckInRecord[]
+    assert.equal(checkins.length, kind === 'checkpoint' ? 0 : 1)
+    if (kind === 'checkpoint') continue
     assert.equal(checkins[0].kind, 'enforce')
     assert.equal(checkins[0].ts, NOW.toISOString())
   }

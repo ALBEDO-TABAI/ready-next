@@ -1,13 +1,15 @@
 import type { AgentInputItem } from '@openai/agents'
 import type { FollowupTaskRef } from '../../../../shared/agent-followup-intent'
 import type { AIConfigLoad } from '../../claude-bridge/direct-chat-ai-config'
-import type { RunMessage, TaskProjectionRecord, TaskType } from '../contracts/run-contracts'
+import type { RunMessage, TaskProjectionRecord } from '../contracts/run-contracts'
 import type { CheckInRecord } from '../quality/task-adjudicator'
 import type {
   resumeSkillChildRun as defaultResumeSkillChildRun,
   waitForSkillChildRunClose as defaultWaitForSkillChildRunClose
 } from '../skills/skill-child-runner'
 import type { SkillToolAuthorization } from '../skills/skill-tool-authorization'
+import type { SkillTurnIdentity } from '../skills/skill-turn-identity'
+import type { PreparedSkillTurnTruth } from '../contracts/browser-workflow-control'
 import type { ToolDefinition } from '../tools-runtime/tool-definition'
 import type { ToolExecutionOutput } from '../tools-runtime/tool-result-types'
 import type { AgentSdkIntentTracker } from './agent-sdk-intent-tracker'
@@ -28,6 +30,7 @@ import type {
 } from './agent-sdk-types'
 import type { AgentControlRuntime } from './runtime'
 import type { DynamicDeliveryCoordinator } from './dynamic-delivery/dynamic-delivery-coordinator'
+import type { VerifiedBrowserWorkflowEvidence } from '../../browser-engine/browser-workflow-evidence'
 
 export interface TurnOrchestratorHost {
   readonly executeToolCall: NonNullable<AgentSdkRuntimeDeps['executeToolCall']>
@@ -56,6 +59,7 @@ export interface TurnOrchestratorHost {
   ): Promise<CompactSessionResult>
   getRunMetaRepositoryForFinalize(): RunMetaRepositoryLike | null
   hasBrowserController(): boolean
+  readVerifiedBrowserWorkflowEvidence(browserTaskId: string): VerifiedBrowserWorkflowEvidence | null
   hasPendingTaskProjection(scopeId?: string): boolean
   learnSiteCardFromToolFailure(
     toolName: string,
@@ -82,6 +86,13 @@ export interface TurnOrchestratorHost {
     forceLocalSendImIntent?: boolean,
     skillHintRelevantForTurn?: boolean
   ): SkillToolAuthorization
-  resolveTaskTypeFromTools(usedTools: string[]): TaskType
+  resolvePreparedSkillTurnForTurn(
+    message: RunMessage,
+    sessionId?: string,
+    requestEnvelope?: unknown,
+    forceLocalSendImIntent?: boolean,
+    skillHintRelevantForTurn?: boolean
+  ): { authorization: SkillToolAuthorization; identity: SkillTurnIdentity }
+  resolveSavedSkillAuthorizationForResume(saved: PreparedSkillTurnTruth): SkillToolAuthorization
   emit(event: string | symbol, ...args: unknown[]): boolean
 }

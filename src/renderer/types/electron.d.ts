@@ -16,6 +16,7 @@ import type { RSSAutoRefreshSnapshot } from '../../shared/rss-auto-refresh'
 import type { ScheduledTasksAPI } from '../../shared/scheduled-tasks'
 import type { CapabilityRuntimeSnapshot } from '../../shared/ai-capability-runtime'
 import type { RendererAgentMetricName } from '../../shared/renderer-agent-metrics'
+import type { CanonicalAssistantMessage } from '../../shared/ipc-contracts/canonical-message'
 import type { RendererStateFlushOutcome } from '../../shared/renderer-state-flush'
 import type { ContextUsageSnapshot } from '../../shared/context-usage-types'
 import type { ModelPackDownloadUpdate, ModelPackId, ModelPackSelfTestReport, ModelPackStatus, ModelSource } from '../../shared/model-pack-types'
@@ -134,9 +135,13 @@ interface IPCResponse<T = void> {
 
 interface SendScopedResponse {
   success: boolean
+  acceptedAsSteering?: boolean
+  ownerRunId?: string | null
   error?: string | null
   errorKind?: string | null
   responseText?: string | null
+  canonicalMessage?: CanonicalAssistantMessage | null
+  canonicalMessageDigest?: string | null
   persistence?: {
     scope: 'pre-existing' | 'lazy-created' | 'failed'
     message: 'persisted' | 'failed' | 'skipped'
@@ -487,47 +492,6 @@ interface ScopeRunSkillProgressData {
   detail?: string | null
   activityUpdatedAt?: string | null
   handoff?: ScopeRunSkillHandoffData | null
-  browserCollectionConsent?: BrowserCollectionConsentProgressData | null
-  browserActionSession?: BrowserActionSessionProgressData | null
-}
-
-interface BrowserCollectionConsentProgressData {
-  requestId: string
-  consentKind: 'partial_collection'
-  sourceTaskId: string
-  targetHost?: string | null
-  warningText?: string | null
-  message?: string | null
-  createdAt?: string | null
-}
-
-interface BrowserActionSessionProgressData {
-  targetTabId: string | null
-  targetFrameId: string | null
-  frameUrl: string | null
-  frameOrigin: string | null
-  currentUrl: string | null
-  origin: string | null
-  lastAction: string | null
-  lastFollowedTab: {
-    tabId: string
-    url: string | null
-    title: string | null
-    reason: string | null
-  } | null
-  transactionStatus: 'active' | 'confirmed'
-  confirmation: {
-    confirmed: true
-    source: 'page_text' | 'public_url' | 'network' | 'site_strategy'
-    signal: string
-    urlHash?: string | null
-    resourceIdHash?: string | null
-    statusCode?: number | null
-    textHash?: string | null
-    observedAt: string
-  } | null
-  nextSuggestedAction: string | null
-  updatedAt: string
 }
 
 interface ScopeRunSkillHandoffData {
@@ -1138,6 +1102,9 @@ interface ElectronAgentAPI {
 	      message: string | Array<{ type: string; text?: string; base64?: string; mimeType?: string }>
 	      requestId?: string
 	      workspaceRoots?: string[]
+	      environmentHint?: {
+	        workbenchMode?: 'browser' | 'document' | 'rss' | 'calendar'
+	      }
 	      deliveryMode?: 'standard' | 'adaptive' | 'thorough'
 	      userMessage?: {
 	        id: string
@@ -1184,6 +1151,10 @@ interface ElectronAgentAPI {
     responseText: string
     confirmed?: boolean
     continuationIntent?: ContinuationIntentData | null
+  }) => Promise<{ success: boolean; error?: string | null }>
+  completeHumanTakeover: (payload: {
+    taskId: string
+    takeoverId: string
   }) => Promise<{ success: boolean; error?: string | null }>
   upsertChannel: (payload: {
     id?: string
@@ -1239,6 +1210,8 @@ interface ElectronAgentAPI {
       runId?: string
       chunk: string
       type: string
+      canonicalMessage?: CanonicalAssistantMessage | null
+      canonicalMessageDigest?: string | null
     }) => void
   ) => () => void
   onStatusChange: (
@@ -1518,7 +1491,7 @@ interface ElectronBrowserAPI {
     error?: string
   }>
   getDiagnostics: (options?: { includePerformance?: boolean }) => Promise<{ success: boolean; data?: BrowserDiagnosticsData; error?: string }>
-  // Agent-browser supervision (plan §3.6): two-step interrupt + task listing.
+  // Agent-browser supervision: one-step takeover + task listing.
   getAgentSupervisionState: () => Promise<{
     controlState: AgentBrowserControlState
     agentTabId: string | null
@@ -1527,18 +1500,7 @@ interface ElectronBrowserAPI {
     activeWriteSurface?: AgentBrowserSurface | null
     error?: string
   }>
-  requestAgentInterruption: () => Promise<{ state: AgentBrowserControlState; pending: boolean; error?: string }>
-  confirmAgentInterruption: () => Promise<{ state: AgentBrowserControlState; frozen: boolean; takeoverTabId?: string | null; error?: string }>
-  dismissAgentInterruption: () => Promise<{ state: AgentBrowserControlState; error?: string }>
-  confirmCollectionConsent: (payload: {
-    requestId: string
-  }) => Promise<{ success: boolean; data?: unknown; error?: string }>
-  resumeTask: (payload: {
-    taskId: string
-  }) => Promise<{ success: boolean; data?: unknown; error?: string }>
-  cancelTask: (payload: {
-    taskId: string
-  }) => Promise<{ success: boolean; data?: unknown; error?: string }>
+  requestAgentInterruption: () => Promise<{ state: AgentBrowserControlState; frozen: boolean; takeoverTabId?: string | null; error?: string }>
   onAgentControlChanged: (callback: (data: { state: AgentBrowserControlState }) => void) => () => void
   onLeaseChanged: (callback: (data: {
     surfaces?: Record<AgentBrowserSurface, BrowserLeaseSurfaceSnapshot>

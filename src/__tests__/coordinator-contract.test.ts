@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { BrowserDomainAdapter } from '../main/modules/agent-control/domain-adapters/browser-domain-adapter'
 import { CalendarDomainAdapter } from '../main/modules/agent-control/domain-adapters/calendar-domain-adapter'
 import { DocumentDomainAdapter } from '../main/modules/agent-control/domain-adapters/document-domain-adapter'
 import { FeishuDomainAdapter } from '../main/modules/agent-control/domain-adapters/feishu-domain-adapter'
@@ -10,7 +9,6 @@ import { SkillDomainAdapter } from '../main/modules/agent-control/skills/skill-d
 
 test('every registered DomainAdapter explicitly implements coordinator role hooks', () => {
   const adapters = [
-    new BrowserDomainAdapter({} as never),
     new DocumentDomainAdapter({
       orchestrator: {} as never,
       toolLoopOrchestrator: {} as never,

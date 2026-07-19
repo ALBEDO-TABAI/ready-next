@@ -2,9 +2,13 @@ import { BrowserWindow, dialog, session, type MessageBoxOptions } from 'electron
 
 import { BrowserDataService, normalizeDomainToken, type BrowserAdblockState } from './data-service'
 import {
-  recordAgentAutoDeniedSitePermission,
+  BrowserSitePermissionRequestStore,
   resolveBrowserPermissionPath,
+  type BrowserPermissionRequestBinding,
+  type BrowserSitePermissionNotice,
+  type BrowserSitePermissionRequestReadback,
 } from './browser-permission-policy'
+import type { BrowserWorkflowWriteTarget } from '../../../shared/browser-workflow-control'
 import {
   shouldAllowBrowserPermission,
   supportsBrowserPermissionRequest,
@@ -47,8 +51,11 @@ interface BrowserSessionPolicyDeps {
   resolveOriginDomain: (webContentsId?: number) => string
   isPreviewWebContentsId: (webContentsId?: number) => boolean
   getMainWindow: () => BrowserWindow | null
-  /** True while an agent run holds a browser write lease（无人值守判定）。 */
-  isAgentDriveActive?: () => boolean
+  resolveAgentPermissionBinding: (
+    webContentsId: number | undefined,
+    partition: string,
+  ) => BrowserPermissionRequestBinding | null
+  isAgentPermissionBindingLive: (binding: BrowserPermissionRequestBinding) => boolean
   /** 权限请求/判决落 ready-browser.log（真机第十二轮观测盲区）。 */
   logDiagnostics?: (message: string) => void
 }
@@ -59,6 +66,7 @@ export class BrowserSessionPolicyService {
   private adblockUpdateTimer: ReturnType<typeof setTimeout> | null = null
   private lastAdblockRendererUpdateAt = 0
   private permissionDecisions = new Map<string, boolean>()
+  private readonly permissionRequests = new BrowserSitePermissionRequestStore()
 
   constructor(private readonly deps: BrowserSessionPolicyDeps) {
     this.adblockState = deps.dataService.readAdblockState()
@@ -71,33 +79,52 @@ export class BrowserSessionPolicyService {
     }
   }
 
-  getPermissionDecision(permission: string, requestingUrl: string): Record<string, unknown> {
-    const key = this.getPermissionDecisionKey(permission, requestingUrl)
-    const cached = this.permissionDecisions.get(key)
+  getSitePermissionRequest(requestId: string): BrowserSitePermissionRequestReadback {
+    return this.permissionRequests.read(
+      requestId,
+      (binding) => this.deps.isAgentPermissionBindingLive(binding),
+    )
+  }
+
+  applySitePermissionRequest(
+    requestId: string,
+    decision: 'allow' | 'deny',
+  ): BrowserSitePermissionRequestReadback {
+    const readback = this.permissionRequests.apply(
+      requestId,
+      decision,
+      (binding) => this.deps.isAgentPermissionBindingLive(binding),
+    )
+    if (readback.applied && readback.target && readback.permission && readback.requestingUrl) {
+      this.permissionDecisions.set(
+        this.getPermissionDecisionKey(readback.target.partition, readback.permission, readback.requestingUrl),
+        decision === 'allow',
+      )
+      this.logPermissionEvent(`agent_set=${decision} requestId=${requestId}`, readback.permission, readback.requestingUrl)
+    }
+    return readback
+  }
+
+  resetPermissionDecision(partition: string, permission: string, requestingUrl: string): Record<string, unknown> {
+    this.permissionDecisions.delete(this.getPermissionDecisionKey(partition, permission, requestingUrl))
+    this.logPermissionEvent('agent_reset', permission, requestingUrl)
     return {
       permission: String(permission || '').toLowerCase(),
-      origin: this.formatRequestingHost(requestingUrl),
-      decision: cached === true
-        ? 'allow'
-        : cached === false
-          ? 'deny'
-          : shouldAllowBrowserPermission(permission, requestingUrl)
-            ? 'allow'
-            : 'ask',
-      source: cached === undefined ? 'policy' : 'session_override',
+      origin: this.formatRequestingOrigin(requestingUrl),
+      decision: shouldAllowBrowserPermission(permission, requestingUrl) ? 'allow' : 'ask',
+      source: 'policy',
     }
   }
 
-  setPermissionDecision(
-    permission: string,
-    requestingUrl: string,
-    decision: 'allow' | 'deny' | 'ask',
-  ): Record<string, unknown> {
-    const key = this.getPermissionDecisionKey(permission, requestingUrl)
-    if (decision === 'ask') this.permissionDecisions.delete(key)
-    else this.permissionDecisions.set(key, decision === 'allow')
-    this.logPermissionEvent(`agent_set=${decision}`, permission, requestingUrl)
-    return this.getPermissionDecision(permission, requestingUrl)
+  consumeSitePermissionNotices(target: BrowserWorkflowWriteTarget): BrowserSitePermissionNotice[] {
+    return this.permissionRequests.consumeNotices(
+      target,
+      (binding) => this.deps.isAgentPermissionBindingLive(binding),
+    )
+  }
+
+  expireSitePermissionRequestsForTab(tabId: string): void {
+    this.permissionRequests.expireForTab(tabId)
   }
 
   setAdblockEnabled(enabled: boolean, scope: 'main' | 'preview' | 'all' = 'all'): BrowserAdblockState {
@@ -142,17 +169,20 @@ export class BrowserSessionPolicyService {
       targetSession.setPermissionCheckHandler((_webContents, permission, requestingOrigin) => {
         if (!supportsBrowserPermissionRequest(permission)) return false
         if (shouldAllowBrowserPermission(permission, requestingOrigin)) return true
-        return this.permissionDecisions.get(this.getPermissionDecisionKey(permission, requestingOrigin)) === true
+        return this.permissionDecisions.get(
+          this.getPermissionDecisionKey(partition, permission, requestingOrigin),
+        ) === true
       })
 
-      targetSession.setPermissionRequestHandler((webContents, permission, callback) => {
-        const requestingUrl = webContents.getURL()
-        const decisionKey = this.getPermissionDecisionKey(permission, requestingUrl)
+      targetSession.setPermissionRequestHandler((webContents, permission, callback, details) => {
+        const requestingUrl = String(details?.requestingUrl || webContents.getURL() || '')
+        const decisionKey = this.getPermissionDecisionKey(partition, permission, requestingUrl)
+        const agentBinding = this.deps.resolveAgentPermissionBinding(webContents.id, partition)
         const path = resolveBrowserPermissionPath({
           permission,
           requestingUrl,
           cachedDecision: this.permissionDecisions.get(decisionKey),
-          agentDriveActive: this.deps.isAgentDriveActive?.() === true,
+          agentDriveActive: agentBinding !== null,
         })
         this.logPermissionEvent(`request path=${path}`, permission, requestingUrl)
         switch (path) {
@@ -165,10 +195,18 @@ export class BrowserSessionPolicyService {
           case 'cached_deny':
             callback(false)
             return
-          case 'agent_auto_deny': {
-            // 不缓存判决：用户在场后仍可对同一 origin 弹窗决定。
-            recordAgentAutoDeniedSitePermission(permission, this.formatRequestingHost(requestingUrl))
-            callback(false)
+          case 'agent_suspend': {
+            if (!agentBinding) {
+              callback(false)
+              return
+            }
+            this.permissionRequests.queue({
+              permission,
+              origin: this.formatRequestingOrigin(requestingUrl),
+              requestingUrl,
+              target: agentBinding,
+              callback,
+            })
             return
           }
           case 'prompt':
@@ -271,12 +309,12 @@ export class BrowserSessionPolicyService {
     return this.isKnownAdHost(host)
   }
 
-  private getPermissionDecisionKey(permission: string, requestingUrl?: string): string {
+  private getPermissionDecisionKey(partition: string, permission: string, requestingUrl?: string): string {
     try {
       const parsed = new URL(String(requestingUrl || ''))
-      return `${parsed.origin}::${String(permission || '').toLowerCase()}`
+      return `${partition}::${parsed.origin}::${String(permission || '').toLowerCase()}`
     } catch {
-      return `${String(requestingUrl || '')}::${String(permission || '').toLowerCase()}`
+      return `${partition}::${String(requestingUrl || '')}::${String(permission || '').toLowerCase()}`
     }
   }
 
@@ -342,6 +380,14 @@ export class BrowserSessionPolicyService {
       return parsed.hostname || parsed.origin || '当前站点'
     } catch {
       return '当前站点'
+    }
+  }
+
+  private formatRequestingOrigin(requestingUrl?: string): string {
+    try {
+      return new URL(String(requestingUrl || '')).origin
+    } catch {
+      return String(requestingUrl || '')
     }
   }
 }

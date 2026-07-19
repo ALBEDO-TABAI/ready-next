@@ -20,8 +20,8 @@ import {
 import { PROVIDER_ERROR_KINDS } from '../main/modules/agent-control/contracts/error-kinds'
 import { ToolDomainError } from '../main/modules/tools/tool-errors'
 
-test('RETRY_STATUS_CODES contains the 8 canonical codes', () => {
-  assert.deepEqual([...RETRY_STATUS_CODES].sort((a, b) => a - b), [408, 409, 425, 429, 500, 502, 503, 504])
+test('RETRY_STATUS_CODES contains the explicit non-5xx retry statuses', () => {
+  assert.deepEqual([...RETRY_STATUS_CODES].sort((a, b) => a - b), [408, 425, 429])
 })
 
 test('isRetryableStatus matches each canonical code', () => {
@@ -30,11 +30,20 @@ test('isRetryableStatus matches each canonical code', () => {
   }
 })
 
-test('isRetryableStatus rejects null/undefined/200/404', () => {
+test('isRetryableStatus accepts retryable server statuses including 520–524', () => {
+  for (const code of [500, 502, 503, 504, 520, 521, 522, 523, 524, 599]) {
+    assert.equal(isRetryableStatus(code), true, `code ${code} should be retryable`)
+  }
+})
+
+test('isRetryableStatus rejects non-transient conflicts and protocol mismatches', () => {
   assert.equal(isRetryableStatus(null), false)
   assert.equal(isRetryableStatus(undefined), false)
   assert.equal(isRetryableStatus(200), false)
   assert.equal(isRetryableStatus(404), false)
+  assert.equal(isRetryableStatus(409), false)
+  assert.equal(isRetryableStatus(501), false)
+  assert.equal(isRetryableStatus(505), false)
 })
 
 test('isRetryableMessage matches "server busy" / "rate limit" / "overloaded"', () => {

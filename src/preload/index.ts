@@ -18,6 +18,7 @@ import type {
   ScheduleUpdateRequest,
 } from '../shared/scheduled-tasks'
 import type { RendererAgentMetricName } from '../shared/renderer-agent-metrics'
+import type { CanonicalAssistantMessage } from '../shared/ipc-contracts/canonical-message'
 import type { ModelPackDownloadUpdate, ModelPackId, ModelSource } from '../shared/model-pack-types'
 import type { RendererStateFlushOutcome } from '../shared/renderer-state-flush'
 import type { RuntimeStatus, RuntimeProvisionTaskSnapshot } from '../shared/runtime-provision-types'
@@ -246,6 +247,9 @@ const agentAPI = {
       message: string | Array<{ type: string; text?: string; base64?: string; mimeType?: string }>
       requestId?: string
       workspaceRoots?: string[]
+      environmentHint?: {
+        workbenchMode?: 'browser' | 'document' | 'rss' | 'calendar'
+      }
       deliveryMode?: 'standard' | 'adaptive' | 'thorough'
       userMessage?: {
         id: string
@@ -287,6 +291,8 @@ const agentAPI = {
     continuationIntent?: ContinuationIntentPayload | null
   }) =>
     ipcRenderer.invoke('agent:respondToInteraction', payload),
+  completeHumanTakeover: (payload: { taskId: string; takeoverId: string }) =>
+    ipcRenderer.invoke('agent:completeHumanTakeover', payload),
   upsertChannel: (payload: {
     id?: string
     type: 'local-debug' | 'generic-webhook' | 'feishu-bot' | 'feishu-app' | 'telegram-bot' | 'wechat-openclaw'
@@ -322,8 +328,24 @@ const agentAPI = {
   // Stage V V3.2 — push payloads carry `sessionId: string | null`
   // (not optional). null = global event (not session-scoped); a string
   // means the event belongs to a specific session and renderer routes by it.
-  onStream: (callback: (data: { agent: string; sessionId: string | null; runId?: string; chunk: string; type: string }) => void) => {
-    const handler = (_: unknown, data: { agent: string; sessionId: string | null; runId?: string; chunk: string; type: string }) => callback(data)
+  onStream: (callback: (data: {
+    agent: string
+    sessionId: string | null
+    runId?: string
+    chunk: string
+    type: string
+    canonicalMessage?: CanonicalAssistantMessage | null
+    canonicalMessageDigest?: string | null
+  }) => void) => {
+    const handler = (_: unknown, data: {
+      agent: string
+      sessionId: string | null
+      runId?: string
+      chunk: string
+      type: string
+      canonicalMessage?: CanonicalAssistantMessage | null
+      canonicalMessageDigest?: string | null
+    }) => callback(data)
     ipcRenderer.on('agent:stream', handler)
     return () => { ipcRenderer.removeListener('agent:stream', handler) }
   },
@@ -516,15 +538,9 @@ const browserAPI = {
   getTabs: () => ipcRenderer.invoke('browser:getTabs'),
   getAdblockState: () => ipcRenderer.invoke('browser:getAdblockState'),
   getDiagnostics: (options?: { includePerformance?: boolean }) => ipcRenderer.invoke('browser:getDiagnostics', options),
-  // Agent-browser supervision (plan §3.6): two-step interrupt + task listing.
+  // Agent-browser supervision: one-step takeover + task listing.
   getAgentSupervisionState: () => ipcRenderer.invoke('browser:getAgentSupervisionState'),
   requestAgentInterruption: () => ipcRenderer.invoke('browser:requestAgentInterruption'),
-  confirmAgentInterruption: () => ipcRenderer.invoke('browser:confirmAgentInterruption'),
-  dismissAgentInterruption: () => ipcRenderer.invoke('browser:dismissAgentInterruption'),
-  confirmCollectionConsent: (payload: { requestId: string }) =>
-    ipcRenderer.invoke('browser:confirmCollectionConsent', payload),
-  resumeTask: (payload: { taskId: string }) => ipcRenderer.invoke('browser:resumeTask', payload),
-  cancelTask: (payload: { taskId: string }) => ipcRenderer.invoke('browser:cancelTask', payload),
   onAgentControlChanged: (callback: (data: { state: string }) => void) => {
     const handler = (_event: unknown, data: { state: string }) => callback(data)
     ipcRenderer.on('browser:agentControlChanged', handler)

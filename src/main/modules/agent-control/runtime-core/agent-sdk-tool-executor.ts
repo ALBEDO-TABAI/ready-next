@@ -5,6 +5,7 @@ import { TARGET_DOCUMENT_ERROR_KINDS } from '../contracts/error-kinds'
 import { buildTextToolResultMessage } from '../../claude-bridge/tool-bridge'
 import type { AIModelConfig } from '../../../../shared/ai-providers'
 import type { CapabilityGroupId } from '../../../../shared/ai-capability-groups'
+import type { SkillSurfaceComposition } from '../../../../shared/browser-workflow-control'
 import { DEFAULT_CONTEXT_WINDOW } from '../../../../shared/context-budget-types'
 import { defaultToolRegistry } from '../tools-runtime/tool-registry'
 import type { ToolDefinition } from '../tools-runtime/tool-definition'
@@ -16,30 +17,19 @@ import {
 import {
   computeCapabilityFloors,
   recoverAbsentFloorsFromRegistry,
-  TAG_FORGE_FOLDER_RUNTIME_TOOL_NAMES,
 } from '../domain-adapters/capability-floors'
+import { buildBrowserDisciplineBundle } from '../domain-adapters/browser-discipline-asset'
 import {
   isReadOnlyResearchSkillToolSet,
   resolveActiveSkillAllowedTools,
   resolveCapabilityGroupIdsForAllowedTools
 } from '../domain-adapters/run-capability-controller'
 import { isHandoffTakeoverToolOutput, runWithHandoffToolGate } from '../agents/handoff-control'
-import { resolvePolicyConflictFacts } from '../policy-arbitration'
-import {
-  isBrowserBatchCollectionWorkflowTool,
-  isBrowserCollectionSubsetTool,
-  isBrowserObservationSubsetTool
-} from '../../../../shared/browser-collection-intent'
 import {
   BROWSER_CONTENT_TASK_TOOL_NAMES,
   BROWSER_INTERACTION_TOOL_NAMES
 } from '../../tools/browser-tool-catalog'
-import {
-  browserBaseIntentForInstruction,
-  browserOnDemandToolNames,
-  browserToolNamesForIntent,
-} from '../../../../shared/browser-tool-surface'
-import { resolveBrowserWorkIntent, type BrowserWorkIntent } from '../../../../shared/browser-work-intent'
+import { BROWSER_PUBLIC_TOOL_NAMES } from '../../../../shared/browser-tool-surface'
 import { GENERAL_RESEARCH_TOOL_NAMES } from '../../tools/general-research-tool-defs'
 import { activeNegations } from '../safety/negation-state'
 import { createBrowserTurnLease } from '../../browser-engine/agent-browser-turn-lease'
@@ -55,7 +45,6 @@ import {
   normalizeToolExecutionOutput
 } from '../tools-runtime/tool-result-types'
 import type { ToolExecutionOutput } from '../tools-runtime/tool-result-types'
-import { noteToolResultForActivePlan } from '../system-reminders/active-plan-step-reminder'
 import type {
   AgentSdkRuntimeDeps,
   CompactReason,
@@ -78,16 +67,11 @@ import {
   formatToolResultTrace,
   hasCurrentDocumentContextResource,
   hasLocalDocumentResource,
-  hasLocalSendImIntentForTurn,
   isDocumentToolFailure,
   isDocumentToolFailureText,
   mapToolFailureClose,
-  messageHasBrowserBatchCollectionIntent,
-  messageHasBrowserCollectionIntent,
-  messageHasExplicitBrowserCollectionIntent,
   normalizeExplicitDocumentTargetToolArgs,
   publicAgentName,
-  resolveBrowserDecisionMode,
   resolveSdkDefaultIntentSurface,
   scopeRunModuleForTool,
   shouldSuppressAskUserQuestionsForOpenConversation,
@@ -97,11 +81,6 @@ import {
   validatePreservedDocumentMutation
 } from './agent-sdk-utils'
 import { buildToolCallDetail, buildToolResultDetail } from './tool-trace-detail'
-import {
-  messageToText,
-  parseEnvelopeResourceReferences,
-  primaryInstructionText,
-} from './agent-sdk-input-context-utils'
 import { log } from './agent-sdk-provider'
 import { AgentSdkSessionManager } from './agent-sdk-session'
 import { getRemainingToolCallBudget } from '../task-projection/run-budget-policy'
@@ -121,32 +100,6 @@ export function isToolEnabledForCurrentAuthorization(
       authorization.allowedTypedActions.has(toolName)
       || authorization.allowedPrimitives.has(toolName)
     )
-}
-
-function createVisibleBrowserToolPreserver(params: {
-  visibleCapabilityGroupIds: ReadonlyArray<string>
-  collectionExposure: boolean
-  persistentCollectionExposure: boolean
-  batchCollectionExposure: boolean
-  defaultBrowserNames: ReadonlySet<string>
-}): ((name: string) => boolean) | undefined {
-  const browserInteractionVisible = params.visibleCapabilityGroupIds.includes('browser_interaction')
-  const browserContentTasksVisible =
-    params.visibleCapabilityGroupIds.includes('browser_content_tasks')
-  if (!browserInteractionVisible && !browserContentTasksVisible) return undefined
-
-  return (name: string): boolean => {
-    if (params.collectionExposure) {
-      return params.batchCollectionExposure
-        ? isBrowserBatchCollectionWorkflowTool(name)
-        : params.persistentCollectionExposure
-          ? isBrowserCollectionSubsetTool(name)
-          : isBrowserObservationSubsetTool(name)
-    }
-    return (
-      ((browserInteractionVisible || browserContentTasksVisible) && params.defaultBrowserNames.has(name))
-    )
-  }
 }
 
 export interface ToolExecutorHost {
@@ -226,6 +179,13 @@ export class AgentSdkToolExecutor {
     }
   }
 
+  listLatentBrowserToolDefinitions(): ToolDefinition[] {
+    const publicNames = new Set<string>(BROWSER_PUBLIC_TOOL_NAMES)
+    return defaultToolRegistry
+      .listToolDefinitions()
+      .filter((definition) => publicNames.has(definition.name))
+  }
+
   listDefaultToolDefinitionsForTurn(params: {
     message: RunMessage
     sessionId?: string
@@ -238,19 +198,33 @@ export class AgentSdkToolExecutor {
     authorization: SkillToolAuthorization
     /** Continuity: a recent explicit local Send IM turn can be retried directly. */
     localSendImIntent?: boolean
-    /** Complete browser-work contract inherited only by retry/correction turns. */
-    recentBrowserWorkIntent?: BrowserWorkIntent
+    /** Skill capability layer owns whether other surfaces are additive. */
+    skillSurfaceComposition?: SkillSurfaceComposition
     /** Request envelope — used to read the canonical user instruction. */
     requestEnvelope?: unknown
     /** P2-2 — the L1 skill catalog is non-empty this turn (gates use_skill exposure). */
     skillCatalogAvailable?: boolean
     onCapabilityResolution?: (resolution: CapabilityResolution) => void
   }): ToolDefinition[] {
-    const browserDecisionMode = resolveBrowserDecisionMode(
-      params.message,
-      params.browserHostAvailable,
-      params.requestEnvelope
+    const environmentHints = (
+      params.requestEnvelope && typeof params.requestEnvelope === 'object'
+        ? (params.requestEnvelope as { environmentHints?: unknown }).environmentHints
+        : null
+    ) as { workbenchMode?: unknown; browserPageRef?: unknown } | null
+    const composition = params.skillSurfaceComposition || 'additive'
+    const browserPageRef = environmentHints?.browserPageRef
+    const hasTrustedBrowserPageRef = Boolean(
+      browserPageRef
+      && typeof browserPageRef === 'object'
+      && typeof (browserPageRef as Record<string, unknown>).tabId === 'string'
+      && typeof (browserPageRef as Record<string, unknown>).physicalTargetToken === 'string'
+      && typeof (browserPageRef as Record<string, unknown>).mainFrameDocumentToken === 'string'
     )
+    const directBrowserSurface = params.browserHostAvailable
+      && composition === 'additive'
+      && environmentHints?.workbenchMode === 'browser'
+      && hasTrustedBrowserPageRef
+    const browserDecisionMode = directBrowserSurface ? 'browser_workflow' : 'free_tool_loop'
     const manifestSkillAllowedTools = resolveActiveSkillAllowedTools(params.authorization)
     const readOnlyResearchSkill = isReadOnlyResearchSkillToolSet(manifestSkillAllowedTools)
     const requiredCapabilityGroupIds = resolveCapabilityGroupIdsForAllowedTools(
@@ -261,125 +235,47 @@ export class AgentSdkToolExecutor {
       message: params.message,
       requestEnvelope: params.requestEnvelope,
       authorization: params.authorization,
-      browserDecisionMode,
       requiredCapabilityGroupIds
     })
-    const policyConflict = resolvePolicyConflictFacts({
-      forceDocumentTool: sdkIntentSurface.forceDocumentTool,
-      allowBrowserTools: sdkIntentSurface.allowBrowserTools,
-      preferredSkillToolNames: sdkIntentSurface.preferredSkillToolNames,
-      browserDecisionMode,
-      documentWidgetTaskKind: sdkIntentSurface.documentWidgetTaskKind,
-      explicitWidgetCreateIntent: sdkIntentSurface.explicitWidgetCreateIntent
-    })
-    const effectiveBrowserDecisionMode =
-      policyConflict.demotedBrowserDecisionMode || browserDecisionMode
-    const currentInstruction =
-      parseEnvelopeResourceReferences(params.requestEnvelope).primaryInstruction
-      || primaryInstructionText(params.message)
-    const instructionForBaseSurface =
-      /^(?:继续|接着|重试|再试|resume\b|continue\b|retry\b)/i.test(currentInstruction.trim())
-      && messageToText(params.message).includes('## 最近会话摘要')
-        ? messageToText(params.message)
-        : currentInstruction
-    const browserWorkIntent = resolveBrowserWorkIntent(currentInstruction)
-    const effectiveBrowserWorkIntent = browserWorkIntent.kind === 'observe'
-      ? params.recentBrowserWorkIntent || browserWorkIntent
-      : browserWorkIntent
-    const defaultBrowserNames = new Set<string>(browserToolNamesForIntent(
-      effectiveBrowserWorkIntent.kind === 'site_research'
-        ? 'site_research'
-        : effectiveBrowserDecisionMode === 'browser_upload_workflow'
-          ? 'interaction'
-          : browserBaseIntentForInstruction(instructionForBaseSurface)
-    ))
-    for (const name of browserOnDemandToolNames(currentInstruction)) defaultBrowserNames.add(name)
-    if (effectiveBrowserDecisionMode === 'browser_upload_workflow') defaultBrowserNames.add('browser_upload')
-    // The current instruction owns the intent. Only a classified retry/correction
-    // may supply a complete prior BrowserWorkIntent through the tracker.
-    const msgIntent = messageHasBrowserCollectionIntent(params.message, params.requestEnvelope)
-    const msgExplicitCollectionIntent = messageHasExplicitBrowserCollectionIntent(
-      params.message,
-      params.requestEnvelope
-    )
-    const msgBatchIntent = messageHasBrowserBatchCollectionIntent(
-      params.message,
-      params.requestEnvelope
-    )
-    const localSendImIntent =
-      params.localSendImIntent === true ||
-      hasLocalSendImIntentForTurn(params.message, params.requestEnvelope)
-    const skillResumeOrRepairContext =
-      params.authorization.mode === 'selected' && params.authorization.source !== 'explicit'
-    const explicitBrowserCollectionIntent = msgExplicitCollectionIntent || msgBatchIntent
-    const suppressBrowserContentTasks =
-      skillResumeOrRepairContext &&
-      browserDecisionMode === 'free_tool_loop' &&
-      effectiveBrowserWorkIntent.kind !== 'site_research' &&
-      !explicitBrowserCollectionIntent
-    const inheritedCollectionIntent = effectiveBrowserWorkIntent.kind === 'persist_collection'
-    const collectionExposure =
-      params.browserHostAvailable &&
-      browserDecisionMode === 'free_tool_loop' &&
-      !localSendImIntent &&
-      (msgIntent || effectiveBrowserWorkIntent.kind === 'site_research' || inheritedCollectionIntent) &&
-      !suppressBrowserContentTasks
-    const persistentCollectionExposure =
-      collectionExposure &&
-      (msgExplicitCollectionIntent || inheritedCollectionIntent)
-    const batchCollectionExposure =
-      persistentCollectionExposure && (
-        msgBatchIntent || effectiveBrowserWorkIntent.batchScope === 'explicit_all_items'
-      )
+    const effectiveBrowserDecisionMode = browserDecisionMode
+    const defaultBrowserNames = new Set<string>(BROWSER_PUBLIC_TOOL_NAMES)
+    const collectionExposure = false
+    const batchCollectionExposure = false
     appendToolCapabilityLog(
       [
         '[collection_exposure]',
         `host=${params.browserHostAvailable}`,
         `mode=${browserDecisionMode}`,
         `effectiveMode=${effectiveBrowserDecisionMode}`,
-        `msgIntent=${msgIntent}`,
-        `explicitCollection=${msgExplicitCollectionIntent}`,
-        `workIntent=${effectiveBrowserWorkIntent.kind}`,
-        `batchIntent=${msgBatchIntent}`,
-        `batchScope=${effectiveBrowserWorkIntent.batchScope}`,
-        `localSendIm=${localSendImIntent}`,
-        `skillResumeSuppress=${suppressBrowserContentTasks}`,
+        'source=structured_capability',
+        `direct=${directBrowserSurface}`,
+        `composition=${composition}`,
         `exposure=${collectionExposure}`,
         `batchExposure=${batchCollectionExposure}`
       ].join(' ')
     )
-    const browserConflictGroupModes = policyConflict.demotedBrowserDecisionMode
-      ? { browser_interaction: false, browser_content_tasks: false }
-      : {}
     // P2-2 — use_skill (skill_activation group) is defaultMode:'on' so the provider supplies its
     // schema through the normal enrichment path. Exposure is CODE-controlled here: expose it ONLY on
     // a mode:'none' turn with a non-empty catalog; suppress it otherwise (selected turns → no recursive
     // activation; legacy callers without the flag → explicit false → zero perturbation).
-    const exposeSkillActivation =
-      params.authorization.mode === 'none' && params.skillCatalogAvailable === true
+    const exposeSkillActivation = params.authorization.mode === 'none'
+      && params.skillCatalogAvailable === true
+    const exposeBrowserActivation = params.browserHostAvailable
+      && !directBrowserSurface
+      && composition === 'additive'
+    const defaultBrowserContentTaskRequested = directBrowserSurface
     const intentGroupModes = {
       ...sdkIntentSurface.intentGroupModes,
-      ...(effectiveBrowserWorkIntent.kind === 'site_research'
-        ? { general_research: false }
-        : {}),
-      ...(Array.from(defaultBrowserNames).some((name) => BROWSER_CONTENT_TASK_TOOL_NAME_SET.has(name))
-        ? { browser_content_tasks: true }
-        : {}),
-      ...(collectionExposure
-        ? { browser_interaction: true, browser_content_tasks: true }
-        : suppressBrowserContentTasks
-          ? { browser_content_tasks: false }
-          : {}),
-      ...browserConflictGroupModes,
-      skill_activation: exposeSkillActivation
+      browser_interaction: directBrowserSurface,
+      browser_content_tasks: directBrowserSurface,
+      skill_activation: exposeSkillActivation || exposeBrowserActivation
     }
     const requestedIntentGroupIds = Array.from(new Set([
-      ...sdkIntentSurface.requestedIntentGroupIds,
-      ...(Array.from(defaultBrowserNames).some((name) => BROWSER_CONTENT_TASK_TOOL_NAME_SET.has(name))
+      ...sdkIntentSurface.requestedIntentGroupIds.filter((groupId) =>
+        groupId !== 'browser_interaction' && groupId !== 'browser_content_tasks'),
+      ...(directBrowserSurface ? ['browser_interaction', 'browser_content_tasks'] as const : []),
+      ...(defaultBrowserContentTaskRequested
         ? ['browser_content_tasks'] as const
-        : []),
-      ...(!sdkIntentSurface.browserIntentNegated && explicitBrowserCollectionIntent
-        ? ['browser_interaction', 'browser_content_tasks'] as const
         : []),
     ]))
     const capabilityResolution = resolveCapabilityResolution({
@@ -415,6 +311,11 @@ export class AgentSdkToolExecutor {
         params.scopeId
       )
     )
+    definitions = definitions.filter((definition) => {
+      if (definition.name === 'use_skill') return exposeSkillActivation
+      if (definition.name === 'use_browser') return exposeBrowserActivation
+      return true
+    })
     if (
       shouldSuppressAskUserQuestionsForOpenConversation({
         message: params.message,
@@ -424,20 +325,7 @@ export class AgentSdkToolExecutor {
     ) {
       definitions = definitions.filter((definition) => definition.name !== 'ask_user_questions')
     }
-    // WP1: when browser tools are surfaced by collection intent (not by a
-    // browser_workflow decision), narrow the browser groups to the collection
-    // subset. getToolDefinitionsForGroup expands a whole group, so the subset
-    // filter must live here at the tool-definition layer (Codex R2).
-    if (collectionExposure) {
-      definitions = definitions.filter((definition) => {
-        const name = (definition as { name?: unknown }).name
-        if (typeof name !== 'string' || !name.startsWith('browser_')) return true
-        if (effectiveBrowserWorkIntent.kind === 'site_research') return defaultBrowserNames.has(name)
-        if (batchCollectionExposure) return isBrowserBatchCollectionWorkflowTool(name)
-        if (persistentCollectionExposure) return isBrowserCollectionSubsetTool(name)
-        return isBrowserObservationSubsetTool(name)
-      })
-    } else if (
+    if (
       capabilityResolution.visibleCapabilityGroupIds.includes('browser_interaction')
       || capabilityResolution.visibleCapabilityGroupIds.includes('browser_content_tasks')
     ) {
@@ -469,28 +357,19 @@ export class AgentSdkToolExecutor {
       hasCurrentDocumentContext: hasCurrentDocumentContextResource(params.requestEnvelope)
     })
     if (activeSkillAllowedTools) {
-      const preserveVisibleBrowserTool = readOnlyResearchSkill && effectiveBrowserWorkIntent.kind !== 'site_research'
-        ? undefined
-        : createVisibleBrowserToolPreserver({
-            visibleCapabilityGroupIds: capabilityResolution.visibleCapabilityGroupIds,
-            collectionExposure,
-            persistentCollectionExposure,
-            batchCollectionExposure,
-            defaultBrowserNames
-          })
+      const preserveVisibleBrowserTool = directBrowserSurface && composition === 'additive'
+        ? (name: string) => defaultBrowserNames.has(name)
+        : undefined
       const preserveVisibleResearchTool =
         !readOnlyResearchSkill &&
         capabilityResolution.visibleCapabilityGroupIds.includes('general_research')
           ? (name: string) => GENERAL_RESEARCH_TOOL_NAME_SET.has(name)
           : undefined
-      const preserveSiteResearchTool = effectiveBrowserWorkIntent.kind === 'site_research'
-        ? (name: string) => defaultBrowserNames.has(name)
-        : undefined
       definitions = filterSelectedSkillToolSurface(definitions, activeSkillAllowedTools, {
         preserveToolName: (name) =>
-          preserveSiteResearchTool?.(name) === true
-          || preserveVisibleBrowserTool?.(name) === true
+          preserveVisibleBrowserTool?.(name) === true
           || preserveVisibleResearchTool?.(name) === true
+          || (composition === 'additive' && name === 'use_browser' && exposeBrowserActivation)
           || name === 'agent_propose_handoff'
           || capabilityFloors.toolNames.has(name)
       })
@@ -516,10 +395,6 @@ export class AgentSdkToolExecutor {
       )
     }
     definitions = floorRecovery.definitions
-    if (capabilityFloors.reasons.includes('tag_forge_folder_batch')) {
-      const tagForgeToolNames = new Set(TAG_FORGE_FOLDER_RUNTIME_TOOL_NAMES)
-      definitions = definitions.filter((definition) => tagForgeToolNames.has(definition.name))
-    }
     return filterToolsByVisionCapability(definitions as unknown as Array<Record<string, unknown>>, {
       supportsVision: capabilityResolution.supportsVision === true
     }) as unknown as ToolDefinition[]
@@ -573,14 +448,14 @@ export class AgentSdkToolExecutor {
       )
     }
     const names = enabledDefinitions.map((definition) => definition.name)
-    const activationSummary = skillId === 'tag-forge'
-      ? `已切换到 Tag Forge 受控打标流程；当前仅可使用：${names.join(', ')}。列表外工具已关闭。请立即继续当前任务，不要等待用户再发消息。`
-      : `技能工具已在本次运行中开放：${names.join(', ') || '无专属工具（仅使用方法论）'}。请立即继续当前任务，不要等待用户再发消息。`
+    const activationSummary = runtimeContext.skillSurfaceComposition === 'exclusive'
+      ? `技能已在当前运行的独占范围内激活；当前可用工具：${names.join(', ') || '无专属工具（仅使用方法论）'}。请立即继续当前任务。`
+      : `技能工具已在本次运行中开放：${names.join(', ') || '无专属工具（仅使用方法论）'}。请立即继续当前任务。`
     const textBridgeCatalog = runtimeContext.useTextToolBridge
       ? enabledDefinitions.map((definition) => [
           `- ${definition.name}: ${definition.description}`,
           `  parameters=${JSON.stringify(definition.schema || { type: 'object', properties: {} })}`,
-        ].join('\n')).join('\n').slice(0, 12_000)
+        ].join('\n')).join('\n')
       : ''
     return createToolExecutionOutput(
       [
@@ -601,6 +476,46 @@ export class AgentSdkToolExecutor {
         framePatch: normalized.framePatch,
         contextModifier: normalized.contextModifier,
         envelope: normalized.envelope,
+      },
+    )
+  }
+
+  private activateBrowserForSameRun(runtimeContext: ToolBridgeRuntimeContext): ToolExecutionOutput {
+    if (!runtimeContext.activatedCapabilityGroups.includes('browser')) {
+      runtimeContext.activatedCapabilityGroups.push('browser')
+    }
+    const enabledDefinitions = runtimeContext.activateBrowserForCurrentRun?.() || []
+    const suppressed = runtimeContext.skillSurfaceComposition === 'exclusive'
+    const discipline = buildBrowserDisciplineBundle({
+      definitions: enabledDefinitions,
+      requestEnvelope: runtimeContext.requestEnvelope,
+      activation: 'same_run',
+      includeCompleteTextCatalog: runtimeContext.useTextToolBridge === true,
+    })
+    return createToolExecutionOutput(
+      [
+        suppressed
+          ? '浏览器能力已记录；当前独占技能范围结束后会自动出现。'
+          : '浏览器能力已在当前运行中开放，请立即继续当前任务。',
+        discipline.text,
+      ].join('\n\n'),
+      {
+        shape: 'json',
+        data: {
+          ok: true,
+          activation: suppressed ? 'active_suppressed_by_exclusive_scope' : 'active_same_run',
+          availableTools: enabledDefinitions.map((definition) => definition.name),
+          activatedCapabilityGroups: [...runtimeContext.activatedCapabilityGroups],
+          browserDiscipline: {
+            major: discipline.major,
+            digest: discipline.digest,
+          },
+          textToolCatalog: {
+            complete: runtimeContext.useTextToolBridge === true,
+            toolCount: discipline.toolCount,
+            chars: discipline.textCatalogChars,
+          },
+        },
       },
     )
   }
@@ -741,6 +656,12 @@ export class AgentSdkToolExecutor {
     // writes are gated and a user takeover suspends them. Lazy (no acquire until
     // a write); released on run cleanup (normal end / cancel / session close).
     if (this.host.browserController && runtimeContext.runId) {
+      executorContext.ensureBrowserWorkflowRoute = runtimeContext.ensureBrowserWorkflowRoute
+      executorContext.browserWorkflowRoute = runtimeContext.browserWorkflowRoute ?? null
+      executorContext.browserObservationBarrier = runtimeContext.browserObservationBarrier ?? null
+      executorContext.browserObservationClosureActive = runtimeContext.browserObservationClosureActive === true
+      executorContext.confirmedBrowserPowerRequest = runtimeContext.confirmedBrowserPowerRequest ?? null
+      executorContext.confirmedBrowserPermissionRequest = runtimeContext.confirmedBrowserPermissionRequest ?? null
       if (!runtimeContext.browserTurnLease) {
         const turnLease = createBrowserTurnLease({
           taskId: runtimeContext.taskId ?? runtimeContext.runId,
@@ -782,7 +703,6 @@ export class AgentSdkToolExecutor {
       this.buildExecutorContext(runtimeContext)
     )
     runtimeContext.recordToolResult(definition.name, output)
-    noteToolResultForActivePlan(runtimeContext.sessionId, definition.name, args, Date.now(), output)
     const outputWithSteering = appendBudgetWarningSteering(output, runtimeContext)
     const normalized = normalizeToolExecutionOutput(outputWithSteering)
     const resultTrace = formatToolResultTrace(definition.name, normalized)
@@ -1005,13 +925,6 @@ export class AgentSdkToolExecutor {
         }
       )
       runtimeContext.recordToolResult(definition.name, output)
-      noteToolResultForActivePlan(
-        runtimeContext.sessionId,
-        definition.name,
-        args,
-        Date.now(),
-        output
-      )
       const outputWithSteering = appendBudgetWarningSteering(output, runtimeContext)
       const resultTrace = formatToolResultTrace(definition.name, outputWithSteering)
       runtimeContext.emitOutput(resultTrace, 'tool_result')
@@ -1099,16 +1012,17 @@ export class AgentSdkToolExecutor {
       return blockerWithSteering
     }
     runtimeContext.emitToolAction(definition.name, effectiveArgs)
-    let output = await this.host.executeToolCall(
-      definition.name,
-      effectiveArgs,
-      this.buildExecutorContext(runtimeContext)
-    )
+    let output = definition.name === 'use_browser'
+      ? this.activateBrowserForSameRun(runtimeContext)
+      : await this.host.executeToolCall(
+          definition.name,
+          effectiveArgs,
+          this.buildExecutorContext(runtimeContext)
+        )
     if (definition.name === 'use_skill') {
       output = this.activateSkillForSameRun(output, runtimeContext)
     }
     runtimeContext.recordToolResult(definition.name, output)
-    noteToolResultForActivePlan(runtimeContext.sessionId, definition.name, args, Date.now(), output)
     const outputWithSteering = appendBudgetWarningSteering(output, runtimeContext)
     const normalized = normalizeToolExecutionOutput(outputWithSteering)
     if (isHandoffTakeoverToolOutput(outputWithSteering)) {

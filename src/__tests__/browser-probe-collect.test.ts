@@ -2,7 +2,11 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import vm from 'node:vm'
 
-import { buildBrowserPageMapProbeJs, buildBrowserTargetProbeJs } from '../main/modules/tools/browser-probe'
+import {
+  buildBrowserPageMapProbeJs,
+  buildBrowserTargetFocusJs,
+  buildBrowserTargetProbeJs,
+} from '../main/modules/tools/browser-probe'
 
 import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
 
@@ -10,42 +14,40 @@ test('browser-probe-collect declares transitive sqlite ABI guard', (t) => {
   skipIfSqliteUnavailable(t, 'browser-probe-collect transitive sqlite load')
 })
 
-// D14（2026-07-04 R1 真机实锚，XHS <xhs-publish-btn>）：Web Component host
-// 的真实控件藏在 shadow root 里，语义选择器/pointer 标签清单/cursor 信号
-// 三层全盲，「发布」永远进不了 map。本文件在 node:vm 里执行真实注入 JS
-// （buildBrowserPageMapProbeJs 产物），用假 DOM 断言采集合同：
-//   1. 可见、带短文本的自定义元素 host 进 targets，role=clickable；
-//   2. 空文本 / 交互祖先覆盖 / 超大面积的 host 不进（防噪声）；
-//   3. 既有语义与 pointer 收集级不回归。
-
 class FakeElement {
   tagName: string
   attrs: Record<string, string>
   innerText: string
   textContent: string
-  style: { display: string; visibility: string; cursor: string; opacity: string }
-  rect: { x: number; y: number; left: number; top: number; width: number; height: number }
+  style = { display: 'block', visibility: 'visible', cursor: 'auto', opacity: '1' }
+  rect: { x: number; y: number; left: number; top: number; right: number; bottom: number; width: number; height: number }
   parentElement: FakeElement | null = null
   children: FakeElement[] = []
-  shadowRoot: null = null
+  shadowRoot: object | null = null
   isContentEditable = false
-  hasInteractiveAncestor = false
+  isConnected = true
+  hidden = false
+  ownerDocument: Record<string, unknown> | null = null
 
   constructor(tagName: string, options: {
     text?: string
     attrs?: Record<string, string>
     cursor?: string
+    x?: number
+    y?: number
     width?: number
     height?: number
-    hasInteractiveAncestor?: boolean
   } = {}) {
     this.tagName = tagName.toUpperCase()
     this.attrs = options.attrs ?? {}
     this.innerText = options.text ?? ''
     this.textContent = options.text ?? ''
-    this.style = { display: 'block', visibility: 'visible', cursor: options.cursor ?? 'auto', opacity: '1' }
-    this.rect = { x: 10, y: 10, left: 10, top: 10, width: options.width ?? 120, height: options.height ?? 40 }
-    this.hasInteractiveAncestor = options.hasInteractiveAncestor ?? false
+    this.style.cursor = options.cursor ?? 'auto'
+    const x = options.x ?? 10
+    const y = options.y ?? 10
+    const width = options.width ?? 120
+    const height = options.height ?? 40
+    this.rect = { x, y, left: x, top: y, right: x + width, bottom: y + height, width, height }
   }
 
   getAttribute(name: string): string | null {
@@ -60,201 +62,168 @@ class FakeElement {
     return this.rect
   }
 
-  closest(_selector: string): FakeElement | null {
-    return this.hasInteractiveAncestor ? new FakeElement('button') : null
-  }
-
-  dispatchEvent(_event: unknown): boolean {
-    return true
-  }
-
-  click(): void {
-    // synthetic activation sink for the act-JS click branch
+  closest(selector: string): FakeElement | null {
+    let current: FakeElement | null = this
+    while (current) {
+      if (selector === 'form' && current.tagName === 'FORM') return current
+      current = current.parentElement
+    }
+    return null
   }
 
   focus(): void {
-    // focus sink for the act-JS fill branch
+    if (this.ownerDocument) this.ownerDocument.activeElement = this
   }
 }
 
-function runProbe(elements: {
-  semantic: FakeElement[]
-  pointer: FakeElement[]
-  all: FakeElement[]
-}): { role: string; name: string; backendDOMNodeId: number }[] {
-  const querySelectorAll = (selector: string): FakeElement[] => {
-    if (selector === '*') return elements.all
-    if (selector === 'div,span,li,p,img,svg') return elements.pointer
-    if (selector.includes('a[href]') && selector.includes('h6')) return elements.semantic
-    return []
+class FakeInputElement extends FakeElement {
+  type = 'text'
+  value = ''
+  readOnly = false
+  disabled = false
+  checked = false
+  focusOptions: { preventScroll?: boolean } | null = null
+
+  constructor(options: ConstructorParameters<typeof FakeElement>[1] = {}) {
+    super('input', options)
+    this.type = options.attrs?.type || 'text'
   }
-  const getComputedStyle = (el: FakeElement) => el.style
-  const sandbox = {
-    document: {
-      querySelectorAll,
-      querySelector: () => null,
-      getElementById: () => null,
-      title: 'fake',
-      body: { innerText: '' },
+
+  override focus(options?: { preventScroll?: boolean }): void {
+    this.focusOptions = options || null
+    super.focus()
+  }
+}
+
+interface ProbeTarget {
+  role: string
+  name: string
+  stableNodeToken: string
+  parentStableNodeToken?: string
+  ancestorStableNodeTokens: string[]
+  frameDocumentToken: string
+  rendered: boolean
+  visible: boolean
+  enabled: boolean
+}
+
+function createProbeRuntime(semantic: FakeElement[]) {
+  const body = new FakeElement('body')
+  const documentElement = new FakeElement('html')
+  const documentState: Record<string, unknown> = {
+    activeElement: body,
+    title: 'fake',
+    readyState: 'complete',
+    body,
+    documentElement,
+    querySelectorAll: (selector: string) => {
+      if (selector.includes('a[href]') && selector.includes('h6')) return semantic
+      if (selector === 'a[href]') return semantic.filter((element) => element.tagName === 'A' && element.hasAttribute('href'))
+      if (selector === 'iframe,frame' || selector === 'iframe') return []
+      if (selector === 'input[type="file"]') return semantic.filter((element) => element.getAttribute('type') === 'file')
+      if (selector === 'input[type="password"]') return semantic.filter((element) => element.getAttribute('type') === 'password')
+      if (selector.includes('[hidden]')) return []
+      return []
     },
+    querySelector: () => null,
+    getElementById: () => null,
+  }
+  for (const element of [body, documentElement, ...semantic]) element.ownerDocument = documentState
+  const getComputedStyle = (element: FakeElement) => element.style
+  const sandbox = {
+    document: documentState,
     window: { getComputedStyle, innerWidth: 1200, innerHeight: 900 },
     getComputedStyle,
-    location: { href: 'https://fake.example/page', origin: 'https://fake.example' },
+    location: { href: 'https://fake.example/page', origin: 'https://fake.example', protocol: 'https:' },
     Element: FakeElement,
-    HTMLInputElement: class {},
-    HTMLTextAreaElement: class {},
-    HTMLSelectElement: class {},
-    HTMLButtonElement: class {},
-    CSS: { escape: (s: string) => s },
-    URL: class {
-      origin = 'https://fake.example'
-    },
+    HTMLElement: FakeElement,
+    HTMLAnchorElement: class extends FakeElement {},
+    HTMLInputElement: FakeInputElement,
+    HTMLTextAreaElement: class extends FakeElement { value = ''; readOnly = false; disabled = false },
+    HTMLSelectElement: class extends FakeElement { value = ''; disabled = false },
+    HTMLButtonElement: class extends FakeElement { disabled = false },
+    HTMLFormElement: class extends FakeElement {},
+    CSS: { escape: (value: string) => value },
+    URL,
   }
-  const payload = JSON.parse(JSON.stringify(vm.runInNewContext(buildBrowserPageMapProbeJs(), sandbox))) as {
-    rawRoots: { children: { role: string; name: string; backendDOMNodeId: number }[] }[]
+  const context = vm.createContext(sandbox)
+  const run = <T>(source: string): T => JSON.parse(JSON.stringify(vm.runInContext(source, context))) as T
+  const pageMap = run<{
+    identity: { frameDocumentToken: string }
+    rawRoots: Array<{ children: ProbeTarget[] }>
+  }>(buildBrowserPageMapProbeJs())
+  return {
+    documentState,
+    pageMap,
+    targets: pageMap.rawRoots[0]?.children || [],
+    run,
   }
-  return payload.rawRoots[0].children
 }
 
-test('custom-element host with rendered text enters targets as clickable', () => {
-  const stashButton = new FakeElement('button', { text: '暂存离开' })
-  const publishHost = new FakeElement('xhs-publish-btn', { text: '发布' })
-  const targets = runProbe({
-    semantic: [stashButton],
-    pointer: [],
-    all: [stashButton, publishHost],
-  })
-  const publish = targets.find((t) => t.name === '发布')
-  assert.ok(publish, 'publish host must be collected')
-  assert.strictEqual(publish?.role, 'clickable')
-  const stash = targets.find((t) => t.name === '暂存离开')
-  assert.strictEqual(stash?.role, 'button')
-})
-
-test('noise custom hosts are excluded: interactive ancestor, oversized', () => {
-  const coveredHost = new FakeElement('xhs-inner-btn', { text: '确认', hasInteractiveAncestor: true })
-  const giantHost = new FakeElement('xhs-layout-shell', { text: '发布', width: 1200, height: 900 })
-  const targets = runProbe({
-    semantic: [],
-    pointer: [],
-    all: [coveredHost, giantHost],
-  })
-  assert.deepStrictEqual(targets, [])
-})
-
-test('empty-text custom host is kept with tagName as its map name (closed shadow)', () => {
-  const mute = new FakeElement('xhs-publish-btn')
-  const targets = runProbe({ semantic: [], pointer: [], all: [mute] })
-  assert.strictEqual(targets.length, 1)
-  assert.strictEqual(targets[0]?.role, 'clickable')
-  assert.strictEqual(targets[0]?.name, 'xhs-publish-btn')
-})
-
-test('custom host at the DOM tail of a huge page is still collected (D13 tail law)', () => {
-  // D14-c 回归钉：首版 scanned>=6000 文档序配额让 publish 页前部烧光预算，
-  // 尾部的发布按钮永远轮不到。7000 个非 custom 填充元素 + 尾部 host。
-  const fillers = Array.from({ length: 7000 }, () => new FakeElement('div'))
-  const publishHost = new FakeElement('xhs-publish-btn', { text: '发布' })
-  const targets = runProbe({
-    semantic: [],
-    pointer: [],
-    all: [...fillers, publishHost],
-  })
-  const publish = targets.find((t) => t.name === '发布')
-  assert.ok(publish, 'tail custom host must survive any scan budget')
-  assert.strictEqual(publish?.role, 'clickable')
-})
-
-test('over-16 custom hosts keep head 10 + tail 6 (primary CTA lives at the tail)', () => {
-  const hosts = Array.from({ length: 20 }, (_, i) => new FakeElement('x-item', { text: `c${i + 1}` }))
-  const targets = runProbe({ semantic: [], pointer: [], all: hosts })
-  const names = targets.map((t) => t.name)
-  assert.strictEqual(names.length, 16)
-  assert.deepStrictEqual(names.slice(0, 10), ['c1', 'c2', 'c3', 'c4', 'c5', 'c6', 'c7', 'c8', 'c9', 'c10'])
-  assert.deepStrictEqual(names.slice(10), ['c15', 'c16', 'c17', 'c18', 'c19', 'c20'])
-})
-
-test('pointer-cursor collection still works alongside custom hosts, order deterministic', () => {
-  const semanticButton = new FakeElement('button', { text: '一键排版' })
+test('DOM fallback exposes semantic targets and ignores visual click guesses', () => {
+  const button = new FakeElement('button', { text: '一键排版' })
   const pointerDiv = new FakeElement('div', { text: '写长文', cursor: 'pointer' })
-  const publishHost = new FakeElement('xhs-publish-btn', { text: '发布' })
-  const targets = runProbe({
-    semantic: [semanticButton],
-    pointer: [pointerDiv],
-    all: [semanticButton, pointerDiv, publishHost],
-  })
-  assert.deepStrictEqual(
-    targets.map((t) => ({ role: t.role, name: t.name, id: t.backendDOMNodeId })),
-    [
-      { role: 'button', name: '一键排版', id: 1 },
-      { role: 'clickable', name: '写长文', id: 2 },
-      { role: 'clickable', name: '发布', id: 3 },
-    ],
-  )
+  const unmarkedCustomHost = new FakeElement('xhs-publish-btn', { text: '发布' })
+  const runtime = createProbeRuntime([button])
+
+  assert.deepEqual(runtime.targets.map((target) => ({ role: target.role, name: target.name })), [
+    { role: 'button', name: '一键排版' },
+  ])
+  assert.match(runtime.targets[0]!.stableNodeToken, /^h[0-9a-z]+$/)
+  assert.equal('backendDOMNodeId' in runtime.targets[0]!, false)
+  assert.equal(runtime.targets.some((target) => target.name === pointerDiv.innerText), false)
+  assert.equal(runtime.targets.some((target) => target.name === unmarkedCustomHost.innerText), false)
 })
 
-// D18：目标实时探针必须把点击坐标（视口 CSS px + 视口尺寸）交回工具层，
-// 供 closed-shadow 无效果时升级可信指针点击。探针只观测，不在页面内合成点击。
-function runTargetProbe(nodeId: string, elements: {
-  semantic: FakeElement[]
-  pointer: FakeElement[]
-  all: FakeElement[]
-}): { matchCount: number; clickPoint?: { x: number; y: number; vw: number; vh: number } | null } {
-  const querySelectorAll = (selector: string): FakeElement[] => {
-    if (selector === '*') return elements.all
-    if (selector === 'div,span,li,p,img,svg') return elements.pointer
-    if (selector.includes('a[href]') && selector.includes('h6')) return elements.semantic
-    return []
-  }
-  const getComputedStyle = (el: FakeElement) => el.style
-  class FakeEvent {
-    constructor(public type: string, public opts?: unknown) {}
-  }
-  const sandbox = {
-    document: {
-      querySelectorAll,
-      querySelector: () => null,
-      getElementById: () => null,
-      title: 'fake',
-      body: { innerText: '' },
-      // elementFromPoint 缺省：目标探针只需要枚举后的目标几何。
-    },
-    window: { getComputedStyle, innerWidth: 1200, innerHeight: 900 },
-    getComputedStyle,
-    location: { href: 'https://fake.example/page', origin: 'https://fake.example' },
-    Element: FakeElement,
-    HTMLInputElement: class {},
-    HTMLTextAreaElement: class {},
-    HTMLSelectElement: class {},
-    HTMLButtonElement: class {},
-    PointerEvent: FakeEvent,
-    MouseEvent: FakeEvent,
-    Event: FakeEvent,
-    InputEvent: FakeEvent,
-    CSS: { escape: (s: string) => s },
-    URL: class {
-      origin = 'https://fake.example'
-    },
-  }
-  return JSON.parse(JSON.stringify(vm.runInNewContext(buildBrowserTargetProbeJs(nodeId), sandbox))) as {
-    matchCount: number
-    clickPoint?: { x: number; y: number; vw: number; vh: number } | null
-  }
-}
-
-test('target probe returns the click point for trusted-pointer escalation', () => {
-  const stashButton = new FakeElement('button', { text: '暂存离开' })
-  const publishHost = new FakeElement('xhs-publish-btn', { text: '发布' })
-  const result = runTargetProbe('2', {
-    semantic: [stashButton],
-    pointer: [],
-    all: [stashButton, publishHost],
+test('custom hosts remain available when the page gives them an explicit role', () => {
+  const publishHost = new FakeElement('xhs-publish-btn', {
+    attrs: { role: 'button', 'aria-label': '发布' },
   })
-  assert.strictEqual(result.matchCount, 1)
-  // rect: left 10 top 10, 120x40 → center (70, 30)；视口 1200x900。
-  // D18-c 起 clickPoint 还带完整 host rect——升级路径用它做 shadow 内部
-  // 命中扫描（host 包围盒可能横跨按钮组，中心点是死区）。
-  assert.deepStrictEqual(result.clickPoint, {
+  const runtime = createProbeRuntime([publishHost])
+
+  assert.deepEqual(runtime.targets.map((target) => ({ role: target.role, name: target.name })), [
+    { role: 'button', name: '发布' },
+  ])
+})
+
+test('flat DOM targets keep stable ancestry and availability', () => {
+  const listbox = new FakeElement('div', { text: '城市', attrs: { role: 'listbox' } })
+  const option = new FakeElement('div', { text: '新加坡', attrs: { role: 'option' } })
+  option.parentElement = listbox
+  listbox.children.push(option)
+  const runtime = createProbeRuntime([listbox, option])
+  const [parent, child] = runtime.targets
+
+  assert.equal(parent?.rendered, true)
+  assert.equal(parent?.visible, true)
+  assert.equal(parent?.enabled, true)
+  assert.equal(child?.parentStableNodeToken, parent?.stableNodeToken)
+  assert.deepEqual(child?.ancestorStableNodeTokens, [parent?.stableNodeToken])
+})
+
+test('laid-out targets outside the viewport stay rendered but are not advertised as visible', () => {
+  const onScreen = new FakeInputElement({ attrs: { placeholder: '当前搜索框' }, y: 120 })
+  const belowViewport = new FakeInputElement({ attrs: { placeholder: '屏幕外搜索框' }, y: 920 })
+  const runtime = createProbeRuntime([onScreen, belowViewport])
+
+  assert.equal(runtime.targets.find((target) => target.name === '当前搜索框')?.visible, true)
+  assert.equal(runtime.targets.find((target) => target.name === '屏幕外搜索框')?.rendered, true)
+  assert.equal(runtime.targets.find((target) => target.name === '屏幕外搜索框')?.visible, false)
+})
+
+test('target probe resolves the exact stable token and reports its geometry', () => {
+  const publishHost = new FakeElement('xhs-publish-btn', {
+    attrs: { role: 'button', 'aria-label': '发布' },
+  })
+  const runtime = createProbeRuntime([publishHost])
+  const target = runtime.targets[0]!
+  const result = runtime.run<{
+    matchCount: number
+    clickPoint: { x: number; y: number; vw: number; vh: number; hostShadow: string | null }
+  }>(buildBrowserTargetProbeJs(target.stableNodeToken, target.frameDocumentToken))
+
+  assert.equal(result.matchCount, 1)
+  assert.deepEqual(result.clickPoint, {
     x: 70,
     y: 30,
     vw: 1200,
@@ -264,46 +233,41 @@ test('target probe returns the click point for trusted-pointer escalation', () =
   })
 })
 
-test('map names an empty contenteditable editor from data-placeholder (D18-d)', () => {
-  // 真机第十六轮实锚：空 tiptap 编辑器无 aria/文本/placeholder，旧命名链
-  // 得空串，模型在 map 里认不出"正文该填哪"，只反复 fill 有名字的标题。
+test('numeric, wrong-document, and detached target identities are rejected', () => {
+  const button = new FakeElement('button', { text: '保存' })
+  const runtime = createProbeRuntime([button])
+  const target = runtime.targets[0]!
+
+  assert.equal(runtime.run<{ matchCount: number }>(buildBrowserTargetProbeJs('1')).matchCount, 0)
+  assert.equal(runtime.run<{ matchCount: number }>(
+    buildBrowserTargetProbeJs(target.stableNodeToken, 'wrong-document'),
+  ).matchCount, 0)
+  button.isConnected = false
+  assert.equal(runtime.run<{ matchCount: number }>(
+    buildBrowserTargetProbeJs(target.stableNodeToken, target.frameDocumentToken),
+  ).matchCount, 0)
+})
+
+test('target focus resolves and focuses the exact editable without scrolling', () => {
+  const input = new FakeInputElement({ attrs: { placeholder: '查询' } })
+  const runtime = createProbeRuntime([input])
+  const target = runtime.targets[0]!
+  const result = runtime.run<{ ok: boolean; reason: string | null; kind: string; tag: string; label: string }>(
+    buildBrowserTargetFocusJs(target.stableNodeToken, false, target.frameDocumentToken),
+  )
+
+  assert.deepEqual(result, { ok: true, reason: null, kind: 'editable', tag: 'input', label: '查询' })
+  assert.equal(input.focusOptions?.preventScroll, true)
+  assert.equal(runtime.documentState.activeElement, input)
+})
+
+test('empty contenteditable is named from its structural placeholder', () => {
   const editor = new FakeElement('div', {
     attrs: { contenteditable: 'true', 'data-placeholder': '输入文字，内容将自动保存' },
   })
   editor.isContentEditable = true
-  const filler = [1, 2, 3, 4].map((i) => new FakeElement('button', { text: `F${i}` }))
-  const targets = runProbe({ semantic: [editor, ...filler], pointer: [], all: [editor, ...filler] })
-  const editorTarget = targets.find((t) => t.role === 'textbox')
-  assert.ok(editorTarget, 'contenteditable must be collected as a textbox target')
-  assert.strictEqual(editorTarget!.name, '输入文字，内容将自动保存')
-})
+  const runtime = createProbeRuntime([editor])
 
-test('target probe reports a missing stale node without inventing a click point', () => {
-  const stashButton = new FakeElement('button', { text: '暂存离开' })
-  const result = runTargetProbe('99', {
-    semantic: [stashButton],
-    pointer: [],
-    all: [stashButton],
-  })
-  assert.strictEqual(result.matchCount, 0)
-  assert.strictEqual(result.clickPoint, undefined)
-})
-
-test('target probe reports hostShadow accessibility for custom hosts', () => {
-  const stashButton = new FakeElement('button', { text: '暂存离开' })
-  const publishHost = new FakeElement('xhs-publish-btn', { text: '发布' })
-  const result = runTargetProbe('2', {
-    semantic: [stashButton],
-    pointer: [],
-    all: [stashButton, publishHost],
-  }) as unknown as { clickPoint: { hostShadow: string | null } }
-  // FakeElement.shadowRoot === null → closed_or_none（closed shadow 与无 shadow 同判）
-  assert.strictEqual(result.clickPoint.hostShadow, 'closed_or_none')
-
-  const plain = runTargetProbe('1', {
-    semantic: [stashButton],
-    pointer: [],
-    all: [stashButton],
-  }) as unknown as { clickPoint: { hostShadow: string | null } }
-  assert.strictEqual(plain.clickPoint.hostShadow, null)
+  assert.equal(runtime.targets[0]?.role, 'textbox')
+  assert.equal(runtime.targets[0]?.name, '输入文字，内容将自动保存')
 })

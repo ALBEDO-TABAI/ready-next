@@ -10,6 +10,7 @@ const {
   check,
   SOURCE_REL,
   EXPECTED_CODES,
+  FORBIDDEN_CODES,
 } = require('../check-llm-retry-status-codes.cjs')
 
 function makeFixture(content) {
@@ -21,10 +22,10 @@ function makeFixture(content) {
 }
 
 function goodSource() {
-  return `export const RETRY_STATUS_CODES = [408, 409, 425, 429, 500, 502, 503, 504] as const\n`
+  return `export const PROVIDER_EXPLICIT_RETRY_STATUS_CODES = [408, 425, 429] as const\n`
 }
 
-test('passes when all 8 codes are present', () => {
+test('passes when all explicit codes are present', () => {
   const root = makeFixture(goodSource())
   try {
     const r = check({ root })
@@ -36,12 +37,12 @@ test('passes when all 8 codes are present', () => {
 
 test('fails when a code is missing', () => {
   const root = makeFixture(
-    `export const RETRY_STATUS_CODES = [408, 409, 425, 429, 500, 502, 503] as const\n`,
+    `export const PROVIDER_EXPLICIT_RETRY_STATUS_CODES = [408, 425] as const\n`,
   )
   try {
     const r = check({ root })
     assert.equal(r.ok, false)
-    assert.ok(r.errors.some((e) => /504/.test(e)))
+    assert.ok(r.errors.some((e) => /429/.test(e)))
   } finally {
     rmSync(root, { recursive: true, force: true })
   }
@@ -52,7 +53,7 @@ test('fails when declaration is missing', () => {
   try {
     const r = check({ root })
     assert.equal(r.ok, false)
-    assert.ok(r.errors.some((e) => /RETRY_STATUS_CODES/.test(e)))
+    assert.ok(r.errors.some((e) => /PROVIDER_EXPLICIT_RETRY_STATUS_CODES/.test(e)))
   } finally {
     rmSync(root, { recursive: true, force: true })
   }
@@ -69,6 +70,20 @@ test('fails when source file is missing', () => {
   }
 })
 
-test('EXPECTED_CODES is the canonical 8-element tuple', () => {
-  assert.deepEqual([...EXPECTED_CODES].sort((a, b) => a - b), [408, 409, 425, 429, 500, 502, 503, 504])
+test('fails when conflict status 409 is present', () => {
+  const root = makeFixture(
+    `export const PROVIDER_EXPLICIT_RETRY_STATUS_CODES = [408, 409, 425, 429] as const\n`,
+  )
+  try {
+    const r = check({ root })
+    assert.equal(r.ok, false)
+    assert.ok(r.errors.some((e) => /409/.test(e)))
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('status tuples match the retry contract', () => {
+  assert.deepEqual([...EXPECTED_CODES].sort((a, b) => a - b), [408, 425, 429])
+  assert.deepEqual(FORBIDDEN_CODES, [409])
 })

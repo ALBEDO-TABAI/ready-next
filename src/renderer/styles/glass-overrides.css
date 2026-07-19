@@ -268,14 +268,14 @@ html[data-skin='liquid-glass']:is([data-glass-variant='solid-green'], [data-glas
 
 html[data-skin='liquid-glass']:is([data-glass-variant='solid-green'], [data-glass-variant='solid-blue']) [data-ready-task-card='true'] {
   color: var(--ready-card-ink) !important;
-  border-color: var(--ready-card-hover-border) !important;
-  background: var(--ready-liquid-card-base-bg, var(--ready-task-card-bg)) !important;
+  border-color: transparent !important;
+  background: transparent !important;
 }
 
 html[data-skin='liquid-glass']:is([data-glass-variant='solid-green'], [data-glass-variant='solid-blue']) [data-ready-tool-trace-card='true'] {
   color: var(--ready-card-ink) !important;
-  border-color: var(--ready-card-hover-border) !important;
-  background: var(--ready-tool-card-bg) !important;
+  border-color: transparent !important;
+  background: transparent !important;
 }
 
 html[data-skin='liquid-glass']:is([data-glass-variant='solid-green'], [data-glass-variant='solid-blue']) [data-reference-skill-hint='true'] {
@@ -316,13 +316,17 @@ html[data-skin='liquid-glass']:is([data-glass-variant='solid-green'], [data-glas
   background: var(--ready-task-card-accent-bg);
 }
 
-html[data-skin='liquid-glass']:is([data-glass-variant='solid-green'], [data-glass-variant='solid-blue']) [data-ready-task-card='true']:hover,
-html[data-skin='liquid-glass']:is([data-glass-variant='solid-green'], [data-glass-variant='solid-blue']) [data-ready-tool-trace-card='true']:hover,
 html[data-skin='liquid-glass']:is([data-glass-variant='solid-green'], [data-glass-variant='solid-blue']) [data-reference-skill-hint='true']:hover,
 html[data-skin='liquid-glass']:is([data-glass-variant='solid-green'], [data-glass-variant='solid-blue']) [data-session-recall-attachments='true']:hover,
 html[data-skin='liquid-glass']:is([data-glass-variant='solid-green'], [data-glass-variant='solid-blue']) [data-chat-message-attachment='true']:hover {
   border-color: var(--ready-card-hover-border) !important;
   background: var(--ready-card-hover-bg) !important;
+}
+
+html[data-skin='liquid-glass']:is([data-glass-variant='solid-green'], [data-glass-variant='solid-blue']) [data-ready-task-card='true']:hover,
+html[data-skin='liquid-glass']:is([data-glass-variant='solid-green'], [data-glass-variant='solid-blue']) [data-ready-tool-trace-card='true']:hover {
+  border-color: transparent !important;
+  background: transparent !important;
 }
 
 html[data-skin='liquid-glass']:is([data-glass-variant='solid-green'], [data-glass-variant='solid-blue']) [data-reference-skill-hint='true']:hover {

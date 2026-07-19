@@ -46,14 +46,8 @@ import {
   type ToolInteractionHint,
 } from '../agent-control/tools-runtime/tool-result-types'
 import { executeBrowserTool } from './browser-tools'
-import { getBrowserActionSession } from '../browser-engine/browser-action-session'
-import { isAgentBrowserError } from '../browser-engine/agent-browser-errors'
-import type { BrowserLeaseGate } from '../browser-engine/agent-browser-lease-gate'
 import type { BrowserTurnLease } from '../browser-engine/agent-browser-turn-lease'
-import {
-  isBrowserBackgroundHandoffTool,
-  resolveBrowserToolSurfaceBinding,
-} from '../browser-engine/browser-surface-binding'
+import { resolveBrowserToolSurfaceBinding } from '../browser-engine/browser-surface-binding'
 import { executeCalendarTool } from './calendar-tools'
 import { executeDocumentTool } from './document-tools'
 import { executeGeneralResearchTool } from './general-research-tools'
@@ -97,16 +91,12 @@ import {
   errorMessageOf,
   isTerminalInfrastructureError,
 } from './tool-errors'
-import { resolveBrowserWorkflowIntent } from '../../../shared/browser-workflow-intent'
+import type { BrowserTaskEnvelope } from '../../../shared/browser-task-envelope'
 import {
-  BROWSER_PUBLIC_TOOL_NAMES,
-  browserToolSurfaceEntry,
-} from '../../../shared/browser-tool-surface'
-import {
-  browserSensitiveOperationsForInstruction,
-  type BrowserTaskEnvelope,
-} from '../../../shared/browser-task-envelope'
-import { parseEnvelopeResourceReferences, primaryInstructionText } from '../agent-control/runtime-core/agent-sdk-input-context-utils'
+  isBrowserPublicToolName,
+  resolveBrowserCapability,
+} from '../../../shared/browser-capability-registry'
+import { browserInvocationArgsDigest } from './browser-task-envelope-binding'
 import { deriveEnvelopeForToolOutput } from './tool-result-envelope'
 import { validateToolInput } from './tool-input-validator'
 import {
@@ -153,6 +143,24 @@ export interface ToolContext {
    * The browser dispatch acquires/gates writes through it; run cleanup releases.
    */
   browserLease?: BrowserTurnLease | null
+  ensureBrowserWorkflowRoute?: () => Promise<{
+    browserTaskId: string
+    requestAnchorSnapshotDigest: string
+  }>
+  browserWorkflowRoute?: {
+    browserTaskId: string
+    requestAnchorSnapshotDigest: string
+  } | null
+  confirmedBrowserPowerRequest?: import('../../../shared/browser-workflow-control').BrowserPowerConfirmationSuspensionRequest | null
+  confirmedBrowserPermissionRequest?: import('../../../shared/browser-workflow-control').BrowserPermissionSuspensionRequest | null
+  browserObservationBarrier?: {
+    actionId: string
+    actionSeq: number
+    operationId: string
+    outcome: Record<string, unknown>
+    clearedByObservationSeq: number | null
+  } | null
+  browserObservationClosureActive?: boolean
   /**
    * Phase 3 (skill-child-loop) — same-turn live active-frame slot. Forwarded
    * by `toToolExecutorContext` so domain dispatchers (notably
@@ -202,66 +210,33 @@ function buildBrowserTaskEnvelope(
   toolName: string,
   args: Record<string, unknown>,
   context: ToolContext,
-  allowedToolNames: Set<string> | null,
 ): BrowserTaskEnvelope | null {
   const scopeId = context.scopeId || context.scope?.id || context.sessionId || ''
   const runId = context.runId || ''
-  const taskId = context.taskId || runId
-  if (!scopeId || !runId || !taskId || !context.browserController) return null
-  const primaryInstruction =
-    parseEnvelopeResourceReferences(context.requestEnvelope).primaryInstruction
-    || primaryInstructionText(context.currentUserText || '')
+  const parentTaskId = context.parentTaskId || context.taskId || runId
+  if (!scopeId || !runId || !parentTaskId || !context.browserController || !isBrowserPublicToolName(toolName)) return null
+  const capability = resolveBrowserCapability(toolName, args)
+  if (!capability) return null
   const tabId = typeof args.tab_id === 'string' && args.tab_id.trim()
     ? args.tab_id.trim()
     : context.browserController.getActiveTab?.()?.id || null
   const tab = tabId
     ? context.browserController.getTabList?.().find((item) => item.id === tabId) || null
     : context.browserController.getActiveTab?.() || null
-  const names = Array.from(allowedToolNames || new Set([toolName]))
-    .filter((name) => BROWSER_PUBLIC_TOOL_NAMES.includes(name as never))
-  if (!names.includes(toolName)) names.push(toolName)
-  const effects = Array.from(new Set(names.flatMap((name) => browserToolSurfaceEntry(name)?.effects || [])))
-  const destination = typeof args.path === 'string'
-    ? args.path
-    : typeof args.directory === 'string'
-      ? args.directory
-      : null
   return {
-    version: 1,
+    version: 3,
     scopeId,
     runId,
-    taskId,
+    parentTaskId,
+    browserTaskId: context.browserWorkflowRoute?.browserTaskId || null,
     agentId: context.agent || context.scope?.agent || null,
-    primaryInstruction,
-    allowedToolNames: names,
-    allowedEffects: effects,
-    allowedSensitiveOperations: browserSensitiveOperationsForInstruction(primaryInstruction),
+    toolName,
+    operationId: capability.operationId,
+    argsDigest: browserInvocationArgsDigest(toolName, capability.operationId, args),
     tabId,
     origin: browserOriginOf(tab?.url || null),
-    destination,
-    workspaceRoots: requestEnvelopeWorkspaceRoots(context.requestEnvelope),
     createdAt: Date.now(),
   }
-}
-
-const BROWSER_SESSION_TARGET_INHERIT_TOOLS = new Set<string>(BROWSER_PUBLIC_TOOL_NAMES)
-
-function inheritBrowserActionSessionTarget(
-  toolName: string,
-  args: Record<string, unknown>,
-  context: ToolContext,
-): Record<string, unknown> {
-  if (!BROWSER_SESSION_TARGET_INHERIT_TOOLS.has(toolName)) return args
-  if (typeof args.tab_id === 'string' && args.tab_id.trim()) return args
-  if (!context.browserLease) return args
-  if (resolveBrowserWorkflowIntent(context.currentUserText || '').kind !== 'transaction') return args
-  const session = getBrowserActionSession(context.sessionId || context.scopeId || context.scope?.id)
-  const targetTabId = typeof session?.targetTabId === 'string' && session.targetTabId.trim()
-    ? session.targetTabId.trim()
-    : ''
-  if (!targetTabId) return args
-  const tabExists = context.browserController?.getTabList?.().some((tab) => tab.id === targetTabId)
-  return tabExists ? { ...args, tab_id: targetTabId } : args
 }
 
 function isFrameScopedInternalSkillActionAllowed(
@@ -473,7 +448,6 @@ async function executeToolCallInner(
   }
 
   if (definition.domain === 'browser') {
-    args = inheritBrowserActionSessionTarget(toolName, args, context)
   }
 
   // EP1-I3-1/I3-2 — action-confirmation gate (05 §3.1/§3.2). Sits AFTER
@@ -621,8 +595,48 @@ async function executeToolCallInner(
           if (!context.browserController) {
             return 'Browser controller is not available'
           }
-          // WP2 — gate free-tool-loop browser writes through the turn lease.
-          let browserLeaseGate: BrowserLeaseGate | undefined
+          const browserCapability = resolveBrowserCapability(toolName, args)
+          if (!browserCapability) {
+            return browserFailureOutput({
+              ok: false,
+              errorKind: TOOL_ADMISSION_ERROR_KINDS.toolNotRegistered.code,
+              toolName,
+            })
+          }
+          if (browserCapability.requiresWorkflowRoute && !context.browserWorkflowRoute) {
+            if (!context.ensureBrowserWorkflowRoute) {
+              return browserFailureOutput({
+                ok: false,
+                errorKind: 'browser_workflow_route_required',
+                toolName,
+                operationId: browserCapability.operationId,
+              })
+            }
+            context.browserWorkflowRoute = await context.ensureBrowserWorkflowRoute()
+          }
+          const unresolvedObservationBarrier = context.browserObservationBarrier
+            && context.browserObservationBarrier.clearedByObservationSeq === null
+              ? context.browserObservationBarrier
+              : null
+          if (
+            (context.browserObservationClosureActive === true || unresolvedObservationBarrier)
+            && browserCapability.mode !== 'observe'
+          ) {
+            return browserFailureOutput({
+              ok: false,
+              errorKind: 'browser_observation_required',
+              operationId: browserCapability.operationId,
+              ...(unresolvedObservationBarrier
+                ? {
+                    pendingActionId: unresolvedObservationBarrier.actionId,
+                    pendingActionSeq: unresolvedObservationBarrier.actionSeq,
+                  }
+                : {}),
+              replayAllowed: false,
+            })
+          }
+          // WP2 — the public browser dispatcher resolves the physical target
+          // before choosing user-view vs grounded agent-view on this turn lease.
           const turnLease = context.browserLease
           const surfaceBinding = resolveBrowserToolSurfaceBinding({
             toolName,
@@ -633,82 +647,28 @@ async function executeToolCallInner(
           if (!surfaceBinding.ok) {
             return browserFailureOutput(surfaceBinding.error as unknown as Record<string, unknown>)
           }
-          if (turnLease && surfaceBinding.binding.effect === 'write') {
-            if (isBrowserBackgroundHandoffTool(toolName, args)) {
-              // Hand the surface to a background browser task (single writer):
-              // release the turn lease so the task can acquire or use its own lane.
-              turnLease.releaseForBackgroundHandoff()
-            } else {
-              const ensured = turnLease.ensureGate()
-              if (isAgentBrowserError(ensured)) {
-                return browserFailureOutput(ensured as unknown as Record<string, unknown>)
-              }
-              browserLeaseGate = ensured
-              // D16 — agent 以写租约驱动该 tab 期间，武装原生文件选择器
-              // 拦截（幂等、best-effort，失败不阻塞工具调用）；租约离开
-              // held 时引擎侧统一解除。
-              try {
-                const armGuard = (context.browserController as {
-                  armAgentFileChooserGuard?: (tabId: string | null) => Promise<void>
-                }).armAgentFileChooserGuard
-                if (typeof armGuard === 'function') {
-                  void armGuard.call(context.browserController, typeof args.tab_id === 'string' ? args.tab_id : null)
-                    .catch(() => { /* best-effort：attach 冲突等直接降级 */ })
-                }
-              } catch {
-                // silent-catch: 文件选择器护栏武装失败不得影响工具执行。
-              }
-            }
-          }
           const browserResult = await executeBrowserTool(
             toolName,
             args,
             context.browserController,
             context.abortSignal,
             context.sessionId,
-            browserLeaseGate,
-            context.currentUserText,
+            undefined,
+            undefined,
             context.runtime,
             {
               ownerAgentId: context.agent ?? null,
               ownerRunId: context.runId ?? null,
+              browserTaskId: context.browserWorkflowRoute?.browserTaskId ?? null,
               parentTaskId: context.taskId ?? context.runId ?? null,
               executionBinding: context.executionBinding ?? null,
               workspaceRoots: requestEnvelopeWorkspaceRoots(context.requestEnvelope),
-              taskEnvelope: buildBrowserTaskEnvelope(toolName, args, context, allowedToolNames),
-              requestPowerConfirmation: invoker === 'model'
-                ? async (details) => {
-                    try {
-                      const questionId = `browser_power_${details.inputHash.slice(0, 12)}`
-                      const output = await executeAskUserQuestions({
-                        questions: [{
-                          id: questionId,
-                          kind: 'single_choice',
-                          question: [
-                            `确认执行 ${details.toolName}：${details.purpose}。`,
-                            `目标：${details.origin || '当前页面'}。`,
-                            `效果：${details.effects.join(', ')}。`,
-                            '本次确认仅对当前任务、当前标签、当前页面和这一组参数生效一次。',
-                          ].join(' '),
-                          options: ['确认执行', '取消'],
-                        }],
-                      }, {
-                        sessionId: context.sessionId,
-                        conversationId: context.scope?.id || context.scopeId || context.sessionId,
-                        signal: context.abortSignal,
-                        emitAskUserQuestionsCard: getAskUserQuestionsCardEmitter(),
-                        persistCardPending: getAskUserQuestionsCardPersistor(),
-                        timeoutMs: 10 * 60_000,
-                      })
-                      const answers = (output.data?.answers || []) as Array<{ id?: unknown; answer?: unknown }>
-                      return answers.some((answer) => answer.id === questionId && answer.answer === '确认执行')
-                    } catch {
-                      // silent-catch: missing/aborted confirmation must fail closed without executing Power.
-                      return false
-                    }
-                  }
-                : undefined,
+              taskEnvelope: buildBrowserTaskEnvelope(toolName, args, context),
+              confirmedBrowserPowerRequest: context.confirmedBrowserPowerRequest || null,
+              confirmedBrowserPermissionRequest: context.confirmedBrowserPermissionRequest || null,
+              registerRunCleanup: context.registerRunCleanup,
               inputSource: invoker === 'model' ? 'model' : 'trusted_internal',
+              browserTurnLease: turnLease,
             },
           )
           if (typeof browserResult === 'string' && browserResult.startsWith('Error:')) {

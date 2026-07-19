@@ -1,4 +1,4 @@
-export function resolveBeginRunRejection(reason: 'superseded' | 'orphan_limit'): {
+export function resolveBeginRunRejection(reason: 'superseded' | 'orphan_limit' | 'active_owner_exists'): {
   status: 'cancelled' | 'error'
   terminalReason: 'cancelled_runtime' | 'blocked_external'
   cancelled: boolean

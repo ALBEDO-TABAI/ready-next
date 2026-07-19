@@ -11,8 +11,8 @@ import {
   siteCardLearningSignalFromToolFailure,
   siteCardLearningSignalsFromCheckIn,
 } from '../main/modules/agent-control/knowledge/site-card-learning'
-import { visibleCollectFailureLearningSignal } from '../main/modules/browser-engine/content-task-runner'
 import { finalizeRunOutcome } from '../main/modules/agent-control/runtime-core/run-finalizer'
+import { collectArtifactProof, collectToolResultProof } from '../main/modules/agent-control/quality/proof-collector'
 
 test('site-card-learning declares transitive sqlite ABI guard', (t) => {
   skipIfSqliteUnavailable(t, 'site-card-learning transitive sqlite load')
@@ -38,27 +38,6 @@ function siteFm(over: Partial<BeliefCardFrontmatter> = {}): BeliefCardFrontmatte
     ...over,
   }
 }
-
-test('visible collect empty diagnostics map to site-card learning signals conservatively', () => {
-  assert.deepEqual(visibleCollectFailureLearningSignal('https://Example.com/u/1', {
-    reason: 'login_wall',
-    evidence: ['login_modal_visible'],
-  }), {
-    domain: 'example.com',
-    failureKind: 'login_wall',
-    detail: 'login_modal_visible',
-  })
-  assert.deepEqual(visibleCollectFailureLearningSignal('https://example.com/list', {
-    reason: 'selector_mismatch',
-    evidence: ['item_selector:.card'],
-  }), {
-    domain: 'example.com',
-    failureKind: 'selector_missing',
-    detail: 'item_selector:.card',
-  })
-  assert.equal(visibleCollectFailureLearningSignal('https://example.com/list', { reason: 'empty_list', evidence: [] }), null)
-  assert.equal(visibleCollectFailureLearningSignal('https://example.com/list', { reason: 'still_loading', evidence: [] }), null)
-})
 
 test('CheckIn blockers map to site-card learning signals only when a domain and closed failure kind are present', () => {
   assert.deepEqual(siteCardLearningSignalsFromCheckIn({
@@ -99,19 +78,22 @@ test('CheckIn blockers map to site-card learning signals only when a domain and 
   }])
 })
 
-test('finalizer forwards CheckIn blockers to the site-card learning hook without changing closeout', async () => {
+test('finalizer forwards only a durable accepted CheckIn to the learning hook without changing closeout', async () => {
   const projection = {
     taskId: 'task-site-learning',
     scopeId: 'scope-site-learning',
     runId: 'run-site-learning',
-    taskType: 'multi_step_task',
-    module: 'browser',
+    taskType: 'short_task',
+    module: 'system',
     status: 'running',
     interactionState: 'running',
     steps: [],
     continuationRef: { targetUrl: 'https://example.com/feed' },
     checkins: [],
-    proofRefs: [],
+    proofRefs: [
+      collectToolResultProof('browser_read', 'site evidence inspected', NOW),
+      collectArtifactProof('/tmp/site-learning-report.md', NOW),
+    ],
     createdAt: '2026-06-13T00:00:00.000Z',
     updatedAt: '2026-06-13T00:00:00.000Z',
   }
@@ -138,11 +120,12 @@ test('finalizer forwards CheckIn blockers to the site-card learning hook without
 
   assert.equal(learned.length, 1)
   const input = learned[0] as {
-    checkIn: { blockers: string[] }
+    checkIn: { blockers: string[]; learningDecision?: { learned: boolean } }
     projection: { continuationRef?: { targetUrl?: string | null } | null }
   }
   assert.equal(input.projection.continuationRef?.targetUrl, 'https://example.com/feed')
-  assert.ok(input.checkIn.blockers.length > 0)
+  assert.deepEqual(input.checkIn.blockers, [])
+  assert.equal(input.checkIn.learningDecision?.learned, true)
   assert.equal(metrics.length, 1, 'learning hook must not suppress close metric')
 })
 

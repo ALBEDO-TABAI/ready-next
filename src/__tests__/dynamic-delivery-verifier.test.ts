@@ -47,6 +47,7 @@ test('fresh verifier receives the sealed post-readback criteria bundle with no t
   assert.equal(result.verdict.verdict, 'accept')
   assert.deepEqual(captured!.tools, [])
   assert.equal(captured!.maxTurns, 1)
+  assert.equal(captured!.maxOutputTokens, 512)
   assert.match(String(captured!.input), /document_readback/)
   assert.match(String(captured!.input), /include risks/)
 })

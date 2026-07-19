@@ -23,6 +23,7 @@ function createRuntimeToolNames(params: {
   message: string
   requestEnvelope?: unknown
   localSendImIntent?: boolean
+  skillSurfaceComposition?: 'additive' | 'exclusive'
 }): string[] {
   const runtime = new AgentSdkRuntime({
     loadAIConfig: () => ({ ok: true, config: fakeConfig, reason: 'present' }),
@@ -63,6 +64,7 @@ function createRuntimeToolNames(params: {
     browserHostAvailable: true,
     feishuConnected: false,
     authorization,
+    skillSurfaceComposition: params.skillSurfaceComposition,
     localSendImIntent: params.localSendImIntent,
     requestEnvelope: params.requestEnvelope,
   }).map((definition) => definition.name)
@@ -204,27 +206,6 @@ test('local send-im file intent accepts referenced files or recent media with di
 })
 
 test('local send-im attached media turns bypass model vision input and browser collection exposure', () => {
-  // eslint-disable-next-line ready/no-source-grep-test -- private SDK runtime guard: this pins the regression where image-send turns were blocked as vision input or exposed collection tools.
-  const source = readFileSync(new URL('../main/modules/agent-control/runtime-core/agent-sdk-runtime.ts', import.meta.url), 'utf8')
-  // The send-im intent/strip helpers were extracted to agent-sdk-utils.ts (V3 Phase 1 split)
-  // and then relocated to agent-sdk-foundation-utils.ts (O2 file split); their wiring stays in the runtime class.
-  const foundationUtilsSource = readFileSync(new URL('../main/modules/agent-control/runtime-core/agent-sdk-foundation-utils.ts', import.meta.url), 'utf8')
-  // Per-session intent TTL state was extracted to AgentSdkIntentTracker (V3 Phase 2 split).
-  const intentTrackerSource = readFileSync(new URL('../main/modules/agent-control/runtime-core/agent-sdk-intent-tracker.ts', import.meta.url), 'utf8')
-  // Default tool-surface selection (incl. the send-im collection-intent suppression)
-  // was extracted to AgentSdkToolExecutor (V3 Phase 5-A).
-  const toolExecutorSource = readFileSync(new URL('../main/modules/agent-control/runtime-core/agent-sdk-tool-executor.ts', import.meta.url), 'utf8')
-  const turnPreparationSource = readFileSync(new URL('../main/modules/agent-control/runtime-core/agent-sdk-turn-preparation.ts', import.meta.url), 'utf8')
-
-  assert.match(foundationUtilsSource, /function hasLocalSendImIntentForTurn/)
-  assert.match(foundationUtilsSource, /function stripMediaBlocksForLocalSendIm/)
-  assert.match(source, /typedActionNames\.add\('skill_send_im_file'\)/)
-  assert.match(toolExecutorSource, /!localSendImIntent\s*&&\s*\(msgIntent \|\| effectiveBrowserWorkIntent\.kind === 'site_research' \|\| inheritedCollectionIntent\)/)
-  // On a local-send-im turn preparation clears the complete inherited browser-work intent.
-  assert.match(turnPreparationSource, /host\.intentTracker\.resetCollectionIntents\(sessionId\)/)
-  assert.match(intentTrackerSource, /this\.browserWorkIntents\.delete\(sessionId\)/)
-  assert.match(turnPreparationSource, /const providerContent = stripMediaBlocksForLocalSendIm/)
-
   const mediaMessage: RunMessage = [
     { type: 'text', text: '把这张图发到我微信' },
     { type: 'image', base64: 'ZmFrZS1pbWFnZQ==', mimeType: 'image/png' },
@@ -235,14 +216,26 @@ test('local send-im attached media turns bypass model vision input and browser c
   assert.match(JSON.stringify(modelInput), /不发送给模型解析/)
 })
 
-test('local send-im collection wording removes browser tools from the runtime tool surface', () => {
+test('an exclusive local send-im skill suppresses an otherwise active browser surface', () => {
   const collectionMessage = '把小红书这个博主的图片都采集下来'
-  const collectionToolNames = createRuntimeToolNames({ message: collectionMessage })
+  const browserEnvironment = {
+    workbenchMode: 'browser',
+    browserPageRef: {
+      tabId: 'tab-1',
+      physicalTargetToken: 'physical-tab-1',
+      mainFrameDocumentToken: 'document-tab-1',
+    },
+  }
+  const collectionToolNames = createRuntimeToolNames({
+    message: collectionMessage,
+    requestEnvelope: { primaryInstruction: collectionMessage, environmentHints: browserEnvironment },
+  })
   assert.ok(collectionToolNames.includes('browser_collect'))
 
   const sendImMessage = '把小红书这个博主的图片都采集下来，并把这四张图发到我微信'
   const requestEnvelope = {
     primaryInstruction: sendImMessage,
+    environmentHints: browserEnvironment,
     resources: [
       { name: '图1.png', path: '/tmp/ready-send-im-proof/图1.png', kind: 'image' },
     ],
@@ -250,6 +243,7 @@ test('local send-im collection wording removes browser tools from the runtime to
   const sendImToolNames = createRuntimeToolNames({
     message: sendImMessage,
     requestEnvelope,
+    skillSurfaceComposition: 'exclusive',
   })
 
   assert.ok(sendImToolNames.includes('skill_send_im_file'))

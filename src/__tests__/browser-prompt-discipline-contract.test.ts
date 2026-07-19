@@ -10,9 +10,9 @@ import { BROWSER_TOOLS } from '../main/modules/tools/browser-tool-catalog'
 // 纪律资产 = assets/prompts/browser/discipline.md（最终 Browser 工具面已确定后注入本轮 instructions）。
 test('browser tool catalog keeps snapshot-find-act discipline on the canonical surface', () => {
   const byName = new Map(BROWSER_TOOLS.map((tool) => [tool.name, tool.description]))
-  assert.match(byName.get('browser_snapshot') || '', /紧凑可访问结构与稳定目标引用/)
-  assert.match(byName.get('browser_find') || '', /页面快照.*查找目标/)
-  assert.match(byName.get('browser_click') || '', /目标引用.*动作后返回可核验结果/)
-  assert.match(byName.get('browser_type') || '', /快速填充或逐键输入/)
+  assert.match(byName.get('browser_snapshot') || '', /target_id/)
+  assert.match(byName.get('browser_find') || '', /缓存页面图.*查找目标/)
+  assert.match(byName.get('browser_click') || '', /引用.*选择器.*坐标/)
+  assert.match(byName.get('browser_type') || '', /精确输入目标/)
   assert.equal(byName.has('browser_visual_step' as never), false)
 })

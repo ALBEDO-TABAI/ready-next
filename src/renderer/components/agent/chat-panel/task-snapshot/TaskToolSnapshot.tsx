@@ -90,9 +90,6 @@ export interface TaskToolSnapshotProps {
   onContinueDetachedTask: (scopeId: string, taskId?: string | null) => void
   onCancelChildRun: (scopeId: string, childRunId: string) => void
   onContinueChildRun: (scopeId: string, childRunId: string) => void
-  onResumeBrowserTask: (scopeId: string, taskId: string) => void
-  onCancelBrowserTask: (scopeId: string, taskId: string) => void
-  onConfirmBrowserCollectionConsent: (scopeId: string, requestId: string) => void
 
   // --- Render-prop ---
   children: (values: TaskToolSnapshotRenderValues) => React.ReactNode
@@ -204,9 +201,6 @@ export function TaskToolSnapshot(props: TaskToolSnapshotProps): React.ReactEleme
     onContinueDetachedTask,
     onCancelChildRun,
     onContinueChildRun,
-    onResumeBrowserTask,
-    onCancelBrowserTask,
-    onConfirmBrowserCollectionConsent,
     children,
   } = props
   const [dismissedBottomTaskKeys, setDismissedBottomTaskKeys] = useState<Set<string>>(readDismissedBottomTaskKeys)
@@ -255,9 +249,6 @@ export function TaskToolSnapshot(props: TaskToolSnapshotProps): React.ReactEleme
           onContinueDetachedTask={onContinueDetachedTask}
           onCancelChildRun={onCancelChildRun}
           onContinueChildRun={onContinueChildRun}
-          onResumeBrowserTask={onResumeBrowserTask}
-          onCancelBrowserTask={onCancelBrowserTask}
-          onConfirmBrowserCollectionConsent={onConfirmBrowserCollectionConsent}
           dismissible={dismissible}
           onDismiss={dismissible ? () => {
             setDismissedBottomTaskKeys((current) => {
@@ -277,9 +268,6 @@ export function TaskToolSnapshot(props: TaskToolSnapshotProps): React.ReactEleme
       onCancelChildRun,
       onContinueDetachedTask,
       onContinueChildRun,
-      onConfirmBrowserCollectionConsent,
-      onCancelBrowserTask,
-      onResumeBrowserTask,
       onDismissMemoryCapture,
       onOpenTaskArtifact,
       onRetryTask,
@@ -568,12 +556,9 @@ export function TaskToolSnapshot(props: TaskToolSnapshotProps): React.ReactEleme
             {hiddenCount > 0 && (
               <div
                 style={{
-                  border: '1px solid var(--border-default)',
-                  borderRadius: 8,
                   padding: '6px 8px',
                   fontSize: 11.5,
                   color: 'var(--text-light)',
-                  background: 'color-mix(in srgb, var(--surface-panel-bg) 38%, transparent)',
                 }}
               >
                 还有 {hiddenCount} 个后台任务，可在任务面板查看

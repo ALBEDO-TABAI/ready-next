@@ -26,6 +26,8 @@ import {
 import { __setSkillActionToolDefsForTests } from '../main/modules/tools/skills-tools'
 import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
 import { enabledSdkToolNames } from './utils/sdk-tool-visibility'
+import { canonicalCoreCloseoutTestPort } from './helpers/canonical-core-closeout-test-port'
+import { __setSkillsRuntimeManagerForTests } from '../main/modules/skills-runtime/runtime-manager'
 
 const fakeConfig = {
   provider: 'openai',
@@ -33,6 +35,25 @@ const fakeConfig = {
   apiKey: 'test-key',
   model: 'gpt-test',
 } as const
+
+test.beforeEach(() => {
+  __setSkillsRuntimeManagerForTests({
+    listSkills: () => [{
+      id: 'video-expert-analyzer',
+      name: 'Video Expert Analyzer',
+      allowedTools: [
+        'skill_video_expert_pipeline',
+        'skill_video_expert_ai_analyze',
+        'skill_inspect_run_state',
+        'skill_cancel_detached',
+      ],
+    }],
+  } as never)
+})
+
+test.after(() => {
+  __setSkillsRuntimeManagerForTests(null)
+})
 
 test('agent sdk product acceptance declares transitive sqlite ABI guard', (t) => {
   skipIfSqliteUnavailable(t, 'agent-sdk-product-acceptance transitive sqlite load')
@@ -166,6 +187,7 @@ function createAcceptanceRun(params: {
   runtime.on('output', (event) => outputEvents.push(event))
   runtime.on('status', (event) => statusEvents.push(event))
   runtime.setRuntime({
+    ...canonicalCoreCloseoutTestPort(),
     isChannelTypeAvailable: (channelType: string) =>
       channelType === 'feishu-app' ? Boolean(params.feishuConnected) : false,
     getConversationScope: () => null,
@@ -215,7 +237,6 @@ test('acceptance 01: SDK direct answer stays on the existing stream and terminal
   const result = await run.send('只回答一句话')
 
   assert.equal(result.success, true)
-  assert.equal(result.taskType, 'direct_answer')
   assert.equal(result.finalText, '可以，已经记下。')
   assert.deepEqual(result.usedTools, [])
   assert.deepEqual(
@@ -259,7 +280,6 @@ test('acceptance 02: SDK research run uses search, fetch, present_file, sources,
   const result = await run.send('研究 Agents SDK 的最新实现依据')
 
   assert.equal(result.success, true)
-  assert.equal(result.taskType, 'research')
   assert.deepEqual(result.usedTools, ['web_search', 'web_fetch', 'present_file'])
   assert.match(run.seenInstructions[0] || '', /当前日期：\d{4}-\d{2}-\d{2}/)
   assert.deepEqual(result.projectionTruth?.projectionPatch?.sources, [
@@ -516,7 +536,6 @@ test('acceptance 08: SDK RSS chain fetches, selects, analyzes, and captures sess
     'rss_analyze_item',
     'rss_capture_session',
   ])
-  assert.equal(result.taskType, 'multi_step_task')
 })
 
 test('acceptance 09: SDK calendar chain lists, creates, updates, and captures session', async () => {

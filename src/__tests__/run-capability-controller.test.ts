@@ -68,7 +68,7 @@ test('prepareInitialRun centralizes initial capability resolution, allowlist, an
   assert.equal(prepared.runtimeSnapshot.groups.channel_feishu.reason, 'environment_unavailable')
 })
 
-test('reconcileAfterBrowserDecision re-resolves browser capabilities without rebuilding inputs in direct-chat', () => {
+test('reconcileAfterBrowserDecision exposes the complete browser surface without rebuilding inputs', () => {
   const requestEnvelope = buildRequestEnvelope({
     userText: '去网页上传这张图，然后发一句介绍',
   })
@@ -112,7 +112,7 @@ test('reconcileAfterBrowserDecision re-resolves browser capabilities without reb
   assert.ok(!reconciled.capabilityResolution.visibleCapabilityGroupIds.includes('browser_content_tasks'))
   assert.ok(reconciled.allowedToolNames.includes('browser_click'))
   assert.ok(reconciled.allowedToolNames.includes('browser_upload'))
-  assert.ok(!reconciled.allowedToolNames.includes('browser_eval'))
+  assert.ok(reconciled.allowedToolNames.includes('browser_eval'))
 })
 
 test('prepareInitialRun opens research tools for location-heavy comparison requests', () => {

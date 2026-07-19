@@ -4,17 +4,14 @@ import test from 'node:test'
 import {
   BROWSER_PUBLIC_TOOL_NAMES,
   BROWSER_TOOL_SURFACE_MANIFEST,
-  browserBaseIntentForInstruction,
-  browserOnDemandToolNames,
-  browserToolNamesForIntent,
+  browserToolSurfaceEntry,
 } from '../shared/browser-tool-surface'
-import {
-  BROWSER_BATCH_COLLECTION_WORKFLOW_TOOL_NAMES,
-  BROWSER_COLLECTION_SUBSET_TOOL_NAMES,
-  BROWSER_OBSERVATION_SUBSET_TOOL_NAMES,
-} from '../shared/browser-collection-intent'
 import { BROWSER_TOOLS } from '../main/modules/tools/browser-tool-catalog'
 import { classifyBrowserToolCall } from '../main/modules/browser-engine/browser-tool-write-classification'
+import {
+  browserCapabilityEntry,
+  browserOperationCapability,
+} from '../shared/browser-capability-registry'
 
 const EXPECTED_PUBLIC_NAMES = [
   'browser_tabs',
@@ -113,28 +110,29 @@ test('browser catalog has one canonical 32-tool semantic surface', () => {
   }
 })
 
-test('common turn surfaces are derived from manifest metadata and stay narrow', () => {
-  assert.deepEqual(BROWSER_OBSERVATION_SUBSET_TOOL_NAMES, browserToolNamesForIntent('observation'))
-  assert.deepEqual(BROWSER_COLLECTION_SUBSET_TOOL_NAMES, browserToolNamesForIntent('collection'))
-  assert.deepEqual(BROWSER_BATCH_COLLECTION_WORKFLOW_TOOL_NAMES, browserToolNamesForIntent('batch_collection'))
-  assert.ok(browserToolNamesForIntent('reading').length <= 10)
-  assert.ok(browserToolNamesForIntent('interaction').length <= 15)
-  assert.ok(browserToolNamesForIntent('advanced').length <= 8)
-  assert.deepEqual(browserOnDemandToolNames('在下拉选项选中新加坡'), ['browser_select'])
-  assert.deepEqual(browserOnDemandToolNames('悬停查看菜单后把卡片拖动排序'), ['browser_hover', 'browser_drag'])
-  assert.deepEqual(browserOnDemandToolNames('处理网页弹窗'), ['browser_dialog'])
-  assert.equal(browserBaseIntentForInstruction('打开网页读一下内容'), 'reading')
-  assert.equal(browserBaseIntentForInstruction('点击登录并填写表单'), 'interaction')
+test('browser activation exposes the complete typed surface without text routing', () => {
+  assert.deepEqual(BROWSER_TOOLS.map((tool) => tool.name), BROWSER_PUBLIC_TOOL_NAMES)
+  for (const name of BROWSER_PUBLIC_TOOL_NAMES) {
+    const entry = browserToolSurfaceEntry(name)
+    assert.ok(entry, `${name} must have surface metadata`)
+    assert.equal(entry?.name, name)
+    assert.ok(BROWSER_TOOLS.find((tool) => tool.name === name)?.params.length !== undefined)
+  }
 })
 
 test('every public browser tool has an explicit lease classification', () => {
   for (const tool of BROWSER_TOOL_SURFACE_MANIFEST) {
-    assert.equal(classifyBrowserToolCall(tool.name, {}), tool.defaultAccess)
+    const operations = browserCapabilityEntry(tool.name)?.operations || []
+    const readOnly = operations.every((operationId) => browserOperationCapability(operationId).mode === 'observe')
+    assert.equal(tool.defaultAccess, readOnly ? 'read' : 'write', tool.name)
   }
   assert.equal(classifyBrowserToolCall('browser_tabs', { action: 'list' }), 'read')
   assert.equal(classifyBrowserToolCall('browser_tabs', { action: 'open' }), 'write')
   assert.equal(classifyBrowserToolCall('browser_task', { action: 'get' }), 'read')
-  assert.equal(classifyBrowserToolCall('browser_task', { action: 'resume' }), 'write')
+  assert.equal(classifyBrowserToolCall('browser_task', { action: 'result' }), 'read')
   assert.equal(classifyBrowserToolCall('browser_dialog', { action: 'get' }), 'read')
   assert.equal(classifyBrowserToolCall('browser_dialog', { action: 'accept' }), 'write')
+  assert.equal(classifyBrowserToolCall('browser_request_takeover', {}), 'control')
+  assert.equal(classifyBrowserToolCall('browser_research', { action: 'start' }), 'control')
+  assert.equal(classifyBrowserToolCall('browser_research', { action: 'complete' }), 'read')
 })

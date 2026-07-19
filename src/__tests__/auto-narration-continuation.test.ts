@@ -18,11 +18,7 @@ import {
   type AutoNarrationContinuationResult,
   type PendingTaskEventDatabase,
 } from '../main/modules/agent-control/system-reminders/background-task-terminal-reminder'
-import {
-  registerWaitingHumanBrowserTaskResumePort,
-  resumeWaitingHumanBrowserTaskFromBridge,
-  type TaskEventBridgePayload,
-} from '../main/modules/browser-engine/task-event-bridge'
+import type { TaskEventBridgePayload } from '../main/modules/browser-engine/task-event-bridge'
 import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
 
 test('auto-narration-continuation declares transitive sqlite ABI guard', (t) => {
@@ -271,38 +267,6 @@ describe('auto narration continuation', () => {
     assert.deepEqual(failures, [{ rowId: 1, error: 'model failed' }])
   })
 
-  test('resumes the original browser task when waiting_human confirmation reaches the bridge', async () => {
-    const resumedTaskIds: string[] = []
-    const unregister = registerWaitingHumanBrowserTaskResumePort({
-      getTask: async (taskId) => ({
-        taskId,
-        kind: 'note_collect',
-        status: 'waiting_human',
-        progress: { total: 2, completed: 0, failed: 0, currentLabel: null },
-      }),
-      resumeTask: async (taskId) => {
-        resumedTaskIds.push(taskId)
-        return {
-          taskId,
-          kind: 'note_collect',
-          status: 'running',
-          progress: { total: 2, completed: 0, failed: 0, currentLabel: null },
-        }
-      },
-    })
-
-    try {
-      const result = await resumeWaitingHumanBrowserTaskFromBridge({
-        taskId: 'browser-task-waiting-human-s2-4',
-        confirmed: true,
-      })
-
-      assert.equal(result.success, true)
-      assert.deepEqual(resumedTaskIds, ['browser-task-waiting-human-s2-4'])
-    } finally {
-      unregister()
-    }
-  })
 })
 
 test('durable dedupe suppresses duplicate terminal pending rows across restarts', () => {

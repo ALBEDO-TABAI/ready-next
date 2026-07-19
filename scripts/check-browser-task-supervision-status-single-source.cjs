@@ -7,7 +7,6 @@ const path = require('node:path')
 const ROOT = process.cwd()
 const SHARED_REL = 'src/shared/browser-task-status.ts'
 const IPC_REL = 'src/main/modules/browser-engine/ipc-supervision.ts'
-const RUNNER_REL = 'src/main/modules/browser-engine/content-task-runner.ts'
 const PERSISTENCE_REL = 'src/main/modules/browser-engine/task-persistence-service.ts'
 const BROWSER_MODE_REL = 'src/renderer/pages/modes/BrowserMode.tsx'
 const PANEL_REL = 'src/renderer/components/browser/AgentBrowserSupervisionPanel.tsx'
@@ -88,7 +87,7 @@ function check({ root = ROOT } = {}) {
   const errors = []
   const files = new Map()
 
-  for (const rel of [SHARED_REL, IPC_REL, RUNNER_REL, PERSISTENCE_REL, BROWSER_MODE_REL, PANEL_REL]) {
+  for (const rel of [SHARED_REL, IPC_REL, PERSISTENCE_REL, BROWSER_MODE_REL, PANEL_REL]) {
     try {
       files.set(rel, stripComments(read(root, rel)))
     } catch (error) {
@@ -113,7 +112,6 @@ function check({ root = ROOT } = {}) {
   for (const rel of [IPC_REL, BROWSER_MODE_REL, PANEL_REL]) {
     requireHelperUse(rel, files.get(rel) || '', errors)
   }
-  requireHelperUse(RUNNER_REL, files.get(RUNNER_REL) || '', errors, { rejectHandWritten: false })
   checkPendingStartupList(files.get(PERSISTENCE_REL) || '', errors)
 
   return { ok: errors.length === 0, errors }

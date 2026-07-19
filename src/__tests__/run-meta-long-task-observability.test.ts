@@ -6,6 +6,7 @@ import { createTaskBudgetRuntime } from '../main/modules/agent-control/task-proj
 import { RunMetaRepository } from '../main/modules/agent-control/task-projection/run-meta-repository'
 
 import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
+import { canonicalCoreCloseoutTestPort } from './helpers/canonical-core-closeout-test-port'
 
 test('run-meta-long-task-observability declares transitive sqlite ABI guard', (t) => {
   skipIfSqliteUnavailable(t, 'run-meta-long-task-observability transitive sqlite load')
@@ -108,6 +109,7 @@ async function runLongTaskWithRepository(
   const runtime = createRuntime({ runAgent })
   runtime.on('error', () => undefined)
   runtime.setRuntime({
+    ...canonicalCoreCloseoutTestPort(),
     getRunMetaRepository: () => repo,
   } as never)
   runtime.newSession('butler::scope-run-meta', 'system prompt')

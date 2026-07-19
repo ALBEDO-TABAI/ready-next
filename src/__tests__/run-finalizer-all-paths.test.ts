@@ -22,6 +22,7 @@ import { createToolExecutionOutput } from '../main/modules/agent-control/tools-r
 import type { ToolDefinition } from '../main/modules/agent-control/tools-runtime/tool-definition'
 
 import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
+import { canonicalCoreCloseoutTestPort } from './helpers/canonical-core-closeout-test-port'
 
 test('run-finalizer-all-paths declares transitive sqlite ABI guard', (t) => {
   skipIfSqliteUnavailable(t, 'run-finalizer-all-paths transitive sqlite load')
@@ -106,6 +107,37 @@ const fakeConfig = {
   model: 'gpt-test',
 } as const
 
+function canonicalCloseoutPort(repository: RunMetaRepository, store?: TaskProjectionStore) {
+  return canonicalCoreCloseoutTestPort((input) => {
+    const patch = {
+      status: input.status,
+      terminalReason: input.terminalReason,
+      initiator: input.initiator,
+      durationMs: input.durationMs,
+    }
+    if (repository.get(input.ownerRunId)) {
+      repository.update(input.ownerRunId, patch as never)
+    } else {
+      repository.create({
+        runId: input.ownerRunId,
+        taskId: input.parentTaskId,
+        scopeId: input.conversationId,
+        ...patch,
+      } as never)
+    }
+    if (store && input.terminalQualityPatch) {
+      store.update(input.parentTaskId, {
+        proofRefs: input.terminalQualityPatch.proofRefs,
+        checkins: input.terminalQualityPatch.checkins,
+        criteria: input.terminalQualityPatch.criteria,
+        ...(input.terminalQualityPatch.learningRefs
+          ? { learningRefs: input.terminalQualityPatch.learningRefs }
+          : {}),
+      } as never)
+    }
+  })
+}
+
 function createRuntime(deps: Partial<AgentSdkRuntimeDeps>): {
   runtime: AgentSdkRuntime
   repository: RunMetaRepository
@@ -119,6 +151,7 @@ function createRuntime(deps: Partial<AgentSdkRuntimeDeps>): {
     ...deps,
   })
   runtime.setRuntime({
+    ...canonicalCloseoutPort(repository),
     getRunMetaRepository: () => repository,
   } as never)
   const outputs: Array<{ runId: string; chunk: string; type: string }> = []
@@ -137,6 +170,7 @@ function attachFinalizeStore(
   store: TaskProjectionStore,
 ): void {
   runtime.setRuntime({
+    ...canonicalCloseoutPort(repository, store),
     getRunMetaRepository: () => repository,
     getTaskProjectionStore: () => store,
     getTaskProjectionStoreForFinalize: () => store,
@@ -364,7 +398,7 @@ describe('run finalizer all paths', () => {
     assert.ok((projection?.checkins?.length || 0) > 0)
   })
 
-  test('budget checkpoint early return records adjudication through finalizer', async () => {
+  test('budget checkpoint records a resumable terminal state without final adjudication', async () => {
     const { runtime, repository } = createRuntime({
       listToolDefinitions: () => [createResearchTool()],
       executeToolCall: async () => createToolExecutionOutput('search result', {
@@ -413,7 +447,7 @@ describe('run finalizer all paths', () => {
     assert.equal(row?.status, 'checkpoint')
     assert.equal(row?.terminalReason, 'checkpoint_budget')
     assert.equal(row?.initiator, 'checkpoint')
-    assert.ok((projection?.checkins?.length || 0) > 0)
+    assert.equal(projection?.checkins?.length || 0, 0)
   })
 
   test('max-turn saved document done branch records adjudication through finalizer', async () => {
@@ -577,7 +611,11 @@ describe('run finalizer all paths', () => {
       assert.equal(result.terminalReason, item.expectedReason)
       assert.equal(row?.status, item.expectedStatus)
       assert.equal(row?.terminalReason, item.expectedReason)
-      assert.ok((projection?.checkins?.length || 0) > 0)
+      if (item.expectedStatus === 'checkpoint') {
+        assert.equal(projection?.checkins?.length || 0, 0)
+      } else {
+        assert.ok((projection?.checkins?.length || 0) > 0)
+      }
     }
   })
 
@@ -614,35 +652,25 @@ describe('run finalizer all paths', () => {
     assert.equal(row?.status, 'cancelled')
     assert.equal(row?.terminalReason, 'cancelled_user')
     assert.equal(row?.initiator, 'user_stop')
-    assert.ok(outputs.some((event) => event.chunk.includes('已手动停止')))
+    assert.match(result.finalText, /已手动停止/)
+    assert.ok(outputs.some((event) => event.type === 'done'))
   })
 
-  test('preempt path records terminal run_meta without same-user takeover capsule', async () => {
+  test('active owner rejects a second direct ingress without cancelling the running turn', async () => {
     let firstSignalReadyResolve!: () => void
     const firstSignalReady = new Promise<void>((resolve) => {
       firstSignalReadyResolve = resolve
     })
-    const runAgentQueue: NonNullable<AgentSdkRuntimeDeps['runAgent']>[] = [
-      ({ signal }) => {
+    const { runtime, repository, outputs } = createRuntime({
+      runAgent: ({ signal }) => {
         firstSignalReadyResolve()
         return new Promise((_resolve, reject) => {
           signal.addEventListener('abort', () => {
-            const error = new Error('process_restarted')
+            const error = new Error('cancelled_user')
             error.name = 'AbortError'
             reject(error)
           }, { once: true })
         })
-      },
-      async ({ onTextDelta }) => {
-        onTextDelta('第二轮完成')
-        return { finalText: '第二轮完成' }
-      },
-    ]
-    const { runtime, repository, outputs } = createRuntime({
-      runAgent: (params) => {
-        const next = runAgentQueue.shift()
-        assert.ok(next)
-        return next(params)
       },
     })
     runtime.newSession('butler::scope-preempt', 'system prompt')
@@ -656,14 +684,18 @@ describe('run finalizer all paths', () => {
       publicSessionId: 'scope-preempt',
       taskId: 'task-preempt-new',
     })
+    assert.equal(second.success, false)
+    assert.equal(second.terminalReason, 'blocked_external')
+    assert.equal(repository.get('run-preempt-old'), null)
+
+    runtime.stopGeneration('butler::scope-preempt')
     const firstResult = await first
 
     const oldRow = repository.get('run-preempt-old')
     assert.equal(firstResult.cancelled, true)
-    assert.equal(firstResult.scopeRunAuthority?.reason, 'preempted_by_same_user')
+    assert.equal(firstResult.scopeRunAuthority, undefined)
     assert.equal(oldRow?.status, 'cancelled')
-    assert.equal(oldRow?.initiator, 'preempted')
-    assert.equal(second.success, true)
+    assert.equal(oldRow?.initiator, 'user_stop')
     assert.equal(outputs.some((event) => event.chunk.includes('已被新消息接管')), false)
   })
 

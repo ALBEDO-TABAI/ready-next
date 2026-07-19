@@ -27,7 +27,6 @@ function seedMinimum(root, overrides = {}) {
     'src/main/modules/browser-engine/agent-browser-errors.ts': "export type AgentBrowserSurface = 'user-view' | 'agent-view'\nexport type AgentBrowserErrorCode = 'browser_surface_undeclared' | 'browser_surface_binding_violation'\n",
     'src/main/modules/browser-engine/browser-surface-binding.ts': "export const x = 'user-view-assisted agent-view-background read-only-observe resolveBrowserToolSurfaceBinding'\n",
     'src/main/modules/tools/tool-executor.ts': "resolveBrowserToolSurfaceBinding({ dispatch: 'tool-executor' })\n",
-    'src/main/modules/tools/browser-agent-runner.ts': "resolveBrowserToolSurfaceBinding({ dispatch: 'browser-agent-runner' })\n",
     'src/main/modules/browser-engine/scoped-browser-facade.ts': "resolveBrowserToolSurfaceBinding({ dispatch: 'scoped-facade' })\n",
     ...overrides,
   }

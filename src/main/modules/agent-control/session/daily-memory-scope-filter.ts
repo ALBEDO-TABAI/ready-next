@@ -8,31 +8,17 @@
  * forensics: a reddit-research checkpoint injected into a collection chat).
  *
  * Contract:
- *  - entries whose `- scope:` line prefix-matches the current scope title
- *    keep their full block;
- *  - entries from other scopes keep factual metadata lines but DROP summary
- *    lines and any line carrying task-imperative phrasing;
- *  - the daily file format has no scope id, only a (truncated) title — when
- *    matching is uncertain we err toward stripping imperatives.
+ *  - entries whose `- scope-id:` exactly matches the current scope keep their
+ *    full block;
+ *  - entries from every other scope are omitted as a whole;
+ *  - legacy title-only entries are not guessed into a scope. Current messages,
+ *    task projection and auto-recall already provide bounded continuity.
  */
 
 const ENTRY_HEADER = /^## \d{4}-\d{2}-\d{2}T/
-const SCOPE_LINE = /^-\s*scope:\s*(.*)$/
-const SUMMARY_LINE = /^-\s*summary:/
-const IMPERATIVE_PATTERN = /(?:请继续|请接着|继续这项任务|接着处理|请立即|继续推进|resume this task|please continue)/i
+const SCOPE_ID_LINE = /^-\s*scope-id:\s*(.*)$/
 
-const SCOPE_MATCH_MIN_PREFIX = 6
-
-function scopeMatches(entryScope: string, currentScopeTitle: string): boolean {
-  const a = entryScope.trim()
-  const b = String(currentScopeTitle || '').trim()
-  if (!a || !b) return false
-  const len = Math.min(a.length, b.length)
-  if (len < SCOPE_MATCH_MIN_PREFIX) return a === b
-  return a.slice(0, len) === b.slice(0, len)
-}
-
-export function filterDailyMemoryForScope(content: string, currentScopeTitle: string): string {
+export function filterDailyMemoryForScope(content: string, currentScopeId: string): string {
   const raw = String(content || '')
   if (!raw.trim()) return raw
   const lines = raw.split('\n')
@@ -57,19 +43,11 @@ export function filterDailyMemoryForScope(content: string, currentScopeTitle: st
       out.push(...block.lines)
       continue
     }
-    const scopeLine = block.lines.find((line) => SCOPE_LINE.test(line))
-    const entryScope = scopeLine ? (SCOPE_LINE.exec(scopeLine)?.[1] ?? '') : ''
-    const isOwnScope = scopeMatches(entryScope, currentScopeTitle)
+    const scopeIdLine = block.lines.find((line) => SCOPE_ID_LINE.test(line))
+    const entryScopeId = scopeIdLine ? (SCOPE_ID_LINE.exec(scopeIdLine)?.[1] ?? '').trim() : ''
+    const isOwnScope = Boolean(entryScopeId && entryScopeId === String(currentScopeId || '').trim())
     if (isOwnScope) {
       out.push(block.header, ...block.lines)
-      continue
-    }
-    // foreign scope: factual metadata stays, summaries and imperatives go
-    out.push(block.header)
-    for (const line of block.lines) {
-      if (SUMMARY_LINE.test(line)) continue
-      if (IMPERATIVE_PATTERN.test(line)) continue
-      out.push(line)
     }
   }
   return out.join('\n')

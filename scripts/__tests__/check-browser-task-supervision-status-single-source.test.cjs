@@ -10,7 +10,6 @@ const { check } = require('../check-browser-task-supervision-status-single-sourc
 
 const SHARED_REL = 'src/shared/browser-task-status.ts'
 const IPC_REL = 'src/main/modules/browser-engine/ipc-supervision.ts'
-const RUNNER_REL = 'src/main/modules/browser-engine/content-task-runner.ts'
 const PERSISTENCE_REL = 'src/main/modules/browser-engine/task-persistence-service.ts'
 const BROWSER_MODE_REL = 'src/renderer/pages/modes/BrowserMode.tsx'
 const PANEL_REL = 'src/renderer/components/browser/AgentBrowserSupervisionPanel.tsx'
@@ -73,7 +72,6 @@ export class BrowserTaskPersistenceService {
 function writePassingHarness(root) {
   write(root, SHARED_REL, shared())
   write(root, IPC_REL, helperConsumer())
-  write(root, RUNNER_REL, helperConsumer())
   write(root, BROWSER_MODE_REL, helperConsumer())
   write(root, PANEL_REL, helperConsumer())
   write(root, PERSISTENCE_REL, persistence())

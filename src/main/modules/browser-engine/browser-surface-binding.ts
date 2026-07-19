@@ -7,16 +7,18 @@ import {
   classifyBrowserToolCall,
   type BrowserToolEffect,
 } from './browser-tool-write-classification'
+import { resolveBrowserCapability } from '../../../shared/browser-capability-registry'
 
 export type BrowserSurfaceIntent =
   | 'user-view-assisted'
   | 'agent-view-background'
   | 'agent-view-foreground'
   | 'read-only-observe'
+  | 'control-no-page-write'
+  | 'workflow-transport'
 
 export type BrowserSurfaceDispatch =
   | 'tool-executor'
-  | 'browser-agent-runner'
   | 'scoped-facade'
 
 export interface BrowserToolSurfaceBinding {
@@ -31,17 +33,6 @@ export interface BrowserToolSurfaceBinding {
 export type BrowserToolSurfaceBindingResult =
   | { ok: true; binding: BrowserToolSurfaceBinding }
   | { ok: false; error: AgentBrowserStructuredError }
-
-export function isBrowserBackgroundHandoffTool(
-  toolName: string,
-  args: Record<string, unknown> = {},
-): boolean {
-  if (toolName === 'browser_research') return true
-  if (toolName === 'browser_collect') {
-    return ['visible', 'notes', 'research', 'start'].includes(String(args.mode || 'visible'))
-  }
-  return toolName === 'browser_task' && String(args.action || 'get') === 'resume'
-}
 
 function binding(params: {
   toolName: string
@@ -69,18 +60,19 @@ export function resolveBrowserToolSurfaceBinding(params: {
   args?: Record<string, unknown>
   dispatch: BrowserSurfaceDispatch
   hasTurnLease?: boolean
-  hasRunnerLeaseGate?: boolean
-  boundSurface?: AgentBrowserSurface
   scopedSurface?: AgentBrowserSurface
   agentTabId?: string | null
 }): BrowserToolSurfaceBindingResult {
   const args = params.args ?? {}
   const effect = classifyBrowserToolCall(params.toolName, args)
-  if (effect === 'read') {
+  const capability = resolveBrowserCapability(params.toolName, args)
+  if (!capability?.requiresPageLease) {
     return binding({
       toolName: params.toolName,
       effect,
-      intent: 'read-only-observe',
+      intent: effect === 'write'
+        ? 'workflow-transport'
+        : effect === 'control' ? 'control-no-page-write' : 'read-only-observe',
       engineSurface: null,
     })
   }
@@ -106,41 +98,6 @@ export function resolveBrowserToolSurfaceBinding(params: {
     })
   }
 
-  if (params.dispatch === 'browser-agent-runner') {
-    const surface = params.boundSurface ?? 'user-view'
-    if (!params.hasRunnerLeaseGate) {
-      return {
-        ok: false,
-        error: agentBrowserError(
-          'browser_surface_undeclared',
-          'Deterministic browser workflow write reached dispatch without its lane lease gate.',
-          {
-            tool: params.toolName,
-            dispatch: params.dispatch,
-            intent: surface === 'agent-view' ? 'agent-view-foreground' : 'user-view-assisted',
-          },
-        ),
-      }
-    }
-    if (surface === 'agent-view' && !String(params.agentTabId || '').trim()) {
-      return {
-        ok: false,
-        error: agentBrowserError(
-          'browser_surface_binding_violation',
-          'Agent-lane browser workflow writes require a bound agent tab.',
-          { tool: params.toolName, dispatch: params.dispatch, intent: 'agent-view-foreground' },
-        ),
-      }
-    }
-    return binding({
-      toolName: params.toolName,
-      effect,
-      intent: surface === 'agent-view' ? 'agent-view-foreground' : 'user-view-assisted',
-      engineSurface: surface,
-      requiresTurnLease: true,
-    })
-  }
-
   if (!params.hasTurnLease) {
     return {
       ok: false,
@@ -152,17 +109,15 @@ export function resolveBrowserToolSurfaceBinding(params: {
     }
   }
 
-  const backgroundHandoff = isBrowserBackgroundHandoffTool(params.toolName, args)
   const intent: BrowserSurfaceIntent = params.toolName === 'browser_research'
-    || (params.toolName === 'browser_collect' && String(args.mode || 'visible') === 'notes')
-    ? 'agent-view-background'
+    ? 'agent-view-foreground'
     : 'user-view-assisted'
   return binding({
     toolName: params.toolName,
     effect,
     intent,
-    engineSurface: intent === 'agent-view-background' ? 'agent-view' : 'user-view',
-    backgroundHandoff,
+    engineSurface: intent === 'agent-view-foreground' ? 'agent-view' : 'user-view',
+    backgroundHandoff: false,
     requiresTurnLease: true,
   })
 }

@@ -8,14 +8,26 @@ author: Codex
 scope: 浏览器研究意图、模型工具面、长任务参数合同、站内多关键词研究、任务投影、完成判定与可诊断性
 related:
   - docs/superpowers/plans/2026-07-17-browser-tool-surface-and-hardening-implementation.md
+  - docs/superpowers/plans/2026-07-18-browser-agent-grounded-orchestration-and-capability-closure-implementation.md
   - docs/architecture/current-runtime-contracts.md §4、§5、§6
+follow_up:
+  - docs/superpowers/plans/2026-07-18-browser-agent-grounded-orchestration-and-capability-closure-implementation.md
 note: >
   本文件是 2026-07-17 小红书多关键词研究失败后的纠偏计划。2026-07-18 已结合 live 调用链完成
   开工前复审、实施、本地/打包门禁和已登录真站验收。它修订前一份已完成计划中“研究可完全内化进
-  browser_collect”与“31 项是固定目标”两项结论，其余已验证的浏览器硬化合同继续有效。
+  browser_collect”与“31 项是固定目标”两项结论。2026-07-18 后续用户复测又证伪了本文件
+  current-site URL adapter 与真站交互正确性结论；被证伪部分由 follow_up 计划覆盖。
 ---
 
 # 浏览器 Agent 站内研究与工具合同修复实施计划
+
+> **2026-07-18 复测纠偏：** 本文件保留为当时的实施记录。后续同一 18 关键词任务证明，现行 runner
+> 仍会合成小红书搜索 URL、直达裸详情 URL，并在任务取消后继续阻止 Agent 使用搜索框；真实浏览
+> 历史出现连续 `300031`。因此 §4.5 的 `inspect_site_search` URL adapter、Phase 3 的 current-site
+> adapter 方案、§10“已登录小红书真站”对交互路径正确性的 completed 结论，以及 §11 的整体关闭
+> 口径，均不再作为现行开发依据。新的证据、目标合同和施工 gate 见
+> `2026-07-18-browser-agent-grounded-orchestration-and-capability-closure-implementation.md`。本文件中意图、公开
+> 工具合同、task/projection 身份和必要输出地板等未被复测证伪的部分继续有效。
 
 ## 0. 本轮边界、假设与完成标准
 

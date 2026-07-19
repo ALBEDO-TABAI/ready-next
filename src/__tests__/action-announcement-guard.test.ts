@@ -15,6 +15,7 @@ import { canResumeShape } from '../main/modules/agent-control/contracts/resume-h
 import type { ToolDefinition } from '../main/modules/agent-control/tools-runtime/tool-definition'
 import { createToolExecutionOutput } from '../main/modules/agent-control/tools-runtime/tool-result-types'
 import { ScriptedAgentRunner } from './helpers/scripted-agent-runner'
+import { canonicalCoreCloseoutTestPort } from './helpers/canonical-core-closeout-test-port'
 
 import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
 
@@ -61,6 +62,7 @@ function createRuntime(deps: Partial<AgentSdkRuntimeDeps>): {
     ...deps
   })
   runtime.setRuntime({
+    ...canonicalCoreCloseoutTestPort(),
     getRunMetaRepository: () => repository
   } as never)
   const outputs: Array<{ chunk: string; type: string }> = []
@@ -417,7 +419,12 @@ describe('action announcement guard', () => {
     assert.equal(result.contextUsage?.usedInputTokens, 32)
     assert.match(result.finalText, /未能启动/)
     assert.match(result.finalText, /回复'继续'可恢复/)
-    assert.ok(outputs.some((event) => event.chunk.includes('已保存断点')))
+    assert.ok(outputs.some((event) => event.type === 'done'))
+    assert.equal(
+      outputs.some((event) => event.chunk.includes('让我先打开') || event.chunk.includes('接下来我马上')),
+      false,
+      'uncommitted model candidates must stay buffered',
+    )
 
     const continuation = result.projectionTruth?.projectionPatch?.taskContinuation as
       | {

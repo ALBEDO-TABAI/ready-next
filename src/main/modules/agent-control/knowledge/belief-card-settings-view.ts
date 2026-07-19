@@ -1,5 +1,3 @@
-import { isHighControlPlatformText } from '../../../../shared/browser-collection-intent'
-import type { BrowserSiteExperienceRiskLevel } from '../../../../shared/browser-site-experience'
 import type { BeliefCard, BeliefCardStore, BeliefCardStatus } from './belief-card-store'
 import { isPossibleRiskUpdateOfSource } from './reserved-card-source'
 
@@ -15,8 +13,8 @@ export interface BeliefCardSettingsItem {
   source: string | null
   stage: string | null
   site: string | null
-  siteRiskLevel: BrowserSiteExperienceRiskLevel | null
-  siteRiskAuthority: 'code' | null
+  siteRiskLevel: 'low' | 'medium' | 'high' | null
+  siteRiskAuthority: null
   isSiteCard: boolean
   isRiskSuggestion: boolean
   bodyPreview: string
@@ -44,15 +42,9 @@ function siteFromPath(relPath: string): string | null {
   return match?.[1] ?? null
 }
 
-function siteRiskLevel(site: string | null): BrowserSiteExperienceRiskLevel | null {
-  if (!site) return null
-  return isHighControlPlatformText(site) ? 'high' : 'low'
-}
-
 function toItem(input: { relPath: string; scopeId: string; card: BeliefCard | null }): BeliefCardSettingsItem {
   if (!input.card) {
     const site = siteFromPath(input.relPath)
-    const risk = siteRiskLevel(site)
     return {
       relPath: input.relPath,
       scopeId: input.scopeId,
@@ -65,8 +57,8 @@ function toItem(input: { relPath: string; scopeId: string; card: BeliefCard | nu
       source: null,
       stage: null,
       site,
-      siteRiskLevel: risk,
-      siteRiskAuthority: risk ? 'code' : null,
+      siteRiskLevel: null,
+      siteRiskAuthority: null,
       isSiteCard: Boolean(site),
       isRiskSuggestion: false,
       bodyPreview: '',
@@ -75,7 +67,6 @@ function toItem(input: { relPath: string; scopeId: string; card: BeliefCard | nu
 
   const fm = input.card.frontmatter
   const site = fm.site ?? siteFromPath(input.relPath)
-  const risk = siteRiskLevel(site)
   const source = fm.source ?? null
   return {
     relPath: input.relPath,
@@ -89,8 +80,8 @@ function toItem(input: { relPath: string; scopeId: string; card: BeliefCard | nu
     source,
     stage: fm.stage ?? null,
     site,
-    siteRiskLevel: risk,
-    siteRiskAuthority: risk ? 'code' : null,
+    siteRiskLevel: null,
+    siteRiskAuthority: null,
     isSiteCard: Boolean(site),
     isRiskSuggestion: isPossibleRiskUpdateOfSource(source),
     bodyPreview: input.card.body.slice(0, 500),

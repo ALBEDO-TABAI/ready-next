@@ -1,4 +1,4 @@
-export type BrowserOwnershipControlState = 'active' | 'pending_confirm' | 'frozen'
+export type BrowserOwnershipControlState = 'active' | 'frozen'
 export type BrowserOwnershipSurface = 'user-view' | 'agent-view'
 export type BrowserOwnershipLeaseState = 'idle' | 'held' | 'takeover' | 'expired'
 
@@ -21,7 +21,6 @@ export type BrowserOwnershipKind =
   | 'user-view'
   | 'agent-current'
   | 'agent-background'
-  | 'pending-confirm'
   | 'frozen'
   | 'takeover'
 
@@ -45,14 +44,6 @@ export function resolveBrowserOwnershipStatus(input: {
       kind: 'frozen',
       label: '已接管',
       detail: 'Agent 浏览器控制已冻结',
-      tone: 'warning',
-    }
-  }
-  if (input.controlState === 'pending_confirm') {
-    return {
-      kind: 'pending-confirm',
-      label: '等待确认',
-      detail: '确认后中断 Agent 浏览器控制',
       tone: 'warning',
     }
   }

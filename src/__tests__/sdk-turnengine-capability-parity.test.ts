@@ -34,6 +34,7 @@ import {
   resolveIntentCapabilityGroupModes,
   type ExecutionIntentContext,
 } from '../main/modules/agent-control/execution-intent-resolver'
+import { BROWSER_PUBLIC_TOOL_NAMES } from '../shared/browser-tool-surface'
 
 const BASE_CONFIG: AIModelConfig = {
   provider: 'openai',
@@ -87,6 +88,21 @@ function buildContext(userText: string, overrides: Partial<ExecutionIntentContex
     documentWidgetProfile: null,
     ...overrides,
   }
+}
+
+function groundedBrowserEnvelope(userText: string) {
+  return buildRequestEnvelope({
+    userText,
+    trustedEnvironment: {
+      workbenchMode: 'browser',
+      browserPageRef: {
+        tabId: 'tab-live-sdk-parity',
+        physicalTargetToken: 'physical-live-sdk-parity',
+        mainFrameId: '0',
+        mainFrameDocumentToken: 'document-live-sdk-parity',
+      },
+    },
+  })
 }
 
 function buildControllerResolution(testCase: CapabilityCase) {
@@ -147,42 +163,27 @@ function listLiveSdkDefaultToolNames(input: {
 }).map((definition) => definition.name).sort()
 }
 
-test('live SDK exposes exactly the 8 common browser tools for an ordinary reading turn', () => {
+test('live SDK exposes the complete typed Browser surface for a grounded workflow', () => {
   const userText = '打开 https://example.com 并阅读当前页面内容'
   const names = listLiveSdkDefaultToolNames({
     userText,
-    requestEnvelope: buildRequestEnvelope({ userText }),
+    requestEnvelope: groundedBrowserEnvelope(userText),
   }).filter((name) => name.startsWith('browser_'))
 
-  assert.deepEqual(names, [
-    'browser_find',
-    'browser_navigate',
-    'browser_read',
-    'browser_screenshot',
-    'browser_search',
-    'browser_snapshot',
-    'browser_tabs',
-    'browser_wait',
-  ])
+  assert.deepEqual(names, [...BROWSER_PUBLIC_TOOL_NAMES].sort())
 })
 
-test('live SDK keeps ordinary browser interaction within 15 tools and excludes specialist powers', () => {
-  const userText = '打开网页，点击登录并填写表单后提交'
+test('live SDK gives a goal-only grounded request the same complete Browser surface', () => {
+  const userText = '在网页上替我把目的地设为新加坡并完成后续步骤'
   const names = listLiveSdkDefaultToolNames({
     userText,
-    requestEnvelope: buildRequestEnvelope({ userText }),
+    requestEnvelope: groundedBrowserEnvelope(userText),
   }).filter((name) => name.startsWith('browser_'))
 
-  assert.equal(names.length, 15)
-  assert.ok(names.includes('browser_click'))
-  assert.ok(names.includes('browser_dialog'))
-  assert.ok(names.includes('browser_request_takeover'))
-  for (const unavailable of ['browser_eval', 'browser_cdp', 'browser_session', 'browser_permission']) {
-    assert.equal(names.includes(unavailable), false, unavailable)
-  }
+  assert.deepEqual(names, [...BROWSER_PUBLIC_TOOL_NAMES].sort())
 })
 
-test('live SDK specialist browser exposure reads only the current primary instruction', () => {
+test('live SDK Browser exposure does not branch on recalled or current request wording', () => {
   const userText = [
     '阅读当前网页',
     '## 最近会话摘要',
@@ -190,24 +191,16 @@ test('live SDK specialist browser exposure reads only the current primary instru
   ].join('\n')
   const names = listLiveSdkDefaultToolNames({
     userText,
-    requestEnvelope: {
-      primaryInstruction: '阅读当前网页',
-      rawUserText: userText,
-      resources: [],
-    },
+    requestEnvelope: groundedBrowserEnvelope('阅读当前网页'),
   }).filter((name) => name.startsWith('browser_'))
-  assert.equal(names.length, 8)
-  assert.equal(names.includes('browser_cdp'), false)
-  assert.equal(names.includes('browser_session'), false)
-  assert.equal(names.includes('browser_permission'), false)
 
   const explicit = '使用 CDP 查看当前页的 Performance 指标'
   const explicitNames = listLiveSdkDefaultToolNames({
     userText: explicit,
-    requestEnvelope: buildRequestEnvelope({ userText: explicit }),
+    requestEnvelope: groundedBrowserEnvelope(explicit),
   }).filter((name) => name.startsWith('browser_'))
-  assert.ok(explicitNames.includes('browser_cdp'))
-  assert.equal(explicitNames.includes('browser_eval'), false)
+  assert.deepEqual(names, [...BROWSER_PUBLIC_TOOL_NAMES].sort())
+  assert.deepEqual(explicitNames, names)
 })
 
 function buildSdkShapedResolution(testCase: CapabilityCase): CapabilityResolution {
@@ -438,7 +431,7 @@ test('P6e documents the SDK default-tools boundary for collection exposure', () 
   assert.equal(sdkCollection.groupStates.browser_content_tasks.reason, 'enabled')
 })
 
-test('P9C checks the live SDK default tool list exposes only the collection subset', () => {
+test('grounded collection requests keep the complete Browser surface', () => {
   const userText = [
     '继续采集',
     '',
@@ -448,27 +441,26 @@ test('P9C checks the live SDK default tool list exposes only the collection subs
   ].join('\n')
   const toolNames = listLiveSdkDefaultToolNames({
     userText,
-    requestEnvelope: buildRequestEnvelope({ userText }),
+    requestEnvelope: groundedBrowserEnvelope(userText),
   })
 
   assert.ok(toolNames.includes('browser_collect'))
   assert.ok(toolNames.includes('ask_user_questions'))
-  assert.equal(toolNames.includes('browser_click'), false)
-  assert.equal(toolNames.includes('browser_type'), false)
+  assert.ok(toolNames.includes('browser_click'))
+  assert.ok(toolNames.includes('browser_type'))
 })
 
-test('P9C exposes browser resource tools for webpage video download requests', () => {
+test('grounded video requests do not create a wording-specific Browser subset', () => {
   const userText = '看看能不能把网页的视频下载到@[整蛊广告]'
   const toolNames = listLiveSdkDefaultToolNames({
     userText,
-    requestEnvelope: buildRequestEnvelope({ userText }),
+    requestEnvelope: groundedBrowserEnvelope(userText),
   })
 
   assert.ok(toolNames.includes('browser_resources'))
   assert.ok(toolNames.includes('browser_download'))
-  assert.ok(toolNames.includes('browser_download'))
-  assert.equal(toolNames.includes('browser_type'), false)
-  assert.equal(toolNames.includes('browser_eval'), false)
+  assert.ok(toolNames.includes('browser_type'))
+  assert.ok(toolNames.includes('browser_eval'))
 })
 
 test('P9C keeps browser resource tools when a reference skill is selected', () => {
@@ -482,7 +474,7 @@ test('P9C keeps browser resource tools when a reference skill is selected', () =
   })
   const toolNames = listLiveSdkDefaultToolNames({
     userText,
-    requestEnvelope: buildRequestEnvelope({ userText }),
+    requestEnvelope: groundedBrowserEnvelope(userText),
     authorization,
   })
 
@@ -491,9 +483,8 @@ test('P9C keeps browser resource tools when a reference skill is selected', () =
   assert.ok(toolNames.includes('skill_export_artifact'))
   assert.ok(toolNames.includes('browser_resources'))
   assert.ok(toolNames.includes('browser_download'))
-  assert.ok(toolNames.includes('browser_download'))
-  assert.equal(toolNames.includes('browser_type'), false)
-  assert.equal(toolNames.includes('browser_eval'), false)
+  assert.ok(toolNames.includes('browser_type'))
+  assert.ok(toolNames.includes('browser_eval'))
 })
 
 test('P9C keeps common interaction tools for publish continuations without exposing specialist powers', () => {
@@ -507,11 +498,7 @@ test('P9C keeps common interaction tools for publish continuations without expos
     '',
     '用户: 继续',
   ].join('\n')
-  const requestEnvelope = {
-    primaryInstruction: '继续',
-    rawUserText: userText,
-    resources: [],
-  }
+  const requestEnvelope = groundedBrowserEnvelope('继续')
   const authorization = buildSelectedSkillToolAuthorization({
     skillId: 'extract',
     allowedTypedActions: [],
@@ -527,8 +514,8 @@ test('P9C keeps common interaction tools for publish continuations without expos
   assert.ok(toolNames.includes('browser_click'))
   assert.ok(toolNames.includes('browser_type'))
   assert.ok(toolNames.includes('browser_screenshot'))
-  assert.equal(toolNames.includes('browser_eval'), false)
-  assert.equal(toolNames.includes('browser_cdp'), false)
+  assert.ok(toolNames.includes('browser_eval'))
+  assert.ok(toolNames.includes('browser_cdp'))
 })
 
 test('P9C bare retry keeps resource tools despite upload words in recalled context', () => {
@@ -542,18 +529,14 @@ test('P9C bare retry keeps resource tools despite upload words in recalled conte
     '',
     '用户: 再试一次',
   ].join('\n')
-  const requestEnvelope = {
-    primaryInstruction: '再试一次',
-    rawUserText: userText,
-    resources: [],
-  }
+  const requestEnvelope = groundedBrowserEnvelope('再试一次')
   const toolNames = listLiveSdkDefaultToolNames({ userText, requestEnvelope })
 
   assert.ok(toolNames.includes('browser_resources'))
   assert.ok(toolNames.includes('browser_download'))
   assert.ok(toolNames.includes('browser_find'))
-  assert.equal(toolNames.includes('browser_upload'), false)
-  assert.equal(toolNames.includes('browser_click'), false)
+  assert.ok(toolNames.includes('browser_upload'))
+  assert.ok(toolNames.includes('browser_click'))
 })
 
 test('selected reference-skill authorization exposes export artifact for target-folder delivery', () => {
@@ -1063,8 +1046,8 @@ test('P6e keeps reconcileAfterBrowserDecision parity for late browser upload dec
   assert.equal(reconciled.toolPolicy.allowBrowserTools, true)
   assert.ok(reconciled.allowedToolNames.includes('browser_click'))
   assert.ok(reconciled.allowedToolNames.includes('browser_upload'))
-  assert.equal(reconciled.allowedToolNames.includes('browser_collect'), false)
-  assert.equal(reconciled.allowedToolNames.includes('browser_eval'), false)
+  assert.ok(reconciled.allowedToolNames.includes('browser_collect'))
+  assert.ok(reconciled.allowedToolNames.includes('browser_eval'))
 })
 
 // P1-2 — typed envelope skill_reference 是授权第一信源；正则文本候选降为兜底。

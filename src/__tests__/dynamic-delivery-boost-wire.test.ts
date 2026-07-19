@@ -4,8 +4,9 @@ import test from 'node:test'
 import { useAgent } from '../renderer/stores/useAgent'
 import { createThoroughDeliveryOverrideLatch } from '../renderer/modules/agent/dynamicDeliveryMode'
 
-test('Boost thorough mode reaches the sendScoped IPC payload unchanged', async () => {
+test('Boost thorough mode reaches the sendScoped IPC payload without preempting an active run', async () => {
   const sent: Array<Record<string, unknown>> = []
+  let killCalls = 0
   const scope = {
     id: 'boost-scope',
     agent: 'butler',
@@ -28,7 +29,10 @@ test('Boost thorough mode reaches the sendScoped IPC payload unchanged', async (
           sent.push(payload)
           return { success: true }
         },
-        kill: async () => ({ success: true }),
+        kill: async () => {
+          killCalls += 1
+          return { success: true }
+        },
       },
       chat: {
         createConversation: async () => ({ success: true }),
@@ -49,12 +53,13 @@ test('Boost thorough mode reaches the sendScoped IPC payload unchanged', async (
     messages: [],
     attachments: [],
     filePool: [],
-    isStreaming: false,
-    foregroundBusy: false,
+    isStreaming: true,
+    foregroundBusy: true,
     composerLocked: false,
     streamingMessageId: null,
     streamingRequestId: null,
     sessions: {},
+    scopeRunStates: {},
     activeSessionId: '__primary__',
     sessionId: '__primary__',
     sendCoalescingEnabled: false,
@@ -70,5 +75,6 @@ test('Boost thorough mode reaches the sendScoped IPC payload unchanged', async (
   assert.equal(result.success, true)
   assert.equal(sent.length, 1)
   assert.equal(sent[0]?.deliveryMode, 'thorough')
+  assert.equal(killCalls, 0, 'an ordinary follow-up must not kill the active run before steering')
   assert.equal(oneShotBoost.consume().deliveryMode, undefined, 'Boost resets immediately after one send')
 })

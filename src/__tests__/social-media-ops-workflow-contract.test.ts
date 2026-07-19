@@ -4,6 +4,7 @@ import { resolve } from 'node:path'
 import test from 'node:test'
 
 import { BROWSER_INTERACTION_TOOL_NAMES } from '../main/modules/tools/browser-tool-catalog'
+import { BROWSER_TOOL_SCHEMAS } from '../main/modules/tools/schemas/browser-tool-schemas'
 
 test('social media operations visual workflow uses a model-readable browser tool', () => {
   const workflow = readFileSync(resolve(
@@ -25,15 +26,20 @@ test('embedded research guidance uses the dedicated browser research contract', 
     process.cwd(),
     'assets/embedded-skills/deep-research/SKILL.md',
   ), 'utf8')
-  const discipline = readFileSync(resolve(
-    process.cwd(),
-    'assets/prompts/browser/discipline.md',
-  ), 'utf8')
-
-  for (const text of [workflow, deepResearch, discipline]) {
+  for (const text of [workflow, deepResearch]) {
     assert.doesNotMatch(text, /browser_collect\(mode=(?:research|start)\)/)
   }
-  assert.match(workflow, /browser_research\(scope=current_site, queries=\[\.\.\.\]\)/)
+  assert.doesNotMatch(workflow, /\b(?:scope|queries|fields|evaluate_source|task_id|evidence_fields|query_outcome)\s*=/)
   assert.match(workflow, /不要为每个关键词打开一个标签/)
-  assert.match(discipline, /一次调用 `browser_research/)
+
+  const calls = Array.from(workflow.matchAll(/`(browser_(?:research|read))\((\{[^\n`]+\})\)`/g))
+  assert.ok(calls.length >= 4)
+  const researchActions = new Set<string>()
+  for (const [, name, rawArgs] of calls) {
+    const args = JSON.parse(rawArgs) as Record<string, unknown>
+    const parsed = BROWSER_TOOL_SCHEMAS[name as 'browser_research' | 'browser_read'].safeParse(args)
+    assert.equal(parsed.success, true, `${name} example must match the live schema`)
+    if (name === 'browser_research') researchActions.add(String(args.action || 'start'))
+  }
+  assert.deepEqual(researchActions, new Set(['start', 'evidence', 'complete']))
 })

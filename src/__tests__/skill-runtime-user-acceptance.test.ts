@@ -122,6 +122,8 @@ function setupSchema(db: SqliteDatabase): void {
 
     CREATE TABLE task_projections (
       task_id TEXT PRIMARY KEY,
+      revision INTEGER NOT NULL DEFAULT 0,
+      dependency_generation INTEGER NOT NULL DEFAULT 0,
       scope_id TEXT NOT NULL,
       run_id TEXT NOT NULL,
       parent_task_id TEXT,
@@ -157,6 +159,11 @@ function setupSchema(db: SqliteDatabase): void {
       packet_role TEXT,
       context_refs_json TEXT,
       delivery_state_json TEXT,
+      request_anchor_json TEXT,
+      goal_mutations_json TEXT,
+      steering_receipts_json TEXT,
+      human_takeover_ref_json TEXT,
+      checkpoint_refs_json TEXT,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );

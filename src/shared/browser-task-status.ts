@@ -15,6 +15,22 @@ export function isBrowserSupervisionVisibleTaskStatus(
   return typeof status === 'string' && BROWSER_SUPERVISION_VISIBLE_TASK_STATUS_SET.has(status)
 }
 
+export const BROWSER_SURFACE_PRESENTING_TASK_STATUSES = [
+  'queued',
+  'running',
+  'waiting_human',
+] as const
+
+export type BrowserSurfacePresentingTaskStatus = typeof BROWSER_SURFACE_PRESENTING_TASK_STATUSES[number]
+
+const BROWSER_SURFACE_PRESENTING_TASK_STATUS_SET = new Set<string>(BROWSER_SURFACE_PRESENTING_TASK_STATUSES)
+
+export function isBrowserSurfacePresentingTaskStatus(
+  status: string | null | undefined,
+): status is BrowserSurfacePresentingTaskStatus {
+  return typeof status === 'string' && BROWSER_SURFACE_PRESENTING_TASK_STATUS_SET.has(status)
+}
+
 export function browserTaskStatusLabel(status: string): string {
   if (status === 'completed') return '已完成'
   if (status === 'failed') return '失败'

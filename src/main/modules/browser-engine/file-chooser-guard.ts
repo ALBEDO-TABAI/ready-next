@@ -15,12 +15,12 @@
  */
 
 import type { BrowserCdpSessionService } from './cdp-session-service'
-import { recordFileChooserInterceptedNotice } from './browser-permission-policy'
 
 interface BrowserFileChooserGuardDeps {
   cdp: BrowserCdpSessionService
   /** 拦截命中时随注记记录的页面 URL（origin 展示用）。 */
   resolveTabUrl?: (tabId: string) => string
+  onIntercepted?: (tabId: string, url: string) => void
   log?: (message: string) => void
 }
 
@@ -64,7 +64,7 @@ export class BrowserFileChooserGuard {
       const unsubscribe = this.deps.cdp.subscribe(tabId, (event) => {
         if (event.method !== 'Page.fileChooserOpened') return
         const url = this.deps.resolveTabUrl?.(tabId) || ''
-        recordFileChooserInterceptedNotice(tabId, url)
+        this.deps.onIntercepted?.(tabId, url)
         this.deps.log?.(`[browser-v3][file-chooser-guard] intercepted tabId=${tabId} url=${url}`)
       })
       this.armedTabs.set(tabId, { unsubscribe, releasePageDomain })

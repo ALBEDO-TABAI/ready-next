@@ -10,9 +10,11 @@ import {
   normalizeBrowserPowerEffects,
 } from '../../../shared/browser-power'
 import {
-  BROWSER_TOOL_SURFACE_MANIFEST,
-  browserToolSurfaceEntry,
-} from '../../../shared/browser-tool-surface'
+  BROWSER_PUBLIC_TOOL_NAMES,
+  browserToolBaseEffects,
+  isBrowserPublicToolName,
+  resolveBrowserCapability,
+} from '../../../shared/browser-capability-registry'
 
 export type BrowserPowerDecisionAction = 'allow' | 'grant_required' | 'grant_mismatch' | 'blocked_by_policy'
 
@@ -38,9 +40,9 @@ const auditEvents: BrowserPowerAuditEvent[] = []
 let browserPowerGlobalModeReader: (() => boolean) | null = null
 
 export const BROWSER_POWER_TOOL_EFFECT_PROFILES: Record<string, BrowserPowerToolEffectProfile> =
-  Object.fromEntries(BROWSER_TOOL_SURFACE_MANIFEST.map((entry) => [
-    entry.name,
-    { effects: [...entry.effects] },
+  Object.fromEntries(BROWSER_PUBLIC_TOOL_NAMES.map((name) => [
+    name,
+    { effects: browserToolBaseEffects(name) },
   ]))
 
 const PRIVATE_POWER_TOOL_NAMES: Readonly<Record<string, string>> = {
@@ -55,15 +57,14 @@ function publicPowerToolName(toolName: string): string {
   return PRIVATE_POWER_TOOL_NAMES[toolName] || toolName
 }
 
-export function browserPowerModeEnabled(currentUserText?: string | null): boolean {
+export function browserPowerModeEnabled(): boolean {
   if (process.env.READY_BROWSER_POWER_MODE === '1') return true
   try {
     if (browserPowerGlobalModeReader?.() === true) return true
   } catch {
-    // Settings are best-effort here; explicit per-run wording and grants still work.
+    // Settings are best-effort; per-action capability comes from typed grants.
   }
-  const text = String(currentUserText || '')
-  return /power\s*browser|web-access|自由\s*(?:js|脚本|eval)|\bcdp\b|网络追踪|监听网络|资源嗅探|嗅探|下载.{0,12}(?:视频|音频|资源)|(?:视频|音频|媒体).{0,12}下载/i.test(text)
+  return false
 }
 
 export function setBrowserPowerGlobalModeReader(reader: (() => boolean) | null): void {
@@ -76,48 +77,10 @@ export function browserToolEffectProfile(toolName: string): BrowserPowerToolEffe
   return BROWSER_POWER_TOOL_EFFECT_PROFILES[publicPowerToolName(toolName)] || null
 }
 
-function addEffect(effects: BrowserPowerEffect[], effect: BrowserPowerEffect): void {
-  if (!effects.includes(effect)) effects.push(effect)
-}
-
-function inferEvalEffects(code: string): BrowserPowerEffect[] {
-  const effects: BrowserPowerEffect[] = ['observe']
-  const normalized = code.toLowerCase()
-  // Computed global/member calls and dynamic code construction defeat static
-  // effect inference. Treat them as an explicit privileged escape rather than
-  // guessing that they are observation-only.
-  if (
-    /(?:globalThis|window|self|document)\s*\[[^\]]+\]\s*\(/i.test(code)
-    || /(?:\beval\s*\(|\bFunction\s*\(|\bimport\s*\(|setTimeout\s*\(\s*['"`]|setInterval\s*\(\s*['"`])/i.test(code)
-    || /\[['"`][^\]]+\]\s*\.\s*(?:join|map|reduce)\s*\([^)]*\)\s*\]\s*\(/i.test(code)
-  ) {
-    addEffect(effects, 'access_control_circumvention')
-  }
-  if (/\b(?:click|focus|blur|scrollto|scrollby|dispatchEvent|setAttribute|removeAttribute)\s*\(|\.(?:value|checked|selected|innerhtml|innertext|textcontent)\s*=/.test(code)) {
-    addEffect(effects, 'page_mutation')
-  }
-  if (/\b(?:fetch|xmlhttprequest|sendbeacon|websocket)\b|\.submit\s*\(|requestsubmit\s*\(/i.test(code)) {
-    addEffect(effects, 'external_submit')
-  }
-  if (/\b(?:password|passwd|otp|one[-_ ]?time|authorization|bearer)\b/i.test(code)) {
-    addEffect(effects, 'credential_use')
-  }
-  if (/\b(?:document\.cookie|localstorage|sessionstorage|cookiestore)\b/i.test(code)
-      && /\b(?:return|json\.stringify|console\.|postmessage|fetch|sendbeacon)\b/i.test(code)) {
-    addEffect(effects, 'secret_export')
-  }
-  if (/\b(?:delete|remove|destroy)\b/i.test(normalized) && /\b(?:account|user|cloud|remote|post|message|record)\b/i.test(normalized)) {
-    addEffect(effects, 'remote_delete')
-  }
-  if (/\b(?:password|credential|recovery|two[-_ ]?factor|2fa)\b/i.test(normalized)
-      && /\b(?:change|update|replace|reset|set)\b/i.test(normalized)) {
-    addEffect(effects, 'credential_change')
-  }
-  if (/\b(?:checkout|purchase|payment|pay|transfer)\b/i.test(normalized)
-      && /\b(?:submit|confirm|click|fetch|request)\b/i.test(normalized)) {
-    addEffect(effects, 'payment')
-  }
-  return effects
+function inferEvalEffects(_code: string): BrowserPowerEffect[] {
+  // Arbitrary JavaScript is an escape capability. Its safety cannot be
+  // inferred from identifiers, prose, locale, minification, or obfuscation.
+  return ['observe', 'page_mutation', 'access_control_circumvention']
 }
 
 function inferCdpEffects(method: string, params: Record<string, unknown>): BrowserPowerEffect[] {
@@ -125,12 +88,7 @@ function inferCdpEffects(method: string, params: Record<string, unknown>): Brows
     return ['observe', 'secret_export']
   }
   if (/^(?:Runtime\.evaluate|Runtime\.callFunctionOn)$/i.test(method)) {
-    const code = typeof params.expression === 'string'
-      ? params.expression
-      : typeof params.functionDeclaration === 'string'
-        ? params.functionDeclaration
-        : ''
-    return inferEvalEffects(code)
+    return ['observe', 'page_mutation', 'access_control_circumvention']
   }
   if (/^(?:Page\.navigate|Page\.reload|Page\.navigateToHistoryEntry)$/i.test(method)) return ['navigate']
   if (/^(?:Input\.|DOM\.set|Emulation\.set|Network\.(?:set|clear)|Page\.set|Storage\.clear|Browser\.setWindowBounds)/i.test(method)) {
@@ -163,8 +121,13 @@ export function inferBrowserPowerEffects(params: {
   if (publicName === 'browser_eval') {
     return inferEvalEffects(typeof args.code === 'string' ? args.code : '')
   }
-  const profile = browserToolEffectProfile(publicName)
-  return [...(params.fallback || profile?.effects || browserToolSurfaceEntry(publicName)?.effects || ['observe'])]
+  if (params.fallback) return [...params.fallback]
+  if (!isBrowserPublicToolName(publicName)) {
+    throw new Error(`browser_operation_not_registered:${publicName}`)
+  }
+  const capability = resolveBrowserCapability(publicName, args)
+  if (!capability) throw new Error(`browser_operation_not_registered:${publicName}`)
+  return [...capability.effects]
 }
 
 export function registerBrowserPowerGrant(input: Omit<BrowserPowerGrant, 'id' | 'createdAt'> & { id?: string }): BrowserPowerGrant {
@@ -278,11 +241,10 @@ export function resolveBrowserPowerAuthorization(params: {
   objectRef?: string | null
   url?: string | null
   destination?: string | null
-  currentUserText?: string | null
 }): BrowserPowerDecision {
   const effects = normalizeBrowserPowerEffects(params.effects, ['observe'])
   const destructiveEffects = effects.filter(isBrowserDestructiveEffect)
-  const powerModeEnabled = browserPowerModeEnabled(params.currentUserText)
+  const powerModeEnabled = browserPowerModeEnabled()
   const grantId = typeof params.grantId === 'string' && params.grantId.trim() ? params.grantId.trim() : ''
 
   if (grantId) {

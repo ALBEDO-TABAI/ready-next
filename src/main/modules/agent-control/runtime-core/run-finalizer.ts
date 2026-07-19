@@ -28,7 +28,14 @@ import {
 import type { TaskBudgetRuntime, TaskProjectionRecord } from '../contracts/run-contracts'
 import { canResumeAsUserPoint } from '../contracts/resume-handle'
 import type { DeliveryStateV1 } from '../../../../shared/dynamic-delivery'
+import { assertDeliveryState } from '../../../../shared/dynamic-delivery'
 import { rebindTaskBudgetRuntime } from '../task-projection/run-budget-policy'
+import type { CanonicalAssistantMessageReceipt } from '../../../../shared/ipc-contracts/canonical-message'
+import type {
+  BrowserWorkflowCloseoutSeal,
+  BrowserWorkflowCompletionVerifierReceipt,
+} from '../../../../shared/browser-workflow-control'
+import { workflowDigest } from '../../repositories/browser-workflow-codec'
 
 export interface RunCloseMetric {
   runId: string
@@ -44,12 +51,19 @@ export interface RunCloseMetric {
 export interface FinalizedRunOutcome {
   status: string
   terminalReason: string
+  canonicalMessage?: CanonicalAssistantMessageReceipt['canonicalMessage']
+  canonicalMessageDigest?: string
 }
 
 interface RunOutcomeTaskFacts {
   taskBudgetRuntime?: TaskBudgetRuntime | null
   providerDiagnostics?: RunOutcomeProviderDiagnostics | null
   usage?: RunOutcomeUsage | null
+  workflowCloseoutSeal?: BrowserWorkflowCloseoutSeal | null
+  workflowVerifierAcceptance?: Omit<
+    BrowserWorkflowCompletionVerifierReceipt,
+    'parentTaskId' | 'ownerRunId' | 'terminalQualityPatchDigest'
+  > | null
 }
 
 interface RunOutcomeProviderDiagnostics {
@@ -110,6 +124,7 @@ export type RunOutcome =
       initiator: string
       terminalReason: string
       projectionPatch?: Record<string, unknown> | null
+      finalText?: string | null
     } & RunOutcomeTaskFacts)
 
 export interface RunMetaRepositoryLike {
@@ -123,8 +138,28 @@ export interface RunFinalizerDeps {
   writeProjectionTerminalPatch?: (
     projectionPatch: Record<string, unknown> | null,
     terminalReason: string,
-    status: string
+    status: string,
+    canonicalReceipt?: CanonicalAssistantMessageReceipt,
   ) => void | Promise<void>
+  commitCanonicalCoreCloseout?: (input: {
+    parentTaskId: string
+    ownerRunId: string
+    status: 'done' | 'error' | 'cancelled' | 'interrupted'
+    terminalReason: string
+    initiator: string
+    durationMs: number
+    finalText: string
+    conversationId: string
+    taskType?: string | null
+    budget?: Record<string, unknown> | null
+    providerDiagnostics?: Record<string, unknown> | null
+    usage?: RunOutcomeUsage | null
+    deliveryState?: DeliveryStateV1 | null
+    continuationRef?: Record<string, unknown> | null
+    workflowCloseoutSeal?: BrowserWorkflowCloseoutSeal | null
+    terminalQualityPatch?: TerminalAdjudicationDecision['terminalQualityPatch'] | null
+    completionVerifierReceipt?: BrowserWorkflowCompletionVerifierReceipt | null
+  }) => Promise<CanonicalAssistantMessageReceipt>
   writeRunCloseMetric: (metric: RunCloseMetric) => void
   /** EP2-Q4a — projection store for shadow adjudication (CheckIn + proofs).
    *  Absent = adjudication skipped (legacy callers unchanged). */
@@ -228,6 +263,19 @@ interface TerminalAdjudicationDecision {
   blockers: string[]
   proofCount: number
   satisfiedCount: number
+  derived: {
+    checkIn: CheckInRecord
+    projection: TaskProjectionRecord
+    now: Date
+    projectionPatch: Partial<TaskProjectionRecord>
+    persistProjectionPatch: boolean
+  }
+  terminalQualityPatch?: {
+    proofRefs: unknown[]
+    checkins: unknown[]
+    criteria: Record<string, unknown>
+    learningRefs?: unknown[]
+  }
 }
 
 export function resolveDynamicDeliveryFinalizerBlocker(
@@ -602,12 +650,22 @@ async function writeTerminalOutcome(
 ): Promise<FinalizedRunOutcome> {
   const facts = resolveEffectiveTaskFacts(outcome, deps)
   const deliveryState = (() => {
+    const candidate = outcome.projectionPatch?.deliveryState
+    if (candidate !== undefined) {
+      assertDeliveryState(candidate)
+      return candidate
+    }
     if (!deps.taskProjectionStore || !outcome.taskId) return null
     return deps.taskProjectionStore.get(outcome.taskId)?.deliveryState ?? null
   })()
   const deliveryBlocker = status === 'done'
     ? resolveDynamicDeliveryFinalizerBlocker(deliveryState)
     : null
+  const deliveryAccepted = Boolean(
+    deliveryState
+    && deliveryState.decision !== 'single_path'
+    && deliveryState.verifier.status === 'accepted'
+  )
   const handoffSuperseded = (() => {
     if (!deps.taskProjectionStore || !outcome.taskId) return false
     const projection = deps.taskProjectionStore.get(outcome.taskId)
@@ -616,7 +674,7 @@ async function writeTerminalOutcome(
     const ref = continuation as Record<string, unknown>
     return ref.kind === 'handoff_takeover' && ref.priorRunId === outcome.runId
   })()
-  const adjudication = handoffSuperseded || deliveryBlocker
+  const adjudication = handoffSuperseded || deliveryBlocker || status === 'checkpoint'
     ? null
     : recordTerminalAdjudication(outcome, deps, status, terminalReason, facts)
   let effectiveStatus: RunMetaTerminalStatus = status
@@ -629,7 +687,14 @@ async function writeTerminalOutcome(
     effectiveStatus = 'error'
     effectiveTerminalReason = 'browser_transaction_unconfirmed'
   }
-  if (!deliveryBlocker && !handoffSuperseded && status === 'done' && adjudication && adjudication.verdict !== 'accept') {
+  if (
+    !deliveryBlocker
+    && !deliveryAccepted
+    && !handoffSuperseded
+    && status === 'done'
+    && adjudication
+    && adjudication.verdict !== 'accept'
+  ) {
     const taskContinuation = continuationFromProjectionPatch(outcome.projectionPatch)
     if (isBrowserTransactionTask(facts)) {
       effectiveStatus = 'error'
@@ -673,7 +738,67 @@ async function writeTerminalOutcome(
   ) {
     effectiveTerminalReason = 'browser_transaction_unconfirmed'
   }
-  writeRunMetaOutcome(outcome, deps, effectiveStatus, effectiveTerminalReason, facts)
+  let canonicalReceipt: CanonicalAssistantMessageReceipt | undefined
+  const completionVerifierReceipt: BrowserWorkflowCompletionVerifierReceipt | null =
+    outcome.workflowVerifierAcceptance
+    && adjudication?.terminalQualityPatch
+    && outcome.taskId
+      ? {
+          ...outcome.workflowVerifierAcceptance,
+          parentTaskId: outcome.taskId,
+          ownerRunId: outcome.runId,
+          terminalQualityPatchDigest: workflowDigest(adjudication.terminalQualityPatch),
+        }
+      : null
+  if (
+    deps.commitCanonicalCoreCloseout
+    && outcome.taskId
+    && outcome.scopeId
+    && effectiveStatus !== 'checkpoint'
+    && typeof outcome.finalText === 'string'
+    && outcome.finalText.trim()
+  ) {
+    canonicalReceipt = await deps.commitCanonicalCoreCloseout({
+      parentTaskId: outcome.taskId,
+      ownerRunId: outcome.runId,
+      status: effectiveStatus === 'done'
+        ? 'done'
+        : effectiveStatus === 'cancelled'
+          ? 'cancelled'
+          : effectiveStatus === 'interrupted'
+            ? 'interrupted'
+            : 'error',
+      terminalReason: effectiveTerminalReason,
+      initiator: outcome.initiator,
+      durationMs: outcome.durationMs,
+      finalText: outcome.finalText,
+      conversationId: outcome.scopeId,
+      taskType: facts.taskType,
+      budget: outcome.taskBudgetRuntime
+        ? { ...outcome.taskBudgetRuntime.budget, ...outcome.taskBudgetRuntime.usage }
+        : null,
+      providerDiagnostics: outcome.providerDiagnostics
+        ? { ...outcome.providerDiagnostics }
+        : null,
+      usage: outcome.usage || null,
+      deliveryState,
+      continuationRef: continuationFromProjectionPatch(outcome.projectionPatch),
+      workflowCloseoutSeal: outcome.workflowCloseoutSeal || null,
+      terminalQualityPatch: adjudication?.terminalQualityPatch || null,
+      completionVerifierReceipt,
+    })
+  } else {
+    writeRunMetaOutcome(outcome, deps, effectiveStatus, effectiveTerminalReason, facts)
+  }
+  if (adjudication) {
+    runTerminalAdjudicationDerivedEffects({
+      adjudication,
+      deps,
+      outcome,
+      terminalStatus: effectiveStatus,
+      terminalReason: effectiveTerminalReason,
+    })
+  }
   if (!handoffSuperseded && deps.writeProjectionTerminalPatch) {
     const terminalProjectionPatch = facts.taskType
       ? { ...(outcome.projectionPatch || {}), taskType: facts.taskType }
@@ -681,14 +806,19 @@ async function writeTerminalOutcome(
     await deps.writeProjectionTerminalPatch(
       terminalProjectionPatch,
       effectiveTerminalReason,
-      effectiveStatus
+      effectiveStatus,
+      canonicalReceipt,
     )
   }
   deps.writeRunCloseMetric({
     ...toRunCloseMetric(outcome, effectiveTerminalReason),
     taskType: facts.taskType
   })
-  return { status: effectiveStatus, terminalReason: effectiveTerminalReason }
+  return {
+    status: effectiveStatus,
+    terminalReason: effectiveTerminalReason,
+    ...(canonicalReceipt || {}),
+  }
 }
 
 function readTerminalFailureReason(value: unknown): TerminalFailureReason | null {
@@ -898,9 +1028,7 @@ function recordTerminalAdjudication(
     //    fields untouched. Only write learningRefs when the run actually learned
     //    (accept + durable evidence); otherwise leave the column null so a
     //    downstream degrade/retry doesn't inherit stale learning evidence.
-    store.update(
-      taskId,
-      {
+    const adjudicationPatch: Partial<TaskProjectionRecord> = {
         proofRefs,
         checkins: appendCheckIns(projection.checkins ?? [], checkIn),
         // P2-2 — persist the resolved acceptance criteria (previously computed for
@@ -913,22 +1041,7 @@ function recordTerminalAdjudication(
           totalCount: checkIn.totalCount
         },
         ...(checkIn.learningDecision?.learned ? { learningRefs } : {})
-      },
-      { silent: true, reasonHint: 'terminal_adjudication' }
-    )
-
-    if (deps.learnFromCheckIn) {
-      try {
-        deps.learnFromCheckIn({ checkIn, projection, now, terminalStatus: status, terminalReason })
-      } catch (error) {
-        logAgentMetric('site_card_learning_checkin_failed', {
-          runId: outcome.runId,
-          taskId,
-          reason: error instanceof Error ? error.message : String(error)
-        })
       }
-    }
-
     // ④ divergence metric when the verdict disagrees with the actual terminal
     if (status === 'done' && verdict !== 'accept') {
       const divergencePayload = {
@@ -944,7 +1057,33 @@ function recordTerminalAdjudication(
       logAgentMetric('adjudicator_enforce_divergence', divergencePayload)
       logAgentMetric('adjudicator_shadow_divergence', { ...divergencePayload, compatibility: true })
     }
-    return { verdict, blockers: checkIn.blockers, proofCount: checkIn.proofCount, satisfiedCount: checkIn.satisfiedCount }
+    return {
+      verdict,
+      blockers: checkIn.blockers,
+      proofCount: checkIn.proofCount,
+      satisfiedCount: checkIn.satisfiedCount,
+      derived: {
+        checkIn,
+        projection,
+        now,
+        projectionPatch: adjudicationPatch,
+        persistProjectionPatch: !projection.requestAnchor,
+      },
+      ...(projection.requestAnchor
+        ? {
+            terminalQualityPatch: {
+              proofRefs,
+              checkins: appendCheckIns(projection.checkins ?? [], checkIn),
+              criteria: {
+                items: criteria.items,
+                satisfiedCount: checkIn.satisfiedCount,
+                totalCount: checkIn.totalCount,
+              },
+              ...(checkIn.learningDecision?.learned ? { learningRefs } : {}),
+            },
+          }
+        : {}),
+    }
   } catch (error) {
     logAgentMetric('adjudication_failed', {
       runId: outcome.runId,
@@ -952,6 +1091,54 @@ function recordTerminalAdjudication(
       reason: error instanceof Error ? error.message : String(error)
     })
     return null
+  }
+}
+
+function runTerminalAdjudicationDerivedEffects(input: {
+  adjudication: TerminalAdjudicationDecision
+  deps: RunFinalizerDeps
+  outcome: RunOutcome
+  terminalStatus: RunMetaTerminalStatus
+  terminalReason: string
+}): void {
+  const { adjudication, deps, outcome, terminalStatus, terminalReason } = input
+  const taskId = outcome.taskId
+  if (!taskId) return
+  if (adjudication.derived.persistProjectionPatch && deps.taskProjectionStore) {
+    try {
+      deps.taskProjectionStore.update(
+        taskId,
+        adjudication.derived.projectionPatch,
+        { silent: true, reasonHint: 'terminal_adjudication' },
+      )
+    } catch (error) {
+      logAgentMetric('terminal_adjudication_projection_repair_failed', {
+        runId: outcome.runId,
+        taskId,
+        reason: error instanceof Error ? error.message : String(error),
+      })
+    }
+  }
+  if (
+    terminalStatus !== 'done'
+    || adjudication.verdict !== 'accept'
+    || !adjudication.derived.checkIn.learningDecision?.learned
+    || !deps.learnFromCheckIn
+  ) return
+  try {
+    deps.learnFromCheckIn({
+      checkIn: adjudication.derived.checkIn,
+      projection: adjudication.derived.projection,
+      now: adjudication.derived.now,
+      terminalStatus,
+      terminalReason,
+    })
+  } catch (error) {
+    logAgentMetric('site_card_learning_checkin_failed', {
+      runId: outcome.runId,
+      taskId,
+      reason: error instanceof Error ? error.message : String(error),
+    })
   }
 }
 

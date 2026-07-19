@@ -21,15 +21,30 @@ export function redactModelVisibleToolText(text: string): string {
   return redactHostPaths(text)
 }
 
+function textDuplicatesData(text: string, data: unknown): boolean {
+  if (!text || !data || typeof data !== 'object') return false
+  try {
+    return JSON.stringify(JSON.parse(text)) === JSON.stringify(data)
+  } catch {
+    // silent-catch: non-JSON text cannot duplicate structured data, so keep both representations.
+    return false
+  }
+}
+
 export function buildModelVisibleToolResultPayload(output: ToolExecutionOutput): Record<string, unknown> {
   const normalized = normalizeToolExecutionOutput(output)
+  const text = redactModelVisibleToolText(normalized.text)
+  const data = redactModelVisibleValue(normalized.data)
   return {
-    text: redactModelVisibleToolText(normalized.text),
-    shape: normalized.shape,
-    data: redactModelVisibleValue(normalized.data),
-    projectionPatch: redactModelVisibleValue(normalized.projectionPatch),
-    framePatch: redactModelVisibleValue(normalized.framePatch),
-    interactionHint: normalized.interactionHint,
+    ...(!textDuplicatesData(text, data) && text ? { text } : {}),
+    ...(data ? { data } : {}),
+    ...(normalized.projectionPatch
+      ? { projectionPatch: redactModelVisibleValue(normalized.projectionPatch) }
+      : {}),
+    ...(normalized.framePatch
+      ? { framePatch: redactModelVisibleValue(normalized.framePatch) }
+      : {}),
+    ...(normalized.interactionHint ? { interactionHint: normalized.interactionHint } : {}),
     ...(normalized.content?.length
       ? {
           content: normalized.content.map((part) => part.type === 'image'

@@ -65,6 +65,7 @@ test('browser host visibility is explicitly gated and browser bounds keep Browse
   assert.match(hostLayout, /showHost\(view: BrowserHostView, bounds: BrowserRect\): void \{[\s\S]*this\.appliedBoundsByView\.delete\(view\)[\s\S]*this\.setHostBoundsNow\(view, bounds\)/)
   assert.match(hostLayout, /private raiseHost\(view: BrowserHostView\): void \{[\s\S]*removeChildView\(view as WebContentsView\)[\s\S]*addChildView\(view as WebContentsView\)/)
   assert.match(hostLayout, /hideHost\(view: BrowserHostView\): void \{[\s\S]*this\.setHostBoundsNow\(view, this\.offscreenBounds\)/)
+  assert.match(hostLayout, /parkHost\(view: BrowserHostView, bounds: BrowserRect\): void \{[\s\S]*this\.attachHost\(view\)[\s\S]*parkedBrowserHostBounds\(bounds\)/)
   assert.doesNotMatch(hostLayout, /scheduleHostBounds\(/)
   assert.doesNotMatch(hostLayout, /clearScheduledBounds\(/)
   assert.match(lifecycle, /shouldShow:\s*boolean/)

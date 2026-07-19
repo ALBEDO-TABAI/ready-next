@@ -6,6 +6,7 @@ import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
 import { AgentSdkRuntime, type AgentSdkRuntimeDeps } from '../main/modules/agent-control/runtime-core/agent-sdk-runtime'
 import { createToolExecutionOutput } from '../main/modules/agent-control/tools-runtime/tool-result-types'
 import type { ToolDefinition } from '../main/modules/agent-control/tools-runtime/tool-definition'
+import { enabledSdkToolNames } from './utils/sdk-tool-visibility'
 
 test('status-query-routing declares transitive sqlite ABI guard', (t) => {
   skipIfSqliteUnavailable(t, 'status-query-routing transitive sqlite load')
@@ -50,7 +51,7 @@ function createRuntime(
     ],
     executeToolCall: async () => createToolExecutionOutput('ok', { shape: 'json', data: { ok: true } }),
     runAgent: async ({ tools }) => {
-      seenTools.push((tools as Array<{ name: string }>).map((toolItem) => toolItem.name))
+      seenTools.push(await enabledSdkToolNames(tools as Array<{ name: string }>))
       return { finalText: '好的。', toolTrace: [] }
     },
     ...deps,
@@ -78,8 +79,7 @@ test('status question narrows browser tools to read-only surface', async () => {
   assert.equal(seenTools.length, 1)
   const names = seenTools[0]
   assert.ok(names.includes('browser_task'), `expected read tool kept, got ${names.join(',')}`)
-  assert.ok(!names.includes('browser_collect'), 'write collect tool must be hidden on status query')
-  assert.ok(!names.includes('browser_collect'), 'write dispatch tool must be hidden on status query')
+  assert.ok(!names.includes('browser_collect'), `write collect tool must be hidden on status query, got ${names.join(',')}`)
 })
 
 test('bare continue keeps the full collection surface (99fc8f regression)', async () => {

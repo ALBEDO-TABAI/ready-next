@@ -113,24 +113,14 @@ test('completed structured output is not failed merely because its counters incl
   assert.ok(collectToolOutputProofs('browser_task', output, NOW).length > 0)
 })
 
-test('browser task mints research source evidence only for completed validated site research', () => {
-  const paused = createToolExecutionOutput('https://example.com/item', {
-    shape: 'json',
-    data: { kind: 'site_research', status: 'paused', result: { essentialOutputSatisfied: false } },
-  })
-  assert.equal(collectToolOutputProofs('browser_task', paused, NOW).length, 0)
-
-  const ordinary = createToolExecutionOutput('https://example.com/item', {
-    shape: 'json',
-    data: { kind: 'visible_collect', status: 'completed', result: { essentialOutputSatisfied: true } },
-  })
-  assert.equal(collectToolOutputProofs('browser_task', ordinary, NOW)[0]?.sourceReceipt, undefined)
-
+test('browser task handles never mint research evidence without a verified observation receipt', () => {
   const completed = createToolExecutionOutput('https://example.com/item', {
     shape: 'json',
-    data: { kind: 'site_research', status: 'completed', result: { essentialOutputSatisfied: true } },
+    data: { kind: 'browser_workflow', status: 'completed', result: { essentialOutputSatisfied: true } },
   })
-  assert.deepEqual(collectToolOutputProofs('browser_task', completed, NOW)[0]?.sourceReceipt?.urls, ['https://example.com/item'])
+  const proofs = collectToolOutputProofs('browser_task', completed, NOW)
+  assert.ok(proofs.length > 0)
+  assert.equal(proofs[0]?.sourceReceipt, undefined)
 })
 
 test('waiting Tag Forge batches never mint completion proof or successful progress', () => {

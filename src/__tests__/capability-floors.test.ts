@@ -46,16 +46,14 @@ test('computeCapabilityFloors: local document resource floors file_locate + file
   assert.ok(floors.reasons.includes('local_document_resource'))
 })
 
-test('computeCapabilityFloors: Tag Forge folder keeps its controlled batch surface', () => {
+test('computeCapabilityFloors: selected skills receive exactly their authorized surface without skill-id branches', () => {
   const floors = computeCapabilityFloors({ authorization: tagForge, hasLocalDocumentResource: true, hasCurrentDocumentContext: false })
   assert.deepEqual([...floors.toolNames].sort(), [
     'file_locate',
     'file_read_excerpt',
-    'tag_forge_apply_batch',
-    'tag_forge_prepare_batch',
+    'skill_read_artifact',
   ])
-  assert.equal([...floors.toolNames].some((name) => name.startsWith('skill_')), false)
-  assert.ok(floors.reasons.includes('tag_forge_folder_batch'))
+  assert.ok(floors.reasons.includes('skill_selected:tag-forge'))
 })
 
 const DOC_CONTEXT_EDIT_FLOOR = [

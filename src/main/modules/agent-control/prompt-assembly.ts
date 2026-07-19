@@ -13,7 +13,7 @@ import { logAgentMetric } from './metrics'
 import { buildContextBill, emitContextBill, type ContextBillPayload, type ContextBillSectionInput } from './context-bill'
 import type { IntentClassification } from './intent-classifier'
 import { classifyIntent } from './intent-classifier'
-import type { RequestEnvelope, TrustedFolderReference } from './contracts/request-envelope'
+import type { RequestEnvelope, TrustedFolderReference, TrustedRequestEnvironment } from './contracts/request-envelope'
 import { buildRequestEnvelope } from './contracts/request-envelope'
 import { filterDailyMemoryForScope } from './session/daily-memory-scope-filter'
 import { buildDailyTaskIndex, type TaskIndexEntry } from './session/daily-task-index-builder'
@@ -210,18 +210,6 @@ const DEFAULT_FILES: Record<string, string> = {
     '\n'
   ),
   'docs/browser-rules.md': ['# 浏览器规则', '- 上传/输入/提交按阶段执行并逐步验证。'].join('\n'),
-  'docs/browser-collect-rules.md': [
-    '# 浏览器逐篇采集流程（博主多篇笔记 → 每篇建文件夹 → 下载图片）',
-    '- 这是"先规划、后台执行"的浏览器采集任务，不是文档改写：用户说"保存到某文件夹"指的是下载目录，不是写文档。',
-    '- 第 1 步（收集清单）：浏览博主主页并滚动加载，用 browser_collect(mode=visible) 收集所有笔记的链接(url)与标题(title)；若用户给了保存文件夹，同时传 output_dir。',
-    '- 第 2 步（必须执行）：优先使用上一步返回的 suggestedNextTool/source_task_id；笔记清单调用 browser_collect(mode=notes, source_task_id, expected_count, output_dir)，图片清单调用 browser_download(mode=collected, source_task_id, directory)。不要手工截断或改写清单。',
-    '- 如果发现结果是 partial/paused 或返回 suggestedContinueTool，先 browser_task(action=resume) 继续发现；除非用户明确只采当前部分，否则不要启动逐项采集。',
-    '- browser_collect(mode=notes) 会在独立后台标签页逐篇打开目标、按标题建文件夹、保存图片并写 note.md/manifest.json，返回后台任务句柄。',
-    '- 若任务状态是 waiting_human/paused_verification，用户说"好了/已验证/继续"时，优先对同一个 browser-task-* 调用 browser_task(action=resume)，不要临时改走单项点击或零散下载。',
-    '- 多篇网页采集必须先用 browser_collect(mode=visible) 冻结清单（用户直接给 URL 列表除外），再调用 browser_collect(mode=notes)；card_loop 或 url_batch 是系统内部选择，不要让用户批准内部策略。',
-    '- 仅收集到链接/图片 URL 不算完成：笔记清单没有调用 browser_collect(mode=notes)、图片清单没有调用 browser_download(mode=collected)，都没有真正保存到本地。拿到清单后立刻执行，不要只描述“将开始采集”。',
-    '- 采集在后台运行，可继续对话；用 browser_task(action=get, task_id) 查询进度，必要时 browser_task(action=cancel, task_id) 取消。',
-  ].join('\n'),
   'docs/rss-rules.md': ['# RSS 规则', '- 先确认源和条目，再运行分析 pipeline。'].join('\n'),
   'docs/calendar-rules.md': ['# 日程规则', '- 写入前先检查时间歧义和冲突。'].join('\n')
 }
@@ -723,7 +711,7 @@ export class PromptAssemblyService {
           // imperative checkpoint lines never steer this conversation.
           const content = filterDailyMemoryForScope(
             sanitizeCommandLikeContent(this.readMemoryFile(path, memoryRoot)),
-            scope.title,
+            scope.id,
           ).trim()
           return content ? formatMemorySection(path.split('/').pop() || path, content) : ''
         })
@@ -1088,6 +1076,7 @@ export class PromptAssemblyService {
     workspaceRoots?: string[]
     contextRefIds?: string[]
     trustedFolderReferences?: TrustedFolderReference[]
+    trustedEnvironment?: TrustedRequestEnvironment
     /** EP3-A2 — 本轮任务 owner（projection 的 ownerAgentId）。三段式解析：
      *  显式合法 owner 优先；完全未传时回退 scope.agent；显式但非法的 id
      *  降级 global-only（不回退，防腐败 owner 借道注入他人谱系）。
@@ -1156,6 +1145,7 @@ export class PromptAssemblyService {
       workspaceRoots: params.workspaceRoots,
       contextRefIds: params.contextRefIds,
       trustedFolderReferences: params.trustedFolderReferences,
+      trustedEnvironment: params.trustedEnvironment,
     })
     const intentClassification = classifyIntent(requestEnvelope)
     const hasExplicitResourceRefs = hasCurrentExplicitResourceRefs(requestEnvelope)
@@ -1382,6 +1372,7 @@ export class PromptAssemblyService {
     const safeSummary = sanitizeCommandLikeContent(params.finalText).trim()
     const lines = [
       `## ${this.now().toISOString()}`,
+      `- scope-id: ${params.scope.id}`,
       `- scope: ${params.scope.title}`,
       `- success: ${params.success ? 'yes' : 'no'}`,
       params.lifecyclePhase ? `- lifecycle: ${params.lifecyclePhase}` : null,

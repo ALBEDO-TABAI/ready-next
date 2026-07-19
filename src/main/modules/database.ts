@@ -2467,6 +2467,68 @@ export class DatabaseManager {
     this.db.prepare('UPDATE chat_conversations SET updated_at = ? WHERE id = ?').run(timestamp, conversationId)
   }
 
+  /** Repair indexes for an already-committed canonical message without ever
+   * rewriting the chat_messages row. The caller-provided digest binds this
+   * repair to the immutable core row. */
+  repairChatMessageDerivedIndexes(
+    expected: {
+      id: string
+      conversationId: string
+      role: string
+      content: string
+      timestamp: string
+      meta: Record<string, unknown>
+    },
+    expectedDigest: string,
+  ): void {
+    if (!this.db) throw new Error('Database not available')
+    const row = this.db.prepare(
+      `SELECT id, conversation_id, role, content, timestamp, meta_json
+         FROM chat_messages WHERE id = ? LIMIT 1`,
+    ).get<{
+      id: string
+      conversation_id: string
+      role: string
+      content: string
+      timestamp: string
+      meta_json: string | null
+    }>(expected.id)
+    if (!row) throw new Error('canonical_chat_message_missing_for_repair')
+    const actual = {
+      id: row.id,
+      conversationId: row.conversation_id,
+      role: row.role,
+      content: row.content,
+      timestamp: row.timestamp,
+      meta: JSON.parse(row.meta_json || '{}') as Record<string, unknown>,
+    }
+    const actualDigest = createHash('sha256').update(JSON.stringify(actual)).digest('hex')
+    if (
+      actualDigest !== expectedDigest
+      || JSON.stringify(actual) !== JSON.stringify(expected)
+    ) throw new Error('canonical_chat_message_digest_mismatch_for_repair')
+
+    this.db.prepare('DELETE FROM chat_messages_fts WHERE message_id = ?').run(actual.id)
+    this.db.prepare(
+      'INSERT INTO chat_messages_fts (message_id, conversation_id, content) VALUES (?, ?, ?)',
+    ).run(actual.id, actual.conversationId, actual.content || '')
+    this.db.prepare(
+      'DELETE FROM session_recall_attachment_index WHERE conversation_id = ? AND source_message_id = ?',
+    ).run(actual.conversationId, actual.id)
+    this.syncConversationRecallAttachments(
+      actual.conversationId,
+      actual.id,
+      actual.timestamp,
+      actual.meta,
+    )
+    this.syncConversationRecallMetadata(actual.conversationId, {
+      previewText: actual.content,
+      updatedAt: actual.timestamp,
+    })
+    this.db.prepare('UPDATE chat_conversations SET updated_at = ? WHERE id = ?')
+      .run(actual.timestamp, actual.conversationId)
+  }
+
   updateConversationScopeMeta(id: string, meta: Record<string, unknown>): ChatConversationRecord | null {
     if (!this.db) return null
     const existing = this.getConversationScope(id)

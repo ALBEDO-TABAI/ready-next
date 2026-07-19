@@ -1,130 +1,95 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
-import { AgentTabControlGate } from '../main/modules/browser-engine/agent-tab-control-gate'
+import {
+  beginAgentTabUserTakeover,
+  createAgentTabUserInputTakeoverHandlers,
+  persistAgentTabUserTakeover,
+} from '../main/modules/browser-engine/agent-tab-control-gate'
+import { BrowserWriteLeaseService } from '../main/modules/browser-engine/browser-write-lease'
 
-describe('AgentTabControlGate (freeze-then-confirm, §3.6)', () => {
-  it('starts active and permits writes', () => {
-    const gate = new AgentTabControlGate()
-    assert.equal(gate.getState(), 'active')
-    assert.equal(gate.isWriteBlocked(), false)
+describe('agent tab immediate takeover', () => {
+  it('records the lease takeover and fences grounded work exactly once', () => {
+    let takenOver = false
+    let fenced = 0
+    let recorded = 0
+    const takeOver = () => beginAgentTabUserTakeover({
+      isTakenOver: () => takenOver,
+      fenceGroundedTasks: () => { fenced += 1 },
+      recordLeaseTakeover: () => { recorded += 1; takenOver = true },
+    })
+    assert.equal(takeOver(), true)
+    assert.equal(takeOver(), false)
+    assert.equal(recorded, 1)
+    assert.equal(fenced, 1)
   })
 
-  it('a user interruption freezes writes pending confirmation (does not cancel)', () => {
-    const gate = new AgentTabControlGate()
-    assert.equal(gate.requestInterruption(), true)
-    assert.equal(gate.getState(), 'pending_confirm')
-    assert.equal(gate.isWriteBlocked(), true, 'agent writes frozen while awaiting confirmation')
+  it('routes real before-input and before-mouse payloads to immediate takeover without blocking user input', () => {
+    let takeovers = 0
+    let prevented = 0
+    let groundedFenced = false
+    let activelyDriven = true
+    const leaseService = new BrowserWriteLeaseService()
+    leaseService.acquire({ surface: 'agent-view', taskId: 'research-task', runId: 'run-1', tabId: 'agent-tab' })
+    const handlers = createAgentTabUserInputTakeoverHandlers({
+      isActivelyDriven: () => activelyDriven,
+      isFrozen: () => leaseService.getState('agent-view') === 'takeover',
+      isAgentKey: (key) => key === 'AgentKey',
+      isAgentMouse: () => false,
+      takeOver: () => {
+        takeovers += 1
+        beginAgentTabUserTakeover({
+          isTakenOver: () => leaseService.getState('agent-view') === 'takeover',
+          fenceGroundedTasks: () => { groundedFenced = true },
+          recordLeaseTakeover: () => {
+            leaseService.recordUserSignal({ surface: 'agent-view', source: 'explicit-button' })
+          },
+        })
+      },
+    })
+    const electronEvent = { preventDefault: () => { prevented += 1 } }
+
+    handlers.onKeyboardInput(electronEvent, { type: 'keyDown', key: 'a' })
+    assert.equal(takeovers, 1)
+    assert.equal(prevented, 0, 'the physical key must continue into the page')
+    assert.equal(groundedFenced, true, 'the grounded task is fenced before the listener returns')
+    assert.equal(leaseService.getState('agent-view'), 'takeover', 'the next agent-view write is rejected synchronously')
+
+    leaseService.clearTakeover('agent-view')
+    leaseService.acquire({ surface: 'agent-view', taskId: 'research-task-2', runId: 'run-2', tabId: 'agent-tab' })
+    takeovers = 0
+    handlers.onKeyboardInput(electronEvent, { type: 'keyDown', key: 'AgentKey' })
+    assert.equal(takeovers, 0, 'trusted injected input must not look like a user takeover')
+    handlers.onMouseInput(electronEvent, { type: 'mouseDown' })
+    assert.equal(takeovers, 1)
+    assert.equal(prevented, 0, 'the physical mouse action must continue into the page')
+
+    takeovers = 0
+    activelyDriven = false
+    handlers.onKeyboardInput(electronEvent, { type: 'keyDown', key: 'b' })
+    assert.equal(takeovers, 0, 'an idle leftover agent tab must not capture user input')
   })
 
-  it('dismissing the confirmation unfreezes and the agent resumes', () => {
-    const gate = new AgentTabControlGate()
-    gate.requestInterruption()
-    gate.dismissInterruption()
-    assert.equal(gate.getState(), 'active')
-    assert.equal(gate.isWriteBlocked(), false)
-  })
+  it('retains the physical fence when durable takeover persistence fails', async () => {
+    const leaseService = new BrowserWriteLeaseService()
+    leaseService.acquire({ surface: 'user-view', taskId: 'browser-child', runId: 'owner-run', tabId: 'tab-a' })
+    leaseService.recordUserSignal({ surface: 'user-view', source: 'explicit-button' })
+    let successCleanup = 0
+    let failures = 0
 
-  it('confirming the interruption moves to frozen (writes stay blocked for cancel/takeover)', () => {
-    const gate = new AgentTabControlGate()
-    gate.requestInterruption()
-    assert.equal(gate.confirmInterruption(), true)
-    assert.equal(gate.getState(), 'frozen')
-    assert.equal(gate.isWriteBlocked(), true)
-  })
+    const persisted = await persistAgentTabUserTakeover({
+      persist: async () => { throw new Error('sqlite busy') },
+      onPersisted: () => {
+        successCleanup += 1
+        leaseService.clearTakeover('user-view')
+      },
+      onPersistenceFailure: () => { failures += 1 },
+    })
 
-  it('a second interruption while pending is a no-op', () => {
-    const gate = new AgentTabControlGate()
-    gate.requestInterruption()
-    assert.equal(gate.requestInterruption(), false)
-    assert.equal(gate.getState(), 'pending_confirm')
-  })
-
-  it('confirm/dismiss are no-ops when not pending', () => {
-    const gate = new AgentTabControlGate()
-    assert.equal(gate.confirmInterruption(), false)
-    gate.dismissInterruption()
-    assert.equal(gate.getState(), 'active')
-  })
-
-  it('reset returns the gate to active', () => {
-    const gate = new AgentTabControlGate()
-    gate.requestInterruption()
-    gate.confirmInterruption()
-    gate.reset()
-    assert.equal(gate.getState(), 'active')
-    assert.equal(gate.isWriteBlocked(), false)
-  })
-
-  it('pending_confirm blocks writes but is NOT frozen — only confirm cancels the task', () => {
-    // Codex result-review #1 residual: the runner's cancel probe (isFrozen) must
-    // not fire while merely pending, or the task would cancel before the user
-    // confirms. Writes are still blocked during pending (isWriteBlocked).
-    const gate = new AgentTabControlGate()
-    assert.equal(gate.isFrozen(), false)
-    assert.equal(gate.isWriteBlocked(), false)
-
-    gate.requestInterruption()
-    assert.equal(gate.getState(), 'pending_confirm')
-    assert.equal(gate.isWriteBlocked(), true, 'pending blocks writes')
-    assert.equal(gate.isFrozen(), false, 'pending must NOT cancel the task')
-
-    gate.confirmInterruption()
-    assert.equal(gate.getState(), 'frozen')
-    assert.equal(gate.isWriteBlocked(), true)
-    assert.equal(gate.isFrozen(), true, 'only a confirmed freeze cancels')
-  })
-
-  it('dismiss from pending clears both write-block and frozen', () => {
-    const gate = new AgentTabControlGate()
-    gate.requestInterruption()
-    gate.dismissInterruption()
-    assert.equal(gate.isWriteBlocked(), false)
-    assert.equal(gate.isFrozen(), false)
-  })
-
-  // D8（真机反复实锚）：用户擦碰 agent 页后走开，pending_confirm 无人
-  // 确认也无人取消 → 横幅常驻 + agent 写入永久冻结。合同：超时惰性回落
-  // 视同 dismiss；确认过的 frozen 不受 TTL 影响；回落后可再次 request。
-  it('stale pending_confirm lazily expires back to active (banner TTL)', () => {
-    let clock = 1_000
-    const gate = new AgentTabControlGate({ pendingConfirmTtlMs: 45_000, now: () => clock })
-    gate.requestInterruption()
-    assert.equal(gate.getState(), 'pending_confirm')
-
-    clock += 44_000
-    assert.equal(gate.getState(), 'pending_confirm', 'within TTL stays pending')
-    assert.equal(gate.isWriteBlocked(), true)
-
-    clock += 2_000
-    assert.equal(gate.getState(), 'active', 'stale pending expires like a dismiss')
-    assert.equal(gate.isWriteBlocked(), false)
-    assert.equal(gate.requestInterruption(), true, 'a fresh interruption can start after expiry')
-  })
-
-  it('confirmed frozen state never expires by TTL', () => {
-    let clock = 1_000
-    const gate = new AgentTabControlGate({ pendingConfirmTtlMs: 45_000, now: () => clock })
-    gate.requestInterruption()
-    gate.confirmInterruption()
-    clock += 10 * 60_000
-    assert.equal(gate.getState(), 'frozen')
-    assert.equal(gate.isFrozen(), true)
-  })
-
-  it('expiry cannot race a confirm: confirm after TTL is a no-op', () => {
-    let clock = 1_000
-    const gate = new AgentTabControlGate({ pendingConfirmTtlMs: 45_000, now: () => clock })
-    gate.requestInterruption()
-    clock += 46_000
-    assert.equal(gate.confirmInterruption(), false, 'stale confirm must not freeze a resumed agent')
-    assert.equal(gate.getState(), 'active')
-  })
-
-  // R18：惰性 TTL 回落不通知任何人——ipc 层按此值安排过期后的状态推送，
-  // 否则 renderer 的「等待确认」胶囊在主进程自愈后仍永远挂着（第十七轮实锚）。
-  it('exposes the pending-confirm TTL so callers can schedule an expiry push', () => {
-    assert.equal(new AgentTabControlGate({ pendingConfirmTtlMs: 32_000 }).getPendingConfirmTtlMs(), 32_000)
-    assert.equal(new AgentTabControlGate().getPendingConfirmTtlMs(), 45_000)
+    assert.equal(persisted, false)
+    assert.equal(failures, 1)
+    assert.equal(successCleanup, 0)
+    assert.equal(leaseService.getState('user-view'), 'takeover')
+    assert.equal(leaseService.checkWrite({ surface: 'user-view', leaseId: 'stale' })?.errorCode, 'lease_takeover')
   })
 })

@@ -1,22 +1,21 @@
 import { BrowserWindow, WebContentsView } from 'electron'
 
-import { type BrowserHostView, type BrowserRect } from './host-types'
+import { parkedBrowserHostBounds, type BrowserHostView, type BrowserRect } from './host-types'
 import { withHtmlInCanvasWebPreferences } from '../app-control/html-in-canvas-feature'
 
 const HOST_BORDER_RADIUS = 18
+export type BrowserHostPresentationState = 'visible' | 'parked' | 'hidden' | 'detached'
 
 export class BrowserHostLayoutService {
   private appliedBoundsByView = new WeakMap<BrowserHostView, string>()
-  private attachedHosts = new WeakSet<BrowserHostView>()
-  private hiddenHosts = new WeakSet<BrowserHostView>()
+  private presentationByView = new WeakMap<BrowserHostView, BrowserHostPresentationState>()
   private readonly offscreenBounds: BrowserRect = { x: -100000, y: -100000, width: 1, height: 1 }
 
   constructor(private mainWindow: BrowserWindow) {}
 
   setMainWindow(mainWindow: BrowserWindow): void {
     this.mainWindow = mainWindow
-    this.attachedHosts = new WeakSet<BrowserHostView>()
-    this.hiddenHosts = new WeakSet<BrowserHostView>()
+    this.presentationByView = new WeakMap<BrowserHostView, BrowserHostPresentationState>()
   }
 
   createHost(partition: string): BrowserHostView {
@@ -39,54 +38,63 @@ export class BrowserHostLayoutService {
   }
 
   detachHost(view: BrowserHostView): void {
-    if (!this.attachedHosts.has(view)) return
+    if (this.getHostPresentationState(view) === 'detached') return
     try {
       this.mainWindow.contentView.removeChildView(view as WebContentsView)
     } catch {
       // ignore detached host errors
     }
-    this.attachedHosts.delete(view)
-    this.hiddenHosts.delete(view)
+    this.presentationByView.set(view, 'detached')
   }
 
   showHost(view: BrowserHostView, bounds: BrowserRect): void {
-    if (this.attachedHosts.has(view)) {
+    if (this.getHostPresentationState(view) !== 'detached') {
       this.raiseHost(view)
     } else {
       this.attachHost(view)
     }
-    this.hiddenHosts.delete(view)
+    this.presentationByView.set(view, 'visible')
     this.appliedBoundsByView.delete(view)
     this.setHostBoundsNow(view, bounds)
   }
 
   hideHost(view: BrowserHostView): void {
-    if (!this.attachedHosts.has(view)) return
-    this.hiddenHosts.add(view)
+    if (this.getHostPresentationState(view) === 'detached') return
+    this.presentationByView.set(view, 'hidden')
     this.setHostBoundsNow(view, this.offscreenBounds)
   }
 
+  parkHost(view: BrowserHostView, bounds: BrowserRect): void {
+    if (this.getHostPresentationState(view) === 'detached') this.attachHost(view)
+    this.presentationByView.set(view, 'parked')
+    this.setHostBoundsNow(view, parkedBrowserHostBounds(bounds))
+  }
+
   applyBounds(view: BrowserHostView, bounds: BrowserRect): void {
-    if (this.hiddenHosts.has(view)) return
+    if (this.getHostPresentationState(view) !== 'visible') return
     this.setHostBoundsNow(view, bounds)
   }
 
   isHostAttached(view: BrowserHostView): boolean {
-    return this.attachedHosts.has(view)
+    return this.getHostPresentationState(view) !== 'detached'
   }
 
   isHostHidden(view: BrowserHostView): boolean {
-    return this.hiddenHosts.has(view)
+    return this.getHostPresentationState(view) === 'hidden'
   }
 
   isHostVisible(view: BrowserHostView): boolean {
-    return this.attachedHosts.has(view) && !this.hiddenHosts.has(view)
+    return this.getHostPresentationState(view) === 'visible'
+  }
+
+  getHostPresentationState(view: BrowserHostView): BrowserHostPresentationState {
+    return this.presentationByView.get(view) || 'detached'
   }
 
   private attachHost(view: BrowserHostView): void {
-    if (this.attachedHosts.has(view)) return
+    if (this.getHostPresentationState(view) !== 'detached') return
     this.mainWindow.contentView.addChildView(view as WebContentsView)
-    this.attachedHosts.add(view)
+    this.presentationByView.set(view, 'hidden')
   }
 
   private raiseHost(view: BrowserHostView): void {

@@ -15,6 +15,10 @@ function projectionAllowsResume(record: TaskProjectionRecord): boolean {
 }
 
 function hasBrowserResumeHandle(record: TaskProjectionRecord): boolean {
+  if (
+    record.checkpointRefs?.suspensionCheckpointId
+    && record.humanTakeoverRef?.state !== 'pending'
+  ) return true
   const ref = record.continuationRef || null
   const detachedTaskId = ref?.detachedTaskId
   return typeof detachedTaskId === 'string' && detachedTaskId.trim().startsWith('browser-task-')

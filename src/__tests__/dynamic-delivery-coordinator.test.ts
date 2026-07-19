@@ -302,7 +302,7 @@ for (const verifierVerdict of ['repair', 'block'] as const) {
   })
 }
 
-test('accept alone commits candidate history, releases buffered output, and close removes context', async () => {
+test('accept seals candidate history and only core-commit hook publishes it', async () => {
   const committed = new MemorySession({ initialItems: [user('base')] })
   const h = harness(async () => ({ finalText: verdict('accept'), usage: usage(4) }))
   const prepared = await prepare(h.coordinator, committed)
@@ -334,6 +334,10 @@ test('accept alone commits candidate history, releases buffered output, and clos
     materializeAndReadBack: async () => ({ version: 1, items: [] }),
   })
   assert.equal(result.acceptedText, 'visible')
+  assert.equal((await committed.getItems()).length, 1)
+  assert.equal(h.projection().deliveryState?.verifier.status, 'pending')
+  const committedCandidate = await h.coordinator.commitVerifiedCandidate('run')
+  assert.equal(committedCandidate.acceptedText, 'visible')
   const acceptedHistory = await committed.getItems()
   assert.equal(acceptedHistory.length, 3)
   assert.equal(JSON.stringify(acceptedHistory).includes('accepted'), true)
@@ -370,9 +374,11 @@ test('one text repair replaces the hidden draft and commits only the accepted an
     signal: new AbortController().signal,
     materializeAndReadBack: async () => ({ version: 1, items: [] }),
   })
-  const committedItems = JSON.stringify(await committed.getItems())
   assert.equal(result.acceptedText, 'repaired answer')
   assert.equal(prepared.emitOutput!.snapshot(), 'repaired answer')
+  assert.equal(JSON.stringify(await committed.getItems()).includes('repaired answer'), false)
+  await h.coordinator.commitVerifiedCandidate('run')
+  const committedItems = JSON.stringify(await committed.getItems())
   assert.equal(committedItems.includes('repaired answer'), true)
   assert.equal(committedItems.includes('rejected draft'), false)
   assert.equal(h.projection().deliveryState?.verifier.repaired, true)
@@ -406,5 +412,6 @@ test('artifact repair reuses only the supplied Owner repair-safe tools on the ve
     materializeAndReadBack: async () => ({ version: 1, items: [{ refId: 'doc-1', digest: 'after', provenance: 'readback', excerpt: 'fixed', kind: 'artifact' }] }),
   })
   assert.equal(result.acceptedText, 'artifact repaired')
+  await h.coordinator.commitVerifiedCandidate('run')
   assert.equal(h.projection().deliveryState?.verifier.repaired, true)
 })

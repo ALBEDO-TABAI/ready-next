@@ -11,6 +11,7 @@
 //   agent:suspendRun             (pause a scope-run; emits 'suspended' update)
 //   agent:resumeRun              (resume a paused scope-run via durable handle)
 //   agent:respondToInteraction   (reply to an in-flight interaction request)
+//   agent:completeHumanTakeover  (claim one typed Browser takeover receipt)
 //
 // Handler bodies are lifted VERBATIM from `ipc-handler.ts` (V2.1i is a pure
 // move — semantics must be byte-for-byte identical so the V5 IPC contract
@@ -146,6 +147,11 @@ export interface RespondToInteractionPayload {
   } | null
 }
 
+export interface CompleteHumanTakeoverPayload {
+  taskId: string
+  takeoverId: string
+}
+
 /**
  * Per-group deps. Mixed surface — see file header for why this is not
  * `Pick<EngineDeps, …>`.
@@ -195,6 +201,7 @@ export interface RunControlGroupDeps {
    * `resumeRun`.
    */
   respondToInteraction(payload: RespondToInteractionPayload): Promise<{ success: boolean; error?: string; errorKind?: string }>
+  completeHumanTakeover(payload: CompleteHumanTakeoverPayload): Promise<{ success: boolean; error?: string; errorKind?: string }>
 }
 
 const CHANNELS = [
@@ -204,6 +211,7 @@ const CHANNELS = [
   'agent:suspendRun',
   'agent:resumeRun',
   'agent:respondToInteraction',
+  'agent:completeHumanTakeover',
 ] as const
 
 export const runControlGroup: IpcChannelGroup<RunControlGroupDeps> = {
@@ -266,6 +274,15 @@ export const runControlGroup: IpcChannelGroup<RunControlGroupDeps> = {
     ipcMain.handle('agent:respondToInteraction', async (_, payload: RespondToInteractionPayload): Promise<IPCResponse> => {
       try {
         const result = await deps.respondToInteraction(payload)
+        return { success: result.success, error: result.error, errorKind: result.errorKind }
+      } catch (error) {
+        return { success: false, error: error instanceof Error ? error.message : String(error) }
+      }
+    })
+
+    ipcMain.handle('agent:completeHumanTakeover', async (_, payload: CompleteHumanTakeoverPayload): Promise<IPCResponse> => {
+      try {
+        const result = await deps.completeHumanTakeover(payload)
         return { success: result.success, error: result.error, errorKind: result.errorKind }
       } catch (error) {
         return { success: false, error: error instanceof Error ? error.message : String(error) }

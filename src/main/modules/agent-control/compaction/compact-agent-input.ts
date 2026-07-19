@@ -41,9 +41,44 @@ const CALL_RESULT_TYPES: Record<string, string> = {
   tool_search_call: 'tool_search_output',
 }
 
-const RESULT_CALL_TYPES = Object.fromEntries(
+const RESULT_CALL_TYPES: Record<string, string> = {
+  ...Object.fromEntries(
   Object.entries(CALL_RESULT_TYPES).map(([callType, resultType]) => [resultType, callType]),
-)
+  ),
+  // OpenAI Responses wire format. The SDK snapshot normally uses
+  // function_call_result, but recovery checkpoints can be written after a
+  // provider round-trip and must accept the lossless wire alias too.
+  function_call_output: 'function_call',
+}
+
+/**
+ * The same call/result contract used by compaction, exposed for durable
+ * checkpoint validation. A clean boundary may not contain a pending call or
+ * an orphan result because either shape makes the next provider request
+ * ambiguous after restart.
+ */
+export function assertAgentInputToolPairIntegrity(items: readonly AgentInputItem[]): void {
+  const pending = new Set<string>()
+  for (const item of items) {
+    const type = getItemType(item)
+    if (!type) continue
+    if (Object.hasOwn(CALL_RESULT_TYPES, type)) {
+      const callId = getCallId(item, type)
+      if (!callId) throw new Error('agent_input_tool_call_missing_id')
+      const key = `${type}:${callId}`
+      if (pending.has(key)) throw new Error('agent_input_duplicate_pending_tool_call')
+      pending.add(key)
+      continue
+    }
+    const callType = RESULT_CALL_TYPES[type]
+    if (!callType) continue
+    const callId = getCallId(item, type)
+    if (!callId) throw new Error('agent_input_tool_result_missing_id')
+    const key = `${callType}:${callId}`
+    if (!pending.delete(key)) throw new Error('agent_input_orphan_tool_result')
+  }
+  if (pending.size > 0) throw new Error('agent_input_has_pending_tool_calls')
+}
 
 function isLegacySkillCatalogReminderItem(item: AgentInputItem): boolean {
   if (!item || typeof item !== 'object') return false
@@ -358,10 +393,10 @@ function getCallId(item: AgentInputItem, type: string): string | null {
   const record = item as Record<string, unknown>
   const primary = record.callId
   if (typeof primary === 'string' && primary.length > 0) return primary
-  if (type === 'tool_search_call' || type === 'tool_search_output') {
-    const fallback = record.call_id
-    if (typeof fallback === 'string' && fallback.length > 0) return fallback
-  }
+  const fallback = record.call_id
+  if (typeof fallback === 'string' && fallback.length > 0) return fallback
+  const id = record.id
+  if (typeof id === 'string' && id.length > 0) return id
   return null
 }
 

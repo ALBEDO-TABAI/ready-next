@@ -1,5 +1,4 @@
-import type { ModelProvider } from '@openai/agents'
-import type { BrowserWorkIntent } from '../../../../shared/browser-work-intent'
+import type { MemorySession, ModelProvider } from '@openai/agents'
 import { classifyFollowupIntent } from '../../../../shared/agent-followup-intent'
 import { resolveAIConfigCapabilities } from '../../../../shared/ai-providers'
 import { buildAgentSpawnContextFromAIConfig } from '../../skills-runtime/agent-context-source'
@@ -12,6 +11,8 @@ import type {
 import { computeCapabilityFloors } from '../domain-adapters/capability-floors'
 import type { RequestedCapabilityConflict } from '../domain-adapters/capability-resolver'
 import type { SkillToolAuthorization } from '../skills/skill-tool-authorization'
+import type { PreparedSkillTurnTruth } from '../contracts/browser-workflow-control'
+import type { ResolvedSkillSurfaceComposition } from '../skills/skill-surface-composition'
 import type { ToolDefinition } from '../tools-runtime/tool-definition'
 import { createEmptyActiveFrameContext } from '../tools-runtime/tool-runtime'
 import { resolveSkillHintRelevanceForTurn } from './agent-sdk-skill-intent-utils'
@@ -30,6 +31,7 @@ import type {
   SdkLongSkillCheckpoint
 } from './agent-sdk-types'
 import type { TurnTerminalReason } from './turn-frame'
+import type { CanonicalAssistantMessageReceipt } from '../../../../shared/ipc-contracts/canonical-message'
 
 export interface AgentSdkPreparedTurnState {
   actionAnnouncementSteered: boolean
@@ -37,11 +39,14 @@ export interface AgentSdkPreparedTurnState {
   fileReadExcerptCheckpointForRecovery: string | null
   finalText: string
   hasSuccessfulDocumentTargetMutation: boolean
+  hasSuccessfulLocalDocumentSourceRead: boolean
   hasSuccessfulLocalDocumentSourceReadForRecovery: boolean
   hasSuccessfulToolProgress: boolean
+  lastDocumentSaveFailure: string | null
   lastDocumentSaveSuccessText: string | null
   lastRollingCheckpointToolCalls: number
   longSkillCheckpoint: SdkLongSkillCheckpoint | null
+  newDocumentNeedsSave: boolean
   observedDocumentMutationConflict: boolean
   observedDocumentMutationMissingTarget: boolean
   observedDocumentMutationTarget: ObservedDocumentToolTarget | null
@@ -73,6 +78,7 @@ export interface AgentSdkPreparedTurnContext {
   toolDefinitions: ToolDefinition[]
   abortController: AbortController
   runHandle: RunHandle
+  committedPublicSession: MemorySession
   session: AgentSdkSession
   isCurrentRun: () => boolean
   toolArgsByName: Map<string, Record<string, unknown>[]>
@@ -82,7 +88,8 @@ export interface AgentSdkPreparedTurnContext {
   emitOutputForRun: (
     chunk: string,
     type: string,
-    projectionPatch?: Record<string, unknown> | null
+    projectionPatch?: Record<string, unknown> | null,
+    canonicalReceipt?: CanonicalAssistantMessageReceipt,
   ) => void
   emitOutput: (
     chunk: string,
@@ -103,7 +110,6 @@ export interface AgentSdkPreparedTurnContext {
   }) => Promise<ExecutionTurnResult>
   finalizeBudgetCheckpointReturn: (checkpointText: string) => Promise<ExecutionTurnResult>
   buildResult: (params: Parameters<typeof buildExecutionTurnResult>[1]) => ExecutionTurnResult
-  recentBrowserWorkIntent: BrowserWorkIntent
   requestedCapabilityConflicts: readonly RequestedCapabilityConflict[]
   turnFollowup: ReturnType<typeof classifyFollowupIntent>
   useTextToolBridge: boolean
@@ -114,6 +120,8 @@ export interface AgentSdkPreparedTurnContext {
   providerContent: RunMessage
   capabilities: ReturnType<typeof resolveAIConfigCapabilities>
   authorization: SkillToolAuthorization
+  preparedSkillTurn: PreparedSkillTurnTruth
+  skillSurface: ResolvedSkillSurfaceComposition
   activeFrame: ReturnType<typeof createEmptyActiveFrameContext>
   contextWindowTokens: number
   maxOutputTokens: number

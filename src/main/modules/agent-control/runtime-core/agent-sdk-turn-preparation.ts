@@ -15,11 +15,12 @@ import {
 } from '../safety/authorization-fact-store'
 import { recordNegations, releaseNegations } from '../safety/negation-state'
 import type { SkillToolAuthorization } from '../skills/skill-tool-authorization'
+import { resolveSkillSurfaceComposition } from '../skills/skill-surface-composition'
+import { revalidateSavedSkillAuthorization } from '../skills/prepared-skill-turn'
 import type {
   CapabilityResolution,
   RequestedCapabilityConflict
 } from '../domain-adapters/capability-resolver'
-import { clearActivePlanForScope } from '../system-reminders/active-plan-step-reminder'
 import type { ToolDefinition } from '../tools-runtime/tool-definition'
 import { createEmptyActiveFrameContext } from '../tools-runtime/tool-runtime'
 import {
@@ -52,7 +53,6 @@ import {
   readSkillReferenceNames,
   resolveSkillHintRelevanceForTurn
 } from './agent-sdk-skill-intent-utils'
-import { resolveBrowserWorkIntent, type BrowserWorkIntent } from '../../../../shared/browser-work-intent'
 import type {
   AgentSdkBudgetCheckpointRestore,
   AgentSdkExecutionOptions,
@@ -61,7 +61,9 @@ import type {
   DocumentTargetGuard
 } from './agent-sdk-types'
 import type { TurnTerminalReason } from './turn-frame'
+import type { PreparedSkillTurnTruth } from '../contracts/browser-workflow-control'
 import { deriveChainedSkillReadRoots } from './turn-frame-resolver'
+import type { AgentSessionCheckpoint } from '../../repositories/agent-session-checkpoint-repository'
 
 import type { TurnOrchestratorHost } from './agent-sdk-turn-context'
 
@@ -72,6 +74,7 @@ export interface AgentSdkTurnPreparationContext {
   content: RunMessage
   effectiveExecutionOptions?: AgentSdkExecutionOptions
   checkpointRestore: AgentSdkBudgetCheckpointRestore | null
+  durableCheckpoint?: AgentSessionCheckpoint | null
   activeFrame: ReturnType<typeof createEmptyActiveFrameContext>
   sessionId?: string
   runId: string
@@ -104,17 +107,65 @@ export type AgentSdkTurnPreparationResult =
       skillCatalogSnapshot: AgentSdkSkillCatalogSnapshotEntry[]
       skillHintRelevanceForTurn: ReturnType<typeof resolveSkillHintRelevanceForTurn>
       authorization: SkillToolAuthorization
+      skillIdentity: ReturnType<TurnOrchestratorHost['resolvePreparedSkillTurnForTurn']>['identity']
+      skillSurface: ReturnType<typeof resolveSkillSurfaceComposition>
       documentTargetGuard: DocumentTargetGuard | null
       requiresLocalDocumentExcerpt: boolean
       preferCurrentDocumentRead: boolean
       requiresLocalDocumentWrite: boolean
       providerContent: RunMessage
-      recentBrowserWorkIntent: BrowserWorkIntent
       requestedCapabilityConflicts: RequestedCapabilityConflict[]
       preNarrowingToolDefinitions: ToolDefinition[]
       toolDefinitions: ToolDefinition[]
       turnFollowup: ReturnType<typeof classifyFollowupIntent>
     }
+
+export interface TurnTextPolicyDecision {
+  negations: ReturnType<typeof classifyFollowupIntent>['negations']
+  releasedNegations: ReturnType<typeof detectNegationReleases>
+  verbatimGrants: ReturnType<typeof detectVerbatimGrants>
+  narrowToStatusTools: boolean
+}
+
+export function resolveTurnTextPolicyDecision(input: {
+  durableBrowserWorkflow: boolean
+  primaryInstruction: string
+  followup: ReturnType<typeof classifyFollowupIntent>
+}): TurnTextPolicyDecision {
+  if (input.durableBrowserWorkflow) {
+    return {
+      negations: [],
+      releasedNegations: [],
+      verbatimGrants: [],
+      narrowToStatusTools: false,
+    }
+  }
+  return {
+    negations: input.followup.negations,
+    releasedNegations: detectNegationReleases(input.primaryInstruction),
+    verbatimGrants: detectVerbatimGrants(input.primaryInstruction),
+    narrowToStatusTools: input.followup.kind === 'status_query',
+  }
+}
+
+export function resolvePreparedSkillTurnAuthority(input: {
+  durablePreparedSkill?: PreparedSkillTurnTruth | null
+  resolveSaved: (saved: PreparedSkillTurnTruth) => SkillToolAuthorization
+  resolveSemantic: () => {
+    authorization: SkillToolAuthorization
+    identity: PreparedSkillTurnTruth['identity']
+  }
+}): {
+  authorization: SkillToolAuthorization
+  identity: PreparedSkillTurnTruth['identity']
+} {
+  return input.durablePreparedSkill
+    ? {
+        authorization: input.resolveSaved(input.durablePreparedSkill),
+        identity: input.durablePreparedSkill.identity,
+      }
+    : input.resolveSemantic()
+}
 
 export function prepareAgentSdkTurn(
   ctx: AgentSdkTurnPreparationContext
@@ -124,6 +175,7 @@ export function prepareAgentSdkTurn(
     content,
     effectiveExecutionOptions,
     checkpointRestore,
+    durableCheckpoint,
     activeFrame,
     sessionId,
     runId,
@@ -159,13 +211,25 @@ export function prepareAgentSdkTurn(
     checkpointRestore,
     taskRefs: scopeTaskRefs
   })
-  const authorization = host.resolveSkillAuthorizationForTurn(
-    content as RunMessage,
-    sessionId,
-    effectiveExecutionOptions?.requestEnvelope,
-    localSendImTurn,
-    skillHintRelevanceForTurn.relevant
+  const durablePreparedSkill = durableCheckpoint?.preparedSkill ?? null
+  const durableBrowserWorkflow = Boolean(
+    durableCheckpoint?.browserTaskId
+    && durableCheckpoint.activatedCapabilityGroups.includes('browser')
   )
+  const preparedSkillTurn = resolvePreparedSkillTurnAuthority({
+    durablePreparedSkill,
+    resolveSaved: (saved) => host.resolveSavedSkillAuthorizationForResume(saved),
+    resolveSemantic: () => host.resolvePreparedSkillTurnForTurn(
+        content as RunMessage,
+        sessionId,
+        effectiveExecutionOptions?.requestEnvelope,
+        localSendImTurn,
+        skillHintRelevanceForTurn.relevant
+      ),
+  })
+  let { authorization } = preparedSkillTurn
+  let skillIdentity = preparedSkillTurn.identity
+  let skillSurface = resolveSkillSurfaceComposition(authorization, runId)
   let skillCatalogSnapshot: AgentSdkSkillCatalogSnapshotEntry[] = []
   // R-XREAD — the live SDK path owns a lightweight active-frame context,
   // not the legacy TurnFrame resolver. Seed it here from typed envelope
@@ -181,7 +245,7 @@ export function prepareAgentSdkTurn(
         description: String(skill.description || ''),
         managedPath: skill.managedPath
       }))
-    const projection = host.runtime?.getTaskProjectionStoreForFinalize?.().get(taskId) ?? null
+    const projection = host.runtime?.getTaskProjectionStoreForFinalize?.()?.get(taskId) ?? null
     const roots = deriveChainedSkillReadRoots({
       selectedSkillId: authorization.mode === 'selected' ? authorization.skillId : null,
       referencedSkillNames: readSkillReferenceNames(effectiveExecutionOptions?.requestEnvelope),
@@ -241,24 +305,11 @@ export function prepareAgentSdkTurn(
     hasActiveTaskContext: hasRecalledTaskContext(messageToText(content as RunMessage)),
     taskRefs: scopeTaskRefs
   })
-  // Keep the complete browser-work contract across a bare retry/correction.
-  // A substantive new task or explicit refusal clears it, so a stale write
-  // boolean cannot leak into an unrelated turn.
-  if (
-    sessionId &&
-    (
-      localSendImTurn ||
-      turnFollowup.kind === 'new_task' ||
-      turnFollowup.negations.includes('collection')
-    )
-  ) {
-    host.intentTracker.resetCollectionIntents(sessionId)
-  }
-  const recentBrowserWorkIntent = host.intentTracker.trackBrowserWorkIntent(
-    sessionId,
-    resolveBrowserWorkIntent(localSendImTurn ? '' : turnFollowupPrimary),
-    turnFollowup.kind,
-  )
+  const turnTextPolicy = resolveTurnTextPolicyDecision({
+    durableBrowserWorkflow,
+    primaryInstruction: turnFollowupPrimary,
+    followup: turnFollowup,
+  })
   const capabilityResolutionCapture: { current: CapabilityResolution | null } = { current: null }
   let toolDefinitions = host.listToolDefinitionsForTurn({
     message: content as RunMessage,
@@ -270,7 +321,7 @@ export function prepareAgentSdkTurn(
     // Phase I —— 渠道回传组仅对绑定了远程线程的 scope 暴露
     channelScopeBound: host.runtime?.isScopeChannelBound?.(sessionId) ?? false,
     authorization,
-    recentBrowserWorkIntent,
+    skillSurfaceComposition: skillSurface.composition,
     localSendImIntent: localSendImTurn,
     requestEnvelope: effectiveExecutionOptions?.requestEnvelope,
     // P2-2 — gate use_skill exposure on the exact per-turn catalog snapshot later shown to the model.
@@ -287,7 +338,7 @@ export function prepareAgentSdkTurn(
     )
     logAgentMetric('tool_capability_conflict', { runId, taskId, scopeId: sessionId || null, groups, reasons })
   }
-  const preNarrowingToolDefinitions = toolDefinitions
+  let preNarrowingToolDefinitions = toolDefinitions
   if (
     shouldUseLocalDocumentToolSet(content as RunMessage, effectiveExecutionOptions?.requestEnvelope)
   ) {
@@ -318,19 +369,20 @@ export function prepareAgentSdkTurn(
   // negations from this turn; an explicit release signal ("现在可以采集
   // 了") lifts them. Dispatch-layer interception consults this state.
   if (sessionId) {
-    if (turnFollowup.negations.length > 0) {
-      recordNegations(sessionId, turnFollowup.negations)
+    if (turnTextPolicy.negations.length > 0) {
+      recordNegations(sessionId, turnTextPolicy.negations)
       // EP2-I-auth: 拒绝权优先于既往批准 — negations revoke matching grants
       revokeAuthorizationsForCategories(
         sessionId,
-        authCategoriesForNegationFamilies(turnFollowup.negations)
+        authCategoriesForNegationFamilies(turnTextPolicy.negations)
       )
     }
-    const released = detectNegationReleases(turnFollowupPrimary)
-    if (released.length > 0) releaseNegations(sessionId, released)
+    if (turnTextPolicy.releasedNegations.length > 0) {
+      releaseNegations(sessionId, turnTextPolicy.releasedNegations)
+    }
     // EP2-I-auth WRITE ENTRY 1 (classifier consumption chain): explicit
     // object+action naming in USER text becomes a provable grant.
-    for (const grant of detectVerbatimGrants(turnFollowupPrimary)) {
+    for (const grant of turnTextPolicy.verbatimGrants) {
       recordVerbatimGrant({
         scopeId: sessionId,
         actionCategory: grant.actionCategory,
@@ -339,13 +391,7 @@ export function prepareAgentSdkTurn(
       })
     }
   }
-  // Review-team D3: a substantive NEW instruction supersedes the prior
-  // plan — otherwise a stale "不要重新规划" reminder (within its TTL)
-  // would steer the model against the user's new task.
-  if (turnFollowup.kind === 'new_task' && turnFollowupPrimary.trim().length > 12) {
-    clearActivePlanForScope(sessionId)
-  }
-  if (turnFollowup.kind === 'status_query') {
+  if (turnTextPolicy.narrowToStatusTools) {
     toolDefinitions = toolDefinitions.filter((definition) => {
       const name = (definition as { name?: unknown }).name
       if (typeof name !== 'string' || !name.startsWith('browser_')) return true
@@ -383,6 +429,71 @@ export function prepareAgentSdkTurn(
       })
     }
   }
+  if (durableCheckpoint) {
+    const projection = host.runtime?.getTaskProjectionStoreForFinalize()?.get(taskId) || null
+    const anchorDigest = projection?.requestAnchor?.snapshotDigest
+      || durableCheckpoint.preparedSkill.requestOrResourceAnchorDigest
+    const availableToolNames = new Set([
+      ...toolDefinitions,
+      ...host.toolExecutor.listLatentSkillToolDefinitions(),
+      ...host.toolExecutor.listLatentBrowserToolDefinitions(),
+    ].map((definition) => definition.name))
+    const revalidated = revalidateSavedSkillAuthorization({
+      saved: durableCheckpoint.preparedSkill,
+      currentLegalAuthorization: authorization,
+      currentlyAvailableToolNames: availableToolNames,
+      currentSurface: skillSurface,
+      requestOrResourceAnchorDigest: anchorDigest,
+      ownerTransition: durableCheckpoint.ownerRunId === runId
+        && durableCheckpoint.ancestorOwnerRunId
+        && durableCheckpoint.ancestorCheckpointDigest
+        ? {
+            fromOwnerRunId: durableCheckpoint.ancestorOwnerRunId,
+            toOwnerRunId: runId,
+            receiptClaimed: true,
+          }
+        : null,
+    })
+    if (revalidated.status === 'waiting') {
+      const detail = revalidated.missingToolNames.length > 0
+        ? `：${revalidated.missingToolNames.join(', ')}`
+        : ''
+      const message = `安全续跑条件已变化，任务保持等待${detail}`
+      emitOutput(message, 'error')
+      return {
+        terminalResult: finalizeEarlyReturn({
+          status: 'checkpoint',
+          terminalReason: 'blocked_tool_error',
+          finalText: '',
+          error: message,
+        }),
+      }
+    }
+    authorization = revalidated.authorization
+    skillSurface = revalidated.effectiveSurface
+    skillIdentity = durableCheckpoint.preparedSkill.identity
+    toolDefinitions = host.listToolDefinitionsForTurn({
+      message: content as RunMessage,
+      sessionId,
+      scopeId: sessionId,
+      config,
+      browserHostAvailable: host.hasBrowserController(),
+      feishuConnected: host.runtime?.isChannelTypeAvailable?.('feishu-app') ?? false,
+      channelScopeBound: host.runtime?.isScopeChannelBound?.(sessionId) ?? false,
+      authorization,
+      skillSurfaceComposition: skillSurface.composition,
+      requestEnvelope: effectiveExecutionOptions?.requestEnvelope,
+      skillCatalogAvailable: skillCatalogSnapshot.length > 0,
+    })
+    if (durableBrowserWorkflow && skillSurface.composition === 'additive') {
+      const byName = new Map(toolDefinitions.map((definition) => [definition.name, definition]))
+      for (const definition of host.toolExecutor.listLatentBrowserToolDefinitions()) {
+        byName.set(definition.name, definition)
+      }
+      toolDefinitions = [...byName.values()]
+    }
+    preNarrowingToolDefinitions = toolDefinitions
+  }
 
   return {
     terminalResult: null,
@@ -390,12 +501,13 @@ export function prepareAgentSdkTurn(
     skillCatalogSnapshot,
     skillHintRelevanceForTurn,
     authorization,
+    skillIdentity,
+    skillSurface,
     documentTargetGuard,
     requiresLocalDocumentExcerpt,
     preferCurrentDocumentRead,
     requiresLocalDocumentWrite,
     providerContent,
-    recentBrowserWorkIntent,
     requestedCapabilityConflicts,
     preNarrowingToolDefinitions,
     toolDefinitions,

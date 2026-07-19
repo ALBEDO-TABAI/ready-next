@@ -49,6 +49,10 @@ export interface SkillState {
   childLoop?: SkillChildLoopDefinition
   /** Embedded manifest tool contract used to admit the selected skill's capability groups. */
   allowedTools?: string[]
+  capabilitySurface?: {
+    composition: 'additive' | 'exclusive'
+    exclusiveScope?: 'owner'
+  }
   configuration?: import('../../../shared/skill-configuration').SkillConfigurationDefinition
 }
 

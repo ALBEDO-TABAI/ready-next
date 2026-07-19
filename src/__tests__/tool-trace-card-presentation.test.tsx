@@ -5,6 +5,7 @@
  * manual expand shows the full list.
  */
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import { createElement } from 'react'
 import { act } from 'react'
@@ -12,6 +13,11 @@ import { createRoot, type Root } from 'react-dom/client'
 import { JSDOM } from 'jsdom'
 
 import { ToolTraceCard } from '../renderer/components/agent/chat-panel/task/TaskCard'
+
+const GLASS_OVERRIDES_CSS = readFileSync(
+  new URL('../renderer/styles/glass-overrides.css', import.meta.url),
+  'utf8',
+)
 
 type TraceEvent = { id: string; kind: 'call' | 'result'; text: string; timestamp: Date }
 
@@ -107,8 +113,13 @@ test('ToolTraceCard: completed run auto-collapses to a single line (count + late
   })
 })
 
-test('ToolTraceCard: collapsed row is borderless and aligns with the message edge', () => {
+test('ToolTraceCard: historical trace row is frameless and aligns with the message edge', () => {
   withDom((render) => {
+    document.documentElement.dataset.skin = 'liquid-glass'
+    document.documentElement.dataset.glassVariant = 'solid-green'
+    const style = document.createElement('style')
+    style.textContent = GLASS_OVERRIDES_CSS
+    document.head.append(style)
     const container = render(createElement(ToolTraceCard, {
       events: makeEvents(),
       pending: false,
@@ -117,6 +128,8 @@ test('ToolTraceCard: collapsed row is borderless and aligns with the message edg
     const card = container.querySelector('[data-ready-tool-trace-card="true"]') as HTMLElement | null
     const header = card?.querySelector('button') as HTMLButtonElement | null
     assert.equal(card?.style.borderWidth, '0px')
+    assert.equal(card?.style.background, 'transparent')
+    assert.equal(card ? window.getComputedStyle(card).backgroundColor : null, 'rgba(0, 0, 0, 0)')
     assert.equal(header?.style.paddingLeft, '0px')
   })
 })

@@ -3,7 +3,7 @@
  *
  * Source: deer-flow agents/middlewares/llm_error_handling_middleware.py
  * Wraps an LLM call with retry + exponential backoff for the canonical
- * transient HTTP statuses (408/409/425/429/5xx) and "server busy"
+ * transient HTTP statuses (408/425/429/retryable 5xx) and "server busy"
  * message patterns. Non-retryable errors bubble out immediately.
  *
  * Stage X6.2 — adds a single, separate auto-retry path for the
@@ -21,9 +21,13 @@ import { logAgentMetric } from '../agent-control/metrics'
 import { PROVIDER_ERROR_KINDS } from '../agent-control/contracts/error-kinds'
 import { TOOL_ERROR_METRICS } from '../agent-control/tools-runtime/tool-error-metrics'
 import { ToolDomainError } from '../tools/tool-errors'
-import { readProviderTerminalError } from './provider-terminal-error'
+import {
+  PROVIDER_EXPLICIT_RETRY_STATUS_CODES,
+  isRetryableProviderHttpStatus,
+  readProviderTerminalError,
+} from './provider-terminal-error'
 
-export const RETRY_STATUS_CODES = [408, 409, 425, 429, 500, 502, 503, 504] as const
+export const RETRY_STATUS_CODES = PROVIDER_EXPLICIT_RETRY_STATUS_CODES
 export type RetryStatusCode = typeof RETRY_STATUS_CODES[number]
 
 export const RETRY_BUSY_PATTERNS: RegExp[] = [
@@ -47,8 +51,7 @@ export interface ProviderErrorClassification {
 }
 
 export function isRetryableStatus(status: number | null | undefined): boolean {
-  if (status == null) return false
-  return (RETRY_STATUS_CODES as readonly number[]).includes(status)
+  return isRetryableProviderHttpStatus(status)
 }
 
 export function isRetryableMessage(message: string | null | undefined): boolean {

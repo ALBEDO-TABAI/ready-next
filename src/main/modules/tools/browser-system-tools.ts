@@ -3,11 +3,14 @@ import type { BrowserNetworkObserverHandle, BrowserNetworkEventRecord } from '..
 import type { ToolExecutionOutput } from '../agent-control/tools-runtime/tool-result-types'
 import { createBrowserStructuredOutput } from './browser-failure-output'
 import { resolveAuthorizedBrowserOutputPath } from './browser-media-download'
+import type { BrowserTaskEnvelope } from '../../../shared/browser-task-envelope'
+import { createHash } from 'node:crypto'
+import type { BrowserPermissionSuspensionRequest } from '../../../shared/browser-workflow-control'
 import {
-  browserTaskEnvelopeAllowsSensitiveOperation,
-  type BrowserSensitiveOperation,
-  type BrowserTaskEnvelope,
-} from '../../../shared/browser-task-envelope'
+  type BrowserOperationId,
+  type BrowserPublicToolName,
+} from '../../../shared/browser-capability-registry'
+import { browserEnvelopeMatchesInvocation } from './browser-task-envelope-binding'
 
 interface ActiveNetworkTrace {
   handle: BrowserNetworkObserverHandle
@@ -57,10 +60,11 @@ export async function executeBrowserSystemTool(
   args: Record<string, unknown>,
   context: {
     controller: BrowserController
-    currentUserText?: string | null
     trustedRoots?: string[]
     taskEnvelope?: BrowserTaskEnvelope | null
     abortSignal?: AbortSignal
+    registerRunCleanup?: (cleanup: () => void | Promise<void>) => void
+    confirmedBrowserPermissionRequest?: BrowserPermissionSuspensionRequest | null
   },
 ): Promise<string | ToolExecutionOutput> {
   const { controller } = context
@@ -74,39 +78,107 @@ export async function executeBrowserSystemTool(
       return null
     }
   })()
-  const requireSensitiveIntent = (
-    sensitiveOperation: BrowserSensitiveOperation,
+  const requireSensitiveConfirmation = async (
+    operationId: Extract<BrowserOperationId,
+      | 'session_clear_origin'
+      | 'session_clear_site_data'
+      | 'session_switch_profile'
+      | 'permission_set'
+      | 'permission_reset'>,
+    publicToolName: Extract<BrowserPublicToolName, 'browser_session' | 'browser_permission'>,
     requestedOrigin?: string | null,
-  ): ToolExecutionOutput | null => {
+  ): Promise<ToolExecutionOutput | null> => {
     const envelope = context.taskEnvelope
-    if (!browserTaskEnvelopeAllowsSensitiveOperation(envelope, sensitiveOperation)) {
+    if (!browserEnvelopeMatchesInvocation(envelope, publicToolName, operationId, args)) {
       return createBrowserStructuredOutput({
         ok: false,
-        errorKind: 'browser_task_intent_mismatch',
-        operation: sensitiveOperation,
-        message: 'This state-changing browser operation was not explicitly requested by the current user turn.',
+        errorKind: 'browser_task_invocation_mismatch',
+        operation: operationId,
       })
     }
     if (!boundTab || !envelope?.tabId || envelope.tabId !== boundTab.id) {
-      return createBrowserStructuredOutput({ ok: false, errorKind: 'browser_task_tab_mismatch', operation: sensitiveOperation })
+      return createBrowserStructuredOutput({ ok: false, errorKind: 'browser_task_tab_mismatch', operation: operationId })
     }
-    const requested = (() => {
-      if (!requestedOrigin) return boundOrigin
-      try { return new URL(requestedOrigin).origin } catch {
-        // silent-catch: malformed requested origins fail the exact-origin comparison below.
-        return null
+    if (operationId !== 'session_switch_profile') {
+      const requested = (() => {
+        if (!requestedOrigin) return boundOrigin
+        try { return new URL(requestedOrigin).origin } catch {
+          // silent-catch: malformed requested origins fail the exact-origin comparison below.
+          return null
+        }
+      })()
+      if (!requested || !boundOrigin || requested !== boundOrigin || envelope.origin !== boundOrigin) {
+        return createBrowserStructuredOutput({
+          ok: false,
+          errorKind: 'browser_task_origin_mismatch',
+          operation: operationId,
+          requestedOrigin: requested,
+          boundOrigin,
+        })
       }
-    })()
-    if (!requested || !boundOrigin || requested !== boundOrigin || envelope.origin !== boundOrigin) {
-      return createBrowserStructuredOutput({
-        ok: false,
-        errorKind: 'browser_task_origin_mismatch',
-        operation: sensitiveOperation,
-        requestedOrigin: requested,
-        boundOrigin,
-      })
     }
     return null
+  }
+  const readExactPermissionRequest = (): {
+    readback: ReturnType<BrowserController['getBrowserPermission']> | null
+    denied: ToolExecutionOutput | null
+  } => {
+    const siteRequestId = String(args.site_request_id || '').trim()
+    if (!siteRequestId) {
+      return {
+        readback: null,
+        denied: createBrowserStructuredOutput({ ok: false, errorKind: 'site_permission_request_id_required' }),
+      }
+    }
+    const readback = controller.getBrowserPermission(siteRequestId)
+    if (readback.state === 'expired' || !readback.target) {
+      return {
+        readback,
+        denied: createBrowserStructuredOutput({
+          ok: false,
+          errorKind: 'browser_permission_request_expired',
+          ...readback,
+        }),
+      }
+    }
+    const envelope = context.taskEnvelope
+    const target = readback.target
+    if (
+      !boundTab
+      || !envelope
+      || !envelope.browserTaskId
+      || envelope.parentTaskId !== target.parentTaskId
+      || envelope.browserTaskId !== target.browserTaskId
+      || envelope.scopeId !== target.scopeId
+      || boundTab.id !== target.tabId
+      || envelope.tabId !== target.tabId
+      || controller.getPhysicalTargetToken(target.tabId) !== target.physicalTargetToken
+    ) {
+      return {
+        readback,
+        denied: createBrowserStructuredOutput({
+          ok: false,
+          errorKind: 'browser_permission_request_target_mismatch',
+          requestId: siteRequestId,
+        }),
+      }
+    }
+    const requestedPermission = String(args.permission || '').toLowerCase()
+    const requestedOrigin = String(args.origin || '')
+    if (
+      (requestedPermission && requestedPermission !== readback.permission)
+      || (requestedOrigin && requestedOrigin !== readback.origin)
+    ) {
+      return {
+        readback,
+        denied: createBrowserStructuredOutput({
+          ok: false,
+          errorKind: 'browser_permission_request_identity_mismatch',
+          requestId: siteRequestId,
+        }),
+      }
+    }
+    return { readback, denied: null }
   }
   switch (operation) {
     case 'dialog_get': {
@@ -125,7 +197,6 @@ export async function executeBrowserSystemTool(
     }
     case 'archive': {
       const resolvedPath = resolveAuthorizedBrowserOutputPath(args.path, {
-        currentUserText: context.currentUserText,
         trustedRoots: context.trustedRoots,
       })
       const format = String(args.format || '') as 'pdf' | 'mhtml' | 'html' | 'markdown'
@@ -174,6 +245,11 @@ export async function executeBrowserSystemTool(
       })
       const trace = { handle, startedAt: new Date().toISOString() }
       traces.set(resolvedTabId, trace)
+      context.registerRunCleanup?.(async () => {
+        if (traces.get(resolvedTabId)?.handle !== handle) return
+        await handle.stop()
+        traces.delete(resolvedTabId)
+      })
       return createBrowserStructuredOutput({ ok: true, traceId: handle.id, tabId: resolvedTabId, startedAt: trace.startedAt })
     }
     case 'network_list':
@@ -216,8 +292,9 @@ export async function executeBrowserSystemTool(
       return createBrowserStructuredOutput({ ok: true, ...(await controller.getBrowserSessionStatus(tabId, String(args.origin || '') || undefined)) })
     case 'session_clear_origin':
     case 'session_clear_site_data': {
-      const intentDenied = requireSensitiveIntent(
-        operation === 'session_clear_origin' ? 'session.clear_origin' : 'session.clear_site_data',
+      const intentDenied = await requireSensitiveConfirmation(
+        operation,
+        'browser_session',
         String(args.origin || '') || null,
       )
       if (intentDenied) return intentDenied
@@ -230,11 +307,8 @@ export async function executeBrowserSystemTool(
     case 'session_switch_profile': {
       const profile = String(args.profile || '').trim()
       if (!profile) return createBrowserStructuredOutput({ ok: false, errorKind: 'profile_required' })
-      const intentDenied = requireSensitiveIntent('session.switch_profile')
+      const intentDenied = await requireSensitiveConfirmation('session_switch_profile', 'browser_session')
       if (intentDenied) return intentDenied
-      if (!context.taskEnvelope?.primaryInstruction.includes(profile)) {
-        return createBrowserStructuredOutput({ ok: false, errorKind: 'browser_task_profile_mismatch', profile })
-      }
       const current = tabId
         ? controller.getTabList().find((tab) => tab.id === tabId)
         : controller.getActiveTab()
@@ -245,22 +319,29 @@ export async function executeBrowserSystemTool(
       return createBrowserStructuredOutput({ ok: created.success === true, ...created, profile, previousTabId: current?.id || null })
     }
     case 'permission_status': {
-      const permission = String(args.permission || '')
-      const origin = String(args.origin || boundOrigin || '')
-      if (!permission) return createBrowserStructuredOutput({ ok: false, errorKind: 'permission_required' })
-      return createBrowserStructuredOutput({ ok: true, ...controller.getBrowserPermission(origin, permission) })
+      const exact = readExactPermissionRequest()
+      if (exact.denied) return exact.denied
+      return createBrowserStructuredOutput({ ok: true, ...exact.readback! })
     }
-    case 'permission_set':
-    case 'permission_reset': {
-      const permission = String(args.permission || '')
-      const origin = String(args.origin || boundOrigin || '')
-      const decision = operation === 'permission_reset' ? 'ask' : String(args.decision || 'ask') as 'allow' | 'deny' | 'ask'
+    case 'permission_set': {
+      const exact = readExactPermissionRequest()
+      if (exact.denied) return exact.denied
+      const pending = exact.readback!
+      const permission = String(pending.permission || '')
+      const origin = String(pending.origin || '')
+      const decision = String(args.decision || '') as 'allow' | 'deny'
       if (!permission) return createBrowserStructuredOutput({ ok: false, errorKind: 'permission_required' })
-      const intentDenied = requireSensitiveIntent(
-        operation === 'permission_reset' ? 'permission.reset' : 'permission.set',
-        origin,
-      )
-      if (intentDenied) return intentDenied
+      if (decision !== 'allow' && decision !== 'deny') {
+        return createBrowserStructuredOutput({ ok: false, errorKind: 'permission_decision_required' })
+      }
+      if (pending.state === 'applied') {
+        return createBrowserStructuredOutput({
+          ok: false,
+          errorKind: 'browser_permission_request_already_applied',
+          requestedDecision: decision,
+          ...pending,
+        })
+      }
       if (permission === 'media' && decision === 'allow') {
         return createBrowserStructuredOutput({
           ok: false,
@@ -268,7 +349,115 @@ export async function executeBrowserSystemTool(
           message: 'Camera and microphone permission must be completed by the user in takeover mode.',
         })
       }
-      return createBrowserStructuredOutput({ ok: true, ...controller.setBrowserPermission(origin, permission, decision) })
+      const intentDenied = await requireSensitiveConfirmation(
+        'permission_set',
+        'browser_permission',
+        boundOrigin,
+      )
+      if (intentDenied) return intentDenied
+      const siteRequestId = pending.requestId
+      const pendingPermission = permission.toLowerCase()
+      const pendingOrigin = origin
+      if (decision === 'allow') {
+        const envelope = context.taskEnvelope!
+        const inputHash = createHash('sha256').update(JSON.stringify({
+          siteRequestId,
+          permission: pendingPermission,
+          origin: pendingOrigin,
+          decision,
+          argsDigest: envelope.argsDigest,
+        })).digest('hex')
+        const targetDigest = createHash('sha256').update(JSON.stringify({
+          scopeId: pending.target!.scopeId,
+          ownerRunId: pending.target!.ownerRunId,
+          browserTaskId: pending.target!.browserTaskId,
+          tabId: pending.target!.tabId,
+          siteRequestId,
+          permission: pendingPermission,
+          origin: pendingOrigin,
+        })).digest('hex')
+        const confirmed = context.confirmedBrowserPermissionRequest
+        const exactConfirmation = Boolean(
+          confirmed
+          && confirmed.actionIntent.siteRequestId === siteRequestId
+          && confirmed.actionIntent.permission === pendingPermission
+          && confirmed.actionIntent.origin === pendingOrigin
+          && confirmed.actionIntent.decision === decision
+          && confirmed.actionIntent.inputHash === inputHash
+          && confirmed.target.scopeId === pending.target!.scopeId
+          && confirmed.target.ownerRunId === pending.target!.ownerRunId
+          && confirmed.target.browserTaskId === pending.target!.browserTaskId
+          && confirmed.target.tabId === pending.target!.tabId
+          && confirmed.target.targetDigest === targetDigest,
+        )
+        if (!exactConfirmation) {
+          const suspension: BrowserPermissionSuspensionRequest = {
+            version: 1,
+            kind: 'browser_permission',
+            requestId: `browser-permission-confirmation-${targetDigest.slice(0, 32)}`,
+            wakeKind: 'browser_permission',
+            toolName: 'browser_permission',
+            actionIntent: {
+              siteRequestId,
+              permission: pendingPermission,
+              origin: pendingOrigin,
+              decision,
+              inputHash,
+            },
+            target: {
+              scopeId: pending.target!.scopeId || envelope.scopeId,
+              ownerRunId: pending.target!.ownerRunId,
+              browserTaskId: pending.target!.browserTaskId,
+              tabId: pending.target!.tabId,
+              targetDigest,
+            },
+            purpose: 'site_permission_request',
+          }
+          return createBrowserStructuredOutput({
+            ok: false,
+            errorKind: 'browser_permission_confirmation_required',
+            phase: 'confirmation_required',
+            suspendAfterToolResult: true,
+            browserSuspensionRequest: suspension,
+          })
+        }
+      }
+      const applied = controller.setBrowserPermission(siteRequestId, decision)
+      if (
+        applied.state !== 'applied'
+        || applied.applied !== true
+        || applied.decision !== decision
+        || applied.requestId !== siteRequestId
+        || applied.permission !== pending.permission
+        || applied.origin !== pending.origin
+        || !applied.target
+        || JSON.stringify(applied.target) !== JSON.stringify(pending.target)
+      ) {
+        return createBrowserStructuredOutput({
+          ok: false,
+          errorKind: applied.state === 'expired'
+            ? 'browser_permission_request_expired'
+            : 'browser_permission_readback_mismatch',
+          ...applied,
+        })
+      }
+      return createBrowserStructuredOutput({ ok: true, ...applied })
+    }
+    case 'permission_reset': {
+      const permission = String(args.permission || '')
+      const origin = String(args.origin || boundOrigin || '')
+      if (!permission) return createBrowserStructuredOutput({ ok: false, errorKind: 'permission_required' })
+      const intentDenied = await requireSensitiveConfirmation(
+        'permission_reset',
+        'browser_permission',
+        origin,
+      )
+      if (intentDenied) return intentDenied
+      if (!boundTab) return createBrowserStructuredOutput({ ok: false, errorKind: 'browser_tab_missing' })
+      return createBrowserStructuredOutput({
+        ok: true,
+        ...controller.resetBrowserPermission(boundTab.id, origin, permission),
+      })
     }
     default:
       return createBrowserStructuredOutput({ ok: false, errorKind: 'tool_not_registered', operation })

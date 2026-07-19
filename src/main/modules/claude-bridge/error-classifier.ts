@@ -1,3 +1,5 @@
+import { isTransientProviderHttpStatus } from './provider-terminal-error'
+
 export type ExecutionErrorKind =
   | 'rate_limit'
   | 'context_overflow'
@@ -26,6 +28,13 @@ function isToolExecutionSource(source?: ErrorClassifierResult['source']): boolea
   return source === 'tool_execution'
 }
 
+function httpStatusFromMessage(message: string): number | null {
+  const match = message.match(/\bhttp(?:\s+status)?[\s:=_-]*(\d{3})\b/i)
+  if (!match) return null
+  const status = Number(match[1])
+  return Number.isInteger(status) ? status : null
+}
+
 export function classifyExecutionError(
   error: unknown,
   options?: { source?: ErrorClassifierResult['source'] },
@@ -33,6 +42,7 @@ export function classifyExecutionError(
   const message = stringifyError(error)
   const normalized = message.toLowerCase()
   const source = options?.source || 'model_request'
+  const httpStatus = httpStatusFromMessage(message)
 
   if (/http 429|rate limit|too many requests/.test(normalized)) {
     return {
@@ -91,7 +101,7 @@ export function classifyExecutionError(
     }
   }
 
-  if (/http 408|http 409|http 500|http 502|http 503|http 504|econnreset|socket hang up|network error|premature close|err_stream_premature_close|incomplete chunked encoding|fetch failed|und_err_socket|\bterminated\b/.test(normalized)) {
+  if (isTransientProviderHttpStatus(httpStatus) || /econnreset|socket hang up|network error|premature close|err_stream_premature_close|incomplete chunked encoding|fetch failed|und_err_socket|\bterminated\b/.test(normalized)) {
     return {
       kind: 'transient',
       source,

@@ -17,8 +17,6 @@ interface AgentBrowserSupervisionPanelProps {
   controlState: AgentBrowserControlState
   tasks: AgentBrowserCollectionTask[]
   requestInterruption: () => Promise<void>
-  confirmInterruption: () => Promise<void>
-  dismissInterruption: () => Promise<void>
   surfaces?: Record<AgentBrowserSurface, BrowserLeaseSurfaceSnapshot> | null
   activeWriteSurface?: AgentBrowserSurface | null
   variant?: 'floating' | 'pane' | 'collapsed' | 'collapsedRail'
@@ -60,8 +58,7 @@ function isTerminalTask(task: AgentBrowserCollectionTask): boolean {
  * note-collection task, or a pending/frozen control gate). Collapsed it is a
  * small floating chip; expanded it lists the dispatched sub-agent sessions
  * (one per background task), each of which expands to its current sub-task
- * (note being collected) + progress. Interrupting the agent's control requires
- * an explicit second confirmation (freeze → confirm).
+ * (note being collected) + progress. A user takeover is immediate.
  *
  * NOTE: positioned over the browser content; because the BrowserView is a
  * native overlay, the exact placement / hideAll behaviour is tuned in live
@@ -71,8 +68,6 @@ export function AgentBrowserSupervisionPanel({
   controlState,
   tasks,
   requestInterruption,
-  confirmInterruption,
-  dismissInterruption,
   surfaces,
   activeWriteSurface,
   variant = 'floating',
@@ -95,7 +90,7 @@ export function AgentBrowserSupervisionPanel({
       ? browserTaskStatusLabel(visibleTasks[0].status)
       : controlState === 'active'
         ? '浏览中'
-        : '等待确认'
+        : '已接管'
   const surfaceLockText = activeSurfaceLockText(surfaces, activeWriteSurface)
   const surfaceModeLabel = activeWriteSurface === 'user-view'
     ? '当前页协作'
@@ -130,7 +125,7 @@ export function AgentBrowserSupervisionPanel({
   }
 
   const containerClass = variant === 'pane'
-    ? 'relative z-[1] mx-2 mt-2 mb-1 overflow-hidden rounded-[12px] border text-[12px]'
+    ? 'relative z-[1] mx-2 mt-2 mb-1 flex min-h-0 flex-col overflow-hidden rounded-[12px] border text-[12px]'
     : 'absolute bottom-3 right-3 z-[60] w-[280px] overflow-hidden rounded-[16px] border text-[12px] shadow-lg'
 
   return (
@@ -140,6 +135,7 @@ export function AgentBrowserSupervisionPanel({
         borderColor: 'color-mix(in srgb, var(--color-blue) 30%, transparent)',
         background: 'color-mix(in srgb, var(--surface-card-bg) 96%, transparent)',
         backdropFilter: 'blur(12px)',
+        maxHeight: variant === 'pane' ? '40%' : undefined,
         boxShadow: variant === 'pane'
           ? '0 0 0 1px color-mix(in srgb, var(--color-blue) 18%, transparent), 0 0 18px color-mix(in srgb, var(--color-blue) 20%, transparent)'
           : '0 8px 28px color-mix(in srgb, var(--color-blue) 22%, transparent)',
@@ -149,7 +145,7 @@ export function AgentBrowserSupervisionPanel({
       <button
         type="button"
         onClick={() => setPanelOpen((v) => !v)}
-        className="flex w-full items-center gap-2 px-3 py-2 text-left"
+        className="flex w-full shrink-0 items-center gap-2 px-3 py-2 text-left"
         style={{ color: 'var(--text-title)' }}
       >
         <Bot style={{ width: 15, height: 15 }} className="text-[var(--color-blue)]" strokeWidth={2} />
@@ -190,7 +186,7 @@ export function AgentBrowserSupervisionPanel({
       )}
 
       {panelOpen && (
-        <div className="flex flex-col gap-1.5 px-2 pb-2">
+        <div className="flex min-h-0 flex-col gap-1.5 overflow-y-auto px-2 pb-2">
           {/* Sub-agent session cards */}
           {surfaceLockText && (
             <div
@@ -236,7 +232,7 @@ export function AgentBrowserSupervisionPanel({
                       : task.status === 'failed' || task.status === 'cancelled'
                         ? <AlertCircle style={{ width: 13, height: 13 }} className="text-[var(--color-orange)]" strokeWidth={2} />
                         : <span className="inline-block h-[7px] w-[7px] rounded-full" style={{ background: 'var(--text-gray)' }} />}
-                  <span className="min-w-0 flex-1 truncate">{task.progress.currentLabel || '浏览器采集子任务'}</span>
+                  <span className="min-w-0 flex-1 truncate">{task.progress.currentLabel || '浏览器子任务'}</span>
                   <span className="text-[10px]" style={{ color: 'var(--text-gray)' }}>
                     {taskStatusText}
                   </span>
@@ -248,7 +244,7 @@ export function AgentBrowserSupervisionPanel({
                 {open && (
                   <div className="px-2.5 pb-2 pt-0.5 text-[11px]" style={{ color: 'var(--text-gray)' }}>
                     <div>当前：{task.progress.currentLabel || '准备中'}</div>
-                    <div>已采集 {task.progress.completed} · 失败 {task.progress.failed}</div>
+                    <div>已完成 {task.progress.completed} · 失败 {task.progress.failed}</div>
                     {task.error && <div className="text-[var(--color-orange)]">错误：{task.error}</div>}
                   </div>
                 )}
@@ -256,9 +252,9 @@ export function AgentBrowserSupervisionPanel({
             )
           })}
 
-          {/* Two-step interrupt */}
+          {/* Immediate takeover */}
           <div className="mt-0.5 px-0.5">
-            {controlState === 'active' && (
+            {controlState === 'active' && (activeTasks.length > 0 || activeWriteSurface === 'agent-view') && (
               <button
                 type="button"
                 onClick={() => void requestInterruption()}
@@ -266,31 +262,8 @@ export function AgentBrowserSupervisionPanel({
                 style={{ background: 'color-mix(in srgb, var(--text-gray) 12%, transparent)', color: 'var(--text-title)' }}
               >
                 <ShieldAlert style={{ width: 13, height: 13 }} strokeWidth={2} />
-                中断 agent 对浏览器的控制
+                立即接管浏览器
               </button>
-            )}
-            {controlState === 'pending_confirm' && (
-              <div className="rounded-[8px] p-2" style={{ background: 'color-mix(in srgb, var(--color-orange) 12%, transparent)' }}>
-                <div className="mb-1.5 text-[11px]" style={{ color: 'var(--text-title)' }}>确定要中断吗？agent 会停止后台采集。</div>
-                <div className="flex gap-1.5">
-                  <button
-                    type="button"
-                    onClick={() => void confirmInterruption()}
-                    className="flex-1 rounded-[8px] py-1 text-[11px] font-semibold text-white"
-                    style={{ background: 'var(--color-orange)' }}
-                  >
-                    确认中断
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => void dismissInterruption()}
-                    className="flex-1 rounded-[8px] py-1 text-[11px] font-medium"
-                    style={{ background: 'color-mix(in srgb, var(--text-gray) 14%, transparent)', color: 'var(--text-title)' }}
-                  >
-                    取消
-                  </button>
-                </div>
-              </div>
             )}
             {controlState === 'frozen' && (
               <div className="rounded-[8px] py-1.5 text-center text-[11px] font-medium" style={{ background: 'color-mix(in srgb, var(--color-orange) 14%, transparent)', color: 'var(--color-orange)' }}>

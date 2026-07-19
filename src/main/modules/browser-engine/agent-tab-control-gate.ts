@@ -1,126 +1,80 @@
 /**
- * AgentTabControlGate — freeze-then-confirm supervision for the agent's browser
- * tab (plan §3.6, Codex R2 #2).
+ * Immediate user takeover helpers for the agent browser tab.
  *
- * The write-lease (idle/held/takeover/expired) is deliberately NOT a task state
- * machine, so the "user is interrupting, freeze the agent's writes until they
- * confirm stop/takeover" concern lives here, separate from the lease. Per agent
- * surface:
- *
- *   active          — agent may write (subject to the lease).
- *   pending_confirm — a user interruption is awaiting a secondary confirmation;
- *                     the agent's writes are FROZEN (blocked, not cancelled).
- *   frozen          — the user confirmed; the agent is suspended while the
- *                     caller performs the cancel (release lease) or takeover.
- *
- * The facade consults isWriteBlocked() before every agent write. Transitions are
- * driven by the supervision UI / main-process input signals, never by the agent.
+ * The write lease remains the single owner of browser-surface serialization.
+ * BrowserWriteLease is the single synchronous ownership truth. User input and
+ * the supervision button transition that lease directly to `takeover`.
+ * There is deliberately no intermediate confirmation state: the same input
+ * that expresses takeover must continue to the page instead of being swallowed.
  *
  * Pure module — no Electron, no IO.
  */
 
-export type AgentTabControlState = 'active' | 'pending_confirm' | 'frozen'
+export interface AgentTabUserInputTakeoverHandlers {
+  onKeyboardInput(event: unknown, input: { type?: string; key?: string }): void
+  onMouseInput(event: unknown, input: { type?: string }): void
+}
+
+export function beginAgentTabUserTakeover(options: {
+  isTakenOver: () => boolean
+  fenceGroundedTasks: () => void
+  recordLeaseTakeover: () => void
+}): boolean {
+  if (options.isTakenOver()) return false
+  options.recordLeaseTakeover()
+  options.fenceGroundedTasks()
+  return true
+}
+
+export async function persistAgentTabUserTakeover(options: {
+  persist: () => Promise<void>
+  onPersisted: () => void
+  onPersistenceFailure: (error: unknown) => void
+}): Promise<boolean> {
+  try {
+    await options.persist()
+  } catch (error) {
+    // The physical user signal has already reached the page. Persistence
+    // failure must keep the synchronous lease fence in place; rollback would
+    // give the old agent write ownership over a page the user just changed.
+    options.onPersistenceFailure(error)
+    return false
+  }
+  options.onPersisted()
+  return true
+}
 
 /**
- * D8（真机反复实锚）：pending_confirm 没有 TTL——用户擦碰一下 agent 页
- * 然后走开，横幅常驻且 agent 写入被永久冻结。惰性回落（与写租约过期同款
- * reconcile 模式）：pending_confirm 超时未确认视同 dismiss，回到 active。
- * 真想接管的用户有更强的租约级 takeover 信号兜底，不受此影响。
+ * Shared by the real Electron before-input/before-mouse listeners and behavior
+ * tests. The Electron event stays opaque and is never invoked, so the takeover
+ * route cannot cancel the user's physical input.
  */
-const DEFAULT_PENDING_CONFIRM_TTL_MS = 45_000
-
-export class AgentTabControlGate {
-  private state: AgentTabControlState = 'active'
-  private pendingSince: number | null = null
-  private readonly pendingConfirmTtlMs: number
-  private readonly now: () => number
-
-  constructor(options: { pendingConfirmTtlMs?: number; now?: () => number } = {}) {
-    this.pendingConfirmTtlMs = options.pendingConfirmTtlMs ?? DEFAULT_PENDING_CONFIRM_TTL_MS
-    this.now = options.now ?? (() => Date.now())
+export function createAgentTabUserInputTakeoverHandlers(options: {
+  isActivelyDriven: () => boolean
+  isFrozen: () => boolean
+  isAgentKey: (key: string) => boolean
+  isAgentMouse: () => boolean
+  takeOver: () => void
+}): AgentTabUserInputTakeoverHandlers {
+  const takeOver = (): void => {
+    if (!options.isActivelyDriven() || options.isFrozen()) return
+    options.takeOver()
   }
-
-  /** Lazily expire a stale pending_confirm before any read of state. */
-  private reconcile(): void {
-    if (
-      this.state === 'pending_confirm'
-      && this.pendingSince !== null
-      && this.now() - this.pendingSince > this.pendingConfirmTtlMs
-    ) {
-      this.state = 'active'
-      this.pendingSince = null
-    }
-  }
-
-  getState(): AgentTabControlState {
-    this.reconcile()
-    return this.state
-  }
-
-  /** Agent writes are blocked while a confirmation is pending or after confirm. */
-  isWriteBlocked(): boolean {
-    this.reconcile()
-    return this.state !== 'active'
-  }
-
-  /**
-   * Whether the user has CONFIRMED the interruption. Distinct from
-   * isWriteBlocked: `pending_confirm` blocks writes but must NOT cancel the
-   * background task — only a confirmed freeze does (Codex result-review #1
-   * residual). The runner's stop probe consumes this, not isWriteBlocked.
-   */
-  isFrozen(): boolean {
-    this.reconcile()
-    return this.state === 'frozen'
-  }
-
-  /**
-   * A user interaction with the agent tab (page click/input/navigate/close) or
-   * an explicit stop/takeover button. Freezes agent writes pending the
-   * secondary confirmation. Returns true if it transitioned active→pending.
-   */
-  requestInterruption(): boolean {
-    this.reconcile()
-    if (this.state === 'active') {
-      this.state = 'pending_confirm'
-      this.pendingSince = this.now()
-      return true
-    }
-    return false
-  }
-
-  /** User dismissed the secondary confirmation → unfreeze, agent resumes. */
-  dismissInterruption(): void {
-    if (this.state === 'pending_confirm') {
-      this.state = 'active'
-      this.pendingSince = null
-    }
-  }
-
-  /**
-   * User confirmed the interruption (stop or takeover). The gate moves to
-   * `frozen`; the caller then cancels the child-run (release lease) or applies a
-   * lease takeover. Writes stay blocked. Returns true if it transitioned.
-   */
-  confirmInterruption(): boolean {
-    this.reconcile()
-    if (this.state === 'pending_confirm') {
-      this.state = 'frozen'
-      this.pendingSince = null
-      return true
-    }
-    return false
-  }
-
-  /** Reset to active (e.g. a fresh agent run reuses the surface). */
-  reset(): void {
-    this.state = 'active'
-    this.pendingSince = null
-  }
-
-  /** R18：惰性 TTL 回落不会主动通知任何人——调用方按此值安排过期后的
-   * 状态推送（renderer 胶囊否则永远停在 pending 显示上）。 */
-  getPendingConfirmTtlMs(): number {
-    return this.pendingConfirmTtlMs
+  return {
+    onKeyboardInput: (_event, input) => {
+      if (input.type !== 'keyDown' && input.type !== 'keyUp' && input.type !== 'char') return
+      if (options.isAgentKey(input.key || '')) return
+      takeOver()
+    },
+    onMouseInput: (_event, input) => {
+      if (
+        input.type !== 'mouseDown'
+        && input.type !== 'mouseUp'
+        && input.type !== 'mouseWheel'
+        && input.type !== 'contextMenu'
+      ) return
+      if (options.isAgentMouse()) return
+      takeOver()
+    },
   }
 }

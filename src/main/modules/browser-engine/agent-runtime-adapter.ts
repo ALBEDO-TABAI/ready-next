@@ -1,4 +1,4 @@
-import type { BrowserAggregateOptions, BrowserCapabilityTaskHandle, BrowserExtractStructuredOptions, BrowserExtractStructuredResult, BrowserStructuredItem } from './capability-types'
+import type { BrowserAggregateOptions, BrowserExtractStructuredOptions, BrowserExtractStructuredResult, BrowserStructuredItem } from './capability-types'
 import type { BrowserTabContextData, BrowserUploadTarget, BrowserViewportMetrics } from './automation-types'
 import type { BrowserExecutionDeadlineOptions } from './automation-service'
 import type { BrowserController } from './ipc-handler'
@@ -21,11 +21,7 @@ export interface BrowserAgentRuntime {
   typeTextDirectly(tabId: string | null, text: string, options?: { useShiftEnterForNewline?: boolean }): Promise<void>
   screenshotAdvanced(tabId: string | null, options?: Record<string, unknown>): Promise<string>
   findUploadTargets(tabId: string | null): Promise<BrowserUploadTarget[]>
-  setFileInputFiles(tabId: string | null, payload: { files: string[]; selector?: string; target?: string; x?: number; y?: number }): Promise<{ ok: boolean; targetDescription: string; inputFound: boolean; filesAssigned?: boolean; assignedFileNames?: string[] }>
-  startTask(request: Record<string, unknown>): Promise<BrowserCapabilityTaskHandle>
-  getTask(taskId: string): Promise<BrowserCapabilityTaskHandle | null>
-  resumeTask(taskId: string): Promise<BrowserCapabilityTaskHandle | null>
-  cancelTask(taskId: string): Promise<BrowserCapabilityTaskHandle | null>
+  setFileInputFiles(tabId: string | null, payload: { files: string[]; selector?: string; targetToken?: string; frameDocumentToken?: string; backendDOMNodeId?: number }): Promise<{ ok: boolean; targetDescription: string; inputFound: boolean; filesAssigned?: boolean; assignedFileNames?: string[] }>
   extractStructured(tabId: string | null, options: BrowserExtractStructuredOptions): Promise<BrowserExtractStructuredResult>
   aggregateResults(items: BrowserStructuredItem[], options?: BrowserAggregateOptions): BrowserStructuredItem[]
   startNetworkObserver?(tabId: string, options?: BrowserNetworkObserverOptions): Promise<BrowserNetworkObserverHandle>
@@ -107,24 +103,8 @@ export class BrowserAgentRuntimeAdapter implements BrowserAgentRuntime {
     return this.controller.findUploadTargets(this.resolveTabId(tabId))
   }
 
-  async setFileInputFiles(tabId: string | null, payload: { files: string[]; selector?: string; target?: string; x?: number; y?: number }): Promise<{ ok: boolean; targetDescription: string; inputFound: boolean; filesAssigned?: boolean; assignedFileNames?: string[] }> {
+  async setFileInputFiles(tabId: string | null, payload: { files: string[]; selector?: string; targetToken?: string; frameDocumentToken?: string; backendDOMNodeId?: number }): Promise<{ ok: boolean; targetDescription: string; inputFound: boolean; filesAssigned?: boolean; assignedFileNames?: string[] }> {
     return this.controller.setFileInputFiles(this.resolveTabId(tabId), payload)
-  }
-
-  async startTask(request: Record<string, unknown>): Promise<BrowserCapabilityTaskHandle> {
-    return this.controller.startTask(request as any)
-  }
-
-  async getTask(taskId: string): Promise<BrowserCapabilityTaskHandle | null> {
-    return this.controller.getTask(taskId)
-  }
-
-  async resumeTask(taskId: string): Promise<BrowserCapabilityTaskHandle | null> {
-    return this.controller.resumeTask(taskId)
-  }
-
-  async cancelTask(taskId: string): Promise<BrowserCapabilityTaskHandle | null> {
-    return this.controller.cancelTask(taskId)
   }
 
   async extractStructured(tabId: string | null, options: BrowserExtractStructuredOptions): Promise<BrowserExtractStructuredResult> {

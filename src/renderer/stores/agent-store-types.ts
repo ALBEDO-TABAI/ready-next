@@ -16,6 +16,7 @@ import type {
 } from '../modules/agent/types'
 import type { TaskDisclosureState, TaskSectionKey } from '../modules/agent/taskCardViewModel'
 import type { DeliveryMode } from '../../shared/dynamic-delivery'
+import type { CanonicalAssistantMessage } from '../../shared/ipc-contracts/canonical-message'
 
 export interface PendingContinuationIntent {
   taskId: string
@@ -39,9 +40,13 @@ export interface PendingContinuationIntent {
 
 export interface AgentSendResult {
   success: boolean
+  acceptedAsSteering?: boolean
+  ownerRunId?: string | null
   error?: string | null
   errorKind?: string | null
   responseText?: string | null
+  canonicalMessage?: CanonicalAssistantMessage | null
+  canonicalMessageDigest?: string | null
   persistence?: {
     scope?: string | null
     message?: string | null

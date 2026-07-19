@@ -212,8 +212,8 @@ test('read-only research skills rebind a generic skill budget to research semant
     options: {
       taskBudgetRuntime: createTaskBudgetRuntime('multi_step_task'),
     },
-    inferredTaskType: 'research',
-    forceInferredTaskType: true,
+    explicitTaskType: 'research',
+    overrideTaskType: true,
   })
   assert.equal(rebound?.taskType, 'research')
 })

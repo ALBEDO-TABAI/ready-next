@@ -9,7 +9,7 @@ import {
   type AIModelConfig
 } from '../../../../shared/ai-providers'
 import type { BrowserController } from '../../browser-engine/ipc-handler'
-import { resumeWaitingHumanBrowserTaskFromBridge } from '../../browser-engine/task-event-bridge'
+import type { BrowserHumanTakeoverIntentInput } from '../../../../shared/browser-workflow-control'
 import type { AskUserQuestionsCardEvent } from '../../tools/builtins/ask-user-questions'
 import { registerChannelOutboundSender } from '../channel-outbound-bridge'
 import type { AgentManager } from '../../claude-bridge/agent-manager'
@@ -55,6 +55,11 @@ import type { DomainAdapter } from '../domain-adapters/domain-adapter'
 import { getSkillsRuntimeManager } from '../../skills-runtime/runtime-manager'
 import { SkillTaskRunRepository } from '../../repositories/skill-task-run-repository'
 import {
+  AgentSessionCheckpointRepository,
+  type CanonicalCoreCloseoutInput,
+  workflowDigest,
+} from '../../repositories/agent-session-checkpoint-repository'
+import {
   cancelSkillChildRun,
   configureSkillChildRunner,
   getSkillChildRunner,
@@ -94,7 +99,6 @@ import { ChannelConfigService } from './channel-config-service'
 import { ScopeAttachmentService } from './scope-attachment-service'
 import { SidecarPollService } from './sidecar-poll-service'
 import { ConversationScopeStore } from './conversation-scope-store'
-import type { ActivePlan } from '../system-reminders/active-plan-step-reminder'
 import { RemoteChannelService } from './remote-channel-service'
 import { reconcileTaskProjections } from '../task-projection/task-projection-reconciler'
 import {
@@ -108,14 +112,12 @@ import type { ProjectionTruthSnapshot, RunCoordinatorResult, TaskProjectionRecor
 import { getBudgetUsagePercent, restoreContinuationTaskBudgetRuntime } from '../task-projection/run-budget-policy'
 import {
   normalizeContinuationIntent,
-  selectContinuationProjection,
   type ContinuationIntent,
 } from '../contracts/continuation-state'
 import { registerPendingTaskEventListener } from '../system-reminders/background-task-terminal-reminder'
 import { taskEventBridge } from '../../browser-engine/task-event-bridge'
 import { createTaskEventProofListener, createTaskProofSink } from '../quality/proof-collector'
 import { isKnowledgeSystemEnabled, runStartupBeliefSync, KnowledgeWatcher } from '../knowledge/knowledge-truth-source'
-import { isRetryOnlyTurn } from '../skills/skill-detection-inputs'
 import { trustedFolderReferencesFromMessageMeta } from '../contracts/request-envelope'
 import { logAgentMetric } from '../metrics'
 import { TOOL_ERROR_METRICS } from '../tools-runtime/tool-error-metrics'
@@ -176,11 +178,14 @@ import {
   type TaskProjectionChildSummaryRow,
   type UpsertChannelPayload,
 } from './runtime-helpers'
+import { resolveTrustedBrowserEnvironment } from './trusted-browser-environment'
 
 export type { UpsertChannelPayload } from './runtime-helpers'
 
 export class AgentControlRuntime extends EventEmitter {
   private readonly db = getDatabase()
+  private readonly agentSessionCheckpoints = new AgentSessionCheckpointRepository(this.db)
+  private readonly browserController: BrowserController | null
   // EP3-A3: declared BEFORE promptAssembly so the roster closure can never
   // observe an uninitialized field (empty/dead table degrades to []).
   private readonly agentRegistry = new AgentRegistryRepository(this.db)
@@ -515,6 +520,37 @@ export class AgentControlRuntime extends EventEmitter {
   constructor(agentManager: AgentManager, browserController?: BrowserController) {
     super()
     this.agentManager = agentManager
+    this.browserController = browserController || null
+    this.browserController?.setHumanTakeoverIntentPort((input) => this.createHumanTakeoverIntent(input))
+    this.browserController?.setBrowserWorkflowWriteAdmissionPort((input) =>
+      this.agentSessionCheckpoints.isBrowserWorkflowWriteAdmitted({
+        parentTaskId: input.parentTaskId,
+        ownerRunId: input.ownerRunId,
+        browserTaskId: input.browserTaskId,
+        physicalTarget: {
+          surface: input.surface,
+          scopeId: input.scopeId,
+          profileId: input.profileId,
+          sessionId: input.sessionId,
+          tabId: input.tabId,
+          physicalTargetToken: input.physicalTargetToken,
+          source: 'physical_input',
+        },
+      }),
+    )
+    this.browserController?.setBrowserWorkflowJournalUnitOfWork({
+      beginAction: (input) => this.agentSessionCheckpoints.beginBrowserWorkflowAction(input),
+      settleAction: (taskId, actionId, outcome) => (
+        this.agentSessionCheckpoints.settleBrowserWorkflowAction(taskId, actionId, outcome)
+      ),
+      recordObservation: (input) => this.agentSessionCheckpoints.recordBrowserWorkflowObservation(input),
+      upsertResearchWorkItems: (taskId, ownerRunId, inputs) => (
+        this.agentSessionCheckpoints.upsertBrowserResearchWorkItems(taskId, ownerRunId, inputs)
+      ),
+      bindResearchEvidence: (taskId, ownerRunId, bindings) => (
+        this.agentSessionCheckpoints.bindBrowserResearchEvidence(taskId, ownerRunId, bindings)
+      ),
+    })
     // Stage Q (Stage 11) — boot fence: detect the incompatible
     // combination of `READY_SKILL_TASK_RUN_INVARIANT_ENFORCED='0'` AND
     // a migrated CHECK constraint on `skill_task_runs`. PR-3 shipped
@@ -716,6 +752,52 @@ export class AgentControlRuntime extends EventEmitter {
     return this.taskProjectionStore
   }
 
+  getAgentSessionCheckpointRepository(): AgentSessionCheckpointRepository {
+    return this.agentSessionCheckpoints
+  }
+
+  async createHumanTakeoverIntent(
+    input: BrowserHumanTakeoverIntentInput,
+  ): Promise<{ takeoverId: string }> {
+    const ref = await this.agentSessionCheckpoints.createHumanTakeoverIntent({
+      parentTaskId: input.parentTaskId,
+      ownerRunId: input.ownerRunId,
+      browserTaskId: input.browserTaskId,
+      physicalTarget: {
+        surface: input.surface,
+        scopeId: input.scopeId,
+        profileId: input.profileId,
+        sessionId: input.sessionId,
+        tabId: input.tabId,
+        physicalTargetToken: input.physicalTargetToken,
+        source: input.source,
+      },
+    })
+    return { takeoverId: ref.takeoverId }
+  }
+
+  async commitCanonicalCoreCloseout(
+    input: Omit<CanonicalCoreCloseoutInput, 'repairDerivedState'>,
+  ) {
+    const committed = await this.agentSessionCheckpoints.commitCanonicalCoreCloseout({
+      ...input,
+      repairDerivedState: async ({ canonicalMessage, canonicalMessageDigest }) => {
+        this.db.repairChatMessageDerivedIndexes(canonicalMessage, canonicalMessageDigest)
+      },
+    })
+    if (committed.derivedRepairError) {
+      logAgentMetric('canonical_core_closeout_derived_repair_failed', {
+        taskId: input.parentTaskId,
+        runId: input.ownerRunId,
+        reason: committed.derivedRepairError.message,
+      })
+    }
+    return {
+      canonicalMessage: committed.value.canonicalMessage,
+      canonicalMessageDigest: committed.value.canonicalMessageDigest,
+    }
+  }
+
   registerSessionAbortController(
     scopeId: string | null,
     sessionId: string | null,
@@ -905,6 +987,7 @@ export class AgentControlRuntime extends EventEmitter {
     )
     this.projectionSync.scheduleTerminalProjectionSyncRetryDrain('startup')
     for (const projection of this.taskProjectionStore.listRecentTasksForPreroute(500) as TaskProjectionRecord[]) {
+      if (projection.requestAnchor) continue
       if (!projection.deliveryState) continue
       const runMetaStatus = this.getRunMetaRepository()?.get(projection.runId)?.status ?? null
       if (!shouldReconcileInterruptedDeliveryProjection({ projectionStatus: projection.status, runMetaStatus })) continue
@@ -1012,6 +1095,9 @@ export class AgentControlRuntime extends EventEmitter {
   }
 
   async stop(): Promise<void> {
+    this.browserController?.setHumanTakeoverIntentPort(null)
+    this.browserController?.setBrowserWorkflowWriteAdmissionPort(null)
+    this.browserController?.setBrowserWorkflowJournalUnitOfWork(null)
     this.scheduledTaskCoordinator.stop()
     const terminalStates = new Set(['done', 'failed', 'cancelled', 'closed'])
     for (const session of this.orchestrator.listAllSessions()) {
@@ -1767,20 +1853,6 @@ export class AgentControlRuntime extends EventEmitter {
     return this.conversationScopes.getConversationScope(scopeId)
   }
 
-  getPersistedActivePlan(scopeId: string): ActivePlan | null {
-    const value = this.getConversationScope(scopeId)?.meta?.activePlan
-    return value && typeof value === 'object' ? value as ActivePlan : null
-  }
-
-  persistActivePlan(scopeId: string, plan: ActivePlan | null): void {
-    const scope = this.getConversationScope(scopeId)
-    if (!scope) return
-    const meta = { ...(scope.meta || {}) }
-    if (plan) meta.activePlan = plan
-    else delete meta.activePlan
-    this.db.updateConversationScopeMeta(scopeId, meta)
-  }
-
   getConversationScopeMessages(scopeId: string): ConversationScopeMessage[] {
     return this.conversationScopes.getConversationScopeMessages(scopeId)
   }
@@ -1825,6 +1897,22 @@ export class AgentControlRuntime extends EventEmitter {
     return this.conversationScopes.createLocalScopeWithMode(agent, id)
   }
 
+  private async resolveTrustedRequestEnvironment(
+    hint?: { workbenchMode?: 'browser' | 'document' | 'rss' | 'calendar' },
+  ): Promise<import('../contracts/request-envelope').TrustedRequestEnvironment> {
+    const workbenchMode = hint?.workbenchMode
+    if (!workbenchMode) return {}
+    if (workbenchMode !== 'browser' || !this.browserController) return { workbenchMode }
+    try {
+      return await resolveTrustedBrowserEnvironment(this.browserController)
+    } catch (error) {
+      logAgentMetric('trusted_browser_environment_degraded', {
+        reason: error instanceof Error ? error.message : String(error),
+      })
+      return { workbenchMode }
+    }
+  }
+
   async sendScoped(payload: {
     scopeId: string
     agent?: string
@@ -1836,16 +1924,25 @@ export class AgentControlRuntime extends EventEmitter {
     parentStepId?: string
     sessionIdOverride?: string
     workspaceRoots?: string[]
+    environmentHint?: {
+      workbenchMode?: 'browser' | 'document' | 'rss' | 'calendar'
+    }
     continuationIntent?: ContinuationIntent | null
     deliveryMode?: import('../../../../shared/dynamic-delivery').DeliveryMode
     taskOrigin?: import('../../../../shared/agent-execution-profile').TaskCreationOrigin
     runOrigin?: import('../../../../shared/agent-execution-profile').RunExecutionOrigin
     scheduledTaskOccurrence?: import('../../../../shared/scheduled-tasks').ScheduledTaskOccurrenceSource
   }): Promise<SendScopedResponse> {
+    const canonicalUserMessage: SendScopedUserMessage = payload.userMessage || {
+      id: `msg-${payload.requestId || randomUUID()}`,
+      content: this.extractTextFromMessage(payload.message),
+      timestamp: new Date().toISOString(),
+      meta: { source: 'main_canonical_ingress' },
+    }
     return runConfirmedSendScoped({
       scopeId: payload.scopeId,
       agent: payload.agent,
-      userMessage: payload.userMessage,
+      userMessage: canonicalUserMessage,
       getScope: (scopeId) => this.db.getConversationScope(scopeId),
       createLocalScope: (agent, scopeId) => {
         const recoveredScope = this.createLocalScope(agent, scopeId)
@@ -1866,54 +1963,73 @@ export class AgentControlRuntime extends EventEmitter {
           userMessage.meta,
         )
       },
+      routeActiveOwner: async (scopeRow, userMessage, persistence) => {
+        const scope = this.mapConversationRow(scopeRow)
+        const activeRunId = this.orchestrator.getActiveRunId(scope.agent, scope.id)
+        if (!activeRunId) return null
+        const candidates = (this.taskProjectionStore.listByScope(scope.id) as TaskProjectionRecord[])
+          .filter((projection) => projection.runId === activeRunId)
+          .sort((left, right) => String(right.updatedAt || '').localeCompare(String(left.updatedAt || '')))
+        const parent = candidates.find((projection) => !projection.parentTaskId)
+          || candidates.find((projection) => projection.taskOrigin !== 'workflow_child')
+          || null
+        if (!parent) {
+          return {
+            success: false,
+            error: 'active_owner_parent_not_found',
+            errorKind: 'persistence_failed',
+            persistence,
+          }
+        }
+        if (!this.agentSessionCheckpoints.isBrowserWorkflowBound(parent.taskId, activeRunId)) {
+          return null
+        }
+        try {
+          await this.agentSessionCheckpoints.persistCanonicalMessageAndSteer({
+            parentTaskId: parent.taskId,
+            ownerRunId: activeRunId,
+            message: {
+              id: userMessage.id,
+              conversationId: scope.id,
+              content: userMessage.content,
+              structuredContent: payload.message,
+              timestamp: userMessage.timestamp || new Date().toISOString(),
+              meta: userMessage.meta,
+            },
+            repairDerivedState: async (message, messageDigest) => {
+              this.db.repairChatMessageDerivedIndexes(message, messageDigest)
+            },
+          })
+          this.orchestrator.refreshActiveRunProgress(scope.agent, scope.id, activeRunId)
+          return {
+            success: true,
+            acceptedAsSteering: true,
+            ownerRunId: activeRunId,
+            persistence,
+          }
+        } catch (error) {
+          // silent-catch: steering persistence failures are returned to the caller as a typed failure.
+          return {
+            success: false,
+            error: error instanceof Error ? error.message : String(error),
+            errorKind: 'persistence_failed',
+            persistence,
+          }
+        }
+      },
       onLazyCreate: (scopeId, agent) => {
         logAgentMetric('local_scope_lazy_created_on_send', { scopeId, agent })
       },
       runConfirmed: async (scopeRow, persistence) => {
         const scope = this.mapConversationRow(scopeRow)
+        const trustedEnvironment = await this.resolveTrustedRequestEnvironment(payload.environmentHint)
         // skill-resume A1: restore reference-skill hint from persisted conv meta
         // before any skill detection runs, so resumed sessions don't lose context
         // after Ready restart (in-memory Map alone wouldn't survive).
         this.referenceHints.restoreReferenceHintFromScope(scope, payload.scopeId)
-        // skill-resume E1: when the user fires a bare retry/continue intent on a
-        // scope with no manually-attached recall context, auto-attach the top
-        // predecessors in the same lineage so prompt assembly has prior context
-        // when it runs.
-        this.sessionRecall.maybeAutoAttachSessionRecallOnResume(payload.scopeId, payload.message)
         const normalizedContinuationIntent = (() => {
           const intent = normalizeContinuationIntent(payload.continuationIntent || null)
-          if (!intent) {
-            const text = this.extractTextFromMessage(payload.message)
-            if (!isRetryOnlyTurn(text)) return null
-            const projections = this.listTaskProjections(payload.scopeId)
-            const sortedProjections = projections
-              .slice()
-              .sort((left, right) => String(right.updatedAt || '').localeCompare(String(left.updatedAt || '')))
-            const resumableProjection = sortedProjections.find((projection) =>
-              deriveTaskProjectionCanResume(projection).canResume === true
-            ) || null
-            const targetProjection = resumableProjection || selectContinuationProjection({
-              projections,
-              userText: text,
-            })
-            const scopeRunSummary = this.scopeRunSummaries.get(payload.scopeId) || null
-            const built = this.buildContinuationIntent({
-              projection: targetProjection,
-              scopeRunSummary,
-              incoming: null,
-              responseText: text,
-            })
-            if (built) {
-              logAgentMetric('runtime_resume_intent_auto_built_on_send', {
-                scopeId: scope.id,
-                taskId: built.taskId,
-                hasChildRunId: Boolean(built.childRunId),
-                hasOutputDir: Boolean(built.outputDir),
-                hasRunStatePath: Boolean(built.runStatePath),
-              })
-            }
-            return built
-          }
+          if (!intent) return null
           const target = this.resolveTaskControlTarget(payload.scopeId, intent.taskId)
           if (!target) return null
           return this.buildContinuationIntent({
@@ -1931,13 +2047,14 @@ export class AgentControlRuntime extends EventEmitter {
                 | string
                 | Array<{ type: string; text?: string; base64?: string; mimeType?: string }>,
               requestId: payload.requestId,
-              sourceMessageId: payload.userMessage?.id ?? null,
+              sourceMessageId: canonicalUserMessage.id,
               taskId: payload.taskId,
               parentTaskId: payload.parentTaskId,
               parentStepId: payload.parentStepId,
               sessionIdOverride: payload.sessionIdOverride,
               workspaceRoots: payload.workspaceRoots,
-              trustedFolderReferences: trustedFolderReferencesFromMessageMeta(payload.userMessage?.meta),
+              trustedFolderReferences: trustedFolderReferencesFromMessageMeta(canonicalUserMessage.meta),
+              trustedEnvironment,
               continuationIntent: normalizedContinuationIntent,
               deliveryMode: payload.deliveryMode,
               taskOrigin: payload.taskOrigin,
@@ -2159,6 +2276,25 @@ export class AgentControlRuntime extends EventEmitter {
     if (!target) {
       return { success: false, error: 'Conversation scope not found' }
     }
+    if (
+      target.projection?.checkpointRefs?.suspensionCheckpointId
+      && target.projection.humanTakeoverRef?.state !== 'pending'
+    ) {
+      if (
+        target.projection.blockedReason === 'browser_power_confirmation_checkpoint'
+        || target.projection.blockedReason === 'browser_permission_checkpoint'
+      ) {
+        return {
+          success: false,
+          error: 'This Browser action requires an explicit confirmation decision.',
+          errorKind: 'confirmation_required',
+        }
+      }
+      return this.resumeBrowserWorkflowFromCheckpoint(target.projection, target.scope, {
+        kind: 'typed_wake',
+        requestId: payload.requestId,
+      })
+    }
     const builtIntent = this.buildContinuationIntent({
       projection: target.projection,
       scopeRunSummary: target.scopeRunSummary,
@@ -2191,6 +2327,231 @@ export class AgentControlRuntime extends EventEmitter {
     })
   }
 
+  async completeHumanTakeover(payload: {
+    taskId: string
+    takeoverId: string
+  }): Promise<{ success: boolean; error?: string; errorKind?: string }> {
+    const taskId = String(payload.taskId || '').trim()
+    const takeoverId = String(payload.takeoverId || '').trim()
+    if (!taskId || !takeoverId) {
+      return { success: false, error: 'taskId and takeoverId are required', errorKind: 'invalid_payload' }
+    }
+    const projection = this.taskProjectionStore.get(taskId) as TaskProjectionRecord | null
+    const takeover = projection?.humanTakeoverRef
+    if (
+      !projection
+      || projection.parentTaskId
+      || !takeover
+      || takeover.state !== 'pending'
+      || takeover.takeoverId !== takeoverId
+    ) {
+      return { success: false, error: 'takeover_receipt_not_pending', errorKind: 'not_resumable' }
+    }
+    const scope = this.getConversationScope(projection.scopeId)
+    if (!scope) return { success: false, error: 'Conversation scope not found', errorKind: 'scope_missing' }
+    return this.resumeBrowserWorkflowFromCheckpoint(projection, scope, {
+      kind: 'human_takeover',
+      takeoverId,
+    })
+  }
+
+  private async resumeBrowserWorkflowFromCheckpoint(
+    projection: TaskProjectionRecord,
+    scope: ConversationScope,
+    trigger:
+      | { kind: 'human_takeover'; takeoverId: string }
+      | { kind: 'typed_wake'; requestId?: string; confirmationDecision?: 'confirmed' | 'denied' },
+  ): Promise<{ success: boolean; error?: string; errorKind?: string }> {
+    const ownerAgentId = projection.ownerAgentId || scope.activeAgentId || scope.agent
+    const newOwnerRunId = `run-${randomUUID()}`
+    let ownerCommitted = false
+    const settleLaunchFailure = async (error: unknown): Promise<void> => {
+      if (!ownerCommitted) return
+      await this.agentSessionCheckpoints.settleOwnerLaunchFailure({
+        parentTaskId: projection.taskId,
+        failedOwnerRunId: newOwnerRunId,
+        error: error instanceof Error ? error.message : String(error),
+      })
+    }
+    try {
+      const profile = await this.executionProfileResolver.resolve(ownerAgentId)
+      const executionBinding = this.executionProfileResolver.createBinding({
+        profile,
+        runId: newOwnerRunId,
+        ownerAgentIdAtStart: ownerAgentId,
+        runOrigin: 'continuation',
+        ownerAssignmentSource: 'continuation',
+      })
+      if (trigger.kind === 'human_takeover') {
+        await this.agentSessionCheckpoints.completeHumanTakeover({
+          taskId: projection.taskId,
+          takeoverId: trigger.takeoverId,
+          newOwnerRunId,
+          executionBinding,
+        })
+        ownerCommitted = true
+      } else {
+        const checkpoint = this.agentSessionCheckpoints.current(projection.taskId, 'suspension')
+        if (!checkpoint) throw new Error('checkpoint_resume_source_missing')
+        const blockedReason = String(projection.blockedReason || '')
+        const wakeKind = blockedReason === 'browser_steering_checkpoint'
+          ? 'steering'
+          : blockedReason === 'browser_power_confirmation_checkpoint'
+            ? 'browser_power_confirmation'
+          : blockedReason === 'browser_permission_checkpoint'
+            ? 'browser_permission'
+          : blockedReason === 'browser_owner_crash_checkpoint'
+            ? 'owner_crash'
+          : blockedReason === 'browser_provider_transfer_checkpoint'
+            ? 'provider_transfer'
+            : blockedReason === 'browser_background_checkpoint'
+              ? 'background_ready'
+              : blockedReason === 'browser_foreground_checkpoint'
+                ? 'foreground_resume'
+                : 'user_continue'
+        const steeringSourceIndex = checkpoint.steeringReceiptIds.length - 1
+        const powerConfirmation = wakeKind === 'browser_power_confirmation'
+          ? this.agentSessionCheckpoints.currentBrowserPowerConfirmation(projection.taskId)
+          : null
+        const permissionConfirmation = wakeKind === 'browser_permission'
+          ? this.agentSessionCheckpoints.currentBrowserPermissionConfirmation(projection.taskId)
+          : null
+        const ownerCrashRecovery = wakeKind === 'owner_crash'
+          ? this.agentSessionCheckpoints.currentOwnerCrashRecovery(projection.taskId)
+          : null
+        if (wakeKind === 'browser_power_confirmation' && !powerConfirmation) {
+          throw new Error('browser_power_confirmation_receipt_missing')
+        }
+        if (wakeKind === 'browser_permission' && !permissionConfirmation) {
+          throw new Error('browser_permission_confirmation_receipt_missing')
+        }
+        if (wakeKind === 'owner_crash' && !ownerCrashRecovery) {
+          throw new Error('browser_owner_crash_receipt_missing')
+        }
+        if (
+          (wakeKind === 'browser_power_confirmation' || wakeKind === 'browser_permission')
+          && !trigger.confirmationDecision
+        ) {
+          throw new Error('browser_confirmation_decision_required')
+        }
+        if (
+          wakeKind === 'browser_permission'
+          && trigger.confirmationDecision === 'denied'
+        ) {
+          if (!this.browserController) throw new Error('browser_controller_unavailable')
+          const siteRequestId = permissionConfirmation!.request.actionIntent.siteRequestId
+          const readback = this.browserController.setBrowserPermission(siteRequestId, 'deny')
+          if (
+            readback.requestId !== siteRequestId
+            || readback.state !== 'applied'
+            || readback.applied !== true
+            || readback.decision !== 'deny'
+          ) throw new Error('browser_permission_request_expired')
+        }
+        const sourceId = wakeKind === 'steering'
+          ? checkpoint.steeringReceiptIds[steeringSourceIndex]
+          : wakeKind === 'browser_power_confirmation'
+            ? powerConfirmation!.request.requestId
+            : wakeKind === 'browser_permission'
+              ? permissionConfirmation!.request.requestId
+            : wakeKind === 'owner_crash'
+              ? ownerCrashRecovery!.receipt.receiptId
+            : String(trigger.requestId || `resume-${randomUUID()}`)
+        const sourceDigest = wakeKind === 'steering'
+          ? checkpoint.steeringReceiptDigests[steeringSourceIndex]
+          : wakeKind === 'browser_power_confirmation'
+            ? workflowDigest({
+                parentTaskId: projection.taskId,
+                checkpointId: checkpoint.checkpointId,
+                basisRevision: Number(projection.revision || 0),
+                kind: wakeKind,
+                sourceId,
+                decision: trigger.confirmationDecision,
+                request: powerConfirmation!.request,
+              })
+            : wakeKind === 'browser_permission'
+              ? workflowDigest({
+                  parentTaskId: projection.taskId,
+                  checkpointId: checkpoint.checkpointId,
+                  basisRevision: Number(projection.revision || 0),
+                  kind: wakeKind,
+                  sourceId,
+                  decision: trigger.confirmationDecision,
+                  request: permissionConfirmation!.request,
+                })
+            : wakeKind === 'owner_crash'
+              ? workflowDigest({
+                  parentTaskId: projection.taskId,
+                  checkpointId: checkpoint.checkpointId,
+                  basisRevision: Number(projection.revision || 0),
+                  kind: wakeKind,
+                  sourceId,
+                  receipt: ownerCrashRecovery!.receipt,
+                })
+            : workflowDigest({
+                parentTaskId: projection.taskId,
+                checkpointId: checkpoint.checkpointId,
+                basisRevision: Number(projection.revision || 0),
+                kind: wakeKind,
+                sourceId,
+              })
+        if (!sourceId || !sourceDigest) throw new Error('checkpoint_resume_wake_source_missing')
+        await this.agentSessionCheckpoints.resumeSuspendedBrowserWorkflow({
+          taskId: projection.taskId,
+          newOwnerRunId,
+          executionBinding,
+          wake: {
+            wakeId: `wake-${randomUUID()}`,
+            kind: wakeKind,
+            sourceId,
+            sourceDigest,
+            checkpointId: checkpoint.checkpointId,
+            basisRevision: Number(projection.revision || 0),
+            issuedAt: new Date().toISOString(),
+            ...(wakeKind === 'browser_power_confirmation' || wakeKind === 'browser_permission'
+              ? { decision: trigger.confirmationDecision }
+              : {}),
+          },
+        })
+        ownerCommitted = true
+      }
+      const result = await this.runCoordinator.runScoped({
+        scope,
+        message: '',
+        requestId: newOwnerRunId,
+        sourceMessageId: projection.requestAnchor?.messageId || null,
+        taskId: projection.taskId,
+        taskOrigin: projection.taskOrigin,
+        runOrigin: 'continuation',
+        preboundExecutionBinding: executionBinding,
+        coordinators: this.getDomainAdapters(),
+      })
+      if (!result.success) await settleLaunchFailure(result.error || 'owner_launch_failed')
+      return {
+        success: result.success,
+        error: result.error,
+        errorKind: result.errorKind,
+      }
+    } catch (error) {
+      // silent-catch: launch failures are settled durably below and returned to the caller.
+      try {
+        await settleLaunchFailure(error)
+      } catch (settleError) {
+        // silent-catch: settlement failure is itself returned as a typed persistence failure.
+        return {
+          success: false,
+          error: `owner_launch_failure_settlement_failed:${settleError instanceof Error ? settleError.message : String(settleError)}`,
+          errorKind: 'persistence_failed',
+        }
+      }
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+        errorKind: 'persistence_failed',
+      }
+    }
+  }
+
   async respondToInteraction(payload: {
     scopeId: string
     taskId?: string
@@ -2203,16 +2564,29 @@ export class AgentControlRuntime extends EventEmitter {
     if (!responseText) {
       return { success: false, error: 'Interaction response is required' }
     }
-    if (payload.confirmed === true && payload.taskId?.startsWith('browser-task-')) {
-      const resumed = await resumeWaitingHumanBrowserTaskFromBridge({
-        taskId: payload.taskId,
-        confirmed: payload.confirmed,
-      })
-      if (resumed.success) return { success: true }
-    }
     const target = this.resolveTaskControlTarget(payload.scopeId, payload.taskId)
     if (!target) {
       return { success: false, error: 'Conversation scope not found' }
+    }
+    if (
+      (
+        target.projection?.blockedReason === 'browser_power_confirmation_checkpoint'
+        || target.projection?.blockedReason === 'browser_permission_checkpoint'
+      )
+      && target.projection.checkpointRefs?.suspensionCheckpointId
+    ) {
+      if (typeof payload.confirmed !== 'boolean') {
+        return {
+          success: false,
+          error: 'A confirmation decision is required.',
+          errorKind: 'confirmation_required',
+        }
+      }
+      return this.resumeBrowserWorkflowFromCheckpoint(target.projection, target.scope, {
+        kind: 'typed_wake',
+        requestId: payload.requestId,
+        confirmationDecision: payload.confirmed ? 'confirmed' : 'denied',
+      })
     }
     const builtIntent = this.buildContinuationIntent({
       projection: target.projection,

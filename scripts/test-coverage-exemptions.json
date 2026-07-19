@@ -70,10 +70,28 @@
   ],
   "c4Exempt": [
     {
-      "path": "src/__tests__/browser-site-research-runner.test.ts",
-      "reason": "Site research coverage injects extraction, tab-session, lease, controller, and task fixtures. No test path opens getDatabase or better-sqlite3; only the browser-tools import graph reaches database.ts, so host-Node coverage must remain active.",
-      "since": "2026-07-18",
-      "owner": "browser-agent-site-research-repair"
+      "path": "src/__tests__/browser-cdp-page-map.test.ts",
+      "reason": "CDP page-map coverage uses a fully injected BrowserController and the in-memory snapshot service. It never opens getDatabase or a repository; only the browser probe import graph reaches database.ts, so host-Node coverage must remain active.",
+      "since": "2026-07-19",
+      "owner": "browser-grounded-orchestration"
+    },
+    {
+      "path": "src/__tests__/browser-language-agnostic-targets.test.ts",
+      "reason": "Language-agnostic targeting coverage uses JSDOM plus an injected BrowserController whose workflow journal methods are in-memory fakes. It never opens getDatabase or better-sqlite3; only browser-tools transitive imports trigger C4.",
+      "since": "2026-07-19",
+      "owner": "browser-grounded-orchestration"
+    },
+    {
+      "path": "src/__tests__/browser-trusted-input.test.ts",
+      "reason": "Trusted-input coverage invokes pure input helpers against a fully injected BrowserController and records mouse, key, and script calls in arrays. It never opens getDatabase or a repository; only browser helper imports trigger C4.",
+      "since": "2026-07-19",
+      "owner": "browser-grounded-orchestration"
+    },
+    {
+      "path": "src/__tests__/prepared-skill-resume-revalidation.test.ts",
+      "reason": "Prepared-skill resume coverage calls pure authorization and text-policy helpers with in-memory sets and maps. It never constructs the turn orchestrator, opens getDatabase, or loads better-sqlite3; the preparation import graph alone triggers C4.",
+      "since": "2026-07-19",
+      "owner": "browser-grounded-orchestration"
     },
     {
       "path": "src/__tests__/browser-capability-service-structure.test.ts",
@@ -212,12 +230,6 @@
       "reason": "P1-E5: exercises the post-action change-receipt shaper + browser_type integration with an injected fake BrowserController (executeJS returns canned probe/typed results); no test path opens better-sqlite3 or reads the real DB. Transitive imports reach sqlite-capable browser-tools only. Host-Node coverage must stay active for the receipt shaping assertions.",
       "since": "2026-07-03",
       "owner": "p1-e5-action-receipt"
-    },
-    {
-      "path": "src/__tests__/browser-pinterest-p0.test.ts",
-      "reason": "P0: tests browser_download_urls / start_task dispatch + pure pinimg helpers with injected fake BrowserControllers and a stubbed fetch; no test path opens better-sqlite3 or reads the real DB. Transitive imports reach sqlite-capable browser-tools modules only. Host-Node coverage must stay active for the pinimg/guard unit assertions.",
-      "since": "2026-06-24",
-      "owner": "p0-pinterest-collection"
     },
     {
       "path": "src/__tests__/run-finalizer-checkin.test.ts",

@@ -6,17 +6,16 @@ import {
   parseTextToolBridgeResponse
 } from '../../claude-bridge/tool-bridge'
 import { TOOL_ADMISSION_ERROR_KINDS } from '../contracts/error-kinds'
-import type { ExecutionTurnResult, RunMessage, TaskBudgetRuntime } from '../contracts/run-contracts'
+import type { ExecutionTurnResult, RunMessage, TaskBudgetRuntime, TaskType } from '../contracts/run-contracts'
 import { logAgentMetric } from '../metrics'
 import { consumeIterationBudget } from '../task-projection/run-budget-policy'
-import { buildActivePlanReminderText } from '../system-reminders/active-plan-step-reminder'
 import {
   drainBackgroundTaskTerminalReminders,
   prependSystemReminderInput,
   registerBackgroundTaskTerminalReminder
 } from '../system-reminders/background-task-terminal-reminder'
-import { registerBrowserActionSessionReminder } from '../system-reminders/browser-action-session-reminder'
 import { registerCriteriaSelfCheckReminder } from '../system-reminders/criteria-self-check-reminder'
+import { buildBrowserObservationRequiredInput } from '../system-reminders/browser-observation-required-reminder'
 import { createSystemReminderRegistry } from '../system-reminders/system-reminder-registry'
 import type { ToolDefinition } from '../tools-runtime/tool-definition'
 import {
@@ -46,7 +45,6 @@ import {
   ROLLING_BUDGET_CHECKPOINT_TOOL_INTERVAL,
   removeAlreadyEmittedNativeText,
   resolveAgentSdkMaxTurns,
-  resolveTaskTypeFromBrowserWorkflowText,
   splitNativeTextBufferForSafeFlush
 } from './agent-sdk-foundation-utils'
 import { log } from './agent-sdk-provider'
@@ -66,6 +64,7 @@ import type {
 import type { TurnTerminalReason } from './turn-frame'
 import { addRunUsage } from './run-usage-accumulator'
 import { isHandoffTakeoverToolOutput } from '../agents/handoff-control'
+import { syncBrowserObservationGapsFromJournal } from './agent-sdk-browser-turn-control'
 import {
   ensureResearchSearchResultDelivered,
   recoverResearchSearchDeliveryAfterTimeout
@@ -120,7 +119,7 @@ export interface AgentSdkModelToolLoopContext {
   sdkTools: ReadyAgentSdkRunParams['tools']
   contextWindowTokens: number
   maxOutputTokens: number
-  inferredSdkTaskType: ReturnType<typeof resolveTaskTypeFromBrowserWorkflowText>
+  turnTaskType: TaskType
   requiredCapabilityGroups: string[]
   usedTools: string[]
   emitOutput: (
@@ -129,9 +128,15 @@ export interface AgentSdkModelToolLoopContext {
     projectionPatch?: Record<string, unknown> | null
   ) => void
   emitHeartbeat: (text: string) => void
+  candidateOutputBuffer?: { snapshot(): string; replace(text: string): void }
   checkpointSnapshotProvider?: () => Promise<AgentInputItem[] | null>
+  callModelInputFilter?: (
+    items: AgentInputItem[],
+    context: { sourceItems: AgentInputItem[]; compacted: boolean },
+  ) => Promise<AgentInputItem[]>
   nativeTextToolBoundaryFlush: { current: (() => void) | null }
   finishBudgetCheckpointIfNeeded: () => Promise<ExecutionTurnResult | null>
+  finishBrowserObservationCheckpoint: (message?: string) => Promise<ExecutionTurnResult>
   maybeHandleSkillClarificationGuard: (
     text: string
   ) => Promise<'continue' | ExecutionTurnResult | null>
@@ -182,14 +187,17 @@ export async function executeAgentSdkModelToolLoop(
     sdkTools,
     contextWindowTokens,
     maxOutputTokens,
-    inferredSdkTaskType,
+    turnTaskType,
     requiredCapabilityGroups,
     usedTools,
     emitOutput,
     emitHeartbeat,
+    candidateOutputBuffer,
     checkpointSnapshotProvider,
+    callModelInputFilter,
     nativeTextToolBoundaryFlush,
     finishBudgetCheckpointIfNeeded,
+    finishBrowserObservationCheckpoint,
     maybeHandleSkillClarificationGuard,
     maybeHandleActionAnnouncementGuard,
     finalizeEarlyReturn
@@ -227,13 +235,34 @@ export async function executeAgentSdkModelToolLoop(
   const bufferNativeTextUntilParsed = !useTextToolBridge && toolDefinitions.length > 0
   const holdNativeTextUntilFinal =
     bufferNativeTextUntilParsed && allowedToolNames.includes('skill_ask_user')
+  const shouldHoldNativeTextUntilVerified = (): boolean =>
+    holdNativeTextUntilFinal || Boolean(toolBridgeRuntimeContext.browserWorkflowRoute)
   const bridgeTurnLimit = useTextToolBridge ? currentAgentSdkMaxTurns() : 3
-  for (let bridgeTurn = 0; bridgeTurn < bridgeTurnLimit; bridgeTurn += 1) {
+  const browserObservationClosure = {
+    phase: 'idle' as
+      | 'idle'
+      | 'observation_pending'
+      | 'observation_running'
+      | 'synthesis_pending'
+      | 'synthesis_running',
+  }
+  let bridgeTurn = 0
+  while (
+    bridgeTurn < bridgeTurnLimit
+    || browserObservationClosure.phase === 'observation_pending'
+    || browserObservationClosure.phase === 'synthesis_pending'
+  ) {
+    const observationClosureTurn = browserObservationClosure.phase === 'observation_pending'
+    const observationSynthesisTurn = browserObservationClosure.phase === 'synthesis_pending'
+    if (observationClosureTurn) browserObservationClosure.phase = 'observation_running'
+    if (observationSynthesisTurn) browserObservationClosure.phase = 'synthesis_running'
+    toolBridgeRuntimeContext.browserObservationClosureActive = observationClosureTurn
+    bridgeTurn += 1
     let streamedText = ''
     let nativeTextBuffer = ''
     let nativeTextAlreadyEmitted = ''
     let nativeTextFlushTimer: ReturnType<typeof setTimeout> | null = null
-    {
+    if (!observationClosureTurn && !observationSynthesisTurn) {
       const checkpointResult = await finishBudgetCheckpointIfNeeded()
       if (checkpointResult) return checkpointResult
     }
@@ -257,6 +286,7 @@ export async function executeAgentSdkModelToolLoop(
       if (nativeTextFlushTimer || !nativeTextBuffer) return
       nativeTextFlushTimer = setTimeout(() => {
         nativeTextFlushTimer = null
+        if (shouldHoldNativeTextUntilVerified()) return
         flushNativeTextBuffer(true)
       }, NATIVE_TEXT_BUFFER_TIMED_FLUSH_MS)
     }
@@ -269,6 +299,7 @@ export async function executeAgentSdkModelToolLoop(
     let contextCompressedForBridgeTurn = false
     let providerRetryAttempts = 0
     let runResult: ReadyAgentSdkRunResult | null = null
+    let successfulRunCandidateStart = candidateOutputBuffer?.snapshot() ?? ''
     const maybeWriteRollingBudgetCheckpoint = async (): Promise<void> => {
       if (
         !state.liveTaskBudgetRuntime ||
@@ -309,7 +340,13 @@ export async function executeAgentSdkModelToolLoop(
       nativeTextAlreadyEmitted = ''
       clearNativeTextFlushTimer()
       const baseItems = await modelSession.getItems()
+      const candidateTextAtAttemptStart = candidateOutputBuffer?.snapshot() ?? ''
       const usedToolsAtAttemptStart = usedTools.length
+      const resetRetryAttempt = async () => {
+        candidateOutputBuffer?.replace(candidateTextAtAttemptStart)
+        await modelSession.clearSession()
+        if (baseItems.length > 0) await modelSession.addItems(baseItems)
+      }
       try {
         if (abortController.signal.aborted) {
           const error =
@@ -330,20 +367,10 @@ export async function executeAgentSdkModelToolLoop(
           terminalReminderTexts.unshift(state.sessionRestoreNotice)
           state.sessionRestoreNotice = null
         }
-        const activePlanReminder = buildActivePlanReminderText(sessionId)
         const registry = createSystemReminderRegistry()
         if (terminalReminderTexts.length > 0) {
           registerBackgroundTaskTerminalReminder(registry, terminalReminderTexts)
         }
-        if (activePlanReminder) {
-          registry.register({
-            topic: 'active-plan-step',
-            priority: 80,
-            conflictsWith: [],
-            text: activePlanReminder
-          })
-        }
-        registerBrowserActionSessionReminder(registry, sessionId)
         // D2 — 结果型任务的验收标准（事中自检），与终态裁决同一模板源。
         // 每 run 只注入一次（首个模型调用）：criteria 是 run 级静态清单，
         // 重复注入既费 token 也会改变后续迭代（如 text-bridge 回喂）的
@@ -351,7 +378,7 @@ export async function executeAgentSdkModelToolLoop(
         if (!state.criteriaSelfCheckInjected) {
           state.criteriaSelfCheckInjected = registerCriteriaSelfCheckReminder(
             registry,
-            state.liveTaskBudgetRuntime?.taskType || inferredSdkTaskType || null
+            state.liveTaskBudgetRuntime?.taskType || turnTaskType
           )
         }
         const reminderText = registry.compose()
@@ -363,7 +390,7 @@ export async function executeAgentSdkModelToolLoop(
           contextCompressedForBridgeTurn ? '上下文较长，压缩后重新调用模型…' : '正在调用模型…'
         )
         // P0-1 — arm the response-boundary release for hold turns only.
-        nativeTextToolBoundaryFlush.current = holdNativeTextUntilFinal
+        nativeTextToolBoundaryFlush.current = shouldHoldNativeTextUntilVerified()
           ? () => {
               flushNativeTextBuffer(true)
             }
@@ -378,18 +405,23 @@ export async function executeAgentSdkModelToolLoop(
           model,
           provider,
           session: modelSession,
-          tools: sdkTools,
+          tools: observationSynthesisTurn ? [] : sdkTools,
           signal: abortController.signal,
-          maxTurns: currentAgentSdkMaxTurns(),
+          maxTurns: observationClosureTurn
+            ? (useTextToolBridge ? 1 : 2)
+            : observationSynthesisTurn
+              ? 1
+              : currentAgentSdkMaxTurns(),
           contextWindowTokens,
           maxOutputTokens,
+          callModelInputFilter,
           onTextDelta: (delta) => {
             streamedText += delta
             if (!useTextToolBridge && !bufferNativeTextUntilParsed) {
               emitOutput(delta, 'text')
             } else if (!useTextToolBridge && bufferNativeTextUntilParsed) {
               nativeTextBuffer += delta
-              if (!holdNativeTextUntilFinal) {
+              if (!shouldHoldNativeTextUntilVerified()) {
                 flushNativeTextBuffer(false)
                 scheduleNativeTextFlush()
               }
@@ -405,6 +437,7 @@ export async function executeAgentSdkModelToolLoop(
         state.runMetaUsage = addRunUsage(state.runMetaUsage, runResult.usage)
         consumeModelIterations(Math.max(1, Math.round(runResult.iterationsUsed || 1)))
         await maybeWriteRollingBudgetCheckpoint()
+        successfulRunCandidateStart = candidateTextAtAttemptStart
         if (toolBridgeRuntimeContext.hostControl === 'handoff_takeover') {
           return finalizeEarlyReturn({ status: 'checkpoint', terminalReason: 'manual_suspend', finalText: '' })
         }
@@ -412,6 +445,19 @@ export async function executeAgentSdkModelToolLoop(
       } catch (error) {
         nativeTextToolBoundaryFlush.current = null
         clearNativeTextFlushTimer()
+        if (error instanceof Error && error.name === 'BrowserWorkflowSuspendedError') {
+          const suspensionKind = toolBridgeRuntimeContext.browserSuspensionRequest?.kind
+          return finalizeEarlyReturn({
+            status: 'checkpoint',
+            terminalReason: 'manual_suspend',
+            finalText: '',
+            initiator: suspensionKind === 'browser_power_confirmation'
+              ? 'browser_power_confirmation'
+              : suspensionKind === 'browser_permission'
+                ? 'browser_permission'
+                : 'browser_human_takeover',
+          })
+        }
         if (abortController.signal.aborted) {
           const abortError =
             abortController.signal.reason instanceof Error
@@ -442,8 +488,7 @@ export async function executeAgentSdkModelToolLoop(
           const checkpointResult = await finishBudgetCheckpointIfNeeded()
           if (checkpointResult) return checkpointResult
         }
-        const replayWouldDuplicateProgress =
-          streamedText.length > 0 || usedTools.length > usedToolsAtAttemptStart
+        const replayWouldDuplicateProgress = usedTools.length > usedToolsAtAttemptStart
         if (
           !replayWouldDuplicateProgress &&
           classifySdkRuntimeError(error).terminalReason === 'context_overflow' &&
@@ -459,6 +504,8 @@ export async function executeAgentSdkModelToolLoop(
             contextWindowTokens
           )
           if (compacted.status === 'compacted' || compacted.status === 'noop') {
+            candidateOutputBuffer?.replace(candidateTextAtAttemptStart)
+            if (compacted.status === 'noop') await resetRetryAttempt()
             contextCompressedForBridgeTurn = true
             continue
           }
@@ -481,6 +528,7 @@ export async function executeAgentSdkModelToolLoop(
                 : '本轮没有开放工具；请直接说明缺口，不要再次调用工具。'
             ].join('\n')
           )
+          await resetRetryAttempt()
           continue
         }
         // S5-2: classified transient provider failures (429/5xx/stream
@@ -503,6 +551,7 @@ export async function executeAgentSdkModelToolLoop(
             providerRetryAttempts < recovery.maxAttempts
           ) {
             providerRetryAttempts += 1
+            await resetRetryAttempt()
             const base = recovery.retryDelayMs || 400
             const delayMs =
               recovery.backoff === 'exponential_jitter'
@@ -543,6 +592,54 @@ export async function executeAgentSdkModelToolLoop(
     }
     if (!runResult) throw new Error('SDK run did not produce a result.')
     const modelText = runResult.finalText || streamedText
+    const refreshBrowserObservationBarrier = (): boolean => {
+      const route = toolBridgeRuntimeContext.browserWorkflowRoute
+      if (!route) return false
+      const evidence = host.readVerifiedBrowserWorkflowEvidence(route.browserTaskId)
+      if (!evidence) throw new Error('browser_observation_evidence_unavailable')
+      syncBrowserObservationGapsFromJournal(
+        toolBridgeRuntimeContext,
+        evidence.unresolvedActions.map((entry) => ({
+          actionId: entry.actionId,
+          actionSeq: entry.actionSeq,
+          outcome: entry.outcome as unknown as Record<string, unknown>,
+        })),
+      )
+      return Boolean(toolBridgeRuntimeContext.browserObservationBarrier)
+    }
+    const continueAfterBrowserObservationToolResults = async (
+      bridgeResults: ToolBridgeResultItem[],
+      visibleText: string,
+    ): Promise<'continue' | ExecutionTurnResult | null> => {
+      if (browserObservationClosure.phase !== 'observation_running') return null
+      state.nextInput = buildTextToolResultMessage(bridgeResults)
+      state.finalText = visibleText
+      toolBridgeRuntimeContext.browserObservationClosureActive = false
+      if (refreshBrowserObservationBarrier()) return finishBrowserObservationCheckpoint()
+      browserObservationClosure.phase = 'synthesis_pending'
+      return 'continue'
+    }
+    const finishBrowserObservationSynthesisCheckpoint = () =>
+      finishBrowserObservationCheckpoint(
+        '页面状态已经核对，但兼容接口没有形成最终答复。我已保存现场，继续时不会重复之前的动作。',
+      )
+    const guardBrowserTerminalCandidate = async (): Promise<
+      'continue' | ExecutionTurnResult | null
+    > => {
+      if (!toolBridgeRuntimeContext.browserWorkflowRoute) return null
+      if (!refreshBrowserObservationBarrier()) return null
+      candidateOutputBuffer?.replace(successfulRunCandidateStart)
+      state.finalText = ''
+      if (browserObservationClosure.phase === 'idle') {
+        browserObservationClosure.phase = 'observation_pending'
+        state.nextInput = buildBrowserObservationRequiredInput(
+          toolBridgeRuntimeContext.browserObservationGaps,
+        )
+        emitHeartbeat('正在核对刚才的页面变化…')
+        return 'continue'
+      }
+      return finishBrowserObservationCheckpoint()
+    }
     const nativeMapCriticalClose = !useTextToolBridge
       ? (toolBridgeRuntimeContext.nativeMapCriticalClose ?? null)
       : null
@@ -570,6 +667,7 @@ export async function executeAgentSdkModelToolLoop(
         leakedToolCall = recoverLooseXmlToolCallText(modelText)
       }
       if (leakedToolCall.toolCalls.length > 0) {
+        if (observationSynthesisTurn) return finishBrowserObservationSynthesisCheckpoint()
         const visibleText = visibleNativeTextAfterFlush(leakedToolCall.visibleText)
         if (visibleText && !shouldSuppressVisibleTextOnToolCall(visibleText)) {
           emitOutput(visibleText, 'text')
@@ -612,6 +710,14 @@ export async function executeAgentSdkModelToolLoop(
             return finalizeEarlyReturn({ status: 'checkpoint', terminalReason: 'manual_suspend', finalText: '' })
           }
         }
+        {
+          const observationClosureResult = await continueAfterBrowserObservationToolResults(
+            bridgeResults,
+            leakedToolCall.visibleText,
+          )
+          if (observationClosureResult === 'continue') continue
+          if (observationClosureResult) return observationClosureResult
+        }
         const handledMapAmbiguity = await host.resolveMapPlaceAmbiguityIfNeeded({
           bridgeResults,
           definitionByName,
@@ -633,6 +739,14 @@ export async function executeAgentSdkModelToolLoop(
           state.finalText = leakedToolCall.visibleText
           continue
         }
+        if (toolBridgeRuntimeContext.browserSuspensionRequest) {
+          // Feed the standard tool result through the next SDK model-input
+          // filter. The filter commits the post-result clean boundary and
+          // aborts before any provider request is dispatched.
+          state.nextInput = buildTextToolResultMessage(bridgeResults)
+          state.finalText = leakedToolCall.visibleText
+          continue
+        }
         {
           const checkpointResult = await finishBudgetCheckpointIfNeeded()
           if (checkpointResult) return checkpointResult
@@ -641,10 +755,18 @@ export async function executeAgentSdkModelToolLoop(
         state.finalText = leakedToolCall.visibleText
         continue
       }
+      {
+        const browserTerminalGuard = await guardBrowserTerminalCandidate()
+        if (browserTerminalGuard === 'continue') continue
+        if (browserTerminalGuard) return browserTerminalGuard
+      }
       state.finalText = ensureResearchSearchResultDelivered(
         modelText,
         toolBridgeRuntimeContext.latestResearchSearchDelivery,
       )
+      if (observationSynthesisTurn && !state.finalText.trim()) {
+        return finishBrowserObservationSynthesisCheckpoint()
+      }
       {
         const skillClarificationResult = await maybeHandleSkillClarificationGuard(state.finalText)
         if (skillClarificationResult === 'continue') continue
@@ -713,10 +835,18 @@ export async function executeAgentSdkModelToolLoop(
 
     const parsed = parseTextToolBridgeResponse(modelText)
     if (parsed.toolCalls.length === 0) {
+      {
+        const browserTerminalGuard = await guardBrowserTerminalCandidate()
+        if (browserTerminalGuard === 'continue') continue
+        if (browserTerminalGuard) return browserTerminalGuard
+      }
       state.finalText = ensureResearchSearchResultDelivered(
         parsed.visibleText || modelText,
         toolBridgeRuntimeContext.latestResearchSearchDelivery,
       )
+      if (observationSynthesisTurn && !state.finalText.trim()) {
+        return finishBrowserObservationSynthesisCheckpoint()
+      }
       {
         const skillClarificationResult = await maybeHandleSkillClarificationGuard(state.finalText)
         if (skillClarificationResult === 'continue') continue
@@ -770,6 +900,7 @@ export async function executeAgentSdkModelToolLoop(
       break
     }
 
+    if (observationSynthesisTurn) return finishBrowserObservationSynthesisCheckpoint()
     if (parsed.visibleText && !shouldSuppressVisibleTextOnToolCall(parsed.visibleText)) {
       emitOutput(parsed.visibleText, 'text')
     }
@@ -812,6 +943,14 @@ export async function executeAgentSdkModelToolLoop(
         return finalizeEarlyReturn({ status: 'checkpoint', terminalReason: 'manual_suspend', finalText: '' })
       }
     }
+    {
+      const observationClosureResult = await continueAfterBrowserObservationToolResults(
+        bridgeResults,
+        parsed.visibleText,
+      )
+      if (observationClosureResult === 'continue') continue
+      if (observationClosureResult) return observationClosureResult
+    }
     const handledMapAmbiguity = await host.resolveMapPlaceAmbiguityIfNeeded({
       bridgeResults,
       definitionByName,
@@ -833,6 +972,14 @@ export async function executeAgentSdkModelToolLoop(
       state.finalText = parsed.visibleText
       continue
     }
+    if (toolBridgeRuntimeContext.browserSuspensionRequest) {
+      // Text-tool providers use the same clean-boundary contract as native
+      // providers: the complete result enters callModelInputFilter, which
+      // persists the suspension and prevents the next wire request.
+      state.nextInput = buildTextToolResultMessage(bridgeResults)
+      state.finalText = parsed.visibleText
+      continue
+    }
     {
       const checkpointResult = await finishBudgetCheckpointIfNeeded()
       if (checkpointResult) return checkpointResult
@@ -842,5 +989,6 @@ export async function executeAgentSdkModelToolLoop(
   }
 
   throwIfAbortSignalAborted(abortController.signal)
+  toolBridgeRuntimeContext.browserObservationClosureActive = false
   return null
 }

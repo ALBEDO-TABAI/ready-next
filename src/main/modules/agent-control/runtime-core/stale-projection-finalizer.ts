@@ -71,6 +71,12 @@ export function shouldFinalizeStaleWithoutHandleProjection(
   nowMs: number,
   graceMs = STALE_WITHOUT_HANDLE_CLOSEOUT_MS,
 ): boolean {
+  // Bound Browser Parents are recovered only by the Parent ExitClass/startup
+  // state machine.  This generic timer must never bypass child/checkpoint
+  // ownership or synthesize a second closeout.
+  if (record.requestAnchor || record.checkpointRefs?.cleanBaseCheckpointId || record.checkpointRefs?.suspensionCheckpointId) {
+    return false
+  }
   if (!STALE_CLOSEOUT_STATUSES.has(record.status)) return false
   if (!record.runId) return false
   if (deriveTaskProjectionCanResume(record).canResume === true) return false
@@ -86,6 +92,9 @@ export async function finalizeStaleWithoutHandleProjections(
   let finalized = 0
 
   for (const record of params.records) {
+    if (record.requestAnchor || record.checkpointRefs?.cleanBaseCheckpointId || record.checkpointRefs?.suspensionCheckpointId) {
+      continue
+    }
     const runMeta = record.runId && params.runMetaRepository
       ? params.runMetaRepository.get(record.runId) as { continuationRef?: TaskProjectionRecord['continuationRef'] } | null
       : null

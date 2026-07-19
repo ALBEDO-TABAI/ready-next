@@ -8,7 +8,7 @@ const { checkRendererMetricChannel } = require('../check-renderer-metric-channel
 
 test('passes when main/preload/types and renderer dogfood emit points exist', () => {
   withFixture({
-    'src/shared/renderer-agent-metrics.ts': 'export const RENDERER_AGENT_METRICS = ["renderer_send_persistence_failed","renderer_attachment_input_failed","renderer_friendly_error_surfaced","renderer_assistant_persistence_failed"] as const\n',
+    'src/shared/renderer-agent-metrics.ts': 'export const RENDERER_AGENT_METRICS = ["renderer_send_persistence_failed","renderer_attachment_input_failed","renderer_friendly_error_surfaced","renderer_send_success_without_canonical_terminal","renderer_steering_send_failed"] as const\n',
     'src/main/modules/claude-bridge/ipc-handler.ts': "ipcMain.handle('agent:emitRendererMetric', () => {})\n",
     'src/preload/index.ts': "emitRendererMetric: (name, payload) => ipcRenderer.invoke('agent:emitRendererMetric', { name, payload })\n",
     'src/renderer/types/electron.d.ts': 'emitRendererMetric: (name: RendererAgentMetricName, payload: Record<string, unknown>) => Promise<{ success: boolean }>\n',
@@ -16,7 +16,8 @@ test('passes when main/preload/types and renderer dogfood emit points exist', ()
       "emitRendererAgentMetric('renderer_send_persistence_failed', {})",
       "emitRendererAgentMetric('renderer_attachment_input_failed', {})",
       "emitRendererAgentMetric('renderer_friendly_error_surfaced', {})",
-      "emitRendererAgentMetric('renderer_assistant_persistence_failed', {})",
+      "emitRendererAgentMetric('renderer_send_success_without_canonical_terminal', {})",
+      "emitRendererAgentMetric('renderer_steering_send_failed', {})",
     ].join('\n'),
   }, (root) => {
     const result = checkRendererMetricChannel({ root })
@@ -26,14 +27,15 @@ test('passes when main/preload/types and renderer dogfood emit points exist', ()
 
 test('fails when the main IPC handler is missing', () => {
   withFixture({
-    'src/shared/renderer-agent-metrics.ts': 'export const RENDERER_AGENT_METRICS = ["renderer_send_persistence_failed","renderer_attachment_input_failed","renderer_friendly_error_surfaced","renderer_assistant_persistence_failed"] as const\n',
+    'src/shared/renderer-agent-metrics.ts': 'export const RENDERER_AGENT_METRICS = ["renderer_send_persistence_failed","renderer_attachment_input_failed","renderer_friendly_error_surfaced","renderer_send_success_without_canonical_terminal","renderer_steering_send_failed"] as const\n',
     'src/preload/index.ts': "emitRendererMetric: (name, payload) => ipcRenderer.invoke('agent:emitRendererMetric', { name, payload })\n",
     'src/renderer/types/electron.d.ts': 'emitRendererMetric: (name: RendererAgentMetricName, payload: Record<string, unknown>) => Promise<{ success: boolean }>\n',
     'src/renderer/stores/useAgent.ts': [
       "emitRendererAgentMetric('renderer_send_persistence_failed', {})",
       "emitRendererAgentMetric('renderer_attachment_input_failed', {})",
       "emitRendererAgentMetric('renderer_friendly_error_surfaced', {})",
-      "emitRendererAgentMetric('renderer_assistant_persistence_failed', {})",
+      "emitRendererAgentMetric('renderer_send_success_without_canonical_terminal', {})",
+      "emitRendererAgentMetric('renderer_steering_send_failed', {})",
     ].join('\n'),
   }, (root) => {
     const result = checkRendererMetricChannel({ root })

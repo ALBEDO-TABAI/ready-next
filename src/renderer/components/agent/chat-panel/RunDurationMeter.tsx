@@ -120,12 +120,7 @@ export function RunDurationMeter({
           gap: 7,
           minHeight: 24,
           padding: '5px 8px',
-          borderRadius: 8,
-          border: '1px solid color-mix(in srgb, var(--border-default) 62%, transparent)',
-          background: 'color-mix(in srgb, var(--surface-card-bg) 22%, transparent)',
           color: 'var(--text-light)',
-          backdropFilter: 'blur(14px) saturate(126%)',
-          WebkitBackdropFilter: 'blur(14px) saturate(126%)',
         }}
       >
         <DotGlyph

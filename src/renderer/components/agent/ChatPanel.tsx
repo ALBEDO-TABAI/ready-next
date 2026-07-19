@@ -901,9 +901,6 @@ export default function ChatPanel({
     handleContinueDetachedTask,
     handleCancelChildRun,
     handleContinueChildRun,
-    handleResumeBrowserTask,
-    handleCancelBrowserTask,
-    handleConfirmBrowserCollectionConsent,
     handleResumeTask,
     handleRetryTask,
     handleOpenTaskArtifact,
@@ -1042,9 +1039,6 @@ export default function ChatPanel({
       onRetryTask={handleRetryTask}
       onSuspendTask={handleSuspendTask}
       onResumeTask={handleResumeTask}
-      onResumeBrowserTask={handleResumeBrowserTask}
-      onCancelBrowserTask={handleCancelBrowserTask}
-      onConfirmBrowserCollectionConsent={handleConfirmBrowserCollectionConsent}
       onCancelDetachedTask={handleCancelDetachedTask}
       onContinueDetachedTask={handleContinueDetachedTask}
       onCancelChildRun={handleCancelChildRun}

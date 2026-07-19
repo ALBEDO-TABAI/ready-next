@@ -120,6 +120,7 @@ test('repository roundtrips packetRole/contextRefs; legacy rows read back NULL/[
           run: (...params: unknown[]) => {
             const row = rows.get(String(params[params.length - 1]))
             if (row) setColumns.forEach((column, index) => { row[column] = params[index] })
+            return { changes: row ? 1 : 0 }
           },
           all: () => [], get: () => undefined,
         }

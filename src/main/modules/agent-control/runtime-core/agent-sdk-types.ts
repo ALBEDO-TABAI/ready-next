@@ -1,6 +1,5 @@
 import type { MemorySession } from '@openai/agents'
 import type { AIModelConfig } from '../../../../shared/ai-providers'
-import type { BrowserWorkIntent } from '../../../../shared/browser-work-intent'
 import type {
   BudgetWarningLevel,
   RunBudgetSeed,
@@ -14,6 +13,7 @@ import type { TurnTerminalReason } from './turn-frame'
 import type { AbortInitiator } from '../contracts/run-contracts-internal'
 import type { AIConfigLoad } from '../../claude-bridge/direct-chat-ai-config'
 import type { SkillToolAuthorization } from '../skills/skill-tool-authorization'
+import type { PreparedSkillTurnTruth } from '../contracts/browser-workflow-control'
 import type { ToolRuntimeActiveFrameContext } from '../tools-runtime/tool-runtime'
 import type { AgentSpawnContext } from '../../../../shared/skill-host-contract'
 import type {
@@ -34,6 +34,7 @@ import type { SpecialistBlueprintSourceMessageUnavailableReason } from '../../..
 import type { CompactResult } from '../compaction/compact-agent-input'
 import type { AgentInputItem, ModelProvider } from '@openai/agents'
 import { type Tool as AgentSdkTool } from '@openai/agents'
+import type { SkillSurfaceComposition, ExclusiveScopeRef } from '../../../../shared/browser-workflow-control'
 
 export interface AgentSdkSession {
   sdkSession: MemorySession
@@ -84,7 +85,7 @@ export type BeginRunResult =
     }
   | {
       ok: false
-      reason: 'superseded' | 'orphan_limit'
+      reason: 'superseded' | 'orphan_limit' | 'active_owner_exists'
       message: string
       currentRunId?: string | null
     }
@@ -105,6 +106,11 @@ export interface ReadyAgentSdkRunParams {
   contextWindowTokens: number
   maxOutputTokens: number
   onTextDelta: (delta: string) => void
+  /** Runs after SDK compaction and before each provider request. */
+  callModelInputFilter?: (
+    items: AgentInputItem[],
+    context: { sourceItems: AgentInputItem[]; compacted: boolean },
+  ) => Promise<AgentInputItem[]>
 }
 
 export interface ReadyAgentSdkRunResult {
@@ -140,10 +146,58 @@ export interface ToolBridgeRuntimeContext {
   allowedToolNames: string[]
   definitionByName: Map<string, ToolDefinition>
   authorization: SkillToolAuthorization
+  preparedSkillTurn: PreparedSkillTurnTruth
   /** `use_skill` refreshes this exact request's authorization and returns the
    *  newly enabled definitions for the next model iteration. */
   activateSkillForCurrentRun?: (skillId: string) => ToolDefinition[] | null
+  activateBrowserForCurrentRun?: () => ToolDefinition[]
+  ensureBrowserWorkflowRoute?: () => Promise<{
+    browserTaskId: string
+    requestAnchorSnapshotDigest: string
+  }>
+  browserWorkflowRoute?: {
+    browserTaskId: string
+    requestAnchorSnapshotDigest: string
+  } | null
+  /** Exact Browser registry operations whose standard results are present in
+   * the owner-local history.  This is an accumulated typed closure, never
+   * inferred from tool names or user text. */
+  browserRequiredOperationIds: string[]
+  /** Highest contiguous settled mutate result that has crossed the standard
+   * tool-result boundary for this owner. */
+  lastEffectiveBrowserActionSeq: number
+  /** Journal-derived actions that still require a causally linked readback. */
+  browserObservationGaps: Array<{
+    actionId: string
+    actionSeq: number
+    operationId: string
+    outcome: Record<string, unknown>
+    clearedByObservationSeq: number | null
+  }>
+  browserObservationBarrier?: {
+    actionId: string
+    actionSeq: number
+    operationId: string
+    outcome: Record<string, unknown>
+    clearedByObservationSeq: number | null
+  } | null
+  /** Run-local admission latch for the single observation-closing model
+   * response. It never replaces the journal-derived barrier; it only keeps a
+   * second tool call in the same response observe-only after the first read
+   * has already cleared that barrier. */
+  browserObservationClosureActive?: boolean
+  browserSuspensionRequest?: (
+    | { kind: 'human_takeover'; takeoverId: string }
+    | import('../../../../shared/browser-workflow-control').BrowserConfirmationSuspensionRequest
+  ) | null
+  confirmedBrowserPowerRequest?: import('../../../../shared/browser-workflow-control').BrowserPowerConfirmationSuspensionRequest | null
+  confirmedBrowserPowerRequestConsumed?: boolean
+  confirmedBrowserPermissionRequest?: import('../../../../shared/browser-workflow-control').BrowserPermissionSuspensionRequest | null
+  confirmedBrowserPermissionRequestConsumed?: boolean
   sameRunActivatedSkillId?: string | null
+  activatedCapabilityGroups: string[]
+  skillSurfaceComposition: SkillSurfaceComposition
+  exclusiveScopeRef: ExclusiveScopeRef | null
   useTextToolBridge?: boolean
   activeFrame: ToolRuntimeActiveFrameContext
   agentContext?: AgentSpawnContext | null
@@ -309,7 +363,7 @@ export interface AgentSdkRuntimeDeps {
     channelScopeBound?: boolean
     authorization: SkillToolAuthorization
     localSendImIntent?: boolean
-    recentBrowserWorkIntent?: BrowserWorkIntent
+    skillSurfaceComposition?: import('../../../../shared/browser-workflow-control').SkillSurfaceComposition
     requestEnvelope?: unknown
     /** P2-2 — the L1 skill catalog is non-empty this turn (gates use_skill exposure). */
     skillCatalogAvailable?: boolean

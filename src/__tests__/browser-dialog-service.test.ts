@@ -3,6 +3,7 @@ import test from 'node:test'
 
 import { BrowserDialogService } from '../main/modules/browser-engine/browser-dialog-service'
 import { executeBrowserTool } from '../main/modules/tools/browser-tools'
+import { captureAgentPageMap } from '../main/modules/tools/browser-observe-tools'
 import type { BrowserController } from '../main/modules/browser-engine/ipc-handler'
 
 test('dialog service records and deterministically handles javascript dialogs', async () => {
@@ -102,26 +103,78 @@ test('dialog service classifies alert, confirm, prompt and beforeunload determin
   }
 })
 
-test('ordinary actions auto-clear alerts but stop on confirm until browser_dialog handles it', async () => {
+test('ordinary actions stop on dialogs until browser_dialog handles the current dialog', async () => {
   let dialogType: 'alert' | 'confirm' = 'confirm'
+  let dialogOpen = true
   let handled = 0
   let backCalls = 0
   const controller = {
     getActiveTab: () => ({ id: 'tab-1', title: 'Fixture', url: 'https://example.test', active: true }),
     getTabList: () => [{ id: 'tab-1', title: 'Fixture', url: 'https://example.test', active: true }],
-    getBrowserDialog: async () => ({ tabId: 'tab-1', type: dialogType, message: 'Dialog' }),
-    handleBrowserDialog: async () => { handled += 1 },
+    getPhysicalTargetToken: () => 'physical-tab-1',
+    getBrowserDialog: async () => dialogOpen ? { tabId: 'tab-1', type: dialogType, message: 'Dialog' } : null,
+    handleBrowserDialog: async () => { handled += 1; dialogOpen = false },
+    beginBrowserWorkflowAction: (input: Record<string, unknown>) => ({
+      actionId: 'dialog-action-1',
+      actionSeq: 1,
+      identity: input.identity,
+    }),
+    settleBrowserWorkflowAction: (_taskId: string, actionId: string, outcome: unknown) => ({
+      receiptId: 'dialog-receipt-1',
+      actionId,
+      actionSeq: 1,
+      outcome,
+    }),
+    executeJS: async (_tabId: string | null, script: string) => script.includes('__READY_AGENT_PAGE_MAP__')
+      ? {
+          identity: { url: 'https://example.test', title: 'Fixture', frameDocumentToken: 'document-tab-1' },
+          viewport: { width: 1000, height: 800 },
+          rawRoots: [],
+        }
+      : {
+          url: 'https://example.test',
+          title: 'Fixture',
+          timeOrigin: 1,
+          mutationRevision: 0,
+          frameDocumentToken: 'document-tab-1',
+        },
     goBack: () => { backCalls += 1; return { success: true } },
   } as unknown as BrowserController
+  const taskContext = {
+    ownerRunId: 'run-dialog-test',
+    browserTaskId: 'browser-task-dialog-test',
+    parentTaskId: 'parent-dialog-test',
+    inputSource: 'trusted_internal' as const,
+  }
+  const execute = (name: string, args: Record<string, unknown>) => executeBrowserTool(
+    name,
+    args,
+    controller,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    taskContext,
+  )
 
-  const blocked = await executeBrowserTool('browser_navigate', { action: 'back' }, controller)
+  await captureAgentPageMap(controller, 'tab-1')
+  const blocked = await execute('browser_navigate', { action: 'back' })
   assert.equal(typeof blocked === 'string' ? null : blocked.data?.errorKind, 'dialog_open')
   assert.equal(backCalls, 0)
   assert.equal(handled, 0)
 
   dialogType = 'alert'
-  const allowed = await executeBrowserTool('browser_navigate', { action: 'back' }, controller)
-  assert.doesNotMatch(typeof allowed === 'string' ? allowed : allowed.text, /dialog_open/)
+  const alertBlocked = await execute('browser_navigate', { action: 'back' })
+  assert.equal(typeof alertBlocked === 'string' ? null : alertBlocked.data?.errorKind, 'dialog_open')
+  assert.equal(handled, 0)
+  assert.equal(backCalls, 0)
+
+  const handledResult = await execute('browser_dialog', { action: 'accept' })
+  assert.equal(typeof handledResult === 'string' ? null : handledResult.data?.ok, true)
   assert.equal(handled, 1)
+
+  const allowed = await execute('browser_navigate', { action: 'back' })
+  assert.doesNotMatch(typeof allowed === 'string' ? allowed : allowed.text, /dialog_open/)
   assert.equal(backCalls, 1)
 })

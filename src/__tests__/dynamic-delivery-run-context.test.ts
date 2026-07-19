@@ -28,6 +28,7 @@ test('run contexts isolate usage, accumulate each provider call once, and close 
     runId: 'run-a', taskId: 'task-a', userRequestVerbatim: 'test request', decision: 'verify_only', state: state(),
     committedSession: session, ownerSession: session, transaction: null,
     outputBuffer: new DeliveryOutputBuffer(), workerReports: [], canonicalReceiptItems: [], evidenceResources: [],
+    pendingAcceptance: null,
   })
 
   assert.equal(store.get('run-a'), context)
@@ -41,6 +42,7 @@ test('run contexts isolate usage, accumulate each provider call once, and close 
     runId: 'run-a', taskId: 'other', userRequestVerbatim: 'test request', decision: 'verify_only', state: state(),
     committedSession: session, ownerSession: session, transaction: null,
     outputBuffer: null, workerReports: [], canonicalReceiptItems: [], evidenceResources: [],
+    pendingAcceptance: null,
   }), /duplicate run context/)
 
   store.close('run-a')

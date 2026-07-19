@@ -450,12 +450,19 @@ export default function TaskPanel() {
 
   const handleRespondToProjection = useCallback(async () => {
     if (!activeProjection?.scopeId) return
+    if (activeProjection.interactionState === 'human_takeover') {
+      const takeover = activeProjection.humanTakeoverRef
+      if (!takeover || takeover.state !== 'pending') return
+      await window.electronAPI.agent.completeHumanTakeover({
+        taskId: activeProjection.taskId,
+        takeoverId: takeover.takeoverId,
+      })
+      return
+    }
     const placeholder =
       activeProjection.interactionState === 'awaiting_confirmation'
         ? '确认继续'
-        : activeProjection.interactionState === 'human_takeover'
-          ? '我已完成，请继续'
-          : '请继续，补充信息如下：'
+        : '请继续，补充信息如下：'
     const responseText = window.prompt('补充后继续', placeholder)
     if (responseText == null) return
     const trimmed = responseText.trim() || placeholder

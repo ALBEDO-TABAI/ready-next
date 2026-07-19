@@ -50,13 +50,20 @@ export function gateActOnTarget(
     candidates?: unknown[]
     ambiguityGroup?: { role: string; name: string; targetIds: string[] } | null
     resolvedRef?: ResolvedTargetRef
+    stableTarget?: boolean
+    target?: {
+      role?: unknown
+      name?: unknown
+      editable?: unknown
+      states?: Record<string, unknown>
+    } | null
   },
 ): ResolvedTargetRef | AgentBrowserStructuredError {
   const parsed = context.resolvedRef || parseTargetId(request.targetId)
   if (!parsed) {
     return agentBrowserError('target_not_found', `Malformed target id: ${request.targetId}`)
   }
-  if (parsed.generation !== context.currentGeneration) {
+  if (parsed.generation !== context.currentGeneration && context.stableTarget !== true) {
     return agentBrowserError(
       'stale_page_map',
       `Target ${request.targetId} was built against page map generation ${parsed.generation}, but the current generation is ${context.currentGeneration}. Re-read the page map first.`,
@@ -88,6 +95,21 @@ export function gateActOnTarget(
       'ambiguous_target',
       `Target ${request.targetId} resolves to ${context.matchCount} elements. Narrow to a container before acting.`,
       { matchCount: context.matchCount, candidates: context.candidates ?? [] },
+    )
+  }
+  if (
+    request.action === 'fill'
+    && context.target?.editable === false
+    && context.target.states?.fileInput !== true
+  ) {
+    return agentBrowserError(
+      'target_not_editable',
+      `Target ${request.targetId} is not editable. Read browser_snapshot again and choose a target whose editable field is true.`,
+      {
+        targetRole: String(context.target.role || ''),
+        targetName: String(context.target.name || ''),
+        editable: false,
+      },
     )
   }
   return parsed

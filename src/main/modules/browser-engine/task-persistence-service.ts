@@ -11,6 +11,37 @@ import type {
 } from './capability-types'
 import { taskEventBridge, toBridgeStatus } from './task-event-bridge'
 import type { TaskExecutionBinding } from '../../../shared/agent-execution-profile'
+import { buildBrowserTaskEventExtra } from './browser-task-event-presentation'
+import {
+  assessBrowserResearch,
+  parseBrowserResearchState,
+  parseBrowserWorkflowActionJournal,
+  parseBrowserWorkflowObservationResources,
+  readVerifiedBrowserWorkflowEvidence,
+  verifyBrowserObservationResource,
+  type BrowserResearchAssessment,
+  type BrowserWorkflowActionJournal,
+  type BrowserWorkflowObservationReceipt,
+  type BrowserWorkflowObservationResource,
+  type VerifiedBrowserWorkflowEvidence,
+  type SettledBrowserWorkflowAction,
+} from './browser-workflow-evidence'
+
+export type {
+  BeginBrowserWorkflowActionInput,
+  BrowserResearchAssessment,
+  BrowserResearchEvidenceBindingInput,
+  BrowserResearchEvidenceRef,
+  BrowserResearchWorkItem,
+  BrowserResearchWorkItemInput,
+  BrowserWorkflowActionJournal,
+  BrowserWorkflowActiveAction,
+  BrowserWorkflowObservationReceipt,
+  BrowserWorkflowObservationResource,
+  VerifiedBrowserWorkflowEvidence,
+  RecordBrowserWorkflowObservationInput,
+  SettledBrowserWorkflowAction,
+} from './browser-workflow-evidence'
 
 function parseJSON<T>(raw: string | null | undefined, fallback: T): T {
   if (!raw) return fallback
@@ -52,6 +83,17 @@ function sha256(value: unknown): string {
   return createHash('sha256').update(stableJson(value)).digest('hex')
 }
 
+function parsePersistedTaskPayload(record: import('../database').BrowserTaskRecord): Record<string, unknown> {
+  try {
+    const payload = asRecord(JSON.parse(record.payload_json))
+    if (payload) return payload
+  } catch {
+    // Browser workflow state is authoritative and must never reset on parse failure.
+  }
+  if (record.kind === 'browser_workflow') throw new Error('browser_workflow_payload_corrupt')
+  return {}
+}
+
 function targetIdentity(value: unknown, index: number): { id: string; url: string | null } | null {
   const record = asRecord(value)
   if (!record) return null
@@ -62,13 +104,24 @@ function targetIdentity(value: unknown, index: number): { id: string; url: strin
 
 type BrowserTaskFailureClassification = NonNullable<BrowserTaskCheckpoint['failures']>[number]['classification']
 
-function failureClassification(reason: string): BrowserTaskFailureClassification {
-  if (/captcha|challenge|verification|验证码|验证|扫码|登录墙/i.test(reason)) return 'verification'
-  if (/429|rate.?limit|retry-after|限流|频繁/i.test(reason)) return 'rate_limit'
-  if (/timeout|network|fetch|connection|dns|socket|导航失败/i.test(reason)) return 'network'
-  if (/not.?found|selector|target|目标|元素/i.test(reason)) return 'target_missing'
-  if (/unavailable|deleted|不存在|无法浏览|下架/i.test(reason)) return 'unavailable'
-  if (/permission|authorization|denied|forbidden|权限|授权/i.test(reason)) return 'authorization'
+const FAILURE_CLASSIFICATIONS = new Set<BrowserTaskFailureClassification>([
+  'verification', 'rate_limit', 'network', 'target_missing', 'unavailable', 'authorization', 'unknown',
+])
+
+function failureClassification(value: unknown): BrowserTaskFailureClassification {
+  const record = asRecord(value)
+  const declared = String(record?.classification || '') as BrowserTaskFailureClassification
+  if (FAILURE_CLASSIFICATIONS.has(declared)) return declared
+  if (record?.challenge === true || record?.loginWall === true) return 'verification'
+  const status = Number(record?.status || record?.statusCode || 0)
+  if (status === 429) return 'rate_limit'
+  const errorKind = String(record?.errorKind || record?.errorCode || '').toLowerCase()
+  if (['challenge_required', 'verification_required', 'login_required', 'auth_required'].includes(errorKind)) return 'verification'
+  if (['rate_limited', 'origin_rate_limited'].includes(errorKind)) return 'rate_limit'
+  if (['network_error', 'browser_operation_timeout', 'navigation_failed'].includes(errorKind)) return 'network'
+  if (['target_not_found', 'target_stale', 'target_ambiguous'].includes(errorKind)) return 'target_missing'
+  if (['content_unavailable', 'unsupported_operation', 'resource_not_found'].includes(errorKind)) return 'unavailable'
+  if (['authorization_denied', 'permission_denied', 'lease_denied'].includes(errorKind)) return 'authorization'
   return 'unknown'
 }
 
@@ -119,15 +172,14 @@ export function enrichBrowserTaskCheckpoint(
     targetList: checkpoint.targetList || targets,
     failures: checkpoint.failures || failures.map((failure, index) => {
       const record = asRecord(failure)
-      const reason = String(record?.reason || record?.error || record?.message || 'unknown')
       const identity = targetIdentity(failure, index)
-      const classification = failureClassification(reason)
+      const classification = failureClassification(failure)
       return {
         targetId: identity?.id || `failure-${index + 1}`,
         classification,
         retryable: typeof record?.retryable === 'boolean'
           ? record.retryable
-          : !['verification', 'unavailable', 'authorization'].includes(classification),
+          : classification === 'network' || classification === 'rate_limit',
       }
     }),
     outputHashes: checkpoint.outputHashes || outputs.map((output, index) => ({
@@ -154,85 +206,6 @@ function readString(record: Record<string, unknown> | null, keys: readonly strin
   return null
 }
 
-function readNumber(record: Record<string, unknown> | null, keys: readonly string[]): number | null {
-  if (!record) return null
-  for (const key of keys) {
-    const value = Number(record[key])
-    if (Number.isFinite(value)) return value
-  }
-  return null
-}
-
-function buildTaskEventExtra(
-  task: BrowserCapabilityTaskHandle | null,
-  payload: Record<string, unknown> | null,
-): Record<string, unknown> | null {
-  if (!task) return null
-  const result = asRecord(task.result)
-  const plan = asRecord(payload?.plan)
-  const progress = task.progress
-  const total = Math.max(0, Number(progress.total || 0))
-  const completed = Math.max(0, Number(progress.completed || 0))
-  const failed = Math.max(0, Number(progress.failed || 0))
-  const explicitRemaining = readNumber(result, ['remaining'])
-  const remaining = explicitRemaining ?? Math.max(0, total - completed - failed)
-  const stopReason = readString(result, ['stopReason'])
-  const autoContinue = result?.autoContinue === true
-  const sourceTaskId = readString(result, ['sourceTaskId'])
-    || readString(payload, ['sourceTaskId'])
-    || readString(plan, ['sourceTaskId'])
-  const outputRootDir = readString(result, ['outputRootDir'])
-    || readString(payload, ['outputRootDir'])
-    || readString(plan, ['outputRootDir'])
-  const canResume = task.status !== 'completed'
-    && task.status !== 'cancelled'
-    && task.status !== 'running'
-    && task.status !== 'queued'
-    && Boolean(task.checkpoint || asRecord(task.result)?.resumeKind)
-
-  return {
-    taskId: task.taskId,
-    browserTaskId: task.taskId,
-    kind: task.kind,
-    scopeId: readString(payload, ['scopeId', 'sessionId', 'publicSessionId']),
-    sourceTaskId,
-    summary: buildTaskEventSummary(task.status, total, completed, failed, remaining, stopReason),
-    progress: {
-      total,
-      completed,
-      failed,
-      remaining,
-      currentLabel: progress.currentLabel ?? null,
-    },
-    stopReason,
-    autoContinue,
-    outputRootDir,
-    resumeFromCursor: readNumber(result, ['resumeFromCursor']),
-    canResume,
-    startedAt: task.startedAt ?? task.createdAt ?? null,
-    finishedAt: task.finishedAt ?? null,
-    updatedAt: task.updatedAt ?? null,
-  }
-}
-
-function buildTaskEventSummary(
-  status: BrowserCapabilityTaskStatus,
-  total: number,
-  completed: number,
-  failed: number,
-  remaining: number,
-  stopReason: string | null,
-): string {
-  if (status === 'completed') return `后台采集完成：已保存 ${completed}/${total}${failed > 0 ? `，失败 ${failed}` : ''}`
-  if (status === 'paused') {
-    const reason = stopReason === 'max_duration' ? '单段运行保护暂停' : '已暂停'
-    return `${reason}：已保存 ${completed}/${total}${remaining > 0 ? `，剩余 ${remaining}` : ''}`
-  }
-  if (status === 'waiting_human') return `后台采集等待处理：已保存 ${completed}/${total}${remaining > 0 ? `，剩余 ${remaining}` : ''}`
-  if (status === 'failed') return `后台采集失败：已保存 ${completed}/${total}${failed > 0 ? `，失败 ${failed}` : ''}`
-  return `后台任务状态更新：${status}`
-}
-
 function recordToHandle(record: import('../database').BrowserTaskRecord): BrowserCapabilityTaskHandle {
   return {
     taskId: record.id,
@@ -257,6 +230,32 @@ function recordToHandle(record: import('../database').BrowserTaskRecord): Browse
     parentTaskId: record.parent_task_id || null,
     projectionRevision: Number(record.projection_revision || 0),
     projectionSync: parseJSON<Record<string, unknown> | null>(record.projection_sync_json, null),
+  }
+}
+
+function preserveBrowserWorkflowJournal(
+  record: import('../database').BrowserTaskRecord,
+  requested: Record<string, unknown>,
+): Record<string, unknown> {
+  if (record.kind !== 'browser_workflow') return requested
+  const current = parsePersistedTaskPayload(record)
+  return {
+    ...requested,
+    ...(Object.prototype.hasOwnProperty.call(current, 'browserWorkflowActionJournal')
+      ? { browserWorkflowActionJournal: current.browserWorkflowActionJournal }
+      : {}),
+    ...(Object.prototype.hasOwnProperty.call(current, 'browserWorkflowObservationResources')
+      ? { browserWorkflowObservationResources: current.browserWorkflowObservationResources }
+      : {}),
+    ...(Object.prototype.hasOwnProperty.call(current, 'browserResearch')
+      ? { browserResearch: current.browserResearch }
+      : {}),
+    ...(Object.prototype.hasOwnProperty.call(current, 'executionBinding')
+      ? { executionBinding: current.executionBinding }
+      : {}),
+    ...(Object.prototype.hasOwnProperty.call(current, 'parentTaskId')
+      ? { parentTaskId: current.parentTaskId }
+      : {}),
   }
 }
 
@@ -314,37 +313,186 @@ export class BrowserTaskPersistenceService {
   getTaskPayload(taskId: string): Record<string, unknown> | null {
     const record = this.repository.getTask(taskId)
     if (!record) return null
-    return parseJSON<Record<string, unknown>>(record.payload_json, {})
+    return parsePersistedTaskPayload(record)
+  }
+
+  assessResearch(taskId: string): BrowserResearchAssessment {
+    const record = this.repository.getTask(taskId)
+    if (!record) throw new Error(`browser_workflow_task_not_found:${taskId}`)
+    if (record.kind !== 'browser_workflow') throw new Error(`browser_workflow_task_kind_required:${record.kind}`)
+    return assessBrowserResearch(taskId, parseBrowserResearchState(parsePersistedTaskPayload(record)))
+  }
+
+  readHighestSettledAction(taskId: string): SettledBrowserWorkflowAction | null {
+    const payload = this.getTaskPayload(taskId)
+    if (!payload) return null
+    const journal = parseBrowserWorkflowActionJournal(payload, taskId)
+    const highest = journal.settledOutcomes.reduce<BrowserWorkflowActionJournal['settledOutcomes'][number] | null>(
+      (current, item) => !current || item.actionSeq > current.actionSeq ? item : current,
+      null,
+    )
+    return highest
+      ? { receiptId: highest.receiptId, actionId: highest.actionId, actionSeq: highest.actionSeq, outcome: highest.outcome }
+      : null
+  }
+
+  readHighestObservation(taskId: string): BrowserWorkflowObservationReceipt | null {
+    const payload = this.getTaskPayload(taskId)
+    if (!payload) return null
+    const journal = parseBrowserWorkflowActionJournal(payload, taskId)
+    return journal.observationReceipts.reduce<BrowserWorkflowObservationReceipt | null>(
+      (current, item) => !current || item.observationSeq > current.observationSeq ? item : current,
+      null,
+    )
+  }
+
+  readObservationResource(taskId: string, resourceId: string): BrowserWorkflowObservationResource | null {
+    const payload = this.getTaskPayload(taskId)
+    if (!payload) return null
+    const resource = parseBrowserWorkflowObservationResources(payload, taskId).find((item) => item.resourceId === resourceId)
+    const receipt = parseBrowserWorkflowActionJournal(payload, taskId).observationReceipts
+      .find((item) => item.resourceId === resourceId)
+    if (!resource || !receipt) return null
+    return verifyBrowserObservationResource(taskId, resource, receipt)
+  }
+
+  listObservationResources(taskId: string): BrowserWorkflowObservationResource[] {
+    const payload = this.getTaskPayload(taskId)
+    if (!payload) return []
+    const receiptList = parseBrowserWorkflowActionJournal(payload, taskId).observationReceipts
+    const receipts = new Map(receiptList
+      .map((receipt) => [receipt.resourceId, receipt]))
+    const resources = parseBrowserWorkflowObservationResources(payload, taskId)
+    if (receipts.size !== receiptList.length || resources.length !== receiptList.length) {
+      throw new Error('browser_observation_resource_receipt_set_mismatch')
+    }
+    return resources.map((resource) => {
+      const receipt = receipts.get(resource.resourceId)
+      if (!receipt) throw new Error('browser_observation_resource_receipt_set_mismatch')
+      return verifyBrowserObservationResource(taskId, resource, receipt)
+    })
+  }
+
+  readVerifiedWorkflowEvidence(taskId: string): VerifiedBrowserWorkflowEvidence {
+    const record = this.repository.getTask(taskId)
+    if (!record) throw new Error(`browser_workflow_task_not_found:${taskId}`)
+    if (record.kind !== 'browser_workflow') throw new Error(`browser_workflow_task_kind_required:${record.kind}`)
+    return readVerifiedBrowserWorkflowEvidence(
+      taskId,
+      parsePersistedTaskPayload(record),
+    )
   }
 
   updateTaskPayload(taskId: string, payload: Record<string, unknown>): boolean {
-    const current = this.getTask(taskId)
-    if (!current) return false
-    const expectedUpdatedAt = String(current.updatedAt || current.createdAt || '')
+    const record = this.repository.getTask(taskId)
+    if (!record) return false
+    const nextPayload = preserveBrowserWorkflowJournal(record, payload || {})
+    const expectedUpdatedAt = String(record.updated_at || record.created_at || '')
     return this.repository.updateTask(taskId, {
-      payload_json: JSON.stringify(payload || {}),
-      active_execution_binding_json: payload.executionBinding && typeof payload.executionBinding === 'object'
-        ? JSON.stringify(payload.executionBinding)
-        : null,
-      parent_task_id: readString(payload, ['parentTaskId']),
+      payload_json: JSON.stringify(nextPayload),
+      active_execution_binding_json: record.kind === 'browser_workflow'
+        ? undefined
+        : nextPayload.executionBinding && typeof nextPayload.executionBinding === 'object'
+          ? JSON.stringify(nextPayload.executionBinding)
+          : null,
+      parent_task_id: record.kind === 'browser_workflow' ? undefined : readString(nextPayload, ['parentTaskId']),
       updated_at: monotonicIsoAfter(expectedUpdatedAt),
     }, expectedUpdatedAt ? { expectedUpdatedAt } : undefined)
+  }
+
+  compareAndSetTaskState(
+    taskId: string,
+    expectedUpdatedAt: string,
+    update: {
+      payload?: Record<string, unknown>
+      progress?: Partial<BrowserCapabilityTaskProgress>
+      checkpoint?: BrowserTaskCheckpoint | null
+      status?: BrowserCapabilityTaskStatus
+      error?: string | null
+      result?: unknown
+      startedAt?: string | null
+      finishedAt?: string | null
+    },
+  ): { committed: boolean; task: BrowserCapabilityTaskHandle | null } {
+    const record = this.repository.getTask(taskId)
+    if (!record) return { committed: false, task: null }
+    const current = recordToHandle(record)
+    if (record.updated_at !== expectedUpdatedAt) return { committed: false, task: current }
+    const requestedStatus = update.status ?? current.status
+    if (isTerminalStatus(current.status) && requestedStatus !== current.status) {
+      return { committed: false, task: current }
+    }
+    const payload = update.payload
+      ? preserveBrowserWorkflowJournal(record, update.payload)
+      : parsePersistedTaskPayload(record)
+    const progress = update.progress || {}
+    const nextProgress: BrowserCapabilityTaskProgress = {
+      total: progress.total ?? current.progress.total,
+      completed: progress.completed ?? current.progress.completed,
+      failed: progress.failed ?? current.progress.failed,
+      currentLabel: Object.prototype.hasOwnProperty.call(progress, 'currentLabel')
+        ? progress.currentLabel ?? null
+        : current.progress.currentLabel ?? null,
+    }
+    const committed = this.repository.updateTask(taskId, {
+      status: requestedStatus,
+      payload_json: update.payload ? JSON.stringify(payload) : undefined,
+      active_execution_binding_json: update.payload && record.kind !== 'browser_workflow'
+        ? payload.executionBinding && typeof payload.executionBinding === 'object'
+          ? JSON.stringify(payload.executionBinding)
+          : null
+        : undefined,
+      parent_task_id: update.payload && record.kind !== 'browser_workflow'
+        ? readString(payload, ['parentTaskId'])
+        : undefined,
+      checkpoint_json: update.checkpoint !== undefined
+        ? JSON.stringify(update.checkpoint === null
+          ? null
+          : enrichBrowserTaskCheckpoint(
+              update.checkpoint,
+              payload,
+              update.result !== undefined ? update.result : current.result,
+            ))
+        : undefined,
+      result_json: update.result !== undefined ? JSON.stringify(update.result) : undefined,
+      progress_total: nextProgress.total,
+      progress_completed: nextProgress.completed,
+      progress_failed: nextProgress.failed,
+      current_label: nextProgress.currentLabel ?? null,
+      error: Object.prototype.hasOwnProperty.call(update, 'error') ? update.error ?? null : undefined,
+      started_at: update.startedAt,
+      finished_at: update.finishedAt,
+      updated_at: monotonicIsoAfter(expectedUpdatedAt),
+    }, { expectedUpdatedAt })
+    const task = this.getTask(taskId)
+    if (!committed) return { committed: false, task }
+    const bridgeStatus = update.status ? toBridgeStatus(update.status) : null
+    if (bridgeStatus) {
+      taskEventBridge.publish({
+        taskId,
+        status: bridgeStatus,
+        extra: buildBrowserTaskEventExtra(task, this.getTaskPayload(taskId)),
+      })
+    }
+    return { committed: true, task }
   }
 
   patchTaskPayload(taskId: string, patch: Record<string, unknown>): boolean {
     const record = this.repository.getTask(taskId)
     if (!record) return false
-    const payload = {
-      ...parseJSON<Record<string, unknown>>(record.payload_json, {}),
+    const payload = preserveBrowserWorkflowJournal(record, {
+      ...parsePersistedTaskPayload(record),
       ...patch,
-    }
+    })
     const expectedUpdatedAt = String(record.updated_at || record.created_at || '')
     return this.repository.updateTask(taskId, {
       payload_json: JSON.stringify(payload),
-      active_execution_binding_json: payload.executionBinding && typeof payload.executionBinding === 'object'
-        ? JSON.stringify(payload.executionBinding)
-        : null,
-      parent_task_id: readString(payload, ['parentTaskId']),
+      active_execution_binding_json: record.kind === 'browser_workflow'
+        ? undefined
+        : payload.executionBinding && typeof payload.executionBinding === 'object'
+          ? JSON.stringify(payload.executionBinding)
+          : null,
+      parent_task_id: record.kind === 'browser_workflow' ? undefined : readString(payload, ['parentTaskId']),
       updated_at: monotonicIsoAfter(expectedUpdatedAt),
     }, expectedUpdatedAt ? { expectedUpdatedAt } : undefined)
   }
@@ -425,7 +573,7 @@ export class BrowserTaskPersistenceService {
       taskEventBridge.publish({
         taskId,
         status: bridgeStatus,
-        extra: buildTaskEventExtra(updated, this.getTaskPayload(taskId)),
+        extra: buildBrowserTaskEventExtra(updated, this.getTaskPayload(taskId)),
       })
     }
     return updated

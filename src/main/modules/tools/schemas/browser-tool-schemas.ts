@@ -1,6 +1,7 @@
 import { z } from 'zod'
 
 const tabId = z.string().optional().describe('目标标签页 ID；省略时使用当前活动标签页')
+const normalizedCoordinate = (description: string) => z.number().min(0).max(999).optional().describe(description)
 const targetFields = {
   target_id: z.string().optional().describe('browser_snapshot 或 browser_find 返回的目标引用'),
   document_epoch: z.number().optional().describe('目标引用绑定的文档版本'),
@@ -8,8 +9,8 @@ const targetFields = {
   selector: z.string().optional().describe('CSS 选择器兜底'),
   text: z.string().optional().describe('可见文本或输入内容，具体含义见工具说明'),
   exact: z.boolean().optional().describe('可见文本是否精确匹配'),
-  x: z.number().optional().describe('归一化横坐标 0-999，仅作最后兜底'),
-  y: z.number().optional().describe('归一化纵坐标 0-999，仅作最后兜底'),
+  x: normalizedCoordinate('归一化横坐标 0-999，仅作最后兜底'),
+  y: normalizedCoordinate('归一化纵坐标 0-999，仅作最后兜底'),
   tab_id: tabId,
 }
 
@@ -39,8 +40,10 @@ export const BROWSER_TOOL_SCHEMAS = {
   }),
   browser_search: z.object({
     query: z.string().describe('搜索关键词'),
-    engine: z.enum(['auto', 'duckduckgo', 'google', 'bing', 'baidu']).optional().describe('搜索引擎，默认 auto'),
-    scope: z.enum(['web', 'current_site']).optional().describe('搜索范围；current_site 只在当前站点内搜索且不回退外部引擎'),
+    input_target_id: z.string().optional().describe('可选的当前页面搜索输入目标引用；省略时只按结构定位唯一可编辑目标'),
+    submit_target_id: z.string().optional().describe('可选的当前页面提交目标引用；省略时优先提交输入框所属表单，只在前台页面无表单结构时按 Enter'),
+    result_target_id: z.string().optional().describe('可选的动作前结果区域引用，用于绑定机械效果预期'),
+    empty_target_id: z.string().optional().describe('可选的动作前空结果区域引用，用于绑定机械效果预期'),
     tab_id: tabId,
     allow_repeat: z.boolean().optional().describe('是否允许短时间内重复执行同一搜索'),
   }),
@@ -51,7 +54,11 @@ export const BROWSER_TOOL_SCHEMAS = {
   browser_find: z.object({
     query: z.string().optional().describe('要查找的文本、名称或描述'),
     role: z.string().optional().describe('可访问角色过滤'),
-    purpose: z.enum(['any', 'action', 'input', 'upload', 'send']).optional().describe('目标用途，默认 any'),
+    purpose: z.enum(['any', 'action', 'input']).optional().describe('结构用途过滤，默认 any；具体动作由模型结合候选名称与页面上下文判断'),
+    within_target_id: z.string().optional().describe('只在该容器目标的后代中查找'),
+    visible: z.boolean().optional().describe('是否只返回可见目标，默认 true'),
+    enabled: z.boolean().optional().describe('是否只返回可用目标，默认 true'),
+    frame_id: z.string().optional().describe('只在指定 frame 中查找'),
     cursor: z.string().optional().describe('上一页返回的分页游标'),
     limit: z.number().optional().describe('最多返回的候选数'),
     tab_id: tabId,
@@ -66,8 +73,7 @@ export const BROWSER_TOOL_SCHEMAS = {
     tab_id: tabId,
     mode: z.enum(['viewport', 'clip', 'full_page']).optional().describe('截图模式，默认 viewport'),
     clip: arbitraryObject.optional().describe('裁剪区域 {x,y,width,height}'),
-    analyze: z.boolean().optional().describe('是否同时返回内部视觉分析'),
-    action: z.enum(['upload', 'send', 'close', 'back', 'input']).optional().describe('视觉分析关注的动作'),
+    purpose: z.string().optional().describe('可选的观察目的；不改变截图行为'),
   }),
   browser_wait: z.object({
     tab_id: tabId,
@@ -119,8 +125,8 @@ export const BROWSER_TOOL_SCHEMAS = {
     tab_id: tabId,
     target_id: z.string().optional().describe('滚动容器引用'),
     selector: z.string().optional().describe('滚动容器选择器'),
-    x: z.number().optional().describe('归一化横坐标 0-999'),
-    y: z.number().optional().describe('归一化纵坐标 0-999'),
+    x: normalizedCoordinate('归一化横坐标 0-999'),
+    y: normalizedCoordinate('归一化纵坐标 0-999'),
     delta_x: z.number().optional().describe('横向滚动像素'),
     delta_y: z.number().optional().describe('纵向滚动像素'),
     direction: z.enum(['up', 'down', 'left', 'right']).optional().describe('滚动方向'),
@@ -134,23 +140,29 @@ export const BROWSER_TOOL_SCHEMAS = {
   browser_drag: z.object({
     source_target_id: z.string().optional().describe('起点引用'),
     target_target_id: z.string().optional().describe('终点引用'),
-    source_x: z.number().optional().describe('起点归一化横坐标'),
-    source_y: z.number().optional().describe('起点归一化纵坐标'),
-    target_x: z.number().optional().describe('终点归一化横坐标'),
-    target_y: z.number().optional().describe('终点归一化纵坐标'),
+    source_x: normalizedCoordinate('起点归一化横坐标 0-999'),
+    source_y: normalizedCoordinate('起点归一化纵坐标 0-999'),
+    target_x: normalizedCoordinate('终点归一化横坐标 0-999'),
+    target_y: normalizedCoordinate('终点归一化纵坐标 0-999'),
     tab_id: tabId,
   }),
   browser_upload: z.object({
     attachment_id: z.string().optional().describe('会话附件 ID'),
-    attachment_ids: z.array(z.string()).optional().describe('多个会话附件 ID'),
+    attachment_ids: z.array(z.string().min(1)).min(1).max(32).optional().describe('多个会话附件 ID'),
     attachment_name: z.string().optional().describe('附件文件名或片段'),
     latest: z.boolean().optional().describe('是否使用最新附件'),
     selector: z.string().optional().describe('file input 选择器'),
     target_id: z.string().optional().describe('上传入口引用'),
-    target: z.string().optional().describe('上传入口描述'),
-    x: z.number().optional().describe('归一化横坐标'),
-    y: z.number().optional().describe('归一化纵坐标'),
     tab_id: tabId,
+  }).refine((value) => Boolean(value.target_id?.trim() || value.selector?.trim()), {
+    message: 'target_id or selector is required',
+  }).refine((value) => [
+    Boolean(value.attachment_id?.trim()),
+    Boolean(value.attachment_ids?.length),
+    Boolean(value.attachment_name?.trim()),
+    value.latest === true,
+  ].filter(Boolean).length === 1, {
+    message: 'choose exactly one attachment selector',
   }),
   browser_dialog: z.object({
     action: z.enum(['get', 'accept', 'dismiss']).optional().describe('对话框动作，默认 get'),
@@ -158,32 +170,41 @@ export const BROWSER_TOOL_SCHEMAS = {
     tab_id: tabId,
   }),
   browser_request_takeover: z.object({
-    action: z.enum(['request', 'complete']).optional().describe('请求用户接管，或在用户明确表示已完成后确认接管结束'),
     reason: z.string().describe('需要用户接管的原因'),
     instruction: z.string().optional().describe('用户需要完成的步骤'),
     tab_id: tabId,
   }),
 
   browser_research: z.object({
-    scope: z.enum(['current_site', 'url_set']).describe('研究范围；不允许静默改用外部搜索引擎'),
-    queries: z.array(z.string().min(1)).min(1).optional().describe('current_site 的非空查询列表，保序去重'),
-    site_tab_id: z.string().optional().describe('当前站点的绑定标签页 ID；已有明确页面引用时可省略'),
-    urls: z.array(z.string().url()).min(1).optional().describe('url_set 的完整 URL 列表'),
-    per_query_limit: z.number().int().min(1).max(50).optional().describe('每个查询冻结的结果卡上限'),
-    detail_limit_per_query: z.number().int().min(0).max(20).optional().describe('每个查询深读详情上限'),
-    fields: z.array(z.enum(['title', 'url', 'author', 'engagement', 'published_at', 'body'])).optional().describe('需要返回的受控字段'),
-    preserve_source_tab: z.boolean().optional().describe('是否保留用户来源页，默认 true'),
+    action: z.enum(['start', 'evidence', 'complete']).optional().describe('研究工作项动作，默认 start'),
+    work_items: z.array(z.object({
+      work_item_id: z.string().min(1).max(256).optional(),
+      goal_refs: z.array(z.string().min(1).max(256)).max(64).optional(),
+      requirement: z.string().min(1).max(4_000).optional(),
+      query: z.string().min(1).max(2_000).optional(),
+      url: z.string().min(1).max(4_000).optional(),
+      field_goals: z.array(z.string().min(1).max(512)).max(64).optional(),
+      required: z.boolean().optional(),
+    })).max(128).optional().describe('开放研究工作项；语义由模型决定'),
+    evidence_bindings: z.array(z.object({
+      work_item_id: z.string().min(1).max(256),
+      observation_receipt_id: z.string().min(1).max(256),
+      action_receipt_id: z.string().min(1).max(256).optional(),
+    })).max(256).optional().describe('把工作项绑定到已持久化且可验证的浏览器证据凭据'),
+  }).superRefine((value, ctx) => {
+    const action = value.action || 'start'
+    if (action === 'evidence' && (!value.evidence_bindings || value.evidence_bindings.length === 0)) {
+      ctx.addIssue({ code: 'custom', path: ['evidence_bindings'], message: 'evidence_bindings is required when action is evidence' })
+      return
+    }
+    if (action === 'start' && (!value.work_items || value.work_items.length === 0)) {
+      ctx.addIssue({ code: 'custom', path: ['work_items'], message: 'start requires work_items' })
+    }
   }),
   browser_collect: z.object({
-    mode: z.enum(['images', 'structured', 'scroll', 'visible', 'notes']).optional().describe('采集模式，默认按参数和页面选择'),
-    url: z.string().optional().describe('目标 URL'),
-    urls: z.array(z.string()).optional().describe('目标 URL 列表'),
-    source_task_id: z.string().optional().describe('上游冻结清单任务 ID'),
-    output_dir: z.string().optional().describe('绑定到任务资源的输出目录'),
-    output_root_dir: z.string().optional().describe('逐篇采集的授权输出根目录'),
+    mode: z.enum(['images', 'structured', 'scroll', 'visible']).optional().describe('采集模式，默认按参数和页面选择'),
     template: z.enum(['article_list', 'image_gallery', 'link_list', 'card_list']).optional().describe('结构提取模板'),
     limit: z.number().optional().describe('采集上限'),
-    expected_count: z.number().optional().describe('预期条目数'),
     keyword: z.string().optional().describe('图片过滤关键词'),
     min_width: z.number().optional().describe('图片最小宽度'),
     include_hidden: z.boolean().optional().describe('是否包含隐藏图片'),
@@ -196,34 +217,21 @@ export const BROWSER_TOOL_SCHEMAS = {
     })).optional().describe('结构化字段映射'),
     max_scrolls: z.number().optional().describe('最大滚动轮数'),
     scroll_delay_ms: z.number().optional().describe('滚动后等待时间'),
-    max_items: z.number().optional().describe('可见采集最大条目数'),
-    max_rounds: z.number().optional().describe('可见采集最大轮数'),
-    max_duration_ms: z.number().optional().describe('单段最大运行时长'),
-    user_expected_total: z.number().optional().describe('用户明确给出的预期总数'),
-    target_profile_url: z.string().optional().describe('逐篇采集的来源主页'),
-    notes: z.array(arbitraryObject).optional().describe('用户明确提供的冻结笔记清单'),
-    max_notes: z.number().optional().describe('逐篇采集最大笔记数'),
-    max_consecutive_failures: z.number().optional().describe('连续失败保护上限'),
     tab_id: tabId,
   }),
   browser_download: z.object({
-    mode: z.enum(['urls', 'collected', 'page', 'media', 'resolve', 'gallery']).describe('下载来源'),
+    mode: z.enum(['urls', 'page', 'media', 'resolve']).describe('下载来源'),
     urls: z.array(z.string().url()).min(1).optional().describe('下载 URL 列表'),
-    url: z.string().url().optional().describe('单个页面或资源 URL'),
-    page_url: z.string().url().optional().describe('resolve 时的来源页面 URL'),
+    url: z.string().url().optional().describe('page/media 模式的页面 URL，或 resolve 模式的已知来源 URL'),
+    page_url: z.string().url().optional().describe('resolve 模式的来源页面 URL'),
     video_url: z.string().url().optional().describe('resolve 时已知的视频 URL'),
     poster_url: z.string().url().optional().describe('resolve 时已知的封面 URL'),
     title: z.string().optional().describe('resolve 时的页面或视频标题'),
     sources: z.array(z.string().url()).min(1).optional().describe('resolve 时的候选媒体 URL'),
-    source_task_id: z.string().optional().describe('已完成采集任务 ID'),
     directory: z.string().optional().describe('由用户指令、任务资源或当前工作区绑定的目录；省略时使用 Ready 默认下载目录'),
     max_total_bytes: z.number().optional().describe('本次任务允许写入的总字节预算'),
     filename_prefix: z.string().optional().describe('输出文件名前缀'),
     overwrite: z.boolean().optional().describe('是否覆盖同名文件'),
-    expected_total: z.number().optional().describe('预期下载总数'),
-    limit: z.number().optional().describe('最多处理的候选数'),
-    max_scrolls: z.number().optional().describe('图库发现最大滚动轮数'),
-    retry_failed: z.boolean().optional().describe('是否只重试失败项'),
     tab_id: tabId,
   }),
   browser_archive: z.object({
@@ -232,7 +240,7 @@ export const BROWSER_TOOL_SCHEMAS = {
     tab_id: tabId,
   }),
   browser_task: z.object({
-    action: z.enum(['get', 'resume', 'cancel', 'result']).optional().describe('任务动作，默认 get'),
+    action: z.enum(['get', 'result']).optional().describe('任务读取动作，默认 get'),
     task_id: z.string().describe('后台浏览器任务 ID'),
   }),
 
@@ -257,7 +265,6 @@ export const BROWSER_TOOL_SCHEMAS = {
     tab_id: tabId,
   }),
   browser_resources: z.object({
-    url: z.string().optional().describe('可选目标页 URL'),
     kinds: z.array(z.enum(['video', 'audio', 'image', 'document', 'json', 'stream', 'unknown'])).optional().describe('资源类型过滤'),
     include_response_bodies: z.boolean().optional().describe('是否读取受限的小型响应正文'),
     wait_ms: z.number().optional().describe('等待资源出现的最长时间'),
@@ -292,10 +299,19 @@ export const BROWSER_TOOL_SCHEMAS = {
   }),
   browser_permission: z.object({
     action: z.enum(['status', 'set', 'reset']).optional().describe('权限动作，默认 status'),
+    site_request_id: z.string().min(1).optional().describe('站点权限请求通知中的精确请求 ID；status/set 必填'),
     permission: z.enum(['geolocation', 'notifications', 'media', 'clipboard-read', 'clipboard-sanitized-write']).optional().describe('站点权限'),
-    decision: z.enum(['allow', 'deny', 'ask']).optional().describe('set 时的决定'),
+    decision: z.enum(['allow', 'deny']).optional().describe('set 时的决定'),
     origin: z.string().optional().describe('目标 origin；省略时使用当前页'),
     tab_id: tabId,
+  }).superRefine((value, ctx) => {
+    const action = value.action || 'status'
+    if ((action === 'status' || action === 'set') && !value.site_request_id?.trim()) {
+      ctx.addIssue({ code: 'custom', path: ['site_request_id'], message: 'site_request_id is required for status/set' })
+    }
+    if (action === 'set' && !value.decision) {
+      ctx.addIssue({ code: 'custom', path: ['decision'], message: 'decision is required for set' })
+    }
   }),
 } as const
 

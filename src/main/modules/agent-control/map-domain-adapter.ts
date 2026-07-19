@@ -18,10 +18,9 @@ import {
 import { isMapSemanticIntentActive } from './map-semantic-intent'
 import type { ScopeRunTaskStep } from './contracts/types'
 
-const BASE_TOOL_PREFIXES = ['map_', 'ask_user_questions']
+const BASE_TOOL_PREFIXES = ['map_', 'ask_user_questions', 'use_browser']
 const DOCUMENT_TOOL_PREFIXES = ['document_', 'present_file']
 const RESEARCH_TOOL_PREFIXES = ['web_search', 'web_fetch', 'web_clip_url', 'present_file']
-const BROWSER_TOOL_PREFIXES = ['browser_']
 const INSTRUCTION = [
   '系统执行器：本轮走地图路线规划路径。',
   '优先使用 map_plan_route 获取路线、顺路地点、耗时和 artifact。',
@@ -89,18 +88,12 @@ function hasExplicitResearchSignal(text: string): boolean {
   return /(查|搜索|搜一下|评价|口碑|小红书|大众点评|攻略|网上|网页|资料|评分)/.test(text)
 }
 
-function hasExplicitBrowserSignal(text: string): boolean {
-  if (hasNegatedLookupSignal(text)) return false
-  return /(打开网页|浏览器|当前页面|网页里|页面里|小红书|大众点评)/.test(text)
-}
-
 function buildPrefixes(params: DomainAdapterPrepareParams): string[] {
   const signals = new Set(params.executionIntentContext.mapSemanticIntent?.secondarySignals || [])
   return [
     ...BASE_TOOL_PREFIXES,
     ...(signals.has('document_output') ? DOCUMENT_TOOL_PREFIXES : []),
     ...(signals.has('research_lookup') && hasExplicitResearchSignal(params.userText) ? RESEARCH_TOOL_PREFIXES : []),
-    ...(signals.has('browser_lookup') && hasExplicitBrowserSignal(params.userText) ? BROWSER_TOOL_PREFIXES : []),
   ]
 }
 
@@ -230,13 +223,12 @@ export class MapDomainAdapter implements DomainAdapter {
       const signals = new Set(params.executionIntentContext.mapSemanticIntent?.secondarySignals || [])
       const shouldContinueForDocument = signals.has('document_output')
       const shouldContinueForResearch = signals.has('research_lookup') && hasExplicitResearchSignal(params.userText)
-      const shouldContinueForBrowser = signals.has('browser_lookup') && hasExplicitBrowserSignal(params.userText)
       for (const executedTool of params.toolBatch?.executedTools || []) {
         if (executedTool.name !== 'map_plan_route') continue
         const record = readStructuredToolResultRecord(executedTool.result)
         const stepId = buildStepId(nextState.steps, executedTool.name)
         const summary = buildToolSummary(record)
-        if (!shouldContinueForDocument && !shouldContinueForResearch && !shouldContinueForBrowser) {
+        if (!shouldContinueForDocument && !shouldContinueForResearch) {
           finalText = buildMapFinalText(record)
         } else if (record?.ok === false && record.errorKind !== 'place_ambiguous') {
           finalText = buildMapFinalText(record)

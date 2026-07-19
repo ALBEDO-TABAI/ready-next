@@ -6,7 +6,10 @@ import { mapBrowserAgentPointerToOverlay } from '../shared/browser-agent-pointer
 import { createToolExecutionOutput, type ToolExecutionOutput } from '../main/modules/agent-control/tools-runtime/tool-result-types'
 import { runBrowserFillFormSequence } from '../main/modules/tools/browser-act-tools'
 import { executeBrowserTool } from '../main/modules/tools/browser-tools'
-import { browserOriginInteractionBudget } from '../main/modules/browser-engine/origin-interaction-budget'
+import {
+  browserOriginInteractionBudget,
+  scopedOriginInteractionKey,
+} from '../main/modules/browser-engine/origin-interaction-budget'
 import {
   captureAgentPageMap,
   executeBrowserObserveTool,
@@ -14,10 +17,7 @@ import {
 } from '../main/modules/tools/browser-observe-tools'
 
 function observeContext(controller: BrowserController) {
-  return {
-    controller,
-    attachBrowserActionSessionOutput: (result: string | ToolExecutionOutput) => result,
-  }
+  return { controller }
 }
 
 test('browser_fill_form stops at the first failed field and never submits partial data', async () => {
@@ -70,7 +70,7 @@ test('browser_read enforces max_chars and returns structured selector ambiguity'
   } as unknown as BrowserController
 
   const bounded = await executeBrowserObserveTool('read', { tab_id: 'tab-a', max_chars: 5 }, observeContext(controller))
-  assert.equal(bounded, 'abcde')
+  assert.equal((bounded as ToolExecutionOutput).data?.content, 'abcde')
 
   selectorMatches = 2
   const ambiguous = await executeBrowserObserveTool('read', { tab_id: 'tab-a', selector: '.card' }, observeContext(controller))
@@ -80,16 +80,68 @@ test('browser_read enforces max_chars and returns structured selector ambiguity'
   assert.equal((ambiguous as ToolExecutionOutput).data?.matchCount, 2)
 })
 
+test('browser_read exposes challenge content for observation but never accepts it as research evidence', async () => {
+  let contentRead = false
+  const controller = {
+    getActiveTab: () => ({ id: 'tab-a', url: 'https://example.test/' }),
+    getTabList: () => [{ id: 'tab-a', url: 'https://example.test/', active: true }],
+    getPageContent: async () => {
+      contentRead = true
+      return 'stale result that must not become evidence'
+    },
+    executeJS: async (_tabId: string | null, script: string) => script.includes('__READY_BLOCKING_CHALLENGE_PROBE__')
+      ? { blocked: true, blockerCount: 1, matchedKinds: ['qr_login'] }
+      : null,
+  } as unknown as BrowserController
+
+  const result = await executeBrowserObserveTool('read', { tab_id: 'tab-a' }, observeContext(controller))
+  assert.equal(typeof result, 'object')
+  assert.equal((result as ToolExecutionOutput).data?.ok, false)
+  assert.equal((result as ToolExecutionOutput).data?.errorKind, 'challenge_required')
+  assert.deepEqual((result as ToolExecutionOutput).data?.evidence, ['visible_blocker:1', 'challenge:qr_login'])
+  assert.equal((result as ToolExecutionOutput).data?.observed, true)
+  assert.equal((result as ToolExecutionOutput).data?.content, 'stale result that must not become evidence')
+  assert.equal((result as ToolExecutionOutput).data?.usableAsResearchEvidence, false)
+  assert.equal(contentRead, true)
+})
+
+test('browser_read never turns an empty or error page into body evidence', async () => {
+  let pageState: Record<string, unknown> = { blocked: false, pageError: false, emptyShell: true, matchedKinds: [] }
+  const controller = {
+    getActiveTab: () => ({ id: 'tab-a', url: 'https://example.test/' }),
+    getTabList: () => [{ id: 'tab-a', url: 'https://example.test/', active: true }],
+    getPageContent: async () => '',
+    executeJS: async () => pageState,
+  } as unknown as BrowserController
+
+  const empty = await executeBrowserObserveTool('read', { tab_id: 'tab-a' }, observeContext(controller)) as ToolExecutionOutput
+  assert.equal(empty.data?.ok, false)
+  assert.equal(empty.data?.errorKind, 'page_content_empty')
+
+  pageState = { blocked: false, pageError: true, emptyShell: false, matchedKinds: [] }
+  const error = await executeBrowserObserveTool('read', { tab_id: 'tab-a' }, observeContext(controller)) as ToolExecutionOutput
+  assert.equal(error.data?.ok, false)
+  assert.equal(error.data?.errorKind, 'page_error')
+})
+
 test('browser_read resolves a fresh opaque target and rejects stale refs structurally', async () => {
   __resetBrowserAgentPageMapForTests()
   let documentKey = 'doc-1'
   const controller = {
     getActiveTab: () => ({ id: 'tab-a', url: 'https://example.test/' }),
     getTabList: () => [{ id: 'tab-a', url: 'https://example.test/', active: true }],
+    getPhysicalTargetToken: () => 'physical-tab-a',
     listFrames: () => [],
+    callFunctionOnBackendNode: async () => ({ matchCount: 1, content: 'Open details\nAccount details' }),
     executeJS: async (_tabId: string | null, script: string) => {
       if (script.includes('__readyBrowserSnapshotMutationState')) {
-        return { url: `https://example.test/${documentKey}`, title: 'Example', timeOrigin: documentKey, mutationRevision: 0 }
+        return {
+          url: `https://example.test/${documentKey}`,
+          title: 'Example',
+          timeOrigin: documentKey,
+          mutationRevision: 0,
+          frameDocumentToken: documentKey,
+        }
       }
       if (script.includes('__READY_AGENT_PAGE_MAP__')) {
         return {
@@ -112,7 +164,7 @@ test('browser_read resolves a fresh opaque target and rejects stale refs structu
   const snapshot = await captureAgentPageMap(controller, 'tab-a')
   const ref = String(((snapshot.pageMap as { targets: Array<{ targetId: string }> }).targets[0]).targetId)
   const content = await executeBrowserObserveTool('read', { tab_id: 'tab-a', target_id: ref, max_chars: 12 }, observeContext(controller))
-  assert.equal(content, 'Open details')
+  assert.equal((content as ToolExecutionOutput).data?.content, 'Open details')
 
   documentKey = 'doc-2'
   const stale = await executeBrowserObserveTool('read', { tab_id: 'tab-a', target_id: ref }, observeContext(controller))
@@ -147,21 +199,13 @@ test('browser_screenshot with analysis always returns the image and honors clip 
   assert.equal(output.content?.[0]?.type === 'image' ? output.content[0].data : '', 'ZmFrZS1wbmc=')
 })
 
-test('browser_tabs reports popup lineage and exact workflow or lease ownership', async () => {
+test('browser_tabs reports popup lineage from tabs and ownership from the lease authority', async () => {
   const controller = {
     getTabList: () => [
       { id: 'tab-root', title: 'Root', url: 'https://example.test/', active: false, openerTabId: null, owner: 'manual', activity: 'idle' },
       { id: 'tab-popup', title: 'Popup', url: 'https://example.test/popup', active: true, openerTabId: 'tab-root', owner: 'agent', activity: 'running' },
       { id: 'tab-other', title: 'Other task', url: 'https://other.test/', active: false, openerTabId: null, owner: 'manual', activity: 'running' },
     ],
-    getActiveForegroundBrowserWorkflowSession: () => ({
-      runId: 'run-popup',
-      taskId: 'task-popup',
-      lane: 'agent-view',
-      boundTabId: 'tab-popup',
-      sourceUserTabId: 'tab-root',
-      status: 'running',
-    }),
     getBrowserLeaseSnapshot: () => ({
       surfaces: {
         'agent-view': { state: 'held', heldBy: 'task-popup', runId: 'run-popup', tabId: 'tab-popup', leaseId: 'lease-popup' },
@@ -178,7 +222,7 @@ test('browser_tabs reports popup lineage and exact workflow or lease ownership',
   assert.equal(popup.rootTabId, 'tab-root')
   assert.deepEqual(
     (popup.workflowBindings as Array<Record<string, unknown>>).map((item) => item.kind),
-    ['foreground_workflow', 'write_lease'],
+    ['write_lease'],
   )
   assert.equal((other.workflowBindings as Array<Record<string, unknown>>)[0]?.taskId, 'task-other')
 })
@@ -202,13 +246,43 @@ test('agent pointer follows page zoom while remaining Retina-DIP invariant', () 
   )
 })
 
-test('browser tool wiring records same-origin network 429 and explicit takeover completion clears challenges', async () => {
+test('browser tool wiring records same-origin network 429 and rejects an ungrounded takeover route', async () => {
   browserOriginInteractionBudget.resetForTests()
   let stopped = false
   let dialogOpen = true
   const controller = {
     getActiveTab: () => ({ id: 'tab-a', url: 'https://example.test/' }),
     getTabList: () => [{ id: 'tab-a', url: 'https://example.test/', active: true }],
+    getPhysicalTargetToken: () => 'physical-tab-a',
+    beginBrowserWorkflowAction: (input: Record<string, unknown>) => ({
+      actionId: 'dialog-action-1',
+      actionSeq: 1,
+      identity: input.identity,
+    }),
+    settleBrowserWorkflowAction: (_taskId: string, actionId: string, outcome: Record<string, unknown>) => ({
+      receiptId: 'dialog-receipt-1',
+      actionId,
+      actionSeq: 1,
+      outcome,
+    }),
+    recordBrowserWorkflowObservation: () => ({ receiptId: 'dialog-observation-1' }),
+    executeJS: async (_tabId: string | null, script: string) => script.includes('__READY_AGENT_PAGE_MAP__')
+      ? {
+          identity: {
+            url: 'https://example.test/',
+            title: 'Example',
+            frameDocumentToken: 'document-tab-a',
+          },
+          viewport: { width: 1000, height: 800 },
+          rawRoots: [],
+        }
+      : {
+          url: 'https://example.test/',
+          title: 'Example',
+          timeOrigin: 1,
+          mutationRevision: 0,
+          frameDocumentToken: 'document-tab-a',
+        },
     getBrowserDialog: async () => dialogOpen ? { type: 'confirm', message: 'Publish?' } : null,
     handleBrowserDialog: async () => { dialogOpen = false },
     startNetworkObserver: async () => ({
@@ -221,27 +295,51 @@ test('browser tool wiring records same-origin network 429 and explicit takeover 
       stop: async () => { stopped = true },
     }),
   } as unknown as BrowserController
+  const executionContext = {
+    ownerRunId: 'run-semantic-test',
+    browserTaskId: 'browser-task-semantic-test',
+    parentTaskId: 'parent-semantic-test',
+    inputSource: 'trusted_internal' as const,
+  }
+  const budgetKey = scopedOriginInteractionKey({
+    profile: 'default',
+    scopeId: null,
+    origin: 'https://example.test',
+  })
 
   try {
-    await executeBrowserTool('browser_dialog', { action: 'accept' }, controller)
-    const limited = browserOriginInteractionBudget.getState('https://example.test')
-    assert.equal(stopped, true)
-    assert.equal(limited.consecutiveFailures, 1)
-    assert.ok(limited.cooldownUntil > Date.now())
-
-    browserOriginInteractionBudget.record('https://example.test', { challenge: true, actionSucceeded: false })
-    const completed = await executeBrowserTool(
-      'browser_request_takeover',
-      { action: 'complete', reason: 'challenge solved' },
+    await captureAgentPageMap(controller, 'tab-a')
+    const dialogResult = await executeBrowserTool(
+      'browser_dialog',
+      { action: 'accept' },
       controller,
       undefined,
       undefined,
       undefined,
-      '验证完成了，继续',
+      undefined,
+      undefined,
+      executionContext,
     )
-    assert.equal(typeof completed, 'object')
-    assert.equal((completed as ToolExecutionOutput).data?.takeover_state, 'completed')
-    assert.equal(browserOriginInteractionBudget.getState('https://example.test').challengeBlocked, false)
+    assert.equal(typeof dialogResult, 'object')
+    assert.equal((dialogResult as ToolExecutionOutput).data?.ok, true)
+    const limited = browserOriginInteractionBudget.getState(budgetKey)
+    assert.equal(stopped, true)
+    assert.equal(limited.consecutiveFailures, 1)
+    assert.ok(limited.cooldownUntil > Date.now())
+
+    const takeover = await executeBrowserTool(
+      'browser_request_takeover',
+      { reason: 'challenge must be handled by the user' },
+      controller,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      executionContext,
+    )
+    assert.equal(typeof takeover, 'object')
+    assert.equal((takeover as ToolExecutionOutput).data?.errorKind, 'browser_workflow_route_required')
   } finally {
     browserOriginInteractionBudget.resetForTests()
   }

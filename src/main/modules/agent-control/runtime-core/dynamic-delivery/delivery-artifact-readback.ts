@@ -10,7 +10,7 @@ import {
   realpathSync,
   statSync,
 } from 'node:fs'
-import { basename, dirname, extname, isAbsolute, join, relative, resolve } from 'node:path'
+import { basename, extname, isAbsolute, join, relative, resolve } from 'node:path'
 
 import { isValidProofRef } from '../../quality/proof-collector'
 import type { RequestEnvelope } from '../../contracts/request-envelope'
@@ -139,29 +139,6 @@ function fileDigest(path: string, size: number): string {
     .digest('hex')
 }
 
-function cleanMarkdownTarget(value: string): string | null {
-  let target = String(value || '').trim()
-  if (!target || /^(?:https?:|mailto:|data:|#)/i.test(target)) return null
-  if (target.startsWith('<') && target.endsWith('>')) target = target.slice(1, -1).trim()
-  target = target.split(/\s+["']/)[0].split('#')[0].split('?')[0].trim()
-  if (!target) return null
-  try {
-    return decodeURIComponent(target)
-  } catch {
-    // silent-catch: malformed percent escapes do not invalidate an otherwise usable local Markdown target.
-    return target
-  }
-}
-
-function markdownLocalTargets(content: string): string[] {
-  const targets = new Set<string>()
-  for (const match of content.matchAll(/\[[^\]]*\]\(([^)]+)\)/g)) {
-    const target = cleanMarkdownTarget(match[1])
-    if (target) targets.add(target)
-  }
-  return Array.from(targets)
-}
-
 function explicitOutputFolderNames(text: string): Set<string> {
   const names = new Set<string>()
   const pattern = /(?:输出到|保存到|存到|导出到|写到|写入到|落到|save\s+to|export\s+to|target\s+folder)\s*@\[([^\]]+)\]/gi
@@ -186,14 +163,6 @@ function explicitOutputRoots(userRequestVerbatim: string, requestEnvelope: unkno
     roots.add(canonicalPath(resource.path))
   }
   return Array.from(roots)
-}
-
-function needsMultipleFiles(text: string): boolean {
-  return /(?:多份|多个|若干份|分别).{0,16}(?:文件|文档)|(?:文件|文档).{0,12}(?:索引|index)/i.test(text)
-}
-
-function needsIndex(text: string): boolean {
-  return /(?:索引|目录页|index)/i.test(text)
 }
 
 function materializeSourceReceipts(proofRefs: ReadonlyArray<unknown>): VerifierResourceItem[] {
@@ -290,7 +259,6 @@ export function materializeDeliveryArtifacts(input: {
   for (const root of outputRoots) collectFiles(root, discoveredFiles)
 
   const artifactItemsByPath = new Map<string, VerifierResourceItem>()
-  const textByPath = new Map<string, string>()
   for (const path of discoveredFiles) {
     const stat = statSync(path)
     if (!stat.isFile()) continue
@@ -306,7 +274,6 @@ export function materializeDeliveryArtifacts(input: {
     const content = stat.size <= FULL_TEXT_READ_LIMIT_BYTES
       ? readFileSync(path, 'utf-8')
       : readPrefix(path).toString('utf-8')
-    textByPath.set(path, content)
     artifactItemsByPath.set(path, {
       refId: path,
       digest: fileDigest(path, stat.size),
@@ -316,7 +283,7 @@ export function materializeDeliveryArtifacts(input: {
     })
   }
 
-  const allTextFiles = Array.from(textByPath.keys())
+  const allTextFiles = Array.from(artifactItemsByPath.keys())
   const provenTextFiles = allTextFiles.filter((path) =>
     Array.from(declaredArtifactRoots).some((root) => pathInsideRoot(path, root)),
   )
@@ -337,72 +304,12 @@ export function materializeDeliveryArtifacts(input: {
     }
   }
 
-  if (needsMultipleFiles(input.userRequestVerbatim) && deliverableFiles.length < 2) {
-    issues.push({
-      code: 'artifact_bundle_incomplete',
-      description: `用户要求多份文件，实际只读回 ${deliverableFiles.length} 份。`,
-    })
-  }
-
   for (const expected of input.expectedOutputs ?? []) {
     if (!expectedOutputExists(expected, deliverableFiles)) {
       issues.push({
         code: 'expected_output_missing',
         description: `已声明的交付项未找到：${expected}`,
         targetRefId: expected,
-      })
-    }
-  }
-
-  if (needsIndex(input.userRequestVerbatim)) {
-    const indexFiles = deliverableFiles.filter((path) => /(?:index|索引|readme)/i.test(basename(path)))
-    const deliverableFileSet = new Set(deliverableFiles)
-    const linkedDeliverables = new Set<string>()
-    if (indexFiles.length === 0) {
-      issues.push({
-        code: 'index_missing',
-        description: '用户要求索引，但目标文件夹中没有索引文件。',
-      })
-    }
-    for (const indexPath of indexFiles) {
-      const targets = markdownLocalTargets(textByPath.get(indexPath) || '')
-      if (targets.length === 0) {
-        issues.push({
-          code: 'index_has_no_local_links',
-          description: `索引没有可点击的本地文件链接：${indexPath}`,
-          targetRefId: indexPath,
-        })
-        continue
-      }
-      for (const target of targets) {
-        const resolvedTarget = resolve(dirname(indexPath), target)
-        if (!existsSync(resolvedTarget) || !statSync(resolvedTarget).isFile()) {
-          issues.push({
-            code: 'index_link_missing',
-            description: `索引链接指向不存在的文件：${indexPath} -> ${target}`,
-            targetRefId: indexPath,
-          })
-          continue
-        }
-        const canonicalTarget = canonicalPath(resolvedTarget)
-        if (!deliverableFileSet.has(canonicalTarget)) {
-          issues.push({
-            code: 'index_link_unproven',
-            description: `索引链接不是本轮已证明的交付文件：${indexPath} -> ${target}`,
-            targetRefId: indexPath,
-          })
-          continue
-        }
-        linkedDeliverables.add(canonicalTarget)
-      }
-    }
-    const unlinkedDeliverables = deliverableFiles.filter((path) =>
-      !indexFiles.includes(path) && !linkedDeliverables.has(path),
-    )
-    if (indexFiles.length > 0 && unlinkedDeliverables.length > 0) {
-      issues.push({
-        code: 'index_coverage_incomplete',
-        description: `索引未覆盖 ${unlinkedDeliverables.length} 份本轮交付文件。`,
       })
     }
   }

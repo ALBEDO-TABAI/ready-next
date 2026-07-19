@@ -27,6 +27,8 @@ interface TaskProjectionDatabaseAccessor {
 
 interface TaskProjectionRow {
   task_id: string
+  revision?: number | null
+  dependency_generation?: number | null
   scope_id: string
   run_id: string
   parent_task_id: string | null
@@ -61,6 +63,11 @@ interface TaskProjectionRow {
   packet_role?: string | null
   context_refs_json?: string | null
   delivery_state_json?: string | null
+  request_anchor_json?: string | null
+  goal_mutations_json?: string | null
+  steering_receipts_json?: string | null
+  human_takeover_ref_json?: string | null
+  checkpoint_refs_json?: string | null
   recent_artifacts_json: string | null
   created_at: string
   updated_at: string
@@ -270,16 +277,19 @@ export class TaskProjectionRepository implements TaskProjectionStore {
 
     db.prepare(`
       INSERT INTO task_projections (
-        task_id, scope_id, run_id, parent_task_id, parent_step_id, task_type, module, task_title, task_summary, status, interaction_state, waiting_for,
+        task_id, revision, dependency_generation, scope_id, run_id, parent_task_id, parent_step_id, task_type, module, task_title, task_summary, status, interaction_state, waiting_for,
         steps_json, current_step_id, budget_json, budget_usage_percent, budget_warning_level,
         recovery_history_json, degradation_reason, blocked_reason, resumable_actions_json,
         continuation_ref_json, progress_json, recent_artifacts_json,
         criteria_json, checkins_json, proof_refs_json, learning_refs_json, model_criteria_json, expected_outputs_json,
         owner_agent_id, task_origin, execution_binding_json, packet_role, context_refs_json, delivery_state_json,
+        request_anchor_json, goal_mutations_json, steering_receipts_json, human_takeover_ref_json, checkpoint_refs_json,
         created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       record.taskId,
+      record.revision ?? 0,
+      record.dependencyGeneration ?? 0,
       record.scopeId,
       record.runId,
       record.parentTaskId ?? null,
@@ -315,6 +325,14 @@ export class TaskProjectionRepository implements TaskProjectionStore {
       record.packetRole ?? null,
       record.contextRefs ? JSON.stringify(record.contextRefs) : null,
       record.deliveryState ? JSON.stringify(record.deliveryState) : null,
+      record.requestAnchor ? JSON.stringify(record.requestAnchor) : null,
+      record.goalMutations ? JSON.stringify(record.goalMutations) : null,
+      record.steeringReceipts ? JSON.stringify(record.steeringReceipts) : null,
+      record.humanTakeoverRef ? JSON.stringify(record.humanTakeoverRef) : null,
+      JSON.stringify(record.checkpointRefs || {
+        cleanBaseCheckpointId: null,
+        suspensionCheckpointId: null,
+      }),
       record.createdAt,
       record.updatedAt,
     )
@@ -389,10 +407,19 @@ export class TaskProjectionRepository implements TaskProjectionStore {
         throw new Error('[task-projection-repository] delivery reducer must preserve generation and increment revision once')
       }
       scopeId = current.scopeId
-      this.update(input.taskId, { deliveryState: next, updatedAt: new Date().toISOString() }, {
-        silent: true,
-        reasonHint: 'dynamic_delivery_reduce',
-      })
+      const reduced = db.prepare(
+        `UPDATE task_projections
+            SET delivery_state_json = ?, updated_at = ?, revision = revision + 1
+          WHERE task_id = ? AND revision = ?`,
+      ).run(
+        JSON.stringify(next),
+        new Date().toISOString(),
+        input.taskId,
+        current.revision,
+      ) as { changes?: number }
+      if (Number(reduced.changes || 0) !== 1) {
+        throw new Error('[task-projection-repository] delivery reducer projection revision conflict')
+      }
       db.exec('COMMIT')
     } catch (error) {
       db.exec('ROLLBACK')
@@ -408,17 +435,15 @@ export class TaskProjectionRepository implements TaskProjectionStore {
     // would only return the new scope; the old scope's renderer would
     // never refetch. Errors here fall back to null (we still emit for
     // the new scope).
-    let priorScopeId: string | null = null
-    let priorRecord: TaskProjectionRecord | null = null
-    try {
-      const prior = this.get(taskId)
-      priorRecord = prior ?? null
-      priorScopeId = prior?.scopeId || null
-    } catch {
-      priorScopeId = null
-    }
+    const priorRecord = this.get(taskId)
+    const priorScopeId = priorRecord?.scopeId || null
     const db = this.dbManager.getRawDb()
     if (!db) throw new Error('Database not available')
+    const browserWorkflowBound = Boolean(priorRecord?.requestAnchor)
+    if (browserWorkflowBound) {
+      if (options?.browserParentBoundary === 'unbound_only') return
+      throw new Error('[task-projection-repository] bound Browser Parent requires workflow unit-of-work')
+    }
     validateTaskQualityFields(patch, 'update')
     const effectiveRunId = patch.runId ?? priorRecord?.runId
     const effectiveBinding = 'executionBinding' in patch ? patch.executionBinding : priorRecord?.executionBinding
@@ -453,6 +478,8 @@ export class TaskProjectionRepository implements TaskProjectionStore {
     }
 
     if ('scopeId' in patch) assign('scope_id', patch.scopeId)
+    if ('revision' in patch) assign('revision', patch.revision)
+    if ('dependencyGeneration' in patch) assign('dependency_generation', patch.dependencyGeneration)
     if ('runId' in patch) assign('run_id', patch.runId)
     if ('parentTaskId' in patch) assign('parent_task_id', patch.parentTaskId)
     if ('parentStepId' in patch) assign('parent_step_id', patch.parentStepId)
@@ -487,16 +514,32 @@ export class TaskProjectionRepository implements TaskProjectionStore {
     if ('packetRole' in patch) assign('packet_role', patch.packetRole)
     if ('contextRefs' in patch) assign('context_refs_json', patch.contextRefs ? JSON.stringify(patch.contextRefs) : null)
     if ('deliveryState' in patch) assign('delivery_state_json', patch.deliveryState ? JSON.stringify(patch.deliveryState) : null)
+    if ('requestAnchor' in patch) assign('request_anchor_json', patch.requestAnchor ? JSON.stringify(patch.requestAnchor) : null)
+    if ('goalMutations' in patch) assign('goal_mutations_json', patch.goalMutations ? JSON.stringify(patch.goalMutations) : null)
+    if ('steeringReceipts' in patch) assign('steering_receipts_json', patch.steeringReceipts ? JSON.stringify(patch.steeringReceipts) : null)
+    if ('humanTakeoverRef' in patch) assign('human_takeover_ref_json', patch.humanTakeoverRef ? JSON.stringify(patch.humanTakeoverRef) : null)
+    if ('checkpointRefs' in patch) assign('checkpoint_refs_json', JSON.stringify(patch.checkpointRefs || {
+      cleanBaseCheckpointId: null,
+      suspensionCheckpointId: null,
+    }))
     if ('createdAt' in patch) assign('created_at', patch.createdAt)
     if ('updatedAt' in patch) assign('updated_at', patch.updatedAt)
 
     if (updates.length === 0) return
 
     const setClause = updates.map(([column]) => `${column} = ?`).join(', ')
-    db.prepare(`UPDATE task_projections SET ${setClause} WHERE task_id = ?`).run(
+    const write = db.prepare(`UPDATE task_projections SET ${setClause} WHERE task_id = ? AND request_anchor_json IS NULL`).run(
       ...updates.map(([, value]) => value),
       taskId,
-    )
+    ) as { changes?: number }
+    if (Number(write.changes || 0) !== 1) {
+      const current = this.get(taskId)
+      if (current?.requestAnchor) {
+        if (options?.browserParentBoundary === 'unbound_only') return
+        throw new Error('[task-projection-repository] bound Browser Parent requires workflow unit-of-work')
+      }
+      return
+    }
     // Stage O — emit after successful SQL execution. We resolve scopeId
     // from the patch first (covers callers that move a row across scopes),
     // and fall back to a re-read so the renderer can still scope its
@@ -534,6 +577,94 @@ export class TaskProjectionRepository implements TaskProjectionStore {
         )
       }
     }
+  }
+
+  compareAndSwap(
+    taskId: string,
+    expectedRevision: number,
+    patch: Partial<TaskProjectionRecord>,
+    options?: TaskProjectionWriteOptions,
+  ): TaskProjectionRecord | null {
+    const db = this.dbManager.getRawDb()
+    if (!db) throw new Error('Database not available')
+    const priorRecord = this.get(taskId)
+    const browserWorkflowBound = Boolean(priorRecord?.requestAnchor)
+    if (browserWorkflowBound) {
+      const allowedFields = options?.browserDerivedFieldOwner === 'proof'
+        ? new Set(['proofRefs', 'updatedAt'])
+        : null
+      const attemptedFields = Object.keys(patch)
+      if (!allowedFields || attemptedFields.some((field) => !allowedFields.has(field))) {
+        throw new Error('[task-projection-repository] bound Browser Parent CAS requires an exact derived-field owner')
+      }
+    }
+    if ('revision' in patch) {
+      throw new Error('[task-projection-repository] compareAndSwap owns revision')
+    }
+    validateTaskQualityFields(patch, 'compareAndSwap')
+    const encoders: Record<string, [string, (value: unknown) => unknown]> = {
+      runId: ['run_id', (value) => value ?? null],
+      status: ['status', (value) => value ?? null],
+      interactionState: ['interaction_state', (value) => value ?? null],
+      waitingFor: ['waiting_for', (value) => value ?? null],
+      steps: ['steps_json', (value) => JSON.stringify(value || [])],
+      currentStepId: ['current_step_id', (value) => value ?? null],
+      blockedReason: ['blocked_reason', (value) => value ?? null],
+      resumableActions: ['resumable_actions_json', (value) => value ? JSON.stringify(value) : null],
+      continuationRef: ['continuation_ref_json', (value) => value ? JSON.stringify(value) : null],
+      proofRefs: ['proof_refs_json', (value) => value ? JSON.stringify(value) : null],
+      checkins: ['checkins_json', (value) => value ? JSON.stringify(value) : null],
+      criteria: ['criteria_json', (value) => value ? JSON.stringify(value) : null],
+      learningRefs: ['learning_refs_json', (value) => value ? JSON.stringify(value) : null],
+      deliveryState: ['delivery_state_json', (value) => value ? JSON.stringify(value) : null],
+      taskSummary: ['task_summary', (value) => value ?? null],
+      progress: ['progress_json', (value) => value ? JSON.stringify(value) : null],
+      budget: ['budget_json', (value) => value ? JSON.stringify(value) : null],
+      budgetUsagePercent: ['budget_usage_percent', (value) => value ?? null],
+      budgetWarningLevel: ['budget_warning_level', (value) => value ?? null],
+      degradationReason: ['degradation_reason', (value) => value ?? null],
+      recentArtifacts: ['recent_artifacts_json', (value) => value ? JSON.stringify(value) : null],
+      executionBinding: ['execution_binding_json', (value) => value ? JSON.stringify(value) : null],
+      dependencyGeneration: ['dependency_generation', (value) => value ?? 0],
+      requestAnchor: ['request_anchor_json', (value) => value ? JSON.stringify(value) : null],
+      goalMutations: ['goal_mutations_json', (value) => value ? JSON.stringify(value) : null],
+      steeringReceipts: ['steering_receipts_json', (value) => value ? JSON.stringify(value) : null],
+      humanTakeoverRef: ['human_takeover_ref_json', (value) => value ? JSON.stringify(value) : null],
+      checkpointRefs: ['checkpoint_refs_json', (value) => JSON.stringify(value || {
+        cleanBaseCheckpointId: null,
+        suspensionCheckpointId: null,
+      })],
+      updatedAt: ['updated_at', (value) => value ?? null],
+    }
+    const entries = Object.entries(patch)
+    if (entries.length === 0) return this.get(taskId)
+    const unsupported = entries.map(([key]) => key).filter((key) => !encoders[key])
+    if (unsupported.length > 0) {
+      throw new Error(`[task-projection-repository] unsupported compareAndSwap field(s): ${unsupported.join(',')}`)
+    }
+    const assignments: string[] = ['revision = revision + 1']
+    const values: unknown[] = []
+    for (const [key, value] of entries) {
+      const [column, encode] = encoders[key]
+      assignments.push(`${column} = ?`)
+      values.push(encode(value))
+    }
+    const anchorBoundary = browserWorkflowBound
+      ? 'request_anchor_json IS NOT NULL'
+      : 'request_anchor_json IS NULL'
+    const result = db.prepare(
+      `UPDATE task_projections SET ${assignments.join(', ')} WHERE task_id = ? AND revision = ? AND ${anchorBoundary}`,
+    ).run(...values, taskId, expectedRevision) as { changes?: number }
+    if (Number(result?.changes || 0) !== 1) return null
+    const updated = this.get(taskId)
+    if (updated) {
+      this.emitChange({
+        scopeId: updated.scopeId,
+        changedTaskIds: [taskId],
+        reason: options?.reasonHint ?? 'update',
+      }, options)
+    }
+    return updated
   }
 
   get(taskId: string): TaskProjectionRecord | null {
@@ -708,6 +839,8 @@ export class TaskProjectionRepository implements TaskProjectionStore {
   private mapRow(row: TaskProjectionRow): TaskProjectionRecord {
     return {
       taskId: row.task_id,
+      revision: row.revision ?? 0,
+      dependencyGeneration: row.dependency_generation ?? 0,
       scopeId: row.scope_id,
       runId: row.run_id,
       parentTaskId: row.parent_task_id ?? null,
@@ -743,6 +876,14 @@ export class TaskProjectionRepository implements TaskProjectionStore {
       packetRole: (row.packet_role === 'parent' || row.packet_role === 'child') ? row.packet_role : null,
       contextRefs: safeParseArray(row.context_refs_json).filter((ref): ref is string => typeof ref === 'string'),
       deliveryState: parseDeliveryStateJson(row.delivery_state_json),
+      requestAnchor: safeParseObject(row.request_anchor_json) as TaskProjectionRecord['requestAnchor'],
+      goalMutations: safeParseArray(row.goal_mutations_json) as TaskProjectionRecord['goalMutations'],
+      steeringReceipts: safeParseArray(row.steering_receipts_json) as TaskProjectionRecord['steeringReceipts'],
+      humanTakeoverRef: safeParseObject(row.human_takeover_ref_json) as TaskProjectionRecord['humanTakeoverRef'],
+      checkpointRefs: ((safeParseObject(row.checkpoint_refs_json) || {
+        cleanBaseCheckpointId: null,
+        suspensionCheckpointId: null,
+      }) as unknown) as TaskProjectionRecord['checkpointRefs'],
       createdAt: row.created_at,
       updatedAt: row.updated_at,
     }

@@ -520,6 +520,26 @@ export function compileSkillDefinition(options: SkillCompilerOptions): SkillDefi
   // Accepts both snake_case (`allowed_tools`, deer-flow form) and camelCase
   // (`allowedTools`) for symmetry with other manifest fields.
   const allowedTools = validateAllowedTools(id, manifest?.allowed_tools ?? manifest?.allowedTools)
+  const capabilitySurface: SkillDefinition['capabilitySurface'] = (() => {
+    const raw = manifest?.capability_surface ?? manifest?.capabilitySurface
+    if (raw === undefined || raw === null) return undefined
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+      throw new Error(`Skill ${id} capability_surface 必须是 object`)
+    }
+    const record = raw as Record<string, unknown>
+    const composition = record.composition
+    if (composition !== 'additive' && composition !== 'exclusive') {
+      throw new Error(`Skill ${id} capability_surface.composition 必须是 additive 或 exclusive`)
+    }
+    const exclusiveScope = record.exclusive_scope ?? record.exclusiveScope
+    if (composition === 'exclusive' && exclusiveScope !== undefined && exclusiveScope !== 'owner') {
+      throw new Error(`Skill ${id} capability_surface.exclusive_scope 必须是 owner`)
+    }
+    return {
+      composition,
+      ...(composition === 'exclusive' ? { exclusiveScope: 'owner' as const } : {}),
+    }
+  })()
   const configuration = normalizeSkillConfiguration(manifest?.configuration ?? manifest?.skill_configuration)
 
   const rawChildLoop = manifest?.child_loop ?? manifest?.childLoop
@@ -555,6 +575,7 @@ export function compileSkillDefinition(options: SkillCompilerOptions): SkillDefi
     hostRequirements,
     childLoop,
     allowedTools,
+    capabilitySurface,
     configuration,
   }
 }

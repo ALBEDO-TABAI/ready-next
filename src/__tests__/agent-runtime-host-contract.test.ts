@@ -22,8 +22,6 @@ test('runtime host is split into run coordinator, run projection, and execution 
   const runCoordinator = readWorkspaceFile('src/main/modules/agent-control/task-projection/run-coordinator.ts')
   const runProjection = readWorkspaceFile('src/main/modules/agent-control/task-projection/run-projection.ts')
   const contracts = readWorkspaceFile('src/main/modules/agent-control/contracts/run-contracts.ts')
-  const browserDomainOrchestrator = readWorkspaceFile('src/main/modules/agent-control/domain-adapters/browser-domain-orchestrator.ts')
-  const browserDomainAdapter = readWorkspaceFile('src/main/modules/agent-control/domain-adapters/browser-domain-adapter.ts')
   const domainAdapter = readWorkspaceFile('src/main/modules/agent-control/domain-adapters/domain-adapter.ts')
   const designToolLoopOrchestrator = readWorkspaceFile('src/main/modules/agent-control/design-tool-loop-orchestrator.ts')
   const documentToolLoopOrchestrator = readWorkspaceFile('src/main/modules/document-engine/pipeline/document-tool-loop-orchestrator.ts')
@@ -69,24 +67,11 @@ test('runtime host is split into run coordinator, run projection, and execution 
   assert.match(runProjection, /export class RunProjection/)
   assert.match(runProjection, /recordEvent\(/)
   assert.doesNotMatch(runProjection, /deriveTaskSummaryPatch\(/)
-  assert.match(browserDomainOrchestrator, /export class BrowserDomainOrchestrator/)
-  assert.match(browserDomainOrchestrator, /async prepareBrowserExecution\(/)
-  assert.match(browserDomainOrchestrator, /createToolLoopState\(/)
-  assert.match(browserDomainOrchestrator, /recordToolLoopProgress\(/)
-  assert.match(browserDomainOrchestrator, /buildToolLoopLimitMessage\(/)
-  assert.match(browserDomainOrchestrator, /buildToolLoopMessage\(/)
-  assert.match(browserDomainOrchestrator, /getRecommendedToolLoopIterations\(/)
-  assert.match(browserDomainOrchestrator, /refineUploadDecision\(/)
-  assert.match(browserDomainOrchestrator, /runDeterministicExecution\(/)
-  assert.match(browserDomainOrchestrator, /resolveExecutionDispatch\(/)
   assert.match(domainAdapter, /export interface DomainAdapter/)
   assert.match(domainAdapter, /executedTools\?: Array</)
   assert.match(domainAdapter, /export function readToolProjectionPatch\(/)
   assert.match(domainAdapter, /export function readStructuredToolResultRecord\(/)
   assert.match(domainAdapter, /export function selectDomainAdapter\(/)
-  assert.match(browserDomainAdapter, /export class BrowserDomainAdapter/)
-  assert.match(browserDomainAdapter, /prepare\(/)
-  assert.match(browserDomainAdapter, /dispatch\(/)
   assert.match(designToolLoopOrchestrator, /export class DesignToolLoopOrchestrator/)
   assert.match(designToolLoopOrchestrator, /applySourceInput\(/)
   assert.match(designToolLoopOrchestrator, /filterToolCalls\(/)
@@ -200,10 +185,9 @@ test('runtime host is split into run coordinator, run projection, and execution 
   assert.match(host, /import \{ SkillContextOrchestrator \} from '\.\.\/skills\/skill-context-orchestrator'/)
   assert.match(host, /import \{ AnthropicExecutionClient \} from '\.\.\/\.\.\/claude-bridge\/anthropic-execution-client'/)
   assert.match(host, /import \{ KimiCodingClient \} from '\.\.\/\.\.\/claude-bridge\/kimi-coding-client'/)
-  assert.match(host, /import \{ BrowserDomainOrchestrator \} from '\.\/browser-domain-orchestrator'/)
   assert.match(host, /import \{ DocumentToolLoopOrchestrator \} from '\.\.\/\.\.\/document-engine\/pipeline\/document-tool-loop-orchestrator'/)
   assert.match(host, /import \{ DocumentDomainOrchestrator \} from '\.\/document-domain-orchestrator'/)
-  assert.match(host, /private readonly browserDomainOrchestrator: BrowserDomainOrchestrator/)
+  assert.doesNotMatch(host, /BrowserDomain(?:Orchestrator|Adapter)|BrowserTaskPlanner/)
   assert.match(host, /private readonly skillContextOrchestrator: SkillContextOrchestrator/)
   assert.match(host, /private readonly anthropicExecutionClient: AnthropicExecutionClient/)
   assert.match(host, /private readonly kimiCodingClient: KimiCodingClient/)
@@ -273,7 +257,7 @@ test('P6t keeps runtime ownership split with SDK as live sender and DomainAdapte
   ])
 })
 
-test('live SDK browser evidence uses the active-plan funnel, not dormant DomainAdapter.applyResult', () => {
+test('live SDK browser completion reads one durable workflow inspection without a second active-plan truth', () => {
   const sdkToolExecutor = readWorkspaceFile(
     'src/main/modules/agent-control/runtime-core/agent-sdk-tool-executor.ts',
   )
@@ -286,8 +270,15 @@ test('live SDK browser evidence uses the active-plan funnel, not dormant DomainA
   const sdkTurnExecution = readWorkspaceFile(
     'src/main/modules/agent-control/runtime-core/agent-sdk-turn-execution.ts',
   )
+  const sdkTurnCompletion = readWorkspaceFile(
+    'src/main/modules/agent-control/runtime-core/agent-sdk-turn-completion.ts',
+  )
 
-  assert.match(sdkToolExecutor, /noteToolResultForActivePlan\(/)
-  assert.match(sdkModelLoop, /buildActivePlanReminderText\(sessionId\)/)
-  assert.doesNotMatch(`${sdkRuntime}\n${sdkTurnExecution}\n${sdkModelLoop}`, /\.applyResult\(/)
+  assert.match(sdkTurnCompletion, /readWorkflowVerifierBundle\(/)
+  assert.doesNotMatch(sdkTurnCompletion, /readVerifiedBrowserWorkflowEvidence\(/)
+  assert.match(sdkTurnCompletion, /browserVerifierInspection\.inspection\.state !== 'sealable'/)
+  assert.doesNotMatch(
+    `${sdkRuntime}\n${sdkTurnExecution}\n${sdkModelLoop}\n${sdkToolExecutor}`,
+    /active-plan-step-reminder|noteToolResultForActivePlan|buildActivePlanReminderText|\.applyResult\(/,
+  )
 })

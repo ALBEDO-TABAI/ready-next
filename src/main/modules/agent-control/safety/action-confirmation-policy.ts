@@ -60,46 +60,11 @@ interface ConfirmationRule {
   reason: string
 }
 
-// Browser interaction tools that can press/submit things on a page.
-const CLICK_TOOLS = [
-  'browser_click',
-  'browser_type',
-  'browser_fill_form',
-  'browser_select',
-  'browser_press_key',
-] as const
-
-// Browser destructive target patterns. The browser execution layer uses them
-// as code-owned destructive anchors and returns grant_required unless a future
-// Power grant matches the target.
-const PAYMENT_FINAL_PATTERN =
-  /确认支付|立即支付|确认付款|立即付款|提交订单|确认下单|确认转账|pay\s*now|confirm\s*(payment|purchase|order)|place\s*order/i
-// Final submit of a password/credential change.
-const PASSWORD_CHANGE_FINAL_PATTERN =
-  /确认修改密码|保存新密码|确认新密码|提交新密码|(confirm|save|submit)\s*new\s*password|update\s*password/i
-// Captcha / human-verification interaction.
-const CAPTCHA_PATTERN =
-  /验证码|滑块|人机验证|安全验证|captcha|recaptcha|hcaptcha|verification\s*code/i
-// M4 carve-out — cookie consent clicks.
-const COOKIE_CONSENT_PATTERN =
-  /cookie|接受所有|全部接受|仅必要|accept\s*all|reject\s*all|only\s*necessary/i
 // M2 feature — outbound content that looks like credentials / identity data.
 const SENSITIVE_CONTENT_PATTERN =
   /密码|口令|私钥|身份证|银行卡|信用卡|passwords?|passwd|api[_-]?key|secret|token|credential|credit\s*card|cvv|passport/i
-// Password-field cue detection for browser execution-layer password fills.
-const PASSWORD_FIELD_PATTERN = /password|passwd|密码/i
 
 const FIRST_BATCH_RULES: readonly ConfirmationRule[] = [
-  // --- M4 carve-outs ------------------------------------------------------
-  {
-    id: 'm4-cookie-consent',
-    designRef: '05 §3.1 M4 — Cookie 同意',
-    mode: 'M4',
-    tools: new Set(CLICK_TOOLS),
-    when: (_args, text) =>
-      COOKIE_CONSENT_PATTERN.test(text) && !PAYMENT_FINAL_PATTERN.test(text),
-    reason: 'Cookie 同意属常规页面疏通操作',
-  },
   // --- M2 — 每次执行前确认，预批准无效 -------------------------------------
   {
     id: 'm2-run-setup-command',
@@ -174,73 +139,6 @@ const FIRST_BATCH_RULES: readonly ConfirmationRule[] = [
     reason: '下载到本地不影响外部状态',
   },
 ]
-
-// ---------------------------------------------------------------------------
-// Browser live-target destructive anchors. The dispatch gate above can only
-// see ARGUMENTS; page-map target_id / CSS selector / coordinates may carry no
-// semantic text. Browser execution re-checks these patterns against the REAL
-// element text/label and reports grant_required when a Power grant is needed.
-// ---------------------------------------------------------------------------
-
-export interface BrowserDestructiveTargetMatch {
-  ruleId: string
-  designRef: string
-  reason: string
-}
-
-const BROWSER_DESTRUCTIVE_TARGET_RULES: ReadonlyArray<{ pattern: RegExp } & BrowserDestructiveTargetMatch> = [
-  {
-    pattern: PAYMENT_FINAL_PATTERN,
-    ruleId: 'browser-power-payment-final',
-    designRef: 'Power Browser destructive — 支付最终确认',
-    reason: '支付/下单确认属于代码枚举的破坏性浏览器动作',
-  },
-  {
-    pattern: PASSWORD_CHANGE_FINAL_PATTERN,
-    ruleId: 'browser-power-password-change-final',
-    designRef: 'Power Browser destructive — 改凭据最终提交',
-    reason: '修改密码/凭据属于代码枚举的破坏性浏览器动作',
-  },
-  {
-    pattern: CAPTCHA_PATTERN,
-    ruleId: 'browser-power-access-control-interaction',
-    designRef: 'Power Browser destructive — 访问控制/安全检查交互',
-    reason: '验证码/安全检查/访问控制交互需要单独授权与审计',
-  },
-]
-
-/** Match the REAL element text/label against the browser destructive target list. */
-export function matchBrowserDestructiveTarget(targetText: string | null | undefined): BrowserDestructiveTargetMatch | null {
-  const text = String(targetText || '')
-  if (!text) return null
-  for (const rule of BROWSER_DESTRUCTIVE_TARGET_RULES) {
-    if (rule.pattern.test(text)) {
-      const { pattern: _pattern, ...match } = rule
-      return match
-    }
-  }
-  return null
-}
-
-/**
- * Regex sources for embedding the same destructive target semantics into in-page scripts
- * (browser_click's single-roundtrip click script). Single pattern source —
- * the in-page copy is generated from these, never hand-written.
- */
-export const BROWSER_DESTRUCTIVE_TARGET_REGEX_SOURCES: readonly string[] =
-  BROWSER_DESTRUCTIVE_TARGET_RULES.map((rule) => rule.pattern.source)
-
-/**
- * True when the call's own arguments already carry a password cue — meaning
- * the dispatch gate upstream classified it (m3-login) and the call only
- * reached execution through the confirm→release path (or a host invoker).
- * The browser-layer password net uses this to stay loop-free: cue present →
- * proceed; cue absent but live target IS a password field → refuse with
- * reroute guidance.
- */
-export function argsCarryPasswordCue(argsText: string): boolean {
-  return PASSWORD_FIELD_PATTERN.test(argsText)
-}
 
 function actionForMode(mode: ConfirmationMode): ConfirmationGateAction {
   switch (mode) {

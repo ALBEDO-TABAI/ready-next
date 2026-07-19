@@ -56,6 +56,32 @@ test('serializeToolExecutionOutput sends tool text to the model even when a proj
   )
 })
 
+test('model-visible JSON results keep one copy when text and data are equivalent', () => {
+  const data = {
+    ok: true,
+    pageMap: { text: '- row "ivory signal": READY-123' },
+  }
+  const output = createToolExecutionOutput(JSON.stringify(data, null, 2), {
+    shape: 'json',
+    data,
+  })
+
+  assert.deepEqual(buildModelVisibleToolResultPayload(output), { data })
+})
+
+test('model-visible JSON results preserve distinct explanatory text', () => {
+  const data = { ok: true, count: 1 }
+  const output = createToolExecutionOutput('Found one result.', {
+    shape: 'json',
+    data,
+  })
+
+  assert.deepEqual(buildModelVisibleToolResultPayload(output), {
+    text: 'Found one result.',
+    data,
+  })
+})
+
 test('serializeToolExecutionOutput falls back to projection JSON only when there is no tool text', () => {
   const output = createToolExecutionOutput('', {
     projectionPatch: {

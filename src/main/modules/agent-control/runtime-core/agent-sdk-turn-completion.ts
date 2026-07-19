@@ -1,4 +1,4 @@
-import type { ModelProvider } from '@openai/agents'
+import { MemorySession, type AgentInputItem, type ModelProvider } from '@openai/agents'
 import { normalizeSessionSnapshotForSeed } from '../compaction/compact-agent-input'
 import type {
   ExecutionTurnResult,
@@ -33,8 +33,36 @@ import {
 } from './run-finalizer'
 import type { TurnTerminalReason } from './turn-frame'
 import type { CollaborationDecision } from '../../../../shared/dynamic-delivery'
-import { mergeRunUsage } from './run-usage-accumulator'
+import type {
+  BrowserWorkflowCloseoutSeal,
+  BrowserWorkflowCompletionVerifierReceipt,
+} from '../../../../shared/browser-workflow-control'
+import { addRunUsage, mergeRunUsage } from './run-usage-accumulator'
 import { materializeDeliveryArtifacts } from './dynamic-delivery/delivery-artifact-readback'
+import type { CanonicalAssistantMessageReceipt } from '../../../../shared/ipc-contracts/canonical-message'
+import { workflowDigest } from '../../repositories/browser-workflow-codec'
+import { buildBrowserWorkflowVerifierEvidenceView } from '../../browser-engine/browser-workflow-verifier-view'
+
+function canonicalAssistantSessionItem(content: string): AgentInputItem {
+  return {
+    type: 'message',
+    role: 'assistant',
+    status: 'completed',
+    content: [{ type: 'output_text', text: content }],
+  } as AgentInputItem
+}
+
+function hasCanonicalAssistantItem(items: readonly AgentInputItem[], content: string): boolean {
+  return items.some((item) => {
+    const candidate = item as {
+      role?: unknown
+      content?: Array<{ type?: unknown; text?: unknown }>
+    }
+    return candidate.role === 'assistant'
+      && Array.isArray(candidate.content)
+      && candidate.content.some((part) => part.type === 'output_text' && part.text === content)
+  })
+}
 
 export interface AgentSdkTurnCompletionState {
   finalText: string
@@ -68,6 +96,8 @@ export interface AgentSdkTurnCompletionContext {
   projectionPatches: Record<string, unknown>[]
   transcriptEvents: TurnTranscriptEvent[]
   runHandle: RunHandle
+  committedPublicSession: MemorySession
+  committedOwnerSession: MemorySession
   deliveryDecision: CollaborationDecision
   deliveryRealEmitOutput: AgentSdkTurnCompletionContext['emitOutput']
   model: string
@@ -83,10 +113,12 @@ export interface AgentSdkTurnCompletionContext {
   emitOutputForRun: (
     chunk: string,
     type: string,
-    projectionPatch?: Record<string, unknown> | null
+    projectionPatch?: Record<string, unknown> | null,
+    canonicalReceipt?: CanonicalAssistantMessageReceipt,
   ) => void
   emitStatusForRun: (status: string, terminalReason?: TurnTerminalReason | null) => void
   finishBudgetCheckpointIfNeeded: () => Promise<ExecutionTurnResult | null>
+  finishSteeringCheckpointIfNeeded: () => Promise<ExecutionTurnResult | null>
   finalizeEarlyReturn: (params: {
     status: 'done' | 'checkpoint' | 'error' | 'cancelled'
     terminalReason: TurnTerminalReason
@@ -123,6 +155,8 @@ export async function finalizeAgentSdkPreparedTurnResult(
     projectionPatches,
     transcriptEvents,
     runHandle,
+    committedPublicSession,
+    committedOwnerSession,
     deliveryDecision,
     deliveryRealEmitOutput,
     model,
@@ -134,6 +168,7 @@ export async function finalizeAgentSdkPreparedTurnResult(
     emitOutputForRun,
     emitStatusForRun,
     finishBudgetCheckpointIfNeeded,
+    finishSteeringCheckpointIfNeeded,
     finalizeEarlyReturn,
     buildResult
   } = ctx
@@ -148,30 +183,48 @@ export async function finalizeAgentSdkPreparedTurnResult(
     runMetaProviderDiagnostics,
     runMetaUsage
   } = state
+  let dynamicDeliveryCandidatePending = false
+  let verifiedCandidateSnapshot: {
+    acceptedText: string
+    committedBase: AgentInputItem[]
+    acceptedDelta: AgentInputItem[]
+  } | null = null
+  let deferredTerminalProjection: {
+    projectionPatch: Record<string, unknown> | null
+    terminalReason: string
+    status: string
+    canonicalReceipt?: CanonicalAssistantMessageReceipt
+  } | null = null
+  let workflowCloseoutSeal: BrowserWorkflowCloseoutSeal | null = null
+  let workflowVerifierAcceptance: Omit<
+    BrowserWorkflowCompletionVerifierReceipt,
+    'parentTaskId' | 'ownerRunId' | 'terminalQualityPatchDigest'
+  > | null = null
   try {
     throwIfAbortSignalAborted(abortSignal)
+    {
+      const checkpointResult = await finishSteeringCheckpointIfNeeded()
+      if (checkpointResult) return checkpointResult
+    }
     if (useTextToolBridge && !finalText && usedTools.length > 0) {
       finalText = '工具已执行，但模型尚未给出最终回复。'
-      emitOutput(finalText, 'text')
     }
     if (requiresLocalDocumentExcerpt && !hasSuccessfulLocalDocumentSourceRead) {
       const message = '还没有读取指定文档正文，不能声明完成。'
-      emitOutput(message, 'error')
       return finalizeEarlyReturn({
         status: 'error',
         terminalReason: 'blocked_tool_error',
         error: message,
-        finalText
+        finalText: message
       })
     }
     if (documentTargetGuard && finalTextIndicatesIncompleteDocument(finalText)) {
       const message = `目标文档 ${documentTargetGuard.targetName} 仍未补完，不能声明完成。`
-      emitOutput(message, 'error')
       return finalizeEarlyReturn({
         status: 'error',
         terminalReason: 'blocked_tool_error',
         error: message,
-        finalText
+        finalText: message
       })
     }
     if (documentTargetGuard) {
@@ -180,23 +233,21 @@ export async function finalizeAgentSdkPreparedTurnResult(
       })
       if (contentIssue) {
         const message = `目标文档 ${documentTargetGuard.targetName} 内容未通过检查：${contentIssue}`
-        emitOutput(message, 'error')
         return finalizeEarlyReturn({
           status: 'error',
           terminalReason: 'blocked_tool_error',
           error: message,
-          finalText
+          finalText: message
         })
       }
     }
     if (documentTargetGuard && !hasSuccessfulDocumentTargetMutation) {
       const message = `目标文档 ${documentTargetGuard.targetName} 尚未实际写入，不能声明完成。`
-      emitOutput(message, 'error')
       return finalizeEarlyReturn({
         status: 'error',
         terminalReason: 'blocked_tool_error',
         error: message,
-        finalText
+        finalText: message
       })
     }
     if (
@@ -207,33 +258,30 @@ export async function finalizeAgentSdkPreparedTurnResult(
     ) {
       if (observedDocumentMutationConflict) {
         const message = '本轮修改涉及多个文档，不能自动判断要保存哪一个。请明确目标文档后继续。'
-        emitOutput(message, 'error')
         return finalizeEarlyReturn({
           status: 'error',
           terminalReason: 'blocked_tool_error',
           error: message,
-          finalText
+          finalText: message
         })
       }
       const observedTarget = observedDocumentMutationTarget as ObservedDocumentToolTarget | null
       if (observedDocumentMutationMissingTarget || !observedTarget) {
         const message = '文档已经发生修改，但工具没有回传明确的文档身份，不能自动保存或声明完成。'
-        emitOutput(message, 'error')
         return finalizeEarlyReturn({
           status: 'error',
           terminalReason: 'blocked_tool_error',
           error: message,
-          finalText
+          finalText: message
         })
       }
       if (!observedTarget.path && observedTarget.requiresSave) {
         const message = `文档 ${observedTarget.title} 还没有保存路径，不能在后台自动保存。请先指定保存位置。`
-        emitOutput(message, 'error')
         return finalizeEarlyReturn({
           status: 'error',
           terminalReason: 'blocked_tool_error',
           error: message,
-          finalText
+          finalText: message
         })
       }
       if (observedTarget.path && observedTarget.requiresSave) {
@@ -295,46 +343,117 @@ export async function finalizeAgentSdkPreparedTurnResult(
     }
     if (lastDocumentSaveFailure && hasSuccessfulDocumentTargetMutation) {
       const message = `文档保存失败，不能声明完成：${lastDocumentSaveFailure}`
-      emitOutput(message, 'error')
       return finalizeEarlyReturn({
         status: 'error',
         terminalReason: 'persistence_failed',
         error: message,
-        finalText
+        finalText: message
       })
     }
     if (newDocumentNeedsSave) {
       const message = '新文档已经修改但尚未保存，不能声明完成。'
-      emitOutput(message, 'error')
       return finalizeEarlyReturn({
         status: 'error',
         terminalReason: 'persistence_failed',
         error: message,
-        finalText
+        finalText: message
       })
     }
     if (!finalText.trim() && usedTools.length > 0) {
       finalText = lastDocumentSaveSuccessText
         ? `已完成，${lastDocumentSaveSuccessText}`
         : '工具已执行完成。'
-      emitOutput(finalText, 'text')
+    }
+    const workflowRepository = toolBridgeRuntimeContext.browserWorkflowRoute
+      ? host.runtime?.getAgentSessionCheckpointRepository() ?? null
+      : null
+    const browserVerifierInspection = workflowRepository
+      ? workflowRepository.readWorkflowVerifierBundle(taskId)
+      : null
+    const browserVerifierBundle = browserVerifierInspection?.bundle ?? null
+    if (browserVerifierInspection && browserVerifierInspection.inspection.state !== 'sealable') {
+      const message = browserVerifierInspection.inspection.state === 'observation_required'
+        ? '最后一个页面动作还没有完成因果观察，本轮未发布候选结果。'
+        : browserVerifierInspection.inspection.state === 'action_in_flight'
+          ? '页面动作仍在执行，本轮未发布候选结果。'
+          : browserVerifierInspection.inspection.state === 'research_incomplete'
+            ? '网页调研证据还未齐备，本轮未发布候选结果。'
+            : '浏览器任务路由已丢失，本轮未发布候选结果。'
+      return finalizeEarlyReturn({
+        status: 'error',
+        terminalReason: 'blocked_tool_error',
+        error: message,
+        finalText: message,
+      })
+    }
+    if (browserVerifierBundle) workflowCloseoutSeal = browserVerifierBundle.seal
+    const verifiedBrowserEvidence = browserVerifierBundle?.evidence ?? null
+    const browserVerifierEvidenceView = verifiedBrowserEvidence
+      ? buildBrowserWorkflowVerifierEvidenceView(verifiedBrowserEvidence)
+      : null
+    const readVerifierResources = (projectionAfterOwner: {
+      proofRefs?: ReadonlyArray<unknown> | null
+      recentArtifacts?: ReadonlyArray<unknown> | null
+      expectedOutputs?: ReadonlyArray<string> | null
+    }) => {
+      const resources = materializeDeliveryArtifacts({
+        proofRefs: projectionAfterOwner.proofRefs,
+        recentArtifacts: projectionAfterOwner.recentArtifacts,
+        expectedOutputs: projectionAfterOwner.expectedOutputs,
+        userRequestVerbatim: browserVerifierBundle?.requestText
+          || String(toolBridgeRuntimeContext.currentUserText || ''),
+        requestEnvelope: toolBridgeRuntimeContext.requestEnvelope,
+        currentRunId: runId,
+        runStartedAtMs: runStartedAt,
+      })
+      return browserVerifierBundle && verifiedBrowserEvidence && browserVerifierEvidenceView
+        ? {
+            ...resources,
+            items: [
+              ...resources.items,
+              {
+                refId: `browser-workflow-evidence:${browserVerifierBundle.browserTaskId}`,
+                digest: workflowDigest({
+                  journal: verifiedBrowserEvidence.journal,
+                  researchState: verifiedBrowserEvidence.researchState,
+                  researchAssessment: verifiedBrowserEvidence.researchAssessment,
+                }),
+                provenance: `browser_workflow_request:${browserVerifierBundle.requestDigest}`,
+                excerpt: browserVerifierEvidenceView.journalExcerpt,
+                kind: 'action_receipt' as const,
+              },
+              ...browserVerifierEvidenceView.resources.map(({ resource, excerpt }) => ({
+                refId: resource.resourceId,
+                digest: workflowDigest({
+                  contentDigest: resource.contentDigest,
+                  provenanceDigest: resource.provenanceDigest,
+                }),
+                provenance: `browser_observation:${resource.provenanceDigest}`,
+                excerpt,
+                kind: 'action_receipt' as const,
+              })),
+            ],
+          }
+        : resources
     }
     if (deliveryDecision !== 'single_path') {
       const store = host.runtime?.getTaskProjectionStoreForFinalize?.() ?? null
       const projectionAfterOwner = store?.get(taskId) ?? null
       if (!projectionAfterOwner) {
         const message = '协作交付状态不可用，已阻止未经复核的结果。'
-        deliveryRealEmitOutput(message, 'error')
         return finalizeEarlyReturn({
           status: 'error',
           terminalReason: 'blocked_tool_error',
           error: message,
-          finalText: ''
+          finalText: message
         })
       }
       const verification = await host.dynamicDelivery.verifyOwnerCandidate({
         runId,
         candidateText: finalText,
+        ...(browserVerifierBundle
+          ? { userRequestVerbatimOverride: browserVerifierBundle.requestText }
+          : {}),
         projectionAfterOwner,
         model,
         provider,
@@ -350,38 +469,88 @@ export async function finalizeAgentSdkPreparedTurnResult(
           const definition = definitionByName.get(toolName)
           return definition ? [host.toolExecutor.buildSdkTool(definition, toolBridgeRuntimeContext)] : []
         }),
-        materializeAndReadBack: async () => materializeDeliveryArtifacts({
-          proofRefs: projectionAfterOwner.proofRefs,
-          recentArtifacts: projectionAfterOwner.recentArtifacts,
-          expectedOutputs: projectionAfterOwner.expectedOutputs,
-          userRequestVerbatim: String(toolBridgeRuntimeContext.currentUserText || ''),
-          requestEnvelope: toolBridgeRuntimeContext.requestEnvelope,
-          currentRunId: runId,
-          runStartedAtMs: runStartedAt,
-        }),
+        materializeAndReadBack: async () => readVerifierResources(projectionAfterOwner),
       })
       runMetaUsage = mergeRunUsage(runMetaUsage as never, verification.verificationUsage) as ReadyAgentSdkRunResult['usage']
       if (verification.verdict.verdict !== 'accept' || verification.acceptedText === null) {
         const message = verification.verdict.verdict === 'repair'
           ? '独立复核发现仍需修正的缺口，本轮未发布候选结果。'
           : '独立复核未通过，本轮未发布候选结果。'
-        deliveryRealEmitOutput(message, 'error')
         return finalizeEarlyReturn({
           status: 'error',
           terminalReason: 'blocked_tool_error',
           error: message,
-          finalText: ''
+          finalText: message
         })
       }
       finalText = verification.acceptedText
-      deliveryRealEmitOutput(finalText, 'text')
+      if (!verification.acceptedDeliveryState) {
+        throw new Error('[dynamic-delivery] accepted candidate is missing accepted state')
+      }
+      projectionPatches.push({ deliveryState: verification.acceptedDeliveryState })
+      dynamicDeliveryCandidatePending = true
+      if (browserVerifierBundle && workflowCloseoutSeal) {
+        workflowVerifierAcceptance = {
+          version: 1,
+          verdict: 'accept',
+          candidateDigest: workflowDigest(finalText),
+          workflowCloseoutSealDigest: workflowDigest(workflowCloseoutSeal),
+          sealedCandidateDigest: workflowDigest(verification.sealed),
+          verifiedAt: verification.sealed.sealedAt,
+        }
+      }
+    } else if (browserVerifierBundle && workflowCloseoutSeal) {
+      const store = host.runtime?.getTaskProjectionStoreForFinalize?.() ?? null
+      const projectionAfterOwner = store?.get(taskId) ?? null
+      if (!projectionAfterOwner) throw new Error('browser_workflow_projection_missing_for_verifier')
+      const verification = await host.dynamicDelivery.verifyStandaloneCandidate({
+        runId,
+        taskId,
+        userRequestVerbatim: browserVerifierBundle.requestText,
+        candidateText: finalText,
+        hostCriteria: projectionAfterOwner.criteria ? [projectionAfterOwner.criteria] : [],
+        modelCriteria: projectionAfterOwner.modelCriteria ?? [],
+        model,
+        provider,
+        contextWindowTokens,
+        maxOutputTokens,
+        signal: abortSignal,
+        materializeAndReadBack: async () => readVerifierResources(projectionAfterOwner),
+      })
+      runMetaUsage = mergeRunUsage(
+        runMetaUsage as never,
+        addRunUsage(null, verification.verificationUsage),
+      ) as ReadyAgentSdkRunResult['usage']
+      if (verification.verdict.verdict !== 'accept') {
+        const message = '独立复核未通过，本轮未发布候选结果。'
+        return finalizeEarlyReturn({
+          status: 'error',
+          terminalReason: 'blocked_tool_error',
+          error: message,
+          finalText: message,
+        })
+      }
+      workflowVerifierAcceptance = {
+        version: 1,
+        verdict: 'accept',
+        candidateDigest: workflowDigest(finalText),
+        workflowCloseoutSealDigest: workflowDigest(workflowCloseoutSeal),
+        sealedCandidateDigest: workflowDigest(verification.sealed),
+        verifiedAt: verification.sealed.sealedAt,
+      }
     }
     {
       const checkpointResult = await finishBudgetCheckpointIfNeeded()
-      if (checkpointResult) return checkpointResult
+      if (checkpointResult) {
+        if (dynamicDeliveryCandidatePending) host.dynamicDelivery.abortVerifiedCandidate(runId)
+        return checkpointResult
+      }
     }
     if (usedTools.length === 0 && (!liveTaskBudgetRuntime || liveTaskBudgetRuntime.bootstrapBudget)) {
       projectionPatches.push({ taskType: 'direct_answer', module: 'system' })
+    }
+    if (toolBridgeRuntimeContext.browserWorkflowRoute && !workflowCloseoutSeal) {
+      throw new Error('browser_workflow_closeout_seal_missing')
     }
     const finalProjectionPatch = mergeProjectionPatches(projectionPatches)
     liveTaskBudgetRuntime = reconcileTerminalTaskBudgetRuntime(
@@ -390,46 +559,140 @@ export async function finalizeAgentSdkPreparedTurnResult(
       usedTools.length
     )
     throwIfAbortSignalAborted(abortSignal)
-    const finalizedDone = await finalizeRunOutcome(
-      {
-        kind: 'done',
-        runId,
-        taskId,
-        scopeId: sessionId || null,
-        durationMs: Math.max(1, Date.now() - runStartedAt),
-        toolCallsUsed: usedTools.length,
-        initiator: runHandle.abortInitiator || 'done',
-        projectionPatch: finalProjectionPatch,
-        // EP2-Q3: the SAME variable emitted to the user above — including
-        // the empty-reply default-text branch that just ran.
-        finalText,
-        taskBudgetRuntime: liveTaskBudgetRuntime,
-        providerDiagnostics: runMetaProviderDiagnostics,
-        usage: runMetaUsage
-      },
-      {
-        runMetaRepository: host.getRunMetaRepositoryForFinalize(),
-        taskProjectionStore: host.runtime?.getTaskProjectionStoreForFinalize?.() ?? null,
-        learnFromCheckIn: (input) => host.learnSiteCardsFromCheckIn(input),
-        writeProjectionTerminalPatch: (projectionPatch, terminalReason, status) => {
-          emitOutputForRun('', 'done', projectionPatch)
-          emitStatusForRun(status, terminalReason as TurnTerminalReason)
-        },
-        writeRunCloseMetric
+    if (dynamicDeliveryCandidatePending) {
+      verifiedCandidateSnapshot = host.dynamicDelivery.inspectVerifiedCandidate(runId)
+      if (
+        verifiedCandidateSnapshot.acceptedText !== finalText
+        || !hasCanonicalAssistantItem(verifiedCandidateSnapshot.acceptedDelta, finalText)
+      ) {
+        host.dynamicDelivery.abortVerifiedCandidate(runId)
+        dynamicDeliveryCandidatePending = false
+        throw new Error('[dynamic-delivery] verified candidate differs from canonical closeout text')
       }
-    )
+    }
+    let finalizedDone
+    try {
+      finalizedDone = await finalizeRunOutcome(
+        {
+          kind: 'done',
+          runId,
+          taskId,
+          scopeId: sessionId || null,
+          durationMs: Math.max(1, Date.now() - runStartedAt),
+          toolCallsUsed: usedTools.length,
+          initiator: runHandle.abortInitiator || 'done',
+          projectionPatch: finalProjectionPatch,
+          finalText,
+          taskBudgetRuntime: liveTaskBudgetRuntime,
+          providerDiagnostics: runMetaProviderDiagnostics,
+          usage: runMetaUsage,
+          workflowCloseoutSeal,
+          workflowVerifierAcceptance,
+        },
+        {
+          runMetaRepository: host.getRunMetaRepositoryForFinalize(),
+          taskProjectionStore: host.runtime?.getTaskProjectionStoreForFinalize?.() ?? null,
+          learnFromCheckIn: (input) => host.learnSiteCardsFromCheckIn(input),
+          commitCanonicalCoreCloseout: host.runtime
+            ? (input) => host.runtime!.commitCanonicalCoreCloseout(input)
+            : undefined,
+          writeProjectionTerminalPatch: (projectionPatch, terminalReason, status, canonicalReceipt) => {
+            deferredTerminalProjection = {
+              projectionPatch,
+              terminalReason,
+              status,
+              canonicalReceipt,
+            }
+          },
+          writeRunCloseMetric
+        }
+      )
+    } catch (error) {
+      if (dynamicDeliveryCandidatePending) host.dynamicDelivery.abortVerifiedCandidate(runId)
+      throw error
+    }
+    if (dynamicDeliveryCandidatePending) {
+      if (finalizedDone.status === 'done') {
+        try {
+          const committedCandidate = await host.dynamicDelivery.commitVerifiedCandidate(runId, {
+            deliveryStateAlreadyPersisted: true,
+          })
+          if (committedCandidate.acceptedText !== finalizedDone.canonicalMessage?.content) {
+            log('[dynamic-delivery] post-commit candidate text mismatch; canonical database message retained')
+          }
+        } catch (error) {
+          // Core truth is already committed.  A derived in-memory session
+          // failure must be repaired from the accepted snapshot below, never
+          // reinterpret the run as failed or emit a second terminal answer.
+          log(`[dynamic-delivery] post-commit candidate merge failed; rebuilding from canonical truth: ${errorMessage(error)}`)
+        }
+      } else {
+        host.dynamicDelivery.abortVerifiedCandidate(runId)
+      }
+      dynamicDeliveryCandidatePending = false
+    }
+    if (finalizedDone.canonicalMessage) {
+      finalText = finalizedDone.canonicalMessage.content
+      let acceptedTruthItems = verifiedCandidateSnapshot
+        ? [
+            ...verifiedCandidateSnapshot.committedBase,
+            ...verifiedCandidateSnapshot.acceptedDelta,
+          ]
+        : await committedOwnerSession.getItems()
+      if (!hasCanonicalAssistantItem(acceptedTruthItems, finalText)) {
+        acceptedTruthItems = [
+          ...acceptedTruthItems,
+          canonicalAssistantSessionItem(finalText),
+        ]
+      }
+      try {
+        const publicItems = await committedPublicSession.getItems()
+        const publicPrefix = acceptedTruthItems.slice(0, publicItems.length)
+        if (JSON.stringify(publicPrefix) !== JSON.stringify(publicItems)) {
+          throw new Error('accepted_owner_session_public_prefix_mismatch')
+        }
+        const acceptedDelta = acceptedTruthItems.slice(publicItems.length)
+        if (acceptedDelta.length > 0) await committedPublicSession.addItems(acceptedDelta)
+        runHandle.capturedSession = committedPublicSession
+      } catch (mergeError) {
+        log(`canonical session merge failed after core commit: ${errorMessage(mergeError)}`)
+        const repairedSession = new MemorySession({
+          sessionId: `${name}:canonical:${runId}`,
+          initialItems: acceptedTruthItems,
+        })
+        runHandle.capturedSession = repairedSession
+        const liveSession = host.sessionManager.get(name)
+        if (liveSession?.currentRun?.runId === runId) liveSession.sdkSession = repairedSession
+      }
+      deliveryRealEmitOutput(finalText, 'text')
+    }
+    const deferred = deferredTerminalProjection as {
+      projectionPatch: Record<string, unknown> | null
+      terminalReason: string
+      status: string
+      canonicalReceipt?: CanonicalAssistantMessageReceipt
+    } | null
+    if (deferred) {
+      emitOutputForRun('', 'done', deferred.projectionPatch, deferred.canonicalReceipt)
+      emitStatusForRun(
+        deferred.status,
+        deferred.terminalReason as TurnTerminalReason,
+      )
+    }
     const finalizedTerminalReason = finalizedDone.terminalReason as TurnTerminalReason
     // S5-1: persist the scope session snapshot at clean run close so a
     // main-process restart can lazily restore the conversation instead of
     // silently forgetting it. Failure is loud (log), never blocking.
-    try {
-      const snapshotItems = normalizeSessionSnapshotForSeed(
-        await runHandle.capturedSession.getItems()
-      )
-      const written = writeScopeSessionSnapshot(name, snapshotItems)
-      if (!written.ok) log(`scope session snapshot write failed: ${written.error}`)
-    } catch (snapshotError) {
-      log(`scope session snapshot write failed: ${errorMessage(snapshotError)}`)
+    if (finalizedDone.canonicalMessage) {
+      try {
+        const snapshotItems = normalizeSessionSnapshotForSeed(
+          await runHandle.capturedSession.getItems()
+        )
+        const written = writeScopeSessionSnapshot(name, snapshotItems)
+        if (!written.ok) log(`scope session snapshot write failed: ${written.error}`)
+      } catch (snapshotError) {
+        log(`scope session snapshot write failed: ${errorMessage(snapshotError)}`)
+      }
     }
     return buildResult({
       success: finalizedDone.status !== 'error',
@@ -442,7 +705,9 @@ export async function finalizeAgentSdkPreparedTurnResult(
       terminalReason: finalizedTerminalReason,
       taskBudgetRuntime: liveTaskBudgetRuntime,
       providerDiagnostics: runMetaProviderDiagnostics,
-      usage: runMetaUsage
+      usage: runMetaUsage,
+      canonicalMessage: finalizedDone.canonicalMessage,
+      canonicalMessageDigest: finalizedDone.canonicalMessageDigest,
     })
   } finally {
     Object.assign(state, {

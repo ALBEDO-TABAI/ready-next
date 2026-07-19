@@ -24,6 +24,8 @@ export type AgentBrowserErrorCode =
   | 'ambiguous_target'
   /** A target_id no longer resolves to any element on the current page. */
   | 'target_not_found'
+  /** A fill action targeted a live element that explicitly reports non-editable. */
+  | 'target_not_editable'
   /** A login wall blocked an agent-view (lane B) collection. */
   | 'login_required'
   /** A high-control platform refused a script-hard tool / script param (§4.4). */

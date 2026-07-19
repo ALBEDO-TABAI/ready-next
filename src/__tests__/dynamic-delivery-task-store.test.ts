@@ -15,7 +15,8 @@ const now = '2026-07-11T00:00:00.000Z'
 function createSchema(db: { exec(sql: string): void }): void {
   db.exec(`
     CREATE TABLE task_projections (
-      task_id TEXT PRIMARY KEY, scope_id TEXT NOT NULL, run_id TEXT NOT NULL,
+      task_id TEXT PRIMARY KEY, revision INTEGER NOT NULL DEFAULT 0,
+      dependency_generation INTEGER NOT NULL DEFAULT 0, scope_id TEXT NOT NULL, run_id TEXT NOT NULL,
       parent_task_id TEXT, parent_step_id TEXT, task_type TEXT NOT NULL, module TEXT NOT NULL,
       task_title TEXT, task_summary TEXT, status TEXT NOT NULL, interaction_state TEXT NOT NULL,
       waiting_for TEXT, steps_json TEXT NOT NULL, current_step_id TEXT, budget_json TEXT,
@@ -25,8 +26,13 @@ function createSchema(db: { exec(sql: string): void }): void {
       criteria_json TEXT, checkins_json TEXT, proof_refs_json TEXT, learning_refs_json TEXT,
       model_criteria_json TEXT, expected_outputs_json TEXT, owner_agent_id TEXT,
       task_origin TEXT, execution_binding_json TEXT, packet_role TEXT, context_refs_json TEXT,
-      delivery_state_json TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
-    )
+      delivery_state_json TEXT, request_anchor_json TEXT, goal_mutations_json TEXT,
+      steering_receipts_json TEXT, human_takeover_ref_json TEXT, checkpoint_refs_json TEXT,
+      created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+    );
+    CREATE TABLE browser_tasks (
+      id TEXT PRIMARY KEY, kind TEXT NOT NULL, parent_task_id TEXT
+    );
   `)
 }
 

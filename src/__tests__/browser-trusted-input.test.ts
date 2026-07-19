@@ -3,9 +3,14 @@ import test from 'node:test'
 
 import type { BrowserController } from '../main/modules/browser-engine/ipc-handler'
 import {
+  clearFocusedInput,
+  runGuardedCoordinateClick,
+  runGuardedCoordinateType,
   runGuardedSelectorClick,
   runGuardedSelectorType,
+  runGuardedTargetType,
 } from '../main/modules/tools/browser-input-actions'
+import { throwIfLiveTargetGuardBlocked } from '../main/modules/tools/browser-probe'
 
 function trustedInputFixture() {
   const scripts: string[] = []
@@ -13,6 +18,12 @@ function trustedInputFixture() {
   const keys: Array<Record<string, unknown>> = []
   const typed: string[] = []
   const controller = {
+    getBrowserInputEnvironment: () => ({
+      mainWindowForeground: true,
+      hostPresentation: 'visible',
+      tabActive: true,
+    }),
+    getPhysicalTargetToken: () => 'physical-tab-a',
     normalizedToCss: async (_tabId: string | null, x: number, y: number) => ({
       x: x / 2,
       y: y / 2,
@@ -24,11 +35,17 @@ function trustedInputFixture() {
     typeTextDirectly: async (_tabId: string | null, text: string) => { typed.push(text) },
     executeJS: async (_tabId: string | null, script: string) => {
       scripts.push(script)
+      if (script.includes('activeElementEditable')) {
+        return { ready: true, focused: true, activeElementEditable: true }
+      }
       if (script.includes('__READY_CLICK_POINT_LABEL_PROBE__')) {
         return { label: 'Open', inputLabel: 'Search', editable: true, password: false }
       }
       if (script.includes('__READY_FOCUSED_EDITABLE_PROBE__')) {
         return { kind: 'editable', tag: 'input', label: 'Search', maxLength: 200, singleLine: true }
+      }
+      if (script.includes('__READY_AGENT_TARGET_SELECT_ALL__')) {
+        return { ok: true, kind: 'text_control' }
       }
       if (script.includes('__READY_TYPED_INTO_PROBE__')) {
         return { tag: 'input', label: 'Search', textHead: 'hello', textLength: 5 }
@@ -54,6 +71,35 @@ test('selector click only observes in page and dispatches trusted mouse input', 
   assert.equal(fixture.scripts.some((script) => /\.click\s*\(|dispatchEvent\s*\(/.test(script)), false)
 })
 
+test('an unavailable point probe does not block visual clicks but still blocks unverifiable typing', async () => {
+  const clickFixture = trustedInputFixture()
+  const clickExecuteJS = clickFixture.controller.executeJS.bind(clickFixture.controller)
+  clickFixture.controller.executeJS = async (tabId, script) => {
+    if (String(script).includes('__READY_CLICK_POINT_LABEL_PROBE__')) throw new Error('probe unavailable')
+    return clickExecuteJS(tabId, script)
+  }
+  await runGuardedCoordinateClick(clickFixture.controller, 'tab-a', 500, 500)
+  assert.deepEqual(clickFixture.mouse.map((event) => event.type), ['mouseMoved', 'mousePressed', 'mouseReleased'])
+
+  const typeFixture = trustedInputFixture()
+  const typeExecuteJS = typeFixture.controller.executeJS.bind(typeFixture.controller)
+  typeFixture.controller.executeJS = async (tabId, script) => {
+    if (String(script).includes('__READY_CLICK_POINT_LABEL_PROBE__')) throw new Error('probe unavailable')
+    return typeExecuteJS(tabId, script)
+  }
+  await assert.rejects(
+    runGuardedCoordinateType(typeFixture.controller, 'tab-a', 500, 500, 'hello', {
+      clearBefore: false,
+      pressEnter: false,
+      useShiftEnter: false,
+      allowPasswordFill: false,
+    }),
+    (error: unknown) => (error as { errorKind?: string }).errorKind === 'denied_pending_confirmation',
+  )
+  assert.equal(typeFixture.mouse.length, 0)
+  assert.equal(typeFixture.typed.length, 0)
+})
+
 test('selector type focuses with trusted mouse input and writes through the browser input channel', async () => {
   const fixture = trustedInputFixture()
   const result = await runGuardedSelectorType(fixture.controller, 'tab-a', '#search', 'hello', {
@@ -64,6 +110,90 @@ test('selector type focuses with trusted mouse input and writes through the brow
   assert.match(result, /"trustedInput":true/)
   assert.deepEqual(fixture.mouse.map((event) => event.type), ['mouseMoved', 'mousePressed', 'mouseReleased'])
   assert.deepEqual(fixture.typed, ['hello'])
-  assert.ok(fixture.keys.length >= 3)
+  assert.equal(fixture.keys.length, 0)
   assert.equal(fixture.scripts.some((script) => /\.click\s*\(|dispatchEvent\s*\(/.test(script)), false)
+})
+
+test('clear focused input sends a complete platform select-all shortcut before backspace', async () => {
+  const fixture = trustedInputFixture()
+  await clearFocusedInput(fixture.controller, 'tab-a')
+
+  if (process.platform === 'darwin') {
+    assert.deepEqual(fixture.keys, [
+      { type: 'rawKeyDown', key: 'a', code: 'KeyA', windowsVirtualKeyCode: 65, nativeVirtualKeyCode: 65, modifiers: 4, isKeypad: false, commands: ['selectAll'] },
+      { type: 'keyUp', key: 'a', code: 'KeyA', windowsVirtualKeyCode: 65, nativeVirtualKeyCode: 65, modifiers: 4, isKeypad: false },
+      { type: 'rawKeyDown', key: 'Backspace', code: 'Backspace', windowsVirtualKeyCode: 8, nativeVirtualKeyCode: 8, modifiers: 0, isKeypad: false, commands: ['deleteBackward'] },
+      { type: 'keyUp', key: 'Backspace', code: 'Backspace', windowsVirtualKeyCode: 8, nativeVirtualKeyCode: 8, modifiers: 0, isKeypad: false },
+    ])
+    return
+  }
+  assert.deepEqual(fixture.keys.map((event) => [event.type, event.key]), [
+    ['rawKeyDown', 'a'],
+    ['keyUp', 'a'],
+    ['rawKeyDown', 'Backspace'],
+    ['keyUp', 'Backspace'],
+  ])
+})
+
+test('target type focuses and verifies inside the target frame without pointer input', async () => {
+  const fixture = trustedInputFixture()
+  const frameScripts: string[] = []
+  const runInTargetFrame = async (script: string): Promise<unknown> => {
+    frameScripts.push(script)
+    if (script.includes('__READY_AGENT_TARGET_FOCUS__')) {
+      return { ok: true, kind: 'editable', tag: 'input', label: 'Field note' }
+    }
+    if (script.includes('__READY_FOCUSED_EDITABLE_PROBE__')) {
+      return { kind: 'editable', tag: 'input', label: 'Field note', maxLength: 120, singleLine: true }
+    }
+    if (script.includes('__READY_AGENT_TARGET_SELECT_ALL__')) {
+      return { ok: true, kind: 'text_control' }
+    }
+    if (script.includes('__READY_TYPED_INTO_PROBE__')) {
+      return { tag: 'input', label: 'Field note', textHead: 'hello', textLength: 5 }
+    }
+    return null
+  }
+
+  const result = await runGuardedTargetType(
+    fixture.controller,
+    'tab-a',
+    '3',
+    'document-frame-3',
+    { x: 250, y: 300, cssX: 125, cssY: 150, width: 500, height: 500 },
+    'hello',
+    { clearBefore: true, pressEnter: false, useShiftEnter: false, allowPasswordFill: false },
+    runInTargetFrame,
+  )
+
+  assert.equal(result.typed, true)
+  assert.deepEqual(fixture.mouse, [])
+  assert.deepEqual(fixture.typed, ['hello'])
+  assert.equal(frameScripts.filter((script) => script.includes('__READY_AGENT_TARGET_FOCUS__')).length, 1)
+  assert.equal(frameScripts.filter((script) => script.includes('__READY_FOCUSED_EDITABLE_PROBE__')).length, 1)
+  assert.equal(frameScripts.filter((script) => script.includes('__READY_TYPED_INTO_PROBE__')).length, 1)
+  assert.equal(fixture.scripts.some((script) => script.includes('__READY_AGENT_TARGET_FOCUS__')), false)
+})
+
+test('live target guard is structural and ignores page labels', () => {
+  assert.doesNotThrow(() => throwIfLiveTargetGuardBlocked({
+    ok: true,
+    label: '确认支付 captcha save password',
+  }, { targetId: 'button-1' }))
+  assert.throws(
+    () => throwIfLiveTargetGuardBlocked({
+      ok: false,
+      errorKind: 'credential_confirmation_required',
+      liveTargetKind: 'password',
+    }, { targetId: 'input-1' }),
+    (error: unknown) => (error as { errorKind?: string }).errorKind === 'credential_confirmation_required',
+  )
+  assert.throws(
+    () => throwIfLiveTargetGuardBlocked({
+      ok: false,
+      errorKind: 'file_input_requires_upload',
+      liveTargetKind: 'file',
+    }, { targetId: 'input-2' }),
+    (error: unknown) => (error as { errorKind?: string }).errorKind === 'file_input_requires_upload',
+  )
 })

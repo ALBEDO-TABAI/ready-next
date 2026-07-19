@@ -1,4 +1,4 @@
-import type { ChatAttachment, ConversationScope } from './types'
+import type { ChatAttachment } from './types'
 import { buildActiveDocumentContext } from './documentActions'
 import { useMode } from '../../stores/useMode'
 import { refreshDocumentWidgetTargetSnapshot } from './widget-target-attachment'
@@ -352,9 +352,18 @@ function formatFolderReference(payload: {
  */
 export function buildEnvironmentContext(): string | null {
   const mode = useMode.getState().workbenchMode
-  if (mode === 'browser') return null
 
   const contexts: string[] = []
+
+  // Browser mode is a structural runtime fact. Keep it separate from the
+  // user's wording so goal-only requests can receive the browser tool surface
+  // without teaching the router an ever-growing action-word dictionary.
+  if (mode === 'browser') {
+    contexts.push([
+      '## 环境信息',
+      '- workbench_mode: browser',
+    ].join('\n'))
+  }
 
   // Document mode environment info
   if (mode === 'document') {
@@ -436,23 +445,6 @@ export function serializePersistedAttachments(attachments: ChatAttachment[]): Ar
       platform: attachment.platform,
       publishStatus: attachment.publishStatus,
     }))
-}
-
-export async function persistAssistantMessage(
-  scopeId: string,
-  responseMessageId: string,
-  content: string,
-  scope: ConversationScope | null,
-  extraMeta?: Record<string, unknown>,
-): Promise<{ success: boolean; error?: string }> {
-  if (!content.trim()) return { success: true }
-  return persistMessage(scopeId, responseMessageId, 'assistant', content, {
-    sourceKind: scope?.sourceKind || 'local',
-    sourceId: scope?.sourceId || 'app',
-    threadKey: scope?.threadKey || scopeId,
-    direction: 'assistant-output',
-    ...(extraMeta || {}),
-  })
 }
 
 function appendTextBlock(target: string | MultimodalBlock[], text: string): string | MultimodalBlock[] {

@@ -38,7 +38,7 @@ export function classifyBrowserPowerFailure(message: string): BrowserPowerFailur
   if (TARGET_STALE_PATTERN.test(text)) {
     return {
       failureClass: 'target_stale',
-      nextSuggestedAction: 'use browser_tabs and rebind the BrowserActionSession target tab, then retry',
+      nextSuggestedAction: 'use browser_tabs to resolve the current target tab, then retry',
     }
   }
   if (FRAME_CONTEXT_PATTERN.test(text)) {

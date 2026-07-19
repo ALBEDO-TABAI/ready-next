@@ -73,6 +73,45 @@ describe('gateActOnTarget', () => {
     assert.equal(res.errorCode, 'target_not_found')
   })
 
+  it('rejects fill on a live target that is explicitly not editable', () => {
+    const context = {
+      currentGeneration: 4,
+      matchCount: 1,
+      target: {
+        role: 'heading',
+        name: 'Registro Corallo',
+        editable: false,
+        states: {},
+      },
+    }
+    const res = gateActOnTarget(
+      { targetId: '4:0:b9', action: 'fill', value: 'Corallo' },
+      context,
+    )
+    assert.ok(isAgentBrowserError(res))
+    if (!isAgentBrowserError(res)) return
+    assert.equal(res.errorCode, 'target_not_editable')
+    assert.equal(res.detail?.targetRole, 'heading')
+  })
+
+  it('allows fill on a live target that is editable', () => {
+    const context = {
+      currentGeneration: 4,
+      matchCount: 1,
+      target: {
+        role: 'searchbox',
+        name: 'Cerca',
+        editable: true,
+        states: {},
+      },
+    }
+    const res = gateActOnTarget(
+      { targetId: '4:0:b12', action: 'fill', value: 'Corallo' },
+      context,
+    )
+    assert.ok(!isAgentBrowserError(res))
+  })
+
   it('passes a unique, current target and returns the parsed ref', () => {
     const res = gateActOnTarget(
       { targetId: '4:2:99', action: 'click' },

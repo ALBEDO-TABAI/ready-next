@@ -2,21 +2,22 @@ import { ipcMain } from 'electron'
 import type { AgentBrowserSurface } from './agent-browser-errors'
 import type { BrowserLeaseState } from './browser-write-lease'
 import type { BrowserCapabilityTaskHandle } from './capability-types'
-import type { BrowserWorkflowSession } from './browser-workflow-session'
-import { isBrowserSupervisionVisibleTaskStatus } from '../../../shared/browser-task-status'
+import {
+  isBrowserSupervisionVisibleTaskStatus,
+  isBrowserSurfacePresentingTaskStatus,
+} from '../../../shared/browser-task-status'
 
 /**
- * Agent-browser supervision IPC (plan §3.6/§0.1). Two surfaces:
- *   - the two-step interrupt of the agent's browser control (freeze → confirm),
- *     so a user can only seize control after an explicit second confirmation;
- *   - listing the active background note-collection tasks for the panel.
+ * Agent-browser supervision IPC. Two surfaces:
+ *   - immediate user takeover of the agent's browser control;
+ *   - listing active agent-view browser tasks for the panel.
  *
  * The control gate + agent tab live on the controller; these handlers are a
  * thin bridge. The renderer polls listAgentTasks/getAgentControlState (no push
  * pipeline) — a progress panel does not need sub-second latency.
  */
 
-export type AgentControlState = 'active' | 'pending_confirm' | 'frozen'
+export type AgentControlState = 'active' | 'frozen'
 
 export interface BrowserLeaseSurfaceSnapshot {
   surface: AgentBrowserSurface
@@ -37,72 +38,30 @@ export type BrowserAgentSupervisionTask = Omit<BrowserCapabilityTaskHandle, 'kin
 }
 
 export interface BrowserSupervisionIPCController {
-  requestAgentInterruption(): { state: AgentControlState; pending: boolean }
-  confirmAgentInterruption(): Promise<{ state: AgentControlState; frozen: boolean; takeoverTabId?: string | null }>
-  dismissAgentInterruption(): { state: AgentControlState }
+  requestAgentInterruption(): Promise<{ state: AgentControlState; frozen: boolean; takeoverTabId?: string | null }>
   getAgentControlState(): AgentControlState
   getAgentTabId(): string | null
   getBrowserLeaseSnapshot(): BrowserLeaseSupervisionSnapshot
   listAgentCollectionTasks(): Promise<BrowserAgentSupervisionTask[]>
-  getActiveForegroundBrowserWorkflowSession?(): BrowserWorkflowSession | null
-}
-
-function foregroundWorkflowTask(session: BrowserWorkflowSession): BrowserAgentSupervisionTask {
-  return {
-    taskId: session.taskId,
-    kind: 'browser_workflow',
-    status: 'running',
-    progress: {
-      total: 1,
-      completed: 0,
-      failed: 0,
-      currentLabel: '前台浏览器任务',
-    },
-    createdAt: new Date(session.startedAt).toISOString(),
-    startedAt: new Date(session.startedAt).toISOString(),
-    updatedAt: new Date(session.updatedAt).toISOString(),
-  }
 }
 
 export function setupBrowserSupervisionIPC(controller: BrowserSupervisionIPCController): void {
-  ipcMain.handle('browser:requestAgentInterruption', () => {
+  ipcMain.handle('browser:requestAgentInterruption', async () => {
     try {
-      return controller.requestAgentInterruption()
-    } catch (error) {
-      return { state: 'active' as AgentControlState, pending: false, error: error instanceof Error ? error.message : String(error) }
-    }
-  })
-
-  ipcMain.handle('browser:confirmAgentInterruption', async () => {
-    try {
-      return await controller.confirmAgentInterruption()
+      return await controller.requestAgentInterruption()
     } catch (error) {
       return { state: 'active' as AgentControlState, frozen: false, error: error instanceof Error ? error.message : String(error) }
     }
   })
 
-  ipcMain.handle('browser:dismissAgentInterruption', () => {
-    try {
-      return controller.dismissAgentInterruption()
-    } catch (error) {
-      return { state: 'active' as AgentControlState, error: error instanceof Error ? error.message : String(error) }
-    }
-  })
-
   ipcMain.handle('browser:getAgentSupervisionState', async () => {
     try {
-      const foreground = controller.getActiveForegroundBrowserWorkflowSession?.() ?? null
-      const tasks = [
-        ...(foreground?.lane === 'agent-view' ? [foregroundWorkflowTask(foreground)] : []),
-        ...(await controller.listAgentCollectionTasks()),
-      ]
+      const tasks = await controller.listAgentCollectionTasks()
       const activeTasks = tasks.filter((task) => isBrowserSupervisionVisibleTaskStatus(task.status))
-      const foregroundAgentTabId = foreground?.lane === 'agent-view' && foreground.status === 'running'
-        ? foreground.boundTabId
-        : null
+      const surfaceTasks = activeTasks.filter((task) => isBrowserSurfacePresentingTaskStatus(task.status))
       return {
         controlState: controller.getAgentControlState(),
-        agentTabId: foregroundAgentTabId || (activeTasks.length > 0 ? controller.getAgentTabId() : null),
+        agentTabId: surfaceTasks.length > 0 ? controller.getAgentTabId() : null,
         tasks: activeTasks,
         ...controller.getBrowserLeaseSnapshot(),
       }

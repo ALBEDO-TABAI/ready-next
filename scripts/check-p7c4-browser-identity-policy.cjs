@@ -65,8 +65,8 @@ const tabLifecycle = assertIncludes('src/main/modules/browser-engine/tab-lifecyc
 ])
 
 const ipcHandler = assertIncludes('src/main/modules/browser-engine/ipc-handler.ts', [
-  'async ensureAgentTab()',
-  "const created = await this.createTab(READY_BROWSER_BLANK_URL, { background: true })",
+  'async ensureAgentTab(profile?: string | null)',
+  "const created = await this.createTab(READY_BROWSER_BLANK_URL, { background: true, profile: requestedProfile })",
   "this.updateTabRuntimeState(created.tabId, { owner: 'agent', activity: 'running' })",
   "partition: 'persist:browser'",
   "session.fromPartition('persist:browser')",

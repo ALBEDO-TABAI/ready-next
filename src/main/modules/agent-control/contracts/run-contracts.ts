@@ -46,7 +46,7 @@ import type {
 import type { IntentClassification } from '../intent-classifier'
 import type { PromptAssemblyResult } from '../prompt-assembly'
 import type { RecentSkillRunForResume } from '../skills/skill-turn-identity-snapshot'
-import type { RequestEnvelope, TrustedFolderReference } from './request-envelope'
+import type { RequestEnvelope, TrustedFolderReference, TrustedRequestEnvironment } from './request-envelope'
 import type { ContinuationIntent, ContinuationState } from './continuation-state'
 import type { DomainAdapter } from '../domain-adapters/domain-adapter'
 import type { ToolExecutionHooks } from '../tools-runtime/tool-execution-hooks'
@@ -59,6 +59,14 @@ import type { SkillChildRunStatus as SharedSkillChildRunStatus } from '../../../
 import type { ContextUsageSnapshot } from '../../../../shared/context-usage-types'
 import type { TaskCreationOrigin, TaskExecutionBinding } from '../../../../shared/agent-execution-profile'
 import type { ScheduledTaskOccurrenceSource } from '../../../../shared/scheduled-tasks'
+import type { CanonicalAssistantMessage } from '../../../../shared/ipc-contracts/canonical-message'
+import type {
+  AgentCheckpointRefs,
+  DurableRequestAnchor,
+  GoalMutationReceipt,
+  HumanTakeoverRef,
+  ParentSteeringReceipt,
+} from '../../../../shared/browser-workflow-control'
 import type { SkillRunContract } from './skill-run-contract'
 import type { RecoveryRecord, ToolSnapshot } from './tool-telemetry-contracts'
 import type {
@@ -340,6 +348,8 @@ export interface UnifiedTaskState {
 
 export interface TaskProjectionRecord {
   taskId: string
+  revision?: number
+  dependencyGeneration?: number
   scopeId: string
   runId: string
   parentTaskId?: string | null
@@ -396,6 +406,11 @@ export interface TaskProjectionRecord {
   contextRefs?: string[] | null
   /** Dynamic Delivery host-owned state. Renderer is read-only. */
   deliveryState?: import('../../../../shared/dynamic-delivery').DeliveryStateV1 | null
+  requestAnchor?: DurableRequestAnchor | null
+  goalMutations?: GoalMutationReceipt[]
+  steeringReceipts?: ParentSteeringReceipt[]
+  humanTakeoverRef?: HumanTakeoverRef | null
+  checkpointRefs?: AgentCheckpointRefs
   createdAt: string
   updatedAt: string
 }
@@ -424,11 +439,16 @@ export type TaskProjectionChangeReason = TaskProjectionChangeReasonWire
 export interface TaskProjectionWriteOptions {
   silent?: boolean
   reasonHint?: TaskProjectionChangeReason
+  /** Bound Browser Parents expose only these derived, non-owner field sets. */
+  browserDerivedFieldOwner?: 'proof'
+  /** Generic projection sync may update a Parent only before Browser claims it. */
+  browserParentBoundary?: 'unbound_only'
 }
 
 export interface TaskProjectionStore {
   create(record: TaskProjectionRecord, options?: TaskProjectionWriteOptions): void | Promise<void>
   update(taskId: string, patch: Partial<TaskProjectionRecord>, options?: TaskProjectionWriteOptions): void | Promise<void>
+  compareAndSwap?(taskId: string, expectedRevision: number, patch: Partial<TaskProjectionRecord>, options?: TaskProjectionWriteOptions): TaskProjectionRecord | null | Promise<TaskProjectionRecord | null>
   get(taskId: string): TaskProjectionRecord | null | Promise<TaskProjectionRecord | null>
   listByScope(scopeId: string): TaskProjectionRecord[] | Promise<TaskProjectionRecord[]>
   listByParentTask(parentTaskId: string): TaskProjectionRecord[] | Promise<TaskProjectionRecord[]>
@@ -537,12 +557,19 @@ export interface RunCoordinatorRequest {
   workspaceRoots?: string[]
   contextRefIds?: string[]
   trustedFolderReferences?: TrustedFolderReference[]
+  trustedEnvironment?: TrustedRequestEnvironment
   budget?: RunBudgetSeed
   continuationIntent?: ContinuationIntent | null
   taskOrigin?: TaskCreationOrigin
   runOrigin?: import('../../../../shared/agent-execution-profile').RunExecutionOrigin
   scheduledTaskOccurrence?: ScheduledTaskOccurrenceSource
   deliveryMode?: import('../../../../shared/dynamic-delivery').DeliveryMode
+  /**
+   * A binding already committed by the same durable workflow transaction.
+   * The coordinator must consume it verbatim and must not create a second
+   * run_meta row or re-resolve ownership from renderer state.
+   */
+  preboundExecutionBinding?: TaskExecutionBinding
 }
 
 export type ScopeRunAuthority = {
@@ -556,6 +583,9 @@ export interface RunCoordinatorResult {
   error?: string
   errorKind?: string
   scopeRunAuthority?: ScopeRunAuthority
+  responseText?: string
+  canonicalMessage?: CanonicalAssistantMessage
+  canonicalMessageDigest?: string
 }
 
 export interface ExecutionHostRequest {
@@ -603,6 +633,8 @@ export interface ExecutionHostResult {
   scopeRunAuthority?: ScopeRunAuthority
   executionBinding?: TaskExecutionBinding | null
   executionAgentDisplayName?: string | null
+  canonicalMessage?: CanonicalAssistantMessage
+  canonicalMessageDigest?: string
 }
 
 export interface ExecutionTurnResult {
@@ -624,6 +656,8 @@ export interface ExecutionTurnResult {
   scopeRunAuthority?: ScopeRunAuthority
   executionBinding?: TaskExecutionBinding | null
   executionAgentDisplayName?: string | null
+  canonicalMessage?: CanonicalAssistantMessage
+  canonicalMessageDigest?: string
 }
 
 export type SkillTaskLifecycleState =
@@ -836,7 +870,6 @@ export interface TurnEngineHost<TSession extends TurnEngineSession = TurnEngineS
   refreshActiveWidgetEditLease?: (ttlMs?: number) => import('../widget-edit-lease').ActiveWidgetEditLease | null
   domainAdapters?: DomainAdapter[]
   skillContextOrchestrator: unknown
-  browserDomainOrchestrator: unknown
   documentToolLoopOrchestrator: unknown
   designToolLoopOrchestrator: unknown
   hostCapabilityDispatcher: unknown

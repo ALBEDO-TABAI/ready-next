@@ -13,6 +13,7 @@ import { createToolExecutionOutput } from '../main/modules/agent-control/tools-r
 import type { ToolDefinition } from '../main/modules/agent-control/tools-runtime/tool-definition'
 
 import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
+import { canonicalCoreCloseoutTestPort } from './helpers/canonical-core-closeout-test-port'
 
 test('agent-sdk-budget-runtime declares transitive sqlite ABI guard', (t) => {
   skipIfSqliteUnavailable(t, 'agent-sdk-budget-runtime transitive sqlite load')
@@ -394,6 +395,7 @@ test('Agent SDK budget continuation collapses concurrent continues for the same 
   })
   const runMeta = new Map<string, Record<string, unknown>>()
   runtime.setRuntime({
+    ...canonicalCoreCloseoutTestPort(),
     getRunMetaRepository: () => ({
       get: (runId: string) => runMeta.get(runId) ?? null,
       create: (input: Record<string, unknown>) => {
@@ -643,6 +645,7 @@ test('invalid budget continuation handles stop before model or tool execution', 
         }
       })
       runtime.setRuntime({
+        ...canonicalCoreCloseoutTestPort(),
         getRunMetaRepository: () => ({
           get: (runId: string) => runMeta.get(runId) ?? null,
           create: (input: Record<string, unknown>) => {

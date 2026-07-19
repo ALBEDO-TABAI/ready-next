@@ -31,6 +31,19 @@ afterEach(() => {
 })
 
 describe('document widget target context', () => {
+  it('adds the active browser mode as structured environment context', async () => {
+    useMode.getState().setWorkbenchMode('browser')
+
+    const composed = await buildComposedAgentInput({
+      content: '把目的地设为新加坡并完成后续步骤',
+      attachments: [],
+      filePool: [],
+    })
+
+    assert.equal(typeof composed, 'string')
+    assert.match(String(composed), /## 环境信息\n- workbench_mode: browser/)
+  })
+
   it('creates a compact widget update prompt for the chat input', () => {
     const prompt = buildWidgetTargetUpdatePrompt('stock_price_chart')
     assert.equal(prompt, '更新当前文档里的 stock_price_chart widget：')

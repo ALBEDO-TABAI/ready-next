@@ -25,6 +25,14 @@ function normalizedOrigin(value: string | null | undefined): string {
   try { return new URL(raw).origin } catch { return raw }
 }
 
+export function scopedOriginInteractionKey(input: {
+  profile?: string | null
+  scopeId?: string | null
+  origin: string
+}): string {
+  return `profile=${String(input.profile || 'default')};scope=${String(input.scopeId || 'unscoped')};origin=${normalizedOrigin(input.origin)}`
+}
+
 function retryAfterMs(value: string | number | null | undefined, now: number): number {
   if (typeof value === 'number' && Number.isFinite(value)) return Math.max(0, value * 1000)
   const text = String(value || '').trim()
@@ -77,7 +85,12 @@ export class OriginInteractionBudget {
     const now = this.now()
     const current = this.getState(origin)
     const rateLimited = signal.status === 429
-    const failed = rateLimited || signal.actionSucceeded === false
+    const authoritativeRejection = typeof signal.status === 'number'
+      && (signal.status === 403 || signal.status >= 500)
+    const failed = rateLimited
+      || authoritativeRejection
+      || signal.challenge === true
+      || signal.loginWall === true
     const retryMs = retryAfterMs(signal.retryAfter, now)
     const failures = failed ? current.consecutiveFailures + 1 : 0
     const adaptiveCooldown = rateLimited
@@ -85,9 +98,12 @@ export class OriginInteractionBudget {
       : failed && failures >= 2
         ? Math.min(15_000, 500 * (2 ** Math.min(5, failures - 2)))
         : 0
+    const activeCurrentCooldown = current.cooldownUntil > now ? current.cooldownUntil : 0
     const next: OriginInteractionState = {
       origin,
-      cooldownUntil: Math.max(current.cooldownUntil, now + adaptiveCooldown),
+      cooldownUntil: adaptiveCooldown > 0
+        ? Math.max(activeCurrentCooldown, now + adaptiveCooldown)
+        : activeCurrentCooldown,
       challengeBlocked: signal.challengeCleared === true
         ? false
         : current.challengeBlocked || signal.challenge === true || signal.loginWall === true,

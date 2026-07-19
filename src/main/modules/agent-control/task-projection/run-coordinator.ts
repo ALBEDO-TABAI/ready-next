@@ -54,6 +54,7 @@ export class RunCoordinator {
         workspaceRoots?: string[]
         contextRefIds?: string[]
         trustedFolderReferences?: RunCoordinatorRequest['trustedFolderReferences']
+        trustedEnvironment?: RunCoordinatorRequest['trustedEnvironment']
         /** EP3-A4 — the scope's effective owner; switches A2 injection. */
         ownerAgentId?: string | null
         executionProfile: AgentExecutionProfile
@@ -160,21 +161,31 @@ export class RunCoordinator {
           ? 'scheduled_task'
         : existingTask ? 'continuation' : request.parentTaskId ? 'parent_task' : 'conversation_active',
     } as const
-    const executionBinding = this.deps.createExecutionBinding
-      ? this.deps.createExecutionBinding(bindingInput)
-      : {
+    const executionBinding = request.preboundExecutionBinding
+      ?? (this.deps.createExecutionBinding
+        ? this.deps.createExecutionBinding(bindingInput)
+        : {
         schemaVersion: 1, runId, ownerAgentIdAtStart: ownerAgentId, runOrigin: bindingInput.runOrigin,
         kind: 'registered_agent', requestedAgentId: ownerAgentId, effectiveAgentId: ownerAgentId,
         executionMaterialHash: executionProfile.executionMaterialHash,
         ownerAssignmentSource: bindingInput.ownerAssignmentSource, executionSelectionSource: 'task_owner', resolutionKind: 'direct',
-      } satisfies TaskExecutionBinding
-    this.deps.persistRunBinding?.({
-      runId,
-      taskId,
-      scopeId: request.scope.id,
-      sessionAgentId: request.scope.agent,
-      executionBinding,
-    })
+      } satisfies TaskExecutionBinding)
+    if (
+      executionBinding.runId !== runId
+      || executionBinding.ownerAgentIdAtStart !== ownerAgentId
+      || executionBinding.executionMaterialHash !== executionProfile.executionMaterialHash
+    ) {
+      throw new Error('[run-coordinator] prebound execution binding does not match durable owner')
+    }
+    if (!request.preboundExecutionBinding) {
+      this.deps.persistRunBinding?.({
+        runId,
+        taskId,
+        scopeId: request.scope.id,
+        sessionAgentId: request.scope.agent,
+        executionBinding,
+      })
+    }
     const prepared = await this.deps.promptAssembly.buildForScopedRun({
       scope: request.scope,
       message: request.message,
@@ -182,6 +193,7 @@ export class RunCoordinator {
       workspaceRoots: request.workspaceRoots,
       contextRefIds: request.contextRefIds,
       trustedFolderReferences: request.trustedFolderReferences,
+      trustedEnvironment: request.trustedEnvironment,
       // EP3-A4 — adoption switched the scope's owner; this is where the
       // next turn's injection follows it (A2 channel).
       ownerAgentId,
@@ -431,6 +443,8 @@ export class RunCoordinator {
         error: result.error || 'Agent execution failed',
         errorKind: result.terminalReason || undefined,
         scopeRunAuthority: result.scopeRunAuthority,
+        canonicalMessage: result.canonicalMessage,
+        canonicalMessageDigest: result.canonicalMessageDigest,
       }
     }
 
@@ -491,6 +505,11 @@ export class RunCoordinator {
         console.error('[RunCoordinator] Reflection failed:', error)
       })
 
-    return { success: true }
+    return {
+      success: true,
+      responseText: result.finalText,
+      canonicalMessage: result.canonicalMessage,
+      canonicalMessageDigest: result.canonicalMessageDigest,
+    }
   }
 }

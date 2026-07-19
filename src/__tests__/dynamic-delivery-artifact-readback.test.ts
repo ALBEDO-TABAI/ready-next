@@ -31,7 +31,7 @@ function folderEnvelope(name: string, path: string) {
   }
 }
 
-test('delivery artifact readback opens the real target files and validates a linked index', () => {
+test('delivery artifact readback opens the real declared files and verifies expected outputs', () => {
   const root = mkdtempSync(join(tmpdir(), 'ready-dd-readback-ok-'))
   try {
     const target = join(root, '宝矿力')
@@ -66,6 +66,23 @@ test('delivery artifact readback opens the real target files and validates a lin
   }
 })
 
+test('delivery artifact readback does not infer file obligations from browser task wording', () => {
+  for (const userRequestVerbatim of [
+    '在当前网站搜索“星河索引”，打开记录并读取校验码和可信度。',
+    '在当前网站查找“多份文件记录”，打开最匹配的结果。',
+  ]) {
+    const result = materializeDeliveryArtifacts({
+      proofRefs: [collectToolResultProof('browser_snapshot', '详情页已读取', NOW, '详情页已读取', 'run-browser')],
+      userRequestVerbatim,
+      currentRunId: 'run-browser',
+      runStartedAtMs: NOW.getTime() - 1_000,
+    })
+
+    assert.deepEqual(result.mechanicalIssues, [])
+    assert.equal(result.items.filter((item) => item.kind === 'action_receipt').length, 1)
+  }
+})
+
 test('delivery artifact readback does not count stale target files as current-run delivery', () => {
   const root = mkdtempSync(join(tmpdir(), 'ready-dd-readback-stale-'))
   try {
@@ -84,9 +101,8 @@ test('delivery artifact readback does not count stale target files as current-ru
     })
 
     const codes = new Set(result.mechanicalIssues?.map((issue) => issue.code))
-    assert.ok(codes.has('artifact_bundle_incomplete'))
     assert.ok(codes.has('expected_output_missing'))
-    assert.ok(codes.has('index_link_unproven'))
+    assert.equal(codes.size, 1)
     assert.equal(result.items.filter((item) => item.kind === 'artifact').length, 1)
   } finally {
     rmSync(root, { recursive: true, force: true })
@@ -179,14 +195,13 @@ test('delivery artifact readback rejects an empty target even when intermediate 
 
     const codes = new Set(result.mechanicalIssues?.map((issue) => issue.code))
     assert.ok(codes.has('output_target_empty'))
-    assert.ok(codes.has('artifact_bundle_incomplete'))
-    assert.ok(codes.has('index_missing'))
+    assert.equal(codes.size, 1)
   } finally {
     rmSync(root, { recursive: true, force: true })
   }
 })
 
-test('delivery artifact readback rejects empty files and broken local index links', () => {
+test('delivery artifact readback rejects empty declared files without guessing semantic requirements', () => {
   const root = mkdtempSync(join(tmpdir(), 'ready-dd-readback-broken-'))
   try {
     const target = join(root, '宝矿力')
@@ -204,8 +219,7 @@ test('delivery artifact readback rejects empty files and broken local index link
 
     const codes = new Set(result.mechanicalIssues?.map((issue) => issue.code))
     assert.ok(codes.has('artifact_empty'))
-    assert.ok(codes.has('artifact_bundle_incomplete'))
-    assert.ok(codes.has('index_link_missing'))
+    assert.equal(codes.size, 1)
   } finally {
     rmSync(root, { recursive: true, force: true })
   }

@@ -13,6 +13,7 @@ import {
 } from '../main/modules/agent-control/metrics'
 
 import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
+import { canonicalCoreCloseoutTestPort } from './helpers/canonical-core-closeout-test-port'
 
 test('abort-initiator-threading declares transitive sqlite ABI guard', (t) => {
   skipIfSqliteUnavailable(t, 'abort-initiator-threading transitive sqlite load')
@@ -106,7 +107,7 @@ test('stopGeneration records user_stop on the active run handle before aborting'
   assert.equal(initiatorAtAbort, 'user_stop')
 })
 
-test('takeover preemption records preempted on the old run handle before aborting', async () => {
+test('a second ingress cannot implicitly preempt the active owner', async () => {
   const name = 'butler::scope-abort-preempt'
   let firstSignalReadyResolve!: () => void
   const firstSignalReady = new Promise<void>((resolve) => {
@@ -114,25 +115,17 @@ test('takeover preemption records preempted on the old run handle before abortin
   })
   let initiatorAtAbort: AbortInitiator | null | undefined
   let runtime!: AgentSdkRuntime
-  const runAgentQueue: NonNullable<AgentSdkRuntimeDeps['runAgent']>[] = [
-    ({ signal }) => {
+  runtime = createRuntime({
+    runAgent: ({ signal }) => {
       firstSignalReadyResolve()
       return new Promise((_resolve, reject) => {
         signal.addEventListener('abort', () => {
           initiatorAtAbort = currentRunHandle(runtime, name)?.abortInitiator
-          const error = new Error('process_restarted')
+          const error = new Error('cancelled_user')
           error.name = 'AbortError'
           reject(error)
         }, { once: true })
       })
-    },
-    async () => ({ finalText: 'second run complete' }),
-  ]
-  runtime = createRuntime({
-    runAgent: (params) => {
-      const next = runAgentQueue.shift()
-      assert.ok(next)
-      return next(params)
     },
   })
   runtime.newSession(name, 'system prompt')
@@ -148,12 +141,16 @@ test('takeover preemption records preempted on the old run handle before abortin
     publicSessionId: 'scope-abort-preempt',
     taskId: 'task-preempt-new',
   })
+  assert.equal(currentRunHandle(runtime, name)?.runId, 'run-preempt-old')
+  assert.equal(currentRunHandle(runtime, name)?.abortInitiator, null)
+  assert.equal(second.success, false)
+  assert.equal(second.terminalReason, 'blocked_external')
+
+  runtime.stopGeneration(name)
   const firstResult = await first
 
-  assert.equal(initiatorAtAbort, 'preempted')
+  assert.equal(initiatorAtAbort, 'user_stop')
   assert.equal(firstResult.cancelled, true)
-  assert.equal(second.success, true)
-  assert.equal(second.finalText, 'second run complete')
 })
 
 test('timeout abort closes through the finalizer with run_meta and run_close reason', async () => {
@@ -179,6 +176,16 @@ test('timeout abort closes through the finalizer with run_meta and run_close rea
       },
     })
     runtime.setRuntime({
+      ...canonicalCoreCloseoutTestPort((input) => {
+        const next = {
+          ...(runMeta.get(input.ownerRunId) ?? { runId: input.ownerRunId }),
+          status: input.status,
+          terminalReason: input.terminalReason,
+          initiator: input.initiator,
+          durationMs: input.durationMs,
+        }
+        runMeta.set(input.ownerRunId, next)
+      }),
       getRunMetaRepository: () => ({
         get: (runId: string) => runMeta.get(runId) ?? null,
         create: (input: Record<string, unknown>) => {

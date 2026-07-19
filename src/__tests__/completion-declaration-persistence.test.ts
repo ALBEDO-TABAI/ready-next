@@ -48,6 +48,7 @@ class ProjectionDb {
           const row = this.rows.get(String(params.at(-1)))
           assert.ok(row)
           columns.forEach((column, index) => { row[column] = params[index] })
+          return { changes: 1 }
         },
         get: () => undefined,
         all: () => [],

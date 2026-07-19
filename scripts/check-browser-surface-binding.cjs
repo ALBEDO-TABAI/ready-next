@@ -10,7 +10,6 @@ const EXECUTE_BROWSER_TOOL_ALLOWLIST = new Map([
   ['src/main/modules/tools/browser-tools.ts', 'definition'],
   ['src/main/modules/tools/index.ts', 'barrel-export'],
   ['src/main/modules/tools/tool-executor.ts', 'tool-executor-dispatch'],
-  ['src/main/modules/tools/browser-agent-runner.ts', 'browser-agent-runner-dispatch'],
   ['src/main/modules/browser-engine/ipc-handler.ts', 'scoped-facade-injected-dispatcher'],
 ])
 
@@ -42,11 +41,6 @@ if (!toolExecutor.includes("dispatch: 'tool-executor'")) {
 }
 if (!toolExecutor.includes('resolveBrowserToolSurfaceBinding')) {
   fail('tool-executor must call resolveBrowserToolSurfaceBinding')
-}
-
-const runner = read('src/main/modules/tools/browser-agent-runner.ts')
-if (!runner.includes("dispatch: 'browser-agent-runner'")) {
-  fail('browser-agent-runner must declare its browser surface dispatch')
 }
 
 const facade = read('src/main/modules/browser-engine/scoped-browser-facade.ts')
@@ -117,9 +111,6 @@ for (const file of listTsFiles(PRODUCTION_SCAN_ROOT)) {
   }
   if (reason === 'tool-executor-dispatch' && !source.includes("dispatch: 'tool-executor'")) {
     fail('tool-executor executeBrowserTool path must declare dispatch')
-  }
-  if (reason === 'browser-agent-runner-dispatch' && !source.includes("dispatch: 'browser-agent-runner'")) {
-    fail('browser-agent-runner executeBrowserTool path must declare dispatch')
   }
   if (reason === 'scoped-facade-injected-dispatcher') {
     assertScopedFacadeDispatcher(strippedSource)

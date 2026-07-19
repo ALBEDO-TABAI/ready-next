@@ -21,7 +21,6 @@ import {
   buildSelectedSkillToolAuthorization,
 } from '../main/modules/agent-control/skills/skill-tool-authorization'
 import type { CapabilityResolution } from '../main/modules/agent-control/domain-adapters/capability-resolver'
-import { resolveBrowserWorkIntent } from '../shared/browser-work-intent'
 import { ToolConsentRetryCoordinator } from '../main/modules/agent-control/runtime-core/tool-consent-retry-coordinator'
 import { __setSkillsRuntimeManagerForTests } from '../main/modules/skills-runtime/runtime-manager'
 
@@ -48,7 +47,7 @@ function reportBrowserProviderConflict(
   return []
 }
 
-test('default SDK executor reports the same suppressed browser groups that it used to build the tool surface', () => {
+test('default SDK executor does not infer a Browser surface from wording alone', () => {
   const runtime = new AgentSdkRuntime({ domainAdapters: [] })
   const executor = (runtime as unknown as {
     toolExecutor: {
@@ -72,10 +71,8 @@ test('default SDK executor reports the same suppressed browser groups that it us
 
   assert.deepEqual(definitions, [])
   assert.deepEqual(
-    captured?.requestedButSuppressed.map((conflict) => [conflict.groupId, conflict.reason]),
-    [
-      ['browser_interaction', 'provider_disabled_tools'],
-    ],
+    captured?.requestedButSuppressed.filter((conflict) => conflict.groupId.startsWith('browser_')),
+    [],
   )
 })
 
@@ -112,16 +109,13 @@ test('default SDK executor does not report negated browser wording as requested 
   )
 })
 
-test('site research and its bare continuation expose the complete live browser workflow', () => {
+test('a trusted Browser workbench surface exposes the complete live browser workflow independent of wording', () => {
   const runtime = new AgentSdkRuntime({ domainAdapters: [] })
   const executor = (runtime as unknown as {
     toolExecutor: {
-      listDefaultToolDefinitionsForTurn(params: Parameters<NonNullable<AgentSdkRuntimeDeps['listToolDefinitions']>>[0] & {
-        recentBrowserWorkIntent?: ReturnType<typeof resolveBrowserWorkIntent>
-      }): Array<{ name: string }>
+      listDefaultToolDefinitionsForTurn(params: Parameters<NonNullable<AgentSdkRuntimeDeps['listToolDefinitions']>>[0]): Array<{ name: string }>
     }
   }).toolExecutor
-  const original = '在小红书当前页面搜索关键词：\n词一\n词二\n这是只读研究任务，不发布、不点赞、不评论、不关注。请完整处理全部2个关键词。'
   const base = {
     sessionId: 'scope-site-research',
     scopeId: 'scope-site-research',
@@ -130,22 +124,35 @@ test('site research and its bare continuation expose the complete live browser w
     feishuConnected: false,
     skillCatalogAvailable: true,
     authorization: buildExplicitNoSkillAuthorization('no_skill_signal'),
+    requestEnvelope: {
+      environmentHints: {
+        workbenchMode: 'browser',
+        browserPageRef: {
+          tabId: 'tab-structured-browser-surface',
+          physicalTargetToken: 'target-token',
+          mainFrameDocumentToken: 'document-token',
+        },
+      },
+    },
   }
   for (const definitions of [
-    executor.listDefaultToolDefinitionsForTurn({ ...base, message: original }),
-    executor.listDefaultToolDefinitionsForTurn({ ...base, message: '在小红书搜索：甲、乙' }),
-    executor.listDefaultToolDefinitionsForTurn({
-      ...base,
-      message: '继续',
-      recentBrowserWorkIntent: resolveBrowserWorkIntent(original),
-    }),
+    executor.listDefaultToolDefinitionsForTurn({ ...base, message: 'research these items' }),
+    executor.listDefaultToolDefinitionsForTurn({ ...base, message: '完全陌生语言 甲乙' }),
+    executor.listDefaultToolDefinitionsForTurn({ ...base, message: '继续' }),
   ]) {
     const names = definitions.map((definition) => definition.name)
-    for (const required of ['browser_research', 'browser_task', 'browser_click', 'browser_type', 'browser_press_key']) {
+    for (const required of [
+      'browser_research',
+      'browser_task',
+      'browser_click',
+      'browser_type',
+      'browser_press_key',
+      'browser_select',
+      'browser_hover',
+      'browser_drag',
+      'browser_dialog',
+    ]) {
       assert.ok(names.includes(required), `${required} missing from ${names.join(',')}`)
-    }
-    for (const forbidden of ['web_search', 'web_fetch', 'web_clip_url']) {
-      assert.equal(names.includes(forbidden), false, `${forbidden} must not bypass current-site research`)
     }
   }
 })
@@ -183,6 +190,16 @@ test('selected advisory skill cannot remove site-research control and continuati
       browserHostAvailable: true,
       feishuConnected: false,
       skillCatalogAvailable: true,
+      requestEnvelope: {
+        environmentHints: {
+          workbenchMode: 'browser',
+          browserPageRef: {
+            tabId: 'tab-selected-skill',
+            physicalTargetToken: 'target-token',
+            mainFrameDocumentToken: 'document-token',
+          },
+        },
+      },
       authorization: buildSelectedSkillToolAuthorization({
         skillId: 'social-media-ops-test',
         allowedTypedActions: [],

@@ -129,8 +129,9 @@ class FakeProjectionRawDb {
         run: (...params: unknown[]) => {
           const taskId = String(params[params.length - 1])
           const row = rows.get(taskId)
-          if (!row) return
+          if (!row) return { changes: 0 }
           setColumns.forEach((column, index) => { row[column] = params[index] })
+          return { changes: 1 }
         },
         all: () => [],
         get: () => undefined,

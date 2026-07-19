@@ -9,11 +9,8 @@ import {
   buildBrowserActionReceipt,
   captureBrowserActionReceipt,
 } from '../main/modules/browser-engine/browser-action-receipt'
-import {
-  buildBrowserActionSessionProgress,
-  noteBrowserActionSession,
-} from '../main/modules/browser-engine/browser-action-session'
 import { executeBrowserTool } from '../main/modules/tools/browser-tools'
+import { captureAgentPageMap } from '../main/modules/tools/browser-observe-tools'
 import { __clearBrowserPowerPolicyForTests } from '../main/modules/browser-engine/browser-power-policy'
 import type { BrowserController } from '../main/modules/browser-engine/ipc-handler'
 import type { ToolExecutionOutput } from '../main/modules/agent-control/tools-runtime/tool-result-types'
@@ -75,11 +72,45 @@ test('browser_type output carries a change receipt (integration)', async () => {
   const controller = {
     getActiveTab: () => ({ id: 'tab-1', title: 'Editor', url: 'https://creator.xiaohongshu.com/publish', active: true }) as never,
     getTabList: () => [{ id: 'tab-1', title: 'Editor', url: 'https://creator.xiaohongshu.com/publish', active: true }] as never,
+    getPhysicalTargetToken: () => 'physical-tab-1',
+    getBrowserInputEnvironment: () => ({ mainWindowForeground: true, hostPresentation: 'visible', tabActive: true }),
+    beginBrowserWorkflowAction: (input: Record<string, unknown>) => ({
+      actionId: 'action-1',
+      actionSeq: 1,
+      identity: input.identity,
+    }),
+    settleBrowserWorkflowAction: (_taskId: string, actionId: string, outcome: Record<string, unknown>) => ({
+      receiptId: 'receipt-1',
+      actionId,
+      actionSeq: 1,
+      outcome,
+    }),
+    recordBrowserWorkflowObservation: () => ({ receiptId: 'observation-1' }),
     normalizedToCss: async (_tabId: string | null, x: number, y: number) => ({ x, y, width: 1000, height: 800 }),
     dispatchMouse: async () => undefined,
     dispatchKey: async () => undefined,
     typeTextDirectly: async () => undefined,
     executeJS: async (_tabId: string | null, code: string) => {
+      if (code.includes('__READY_AGENT_PAGE_MAP__')) {
+        return {
+          identity: {
+            url: 'https://creator.xiaohongshu.com/publish',
+            title: 'Editor',
+            frameDocumentToken: 'document-tab-1',
+          },
+          viewport: { width: 1000, height: 800 },
+          rawRoots: [],
+        }
+      }
+      if (code.includes('__readyBrowserTargetIdentityV3')) {
+        return {
+          url: 'https://creator.xiaohongshu.com/publish',
+          title: 'Editor',
+          timeOrigin: 1,
+          mutationRevision: 0,
+          frameDocumentToken: 'document-tab-1',
+        }
+      }
       if (code.includes('__READY_ACTION_RECEIPT__')) {
         probed = true
         return { url: 'https://creator.xiaohongshu.com/publish', title: '写笔记', activeElement: 'textarea:正文', visibleSignal: '已保存草稿' }
@@ -87,11 +118,28 @@ test('browser_type output carries a change receipt (integration)', async () => {
       if (code.includes('__READY_CLICK_POINT_LABEL_PROBE__')) {
         return { label: '', inputLabel: '正文', password: false, editable: true }
       }
+      if (code.includes('activeElementEditable') && code.includes('document.hasFocus')) {
+        return { ready: true, focused: true, activeElementEditable: true }
+      }
       if (code.includes('__READY_FOCUSED_EDITABLE_PROBE__')) {
-        return { kind: 'editable', tag: 'textarea', label: '正文', maxLength: null, singleLine: false }
+        return {
+          kind: 'editable',
+          tag: 'textarea',
+          label: '正文',
+          maxLength: null,
+          singleLine: false,
+          documentFocused: true,
+          documentReady: true,
+        }
       }
       if (code.includes('__READY_TYPED_INTO_PROBE__')) {
-        return { tag: 'textarea', label: '正文', textHead: '今天天气不错', textLength: 6 }
+        return { tag: 'textarea', label: '正文', textHead: '今天天气不错', textLength: 6, textMatchesExpected: true }
+      }
+      if (code.includes('changed: after !== state.before') && code.includes('__readyTextDeliveryProbe')) {
+        return { count: 1, changed: true }
+      }
+      if (code.includes('globalThis.__readyTextDeliveryProbe = state')) {
+        return 'text-probe'
       }
       if (code.includes('document.querySelector')) {
         return { ok: true, x: 100, y: 100, width: 1000, height: 800 }
@@ -100,30 +148,29 @@ test('browser_type output carries a change receipt (integration)', async () => {
     },
   } as unknown as BrowserController
 
+  await captureAgentPageMap(controller, 'tab-1')
   const out = await executeBrowserTool(
     'browser_type',
     { selector: 'textarea', text: '今天天气不错', tab_id: 'tab-1' },
     controller,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    {
+      ownerRunId: 'run-receipt-test',
+      browserTaskId: 'browser-task-receipt-test',
+      parentTaskId: 'parent-receipt-test',
+      inputSource: 'trusted_internal',
+    },
   )
   const parsed = parseOutput(out)
+  assert.equal(parsed.errorKind, undefined, JSON.stringify(parsed))
   assert.ok(probed, 'the read-only receipt probe must run after typing')
   const receipt = parsed.changeReceipt as Record<string, unknown> | undefined
   assert.ok(receipt, 'browser_type output must include a changeReceipt')
   assert.equal(receipt!.captured, true)
   assert.equal(receipt!.activeElement, 'textarea:正文')
   assert.equal(receipt!.visibleSignal, '已保存草稿')
-})
-
-test('nextSuggestedAction stays in session metadata and never becomes a task step or criterion', () => {
-  const session = noteBrowserActionSession('scope-d11', {
-    targetTabId: 'tab-1',
-    transactionStatus: 'confirmed',
-    nextSuggestedAction: 'finish with transaction proof',
-  })
-  assert.ok(session)
-  const progress = buildBrowserActionSessionProgress(session!) as Record<string, unknown>
-  assert.equal(progress.detail, null)
-  assert.equal((progress.browserActionSession as { nextSuggestedAction?: string }).nextSuggestedAction, 'finish with transaction proof')
-  assert.equal('steps' in progress, false)
-  assert.equal('criteria' in progress, false)
 })

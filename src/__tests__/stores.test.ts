@@ -1027,7 +1027,18 @@ describe('useAgent Store', () => {
                 }),
                 sendScoped: async (payload: Record<string, unknown>) => {
                     sendScopedCalls.push(payload)
-                    return { success: true }
+                    return {
+                        success: true,
+                        canonicalMessage: {
+                            id: 'assistant-local-success',
+                            conversationId: String(payload.scopeId),
+                            role: 'assistant',
+                            content: 'done',
+                            timestamp: '2026-04-15T10:00:01.000Z',
+                            meta: {},
+                        },
+                        canonicalMessageDigest: 'digest-local-success',
+                    }
                 },
                 kill: async () => ({ success: true }),
             },
@@ -1127,7 +1138,18 @@ describe('useAgent Store', () => {
                     if (sendScopedCalls.length === 1) {
                         return { success: false, error: `Conversation scope not found: ${String(payload?.scopeId)}` }
                     }
-                    return { success: true }
+                    return {
+                        success: true,
+                        canonicalMessage: {
+                            id: 'assistant-local-retry',
+                            conversationId: String(payload.scopeId),
+                            role: 'assistant',
+                            content: 'done',
+                            timestamp: '2026-04-15T10:00:01.000Z',
+                            meta: {},
+                        },
+                        canonicalMessageDigest: 'digest-local-retry',
+                    }
                 },
                 kill: async () => ({ success: true }),
             },
@@ -1207,7 +1229,7 @@ describe('useAgent Store', () => {
             sendScopedCalls.map((call) => call.agent),
             ['butler', 'butler'],
         )
-        assert.strictEqual(sendScopedCalls[0].message, 'hello again')
+        assert.match(String(sendScopedCalls[0].message), /^hello again(?:\n|$)/)
         assert.ok(typeof sendScopedCalls[0].requestId === 'string' && (sendScopedCalls[0].requestId as string).length > 0)
         assert.deepStrictEqual(createLocalScopeCalls, [
             { agent: 'butler', scopeId: 'conv-local-retry' },
@@ -1238,7 +1260,11 @@ describe('useAgent Store', () => {
                 }),
                 sendScoped: async (payload: Record<string, unknown>) => {
                     sendScopedCalls.push(payload)
-                    return { success: true }
+                    return {
+                        success: true,
+                        acceptedAsSteering: true,
+                        ownerRunId: 'run-background-child',
+                    }
                 },
                 kill: async (agent: string, scopeId?: string) => {
                     killCalls.push({ agent, scopeId })
@@ -1314,7 +1340,7 @@ describe('useAgent Store', () => {
         assert.strictEqual(killCalls.length, 0)
         assert.strictEqual(sendScopedCalls.length, 1)
         assert.strictEqual(sendScopedCalls[0].scopeId, 'conv-local-background-child')
-        assert.strictEqual(sendScopedCalls[0].message, 'start a separate question')
+        assert.match(String(sendScopedCalls[0].message), /^start a separate question(?:\n|$)/)
     })
 
     it('applies auto preroute before creating the first local scope', async () => {
@@ -1644,7 +1670,7 @@ describe('useAgent Store', () => {
         )
     })
 
-    it('should render backend responseText returned by sendScoped success', async () => {
+    it('should render the canonical persisted assistant message returned by sendScoped success', async () => {
         const scopeId = 'conv-local-response-text'
         const savedMessages: Array<{ role: string; content: string }> = []
 
@@ -1667,7 +1693,16 @@ describe('useAgent Store', () => {
                 }),
                 sendScoped: async () => ({
                     success: true,
-                    responseText: '广州一周天气：小雨为主。',
+                    responseText: '这段非权威返回不得进入界面。',
+                    canonicalMessage: {
+                        id: 'assistant-canonical-weather',
+                        conversationId: scopeId,
+                        role: 'assistant',
+                        content: '广州一周天气：小雨为主。',
+                        timestamp: '2026-04-15T10:00:01.000Z',
+                        meta: {},
+                    },
+                    canonicalMessageDigest: 'digest-canonical-weather',
                     persistence: {
                         scope: 'pre-existing',
                         message: 'persisted',
@@ -1720,9 +1755,10 @@ describe('useAgent Store', () => {
 
         assert.equal(result.success, true)
         assert.match(assistantMessage?.content || '', /广州一周天气/)
+        assert.doesNotMatch(assistantMessage?.content || '', /非权威返回/)
         assert.equal(useAgent.getState().isStreaming, false)
         await new Promise<void>((resolve) => setTimeout(resolve, 0))
-        assert.equal(savedMessages.some((message) => message.role === 'assistant' && /广州一周天气/.test(message.content)), true)
+        assert.equal(savedMessages.some((message) => message.role === 'assistant'), false)
     })
 
     it('should not append backend responseText after the same answer already streamed', async () => {

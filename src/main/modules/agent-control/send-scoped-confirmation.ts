@@ -58,10 +58,14 @@ export interface SendScopedUserMessage {
 
 export interface SendScopedResponse {
   success: boolean
+  acceptedAsSteering?: boolean
+  ownerRunId?: string
   error?: string
   errorKind?: SendScopedErrorKind
   responseText?: string
   persistence?: SendScopedPersistence
+  canonicalMessage?: import('../../../shared/ipc-contracts/canonical-message').CanonicalAssistantMessage
+  canonicalMessageDigest?: string
 }
 
 export async function runConfirmedSendScoped<ScopeRow>(params: {
@@ -71,6 +75,11 @@ export async function runConfirmedSendScoped<ScopeRow>(params: {
   getScope: (scopeId: string) => ScopeRow | null
   createLocalScope: (agent: string, scopeId: string) => ScopeRow
   persistUserMessage: (scope: ScopeRow, userMessage: SendScopedUserMessage) => void
+  routeActiveOwner?: (
+    scope: ScopeRow,
+    userMessage: SendScopedUserMessage,
+    persistence: SendScopedPersistence,
+  ) => Promise<SendScopedResponse | null>
   onLazyCreate?: (scopeId: string, agent: string) => void
   runConfirmed: (scope: ScopeRow, persistence: SendScopedPersistence) => Promise<SendScopedResponse>
 }): Promise<SendScopedResponse> {
@@ -100,6 +109,18 @@ export async function runConfirmedSendScoped<ScopeRow>(params: {
     attachmentConfirmation: params.userMessage?.attachmentConfirmation,
   })
   if (params.userMessage) {
+    if (params.routeActiveOwner) {
+      const routed = await params.routeActiveOwner(scope, params.userMessage, persistence)
+      if (routed) {
+        return {
+          ...routed,
+          persistence: {
+            ...persistence,
+            message: routed.success ? 'persisted' : persistence.message,
+          },
+        }
+      }
+    }
     try {
       params.persistUserMessage(scope, params.userMessage)
       persistence = {

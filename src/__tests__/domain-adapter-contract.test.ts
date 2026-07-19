@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { BrowserDomainAdapter } from '../main/modules/agent-control/domain-adapters/browser-domain-adapter'
 import { DocumentDomainAdapter } from '../main/modules/agent-control/domain-adapters/document-domain-adapter'
 import { SkillDomainAdapter } from '../main/modules/agent-control/skills/skill-domain-adapter'
 import { RSSDomainAdapter } from '../main/modules/agent-control/domain-adapters/rss-domain-adapter'
@@ -58,7 +57,6 @@ function createAdapterApplyParams(executor: 'skill' | 'rss' | 'calendar' | 'feis
 
 test('every phase4 domain adapter implements the unified lifecycle contract', () => {
   const adapters: DomainAdapter[] = [
-    new BrowserDomainAdapter({} as never),
     new DocumentDomainAdapter({
       orchestrator: {} as never,
       toolLoopOrchestrator: {} as never,
@@ -123,116 +121,6 @@ test('document intent is not stolen by a stale skill executor route', () => {
   })
 
   assert.equal(selected?.id, 'document')
-})
-
-test('browser domain adapter preserves upload prompt refinement before building browser state', async () => {
-  const adapter = new BrowserDomainAdapter({
-    async prepareBrowserExecution(params: Record<string, unknown>) {
-      return {
-        browserDecision: (params.decision as { mode: string; promptIntent?: { refined?: string } } | undefined) || {
-          mode: 'browser_upload_workflow',
-          promptIntent: { refined: '初始提示词' },
-        },
-        browserContinuity: null,
-        browserContinuityInstruction: null,
-        clarifyText: null,
-        shouldInspectAmbiguousModeEntry: false,
-        canUseDeterministicBrowserRunner: false,
-      }
-    },
-    async refineUploadDecision(params: {
-      decision: { mode: string; promptIntent?: { refined?: string } }
-      requestPromptDraft: (planningPrompt: string) => Promise<string>
-    }) {
-      const draft = await params.requestPromptDraft('请补全提示词')
-      return {
-        ...params.decision,
-        promptIntent: {
-          refined: draft,
-        },
-      }
-    },
-    resolveExecutionDispatch() {
-      return {
-        kind: 'none' as const,
-        continuityInstruction: null,
-        responseText: null,
-        toolLoopMessage: null,
-        fallbackLog: null,
-      }
-    },
-    async runDeterministicExecution() {
-      return { handled: false, state: 'done' as const, message: '' }
-    },
-    createToolLoopState(decision: unknown) {
-      return {
-        isBrowserTask: true,
-        steps: [],
-        stepIndex: 0,
-        browserToolCallCount: Number((decision as { promptIntent?: { refined?: string } }).promptIntent?.refined === '更具体的提示词'),
-      }
-    },
-    recordToolLoopProgress() {
-      return {
-        state: { isBrowserTask: true, steps: [], stepIndex: 0, browserToolCallCount: 0 },
-        advancedStepIndex: null,
-        checkpointMessage: null,
-      }
-    },
-    buildToolLoopLimitMessage() {
-      return null
-    },
-    getBudgetHint() {
-      return null
-    },
-    buildStructuredTaskPayload() {
-      return {
-        module: 'browser',
-        taskTitle: '浏览器任务',
-        taskSummary: '执行中',
-        steps: [],
-        currentStepId: null,
-        waitingFor: 'none',
-        resumableActions: ['cancel'],
-        recentArtifacts: [],
-        message: '执行中',
-      }
-    },
-  } as never)
-
-  const result = await adapter.prepare({
-    route: createRoute('browser'),
-    request: {
-      sessionId: 'session-1',
-      abortSignal: new AbortController().signal,
-    } as never,
-    host: {
-      browserController: {} as never,
-      providerContext: {} as never,
-      skillContextOrchestrator: {
-        findExplicitlyRequestedSkills: () => [],
-      },
-      isBrowserAgentV3Enabled: () => true,
-      requestSimpleText: async () => ({ text: '更具体的提示词' }),
-      log: () => undefined,
-    } as never,
-    session: {
-      messages: [],
-    } as never,
-    userText: '上传图片并生成',
-    pureUserInput: '上传图片并生成',
-    requestEnvelope: {} as never,
-    executionIntentContext: {} as never,
-    hasTools: true,
-    toolPolicy: {} as never,
-    allowedToolNames: ['browser_open'],
-  })
-
-  assert.equal(
-    (result.domainState as { preparedBrowserExecution: { browserDecision: { promptIntent?: { refined?: string } } } })
-      .preparedBrowserExecution.browserDecision.promptIntent?.refined,
-    '更具体的提示词',
-  )
 })
 
 test('document domain adapter still handles deterministic format and rewrite flows after host shortcut cleanup', async () => {

@@ -11,7 +11,6 @@ const { check } = require('../check-browser-task-status-publish-single-source.cj
 const CAPABILITY_TYPES_REL = 'src/main/modules/browser-engine/capability-types.ts'
 const TASK_EVENT_BRIDGE_REL = 'src/main/modules/browser-engine/task-event-bridge.ts'
 const TASK_PERSISTENCE_REL = 'src/main/modules/browser-engine/task-persistence-service.ts'
-const CONTENT_TASK_RUNNER_REL = 'src/main/modules/browser-engine/content-task-runner.ts'
 
 function makeRoot(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'browser-task-status-publish-'))
@@ -89,25 +88,10 @@ export function updateProgress(status?: import('./capability-types').BrowserCapa
 `
 }
 
-function runnerSource(extra = '') {
-  return `
-import { taskEventBridge, toBridgeStatus } from './task-event-bridge'
-import type { BrowserCapabilityTaskStatus } from './capability-types'
-
-function publishBrowserTaskEvent(status: BrowserCapabilityTaskStatus): void {
-  const bridgeStatus = toBridgeStatus(status)
-  ${extra}
-  if (!bridgeStatus) return
-  taskEventBridge.publish({ status: bridgeStatus })
-}
-`
-}
-
 function writePassingHarness(root) {
   write(root, CAPABILITY_TYPES_REL, capabilityTypes())
   write(root, TASK_EVENT_BRIDGE_REL, taskEventBridge())
   write(root, TASK_PERSISTENCE_REL, persistenceSource())
-  write(root, CONTENT_TASK_RUNNER_REL, runnerSource())
 }
 
 test('gate passes for the real tree', () => {
@@ -197,15 +181,6 @@ test('gate fails when needs_attention leaks into persisted status', (t) => {
   const result = check({ root })
   assert.equal(result.ok, false)
   assert.ok(result.errors.some((error) => error.includes('needs_attention_leaked_to_persisted')))
-})
-
-test('gate fails when a publish site keeps an inline bridge status list', (t) => {
-  const root = makeRoot(t)
-  writePassingHarness(root)
-  write(root, CONTENT_TASK_RUNNER_REL, runnerSource("const local = ['completed', 'failed']"))
-  const result = check({ root })
-  assert.equal(result.ok, false)
-  assert.ok(result.errors.some((error) => error.includes('publish_site_inline_status_list')))
 })
 
 test('gate fails when a publish site bypasses toBridgeStatus', (t) => {

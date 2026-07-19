@@ -7,12 +7,20 @@ owner: 白
 original_author: Claude (Fable 5)
 review_author: Codex
 scope: agent 浏览器工具目录、执行链、长任务、下载、Power、BrowserView 控制反馈与验收
+follow_up:
+  - docs/superpowers/plans/2026-07-18-browser-agent-grounded-orchestration-and-capability-closure-implementation.md
 note: >
   本文件已经用户批准并完成实施，现为浏览器 Agent 工具面、执行链、恢复、原生指针与控制提示的强制合同。
   实施采用原子切换，未保留 legacy 工具名称兼容分支；软件交付证据与需要外部测试账号的发布前验收在文末分开记录。
 ---
 
 # 浏览器 Agent 工具面重组与可靠性强化实施计划
+
+> **2026-07-18 运行纠偏：** 本文件保留为 2026-07-17 已完成实施记录。后续真实任务证明，新增的
+> `browser_research` 专用链路绕开了本文件要求的通用执行权威，并且“低频工具只按用户原始文字追加”
+> 无法覆盖运行中才显现的页面需求。因此 §3.4 的暴露策略、§8.2 的站内研究验收口径及 §15 对整体
+> 浏览器能力已闭环的表述，不再单独作为现行完备性依据。通用调度、能力动态升级、站内研究、登录、
+> 标签生命周期和新增验收由 follow_up 计划统一裁决；本文件其余已验证的基础能力继续有效。
 
 ## 0. 本轮边界、假设与完成标准
 

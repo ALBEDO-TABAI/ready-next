@@ -51,6 +51,11 @@ import {
   getUseSkillOpenAITools,
 } from '../../tools/use-skill-tool-defs'
 import {
+  USE_BROWSER_TOOL_NAMES,
+  getUseBrowserAnthropicTools,
+  getUseBrowserOpenAITools,
+} from '../../tools/use-browser-tool-defs'
+import {
   CHANNEL_OUTBOUND_TOOL_NAMES,
   getChannelOutboundAnthropicTools,
   getChannelOutboundOpenAITools,
@@ -424,7 +429,6 @@ function resolveStaticSkillToolNames(sessionId?: string): string[] {
 function resolveToolKind(toolName: string, domain: ToolDomain): ToolKind {
   if (domain === 'browser') {
     const surface = browserToolSurfaceEntry(toolName)
-    if (surface?.layer === 'long_task') return 'job'
     if (surface?.defaultAccess === 'read') return 'read'
     return 'write'
   }
@@ -913,22 +917,27 @@ const GROUP_TOOL_PROVIDERS: Record<CapabilityGroupId, ToolRegistryProvider> = {
   // strategy as skill_install (no skill_ prefix → survives filterToolsByAuthorization).
   // The SDK executor gates exposure via intentGroupModes; the provider just supplies the schema.
   skill_activation: {
-    staticToolNames: USE_SKILL_TOOL_NAMES,
-    getToolDefinitions: () => buildToolDefinitions('skill_activation', USE_SKILL_TOOL_NAMES),
+    staticToolNames: [...USE_SKILL_TOOL_NAMES, ...USE_BROWSER_TOOL_NAMES],
+    getToolDefinitions: () => buildToolDefinitions(
+      'skill_activation',
+      [...USE_SKILL_TOOL_NAMES, ...USE_BROWSER_TOOL_NAMES],
+    ),
     getAnthropicTools: () => {
       try {
-        return getUseSkillAnthropicTools()
+        return [...getUseSkillAnthropicTools(), ...getUseBrowserAnthropicTools()]
       } catch {
         // silent-catch: keep use_skill exposed via the static schema on a build failure.
-        return USE_SKILL_TOOL_NAMES.map((name) => createStaticFallbackSchema(name, 'anthropic'))
+        return [...USE_SKILL_TOOL_NAMES, ...USE_BROWSER_TOOL_NAMES]
+          .map((name) => createStaticFallbackSchema(name, 'anthropic'))
       }
     },
     getOpenAITools: () => {
       try {
-        return getUseSkillOpenAITools()
+        return [...getUseSkillOpenAITools(), ...getUseBrowserOpenAITools()]
       } catch {
         // silent-catch: keep use_skill exposed via the static schema on a build failure.
-        return USE_SKILL_TOOL_NAMES.map((name) => createStaticFallbackSchema(name, 'openai'))
+        return [...USE_SKILL_TOOL_NAMES, ...USE_BROWSER_TOOL_NAMES]
+          .map((name) => createStaticFallbackSchema(name, 'openai'))
       }
     },
   },

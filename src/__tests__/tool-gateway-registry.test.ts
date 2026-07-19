@@ -62,11 +62,9 @@ test('tool gateway exposes formal capability groups and resolves grouped tools',
 
   assert.ok(browserInteractionTools.includes('browser_navigate'))
   assert.ok(browserInteractionTools.includes('browser_click'))
-  assert.ok(!browserInteractionTools.includes('browser_collect'))
+  assert.ok(browserInteractionTools.includes('browser_collect'))
 
-  assert.ok(browserContentTools.includes('browser_collect'))
-  assert.ok(browserContentTools.includes('browser_collect'))
-  assert.ok(!browserContentTools.includes('browser_click'))
+  assert.deepEqual(browserContentTools, [])
 
   assert.ok(systemTools.includes('system_run_embedded_python'))
   assert.ok(systemTools.includes('system_run_openclaw'))
@@ -83,7 +81,7 @@ test('tool gateway exposes formal capability groups and resolves grouped tools',
   assert.equal(browserNavigate?.timeoutProfile, 'browser_interactive')
   assert.equal(browserNavigate?.supportsTextBridge, false)
   assert.deepEqual(browserNavigate?.projectionHint, { mutating: true })
-  assert.match(browserNavigate?.description || '', /打开地址|后退|刷新/)
+  assert.match(browserNavigate?.description || '', /open\/back\/forward\/reload/)
   assert.equal(browserNavigate?.schema?.type, 'object')
   assert.equal(browserNavigate?.resultShape, 'text')
   assert.equal(documentSave?.domain, 'document')

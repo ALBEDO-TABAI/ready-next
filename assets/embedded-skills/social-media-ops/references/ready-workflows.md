@@ -13,8 +13,9 @@
 ### 1.2 浏览器采集纪律
 - **能采就采，不能采就要**：目标平台页面可公开访问时用浏览器实采；不可访问（登录墙/仅 App 生态）时如实说明，请用户提供截图、导出数据或口述关键数字，**绝不虚构采集结果**。
 - 常用动作：`browser_navigate` 打开目标页 → `browser_read`/`browser_collect` 提取结构化字段 → 列表页配 `browser_collect` 滚动收集 → 视觉判断（封面/版式）直接用 `browser_screenshot` 返回可读分析结果；`browser_screenshot` 仅用于坐标动作前后留证，不把其 `image_id` 当作主模型可读图片。
-- **节奏**：详情页每批 3-4 个，批间自然停顿；连续采集触发平台验证/登录时用 `browser_request_takeover` 请用户接管处理，处理完继续，不静默放弃、不硬闯。
-- **多关键词站内研究**：当前登录站点上的关键词矩阵必须一次调用 `browser_research(scope=current_site, queries=[...])`，由后台串行复用一个研究标签并用 `browser_task` 查询或续跑；不要为每个关键词打开一个标签，不要改用旧的 `browser_collect` 研究模式。多账号研究分别建立独立研究任务，不在同一站点并发抢写。
+- **节奏**：详情页每批 3-4 个，批间自然停顿；连续采集触发平台验证/登录时用 `browser_request_takeover` 请用户接管处理。接管会立即停止 Agent 开始新的页面写动作；用户处理完后续跑原任务，不静默放弃、不硬闯。
+- **多关键词站内研究**：把每个查询及真正需要的字段声明成工作项，例如 `browser_research({"action":"start","work_items":[{"work_item_id":"query-1","query":"示例关键词","field_goals":["标题","正文","互动量"],"required":true}]})`。主 Agent 在同一真实页面上用 snapshot/find/search/type/click/read/back 逐项执行并复核，由模型根据现场页面决定下一步，详情只从当前结果 target 点入。不要为每个关键词打开一个标签，不要改用 `browser_collect` 研究模式。多账号研究分别建立独立工作项，不在同一站点并发抢写。
+- **证据、续跑与完成**：读页只传真实定位参数，例如 `browser_read({"target_id":"target-1","max_chars":12000})`。每个工作项完成后，把工具返回的持久观察凭据绑回工作项，例如 `browser_research({"action":"evidence","evidence_bindings":[{"work_item_id":"query-1","observation_receipt_id":"observation-1"}]})`。停止、用户接管或验证阻断后，Ready 会从同一持久浏览器任务续跑，不另造一个研究 resume 动作。fresh 搜索页确实无结果时，也要读回当前页面并绑定对应观察凭据，不用固定选择器或候选控件数量猜空。只有所有必需工作项都有真实证据，才调用 `browser_research({"action":"complete"})`；查询数不算交付完成。完成后从真实证据内容整理结果；若要写文档，必须再读回确认。
 - 开放网页调研（找案例/查规则/看讨论）用 `web_search`/`web_fetch`；需要当前登录会话的站内研究用 `browser_research`。
 - **平台规则/门槛数字必须实时核查**后再引用（platform-mechanics.md 只提供基线与核查方向）。
 

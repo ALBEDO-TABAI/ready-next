@@ -25,6 +25,16 @@ describe('BrowserTurnLease (free-loop turn lease, WP2)', () => {
     assert.equal(g1.leaseId, g2.leaseId, 'same turn lease reused')
   })
 
+  it('can bind the same turn owner to a grounded agent-view tab without taking user-view', () => {
+    const { service, turn } = make()
+    const gate = turn.ensureGateForSurface('agent-view', 'agent-tab-1')
+    assert.ok(!isAgentBrowserError(gate))
+    if (isAgentBrowserError(gate)) return
+    assert.equal(gate.surface, 'agent-view')
+    assert.equal(service.getLease('agent-view')?.tabId, 'agent-tab-1')
+    assert.equal(service.getState('user-view'), 'idle')
+  })
+
   it('heartbeats the active lease on each ensureGate so long turns do not expire mid-run', () => {
     let now = 1_000
     const service = new BrowserWriteLeaseService({
@@ -81,17 +91,19 @@ describe('BrowserTurnLease (free-loop turn lease, WP2)', () => {
     assert.equal(g.errorCode, 'lease_held')
   })
 
-  it('clears a prior takeover and re-acquires (re-authorization, §4.7)', () => {
+  it('does not treat a fresh turn as authority to clear a prior takeover', () => {
     const { service, turn } = make()
     // Simulate a previous turn that the user took over.
     const prior = service.acquire({ surface: 'user-view', taskId: 'prev', runId: 'r0' })
     if (isAgentBrowserError(prior)) throw new Error('expected lease')
     service.recordUserSignal({ surface: 'user-view', source: 'keyboard' })
     assert.equal(service.getState('user-view'), 'takeover')
-    // A new browser-exposed turn re-authorizes: ensureGate clears + acquires.
+    // Only a typed control-plane wake may clear durable takeover state.
     const g = turn.ensureGate()
-    assert.ok(!isAgentBrowserError(g))
-    assert.equal(service.getState('user-view'), 'held')
+    assert.ok(isAgentBrowserError(g))
+    if (!isAgentBrowserError(g)) return
+    assert.equal(g.errorCode, 'lease_takeover')
+    assert.equal(service.getState('user-view'), 'takeover')
   })
 
   it('does NOT steal a surface actively held by a background task (lease_held, not cleared)', () => {
@@ -139,16 +151,42 @@ describe('BrowserTurnLease (free-loop turn lease, WP2)', () => {
     assert.equal(service.getState('user-view'), 'takeover', 'surface stays under user control')
   })
 
-  it('only the turn FIRST acquire clears a prior takeover (re-authorization), not later ones', () => {
+  it('a new turn remains fenced until the control plane explicitly clears takeover', () => {
     const service = new BrowserWriteLeaseService()
     // A previous turn was taken over.
     const prev = service.acquire({ surface: 'user-view', taskId: 'prev', runId: 'r0' })
     if (isAgentBrowserError(prev)) throw new Error('expected lease')
     service.recordUserSignal({ surface: 'user-view', source: 'keyboard' })
-    // New turn: first acquire clears the prior takeover (user re-authorized).
     const turn = new BrowserTurnLease({ taskId: 't2', runId: 'r2' }, 'user-view', service)
+    const blocked = turn.ensureGate()
+    assert.ok(isAgentBrowserError(blocked))
+    if (!isAgentBrowserError(blocked)) return
+    assert.equal(blocked.errorCode, 'lease_takeover')
+    service.clearTakeover('user-view')
     assert.ok(!isAgentBrowserError(turn.ensureGate()))
     assert.equal(service.getState('user-view'), 'held')
+  })
+
+  it('keeps every run blocked after takeover until a typed wake clears the fence', () => {
+    const service = new BrowserWriteLeaseService()
+    const oldTurn = new BrowserTurnLease({ taskId: 'research', runId: 'old-run' }, 'agent-view', service)
+    assert.ok(!isAgentBrowserError(oldTurn.ensureGateForSurface('agent-view', 'agent-tab')))
+    service.recordUserSignal({ surface: 'agent-view', source: 'keyboard' })
+
+    const oldRetry = oldTurn.ensureGateForSurface('agent-view', 'agent-tab')
+    assert.ok(isAgentBrowserError(oldRetry))
+    if (!isAgentBrowserError(oldRetry)) return
+    assert.equal(oldRetry.errorCode, 'lease_takeover')
+
+    const freshTurn = new BrowserTurnLease({ taskId: 'research', runId: 'fresh-run' }, 'agent-view', service)
+    const stillBlocked = freshTurn.ensureGateForSurface('agent-view', 'agent-tab')
+    assert.ok(isAgentBrowserError(stillBlocked))
+    if (!isAgentBrowserError(stillBlocked)) return
+    assert.equal(stillBlocked.errorCode, 'lease_takeover')
+    service.clearTakeover('agent-view')
+    const resumed = freshTurn.ensureGateForSurface('agent-view', 'agent-tab')
+    assert.ok(!isAgentBrowserError(resumed))
+    assert.equal(service.getState('agent-view'), 'held')
   })
 
   it('release() (run cleanup) frees the surface and seals the turn lease', () => {

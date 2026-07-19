@@ -1,10 +1,16 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import { createElement } from 'react'
 import { flushSync } from 'react-dom'
 import { createRoot, type Root } from 'react-dom/client'
 import { JSDOM } from 'jsdom'
 import type { TaskCardRun } from '../renderer/components/agent/task-card-from-projection'
+
+const GLASS_OVERRIDES_CSS = readFileSync(
+  new URL('../renderer/styles/glass-overrides.css', import.meta.url),
+  'utf8',
+)
 
 function installDomGlobals(): { dom: JSDOM; restore: () => void } {
   const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>', {
@@ -145,15 +151,25 @@ test('task card child-run buttons invoke continue and cancel handlers', () => {
   }
 })
 
-test('task card keeps a visible boundary and inset header', () => {
+test('task card stays frameless while retaining its inset interactive header', () => {
+  document.documentElement.dataset.skin = 'liquid-glass'
+  document.documentElement.dataset.glassVariant = 'solid-green'
+  const style = document.createElement('style')
+  style.textContent = GLASS_OVERRIDES_CSS
+  document.head.append(style)
   const { container, unmount } = mountTaskCard(makeRun(), { expanded: false })
   try {
     const card = container.querySelector('[data-ready-task-card="true"]') as HTMLElement | null
     const header = card?.querySelector('button') as HTMLButtonElement | null
-    assert.match(card?.style.border || '', /1px solid/)
+    assert.equal(card?.style.borderWidth, '0px')
+    assert.equal(card?.style.background, 'transparent')
+    assert.equal(card ? window.getComputedStyle(card).backgroundColor : null, 'rgba(0, 0, 0, 0)')
     assert.equal(header?.style.paddingLeft, '10px')
   } finally {
     unmount()
+    style.remove()
+    delete document.documentElement.dataset.skin
+    delete document.documentElement.dataset.glassVariant
   }
 })
 
@@ -231,7 +247,7 @@ test('task card suspended and cross-scope buttons invoke resume and open handler
   ])
 })
 
-test('task card browser collection button invokes browser resume handler instead of generic resume', () => {
+test('browser tasks use the canonical generic resume path without retired collection controls', () => {
   const calls: Array<[string, string, string]> = []
   const run = makeRun({
     scopeId: 'conv-browser',
@@ -239,7 +255,7 @@ test('task card browser collection button invokes browser resume handler instead
     module: 'browser',
     phase: 'tool_running',
     status: 'running',
-    interactionState: 'running',
+    interactionState: 'suspended',
     waitingFor: 'background',
     resumableActions: ['continue', 'cancel'],
     canResume: true,
@@ -251,22 +267,16 @@ test('task card browser collection button invokes browser resume handler instead
     },
   })
   const { container, unmount } = mountTaskCard(run, {
-    onResumeBrowserTask: (scopeId: string, taskId: string) => calls.push(['browser', scopeId, taskId]),
-    onCancelBrowserTask: (scopeId: string, taskId: string) => calls.push(['cancel', scopeId, taskId]),
     onResumeRun: (scopeId: string) => calls.push(['generic', scopeId, '']),
   })
   try {
     const generic = Array.from(container.querySelectorAll('button'))
       .find((button) => button.textContent?.trim() === '继续运行')
-    assert.equal(generic, undefined)
-    const button = container.querySelector('[data-ready-task-action="resume-browser-task"]')
-    assert.equal(button?.getAttribute('data-ready-task-id'), 'browser-task-card-loop-1')
-    clickButton(container, '继续浏览器采集')
-    clickButton(container, '停止采集')
-    assert.deepEqual(calls, [
-      ['browser', 'conv-browser', 'browser-task-card-loop-1'],
-      ['cancel', 'conv-browser', 'browser-task-card-loop-1'],
-    ])
+    assert.ok(generic)
+    assert.equal(container.querySelector('[data-ready-task-action="resume-browser-task"]'), null)
+    assert.equal(container.querySelector('[data-ready-task-action="cancel-browser-task"]'), null)
+    clickButton(container, '继续运行')
+    assert.deepEqual(calls, [['generic', 'conv-browser', '']])
   } finally {
     unmount()
   }
@@ -365,9 +375,6 @@ test('cleared fixed task cards stay cleared after the task area remounts', () =>
         onContinueDetachedTask: noop,
         onCancelChildRun: noop,
         onContinueChildRun: noop,
-        onResumeBrowserTask: noop,
-        onCancelBrowserTask: noop,
-        onConfirmBrowserCollectionConsent: noop,
         children: ({ bottomTaskCard }) => createElement('div', null, bottomTaskCard),
       }))
     })
@@ -390,7 +397,7 @@ test('cleared fixed task cards stay cleared after the task area remounts', () =>
   }
 })
 
-test('task card pending browser collection consent invokes consent handler and hides generic confirmation', () => {
+test('browser confirmation uses the canonical task confirmation path without retired consent payloads', () => {
   const calls: Array<[string, string, string]> = []
   const run = makeRun({
     scopeId: 'conv-browser',
@@ -408,30 +415,18 @@ test('task card pending browser collection consent invokes consent handler and h
       fingerprint: 'browser-consent-test-1',
       updatedAt: '2026-06-06T00:00:00.000Z',
       lastError: null,
-      browserCollectionConsent: {
-        requestId: 'browser-consent-test-1',
-        consentKind: 'partial_collection',
-        sourceTaskId: 'browser-task-visible-consent',
-        message: '需要确认部分采集',
-        createdAt: '2026-06-06T00:00:00.000Z',
-      },
     },
   })
   const { container, unmount } = mountTaskCard(run, {
-    onConfirmBrowserCollectionConsent: (scopeId: string, requestId: string) => calls.push(['consent', scopeId, requestId]),
     onSubmitConfirmation: (scopeId: string, confirmed: boolean) => calls.push(['generic', scopeId, String(confirmed)]),
   })
   try {
     const generic = Array.from(container.querySelectorAll('button'))
       .find((button) => button.textContent?.trim() === '确认继续')
-    assert.equal(generic, undefined)
-    const button = container.querySelector('[data-ready-task-action="confirm-browser-collection-consent"]')
-    assert.equal(button?.getAttribute('data-ready-task-scope-id'), 'conv-browser')
-    assert.equal(button?.getAttribute('data-ready-task-id'), 'browser-task-visible-consent')
-    assert.equal(button?.getAttribute('data-ready-task-consent-kind'), 'partial_collection')
-    assert.equal(button?.getAttribute('data-ready-task-consent-request-id'), 'browser-consent-test-1')
-    clickButton(container, '确认部分采集')
-    assert.deepEqual(calls, [['consent', 'conv-browser', 'browser-consent-test-1']])
+    assert.ok(generic)
+    assert.equal(container.querySelector('[data-ready-task-action="confirm-browser-collection-consent"]'), null)
+    clickButton(container, '确认继续')
+    assert.deepEqual(calls, [['generic', 'conv-browser', 'true']])
   } finally {
     unmount()
   }

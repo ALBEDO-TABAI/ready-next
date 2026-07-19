@@ -10,8 +10,8 @@
  * 独占 helper（页面地图 generation/ambiguity 单例、captureAgentPageMap 与
  * settle-retry 感知面、截图缓存、workflow 状态探针、输入/发送目标排序）。
  * 页面地图状态随组迁移并导出，留守的 browser_click/browser_type 改从本模块
- * import 回读（facade→observe 单向）。attachBrowserActionSessionOutput
- * （sitePermissionNotices 排空合同红线）留在 browser-tools，经
+ * import 回读（facade→observe 单向）。attachBrowserToolOutput
+ * （sitePermissionNotices 精确任务范围合同）留在 browser-tools，经
  * BrowserObserveToolContext 注入回接；resolveToolContextMeta / getPageIdentity /
  * locateActionTargets / listSubframesSafe / uniqueStrings /
  * browserStructuredErrorOutput 因留守 case 同时使用而移入
@@ -28,9 +28,13 @@ import {
   normalizeBrowserReadonlyProbeRequest,
 } from '../../../shared/browser-readonly-probe'
 import { agentBrowserError } from '../browser-engine/agent-browser-errors'
-import type { BrowserTransactionConfirmation } from '../browser-engine/browser-action-session'
 import { buildPageMap, parseTargetId, type PageMap, type RawAxNode } from '../browser-engine/agent-browser-page-map'
-import { browserSnapshotService } from '../browser-engine/browser-snapshot-service'
+import {
+  browserSnapshotService,
+  compactBrowserSnapshotTarget,
+} from '../browser-engine/browser-snapshot-service'
+import { captureBrowserCdpPageMap } from '../browser-engine/browser-cdp-page-map-capture'
+import { browserInputEnvironmentReadiness } from '../browser-engine/browser-input-readiness'
 import {
   getBrowserPageMapAmbiguity,
   rememberBrowserPageMapAmbiguity as rememberAmbiguity,
@@ -41,14 +45,19 @@ import {
   createBrowserStructuredOutput as browserStructuredOutput,
   stringifyBrowserJsonOrFailure,
 } from './browser-failure-output'
-import { buildBrowserPageMapProbeJs, buildBrowserTargetReadJs } from './browser-probe'
+import {
+  buildBrowserBlockingChallengeProbeJs,
+  buildBrowserPageMapProbeJs,
+  buildBrowserTargetReadJs,
+  callBrowserBackendTarget,
+  normalizeBrowserBlockingChallengeProbe,
+} from './browser-probe'
 import { sleepWithAbort, waitForReady } from './browser-input-actions'
 import {
   browserStructuredErrorOutput,
   getPageIdentity,
   listSubframesSafe,
   locateActionTargets,
-  resolveHighControlAgentTab,
   resolveToolContextMeta,
   truncate,
   uniqueStrings,
@@ -143,7 +152,7 @@ function buildPageMapAmbiguityGroups(targets: PageMap['targets']): Array<{ role:
  * max_bytes 时 map 不限量——小红书发布编辑器单次 ~27k token，触发 presend
  * 单结果截断后模型信息真空。32KB（钳制区间内）≈8-11k token，留足两次读。
  */
-export const DEFAULT_AGENT_PAGE_MAP_MAX_BYTES = 16_384
+export const DEFAULT_AGENT_PAGE_MAP_MAX_BYTES = 8_192
 
 export async function captureAgentPageMap(
   controller: BrowserController,
@@ -153,32 +162,58 @@ export async function captureAgentPageMap(
 ): Promise<Record<string, unknown>> {
   const budget = maxBytes || DEFAULT_AGENT_PAGE_MAP_MAX_BYTES
   const payload = await browserSnapshotService.capture(controller, tabId, budget, async (generation) => {
-    const raw = await controller.executeJS(tabId, buildBrowserPageMapProbeJs()) as {
-    identity?: { url?: string; title?: string }
+    const [raw, cdpCapture] = await Promise.all([
+      controller.executeJS(tabId, buildBrowserPageMapProbeJs()) as Promise<{
+    identity?: { url?: string; title?: string; frameDocumentToken?: string }
     viewport?: { width?: number; height?: number }
     bodyText?: string
     rawRoots?: RawAxNode[]
     riskFlags?: Record<string, unknown>
     structureHints?: Record<string, unknown>
-    } | null
+      } | null>,
+      captureBrowserCdpPageMap(controller, tabId, async (backendDOMNodeId, roleHint) => {
+        const result = await callBrowserBackendTarget(
+          controller,
+          tabId,
+          backendDOMNodeId,
+          'probe',
+          { roleHint },
+        ) as { target?: unknown } | null
+        return result?.target && typeof result.target === 'object'
+          ? result.target as Record<string, unknown>
+          : null
+      }),
+    ])
     const viewport = {
       width: Number(raw?.viewport?.width || 0) || 0,
       height: Number(raw?.viewport?.height || 0) || 0,
     }
   // D10 frame 穿透：主帧 probe 后逐子帧补采，目标打上 frameKey（进 targetId
   // 的 frameId 槽位，act 侧按它路由回同一帧执行）。单帧失败不阻断整图。
-    const rawRoots: RawAxNode[] = Array.isArray(raw?.rawRoots) ? raw.rawRoots : []
+    const rawRoots: RawAxNode[] = cdpCapture?.rawRoots
+      || (Array.isArray(raw?.rawRoots) ? raw.rawRoots : [])
     const mappedFrames: Array<{ frameKey: string; url: string; targetCount: number }> = []
     if (typeof controller.executeJSInFrame === 'function') {
       for (const frame of listSubframesSafe(controller, tabId)) {
         try {
           const frameRaw = await controller.executeJSInFrame(tabId, frame.frameKey, buildBrowserPageMapProbeJs()) as {
+            identity?: { frameDocumentToken?: string }
             rawRoots?: RawAxNode[]
           } | null
           const children = Array.isArray(frameRaw?.rawRoots?.[0]?.children) ? frameRaw.rawRoots[0].children : []
           if (children.length === 0) continue
-          for (const child of children) child.frameId = frame.frameKey
-          rawRoots.push({ role: 'iframe', name: frame.url.slice(0, 120), frameId: frame.frameKey, children })
+          const frameDocumentToken = String(frameRaw?.identity?.frameDocumentToken || '')
+          for (const child of children) {
+            child.frameId = frame.frameKey
+            if (frameDocumentToken) child.frameDocumentToken = frameDocumentToken
+          }
+          rawRoots.push({
+            role: 'iframe',
+            name: frame.url.slice(0, 120),
+            frameId: frame.frameKey,
+            ...(frameDocumentToken ? { frameDocumentToken } : {}),
+            children,
+          })
           mappedFrames.push({ frameKey: frame.frameKey, url: frame.url.slice(0, 200), targetCount: children.length })
         } catch (error) {
           log(`page map subframe probe failed (${frame.frameKey}): ${error instanceof Error ? error.message : String(error)}`)
@@ -193,34 +228,65 @@ export async function captureAgentPageMap(
       viewport,
       maxBytes: Math.max(512, Math.floor(budget * 0.5)),
     })
+    const riskFlags = raw?.riskFlags && Object.keys(raw.riskFlags).length > 0
+      ? raw.riskFlags
+      : null
+    const structureHints = raw?.structureHints && Object.values(raw.structureHints).some((value) => (
+      Array.isArray(value) ? value.length > 0 : Boolean(value)
+    ))
+      ? raw.structureHints
+      : null
     return {
       pageIdentity: {
         url: String(raw?.identity?.url || ''),
         title: String(raw?.identity?.title || ''),
+        frameDocumentToken: String(raw?.identity?.frameDocumentToken || ''),
         generation,
-        capturedAt: new Date().toISOString(),
       },
       summary: {
-        bodyText: String(raw?.bodyText || '').slice(0, 1000),
         targetCount: pageMap.targets.length,
         truncated: pageMap.truncated,
       },
       pageMap: {
         ...pageMap,
-        structureHints: raw?.structureHints || { iframes: [], shadowRoots: [], hiddenLoaded: [] },
+        ...(structureHints ? { structureHints } : {}),
       },
-      riskFlags: raw?.riskFlags || {},
+      ...(riskFlags ? { riskFlags } : {}),
       evidence: {
         generation,
-        targetSource: 'dom-target-library',
-        targetCount: pageMap.targets.length,
-        truncated: pageMap.truncated,
+        targetSource: cdpCapture?.targetSource || 'semantic_dom_fallback',
+        backendTargetCount: cdpCapture?.backendTargetCount || 0,
+        unstableAxTargetCount: cdpCapture?.unstableAxTargetCount || 0,
         ...(mappedFrames.length > 0 ? { frames: mappedFrames } : {}),
       },
-      nextAllowedActions: ['click or type by target reference', 'wait', 'stop with reason'],
     }
   }, options)
   const transformedMap = payload.pageMap as PageMap
+  const directText = browserInputEnvironmentReadiness(controller, tabId, 'direct_text')
+  const trustedPointer = browserInputEnvironmentReadiness(controller, tabId, 'trusted_pointer')
+  const trustedKeyboard = browserInputEnvironmentReadiness(controller, tabId, 'trusted_keyboard')
+  const hasObservedHref = transformedMap.targets.some((target) => Boolean(target.fingerprint?.href))
+  const hasRenderedEditable = transformedMap.targets.some((target) => (
+    target.rendered !== false && target.editable === true
+  ))
+  const hasFormBackedEditable = transformedMap.targets.some((target) => (
+    target.rendered !== false && target.editable === true && Boolean(target.fingerprint?.formAction)
+  ))
+  payload.interactionReadiness = {
+    observe: { ready: true, reason: 'ready' },
+    directText,
+    trustedPointer,
+    trustedKeyboard,
+  }
+  payload.nextAllowedActions = [
+    ...(hasFormBackedEditable && directText.ready ? ['form_submit'] : []),
+    ...(hasRenderedEditable && directText.ready ? ['type'] : []),
+    ...(trustedPointer.ready ? ['click'] : []),
+    ...(hasObservedHref ? ['navigate_href'] : []),
+    'observe',
+    'wait',
+    'stop',
+  ]
   const ambiguityGroups = buildPageMapAmbiguityGroups(transformedMap.targets)
   payload.ambiguityGroups = ambiguityGroups
   rememberBrowserPageMapAmbiguity(controller, tabId, ambiguityGroups)
@@ -561,7 +627,7 @@ function rankTargetsNearAnchor(
 }
 
 /**
- * B6 注入面：attachBrowserActionSessionOutput（sitePermissionNotices 排空
+ * B6 注入面：attachBrowserToolOutput（sitePermissionNotices 精确任务范围
  * 合同红线）的实现体留在 browser-tools.ts，以函数引用注入。本模块不反向
  * import browser-tools，防循环依赖。
  */
@@ -569,18 +635,16 @@ export interface BrowserObserveToolContext {
   controller: BrowserController
   abortSignal?: AbortSignal
   sessionId?: string
-  currentUserText?: string
-  attachBrowserActionSessionOutput: (
+  attachBrowserToolOutput: (
     result: string | ToolExecutionOutput,
     params: {
       toolName: string
       args: Record<string, unknown>
       controller: BrowserController
       sessionId?: string
-      currentUserText?: string
       tabId?: string | null
       frameId?: string | null
-      confirmation?: BrowserTransactionConfirmation | null
+      confirmation?: unknown
       nextSuggestedAction?: string | null
     },
   ) => string | ToolExecutionOutput
@@ -591,7 +655,7 @@ export async function executeBrowserObserveTool(
   args: Record<string, unknown>,
   ctx: BrowserObserveToolContext,
 ): Promise<string | ToolExecutionOutput> {
-  const { controller, abortSignal, sessionId, currentUserText, attachBrowserActionSessionOutput } = ctx
+  const { controller, abortSignal, sessionId,  attachBrowserToolOutput } = ctx
   switch (toolName) {
       case 'tabs_list': {
         const tabs = controller.getTabList() as Array<ReturnType<BrowserController['getTabList']>[number] & {
@@ -608,16 +672,6 @@ export async function executeBrowserObserveTool(
           }
           return current?.id || tabId
         }
-        const workflow = (controller as unknown as {
-          getActiveForegroundBrowserWorkflowSession?: () => {
-            runId: string
-            taskId: string
-            lane: string
-            boundTabId: string
-            sourceUserTabId: string | null
-            status: string
-          } | null
-        }).getActiveForegroundBrowserWorkflowSession?.() || null
         const leaseSnapshot = (controller as unknown as {
           getBrowserLeaseSnapshot?: () => {
             surfaces?: Record<string, {
@@ -634,16 +688,6 @@ export async function executeBrowserObserveTool(
           activeTabId: tabs.find((tab) => tab.active)?.id || null,
           tabs: tabs.map((tab) => {
             const bindings: Record<string, unknown>[] = []
-            if (workflow?.boundTabId === tab.id) {
-              bindings.push({
-                kind: 'foreground_workflow',
-                runId: workflow.runId,
-                taskId: workflow.taskId,
-                lane: workflow.lane,
-                status: workflow.status,
-                sourceUserTabId: workflow.sourceUserTabId,
-              })
-            }
             for (const [surface, lease] of Object.entries(leaseSnapshot?.surfaces || {})) {
               if (lease.tabId !== tab.id || lease.state === 'idle') continue
               bindings.push({
@@ -667,8 +711,39 @@ export async function executeBrowserObserveTool(
 
       case 'read': {
         let tabId = (args.tab_id as string) || null
-        tabId = (await resolveHighControlAgentTab(controller, args, { signal: abortSignal })).tabId
         const maxChars = strictReadMaxChars(args.max_chars)
+        const blockingChallenge = normalizeBrowserBlockingChallengeProbe(
+          await controller.executeJS(tabId, buildBrowserBlockingChallengeProbeJs()),
+        )
+        if (blockingChallenge.blocked) {
+          const observedContent = fitReadContent(await controller.getPageContent(tabId).catch(() => ''), maxChars)
+          return browserStructuredOutput({
+            ok: false,
+            errorKind: 'challenge_required',
+            waitingHuman: true,
+            observed: true,
+            pageState: 'challenge',
+            content: observedContent,
+            usableAsResearchEvidence: false,
+            evidence: [
+              `visible_blocker:${blockingChallenge.blockerCount}`,
+              ...blockingChallenge.matchedKinds.map((kind) => `challenge:${kind}`),
+            ],
+            nextSuggestedAction: 'request user takeover for the blocking verification, then resume the same task',
+          })
+        }
+        if (blockingChallenge.pageError || blockingChallenge.emptyShell) {
+          const observedContent = fitReadContent(await controller.getPageContent(tabId).catch(() => ''), maxChars)
+          return browserStructuredOutput({
+            ok: false,
+            errorKind: blockingChallenge.pageError ? 'page_error' : 'page_content_empty',
+            observed: true,
+            pageState: blockingChallenge.pageError ? 'error' : 'empty_shell',
+            content: observedContent,
+            usableAsResearchEvidence: false,
+            nextSuggestedAction: 're-ground the intended live tab before reading content again',
+          })
+        }
         const targetId = typeof args.target_id === 'string' ? args.target_id.trim() : ''
         const selector = typeof args.selector === 'string' ? args.selector.trim() : ''
         if (targetId && selector) {
@@ -700,10 +775,15 @@ export async function executeBrowserObserveTool(
           }
           let probe: unknown
           try {
-            probe = parsed.frameId === '0'
-              ? await controller.executeJS(tabId, buildBrowserTargetReadJs(parsed.node))
+            const backendNodeId = /^b(\d+)$/.exec(parsed.node)?.[1]
+            probe = parsed.frameId === '0' && backendNodeId
+              ? await callBrowserBackendTarget(controller, tabId, Number(backendNodeId), 'read', {
+                  roleHint: String(resolved.target.role || ''),
+                })
+              : parsed.frameId === '0'
+                ? await controller.executeJS(tabId, buildBrowserTargetReadJs(parsed.node, resolved.frameDocumentToken))
               : typeof controller.executeJSInFrame === 'function'
-                ? await controller.executeJSInFrame(tabId, parsed.frameId, buildBrowserTargetReadJs(parsed.node))
+                ? await controller.executeJSInFrame(tabId, parsed.frameId, buildBrowserTargetReadJs(parsed.node, resolved.frameDocumentToken))
                 : null
           } catch (error) {
             // silent-catch: the structured stale-target result below carries the failure to the caller.
@@ -718,7 +798,11 @@ export async function executeBrowserObserveTool(
           if (Number(record.matchCount || 0) !== 1) {
             return browserStructuredOutput({ ok: false, errorKind: 'target_stale', targetId })
           }
-          return fitReadContent(record.content, maxChars)
+          return browserStructuredOutput({
+            ok: true,
+            observationFresh: true,
+            content: fitReadContent(record.content, maxChars),
+          })
         }
         if (selector) {
           const probe = await controller.executeJS(tabId, scopedReadProbeJs(selector))
@@ -738,51 +822,46 @@ export async function executeBrowserObserveTool(
           if (matchCount > 1) {
             return browserStructuredOutput({ ok: false, errorKind: 'target_ambiguous', selector, matchCount })
           }
-          return fitReadContent(record.content, maxChars)
+          return browserStructuredOutput({
+            ok: true,
+            observationFresh: true,
+            content: fitReadContent(record.content, maxChars),
+          })
         }
         const content = await controller.getPageContent(tabId)
         if (!content || content.trim().length === 0) {
-          return fitReadContent('Page content is empty or still loading.', maxChars)
+          return browserStructuredOutput({
+            ok: false,
+            errorKind: 'page_content_empty',
+            nextSuggestedAction: 'wait for a real page body or re-ground the intended live tab before reading again',
+          })
         }
-        return fitReadContent(content, maxChars)
+        return browserStructuredOutput({
+          ok: true,
+          observationFresh: true,
+          content: fitReadContent(content, maxChars),
+        })
       }
 
       case 'snapshot': {
         let tabId = (args.tab_id as string) || null
-        tabId = (await resolveHighControlAgentTab(controller, args, { signal: abortSignal })).tabId
         const maxBytes = typeof args.max_bytes === 'number'
           ? Math.max(1024, Math.min(65_536, args.max_bytes))
           : DEFAULT_AGENT_PAGE_MAP_MAX_BYTES
-        let payload = await captureAgentPageMap(controller, tabId, maxBytes)
-        // D12（真机第五轮实锚）：navigate 后立即 read map 常撞上 SPA 未渲染完
-        // （目标数异常少），弱模型会因此直接放弃。工具层兜一次 settle 重试，
-        // 把"先等再读"的纪律下沉为工具合同。重试后必须返回最新捕获——
-        // generation 已递增，返回旧图会让后续 act 全部撞 stale_page_map。
-        const firstTargetCount = Array.isArray((payload.pageMap as { targets?: unknown[] } | undefined)?.targets)
-          ? ((payload.pageMap as { targets: unknown[] }).targets.length)
-          : 0
-        if (firstTargetCount < 5) {
-          await waitForReady(controller, tabId, 3000, undefined, abortSignal)
-          payload = await captureAgentPageMap(controller, tabId, maxBytes, { force: true })
-          payload.evidence = {
-            ...(payload.evidence as Record<string, unknown>),
-            settleRetried: true,
-            firstAttemptTargetCount: firstTargetCount,
-          }
-        }
+        const payload = await captureAgentPageMap(controller, tabId, maxBytes)
+        payload.ok = true
         {
           // 观测锚：map 结果概要落日志——真机诊断两轮都因看不到工具返回
           // 内容而只能排除法推根因，这一行让下一轮直接读到感知面实况。
           const mapSummary = payload.pageMap as { targets?: unknown[]; truncated?: boolean } | undefined
-          const evidenceSummary = payload.evidence as { frames?: unknown[]; settleRetried?: boolean } | undefined
-          log(`read_page_map result: targets=${Array.isArray(mapSummary?.targets) ? mapSummary.targets.length : 0} truncated=${mapSummary?.truncated === true} frames=${Array.isArray(evidenceSummary?.frames) ? evidenceSummary.frames.length : 0} settleRetried=${evidenceSummary?.settleRetried === true} maxBytes=${maxBytes}`)
+          const evidenceSummary = payload.evidence as { frames?: unknown[] } | undefined
+          log(`read_page_map result: targets=${Array.isArray(mapSummary?.targets) ? mapSummary.targets.length : 0} truncated=${mapSummary?.truncated === true} frames=${Array.isArray(evidenceSummary?.frames) ? evidenceSummary.frames.length : 0} maxBytes=${maxBytes}`)
         }
-        return attachBrowserActionSessionOutput(JSON.stringify(payload, null, 2), {
+        return attachBrowserToolOutput(JSON.stringify(payload, null, 2), {
           toolName,
           args,
           controller,
           sessionId,
-          currentUserText,
           tabId,
           // D10-c 后 iframe 内容已直接并入本图（evidence.frames），不再
           // 引导 Power CDP 探测——那条建议曾被投影成任务卡假步骤（D11）
@@ -793,29 +872,49 @@ export async function executeBrowserObserveTool(
 
       case 'find': {
         let tabId = (args.tab_id as string) || null
-        tabId = (await resolveHighControlAgentTab(controller, args, { signal: abortSignal })).tabId
         const limit = Math.max(1, Math.min(100, Number(args.limit || 20)))
         const payload = await captureAgentPageMap(controller, tabId, DEFAULT_AGENT_PAGE_MAP_MAX_BYTES)
         const found = browserSnapshotService.find(controller, tabId, {
           query: String(args.query || ''),
           role: String(args.role || ''),
+          purpose: String(args.purpose || 'any') as 'any' | 'action' | 'input',
           cursor: Number(args.cursor || 0),
           limit,
+          ...(typeof args.visible === 'boolean' ? { visible: args.visible } : {}),
+          ...(typeof args.enabled === 'boolean' ? { enabled: args.enabled } : {}),
+          withinTargetId: String(args.within_target_id || ''),
+          frameId: String(args.frame_id || ''),
         })
+        if (found?.errorCode) {
+          return browserStructuredOutput({
+            ok: false,
+            errorKind: found.errorCode === 'within_target_stale' ? 'stale_page_map' : 'target_not_found',
+            errorCode: found.errorCode,
+            message: found.errorCode === 'within_target_stale'
+              ? 'within_target_id belongs to an older snapshot. Capture a fresh snapshot and retry.'
+              : 'within_target_id does not identify a target in the current tab snapshot.',
+            pageIdentity: payload.pageIdentity,
+          })
+        }
+        const total = found?.total || 0
         return browserStructuredOutput({
           ok: true,
           pageIdentity: payload.pageIdentity,
-          matches: found?.matches || [],
+          matches: (found?.matches || []).map(compactBrowserSnapshotTarget),
           count: found?.matches.length || 0,
-          total: found?.total || 0,
+          total,
+          unique: total === 1,
+          ambiguous: total > 1,
           cursor: found?.cursor || 0,
           nextCursor: found?.nextCursor || null,
+          ...(total > 1
+            ? { nextSuggestedAction: 'Narrow query, role, purpose, frame_id, or within_target_id before acting.' }
+            : {}),
         })
       }
 
       case 'snapshot_probe': {
         let tabId = (args.tab_id as string) || null
-        tabId = (await resolveHighControlAgentTab(controller, args, { signal: abortSignal })).tabId
         const requestedGeneration = Number(args.generation)
         const currentGeneration = currentBrowserPageMapGeneration(controller, tabId)
         if (!Number.isFinite(requestedGeneration) || requestedGeneration <= 0) {
@@ -845,7 +944,6 @@ export async function executeBrowserObserveTool(
 
       case 'screenshot': {
         let tabId = (args.tab_id as string) || null
-        tabId = (await resolveHighControlAgentTab(controller, args, { signal: abortSignal })).tabId
         const mode = String(args.mode || 'viewport') as 'viewport' | 'clip' | 'full_page'
         const clipRaw = args.clip
         const clip = clipRaw && typeof clipRaw === 'object'
@@ -1016,71 +1114,9 @@ export async function executeBrowserObserveTool(
         })
       }
 
-      case 'find_action': {
-        const startedAt = Date.now()
-        const tabId = (args.tab_id as string) || null
-        const action = String(args.action || '').trim() as 'upload' | 'send' | 'close' | 'back'
-        if (!['upload', 'send', 'close', 'back'].includes(action)) {
-          return browserStructuredOutput({ ok: false, reason: 'invalid_action' })
-        }
-        const targets = await locateActionTargets(controller, tabId, action)
-        const toolMeta = resolveToolContextMeta(controller, tabId)
-        // R19 观测补缺：结果概要落日志——真机上无法验证 closed-shadow 增补
-        // 是否生效（R17 第一名「添加商品」只能靠截图倒推）。
-        const shadowCount = targets.filter((item) => (item.evidence || []).includes('closed_shadow_scan')).length
-        log(`locate_action_targets action=${action} count=${targets.length} shadow=${shadowCount} top=${JSON.stringify(targets.slice(0, 3).map((item) => `${item.label}${item.disabled ? '[disabled]' : ''}`))}`)
-        return JSON.stringify({
-          ok: true,
-          ...toolMeta,
-          action,
-          latencyMs: Date.now() - startedAt,
-          count: targets.length,
-          targets,
-          evidenceIds: uniqueStrings(targets.flatMap((item) => item.evidence || [])),
-        }, null, 2)
-      }
-
-      case 'find_input': {
-        const startedAt = Date.now()
-        const tabId = (args.tab_id as string) || null
-        const target = String(args.target || '').trim().toLowerCase()
-        const ranked = await locateActionTargets(controller, tabId, 'input')
-        const targets = target
-          ? [...ranked].sort((a, b) => {
-            const aMatch = String(a.label || '').toLowerCase().includes(target) ? 1 : 0
-            const bMatch = String(b.label || '').toLowerCase().includes(target) ? 1 : 0
-            if (aMatch !== bMatch) return bMatch - aMatch
-            return Number(b.confidence || 0) - Number(a.confidence || 0)
-          })
-          : ranked
-        const activeTarget = pickActiveInputTarget(targets) || pickActiveInputTarget(ranked)
-        const anchorTarget = activeTarget || targets[0] || null
-        const rankedSendTargets = anchorTarget
-          ? rankTargetsNearAnchor(await locateActionTargets(controller, tabId, 'send'), anchorTarget)
-          : []
-        const nearbySendTargets = rankedSendTargets.some((item) => Boolean(item.nearActiveInput))
-          ? rankedSendTargets.filter((item) => Boolean(item.nearActiveInput)).slice(0, 4)
-          : rankedSendTargets.slice(0, 2)
-        const toolMeta = resolveToolContextMeta(controller, tabId)
-        return JSON.stringify({
-          ok: true,
-          ...toolMeta,
-          latencyMs: Date.now() - startedAt,
-          count: targets.length,
-          targets,
-          active_target: activeTarget,
-          nearby_send_targets: nearbySendTargets,
-          evidenceIds: uniqueStrings([
-            ...targets.flatMap((item) => item.evidence || []),
-            ...nearbySendTargets.flatMap((item) => item.evidence || []),
-          ]),
-        }, null, 2)
-      }
-
       case 'screenshot_analyze': {
         const startedAt = Date.now()
         let tabId = (args.tab_id as string) || null
-        tabId = (await resolveHighControlAgentTab(controller, args, { signal: abortSignal })).tabId
         const action = String(args.action || 'general').trim() as 'upload' | 'send' | 'close' | 'back' | 'input' | 'general'
         const includeDomCandidates = args.include_dom_candidates !== false
         const domCandidates = includeDomCandidates && action !== 'general'
@@ -1133,7 +1169,6 @@ export async function executeBrowserObserveTool(
         const timeoutMs = Number(args.timeout_ms || 8000)
         const selector = typeof args.selector === 'string' ? args.selector : undefined
         let tabId = (args.tab_id as string) || null
-        tabId = (await resolveHighControlAgentTab(controller, args, { signal: abortSignal })).tabId
         const ready = await waitForReady(controller, tabId, Math.max(500, Math.min(timeoutMs, 30_000)), selector, abortSignal)
         return `Wait result: ready=${ready.ready}, selectorMatched=${ready.matchedSelector}, elapsed=${ready.elapsedMs}ms`
       }
@@ -1145,7 +1180,6 @@ export async function executeBrowserObserveTool(
           return JSON.stringify({ matched: true, elapsedMs: durationMs }, null, 2)
         }
         let tabId = (args.tab_id as string) || null
-        tabId = (await resolveHighControlAgentTab(controller, args, { signal: abortSignal })).tabId
         const requestedCondition = String(args.condition || 'ready')
         const customJs = requestedCondition === 'text'
           ? `Boolean(document.body?.innerText?.includes(${JSON.stringify(String(args.text || ''))}))`

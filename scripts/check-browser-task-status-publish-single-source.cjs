@@ -8,7 +8,6 @@ const ROOT = process.cwd()
 const CAPABILITY_TYPES_REL = 'src/main/modules/browser-engine/capability-types.ts'
 const TASK_EVENT_BRIDGE_REL = 'src/main/modules/browser-engine/task-event-bridge.ts'
 const TASK_PERSISTENCE_REL = 'src/main/modules/browser-engine/task-persistence-service.ts'
-const CONTENT_TASK_RUNNER_REL = 'src/main/modules/browser-engine/content-task-runner.ts'
 const MAP_NAME = 'BROWSER_TASK_BRIDGE_PUBLISH'
 const PERSISTED_TYPE = 'BrowserCapabilityTaskStatus'
 const BRIDGE_TYPE = 'TaskEventBridgeStatus'
@@ -58,27 +57,13 @@ function compareMapKeys(statuses, map) {
   return errors
 }
 
-function hasInlineStatusList(text, bridgeStatuses) {
-  const listMatches = [
-    ...text.matchAll(/\[[\s\S]*?\]/g),
-    ...text.matchAll(/new\s+Set(?:\s*<[^>]+>)?\s*\(\s*\[[\s\S]*?\]\s*\)/g),
-  ].map((item) => item[0])
-  return listMatches.some((snippet) => {
-    const count = bridgeStatuses.filter((status) => new RegExp(`['"]${status}['"]`).test(snippet)).length
-    return count >= 2
-  })
-}
-
-function publishSitesUseMapping(rel, text, errors, bridgeStatuses) {
+function publishSitesUseMapping(rel, text, errors) {
   if (!text.includes('taskEventBridge.publish(')) return
   if (!text.includes('toBridgeStatus(')) {
     errors.push(`publish_site_missing_to_bridge_status:${rel}`)
   }
   if (/\bisTaskEventBridgeStatus\s*\(/.test(text)) {
     errors.push(`publish_site_uses_bridge_membership_guard:${rel}`)
-  }
-  if (hasInlineStatusList(text, bridgeStatuses)) {
-    errors.push(`publish_site_inline_status_list:${rel}`)
   }
 }
 
@@ -87,7 +72,6 @@ function check({ root = ROOT } = {}) {
   let capabilityText = ''
   let bridgeText = ''
   let persistenceText = ''
-  let runnerText = ''
 
   try {
     capabilityText = stripComments(read(root, CAPABILITY_TYPES_REL))
@@ -103,11 +87,6 @@ function check({ root = ROOT } = {}) {
     persistenceText = stripComments(read(root, TASK_PERSISTENCE_REL))
   } catch (error) {
     errors.push(`missing_task_persistence:${TASK_PERSISTENCE_REL}:${error.message}`)
-  }
-  try {
-    runnerText = stripComments(read(root, CONTENT_TASK_RUNNER_REL))
-  } catch (error) {
-    errors.push(`missing_content_task_runner:${CONTENT_TASK_RUNNER_REL}:${error.message}`)
   }
 
   const persistedStatuses = capabilityText ? extractTypeUnion(capabilityText, PERSISTED_TYPE) : null
@@ -146,8 +125,7 @@ function check({ root = ROOT } = {}) {
     }
   }
   if (bridgeStatuses) {
-    publishSitesUseMapping(TASK_PERSISTENCE_REL, persistenceText, errors, bridgeStatuses)
-    publishSitesUseMapping(CONTENT_TASK_RUNNER_REL, runnerText, errors, bridgeStatuses)
+    publishSitesUseMapping(TASK_PERSISTENCE_REL, persistenceText, errors)
   }
 
   return { ok: errors.length === 0, errors }

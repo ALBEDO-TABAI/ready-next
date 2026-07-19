@@ -54,6 +54,7 @@ export interface BrowserKeyEventPayload {
   autoRepeat?: boolean
   unmodifiedText?: string
   location?: number
+  commands?: string[]
 }
 
 export interface BrowserScreenshotOptions {

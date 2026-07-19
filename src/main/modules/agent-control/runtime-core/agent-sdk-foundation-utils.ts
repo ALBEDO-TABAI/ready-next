@@ -4,7 +4,6 @@ import {
   type AIModelConfig,
   type AIModelDef
 } from '../../../../shared/ai-providers'
-import { resolveBrowserWorkflowIntent } from '../../../../shared/browser-workflow-intent'
 import { hasLocalSendImFileIntent } from '../../../../shared/remote-im-file-intent'
 import { PRIMITIVE_TOOL_DEFS } from '../../tools/skill-primitives/tool-defs'
 import { appendToolCapabilityLog } from '../../tools/tool-event-log'
@@ -15,7 +14,6 @@ import type {
   RunMessage,
   TaskBudgetRuntime
 } from '../contracts/run-contracts'
-import { TAG_FORGE_FOLDER_RUNTIME_TOOL_NAMES } from '../domain-adapters/capability-floors'
 import { isRetryOnlyTurn } from '../skills/skill-detection-inputs'
 import { loadReadySystemPrompt } from '../prompt-assets/ready-system-asset'
 import type { SkillToolAuthorization } from '../skills/skill-tool-authorization'
@@ -474,36 +472,6 @@ function cloneTaskBudgetRuntime(runtime: TaskBudgetRuntime): TaskBudgetRuntime {
   }
 }
 
-export function resolveTaskTypeFromToolDefinitions(
-  definitions: ToolDefinition[]
-): import('../contracts/run-contracts').TaskType | null {
-  if (
-    definitions.some(
-      (definition) =>
-        definition.domain === 'general_research' || definition.name === 'browser_research'
-    )
-  ) {
-    return 'research'
-  }
-  if (
-    definitions.some(
-      (definition) => definition.domain === 'skill' || definition.name.startsWith('skill_')
-    )
-  ) {
-    return 'multi_step_task'
-  }
-  if (definitions.some((definition) => definition.domain === 'browser')) {
-    return 'short_task'
-  }
-  return null
-}
-
-export function resolveTaskTypeFromBrowserWorkflowText(
-  text: string | null | undefined
-): import('../contracts/run-contracts').TaskType | null {
-  return resolveBrowserWorkflowIntent(text).kind === 'transaction' ? 'browser_transaction' : null
-}
-
 /**
  * 2026-07-04 真机回归第二轮根因修复 — 意图/交易判定的输入必须是**用户话语**，
  * 不是注入后的完整消息。
@@ -535,31 +503,28 @@ export function resolvePureUserTextForClassification(
 
 export function resolveAgentSdkTaskBudgetRuntime(params: {
   options?: AgentSdkExecutionOptions
-  inferredTaskType?: import('../contracts/run-contracts').TaskType | null
-  forceInferredTaskType?: boolean
+  explicitTaskType?: import('../contracts/run-contracts').TaskType | null
+  overrideTaskType?: boolean
 }): TaskBudgetRuntime | null {
   const inherited = params.options?.taskBudgetRuntime
     ? cloneTaskBudgetRuntime(params.options.taskBudgetRuntime)
     : null
-  const inferredTaskType = params.inferredTaskType || inherited?.taskType || 'short_task'
+  const taskType = params.explicitTaskType || inherited?.taskType || 'short_task'
   const unfrozen = inherited?.frozen ? resumeBudgetRuntime(inherited) : inherited
 
   if (unfrozen) {
-    if (
-      inferredTaskType !== unfrozen.taskType &&
-      (unfrozen.bootstrapBudget || params.forceInferredTaskType)
-    ) {
-      return rebindTaskBudgetRuntime(unfrozen, inferredTaskType, { bootstrapBudget: false })
+    if (params.overrideTaskType && taskType !== unfrozen.taskType) {
+      return rebindTaskBudgetRuntime(unfrozen, taskType, { bootstrapBudget: false })
     }
     return unfrozen
   }
 
   const seed = params.options?.budget || null
   if (!seed) return null
-  return createTaskBudgetRuntime(inferredTaskType, {
+  return createTaskBudgetRuntime(taskType, {
     budget: seed,
     usage: params.options?.budgetState || null,
-    bootstrapBudget: inferredTaskType === 'short_task'
+    bootstrapBudget: taskType === 'short_task'
   })
 }
 
@@ -591,15 +556,12 @@ export function restoreCheckpointToolSurface(params: {
   const requiredToolNames =
     restore.requiredToolNames.length > 0 ? restore.requiredToolNames : restore.usedToolNames
   const missingToolNames = requiredToolNames.filter((name) => !byName.has(name))
-  const isTagForgeFolderSurface =
-    requiredToolNames.length === TAG_FORGE_FOLDER_RUNTIME_TOOL_NAMES.length
-    && TAG_FORGE_FOLDER_RUNTIME_TOOL_NAMES.every((name) => requiredToolNames.includes(name))
   return {
-    toolDefinitions: isTagForgeFolderSurface
-      ? requiredToolNames
-          .map((name) => byName.get(name))
-          .filter((definition): definition is ToolDefinition => Boolean(definition))
-      : Array.from(byName.values()),
+    // A checkpoint resumes the exact saved surface. Newly legal tools are not
+    // silently added; missing saved tools block above instead of broadening.
+    toolDefinitions: requiredToolNames
+      .map((name) => byName.get(name))
+      .filter((definition): definition is ToolDefinition => Boolean(definition)),
     missingToolNames
   }
 }

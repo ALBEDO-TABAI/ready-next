@@ -306,6 +306,7 @@ export class DynamicDeliveryCoordinator {
       workerReports: [],
       canonicalReceiptItems: [],
       evidenceResources: [],
+      pendingAcceptance: null,
     })
     if (accumulatedUsage) context.usage.add(accumulatedUsage)
 
@@ -562,6 +563,50 @@ export class DynamicDeliveryCoordinator {
     return verifyDeliveryCandidate(input)
   }
 
+  async verifyStandaloneCandidate(input: {
+    runId: string
+    taskId: string
+    userRequestVerbatim: string
+    candidateText: string
+    hostCriteria: ReadonlyArray<Record<string, unknown>>
+    modelCriteria: readonly string[]
+    model: string
+    provider: ModelProvider
+    contextWindowTokens: number
+    maxOutputTokens: number
+    signal: AbortSignal
+    materializeAndReadBack: () => Promise<VerifierResourceBundle>
+  }): Promise<{
+    verdict: DeliveryVerificationVerdict
+    sealed: Readonly<SealedDeliveryCandidate>
+    verificationUsage: ReadyAgentSdkRunResult['usage']
+  }> {
+    const sealed = await sealDeliveryCandidate({
+      userRequestVerbatim: input.userRequestVerbatim,
+      candidateText: input.candidateText,
+      hostCriteria: input.hostCriteria,
+      modelCriteria: input.modelCriteria,
+      openQuestions: [],
+      materializeAndReadBack: input.materializeAndReadBack,
+    })
+    const verification = await this.verifySealedCandidate({
+      candidate: sealed,
+      runId: input.runId,
+      taskId: input.taskId,
+      model: input.model,
+      provider: input.provider,
+      contextWindowTokens: input.contextWindowTokens,
+      maxOutputTokens: input.maxOutputTokens,
+      signal: input.signal,
+      runAgent: this.runAgent,
+    })
+    return {
+      verdict: verification.verdict,
+      sealed,
+      verificationUsage: verification.usage,
+    }
+  }
+
   async buildSanitizedCheckpoint(runId: string, receipts: readonly AgentInputItem[] = []): Promise<AgentInputItem[] | null> {
     const context = this.contexts.get(runId)
     if (!context?.transaction) return null
@@ -572,6 +617,7 @@ export class DynamicDeliveryCoordinator {
   async verifyOwnerCandidate(input: {
     runId: string
     candidateText: string
+    userRequestVerbatimOverride?: string
     projectionAfterOwner: TaskProjectionRecord
     model: string
     provider: ModelProvider
@@ -584,6 +630,7 @@ export class DynamicDeliveryCoordinator {
     verdict: DeliveryVerificationVerdict
     sealed: SealedDeliveryCandidate
     acceptedText: string | null
+    acceptedDeliveryState: DeliveryStateV1 | null
     usage: RunUsage | null
     verificationUsage: RunUsage | null
   }> {
@@ -593,12 +640,13 @@ export class DynamicDeliveryCoordinator {
     }
     context.canonicalReceiptItems = await context.transaction.collectCanonicalReceiptItems()
     let candidateText = input.candidateText
+    const verifierUserRequest = input.userRequestVerbatimOverride || context.userRequestVerbatim
     const materializeAndReadBack = async (): Promise<VerifierResourceBundle> => {
       const materialized = await input.materializeAndReadBack()
       return { ...materialized, items: [...materialized.items, ...context.evidenceResources] }
     }
     let sealed = await sealDeliveryCandidate({
-      userRequestVerbatim: context.userRequestVerbatim,
+      userRequestVerbatim: verifierUserRequest,
       candidateText,
       hostCriteria: input.projectionAfterOwner.criteria ? [input.projectionAfterOwner.criteria] : [],
       modelCriteria: input.projectionAfterOwner.modelCriteria ?? [],
@@ -654,7 +702,7 @@ export class DynamicDeliveryCoordinator {
         candidateText = repair.finalText.trim()
         context.outputBuffer.replace(candidateText)
         sealed = await sealDeliveryCandidate({
-          userRequestVerbatim: context.userRequestVerbatim,
+          userRequestVerbatim: verifierUserRequest,
           candidateText,
           hostCriteria: input.projectionAfterOwner.criteria ? [input.projectionAfterOwner.criteria] : [],
           modelCriteria: input.projectionAfterOwner.modelCriteria ?? [],
@@ -710,7 +758,7 @@ export class DynamicDeliveryCoordinator {
         candidateText = repair.finalText.trim() || candidateText
         context.outputBuffer.replace(candidateText)
         sealed = await sealDeliveryCandidate({
-          userRequestVerbatim: context.userRequestVerbatim,
+          userRequestVerbatim: verifierUserRequest,
           candidateText,
           hostCriteria: input.projectionAfterOwner.criteria ? [input.projectionAfterOwner.criteria] : [],
           modelCriteria: input.projectionAfterOwner.modelCriteria ?? [],
@@ -766,7 +814,7 @@ export class DynamicDeliveryCoordinator {
       const acceptedText = context.outputBuffer.snapshot()
       const acceptedInputItems = await context.transaction.collectAcceptedInputItems()
       const acceptedAssistantProviderData = await context.transaction.collectAcceptedAssistantProviderData()
-      await context.transaction.commitAccepted([
+      await context.transaction.prepareAccepted([
         ...acceptedInputItems,
         {
           type: 'message',
@@ -785,17 +833,12 @@ export class DynamicDeliveryCoordinator {
         verifier: { status: 'accepted', repaired },
         usage: context.usage.snapshot() ?? context.state.usage,
       }
-      this.persistNextState(context, nextState)
-      logAgentMetric('dynamic_delivery_finished', {
-        runId: input.runId,
-        taskId: context.taskId,
-        verdict: 'accepted',
-        repaired,
-      })
+      context.pendingAcceptance = { acceptedText, nextState }
       return {
         verdict: verification.verdict,
         sealed,
-        acceptedText: context.outputBuffer.releaseAccepted(),
+        acceptedText,
+        acceptedDeliveryState: nextState,
         usage: context.usage.snapshot(),
         verificationUsage: supplementalUsage,
       }
@@ -819,9 +862,59 @@ export class DynamicDeliveryCoordinator {
       verdict: verification.verdict,
       sealed,
       acceptedText: null,
+      acceptedDeliveryState: null,
       usage: context.usage.snapshot(),
       verificationUsage: supplementalUsage,
     }
+  }
+
+  async commitVerifiedCandidate(runId: string, options?: {
+    deliveryStateAlreadyPersisted?: boolean
+  }): Promise<{
+    acceptedText: string
+    acceptedDelta: AgentInputItem[]
+  }> {
+    const context = this.contexts.get(runId)
+    if (!context?.transaction || !context.outputBuffer || !context.pendingAcceptance) {
+      throw new Error('[dynamic-delivery] no verified candidate is pending commit')
+    }
+    const pending = context.pendingAcceptance
+    if (options?.deliveryStateAlreadyPersisted) context.state = pending.nextState
+    else this.persistNextState(context, pending.nextState)
+    const acceptedDelta = await context.transaction.commitPrepared()
+    const acceptedText = context.outputBuffer.releaseAccepted()
+    context.pendingAcceptance = null
+    logAgentMetric('dynamic_delivery_finished', {
+      runId,
+      taskId: context.taskId,
+      verdict: 'accepted',
+      repaired: pending.nextState.verifier.repaired,
+    })
+    return { acceptedText, acceptedDelta }
+  }
+
+  inspectVerifiedCandidate(runId: string): {
+    acceptedText: string
+    committedBase: AgentInputItem[]
+    acceptedDelta: AgentInputItem[]
+  } {
+    const context = this.contexts.get(runId)
+    if (!context?.transaction || !context.pendingAcceptance) {
+      throw new Error('[dynamic-delivery] no verified candidate is pending inspection')
+    }
+    const prepared = context.transaction.inspectPrepared()
+    return {
+      acceptedText: context.pendingAcceptance.acceptedText,
+      ...prepared,
+    }
+  }
+
+  abortVerifiedCandidate(runId: string): void {
+    const context = this.contexts.get(runId)
+    if (!context?.transaction || !context.outputBuffer || !context.pendingAcceptance) return
+    context.transaction.abortCandidate()
+    context.outputBuffer.discard()
+    context.pendingAcceptance = null
   }
 
   close(runId: string): void {

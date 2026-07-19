@@ -45,7 +45,11 @@ interface IPCResponse<T = unknown> {
   mock?: boolean
   errorKind?: string
   responseText?: string
+  acceptedAsSteering?: boolean
+  ownerRunId?: string
   persistence?: unknown
+  canonicalMessage?: import('../../../../shared/ipc-contracts/canonical-message').CanonicalAssistantMessage
+  canonicalMessageDigest?: string
   /**
    * Stage V V3.5 — structured error tag for `session_limit_exceeded`.
    * `code: 'SESSION_LIMIT'` lets the renderer pattern-match the failure
@@ -84,10 +88,14 @@ function isSessionLimitError(error: unknown): error is Error & {
  */
 interface SendScopedResult {
   success: boolean
+  acceptedAsSteering?: boolean
+  ownerRunId?: string
   error?: string
   errorKind?: string
   responseText?: string
   persistence?: unknown
+  canonicalMessage?: import('../../../../shared/ipc-contracts/canonical-message').CanonicalAssistantMessage
+  canonicalMessageDigest?: string
 }
 
 /**
@@ -101,6 +109,9 @@ export interface SendScopedPayload {
   message: string | MultimodalBlock[]
   requestId?: string
   workspaceRoots?: string[]
+  environmentHint?: {
+    workbenchMode?: 'browser' | 'document' | 'rss' | 'calendar'
+  }
   deliveryMode?: DeliveryMode
   userMessage?: SendScopedUserMessage
   continuationIntent?: {
@@ -295,10 +306,14 @@ export const agentLifecycleGroup: IpcChannelGroup<AgentLifecycleGroupDeps> = {
         deps.log(`[ipc] agent:sendScoped done scopeId=${payload.scopeId} requestId=${payload.requestId || 'none'} success=${result.success} error=${result.error || 'none'}`)
         return {
           success: result.success,
+          acceptedAsSteering: result.acceptedAsSteering,
+          ownerRunId: result.ownerRunId,
           error: result.error,
           errorKind: result.errorKind,
           responseText: result.responseText,
           persistence: result.persistence,
+          canonicalMessage: result.canonicalMessage,
+          canonicalMessageDigest: result.canonicalMessageDigest,
         }
       } catch (error) {
         deps.log(`[ipc] agent:sendScoped failed scopeId=${payload.scopeId} requestId=${payload.requestId || 'none'} error=${error instanceof Error ? error.message : String(error)}`)

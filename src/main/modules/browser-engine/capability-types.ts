@@ -86,10 +86,10 @@ export interface BrowserCapabilityTaskProgress {
 }
 
 export const BROWSER_CAPABILITY_TASK_KINDS = [
+  'browser_workflow',
   'download_urls',
   'scroll_collect',
   'research',
-  'site_research',
   'visible_collect',
   'note_collect',
   'card_loop',

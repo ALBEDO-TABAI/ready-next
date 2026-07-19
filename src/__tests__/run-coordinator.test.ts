@@ -23,6 +23,20 @@ function createScope(): ConversationScope {
   }
 }
 
+function canonicalCloseout(content: string) {
+  return {
+    canonicalMessage: {
+      id: `assistant:${content.length}`,
+      conversationId: 'scope-1',
+      role: 'assistant' as const,
+      content,
+      timestamp: '2026-04-09T10:00:00.000Z',
+      meta: {},
+    },
+    canonicalMessageDigest: `digest:${content.length}`,
+  }
+}
+
 test('RunCoordinator forwards per-call coordinators into prompt assembly', async () => {
   const scopedCoordinators = [{ id: 'scoped' }] as never
   const inboundCoordinators = [{ id: 'inbound' }] as never
@@ -145,6 +159,7 @@ test('RunCoordinator assembles prompt, executes host, and emits planning metadat
         success: true,
         finalText: 'done text',
         cancelled: false,
+        ...canonicalCloseout('done text'),
       usedTools: ['browser_click'],
       budgetState: request.budgetState,
       taskBudgetRuntime: request.taskBudgetRuntime
@@ -182,7 +197,11 @@ test('RunCoordinator assembles prompt, executes host, and emits planning metadat
     coordinators: []
   })
 
-  assert.deepEqual(result, { success: true })
+  assert.deepEqual(result, {
+    success: true,
+    responseText: 'done text',
+    ...canonicalCloseout('done text'),
+  })
   assert.equal(events[0]?.phase, 'planning')
   // 2026-07-04 语义更新：browser-upload 是流程知识片段，不再充当任务名/模块
   // ——planning 卡回中性占位，真实标题由 run 中的 projection 回填。
@@ -239,6 +258,7 @@ test('RunCoordinator forwards task metadata from execution results into the fina
       success: true,
       finalText: 'done text',
       cancelled: false,
+      ...canonicalCloseout('done text'),
       usedTools: ['document_update_widget'],
       taskId: request.taskId,
       taskType: 'multi_step_task',
@@ -262,7 +282,11 @@ test('RunCoordinator forwards task metadata from execution results into the fina
     coordinators: []
   })
 
-  assert.deepEqual(result, { success: true })
+  assert.deepEqual(result, {
+    success: true,
+    responseText: 'done text',
+    ...canonicalCloseout('done text'),
+  })
   assert.match(events[0]?.taskId || '', /^task-/)
   assert.equal(events[0]?.taskId, events.at(-1)?.taskId)
   assert.equal(events.at(-1)?.taskType, 'multi_step_task')
@@ -294,6 +318,7 @@ test('RunCoordinator treats successful adjudication_degraded results as done eve
       success: true,
       finalText: '文档已保存',
       cancelled: false,
+      ...canonicalCloseout('文档已保存'),
       usedTools: ['document_save_tab'],
       terminalReason: 'adjudication_degraded',
       taskType: 'multi_step_task',
@@ -311,7 +336,11 @@ test('RunCoordinator treats successful adjudication_degraded results as done eve
     coordinators: [],
   })
 
-  assert.deepEqual(result, { success: true })
+  assert.deepEqual(result, {
+    success: true,
+    responseText: '文档已保存',
+    ...canonicalCloseout('文档已保存'),
+  })
   assert.equal(events.at(-1)?.phase, 'done')
   assert.equal(events.at(-1)?.terminalReason, 'adjudication_degraded')
   assert.equal(recordedSuccess, true)
@@ -383,6 +412,7 @@ test('RunCoordinator creates a stable task id when execution host does not provi
       success: true,
       finalText: 'done text',
       cancelled: false,
+      ...canonicalCloseout('done text'),
       usedTools: [],
       taskId: request.taskId,
       executionDiagnostics: null,
@@ -400,7 +430,11 @@ test('RunCoordinator creates a stable task id when execution host does not provi
     coordinators: []
   })
 
-  assert.deepEqual(result, { success: true })
+  assert.deepEqual(result, {
+    success: true,
+    responseText: 'done text',
+    ...canonicalCloseout('done text'),
+  })
   assert.match(events[0]?.taskId || '', /^task-/)
   assert.equal(events[0]?.taskId, events.at(-1)?.taskId)
   assert.equal(events[0]?.taskProjectionId, events[0]?.taskId)

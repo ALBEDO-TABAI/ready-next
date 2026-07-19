@@ -1,9 +1,4 @@
 import { type AgentInputItem } from '@openai/agents'
-import { followupConsultsRecalledContext } from '../../../../shared/agent-followup-intent'
-import {
-  browserWorkflowIntentToDecisionMode,
-  resolveBrowserWorkflowIntent
-} from '../../../../shared/browser-workflow-intent'
 import { hasLocalSendImFileIntent } from '../../../../shared/remote-im-file-intent'
 import {} from '../compaction/compact-agent-input'
 import type { RunMessage } from '../contracts/run-contracts'
@@ -12,13 +7,10 @@ import type { TurnTerminalReason } from './turn-frame'
 import { resolveDocumentTargetGuard } from './agent-sdk-document-utils'
 import { hasCurrentTurnAttachmentContext } from './agent-sdk-foundation-utils'
 import {
-  messageToText,
   parseAttachmentReferences,
   parseEnvelopeResourceReferences,
   primaryInstructionText
 } from './agent-sdk-input-context-utils'
-import { asRecord, stringField } from './agent-sdk-model-message-utils'
-import { hasRecalledTaskContext } from './agent-sdk-skill-intent-utils'
 
 // ── Group G: Tool and execution helpers (lines 1801-2122) ──
 
@@ -243,69 +235,6 @@ export function buildLocalDocumentExcerptRepairInput(preferCurrentDocumentRead =
     '请先调用 file_read_excerpt 读取相关章节或片段，再基于读取内容重新生成结果。',
     '如果已经写入了目标文档，请用读取后的依据修正并替换为可靠版本，然后保存。'
   ].join('\n')
-}
-
-function shouldExposeResearchTools(text: string): boolean {
-  return /(?:搜索|查找|查一下|检索|研究|资料|来源|引用|最新|今天|新闻|天气|股价|汇率|比分|赛程|官网|公告|价格|source|citation|research|search|latest|today|news)/i.test(
-    text
-  )
-}
-
-export function hasBrowserPublishOperationIntent(text: string): boolean {
-  const intent = resolveBrowserWorkflowIntent(text)
-  return intent.kind === 'transaction' && intent.transactionKind === 'publish'
-}
-
-function shouldPreferBrowserCollectionToolLoop(text: string): boolean {
-  return resolveBrowserWorkflowIntent(text).kind === 'collection'
-}
-
-export function resolveBrowserDecisionMode(
-  message: RunMessage,
-  browserHostAvailable: boolean,
-  requestEnvelope?: unknown
-): import('../../../../shared/browser-agent-task').BrowserTaskDecisionMode {
-  if (!browserHostAvailable) return 'free_tool_loop'
-  const envelopeRefs = parseEnvelopeResourceReferences(requestEnvelope)
-  const primary = envelopeRefs.primaryInstruction || primaryInstructionText(message)
-  const envelopeRecord = asRecord(requestEnvelope)
-  const rawUserText = stringField(envelopeRecord, 'rawUserText') || messageToText(message)
-  const text = followupConsultsRecalledContext(primary, {
-    hasActiveTaskContext: hasRecalledTaskContext(rawUserText)
-  })
-    ? `${primary}\n${rawUserText}`
-    : primary
-  const workflowIntent = resolveBrowserWorkflowIntent(text)
-  if (workflowIntent.kind === 'transaction' || workflowIntent.kind === 'collection') {
-    return browserWorkflowIntentToDecisionMode(workflowIntent)
-  }
-  const hasBrowserPublishOperation = hasBrowserPublishOperationIntent(text)
-  const hasExplicitBrowserSurface =
-    hasBrowserPublishOperation ||
-    /(?:网页|浏览器|网站|当前页|页面|链接|url|https?:\/\/|www\.|browser|website|web page|current page|click|download)/i.test(
-      text
-    )
-  const hasDocumentSurface =
-    /(?:文档|文稿|原文|文章|段落|章节|markdown|\.md\b|@\[.*?\.(?:md|txt|docx?)\]|widget|show-widget|图表|趋势图|人物关系图|卡片|信息卡|表格|保存|写入|追加|替换|编辑|改写|润色|排版|格式)/i.test(
-      text
-    )
-  const hasBrowserUploadIntent =
-    hasExplicitBrowserSurface &&
-    /(?:上传|提交|发布|发送|选择).{0,30}(?:附件|文件|图片|图像|视频|upload|attach|file|image|video)|(?:附件|文件|图片|图像|视频|file|image|video).{0,30}(?:上传|提交|发布|发送|upload|attach)|(?:upload|attach).{0,30}(?:file|image|video)/i.test(
-      text
-    )
-  if (hasBrowserUploadIntent) return 'browser_upload_workflow'
-  if (hasBrowserPublishOperation) return 'browser_workflow'
-  if (shouldPreferBrowserCollectionToolLoop(text)) return 'free_tool_loop'
-  if (hasDocumentSurface && !hasExplicitBrowserSurface) return 'free_tool_loop'
-  if (
-    shouldExposeResearchTools(text) ||
-    hasExplicitBrowserSurface ||
-    /(?:打开|点击|输入|下载)/i.test(text)
-  ) {
-    return 'browser_workflow'
-  }
-  return 'free_tool_loop'
 }
 
 export function toSdkInput(message: RunMessage): string | AgentInputItem[] {

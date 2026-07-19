@@ -35,6 +35,13 @@ const AGENT_SDK_TURN_COMPLETION_REL =
   'src/main/modules/agent-control/runtime-core/agent-sdk-turn-completion.ts'
 const RUN_META_REPOSITORY_REL =
   'src/main/modules/agent-control/task-projection/run-meta-repository.ts'
+const WORKFLOW_UNIT_OF_WORK_REPOSITORY_REL =
+  'src/main/modules/repositories/agent-session-checkpoint-repository.ts'
+const WORKFLOW_UNIT_OF_WORK_LEAF_REPOSITORIES = new Set([
+  'src/main/modules/repositories/agent-session-checkpoint-closeout.ts',
+  'src/main/modules/repositories/agent-session-checkpoint-resume.ts',
+  'src/main/modules/repositories/agent-session-checkpoint-store.ts',
+])
 const DIRECT_ANSWER_HISTORY_MIGRATION_REL =
   'src/main/modules/agent-control/task-projection/direct-answer-history-migration.ts'
 const DIRECT_ANSWER_HISTORY_MIGRATION_MARKER =
@@ -42,6 +49,9 @@ const DIRECT_ANSWER_HISTORY_MIGRATION_MARKER =
 const STARTUP_RUN_RECONCILER_REL = 'src/main/modules/app-control/startup-run-reconciler.ts'
 const STARTUP_RECONCILER_EXEMPT_MARKER =
   'run-finalizer-exempt: startup-recovery-only working->interrupted'
+const MIGRATIONS_REL = 'src/main/modules/migrations.ts'
+const WORKFLOW_STATUS_MIGRATION_MARKER =
+  'run-finalizer-exempt: migration-083 normalizes legacy working owners into the running workflow state'
 const SCAN_DIRS = ['src/main/modules/']
 
 function readConstArray(rel, name) {
@@ -100,6 +110,8 @@ function lineOf(text, idx) {
 function isAllowedRunMetaWriter(rel, text) {
   return rel === RUN_FINALIZER_REL
     || rel === RUN_META_REPOSITORY_REL
+    || rel === WORKFLOW_UNIT_OF_WORK_REPOSITORY_REL
+    || WORKFLOW_UNIT_OF_WORK_LEAF_REPOSITORIES.has(rel)
     || (
       rel === DIRECT_ANSWER_HISTORY_MIGRATION_REL
       && text.includes(DIRECT_ANSWER_HISTORY_MIGRATION_MARKER)
@@ -107,6 +119,10 @@ function isAllowedRunMetaWriter(rel, text) {
 }
 
 function sourceForRunMetaRules(rel, text) {
+  if (rel === MIGRATIONS_REL && text.includes(WORKFLOW_STATUS_MIGRATION_MARKER)) {
+    const normalized = /UPDATE\s+run_meta\s+SET\s+status\s*=\s*['"]running['"]\s+WHERE\s+status\s*=\s*['"]working['"]/i
+    return text.replace(normalized, (match) => match.replace(/[^\r\n]/g, ' '))
+  }
   if (rel !== STARTUP_RUN_RECONCILER_REL || !text.includes(STARTUP_RECONCILER_EXEMPT_MARKER)) {
     return text
   }

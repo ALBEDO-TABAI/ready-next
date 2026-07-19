@@ -3,7 +3,6 @@ import assert from 'node:assert'
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { BrowserDomainAdapter } from '../main/modules/agent-control/domain-adapters/browser-domain-adapter'
 import { CalendarDomainAdapter } from '../main/modules/agent-control/domain-adapters/calendar-domain-adapter'
 import { DocumentDomainAdapter } from '../main/modules/agent-control/domain-adapters/document-domain-adapter'
 import { FeishuDomainAdapter } from '../main/modules/agent-control/domain-adapters/feishu-domain-adapter'
@@ -51,10 +50,6 @@ function createDocumentAdapter(): DocumentDomainAdapter {
     orchestrator: {} as never,
     toolLoopOrchestrator: {} as never,
   })
-}
-
-function createBrowserAdapter(): BrowserDomainAdapter {
-  return new BrowserDomainAdapter({} as never)
 }
 
 describe('PromptAssemblyService', () => {
@@ -233,57 +228,6 @@ describe('PromptAssemblyService', () => {
     rmSync(root, { recursive: true, force: true })
   })
 
-  it('loads the browser-upload trigger from the browser coordinator', async () => {
-    const root = mkdtempSync(join(tmpdir(), 'ready-prompt-fallback-triggers-'))
-    mkdirSync(join(root, 'docs'), { recursive: true })
-    mkdirSync(join(root, 'memory'), { recursive: true })
-    writeFileSync(join(root, 'docs', 'browser-rules.md'), '# Browser\nBrowser rules.', 'utf8')
-
-    const service = new PromptAssemblyService({
-      getMemoryRoot: () => root,
-      getScopeMessages: () => [],
-      now: () => new Date('2026-03-08T10:00:00.000Z')
-    })
-
-    const browserAdapter = createBrowserAdapter()
-    const browserFragments = browserAdapter.contributePromptFragment() || []
-    assert.ok(browserFragments.some((item) => item.id === 'browser-upload'))
-
-    const result = await service.buildForScopedRun({
-      scope: createScope(),
-      message: '请在浏览器上传材料，然后提交网页',
-      coordinators: [browserAdapter]
-    })
-
-    assert.equal(countTrigger(result, 'browser-upload'), 1)
-    assert.equal(countTrigger(result, 'document-write'), 0)
-
-    rmSync(root, { recursive: true, force: true })
-  })
-
-  it('does not load the browser trigger for negated web lookup wording', async () => {
-    const root = mkdtempSync(join(tmpdir(), 'ready-prompt-browser-negated-trigger-'))
-    mkdirSync(join(root, 'docs'), { recursive: true })
-    mkdirSync(join(root, 'memory'), { recursive: true })
-    writeFileSync(join(root, 'docs', 'browser-rules.md'), '# Browser\nBrowser rules.', 'utf8')
-
-    const service = new PromptAssemblyService({
-      getMemoryRoot: () => root,
-      getScopeMessages: () => [],
-      now: () => new Date('2026-03-08T10:00:00.000Z')
-    })
-
-    const result = await service.buildForScopedRun({
-      scope: createScope(),
-      message: '成都 4 个地点怎么走，给我总耗时，不要查网页。',
-      coordinators: [createBrowserAdapter()]
-    })
-
-    assert.equal(countTrigger(result, 'browser-upload'), 0)
-
-    rmSync(root, { recursive: true, force: true })
-  })
-
   it('still loads the Document trigger from the document coordinator', async () => {
     const root = mkdtempSync(join(tmpdir(), 'ready-prompt-document-trigger-'))
     mkdirSync(join(root, 'docs'), { recursive: true })
@@ -308,33 +252,6 @@ describe('PromptAssemblyService', () => {
 
     assert.equal(countTrigger(result, 'document-write'), 1)
     assert.ok(result.triggerHits.some((item) => item.id === 'document-write' && !item.blocking))
-
-    rmSync(root, { recursive: true, force: true })
-  })
-
-  it('a blogger-notes collection ("每篇建文件夹保存图片") triggers browser-collect-notes, not document-write', async () => {
-    const root = mkdtempSync(join(tmpdir(), 'ready-prompt-collect-trigger-'))
-    mkdirSync(join(root, 'docs'), { recursive: true })
-    mkdirSync(join(root, 'memory'), { recursive: true })
-
-    const service = new PromptAssemblyService({
-      getMemoryRoot: () => root,
-      getScopeMessages: () => [],
-      now: () => new Date('2026-04-24T10:00:00.000Z')
-    })
-
-    const result = await service.buildForScopedRun({
-      scope: createScope(),
-      message: '把你能看到的这个博主的笔记，每篇笔记都新建一个独立文件夹，把笔记内的图片保存到 ao’i 这个文件夹下的对应文件夹中',
-      coordinators: [createBrowserAdapter(), createDocumentAdapter()],
-    })
-    // The browser-collect workflow guidance fires; the document-write false
-    // match on "文件夹...保存" is gone (folder is not a file-write signal).
-    assert.equal(countTrigger(result, 'browser-collect-notes'), 1)
-    assert.equal(countTrigger(result, 'document-write'), 0)
-    const joinedBootstrap = result.bootstrapMessages.join('\n\n')
-    assert.match(joinedBootstrap, /逐篇打开/)
-    assert.match(joinedBootstrap, /card_loop 或 url_batch 是系统内部选择/)
 
     rmSync(root, { recursive: true, force: true })
   })
@@ -365,7 +282,6 @@ describe('PromptAssemblyService', () => {
         '请创建飞书文档并上传图片，然后在浏览器提交内容、保存文档、渲染视频、分析 RSS，并创建日程',
       coordinators: [
         new FeishuDomainAdapter(),
-        createBrowserAdapter(),
         createDocumentAdapter(),
         new RSSDomainAdapter(),
         new CalendarDomainAdapter(),

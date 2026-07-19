@@ -65,10 +65,10 @@ export const RESEARCH_SOURCE_CONTENT_TOOL_NAMES = new Set([
   'browser_read',
 ])
 
-// Async browser research/collection tools return task handles, not acquired bodies.
-// They may become source evidence only after a future terminal-result reader validates
-// the completed bundle; the launch result itself never qualifies.
-export const RESEARCH_SOURCE_BUNDLED_TOOL_NAMES = new Set<string>(['browser_task'])
+// Browser workflow resources are verified against their durable observation
+// receipts before they enter the verifier. A status/task handle is never source
+// evidence by itself.
+export const RESEARCH_SOURCE_BUNDLED_TOOL_NAMES = new Set<string>()
 
 const RESEARCH_SOURCE_TOOL_NAMES = new Set([
   ...RESEARCH_SOURCE_DISCOVERY_TOOL_NAMES,
@@ -322,16 +322,7 @@ function transactionConfirmationFromRecord(record: Record<string, unknown> | nul
     ? record.transactionConfirmed as Record<string, unknown>
     : null
   if (direct?.confirmed === true) return direct
-  const progress = record.progress && typeof record.progress === 'object' && !Array.isArray(record.progress)
-    ? record.progress as Record<string, unknown>
-    : null
-  const session = progress?.browserActionSession && typeof progress.browserActionSession === 'object' && !Array.isArray(progress.browserActionSession)
-    ? progress.browserActionSession as Record<string, unknown>
-    : null
-  const confirmation = session?.confirmation && typeof session.confirmation === 'object' && !Array.isArray(session.confirmation)
-    ? session.confirmation as Record<string, unknown>
-    : null
-  return confirmation?.confirmed === true ? confirmation : null
+  return null
 }
 
 function transactionConfirmationRef(toolName: string, confirmation: Record<string, unknown>): string {
@@ -349,15 +340,6 @@ function sourceReceiptMaterial(
   normalized: ReturnType<typeof normalizeToolExecutionOutput>,
 ): string {
   if (!RESEARCH_SOURCE_TOOL_NAMES.has(toolName)) return normalized.text
-  if (toolName === 'browser_task') {
-    const data = recordValue(normalized.data)
-    const result = recordValue(data?.result)
-    const taskKind = String(data?.kind || data?.taskKind || result?.kind || '').trim()
-    const status = String(data?.status || '').trim().toLowerCase()
-    const essentialOutputSatisfied = data?.essentialOutputSatisfied === true
-      || result?.essentialOutputSatisfied === true
-    if (taskKind !== 'site_research' || status !== 'completed' || !essentialOutputSatisfied) return ''
-  }
   const parts = [normalized.text]
   for (const value of [normalized.data, normalized.projectionPatch]) {
     if (value === undefined || value === null) continue
@@ -484,6 +466,12 @@ export function createJsonlArchiver(filePath: string): (rows: ProofRef[]) => voi
 export interface ProofSinkStore {
   get(taskId: string): TaskProjectionRecord | null
   update(taskId: string, patch: Partial<TaskProjectionRecord>, options?: { silent?: boolean; reasonHint?: string }): void
+  compareAndSwap?(
+    taskId: string,
+    expectedRevision: number,
+    patch: Partial<TaskProjectionRecord>,
+    options?: { silent?: boolean; reasonHint?: string; browserDerivedFieldOwner?: 'proof' },
+  ): TaskProjectionRecord | null
 }
 
 /**
@@ -500,7 +488,17 @@ export function createTaskProofSink(store: ProofSinkStore): {
         const record = store.get(taskId)
         if (!record) return false
         const next = appendProofRefs(record.proofRefs ?? [], proofs, { archive: opts.archive })
-        store.update(taskId, { proofRefs: next }, { silent: true, reasonHint: 'proof_collect' })
+        if (store.compareAndSwap && record.requestAnchor) {
+          const updated = store.compareAndSwap(
+            taskId,
+            Number(record.revision ?? 0),
+            { proofRefs: next, updatedAt: new Date().toISOString() },
+            { silent: true, reasonHint: 'proof_collect', browserDerivedFieldOwner: 'proof' },
+          )
+          if (!updated) throw new Error('bound_parent_proof_revision_conflict')
+        } else {
+          store.update(taskId, { proofRefs: next }, { silent: true, reasonHint: 'proof_collect' })
+        }
         return true
       } catch (error) {
         logAgentMetric('proof_collect_failed', {

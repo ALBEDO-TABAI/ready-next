@@ -85,24 +85,27 @@
 
 ## 6. 后台任务、采集与浏览器执行
 
-- Browser Agent 走“理解 -> 计划 -> 分步执行 -> 复核”；链接是资源，不是立即执行指令。
-- `assets/prompts/browser/discipline.md` 是 Browser 详细纪律的唯一稳定来源；只在最终模型工具面含 `browser_interaction` 或 `browser_content_tasks` 时注入一次本轮 instructions。Browser DomainAdapter 不再重复注入，普通 `web_search` 也不触发；运行时只补当前采集、Power 与用户接管事实。
-- 模型可见浏览器能力只来自 `src/shared/browser-tool-surface.ts` 的 32 项语义清单；阅读、交互、站内研究、持久采集和高级能力按本轮意图分层暴露。`browser_research` 负责当前登录站点或 URL 集的多查询研究；`browser_collect` 只负责按页、按清单或按结构采集，普通分析、整理、筛选和选题不得因此打开下载或持久采集。旧工具名、`browser_execute_js`、`browser_run_workflow`、模型自证采集同意和模型自报 effects 不得保留兼容执行分支。
-- 所有公开浏览器调用先经过 `BrowserActionExecutor`，统一完成参数归一、写租约、同 origin 串行、自适应冷却、总时限、中止、动作生命周期和结构化错误。点击、输入、按键、滚动与拖拽使用可信浏览器输入；写动作结束后快照标脏，旧 ref 不能跨标签、文档或快照版本复用。
-- `BrowserSnapshotService` 是页面结构与 target ref 的唯一公开真值。默认快照总预算 16 KiB；`browser_find` 在私有完整目标集上查找，动作只允许一次内部刷新与唯一重绑定。`browser_screenshot` 返回真实图像块，不再返回只有缓存可见的图片 ID。
-- Power 使用 `browser_eval`、`browser_cdp`、`browser_network` 与 `browser_resources`；效果由代码按工具、CDP 方法、目标和输出通道推导，不按域名静态封锁。普通观察和诊断不因审计暂时失败而阻断；支付、远程删除、账号或凭据修改、秘密导出等破坏性效果在执行前必须有匹配且持久化成功的 grant/audit。
-- 下载只走当前浏览器 session，并以临时文件流式落盘、预算校验、hash 与原子发布收口；公开 URL 静默跳入本地网络时拒绝，用户明确打开的内网/本地来源保持可用。输出只能落入本轮用户指令、workspace/resource 或 Ready 默认目录授权的根。
-- Agent 的真实可信鼠标事件自动驱动独立、完全 click-through 的原生指针层；提示层是可关闭的小型原生子窗口。动作终态、写租约丢失、用户接管、标签切换、BrowserView 隐藏或 bounds 改变时必须清除旧指针；提示关闭只影响显示，不改变任务或写权限。
-- 后台任务终态经 `TaskEventBridge` 回到 Agent 循环：活跃 run 注入提醒，无活跃 run 写 pending 并播报续跑。没有注册路由的 `scheduleTask` 必须运行时失败。
-- 已由当前用户目标明确授权的同一浏览器长任务，可从持久 checkpoint 自动续跑，不重复询问内部策略或批次选择；只有安全验证需要接管、任务边界扩大，或系统确实无法完成全量且准备交付部分结果时才打断用户。
-- 浏览器页面引用、平台名、账号名和“分析/选题”只开放观察能力；只有用户明确说采集、抓取、下载或保存，才开放持久采集工具并承担产物验收。`browser_task(action=get|result)` 必须纯查询，`resume` 只能继续原任务，不能把完成的发现任务自动升级成保存采集。
-- 浏览器续跑只继承完整 `BrowserWorkIntent`、原始查询和持久任务句柄，不继承孤立的 collection/batch 标记。站内研究默认串行复用一个独立研究标签并保留来源页；当前站点 adapter 不支持时必须明确失败，禁止静默退回外部搜索。
-- 浏览器任务永久保留创建 run，活动执行绑定、父任务、任务 revision 与 projection revision 分字段持久化。projection 的 `runId` 必须与活动执行绑定一致；projection 写失败只进入任务内的有界重试与启动对账，不能反向杀死真实浏览器任务，旧 revision 不能覆盖新续跑。
-- `browser_research` 完成前必须先通过必要输出检查：查询覆盖、候选结果以及用户明确要求的正文/互动量缺一不可。失败回执只证明失败发生，不得让通用降级判定把 0/18、缺正文或缺互动量的结果显示成绿色完成。
-- 可见发现任务与后续保存任务是一条可追踪的任务链：停止入口必须指向当前仍运行的保存任务；卡片清除只移除展示，不能偷偷停止任务。采集卡在运行和完成后都保留固定位置，直到用户点右上角清除或右滑清除，并展示可打开的结果文件夹、报告与清单。
-- 采集 projection 必须继承发起 Agent、父任务与执行绑定；保存目录从任务计划开始就可见，终态以 runner 回写的真实 `outputRootDir/reportPath/manifestPath` 为准，不能让用户靠默认路径猜结果位置。
-- 采集终态只由 `browser-engine/collection-verdict.ts` 的 `resolveCollectionVerdict()` 决定：0 条永不 completed，部分进展不清断点，整任务重试只重试失败项。
-- 浏览器专项回归入口是 `npm run verify:browser-lane`、`npm run verify:browser-surface`、`npm run verify:browser-reliability`、`npm run verify:browser-native-lock`；涉及会话、下载记录或任务持久化还必须跑 `npm run verify:native`，原生指针与提示层另跑真实 Electron live proof。
+- Browser Agent 负责理解目标、选择下一步和判断证据是否足够；代码只负责能力边界、状态推进、页面动作和可验证结果。链接先作为资源理解，不按站点、语言、控件文案、查询关键词或固定步骤硬编码流程。
+- `assets/prompts/browser/discipline.md` 是 Browser 详细纪律的唯一稳定来源；只在最终工具面真实含浏览器能力时注入一次。普通网页搜索、未激活的浏览器环境和已被 exclusive skill 接管的轮次不得误注入。
+- 浏览器激活只读取可信结构事实：当前工作面、绑定当前页面的 `browserPageRef` 和本轮技能组合。直接浏览器工作面一次提供完整的 typed browser surface；其他环境通过 `use_browser` 显式进入。能力叠加与互斥由统一组合器决定，不从用户自然语言猜工具子集。
+- `browser-capability-registry` 是公开工具名、operation、effects、运行模式和执行边界的唯一代码真值；共享语义清单和 wire schema 从同一合同派生。条件参数必须在 schema 中表达，模型自报 effects、同意或权限不能改变代码侧结论。
+- 除标签管理等 management 操作外，所有页面绑定操作都必须携带可核对的父任务、Owner run、browser task、物理标签与持久 journal 路由；可信内部调用也不能绕过。路由缺失、冲突或已失效时明确失败，不新建第二套临时进度。
+- 所有公开页面动作经 `BrowserActionExecutor` 进入同一执行栈：先登记动作和写租约，再由可信鼠标、键盘或直接文本通道完成物理输入并记录机械 delivery/effect。动作若在返回时仍需观察，就只标记 `needsObservation`，不能伪造 observation receipt。搜索只是“填入当前结构目标并提交”；工具返回文案、目标数量或候选数量都不能冒充动作或阅读证据。
+- 输入 readiness 按 transport 分别裁决，不存在一个“当前页面全部可写”开关。稳定 ref 重解析到同一 rendered editable、精确 focus 成功且 physical target 仍存在时，direct text 可在 hidden/parked/detached host 上投递并严格回读；同一表单的结构化 `requestSubmit()` 也可用。指针、键盘事件、滚轮和拖拽只在可见、活动、前台 host 上开放；任一通道不得主动抢 OS 焦点。
+- `BrowserSnapshotService` 是页面结构与 target ref 的唯一公开真值。ref 同时绑定逻辑标签、物理 target、frame document 和 snapshot revision；完整目标集保持私有，公开快照受预算约束。页面或 frame 变化后必须重新观测，禁止按 role/name、href、站点规则或旧 generation 无声重绑后继续写。
+- 主 frame 与子 frame 通过 CDP/DOM/AX 分层采集；CDP AX/DOM 是 closed-shadow、委托控件和无普通 DOM 语义目标的主要来源。DOM fallback 只收集链接、表单控件、显式 role、contenteditable 和标题等结构目标，不再因标签名带短横线、`cursor:pointer`、元素文本或 DOM 顺序猜可点击性。`browser_find` 只按结构属性、可见性、可用性、可编辑性、frame 和包含关系过滤，由模型结合上下文选择目标。截图返回真实图像。BrowserView 被 DOM 覆盖时先 hide/停放，恢复后 show 并同步 bounds。
+- 点击在结构目标已唯一确定但 point probe 暂时失败时允许可信输入通道尽力投递；输入文字、上传和密码目标必须先验证真实目的地。文件上传必须显式选择一个附件、多个附件、名称或 `latest:true`，并在 input readback 中精确核对已赋值文件；禁止静默取“最新附件”。
+- 搜索的 fill 和 submit 是两个独立 action：先回读输入值，再优先提交该输入所属的精确 form；只在无可绑定 form 时才使用显式 submit target 或前台 Enter。提交送达与搜索结果成立分开记录，后续结果/空结果必须来自更新的绑定 observation；不导航不等于未提交，也不自动重发。快照观察到的真实 href 可带来源 ref 直接导航，不强制先点击；仍禁止合成站点 URL。
+- 任一已结算但尚无因果 observation receipt 的页面动作，都会从同一 journal 派生 observe-only barrier；它不依赖 checkpoint cursor，也不另建 pending 状态。barrier 存在时终态候选不能发布，模型在同一 Owner/run/task 内最多获得一次显式观察收口机会，并自行选择合适的只读 Browser 工具；代码不自动调用 snapshot，也不写站点、语言、查询词或步骤规则。原生工具协议在一个有界调用内读回观察；文本工具桥允许一次观察响应和一次无工具的结果合成响应，两者都独立于已耗尽的普通轮次预算。观察响应中的全部调用保持只读，即使首个读取已清除 journal barrier，后续调用也不能写页面；合成响应不再开放工具。未清除 barrier 或未形成最终答复时持久化为可续跑暂停，非观察操作和自动重放一律拒绝。
+- 下载只走当前浏览器 session，以临时文件流式落盘、预算校验、hash 与原子发布收口。公开地址静默跳入本地网络时拒绝，用户明确打开的内网/本地来源保持可用；输出只能进入本轮明确授权或 Ready 管理的目录。
+- Power 工具效果按工具、CDP 方法、目标和输出通道机械推导，不按域名封锁。普通观察与诊断不因审计暂时失败而阻断；真实破坏性或秘密外发动作必须在执行前匹配已持久化的精确 grant。权限请求按 partition、逻辑/物理标签、Owner、任务、scope、origin 和请求身份逐项绑定，不使用全局等待队列。
+- `browser_research` 只维护 `start | evidence | complete` 三类持久研究状态：建立开放 work items、把指定 observation receipt 绑定到指定字段、在完成时核对覆盖与来源。它不运行站点 adapter、固定步骤计划或后台浏览器 runner；下一页面动作始终由主 Agent 通过公开工具决定。
+- browser journal/checkpoint 是动作、证据、暂停和续跑的唯一持久真值。续跑依赖原任务路由、已完成动作和未解决 work items，不继承自然语言意图副本或 collection/batch 标记。只有绑定真实页面读取的 observation resource 能成为来源证据；失败回执、工具日志、URL、标题或候选数量不能冒充正文。
+- Browser workflow closeout 只做一次 typed inspection，结果为 `absent | action_in_flight | observation_required | research_incomplete | sealable`。成功只能从 `sealable` 进入最终复核；error/cancel/interrupted 不复用成功 seal，而是在核对 child revision 与绑定后原子收口，不能留下仍为 running 的 Parent、child 或 run。
+- `browser_research(action=complete)` 只在所有开放 work items 都有匹配当前文档与目标字段的有效证据时完成；正文必须来自详情页读取，列表事实只能覆盖其实际读到的字段。受预算约束的结果与证据摘要写入同一个 task transaction，重启或 rebind 后仍可核验和交付。
+- 浏览器任务永久保留创建 run、活动执行绑定、父任务和 revision。Renderer 只消费 Main projection；旧 revision 不得覆盖新续跑，projection 写失败不得反向杀死真实任务。停止或用户接管时先关闭写栅栏，再持久化可续跑暂停；用户输入继续送入页面，不额外排队或要求二次确认。
+- Agent 指针层只展示真实可信鼠标动作，完全 click-through；动作终态、租约丢失、接管、标签切换、BrowserView 隐藏或 bounds 改变时清除。提示显示状态不改变任务、权限或执行状态。
+- 浏览器专项回归入口是 `npm run verify:browser-orchestration`、`npm run verify:browser-surface`、`npm run verify:browser-reliability` 与 `npm run verify:browser-grounded-orchestration-native`；涉及 SQLite、下载记录或任务持久化还必须跑 `npm run verify:native`，最终另跑隔离配置下的真实 Electron live proof。完整基线一旦通过，后续局部修正保留累计证据，只复测原失败、直接风险变体和受影响 gate，不机械重跑未受影响矩阵。
 - RSS 自动刷新由 Main 单实例调度，不依赖 RSS 页面是否打开；`rss:auto_refresh_interval_ms=0` 表示仅手动刷新。冷启动按持久化的最近一次 `fetchAll` 完成时间补跑或等待剩余间隔，设置保存后立即重新排期。手动与自动刷新必须复用同一个 `fetchAll` 入口和 `RSSUpdateLock`；自动结果通过状态查询与完成事件通知 Renderer，`success:false` 和部分源错误都必须保留为可见警告。
 - RSS 文章在统一抓取出口按平台内容编号归一后再入库；Bilibili 视频页、带追踪参数的链接和明确只指向一条视频的动态，以及 Twitter/X 同一状态的等价链接，必须得到同一文章身份。普通文章对视频或推文的引用不得改变文章身份。同标题或同发布时间不能单独作为去重依据；历史别名合并必须保留未读、收藏、收件箱可见性和分析任务关联。
 - Agent 定时任务的唯一时间与领取真值是 Main + SQLite 的 `scheduled_tasks` / `agent_schedule_occurrences`；sidecar 不再调度或镜像。每次触发先持久领取 occurrence，再按 scope 串行进入生产 Agent 主链；同一 schedule 不并发，前台运行优先，缺失 scope/Agent/workspace 时暂停或阻塞而不走兜底会话。

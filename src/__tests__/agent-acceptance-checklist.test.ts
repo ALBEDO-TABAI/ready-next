@@ -13,7 +13,8 @@ import assert from 'node:assert/strict'
 import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, relative } from 'node:path'
-import test, { after } from 'node:test'
+import test, { after, before } from 'node:test'
+import { canonicalCoreCloseoutTestPort } from './helpers/canonical-core-closeout-test-port'
 
 import {
   AgentSdkRuntime,
@@ -42,6 +43,7 @@ import type {
   ToolTraceEvent,
 } from '../renderer/modules/agent/types'
 import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
+import { __setSkillsRuntimeManagerForTests } from '../main/modules/skills-runtime/runtime-manager'
 
 const STAGE_Z_ROOT = 'docs/superpowers/audits/2026-05-24-stage-z-closeout'
 const STAGE_Z_AGENT_ACCEPTANCE_DIR = `${STAGE_Z_ROOT}/agent-acceptance`
@@ -60,6 +62,23 @@ const fakeConfig = {
   apiKey: 'test-key',
   model: 'gpt-test',
 } as const
+
+before(() => {
+  __setSkillsRuntimeManagerForTests({
+    listSkills: () => [
+      { id: 'hfp-space-design', name: 'hfp-space-design', allowedTools: ['document_create_tab', 'document_set_content', 'document_save_tab'] },
+      { id: 'quick-analyzer', name: 'Quick Analyzer', allowedTools: ['skill_quick_analyze'] },
+      { id: 'doc-analyzer', name: 'Doc Analyzer', allowedTools: ['skill_doc_analyze_start', 'skill_doc_analyze_get_artifact', 'skill_doc_analyze_summarize'] },
+      { id: 'video-expert-analyzer', name: 'Video Expert Analyzer', allowedTools: ['skill_long_pipeline_start', 'skill_video_expert_pipeline'] },
+      { id: 'video-copy-analyzer', name: 'Video Copy Analyzer', allowedTools: ['skill_video_copy_analyze'] },
+      { id: 'config-required', name: 'Config Required', allowedTools: ['skill_needs_config_start'] },
+    ],
+  } as never)
+})
+
+after(() => {
+  __setSkillsRuntimeManagerForTests(null)
+})
 
 test('agent acceptance checklist declares transitive sqlite coverage', (t) => {
   skipIfSqliteUnavailable(t, 'agent acceptance checklist transitive sqlite guard')
@@ -501,6 +520,7 @@ async function runChecklistItem(params: ChecklistRunParams): Promise<ChecklistRu
   runtime.on('output', (event) => outputEvents.push(event))
   runtime.on('status', (event) => statusEvents.push(event))
   runtime.setRuntime({
+    ...canonicalCoreCloseoutTestPort(),
     isChannelTypeAvailable: (channelType: string) =>
       channelType === 'feishu-app' ? Boolean(params.feishuConnected) : false,
     getConversationScope: () => null,

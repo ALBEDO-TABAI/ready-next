@@ -19,6 +19,13 @@
 
 import type { TaskType as SharedTaskType } from '../task-types'
 import type { SkillChildRunStatus } from '../skill-child-run-status'
+import type {
+  AgentCheckpointRefs,
+  DurableRequestAnchor,
+  GoalMutationReceipt,
+  HumanTakeoverRef,
+  ParentSteeringReceipt,
+} from '../browser-workflow-control'
 
 // ---------- task-type aliases ----------
 
@@ -134,6 +141,8 @@ export interface RecoveryRecord {
 
 export interface TaskProjectionRecord {
   taskId: string
+  revision?: number
+  dependencyGeneration?: number
   scopeId: string
   runId: string
   parentTaskId?: string | null
@@ -185,6 +194,11 @@ export interface TaskProjectionRecord {
   contextRefs?: string[] | null
   /** Dynamic Delivery host-owned state. Renderer must not derive or mutate it. */
   deliveryState?: import('../dynamic-delivery').DeliveryStateV1 | null
+  requestAnchor?: DurableRequestAnchor | null
+  goalMutations?: GoalMutationReceipt[]
+  steeringReceipts?: ParentSteeringReceipt[]
+  humanTakeoverRef?: HumanTakeoverRef | null
+  checkpointRefs?: AgentCheckpointRefs
   createdAt: string
   updatedAt: string
 }

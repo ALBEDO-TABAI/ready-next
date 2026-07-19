@@ -216,7 +216,7 @@ describe('agent stream segmentation', () => {
     cleanup()
   })
 
-  it('re-persists the assistant message snapshot after the final scope run state arrives', async () => {
+  it('never persists assistant snapshots from renderer when the final scope state arrives', async () => {
     const listeners: {
       onStream?: (data: { agent: string; sessionId?: string; runId?: string; chunk: string; type: string }) => void
       onStatusChange?: (data: unknown) => void
@@ -378,20 +378,15 @@ describe('agent stream segmentation', () => {
 
     await new Promise((resolve) => setTimeout(resolve, 0))
 
-    assert.ok(savedMessages.length >= 2)
-    assert.strictEqual(savedMessages[0]?.meta?.taskSnapshot?.phase, 'done')
-    const lastSaved = savedMessages.at(-1)
-    assert.strictEqual(lastSaved?.meta?.taskSnapshot?.phase, 'done')
-    assert.strictEqual(lastSaved?.meta?.taskSnapshot?.taskTitle, '最新信息查询')
-    assert.strictEqual(lastSaved?.meta?.taskSnapshot?.taskSummary, '已完成网页查询')
+    assert.strictEqual(savedMessages.length, 0)
+    assert.strictEqual(useAgent.getState().scopeRunStates['scope-a']?.phase, 'done')
+    assert.strictEqual(useAgent.getState().scopeRunStates['scope-a']?.taskTitle, '最新信息查询')
+    assert.strictEqual(useAgent.getState().scopeRunStates['scope-a']?.taskSummary, '已完成网页查询')
 
     cleanup()
   })
 
-  // 2026-07-10 activity-capsule L3 — 富工具事件（toolName/detail）经 store
-  // 落到持久化快照的往返合同：逐消息段快照携带两个字段；整轮 taskSnapshot
-  // 只保留 toolName、刻意剥离 detail（消息 meta 体积控制）。
-  it('carries structured tool detail into the segment snapshot and strips it from the run-level snapshot', async () => {
+  it('keeps structured tool detail in projection state without renderer message persistence', async () => {
     const listeners: {
       onStream?: (data: { agent: string; sessionId?: string; runId?: string; chunk: string; type: string }) => void
       onStatusChange?: (data: unknown) => void
@@ -563,26 +558,15 @@ describe('agent stream segmentation', () => {
     })
     await new Promise((resolve) => setTimeout(resolve, 0))
 
-    const lastSaved = savedMessages.at(-1) as {
-      meta?: {
-        taskSnapshot?: { toolTrace?: Array<Record<string, unknown>> }
-        toolTraceSnapshot?: Array<Record<string, unknown>>
-      }
-    } | undefined
-    const segmentItems = lastSaved?.meta?.toolTraceSnapshot || []
-    assert.ok(segmentItems.length >= 1, 'segment snapshot persisted')
-    assert.strictEqual(segmentItems[0]?.toolName, 'skill_read_artifact')
-    assert.match(String(segmentItems[0]?.detail || ''), /mapping\.md/)
-
-    const runLevelItems = lastSaved?.meta?.taskSnapshot?.toolTrace || []
-    assert.ok(runLevelItems.length >= 1, 'run-level snapshot persisted')
-    assert.strictEqual(runLevelItems[0]?.toolName, 'skill_read_artifact')
-    assert.strictEqual(runLevelItems[0]?.detail, undefined, 'run-level snapshot deliberately strips detail')
+    const finalTrace = useAgent.getState().scopeRunStates['scope-detail']?.toolTrace || []
+    assert.strictEqual(finalTrace[0]?.toolName, 'skill_read_artifact')
+    assert.match(finalTrace[0]?.detail || '', /mapping\.md/)
+    assert.strictEqual(savedMessages.length, 0)
 
     cleanup()
   })
 
-  it('clears streaming state when stream done arrives before the final scope event', async () => {
+  it('does not finalize from a done marker that lacks the canonical terminal message', async () => {
     const listeners: {
       onStream?: (data: { agent: string; sessionId?: string; runId?: string; chunk: string; type: string }) => void
       onStatusChange?: (data: unknown) => void
@@ -718,14 +702,13 @@ describe('agent stream segmentation', () => {
     await new Promise((resolve) => setTimeout(resolve, 0))
 
     const state = useAgent.getState()
-    assert.strictEqual(state.isStreaming, false)
-    assert.strictEqual(state.streamingMessageId, null)
-    assert.strictEqual(state.streamingRequestId, null)
-    assert.strictEqual(state.toolTraceStatus, 'done')
-    assert.strictEqual(state.scopeRunStates['scope-stuck']?.phase, 'done')
-    assert.strictEqual(state.scopeRunStates['scope-stuck']?.terminalReason, 'done')
-    const lastSavedMeta = savedMessages.at(-1)?.meta as { taskSnapshot?: { phase?: string } } | undefined
-    assert.strictEqual(lastSavedMeta?.taskSnapshot?.phase, 'done')
+    assert.strictEqual(state.isStreaming, true)
+    assert.strictEqual(state.streamingMessageId, 'msg-stuck')
+    assert.strictEqual(state.streamingRequestId, 'req-stuck')
+    assert.strictEqual(state.toolTraceStatus, 'running')
+    assert.strictEqual(state.scopeRunStates['scope-stuck']?.phase, 'responding')
+    assert.strictEqual(state.scopeRunStates['scope-stuck']?.terminalReason ?? null, null)
+    assert.strictEqual(savedMessages.length, 0)
 
     cleanup()
   })
@@ -873,7 +856,7 @@ describe('agent stream segmentation', () => {
     assert.strictEqual(state.toolTraceStatus, 'done')
     assert.strictEqual(state.scopeRunStates['scope-final-only']?.phase, 'done')
     assert.strictEqual(state.scopeRunStates['scope-final-only']?.terminalReason, 'done')
-    assert.strictEqual((savedMessages.at(-1)?.meta as { taskSnapshot?: { phase?: string } } | undefined)?.taskSnapshot?.phase, 'done')
+    assert.strictEqual(savedMessages.length, 0)
 
     cleanup()
   })

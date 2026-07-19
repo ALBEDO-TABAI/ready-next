@@ -557,6 +557,42 @@ describe('BrowserAutomationService', () => {
 
     assert.strictEqual(text.length, 30_000)
   })
+
+  it('forwards Chromium editing commands with trusted key events', async () => {
+    const mock = createMockView()
+    const service = new BrowserAutomationService({
+      resolveTabView: () => ({
+        tabId: 'tab-1',
+        tab: { id: 'tab-1', url: 'https://example.com', title: 'Example', view: mock.view },
+        view: mock.view,
+      }),
+      createBrowserError: (_code, message) => new Error(message),
+      getViewBounds: () => ({ x: 0, y: 0, width: 1200, height: 800 }),
+    })
+
+    await service.dispatchKey('tab-1', {
+      type: 'rawKeyDown',
+      key: 'a',
+      code: 'KeyA',
+      modifiers: 4,
+      commands: ['selectAll'],
+    })
+
+    assert.deepEqual(mock.state.keyCommands, [{
+      type: 'rawKeyDown',
+      key: 'a',
+      code: 'KeyA',
+      text: '',
+      modifiers: 4,
+      windowsVirtualKeyCode: undefined,
+      nativeVirtualKeyCode: undefined,
+      isKeypad: undefined,
+      autoRepeat: undefined,
+      unmodifiedText: undefined,
+      location: undefined,
+      commands: ['selectAll'],
+    }])
+  })
 })
 
 describe('BrowserTabLifecycleService', () => {

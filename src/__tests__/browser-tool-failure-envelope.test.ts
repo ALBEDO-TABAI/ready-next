@@ -2,11 +2,12 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import { executeToolCall, type ToolContext } from '../main/modules/tools/tool-executor'
-import { __setBrowserCollectionConsentStoreForTests } from '../main/modules/tools/browser-collection-tools'
 import { createBrowserStructuredOutput } from '../main/modules/tools/browser-failure-output'
 import { BrowserTurnLease } from '../main/modules/browser-engine/agent-browser-turn-lease'
 import { BrowserWriteLeaseService } from '../main/modules/browser-engine/browser-write-lease'
+import { browserSnapshotService } from '../main/modules/browser-engine/browser-snapshot-service'
 import type { BrowserController } from '../main/modules/browser-engine/ipc-handler'
+import { attachBrowserWorkflowFixture } from './utils/browser-workflow-fixture'
 import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
 
 test('browser-tool-failure-envelope declares transitive sqlite ABI guard', (t) => {
@@ -23,6 +24,8 @@ function makeController(overrides: Partial<BrowserController> = {}): BrowserCont
     getTaskPayload: () => null,
     startTask: async () => ({ taskId: 'task-1', status: 'queued' }) as never,
     startNoteCollection: async () => ({ ok: true, taskId: 'note-1' }) as never,
+    recordBrowserPowerPreflightAudit: () => undefined,
+    consumeBrowserSiteNotices: () => [],
     ...overrides,
   } as BrowserController
 }
@@ -33,40 +36,73 @@ function writeContext(controller: BrowserController): ToolContext {
 }
 
 function writeContextWithLease(controller: BrowserController, service: BrowserWriteLeaseService): ToolContext {
+  const fixture = attachBrowserWorkflowFixture(controller)
   return {
     invoker: 'host',
-    browserController: controller,
+    browserController: fixture.controller,
     browserLease: new BrowserTurnLease({ taskId: 'task-test', runId: 'run-test' }, 'user-view', service),
     allowedToolNames: null,
     sessionId: 'browser-failure-envelope-test',
+    scopeId: 'browser-failure-envelope-test',
     runId: 'run-test',
+    taskId: 'parent-task-test',
+    browserWorkflowRoute: {
+      browserTaskId: fixture.context.browserTaskId,
+      requestAnchorSnapshotDigest: 'request-anchor-browser-failure-envelope-test',
+    },
   } as ToolContext
 }
 
 function noLeaseContext(controller: BrowserController): ToolContext {
+  const fixture = attachBrowserWorkflowFixture(controller)
   return {
     invoker: 'host',
-    browserController: controller,
+    browserController: fixture.controller,
     allowedToolNames: null,
     sessionId: 'browser-failure-envelope-test',
+    scopeId: 'browser-failure-envelope-test',
     runId: 'run-test',
+    taskId: 'parent-task-test',
+    browserWorkflowRoute: {
+      browserTaskId: fixture.context.browserTaskId,
+      requestAnchorSnapshotDigest: 'request-anchor-browser-failure-envelope-test',
+    },
   } as ToolContext
 }
 
+async function primeSnapshot(context: ToolContext): Promise<void> {
+  await browserSnapshotService.capture(
+    context.browserController!,
+    'tab-1',
+    10_000,
+    async () => ({ pageMap: { targets: [] } }),
+    { force: true },
+  )
+}
+
 test('advanced execution failure returns structured browser failure data and envelope', async () => {
+  const context = writeContext(makeController({
+    sendCdpCommand: async (_tabId, method) => {
+      if (method === 'Page.getFrameTree') return { frameTree: { frame: { id: 'main' } } }
+      if (method === 'Page.createIsolatedWorld') return { executionContextId: 1 }
+      throw new Error('debugger unavailable')
+    },
+  }))
+  await primeSnapshot(context)
+  const pending = await executeToolCall(
+    'browser_eval',
+    { code: 'document.title', purpose: 'read title' },
+    context,
+  )
+  assert.equal(pending.data?.errorKind, 'grant_required')
+  context.confirmedBrowserPowerRequest = pending.data?.browserSuspensionRequest as ToolContext['confirmedBrowserPowerRequest']
   const output = await executeToolCall(
     'browser_eval',
     { code: 'document.title', purpose: 'read title' },
-    writeContext(makeController({
-      getActiveTab: () => ({ id: 'tab-xhs', title: 'XHS', url: 'https://www.xiaohongshu.com/explore/1', active: true }) as never,
-      getTabList: () => [{ id: 'tab-xhs', title: 'XHS', url: 'https://www.xiaohongshu.com/explore/1', active: true }] as never,
-      sendCdpCommand: async () => {
-        throw new Error('debugger unavailable')
-      },
-    })),
+    context,
   )
 
-  assert.equal(output.data?.errorKind, 'browser_eval_failed')
+  assert.equal(output.data?.errorKind, 'browser_eval_failed', JSON.stringify(output))
   assert.equal(output.envelope?.ok, false)
   assert.equal(output.envelope?.kind, 'internal_error')
 })
@@ -110,12 +146,14 @@ test('browser write with held lease returns structured browser failure data', as
 })
 
 test('navigation Error string returns are structured at dispatcher exit', async () => {
+  const context = writeContext(makeController({
+    goBack: () => ({ success: false, error: 'cannot go back' }),
+  }))
+  await primeSnapshot(context)
   const output = await executeToolCall(
     'browser_navigate',
     { action: 'back' },
-    writeContext(makeController({
-      goBack: () => ({ success: false, error: 'cannot go back' }),
-    })),
+    context,
   )
 
   assert.equal(output.data?.ok, false)
@@ -142,60 +180,22 @@ test('wrong browser task id results are structured failures', async () => {
 })
 
 test('browser_click target failure returns an error envelope, not ok text', async () => {
+  const context = writeContext(makeController({
+    executeJS: async (_tabId, code) => {
+      if (code.includes('__READY_DESTRUCTIVE_TARGET_CHECK__')) return 'Element not found: #missing'
+      if (code.includes('document.readyState')) return { readyState: 'complete', bodyTextLen: 20, matched: false }
+      return null
+    },
+  }))
+  await primeSnapshot(context)
   const output = await executeToolCall(
     'browser_click',
     { selector: '#missing' },
-    writeContext(makeController({
-      executeJS: async (_tabId, code) => {
-        if (code.includes('__READY_DESTRUCTIVE_TARGET_CHECK__')) return 'Element not found: #missing'
-        if (code.includes('document.readyState')) return { readyState: 'complete', bodyTextLen: 20, matched: false }
-        return null
-      },
-    })),
+    context,
   )
 
   assert.equal(output.data?.ok, false)
   assert.equal(output.data?.errorKind, 'target_not_found')
   assert.equal(output.envelope?.ok, false)
   assert.equal(output.envelope?.kind, 'arg_error')
-})
-
-test('browser_collect source handoff mismatch returns structured envelope', async () => {
-  __setBrowserCollectionConsentStoreForTests({
-    hasConsent: () => false,
-  } as never)
-  try {
-    const output = await executeToolCall(
-      'browser_collect',
-      {
-        mode: 'notes',
-        source_task_id: 'source-task-1',
-        target_profile_url: 'https://example.com/profile',
-        output_root_dir: '/tmp/other-output-root',
-      },
-      writeContext(makeController({
-        getTask: async () => ({
-          taskId: 'source-task-1',
-          kind: 'visible_collect',
-          status: 'completed',
-          progress: { total: 1, completed: 1, failed: 0, currentLabel: null },
-          result: {
-            discoveryStatus: 'complete',
-            noteCandidates: [{ url: 'https://example.com/a', title: 'A' }],
-          },
-        }) as never,
-        getTaskPayload: () => ({
-          scopeId: 'browser-failure-envelope-test',
-          outputRootDir: '/tmp/original-output-root',
-        }),
-      })),
-    )
-
-    assert.equal(output.data?.ok, false)
-    assert.equal(output.data?.errorKind, 'stale_source_task_output')
-    assert.equal(output.envelope?.ok, false)
-    assert.equal(output.envelope?.kind, 'internal_error')
-  } finally {
-    __setBrowserCollectionConsentStoreForTests(null)
-  }
 })

@@ -3,7 +3,6 @@ import test from 'node:test'
 
 import { BrowserCdpSessionService } from '../main/modules/browser-engine/cdp-session-service'
 import { BrowserFileChooserGuard } from '../main/modules/browser-engine/file-chooser-guard'
-import { consumePendingBrowserSitePermissionNotices } from '../main/modules/browser-engine/browser-permission-policy'
 import type { BrowserHostView } from '../main/modules/browser-engine/host-types'
 
 import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
@@ -63,14 +62,15 @@ function makeFakeHost() {
   }
 }
 
-test('arm enables interception idempotently and fileChooserOpened queues a reroute notice', async () => {
-  consumePendingBrowserSitePermissionNotices()
+test('arm enables interception idempotently and reports fileChooserOpened to its owner', async () => {
   const fake = makeFakeHost()
   const cdp = new BrowserCdpSessionService(fake.host)
   const logLines: string[] = []
+  const intercepted: Array<{ tabId: string; url: string }> = []
   const guard = new BrowserFileChooserGuard({
     cdp,
     resolveTabUrl: () => 'https://creator.xiaohongshu.com/publish/publish',
+    onIntercepted: (tabId, url) => intercepted.push({ tabId, url }),
     log: (m) => logLines.push(m),
   })
 
@@ -83,18 +83,17 @@ test('arm enables interception idempotently and fileChooserOpened queues a rerou
   assert.ok(fake.commands.some((c) => c.method === 'Page.enable'), 'Page domain must be retained')
 
   fake.emit('Page.fileChooserOpened', { frameId: 'f1', mode: 'selectSingle' })
-  const notices = consumePendingBrowserSitePermissionNotices()
-  assert.strictEqual(notices.length, 1)
-  assert.strictEqual(notices[0]?.kind, 'file_chooser_intercepted')
-  assert.strictEqual(notices[0]?.origin, 'https://creator.xiaohongshu.com/publish/publish')
-  assert.ok(notices[0]?.guidance.includes('browser_upload'))
+  assert.deepEqual(intercepted, [{
+    tabId: 'tab-7',
+    url: 'https://creator.xiaohongshu.com/publish/publish',
+  }])
 })
 
 test('disarmAll disables interception, unsubscribes, and clears armed tabs', async () => {
-  consumePendingBrowserSitePermissionNotices()
   const fake = makeFakeHost()
   const cdp = new BrowserCdpSessionService(fake.host)
-  const guard = new BrowserFileChooserGuard({ cdp })
+  const intercepted: string[] = []
+  const guard = new BrowserFileChooserGuard({ cdp, onIntercepted: (tabId) => intercepted.push(tabId) })
 
   await guard.arm('tab-7')
   await guard.disarmAll()
@@ -107,7 +106,7 @@ test('disarmAll disables interception, unsubscribes, and clears armed tabs', asy
   assert.ok(fake.commands.some((c) => c.method === 'Page.disable'), 'Page domain retain must be released')
 
   fake.emit('Page.fileChooserOpened', { frameId: 'f1', mode: 'selectSingle' })
-  assert.deepStrictEqual(consumePendingBrowserSitePermissionNotices(), [], 'events after disarm must not queue notices')
+  assert.deepStrictEqual(intercepted, [], 'events after disarm must not report interception')
 
   // re-arm after disarm works（下一次写租约周期）
   await guard.arm('tab-7')

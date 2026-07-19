@@ -32,9 +32,6 @@ export type ReminderTopic =
   // call (previously registered via an `as ReminderTopic` cast; now part of
   // the honest vocabulary). No conflicts.
   | 'background-task-terminal'
-  // S4-5 — active plan current-step re-injection with evidence-backed advancement. No conflicts.
-  | 'active-plan-step'
-  | 'browser-action-session'
   // D2 (2026-07-03) — per-model-call acceptance-criteria self-check for
   // outcome-bearing task types (multi_step/research/media/browser_transaction).
   // Same template source as terminal adjudication (resolveCriteria). No conflicts.
@@ -45,6 +42,7 @@ export type ReminderTopic =
   // P3-2 — selected 轮：激活技能带脚本但未获脚本执行授权时提醒模型走只读方法论，别伪造脚本结果。priority 85。
   | 'skill-shell-consent'
   | 'tool-capability-conflict'
+  | 'browser-observation-required'
 
 export interface ReminderEntry {
   readonly topic: ReminderTopic

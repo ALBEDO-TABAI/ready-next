@@ -18,11 +18,6 @@
 import { existsSync } from 'fs'
 import { getProviderDef } from '../../../../shared/ai-providers'
 import type { BrowserController } from '../../browser-engine/ipc-handler'
-import { BrowserSiteExperienceStore } from '../../browser-engine/browser-site-experience-store'
-import { BrowserDomainOrchestrator } from './browser-domain-orchestrator'
-import { BrowserDomainAdapter } from './browser-domain-adapter'
-import { loadSiteCardFragments } from './site-card-fragments'
-import { BrowserTaskPlanner } from './browser-task-planner'
 import type { DomainAdapter } from './domain-adapter'
 import { FeishuDomainAdapter } from './feishu-domain-adapter'
 import { DocumentDomainOrchestrator } from './document-domain-orchestrator'
@@ -37,11 +32,6 @@ import { SkillDomainAdapter } from '../skills/skill-domain-adapter'
 import { SkillContextOrchestrator } from '../skills/skill-context-orchestrator'
 import { SubtaskRuntime } from '../runtime-core/subtask-runtime'
 import { WidgetEditLeaseStore } from '../widget-edit-lease'
-import type {
-  AttachmentResourceList,
-  BrowserTaskAttachmentResource,
-} from '../../../../shared/browser-agent-task'
-import type { RunMessage } from '../contracts/run-contracts'
 import { getSkillsRuntimeManager } from '../../skills-runtime/runtime-manager'
 import { executeToolCall } from '../../tools'
 import { findSkillToolBySkillAction, findSkillToolByName } from '../../tools/skills-tools'
@@ -49,15 +39,12 @@ import { AnthropicExecutionClient } from '../../claude-bridge/anthropic-executio
 import { KimiCodingClient } from '../../claude-bridge/kimi-coding-client'
 import { OpenAIExecutionClient } from '../../claude-bridge/openai-execution-client'
 import { createRotatingLogger } from '../../../utils/rotating-logger'
-import { AttachmentLoadFailureThrottle } from '../../claude-bridge/direct-chat-attachment-metrics'
-import { ChatRepository } from '../../repositories/chat-repository'
 import {
   extractPrimaryUserInstruction as extractPrimaryUserInstructionFromText,
 } from '../../claude-bridge/tool-policy-heuristics'
 import { DEFAULT_API_REQUEST_TIMEOUT_MS } from '../../claude-bridge/request-timeout-policy'
 
 const directChatLogger = createRotatingLogger('ready-directchat.log', { buffered: true })
-const chatRepository = new ChatRepository()
 
 function log(msg: string) {
   try { directChatLogger.append(`[${new Date().toISOString()}] ${msg}\n`) } catch { /* */ }
@@ -84,7 +71,6 @@ interface DirectChatSession {
 
 export class DomainAdapterHost {
   private browserController: BrowserController | null = null
-  private readonly browserDomainOrchestrator: BrowserDomainOrchestrator
   private readonly skillContextOrchestrator: SkillContextOrchestrator
   private readonly anthropicExecutionClient: AnthropicExecutionClient
   private readonly kimiCodingClient: KimiCodingClient
@@ -95,46 +81,8 @@ export class DomainAdapterHost {
   private readonly domainAdapters: DomainAdapter[]
   private readonly widgetEditLeaseStore = new WidgetEditLeaseStore()
   private runtime: import('../runtime-core/runtime').AgentControlRuntime | null = null
-  private attachmentLoadFailureThrottle = new AttachmentLoadFailureThrottle()
 
   constructor() {
-    const browserTaskPlanner = new BrowserTaskPlanner({
-      getSessionAttachmentHints: (sessionId) => this.getSessionAttachmentHints(sessionId),
-      getSessionAttachmentResourceList: (sessionId) => this.getSessionAttachmentResourceList(sessionId),
-      getSessionAttachmentResources: (sessionId) => this.getSessionAttachmentResources(sessionId),
-      getIncomingAttachmentHints: (userText) => this.getIncomingAttachmentHints(userText),
-      getActiveTab: () => {
-        const activeTab = this.browserController?.getActiveTab()
-        return activeTab
-          ? {
-            id: activeTab.id,
-            url: activeTab.url,
-            title: activeTab.title,
-            domain: activeTab.domain,
-            active: true,
-            owner: activeTab.owner,
-            required: activeTab.required,
-            activity: activeTab.activity,
-            lastAuditedAt: activeTab.lastAuditedAt,
-            loading: activeTab.loading,
-            canGoBack: activeTab.canGoBack,
-            canGoForward: activeTab.canGoForward,
-            error: activeTab.error,
-            favicon: activeTab.favicon,
-          }
-          : undefined
-      },
-      getTabContext: async (tabId) => this.browserController?.getTabContext(tabId) || null,
-      extractPrimaryUserInstruction: (raw) => this.extractPrimaryUserInstruction(raw),
-    })
-    let browserSiteExperienceStore: BrowserSiteExperienceStore | null = null
-    try {
-      browserSiteExperienceStore = new BrowserSiteExperienceStore()
-    } catch {
-      // silent-catch: store construction failure disables site-experience hints for this session
-      browserSiteExperienceStore = null
-    }
-    this.browserDomainOrchestrator = new BrowserDomainOrchestrator(browserTaskPlanner, browserSiteExperienceStore)
     this.skillContextOrchestrator = new SkillContextOrchestrator({
       extractPrimaryUserInstruction: (raw) => this.extractPrimaryUserInstruction(raw),
       listSkills: () => getSkillsRuntimeManager().listSkills(),
@@ -260,7 +208,6 @@ export class DomainAdapterHost {
       // path changes.
       new ResearchDomainAdapter(),
       new MapDomainAdapter(),
-      new BrowserDomainAdapter(this.browserDomainOrchestrator as never, loadSiteCardFragments()),
       new DocumentDomainAdapter({
         orchestrator: this.documentDomainOrchestrator as never,
         toolLoopOrchestrator: this.documentToolLoopOrchestrator as never,
@@ -350,78 +297,6 @@ export class DomainAdapterHost {
   resetSession(name: string): void {
     this.documentTaskPipelineExecutor.clearSessionCache(name)
     this.widgetEditLeaseStore.release(name)
-  }
-
-  private getSessionAttachmentHints(sessionId?: string): { count: number; latestName?: string } {
-    if (!sessionId) return { count: 0 }
-    const visible = this.getSessionAttachmentResourceList(sessionId)
-    if (!visible.ok) return { count: 0 }
-    return {
-      count: visible.resources.length,
-      latestName: visible.resources[0]?.name || undefined,
-    }
-  }
-
-  private getSessionAttachmentResourceList(sessionId?: string): AttachmentResourceList {
-    if (!sessionId) return { ok: true, resources: [] }
-    try {
-      const resources: BrowserTaskAttachmentResource[] = []
-      for (const item of chatRepository.listConversationAttachments(sessionId)) {
-        if (!item.path) continue
-        try {
-          if (!existsSync(item.path)) continue
-        } catch (error) {
-          // silent-catch: surfaced via throttled fs_error emit + structured {ok:false} return
-          const message = error instanceof Error ? error.message : String(error)
-          this.attachmentLoadFailureThrottle.maybeEmit(sessionId, 'fs_error', {
-            message: message.slice(0, 200),
-          })
-          return { ok: false, reason: 'fs_error', message: message.slice(0, 200) }
-        }
-        const resource = {
-          attachmentId: String(item.attachment_id || '').trim(),
-          name: String(item.name || '').trim(),
-          type: String(item.type || 'other'),
-          mimeType: item.mime_type || undefined,
-          path: item.path,
-          createdAt: item.created_at,
-        }
-        if (resource.attachmentId && resource.name && resource.path) {
-          resources.push(resource)
-        }
-      }
-      return { ok: true, resources }
-    } catch (error) {
-      // silent-catch: Stage 2.2: previously this catch silently returned `[]`, making DB
-      // load failures indistinguishable from "user has no attachments" for
-      // operators. The legacy array API still returns `[]` on failure, while
-      // BrowserTaskPlanner now consumes this detailed result so upload turns
-      // can clarify instead of treating DB/FS failure as a true empty state.
-      const message = error instanceof Error ? error.message : String(error)
-      this.attachmentLoadFailureThrottle.maybeEmit(sessionId, 'db_error', {
-        message: message.slice(0, 200),
-      })
-      return { ok: false, reason: 'db_error', message: message.slice(0, 200) }
-    }
-  }
-
-  private getSessionAttachmentResources(sessionId?: string): BrowserTaskAttachmentResource[] {
-    const result = this.getSessionAttachmentResourceList(sessionId)
-    return result.ok ? result.resources : []
-  }
-
-  private getIncomingAttachmentHints(content: RunMessage): { count: number; latestName?: string } {
-    if (!Array.isArray(content)) return { count: 0 }
-    const mediaBlocks = content.filter((block) => block.type === 'image' || block.type === 'video')
-    if (mediaBlocks.length === 0) return { count: 0 }
-    return {
-      count: mediaBlocks.length,
-      latestName: mediaBlocks.length === 1
-        ? mediaBlocks[0].type === 'image'
-          ? '当前消息图片'
-          : '当前消息视频'
-        : `当前消息附件(${mediaBlocks.length})`,
-    }
   }
 
   private extractPrimaryUserInstruction(raw: string): string {

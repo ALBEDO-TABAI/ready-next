@@ -35,6 +35,7 @@ export class BrowserCdpSessionService {
   private readonly attachedByService = new Set<string>()
   private readonly subscribersByTab = new Map<string, Set<BrowserDebuggerMessageListener>>()
   private readonly inFlightCommandsByTab = new Map<string, number>()
+  private readonly attachmentRefsByTab = new Map<string, number>()
 
   constructor(private readonly host: BrowserCdpHost) {}
 
@@ -100,6 +101,20 @@ export class BrowserCdpSessionService {
       const remaining = Math.max(0, (this.inFlightCommandsByTab.get(resolvedTabId) ?? 1) - 1)
       if (remaining > 0) this.inFlightCommandsByTab.set(resolvedTabId, remaining)
       else this.inFlightCommandsByTab.delete(resolvedTabId)
+      this.maybeDetach(resolvedTabId, view)
+    }
+  }
+
+  async retainAttachment(tabId: string | null): Promise<() => void> {
+    const { tabId: resolvedTabId, view } = await this.ensureAttached(tabId)
+    this.attachmentRefsByTab.set(resolvedTabId, (this.attachmentRefsByTab.get(resolvedTabId) ?? 0) + 1)
+    let released = false
+    return () => {
+      if (released) return
+      released = true
+      const remaining = Math.max(0, (this.attachmentRefsByTab.get(resolvedTabId) ?? 1) - 1)
+      if (remaining > 0) this.attachmentRefsByTab.set(resolvedTabId, remaining)
+      else this.attachmentRefsByTab.delete(resolvedTabId)
       this.maybeDetach(resolvedTabId, view)
     }
   }
@@ -183,6 +198,7 @@ export class BrowserCdpSessionService {
     }
     this.subscribersByTab.delete(tabId)
     this.domainRefsByTab.delete(tabId)
+    this.attachmentRefsByTab.delete(tabId)
     this.inFlightCommandsByTab.delete(tabId)
     this.maybeDetach(tabId, view ?? undefined, true)
   }
@@ -191,6 +207,7 @@ export class BrowserCdpSessionService {
     if (!this.attachedByService.has(tabId)) return
     if (!force && (
       (this.domainRefsByTab.get(tabId)?.size ?? 0) > 0
+      || (this.attachmentRefsByTab.get(tabId) ?? 0) > 0
       || (this.subscribersByTab.get(tabId)?.size ?? 0) > 0
       || (this.inFlightCommandsByTab.get(tabId) ?? 0) > 0
     )) return

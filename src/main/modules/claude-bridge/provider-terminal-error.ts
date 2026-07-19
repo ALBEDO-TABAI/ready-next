@@ -74,6 +74,9 @@ const NETWORK_BODY_MARKERS = /(enotfound|econnrefused|getaddrinfo[\s\S]*(enotfou
 
 const TRANSIENT_BODY_MARKERS = /(econnreset|socket[\s_-]*hang[\s_-]*up|eai_again|epipe|etimedout)/i
 
+/** Request/rate-limit statuses that are retryable outside the generic 5xx range. */
+export const PROVIDER_EXPLICIT_RETRY_STATUS_CODES = [408, 425, 429] as const
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -82,8 +85,17 @@ function safeBody(input: ClassifyProviderErrorInput): string {
   return input.errorBody ? String(input.errorBody) : ''
 }
 
-function isTransientHttpStatus(status: number | undefined): boolean {
-  return status === 408 || status === 425 || status === 500 || status === 502 || status === 503 || status === 504
+export function isTransientProviderHttpStatus(status: number | null | undefined): boolean {
+  if (status === 408 || status === 425) return true
+  if (status === null || status === undefined || status < 500 || status > 599) return false
+  // 501/505 describe a protocol or capability mismatch. Replaying the same
+  // request cannot repair either condition; every other gateway/server 5xx is
+  // treated as transient, including Cloudflare's 520–524 range.
+  return status !== 501 && status !== 505
+}
+
+export function isRetryableProviderHttpStatus(status: number | null | undefined): boolean {
+  return status === 429 || isTransientProviderHttpStatus(status)
 }
 
 // ---------------------------------------------------------------------------
@@ -159,7 +171,7 @@ export function classifyProviderError(input: ClassifyProviderErrorInput): Provid
     return { code: 'invalid_request', httpStatus, providerMessage }
   }
 
-  if (isTransientHttpStatus(httpStatus)) {
+  if (isTransientProviderHttpStatus(httpStatus)) {
     return { code: 'transient', httpStatus, providerMessage }
   }
 
@@ -277,4 +289,3 @@ export function parseRetryAfterHeader(rawValue: string | null | undefined): numb
   const deltaSeconds = Math.ceil((httpDateMs - Date.now()) / 1000)
   return deltaSeconds > 0 ? deltaSeconds : undefined
 }
-

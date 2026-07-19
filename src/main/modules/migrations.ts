@@ -18,8 +18,13 @@ import {
   normalizeAgentSlug,
 } from '../../shared/agent-identity'
 import type { ScheduleSpecV1 } from '../../shared/scheduled-tasks'
+import { BROWSER_CHECKPOINT_WAKE_KINDS } from '../../shared/browser-workflow-control'
 import { migrateCanonicalRSSItemIdentities } from './rss-engine/item-identity-migration'
 import { migrateFalseFailedDirectAnswers } from './agent-control/task-projection/direct-answer-history-migration'
+
+const BROWSER_CHECKPOINT_WAKE_KIND_SQL = BROWSER_CHECKPOINT_WAKE_KINDS
+  .map((kind) => `'${kind}'`)
+  .join(', ')
 
 // Minimal interface compatible with DatabaseConnection from database.ts.
 // Defined locally to avoid circular imports.
@@ -3655,6 +3660,143 @@ const migrations: Migration[] = [
         ALTER TABLE browser_tasks ADD COLUMN projection_sync_json TEXT;
         CREATE INDEX IF NOT EXISTS idx_browser_tasks_projection_revision
           ON browser_tasks(projection_revision, revision, updated_at DESC);
+      `)
+    },
+  },
+  {
+    name: '083_agent_browser_control_plane',
+    up: (db) => {
+      const duplicateBrowserWorkflowParents = db.prepare(`
+        SELECT parent_task_id, COUNT(*) AS child_count
+          FROM browser_tasks
+         WHERE kind = 'browser_workflow' AND parent_task_id IS NOT NULL
+         GROUP BY parent_task_id
+        HAVING COUNT(*) > 1
+      `).all<{ parent_task_id: string; child_count: number }>()
+      if (duplicateBrowserWorkflowParents.length > 0) {
+        throw new Error(
+          `083_agent_browser_control_plane: duplicate browser_workflow children require explicit repair (${duplicateBrowserWorkflowParents
+            .map((row) => `${row.parent_task_id}:${row.child_count}`)
+            .join(',')})`,
+        )
+      }
+      db.exec(`
+        ALTER TABLE task_projections ADD COLUMN revision INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE task_projections ADD COLUMN dependency_generation INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE task_projections ADD COLUMN request_anchor_json TEXT;
+        ALTER TABLE task_projections ADD COLUMN goal_mutations_json TEXT;
+        ALTER TABLE task_projections ADD COLUMN steering_receipts_json TEXT;
+        ALTER TABLE task_projections ADD COLUMN human_takeover_ref_json TEXT;
+        ALTER TABLE task_projections ADD COLUMN checkpoint_refs_json TEXT NOT NULL DEFAULT '{"cleanBaseCheckpointId":null,"suspensionCheckpointId":null}';
+
+        CREATE TABLE IF NOT EXISTS agent_session_checkpoints (
+          checkpoint_id TEXT PRIMARY KEY,
+          role TEXT NOT NULL CHECK (role IN ('clean_base', 'suspension')),
+          parent_task_id TEXT NOT NULL,
+          browser_task_id TEXT,
+          owner_run_id TEXT NOT NULL,
+          ancestor_owner_run_id TEXT,
+          ancestor_checkpoint_digest TEXT,
+          schema_major INTEGER NOT NULL,
+          serializer_major INTEGER NOT NULL,
+          registry_major INTEGER NOT NULL,
+          safety_major INTEGER NOT NULL,
+          final_input_json TEXT NOT NULL,
+          final_input_digest TEXT NOT NULL,
+          sdk_source_item_count INTEGER NOT NULL,
+          sdk_source_prefix_digest TEXT NOT NULL,
+          last_effective_browser_action_seq INTEGER NOT NULL DEFAULT 0,
+          steering_receipt_ids_json TEXT NOT NULL,
+          steering_receipt_digests_json TEXT NOT NULL,
+          required_operation_ids_json TEXT NOT NULL,
+          resource_refs_json TEXT NOT NULL,
+          prepared_skill_json TEXT NOT NULL,
+          activated_capability_groups_json TEXT NOT NULL,
+          created_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_agent_session_checkpoints_parent
+          ON agent_session_checkpoints(parent_task_id, created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_agent_session_checkpoints_owner
+          ON agent_session_checkpoints(owner_run_id, created_at DESC);
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_browser_tasks_one_workflow_per_parent
+          ON browser_tasks(parent_task_id) WHERE kind = 'browser_workflow';
+
+        -- run-finalizer-exempt: migration-083 normalizes legacy working owners into the running workflow state
+        UPDATE run_meta SET status = 'running' WHERE status = 'working';
+      `)
+    },
+  },
+  {
+    name: '084_agent_browser_typed_wake_receipts',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS agent_checkpoint_wake_receipts (
+          wake_id TEXT PRIMARY KEY,
+          parent_task_id TEXT NOT NULL,
+          checkpoint_id TEXT NOT NULL,
+          basis_revision INTEGER NOT NULL,
+          kind TEXT NOT NULL CHECK (kind IN (${BROWSER_CHECKPOINT_WAKE_KIND_SQL})),
+          source_id TEXT NOT NULL,
+          source_digest TEXT NOT NULL,
+          issued_at TEXT NOT NULL,
+          consumed_by_run_id TEXT,
+          consumed_at TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_agent_checkpoint_wake_parent
+          ON agent_checkpoint_wake_receipts(parent_task_id, issued_at DESC);
+      `)
+    },
+  },
+  {
+    name: '085_agent_browser_exhaustive_wake_receipts',
+    up: (db) => {
+      db.exec(`
+        DROP INDEX IF EXISTS idx_agent_checkpoint_wake_parent;
+        ALTER TABLE agent_checkpoint_wake_receipts
+          RENAME TO agent_checkpoint_wake_receipts_legacy_085;
+        CREATE TABLE agent_checkpoint_wake_receipts (
+          wake_id TEXT PRIMARY KEY,
+          parent_task_id TEXT NOT NULL,
+          checkpoint_id TEXT NOT NULL,
+          basis_revision INTEGER NOT NULL,
+          kind TEXT NOT NULL CHECK (kind IN (${BROWSER_CHECKPOINT_WAKE_KIND_SQL})),
+          source_id TEXT NOT NULL,
+          source_digest TEXT NOT NULL,
+          issued_at TEXT NOT NULL,
+          consumed_by_run_id TEXT,
+          consumed_at TEXT
+        );
+        INSERT INTO agent_checkpoint_wake_receipts (
+          wake_id, parent_task_id, checkpoint_id, basis_revision, kind,
+          source_id, source_digest, issued_at, consumed_by_run_id, consumed_at
+        )
+        SELECT wake_id, parent_task_id, checkpoint_id, basis_revision, kind,
+               source_id, source_digest, issued_at, consumed_by_run_id, consumed_at
+          FROM agent_checkpoint_wake_receipts_legacy_085;
+        DROP TABLE agent_checkpoint_wake_receipts_legacy_085;
+        CREATE INDEX idx_agent_checkpoint_wake_parent
+          ON agent_checkpoint_wake_receipts(parent_task_id, issued_at DESC);
+      `)
+    },
+  },
+  {
+    name: '086_agent_steering_message_resources',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS agent_steering_message_resources (
+          resource_id TEXT PRIMARY KEY,
+          message_id TEXT NOT NULL,
+          ordinal INTEGER NOT NULL,
+          block_type TEXT NOT NULL CHECK (block_type IN ('text', 'image', 'video')),
+          media_type TEXT,
+          content TEXT NOT NULL,
+          content_digest TEXT NOT NULL,
+          provenance_digest TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          UNIQUE(message_id, ordinal)
+        );
+        CREATE INDEX IF NOT EXISTS idx_agent_steering_resources_message
+          ON agent_steering_message_resources(message_id, ordinal);
       `)
     },
   }

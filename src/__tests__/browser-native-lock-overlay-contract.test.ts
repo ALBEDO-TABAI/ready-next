@@ -44,7 +44,6 @@ test('P7c3 uses a native child window lock overlay rather than a DOM z-index bad
   assert.match(ipcHandler, /setupBrowserLockOverlayIPC/)
   assert.match(ipcHandler, /transition\.previousState === 'held'[\s\S]{0,180}clearBrowserAgentPointer\(\)/)
   assert.match(ipcHandler, /transition\.previousState === 'held'[\s\S]{0,260}publishBrowserAgentActionLifecycle\('abort'\)/)
-  assert.match(ipcHandler, /closeForegroundBrowserWorkflowSession[\s\S]{0,900}publishBrowserAgentActionLifecycle/)
   assert.match(ipcHandler, /clearAgentPointer:\s*\(\) => clearBrowserAgentPointer\(\)/)
   assert.match(visibilityRuntime, /intent\.kind === 'hide'[\s\S]{0,120}this\.deps\.clearAgentPointer\(\)/)
   assert.match(preload, /showBrowserLockOverlay/)

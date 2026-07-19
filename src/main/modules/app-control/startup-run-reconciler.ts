@@ -68,7 +68,8 @@ function parseJsonRecord(raw: string | null | undefined): Record<string, unknown
 
 // B3 — a running browser task with no usable checkpoint is paused (not silently
 // cancelled) with a rerun marker so it stays resumable from the original request
-// (content-task-runner.canResumeTask honors `resumeKind:'rerun_from_request'`).
+// The durable browser workflow route owns restart admission; startup does not
+// infer resumability from a retired collection runner.
 function resultWithRerunMarker(raw: string | null): string {
   const result = parseJsonRecord(raw) || {}
   return JSON.stringify({ ...result, resumeKind: 'rerun_from_request', restartReason: 'restart' })

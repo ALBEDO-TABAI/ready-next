@@ -35,7 +35,6 @@ import type {
   ConversationScopeMessage,
   ScopeRunSummary,
 } from '../contracts/types'
-import { BrowserCollectionConsentStore } from '../../browser-engine/browser-collection-consent'
 import { forgetSession } from '../session/session-continuity'
 import { logAgentMetric } from '../metrics'
 import { tryParseJson } from './runtime-helpers'
@@ -86,11 +85,6 @@ export class ConversationScopeStore {
     this.deps.scopeRunSummaries.delete(scopeId)
     forgetSession(scopeId)
     this.deps.taskProjectionStore.deleteByScope(scopeId)
-    try {
-      new BrowserCollectionConsentStore().deleteByScope(scopeId)
-    } catch (error) {
-      console.warn('[Runtime] Failed to clear browser collection consent scope:', error)
-    }
     this.deps.db.deleteConversation(scopeId)
   }
 

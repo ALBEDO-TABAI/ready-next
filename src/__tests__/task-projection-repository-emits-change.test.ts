@@ -34,8 +34,21 @@ function makeMockDb() {
             return {
               run: (...params: unknown[]) => {
                 const taskId = params[0] as string
-                const scopeId = params[1] as string
-                rows.set(taskId, { task_id: taskId, scope_id: scopeId })
+                const scopeId = params[3] as string
+                rows.set(taskId, {
+                  task_id: taskId,
+                  scope_id: scopeId,
+                  run_id: 'r',
+                  task_type: 'short_task',
+                  module: 'system',
+                  status: 'running',
+                  interaction_state: 'running',
+                  steps_json: '[]',
+                  recent_artifacts_json: '[]',
+                  created_at: '2026-05-07T00:00:00.000Z',
+                  updated_at: '2026-05-07T00:00:00.000Z',
+                })
+                return { changes: 1 }
               },
               get: () => undefined,
               all: () => [],
@@ -47,6 +60,7 @@ function makeMockDb() {
                 const taskId = params[params.length - 1] as string
                 const existing = rows.get(taskId)
                 if (existing) rows.set(taskId, existing)
+                return { changes: existing ? 1 : 0 }
               },
               get: () => undefined,
               all: () => [],
@@ -59,6 +73,7 @@ function makeMockDb() {
                 for (const [k, v] of Array.from(rows.entries())) {
                   if (v.scope_id === scopeId) rows.delete(k)
                 }
+                return { changes: 1 }
               },
               get: () => undefined,
               all: () => [],

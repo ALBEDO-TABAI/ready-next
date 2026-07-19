@@ -9,6 +9,7 @@ import { AgentSdkRuntime, type AgentSdkRuntimeDeps } from '../main/modules/agent
 import { RunMetaRepository } from '../main/modules/agent-control/task-projection/run-meta-repository'
 import { __setMetricSinkForTests } from '../main/modules/agent-control/metrics'
 import { ScriptedAgentRunner } from './helpers/scripted-agent-runner'
+import { canonicalCoreCloseoutTestPort } from './helpers/canonical-core-closeout-test-port'
 
 import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
 
@@ -240,6 +241,21 @@ describe('finalizeRunOutcome', () => {
       }])
       const runtime = createRuntime(scripted.deps)
       runtime.setRuntime({
+        ...canonicalCoreCloseoutTestPort((input) => {
+          const patch = {
+            status: input.status,
+            terminalReason: input.terminalReason,
+            initiator: input.initiator,
+            durationMs: input.durationMs,
+          }
+          if (repository.get(input.ownerRunId)) repository.update(input.ownerRunId, patch as never)
+          else repository.create({
+            runId: input.ownerRunId,
+            taskId: input.parentTaskId,
+            scopeId: input.conversationId,
+            ...patch,
+          } as never)
+        }),
         getRunMetaRepository: () => repository,
       } as never)
       runtime.newSession('butler::scope-run-finalizer', 'system prompt')

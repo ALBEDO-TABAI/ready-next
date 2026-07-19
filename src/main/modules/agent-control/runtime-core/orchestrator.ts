@@ -337,6 +337,11 @@ export class ReadyAgentOrchestrator extends EventEmitter {
     return this.activeRunIds.get(this.toTaskKey(agent, sessionId)) === requestId
   }
 
+  getActiveRunId(agent: string, sessionId: string | undefined): string | null {
+    if (!agent) return null
+    return this.activeRunIds.get(this.toTaskKey(agent, sessionId)) || null
+  }
+
   inspectActiveRunIfMatches(
     agent: string,
     sessionId: string | undefined,

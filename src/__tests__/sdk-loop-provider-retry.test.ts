@@ -75,7 +75,7 @@ test('persistent 5xx exhausts retries and surfaces a classified failure', async 
   assert.equal(calls, 4)
 })
 
-test('a stream cut after visible text never replays the model request', async () => {
+test('a stream cut before candidate commit retries without publishing the interrupted text', async () => {
   let calls = 0
   const visible: string[] = []
   const runtime = createRuntime(async ({ onTextDelta }) => {
@@ -95,10 +95,10 @@ test('a stream cut after visible text never replays the model request', async ()
     {}
   )
 
-  assert.equal(calls, 1)
-  assert.equal(result.success, false)
-  assert.equal(visible.join('').includes('完整答复'), false)
-  assert.equal((visible.join('').match(/半句/g) || []).length, 1)
+  assert.equal(calls, 2)
+  assert.equal(result.success, true)
+  assert.equal(result.finalText.includes('完整答复'), true)
+  assert.equal(visible.join('').includes('半句'), false)
 })
 
 test('a transient failure after a real tool result never replays the tool turn', async () => {

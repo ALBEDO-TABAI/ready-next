@@ -43,8 +43,6 @@ test('AgentBrowserSupervisionPanel renders visible co-driving copy for user-view
     controlState: 'active',
     tasks: [task()],
     requestInterruption: noop,
-    confirmInterruption: noop,
-    dismissInterruption: noop,
     surfaces: surfaces('user-view'),
     activeWriteSurface: 'user-view',
   }))
@@ -59,8 +57,6 @@ test('AgentBrowserSupervisionPanel renders background agent page copy for agent-
     controlState: 'active',
     tasks: [task()],
     requestInterruption: noop,
-    confirmInterruption: noop,
-    dismissInterruption: noop,
     surfaces: surfaces('agent-view'),
     activeWriteSurface: 'agent-view',
   }))
@@ -80,8 +76,6 @@ test('AgentBrowserSupervisionPanel keeps waiting_human tasks visible as verifica
     controlState: 'active',
     tasks: [waitingTask],
     requestInterruption: noop,
-    confirmInterruption: noop,
-    dismissInterruption: noop,
     surfaces: surfaces('agent-view'),
     activeWriteSurface: 'agent-view',
   }))
@@ -89,4 +83,36 @@ test('AgentBrowserSupervisionPanel keeps waiting_human tasks visible as verifica
   assert.match(html, /等待确认/)
   assert.match(html, /等待人工确认/)
   assert.doesNotMatch(html, /2\/3/)
+})
+
+test('AgentBrowserSupervisionPanel offers one-step takeover without a confirmation branch', () => {
+  const html = renderToStaticMarkup(createElement(AgentBrowserSupervisionPanel, {
+    controlState: 'active',
+    tasks: [task()],
+    requestInterruption: noop,
+    surfaces: surfaces('agent-view'),
+    activeWriteSurface: 'agent-view',
+  }))
+
+  assert.match(html, /立即接管浏览器/)
+  assert.doesNotMatch(html, /确认中断/)
+  assert.doesNotMatch(html, /取消/)
+})
+
+test('pane supervision history cannot consume the browser surface', () => {
+  const tasks = Array.from({ length: 12 }, (_, index) => ({
+    ...task(),
+    taskId: `task-${index}`,
+  }))
+  const html = renderToStaticMarkup(createElement(AgentBrowserSupervisionPanel, {
+    controlState: 'active',
+    tasks,
+    requestInterruption: noop,
+    surfaces: surfaces('agent-view'),
+    activeWriteSurface: 'agent-view',
+    variant: 'pane',
+  }))
+
+  assert.match(html, /max-height:40%/)
+  assert.match(html, /overflow-y-auto/)
 })

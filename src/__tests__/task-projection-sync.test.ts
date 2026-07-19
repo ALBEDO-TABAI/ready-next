@@ -225,6 +225,75 @@ test('syncTaskProjection falls back to update when create loses a concurrent ins
   assert.equal(records.get('task-1')?.taskSummary, '并发后更新成功')
 })
 
+test('syncTaskProjection yields when Browser claims the Parent between read and update', async () => {
+  const records = new Map<string, TaskProjectionRecord>()
+  const initialStore: TaskProjectionStore = {
+    create(record) {
+      records.set(record.taskId, record)
+    },
+    update(taskId, patch) {
+      records.set(taskId, { ...records.get(taskId)!, ...patch })
+    },
+    get(taskId) {
+      return records.get(taskId) || null
+    },
+    listByScope() {
+      return []
+    },
+    listByParentTask() {
+      return []
+    },
+  }
+  await syncTaskProjection(initialStore, createSummary(), createPayload())
+
+  const anchor = {
+    messageId: 'message-browser-owner',
+    messageDigest: 'a'.repeat(64),
+    canonicalMessageSnapshot: {
+      role: 'user' as const,
+      content: 'browse the current page',
+      timestamp: '2026-04-16T11:00:01.000Z',
+    },
+    resourceAnchors: [],
+    snapshotDigest: 'b'.repeat(64),
+    createdAt: '2026-04-16T11:00:01.000Z',
+  }
+  let observedBoundary: string | undefined
+  const racingStore: TaskProjectionStore = {
+    create() {
+      throw new Error('unexpected create')
+    },
+    update(taskId, _patch, options) {
+      observedBoundary = options?.browserParentBoundary
+      records.set(taskId, { ...records.get(taskId)!, requestAnchor: anchor })
+    },
+    get(taskId) {
+      return records.get(taskId) || null
+    },
+    listByScope() {
+      return []
+    },
+    listByParentTask() {
+      return []
+    },
+  }
+
+  const result = await syncTaskProjection(racingStore, {
+    ...createSummary(),
+    phase: 'takeover',
+    interactionState: 'human_takeover',
+    updatedAt: '2026-04-16T11:01:00.000Z',
+  }, {
+    ...createPayload(),
+    phase: 'takeover',
+    timestamp: '2026-04-16T11:01:00.000Z',
+  })
+
+  assert.equal(observedBoundary, 'unbound_only')
+  assert.equal(result?.requestAnchor?.messageId, anchor.messageId)
+  assert.equal(records.get('task-1')?.status, 'running')
+})
+
 test('syncTaskProjection collapses duplicate skill projections by detached task id', async () => {
   const records = new Map<string, TaskProjectionRecord>()
   const store: TaskProjectionStore = {

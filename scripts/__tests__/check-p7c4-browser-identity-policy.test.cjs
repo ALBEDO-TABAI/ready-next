@@ -67,8 +67,8 @@ function seed(root, overrides = {}) {
     'scripts/p7c4-browser-identity-inventory.json': `${JSON.stringify(inventory, null, 2)}\n`,
     'src/main/modules/browser-engine/tab-lifecycle-service.ts': "const view = this.host.createHost(profile ? `persist:browser-profile-${profile}` : 'persist:browser')\n",
     'src/main/modules/browser-engine/ipc-handler.ts': [
-      'async ensureAgentTab() {',
-      "const created = await this.createTab(READY_BROWSER_BLANK_URL, { background: true })",
+      'async ensureAgentTab(profile?: string | null) {',
+      "const created = await this.createTab(READY_BROWSER_BLANK_URL, { background: true, profile: requestedProfile })",
       "this.updateTabRuntimeState(created.tabId, { owner: 'agent', activity: 'running' })",
       "partition: 'persist:browser'",
       "session.fromPartition('persist:browser')",
