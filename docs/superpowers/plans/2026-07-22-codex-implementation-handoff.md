@@ -52,6 +52,15 @@ authorities:
    - 任一红或与 S1 改动面冲突过大 → 封存：`git switch -c wip/2026-07-18-grounded-orchestration-partial && git add -A && git commit -m "wip: shelve grounded orchestration partial implementation"`，再 `git switch feature/skill-envelope-floors`，以干净基线开工。
 4. **探针归档**：`.ready-exact-prompt-live.mjs`、`.ready-exact-prompt-live-report.json`、`.ready-provider-probe.mjs` 移入 `outputs/agent-audit/2026-07-22/`（审计引用的 report 保留）。
 
+### L-1 执行记录（2026-07-22）
+
+- docs-only 提交：`6d6402853`。
+- Gate 结果：`typecheck=0`（`/tmp/l1-tc.log`）、`verify:browser-orchestration=0`（`/tmp/l1-bo.log`）、`verify:stability=1`（`/tmp/l1-st.log`）、`verify:native=0`（`/tmp/l1-na.log`）。
+- 失败定性：`verify:stability` 被 module-boundary gate 拒绝；`agent-sdk-turn-completion.ts` / `agent-sdk-turn-execution.ts` / `agent-sdk-turn-model-loop.ts` 超过 900 行，`agent-sdk-turn-orchestrator.ts` 达 1003 行并超过 1000 行硬上限。
+- 处置：按“任一红则封存”分支执行，已将 07-18 在途实现封存到 `wip/2026-07-18-grounded-orchestration-partial`，提交 `79fbc376`；当前分支回到干净 `feature/skill-envelope-floors`。
+- 探针归档：三份根目录探针已移入该 WIP 提交的 `outputs/agent-audit/2026-07-22/`，其中 live report 保留。
+- 与计划偏差：为避免探针在切回基线后随分支消失，归档动作在 WIP 提交前完成；其余顺序、Gate 命令和处置标准零偏差。
+
 ## 3. L0 施工顺序与每阶段入口
 
 全部细节以收口计划对应章节为准，此处只列入口与不可跳步：
