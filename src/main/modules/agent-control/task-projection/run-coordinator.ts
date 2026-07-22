@@ -464,7 +464,11 @@ export class RunCoordinator {
     if (result.terminalReason === 'manual_suspend') {
       const handoff = this.deps.getPendingHandoff?.(taskId) ?? null
       if (!handoff || handoff.handoffGeneration <= request.scope.handoffGeneration) {
-        return { success: true }
+        return {
+          success: true,
+          canonicalMessage: result.canonicalMessage,
+          canonicalMessageDigest: result.canonicalMessageDigest,
+        }
       }
       const takeoverScope = this.deps.getConversationScope?.(request.scope.id) ?? null
       if (!takeoverScope || takeoverScope.activeAgentId !== handoff.targetAgentId) {

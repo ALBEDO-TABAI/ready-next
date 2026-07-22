@@ -11,6 +11,8 @@ import {
 import { classifyExecutionError } from '../main/modules/claude-bridge/error-classifier'
 import { createToolExecutionOutput } from '../main/modules/agent-control/tools-runtime/tool-result-types'
 import type { ToolDefinition } from '../main/modules/agent-control/tools-runtime/tool-definition'
+import { handleAgentSdkTurnError, shouldCheckpointProviderFailure } from '../main/modules/agent-control/runtime-core/agent-sdk-turn-closeout'
+import { buildProviderHttpError } from '../main/modules/claude-bridge/provider-terminal-error'
 
 test('sdk-loop-provider-retry declares transitive sqlite ABI guard', (t) => {
   skipIfSqliteUnavailable(t, 'sdk-loop-provider-retry transitive sqlite load')
@@ -73,6 +75,67 @@ test('persistent 5xx exhausts retries and surfaces a classified failure', async 
   assert.equal(result.success, false)
   // 1 initial + maxAttempts(3) retries = 4 calls
   assert.equal(calls, 4)
+})
+
+test('retry exhaustion becomes resumable only when a durable Browser checkpoint path exists', () => {
+  const error = new Error('HTTP 503 Service Unavailable') as Error & {
+    __readyProviderRequestRetryExhausted?: boolean
+  }
+  error.__readyProviderRequestRetryExhausted = true
+  assert.equal(shouldCheckpointProviderFailure(error, true), true)
+  assert.equal(shouldCheckpointProviderFailure(error, false), false)
+  assert.equal(shouldCheckpointProviderFailure(new Error('HTTP 503 Service Unavailable'), true), false)
+})
+
+test('retry-exhausted provider failure closes through the durable Browser checkpoint callback', async () => {
+  const error = buildProviderHttpError({
+    httpStatus: 503,
+    errorBody: 'Service Unavailable',
+  }) as Error & {
+    __readyProviderRequestRetryExhausted?: boolean
+  }
+  error.__readyProviderRequestRetryExhausted = true
+  let capturedDiagnostics: Record<string, unknown> | null = null
+  const expected = {
+    success: true,
+    status: 'checkpoint' as const,
+    terminalReason: 'blocked_tool_error' as const,
+    finalText: '浏览器进度已保存',
+  }
+  const result = await handleAgentSdkTurnError({
+    error,
+    name: 'butler::scope-provider-transfer',
+    runId: 'run-provider-transfer',
+    taskId: 'task-provider-transfer',
+    sessionId: 'scope-provider-transfer',
+    runStartedAt: Date.now(),
+    runHandle: { abortInitiator: null },
+    abortController: new AbortController(),
+    usedTools: ['browser_read'],
+    transcriptEvents: [],
+    projectionPatches: [],
+    runMetaBudgetRuntime: null,
+    runMetaProviderDiagnostics: null,
+    runMetaUsage: null,
+    longSkillCheckpoint: null,
+    finalText: '',
+    documentTargetGuardForRecovery: null,
+    requiresLocalDocumentExcerptForRecovery: false,
+    requiresLocalDocumentWriteForRecovery: false,
+    hasSuccessfulLocalDocumentSourceReadForRecovery: false,
+    fileReadExcerptCheckpointForRecovery: null,
+    hasSuccessfulDocumentTargetMutation: false,
+    hasSuccessfulToolProgress: true,
+    lastDocumentSaveSuccessText: null,
+    finishProviderTransferCheckpoint: async (diagnostics) => {
+      capturedDiagnostics = diagnostics as unknown as Record<string, unknown>
+      return expected
+    },
+  } as never)
+
+  assert.equal(result, expected)
+  assert.equal(capturedDiagnostics?.lastProviderFailureHttpStatus, 503)
+  assert.equal(capturedDiagnostics?.lastProviderFailureErrorKind, 'transient')
 })
 
 test('a stream cut before candidate commit retries without publishing the interrupted text', async () => {

@@ -28,8 +28,12 @@ import {
 import { createToolExecutionOutput } from '../main/modules/agent-control/tools-runtime/tool-result-types'
 import type { TaskProjectionRecord } from '../main/modules/agent-control/contracts/run-contracts'
 import { __setMetricSinkForTests, type AgentMetricEvent } from '../main/modules/agent-control/metrics'
+import { setBrowserTargetClaimRunCloseoutPort } from '../main/modules/browser-engine/browser-target-claim-closeout'
 
 const NOW = new Date('2026-06-12T12:00:00.000Z')
+
+test.before(() => setBrowserTargetClaimRunCloseoutPort(() => undefined))
+test.after(() => setBrowserTargetClaimRunCloseoutPort(null))
 
 function collectDocumentSaveProofs(path = '/tmp/report.md') {
   return collectToolOutputProofs('document_save_tab', createToolExecutionOutput(`已保存文档：${path}`, {

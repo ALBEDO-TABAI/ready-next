@@ -6,8 +6,13 @@ import {
   acquireTarget,
   createTargetClaimService,
   identityOf,
+  setTargetUserOwnedForTest,
   TARGET_A,
 } from './utils/browser-target-claim-fixture'
+import {
+  BrowserTargetClaimService,
+  MemoryBrowserTargetClaimRepository,
+} from '../main/modules/browser-engine/browser-target-claims'
 
 describe('Browser target claims', () => {
   it('lets one Owner hold independent A and B targets on the same surface', () => {
@@ -41,6 +46,25 @@ describe('Browser target claims', () => {
     assert.equal(second.detail?.tabId, 'tab-a')
   })
 
+  it('audits a rejected competing claim once per operation', () => {
+    const repository = new MemoryBrowserTargetClaimRepository()
+    const service = new BrowserTargetClaimService(repository)
+    const first = service.acquire({ ...TARGET_A, operationId: 'first-acquire' })
+    if (isAgentBrowserError(first)) throw new Error(first.message)
+    const rejectedInput = {
+      ...TARGET_A,
+      operationId: 'competing-acquire',
+      ownerRunId: 'run-other',
+      parentTaskId: 'task-other',
+      browserTaskId: 'browser-task-other',
+    }
+    assert.ok(isAgentBrowserError(service.acquire(rejectedInput)))
+    assert.ok(isAgentBrowserError(service.acquire(rejectedInput)))
+    const rejected = repository.listReceipts().filter((receipt) => receipt.kind === 'claim_rejected')
+    assert.equal(rejected.length, 1)
+    assert.equal(rejected[0]?.errorCode, 'lease_held')
+  })
+
   it('rejects an old generation after close and reacquire', () => {
     const service = createTargetClaimService()
     const oldClaim = acquireTarget(service)
@@ -59,35 +83,11 @@ describe('Browser target claims', () => {
       tabId: 'tab-b',
       physicalTargetToken: 'boot-test:tab-b:1',
     })
-    const taken = service.recordUserSignal({
-      target: identityOf(a),
-      source: 'pointer',
-      suspensionCheckpointId: 'checkpoint-a',
-    })
+    const taken = setTargetUserOwnedForTest(service, a, 'checkpoint-a')
 
     assert.equal(taken?.state, 'user_owned')
     assert.equal(service.checkWrite(identityOf(a))?.errorCode, 'lease_takeover')
     assert.equal(service.checkWrite(identityOf(b)), null)
-  })
-
-  it('suppresses an Agent navigation echo but accepts an explicit takeover mid-action', () => {
-    const service = createTargetClaimService()
-    const claim = acquireTarget(service)
-    const identity = identityOf(claim)
-    const correlationId = service.beginAgentAction(identity)
-    if (isAgentBrowserError(correlationId)) throw new Error(correlationId.message)
-
-    assert.equal(service.recordUserSignal({
-      target: identity,
-      source: 'navigation',
-      suspensionCheckpointId: 'checkpoint-nav',
-    }), null)
-    assert.equal(service.read(claim.logicalKey)?.state, 'held')
-    assert.equal(service.recordUserSignal({
-      target: identity,
-      source: 'explicit-button',
-      suspensionCheckpointId: 'checkpoint-button',
-    })?.state, 'user_owned')
   })
 
   it('settles logical close by current state without leaving a held owner', () => {
@@ -97,11 +97,7 @@ describe('Browser target claims', () => {
 
     const userService = createTargetClaimService()
     const user = acquireTarget(userService)
-    userService.recordUserSignal({
-      target: identityOf(user),
-      source: 'keyboard',
-      suspensionCheckpointId: 'checkpoint-user',
-    })
+    setTargetUserOwnedForTest(userService, user, 'checkpoint-user')
     assert.equal(userService.closeTarget(user.logicalKey)?.state, 'released')
   })
 
@@ -128,11 +124,7 @@ describe('Browser target claims', () => {
       tabId: 'tab-b',
       physicalTargetToken: 'boot-test:tab-b:1',
     })
-    service.recordUserSignal({
-      target: identityOf(a),
-      source: 'keyboard',
-      suspensionCheckpointId: 'checkpoint-a',
-    })
+    setTargetUserOwnedForTest(service, a, 'checkpoint-a')
     service.closeoutRun({
       ownerRunId: 'run-a',
       resumable: true,
@@ -146,13 +138,4 @@ describe('Browser target claims', () => {
     assert.equal(service.heldForRun('run-a').length, 0)
   })
 
-  it('invalidates the old physical identity on boot restart', () => {
-    const service = createTargetClaimService()
-    const claim = acquireTarget(service)
-    service.expireBoot('boot-test')
-    const readback = service.read(claim.logicalKey)
-    assert.equal(readback?.state, 'expired')
-    assert.equal(readback?.physicalTargetToken, null)
-    assert.ok(service.checkWrite(identityOf(claim)))
-  })
 })

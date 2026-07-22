@@ -14,5 +14,6 @@ export function setBrowserTargetClaimRunCloseoutPort(
 }
 
 export function closeoutBrowserTargetClaimsForRun(input: BrowserTargetClaimRunCloseout): void {
-  closeoutPort?.(input)
+  if (!closeoutPort) throw new Error('browser_target_claim_closeout_port_unset')
+  closeoutPort(input)
 }

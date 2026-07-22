@@ -370,6 +370,88 @@ test('startup run reconciler closes stale run, projection, browser, and skill ro
   }
 })
 
+test('startup expires a pending browser confirmation and keeps the checkpoint reissuable', async (t) => {
+  if (skipIfSqliteUnavailable(t, 'startup browser confirmation expiration')) return
+  const db = await openDb()
+  try {
+    seedTaskProjection(db, {
+      taskId: 'projection-browser-confirmation',
+      runId: 'run-browser-confirmation',
+      status: 'recoverable_paused',
+      continuationRef: {
+        kind: 'browser_checkpoint',
+        checkpointId: 'checkpoint-browser-confirmation',
+        browserTaskId: 'browser-task-confirmation',
+        suspensionReason: 'browser_power_confirmation',
+        suspensionRequest: {
+          version: 1,
+          kind: 'browser_power_confirmation',
+          requestId: 'browser-confirmation-1',
+          wakeKind: 'browser_power_confirmation',
+          toolName: 'browser_eval',
+          effects: ['page_mutation'],
+          actionIntent: { objectRef: 'page', inputHash: 'input-hash' },
+          target: {
+            scopeId: 'scope-a',
+            ownerRunId: 'run-browser-confirmation',
+            browserTaskId: 'browser-task-confirmation',
+            tabId: 'tab-1',
+            documentKeyHash: 'document-key-hash',
+            origin: 'https://example.com',
+            targetDigest: 'target-digest',
+          },
+          purpose: '更新页面',
+        },
+      },
+    })
+    db.prepare(
+      `UPDATE task_projections
+          SET module = 'browser', interaction_state = 'suspended', waiting_for = 'confirmation',
+              blocked_reason = 'browser_power_confirmation_checkpoint',
+              resumable_actions_json = '["continue","cancel"]'
+        WHERE task_id = 'projection-browser-confirmation'`,
+    ).run()
+
+    const first = await reconcileStartupRunsOnStartup({
+      db,
+      now: new Date('2026-07-22T10:00:00.000Z'),
+      skillTaskRunRepository: new SkillTaskRunRepository({ getRawDb: () => db as never }),
+      logMetric: () => undefined,
+    })
+    const projection = db.prepare(
+      `SELECT waiting_for, blocked_reason, degradation_reason, resumable_actions_json,
+              continuation_ref_json, revision
+         FROM task_projections WHERE task_id = ?`,
+    ).get<{
+      waiting_for: string
+      blocked_reason: string
+      degradation_reason: string
+      resumable_actions_json: string
+      continuation_ref_json: string
+      revision: number
+    }>('projection-browser-confirmation')!
+    const continuation = JSON.parse(projection.continuation_ref_json) as Record<string, unknown>
+    assert.equal(first.reconcileCount.taskProjections, 1)
+    assert.equal(projection.waiting_for, 'none')
+    assert.equal(projection.blocked_reason, 'browser_confirmation_expired_checkpoint')
+    assert.equal(projection.degradation_reason, 'browser_confirmation_expired_on_restart_or_resend')
+    assert.deepEqual(JSON.parse(projection.resumable_actions_json), ['continue', 'cancel'])
+    assert.equal(continuation.suspensionRequest, undefined)
+    assert.equal(continuation.checkpointId, 'checkpoint-browser-confirmation')
+    assert.equal(projection.revision, 1)
+
+    const second = await reconcileStartupRunsOnStartup({
+      db,
+      now: new Date('2026-07-22T10:01:00.000Z'),
+      skillTaskRunRepository: new SkillTaskRunRepository({ getRawDb: () => db as never }),
+      logMetric: () => undefined,
+    })
+    assert.equal(second.reconcileCount.taskProjections, 0)
+  } finally {
+    db.close()
+  }
+})
+
 test('startup run reconciler preserves terminal run reasons instead of rewriting them as restart interruptions', async (t) => {
   if (skipIfSqliteUnavailable(t, 'startup run reconciler terminal projection repair')) return
   const db = await openDb()

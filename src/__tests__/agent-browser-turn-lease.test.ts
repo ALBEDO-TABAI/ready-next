@@ -6,6 +6,7 @@ import { isAgentBrowserError } from '../main/modules/browser-engine/agent-browse
 import type { BrowserTargetClaimAcquireInput } from '../main/modules/browser-engine/browser-target-claims'
 import {
   createTargetClaimService,
+  setTargetUserOwnedForTest,
   TARGET_A,
 } from './utils/browser-target-claim-fixture'
 
@@ -47,11 +48,9 @@ describe('BrowserTurnLease target claims', () => {
     const turn = new BrowserTurnLease({ taskId: 'task-a', runId: 'run-a' }, service)
     const a = turn.ensureGateForTarget(target())
     if (isAgentBrowserError(a)) throw new Error(a.message)
-    service.recordUserSignal({
-      target: a.identity,
-      source: 'keyboard',
-      suspensionCheckpointId: 'checkpoint-a',
-    })
+    const claim = service.read(a.identity)
+    if (!claim) throw new Error('claim missing')
+    setTargetUserOwnedForTest(service, claim, 'checkpoint-a')
     const b = turn.ensureGateForTarget(target({
       tabId: 'tab-b',
       physicalTargetToken: 'boot-test:tab-b:1',

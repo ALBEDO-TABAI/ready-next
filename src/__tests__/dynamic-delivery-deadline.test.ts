@@ -5,6 +5,10 @@ import {
   armDynamicDeliveryDeadline,
   resolveDynamicDeliveryWallClockMs,
 } from '../main/modules/agent-control/runtime-core/dynamic-delivery/delivery-deadline'
+import {
+  __resetInteractionLifecycleRegistryForTests,
+  getInteractionLifecycleRegistry,
+} from '../main/modules/agent-control/runtime-core/interaction-lifecycle-registry'
 
 test('delivery wall-clock budgets are explicit and stay below the hard cap', () => {
   assert.equal(resolveDynamicDeliveryWallClockMs('standard'), null)
@@ -119,4 +123,40 @@ test('S0 R2: resolving user input grants a complete new no-progress window', () 
     globalThis.setTimeout = originalSetTimeout
     globalThis.clearTimeout = originalClearTimeout
   }
+})
+
+test('remote projection scope pauses the same run clock even when its local session id differs', async () => {
+  __resetInteractionLifecycleRegistryForTests()
+  const abortController = new AbortController()
+  const runHandle = { abortInitiator: null } as Parameters<typeof armDynamicDeliveryDeadline>[0]['runHandle']
+  const deadline = armDynamicDeliveryDeadline({
+    mode: 'adaptive',
+    runId: 'run-remote-scope',
+    abortController,
+    runHandle,
+    timeoutMsForTest: 20,
+    agentId: 'butler',
+    scopeId: 'local-session-id',
+    scopeIdAliases: ['remote-projection-scope'],
+  })
+  const registry = getInteractionLifecycleRegistry()
+  assert.equal(registry.register({
+    interactionId: 'remote-confirmation',
+    runId: 'run-remote-scope',
+    agentId: 'butler',
+    scopeId: 'remote-projection-scope',
+    type: 'browser_confirmation',
+  }), true)
+  await new Promise((resolve) => setTimeout(resolve, 45))
+  assert.equal(abortController.signal.aborted, false)
+  assert.equal(registry.settle({
+    interactionId: 'remote-confirmation',
+    runId: 'run-remote-scope',
+    agentId: 'butler',
+    scopeId: 'remote-projection-scope',
+    disposition: 'resume_with_result',
+  }), true)
+  await new Promise<void>((resolve) => abortController.signal.addEventListener('abort', () => resolve(), { once: true }))
+  deadline.dispose()
+  assert.equal((abortController.signal.reason as Error).message, 'delivery_wall_clock_exceeded')
 })

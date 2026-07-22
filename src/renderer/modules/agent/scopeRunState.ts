@@ -18,6 +18,7 @@ import type {
   ToolTraceEvent
 } from './types'
 import type { ContextUsageSnapshot } from '../../../shared/context-usage-types'
+import { readBrowserConfirmationRequest } from '../../../shared/browser-confirmation-card'
 
 function generateArtifactId(): string {
   return `artifact-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
@@ -553,11 +554,15 @@ function parseTaskContinuation(input: unknown): ScopeRunTaskContinuation | null 
   if (!input || typeof input !== 'object') return null
   const record = input as Record<string, unknown>
   const continuation: ScopeRunTaskContinuation = {}
-  const copyString = (key: Exclude<keyof ScopeRunTaskContinuation, 'progress' | 'resumeKind'>): void => {
+  const copyString = (key: Exclude<keyof ScopeRunTaskContinuation, 'progress' | 'resumeKind' | 'suspensionRequest'>): void => {
     if (typeof record[key] !== 'string') return
     const value = String(record[key]).trim()
     if (value) continuation[key] = value
   }
+  copyString('kind')
+  copyString('checkpointId')
+  copyString('browserTaskId')
+  copyString('suspensionReason')
   copyString('executionId')
   copyString('taskId')
   copyString('stepId')
@@ -582,6 +587,7 @@ function parseTaskContinuation(input: unknown): ScopeRunTaskContinuation | null 
   copyString('runStatePath')
   copyString('outputDir')
   copyString('progressFingerprint')
+  continuation.suspensionRequest = readBrowserConfirmationRequest(record.suspensionRequest)
   const progress = parseSkillProgress(record.progress)
   if (progress) continuation.progress = progress
   return Object.keys(continuation).length > 0 ? continuation : null

@@ -251,6 +251,30 @@ describe('finalizeRunOutcome', () => {
     assert.equal(metrics[0]?.initiator, 'preempted')
   })
 
+  test('provider failure identity is retained on the run-close metric', async () => {
+    const { metrics, deps } = createMetricSpy()
+    await finalizeRunOutcome({
+      kind: 'error',
+      runId: 'run-provider-failure-metric',
+      durationMs: 75,
+      toolCallsUsed: 0,
+      initiator: 'error',
+      terminalReason: 'blocked_external',
+      providerDiagnostics: {
+        provider: 'openai-compatible',
+        agentProtocol: 'openai-compatible',
+        wireApi: 'responses',
+        contextWindow: 65_536,
+        protocolSource: 'explicit',
+        contextWindowSource: 'model',
+        lastProviderFailureHttpStatus: 503,
+        lastProviderFailureErrorKind: 'transient',
+      },
+    }, deps)
+    assert.equal(metrics[0]?.lastProviderFailureHttpStatus, 503)
+    assert.equal(metrics[0]?.lastProviderFailureErrorKind, 'transient')
+  })
+
   test('normal AgentSdkRuntime run finalizes run_meta and emits run-close metric through finalizer', async () => {
     const db = new RunMetaDb()
     const repository = new RunMetaRepository(db as unknown as ConstructorParameters<typeof RunMetaRepository>[0])

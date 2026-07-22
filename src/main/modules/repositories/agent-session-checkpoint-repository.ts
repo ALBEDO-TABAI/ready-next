@@ -111,6 +111,12 @@ export class AgentSessionCheckpointRepository {
     return this.resume.currentBrowserPermissionConfirmation(...args)
   }
 
+  expirePendingBrowserConfirmations(
+    ...args: Parameters<AgentSessionCheckpointRepository['resume']['expirePendingBrowserConfirmations']>
+  ): ReturnType<AgentSessionCheckpointRepository['resume']['expirePendingBrowserConfirmations']> {
+    return this.resume.expirePendingBrowserConfirmations(...args)
+  }
+
   currentOwnerCrashRecovery(
     ...args: Parameters<AgentSessionCheckpointRepository['resume']['currentOwnerCrashRecovery']>
   ): ReturnType<AgentSessionCheckpointRepository['resume']['currentOwnerCrashRecovery']> {

@@ -26,7 +26,37 @@ export function createTargetClaimService(input: {
   defaultTtlMs?: number
   generateId?: () => string
 } = {}): BrowserTargetClaimService {
-  return new BrowserTargetClaimService(new MemoryBrowserTargetClaimRepository(), input)
+  const repository = new MemoryBrowserTargetClaimRepository()
+  const service = new BrowserTargetClaimService(repository, input)
+  repositories.set(service, repository)
+  return service
+}
+
+const repositories = new WeakMap<BrowserTargetClaimService, MemoryBrowserTargetClaimRepository>()
+
+export function setTargetUserOwnedForTest(
+  service: BrowserTargetClaimService,
+  claim: BrowserTargetClaim,
+  checkpointId = 'checkpoint-test-user-owned',
+): BrowserTargetClaim {
+  const repository = repositories.get(service)
+  if (!repository) throw new Error('test_target_claim_repository_missing')
+  const current = repository.read(claim.logicalKey)
+  if (!current) throw new Error('test_target_claim_missing')
+  const next = {
+    ...current,
+    claimId: `test-user-owned-${current.claimId}`,
+    generation: current.generation + 1,
+    state: 'user_owned' as const,
+    suspensionCheckpointId: checkpointId,
+    suspensionReason: 'browser_target_user_owned',
+    expiresAt: current.updatedAt,
+    updatedAt: current.updatedAt + 1,
+  }
+  repository.mutate((store) => {
+    if (!store.write(next, current.generation)) throw new Error('test_target_claim_cas_conflict')
+  })
+  return next
 }
 
 export function acquireTarget(

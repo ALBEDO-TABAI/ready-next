@@ -8,7 +8,7 @@ import { recoverPendingHandoffTakeovers } from '../main/modules/agent-control/ag
 import { executeToolCall } from '../main/modules/tools/tool-executor'
 import { finalizeRunOutcome } from '../main/modules/agent-control/runtime-core/run-finalizer'
 import { createTaskBudgetRuntime } from '../main/modules/agent-control/task-projection/run-budget-policy'
-import { acquireTarget, createTargetClaimService, identityOf, TARGET_A } from './utils/browser-target-claim-fixture'
+import { acquireTarget, createTargetClaimService, setTargetUserOwnedForTest, TARGET_A } from './utils/browser-target-claim-fixture'
 
 function turnTarget(patch: Partial<BrowserTargetClaimAcquireInput> = {}) {
   const { parentTaskId: _parentTaskId, ownerRunId: _ownerRunId, ...target } = { ...TARGET_A, ...patch }
@@ -18,11 +18,7 @@ function turnTarget(patch: Partial<BrowserTargetClaimAcquireInput> = {}) {
 test('S0 R1a: takeover on tab A does not block a fresh run on unrelated tab B', () => {
   const service = createTargetClaimService()
   const oldClaim = acquireTarget(service)
-  service.recordUserSignal({
-    target: identityOf(oldClaim),
-    source: 'keyboard',
-    suspensionCheckpointId: 'checkpoint-a',
-  })
+  setTargetUserOwnedForTest(service, oldClaim, 'checkpoint-a')
   const next = service.acquire({
     ...TARGET_A,
     tabId: 'tab-b',
@@ -40,11 +36,9 @@ test('S0 R1b: the same turn acquires tab B after target A takeover is resolved',
   const first = turn.ensureGateForTarget(turnTarget())
   assert.ok(!isAgentBrowserError(first))
   if (isAgentBrowserError(first)) return
-  service.recordUserSignal({
-    target: first.identity,
-    source: 'explicit-button',
-    suspensionCheckpointId: 'checkpoint-a',
-  })
+  const firstClaim = service.read(first.identity)
+  if (!firstClaim) throw new Error('claim missing')
+  setTargetUserOwnedForTest(service, firstClaim, 'checkpoint-a')
   const second = turn.ensureGateForTarget(turnTarget({
     tabId: 'tab-b',
     physicalTargetToken: 'boot-test:tab-b:1',
@@ -76,21 +70,13 @@ test('S0 ownership signals: presentation-only tab switching does not take over t
 test('S0 ownership signals: trusted pointer input on the target is recognized as user takeover input', () => {
   const service = createTargetClaimService()
   const claim = acquireTarget(service)
-  assert.equal(service.recordUserSignal({
-    target: identityOf(claim),
-    source: 'pointer',
-    suspensionCheckpointId: 'checkpoint-pointer',
-  })?.state, 'user_owned')
+  assert.equal(setTargetUserOwnedForTest(service, claim, 'checkpoint-pointer').state, 'user_owned')
 })
 
 test('S0 ownership signals: chrome navigation fences only the claimed target', () => {
   const service = createTargetClaimService()
   const claim = acquireTarget(service)
-  assert.equal(service.recordUserSignal({
-    target: identityOf(claim),
-    source: 'navigation',
-    suspensionCheckpointId: 'checkpoint-navigation',
-  })?.state, 'user_owned')
+  assert.equal(setTargetUserOwnedForTest(service, claim, 'checkpoint-navigation').state, 'user_owned')
 })
 
 test('S0 ownership signals: closing a claimed tab settles ownership immediately', () => {

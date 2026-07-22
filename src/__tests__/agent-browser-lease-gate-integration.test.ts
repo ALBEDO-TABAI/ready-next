@@ -6,7 +6,7 @@ import { browserSnapshotService } from '../main/modules/browser-engine/browser-s
 import type { BrowserController } from '../main/modules/browser-engine/ipc-handler'
 import type { BrowserTargetClaimGate } from '../main/modules/browser-engine/agent-browser-lease-gate'
 import { attachBrowserWorkflowFixture } from './utils/browser-workflow-fixture'
-import { acquireTarget, createTargetClaimService, identityOf } from './utils/browser-target-claim-fixture'
+import { acquireTarget, createTargetClaimService, identityOf, setTargetUserOwnedForTest } from './utils/browser-target-claim-fixture'
 
 import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
 
@@ -176,11 +176,9 @@ describe('lease gate integration on executeBrowserTool', () => {
     const ok = await executeBrowserTool('browser_navigate', { action: 'back' }, controller, undefined, undefined, gate, undefined, undefined, workflowContext())
     assert.equal(errorKind(ok), undefined, `write with a valid lease must pass: ${JSON.stringify(parseError(ok))}`)
 
-    gate.service.recordUserSignal({
-      target: gate.identity,
-      source: 'keyboard',
-      suspensionCheckpointId: 'checkpoint-takeover',
-    })
+    const current = gate.service.read(gate.identity)
+    if (!current) throw new Error('claim missing')
+    setTargetUserOwnedForTest(gate.service, current, 'checkpoint-takeover')
     const blocked = await executeBrowserTool('browser_navigate', { action: 'back' }, controller, undefined, undefined, gate, undefined, undefined, workflowContext())
     const err = parseError(blocked)
     assert.ok(err)

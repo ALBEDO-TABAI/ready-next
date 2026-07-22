@@ -21,6 +21,14 @@
 
 | 评估日期 | 任务 | 文件 | 总行数 | 本次新增 | 结论 | 判断与后续动作 | 状态 |
 | --- | --- | --- | ---: | ---: | --- | --- | --- |
+| 2026-07-22 | Provider 可靠性与确认可见性 | `src/main/modules/repositories/agent-session-checkpoint-resume.ts` | 1454 | 净 +126 | 危险 | 本轮又加入确认过期、拒绝回执和事务内续跑判定，证明该入口已同时承担多类状态转移。后续应先以现有原生门禁固定合同，再迁出确认生命周期事务。 | 待独立拆分合同；交付时提醒 |
+| 2026-07-22 | Provider 可靠性与确认可见性 | `src/main/modules/agent-control/runtime-core/runtime.ts` | 3148 | 净 +3 | 危险 | 本轮只接入同会话重发时的旧确认失效，但运行服务装配仍过度集中。后续仍应把 Browser/continuation 组合入口迁出。 | 待独立拆分合同；交付时提醒 |
+| 2026-07-22 | Provider 可靠性与确认可见性 | `src/main/modules/agent-control/runtime-core/run-finalizer.ts` | 1314 | 净 +40 | 危险 | 本轮接入 Provider 失败诊断与 Browser 目标收口，通用终态、投影和产品收口仍集中在一个文件。后续应分离通用终态事务与产品诊断适配。 | 待独立拆分合同；交付时提醒 |
+| 2026-07-22 | Provider 可靠性与确认可见性 | `src/__tests__/agent-session-checkpoint-native.test.ts` | 1595 | 净 +162 | 一般 | 仍聚焦真实 SQLite checkpoint 生命周期，本轮增加确认单消息、过期、拒绝与合法续跑对照。2026-08-22 复查是否按写入、确认和目标恢复拆分夹具。 | 已排期：2026-08-22 |
+| 2026-07-22 | Provider 可靠性与确认可见性 | `src/__tests__/run-finalizer-checkin.test.ts` | 1327 | 净 +4 | 一般 | 仍是终态判决与验收回执的单一行为域，本轮只显式装配测试收口依赖。2026-08-19 复查来源证明与终态验收拆分。 | 已排期：2026-08-19 |
+| 2026-07-22 | Provider 可靠性与确认可见性 | `src/renderer/components/ready/TaskPanel.tsx` | 1131 | 净 +53 | 一般 | 文件仍是任务面板宿主，本轮只增加结构化确认展示与类型化选择。2026-08-22 复查任务详情和列表展示是否继续拆分。 | 已排期：2026-08-22 |
+| 2026-07-22 | Provider 可靠性与确认可见性 | `src/renderer/modules/agent/scopeRunState.ts` | 1061 | 净 +7 | 一般 | 仍聚焦运行状态归一化，本轮只完整读取结构化确认续跑字段。2026-08-22 复查事件归一化边界。 | 已排期：2026-08-22 |
+| 2026-07-22 | Provider 可靠性与确认可见性 | `src/renderer/types/electron.d.ts` | 4050 | 净 +1 | 健康 | 只补齐结构化确认的跨进程声明，由类型检查、行为测试和真实应用验收覆盖。 | 无需处理 |
 | 2026-07-22 | 浏览器目标归属与续跑闭环 | `src/main/modules/repositories/agent-session-checkpoint-resume.ts` | 1329 | 净 +407 | 危险 | 目标级接管、同任务多目标恢复和任务级竞态已集中到同一恢复入口，虽有原生并发门禁，但继续增长会妨碍判定事务边界。后续应先固定单目标与多目标恢复合同，再迁出目标恢复事务。 | 待独立拆分合同；交付时提醒 |
 | 2026-07-22 | 浏览器目标归属与续跑闭环 | `src/main/modules/agent-control/runtime-core/runtime.ts` | 3145 | 净 +168 | 危险 | 本轮接入人工交互生命周期、浏览器目标恢复与启动 handoff 结算路由，但运行服务装配仍过度集中。后续应把交互生命周期与 Browser/continuation 组合 facade 迁出。 | 待独立拆分合同；交付时提醒 |
 | 2026-07-22 | 浏览器目标归属与续跑闭环 | `src/main/modules/browser-engine/ipc-handler.ts` | 2825 | 净 +5 | 危险 | 本轮删除旧归属路径并接入目标接管和真实页面判定，但浏览器宿主控制、服务装配与入口仍集中。后续应继续下沉目标接管与宿主协调。 | 待独立拆分合同；交付时提醒 |

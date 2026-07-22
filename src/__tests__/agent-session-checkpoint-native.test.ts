@@ -574,7 +574,12 @@ test('verifier rejection facts survive incomplete suspension and reach the resum
       browserTaskId: route.browserTaskId,
       suspensionReason: 'incomplete',
     })
-    assert.equal(parent?.continuation_ref_json, null)
+    assert.deepEqual(JSON.parse(parent?.continuation_ref_json || '{}'), {
+      kind: 'browser_checkpoint',
+      checkpointId: checkpoint.checkpointId,
+      browserTaskId: route.browserTaskId,
+      suspensionReason: 'incomplete',
+    })
     assert.equal(
       db.prepare('SELECT status FROM browser_tasks WHERE id = ?')
         .get<{ status: string }>(route.browserTaskId)?.status,
@@ -785,6 +790,162 @@ test('startup recovery converts a stale Browser owner with a clean checkpoint in
       db.prepare(`SELECT COUNT(*) AS count FROM browser_control_receipts
                    WHERE browser_task_id = ? AND kind = 'claim_suspended'`)
         .get<{ count: number }>(route.browserTaskId)?.count,
+      1,
+    )
+  } finally {
+    db.close()
+  }
+})
+
+test('browser confirmation suspension writes one canonical notice and audits rejected and accepted resumes', async (t) => {
+  if (skipIfSqliteUnavailable(t, 'browser-confirmation-canonical-native')) return
+  const db = openDb()
+  try {
+    const accessor = { getRawDb: () => db }
+    const projections = new TaskProjectionRepository(accessor)
+    const runMeta = new RunMetaRepository(db)
+    const repository = new AgentSessionCheckpointRepository(accessor)
+    const parentTaskId = 'parent-browser-confirmation'
+    const scopeId = 'scope-browser-confirmation'
+    const ownerRunId = 'run-browser-confirmation'
+    const now = '2026-07-22T01:00:00.000Z'
+    projections.create({
+      taskId: parentTaskId,
+      scopeId,
+      runId: ownerRunId,
+      taskType: 'browser_transaction',
+      module: 'browser',
+      status: 'running',
+      interactionState: 'running',
+      waitingFor: 'none',
+      steps: [],
+      ownerAgentId: 'butler',
+      taskOrigin: 'user_root',
+      executionBinding: executionBinding(ownerRunId),
+      createdAt: now,
+      updatedAt: now,
+    })
+    runMeta.create({
+      runId: ownerRunId,
+      taskId: parentTaskId,
+      scopeId,
+      agentId: 'butler',
+      executionBinding: executionBinding(ownerRunId),
+      status: 'running',
+    }, Date.parse(now))
+    db.prepare(
+      `INSERT INTO chat_conversations (id, agent, title, created_at, updated_at)
+       VALUES (?, 'butler', 'Browser confirmation', ?, ?)`,
+    ).run(scopeId, now, now)
+    const sourceMessageId = 'message-browser-confirmation'
+    db.prepare(
+      `INSERT INTO chat_messages (id, conversation_id, role, content, timestamp, meta_json)
+       VALUES (?, ?, 'user', '执行页面脚本', ?, '{}')`,
+    ).run(sourceMessageId, scopeId, now)
+    const route = await repository.bindBrowserWorkflowRoute({
+      parentTaskId,
+      ownerRunId,
+      sourceMessageId,
+      executionBinding: executionBinding(ownerRunId),
+      now,
+    })
+    const request = {
+      version: 1 as const,
+      kind: 'browser_power_confirmation' as const,
+      requestId: 'power-request-1',
+      wakeKind: 'browser_power_confirmation' as const,
+      toolName: 'browser_eval' as const,
+      effects: ['page_mutation'] as const,
+      actionIntent: { objectRef: 'page', inputHash: 'input-hash' },
+      target: {
+        scopeId,
+        ownerRunId,
+        browserTaskId: route.browserTaskId,
+        tabId: 'tab-1',
+        documentKeyHash: 'document-key',
+        origin: 'https://example.test',
+        targetDigest: 'target-digest',
+      },
+      purpose: 'read page state',
+    }
+    const sourceItems = [{ role: 'user', content: '执行页面脚本' } as AgentInputItem]
+    const suspension = await repository.writeCleanBoundary({
+      parentTaskId,
+      browserTaskId: route.browserTaskId,
+      ownerRunId,
+      role: 'suspension',
+      suspensionReason: 'browser_power_confirmation',
+      suspensionRequest: request,
+      sourceItems,
+      sdkSourceItems: sourceItems,
+      sdkSourceItemCount: sourceItems.length,
+      sdkSourcePrefixDigest: workflowDigest(sourceItems),
+      preparedSkill: preparedSkill(),
+      activatedCapabilityGroups: ['browser'],
+      now,
+    })
+    assert.ok(suspension.canonicalMessage)
+    assert.match(suspension.canonicalMessage.content, /等待你的确认/)
+    assert.equal(suspension.canonicalMessage.conversationId, scopeId)
+    assert.equal(
+      db.prepare(`SELECT COUNT(*) AS count FROM chat_messages
+                   WHERE id = ? AND role = 'assistant'`)
+        .get<{ count: number }>(suspension.canonicalMessage.id)?.count,
+      1,
+    )
+    const parent = projections.get(parentTaskId)
+    assert.equal(parent?.waitingFor, 'confirmation')
+    assert.equal(
+      (parent?.continuationRef as { suspensionRequest?: { requestId?: string } } | null)?.suspensionRequest?.requestId,
+      request.requestId,
+    )
+    const current = repository.currentBrowserPowerConfirmation(parentTaskId)
+    assert.ok(current)
+    const wakeBase = {
+      wakeId: 'wake-power-request-1',
+      kind: 'browser_power_confirmation' as const,
+      sourceId: request.requestId,
+      checkpointId: current.checkpointId,
+      issuedAt: '2026-07-22T01:00:01.000Z',
+      decision: 'confirmed' as const,
+    }
+    const sourceDigest = workflowDigest({
+      parentTaskId,
+      checkpointId: current.checkpointId,
+      basisRevision: current.basisRevision,
+      kind: wakeBase.kind,
+      sourceId: wakeBase.sourceId,
+      decision: wakeBase.decision,
+      request,
+    })
+    await assert.rejects(
+      repository.resumeSuspendedBrowserWorkflow({
+        taskId: parentTaskId,
+        newOwnerRunId: 'run-browser-confirmation-stale',
+        executionBinding: executionBinding('run-browser-confirmation-stale'),
+        wake: { ...wakeBase, basisRevision: current.basisRevision - 1, sourceDigest },
+      }),
+      /checkpoint_wake_basis_revision_mismatch/,
+    )
+    assert.equal(
+      db.prepare(`SELECT COUNT(*) AS count FROM browser_control_receipts
+                   WHERE browser_task_id = ? AND kind = 'resume_rejected'`)
+        .get<{ count: number }>(route.browserTaskId)?.count,
+      1,
+    )
+    const resumed = await repository.resumeSuspendedBrowserWorkflow({
+      taskId: parentTaskId,
+      newOwnerRunId: 'run-browser-confirmation-resumed',
+      executionBinding: executionBinding('run-browser-confirmation-resumed'),
+      wake: { ...wakeBase, basisRevision: current.basisRevision, sourceDigest },
+    })
+    assert.equal(resumed.browserTaskId, route.browserTaskId)
+    assert.equal(resumed.parent.runId, 'run-browser-confirmation-resumed')
+    assert.equal(
+      db.prepare(`SELECT COUNT(*) AS count FROM browser_control_receipts
+                   WHERE browser_task_id = ? AND kind = 'task_resume_authorized'
+                     AND wake_id = ? AND successor_run_id = ?`)
+        .get<{ count: number }>(route.browserTaskId, wakeBase.wakeId, resumed.newOwnerRunId)?.count,
       1,
     )
   } finally {

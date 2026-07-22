@@ -397,6 +397,98 @@ test('cleared fixed task cards stay cleared after the task area remounts', () =>
   }
 })
 
+test('pending browser confirmation stays visible in the fixed task area', () => {
+  const confirmationCalls: Array<[string, boolean]> = []
+  const run = makeRun({
+    scopeId: 'conv-confirmation',
+    taskId: 'task-confirmation',
+    title: '',
+    taskSummary: null,
+    waitingFor: 'confirmation',
+    interactionState: 'awaiting_confirmation',
+    taskContinuation: {
+      kind: 'browser_checkpoint',
+      checkpointId: 'checkpoint-confirmation',
+      browserTaskId: 'browser-task-confirmation',
+      suspensionRequest: {
+        version: 1,
+        kind: 'browser_power_confirmation',
+        requestId: 'confirmation-1',
+        wakeKind: 'browser_power_confirmation',
+        toolName: 'browser_eval',
+        effects: ['page_mutation'],
+        actionIntent: { objectRef: 'page', inputHash: 'input-hash' },
+        target: {
+          scopeId: 'conv-confirmation',
+          ownerRunId: 'run-confirmation',
+          browserTaskId: 'browser-task-confirmation',
+          tabId: 'tab-1',
+          documentKeyHash: 'document-key-hash',
+          origin: 'https://example.com',
+          targetDigest: 'target-digest',
+        },
+        purpose: '更新页面内容',
+      },
+    },
+    resumableActions: ['continue', 'cancel'],
+    canResume: true,
+  })
+  const host = document.getElementById('root')
+  assert.ok(host)
+  host.innerHTML = ''
+  const root = createRoot(host)
+  const noop = () => {}
+  flushSync(() => {
+    root.render(createElement(TaskToolSnapshot, {
+      messages: [],
+      currentTaskRun: run,
+      backgroundTaskRuns: [],
+      liveTaskRuns: [run],
+      currentScopeId: 'conv-confirmation',
+      taskDisclosureState: {},
+      isStreaming: false,
+      streamingMessageId: null,
+      parseSerializedTaskSnapshot: () => null,
+      parseSerializedToolTraceSnapshot: () => [],
+      setTaskSectionExpanded: noop,
+      onOpenTaskArtifact: noop,
+      onDismissMemoryCapture: noop,
+      onUndoMemoryCapture: noop,
+      onSupplementMemoryCapture: noop,
+      onOpenScope: noop,
+      onContinueTaskInput: noop,
+      onSubmitTaskConfirmation: (scopeId: string, confirmed: boolean) => {
+        confirmationCalls.push([scopeId, confirmed])
+      },
+      onSubmitTaskAgentResult: noop,
+      onRetryTask: noop,
+      onSuspendTask: noop,
+      onResumeTask: noop,
+      onCancelDetachedTask: noop,
+      onContinueDetachedTask: noop,
+      onCancelChildRun: noop,
+      onContinueChildRun: noop,
+      children: ({ bottomTaskCard }) => createElement('div', null, bottomTaskCard),
+    }))
+  })
+
+  try {
+    const card = host.querySelector('[data-ready-browser-confirmation-card="browser_power_confirmation"]')
+    assert.ok(card)
+    const buttons = Array.from(host.querySelectorAll('button'))
+    const allow = buttons.find((button) => button.textContent?.trim() === '允许并继续')
+    const deny = buttons.find((button) => button.textContent?.trim() === '拒绝')
+    assert.ok(allow)
+    assert.ok(deny)
+    assert.equal(buttons.some((button) => button.textContent?.trim() === '继续运行'), false)
+    flushSync(() => allow.click())
+    flushSync(() => deny.click())
+    assert.deepEqual(confirmationCalls, [['conv-confirmation', true], ['conv-confirmation', false]])
+  } finally {
+    root.unmount()
+  }
+})
+
 test('browser confirmation uses the canonical task confirmation path without retired consent payloads', () => {
   const calls: Array<[string, string, string]> = []
   const run = makeRun({

@@ -782,6 +782,57 @@ export class AgentSessionCheckpointResumeRepository {
     return { request, checkpointId, basisRevision: parent.revision }
   }
 
+  async expirePendingBrowserConfirmations(input: {
+    scopeId?: string | null
+    now?: string
+  } = {}): Promise<string[]> {
+    return this.unitOfWork.runImmediateWithRetry((db) => {
+      const now = input.now || new Date().toISOString()
+      const rows = db.prepare(
+        `SELECT task_id, continuation_ref_json, revision
+           FROM task_projections
+          WHERE status = 'recoverable_paused'
+            AND waiting_for = 'confirmation'
+            AND blocked_reason IN ('browser_power_confirmation_checkpoint', 'browser_permission_checkpoint')
+            AND (? IS NULL OR scope_id = ?)
+          ORDER BY updated_at ASC`,
+      ).all<{ task_id: string; continuation_ref_json: string | null; revision: number }>(
+        input.scopeId || null,
+        input.scopeId || null,
+      )
+      const expiredTaskIds: string[] = []
+      for (const row of rows) {
+        const continuation = parseObjectStrict<Record<string, unknown>>(
+          row.continuation_ref_json,
+          'browser_confirmation_expiration_continuation_ref_json',
+        )
+        if (!confirmationRequestFromContinuation(continuation)) continue
+        const nextContinuation = { ...continuation }
+        delete nextContinuation.suspensionRequest
+        const result = db.prepare(
+          `UPDATE task_projections
+              SET waiting_for = 'none',
+                  blocked_reason = 'browser_confirmation_expired_checkpoint',
+                  degradation_reason = 'browser_confirmation_expired_on_restart_or_resend',
+                  resumable_actions_json = ?,
+                  continuation_ref_json = ?,
+                  revision = revision + 1,
+                  updated_at = ?
+            WHERE task_id = ? AND revision = ? AND waiting_for = 'confirmation'`,
+        ).run(
+          serializeWorkflowJson(['continue', 'cancel'], 'browser_confirmation_expiration_actions'),
+          serializeWorkflowJson(nextContinuation, 'browser_confirmation_expiration_continuation'),
+          now,
+          row.task_id,
+          row.revision,
+        )
+        if (changed(result) !== 1) throw new Error('browser_confirmation_expiration_cas_failed')
+        expiredTaskIds.push(row.task_id)
+      }
+      return expiredTaskIds
+    })
+  }
+
   currentBrowserPermissionConfirmation(parentTaskId: string): {
     request: Extract<BrowserConfirmationSuspensionRequest, { kind: 'browser_permission' }>
     checkpointId: string
@@ -992,7 +1043,8 @@ export class AgentSessionCheckpointResumeRepository {
     wake: BrowserCheckpointWakeReceiptInput
     now?: string
   }): Promise<HumanTakeoverResumeBinding> {
-    return this.unitOfWork.runImmediateWithRetry((db) => {
+    try {
+      return await this.unitOfWork.runImmediateWithRetry((db) => {
       const parent = readParent(db, input.taskId)
       if (parent.humanTakeoverRef?.state === 'pending') throw new Error('typed_takeover_receipt_required')
       if (input.executionBinding.runId !== input.newOwnerRunId) {
@@ -1309,6 +1361,31 @@ export class AgentSessionCheckpointResumeRepository {
       if (!checkpoint || checkpoint.ownerRunId !== input.newOwnerRunId) {
         throw new Error('checkpoint_resume_readback_failed')
       }
+      const sequence = Number(db.prepare(
+        'SELECT COALESCE(MAX(sequence), 0) + 1 AS sequence FROM browser_control_receipts WHERE browser_task_id = ?',
+      ).get<{ sequence: number }>(source.browserTaskId)?.sequence || 1)
+      db.prepare(`
+        INSERT INTO browser_control_receipts (
+          receipt_id, sequence, parent_task_id, browser_task_id, owner_run_id,
+          partition, tab_id, physical_target_token, boot_incarnation_id,
+          previous_claim_id, previous_generation, next_claim_id, next_generation,
+          clean_base_checkpoint_id, suspension_checkpoint_id, wake_id, successor_run_id,
+          continuation_generation, idempotency_key, kind, error_code, recoverable, created_at
+        ) VALUES (?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, ?, ?, ?, ?, ?, ?, 'task_resume_authorized', NULL, 1, ?)
+      `).run(
+        `browser-control-${randomUUID()}`,
+        sequence,
+        parent.taskId,
+        source.browserTaskId,
+        input.newOwnerRunId,
+        newCheckpointId,
+        checkpointId,
+        wakeId,
+        input.newOwnerRunId,
+        parent.revision + 1,
+        `task_resume_authorized:${wakeId}`,
+        createdAt,
+      )
       return {
         parent: readParent(db, parent.taskId),
         browserTaskId: source.browserTaskId,
@@ -1317,6 +1394,54 @@ export class AgentSessionCheckpointResumeRepository {
         newOwnerRunId: input.newOwnerRunId,
         createdSuccessor: true,
       }
+      })
+    } catch (error) {
+      this.recordResumeRejected(input, error)
+      throw error
+    }
+  }
+
+  private recordResumeRejected(
+    input: {
+      taskId: string
+      newOwnerRunId: string
+      wake: BrowserCheckpointWakeReceiptInput
+      now?: string
+    },
+    error: unknown,
+  ): void {
+    this.unitOfWork.runImmediateWithRetry((db) => {
+      const parent = readParent(db, input.taskId)
+      const checkpointId = parent.checkpointRefs.suspensionCheckpointId
+      if (!checkpointId) return
+      const checkpoint = this.readCheckpointFromDb(db, checkpointId)
+      if (!checkpoint?.browserTaskId) return
+      const errorCode = error instanceof Error ? error.message : String(error)
+      const sequence = Number(db.prepare(
+        'SELECT COALESCE(MAX(sequence), 0) + 1 AS sequence FROM browser_control_receipts WHERE browser_task_id = ?',
+      ).get<{ sequence: number }>(checkpoint.browserTaskId)?.sequence || 1)
+      db.prepare(`
+        INSERT OR IGNORE INTO browser_control_receipts (
+          receipt_id, sequence, parent_task_id, browser_task_id, owner_run_id,
+          partition, tab_id, physical_target_token, boot_incarnation_id,
+          previous_claim_id, previous_generation, next_claim_id, next_generation,
+          clean_base_checkpoint_id, suspension_checkpoint_id, wake_id, successor_run_id,
+          continuation_generation, idempotency_key, kind, error_code, recoverable, created_at
+        ) VALUES (?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, ?, ?, ?, NULL, ?, ?, 'resume_rejected', ?, 1, ?)
+      `).run(
+        `browser-control-${randomUUID()}`,
+        sequence,
+        parent.taskId,
+        checkpoint.browserTaskId,
+        parent.runId,
+        parent.checkpointRefs.cleanBaseCheckpointId,
+        checkpointId,
+        String(input.wake.wakeId || ''),
+        parent.revision,
+        `resume_rejected:${String(input.wake.wakeId || 'missing')}:${workflowDigest(errorCode)}`,
+        errorCode,
+        input.now || new Date().toISOString(),
+      )
     })
   }
 

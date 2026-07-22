@@ -55,6 +55,8 @@ export interface RunCloseMetric {
   /** P0-4 — effective task type (terminal patch wins over the stale row);
    *  coverage accounting for the Q4b promotion gate reads THIS. */
   taskType?: string | null
+  lastProviderFailureHttpStatus?: number | null
+  lastProviderFailureErrorKind?: string | null
 }
 
 export interface FinalizedRunOutcome {
@@ -73,6 +75,7 @@ interface RunOutcomeTaskFacts {
     BrowserWorkflowCompletionVerifierReceipt,
     'parentTaskId' | 'ownerRunId' | 'terminalQualityPatchDigest'
   > | null
+  canonicalMessageReceipt?: CanonicalAssistantMessageReceipt | null
 }
 
 interface RunOutcomeProviderDiagnostics {
@@ -85,6 +88,8 @@ interface RunOutcomeProviderDiagnostics {
   usageSource?: 'provider' | 'estimated' | 'missing'
   providerCallCount?: number
   missingCallCount?: number
+  lastProviderFailureHttpStatus?: number | null
+  lastProviderFailureErrorKind?: string | null
 }
 
 interface RunOutcomeUsage {
@@ -432,7 +437,7 @@ export async function finalizeRunOutcome(
 
   if (outcome.kind === 'done') {
     const finalized = await writeTerminalOutcome(outcome, deps, 'done', outcome.terminalReason || 'done')
-    closeoutBrowserTargetClaimsForRun({
+    closeoutBrowserClaimsIfOwned(outcome, deps, {
       ownerRunId: outcome.runId,
       resumable: false,
       suspensionCheckpointId: null,
@@ -452,7 +457,7 @@ export async function finalizeRunOutcome(
     }
 
     const finalized = await writeTerminalOutcome(outcome, deps, 'checkpoint', outcome.terminalReason || 'checkpoint')
-    closeoutBrowserTargetClaimsForRun({
+    closeoutBrowserClaimsIfOwned(outcome, deps, {
       ownerRunId: outcome.runId,
       resumable: true,
       suspensionCheckpointId: outcome.continuationHandle,
@@ -471,7 +476,7 @@ export async function finalizeRunOutcome(
     outcome.projectionPatch
     && ['recoverable_paused', 'paused'].includes(String(outcome.projectionPatch.status || '')),
   )
-  closeoutBrowserTargetClaimsForRun({
+  closeoutBrowserClaimsIfOwned(outcome, deps, {
     ownerRunId: outcome.runId,
     resumable: recoverable,
     suspensionCheckpointId: recoverable
@@ -480,6 +485,28 @@ export async function finalizeRunOutcome(
     suspensionReason: recoverable ? outcome.terminalReason : null,
   })
   return finalized
+}
+
+function closeoutBrowserClaimsIfOwned(
+  outcome: RunOutcome,
+  deps: RunFinalizerDeps,
+  input: Parameters<typeof closeoutBrowserTargetClaimsForRun>[0],
+): void {
+  const projection = outcome.taskId && deps.taskProjectionStore
+    ? deps.taskProjectionStore.get(outcome.taskId)
+    : null
+  const continuation = projection?.continuationRef
+  const browserOwned = projection?.module === 'browser'
+    || outcome.projectionPatch?.module === 'browser'
+    || Boolean(
+      continuation
+      && typeof continuation === 'object'
+      && (
+        (continuation as Record<string, unknown>).kind === 'browser_checkpoint'
+        || (continuation as Record<string, unknown>).browserTaskId
+      ),
+    )
+  if (browserOwned) closeoutBrowserTargetClaimsForRun(input)
 }
 
 /**
@@ -776,7 +803,7 @@ async function writeTerminalOutcome(
   ) {
     effectiveTerminalReason = 'browser_transaction_unconfirmed'
   }
-  let canonicalReceipt: CanonicalAssistantMessageReceipt | undefined
+  let canonicalReceipt: CanonicalAssistantMessageReceipt | undefined = outcome.canonicalMessageReceipt || undefined
   const completionVerifierReceipt: BrowserWorkflowCompletionVerifierReceipt | null =
     outcome.workflowVerifierAcceptance
     && adjudication?.terminalQualityPatch
@@ -1262,13 +1289,20 @@ function writeRunMetaOutcome(
 }
 
 function toRunCloseMetric(outcome: RunOutcome, terminalReason: string): RunCloseMetric {
-  return {
+  const metric: RunCloseMetric = {
     runId: outcome.runId,
     terminalReason,
     initiator: outcome.initiator,
     toolCallsUsed: outcome.toolCallsUsed,
-    durationMs: outcome.durationMs
+    durationMs: outcome.durationMs,
   }
+  if (outcome.providerDiagnostics?.lastProviderFailureHttpStatus !== undefined) {
+    metric.lastProviderFailureHttpStatus = outcome.providerDiagnostics.lastProviderFailureHttpStatus
+  }
+  if (outcome.providerDiagnostics?.lastProviderFailureErrorKind !== undefined) {
+    metric.lastProviderFailureErrorKind = outcome.providerDiagnostics.lastProviderFailureErrorKind
+  }
+  return metric
 }
 
 function isValidContinuationHandle(handle: string | null): handle is string {

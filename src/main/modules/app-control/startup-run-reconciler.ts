@@ -33,7 +33,7 @@ export interface StartupRunReconcilerOptions {
   db?: StartupRunReconcilerDb | null
   now?: Date
   skillTaskRunRepository?: Pick<SkillTaskRunRepository, 'reconcileRunningRowsOnStartup'>
-  agentSessionCheckpointRepository?: Pick<AgentSessionCheckpointRepository, 'settleOwnerFailure'>
+  agentSessionCheckpointRepository?: Pick<AgentSessionCheckpointRepository, 'settleOwnerFailure' | 'expirePendingBrowserConfirmations'>
   skillStaleAfterMs?: number
   logMetric?: (name: string, payload: Record<string, unknown>) => void
 }
@@ -351,13 +351,16 @@ export async function reconcileStartupRunsOnStartup(
   const agentSessionCheckpointRepository =
     options.agentSessionCheckpointRepository ||
     new AgentSessionCheckpointRepository({ getRawDb: () => db as DatabaseConnection })
+  const expiredBrowserConfirmations = await agentSessionCheckpointRepository.expirePendingBrowserConfirmations({
+    now: now.toISOString(),
+  })
   const browserWorkflowOwners = await reconcileBrowserWorkflowOwners(
     db,
     agentSessionCheckpointRepository,
     now.toISOString(),
   )
   const runMeta = browserWorkflowOwners.count + reconcileRunMeta(db, now.getTime())
-  const taskProjections = browserWorkflowOwners.count + reconcileTaskProjections(db, now.toISOString())
+  const taskProjections = expiredBrowserConfirmations.length + browserWorkflowOwners.count + reconcileTaskProjections(db, now.toISOString())
   const browserTasks = browserWorkflowOwners.count + reconcileBrowserTasks(db, now.toISOString())
   const skillRuns = reconcileSkillRuns(skillTaskRunRepository, now, options.skillStaleAfterMs)
   const reconcileCount: StartupRunReconcileCount = {
@@ -370,6 +373,7 @@ export async function reconcileStartupRunsOnStartup(
   const emitMetric = options.logMetric || logAgentMetric
   emitMetric('startup_run_reconciler.reconciled', {
     reconcileCount,
+    expiredBrowserConfirmations,
     browserWorkflowOwnerRecoveryFailures: browserWorkflowOwners.failures,
     skillRunDetails: skillRuns.result
   })

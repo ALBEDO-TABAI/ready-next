@@ -13,6 +13,9 @@ import { releaseBudgetCheckpointFlight, taskBudgetDiagnostics } from './agent-sd
 import { messageToText } from './agent-sdk-input-context-utils'
 import { publicAgentName } from './agent-sdk-model-message-utils'
 import { log } from './agent-sdk-provider'
+import { isProviderRequestRetryExhausted } from './agent-sdk-provider-request-retry'
+import { classifyExecutionError } from '../../claude-bridge/error-classifier'
+import { readProviderTerminalError } from '../../claude-bridge/provider-terminal-error'
 import {
   continuationHandleFromLongSkillCheckpoint,
   isCheckpointTerminalReason,
@@ -303,6 +306,9 @@ export interface TurnErrorCloseoutContext {
   hasSuccessfulDocumentTargetMutation: boolean
   hasSuccessfulToolProgress: boolean
   lastDocumentSaveSuccessText: string | null
+  finishProviderTransferCheckpoint: ((
+    providerDiagnostics: AgentSdkProviderDiagnostics | null,
+  ) => Promise<ExecutionTurnResult | null>) | null
   emitOutputForRun: (
     chunk: string,
     type: string,
@@ -329,6 +335,13 @@ export interface TurnErrorCloseoutContext {
   buildLocalDocumentWriteBudgetCheckpoint: () => string
   buildToolProgressBudgetCheckpoint: (usedTools: string[]) => string
   buildResult: (params: Parameters<typeof buildExecutionTurnResult>[1]) => ExecutionTurnResult
+}
+
+export function shouldCheckpointProviderFailure(
+  error: unknown,
+  hasDurableBrowserState: boolean,
+): boolean {
+  return hasDurableBrowserState && isProviderRequestRetryExhausted(error)
 }
 
 export async function handleAgentSdkTurnError(
@@ -542,6 +555,27 @@ export async function handleAgentSdkTurnError(
   if (/Max turns \(\d+\) exceeded/i.test(message) && ctx.hasSuccessfulToolProgress) {
     return finalizeBudgetCheckpointReturn(ctx.buildToolProgressBudgetCheckpoint(usedTools))
   }
+  const typedProviderFailure = readProviderTerminalError(error)
+  const providerRetryExhausted = isProviderRequestRetryExhausted(error)
+  const providerDiagnostics = providerRetryExhausted || typedProviderFailure
+    ? {
+        ...(runMetaProviderDiagnostics || {
+          provider: null,
+          agentProtocol: null,
+          wireApi: null,
+          contextWindow: null,
+          protocolSource: null,
+          contextWindowSource: null,
+        }),
+        lastProviderFailureHttpStatus: typedProviderFailure?.httpStatus ?? null,
+        lastProviderFailureErrorKind: typedProviderFailure?.code
+          || classifyExecutionError(error, { source: 'model_request' }).kind,
+      }
+    : runMetaProviderDiagnostics
+  if (shouldCheckpointProviderFailure(error, Boolean(ctx.finishProviderTransferCheckpoint)) && ctx.finishProviderTransferCheckpoint) {
+    const checkpoint = await ctx.finishProviderTransferCheckpoint(providerDiagnostics)
+    if (checkpoint) return checkpoint
+  }
   const failure = classifySdkRuntimeError(error)
   const failureText = `${failure.userMessagePrefix}: ${message}`
   const finalized = await finalizeRunOutcome(
@@ -557,7 +591,7 @@ export async function handleAgentSdkTurnError(
       finalText: failureText,
       projectionPatch: mergeProjectionPatches(projectionPatches),
       taskBudgetRuntime: runMetaBudgetRuntime,
-      providerDiagnostics: runMetaProviderDiagnostics,
+      providerDiagnostics,
       usage: runMetaUsage
     },
     {
@@ -586,7 +620,7 @@ export async function handleAgentSdkTurnError(
     projectionPatches,
     terminalReason: failure.terminalReason,
     taskBudgetRuntime: runMetaBudgetRuntime,
-    providerDiagnostics: runMetaProviderDiagnostics,
+    providerDiagnostics,
     usage: runMetaUsage,
     canonicalMessage: finalized.canonicalMessage,
     canonicalMessageDigest: finalized.canonicalMessageDigest,

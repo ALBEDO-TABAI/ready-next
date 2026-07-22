@@ -17,6 +17,7 @@ import {
   deriveTaskCardRuntimeState,
 } from '../../../../modules/agent/taskCardViewModel'
 import { interactionStateToBadgeLabel } from '../../../../modules/agent/task-status-vocabulary'
+import { readBrowserConfirmationRequest } from '../../../../../shared/browser-confirmation-card'
 
 export function taskTypeBadgeLabel(taskType: TaskCardRun['taskType'] | undefined): string {
   switch (taskType) {
@@ -80,6 +81,7 @@ export function budgetWarningBadgeLabel(level: TaskProjectionRecordData['budgetW
 export function isTaskVisible(run: Omit<TaskCardRun, '__brand'> | null | undefined): boolean {
   if (!run) return false
   return Boolean(
+    readBrowserConfirmationRequest(run.taskContinuation) ||
     run.taskTitle ||
     run.taskSummary ||
     run.progress ||

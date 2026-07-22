@@ -253,6 +253,7 @@ export interface ScopeRunTaskContinuation {
   checkpointId?: string | null
   browserTaskId?: string | null
   suspensionReason?: string | null
+  suspensionRequest?: import('../../../shared/browser-workflow-control').BrowserConfirmationSuspensionRequest | null
   taskId?: string | null
   // Phase 4: executionId is optional — the skill_executions state machine is
   // retired, so skill-sourced continuations no longer carry an executionId.

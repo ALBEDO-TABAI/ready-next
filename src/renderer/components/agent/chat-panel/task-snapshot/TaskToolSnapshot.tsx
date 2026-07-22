@@ -43,6 +43,7 @@ import {
   type TaskSectionKey,
 } from '../../../../modules/agent/taskCardViewModel'
 import { filterUserVisibleToolTraceEvents } from '../../../../modules/agent/toolTraceVisibility'
+import { readBrowserConfirmationRequest } from '../../../../../shared/browser-confirmation-card'
 import type { TaskCardRun } from '../../task-card-from-projection'
 import { TaskCard, ToolTraceCard } from '../task/TaskCard'
 import { isTaskVisible } from '../helpers/badges'
@@ -465,6 +466,9 @@ export function TaskToolSnapshot(props: TaskToolSnapshotProps): React.ReactEleme
     const hasPendingAskUserCard = messages.some(
       (m) => m.type === 'ask_user_questions' && m.askUserQuestions?.status === 'pending',
     )
+    const hasPendingBrowserConfirmation = Boolean(
+      currentTaskRun && readBrowserConfirmationRequest(currentTaskRun.taskContinuation),
+    )
 
     function isHeavyOngoing(run: typeof currentTaskRun): boolean {
       if (!run) return false
@@ -483,6 +487,7 @@ export function TaskToolSnapshot(props: TaskToolSnapshotProps): React.ReactEleme
     const foregroundActive = Boolean(
       currentTaskRun &&
       (
+        hasPendingBrowserConfirmation ||
         isStreaming ||
         currentTaskRun.phase === 'queued' ||
         currentTaskRun.phase === 'planning' ||
@@ -492,7 +497,9 @@ export function TaskToolSnapshot(props: TaskToolSnapshotProps): React.ReactEleme
         currentTaskRun.phase === 'responding'
       )
     )
-    const suppressForeground = foregroundActive && (hasPendingAskUserCard || !isHeavyOngoing(currentTaskRun))
+    const suppressForeground = foregroundActive
+      && !hasPendingBrowserConfirmation
+      && (hasPendingAskUserCard || !isHeavyOngoing(currentTaskRun))
     const effectiveForegroundActive = foregroundActive && !suppressForeground
 
     const foregroundDismissed = currentTaskRun

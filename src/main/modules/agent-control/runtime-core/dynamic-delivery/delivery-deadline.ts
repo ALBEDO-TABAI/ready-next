@@ -52,6 +52,7 @@ export function armDynamicDeliveryDeadline(input: {
   isAwaitingUserInput?: () => boolean
   agentId?: string
   scopeId?: string | null
+  scopeIdAliases?: readonly string[]
 }): DynamicDeliveryDeadlineHandle {
   const configuredMs = resolveDynamicDeliveryWallClockMs(input.mode, input.profile)
   if (configuredMs === null) {
@@ -95,10 +96,19 @@ export function armDynamicDeliveryDeadline(input: {
 
   arm(input.timeoutMsForTest ?? Math.max(0, configuredMs - elapsedAtArmMs))
   const registry = getInteractionLifecycleRegistry()
+  const acceptedScopeIds = new Set(
+    [input.scopeId, ...(input.scopeIdAliases || [])]
+      .map((value) => String(value || '').trim())
+      .filter(Boolean),
+  )
   let handle: DynamicDeliveryDeadlineHandle
-  const offLifecycle = input.agentId && input.scopeId
+  const offLifecycle = input.agentId && acceptedScopeIds.size > 0
     ? registry.subscribe((event) => {
-        if (event.runId !== input.runId || event.agentId !== input.agentId || event.scopeId !== input.scopeId) return
+        if (
+          event.runId !== input.runId
+          || event.agentId !== input.agentId
+          || !acceptedScopeIds.has(event.scopeId)
+        ) return
         if (event.phase === 'suspended') handle.suspend(event.interactionId)
         else if (event.phase === 'resumed') handle.resume(event.interactionId)
         else if (event.phase === 'checkpointed' || event.phase === 'terminated') handle.suspend(event.interactionId)

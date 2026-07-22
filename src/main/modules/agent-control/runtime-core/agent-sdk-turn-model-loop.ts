@@ -411,10 +411,11 @@ export async function executeAgentSdkModelToolLoop(
         clearNativeTextFlushTimer()
         if (error instanceof Error && error.name === 'BrowserWorkflowSuspendedError') {
           const suspensionKind = toolBridgeRuntimeContext.browserSuspensionRequest?.kind
+          const canonicalReceipt = toolBridgeRuntimeContext.browserSuspensionCanonicalReceipt || null
           return finalizeEarlyReturn({
             status: 'checkpoint',
             terminalReason: 'manual_suspend',
-            finalText: '',
+            finalText: canonicalReceipt?.canonicalMessage.content || '',
             initiator: suspensionKind === 'browser_power_confirmation'
               ? 'browser_power_confirmation'
               : suspensionKind === 'browser_permission'

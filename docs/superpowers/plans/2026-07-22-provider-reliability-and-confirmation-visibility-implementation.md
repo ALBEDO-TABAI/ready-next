@@ -2,7 +2,7 @@
 title: Provider 可靠性与确认可见性实施合同（第二批工单）
 date: 2026-07-22
 kind: implementation
-status: approved-for-implementation
+status: implemented-p1-p4-p5-blocked
 enforce: true
 owner: 白
 author: Claude
@@ -90,3 +90,55 @@ npm run verify:native
 ```
 
 P1 另需真机注入验收（power confirmation 卡可见性无法用纯单测证明）；P2 并入 A6 预演报告。每项完成更新本文状态与 EXIT 码，行数超限文件按 CLAUDE.md 1000 行规则更新健康台账。
+
+## 4. 2026-07-22 实施结果
+
+总状态：**P1–P4 已完成；P5 被本机浏览器远程调试权限阻塞，未伪造外部实测结论。**
+
+### 4.1 P1 — completed
+
+1. Browser power confirmation、browser permission 和人工接管暂停都会产生一条可见的 canonical assistant notice，并与干净 checkpoint 同事务写入。
+2. 聊天区和任务面板共用结构化确认内容；用户只能选择“允许并继续”或“拒绝”，通用“继续运行”旁路已移除。拒绝会以 typed denied 结果回到同一模型循环。
+3. 冷启动或同会话重发时，旧确认必定 expired，但保留 checkpoint 以便重新签发；旧按钮不能放行。
+4. 真实 Electron 隔离 profile 注入 `browser_eval/page_mutation` 验收通过：聊天区同时显示等待提示、目标 `https://example.com`、允许和拒绝按钮，DOM 读回只有一张确认卡，没有通用继续按钮。同一 profile 重启后数据库读回 `browser_confirmation_expired_checkpoint`、`waiting_for=none`。截图：`/tmp/ready-confirmation-live.NMnKYk/confirmation-visible.png`。
+
+### 4.2 P2 — completed
+
+1. 只有“Provider/transport 有界重试耗尽 + 已有 durable Browser checkpoint”才转成可续跑的 `blocked_tool_error/provider_transfer`。
+2. 暂停投影保留同一 Parent/child 续跑身份，并记录最后一次 Provider 失败的状态码和错误分类。
+3. 没有可恢复状态时仍然是 `blocked_external`，未扩大可续跑边界。
+
+### 4.3 P3 — completed
+
+1. finalizer 的 claim closeout 端口未装配时立即报错；已装配时在一个存储事务内结算该 run 的所有 held target。
+2. `claim_rejected`、`task_resume_authorized`、`resume_rejected` 已有唯一写入点、去重和行为测试。
+3. 未接线的 `recordUserSignal` / `expireBoot` 生产表面已退役，surface gate 现在认证真实生产路径。
+4. 单写者条文已与三个需要同事务写入的 checkpoint repository 例外对齐。
+
+### 4.4 P4 — completed
+
+1. 远程 scope 与本地 session id 不同时，用户交互仍会暂停同一个无进展时钟，已有行为对照。
+2. `run_close` 只在确实有 Provider 失败时关联 `httpStatus/errorKind`，无失败时不制造空诊断。
+3. Browser 默认路由已直接覆盖 research-only、显式目标优先、非研究任务和 projection 不可用时回退可见 active tab。
+
+### 4.5 P5 — blocked
+
+`web-access` 强制预检无法连接 Edge/Chrome 远程调试会话，因此不能在当前环境合规地完成 K3 `low/high/max`、两轮思考回传与 65536 `max_tokens` 真实外部请求。未修改 K3 默认思考档位，也未把关联计划伪标为 completed。解除条件：在 Edge 的 `edge://inspect/#remote-debugging` 或 Chrome 对应页面开启远程调试后重跑 P5。
+
+### 4.6 验证记录
+
+| 命令 / 验收 | 结果 |
+| --- | --- |
+| `npm run typecheck` | EXIT 0 |
+| `npm run verify:streaming` | EXIT 0，195 tests，194 pass，1 skip |
+| `npm run verify:agent-continuation-clock` | EXIT 0，58 tests，56 pass，2 ABI skip；随后的 Browser target native 套件 10/10 pass |
+| `npm run verify:dynamic-delivery` | EXIT 0，含 agent foundation、真实 native ABI、类型和单写者现有库存检查 |
+| `npm run verify:browser-target-claims` | EXIT 0，行为 14/14 pass，native 10/10 pass |
+| `npm run verify:stability` | EXIT 0，主套件与 Send IM 套件均 0 fail |
+| `npm run verify:native` | EXIT 0，Electron 42.3 / ABI 146 |
+| `npm run build:dir` | EXIT 0，产物 `exports/mac-arm64/Ready.app` 完成 ad-hoc 签名 |
+| 确认卡行为测试 | 15/15 pass；含底部任务区真实渲染与旁路按钮缺席断言 |
+| 隔离 Electron profile 真机验收 | 确认卡可见，允许/拒绝可见，无通用继续按钮；重启后旧确认 expired |
+| `git diff --check` / Agent SDK 模块边界 / Browser surface gate | 全部 EXIT 0 |
+
+超过 1000 行且本轮净增的文件已全部记入 `docs/code-health/large-file-health-log.md`。其中 checkpoint resume、runtime 和 run-finalizer 仍评为“危险”，本轮未在可靠性工单内顺手大拆。

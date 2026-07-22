@@ -9,7 +9,6 @@ import type {
 import { BrowserWorkflowUnitOfWork } from '../repositories/browser-workflow-unit-of-work'
 
 export type BrowserTargetClaimState = 'held' | 'user_owned' | 'suspended' | 'expired' | 'released'
-export type BrowserTargetUserSignalSource = 'keyboard' | 'pointer' | 'navigation' | 'explicit-button'
 
 export interface BrowserLogicalTargetKey {
   partition: string
@@ -45,6 +44,7 @@ export interface BrowserTargetClaim {
 }
 
 export interface BrowserTargetClaimAcquireInput extends BrowserPhysicalTargetKey {
+  operationId?: string
   profileId: string | null
   surface: AgentBrowserSurface
   parentTaskId: string
@@ -65,6 +65,7 @@ export type BrowserControlReceiptKind =
   | 'claim_acquired' | 'target_user_owned' | 'target_stale'
   | 'claim_resumed' | 'claim_suspended' | 'claim_released'
   | 'claim_expired' | 'target_closed_or_replaced'
+  | 'claim_rejected' | 'task_resume_authorized' | 'resume_rejected'
 
 export interface BrowserControlReceipt {
   receiptId: string
@@ -77,11 +78,15 @@ export interface BrowserControlReceipt {
   bootIncarnationId: string | null
   previousClaimId: string | null
   previousGeneration: number | null
-  nextClaimId: string
-  nextGeneration: number
+  nextClaimId: string | null
+  nextGeneration: number | null
   suspensionCheckpointId: string | null
+  wakeId?: string | null
+  successorRunId?: string | null
+  continuationGeneration?: number | null
   idempotencyKey: string
   kind: BrowserControlReceiptKind
+  errorCode?: string | null
   recoverable: boolean
   createdAt: string
 }
@@ -248,19 +253,21 @@ export class BrowserTargetClaimRepository implements BrowserTargetClaimStore {
           'SELECT COALESCE(MAX(sequence), 0) + 1 AS sequence FROM browser_control_receipts WHERE browser_task_id = ?',
         ).get<{ sequence: number }>(receipt.browserTaskId)?.sequence || 1)
         db.prepare(`
-          INSERT INTO browser_control_receipts (
+          INSERT OR IGNORE INTO browser_control_receipts (
             receipt_id, sequence, parent_task_id, browser_task_id, owner_run_id,
             partition, tab_id, physical_target_token, boot_incarnation_id,
             previous_claim_id, previous_generation, next_claim_id, next_generation,
             clean_base_checkpoint_id, suspension_checkpoint_id, wake_id, successor_run_id,
             continuation_generation, idempotency_key, kind, error_code, recoverable, created_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, NULL, NULL, NULL, ?, ?, NULL, ?, ?)
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `).run(
           receipt.receiptId, sequence, receipt.parentTaskId, receipt.browserTaskId, receipt.ownerRunId,
           receipt.logicalTargetKey.partition, receipt.logicalTargetKey.tabId,
           receipt.physicalTargetToken, receipt.bootIncarnationId,
           receipt.previousClaimId, receipt.previousGeneration, receipt.nextClaimId, receipt.nextGeneration,
-          receipt.suspensionCheckpointId, receipt.idempotencyKey, receipt.kind,
+          receipt.suspensionCheckpointId, receipt.wakeId ?? null,
+          receipt.successorRunId ?? null, receipt.continuationGeneration ?? null,
+          receipt.idempotencyKey, receipt.kind, receipt.errorCode ?? null,
           receipt.recoverable ? 1 : 0, receipt.createdAt,
         )
       },
@@ -297,6 +304,7 @@ export class MemoryBrowserTargetClaimRepository implements BrowserTargetClaimSto
         return true
       },
       appendReceipt: (receipt) => {
+        if (this.receipts.some((item) => item.idempotencyKey === receipt.idempotencyKey)) return
         this.receipts.push({ ...structuredClone(receipt), sequence: this.receipts.length + 1 })
       },
     })
@@ -423,6 +431,28 @@ export class BrowserTargetClaimService {
     const result = this.store.mutate((store) => {
       const key = { partition: input.partition, tabId: input.tabId }
       const current = store.read(key)
+      const reject = (error: AgentBrowserStructuredError): AgentBrowserStructuredError => {
+        store.appendReceipt({
+          receiptId: `browser-control-${randomUUID()}`,
+          parentTaskId: input.parentTaskId,
+          browserTaskId: input.browserTaskId,
+          ownerRunId: input.ownerRunId,
+          logicalTargetKey: key,
+          physicalTargetToken: input.physicalTargetToken,
+          bootIncarnationId: input.bootIncarnationId,
+          previousClaimId: current?.claimId ?? null,
+          previousGeneration: current?.generation ?? null,
+          nextClaimId: current?.claimId ?? null,
+          nextGeneration: current?.generation ?? null,
+          suspensionCheckpointId: current?.suspensionCheckpointId ?? null,
+          idempotencyKey: `claim_rejected:${input.operationId || input.physicalTargetToken}:${input.ownerRunId}:${current?.claimId || 'none'}:${current?.generation || 0}`,
+          kind: 'claim_rejected',
+          errorCode: error.errorCode,
+          recoverable: error.errorCode !== 'lease_required' || current?.state === 'suspended',
+          createdAt: new Date(at).toISOString(),
+        })
+        return error
+      }
       if (current?.state === 'held') {
         if (
           current.ownerRunId === input.ownerRunId
@@ -434,29 +464,29 @@ export class BrowserTargetClaimService {
           if (!store.write(renewed, current.generation)) throw new Error('browser_target_claim_cas_conflict')
           return renewed
         }
-        return agentBrowserError('lease_held', `Target ${input.tabId} is already held by another Browser owner.`, {
+        return reject(agentBrowserError('lease_held', `Target ${input.tabId} is already held by another Browser owner.`, {
           partition: input.partition,
           tabId: input.tabId,
           heldBy: current.ownerRunId,
           claimId: current.claimId,
           generation: current.generation,
-        })
+        }))
       }
       if (current?.state === 'user_owned') {
-        return agentBrowserError('lease_takeover', `Target ${input.tabId} is under user control.`, {
+        return reject(agentBrowserError('lease_takeover', `Target ${input.tabId} is under user control.`, {
           partition: input.partition,
           tabId: input.tabId,
           claimId: current.claimId,
           generation: current.generation,
-        })
+        }))
       }
       if (current?.state === 'suspended') {
-        return agentBrowserError('lease_required', `Target ${input.tabId} requires an authorized continuation before it can be resumed.`, {
+        return reject(agentBrowserError('lease_required', `Target ${input.tabId} requires an authorized continuation before it can be resumed.`, {
           partition: input.partition,
           tabId: input.tabId,
           state: current.state,
           suspensionCheckpointId: current.suspensionCheckpointId,
-        })
+        }))
       }
       const claim: BrowserTargetClaim = {
         version: 1,
@@ -564,23 +594,6 @@ export class BrowserTargetClaimService {
     return (this.activeActions.get(identity.claimId)?.size ?? 0) > 0
   }
 
-  recordUserSignal(input: {
-    target: BrowserPhysicalTargetKey
-    source: BrowserTargetUserSignalSource
-    suspensionCheckpointId: string
-    suspensionReason?: string
-  }): BrowserTargetClaim | null {
-    const current = this.read(input.target)
-    if (!current || current.state !== 'held' || !samePhysicalIdentity(current, input.target)) return null
-    if (input.source === 'navigation' && this.activeActions.get(current.claimId)?.size) return null
-    return this.transition(current, {
-      state: 'user_owned',
-      suspensionCheckpointId: input.suspensionCheckpointId,
-      suspensionReason: input.suspensionReason ?? 'browser_target_user_owned',
-      expiresAt: this.now(),
-    }, 'user_signal')
-  }
-
   release(identity: BrowserTargetClaimIdentity): BrowserTargetClaim | null {
     const current = this.read(identity)
     if (!current || current.state !== 'held') return current
@@ -652,50 +665,56 @@ export class BrowserTargetClaimService {
     suspensionCheckpointId?: string | null
     suspensionReason?: string | null
   }): BrowserTargetClaim[] {
-    const settled: BrowserTargetClaim[] = []
+    const held = this.store.list()
+      .filter((claim) => claim.ownerRunId === input.ownerRunId && claim.state === 'held')
+    if (held.length === 0) return []
     const canSuspend = Boolean(input.resumable && input.suspensionCheckpointId)
-    for (const claim of this.heldForRun(input.ownerRunId)) {
-      settled.push(this.transition(claim, canSuspend ? {
+    const at = this.now()
+    const transitions = held.map((claim) => {
+      const patch: Partial<BrowserTargetClaim> = canSuspend ? {
         state: 'suspended',
         physicalTargetToken: null,
         bootIncarnationId: null,
         suspensionCheckpointId: input.suspensionCheckpointId!,
         suspensionReason: input.suspensionReason || 'browser_run_checkpoint',
-        expiresAt: this.now(),
+        expiresAt: at,
       } : {
         state: 'released',
         physicalTargetToken: null,
         bootIncarnationId: null,
         suspensionCheckpointId: null,
         suspensionReason: null,
-        expiresAt: this.now(),
-      }, canSuspend ? 'suspend' : 'release'))
+        expiresAt: at,
+      }
+      const next: BrowserTargetClaim = {
+        ...claim,
+        ...patch,
+        version: 1,
+        claimId: this.generateId(),
+        generation: claim.generation + 1,
+        updatedAt: at,
+      }
+      return { previous: claim, next }
+    })
+    this.store.mutate((store) => {
+      for (const transition of transitions) {
+        if (!store.write(transition.next, transition.previous.generation)) {
+          throw new Error('browser_target_claim_closeout_cas_conflict')
+        }
+        store.appendReceipt(this.receipt(
+          transition.previous,
+          transition.next,
+          canSuspend ? 'suspend' : 'release',
+        ))
+      }
+    })
+    for (const transition of transitions) {
+      this.activeActions.delete(transition.previous.claimId)
+      this.emit(transition.previous, transition.next, canSuspend ? 'suspend' : 'release')
     }
-    return settled
+    return transitions.map((transition) => transition.next)
   }
 
-  expireBoot(bootIncarnationId: string): BrowserTargetClaim[] {
-    const settled: BrowserTargetClaim[] = []
-    for (const claim of this.list()) {
-      if (claim.bootIncarnationId !== bootIncarnationId) continue
-      if (claim.state === 'held') {
-        settled.push(this.transition(claim, {
-          state: 'expired',
-          physicalTargetToken: null,
-          bootIncarnationId: null,
-          suspensionCheckpointId: null,
-          suspensionReason: null,
-          expiresAt: this.now(),
-        }, 'restart'))
-      } else if (claim.state === 'suspended' || claim.state === 'user_owned') {
-        settled.push(this.transition(claim, {
-          physicalTargetToken: null,
-          bootIncarnationId: null,
-        }, 'restart'))
-      }
-    }
-    return settled
-  }
 }
 
 export function bootIncarnationIdFromPhysicalTargetToken(token: string): string {

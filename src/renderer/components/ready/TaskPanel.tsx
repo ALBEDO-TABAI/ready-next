@@ -25,6 +25,10 @@ import { useNavigate } from 'react-router-dom'
 import AgentSelector from './AgentSelector'
 import AgentTagRow from './AgentTagRow'
 import { EmergenceFeedSection } from './EmergenceFeedSection'
+import {
+  buildBrowserConfirmationCard,
+  readBrowserConfirmationRequest,
+} from '../../../shared/browser-confirmation-card'
 
 interface Task {
   id: string
@@ -369,6 +373,10 @@ export default function TaskPanel() {
     activeProjection?.interactionState === 'awaiting_clarification'
     || activeRun?.waitingFor === 'input'
     || activeRun?.waitingFor === 'clarification'
+  const projectionConfirmationRequest = readBrowserConfirmationRequest(activeProjection?.continuationRef)
+  const projectionConfirmationCard = projectionConfirmationRequest
+    ? buildBrowserConfirmationCard(projectionConfirmationRequest)
+    : null
   const projectionRuntimeState = useMemo(() => {
     if (!activeProjection) return null
     return deriveTaskCardRuntimeState({
@@ -472,6 +480,18 @@ export default function TaskPanel() {
       taskId: activeProjection.taskId || undefined,
       responseText: trimmed,
       continuationIntent: buildProjectionContinuationIntent(activeProjection, trimmed),
+    })
+  }, [activeProjection])
+
+  const handleConfirmProjection = useCallback(async (confirmed: boolean) => {
+    if (!activeProjection?.scopeId) return
+    const responseText = confirmed ? '确认继续。' : '拒绝这次操作。'
+    await window.electronAPI.agent.respondToInteraction({
+      scopeId: activeProjection.scopeId,
+      taskId: activeProjection.taskId || undefined,
+      responseText,
+      confirmed,
+      continuationIntent: buildProjectionContinuationIntent(activeProjection, responseText),
     })
   }, [activeProjection])
 
@@ -676,7 +696,7 @@ export default function TaskPanel() {
             )}
             {activeProjection && (
               <div className="flex flex-wrap gap-1.5">
-                {projectionRuntimeState?.actionSet.includes('continue') && (
+                {activeProjection.waitingFor !== 'confirmation' && projectionRuntimeState?.actionSet.includes('continue') && (
                   <button
                     type="button"
                     onClick={handleResumeProjection}
@@ -696,21 +716,45 @@ export default function TaskPanel() {
                     取消任务
                   </button>
                 )}
-                {(isAwaitingSupplement
-                  || activeProjection?.interactionState === 'awaiting_confirmation'
-                  || activeProjection?.interactionState === 'human_takeover') && (
+                {isAwaitingSupplement && (
                   <button
                     type="button"
                     onClick={handleRespondToProjection}
                     className="rounded-[8px] border px-2.5 py-1.5 text-[10.5px] transition-colors hover:bg-black/5"
                     style={{ borderColor: 'var(--border-default)', color: 'var(--text-body)' }}
                   >
-                    {activeProjection?.interactionState === 'awaiting_confirmation'
-                      ? '确认继续'
-                      : activeProjection?.interactionState === 'human_takeover'
-                        ? '我已完成'
-                        : '补充后继续'}
+                    补充后继续
                   </button>
+                )}
+                {activeProjection?.interactionState === 'human_takeover' && (
+                  <button
+                    type="button"
+                    onClick={handleRespondToProjection}
+                    className="rounded-[8px] border px-2.5 py-1.5 text-[10.5px] transition-colors hover:bg-black/5"
+                    style={{ borderColor: 'var(--border-default)', color: 'var(--text-body)' }}
+                  >
+                    我已完成
+                  </button>
+                )}
+                {activeProjection?.waitingFor === 'confirmation' && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => handleConfirmProjection(true)}
+                      className="rounded-[8px] border px-2.5 py-1.5 text-[10.5px] transition-colors hover:bg-black/5"
+                      style={{ borderColor: 'var(--border-default)', color: 'var(--text-body)' }}
+                    >
+                      {projectionConfirmationCard?.allowLabel || '允许并继续'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleConfirmProjection(false)}
+                      className="rounded-[8px] border px-2.5 py-1.5 text-[10.5px] transition-colors hover:bg-black/5"
+                      style={{ borderColor: 'var(--border-default)', color: 'var(--text-body)' }}
+                    >
+                      {projectionConfirmationCard?.denyLabel || '拒绝'}
+                    </button>
+                  </>
                 )}
                 {projectionRuntimeState?.actionSet.includes('retry') && (
                   <button

@@ -191,6 +191,7 @@ export interface ToolBridgeRuntimeContext {
     | { kind: 'human_takeover'; takeoverId: string }
     | import('../../../../shared/browser-workflow-control').BrowserConfirmationSuspensionRequest
   ) | null
+  browserSuspensionCanonicalReceipt?: import('../../../../shared/ipc-contracts/canonical-message').CanonicalAssistantMessageReceipt | null
   confirmedBrowserPowerRequest?: import('../../../../shared/browser-workflow-control').BrowserPowerConfirmationSuspensionRequest | null
   confirmedBrowserPowerRequestConsumed?: boolean
   confirmedBrowserPermissionRequest?: import('../../../../shared/browser-workflow-control').BrowserPermissionSuspensionRequest | null
@@ -268,6 +269,8 @@ export interface AgentSdkProviderDiagnostics {
   contextWindow: number | null
   protocolSource: 'explicit' | 'inferred' | null
   contextWindowSource: 'explicit' | 'model' | 'fallback' | null
+  lastProviderFailureHttpStatus?: number | null
+  lastProviderFailureErrorKind?: string | null
 }
 
 export interface RunMetaRepositoryLike {

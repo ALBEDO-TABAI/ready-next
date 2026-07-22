@@ -15,6 +15,7 @@ import {
 import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
 import { canonicalCoreCloseoutTestPort } from './helpers/canonical-core-closeout-test-port'
 import { createTaskBudgetRuntime } from '../main/modules/agent-control/task-projection/run-budget-policy'
+import { setBrowserTargetClaimRunCloseoutPort } from '../main/modules/browser-engine/browser-target-claim-closeout'
 
 test('abort-initiator-threading declares transitive sqlite ABI guard', (t) => {
   skipIfSqliteUnavailable(t, 'abort-initiator-threading transitive sqlite load')
@@ -267,7 +268,9 @@ test('delivery wall-clock abort is a delivery failure, not a user cancellation',
   assert.equal(runtimeErrors[0]?.errorKind, 'delivery_failed')
 })
 
-test('S0 R3: delivery deadline preserves a durable Browser task as a resumable checkpoint', async () => {
+test('S0 R3: delivery deadline preserves a durable Browser task as a resumable checkpoint', async (t) => {
+  setBrowserTargetClaimRunCloseoutPort(() => undefined)
+  t.after(() => setBrowserTargetClaimRunCloseoutPort(null))
   const projection = {
     taskId: 'task-delivery-browser',
     scopeId: 'scope-delivery-browser',

@@ -34,8 +34,15 @@ for (const legacy of LEGACY_PATHS) {
 }
 
 const claims = read('src/main/modules/browser-engine/browser-target-claims.ts')
-for (const token of ['BrowserTargetClaimRepository', 'BrowserTargetClaimService', 'checkWrite(', 'recordUserSignal(']) {
+for (const token of ['BrowserTargetClaimRepository', 'BrowserTargetClaimService', 'checkWrite(']) {
   if (!claims.includes(token)) fail(`target-claim authority missing ${token}`)
+}
+for (const retired of ['recordUserSignal(', 'expireBoot(']) {
+  if (claims.includes(retired)) fail(`retired target-claim path still exists: ${retired}`)
+}
+const resumeTransactions = read('src/main/modules/repositories/agent-session-checkpoint-resume.ts')
+for (const token of ['createHumanTakeoverIntent(', 'settleOwnerFailure(']) {
+  if (!resumeTransactions.includes(token)) fail(`durable takeover/restart transaction missing ${token}`)
 }
 const gate = read('src/main/modules/browser-engine/agent-browser-lease-gate.ts')
 if (!gate.includes('BrowserTargetClaimService') || !gate.includes('checkWrite(')) {

@@ -56,6 +56,10 @@ export interface AgentSdkPreparedTurnState {
   runMetaUsage: ReadyAgentSdkRunResult['usage'] | null
   sessionRestoreNotice: string | null
   skillClarificationSteered: boolean
+  checkpointCanonicalReceipt: CanonicalAssistantMessageReceipt | null
+  finishProviderTransferCheckpoint: ((
+    providerDiagnostics: AgentSdkProviderDiagnostics | null,
+  ) => Promise<ExecutionTurnResult | null>) | null
 }
 
 export interface AgentSdkPreparedTurnContext {

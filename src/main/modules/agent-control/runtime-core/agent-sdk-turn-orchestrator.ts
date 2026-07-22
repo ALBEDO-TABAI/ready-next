@@ -481,7 +481,8 @@ export class AgentSdkTurnOrchestrator {
         projectionPatch,
         taskBudgetRuntime: effectiveBudgetRuntime,
         providerDiagnostics: effectiveProviderDiagnostics,
-        usage: runMetaUsage
+        usage: runMetaUsage,
+        canonicalMessageReceipt: params.status === 'checkpoint' ? preparedTurnState?.checkpointCanonicalReceipt || null : null,
       }
       const deps = {
         runMetaRepository: this.host.getRunMetaRepositoryForFinalize(),
@@ -842,7 +843,8 @@ export class AgentSdkTurnOrchestrator {
         runMetaProviderDiagnostics,
         runMetaUsage,
         sessionRestoreNotice,
-        skillClarificationSteered
+        skillClarificationSteered,
+        checkpointCanonicalReceipt: null, finishProviderTransferCheckpoint: null,
       }
       const executionResult = await executeAgentSdkPreparedTurn({
         state: preparedTurnState,
@@ -959,9 +961,8 @@ export class AgentSdkTurnOrchestrator {
         hasSuccessfulToolProgress: preparedTurnState
           ? preparedTurnState.hasSuccessfulToolProgress
           : hasSuccessfulToolProgress,
-        lastDocumentSaveSuccessText: preparedTurnState
-          ? preparedTurnState.lastDocumentSaveSuccessText
-          : lastDocumentSaveSuccessText,
+        lastDocumentSaveSuccessText: preparedTurnState ? preparedTurnState.lastDocumentSaveSuccessText : lastDocumentSaveSuccessText,
+        finishProviderTransferCheckpoint: preparedTurnState?.finishProviderTransferCheckpoint || null,
         emitOutputForRun,
         emitOutput,
         emitStatusForRun,

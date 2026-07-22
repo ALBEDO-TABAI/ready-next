@@ -6,7 +6,7 @@ import {
   createAgentTabUserInputTakeoverHandlers,
   persistAgentTabUserTakeover,
 } from '../main/modules/browser-engine/agent-tab-control-gate'
-import { acquireTarget, createTargetClaimService, identityOf } from './utils/browser-target-claim-fixture'
+import { acquireTarget, createTargetClaimService, identityOf, setTargetUserOwnedForTest } from './utils/browser-target-claim-fixture'
 
 describe('agent tab immediate takeover', () => {
   it('records the lease takeover and fences grounded work exactly once', () => {
@@ -47,11 +47,7 @@ describe('agent tab immediate takeover', () => {
           isTakenOver: () => claimService.read(claim.logicalKey)?.state === 'user_owned',
           fenceGroundedTasks: () => { groundedFenced = true },
           recordLeaseTakeover: () => {
-            claimService.recordUserSignal({
-              target: identityOf(claim),
-              source: 'explicit-button',
-              suspensionCheckpointId: 'checkpoint-user',
-            })
+            setTargetUserOwnedForTest(claimService, claim, 'checkpoint-user')
           },
         })
       },
@@ -91,11 +87,7 @@ describe('agent tab immediate takeover', () => {
       ownerRunId: 'owner-run',
       tabId: 'tab-a',
     })
-    claimService.recordUserSignal({
-      target: identityOf(claim),
-      source: 'explicit-button',
-      suspensionCheckpointId: 'checkpoint-user',
-    })
+    setTargetUserOwnedForTest(claimService, claim, 'checkpoint-user')
     let successCleanup = 0
     let failures = 0
 

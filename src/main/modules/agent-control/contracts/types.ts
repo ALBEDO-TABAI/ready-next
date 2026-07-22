@@ -254,6 +254,7 @@ export interface ScopeRunTaskContinuation {
   checkpointId?: string | null
   browserTaskId?: string | null
   suspensionReason?: string | null
+  suspensionRequest?: import('../../../../shared/browser-workflow-control').BrowserConfirmationSuspensionRequest | null
   taskId?: string | null
   executionId?: string | null
   stepId?: string | null

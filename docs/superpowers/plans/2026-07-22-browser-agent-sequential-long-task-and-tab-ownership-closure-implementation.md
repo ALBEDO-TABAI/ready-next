@@ -175,7 +175,7 @@ CREATE TABLE browser_target_claims (
 );
 ```
 
-只有 `BrowserTargetClaimRepository` 可以写该表：
+该表只有两类合法写者：独立 target 转换由 `BrowserTargetClaimRepository` 写入；需要与 Parent、Browser child、run、checkpoint 同事务收口的跨账本转换，只能由 `AgentSessionCheckpointStoreRepository`、`AgentSessionCheckpointResumeRepository` 和 `AgentSessionCheckpointCloseoutRepository` 写入。除这四个具名事务边界外，任何生产路径都不得直接修改 claim 表。
 
 1. acquire/resume 以 logical key + 当前 physical token/boot + 旧 generation 做 CAS，成功时 generation 单调加一并签发新 claimId；同 logical target 不可能同时有两个 current row。
 2. heartbeat 只允许当前 `held + claimId + generation + ownerRunId`，并在每次 page mutation 前刷新；内存只缓存 read-through snapshot，不是授权真值。

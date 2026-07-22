@@ -2117,6 +2117,9 @@ export class AgentControlRuntime extends EventEmitter {
       },
       runConfirmed: async (scopeRow, persistence) => {
         const scope = this.mapConversationRow(scopeRow)
+        if (!payload.continuationIntent) {
+          await this.agentSessionCheckpoints.expirePendingBrowserConfirmations({ scopeId: scope.id })
+        }
         const trustedEnvironment = await this.resolveTrustedRequestEnvironment(payload.environmentHint)
         // skill-resume A1: restore reference-skill hint from persisted conv meta
         // before any skill detection runs, so resumed sessions don't lose context

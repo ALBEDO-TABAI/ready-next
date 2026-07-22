@@ -6,6 +6,8 @@ import type {
   BrowserConfirmationSuspensionRequest,
 } from '../../../shared/browser-workflow-control'
 import { browserHumanTakeoverBlockedReason } from '../../../shared/browser-workflow-control'
+import { browserConfirmationNotice } from '../../../shared/browser-confirmation-card'
+import type { CanonicalAssistantMessageReceipt } from '../../../shared/ipc-contracts/canonical-message'
 import { BROWSER_OPERATION_IDS } from '../../../shared/browser-capability-registry'
 import { assertAgentInputToolPairIntegrity } from '../agent-control/compaction/compact-agent-input'
 import { readVerifiedBrowserWorkflowEvidence } from '../browser-engine/browser-workflow-evidence'
@@ -30,6 +32,7 @@ import {
   type WorkflowCheckpointRow,
 } from './browser-workflow-row-mapping'
 import type { BrowserObservationGap } from './agent-session-checkpoint-types'
+import { buildCanonicalCoreCloseoutMessage } from './canonical-core-closeout-message'
 
 interface ChatMessageRow {
   id: string
@@ -37,7 +40,10 @@ interface ChatMessageRow {
   role: string
   content: string
   timestamp: string
+  meta_json?: string | null
 }
+
+export type AgentSessionCheckpointWriteResult = AgentSessionCheckpoint & Partial<CanonicalAssistantMessageReceipt>
 
 interface SteeringMessageResourceRow {
   resource_id: string
@@ -189,7 +195,7 @@ export class AgentSessionCheckpointStoreRepository {
     ancestorOwnerRunId?: string | null
     ancestorCheckpointDigest?: string | null
     now?: string
-  }): Promise<AgentSessionCheckpoint> {
+  }): Promise<AgentSessionCheckpointWriteResult> {
     return this.unitOfWork.runImmediateWithRetry((db) => {
       const parent = readParent(db, input.parentTaskId)
       if (parent.runId !== input.ownerRunId) throw new Error('checkpoint_owner_mismatch')
@@ -419,13 +425,22 @@ export class AgentSessionCheckpointStoreRepository {
       const checkpointRefs: AgentCheckpointRefs = checkpoint.role === 'clean_base'
         ? { ...parent.checkpointRefs, cleanBaseCheckpointId: checkpointId }
         : { ...parent.checkpointRefs, suspensionCheckpointId: checkpointId }
+      const continuationRef = {
+        kind: suspensionReason === 'human_takeover' ? 'human_takeover' : 'browser_checkpoint',
+        ...(input.takeoverId ? { takeoverId: input.takeoverId } : {}),
+        ...(input.suspensionRequest ? { suspensionRequest: input.suspensionRequest } : {}),
+        checkpointId,
+        browserTaskId: input.browserTaskId ?? null,
+        suspensionReason,
+      }
       const parentUpdate = input.role === 'suspension'
         ? db.prepare(
             `UPDATE task_projections
                 SET steering_receipts_json = ?, checkpoint_refs_json = ?,
                     status = 'recoverable_paused', interaction_state = ?,
                     waiting_for = ?, blocked_reason = ?,
-                    resumable_actions_json = ?, revision = revision + 1, updated_at = ?
+                    resumable_actions_json = ?, continuation_ref_json = ?,
+                    revision = revision + 1, updated_at = ?
               WHERE task_id = ? AND revision = ? AND run_id = ?`,
           ).run(
             serializeWorkflowJson(receipts, 'steering_receipts_json'),
@@ -444,6 +459,7 @@ export class AgentSessionCheckpointStoreRepository {
                   ? 'browser_permission_checkpoint'
                 : `browser_${suspensionReason || 'manual'}_checkpoint`,
             serializeWorkflowJson(['continue', 'cancel'], 'takeover_resumable_actions_json'),
+            serializeWorkflowJson(continuationRef, 'suspension_continuation_ref_json'),
             createdAt,
             parent.taskId,
             parent.revision,
@@ -493,14 +509,7 @@ export class AgentSessionCheckpointStoreRepository {
             WHERE run_id = ? AND task_id = ? AND status = 'running'`,
         ).run(
           suspensionReason === 'human_takeover' ? 'human_takeover' : `checkpoint_${suspensionReason || 'manual'}`,
-          serializeWorkflowJson({
-            kind: suspensionReason === 'human_takeover' ? 'human_takeover' : 'browser_checkpoint',
-            ...(input.takeoverId ? { takeoverId: input.takeoverId } : {}),
-            ...(input.suspensionRequest ? { suspensionRequest: input.suspensionRequest } : {}),
-            checkpointId,
-            browserTaskId: input.browserTaskId ?? null,
-            suspensionReason,
-          }, 'takeover_continuation_ref_json'),
+          serializeWorkflowJson(continuationRef, 'takeover_continuation_ref_json'),
           Date.parse(createdAt) || Date.now(),
           input.ownerRunId,
           parent.taskId,
@@ -531,7 +540,70 @@ export class AgentSessionCheckpointStoreRepository {
         ? updatedParent.checkpointRefs.cleanBaseCheckpointId
         : updatedParent.checkpointRefs.suspensionCheckpointId
       if (authoritativeId !== checkpointId) throw new Error('checkpoint_parent_pointer_readback_failed')
-      return readback
+      if (input.role !== 'suspension') return readback
+
+      const notice = input.suspensionRequest
+        ? browserConfirmationNotice(input.suspensionRequest)
+        : suspensionReason === 'human_takeover'
+          ? parent.humanTakeoverRef?.userPrompt
+            ? browserHumanTakeoverBlockedReason(parent.humanTakeoverRef.userPrompt)
+            || '页面需要你完成验证或手动操作。完成后可以从任务卡继续。'
+            : '页面需要你完成验证或手动操作。完成后可以从任务卡继续。'
+          : null
+      if (!notice) return readback
+      const canonicalMessage = buildCanonicalCoreCloseoutMessage({
+        parentTaskId: parent.taskId,
+        ownerRunId: input.ownerRunId,
+        conversationId: parent.scopeId,
+        finalText: notice,
+        timestamp: createdAt,
+        terminalReason: suspensionReason === 'human_takeover'
+          ? 'human_takeover'
+          : `checkpoint_${suspensionReason}`,
+      })
+      canonicalMessage.meta = {
+        ...canonicalMessage.meta,
+        checkpointId,
+        ...(input.suspensionRequest ? { browserConfirmationRequest: input.suspensionRequest } : {}),
+      }
+      const canonicalMessageDigest = workflowDigest(canonicalMessage)
+      db.prepare(
+        `INSERT INTO chat_messages (id, conversation_id, role, content, timestamp, meta_json)
+         VALUES (?, ?, 'assistant', ?, ?, ?)
+         ON CONFLICT(id) DO NOTHING`,
+      ).run(
+        canonicalMessage.id,
+        canonicalMessage.conversationId,
+        canonicalMessage.content,
+        canonicalMessage.timestamp,
+        serializeWorkflowJson(canonicalMessage.meta, 'checkpoint_canonical_assistant_meta_json'),
+      )
+      const messageReadback = db.prepare(
+        `SELECT id, conversation_id, role, content, timestamp, meta_json
+           FROM chat_messages WHERE id = ? LIMIT 1`,
+      ).get<Required<ChatMessageRow>>(canonicalMessage.id)
+      if (!messageReadback || messageReadback.role !== 'assistant') {
+        throw new Error('checkpoint_canonical_assistant_message_readback_failed')
+      }
+      const readbackCanonical = {
+        id: messageReadback.id,
+        conversationId: messageReadback.conversation_id,
+        role: 'assistant' as const,
+        content: messageReadback.content,
+        timestamp: messageReadback.timestamp,
+        meta: parseObjectStrict<Record<string, unknown>>(
+          messageReadback.meta_json || '{}',
+          'checkpoint_canonical_assistant_meta_json',
+        ),
+      }
+      if (workflowDigest(readbackCanonical) !== canonicalMessageDigest) {
+        throw new Error('checkpoint_canonical_assistant_message_digest_mismatch')
+      }
+      return {
+        ...readback,
+        canonicalMessage: readbackCanonical,
+        canonicalMessageDigest,
+      }
     })
   }
 

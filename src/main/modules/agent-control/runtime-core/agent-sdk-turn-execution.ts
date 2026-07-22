@@ -226,6 +226,7 @@ export async function executeAgentSdkPreparedTurn(
     startedAtMs: runStartedAt,
     agentId: name,
     scopeId: sessionId ?? null,
+    scopeIdAliases: [host.runtime?.getTaskProjectionStoreForFinalize?.()?.get(taskId)?.scopeId || '', effectiveExecutionOptions?.publicSessionId || ''],
   })
   const emitOutputBeforeProgressTracking = emitOutput
   emitOutput = (chunk, type, projectionPatch) => {
@@ -483,6 +484,7 @@ export async function executeAgentSdkPreparedTurn(
       projectionPatches,
       getTaskBudgetRuntime: () => liveTaskBudgetRuntime,
       setContinuationRef: (continuation) => { runMetaContinuationRef = continuation },
+      setProviderDiagnostics: (diagnostics) => { runMetaProviderDiagnostics = diagnostics },
       setFinalText: (text) => { finalText = text },
       emitOutput,
       finalizeCheckpoint: (params) => finalizeEarlyReturn({
@@ -491,6 +493,7 @@ export async function executeAgentSdkPreparedTurn(
         ...params,
       }),
     })
+    ctx.state.finishProviderTransferCheckpoint = browserSuspension.finishProviderTransferCheckpoint
     const finishSteeringCheckpointIfNeeded = async (): Promise<ExecutionTurnResult | null> => {
       if (
         !toolBridgeRuntimeContext.browserWorkflowRoute
@@ -649,9 +652,7 @@ export async function executeAgentSdkPreparedTurn(
     if (assembledInput.terminalResult) return await assembledInput.terminalResult
     const { sdkTools, instructions } = assembledInput
     let { nextInput } = assembledInput
-    if (deliveryReminder) {
-      nextInput = prependSystemReminderInput(nextInput, deliveryReminder)
-    }
+    if (deliveryReminder) nextInput = prependSystemReminderInput(nextInput, deliveryReminder)
     const modelToolLoopResult = await executeAgentSdkModelToolLoop({
       state: {
         get criteriaSelfCheckInjected() {
@@ -783,6 +784,7 @@ export async function executeAgentSdkPreparedTurn(
       maybeHandleActionAnnouncementGuard,
       finalizeEarlyReturn
     })
+    ctx.state.checkpointCanonicalReceipt = toolBridgeRuntimeContext.browserSuspensionCanonicalReceipt || null
     if (modelToolLoopResult) return modelToolLoopResult
     return await finalizeAgentSdkPreparedTurnResult({
       state: {

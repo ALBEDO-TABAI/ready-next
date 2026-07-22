@@ -23,7 +23,8 @@ function write(root, rel, body) {
 }
 
 function seed(root) {
-  write(root, 'src/main/modules/browser-engine/browser-target-claims.ts', 'BrowserTargetClaimRepository BrowserTargetClaimService checkWrite( recordUserSignal(')
+  write(root, 'src/main/modules/browser-engine/browser-target-claims.ts', 'BrowserTargetClaimRepository BrowserTargetClaimService checkWrite(')
+  write(root, 'src/main/modules/repositories/agent-session-checkpoint-resume.ts', 'createHumanTakeoverIntent( settleOwnerFailure(')
   write(root, 'src/main/modules/browser-engine/agent-browser-lease-gate.ts', 'BrowserTargetClaimService checkWrite(')
   write(root, 'src/main/modules/tools/browser-tools.ts', 'export function executeBrowserTool() {}')
 }

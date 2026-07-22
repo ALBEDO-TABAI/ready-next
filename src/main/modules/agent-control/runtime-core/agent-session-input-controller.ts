@@ -320,6 +320,13 @@ export class AgentSessionInputController {
       finalItems: structuredClone(checkpoint.finalInput) as AgentInputItem[],
     }
     if (this.runtimeContext.browserSuspensionRequest) {
+      this.runtimeContext.browserSuspensionCanonicalReceipt = checkpoint.canonicalMessage
+        && checkpoint.canonicalMessageDigest
+        ? {
+            canonicalMessage: checkpoint.canonicalMessage,
+            canonicalMessageDigest: checkpoint.canonicalMessageDigest,
+          }
+        : null
       const error = new Error('browser_workflow_suspended_after_tool_result')
       error.name = 'BrowserWorkflowSuspendedError'
       throw error

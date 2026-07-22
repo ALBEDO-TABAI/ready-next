@@ -151,6 +151,76 @@ test('TaskCard renders only exact child-run continue action for suspended child 
   }
 })
 
+test('TaskCard renders a browser confirmation card with only typed allow and deny actions', () => {
+  const confirmationCalls: Array<[string, boolean]> = []
+  const resumeCalls: string[] = []
+  const run = taskProjectionToTaskCardRun({
+    scopeId: 'scope-confirmation',
+    taskId: 'task-confirmation',
+    phase: 'checkpoint',
+    title: '等待浏览器确认',
+    steps: [],
+    waitingFor: 'confirmation',
+    resumableActions: ['continue', 'cancel'],
+    recentArtifacts: [],
+    taskContinuation: {
+      kind: 'browser_checkpoint',
+      checkpointId: 'checkpoint-confirmation',
+      browserTaskId: 'browser-task-confirmation',
+      suspensionRequest: {
+        version: 1,
+        kind: 'browser_power_confirmation',
+        requestId: 'confirmation-1',
+        wakeKind: 'browser_power_confirmation',
+        toolName: 'browser_eval',
+        effects: ['page_mutation'],
+        actionIntent: { objectRef: 'page', inputHash: 'input-hash' },
+        target: {
+          scopeId: 'scope-confirmation',
+          ownerRunId: 'run-confirmation',
+          browserTaskId: 'browser-task-confirmation',
+          tabId: 'tab-1',
+          documentKeyHash: 'document-key-hash',
+          origin: 'https://example.com',
+          targetDigest: 'target-digest',
+        },
+        purpose: '更新页面内容',
+      },
+    },
+    taskType: 'research',
+    interactionState: 'suspended',
+    canResume: true,
+    updatedAt: '2026-07-22T00:00:00.000Z',
+    toolTrace: [],
+  })
+  const rendered = mount(createElement(TaskCard, {
+    run,
+    expanded: true,
+    onSubmitConfirmation: (scopeId, confirmed) => confirmationCalls.push([scopeId, confirmed]),
+    onResumeRun: (scopeId) => resumeCalls.push(scopeId),
+  }))
+
+  try {
+    const card = rendered.container.querySelector('[data-ready-browser-confirmation-card="browser_power_confirmation"]')
+    assert.ok(card)
+    assert.match(card.textContent || '', /需要你确认浏览器操作/)
+    assert.match(card.textContent || '', /修改页面内容/)
+    assert.match(card.textContent || '', /example\.com/)
+    const buttons = Array.from(rendered.container.querySelectorAll('button'))
+    const allow = buttons.find((button) => button.textContent?.trim() === '允许并继续')
+    const deny = buttons.find((button) => button.textContent?.trim() === '拒绝')
+    assert.ok(allow)
+    assert.ok(deny)
+    assert.equal(buttons.some((button) => button.textContent?.trim() === '继续运行'), false)
+    allow.click()
+    deny.click()
+    assert.deepEqual(confirmationCalls, [['scope-confirmation', true], ['scope-confirmation', false]])
+    assert.deepEqual(resumeCalls, [])
+  } finally {
+    rendered.unmount()
+  }
+})
+
 test('TaskCard hides interaction badge for terminal failed runs', () => {
   const run = taskProjectionToTaskCardRun({
     scopeId: 'scope-1',

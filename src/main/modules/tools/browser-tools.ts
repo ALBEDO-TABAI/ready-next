@@ -39,6 +39,28 @@ import { scopedOriginInteractionKey, type OriginInteractionSignal } from '../bro
 const logger = createRotatingLogger('ready-tools.log', { buffered: true })
 const actionExecutor = new BrowserActionExecutor()
 
+export function shouldUseResearchWorkTab(input: {
+  taskType: string | null | undefined
+  browserTaskId: string | null | undefined
+  parentTaskId: string | null | undefined
+  requiresDocument: boolean
+  explicitTabId: unknown
+}): boolean {
+  return input.taskType === 'research'
+    && Boolean(input.browserTaskId && input.parentTaskId)
+    && input.requiresDocument
+    && !(typeof input.explicitTabId === 'string' && input.explicitTabId.trim())
+}
+
+export function resolveBrowserInitialTabId(
+  explicitTabId: unknown,
+  activeTabId: string | null | undefined,
+): string | null {
+  return typeof explicitTabId === 'string' && explicitTabId.trim()
+    ? explicitTabId
+    : activeTabId || null
+}
+
 function log(message: string): void {
   try { logger.append(`[${new Date().toISOString()}] ${message}\n`) } catch { /* silent-catch: diagnostics must not fail browser work. */ }
 }
@@ -307,16 +329,17 @@ export async function executeBrowserTool(
     const operationCapability = invocation.ok ? browserOperationCapability(invocation.operation) : null
     const browserTaskId = String(taskExecutionContext?.browserTaskId || '').trim()
     const parentTaskId = String(taskExecutionContext?.parentTaskId || '').trim()
-    const researchWorkTab = Boolean(
-      browserTaskId
-      && parentTaskId
-      && runtime?.getTaskProjection(parentTaskId)?.taskType === 'research',
-    )
-    if (
-      researchWorkTab
-      && operationCapability?.requiresDocument
-      && !(typeof args.tab_id === 'string' && args.tab_id.trim())
-    ) {
+    const taskType = browserTaskId && parentTaskId
+      ? runtime?.getTaskProjection(parentTaskId)?.taskType
+      : null
+    const researchWorkTab = shouldUseResearchWorkTab({
+      taskType,
+      browserTaskId,
+      parentTaskId,
+      requiresDocument: operationCapability?.requiresDocument === true,
+      explicitTabId: args.tab_id,
+    })
+    if (researchWorkTab) {
       const workTab = await controller.ensureAgentWorkTab(browserTaskId)
       if (!workTab.success || !workTab.tabId) {
         return createBrowserStructuredOutput({
@@ -328,9 +351,7 @@ export async function executeBrowserTool(
       args = { ...args, tab_id: workTab.tabId }
     }
     const origin = browserActionOrigin(args, controller)
-    const initialTabId = typeof args.tab_id === 'string' && args.tab_id.trim()
-      ? args.tab_id
-      : controller.getActiveTab?.()?.id || null
+    const initialTabId = resolveBrowserInitialTabId(args.tab_id, controller.getActiveTab?.()?.id)
     const requiresPageLease = operationCapability?.requiresPageLease === true
     const tabList = controller.getTabList?.() || []
     const initialTarget = initialTabId

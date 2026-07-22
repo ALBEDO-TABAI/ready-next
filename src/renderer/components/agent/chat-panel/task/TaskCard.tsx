@@ -25,6 +25,10 @@ import {
 import type { TaskCardRun } from '../../task-card-from-projection'
 import { AgentStatusDot } from '../../../ui/dot-matrix/AgentStatusDot'
 import { RunFeedbackStars } from './RunFeedbackStars'
+import {
+  buildBrowserConfirmationCard,
+  readBrowserConfirmationRequest,
+} from '../../../../../shared/browser-confirmation-card'
 
 // ---------------------------------------------------------------------------
 // 2026-07-10 activity-capsule redesign — `TaskCard` 与 `ToolTraceCard` 共享
@@ -278,9 +282,14 @@ export function TaskCard({
     && run.canResume === true
     && !childRunId
     && !isDetachedTask
+    && run.waitingFor !== 'confirmation'
     && (run.waitingFor !== 'none' || resumableActions.length > 0)
   const showContinueInput = !isAgentHandoff && (run.waitingFor === 'input' || run.waitingFor === 'clarification')
   const showConfirmationPair = run.waitingFor === 'confirmation'
+  const confirmationRequest = readBrowserConfirmationRequest(run.taskContinuation)
+  const confirmationCard = confirmationRequest
+    ? buildBrowserConfirmationCard(confirmationRequest)
+    : null
   const showAgentResult = run.waitingFor === 'agent_result'
   const showRetry = run.canResume === true && resumableActions.includes('retry')
   const hasActionRow = showSuspendButton
@@ -720,6 +729,25 @@ export function TaskCard({
         </div>
       )}
 
+      {showConfirmationPair && confirmationCard && (
+        <div
+          data-ready-browser-confirmation-card={confirmationCard.kind}
+          data-ready-browser-confirmation-request-id={confirmationCard.requestId}
+          className="mx-2.5 mb-2 rounded-[10px] border p-2.5"
+          style={{ borderColor: 'var(--border-default)', background: 'var(--bg-subtle)' }}
+        >
+          <div className="text-[12px] font-semibold" style={{ color: 'var(--text-strong)' }}>
+            {confirmationCard.title}
+          </div>
+          <div className="mt-1 text-[11px]" style={{ color: 'var(--text-body)' }}>
+            {confirmationCard.description}
+          </div>
+          <div className="mt-1 text-[10.5px]" style={{ color: 'var(--text-light)' }}>
+            {confirmationCard.detail}
+          </div>
+        </div>
+      )}
+
       {/* 动作行不受折叠门控：等待用户/可恢复/需确认时必须一眼可点。 */}
       {hasActionRow && (
         <div className="flex flex-wrap gap-1.5" style={{ padding: '0 10px 9px' }}>
@@ -801,14 +829,14 @@ export function TaskCard({
                 onClick={() => onSubmitConfirmation?.(run.scopeId, true)}
                 style={{ ...TASK_ACTION_BUTTON_STYLE }}
               >
-                确认继续
+                {confirmationCard?.allowLabel || '确认继续'}
               </button>
               <button
                 type="button"
                 onClick={() => onSubmitConfirmation?.(run.scopeId, false)}
                 style={{ ...TASK_ACTION_BUTTON_STYLE }}
               >
-                暂不继续
+                {confirmationCard?.denyLabel || '暂不继续'}
               </button>
             </>
           )}

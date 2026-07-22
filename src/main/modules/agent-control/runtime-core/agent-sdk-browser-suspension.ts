@@ -2,10 +2,10 @@ import type { AgentInputItem } from '@openai/agents'
 import type { ExecutionTurnResult, TaskBudgetRuntime } from '../contracts/run-contracts'
 import type { TurnTerminalReason } from './turn-frame'
 import type { AgentSessionInputController } from './agent-session-input-controller'
-import type { ToolBridgeRuntimeContext } from './agent-sdk-types'
+import type { AgentSdkProviderDiagnostics, ToolBridgeRuntimeContext } from './agent-sdk-types'
 import { workflowDigest } from '../../repositories/browser-workflow-codec'
 
-type BrowserSuspensionReason = 'budget' | 'steering' | 'incomplete' | 'background' | 'manual'
+type BrowserSuspensionReason = 'budget' | 'steering' | 'incomplete' | 'background' | 'provider_transfer' | 'manual'
 type BrowserSuspensionTerminalReason = Extract<
   TurnTerminalReason,
   | 'checkpoint_budget'
@@ -13,6 +13,7 @@ type BrowserSuspensionTerminalReason = Extract<
   | 'checkpoint_incomplete'
   | 'checkpoint_background'
   | 'checkpoint_user_input'
+  | 'blocked_tool_error'
 >
 
 interface BrowserVerifierRecoveryInput {
@@ -68,6 +69,7 @@ export function createBrowserSuspensionController(input: {
   projectionPatches: Record<string, unknown>[]
   getTaskBudgetRuntime: () => TaskBudgetRuntime | null
   setContinuationRef: (continuation: Record<string, unknown>) => void
+  setProviderDiagnostics: (diagnostics: AgentSdkProviderDiagnostics | null) => void
   setFinalText: (text: string) => void
   emitOutput: (
     chunk: string,
@@ -147,5 +149,14 @@ export function createBrowserSuspensionController(input: {
     return checkpoint
   }
 
-  return { finishSuspension, finishObservationCheckpoint, finishIncompleteCheckpoint }
+  const finishProviderTransferCheckpoint = (diagnostics: AgentSdkProviderDiagnostics | null) => {
+    input.setProviderDiagnostics(diagnostics)
+    return finishSuspension({
+      reason: 'provider_transfer',
+      terminalReason: 'blocked_tool_error',
+      message: '模型服务暂时不可用，浏览器现场和当前进度已保存，可以继续这项任务。',
+    })
+  }
+
+  return { finishSuspension, finishObservationCheckpoint, finishIncompleteCheckpoint, finishProviderTransferCheckpoint }
 }
