@@ -897,6 +897,17 @@ END;
 - S4 解锁前，R6 三条分裂都必须在同 identity fixture 上可重现、可回读且归因到唯一写者；否则 S4 不开工。
 - 证据报告记录现有 gate 哪些是结构检查、哪些是真实行为。
 
+### S0 执行记录（2026-07-22）
+
+- 基线源码：`733599dcd87f254723784a5c8eb8b3bfc7f3f7cf` / `feature/skill-envelope-floors` / app `0.7.5`。本轮没有可回链该 commit 的真实运行二进制 handshake，因此只作诊断基线，不作发布证据。
+- 基线 dirty 集合为 6 个文档/测试/fixture 文件，按路径排序后的 `path + SHA-256` 清单 digest 为 `9ce134e431e25a7bf4d90080dec5369a6887ace4c159b42768c44fba7ee9187c`；尚未改产品代码。
+- 诊断环境：userData/DB=`/Users/user/Library/Application Support/ready/ready.db`（本轮只读证据）；日志根=`/var/folders/hz/n73vqpzs6991580kkw8jgsrh0000gn/T`，包含 `ready-directchat.log` / `ready-tools.log` / `ready-browser.log` / `ready-agent-metrics.log` / `ready-process-events.log`；Browser 默认 profile policy 为 `persist:browser`，命名 profile 为 `persist:browser-profile-<profile>`。
+- 18 项脱敏 fixture：`src/__tests__/fixtures/browser-live-grounded-18-items.json`，文件 digest=`d825e3b840e4195b568a6a835ef91bc9fb0e3f3e592cc4817a53316401769c0e`，request digest=`0b74d2c61d51af4adf4d1846c33bc6bd6d8520133258d32bfbd3de9761ef9e04`。
+- 稳定失败基线：R1/R2=`/tmp/s0-r1-r2-baseline.log` (EXIT 1)，R3=`/tmp/s0-r3-baseline.log` (EXIT 1)，R8/R9=`/tmp/s0-r8-r9-baseline.log` (EXIT 1)，指针/展示切 tab/导航/关 tab 与 R1/R8/R9 合并基线=`/tmp/s0-browser-ownership-baseline.log` (EXIT 1)，R7 启动事件=`/tmp/s0-r7-baseline.log` (EXIT 1)。
+- 已有行为覆盖：stale projection 收口与 Main no-progress 守卫共 16 例通过，`/tmp/s0-stale-main-guard.log` (EXIT 0)。`npm run typecheck` 通过，`/tmp/s0-typecheck-final.log` (EXIT 0)。
+- R6 proof 在当前 HEAD 通过，`/tmp/s0-r6-proof.log` (EXIT 0)，不能重现历史 `research -> short_task` 末写覆盖；按硬门将 S4 保持 locked，不修改当前产品。
+- R7 的 process-events “停摆”前提已撤销，收窄为缺 Main 启动/正常退出/active-run 退出摘要；R10 由 DB+日志证明是显式 `@[tag-forge]` 请求，从缺陷列表撤销。
+
 ## S1：用 target claim 替换 surface 全局租约
 
 ### 主要改动面

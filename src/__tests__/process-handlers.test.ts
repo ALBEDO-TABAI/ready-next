@@ -143,3 +143,12 @@ test('Electron runtime gone handlers record metrics without forcing exit', () =>
   ])
   assert.equal(records.length, 2)
 })
+
+test('S0 R7: registering process observability records the Main boot identity', () => {
+  const { records } = createHarness()
+  assert.equal(
+    (records[0] as { kind?: string } | undefined)?.kind,
+    'main-process-started',
+    'an event-only file with no boot record cannot distinguish silence from a dead logger',
+  )
+})

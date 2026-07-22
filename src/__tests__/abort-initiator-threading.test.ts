@@ -14,6 +14,7 @@ import {
 
 import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
 import { canonicalCoreCloseoutTestPort } from './helpers/canonical-core-closeout-test-port'
+import { createTaskBudgetRuntime } from '../main/modules/agent-control/task-projection/run-budget-policy'
 
 test('abort-initiator-threading declares transitive sqlite ABI guard', (t) => {
   skipIfSqliteUnavailable(t, 'abort-initiator-threading transitive sqlite load')
@@ -264,4 +265,71 @@ test('delivery wall-clock abort is a delivery failure, not a user cancellation',
   assert.equal(result.terminalReason, 'delivery_failed')
   assert.equal(result.error, 'delivery_wall_clock_exceeded')
   assert.equal(runtimeErrors[0]?.errorKind, 'delivery_failed')
+})
+
+test('S0 R3: delivery deadline preserves a durable Browser task as a resumable checkpoint', async () => {
+  const projection = {
+    taskId: 'task-delivery-browser',
+    scopeId: 'scope-delivery-browser',
+    runId: 'run-delivery-browser',
+    taskType: 'research',
+    module: 'browser',
+    status: 'running',
+    interactionState: 'running',
+    waitingFor: 'none',
+    steps: [],
+    resumableActions: ['continue', 'cancel'],
+    requestAnchor: {
+      messageId: 'message-delivery-browser',
+      requestDigest: 'request-digest-delivery-browser',
+    },
+    continuationRef: {
+      kind: 'browser_checkpoint',
+      checkpointId: 'checkpoint-delivery-browser',
+      browserTaskId: 'browser-task-delivery-browser',
+    },
+    checkpointRefs: {
+      cleanBaseCheckpointId: 'clean-delivery-browser',
+      suspensionCheckpointId: 'checkpoint-delivery-browser',
+    },
+  }
+  const runtime = createRuntime({
+    runAgent: async () => {
+      const error = new Error('delivery_wall_clock_exceeded')
+      error.name = 'AbortError'
+      throw error
+    },
+  })
+  runtime.setRuntime({
+    ...canonicalCoreCloseoutTestPort(),
+    getRunMetaRepository: () => null,
+    getTaskProjection: () => projection,
+    getTaskProjectionStore: () => ({
+      get: () => projection,
+      update: (_taskId: string, patch: Record<string, unknown>) => Object.assign(projection, patch),
+    }),
+    getTaskProjectionStoreForFinalize: () => ({
+      get: () => projection,
+      update: (_taskId: string, patch: Record<string, unknown>) => Object.assign(projection, patch),
+    }),
+  } as never)
+  runtime.on('error', () => undefined)
+  runtime.newSession('butler::scope-delivery-browser', 'system prompt')
+
+  const result = await runtime.sendMessage(
+    'butler::scope-delivery-browser',
+    'complete all 18 browser research items',
+    'run-delivery-browser',
+    {
+      publicSessionId: 'scope-delivery-browser',
+      taskId: 'task-delivery-browser',
+      deliveryMode: 'standard',
+      taskBudgetRuntime: createTaskBudgetRuntime('research'),
+    },
+  )
+
+  assert.equal(result.success, true)
+  assert.equal(result.terminalReason, 'blocked_tool_error')
+  assert.equal(projection.taskId, 'task-delivery-browser')
+  assert.equal(projection.continuationRef.browserTaskId, 'browser-task-delivery-browser')
 })

@@ -54,3 +54,54 @@ test('delivery deadline stays suspended while the run is awaiting user input', a
   deadline.dispose()
   assert.equal((abortController.signal.reason as Error).message, 'delivery_wall_clock_exceeded')
 })
+
+test('S0 R2: resolving user input grants a complete new no-progress window', () => {
+  const scheduled: Array<{ callback: () => void; delayMs: number; cleared: boolean }> = []
+  const originalSetTimeout = globalThis.setTimeout
+  const originalClearTimeout = globalThis.clearTimeout
+  let awaiting = true
+
+  globalThis.setTimeout = ((callback: () => void, delayMs?: number) => {
+    const timer = {
+      callback,
+      delayMs: Number(delayMs || 0),
+      cleared: false,
+      unref: () => timer,
+    }
+    scheduled.push(timer)
+    return timer
+  }) as typeof setTimeout
+  globalThis.clearTimeout = ((timer: { cleared?: boolean }) => {
+    timer.cleared = true
+  }) as typeof clearTimeout
+
+  try {
+    const abortController = new AbortController()
+    const runHandle = { abortInitiator: null } as Parameters<typeof armDynamicDeliveryDeadline>[0]['runHandle']
+    const deadline = armDynamicDeliveryDeadline({
+      mode: 'adaptive',
+      runId: 'run-resolved-user-input',
+      abortController,
+      runHandle,
+      isAwaitingUserInput: () => awaiting,
+    })
+
+    assert.equal(scheduled[0]?.delayMs, 120_000)
+    scheduled[0]?.callback()
+    assert.equal(scheduled[1]?.delayMs, 1_000, 'the current implementation polls while input is pending')
+
+    awaiting = false
+    scheduled[1]?.callback()
+
+    assert.equal(
+      abortController.signal.aborted,
+      false,
+      'resolving the blocker is progress and must not reuse the one-second poll as a deadline',
+    )
+    assert.equal(scheduled.at(-1)?.delayMs, 120_000)
+    deadline.dispose()
+  } finally {
+    globalThis.setTimeout = originalSetTimeout
+    globalThis.clearTimeout = originalClearTimeout
+  }
+})

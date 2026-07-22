@@ -1,0 +1,44 @@
+{
+  "fixtureVersion": 1,
+  "fixtureId": "xhs-18-keyword-research-v1",
+  "requestDigest": "0b74d2c61d51af4adf4d1846c33bc6bd6d8520133258d32bfbd3de9761ef9e04",
+  "requiredItems": [
+    "vlog调色 高级感",
+    "剪映 进阶教程",
+    "自媒体视频 质感提升",
+    "vlog转场 创意",
+    "短视频 字幕排版 高级",
+    "视频拍出来和博主差距大",
+    "vlog怎么剪才有网感",
+    "剪映调色 没质感",
+    "达芬奇调色 vlog",
+    "商业剪辑师 技巧",
+    "AI做视频 教程",
+    "AI视频制作 博主",
+    "AI生成视频 自媒体",
+    "vlog美颜 高级感",
+    "视频画质 美颜 剪辑",
+    "博主美颜参数 分享",
+    "视频封面 设计 自媒体",
+    "小红书封面 制作教程"
+  ],
+  "requiredFields": [
+    "title",
+    "visible_content_summary",
+    "visible_engagement_signal",
+    "source_observation_receipt"
+  ],
+  "accountFitTarget": "acceptance-account-fixture",
+  "outputContract": [
+    "keyword_research_coverage",
+    "account_fit_analysis",
+    "saved_markdown",
+    "readback_hash",
+    "single_final_reply"
+  ],
+  "privacy": {
+    "containsCredentials": false,
+    "containsCookies": false,
+    "containsDailyProfilePath": false
+  }
+}
