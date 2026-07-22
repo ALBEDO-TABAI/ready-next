@@ -61,6 +61,8 @@ export interface RunHandle {
   settled: Promise<void>
   resolveSettled: () => void
   capturedSession: MemorySession
+  /** 本轮 turn-execution 装配的模型流存活监听（reasoning/thinking 增量也算活）；turn 收尾必须清空。 */
+  noteModelStreamActivity?: (() => void) | null
 }
 
 export interface PendingCompact {

@@ -54,6 +54,25 @@ test('delivery deadline stays suspended while the run is awaiting user input', a
   assert.equal((abortController.signal.reason as Error).message, 'delivery_wall_clock_exceeded')
 })
 
+test('reasoning deltas are model liveness and refresh the no-progress window', async () => {
+  const abortController = new AbortController()
+  const runHandle = { abortInitiator: null } as Parameters<typeof armDynamicDeliveryDeadline>[0]['runHandle']
+  const deadline = armDynamicDeliveryDeadline({
+    mode: 'adaptive',
+    runId: 'run-reasoning-liveness',
+    abortController,
+    runHandle,
+    timeoutMsForTest: 30,
+  })
+  await new Promise((resolve) => setTimeout(resolve, 20))
+  deadline.noteProgress('reasoning_delta')
+  await new Promise((resolve) => setTimeout(resolve, 20))
+  assert.equal(abortController.signal.aborted, false, 'streamed reasoning must count as progress, not silence')
+  await new Promise<void>((resolve) => abortController.signal.addEventListener('abort', () => resolve(), { once: true }))
+  deadline.dispose()
+  assert.equal((abortController.signal.reason as Error).message, 'delivery_wall_clock_exceeded')
+})
+
 test('S0 R2: resolving user input grants a complete new no-progress window', () => {
   const scheduled: Array<{ callback: () => void; delayMs: number; cleared: boolean }> = []
   const originalSetTimeout = globalThis.setTimeout

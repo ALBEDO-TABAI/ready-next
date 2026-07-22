@@ -5,7 +5,7 @@
  * docs/superpowers/plans/2026-07-02-p0-0-provider-true-sse-streaming-implementation.md:
  * incremental text deltas before response_done, tool-call fragment
  * accumulation, reasoning kept out of the visible stream, the three-rung
- * degrade ladder (non-SSE JSON / pre-delta 4xx retry / 5xx bubble), abort
+ * degrade ladder (non-SSE JSON / pre-delta 4xx fallback / request-level 5xx retry), abort
  * and idle-stall semantics, the READY_SDK_TRUE_SSE=off kill switch, and
  * vllm patch-profile composition on streaming bodies.
  */
@@ -235,6 +235,27 @@ test('SDK chat stream: incremental deltas, interleaved tool-call fragments, reas
   assert.equal(done.response.usage.totalTokens, 16)
 })
 
+test('SDK chat stream: reasoning deltas fire onModelStreamActivity as liveness without streaming text', async () => {
+  const chunks = [
+    dataLine({ id: 'chatcmpl-r', choices: [{ delta: { reasoning_content: '思考A' } }] }),
+    dataLine({ choices: [{ delta: { reasoning_content: '思考B' } }] }),
+    dataLine({ choices: [{ delta: { content: '答' } }] }),
+    dataLine({ choices: [{ delta: {}, finish_reason: 'stop' }] }),
+    'data: [DONE]\n\n',
+  ]
+  const { fetch } = makeQueuedFetch([sseResponse(chunks)])
+  let activity = 0
+  const model = new ReadyOpenAICompatibleModel({
+    config: makeConfig(),
+    baseUrl: 'https://example.invalid',
+    fetchWithTimeout: fetch,
+    onModelStreamActivity: () => { activity += 1 },
+  })
+  const events = await collect(model.getStreamedResponse(makeRequest()))
+  assert.equal(activity, 2, 'each reasoning delta is a liveness signal for the no-progress clock')
+  assert.deepEqual(textDeltas(events), ['答'], 'reasoning still never streams as visible text')
+})
+
 test('SDK chat stream: vllm patch profile composes on the streaming body (include_usage + stream_usage)', async () => {
   const { fetch, captured } = makeQueuedFetch([sseResponse(['data: [DONE]\n\n'])])
   const model = new ReadyOpenAICompatibleModel({
@@ -330,15 +351,38 @@ test('SDK chat stream: 400 without any stream mention bubbles (rung-2 scope guar
   assert.equal(captured.length, 1)
 })
 
-test('SDK chat stream: 5xx does not retry — provider http error bubbles', async () => {
-  const { fetch, captured } = makeQueuedFetch([new Response('boom', { status: 500 })])
-  const model = new ReadyOpenAICompatibleModel({
-    config: makeConfig(),
-    baseUrl: 'https://example.invalid',
-    fetchWithTimeout: fetch,
-  })
-  await assert.rejects(collect(model.getStreamedResponse(makeRequest())))
-  assert.equal(captured.length, 1)
+test('SDK chat stream: transient 502 retries the same provider request without replaying tools', async () => {
+  const chunks = [
+    dataLine({ id: 'chatcmpl-retry', choices: [{ delta: { content: '继续完成' } }] }),
+    dataLine({ choices: [{ delta: {}, finish_reason: 'stop' }], usage: { prompt_tokens: 5, completion_tokens: 2, total_tokens: 7 } }),
+    'data: [DONE]\n\n',
+  ]
+  const { metrics, restore } = captureMetrics()
+  try {
+    const { fetch, captured } = makeQueuedFetch([
+      new Response('gateway failed once', { status: 502 }),
+      new Response('gateway failed twice', { status: 502 }),
+      sseResponse(chunks),
+    ])
+    const model = new ReadyOpenAICompatibleModel({
+      config: makeConfig(),
+      baseUrl: 'https://example.invalid',
+      fetchWithTimeout: fetch,
+    })
+    const events = await collect(model.getStreamedResponse(makeRequest()))
+
+    assert.equal(captured.length, 3)
+    for (const request of captured.slice(1)) assert.deepEqual(request, captured[0])
+    assert.deepEqual(textDeltas(events), ['继续完成'])
+    assert.deepEqual(
+      metrics
+        .filter((event) => event.metric === 'provider_request_retry')
+        .map((event) => [event.httpStatus, event.attempt]),
+      [[502, 1], [502, 2]],
+    )
+  } finally {
+    restore()
+  }
 })
 
 test('READY_SDK_TRUE_SSE=off: chat reverts to blocking pseudo stream (no stream flag on the wire)', async () => {
@@ -452,6 +496,30 @@ test('SDK anthropic stream: text deltas live, tool_use input joins, thinking sta
   assert.ok(serialized.includes('browser_click'))
   assert.ok(serialized.includes('sel'), `tool_use input JSON must join and parse: ${serialized}`)
   assert.ok(!textDeltas(events).some((delta) => delta.includes('内部推理')), 'thinking must never stream as visible text')
+})
+
+test('SDK anthropic stream: thinking deltas fire onModelStreamActivity as liveness without streaming text', async () => {
+  const chunks = [
+    `event: message_start\n${dataLine({ type: 'message_start', message: { id: 'msg_r', usage: { input_tokens: 1 } } })}`,
+    `event: content_block_start\n${dataLine({ type: 'content_block_start', index: 0, content_block: { type: 'thinking', thinking: '' } })}`,
+    `event: content_block_delta\n${dataLine({ type: 'content_block_delta', index: 0, delta: { type: 'thinking_delta', thinking: '深思' } })}`,
+    `event: content_block_delta\n${dataLine({ type: 'content_block_delta', index: 0, delta: { type: 'signature_delta', signature: 'sig' } })}`,
+    `event: content_block_stop\n${dataLine({ type: 'content_block_stop', index: 0 })}`,
+    `event: content_block_start\n${dataLine({ type: 'content_block_start', index: 1, content_block: { type: 'text', text: '' } })}`,
+    `event: content_block_delta\n${dataLine({ type: 'content_block_delta', index: 1, delta: { type: 'text_delta', text: '好' } })}`,
+    `event: message_stop\n${dataLine({ type: 'message_stop' })}`,
+  ]
+  const { fetch } = makeQueuedFetch([sseResponse(chunks)])
+  let activity = 0
+  const model = new ReadyAnthropicModel({
+    config: makeConfig(),
+    baseUrl: 'https://example.invalid',
+    fetchWithTimeout: fetch,
+    onModelStreamActivity: () => { activity += 1 },
+  })
+  const events = await collect(model.getStreamedResponse(makeRequest()))
+  assert.equal(activity, 2, 'thinking and signature deltas are liveness signals for the no-progress clock')
+  assert.deepEqual(textDeltas(events), ['好'])
 })
 
 test('SDK anthropic stream: mid-stream abort stops iteration without a terminal event', async () => {

@@ -29,7 +29,7 @@ import {
 import { buildExecutionTurnResult } from './agent-sdk-turn-closeout'
 import { finalizeAgentSdkPreparedTurnResult } from './agent-sdk-turn-completion'
 import type { TurnOrchestratorHost } from './agent-sdk-turn-context'
-import { armDynamicDeliveryDeadline } from './dynamic-delivery/delivery-deadline'
+import { armDynamicDeliveryDeadline, bindModelStreamLiveness } from './dynamic-delivery/delivery-deadline'
 import { DeliveryOutputBuffer } from './dynamic-delivery/delivery-output-buffer'
 import { buildSanitizedCheckpointFromSession } from './dynamic-delivery/candidate-session-fork'
 import { createAgentSdkTurnGuards } from './agent-sdk-turn-guards'
@@ -232,6 +232,7 @@ export async function executeAgentSdkPreparedTurn(
     if (type === 'text' && chunk.trim()) deliveryDeadline.noteProgress('text_delta')
     emitOutputBeforeProgressTracking(chunk, type, projectionPatch)
   }
+  runHandle.noteModelStreamActivity = bindModelStreamLiveness(deliveryDeadline)
   try {
     const latentSkillToolDefinitions = host.toolExecutor.listLatentSkillToolDefinitions()
       .filter((definition) => !toolDefinitions.some((visible) => visible.name === definition.name))
@@ -889,6 +890,7 @@ export async function executeAgentSdkPreparedTurn(
       buildResult
     })
   } finally {
+    runHandle.noteModelStreamActivity = null
     deliveryDeadline.dispose()
     syncState()
   }

@@ -39,6 +39,31 @@ import {
   ResponsesStreamAccumulator,
   parseSseStream
 } from './provider-sse'
+import { fetchProviderRequestWithRetry } from './agent-sdk-provider-request-retry'
+
+/** 六个 provider 请求点共用的重试入口：仅覆盖首字节前的幂等窗口。 */
+function fetchProviderParts(input: {
+  deps: { config: AIModelConfig; fetchWithTimeout: NonNullable<AgentSdkRuntimeDeps['fetchWithTimeout']> }
+  parts: { url: string; headers: Record<string, string>; body: Record<string, unknown> }
+  request: ModelRequest
+  label: string
+  path: 'chat' | 'responses' | 'anthropic'
+}): Promise<Response> {
+  return fetchProviderRequestWithRetry({
+    fetchWithTimeout: input.deps.fetchWithTimeout,
+    url: input.parts.url,
+    init: {
+      method: 'POST',
+      headers: input.parts.headers,
+      body: JSON.stringify(input.parts.body),
+      signal: input.request.signal
+    },
+    signal: input.request.signal || new AbortController().signal,
+    label: input.label,
+    path: input.path,
+    provider: input.deps.config.provider || null
+  })
+}
 import {
   buildChatCompletionsToolCalls,
   buildResponsesToolCalls
@@ -185,7 +210,11 @@ function isLikelyStreamShapeRejection(status: number, errorBody: string): boolea
 
 export function resolveAgentSdkProvider(
   config: AIModelConfig,
-  deps: { fetchWithTimeout: NonNullable<AgentSdkRuntimeDeps['fetchWithTimeout']> }
+  deps: {
+    fetchWithTimeout: NonNullable<AgentSdkRuntimeDeps['fetchWithTimeout']>
+    /** 模型流仍在产出（含 reasoning/thinking 增量）时的存活信号；用于无进展时钟。 */
+    onModelStreamActivity?: () => void
+  }
 ): {
   provider: ModelProvider
   model: string
@@ -205,7 +234,8 @@ export function resolveAgentSdkProvider(
       provider: new ReadyAnthropicModelProvider({
         config: normalized,
         baseUrl: baseURL,
-        fetchWithTimeout: deps.fetchWithTimeout
+        fetchWithTimeout: deps.fetchWithTimeout,
+        onModelStreamActivity: deps.onModelStreamActivity
       })
     }
   }
@@ -218,7 +248,8 @@ export function resolveAgentSdkProvider(
       provider: new ReadyOpenAICompatibleModelProvider({
         config: normalized,
         baseUrl: baseURL,
-        fetchWithTimeout: deps.fetchWithTimeout
+        fetchWithTimeout: deps.fetchWithTimeout,
+        onModelStreamActivity: deps.onModelStreamActivity
       })
     }
   }
@@ -241,6 +272,7 @@ class ReadyOpenAICompatibleModelProvider implements ModelProvider {
       config: AIModelConfig
       baseUrl: string
       fetchWithTimeout: NonNullable<AgentSdkRuntimeDeps['fetchWithTimeout']>
+      onModelStreamActivity?: () => void
     }
   ) {}
 
@@ -342,6 +374,7 @@ export class ReadyOpenAICompatibleModel implements Model {
       config: AIModelConfig
       baseUrl: string
       fetchWithTimeout: NonNullable<AgentSdkRuntimeDeps['fetchWithTimeout']>
+      onModelStreamActivity?: () => void
     }
   ) {}
 
@@ -426,17 +459,8 @@ export class ReadyOpenAICompatibleModel implements Model {
     const parts = this.chatCompletionsParts(request, provider)
     applyProviderRequestPatch(parts.body, parts.patchContext)
 
-    const response = await this.deps.fetchWithTimeout(
-      parts.url,
-      {
-        method: 'POST',
-        headers: parts.headers,
-        body: JSON.stringify(parts.body),
-        signal: request.signal
-      },
-      request.signal || new AbortController().signal,
-      'agents-sdk openai-compatible chat'
-    )
+    const response = await fetchProviderParts(
+      { deps: this.deps, parts, request, label: 'agents-sdk openai-compatible chat', path: 'chat' })
     const rawText = await response.text()
     if (!response.ok)
       throw buildProviderHttpError({ httpStatus: response.status, errorBody: rawText })
@@ -500,17 +524,8 @@ export class ReadyOpenAICompatibleModel implements Model {
     parts.body.stream = false
     applyProviderRequestPatch(parts.body, parts.patchContext)
 
-    const response = await this.deps.fetchWithTimeout(
-      parts.url,
-      {
-        method: 'POST',
-        headers: parts.headers,
-        body: JSON.stringify(parts.body),
-        signal: request.signal
-      },
-      request.signal || new AbortController().signal,
-      'agents-sdk openai-compatible responses'
-    )
+    const response = await fetchProviderParts(
+      { deps: this.deps, parts, request, label: 'agents-sdk openai-compatible responses', path: 'responses' })
     if (!response.ok) {
       const rawError = await response.text().catch(() => '')
       throw buildProviderHttpError({ httpStatus: response.status, errorBody: rawError })
@@ -560,17 +575,8 @@ export class ReadyOpenAICompatibleModel implements Model {
     applyProviderRequestPatch(parts.body, parts.patchContext)
 
     const label = 'agents-sdk openai-compatible chat stream'
-    const response = await this.deps.fetchWithTimeout(
-      parts.url,
-      {
-        method: 'POST',
-        headers: parts.headers,
-        body: JSON.stringify(parts.body),
-        signal: request.signal
-      },
-      request.signal || new AbortController().signal,
-      label
-    )
+    const requestStartedAt = Date.now()
+    const response = await fetchProviderParts({ deps: this.deps, parts, request, label, path: 'chat' })
     if (!response.ok) {
       const rawError = await response.text().catch(() => '')
       // 降级二：首 delta 前"流式形状被拒"→ 单次阻塞重试（无 token 损耗）。
@@ -611,22 +617,36 @@ export class ReadyOpenAICompatibleModel implements Model {
     }
 
     const accumulator = new ChatCompletionsStreamAccumulator()
-    const startedAt = Date.now()
+    const headersMs = Date.now() - requestStartedAt
     let firstDeltaSeen = false
+    let firstReasoningSeen = false
     for await (const event of parseSseStream(response.body, { signal: request.signal, label })) {
       if (event.data === '[DONE]') break
       const chunk = safeParseJsonRecord(event.data)
       if (!chunk) continue
       const streamError = providerStreamPayloadError(chunk)
       if (streamError) throw streamError
-      const { textDelta } = accumulator.feed(chunk)
+      const { textDelta, reasoningDelta } = accumulator.feed(chunk)
+      if (reasoningDelta) {
+        if (!firstReasoningSeen) {
+          firstReasoningSeen = true
+          logAgentMetric('provider_stream_first_reasoning', {
+            path: 'chat',
+            provider: this.deps.config.provider || null,
+            ms: Date.now() - requestStartedAt,
+            headersMs
+          })
+        }
+        this.deps.onModelStreamActivity?.()
+      }
       if (textDelta) {
         if (!firstDeltaSeen) {
           firstDeltaSeen = true
           logAgentMetric('provider_stream_first_delta', {
             path: 'chat',
             provider: this.deps.config.provider || null,
-            ms: Date.now() - startedAt
+            ms: Date.now() - requestStartedAt,
+            headersMs
           })
         }
         yield { type: 'output_text_delta', delta: textDelta } as StreamEvent
@@ -651,17 +671,8 @@ export class ReadyOpenAICompatibleModel implements Model {
     applyProviderRequestPatch(parts.body, parts.patchContext)
 
     const label = 'agents-sdk openai-compatible responses stream'
-    const response = await this.deps.fetchWithTimeout(
-      parts.url,
-      {
-        method: 'POST',
-        headers: parts.headers,
-        body: JSON.stringify(parts.body),
-        signal: request.signal
-      },
-      request.signal || new AbortController().signal,
-      label
-    )
+    const requestStartedAt = Date.now()
+    const response = await fetchProviderParts({ deps: this.deps, parts, request, label, path: 'responses' })
     if (!response.ok) {
       const rawError = await response.text().catch(() => '')
       if (isLikelyStreamShapeRejection(response.status, rawError)) {
@@ -699,22 +710,36 @@ export class ReadyOpenAICompatibleModel implements Model {
     }
 
     const accumulator = new ResponsesStreamAccumulator()
-    const startedAt = Date.now()
+    const headersMs = Date.now() - requestStartedAt
     let firstDeltaSeen = false
+    let firstReasoningSeen = false
     for await (const event of parseSseStream(response.body, { signal: request.signal, label })) {
       if (event.data === '[DONE]') break
       const payload = safeParseJsonRecord(event.data)
       if (!payload) continue
       const streamError = providerStreamPayloadError(payload)
       if (streamError) throw streamError
-      const { textDelta } = accumulator.feed(event.event, payload)
+      const { textDelta, reasoningDelta } = accumulator.feed(event.event, payload)
+      if (reasoningDelta) {
+        if (!firstReasoningSeen) {
+          firstReasoningSeen = true
+          logAgentMetric('provider_stream_first_reasoning', {
+            path: 'responses',
+            provider: this.deps.config.provider || null,
+            ms: Date.now() - requestStartedAt,
+            headersMs
+          })
+        }
+        this.deps.onModelStreamActivity?.()
+      }
       if (textDelta) {
         if (!firstDeltaSeen) {
           firstDeltaSeen = true
           logAgentMetric('provider_stream_first_delta', {
             path: 'responses',
             provider: this.deps.config.provider || null,
-            ms: Date.now() - startedAt
+            ms: Date.now() - requestStartedAt,
+            headersMs
           })
         }
         yield { type: 'output_text_delta', delta: textDelta } as StreamEvent
@@ -742,6 +767,7 @@ class ReadyAnthropicModelProvider implements ModelProvider {
       config: AIModelConfig
       baseUrl: string
       fetchWithTimeout: NonNullable<AgentSdkRuntimeDeps['fetchWithTimeout']>
+      onModelStreamActivity?: () => void
     }
   ) {}
 
@@ -781,6 +807,7 @@ export class ReadyAnthropicModel implements Model {
       config: AIModelConfig
       baseUrl: string
       fetchWithTimeout: NonNullable<AgentSdkRuntimeDeps['fetchWithTimeout']>
+      onModelStreamActivity?: () => void
     }
   ) {}
 
@@ -838,17 +865,8 @@ export class ReadyAnthropicModel implements Model {
   async getResponse(request: ModelRequest): Promise<ModelResponse> {
     assertManualThinkingModeProviderSafe(this.deps.config, 'sdk-anthropic')
     const parts = this.anthropicParts(request)
-    const resp = await this.deps.fetchWithTimeout(
-      parts.url,
-      {
-        method: 'POST',
-        headers: parts.headers,
-        body: JSON.stringify(parts.body),
-        signal: request.signal
-      },
-      request.signal || new AbortController().signal,
-      'agents-sdk anthropic model'
-    )
+    const resp = await fetchProviderParts(
+      { deps: this.deps, parts, request, label: 'agents-sdk anthropic model', path: 'anthropic' })
     const rawText = await resp.text()
     if (!resp.ok) {
       throw buildProviderHttpError({ httpStatus: resp.status, errorBody: rawText })
@@ -873,17 +891,8 @@ export class ReadyAnthropicModel implements Model {
     parts.body.stream = true
 
     const label = 'agents-sdk anthropic model stream'
-    const response = await this.deps.fetchWithTimeout(
-      parts.url,
-      {
-        method: 'POST',
-        headers: parts.headers,
-        body: JSON.stringify(parts.body),
-        signal: request.signal
-      },
-      request.signal || new AbortController().signal,
-      label
-    )
+    const requestStartedAt = Date.now()
+    const response = await fetchProviderParts({ deps: this.deps, parts, request, label, path: 'anthropic' })
     if (!response.ok) {
       const rawError = await response.text().catch(() => '')
       if (isLikelyStreamShapeRejection(response.status, rawError)) {
@@ -923,22 +932,36 @@ export class ReadyAnthropicModel implements Model {
     }
 
     const accumulator = new AnthropicStreamAccumulator()
-    const startedAt = Date.now()
+    const headersMs = Date.now() - requestStartedAt
     let firstDeltaSeen = false
+    let firstReasoningSeen = false
     for await (const event of parseSseStream(response.body, { signal: request.signal, label })) {
       if (event.data === '[DONE]') break
       const payload = safeParseJsonRecord(event.data)
       if (!payload) continue
       const streamError = providerStreamPayloadError(payload)
       if (streamError) throw streamError
-      const { textDelta } = accumulator.feed(event.event, payload)
+      const { textDelta, reasoningDelta } = accumulator.feed(event.event, payload)
+      if (reasoningDelta) {
+        if (!firstReasoningSeen) {
+          firstReasoningSeen = true
+          logAgentMetric('provider_stream_first_reasoning', {
+            path: 'anthropic',
+            provider: this.deps.config.provider || null,
+            ms: Date.now() - requestStartedAt,
+            headersMs
+          })
+        }
+        this.deps.onModelStreamActivity?.()
+      }
       if (textDelta) {
         if (!firstDeltaSeen) {
           firstDeltaSeen = true
           logAgentMetric('provider_stream_first_delta', {
             path: 'anthropic',
             provider: this.deps.config.provider || null,
-            ms: Date.now() - startedAt
+            ms: Date.now() - requestStartedAt,
+            headersMs
           })
         }
         yield { type: 'output_text_delta', delta: textDelta } as StreamEvent

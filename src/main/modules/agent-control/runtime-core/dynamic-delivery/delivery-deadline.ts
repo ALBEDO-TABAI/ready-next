@@ -7,7 +7,7 @@ import { getInteractionLifecycleRegistry } from '../interaction-lifecycle-regist
 export const DYNAMIC_DELIVERY_HARD_WALL_CLOCK_MS = 300_000
 
 export interface DynamicDeliveryDeadlineHandle {
-  noteProgress(reason: 'text_delta' | 'tool_result' | 'user_input_resolved'): void
+  noteProgress(reason: 'text_delta' | 'tool_result' | 'user_input_resolved' | 'reasoning_delta'): void
   suspend(interactionId: string): void
   resume(interactionId: string): void
   dispose(): void
@@ -22,6 +22,23 @@ export function resolveDynamicDeliveryWallClockMs(
   if (mode === 'standard') return null
   const configuredMs = mode === 'thorough' || profile === 'tag_forge_folder_batch' ? 240_000 : 120_000
   return Math.min(configuredMs, DYNAMIC_DELIVERY_HARD_WALL_CLOCK_MS)
+}
+
+/**
+ * Reasoning/thinking 增量是模型仍在推进的存活信号：K3 这类深思考模型可以
+ * >120s 无可见文本；不计入进展会被无进展时钟误杀。1s 节流避免逐 token 重臂。
+ */
+export function bindModelStreamLiveness(
+  handle: DynamicDeliveryDeadlineHandle,
+  throttleMs = 1_000,
+): () => void {
+  let lastNoteAt = 0
+  return () => {
+    const now = Date.now()
+    if (now - lastNoteAt < throttleMs) return
+    lastNoteAt = now
+    handle.noteProgress('reasoning_delta')
+  }
 }
 
 export function armDynamicDeliveryDeadline(input: {

@@ -143,6 +143,8 @@ export async function* parseSseStream(
 export interface StreamFeedResult {
   /** Text that became visible with this event — yield it downstream now. */
   textDelta?: string
+  /** Reasoning/thinking产出仍在推进（不可见文本）——是存活信号，不是可交付内容。 */
+  reasoningDelta?: boolean
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -190,15 +192,18 @@ export class ChatCompletionsStreamAccumulator {
     const delta = asRecord(choice.delta) || asRecord(choice.message)
     if (!delta) return {}
     let textDelta: string | undefined
+    let reasoningDelta = false
     if (typeof delta.content === 'string' && delta.content) {
       this.content += delta.content
       textDelta = delta.content
     }
     if (typeof delta.reasoning_content === 'string' && delta.reasoning_content) {
       this.reasoningContent += delta.reasoning_content
+      reasoningDelta = true
     }
     if (Array.isArray(delta.reasoning_details) && delta.reasoning_details.length > 0) {
       this.reasoningDetails.push(...delta.reasoning_details)
+      reasoningDelta = true
     }
     const toolCalls = Array.isArray(delta.tool_calls) ? delta.tool_calls : []
     for (const raw of toolCalls) {
@@ -215,7 +220,7 @@ export class ChatCompletionsStreamAccumulator {
       }
       this.toolCalls.set(index, slot)
     }
-    return { textDelta }
+    return { textDelta, ...(reasoningDelta ? { reasoningDelta } : {}) }
   }
 
   final(): Record<string, unknown> {
@@ -260,6 +265,9 @@ export class ResponsesStreamAccumulator {
     if (type === 'response.output_text.delta') {
       const delta = typeof data.delta === 'string' ? data.delta : ''
       return delta ? { textDelta: delta } : {}
+    }
+    if (type.startsWith('response.reasoning') && type.endsWith('.delta')) {
+      return { reasoningDelta: true }
     }
     const candidate = asRecord(data.response) || data
     if (type === 'response.completed') {
@@ -339,11 +347,11 @@ export class AnthropicStreamAccumulator {
       }
       if (deltaType === 'thinking_delta' && typeof delta.thinking === 'string') {
         slot.block.thinking = `${typeof slot.block.thinking === 'string' ? slot.block.thinking : ''}${delta.thinking}`
-        return {}
+        return { reasoningDelta: true }
       }
       if (deltaType === 'signature_delta' && typeof delta.signature === 'string') {
         slot.block.signature = `${typeof slot.block.signature === 'string' ? slot.block.signature : ''}${delta.signature}`
-        return {}
+        return { reasoningDelta: true }
       }
       return {}
     }

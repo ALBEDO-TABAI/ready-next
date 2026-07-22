@@ -697,6 +697,8 @@ export function resolveMaxOutputTokens(config: AIModelConfig): number {
     provider?.models.find((model) => model.id === config.model)?.maxOutputTokens
   )
   if (catalog !== null) return catalog
+  // K3 官方默认输出上限 131072；anthropic 兜底 4096 会截断其长产出，取保守中档。
+  if (isKimiK3Config(config)) return 65_536
   if (resolveAIConfigCapabilities(config)?.agentProtocol === 'anthropic') return 4096
   return 8192
 }

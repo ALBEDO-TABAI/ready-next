@@ -624,9 +624,8 @@ export class AgentSdkTurnOrchestrator {
       }
 
       const normalizedConfig = normalizeAIConfig(configDetail.config)
-      const { provider, model } = resolveAgentSdkProvider(normalizedConfig, {
-        fetchWithTimeout: this.host.fetchWithTimeout
-      })
+      const { provider, model } = resolveAgentSdkProvider(normalizedConfig,
+        { fetchWithTimeout: this.host.fetchWithTimeout, onModelStreamActivity: () => runHandle.noteModelStreamActivity?.() })
       const maxOutputTokens = resolveMaxOutputTokens(normalizedConfig)
       const capabilities = resolveAIConfigCapabilities(normalizedConfig)
       const modelDef = resolveConfiguredModelDef(normalizedConfig, capabilities?.baseUrl)

@@ -88,6 +88,16 @@ test('resolveMaxOutputTokens uses override, catalog, safe Anthropic fallback, th
     8192
   )
   assert.equal(
+    resolveMaxOutputTokens({
+      provider: 'openai-compatible',
+      baseUrl: 'https://api.kimi.com/coding',
+      apiKey: 'test',
+      model: 'k3'
+    }),
+    65_536,
+    'K3 must not inherit the 4096 anthropic fallback that truncates its long outputs'
+  )
+  assert.equal(
     resolveMaxOutputTokens(config('claude-opus-4-20250514', { maxOutputTokensOverride: 12345 })),
     12345
   )
