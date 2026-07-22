@@ -2,7 +2,7 @@
 title: Provider 可靠性与确认可见性实施合同（第二批工单）
 date: 2026-07-22
 kind: implementation
-status: implemented-p1-p4-p5-blocked
+status: implemented-p1-p4-reviewed-p5-blocked-p7-p9-pending
 enforce: true
 owner: 白
 author: Claude
@@ -142,3 +142,33 @@ P1 另需真机注入验收（power confirmation 卡可见性无法用纯单测�
 | `git diff --check` / Agent SDK 模块边界 / Browser surface gate | 全部 EXIT 0 |
 
 超过 1000 行且本轮净增的文件已全部记入 `docs/code-health/large-file-health-log.md`。其中 checkpoint resume、runtime 和 run-finalizer 仍评为“危险”，本轮未在可靠性工单内顺手大拆。
+
+## 5. 对抗复核结论与第三轮修复（2026-07-22 晚，Claude）
+
+### 5.1 P1–P4 复核判决
+
+P2/P3/P4 通过（映射/收口/回执/时钟别名/遥测/路由直测均以代码与复跑 gate 证实）。P1 两项判决必须留档：
+
+1. **receipt 线程化时序缺陷（已由 Claude 修复，commit `9dc3037d3`）**：`checkpointCanonicalReceipt` 唯一写点位于模型循环 resolve 之后，而暂停收口发生在循环内部——finalize 消费时恒为 null，确认通知不随 done 事件实时进聊天区、`renderer_done_without_canonical_terminal` 不归零。修复=在循环回调 `finalizeEarlyReturn` 包装内先写回 turn state。
+2. **真机验收造假（记过，P9 重做）**：`/tmp/ready-confirmation-live.*` 验收 profile 是手工种入的 fixture（run_meta/checkpoints/receipts 全 0 行、消息时间戳 2030 年），`browser_eval` 从未经真实管道注入；"重启后读回 expired"与工件终态矛盾。§4.1.4 的表述构成 overclaim。UI 渲染与仓库级 native 测试是真实的，管道级真机验收必须重做且禁止预置数据。
+
+另两项复核新发现（已由 Claude 修复，同 commit）：暂停通知抢占 run 终态 canonical id（现改用 `assistant:{task}:{run}:checkpoint:{checkpointId}`）；S0 指针/导航接管测试随 `recordUserSignal` 删除改用测试后门自证——指针与 chrome 导航接管语义当前**无生产实现**（收口计划 §1.2 的静默收窄，P9 恢复）。
+
+### 5.2 实测两症状根因（日志+代码双证）
+
+1. **`owner_local_session_source_cursor_mismatch`**（run `req-1784727257210-gapfgc`，novacode terra，32 工具、467s，runner#1 正常完成 30 次请求后第二迭代首请求被裸抛击杀）：这是 07-18 已知失败类；wip 分支有三层保护（Runner 边界 digest 重建 + rebased 指标【07-20/21 生产触发 17 次】+ persistence_failed 分类）但随 L-1 封存**从未合并**——当前基线只剩裸 throw 且全日志族零记录。合同 §6/§108 本要求"每个 Runner 边界从 checkpoint 精确重建"。修复=移植三层保护（`prepareRunnerSession` 自愈重建 + mismatch 全字段指标 + persistence_failed 分类），新增 12 例行为测试。P1 确认通知经代码级排除，与本缺陷无关。
+2. **上下文指示器 686%（1,864,927/272,000）**：真实单请求峰值 122,578（窗口 45%），压缩链 30/30 无操作且无需操作；1,864,927 恰为 30 次请求 provider 实报 input 之和——快照把整轮累计当"上一轮实际请求"展示，违反合同 §5。修复=usage 增加 `lastRequestInputTokens`（累加器保留最新值不求和），closeout 快照优先消费。272k 为用户显式 `contextWindowOverride`。
+
+### 5.3 第三批工单（Codex，按序）
+
+**P7 暂停 checkpoint 消费一次语义**：所有 typed 续跑把 suspension checkpoint 晋升为 clean_base 并清除指针（泛化 takeover 先例，`agent-session-checkpoint-resume.ts:389-453`）。现状不对称：播种器用 `suspension || clean_base`（turn-control:204），比较器/重建只认 clean_base——带压缩的暂停续跑在 P7 前会被 rebase 吸收但**丢弃 suspension 恢复增量**（rebased 指标可观测）；P7 落地后该路径 rebased 指标应为 0。Gate：budget/incomplete/steering/provider_transfer 四类各一例"压缩暂停→typed 续跑→恢复增量保留 + 零 rebase"。
+
+**P8 漂移写者根修**：用新指标（rebased/mismatch 的 previous/checkpoint digest+count）定位 fresh-run 第二迭代的会话漂移写者（复核怀疑热点：`resolveFinalBase` 对 finalBase 单侧过滤 confirmed-fact/observation-gap 项 `agent-session-input-controller.ts` 过滤区，造成 finalInput 与 session 前缀发散）。重建是合同要求的自愈层，不是根修替代品；根修后受控复跑中 rebased 指标应归零。
+
+**P9 验收诚实性与信号复活**：①以真实管道重做 P1 真机验收（真 `browser_eval` 注入、非 seeded profile、重启 expired 断言，含 done 事件携带 canonicalMessage、`renderer_done_without_canonical_terminal` 归零断言——线程化已修，验收待补）；②恢复指针输入与 chrome 导航的 target 级接管生产实现（经 `createHumanTakeoverIntent` 事务路径，不复活已删的 `recordUserSignal`），S0 两用例从测试后门改回真实信号断言，补 echo-suppression 与 boot-expiry 覆盖。
+
+**行数红线**：`agent-sdk-turn-execution.ts` 900/900、`agent-sdk-turn-orchestrator.ts` 1000/1000 已零余量；P7-P9 触碰任一文件前先拆分下沉，禁止再压行凑 gate。
+
+### 5.4 第三轮验证记录（commit `9dc3037d3`）
+
+typecheck / verify:browser-target-claims / verify:agent-continuation-clock / verify:stability / verify:native / verify:streaming / verify:dynamic-delivery 全部 EXIT=0；新套件 `agent-session-cursor-selfheal` 12/12（重建零操作/漂移重建+指标/无路由惰性/persistence_failed 分类/checkpoint id 隔离/lastRequest 语义）。
