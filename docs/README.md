@@ -1,6 +1,6 @@
 # Ready 文档导航与维护规则
 
-> 更新时间：2026-07-15
+> 更新时间：2026-07-22
 
 本文是 `docs/` 的入口。代码、`package.json` 与机器校验结果始终优先于叙述性文档；如果两者冲突，应修正文档，而不是为旧文档保留兼容实现。
 
@@ -22,6 +22,11 @@
 | 当前代码入口、模块与依赖 | `docs/architecture/codebase-map.md` |
 | Agent、Browser、Skill、Widget 等运行时硬合同 | `docs/architecture/current-runtime-contracts.md` |
 | Ready 系统提示词实施审阅记录 | `docs/superpowers/specs/2026-07-15-ready-system-prompt-implementation-review.md` |
+| 长任务整治总排序与范围裁决（L-1→L0→L1→L2 唯一入口） | `docs/superpowers/plans/2026-07-22-agent-long-task-remediation-roadmap.md` |
+| Codex 实施启动 handoff（L-1 + L0 执行入口） | `docs/superpowers/plans/2026-07-22-codex-implementation-handoff.md` |
+| Browser Agent 单 Agent 长任务与标签页所有权收口 | `docs/superpowers/plans/2026-07-22-browser-agent-sequential-long-task-and-tab-ownership-closure-implementation.md` |
+| Agent 长程 Plan-and-Execute、策略与分支架构 | `docs/superpowers/plans/2026-07-22-agent-plan-execute-policy-hooks-and-branching-runtime-design.md` |
+| 2026-07-22 Browser Agent 长任务根因证据 | `docs/superpowers/audits/2026-07-22-browser-agent-long-task-root-cause-and-evidence.md` |
 | 架构原则的反例与自检 | `.claude/architectural-principles.md` |
 | 测试边界与 SQLite 验收 | `docs/superpowers/testing-conventions.md` |
 | UI 修改入口 | `UI_ADJUSTMENT_GUIDE.md` |
