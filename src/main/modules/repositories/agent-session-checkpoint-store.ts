@@ -560,6 +560,7 @@ export class AgentSessionCheckpointStoreRepository {
         terminalReason: suspensionReason === 'human_takeover'
           ? 'human_takeover'
           : `checkpoint_${suspensionReason}`,
+        checkpointId,
       })
       canonicalMessage.meta = {
         ...canonicalMessage.meta,

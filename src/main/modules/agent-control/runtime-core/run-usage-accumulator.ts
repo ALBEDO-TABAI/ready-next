@@ -2,6 +2,8 @@ export interface RunUsage {
   inputTokens: number
   outputTokens: number
   totalTokens: number
+  /** 最后一次 provider 请求的实报 input；累加时保留最新值，不参与求和。 */
+  lastRequestInputTokens?: number
   usageSource: 'provider' | 'estimated' | 'missing'
   providerCallCount: number
   missingCallCount: number
@@ -20,6 +22,9 @@ export function addRunUsage(
       inputTokens: current?.inputTokens ?? 0,
       outputTokens: current?.outputTokens ?? 0,
       totalTokens: current?.totalTokens ?? 0,
+      ...(current?.lastRequestInputTokens !== undefined
+        ? { lastRequestInputTokens: current.lastRequestInputTokens }
+        : {}),
       usageSource: current?.usageSource === 'provider' ? 'provider' : 'missing',
       providerCallCount: current?.providerCallCount ?? 0,
       missingCallCount: (current?.missingCallCount ?? 0) + 1,
@@ -29,10 +34,12 @@ export function addRunUsage(
   const outputTokens = finiteNonNegative(next.outputTokens)
   const reportedTotal = finiteNonNegative(next.totalTokens)
   const totalTokens = reportedTotal || inputTokens + outputTokens
+  const lastRequestInputTokens = next.lastRequestInputTokens ?? current?.lastRequestInputTokens
   return {
     inputTokens: (current?.inputTokens ?? 0) + inputTokens,
     outputTokens: (current?.outputTokens ?? 0) + outputTokens,
     totalTokens: (current?.totalTokens ?? 0) + totalTokens,
+    ...(lastRequestInputTokens !== undefined ? { lastRequestInputTokens } : {}),
     usageSource: 'provider',
     providerCallCount: (current?.providerCallCount ?? 0) + 1,
     missingCallCount: current?.missingCallCount ?? 0,
@@ -45,10 +52,12 @@ export function mergeRunUsage(
 ): RunUsage | null {
   if (!current) return next ? { ...next } : null
   if (!next) return { ...current }
+  const lastRequestInputTokens = next.lastRequestInputTokens ?? current.lastRequestInputTokens
   return {
     inputTokens: current.inputTokens + next.inputTokens,
     outputTokens: current.outputTokens + next.outputTokens,
     totalTokens: current.totalTokens + next.totalTokens,
+    ...(lastRequestInputTokens !== undefined ? { lastRequestInputTokens } : {}),
     usageSource: current.usageSource === 'provider' || next.usageSource === 'provider'
       ? 'provider'
       : current.usageSource === 'estimated' || next.usageSource === 'estimated'

@@ -205,14 +205,11 @@ export async function executeAgentSdkPreparedTurn(
     syncLocalState()
     return result
   }
-  const finalizeBudgetCheckpointReturn: typeof finalizeBudgetCheckpointReturnFromContext = (
-    checkpointText
-  ) => {
+  const finalizeBudgetCheckpointReturn: typeof finalizeBudgetCheckpointReturnFromContext = async (checkpointText) => {
     syncState()
-    return finalizeBudgetCheckpointReturnFromContext(checkpointText).then((result) => {
-      syncLocalState()
-      return result
-    })
+    const result = await finalizeBudgetCheckpointReturnFromContext(checkpointText)
+    syncLocalState()
+    return result
   }
   const deliveryMode = effectiveExecutionOptions?.deliveryMode ?? 'adaptive'
   const deliveryDeadline = armDynamicDeliveryDeadline({
@@ -776,15 +773,19 @@ export async function executeAgentSdkPreparedTurn(
       callModelInputFilter: modelInputController
         ? (items, context) => modelInputController.filter(items, context)
         : undefined,
+      prepareModelSessionForRunner: modelInputController ? () => modelInputController.prepareRunnerSession(ownerModelSession) : undefined,
       nativeTextToolBoundaryFlush,
       finishBudgetCheckpointIfNeeded,
       finishBrowserObservationCheckpoint: browserSuspension.finishObservationCheckpoint,
       finishBrowserIncompleteCheckpoint: browserSuspension.finishIncompleteCheckpoint,
       maybeHandleSkillClarificationGuard,
       maybeHandleActionAnnouncementGuard,
-      finalizeEarlyReturn
+      finalizeEarlyReturn: (params) => {
+        // 暂停收口发生在循环内部：receipt 必须在 finalize 消费前写回 ctx.state。
+        ctx.state.checkpointCanonicalReceipt = toolBridgeRuntimeContext.browserSuspensionCanonicalReceipt || ctx.state.checkpointCanonicalReceipt || null
+        return finalizeEarlyReturn(params)
+      }
     })
-    ctx.state.checkpointCanonicalReceipt = toolBridgeRuntimeContext.browserSuspensionCanonicalReceipt || null
     if (modelToolLoopResult) return modelToolLoopResult
     return await finalizeAgentSdkPreparedTurnResult({
       state: {

@@ -8,6 +8,9 @@ export interface CanonicalCoreCloseoutMessageInput {
   finalText: string
   timestamp: string
   terminalReason: string
+  /** 暂停通知必须带 checkpointId 占用独立 id；否则会抢占 run 唯一终态 id，
+   *  同 run 后续非 checkpoint 终态将撞 canonical_assistant_message_conflict。 */
+  checkpointId?: string | null
   completionVerifierReceipt?: BrowserWorkflowCompletionVerifierReceipt | null
 }
 
@@ -15,7 +18,9 @@ export function buildCanonicalCoreCloseoutMessage(
   input: CanonicalCoreCloseoutMessageInput,
 ): CanonicalAssistantMessage {
   return {
-    id: `assistant:${input.parentTaskId}:${input.ownerRunId}:terminal`,
+    id: input.checkpointId
+      ? `assistant:${input.parentTaskId}:${input.ownerRunId}:checkpoint:${input.checkpointId}`
+      : `assistant:${input.parentTaskId}:${input.ownerRunId}:terminal`,
     conversationId: input.conversationId,
     role: 'assistant',
     content: input.finalText,

@@ -131,6 +131,7 @@ export interface AgentSdkModelToolLoopContext {
   emitHeartbeat: (text: string) => void
   candidateOutputBuffer?: { snapshot(): string; replace(text: string): void }
   checkpointSnapshotProvider?: () => Promise<AgentInputItem[] | null>
+  prepareModelSessionForRunner?: () => Promise<void>
   callModelInputFilter?: (
     items: AgentInputItem[],
     context: { sourceItems: AgentInputItem[]; compacted: boolean },
@@ -196,6 +197,7 @@ export async function executeAgentSdkModelToolLoop(
     emitHeartbeat,
     candidateOutputBuffer,
     checkpointSnapshotProvider,
+    prepareModelSessionForRunner,
     callModelInputFilter,
     nativeTextToolBoundaryFlush,
     finishBudgetCheckpointIfNeeded,
@@ -303,6 +305,7 @@ export async function executeAgentSdkModelToolLoop(
       nativeTextBuffer = ''
       nativeTextAlreadyEmitted = ''
       clearNativeTextFlushTimer()
+      await prepareModelSessionForRunner?.()
       const baseItems = await modelSession.getItems()
       const candidateTextAtAttemptStart = candidateOutputBuffer?.snapshot() ?? ''
       const usedToolsAtAttemptStart = usedTools.length

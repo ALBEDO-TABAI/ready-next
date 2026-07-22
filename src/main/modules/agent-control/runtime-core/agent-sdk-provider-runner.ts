@@ -230,6 +230,7 @@ export function usageFromModelResponses(
   let inputTokens = 0
   let outputTokens = 0
   let totalTokens = 0
+  let lastRequestInputTokens: number | undefined
   let sawUsage = false
   for (const response of responses) {
     const current = usageFromModelResponse(response)
@@ -238,8 +239,11 @@ export function usageFromModelResponses(
     inputTokens += current.inputTokens
     outputTokens += current.outputTokens
     totalTokens += current.totalTokens
+    lastRequestInputTokens = current.inputTokens
   }
-  return sawUsage ? { inputTokens, outputTokens, totalTokens } : undefined
+  return sawUsage
+    ? { inputTokens, outputTokens, totalTokens, lastRequestInputTokens }
+    : undefined
 }
 
 export function usageFromModelResponse(

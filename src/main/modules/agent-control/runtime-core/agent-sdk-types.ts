@@ -121,6 +121,8 @@ export interface ReadyAgentSdkRunResult {
     inputTokens: number
     outputTokens: number
     totalTokens: number
+    /** 最后一次 provider 请求的实报 input（合同 §5：上下文占用显示最后一次真实请求，不是整轮累计）。 */
+    lastRequestInputTokens?: number
   }
   lastResponseId?: string
 }

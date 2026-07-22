@@ -236,7 +236,7 @@ export function buildExecutionTurnResult(
   const taskType = params.taskBudgetRuntime?.taskType
   const budgetDiagnostics = taskBudgetDiagnostics(params.taskBudgetRuntime || null)
   const contextUsage = buildContextUsageSnapshot({
-    inputTokens: params.usage?.inputTokens ?? null,
+    inputTokens: params.usage?.lastRequestInputTokens ?? params.usage?.inputTokens ?? null,
     windowTokens: params.providerDiagnostics?.contextWindow ?? null,
     windowSource: params.providerDiagnostics?.contextWindowSource ?? null,
     timestamp: new Date().toISOString()

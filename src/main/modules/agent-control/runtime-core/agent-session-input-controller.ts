@@ -1,6 +1,7 @@
-import type { AgentInputItem } from '@openai/agents'
+import type { AgentInputItem, MemorySession } from '@openai/agents'
 import type { DurableRequestAnchor } from '../../../../shared/browser-workflow-control'
 import type { RequestEnvelope } from '../contracts/request-envelope'
+import { logAgentMetric } from '../metrics'
 import { parseEnvelopeResourceReferences } from './agent-sdk-input-context-utils'
 import {
   AgentSessionCheckpointRepository,
@@ -168,6 +169,43 @@ export class AgentSessionInputController {
     return this.latestProviderBoundary
       ? structuredClone(this.latestProviderBoundary.finalItems) as AgentInputItem[]
       : null
+  }
+
+  /**
+   * Runner 边界重建（contracts §6/§108）：owner-local 会话与当前 clean_base
+   * checkpoint 的 final input 不一致时，以 checkpoint 为唯一真值重建会话，
+   * 而不是等 resolveFinalBase 的游标校验裸抛把整个任务打死。正常迭代
+   * digest 相等时是零操作。每次重建都打 rebased 指标供根因追踪。
+   */
+  async prepareRunnerSession(session: MemorySession): Promise<void> {
+    const route = this.runtimeContext.browserWorkflowRoute
+    if (!route || !this.runtimeContext.activatedCapabilityGroups.includes('browser')) return
+    const current = this.repository.current(this.runtimeContext.taskId, 'clean_base')
+    if (!current) return
+
+    const sessionItems = await session.getItems()
+    const sessionDigest = workflowDigest(sessionItems)
+    if (sessionDigest !== current.finalInputDigest) {
+      await session.clearSession()
+      if (current.finalInput.length > 0) {
+        await session.addItems(structuredClone(current.finalInput) as AgentInputItem[])
+      }
+      logAgentMetric('owner_local_runner_session_rebased', {
+        runId: this.runtimeContext.runId,
+        taskId: this.runtimeContext.taskId,
+        browserTaskId: route.browserTaskId,
+        previousItemCount: sessionItems.length,
+        checkpointItemCount: current.finalInput.length,
+        previousDigest: sessionDigest,
+        checkpointDigest: current.finalInputDigest,
+      })
+    }
+    this.latestProviderBoundary = {
+      compactedItems: structuredClone(current.finalInput) as AgentInputItem[],
+      sourceItems: structuredClone(current.finalInput) as AgentInputItem[],
+      compacted: false,
+      finalItems: structuredClone(current.finalInput) as AgentInputItem[],
+    }
   }
 
   async ensureBrowserWorkflowRoute(): Promise<{
@@ -350,6 +388,17 @@ export class AgentSessionInputController {
       ) === current.sdkSourcePrefixDigest
       const checkpointSeedMatches = hasExactPrefix(current.finalInput, sourceItems)
       if (!storedCursorMatches && !checkpointSeedMatches) {
+        logAgentMetric('owner_local_session_source_cursor_mismatch', {
+          runId: this.runtimeContext.runId,
+          taskId: this.runtimeContext.taskId,
+          browserTaskId: this.runtimeContext.browserWorkflowRoute?.browserTaskId || null,
+          sourceItemCount: sourceItems.length,
+          checkpointItemCount: current.finalInput.length,
+          checkpointSdkSourceItemCount: current.sdkSourceItemCount,
+          actualSourcePrefixDigest: exactPrefixDigest(sourceItems, current.sdkSourceItemCount),
+          expectedSourcePrefixDigest: current.sdkSourcePrefixDigest,
+          checkpointSeedDigest: workflowDigest(current.finalInput),
+        })
         throw new Error('owner_local_session_source_cursor_mismatch')
       }
       const suffix = checkpointSeedMatches

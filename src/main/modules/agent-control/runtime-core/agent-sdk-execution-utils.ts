@@ -329,6 +329,16 @@ export function classifySdkRuntimeError(error: unknown): {
 } {
   const message = errorMessage(error)
   if (
+    /(?:owner_local_session_source_cursor_mismatch|browser_route_clean_boundary_missing|checkpoint_sdk_source_prefix_mismatch)/.test(
+      message
+    )
+  ) {
+    return {
+      terminalReason: 'persistence_failed',
+      userMessagePrefix: 'SDK 会话保存失败'
+    }
+  }
+  if (
     /(?:api key|authentication|unauthorized|invalid.*key|forbidden|401|403|只支持 OpenAI 协议)/i.test(
       message
     )
