@@ -86,6 +86,10 @@ authorities:
 6. 所有验证命令逐条记录退出码；不得用管道尾接 echo 掩蔽失败。
 7. 每阶段收尾按 CLAUDE.md §10：typecheck、对应专项 gate、涉 SQLite 跑 `verify:native`（ABI skip 只算未覆盖）、净增行数文件查 1000 行健康度并更新 `docs/code-health/large-file-health-log.md`。
 
+## 4.5 第二批工单（2026-07-22 晚，L0 主链之外）
+
+L0 实施已提交（`6937050ae`），provider 内核修复已由 Claude 落地（`2c7293377`）。实测暴露的确认可见性、§1.6 Provider 行、对抗复核四缺陷等后续工单见：`docs/superpowers/plans/2026-07-22-provider-reliability-and-confirmation-visibility-implementation.md`（P1→P6 按序，P1 确认卡可见性最高优先）。S5 真机验收（A1–A12）仍待授权 acceptance profile，与第二批工单并行不冲突；P2 是 A6 的前置件。
+
 ## 5. 汇报与证据合同
 
 - 每阶段完成：更新收口计划该阶段状态 + 附 gate 输出路径与 EXIT 码 + 简述与计划的偏差（零偏差也要写明）。

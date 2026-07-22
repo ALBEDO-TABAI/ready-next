@@ -24,6 +24,7 @@
 | Ready 系统提示词实施审阅记录 | `docs/superpowers/specs/2026-07-15-ready-system-prompt-implementation-review.md` |
 | 长任务整治总排序与范围裁决（L-1→L0→L1→L2 唯一入口） | `docs/superpowers/plans/2026-07-22-agent-long-task-remediation-roadmap.md` |
 | Codex 实施启动 handoff（L-1 + L0 执行入口） | `docs/superpowers/plans/2026-07-22-codex-implementation-handoff.md` |
+| Provider 可靠性与确认可见性（第二批工单 P1–P6） | `docs/superpowers/plans/2026-07-22-provider-reliability-and-confirmation-visibility-implementation.md` |
 | Browser Agent 单 Agent 长任务与标签页所有权收口 | `docs/superpowers/plans/2026-07-22-browser-agent-sequential-long-task-and-tab-ownership-closure-implementation.md` |
 | Agent 长程 Plan-and-Execute、策略与分支架构 | `docs/superpowers/plans/2026-07-22-agent-plan-execute-policy-hooks-and-branching-runtime-design.md` |
 | 2026-07-22 Browser Agent 长任务根因证据 | `docs/superpowers/audits/2026-07-22-browser-agent-long-task-root-cause-and-evidence.md` |
