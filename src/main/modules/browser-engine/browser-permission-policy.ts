@@ -62,6 +62,9 @@ function sameWorkflowTarget(
     && left.sessionId === right.sessionId
     && left.tabId === right.tabId
     && left.physicalTargetToken === right.physicalTargetToken
+    && left.bootIncarnationId === right.bootIncarnationId
+    && left.claimId === right.claimId
+    && left.generation === right.generation
 }
 
 export function sameBrowserPermissionRequestBinding(
@@ -73,40 +76,30 @@ export function sameBrowserPermissionRequestBinding(
 
 /**
  * A site permission can enter the unattended Agent path only when the exact
- * physical tab has both a live workflow binding and the matching live lease.
+ * physical tab has a live workflow binding backed by the current target claim.
  */
 export function resolveAgentPermissionRequestBinding(input: {
   partition: string
   tabId: string | null
   physicalTargetToken: string | null
   workflowTarget: BrowserWorkflowWriteTarget | null
-  lease: {
-    surface: BrowserWorkflowWriteTarget['surface']
-    taskId: string
-    runId: string
-    tabId: string | null
-  } | null
-  writeAdmitted: boolean
+  admittedTarget: BrowserWorkflowWriteTarget | null
 }): BrowserPermissionRequestBinding | null {
   const target = input.workflowTarget
-  const lease = input.lease
   if (
     !input.partition
     || !input.tabId
     || !input.physicalTargetToken
     || !target
-    || !lease
-    || !input.writeAdmitted
+    || !input.admittedTarget
   ) return null
   if (
-    target.tabId !== input.tabId
+    target.partition !== input.partition
+    || target.tabId !== input.tabId
     || target.physicalTargetToken !== input.physicalTargetToken
-    || lease.surface !== target.surface
-    || lease.tabId !== target.tabId
-    || lease.taskId !== target.parentTaskId
-    || lease.runId !== target.ownerRunId
+    || !sameWorkflowTarget(target, input.admittedTarget)
   ) return null
-  return { partition: input.partition, ...target }
+  return { ...target }
 }
 
 function permissionRequestKey(input: {

@@ -6,7 +6,7 @@ import {
   createAgentTabUserInputTakeoverHandlers,
   persistAgentTabUserTakeover,
 } from '../main/modules/browser-engine/agent-tab-control-gate'
-import { BrowserWriteLeaseService } from '../main/modules/browser-engine/browser-write-lease'
+import { acquireTarget, createTargetClaimService, identityOf } from './utils/browser-target-claim-fixture'
 
 describe('agent tab immediate takeover', () => {
   it('records the lease takeover and fences grounded work exactly once', () => {
@@ -29,20 +29,29 @@ describe('agent tab immediate takeover', () => {
     let prevented = 0
     let groundedFenced = false
     let activelyDriven = true
-    const leaseService = new BrowserWriteLeaseService()
-    leaseService.acquire({ surface: 'agent-view', taskId: 'research-task', runId: 'run-1', tabId: 'agent-tab' })
+    const claimService = createTargetClaimService()
+    let claim = acquireTarget(claimService, {
+      surface: 'agent-view',
+      parentTaskId: 'research-task',
+      ownerRunId: 'run-1',
+      tabId: 'agent-tab',
+    })
     const handlers = createAgentTabUserInputTakeoverHandlers({
       isActivelyDriven: () => activelyDriven,
-      isFrozen: () => leaseService.getState('agent-view') === 'takeover',
+      isFrozen: () => claimService.read(claim.logicalKey)?.state === 'user_owned',
       isAgentKey: (key) => key === 'AgentKey',
       isAgentMouse: () => false,
       takeOver: () => {
         takeovers += 1
         beginAgentTabUserTakeover({
-          isTakenOver: () => leaseService.getState('agent-view') === 'takeover',
+          isTakenOver: () => claimService.read(claim.logicalKey)?.state === 'user_owned',
           fenceGroundedTasks: () => { groundedFenced = true },
           recordLeaseTakeover: () => {
-            leaseService.recordUserSignal({ surface: 'agent-view', source: 'explicit-button' })
+            claimService.recordUserSignal({
+              target: identityOf(claim),
+              source: 'explicit-button',
+              suspensionCheckpointId: 'checkpoint-user',
+            })
           },
         })
       },
@@ -53,10 +62,15 @@ describe('agent tab immediate takeover', () => {
     assert.equal(takeovers, 1)
     assert.equal(prevented, 0, 'the physical key must continue into the page')
     assert.equal(groundedFenced, true, 'the grounded task is fenced before the listener returns')
-    assert.equal(leaseService.getState('agent-view'), 'takeover', 'the next agent-view write is rejected synchronously')
+    assert.equal(claimService.read(claim.logicalKey)?.state, 'user_owned', 'the next write to that target is rejected synchronously')
 
-    leaseService.clearTakeover('agent-view')
-    leaseService.acquire({ surface: 'agent-view', taskId: 'research-task-2', runId: 'run-2', tabId: 'agent-tab' })
+    claimService.closeTarget(claim.logicalKey)
+    claim = acquireTarget(claimService, {
+      surface: 'agent-view',
+      parentTaskId: 'research-task-2',
+      ownerRunId: 'run-2',
+      tabId: 'agent-tab',
+    })
     takeovers = 0
     handlers.onKeyboardInput(electronEvent, { type: 'keyDown', key: 'AgentKey' })
     assert.equal(takeovers, 0, 'trusted injected input must not look like a user takeover')
@@ -71,9 +85,17 @@ describe('agent tab immediate takeover', () => {
   })
 
   it('retains the physical fence when durable takeover persistence fails', async () => {
-    const leaseService = new BrowserWriteLeaseService()
-    leaseService.acquire({ surface: 'user-view', taskId: 'browser-child', runId: 'owner-run', tabId: 'tab-a' })
-    leaseService.recordUserSignal({ surface: 'user-view', source: 'explicit-button' })
+    const claimService = createTargetClaimService()
+    const claim = acquireTarget(claimService, {
+      parentTaskId: 'browser-child',
+      ownerRunId: 'owner-run',
+      tabId: 'tab-a',
+    })
+    claimService.recordUserSignal({
+      target: identityOf(claim),
+      source: 'explicit-button',
+      suspensionCheckpointId: 'checkpoint-user',
+    })
     let successCleanup = 0
     let failures = 0
 
@@ -81,7 +103,7 @@ describe('agent tab immediate takeover', () => {
       persist: async () => { throw new Error('sqlite busy') },
       onPersisted: () => {
         successCleanup += 1
-        leaseService.clearTakeover('user-view')
+        claimService.closeTarget(claim.logicalKey)
       },
       onPersistenceFailure: () => { failures += 1 },
     })
@@ -89,7 +111,7 @@ describe('agent tab immediate takeover', () => {
     assert.equal(persisted, false)
     assert.equal(failures, 1)
     assert.equal(successCleanup, 0)
-    assert.equal(leaseService.getState('user-view'), 'takeover')
-    assert.equal(leaseService.checkWrite({ surface: 'user-view', leaseId: 'stale' })?.errorCode, 'lease_takeover')
+    assert.equal(claimService.read(claim.logicalKey)?.state, 'user_owned')
+    assert.equal(claimService.checkWrite(identityOf(claim))?.errorCode, 'lease_takeover')
   })
 })

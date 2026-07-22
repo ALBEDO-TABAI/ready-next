@@ -71,7 +71,15 @@ describe('background task terminal reminder injection', () => {
         },
       },
     ])
-    const runtime = createRuntime(scripted.deps)
+    const runtime = createRuntime({
+      ...scripted.deps,
+      getScopeTaskRefs: () => [{
+        taskId: 'foreground-task-background-terminal-reminder',
+        status: 'running',
+        canResume: true,
+        continuationCheckpointId: 'checkpoint-background-terminal-reminder',
+      }],
+    })
     runtime.newSession('butler::scope-background-terminal-reminder', 'system prompt')
 
     const result = await runtime.sendMessage(

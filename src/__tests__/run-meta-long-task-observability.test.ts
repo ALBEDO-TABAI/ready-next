@@ -143,8 +143,8 @@ test('Agent SDK scoped run writes long-task run_meta fields on close', async () 
   assert.equal(row.providerProtocol, 'anthropic')
   assert.equal(row.contextWindow, 96_000)
   assert.deepEqual(row.budget, {
-    maxIterations: 60,
-    maxToolCalls: 60,
+    maxIterations: 220,
+    maxToolCalls: 220,
     maxParallelToolGroups: 5,
     reservedToolCalls: 0,
     iterationsUsed: 1,

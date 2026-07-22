@@ -1,6 +1,10 @@
 import type { BrowserController } from '../browser-engine/ipc-handler'
 import { createHash } from 'node:crypto'
-import type { BrowserLeaseGate } from '../browser-engine/agent-browser-lease-gate'
+import type { BrowserTargetClaimGate } from '../browser-engine/agent-browser-lease-gate'
+import {
+  bootIncarnationIdFromPhysicalTargetToken,
+  partitionForBrowserProfile,
+} from '../browser-engine/browser-target-claims'
 import type { BrowserTurnLease } from '../browser-engine/agent-browser-turn-lease'
 import { isAgentBrowserError } from '../browser-engine/agent-browser-errors'
 import type { BrowserActionReceipt } from '../browser-engine/browser-action-receipt'
@@ -250,7 +254,7 @@ export async function executeBrowserTool(
   controller: BrowserController,
   abortSignal?: AbortSignal,
   sessionId?: string,
-  leaseGate?: BrowserLeaseGate,
+  leaseGate?: BrowserTargetClaimGate,
   _legacyUserText?: string,
   runtime?: AgentControlRuntime | null,
   taskExecutionContext?: {
@@ -276,13 +280,9 @@ export async function executeBrowserTool(
     browserTurnLease?: BrowserTurnLease | null
   },
 ): Promise<string | ToolExecutionOutput> {
-  const origin = browserActionOrigin(args, controller)
   log(`executeBrowserTool ${JSON.stringify(sanitizeBrowserToolLogArgs(toolName, args))}`)
   try {
     const ownerRunId = String(taskExecutionContext?.ownerRunId || '').trim()
-    const initialTabId = typeof args.tab_id === 'string' && args.tab_id.trim()
-      ? args.tab_id
-      : controller.getActiveTab?.()?.id || null
     const invocation = resolveBrowserToolInvocation(toolName, args, taskExecutionContext?.inputSource)
     if (
       invocation.ok
@@ -305,18 +305,67 @@ export async function executeBrowserTool(
       })
     }
     const operationCapability = invocation.ok ? browserOperationCapability(invocation.operation) : null
+    const browserTaskId = String(taskExecutionContext?.browserTaskId || '').trim()
+    const parentTaskId = String(taskExecutionContext?.parentTaskId || '').trim()
+    const researchWorkTab = Boolean(
+      browserTaskId
+      && parentTaskId
+      && runtime?.getTaskProjection(parentTaskId)?.taskType === 'research',
+    )
+    if (
+      researchWorkTab
+      && operationCapability?.requiresDocument
+      && !(typeof args.tab_id === 'string' && args.tab_id.trim())
+    ) {
+      const workTab = await controller.ensureAgentWorkTab(browserTaskId)
+      if (!workTab.success || !workTab.tabId) {
+        return createBrowserStructuredOutput({
+          ok: false,
+          errorKind: 'browser_agent_work_tab_unavailable',
+          message: workTab.error || 'Agent work tab could not be created.',
+        })
+      }
+      args = { ...args, tab_id: workTab.tabId }
+    }
+    const origin = browserActionOrigin(args, controller)
+    const initialTabId = typeof args.tab_id === 'string' && args.tab_id.trim()
+      ? args.tab_id
+      : controller.getActiveTab?.()?.id || null
     const requiresPageLease = operationCapability?.requiresPageLease === true
     const tabList = controller.getTabList?.() || []
     const initialTarget = initialTabId
       ? tabList.find((tab) => tab.id === initialTabId) || null
       : null
     const requiresAgentView = initialTarget?.owner === 'agent'
-    const leaseTargetTabId = initialTabId
     let workflowWriteTarget: BrowserWorkflowWriteTarget | null = null
     let effectiveLeaseGate = leaseGate
-    if (!effectiveLeaseGate && requiresPageLease && taskExecutionContext?.browserTurnLease) {
+    if (
+      !effectiveLeaseGate
+      && requiresPageLease
+      && initialTabId
+      && taskExecutionContext?.browserTurnLease
+      && taskExecutionContext.browserTaskId
+    ) {
       const surface = requiresAgentView ? 'agent-view' : 'user-view'
-      const ensured = taskExecutionContext.browserTurnLease.ensureGateForSurface(surface, leaseTargetTabId)
+      const physicalTargetToken = controller.getPhysicalTargetToken(initialTabId)
+      if (!physicalTargetToken) {
+        return createBrowserStructuredOutput({
+          ok: false,
+          errorCode: 'browser_physical_target_unavailable',
+          errorKind: 'browser_physical_target_unavailable',
+        })
+      }
+      const ensured = taskExecutionContext.browserTurnLease.ensureGateForTarget({
+        partition: partitionForBrowserProfile(initialTarget?.profile),
+        tabId: initialTabId,
+        physicalTargetToken,
+        bootIncarnationId: bootIncarnationIdFromPhysicalTargetToken(physicalTargetToken),
+        profileId: initialTarget?.profile || null,
+        surface,
+        browserTaskId: taskExecutionContext.browserTaskId,
+        scopeId: sessionId || null,
+        sessionId: null,
+      })
       if (isAgentBrowserError(ensured)) {
         return createBrowserStructuredOutput({
           ...ensured,
@@ -350,6 +399,7 @@ export async function executeBrowserTool(
         })
       }
       workflowWriteTarget = {
+        partition: effectiveLeaseGate.identity.partition,
         parentTaskId: taskExecutionContext.parentTaskId,
         ownerRunId,
         browserTaskId: taskExecutionContext.browserTaskId,
@@ -359,6 +409,9 @@ export async function executeBrowserTool(
         sessionId: null,
         tabId: initialTabId,
         physicalTargetToken,
+        bootIncarnationId: effectiveLeaseGate.identity.bootIncarnationId,
+        claimId: effectiveLeaseGate.identity.claimId,
+        generation: effectiveLeaseGate.identity.generation,
       }
       const clearPhysicalBinding = controller.bindBrowserWorkflowPhysicalTarget({
         ...workflowWriteTarget,
@@ -373,7 +426,7 @@ export async function executeBrowserTool(
           armAgentFileChooserGuard?: (tabId: string | null) => Promise<void>
         }).armAgentFileChooserGuard
         if (typeof armGuard === 'function') {
-          await armGuard.call(controller, leaseTargetTabId)
+          await armGuard.call(controller, initialTabId)
         }
       } catch {
         // silent-catch: chooser guard attachment must not fail browser work.
@@ -521,13 +574,14 @@ export async function executeBrowserTool(
               abortSignal: signal,
               sessionId,
               mutationBoundary,
+              agentOwnedWorkTab: researchWorkTab && browserTaskId ? { browserTaskId } : null,
               requestPowerConfirmation: taskExecutionContext?.requestPowerConfirmation,
               createHumanTakeoverIntent: runtime
                 && taskExecutionContext?.parentTaskId
                 && taskExecutionContext.ownerRunId
                 && taskExecutionContext.browserTaskId
-                ? async (userPrompt) => {
-                    const groundedTabId = initialTabId || controller.getActiveTab?.()?.id || null
+                ? async ({ tabId: requestedTabId, ...userPrompt }) => {
+                    const groundedTabId = requestedTabId || initialTabId || controller.getActiveTab?.()?.id || null
                     const groundedTab = groundedTabId
                       ? controller.getTabList?.().find((tab) => tab.id === groundedTabId) || null
                       : null

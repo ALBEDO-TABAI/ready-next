@@ -27,6 +27,7 @@ import type {
   AgentBrowserControlState,
   AgentBrowserSurface,
   BrowserLeaseSurfaceSnapshot,
+  BrowserTargetClaimSnapshot,
 } from '../modules/browser/useAgentBrowserSupervision'
 import type {
   PetActivitySnapshot,
@@ -1502,13 +1503,23 @@ interface ElectronBrowserAPI {
     controlState: AgentBrowserControlState
     agentTabId: string | null
     tasks: AgentBrowserCollectionTask[]
+    claims?: BrowserTargetClaimSnapshot[]
     surfaces?: Record<AgentBrowserSurface, BrowserLeaseSurfaceSnapshot>
     activeWriteSurface?: AgentBrowserSurface | null
     error?: string
   }>
   requestAgentInterruption: () => Promise<{ state: AgentBrowserControlState; frozen: boolean; takeoverTabId?: string | null; error?: string }>
+  resumeTargetClaim: (request: {
+    parentTaskId: string
+    browserTaskId: string
+    claimId: string
+    oldGeneration: number
+    checkpointId: string
+    wakeNonce: string
+  }) => Promise<{ success: boolean; error?: string; errorKind?: string }>
   onAgentControlChanged: (callback: (data: { state: AgentBrowserControlState }) => void) => () => void
   onLeaseChanged: (callback: (data: {
+    claims?: BrowserTargetClaimSnapshot[]
     surfaces?: Record<AgentBrowserSurface, BrowserLeaseSurfaceSnapshot>
     activeWriteSurface?: AgentBrowserSurface | null
   }) => void) => () => void
@@ -3238,6 +3249,21 @@ interface ElectronAppShortcutEvent {
 }
 
 interface ElectronAppAPI {
+  browserLiveProofHandshake: (nonce: string) => Promise<{
+    success: boolean
+    error?: string
+    proofNonce?: string
+    pid?: number
+    execPath?: string
+    execSha256?: string
+    asarPath?: string | null
+    asarSha256?: string | null
+    sourceManifestDigest?: string
+    bootIncarnationId?: string
+    userDataPath?: string
+    databasePath?: string
+    appVersion?: string
+  }>
   checkUpdate: () => Promise<{ success: boolean; version?: string | null; error?: string }>
   installUpdate: () => Promise<void>
   captureWindow: () => Promise<{ success: boolean; path?: string; error?: string }>

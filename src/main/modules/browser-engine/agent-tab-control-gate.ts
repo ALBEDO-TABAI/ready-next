@@ -1,9 +1,8 @@
 /**
  * Immediate user takeover helpers for the agent browser tab.
  *
- * The write lease remains the single owner of browser-surface serialization.
- * BrowserWriteLease is the single synchronous ownership truth. User input and
- * the supervision button transition that lease directly to `takeover`.
+ * The exact target claim is the synchronous ownership truth. User input and
+ * the supervision button transition that claim directly to `user_owned`.
  * There is deliberately no intermediate confirmation state: the same input
  * that expresses takeover must continue to the page instead of being swallowed.
  *

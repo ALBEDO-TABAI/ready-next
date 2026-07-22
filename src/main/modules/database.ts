@@ -1,6 +1,7 @@
 import { createRequire } from 'module'
 import { createHash } from 'crypto'
 import { join } from 'path'
+import { resolveReadyDatabasePath } from './database-path'
 import { runMigrations } from './migrations'
 import {
   performBootSweep,
@@ -621,7 +622,7 @@ export class DatabaseManager {
           throw new Error('Electron app.getPath is unavailable')
         }
         const userDataPath = app.getPath('userData')
-        this.dbPath = join(userDataPath, 'ready.db')
+        this.dbPath = resolveReadyDatabasePath(userDataPath, process.env.READY_DB_PATH)
       } catch (error) {
         throw new DatabaseUnavailableError(
           `Cannot resolve Ready userData database path: ${formatDatabaseError(error)}`,

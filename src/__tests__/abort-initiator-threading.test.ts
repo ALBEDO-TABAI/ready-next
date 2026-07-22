@@ -328,7 +328,7 @@ test('S0 R3: delivery deadline preserves a durable Browser task as a resumable c
     },
   )
 
-  assert.equal(result.success, true)
+  assert.equal(result.success, true, JSON.stringify(result))
   assert.equal(result.terminalReason, 'blocked_tool_error')
   assert.equal(projection.taskId, 'task-delivery-browser')
   assert.equal(projection.continuationRef.browserTaskId, 'browser-task-delivery-browser')

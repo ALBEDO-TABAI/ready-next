@@ -8,12 +8,12 @@ function readWorkspaceFile(path: string): string {
   return readFileSync(resolve(process.cwd(), path), 'utf8')
 }
 
-test('browser lease transitions push the existing supervision snapshot to the renderer', () => {
+test('browser target-claim transitions push the supervision snapshot to the renderer', () => {
   const ipcHandler = readWorkspaceFile('src/main/modules/browser-engine/ipc-handler.ts')
   const preload = readWorkspaceFile('src/preload/index.ts')
   const supervisionHook = readWorkspaceFile('src/renderer/modules/browser/useAgentBrowserSupervision.ts')
 
-  assert.match(ipcHandler, /getBrowserWriteLeaseService\(\)\.onTransition/)
+  assert.match(ipcHandler, /getBrowserTargetClaimService\(\)\.onTransition/)
   assert.match(ipcHandler, /sendToRenderer\('browser:leaseChanged', this\.getBrowserLeaseSnapshot\(\)\)/)
   assert.match(preload, /onLeaseChanged/)
   assert.match(preload, /ipcRenderer\.on\('browser:leaseChanged'/)
@@ -21,28 +21,39 @@ test('browser lease transitions push the existing supervision snapshot to the re
   assert.match(supervisionHook, /applyLeaseSnapshotToSupervisionState/)
 })
 
-test('user-view takeover stays separate while agent-view input takes over immediately', () => {
+test('physical user input takes over only the exact driven target', () => {
   const ipcHandler = readWorkspaceFile('src/main/modules/browser-engine/ipc-handler.ts')
   const ipcSupervision = readWorkspaceFile('src/main/modules/browser-engine/ipc-supervision.ts')
   const preload = readWorkspaceFile('src/preload/index.ts')
 
-  assert.match(ipcHandler, /attachUserViewLeaseTakeover/)
-  assert.match(ipcHandler, /shouldRecordUserViewTabSwitch/)
-  assert.match(ipcHandler, /recordUserViewTakeoverSignal/)
-  assert.match(ipcHandler, /source: 'keyboard'/)
-  assert.match(ipcHandler, /source: 'tab-switch'/)
-  assert.match(ipcHandler, /nextTab\?\.owner !== 'agent'/)
+  assert.match(ipcHandler, /attachTargetClaimSupervision/)
   assert.match(ipcHandler, /attachAgentTabSupervision/)
-  assert.match(ipcHandler, /beginAgentTabUserTakeover\(\{/)
-  assert.match(ipcHandler, /recordUserSignal\(\{ surface: selected\.surface, source: 'explicit-button' \}\)/)
-  assert.match(ipcHandler, /leaseService\.getLease\(surface\)\?\.tabId === tabId/)
-  assert.match(ipcHandler, /token\.startsWith\('foreground-workflow:'\)/)
+  assert.match(ipcHandler, /requestAgentInterruption\(tabId, 'physical_input'\)/)
+  assert.match(ipcHandler, /requestedTabId[\s\S]*claim\.logicalKey\.tabId === requestedTabId/)
+  assert.match(ipcHandler, /signalSource === 'navigation' && claimService\.hasActiveAgentAction\(\{/)
+  assert.doesNotMatch(ipcHandler, /source: 'tab-switch'/)
   assert.doesNotMatch(ipcHandler, /task\.kind === 'site_research'/)
   const agentTabSupervision = ipcHandler.match(/private attachAgentTabSupervision[\s\S]*?private isAgentActivelyDrivingTab/)?.[0] || ''
   assert.doesNotMatch(agentTabSupervision, /preventDefault/)
   assert.doesNotMatch(ipcSupervision, /confirmAgentInterruption|dismissAgentInterruption/)
   assert.doesNotMatch(preload, /confirmAgentInterruption|dismissAgentInterruption/)
-  assert.doesNotMatch(ipcHandler, /recordUserViewTakeoverSignal\([\s\S]{0,300}agentTabControlGate/)
+})
+
+test('target resume is wired through Main, preload, renderer types, and a concrete supervision action', () => {
+  const ipcSupervision = readWorkspaceFile('src/main/modules/browser-engine/ipc-supervision.ts')
+  const preload = readWorkspaceFile('src/preload/index.ts')
+  const rendererTypes = readWorkspaceFile('src/renderer/types/electron.d.ts')
+  const hook = readWorkspaceFile('src/renderer/modules/browser/useAgentBrowserSupervision.ts')
+  const panel = readWorkspaceFile('src/renderer/components/browser/AgentBrowserSupervisionPanel.tsx')
+
+  assert.match(ipcSupervision, /ipcMain\.handle\('browser:resumeTargetClaim'/)
+  assert.match(preload, /resumeTargetClaim:[\s\S]*ipcRenderer\.invoke\('browser:resumeTargetClaim'/)
+  assert.match(rendererTypes, /resumeTargetClaim:/)
+  assert.match(hook, /oldGeneration: claim\.generation/)
+  assert.match(hook, /checkpointId: claim\.suspensionCheckpointId/)
+  assert.match(hook, /wakeNonce: crypto\.randomUUID\(\)/)
+  assert.match(panel, /继续 Agent/)
+  assert.match(panel, /其他页面不受影响/)
 })
 
 test('P7c live-proof helpers are env-gated and used only by the live proof script', () => {

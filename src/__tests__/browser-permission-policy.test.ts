@@ -97,24 +97,21 @@ function binding(overrides: Partial<BrowserPermissionRequestBinding> = {}): Brow
     sessionId: null,
     tabId: 'tab-1',
     physicalTargetToken: 'physical-1',
+    bootIncarnationId: 'boot-1',
+    claimId: 'claim-1',
+    generation: 1,
     ...overrides,
   }
 }
 
-test('agent suspension requires the lease for the exact bound physical tab and owner', () => {
+test('agent suspension requires the claim for the exact bound physical tab and owner', () => {
   const target = binding()
   const exact = resolveAgentPermissionRequestBinding({
     partition: target.partition,
     tabId: target.tabId,
     physicalTargetToken: target.physicalTargetToken,
     workflowTarget: target,
-    lease: {
-      surface: target.surface,
-      taskId: target.parentTaskId,
-      runId: target.ownerRunId,
-      tabId: target.tabId,
-    },
-    writeAdmitted: true,
+    admittedTarget: target,
   })
   assert.deepEqual(exact, target)
   assert.equal(resolveAgentPermissionRequestBinding({
@@ -122,27 +119,15 @@ test('agent suspension requires the lease for the exact bound physical tab and o
     tabId: target.tabId,
     physicalTargetToken: target.physicalTargetToken,
     workflowTarget: target,
-    lease: {
-      surface: target.surface,
-      taskId: target.parentTaskId,
-      runId: target.ownerRunId,
-      tabId: 'tab-2',
-    },
-    writeAdmitted: true,
-  }), null, 'a lease on another tab must not suspend this tab permission request')
+    admittedTarget: binding({ tabId: 'tab-2' }),
+  }), null, 'a claim on another tab must not suspend this tab permission request')
   assert.equal(resolveAgentPermissionRequestBinding({
     partition: target.partition,
     tabId: target.tabId,
     physicalTargetToken: target.physicalTargetToken,
     workflowTarget: target,
-    lease: {
-      surface: target.surface,
-      taskId: target.parentTaskId,
-      runId: 'another-owner-run',
-      tabId: target.tabId,
-    },
-    writeAdmitted: true,
-  }), null, 'a lease held by another owner must not suspend this request')
+    admittedTarget: binding({ ownerRunId: 'another-owner-run' }),
+  }), null, 'a claim held by another owner must not suspend this request')
 })
 
 test('pending requests and notices stay partition/tab/workflow scoped', () => {

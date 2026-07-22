@@ -8,7 +8,7 @@
  * classification to behavior stays in plain code (CLAUDE.md §0 "模型只做判断题").
  *
  * Kinds:
- *  - continue_task: "继续 / 接着弄 / resume" — resume the prior task lineage.
+ *  - continue_task: a typed or model-adjudicated continuation signal.
  *  - status_query:  "怎么样了 / 还在跑吗" — report state; must NOT restart work.
  *  - correction:    "第一篇少了图 / 不对，改成…" — prior output needs repair.
  *  - new_task:      substantive new instruction (default for real content).
@@ -19,7 +19,7 @@
 
 import { isSkillChildRunOpenStatus } from './skill-child-run-status'
 
-const CONTINUE_PATTERN =
+const CONTINUATION_CUE_PATTERN =
   /(?:继续|接着(?:弄|做|来|跑|采|处理)?|接续|重试|再试|再来一次|再跑|再采|恢复|go on|continue|retry|keep going|try again|resume|carry on)/i
 
 const STATUS_PATTERN =
@@ -73,6 +73,10 @@ export interface FollowupTaskRef {
   summary?: string | null
   nextAction?: string | null
   blockerCategory?: string | null
+  ownerAgentId?: string | null
+  continuationCheckpointId?: string | null
+  browserTaskId?: string | null
+  canResume?: boolean
 }
 
 /** True when at least one ref is active / blocked / pending adjudication. */
@@ -101,6 +105,8 @@ export interface FollowupIntentResult {
   negations: FollowupNegationFamily[]
   /** EP2-I1 — first continuable ref when kind=continue_task with facts. */
   targetTaskId?: string
+  /** Language cue only. It may preserve active-task safety guards but never selects or resumes a task. */
+  continuationCue?: boolean
 }
 
 /**
@@ -174,22 +180,19 @@ export function classifyFollowupIntent(
   if (
     continuable && continuable.length > 0 && isShort
     && VAGUE_INTERROGATIVE.test(t)
-    && !CONTINUE_PATTERN.test(t)
   ) {
     return { kind: 'status_query', confidence: 0.6, negations }
   }
 
-  // Review-team D1b: an explicit topic shift ("继续聊聊别的话题") contains a
-  // continuation verb but is NOT a task continuation.
+  // A natural-language continuation cue may keep unfinished-task safety guards
+  // active, but it is deliberately not a routing decision. The live turn must
+  // select a structured candidate through resume_task (or ask when ambiguous).
   const TOPIC_SHIFT = /(?:聊聊|换个|别的话题|其他话题|另一个话题|new topic|something else)/i
-  if (isShort && CONTINUE_PATTERN.test(t) && negations.length === 0 && !TOPIC_SHIFT.test(t)) {
-    // EP2-I1 state-first hard rule: facts present + zero continuable refs →
-    // continuation semantics do not exist. new_task, no memory digging (P6).
-    if (continuable) {
-      if (continuable.length === 0) return { kind: 'new_task', confidence: 0.85, negations }
-      return { kind: 'continue_task', confidence: 0.9, negations, targetTaskId: continuable[0].taskId }
-    }
-    return { kind: 'continue_task', confidence: 0.9, negations }
+  const hasContinuationState = continuable === null
+    ? ctx.hasActiveTaskContext
+    : continuable.length > 0
+  if (hasContinuationState && CONTINUATION_CUE_PATTERN.test(t) && negations.length === 0 && !TOPIC_SHIFT.test(t)) {
+    return { kind: 'new_task', confidence: 0.45, negations, continuationCue: true }
   }
 
   // Short messages with an active task that match nothing above are the

@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import type { TaskExecutionBinding } from '../../../shared/agent-execution-profile'
 import { assertDeliveryState, type DeliveryStateV1 } from '../../../shared/dynamic-delivery'
 import type {
@@ -10,7 +11,7 @@ import {
   workflowDigest,
 } from './browser-workflow-codec'
 import type { DurableWriteResult } from './browser-workflow-unit-of-work'
-import { BrowserWorkflowUnitOfWork } from './browser-workflow-unit-of-work'
+import { BrowserWorkflowUnitOfWork, type WorkflowRawDatabase } from './browser-workflow-unit-of-work'
 import { readWorkflowParent } from './browser-workflow-row-mapping'
 import type {
   CanonicalCoreCloseoutInput,
@@ -31,6 +32,82 @@ const readParent = readWorkflowParent
 
 function changed(result: unknown): number {
   return Number((result as { changes?: unknown } | null)?.changes || 0)
+}
+
+function releaseHeldBrowserTargetClaims(
+  db: WorkflowRawDatabase,
+  ownerRunId: string,
+  nowMs: number,
+): void {
+  const claims = db.prepare(`
+    SELECT partition, tab_id, physical_target_token, boot_incarnation_id,
+           claim_id, generation, parent_task_id, browser_task_id
+      FROM browser_target_claims
+     WHERE owner_run_id = ? AND state = 'held'
+     ORDER BY browser_task_id, partition, tab_id
+  `).all<{
+    partition: string
+    tab_id: string
+    physical_target_token: string | null
+    boot_incarnation_id: string | null
+    claim_id: string
+    generation: number
+    parent_task_id: string
+    browser_task_id: string
+  }>(ownerRunId)
+  const createdAt = new Date(nowMs).toISOString()
+  for (const claim of claims) {
+    const nextClaimId = `claim-${randomUUID()}`
+    const nextGeneration = claim.generation + 1
+    const updated = db.prepare(`
+      UPDATE browser_target_claims
+         SET state = 'released', physical_target_token = NULL, boot_incarnation_id = NULL,
+             claim_id = ?, generation = ?, suspension_checkpoint_id = NULL,
+             suspension_reason = NULL, heartbeat_at = ?, expires_at = ?, updated_at = ?
+       WHERE partition = ? AND tab_id = ? AND owner_run_id = ? AND state = 'held'
+         AND claim_id = ? AND generation = ?
+    `).run(
+      nextClaimId,
+      nextGeneration,
+      nowMs,
+      nowMs,
+      nowMs,
+      claim.partition,
+      claim.tab_id,
+      ownerRunId,
+      claim.claim_id,
+      claim.generation,
+    )
+    if (changed(updated) !== 1) throw new Error('core_closeout_target_claim_cas_conflict')
+    const sequence = Number(db.prepare(
+      'SELECT COALESCE(MAX(sequence), 0) + 1 AS sequence FROM browser_control_receipts WHERE browser_task_id = ?',
+    ).get<{ sequence: number }>(claim.browser_task_id)?.sequence || 1)
+    db.prepare(`
+      INSERT INTO browser_control_receipts (
+        receipt_id, sequence, parent_task_id, browser_task_id, owner_run_id,
+        partition, tab_id, physical_target_token, boot_incarnation_id,
+        previous_claim_id, previous_generation, next_claim_id, next_generation,
+        clean_base_checkpoint_id, suspension_checkpoint_id, wake_id, successor_run_id,
+        continuation_generation, idempotency_key, kind, error_code, recoverable, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, NULL, ?, 'claim_released', NULL, 0, ?)
+    `).run(
+      `browser-control-${randomUUID()}`,
+      sequence,
+      claim.parent_task_id,
+      claim.browser_task_id,
+      ownerRunId,
+      claim.partition,
+      claim.tab_id,
+      claim.physical_target_token,
+      claim.boot_incarnation_id,
+      claim.claim_id,
+      claim.generation,
+      nextClaimId,
+      nextGeneration,
+      `claim-released:${claim.claim_id}:${claim.generation}`,
+      createdAt,
+    )
+  }
 }
 
 export class AgentSessionCheckpointCloseoutRepository {
@@ -173,6 +250,7 @@ export class AgentSessionCheckpointCloseoutRepository {
             `SELECT id FROM browser_tasks
               WHERE parent_task_id = ? AND kind = 'browser_workflow' LIMIT 1`,
           ).get<{ id: string }>(parent.taskId)?.id ?? null
+          releaseHeldBrowserTargetClaims(db, input.ownerRunId, Date.now())
           return {
             parent,
             browserTaskId,
@@ -541,6 +619,8 @@ export class AgentSessionCheckpointCloseoutRepository {
           )
           if (changed(childUpdate) !== 1) throw new Error('core_closeout_browser_child_mismatch')
         }
+
+        releaseHeldBrowserTargetClaims(db, input.ownerRunId, persistedNowMs)
 
         db.prepare(
           'DELETE FROM agent_session_checkpoints WHERE parent_task_id = ?',

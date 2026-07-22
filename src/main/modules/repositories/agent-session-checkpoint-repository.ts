@@ -219,4 +219,21 @@ export class AgentSessionCheckpointRepository {
   }): boolean {
     return this.route.isBrowserWorkflowSettlementAdmitted(input)
   }
+
+  async updateBrowserWorkflowCompletionDeclaration(input: {
+    parentTaskId: string
+    browserTaskId: string
+    ownerRunId: string
+    modelCriteria: string[]
+    expectedOutputs: string[]
+    now?: string
+  }): Promise<void> {
+    await this.route.updateBrowserWorkflowCompletionDeclaration(input)
+  }
+
+  async settleHandoffTakeoverContinuation(
+    ...args: Parameters<AgentSessionCheckpointRepository['route']['settleHandoffTakeoverContinuation']>
+  ): ReturnType<AgentSessionCheckpointRepository['route']['settleHandoffTakeoverContinuation']> {
+    await this.route.settleHandoffTakeoverContinuation(...args)
+  }
 }

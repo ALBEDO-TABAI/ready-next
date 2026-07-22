@@ -1,6 +1,7 @@
 import { ipcMain } from 'electron'
 import type { AgentBrowserSurface } from './agent-browser-errors'
-import type { BrowserLeaseState } from './browser-write-lease'
+import type { BrowserTargetClaimState } from './browser-target-claims'
+import type { BrowserTargetResumeRequest } from '../../../shared/browser-workflow-control'
 import type { BrowserCapabilityTaskHandle } from './capability-types'
 import {
   isBrowserSupervisionVisibleTaskStatus,
@@ -18,6 +19,7 @@ import {
  */
 
 export type AgentControlState = 'active' | 'frozen'
+export type BrowserLeaseState = 'idle' | 'held' | 'takeover' | 'expired'
 
 export interface BrowserLeaseSurfaceSnapshot {
   surface: AgentBrowserSurface
@@ -29,6 +31,19 @@ export interface BrowserLeaseSurfaceSnapshot {
 }
 
 export interface BrowserLeaseSupervisionSnapshot {
+  claims: Array<{
+    partition: string
+    tabId: string
+    surface: AgentBrowserSurface
+    state: BrowserTargetClaimState
+    parentTaskId: string
+    browserTaskId: string
+    ownerRunId: string
+    claimId: string
+    generation: number
+    suspensionCheckpointId: string | null
+    suspensionReason: string | null
+  }>
   surfaces: Record<AgentBrowserSurface, BrowserLeaseSurfaceSnapshot>
   activeWriteSurface: AgentBrowserSurface | null
 }
@@ -43,6 +58,7 @@ export interface BrowserSupervisionIPCController {
   getAgentTabId(): string | null
   getBrowserLeaseSnapshot(): BrowserLeaseSupervisionSnapshot
   listAgentCollectionTasks(): Promise<BrowserAgentSupervisionTask[]>
+  resumeBrowserTarget(input: BrowserTargetResumeRequest): Promise<{ success: boolean; error?: string; errorKind?: string }>
 }
 
 export function setupBrowserSupervisionIPC(controller: BrowserSupervisionIPCController): void {
@@ -67,6 +83,14 @@ export function setupBrowserSupervisionIPC(controller: BrowserSupervisionIPCCont
       }
     } catch (error) {
       return { controlState: 'active' as AgentControlState, agentTabId: null, tasks: [], error: error instanceof Error ? error.message : String(error) }
+    }
+  })
+
+  ipcMain.handle('browser:resumeTargetClaim', async (_, input: BrowserTargetResumeRequest) => {
+    try {
+      return await controller.resumeBrowserTarget(input)
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error), errorKind: 'resume_failed' }
     }
   })
 }

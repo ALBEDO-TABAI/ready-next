@@ -89,6 +89,15 @@ export interface TurnFrameSkillSlice {
   runContract: SkillRunContract | null
 }
 
+export interface TurnFrameResumableCandidate {
+  taskId: string
+  ownerAgentId: string | null
+  summary: string | null
+  blockerCategory: string | null
+  checkpointId: string | null
+  browserTaskId: string | null
+}
+
 /**
  * Stage E — `FrameAction` is the steering decision the turn engine forces
  * on the next iteration. It carries enough information for a deterministic
@@ -118,6 +127,7 @@ export interface TurnFrame {
   mode: TurnFrameMode
   userIntent: TurnUserIntent
   skill: TurnFrameSkillSlice | null
+  resumableCandidates: TurnFrameResumableCandidate[]
   liveness: TurnFrameLiveness
   progress: {
     stage: string | null
@@ -179,6 +189,7 @@ export function summarizeTurnFrame(frame: TurnFrame | null): Record<string, unkn
     requestId: frame.ids.requestId,
     mode: frame.mode,
     skillId: frame.skill?.skillId || null,
+    resumableCandidateCount: frame.resumableCandidates?.length || 0,
     source: frame.skill?.source || null,
     hasRunState: Boolean(frame.skill?.runStatePath),
     hasOutputDir: Boolean(frame.skill?.outputDir),

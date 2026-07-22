@@ -552,4 +552,139 @@ export class AgentSessionCheckpointRouteRepository {
       return false
     }
   }
+
+  async updateBrowserWorkflowCompletionDeclaration(input: {
+    parentTaskId: string
+    browserTaskId: string
+    ownerRunId: string
+    modelCriteria: string[]
+    expectedOutputs: string[]
+    now?: string
+  }): Promise<void> {
+    await this.unitOfWork.runImmediateWithRetry((db) => {
+      const child = db.prepare(`
+        SELECT parent_task_id, kind, active_execution_binding_json
+          FROM browser_tasks WHERE id = ? LIMIT 1
+      `).get<{
+        parent_task_id: string | null
+        kind: string
+        active_execution_binding_json: string | null
+      }>(input.browserTaskId)
+      const binding = child?.active_execution_binding_json
+        ? JSON.parse(child.active_execution_binding_json) as { runId?: string }
+        : null
+      if (
+        !child
+        || child.parent_task_id !== input.parentTaskId
+        || child.kind !== 'browser_workflow'
+        || binding?.runId !== input.ownerRunId
+      ) throw new Error('browser_completion_declaration_binding_mismatch')
+      const updated = db.prepare(`
+        UPDATE task_projections
+           SET model_criteria_json = ?, expected_outputs_json = ?,
+               revision = revision + 1, updated_at = ?
+         WHERE task_id = ? AND run_id = ?
+      `).run(
+        JSON.stringify(input.modelCriteria),
+        JSON.stringify(input.expectedOutputs),
+        input.now || new Date().toISOString(),
+        input.parentTaskId,
+        input.ownerRunId,
+      ) as { changes?: number }
+      if (Number(updated.changes || 0) !== 1) {
+        throw new Error('browser_completion_declaration_parent_conflict')
+      }
+    })
+  }
+
+  async settleHandoffTakeoverContinuation(input: {
+    parentTaskId: string
+    handoffGeneration: number
+    outcome: 'consumed' | 'recovery_failed' | 'recovery_terminal'
+    attempts?: number
+    error?: string
+    now?: string
+  }): Promise<void> {
+    await this.unitOfWork.runImmediateWithRetry((db) => {
+      const row = db.prepare(`
+        SELECT revision, continuation_ref_json, request_anchor_json
+          FROM task_projections WHERE task_id = ? LIMIT 1
+      `).get<{
+        revision: number
+        continuation_ref_json: string | null
+        request_anchor_json: string | null
+      }>(input.parentTaskId)
+      if (!row) throw new Error('handoff_recovery_parent_not_found')
+      if (!row.request_anchor_json) throw new Error('handoff_recovery_browser_parent_not_bound')
+      if (!row.continuation_ref_json) return
+      const continuation = parseObjectStrict<Record<string, unknown>>(
+        row.continuation_ref_json,
+        'handoff_recovery_continuation_ref_json',
+      )
+      if (
+        continuation.kind !== 'handoff_takeover'
+        || Number(continuation.handoffGeneration) !== input.handoffGeneration
+      ) throw new Error('handoff_recovery_continuation_changed')
+      if (continuation.consumed === true) return
+
+      const nextContinuation: Record<string, unknown> = { ...continuation }
+      let status: string | null = null
+      let interactionState: string | null = null
+      let blockedReason: string | null = null
+      let resumableActions: string | null = null
+      if (input.outcome === 'consumed') {
+        nextContinuation.consumed = true
+      } else if (input.outcome === 'recovery_failed') {
+        nextContinuation.startupRecoveryAttempts = Math.max(1, Number(input.attempts || 1))
+        nextContinuation.startupRecoveryError = String(input.error || 'handoff takeover failed')
+      } else {
+        const error = String(input.error || 'startup_recovery_exhausted')
+        nextContinuation.consumed = true
+        nextContinuation.startupRecoveryAttempts = Math.max(
+          3,
+          Number(input.attempts || continuation.startupRecoveryAttempts || 0),
+        )
+        nextContinuation.startupRecoveryTerminal = true
+        nextContinuation.startupRecoveryError = error
+        status = 'failed'
+        interactionState = 'suspended'
+        blockedReason = error
+        resumableActions = '[]'
+      }
+
+      const now = input.now || new Date().toISOString()
+      const updated = input.outcome === 'recovery_terminal'
+        ? db.prepare(`
+            UPDATE task_projections
+               SET continuation_ref_json = ?, status = ?, interaction_state = ?,
+                   blocked_reason = ?, resumable_actions_json = ?, waiting_for = 'none',
+                   revision = revision + 1, updated_at = ?
+             WHERE task_id = ? AND revision = ? AND request_anchor_json IS NOT NULL
+               AND continuation_ref_json = ?
+          `).run(
+            serializeWorkflowJson(nextContinuation, 'handoff_recovery_continuation_ref_json'),
+            status,
+            interactionState,
+            blockedReason,
+            resumableActions,
+            now,
+            input.parentTaskId,
+            row.revision,
+            row.continuation_ref_json,
+          )
+        : db.prepare(`
+            UPDATE task_projections
+               SET continuation_ref_json = ?, revision = revision + 1, updated_at = ?
+             WHERE task_id = ? AND revision = ? AND request_anchor_json IS NOT NULL
+               AND continuation_ref_json = ?
+          `).run(
+            serializeWorkflowJson(nextContinuation, 'handoff_recovery_continuation_ref_json'),
+            now,
+            input.parentTaskId,
+            row.revision,
+            row.continuation_ref_json,
+          )
+      if (changed(updated) !== 1) throw new Error('handoff_recovery_parent_conflict')
+    })
+  }
 }

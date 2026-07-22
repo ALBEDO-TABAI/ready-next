@@ -99,7 +99,7 @@ export class RunCoordinator {
       userRequestVerbatim: string
       contextRefIds: string[]
     } | null
-    markHandoffConsumed?: (taskId: string, handoffGeneration: number) => void
+    markHandoffConsumed?: (taskId: string, handoffGeneration: number) => void | Promise<void>
   }) {}
 
   async runScoped(
@@ -481,7 +481,7 @@ export class RunCoordinator {
         runOrigin: 'handoff_takeover',
       }, hooks)
       if (takeoverResult.success) {
-        this.deps.markHandoffConsumed?.(taskId, handoff.handoffGeneration)
+        await this.deps.markHandoffConsumed?.(taskId, handoff.handoffGeneration)
       }
       return takeoverResult
     }

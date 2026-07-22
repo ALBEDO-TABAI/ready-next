@@ -25,6 +25,20 @@ export interface BrowserLeaseSurfaceSnapshot {
   leaseId: string | null
 }
 
+export interface BrowserTargetClaimSnapshot {
+  partition: string
+  tabId: string
+  surface: AgentBrowserSurface
+  state: 'held' | 'user_owned' | 'suspended' | 'expired' | 'released'
+  parentTaskId: string
+  browserTaskId: string
+  ownerRunId: string
+  claimId: string
+  generation: number
+  suspensionCheckpointId: string | null
+  suspensionReason: string | null
+}
+
 /** An agent-view browser task surfaced to the supervision panel. */
 export interface AgentBrowserCollectionTask {
   taskId: string
@@ -41,16 +55,18 @@ export interface AgentBrowserSupervisionState {
   controlState: AgentBrowserControlState
   agentTabId: string | null
   tasks: AgentBrowserCollectionTask[]
+  claims: BrowserTargetClaimSnapshot[]
   surfaces: Record<AgentBrowserSurface, BrowserLeaseSurfaceSnapshot> | null
   activeWriteSurface: AgentBrowserSurface | null
 }
 
 export interface BrowserLeaseSupervisionSnapshot {
+  claims?: BrowserTargetClaimSnapshot[]
   surfaces?: Record<AgentBrowserSurface, BrowserLeaseSurfaceSnapshot>
   activeWriteSurface?: AgentBrowserSurface | null
 }
 
-const EMPTY: AgentBrowserSupervisionState = { controlState: 'active', agentTabId: null, tasks: [], surfaces: null, activeWriteSurface: null }
+const EMPTY: AgentBrowserSupervisionState = { controlState: 'active', agentTabId: null, tasks: [], claims: [], surfaces: null, activeWriteSurface: null }
 const POLL_MS = 2500
 
 interface BrowserTabInfoLike {
@@ -122,6 +138,7 @@ export function applyLeaseSnapshotToSupervisionState(
   const hasActiveWriteSurface = Object.prototype.hasOwnProperty.call(snapshot, 'activeWriteSurface')
   return {
     ...current,
+    claims: snapshot.claims ?? current.claims,
     surfaces: snapshot.surfaces ?? current.surfaces,
     activeWriteSurface: hasActiveWriteSurface
       ? snapshot.activeWriteSurface ?? null
@@ -131,6 +148,7 @@ export function applyLeaseSnapshotToSupervisionState(
 
 export function useAgentBrowserSupervision(): AgentBrowserSupervisionState & {
   requestInterruption: () => Promise<void>
+  resumeTargetClaim: (claim: BrowserTargetClaimSnapshot) => Promise<{ success: boolean; error?: string; errorKind?: string }>
 } {
   const [state, setState] = useState<AgentBrowserSupervisionState>(EMPTY)
   const mounted = useRef(true)
@@ -148,6 +166,7 @@ export function useAgentBrowserSupervision(): AgentBrowserSupervisionState & {
           controlState: next.controlState,
           agentTabId: next.agentTabId,
           tasks: next.tasks ?? [],
+          claims: next.claims ?? [],
           surfaces: next.surfaces ?? null,
           activeWriteSurface: next.activeWriteSurface ?? null,
         })
@@ -190,5 +209,21 @@ export function useAgentBrowserSupervision(): AgentBrowserSupervisionState & {
     await refresh()
   }, [refresh])
 
-  return { ...state, requestInterruption }
+  const resumeTargetClaim = useCallback(async (claim: BrowserTargetClaimSnapshot) => {
+    if (!claim.suspensionCheckpointId) {
+      return { success: false, error: 'Target has no continuation checkpoint', errorKind: 'not_resumable' }
+    }
+    const result = await window.electronAPI?.browser?.resumeTargetClaim?.({
+      parentTaskId: claim.parentTaskId,
+      browserTaskId: claim.browserTaskId,
+      claimId: claim.claimId,
+      oldGeneration: claim.generation,
+      checkpointId: claim.suspensionCheckpointId,
+      wakeNonce: crypto.randomUUID(),
+    }) ?? { success: false, error: 'Browser runtime unavailable', errorKind: 'runtime_unavailable' }
+    await refresh()
+    return result
+  }, [refresh])
+
+  return { ...state, requestInterruption, resumeTargetClaim }
 }

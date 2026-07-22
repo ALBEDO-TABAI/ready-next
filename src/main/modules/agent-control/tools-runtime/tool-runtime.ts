@@ -8,6 +8,7 @@ import type { TurnFeatureFlags } from '../runtime-core/turn-feature-flags'
 import type { SkillToolAuthorization } from '../skills/skill-tool-authorization'
 import type { SkillRunContract } from '../contracts/run-contracts'
 import type { ToolExecutionOutput } from './tool-result-types'
+import type { TurnFrameResumableCandidate } from '../runtime-core/turn-frame'
 
 /**
  * Phase 3 (skill-child-loop) — live, same-turn slice of the active TurnFrame
@@ -42,6 +43,7 @@ export interface ToolRuntimeActiveFrameContext {
   activeReadOnlyRoots?: string[]
   runContract: SkillRunContract | null
   discoveredHandles: Record<string, unknown>[]
+  resumableCandidates: TurnFrameResumableCandidate[]
 }
 
 export interface ToolRuntimeContext {
@@ -96,6 +98,7 @@ export function createEmptyActiveFrameContext(): ToolRuntimeActiveFrameContext {
     activeReadOnlyRoots: [],
     runContract: null,
     discoveredHandles: [],
+    resumableCandidates: [],
   }
 }
 

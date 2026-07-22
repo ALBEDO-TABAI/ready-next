@@ -6,6 +6,7 @@ import type {
   AgentBrowserControlState,
   AgentBrowserSurface,
   BrowserLeaseSurfaceSnapshot,
+  BrowserTargetClaimSnapshot,
 } from '../../modules/browser/useAgentBrowserSupervision'
 import {
   browserTaskStatusLabel,
@@ -16,7 +17,9 @@ import {
 interface AgentBrowserSupervisionPanelProps {
   controlState: AgentBrowserControlState
   tasks: AgentBrowserCollectionTask[]
+  claims: BrowserTargetClaimSnapshot[]
   requestInterruption: () => Promise<void>
+  resumeTargetClaim: (claim: BrowserTargetClaimSnapshot) => Promise<{ success: boolean; error?: string; errorKind?: string }>
   surfaces?: Record<AgentBrowserSurface, BrowserLeaseSurfaceSnapshot> | null
   activeWriteSurface?: AgentBrowserSurface | null
   variant?: 'floating' | 'pane' | 'collapsed' | 'collapsedRail'
@@ -67,7 +70,9 @@ function isTerminalTask(task: AgentBrowserCollectionTask): boolean {
 export function AgentBrowserSupervisionPanel({
   controlState,
   tasks,
+  claims = [],
   requestInterruption,
+  resumeTargetClaim = async () => ({ success: false, error: 'target_claim_resume_unavailable' }),
   surfaces,
   activeWriteSurface,
   variant = 'floating',
@@ -77,11 +82,14 @@ export function AgentBrowserSupervisionPanel({
 }: AgentBrowserSupervisionPanelProps): ReactElement | null {
   const [panelOpen, setPanelOpen] = useState(true)
   const [expandedTaskId, setExpandedTaskId] = useState<string | null>(null)
+  const [resumingClaimId, setResumingClaimId] = useState<string | null>(null)
+  const [resumeError, setResumeError] = useState<string | null>(null)
 
   const activeTasks = tasks.filter(isActiveTask)
+  const userOwnedClaims = claims.filter((claim) => claim.state === 'user_owned')
   const terminalTasks = tasks.filter(isTerminalTask)
   const visibleTasks = activeTasks.length > 0 ? activeTasks : terminalTasks.slice(0, 1)
-  const visible = variant === 'collapsed' || variant === 'collapsedRail' || activeTasks.length > 0 || terminalTasks.length > 0 || controlState !== 'active'
+  const visible = variant === 'collapsed' || variant === 'collapsedRail' || activeTasks.length > 0 || terminalTasks.length > 0 || userOwnedClaims.length > 0 || controlState !== 'active'
   if (!visible) return null
   const waitingForVerification = activeTasks.some((task) => task.status === 'waiting_human')
   const statusText = activeTasks.length > 0
@@ -90,7 +98,7 @@ export function AgentBrowserSupervisionPanel({
       ? browserTaskStatusLabel(visibleTasks[0].status)
       : controlState === 'active'
         ? '浏览中'
-        : '已接管'
+        : userOwnedClaims.length > 0 ? `${userOwnedClaims.length} 页待继续` : '已接管'
   const surfaceLockText = activeSurfaceLockText(surfaces, activeWriteSurface)
   const surfaceModeLabel = activeWriteSurface === 'user-view'
     ? '当前页协作'
@@ -252,6 +260,49 @@ export function AgentBrowserSupervisionPanel({
             )
           })}
 
+          {userOwnedClaims.map((claim) => (
+            <div
+              key={claim.claimId}
+              className="rounded-[12px] border p-2.5"
+              data-browser-target-user-owned={claim.tabId}
+              style={{
+                borderColor: 'color-mix(in srgb, var(--color-orange) 34%, transparent)',
+                background: 'color-mix(in srgb, var(--color-orange) 8%, transparent)',
+              }}
+            >
+              <div className="flex items-center gap-2" style={{ color: 'var(--text-title)' }}>
+                <ShieldAlert style={{ width: 13, height: 13 }} className="text-[var(--color-orange)]" strokeWidth={2} />
+                <span className="min-w-0 flex-1 truncate">页面 {claim.tabId} 已由你接管</span>
+              </div>
+              <div className="mt-1 truncate text-[10px]" style={{ color: 'var(--text-gray)' }}>
+                任务 {claim.parentTaskId}
+              </div>
+              <button
+                type="button"
+                disabled={resumingClaimId !== null || !claim.suspensionCheckpointId}
+                onClick={() => {
+                  setResumingClaimId(claim.claimId)
+                  setResumeError(null)
+                  void resumeTargetClaim(claim)
+                    .then((result) => {
+                      if (!result.success) setResumeError(result.error || '暂时无法继续')
+                    })
+                    .finally(() => setResumingClaimId(null))
+                }}
+                className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-[8px] py-1.5 text-[11px] font-semibold disabled:opacity-50"
+                style={{ background: 'var(--color-blue)', color: 'white' }}
+              >
+                {resumingClaimId === claim.claimId && <Loader2 style={{ width: 12, height: 12 }} className="animate-spin" strokeWidth={2} />}
+                继续 Agent
+              </button>
+            </div>
+          ))}
+          {resumeError && (
+            <div className="px-1 text-[10px]" role="alert" style={{ color: 'var(--color-orange)' }}>
+              {resumeError}
+            </div>
+          )}
+
           {/* Immediate takeover */}
           <div className="mt-0.5 px-0.5">
             {controlState === 'active' && (activeTasks.length > 0 || activeWriteSurface === 'agent-view') && (
@@ -267,7 +318,7 @@ export function AgentBrowserSupervisionPanel({
             )}
             {controlState === 'frozen' && (
               <div className="rounded-[8px] py-1.5 text-center text-[11px] font-medium" style={{ background: 'color-mix(in srgb, var(--color-orange) 14%, transparent)', color: 'var(--color-orange)' }}>
-                已接管：agent 浏览器控制已冻结
+                已接管的页面已暂停，其他页面不受影响
               </div>
             )}
           </div>

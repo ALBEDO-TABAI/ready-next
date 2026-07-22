@@ -89,6 +89,7 @@ export interface HumanTakeoverResumeBinding {
   checkpoint: AgentSessionCheckpoint
   previousOwnerRunId: string
   newOwnerRunId: string
+  createdSuccessor: boolean
 }
 
 export interface BrowserCheckpointWakeReceiptInput {

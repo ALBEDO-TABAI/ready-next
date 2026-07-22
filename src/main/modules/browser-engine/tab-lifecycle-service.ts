@@ -355,7 +355,7 @@ export class BrowserTabLifecycleService {
 
   async createTab(
     url: string,
-    options?: { background?: boolean; openerTabId?: string | null; profile?: string | null },
+    options?: { background?: boolean; openerTabId?: string | null; profile?: string | null; owner?: 'manual' | 'agent' },
   ): Promise<{ success: boolean; tabId?: string; error?: string }> {
     if (!this.host.isAllowedUrl(url)) {
       return { success: false, error: 'Blocked URL protocol. Only http:, https:, and local HTML files are allowed.' }
@@ -373,9 +373,9 @@ export class BrowserTabLifecycleService {
         title: 'Mock Tab',
         domain: this.host.extractDomain(url),
         favicon: null,
-        owner: 'manual',
-        required: false,
-        activity: 'idle',
+        owner: options?.owner === 'agent' ? 'agent' : 'manual',
+        required: options?.owner === 'agent',
+        activity: options?.owner === 'agent' ? 'running' : 'idle',
         lastAuditedAt: null,
         loading: false,
         canGoBack: false,
@@ -400,9 +400,9 @@ export class BrowserTabLifecycleService {
       title: 'Loading...',
       domain: this.host.extractDomain(url),
       favicon: null,
-      owner: 'manual',
-      required: false,
-      activity: 'idle',
+      owner: options?.owner === 'agent' ? 'agent' : 'manual',
+      required: options?.owner === 'agent',
+      activity: options?.owner === 'agent' ? 'running' : 'idle',
       lastAuditedAt: null,
       loading: true,
       canGoBack: false,

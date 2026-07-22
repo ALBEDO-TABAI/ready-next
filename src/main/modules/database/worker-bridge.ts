@@ -19,6 +19,7 @@ import { dirname, join } from 'path'
 import { Worker } from 'worker_threads'
 import { createRequire } from 'module'
 import { createRotatingLogger } from '../../utils/rotating-logger'
+import { resolveReadyDatabasePath } from '../database-path'
 import type { SearchHit } from '../search-engine/query'
 import type {
   ReindexAllSourcesResult,
@@ -277,7 +278,7 @@ let singleton: WorkerDbBridgeImpl | null = null
 function resolveDbPath(): string {
   if (electronModule?.app) {
     const userData = electronModule.app.getPath('userData')
-    return join(userData, 'ready.db')
+    return resolveReadyDatabasePath(userData, process.env.READY_DB_PATH)
   }
   // Worker can also be tested with an explicit env override.
   if (process.env.READY_DB_PATH) return process.env.READY_DB_PATH

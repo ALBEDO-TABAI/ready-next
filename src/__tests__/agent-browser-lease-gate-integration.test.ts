@@ -2,12 +2,11 @@ import assert from 'node:assert/strict'
 import { describe, it, test } from 'node:test'
 
 import { executeBrowserTool } from '../main/modules/tools/browser-tools'
-import { BrowserWriteLeaseService } from '../main/modules/browser-engine/browser-write-lease'
 import { browserSnapshotService } from '../main/modules/browser-engine/browser-snapshot-service'
-import { isAgentBrowserError } from '../main/modules/browser-engine/agent-browser-errors'
 import type { BrowserController } from '../main/modules/browser-engine/ipc-handler'
-import type { BrowserLeaseGate } from '../main/modules/browser-engine/agent-browser-lease-gate'
+import type { BrowserTargetClaimGate } from '../main/modules/browser-engine/agent-browser-lease-gate'
 import { attachBrowserWorkflowFixture } from './utils/browser-workflow-fixture'
+import { acquireTarget, createTargetClaimService, identityOf } from './utils/browser-target-claim-fixture'
 
 import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
 
@@ -69,6 +68,35 @@ function workflowContext(): NonNullable<Parameters<typeof executeBrowserTool>[8]
   }
 }
 
+function targetGate(input: { held?: boolean } = {}): BrowserTargetClaimGate {
+  const service = createTargetClaimService()
+  if (input.held !== false) {
+    const claim = acquireTarget(service, {
+      partition: 'persist:browser',
+      tabId: 'tab-1',
+      physicalTargetToken: 'physical-tab-1',
+      bootIncarnationId: 'physical-tab-1',
+      parentTaskId: 'parent-lease-test',
+      browserTaskId: 'browser-task-lease-test',
+      ownerRunId: 'run-lease-test',
+    })
+    return { service, surface: 'user-view', identity: identityOf(claim) }
+  }
+  return {
+    service,
+    surface: 'user-view',
+    identity: {
+      partition: 'persist:browser',
+      tabId: 'tab-1',
+      physicalTargetToken: 'physical-tab-1',
+      bootIncarnationId: 'physical-tab-1',
+      claimId: 'missing-claim',
+      generation: 1,
+      ownerRunId: 'run-lease-test',
+    },
+  }
+}
+
 // 73ba5299（audit roadmap closures）：拒绝路径从裸 JSON 字符串演进为结构化
 // ToolExecutionOutput（CLAUDE.md「工具错误由 dispatch 层转成结构化
 // ToolExecutionOutput」合同）；.text 仍携带同一 JSON 负载，语义字段不变。
@@ -94,9 +122,8 @@ describe('lease gate integration on executeBrowserTool', () => {
     assert.equal(parseError(out)?.errorKind, 'browser_workflow_journal_required')
   })
 
-  it('denies a write tool with lease_required when no lease is held', async () => {
-    const service = new BrowserWriteLeaseService()
-    const gate: BrowserLeaseGate = { service, surface: 'user-view', leaseId: null }
+  it('denies a write tool with lease_required when no target claim is held', async () => {
+    const gate = targetGate({ held: false })
     const controller = createController()
     const out = await executeBrowserTool('browser_click', { x: 1, y: 1 }, controller, undefined, undefined, gate, undefined, undefined, workflowContext())
     const err = parseError(out)
@@ -104,17 +131,15 @@ describe('lease gate integration on executeBrowserTool', () => {
     assert.equal(errorKind(out), 'lease_required')
   })
 
-  it('lets read tools through without a lease (reads are free)', async () => {
-    const service = new BrowserWriteLeaseService()
-    const gate: BrowserLeaseGate = { service, surface: 'user-view', leaseId: null }
+  it('lets read tools through without a target claim (reads are free)', async () => {
+    const gate = targetGate({ held: false })
     const controller = createController()
     const out = await executeBrowserTool('browser_read', {}, controller, undefined, undefined, gate, undefined, undefined, workflowContext())
     assert.equal(parseError(out)?.content, 'visible page text')
   })
 
   it('keeps structured collection observational and gates collection modes that scroll the page', async () => {
-    const service = new BrowserWriteLeaseService()
-    const gate: BrowserLeaseGate = { service, surface: 'user-view', leaseId: null }
+    const gate = targetGate({ held: false })
     const controller = createController({
     } as Partial<BrowserController>)
 
@@ -128,8 +153,7 @@ describe('lease gate integration on executeBrowserTool', () => {
   })
 
   it('always gates browser_eval as a write-capable tool, even for read-looking code', async () => {
-    const service = new BrowserWriteLeaseService()
-    const gate: BrowserLeaseGate = { service, surface: 'user-view', leaseId: null }
+    const gate = targetGate({ held: false })
     const controller = createController()
     const out = await executeBrowserTool('browser_eval', { purpose: 'read title', code: 'document.title' }, controller, undefined, undefined, gate, undefined, undefined, workflowContext())
     const err = parseError(out)
@@ -137,11 +161,8 @@ describe('lease gate integration on executeBrowserTool', () => {
     assert.equal(errorKind(out), 'lease_required')
   })
 
-  it('permits a write once a valid lease is held, then blocks it with lease_takeover after user takeover', async () => {
-    const service = new BrowserWriteLeaseService()
-    const lease = service.acquire({ surface: 'user-view', taskId: 't1', runId: 'r1' })
-    if (isAgentBrowserError(lease)) throw new Error('expected lease')
-    const gate: BrowserLeaseGate = { service, surface: 'user-view', leaseId: lease.leaseId }
+  it('permits a write with an exact target claim, then blocks it after user takeover', async () => {
+    const gate = targetGate()
     // browser_navigate is a lightweight write (no slow verification path).
     const controller = createController({ goBack: () => ({ success: true }) } as Partial<BrowserController>)
     await browserSnapshotService.capture(
@@ -155,7 +176,11 @@ describe('lease gate integration on executeBrowserTool', () => {
     const ok = await executeBrowserTool('browser_navigate', { action: 'back' }, controller, undefined, undefined, gate, undefined, undefined, workflowContext())
     assert.equal(errorKind(ok), undefined, `write with a valid lease must pass: ${JSON.stringify(parseError(ok))}`)
 
-    service.recordUserSignal({ surface: 'user-view', source: 'keyboard' })
+    gate.service.recordUserSignal({
+      target: gate.identity,
+      source: 'keyboard',
+      suspensionCheckpointId: 'checkpoint-takeover',
+    })
     const blocked = await executeBrowserTool('browser_navigate', { action: 'back' }, controller, undefined, undefined, gate, undefined, undefined, workflowContext())
     const err = parseError(blocked)
     assert.ok(err)

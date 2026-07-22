@@ -10,6 +10,7 @@ publish:
   releaseType: release
 files:
   - out/**/*
+  - build/browser-live-proof/**/*
   - package.json
   - node_modules/**/*
   # Renderer-only packages are already bundled into out/renderer assets by Vite.

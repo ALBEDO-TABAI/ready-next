@@ -99,6 +99,8 @@ export interface BrowserHumanTakeoverIntentInput extends BrowserHumanTakeoverPhy
   parentTaskId: string
   ownerRunId: string
   browserTaskId: string
+  targetClaimId?: string | null
+  targetClaimGeneration?: number | null
   userPrompt?: BrowserHumanTakeoverPrompt | null
 }
 
@@ -106,7 +108,21 @@ export type BrowserHumanTakeoverIntentPort = (
   input: BrowserHumanTakeoverIntentInput,
 ) => Promise<{ takeoverId: string }>
 
+export interface BrowserTargetResumeRequest {
+  parentTaskId: string
+  browserTaskId: string
+  claimId: string
+  oldGeneration: number
+  checkpointId: string
+  wakeNonce: string
+}
+
+export type BrowserTargetResumePort = (
+  input: BrowserTargetResumeRequest,
+) => Promise<{ success: boolean; error?: string; errorKind?: string }>
+
 export interface BrowserWorkflowWriteTarget {
+  partition: string
   parentTaskId: string
   ownerRunId: string
   browserTaskId: string
@@ -116,6 +132,9 @@ export interface BrowserWorkflowWriteTarget {
   sessionId: string | null
   tabId: string
   physicalTargetToken: string
+  bootIncarnationId: string
+  claimId: string
+  generation: number
 }
 
 export type BrowserWorkflowWriteAdmissionPort = (

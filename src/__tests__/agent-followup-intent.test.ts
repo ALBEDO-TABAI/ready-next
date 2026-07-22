@@ -11,16 +11,17 @@ import {
 const ACTIVE = { hasActiveTaskContext: true }
 const IDLE = { hasActiveTaskContext: false }
 
-test('followup truth table — continue / status / correction / new task', () => {
+test('followup truth table — natural continuation stays semantic / status / correction / new task', () => {
   const cases: Array<[string, typeof ACTIVE, string]> = [
-    // continue_task
-    ['继续', ACTIVE, 'continue_task'],
-    ['接着弄', ACTIVE, 'continue_task'],
-    ['接着采', ACTIVE, 'continue_task'],
-    ['重试一下', ACTIVE, 'continue_task'],
-    ['resume', ACTIVE, 'continue_task'],
-    ['keep going', ACTIVE, 'continue_task'],
-    ['恢复任务', ACTIVE, 'continue_task'],
+    // Natural-language continuation is selected by the model from typed
+    // candidates; the code classifier must not choose a task.
+    ['继续', ACTIVE, 'new_task'],
+    ['接着弄', ACTIVE, 'new_task'],
+    ['接着采', ACTIVE, 'new_task'],
+    ['重试一下', ACTIVE, 'new_task'],
+    ['resume', ACTIVE, 'new_task'],
+    ['keep going', ACTIVE, 'new_task'],
+    ['恢复任务', ACTIVE, 'new_task'],
     // status_query
     ['怎么样了', ACTIVE, 'status_query'],
     ['还在跑吗', ACTIVE, 'status_query'],
@@ -56,7 +57,7 @@ test('negation guard suppresses the negated intent family', () => {
 
 test('negated collection never consults recalled context', () => {
   assert.equal(followupConsultsRecalledContext('不要采集了，先看看', ACTIVE), false)
-  assert.equal(followupConsultsRecalledContext('继续', ACTIVE), true)
+  assert.equal(followupConsultsRecalledContext('继续', ACTIVE), false)
   assert.equal(followupConsultsRecalledContext('怎么样了', ACTIVE), true)
   assert.equal(followupConsultsRecalledContext('你只采了 1 张', ACTIVE), true)
   assert.equal(followupConsultsRecalledContext('帮我查个汇率', ACTIVE), false)
@@ -77,14 +78,15 @@ test('judge is consulted only inside the ambiguous band and failures fall back',
     judged += 1
     return 'continue_task' as const
   }
-  // high-confidence heuristic: judge not consulted
+  // Natural continuation is in the semantic band: the judge may interpret
+  // intent but still cannot choose a concrete task identity.
   const sure = await classifyFollowupIntentWithJudge('继续', ACTIVE, judge)
   assert.equal(sure.kind, 'continue_task')
-  assert.equal(judged, 0)
+  assert.equal(judged, 1)
   // ambiguous short follow-up with active task: judge consulted
   const vague = await classifyFollowupIntentWithJudge('嗯 然后呢', ACTIVE, judge)
   assert.equal(vague.kind, 'continue_task')
-  assert.equal(judged, 1)
+  assert.equal(judged, 2)
   // judge failure falls back to heuristic
   const failing = async () => {
     throw new Error('judge offline')
@@ -101,5 +103,5 @@ test('D1: compound status message keeps its real instruction out of status_query
 
 test('D1b: topic shift with a continue verb is not task continuation', () => {
   assert.equal(classifyFollowupIntent('继续聊聊别的话题', ACTIVE).kind, 'new_task')
-  assert.equal(classifyFollowupIntent('继续', ACTIVE).kind, 'continue_task')
+  assert.equal(classifyFollowupIntent('继续', ACTIVE).kind, 'new_task')
 })

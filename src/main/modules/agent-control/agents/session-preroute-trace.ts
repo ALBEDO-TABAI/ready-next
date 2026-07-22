@@ -53,11 +53,14 @@ export function buildSessionPrerouteTrace(input: {
     hasActiveTaskContext: input.recentOwnedTasks.length > 0,
     taskRefs: input.recentOwnedTasks,
   })
-  if (intent.kind === 'continue_task' || intent.kind === 'status_query') {
+  if (intent.kind === 'continue_task' || intent.kind === 'status_query' || intent.continuationCue === true) {
     const pinned = intent.targetTaskId
       ? input.recentOwnedTasks.find((ref) => ref.taskId === intent.targetTaskId)
       : undefined
-    const target = pinned ?? input.recentOwnedTasks.find(isOpenTask)
+    const openTasks = input.recentOwnedTasks.filter(isOpenTask)
+    const target = pinned ?? (intent.continuationCue === true && openTasks.length !== 1
+      ? undefined
+      : openTasks[0])
     if (target?.ownerAgentId && !input.isAgentActive(String(target.ownerAgentId))) {
       addReason(reasons, 'state_owner_inactive')
     }

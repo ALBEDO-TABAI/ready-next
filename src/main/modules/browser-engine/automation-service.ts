@@ -49,6 +49,10 @@ const DEFAULT_BROWSER_JS_TIMEOUT_MS = 10_000
 const DEFAULT_BROWSER_CDP_TIMEOUT_MS = 15_000
 const BROWSER_BOOT_INCARNATION_ID = randomUUID()
 
+export function getBrowserBootIncarnationId(): string {
+  return BROWSER_BOOT_INCARNATION_ID
+}
+
 async function withBrowserExecutionDeadline<T>(
   label: string,
   operation: Promise<T>,

@@ -70,7 +70,10 @@ test('browser takeover persists the exact user instruction through the typed int
       timeout_sec: 90,
     },
     {
-      controller: {} as BrowserController,
+      controller: {
+        getActiveTab: () => ({ id: 'tab-challenge' }),
+        executeJS: async () => ({ blocked: true, blockerCount: 1, matchedKinds: ['captcha'] }),
+      } as unknown as BrowserController,
       mutationBoundary: {} as never,
       createHumanTakeoverIntent: async (prompt) => {
         capturedPrompt = prompt
@@ -84,6 +87,7 @@ test('browser takeover persists the exact user instruction through the typed int
     callToAction: '请完成页面验证',
     details: '验证完成后继续当前任务',
     timeoutSec: 90,
+    tabId: 'tab-challenge',
   })
   assert.equal((result as ToolExecutionOutput).data?.phase, 'human_required')
 })
@@ -367,7 +371,7 @@ test('browser tool wiring records same-origin network 429 and rejects an ungroun
       executionContext,
     )
     assert.equal(typeof takeover, 'object')
-    assert.equal((takeover as ToolExecutionOutput).data?.errorKind, 'browser_workflow_route_required')
+    assert.equal((takeover as ToolExecutionOutput).data?.errorKind, 'human_takeover_not_grounded')
   } finally {
     browserOriginInteractionBudget.resetForTests()
   }

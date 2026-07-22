@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
-import type { BrowserLeaseGate } from '../browser-engine/agent-browser-lease-gate'
-import { beginLeaseGate } from '../browser-engine/agent-browser-lease-gate'
+import type { BrowserTargetClaimGate } from '../browser-engine/agent-browser-lease-gate'
+import { beginTargetClaimGate } from '../browser-engine/agent-browser-lease-gate'
 import { browserOperationCapability } from '../../../shared/browser-capability-registry'
 import { resolveToolExecutionTimeoutMs } from './tool-execution-timeout-policy'
 import { createBrowserStructuredOutput } from './browser-failure-output'
@@ -113,7 +113,7 @@ export interface BrowserActionExecutorInput {
   args: Record<string, unknown>
   inputSource?: BrowserToolInputSource
   abortSignal?: AbortSignal
-  leaseGate?: BrowserLeaseGate
+  leaseGate?: BrowserTargetClaimGate
   origin?: string | null
   interactionBudgetKey?: string | null
   interactionBudget?: OriginInteractionBudget
@@ -289,7 +289,7 @@ export class BrowserActionExecutor {
       })
     }
 
-    const leaseHandle = beginLeaseGate(input.leaseGate, input.toolName, invocation.args)
+    const leaseHandle = beginTargetClaimGate(input.leaseGate, input.toolName, invocation.args)
     const structuredDenial = (message: string, fallback = 'lease_denied') => {
       let data: Record<string, unknown> = {}
       try { data = asRecord(JSON.parse(message)) || {} } catch {

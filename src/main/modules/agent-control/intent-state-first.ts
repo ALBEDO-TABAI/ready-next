@@ -22,6 +22,10 @@ export function selectFollowupTaskRefs(
       interactionState: record.interactionState ?? null,
       summary: record.taskSummary ?? null,
       blockerCategory: record.blockedReason ?? null,
+      ownerAgentId: record.ownerAgentId ?? null,
+      continuationCheckpointId: record.checkpointRefs?.suspensionCheckpointId ?? null,
+      browserTaskId: record.humanTakeoverRef?.browserTaskId ?? null,
+      canResume: record.canResume === true,
     }))
   } catch {
     return []

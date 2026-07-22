@@ -77,6 +77,91 @@ function changed(result: unknown): number {
   return Number((result as { changes?: unknown } | null)?.changes || 0)
 }
 
+export function suspendHeldBrowserTargetClaims(
+  db: WorkflowRawDatabase,
+  input: {
+    ownerRunId: string
+    checkpointId: string
+    cleanBaseCheckpointId: string | null
+    suspensionReason: string
+    createdAt: string
+  },
+): void {
+  const claims = db.prepare(`
+    SELECT partition, tab_id, physical_target_token, boot_incarnation_id,
+           claim_id, generation, parent_task_id, browser_task_id
+      FROM browser_target_claims
+     WHERE owner_run_id = ? AND state = 'held'
+     ORDER BY browser_task_id, partition, tab_id
+  `).all<{
+    partition: string
+    tab_id: string
+    physical_target_token: string | null
+    boot_incarnation_id: string | null
+    claim_id: string
+    generation: number
+    parent_task_id: string
+    browser_task_id: string
+  }>(input.ownerRunId)
+  const nowMs = Date.parse(input.createdAt) || Date.now()
+  for (const claim of claims) {
+    const nextClaimId = `claim-${randomUUID()}`
+    const nextGeneration = claim.generation + 1
+    const update = db.prepare(`
+      UPDATE browser_target_claims
+         SET state = 'suspended', physical_target_token = NULL, boot_incarnation_id = NULL,
+             claim_id = ?, generation = ?, suspension_checkpoint_id = ?, suspension_reason = ?,
+             heartbeat_at = ?, expires_at = ?, updated_at = ?
+       WHERE partition = ? AND tab_id = ? AND owner_run_id = ? AND state = 'held'
+         AND claim_id = ? AND generation = ?
+    `).run(
+      nextClaimId,
+      nextGeneration,
+      input.checkpointId,
+      input.suspensionReason,
+      nowMs,
+      nowMs,
+      nowMs,
+      claim.partition,
+      claim.tab_id,
+      input.ownerRunId,
+      claim.claim_id,
+      claim.generation,
+    )
+    if (changed(update) !== 1) throw new Error('checkpoint_target_claim_cas_conflict')
+    const sequence = Number(db.prepare(
+      'SELECT COALESCE(MAX(sequence), 0) + 1 AS sequence FROM browser_control_receipts WHERE browser_task_id = ?',
+    ).get<{ sequence: number }>(claim.browser_task_id)?.sequence || 1)
+    db.prepare(`
+      INSERT INTO browser_control_receipts (
+        receipt_id, sequence, parent_task_id, browser_task_id, owner_run_id,
+        partition, tab_id, physical_target_token, boot_incarnation_id,
+        previous_claim_id, previous_generation, next_claim_id, next_generation,
+        clean_base_checkpoint_id, suspension_checkpoint_id, wake_id, successor_run_id,
+        continuation_generation, idempotency_key, kind, error_code, recoverable, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, ?, 'claim_suspended', NULL, 1, ?)
+    `).run(
+      `browser-control-${randomUUID()}`,
+      sequence,
+      claim.parent_task_id,
+      claim.browser_task_id,
+      input.ownerRunId,
+      claim.partition,
+      claim.tab_id,
+      claim.physical_target_token,
+      claim.boot_incarnation_id,
+      claim.claim_id,
+      claim.generation,
+      nextClaimId,
+      nextGeneration,
+      input.cleanBaseCheckpointId,
+      input.checkpointId,
+      `claim-suspended:${claim.claim_id}:${claim.generation}:${input.checkpointId}`,
+      input.createdAt,
+    )
+  }
+}
+
 export class AgentSessionCheckpointStoreRepository {
   constructor(
     private readonly accessor: WorkflowDatabaseAccessor,
@@ -380,6 +465,27 @@ export class AgentSessionCheckpointStoreRepository {
       if (changed(parentUpdate) !== 1) throw new Error('checkpoint_parent_revision_conflict')
 
       if (input.role === 'suspension') {
+        if (suspensionReason === 'human_takeover' && input.browserTaskId) {
+          db.prepare(`
+            UPDATE browser_target_claims
+               SET suspension_checkpoint_id = ?, updated_at = ?
+             WHERE parent_task_id = ? AND browser_task_id = ? AND owner_run_id = ?
+               AND state = 'user_owned' AND suspension_reason = 'browser_target_user_owned'
+          `).run(
+            checkpointId,
+            Date.parse(createdAt) || Date.now(),
+            parent.taskId,
+            input.browserTaskId,
+            input.ownerRunId,
+          )
+        }
+        suspendHeldBrowserTargetClaims(db, {
+          ownerRunId: input.ownerRunId,
+          checkpointId,
+          cleanBaseCheckpointId: parent.checkpointRefs.cleanBaseCheckpointId,
+          suspensionReason: suspensionReason || 'browser_run_checkpoint',
+          createdAt,
+        })
         const runUpdate = db.prepare(
           `UPDATE run_meta
               SET status = 'checkpoint', terminal_reason = ?,

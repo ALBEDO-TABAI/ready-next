@@ -9,7 +9,7 @@ import {
   type AIModelConfig
 } from '../../../../shared/ai-providers'
 import type { BrowserController } from '../../browser-engine/ipc-handler'
-import type { BrowserHumanTakeoverIntentInput } from '../../../../shared/browser-workflow-control'
+import type { BrowserHumanTakeoverIntentInput, BrowserTargetResumeRequest } from '../../../../shared/browser-workflow-control'
 import type { AskUserQuestionsCardEvent } from '../../tools/builtins/ask-user-questions'
 import { registerChannelOutboundSender } from '../channel-outbound-bridge'
 import type { AgentManager } from '../../claude-bridge/agent-manager'
@@ -129,6 +129,7 @@ import {
   type SendScopedUserMessage,
 } from '../send-scoped-confirmation'
 import { SessionRecallService } from '../session/session-recall-service'
+import { getInteractionLifecycleRegistry } from './interaction-lifecycle-registry'
 import { SidecarManager } from '../sidecar-manager'
 import { MemoryRepository } from '../../repositories/memory-repository'
 import { MemoryLifecycleManager } from '../memory/memory-lifecycle'
@@ -522,6 +523,9 @@ export class AgentControlRuntime extends EventEmitter {
     this.agentManager = agentManager
     this.browserController = browserController || null
     this.browserController?.setHumanTakeoverIntentPort((input) => this.createHumanTakeoverIntent(input))
+    this.browserController?.setBrowserTargetResumePort((input) => this.resumeBrowserTargetClaim(input))
+    this.browserController?.setBrowserTargetCheckpointResolver((parentTaskId) =>
+      this.getTaskProjection(parentTaskId)?.checkpointRefs?.cleanBaseCheckpointId || null)
     this.browserController?.setBrowserWorkflowWriteAdmissionPort((input) =>
       this.agentSessionCheckpoints.isBrowserWorkflowWriteAdmitted({
         parentTaskId: input.parentTaskId,
@@ -628,12 +632,20 @@ export class AgentControlRuntime extends EventEmitter {
           contextRefIds: Array.isArray(ref.contextRefIds) ? ref.contextRefIds.map(String) : [],
         }
       },
-      markHandoffConsumed: (taskId, handoffGeneration) => {
+      markHandoffConsumed: async (taskId, handoffGeneration) => {
         const projection = this.taskProjectionStore.get(taskId)
         const ref = projection?.continuationRef as Record<string, unknown> | null | undefined
         if (hasAdvancedPastHandoffContinuation(projection)) return
         if (!projection || !ref || Number(ref.handoffGeneration) !== handoffGeneration) {
           throw new Error('[runtime] handoff continuation changed before consume')
+        }
+        if (projection.requestAnchor) {
+          await this.agentSessionCheckpoints.settleHandoffTakeoverContinuation({
+            parentTaskId: taskId,
+            handoffGeneration,
+            outcome: 'consumed',
+          })
+          return
         }
         this.taskProjectionStore.update(taskId, {
           continuationRef: { ...ref, consumed: true } as never,
@@ -756,6 +768,16 @@ export class AgentControlRuntime extends EventEmitter {
     return this.agentSessionCheckpoints
   }
 
+  async updateBrowserWorkflowCompletionDeclaration(input: {
+    parentTaskId: string
+    browserTaskId: string
+    ownerRunId: string
+    modelCriteria: string[]
+    expectedOutputs: string[]
+  }): Promise<void> {
+    await this.agentSessionCheckpoints.updateBrowserWorkflowCompletionDeclaration(input)
+  }
+
   async createHumanTakeoverIntent(
     input: BrowserHumanTakeoverIntentInput,
   ): Promise<{ takeoverId: string }> {
@@ -763,6 +785,8 @@ export class AgentControlRuntime extends EventEmitter {
       parentTaskId: input.parentTaskId,
       ownerRunId: input.ownerRunId,
       browserTaskId: input.browserTaskId,
+      targetClaimId: input.targetClaimId ?? null,
+      targetClaimGeneration: input.targetClaimGeneration ?? null,
       userPrompt: input.userPrompt ?? null,
       physicalTarget: {
         surface: input.surface,
@@ -773,6 +797,16 @@ export class AgentControlRuntime extends EventEmitter {
         physicalTargetToken: input.physicalTargetToken,
         source: input.source,
       },
+    })
+    const projection = this.getTaskProjection(input.parentTaskId)
+    getInteractionLifecycleRegistry().register({
+      interactionId: ref.takeoverId,
+      runId: input.ownerRunId,
+      agentId: projection?.ownerAgentId || 'butler',
+      scopeId: projection?.scopeId || input.scopeId || '',
+      type: input.targetClaimId ? 'human_takeover' : 'page_challenge',
+      timeoutMs: input.targetClaimId ? undefined : Math.max(1, Number(input.userPrompt?.timeoutSec || 300)) * 1_000,
+      timeoutDisposition: input.targetClaimId ? undefined : 'checkpoint',
     })
     return { takeoverId: ref.takeoverId }
   }
@@ -1079,15 +1113,74 @@ export class AgentControlRuntime extends EventEmitter {
         runOrigin: 'handoff_takeover',
         coordinators: this.getDomainAdapters(),
       }),
-      markConsumed: (taskId, handoffGeneration) => {
+      markConsumed: async (taskId, handoffGeneration) => {
         const latest = this.taskProjectionStore.get(taskId)
         const latestRef = latest?.continuationRef as Record<string, unknown> | null | undefined
         if (hasAdvancedPastHandoffContinuation(latest)) return
         if (!latest || !latestRef || Number(latestRef.handoffGeneration) !== handoffGeneration) {
           throw new Error('handoff continuation changed before startup recovery consume')
         }
+        if (latest.requestAnchor) {
+          await this.agentSessionCheckpoints.settleHandoffTakeoverContinuation({
+            parentTaskId: taskId,
+            handoffGeneration,
+            outcome: 'consumed',
+          })
+          return
+        }
         this.taskProjectionStore.update(taskId, {
           continuationRef: { ...latestRef, consumed: true } as never,
+          updatedAt: new Date().toISOString(),
+        })
+      },
+      markRecoveryFailed: async (taskId, handoffGeneration, attempts, error) => {
+        const latest = this.taskProjectionStore.get(taskId)
+        const latestRef = latest?.continuationRef as Record<string, unknown> | null | undefined
+        if (!latest || !latestRef || Number(latestRef.handoffGeneration) !== handoffGeneration) return
+        if (latest.requestAnchor) {
+          await this.agentSessionCheckpoints.settleHandoffTakeoverContinuation({
+            parentTaskId: taskId,
+            handoffGeneration,
+            outcome: 'recovery_failed',
+            attempts,
+            error,
+          })
+          return
+        }
+        this.taskProjectionStore.update(taskId, {
+          continuationRef: {
+            ...latestRef,
+            startupRecoveryAttempts: attempts,
+            startupRecoveryError: error,
+          } as never,
+          updatedAt: new Date().toISOString(),
+        })
+      },
+      markRecoveryTerminal: async (taskId, handoffGeneration, error) => {
+        const latest = this.taskProjectionStore.get(taskId)
+        const latestRef = latest?.continuationRef as Record<string, unknown> | null | undefined
+        if (!latest || !latestRef || Number(latestRef.handoffGeneration) !== handoffGeneration) return
+        if (latest.requestAnchor) {
+          await this.agentSessionCheckpoints.settleHandoffTakeoverContinuation({
+            parentTaskId: taskId,
+            handoffGeneration,
+            outcome: 'recovery_terminal',
+            error,
+          })
+          return
+        }
+        this.taskProjectionStore.update(taskId, {
+          continuationRef: {
+            ...latestRef,
+            consumed: true,
+            startupRecoveryAttempts: Math.max(3, Number(latestRef.startupRecoveryAttempts || 0)),
+            startupRecoveryTerminal: true,
+            startupRecoveryError: error,
+          } as never,
+          status: 'failed',
+          interactionState: 'suspended',
+          blockedReason: error,
+          resumableActions: [],
           updatedAt: new Date().toISOString(),
         })
       },
@@ -1097,6 +1190,7 @@ export class AgentControlRuntime extends EventEmitter {
 
   async stop(): Promise<void> {
     this.browserController?.setHumanTakeoverIntentPort(null)
+    this.browserController?.setBrowserTargetResumePort(null)
     this.browserController?.setBrowserWorkflowWriteAdmissionPort(null)
     this.browserController?.setBrowserWorkflowJournalUnitOfWork(null)
     this.scheduledTaskCoordinator.stop()
@@ -2350,9 +2444,60 @@ export class AgentControlRuntime extends EventEmitter {
     }
     const scope = this.getConversationScope(projection.scopeId)
     if (!scope) return { success: false, error: 'Conversation scope not found', errorKind: 'scope_missing' }
+    if (
+      takeover.physicalTarget
+      && this.browserController
+      && this.browserController.getPhysicalTargetToken(takeover.physicalTarget.tabId) !== takeover.physicalTarget.physicalTargetToken
+    ) {
+      return { success: false, error: 'takeover_physical_target_stale', errorKind: 'not_resumable' }
+    }
     return this.resumeBrowserWorkflowFromCheckpoint(projection, scope, {
       kind: 'human_takeover',
       takeoverId,
+    })
+  }
+
+  async resumeBrowserTargetClaim(payload: BrowserTargetResumeRequest): Promise<{ success: boolean; error?: string; errorKind?: string }> {
+    const parentTaskId = String(payload.parentTaskId || '').trim()
+    const browserTaskId = String(payload.browserTaskId || '').trim()
+    const claimId = String(payload.claimId || '').trim()
+    const checkpointId = String(payload.checkpointId || '').trim()
+    const wakeNonce = String(payload.wakeNonce || '').trim()
+    if (!parentTaskId || !browserTaskId || !claimId || !checkpointId || !wakeNonce || !Number.isInteger(payload.oldGeneration)) {
+      return { success: false, error: 'invalid_target_resume_payload', errorKind: 'invalid_payload' }
+    }
+    const projection = this.taskProjectionStore.get(parentTaskId) as TaskProjectionRecord | null
+    const takeover = projection?.humanTakeoverRef
+    const claim = this.browserController?.getBrowserLeaseSnapshot().claims.find((candidate) => (
+      candidate.parentTaskId === parentTaskId
+      && candidate.browserTaskId === browserTaskId
+      && candidate.claimId === claimId
+      && candidate.generation === payload.oldGeneration
+      && candidate.suspensionCheckpointId === checkpointId
+      && candidate.state === 'user_owned'
+    ))
+    if (!projection || !takeover || !claim) {
+      return { success: false, error: 'target_resume_identity_stale', errorKind: 'not_resumable' }
+    }
+    const physicalTargetToken = this.browserController?.getPhysicalTargetToken(claim.tabId) || null
+    if (!physicalTargetToken) {
+      return { success: false, error: 'target_resume_physical_target_stale', errorKind: 'not_resumable' }
+    }
+    const scope = this.getConversationScope(projection.scopeId)
+    if (!scope) return { success: false, error: 'Conversation scope not found', errorKind: 'scope_missing' }
+    return this.resumeBrowserWorkflowFromCheckpoint(projection, scope, {
+      kind: 'human_takeover',
+      takeoverId: takeover.takeoverId,
+      wakeNonce,
+      targetClaim: {
+        partition: claim.partition,
+        tabId: claim.tabId,
+        physicalTargetToken,
+        claimId: claim.claimId,
+        generation: claim.generation,
+        suspensionCheckpointId: checkpointId,
+        browserTaskId,
+      },
     })
   }
 
@@ -2360,7 +2505,20 @@ export class AgentControlRuntime extends EventEmitter {
     projection: TaskProjectionRecord,
     scope: ConversationScope,
     trigger:
-      | { kind: 'human_takeover'; takeoverId: string }
+      | {
+          kind: 'human_takeover'
+          takeoverId: string
+          wakeNonce?: string
+          targetClaim?: {
+            partition: string
+            tabId: string
+            physicalTargetToken: string
+            claimId: string
+            generation: number
+            suspensionCheckpointId: string
+            browserTaskId: string
+          }
+        }
       | { kind: 'typed_wake'; requestId?: string; confirmationDecision?: 'confirmed' | 'denied' },
   ): Promise<{ success: boolean; error?: string; errorKind?: string }> {
     const ownerAgentId = projection.ownerAgentId || scope.activeAgentId || scope.agent
@@ -2385,11 +2543,21 @@ export class AgentControlRuntime extends EventEmitter {
         ownerAssignmentSource: 'continuation',
       })
       if (trigger.kind === 'human_takeover') {
-        await this.agentSessionCheckpoints.completeHumanTakeover({
+        const resumed = await this.agentSessionCheckpoints.completeHumanTakeover({
           taskId: projection.taskId,
           takeoverId: trigger.takeoverId,
           newOwnerRunId,
           executionBinding,
+          wakeId: trigger.wakeNonce,
+          targetClaim: trigger.targetClaim,
+        })
+        if (!resumed.createdSuccessor) return { success: true }
+        getInteractionLifecycleRegistry().settle({
+          interactionId: trigger.takeoverId,
+          runId: projection.runId,
+          agentId: projection.ownerAgentId || scope.activeAgentId || scope.agent,
+          scopeId: projection.scopeId,
+          disposition: 'resume_with_result',
         })
         ownerCommitted = true
       } else {

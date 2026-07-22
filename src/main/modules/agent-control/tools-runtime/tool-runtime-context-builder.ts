@@ -42,6 +42,9 @@ export function buildActiveFrameContextFromTurnFrame(
       : [],
     runContract: frame.skill?.runContract ?? null,
     discoveredHandles: [],
+    resumableCandidates: Array.isArray(frame.resumableCandidates)
+      ? [...frame.resumableCandidates]
+      : [],
   }
 }
 

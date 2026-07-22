@@ -29,6 +29,8 @@
  */
 
 import { randomUUID } from 'node:crypto'
+import { getInteractionLifecycleRegistry } from '../../agent-control/runtime-core/interaction-lifecycle-registry'
+import type { InteractionLifecycleIdentity } from '../../agent-control/runtime-core/interaction-lifecycle-registry'
 
 export type AskUserQuestionKind = 'single_choice' | 'multi_choice' | 'free_text'
 
@@ -64,6 +66,7 @@ export interface AskUserQuestionsCardRecord {
   agent?: string | null
   requestId?: string | null
   responsePolicy?: AskUserQuestionsResponsePolicy
+  lifecycleType?: InteractionLifecycleIdentity['type']
   questions: AskUserQuestionSpec[]
   askedAt: number
   resolve: (answerSet: AskUserQuestionsAnswerSet) => void
@@ -79,6 +82,7 @@ export interface PendingAskUserQuestionsCardView {
   agent?: string | null
   requestId?: string | null
   responsePolicy?: AskUserQuestionsResponsePolicy
+  lifecycleType?: InteractionLifecycleIdentity['type']
   questions: AskUserQuestionSpec[]
   askedAt: number
 }
@@ -106,6 +110,13 @@ export class AskUserQuestionsStore {
 
   register(record: AskUserQuestionsCardRecord): void {
     this.records.set(record.cardId, record)
+    getInteractionLifecycleRegistry().register({
+      interactionId: record.cardId,
+      runId: record.requestId || '',
+      agentId: record.agent || '',
+      scopeId: record.scopeId || record.sessionId || '',
+      type: record.lifecycleType || 'ask_user_questions',
+    })
   }
 
   hasPendingForSession(sessionId: string | null): boolean {
@@ -159,6 +170,13 @@ export class AskUserQuestionsStore {
     if (!record) return false
     clearTimeout(record.timeoutHandle)
     this.records.delete(cardId)
+    getInteractionLifecycleRegistry().settle({
+      interactionId: record.cardId,
+      runId: record.requestId || '',
+      agentId: record.agent || '',
+      scopeId: record.scopeId || record.sessionId || '',
+      disposition: 'resume_with_result',
+    })
     record.resolve(answerSet)
     return true
   }
@@ -172,6 +190,13 @@ export class AskUserQuestionsStore {
     if (!record) return false
     clearTimeout(record.timeoutHandle)
     this.records.delete(cardId)
+    getInteractionLifecycleRegistry().settle({
+      interactionId: record.cardId,
+      runId: record.requestId || '',
+      agentId: record.agent || '',
+      scopeId: record.scopeId || record.sessionId || '',
+      disposition: 'terminate',
+    })
     record.reject(error)
     return true
   }
@@ -180,6 +205,13 @@ export class AskUserQuestionsStore {
   clear(): void {
     for (const [, record] of this.records) {
       clearTimeout(record.timeoutHandle)
+      getInteractionLifecycleRegistry().settle({
+        interactionId: record.cardId,
+        runId: record.requestId || '',
+        agentId: record.agent || '',
+        scopeId: record.scopeId || record.sessionId || '',
+        disposition: 'terminate',
+      })
       try {
         record.reject(new Error('ask_user_questions store cleared'))
       } catch {
@@ -201,6 +233,13 @@ export class AskUserQuestionsStore {
       if (record.sessionId === sessionId) {
         clearTimeout(record.timeoutHandle)
         this.records.delete(cardId)
+        getInteractionLifecycleRegistry().settle({
+          interactionId: record.cardId,
+          runId: record.requestId || '',
+          agentId: record.agent || '',
+          scopeId: record.scopeId || record.sessionId || '',
+          disposition: 'terminate',
+        })
         try {
           record.reject(error)
         } catch {
@@ -230,6 +269,7 @@ export class AskUserQuestionsStore {
         agent: record.agent ?? null,
         requestId: record.requestId ?? null,
         responsePolicy: record.responsePolicy,
+        lifecycleType: record.lifecycleType,
         questions: record.questions,
         askedAt: record.askedAt,
       })

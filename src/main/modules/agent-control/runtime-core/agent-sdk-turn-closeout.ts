@@ -364,6 +364,37 @@ export async function handleAgentSdkTurnError(
     const deliveryWallClockExceeded = /delivery_wall_clock_exceeded/.test(
       `${errorMessage(error)}\n${errorMessage(abortReason)}`,
     )
+    const projection = host.runtime?.getTaskProjectionStoreForFinalize?.()?.get(taskId) ?? null
+    const continuation = projection?.continuationRef && typeof projection.continuationRef === 'object'
+      ? projection.continuationRef as Record<string, unknown>
+      : null
+    const durableBrowserState = Boolean(
+      projection
+      && (
+        projection.module === 'browser'
+        || continuation?.kind === 'browser_checkpoint'
+        || continuation?.browserTaskId
+      )
+      && (
+        projection.checkpointRefs?.cleanBaseCheckpointId
+        || projection.checkpointRefs?.suspensionCheckpointId
+        || continuation?.childRunId
+        || continuation?.browserTaskId
+      )
+    )
+    if (deliveryWallClockExceeded && durableBrowserState) {
+      return finalizeEarlyReturn({
+        status: 'checkpoint',
+        terminalReason: 'blocked_tool_error',
+        finalText: '',
+        error: 'delivery_wall_clock_exceeded',
+        continuationHandle: projection?.checkpointRefs?.suspensionCheckpointId
+          || projection?.checkpointRefs?.cleanBaseCheckpointId
+          || String(continuation?.childRunId || continuation?.browserTaskId || ''),
+        taskBudgetRuntime: runMetaBudgetRuntime,
+        providerDiagnostics: runMetaProviderDiagnostics,
+      })
+    }
     const preemptedByNewerSend =
       abortReason instanceof Error && abortReason.message === 'process_restarted'
     const abortInitiator =

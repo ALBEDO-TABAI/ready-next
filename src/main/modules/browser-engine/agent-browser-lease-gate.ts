@@ -1,52 +1,36 @@
-/**
- * Lease gate that fronts every browser tool call when running under an Agent
- * Browser lane (counterplan §5.2, WP1). It is OPT-IN: only callers that pass a
- * gate (the new lane-A/lane-B agent flows) are enforced. Legacy free-form
- * browser tool usage passes no gate and is unaffected — the lease scopes to the
- * new协驾 flow, it does not retroactively break existing call sites.
- *
- * On a write call it consults the lease (lease_required / lease_takeover) and,
- * when permitted, opens an agent action window so the simultaneous user-origin
- * navigation/key events the write itself produces are not misread as a takeover
- * (see browser-write-lease recordUserSignal).
- *
- * Pure-ish module — only depends on the lease service + classification.
- */
-
 import { resolveBrowserCapability } from '../../../shared/browser-capability-registry'
 import { isAgentBrowserError } from './agent-browser-errors'
 import type { AgentBrowserSurface } from './agent-browser-errors'
-import type { BrowserWriteLeaseService } from './browser-write-lease'
+import type {
+  BrowserTargetClaimIdentity,
+  BrowserTargetClaimService,
+} from './browser-target-claims'
 
-export interface BrowserLeaseGate {
-  service: BrowserWriteLeaseService
+export interface BrowserTargetClaimGate {
+  service: BrowserTargetClaimService
+  identity: BrowserTargetClaimIdentity
   surface: AgentBrowserSurface
-  leaseId: string | null
 }
 
-export interface LeaseGateHandle {
-  /** Non-null when the call is denied; the caller should return it verbatim. */
+export interface TargetClaimGateHandle {
   deniedMessage: string | null
-  /** Recheck and open the short agent-action window at the physical dispatch
-   * boundary, after any origin queue/cooldown wait. */
   begin: () => string | null
-  /** Always call once the tool finishes (closes the agent action window). */
   end: () => void
 }
 
 const NOOP = () => {}
 
-export function beginLeaseGate(
-  gate: BrowserLeaseGate | undefined,
+export function beginTargetClaimGate(
+  gate: BrowserTargetClaimGate | undefined,
   toolName: string,
   args: Record<string, unknown>,
-): LeaseGateHandle {
+): TargetClaimGateHandle {
   if (!gate) return { deniedMessage: null, begin: () => null, end: NOOP }
 
   const capability = resolveBrowserCapability(toolName, args)
   if (!capability?.requiresPageLease) return { deniedMessage: null, begin: () => null, end: NOOP }
 
-  const denied = gate.service.checkWrite({ surface: gate.surface, leaseId: gate.leaseId })
+  const denied = gate.service.checkWrite(gate.identity)
   if (denied && isAgentBrowserError(denied)) {
     return { deniedMessage: JSON.stringify(denied), begin: () => JSON.stringify(denied), end: NOOP }
   }
@@ -55,14 +39,16 @@ export function beginLeaseGate(
   return {
     deniedMessage: null,
     begin: () => {
-      const boundaryDenied = gate.service.checkWrite({ surface: gate.surface, leaseId: gate.leaseId })
+      const boundaryDenied = gate.service.checkWrite(gate.identity)
       if (boundaryDenied) return JSON.stringify(boundaryDenied)
       if (correlationId) return null
-      correlationId = gate.service.beginAgentAction(gate.surface)
+      const started = gate.service.beginAgentAction(gate.identity)
+      if (isAgentBrowserError(started)) return JSON.stringify(started)
+      correlationId = started
       return null
     },
     end: () => {
-      if (correlationId) gate.service.endAgentAction(gate.surface, correlationId)
+      if (correlationId) gate.service.endAgentAction(gate.identity, correlationId)
       correlationId = null
     },
   }

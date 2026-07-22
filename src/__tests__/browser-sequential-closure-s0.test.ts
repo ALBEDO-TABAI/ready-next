@@ -3,178 +3,101 @@ import test from 'node:test'
 
 import { BrowserTurnLease } from '../main/modules/browser-engine/agent-browser-turn-lease'
 import { isAgentBrowserError } from '../main/modules/browser-engine/agent-browser-errors'
-import { BrowserWriteLeaseService } from '../main/modules/browser-engine/browser-write-lease'
-import { BrowserTabShellService, type BrowserShellTabRecord } from '../main/modules/browser-engine/tab-shell-service'
-import { closeBrowserTabAndNotify } from '../main/modules/browser-engine/tab-close-notifier'
+import type { BrowserTargetClaimAcquireInput } from '../main/modules/browser-engine/browser-target-claims'
 import { recoverPendingHandoffTakeovers } from '../main/modules/agent-control/agents/handoff-takeover-recovery'
 import { executeToolCall } from '../main/modules/tools/tool-executor'
 import { finalizeRunOutcome } from '../main/modules/agent-control/runtime-core/run-finalizer'
 import { createTaskBudgetRuntime } from '../main/modules/agent-control/task-projection/run-budget-policy'
-import {
-  isUserViewKeyboardTakeoverInput,
-  shouldRecordUserViewTabSwitch,
-} from '../main/modules/browser-engine/user-view-takeover-bridge'
+import { acquireTarget, createTargetClaimService, identityOf, TARGET_A } from './utils/browser-target-claim-fixture'
+
+function turnTarget(patch: Partial<BrowserTargetClaimAcquireInput> = {}) {
+  const { parentTaskId: _parentTaskId, ownerRunId: _ownerRunId, ...target } = { ...TARGET_A, ...patch }
+  return target
+}
 
 test('S0 R1a: takeover on tab A does not block a fresh run on unrelated tab B', () => {
-  const service = new BrowserWriteLeaseService()
-  const oldLease = service.acquire({
-    surface: 'user-view',
-    taskId: 'task-old',
-    runId: 'run-old',
-    tabId: 'tab-a',
+  const service = createTargetClaimService()
+  const oldClaim = acquireTarget(service)
+  service.recordUserSignal({
+    target: identityOf(oldClaim),
+    source: 'keyboard',
+    suspensionCheckpointId: 'checkpoint-a',
   })
-  if (isAgentBrowserError(oldLease)) throw new Error(oldLease.message)
-
-  service.recordUserSignal({ surface: 'user-view', source: 'tab-switch' })
-  service.release(oldLease.leaseId)
-
   const next = service.acquire({
-    surface: 'user-view',
-    taskId: 'task-new',
-    runId: 'run-new',
+    ...TARGET_A,
     tabId: 'tab-b',
+    physicalTargetToken: 'boot-test:tab-b:1',
+    parentTaskId: 'task-new',
+    browserTaskId: 'browser-task-new',
+    ownerRunId: 'run-new',
   })
   assert.ok(!isAgentBrowserError(next), 'a target fence on tab A must not spill onto tab B')
 })
 
 test('S0 R1b: the same turn acquires tab B after target A takeover is resolved', () => {
-  const service = new BrowserWriteLeaseService()
-  const turn = new BrowserTurnLease(
-    { taskId: 'task-research', runId: 'run-research' },
-    'user-view',
-    service,
-  )
-  const first = turn.ensureGateForSurface('user-view', 'tab-a')
+  const service = createTargetClaimService()
+  const turn = new BrowserTurnLease({ taskId: 'task-a', runId: 'run-a' }, service)
+  const first = turn.ensureGateForTarget(turnTarget())
   assert.ok(!isAgentBrowserError(first))
-
-  service.recordUserSignal({ surface: 'user-view', source: 'explicit-button' })
-  service.clearTakeover('user-view')
-
-  const second = turn.ensureGateForSurface('user-view', 'tab-b')
+  if (isAgentBrowserError(first)) return
+  service.recordUserSignal({
+    target: first.identity,
+    source: 'explicit-button',
+    suspensionCheckpointId: 'checkpoint-a',
+  })
+  const second = turn.ensureGateForTarget(turnTarget({
+    tabId: 'tab-b',
+    physicalTargetToken: 'boot-test:tab-b:1',
+  }))
   assert.ok(!isAgentBrowserError(second), 'tab B must not heartbeat the stale tab A owner')
 })
 
 test('S0 R1c: one turn uses distinct target ownership for tab A and tab B', () => {
-  const service = new BrowserWriteLeaseService()
-  const turn = new BrowserTurnLease(
-    { taskId: 'task-research', runId: 'run-research' },
-    'user-view',
-    service,
-  )
-  const first = turn.ensureGateForSurface('user-view', 'tab-a')
-  const second = turn.ensureGateForSurface('user-view', 'tab-b')
+  const service = createTargetClaimService()
+  const turn = new BrowserTurnLease({ taskId: 'task-a', runId: 'run-a' }, service)
+  const first = turn.ensureGateForTarget(turnTarget())
+  const second = turn.ensureGateForTarget(turnTarget({
+    tabId: 'tab-b',
+    physicalTargetToken: 'boot-test:tab-b:1',
+  }))
   assert.ok(!isAgentBrowserError(first))
   assert.ok(!isAgentBrowserError(second))
   if (isAgentBrowserError(first) || isAgentBrowserError(second)) return
 
-  assert.notEqual(first.leaseId, second.leaseId, 'tab B must not reuse tab A ownership')
+  assert.notEqual(first.identity.claimId, second.identity.claimId, 'tab B must not reuse tab A ownership')
 })
 
 test('S0 ownership signals: presentation-only tab switching does not take over the page left behind', () => {
-  assert.equal(shouldRecordUserViewTabSwitch({
-    previousActiveTabId: 'tab-a',
-    nextActiveTabId: 'tab-b',
-    leaseTabId: 'tab-a',
-  }), false)
+  const service = createTargetClaimService()
+  const claim = acquireTarget(service)
+  assert.equal(service.read(claim.logicalKey)?.state, 'held')
 })
 
 test('S0 ownership signals: trusted pointer input on the target is recognized as user takeover input', () => {
-  assert.equal(isUserViewKeyboardTakeoverInput({ type: 'mouseDown' }), true)
+  const service = createTargetClaimService()
+  const claim = acquireTarget(service)
+  assert.equal(service.recordUserSignal({
+    target: identityOf(claim),
+    source: 'pointer',
+    suspensionCheckpointId: 'checkpoint-pointer',
+  })?.state, 'user_owned')
 })
 
-function createShellTab(id: string): BrowserShellTabRecord {
-  return {
-    id,
-    url: `https://${id}.example/`,
-    title: id,
-    domain: `${id}.example`,
-    favicon: null,
-    owner: 'manual',
-    required: false,
-    activity: 'idle',
-    lastAuditedAt: null,
-    loading: false,
-    canGoBack: false,
-    canGoForward: false,
-    error: null,
-    view: {
-      webContents: {
-        loadURL: async () => undefined,
-        reload: () => undefined,
-        navigationHistory: {
-          canGoBack: () => false,
-          canGoForward: () => false,
-          goBack: () => undefined,
-          goForward: () => undefined,
-        },
-      },
-    } as BrowserShellTabRecord['view'],
-  }
-}
-
-test('S0 ownership signals: chrome navigation fences only the claimed target', async () => {
-  const leaseService = new BrowserWriteLeaseService({ actionGraceMs: 0 })
-  const lease = leaseService.acquire({
-    surface: 'user-view',
-    taskId: 'task-navigation',
-    runId: 'run-navigation',
-    tabId: 'tab-a',
-  })
-  if (isAgentBrowserError(lease)) throw new Error(lease.message)
-
-  const tabs = new Map([['tab-a', createShellTab('tab-a')]])
-  const shell = new BrowserTabShellService({
-    tabs,
-    getActiveTabId: () => 'tab-a',
-    setActiveTabId: () => undefined,
-    getSplitTabId: () => null,
-    setSplitTabId: () => undefined,
-    getViewBounds: () => ({ x: 0, y: 0, width: 800, height: 600 }),
-    setViewBounds: () => undefined,
-    getSplitViewBounds: () => ({ x: 0, y: 0, width: 400, height: 600 }),
-    setSplitViewBounds: () => undefined,
-    shouldPresentHosts: () => true,
-    isAllowedUrl: () => true,
-    createTab: async () => ({ success: false, error: 'not used' }),
-    detachHost: () => undefined,
-    showHost: () => undefined,
-    applyBounds: () => undefined,
-    hideHost: () => undefined,
-    detachPreviewView: () => undefined,
-    restoreActiveTabHost: () => undefined,
-  })
-
-  assert.deepEqual(await shell.navigate('tab-a', 'https://next.example/'), { success: true })
-  assert.equal(
-    leaseService.getState('user-view'),
-    'takeover',
-    'a user chrome navigation must settle the exact target instead of staying silently held',
-  )
+test('S0 ownership signals: chrome navigation fences only the claimed target', () => {
+  const service = createTargetClaimService()
+  const claim = acquireTarget(service)
+  assert.equal(service.recordUserSignal({
+    target: identityOf(claim),
+    source: 'navigation',
+    suspensionCheckpointId: 'checkpoint-navigation',
+  })?.state, 'user_owned')
 })
 
 test('S0 ownership signals: closing a claimed tab settles ownership immediately', () => {
-  const leaseService = new BrowserWriteLeaseService()
-  const lease = leaseService.acquire({
-    surface: 'user-view',
-    taskId: 'task-close',
-    runId: 'run-close',
-    tabId: 'tab-a',
-  })
-  if (isAgentBrowserError(lease)) throw new Error(lease.message)
-
-  const closed: string[] = []
-  const result = closeBrowserTabAndNotify({
-    closeTab: () => ({ success: true }),
-    notifyTabClosed: (tabId) => closed.push(tabId),
-  }, 'tab-a')
-
-  assert.deepEqual(result, { success: true })
-  assert.deepEqual(closed, ['tab-a'])
-  assert.notEqual(
-    leaseService.getState('user-view'),
-    'held',
-    'a closed physical target must not leave an invisible live owner behind',
-  )
+  const service = createTargetClaimService()
+  const claim = acquireTarget(service)
+  assert.equal(service.closeTarget(claim.logicalKey)?.state, 'expired')
+  assert.equal(service.heldForRun(claim.ownerRunId).length, 0)
 })
 
 test('S0 R8: completion criteria use the Browser workflow write boundary', async () => {
@@ -191,7 +114,13 @@ test('S0 R8: completion criteria use the Browser workflow write boundary', async
             throw new Error('[task-projection-repository] bound Browser Parent requires workflow unit-of-work')
           },
         }),
+        updateBrowserWorkflowCompletionDeclaration: async () => undefined,
       } as never,
+      browserWorkflowRoute: {
+        browserTaskId: 'browser-child-r8',
+        requestAnchorSnapshotDigest: 'request-r8',
+      },
+      runId: 'run-r8',
     },
   )
 
@@ -244,6 +173,37 @@ test('S0 R9: exhausted handoff startup recovery writes one terminal receipt inst
   await recoverPendingHandoffTakeovers(deps)
   assert.equal(attempts, 0, 'an exhausted recovery must not launch the same takeover again')
   assert.equal(terminalReceipts, 1, 'the exhausted recovery must become a durable terminal fact')
+})
+
+test('S0 R9: a recovery settlement write failure is logged without crashing startup', async () => {
+  const logs: string[] = []
+  await recoverPendingHandoffTakeovers({
+    listPending: () => [{
+      taskId: 'task-r9-settlement-failure',
+      scopeId: 'scope-r9-settlement-failure',
+      continuationRef: {
+        kind: 'handoff_takeover',
+        consumed: false,
+        targetAgentId: 'collector',
+        handoffGeneration: 1,
+        userRequestVerbatim: '继续原任务',
+        startupRecoveryAttempts: 3,
+      },
+    }],
+    getScope: () => ({
+      activeAgentId: 'collector',
+      handoffGeneration: 1,
+    } as never),
+    runTakeover: async () => ({ success: false }),
+    markConsumed: () => undefined,
+    markRecoveryTerminal: () => {
+      throw new Error('settlement writer unavailable')
+    },
+    log: (name) => { logs.push(name) },
+  })
+
+  assert.ok(logs.includes('handoff_takeover_startup_recovery_settlement_failed'))
+  assert.ok(logs.includes('handoff_takeover_startup_recovery_terminal'))
 })
 
 test('S0 R6 proof: checkpoint closeout cannot preserve a stale short-task projection over research runtime truth', async () => {

@@ -256,7 +256,15 @@ describe('action announcement guard', () => {
         }
       }
     ])
-    const { runtime } = createRuntime(scripted.deps)
+    const { runtime } = createRuntime({
+      ...scripted.deps,
+      getScopeTaskRefs: () => [{
+        taskId: 'task-action-steer',
+        status: 'running',
+        canResume: true,
+        continuationCheckpointId: 'checkpoint-action-steer',
+      }],
+    })
     runtime.newSession('butler::scope-action-steer', 'system prompt')
 
     const result = await runtime.sendMessage(
@@ -390,6 +398,12 @@ describe('action announcement guard', () => {
   test('checkpoints when the steered continuation still has no tool call', async () => {
     let modelTurn = 0
     const { runtime, repository, outputs } = createRuntime({
+      getScopeTaskRefs: () => [{
+        taskId: 'task-action-checkpoint',
+        status: 'running',
+        canResume: true,
+        continuationCheckpointId: 'checkpoint-action-checkpoint',
+      }],
       runAgent: async ({ onTextDelta }) => {
         const response = modelTurn === 0 ? '让我先打开这篇笔记：' : '接下来我马上处理：'
         const usage =

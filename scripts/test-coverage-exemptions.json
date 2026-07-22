@@ -70,6 +70,30 @@
   ],
   "c4Exempt": [
     {
+      "path": "src/__tests__/agent-browser-turn-lease.test.ts",
+      "reason": "Target-claim turn coverage uses MemoryBrowserTargetClaimRepository through the shared fixture and never constructs a SQLite repository; only the production claim module import graph reaches database.ts.",
+      "since": "2026-07-22",
+      "owner": "browser-target-claims"
+    },
+    {
+      "path": "src/__tests__/agent-continuation-clock.test.ts",
+      "reason": "Continuation coverage uses TurnFrame candidates, an injected runtime, and in-memory tool context; it never opens getDatabase or a repository, while tool-executor transitive imports reach database.ts.",
+      "since": "2026-07-22",
+      "owner": "agent-continuation-clock"
+    },
+    {
+      "path": "src/__tests__/browser-agent-work-tab.test.ts",
+      "reason": "Agent work-tab routing coverage invokes browser tools with a fully injected controller and in-memory call log; no path opens getDatabase or better-sqlite3.",
+      "since": "2026-07-22",
+      "owner": "browser-target-claims"
+    },
+    {
+      "path": "src/__tests__/browser-sequential-closure-s0.test.ts",
+      "reason": "Sequential-closure regression coverage uses MemoryBrowserTargetClaimRepository plus injected finalizer and handoff stores; it never opens the production database, while transitive runtime imports trigger C4.",
+      "since": "2026-07-22",
+      "owner": "browser-sequential-closure"
+    },
+    {
       "path": "src/__tests__/browser-terminal-observation-guard.test.ts",
       "reason": "Browser terminal-candidate coverage runs the model loop with an in-memory MemorySession, injected host evidence, and checkpoint callbacks that fail if reached unexpectedly. It never constructs a repository or opens getDatabase; only the live loop import graph reaches database.ts, so host-Node coverage must remain active.",
       "since": "2026-07-19",

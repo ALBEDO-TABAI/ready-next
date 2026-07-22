@@ -91,11 +91,11 @@ test('Agent SDK runtime uses live task budget runtime for maxTurns and tool-call
 
   assert.equal(result.success, true)
   assert.equal(result.taskType, 'research')
-  assert.equal(seenMaxTurns, 60)
+  assert.equal(seenMaxTurns, 220)
   assert.equal(result.executionDiagnostics?.taskBudgetRuntime?.taskType, 'research')
   assert.equal(result.executionDiagnostics?.taskBudgetRuntime?.usage.toolCallsUsed, 1)
   assert.equal(result.executionDiagnostics?.budget?.toolCallsUsed, 1)
-  assert.equal(result.executionDiagnostics?.budgetUsagePercent, 2)
+  assert.equal(result.executionDiagnostics?.budgetUsagePercent, 0)
   assert.equal(result.executionDiagnostics?.budgetWarningLevel, 'none')
 })
 

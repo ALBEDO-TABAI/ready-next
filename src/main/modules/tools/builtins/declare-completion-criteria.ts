@@ -22,7 +22,7 @@ export interface CompletionDeclarationPatch {
 export interface DeclareCompletionCriteriaDeps {
   taskId: string | null
   sessionId?: string | null
-  updateTaskCompletionDeclaration: (taskId: string, patch: CompletionDeclarationPatch) => void
+  updateTaskCompletionDeclaration: (taskId: string, patch: CompletionDeclarationPatch) => void | Promise<void>
 }
 
 function normalizeExpectedOutputs(value: unknown): { ok: true; value: string[] } | { ok: false; message: string } {
@@ -44,10 +44,10 @@ function normalizeExpectedOutputs(value: unknown): { ok: true; value: string[] }
   return { ok: true, value: outputs }
 }
 
-export function executeDeclareCompletionCriteria(
+export async function executeDeclareCompletionCriteria(
   args: Record<string, unknown>,
   deps: DeclareCompletionCriteriaDeps,
-): ToolExecutionOutput {
+): Promise<ToolExecutionOutput> {
   const raw = Array.isArray(args.criteria) ? args.criteria : null
   if (!raw || raw.length === 0) {
     return createToolExecutionOutput('未登记：criteria 必须是非空字符串数组。', {
@@ -95,7 +95,7 @@ export function executeDeclareCompletionCriteria(
     })
   }
 
-  deps.updateTaskCompletionDeclaration(deps.taskId, {
+  await deps.updateTaskCompletionDeclaration(deps.taskId, {
     modelCriteria: criteria,
     expectedOutputs: expectedOutputsResult.value,
   })

@@ -38,18 +38,17 @@ test('delivery deadline is a rolling no-progress window and successful progress 
 test('delivery deadline stays suspended while the run is awaiting user input', async () => {
   const abortController = new AbortController()
   const runHandle = { abortInitiator: null } as Parameters<typeof armDynamicDeliveryDeadline>[0]['runHandle']
-  let awaiting = true
   const deadline = armDynamicDeliveryDeadline({
     mode: 'adaptive',
     runId: 'run-awaiting-user',
     abortController,
     runHandle,
     timeoutMsForTest: 20,
-    isAwaitingUserInput: () => awaiting,
   })
+  deadline.suspend('ask-1')
   await new Promise((resolve) => setTimeout(resolve, 45))
   assert.equal(abortController.signal.aborted, false)
-  awaiting = false
+  deadline.resume('ask-1')
   await new Promise<void>((resolve) => abortController.signal.addEventListener('abort', () => resolve(), { once: true }))
   deadline.dispose()
   assert.equal((abortController.signal.reason as Error).message, 'delivery_wall_clock_exceeded')
@@ -59,7 +58,6 @@ test('S0 R2: resolving user input grants a complete new no-progress window', () 
   const scheduled: Array<{ callback: () => void; delayMs: number; cleared: boolean }> = []
   const originalSetTimeout = globalThis.setTimeout
   const originalClearTimeout = globalThis.clearTimeout
-  let awaiting = true
 
   globalThis.setTimeout = ((callback: () => void, delayMs?: number) => {
     const timer = {
@@ -83,15 +81,13 @@ test('S0 R2: resolving user input grants a complete new no-progress window', () 
       runId: 'run-resolved-user-input',
       abortController,
       runHandle,
-      isAwaitingUserInput: () => awaiting,
     })
 
     assert.equal(scheduled[0]?.delayMs, 120_000)
-    scheduled[0]?.callback()
-    assert.equal(scheduled[1]?.delayMs, 1_000, 'the current implementation polls while input is pending')
-
-    awaiting = false
-    scheduled[1]?.callback()
+    deadline.suspend('ask-r2')
+    assert.equal(scheduled[0]?.cleared, true)
+    assert.equal(scheduled.length, 1, 'pending input must not run a one-second polling timer')
+    deadline.resume('ask-r2')
 
     assert.equal(
       abortController.signal.aborted,

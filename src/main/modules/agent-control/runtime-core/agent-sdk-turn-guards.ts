@@ -124,6 +124,7 @@ export function createAgentSdkTurnGuards(ctx: AgentSdkTurnGuardContext): {
       // reference now requires continuation/budget state or a follow-up that points
       // back at prior work.
       turnFollowup.kind === 'continue_task' ||
+      turnFollowup.continuationCue === true ||
       turnFollowup.kind === 'correction' ||
       turnFollowup.kind === 'status_query' ||
       effectiveExecutionOptions?.continuationIntent ||

@@ -82,14 +82,17 @@ export function decideSessionPreroute(input: {
     hasActiveTaskContext: input.recentOwnedTasks.length > 0,
     taskRefs: input.recentOwnedTasks,
   })
-  if (intent.kind === 'continue_task' || intent.kind === 'status_query') {
+  if (intent.kind === 'continue_task' || intent.kind === 'status_query' || intent.continuationCue === true) {
     // bind to the classifier's pinned task when present, else the most
     // recent open task — OWNED OR NOT (an un-owned continuation belongs to
     // the main agent and must never be hijacked by precedent, C4.1 协同).
     const pinned = intent.targetTaskId
       ? input.recentOwnedTasks.find((ref) => ref.taskId === intent.targetTaskId)
       : undefined
-    const target = pinned ?? input.recentOwnedTasks.find(isOpenTask)
+    const openTasks = input.recentOwnedTasks.filter(isOpenTask)
+    const target = pinned ?? (intent.continuationCue === true && openTasks.length !== 1
+      ? undefined
+      : openTasks[0])
     if (target?.ownerAgentId && input.isAgentActive(String(target.ownerAgentId))) {
       return {
         decision: { tier: 'state', targetAgentId: String(target.ownerAgentId), taskId: target.taskId ?? null },

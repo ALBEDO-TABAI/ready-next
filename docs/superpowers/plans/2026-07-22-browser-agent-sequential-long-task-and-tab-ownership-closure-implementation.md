@@ -942,6 +942,13 @@ END;
 - 研究型运行全程用户活动 tab 零打扰：URL、滚动、前台呈现不变，无自动 switchTab；用户切到 agent 工作 tab 查看不改 claim，在其中真实输入只 fence 该 target。
 - dormant 清理后 `ensureAgentTab` / `ScopedBrowserFacade` / `releaseForBackgroundHandoff` 无生产调用面残留（删除项以编译与 grep 双证）。
 
+### S1 执行记录（2026-07-22）
+
+- 已以持久 `BrowserTargetClaim` 替换旧 surface 写入归属，并删除旧 lane/write-lease/scoped facade/takeover bridge 生产路径；同一 Owner 可同时持有多个 target，旧 generation、物理重建和启动重绑均 fail closed。
+- 研究型工作默认进入任务自有后台标签，不切换用户当前标签；目标归属列表成为监督面板的唯一输入。
+- Gate：`verify:browser-target-claims=0`（`/tmp/s1-browser-target-claims.log`）、`typecheck=0`（`/tmp/s1-s3-typecheck.log`）、`verify:native=0`（`/tmp/s1-s3-native.log`）。专项包含 14 个 TypeScript 行为用例与 8 个真实 Electron SQLite 用例，覆盖 migration 087、CAS、重启、closeout、多目标恢复和 `PRAGMA quick_check`。
+- 与计划偏差：零范围偏差；没有保留旧 surface ownership 兼容分支，也没有新增 §1.5/§1.5.1 表。
+
 ## S2：接管—暂停—继续闭环
 
 ### 改动
@@ -962,6 +969,13 @@ END;
 - task-level wake 不批量恢复 claim；target wake 只解精确 user fence；首次访问其他 suspended target 时才 fresh observe + CAS 新 generation。
 - A/C 两个 target wake 与 task continue 三方并发时，Parent-level admission CAS 只创建一个 successor；三份 receipt 都绑定它，A/C 各自授权、其他 user-owned target 不解锁，同一 Parent active run 数始终为 1。
 - 指针/导航/关 tab 三类信号只 fence/结算精确 target 并写 receipt；命中 agent action correlation 的同类事件零接管。
+
+### S2 执行记录（2026-07-22）
+
+- 接管已收缩到精确 target；Agent 回声不再触发接管，物理输入、用户导航和关闭标签分别按 target 归因或结算。无真实页面阻塞时，页面接管请求明确拒绝，不再冒充 owner 冲突。
+- Main、共享合同、Preload、Renderer 类型与监督 UI 已同步；“继续 Agent”携带 target/checkpoint 身份，重复、过期和错误恢复均零写入。A/C target wake 与 task continue 三方竞态由 Parent admission 只创建一个 successor。
+- Gate：`verify:browser-surface=0`（`/tmp/s2-browser-surface.log`）、`verify:browser-target-claims=0`（`/tmp/s1-browser-target-claims.log`）、`typecheck=0`（`/tmp/s1-s3-typecheck.log`）、`verify:native=0`（`/tmp/s1-s3-native.log`）。
+- 与计划偏差：零范围偏差；页面挑战和 owner 接管保持两套不同语义，没有按整个 Browser surface 冻结。
 
 ## S3：修正等待时钟和持久续跑
 
@@ -987,11 +1001,23 @@ END;
 - 同一 run 先取得 A/B，再在 A 接管或 fault：closeout 后 A=user_owned、B=suspended、held=0；target wake A 后续跑 A，首次访问 B 时 lazy resume B（依赖 S1/S2 机器，此处验证 S3 接线）。
 - 移交项（架构计划 P1/P3 落地前不作为本阶段验收）：SQL adversarial、全边界崩溃注入、outcome outbox 恰好一次、request prepared/sent/delta 账本、durable waiter 还原。
 
+### S3-min 执行记录（2026-07-22）
+
+- 无进展时钟已改为显式暂停/恢复；交互创建即暂停，最后一个 blocker 结算后才恢复并获得完整新窗口。普通 ask、技能 ask、高危确认、页面挑战与人工接管统一进入进程内生命周期登记。
+- deadline 触发时，只要已有 durable Browser 任务即收口为可续跑暂停；typed continue 只接受 TurnFrame 的精确候选，自然语言“继续”不再由代码静默选择最近任务。
+- Gate：`verify:agent-continuation-clock=0`（`/tmp/s3-agent-continuation-clock.log`），其中真实等待 `120158ms` 后仍获得完整新窗口；同时重跑 `verify:browser-target-claims=0`。`typecheck=0`（`/tmp/s1-s3-typecheck.log`）、`verify:native=0`（`/tmp/s1-s3-native.log`）。
+- 与计划偏差：零范围偏差；没有建立移交给 P1/P3 的持久交互或 Provider 请求账本，也不宣称崩溃边界恰好一次。
+
 ## S4（只在 R6 proof gate 达到 100% 后）：统一进度、预算与终态投影
 
 ### 改动
 
 S0 未同时锁定 R6 的稳定触发、唯一最后写者和可观察后果时，本节不是实施授权，必须移入独立待证计划。
+
+### S4 执行裁决（2026-07-22）
+
+- S0 的 R6 proof 无法在当前 HEAD 重现历史三层分裂，未达到“稳定触发 + 唯一最后写者 + 可观察后果”100% 硬门。
+- 按本计划原文保持 S4 locked；本轮没有修改产品中的类型、预算或终态投影。该切片需另立待证计划后才能实施。
 
 1. 找出 `research -> short_task` 的最后写者，从 Parent bind 开始冻结 task type；子域只能继承，不能降级。
 2. 从同一 budget runtime 派生 run_meta/projection/checkpoint 数字；禁止投影使用新默认值覆盖实际使用量。
@@ -1040,6 +1066,13 @@ S0 未同时锁定 R6 的稳定触发、唯一最后写者和可观察后果时�
 - 不在下一阶段用子 Agent 掩盖失败。
 
 controlled/CI gate 与 real-site release gate 必须分开：前者使用全新隔离 userData + localhost fixture，可自动重放；后者只证明真实登录站点行为，不进入 CI，也不能靠复制用户 profile 伪造隔离。两门都通过才算 A1–A12 完成。
+
+### S5 执行记录（2026-07-22，未完成）
+
+- 内部门禁已通过：`typecheck=0`（`/tmp/s5-typecheck.log`）、全量 `test=0`（`/tmp/s5-test.log`，7430 项、0 失败）、`build=0`（`/tmp/s5-build.log`）、最终 `verify:native=0`（`/tmp/s5-native-final.log`）；Browser orchestration/reliability/lane/stability 专项均为 0，日志分别位于 `/tmp/s5-browser-orchestration.log`、`/tmp/s5-browser-reliability.log`、`/tmp/s5-browser-lane.log`、`/tmp/s5-stability.log`。
+- `verify:browser-live-grounded --handshake-only` 已证明本次源码 manifest、安装包进程、app.asar、随机 nonce、隔离 userData 与隔离 DB 路径相互一致；日常 Ready profile 未读未写。该握手只证明验收载体身份，不替代 controlled/real-site gate。
+- 完整 `verify:browser-live-grounded` 当前明确失败（`/tmp/s5-browser-live-grounded.log`）：环境未提供用户授权的专用 `READY_BROWSER_LIVE_ACCEPTANCE_PROFILE`。按计划禁止读取日常 Ready profile，因此没有尝试绕过。
+- A1–A12、12 个 controlled 结构变体以及真实小红书三轮尚未验收；当前 full-mode runner 只完成启动、身份握手、隔离路径和报告拒绝骨架，尚未在授权 profile 上完成驱动与报告校验闭环。因此 S5 保持未完成，不启动独立 reviewer、不提交本轮代码、不更新 current-runtime-contracts。
 
 ## 后续独立切片 C1：上下文性能（不阻塞本计划）
 

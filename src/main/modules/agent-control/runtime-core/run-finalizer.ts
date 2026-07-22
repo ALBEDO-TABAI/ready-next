@@ -44,6 +44,7 @@ import type {
   BrowserWorkflowCompletionVerifierReceipt,
 } from '../../../../shared/browser-workflow-control'
 import { workflowDigest } from '../../repositories/browser-workflow-codec'
+import { closeoutBrowserTargetClaimsForRun } from '../../browser-engine/browser-target-claim-closeout'
 
 export interface RunCloseMetric {
   runId: string
@@ -430,7 +431,14 @@ export async function finalizeRunOutcome(
   }
 
   if (outcome.kind === 'done') {
-    return writeTerminalOutcome(outcome, deps, 'done', outcome.terminalReason || 'done')
+    const finalized = await writeTerminalOutcome(outcome, deps, 'done', outcome.terminalReason || 'done')
+    closeoutBrowserTargetClaimsForRun({
+      ownerRunId: outcome.runId,
+      resumable: false,
+      suspensionCheckpointId: null,
+      suspensionReason: null,
+    })
+    return finalized
   }
 
   if (outcome.kind === 'checkpoint') {
@@ -443,15 +451,35 @@ export async function finalizeRunOutcome(
       throw new Error('checkpoint outcome requires a valid continuation handle')
     }
 
-    return writeTerminalOutcome(outcome, deps, 'checkpoint', outcome.terminalReason || 'checkpoint')
+    const finalized = await writeTerminalOutcome(outcome, deps, 'checkpoint', outcome.terminalReason || 'checkpoint')
+    closeoutBrowserTargetClaimsForRun({
+      ownerRunId: outcome.runId,
+      resumable: true,
+      suspensionCheckpointId: outcome.continuationHandle,
+      suspensionReason: outcome.terminalReason || 'checkpoint',
+    })
+    return finalized
   }
 
-  return writeTerminalOutcome(
+  const finalized = await writeTerminalOutcome(
     outcome,
     deps,
     statusFromOutcomeKind(outcome.kind),
     outcome.terminalReason
   )
+  const recoverable = Boolean(
+    outcome.projectionPatch
+    && ['recoverable_paused', 'paused'].includes(String(outcome.projectionPatch.status || '')),
+  )
+  closeoutBrowserTargetClaimsForRun({
+    ownerRunId: outcome.runId,
+    resumable: recoverable,
+    suspensionCheckpointId: recoverable
+      ? String(outcome.projectionPatch?.continuationHandle || outcome.projectionPatch?.checkpointId || '') || null
+      : null,
+    suspensionReason: recoverable ? outcome.terminalReason : null,
+  })
+  return finalized
 }
 
 /**

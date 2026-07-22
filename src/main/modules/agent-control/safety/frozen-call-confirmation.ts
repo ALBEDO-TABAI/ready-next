@@ -67,6 +67,7 @@ export interface FrozenCallConfirmationDeps {
   sessionId?: string | null
   conversationId?: string | null
   runId?: string | null
+  agentId?: string | null
   /** EP2-Q4a — frozen-call audit events become task proofs (kind task_event). */
   appendProof?: ((taskId: string, ref: string) => void) | null
   /** EP2-I-auth WRITE ENTRY 2 — only honored when the user picked
@@ -146,6 +147,10 @@ export async function runFrozenCallConfirmation(
     const cardOutput = await executeAskUserQuestions({ questions: [question] }, {
       sessionId: sessionId || undefined,
       conversationId: deps.conversationId || undefined,
+      scopeId: deps.scopeId || undefined,
+      agent: deps.agentId || undefined,
+      requestId: deps.runId || undefined,
+      lifecycleType: 'action_confirmation',
       signal: deps.signal,
       emitAskUserQuestionsCard: deps.emitCard,
       persistCardPending: deps.persistCard,

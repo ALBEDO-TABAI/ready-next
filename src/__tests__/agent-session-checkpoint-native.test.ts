@@ -26,6 +26,8 @@ import {
   inspectKimiK3History,
 } from '../shared/ai-providers/kimi-k3'
 import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
+import { BrowserTargetClaimRepository, BrowserTargetClaimService } from '../main/modules/browser-engine/browser-target-claims'
+import { isAgentBrowserError } from '../main/modules/browser-engine/agent-browser-errors'
 
 type SqliteCtor = new (path: string) => DatabaseConnection & MigrationDatabase
 const require = createRequire(import.meta.url)
@@ -717,6 +719,21 @@ test('startup recovery converts a stale Browser owner with a clean checkpoint in
       activatedCapabilityGroups: ['browser'],
       now,
     })
+    const claimService = new BrowserTargetClaimService(new BrowserTargetClaimRepository(accessor))
+    const heldClaim = claimService.acquire({
+      partition: 'persist:browser',
+      tabId: 'startup-tab',
+      physicalTargetToken: 'boot-startup:startup-tab:1',
+      bootIncarnationId: 'boot-startup',
+      profileId: null,
+      surface: 'agent-view',
+      parentTaskId,
+      browserTaskId: route.browserTaskId,
+      ownerRunId,
+      scopeId,
+      sessionId: null,
+    })
+    if (isAgentBrowserError(heldClaim)) throw new Error(heldClaim.message)
 
     const result = await reconcileStartupRunsOnStartup({
       db,
@@ -760,6 +777,16 @@ test('startup recovery converts a stale Browser owner with a clean checkpoint in
       'paused',
     )
     assert.ok(repository.currentOwnerCrashRecovery(parentTaskId))
+    const recoveredClaim = claimService.read(heldClaim.logicalKey)
+    assert.equal(recoveredClaim?.state, 'suspended')
+    assert.equal(recoveredClaim?.physicalTargetToken, null)
+    assert.equal(recoveredClaim?.suspensionCheckpointId, checkpointRefs.suspensionCheckpointId)
+    assert.equal(
+      db.prepare(`SELECT COUNT(*) AS count FROM browser_control_receipts
+                   WHERE browser_task_id = ? AND kind = 'claim_suspended'`)
+        .get<{ count: number }>(route.browserTaskId)?.count,
+      1,
+    )
   } finally {
     db.close()
   }
@@ -823,10 +850,68 @@ test('human takeover keeps its exact user instruction in the durable suspension 
       details: '验证完成后继续当前任务',
       timeoutSec: 90,
     }
+    const sourceItems = [{ role: 'user', content: '完成网页任务' } as AgentInputItem]
+    await repository.writeCleanBoundary({
+      parentTaskId,
+      browserTaskId: route.browserTaskId,
+      ownerRunId,
+      sourceItems,
+      sdkSourceItems: sourceItems,
+      sdkSourceItemCount: sourceItems.length,
+      sdkSourcePrefixDigest: workflowDigest(sourceItems),
+      preparedSkill: preparedSkill(),
+      activatedCapabilityGroups: ['browser'],
+      now,
+    })
+    const claimService = new BrowserTargetClaimService(new BrowserTargetClaimRepository(accessor))
+    const claim = claimService.acquire({
+      partition: 'persist:browser-profile-default',
+      tabId: 'tab-1',
+      physicalTargetToken: 'physical-tab-1',
+      bootIncarnationId: 'boot-human-takeover',
+      profileId: 'default',
+      surface: 'user-view',
+      parentTaskId,
+      browserTaskId: route.browserTaskId,
+      ownerRunId,
+      scopeId,
+      sessionId: null,
+    })
+    if (isAgentBrowserError(claim)) throw new Error(claim.message)
+    const siblingClaim = claimService.acquire({
+      partition: 'persist:browser-profile-default',
+      tabId: 'tab-2',
+      physicalTargetToken: 'physical-tab-2',
+      bootIncarnationId: 'boot-human-takeover',
+      profileId: 'default',
+      surface: 'agent-view',
+      parentTaskId,
+      browserTaskId: route.browserTaskId,
+      ownerRunId,
+      scopeId,
+      sessionId: null,
+    })
+    if (isAgentBrowserError(siblingClaim)) throw new Error(siblingClaim.message)
+    const additionalUserClaim = claimService.acquire({
+      partition: 'persist:browser-profile-default',
+      tabId: 'tab-3',
+      physicalTargetToken: 'physical-tab-3',
+      bootIncarnationId: 'boot-human-takeover',
+      profileId: 'default',
+      surface: 'agent-view',
+      parentTaskId,
+      browserTaskId: route.browserTaskId,
+      ownerRunId,
+      scopeId,
+      sessionId: null,
+    })
+    if (isAgentBrowserError(additionalUserClaim)) throw new Error(additionalUserClaim.message)
     const takeover = await repository.createHumanTakeoverIntent({
       parentTaskId,
       ownerRunId,
       browserTaskId: route.browserTaskId,
+      targetClaimId: claim.claimId,
+      targetClaimGeneration: claim.generation,
       physicalTarget: {
         surface: 'user-view',
         scopeId,
@@ -839,7 +924,27 @@ test('human takeover keeps its exact user instruction in the durable suspension 
       userPrompt,
       now,
     })
-    const sourceItems = [{ role: 'user', content: '完成网页任务' } as AgentInputItem]
+    const sharedTakeover = await repository.createHumanTakeoverIntent({
+      parentTaskId,
+      ownerRunId,
+      browserTaskId: route.browserTaskId,
+      targetClaimId: additionalUserClaim.claimId,
+      targetClaimGeneration: additionalUserClaim.generation,
+      physicalTarget: {
+        surface: 'agent-view',
+        scopeId,
+        profileId: 'default',
+        sessionId: null,
+        tabId: 'tab-3',
+        physicalTargetToken: 'physical-tab-3',
+        source: 'supervision_button',
+      },
+      userPrompt,
+      now,
+    })
+    assert.equal(sharedTakeover.takeoverId, takeover.takeoverId)
+    const additionalUserOwned = claimService.read(additionalUserClaim.logicalKey)
+    assert.equal(additionalUserOwned?.state, 'user_owned')
     await repository.writeCleanBoundary({
       parentTaskId,
       browserTaskId: route.browserTaskId,
@@ -869,6 +974,113 @@ test('human takeover keeps its exact user instruction in the durable suspension 
     assert.equal(row?.waiting_for, 'confirmation')
     assert.equal(row?.blocked_reason, '请完成页面验证 · 验证完成后继续当前任务')
     assert.deepEqual(JSON.parse(row?.human_takeover_ref_json || '{}').userPrompt, userPrompt)
+    assert.equal(claimService.read(claim.logicalKey)?.state, 'user_owned')
+    assert.equal(claimService.read(siblingClaim.logicalKey)?.state, 'suspended')
+    assert.equal(claimService.read(additionalUserClaim.logicalKey)?.state, 'user_owned')
+    assert.equal(claimService.read(siblingClaim.logicalKey)?.suspensionCheckpointId, row
+      ? JSON.parse(db.prepare('SELECT checkpoint_refs_json FROM task_projections WHERE task_id = ?').get<{ checkpoint_refs_json: string }>(parentTaskId)?.checkpoint_refs_json || '{}').suspensionCheckpointId
+      : null)
+
+    const newOwnerRunId = 'run-browser-human-takeover-resumed'
+    const firstBeforeResume = claimService.read(claim.logicalKey)
+    const additionalBeforeResume = claimService.read(additionalUserClaim.logicalKey)
+    assert.ok(firstBeforeResume?.suspensionCheckpointId)
+    assert.ok(additionalBeforeResume?.suspensionCheckpointId)
+    const concurrentWake = await Promise.allSettled([
+      repository.completeHumanTakeover({
+      taskId: parentTaskId,
+      takeoverId: takeover.takeoverId,
+      newOwnerRunId,
+      executionBinding: executionBinding(newOwnerRunId),
+      wakeId: 'wake-tab-1',
+      targetClaim: {
+        partition: firstBeforeResume.logicalKey.partition,
+        tabId: firstBeforeResume.logicalKey.tabId,
+        physicalTargetToken: firstBeforeResume.physicalTargetToken || '',
+        claimId: firstBeforeResume.claimId,
+        generation: firstBeforeResume.generation,
+        suspensionCheckpointId: firstBeforeResume.suspensionCheckpointId,
+        browserTaskId: route.browserTaskId,
+      },
+      now: new Date().toISOString(),
+      }),
+      repository.completeHumanTakeover({
+        taskId: parentTaskId,
+        takeoverId: takeover.takeoverId,
+        newOwnerRunId: 'run-browser-human-takeover-ignored-racer',
+        executionBinding: executionBinding('run-browser-human-takeover-ignored-racer'),
+        wakeId: 'wake-tab-3',
+        targetClaim: {
+          partition: additionalBeforeResume.logicalKey.partition,
+          tabId: additionalBeforeResume.logicalKey.tabId,
+          physicalTargetToken: additionalBeforeResume.physicalTargetToken || '',
+          claimId: additionalBeforeResume.claimId,
+          generation: additionalBeforeResume.generation,
+          suspensionCheckpointId: additionalBeforeResume.suspensionCheckpointId,
+          browserTaskId: route.browserTaskId,
+        },
+        now: new Date().toISOString(),
+      }),
+      repository.resumeSuspendedBrowserWorkflow({
+        taskId: parentTaskId,
+        newOwnerRunId: 'run-browser-human-takeover-task-racer',
+        executionBinding: executionBinding('run-browser-human-takeover-task-racer'),
+        wake: {
+          wakeId: 'wake-task-racer',
+          checkpointId: firstBeforeResume.suspensionCheckpointId,
+          basisRevision: Number(row ? JSON.parse(row.human_takeover_ref_json).basisRevision : 0),
+          kind: 'user_continue',
+          sourceId: 'task-racer',
+          sourceDigest: 'stale-by-design',
+          issuedAt: new Date().toISOString(),
+        },
+      }),
+    ])
+    assert.equal(concurrentWake[0].status, 'fulfilled')
+    assert.equal(concurrentWake[1].status, 'fulfilled')
+    assert.equal(concurrentWake[2].status, 'rejected')
+    const successorCount = [concurrentWake[0], concurrentWake[1]].filter((entry) => (
+      entry.status === 'fulfilled' && entry.value.createdSuccessor
+    )).length
+    assert.equal(successorCount, 1)
+    const resumed = claimService.read(claim.logicalKey)
+    assert.equal(resumed?.state, 'held')
+    assert.equal(resumed?.ownerRunId, newOwnerRunId)
+    assert.equal(resumed?.generation, claim.generation + 2)
+    assert.equal(claimService.read(siblingClaim.logicalKey)?.state, 'suspended')
+    const additionalResume = concurrentWake[1]
+    assert.equal(additionalResume.status, 'fulfilled')
+    const additionalResumed = claimService.read(additionalUserClaim.logicalKey)
+    assert.equal(additionalResumed?.state, 'held')
+    assert.equal(additionalResumed?.ownerRunId, newOwnerRunId)
+    const receiptKinds = db.prepare(
+      'SELECT kind FROM browser_control_receipts WHERE browser_task_id = ? ORDER BY sequence',
+    ).all<{ kind: string }>(route.browserTaskId).map((entry) => entry.kind)
+    assert.deepEqual(receiptKinds.slice(-6), [
+      'target_user_owned',
+      'claim_suspended',
+      'target_resume_authorized',
+      'claim_resumed',
+      'target_resume_authorized',
+      'claim_resumed',
+    ])
+    const receiptCount = receiptKinds.length
+    await assert.rejects(
+      repository.completeHumanTakeover({
+        taskId: parentTaskId,
+        takeoverId: takeover.takeoverId,
+        newOwnerRunId: 'run-browser-human-takeover-duplicate',
+        executionBinding: executionBinding('run-browser-human-takeover-duplicate'),
+        now: new Date().toISOString(),
+      }),
+      /takeover_receipt_not_pending/,
+    )
+    assert.equal(
+      db.prepare('SELECT COUNT(*) AS count FROM browser_control_receipts WHERE browser_task_id = ?')
+        .get<{ count: number }>(route.browserTaskId)?.count,
+      receiptCount,
+    )
+    assert.equal(claimService.read(claim.logicalKey)?.generation, claim.generation + 2)
   } finally {
     db.close()
   }
@@ -938,6 +1150,21 @@ test('non-done core closeout terminates all browser ledgers without requiring a 
       executionBinding: ownerBinding,
       now,
     })
+    const claimService = new BrowserTargetClaimService(new BrowserTargetClaimRepository(accessor))
+    const heldClaim = claimService.acquire({
+      partition: 'persist:browser',
+      tabId: 'tab-browser-non-done-closeout',
+      physicalTargetToken: 'physical-browser-non-done-closeout',
+      bootIncarnationId: 'boot-browser-non-done-closeout',
+      profileId: null,
+      surface: 'user-view',
+      parentTaskId,
+      browserTaskId: route.browserTaskId,
+      ownerRunId,
+      scopeId,
+      sessionId: null,
+    })
+    if (isAgentBrowserError(heldClaim)) throw new Error(heldClaim.message)
     db.prepare(
       'UPDATE task_projections SET continuation_ref_json = ? WHERE task_id = ?',
     ).run(JSON.stringify({
@@ -1056,6 +1283,20 @@ test('non-done core closeout terminates all browser ledgers without requiring a 
       db.prepare('SELECT status FROM browser_tasks WHERE id = ?').get(route.browserTaskId),
       { status: 'failed' },
     )
+    assert.equal(claimService.read(heldClaim.logicalKey)?.state, 'released')
+    assert.deepEqual(
+      db.prepare(
+        `SELECT kind, previous_claim_id, previous_generation, next_generation
+           FROM browser_control_receipts
+          WHERE browser_task_id = ? AND kind = 'claim_released'`,
+      ).get(route.browserTaskId),
+      {
+        kind: 'claim_released',
+        previous_claim_id: heldClaim.claimId,
+        previous_generation: heldClaim.generation,
+        next_generation: heldClaim.generation + 1,
+      },
+    )
     const quality = db.prepare(
       'SELECT proof_refs_json, checkins_json, criteria_json FROM task_projections WHERE task_id = ?',
     ).get<{ proof_refs_json: string; checkins_json: string; criteria_json: string }>(parentTaskId)
@@ -1069,6 +1310,124 @@ test('non-done core closeout terminates all browser ledgers without requiring a 
       template: 'research/browser',
       items: [],
     })
+  } finally {
+    db.close()
+  }
+})
+
+test('bound Browser Parent handoff recovery settlements stay inside the workflow transaction', async (t) => {
+  if (skipIfSqliteUnavailable(t, 'browser-handoff-recovery-settlement-native')) return
+  const db = openDb()
+  try {
+    const accessor = { getRawDb: () => db }
+    const projections = new TaskProjectionRepository(accessor)
+    const repository = new AgentSessionCheckpointRepository(accessor)
+    const now = '2026-07-22T06:00:00.000Z'
+
+    const createBoundParent = async (suffix: string) => {
+      const parentTaskId = `parent-handoff-recovery-${suffix}`
+      const scopeId = `scope-handoff-recovery-${suffix}`
+      const ownerRunId = `run-handoff-recovery-${suffix}`
+      const binding = executionBinding(ownerRunId)
+      projections.create({
+        taskId: parentTaskId,
+        scopeId,
+        runId: ownerRunId,
+        taskType: 'research',
+        module: 'browser',
+        status: 'recoverable_paused',
+        interactionState: 'suspended',
+        waitingFor: 'background',
+        steps: [],
+        ownerAgentId: 'collector',
+        taskOrigin: 'user_root',
+        executionBinding: binding,
+        continuationRef: {
+          kind: 'handoff_takeover',
+          taskId: parentTaskId,
+          targetAgentId: 'collector',
+          handoffGeneration: 1,
+          userRequestVerbatim: '继续原任务',
+          consumed: false,
+        } as never,
+        createdAt: now,
+        updatedAt: now,
+      })
+      db.prepare(
+        `INSERT INTO chat_conversations (id, agent, title, created_at, updated_at)
+         VALUES (?, 'butler', 'Browser handoff recovery', ?, ?)`,
+      ).run(scopeId, now, now)
+      const sourceMessageId = `message-handoff-recovery-${suffix}`
+      db.prepare(
+        `INSERT INTO chat_messages (id, conversation_id, role, content, timestamp, meta_json)
+         VALUES (?, ?, 'user', '继续原任务', ?, '{}')`,
+      ).run(sourceMessageId, scopeId, now)
+      await repository.bindBrowserWorkflowRoute({
+        parentTaskId,
+        ownerRunId,
+        sourceMessageId,
+        executionBinding: binding,
+        now,
+      })
+      return parentTaskId
+    }
+
+    const retryTaskId = await createBoundParent('retry')
+    assert.throws(
+      () => projections.update(retryTaskId, { blockedReason: 'must-not-bypass-workflow' }),
+      /bound Browser Parent requires workflow unit-of-work/,
+    )
+    await repository.settleHandoffTakeoverContinuation({
+      parentTaskId: retryTaskId,
+      handoffGeneration: 1,
+      outcome: 'recovery_failed',
+      attempts: 1,
+      error: 'core_closeout_owner_mismatch',
+      now: '2026-07-22T06:01:00.000Z',
+    })
+    const retried = projections.get(retryTaskId)
+    assert.equal((retried?.continuationRef as Record<string, unknown>).startupRecoveryAttempts, 1)
+    assert.equal((retried?.continuationRef as Record<string, unknown>).consumed, false)
+    assert.equal(retried?.status, 'recoverable_paused')
+
+    await repository.settleHandoffTakeoverContinuation({
+      parentTaskId: retryTaskId,
+      handoffGeneration: 1,
+      outcome: 'consumed',
+      now: '2026-07-22T06:02:00.000Z',
+    })
+    assert.equal((projections.get(retryTaskId)?.continuationRef as Record<string, unknown>).consumed, true)
+
+    db.prepare(`
+      UPDATE task_projections
+         SET continuation_ref_json = ?, status = 'recoverable_paused',
+             interaction_state = 'suspended', resumable_actions_json = NULL
+       WHERE task_id = ?
+    `).run(JSON.stringify({
+      kind: 'handoff_takeover',
+      taskId: retryTaskId,
+      targetAgentId: 'collector',
+      handoffGeneration: 1,
+      userRequestVerbatim: '继续原任务',
+      consumed: false,
+      startupRecoveryAttempts: 2,
+    }), retryTaskId)
+    await repository.settleHandoffTakeoverContinuation({
+      parentTaskId: retryTaskId,
+      handoffGeneration: 1,
+      outcome: 'recovery_terminal',
+      attempts: 3,
+      error: 'core_closeout_owner_mismatch',
+      now: '2026-07-22T06:03:00.000Z',
+    })
+    const terminal = projections.get(retryTaskId)
+    const terminalRef = terminal?.continuationRef as Record<string, unknown>
+    assert.equal(terminalRef.consumed, true)
+    assert.equal(terminalRef.startupRecoveryAttempts, 3)
+    assert.equal(terminalRef.startupRecoveryTerminal, true)
+    assert.equal(terminal?.status, 'failed')
+    assert.equal(terminal?.interactionState, 'suspended')
+    assert.deepEqual(terminal?.resumableActions, [])
   } finally {
     db.close()
   }

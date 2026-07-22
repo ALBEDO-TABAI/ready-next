@@ -19,12 +19,29 @@ import {
 
 export const AGENT_INTERACTION_TOOL_NAMES: readonly string[] = [
   'ask_user_questions',
+  'resume_task',
   'agent_propose_handoff',
   'propose_specialist_blueprint',
   'confirm_specialist_blueprint',
   'rename_specialist_agent',
   'declare_completion_criteria',
 ] as const
+
+const RESUME_TASK_DESCRIPTION = [
+  '恢复本轮 TurnFrame resumable_candidates 中明确选中的既有任务。必须原样传入候选的 task_id；候选有 checkpoint_id 时也必须原样传入。',
+  '只有用户语义明确指向某个候选时才能调用。候选超过一个且用户没有指明时，先用 ask_user_questions 让用户选择；零候选时禁止调用，并把当前消息作为普通新请求处理。',
+  '不要根据“最新”“最近”或列表顺序替用户选择；不要自己编造 task_id 或 checkpoint_id。',
+].join('\n')
+
+const RESUME_TASK_INPUT_SCHEMA = {
+  type: 'object',
+  properties: {
+    task_id: { type: 'string', minLength: 1, description: 'TurnFrame 候选中的 taskId。' },
+    checkpoint_id: { type: 'string', minLength: 1, description: '候选中的 checkpointId；候选为空时省略。' },
+  },
+  required: ['task_id'],
+  additionalProperties: false,
+} as const
 
 const DECLARE_COMPLETION_CRITERIA_DESCRIPTION = [
   '在规划或执行早期，把你对「这个任务做到什么程度才算完成」的具体判断登记为补充验收标准（1-8 条，每条 ≤120 字符的可验证陈述）。任务承诺交付文件时，同时用 expected_outputs 声明每个最终文件目标。终态裁决时会逐项核对。',
@@ -457,6 +474,11 @@ export function getAgentInteractionAnthropicTools(): Array<Record<string, unknow
       input_schema: ASK_USER_QUESTIONS_INPUT_SCHEMA,
     }),
     normalizeAnthropicToolSchema({
+      name: 'resume_task',
+      description: RESUME_TASK_DESCRIPTION,
+      input_schema: RESUME_TASK_INPUT_SCHEMA,
+    }),
+    normalizeAnthropicToolSchema({
       name: 'agent_propose_handoff',
       description: PROPOSE_HANDOFF_DESCRIPTION,
       input_schema: PROPOSE_HANDOFF_INPUT_SCHEMA,
@@ -492,6 +514,14 @@ export function getAgentInteractionOpenAITools(): Array<Record<string, unknown>>
         name: 'ask_user_questions',
         description: ASK_USER_QUESTIONS_DESCRIPTION,
         parameters: ASK_USER_QUESTIONS_INPUT_SCHEMA,
+      },
+    }),
+    normalizeOpenAIToolSchema({
+      type: 'function',
+      function: {
+        name: 'resume_task',
+        description: RESUME_TASK_DESCRIPTION,
+        parameters: RESUME_TASK_INPUT_SCHEMA,
       },
     }),
     normalizeOpenAIToolSchema({

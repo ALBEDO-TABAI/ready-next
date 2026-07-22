@@ -23,6 +23,7 @@
  */
 
 import { randomUUID } from 'node:crypto'
+import { getInteractionLifecycleRegistry } from '../../agent-control/runtime-core/interaction-lifecycle-registry'
 
 export interface EphemeralAskUserRecord {
   executionId: string
@@ -87,6 +88,13 @@ export class EphemeralExecutionStore {
 
   register(record: EphemeralAskUserRecord): void {
     this.records.set(record.executionId, record)
+    getInteractionLifecycleRegistry().register({
+      interactionId: record.executionId,
+      runId: record.requestId || '',
+      agentId: record.agent || '',
+      scopeId: record.scopeId || record.sessionId || '',
+      type: 'ask_user',
+    })
   }
 
   onCleared(listener: (event: EphemeralAskUserClearedEvent) => void): () => void {
@@ -122,6 +130,13 @@ export class EphemeralExecutionStore {
     if (!record) return false
     clearTimeout(record.timeoutHandle)
     this.records.delete(executionId)
+    getInteractionLifecycleRegistry().settle({
+      interactionId: record.executionId,
+      runId: record.requestId || '',
+      agentId: record.agent || '',
+      scopeId: record.scopeId || record.sessionId || '',
+      disposition: 'resume_with_result',
+    })
     this.notifyCleared(record, 'resolved')
     record.resolve(value)
     return true
@@ -136,6 +151,13 @@ export class EphemeralExecutionStore {
     if (!record) return false
     clearTimeout(record.timeoutHandle)
     this.records.delete(executionId)
+    getInteractionLifecycleRegistry().settle({
+      interactionId: record.executionId,
+      runId: record.requestId || '',
+      agentId: record.agent || '',
+      scopeId: record.scopeId || record.sessionId || '',
+      disposition: 'terminate',
+    })
     this.notifyCleared(record, 'rejected')
     record.reject(error)
     return true
@@ -145,6 +167,13 @@ export class EphemeralExecutionStore {
   clear(): void {
     for (const [, record] of this.records) {
       clearTimeout(record.timeoutHandle)
+      getInteractionLifecycleRegistry().settle({
+        interactionId: record.executionId,
+        runId: record.requestId || '',
+        agentId: record.agent || '',
+        scopeId: record.scopeId || record.sessionId || '',
+        disposition: 'terminate',
+      })
       this.notifyCleared(record, 'cleared')
       try {
         record.reject(new Error('Ephemeral ask_user store cleared'))
@@ -165,6 +194,13 @@ export class EphemeralExecutionStore {
       if (record.sessionId === sessionId) {
         clearTimeout(record.timeoutHandle)
         this.records.delete(executionId)
+        getInteractionLifecycleRegistry().settle({
+          interactionId: record.executionId,
+          runId: record.requestId || '',
+          agentId: record.agent || '',
+          scopeId: record.scopeId || record.sessionId || '',
+          disposition: 'terminate',
+        })
         this.notifyCleared(record, 'rejected')
         try {
           record.reject(error)

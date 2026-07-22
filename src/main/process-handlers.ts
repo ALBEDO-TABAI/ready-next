@@ -4,10 +4,11 @@ import { PROCESS_METRICS, type ProcessMetricName } from './utils/process-metrics
 
 type FatalProcessEvent = 'unhandledRejection' | 'uncaughtException'
 type RuntimeGoneEvent = 'render-process-gone' | 'child-process-gone'
+type MainLifecycleEvent = 'main-process-started'
 
 export interface MainProcessEventRecord {
   at: string
-  kind: FatalProcessEvent | RuntimeGoneEvent
+  kind: FatalProcessEvent | RuntimeGoneEvent | MainLifecycleEvent
   error?: {
     name?: string
     message: string
@@ -118,6 +119,12 @@ export function registerMainProcessHandlers(deps: MainProcessHandlerDeps): void 
   const timeoutMs = deps.timeoutMs ?? DEFAULT_FATAL_CLEANUP_TIMEOUT_MS
   const now = deps.now ?? (() => new Date())
   let fatalExitStarted = false
+
+  void safeRecordEvent(recordEvent, {
+    at: now().toISOString(),
+    kind: 'main-process-started',
+    details: { pid: process.pid },
+  })
 
   const handleFatal = (kind: FatalProcessEvent, error: unknown, details: Record<string, unknown>): void => {
     if (fatalExitStarted) return

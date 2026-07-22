@@ -96,7 +96,7 @@ test('fatal process handlers run bounded cleanup and exit once', async () => {
   assert.equal(cleanupCalls, 1)
   assert.deepEqual(exits, [1])
   assert.equal(metrics[0]?.name, PROCESS_METRICS.processUnhandledRejection)
-  assert.equal(records.length, 1)
+  assert.equal(records.length, 2)
 })
 
 test('fatal process cleanup timeout still exits', async () => {
@@ -141,7 +141,7 @@ test('Electron runtime gone handlers record metrics without forcing exit', () =>
     PROCESS_METRICS.renderProcessGone,
     PROCESS_METRICS.childProcessGone,
   ])
-  assert.equal(records.length, 2)
+  assert.equal(records.length, 3)
 })
 
 test('S0 R7: registering process observability records the Main boot identity', () => {

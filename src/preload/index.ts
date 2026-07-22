@@ -46,6 +46,7 @@ import type {
   VerticalRailOverlayCommand,
   VerticalRailOverlaySnapshot,
 } from '../shared/browser-vertical-rail-overlay'
+import type { BrowserTargetResumeRequest } from '../shared/browser-workflow-control'
 import type {
   BrowserFastCardContextActionEvent,
   FastCardOverlayCommand,
@@ -541,16 +542,20 @@ const browserAPI = {
   // Agent-browser supervision: one-step takeover + task listing.
   getAgentSupervisionState: () => ipcRenderer.invoke('browser:getAgentSupervisionState'),
   requestAgentInterruption: () => ipcRenderer.invoke('browser:requestAgentInterruption'),
+  resumeTargetClaim: (request: BrowserTargetResumeRequest) =>
+    ipcRenderer.invoke('browser:resumeTargetClaim', request),
   onAgentControlChanged: (callback: (data: { state: string }) => void) => {
     const handler = (_event: unknown, data: { state: string }) => callback(data)
     ipcRenderer.on('browser:agentControlChanged', handler)
     return () => ipcRenderer.removeListener('browser:agentControlChanged', handler)
   },
   onLeaseChanged: (callback: (data: {
+    claims?: Array<Record<string, unknown>>
     surfaces?: Record<string, unknown>
     activeWriteSurface?: string | null
   }) => void) => {
     const handler = (_event: unknown, data: {
+      claims?: Array<Record<string, unknown>>
       surfaces?: Record<string, unknown>
       activeWriteSurface?: string | null
     }) => callback(data)
@@ -1212,6 +1217,7 @@ const skillsAPI = {
 
 // App / Auto-update API
 const appAPI = {
+  browserLiveProofHandshake: (nonce: string) => ipcRenderer.invoke('app:browserLiveProofHandshake', nonce),
   checkUpdate: () => ipcRenderer.invoke('app:check-update'),
   installUpdate: () => ipcRenderer.invoke('app:install-update'),
   captureWindow: () => ipcRenderer.invoke('app:captureWindow'),

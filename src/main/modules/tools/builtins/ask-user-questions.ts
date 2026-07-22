@@ -38,6 +38,7 @@ import {
   type ToolExecutionOutput,
 } from '../../agent-control/tools-runtime/tool-result-types'
 import { ToolDomainError } from '../tool-errors'
+import type { InteractionLifecycleIdentity } from '../../agent-control/runtime-core/interaction-lifecycle-registry'
 import {
   AskUserQuestionsStore,
   generateAskUserQuestionsCardId,
@@ -177,6 +178,7 @@ export interface AskUserQuestionsCardEvent {
   scopeId?: string | null
   agent?: string | null
   requestId?: string | null
+  lifecycleType?: InteractionLifecycleIdentity['type']
   responsePolicy?: AskUserQuestionsResponsePolicy
   questions: AskUserQuestionSpec[]
   askedAt: number
@@ -204,6 +206,7 @@ export interface AskUserQuestionsHandlerDeps {
   scopeId?: string
   agent?: string | null
   requestId?: string | null
+  lifecycleType?: InteractionLifecycleIdentity['type']
   /** Restricts who may answer host-owned, setting-level confirmations. */
   responsePolicy?: AskUserQuestionsResponsePolicy
   signal?: AbortSignal
@@ -634,6 +637,7 @@ export async function executeAskUserQuestions(
         agent,
         requestId,
         responsePolicy,
+        lifecycleType: deps.lifecycleType,
         questions,
         askedAt,
       resolve: resolvePromise,

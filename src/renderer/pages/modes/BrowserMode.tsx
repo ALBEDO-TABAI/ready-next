@@ -1280,7 +1280,9 @@ export default function BrowserMode({
                     <AgentBrowserSupervisionPanel
                       controlState={agentSupervision.controlState}
                       tasks={agentSupervision.tasks}
+                      claims={agentSupervision.claims}
                       requestInterruption={agentSupervision.requestInterruption}
+                      resumeTargetClaim={agentSupervision.resumeTargetClaim}
                       surfaces={agentSupervision.surfaces}
                       activeWriteSurface={agentSupervision.activeWriteSurface}
                       variant="collapsedRail"
@@ -1309,7 +1311,9 @@ export default function BrowserMode({
                       <AgentBrowserSupervisionPanel
                         controlState={agentSupervision.controlState}
                         tasks={agentSupervision.tasks}
+                        claims={agentSupervision.claims}
                         requestInterruption={agentSupervision.requestInterruption}
+                        resumeTargetClaim={agentSupervision.resumeTargetClaim}
                         surfaces={agentSupervision.surfaces}
                         activeWriteSurface={agentSupervision.activeWriteSurface}
                         variant="pane"

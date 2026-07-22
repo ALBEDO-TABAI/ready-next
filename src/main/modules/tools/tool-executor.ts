@@ -540,6 +540,7 @@ async function executeToolCallInner(
         sessionId: context.sessionId ?? null,
         conversationId: context.scope?.id || context.scopeId || context.sessionId || null,
         runId: context.runId ?? null,
+        agentId: context.agent ?? context.scope?.agent ?? null,
         taskId: context.taskId ?? null,
         scopeId: context.scopeId || context.scope?.id || null,
         signal: context.abortSignal,
@@ -894,6 +895,33 @@ async function executeToolCallInner(
           })
 
         case 'agent_interaction':
+          if (toolName === 'resume_task') {
+            const runtime = context.runtime
+            const taskId = String((args as Record<string, unknown>).task_id || '').trim()
+            const checkpointId = String((args as Record<string, unknown>).checkpoint_id || '').trim() || null
+            const candidate = context.activeFrame?.resumableCandidates?.find((item) => item.taskId === taskId)
+            if (!runtime || !context.scopeId) {
+              return createToolExecutionOutput('任务未恢复：当前运行环境不可用。', {
+                shape: 'json',
+                data: { success: false, errorKind: 'runtime_unavailable' },
+              })
+            }
+            if (!candidate || candidate.checkpointId !== checkpointId) {
+              return createToolExecutionOutput('任务未恢复：候选身份已变化，请重新读取当前候选。', {
+                shape: 'json',
+                data: { success: false, errorKind: 'stale_resume_candidate', taskId },
+              })
+            }
+            const result = await runtime.resumeRun({
+              scopeId: context.scopeId,
+              taskId,
+              responseText: '继续已选择的任务。',
+            })
+            return createToolExecutionOutput(result.success ? '已恢复所选任务。' : `任务未恢复：${result.error || '未知原因'}`, {
+              shape: 'json',
+              data: { ...result, taskId, checkpointId },
+            })
+          }
           // D4 — 声明验收标准：校验在 builtin 内代码强制，落 projection 行
           // modelCriteria（整组替换），finalizer 终态合并裁决。
           if (toolName === 'declare_completion_criteria') {
@@ -908,7 +936,20 @@ async function executeToolCallInner(
             return executeDeclareCompletionCriteria(args, {
               taskId: context.taskId ?? null,
               sessionId: context.sessionId ?? null,
-              updateTaskCompletionDeclaration: (taskId, patch) => store.update(taskId, patch),
+              updateTaskCompletionDeclaration: async (taskId, patch) => {
+                const browserTaskId = context.browserWorkflowRoute?.browserTaskId
+                const ownerRunId = context.runId
+                if (browserTaskId && ownerRunId) {
+                  await runtime.updateBrowserWorkflowCompletionDeclaration({
+                    parentTaskId: taskId,
+                    browserTaskId,
+                    ownerRunId,
+                    ...patch,
+                  })
+                  return
+                }
+                store.update(taskId, patch)
+              },
             })
           }
           const semanticJudge = toolName === 'confirm_specialist_blueprint' || toolName === 'propose_specialist_blueprint'
@@ -1011,6 +1052,8 @@ async function executeToolCallInner(
               sessionId: context.sessionId,
               conversationId: context.scope?.id || context.sessionId,
               scopeId: context.scopeId,
+              runId: context.runId,
+              agentId: context.agent || context.scope?.agent || null,
               signal: context.abortSignal,
               emitCard: getAskUserQuestionsCardEmitter(),
               persistCard: getAskUserQuestionsCardPersistor(),

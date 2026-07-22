@@ -24,8 +24,6 @@ import {
   __resetMcpRegistryForTests
 } from '../main/modules/mcp/registry'
 import { setCachedMcpOAuthToken, __resetMcpOAuthForTests } from '../main/modules/mcp/oauth'
-import { __resetBrowserWriteLeaseServiceForTests } from '../main/modules/browser-engine/agent-browser-lease-singleton'
-import { isAgentBrowserError } from '../main/modules/browser-engine/agent-browser-errors'
 import type { BrowserTurnLease } from '../main/modules/browser-engine/agent-browser-turn-lease'
 import {
   clearLastReferenceSkill,
@@ -6650,9 +6648,7 @@ test('agent sdk runtime exposes complete grounded browser plus requested domain 
   }
 })
 
-test('agent sdk runtime reuses one browser write lease across consecutive tool calls in a run', async () => {
-  __resetBrowserWriteLeaseServiceForTests()
-  try {
+test('agent sdk runtime reuses one browser target-claim turn across consecutive tool calls in a run', async () => {
     const goBackDefinition = createToolDefinition({
       name: 'browser_navigate',
       groupId: 'browser',
@@ -6682,23 +6678,16 @@ test('agent sdk runtime reuses one browser write lease across consecutive tool c
         additionalProperties: false
       }
     })
-    const leaseIds: string[] = []
+    const turnClaims: BrowserTurnLease[] = []
     const runtime = createRuntime({
       listToolDefinitions: () => [goBackDefinition, navigateDefinition],
       executeToolCall: async (toolName, _args, context) => {
         const turnLease = (context as { browserLease?: BrowserTurnLease | null }).browserLease
-        assert.ok(turnLease, 'browser tools must receive a turn lease')
-        const gate = turnLease.ensureGate()
-        if (isAgentBrowserError(gate)) {
-          return createToolExecutionOutput(gate.message, {
-            shape: 'json',
-            data: gate
-          })
-        }
-        leaseIds.push(gate.leaseId)
+        assert.ok(turnLease, 'browser tools must receive a target-claim turn')
+        turnClaims.push(turnLease)
         return createToolExecutionOutput(`${toolName} ok`, {
           shape: 'json',
-          data: { ok: true, leaseId: gate.leaseId }
+          data: { ok: true }
         })
       },
       runAgent: async ({ tools, onTextDelta }) => {
@@ -6732,11 +6721,8 @@ test('agent sdk runtime reuses one browser write lease across consecutive tool c
     )
 
     assert.equal(result.success, true)
-    assert.equal(leaseIds.length, 2)
-    assert.equal(leaseIds[0], leaseIds[1], 'one SDK run must reuse the same browser lease')
-  } finally {
-    __resetBrowserWriteLeaseServiceForTests()
-  }
+    assert.equal(turnClaims.length, 2)
+    assert.equal(turnClaims[0], turnClaims[1], 'one SDK run must reuse the same target-claim turn')
 })
 
 test('agent sdk runtime does not hardcode a reduced browser surface for upload wording', async () => {

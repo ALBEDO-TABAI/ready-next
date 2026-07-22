@@ -62,7 +62,7 @@ import type {
 } from './agent-sdk-types'
 import type { TurnTerminalReason } from './turn-frame'
 import type { PreparedSkillTurnTruth } from '../contracts/browser-workflow-control'
-import { deriveChainedSkillReadRoots } from './turn-frame-resolver'
+import { buildTurnFrameResumableCandidates, deriveChainedSkillReadRoots } from './turn-frame-resolver'
 import type { AgentSessionCheckpoint } from '../../repositories/agent-session-checkpoint-repository'
 
 import type { TurnOrchestratorHost } from './agent-sdk-turn-context'
@@ -118,6 +118,7 @@ export type AgentSdkTurnPreparationResult =
       preNarrowingToolDefinitions: ToolDefinition[]
       toolDefinitions: ToolDefinition[]
       turnFollowup: ReturnType<typeof classifyFollowupIntent>
+      resumableCandidates: ReturnType<typeof buildTurnFrameResumableCandidates>
     }
 
 export interface TurnTextPolicyDecision {
@@ -200,6 +201,8 @@ export function prepareAgentSdkTurn(
       isLocalSendImRetryFollowup(content as RunMessage, effectiveExecutionOptions?.requestEnvelope))
   const scopeTaskRefs =
     host.getScopeTaskRefs && sessionId ? host.getScopeTaskRefs(sessionId) : undefined
+  const resumableCandidates = buildTurnFrameResumableCandidates(scopeTaskRefs)
+  activeFrame.resumableCandidates = resumableCandidates
   const skillHintRelevanceForTurn = resolveSkillHintRelevanceForTurn({
     message: content as RunMessage,
     sessionId,
@@ -511,6 +514,7 @@ export function prepareAgentSdkTurn(
     requestedCapabilityConflicts,
     preNarrowingToolDefinitions,
     toolDefinitions,
-    turnFollowup
+    turnFollowup,
+    resumableCandidates
   }
 }

@@ -32,12 +32,12 @@ function makeDeps() {
   }
 }
 
-test('合法声明写入 projection 并发 model_criteria_declared 账本', () => {
+test('合法声明写入 projection 并发 model_criteria_declared 账本', async () => {
   const events: Array<Record<string, unknown>> = []
   __setMetricSinkForTests((event) => { events.push(event as unknown as Record<string, unknown>) })
   try {
     const { writes, deps } = makeDeps()
-    const output = executeDeclareCompletionCriteria(
+    const output = await executeDeclareCompletionCriteria(
       {
         criteria: ['  产物文件已写入并回报绝对路径 ', '三个来源交叉验证过'],
         expected_outputs: ['/Users/user/V/描述.md', '/Users/user/V/深读.md'],
@@ -62,31 +62,31 @@ test('合法声明写入 projection 并发 model_criteria_declared 账本', () =
   }
 })
 
-test('校验矩阵：空数组 / 超条数 / 空白条目 / 超长条目 / 无任务上下文', () => {
+test('校验矩阵：空数组 / 超条数 / 空白条目 / 超长条目 / 无任务上下文', async () => {
   const { writes, deps } = makeDeps()
-  assert.equal(executeDeclareCompletionCriteria({ criteria: [] }, deps).data?.errorKind, 'input_validation')
+  assert.equal((await executeDeclareCompletionCriteria({ criteria: [] }, deps)).data?.errorKind, 'input_validation')
   assert.equal(
-    executeDeclareCompletionCriteria({ criteria: Array.from({ length: DECLARE_CRITERIA_MAX_ITEMS + 1 }, (_, i) => `条目 ${i}`) }, deps).data?.errorKind,
+    (await executeDeclareCompletionCriteria({ criteria: Array.from({ length: DECLARE_CRITERIA_MAX_ITEMS + 1 }, (_, i) => `条目 ${i}`) }, deps)).data?.errorKind,
     'input_validation',
   )
-  assert.equal(executeDeclareCompletionCriteria({ criteria: ['合法', '   '] }, deps).data?.errorKind, 'input_validation')
-  assert.equal(executeDeclareCompletionCriteria({ criteria: ['长'.repeat(121)] }, deps).data?.errorKind, 'input_validation')
-  assert.equal(executeDeclareCompletionCriteria({ criteria: ['合法'], expected_outputs: [] }, deps).data?.errorKind, 'input_validation')
-  assert.equal(executeDeclareCompletionCriteria({ criteria: ['合法'], expected_outputs: ['x'.repeat(201)] }, deps).data?.errorKind, 'input_validation')
-  assert.equal(executeDeclareCompletionCriteria({ criteria: ['合法'], expected_outputs: ['/Users/user/V/'] }, deps).data?.errorKind, 'input_validation')
+  assert.equal((await executeDeclareCompletionCriteria({ criteria: ['合法', '   '] }, deps)).data?.errorKind, 'input_validation')
+  assert.equal((await executeDeclareCompletionCriteria({ criteria: ['长'.repeat(121)] }, deps)).data?.errorKind, 'input_validation')
+  assert.equal((await executeDeclareCompletionCriteria({ criteria: ['合法'], expected_outputs: [] }, deps)).data?.errorKind, 'input_validation')
+  assert.equal((await executeDeclareCompletionCriteria({ criteria: ['合法'], expected_outputs: ['x'.repeat(201)] }, deps)).data?.errorKind, 'input_validation')
+  assert.equal((await executeDeclareCompletionCriteria({ criteria: ['合法'], expected_outputs: ['/Users/user/V/'] }, deps)).data?.errorKind, 'input_validation')
   assert.equal(writes.length, 0, '校验失败绝不落库')
 
-  const noTask = executeDeclareCompletionCriteria(
+  const noTask = await executeDeclareCompletionCriteria(
     { criteria: ['合法标准'] },
     { taskId: null, updateTaskCompletionDeclaration: () => { throw new Error('must not write') } },
   )
   assert.equal(noTask.data?.errorKind, 'task_context_missing')
 })
 
-test('重复声明是整组替换（幂等语义由写侧承载）', () => {
+test('重复声明是整组替换（幂等语义由写侧承载）', async () => {
   const { writes, deps } = makeDeps()
-  executeDeclareCompletionCriteria({ criteria: ['第一版标准'] }, deps)
-  executeDeclareCompletionCriteria({ criteria: ['第二版标准 A', '第二版标准 B'] }, deps)
+  await executeDeclareCompletionCriteria({ criteria: ['第一版标准'] }, deps)
+  await executeDeclareCompletionCriteria({ criteria: ['第二版标准 A', '第二版标准 B'] }, deps)
   assert.equal(writes.length, 2)
   assert.deepEqual(writes[1], {
     taskId: 'task-d4',

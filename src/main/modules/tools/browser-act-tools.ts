@@ -741,6 +741,7 @@ export interface BrowserActToolContext {
   abortSignal?: AbortSignal
   sessionId?: string
   mutationBoundary: BrowserMutationBoundary
+  agentOwnedWorkTab?: { browserTaskId: string } | null
   requestPowerConfirmation?: (details: {
     toolName: string
     effects: BrowserPowerEffect[]
@@ -753,6 +754,7 @@ export interface BrowserActToolContext {
     callToAction: string
     details: string
     timeoutSec: number
+    tabId: string
   }) => Promise<{ takeoverId: string }>
   attachBrowserToolOutput: (
     result: string | ToolExecutionOutput,
@@ -873,20 +875,25 @@ export async function executeBrowserActTool(
   args: Record<string, unknown>,
   ctx: BrowserActToolContext,
 ): Promise<string | ToolExecutionOutput> {
-  const { controller, abortSignal, sessionId,  mutationBoundary, attachBrowserToolOutput } = ctx
+  const { controller, abortSignal, sessionId, mutationBoundary, attachBrowserToolOutput } = ctx
   switch (toolName) {
       case 'tabs_open': {
         const url = String(args.url || 'about:blank')
-        const created = await controller.createTab(url, {
-          background: args.background === true,
-          openerTabId: typeof args.opener_tab_id === 'string' ? args.opener_tab_id : null,
-        })
+        const created = ctx.agentOwnedWorkTab
+          ? await controller.ensureAgentWorkTab(ctx.agentOwnedWorkTab.browserTaskId, url)
+          : await controller.createTab(url, {
+              background: args.background === true,
+              openerTabId: typeof args.opener_tab_id === 'string' ? args.opener_tab_id : null,
+            })
         return JSON.stringify(created, null, 2)
       }
 
       case 'tabs_switch': {
         const tabId = String(args.tab_id || '')
         if (!tabId) return 'Error: tab_id is required'
+        if (ctx.agentOwnedWorkTab && controller.getAgentWorkTab(ctx.agentOwnedWorkTab.browserTaskId) === tabId) {
+          return JSON.stringify({ success: true, tabId, presented: false }, null, 2)
+        }
         return JSON.stringify(controller.switchTab(tabId), null, 2)
       }
 
@@ -2451,6 +2458,16 @@ export async function executeBrowserActTool(
       case 'request_takeover': {
         const callToAction = String(args.reason || args.call_to_action || '').trim()
         if (!callToAction) return 'Error: reason is required'
+        const tabId = String(args.tab_id || controller.getActiveTab?.()?.id || '').trim()
+        if (!tabId) {
+          return browserStructuredOutput({ ok: false, errorKind: 'human_takeover_not_grounded' })
+        }
+        const grounding = normalizeBrowserBlockingChallengeProbe(
+          await controller.executeJS(tabId, buildBrowserBlockingChallengeProbeJs()),
+        )
+        if (!grounding.blocked && !grounding.pageError && !grounding.emptyShell) {
+          return browserStructuredOutput({ ok: false, errorKind: 'human_takeover_not_grounded' })
+        }
         if (!ctx.createHumanTakeoverIntent) {
           return browserStructuredOutput({
             ok: false,
@@ -2461,7 +2478,7 @@ export async function executeBrowserActTool(
         const details = String(args.instruction || args.details || '')
         const timeoutSec = Math.max(30, Math.min(1200, Number(args.timeout_sec || 300)))
         log(`[browser-v3][human-required] reasonLength=${callToAction.length} timeout=${timeoutSec}s`)
-        const takeover = await ctx.createHumanTakeoverIntent({ callToAction, details, timeoutSec })
+        const takeover = await ctx.createHumanTakeoverIntent({ callToAction, details, timeoutSec, tabId })
         return browserStructuredOutput({
           ok: true,
           operationId: 'request_takeover',

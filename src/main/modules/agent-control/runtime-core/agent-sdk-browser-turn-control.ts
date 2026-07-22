@@ -13,6 +13,7 @@ import type {
 } from '../../../../shared/browser-workflow-control'
 import type { TurnOrchestratorHost } from './agent-sdk-turn-context'
 import type { RunHandle, ToolBridgeRuntimeContext } from './agent-sdk-types'
+import { getInteractionLifecycleRegistry } from './interaction-lifecycle-registry'
 
 const BROWSER_OPERATION_ID_SET = new Set<string>(BROWSER_OPERATION_IDS)
 const BROWSER_POWER_EFFECT_SET = new Set<string>(BROWSER_POWER_EFFECTS)
@@ -401,8 +402,38 @@ export function recordBrowserWorkflowToolResult(
     : ''
   if (powerSuspensionRequest) {
     runtimeContext.browserSuspensionRequest = powerSuspensionRequest
+    const lifecycle = getInteractionLifecycleRegistry()
+    lifecycle.register({
+      interactionId: powerSuspensionRequest.requestId,
+      runId: runtimeContext.runId,
+      agentId: runtimeContext.agentName,
+      scopeId: runtimeContext.sessionId || runtimeContext.taskId,
+      type: 'browser_confirmation',
+    })
+    lifecycle.settle({
+      interactionId: powerSuspensionRequest.requestId,
+      runId: runtimeContext.runId,
+      agentId: runtimeContext.agentName,
+      scopeId: runtimeContext.sessionId || runtimeContext.taskId,
+      disposition: 'checkpoint',
+    })
   } else if (permissionSuspensionRequest) {
     runtimeContext.browserSuspensionRequest = permissionSuspensionRequest
+    const lifecycle = getInteractionLifecycleRegistry()
+    lifecycle.register({
+      interactionId: permissionSuspensionRequest.requestId,
+      runId: runtimeContext.runId,
+      agentId: runtimeContext.agentName,
+      scopeId: runtimeContext.sessionId || runtimeContext.taskId,
+      type: 'browser_confirmation',
+    })
+    lifecycle.settle({
+      interactionId: permissionSuspensionRequest.requestId,
+      runId: runtimeContext.runId,
+      agentId: runtimeContext.agentName,
+      scopeId: runtimeContext.sessionId || runtimeContext.taskId,
+      disposition: 'checkpoint',
+    })
   } else if (takeoverId) {
     runtimeContext.browserSuspensionRequest = { kind: 'human_takeover', takeoverId }
   } else {

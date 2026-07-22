@@ -3799,6 +3799,122 @@ const migrations: Migration[] = [
           ON agent_steering_message_resources(message_id, ordinal);
       `)
     },
+  },
+  {
+    name: '087_browser_target_claims',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS browser_target_claims (
+          partition TEXT NOT NULL,
+          tab_id TEXT NOT NULL,
+          physical_target_token TEXT,
+          boot_incarnation_id TEXT,
+          claim_id TEXT NOT NULL UNIQUE,
+          generation INTEGER NOT NULL,
+          profile_id TEXT,
+          surface TEXT NOT NULL,
+          parent_task_id TEXT NOT NULL,
+          browser_task_id TEXT NOT NULL,
+          owner_run_id TEXT NOT NULL,
+          scope_id TEXT,
+          session_id TEXT,
+          state TEXT NOT NULL,
+          suspension_checkpoint_id TEXT,
+          suspension_reason TEXT,
+          acquired_at INTEGER NOT NULL,
+          heartbeat_at INTEGER NOT NULL,
+          expires_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          PRIMARY KEY (partition, tab_id),
+          CHECK (generation >= 1),
+          CHECK (surface IN ('user-view', 'agent-view')),
+          CHECK (state IN ('held', 'user_owned', 'suspended', 'expired', 'released')),
+          CHECK ((physical_target_token IS NULL) = (boot_incarnation_id IS NULL)),
+          CHECK (state != 'held' OR physical_target_token IS NOT NULL),
+          CHECK (
+            (state IN ('user_owned', 'suspended')
+              AND suspension_checkpoint_id IS NOT NULL AND suspension_reason IS NOT NULL)
+            OR (state IN ('held', 'expired', 'released')
+              AND suspension_checkpoint_id IS NULL AND suspension_reason IS NULL)
+          )
+        );
+        CREATE INDEX IF NOT EXISTS idx_browser_target_claims_owner
+          ON browser_target_claims(owner_run_id, state, updated_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_browser_target_claims_parent
+          ON browser_target_claims(parent_task_id, browser_task_id, state, updated_at DESC);
+
+        CREATE TABLE IF NOT EXISTS browser_control_receipts (
+          receipt_id TEXT PRIMARY KEY,
+          sequence INTEGER NOT NULL,
+          parent_task_id TEXT NOT NULL,
+          browser_task_id TEXT NOT NULL,
+          owner_run_id TEXT NOT NULL,
+          partition TEXT,
+          tab_id TEXT,
+          physical_target_token TEXT,
+          boot_incarnation_id TEXT,
+          previous_claim_id TEXT,
+          previous_generation INTEGER,
+          next_claim_id TEXT,
+          next_generation INTEGER,
+          clean_base_checkpoint_id TEXT,
+          suspension_checkpoint_id TEXT,
+          wake_id TEXT,
+          successor_run_id TEXT,
+          continuation_generation INTEGER,
+          idempotency_key TEXT NOT NULL UNIQUE,
+          kind TEXT NOT NULL,
+          error_code TEXT,
+          recoverable INTEGER NOT NULL,
+          created_at TEXT NOT NULL
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_browser_control_receipts_child_sequence
+          ON browser_control_receipts(browser_task_id, sequence);
+        CREATE INDEX IF NOT EXISTS idx_browser_control_receipts_target
+          ON browser_control_receipts(partition, tab_id, sequence);
+
+        INSERT OR IGNORE INTO browser_target_claims (
+          partition, tab_id, physical_target_token, boot_incarnation_id,
+          claim_id, generation, profile_id, surface,
+          parent_task_id, browser_task_id, owner_run_id, scope_id, session_id,
+          state, suspension_checkpoint_id, suspension_reason,
+          acquired_at, heartbeat_at, expires_at, updated_at
+        )
+        SELECT
+          CASE
+            WHEN NULLIF(json_extract(human_takeover_ref_json, '$.physicalTarget.profileId'), '') IS NULL
+              THEN 'persist:browser'
+            ELSE 'persist:browser-profile-' || lower(json_extract(human_takeover_ref_json, '$.physicalTarget.profileId'))
+          END,
+          json_extract(human_takeover_ref_json, '$.physicalTarget.tabId'),
+          NULL,
+          NULL,
+          'claim-migrated-' || task_id,
+          1,
+          NULLIF(json_extract(human_takeover_ref_json, '$.physicalTarget.profileId'), ''),
+          json_extract(human_takeover_ref_json, '$.physicalTarget.surface'),
+          task_id,
+          json_extract(human_takeover_ref_json, '$.browserTaskId'),
+          json_extract(human_takeover_ref_json, '$.ownerRunId'),
+          scope_id,
+          NULLIF(json_extract(human_takeover_ref_json, '$.physicalTarget.sessionId'), ''),
+          'user_owned',
+          json_extract(checkpoint_refs_json, '$.suspensionCheckpointId'),
+          'browser_target_user_owned',
+          CAST(strftime('%s','now') AS INTEGER) * 1000,
+          CAST(strftime('%s','now') AS INTEGER) * 1000,
+          CAST(strftime('%s','now') AS INTEGER) * 1000,
+          CAST(strftime('%s','now') AS INTEGER) * 1000
+        FROM task_projections
+        WHERE human_takeover_ref_json IS NOT NULL
+          AND json_extract(human_takeover_ref_json, '$.state') = 'pending'
+          AND NULLIF(json_extract(human_takeover_ref_json, '$.physicalTarget.tabId'), '') IS NOT NULL
+          AND NULLIF(json_extract(human_takeover_ref_json, '$.physicalTarget.surface'), '') IS NOT NULL
+          AND NULLIF(json_extract(human_takeover_ref_json, '$.browserTaskId'), '') IS NOT NULL
+          AND NULLIF(json_extract(human_takeover_ref_json, '$.ownerRunId'), '') IS NOT NULL
+          AND NULLIF(json_extract(checkpoint_refs_json, '$.suspensionCheckpointId'), '') IS NOT NULL;
+      `)
+    },
   }
 ]
 

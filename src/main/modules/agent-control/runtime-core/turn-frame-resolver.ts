@@ -17,6 +17,7 @@ import {
 } from '../session/active-skill-context'
 import { applySteeringToTurnFrame } from './turn-frame-steering'
 import type { TurnFrame, TurnFrameLiveness, TurnFrameMode, TurnUserIntent } from './turn-frame'
+import type { FollowupTaskRef } from '../../../../shared/agent-followup-intent'
 
 /**
  * Stage M (M0a) — seed `frame.activeArtifactRoots` from the resolved
@@ -161,6 +162,22 @@ export interface ResolveTurnFrameInputs {
   taskRuns?: SkillTaskRunRecord[]
   activeContext?: ActiveSkillContext | null
   referenceHint?: ReferenceSkillHint | null
+  resumableTaskRefs?: ReadonlyArray<FollowupTaskRef>
+}
+
+export function buildTurnFrameResumableCandidates(
+  refs: ReadonlyArray<FollowupTaskRef> | null | undefined,
+): TurnFrame['resumableCandidates'] {
+  return (refs || [])
+    .filter((ref) => ref.canResume === true)
+    .map((ref) => ({
+      taskId: ref.taskId,
+      ownerAgentId: ref.ownerAgentId || null,
+      summary: ref.summary || null,
+      blockerCategory: ref.blockerCategory || null,
+      checkpointId: ref.continuationCheckpointId || null,
+      browserTaskId: ref.browserTaskId || null,
+    }))
 }
 
 function contextWithoutRemembered(inputs: Parameters<typeof resolveActiveSkillContextFromInputs>[0]): ActiveSkillContext | null {
@@ -355,6 +372,7 @@ export function resolveTurnFrame(inputs: ResolveTurnFrameInputs): TurnFrame {
         runContract,
       }
       : null,
+    resumableCandidates: buildTurnFrameResumableCandidates(inputs.resumableTaskRefs),
     liveness: inferLiveness(context, supervisorForContext, userIntent),
     progress: progressFromSnapshot(supervisorForContext),
     steering: {

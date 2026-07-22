@@ -4,11 +4,12 @@ import test from 'node:test'
 import { executeToolCall, type ToolContext } from '../main/modules/tools/tool-executor'
 import { createBrowserStructuredOutput } from '../main/modules/tools/browser-failure-output'
 import { BrowserTurnLease } from '../main/modules/browser-engine/agent-browser-turn-lease'
-import { BrowserWriteLeaseService } from '../main/modules/browser-engine/browser-write-lease'
+import type { BrowserTargetClaimService } from '../main/modules/browser-engine/browser-target-claims'
 import { browserSnapshotService } from '../main/modules/browser-engine/browser-snapshot-service'
 import type { BrowserController } from '../main/modules/browser-engine/ipc-handler'
 import { attachBrowserWorkflowFixture } from './utils/browser-workflow-fixture'
 import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
+import { acquireTarget, createTargetClaimService } from './utils/browser-target-claim-fixture'
 
 test('browser-tool-failure-envelope declares transitive sqlite ABI guard', (t) => {
   skipIfSqliteUnavailable(t, 'browser-tool-failure-envelope transitive sqlite load')
@@ -31,16 +32,16 @@ function makeController(overrides: Partial<BrowserController> = {}): BrowserCont
 }
 
 function writeContext(controller: BrowserController): ToolContext {
-  const service = new BrowserWriteLeaseService()
+  const service = createTargetClaimService()
   return writeContextWithLease(controller, service)
 }
 
-function writeContextWithLease(controller: BrowserController, service: BrowserWriteLeaseService): ToolContext {
+function writeContextWithLease(controller: BrowserController, service: BrowserTargetClaimService): ToolContext {
   const fixture = attachBrowserWorkflowFixture(controller)
   return {
     invoker: 'host',
     browserController: fixture.controller,
-    browserLease: new BrowserTurnLease({ taskId: 'task-test', runId: 'run-test' }, 'user-view', service),
+    browserLease: new BrowserTurnLease({ taskId: 'parent-task-test', runId: 'run-test' }, service),
     allowedToolNames: null,
     sessionId: 'browser-failure-envelope-test',
     scopeId: 'browser-failure-envelope-test',
@@ -130,9 +131,17 @@ test('browser write without surface binding returns structured browser failure d
   assert.equal(output.envelope?.kind, 'internal_error')
 })
 
-test('browser write with held lease returns structured browser failure data', async () => {
-  const service = new BrowserWriteLeaseService()
-  service.acquire({ surface: 'user-view', taskId: 'other-task', runId: 'other-run' })
+test('browser write with a target held by another run returns structured browser failure data', async () => {
+  const service = createTargetClaimService()
+  acquireTarget(service, {
+    partition: 'persist:browser',
+    tabId: 'tab-1',
+    physicalTargetToken: 'physical-tab-1',
+    bootIncarnationId: 'physical-tab-1',
+    parentTaskId: 'other-task',
+    browserTaskId: 'other-browser-task',
+    ownerRunId: 'other-run',
+  })
   const output = await executeToolCall(
     'browser_click',
     { selector: '#submit' },

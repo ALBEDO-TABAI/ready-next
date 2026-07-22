@@ -11,6 +11,7 @@ import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { setupAgentIPC, cleanupAgentRuntime, reconcileAgentSchedulesOnResume } from './modules/claude-bridge/ipc-handler'
 import { AgentManager } from './modules/claude-bridge/agent-manager'
 import { setupBrowserIPC, type BrowserController } from './modules/browser-engine/ipc-handler'
+import { setupBrowserLiveProofHandshake } from './modules/browser-engine/live-proof-handshake'
 import { setupDocumentIPC } from './modules/document-engine/ipc-handler'
 import { setupSearchIPC, shutdownFileWatchers } from './modules/search-engine/ipc-handler'
 import { setupFileEmergenceIPC } from './modules/file-emergence/ipc-handler'
@@ -598,6 +599,7 @@ async function createWindow(): Promise<void> {
 // --- Register all ipcMain.handle() handlers once (not per-window) ---
 
 function setupGlobalIPC(): void {
+  setupBrowserLiveProofHandshake()
   // Module IPC handlers (no window dependency)
   setDirectoryChangeBroadcastTargetProvider(() => (
     mainWindow && !mainWindow.isDestroyed() ? [mainWindow.webContents] : []

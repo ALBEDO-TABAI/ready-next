@@ -1018,8 +1018,23 @@ export class AgentSdkToolExecutor {
     if (definition.name === 'use_skill') {
       output = this.activateSkillForSameRun(output, runtimeContext)
     }
+    const previousBudgetWarning = runtimeContext.taskBudgetRuntime?.warningLevel || 'none'
     runtimeContext.recordToolResult(definition.name, output)
-    const normalized = normalizeToolExecutionOutput(output)
+    let normalized = normalizeToolExecutionOutput(output)
+    const currentBudgetWarning = runtimeContext.taskBudgetRuntime?.warningLevel || 'none'
+    if (currentBudgetWarning !== 'none' && currentBudgetWarning !== previousBudgetWarning) {
+      output = createToolExecutionOutput(`${normalized.text}\n\n预算提醒：本轮剩余工具额度已进入 ${currentBudgetWarning}，请优先完成当前目标。`, {
+        shape: normalized.shape,
+        data: normalized.data,
+        projectionPatch: normalized.projectionPatch,
+        interactionHint: normalized.interactionHint,
+        content: normalized.content,
+        framePatch: normalized.framePatch,
+        contextModifier: normalized.contextModifier,
+        envelope: normalized.envelope,
+      })
+      normalized = normalizeToolExecutionOutput(output)
+    }
     if (isHandoffTakeoverToolOutput(output)) {
       runtimeContext.hostControl = 'handoff_takeover'
     }

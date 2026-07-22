@@ -32,8 +32,6 @@ import type { TurnOrchestratorHost } from './agent-sdk-turn-context'
 import { armDynamicDeliveryDeadline } from './dynamic-delivery/delivery-deadline'
 import { DeliveryOutputBuffer } from './dynamic-delivery/delivery-output-buffer'
 import { buildSanitizedCheckpointFromSession } from './dynamic-delivery/candidate-session-fork'
-import { getEphemeralExecutionStore } from '../../tools/skill-primitives/ephemeral-execution-store'
-import { getAskUserQuestionsStore } from '../../tools/builtins/ask-user-questions-store'
 import { createAgentSdkTurnGuards } from './agent-sdk-turn-guards'
 import { assembleAgentSdkTurnInput } from './agent-sdk-turn-input-assembly'
 import type { AgentSdkPreparedTurnContext } from './agent-sdk-turn-execution-types'
@@ -226,9 +224,8 @@ export async function executeAgentSdkPreparedTurn(
     abortController,
     runHandle,
     startedAtMs: runStartedAt,
-    isAwaitingUserInput: () =>
-      getEphemeralExecutionStore().hasPendingForRun(name, sessionId ?? null, runId)
-      || getAskUserQuestionsStore().hasPendingForRun(name, sessionId ?? null, runId),
+    agentId: name,
+    scopeId: sessionId ?? null,
   })
   const emitOutputBeforeProgressTracking = emitOutput
   emitOutput = (chunk, type, projectionPatch) => {

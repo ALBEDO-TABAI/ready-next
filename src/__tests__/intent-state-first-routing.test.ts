@@ -48,10 +48,11 @@ test('state-first hard rule: no continuable ref → 继续 is new_task, never co
   }
 })
 
-test('continuable ref present: 继续 routes to continue_task with the target task id', () => {
+test('continuable ref present: 继续 stays semantic without selecting a task id', () => {
   const result = classifyFollowupIntent('继续', { hasActiveTaskContext: true, taskRefs: [completed, running] })
-  assert.equal(result.kind, 'continue_task')
-  assert.equal(result.targetTaskId, 'task-run', 'first continuable ref becomes the target')
+  assert.equal(result.kind, 'new_task')
+  assert.equal(result.continuationCue, true)
+  assert.equal(result.targetTaskId, undefined, 'code must not select a resumable task')
 })
 
 test('active ref + vague interrogative phrasing falls into status_query (fact-fed fallback)', () => {
@@ -64,9 +65,10 @@ test('active ref + vague interrogative phrasing falls into status_query (fact-fe
   assert.equal(noTask.kind, 'new_task')
 })
 
-test('legacy callers without task facts keep S4-1 behavior unchanged', () => {
+test('legacy callers without task facts preserve the cue without selecting a task', () => {
   const legacy = classifyFollowupIntent('继续', { hasActiveTaskContext: true })
-  assert.equal(legacy.kind, 'continue_task')
+  assert.equal(legacy.kind, 'new_task')
+  assert.equal(legacy.continuationCue, true)
   const statusLegacy = classifyFollowupIntent('怎么样了', { hasActiveTaskContext: true })
   assert.equal(statusLegacy.kind, 'status_query')
 })
@@ -91,7 +93,8 @@ test('selectFollowupTaskRefs maps scope projections into classifier facts', () =
   assert.equal(refs.length, 2)
   assert.deepEqual(refs[0], {
     taskId: 'task-1', status: 'running', interactionState: 'running',
-    summary: '采集主页', blockerCategory: null,
+    summary: '采集主页', blockerCategory: null, ownerAgentId: null,
+    continuationCheckpointId: null, browserTaskId: null, canResume: false,
   })
   assert.equal(refs[1].interactionState, 'check_in_pending')
   assert.deepEqual(selectFollowupTaskRefs(store, 'scope-other'), [])

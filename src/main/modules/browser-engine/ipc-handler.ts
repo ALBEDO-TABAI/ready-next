@@ -19,18 +19,19 @@ import type {
 } from './capability-types'
 import { AgentInputPassthroughRegistry } from './agent-input-passthrough'
 import {
-  beginAgentTabUserTakeover,
   createAgentTabUserInputTakeoverHandlers,
   persistAgentTabUserTakeover,
 } from './agent-tab-control-gate'
-import { getBrowserWriteLeaseService } from './agent-browser-lease-singleton'
+import { getBrowserTargetClaimService } from './browser-target-claim-singleton'
+import { setBrowserTargetClaimRunCloseoutPort } from './browser-target-claim-closeout'
+import {
+  bootIncarnationIdFromPhysicalTargetToken,
+  partitionForBrowserProfile,
+  type BrowserPhysicalTargetKey,
+  type BrowserTargetClaimIdentity,
+} from './browser-target-claims'
 import { BrowserFileChooserGuard } from './file-chooser-guard'
 import { agentBrowserError, isAgentBrowserError, type AgentBrowserStructuredError, type AgentBrowserSurface } from './agent-browser-errors'
-import {
-  isUserViewKeyboardTakeoverInput,
-  recordUserViewTakeoverSignal,
-  shouldRecordUserViewTabSwitch,
-} from './user-view-takeover-bridge'
 import type {
   BrowserCDPErrorCode,
   BrowserKeyEventPayload,
@@ -133,6 +134,8 @@ import { disposeBrowserPageMapAmbiguity } from './browser-page-map-ambiguity-cac
 import { BrowserVisibilityRuntime } from './browser-visibility-runtime'
 import type {
   BrowserHumanTakeoverIntentPort,
+  BrowserTargetResumePort,
+  BrowserTargetResumeRequest,
   BrowserHumanTakeoverPhysicalTarget,
   BrowserWorkflowWriteAdmissionPort,
   BrowserWorkflowWriteTarget,
@@ -149,8 +152,12 @@ function sameBrowserWorkflowWriteTarget(
     && left.scopeId === right.scopeId
     && left.profileId === right.profileId
     && left.sessionId === right.sessionId
+    && left.partition === right.partition
     && left.tabId === right.tabId
     && left.physicalTargetToken === right.physicalTargetToken
+    && left.bootIncarnationId === right.bootIncarnationId
+    && left.claimId === right.claimId
+    && left.generation === right.generation
 }
 
 interface Tab extends BrowserTabMetaRecord {
@@ -211,7 +218,6 @@ export class BrowserController {
   viewBounds: BrowserRect = { x: 0, y: 0, width: 800, height: 600 }
   splitViewBounds: BrowserRect = { x: 0, y: 0, width: 800, height: 600 }
   previewBounds: BrowserRect = { x: 0, y: 0, width: 800, height: 600 }
-  private readonly frozenBoundsByTab = new Map<string, { bounds: BrowserRect; tokens: Set<string> }>()
   private readonly browserVisibilityRuntime: BrowserVisibilityRuntime
   private readonly localMediaDropRuns = new Map<string, number>()
   private readonly browserHostKind = BROWSER_HOST_KIND
@@ -238,8 +244,9 @@ export class BrowserController {
   readonly agentInputPassthrough = new AgentInputPassthroughRegistry()
   /** Agent-tab supervision listener de-duplication. */
   private readonly supervisedAgentTabWebContentsIds = new Set<number>()
-  /** The dedicated background tab the collector sub-agent drives (plan §3.5/§3.9). */
+  /** Most recently created task-owned work tab, used only for supervision display. */
   private agentTabId: string | null = null
+  private readonly agentWorkTabs = new Map<string, string>()
   private readonly tabLifecycleService: BrowserTabLifecycleService
   private readonly tabMetaService: BrowserTabMetaService<Tab>
   private readonly tabShellService: BrowserTabShellService
@@ -250,6 +257,8 @@ export class BrowserController {
   private readonly windowOpenService: BrowserWindowOpenService
   private readonly userViewTakeoverWebContentsIds = new Set<number>()
   private humanTakeoverIntentPort: BrowserHumanTakeoverIntentPort | null = null
+  private targetResumePort: BrowserTargetResumePort | null = null
+  private targetCheckpointResolver: ((parentTaskId: string) => string | null) | null = null
   private workflowWriteAdmissionPort: BrowserWorkflowWriteAdmissionPort | null = null
   private workflowJournalUnitOfWork: BrowserWorkflowJournalUnitOfWorkPort | null = null
   private readonly workflowPhysicalBindings = new Map<string, BrowserWorkflowWriteTarget>()
@@ -258,7 +267,7 @@ export class BrowserController {
     notice: BrowserSitePermissionNotice
   }>>()
   private readonly pendingPhysicalTakeovers = new Set<string>()
-  private p7cLiveProofLeaseId: string | null = null
+  private p7cLiveProofClaimIdentity: BrowserTargetClaimIdentity | null = null
 
   publishAgentBrowserAction(event: { phase: 'start' | 'finish' | 'abort' }): void {
     publishBrowserAgentActionLifecycle(event.phase)
@@ -505,7 +514,6 @@ export class BrowserController {
       setSplitViewBounds: (bounds) => {
         this.splitViewBounds = bounds
       },
-      getFrozenBounds: (tabId) => this.getFrozenBoundsForTab(tabId),
       shouldPresentHosts: () => this.browserVisibilityRuntime.shouldPresentHosts(),
       isAllowedUrl: (url) => isAllowedBrowserURL(url, { allowLocalHtml: true }),
       createTab: (url) => this.createTab(url),
@@ -576,9 +584,9 @@ export class BrowserController {
         shell.openExternal(url)
       },
     })
-    getBrowserWriteLeaseService().onTransition((transition) => {
+    getBrowserTargetClaimService().onTransition((transition) => {
       this.notifyBrowserLeaseChanged()
-      if (transition.surface === 'agent-view') this.notifyAgentControlChanged()
+      this.notifyAgentControlChanged()
       this.performanceRuntime.reconcile()
       // D16 — 写租约离开 held（释放/接管/过期）即解除文件选择器拦截，
       // 用户随后的原生选择器行为不受 agent 遗留影响。
@@ -588,6 +596,9 @@ export class BrowserController {
         void this.fileChooserGuard.disarmAll()
       }
     })
+    setBrowserTargetClaimRunCloseoutPort((input) => {
+      getBrowserTargetClaimService().closeoutRun(input)
+    })
   }
 
   private logBrowserDiag(message: string): void {
@@ -595,9 +606,8 @@ export class BrowserController {
   }
 
   private isTabLeaseProtected(tabId: string): boolean {
-    const leases = getBrowserWriteLeaseService()
-    return leases.getLease('user-view')?.tabId === tabId
-      || leases.getLease('agent-view')?.tabId === tabId
+    return getBrowserTargetClaimService().list()
+      .some((claim) => claim.logicalKey.tabId === tabId && claim.state === 'held')
   }
 
   private disposeTabRuntimeResources(tabId: string): void {
@@ -668,16 +678,14 @@ export class BrowserController {
   ): BrowserPermissionRequestBinding | null {
     if (this.partitionForTab(tabId) !== partition) return null
     const workflowTarget = this.workflowPhysicalBindings.get(tabId) || null
-    const lease = workflowTarget
-      ? getBrowserWriteLeaseService().getLease(workflowTarget.surface)
-      : null
     return resolveAgentPermissionRequestBinding({
       partition,
       tabId,
       physicalTargetToken: this.getPhysicalTargetToken(tabId) || null,
       workflowTarget,
-      lease,
-      writeAdmitted: workflowTarget ? this.isBrowserWorkflowWriteAdmitted(workflowTarget) : false,
+      admittedTarget: workflowTarget && this.isBrowserWorkflowWriteAdmitted(workflowTarget)
+        ? workflowTarget
+        : null,
     })
   }
 
@@ -712,7 +720,6 @@ export class BrowserController {
     for (const record of fileChooserRecords) {
       if (
         sameBrowserPermissionRequestBinding(record.target, {
-          partition: record.target.partition,
           ...target,
         })
       ) notices.push(record.notice)
@@ -980,33 +987,6 @@ export class BrowserController {
     return { ...this.viewBounds }
   }
 
-  private acquireTabBoundsLock(tabId: string, token: string): () => void {
-    const existing = this.frozenBoundsByTab.get(tabId)
-    if (existing) {
-      existing.tokens.add(token)
-      this.logBrowserDiag(`[browser-host][bounds-lock] reuse tab=${tabId} token=${token} x=${existing.bounds.x} y=${existing.bounds.y} w=${existing.bounds.width} h=${existing.bounds.height}`)
-      return () => this.releaseTabBoundsLock(tabId, token)
-    }
-    const bounds = this.currentBoundsForTab(tabId)
-    this.frozenBoundsByTab.set(tabId, { bounds, tokens: new Set([token]) })
-    this.logBrowserDiag(`[browser-host][bounds-lock] acquire tab=${tabId} token=${token} x=${bounds.x} y=${bounds.y} w=${bounds.width} h=${bounds.height}`)
-    return () => this.releaseTabBoundsLock(tabId, token)
-  }
-
-  private releaseTabBoundsLock(tabId: string, token: string): void {
-    const existing = this.frozenBoundsByTab.get(tabId)
-    if (!existing) return
-    existing.tokens.delete(token)
-    if (existing.tokens.size > 0) return
-    this.frozenBoundsByTab.delete(tabId)
-    this.logBrowserDiag(`[browser-host][bounds-lock] release tab=${tabId} token=${token}`)
-  }
-
-  private getFrozenBoundsForTab(tabId: string): BrowserRect | null {
-    const existing = this.frozenBoundsByTab.get(tabId)
-    return existing ? { ...existing.bounds } : null
-  }
-
   private clearSplitTabHost(): void {
     if (!this.splitTabId) return
     const splitTab = this.tabs.get(this.splitTabId)
@@ -1157,6 +1137,19 @@ export class BrowserController {
     this.humanTakeoverIntentPort = port
   }
 
+  setBrowserTargetResumePort(port: BrowserTargetResumePort | null): void {
+    this.targetResumePort = port
+  }
+
+  setBrowserTargetCheckpointResolver(port: ((parentTaskId: string) => string | null) | null): void {
+    this.targetCheckpointResolver = port
+  }
+
+  async resumeBrowserTarget(input: BrowserTargetResumeRequest): Promise<{ success: boolean; error?: string; errorKind?: string }> {
+    if (!this.targetResumePort) return { success: false, error: 'target_resume_unavailable', errorKind: 'resume_failed' }
+    return this.targetResumePort(input)
+  }
+
   setBrowserWorkflowWriteAdmissionPort(port: BrowserWorkflowWriteAdmissionPort | null): void {
     this.workflowWriteAdmissionPort = port
   }
@@ -1183,6 +1176,16 @@ export class BrowserController {
     if (!current || !sameBrowserWorkflowWriteTarget(current, input)) return false
     if (this.pendingPhysicalTakeovers.has(input.tabId)) return false
     if (this.getPhysicalTargetToken(input.tabId) !== input.physicalTargetToken) return false
+    const denied = getBrowserTargetClaimService().checkWrite({
+      partition: input.partition,
+      tabId: input.tabId,
+      physicalTargetToken: input.physicalTargetToken,
+      bootIncarnationId: input.bootIncarnationId,
+      claimId: input.claimId,
+      generation: input.generation,
+      ownerRunId: input.ownerRunId,
+    })
+    if (denied) return false
     if (!this.workflowWriteAdmissionPort) return false
     return this.workflowWriteAdmissionPort(input)
   }
@@ -1195,11 +1198,6 @@ export class BrowserController {
     if (!current || !sameBrowserWorkflowWriteTarget(current, input)) return false
     if (this.getPhysicalTargetToken(input.tabId) !== input.physicalTargetToken) return false
     this.workflowPhysicalBindings.delete(input.tabId)
-    const leases = getBrowserWriteLeaseService()
-    if (leases.getLease(input.surface)?.tabId === input.tabId) {
-      leases.recordUserSignal({ surface: input.surface, source: 'explicit-button' })
-      leases.clearTakeover(input.surface)
-    }
     const tab = this.tabs.get(input.tabId)
     if (tab) {
       this.updateTabRuntimeState(input.tabId, { owner: 'manual', activity: 'attention' })
@@ -1314,40 +1312,6 @@ export class BrowserController {
   }
 
   /**
-   * Ensure the dedicated background tab the collector sub-agent drives (plan
-   * §3.5/§3.9), WITHOUT stealing the user's foreground. We create the tab,
-   * tag it owner:'agent', and restore whatever tab the user had active so the
-   * agent never preempts the visible browser.
-   */
-  async ensureAgentTab(profile?: string | null): Promise<string> {
-    const requestedProfile = String(profile || '').trim() || null
-    if (this.agentTabId) {
-      const agentTab = this.tabs.get(this.agentTabId)
-      if (agentTab?.owner === 'agent' && (agentTab.profile || null) === requestedProfile) {
-        this.updateTabRuntimeState(this.agentTabId, { activity: 'running' })
-        return this.agentTabId
-      }
-    }
-    // Create the agent tab in the BACKGROUND so it never becomes active or gets
-    // presented — no foreground preemption, no create-then-switch-back flicker
-    // (Codex result-review #4). Belt-and-suspenders: if the host ever activates
-    // it anyway, restore the user's tab.
-    const previousActive = this.activeTabId
-    const created = await this.createTab(READY_BROWSER_BLANK_URL, { background: true, profile: requestedProfile })
-    if (!created.success || !created.tabId) {
-      throw new Error(created.error || 'failed to create agent tab')
-    }
-    this.agentTabId = created.tabId
-    this.updateTabRuntimeState(created.tabId, { owner: 'agent', activity: 'running' })
-    this.syncPopupContextForTab(created.tabId)
-    if (previousActive && this.activeTabId === created.tabId && this.tabs.has(previousActive)) {
-      this.switchTab(previousActive)
-    }
-    this.attachAgentTabSupervision(created.tabId)
-    return created.tabId
-  }
-
-  /**
    * A real user key or mouse action on an actively driven agent tab takes over
    * immediately. Agent-injected CDP input is identified by
    * `agentInputPassthrough` and still passes without changing ownership.
@@ -1378,23 +1342,11 @@ export class BrowserController {
     })
   }
 
-  /**
-   * R18：某 tab 当前是否被 agent 主动驱动。唯一真源是驱动生命周期本身：
-   * bounds-lock 令牌（foreground-workflow: 与 collection: 前缀，随驱动同取
-   * 同放）或状态为 running 的前台 workflow 会话绑定。run 结束两者皆释放，
-   * 监督闸随之松手，用户在 agent 遗留页面上的输入不再被吞。
-   */
+  /** A tab is actively driven only while its exact target claim is held. */
   private isAgentActivelyDrivingTab(tabId: string): boolean {
-    const leaseService = getBrowserWriteLeaseService()
-    for (const surface of ['user-view', 'agent-view'] as const) {
-      if (leaseService.getLease(surface)?.tabId === tabId) return true
-    }
-    const locked = this.frozenBoundsByTab.get(tabId)
-    if (locked) {
-      for (const token of locked.tokens) {
-        if (token.startsWith('foreground-workflow:') || token.startsWith('collection:')) return true
-      }
-    }
+    if (getBrowserTargetClaimService().list().some((claim) => (
+      claim.logicalKey.tabId === tabId && claim.state === 'held'
+    ))) return true
     return false
   }
 
@@ -1406,26 +1358,22 @@ export class BrowserController {
     this.sendToRenderer('browser:leaseChanged', this.getBrowserLeaseSnapshot())
   }
 
-  private attachUserViewLeaseTakeover(tabId: string): void {
+  private attachTargetClaimSupervision(tabId: string): void {
     const webContents = this.tabs.get(tabId)?.view?.webContents
     if (!webContents || this.userViewTakeoverWebContentsIds.has(webContents.id)) return
     this.userViewTakeoverWebContentsIds.add(webContents.id)
-    webContents.on('before-input-event', (_event, input) => {
-      if (!isUserViewKeyboardTakeoverInput(input)) return
-      // D18-d：agent 自注入键不算用户接管信号
-      if (this.agentInputPassthrough.matchKey(input.key || '')) return
-      const tab = this.tabs.get(tabId)
-      if (!tab || tab.owner === 'agent') return
-      if (this.workflowPhysicalBindings.has(tabId)) {
-        void this.requestAgentInterruption(tabId, 'physical_input')
-        return
-      }
-      recordUserViewTakeoverSignal({
-        service: getBrowserWriteLeaseService(),
-        activeTabId: this.activeTabId,
-        signalTabId: tabId,
-        source: 'keyboard',
-      })
+    const inputTakeover = createAgentTabUserInputTakeoverHandlers({
+      isActivelyDriven: () => this.isAgentActivelyDrivingTab(tabId),
+      isFrozen: () => this.pendingPhysicalTakeovers.has(tabId),
+      isAgentKey: (key) => this.agentInputPassthrough.matchKey(key),
+      isAgentMouse: () => this.agentInputPassthrough.matchMouse(),
+      takeOver: () => { void this.requestAgentInterruption(tabId, 'physical_input') },
+    })
+    webContents.on('before-input-event', (event, input) => {
+      inputTakeover.onKeyboardInput(event, input)
+    })
+    webContents.on('before-mouse-event', (event, input) => {
+      inputTakeover.onMouseInput(event, input)
     })
     webContents.once('destroyed', () => {
       this.userViewTakeoverWebContentsIds.delete(webContents.id)
@@ -1450,47 +1398,46 @@ export class BrowserController {
   async requestAgentInterruption(
     requestedTabId?: string | null,
     source: BrowserHumanTakeoverPhysicalTarget['source'] = 'supervision_button',
+    signalSource: 'keyboard' | 'pointer' | 'navigation' | 'explicit-button' = source === 'supervision_button'
+      ? 'explicit-button'
+      : 'keyboard',
   ): Promise<{
     state: 'active' | 'frozen'
     frozen: boolean
     takeoverTabId?: string | null
   }> {
-    const leaseService = getBrowserWriteLeaseService()
-    const leases = (['agent-view', 'user-view'] as const)
-      .map((surface) => ({ surface, lease: leaseService.getLease(surface) }))
-      .filter((entry): entry is {
-        surface: 'agent-view' | 'user-view'
-        lease: NonNullable<ReturnType<typeof leaseService.getLease>>
-      } => Boolean(entry.lease))
+    const claimService = getBrowserTargetClaimService()
+    const claims = claimService.list().filter((claim) => claim.state === 'held')
     const selected = requestedTabId
-      ? leases.find((entry) => entry.lease.tabId === requestedTabId) || null
-      : leases.find((entry) => entry.lease.tabId === this.agentTabId)
-        || leases[0]
+      ? claims.find((claim) => claim.logicalKey.tabId === requestedTabId) || null
+      : claims.find((claim) => claim.logicalKey.tabId === this.agentTabId)
+        || claims[0]
         || null
-    const takeoverTabId = requestedTabId || selected?.lease.tabId || this.agentTabId
+    const takeoverTabId = requestedTabId || selected?.logicalKey.tabId || this.agentTabId
     const binding = takeoverTabId ? this.workflowPhysicalBindings.get(takeoverTabId) || null : null
     const physicalTargetToken = takeoverTabId ? this.getPhysicalTargetToken(takeoverTabId) : ''
     if (
       !selected
       || !takeoverTabId
       || !binding
-      || binding.surface !== selected.surface
+      || binding.claimId !== selected.claimId
+      || binding.generation !== selected.generation
       || !physicalTargetToken
       || !this.humanTakeoverIntentPort
     ) {
       return { state: this.getAgentControlState(), frozen: false, takeoverTabId: takeoverTabId || null }
     }
-    const frozen = beginAgentTabUserTakeover({
-      isTakenOver: () => leaseService.getState(selected.surface) === 'takeover',
-      fenceGroundedTasks: () => {},
-      recordLeaseTakeover: () => {
-        leaseService.recordUserSignal({ surface: selected.surface, source: 'explicit-button' })
-      },
-    })
-    if (!frozen) {
-      return { state: this.getAgentControlState(), frozen: true, takeoverTabId }
+    if (signalSource === 'navigation' && claimService.hasActiveAgentAction({
+      partition: selected.logicalKey.partition,
+      tabId: selected.logicalKey.tabId,
+      physicalTargetToken: selected.physicalTargetToken!,
+      bootIncarnationId: selected.bootIncarnationId!,
+      claimId: selected.claimId,
+      generation: selected.generation,
+      ownerRunId: selected.ownerRunId,
+    })) {
+      return { state: this.getAgentControlState(), frozen: false, takeoverTabId }
     }
-
     this.pendingPhysicalTakeovers.add(takeoverTabId)
     this.notifyAgentControlChanged()
     const persisted = await persistAgentTabUserTakeover({
@@ -1499,6 +1446,8 @@ export class BrowserController {
           parentTaskId: binding.parentTaskId,
           ownerRunId: binding.ownerRunId,
           browserTaskId: binding.browserTaskId,
+          targetClaimId: selected.claimId,
+          targetClaimGeneration: selected.generation,
           surface: binding.surface,
           scopeId: binding.scopeId,
           profileId: this.tabs.get(takeoverTabId)?.profile || null,
@@ -1517,16 +1466,17 @@ export class BrowserController {
       this.notifyAgentControlChanged()
       return { state: 'frozen', frozen: true, takeoverTabId }
     }
+    const frozen = claimService.read(selected.logicalKey)
+    if (frozen?.state !== 'user_owned') {
+      this.logBrowserDiag(`[browser-takeover] durable intent committed without target fence tab=${takeoverTabId}`)
+      return { state: 'frozen', frozen: true, takeoverTabId }
+    }
 
     if (takeoverTabId && this.tabs.has(takeoverTabId)) {
       this.updateTabRuntimeState(takeoverTabId, { owner: 'manual', activity: 'attention' })
       this.syncPopupContextForTab(takeoverTabId)
       if (takeoverTabId === this.agentTabId) this.agentTabId = null
     }
-    // The durable target fence above is now authoritative. Release the coarse
-    // surface takeover so an unrelated tab on the same surface remains usable;
-    // the old owner retains a stale lease id and therefore cannot write again.
-    leaseService.clearTakeover(selected.surface)
     this.pendingPhysicalTakeovers.delete(takeoverTabId)
     this.notifyAgentControlChanged()
 
@@ -1534,16 +1484,14 @@ export class BrowserController {
   }
 
   getAgentControlState(): 'active' | 'frozen' {
-    const leases = getBrowserWriteLeaseService()
     return this.pendingPhysicalTakeovers.size > 0
-      || leases.getState('agent-view') === 'takeover'
-      || leases.getState('user-view') === 'takeover'
+      || getBrowserTargetClaimService().list().some((claim) => claim.state === 'user_owned')
       ? 'frozen'
       : 'active'
   }
 
   getBrowserLeaseSnapshot(): BrowserLeaseSupervisionSnapshot {
-    return buildBrowserLeaseSupervisionSnapshot(getBrowserWriteLeaseService())
+    return buildBrowserLeaseSupervisionSnapshot(getBrowserTargetClaimService())
   }
 
   private isP7cLiveProofEnabled(): boolean {
@@ -1660,23 +1608,37 @@ export class BrowserController {
     }
     const tab = this.getActiveTab()
     if (!tab?.id) return { success: false, error: 'no active browser tab' }
-    const service = getBrowserWriteLeaseService()
-    const state = service.getState('user-view')
-    if (state === 'takeover' || state === 'expired') {
-      service.clearTakeover('user-view')
-    }
-    const lease = service.acquire({
+    const physicalTargetToken = this.getPhysicalTargetToken(tab.id)
+    if (!physicalTargetToken) return { success: false, error: 'physical target unavailable' }
+    const service = getBrowserTargetClaimService()
+    const ownerRunId = `p7c-live-proof-${Date.now()}`
+    const claim = service.acquire({
+      partition: partitionForBrowserProfile(tab.profile),
+      physicalTargetToken,
+      bootIncarnationId: bootIncarnationIdFromPhysicalTargetToken(physicalTargetToken),
+      profileId: tab.profile || null,
       surface: 'user-view',
-      taskId: 'p7c-live-proof',
-      runId: `p7c-live-proof-${Date.now()}`,
+      parentTaskId: 'p7c-live-proof',
+      browserTaskId: 'p7c-live-proof',
+      ownerRunId,
+      scopeId: null,
+      sessionId: null,
       tabId: tab.id,
       ttlMs: 30_000,
     })
-    if (isAgentBrowserError(lease)) {
-      return { success: false, error: lease.message || lease.errorCode }
+    if (isAgentBrowserError(claim)) {
+      return { success: false, error: claim.message || claim.errorCode }
     }
-    this.p7cLiveProofLeaseId = lease.leaseId
-    return { success: true, leaseId: lease.leaseId, tabId: tab.id }
+    this.p7cLiveProofClaimIdentity = {
+      partition: claim.logicalKey.partition,
+      tabId: claim.logicalKey.tabId,
+      physicalTargetToken: claim.physicalTargetToken!,
+      bootIncarnationId: claim.bootIncarnationId!,
+      claimId: claim.claimId,
+      generation: claim.generation,
+      ownerRunId: claim.ownerRunId,
+    }
+    return { success: true, leaseId: claim.claimId, tabId: tab.id }
   }
 
   sendP7cLiveProofUserKey(key = 'a'): { success: boolean; error?: string } {
@@ -1745,10 +1707,9 @@ export class BrowserController {
     if (!this.isP7cLiveProofEnabled()) {
       return { success: false, error: 'p7c live proof is disabled' }
     }
-    const denied = getBrowserWriteLeaseService().checkWrite({
-      surface: 'user-view',
-      leaseId: this.p7cLiveProofLeaseId,
-    })
+    const denied = this.p7cLiveProofClaimIdentity
+      ? getBrowserTargetClaimService().checkWrite(this.p7cLiveProofClaimIdentity)
+      : agentBrowserError('lease_required', 'proof claim missing')
     if (!denied) return { success: false, error: 'write was still allowed' }
     return { success: true, errorKind: denied.errorCode }
   }
@@ -1757,8 +1718,10 @@ export class BrowserController {
     if (!this.isP7cLiveProofEnabled()) {
       return { success: false, error: 'p7c live proof is disabled' }
     }
-    this.p7cLiveProofLeaseId = null
-    getBrowserWriteLeaseService().clearTakeover('user-view')
+    if (this.p7cLiveProofClaimIdentity) {
+      getBrowserTargetClaimService().closeTarget(this.p7cLiveProofClaimIdentity)
+    }
+    this.p7cLiveProofClaimIdentity = null
     publishBrowserAgentActionLifecycle('abort')
     return { success: true }
   }
@@ -2027,17 +1990,41 @@ export class BrowserController {
    */
   async createTab(
     url: string,
-    options?: { background?: boolean; openerTabId?: string | null; profile?: string | null },
+    options?: { background?: boolean; openerTabId?: string | null; profile?: string | null; owner?: BrowserTabOwner },
   ): Promise<{ success: boolean; tabId?: string; error?: string }> {
     if (!options?.background) this.clearSplitTabHost()
     const result = await this.tabLifecycleService.createTab(url, options)
     if (result.success && result.tabId) {
-      this.attachUserViewLeaseTakeover(result.tabId)
+      this.attachTargetClaimSupervision(result.tabId)
+      if (options?.owner === 'agent') {
+        this.agentTabId = result.tabId
+        this.attachAgentTabSupervision(result.tabId)
+      }
       void this.dialogService.ensure(result.tabId).catch(() => undefined)
       this.performanceRuntime.reconcile()
       this.performanceRuntime.scheduleReclaim()
     }
     return result
+  }
+
+  getAgentWorkTab(browserTaskId: string): string | null {
+    const tabId = this.agentWorkTabs.get(browserTaskId) || null
+    if (!tabId || this.tabs.get(tabId)?.owner !== 'agent') {
+      if (tabId) this.agentWorkTabs.delete(browserTaskId)
+      return null
+    }
+    return tabId
+  }
+
+  async ensureAgentWorkTab(
+    browserTaskId: string,
+    url = 'about:blank',
+  ): Promise<{ success: boolean; tabId?: string; error?: string }> {
+    const current = this.getAgentWorkTab(browserTaskId)
+    if (current) return { success: true, tabId: current }
+    const created = await this.createTab(url, { background: true, owner: 'agent' })
+    if (created.success && created.tabId) this.agentWorkTabs.set(browserTaskId, created.tabId)
+    return created
   }
 
   registerDormantTabs(request: RegisterDormantBrowserTabsRequest): RegisterDormantBrowserTabsResult {
@@ -2485,6 +2472,7 @@ export class BrowserController {
    */
   async navigate(tabId: string | null, url: string): Promise<{ success: boolean; error?: string }> {
     const resolvedTabId = tabId || this.activeTabId
+    if (resolvedTabId) void this.requestAgentInterruption(resolvedTabId, 'physical_input', 'navigation')
     if (resolvedTabId && !this.tabs.get(resolvedTabId)?.view) {
       const materialized = this.tabLifecycleService.materializeTab(resolvedTabId, {
         activate: resolvedTabId === this.activeTabId,
@@ -2501,6 +2489,24 @@ export class BrowserController {
   ): { success: boolean; tabId?: string; error?: string } {
     const result = this.tabLifecycleService.materializeTab(tabId, { activate: false })
     if (result.success) {
+      const partition = this.partitionForTab(tabId)
+      const physicalTargetToken = this.getPhysicalTargetToken(tabId)
+      if (partition && physicalTargetToken) {
+        const service = getBrowserTargetClaimService()
+        const current = service.read({ partition, tabId })
+        try {
+          service.replacePhysicalTarget({
+            partition,
+            tabId,
+            physicalTargetToken,
+            bootIncarnationId: bootIncarnationIdFromPhysicalTargetToken(physicalTargetToken),
+          }, current?.state === 'held'
+            ? this.targetCheckpointResolver?.(current.parentTaskId) || null
+            : null)
+        } catch (error) {
+          return { success: false, error: error instanceof Error ? error.message : String(error) }
+        }
+      }
       if (options.preserveViewport) {
         const view = this.tabs.get(tabId)?.view
         if (!view) return { success: false, error: 'Tab could not be materialized' }
@@ -2515,21 +2521,37 @@ export class BrowserController {
    * Go back in the active tab.
    */
   goBack(tabId: string | null): { success: boolean; error?: string } {
+    const resolvedTabId = tabId || this.activeTabId
+    if (resolvedTabId) void this.requestAgentInterruption(resolvedTabId, 'physical_input', 'navigation')
     return this.tabShellService.goBack(tabId)
   }
 
   goForward(tabId: string | null): { success: boolean; error?: string } {
+    const resolvedTabId = tabId || this.activeTabId
+    if (resolvedTabId) void this.requestAgentInterruption(resolvedTabId, 'physical_input', 'navigation')
     return this.tabShellService.goForward(tabId)
   }
 
   reload(tabId: string | null): { success: boolean; error?: string } {
+    const resolvedTabId = tabId || this.activeTabId
+    if (resolvedTabId) void this.requestAgentInterruption(resolvedTabId, 'physical_input', 'navigation')
     return this.tabShellService.reload(tabId)
   }
 
   closeTab(tabId: string): { success: boolean; error?: string } {
+    const partition = this.partitionForTab(tabId)
     if (this.tabs.has(tabId)) this.disposeTabRuntimeResources(tabId)
     const result = this.tabShellService.closeTab(tabId)
-    if (result.success) this.performanceRuntime.disposeTab(tabId)
+    if (result.success) {
+      if (partition) getBrowserTargetClaimService().closeTarget({ partition, tabId })
+      this.workflowPhysicalBindings.delete(tabId)
+      this.pendingPhysicalTakeovers.delete(tabId)
+      this.performanceRuntime.disposeTab(tabId)
+      for (const [browserTaskId, ownedTabId] of this.agentWorkTabs) {
+        if (ownedTabId === tabId) this.agentWorkTabs.delete(browserTaskId)
+      }
+      if (this.agentTabId === tabId) this.agentTabId = null
+    }
     return result
   }
 
@@ -2563,23 +2585,6 @@ export class BrowserController {
       this.performanceRuntime.noteInteraction(tabId)
       if (result.previousActiveTabId && result.previousActiveTabId !== (result.activeTabId ?? tabId)) {
         clearBrowserAgentPointer()
-      }
-      const leaseTabId = getBrowserWriteLeaseService().getLease('user-view')?.tabId ?? null
-      const nextTab = this.tabs.get(tabId)
-      if (
-        nextTab?.owner !== 'agent'
-        && shouldRecordUserViewTabSwitch({
-          previousActiveTabId: result.previousActiveTabId ?? null,
-          nextActiveTabId: result.activeTabId ?? tabId,
-          leaseTabId,
-        })
-      ) {
-        recordUserViewTakeoverSignal({
-          service: getBrowserWriteLeaseService(),
-          activeTabId: this.activeTabId,
-          signalTabId: tabId,
-          source: 'tab-switch',
-        })
       }
     }
     return result

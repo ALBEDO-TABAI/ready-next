@@ -67,6 +67,8 @@ export interface HandoffProposalDeps {
   sessionId?: string | null
   conversationId?: string | null
   scopeId?: string | null
+  runId?: string | null
+  agentId?: string | null
   signal?: AbortSignal
   emitCard?: EmitAskUserQuestionsCard
   persistCard?: PersistAskUserQuestionsCardPending
@@ -154,6 +156,10 @@ export async function runHandoffProposal(
     const cardOutput = await executeAskUserQuestions({ questions: [question] }, {
       sessionId: deps.sessionId || undefined,
       conversationId: deps.conversationId || undefined,
+      scopeId: deps.scopeId || undefined,
+      agent: deps.agentId || undefined,
+      requestId: deps.runId || undefined,
+      lifecycleType: 'handoff',
       signal: deps.signal,
       emitAskUserQuestionsCard: deps.emitCard,
       persistCardPending: deps.persistCard,

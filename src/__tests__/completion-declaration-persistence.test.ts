@@ -94,7 +94,7 @@ test('declaration persists across repository restart and drives terminal deliver
     updatedAt: '2026-07-10T00:00:00.000Z',
   } as never, { silent: true })
 
-  const output = executeDeclareCompletionCriteria({
+  const output = await executeDeclareCompletionCriteria({
     criteria: ['两份承诺文件均已落盘'],
     expected_outputs: ['/Users/user/V/描述.md', '/Users/user/V/深读.md'],
   }, {
