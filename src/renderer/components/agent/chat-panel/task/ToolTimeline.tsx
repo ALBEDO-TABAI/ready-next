@@ -269,10 +269,7 @@ export function ToolTimelineRow({
             data-ready-tool-timeline-detail="true"
             style={{
               marginTop: 5,
-              borderRadius: 8,
-              border: '1px solid var(--border-default)',
-              background: 'color-mix(in srgb, var(--surface-card-bg) 36%, transparent)',
-              padding: '6px 8px',
+              minWidth: 0,
               display: 'flex',
               flexDirection: 'column',
               gap: 5,

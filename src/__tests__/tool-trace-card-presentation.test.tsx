@@ -165,6 +165,10 @@ test('ToolTraceCard: clicking a timeline item discloses the call and output deta
     })
     const detail = container.querySelector('[data-ready-tool-timeline-detail="true"]')
     assert.ok(detail, 'clicking the row opens the detail block')
+    const detailElement = detail as HTMLElement
+    assert.equal(detailElement.style.border, '', 'detail does not wrap code blocks in another frame')
+    assert.equal(detailElement.style.background, '', 'detail does not add a tinted backing surface')
+    assert.equal(detailElement.style.padding, '', 'code blocks expand to the former detail-frame bounds')
     assert.equal(detail?.querySelectorAll('[data-ready-code-block="true"]').length, 2)
     const detailText = detail?.textContent || ''
     assert.ok(detailText.includes('调用 browser_read'), `detail keeps the full call line: ${detailText}`)
