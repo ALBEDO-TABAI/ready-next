@@ -562,6 +562,177 @@
   padding-right: 18px;
 }
 
+.ready-agent-prose {
+  max-width: 72ch;
+  line-height: var(--leading-normal);
+  text-wrap: pretty;
+}
+
+.ready-agent-link {
+  color: inherit;
+  text-decoration-color: color-mix(in srgb, currentColor 42%, transparent);
+  text-decoration-line: underline;
+  text-decoration-thickness: 0.5px;
+  text-underline-offset: 3px;
+  transition: color var(--duration-fast) ease, text-decoration-color var(--duration-fast) ease;
+}
+
+.ready-agent-link:not(.ready-agent-citation)::after {
+  content: '↗';
+  display: inline-block;
+  margin-left: 2px;
+  color: var(--text-light);
+  font-size: 0.78em;
+  text-decoration: none;
+  transform: translateY(-0.08em);
+}
+
+.ready-agent-link:hover {
+  color: var(--text-title);
+  text-decoration-color: currentColor;
+}
+
+.ready-agent-link:focus-visible,
+.ready-code-block-copy:focus-visible {
+  outline: 1.5px solid var(--color-ready-orange);
+  outline-offset: 2px;
+}
+
+.ready-agent-citation {
+  display: inline-flex;
+  width: 13px;
+  height: 13px;
+  align-items: center;
+  justify-content: center;
+  margin: 0 2px;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--text-muted) 10%, transparent);
+  color: var(--text-gray);
+  font-family: var(--font-numeric);
+  font-size: var(--text-2xs);
+  font-weight: var(--fw-semibold);
+  line-height: var(--leading-none);
+  text-decoration: none;
+  vertical-align: 0.45em;
+}
+
+.ready-agent-citation:hover {
+  background: color-mix(in srgb, var(--text-muted) 17%, transparent);
+}
+
+.ready-stream-caret {
+  display: inline-block;
+  width: 1.5px;
+  height: 1.05em;
+  margin-left: 2px;
+  border-radius: 1px;
+  background: var(--color-ready-orange);
+  vertical-align: -0.12em;
+}
+
+.ready-code-block {
+  overflow: hidden;
+  margin: 6px 0;
+  border: 0.5px solid color-mix(in srgb, var(--border-default) 88%, transparent);
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--surface-card-bg) 82%, var(--bg-content) 18%);
+}
+
+.ready-code-block-header {
+  display: flex;
+  min-height: 32px;
+  align-items: center;
+  gap: 8px;
+  padding: 0 8px 0 12px;
+  border-bottom: 0.5px solid color-mix(in srgb, var(--border-default) 82%, transparent);
+}
+
+.ready-code-block-language {
+  overflow: hidden;
+  color: var(--text-gray);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  line-height: var(--leading-tight);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ready-code-block-copy {
+  display: inline-flex;
+  min-height: 24px;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  padding: 2px 5px;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text-light);
+  cursor: pointer;
+  font-family: var(--font-ui);
+  font-size: var(--text-sm);
+  line-height: var(--leading-dense);
+  transition: background-color var(--duration-fast) ease, color var(--duration-fast) ease;
+}
+
+.ready-code-block-copy:hover {
+  background: color-mix(in srgb, var(--text-muted) 8%, transparent);
+  color: var(--text-body);
+}
+
+.ready-code-block-body {
+  max-width: 100%;
+  margin: 0;
+  padding: 8px 0;
+  overflow-x: auto;
+  color: var(--text-body);
+  font-family: var(--font-mono);
+  font-size: var(--text-base);
+  line-height: 1.65;
+  scrollbar-width: thin;
+}
+
+.ready-code-block-body code {
+  display: block;
+  min-width: max-content;
+}
+
+.ready-code-line {
+  display: grid;
+  min-height: 20px;
+  grid-template-columns: 34px minmax(0, 1fr);
+}
+
+.ready-code-line-number {
+  padding: 0 8px 0 4px;
+  border-right: 0.5px solid color-mix(in srgb, var(--border-default) 70%, transparent);
+  color: var(--text-light);
+  font-family: var(--font-numeric);
+  font-size: var(--text-xs);
+  text-align: right;
+  user-select: none;
+}
+
+.ready-code-line-text {
+  padding: 0 12px 0 9px;
+  white-space: pre;
+}
+
+.ready-code-block[data-ready-code-kind='diff'] .ready-code-line[data-ready-diff-line='add'] {
+  background: color-mix(in srgb, var(--color-green) 10%, transparent);
+  color: color-mix(in srgb, var(--color-green) 78%, var(--text-body) 22%);
+}
+
+.ready-code-block[data-ready-code-kind='diff'] .ready-code-line[data-ready-diff-line='remove'] {
+  background: color-mix(in srgb, var(--color-red) 9%, transparent);
+  color: color-mix(in srgb, var(--color-red) 78%, var(--text-body) 22%);
+}
+
+.ready-code-block[data-ready-code-kind='diff'] .ready-code-line[data-ready-diff-line='meta'] {
+  color: var(--text-gray);
+  font-style: italic;
+}
+
 .agent-markdown-table-scroll {
   width: 100%;
   max-width: 100%;

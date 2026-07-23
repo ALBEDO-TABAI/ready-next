@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useMemo } from 'react'
-import { Wrench, X } from 'lucide-react'
+import { Circle, CircleCheck, CircleDot, CirclePause, CircleX, Wrench, X } from 'lucide-react'
 import {
   buildTaskCardViewModel,
   deriveTaskCardRuntimeState,
@@ -114,6 +114,28 @@ const CAPSULE_HEADER_STYLE: React.CSSProperties = {
 const TASK_CARD_HEADER_STYLE: React.CSSProperties = {
   ...CAPSULE_HEADER_STYLE,
   padding: '7px 10px',
+}
+
+function TaskStepStatusGlyph({ status }: { status: string }) {
+  const config = status === 'done'
+    ? { Icon: CircleCheck, label: '步骤已完成' }
+    : status === 'running'
+      ? { Icon: CircleDot, label: '步骤进行中' }
+      : status === 'blocked'
+        ? { Icon: CirclePause, label: '步骤待继续' }
+        : status === 'error'
+          ? { Icon: CircleX, label: '步骤失败' }
+          : { Icon: Circle, label: '步骤待执行' }
+  return (
+    <span
+      className="ready-task-step-glyph"
+      data-ready-task-step-status={status}
+      role="img"
+      aria-label={config.label}
+    >
+      <config.Icon aria-hidden="true" size={12} strokeWidth={1.65} />
+    </span>
+  )
 }
 
 export function TaskCard({
@@ -571,25 +593,7 @@ export function TaskCard({
             <div className="flex flex-col" style={{ gap: 5 }}>
               {planStepsToRender.map((step) => (
                 <div key={step.id} className="flex items-start gap-2">
-                  <span
-                    style={{
-                      width: 5,
-                      height: 5,
-                      borderRadius: 999,
-                      marginTop: 5,
-                      background:
-                        step.status === 'done'
-                          ? 'var(--color-green)'
-                          : step.status === 'running'
-                            ? 'var(--color-ready-orange)'
-                            : step.status === 'blocked'
-                              ? 'var(--color-orange, #f59e0b)'
-                              : step.status === 'error'
-                                ? 'var(--color-red)'
-                                : 'var(--border-default)',
-                      flexShrink: 0
-                    }}
-                  />
+                  <TaskStepStatusGlyph status={step.status} />
                   <div className="t-meta" data-typography-role="meta" style={{ minWidth: 0, flex: 1, color: 'var(--text-body)' }}>
                     {formatTaskStepDisplayTitle(step.title, run.progress)}
                     {step.detail ? (

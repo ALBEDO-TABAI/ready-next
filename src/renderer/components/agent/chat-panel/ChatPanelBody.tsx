@@ -351,7 +351,7 @@ export function ChatPanelBody(props: ChatPanelBodyProps): React.ReactElement {
             renderAttachmentIcon={(attachment, size = 16) => (
               <AttachmentIcon attachment={attachment} size={size} />
             )}
-            renderMarkdown={(content) => <MarkdownContent content={content} />}
+            renderMarkdown={(content, streaming) => <MarkdownContent content={content} streaming={streaming} />}
           />
 
           {agentSelectionMenu && (

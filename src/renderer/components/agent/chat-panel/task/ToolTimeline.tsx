@@ -1,5 +1,15 @@
 import { useState } from 'react'
-import { ChevronRight } from 'lucide-react'
+import {
+  ChevronRight,
+  FileText,
+  FolderOpen,
+  Globe2,
+  Image,
+  Search,
+  Sparkles,
+  SquareTerminal,
+  Wrench,
+} from 'lucide-react'
 import { formatSingleLinePreview } from '../../../../modules/agent/toolTracePreview'
 import type {
   ToolTimelineItem,
@@ -39,8 +49,118 @@ function timelineVisualState(status: ToolTimelineStatus): TaskCardVisualState {
   return 'done'
 }
 
+export type ToolActivityKind =
+  | 'research'
+  | 'browser'
+  | 'image'
+  | 'document'
+  | 'file'
+  | 'skill'
+  | 'command'
+  | 'generic'
+
+export interface ToolActivityPresentation {
+  kind: ToolActivityKind
+  title: string
+}
+
 function toolTimelineItemTitle(item: ToolTimelineItem): string {
   return formatSingleLinePreview(item.status === 'running' ? item.callText : (item.resultText || item.callText))
+}
+
+function toolNameFromItem(item: ToolTimelineItem): string {
+  if (item.toolName) return item.toolName.toLowerCase()
+  return item.callText?.match(/^([a-zA-Z_][\w:.-]*)\s*\(/)?.[1]?.toLowerCase() || ''
+}
+
+function toolDescriptor(item: ToolTimelineItem): string {
+  if (!item.callDetail) return ''
+  let detail: Record<string, unknown>
+  try {
+    const parsed = JSON.parse(item.callDetail) as unknown
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return ''
+    detail = parsed as Record<string, unknown>
+  } catch {
+    return ''
+  }
+  for (const key of ['query', 'url', 'prompt', 'title', 'name', 'relativePath', 'path', 'command']) {
+    const value = detail[key]
+    if (typeof value !== 'string' || !value.trim()) continue
+    const compact = formatSingleLinePreview(value.trim())
+    return [...compact].length > 64 ? `${[...compact].slice(0, 63).join('')}…` : compact
+  }
+  return ''
+}
+
+function activityTitle(
+  item: ToolTimelineItem,
+  labels: { running: string; done: string; error: string },
+): string {
+  const label = labels[item.status]
+  const descriptor = toolDescriptor(item)
+  return descriptor ? `${label} · ${descriptor}` : label
+}
+
+type ToolActivityRule = {
+  kind: ToolActivityKind
+  matches: (name: string) => boolean
+  labels: { running: string; done: string; error: string }
+}
+
+const TOOL_ACTIVITY_RULES: ToolActivityRule[] = [
+  { kind: 'research', matches: (name) => name === 'web_search_domains', labels: { running: '查询搜索范围', done: '搜索范围已确认', error: '搜索范围查询失败' } },
+  { kind: 'research', matches: (name) => name === 'web_search', labels: { running: '搜索网页', done: '网页检索完成', error: '网页检索失败' } },
+  { kind: 'research', matches: (name) => name === 'web_fetch', labels: { running: '读取网页', done: '网页已读取', error: '网页读取失败' } },
+  { kind: 'research', matches: (name) => name === 'web_clip_url', labels: { running: '保存网页资料', done: '网页资料已保存', error: '网页资料保存失败' } },
+  { kind: 'file', matches: (name) => name === 'present_file', labels: { running: '整理文件', done: '文件已整理', error: '文件整理失败' } },
+  { kind: 'image', matches: (name) => name === 'generate_image', labels: { running: '生成图片', done: '图片已生成', error: '图片生成失败' } },
+  { kind: 'browser', matches: (name) => name.startsWith('browser_') || name === 'use_browser', labels: { running: '操作网页', done: '网页操作完成', error: '网页操作失败' } },
+  { kind: 'document', matches: (name) => name.startsWith('document_') || name.startsWith('widget_'), labels: { running: '处理文档', done: '文档处理完成', error: '文档处理失败' } },
+  { kind: 'file', matches: (name) => name.startsWith('file_') || name.startsWith('tag_forge_') || name === 'apply_patch' || /^skill_(?:read|write|export)_artifact$/.test(name), labels: { running: '处理文件', done: '文件处理完成', error: '文件处理失败' } },
+  { kind: 'command', matches: (name) => /command|shell|exec|stdin/.test(name), labels: { running: '运行本地命令', done: '本地命令完成', error: '本地命令失败' } },
+  { kind: 'skill', matches: (name) => name === 'use_skill' || name.startsWith('skill_'), labels: { running: '运行技能', done: '技能运行完成', error: '技能运行失败' } },
+]
+
+export function resolveToolActivityPresentation(item: ToolTimelineItem): ToolActivityPresentation {
+  const rule = TOOL_ACTIVITY_RULES.find((candidate) => candidate.matches(toolNameFromItem(item)))
+  if (!rule) {
+    return {
+      kind: 'generic',
+      title: toolTimelineItemTitle(item),
+    }
+  }
+  return {
+    kind: rule.kind,
+    title: activityTitle(item, rule.labels),
+  }
+}
+
+function ToolActivityIcon({ kind }: { kind: ToolActivityKind }) {
+  const Icon = {
+    research: Search,
+    browser: Globe2,
+    image: Image,
+    document: FileText,
+    file: FolderOpen,
+    skill: Sparkles,
+    command: SquareTerminal,
+    generic: Wrench,
+  }[kind]
+  return <Icon aria-hidden="true" size={12} strokeWidth={1.8} />
+}
+
+function ImageGenerationProgress() {
+  return (
+    <div
+      className="ready-image-generation-progress"
+      data-ready-image-generation-progress="true"
+      role="img"
+      aria-label="图片生成中"
+    >
+      <span className="ready-image-generation-dots" aria-hidden="true" />
+      <span className="ready-image-generation-focus" aria-hidden="true" />
+    </div>
+  )
 }
 
 const DETAIL_SECTION_LABEL_STYLE: React.CSSProperties = { color: 'var(--text-light)' }
@@ -80,17 +200,28 @@ export function ToolTimelineRow({
   onToggle?: () => void
   interactive?: boolean
 }) {
-  const title = toolTimelineItemTitle(item)
+  const presentation = resolveToolActivityPresentation(item)
   const callDetailText = item.callDetail || item.callText
   const resultDetailText = item.resultDetail || item.resultText
   return (
-    <div data-ready-tool-timeline-item={item.status} style={{ display: 'flex', gap: 8 }}>
+    <div
+      data-ready-tool-timeline-item={item.status}
+      data-ready-tool-activity-kind={presentation.kind}
+      style={{ display: 'flex', gap: 8 }}
+    >
       <div
         aria-hidden="true"
         style={{ width: 12, display: 'flex', flexDirection: 'column', alignItems: 'center', flexShrink: 0 }}
       >
-        <div style={{ paddingTop: 4 }}>
-          <AgentStatusDot state={timelineVisualState(item.status)} size={9} />
+        <div
+          className="ready-tool-activity-glyph"
+          data-state={item.status}
+          style={{ paddingTop: 3 }}
+        >
+          <ToolActivityIcon kind={presentation.kind} />
+          <span className="ready-tool-activity-status">
+            <AgentStatusDot state={timelineVisualState(item.status)} size={6} />
+          </span>
         </div>
         {!isLast && (
           <div
@@ -128,7 +259,7 @@ export function ToolTimelineRow({
               whiteSpace: 'nowrap',
             }}
           >
-            {title}
+            {presentation.title}
           </span>
           {item.durationLabel ? (
             <span
@@ -142,6 +273,7 @@ export function ToolTimelineRow({
           ) : null}
           {interactive ? <CapsuleChevron expanded={Boolean(open)} /> : null}
         </button>
+        {presentation.kind === 'image' && item.status === 'running' ? <ImageGenerationProgress /> : null}
         {interactive && open ? (
           <div
             data-ready-tool-timeline-detail="true"

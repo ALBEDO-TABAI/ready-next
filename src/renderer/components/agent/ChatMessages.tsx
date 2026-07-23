@@ -14,6 +14,7 @@ import { filterUserVisibleToolTraceEvents } from '../../modules/agent/toolTraceV
 import { ToolTraceCard } from './chat-panel/task/TaskCard'
 import { AskUserQuestionsCard } from './AskUserQuestionsCard'
 import { GeneratedImageGallery } from './GeneratedImageGallery'
+import { ThinkingIndicator } from './chat-panel/ThinkingIndicator'
 import { generatedImagesFromMessage } from '../../modules/image-generation/generatedImageArtifacts'
 import { submitAskUserQuestionsAnswers, cancelAskUserQuestionsCard } from '../../stores/useAgent'
 import { isImageGenerationReferencePath } from '../../../shared/image-generation'
@@ -50,7 +51,7 @@ interface ChatMessagesProps {
   getAttachmentMetaSummary: (attachment: ChatAttachment) => string | null
   getAttachmentPreviewSrc: (attachment: ChatAttachment) => string | null
   renderAttachmentIcon: (attachment: ChatAttachment, size?: number) => React.ReactNode
-  renderMarkdown: (content: string) => React.ReactNode
+  renderMarkdown: (content: string, streaming?: boolean) => React.ReactNode
 }
 
 export default function ChatMessages({
@@ -169,6 +170,7 @@ export default function ChatMessages({
         const taskSnapshot = msg.type === 'agent' ? messageTaskSnapshots[msg.id] : null
         const toolTraceSnapshot = msg.type === 'agent' ? messageToolTraceSnapshots[msg.id] : null
         const generatedImages = generatedImagesFromMessage(msg)
+        const isStreamingMessage = isStreaming && msg.id === streamingMessageId
 
         return (
           <div key={msg.id} className="flex flex-col" style={{ gap: 10 }}>
@@ -299,7 +301,7 @@ export default function ChatMessages({
                   }}
                 >
                   <div className="t-body" data-typography-role="body" style={{ color: 'var(--text-body)' }}>
-                    {renderMarkdown(msg.content)}
+                    {renderMarkdown(msg.content, isStreamingMessage)}
                   </div>
                   {generatedImages.length > 0 ? (
                     <GeneratedImageGallery
@@ -406,49 +408,7 @@ export default function ChatMessages({
                 ) : null}
               </div>
             ) : (
-              <div className="flex items-center gap-3" style={{ padding: '2px 0 4px' }}>
-                <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: 'var(--bg-avatar)' }}>
-                  <span className="t-subtitle" data-typography-role="subtitle" style={{ color: 'var(--text-title)' }}>R</span>
-                </div>
-                <div className="flex items-center gap-2.5" style={{ color: 'var(--text-gray)' }}>
-                  <span className="t-ui" data-typography-role="ui">思考中</span>
-                  <div className="flex items-center gap-1.5" aria-label="agent-thinking">
-                    <span
-                      className="animate-pulse"
-                      style={{
-                        width: 4,
-                        height: 4,
-                        borderRadius: 999,
-                        background: 'var(--color-blue)',
-                        opacity: 0.5,
-                        animationDelay: '0ms',
-                      }}
-                    />
-                    <span
-                      className="animate-pulse"
-                      style={{
-                        width: 4,
-                        height: 4,
-                        borderRadius: 999,
-                        background: 'var(--color-blue)',
-                        opacity: 0.5,
-                        animationDelay: '180ms',
-                      }}
-                    />
-                    <span
-                      className="animate-pulse"
-                      style={{
-                        width: 4,
-                        height: 4,
-                        borderRadius: 999,
-                        background: 'var(--color-blue)',
-                        opacity: 0.5,
-                        animationDelay: '360ms',
-                      }}
-                    />
-                  </div>
-                </div>
-              </div>
+              <ThinkingIndicator />
             )
           )
         }

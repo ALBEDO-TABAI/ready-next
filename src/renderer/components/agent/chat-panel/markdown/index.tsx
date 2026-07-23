@@ -1,4 +1,5 @@
 import { useMemo } from 'react'
+import { MessageCodeBlock } from './MessageCodeBlock'
 
 // ---------------------------------------------------------------------------
 // Lightweight Markdown renderer (no external deps)
@@ -215,13 +216,15 @@ function splitBareUrl(raw: string): { href: string; trailing: string } {
 }
 
 function externalLink(href: string, label: string, key: string): React.ReactNode {
+  const citation = /^\d+$/.test(label.trim())
   return (
     <a
       key={key}
       href={href}
       target="_blank"
       rel="noreferrer"
-      style={{ color: 'inherit', textDecoration: 'underline', textUnderlineOffset: 2 }}
+      className={citation ? 'ready-agent-link ready-agent-citation' : 'ready-agent-link'}
+      data-ready-agent-citation={citation ? 'true' : undefined}
     >
       {label}
     </a>
@@ -282,8 +285,19 @@ export function renderInline(text: string): React.ReactNode[] {
   return parts.length > 0 ? parts : [text]
 }
 
-export function MarkdownContent({ content }: { content: string }) {
+function StreamCaret({ visible }: { visible: boolean }) {
+  if (!visible) return null
+  return <span className="ready-stream-caret" data-ready-stream-caret="true" aria-hidden="true" />
+}
+
+export function MarkdownContent({ content, streaming = false }: { content: string; streaming?: boolean }) {
   const nodes = useMemo(() => parseMarkdown(content), [content])
+  const lastContentIndex = useMemo(() => {
+    for (let index = nodes.length - 1; index >= 0; index -= 1) {
+      if (nodes[index].type !== 'br') return index
+    }
+    return -1
+  }, [nodes])
 
   // Bug fix: numbered list ordinals must reflect position *within the list*,
   // not the node's index in the whole document. The line-based parser emits
@@ -310,42 +324,36 @@ export function MarkdownContent({ content }: { content: string }) {
   }, [nodes])
 
   return (
-    <div className="markdown-content" style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+    <div className="markdown-content ready-agent-prose" style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
       {nodes.map((node, idx) => {
+        const showCaret = streaming && idx === lastContentIndex
         switch (node.type) {
           case 'header': {
             const fontSize = node.level === 1 ? 16 : node.level === 2 ? 14.5 : 13.5
             return (
               <div key={idx} style={{ fontSize, fontWeight: 700, marginTop: 6, marginBottom: 2 }}>
                 {renderInline(node.content)}
+                <StreamCaret visible={showCaret} />
               </div>
             )
           }
           case 'codeblock':
             return (
-              <pre
+              <MessageCodeBlock
                 key={idx}
-                style={{
-                  background: 'var(--bg-code)',
-                  padding: '10px 12px',
-                  borderRadius: 6,
-                  fontSize: 12,
-                  fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
-                  overflowX: 'auto',
-                  whiteSpace: 'pre-wrap',
-                  wordBreak: 'break-word',
-                  margin: '4px 0',
-                  lineHeight: 1.5
-                }}
-              >
-                {node.content}
-              </pre>
+                language={node.lang || ''}
+                code={node.content}
+                streaming={showCaret}
+              />
             )
           case 'bullet':
             return (
               <div key={idx} style={{ display: 'flex', gap: 6, paddingLeft: 4 }}>
                 <span style={{ flexShrink: 0, color: 'var(--text-gray)' }}>&bull;</span>
-                <span>{renderInline(node.content)}</span>
+                <span>
+                  {renderInline(node.content)}
+                  <StreamCaret visible={showCaret} />
+                </span>
               </div>
             )
           case 'numbered':
@@ -361,7 +369,10 @@ export function MarkdownContent({ content }: { content: string }) {
                 >
                   {numberedOrdinals[idx]}.
                 </span>
-                <span>{renderInline(node.content)}</span>
+                <span>
+                  {renderInline(node.content)}
+                  <StreamCaret visible={showCaret} />
+                </span>
               </div>
             )
           case 'table': {
@@ -404,7 +415,12 @@ export function MarkdownContent({ content }: { content: string }) {
           case 'br':
             return <div key={idx} style={{ height: 6 }} />
           default:
-            return <div key={idx}>{renderInline(node.content)}</div>
+            return (
+              <div key={idx}>
+                {renderInline(node.content)}
+                <StreamCaret visible={showCaret} />
+              </div>
+            )
         }
       })}
     </div>
