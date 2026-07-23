@@ -42,7 +42,7 @@ function retryDelayMs(input: {
   if (input.backoff !== 'exponential_jitter') return input.baseDelayMs
   return Math.min(
     input.baseDelayMs * 2 ** (input.attempt - 1) + Math.floor(Math.random() * 100),
-    8_000,
+    30_000,
   )
 }
 

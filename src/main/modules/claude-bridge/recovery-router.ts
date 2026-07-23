@@ -33,7 +33,9 @@ export function buildRecoveryPlan(result: ErrorClassifierResult): RecoveryPlan {
         shouldRetry: true,
         retryDelayMs: result.suggestedDelayMs || 500,
         backoff: result.kind === 'transient' ? 'exponential_jitter' : 'fixed',
-        maxAttempts: result.kind === 'timeout_model' ? 1 : 3,
+        // 2026-07-23: novacode 502 窗口可持续数分钟；3 次 ~3.7s 远不够。
+        // 6 次指数抖动（上限 30s）总等待约 63s，覆盖短暂故障窗口。
+        maxAttempts: result.kind === 'timeout_model' ? 1 : 6,
         shouldCompressContext: false,
         shouldSurfaceDirectly: false,
       }
