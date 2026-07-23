@@ -73,8 +73,8 @@ test('persistent 5xx exhausts retries and surfaces a classified failure', async 
     {}
   )
   assert.equal(result.success, false)
-  // 1 initial + maxAttempts(3) retries = 4 calls
-  assert.equal(calls, 4)
+  // 1 initial + maxAttempts(6) retries = 7 calls（2026-07-23 transient 上限 3→6）
+  assert.equal(calls, 7)
 })
 
 test('retry exhaustion becomes resumable only when a durable Browser checkpoint path exists', () => {

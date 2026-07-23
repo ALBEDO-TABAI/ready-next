@@ -972,7 +972,8 @@ export async function executeBrowserObserveTool(
         return createToolExecutionOutput(JSON.stringify(data, null, 2), {
           shape: 'multimodal',
           data,
-          content: viewportZero ? [] : [{ type: 'image', data: base64, mediaType: 'image/png', detail: 'auto' }],
+          // viewport 路径压缩为 JPEG（K3 400 修复）；clip/full_page 仍走 CDP PNG。
+          content: viewportZero ? [] : [{ type: 'image', data: base64, mediaType: mode === 'viewport' ? 'image/jpeg' : 'image/png', detail: 'auto' }],
         })
       }
 
@@ -1110,7 +1111,8 @@ export async function executeBrowserObserveTool(
         return createToolExecutionOutput(JSON.stringify(data, null, 2), {
           shape: 'multimodal',
           data,
-          content: [{ type: 'image', data: base64, mediaType: 'image/png', detail: 'auto' }],
+          // browser_status 截图走 viewport 路径，已压缩为 JPEG（K3 400 修复）。
+          content: [{ type: 'image', data: base64, mediaType: 'image/jpeg', detail: 'auto' }],
         })
       }
 
@@ -1161,7 +1163,7 @@ export async function executeBrowserObserveTool(
         return createToolExecutionOutput(JSON.stringify(payload, null, 2), {
           shape: 'multimodal',
           data: payload,
-          content: [{ type: 'image', data: screenshot, mediaType: 'image/png', detail: 'auto' }],
+          content: [{ type: 'image', data: screenshot, mediaType: mode === 'viewport' ? 'image/jpeg' : 'image/png', detail: 'auto' }],
         })
       }
 

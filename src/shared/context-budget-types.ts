@@ -48,8 +48,17 @@ export function computeContextBudget(params: {
 
 const textEncoder = new TextEncoder()
 export const IMAGE_EST_TOKENS = 1_600
+// 2026-07-23 K3 400 校准：native vision provider 把图片编码为 ~1600 tokens，
+// 但 openai-compatible / anthropic 文本协议下 base64 data URL 按字符进 tokenizer
+// （1.4M 字符 ≈ 1.05M tokens）。估算取两者较大值的近似下界：按 base64 长度 /4
+// 计。宁可高估触发压缩/驱逐，不可低估把 1M token 的请求放过软线。
+const BASE64_CHARS_PER_TOKEN = 4
 const OPAQUE_FILE_REF_TOKENS = 120_000
 const OPAQUE_AUDIO_REF_TOKENS = 120_000
+
+export function estimateImageDataTokens(dataUrlOrBase64Length: number): number {
+  return Math.max(IMAGE_EST_TOKENS, Math.ceil(dataUrlOrBase64Length / BASE64_CHARS_PER_TOKEN))
+}
 
 export function estimateTextTokens(text: string): number {
   let tokens = 0
@@ -71,7 +80,7 @@ export function estimateInputItemTokens(items: AgentInputItem[]): number {
 
 function estimateUnknownTokens(value: unknown, keyHint = ''): number {
   if (typeof value === 'string') {
-    if (/^data:image\//i.test(value)) return IMAGE_EST_TOKENS
+    if (/^data:image\//i.test(value)) return estimateImageDataTokens(value.length)
     if (/^(?:data:|[A-Za-z0-9+/]{200,}={0,2}$)/.test(value)) {
       return Math.max(value.length, estimateTextTokens(value))
     }
@@ -93,7 +102,14 @@ function estimateUnknownTokens(value: unknown, keyHint = ''): number {
 
   const record = value as Record<string, unknown>
   const type = typeof record.type === 'string' ? record.type : ''
-  if (type === 'input_image' || type === 'computer_screenshot') return IMAGE_EST_TOKENS
+  if (type === 'input_image' || type === 'computer_screenshot') {
+    const payload = typeof record.image === 'string'
+      ? record.image
+      : typeof record.data === 'string'
+        ? record.data
+        : ''
+    return estimateImageDataTokens(payload.length)
+  }
   let semanticTokens = 0
   for (const [key, child] of Object.entries(record)) {
     semanticTokens += estimateUnknownTokens(child, key)

@@ -81,6 +81,68 @@ export function assertAgentInputToolPairIntegrity(items: readonly AgentInputItem
   if (pending.size > 0) throw new Error('agent_input_has_pending_tool_calls')
 }
 
+const IMAGE_EVICTED_PLACEHOLDER = '[ready:stale-screenshot-evicted] 历史截图为失效观察，已从上下文移除；需要当前页面视觉时重新截图。'
+
+/**
+ * 工具结果中的历史截图驱逐（2026-07-23 K3 HTTP 400 根因）：
+ * input_image 的 base64 在语义估算里按 IMAGE_EST_TOKENS=1600 计，但按文本
+ * 计 token 的 provider 会收全量字符（一张 1.4MB 截图 ≈ 1.05M tokens），
+ * 单张即可超过 1M 硬顶且完全绕开软线判断。工具结果里的截图是即时观察，
+ * 页面随后就变了——旧图无条件驱逐，keepNewest 时仅保留最新一张。
+ * 只处理工具结果（function_call_result/computer_call_result 等）；
+ * 用户消息里的图片附件是用户输入，不驱逐。
+ */
+export function evictStaleToolResultImages(
+  items: AgentInputItem[],
+  options: { keepNewest: boolean },
+): { items: AgentInputItem[]; evictedImages: number } {
+  let newestImageIndex = -1
+  if (options.keepNewest) {
+    for (let index = items.length - 1; index >= 0; index -= 1) {
+      if (isToolResultItem(items[index]) && toolResultContainsInputImage(items[index])) {
+        newestImageIndex = index
+        break
+      }
+    }
+  }
+  let evictedImages = 0
+  const output = items.map((item, index) => {
+    if (index === newestImageIndex) return item
+    if (!isToolResultItem(item) || !toolResultContainsInputImage(item)) return item
+    evictedImages += 1
+    return replaceToolResultImages(item)
+  })
+  return { items: evictedImages > 0 ? output : items, evictedImages }
+}
+
+function toolResultContainsInputImage(item: AgentInputItem): boolean {
+  const output = (item as Record<string, unknown>).output
+  if (!Array.isArray(output)) return false
+  return output.some((part) => {
+    if (!part || typeof part !== 'object') return false
+    const record = part as Record<string, unknown>
+    return record.type === 'input_image'
+      || (record.type === 'computer_screenshot' && typeof record.data === 'string' && record.data.length > 1_000)
+  })
+}
+
+function replaceToolResultImages(item: AgentInputItem): AgentInputItem {
+  const record = item as Record<string, unknown>
+  const output = record.output as unknown[]
+  const replaced = output.map((part) => {
+    if (!part || typeof part !== 'object') return part
+    const partRecord = part as Record<string, unknown>
+    if (partRecord.type === 'input_image') {
+      return { type: 'input_text', text: IMAGE_EVICTED_PLACEHOLDER }
+    }
+    if (partRecord.type === 'computer_screenshot' && typeof partRecord.data === 'string' && partRecord.data.length > 1_000) {
+      return { ...partRecord, data: IMAGE_EVICTED_PLACEHOLDER }
+    }
+    return part
+  })
+  return { ...record, output: replaced } as AgentInputItem
+}
+
 function isLegacySkillCatalogReminderItem(item: AgentInputItem): boolean {
   if (!item || typeof item !== 'object') return false
   const record = item as Record<string, unknown>
@@ -114,7 +176,14 @@ export function compactAgentInputItems(
   )
   const beforeTokens = estimateInputItemTokens(items)
   const legacyCatalogs = stripLegacySkillCatalogReminderItems(items)
-  const sourceItems = legacyCatalogs.items
+  // 2026-07-23 K3 HTTP 400 根因修复：截图 base64 在语义估算里恒为 1600 tokens，
+  // 但按文本计 token 的 provider（K3 coding 端点）会收全量字符（1.38M 字符
+  // ≈ 1.05M tokens > 1M 硬顶）。工具结果里的历史截图按浏览器纪律本就是
+  // 失效观察——无条件驱逐旧图、只保留最新一张，且最新一张也受物理上限约束。
+  // 这是对 R1“低于软线不截断”合同的显式例外：R1 保护的是动作后的文本读回执，
+  // 失效截图不属于该类。用户消息里的图片附件不在此列。
+  const imageEviction = evictStaleToolResultImages(legacyCatalogs.items, { keepNewest: true })
+  const sourceItems = imageEviction.items
   const sourceTokens = estimateInputItemTokens(sourceItems)
 
   // 2026-07-03 真机回归 R1 根因修复：单结果超限截断只允许在真实上下文压力
@@ -124,12 +193,12 @@ export function compactAgentInputItems(
   if (!options.force && sourceTokens <= windowTokens * CONTEXT_SOFT_RATIO) {
     return {
       items: sourceItems,
-      compacted: legacyCatalogs.droppedItems > 0,
+      compacted: legacyCatalogs.droppedItems > 0 || imageEviction.evictedImages > 0,
       report: {
         beforeTokens,
         afterTokens: sourceTokens,
         droppedItems: legacyCatalogs.droppedItems,
-        truncatedToolResults: 0,
+        truncatedToolResults: imageEviction.evictedImages,
         summarized: false,
       },
     }
@@ -144,7 +213,7 @@ export function compactAgentInputItems(
       items: workingItems,
       beforeTokens,
       droppedItems: legacyCatalogs.droppedItems,
-      truncatedToolResults: truncated.truncatedToolResults,
+      truncatedToolResults: truncated.truncatedToolResults + imageEviction.evictedImages,
       summarized: false,
     })
   }
@@ -164,7 +233,7 @@ export function compactAgentInputItems(
       items: workingItems,
       beforeTokens,
       droppedItems: legacyCatalogs.droppedItems,
-      truncatedToolResults: truncated.truncatedToolResults,
+      truncatedToolResults: truncated.truncatedToolResults + imageEviction.evictedImages,
       summarized: false,
     })
   }
@@ -178,7 +247,7 @@ export function compactAgentInputItems(
       summary: resolvedSummary,
       beforeTokens,
       droppedItems: legacyCatalogs.droppedItems + droppedItems.length,
-      truncatedToolResults: truncated.truncatedToolResults,
+      truncatedToolResults: truncated.truncatedToolResults + imageEviction.evictedImages,
     }))
   }
 
@@ -189,7 +258,7 @@ export function compactAgentInputItems(
     summary,
     beforeTokens,
     droppedItems: legacyCatalogs.droppedItems + droppedItems.length,
-    truncatedToolResults: truncated.truncatedToolResults,
+    truncatedToolResults: truncated.truncatedToolResults + imageEviction.evictedImages,
   })
 }
 
@@ -309,6 +378,9 @@ function truncateOversizedToolResults(
   let truncatedToolResults = 0
   const output = items.map((item) => {
     if (!isToolResultItem(item)) return item
+    // 带图的工具结果由 evictStaleToolResultImages 独占管理：其体量由图片
+    // 主导，整体替换会摧毁"保留最新观察"的驱逐语义。
+    if (toolResultContainsInputImage(item)) return item
     const tokens = estimateInputItemTokens([item])
     if (tokens <= maxToolResultTokens) return item
     truncatedToolResults += 1

@@ -220,6 +220,71 @@ test('截断 stub 保留原文开头摘录，不再制造零内容信息真空',
   assert.match(output, /RESEARCH_PLAN_RECEIPT_HEAD/)
 })
 
+test('2026-07-23 K3 400 回归：工具结果中的历史截图无条件驱逐，仅保留最新一张', async () => {
+  // 复现真实数字：一张 1.4M 字符 base64 截图在语义估算里只计 1600 tokens，
+  // 远低于软线，但按文本计 token 的 provider 会收全量字符 → HTTP 400。
+  const bigImage = `data:image/png;base64,${'A'.repeat(1_400_000)}`
+  const result = await compactAgentInputItems([
+    userMessage('任务'),
+    namedCall('shot-1', 'browser_status', {}),
+    imageResult('shot-1', '第一次截图状态', bigImage),
+    namedCall('shot-2', 'browser_status', {}),
+    imageResult('shot-2', '第二次截图状态', bigImage),
+    userMessage('tail'),
+  ], {
+    windowTokens: 272_000,
+  })
+
+  assert.equal(result.compacted, true)
+  assert.equal(result.report.truncatedToolResults, 1, '两张图驱逐旧的一张')
+  const serialized = JSON.stringify(result.items)
+  assert.equal(
+    (serialized.match(/AAAAAAAAAA/g) || []).length > 0,
+    true,
+    '最新截图必须保留',
+  )
+  const firstOutput = JSON.stringify(result.items[2])
+  assert.match(firstOutput, /stale-screenshot-evicted/, '旧截图被替换为占位符')
+  assert.doesNotMatch(firstOutput, /AAAAAAAAAA/, '旧截图的 base64 必须被移除')
+  const secondOutput = JSON.stringify(result.items[4])
+  assert.match(secondOutput, /AAAAAAAAAA/, '最新截图原样保留')
+  // 文本部分不受影响
+  assert.match(firstOutput, /第一次截图状态/)
+})
+
+test('截图驱逐不动用户消息里的图片附件', async () => {
+  const userImage = {
+    role: 'user',
+    content: [
+      { type: 'input_text', text: '看这张图' },
+      { type: 'input_image', image: `data:image/png;base64,${'B'.repeat(5_000)}` },
+    ],
+  } as AgentInputItem
+  const result = await compactAgentInputItems([
+    userImage,
+    namedCall('shot-1', 'browser_status', {}),
+    imageResult('shot-1', '状态', `data:image/png;base64,${'C'.repeat(5_000)}`),
+  ], {
+    windowTokens: 272_000,
+  })
+
+  assert.equal(result.report.truncatedToolResults, 0, '唯一一张工具截图是最新的，保留')
+  assert.match(JSON.stringify(result.items[0]), /BBBBBBBBBB/, '用户附件图片不驱逐')
+})
+
+function imageResult(callId: string, text: string, imageDataUrl: string): AgentInputItem {
+  return {
+    type: 'function_call_result',
+    callId,
+    name: 'browser_status',
+    status: 'completed',
+    output: [
+      { type: 'input_text', text },
+      { type: 'input_image', detail: 'auto', image: imageDataUrl },
+    ],
+  } as AgentInputItem
+}
+
 function userMessage(content: string): AgentInputItem {
   return { role: 'user', content } as AgentInputItem
 }
