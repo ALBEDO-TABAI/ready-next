@@ -37,6 +37,27 @@ test('boot entry shows the splash before dynamically importing the heavy app mod
   assert.ok(heavyImportIndex > splashIndex)
 })
 
+test('boot entry acquires the single-instance lock after userData override and before the heavy app boots', () => {
+  const bootEntry = readWorkspaceFile('src/main/boot-entry.ts')
+  const userDataIndex = bootEntry.indexOf("app.setPath('userData', READY_USER_DATA_DIR)")
+  const lockIndex = bootEntry.indexOf('requestSingleInstanceLock()')
+  const heavyImportIndex = bootEntry.indexOf("await import('./index')")
+
+  // Lock is scoped to the resolved userData dir, so it must run AFTER the
+  // override (isolated profiles keep their own lock) and BEFORE any boot work
+  // that opens the shared SQLite. Two instances on one userData let the second
+  // boot's reconciler reap the first process's in-flight run.
+  assert.ok(lockIndex > 0, 'boot entry must acquire the single-instance lock')
+  assert.ok(lockIndex > userDataIndex, 'lock must run after the userData override')
+  assert.ok(heavyImportIndex > lockIndex, 'the heavy app module must load only after the lock is held')
+  assert.match(bootEntry, /app\.exit\(0\)/)
+})
+
+test('a denied second instance focuses the running window instead of double-booting', () => {
+  const mainIndex = readWorkspaceFile('src/main/index.ts')
+  assert.match(mainIndex, /app\.on\('second-instance'/)
+})
+
 test('boot entry static import graph stays tiny so the splash is not delayed', () => {
   const bootEntry = readWorkspaceFile('src/main/boot-entry.ts')
   // 白名单外的任何静态 import 都会把整棵依赖树求值成本压回 splash 之前。

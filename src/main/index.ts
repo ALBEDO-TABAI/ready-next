@@ -1080,6 +1080,17 @@ app.whenReady().then(async () => {
 })
 
 // Quit when all windows are closed, except on macOS.
+// A second launch on the same userData is denied the single-instance lock in
+// boot-entry and exits; this focuses the already-running window instead of
+// silently doing nothing. Guards the invariant that only one process ever runs
+// the startup reconciler against a given SQLite (see boot-entry lock rationale).
+app.on('second-instance', () => {
+  if (!mainWindow) return
+  if (mainWindow.isMinimized()) mainWindow.restore()
+  mainWindow.show()
+  mainWindow.focus()
+})
+
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
     app.quit()

@@ -27,6 +27,19 @@ if (READY_USER_DATA_DIR) {
   app.setPath('userData', READY_USER_DATA_DIR)
 }
 
+// Single-instance lock is scoped to the resolved userData dir (Electron keeps
+// the SingletonLock file there), so it must run AFTER the userData override —
+// an isolated acceptance profile keeps its own lock and never collides with the
+// daily instance. Two instances on the SAME userData share one SQLite, and the
+// second boot's startup reconciler would reap the first process's in-flight run
+// as "leftover" (root cause of the core_closeout_terminal_retry_conflict / ghost
+// run observed 2026-07-23). The runtime models process handoff as boot=prior-dead,
+// which is only true when a single instance is enforced here.
+const READY_ALLOW_MULTI_INSTANCE = process.env.READY_ALLOW_MULTI_INSTANCE === '1'
+if (!READY_ALLOW_MULTI_INSTANCE && !app.requestSingleInstanceLock()) {
+  app.exit(0)
+}
+
 // Crash forensics (opt-in via READY_PROC_DIAG=1): synchronous stderr timeline
 // of webContents creation / main-frame navigation starts / renderer deaths.
 // Synchronous on purpose — when the main process dies mid-crash, async logs
