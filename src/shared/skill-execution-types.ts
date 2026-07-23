@@ -162,6 +162,12 @@ export interface SkillDefinition {
    */
   hostRequirements?: import('./skill-host-contract').SkillHostRequirements
   /**
+   * Bare executable names declared by Agent Skills frontmatter at
+   * `metadata.requires.bins`. Imported skills still need per-skill shell
+   * consent before these names enter the temporary command allowlist.
+   */
+  requiredBins?: string[]
+  /**
    * Declarative child-loop ownership contract. Skills that launch durable
    * child runs declare the typed actions here; Ready core must consult this
    * contract instead of carrying per-skill action tables.

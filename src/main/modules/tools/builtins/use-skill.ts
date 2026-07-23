@@ -26,6 +26,7 @@ export interface UseSkillSkillLike {
   name: string
   managedPath?: string
   description?: string
+  requiredBins?: readonly string[]
 }
 
 export interface UseSkillDeps {
@@ -69,7 +70,15 @@ export async function executeUseSkill(
   // same-run activation; it remains available to the existing continuation resolver.
   deps.rememberReferenceSkill(deps.sessionId, { id: skill.id, name: skill.name })
 
-  const note = '技能方法论已注入。宿主会在本次运行的下一次模型迭代开放该技能获准的工具；请立即继续当前任务，不要只给计划，也不要等待用户再次发言。'
+  const declaredBins = (skill.requiredBins || []).filter((bin) =>
+    typeof bin === 'string' && bin.trim())
+  const executableNote = declaredBins.length > 0
+    ? `本技能声明的本机程序已直接可用：${declaredBins.join('、')}。调用时请让命令直接以这些程序名开头，不要先套 bash/sh、管道或重定向。`
+    : ''
+  const note = [
+    '技能方法论已注入。宿主会在本次运行的下一次模型迭代开放该技能获准的工具；请立即继续当前任务，不要只给计划，也不要等待用户再次发言。',
+    executableNote,
+  ].filter(Boolean).join('\n')
   const header = doc
     ? `已激活技能「${skill.name}」（${skill.id}）。方法论如下${doc.truncated ? '（已截断到 12000 字，更多细节见技能的 references/）' : ''}：`
     : `已激活技能「${skill.name}」（${skill.id}）。该技能未内联方法论文档；请按技能工具的返回逐步执行。`
@@ -81,6 +90,7 @@ export async function executeUseSkill(
       skill_id: skill.id,
       activation: 'pending_same_run_refresh',
       docTruncated: doc?.truncated ?? false,
+      declaredBins,
       note,
     },
   })

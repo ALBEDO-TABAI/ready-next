@@ -51,6 +51,7 @@ export interface AgentSdkSkillCatalogSnapshotEntry {
   name: string
   description: string
   managedPath?: string
+  readOnlyDependencyRoots?: string[]
 }
 
 export interface RunHandle {
@@ -213,6 +214,11 @@ export interface ToolBridgeRuntimeContext {
   ) => void
   emitToolAction: (toolName: string, args: Record<string, unknown>) => void
   recordToolResult: (toolName: string, output: ToolExecutionOutput) => void
+  beginToolExecution?: (
+    definition: ToolDefinition,
+    args: Record<string, unknown>,
+  ) => string
+  endToolExecution?: (token: string, error?: unknown) => void
   latestResearchSearchDelivery?: import('./research-result-delivery').ResearchSearchDelivery | null
   nativeMapCriticalClose?: MapToolFailureClose | null
   nativeMapAmbiguityResolved?: boolean
@@ -221,6 +227,13 @@ export interface ToolBridgeRuntimeContext {
   taskBudgetRuntime: TaskBudgetRuntime | null
   hostControl?: 'handoff_takeover' | null
   toolExecutionChain?: Promise<void>
+}
+
+export interface InterruptedToolExecution {
+  toolName: string
+  args: Record<string, unknown>
+  startedAtMs: number
+  expectedTimeoutMs: number
 }
 
 export interface SdkLongSkillCheckpoint {
@@ -326,6 +339,7 @@ export interface SkillContextOrchestratorLike {
     skillId?: string
     name?: string
     managedPath?: string
+    requiredBins?: readonly string[]
   }>
   buildPreferredSkillToolNames?: (userText: string, sessionId?: string) => string[] | null
   peekCurrentReferenceSkillHint?: (sessionId?: string) => { id: string; name: string } | null

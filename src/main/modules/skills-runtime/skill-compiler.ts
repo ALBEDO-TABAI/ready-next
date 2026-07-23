@@ -24,6 +24,7 @@ import {
 } from '../../../shared/skill-host-contract'
 import { normalizeSkillConfiguration } from '../../../shared/skill-configuration'
 import { normalizeReadSkillVisibility } from './read-skill-visibility'
+import { parseSkillRequiredBins } from './skill-frontmatter'
 
 const MANIFEST_CANDIDATES = ['ready-skill.json', '.ready-skill.json', 'skill.json', 'manifest.json']
 const DOCUMENT_CANDIDATES = ['SKILL.md', 'README.md', 'README.zh-CN.md']
@@ -447,6 +448,9 @@ export function compileSkillDefinition(options: SkillCompilerOptions): SkillDefi
   const { folderPath, source, managedPath, sourcePath, fallbackMeta } = options
   const manifestEntry = findFirstExisting(folderPath, MANIFEST_CANDIDATES)
   const documentEntry = findFirstExisting(folderPath, DOCUMENT_CANDIDATES) || undefined
+  const documentText = documentEntry
+    ? readFileSync(join(folderPath, documentEntry), 'utf-8')
+    : null
   const manifestPath = manifestEntry ? join(folderPath, manifestEntry) : undefined
   const manifest = manifestPath ? asObject(readJson(manifestPath)) : null
 
@@ -510,6 +514,7 @@ export function compileSkillDefinition(options: SkillCompilerOptions): SkillDefi
     }
     hostRequirements = parsed.data
   }
+  const requiredBins = documentText ? parseSkillRequiredBins(documentText) : []
   // Stage N (Phase 0.4) — only embedded skills may opt into the child-loop
   // runtime. Custom user-installed skills shipping `child_loop` would slip
   // past the parent-force fence (their dynamic tool name is not in
@@ -573,6 +578,7 @@ export function compileSkillDefinition(options: SkillCompilerOptions): SkillDefi
     workflow,
     manifestValid: true,
     hostRequirements,
+    requiredBins,
     childLoop,
     allowedTools,
     capabilitySurface,

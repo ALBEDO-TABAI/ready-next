@@ -39,8 +39,9 @@
 - 代码侧 `findExplicitlyRequestedSkills` 只认完整技能名或明确别名，禁止按普通任务词或 description 模糊激活。
 - `use_skill` 返回方法论后必须继续完成当前任务，不能只给计划等用户再次发言。
 - 外来技能的 `allowed-tools` 一律忽略并记 `ignoredFields`；工具面只由 Ready 授权层决定。未知 frontmatter 字段忽略，不因规范扩展拒绝导入。
-- custom/导入技能的 `skill_run_shell` 默认关闭，按技能保存 `skill_shell_consent`；embedded skill 默认允许。未同意的轮次只能执行只读方法论，不能伪造脚本结果。
+- custom/导入技能只要带 `scripts/`，或在标准 frontmatter 通过 `metadata.requires.bins` 声明合法裸程序名，就拥有可执行面。声明程序在该技能激活轮直接可用，不增加 Ready 专属开关；未获得脚本同意时，shell allowlist 只含该技能声明的程序，不继承通用命令或 `host_requirements` 扩展。custom 自带 `scripts/` 仍按技能保存 `skill_shell_consent`，embedded skill 默认允许。路径、shell 元字符和破坏性命令不能成为声明程序。
 - `skill_run_shell`、artifact 读写和 config patch 仍必须遵守沙箱、allowlist、大小上限、symlink 与保留文件约束；用户同意 shell 不等于取消这些边界。
+- `SKILL.md` 中形如 `../<skill-id>/SKILL.md` 的兄弟技能链接只在目标已注册且为 reference/advisory 时生效；`use_skill` 同轮激活后把目标根加入只读通道，不加入 artifact 写根。不识别绝对路径、`../../`、任意文件链接或未注册目录，也不因链接自动导入外部技能。
 - `~/.agents/skills` 只读发现并建议导入，绝不自动导入或写回。作者侧校验使用 `npm run skills:lint <dir>`；lint ERROR 不替代导入时的安全扫描。
 - import 保持宽松：缺 id/description 时只使用既有 safeSlug 与 description 推导兜底，lint ERROR 不阻断导入；安全底线仍是 manifest 存在性、目录扫描与执行授权。
 - `skill_executions` 状态机、相关 IPC 和 workflow coordinator 已退役，不得复活。进度走 task tracker、projection 与 child-run 合同。
@@ -74,7 +75,7 @@
 - 零工具的行动宣告不能直接判 done：先转向，再 checkpoint；完成判定必须基于本轮真实证据。
 - Renderer 60 秒 watchdog 只是活性探针。Main 确认同 requestId 仍 active 时返回 active 并续期，Renderer 不得终止仍运行的 provider。
 - Main 的 no-progress 守卫独立于 Renderer watchdog，按 requestId 仲裁；用 `main_no_progress_timeout` 区分 renderer/model/tool timeout。
-- Dynamic Delivery 的 adaptive 120 秒、thorough 240 秒是滚动无进展窗口；成功文本或工具结果会续期，持续无进展才以 `delivery_wall_clock_exceeded` 收口。
+- Dynamic Delivery 的 adaptive 120 秒、thorough 240 秒是滚动无进展窗口；成功文本、推理增量或工具结果会续期。工具 dispatch 到 settle 之间必须登记执行态，外层窗口不得早于该工具定义的执行上限；工具结束后恢复普通滚动窗口。工具超过登记上限仍未 settle 才以 `delivery_wall_clock_exceeded` 收口，收口必须说明停在哪个工具以及没有结果不能视为成功。
 - 旧 run 晚到不能覆盖同 scope 新 run；已落库消息不能显示成消息丢失。
 - 冷启动把持久化的 `working | running` 都视为上次进程遗留。仍绑定 Browser workflow 且持有当前 clean checkpoint 的 Owner 必须先经 Browser 单事务转成 owner-crash 可续跑暂停，再由通用 reconciler 清理其余无有效检查点的行；迁移后的 `running` 词汇不能逃过清扫，有检查点的 Parent 也不能被标成不可继续。
 - Dynamic Delivery 默认 `adaptive`，设置页可切 `standard`；输入框 `thorough` 只影响下一次发送并立即复位。
@@ -141,7 +142,7 @@
 
 - 非浏览器高危工具在 authorization 后由 `agent-control/safety/action-confirmation-policy.ts` 的 M1-M4 表裁决；不得用提示词代替确认闸门。
 - 内置 `operator` 使用保留身份与独立内置人格；迁移遇到任何不完全等于内置种子的同 slug agent 时，必须先无损改名和搬迁人格再补种。历史保留 slug 人格错绑只允许由后续迁移在账本与精确占位内容共同证明时修复，含糊或用户编辑状态不得覆盖。`social-media-ops` 是 reference/advisory 技能；截图缓存只算坐标证据，视觉判断必须走能返回分析结果的工具。
-- `run_setup_command` 的 `confirmAck` 只表示进入执行阶段，不是用户授权凭证；所有执行阶段调用必须冻结原参数并走 Ready 确认卡。CLI 授权优先使用可续接的 JSON/device-code 流程并显示可点击链接；退出码 10 的高风险重试不得自动追加 `--yes` 后执行，原始 TTY 交互仍明确不支持。
+- `run_setup_command` 只在用户同时明确安装/配置类动作与 CLI、命令行、本地程序、包管理器或运行环境目标时进入模型工具面；普通 CLI 读取不得借它绕过技能执行。它的 `confirmAck` 只表示进入执行阶段，不是用户授权凭证；所有执行阶段调用必须冻结原参数并走 Ready 确认卡。CLI 授权优先使用可续接的 JSON/device-code 流程并显示可点击链接；退出码 10 的高风险重试不得自动追加 `--yes` 后执行，原始 TTY 交互仍明确不支持。
 - staged 信念卡不得进入 prompt；Reflection 不得直接写 prompt 可见的 `resident_user` / `scope_memory`，并必须发 `reflection_outcome` 账本。
 - owner 解析顺序：显式合法 `ownerAgentId` 优先；完全未传时回退 `scope.agent`；显式非法时降级 global-only，不借道读取其他 Agent 谱系。
 - charter/路由索引只进入主 Agent 会话；`ownerAgentId` 只能由用户采纳 handoff 后写入，后续轮次随 scope 最近 owner 切换。

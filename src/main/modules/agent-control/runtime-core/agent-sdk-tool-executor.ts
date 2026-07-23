@@ -136,6 +136,26 @@ export interface ToolExecutorHost {
 export class AgentSdkToolExecutor {
   constructor(private readonly host: ToolExecutorHost) {}
 
+  private async executeHostToolCall(
+    definition: ToolDefinition,
+    args: Record<string, unknown>,
+    runtimeContext: ToolBridgeRuntimeContext,
+  ): Promise<ToolExecutionOutput> {
+    const token = runtimeContext.beginToolExecution?.(definition, args) || ''
+    try {
+      const output = await this.host.executeToolCall(
+        definition.name,
+        args,
+        this.buildExecutorContext(runtimeContext)
+      )
+      runtimeContext.endToolExecution?.(token)
+      return output
+    } catch (error) {
+      runtimeContext.endToolExecution?.(token, error)
+      throw error
+    }
+  }
+
   private rendererToolActionRequester:
     | ((payload: {
         agent?: string
@@ -696,11 +716,7 @@ export class AgentSdkToolExecutor {
       detail: buildToolCallDetail(args)
     })
     runtimeContext.emitToolAction(definition.name, args)
-    const output = await this.host.executeToolCall(
-      definition.name,
-      args,
-      this.buildExecutorContext(runtimeContext)
-    )
+    const output = await this.executeHostToolCall(definition, args, runtimeContext)
     runtimeContext.recordToolResult(definition.name, output)
     const normalized = normalizeToolExecutionOutput(output)
     const resultTrace = formatToolResultTrace(definition.name, normalized)
@@ -1010,11 +1026,7 @@ export class AgentSdkToolExecutor {
     runtimeContext.emitToolAction(definition.name, effectiveArgs)
     let output = definition.name === 'use_browser'
       ? this.activateBrowserForSameRun(runtimeContext)
-      : await this.host.executeToolCall(
-          definition.name,
-          effectiveArgs,
-          this.buildExecutorContext(runtimeContext)
-        )
+      : await this.executeHostToolCall(definition, effectiveArgs, runtimeContext)
     if (definition.name === 'use_skill') {
       output = this.activateSkillForSameRun(output, runtimeContext)
     }

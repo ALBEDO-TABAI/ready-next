@@ -27,6 +27,7 @@ import type {
   AgentSdkProviderDiagnostics,
   AgentSdkSession,
   DocumentTargetGuard,
+  InterruptedToolExecution,
   ReadyAgentSdkRunResult,
   RunHandle,
   RunMetaRepositoryLike,
@@ -34,6 +35,7 @@ import type {
 } from './agent-sdk-types'
 import { finalizeRunOutcome, writeRunCloseMetric, type RunOutcome } from './run-finalizer'
 import type { TurnTerminalReason } from './turn-frame'
+import { buildDeliveryDeadlineTerminalText } from './tool-timeout-user-message'
 
 export async function recordAdmissionRejection(
   host: TurnOrchestratorHost,
@@ -312,6 +314,7 @@ export interface TurnErrorCloseoutContext {
   runMetaUsage: ReadyAgentSdkRunResult['usage'] | null
   longSkillCheckpoint: SdkLongSkillCheckpoint | null
   finalText: string
+  interruptedToolExecution: InterruptedToolExecution | null
   documentTargetGuardForRecovery: DocumentTargetGuard | null
   requiresLocalDocumentExcerptForRecovery: boolean
   requiresLocalDocumentWriteForRecovery: boolean
@@ -449,7 +452,7 @@ export async function handleAgentSdkTurnError(
     const terminalText = preemptedByNewerSend
       ? ''
       : deliveryWallClockExceeded
-        ? '任务因运行时间达到上限而停止。'
+        ? buildDeliveryDeadlineTerminalText(ctx.interruptedToolExecution)
         : abortInitiator === 'user_stop'
           ? '已手动停止，进度已保存至当前会话。'
           : '任务已停止。'

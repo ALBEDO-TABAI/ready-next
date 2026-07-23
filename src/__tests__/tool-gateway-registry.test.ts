@@ -12,6 +12,7 @@ import {
   buildExplicitNoSkillAuthorization,
   buildSelectedSkillToolAuthorization,
 } from '../main/modules/agent-control/skills/skill-tool-authorization'
+import { COMMAND_EXEC_TOOL_TIMEOUT_MS } from '../main/modules/tools/tool-execution-timeout-policy'
 
 test('tool gateway exposes formal capability groups and resolves grouped tools', () => {
   const gateway = new ToolGateway()
@@ -59,6 +60,7 @@ test('tool gateway exposes formal capability groups and resolves grouped tools',
   const documentRemoveWidget = gateway.getToolDefinition('document_remove_widget')
   const documentListWidgets = gateway.getToolDefinition('document_list_widgets')
   const skillPipeline = gateway.getToolDefinition('skill_video_expert_pipeline')
+  const setupCommand = gateway.getToolDefinition('run_setup_command')
 
   assert.ok(browserInteractionTools.includes('browser_navigate'))
   assert.ok(browserInteractionTools.includes('browser_click'))
@@ -105,6 +107,9 @@ test('tool gateway exposes formal capability groups and resolves grouped tools',
   assert.equal(documentListWidgets?.resultShape, 'text')
   assert.equal(documentListWidgets?.projectionHint, null)
   assert.equal(skillPipeline, null)
+  assert.equal(setupCommand?.timeoutProfile, 'command_exec')
+  assert.equal(setupCommand?.executionTimeoutMs, COMMAND_EXEC_TOOL_TIMEOUT_MS)
+  assert.equal(setupCommand?.interruptBehavior, 'host_managed')
   assert.ok(gateway.listToolDefinitions().some((tool) => tool.name === 'session_search' && tool.domain === 'session'))
 })
 

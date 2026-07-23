@@ -844,7 +844,7 @@ export class AgentSdkTurnOrchestrator {
         runMetaUsage,
         sessionRestoreNotice,
         skillClarificationSteered,
-        checkpointCanonicalReceipt: null, finishProviderTransferCheckpoint: null,
+        checkpointCanonicalReceipt: null, interruptedToolExecution: null, finishProviderTransferCheckpoint: null,
       }
       const executionResult = await executeAgentSdkPreparedTurn({
         state: preparedTurnState,
@@ -945,7 +945,7 @@ export class AgentSdkTurnOrchestrator {
         longSkillCheckpoint: preparedTurnState
           ? preparedTurnState.longSkillCheckpoint
           : longSkillCheckpoint,
-        finalText: preparedTurnState ? preparedTurnState.finalText : finalText,
+        finalText: preparedTurnState ? preparedTurnState.finalText : finalText, interruptedToolExecution: preparedTurnState?.interruptedToolExecution || null,
         documentTargetGuardForRecovery,
         requiresLocalDocumentExcerptForRecovery,
         requiresLocalDocumentWriteForRecovery,

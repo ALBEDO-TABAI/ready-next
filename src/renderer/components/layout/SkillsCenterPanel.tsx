@@ -33,6 +33,7 @@ interface SkillState {
   executionMode: 'advisory' | 'workflow' | 'direct'
   managedPath?: string
   sourcePath?: string
+  requiredBins?: string[]
   configuration?: SkillConfigurationDefinition
 }
 
@@ -168,7 +169,7 @@ export default function SkillsCenterPanel({ children }: SkillsCenterPanelProps) 
   const [importDropActive, setImportDropActive] = useState(false)
   // P3-1 — discovered ~/.agents/skills candidates (suggest-import; rendered only when non-empty).
   const [externalCandidates, setExternalCandidates] = useState<ExternalSkillCandidateView[]>([])
-  // P3-2 — per-custom-skill shell-execution consent info (toggle shown only for skills with scripts/).
+  // P3-2 — per-custom-skill local-execution consent info.
   const [shellConsentMap, setShellConsentMap] = useState<Record<string, { hasScripts: boolean; consent: boolean }>>({})
   const [selectedCardId, setSelectedCardId] = useState<string | null>(null)
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; target: SkillCardContextTarget } | null>(null)
@@ -744,7 +745,7 @@ export default function SkillsCenterPanel({ children }: SkillsCenterPanelProps) 
                         >
                           {skill.sourcePath || skill.managedPath || runtimeInfo?.customSkillsRoot || ''}
                         </p>
-                        {/* P3-2 — shell-execution consent toggle; shown only for custom skills that ship a scripts/ dir. */}
+                        {/* P3-2 — only bundled scripts require a Ready-specific consent toggle. */}
                         {shellConsentMap[skill.id]?.hasScripts && (
                           <div
                             style={{ marginTop: 6, display: 'flex', alignItems: 'center', gap: 6 }}

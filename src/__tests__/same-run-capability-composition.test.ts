@@ -73,6 +73,7 @@ function createFixture() {
     exclusiveScopeRef: null,
     authorization: buildExplicitNoSkillAuthorization('no_skill_signal'),
     preparedSkillTurn: null,
+    activeFrame: { activeArtifactRoots: [], activeReadOnlyRoots: [] },
     allowedToolNames,
     definitionByName,
   } as unknown as ToolBridgeRuntimeContext
@@ -96,6 +97,7 @@ function createFixture() {
         },
         surface,
       }),
+    resolveReadOnlySkillRoots: () => ['/managed/lark-shared'],
     resolveExclusiveFloorToolNames: () => [tagForge.name],
     allowedToolNames,
     definitionByName,
@@ -138,6 +140,7 @@ function assertExclusiveSurface(fixture: ReturnType<typeof createFixture>): void
   assert.equal(fixture.checkpointRequiredCapabilityGroups.includes('browser_interaction'), false)
   assert.equal(fixture.checkpointRequiredToolNames.includes(fixture.browser.name), false)
   assert.deepEqual(fixture.runtimeContext.activatedCapabilityGroups, ['browser'])
+  assert.deepEqual(fixture.runtimeContext.activeFrame.activeReadOnlyRoots, ['/managed/lark-shared'])
 }
 
 test('Tag Forge stays exclusive whether Browser is activated before or after the skill', () => {

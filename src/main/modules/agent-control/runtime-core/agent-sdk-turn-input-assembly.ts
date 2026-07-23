@@ -3,8 +3,8 @@ import { buildTextToolBridgePrompt } from '../../claude-bridge/tool-bridge'
 import {
   getSkillShellConsent,
   isEmbeddedSkill,
-  skillDirHasScripts
 } from '../../skills-runtime/skill-shell-consent'
+import { skillDirHasScripts } from '../../skills-runtime/skill-executable-surface'
 import { RUNTIME_PREAMBLE_STAGE, buildRuntimePreambleBill, emitContextBill } from '../context-bill'
 import type {
   ExecutionTurnResult,

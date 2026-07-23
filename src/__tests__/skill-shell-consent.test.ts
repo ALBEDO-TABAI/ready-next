@@ -32,18 +32,25 @@ test('parseShellConsentMap: valid map keeps only true values; bad/absent JSON �
   assert.deepEqual(parseShellConsentMap('"str"'), {})
 })
 
-test('resolveSkillShellAllowed: embedded+scripts → allow; custom needs consent; no scripts → always deny', () => {
-  // embedded + scripts → allow (default trusted)
-  assert.equal(resolveSkillShellAllowed({ hasScripts: true, isEmbedded: true, hasConsent: false }), true)
-  // custom + scripts + no consent → deny
-  assert.equal(resolveSkillShellAllowed({ hasScripts: true, isEmbedded: false, hasConsent: false }), false)
-  // custom + scripts + consent → allow
-  assert.equal(resolveSkillShellAllowed({ hasScripts: true, isEmbedded: false, hasConsent: true }), true)
-  // no scripts → deny regardless
-  assert.equal(resolveSkillShellAllowed({ hasScripts: false, isEmbedded: true, hasConsent: true }), false)
+test('resolveSkillShellAllowed: declared bins are immediate while custom bundled scripts need consent', () => {
+  assert.equal(resolveSkillShellAllowed({
+    hasScripts: false, hasDeclaredBins: true, isEmbedded: false, hasConsent: false,
+  }), true)
+  assert.equal(resolveSkillShellAllowed({
+    hasScripts: true, hasDeclaredBins: false, isEmbedded: true, hasConsent: false,
+  }), true)
+  assert.equal(resolveSkillShellAllowed({
+    hasScripts: true, hasDeclaredBins: false, isEmbedded: false, hasConsent: false,
+  }), false)
+  assert.equal(resolveSkillShellAllowed({
+    hasScripts: true, hasDeclaredBins: false, isEmbedded: false, hasConsent: true,
+  }), true)
+  assert.equal(resolveSkillShellAllowed({
+    hasScripts: false, hasDeclaredBins: false, isEmbedded: true, hasConsent: true,
+  }), false)
 })
 
-test('skillShellConsentReminderText: only when scripts present, not embedded, and no consent', () => {
+test('skillShellConsentReminderText: only bundled scripts require the Ready-specific toggle', () => {
   assert.equal(
     skillShellConsentReminderText({ skillName: 'X', hasScripts: true, isEmbedded: false, hasConsent: false })?.includes('X'),
     true,

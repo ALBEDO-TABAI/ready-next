@@ -37,6 +37,7 @@ export type ToolTimeoutProfile =
   | 'feishu'
   | 'image_generation'
   | 'map'
+  | 'command_exec'
 
 export interface ToolProjectionHint {
   mutating?: boolean

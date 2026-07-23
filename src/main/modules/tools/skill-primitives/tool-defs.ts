@@ -34,7 +34,7 @@ export const PRIMITIVE_TOOL_DEFS: SkillToolDef[] = [
   {
     name: 'skill_run_shell',
     description:
-      '在技能沙箱内执行一次 shell 命令。cwd=技能 managedPath；env 注入 CLAUDE_SKILL_DIR（managedPath）与 CLAUDE_SKILL_OUTPUT_DIR（per-skill output 目录）。支持 cd、$VAR、&&、管道、重定向、bash/sh 包裹的 POSIX 单引号写法，以及 python/node/grep/find/awk/sed 这类脚本探针里的单引号片段；受白名单限制，只允许 python/python3/node/bash/sh/curl/cat/ls/head/tail/grep/find/which/mkdir/pwd/echo/awk/sed，禁止 rm/cp/mv。脚本优先通过 bash scripts/x.sh 或 python scripts/x.py 调用。stdout/stderr 超过 8K 字符会被截断并落到 artifact 文件。',
+      '在技能沙箱内执行一次本地程序或 shell 命令。cwd=技能 managedPath；env 注入 CLAUDE_SKILL_DIR（managedPath）与 CLAUDE_SKILL_OUTPUT_DIR（per-skill output 目录）。基础白名单为 python/python3/node/bash/sh/curl/cat/ls/head/tail/grep/find/which/mkdir/pwd/echo/awk/sed；当前技能通过 metadata.requires.bins 或 host_requirements 声明的程序仅在该技能已激活且获执行同意时临时加入。禁止 rm/cp/mv。脚本优先通过 bash scripts/x.sh 或 python scripts/x.py 调用。stdout/stderr 超过 8K 字符会被截断并落到 artifact 文件。',
     kind: 'primitive',
     params: zodObjectToParamList(SKILL_PRIMITIVE_SCHEMAS.skill_run_shell),
   },

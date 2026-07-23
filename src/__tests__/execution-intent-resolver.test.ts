@@ -3,7 +3,11 @@ import test from 'node:test'
 
 import { classifyIntent } from '../main/modules/agent-control/intent-classifier'
 import { buildRequestEnvelope } from '../main/modules/agent-control/contracts/request-envelope'
-import { buildExecutionToolState, resolveExecutionIntentContext } from '../main/modules/agent-control/execution-intent-resolver'
+import {
+  buildExecutionToolState,
+  hasExplicitSetupCommandIntent,
+  resolveExecutionIntentContext
+} from '../main/modules/agent-control/execution-intent-resolver'
 
 test('resolveExecutionIntentContext preserves document follow-up context and widget intent', () => {
   const requestEnvelope = buildRequestEnvelope({
@@ -215,6 +219,85 @@ test('buildExecutionToolState keeps rss and feishu tools available only when use
   assert.equal(rssState.capabilityResolution.visibleCapabilityGroupIds.includes('channel_feishu'), false)
   assert.equal(feishuState.capabilityResolution.visibleCapabilityGroupIds.includes('channel_feishu'), true)
   assert.equal(feishuState.capabilityResolution.visibleCapabilityGroupIds.includes('rss'), false)
+})
+
+test('local Feishu CLI intent does not request the sidecar-backed channel_feishu surface', () => {
+  const envelope = buildRequestEnvelope({
+    userText: '用飞书 CLI 查一下我这周的会话记录',
+  })
+  const state = buildExecutionToolState({
+    supportsToolCalls: true,
+    hasVideoInputs: false,
+    hasIncomingVideo: false,
+    keepToolsWithVideo: false,
+    preferredSkillToolNames: null,
+    contextualUserInput: envelope.primaryInstruction,
+    userInstructionText: envelope.primaryInstruction,
+    intentClassification: classifyIntent(envelope),
+    hasDocumentEnvironment: false,
+    hasWidgetTargetContext: false,
+    explicitWidgetCreateIntent: false,
+    documentWidgetTaskKind: null,
+    documentWidgetProfile: null,
+    browserDecisionMode: 'free_tool_loop',
+    capabilityProfile: 'local_chat',
+    feishuConnected: false,
+  })
+
+  assert.equal(state.capabilityResolution.requestedButSuppressed.some(
+    (conflict) => conflict.groupId === 'channel_feishu',
+  ), false)
+})
+
+test('local CLI reads do not expose the install/config command while explicit setup still does', () => {
+  const readText = '用飞书 CLI 查一下我这周的会话记录'
+  const readEnvelope = buildRequestEnvelope({ userText: readText })
+  const readState = buildExecutionToolState({
+    supportsToolCalls: true,
+    hasVideoInputs: false,
+    hasIncomingVideo: false,
+    keepToolsWithVideo: false,
+    preferredSkillToolNames: null,
+    contextualUserInput: readText,
+    userInstructionText: readText,
+    intentClassification: classifyIntent(readEnvelope),
+    hasDocumentEnvironment: false,
+    hasWidgetTargetContext: false,
+    explicitWidgetCreateIntent: false,
+    documentWidgetTaskKind: null,
+    documentWidgetProfile: null,
+    browserDecisionMode: 'free_tool_loop',
+    capabilityProfile: 'local_chat',
+    feishuConnected: false,
+  })
+
+  const setupText = '帮我安装并配置飞书 CLI'
+  const setupEnvelope = buildRequestEnvelope({ userText: setupText })
+  const setupState = buildExecutionToolState({
+    supportsToolCalls: true,
+    hasVideoInputs: false,
+    hasIncomingVideo: false,
+    keepToolsWithVideo: false,
+    preferredSkillToolNames: null,
+    contextualUserInput: setupText,
+    userInstructionText: setupText,
+    intentClassification: classifyIntent(setupEnvelope),
+    hasDocumentEnvironment: false,
+    hasWidgetTargetContext: false,
+    explicitWidgetCreateIntent: false,
+    documentWidgetTaskKind: null,
+    documentWidgetProfile: null,
+    browserDecisionMode: 'free_tool_loop',
+    capabilityProfile: 'local_chat',
+    feishuConnected: false,
+  })
+
+  assert.equal(readState.capabilityResolution.visibleCapabilityGroupIds.includes('command_exec'), false)
+  assert.equal(setupState.capabilityResolution.visibleCapabilityGroupIds.includes('command_exec'), true)
+  assert.equal(hasExplicitSetupCommandIntent('看看飞书 CLI 有没有登录'), false)
+  assert.equal(hasExplicitSetupCommandIntent('为什么安装飞书 CLI 会超时'), false)
+  assert.equal(hasExplicitSetupCommandIntent('安装飞书 CLI'), true)
+  assert.equal(hasExplicitSetupCommandIntent('安装失败了，帮我修复飞书 CLI'), true)
 })
 
 test('resolveExecutionIntentContext builds a structured document task plan for explicit source-to-target requests', () => {

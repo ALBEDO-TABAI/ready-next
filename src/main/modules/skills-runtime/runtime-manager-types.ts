@@ -46,6 +46,8 @@ export interface SkillState {
    * to compute the effective shell allowlist for skill_run_shell.
    */
   hostRequirements?: import('../../../shared/skill-host-contract').SkillHostRequirements
+  /** Agent Skills `metadata.requires.bins`, validated as bare executable names. */
+  requiredBins?: string[]
   childLoop?: SkillChildLoopDefinition
   /** Embedded manifest tool contract used to admit the selected skill's capability groups. */
   allowedTools?: string[]

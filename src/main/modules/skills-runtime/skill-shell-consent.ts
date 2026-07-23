@@ -1,17 +1,13 @@
 /**
  * P3-2 — per-skill `skill_run_shell` consent policy.
  *
- * Embedded skills ship with the app and pass the CI security contract, so they may run scripts by
- * default. Custom/imported skills require EXPLICIT per-skill consent (a settings toggle) before the
- * agent is allowed to run their scripts. This does not change the sandbox/allowlist — a granted skill
- * still runs under the same shell fences; consent only gates whether `skill_run_shell` is authorized.
+ * Binaries explicitly declared through Agent Skills `metadata.requires.bins` are available without
+ * a second Ready-specific toggle. Embedded skills may also run their bundled scripts by default;
+ * custom/imported bundled scripts still require per-skill consent.
  *
- * The pure policy (`parseShellConsentMap` / `resolveSkillShellAllowed` / `skillDirHasScripts`) is
+ * The pure policy (`parseShellConsentMap` / `resolveSkillShellAllowed`) is
  * unit-testable; `getSkillShellConsent` / `setSkillShellConsent` are thin DB-backed wrappers.
  */
-import { existsSync } from 'node:fs'
-import { join } from 'node:path'
-
 import { getDatabase } from '../database'
 import { EMBEDDED_SKILL_IDS } from './manifest'
 
@@ -56,21 +52,13 @@ export function isEmbeddedSkill(skillId: string): boolean {
   return EMBEDDED_SKILL_IDS.has(skillId)
 }
 
-/** True when the skill's managed folder contains a `scripts/` directory. */
-export function skillDirHasScripts(managedPath: string | undefined | null): boolean {
-  if (!managedPath) return false
-  try {
-    return existsSync(join(managedPath, 'scripts'))
-  } catch {
-    return false
-  }
-}
-
-/** Pure P3-2 policy: shell is allowed only when the skill has scripts AND (is embedded OR consented). */
+/** Declared local binaries are immediate; bundled scripts retain the existing trust boundary. */
 export function resolveSkillShellAllowed(params: {
   hasScripts: boolean
+  hasDeclaredBins: boolean
   isEmbedded: boolean
   hasConsent: boolean
 }): boolean {
-  return params.hasScripts && (params.isEmbedded || params.hasConsent)
+  return params.hasDeclaredBins
+    || (params.hasScripts && (params.isEmbedded || params.hasConsent))
 }

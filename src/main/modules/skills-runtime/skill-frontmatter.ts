@@ -9,10 +9,49 @@
  * (name / description / version). Unknown fields are kept verbatim (spec tolerance,
  * P2-4): the caller decides which keys to honor.
  */
+import { parse as parseYaml } from 'yaml'
+
+import { isDestructiveShellCommand } from '../../../shared/skill-host-contract'
 
 export interface SkillFrontmatter {
   body: string
   metadata: Record<string, string>
+}
+
+const DECLARED_BIN_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/
+
+function asObject(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null
+}
+
+/**
+ * Parse the Agent Skills standard executable dependency declaration:
+ * `metadata.requires.bins`. Only bare program names are accepted. Paths,
+ * shell syntax and Ready's destructive command set are rejected so an
+ * imported document cannot widen `skill_run_shell` beyond one named binary.
+ */
+export function parseSkillRequiredBins(text: string): string[] {
+  const normalized = text.replace(/^\uFEFF/, '')
+  const match = normalized.match(/^---\s*\r?\n([\s\S]*?)\r?\n---\s*(?:\r?\n|$)/)
+  if (!match) return []
+  try {
+    const root = asObject(parseYaml(match[1]))
+    const metadata = asObject(root?.metadata)
+    const requires = asObject(metadata?.requires)
+    const bins = Array.isArray(requires?.bins) ? requires.bins : []
+    return Array.from(new Set(
+      bins
+        .filter((value): value is string => typeof value === 'string')
+        .map((value) => value.trim())
+        .filter((value) =>
+          DECLARED_BIN_PATTERN.test(value)
+          && !isDestructiveShellCommand(value)),
+    ))
+  } catch {
+    return []
+  }
 }
 
 /**

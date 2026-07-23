@@ -276,7 +276,7 @@ import {
   documentSaveSucceeded,
   documentToolMutatedContent,
   errorMessage,
-  explicitReferenceSkillHasScripts,
+  resolveExplicitReferenceSkillExecutableSurface,
   extractLongSkillCheckpoint,
   extractSdkMissingToolName,
   filterSelectedSkillToolSurface,
@@ -1113,9 +1113,10 @@ export class AgentSdkRuntime extends EventEmitter {
             .filter((toolName) => toolName.startsWith('skill_') && !PRIMITIVE_TOOL_NAME_SET.has(toolName)),
         )
         const typedRefActions = Array.from(typedRefActionNames)
-        // P3-2 — shell only when the skill has scripts AND (embedded OR user-consented).
+        const typedRefExecutableSurface =
+          resolveExplicitReferenceSkillExecutableSurface(matchedSkill, typedRefActions)
         const typedRefAllowRunShell = resolveSkillShellAllowed({
-          hasScripts: explicitReferenceSkillHasScripts(matchedSkill, typedRefActions),
+          ...typedRefExecutableSurface,
           isEmbedded: isEmbeddedSkill(typedRefSkillId),
           hasConsent: getSkillShellConsent(typedRefSkillId),
         })
@@ -1142,7 +1143,13 @@ export class AgentSdkRuntime extends EventEmitter {
     if (userTextCandidates.length === 0) return buildExplicitNoSkillAuthorization('no_skill_signal')
     const explicitSkillMatches: Array<{
       text: string
-      skill: { id?: string; skillId?: string; name?: string; managedPath?: string }
+      skill: {
+        id?: string
+        skillId?: string
+        name?: string
+        managedPath?: string
+        requiredBins?: readonly string[]
+      }
     }> = []
     for (const text of userTextCandidates) {
       const skills = orchestrator.findExplicitlyRequestedSkills?.(text) || []
@@ -1180,16 +1187,17 @@ export class AgentSdkRuntime extends EventEmitter {
     const typedActions = Array.from(typedActionNames)
     const skillId = explicitSkillId || (skillHintRelevantForTurn ? referenceHint?.id || null : null)
     if (!skillId) return buildExplicitNoSkillAuthorization('no_skill_signal')
-    // P3-2 — shell only when the skill has scripts AND (embedded OR user-consented).
+    const selectedSkillCandidate = explicitSkill
+      ?? (orchestrator.findExplicitlyRequestedSkills?.(`@[${skillId}]`) || [])
+        .find((candidate) => (candidate.id || candidate.skillId) === skillId)
+    const executableSurface =
+      resolveExplicitReferenceSkillExecutableSurface(selectedSkillCandidate || null, typedActions)
     const allowRunShell = resolveSkillShellAllowed({
-      hasScripts: explicitReferenceSkillHasScripts(explicitSkill, typedActions),
+      ...executableSurface,
       isEmbedded: isEmbeddedSkill(skillId),
       hasConsent: getSkillShellConsent(skillId),
     })
     const allowAskUser = !shouldSuppressSkillAskUserForArtifactDelivery(userTextCandidates)
-    const selectedSkillCandidate = explicitSkill
-      ?? (orchestrator.findExplicitlyRequestedSkills?.(`@[${skillId}]`) || [])
-        .find((candidate) => (candidate.id || candidate.skillId) === skillId)
     const selectedSkill = registeredSkillOrFallback(skillId, selectedSkillCandidate)
     const manifestTools = resolveManifestBoundSkillTools(
       selectedSkill,
@@ -1258,8 +1266,10 @@ export class AgentSdkRuntime extends EventEmitter {
       ? getSkillsRuntimeManager().listSkills()
           .find((candidate) => candidate.id === skillId && candidate.manifestValid !== false) ?? null
       : null
+    const executableSurface =
+      resolveExplicitReferenceSkillExecutableSurface(skill, saved.authorizedTypedActions)
     const allowRunShell = Boolean(skillId && skill && resolveSkillShellAllowed({
-      hasScripts: explicitReferenceSkillHasScripts(skill, saved.authorizedTypedActions),
+      ...executableSurface,
       isEmbedded: isEmbeddedSkill(skillId),
       hasConsent: getSkillShellConsent(skillId),
     }))

@@ -21,6 +21,13 @@
 
 | 评估日期 | 任务 | 文件 | 总行数 | 本次新增 | 结论 | 判断与后续动作 | 状态 |
 | --- | --- | --- | ---: | ---: | --- | --- | --- |
+| 2026-07-23 | 飞书 CLI 与超时闭环 | `src/main/modules/tools/skills-tools.ts` | 3101 | 净 +13 | 危险 | 技能工具注册、执行分派、授权与投影仍集中；本轮只把已验证的技能声明程序并入当前技能临时白名单，判断已留在解析和授权叶子层。后续仍需按既有独立合同拆分全局技能工具宿主。 | 待独立拆分合同；交付时提醒 |
+| 2026-07-23 | 飞书 CLI 与超时闭环 | `src/main/modules/agent-control/tools-runtime/tool-registry.ts` | 1537 | 净 +3 | 一般 | 只让统一工具定义携带现有 timeout profile 的执行上限，并注册 command_exec profile；没有加入飞书业务判断。2026-08-23 复查跨域注册密度。 | 已排期：2026-08-23 |
+| 2026-07-23 | 飞书 CLI 与超时闭环 | `src/main/modules/agent-control/runtime-core/agent-sdk-tool-executor.ts` | 1134 | 净 +12 | 一般 | 只把所有宿主工具调用统一包进执行开始/结束生命周期，具体时钟和收口均在独立模块。2026-08-23 复查 SDK 工具包装与事件发布边界。 | 已排期：2026-08-23 |
+| 2026-07-23 | 飞书 CLI 与超时闭环 | `src/main/modules/agent-control/runtime-core/agent-sdk-runtime.ts` | 1314 | 净 +10 | 一般 | 只把“脚本存在”授权判定替换为统一可执行面判定，并修正同轮选中技能先解析、后授权的顺序；技能解析和同意策略仍在叶子模块。2026-08-23 复查技能授权组装密度。 | 已排期：2026-08-23 |
+| 2026-07-23 | 飞书 CLI 与超时闭环 | `src/main/modules/skills-runtime/runtime-manager.ts` | 1172 | 净 +5 | 一般 | 只透传声明程序；技能中心的同意状态继续只面向技能自带脚本，解析和策略均在叶子模块。2026-08-23 复查运行时装配密度。 | 已排期：2026-08-23 |
+| 2026-07-23 | 飞书 CLI 与超时闭环 | `src/renderer/components/layout/SkillsCenterPanel.tsx` | 1402 | 净 +1 | 一般 | 只透传声明程序信息并明确既有同意开关仍仅为技能自带脚本显示，没有增加新的交互流程。2026-08-23 复查技能配置与卡片呈现是否继续下沉。 | 已排期：2026-08-23 |
+| 2026-07-23 | 飞书 CLI 与超时闭环 | `src/renderer/types/electron.d.ts` | 4051 | 净 +1 | 健康 | 机械补齐声明程序和执行同意返回形状，由跨进程类型检查与真实应用回读覆盖。 | 无需处理 |
 | 2026-07-23 | Provider checkpoint 纠偏（复核补录） | `src/main/modules/agent-control/runtime-core/runtime.ts` | 2603 | 净 -545 | 危险 | 拆分后仍是最大运行服务装配文件；危险评级不因净减撤销。后续按既有拆分合同继续迁出交互生命周期与 continuation 组合。 | 待独立拆分合同；交付时提醒 |
 | 2026-07-23 | Provider checkpoint 纠偏 | `src/main/modules/agent-control/runtime-core/orchestrator.ts` | 1040 | 净 +12 | 一般 | 仍是 Agent 运行组合入口，本轮只接入 Browser continuation 窄委派；业务判断已在叶子模块。2026-08-23 复查组合接线密度。 | 已排期：2026-08-23 |
 | 2026-07-23 | Provider checkpoint 纠偏 | `src/renderer/components/agent/ChatPanel.tsx` | 1167 | 净 +17 | 一般 | 仍是聊天面板组合宿主，本轮只透传结构化暂停与 canonical 终态。2026-08-23 复查任务面板接线是否继续下沉。 | 已排期：2026-08-23 |

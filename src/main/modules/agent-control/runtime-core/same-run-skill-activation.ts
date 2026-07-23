@@ -65,6 +65,7 @@ export function installSameRunSkillActivation(input: {
     identity: SkillTurnIdentity
     surface: ResolvedSkillSurfaceComposition
   }) => PreparedSkillTurnTruth
+  resolveReadOnlySkillRoots?: (skillId: string) => string[]
   resolveExclusiveFloorToolNames: (authorization: SkillToolAuthorization) => Iterable<string>
   allowedToolNames: string[]
   definitionByName: Map<string, ToolDefinition>
@@ -91,6 +92,14 @@ export function installSameRunSkillActivation(input: {
       identity: prepared.identity,
       surface,
     })
+    const readOnlyRoots = input.resolveReadOnlySkillRoots?.(skillId) || []
+    if (readOnlyRoots.length > 0) {
+      const roots = input.runtimeContext.activeFrame.activeReadOnlyRoots ||= []
+      const seen = new Set(roots)
+      for (const root of readOnlyRoots) {
+        if (!seen.has(root)) roots.push(root)
+      }
+    }
 
     const authorizedNames = new Set([
       ...authorization.allowedTypedActions,

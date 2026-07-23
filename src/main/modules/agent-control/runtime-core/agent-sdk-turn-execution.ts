@@ -39,6 +39,7 @@ import { executeAgentSdkModelToolLoop } from './agent-sdk-turn-model-loop'
 import { bindAgentSessionInputController } from './agent-session-input-bindings'
 import { browserSurfaceActiveForDefinitions, prepareBrowserWorkflowTurnState } from './agent-sdk-browser-turn-control'
 import { createAgentSdkToolResultRecorder } from './agent-sdk-turn-tool-result-recorder'
+import { createAgentSdkToolExecutionLifecycle } from './agent-sdk-tool-execution-lifecycle'
 import { ensureLongRunningTaskBudgetCapacity } from '../task-projection/run-budget-policy'
 import { createBrowserSuspensionController } from './agent-sdk-browser-suspension'
 import type {
@@ -381,6 +382,9 @@ export async function executeAgentSdkPreparedTurn(
         taskId,
         noteProgress: () => deliveryDeadline.noteProgress('tool_result'),
       }),
+      ...createAgentSdkToolExecutionLifecycle({
+        runId, abortController, deliveryDeadline, state: ctx.state,
+      }),
       agentContext,
       runHandle: { ...runHandle, capturedSession: ownerModelSession },
       taskBudgetRuntime: liveTaskBudgetRuntime
@@ -409,6 +413,8 @@ export async function executeAgentSdkPreparedTurn(
           surface,
         })
       },
+      resolveReadOnlySkillRoots: (skillId) =>
+        skillCatalogSnapshot.find((entry) => entry.id === skillId)?.readOnlyDependencyRoots || [],
       resolveExclusiveFloorToolNames: (nextAuthorization) => computeCapabilityFloors({
         authorization: nextAuthorization,
         hasLocalDocumentResource: parseEnvelopeResourceReferences(

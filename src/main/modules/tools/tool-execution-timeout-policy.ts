@@ -10,6 +10,7 @@ export const SKILL_LONG_TOOL_TIMEOUT_MS = 600_000
 export const FEISHU_TOOL_TIMEOUT_MS = 30_000
 export const IMAGE_GENERATION_TOOL_TIMEOUT_MS = IMAGE_GENERATION_REQUEST_TIMEOUT_MS + 5_000
 export const MAP_TOOL_TIMEOUT_MS = 60_000
+export const COMMAND_EXEC_TOOL_TIMEOUT_MS = 600_000
 
 export function resolveToolExecutionTimeoutMsForProfile(profile: ToolTimeoutProfile): number {
   switch (profile) {
@@ -27,6 +28,8 @@ export function resolveToolExecutionTimeoutMsForProfile(profile: ToolTimeoutProf
       return IMAGE_GENERATION_TOOL_TIMEOUT_MS
     case 'map':
       return MAP_TOOL_TIMEOUT_MS
+    case 'command_exec':
+      return COMMAND_EXEC_TOOL_TIMEOUT_MS
     default:
       return DEFAULT_TOOL_EXECUTION_TIMEOUT_MS
   }
@@ -55,6 +58,9 @@ export function resolveToolExecutionTimeoutMs(toolName: string): number {
   }
   if (tag.domain === 'map') {
     return resolveToolExecutionTimeoutMsForProfile('map')
+  }
+  if (tag.domain === 'command_exec') {
+    return resolveToolExecutionTimeoutMsForProfile('command_exec')
   }
   return resolveToolExecutionTimeoutMsForProfile('default')
 }

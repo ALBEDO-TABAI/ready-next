@@ -3003,6 +3003,7 @@ interface SkillState {
   executionMode: SkillExecutionMode
   managedPath?: string
   sourcePath?: string
+  requiredBins?: string[]
   configuration?: SkillConfigurationDefinitionData
 }
 

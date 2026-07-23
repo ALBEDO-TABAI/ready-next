@@ -5,9 +5,12 @@ import type { RunHandle } from '../agent-sdk-types'
 import { getInteractionLifecycleRegistry } from '../interaction-lifecycle-registry'
 
 export const DYNAMIC_DELIVERY_HARD_WALL_CLOCK_MS = 300_000
+const TOOL_SETTLE_GRACE_MS = 5_000
 
 export interface DynamicDeliveryDeadlineHandle {
   noteProgress(reason: 'text_delta' | 'tool_result' | 'user_input_resolved' | 'reasoning_delta'): void
+  beginToolExecution(input: { toolName: string; expectedTimeoutMs: number }): string
+  endToolExecution(token: string): void
   suspend(interactionId: string): void
   resume(interactionId: string): void
   dispose(): void
@@ -49,6 +52,7 @@ export function armDynamicDeliveryDeadline(input: {
   runHandle: RunHandle
   startedAtMs?: number
   timeoutMsForTest?: number
+  toolSettleGraceMsForTest?: number
   isAwaitingUserInput?: () => boolean
   agentId?: string
   scopeId?: string | null
@@ -56,7 +60,14 @@ export function armDynamicDeliveryDeadline(input: {
 }): DynamicDeliveryDeadlineHandle {
   const configuredMs = resolveDynamicDeliveryWallClockMs(input.mode, input.profile)
   if (configuredMs === null) {
-    return { noteProgress: () => undefined, suspend: () => undefined, resume: () => undefined, dispose: () => undefined }
+    return {
+      noteProgress: () => undefined,
+      beginToolExecution: () => '',
+      endToolExecution: () => undefined,
+      suspend: () => undefined,
+      resume: () => undefined,
+      dispose: () => undefined,
+    }
   }
   const elapsedAtArmMs = input.startedAtMs === undefined
     ? 0
@@ -66,6 +77,12 @@ export function armDynamicDeliveryDeadline(input: {
   let disposed = false
   let progressRevision = 0
   const suspendedInteractions = new Set<string>()
+  const activeTools = new Map<string, {
+    toolName: string
+    deadlineAtMs: number
+  }>()
+  let toolSequence = 0
+  const toolSettleGraceMs = input.toolSettleGraceMsForTest ?? TOOL_SETTLE_GRACE_MS
 
   const arm = (timeoutMs: number): void => {
     if (timer) clearTimeout(timer)
@@ -92,6 +109,24 @@ export function armDynamicDeliveryDeadline(input: {
     }, timeoutMs)
     const unref = (timer as { unref?: unknown }).unref
     if (typeof unref === 'function') unref.call(timer)
+  }
+
+  const nextWindowMs = (): number => {
+    const now = Date.now()
+    const activeToolRemainingMs = Array.from(activeTools.values()).reduce(
+      (max, tool) => Math.max(max, tool.deadlineAtMs - now),
+      0,
+    )
+    return Math.max(progressWindowMs, activeToolRemainingMs)
+  }
+
+  const rearmForCurrentState = (): void => {
+    if (suspendedInteractions.size > 0) {
+      if (timer) clearTimeout(timer)
+      timer = null
+      return
+    }
+    arm(nextWindowMs())
   }
 
   arm(input.timeoutMsForTest ?? Math.max(0, configuredMs - elapsedAtArmMs))
@@ -124,9 +159,41 @@ export function armDynamicDeliveryDeadline(input: {
         profile: input.profile || 'default',
         reason,
         progressRevision,
-        nextTimeoutMs: progressWindowMs,
+        nextTimeoutMs: nextWindowMs(),
       })
-      arm(progressWindowMs)
+      rearmForCurrentState()
+    },
+    beginToolExecution({ toolName, expectedTimeoutMs }) {
+      if (disposed || input.abortController.signal.aborted) return ''
+      const token = `${input.runId}:tool:${++toolSequence}`
+      const boundedTimeoutMs = Math.max(1, Math.round(expectedTimeoutMs || progressWindowMs))
+      activeTools.set(token, {
+        toolName,
+        deadlineAtMs: Date.now() + boundedTimeoutMs + toolSettleGraceMs,
+      })
+      progressRevision += 1
+      logAgentMetric('dynamic_delivery_tool_execution_started', {
+        runId: input.runId,
+        toolName,
+        expectedTimeoutMs: boundedTimeoutMs,
+        settleGraceMs: toolSettleGraceMs,
+        activeToolCount: activeTools.size,
+      })
+      rearmForCurrentState()
+      return token
+    },
+    endToolExecution(token) {
+      if (disposed || !token) return
+      const active = activeTools.get(token)
+      if (!active) return
+      activeTools.delete(token)
+      progressRevision += 1
+      logAgentMetric('dynamic_delivery_tool_execution_settled', {
+        runId: input.runId,
+        toolName: active.toolName,
+        activeToolCount: activeTools.size,
+      })
+      rearmForCurrentState()
     },
     suspend(interactionId) {
       if (disposed || !interactionId) return
@@ -148,6 +215,7 @@ export function armDynamicDeliveryDeadline(input: {
     dispose() {
       disposed = true
       offLifecycle()
+      activeTools.clear()
       if (timer) clearTimeout(timer)
       timer = null
     },

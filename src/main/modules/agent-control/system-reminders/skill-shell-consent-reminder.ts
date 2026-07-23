@@ -1,5 +1,6 @@
 /**
- * P3-2 — selected-turn reminder when the active skill has scripts but lacks shell-execution consent.
+ * P3-2 — selected-turn reminder when the active skill has bundled scripts but
+ * lacks shell-execution consent.
  *
  * Tells the model, plainly, that it cannot run this skill's scripts this turn and how the USER can
  * grant it — so it uses the read-only methodology instead of FABRICATING script results. Reminder

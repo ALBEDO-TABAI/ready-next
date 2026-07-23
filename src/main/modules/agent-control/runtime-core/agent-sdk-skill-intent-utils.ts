@@ -1,5 +1,3 @@
-import { existsSync } from 'fs'
-import { join } from 'path'
 import type { FollowupTaskRef } from '../../../../shared/agent-followup-intent'
 import type { CapabilityGroupId } from '../../../../shared/ai-capability-groups'
 import {
@@ -23,6 +21,10 @@ import type {
   AgentSdkBudgetCheckpointRestore,
   SkillContextOrchestratorLike
 } from './agent-sdk-types'
+import {
+  skillDirHasScripts,
+  skillHasDeclaredBins
+} from '../../skills-runtime/skill-executable-surface'
 
 import {
   messageToText,
@@ -34,18 +36,16 @@ import { asRecord, stringField } from './agent-sdk-model-message-utils'
 
 // ── Group E: Skill context & intent helpers (lines 964-1359) ──
 
-export function explicitReferenceSkillHasScripts(
-  skill: { managedPath?: string } | null,
+export function resolveExplicitReferenceSkillExecutableSurface(
+  skill: { managedPath?: string; requiredBins?: readonly string[] } | null,
   typedActions: ReadonlyArray<string>
-): boolean {
-  if (!skill || typedActions.length > 0) return false
-  const managedPath = typeof skill.managedPath === 'string' ? skill.managedPath : ''
-  if (!managedPath) return false
-  try {
-    return existsSync(join(managedPath, 'scripts'))
-  } catch {
-    // silent-catch: an unreadable skill root cannot prove script availability.
-    return false
+): { hasScripts: boolean; hasDeclaredBins: boolean } {
+  if (!skill || typedActions.length > 0) {
+    return { hasScripts: false, hasDeclaredBins: false }
+  }
+  return {
+    hasScripts: skillDirHasScripts(skill.managedPath),
+    hasDeclaredBins: skillHasDeclaredBins(skill)
   }
 }
 

@@ -33,7 +33,7 @@ import {
 } from '../../tools/image-generation-tool-defs'
 import {
   IMAGE_GENERATION_TOOL_TIMEOUT_MS,
-  resolveToolExecutionTimeoutMs,
+  resolveToolExecutionTimeoutMsForProfile,
 } from '../../tools/tool-execution-timeout-policy'
 import {
   AGENT_INTERACTION_TOOL_NAMES,
@@ -446,6 +446,7 @@ function resolveToolTimeoutProfile(toolName: string, domain: ToolDomain, kind: T
   if (domain === 'skill') return 'skill'
   if (domain === 'feishu') return 'feishu'
   if (domain === 'image_generation') return 'image_generation'
+  if (domain === 'command_exec') return 'command_exec'
   return 'default'
 }
 
@@ -458,7 +459,9 @@ function buildToolDefinition(
   const domain = tag.domain as ToolDomain
   const kind = resolveToolKind(toolName, domain)
   const concurrency: ToolConcurrency = tag.accessMode === 'read' ? 'parallel_read_safe' : 'serialized'
-  const interruptBehavior: ToolInterruptBehavior = domain === 'skill' || domain === 'system'
+  const interruptBehavior: ToolInterruptBehavior = domain === 'skill'
+    || domain === 'system'
+    || domain === 'command_exec'
     ? 'host_managed'
     : 'abort_signal'
 
@@ -475,7 +478,7 @@ function buildToolDefinition(
     description: metadata?.description || toolName,
     schema: metadata?.schema || null,
     executionTimeoutMs: metadata?.executionTimeoutMs
-      ?? (domain === 'browser' ? resolveToolExecutionTimeoutMs(toolName) : undefined),
+      ?? resolveToolExecutionTimeoutMsForProfile(resolveToolTimeoutProfile(toolName, domain, kind)),
     executionVisibility: metadata?.executionVisibility || 'model',
     requiresExplicitAllowlist: metadata?.requiresExplicitAllowlist,
     resultShape: resolveToolResultShape(toolName, domain),

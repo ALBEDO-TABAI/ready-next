@@ -32,7 +32,8 @@ import {
   updateManagedCustomSkillDescription,
 } from './custom-skill-registry'
 import { listExternalSkillCandidates, type ExternalSkillCandidate } from './external-skill-discovery'
-import { getSkillShellConsent, setSkillShellConsent, skillDirHasScripts } from './skill-shell-consent'
+import { getSkillShellConsent, setSkillShellConsent } from './skill-shell-consent'
+import { skillDirHasScripts } from './skill-executable-surface'
 import { SkillLoader } from './skill-loader'
 import { scanSkillDirectory } from './skill-security-scanner'
 // Phase 4: ExecutionStateStore / ExecutionCoordinator retired along with the
@@ -399,6 +400,7 @@ export class SkillsRuntimeManager {
       managedPath: definition.source === 'embedded' ? skillPath : definition.managedPath,
       sourcePath: definition.sourcePath,
       hostRequirements: definition.hostRequirements,
+      requiredBins: definition.requiredBins,
       childLoop: definition.childLoop,
       allowedTools: definition.source === 'embedded' ? definition.allowedTools : undefined,
       capabilitySurface: definition.source === 'embedded' ? definition.capabilitySurface : undefined,
@@ -733,7 +735,10 @@ export class SkillsRuntimeManager {
     const info: Record<string, { hasScripts: boolean; consent: boolean }> = {}
     for (const skill of this.listSkills()) {
       if (skill.source !== 'custom') continue
-      info[skill.id] = { hasScripts: skillDirHasScripts(skill.managedPath), consent: getSkillShellConsent(skill.id) }
+      info[skill.id] = {
+        hasScripts: skillDirHasScripts(skill.managedPath),
+        consent: getSkillShellConsent(skill.id),
+      }
     }
     return info
   }

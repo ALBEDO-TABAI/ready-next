@@ -81,6 +81,8 @@ import { defaultLookupSkillRoots } from './skill-primitives/root-resolver'
 import { SHELL_ALLOWLIST } from './skill-primitives/run-shell'
 import { getAskUserQuestionEmitter } from '../agent-control/ask-user/ask-user-bridge'
 import { getSkillHostController } from '../skills-runtime/skill-host-controller'
+import { getSkillShellConsent, isEmbeddedSkill } from '../skills-runtime/skill-shell-consent'
+import { buildSkillShellBaseAllowlist } from '../skills-runtime/skill-executable-surface'
 import { ToolDomainError } from './tool-errors'
 import {
   toAnthropicTool,
@@ -2079,11 +2081,22 @@ export async function executeSkillTool(
         const skillDef = listSkillsSafely().find((skill) => skill.id === skillId)
         const allowPackagedRuntime = skillDef?.source === 'embedded'
         const hostRequirements = skillDef?.hostRequirements ?? null
+        const armedSkillId = referenceSkillId || activeSkillId
+        const skillIdentityMatches = armedSkillId === skillId
+        const allowSkillScripts = Boolean(
+          skillIdentityMatches
+          && (allowPackagedRuntime || getSkillShellConsent(skillId) || isEmbeddedSkill(skillId))
+        )
+        const baseAllowlist = buildSkillShellBaseAllowlist({
+          baseAllowlist: SHELL_ALLOWLIST,
+          requiredBins: skillIdentityMatches ? skillDef?.requiredBins : [],
+          allowSkillScripts,
+        })
         const effectiveAllowlist = getSkillHostController().getEffectiveShellAllowlist(
           sessionId,
-          referenceSkillId || activeSkillId,
-          SHELL_ALLOWLIST,
-          hostRequirements,
+          skillIdentityMatches ? armedSkillId : null,
+          baseAllowlist,
+          allowSkillScripts ? hostRequirements : null,
         )
         const output = await executeRunShell(
           {

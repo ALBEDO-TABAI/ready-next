@@ -77,6 +77,43 @@ test('reasoning deltas are model liveness and refresh the no-progress window', a
   assert.equal((abortController.signal.reason as Error).message, 'delivery_wall_clock_exceeded')
 })
 
+test('an active tool owns the no-progress window until its registered timeout', async () => {
+  const abortController = new AbortController()
+  const runHandle = { abortInitiator: null } as Parameters<typeof armDynamicDeliveryDeadline>[0]['runHandle']
+  const deadline = armDynamicDeliveryDeadline({
+    mode: 'adaptive',
+    runId: 'run-active-tool',
+    abortController,
+    runHandle,
+    timeoutMsForTest: 20,
+    toolSettleGraceMsForTest: 0,
+  })
+  const token = deadline.beginToolExecution({ toolName: 'run_setup_command', expectedTimeoutMs: 80 })
+  await new Promise((resolve) => setTimeout(resolve, 40))
+  assert.equal(abortController.signal.aborted, false)
+  deadline.endToolExecution(token)
+  await new Promise<void>((resolve) => abortController.signal.addEventListener('abort', () => resolve(), { once: true }))
+  deadline.dispose()
+  assert.equal((abortController.signal.reason as Error).message, 'delivery_wall_clock_exceeded')
+})
+
+test('a tool that never settles is aborted after its registered timeout', async () => {
+  const abortController = new AbortController()
+  const runHandle = { abortInitiator: null } as Parameters<typeof armDynamicDeliveryDeadline>[0]['runHandle']
+  const deadline = armDynamicDeliveryDeadline({
+    mode: 'adaptive',
+    runId: 'run-stuck-tool',
+    abortController,
+    runHandle,
+    timeoutMsForTest: 20,
+    toolSettleGraceMsForTest: 0,
+  })
+  deadline.beginToolExecution({ toolName: 'run_setup_command', expectedTimeoutMs: 45 })
+  await new Promise<void>((resolve) => abortController.signal.addEventListener('abort', () => resolve(), { once: true }))
+  deadline.dispose()
+  assert.equal((abortController.signal.reason as Error).message, 'delivery_wall_clock_exceeded')
+})
+
 test('S0 R2: resolving user input grants a complete new no-progress window', () => {
   const scheduled: Array<{ callback: () => void; delayMs: number; cleared: boolean }> = []
   const originalSetTimeout = globalThis.setTimeout

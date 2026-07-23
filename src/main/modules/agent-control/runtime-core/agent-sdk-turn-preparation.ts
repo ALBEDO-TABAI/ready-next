@@ -4,6 +4,7 @@ import {
 } from '../../../../shared/agent-followup-intent'
 import { classifyBrowserToolCall } from '../../browser-engine/browser-tool-write-classification'
 import { getSkillsRuntimeManager } from '../../skills-runtime/runtime-manager'
+import { resolveDeclaredSiblingSkillReadRoots } from '../../skills-runtime/skill-sibling-reference-roots'
 import { appendToolCapabilityLog } from '../../tools/tool-event-log'
 import type { ExecutionTurnResult, RunMessage, TaskBudgetRuntime } from '../contracts/run-contracts'
 import { logAgentMetric } from '../metrics'
@@ -246,7 +247,11 @@ export function prepareAgentSdkTurn(
         id: String(skill.id),
         name: String(skill.name),
         description: String(skill.description || ''),
-        managedPath: skill.managedPath
+        managedPath: skill.managedPath,
+        readOnlyDependencyRoots: resolveDeclaredSiblingSkillReadRoots({
+          selectedSkillId: String(skill.id),
+          skills
+        })
       }))
     const projection = host.runtime?.getTaskProjectionStoreForFinalize?.()?.get(taskId) ?? null
     const roots = deriveChainedSkillReadRoots({

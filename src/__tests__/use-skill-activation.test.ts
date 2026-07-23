@@ -101,6 +101,25 @@ test('use_skill dispatch: missing/blank skill_id → input_validation', async ()
   )
 })
 
+test('use_skill dispatch tells the model to invoke declared local binaries directly', async () => {
+  const output = await executeUseSkill(
+    { skill_id: 'lark-im' },
+    {
+      sessionId: 'scope-use-skill-lark-bin',
+      listSkills: () => [{
+        id: 'lark-im',
+        name: 'Lark IM',
+        requiredBins: ['lark-cli'],
+      }],
+      readSkillDoc: () => null,
+      rememberReferenceSkill: () => undefined,
+    },
+  )
+  assert.match(output.text, /lark-cli/)
+  assert.match(output.text, /不要先套 bash\/sh/)
+  assert.deepEqual(output.data?.declaredBins, ['lark-cli'])
+})
+
 test('use_skill tool name has no skill_ prefix (must survive filterToolsByAuthorization in mode:none)', () => {
   assert.deepEqual(USE_SKILL_TOOL_NAMES, ['use_skill'])
   assert.ok(!USE_SKILL_TOOL_NAMES[0].startsWith('skill_'))
@@ -299,6 +318,47 @@ test('use_skill activation hint remains available to a later continuation turn',
   } finally {
     clearLastReferenceSkill(sessionId)
   }
+})
+
+test('use_skill same-run refresh exposes a declared local CLI without a consent toggle', () => {
+  const larkSkill = {
+    id: 'lark-im',
+    name: 'Lark IM',
+    description: 'Search Lark messages',
+    managedPath: '/tmp/lark-im',
+    requiredBins: ['lark-cli'],
+  }
+  const runtime = new AgentSdkRuntime({
+    loadAIConfig: () => ({ ok: true, config: BASE_CONFIG, reason: 'present' }),
+    domainAdapters: [],
+    skillContextOrchestrator: {
+      findExplicitlyRequestedSkills: (text: string) =>
+        text.includes('lark-im') ? [larkSkill] : [],
+      buildPreferredSkillToolNames: () => [],
+      getCurrentReferenceSkillHint: () => ({ id: 'lark-im', name: 'Lark IM' }),
+    } as never,
+  })
+  const privateRuntime = runtime as unknown as {
+    resolveSkillAuthorizationForTurn: (
+      message: string, sessionId?: string, requestEnvelope?: unknown,
+      forceLocalSendImIntent?: boolean, skillHintRelevantForTurn?: boolean,
+    ) => SkillToolAuthorization
+  }
+
+  const authorization = privateRuntime.resolveSkillAuthorizationForTurn(
+    '继续查询',
+    'scope-lark-cli-same-run',
+    undefined,
+    false,
+    true,
+  )
+  assert.equal(authorization.mode, 'selected')
+  assert.equal(
+    authorization.mode === 'selected'
+      ? authorization.allowedPrimitives.has('skill_run_shell')
+      : false,
+    true,
+  )
 })
 
 // ─── shared doc reader ───────────────────────────────────────────────────────

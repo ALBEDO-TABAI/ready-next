@@ -28,6 +28,7 @@ import type {
   ObservedDocumentToolTarget,
   ReadyAgentSdkRunResult,
   RunHandle,
+  InterruptedToolExecution,
   SdkLongSkillCheckpoint
 } from './agent-sdk-types'
 import type { TurnTerminalReason } from './turn-frame'
@@ -57,6 +58,7 @@ export interface AgentSdkPreparedTurnState {
   sessionRestoreNotice: string | null
   skillClarificationSteered: boolean
   checkpointCanonicalReceipt: CanonicalAssistantMessageReceipt | null
+  interruptedToolExecution: InterruptedToolExecution | null
   finishProviderTransferCheckpoint: ((
     providerDiagnostics: AgentSdkProviderDiagnostics | null,
   ) => Promise<ExecutionTurnResult | null>) | null
