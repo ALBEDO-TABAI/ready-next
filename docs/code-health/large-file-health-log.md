@@ -21,11 +21,12 @@
 
 | 评估日期 | 任务 | 文件 | 总行数 | 本次新增 | 结论 | 判断与后续动作 | 状态 |
 | --- | --- | --- | ---: | ---: | --- | --- | --- |
+| 2026-07-23 | Provider checkpoint 纠偏（复核补录） | `src/main/modules/agent-control/runtime-core/runtime.ts` | 2603 | 净 -545 | 危险 | 拆分后仍是最大运行服务装配文件；危险评级不因净减撤销。后续按既有拆分合同继续迁出交互生命周期与 continuation 组合。 | 待独立拆分合同；交付时提醒 |
 | 2026-07-23 | Provider checkpoint 纠偏 | `src/main/modules/agent-control/runtime-core/orchestrator.ts` | 1040 | 净 +12 | 一般 | 仍是 Agent 运行组合入口，本轮只接入 Browser continuation 窄委派；业务判断已在叶子模块。2026-08-23 复查组合接线密度。 | 已排期：2026-08-23 |
 | 2026-07-23 | Provider checkpoint 纠偏 | `src/renderer/components/agent/ChatPanel.tsx` | 1167 | 净 +17 | 一般 | 仍是聊天面板组合宿主，本轮只透传结构化暂停与 canonical 终态。2026-08-23 复查任务面板接线是否继续下沉。 | 已排期：2026-08-23 |
 | 2026-07-23 | Provider checkpoint 纠偏 | `src/renderer/components/ready/TaskPanel.tsx` | 1155 | 净 +24 | 一般 | 仍是任务面板宿主，本轮只按 `waitingFor` 和续跑句柄呈现等待/暂停/未完成。2026-08-23 复查详情与列表呈现边界。 | 已排期：2026-08-23 |
 | 2026-07-23 | Provider checkpoint 纠偏 | `src/renderer/pages/modes/BrowserMode.tsx` | 1451 | 净 +2 | 一般 | 页面仍只组合 Browser 工作面，本轮只透传监督面的结构状态。2026-08-23 复查 BrowserView 可见性与监督接线。 | 已排期：2026-08-23 |
-| 2026-07-23 | Provider checkpoint 纠偏拆分 | `agent-session-checkpoint-resume.ts` / `run-finalizer.ts` / `browser-engine/ipc-handler.ts` / `renderer/modules/agent/runtimeDriver.ts` / `agentPanelTestHarness.ts` | 59 / 231 / 218 / 689 / 19 | 均为净减 | 健康 | 原超限 facade 已分别降为窄委派或组合入口；叶子模块最大为 745 行，模块边界脚本强制方向与上限。 | 拆分完成 |
+| 2026-07-23 | Provider checkpoint 纠偏拆分 | `agent-session-checkpoint-resume.ts` / `run-finalizer.ts` / `browser-engine/ipc-handler.ts` / `renderer/modules/agent/runtimeDriver.ts` / `agentPanelTestHarness.ts` | 59 / 231 / 218 / 689 / 19 | 均为净减 | 健康 | 原超限 facade 已分别降为窄委派或组合入口；叶子模块最大为 760 行（browser-controller-contract-base.ts，复核修正），模块边界脚本强制方向与上限。 | 拆分完成 |
 | 2026-07-22 | Provider 可靠性第三批 | `src/main/modules/repositories/agent-session-checkpoint-resume.ts` | 1478 | 净 +24 | 危险 | typed 续跑、确认、接管和 owner-crash 事务混合，已妨碍 P7 恢复重数修复。2026-07-23 计划要求先按四个事务域做 move-only 拆分，再改 marker。 | 已纳入 2026-07-23 纠偏实施计划 |
 | 2026-07-22 | Provider 可靠性第三批 | `src/main/modules/browser-engine/ipc-handler.ts` | 2829 | 净 +4 | 危险 | BrowserController 与 IPC 注册、target 接管、tab/捕获服务仍混合。2026-07-23 计划要求保留稳定 facade，将接管、tab、capture、live-proof 和 composition 下沉。 | 已纳入 2026-07-23 纠偏实施计划 |
 | 2026-07-22 | Provider 可靠性第三批 | `src/renderer/modules/agent/agentPanelTestHarness.ts` | 1483 | 净 +9 | 危险 | 类型、快照、诊断与交互驱动已集中过多，并导致 P9 报告对“可见”的证明模糊。2026-07-23 计划要求拆成 types/snapshot/diagnostics/driver，原安装入口保持不变。 | 已纳入 2026-07-23 纠偏实施计划 |

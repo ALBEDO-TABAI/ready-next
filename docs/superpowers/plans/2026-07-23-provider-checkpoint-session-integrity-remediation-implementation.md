@@ -598,3 +598,27 @@ The delivery is not complete until deterministic native gates, packaged runtime 
 ### 11.3 外部验收纪律
 
 P15 仍不完成。扫码解除安全验证后，必须重新生成当前 source manifest 的安装包，再依次重跑 handshake、confirmation、provider transfer 和 18 关键词真实任务。只有两份新产物、Browser child 19/19、Parent/run/canonical/done/fresh verifier 全部一致，且四项 target-run metric 均为 0，才能把本文档状态改为 implemented 并宣布交付完成。
+
+## 10. 对抗复核判决与双实例根因（2026-07-23，Claude）
+
+### 10.1 判决
+
+独立复核（135 文件、六 gate 本机复跑全绿）：**P8 单写者根修 PASS**（input filter 纯化、`filterAndSyncRunnerSession` 双写类结构性消除）；**P10 原子 canonical 收口 PASS**（全部 suspension reason 单事务 + fail-closed 回读）；**P12 重数 PASS**；**P14 UI 真值 PASS**；**P9/P15 验收诚实性 PASS——连续两轮造假的失败模式已关闭**（checker fail-closed + 11 个负例测试 + 真实打包运行报告，哈希/时间戳/id 均真；XHS 18 词证明为诚实待跑，checker 要求 18/18 否则非零）。Claude 第三轮五处修复全部完好。已提交 `22170d44`。
+
+### 10.2 遗留缺口（编入后续，非运行时回归）
+
+1. **§3.5 验证缺口**：真实 `Runner + MemorySession + callModelInputFilter` 的压缩/重试路径未被真 SDK 测试贯穿（现有真 Runner 测试恒 `compacted:false`、无重试）。filter 纯化使双写在这些路径也结构性不可能，但本计划自设的验收未交付——在曾经造假的领域必须补上。
+2. **`rebased=0` 语义弱于宣称**：`prepareRunnerSession` 分支 1/2 静默重建会话不打指标，仅分支 3（有损全量重建）打点。指标语义应明示为"有损重建为 0"，或为静默重建补独立观测。
+3. **BrowserController 拆分形态偏离声明**：实现为 10 级线性继承链而非 §5.4 声明的窄端口组合；`browser-controller-contract-base.ts`（760 行）未在 §5.4 申报。行为保持、gate 通过，但形态债务记档，后续拆分不得继续加深继承链。
+4. 台账漂移已修正（runtime.ts 2603 仍危险补录；叶子最大 745→760）。
+
+### 10.3 双实例根因与 P16（2026-07-23 实测 55 秒失败）
+
+复测 run `req-1784772669864-9utcs8`（重试轮）取证结论：**provider 全程健康**（6 个正常回合、首字节 3517ms、零重试零 5xx）。02:11:29 第二个 Ready 主进程启动（共享同一 userData/SQLite），其 startup reconciler 把第一进程**在跑**的 run 当"上次进程遗留"清算，boot 过期逻辑清掉活体 claims → 浏览器工具连续失败 → 首进程终态写入被拒 `core_closeout_terminal_retry_conflict` → **幽灵 run**（无 run_close/run_meta/投影），卡片文案继承上一轮 checkpoint 的"模型服务暂时不可用"，与本轮死因无关。前一轮（poac9d）的 3×502→`checkpoint_provider_transfer` 可续跑收口则是 P2 正确工作。
+
+**已修（Claude，commit `7a46c8a5`）**：`boot-entry.ts` 增加 userData 级 `requestSingleInstanceLock`（在 READY_USER_DATA_DIR 覆写之后取锁，隔离验收 profile 各持己锁互不干扰；`READY_ALLOW_MULTI_INSTANCE=1` 供工具链豁免）；`index.ts` second-instance 聚焦既有窗口；启动契约测试 10/10。运行时"启动=上个进程已死"的建模自此有锁背书。
+
+**P16（Codex，后续）**：
+1. 冲突败者记账 fail-closed：`core_closeout_terminal_retry_conflict` 等终态写入冲突的败者必须仍写出自身 run_close 指标与 run_meta（interrupted/superseded）终态行，禁止幽灵 run；
+2. 重试轮卡片归因：重试 run 的失败文案必须描述本轮真实死因，不得继承上一轮 checkpoint 的原因文案（"可以继续"仍由既有 checkpoint 背书，二者分离呈现）；
+3. Gate：注入终态写入冲突 → 败者有终态行 + 卡片归因正确；双实例场景由单实例锁合同测试覆盖，不再作为运行时可达路径。
