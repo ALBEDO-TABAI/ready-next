@@ -35,6 +35,8 @@ const DEFAULT_CONFLICTS: Record<ReminderTopic, ReadonlyArray<ReminderTopic>> = {
   'tool-capability-conflict': [],
   'browser-observation-required': [],
   'browser-research-incomplete': [],
+  // 2026-07-23 — 研究进度账本回灌；进度态与收尾拦截（incomplete）互补不冲突。
+  'browser-research-progress': [],
 }
 
 export function composeSystemReminder(

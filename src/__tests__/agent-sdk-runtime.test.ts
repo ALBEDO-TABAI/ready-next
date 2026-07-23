@@ -5090,7 +5090,20 @@ test('agent sdk runtime compacts oversized session history before sending wire i
     assert.equal(requests.length, 1)
     const bodyText = JSON.stringify(requests[0])
     assert.match(bodyText, /ready:context-compacted/)
-    assert.doesNotMatch(bodyText, /old-hidden-context-4/)
+    // 2026-07-23 失忆回归修复：压缩摘要现在携带确定性操作台账（助手摘录等），
+    // 被压缩的 old-hidden-context-4 内容会以截断摘录形式出现在 summary 里。
+    // 原断言改为：完整原文不得以独立消息出现（只允许在 summary 摘录里出现）。
+    const messages = (requests[0] as { messages?: unknown[] }).messages ?? []
+    const nonSummaryMessages = messages.filter((msg) => {
+      const content = String((msg as { content?: unknown }).content ?? '')
+      return !content.includes('[ready:context-compacted]')
+    })
+    assert.ok(
+      !nonSummaryMessages.some((msg) =>
+        String((msg as { content?: unknown }).content ?? '').includes('old-hidden-context-4')
+      ),
+      'dropped context must not appear as a standalone message outside the compaction summary',
+    )
     assert.match(bodyText, /recent-tail-marker/)
     assert.equal(countOccurrences(bodyText, 'CURRENT_INPUT_UNIQUE'), 1)
     const compactionMetric = metrics.find(

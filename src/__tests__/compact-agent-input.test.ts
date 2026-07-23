@@ -168,8 +168,73 @@ test('forced compaction persists legacy catalog removal even when every remainin
   assert.deepEqual(compacted.items, [user])
 })
 
+test('2026-07-23 失忆回归：压缩摘要携带确定性操作台账（搜索/写入/计划/助手摘录）', async () => {
+  const filler = 'x'.repeat(400)
+  const result = await compactAgentInputItems([
+    userMessage('采集 18 个关键词'),
+    namedCall('s1', 'browser_search', { query: 'vlog调色 高级感' }),
+    functionResult('s1', filler),
+    namedCall('s2', 'browser_search', { query: '剪映 进阶教程' }),
+    functionResult('s2', filler),
+    namedCall('r1', 'browser_research', { action: 'start', work_items: new Array(18).fill({ query: 'q' }) }),
+    functionResult('r1', filler),
+    namedCall('w1', 'file_write', { path: '/tmp/lib-a/样本库.md', content: filler }),
+    functionResult('w1', 'ok'),
+    namedCall('o1', 'browser_read', { target: 'page' }),
+    functionResult('o1', filler),
+    assistantMessage('第 2 个关键词已完成，继续第 3 个'),
+    userMessage(`tail ${filler}`),
+  ], {
+    windowTokens: 400,
+    keepHeadCount: 1,
+    keepTailCount: 1,
+  })
+
+  assert.equal(result.report.summarized, true)
+  const summary = String(
+    (result.items.find((item) => JSON.stringify(item).includes('[ready:context-compacted]')) as {
+      content?: unknown
+    })?.content ?? '',
+  )
+  assert.match(summary, /确定性操作台账/)
+  assert.match(summary, /已执行搜索（按序）：1\.vlog调色 高级感 2\.剪映 进阶教程/)
+  assert.match(summary, /文件写入\/修改：file_write \/tmp\/lib-a\/样本库\.md/)
+  assert.match(summary, /研究计划操作：start\(18 items\)/)
+  assert.match(summary, /其余工具调用统计：browser_read×1/)
+  assert.match(summary, /最近助手输出摘录：「第 2 个关键词已完成，继续第 3 个」/)
+})
+
+test('截断 stub 保留原文开头摘录，不再制造零内容信息真空', async () => {
+  const result = await compactAgentInputItems([
+    functionCall('big-call'),
+    functionResult('big-call', `RESEARCH_PLAN_RECEIPT_HEAD ${'x'.repeat(2_000)}`),
+  ], {
+    windowTokens: 600,
+    maxToolResultTokens: 100,
+  })
+
+  assert.equal(result.report.truncatedToolResults, 1)
+  const output = String((result.items[1] as { output?: unknown }).output)
+  assert.match(output, /tool-result-truncated/)
+  assert.match(output, /截断前开头 600 字符/)
+  assert.match(output, /RESEARCH_PLAN_RECEIPT_HEAD/)
+})
+
 function userMessage(content: string): AgentInputItem {
   return { role: 'user', content } as AgentInputItem
+}
+
+function assistantMessage(content: string): AgentInputItem {
+  return { role: 'assistant', content } as AgentInputItem
+}
+
+function namedCall(callId: string, name: string, args: Record<string, unknown>): AgentInputItem {
+  return {
+    type: 'function_call',
+    callId,
+    name,
+    arguments: JSON.stringify(args),
+  } as AgentInputItem
 }
 
 function systemMessage(content: string): AgentInputItem {

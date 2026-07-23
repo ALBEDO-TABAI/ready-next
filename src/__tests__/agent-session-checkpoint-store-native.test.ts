@@ -371,11 +371,30 @@ test('browser journal writes are owner-bound atomic transactions and corrupt obs
     )
     assert.equal(completeResearch.satisfied, true)
     assert.equal(completeResearch.evidenceRefs.length, 1)
+    // 2026-07-23 失忆回归修复：同一内容换新 id 重注册（模型失忆后的典型行为）
+    // 不得追加新工作项，也不得破坏 satisfied 与 progress。
+    const rewaved = repository.upsertBrowserResearchWorkItems(
+      route.browserTaskId,
+      newOwnerRunId,
+      [{ workItemId: 'research-work-native-wave2', requirement: 'verify a second fact' }],
+    )
+    assert.equal(rewaved.workItems.length, 1)
+    assert.deepEqual(rewaved.workItems.map((item) => item.workItemId), ['research-work-native'])
+    assert.equal(rewaved.satisfied, true)
     const progress = db.prepare(
       'SELECT progress_total, progress_completed FROM browser_tasks WHERE id = ?',
     ).get<{ progress_total: number; progress_completed: number }>(route.browserTaskId)
     assert.deepEqual(progress, { progress_total: 1, progress_completed: 1 })
     assert.equal(repository.inspectWorkflowCloseout(parentTaskId).state, 'sealable')
+    // 内容不同的新工作项仍可正常扩展计划。
+    const extended = repository.upsertBrowserResearchWorkItems(
+      route.browserTaskId,
+      newOwnerRunId,
+      [{ workItemId: 'research-work-native-extra', requirement: 'verify a third fact' }],
+    )
+    assert.equal(extended.workItems.length, 2)
+    assert.deepEqual(extended.missingWorkItemIds, ['research-work-native-extra'])
+    assert.equal(repository.inspectWorkflowCloseout(parentTaskId).state, 'research_incomplete')
   } finally {
     db.close()
   }

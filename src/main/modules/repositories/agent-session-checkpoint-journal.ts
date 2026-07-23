@@ -199,6 +199,25 @@ function exactIdentity(left: unknown, right: unknown): boolean {
   return browserWorkflowStableDigest(left) === browserWorkflowStableDigest(right)
 }
 
+/** 工作项的内容身份：与 workItemId / evidenceRefIds / createdAt 无关。 */
+function researchWorkItemContentDigest(item: {
+  goalRefs: string[]
+  requirement: string | null
+  query: string | null
+  url: string | null
+  fieldGoals: string[]
+  required: boolean
+}): string {
+  return browserWorkflowStableDigest({
+    goalRefs: item.goalRefs,
+    requirement: item.requirement,
+    query: item.query,
+    url: item.url,
+    fieldGoals: item.fieldGoals,
+    required: item.required,
+  })
+}
+
 export class AgentSessionCheckpointJournalRepository {
   constructor(readonly unitOfWork: BrowserWorkflowUnitOfWork) {}
 
@@ -498,9 +517,17 @@ export class AgentSessionCheckpointJournalRepository {
       const state = parseBrowserResearchState(payload)
       const createdAt = new Date().toISOString()
       const nextById = new Map(state.workItems.map((item) => [item.workItemId, item]))
+      // 2026-07-23 失忆回归修复：模型每波重注册计划会发明新的 id 命名法
+      // （q01→kw-1→kw01→k01），同一内容以不同 id 反复 append，把必做清单
+      // 从 18 项污染到 97 项。内容摘要相同（无关 id）视为同一工作项，静默
+      // 合并到既有项，不再追加。
+      const idByContentDigest = new Map(
+        state.workItems.map((item) => [researchWorkItemContentDigest(item), item.workItemId]),
+      )
       for (const input of inputs) {
         const next = stableBrowserResearchWorkItem(taskId, input, createdAt)
         const existing = nextById.get(next.workItemId)
+        const nextContentDigest = researchWorkItemContentDigest(next)
         if (existing) {
           const existingContent = { ...existing, evidenceRefIds: [], createdAt: '' }
           const nextContent = { ...next, evidenceRefIds: [], createdAt: '' }
@@ -509,6 +536,8 @@ export class AgentSessionCheckpointJournalRepository {
           }
           continue
         }
+        if (idByContentDigest.has(nextContentDigest)) continue
+        idByContentDigest.set(nextContentDigest, next.workItemId)
         nextById.set(next.workItemId, next)
       }
       const nextState: BrowserResearchPayloadState = {

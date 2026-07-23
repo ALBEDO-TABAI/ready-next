@@ -8,13 +8,7 @@ import {
 import { TOOL_ADMISSION_ERROR_KINDS } from '../contracts/error-kinds'
 import type { ExecutionTurnResult, RunMessage, TaskBudgetRuntime, TaskType } from '../contracts/run-contracts'
 import { logAgentMetric } from '../metrics'
-import {
-  drainBackgroundTaskTerminalReminders,
-  prependSystemReminderInput,
-  registerBackgroundTaskTerminalReminder
-} from '../system-reminders/background-task-terminal-reminder'
-import { registerCriteriaSelfCheckReminder } from '../system-reminders/criteria-self-check-reminder'
-import { createSystemReminderRegistry } from '../system-reminders/system-reminder-registry'
+import { prependSystemReminderInput } from '../system-reminders/background-task-terminal-reminder'
 import type { ToolDefinition } from '../tools-runtime/tool-definition'
 import {
   createToolExecutionOutput,
@@ -44,6 +38,7 @@ import {
   removeAlreadyEmittedNativeText,
   splitNativeTextBufferForSafeFlush
 } from './agent-sdk-foundation-utils'
+import { applyPerCallSystemReminders } from './agent-sdk-per-call-reminders'
 import { log } from './agent-sdk-provider'
 import { mapToolFailureClose } from './agent-sdk-runtime-outcome-utils'
 import type { TurnOrchestratorHost } from './agent-sdk-turn-context'
@@ -329,29 +324,14 @@ export async function executeAgentSdkModelToolLoop(
         // mid-run crash loses at most N batches instead of everything
         // written only at exhaustion. Failure is loud, never blocking.
         await writeRollingBudgetCheckpointIfDue()
-        const terminalReminderTexts = drainBackgroundTaskTerminalReminders(sessionId)
-        if (state.sessionRestoreNotice) {
-          terminalReminderTexts.unshift(state.sessionRestoreNotice)
-          state.sessionRestoreNotice = null
-        }
-        const registry = createSystemReminderRegistry()
-        if (terminalReminderTexts.length > 0) {
-          registerBackgroundTaskTerminalReminder(registry, terminalReminderTexts)
-        }
-        // D2 — 结果型任务的验收标准（事中自检），与终态裁决同一模板源。
-        // 每 run 只注入一次（首个模型调用）：criteria 是 run 级静态清单，
-        // 重复注入既费 token 也会改变后续迭代（如 text-bridge 回喂）的
-        // 输入形状。非结果型任务在 builder 内跳过。
-        if (!state.criteriaSelfCheckInjected) {
-          state.criteriaSelfCheckInjected = registerCriteriaSelfCheckReminder(
-            registry,
-            state.liveTaskBudgetRuntime?.taskType || turnTaskType
-          )
-        }
-        const reminderText = registry.compose()
-        if (reminderText) {
-          state.nextInput = prependSystemReminderInput(state.nextInput, reminderText)
-        }
+        applyPerCallSystemReminders({
+          state,
+          runScopeKey: runHandle,
+          sessionId,
+          turnTaskType,
+          host,
+          browserWorkflowRoute: toolBridgeRuntimeContext.browserWorkflowRoute ?? null
+        })
         // P0-3 — the model call is the longest pre-output stage; say so.
         emitHeartbeat(
           contextCompressedForBridgeTurn ? '上下文较长，压缩后重新调用模型…' : '正在调用模型…'

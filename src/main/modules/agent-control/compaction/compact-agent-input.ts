@@ -8,6 +8,7 @@ import {
   SKILL_CATALOG_REMINDER_MARKER,
 } from '../system-reminders/skill-catalog-reminder'
 import { kimiK3CompactionProviderData } from '../../../../shared/ai-providers/kimi-k3'
+import { buildCompactionLedger } from './compaction-ledger'
 
 export interface CompactOptions {
   windowTokens: number
@@ -320,6 +321,29 @@ function truncateOversizedToolResults(
   }
 }
 
+// 截断 stub 必须保留有界的原文开头：零内容占位符曾让模型在关键动作后拿到
+// 信息真空（2026-07-03 R1 盲宣告完成、2026-07-23 研究计划回执被清空后反复
+// 重注册计划）。开头摘录给模型留下"这条结果大致是什么"的锚点。
+const TRUNCATED_RESULT_HEAD_CHARS = 600
+
+function truncatedResultHead(value: unknown): string {
+  const text = typeof value === 'string' ? value : extractOutputTextParts(value)
+  const head = text.trim().slice(0, TRUNCATED_RESULT_HEAD_CHARS)
+  return head ? `\n[截断前开头 ${TRUNCATED_RESULT_HEAD_CHARS} 字符] ${head}` : ''
+}
+
+function extractOutputTextParts(value: unknown): string {
+  if (!Array.isArray(value)) return ''
+  const parts: string[] = []
+  for (const part of value) {
+    if (part && typeof part === 'object') {
+      const text = (part as Record<string, unknown>).text
+      if (typeof text === 'string' && text.trim()) parts.push(text.trim())
+    }
+  }
+  return parts.join(' ')
+}
+
 function truncateToolResultItem(
   item: AgentInputItem,
   tokens: number,
@@ -329,14 +353,20 @@ function truncateToolResultItem(
   const record = item as Record<string, unknown>
   switch (record.type) {
     case 'function_call_result':
-      return { ...record, output: placeholder } as AgentInputItem
-    case 'shell_call_output':
+      return { ...record, output: `${placeholder}${truncatedResultHead(record.output)}` } as AgentInputItem
+    case 'shell_call_output': {
+      const firstOutput = Array.isArray(record.output) ? record.output[0] as Record<string, unknown> | undefined : undefined
       return {
         ...record,
-        output: [{ stdout: placeholder, stderr: '', outcome: { type: 'exit', exitCode: null } }],
+        output: [{
+          stdout: `${placeholder}${truncatedResultHead(firstOutput?.stdout)}`,
+          stderr: '',
+          outcome: { type: 'exit', exitCode: null },
+        }],
       } as AgentInputItem
+    }
     case 'apply_patch_call_output':
-      return { ...record, output: placeholder } as AgentInputItem
+      return { ...record, output: `${placeholder}${truncatedResultHead(record.output)}` } as AgentInputItem
     case 'computer_call_result':
       return {
         ...record,
@@ -363,11 +393,14 @@ function resolveKeepHeadCount(items: readonly AgentInputItem[], override: number
 }
 
 function buildDefaultSummary(items: readonly AgentInputItem[]): string {
+  // 2026-07-23 失忆回归修复：占位摘要必须携带确定性操作台账（搜索/写入/
+  // 计划/摘录），否则压缩后的模型只剩原始任务指令，会重做已完成的工作。
   return [
     '[ready:context-compacted]',
     `Earlier context items compacted: ${items.length}.`,
+    buildCompactionLedger(items),
     'Tool call/result pairs were preserved only when both sides remained in the kept context.',
-  ].join('\n')
+  ].filter(Boolean).join('\n')
 }
 
 function createSummaryItem(summary: string, sourceItems: AgentInputItem[]): AgentInputItem {

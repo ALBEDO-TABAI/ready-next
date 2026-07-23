@@ -44,6 +44,10 @@ export type ReminderTopic =
   | 'tool-capability-conflict'
   | 'browser-observation-required'
   | 'browser-research-incomplete'
+  // 2026-07-23 — 浏览器研究进度账本（durable 真值回灌）：压缩后模型失去
+  // "已完成哪些工作项"的记忆时以账本对齐。digest 变化或每 3 次模型调用重注。
+  // priority 88（低于 browser-research-incomplete 95）。No conflicts.
+  | 'browser-research-progress'
 
 export interface ReminderEntry {
   readonly topic: ReminderTopic
