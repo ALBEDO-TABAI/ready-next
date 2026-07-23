@@ -41,6 +41,21 @@ test('chat messages expose a temporary pending task block while the next reply i
   assert.match(taskToolSnapshot, /message\.id === streamingMessageId && !message\.content\.trim\(\)/)
 })
 
+test('ask-user cards share the assistant message width and right safety inset', () => {
+  const chatMessages = readWorkspaceFile('src/renderer/components/agent/ChatMessages.tsx')
+  const askUserCard = readWorkspaceFile('src/renderer/components/agent/AskUserQuestionsCard.tsx')
+  const chatUtilities = readWorkspaceFile('src/renderer/styles/chat-utilities.css')
+
+  assert.match(chatMessages, /data-chat-message-ask-user=\{msg\.id\}/)
+  assert.match(chatMessages, /data-chat-message-ask-user=\{msg\.id\}[\s\S]*max-w-\[90%\] w-full/)
+  assert.match(chatMessages, /data-chat-message-ask-user=\{msg\.id\}[\s\S]*paddingRight:\s*18/)
+  assert.match(chatMessages, /data-chat-message-ask-user=\{msg\.id\}[\s\S]*boxSizing:\s*'border-box'/)
+  assert.match(askUserCard, /className="ready-ask-user-summary-list"/)
+  assert.match(askUserCard, /padding:\s*'0 0 0 22px'/)
+  assert.match(chatUtilities, /\.ready-ask-user-summary-list::before/)
+  assert.match(chatUtilities, /left:\s*6\.5px/)
+})
+
 test('task and tool cards stay collapsed by default and only reveal the latest line until expanded', () => {
   const taskCard = readWorkspaceFile('src/renderer/components/agent/chat-panel/task/TaskCard.tsx')
   // 2026-07-10 行数健康度拆分 — L2/L3 时间线组件族独立成文件。

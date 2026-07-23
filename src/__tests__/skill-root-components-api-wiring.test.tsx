@@ -335,3 +335,68 @@ test('AskUserQuestionsCard keeps multi-question answers in one paged card and su
     handle.restore()
   }
 })
+
+test('submitted AskUserQuestionsCard is frameless and aligns its expanded answers', async () => {
+  const handle = installDom()
+  let root: Root | null = null
+  try {
+    root = createRoot(handle.rootElement)
+    await act(async () => {
+      root?.render(createElement(AskUserQuestionsCard, {
+        card: {
+          type: 'ask_user_questions' as const,
+          cardId: 'auq-submitted-layout',
+          status: 'submitted' as const,
+          askedAt: '2026-07-23T00:00:00.000Z',
+          questions: [
+            {
+              id: 'room',
+              question: '请选择会议室',
+              kind: 'single_choice' as const,
+              options: ['保利世贸G座-1105-1'],
+              placeholder: null,
+              required: true,
+            },
+          ],
+          answers: [{ id: 'room', answer: '保利世贸G座-1105-1' }],
+        },
+        onSubmit: async () => ({ success: true }),
+        onCancel: async () => ({ success: true }),
+      }))
+    })
+    await flush()
+
+    const card = handle.dom.window.document.querySelector(
+      '[data-ready-ask-user-card="submitted"]',
+    ) as HTMLElement | null
+    assert.ok(card)
+    assert.equal(card.style.border, '')
+    assert.equal(card.style.background, '')
+    assert.equal(card.style.padding, '')
+    assert.equal(card.style.width, '100%')
+    assert.equal(card.style.boxSizing, 'border-box')
+
+    const toggle = Array.from(card.querySelectorAll('button'))
+      .find((button) => button.textContent?.includes('展开')) as HTMLButtonElement | undefined
+    assert.ok(toggle)
+    await act(async () => {
+      toggle.click()
+      await Promise.resolve()
+    })
+
+    const summary = card.querySelector('[data-ready-ask-user-summary-list="true"]') as HTMLElement | null
+    assert.ok(summary)
+    assert.equal(summary.style.width, '100%')
+    assert.equal(summary.style.paddingLeft, '22px')
+    assert.equal(summary.style.listStyle, 'none')
+    assert.ok(summary.classList.contains('ready-ask-user-summary-list'))
+    assert.match(summary.textContent || '', /保利世贸G座-1105-1/)
+  } finally {
+    if (root) {
+      await act(async () => {
+        root?.unmount()
+      })
+    }
+    handle.restore()
+  }
+})

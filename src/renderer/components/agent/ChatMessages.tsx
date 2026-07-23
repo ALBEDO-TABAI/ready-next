@@ -162,7 +162,12 @@ export default function ChatMessages({
         // card handles its own pending/collapsed presentation.
         if (msg.type === 'ask_user_questions' && msg.askUserQuestions) {
           return (
-            <div key={msg.id} className="flex flex-col" style={{ gap: 10 }}>
+            <div
+              key={msg.id}
+              data-chat-message-ask-user={msg.id}
+              className="flex flex-col max-w-[90%] w-full"
+              style={{ gap: 10, paddingRight: 18, boxSizing: 'border-box' }}
+            >
               <AskUserQuestionsCard
                 card={msg.askUserQuestions}
                 onSubmit={submitAskUserQuestionsAnswers}

@@ -185,11 +185,11 @@ export function AskUserQuestionsCard({ card, onSubmit, onCancel }: AskUserQuesti
     }
     return (
       <div
+        data-ready-ask-user-card={card.status}
         style={{
-          borderRadius: 8,
-          padding: '10px 12px',
-          border: '1px solid var(--border-default)',
-          background: 'color-mix(in srgb, var(--surface-card-bg) 22%, transparent)',
+          width: '100%',
+          minWidth: 0,
+          boxSizing: 'border-box',
           color: 'var(--text-body)',
         }}
         role="group"
@@ -210,19 +210,33 @@ export function AskUserQuestionsCard({ card, onSubmit, onCancel }: AskUserQuesti
             fontSize: 12.5,
             fontWeight: 600,
             width: '100%',
+            minWidth: 0,
             textAlign: 'left',
           }}
         >
           {card.status === 'submitted'
             ? <Check size={14} color="var(--color-green, #16a34a)" />
             : <AlertCircle size={14} color="var(--text-light)" />}
-          <span>{headlineByStatus[card.status]}</span>
-          <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--text-light)' }}>
+          <span style={{ minWidth: 0 }}>{headlineByStatus[card.status]}</span>
+          <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--text-light)', flexShrink: 0 }}>
             {expandSummary ? '收起' : '展开'}
           </span>
         </button>
         {expandSummary && (
-          <ol style={{ margin: '10px 0 0 0', padding: '0 0 0 18px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <ol
+            data-ready-ask-user-summary-list="true"
+            className="ready-ask-user-summary-list"
+            style={{
+              width: '100%',
+              minWidth: 0,
+              margin: '10px 0 0',
+              padding: '0 0 0 22px',
+              listStyle: 'none',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 6,
+            }}
+          >
             {card.questions.map((q) => {
               const answer = card.answers?.find((a) => a.id === q.id)
               const rendered = answer
@@ -231,7 +245,7 @@ export function AskUserQuestionsCard({ card, onSubmit, onCancel }: AskUserQuesti
                   : String(answer.answer)
                 : '(未作答)'
               return (
-                <li key={q.id} style={{ fontSize: 12, lineHeight: 1.5 }}>
+                <li key={q.id} style={{ minWidth: 0, fontSize: 12, lineHeight: 1.5, overflowWrap: 'anywhere' }}>
                   <div style={{ color: 'var(--text-body)' }}>{renderInline(q.question)}</div>
                   <div style={{ color: 'var(--text-gray)', fontStyle: answer ? 'normal' : 'italic' }}>→ {rendered}</div>
                 </li>
@@ -261,7 +275,11 @@ export function AskUserQuestionsCard({ card, onSubmit, onCancel }: AskUserQuesti
 
   return (
     <div
+      data-ready-ask-user-card="pending"
       style={{
+        width: '100%',
+        minWidth: 0,
+        boxSizing: 'border-box',
         borderRadius: 12,
         padding: 14,
         border: '1px solid var(--border-default)',
@@ -374,6 +392,7 @@ export function AskUserQuestionsCard({ card, onSubmit, onCancel }: AskUserQuesti
           disabled={isSubmitting}
           style={{
             width: '100%',
+            boxSizing: 'border-box',
             resize: 'vertical',
             padding: '8px 10px',
             borderRadius: 8,
