@@ -165,6 +165,7 @@ test('ToolTraceCard: clicking a timeline item discloses the call and output deta
     })
     const detail = container.querySelector('[data-ready-tool-timeline-detail="true"]')
     assert.ok(detail, 'clicking the row opens the detail block')
+    assert.equal(detail?.querySelectorAll('[data-ready-code-block="true"]').length, 2)
     const detailText = detail?.textContent || ''
     assert.ok(detailText.includes('调用 browser_read'), `detail keeps the full call line: ${detailText}`)
     assert.ok(detailText.includes('读取完成'), `detail keeps the full output text: ${detailText}`)
@@ -205,6 +206,9 @@ test('ToolTraceCard: rich events surface toolName, args JSON, and full output in
     })
     const detail = container.querySelector('[data-ready-tool-timeline-detail="true"]')
     assert.ok(detail)
+    assert.equal(detail?.querySelectorAll('[data-ready-code-block="true"]').length, 2)
+    assert.ok(detail?.querySelector('[data-ready-tool-detail-code="调用"]'))
+    assert.ok(detail?.querySelector('[data-ready-tool-detail-code="输出"]'))
     const text = detail?.textContent || ''
     assert.ok(
       (detail?.querySelector('[data-ready-tool-timeline-tool-name="true"]')?.textContent || '').includes('skill_read_artifact'),

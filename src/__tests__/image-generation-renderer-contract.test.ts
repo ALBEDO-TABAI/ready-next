@@ -6,17 +6,20 @@ import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 
 import ChatAttachments from '../renderer/components/agent/ChatAttachments'
+import { GeneratedImageGallery } from '../renderer/components/agent/GeneratedImageGallery'
 import { AttachmentPreviewModal } from '../renderer/components/agent/chat-panel/attachments-preview'
 import { buildSlashCommandInsertion } from '../renderer/modules/agent/slash-skill-selection'
 import type { AgentMessage } from '../renderer/modules/agent/types'
 import {
   generatedImageArtifactToAttachment,
+  generatedImagesFromArtifacts,
   generatedImagesFromMessage,
 } from '../renderer/modules/image-generation/generatedImageArtifacts'
 import {
   parseGeneratedImageDragPayload,
 } from '../renderer/modules/image-generation/generatedImageDrag'
 import { isImageGenerationReferencePath } from '../shared/image-generation'
+import { buildCanonicalCoreCloseoutMessage } from '../main/modules/repositories/canonical-core-closeout-message'
 
 const artifact = {
   id: 'generated-image:one',
@@ -48,6 +51,32 @@ test('generated image artifacts round-trip from projection snapshot into chat at
   assert.equal(attachment.source, 'generated-image')
   assert.equal(attachment.path, artifact.path)
   assert.equal(attachment.contentType, 'image/png')
+})
+
+test('canonical terminal messages retain generated image artifacts for immediate and restored previews', () => {
+  const canonical = buildCanonicalCoreCloseoutMessage({
+    parentTaskId: 'task-image',
+    ownerRunId: 'run-image',
+    conversationId: 'scope-image',
+    finalText: '已生成图片。',
+    timestamp: '2026-07-23T10:30:06.000Z',
+    terminalReason: 'done',
+    recentArtifacts: [artifact],
+  })
+  const message: AgentMessage = {
+    id: canonical.id,
+    agent: 'ready',
+    content: canonical.content,
+    type: 'agent',
+    timestamp: new Date(canonical.timestamp),
+    meta: canonical.meta,
+  }
+
+  assert.equal(generatedImagesFromMessage(message)[0]?.path, artifact.path)
+})
+
+test('live task artifacts restore the preview before canonical message metadata is refreshed', () => {
+  assert.equal(generatedImagesFromArtifacts([artifact, artifact])[0]?.path, artifact.path)
 })
 
 test('generated image drag payload requires a local absolute path and preserves image identity', () => {
@@ -125,6 +154,18 @@ test('generated image preview keeps the chat visible and exposes only three icon
   assert.doesNotMatch(html, />ready-image\.png</)
   assert.doesNotMatch(html, />在 Finder 中显示</)
   assert.doesNotMatch(html, />系统打开</)
+})
+
+test('generated image card uses a quiet green dot for the current image', () => {
+  const html = renderToStaticMarkup(createElement(GeneratedImageGallery, {
+    images: [artifact],
+    onPreview: () => undefined,
+    onReferenceSelect: () => undefined,
+  }))
+
+  assert.match(html, /aria-label="当前图片"/)
+  assert.match(html, /background:var\(--color-green\)/)
+  assert.doesNotMatch(html, /已激活/)
 })
 
 test('generated images can drop into both document editing surfaces', () => {

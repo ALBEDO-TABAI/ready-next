@@ -39,11 +39,96 @@ html[data-skin='liquid-glass']:is([data-glass-variant='solid-green'], [data-glas
 }
 
 .ready-thinking-state-label {
+  background-image: linear-gradient(
+    100deg,
+    var(--text-gray) 0%,
+    var(--text-gray) 38%,
+    var(--text-title) 50%,
+    var(--text-gray) 62%,
+    var(--text-gray) 100%
+  );
+  background-position: 140% 0;
+  background-size: 220% 100%;
+  background-clip: text;
+  color: transparent;
   font-family: var(--font-ui);
   font-size: var(--text-base);
   line-height: var(--leading-dense);
   font-weight: var(--fw-medium);
   letter-spacing: var(--tracking-normal);
+  animation: ready-thinking-sweep 1.8s ease-in-out infinite;
+}
+
+.ready-thinking-state-trail {
+  margin-left: -4px;
+  color: var(--text-light);
+  font-family: var(--font-numeric);
+  letter-spacing: 1px;
+  animation: ready-thinking-trail 1.3s steps(3, end) infinite;
+}
+
+.ready-thinking-reasoning {
+  position: relative;
+  padding-left: 12px;
+  color: var(--text-gray);
+}
+
+.ready-thinking-reasoning::before {
+  position: absolute;
+  top: 0.25em;
+  bottom: 0.25em;
+  left: 0;
+  width: 1px;
+  border-radius: var(--radius-full);
+  background: color-mix(in srgb, var(--border-default) 84%, transparent);
+  content: '';
+}
+
+.ready-thinking-reasoning[data-ready-thinking-reasoning='running'] {
+  animation: ready-reasoning-breathe 1.8s ease-in-out infinite;
+}
+
+.ready-task-todo-row {
+  animation: ready-task-row-enter 180ms ease-out both;
+}
+
+.ready-task-todo-label {
+  color: var(--text-body);
+  text-decoration-color: transparent;
+  text-decoration-thickness: 0.5px;
+  transition:
+    color var(--duration-normal) ease,
+    text-decoration-color var(--duration-normal) ease;
+}
+
+[data-ready-tool-timeline-item='running'] .ready-task-todo-label,
+[data-ready-task-todo-state='running'] .ready-task-todo-label {
+  background-image: linear-gradient(
+    100deg,
+    var(--text-body) 0%,
+    var(--text-body) 34%,
+    var(--text-title) 48%,
+    var(--text-gray) 60%,
+    var(--text-body) 72%,
+    var(--text-body) 100%
+  );
+  background-position: 145% 0;
+  background-size: 240% 100%;
+  background-clip: text;
+  color: transparent;
+  animation: ready-task-label-sweep 1.9s ease-in-out infinite;
+}
+
+[data-ready-tool-timeline-item='done'] .ready-task-todo-label,
+[data-ready-task-todo-state='done'] .ready-task-todo-label {
+  color: var(--text-light);
+  text-decoration-line: line-through;
+  text-decoration-color: color-mix(in srgb, var(--text-light) 72%, transparent);
+}
+
+[data-ready-tool-timeline-item='error'] .ready-task-todo-label,
+[data-ready-task-todo-state='error'] .ready-task-todo-label {
+  color: var(--color-red);
 }
 
 .ready-tool-activity-glyph {
@@ -96,9 +181,11 @@ html[data-skin='liquid-glass']:is([data-glass-variant='solid-green'], [data-glas
 
 .ready-image-generation-progress {
   position: relative;
-  width: 68px;
-  height: 44px;
+  width: min(calc(100% + 20px), 420px);
+  max-height: 360px;
+  aspect-ratio: 7 / 5;
   margin-top: 7px;
+  margin-left: -20px;
   overflow: hidden;
   border: 0.5px solid color-mix(in srgb, var(--border-default) 82%, transparent);
   border-radius: var(--radius-md);
@@ -126,6 +213,71 @@ html[data-skin='liquid-glass']:is([data-glass-variant='solid-green'], [data-glas
   mask-position: -14px -4px;
   mask-size: 70% 90%;
   animation: ready-image-focus-move 2.6s cubic-bezier(0.22, 1, 0.36, 1) infinite alternate;
+}
+
+[data-ready-tool-detail-code] {
+  min-width: 0;
+}
+
+[data-ready-tool-detail-code] .ready-code-block {
+  margin: 0;
+}
+
+[data-ready-tool-detail-code] .ready-code-block-body {
+  max-height: min(34vh, 300px);
+}
+
+@keyframes ready-thinking-sweep {
+  from {
+    background-position: 140% 0;
+  }
+
+  to {
+    background-position: -45% 0;
+  }
+}
+
+@keyframes ready-thinking-trail {
+  0% {
+    clip-path: inset(0 100% 0 0);
+  }
+
+  100% {
+    clip-path: inset(0 0 0 0);
+  }
+}
+
+@keyframes ready-task-label-sweep {
+  from {
+    background-position: 145% 0;
+  }
+
+  to {
+    background-position: -55% 0;
+  }
+}
+
+@keyframes ready-reasoning-breathe {
+  0%,
+  100% {
+    opacity: 0.68;
+  }
+
+  50% {
+    opacity: 1;
+  }
+}
+
+@keyframes ready-task-row-enter {
+  from {
+    opacity: 0;
+    transform: translateY(2px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 @keyframes ready-task-step-breathe {
@@ -214,7 +366,13 @@ html[data-skin='liquid-glass']:is([data-glass-variant='solid-green'], [data-glas
 
 @media (prefers-reduced-motion: reduce) {
   .ready-task-step-glyph[data-ready-task-step-status='running'],
-  .ready-image-generation-focus {
+  .ready-image-generation-focus,
+  .ready-thinking-state-label,
+  .ready-thinking-state-trail,
+  .ready-thinking-reasoning[data-ready-thinking-reasoning='running'],
+  [data-ready-tool-timeline-item='running'] .ready-task-todo-label,
+  [data-ready-task-todo-state='running'] .ready-task-todo-label,
+  .ready-task-todo-row {
     animation: none;
   }
 }

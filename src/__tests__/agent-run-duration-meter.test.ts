@@ -124,6 +124,8 @@ test('duration meter keeps its status and timer without an outer box', () => {
   assert.doesNotMatch(meter[1], /(?:^|;)border:/)
   assert.doesNotMatch(meter[1], /(?:^|;)background:/)
   assert.doesNotMatch(meter[1], /backdrop-filter/)
+  assert.match(markup, /max-w-\[90%\] w-full/)
+  assert.match(markup, /padding:0 18px 2px 0/)
   assert.match(markup, /本轮用时/)
   assert.match(markup, /00:09/)
 })

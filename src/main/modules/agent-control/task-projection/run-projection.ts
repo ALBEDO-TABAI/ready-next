@@ -105,7 +105,11 @@ export class RunProjection {
       ? truthPatch.recentArtifacts as ScopeRunSummary['recentArtifacts']
       : null
     const recentArtifacts = selectRecentArtifacts(
-      truthRecentArtifacts || payload.recentArtifacts || payload.artifactRefs || previous?.recentArtifacts || [],
+      truthRecentArtifacts
+        || payload.recentArtifacts
+        || payload.artifactRefs
+        || (isSameTaskAsPrevious ? previous?.recentArtifacts : [])
+        || [],
     )
     const activePhase =
       payload.phase === 'queued'

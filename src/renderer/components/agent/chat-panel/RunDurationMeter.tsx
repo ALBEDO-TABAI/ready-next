@@ -41,15 +41,7 @@ export function formatRunDuration(ms: number): string {
 
 function runDurationLabel(run: ScopeRunState): Pick<RunDurationMeterModel, 'label' | 'glyph' | 'tone'> {
   if (LIVE_PHASES.has(run.phase)) {
-    // P0-3 — planning-stage heartbeats ("正在理解需求…/正在调用模型…") surface
-    // here instead of the static label, so the pre-first-output window shows
-    // real progression. Raw status echoes ("状态：working") and long texts
-    // stay on the generic label.
-    const trimmed = run.phase === 'planning' && typeof run.latestText === 'string'
-      ? run.latestText.trim()
-      : ''
-    const heartbeat = trimmed && !trimmed.startsWith('状态：') && trimmed.length <= 30 ? trimmed : null
-    return { label: heartbeat || '本轮进行中', glyph: 'running', tone: 'neutral' }
+    return { label: '本轮进行中', glyph: 'running', tone: 'neutral' }
   }
   if (run.phase === 'cancelled') {
     return { label: '本轮已停止', glyph: 'idle', tone: 'neutral' }
@@ -111,7 +103,10 @@ export function RunDurationMeter({
   const durationLabel = model.label === '本轮用时' ? '' : '本轮用时 '
 
   return (
-    <div className="flex" style={{ padding: '0 6px 2px' }}>
+    <div
+      className="flex max-w-[90%] w-full"
+      style={{ padding: '0 18px 2px 0', boxSizing: 'border-box' }}
+    >
       <div
         data-agent-run-duration-meter="true"
         aria-label={`${model.label}，${durationLabel}${model.duration}`}
@@ -122,7 +117,7 @@ export function RunDurationMeter({
           alignItems: 'center',
           gap: 7,
           minHeight: 24,
-          padding: '5px 8px',
+          padding: '5px 0',
           color: 'var(--text-light)',
         }}
       >

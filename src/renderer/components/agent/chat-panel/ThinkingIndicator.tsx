@@ -11,6 +11,7 @@ export function ThinkingIndicator() {
     >
       <AgentStatusDot state="running" size={12} />
       <span className="ready-thinking-state-label">思考中</span>
+      <span className="ready-thinking-state-trail" aria-hidden="true">···</span>
     </div>
   )
 }

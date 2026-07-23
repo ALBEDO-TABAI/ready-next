@@ -9,13 +9,16 @@ const CHAT_BOTTOM_SAFETY_MARGIN_PX = 12
 // view back down. 96px ≈ one short message of slack so小幅 overshoot still counts.
 const CHAT_STICK_TO_BOTTOM_THRESHOLD_PX = 96
 import { Copy, Check } from 'lucide-react'
-import type { AgentMessage, ChatAttachment, ToolTraceEvent } from '../../stores/useAgent'
+import type { AgentMessage, AgentArtifact, ChatAttachment, ToolTraceEvent } from '../../stores/useAgent'
 import { filterUserVisibleToolTraceEvents } from '../../modules/agent/toolTraceVisibility'
 import { ToolTraceCard } from './chat-panel/task/TaskCard'
 import { AskUserQuestionsCard } from './AskUserQuestionsCard'
 import { GeneratedImageGallery } from './GeneratedImageGallery'
 import { ThinkingIndicator } from './chat-panel/ThinkingIndicator'
-import { generatedImagesFromMessage } from '../../modules/image-generation/generatedImageArtifacts'
+import {
+  generatedImagesFromArtifacts,
+  generatedImagesFromMessage,
+} from '../../modules/image-generation/generatedImageArtifacts'
 import { submitAskUserQuestionsAnswers, cancelAskUserQuestionsCard } from '../../stores/useAgent'
 import { isImageGenerationReferencePath } from '../../../shared/image-generation'
 import WelcomePanel from './WelcomePanel'
@@ -28,6 +31,7 @@ const CHAT_SCROLL_TOP_FADE = 38
 interface ChatMessagesProps {
   messages: AgentMessage[]
   messageTaskSnapshots: Record<string, React.ReactNode>
+  messageGeneratedImageArtifacts: Record<string, AgentArtifact[]>
   messageToolTraceSnapshots: Record<string, React.ReactNode>
   pendingTaskRun: React.ReactNode | null
   pendingToolTrace: React.ReactNode | null
@@ -57,6 +61,7 @@ interface ChatMessagesProps {
 export default function ChatMessages({
   messages,
   messageTaskSnapshots,
+  messageGeneratedImageArtifacts,
   messageToolTraceSnapshots,
   pendingTaskRun,
   pendingToolTrace,
@@ -169,7 +174,10 @@ export default function ChatMessages({
         const showMessageDivider = index < visibleMessages.length - 1 && (msg.type === 'user' || msg.type === 'agent')
         const taskSnapshot = msg.type === 'agent' ? messageTaskSnapshots[msg.id] : null
         const toolTraceSnapshot = msg.type === 'agent' ? messageToolTraceSnapshots[msg.id] : null
-        const generatedImages = generatedImagesFromMessage(msg)
+        const generatedImages = generatedImagesFromArtifacts([
+          ...generatedImagesFromMessage(msg),
+          ...(messageGeneratedImageArtifacts[msg.id] || []),
+        ])
         const isStreamingMessage = isStreaming && msg.id === streamingMessageId
 
         return (
@@ -348,13 +356,21 @@ export default function ChatMessages({
             </div>
 
             {taskSnapshot ? (
-              <div data-chat-message-task-snapshot={msg.id}>
+              <div
+                data-chat-message-task-snapshot={msg.id}
+                className="max-w-[90%] w-full"
+                style={{ paddingRight: 18, boxSizing: 'border-box' }}
+              >
                 {taskSnapshot}
               </div>
             ) : null}
 
             {toolTraceSnapshot ? (
-              <div data-chat-message-tool-trace={msg.id}>
+              <div
+                data-chat-message-tool-trace={msg.id}
+                className="max-w-[90%] w-full"
+                style={{ paddingRight: 18, boxSizing: 'border-box' }}
+              >
                 {toolTraceSnapshot}
               </div>
             ) : null}
@@ -390,32 +406,43 @@ export default function ChatMessages({
         </div>
       )}
 
-      {isStreaming && (() => {
-        const streamMsg = messages.find((m) => m.id === streamingMessageId)
-        if (!streamMsg || streamMsg.content.length === 0) {
-          return (
-            pendingTaskRun || pendingToolTrace ? (
-              <div className="flex flex-col" style={{ gap: 8 }}>
-                {pendingTaskRun ? (
-                  <div data-chat-pending-task-snapshot="true">
-                    {pendingTaskRun}
+      {isStreaming ? (
+        <div data-chat-live-activity="true" className="flex flex-col" style={{ gap: 6 }}>
+          {(() => {
+            const streamMsg = messages.find((m) => m.id === streamingMessageId)
+            if (!streamMsg || streamMsg.content.length === 0) {
+              return (
+                pendingTaskRun || pendingToolTrace ? (
+                  <div className="flex flex-col" style={{ gap: 8 }}>
+                    {pendingTaskRun ? (
+                      <div
+                        data-chat-pending-task-snapshot="true"
+                        className="max-w-[90%] w-full"
+                        style={{ paddingRight: 18, boxSizing: 'border-box' }}
+                      >
+                        {pendingTaskRun}
+                      </div>
+                    ) : null}
+                    {pendingToolTrace ? (
+                      <div
+                        data-chat-pending-tool-trace="true"
+                        className="max-w-[90%] w-full"
+                        style={{ paddingRight: 18, boxSizing: 'border-box' }}
+                      >
+                        {pendingToolTrace}
+                      </div>
+                    ) : null}
                   </div>
-                ) : null}
-                {pendingToolTrace ? (
-                  <div data-chat-pending-tool-trace="true">
-                    {pendingToolTrace}
-                  </div>
-                ) : null}
-              </div>
-            ) : (
-              <ThinkingIndicator />
-            )
-          )
-        }
-        return null
-      })()}
-
-      {runDurationMeter}
+                ) : (
+                  <ThinkingIndicator />
+                )
+              )
+            }
+            return null
+          })()}
+          {runDurationMeter}
+        </div>
+      ) : runDurationMeter}
 
       <div data-skill-ask-user-anchor="true" aria-hidden="true" style={{ flex: '0 0 auto', width: '100%' }} />
 

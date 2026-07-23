@@ -24,7 +24,7 @@ import {
 } from '../helpers/badges'
 import type { TaskCardRun } from '../../task-card-from-projection'
 import { AgentStatusDot } from '../../../ui/dot-matrix/AgentStatusDot'
-import { RunFeedbackStars } from './RunFeedbackStars'
+import { TaskCardFooter } from './TaskCardFooter'
 import {
   buildBrowserConfirmationCard,
   readBrowserConfirmationRequest,
@@ -113,7 +113,7 @@ const CAPSULE_HEADER_STYLE: React.CSSProperties = {
 
 const TASK_CARD_HEADER_STYLE: React.CSSProperties = {
   ...CAPSULE_HEADER_STYLE,
-  padding: '7px 10px',
+  padding: '7px 0',
 }
 
 function TaskStepStatusGlyph({ status }: { status: string }) {
@@ -145,6 +145,7 @@ export function TaskCard({
   pending = false,
   compact = false,
   expanded = false,
+  terminalDuration,
   disclosureState,
   onToggleExpanded,
   onOpenScope,
@@ -181,6 +182,7 @@ export function TaskCard({
   pending?: boolean
   compact?: boolean
   expanded?: boolean
+  terminalDuration?: string | null
   disclosureState?: Record<string, boolean>
   onToggleExpanded?: () => void
   onOpenScope?: (scopeId: string) => void
@@ -217,7 +219,6 @@ export function TaskCard({
       source: hit,
     })
   }, [vm.legacyHandoffHit, vm.key, run.scopeId, run.taskId])
-  const primaryTitle = vm.title
   const steps = vm.steps
   const PLAN_STEP_COLLAPSE_THRESHOLD = 10
   const [showAllPlanSteps, setShowAllPlanSteps] = useState(false)
@@ -251,13 +252,17 @@ export function TaskCard({
     || run.status === 'failed'
     || run.status === 'killed'
   )
+  const hasPlaceholderTitle = vm.title === '正在理解需求' || vm.title === '正在生成…'
+  const useDurationDisclosure = hasTerminalTaskStatus && (Boolean(terminalDuration) || hasPlaceholderTitle)
+  const primaryTitle = useDurationDisclosure ? '本轮用时' : vm.title
   const shouldShowInteractionBadge = Boolean(
     run.interactionState
     && run.interactionState !== 'running'
     && !hasTerminalTaskStatus,
   )
+  const taskKindBadge = getTaskStartModeLabel(run)
+    || (run.taskType ? taskTypeBadgeLabel(run.taskType) : null)
   const metaBadges = [
-    getTaskStartModeLabel(run) || (run.taskType ? taskTypeBadgeLabel(run.taskType) : null),
     shouldShowInteractionBadge ? interactionStateBadgeLabel(run.interactionState) : null,
     run.budgetWarningLevel ? budgetWarningBadgeLabel(run.budgetWarningLevel) : null,
     run.recoveryHistory && run.recoveryHistory.length > 0
@@ -274,9 +279,15 @@ export function TaskCard({
   const toolCount = timelineItems.length
   // 运行态折叠时自动浮出最近动态（P0-2 语义，与 ToolTraceCard 一致）。
   const recentItems = pending && !expanded && !compact ? timelineItems.slice(-3) : []
-  const headerPreviewSource = pending && timelineEvents.length > 0
-    ? formatToolTracePreview(timelineEvents[timelineEvents.length - 1]?.text)
-    : summaryPreview
+  const headerPreviewSource = useDurationDisclosure
+    ? (
+        vm.title === '正在理解需求' || vm.title === '正在生成…'
+          ? ''
+          : vm.title
+      )
+    : pending && timelineEvents.length > 0
+      ? formatToolTracePreview(timelineEvents[timelineEvents.length - 1]?.text)
+      : summaryPreview
   const headerPreview = headerPreviewSource === primaryTitle || headerPreviewSource === vm.statusLabel
     ? ''
     : headerPreviewSource
@@ -379,7 +390,7 @@ export function TaskCard({
           onToggleExpanded?.()
         }}
         className="hover:bg-[color-mix(in_srgb,var(--surface-card-bg)_44%,transparent)] transition-colors duration-160"
-        style={{ ...TASK_CARD_HEADER_STYLE, paddingRight: dismissible ? 36 : 10 }}
+        style={{ ...TASK_CARD_HEADER_STYLE, paddingRight: dismissible ? 26 : 0 }}
       >
         <span style={{ flexShrink: 0, display: 'flex', alignItems: 'center' }}>
           <AgentStatusDot state={taskRuntimeState.visualState} size={11} />
@@ -399,6 +410,16 @@ export function TaskCard({
         >
           {primaryTitle}
         </span>
+        {useDurationDisclosure && terminalDuration ? (
+          <span
+            className="t-data"
+            data-ready-task-terminal-duration="true"
+            data-typography-role="data"
+            style={{ color: 'var(--text-body)', flexShrink: 0 }}
+          >
+            {terminalDuration}
+          </span>
+        ) : null}
         {headerPreview ? (
           <span
             className="t-meta"
@@ -578,7 +599,11 @@ export function TaskCard({
           )}
 
           {summaryPreview && vm.summary !== primaryTitle && vm.summary !== vm.statusLabel ? (
-            <div className="t-meta" data-typography-role="meta" style={{ color: 'var(--text-gray)' }}>
+            <div
+              className="ready-thinking-reasoning t-meta"
+              data-ready-thinking-reasoning={hasTerminalTaskStatus ? 'done' : 'running'}
+              data-typography-role="meta"
+            >
               {formatTaskUserFacingText(vm.summary)}
             </div>
           ) : null}
@@ -592,9 +617,17 @@ export function TaskCard({
           {steps.length > 0 && (
             <div className="flex flex-col" style={{ gap: 5 }}>
               {planStepsToRender.map((step) => (
-                <div key={step.id} className="flex items-start gap-2">
+                <div
+                  key={step.id}
+                  className="ready-task-todo-row flex items-start gap-2"
+                  data-ready-task-todo-state={step.status}
+                >
                   <TaskStepStatusGlyph status={step.status} />
-                  <div className="t-meta" data-typography-role="meta" style={{ minWidth: 0, flex: 1, color: 'var(--text-body)' }}>
+                  <div
+                    className="ready-task-todo-label t-meta"
+                    data-typography-role="meta"
+                    style={{ minWidth: 0, flex: 1 }}
+                  >
                     {formatTaskStepDisplayTitle(step.title, run.progress)}
                     {step.detail ? (
                       <span style={{ color: 'var(--text-light)' }}>
@@ -676,10 +709,7 @@ export function TaskCard({
             </div>
           )}
 
-          {/* D5 — 终态 run 的用户反馈入口（runId 由 main 侧按 taskId 解析）。 */}
-          {hasTerminalTaskStatus && !isDetachedTask && run.taskId ? (
-            <RunFeedbackStars taskId={run.taskId} />
-          ) : null}
+          <TaskCardFooter taskId={run.taskId} taskKindBadge={taskKindBadge} terminal={hasTerminalTaskStatus} detached={isDetachedTask} />
         </div>
       )}
 

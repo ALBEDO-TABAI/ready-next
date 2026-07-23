@@ -11,6 +11,14 @@ import {
   ToolTimeline,
 } from '../renderer/components/agent/chat-panel/task/ToolTimeline'
 import { taskProjectionToTaskCardRun } from '../renderer/components/agent/task-card-from-projection'
+import {
+  isTaskPlaceholderOnly,
+  isTaskVisible,
+} from '../renderer/components/agent/chat-panel/helpers/badges'
+import {
+  shouldRenderPendingTaskCard,
+  terminalGeneratedImageArtifacts,
+} from '../renderer/components/agent/chat-panel/task-snapshot/TaskToolSnapshot'
 
 test('thinking indicator is a compact live status without an assistant avatar', () => {
   const html = renderToStaticMarkup(createElement(ThinkingIndicator))
@@ -32,6 +40,7 @@ test('streaming prose exposes a steady caret while completed prose does not', ()
   }))
 
   assert.match(streaming, /data-ready-stream-caret="true"/)
+  assert.match(streaming, /data-ready-streaming="true"/)
   assert.doesNotMatch(complete, /data-ready-stream-caret/)
 })
 
@@ -60,6 +69,9 @@ test('real diff blocks and numbered links receive their adapted presentation', (
   }))
 
   assert.match(html, /data-ready-agent-citation="true"/)
+  assert.match(html, /data-ready-agent-citation-sources="true"/)
+  assert.match(html, /data-ready-agent-citation-source="1"/)
+  assert.match(html, />example\.com</)
   assert.match(html, /data-ready-code-kind="diff"/)
   assert.match(html, /data-ready-diff-line="remove"/)
   assert.match(html, /data-ready-diff-line="add"/)
@@ -103,7 +115,102 @@ test('tool activity presentation uses typed, truthful labels from existing trace
     }],
   }))
   assert.match(html, /data-ready-tool-activity-kind="research"/)
+  assert.match(html, /ready-task-todo-label/)
   assert.match(html, /搜索网页 · Ready Electron 42/)
+})
+
+test('placeholder-only progress yields to thinking while terminal direct answers hide the stale card', () => {
+  const placeholder = {
+    scopeId: 'scope-1',
+    taskId: 'task-1',
+    phase: 'planning',
+    status: 'running',
+    taskTitle: '正在理解需求',
+    taskSummary: '正在整理任务边界、上下文与可用能力',
+    steps: [],
+    toolTrace: [],
+    recentArtifacts: [],
+  } as any
+
+  assert.equal(isTaskPlaceholderOnly(placeholder), true)
+  assert.equal(isTaskVisible(placeholder), true)
+  assert.equal(isTaskVisible({ ...placeholder, phase: 'done', status: 'completed' }), true)
+  const placeholderWithTrace = {
+    ...placeholder,
+    toolTrace: [{ id: 'tool-1', kind: 'call', text: 'web_search()', timestamp: new Date() }],
+  }
+  assert.equal(isTaskPlaceholderOnly(placeholderWithTrace), true)
+  assert.equal(isTaskVisible({ ...placeholderWithTrace, phase: 'done', status: 'completed' }), true)
+  assert.equal(shouldRenderPendingTaskCard(placeholder, 0), false)
+  assert.equal(shouldRenderPendingTaskCard(placeholder, 1), true)
+})
+
+test('terminal duration replaces the stale planning title without removing the disclosure', () => {
+  const run = taskProjectionToTaskCardRun({
+    scopeId: 'scope-duration',
+    taskId: 'task-duration',
+    phase: 'done',
+    status: 'completed',
+    title: '原始会话标题',
+    taskTitle: '正在理解需求',
+    taskSummary: '正在整理任务边界、上下文与可用能力',
+    steps: [],
+    waitingFor: 'none',
+    resumableActions: [],
+    recentArtifacts: [],
+    taskContinuation: null,
+    progress: null,
+    memoryCapture: null,
+    taskType: 'short_task',
+    interactionState: 'suspended',
+    canResume: false,
+    updatedAt: '2026-07-23T00:00:05.000Z',
+    toolTrace: [],
+  })
+  const html = renderToStaticMarkup(createElement(TaskCard, {
+    run,
+    terminalDuration: '00:05',
+    expanded: true,
+  }))
+
+  assert.match(html, />本轮用时</)
+  assert.match(html, /data-ready-task-terminal-duration="true"[^>]*>00:05</)
+  assert.doesNotMatch(html, />正在理解需求</)
+  assert.match(html, /<button/)
+  assert.match(html, /class="flex items-end justify-between"/)
+  assert.match(html, /data-ready-task-kind-badge="true"[^>]*>短任务</)
+})
+
+test('a running follow-up cannot borrow a generated image from the previous turn', () => {
+  const run = taskProjectionToTaskCardRun({
+    scopeId: 'scope-image-follow-up',
+    taskId: 'task-image-follow-up',
+    phase: 'tool_running',
+    status: 'running',
+    title: '生成下一张图片',
+    recentArtifacts: [{
+      id: 'stale-image',
+      module: 'system',
+      kind: 'generated_image',
+      label: 'previous.jpg',
+      path: '/tmp/previous.jpg',
+      createdAt: '2026-07-23T00:00:00.000Z',
+    }],
+    updatedAt: '2026-07-23T00:00:01.000Z',
+  })
+
+  assert.equal(terminalGeneratedImageArtifacts(run).length, 0)
+  assert.equal(terminalGeneratedImageArtifacts(taskProjectionToTaskCardRun({
+    ...run,
+    phase: 'done',
+    status: 'completed',
+  })).length, 0)
+  assert.equal(terminalGeneratedImageArtifacts(taskProjectionToTaskCardRun({
+    ...run,
+    phase: 'done',
+    status: 'completed',
+    taskTitle: 'AI 生图',
+  })).length, 1)
 })
 
 test('Ready tool names map to their actual product activity instead of reference-library names', () => {

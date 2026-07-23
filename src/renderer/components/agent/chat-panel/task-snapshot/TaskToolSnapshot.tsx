@@ -36,6 +36,7 @@
 import { useCallback, useMemo, useState } from 'react'
 import type React from 'react'
 import type { AgentMessage, ToolTraceEvent } from '../../../../stores/useAgent'
+import type { AgentArtifact } from '../../../../modules/agent/types'
 import {
   createDefaultTaskDisclosureState,
   getTaskRunDisplayKey,
@@ -46,10 +47,11 @@ import { filterUserVisibleToolTraceEvents } from '../../../../modules/agent/tool
 import { readBrowserConfirmationRequest } from '../../../../../shared/browser-confirmation-card'
 import type { TaskCardRun } from '../../task-card-from-projection'
 import { TaskCard, ToolTraceCard } from '../task/TaskCard'
-import { isTaskVisible } from '../helpers/badges'
+import { isTaskPlaceholderOnly, isTaskVisible } from '../helpers/badges'
 
 export interface TaskToolSnapshotRenderValues {
   messageTaskSnapshots: Record<string, React.ReactNode>
+  messageGeneratedImageArtifacts: Record<string, AgentArtifact[]>
   messageToolTraceSnapshots: Record<string, React.ReactNode>
   pendingTaskRun: React.ReactNode | null
   pendingToolTrace: React.ReactNode | null
@@ -66,6 +68,7 @@ export interface TaskToolSnapshotProps {
   taskDisclosureState: Record<string, TaskDisclosureState>
   isStreaming: boolean
   streamingMessageId: string | null
+  terminalDurationLabel?: string | null
 
   // --- Serialized payload parsers (kept in ChatPanel for source-grep
   // contract; passed in here as stable useCallback identities) ---
@@ -164,6 +167,27 @@ export function newerTaskSnapshot(snapshot: TaskCardRun, liveTaskRuns: TaskCardR
   return liveUpdatedAt >= snapshotUpdatedAt ? liveRun : snapshot
 }
 
+export function shouldRenderPendingTaskCard(
+  run: TaskCardRun,
+  visibleToolEventCount: number,
+): boolean {
+  return !(isTaskPlaceholderOnly(run) && visibleToolEventCount === 0)
+}
+
+export function terminalGeneratedImageArtifacts(run: TaskCardRun | null): AgentArtifact[] {
+  if (!run) return []
+  if (run.taskTitle?.trim() !== 'AI 生图') return []
+  const terminal = (
+    run.phase === 'done'
+    || run.phase === 'cancelled'
+    || run.status === 'completed'
+    || run.status === 'failed'
+    || run.status === 'killed'
+  )
+  if (!terminal) return []
+  return (run.recentArtifacts || []).filter((artifact) => artifact.kind === 'generated_image')
+}
+
 export function selectBottomBackgroundTaskRuns<T>(
   runs: readonly T[],
 ): { visibleRuns: T[]; hiddenCount: number } {
@@ -184,6 +208,7 @@ export function TaskToolSnapshot(props: TaskToolSnapshotProps): React.ReactEleme
     taskDisclosureState,
     isStreaming,
     streamingMessageId,
+    terminalDurationLabel = null,
     parseSerializedTaskSnapshot,
     parseSerializedToolTraceSnapshot,
     setTaskSectionExpanded,
@@ -218,6 +243,11 @@ export function TaskToolSnapshot(props: TaskToolSnapshotProps): React.ReactEleme
       const dismissalKey = taskRunSnapshotKey(run)
       if (dismissible && dismissedBottomTaskKeys.has(dismissalKey)) return null
       const expanded = Boolean(taskDisclosureState[key]?.overview)
+      const carriesForegroundDuration = Boolean(
+        terminalDurationLabel
+        && currentTaskRun
+        && taskRunsShareIdentity(run, currentTaskRun)
+      )
       return (
         <TaskCard
           key={key}
@@ -230,6 +260,7 @@ export function TaskToolSnapshot(props: TaskToolSnapshotProps): React.ReactEleme
           pending={pending}
           compact={compact}
           expanded={expanded}
+          terminalDuration={carriesForegroundDuration ? terminalDurationLabel : null}
           disclosureState={{
             ...createDefaultTaskDisclosureState(run),
             ...(taskDisclosureState[key] || {})
@@ -263,6 +294,7 @@ export function TaskToolSnapshot(props: TaskToolSnapshotProps): React.ReactEleme
     },
     [
       currentScopeId,
+      currentTaskRun,
       onOpenScope,
       onContinueTaskInput,
       onCancelDetachedTask,
@@ -280,7 +312,8 @@ export function TaskToolSnapshot(props: TaskToolSnapshotProps): React.ReactEleme
       onUndoMemoryCapture,
       setTaskSectionExpanded,
       dismissedBottomTaskKeys,
-      taskDisclosureState
+      taskDisclosureState,
+      terminalDurationLabel,
     ]
   )
 
@@ -298,13 +331,31 @@ export function TaskToolSnapshot(props: TaskToolSnapshotProps): React.ReactEleme
   // Activity-capsule 合并：有可见 task snapshot 的消息，把该消息段的工具
   // 事件并入同一张任务胶囊（时间线在胶囊内展开）；只有无 task 的消息才
   // 落到独立的 ToolTraceCard。两个 map 对同一 message id 互斥。
-  const messageTaskSnapshots = useMemo<Record<string, React.ReactNode>>(() => {
+  const {
+    messageTaskSnapshots,
+    messageGeneratedImageArtifacts,
+  } = useMemo<{
+    messageTaskSnapshots: Record<string, React.ReactNode>
+    messageGeneratedImageArtifacts: Record<string, AgentArtifact[]>
+  }>(() => {
     const nextSnapshots: Record<string, React.ReactNode> = {}
+    const nextGeneratedImages: Record<string, AgentArtifact[]> = {}
     for (const message of messages) {
       if (message.type !== 'agent') continue
+      if (isStreaming && message.id === streamingMessageId && !message.content.trim()) continue
       const snapshot = parseSerializedTaskSnapshot(message.meta?.taskSnapshot)
-      if (!snapshot || !isTaskVisible(snapshot)) continue
-      const taskRun = newerTaskSnapshot(snapshot, liveTaskRuns)
+      const messageTaskId = stableTaskIdentity(
+        typeof message.meta?.taskId === 'string' ? message.meta.taskId : null,
+      )
+      const liveMessageRun = messageTaskId
+        ? liveTaskRuns.find((run) => taskRunIdentityValues(run).has(messageTaskId))
+        : liveTaskRuns.find((run) => run.responseMessageId === message.id)
+      const taskRun = snapshot
+        ? newerTaskSnapshot(snapshot, liveTaskRuns)
+        : liveMessageRun
+      if (!taskRun || !isTaskVisible(taskRun)) continue
+      const generatedImages = terminalGeneratedImageArtifacts(taskRun)
+      if (generatedImages.length > 0) nextGeneratedImages[message.id] = generatedImages
       const segmentEvents = filterUserVisibleToolTraceEvents(
         parseSerializedToolTraceSnapshot(message.meta?.toolTraceSnapshot),
       )
@@ -331,7 +382,17 @@ export function TaskToolSnapshot(props: TaskToolSnapshotProps): React.ReactEleme
       )
     }
 
-    return nextSnapshots
+    if (currentTaskRun?.responseMessageId) {
+      const generatedImages = terminalGeneratedImageArtifacts(currentTaskRun)
+      if (generatedImages.length > 0) {
+        nextGeneratedImages[currentTaskRun.responseMessageId] = generatedImages
+      }
+    }
+
+    return {
+      messageTaskSnapshots: nextSnapshots,
+      messageGeneratedImageArtifacts: nextGeneratedImages,
+    }
   }, [
     currentTaskRun,
     currentVisibleToolTraceSegment,
@@ -398,6 +459,7 @@ export function TaskToolSnapshot(props: TaskToolSnapshotProps): React.ReactEleme
     const streamMessage = messages.find((message) => message.id === streamingMessageId)
     if (!currentTaskRun || !isStreaming || !streamingMessageId) return null
     if (streamMessage && streamMessage.content.length > 0) return null
+    if (!shouldRenderPendingTaskCard(currentTaskRun, currentVisibleToolTraceSegment.length)) return null
     return renderTaskSnapshotCard(
       currentTaskRun,
       `pending-task-${currentTaskRun.scopeId}`,
@@ -581,6 +643,7 @@ export function TaskToolSnapshot(props: TaskToolSnapshotProps): React.ReactEleme
     <>
       {children({
         messageTaskSnapshots,
+        messageGeneratedImageArtifacts,
         messageToolTraceSnapshots,
         pendingTaskRun,
         pendingToolTrace,

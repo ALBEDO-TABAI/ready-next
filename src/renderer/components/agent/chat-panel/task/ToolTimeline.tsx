@@ -17,6 +17,7 @@ import type {
 } from '../../../../modules/agent/toolTraceRows'
 import { AgentStatusDot } from '../../../ui/dot-matrix/AgentStatusDot'
 import type { TaskCardVisualState } from '../../../../modules/agent/task-status-vocabulary'
+import { MessageCodeBlock } from '../markdown/MessageCodeBlock'
 
 // ---------------------------------------------------------------------------
 // 2026-07-10 activity-capsule — L2 工具时间线 + L3 逐条详情披露。
@@ -163,21 +164,10 @@ function ImageGenerationProgress() {
   )
 }
 
-const DETAIL_SECTION_LABEL_STYLE: React.CSSProperties = { color: 'var(--text-light)' }
-
-function DetailSection({ label, text, mono }: { label: string; text: string; mono?: boolean }) {
+function DetailCodeBlock({ label, text, language }: { label: string; text: string; language: string }) {
   return (
-    <div>
-      <div className="t-label" data-typography-role="label" style={DETAIL_SECTION_LABEL_STYLE}>
-        {label}
-      </div>
-      <div
-        className={mono ? 't-data' : 't-meta'}
-        data-typography-role={mono ? 'data' : 'meta'}
-        style={{ color: 'var(--text-body)', whiteSpace: 'pre-wrap', wordBreak: 'break-word', marginTop: 2 }}
-      >
-        {text}
-      </div>
+    <div data-ready-tool-detail-code={label}>
+      <MessageCodeBlock language={language} code={text} />
     </div>
   )
 }
@@ -207,6 +197,7 @@ export function ToolTimelineRow({
     <div
       data-ready-tool-timeline-item={item.status}
       data-ready-tool-activity-kind={presentation.kind}
+      className="ready-task-todo-row"
       style={{ display: 'flex', gap: 8 }}
     >
       <div
@@ -248,10 +239,9 @@ export function ToolTimelineRow({
           }}
         >
           <span
-            className="t-meta"
+            className="ready-task-todo-label t-meta"
             data-typography-role="meta"
             style={{
-              color: 'var(--text-body)',
               minWidth: 0,
               flex: 1,
               overflow: 'hidden',
@@ -298,9 +288,15 @@ export function ToolTimelineRow({
                 {item.toolName}
               </div>
             ) : null}
-            {callDetailText ? <DetailSection label="调用" text={callDetailText} mono /> : null}
+            {callDetailText ? (
+              <DetailCodeBlock
+                label="调用"
+                text={callDetailText}
+                language={item.callDetail?.trim().startsWith('{') ? 'json' : '调用'}
+              />
+            ) : null}
             {resultDetailText ? (
-              <DetailSection label="输出" text={resultDetailText} />
+              <DetailCodeBlock label="输出" text={resultDetailText} language="输出" />
             ) : (
               <div className="t-meta" data-typography-role="meta" style={{ color: 'var(--text-light)' }}>
                 执行中，尚无输出。

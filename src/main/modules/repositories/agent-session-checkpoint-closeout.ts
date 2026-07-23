@@ -6,6 +6,7 @@ import type {
 } from '../../../shared/ipc-contracts/canonical-message'
 import { buildCanonicalCoreCloseoutMessage } from './canonical-core-closeout-message'
 import {
+  parseArrayStrict,
   parseObjectStrict,
   serializeWorkflowJson,
   workflowDigest,
@@ -141,7 +142,7 @@ export class AgentSessionCheckpointCloseoutRepository {
         const parentWinner = db.prepare(
           `SELECT status, execution_binding_json, delivery_state_json,
                   task_type, module, budget_json, budget_usage_percent,
-                  budget_warning_level, continuation_ref_json
+                  budget_warning_level, continuation_ref_json, recent_artifacts_json
              FROM task_projections
             WHERE task_id = ? AND revision = ? AND run_id = ? LIMIT 1`,
         ).get<{
@@ -154,6 +155,7 @@ export class AgentSessionCheckpointCloseoutRepository {
           budget_usage_percent: number | null
           budget_warning_level: string | null
           continuation_ref_json: string | null
+          recent_artifacts_json: string | null
         }>(
           parent.taskId,
           parent.revision,
@@ -202,6 +204,10 @@ export class AgentSessionCheckpointCloseoutRepository {
                 finalText: input.finalText,
                 timestamp: existingMessage.timestamp,
                 terminalReason: input.terminalReason,
+                recentArtifacts: parseArrayStrict<unknown>(
+                  parentWinner.recent_artifacts_json || '[]',
+                  'core_closeout_recent_artifacts_json',
+                ),
                 completionVerifierReceipt: input.completionVerifierReceipt,
               })
             : null
@@ -403,6 +409,10 @@ export class AgentSessionCheckpointCloseoutRepository {
           finalText: input.finalText,
           timestamp: existingMessage?.timestamp || now,
           terminalReason: input.terminalReason,
+          recentArtifacts: parseArrayStrict<unknown>(
+            parentWinner.recent_artifacts_json || '[]',
+            'core_closeout_recent_artifacts_json',
+          ),
           completionVerifierReceipt: input.completionVerifierReceipt,
         })
         const canonicalMessage: CanonicalAssistantMessage = existingMessage

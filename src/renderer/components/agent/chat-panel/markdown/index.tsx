@@ -231,6 +231,33 @@ function externalLink(href: string, label: string, key: string): React.ReactNode
   )
 }
 
+export interface InlineCitationSource {
+  index: string
+  href: string
+  source: string
+}
+
+export function extractInlineCitationSources(content: string): InlineCitationSource[] {
+  const sources = new Map<string, InlineCitationSource>()
+  const pattern = /\[(\d+)\]\((https?:\/\/[^\s)]+)\)/g
+  let match: RegExpExecArray | null
+  while ((match = pattern.exec(content)) !== null) {
+    const index = match[1]
+    const href = match[2]
+    const key = `${index}:${href}`
+    if (sources.has(key)) continue
+    let source = href
+    try {
+      source = new URL(href).hostname.replace(/^www\./, '')
+    } catch {
+      // The renderer only links http(s) values. If URL parsing still fails,
+      // the literal href is the truthful fallback label.
+    }
+    sources.set(key, { index, href, source })
+  }
+  return [...sources.values()]
+}
+
 /** Parse inline formatting: **bold**, *italic*, `code`, and safe http(s) links. */
 export function renderInline(text: string): React.ReactNode[] {
   const parts: React.ReactNode[] = []
@@ -292,6 +319,7 @@ function StreamCaret({ visible }: { visible: boolean }) {
 
 export function MarkdownContent({ content, streaming = false }: { content: string; streaming?: boolean }) {
   const nodes = useMemo(() => parseMarkdown(content), [content])
+  const citationSources = useMemo(() => extractInlineCitationSources(content), [content])
   const lastContentIndex = useMemo(() => {
     for (let index = nodes.length - 1; index >= 0; index -= 1) {
       if (nodes[index].type !== 'br') return index
@@ -324,7 +352,11 @@ export function MarkdownContent({ content, streaming = false }: { content: strin
   }, [nodes])
 
   return (
-    <div className="markdown-content ready-agent-prose" style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+    <div
+      className="markdown-content ready-agent-prose"
+      data-ready-streaming={streaming ? 'true' : undefined}
+      style={{ display: 'flex', flexDirection: 'column', gap: 2 }}
+    >
       {nodes.map((node, idx) => {
         const showCaret = streaming && idx === lastContentIndex
         switch (node.type) {
@@ -423,6 +455,28 @@ export function MarkdownContent({ content, streaming = false }: { content: strin
             )
         }
       })}
+      {citationSources.length > 0 ? (
+        <div
+          className="ready-agent-citation-sources"
+          data-ready-agent-citation-sources="true"
+          aria-label="引用来源"
+        >
+          {citationSources.map((citation) => (
+            <a
+              key={`${citation.index}:${citation.href}`}
+              className="ready-agent-citation-source"
+              data-ready-agent-citation-source={citation.index}
+              href={citation.href}
+              target="_blank"
+              rel="noreferrer"
+              title={citation.href}
+            >
+              <span className="ready-agent-citation-source-index">[{citation.index}]</span>
+              <span>{citation.source}</span>
+            </a>
+          ))}
+        </div>
+      ) : null}
     </div>
   )
 }

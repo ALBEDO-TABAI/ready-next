@@ -112,9 +112,21 @@ export function GeneratedImageGallery({ images, onPreview, onReferenceSelect }: 
                 style={{ color: 'var(--text-light)' }}
               >
                 <span className="truncate">{String(image.meta?.model || 'AI 生成图片')}</span>
-                <span style={{ color: active ? 'var(--color-ready-orange)' : 'var(--text-light)' }}>
-                  {active ? '已激活' : '点击预览'}
-                </span>
+                {active ? (
+                  <span
+                    aria-label="当前图片"
+                    title="当前图片"
+                    style={{
+                      width: 7,
+                      height: 7,
+                      borderRadius: '50%',
+                      background: 'var(--color-green)',
+                      flexShrink: 0,
+                    }}
+                  />
+                ) : (
+                  <span>点击预览</span>
+                )}
               </span>
             </button>
           )

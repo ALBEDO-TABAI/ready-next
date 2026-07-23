@@ -12,12 +12,15 @@ test('chat messages render task snapshots directly under agent replies', () => {
   const chatMessages = readWorkspaceFile('src/renderer/components/agent/ChatMessages.tsx')
 
   assert.match(chatMessages, /messageTaskSnapshots:\s*Record<string,/)
+  assert.match(chatMessages, /messageGeneratedImageArtifacts:\s*Record<string,/)
   assert.match(chatMessages, /messageToolTraceSnapshots:\s*Record<string,/)
   assert.match(chatMessages, /msg\.type === 'agent'/)
   assert.match(chatMessages, /messageTaskSnapshots\[msg\.id\]/)
+  assert.match(chatMessages, /messageGeneratedImageArtifacts\[msg\.id\]/)
   assert.match(chatMessages, /messageToolTraceSnapshots\[msg\.id\]/)
   assert.match(chatMessages, /data-chat-message-task-snapshot/)
   assert.match(chatMessages, /data-chat-message-tool-trace/)
+  assert.match(chatMessages, /data-chat-message-task-snapshot=\{msg\.id\}[\s\S]*max-w-\[90%\]/)
   assert.match(chatMessages, /shouldRenderGlobalToolTraceCapsule/)
 })
 
@@ -28,7 +31,14 @@ test('chat messages expose a temporary pending task block while the next reply i
   assert.match(chatMessages, /pendingToolTrace:/)
   assert.match(chatMessages, /data-chat-pending-task-snapshot/)
   assert.match(chatMessages, /data-chat-pending-tool-trace/)
+  assert.match(chatMessages, /data-chat-live-activity="true"/)
+  assert.match(chatMessages, /data-chat-live-activity="true"[\s\S]*gap:\s*6/)
   assert.match(chatMessages, /streamMsg\.content\.length === 0/)
+
+  const taskToolSnapshot = readWorkspaceFile(
+    'src/renderer/components/agent/chat-panel/task-snapshot/TaskToolSnapshot.tsx',
+  )
+  assert.match(taskToolSnapshot, /message\.id === streamingMessageId && !message\.content\.trim\(\)/)
 })
 
 test('task and tool cards stay collapsed by default and only reveal the latest line until expanded', () => {

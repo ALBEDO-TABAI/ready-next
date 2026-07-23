@@ -232,6 +232,52 @@ test('RunProjection preserves recent media even when later non-media artifacts a
   ])
 })
 
+test('RunProjection never carries artifacts from a completed task into the next run', () => {
+  const store = new Map<string, ScopeRunSummary>()
+  const projection = new RunProjection({
+    getScope: () => createScope(),
+    getPrevious: (scopeId) => store.get(scopeId),
+    setSummary: (scopeId, summary) => {
+      store.set(scopeId, summary)
+    },
+    toChannelKey: () => 'local:app',
+  })
+
+  projection.recordEvent({
+    type: 'started',
+    scopeId: 'scope-1',
+    agent: 'butler',
+    runId: 'run-image',
+    taskId: 'task-image',
+    phase: 'planning',
+    taskTitle: 'AI 生图',
+    recentArtifacts: [{
+      id: 'generated-image:one',
+      module: 'system',
+      kind: 'generated_image',
+      label: 'ready-image.jpg',
+      path: '/tmp/ready-image.jpg',
+      mimeType: 'image/jpeg',
+      createdAt: '2026-07-23T10:30:00.000Z',
+    }],
+    timestamp: '2026-07-23T10:30:00.000Z',
+  })
+
+  const nextRun = projection.recordEvent({
+    type: 'started',
+    scopeId: 'scope-1',
+    agent: 'butler',
+    runId: 'run-direct-answer',
+    taskId: 'task-direct-answer',
+    phase: 'planning',
+    taskTitle: '正在理解需求',
+    taskSummary: '正在整理任务边界、上下文与可用能力',
+    timestamp: '2026-07-23T10:31:00.000Z',
+  })
+
+  assert.deepEqual(nextRun?.recentArtifacts, [])
+})
+
 test('RunProjection clears stale skill blockers when projection truth explicitly sends null', () => {
   const store = new Map<string, ScopeRunSummary>()
   const projection = new RunProjection({

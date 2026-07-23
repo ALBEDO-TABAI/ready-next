@@ -35,20 +35,23 @@ function normalizeGeneratedArtifact(value: unknown): AgentArtifact | null {
   }
 }
 
-export function generatedImagesFromMessage(message: AgentMessage): AgentArtifact[] {
-  if (message.type !== 'agent') return []
-  const meta = asRecord(message.meta)
-  const taskSnapshot = parseRecord(meta?.taskSnapshot)
-  const inputs = [
-    ...(Array.isArray(taskSnapshot?.recentArtifacts) ? taskSnapshot.recentArtifacts : []),
-    ...(Array.isArray(meta?.recentArtifacts) ? meta.recentArtifacts : []),
-  ]
+export function generatedImagesFromArtifacts(inputs: unknown[]): AgentArtifact[] {
   const deduped = new Map<string, AgentArtifact>()
   for (const input of inputs) {
     const artifact = normalizeGeneratedArtifact(input)
     if (artifact?.path) deduped.set(artifact.path, artifact)
   }
   return Array.from(deduped.values())
+}
+
+export function generatedImagesFromMessage(message: AgentMessage): AgentArtifact[] {
+  if (message.type !== 'agent') return []
+  const meta = asRecord(message.meta)
+  const taskSnapshot = parseRecord(meta?.taskSnapshot)
+  return generatedImagesFromArtifacts([
+    ...(Array.isArray(taskSnapshot?.recentArtifacts) ? taskSnapshot.recentArtifacts : []),
+    ...(Array.isArray(meta?.recentArtifacts) ? meta.recentArtifacts : []),
+  ])
 }
 
 export function generatedImageArtifactToAttachment(artifact: AgentArtifact): ChatAttachment {

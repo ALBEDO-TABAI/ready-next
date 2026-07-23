@@ -40,7 +40,7 @@ import {
   TaskToolSnapshot,
   type TaskToolSnapshotProps,
 } from './task-snapshot/TaskToolSnapshot'
-import { RunDurationMeter } from './RunDurationMeter'
+import { buildRunDurationMeterModel, RunDurationMeter } from './RunDurationMeter'
 
 interface AgentSelectionMenuState {
   x: number
@@ -183,6 +183,10 @@ export function ChatPanelBody(props: ChatPanelBodyProps): React.ReactElement {
   const composerOverlayRef = useRef<HTMLDivElement | null>(null)
   const [composerBottomInset, setComposerBottomInset] = useState(CHAT_COMPOSER_FALLBACK_BOTTOM_INSET)
   const currentRunForDurationMeter = currentScopeId ? scopeRunStates[currentScopeId] || null : null
+  const currentRunDurationModel = buildRunDurationMeterModel(currentRunForDurationMeter, Date.now())
+  const terminalDurationLabel = currentRunDurationModel && !currentRunDurationModel.live && currentTaskRun
+    ? currentRunDurationModel.duration
+    : null
 
   // 外壳保持透明：玻璃材质（折射/模糊/纱层）全部由 ChatInput 里的 LiquidLens 承担。
   const composerShellStyle = {
@@ -287,6 +291,7 @@ export function ChatPanelBody(props: ChatPanelBodyProps): React.ReactElement {
       taskDisclosureState={taskDisclosureState}
       isStreaming={isStreaming}
       streamingMessageId={streamingMessageId}
+      terminalDurationLabel={terminalDurationLabel}
       parseSerializedTaskSnapshot={parseSerializedTaskSnapshot}
       parseSerializedToolTraceSnapshot={parseSerializedToolTraceSnapshot}
       setTaskSectionExpanded={setTaskSectionExpanded}
@@ -308,6 +313,7 @@ export function ChatPanelBody(props: ChatPanelBodyProps): React.ReactElement {
     >
       {({
         messageTaskSnapshots,
+        messageGeneratedImageArtifacts,
         messageToolTraceSnapshots,
         pendingTaskRun,
         pendingToolTrace,
@@ -326,10 +332,11 @@ export function ChatPanelBody(props: ChatPanelBodyProps): React.ReactElement {
           <ChatMessages
             messages={messages}
             messageTaskSnapshots={messageTaskSnapshots}
+            messageGeneratedImageArtifacts={messageGeneratedImageArtifacts}
             messageToolTraceSnapshots={messageToolTraceSnapshots}
             pendingTaskRun={pendingTaskRun}
             pendingToolTrace={pendingToolTrace}
-            runDurationMeter={<RunDurationMeter run={currentRunForDurationMeter} />}
+            runDurationMeter={terminalDurationLabel ? null : <RunDurationMeter run={currentRunForDurationMeter} />}
             isStreaming={isStreaming}
             streamingMessageId={streamingMessageId}
             toolTrace={toolTrace}
