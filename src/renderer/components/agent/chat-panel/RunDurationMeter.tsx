@@ -58,13 +58,15 @@ function runDurationLabel(run: ScopeRunState): Pick<RunDurationMeterModel, 'labe
     return { label: '本轮失败', glyph: 'error', tone: 'signal' }
   }
   if (run.phase === 'checkpoint') {
-    const hasWaitingTarget = Boolean(
+    if (run.waitingFor && run.waitingFor !== 'none') {
+      return { label: '本轮等待中', glyph: 'needs_input', tone: 'signal' }
+    }
+    const canContinue = Boolean(
       run.taskContinuation
-      || (run.waitingFor && run.waitingFor !== 'none')
-      || (run.resumableActions && run.resumableActions.length > 0),
+      || run.resumableActions?.some((action) => action !== 'none'),
     )
-    return hasWaitingTarget
-      ? { label: '本轮等待中', glyph: 'needs_input', tone: 'signal' }
+    return canContinue
+      ? { label: '本轮已暂停', glyph: 'idle', tone: 'neutral' }
       : { label: '本轮未完成', glyph: 'error', tone: 'signal' }
   }
   return { label: '本轮用时', glyph: 'done', tone: 'neutral' }
@@ -106,12 +108,13 @@ export function RunDurationMeter({
   }, [model?.live, run?.requestId, run?.startedAt])
 
   if (!model) return null
+  const durationLabel = model.label === '本轮用时' ? '' : '本轮用时 '
 
   return (
     <div className="flex" style={{ padding: '0 6px 2px' }}>
       <div
         data-agent-run-duration-meter="true"
-        aria-label={`${model.label} ${model.duration}`}
+        aria-label={`${model.label}，${durationLabel}${model.duration}`}
         className="t-meta"
         data-typography-role="meta"
         style={{
@@ -141,7 +144,7 @@ export function RunDurationMeter({
             whiteSpace: 'nowrap',
           }}
         >
-          {model.duration}
+          {durationLabel}{model.duration}
         </span>
       </div>
     </div>

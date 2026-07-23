@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import { createRequire } from 'node:module'
 import { createReadStream, existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { tmpdir } from 'node:os'
 import { app, ipcMain } from 'electron'
 
 import { resolveReadyDatabasePath } from '../database-path'
@@ -48,6 +49,8 @@ export function setupBrowserLiveProofHandshake(): void {
       bootIncarnationId: getBrowserBootIncarnationId(),
       userDataPath,
       databasePath,
+      tempDir: tmpdir(),
+      metricsPath: join(tmpdir(), 'ready-agent-metrics.log'),
       appVersion: app.getVersion(),
     }
   })

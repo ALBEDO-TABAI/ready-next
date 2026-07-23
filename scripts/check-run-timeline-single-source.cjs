@@ -21,6 +21,8 @@ const RENDERER_HUB_REL = 'src/renderer/modules/agent/runtimeDriver.ts'
 
 const RENDERER_EXEMPT = new Set([
   RENDERER_HUB_REL,
+  'src/renderer/modules/agent/runtime-driver-stream-events.ts',
+  'src/renderer/modules/agent/runtime-driver-scope-events.ts',
   'src/renderer/types/electron.d.ts',
   'src/renderer/preview/installSettingsPreviewMocks.ts',
 ])

@@ -45,19 +45,19 @@ function seed(root, overrides = {}) {
       },
       {
         id: 'background-probe',
-        file: 'src/main/modules/browser-engine/ipc-handler.ts',
+        file: 'src/main/modules/browser-engine/browser-controller-capture-runtime.ts',
         partition: 'persist:browser (background probe)',
         evidence: "partition: 'persist:browser'",
       },
       {
         id: 'download-session',
-        file: 'src/main/modules/browser-engine/ipc-handler.ts',
+        file: 'src/main/modules/browser-engine/browser-controller-capture-runtime.ts',
         partition: 'source tab session or persist:browser fallback',
         evidence: 'targetSession = this.resolveTabView(payload.tabId).view.webContents.session',
       },
       {
         id: 'permission-and-adblock-policy',
-        file: 'src/main/modules/browser-engine/ipc-handler.ts',
+        file: 'src/main/modules/browser-engine/browser-controller-composition.ts',
         partition: 'every created browser partition',
         evidence: 'this.sessionPolicyService.applyForPartition(partition)',
       },
@@ -66,15 +66,18 @@ function seed(root, overrides = {}) {
   const files = {
     'scripts/p7c4-browser-identity-inventory.json': `${JSON.stringify(inventory, null, 2)}\n`,
     'src/main/modules/browser-engine/tab-lifecycle-service.ts': "const view = this.host.createHost(profile ? `persist:browser-profile-${profile}` : 'persist:browser')\n",
-    'src/main/modules/browser-engine/ipc-handler.ts': [
+    'src/main/modules/browser-engine/browser-controller-tab-runtime.ts': [
       'async ensureAgentWorkTab(',
       "const created = await this.createTab(url, { background: true, owner: 'agent' })",
-      "partition: 'persist:browser'",
-      "session.fromPartition('persist:browser')",
-      'targetSession = this.resolveTabView(payload.tabId).view.webContents.session',
-      'this.sessionPolicyService.applyForPartition(partition)',
-      '}',
     ].join('\n'),
+    'src/main/modules/browser-engine/browser-controller-capture-runtime.ts': [
+      "partition: 'persist:browser'",
+      'targetSession = this.resolveTabView(payload.tabId).view.webContents.session',
+    ].join('\n'),
+    'src/main/modules/browser-engine/browser-controller-composition.ts': [
+      'this.sessionPolicyService.applyForPartition(partition)',
+    ].join('\n'),
+    'src/main/modules/browser-engine/ipc-handler.ts': "session.fromPartition('persist:browser')\n",
     'src/main/modules/browser-engine/preview-service.ts': "this.deps.createHost('persist:browser')\n",
     'src/main/modules/browser-engine/auth-popup-manager.ts': "profile ? `persist:browser-profile-${profile}` : 'persist:browser'\n",
     'src/main/modules/browser-engine/session-policy-service.ts': "this.applyForPartition('persist:browser')\n",

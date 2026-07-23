@@ -147,12 +147,14 @@ export async function persistRunMetaSnapshot(
   let terminalReason = params.terminalReason
   let preservedTaskType: string | null | undefined
   let preservedBudget: Record<string, unknown> | null | undefined
+  let preservedContinuationRef: Record<string, unknown> | null | undefined
   try {
     const existing = repository.get(params.runId) as {
       status?: unknown
       terminalReason?: unknown
       taskType?: unknown
       budget?: unknown
+      continuationRef?: unknown
     } | null
     const existingStatus = String(existing?.status || '')
     const terminalStatuses = new Set([
@@ -166,6 +168,15 @@ export async function persistRunMetaSnapshot(
     if (existing && terminalStatuses.has(existingStatus)) {
       preservedTaskType = (existing.taskType as string | null) ?? null
       preservedBudget = (existing.budget as Record<string, unknown> | null) ?? null
+      if (
+        existingStatus === 'checkpoint'
+        && params.continuationRef === null
+        && existing.continuationRef
+        && typeof existing.continuationRef === 'object'
+        && !Array.isArray(existing.continuationRef)
+      ) {
+        preservedContinuationRef = existing.continuationRef as Record<string, unknown>
+      }
       if (!terminalStatuses.has(status)) {
         status = existingStatus
         terminalReason = (existing?.terminalReason as typeof terminalReason) || terminalReason
@@ -193,7 +204,10 @@ export async function persistRunMetaSnapshot(
       preservedBudget !== undefined
         ? preservedBudget
         : (budgetDiagnostics.budget as Record<string, unknown> | null),
-    continuationRef: params.continuationRef,
+    continuationRef:
+      preservedContinuationRef !== undefined
+        ? preservedContinuationRef
+        : params.continuationRef,
     recoveryHistory: [],
     inputTokens: params.usage?.inputTokens ?? 0,
     outputTokens: params.usage?.outputTokens ?? 0,

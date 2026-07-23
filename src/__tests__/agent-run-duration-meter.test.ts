@@ -81,7 +81,7 @@ test('cancelled agent turn shows stopped copy and does not animate', () => {
   assert.equal(model?.live, false)
 })
 
-test('checkpoint says waiting only when a real continuation or user wait exists', () => {
+test('checkpoint distinguishes paused continuation, real user wait, and incomplete state', () => {
   const orphan = buildRunDurationMeterModel(
     run({ phase: 'checkpoint', terminalReason: 'delivery_failed', updatedAt: '2026-06-27T03:00:31.000Z' }),
     Date.parse('2026-06-27T03:05:00.000Z'),
@@ -95,10 +95,19 @@ test('checkpoint says waiting only when a real continuation or user wait exists'
     }),
     Date.parse('2026-06-27T03:05:00.000Z'),
   )
+  const waiting = buildRunDurationMeterModel(
+    run({
+      phase: 'checkpoint',
+      waitingFor: 'confirmation',
+      updatedAt: '2026-06-27T03:00:31.000Z',
+    }),
+    Date.parse('2026-06-27T03:05:00.000Z'),
+  )
 
   assert.equal(orphan?.label, '本轮未完成')
   assert.equal(orphan?.glyph, 'error')
-  assert.equal(resumable?.label, '本轮等待中')
+  assert.equal(resumable?.label, '本轮已暂停')
+  assert.equal(waiting?.label, '本轮等待中')
 })
 
 test('empty or idle run does not render a duration model', () => {

@@ -117,6 +117,19 @@ describe('Browser target claims', () => {
     assert.ok(service.checkWrite(identityOf(oldClaim)))
   })
 
+  it('expires physical target ownership from a previous app boot', () => {
+    const service = createTargetClaimService()
+    const oldClaim = acquireTarget(service, {
+      physicalTargetToken: 'boot-old:tab-a:1',
+      bootIncarnationId: 'boot-old',
+    })
+    const expired = service.expirePreviousBoot('boot-current')
+
+    assert.equal(expired.length, 1)
+    assert.equal(service.read(oldClaim.logicalKey)?.state, 'expired')
+    assert.equal(service.read(oldClaim.logicalKey)?.physicalTargetToken, null)
+  })
+
   it('closeout settles every held target for the old run while preserving user-owned A', () => {
     const service = createTargetClaimService()
     const a = acquireTarget(service)

@@ -8,6 +8,12 @@ import { recoverPendingHandoffTakeovers } from '../main/modules/agent-control/ag
 import { executeToolCall } from '../main/modules/tools/tool-executor'
 import { finalizeRunOutcome } from '../main/modules/agent-control/runtime-core/run-finalizer'
 import { createTaskBudgetRuntime } from '../main/modules/agent-control/task-projection/run-budget-policy'
+import {
+  createAgentTabUserInputTakeoverHandlers,
+  isAgentNavigationEcho,
+  persistAgentTabUserTakeover,
+} from '../main/modules/browser-engine/agent-tab-control-gate'
+import { setBrowserTargetClaimRunCloseoutPort } from '../main/modules/browser-engine/browser-target-claim-closeout'
 import { acquireTarget, createTargetClaimService, setTargetUserOwnedForTest, TARGET_A } from './utils/browser-target-claim-fixture'
 
 function turnTarget(patch: Partial<BrowserTargetClaimAcquireInput> = {}) {
@@ -67,16 +73,48 @@ test('S0 ownership signals: presentation-only tab switching does not take over t
   assert.equal(service.read(claim.logicalKey)?.state, 'held')
 })
 
-test('S0 ownership signals: trusted pointer input on the target is recognized as user takeover input', () => {
+test('S0 ownership signals: trusted pointer input reaches the durable takeover intent port', async () => {
   const service = createTargetClaimService()
   const claim = acquireTarget(service)
-  assert.equal(setTargetUserOwnedForTest(service, claim, 'checkpoint-pointer').state, 'user_owned')
+  const committed: string[] = []
+  let transaction: Promise<boolean> | null = null
+  const handlers = createAgentTabUserInputTakeoverHandlers({
+    isActivelyDriven: () => true,
+    isFrozen: () => false,
+    isAgentKey: () => false,
+    isAgentMouse: () => false,
+    takeOver: () => {
+      transaction = persistAgentTabUserTakeover({
+        persist: async () => { committed.push(claim.claimId) },
+        onPersisted: () => undefined,
+        onPersistenceFailure: () => undefined,
+      })
+    },
+  })
+  let prevented = 0
+  handlers.onMouseInput({ preventDefault: () => { prevented += 1 } }, { type: 'mouseDown' })
+  assert.equal(await transaction, true)
+  assert.deepEqual(committed, [claim.claimId])
+  assert.equal(prevented, 0)
 })
 
-test('S0 ownership signals: chrome navigation fences only the claimed target', () => {
+test('S0 ownership signals: chrome navigation targets one claim and suppresses agent echoes', async () => {
   const service = createTargetClaimService()
   const claim = acquireTarget(service)
-  assert.equal(setTargetUserOwnedForTest(service, claim, 'checkpoint-navigation').state, 'user_owned')
+  const sibling = acquireTarget(service, {
+    tabId: 'tab-b',
+    physicalTargetToken: 'boot-test:tab-b:1',
+  })
+  const committed: string[] = []
+  assert.equal(isAgentNavigationEcho({ signalSource: 'navigation', hasActiveAgentAction: false }), false)
+  await persistAgentTabUserTakeover({
+    persist: async () => { committed.push(claim.claimId) },
+    onPersisted: () => undefined,
+    onPersistenceFailure: () => undefined,
+  })
+  assert.deepEqual(committed, [claim.claimId])
+  assert.notEqual(committed[0], sibling.claimId)
+  assert.equal(isAgentNavigationEcho({ signalSource: 'navigation', hasActiveAgentAction: true }), true)
 })
 
 test('S0 ownership signals: closing a claimed tab settles ownership immediately', () => {
@@ -206,6 +244,7 @@ test('S0 R6 proof: checkpoint closeout cannot preserve a stale short-task projec
     usage: { iterationsUsed: 34, toolCallsUsed: 37, parallelToolGroupsUsed: 0 },
   })
 
+  setBrowserTargetClaimRunCloseoutPort(() => undefined)
   await finalizeRunOutcome({
     kind: 'checkpoint',
     runId: 'run-r6',
@@ -252,4 +291,5 @@ test('S0 R6 proof: checkpoint closeout cannot preserve a stale short-task projec
   assert.equal(runMeta?.taskType, 'research')
   assert.equal((runMeta?.budget as { maxIterations?: number } | null)?.maxIterations, 220)
   assert.equal(closeTaskType, 'research')
+  setBrowserTargetClaimRunCloseoutPort(null)
 })

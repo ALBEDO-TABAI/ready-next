@@ -1,0 +1,410 @@
+import { app, BrowserWindow, ipcMain, shell, session } from 'electron'
+import { mkdir, open, rename, stat, unlink, writeFile } from 'node:fs/promises'
+import { dirname, extname, join } from 'node:path'
+import { randomUUID } from 'node:crypto'
+import { BrowserAppShortcutBridgeService } from './app-shortcut-service'
+import { BrowserAutomationService, type BrowserExecutionDeadlineOptions } from './automation-service'
+import { BrowserCapabilityService } from './capability-service'
+import { BrowserCdpSessionService } from './cdp-session-service'
+import { BrowserDialogService, type BrowserDialogSnapshot } from './browser-dialog-service'
+import type {
+  BrowserAggregateOptions,
+  BrowserCapabilityTaskHandle,
+  BrowserExtractStructuredOptions,
+  BrowserExtractStructuredResult,
+  BrowserScrollCollectOptions,
+  BrowserScrollCollectResult,
+  BrowserStructuredItem,
+  BrowserWaitForConditionOptions,
+} from './capability-types'
+import { AgentInputPassthroughRegistry } from './agent-input-passthrough'
+import {
+  createAgentTabUserInputTakeoverHandlers,
+  isAgentNavigationEcho,
+  persistAgentTabUserTakeover,
+} from './agent-tab-control-gate'
+import { getBrowserTargetClaimService } from './browser-target-claim-singleton'
+import { setBrowserTargetClaimRunCloseoutPort } from './browser-target-claim-closeout'
+import {
+  bootIncarnationIdFromPhysicalTargetToken,
+  partitionForBrowserProfile,
+  type BrowserPhysicalTargetKey,
+  type BrowserTargetClaimIdentity,
+} from './browser-target-claims'
+import { BrowserFileChooserGuard } from './file-chooser-guard'
+import { agentBrowserError, isAgentBrowserError, type AgentBrowserStructuredError, type AgentBrowserSurface } from './agent-browser-errors'
+import type {
+  BrowserCDPErrorCode,
+  BrowserKeyEventPayload,
+  BrowserMouseEventPayload,
+  BrowserScreenshotOptions,
+  BrowserTabContextData,
+  BrowserUploadTarget,
+  BrowserViewportMetrics,
+} from './automation-types'
+import { AuthPopupManager } from './auth-popup-manager'
+import { BrowserBookmarkTransferService } from './bookmark-transfer-service'
+import { BrowserContextMenuService } from './context-menu-service'
+import { findReusableCaptureTabId } from './capture-url-utils'
+import { BrowserDataService, type BrowserAdblockState } from './data-service'
+import { BrowserDownloadService, type BrowserDownloadUrlToDirectoryPayload, type BrowserDownloadUrlToDirectoryResult } from './download-service'
+import { BrowserNetworkObserverService, type BrowserNetworkObserverHandle, type BrowserNetworkObserverOptions } from './network-observer-service'
+import {
+  BROWSER_DIAGNOSTICS_LOG_PATH,
+  BrowserDiagnosticsService,
+  type BrowserContinuityDiagnosticsSnapshot,
+  type BrowserPageDiagnosticsSnapshot,
+  type BrowserTaskDiagnosticsSnapshot,
+} from './diagnostics-service'
+import { BrowserHostLayoutService } from './host-layout-service'
+import type { BrowserHostPresentationState } from './host-layout-service'
+import {
+  BROWSER_HOST_KIND,
+  type BrowserHostView,
+  type BrowserRect,
+  type BrowserViewBoundsUpdate,
+  type PreviewTabState,
+} from './host-types'
+import { setupBrowserClipIPC } from './ipc-clip'
+import { setupBrowserClipDraggedTabIPC } from './ipc-clip-dragged-tab'
+import { setupBrowserContentStudyIPC } from './ipc-content-study-dragged-tab'
+import { setupBrowserDataIPC } from './ipc-data'
+import { setupBrowserPrivacyIPC } from './ipc-privacy'
+import { BrowserPrivacyService } from './privacy-service'
+import { setupBrowserFastCardIPC } from './ipc-fastcard'
+import { setupBrowserVerticalRailOverlayIPC } from './ipc-vertical-rail-overlay'
+import {
+  clearBrowserAgentPointer,
+  publishBrowserAgentActionLifecycle,
+  publishBrowserAgentPointer,
+  setupBrowserLockOverlayIPC,
+} from './ipc-browser-lock-overlay'
+import { setupBrowserShellIPC } from './ipc-shell'
+import { setupBrowserSupervisionIPC } from './ipc-supervision'
+import type { BrowserLeaseSupervisionSnapshot } from './ipc-supervision'
+import { buildBrowserLeaseSupervisionSnapshot } from './browser-lease-supervision-snapshot'
+import { BrowserPreviewService } from './preview-service'
+import { BrowserPageBackgroundService } from './page-background-service'
+import { BrowserSessionPolicyService } from './session-policy-service'
+import {
+  resolveAgentPermissionRequestBinding,
+  sameBrowserPermissionRequestBinding,
+  type BrowserPermissionRequestBinding,
+  type BrowserSitePermissionNotice,
+  type BrowserSitePermissionRequestReadback,
+} from './browser-permission-policy'
+import { BrowserTabLifecycleService } from './tab-lifecycle-service'
+import {
+  downloadRemoteMediaDropUrls,
+  scheduleRemoteMediaDropCleanup,
+} from './remote-media-drop-cache'
+import { type BrowserTabMetaRecord, BrowserTabMetaService } from './tab-meta-service'
+import { BrowserTabShellService } from './tab-shell-service'
+import {
+  BrowserTaskPersistenceService,
+  type BrowserResearchAssessment,
+  type BrowserResearchEvidenceBindingInput,
+  type VerifiedBrowserWorkflowEvidence,
+  type BrowserResearchWorkItemInput,
+  type BeginBrowserWorkflowActionInput,
+  type BrowserWorkflowActiveAction,
+  type BrowserWorkflowObservationReceipt,
+  type BrowserWorkflowObservationResource,
+  type RecordBrowserWorkflowObservationInput,
+  type SettledBrowserWorkflowAction,
+} from './task-persistence-service'
+import type { BrowserActionOutcome } from '../../../shared/browser-action-outcome'
+import { BrowserUtilityMenuService } from './utility-menu-service'
+import { BrowserWindowOpenService } from './window-open-service'
+import { withHtmlInCanvasWebPreferences } from '../app-control/html-in-canvas-feature'
+import { getReadyBoardService } from '../board-engine/ipc-handler'
+import {
+  isAllowedBrowserURL,
+  toOAuthCompatibleUserAgent,
+} from './popup-policy'
+import type { BrowserUtilityMenuRequest } from '../../../shared/browser-utility-menu'
+import { mapBrowserAgentPointerToOverlay } from '../../../shared/browser-agent-pointer'
+import { READY_BROWSER_BLANK_URL } from '../../../shared/browser-defaults'
+import { parseBrowserLocalMediaDropUrl } from '../../../shared/browser-local-media-drop'
+import type { BrowserPowerPreflightAuditRecord } from '../database'
+import { readBrowserSessionStatus } from './browser-session-status'
+import { BrowserPerformanceRuntime } from './browser-performance-runtime'
+import type { RegisterDormantBrowserTabsRequest, RegisterDormantBrowserTabsResult } from '../../../shared/browser-tab-session'
+import { browserSnapshotService } from './browser-snapshot-service'
+import { disposeBrowserPageMapAmbiguity } from './browser-page-map-ambiguity-cache'
+import { BrowserVisibilityRuntime } from './browser-visibility-runtime'
+import type {
+  BrowserHumanTakeoverIntentPort,
+  BrowserTargetResumePort,
+  BrowserTargetResumeRequest,
+  BrowserHumanTakeoverPhysicalTarget,
+  BrowserWorkflowWriteAdmissionPort,
+  BrowserWorkflowWriteTarget,
+} from '../../../shared/browser-workflow-control'
+import { type Tab } from './browser-controller-contract-base'
+import { BrowserLiveProofRuntime } from './browser-live-proof-runtime'
+
+export abstract class BrowserControllerInteractionRuntime extends BrowserLiveProofRuntime {
+  protected createBrowserError(code: BrowserCDPErrorCode, message: string): Error {
+    const error = new Error(message)
+    ;(error as Error & { code?: BrowserCDPErrorCode }).code = code
+    return error
+  }
+
+  protected resolveTabView(tabId: string | null): { tabId: string; tab: Tab; view: BrowserHostView } {
+    const tid = tabId || this.activeTabId
+    if (!tid) {
+      throw this.createBrowserError('NO_ACTIVE_TAB', 'No active tab')
+    }
+    const tab = this.tabs.get(tid)
+    if (!tab?.view) {
+      throw this.createBrowserError('TAB_NOT_FOUND', `Tab not found: ${tid}`)
+    }
+    return { tabId: tid, tab, view: tab.view }
+  }
+
+  protected handleWindowOpen(
+    details: {
+      url: string
+      frameName?: string
+      features?: string
+      disposition?: string
+      referrer?: { url?: string }
+    },
+    source: 'tab' | 'preview',
+    sourceContentsId: number,
+  ): {
+    action: 'allow' | 'deny'
+    overrideBrowserWindowOptions?: Electron.BrowserWindowConstructorOptions
+  } {
+    const referrerUrl = details.referrer?.url || this.resolveUrlForWebContentsId(sourceContentsId)
+    const sourceTabId = this.getTabIdForWebContents(sourceContentsId)
+    const sourceOwner = sourceTabId ? this.tabs.get(sourceTabId)?.owner ?? null : null
+    const profile = sourceTabId ? this.tabs.get(sourceTabId)?.profile ?? null : null
+    return this.windowOpenService.handle({
+      ...details,
+      referrer: referrerUrl ? { url: referrerUrl } : details.referrer,
+    }, source, sourceContentsId, { sourceTabId, sourceOwner, profile })
+  }
+
+  async importBookmarksFromDialog(): Promise<{
+    success: boolean
+    canceled?: boolean
+    imported?: number
+    skipped?: number
+    error?: string
+    filePath?: string
+  }> {
+    return this.bookmarkTransferService.importBookmarksFromDialog()
+  }
+
+  async exportBookmarksToDialog(): Promise<{
+    success: boolean
+    canceled?: boolean
+    exported?: number
+    error?: string
+    filePath?: string
+  }> {
+    return this.bookmarkTransferService.exportBookmarksToDialog()
+  }
+
+  showUtilityMenu(payload: unknown): { success: boolean } {
+    return this.utilityMenuService.showMenu(payload as BrowserUtilityMenuRequest)
+  }
+
+  async previewOpen(url: string): Promise<{ success: boolean; error?: string }> {
+    return this.previewService.open(url)
+  }
+
+  async previewNavigate(url: string): Promise<{ success: boolean; error?: string }> {
+    return this.previewService.navigate(url)
+  }
+
+  previewGoBack(): { success: boolean; error?: string } {
+    return this.previewService.goBack()
+  }
+
+  previewGoForward(): { success: boolean; error?: string } {
+    return this.previewService.goForward()
+  }
+
+  previewReload(): { success: boolean; error?: string } {
+    return this.previewService.reload()
+  }
+
+  previewUpdateBounds(bounds: { x: number; y: number; width: number; height: number }): { success: boolean } {
+    return this.previewService.updateBounds(bounds)
+  }
+
+  previewClose(): { success: boolean } {
+    return this.previewService.close()
+  }
+
+  previewGetState(): PreviewTabState {
+    return this.previewService.getState()
+  }
+
+  detachPreviewView(): void {
+    this.previewService.detach()
+  }
+
+  // ── Programmatic API (for tool calling, not IPC) ──────────────────
+
+  async getBrowserDialog(tabId: string | null): Promise<BrowserDialogSnapshot | null> {
+    const resolved = this.resolveTabView(tabId).tabId
+    await this.dialogService.ensure(resolved)
+    return this.dialogService.get(resolved)
+  }
+
+  async handleBrowserDialog(
+    tabId: string | null,
+    params: { accept: boolean; promptText?: string },
+  ): Promise<{ success: boolean }> {
+    const resolved = this.resolveTabView(tabId).tabId
+    await this.dialogService.handle(resolved, params)
+    return { success: true }
+  }
+
+  async archivePage(
+    tabId: string | null,
+    path: string,
+    format: 'pdf' | 'mhtml' | 'html' | 'markdown',
+    options?: { signal?: AbortSignal },
+  ): Promise<{ success: boolean; path: string; format: string }> {
+    const throwIfAborted = () => {
+      if (options?.signal?.aborted) throw options.signal.reason || new Error('archive_aborted')
+    }
+    const { view } = this.resolveTabView(tabId)
+    throwIfAborted()
+    await mkdir(dirname(path), { recursive: true })
+    const reservation = await open(path, 'wx').catch((error) => {
+      if ((error as NodeJS.ErrnoException).code === 'EEXIST') throw new Error('archive_destination_exists')
+      throw error
+    })
+    await reservation.close()
+    const suffix = extname(path) || `.${format}`
+    const temporaryPath = join(dirname(path), `.ready-archive-${randomUUID()}${suffix}.part`)
+    try {
+      throwIfAborted()
+      if (format === 'pdf') {
+        const bytes = await view.webContents.printToPDF({ printBackground: true })
+        throwIfAborted()
+        await writeFile(temporaryPath, bytes, { flag: 'wx' })
+      } else if (format === 'mhtml') {
+        await view.webContents.savePage(temporaryPath, 'MHTML')
+      } else if (format === 'html') {
+        await view.webContents.savePage(temporaryPath, 'HTMLOnly')
+      } else {
+        const page = await this.executeJS(tabId, `(() => ({
+          title: document.title || '',
+          url: location.href,
+          text: document.body?.innerText || '',
+        }))()` , { timeoutMs: 10_000, signal: options?.signal }) as { title?: string; url?: string; text?: string }
+        throwIfAborted()
+        await writeFile(temporaryPath, `# ${String(page.title || 'Archived page')}\n\nSource: ${String(page.url || '')}\n\n${String(page.text || '')}\n`, { encoding: 'utf8', flag: 'wx' })
+      }
+      throwIfAborted()
+      const saved = await stat(temporaryPath)
+      if (!saved.isFile() || saved.size <= 0) throw new Error('archive_output_empty')
+      throwIfAborted()
+      await rename(temporaryPath, path)
+    } catch (error) {
+      await unlink(temporaryPath).catch(() => undefined)
+      await unlink(path).catch(() => undefined)
+      throw error
+    }
+    return { success: true, path, format }
+  }
+
+  async collectConsoleMessages(
+    tabId: string | null,
+    options?: { durationMs?: number; limit?: number },
+  ): Promise<Array<Record<string, unknown>>> {
+    const resolved = this.resolveTabView(tabId).tabId
+    const messages: Array<Record<string, unknown>> = []
+    const limit = Math.max(1, Math.min(500, Number(options?.limit || 100)))
+    const unsubscribe = this.cdpSessionService.subscribe(resolved, (event) => {
+      if (!['Runtime.consoleAPICalled', 'Runtime.exceptionThrown', 'Log.entryAdded'].includes(event.method)) return
+      messages.push({ method: event.method, ...event.params })
+      if (messages.length > limit) messages.splice(0, messages.length - limit)
+    })
+    const releaseRuntime = await this.cdpSessionService.retainDomain(resolved, 'Runtime')
+    const releaseLog = await this.cdpSessionService.retainDomain(resolved, 'Log')
+    try {
+      const durationMs = Math.max(0, Math.min(10_000, Number(options?.durationMs || 250)))
+      if (durationMs > 0) await new Promise((resolve) => setTimeout(resolve, durationMs))
+      return messages
+    } finally {
+      unsubscribe()
+      await Promise.all([releaseRuntime(), releaseLog()])
+    }
+  }
+
+  async clearConsoleMessages(tabId: string | null): Promise<{ success: boolean }> {
+    const resolved = this.resolveTabView(tabId).tabId
+    await this.cdpSessionService.sendCommand(resolved, 'Runtime.discardConsoleEntries').catch(() => undefined)
+    await this.cdpSessionService.sendCommand(resolved, 'Log.clear').catch(() => undefined)
+    return { success: true }
+  }
+
+  async getBrowserSessionStatus(tabId: string | null, requestedOrigin?: string): Promise<Record<string, unknown>> {
+    const { view, tabId: resolvedTabId } = this.resolveTabView(tabId)
+    const tab = this.tabs.get(resolvedTabId)
+    const currentUrl = view.webContents.getURL()
+    return readBrowserSessionStatus({
+      tabId: resolvedTabId,
+      profile: tab?.profile || null,
+      currentUrl,
+      requestedOrigin,
+      getCookieCount: async (origin) => (await view.webContents.session.cookies.get({ url: origin })).length,
+      readStorageCounts: () => view.webContents.executeJavaScript(`(() => ({
+        localStorageKeys: Object.keys(localStorage).length,
+        sessionStorageKeys: Object.keys(sessionStorage).length,
+        hasIndexedDb: typeof indexedDB !== 'undefined',
+      }))()`, true),
+    })
+  }
+
+  async clearBrowserOriginData(
+    tabId: string | null,
+    requestedOrigin?: string,
+    dataTypes?: string[],
+  ): Promise<{ success: boolean; origin: string; cleared: string[] }> {
+    const { view } = this.resolveTabView(tabId)
+    const currentUrl = view.webContents.getURL()
+    const origin = requestedOrigin || new URL(currentUrl).origin
+    const requested = new Set(dataTypes?.length ? dataTypes : ['cookies', 'cache', 'storage', 'service_workers'])
+    const storages: Array<'cookies' | 'localstorage' | 'indexdb' | 'websql' | 'cachestorage' | 'serviceworkers'> = []
+    if (requested.has('cookies')) storages.push('cookies')
+    if (requested.has('storage')) storages.push('localstorage', 'indexdb', 'websql', 'cachestorage')
+    if (requested.has('service_workers')) storages.push('serviceworkers')
+    if (storages.length > 0) await view.webContents.session.clearStorageData({ origin, storages })
+    if (requested.has('cache')) await view.webContents.session.clearCache()
+    return { success: true, origin, cleared: Array.from(requested) }
+  }
+
+  getBrowserPermission(siteRequestId: string): BrowserSitePermissionRequestReadback {
+    return this.sessionPolicyService.getSitePermissionRequest(siteRequestId)
+  }
+
+  setBrowserPermission(
+    siteRequestId: string,
+    decision: 'allow' | 'deny',
+  ): BrowserSitePermissionRequestReadback {
+    return this.sessionPolicyService.applySitePermissionRequest(siteRequestId, decision)
+  }
+
+  resetBrowserPermission(
+    tabId: string,
+    origin: string,
+    permission: string,
+  ): Record<string, unknown> {
+    const partition = this.partitionForTab(tabId)
+    if (!partition) return { permission, origin, decision: 'ask', source: 'expired_tab' }
+    return this.sessionPolicyService.resetPermissionDecision(partition, permission, origin)
+  }
+
+  /**
+   * Create a new tab and navigate to URL. Returns the tab ID.
+   */
+}

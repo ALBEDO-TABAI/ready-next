@@ -63,7 +63,7 @@ export interface TaskInteractionHandlers {
     responseText?: string,
   ) => PendingContinuationIntent | undefined
   handleContinueTaskInput: (scopeId: string) => Promise<void>
-  handleSubmitTaskConfirmation: (scopeId: string, confirmed: boolean) => Promise<void>
+  handleSubmitTaskConfirmation: (scopeId: string, confirmed: boolean, requestId?: string) => Promise<void>
   handleSubmitTaskAgentResult: (scopeId: string) => Promise<void>
   handleSuspendTask: (scopeId: string) => Promise<void>
   handleCancelDetachedTask: (scopeId: string, taskId?: string | null) => Promise<void>
@@ -164,13 +164,15 @@ export function useTaskInteractionHandlers(
   )
 
   const handleSubmitTaskConfirmation = useCallback(
-    async (scopeId: string, confirmed: boolean) => {
+    async (scopeId: string, confirmed: boolean, requestId?: string) => {
       const run =
+        mergedTaskRuns.find((item) => item.scopeId === scopeId && item.waitingFor === 'confirmation') ||
         useAgent.getState().scopeRunStates[scopeId] ||
         mergedTaskRuns.find((item) => item.scopeId === scopeId)
       await window.electronAPI.agent.respondToInteraction({
         scopeId,
         taskId: run?.taskId || undefined,
+        requestId,
         responseText: confirmed ? '确认继续。' : '暂不继续，请先停止。',
         confirmed,
         continuationIntent: buildRunContinuationIntent(
@@ -178,8 +180,17 @@ export function useTaskInteractionHandlers(
           confirmed ? '确认继续。' : '暂不继续，请先停止。',
         ),
       })
+      await Promise.all([
+        refreshPersistedScopeRuns(),
+        refreshPersistedTaskProjections(),
+      ])
     },
-    [buildRunContinuationIntent, mergedTaskRuns]
+    [
+      buildRunContinuationIntent,
+      mergedTaskRuns,
+      refreshPersistedScopeRuns,
+      refreshPersistedTaskProjections,
+    ]
   )
 
   const handleSubmitTaskAgentResult = useCallback(

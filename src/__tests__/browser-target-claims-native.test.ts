@@ -91,3 +91,26 @@ test('SQLite target-claim CAS preserves one writer and rejects stale generations
     db.close()
   }
 })
+
+test('startup expires target claims persisted by an older Browser boot', async (t) => {
+  if (skipIfSqliteUnavailable(t, 'target claim boot expiry')) return
+  const Database = (await import('better-sqlite3')).default
+  const db = new Database(':memory:')
+  try {
+    db.exec('CREATE TABLE task_projections (task_id TEXT PRIMARY KEY, scope_id TEXT NOT NULL, human_takeover_ref_json TEXT, checkpoint_refs_json TEXT)')
+    __runMigrationForTests('087_browser_target_claims', db as unknown as MigrationDatabase)
+    const service = new BrowserTargetClaimService(new BrowserTargetClaimRepository({ getRawDb: () => db as never }))
+    const claim = service.acquire({
+      partition: 'persist:browser', tabId: 'tab-old',
+      physicalTargetToken: 'boot-old:tab-old:1', bootIncarnationId: 'boot-old',
+      profileId: null, surface: 'user-view', parentTaskId: 'parent-old',
+      browserTaskId: 'browser-old', ownerRunId: 'run-old', scopeId: 'scope-old', sessionId: null,
+    })
+    assert.equal('ok' in claim && claim.ok === false, false)
+    assert.equal(service.expirePreviousBoot('boot-current').length, 1)
+    assert.equal(service.read({ partition: 'persist:browser', tabId: 'tab-old' })?.state, 'expired')
+    assert.equal(db.pragma('quick_check', { simple: true }), 'ok')
+  } finally {
+    db.close()
+  }
+})

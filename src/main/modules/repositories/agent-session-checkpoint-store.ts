@@ -6,7 +6,6 @@ import type {
   BrowserConfirmationSuspensionRequest,
 } from '../../../shared/browser-workflow-control'
 import { browserHumanTakeoverBlockedReason } from '../../../shared/browser-workflow-control'
-import { browserConfirmationNotice } from '../../../shared/browser-confirmation-card'
 import type { CanonicalAssistantMessageReceipt } from '../../../shared/ipc-contracts/canonical-message'
 import { BROWSER_OPERATION_IDS } from '../../../shared/browser-capability-registry'
 import { assertAgentInputToolPairIntegrity } from '../agent-control/compaction/compact-agent-input'
@@ -32,7 +31,7 @@ import {
   type WorkflowCheckpointRow,
 } from './browser-workflow-row-mapping'
 import type { BrowserObservationGap } from './agent-session-checkpoint-types'
-import { buildCanonicalCoreCloseoutMessage } from './canonical-core-closeout-message'
+import { writeCanonicalCheckpointNotice } from './agent-session-checkpoint-canonical-notice'
 
 interface ChatMessageRow {
   id: string
@@ -191,6 +190,7 @@ export class AgentSessionCheckpointStoreRepository {
     takeoverId?: string | null
     suspensionRequest?: BrowserConfirmationSuspensionRequest | null
     suspensionReason?: BrowserCheckpointSuspensionReason
+    publicNotice?: string | null
     versions?: Partial<Pick<AgentSessionCheckpoint, 'schemaMajor' | 'serializerMajor' | 'registryMajor' | 'safetyMajor'>>
     ancestorOwnerRunId?: string | null
     ancestorCheckpointDigest?: string | null
@@ -542,68 +542,20 @@ export class AgentSessionCheckpointStoreRepository {
       if (authoritativeId !== checkpointId) throw new Error('checkpoint_parent_pointer_readback_failed')
       if (input.role !== 'suspension') return readback
 
-      const notice = input.suspensionRequest
-        ? browserConfirmationNotice(input.suspensionRequest)
-        : suspensionReason === 'human_takeover'
-          ? parent.humanTakeoverRef?.userPrompt
-            ? browserHumanTakeoverBlockedReason(parent.humanTakeoverRef.userPrompt)
-            || '页面需要你完成验证或手动操作。完成后可以从任务卡继续。'
-            : '页面需要你完成验证或手动操作。完成后可以从任务卡继续。'
-          : null
-      if (!notice) return readback
-      const canonicalMessage = buildCanonicalCoreCloseoutMessage({
+      const canonicalReceipt = writeCanonicalCheckpointNotice(db, {
         parentTaskId: parent.taskId,
         ownerRunId: input.ownerRunId,
         conversationId: parent.scopeId,
-        finalText: notice,
-        timestamp: createdAt,
-        terminalReason: suspensionReason === 'human_takeover'
-          ? 'human_takeover'
-          : `checkpoint_${suspensionReason}`,
         checkpointId,
+        createdAt,
+        suspensionReason: suspensionReason || 'manual',
+        suspensionRequest: input.suspensionRequest,
+        humanTakeoverPrompt: parent.humanTakeoverRef?.userPrompt,
+        publicNotice: input.publicNotice,
       })
-      canonicalMessage.meta = {
-        ...canonicalMessage.meta,
-        checkpointId,
-        ...(input.suspensionRequest ? { browserConfirmationRequest: input.suspensionRequest } : {}),
-      }
-      const canonicalMessageDigest = workflowDigest(canonicalMessage)
-      db.prepare(
-        `INSERT INTO chat_messages (id, conversation_id, role, content, timestamp, meta_json)
-         VALUES (?, ?, 'assistant', ?, ?, ?)
-         ON CONFLICT(id) DO NOTHING`,
-      ).run(
-        canonicalMessage.id,
-        canonicalMessage.conversationId,
-        canonicalMessage.content,
-        canonicalMessage.timestamp,
-        serializeWorkflowJson(canonicalMessage.meta, 'checkpoint_canonical_assistant_meta_json'),
-      )
-      const messageReadback = db.prepare(
-        `SELECT id, conversation_id, role, content, timestamp, meta_json
-           FROM chat_messages WHERE id = ? LIMIT 1`,
-      ).get<Required<ChatMessageRow>>(canonicalMessage.id)
-      if (!messageReadback || messageReadback.role !== 'assistant') {
-        throw new Error('checkpoint_canonical_assistant_message_readback_failed')
-      }
-      const readbackCanonical = {
-        id: messageReadback.id,
-        conversationId: messageReadback.conversation_id,
-        role: 'assistant' as const,
-        content: messageReadback.content,
-        timestamp: messageReadback.timestamp,
-        meta: parseObjectStrict<Record<string, unknown>>(
-          messageReadback.meta_json || '{}',
-          'checkpoint_canonical_assistant_meta_json',
-        ),
-      }
-      if (workflowDigest(readbackCanonical) !== canonicalMessageDigest) {
-        throw new Error('checkpoint_canonical_assistant_message_digest_mismatch')
-      }
       return {
         ...readback,
-        canonicalMessage: readbackCanonical,
-        canonicalMessageDigest,
+        ...canonicalReceipt,
       }
     })
   }

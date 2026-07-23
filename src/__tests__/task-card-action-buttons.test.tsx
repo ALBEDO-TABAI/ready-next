@@ -398,7 +398,7 @@ test('cleared fixed task cards stay cleared after the task area remounts', () =>
 })
 
 test('pending browser confirmation stays visible in the fixed task area', () => {
-  const confirmationCalls: Array<[string, boolean]> = []
+  const confirmationCalls: Array<[string, boolean, string | undefined]> = []
   const run = makeRun({
     scopeId: 'conv-confirmation',
     taskId: 'task-confirmation',
@@ -457,8 +457,8 @@ test('pending browser confirmation stays visible in the fixed task area', () => 
       onSupplementMemoryCapture: noop,
       onOpenScope: noop,
       onContinueTaskInput: noop,
-      onSubmitTaskConfirmation: (scopeId: string, confirmed: boolean) => {
-        confirmationCalls.push([scopeId, confirmed])
+      onSubmitTaskConfirmation: (scopeId: string, confirmed: boolean, requestId?: string) => {
+        confirmationCalls.push([scopeId, confirmed, requestId])
       },
       onSubmitTaskAgentResult: noop,
       onRetryTask: noop,
@@ -483,7 +483,10 @@ test('pending browser confirmation stays visible in the fixed task area', () => 
     assert.equal(buttons.some((button) => button.textContent?.trim() === '继续运行'), false)
     flushSync(() => allow.click())
     flushSync(() => deny.click())
-    assert.deepEqual(confirmationCalls, [['conv-confirmation', true], ['conv-confirmation', false]])
+    assert.deepEqual(confirmationCalls, [
+      ['conv-confirmation', true, 'confirmation-1'],
+      ['conv-confirmation', false, 'confirmation-1'],
+    ])
   } finally {
     root.unmount()
   }

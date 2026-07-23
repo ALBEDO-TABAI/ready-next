@@ -22,6 +22,7 @@ interface AgentBrowserSupervisionPanelProps {
   resumeTargetClaim: (claim: BrowserTargetClaimSnapshot) => Promise<{ success: boolean; error?: string; errorKind?: string }>
   surfaces?: Record<AgentBrowserSurface, BrowserLeaseSurfaceSnapshot> | null
   activeWriteSurface?: AgentBrowserSurface | null
+  takeoverError?: string | null
   variant?: 'floating' | 'pane' | 'collapsed' | 'collapsedRail'
   onCollapse?: () => void
   onExpand?: () => void
@@ -75,6 +76,7 @@ export function AgentBrowserSupervisionPanel({
   resumeTargetClaim = async () => ({ success: false, error: 'target_claim_resume_unavailable' }),
   surfaces,
   activeWriteSurface,
+  takeoverError,
   variant = 'floating',
   onCollapse,
   onExpand,
@@ -89,7 +91,7 @@ export function AgentBrowserSupervisionPanel({
   const userOwnedClaims = claims.filter((claim) => claim.state === 'user_owned')
   const terminalTasks = tasks.filter(isTerminalTask)
   const visibleTasks = activeTasks.length > 0 ? activeTasks : terminalTasks.slice(0, 1)
-  const visible = variant === 'collapsed' || variant === 'collapsedRail' || activeTasks.length > 0 || terminalTasks.length > 0 || userOwnedClaims.length > 0 || controlState !== 'active'
+  const visible = variant === 'collapsed' || variant === 'collapsedRail' || activeTasks.length > 0 || terminalTasks.length > 0 || userOwnedClaims.length > 0 || controlState !== 'active' || Boolean(takeoverError)
   if (!visible) return null
   const waitingForVerification = activeTasks.some((task) => task.status === 'waiting_human')
   const statusText = activeTasks.length > 0
@@ -195,6 +197,17 @@ export function AgentBrowserSupervisionPanel({
 
       {panelOpen && (
         <div className="flex min-h-0 flex-col gap-1.5 overflow-y-auto px-2 pb-2">
+          {takeoverError && (
+            <div
+              role="alert"
+              data-browser-takeover-error
+              className="flex items-start gap-1.5 rounded-[8px] px-2 py-1.5 text-[11px] font-medium"
+              style={{ background: 'color-mix(in srgb, var(--color-red) 12%, transparent)', color: 'var(--color-red)' }}
+            >
+              <AlertCircle style={{ width: 13, height: 13, flexShrink: 0 }} strokeWidth={2} />
+              <span>{takeoverError}</span>
+            </div>
+          )}
           {/* Sub-agent session cards */}
           {surfaceLockText && (
             <div

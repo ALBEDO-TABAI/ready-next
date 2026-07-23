@@ -489,11 +489,12 @@ export default function TaskPanel() {
     await window.electronAPI.agent.respondToInteraction({
       scopeId: activeProjection.scopeId,
       taskId: activeProjection.taskId || undefined,
+      requestId: projectionConfirmationCard?.requestId,
       responseText,
       confirmed,
       continuationIntent: buildProjectionContinuationIntent(activeProjection, responseText),
     })
-  }, [activeProjection])
+  }, [activeProjection, projectionConfirmationCard?.requestId])
 
   const handleRetryProjection = useCallback(() => {
     // Stage Q (Stage 11) — gate retry by canResume in addition to the
@@ -694,6 +695,25 @@ export default function TaskPanel() {
                 </div>
               </div>
             )}
+            {activeProjection?.waitingFor === 'confirmation' && projectionConfirmationCard && (
+              <div
+                data-ready-browser-confirmation-card={projectionConfirmationCard.kind}
+                data-ready-browser-confirmation-request-id={projectionConfirmationCard.requestId}
+                data-ready-browser-confirmation-target={projectionConfirmationRequest?.target.tabId || ''}
+                className="rounded-[8px] border px-2.5 py-2"
+                style={{ borderColor: 'var(--border-default)', background: 'var(--bg-subtle)' }}
+              >
+                <div className="text-[11px] font-semibold" style={{ color: 'var(--text-strong)' }}>
+                  {projectionConfirmationCard.title}
+                </div>
+                <div className="mt-1 text-[10px]" style={{ color: 'var(--text-body)', lineHeight: 1.5 }}>
+                  {projectionConfirmationCard.description}
+                </div>
+                <div className="mt-1 text-[10px]" style={{ color: 'var(--text-light)', lineHeight: 1.5 }}>
+                  {projectionConfirmationCard.detail}
+                </div>
+              </div>
+            )}
             {activeProjection && (
               <div className="flex flex-wrap gap-1.5">
                 {activeProjection.waitingFor !== 'confirmation' && projectionRuntimeState?.actionSet.includes('continue') && (
@@ -740,6 +760,8 @@ export default function TaskPanel() {
                   <>
                     <button
                       type="button"
+                      data-ready-browser-confirmation-action="allow"
+                      data-ready-browser-confirmation-request-id={projectionConfirmationCard?.requestId}
                       onClick={() => handleConfirmProjection(true)}
                       className="rounded-[8px] border px-2.5 py-1.5 text-[10.5px] transition-colors hover:bg-black/5"
                       style={{ borderColor: 'var(--border-default)', color: 'var(--text-body)' }}
@@ -748,6 +770,8 @@ export default function TaskPanel() {
                     </button>
                     <button
                       type="button"
+                      data-ready-browser-confirmation-action="deny"
+                      data-ready-browser-confirmation-request-id={projectionConfirmationCard?.requestId}
                       onClick={() => handleConfirmProjection(false)}
                       className="rounded-[8px] border px-2.5 py-1.5 text-[10.5px] transition-colors hover:bg-black/5"
                       style={{ borderColor: 'var(--border-default)', color: 'var(--text-body)' }}

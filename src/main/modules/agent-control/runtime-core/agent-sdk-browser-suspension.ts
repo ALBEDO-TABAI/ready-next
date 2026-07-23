@@ -89,10 +89,14 @@ export function createBrowserSuspensionController(input: {
     message: string
     recoveryItems?: AgentInputItem[]
   }): Promise<ExecutionTurnResult | null> => {
-    if (!input.modelInputController || !input.runtimeContext.browserWorkflowRoute) return null
+    if (!input.modelInputController) return null
+    const route = input.runtimeContext.browserWorkflowRoute
+      || input.modelInputController.restoreBrowserWorkflowRoute()
+    if (!route) return null
 
     const checkpoint = await input.modelInputController.persistSuspension(
       params.reason,
+      params.message,
       params.recoveryItems,
     )
     const continuationRef = {
@@ -139,10 +143,12 @@ export function createBrowserSuspensionController(input: {
     message = '浏览器任务仍有未完成项，我已保存当前证据和页面进度，可以继续。',
     recoveryItems: AgentInputItem[] = [],
   ): Promise<ExecutionTurnResult> => {
+    const publicMessage = message.trim()
+      || '浏览器任务仍有未完成项，当前证据和页面进度已保存，可以继续。'
     const checkpoint = await finishSuspension({
       reason: 'incomplete',
       terminalReason: 'checkpoint_incomplete',
-      message,
+      message: publicMessage,
       recoveryItems,
     })
     if (!checkpoint) throw new Error('browser_incomplete_checkpoint_unavailable')

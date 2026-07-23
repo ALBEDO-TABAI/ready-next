@@ -45,7 +45,7 @@ function check({ root = ROOT } = {}) {
   const readAt = (relPath) => fs.readFileSync(path.join(root, relPath), 'utf8')
 
   const menu = stripComments(readAt('src/main/modules/browser-engine/context-menu-service.ts'))
-  const ipc = stripComments(readAt('src/main/modules/browser-engine/ipc-handler.ts'))
+  const ipc = stripComments(readAt('src/main/modules/browser-engine/browser-controller-composition.ts'))
 
   // 1 & 2. Each "open in new tab" menu item — located by its stable user-facing
   // label — must call createTab with { background: true } inside its click handler.

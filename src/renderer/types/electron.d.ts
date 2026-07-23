@@ -1518,7 +1518,7 @@ interface ElectronBrowserAPI {
     checkpointId: string
     wakeNonce: string
   }) => Promise<{ success: boolean; error?: string; errorKind?: string }>
-  onAgentControlChanged: (callback: (data: { state: AgentBrowserControlState }) => void) => () => void
+  onAgentControlChanged: (callback: (data: { state: AgentBrowserControlState; takeoverError?: string | null }) => void) => () => void
   onLeaseChanged: (callback: (data: {
     claims?: BrowserTargetClaimSnapshot[]
     surfaces?: Record<AgentBrowserSurface, BrowserLeaseSurfaceSnapshot>

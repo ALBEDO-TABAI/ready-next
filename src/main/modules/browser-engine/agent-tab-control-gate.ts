@@ -43,6 +43,13 @@ export async function persistAgentTabUserTakeover(options: {
   return true
 }
 
+export function isAgentNavigationEcho(input: {
+  signalSource: 'keyboard' | 'pointer' | 'navigation' | 'explicit-button'
+  hasActiveAgentAction: boolean
+}): boolean {
+  return input.signalSource === 'navigation' && input.hasActiveAgentAction
+}
+
 /**
  * Shared by the real Electron before-input/before-mouse listeners and behavior
  * tests. The Electron event stays opaque and is never invoked, so the takeover

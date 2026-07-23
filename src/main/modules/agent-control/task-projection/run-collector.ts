@@ -40,6 +40,8 @@ export interface SendAndCollectResult {
   executionDiagnostics?: import('../contracts/run-contracts').ExecutionRunDiagnostics | null
   projectionTruth?: import('../contracts/run-contracts').ProjectionTruthSnapshot | null
   terminalReason?: import('../runtime-core/turn-frame').TurnTerminalReason | null
+  canonicalMessage?: import('../contracts/run-contracts').ExecutionHostResult['canonicalMessage']
+  canonicalMessageDigest?: string
 }
 
 /**

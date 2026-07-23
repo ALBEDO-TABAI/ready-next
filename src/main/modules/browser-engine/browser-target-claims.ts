@@ -627,6 +627,22 @@ export class BrowserTargetClaimService {
     }, 'close')
   }
 
+  expirePreviousBoot(currentBootIncarnationId: string): BrowserTargetClaim[] {
+    const stale = this.store.list().filter((claim) => (
+      claim.bootIncarnationId
+      && claim.bootIncarnationId !== currentBootIncarnationId
+      && (claim.state === 'held' || claim.state === 'user_owned' || claim.state === 'suspended')
+    ))
+    return stale.map((claim) => this.transition(claim, {
+      state: 'expired',
+      physicalTargetToken: null,
+      bootIncarnationId: null,
+      suspensionCheckpointId: null,
+      suspensionReason: null,
+      expiresAt: this.now(),
+    }, 'restart'))
+  }
+
   replacePhysicalTarget(
     target: BrowserPhysicalTargetKey,
     suspensionCheckpointId?: string | null,

@@ -5,6 +5,7 @@ const repository = fs.readFileSync('src/main/modules/repositories/task-projectio
 const runtime = fs.readFileSync('src/main/modules/agent-control/runtime-core/runtime.ts', 'utf8')
 const sync = fs.readFileSync('src/main/modules/agent-control/task-projection/task-projection-sync.ts', 'utf8')
 const finalizer = fs.readFileSync('src/main/modules/agent-control/runtime-core/run-finalizer.ts', 'utf8')
+const finalizerPersistence = fs.readFileSync('src/main/modules/agent-control/runtime-core/run-finalizer-persistence.ts', 'utf8')
 const toolExecutor = fs.readFileSync('src/main/modules/agent-control/runtime-core/agent-sdk-tool-executor.ts', 'utf8')
 const failures = []
 if (!coordinator.includes('request.scope.activeAgentId')) failures.push('new tasks do not consume conversation activeAgentId')
@@ -15,7 +16,7 @@ if (!sync.includes('taskOrigin is required for a new projection')) failures.push
 if (sync.includes("payload.taskOrigin ?? previous?.taskOrigin ?? 'legacy'")) failures.push('projection sync still guesses legacy origin for new writes')
 if (!coordinator.includes('continuation task does not belong to scope')) failures.push('continuation target scope guard missing')
 if (!runtime.includes('adoptSameSessionHandoff')) failures.push('atomic handoff adoption seam missing')
-if (!finalizer.includes("ref.kind === 'handoff_takeover' && ref.priorRunId === outcome.runId")) failures.push('old-run finalizer is not fenced from takeover projection writes')
+if (![finalizer, finalizerPersistence].some((source) => source.includes("ref.kind === 'handoff_takeover' && ref.priorRunId === outcome.runId"))) failures.push('old-run finalizer is not fenced from takeover projection writes')
 if (!toolExecutor.includes('runWithHandoffToolGate')) failures.push('same-batch tool execution is not closed after handoff takeover')
 if (runtime.includes('resolveScopeOwnerAgent:')) failures.push('legacy latest-owner injection remains live')
 if (failures.length) throw new Error(failures.join('\n'))

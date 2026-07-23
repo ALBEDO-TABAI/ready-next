@@ -22,19 +22,19 @@
     },
     {
       "id": "background-probe",
-      "file": "src/main/modules/browser-engine/ipc-handler.ts",
+      "file": "src/main/modules/browser-engine/browser-controller-capture-runtime.ts",
       "partition": "persist:browser (background probe)",
       "evidence": "partition: 'persist:browser'"
     },
     {
       "id": "download-session",
-      "file": "src/main/modules/browser-engine/ipc-handler.ts",
+      "file": "src/main/modules/browser-engine/browser-controller-capture-runtime.ts",
       "partition": "source tab session or persist:browser fallback",
       "evidence": "targetSession = this.resolveTabView(payload.tabId).view.webContents.session"
     },
     {
       "id": "permission-and-adblock-policy",
-      "file": "src/main/modules/browser-engine/ipc-handler.ts",
+      "file": "src/main/modules/browser-engine/browser-controller-composition.ts",
       "partition": "every created browser partition",
       "evidence": "this.sessionPolicyService.applyForPartition(partition)"
     }

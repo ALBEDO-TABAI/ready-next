@@ -268,9 +268,21 @@
       "owner": "p1-e5-action-receipt"
     },
     {
-      "path": "src/__tests__/run-finalizer-checkin.test.ts",
+      "path": "src/__tests__/run-finalizer-task-facts.test.ts",
       "reason": "P1/P2: tests finalizeRunOutcome + projectionPatchFromChildClose with in-memory fake projection stores and run-meta maps; no test path opens better-sqlite3 or reads the real DB. The agent-sdk-runtime import (projectionPatchFromChildClose) is a pure function but pulls a sqlite-capable module into the transitive graph. Host-Node coverage must stay active for adjudication/proof assertions.",
       "since": "2026-06-24",
+      "owner": "p1-p2-agent-adjudication"
+    },
+    {
+      "path": "src/__tests__/run-finalizer-adjudication.test.ts",
+      "reason": "P1/P2: tests finalizeRunOutcome with in-memory fake projection stores and run-meta maps; no test path opens better-sqlite3 or reads the real DB. Transitive runtime imports are sqlite-capable, but Host-Node coverage must stay active for adjudication assertions.",
+      "since": "2026-07-23",
+      "owner": "p1-p2-agent-adjudication"
+    },
+    {
+      "path": "src/__tests__/run-finalizer-canonical-checkpoint.test.ts",
+      "reason": "P1/P2: tests canonical checkpoint closeout with in-memory fake stores; no test path opens better-sqlite3 or reads the real DB. Transitive runtime imports are sqlite-capable, but Host-Node coverage must stay active for checkpoint assertions.",
+      "since": "2026-07-23",
       "owner": "p1-p2-agent-adjudication"
     },
     {

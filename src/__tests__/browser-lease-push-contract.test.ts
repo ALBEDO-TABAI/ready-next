@@ -9,12 +9,13 @@ function readWorkspaceFile(path: string): string {
 }
 
 test('browser target-claim transitions push the supervision snapshot to the renderer', () => {
-  const ipcHandler = readWorkspaceFile('src/main/modules/browser-engine/ipc-handler.ts')
+  const controllerComposition = readWorkspaceFile('src/main/modules/browser-engine/browser-controller-composition.ts')
+  const takeoverRuntime = readWorkspaceFile('src/main/modules/browser-engine/browser-human-takeover-runtime.ts')
   const preload = readWorkspaceFile('src/preload/index.ts')
   const supervisionHook = readWorkspaceFile('src/renderer/modules/browser/useAgentBrowserSupervision.ts')
 
-  assert.match(ipcHandler, /getBrowserTargetClaimService\(\)\.onTransition/)
-  assert.match(ipcHandler, /sendToRenderer\('browser:leaseChanged', this\.getBrowserLeaseSnapshot\(\)\)/)
+  assert.match(controllerComposition, /getBrowserTargetClaimService\(\)\.onTransition/)
+  assert.match(takeoverRuntime, /sendToRenderer\('browser:leaseChanged', this\.getBrowserLeaseSnapshot\(\)\)/)
   assert.match(preload, /onLeaseChanged/)
   assert.match(preload, /ipcRenderer\.on\('browser:leaseChanged'/)
   assert.match(supervisionHook, /onLeaseChanged/)
@@ -22,18 +23,20 @@ test('browser target-claim transitions push the supervision snapshot to the rend
 })
 
 test('physical user input takes over only the exact driven target', () => {
-  const ipcHandler = readWorkspaceFile('src/main/modules/browser-engine/ipc-handler.ts')
+  const takeoverRuntime = readWorkspaceFile('src/main/modules/browser-engine/browser-human-takeover-runtime.ts')
+  const agentTabControlGate = readWorkspaceFile('src/main/modules/browser-engine/agent-tab-control-gate.ts')
   const ipcSupervision = readWorkspaceFile('src/main/modules/browser-engine/ipc-supervision.ts')
   const preload = readWorkspaceFile('src/preload/index.ts')
 
-  assert.match(ipcHandler, /attachTargetClaimSupervision/)
-  assert.match(ipcHandler, /attachAgentTabSupervision/)
-  assert.match(ipcHandler, /requestAgentInterruption\(tabId, 'physical_input'\)/)
-  assert.match(ipcHandler, /requestedTabId[\s\S]*claim\.logicalKey\.tabId === requestedTabId/)
-  assert.match(ipcHandler, /signalSource === 'navigation' && claimService\.hasActiveAgentAction\(\{/)
-  assert.doesNotMatch(ipcHandler, /source: 'tab-switch'/)
-  assert.doesNotMatch(ipcHandler, /task\.kind === 'site_research'/)
-  const agentTabSupervision = ipcHandler.match(/private attachAgentTabSupervision[\s\S]*?private isAgentActivelyDrivingTab/)?.[0] || ''
+  assert.match(takeoverRuntime, /attachTargetClaimSupervision/)
+  assert.match(takeoverRuntime, /attachAgentTabSupervision/)
+  assert.match(takeoverRuntime, /requestAgentInterruption\(tabId, 'physical_input'\)/)
+  assert.match(takeoverRuntime, /requestedTabId[\s\S]*claim\.logicalKey\.tabId === requestedTabId/)
+  assert.match(takeoverRuntime, /isAgentNavigationEcho\(\{[\s\S]*signalSource,[\s\S]*hasActiveAgentAction: claimService\.hasActiveAgentAction\(\{/)
+  assert.match(agentTabControlGate, /input\.signalSource === 'navigation' && input\.hasActiveAgentAction/)
+  assert.doesNotMatch(takeoverRuntime, /source: 'tab-switch'/)
+  assert.doesNotMatch(takeoverRuntime, /task\.kind === 'site_research'/)
+  const agentTabSupervision = takeoverRuntime.match(/protected attachAgentTabSupervision[\s\S]*?protected isAgentActivelyDrivingTab/)?.[0] || ''
   assert.doesNotMatch(agentTabSupervision, /preventDefault/)
   assert.doesNotMatch(ipcSupervision, /confirmAgentInterruption|dismissAgentInterruption/)
   assert.doesNotMatch(preload, /confirmAgentInterruption|dismissAgentInterruption/)
@@ -57,19 +60,19 @@ test('target resume is wired through Main, preload, renderer types, and a concre
 })
 
 test('P7c live-proof helpers are env-gated and used only by the live proof script', () => {
-  const ipcHandler = readWorkspaceFile('src/main/modules/browser-engine/ipc-handler.ts')
+  const liveProofRuntime = readWorkspaceFile('src/main/modules/browser-engine/browser-live-proof-runtime.ts')
   const ipcShell = readWorkspaceFile('src/main/modules/browser-engine/ipc-shell.ts')
   const preload = readWorkspaceFile('src/preload/index.ts')
   const liveProofScript = readWorkspaceFile('scripts/run-p7c-browser-decoupling-live-proof.mjs')
 
-  assert.match(ipcHandler, /READY_P7C_LIVE_PROOF/)
-  assert.match(ipcHandler, /createP7cLiveProofManualTab/)
-  assert.match(ipcHandler, /prepareP7cLiveProofForegroundProbe/)
-  assert.match(ipcHandler, /sampleP7cLiveProofActiveTabState/)
-  assert.match(ipcHandler, /startP7cLiveProofUserViewLease/)
-  assert.match(ipcHandler, /sendP7cLiveProofUserKey/)
-  assert.match(ipcHandler, /checkP7cLiveProofWriteDenied/)
-  assert.match(ipcHandler, /clearP7cLiveProofState/)
+  assert.match(liveProofRuntime, /READY_P7C_LIVE_PROOF/)
+  assert.match(liveProofRuntime, /createP7cLiveProofManualTab/)
+  assert.match(liveProofRuntime, /prepareP7cLiveProofForegroundProbe/)
+  assert.match(liveProofRuntime, /sampleP7cLiveProofActiveTabState/)
+  assert.match(liveProofRuntime, /startP7cLiveProofUserViewLease/)
+  assert.match(liveProofRuntime, /sendP7cLiveProofUserKey/)
+  assert.match(liveProofRuntime, /checkP7cLiveProofWriteDenied/)
+  assert.match(liveProofRuntime, /clearP7cLiveProofState/)
   assert.match(ipcShell, /browser:p7cLiveProofCreateManualTab/)
   assert.match(ipcShell, /browser:p7cLiveProofPrepareForegroundProbe/)
   assert.match(ipcShell, /browser:p7cLiveProofSampleActiveTabState/)

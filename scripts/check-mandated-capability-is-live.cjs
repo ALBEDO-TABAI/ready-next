@@ -187,12 +187,12 @@ const REGISTRY = Object.freeze([
       },
       {
         name: 'finalizer merges declared criteria into adjudication',
-        file: 'src/main/modules/agent-control/runtime-core/run-finalizer.ts',
+        file: 'src/main/modules/agent-control/runtime-core/run-finalizer-adjudication.ts',
         pattern: /appendModelCriteria\(criteria\.items/,
       },
     ],
     firedLedger: {
-      file: 'src/main/modules/agent-control/runtime-core/run-finalizer.ts',
+      file: 'src/main/modules/agent-control/runtime-core/run-finalizer-adjudication.ts',
       event: 'model_criteria_merged',
     },
   },

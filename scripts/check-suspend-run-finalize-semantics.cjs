@@ -4,12 +4,12 @@ const fs = require('node:fs')
 const path = require('node:path')
 
 const root = process.cwd()
-const runtimePath = path.join(root, 'src/main/modules/agent-control/runtime-core/runtime.ts')
+const runtimePath = path.join(root, 'src/main/modules/agent-control/runtime-core/browser-continuation-runtime.ts')
 const orchestratorPath = path.join(root, 'src/main/modules/agent-control/runtime-core/orchestrator.ts')
 const sdkRuntimePath = path.join(root, 'src/main/modules/agent-control/runtime-core/agent-sdk-runtime.ts')
 // V3 Phase 5-B: the manual-suspend abort branch is owned by the closeout leaf.
 const sdkTurnCloseoutPath = path.join(root, 'src/main/modules/agent-control/runtime-core/agent-sdk-turn-closeout.ts')
-const finalizerPath = path.join(root, 'src/main/modules/agent-control/runtime-core/run-finalizer.ts')
+const finalizerProjectionPath = path.join(root, 'src/main/modules/agent-control/runtime-core/run-finalizer-projection.ts')
 
 function read(relPath) {
   return fs.readFileSync(relPath, 'utf8')
@@ -60,11 +60,11 @@ function extractMethod(source, methodName) {
 const runtime = read(runtimePath)
 const orchestrator = read(orchestratorPath)
 const sdkTurnCloseout = read(sdkTurnCloseoutPath)
-const finalizer = read(finalizerPath)
+const finalizerProjection = read(finalizerProjectionPath)
 
 const suspendRun = extractMethod(runtime, 'suspendRun')
 if (!suspendRun) {
-  fail('runtime.ts is missing suspendRun()')
+  fail('browser-continuation-runtime.ts is missing suspendRun()')
 } else {
   if (/\.kill\s*\(/.test(suspendRun)) {
     fail('suspendRun() must not call orchestrator.kill(); use interruptForSuspend()')
@@ -106,10 +106,10 @@ if (!/return finalizeEarlyReturn\(\{[\s\S]{0,300}?status:\s*'checkpoint'[\s\S]{0
   fail('AgentSdkRuntime manual suspend branch must checkpoint through finalizeEarlyReturn')
 }
 
-if (!/function buildManualSuspendProjectionPatch/.test(finalizer)) {
-  fail('run-finalizer.ts must own buildManualSuspendProjectionPatch()')
+if (!/function buildManualSuspendProjectionPatch/.test(finalizerProjection)) {
+  fail('run-finalizer-projection.ts must own buildManualSuspendProjectionPatch()')
 }
-if (!/canResumeAsUserPoint/.test(finalizer) || !/recoverable_paused/.test(finalizer)) {
+if (!/canResumeAsUserPoint/.test(finalizerProjection) || !/recoverable_paused/.test(finalizerProjection)) {
   fail('manual suspend projection patch must use real resume proof before recoverable_paused')
 }
 

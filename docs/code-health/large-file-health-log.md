@@ -1,6 +1,6 @@
 # 代码行数健康度台账
 
-> 更新时间：2026-07-22
+> 更新时间：2026-07-23
 
 这份台账记录“任务给代码文件增加行数后，文件总行数已超过 1000 行”的健康度评估。它不是按行数自动要求拆分，而是把真正影响维护、验证和协作的风险持续留下来。
 
@@ -21,11 +21,19 @@
 
 | 评估日期 | 任务 | 文件 | 总行数 | 本次新增 | 结论 | 判断与后续动作 | 状态 |
 | --- | --- | --- | ---: | ---: | --- | --- | --- |
+| 2026-07-23 | Provider checkpoint 纠偏 | `src/main/modules/agent-control/runtime-core/orchestrator.ts` | 1040 | 净 +12 | 一般 | 仍是 Agent 运行组合入口，本轮只接入 Browser continuation 窄委派；业务判断已在叶子模块。2026-08-23 复查组合接线密度。 | 已排期：2026-08-23 |
+| 2026-07-23 | Provider checkpoint 纠偏 | `src/renderer/components/agent/ChatPanel.tsx` | 1167 | 净 +17 | 一般 | 仍是聊天面板组合宿主，本轮只透传结构化暂停与 canonical 终态。2026-08-23 复查任务面板接线是否继续下沉。 | 已排期：2026-08-23 |
+| 2026-07-23 | Provider checkpoint 纠偏 | `src/renderer/components/ready/TaskPanel.tsx` | 1155 | 净 +24 | 一般 | 仍是任务面板宿主，本轮只按 `waitingFor` 和续跑句柄呈现等待/暂停/未完成。2026-08-23 复查详情与列表呈现边界。 | 已排期：2026-08-23 |
+| 2026-07-23 | Provider checkpoint 纠偏 | `src/renderer/pages/modes/BrowserMode.tsx` | 1451 | 净 +2 | 一般 | 页面仍只组合 Browser 工作面，本轮只透传监督面的结构状态。2026-08-23 复查 BrowserView 可见性与监督接线。 | 已排期：2026-08-23 |
+| 2026-07-23 | Provider checkpoint 纠偏拆分 | `agent-session-checkpoint-resume.ts` / `run-finalizer.ts` / `browser-engine/ipc-handler.ts` / `renderer/modules/agent/runtimeDriver.ts` / `agentPanelTestHarness.ts` | 59 / 231 / 218 / 689 / 19 | 均为净减 | 健康 | 原超限 facade 已分别降为窄委派或组合入口；叶子模块最大为 745 行，模块边界脚本强制方向与上限。 | 拆分完成 |
+| 2026-07-22 | Provider 可靠性第三批 | `src/main/modules/repositories/agent-session-checkpoint-resume.ts` | 1478 | 净 +24 | 危险 | typed 续跑、确认、接管和 owner-crash 事务混合，已妨碍 P7 恢复重数修复。2026-07-23 计划要求先按四个事务域做 move-only 拆分，再改 marker。 | 已纳入 2026-07-23 纠偏实施计划 |
+| 2026-07-22 | Provider 可靠性第三批 | `src/main/modules/browser-engine/ipc-handler.ts` | 2829 | 净 +4 | 危险 | BrowserController 与 IPC 注册、target 接管、tab/捕获服务仍混合。2026-07-23 计划要求保留稳定 facade，将接管、tab、capture、live-proof 和 composition 下沉。 | 已纳入 2026-07-23 纠偏实施计划 |
+| 2026-07-22 | Provider 可靠性第三批 | `src/renderer/modules/agent/agentPanelTestHarness.ts` | 1483 | 净 +9 | 危险 | 类型、快照、诊断与交互驱动已集中过多，并导致 P9 报告对“可见”的证明模糊。2026-07-23 计划要求拆成 types/snapshot/diagnostics/driver，原安装入口保持不变。 | 已纳入 2026-07-23 纠偏实施计划 |
 | 2026-07-22 | Provider 可靠性与确认可见性 | `src/main/modules/repositories/agent-session-checkpoint-resume.ts` | 1454 | 净 +126 | 危险 | 本轮又加入确认过期、拒绝回执和事务内续跑判定，证明该入口已同时承担多类状态转移。后续应先以现有原生门禁固定合同，再迁出确认生命周期事务。 | 待独立拆分合同；交付时提醒 |
-| 2026-07-22 | Provider 可靠性与确认可见性 | `src/main/modules/agent-control/runtime-core/runtime.ts` | 3148 | 净 +3 | 危险 | 本轮只接入同会话重发时的旧确认失效，但运行服务装配仍过度集中。后续仍应把 Browser/continuation 组合入口迁出。 | 待独立拆分合同；交付时提醒 |
-| 2026-07-22 | Provider 可靠性与确认可见性 | `src/main/modules/agent-control/runtime-core/run-finalizer.ts` | 1314 | 净 +40 | 危险 | 本轮接入 Provider 失败诊断与 Browser 目标收口，通用终态、投影和产品收口仍集中在一个文件。后续应分离通用终态事务与产品诊断适配。 | 待独立拆分合同；交付时提醒 |
-| 2026-07-22 | Provider 可靠性与确认可见性 | `src/__tests__/agent-session-checkpoint-native.test.ts` | 1595 | 净 +162 | 一般 | 仍聚焦真实 SQLite checkpoint 生命周期，本轮增加确认单消息、过期、拒绝与合法续跑对照。2026-08-22 复查是否按写入、确认和目标恢复拆分夹具。 | 已排期：2026-08-22 |
-| 2026-07-22 | Provider 可靠性与确认可见性 | `src/__tests__/run-finalizer-checkin.test.ts` | 1327 | 净 +4 | 一般 | 仍是终态判决与验收回执的单一行为域，本轮只显式装配测试收口依赖。2026-08-19 复查来源证明与终态验收拆分。 | 已排期：2026-08-19 |
+| 2026-07-22 | Provider 可靠性与确认可见性 | `src/main/modules/agent-control/runtime-core/runtime.ts` | 3148 | 净 +3 | 危险 | Browser/continuation 组合入口已成独立迁出边界。2026-07-23 计划只迁移本次相关域并建立禁止回流 gate，不借机重写日程/渠道/记忆域。 | 已纳入 2026-07-23 纠偏实施计划 |
+| 2026-07-22 | Provider 可靠性与确认可见性 | `src/main/modules/agent-control/runtime-core/run-finalizer.ts` | 1314 | 净 +40 | 危险 | 终态类型、投影、任务事实、裁决和持久化必须在 checkpoint canonical 修复前拆分；`finalizeRunOutcome()` 仍保留为唯一公开入口。 | 已纳入 2026-07-23 纠偏实施计划 |
+| 2026-07-22 | Provider 可靠性与确认可见性 | `src/__tests__/agent-session-checkpoint-native.test.ts` | 1595 | 净 +162 | 一般 | checkpoint 写入、确认生命周期和 target 恢复场景已肥大到妨碍缺口定位。2026-07-23 计划要求在共享原生 SQLite fixture 基础上按行为域拆套件。 | 已纳入 2026-07-23 纠偏实施计划 |
+| 2026-07-22 | Provider 可靠性与确认可见性 | `src/__tests__/run-finalizer-checkin.test.ts` | 1327 | 净 +4 | 一般 | 终态判决、canonical 收口与验收回执已应分组，否则后续修复会继续把新变体堆进单文件。 | 已纳入 2026-07-23 纠偏实施计划 |
 | 2026-07-22 | Provider 可靠性与确认可见性 | `src/renderer/components/ready/TaskPanel.tsx` | 1131 | 净 +53 | 一般 | 文件仍是任务面板宿主，本轮只增加结构化确认展示与类型化选择。2026-08-22 复查任务详情和列表展示是否继续拆分。 | 已排期：2026-08-22 |
 | 2026-07-22 | Provider 可靠性与确认可见性 | `src/renderer/modules/agent/scopeRunState.ts` | 1061 | 净 +7 | 一般 | 仍聚焦运行状态归一化，本轮只完整读取结构化确认续跑字段。2026-08-22 复查事件归一化边界。 | 已排期：2026-08-22 |
 | 2026-07-22 | Provider 可靠性与确认可见性 | `src/renderer/types/electron.d.ts` | 4050 | 净 +1 | 健康 | 只补齐结构化确认的跨进程声明，由类型检查、行为测试和真实应用验收覆盖。 | 无需处理 |
@@ -45,13 +53,13 @@
 | 2026-07-20 | 浏览器填字、回车与暂停闭环 | `scripts/run-browser-grounded-orchestration-live-proof.mjs` | 1062 | 净 +57 | 一般 | 仍是单一真实应用验收入口；本轮修正 Renderer/Main 标签一致性并复用一例验证纯键盘提交。2026-08-20 复查是否迁出标签准备与报告读取。 | 已排期：2026-08-20 |
 | 2026-07-20 | 浏览器填字、回车与暂停闭环 | `src/__tests__/agent-session-checkpoint-native.test.ts` | 1075 | 净 +108 | 一般 | 仍只验证原生 SQLite checkpoint 生命周期，本轮补接管提示与可继续动作持久化。2026-08-20 复查是否按写入、恢复拆分夹具。 | 已排期：2026-08-20 |
 | 2026-07-20 | 浏览器填字、回车与暂停闭环 | `src/__tests__/browser-engine-services.test.ts` | 1389 | 净 +7 | 一般 | 仍是浏览器引擎服务行为集；本轮只在现有键盘投递用例中核对 CDP 焦点模拟的开启与恢复。2026-08-20 复查是否按 automation/lifecycle 拆分。 | 已排期：2026-08-20 |
-| 2026-07-20 | 浏览器填字、回车与暂停闭环 | `src/__tests__/runtime-driver-terminal-unlock.test.ts` | 1283 | 净 +37 | 一般 | 仍聚焦 Renderer 终态解锁，本轮补真实暂停到达后不再虚构缺失终态。2026-08-20 复查 Browser 专项是否迁出。 | 已排期：2026-08-20 |
+| 2026-07-20 | 浏览器填字、回车与暂停闭环 | `src/__tests__/runtime-driver-terminal-unlock.test.ts` | 1283 | 净 +37 | 一般 | 人工暂停、终态解锁和 Renderer 看门狗场景已可独立拆分。2026-07-23 计划要求把 Browser checkpoint 场景迁出，原套件保留通用终态合同。 | 已纳入 2026-07-23 纠偏实施计划 |
 | 2026-07-20 | 浏览器填字、回车与暂停闭环 | `src/__tests__/scope-run-state.test.ts` | 1293 | 净 +28 | 一般 | 仍聚焦 scope 运行状态归一化，本轮补人工暂停的完成与错误对照。2026-08-20 复查按终态族拆分。 | 已排期：2026-08-20 |
 | 2026-07-20 | 浏览器填字、回车与暂停闭环 | `src/main/modules/agent-control/runtime-core/runtime.ts` | 2977 | 净 +1 | 危险 | 本轮只透传接管提示，运行服务装配仍过度集中；后续应继续迁出 Browser/continuation 组合 facade。 | 待独立拆分合同；交付时提醒 |
 | 2026-07-20 | 浏览器填字、回车与暂停闭环 | `src/main/modules/browser-engine/ipc-handler.ts` | 2820 | 净 +13 | 危险 | 本轮只让 detached/hidden 宿主在受保护的发键期间临时 offscreen park 并按原状态恢复，但浏览器宿主控制、服务装配与入口仍集中。后续应把输入 presentation 与 layout 协调继续下沉。 | 待独立拆分合同；交付时提醒 |
 | 2026-07-20 | 浏览器填字、回车与暂停闭环 | `src/main/modules/tools/browser-act-tools.ts` | 2519 | 净 +17 | 危险 | 本轮只修提交结果与部分写入回执；交互、表单、导航、上传与采集仍共用巨大分派器。后续按既有动作族拆分合同继续下沉。 | 待独立拆分合同；交付时提醒 |
 | 2026-07-20 | 浏览器填字、回车与暂停闭环 | `src/main/modules/tools/browser-input-actions.ts` | 1273 | 净 +58 | 一般 | 文件仍聚焦可信输入，本轮把文字写入、定向键盘投递和部分生效回读分开验证，不再引入原生聚焦路径。2026-08-20 复查是否按文字与键盘通道拆分。 | 已排期：2026-08-20 |
-| 2026-07-20 | 浏览器填字、回车与暂停闭环 | `src/renderer/modules/agent/runtimeDriver.ts` | 1884 | 净 +5 | 一般 | 本轮只让已到达的人工暂停终态及时解锁，事件桥职责未扩散。2026-08-20 复查 scope-run 事件映射器下沉。 | 已排期：2026-08-20 |
+| 2026-07-20 | 浏览器填字、回车与暂停闭环 | `src/renderer/modules/agent/runtimeDriver.ts` | 1884 | 净 +5 | 一般 | 监听器、运行状态、超时、终态消息和 scope 事件映射已集中过多。2026-07-23 计划要求保留安装入口，拆出 session/watchdog/canonical/scope 事件域。 | 已纳入 2026-07-23 纠偏实施计划 |
 | 2026-07-20 | 浏览器填字、回车与暂停闭环 | `src/renderer/modules/agent/scopeRunState.ts` | 1055 | 净 +1 | 一般 | 仍是运行状态归一化单一职责，本轮只增加人工暂停枚举。2026-08-20 复查事件归一化边界。 | 已排期：2026-08-20 |
 | 2026-07-20 | 浏览器填字、回车与暂停闭环 | `src/renderer/types/electron.d.ts` | 4023 | 净 +1 | 健康 | 只补齐跨进程人工暂停声明，类型检查和真实应用验收覆盖。 | 无需处理 |
 | 2026-07-19 | 浏览器 grounded 调度与能力闭环 | `src/__tests__/agent-acceptance-checklist.test.ts` | 2789 | 净 +20 | 危险 | 产品验收矩阵仍聚合多个独立能力域；本轮只补最终工具面与浏览器能力地板验收。后续应按产品域拆成独立验收套件。 | 待独立测试拆分合同；交付时提醒 |

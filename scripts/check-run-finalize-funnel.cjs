@@ -41,7 +41,12 @@ const WORKFLOW_UNIT_OF_WORK_LEAF_REPOSITORIES = new Set([
   'src/main/modules/repositories/agent-session-checkpoint-closeout.ts',
   'src/main/modules/repositories/agent-session-checkpoint-resume.ts',
   'src/main/modules/repositories/agent-session-checkpoint-store.ts',
+  'src/main/modules/repositories/agent-session-checkpoint-takeover.ts',
+  'src/main/modules/repositories/agent-session-checkpoint-owner-recovery.ts',
+  'src/main/modules/repositories/agent-session-checkpoint-typed-resume.ts',
 ])
+const RUN_FINALIZER_PROJECTION_REL =
+  'src/main/modules/agent-control/runtime-core/run-finalizer-projection.ts'
 const DIRECT_ANSWER_HISTORY_MIGRATION_REL =
   'src/main/modules/agent-control/task-projection/direct-answer-history-migration.ts'
 const DIRECT_ANSWER_HISTORY_MIGRATION_MARKER =
@@ -131,7 +136,7 @@ function sourceForRunMetaRules(rel, text) {
 }
 
 function isAllowedProjectionPatchConstructor(rel) {
-  return rel === RUN_FINALIZER_REL
+  return rel === RUN_FINALIZER_REL || rel === RUN_FINALIZER_PROJECTION_REL
 }
 
 function pushRegexViolations(violations, rel, text, rules) {

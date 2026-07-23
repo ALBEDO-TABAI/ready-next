@@ -58,6 +58,7 @@ export interface AgentBrowserSupervisionState {
   claims: BrowserTargetClaimSnapshot[]
   surfaces: Record<AgentBrowserSurface, BrowserLeaseSurfaceSnapshot> | null
   activeWriteSurface: AgentBrowserSurface | null
+  takeoverError: string | null
 }
 
 export interface BrowserLeaseSupervisionSnapshot {
@@ -66,7 +67,7 @@ export interface BrowserLeaseSupervisionSnapshot {
   activeWriteSurface?: AgentBrowserSurface | null
 }
 
-const EMPTY: AgentBrowserSupervisionState = { controlState: 'active', agentTabId: null, tasks: [], claims: [], surfaces: null, activeWriteSurface: null }
+const EMPTY: AgentBrowserSupervisionState = { controlState: 'active', agentTabId: null, tasks: [], claims: [], surfaces: null, activeWriteSurface: null, takeoverError: null }
 const POLL_MS = 2500
 
 interface BrowserTabInfoLike {
@@ -162,14 +163,15 @@ export function useAgentBrowserSupervision(): AgentBrowserSupervisionState & {
         if (next.agentTabId) {
           await syncAgentTabFromRuntime(api, next.agentTabId)
         }
-        setState({
+        setState((current) => ({
           controlState: next.controlState,
           agentTabId: next.agentTabId,
           tasks: next.tasks ?? [],
           claims: next.claims ?? [],
           surfaces: next.surfaces ?? null,
           activeWriteSurface: next.activeWriteSurface ?? null,
-        })
+          takeoverError: current.takeoverError,
+        }))
       }
     } catch {
       // silent-catch: transient IPC failure keeps the last known supervision state.
@@ -182,7 +184,10 @@ export function useAgentBrowserSupervision(): AgentBrowserSupervisionState & {
     const id = window.setInterval(refresh, POLL_MS)
     // Push: refresh immediately when the user takes over instead of waiting for
     // the next poll.
-    const off = window.electronAPI?.browser?.onAgentControlChanged?.(() => {
+    const off = window.electronAPI?.browser?.onAgentControlChanged?.((event) => {
+      if (mounted.current) {
+        setState((current) => ({ ...current, controlState: event.state, takeoverError: event.takeoverError || null }))
+      }
       void refresh()
     })
     const offLease = window.electronAPI?.browser?.onLeaseChanged?.((snapshot) => {

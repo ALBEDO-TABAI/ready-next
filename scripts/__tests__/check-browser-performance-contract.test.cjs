@@ -18,12 +18,16 @@ function fixture(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ready-browser-perf-contract-'))
   t.after(() => fs.rmSync(root, { recursive: true, force: true }))
   write(root, 'src/main/modules/browser-engine/browser-tab-load-governor.ts', 'tab.view.webContents.setBackgroundThrottling(true)')
-  write(root, 'src/main/modules/browser-engine/ipc-handler.ts', `
+  write(root, 'src/main/modules/browser-engine/browser-controller-composition.ts', `
     this.performanceRuntime = new BrowserPerformanceRuntime({
       emitTabUpdate: () => this.sendToRendererImmediate('browser:tabUpdate'),
     })
+  `)
+  write(root, 'src/main/modules/browser-engine/browser-controller-tab-runtime.ts', `
     registerDormantTabs(request) { return this.tabLifecycleService.registerDormantTabs(request) }
   `)
+  write(root, 'src/main/modules/browser-engine/browser-controller-capture-runtime.ts', '')
+  write(root, 'src/main/modules/browser-engine/ipc-handler.ts', '')
   write(root, 'src/main/modules/browser-engine/browser-performance-runtime.ts', `
     this.updateBatcher = new BrowserTabUpdateBatcher({ emit: (update) => this.deps.emitTabUpdate(update) })
   `)
@@ -43,11 +47,15 @@ function fixture(t) {
 
 test('browser performance contract accepts the governed lazy architecture', (t) => {
   const root = fixture(t)
-  write(root, 'src/main/modules/browser-engine/ipc-handler.ts', `
+  write(root, 'src/main/modules/browser-engine/browser-controller-composition.ts', `
     this.performanceRuntime = new BrowserPerformanceRuntime({
       emitTabUpdate: () => this.sendToRendererImmediate('browser:tabUpdate'),
     })
+  `)
+  write(root, 'src/main/modules/browser-engine/browser-controller-tab-runtime.ts', `
     registerDormantTabs(request) { return this.tabLifecycleService.registerDormantTabs(request) }
+  `)
+  write(root, 'src/main/modules/browser-engine/browser-controller-capture-runtime.ts', `
     async captureBackgroundPage() {
       const probeWindow = new BrowserWindow({ webPreferences: { backgroundThrottling: false } })
     }

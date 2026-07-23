@@ -50,7 +50,7 @@ test('gate rejects a full foreground regression (call sites + interface + wiring
       linkCall: 'this.host.createTab(linkUrl)',
       imageCall: 'this.host.createTab(imageUrl)',
     }),
-    'src/main/modules/browser-engine/ipc-handler.ts': ipcSource('createTab: (url) => this.createTab(url)'),
+    'src/main/modules/browser-engine/browser-controller-composition.ts': ipcSource('createTab: (url) => this.createTab(url)'),
   })
   const result = check({ root })
   assert.equal(result.ok, false)
@@ -68,7 +68,7 @@ test('gate catches the silent options-drop even when call sites are correct', ()
       linkCall: 'this.host.createTab(linkUrl, { background: true })',
       imageCall: 'this.host.createTab(imageUrl, { background: true })',
     }),
-    'src/main/modules/browser-engine/ipc-handler.ts': ipcSource('createTab: (url) => this.createTab(url)'),
+    'src/main/modules/browser-engine/browser-controller-composition.ts': ipcSource('createTab: (url) => this.createTab(url)'),
   })
   const result = check({ root })
   assert.equal(result.ok, false)
@@ -89,7 +89,7 @@ test('gate catches background:false masquerading as an options bag', () => {
       linkCall: 'this.host.createTab(linkUrl, { background: false })',
       imageCall: 'this.host.createTab(imageUrl, { background: true })',
     }),
-    'src/main/modules/browser-engine/ipc-handler.ts': ipcSource('createTab: (url, options) => this.createTab(url, options)'),
+    'src/main/modules/browser-engine/browser-controller-composition.ts': ipcSource('createTab: (url, options) => this.createTab(url, options)'),
   })
   const result = check({ root })
   assert.equal(result.ok, false)
@@ -108,7 +108,7 @@ test('gate detects a deleted open-in-tab menu item (not just a foreground revert
         { label: '在新标签页打开链接', click: () => { void this.host.createTab(linkUrl, { background: true }).catch(() => {}) } },
       ]
     `,
-    'src/main/modules/browser-engine/ipc-handler.ts': ipcSource('createTab: (url, options) => this.createTab(url, options)'),
+    'src/main/modules/browser-engine/browser-controller-composition.ts': ipcSource('createTab: (url, options) => this.createTab(url, options)'),
   })
   const result = check({ root })
   assert.equal(result.ok, false)
@@ -127,7 +127,7 @@ test('gate does NOT false-fail on behavior-identical reformats (P3 regression gu
       linkCall: '(() => { const link = linkUrl; return this.host.createTab(link, { background: true }) })()',
       imageCall: '(() => { const pic = imageUrl; return this.host.createTab(pic, { background: true }) })()',
     }),
-    'src/main/modules/browser-engine/ipc-handler.ts': ipcSource('createTab: (u, o) => this.createTab(u, o)'),
+    'src/main/modules/browser-engine/browser-controller-composition.ts': ipcSource('createTab: (u, o) => this.createTab(u, o)'),
   })
   const result = check({ root })
   assert.equal(result.ok, true, `reformats must not false-fail: ${result.errors.join(', ')}`)

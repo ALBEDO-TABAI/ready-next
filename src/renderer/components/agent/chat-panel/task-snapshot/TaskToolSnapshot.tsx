@@ -82,7 +82,7 @@ export interface TaskToolSnapshotProps {
   onSupplementMemoryCapture: (scopeId: string) => void
   onOpenScope: (scopeId: string) => void
   onContinueTaskInput: (scopeId: string) => void
-  onSubmitTaskConfirmation: (scopeId: string, confirmed: boolean) => void
+  onSubmitTaskConfirmation: (scopeId: string, confirmed: boolean, requestId?: string) => void
   onSubmitTaskAgentResult: (scopeId: string) => void
   onRetryTask: (scopeId: string) => void
   onSuspendTask: (scopeId: string) => void

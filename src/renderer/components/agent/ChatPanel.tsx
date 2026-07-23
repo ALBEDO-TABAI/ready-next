@@ -721,6 +721,23 @@ export default function ChatPanel({
     void refreshPersistedTaskProjections()
   }, [refreshPersistedTaskProjections, currentScopeId, filteredScopes.length])
 
+  const latestBrowserConfirmationMessageId = useMemo(() => {
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+      const message = messages[index]
+      if (message.type === 'agent' && message.meta?.browserConfirmationRequest) return message.id
+    }
+    return null
+  }, [messages])
+
+  // A brand-new local scope can receive its first projection push before the
+  // scope has entered filteredScopes. The canonical checkpoint notice is
+  // committed in the same transaction as the projection, so its arrival is a
+  // reliable second edge for reading the now-durable confirmation state.
+  useEffect(() => {
+    if (!latestBrowserConfirmationMessageId) return
+    void refreshPersistedTaskProjections()
+  }, [latestBrowserConfirmationMessageId, refreshPersistedTaskProjections])
+
   // Stage O §1.1 — push subscription. The debouncer collapses bursts
   // (child-runner finalize close emits 5+ updates back-to-back); cancel
   // is called in cleanup so a pending timer doesn't fire post-unmount.

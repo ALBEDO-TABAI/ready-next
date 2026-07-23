@@ -152,7 +152,7 @@ test('TaskCard renders only exact child-run continue action for suspended child 
 })
 
 test('TaskCard renders a browser confirmation card with only typed allow and deny actions', () => {
-  const confirmationCalls: Array<[string, boolean]> = []
+  const confirmationCalls: Array<[string, boolean, string | undefined]> = []
   const resumeCalls: string[] = []
   const run = taskProjectionToTaskCardRun({
     scopeId: 'scope-confirmation',
@@ -196,7 +196,7 @@ test('TaskCard renders a browser confirmation card with only typed allow and den
   const rendered = mount(createElement(TaskCard, {
     run,
     expanded: true,
-    onSubmitConfirmation: (scopeId, confirmed) => confirmationCalls.push([scopeId, confirmed]),
+    onSubmitConfirmation: (scopeId, confirmed, requestId) => confirmationCalls.push([scopeId, confirmed, requestId]),
     onResumeRun: (scopeId) => resumeCalls.push(scopeId),
   }))
 
@@ -214,7 +214,10 @@ test('TaskCard renders a browser confirmation card with only typed allow and den
     assert.equal(buttons.some((button) => button.textContent?.trim() === '继续运行'), false)
     allow.click()
     deny.click()
-    assert.deepEqual(confirmationCalls, [['scope-confirmation', true], ['scope-confirmation', false]])
+    assert.deepEqual(confirmationCalls, [
+      ['scope-confirmation', true, 'confirmation-1'],
+      ['scope-confirmation', false, 'confirmation-1'],
+    ])
     assert.deepEqual(resumeCalls, [])
   } finally {
     rendered.unmount()

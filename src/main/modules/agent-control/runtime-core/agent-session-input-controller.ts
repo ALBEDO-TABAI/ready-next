@@ -1,5 +1,6 @@
 import type { AgentInputItem, MemorySession } from '@openai/agents'
 import type { DurableRequestAnchor } from '../../../../shared/browser-workflow-control'
+import type { CanonicalAssistantMessageReceipt } from '../../../../shared/ipc-contracts/canonical-message'
 import type { RequestEnvelope } from '../contracts/request-envelope'
 import { logAgentMetric } from '../metrics'
 import { parseEnvelopeResourceReferences } from './agent-sdk-input-context-utils'
@@ -7,6 +8,10 @@ import {
   AgentSessionCheckpointRepository,
   workflowDigest,
 } from '../../repositories/agent-session-checkpoint-repository'
+import {
+  consumeTypedResumeRecoveryMarkers,
+  typedResumeRecoveryId,
+} from '../../repositories/typed-resume-checkpoint'
 import type { ToolBridgeRuntimeContext } from './agent-sdk-types'
 
 function browserRouteResourceAnchors(value: unknown): DurableRequestAnchor['resourceAnchors'] {
@@ -42,6 +47,44 @@ function exactPrefixDigest(
 ): string | null {
   if (count < 0 || count > items.length) return null
   return workflowDigest(items.slice(0, count))
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  const prototype = Object.getPrototypeOf(value)
+  return prototype === Object.prototype || prototype === null
+}
+
+function hasToolSearchCallId(record: Record<string, unknown>): boolean {
+  const callId = record.call_id ?? record.callId
+  if (typeof callId === 'string' && callId.length > 0) return true
+  const providerData = isPlainRecord(record.providerData) ? record.providerData : null
+  const providerCallId = providerData?.call_id ?? providerData?.callId
+  return typeof providerCallId === 'string' && providerCallId.length > 0
+}
+
+function sessionComparableValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(sessionComparableValue)
+  if (!isPlainRecord(value)) return value
+  const stripId = value.type === 'function_call'
+    || value.type === 'function_call_result'
+    || ((value.type === 'tool_search_call' || value.type === 'tool_search_output')
+      && hasToolSearchCallId(value))
+  return Object.fromEntries(Object.entries(value)
+    .filter(([key]) => !(stripId && key === 'id'))
+    .map(([key, entry]) => [key, sessionComparableValue(entry)]))
+}
+
+function sessionComparableDigest(items: readonly AgentInputItem[]): string {
+  return workflowDigest(sessionComparableValue(items))
+}
+
+function hasSessionComparablePrefix(
+  prefix: readonly AgentInputItem[],
+  items: readonly AgentInputItem[],
+): boolean {
+  if (prefix.length > items.length) return false
+  return sessionComparableDigest(prefix) === sessionComparableDigest(items.slice(0, prefix.length))
 }
 
 function hasExactPrefix(
@@ -133,14 +176,20 @@ function appendWithoutDuplicateDurableFacts(
   const verifierFactIds = new Set(result
     .map(browserVerifierRecoveryFactId)
     .filter((id): id is string => Boolean(id)))
+  const typedResumeIds = new Set(result
+    .map(typedResumeRecoveryId)
+    .filter((id): id is string => Boolean(id)))
   for (const item of suffix) {
     const receiptId = steeringReceiptId(item)
     const verifierFactId = browserVerifierRecoveryFactId(item)
+    const typedResumeId = typedResumeRecoveryId(item)
     if (receiptId && steeringIds.has(receiptId)) continue
     if (verifierFactId && verifierFactIds.has(verifierFactId)) continue
+    if (typedResumeId && typedResumeIds.has(typedResumeId)) continue
     result.push(structuredClone(item) as AgentInputItem)
     if (receiptId) steeringIds.add(receiptId)
     if (verifierFactId) verifierFactIds.add(verifierFactId)
+    if (typedResumeId) typedResumeIds.add(typedResumeId)
   }
   return result
 }
@@ -185,7 +234,37 @@ export class AgentSessionInputController {
 
     const sessionItems = await session.getItems()
     const sessionDigest = workflowDigest(sessionItems)
-    if (sessionDigest !== current.finalInputDigest) {
+    const sessionComparable = sessionComparableDigest(sessionItems)
+    const checkpointComparable = sessionComparableDigest(current.finalInput)
+    const checkpointIsSessionPrefix = hasSessionComparablePrefix(current.finalInput, sessionItems)
+    const sourcePrefixMatches = exactPrefixDigest(sessionItems, current.sdkSourceItemCount)
+      === current.sdkSourcePrefixDigest
+    const latestFilteredSource = this.latestProviderBoundary?.sourceItems || null
+    const latestFilteredSourceIsSessionPrefix = Boolean(
+      latestFilteredSource && hasSessionComparablePrefix(latestFilteredSource, sessionItems),
+    )
+    if (sessionComparable !== checkpointComparable && latestFilteredSourceIsSessionPrefix) {
+      const suffix = sessionItems.slice(latestFilteredSource?.length || 0)
+      await session.clearSession()
+      const reconciled = [
+        ...structuredClone(current.finalInput) as AgentInputItem[],
+        ...structuredClone(suffix) as AgentInputItem[],
+      ]
+      if (reconciled.length > 0) {
+        await session.addItems(reconciled)
+      }
+    } else if (
+      sessionComparable !== checkpointComparable
+      && !checkpointIsSessionPrefix
+      && sourcePrefixMatches
+    ) {
+      const reconciled = [
+        ...structuredClone(current.finalInput) as AgentInputItem[],
+        ...structuredClone(sessionItems.slice(current.sdkSourceItemCount)) as AgentInputItem[],
+      ]
+      await session.clearSession()
+      if (reconciled.length > 0) await session.addItems(reconciled)
+    } else if (sessionComparable !== checkpointComparable && !checkpointIsSessionPrefix) {
       await session.clearSession()
       if (current.finalInput.length > 0) {
         await session.addItems(structuredClone(current.finalInput) as AgentInputItem[])
@@ -235,6 +314,26 @@ export class AgentSessionInputController {
     return route
   }
 
+  restoreBrowserWorkflowRoute(): {
+    browserTaskId: string
+    requestAnchorSnapshotDigest: string
+  } | null {
+    if (this.runtimeContext.browserWorkflowRoute) return this.runtimeContext.browserWorkflowRoute
+    if (!this.runtimeContext.activatedCapabilityGroups.includes('browser')) return null
+    const current = this.repository.current(this.runtimeContext.taskId, 'clean_base')
+    if (
+      !current?.browserTaskId
+      || current.ownerRunId !== this.runtimeContext.runId
+    ) return null
+    const route = {
+      browserTaskId: current.browserTaskId,
+      requestAnchorSnapshotDigest:
+        current.preparedSkill.requestOrResourceAnchorDigest || workflowDigest(current.finalInput),
+    }
+    this.runtimeContext.browserWorkflowRoute = route
+    return route
+  }
+
   async persistLatestCleanBoundary(): Promise<AgentInputItem[]> {
     const boundary = this.latestProviderBoundary
     if (!boundary) throw new Error('browser_route_clean_boundary_missing')
@@ -246,6 +345,7 @@ export class AgentSessionInputController {
 
   async persistSuspension(
     reason: 'budget' | 'steering' | 'incomplete' | 'background' | 'foreground' | 'provider_transfer' | 'manual',
+    publicNotice: string,
     recoveryItems: readonly AgentInputItem[] = [],
   ) {
     const route = this.runtimeContext.browserWorkflowRoute
@@ -262,12 +362,13 @@ export class AgentSessionInputController {
       },
     )
     const suspensionInput = appendWithoutDuplicateDurableFacts(cleanInput, recoveryItems)
-    return this.repository.writeCleanBoundary({
+    const checkpoint = await this.repository.writeCleanBoundary({
       parentTaskId: this.runtimeContext.taskId,
       browserTaskId: route.browserTaskId,
       ownerRunId: this.runtimeContext.runId,
       role: 'suspension',
       suspensionReason: reason,
+      publicNotice,
       sourceItems: suspensionInput,
       sdkSourceItems: boundary.sourceItems,
       sdkSourceItemCount: boundary.sourceItems.length,
@@ -280,6 +381,8 @@ export class AgentSessionInputController {
         .map((resource) => String(resource.path || resource.name || resource.kind || '').trim())
         .filter(Boolean),
     })
+    this.recordSuspensionCanonicalReceipt(checkpoint)
+    return checkpoint
   }
 
   async filter(
@@ -358,18 +461,25 @@ export class AgentSessionInputController {
       finalItems: structuredClone(checkpoint.finalInput) as AgentInputItem[],
     }
     if (this.runtimeContext.browserSuspensionRequest) {
-      this.runtimeContext.browserSuspensionCanonicalReceipt = checkpoint.canonicalMessage
-        && checkpoint.canonicalMessageDigest
-        ? {
-            canonicalMessage: checkpoint.canonicalMessage,
-            canonicalMessageDigest: checkpoint.canonicalMessageDigest,
-          }
-        : null
+      this.recordSuspensionCanonicalReceipt(checkpoint)
       const error = new Error('browser_workflow_suspended_after_tool_result')
       error.name = 'BrowserWorkflowSuspendedError'
       throw error
     }
     return checkpoint.finalInput
+  }
+
+  private recordSuspensionCanonicalReceipt(checkpoint: {
+    canonicalMessage?: CanonicalAssistantMessageReceipt['canonicalMessage']
+    canonicalMessageDigest?: string
+  }): void {
+    if (!checkpoint.canonicalMessage || !checkpoint.canonicalMessageDigest) {
+      throw new Error('browser_checkpoint_canonical_receipt_missing')
+    }
+    this.runtimeContext.browserSuspensionCanonicalReceipt = {
+      canonicalMessage: checkpoint.canonicalMessage,
+      canonicalMessageDigest: checkpoint.canonicalMessageDigest,
+    }
   }
 
   private async resolveFinalBase(
@@ -386,7 +496,7 @@ export class AgentSessionInputController {
         sourceItems,
         current.sdkSourceItemCount,
       ) === current.sdkSourcePrefixDigest
-      const checkpointSeedMatches = hasExactPrefix(current.finalInput, sourceItems)
+      const checkpointSeedMatches = hasSessionComparablePrefix(current.finalInput, sourceItems)
       if (!storedCursorMatches && !checkpointSeedMatches) {
         logAgentMetric('owner_local_session_source_cursor_mismatch', {
           runId: this.runtimeContext.runId,
@@ -406,7 +516,7 @@ export class AgentSessionInputController {
         : sourceItems.slice(current.sdkSourceItemCount)
       if (context.compacted) {
         const durableFactItems = current.finalInput.filter((item) => (
-          steeringReceiptId(item) || browserVerifierRecoveryFactId(item)
+          steeringReceiptId(item) || browserVerifierRecoveryFactId(item) || typedResumeRecoveryId(item)
         ))
         finalBase = appendWithoutDuplicateDurableFacts(compactedItems, durableFactItems)
       } else {
@@ -424,6 +534,6 @@ export class AgentSessionInputController {
     if (this.runtimeContext.confirmedBrowserPermissionRequestConsumed) {
       finalBase = finalBase.filter((item) => !isConfirmedBrowserPermissionFact(item))
     }
-    return finalBase
+    return consumeTypedResumeRecoveryMarkers(finalBase)
   }
 }

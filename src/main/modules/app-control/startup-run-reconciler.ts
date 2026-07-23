@@ -33,7 +33,7 @@ export interface StartupRunReconcilerOptions {
   db?: StartupRunReconcilerDb | null
   now?: Date
   skillTaskRunRepository?: Pick<SkillTaskRunRepository, 'reconcileRunningRowsOnStartup'>
-  agentSessionCheckpointRepository?: Pick<AgentSessionCheckpointRepository, 'settleOwnerFailure' | 'expirePendingBrowserConfirmations'>
+  agentSessionCheckpointRepository?: Pick<AgentSessionCheckpointRepository, 'settleOwnerFailure' | 'expirePendingBrowserConfirmations' | 'expirePendingHumanTakeovers'>
   skillStaleAfterMs?: number
   logMetric?: (name: string, payload: Record<string, unknown>) => void
 }
@@ -354,13 +354,16 @@ export async function reconcileStartupRunsOnStartup(
   const expiredBrowserConfirmations = await agentSessionCheckpointRepository.expirePendingBrowserConfirmations({
     now: now.toISOString(),
   })
+  const expiredHumanTakeovers = await agentSessionCheckpointRepository.expirePendingHumanTakeovers({
+    now: now.toISOString(),
+  })
   const browserWorkflowOwners = await reconcileBrowserWorkflowOwners(
     db,
     agentSessionCheckpointRepository,
     now.toISOString(),
   )
   const runMeta = browserWorkflowOwners.count + reconcileRunMeta(db, now.getTime())
-  const taskProjections = expiredBrowserConfirmations.length + browserWorkflowOwners.count + reconcileTaskProjections(db, now.toISOString())
+  const taskProjections = expiredBrowserConfirmations.length + expiredHumanTakeovers.length + browserWorkflowOwners.count + reconcileTaskProjections(db, now.toISOString())
   const browserTasks = browserWorkflowOwners.count + reconcileBrowserTasks(db, now.toISOString())
   const skillRuns = reconcileSkillRuns(skillTaskRunRepository, now, options.skillStaleAfterMs)
   const reconcileCount: StartupRunReconcileCount = {
@@ -374,6 +377,7 @@ export async function reconcileStartupRunsOnStartup(
   emitMetric('startup_run_reconciler.reconciled', {
     reconcileCount,
     expiredBrowserConfirmations,
+    expiredHumanTakeovers,
     browserWorkflowOwnerRecoveryFailures: browserWorkflowOwners.failures,
     skillRunDetails: skillRuns.result
   })

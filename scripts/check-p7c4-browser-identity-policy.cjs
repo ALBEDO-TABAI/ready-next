@@ -64,10 +64,21 @@ const tabLifecycle = assertIncludes('src/main/modules/browser-engine/tab-lifecyc
   "profile ? `persist:browser-profile-${profile}` : 'persist:browser'",
 ])
 
-const ipcHandler = assertIncludes('src/main/modules/browser-engine/ipc-handler.ts', [
+const controllerTab = assertIncludes('src/main/modules/browser-engine/browser-controller-tab-runtime.ts', [
   'async ensureAgentWorkTab(',
   "const created = await this.createTab(url, { background: true, owner: 'agent' })",
+])
+
+const controllerComposition = assertIncludes('src/main/modules/browser-engine/browser-controller-composition.ts', [
+  'this.sessionPolicyService.applyForPartition(partition)',
+])
+
+const controllerCapture = assertIncludes('src/main/modules/browser-engine/browser-controller-capture-runtime.ts', [
   "partition: 'persist:browser'",
+  'targetSession = this.resolveTabView(payload.tabId).view.webContents.session',
+])
+
+const ipcHandler = assertIncludes('src/main/modules/browser-engine/ipc-handler.ts', [
   "session.fromPartition('persist:browser')",
 ])
 
@@ -112,6 +123,9 @@ for (const [relPath, source] of [
   ['outputs/agent-audit/fix-plan/164-CONSENSUS-BROWSER-ISOLATION-SPECIALIST-PRODUCT-ROUTE.md', consensus],
   ['outputs/agent-audit/fix-plan/00-ROADMAP.md', roadmap],
   ['src/main/modules/browser-engine/tab-lifecycle-service.ts', tabLifecycle],
+  ['src/main/modules/browser-engine/browser-controller-tab-runtime.ts', controllerTab],
+  ['src/main/modules/browser-engine/browser-controller-composition.ts', controllerComposition],
+  ['src/main/modules/browser-engine/browser-controller-capture-runtime.ts', controllerCapture],
   ['src/main/modules/browser-engine/ipc-handler.ts', ipcHandler],
 ]) {
   assertNoSharedSessionIsolationClaim(relPath, source)

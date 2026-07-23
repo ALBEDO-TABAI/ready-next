@@ -11,7 +11,6 @@ const result = spawnSync(electron, [
   tsxCli,
   '--test',
   '--test-concurrency=1',
-  'src/__tests__/agent-session-checkpoint-native.test.ts',
   'src/__tests__/browser-target-claims-native.test.ts',
 ], {
   cwd: root,
@@ -20,4 +19,14 @@ const result = spawnSync(electron, [
 })
 
 if (result.error) throw result.error
-process.exit(result.status ?? 1)
+if ((result.status ?? 1) !== 0) process.exit(result.status ?? 1)
+
+const signalResult = spawnSync(process.execPath, [
+  'scripts/run-browser-takeover-native-signal-tests.cjs',
+], {
+  cwd: root,
+  env: { ...process.env },
+  stdio: 'inherit',
+})
+if (signalResult.error) throw signalResult.error
+process.exit(signalResult.status ?? 1)

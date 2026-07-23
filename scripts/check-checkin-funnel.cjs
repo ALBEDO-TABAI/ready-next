@@ -15,6 +15,7 @@ const SCAN_ROOT = join(ROOT, 'src', 'main')
 
 const WHITELIST = new Set([
   'src/main/modules/agent-control/runtime-core/run-finalizer.ts',
+  'src/main/modules/agent-control/runtime-core/run-finalizer-adjudication.ts',
   'src/main/modules/agent-control/quality/task-adjudicator.ts',
   'src/main/modules/repositories/task-projection-repository.ts',
 ])

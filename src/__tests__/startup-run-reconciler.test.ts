@@ -375,6 +375,19 @@ test('startup expires a pending browser confirmation and keeps the checkpoint re
   const db = await openDb()
   try {
     seedTaskProjection(db, {
+      taskId: 'projection-corrupt-confirmation',
+      runId: 'run-corrupt-confirmation',
+      status: 'recoverable_paused',
+      continuationRef: null,
+    })
+    db.prepare(
+      `UPDATE task_projections
+          SET module = 'browser', interaction_state = 'suspended', waiting_for = 'confirmation',
+              blocked_reason = 'browser_power_confirmation_checkpoint',
+              resumable_actions_json = '["continue","cancel"]'
+        WHERE task_id = 'projection-corrupt-confirmation'`,
+    ).run()
+    seedTaskProjection(db, {
       taskId: 'projection-browser-confirmation',
       runId: 'run-browser-confirmation',
       status: 'recoverable_paused',
@@ -431,7 +444,7 @@ test('startup expires a pending browser confirmation and keeps the checkpoint re
       revision: number
     }>('projection-browser-confirmation')!
     const continuation = JSON.parse(projection.continuation_ref_json) as Record<string, unknown>
-    assert.equal(first.reconcileCount.taskProjections, 1)
+    assert.equal(first.reconcileCount.taskProjections, 2)
     assert.equal(projection.waiting_for, 'none')
     assert.equal(projection.blocked_reason, 'browser_confirmation_expired_checkpoint')
     assert.equal(projection.degradation_reason, 'browser_confirmation_expired_on_restart_or_resend')
@@ -439,6 +452,17 @@ test('startup expires a pending browser confirmation and keeps the checkpoint re
     assert.equal(continuation.suspensionRequest, undefined)
     assert.equal(continuation.checkpointId, 'checkpoint-browser-confirmation')
     assert.equal(projection.revision, 1)
+    const corruptProjection = db.prepare(
+      `SELECT waiting_for, blocked_reason, continuation_ref_json
+         FROM task_projections WHERE task_id = ?`,
+    ).get<{
+      waiting_for: string
+      blocked_reason: string
+      continuation_ref_json: string
+    }>('projection-corrupt-confirmation')!
+    assert.equal(corruptProjection.waiting_for, 'none')
+    assert.equal(corruptProjection.blocked_reason, 'browser_confirmation_expired_checkpoint')
+    assert.deepEqual(JSON.parse(corruptProjection.continuation_ref_json), {})
 
     const second = await reconcileStartupRunsOnStartup({
       db,

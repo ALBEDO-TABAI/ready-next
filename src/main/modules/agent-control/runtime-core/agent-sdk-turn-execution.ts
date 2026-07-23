@@ -36,7 +36,7 @@ import { createAgentSdkTurnGuards } from './agent-sdk-turn-guards'
 import { assembleAgentSdkTurnInput } from './agent-sdk-turn-input-assembly'
 import type { AgentSdkPreparedTurnContext } from './agent-sdk-turn-execution-types'
 import { executeAgentSdkModelToolLoop } from './agent-sdk-turn-model-loop'
-import { AgentSessionInputController } from './agent-session-input-controller'
+import { bindAgentSessionInputController } from './agent-session-input-bindings'
 import { browserSurfaceActiveForDefinitions, prepareBrowserWorkflowTurnState } from './agent-sdk-browser-turn-control'
 import { createAgentSdkToolResultRecorder } from './agent-sdk-turn-tool-result-recorder'
 import { ensureLongRunningTaskBudgetCapacity } from '../task-projection/run-budget-policy'
@@ -430,18 +430,13 @@ export async function executeAgentSdkPreparedTurn(
         checkpointRequiredCapabilityGroups,
         checkpointRequiredToolNames,
       })
-    const checkpointRepository = host.runtime?.getAgentSessionCheckpointRepository?.() ?? null
-    const modelInputController = checkpointRepository
-      ? new AgentSessionInputController(
-          checkpointRepository,
-          toolBridgeRuntimeContext,
-          effectiveExecutionOptions?.requestEnvelope,
-        )
-      : null
-    if (modelInputController) {
-      toolBridgeRuntimeContext.ensureBrowserWorkflowRoute = () =>
-        modelInputController.ensureBrowserWorkflowRoute()
-    }
+    const modelInputBindings = bindAgentSessionInputController({
+      repository: host.runtime?.getAgentSessionCheckpointRepository?.() ?? null,
+      runtimeContext: toolBridgeRuntimeContext,
+      requestEnvelope: effectiveExecutionOptions?.requestEnvelope,
+      ownerModelSession,
+    })
+    const modelInputController = modelInputBindings?.controller ?? null
     const buildOwnerCheckpointSnapshot = async (): Promise<AgentInputItem[]> => {
       const providerBoundary = modelInputController?.latestFilteredInput()
       if (providerBoundary) return providerBoundary
@@ -484,11 +479,10 @@ export async function executeAgentSdkPreparedTurn(
       setProviderDiagnostics: (diagnostics) => { runMetaProviderDiagnostics = diagnostics },
       setFinalText: (text) => { finalText = text },
       emitOutput,
-      finalizeCheckpoint: (params) => finalizeEarlyReturn({
-        status: 'checkpoint',
-        providerDiagnostics: runMetaProviderDiagnostics,
-        ...params,
-      }),
+      finalizeCheckpoint: (params) => {
+        ctx.state.checkpointCanonicalReceipt = toolBridgeRuntimeContext.browserSuspensionCanonicalReceipt || null
+        return finalizeEarlyReturn({ status: 'checkpoint', providerDiagnostics: runMetaProviderDiagnostics, ...params })
+      },
     })
     ctx.state.finishProviderTransferCheckpoint = browserSuspension.finishProviderTransferCheckpoint
     const finishSteeringCheckpointIfNeeded = async (): Promise<ExecutionTurnResult | null> => {
@@ -499,7 +493,7 @@ export async function executeAgentSdkPreparedTurn(
       return browserSuspension.finishSuspension({
         reason: 'steering',
         terminalReason: 'checkpoint_steered',
-        message: '',
+        message: '浏览器现场和当前进度已保存，可以继续这项任务。',
       })
     }
     const finishBudgetCheckpointIfNeeded = async (): Promise<ExecutionTurnResult | null> => {
@@ -770,10 +764,8 @@ export async function executeAgentSdkPreparedTurn(
       emitOutput, emitHeartbeat,
       candidateOutputBuffer,
       checkpointSnapshotProvider: buildOwnerCheckpointSnapshot,
-      callModelInputFilter: modelInputController
-        ? (items, context) => modelInputController.filter(items, context)
-        : undefined,
-      prepareModelSessionForRunner: modelInputController ? () => modelInputController.prepareRunnerSession(ownerModelSession) : undefined,
+      callModelInputFilter: modelInputBindings?.filter,
+      prepareModelSessionForRunner: modelInputBindings?.prepareRunnerSession,
       nativeTextToolBoundaryFlush,
       finishBudgetCheckpointIfNeeded,
       finishBrowserObservationCheckpoint: browserSuspension.finishObservationCheckpoint,

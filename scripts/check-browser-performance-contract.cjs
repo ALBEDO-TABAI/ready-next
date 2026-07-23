@@ -8,6 +8,9 @@ const ROOT = process.cwd()
 const ENGINE_REL = 'src/main/modules/browser-engine'
 const GOVERNOR_REL = `${ENGINE_REL}/browser-tab-load-governor.ts`
 const CONTROLLER_REL = `${ENGINE_REL}/ipc-handler.ts`
+const CONTROLLER_COMPOSITION_REL = `${ENGINE_REL}/browser-controller-composition.ts`
+const CONTROLLER_TAB_REL = `${ENGINE_REL}/browser-controller-tab-runtime.ts`
+const CONTROLLER_CAPTURE_REL = `${ENGINE_REL}/browser-controller-capture-runtime.ts`
 const PERFORMANCE_RUNTIME_REL = `${ENGINE_REL}/browser-performance-runtime.ts`
 const TAB_LIFECYCLE_REL = `${ENGINE_REL}/tab-lifecycle-service.ts`
 const MAIN_INDEX_REL = 'src/main/index.ts'
@@ -41,7 +44,7 @@ function read(root, rel) {
 function hasDisallowedForcedFullSpeed(rel, source) {
   const matches = [...source.matchAll(/backgroundThrottling\s*:\s*false/g)]
   if (matches.length === 0) return false
-  if (rel !== CONTROLLER_REL) return true
+  if (rel !== CONTROLLER_CAPTURE_REL) return true
   const captureStart = source.indexOf('async captureBackgroundPage(')
   return matches.some((match) => {
     const offset = match.index ?? -1
@@ -67,27 +70,27 @@ function check({ root = ROOT } = {}) {
     if (rel !== GOVERNOR_REL && /\.setBackgroundThrottling\s*\(/.test(source)) {
       errors.push(`background_throttling_outside_governor:${rel}`)
     }
-    if (rel !== CONTROLLER_REL && /browser:tabUpdate/.test(source)) {
+    if (rel !== CONTROLLER_COMPOSITION_REL && /browser:tabUpdate/.test(source)) {
       errors.push(`tab_update_bypasses_controller_batcher:${rel}`)
     }
   }
 
   try {
-    const controller = read(root, CONTROLLER_REL)
+    const controller = read(root, CONTROLLER_TAB_REL)
     const lifecycle = read(root, TAB_LIFECYCLE_REL)
     if (
       !/registerDormantTabs\s*\([^)]*\)[\s\S]*tabLifecycleService\.registerDormantTabs\s*\(/.test(controller)
       || !/registerDormantTabs\s*\(/.test(lifecycle)
       || !/this\.materializeTab\s*\(/.test(lifecycle)
     ) {
-      errors.push(`missing_dormant_materialization_contract:${CONTROLLER_REL}`)
+      errors.push(`missing_dormant_materialization_contract:${CONTROLLER_TAB_REL}`)
     }
     const runtime = read(root, PERFORMANCE_RUNTIME_REL)
     if (
-      !/new BrowserPerformanceRuntime\s*\([\s\S]*emitTabUpdate:[\s\S]*sendToRendererImmediate\('browser:tabUpdate'/.test(controller)
+      !/new BrowserPerformanceRuntime\s*\([\s\S]*emitTabUpdate:[\s\S]*sendToRendererImmediate\('browser:tabUpdate'/.test(read(root, CONTROLLER_COMPOSITION_REL))
       || !/new BrowserTabUpdateBatcher\s*\([\s\S]*emit:[\s\S]*deps\.emitTabUpdate/.test(runtime)
     ) {
-      errors.push(`missing_tab_update_batcher_boundary:${CONTROLLER_REL}`)
+      errors.push(`missing_tab_update_batcher_boundary:${CONTROLLER_COMPOSITION_REL}`)
     }
   } catch (error) {
     errors.push(`missing_controller:${error.message}`)

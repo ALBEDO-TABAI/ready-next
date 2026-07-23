@@ -2,7 +2,7 @@
 title: Provider 可靠性与确认可见性实施合同（第二批工单）
 date: 2026-07-22
 kind: implementation
-status: implemented-p1-p4-reviewed-p5-blocked-p7-p9-pending
+status: implemented-p1-p4-p5-blocked-p7-p9-remediation-required
 enforce: true
 owner: 白
 author: Claude
@@ -12,6 +12,8 @@ requires:
   - docs/superpowers/plans/2026-07-22-agent-long-task-remediation-roadmap.md
 related:
   - docs/superpowers/plans/2026-07-17-kimi-k3-agent-specialization-implementation.md
+superseded_by:
+  - docs/superpowers/plans/2026-07-23-provider-checkpoint-session-integrity-remediation-implementation.md
 ---
 
 # Provider 可靠性与确认可见性实施合同（第二批工单）
@@ -172,3 +174,39 @@ P2/P3/P4 通过（映射/收口/回执/时钟别名/遥测/路由直测均以代
 ### 5.4 第三轮验证记录（commit `9dc3037d3`）
 
 typecheck / verify:browser-target-claims / verify:agent-continuation-clock / verify:stability / verify:native / verify:streaming / verify:dynamic-delivery 全部 EXIT=0；新套件 `agent-session-cursor-selfheal` 12/12（重建零操作/漂移重建+指标/无路由惰性/persistence_failed 分类/checkpoint id 隔离/lastRequest 语义）。
+
+### 5.5 P7–P9 实施结果（Codex）
+
+> ⚠️ 历史实施者声明，已被本文 §6 与 `2026-07-23-provider-checkpoint-session-integrity-remediation-implementation.md` 纠偏；不得单独引用本节判定 P7–P9 完成。
+
+1. **P7 completed**：budget、incomplete、steering、provider_transfer 四类 typed 续跑统一把 suspension 晋升为新的 clean base、清除 suspension 指针，并用一次性恢复标记保留压缩后的恢复增量。第一次 Provider 边界消费标记，后续迭代不再重复注入。四类原生 SQLite 用例均断言恢复增量存在、指针清空且 `rebased/mismatch` 为 0。
+2. **P8 completed**：根因确认是 Provider 输入过滤后只更新了请求输入，owner-local session 仍保留过滤前条目。现在过滤与会话同步在同一绑定层完成；fresh-run 第二迭代受控复跑中不再触发重建或游标不一致。执行入口的这组职责已下沉到 `agent-session-input-bindings.ts`，`agent-sdk-turn-execution.ts` 从 900 行降至 893 行；1000 行调度入口未修改。
+3. **P9 completed**：指针输入和 chrome 导航都通过真实 `createHumanTakeoverIntent` 事务接管精确 target；没有恢复 `recordUserSignal`。导航回声只在同 target 存在 Agent 活动动作时抑制；旧 boot 的 held/user-owned/suspended claim 在启动时过期。S0 两例已改成真实输入链，另有真实 SQLite 接管、回声抑制和启动过期覆盖。
+4. **P1 真机验收已诚实重做**：使用全新 profile `/tmp/ready-p9-live.3LxYLr`，只复制 6 条 Provider/模式设置；注入前 `chat_messages/run_meta/agent_session_checkpoints/browser_control_receipts` 均为 0。真实模型调用 `browser_eval` 后，确认投影、suspension checkpoint 与 canonical notice 均由生产管道生成；done 事件携带同一 canonical message，`renderer_done_without_canonical_terminal` 增量为 0。同一 profile 重启后，旧确认变为 `browser_confirmation_expired_checkpoint`、`waiting_for=none`，pending request 已清除。机器可读报告：`/tmp/ready-p9-live.3LxYLr/provider-confirmation-report.json`；复跑入口：`scripts/run-provider-confirmation-live-proof.mjs`。
+
+### 5.6 P7–P9 验证记录
+
+| 命令 / 验收 | 结果 |
+| --- | --- |
+| P7/P8/P9 直接行为套件 | EXIT 0，27/27 pass |
+| `npm run verify:browser-target-claims` | EXIT 0，行为 15/15，原生 19/19 |
+| `npm run verify:agent-continuation-clock` | EXIT 0，主套件 58（56 pass，2 ABI skip），随后行为 15/15、原生 19/19 |
+| `npm run verify:streaming` | EXIT 0 |
+| `npm run verify:stability` | EXIT 0，主套件 154（0 fail），Send IM 142（0 fail） |
+| `npm run verify:dynamic-delivery` | EXIT 0，含原生 ABI 与 typecheck |
+| `npm run typecheck` | EXIT 0 |
+| `npm run build` | EXIT 0 |
+| 隔离 Electron 真实确认与重启验收 | 触发六项、重启两项全部为 true |
+
+首次整套 continuation gate 曾因旧结构断言要求导航回声判断必须内联而失败；行为本身已通过。该断言已改为同时验证生产入口调用下沉规则与下沉规则内容，随后 `verify:browser-target-claims` 和完整 `verify:agent-continuation-clock` 均重跑通过。
+
+## 6. 2026-07-23 复测纠偏
+
+§5.5–§5.6 是当时实施者的记录，不再是 P7–P9 当前验收真值。2026-07-23 真实长任务复测和两路对抗审查确认：
+
+1. P7 四类主路径基本成立，但同一恢复增量中内容完全相同的两项会因 `wakeId + itemDigest` 身份冲突丢失一项。
+2. P8 根修失败：filter 内提前写 owner-local session，SDK 随后再写一次。真实 run `req-1784736080939-0t99qn` 出现 `previousItemCount=138 / checkpointItemCount=69` 的 rebase。
+3. P9 生产信号接线存在，但 S0 仍未贯穿 BrowserController → runtime → repository；真机脚本默认读错 metric 文件，且忽略报告中 `live.ok=false` 和空可见消息。
+4. 新症状的直接根因是普通 `provider_transfer` checkpoint 没有 canonical assistant notice；提示只写入 `run_meta.last_message_text`，Renderer 收到无 canonical 的 done 后无消息可呈现。该 run 其实只完成首批产物，Browser child 为 paused 17/55，不是已完成任务。
+
+后续修复、相关大文件拆分、机器 gate 和真实验收的唯一实施入口为 `docs/superpowers/plans/2026-07-23-provider-checkpoint-session-integrity-remediation-implementation.md`。

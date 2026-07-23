@@ -12,7 +12,7 @@ const requirements = [
   ['src/main/modules/agent-control/runtime-core/runtime.ts', /reconcileInterruptedDeliveryState\s*\(/, 'startup reconciliation'],
   ['src/main/modules/agent-control/runtime-core/dynamic-delivery/dynamic-delivery-coordinator.ts', /tools:\s*\[\]/, 'no-tools worker calls'],
   ['src/main/modules/agent-control/runtime-core/dynamic-delivery/dynamic-delivery-coordinator.ts', /dynamic_delivery_fired/, 'fired metric'],
-  ['src/main/modules/agent-control/runtime-core/run-finalizer.ts', /delivery_verifier_unsettled/, 'finalizer guard'],
+  ['src/main/modules/agent-control/runtime-core/run-finalizer-adjudication.ts', /delivery_verifier_unsettled/, 'finalizer guard'],
   ['src/main/modules/repositories/task-projection-repository.ts', /createDeliveryTreeAtomic\s*\(/, 'atomic task tree'],
   ['src/main/modules/repositories/task-projection-repository.ts', /reduceDeliveryState\s*\(/, 'CAS reducer'],
   ['src/main/modules/agent-control/runtime-core/dynamic-delivery/candidate-session-fork.ts', /class CandidateSessionTransaction/, 'candidate fork'],

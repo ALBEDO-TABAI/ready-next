@@ -544,8 +544,8 @@ const browserAPI = {
   requestAgentInterruption: () => ipcRenderer.invoke('browser:requestAgentInterruption'),
   resumeTargetClaim: (request: BrowserTargetResumeRequest) =>
     ipcRenderer.invoke('browser:resumeTargetClaim', request),
-  onAgentControlChanged: (callback: (data: { state: string }) => void) => {
-    const handler = (_event: unknown, data: { state: string }) => callback(data)
+  onAgentControlChanged: (callback: (data: { state: string; takeoverError?: string | null }) => void) => {
+    const handler = (_event: unknown, data: { state: string; takeoverError?: string | null }) => callback(data)
     ipcRenderer.on('browser:agentControlChanged', handler)
     return () => ipcRenderer.removeListener('browser:agentControlChanged', handler)
   },

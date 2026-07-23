@@ -1285,6 +1285,7 @@ export default function BrowserMode({
                       resumeTargetClaim={agentSupervision.resumeTargetClaim}
                       surfaces={agentSupervision.surfaces}
                       activeWriteSurface={agentSupervision.activeWriteSurface}
+                      takeoverError={agentSupervision.takeoverError}
                       variant="collapsedRail"
                       onExpand={() => setAgentPaneCollapsed(false)}
                     />
@@ -1316,6 +1317,7 @@ export default function BrowserMode({
                         resumeTargetClaim={agentSupervision.resumeTargetClaim}
                         surfaces={agentSupervision.surfaces}
                         activeWriteSurface={agentSupervision.activeWriteSurface}
+                        takeoverError={agentSupervision.takeoverError}
                         variant="pane"
                         onCollapse={() => setAgentPaneCollapsed(true)}
                         onClose={() => {

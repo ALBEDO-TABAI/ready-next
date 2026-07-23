@@ -167,7 +167,7 @@ export function TaskCard({
   onUndoMemoryCapture?: (scopeId: string) => void
   onSupplementMemoryCapture?: (scopeId: string) => void
   onContinueInput?: (scopeId: string) => void
-  onSubmitConfirmation?: (scopeId: string, confirmed: boolean) => void
+  onSubmitConfirmation?: (scopeId: string, confirmed: boolean, requestId?: string) => void
   onSubmitAgentResult?: (scopeId: string) => void
   onRetry?: (scopeId: string) => void
   onSuspendRun?: (scopeId: string) => void
@@ -826,14 +826,18 @@ export function TaskCard({
             <>
               <button
                 type="button"
-                onClick={() => onSubmitConfirmation?.(run.scopeId, true)}
+                data-ready-browser-confirmation-action="allow"
+                data-ready-browser-confirmation-request-id={confirmationCard?.requestId}
+                onClick={() => onSubmitConfirmation?.(run.scopeId, true, confirmationCard?.requestId)}
                 style={{ ...TASK_ACTION_BUTTON_STYLE }}
               >
                 {confirmationCard?.allowLabel || '确认继续'}
               </button>
               <button
                 type="button"
-                onClick={() => onSubmitConfirmation?.(run.scopeId, false)}
+                data-ready-browser-confirmation-action="deny"
+                data-ready-browser-confirmation-request-id={confirmationCard?.requestId}
+                onClick={() => onSubmitConfirmation?.(run.scopeId, false, confirmationCard?.requestId)}
                 style={{ ...TASK_ACTION_BUTTON_STYLE }}
               >
                 {confirmationCard?.denyLabel || '暂不继续'}

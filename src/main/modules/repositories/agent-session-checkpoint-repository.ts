@@ -93,6 +93,12 @@ export class AgentSessionCheckpointRepository {
     return this.resume.createHumanTakeoverIntent(...args)
   }
 
+  expirePendingHumanTakeovers(
+    ...args: Parameters<AgentSessionCheckpointRepository['resume']['expirePendingHumanTakeovers']>
+  ): ReturnType<AgentSessionCheckpointRepository['resume']['expirePendingHumanTakeovers']> {
+    return this.resume.expirePendingHumanTakeovers(...args)
+  }
+
   completeHumanTakeover(
     ...args: Parameters<AgentSessionCheckpointRepository['resume']['completeHumanTakeover']>
   ): ReturnType<AgentSessionCheckpointRepository['resume']['completeHumanTakeover']> {
