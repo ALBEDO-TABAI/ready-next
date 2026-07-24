@@ -1,5 +1,6 @@
 import type { AIModelConfig, AIProviderDef, AIReasoningEffort, AIWireAPI } from '../../../shared/ai-providers'
 import { resolveAIConfigCapabilities } from '../../../shared/ai-providers'
+import { normalizeChatGptOAuthReasoningEffort } from '../../../shared/chatgpt-oauth'
 import { looksLikeMissingNativeToolsReply } from '../claude-bridge/tool-bridge'
 import { buildToolDispatchDecision } from './tool-policy/execution-tool-policy'
 
@@ -24,7 +25,11 @@ export function resolveOpenAIProviderRuntime(params: {
 
   const reasoningEffort = (() => {
     const effort = params.config.reasoningEffort || params.provider?.defaultReasoningEffort
-    return effort === 'minimal' || effort === 'low' || effort === 'medium' || effort === 'high' || effort === 'max'
+    if (params.config.authMode === 'chatgpt-oauth') {
+      return normalizeChatGptOAuthReasoningEffort(effort)
+    }
+    return effort === 'none' || effort === 'minimal' || effort === 'low' || effort === 'medium'
+      || effort === 'high' || effort === 'xhigh' || effort === 'max'
       ? effort
       : undefined
   })()

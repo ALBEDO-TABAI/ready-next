@@ -52,6 +52,7 @@
 ## 4. Provider、流式与工具错误
 
 - AI provider 能力必须由共享能力层解析；“OpenAI 兼容”不代表一定支持原生 tools、vision 或 video。通用 openai-compatible 的 `toolUseMode=auto` 必须按不支持工具收口，只有显式 `on` 或内置 provider 合同可以开放；Packer 仅可为已经真实验证过工具流的固定端点写入 `on`。
+- OpenAI 内置预设仍以 API Key 为默认认证。`ChatGPT OAuth（实验）` 只能由用户主动连接为独立预设：授权主体是 Codex，Ready 凭证与 Codex CLI 隔离，模型服务只绑定 `127.0.0.1` 且每个请求校验随机代理口令；凭证依赖 refresh token 自动续期，已启动的本机服务随 Ready 进程保持且不因切换预设而关闭，只有显式断开才删除凭证；Provider 必须走 Ready 的无状态 Responses 适配器并在每次请求回放完整历史，不得进入官方 OpenAI 的连续响应客户端；该代理虽把流式事件体标为 `application/json`，显式 OAuth 路径仍必须按 SSE 增量消费，并在终局载荷缺少文字时用本轮增量恢复完整回答；缺凭证、口令不匹配或上游失败都必须关闭失败，不得回落到 API Key 或其他账号。
 - 设置页的工具调用 `auto` 必须展示共享能力层解析出的生效值；openai-compatible 自动关闭时明确说明：端点真实支持 function calling 才可“强制开启”。聊天文字不得直接写设置。只有本轮已有 `provider_disabled_tools` 冲突、共享能力仍为关闭且用户明确肯定授权具体工具时，Main 才可直接复用 `ask_user_questions` 确认卡；“打开网页”“当前打开的标签页”“使用浏览器工具”等任务动作不算设置授权。卡片只允许本机 Renderer 作答，远程绑定会话不得发起、转发或提交这类本机设置确认。确认后重新读取活跃配置，核对 active profile id + provider/baseUrl/model，只修改 `toolUseMode`；workspace、当前配置与兼容镜像在同一数据库事务内写入。配置漂移、拒绝、取消、超时或持久化失败均不写。成功时旧工具面回合先结束，再以原始请求、原 scope/task 和全新 run 唯一地自动续跑；不得要求用户重发，也不得复用旧配置快照。
 - OpenAI-compatible 的 `baseUrl` 是 API 前缀：origin-only 地址统一补 `/v1`，显式前缀原样保留，消费者只能再拼资源路径，禁止形成 `/v1/v1`。保存和请求边界必须移除 URL 中的用户名、密码、查询参数与锚点；设置输入框保留编辑草稿。Packer 的明文 HTTP 仅允许严格解析后的本机或私网地址，不能用域名前缀猜私网。
 - 一键运行时配置由 Main 持有带 `runId/revision` 的单任务快照；设置页重进只恢复投影，重复开始加入原任务。停止先进入 `cancelling`，旧 run 的晚到进度不得改写终态或后续重试，Renderer 必须提供可见的停止与失败后重试入口。

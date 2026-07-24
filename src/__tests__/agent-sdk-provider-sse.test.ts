@@ -11,12 +11,14 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { MemorySession } from '@openai/agents'
 
 import {
   ReadyAnthropicModel,
   ReadyOpenAICompatibleModel,
   resolveAgentSdkProvider,
   resolveTrueSseMode,
+  runWithOpenAIAgentsSdk,
 } from '../main/modules/agent-control/runtime-core/agent-sdk-provider'
 import {
   parseSseStream,
@@ -119,6 +121,26 @@ function captureMetrics(): { metrics: AgentMetricEvent[]; restore: () => void } 
 }
 
 const dataLine = (payload: unknown): string => `data: ${JSON.stringify(payload)}\n\n`
+
+test('ChatGPT OAuth resolves through Ready stateless Responses adapter', async () => {
+  const resolved = resolveAgentSdkProvider(
+    makeConfig({
+      provider: 'openai',
+      authMode: 'chatgpt-oauth',
+      baseUrl: 'http://127.0.0.1:10532/v1',
+      apiKey: 'ready-oauth-proxy-key-12345678901234567890',
+      agentProtocol: 'openai',
+      wireApi: 'responses',
+      reasoningEffort: 'low',
+      toolUseMode: 'on',
+      nativeVideoMode: 'off',
+    }),
+    { fetchWithTimeout: makeQueuedFetch([]).fetch },
+  )
+
+  const model = await resolved.provider.getModel(resolved.model)
+  assert.ok(model instanceof ReadyOpenAICompatibleModel)
+})
 
 // ============================================================================
 // provider-sse pure layer
@@ -441,6 +463,144 @@ test('SDK responses stream: output_text deltas + completed payload carries tool 
   const serialized = JSON.stringify(done.response.output)
   assert.ok(serialized.includes('早安！'))
   assert.ok(serialized.includes('browser_read'))
+})
+
+test('ChatGPT OAuth Responses requests carry the selected reasoning effort', async () => {
+  for (const effort of ['low', 'xhigh'] as const) {
+    const { fetch, captured } = makeQueuedFetch([jsonResponse({
+      id: `resp_${effort}`,
+      output: [{ type: 'message', content: [{ type: 'output_text', text: 'ok' }] }],
+      usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 },
+    })])
+    const model = new ReadyOpenAICompatibleModel({
+      config: makeConfig({
+        provider: 'openai',
+        authMode: 'chatgpt-oauth',
+        baseUrl: 'http://127.0.0.1:10532/v1',
+        apiKey: 'ready-oauth-proxy-key-12345678901234567890',
+        agentProtocol: 'openai',
+        wireApi: 'responses',
+        reasoningEffort: effort,
+        toolUseMode: 'on',
+        nativeVideoMode: 'off',
+      }),
+      baseUrl: 'http://127.0.0.1:10532/v1',
+      fetchWithTimeout: fetch,
+    })
+
+    await model.getResponse(makeRequest())
+
+    assert.deepEqual(captured[0].body.reasoning, { effort })
+  }
+})
+
+test('ChatGPT OAuth consumes its mislabeled application/json body as a real Responses stream', async () => {
+  const completedResponse = {
+    id: 'resp_oauth_stream',
+    output: [],
+    usage: { input_tokens: 4, output_tokens: 2, total_tokens: 6 },
+  }
+  const chunks = [
+    `event: response.output_text.delta\n${dataLine({ type: 'response.output_text.delta', delta: '你' })}`,
+    `event: response.output_text.delta\n${dataLine({ type: 'response.output_text.delta', delta: '好！' })}`,
+    `event: response.completed\n${dataLine({ type: 'response.completed', response: completedResponse })}`,
+  ]
+  const mislabeledStream = new Response(sseBody(chunks), {
+    status: 200,
+    headers: { 'content-type': 'application/json; charset=utf-8' },
+  })
+  const { fetch, captured } = makeQueuedFetch([mislabeledStream])
+  const { metrics, restore } = captureMetrics()
+  try {
+    const model = new ReadyOpenAICompatibleModel({
+      config: makeConfig({
+        provider: 'openai',
+        authMode: 'chatgpt-oauth',
+        baseUrl: 'http://127.0.0.1:10532/v1',
+        agentProtocol: 'openai',
+        wireApi: 'responses',
+        reasoningEffort: 'low',
+        toolUseMode: 'on',
+        nativeVideoMode: 'off',
+      }),
+      baseUrl: 'http://127.0.0.1:10532/v1',
+      fetchWithTimeout: fetch,
+    })
+
+    const events = await collect(model.getStreamedResponse(makeRequest()))
+
+    assert.equal(captured.length, 1)
+    assert.deepEqual(textDeltas(events), ['你', '好！'])
+    const done = events[events.length - 1] as {
+      type: string
+      response: { output: unknown[] }
+    }
+    assert.equal(done.type, 'response_done')
+    assert.ok(JSON.stringify(done.response.output).includes('你好！'))
+    assert.ok(metrics.some((event) => event.metric === 'provider_stream_content_type_override'))
+    assert.ok(metrics.some((event) => event.metric === 'provider_stream_terminal_text_recovered'))
+    assert.ok(!metrics.some((event) => event.metric === 'provider_stream_fallback'))
+  } finally {
+    restore()
+  }
+})
+
+test('ChatGPT OAuth delta text closes the Agents SDK run after one provider request', async () => {
+  const completedResponse = {
+    id: 'resp_oauth_runner',
+    output: [],
+    usage: { input_tokens: 4, output_tokens: 2, total_tokens: 6 },
+  }
+  const chunks = [
+    `event: response.output_text.delta\n${dataLine({ type: 'response.output_text.delta', delta: 'Hello' })}`,
+    `event: response.output_text.delta\n${dataLine({ type: 'response.output_text.delta', delta: '!' })}`,
+    `event: response.completed\n${dataLine({ type: 'response.completed', response: completedResponse })}`,
+  ]
+  const { fetch, captured } = makeQueuedFetch([
+    new Response(sseBody(chunks), {
+      status: 200,
+      headers: { 'content-type': 'application/json; charset=utf-8' },
+    }),
+  ])
+  const config = makeConfig({
+    provider: 'openai',
+    authMode: 'chatgpt-oauth',
+    baseUrl: 'http://127.0.0.1:10532/v1',
+    agentProtocol: 'openai',
+    wireApi: 'responses',
+    reasoningEffort: 'low',
+    toolUseMode: 'on',
+    nativeVideoMode: 'off',
+  })
+  const model = new ReadyOpenAICompatibleModel({
+    config,
+    baseUrl: config.baseUrl,
+    fetchWithTimeout: fetch,
+  })
+  const deltas: string[] = []
+
+  const result = await runWithOpenAIAgentsSdk({
+    agentName: 'oauth-runner-proof',
+    sessionId: 'oauth-runner-proof',
+    runId: 'oauth-runner-proof',
+    taskId: 'oauth-runner-proof',
+    input: 'hi',
+    instructions: 'Reply briefly.',
+    model: config.model,
+    provider: { getModel: () => model },
+    session: new MemorySession(),
+    tools: [],
+    signal: new AbortController().signal,
+    maxTurns: 2,
+    contextWindowTokens: 200_000,
+    maxOutputTokens: 256,
+    onTextDelta: (delta) => deltas.push(delta),
+  })
+
+  assert.equal(captured.length, 1)
+  assert.equal(result.iterationsUsed, 1)
+  assert.equal(result.finalText, 'Hello!')
+  assert.deepEqual(deltas, ['Hello', '!'])
 })
 
 test('SDK responses stream: delta-only stream without terminal payload fails loud (stream_incomplete)', async () => {

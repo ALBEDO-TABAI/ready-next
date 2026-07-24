@@ -3313,11 +3313,12 @@ interface AIModelConfigData {
   baseUrl: string
   apiKey: string
   model: string
+  authMode?: 'api-key' | 'chatgpt-oauth'
   modelIds?: string[]
   displayName?: string
   agentProtocol?: 'anthropic' | 'openai'
   wireApi?: 'chat/completions' | 'responses'
-  reasoningEffort?: 'minimal' | 'low' | 'medium' | 'high' | 'max'
+  reasoningEffort?: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
   toolUseMode?: 'auto' | 'on' | 'off'
   visionMode?: 'auto' | 'on' | 'off'
   nativeVideoMode?: 'auto' | 'on' | 'off'
@@ -3345,6 +3346,15 @@ interface AIProviderWorkspaceData {
 interface SettingsTestResult {
   latencyMs: number
   modelList?: string[]
+}
+
+interface ChatGptOAuthStatusData {
+  state: 'signed_out' | 'signed_in' | 'ready' | 'error'
+  connected: boolean
+  running: boolean
+  baseUrl: string
+  models: string[]
+  error?: string
 }
 
 type ExternalServiceKindData =
@@ -3405,6 +3415,26 @@ interface ElectronSettingsAPI {
   testAIConnection: (
     config: AIModelConfigData
   ) => Promise<{ success: boolean; data?: SettingsTestResult; error?: string }>
+  getChatGptOAuthStatus: () => Promise<{
+    success: boolean
+    data?: ChatGptOAuthStatusData
+    error?: string
+  }>
+  connectChatGptOAuth: () => Promise<{
+    success: boolean
+    data?: ChatGptOAuthStatusData
+    error?: string
+  }>
+  resumeChatGptOAuth: () => Promise<{
+    success: boolean
+    data?: ChatGptOAuthStatusData
+    error?: string
+  }>
+  disconnectChatGptOAuth: () => Promise<{
+    success: boolean
+    data?: ChatGptOAuthStatusData
+    error?: string
+  }>
   listExternalServices: () => Promise<{ success: boolean; data?: PublicExternalServiceProfileData[]; error?: string }>
   updateExternalService: (
     input: ExternalServiceUpdateInputData

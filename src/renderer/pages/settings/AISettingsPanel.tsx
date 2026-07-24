@@ -16,6 +16,11 @@ import {
 } from '../../components/settings/settings-theme'
 import { AISettingsFieldCard, SettingsSwitch } from './settings-shared'
 import { resolveToolUseModePresentation } from './tool-use-mode-copy'
+import {
+  isChatGptOAuthConfig,
+  normalizeChatGptOAuthReasoningEffort,
+} from '../../../shared/chatgpt-oauth'
+import { ChatGptOAuthSettingsCard } from './ChatGptOAuthSettingsCard'
 
 // ── AI Settings Panel (dynamic, wired to backend) ──────────────────────────
 const compactSelectStyle = {
@@ -91,6 +96,7 @@ export function AISettingsPanel() {
   )
   const activeProfile = useMemo(() => getActiveAIProfile(workspace), [workspace])
   const selectedConfig = selectedProfile?.config || activeConfig
+  const isChatGptOAuth = isChatGptOAuthConfig(selectedConfig)
   const currentProvider = getProviderDef(selectedConfig.provider, selectedConfig.baseUrl)
   const capabilities = useMemo(() => resolveAIConfigCapabilities(selectedConfig), [selectedConfig])
   const toolUsePresentation = useMemo(
@@ -99,7 +105,7 @@ export function AISettingsPanel() {
   )
   const models = currentProvider?.models || []
   const isKimiK3 = isKimiK3Config(selectedConfig)
-  const showReasoningEffort = isKimiK3 || (capabilities?.agentProtocol === 'openai' && capabilities?.wireApi === 'responses')
+  const showReasoningEffort = isKimiK3 || (!isChatGptOAuth && capabilities?.agentProtocol === 'openai' && capabilities?.wireApi === 'responses')
   const reasoningEffortOptions = isKimiK3
     ? KIMI_K3_REASONING_EFFORTS
     : ['minimal', 'low', 'medium', 'high'] as const
@@ -558,66 +564,84 @@ export function AISettingsPanel() {
                       />
                     )}
                   />
-                  <AISettingsFieldCard
-                    title="API 格式"
-                    description={`当前解析为 ${resolvedAgentInterfaceLabel}。`}
-                    control={(
-                      <select
-                        value={selectedConfig.agentProtocol || 'auto'}
-                        onChange={(event) => updateField('agentProtocol', (event.target.value === 'auto' ? undefined : event.target.value) as typeof selectedConfig.agentProtocol)}
-                        className="rounded-lg border text-[12px] focus:outline-none focus:ring-2 focus:ring-[var(--color-blue)]/30 cursor-pointer"
-                        style={stackedSelectStyle}
-                      >
-                        <option value="auto">自动</option>
-                        <option value="openai">OpenAI 兼容</option>
-                        <option value="anthropic">Anthropic 兼容</option>
-                      </select>
-                    )}
-                  />
-                  <AISettingsFieldCard
-                    title="API 地址"
-                    wide
-                    description={currentProvider?.helpUrl ? (
-                      <>
-                        服务端点 URL，<a href={currentProvider.helpUrl} target="_blank" rel="noreferrer" className="underline" style={{ color: 'var(--color-blue)' }}>查看文档</a>
-                      </>
-                    ) : '自定义供应商地址；OpenAI 兼容服务只填域名或 IP 时会自动使用 /v1'}
-                    control={(
-                      <input
-                        type="text"
-                        value={selectedConfig.baseUrl}
-                        onChange={(event) => updateField('baseUrl', event.target.value)}
-                        placeholder={currentProvider?.baseUrl || 'https://...'}
-                        className="rounded-lg border text-[12px] focus:outline-none focus:ring-2 focus:ring-[var(--color-blue)]/30"
-                        style={stackedInputStyle}
+                  {!isChatGptOAuth && (
+                    <>
+                      <AISettingsFieldCard
+                        title="API 格式"
+                        description={`当前解析为 ${resolvedAgentInterfaceLabel}。`}
+                        control={(
+                          <select
+                            value={selectedConfig.agentProtocol || 'auto'}
+                            onChange={(event) => updateField('agentProtocol', (event.target.value === 'auto' ? undefined : event.target.value) as typeof selectedConfig.agentProtocol)}
+                            className="rounded-lg border text-[12px] focus:outline-none focus:ring-2 focus:ring-[var(--color-blue)]/30 cursor-pointer"
+                            style={stackedSelectStyle}
+                          >
+                            <option value="auto">自动</option>
+                            <option value="openai">OpenAI 兼容</option>
+                            <option value="anthropic">Anthropic 兼容</option>
+                          </select>
+                        )}
                       />
-                    )}
-                  />
-                  <AISettingsFieldCard
-                    title="API Key"
-                    wide
-                    description={currentProvider?.apiKeyPlaceholder || 'sk-...'}
-                    control={(
-                      <div className="flex items-center gap-2">
-                        <input
-                          type={showKey ? 'text' : 'password'}
-                          value={selectedConfig.apiKey}
-                          onChange={(event) => updateField('apiKey', event.target.value)}
-                          placeholder={currentProvider?.apiKeyPlaceholder || 'sk-...'}
-                          className="min-w-0 flex-1 rounded-lg border font-mono text-[12px] focus:outline-none focus:ring-2 focus:ring-[var(--color-blue)]/30"
-                          style={stackedInputStyle}
-                        />
-                        <button
-                          type="button"
-                          onClick={() => setShowKey((value) => !value)}
-                          className="shrink-0 rounded-md px-2 py-1 text-[11px] transition-colors hover:bg-[var(--bg-hover)]"
-                          style={{ color: 'var(--text-muted)' }}
-                        >
-                          {showKey ? '隐藏' : '显示'}
-                        </button>
-                      </div>
-                    )}
-                  />
+                      <AISettingsFieldCard
+                        title="API 地址"
+                        wide
+                        description={currentProvider?.helpUrl ? (
+                          <>
+                            服务端点 URL，<a href={currentProvider.helpUrl} target="_blank" rel="noreferrer" className="underline" style={{ color: 'var(--color-blue)' }}>查看文档</a>
+                          </>
+                        ) : '自定义供应商地址；OpenAI 兼容服务只填域名或 IP 时会自动使用 /v1'}
+                        control={(
+                          <input
+                            type="text"
+                            value={selectedConfig.baseUrl}
+                            onChange={(event) => updateField('baseUrl', event.target.value)}
+                            placeholder={currentProvider?.baseUrl || 'https://...'}
+                            className="rounded-lg border text-[12px] focus:outline-none focus:ring-2 focus:ring-[var(--color-blue)]/30"
+                            style={stackedInputStyle}
+                          />
+                        )}
+                      />
+                      <AISettingsFieldCard
+                        title="API Key"
+                        wide
+                        description={currentProvider?.apiKeyPlaceholder || 'sk-...'}
+                        control={(
+                          <div className="flex items-center gap-2">
+                            <input
+                              type={showKey ? 'text' : 'password'}
+                              value={selectedConfig.apiKey}
+                              onChange={(event) => updateField('apiKey', event.target.value)}
+                              placeholder={currentProvider?.apiKeyPlaceholder || 'sk-...'}
+                              className="min-w-0 flex-1 rounded-lg border font-mono text-[12px] focus:outline-none focus:ring-2 focus:ring-[var(--color-blue)]/30"
+                              style={stackedInputStyle}
+                            />
+                            <button
+                              type="button"
+                              onClick={() => setShowKey((value) => !value)}
+                              className="shrink-0 rounded-md px-2 py-1 text-[11px] transition-colors hover:bg-[var(--bg-hover)]"
+                              style={{ color: 'var(--text-muted)' }}
+                            >
+                              {showKey ? '隐藏' : '显示'}
+                            </button>
+                          </div>
+                        )}
+                      />
+                    </>
+                  )}
+                  {selectedConfig.provider === 'openai' && (
+                    <ChatGptOAuthSettingsCard
+                      active={isChatGptOAuth}
+                      reasoningEffort={normalizeChatGptOAuthReasoningEffort(selectedConfig.reasoningEffort)}
+                      onReasoningEffortChange={(effort) => updateField('reasoningEffort', effort)}
+                      onConnected={async () => {
+                        await loadConfig()
+                      }}
+                      onDisconnected={async () => {
+                        await loadConfig()
+                        setProfileDetailOpen(false)
+                      }}
+                    />
+                  )}
                   <div
                     className="flex items-center justify-between gap-3 pb-4 md:col-span-2"
                     style={{ borderBottom: '1px solid color-mix(in srgb, var(--surface-border) 12%, transparent)' }}
@@ -947,8 +971,11 @@ export function AISettingsPanel() {
           {selectedConfig.provider === 'moonshot' && (
             <>Moonshot API 完全兼容 OpenAI SDK，在<a href="https://platform.moonshot.cn/console" target="_blank" rel="noreferrer" className="underline" style={{ color: 'var(--color-blue)' }}>月之暗面控制台</a>获取 API Key。</>
           )}
-          {selectedConfig.provider === 'openai' && (
+          {selectedConfig.provider === 'openai' && !isChatGptOAuth && (
             <>输入任意 OpenAI 或 Anthropic 兼容 API 的地址和密钥；需要浏览器 / 文档工具可用时，再到能力页同步设置。</>
+          )}
+          {isChatGptOAuth && (
+            <>这是非官方实验入口，只使用 Ready 自己保存的登录。断开后会回到原有 OpenAI API Key 预设。</>
           )}
         </div>
       )}

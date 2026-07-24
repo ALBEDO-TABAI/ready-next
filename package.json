@@ -240,6 +240,7 @@
     "lucide-react": "^0.475.0",
     "mammoth": "^1.8.0",
     "mermaid": "^11.15.0",
+    "openai-oauth": "2.0.0",
     "pdf2json": "^4.0.3",
     "photoswipe": "^5.4.4",
     "preact": "10.19.2",

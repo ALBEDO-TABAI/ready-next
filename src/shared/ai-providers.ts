@@ -39,10 +39,18 @@ export type AIProviderType =
 
 export type AIModelCategory = 'chat' | 'image' | 'video'
 export type AIWireAPI = 'chat/completions' | 'responses'
-export type AIReasoningEffort = 'minimal' | 'low' | 'medium' | 'high' | 'max'
+export type AIReasoningEffort =
+  | 'none'
+  | 'minimal'
+  | 'low'
+  | 'medium'
+  | 'high'
+  | 'xhigh'
+  | 'max'
 export type AIAgentProtocol = 'anthropic' | 'openai'
 export type AICapabilityMode = 'auto' | 'on' | 'off'
 export type AIToolCallTransport = 'native' | 'text' | 'none'
+export type AIAuthMode = 'api-key' | 'chatgpt-oauth'
 
 export interface AIModelDef {
   id: string
@@ -99,6 +107,7 @@ export interface AIModelConfig {
   baseUrl: string
   apiKey: string
   model: string
+  authMode?: AIAuthMode
   modelIds?: string[]
   agentProtocol?: AIAgentProtocol
   wireApi?: AIWireAPI

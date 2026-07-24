@@ -25,6 +25,28 @@ test('resolveOpenAIProviderRuntime prefers explicit wire api and reasoning effor
   assert.equal(runtime.reasoningEffort, 'high')
 })
 
+test('resolveOpenAIProviderRuntime maps OAuth effort to the model-supported scale', () => {
+  const migrated = resolveOpenAIProviderRuntime({
+    config: createConfig({
+      authMode: 'chatgpt-oauth',
+      wireApi: 'responses',
+      reasoningEffort: 'minimal',
+    }),
+    baseUrl: 'http://127.0.0.1:10532/v1',
+  })
+  const strongest = resolveOpenAIProviderRuntime({
+    config: createConfig({
+      authMode: 'chatgpt-oauth',
+      wireApi: 'responses',
+      reasoningEffort: 'xhigh',
+    }),
+    baseUrl: 'http://127.0.0.1:10532/v1',
+  })
+
+  assert.equal(migrated.reasoningEffort, 'low')
+  assert.equal(strongest.reasoningEffort, 'xhigh')
+})
+
 test('resolveOpenAIProviderRuntime falls back to codex responses defaults', () => {
   const runtime = resolveOpenAIProviderRuntime({
     config: createConfig({ baseUrl: 'https://code.newcli.com/codex/v1' }),

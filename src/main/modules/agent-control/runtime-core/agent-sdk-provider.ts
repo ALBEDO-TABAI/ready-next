@@ -242,7 +242,7 @@ export function resolveAgentSdkProvider(
   if (capabilities.agentProtocol !== 'openai') {
     throw new Error('当前 SDK 路径暂不支持该模型协议配置。')
   }
-  if (normalized.provider !== 'openai') {
+  if (normalized.provider !== 'openai' || normalized.authMode === 'chatgpt-oauth') {
     return {
       model: normalized.model,
       provider: new ReadyOpenAICompatibleModelProvider({
@@ -688,7 +688,10 @@ export class ReadyOpenAICompatibleModel implements Model {
       }
       throw buildProviderHttpError({ httpStatus: response.status, errorBody: rawError })
     }
-    if (!isEventStreamContentType(response) || !response.body) {
+    const declaredEventStream = isEventStreamContentType(response)
+    const acceptsChatGptOAuthStream =
+      this.deps.config.authMode === 'chatgpt-oauth' && Boolean(response.body)
+    if ((!declaredEventStream && !acceptsChatGptOAuthStream) || !response.body) {
       const rawText = await response.text()
       logAgentMetric('provider_stream_fallback', {
         path: 'responses',
@@ -707,6 +710,13 @@ export class ReadyOpenAICompatibleModel implements Model {
         parts.responseId
       )
       return
+    }
+    if (!declaredEventStream) {
+      logAgentMetric('provider_stream_content_type_override', {
+        path: 'responses',
+        provider: this.deps.config.provider || null,
+        authMode: 'chatgpt-oauth'
+      })
     }
 
     const accumulator = new ResponsesStreamAccumulator()
@@ -748,6 +758,12 @@ export class ReadyOpenAICompatibleModel implements Model {
     const finalPayload = accumulator.final()
     if (!finalPayload) {
       throw new Error(`${label} 未收到终局响应载荷（stream_incomplete）`)
+    }
+    if (accumulator.didRecoverTerminalText) {
+      logAgentMetric('provider_stream_terminal_text_recovered', {
+        path: 'responses',
+        provider: this.deps.config.provider || null
+      })
     }
     const shaped = shapeResponsesModelResponse(
       finalPayload,

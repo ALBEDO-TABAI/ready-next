@@ -259,11 +259,14 @@ export class ChatCompletionsStreamAccumulator {
 export class ResponsesStreamAccumulator {
   private completed: Record<string, unknown> | null = null
   private lastPayload: Record<string, unknown> | null = null
+  private outputText = ''
+  private recoveredTerminalText = false
 
   feed(eventName: string, data: Record<string, unknown>): StreamFeedResult {
     const type = typeof data.type === 'string' && data.type ? data.type : eventName
     if (type === 'response.output_text.delta') {
       const delta = typeof data.delta === 'string' ? data.delta : ''
+      this.outputText += delta
       return delta ? { textDelta: delta } : {}
     }
     if (type.startsWith('response.reasoning') && type.endsWith('.delta')) {
@@ -282,9 +285,42 @@ export class ResponsesStreamAccumulator {
     return this.completed !== null
   }
 
+  get didRecoverTerminalText(): boolean {
+    return this.recoveredTerminalText
+  }
+
   /** completed > last payload > null（调用方对 null 抛 stream_incomplete）。 */
   final(): Record<string, unknown> | null {
-    return this.completed || this.lastPayload
+    const payload = this.completed || this.lastPayload
+    if (!payload || !this.outputText) return payload
+    const output = Array.isArray(payload.output)
+      ? payload.output.filter((item): item is Record<string, unknown> => Boolean(asRecord(item)))
+      : []
+    const terminalHasText = output.some((item) => {
+      const content = Array.isArray(item.content) ? item.content : []
+      return content.some((part) => {
+        const record = asRecord(part)
+        return typeof record?.text === 'string' && record.text.length > 0
+      })
+    })
+    if (terminalHasText) return payload
+    this.recoveredTerminalText = true
+    const responseId = typeof payload.id === 'string' && payload.id
+      ? payload.id
+      : 'stream'
+    return {
+      ...payload,
+      output: [
+        ...output,
+        {
+          id: `msg_${responseId}`,
+          type: 'message',
+          role: 'assistant',
+          status: 'completed',
+          content: [{ type: 'output_text', text: this.outputText }]
+        }
+      ]
+    }
   }
 }
 

@@ -37,7 +37,7 @@ interface RendererAIConfigForCapabilities {
   displayName?: string
   agentProtocol?: 'anthropic' | 'openai'
   wireApi?: 'chat/completions' | 'responses'
-  reasoningEffort?: 'minimal' | 'low' | 'medium' | 'high' | 'max'
+  reasoningEffort?: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
   toolUseMode?: 'auto' | 'on' | 'off'
   visionMode?: 'auto' | 'on' | 'off'
   nativeVideoMode?: 'auto' | 'on' | 'off'
