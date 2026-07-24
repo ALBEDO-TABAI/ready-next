@@ -1,6 +1,6 @@
 # Ready 文档导航与维护规则
 
-> 更新时间：2026-07-22
+> 更新时间：2026-07-24
 
 本文是 `docs/` 的入口。代码、`package.json` 与机器校验结果始终优先于叙述性文档；如果两者冲突，应修正文档，而不是为旧文档保留兼容实现。
 
@@ -28,6 +28,11 @@
 | Browser Agent 单 Agent 长任务与标签页所有权收口 | `docs/superpowers/plans/2026-07-22-browser-agent-sequential-long-task-and-tab-ownership-closure-implementation.md` |
 | Agent 长程 Plan-and-Execute、策略与分支架构 | `docs/superpowers/plans/2026-07-22-agent-plan-execute-policy-hooks-and-branching-runtime-design.md` |
 | 2026-07-22 Browser Agent 长任务根因证据 | `docs/superpowers/audits/2026-07-22-browser-agent-long-task-root-cause-and-evidence.md` |
+| ChatGPT App Agent/Browser 本地逆向证据快照 | `docs/superpowers/audits/2026-07-24-chatgpt-app-agent-browser-runtime-study.md` |
+| Ready 与 ChatGPT Agent/Browser 交叉差距审计 | `docs/superpowers/audits/2026-07-24-ready-vs-chatgpt-agent-browser-gap-audit.md` |
+| Durable Agent 与 Browser Runtime 目标架构（已确认，agent-renew 实施） | `docs/superpowers/specs/2026-07-24-ready-agent-browser-target-architecture.md` |
+| Durable Agent Runtime 重构计划（已确认，agent-renew 实施） | `docs/superpowers/plans/2026-07-24-agent-runtime-rearchitecture-implementation.md` |
+| Browser Runtime 与无人值守研究计划（已确认，agent-renew 实施） | `docs/superpowers/plans/2026-07-24-browser-unattended-research-implementation.md` |
 | 架构原则的反例与自检 | `.claude/architectural-principles.md` |
 | 测试边界与 SQLite 验收 | `docs/superpowers/testing-conventions.md` |
 | UI 修改入口 | `UI_ADJUSTMENT_GUIDE.md` |

@@ -6,6 +6,13 @@ status: approved-direction-blocked-by-browser-sequential-closure
 enforce: false
 owner: 白
 author: Codex
+refined_by:
+  - docs/superpowers/specs/2026-07-24-ready-agent-browser-target-architecture.md
+  - docs/superpowers/plans/2026-07-24-agent-runtime-rearchitecture-implementation.md
+implementation_exclusion:
+  - 本计划不得与 2026-07-24 Agent 计划分别建表或独立进入生产；07-22 ExecutionPlan ledgers 是唯一调度底座，07-24 只补 Task/Turn/Item 与 Browser/恢复合同
+  - 唯一切换顺序为 A0–A5 → Browser B0/spike/B1–B5 → Agent A6+Browser B6 联合切换 → A7+B7
+implementation_workspace: /Users/user/实验田/ready-cowork-agent-renew (branch codex/agent-renew)
 implementation_gate: pending_browser_sequential_closure（用户已于 2026-07-22 确认方向与范围）
 blocked_by:
   - docs/superpowers/plans/2026-07-22-browser-agent-sequential-long-task-and-tab-ownership-closure-implementation.md
@@ -111,11 +118,13 @@ review:
 | Domain child（如 `browser_tasks`） | 域内实际动作、证据、检查点和恢复状态 |
 | `TaskProjection` | UI/查询派生；不作 scheduler CAS 真值 |
 | `TurnFrame` | 当前模型循环内一致读源；不跨 turn |
-| Checkpoint | 节点续跑的唯一模型输入快照 |
+| Checkpoint | 节点续跑的身份锚点与最小 continuation state；只引用 canonical plan/facts/evidence/receipts/artifacts，不保存或重放完整 SDK final input |
 | CompletionVerifier | 候选交付的语义验收 |
 | `finalizeRunOutcome()` | Parent/run/投影/用户终稿的唯一终态入口 |
 
 BrowserResearchState 只回答“需要哪些网页事实、目前覆盖多少”，不重复 ExecutionPlan 的顺序、依赖和分支组。ExecutionPlan 的 Browser 节点只持有 browserTaskId/checkpoint/evidence handle，不复制 Browser journal 和 work items。
+
+输入真值由 canonical ledgers、结构化 facts、evidence、action receipts 和 artifact refs 共同组成。Provider transcript、完整 SDK history/final input 只允许作为可删除的诊断缓存；它们不能决定续作、计划、证据、预算或终态，也不能被直接重放成下一次 Provider 输入。
 
 ## 2.2 Canonical plan ledger
 
@@ -551,13 +560,13 @@ pending/ready/running/waiting/checkpointed -> cancelled
 1. 普通节点只有全部 `dependsOn` 节点 `succeeded` 才能进 ready；branch join 不复用该规则猜测，只按 §3.2 的具名 `joinPolicy` 进 ready。
 2. 从 ready 到 running 必须在同一事务中创建 attempt 和取得所有必需资源 claim；不使用 fire-and-forget。
 3. SDK 模型循环只读当前 node attempt 的 request bundle，不自行跳节点或改依赖。
-4. checkpoint 包含 plan/revision/node/attempt/generation、已结算证据、未完成动作和 sanitized model input。
+4. checkpoint 只保存 plan/revision/node/attempt/generation、canonical fact/evidence/action-receipt/artifact 的 identity+revision+digest、未完成目标和最小 continuation state。完整 Provider transcript、SDK history/final input 不进入 canonical checkpoint。
 5. 节点 retry/redispatch 从 checkpoint 创建新 NodeAttempt + call scope generation；旧 attempt/scope 不重开，迟到结果因 generation 不匹配失效。只有在任何语义输出或工具效果之前的 provider transport retry 可作为同 call scope 内的新 `providerRequestIndex`。
 6. `unknown_effect_write` 在效果未知时不重放；必须先观察/对账，仍不可知就 block。
 7. Parent 取消向全部 active attempts 传播，但分支仍必须以自己的 cancel receipt 结算，不依赖 Promise 自然消失。
 8. 同 call scope 的 request retry 只在当前进程确定知道该 request 已以 transport 失败结算，且 `first_accepted_delta_kind IS NULL`、sealed candidate/shared session/Renderer 都未接受任何 delta、无完整或部分 tool call 被采纳、无 tool dispatch 时允许。任一条不满足就结算旧 scope，从 clean checkpoint 新建对应 kind 的 scope attempt；node scope 还必须新建 NodeAttempt。
 9. 进程在 request `sent` 后崩溃时，无论外部服务是否已回应，都不续跑同 call scope；启动恢复将它结算 `interrupted/unknown_after_crash`，再从旧 clean checkpoint 创建新 scope。若前一 scope 已 dispatch unknown-effect，则先对账而非重发。
-10. context compaction 是发请求前的确定性输入变换，先写 source/working digest，不冒充 retry；user steering 只在 clean checkpoint 生成新 revision/scope；部分 function-call 已算 delta accepted，不在同 scope 重发；verifier transport 只在零 delta 时可对同 sealed candidate 做 request-level retry，否则新建 verifier scope，绝不重跑 Browser/文档动作。
+10. context compaction 是发请求前的确定性输入变换；source digest 来自 canonical refs，working digest 来自本次确定性 Context Builder 输出，不冒充 retry。诊断 transcript cache 可随时删除，禁止重放完整 SDK input。user steering 只在 clean checkpoint 生成新 revision/scope；部分 function-call 已算 delta accepted，不在同 scope 重发；verifier transport 只在零 delta 时可对同 sealed candidate 做 request-level retry，否则新建 verifier scope，绝不重跑 Browser/文档动作。
 
 ## 5. 一张 DAG、两类分支组与 Owner 准入规则
 
@@ -841,7 +850,7 @@ Gate：`verify:execution-plan` / native、`verify:execution-call-scopes`、`veri
 
 ## P2：节点 checkpoint 与有界 replan
 
-1. 统一 clean checkpoint writer/reader：canonical checkpoint 继续保存当前 SDK 的完整 final input，作为唯一持久输入真值；另外从它确定性派生当前节点、已结算 refs 和未完成目标组成的 working bundle，并记录 source/working digest，不能用摘要覆盖 checkpoint。
+1. 统一 clean checkpoint writer/reader：canonical checkpoint 只保存当前节点/attempt/generation、canonical plan/facts/evidence/action receipts/artifact refs 的 identity+revision+digest、未完成目标和最小 continuation state。Context Builder 从这些真值确定性生成 working bundle，并记录 source/working digest；完整 Provider transcript/SDK final input 降为可删除诊断缓存，既不作为输入真值，也禁止直接重放。
 2. 在节点失败、用户 steering、verifier gap 与资源变化时允许 bounded replan。
 3. 新 revision 追加 supersession/source receipts，不修改旧 revision。
 4. 证明 compaction/restart 不改依赖、证据和产物覆盖。
