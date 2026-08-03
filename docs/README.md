@@ -1,6 +1,6 @@
 # Ready 文档导航与维护规则
 
-> 更新时间：2026-07-24
+> 更新时间：2026-08-03
 
 本文是 `docs/` 的入口。代码、`package.json` 与机器校验结果始终优先于叙述性文档；如果两者冲突，应修正文档，而不是为旧文档保留兼容实现。
 
@@ -33,6 +33,9 @@
 | Durable Agent 与 Browser Runtime 目标架构（已确认，agent-renew 实施） | `docs/superpowers/specs/2026-07-24-ready-agent-browser-target-architecture.md` |
 | Durable Agent Runtime 重构计划（已确认，agent-renew 实施） | `docs/superpowers/plans/2026-07-24-agent-runtime-rearchitecture-implementation.md` |
 | Browser Runtime 与无人值守研究计划（已确认，agent-renew 实施） | `docs/superpowers/plans/2026-07-24-browser-unattended-research-implementation.md` |
+| Agent 模块与统一执行环境全局审计（2026-08-03 事实基线） | `docs/superpowers/audits/2026-08-03-ready-agent-module-and-unified-execution-runtime-audit.md` |
+| Agent 统一执行环境目标架构补充（已确认，合并进 07-24 架构） | `docs/superpowers/specs/2026-08-03-ready-agent-unified-execution-runtime-target-architecture-addendum.md` |
+| Agent 统一执行环境实施计划（已确认，agent-renew 实施） | `docs/superpowers/plans/2026-08-03-ready-agent-unified-execution-runtime-implementation.md` |
 | 架构原则的反例与自检 | `.claude/architectural-principles.md` |
 | 测试边界与 SQLite 验收 | `docs/superpowers/testing-conventions.md` |
 | UI 修改入口 | `UI_ADJUSTMENT_GUIDE.md` |
