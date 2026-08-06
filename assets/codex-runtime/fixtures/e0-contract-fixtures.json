@@ -1,0 +1,259 @@
+{
+  "schemaVersion": 1,
+  "responseSelection": [
+    {
+      "id": "direct-explicit-final",
+      "terminalStatus": "completed",
+      "items": [
+        {
+          "id": "msg-final",
+          "type": "agentMessage",
+          "phase": "final_answer",
+          "deltas": ["ready", " answer"],
+          "completedText": "ready answer"
+        }
+      ],
+      "expected": {
+        "kind": "candidate",
+        "itemId": "msg-final",
+        "body": "ready answer"
+      }
+    },
+    {
+      "id": "commentary-then-final",
+      "terminalStatus": "completed",
+      "items": [
+        {
+          "id": "msg-progress",
+          "type": "agentMessage",
+          "phase": "commentary",
+          "deltas": ["working"],
+          "completedText": "working"
+        },
+        {
+          "id": "msg-final",
+          "type": "agentMessage",
+          "phase": "final_answer",
+          "deltas": [],
+          "completedText": "done"
+        }
+      ],
+      "expected": {
+        "kind": "candidate",
+        "itemId": "msg-final",
+        "body": "done"
+      }
+    },
+    {
+      "id": "multi-tool-null-fallback",
+      "terminalStatus": "completed",
+      "items": [
+        {
+          "id": "msg-working",
+          "type": "agentMessage",
+          "phase": null,
+          "deltas": [],
+          "completedText": "I will inspect."
+        },
+        {
+          "id": "call-1",
+          "type": "dynamicToolCall"
+        },
+        {
+          "id": "msg-after-tool",
+          "type": "agentMessage",
+          "phase": null,
+          "deltas": ["verified"],
+          "completedText": "verified"
+        }
+      ],
+      "expected": {
+        "kind": "candidate",
+        "itemId": "msg-after-tool",
+        "body": "verified"
+      }
+    },
+    {
+      "id": "delta-mismatch",
+      "terminalStatus": "completed",
+      "items": [
+        {
+          "id": "msg-final",
+          "type": "agentMessage",
+          "phase": "final_answer",
+          "deltas": ["partial"],
+          "completedText": "different"
+        }
+      ],
+      "expected": {
+        "kind": "protocol_failure",
+        "code": "delta_completed_mismatch"
+      }
+    },
+    {
+      "id": "multiple-finals",
+      "terminalStatus": "completed",
+      "items": [
+        {
+          "id": "msg-final-1",
+          "type": "agentMessage",
+          "phase": "final_answer",
+          "deltas": [],
+          "completedText": "one"
+        },
+        {
+          "id": "msg-final-2",
+          "type": "agentMessage",
+          "phase": "final_answer",
+          "deltas": [],
+          "completedText": "two"
+        }
+      ],
+      "expected": {
+        "kind": "protocol_failure",
+        "code": "multiple_explicit_finals"
+      }
+    },
+    {
+      "id": "interrupted-final-is-rejected",
+      "terminalStatus": "interrupted",
+      "items": [
+        {
+          "id": "msg-final",
+          "type": "agentMessage",
+          "phase": "final_answer",
+          "deltas": ["partial"],
+          "completedText": "partial"
+        }
+      ],
+      "expected": {
+        "kind": "no_candidate",
+        "code": "terminal_not_completed"
+      }
+    }
+  ],
+  "startDelivery": [
+    {
+      "id": "accepted-before-write-callback",
+      "evidence": {
+        "intent": true,
+        "writeConfirmed": false,
+        "nativeMatches": 1,
+        "metadataExact": true,
+        "typedRpcRejection": false,
+        "stableZeroReadback": false,
+        "oldProcessStableZero": false,
+        "ownerEvidence": false
+      },
+      "expected": "accepted"
+    },
+    {
+      "id": "single-zero-live-is-unknown",
+      "evidence": {
+        "intent": true,
+        "writeConfirmed": true,
+        "nativeMatches": 0,
+        "metadataExact": true,
+        "typedRpcRejection": false,
+        "stableZeroReadback": false,
+        "oldProcessStableZero": false,
+        "ownerEvidence": true
+      },
+      "expected": "unknown"
+    },
+    {
+      "id": "typed-rejection-stable-zero",
+      "evidence": {
+        "intent": true,
+        "writeConfirmed": false,
+        "nativeMatches": 0,
+        "metadataExact": true,
+        "typedRpcRejection": true,
+        "stableZeroReadback": true,
+        "oldProcessStableZero": false,
+        "ownerEvidence": true
+      },
+      "expected": "proven_absent"
+    },
+    {
+      "id": "old-tree-zero-new-sidecar-zero",
+      "evidence": {
+        "intent": true,
+        "writeConfirmed": true,
+        "nativeMatches": 0,
+        "metadataExact": true,
+        "typedRpcRejection": false,
+        "stableZeroReadback": true,
+        "oldProcessStableZero": true,
+        "ownerEvidence": true
+      },
+      "expected": "proven_absent"
+    },
+    {
+      "id": "multiple-native-candidates",
+      "evidence": {
+        "intent": true,
+        "writeConfirmed": true,
+        "nativeMatches": 2,
+        "metadataExact": true,
+        "typedRpcRejection": false,
+        "stableZeroReadback": false,
+        "oldProcessStableZero": false,
+        "ownerEvidence": true
+      },
+      "expected": "unknown"
+    }
+  ],
+  "stableZeroSamples": [
+    {
+      "id": "four-zero-samples-after-deadline",
+      "spawnVisibilityDeadlinePassed": true,
+      "samples": [0, 0, 0, 0],
+      "expected": true
+    },
+    {
+      "id": "first-zero-then-child-visible",
+      "spawnVisibilityDeadlinePassed": true,
+      "samples": [0, 1],
+      "expected": false
+    },
+    {
+      "id": "zero-before-visibility-deadline",
+      "spawnVisibilityDeadlinePassed": false,
+      "samples": [0, 0, 0, 0],
+      "expected": false
+    }
+  ],
+  "reservationSets": [
+    {
+      "id": "existing-thread-last-slot",
+      "capacity": 64,
+      "used": 63,
+      "kind": "existing_thread",
+      "expected": {
+        "accepted": true,
+        "reserved": 1
+      }
+    },
+    {
+      "id": "lazy-root-last-slot",
+      "capacity": 64,
+      "used": 63,
+      "kind": "lazy_root",
+      "expected": {
+        "accepted": false,
+        "reserved": 0
+      }
+    },
+    {
+      "id": "lazy-root-two-slots",
+      "capacity": 64,
+      "used": 62,
+      "kind": "lazy_root",
+      "expected": {
+        "accepted": true,
+        "reserved": 2
+      }
+    }
+  ]
+}

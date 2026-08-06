@@ -1,0 +1,64 @@
+{
+  "schemaVersion": 1,
+  "sourceRepo": "https://github.com/openai/codex",
+  "releaseUrl": "https://github.com/openai/codex/releases/tag/rust-v0.146.1",
+  "releaseTag": "rust-v0.146.1",
+  "annotatedTagObject": "abb1de9be901ab658fec7bbbc4a1fa2e85512be3",
+  "gitCommit": "79b4f03d35962b005b007a015113b38930711665",
+  "codexVersion": "0.146.1",
+  "platform": "darwin",
+  "architecture": "arm64",
+  "targetTriple": "aarch64-apple-darwin",
+  "releaseAsset": {
+    "name": "codex-aarch64-apple-darwin.tar.gz",
+    "url": "https://github.com/openai/codex/releases/download/rust-v0.146.1/codex-aarch64-apple-darwin.tar.gz",
+    "archiveSha256": "337c5eb270d24bd556c46ad7814db62c2464b1eb0a253106bc98678dbd781821",
+    "binaryNameInArchive": "codex-aarch64-apple-darwin",
+    "binarySha256": "35d248101b211d6248ad4e6b8c1d441fe81236da87afb9f3e9ea51a049e9f179",
+    "binarySizeBytes": 270973936,
+    "buildRecipe": "official-release-asset"
+  },
+  "signingEvidence": {
+    "authority": "Developer ID Application: OpenAI OpCo, LLC (2DC432GLL2)",
+    "teamIdentifier": "2DC432GLL2"
+  },
+  "license": {
+    "path": "LICENSE",
+    "sha256": "d17f227e4df5da1600391338865ce0f3055211760a36688f816941d58232d8dc"
+  },
+  "thirdPartyNotice": {
+    "path": "NOTICE",
+    "sha256": "9d71575ecfd9a843fc1677b0efb08053c6ba9fd686a0de1a6f5382fd3c220915"
+  },
+  "schemaGeneration": {
+    "stableCommand": [
+      "app-server",
+      "generate-json-schema",
+      "--out"
+    ],
+    "experimentalCommand": [
+      "app-server",
+      "generate-json-schema",
+      "--experimental",
+      "--out"
+    ],
+    "stableBundle": {
+      "path": "schemas/stable/codex_app_server_protocol.schemas.json",
+      "sha256": "75bb1353d7f6aa5a2577a761d09307bcb93014700ead5aaf07fa9d453b98eed3"
+    },
+    "stableV2Bundle": {
+      "path": "schemas/stable/codex_app_server_protocol.v2.schemas.json",
+      "checkedInSha256": "e73b948f24079b1c531a64d5763f4820928b795613b72acf69d5764ba7f5c7e9",
+      "semanticSha256": "0dbb75599e372f1d46acb5fb31703909acd5794de39f6c027a70dea3dc38d366"
+    },
+    "experimentalBundle": {
+      "path": "schemas/experimental/codex_app_server_protocol.schemas.json",
+      "sha256": "422e5b0e742f1b63ad33122e07856a03e8867256468c5f7226ea7413ea8e45bb"
+    },
+    "experimentalV2Bundle": {
+      "path": "schemas/experimental/codex_app_server_protocol.v2.schemas.json",
+      "checkedInSha256": "1f872d3d77b573680242181a80e2d15858716c57edc4df834cfe8418adeb15ad",
+      "semanticSha256": "39fd83adf1f335dfaf8b68dddbe7c177824af4122fb695c912cb6e2d252d49e1"
+    }
+  }
+}

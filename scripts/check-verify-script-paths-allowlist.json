@@ -36,6 +36,62 @@
       "owner": "Phase C DirectChat retirement existence contract",
       "expiresAt": "2027-12-31",
       "addedBy": "2026-07-12 documentation and path hygiene audit"
+    },
+    {
+      "path": "src/main/modules/browser-engine/browser-write-lease.ts",
+      "reason": "Intentional negative-existence fixture in check-browser-surface-binding.cjs: the target-claim gate names this retired ownership file so recreating it fails.",
+      "owner": "Browser target-claim retirement contract",
+      "expiresAt": "2027-12-31",
+      "addedBy": "2026-08-06 cod-ready E0 baseline repair"
+    },
+    {
+      "path": "src/main/modules/browser-engine/scoped-browser-facade.ts",
+      "reason": "Intentional negative-existence fixture in check-browser-surface-binding.cjs: the target-claim gate names this retired ownership file so recreating it fails.",
+      "owner": "Browser target-claim retirement contract",
+      "expiresAt": "2027-12-31",
+      "addedBy": "2026-08-06 cod-ready E0 baseline repair"
+    },
+    {
+      "path": "src/main/modules/browser-engine/agent-browser-lane.ts",
+      "reason": "Intentional negative-existence fixture in check-browser-surface-binding.cjs: the target-claim gate names this retired ownership file so recreating it fails.",
+      "owner": "Browser target-claim retirement contract",
+      "expiresAt": "2027-12-31",
+      "addedBy": "2026-08-06 cod-ready E0 baseline repair"
+    },
+    {
+      "path": "src/main/modules/browser-engine/agent-browser-lease-singleton.ts",
+      "reason": "Intentional negative-existence fixture in check-browser-surface-binding.cjs: the target-claim gate names this retired ownership file so recreating it fails.",
+      "owner": "Browser target-claim retirement contract",
+      "expiresAt": "2027-12-31",
+      "addedBy": "2026-08-06 cod-ready E0 baseline repair"
+    },
+    {
+      "path": "src/main/modules/browser-engine/user-view-takeover-bridge.ts",
+      "reason": "Intentional negative-existence fixture in check-browser-surface-binding.cjs: the target-claim gate names this retired ownership file so recreating it fails.",
+      "owner": "Browser target-claim retirement contract",
+      "expiresAt": "2027-12-31",
+      "addedBy": "2026-08-06 cod-ready E0 baseline repair"
+    },
+    {
+      "path": "src/__tests__/agent-session-checkpoint-native.test.ts",
+      "reason": "Intentional negative-existence fixture in check-provider-checkpoint-module-boundaries.cjs: the retired aggregate test must stay absent after its behavior was split across focused native tests.",
+      "owner": "Provider checkpoint split-test retirement contract",
+      "expiresAt": "2027-12-31",
+      "addedBy": "2026-08-06 cod-ready E0 baseline repair"
+    },
+    {
+      "path": "src/__tests__/run-finalizer-checkin.test.ts",
+      "reason": "Intentional negative-existence fixture in check-provider-checkpoint-module-boundaries.cjs: the retired aggregate test must stay absent after its behavior was split across focused finalizer tests.",
+      "owner": "Run finalizer split-test retirement contract",
+      "expiresAt": "2027-12-31",
+      "addedBy": "2026-08-06 cod-ready E0 baseline repair"
+    },
+    {
+      "path": "src/__tests__/runtime-driver-terminal-unlock.test.ts",
+      "reason": "Intentional negative-existence fixture in check-provider-checkpoint-module-boundaries.cjs: the retired aggregate test must stay absent after its behavior was split across focused runtime-driver tests.",
+      "owner": "Runtime driver split-test retirement contract",
+      "expiresAt": "2027-12-31",
+      "addedBy": "2026-08-06 cod-ready E0 baseline repair"
     }
   ]
 }

@@ -1,0 +1,119 @@
+{
+  "contractVersion": 1,
+  "phase": "E0-R",
+  "pinnedCodexVersion": "0.146.1",
+  "baseE0Failure": {
+    "immutable": true,
+    "failureCode": "codex_additional_context_previous_value_retained",
+    "report": "docs/superpowers/audits/2026-08-06-codex-runtime-e0-failure-report.json"
+  },
+  "scope": {
+    "productCodeChangesAllowed": false,
+    "readyHistoryInjectionCount": 0,
+    "readyCompactionCount": 0,
+    "modelProtocolConversionLayers": 1,
+    "costBearingExternalCalls": false
+  },
+  "resourceReference": {
+    "additionalContextFields": [
+      "logicalResourceId",
+      "currentVersion",
+      "currentDigest",
+      "supersedesVersion",
+      "policyEpoch"
+    ],
+    "resourceBodyAllowed": false,
+    "semanticFactAllowed": false,
+    "dynamicSummaryAllowed": false,
+    "credentialAllowed": false,
+    "oldReferencesMayRemainInNativeHistory": true
+  },
+  "visibility": {
+    "oldToolOutputMayRemainModelVisible": true,
+    "sameThreadErasureClaimAllowed": false,
+    "nativeCompactionCountsAsDeletionProof": false,
+    "mcpCountsAsDeletionProof": false
+  },
+  "authority": {
+    "hostResolvesCurrentVersion": true,
+    "modelReceivesReusableCapabilityToken": false,
+    "staleRead": {
+      "errorCode": "resource_version_superseded",
+      "resourceBodyBytes": 0,
+      "receiptCreated": false
+    },
+    "staleMutation": {
+      "errorCode": "resource_version_superseded",
+      "effectIdentityCreated": false,
+      "externalEffectCount": 0
+    },
+    "currentReadReceiptFields": [
+      "receiptId",
+      "threadId",
+      "turnId",
+      "callId",
+      "logicalResourceId",
+      "version",
+      "digest",
+      "policyEpoch",
+      "resultDigest"
+    ],
+    "mcpReceiptReconciliation": {
+      "serverReceiptIsProvisional": true,
+      "provisionalReceiptCanPublish": false,
+      "uniqueRequestNonceRequired": true,
+      "hostReceiptRequiresProviderCallId": true,
+      "hostReceiptRequiresNativeCompletedItem": true,
+      "providerAndNativeCallIdsMustMatch": true,
+      "rawRequestAndResultMustBeRecomputed": true
+    },
+    "publicationReceiptMustJoinExactCaseThreadTurnCall": true,
+    "publicationRequiresCurrentReadReceipt": true,
+    "receiptIsSemanticFreshnessProof": false
+  },
+  "semanticFreshness": {
+    "turnOneMustReadBody": "E0R_RESOURCE_V1_BODY",
+    "turnTwoMustReadBody": "E0R_RESOURCE_V2_BODY",
+    "turnTwoCandidateMustContain": "E0R_RESOURCE_V2_BODY",
+    "turnTwoCandidateMustNotContain": "E0R_RESOURCE_V1_BODY",
+    "missingCurrentReceiptPublicationAllowed": false,
+    "productionHardening": "fresh_verifier_current_version_only_accept_or_reject"
+  },
+  "hardIsolation": {
+    "explicitNewThreadRequired": true,
+    "silentThreadSwapAllowed": false,
+    "oldAliasRetired": true,
+    "newThreadCountsAsStoredHistoryDeletion": false,
+    "storedHistoryDeletionRequiresSeparateReadback": true
+  },
+  "continuityMatrix": [
+    "same_thread_second_turn",
+    "thread_read_resume",
+    "manual_compaction",
+    "automatic_compaction",
+    "sidecar_restart"
+  ],
+  "nativeCompactionEvidence": {
+    "compactPromptOverrideAllowed": false,
+    "manualRequiresBoundThreadTurnItemProviderAndReadback": true,
+    "automaticRequiresBoundThreadTurnItem": true,
+    "automaticRequiresEmptyProviderToolSurface": true,
+    "automaticRequiresThreadReadback": true,
+    "resumeManualAndRestartTurnIdsMustMatchReadback": true
+  },
+  "agentMatrix": {
+    "root": "required",
+    "defaultSubagentNoHistory": "required",
+    "historySubagent": "required",
+    "nativeTurnCompletedAndReadbackRequired": true,
+    "providerToolSurfaceMustBeExact": true,
+    "dynamicToolsInheritanceMustBeObserved": true,
+    "readOnlyMcpFallbackWhenDynamicToolsUnavailable": true,
+    "mcpFallbackDoesNotChangeVisibilityContract": true
+  },
+  "phaseAdvance": {
+    "nextPhase": "E1",
+    "allowedOnlyWhenAllRequiredGatesPass": true,
+    "partialPassAllowed": false
+  }
+}

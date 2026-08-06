@@ -50,6 +50,7 @@ exports/
 # Electron
 *.asar
 build/runtime-seeds/
+/build/codex/
 
 # Local scratch / generated artifacts
 /Pack-source/

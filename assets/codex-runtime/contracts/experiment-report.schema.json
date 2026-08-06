@@ -1,0 +1,284 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ready.local/schemas/codex-runtime-experiment-report.schema.json",
+  "title": "Codex runtime replacement experiment report",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "experiment",
+    "ready",
+    "source",
+    "protocol",
+    "commands",
+    "performance",
+    "productImplementation",
+    "review",
+    "verdict"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": 1
+    },
+    "experiment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "phase",
+        "startedAt",
+        "completedAt",
+        "contractDigest"
+      ],
+      "properties": {
+        "phase": {
+          "type": "string",
+          "pattern": "^E[0-9]$"
+        },
+        "startedAt": {
+          "type": "string"
+        },
+        "completedAt": {
+          "type": "string"
+        },
+        "contractDigest": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "ready": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "worktree",
+        "branch",
+        "head",
+        "baselineHead",
+        "dirtyPaths"
+      ],
+      "properties": {
+        "worktree": {
+          "type": "string"
+        },
+        "branch": {
+          "type": "string"
+        },
+        "head": {
+          "type": "string"
+        },
+        "baselineHead": {
+          "type": "string"
+        },
+        "dirtyPaths": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "releaseTag",
+        "commit",
+        "version",
+        "binarySha256",
+        "schemaDigests",
+        "licenseSha256"
+      ],
+      "properties": {
+        "releaseTag": {
+          "type": "string"
+        },
+        "commit": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        },
+        "binarySha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "schemaDigests": {
+          "type": "object",
+          "minProperties": 4,
+          "additionalProperties": {
+            "$ref": "#/$defs/sha256"
+          }
+        },
+        "licenseSha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "protocol": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "evidenceDigests",
+        "passedInvariants",
+        "failedInvariants",
+        "blockedInvariants"
+      ],
+      "properties": {
+        "evidenceDigests": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/sha256"
+          }
+        },
+        "passedInvariants": {
+          "$ref": "#/$defs/stringList"
+        },
+        "failedInvariants": {
+          "$ref": "#/$defs/stringList"
+        },
+        "blockedInvariants": {
+          "$ref": "#/$defs/stringList"
+        }
+      }
+    },
+    "commands": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "command",
+          "exitCode",
+          "status"
+        ],
+        "properties": {
+          "command": {
+            "type": "string"
+          },
+          "exitCode": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "status": {
+            "enum": [
+              "PASS",
+              "FAIL",
+              "NOT_RUN"
+            ]
+          },
+          "note": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "performance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "reason"
+      ],
+      "properties": {
+        "status": {
+          "enum": [
+            "MEASURED",
+            "NOT_RUN"
+          ]
+        },
+        "reason": {
+          "type": "string"
+        }
+      }
+    },
+    "productImplementation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "started",
+        "changedProductPaths"
+      ],
+      "properties": {
+        "started": {
+          "type": "boolean"
+        },
+        "changedProductPaths": {
+          "$ref": "#/$defs/stringList"
+        }
+      }
+    },
+    "review": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "identity",
+        "rounds",
+        "verdict",
+        "findings"
+      ],
+      "properties": {
+        "identity": {
+          "type": "string"
+        },
+        "rounds": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "verdict": {
+          "enum": [
+            "PASS",
+            "FAIL",
+            "BLOCKED",
+            "FIX-AND-RECHECK"
+          ]
+        },
+        "findings": {
+          "$ref": "#/$defs/stringList"
+        }
+      }
+    },
+    "verdict": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "failureCode",
+        "summary",
+        "nextPhaseAllowed"
+      ],
+      "properties": {
+        "status": {
+          "enum": [
+            "PASS",
+            "FAIL",
+            "BLOCKED"
+          ]
+        },
+        "failureCode": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "summary": {
+          "type": "string"
+        },
+        "nextPhaseAllowed": {
+          "type": "boolean"
+        }
+      }
+    }
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "stringList": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  }
+}

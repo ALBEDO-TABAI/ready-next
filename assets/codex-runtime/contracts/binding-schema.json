@@ -1,0 +1,359 @@
+{
+  "schemaVersion": 1,
+  "sqliteForeignKeysAssumed": false,
+  "singleWriterModule": "CodexBindingRepository",
+  "tables": {
+    "codex_thread_bindings": {
+      "primaryKey": [
+        "thread_binding_id"
+      ],
+      "columns": [
+        "thread_binding_id",
+        "codex_thread_id",
+        "codex_session_id",
+        "codex_parent_thread_id",
+        "codex_forked_from_id",
+        "codex_source_json",
+        "codex_thread_source_json",
+        "thread_start_reservation_set_id",
+        "thread_start_reservation_member_id",
+        "thread_start_reservation_admitted_at",
+        "thread_start_reservation_released_at",
+        "thread_start_reservation_release_reason",
+        "thread_start_request_id",
+        "thread_start_rpc_connection_epoch",
+        "thread_start_rpc_id",
+        "thread_start_dispatch_intent_at",
+        "thread_start_child_write_confirmed_at",
+        "thread_start_child_write_digest",
+        "thread_start_response_at",
+        "thread_start_reconciled_at",
+        "thread_start_reconciliation_evidence_digest",
+        "thread_start_late_response_guard_closed_at",
+        "thread_start_late_response_guard_close_reason",
+        "isolated_thread_cwd",
+        "ready_conversation_alias",
+        "alias_generation",
+        "ready_scope_id",
+        "runtime_manifest_digest",
+        "protocol_schema_digest",
+        "tool_surface_digest",
+        "instruction_contract_digest",
+        "codex_model_provider_id",
+        "codex_model",
+        "upstream_profile_snapshot_ref",
+        "upstream_profile_snapshot_digest",
+        "thread_started_at",
+        "revision",
+        "created_at",
+        "updated_at",
+        "retired_at",
+        "retired_reason",
+        "retirement_evidence_digest",
+        "continuation_blocked_at",
+        "continuation_blocked_reason",
+        "continuation_blocked_evidence_digest"
+      ],
+      "unique": [
+        [
+          "codex_thread_id"
+        ],
+        [
+          "thread_start_reservation_set_id"
+        ],
+        [
+          "thread_start_reservation_member_id"
+        ],
+        [
+          "thread_start_request_id"
+        ],
+        [
+          "isolated_thread_cwd"
+        ],
+        [
+          "ready_conversation_alias",
+          "alias_generation"
+        ]
+      ],
+      "partialUnique": [
+        {
+          "columns": [
+            "ready_conversation_alias"
+          ],
+          "where": "retired_at IS NULL"
+        }
+      ],
+      "closedEnums": {
+        "retired_reason": [
+          "user_reset",
+          "closed",
+          "publication_diverged",
+          "manual_compaction_quarantine",
+          "cleanup"
+        ],
+        "continuation_blocked_reason": [
+          "start_delivery_absent",
+          "publication_diverged"
+        ]
+      }
+    },
+    "codex_turn_bindings": {
+      "primaryKey": [
+        "ready_run_id"
+      ],
+      "columns": [
+        "ready_run_id",
+        "ready_task_id",
+        "thread_binding_id",
+        "codex_thread_id",
+        "codex_turn_id",
+        "start_reservation_set_id",
+        "start_reservation_required_member_count",
+        "turn_start_reservation_member_id",
+        "turn_start_reservation_admitted_at",
+        "turn_start_reservation_released_at",
+        "turn_start_reservation_release_reason",
+        "turn_request_id",
+        "turn_start_rpc_connection_epoch",
+        "turn_start_rpc_id",
+        "turn_start_dispatch_intent_at",
+        "turn_start_child_write_confirmed_at",
+        "turn_start_child_write_digest",
+        "turn_start_response_at",
+        "turn_start_reconciled_at",
+        "turn_start_reconciliation_evidence_digest",
+        "turn_start_late_response_guard_closed_at",
+        "turn_start_late_response_guard_close_reason",
+        "host_failure_kind",
+        "host_failure_recorded_at",
+        "host_failure_evidence_digest",
+        "host_failure_product_terminal_digest",
+        "origin_user_message_id",
+        "ingress_admitted_revision",
+        "ingress_admitted_digest",
+        "ingress_admitted_at",
+        "predecessor_run_id",
+        "attempt_kind",
+        "history_parity_evidence_digest",
+        "current_thread_read_evidence_digest",
+        "continuation_contract_digest",
+        "tool_surface_digest",
+        "authorization_snapshot_digest",
+        "effective_codex_model",
+        "effective_upstream_snapshot_ref",
+        "effective_upstream_snapshot_digest",
+        "additional_context_digest",
+        "turn_contract_digest",
+        "interrupt_requested_at",
+        "interrupt_ack_at",
+        "interrupt_state_unknown_at",
+        "revision",
+        "created_at",
+        "updated_at"
+      ],
+      "unique": [
+        [
+          "start_reservation_set_id"
+        ],
+        [
+          "turn_start_reservation_member_id"
+        ],
+        [
+          "turn_request_id"
+        ],
+        [
+          "codex_thread_id",
+          "codex_turn_id"
+        ]
+      ],
+      "partialUnique": [
+        {
+          "columns": [
+            "origin_user_message_id"
+          ],
+          "where": "attempt_kind = 'user_ingress' AND origin_user_message_id IS NOT NULL"
+        },
+        {
+          "columns": [
+            "predecessor_run_id"
+          ],
+          "where": "attempt_kind IN ('recovery_successor','checkpoint_successor','explicit_retry') AND predecessor_run_id IS NOT NULL"
+        }
+      ],
+      "closedEnums": {
+        "attempt_kind": [
+          "user_ingress",
+          "recovery_successor",
+          "checkpoint_successor",
+          "explicit_retry"
+        ],
+        "host_failure_kind": [
+          "sidecar_spawn_failed",
+          "thread_start_rpc_rejected",
+          "thread_start_delivery_proven_absent",
+          "turn_start_rpc_rejected",
+          "turn_start_delivery_proven_absent"
+        ]
+      }
+    },
+    "codex_tool_call_bindings": {
+      "primaryKey": [
+        "codex_thread_id",
+        "codex_turn_id",
+        "codex_call_id"
+      ],
+      "columns": [
+        "codex_thread_id",
+        "codex_turn_id",
+        "codex_call_id",
+        "ready_run_id",
+        "ready_action_id",
+        "tool_name",
+        "args_digest",
+        "turn_contract_digest",
+        "receipt_id",
+        "result_digest",
+        "revision",
+        "created_at",
+        "updated_at"
+      ],
+      "unique": [
+        [
+          "ready_action_id"
+        ],
+        [
+          "receipt_id"
+        ]
+      ]
+    },
+    "codex_manual_compaction_bindings": {
+      "primaryKey": [
+        "manual_compaction_id"
+      ],
+      "columns": [
+        "manual_compaction_id",
+        "thread_binding_id",
+        "codex_thread_id",
+        "codex_compaction_turn_id",
+        "codex_model_provider_id",
+        "codex_model",
+        "upstream_profile_snapshot_ref",
+        "upstream_profile_snapshot_digest",
+        "provider_snapshot_json",
+        "credential_reference_id",
+        "expected_tools_digest",
+        "expires_at",
+        "consumed_at",
+        "consume_evidence_digest",
+        "abandoned_at",
+        "abandoned_reason",
+        "abandoned_reconciled_at",
+        "revision",
+        "created_at",
+        "updated_at"
+      ],
+      "partialUnique": [
+        {
+          "columns": [
+            "thread_binding_id"
+          ],
+          "where": "consumed_at IS NULL AND abandoned_at IS NULL"
+        }
+      ]
+    },
+    "codex_thread_dispatch_fences": {
+      "primaryKey": [
+        "thread_binding_id"
+      ],
+      "columns": [
+        "thread_binding_id",
+        "owner_main_boot_id",
+        "operation_kind",
+        "owner_ready_run_id",
+        "owner_manual_compaction_id",
+        "acquired_at",
+        "expires_at",
+        "quarantined_at",
+        "quarantine_reason",
+        "revision"
+      ],
+      "closedEnums": {
+        "operation_kind": [
+          "product_turn",
+          "manual_compaction"
+        ]
+      },
+      "exactlyOneOwner": [
+        "owner_ready_run_id",
+        "owner_manual_compaction_id"
+      ]
+    },
+    "codex_sidecar_process_leases": {
+      "primaryKey": [
+        "process_lease_id"
+      ],
+      "columns": [
+        "process_lease_id",
+        "singleton_slot",
+        "owner_main_boot_id",
+        "owner_main_pid",
+        "owner_main_process_start_identity",
+        "sidecar_spawn_instance_id",
+        "connection_epoch",
+        "runtime_manifest_digest",
+        "binary_sha256",
+        "executable_path",
+        "isolated_state_dir",
+        "spawn_intent_at",
+        "spawn_visibility_deadline_at",
+        "pid",
+        "process_group_id",
+        "process_start_identity",
+        "ownership_confirmed_at",
+        "owner_main_dead_at",
+        "owner_main_death_evidence_digest",
+        "connection_opened_at",
+        "closed_at",
+        "tree_zero_at",
+        "tree_zero_matcher_mode",
+        "stable_zero_sample_transcript_digest",
+        "tree_zero_evidence_digest",
+        "revision"
+      ],
+      "unique": [
+        [
+          "sidecar_spawn_instance_id"
+        ],
+        [
+          "connection_epoch"
+        ]
+      ],
+      "partialUnique": [
+        {
+          "columns": [
+            "singleton_slot"
+          ],
+          "where": "tree_zero_at IS NULL"
+        }
+      ],
+      "closedEnums": {
+        "tree_zero_matcher_mode": [
+          "pre_cas",
+          "post_cas"
+        ]
+      }
+    }
+  },
+  "crossTableInvariants": [
+    "thread_turn_call_parent_identity_exact",
+    "normal_turn_binding_and_dispatch_fence_acquired_in_one_immediate_transaction",
+    "ready_closeout_and_product_fence_release_committed_in_one_transaction",
+    "host_failure_evidence_all_or_none_and_immutable",
+    "continuation_blocker_fields_all_or_none",
+    "user_ingress_successor_evidence_all_empty",
+    "non_user_successor_evidence_all_nonempty_and_immutable",
+    "binding_writes_reject_stale_revision",
+    "repository_reads_back_before_commit",
+    "no_repository_external_direct_sql_writer"
+  ]
+}
