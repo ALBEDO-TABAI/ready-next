@@ -47,7 +47,7 @@ import { cancelChildRunForIpc, listActiveChildRunsForIpc } from './active-child-
 import { askUserGroup } from './ipc/ask-user-group'
 import { toolEventGroup } from './ipc/tool-event-group'
 import { agentLifecycleGroup } from './ipc/agent-lifecycle-group'
-import { createE1UnavailableCodexRuntimeComposition } from '../agent-control/codex-runtime/codex-runtime-composition'
+import { createE2UnavailableCodexRuntimeComposition } from '../agent-control/codex-runtime/codex-runtime-composition'
 import { agentRuntimeGroup } from './ipc/agent-runtime-group'
 import { mcpGroup, runMcpBoot } from './ipc/mcp-group'
 import { agentRegistryGroup } from './ipc/agent-registry-group'
@@ -588,7 +588,7 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
     runtime = new AgentControlRuntime(
       agentManager,
       browserController,
-      createE1UnavailableCodexRuntimeComposition(),
+      createE2UnavailableCodexRuntimeComposition(),
     )
     void runtime.start()
     // Phase 1.3 — kick off the Python venv health check immediately after the

@@ -70,6 +70,8 @@ class FakeNativeRuntime implements CodexNativeRuntime {
   readonly interrupts: Array<{ threadId: string; turnId: string }> = []
   thread: CodexThread = rootThread
   suppressTurnTerminal = false
+  pendingThreadStart = false
+  pendingTurnStart = false
   private readonly listeners = new Set<(notification: CodexNativeNotification) => void>()
 
   private failIfRequested(method: string): void {
@@ -87,12 +89,16 @@ class FakeNativeRuntime implements CodexNativeRuntime {
   async threadStart(params: CodexThreadStartParams): Promise<{ thread: CodexThread; instructionSources: string[] }> {
     this.calls.push('threadStart')
     this.failIfRequested('threadStart')
+    if (this.pendingThreadStart) return new Promise(() => undefined)
     return { thread: { ...this.thread, cwd: params.cwd }, instructionSources: [] }
   }
   async threadRead(): Promise<{ thread: CodexThread }> {
     this.calls.push('threadRead')
     this.failIfRequested('threadRead')
     return { thread: { ...this.thread, turns: [{ ...activeTurn, status: 'completed' }] } }
+  }
+  async threadList(): Promise<{ data: CodexThread[]; nextCursor: string | null }> {
+    throw new Error('not used')
   }
   async threadResume(): Promise<{ thread: CodexThread; instructionSources: string[] }> {
     this.calls.push('threadResume')
@@ -105,6 +111,7 @@ class FakeNativeRuntime implements CodexNativeRuntime {
   async turnStart(): Promise<{ turn: CodexTurn }> {
     this.calls.push('turnStart')
     this.failIfRequested('turnStart')
+    if (this.pendingTurnStart) return new Promise(() => undefined)
     if (this.suppressTurnTerminal) return { turn: activeTurn }
     this.emit({
       method: 'item/completed',
@@ -683,6 +690,60 @@ test('turn start transport failure still reaches Ready closeout exactly once', a
     assert.equal(candidates[0].hostFailure.stage, 'turn_start')
     assert.match(candidates[0].hostFailure.message, /turnStart_failed/)
     assert.equal(candidates[0].terminalReasonCandidate, 'persistence_failed')
+  }
+})
+
+test('unresolved native start remains pending without creating a Ready failure or closeout', async () => {
+  for (const stage of ['thread', 'turn'] as const) {
+    const { adapter, nativeRuntime, lifecycleStore, candidates } = createHarness()
+    if (stage === 'thread') nativeRuntime.pendingThreadStart = true
+    else {
+      lifecycleStore.threadState = 'loaded'
+      nativeRuntime.pendingTurnStart = true
+    }
+
+    const execution = adapter.executePreparedRun({
+      prepared,
+      expectedScopeId: prepared.readyToolHostIdentity.scopeId,
+      emitStartedProjection: () => {},
+      resolveContext: async () => ({
+        turnBuildContext: {
+          turnRequestId: `turn-request-${stage}-pending`,
+          readyRunId: 'run-1',
+          toolSurfaceDigest: 'surface-digest',
+          turnContractDigest: 'turn-digest',
+          upstreamProfileSnapshotDigest: 'profile-digest',
+        },
+        collection: {
+          terminalTimeoutMs: 20,
+          actionReceiptRefs: [],
+          interactionState: null,
+          waitingFor: null,
+          terminalReasonCandidate: 'done',
+          abortInitiator: null,
+          budgetState: {},
+          contextState: {},
+          providerDiagnostics: {},
+          recoveryCheckpointRef: null,
+          browserContinuationRef: null,
+          browserProofRefs: [],
+          otherProofRefs: [],
+          projectionPatchRefs: [],
+          allowNullPhaseFallback: true,
+          allowDirectProvisionalStream: false,
+          onAutomaticCompactionObserved: () => {},
+          onProvisionalDelta: () => {},
+        },
+      }),
+    })
+    const state = await Promise.race([
+      execution.then(() => 'settled'),
+      new Promise<'pending'>((resolve) => setTimeout(() => resolve('pending'), 25)),
+    ])
+    assert.equal(state, 'pending')
+    assert.equal(candidates.length, 0)
+    assert.equal(lifecycleStore.calls.includes('bindStartedThread'), false)
+    assert.deepEqual(nativeRuntime.calls, stage === 'thread' ? ['threadStart'] : ['turnStart'])
   }
 })
 

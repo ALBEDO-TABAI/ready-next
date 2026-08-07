@@ -41,6 +41,7 @@ export interface DatabaseConnection {
   exec(sql: string): void
   prepare(sql: string): DatabaseStatement
   close(): void
+  readonly inTransaction?: boolean
   // better-sqlite3 exposes pragma() at runtime; declared optional so mocks /
   // in-memory fallbacks that omit it stay structurally compatible.
   pragma?(source: string, options?: { simple?: boolean }): unknown

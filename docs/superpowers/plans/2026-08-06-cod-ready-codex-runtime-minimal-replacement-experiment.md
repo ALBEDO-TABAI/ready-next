@@ -2,7 +2,7 @@
 title: cod-ready Codex Runtime 最小替换试验实施计划
 date: 2026-08-06
 kind: implementation-plan
-status: experiment-e1-passed
+status: experiment-e2-passed
 enforce: true
 owner: 白
 author: Codex
@@ -13,12 +13,13 @@ approval:
 route_revision:
   date: 2026-08-07
   instruction: 那就按你理解的继续
-  phase: E1
+  phase: E2
 phase_progress:
   completed:
     - E0-R
     - E1
-  next: E2
+    - E2
+  next: E3
   next_phase_allowed: true
 implementation_branch: codex/cod-ready
 implementation_worktree: /Users/user/实验田/cod-ready
@@ -171,6 +172,26 @@ E1 已完成并通过独立复审：**PASS，允许进入 E2**。
 
 阶段报告见 `docs/superpowers/audits/2026-08-07-codex-runtime-e1-report.md` 与同名 JSON；原 E0 FAIL 和
 E0-R PASS 报告保持不变。E2 从此边界开始，不将 E1 fake native port 冒充为已实现 sidecar。
+
+## 0.6 E2 施工结论（2026-08-07）
+
+E2 已完成并通过独立复审：**PASS，允许进入 E3**。
+
+- 固定版本 app-server 已作为真实子进程运行；JSONL client、初始化、严格 RPC 面、独立状态目录、最小环境、进程归属、
+  crash backoff 与旧进程结算均有行为门禁。
+- 六张 Codex 持久表与迁移 088/089 已建立；start reservation、binding、dispatch fence、manual compaction 和 process lease
+  由单一 repository 按 revision/CAS 写入，关键身份、隔离原因和进程证据不可改写。
+- response、notification、server request 早到时保持无副作用缓冲；只有 native/client/Ready 三方身份精确一致后才提交并释放。
+  冲突、截止或断线先持久隔离，任何 intent 后的 unknown 都不重发。
+- boot reconciliation 在开放 ingress 前先结算旧进程与六个 start crash seam，再按 accepted / proven-absent / unknown
+  三分恢复 binding、capacity、fence 与 manual compaction。
+- 真实子进程验收覆盖 thread/turn 生命周期、受限 archive、自动/手动压缩、并发、正式重启、旧 Main 死亡与六处强杀。
+  E2 专项共 181/181 通过；全库 18 个既有失败保持同一集合，E2 新增失败为 0。
+- 具名 reviewer `/root/e0_adversarial_reviewer` 经四轮复核后给出
+  `FINAL VERDICT: PASS / P0=0 / P1=0 / P2=0 / nextPhaseAllowed=true`。
+
+阶段报告见 `docs/superpowers/audits/2026-08-07-codex-runtime-e2-report.md` 与同名 JSON。生产组合仍故意不可用；
+真实 Provider、Ready 工具和产品竖切仍分别属于 E3、E4 与后续阶段，不因 E2 通过而提前放行。
 
 ## 1. 开工假设与不确定项
 

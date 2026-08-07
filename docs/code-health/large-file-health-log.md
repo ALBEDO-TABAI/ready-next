@@ -21,6 +21,14 @@
 
 | 评估日期 | 任务 | 文件 | 总行数 | 本次新增 | 结论 | 判断与后续动作 | 状态 |
 | --- | --- | --- | ---: | ---: | --- | --- | --- |
+| 2026-08-07 | Codex Runtime E2 sidecar 与恢复 | `src/main/modules/agent-control/codex-runtime/codex-binding-repository.ts` | 2129 | 新文件 | 危险 | 六张 Codex 持久表的原子准入、启动裁决、压缩、进程租约和收口集中在唯一写者，单一权威是必要的，但事务族已过多。E8 前应保留一个对外 facade 和写向 gate，再按 start/turn、manual compaction、process lease 三类内部事务边界拆分。 | 待 E8 前独立拆分合同；交付时提醒 |
+| 2026-08-07 | Codex Runtime E2 真进程恢复补证 | `src/__tests__/codex-sidecar-crash-recovery.e2e.ts` | 1139 | 新文件 | 一般 | 单一验收流程覆盖六个启动中断位置、早到事件和三路恢复，共享搭建与故障注入使文件过线，但职责仍限于同一真进程合同。2026-09-07 复查是否将通用 provider/transport fixture 与断言场景拆开。 | 已排期：2026-09-07 |
+| 2026-08-07 | Codex Runtime E2 sidecar 与恢复 | `src/__tests__/codex-sidecar-process-lease.e2e.ts` | 1044 | 新文件 | 一般 | 单一真子进程验收流程覆盖会话、工具、压缩、并发、正式重启和受限清理；继续增长会降低故障定位速度。2026-09-07 复查是否按正常产品流与进程生命周期拆分。 | 已排期：2026-09-07 |
+| 2026-08-07 | Codex Runtime E2 持久约束复核 | `src/__tests__/codex-binding-repository-native.test.ts` | 1022 | 新文件 | 一般 | 单一原生 SQLite 套件覆盖六表关系、启动隔离、原子收口和进程证据；继续增长会降低失败定位速度。2026-09-07 复查是否按启动绑定、产品收口和进程租约拆套件。 | 已排期：2026-09-07 |
+| 2026-08-07 | Codex Runtime E2 sidecar 与恢复 | `src/main/modules/agent-control/runtime-core/runtime.ts` | 2299 | 净 +4 | 危险 | 本轮只在既有组合根注入 Codex 收口事务参与者，新判断在叶子仓储内；但文件仍承载过多运行时装配职责，沿用既有拆分约束。 | 待独立拆分合同；交付时提醒 |
+| 2026-08-07 | Codex Runtime E2 sidecar 与恢复 | `src/main/modules/database.ts` | 3089 | 净 +1 | 危险 | 本轮只补充原生 SQLite 事务状态的窄类型读回，没有新增数据域；多产品数据入口仍集中，沿用既有仓储下沉计划。 | 待拆分规划；交付时提醒 |
+| 2026-08-07 | Codex Runtime E2 sidecar 与恢复 | `src/main/modules/migrations.ts` | 4003 | 净 +20 | 健康 | 只追加顺序迁移 088 与证据保护升级 089，实际表结构在独立合同文件，并由 Electron SQLite 迁移、触发器和重复加载行为验证。 | 无需处理 |
+| 2026-08-07 | Codex Runtime E2 sidecar 与恢复 | `src/__tests__/ready-codex-lifecycle-adapter.test.ts` | 1058 | 净 +61 | 一般 | 仍是 Codex 生命周期适配的单一行为套件，本轮只补无效原生结果与收口失败反例。2026-09-07 复查是否按发送收口与用户生命周期拆套件。 | 已排期：2026-09-07 |
 | 2026-08-07 | Codex Runtime E1 原生接缝 | `src/main/modules/agent-control/contracts/run-contracts.ts` | 1010 | 净 +1 | 健康 | 只为既有协调结果补充产品收口证据字段；文件仍是单一合同声明面，并由类型检查、Codex 专项行为测试和正式构建覆盖。 | 无需处理 |
 | 2026-08-07 | Codex Runtime E1 原生接缝 | `src/main/modules/agent-control/runtime-core/remote-channel-service.ts` | 1254 | 净 +8 | 一般 | 只把旧本地协调器请求改为显式注入的入站执行端口，渠道身份、附件和投递职责没有扩张。2026-09-07 复查入站执行端口能否继续下沉到独立渠道入口。 | 已排期：2026-09-07 |
 | 2026-07-24 | ChatGPT OAuth 实验接入 | `src/preload/index.ts` | 1601 | 净 +4 | 一般 | 只增加登录状态读取、发起登录与退出登录的跨进程透传，仍是跨进程 API 汇总面。2026-08-24 复查是否按设置域拆分接口组装。 | 已排期：2026-08-24 |

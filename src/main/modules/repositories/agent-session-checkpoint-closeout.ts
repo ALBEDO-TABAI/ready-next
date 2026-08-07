@@ -29,6 +29,14 @@ interface ChatMessageRow {
   meta_json?: string | null
 }
 
+export interface CanonicalCoreCloseoutTransactionParticipant {
+  complete(input: {
+    readyRunId: string
+    productTerminalDigest: string
+    closeoutAt: string
+  }): void
+}
+
 const readParent = readWorkflowParent
 
 function changed(result: unknown): number {
@@ -112,7 +120,10 @@ function releaseHeldBrowserTargetClaims(
 }
 
 export class AgentSessionCheckpointCloseoutRepository {
-  constructor(readonly unitOfWork: BrowserWorkflowUnitOfWork) {}
+  constructor(
+    readonly unitOfWork: BrowserWorkflowUnitOfWork,
+    private readonly transactionParticipant?: CanonicalCoreCloseoutTransactionParticipant,
+  ) {}
 
   async commitCanonicalCoreCloseout(
     input: CanonicalCoreCloseoutInput,
@@ -257,6 +268,11 @@ export class AgentSessionCheckpointCloseoutRepository {
               WHERE parent_task_id = ? AND kind = 'browser_workflow' LIMIT 1`,
           ).get<{ id: string }>(parent.taskId)?.id ?? null
           releaseHeldBrowserTargetClaims(db, input.ownerRunId, Date.now())
+          this.transactionParticipant?.complete({
+            readyRunId: input.ownerRunId,
+            productTerminalDigest: workflowDigest(canonicalMessage),
+            closeoutAt: canonicalMessage.timestamp,
+          })
           return {
             parent,
             browserTaskId,
@@ -652,6 +668,11 @@ export class AgentSessionCheckpointCloseoutRepository {
         ) {
           throw new Error('core_closeout_run_meta_readback_failed')
         }
+        this.transactionParticipant?.complete({
+          readyRunId: input.ownerRunId,
+          productTerminalDigest: canonicalMessageDigest,
+          closeoutAt: readbackCanonical.timestamp,
+        })
         return {
           parent: readParent(db, parent.taskId),
           browserTaskId,

@@ -21,6 +21,10 @@ import type { ScheduleSpecV1 } from '../../shared/scheduled-tasks'
 import { BROWSER_CHECKPOINT_WAKE_KINDS } from '../../shared/browser-workflow-control'
 import { migrateCanonicalRSSItemIdentities } from './rss-engine/item-identity-migration'
 import { migrateFalseFailedDirectAnswers } from './agent-control/task-projection/direct-answer-history-migration'
+import {
+  CODEX_BINDING_EVIDENCE_GUARDS_SQL,
+  CODEX_BINDING_SCHEMA_SQL,
+} from './agent-control/codex-runtime/codex-binding-schema'
 
 const BROWSER_CHECKPOINT_WAKE_KIND_SQL = BROWSER_CHECKPOINT_WAKE_KINDS
   .map((kind) => `'${kind}'`)
@@ -3915,7 +3919,23 @@ const migrations: Migration[] = [
           AND NULLIF(json_extract(checkpoint_refs_json, '$.suspensionCheckpointId'), '') IS NOT NULL;
       `)
     },
-  }
+  },
+  {
+    name: '088_codex_runtime_bindings',
+    up: (db) => {
+      db.exec(CODEX_BINDING_SCHEMA_SQL)
+    },
+  },
+  {
+    name: '089_codex_runtime_evidence_guards',
+    up: (db) => {
+      db.exec(`
+        DROP TRIGGER IF EXISTS codex_fence_parent_update;
+        DROP TRIGGER IF EXISTS codex_process_lease_identity_immutable_update;
+      `)
+      db.exec(CODEX_BINDING_EVIDENCE_GUARDS_SQL)
+    },
+  },
 ]
 
 /**

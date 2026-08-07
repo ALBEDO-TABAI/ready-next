@@ -23,6 +23,7 @@ import { CodexTurnInputBuilder } from './codex-turn-input-builder'
 import type {
   CodexNativeNotification,
   CodexNativeRuntime,
+  CodexThreadListParams,
   CodexThreadStartParams,
   CodexTurnStartParams,
 } from './codex-native-runtime'
@@ -31,6 +32,9 @@ import {
   type CodexPreparedRunContext,
   type ReadyCodexLifecycleStore,
 } from './ready-codex-lifecycle-adapter'
+import type {
+  CanonicalCoreCloseoutTransactionParticipant,
+} from '../../repositories/agent-session-checkpoint-repository'
 
 export interface CodexStartIdentityPort {
   resolveMethods(scopeId: string): StartIdentityReservationMethods
@@ -98,6 +102,7 @@ export interface CodexRuntimeComposition {
   ingressPort: CodexIngressPort
   aliasBindingPort: CodexAliasBindingPort
   preparedRunContextPort: CodexPreparedRunContextPort
+  canonicalCloseoutTransactionParticipant: CanonicalCoreCloseoutTransactionParticipant
 }
 
 class UnavailableCodexNativeRuntime implements CodexNativeRuntime {
@@ -108,6 +113,7 @@ class UnavailableCodexNativeRuntime implements CodexNativeRuntime {
   async initialize(): Promise<never> { return this.unavailable() }
   async threadStart(_params: CodexThreadStartParams): Promise<never> { return this.unavailable() }
   async threadRead(_params: { threadId: string; includeTurns: true }): Promise<never> { return this.unavailable() }
+  async threadList(_params: CodexThreadListParams): Promise<never> { return this.unavailable() }
   async threadResume(_params: { threadId: string }): Promise<never> { return this.unavailable() }
   async threadArchive(_params: { threadId: string }): Promise<never> { return this.unavailable() }
   async turnStart(_params: CodexTurnStartParams): Promise<never> { return this.unavailable() }
@@ -142,7 +148,7 @@ class UnavailableCodexLifecycleStore implements ReadyCodexLifecycleStore {
   digestThreadRead(): string { return digest('e1-native-unavailable:thread-read') }
 }
 
-export function createE1UnavailableCodexRuntimeComposition(): CodexRuntimeComposition {
+export function createE2UnavailableCodexRuntimeComposition(): CodexRuntimeComposition {
   const nativeRuntime = new UnavailableCodexNativeRuntime()
   const collector = new CodexTurnCollector(nativeRuntime)
   const lifecycleAdapter = new ReadyCodexLifecycleAdapter<ReadyClosedCodexProductRun>({
@@ -205,6 +211,9 @@ export function createE1UnavailableCodexRuntimeComposition(): CodexRuntimeCompos
       async resolve() {
         throw new Error('codex_prepared_run_context_unavailable')
       },
+    },
+    canonicalCloseoutTransactionParticipant: {
+      complete() {},
     },
   }
 }

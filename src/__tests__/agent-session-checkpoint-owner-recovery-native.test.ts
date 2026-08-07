@@ -182,7 +182,17 @@ test('non-done core closeout terminates all browser ledgers without requiring a 
     const accessor = { getRawDb: () => db }
     const projections = new TaskProjectionRepository(accessor)
     const runMeta = new RunMetaRepository(db)
-    const repository = new AgentSessionCheckpointRepository(accessor)
+    let closeoutParticipantInput: {
+      readyRunId: string
+      productTerminalDigest: string
+      closeoutAt: string
+    } | null = null
+    const repository = new AgentSessionCheckpointRepository(accessor, {
+      complete(input) {
+        assert.equal(db.inTransaction, true)
+        closeoutParticipantInput = input
+      },
+    })
     const parentTaskId = 'parent-browser-non-done-closeout'
     const scopeId = 'scope-browser-non-done-closeout'
     const ownerRunId = 'run-browser-non-done-closeout'
@@ -399,6 +409,9 @@ test('non-done core closeout terminates all browser ledgers without requiring a 
       template: 'research/browser',
       items: [],
     })
+    assert.equal(closeoutParticipantInput?.readyRunId, ownerRunId)
+    assert.equal(closeoutParticipantInput?.closeoutAt, now)
+    assert.equal(closeoutParticipantInput?.productTerminalDigest, closeout.value.canonicalMessageDigest)
   } finally {
     db.close()
   }

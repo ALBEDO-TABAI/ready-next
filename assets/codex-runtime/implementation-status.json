@@ -1,11 +1,11 @@
 {
   "schemaVersion": 1,
-  "currentPhase": "E1",
+  "currentPhase": "E2",
   "finalVerdict": "PENDING",
   "phases": {
     "E0": "failed",
     "E1": "passed",
-    "E2": "not_started",
+    "E2": "passed",
     "E3": "not_started",
     "E4": "not_started",
     "E5": "not_started",

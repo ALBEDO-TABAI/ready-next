@@ -7,7 +7,10 @@ import {
   type WorkflowRawDatabase,
 } from './browser-workflow-unit-of-work'
 import { AgentSessionCheckpointRouteRepository } from './agent-session-checkpoint-route'
-import { AgentSessionCheckpointCloseoutRepository } from './agent-session-checkpoint-closeout'
+import {
+  AgentSessionCheckpointCloseoutRepository,
+  type CanonicalCoreCloseoutTransactionParticipant,
+} from './agent-session-checkpoint-closeout'
 import { AgentSessionCheckpointSteeringRepository } from './agent-session-checkpoint-steering'
 import { AgentSessionCheckpointResumeRepository } from './agent-session-checkpoint-resume'
 import { AgentSessionCheckpointStoreRepository } from './agent-session-checkpoint-store'
@@ -25,6 +28,7 @@ export type {
   BrowserWorkflowParentRecord,
 } from './browser-workflow-row-mapping'
 export type * from './agent-session-checkpoint-types'
+export type { CanonicalCoreCloseoutTransactionParticipant } from './agent-session-checkpoint-closeout'
 
 export class AgentSessionCheckpointRepository {
   readonly unitOfWork: BrowserWorkflowUnitOfWork
@@ -35,10 +39,16 @@ export class AgentSessionCheckpointRepository {
   private readonly store: AgentSessionCheckpointStoreRepository
   private readonly journal: AgentSessionCheckpointJournalRepository
 
-  constructor(accessor: WorkflowDatabaseAccessor) {
+  constructor(
+    accessor: WorkflowDatabaseAccessor,
+    closeoutTransactionParticipant?: CanonicalCoreCloseoutTransactionParticipant,
+  ) {
     this.unitOfWork = new BrowserWorkflowUnitOfWork(accessor)
     this.route = new AgentSessionCheckpointRouteRepository(accessor, this.unitOfWork)
-    this.closeout = new AgentSessionCheckpointCloseoutRepository(this.unitOfWork)
+    this.closeout = new AgentSessionCheckpointCloseoutRepository(
+      this.unitOfWork,
+      closeoutTransactionParticipant,
+    )
     this.steering = new AgentSessionCheckpointSteeringRepository(accessor, this.unitOfWork)
     this.resume = new AgentSessionCheckpointResumeRepository(accessor, this.unitOfWork)
     this.store = new AgentSessionCheckpointStoreRepository(accessor, this.unitOfWork)

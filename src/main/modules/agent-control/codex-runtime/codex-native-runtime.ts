@@ -29,6 +29,12 @@ export type CodexThreadStartParams = {
   developerInstructions: string
 }
 
+export type CodexThreadListParams = {
+  limit: number
+  cwd: string
+  sourceKinds: ['vscode']
+}
+
 export type CodexTurnStartParams = {
   threadId: string
   clientUserMessageId: string
@@ -195,6 +201,10 @@ export interface CodexNativeRuntime {
     instructionSources: string[]
   }>
   threadRead(params: { threadId: string; includeTurns: true }): Promise<{ thread: CodexThread }>
+  threadList(params: CodexThreadListParams): Promise<{
+    data: CodexThread[]
+    nextCursor: string | null
+  }>
   threadResume(params: { threadId: string }): Promise<{
     thread: CodexThread
     instructionSources: string[]
@@ -217,6 +227,9 @@ const PASSIVE_NOTIFICATION_METHODS = new Set([
   'thread/tokenUsage/updated',
   'account/rateLimits/updated',
   'remoteControl/status/changed',
+  'serverRequest/resolved',
+  'thread/compacted',
+  'thread/archived',
 ])
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -512,7 +525,7 @@ function normalizeTurnError(value: unknown): CodexTurnError | null {
   }
 }
 
-function normalizeTurn(value: unknown): CodexTurn | null {
+export function normalizeCodexTurn(value: unknown): CodexTurn | null {
   if (!isRecord(value)) return null
   const id = stringField(value, 'id')
   const status = stringField(value, 'status')
@@ -542,7 +555,7 @@ function normalizeTurn(value: unknown): CodexTurn | null {
   }
 }
 
-function normalizeThread(value: unknown): CodexThread | null {
+export function normalizeCodexThread(value: unknown): CodexThread | null {
   if (!isRecord(value)) return null
   const id = stringField(value, 'id')
   const sessionId = stringField(value, 'sessionId')
@@ -578,7 +591,7 @@ function normalizeThread(value: unknown): CodexThread | null {
     || !Number.isSafeInteger(value.updatedAt)
     || !Array.isArray(value.turns)
   ) return null
-  const turns = value.turns.map(normalizeTurn)
+  const turns = value.turns.map(normalizeCodexTurn)
   if (turns.some((turn) => !turn)) return null
   return {
     id,
@@ -610,14 +623,14 @@ export function normalizeCodexNativeNotification(
   const params = value.params
 
   if (method === 'thread/started') {
-    const thread = normalizeThread(params.thread)
+    const thread = normalizeCodexThread(params.thread)
     return thread
       ? { kind: 'accepted', notification: { method, params: { thread } } }
       : { kind: 'invalid', code: 'invalid_params' }
   }
   if (method === 'turn/started' || method === 'turn/completed') {
     const threadId = stringField(params, 'threadId')
-    const turn = normalizeTurn(params.turn)
+    const turn = normalizeCodexTurn(params.turn)
     if (!threadId || !turn) return { kind: 'invalid', code: 'invalid_params' }
     return { kind: 'accepted', notification: { method, params: { threadId, turn } } }
   }

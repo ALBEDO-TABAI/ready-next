@@ -166,7 +166,7 @@ export type { UpsertChannelPayload } from './runtime-helpers'
 
 export class AgentControlRuntime extends EventEmitter {
   private readonly db = getDatabase()
-  private readonly agentSessionCheckpoints = new AgentSessionCheckpointRepository(this.db)
+  private readonly agentSessionCheckpoints: AgentSessionCheckpointRepository
   private readonly browserController: BrowserController | null
   private readonly browserContinuation: BrowserContinuationRuntime
   // EP3-A3: declared BEFORE promptAssembly so the roster closure can never
@@ -510,6 +510,10 @@ export class AgentControlRuntime extends EventEmitter {
     this.agentManager = agentManager
     this.browserController = browserController || null
     this.codexRuntime = codexRuntime
+    this.agentSessionCheckpoints = new AgentSessionCheckpointRepository(
+      this.db,
+      codexRuntime.canonicalCloseoutTransactionParticipant,
+    )
     this.browserController?.setHumanTakeoverIntentPort((input) => this.createHumanTakeoverIntent(input))
     this.browserController?.setBrowserTargetResumePort((input) => this.resumeBrowserTargetClaim(input))
     this.browserController?.setBrowserTargetCheckpointResolver((parentTaskId) =>

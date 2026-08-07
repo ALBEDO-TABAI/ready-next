@@ -176,7 +176,7 @@ test('Codex composition is explicit and has no SDK fallback constructor', () => 
   assert.match(runtime, /codexRuntime: CodexRuntimeComposition/)
   const constructorSignature = between(runtime, 'constructor(', 'super()')
   assert.doesNotMatch(constructorSignature, /codexRuntime\?:|codexRuntime\s*=/)
-  assert.match(ipc, /createE1UnavailableCodexRuntimeComposition\(\)/)
+  assert.match(ipc, /createE2UnavailableCodexRuntimeComposition\(\)/)
   assert.match(composition, /ingressPort: CodexIngressPort/)
   assert.match(composition, /preparedRunContextPort: CodexPreparedRunContextPort/)
   assert.match(composition, /lifecycleAdapter: ReadyCodexLifecycleAdapter<ReadyClosedCodexProductRun>/)

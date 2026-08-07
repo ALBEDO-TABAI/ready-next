@@ -58,6 +58,7 @@ class FixtureNativeRuntime implements CodexNativeRuntime {
   initialize(): Promise<{ userAgent: string }> { throw new Error('unused') }
   threadStart(): Promise<{ thread: CodexThread; instructionSources: string[] }> { throw new Error('unused') }
   threadRead(): Promise<{ thread: CodexThread }> { throw new Error('unused') }
+  threadList(): Promise<{ data: CodexThread[]; nextCursor: string | null }> { throw new Error('unused') }
   threadResume(): Promise<{ thread: CodexThread; instructionSources: string[] }> { throw new Error('unused') }
   threadArchive(): Promise<Record<string, never>> { throw new Error('unused') }
   turnStart(): Promise<{ turn: CodexTurn }> { throw new Error('unused') }

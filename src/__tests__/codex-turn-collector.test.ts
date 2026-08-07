@@ -26,6 +26,7 @@ class FakeNativeRuntime implements CodexNativeRuntime {
   initialize(): Promise<{ userAgent: string }> { throw new Error('unused') }
   threadStart(): Promise<{ thread: CodexThread; instructionSources: string[] }> { throw new Error('unused') }
   threadRead(): Promise<{ thread: CodexThread }> { throw new Error('unused') }
+  threadList(): Promise<{ data: CodexThread[]; nextCursor: string | null }> { throw new Error('unused') }
   threadResume(): Promise<{ thread: CodexThread; instructionSources: string[] }> { throw new Error('unused') }
   threadArchive(): Promise<Record<string, never>> { throw new Error('unused') }
   turnStart(): Promise<{ turn: CodexTurn }> { throw new Error('unused') }
@@ -229,6 +230,20 @@ test('collector preserves tool, compaction, action, proof, waiting, and checkpoi
     itemId: 'compact-1',
   }])
   assert.equal(JSON.stringify(result).includes('compact-1'), false)
+})
+
+test('deprecated thread compaction notification is passive while the typed item remains authoritative', () => {
+  assert.deepEqual(normalizeCodexNativeNotification({
+    method: 'thread/compacted',
+    params: { threadId: 'thread-1' },
+  }), { kind: 'ignored', method: 'thread/compacted' })
+})
+
+test('thread archive acknowledgement is passive after the typed request resolves', () => {
+  assert.deepEqual(normalizeCodexNativeNotification({
+    method: 'thread/archived',
+    params: { threadId: 'thread-1' },
+  }), { kind: 'ignored', method: 'thread/archived' })
 })
 
 test('collector covers product exit hints while engine outcome remains native truth', async () => {
