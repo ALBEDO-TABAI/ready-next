@@ -7,8 +7,9 @@ import {
   resolveAIConfigCapabilities,
   type AIModelConfig,
 } from '../../../shared/ai-providers'
+import type { AgentIngressMessageBlock } from '../../../shared/ipc-contracts/agent-runtime'
 
-export type MultimodalBlock = { type: 'text' | 'image' | 'video'; text?: string; base64?: string; mimeType?: string }
+export type MultimodalBlock = AgentIngressMessageBlock
 
 export interface AttachmentInputFailure {
   id: string
@@ -376,34 +377,6 @@ export function buildEnvironmentContext(): string | null {
   return contexts.length > 0 ? contexts.join('\n\n') : null
 }
 
-export async function persistMessage(
-  conversationId: string,
-  id: string,
-  role: string,
-  content: string,
-  meta?: Record<string, unknown>,
-): Promise<{ success: boolean; error?: string }> {
-  if (typeof window === 'undefined' || !window.electronAPI?.chat) {
-    return { success: false, error: 'chat ipc unavailable' }
-  }
-  try {
-    const result = await window.electronAPI.chat.saveMessage({
-      id,
-      conversationId,
-      role,
-      content,
-      timestamp: new Date().toISOString(),
-      meta,
-    })
-    if (!result?.success) {
-      return { success: false, error: result?.error || 'message persist failed' }
-    }
-    return { success: true }
-  } catch {
-    return { success: false, error: 'message persist failed' }
-  }
-}
-
 export function serializePersistedAttachments(attachments: ChatAttachment[]): Array<Record<string, unknown>> {
   return attachments
     .filter((attachment) => {
@@ -695,7 +668,9 @@ export async function buildComposedAgentInputWithDiagnostics(params: {
     }
 
     const hasMediaBlocks = blocks.some((b) => b.type === 'image' || b.type === 'video')
-    finalMessage = hasMediaBlocks ? blocks : blocks.map((b) => b.text || '').join('')
+    finalMessage = hasMediaBlocks
+      ? blocks
+      : blocks.flatMap((block) => block.type === 'text' ? [block.text] : []).join('')
   }
 
   const referencedPoolAttachments = resolveReferencedFilePoolAttachments(content, filePool)

@@ -15,10 +15,8 @@
  *      fallback metric is recorded.
  *   2. event.sessionId is null but conversationId matches a live slice →
  *      routes to that slice, metric reason 'null-sessionId'.
- *   3. event.sessionId points at a slice that has been transitioned to
- *      'done' AND a different live slice owns the same conversationId →
- *      lookupSessionByConversation wins, metric reason
- *      'stale-or-terminated-session'.
+ *   3. event.sessionId points at a slice whose latest turn is 'done' →
+ *      the same open conversation remains reusable and wins directly.
  *   4. event.sessionId is not present in `sessions` Record AND
  *      conversationId is null → falls through to state.activeSessionId,
  *      metric reason 'unknown-session'.
@@ -57,8 +55,6 @@ function makeSlice(opts: {
 } = {}): SessionSlice {
   return {
     messages: [],
-    pendingSendCount: 0,
-    pendingSendFlushAt: null,
     isStreaming: false,
     foregroundBusy: false,
     composerLocked: false,
@@ -102,10 +98,6 @@ function seedStore(opts: SeedOptions = {}) {
     attachments: [],
     filePool: [],
     activeAttachmentPreview: null,
-    sendCoalescingEnabled: true,
-    sendCoalescingWindowMs: 1200,
-    pendingSendCount: 0,
-    pendingSendFlushAt: null,
     sessions: opts.sessions ?? {},
     activeSessionId: opts.activeSessionId ?? null,
     taskDisclosureState: {},
@@ -187,20 +179,15 @@ test('V3.3d case 2 — null sessionId + conversationId matches live → routes v
   )
 })
 
-// --- Case 3 — stale-terminated sessionId + live conversation match -----
+// --- Case 3 — a terminal turn does not close its conversation alias -----
 
-test('V3.3d case 3 — stale terminated event.sessionId + live conversation match → metric stale-or-terminated-session', () => {
+test('V3.3d case 3 — done turn remains routable on the same open conversation', () => {
   __resetCardRoutingMetricsForTesting()
   seedStore({
     sessions: {
-      // event.sessionId points here, but the slice has been transitioned
-      // to 'done' by an earlier scopeRunEvent — isLiveSession rejects it.
       'session-A': makeSlice({ state: 'done', conversationId: 'conv-shared' }),
-      // A different live session owns the same conversation now (e.g.
-      // user opened the conversation again after the first run finished).
-      'session-A-prime': makeSlice({ state: 'live', conversationId: 'conv-shared' }),
     },
-    activeSessionId: 'session-A-prime',
+    activeSessionId: 'session-A',
   })
 
   const decision = routeCardToSession(useAgent.getState(), {
@@ -211,17 +198,13 @@ test('V3.3d case 3 — stale terminated event.sessionId + live conversation matc
 
   assert.equal(
     decision.targetSessionId,
-    'session-A-prime',
-    'falls through to the live conversation match',
+    'session-A',
+    'terminal turn state does not retire the conversation alias',
   )
-  assert.equal(
-    decision.metric,
-    'stale-or-terminated-session',
-    'metric reason identifies the terminated original session',
-  )
+  assert.equal(decision.metric, null)
 
-  // Guard: lookupSessionByConversation must NOT return the terminated slice.
-  assert.equal(isLiveSession(useAgent.getState(), 'session-A'), false)
+  assert.equal(isLiveSession(useAgent.getState(), 'session-A'), true)
+  assert.equal(lookupSessionByConversation(useAgent.getState(), 'conv-shared'), 'session-A')
 })
 
 // --- Case 4 — unknown sessionId (not in Record) + null conversation -----

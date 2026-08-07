@@ -1,15 +1,12 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
-  captured,
   driverApi,
   fireOnError,
   fireOnScopeRunEvent,
-  fireOnStream,
   fixtureState,
   getSessionSlice,
   infrastructureTimeoutReports,
-  makeLockedSlice,
   seedTwoSessions,
   useAgent,
 } from './runtime-driver-test-fixtures'
@@ -100,8 +97,9 @@ test('X2.1 #5 — mid-send scope switch: terminal still unlocks the originating 
 //
 // If no renderer-visible event arrives within 60s, ask main for the run's
 // authoritative state. Active/paused runs stay locked and are probed later;
-// missing/stale runs unlock quietly; an unreachable main eventually unlocks
-// with an honest unknown-state notice.
+// missing runs unlock quietly; stale probes that identify a replacement run
+// stay locked under that replacement identity. An unreachable main eventually
+// unlocks with an honest unknown-state notice.
 //
 // The driver exposes `armInfrastructureWatchdog(scopeId, requestId,
 // { timeoutMs })` as a test seam so we can fire it on a 1ms budget
@@ -174,6 +172,107 @@ test('X2.6 — main-confirmed missing run unlocks without a lost-track message',
     typeof m.content === 'string' && m.content.includes('Ready 跟丢了'))
   assert.equal(lostTrackMsg, undefined, 'main confirmed the run is gone, so renderer must not claim it lost the request')
   assert.equal(getSessionSlice(state, 'session-A').composerLocked, false, 'composer unlocks after main confirms no active run')
+})
+
+test('X2.6 — stale watchdog adopts the replacement run and never unlocks it', async () => {
+  infrastructureTimeoutReports.length = 0
+  fixtureState.infrastructureTimeoutReportResult = {
+    success: true,
+    data: { state: 'stale', activeRunId: 'req-new' },
+  }
+  seedTwoSessions({
+    activeSessionId: 'session-A',
+    lockedSessionId: 'session-A',
+    lockedScopeId: 'scope-A',
+    otherScopeId: 'scope-B',
+    requestId: 'req-old',
+  })
+
+  driverApi.armInfrastructureWatchdog('scope-A', 'req-old', { timeoutMs: 10 })
+  await new Promise((resolve) => setTimeout(resolve, 50))
+
+  const state = useAgent.getState()
+  const slice = getSessionSlice(state, 'session-A')
+  assert.deepEqual(infrastructureTimeoutReports, [
+    { scopeId: 'scope-A', requestId: 'req-old', elapsedMs: 10 },
+  ])
+  assert.equal(slice.composerLocked, true)
+  assert.equal(slice.foregroundBusy, true)
+  assert.equal(slice.isStreaming, true)
+  assert.equal(slice.streamingRequestId, 'req-new')
+  assert.equal(slice.scopeRunStates['scope-A']?.requestId, 'req-new')
+  assert.notEqual(slice.scopeRunStates['scope-A']?.phase, 'error')
+
+  driverApi.clearInfrastructureWatchdog('scope-A', 'req-new')
+})
+
+test('X2.6 — malformed stale response stays fail-closed instead of unlocking the run', async () => {
+  infrastructureTimeoutReports.length = 0
+  fixtureState.infrastructureTimeoutReportResult = {
+    success: true,
+    data: { state: 'stale' },
+  }
+  seedTwoSessions({
+    activeSessionId: 'session-A',
+    lockedSessionId: 'session-A',
+    lockedScopeId: 'scope-A',
+    otherScopeId: 'scope-B',
+    requestId: 'req-A',
+  })
+
+  driverApi.armInfrastructureWatchdog('scope-A', 'req-A', { timeoutMs: 10 })
+  await new Promise((resolve) => setTimeout(resolve, 2300))
+
+  const state = useAgent.getState()
+  const slice = getSessionSlice(state, 'session-A')
+  assert.deepEqual(infrastructureTimeoutReports, [
+    { scopeId: 'scope-A', requestId: 'req-A', elapsedMs: 10 },
+  ], 'a malformed affirmative response is not retried as an unreachable main')
+  assert.equal(slice.composerLocked, true)
+  assert.equal(slice.foregroundBusy, true)
+  assert.equal(slice.isStreaming, true)
+  assert.equal(slice.streamingRequestId, 'req-A')
+  assert.notEqual(slice.scopeRunStates['scope-A']?.phase, 'error')
+  assert.notEqual(slice.scopeRunStates['scope-A']?.terminalReason, 'infra_error')
+  assert.equal(
+    state.messages.some((message: { content: unknown }) => (
+      typeof message.content === 'string' && message.content.includes('联系不上后台')
+    )),
+    false,
+  )
+
+  driverApi.clearInfrastructureWatchdog('scope-A', 'req-A')
+})
+
+test('X2.6 — contradictory not_found response with an active run stays fail-closed', async () => {
+  infrastructureTimeoutReports.length = 0
+  fixtureState.infrastructureTimeoutReportResult = {
+    success: true,
+    data: { state: 'not_found', activeRunId: 'req-live' },
+  }
+  seedTwoSessions({
+    activeSessionId: 'session-A',
+    lockedSessionId: 'session-A',
+    lockedScopeId: 'scope-A',
+    otherScopeId: 'scope-B',
+    requestId: 'req-A',
+  })
+
+  driverApi.armInfrastructureWatchdog('scope-A', 'req-A', { timeoutMs: 10 })
+  await new Promise((resolve) => setTimeout(resolve, 100))
+
+  const slice = getSessionSlice(useAgent.getState(), 'session-A')
+  assert.deepEqual(infrastructureTimeoutReports, [
+    { scopeId: 'scope-A', requestId: 'req-A', elapsedMs: 10 },
+  ])
+  assert.equal(slice.composerLocked, true)
+  assert.equal(slice.foregroundBusy, true)
+  assert.equal(slice.isStreaming, true)
+  assert.equal(slice.streamingRequestId, 'req-A')
+  assert.notEqual(slice.scopeRunStates['scope-A']?.phase, 'error')
+  assert.notEqual(slice.scopeRunStates['scope-A']?.terminalReason, 'main_no_progress_timeout')
+
+  driverApi.clearInfrastructureWatchdog('scope-A', 'req-A')
 })
 
 test('X2.6 — paused_user_input keeps the run alive and the composer locked', async () => {

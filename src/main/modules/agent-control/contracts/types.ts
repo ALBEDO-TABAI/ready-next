@@ -20,11 +20,8 @@ export type AgentTaskState =
   | 'done'
   | 'failed'
   | 'cancelled'
-  // Stage V V3.1 — `closed` is the terminal session state set by
-  // `ReadyAgentOrchestrator.closeSession()`. It is excluded from the V3.3d
-  // `isLiveSession` guard alongside `done`/`failed`/`cancelled` so a closed
-  // session can never be revived by listener fallback or conversation
-  // lookup (codex round-7 / Stage V plan §4 V3.3d).
+  // `closed` retires the conversation alias. Turn-terminal states such as
+  // done/failed/cancelled remain reusable for a later native turn.
   | 'closed'
 
 export interface ChannelAttachment {
@@ -86,7 +83,7 @@ export interface HeartbeatSnapshot {
   toolGateway: HeartbeatComponentSnapshot & { availableTools: number }
 }
 
-export type AgentRuntimeKernel = 'ready-agent-sdk'
+export type AgentRuntimeKernel = 'codex-native'
 
 export interface AgentRuntimeStatus {
   orchestrator: AgentRuntimeKernel
@@ -108,6 +105,7 @@ export interface AgentRuntimeStatus {
 
 export interface ConversationScope {
   id: string
+  aliasGeneration?: number | null
   agent: string
   activeAgentId: string
   handoffGeneration: number

@@ -208,3 +208,101 @@ test('pushed card for a background session does NOT bleed into the active top-le
     teardown()
   }
 })
+
+test('renderer reload hydrates pending cards into every matching live session', async () => {
+  seedStore({
+    sessions: {
+      'session-A': makeSlice({ state: 'live', conversationId: 'conv-A' }),
+      'session-B': makeSlice({ state: 'live', conversationId: 'conv-B' }),
+    },
+    activeSessionId: 'session-A',
+    sessionId: 'session-A',
+  })
+  const hadWindow = 'window' in globalThis
+  const previousWindow = (globalThis as { window?: unknown }).window
+  ;(globalThis as { window?: unknown }).window = {
+    electronAPI: {
+      agentInteraction: {
+        listPendingAskUserQuestions: () => Promise.resolve({
+          success: true,
+          data: [
+            { cardId: 'card-hydrate-A', conversationId: 'conv-A', questions: SAMPLE_QUESTIONS, askedAt: 1 },
+            { cardId: 'card-hydrate-B', conversationId: 'conv-B', questions: SAMPLE_QUESTIONS, askedAt: 2 },
+          ],
+        }),
+        onAskUserQuestionsCard: () => () => {},
+      },
+    },
+  }
+
+  const unsubscribe = initAgentInteractionListeners()
+  try {
+    await Promise.resolve()
+    await Promise.resolve()
+    const state = useAgent.getState()
+    assert.deepEqual(state.sessions['session-A'].messages.map((message) => message.id), ['card-hydrate-A'])
+    assert.deepEqual(state.sessions['session-B'].messages.map((message) => message.id), ['card-hydrate-B'])
+    assert.deepEqual(state.messages.map((message) => message.id), ['card-hydrate-A'])
+  } finally {
+    unsubscribe()
+    if (hadWindow) (globalThis as { window?: unknown }).window = previousWindow
+    else delete (globalThis as { window?: unknown }).window
+  }
+})
+
+test('true cold reload restores every scope before pending-card hydration', async () => {
+  seedStore({ sessions: {}, activeSessionId: null, sessionId: 'session-bootstrap' })
+  const hadWindow = 'window' in globalThis
+  const previousWindow = (globalThis as { window?: unknown }).window
+  ;(globalThis as { window?: unknown }).window = {
+    electronAPI: {
+      agent: {
+        listConversationScopes: () => Promise.resolve({
+          success: true,
+          data: [
+            {
+              id: 'conv-A', aliasGeneration: 3, agent: 'butler', activeAgentId: 'butler',
+              handoffGeneration: 0, title: 'A', sourceKind: 'local', sourceId: 'app',
+              threadKey: 'conv-A', meta: {}, createdAt: '2026-08-07T00:00:00.000Z',
+              updatedAt: '2026-08-07T00:00:00.000Z', lastMessageAt: null,
+            },
+            {
+              id: 'conv-B', aliasGeneration: 4, agent: 'butler', activeAgentId: 'butler',
+              handoffGeneration: 0, title: 'B', sourceKind: 'local', sourceId: 'app',
+              threadKey: 'conv-B', meta: {}, createdAt: '2026-08-07T00:00:00.000Z',
+              updatedAt: '2026-08-07T00:00:00.000Z', lastMessageAt: null,
+            },
+          ],
+        }),
+      },
+      agentInteraction: {
+        listPendingAskUserQuestions: () => Promise.resolve({
+          success: true,
+          data: [
+            { cardId: 'card-cold-A', conversationId: 'conv-A', questions: SAMPLE_QUESTIONS, askedAt: 1 },
+            { cardId: 'card-cold-B', conversationId: 'conv-B', questions: SAMPLE_QUESTIONS, askedAt: 2 },
+          ],
+        }),
+        onAskUserQuestionsCard: () => () => {},
+      },
+    },
+  }
+
+  const unsubscribe = initAgentInteractionListeners()
+  try {
+    await useAgent.getState().loadScopes()
+    await Promise.resolve()
+    const state = useAgent.getState()
+    assert.equal(state.sessionOrder.length, 2)
+    const sessionA = Object.values(state.sessions).find((slice) => slice.conversationId === 'conv-A')
+    const sessionB = Object.values(state.sessions).find((slice) => slice.conversationId === 'conv-B')
+    assert.deepEqual(sessionA?.messages.map((message) => message.id), ['card-cold-A'])
+    assert.deepEqual(sessionB?.messages.map((message) => message.id), ['card-cold-B'])
+    assert.equal(sessionA?.aliasGeneration, 3)
+    assert.equal(sessionB?.aliasGeneration, 4)
+  } finally {
+    unsubscribe()
+    if (hadWindow) (globalThis as { window?: unknown }).window = previousWindow
+    else delete (globalThis as { window?: unknown }).window
+  }
+})

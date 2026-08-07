@@ -1,30 +1,3 @@
-// Stage V V2.1c — behavior test for `agentLifecycleGroup.register` /
-// `IpcDisposeHandle.dispose()`.
-//
-// V2.1c extracts the agent-loop lifecycle channels from claude-bridge's
-// `setupAgentIPC`:
-//
-//   agent:send        (push a turn at a global agent + sessionId)
-//   agent:newSession  (clear in-flight state + start a fresh session)
-//   agent:kill        (stop generation for an agent + sessionId)
-//   agent:sendScoped  (push a turn at a scope-run + optional continuation)
-//   agent:compactSession (manual memory-session compaction)
-//
-// The V5 IPC contract gate proves the channel literals still exist on the
-// renderer side, but it cannot prove:
-//
-//   1. `register` wires EXACTLY the channel names the group owns via
-//      `ipcMain.handle` (no extras, no missing ones — all are invoke /
-//      Promise so they all live on the handle slot, not the listener slot).
-//   2. The returned dispose handle calls `removeHandler` for each of those
-//      same channels — so dev-reload re-registration and
-//      `cleanupAgentRuntime` shutdown don't leak handler slots.
-//
-// Handler bodies are NOT exercised here — those are covered by pre-existing
-// orchestrator + runtime tests and the V5 gate ensures the channel literal
-// stays correct. The point of this file is the GROUP MECHANISM (register
-// routing + dispose symmetry), not handler semantics.
-
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import type { IpcMain, IpcMainInvokeEvent } from 'electron'
@@ -37,156 +10,203 @@ import {
 
 type HandlerFn = (event: IpcMainInvokeEvent, ...args: unknown[]) => unknown
 
-interface MockIpc {
-  ipc: IpcMain
-  handleCalls: Array<{ channel: string; handler: HandlerFn }>
-  removeHandlerCalls: string[]
-}
-
-function createMockIpc(): MockIpc {
+function createMockIpc() {
   const handleCalls: Array<{ channel: string; handler: HandlerFn }> = []
   const removeHandlerCalls: string[] = []
-  // Mock just the two ipcMain methods the group touches; cast to IpcMain so
-  // the group's call signatures still type-check. If the group grows a new
-  // ipc surface (e.g. `ipcMain.on`) without updating this mock, the test
-  // fails loudly via the missing-method TypeError — exactly the assertion
-  // we want.
   const ipc = {
-    handle(channel: string, handler: HandlerFn) {
-      handleCalls.push({ channel, handler })
-    },
-    removeHandler(channel: string) {
-      removeHandlerCalls.push(channel)
-    },
+    handle(channel: string, handler: HandlerFn) { handleCalls.push({ channel, handler }) },
+    removeHandler(channel: string) { removeHandlerCalls.push(channel) },
   } as unknown as IpcMain
   return { ipc, handleCalls, removeHandlerCalls }
 }
 
 function createMockDeps(): AgentLifecycleGroupDeps {
-  // Behaviour test does not invoke handler bodies, so deps just need to
-  // satisfy the type. Each function throws so an accidental call surfaces in
-  // test output rather than silently returning undefined.
-  const fail = (label: string) => () => {
+  const fail = (label: string) => async () => {
     throw new Error(`mock dep ${label} should not be called from registration test`)
   }
   return {
-    // Minimal orchestrator stub — only the three methods the group's handlers
-    // touch. Cast to the orchestrator type so the dep contract still
-    // type-checks; the test fails loudly if the group's `register` itself
-    // (not the handler bodies) starts calling other orchestrator methods.
-    orchestrator: {
-      send: fail('orchestrator.send'),
-      newSession: fail('orchestrator.newSession'),
-      kill: fail('orchestrator.kill'),
-      compactSession: fail('orchestrator.compactSession'),
-    } as unknown as AgentLifecycleGroupDeps['orchestrator'],
     sendScoped: fail('sendScoped') as AgentLifecycleGroupDeps['sendScoped'],
-    cancelToolActionRequestsBySession: fail('cancelToolActionRequestsBySession'),
-    cleanupSkillSessionState: fail('cleanupSkillSessionState'),
-    cancelSkillSessionPendingInteractions: fail('cancelSkillSessionPendingInteractions'),
-    log: () => {
-      /* no-op — log appender is benign so we let it succeed silently */
-    },
+    createSession: fail('createSession') as AgentLifecycleGroupDeps['createSession'],
+    resetSession: fail('resetSession') as AgentLifecycleGroupDeps['resetSession'],
+    stopSession: fail('stopSession') as AgentLifecycleGroupDeps['stopSession'],
+    closeSession: fail('closeSession') as AgentLifecycleGroupDeps['closeSession'],
+    compactSession: fail('compactSession') as AgentLifecycleGroupDeps['compactSession'],
+    log: () => {},
   }
 }
 
-test('agentLifecycleGroup.register wires the documented channels exactly once each via ipcMain.handle', () => {
+test('lifecycle group registers only the six exact Codex-facing async channels', () => {
   const { ipc, handleCalls } = createMockIpc()
   agentLifecycleGroup.register(ipc, createMockDeps())
 
   const registered = handleCalls.map((entry) => entry.channel).sort()
-  const expected = [..._agentLifecycleGroupChannelsForTest].sort()
-  assert.deepEqual(
-    registered,
-    expected,
-    'register must subscribe to exactly the agent-lifecycle channels',
-  )
-  assert.equal(handleCalls.length, _agentLifecycleGroupChannelsForTest.length, 'each channel must be registered exactly once')
-
-  // Spot-check the exact channel literals per the plan (V2.1c, §3 V2.1) so
-  // accidental renames trip this test even if the channel count happens to
-  // still be 4. The V5 IPC contract gate catches the renderer side; this
-  // pins the main-side literals.
-  for (const required of [
-    'agent:send',
-    'agent:newSession',
-    'agent:kill',
-    'agent:sendScoped',
+  assert.deepEqual(registered, [..._agentLifecycleGroupChannelsForTest].sort())
+  assert.deepEqual(registered, [
+    'agent:closeSession',
     'agent:compactSession',
-  ]) {
-    assert.ok(
-      registered.includes(required),
-      `expected channel "${required}" to be registered`,
-    )
-  }
+    'agent:createSession',
+    'agent:kill',
+    'agent:resetSession',
+    'agent:sendScoped',
+  ])
+  assert.equal(registered.includes('agent:newSession'), false)
+  assert.equal(registered.includes('agent:send'), false)
 })
 
-test('agentLifecycleGroup namespace is the documented label so dispose ordering can rely on it', () => {
-  // The plan's V2.0 skeleton documents the namespace as a human label. We pin
-  // it because the host (`ipc-handler.ts`) may later sort dispose calls or
-  // log by namespace; renaming would silently break that ordering.
-  assert.equal(agentLifecycleGroup.namespace, 'agent:lifecycle')
-})
-
-test('agent:compactSession handler forwards the public tuple without composing the internal key in IPC', async () => {
+test('lifecycle handlers await the exact adapter result and pass immutable alias identity', async () => {
   const { ipc, handleCalls } = createMockIpc()
-  const calls: Array<{ agent: string; sessionId?: string }> = []
   const deps = createMockDeps()
-  deps.orchestrator = {
-    ...deps.orchestrator,
-    compactSession: async (agent: string, sessionId?: string) => {
-      calls.push({ agent, sessionId })
-      return { status: 'queued' }
-    },
-  } as unknown as AgentLifecycleGroupDeps['orchestrator']
-
+  const calls: Array<{ aliasId: string; aliasGeneration: number }> = []
+  deps.compactSession = async (request) => {
+    calls.push(request)
+    return {
+      ok: true,
+      action: 'manual_compact',
+      aliasId: request.aliasId,
+      manualCompactionId: 'manual-1',
+      contextCompactionItemId: 'item-1',
+      codexTurnId: 'turn-1',
+      threadReadDigest: 'read-digest',
+    }
+  }
   agentLifecycleGroup.register(ipc, deps)
 
-  const compactHandler = handleCalls.find((entry) => entry.channel === 'agent:compactSession')?.handler
-  assert.ok(compactHandler, 'agent:compactSession handler must be registered')
+  const handler = handleCalls.find((entry) => entry.channel === 'agent:compactSession')?.handler
+  assert.ok(handler)
+  const result = await handler(
+    {} as IpcMainInvokeEvent,
+    { aliasId: 'alias-1', aliasGeneration: 3 },
+  )
 
-  const result = await compactHandler({} as IpcMainInvokeEvent, { agent: 'butler', sessionId: 'session-1' })
-
-  assert.deepEqual(calls, [{ agent: 'butler', sessionId: 'session-1' }])
-  assert.deepEqual(result, { success: true, data: { status: 'queued' } })
+  assert.deepEqual(calls, [{ aliasId: 'alias-1', aliasGeneration: 3 }])
+  assert.deepEqual(result, {
+    ok: true,
+    action: 'manual_compact',
+    aliasId: 'alias-1',
+    manualCompactionId: 'manual-1',
+    contextCompactionItemId: 'item-1',
+    codexTurnId: 'turn-1',
+    threadReadDigest: 'read-digest',
+  })
 })
 
-test('IpcDisposeHandle.dispose removes the same channels that register added', () => {
+test('lifecycle result runtime schema rejects weak free-form handler output', async () => {
+  const { ipc, handleCalls } = createMockIpc()
+  const deps = createMockDeps()
+  deps.stopSession = async () => ({ success: false, error: 'busy' }) as never
+  agentLifecycleGroup.register(ipc, deps)
+
+  const handler = handleCalls.find((entry) => entry.channel === 'agent:kill')?.handler
+  assert.ok(handler)
+  await assert.rejects(
+    () => Promise.resolve(handler(
+      {} as IpcMainInvokeEvent,
+      { aliasId: 'alias-1', aliasGeneration: 1 },
+    )),
+  )
+})
+
+test('lifecycle request runtime schema rejects missing, stale-shaped, and extended bindings', async () => {
+  const { ipc, handleCalls } = createMockIpc()
+  const deps = createMockDeps()
+  let calls = 0
+  deps.resetSession = async (request) => {
+    calls += 1
+    return {
+      ok: false,
+      action: 'reset',
+      code: 'thread_busy',
+      preserveUi: true,
+      aliasId: request.aliasId,
+      aliasGeneration: request.aliasGeneration,
+      evidenceDigest: 'busy-evidence',
+    }
+  }
+  agentLifecycleGroup.register(ipc, deps)
+  const handler = handleCalls.find((entry) => entry.channel === 'agent:resetSession')?.handler
+  assert.ok(handler)
+
+  for (const payload of [
+    { aliasId: 'alias-1' },
+    { aliasId: 'alias-1', aliasGeneration: 0 },
+    { aliasId: 'alias-1', aliasGeneration: '1' },
+    { aliasId: 'alias-1', aliasGeneration: 1, sessionId: 'legacy' },
+  ]) {
+    await assert.rejects(() => Promise.resolve(handler({} as IpcMainInvokeEvent, payload)))
+  }
+  assert.equal(calls, 0)
+})
+
+test('send handler accepts only the shared exact request and rejects retired workflow fields before dispatch', async () => {
+  const { ipc, handleCalls } = createMockIpc()
+  const deps = createMockDeps()
+  const received: unknown[] = []
+  deps.sendScoped = async (payload) => {
+    received.push(payload)
+    return {
+      success: false,
+      disposition: 'rejected_before_persistence',
+      shouldClearInput: false,
+      preserveInput: true,
+      retryableByUser: true,
+      persistence: {
+        scope: 'pre-existing',
+        message: 'skipped',
+        attachments: 'none',
+        inputAttachments: 'none',
+      },
+      error: 'busy',
+      errorKind: 'thread_busy',
+      admissionEvidenceDigest: 'busy-evidence',
+    }
+  }
+  agentLifecycleGroup.register(ipc, deps)
+  const handler = handleCalls.find((entry) => entry.channel === 'agent:sendScoped')?.handler
+  assert.ok(handler)
+  const exactRequest = {
+    scopeId: 'alias-1',
+    requestId: 'request-1',
+    message: 'hello',
+    userMessage: {
+      id: 'message-1',
+      content: 'hello',
+      timestamp: '2026-08-07T00:00:00.000Z',
+      meta: {},
+      attachmentConfirmation: {
+        selectedCount: 0,
+        metadataCount: 0,
+        inputIncludedCount: 0,
+        inputFailedCount: 0,
+      },
+    },
+  }
+
+  await handler({} as IpcMainInvokeEvent, exactRequest)
+  assert.deepEqual(received, [exactRequest])
+
+  for (const retiredField of ['agent', 'deliveryMode', 'continuationIntent', 'workspaceRoots']) {
+    await assert.rejects(() => Promise.resolve(handler(
+      {} as IpcMainInvokeEvent,
+      { ...exactRequest, [retiredField]: retiredField === 'workspaceRoots' ? [] : 'retired' },
+    )))
+  }
+  assert.equal(received.length, 1)
+})
+
+test('dispose removes the same channels and remains idempotent', () => {
   const { ipc, removeHandlerCalls } = createMockIpc()
   const handle = agentLifecycleGroup.register(ipc, createMockDeps())
-
-  // register clears prior handlers FIRST (defensive dev-reload pre-clear);
-  // the test only cares about the dispose-time removals, so snapshot the
-  // count and diff after dispose.
-  const baselineRemoveCount = removeHandlerCalls.length
+  const baseline = removeHandlerCalls.length
 
   handle.dispose()
-
-  const removedDuringDispose = removeHandlerCalls.slice(baselineRemoveCount).sort()
-  const expected = [..._agentLifecycleGroupChannelsForTest].sort()
   assert.deepEqual(
-    removedDuringDispose,
-    expected,
-    'dispose must call removeHandler for every channel the group registered',
+    removeHandlerCalls.slice(baseline).sort(),
+    [..._agentLifecycleGroupChannelsForTest].sort(),
   )
-})
-
-test('dispose is idempotent — calling twice does not throw and stays bounded', () => {
-  const { ipc, removeHandlerCalls } = createMockIpc()
-  const handle = agentLifecycleGroup.register(ipc, createMockDeps())
-
-  handle.dispose()
-  const afterFirst = removeHandlerCalls.length
-  // Electron's `removeHandler` is itself a no-op on missing channels; the
-  // group's dispose loop wraps each call in try/catch, so a second
-  // invocation must NOT throw. We allow the call to issue removeHandler
-  // again — what we care about is no exception, no handler-slot leak.
   assert.doesNotThrow(() => handle.dispose())
-  // Second dispose runs the same removeHandler calls; total count grows by
-  // exactly the channel count, never more.
   assert.equal(
-    removeHandlerCalls.length - afterFirst,
-    _agentLifecycleGroupChannelsForTest.length,
-    'second dispose issues at most one removeHandler per channel',
+    removeHandlerCalls.length - baseline,
+    _agentLifecycleGroupChannelsForTest.length * 2,
   )
+  assert.equal(agentLifecycleGroup.namespace, 'agent:lifecycle')
 })

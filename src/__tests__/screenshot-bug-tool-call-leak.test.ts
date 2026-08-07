@@ -19,7 +19,7 @@ import type { TaskProjectionRecord } from '../main/modules/agent-control/contrac
 // Phase 3.2's `pushAssistantTextSafely` only protected `session.messages.push`
 // (history fed back to the LLM), but the visible chat panel + chat_messages
 // DB persistence flowed through OTHER paths (TurnTranscript.emitOutput,
-// chat:saveMessage IPC) that were untouched.
+// canonical persistence) that were untouched.
 
 const TURN_TRANSCRIPT_PATH = new URL('../main/modules/agent-control/runtime-core/turn-transcript.ts', import.meta.url)
 const CHAT_PERSISTENCE_GROUP_PATH = new URL('../main/modules/claude-bridge/ipc/chat-persistence-group.ts', import.meta.url)
@@ -144,13 +144,13 @@ test('SCREENSHOT BUG — clean text passes through with zero allocation overhead
 })
 
 // ---------------------------------------------------------------------------
-// SECONDARY FIX — chat:saveMessage IPC sanitation (defense-in-depth)
+// SECONDARY FIX — sanitizer behavior used by canonical output paths
 // ---------------------------------------------------------------------------
 
 test('SCREENSHOT BUG — sanitizeAssistantText alone correctly strips the screenshot text', () => {
   const cleaned = sanitizeAssistantText(SCREENSHOT_LEAK_TEXT, {
     sessionId: 'sess-x',
-    source: 'chat_save_message',
+    source: 'transcript_emit',
   })
   assert.equal(TOOL_CALL_TEXT_PATTERN.test(cleaned), false)
   assert.match(cleaned, /好，从头来/)
@@ -159,7 +159,7 @@ test('SCREENSHOT BUG — sanitizeAssistantText alone correctly strips the screen
 test('SCREENSHOT BUG — malformed plural tool_calls block does not leak parameter body', () => {
   const cleaned = sanitizeAssistantText(MALFORMED_PLURAL_TOOL_CALLS_TEXT, {
     sessionId: 'sess-malformed',
-    source: 'chat_save_message',
+    source: 'transcript_emit',
   })
 
   assert.equal(TOOL_CALL_TEXT_PATTERN.test(cleaned), false)
@@ -194,19 +194,9 @@ test('DIRECT PATH GUARD — tool-call-only text gets a visible fallback instead 
   assert.match(fallback!.text, /网页查询/)
 })
 
-test('SCREENSHOT BUG wiring — chat:saveMessage IPC uses sanitizeAssistantText for assistant rows', () => {
+test('Codex E1 — the retired renderer message-write IPC cannot bypass canonical persistence', () => {
   const source = readSource(CHAT_PERSISTENCE_GROUP_PATH)
-  // Find the chat:saveMessage handler block. The handler spans the IPC body
-  // including both the sanitization branch and the hint-persist hook, so we
-  // grab a wide enough window (up to next IPC handler registration).
-  const block = source.match(/'chat:saveMessage'[\s\S]*?ipcMain\.handle\('chat:createConversation'/)
-  assert.ok(block, 'chat:saveMessage handler block exists (bounded by next handler)')
-  assert.match(block![0], /sanitizeAssistantText\(data\.content/)
-  // Non-assistant content must NOT be sanitized (user prose may legitimately
-  // discuss tool_call XML in support chats).
-  assert.match(block![0], /data\.role\s*===\s*'assistant'/)
-  // The hint persistence hook must still fire AFTER the sanitized save.
-  assert.match(block![0], /persistReferenceHintAfterAssistantMessage/)
+  assert.doesNotMatch(source, /chat:saveMessage|deps\.saveMessage/)
 })
 
 // ---------------------------------------------------------------------------

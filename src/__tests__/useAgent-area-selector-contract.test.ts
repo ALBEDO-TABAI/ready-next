@@ -2,7 +2,7 @@
  * Stage W W4.5 — useAgent per-area selector contract.
  *
  * Pins two falsifiable properties for the 6 declared ownership areas
- * (session slice / runtime listeners / pending-send / persistence /
+ * (session slice / runtime listeners / persistence /
  * projection / UI selectors — see ownership-areas.md):
  *
  *   1. Each area exposes a typed selector that returns a stable view of its
@@ -14,8 +14,8 @@
  *      breaks consumer memoization and is rejected by this contract.
  *
  *   2. The area's internal mutable state is not exported on the public
- *      module surface. Specifically: the pending-send coalescing Maps
- *      (`pendingSendTimers`, `pendingSendBuffers`), the runtime listener
+ *      module surface. Specifically: retired pending-send coalescing state,
+ *      the runtime listener
  *      metrics object (`cardRoutingMetrics`), and the private write
  *      helper (`withSessionSliceAndActiveMirror`) must not be reachable
  *      from outside the store module.
@@ -40,7 +40,6 @@ import {
   selectAttachments,
   selectConversations,
   selectFilePool,
-  selectPendingSendForActive,
   selectScopes,
   selectSessionOrder,
   useAgent,
@@ -51,8 +50,6 @@ import { createEmptyScopeRunState } from '../renderer/modules/agent/scopeRunStat
 function makeSlice(patch: Partial<SessionSlice> = {}): SessionSlice {
   return {
     messages: [],
-    pendingSendCount: 0,
-    pendingSendFlushAt: null,
     isStreaming: false,
     foregroundBusy: false,
     composerLocked: false,
@@ -60,8 +57,11 @@ function makeSlice(patch: Partial<SessionSlice> = {}): SessionSlice {
     streamingRequestId: null,
     scopeRunStates: {},
     taskDisclosureState: {},
+    lifecyclePendingAction: null,
+    lifecycleError: null,
     state: 'live',
     conversationId: null,
+    aliasGeneration: null,
     inputValue: '',
     ...patch,
   }
@@ -92,10 +92,6 @@ function resetStore() {
     attachments: [],
     filePool: [],
     activeAttachmentPreview: null,
-    sendCoalescingEnabled: true,
-    sendCoalescingWindowMs: 1200,
-    pendingSendCount: 0,
-    pendingSendFlushAt: null,
     sessions: { 'session-A': makeSlice() },
     activeSessionId: 'session-A',
     sessionOrder: ['session-A'],
@@ -129,20 +125,6 @@ test('W4.5 — area S: selectActiveSessionSlice / selectSessionOrder stable acro
   useAgent.setState({ currentAgent: 'butler' })
   const order3 = selectSessionOrder(useAgent.getState())
   assert.equal(order1, order3, 'selectSessionOrder identity preserved across unrelated set')
-})
-
-test('W4.5 — area P: selectPendingSendForActive returns primitive-stable view', () => {
-  resetStore()
-  const state1 = useAgent.getState()
-  const a = selectPendingSendForActive(state1)
-  const b = selectPendingSendForActive(state1)
-  assert.equal(a.count, b.count, 'pendingSendCount primitive stable')
-  assert.equal(a.flushAt, b.flushAt, 'pendingSendFlushAt primitive stable')
-
-  useAgent.setState({ pendingSendCount: 2, pendingSendFlushAt: 1234 })
-  const c = selectPendingSendForActive(useAgent.getState())
-  assert.equal(c.count, 2, 'selector reflects updated pendingSendCount')
-  assert.equal(c.flushAt, 1234, 'selector reflects updated pendingSendFlushAt')
 })
 
 test('W4.5 — area J: selectActiveScopeRunStates returns referentially-stable map', () => {
@@ -210,11 +192,7 @@ test('W4.5 — area L: getSessionSlice + routeCardToSession compose stably for n
 // Property 2 — area-internal mutable state is not exported
 // ==========================================================================
 
-test('W4.5 — pending-send Maps and runtime-listener metrics are not exported', () => {
-  // The mutable coalescing Maps and listener metrics object must not be
-  // reachable from outside the store. Only test-only `__get*ForTesting`
-  // introspection helpers are allowed; these return read-only snapshots
-  // so external code cannot mutate them.
+test('W4.5 — retired pending-send state and runtime-listener internals are not exported', () => {
   const exports = Object.keys(useAgentModule)
 
   assert.equal(exports.includes('pendingSendTimers'), false, 'pendingSendTimers Map not exported')
@@ -224,9 +202,8 @@ test('W4.5 — pending-send Maps and runtime-listener metrics are not exported',
   assert.equal(exports.includes('withSessionSliceAndActiveMirror'), false, 'withSessionSliceAndActiveMirror private write helper not exported')
   assert.equal(exports.includes('mirrorFromSessionSlice'), false, 'mirrorFromSessionSlice private helper not exported')
 
-  // Sanity — the test-only introspection helpers are present (they are the
-  // allowed read paths for the runtime-listener metrics).
+  assert.equal(exports.includes('__getPendingSendCoalescingFleetSizeForTesting'), false)
+  assert.equal(exports.includes('__disposePendingSendCoalescingForHMR'), false)
   assert.equal(exports.includes('__getCardRoutingMetricsForTesting'), true, 'test-only metrics snapshot is exported')
   assert.equal(exports.includes('__resetCardRoutingMetricsForTesting'), true, 'test-only metrics reset is exported')
-  assert.equal(exports.includes('__getPendingSendCoalescingFleetSizeForTesting'), true, 'test-only fleet size introspection is exported')
 })

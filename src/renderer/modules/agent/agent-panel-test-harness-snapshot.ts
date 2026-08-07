@@ -376,8 +376,6 @@ export function createAgentPanelSnapshot(
     composer: {
       inputValue: state.inputValue,
       locked: Boolean(state.composerLocked || state.foregroundBusy || state.isStreaming),
-      pendingSendCount: state.pendingSendCount || 0,
-      pendingSendFlushAt: state.pendingSendFlushAt || null,
       attachmentNames: (state.attachments || []).map((attachment) => attachment.name),
       filePoolNames: (state.filePool || []).map((attachment) => attachment.name),
     },

@@ -20,17 +20,25 @@ function turnMetadata(request) {
 }
 
 function assertCommon(capture) {
+  const threadStartIdentity = contracts.turnClientIdentityExtractionContract?.thread_start
+  const pinnedSource = threadStartIdentity?.pinnedAppServerSource
+  assert(typeof pinnedSource === 'string' && pinnedSource.length > 0, 'pinned_thread_source_missing')
+  assert(
+    JSON.stringify(threadStartIdentity.threadListSourceKinds) === JSON.stringify([pinnedSource]),
+    'thread_list_source_contract_mismatch'
+  )
   assert(capture.runtime.releaseTag === 'rust-v0.146.1', 'unexpected_release_tag')
   assert(capture.invariants.providerAuthorizationPresent, 'provider_authorization_missing')
   assert(capture.invariants.providerAuthorizationValueNotStored, 'provider_token_stored')
   assert(capture.invariants.appServerStderrDoesNotContainGatewayToken, 'provider_token_in_stderr')
   assert(capture.invariants.nativeBaseInstructionsPresent, 'native_base_instructions_missing')
   assert(capture.invariants.userClientIdReadback, 'user_client_id_not_read_back')
-  assert(capture.threads.first.source === 'vscode', 'unexpected_thread_source')
+  assert(capture.threads.first.source === pinnedSource, 'unexpected_thread_source')
   assert(capture.threads.instructionSourcesEmpty, 'instruction_source_discovered')
   assert(capture.threads.rootMetadataValid, 'root_thread_metadata_invalid')
   assert(capture.threads.list.data.length === 1, 'thread_list_identity_not_unique')
   assert(capture.threads.list.data[0].id === capture.threads.first.id, 'thread_list_identity_mismatch')
+  assert(capture.threads.list.data[0].source === pinnedSource, 'thread_list_source_mismatch')
 }
 
 function checkProtocol() {

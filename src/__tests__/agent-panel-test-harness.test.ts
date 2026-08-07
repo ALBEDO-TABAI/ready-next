@@ -100,9 +100,12 @@ function baseState(input: Partial<HarnessState> = {}): HarnessState {
     composerLocked: false,
     streamingMessageId: null,
     streamingRequestId: null,
-    pendingSendCount: 0,
-    pendingSendFlushAt: null,
-    sendMessage: async () => ({ success: true, shouldClearInput: true, preserveInput: false }),
+    sendMessage: async () => ({
+      success: true,
+      disposition: 'terminal_success',
+      shouldClearInput: true,
+      preserveInput: false,
+    }),
     setInputValue: () => {},
     ...input,
   }
@@ -331,7 +334,12 @@ describe('agent panel test harness', () => {
           ],
         }
         notify(state, previous)
-        return { success: true, shouldClearInput: true, preserveInput: false }
+        return {
+          success: true,
+          disposition: 'terminal_success',
+          shouldClearInput: true,
+          preserveInput: false,
+        }
       },
     }
     const store = {
@@ -360,14 +368,24 @@ describe('agent panel test harness', () => {
     onDomClick = () => {
       domClickCount += 1
       const previous = state
-      state = { ...state, pendingSendCount: 1 }
+      state = {
+        ...state,
+        foregroundBusy: true,
+        composerLocked: true,
+        streamingRequestId: 'request-dom',
+      }
       notify(state, previous)
     }
     const domStarted = await harness.submit('DOM 已启动提交', { mode: 'dom', waitForIdle: false })
     assert.equal(domStarted.inputMode, 'dom')
     assert.equal(domStarted.sendResult, null)
     assert.ok(domStarted.diagnostics.some((item) => item.id === 'send_returned_without_user_message'))
-    state = { ...state, pendingSendCount: 0 }
+    state = {
+      ...state,
+      foregroundBusy: false,
+      composerLocked: false,
+      streamingRequestId: null,
+    }
 
     const missingTool = await harness.submit('模拟 VEA 输入', {
       mode: 'store',

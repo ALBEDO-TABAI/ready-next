@@ -36,6 +36,15 @@ interface InfrastructureWatchdog {
   reportRetries?: number
 }
 
+type InfrastructureTimeoutMainReport =
+  | {
+      kind: 'authoritative'
+      state: 'active' | 'stale' | 'not_found' | 'paused_user_input'
+      activeRunId: string | null
+    }
+  | { kind: 'unreachable' }
+  | { kind: 'invalid_response' }
+
 
 export function createRuntimeDriverWatchdog(store: AgentStoreLike) {
   // Keyed by `${scopeId}::${requestId}` — at most one watchdog per
@@ -134,11 +143,11 @@ export function createRuntimeDriverWatchdog(store: AgentStoreLike) {
     scopeId: string,
     requestId: string,
     elapsedMs: number,
-  ): Promise<'active' | 'stale' | 'not_found' | 'paused_user_input' | null> {
+  ): Promise<InfrastructureTimeoutMainReport> {
     const report = typeof window !== 'undefined'
       ? window.electronAPI?.agent?.reportInfrastructureTimeout
       : undefined
-    if (typeof report !== 'function') return null
+    if (typeof report !== 'function') return { kind: 'unreachable' }
     let timeout: ReturnType<typeof setTimeout> | null = null
     try {
       const response = await Promise.race<unknown>([
@@ -147,22 +156,33 @@ export function createRuntimeDriverWatchdog(store: AgentStoreLike) {
           timeout = setTimeout(() => resolve(null), INFRASTRUCTURE_TIMEOUT_REPORT_ACK_MS)
         }),
       ])
-      if (!response || typeof response !== 'object') return null
-      const record = response as { success?: unknown; data?: { state?: unknown } }
-      if (record.success !== true) return null
+      if (!response || typeof response !== 'object') return { kind: 'unreachable' }
+      const record = response as {
+        success?: unknown
+        data?: { state?: unknown; activeRunId?: unknown }
+      }
+      if (record.success !== true) return { kind: 'unreachable' }
       const state = record.data?.state
       if (
         state === 'active'
         || state === 'stale'
         || state === 'not_found'
         || state === 'paused_user_input'
-      ) return state
+      ) {
+        const activeRunId = typeof record.data?.activeRunId === 'string'
+          && record.data.activeRunId.trim()
+          ? record.data.activeRunId.trim()
+          : null
+        if (state === 'stale' && !activeRunId) return { kind: 'invalid_response' }
+        if (state !== 'stale' && activeRunId) return { kind: 'invalid_response' }
+        return { kind: 'authoritative', state, activeRunId }
+      }
+      return { kind: 'invalid_response' }
     } catch {
-      return null
+      return { kind: 'unreachable' }
     } finally {
       if (timeout) clearTimeout(timeout)
     }
-    return null
   }
 
   async function fireInfrastructureTimeout(scopeId: string, requestId: string): Promise<void> {
@@ -183,7 +203,9 @@ export function createRuntimeDriverWatchdog(store: AgentStoreLike) {
       return
     }
 
-    const mainState = await reportInfrastructureTimeoutToMain(scopeId, requestId, watchdog.timeoutMs)
+    const mainReport = await reportInfrastructureTimeoutToMain(scopeId, requestId, watchdog.timeoutMs)
+    const mainState = mainReport.kind === 'authoritative' ? mainReport.state : null
+    const activeRunId = mainReport.kind === 'authoritative' ? mainReport.activeRunId : null
 
     // A terminal event during the report wait cleared (or a refresh replaced)
     // our entry — main resolved authoritatively; do not re-arm or overwrite.
@@ -195,6 +217,77 @@ export function createRuntimeDriverWatchdog(store: AgentStoreLike) {
     }
     // We still own the resolution — take the entry out of the map now.
     infrastructureWatchdogs.delete(key)
+
+    if (mainState === 'stale' && activeRunId) {
+      const replacementRequestId = activeRunId
+      store.setState((current: {
+        currentAgent?: string
+        sessions?: Record<string, unknown>
+      }) => {
+        const sessionId = sessionKeyForScopeId(current, scopeId)
+        const currentSlice = normalizeSessionSlice(current.sessions?.[sessionId])
+        const previousRun = currentSlice.scopeRunStates[scopeId]
+          || runState
+          || createEmptyScopeRunState({
+            scopeId,
+            agent: state.currentAgent || current.currentAgent || 'butler',
+            requestId: replacementRequestId,
+            phase: 'planning',
+          })
+        return withSessionSliceAndActiveRuntimeMirror(current, sessionId, {
+          isStreaming: true,
+          foregroundBusy: true,
+          composerLocked: true,
+          streamingRequestId: replacementRequestId,
+          scopeRunStates: {
+            ...currentSlice.scopeRunStates,
+            [scopeId]: {
+              ...previousRun,
+              requestId: replacementRequestId,
+              phase: previousRun.phase === 'done'
+                || previousRun.phase === 'error'
+                || previousRun.phase === 'cancelled'
+                ? 'planning'
+                : previousRun.phase,
+              terminalReason: null,
+              error: undefined,
+              updatedAt: new Date().toISOString(),
+            },
+          },
+        })
+      })
+      armInfrastructureWatchdog(scopeId, replacementRequestId, {
+        timeoutMs: ACTIVE_RUN_INFRASTRUCTURE_TIMEOUT_MS,
+      })
+      emitRendererAgentMetric('renderer_infrastructure_timeout_replacement_run', {
+        scopeId,
+        staleRequestId: requestId,
+        activeRunId: replacementRequestId,
+        elapsedMs: watchdog.timeoutMs,
+      })
+      return
+    }
+
+    if (mainReport.kind === 'invalid_response') {
+      const timer = setTimeout(
+        () => { void fireInfrastructureTimeout(scopeId, requestId) },
+        ACTIVE_RUN_INFRASTRUCTURE_TIMEOUT_MS,
+      )
+      const unref = (timer as { unref?: unknown }).unref
+      if (typeof unref === 'function') unref.call(timer)
+      infrastructureWatchdogs.set(key, {
+        ...watchdog,
+        timer,
+        timeoutMs: ACTIVE_RUN_INFRASTRUCTURE_TIMEOUT_MS,
+        reportRetries: 0,
+      })
+      emitRendererAgentMetric('renderer_infrastructure_timeout_invalid_response', {
+        scopeId,
+        requestId,
+        elapsedMs: watchdog.timeoutMs,
+      })
+      return
+    }
 
     if (mainState === 'active' || mainState === 'paused_user_input') {
       const timer = setTimeout(() => { void fireInfrastructureTimeout(scopeId, requestId) }, ACTIVE_RUN_INFRASTRUCTURE_TIMEOUT_MS)
@@ -236,8 +329,9 @@ export function createRuntimeDriverWatchdog(store: AgentStoreLike) {
     }
 
     // Resolve. `null` here = retries exhausted, main genuinely unreachable.
-    // `not_found`/`stale` = main answered (run is gone or replaced) → quiet
-    // unlock, no alarming message. NEVER claim the
+    // `not_found` = main answered that the run is gone → quiet unlock, no
+    // alarming message. A typed `stale + activeRunId` returned earlier after
+    // transferring the lock to that replacement. NEVER claim the
     // run was "已自动恢复" — that false claim invited duplicate resends while a
     // live main run continued.
     const mainUnreachable = mainState === null

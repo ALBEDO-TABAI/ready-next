@@ -60,6 +60,11 @@ export class ProjectionSyncCoordinator {
     this.emitScopeRunEvent(payload, projectionTruth)
   }
 
+  /** Publishes a terminal readback already committed by Ready closeout. */
+  publishCommittedScopeRunEvent(payload: ScopeRunEventPayload): void {
+    this.deps.emit('scopeRunEvent', payload)
+  }
+
   recordScopeRunEvent(payload: ScopeRunEventPayload, projectionTruth?: ProjectionTruthSnapshot | null): ScopeRunSummary | null {
     const summary = this.recordRunProjectionEvent(payload, projectionTruth)
     if (summary) {

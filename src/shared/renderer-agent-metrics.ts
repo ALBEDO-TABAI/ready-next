@@ -12,7 +12,6 @@ export const RENDERER_AGENT_METRICS = [
   'renderer_canonical_terminal_readback_missing',
   'renderer_canonical_terminal_readback_failed',
   'legacy_handoff_text_fallback_used',
-  'scope_create_persistence_failed',
   // Stage U (PR 1, B.5) — sendMessage's pre-send hook hit its 2000ms hard
   // cap while awaiting an ask_user_questions cancel IPC. The card stays
   // pending locally with `localDisabled=true` until the late cancel lands.
@@ -22,12 +21,14 @@ export const RENDERER_AGENT_METRICS = [
   // send). The originating session is auto-unlocked and a "Ready lost
   // track" toast is surfaced. See plan §7.2 last paragraph.
   'renderer_infrastructure_timeout_fired',
-	  // B step 2 — a main-unreachable timeout report is retried before the renderer
-	  // gives up; this fires once per retry attempt.
-	  'renderer_infrastructure_timeout_report_retry',
-	  'renderer_infrastructure_timeout_active_run',
-	  'renderer_infrastructure_timeout_paused_user_input',
-	] as const
+  // B step 2 — a main-unreachable timeout report is retried before the renderer
+  // gives up; this fires once per retry attempt.
+  'renderer_infrastructure_timeout_report_retry',
+  'renderer_infrastructure_timeout_active_run',
+  'renderer_infrastructure_timeout_paused_user_input',
+  'renderer_infrastructure_timeout_replacement_run',
+  'renderer_infrastructure_timeout_invalid_response',
+] as const
 
 export type RendererAgentMetricName = typeof RENDERER_AGENT_METRICS[number]
 

@@ -140,6 +140,26 @@ test('IpcDisposeHandle.dispose removes the same channels that register added', (
   )
 })
 
+test('manual suspend preserves the typed unsupported failure across IPC', async () => {
+  const { ipc, handleCalls } = createMockIpc()
+  const deps = createMockDeps()
+  deps.suspendRun = async () => ({
+    success: false,
+    error: 'Codex manual suspend requires native terminal reconciliation.',
+    errorKind: 'unsupported',
+  })
+  runControlGroup.register(ipc, deps)
+  const handler = handleCalls.find((entry) => entry.channel === 'agent:suspendRun')?.handler
+  assert.ok(handler)
+
+  const result = await handler!({} as IpcMainInvokeEvent, { scopeId: 'scope-A' })
+  assert.deepEqual(result, {
+    success: false,
+    error: 'Codex manual suspend requires native terminal reconciliation.',
+    errorKind: 'unsupported',
+  })
+})
+
 test('dispose is idempotent — calling twice does not throw and stays bounded', () => {
   const { ipc, removeHandlerCalls } = createMockIpc()
   const handle = runControlGroup.register(ipc, createMockDeps())

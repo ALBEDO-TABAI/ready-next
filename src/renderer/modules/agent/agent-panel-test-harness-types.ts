@@ -1,5 +1,6 @@
 import type { TaskCardAction } from './taskCardViewModel'
 import type { TaskCardVisualState } from './task-status-vocabulary'
+import type { CreateSessionResult, SendMessageResult } from '../../../shared/ipc-contracts/agent-runtime'
 import type {
   AgentArtifact,
   AgentMessage,
@@ -14,12 +15,7 @@ import type {
   ToolTraceEvent,
 } from './types'
 
-export type SendMessageResultLike = {
-  success: boolean
-  shouldClearInput?: boolean
-  preserveInput?: boolean
-  errorKind?: string | null
-}
+export type SendMessageResultLike = SendMessageResult
 
 export type StoreState = {
   agents?: Array<{ name: string; displayName?: string; status?: string; selected?: boolean }>
@@ -47,16 +43,11 @@ export type StoreState = {
   composerLocked: boolean
   streamingMessageId: string | null
   streamingRequestId: string | null
-  pendingSendCount: number
-  pendingSendFlushAt: number | null
-  sendCoalescingEnabled?: boolean
-  sendCoalescingWindowMs?: number
   sendMessage: (content: string) => Promise<SendMessageResultLike>
   setInputValue: (value: string, options?: { preserveContinuationIntent?: boolean }) => void
   addAttachments?: (files: ChatAttachment[]) => void
   clearAttachments?: () => void
-  newSession?: () => void
-  createNewSession?: () => string | null
+  createNewSession?: () => Promise<CreateSessionResult>
   setActiveSessionId?: (id: string) => void
 }
 
@@ -154,8 +145,6 @@ export interface AgentPanelSnapshot {
   composer: {
     inputValue: string
     locked: boolean
-    pendingSendCount: number
-    pendingSendFlushAt: number | null
     attachmentNames: string[]
     filePoolNames: string[]
   }
@@ -273,7 +262,7 @@ export interface AgentPanelTestHarness {
   }>
   attachFiles: (files: AgentPanelTestAttachmentInput[]) => Promise<ChatAttachment[]>
   clearAttachments: () => void
-  newSession: () => Promise<AgentPanelSnapshot>
+  createSession: () => Promise<AgentPanelSnapshot>
   prepareWorkspace: (root: string, options?: { reindex?: boolean }) => Promise<AgentPanelTestWorkspaceResult>
   waitForIdle: (options?: { timeoutMs?: number; pollMs?: number }) => Promise<AgentPanelSnapshot>
   sessionSummary: () => AgentPanelSessionSummary
@@ -295,4 +284,3 @@ declare global {
     __READY_AGENT_TEST__?: AgentPanelTestHarness
   }
 }
-

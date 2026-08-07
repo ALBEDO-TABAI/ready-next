@@ -2,7 +2,7 @@
 title: cod-ready Codex Runtime 最小替换试验实施计划
 date: 2026-08-06
 kind: implementation-plan
-status: experiment-e0r-approved
+status: experiment-e1-passed
 enforce: true
 owner: 白
 author: Codex
@@ -11,9 +11,15 @@ approval:
   date: 2026-08-06
   instruction: 根据文档指引开始施工
 route_revision:
-  date: 2026-08-06
+  date: 2026-08-07
   instruction: 那就按你理解的继续
-  phase: E0-R
+  phase: E1
+phase_progress:
+  completed:
+    - E0-R
+    - E1
+  next: E2
+  next_phase_allowed: true
 implementation_branch: codex/cod-ready
 implementation_worktree: /Users/user/实验田/cod-ready
 source_worktree: /Users/user/实验田/ready-cowork-newtab
@@ -143,6 +149,28 @@ E0-R 完成要求同时满足：
 - 具名独立 reviewer 对 E0-R 报告给出明确 PASS。
 
 任一项失败或不可观测，E0-R 为 FAIL/BLOCKED，`nextPhaseAllowed=false`，不得进入 E1。
+
+## 0.5 E1 施工结论（2026-08-07）
+
+E1 已完成并通过独立复审：**PASS，允许进入 E2**。
+
+- Agent 生产发送主链已收窄为唯一 Codex 组装路径；旧 SDK 循环、PromptAssembly、Dynamic Delivery、
+  child-run/workflow continuation、全局 session cap 和 Renderer coalescing 不再进入该路径。
+- shared send/lifecycle wire 改为唯一严格合同；Renderer 只在 durable ingress admission 后提交用户气泡、
+  标题与输入清理，失败生命周期操作保留原 UI。
+- `CodexNativeRuntime` typed seam、product preparer、turn input builder、collector 与薄 lifecycle adapter 已建立；
+  本固定版本只接受 `source=vscode` 的 app-server root；合法但不属于该 root 的 custom/subagent source
+  在 binding、resume marker 和 `turn/start` 前关闭失败。
+- 预留与准备结果都在产品持久化前做 exact runtime validation；终态只发布 Ready 已提交的回读。
+  损坏、外来或空 digest 回读保持同一 active operation，不产生第五种 wire 返回，不提前结算。
+- E1 专项 14 文件 108/108 通过，`typecheck`、build、native ABI、source pin、source-contract 交叉门禁、
+  phase-status、exit-authority、meta-path 和 diff gate 通过。
+  全库 parallel 回归仍是施工前同一组 18 个已知失败，E1 新增失败为 0；两组 serial 回归通过。
+- 具名 reviewer `/root/e0_adversarial_reviewer` 在首轮指出完整 `SessionSource` 结构缺口；根因修复后
+  重跑给出 `PASS / nextPhaseAllowed=true`。
+
+阶段报告见 `docs/superpowers/audits/2026-08-07-codex-runtime-e1-report.md` 与同名 JSON；原 E0 FAIL 和
+E0-R PASS 报告保持不变。E2 从此边界开始，不将 E1 fake native port 冒充为已实现 sidecar。
 
 ## 1. 开工假设与不确定项
 

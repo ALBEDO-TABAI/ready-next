@@ -15,8 +15,12 @@ import type {
   ToolTraceEvent,
 } from '../modules/agent/types'
 import type { TaskDisclosureState, TaskSectionKey } from '../modules/agent/taskCardViewModel'
-import type { DeliveryMode } from '../../shared/dynamic-delivery'
-import type { CanonicalAssistantMessage } from '../../shared/ipc-contracts/canonical-message'
+import type {
+  CreateSessionResult,
+  LifecycleResult,
+  SendMessageResult as SharedSendMessageResult,
+  SendScopedResponse,
+} from '../../shared/ipc-contracts/agent-runtime'
 
 export interface PendingContinuationIntent {
   taskId: string
@@ -38,28 +42,8 @@ export interface PendingContinuationIntent {
   childRunId?: string
 }
 
-export interface AgentSendResult {
-  success: boolean
-  acceptedAsSteering?: boolean
-  ownerRunId?: string | null
-  error?: string | null
-  errorKind?: string | null
-  responseText?: string | null
-  canonicalMessage?: CanonicalAssistantMessage | null
-  canonicalMessageDigest?: string | null
-  persistence?: {
-    scope?: string | null
-    message?: string | null
-    attachments?: string | null
-  } | null
-}
-
-export interface SendMessageResult {
-  success: boolean
-  shouldClearInput: boolean
-  preserveInput: boolean
-  errorKind?: string | null
-}
+export type AgentSendResult = SendScopedResponse
+export type SendMessageResult = SharedSendMessageResult
 
 /**
  * Stage V V3.3a bootstrap half-step (delivered alongside V3.3c).
@@ -89,8 +73,6 @@ export type SessionSliceState = 'live' | 'done' | 'error' | 'cancelled' | 'close
 
 export interface SessionSlice {
   messages: AgentMessage[]
-  pendingSendCount: number
-  pendingSendFlushAt: number | null
   isStreaming: boolean
   foregroundBusy: boolean
   composerLocked: boolean
@@ -98,10 +80,13 @@ export interface SessionSlice {
   streamingRequestId: string | null
   scopeRunStates: Record<string, ScopeRunState>
   taskDisclosureState: Record<string, TaskDisclosureState>
-  /** V3.3d — terminal exclusion set drives `isLiveSession`. */
+  lifecyclePendingAction: 'creating' | 'resetting' | 'stopping' | 'closing' | 'compacting' | null
+  lifecycleError: Extract<LifecycleResult, { ok: false }> | null
+  /** Latest turn state; only `closed` retires the conversation alias. */
   state: SessionSliceState
   /** V3.3d — backing field for `lookupSessionByConversation`. */
   conversationId: string | null
+  aliasGeneration: number | null
   /**
    * V3.3b.1 — per-session composer draft. The top-level `inputValue` field
    * is a read-through mirror of `sessions[activeSessionId].inputValue`.
@@ -140,24 +125,12 @@ export interface AgentState {
   attachments: ChatAttachment[]
   filePool: ChatAttachment[]
   activeAttachmentPreview: AttachmentPreviewState | null
-  sendCoalescingEnabled: boolean
-  sendCoalescingWindowMs: number
-  /**
-   * V3.3c — top-level mirror of `sessions[activeSessionId].pendingSendCount`.
-   * Source of truth lives in `sessions[id]`; the top-level value is rewritten
-   * alongside every slice write so existing ChatPanel/ChatInput selectors and
-   * the agent-panel test harness keep observing the active-session value.
-   */
-  pendingSendCount: number
-  /** V3.3c — top-level mirror of `sessions[activeSessionId].pendingSendFlushAt`. */
-  pendingSendFlushAt: number | null
   /** V3.3a bootstrap — per-sessionId slice store. */
   sessions: Record<string, SessionSlice>
   /** V3.3a bootstrap — active sessionId selector; nullable until first write. */
   activeSessionId: string | null
   /**
-   * V3.4a — render-order list for session tabs. Source of truth for tab
-   * ordering and the renderer-side ≤3 hard limit. Entries appear here in
+   * Render-order list for session tabs. Entries appear here in
    * the order they were created via `createNewSession`; `closeSession`
    * removes the matching id. The list is empty in the cold-start state so
    * the SessionTabs strip renders nothing (V6 fixture-compatible).
@@ -175,24 +148,10 @@ export interface AgentState {
   setComposerDraft: (value: string, continuationIntent?: PendingContinuationIntent | null) => void
   clearPendingContinuationIntent: () => void
   setIsStreaming: (streaming: boolean) => void
-  sendMessage: (content: string, options?: { deliveryMode?: DeliveryMode }) => Promise<SendMessageResult>
-  stopStreaming: () => void
-  undoLastMessage: () => void
-  /**
-   * Stage X2.3 contract (b) — INTERNAL bootstrap path. Creates a fresh
-   * local conversation scope and swaps the currently-active session
-   * slice IN PLACE without growing `sessionOrder`. Used by:
-   *   - `deleteConversation` (post-delete recovery for the active scope)
-   *   - the `sendMessage` no-scope bootstrap (synchronizing a scope
-   *     before the first IPC).
-   *   - `undoLastMessage` (resets the active scope after undo).
-   *
-   * NOT to be called from UI controls — those go through
-   * `createNewSession()` (the visible tab API). Wiring UI to this method
-   * leaves the user with an "invisible" session (no chip in
-   * `SessionTabs`), which is exactly the W5 item 3 failure mode.
-   */
-  newSession: () => void
+  sendMessage: (content: string) => Promise<SendMessageResult>
+  stopStreaming: () => Promise<LifecycleResult>
+  resetCurrentConversation: () => Promise<LifecycleResult>
+  compactCurrentSession: () => Promise<LifecycleResult>
   loadScopes: () => Promise<void>
   loadScope: (scopeId: string) => Promise<void>
   setCurrentScope: (scopeId: string) => Promise<void>
@@ -213,9 +172,6 @@ export interface AgentState {
   removeAttachment: (id: string) => void
   clearAttachments: () => void
   setActiveAttachmentPreview: (preview: AttachmentPreviewState | null) => void
-  loadSendPreferences: () => Promise<void>
-  setSendCoalescingEnabled: (enabled: boolean) => Promise<void>
-  setSendCoalescingWindowMs: (windowMs: number) => Promise<void>
   pickFiles: () => Promise<void>
   setTaskSectionExpanded: (taskKey: string, sectionKey: TaskSectionKey, expanded: boolean) => void
   toggleTaskSection: (taskKey: string, sectionKey: TaskSectionKey) => void
@@ -226,34 +182,13 @@ export interface AgentState {
    * in `sessionOrder` (defensive: prevents activating a closed session).
    */
   setActiveSessionId: (id: string) => void
-  /**
-   * V3.4a — create a fresh session slice, append its id to `sessionOrder`,
-   * and switch the active session to it. Rejected (no-op) when the
-   * renderer-side cap is reached (MAX_AGENT_SESSIONS *live* sessions; terminal
-   * ones are pruned and never count); the caller surfaces this as a disabled
-   * "+" by re-reading the live-session count.
-   * Returns the newly created session id, or `null` if rejected.
-   *
-   * Stage X2.3 contract (b) — VISIBLE TAB API. ALL UI-reachable session
-   * creation paths route through this method:
-   *   - SessionTabs "+ 新建" button.
-   *   - ChatPanel header `handleNewSession`.
-   *   - ChatPanel `handleChannelSelect` when landing on an empty local
-   *     channel.
-   *   - ChatPanel boot effect when `scopes.length === 0`.
-   *
-   * Two notes vs the legacy `newSession()`:
-   *   1. This appends to `sessionOrder` — the new tab is immediately
-   *      visible in `SessionTabs` (whereas `newSession()` swaps in place).
-   *   2. This respects the shared MAX_AGENT_SESSIONS cap (live sessions only);
-   *      `newSession()` does not.
-   */
-  createNewSession: () => string | null
+  /** Create and display a new alias only after Main confirms persistence. */
+  createNewSession: () => Promise<CreateSessionResult>
   /**
    * V3.4a — drop a session from the tab strip. Removes the entry from
    * `sessions` and `sessionOrder`; when `id === activeSessionId`, switches
    * the active session to the first remaining tab (or `null` if none).
    * No-op if `id` is not present.
    */
-  closeSession: (id: string) => void
+  closeSession: (id: string) => Promise<LifecycleResult>
 }

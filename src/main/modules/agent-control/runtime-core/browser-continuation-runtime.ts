@@ -6,20 +6,11 @@ import type { AgentExecutionProfileResolver } from '../agents/agent-execution-pr
 import type { ConversationScope, ScopeRunSummary } from '../contracts/types'
 import type { ContinuationIntent } from '../contracts/continuation-state'
 import type { ProjectionTruthSnapshot, TaskProjectionRecord } from '../contracts/run-contracts'
-import type { RunCoordinator } from '../task-projection/run-coordinator'
 import type { TaskProjectionRepository } from '../../repositories/task-projection-repository'
-import type { ReadyAgentOrchestrator } from './orchestrator'
 import {
   AgentSessionCheckpointRepository,
   workflowDigest,
 } from '../../repositories/agent-session-checkpoint-repository'
-import {
-  buildManualSuspendProjectionPatch,
-  finalizeRunOutcome,
-  type RunMetaRepositoryLike,
-  writeRunCloseMetric,
-} from './run-finalizer'
-import { getBudgetUsagePercent, restoreContinuationTaskBudgetRuntime } from '../task-projection/run-budget-policy'
 import { canRespondToUserInteractionWithoutResumeHandle } from './runtime-helpers'
 import { getInteractionLifecycleRegistry } from './interaction-lifecycle-registry'
 import { logAgentMetric } from '../metrics'
@@ -34,21 +25,14 @@ type TaskControlTarget = {
 export interface BrowserContinuationRuntimeDeps {
   agentSessionCheckpoints: AgentSessionCheckpointRepository
   browserController: BrowserController | null
-  orchestrator: ReadyAgentOrchestrator
   taskProjectionStore: TaskProjectionRepository
-  runCoordinator: RunCoordinator
   executionProfileResolver: AgentExecutionProfileResolver
   scopeRunSummaries: Map<string, ScopeRunSummary>
   getConversationScope(scopeId: string): ConversationScope | null
   getTaskProjection(taskId: string): TaskProjectionRecord | null
   listTaskProjections(scopeId: string): TaskProjectionRecord[]
-  getRunMetaRepositoryForFinalize(): RunMetaRepositoryLike | null
-  getTaskProjectionStoreForFinalize(): {
-    get(taskId: string): TaskProjectionRecord | null
-    update(taskId: string, patch: Partial<TaskProjectionRecord>, options?: { silent?: boolean; reasonHint?: string }): void
-  }
   getDomainAdapters(): ReadonlyArray<DomainAdapter>
-  sendScoped(payload: {
+  dispatchSuccessor(payload: {
     scopeId: string
     requestId?: string
     taskId?: string
@@ -96,80 +80,16 @@ async createHumanTakeoverIntent(
 async suspendRun(payload: {
   scopeId: string
   taskId?: string
-}): Promise<{ success: boolean; error?: string }> {
+}): Promise<{ success: boolean; error?: string; errorKind?: string }> {
   const target = this.resolveTaskControlTarget(payload.scopeId, payload.taskId)
   if (!target) {
     return { success: false, error: 'Conversation scope not found' }
   }
-  const restored = restoreContinuationTaskBudgetRuntime({
-    taskType: target.projection?.taskType || 'short_task',
-    projectionBudget: target.projection?.budget || null,
-    projectionBudgetRuntime: null,
-    budget: target.projection?.budget || null,
-  })
-  const runtime = restored.runtime
-    ? {
-      ...restored.runtime,
-      frozen: true,
-    }
-    : null
-  const resolvedTaskId =
-    target.projection?.taskId
-    || target.scopeRunSummary?.taskId
-    || target.scopeRunSummary?.taskProjectionId
-    || payload.taskId
-    || null
-  if (!resolvedTaskId) {
-    return { success: false, error: 'Task projection not found' }
+  return {
+    success: false,
+    error: 'Codex manual suspend requires native terminal reconciliation.',
+    errorKind: 'unsupported',
   }
-  const stopped = this.deps.orchestrator.interruptForSuspend(target.scope.agent, target.scope.id)
-  const resolvedRunId =
-    stopped.runId
-    || target.projection?.runId
-    || target.scopeRunSummary?.runId
-    || null
-  if (!resolvedRunId) {
-    return { success: false, error: 'Active run not found' }
-  }
-  const timestamp = new Date().toISOString()
-  const projectionPatch = buildManualSuspendProjectionPatch({
-    projection: target.projection,
-    taskTitle: target.projection?.taskTitle ?? target.scopeRunSummary?.taskTitle ?? null,
-    taskSummary: target.projection?.taskSummary ?? target.scopeRunSummary?.taskSummary ?? null,
-    steps: target.projection?.steps ?? [],
-    currentStepId: target.projection?.currentStepId ?? target.scopeRunSummary?.currentStepId ?? null,
-    continuationRef: target.projection?.continuationRef ?? target.scopeRunSummary?.taskContinuation ?? null,
-    budget: target.projection?.budget ?? null,
-    budgetUsagePercent: runtime ? getBudgetUsagePercent(runtime) : target.projection?.budgetUsagePercent ?? null,
-    budgetWarningLevel: runtime?.warningLevel ?? target.projection?.budgetWarningLevel ?? null,
-    recoveryHistory: target.projection?.recoveryHistory ?? [],
-    updatedAt: timestamp,
-  })
-  await finalizeRunOutcome({
-    kind: 'interrupted',
-    runId: resolvedRunId,
-    taskId: resolvedTaskId,
-    scopeId: target.scope.id,
-    durationMs: 1,
-    toolCallsUsed: 0,
-    initiator: 'manual_suspend',
-    terminalReason: 'manual_suspend',
-    projectionPatch,
-    taskBudgetRuntime: runtime,
-  }, {
-    runMetaRepository: this.deps.getRunMetaRepositoryForFinalize(),
-    taskProjectionStore: this.deps.getTaskProjectionStoreForFinalize(),
-    writeProjectionTerminalPatch: async (patch) => {
-      if (!patch) return
-      this.deps.taskProjectionStore.update(
-        resolvedTaskId,
-        patch as Partial<TaskProjectionRecord>,
-        { reasonHint: 'update' },
-      )
-    },
-    writeRunCloseMetric,
-  })
-  return { success: true }
 }
 
 async resumeRun(payload: {
@@ -226,7 +146,7 @@ async resumeRun(payload: {
       errorKind: 'not_resumable',
     }
   }
-  return this.deps.sendScoped({
+  return this.deps.dispatchSuccessor({
     scopeId: target.scope.id,
     requestId: payload.requestId,
     message: String(payload.responseText || '').trim() || '继续当前任务。',
@@ -497,16 +417,12 @@ async resumeBrowserWorkflowFromCheckpoint(
       })
       ownerCommitted = true
     }
-    const result = await this.deps.runCoordinator.runScoped({
-      scope,
-      message: '',
-      requestId: newOwnerRunId,
-      sourceMessageId: projection.requestAnchor?.messageId || null,
+    const result = await this.deps.dispatchSuccessor({
+      scopeId: scope.id,
       taskId: projection.taskId,
-      taskOrigin: projection.taskOrigin,
-      runOrigin: 'continuation',
-      preboundExecutionBinding: executionBinding,
-      coordinators: this.deps.getDomainAdapters(),
+      requestId: newOwnerRunId,
+      message: '',
+      continuationIntent: null,
     })
     if (!result.success) await settleLaunchFailure(result.error || 'owner_launch_failed')
     return {
@@ -593,7 +509,7 @@ async respondToInteraction(payload: {
       errorKind: 'not_resumable',
     }
   }
-  return this.deps.sendScoped({
+  return this.deps.dispatchSuccessor({
     scopeId: target.scope.id,
     requestId: payload.requestId,
     taskId: target.projection?.taskId || target.scopeRunSummary?.taskId || payload.taskId,

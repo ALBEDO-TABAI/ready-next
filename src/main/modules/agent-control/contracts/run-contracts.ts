@@ -586,6 +586,7 @@ export interface RunCoordinatorResult {
   responseText?: string
   canonicalMessage?: CanonicalAssistantMessage
   canonicalMessageDigest?: string
+  productOutcomeDigest?: string
 }
 
 export interface ExecutionHostRequest {

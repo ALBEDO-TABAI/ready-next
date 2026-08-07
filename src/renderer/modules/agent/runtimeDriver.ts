@@ -75,7 +75,6 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
     if (typeof window === 'undefined' || !window.electronAPI) return () => { /* no electronAPI */ }
 
     listenersInitialized = true
-    void store.getState().loadSendPreferences()
 
     const cleanupStream = installRuntimeDriverStreamEvents({
       store,

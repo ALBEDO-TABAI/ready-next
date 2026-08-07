@@ -7,7 +7,6 @@
 //   agent:listConversationScopes        (list scopes, optionally per-agent)
 //   agent:listScopeRuns                 (list active/completed scope-runs)
 //   agent:getConversationScopeMessages  (full chat_messages stream)
-//   agent:createLocalScope              (mint a local-source scope row)
 //   agent:listScopeAttachments          (filesystem-verified attachments)
 //   agent:getScopeAttachment            (one attachment by id)
 //   agent:clearRemoteAttachmentCache    (wipe cache subtree)
@@ -16,8 +15,8 @@
 // The V5 IPC contract gate proves the channel literals still exist on the
 // renderer side, but it cannot prove:
 //
-//   1. `register` wires EXACTLY the 8 channel names the group owns via
-//      `ipcMain.handle` (no extras, no missing ones — all 8 are invoke /
+//   1. `register` wires EXACTLY the 7 channel names the group owns via
+//      `ipcMain.handle` (no extras, no missing ones — all 7 are invoke /
 //      Promise or sync-return so they all live on the handle slot).
 //   2. The returned dispose handle calls `removeHandler` for each of those
 //      same 8 channels — so dev-reload re-registration and
@@ -76,7 +75,6 @@ function createMockDeps(): ConversationGroupDeps {
     listConversationScopes: fail('listConversationScopes') as ConversationGroupDeps['listConversationScopes'],
     listScopeRuns: fail('listScopeRuns') as ConversationGroupDeps['listScopeRuns'],
     getConversationScopeMessages: fail('getConversationScopeMessages') as ConversationGroupDeps['getConversationScopeMessages'],
-    createLocalScopeWithMode: fail('createLocalScopeWithMode') as ConversationGroupDeps['createLocalScopeWithMode'],
     listScopeAttachments: fail('listScopeAttachments') as ConversationGroupDeps['listScopeAttachments'],
     getScopeAttachment: fail('getScopeAttachment') as ConversationGroupDeps['getScopeAttachment'],
     clearRemoteAttachmentCache: fail('clearRemoteAttachmentCache') as ConversationGroupDeps['clearRemoteAttachmentCache'],
@@ -87,7 +85,7 @@ function createMockDeps(): ConversationGroupDeps {
   }
 }
 
-test('conversationGroup.register wires the 8 documented channels exactly once each via ipcMain.handle', () => {
+test('conversationGroup.register wires the 7 read/cache channels exactly once each via ipcMain.handle', () => {
   const { ipc, handleCalls } = createMockIpc()
   conversationGroup.register(ipc, createMockDeps())
 
@@ -96,9 +94,9 @@ test('conversationGroup.register wires the 8 documented channels exactly once ea
   assert.deepEqual(
     registered,
     expected,
-    'register must subscribe to exactly the 8 conversation-scope channels',
+    'register must subscribe to exactly the 7 conversation-scope channels',
   )
-  assert.equal(handleCalls.length, 8, 'each channel must be registered exactly once')
+  assert.equal(handleCalls.length, 7, 'each channel must be registered exactly once')
 
   // Spot-check the exact channel literals per the plan (V2.1e, §3 V2.1) so
   // accidental renames trip this test even if the channel count happens to
@@ -108,7 +106,6 @@ test('conversationGroup.register wires the 8 documented channels exactly once ea
     'agent:listConversationScopes',
     'agent:listScopeRuns',
     'agent:getConversationScopeMessages',
-    'agent:createLocalScope',
     'agent:listScopeAttachments',
     'agent:getScopeAttachment',
     'agent:clearRemoteAttachmentCache',
@@ -128,7 +125,7 @@ test('conversationGroup namespace is the documented label so dispose ordering ca
   assert.equal(conversationGroup.namespace, 'agent:conversation')
 })
 
-test('IpcDisposeHandle.dispose removes the same 8 channels that register added', () => {
+test('IpcDisposeHandle.dispose removes the same 7 channels that register added', () => {
   const { ipc, removeHandlerCalls } = createMockIpc()
   const handle = conversationGroup.register(ipc, createMockDeps())
 

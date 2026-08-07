@@ -40,8 +40,6 @@ export function activeSessionKeyFromState(state: any): string {
 export function makeEmptySessionSlice(conversationId: string | null = null): Record<string, unknown> {
   return {
     messages: [],
-    pendingSendCount: 0,
-    pendingSendFlushAt: null,
     isStreaming: false,
     foregroundBusy: false,
     composerLocked: false,
@@ -49,8 +47,11 @@ export function makeEmptySessionSlice(conversationId: string | null = null): Rec
     streamingRequestId: null,
     scopeRunStates: {},
     taskDisclosureState: {},
+    lifecyclePendingAction: null,
+    lifecycleError: null,
     state: 'live',
     conversationId,
+    aliasGeneration: null,
     inputValue: '',
   }
 }
@@ -192,4 +193,3 @@ export function syncActiveScopeRunAliases(
     toolTraceStatus: phaseToToolTraceStatus(activeRunState?.phase, activeRunState?.terminalReason),
   }
 }
-

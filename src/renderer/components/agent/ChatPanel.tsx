@@ -4,8 +4,6 @@ import {
   useAgent,
   initAgentListeners,
   lookupSessionByConversation,
-  isLiveSession,
-  MAX_AGENT_SESSIONS,
   type ChatAttachment,
   type ConversationScope,
   type ScopeRunState,
@@ -89,7 +87,6 @@ import { formatTime } from './chat-panel/format-time'
 // All deps that previously closed over ChatPanel-local state are now
 // injected via params; behavior preserved byte-for-byte.
 import { useTaskInteractionHandlers } from './chat-panel/task-interaction/use-task-interaction-handlers'
-import { createThoroughDeliveryOverrideLatch } from '../../modules/agent/dynamicDeliveryMode'
 // Stage V V1.9a — channel + session-recall state, derivations, effects and
 // callbacks (selectedChannelKey / channelOptions / currentChannel /
 // filteredScopes / currentAgentData / sessionRecall query+results+capsules
@@ -193,7 +190,8 @@ export default function ChatPanel({
     setInputValue,
     sendMessage,
     stopStreaming,
-    undoLastMessage,
+    resetCurrentConversation,
+    compactCurrentSession,
     createNewSession,
     // W2
     scopes,
@@ -212,26 +210,16 @@ export default function ChatPanel({
     filePool,
     activeAttachmentPreview,
     setActiveAttachmentPreview,
-    pendingSendCount,
-    pendingSendFlushAt,
-    loadSendPreferences,
     taskDisclosureState,
     setTaskSectionExpanded,
     sessions,
     sessionOrder,
+    activeSessionId,
     dismissSoftError
   } = useAgent()
 
   const { toggleChatPanel: toggleChatPanelStore } = useWorkspace()
   const toggleChatPanel = onTogglePanel ?? toggleChatPanelStore
-
-  // "New conversation" is only blocked when MAX_AGENT_SESSIONS conversations
-  // are still LIVE (unfinished); finished ones are pruned on create. When this
-  // is false the "+" buttons render disabled with an explanatory tooltip so the
-  // limit is visible instead of a silent no-op.
-  const canCreateSession = useAgent(
-    (s) => s.sessionOrder.filter((id) => isLiveSession(s, id)).length < MAX_AGENT_SESSIONS,
-  )
 
   const [toolTraceExpanded, setToolTraceExpanded] = useState(false)
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null)
@@ -241,7 +229,6 @@ export default function ChatPanel({
     text: string
     boundary: { left: number; top: number; right: number; bottom: number }
   } | null>(null)
-  const [pendingSendCountdown, setPendingSendCountdown] = useState(0)
   const [attachmentPreviewLoading, setAttachmentPreviewLoading] = useState(false)
   const [persistedScopeRuns, setPersistedScopeRuns] = useState<PersistedScopeRunSummary[]>([])
   const [persistedTaskProjections, setPersistedTaskProjections] = useState<
@@ -566,23 +553,6 @@ export default function ChatPanel({
       .filter(Boolean) as ToolTraceEvent[]
   }, [])
 
-  useEffect(() => {
-    void loadSendPreferences()
-  }, [loadSendPreferences])
-
-  useEffect(() => {
-    if (!pendingSendCount || !pendingSendFlushAt) {
-      setPendingSendCountdown(0)
-      return
-    }
-    const update = () => {
-      setPendingSendCountdown(Math.max(0, pendingSendFlushAt - Date.now()))
-    }
-    update()
-    const timer = window.setInterval(update, 100)
-    return () => window.clearInterval(timer)
-  }, [pendingSendCount, pendingSendFlushAt])
-
   const copyTextToClipboard = useCallback(async (content: string) => {
     const value = content?.trim()
     if (!value) return false
@@ -668,15 +638,11 @@ export default function ChatPanel({
 
   useEffect(() => {
     void loadScopes().then(() => {
-      // Stage X2.3 — UI-reachable entry point: when the agent has no
-      // existing scopes after load, create a session via the visible
-      // `createNewSession()` (appends to `sessionOrder`); the legacy
-      // `newSession()` only swaps in place and is reserved for non-UI
-      // bootstrap paths.
       if (useAgent.getState().scopes.length === 0) {
-        useAgent.getState().createNewSession()
+        return useAgent.getState().createNewSession()
       }
-    })
+      return null
+    }).catch(() => undefined)
   }, [currentAgent, loadScopes])
 
   useEffect(() => {
@@ -783,35 +749,17 @@ export default function ChatPanel({
   }, [])
 
   const sendingRef = useRef(false)
-  const [thoroughOverride, setThoroughOverride] = useState(false)
-  const thoroughOverrideLatchRef = useRef<ReturnType<typeof createThoroughDeliveryOverrideLatch> | null>(null)
-  if (!thoroughOverrideLatchRef.current) {
-    thoroughOverrideLatchRef.current = createThoroughDeliveryOverrideLatch()
-  }
-  const thoroughOverrideLatch = thoroughOverrideLatchRef.current
-  const handleThoroughOverrideChange = useCallback((enabled: boolean) => {
-    thoroughOverrideLatch.setEnabled(enabled)
-    setThoroughOverride(enabled)
-  }, [thoroughOverrideLatch])
   const handleSend = useCallback(async () => {
     if (sendingRef.current) return
     const content = inputValue.trim()
     if (!content && attachments.length === 0) return
     sendingRef.current = true
-    const consumedOverride = thoroughOverrideLatch.consume()
-    const deliveryMode = consumedOverride.deliveryMode
-    handleThoroughOverrideChange(consumedOverride.nextEnabled)
-    setInputValue('', { preserveContinuationIntent: true })
-    chatInputRef.current?.resetHeight()
     try {
-      const result = await sendMessage(content, { deliveryMode })
-      if (result.preserveInput) {
-        setInputValue(content, { preserveContinuationIntent: true })
-      }
+      await sendMessage(content)
     } finally {
       sendingRef.current = false
     }
-  }, [attachments.length, handleThoroughOverrideChange, inputValue, setInputValue, sendMessage, thoroughOverrideLatch])
+  }, [attachments.length, inputValue, sendMessage])
 
   const handleAgentSelect = useCallback(
     (name: string) => {
@@ -840,11 +788,29 @@ export default function ChatPanel({
     focusInputWithResize()
   }, [addAttachments, focusInputWithResize])
 
-  const handleNewSession = useCallback(() => {
-    // Stage X2.3 — header "new session" button goes through the visible
-    // tab API; see useAgent.createNewSession jsdoc for the contract.
-    createNewSession()
+  const handleNewSession = useCallback(async () => {
+    try {
+      return await createNewSession()
+    } catch {
+      return null
+    }
   }, [createNewSession])
+
+  const handleResetCurrentConversation = useCallback(async () => {
+    try {
+      await resetCurrentConversation()
+    } catch {
+      // The retained session remains the visible recovery boundary.
+    }
+  }, [resetCurrentConversation])
+
+  const handleCompactCurrentSession = useCallback(async () => {
+    try {
+      await compactCurrentSession()
+    } catch {
+      // The retained session remains the visible recovery boundary.
+    }
+  }, [compactCurrentSession])
 
   const handleLoadConversation = useCallback(
     (convId: string) => {
@@ -859,7 +825,7 @@ export default function ChatPanel({
   )
 
   const handleChannelSelect = useCallback(
-    (channel: ConversationChannelOption) => {
+    async (channel: ConversationChannelOption) => {
       setSelectedChannelKey(channel.key)
 
       const latestScope = scopes
@@ -871,14 +837,12 @@ export default function ChatPanel({
         })[0]
 
       if (latestScope) {
-        loadConversation(latestScope.id)
+        await loadConversation(latestScope.id)
         return
       }
 
       if (channel.sourceKind === 'local') {
-        // Stage X2.3 — channel selection that lands on an empty local
-        // channel funnels through the visible tab API too.
-        createNewSession()
+        await createNewSession()
       }
     },
     [getScopeChannelKey, loadConversation, createNewSession, scopes]
@@ -886,11 +850,13 @@ export default function ChatPanel({
 
   const handleDeleteConversation = useCallback(
     async (convId: string) => {
-      await deleteConversation(convId)
-      // 乐观从 sessionRecallResults 移除，避免列表残留让用户以为没删掉
-      setSessionRecallResults((prev) => prev.filter((hit) => hit.conversationId !== convId))
-      // 异步重新拉取一次，确保与后端一致
-      void runSessionRecallSearch(sessionRecallQuery)
+      try {
+        await deleteConversation(convId)
+        setSessionRecallResults((prev) => prev.filter((hit) => hit.conversationId !== convId))
+        void runSessionRecallSearch(sessionRecallQuery)
+      } catch {
+        // Lifecycle failure remains visible in the retained session state.
+      }
     },
     [deleteConversation, runSessionRecallSearch, sessionRecallQuery]
   )
@@ -970,6 +936,16 @@ export default function ChatPanel({
   // Blank until the current scope carries a real (non-placeholder) title —
   // i.e. until the user has actually started a conversation.
   const sessionTitle = resolveChatSessionTitle(currentScope?.title)
+  const activeLifecycleSlice = activeSessionId ? sessions[activeSessionId] : null
+  const activeLifecycleError = activeLifecycleSlice?.lifecycleError ?? null
+  const lifecycleUncertainty = activeLifecycleError?.code === 'interrupt_state_unknown'
+    ? 'interrupt' as const
+    : activeLifecycleError?.code === 'compaction_state_unknown'
+      ? 'compaction' as const
+      : null
+  const lifecycleInputBlocked = Boolean(
+    activeLifecycleSlice?.lifecyclePendingAction || lifecycleUncertainty,
+  )
   const modeSwitcher = workbenchMode && onWorkbenchModeChange
     ? (
         <div className="ready-chat-mode-tabs-dock" data-chat-mode-tabs-dock="true">
@@ -998,7 +974,11 @@ export default function ChatPanel({
       sessionsByChannelKey={sessionsByChannelKey}
       onChannelSelect={handleChannelSelect}
       onNewSession={handleNewSession}
-      newSessionDisabled={!canCreateSession}
+      onResetCurrentConversation={handleResetCurrentConversation}
+      onCompactCurrentSession={handleCompactCurrentSession}
+      currentConversationAvailable={Boolean(currentScopeId)}
+      lifecyclePendingAction={activeLifecycleSlice?.lifecyclePendingAction ?? null}
+      lifecycleUncertainty={lifecycleUncertainty}
       onLoadConversation={handleLoadConversation}
       onDeleteConversation={handleDeleteConversation}
       onRenameConversation={handleRenameConversation}
@@ -1041,6 +1021,7 @@ export default function ChatPanel({
       scopeRunStates={scopeRunStates}
       taskDisclosureState={taskDisclosureState}
       isStreaming={isStreaming}
+      lifecycleInputBlocked={lifecycleInputBlocked}
       streamingMessageId={streamingMessageId}
       parseSerializedTaskSnapshot={parseSerializedTaskSnapshot}
       parseSerializedToolTraceSnapshot={parseSerializedToolTraceSnapshot}
@@ -1087,8 +1068,6 @@ export default function ChatPanel({
       currentAgentAvatar={currentAgentData?.avatar || '🤖'}
       currentAgentDisplayName={currentAgentDisplayName}
       isChannelScope={currentScope?.sourceKind === 'channel'}
-      pendingSendCount={pendingSendCount}
-      pendingSendCountdown={pendingSendCountdown}
       isDragOver={isDragOver}
       filePool={filePool}
       chatInputRef={chatInputRef}
@@ -1096,10 +1075,9 @@ export default function ChatPanel({
       onSend={() => {
         void handleSend()
       }}
-      thoroughOverride={thoroughOverride}
-      onThoroughOverrideChange={handleThoroughOverrideChange}
-      onStop={stopStreaming}
-      onUndo={undoLastMessage}
+      onStop={() => {
+        void stopStreaming().catch(() => undefined)
+      }}
       onPickFiles={pickFiles}
       onAgentSelect={handleAgentSelect}
       onSkillReference={handleSkillReference}
@@ -1137,10 +1115,10 @@ export default function ChatPanel({
                 toggleChatPanel()
               }}
               onNewSession={() => {
-                handleNewSession()
-                toggleChatPanel()
+                void handleNewSession().then((result) => {
+                  if (result?.ok) toggleChatPanel()
+                })
               }}
-              newSessionDisabled={!canCreateSession}
             />
           </ChatPanelMotionLayer>
         ) : showExpandedPanel ? (

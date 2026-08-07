@@ -32,7 +32,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { JSDOM } from 'jsdom'
 
-import { getSessionSlice, useAgent } from '../renderer/stores/useAgent'
+import { getSessionSlice, useAgent, type SessionSlice } from '../renderer/stores/useAgent'
 
 // --- jsdom shim ------------------------------------------------------------
 
@@ -67,6 +67,25 @@ interface SeedOptions {
   inputValue?: string
 }
 
+function makeSlice(inputValue: string): SessionSlice {
+  return {
+    messages: [],
+    isStreaming: false,
+    foregroundBusy: false,
+    composerLocked: false,
+    streamingMessageId: null,
+    streamingRequestId: null,
+    scopeRunStates: {},
+    taskDisclosureState: {},
+    lifecyclePendingAction: null,
+    lifecycleError: null,
+    state: 'live',
+    conversationId: null,
+    aliasGeneration: null,
+    inputValue,
+  }
+}
+
 function seedStore(opts: SeedOptions = {}) {
   useAgent.setState({
     agents: [{ name: 'butler', displayName: '管家', avatar: '', status: 'idle', selected: true }],
@@ -92,10 +111,6 @@ function seedStore(opts: SeedOptions = {}) {
     attachments: [],
     filePool: [],
     activeAttachmentPreview: null,
-    sendCoalescingEnabled: true,
-    sendCoalescingWindowMs: 1200,
-    pendingSendCount: 0,
-    pendingSendFlushAt: null,
     sessions: opts.sessions ?? {},
     activeSessionId: opts.activeSessionId ?? null,
     taskDisclosureState: {},
@@ -147,20 +162,8 @@ test('V3.3b.1 — two sessions: setInputValue on A leaves session B slice untouc
       sessionId: 'session-A',
       activeSessionId: 'session-A',
       sessions: {
-        'session-A': {
-          pendingSendCount: 0,
-          pendingSendFlushAt: null,
-          state: 'live',
-          conversationId: null,
-          inputValue: 'A initial',
-        },
-        'session-B': {
-          pendingSendCount: 0,
-          pendingSendFlushAt: null,
-          state: 'live',
-          conversationId: null,
-          inputValue: 'B initial',
-        },
+        'session-A': makeSlice('A initial'),
+        'session-B': makeSlice('B initial'),
       },
       inputValue: 'A initial',
     })
@@ -200,20 +203,8 @@ test('V3.3b.1 — switching activeSessionId preserves each session draft; mirror
       sessionId: 'session-A',
       activeSessionId: 'session-A',
       sessions: {
-        'session-A': {
-          pendingSendCount: 0,
-          pendingSendFlushAt: null,
-          state: 'live',
-          conversationId: null,
-          inputValue: 'draft-A',
-        },
-        'session-B': {
-          pendingSendCount: 0,
-          pendingSendFlushAt: null,
-          state: 'live',
-          conversationId: null,
-          inputValue: 'draft-B',
-        },
+        'session-A': makeSlice('draft-A'),
+        'session-B': makeSlice('draft-B'),
       },
       inputValue: 'draft-A',
     })
@@ -302,10 +293,7 @@ test('V3.3b.1 — bootstrap fresh state: top-level inputValue defaults "" alongs
     assert.equal(unknown.inputValue, '', 'unknown session falls back to empty slice with ""')
 
     // Bootstrap invariant: the empty slice carries the same shape as a
-    // freshly-created live slice — pendingSendCount=0, flushAt=null,
-    // state='live', conversationId=null, inputValue=''.
-    assert.equal(slice.pendingSendCount, 0, 'bootstrap slice pendingSendCount=0')
-    assert.equal(slice.pendingSendFlushAt, null, 'bootstrap slice pendingSendFlushAt=null')
+    // freshly-created live slice after pending-send coalescing retirement.
     assert.equal(slice.state, 'live', 'bootstrap slice state=live')
     assert.equal(slice.conversationId, null, 'bootstrap slice conversationId=null')
   } finally {

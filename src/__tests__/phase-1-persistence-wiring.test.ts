@@ -8,10 +8,8 @@ import { TOOL_ERROR_METRICS } from '../main/modules/agent-control/tools-runtime/
 //
 // These tests pin the cross-module wiring described in the audit's Phase 1
 // section. They are intentionally source-grep style (not full integration
-// runs) because the same audit identified divergent persist paths between
-// `runtime.createConversationMessage` and `chatRepository.saveMessage`; the
-// risk is regression by accident, and a contract test is the cheapest way
-// to catch a future refactor that drops one of these hooks.
+// runs) because the risk is regression by accident, and a contract test is
+// the cheapest way to catch a future refactor that drops one of these hooks.
 
 const RUNTIME_PATH = new URL('../main/modules/agent-control/runtime-core/runtime.ts', import.meta.url)
 // B8-D R2 — the reference-hint method bodies moved from runtime.ts into the
@@ -41,65 +39,25 @@ function readSource(url: URL): string {
   return readFileSync(url, 'utf8')
 }
 
-test('Phase 1.1 — runtime exposes persistReferenceHintAfterAssistantMessage and routes assistants through persistReferenceHintToScope', () => {
+test('Phase 1.1 — canonical conversation-message persistence snapshots assistant reference hints', () => {
   const runtimeSource = readSource(RUNTIME_PATH)
   const serviceSource = readSource(REFERENCE_HINT_SERVICE_PATH)
+  const storeSource = readSource(CONVERSATION_SCOPE_STORE_PATH)
+  const blockMatch = storeSource.match(/createConversationMessage\([\s\S]*?\n\s{2}\}/)
 
+  assert.ok(blockMatch, 'canonical createConversationMessage block exists')
   assert.match(
-    runtimeSource,
-    /persistReferenceHintAfterAssistantMessage\s*\(scopeId:\s*string,\s*role:\s*string\)\s*:\s*void/,
-    'public hook signature is part of the runtime contract',
+    blockMatch![0],
+    /payload\.role\s*===\s*'assistant'[\s\S]*this\.deps\.persistReferenceHintToScope\(scopeId\)/,
+    'canonical assistant-message persistence snapshots the reference hint',
   )
-  // B8-D R2 — the runtime hook MUST stay a delegate into ReferenceHintService
-  // so the IPC → runtime → service chain cannot silently detach.
-  assert.match(
-    runtimeSource,
-    /persistReferenceHintAfterAssistantMessage[^}]*this\.referenceHints\.persistReferenceHintAfterAssistantMessage\(/,
-    'runtime hook delegates to ReferenceHintService',
-  )
-  // The hook MUST be a no-op for non-assistant roles to avoid wasted DB writes
-  // when the chat panel saves a user message.
-  assert.match(
-    serviceSource,
-    /persistReferenceHintAfterAssistantMessage[^}]*if\s*\(role\s*!==\s*'assistant'\)\s*return/,
-    'hook short-circuits non-assistant roles',
-  )
-  // The hook MUST delegate to the existing persist helper rather than
-  // re-implementing snapshot logic.
-  assert.match(
-    serviceSource,
-    /persistReferenceHintAfterAssistantMessage[^}]*this\.persistReferenceHintToScope\(/,
-    'hook delegates to persistReferenceHintToScope',
-  )
+  assert.doesNotMatch(runtimeSource, /persistReferenceHintAfterAssistantMessage/)
+  assert.doesNotMatch(serviceSource, /persistReferenceHintAfterAssistantMessage/)
 })
 
-test('Phase 1.1 — chat:saveMessage IPC invokes the hook after persisting the row', () => {
+test('Codex E1 — renderer direct message persistence IPC is retired', () => {
   const source = readSource(CHAT_PERSISTENCE_GROUP_PATH)
-
-  // Find the chat:saveMessage handler block bounded by the next IPC handler.
-  // (Screenshot-bug hotfix added a sanitize step before the saveMessage call,
-  // so the block now contains a sanitizedContent local variable; widen the
-  // window so the hint-persist hook is also captured.)
-  const blockMatch = source.match(/'chat:saveMessage'[\s\S]*?ipcMain\.handle\('chat:createConversation'/)
-  assert.ok(blockMatch, 'chat:saveMessage handler block exists')
-
-  const block = blockMatch[0]
-  assert.match(
-    block,
-    /deps\.saveMessage\(/,
-    'saveMessage still writes the row',
-  )
-  assert.match(
-    block,
-    /deps\.persistReferenceHintAfterAssistantMessage\(\s*data\.conversationId\s*,\s*data\.role\s*\)/,
-    'IPC calls the runtime hook with conversationId + role',
-  )
-
-  // Saving the row must NOT depend on the hook succeeding, but the hook MUST
-  // run AFTER the row is written so the snapshot reflects the latest state.
-  const saveIdx = block.indexOf('deps.saveMessage')
-  const hookIdx = block.indexOf('persistReferenceHintAfterAssistantMessage')
-  assert.ok(saveIdx >= 0 && hookIdx > saveIdx, 'hook fires after saveMessage')
+  assert.doesNotMatch(source, /chat:saveMessage|deps\.saveMessage/)
 })
 
 test('Phase 1.2 — ensureChannelScope restores reference hint from meta_json before the message reaches orchestrator', () => {

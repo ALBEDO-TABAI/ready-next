@@ -3,7 +3,6 @@ import type { AgentMessage, ConversationScope, ScopeRunState } from './types'
 import { useMode } from '../../stores/useMode'
 import { rebuildAgentMessageFromRow } from '../../stores/agent-store-helpers'
 import { emitRendererAgentMetric } from './rendererMetrics'
-import { isForegroundBusyScopeRunState } from './scopeRunState'
 import {
   normalizeSessionSlice,
   sessionKeyForScopeId,
@@ -23,83 +22,17 @@ export function createRuntimeDriverCanonicalTerminal(deps: {
   function completeScopeRunAfterSendSuccess(
     scopeId: string,
     requestId: string,
-    options?: {
-      canonicalMessage?: CanonicalAssistantMessage | null
-      canonicalMessageDigest?: string | null
-      acceptedAsSteering?: boolean
-      ownerRunId?: string | null
-      previousOwnerRun?: ScopeRunState | null
+    options: {
+      canonicalMessage: CanonicalAssistantMessage
+      canonicalMessageDigest: string
     },
   ): void {
-    if (options?.acceptedAsSteering) {
-      clearInfrastructureWatchdog(scopeId, requestId)
-      store.setState((state: any) => {
-        const sessionId = sessionKeyForScopeId(state, scopeId)
-        const currentSlice = normalizeSessionSlice(state.sessions?.[sessionId])
-        const currentRun = currentSlice.scopeRunStates[scopeId] || getScopeRunStateFromState(state, scopeId)
-        const ownerRunId = options.ownerRunId || options.previousOwnerRun?.requestId || currentRun?.requestId || null
-        const restoredRun = currentRun?.requestId !== requestId
-          ? currentRun
-          : options.previousOwnerRun?.requestId === ownerRunId
-            ? options.previousOwnerRun
-            : currentRun && ownerRunId
-              ? {
-                ...currentRun,
-                requestId: ownerRunId,
-                responseMessageId: null,
-                responseBuffer: '',
-                terminalReason: null,
-                updatedAt: new Date().toISOString(),
-              }
-              : currentRun
-        const isFakeTransient = (message: AgentMessage): boolean => {
-          const meta = (message.meta || {}) as Record<string, unknown>
-          return meta.transient === true && meta.runId === requestId
-        }
-        const nextMessages = (currentSlice.messages || state.messages || []).filter((message: AgentMessage) => !isFakeTransient(message))
-        const nextLive = Array.isArray(state.scopeLiveMessages?.[scopeId])
-          ? state.scopeLiveMessages[scopeId].filter((message: AgentMessage) => !isFakeTransient(message))
-          : []
-        const ownerStillBusy = isForegroundBusyScopeRunState(restoredRun)
-        return {
-          ...withSessionSliceAndActiveRuntimeMirror(state, sessionId, {
-            messages: nextMessages,
-            scopeRunStates: restoredRun
-              ? { ...currentSlice.scopeRunStates, [scopeId]: restoredRun }
-              : currentSlice.scopeRunStates,
-            isStreaming: ownerStillBusy,
-            foregroundBusy: ownerStillBusy,
-            composerLocked: ownerStillBusy,
-            streamingMessageId: ownerStillBusy ? restoredRun?.responseMessageId || null : null,
-            streamingRequestId: ownerStillBusy ? ownerRunId : null,
-          }),
-          scopeLiveMessages: {
-            ...(state.scopeLiveMessages || {}),
-            [scopeId]: nextLive,
-          },
-        }
-      })
-      return
-    }
-
-    if (!options?.canonicalMessage) {
-      const currentRun = getScopeRunStateFromState(store.getState(), scopeId)
-      if (currentRun?.requestId === requestId && currentRun.terminalReason) {
-        clearInfrastructureWatchdog(scopeId, requestId)
-        return
-      }
-      emitRendererAgentMetric('renderer_send_success_without_canonical_terminal', {
-        scopeId,
-        requestId,
-      })
-      return
-    }
-
     clearInfrastructureWatchdog(scopeId, requestId)
     let persistedRunState: ScopeRunState | null = null
     store.setState((state: any) => {
       const sessionId = sessionKeyForScopeId(state, scopeId)
       const currentSlice = normalizeSessionSlice(state.sessions?.[sessionId])
+      if (!state.sessions?.[sessionId] || currentSlice.conversationId !== scopeId) return {}
       const previous = currentSlice.scopeRunStates[scopeId] || getScopeRunStateFromState(state, scopeId)
       if (previous?.requestId && previous.requestId !== requestId) return {}
 
@@ -133,7 +66,7 @@ export function createRuntimeDriverCanonicalTerminal(deps: {
       })
     })
 
-    if (persistedRunState && options?.canonicalMessage) {
+    if (persistedRunState) {
       const state = store.getState()
       const latestRunState = getScopeRunStateFromState(state, scopeId) || persistedRunState
       void reconcileCanonicalTerminalMessage(
@@ -289,6 +222,7 @@ export function createRuntimeDriverCanonicalTerminal(deps: {
     store.setState((state: any) => {
       const sessionId = sessionKeyForScopeId(state, scopeId)
       const currentSlice = normalizeSessionSlice(state.sessions?.[sessionId])
+      if (!state.sessions?.[sessionId] || currentSlice.conversationId !== scopeId) return {}
       const previous = currentSlice.scopeRunStates[scopeId] || getScopeRunStateFromState(state, scopeId) || runState
       const transientResponseId = previous?.responseMessageId || runState?.responseMessageId || null
       const ownerRunId = previous?.requestId || runState?.requestId || null

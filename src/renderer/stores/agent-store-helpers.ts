@@ -2,15 +2,10 @@
  * agent-store-helpers.ts — useAgent 前置块纯移动拆分（2026-07-05 B8 式 P 级）。
  *
  * 本文件内容整块搬自 src/renderer/stores/useAgent.ts（字节原样，仅 import/export
- * 接线变动；可变模块级单例 cardRoutingMetrics / scopeCreatePersistenceMetricThrottle
- * 连同全部 owner 函数整簇搬入，ES module 单例语义不变）。
+ * 接线变动；可变模块级单例连同全部 owner 函数整簇搬入，
+ * ES module 单例语义不变）。
  * 铁律：本文件不得 import ./useAgent（防环）。
  */
-import {
-  ScopeCreatePersistenceMetricThrottle,
-  type ScopeCreatePersistenceSite,
-} from '../modules/agent/scope-create-persistence-metrics'
-import { emitRendererAgentMetric } from '../modules/agent/rendererMetrics'
 import { syncActiveScopeRunAliases } from '../modules/agent/runtimeDriver'
 import { extractAttachmentsFromMeta as extractPersistedAttachments } from '../modules/agent/messageComposer'
 import { defaultAgentEmoji } from '../../shared/agent-identity'
@@ -29,40 +24,6 @@ import type {
   SessionSlice,
   SessionSliceState,
 } from './agent-store-types'
-
-/**
- * Stage 3 W4 — observability-only throttle for createLocalScope IPC failures
- * across newSession + 4 sendMessage bootstrap sites. The retry chain at
- * sendMessage's "Conversation scope not found" handler still drives behavior;
- * this throttle adds a renderer-channel metric so operators can see when
- * scope persistence is failing without changing user-visible UI.
- */
-export const scopeCreatePersistenceMetricThrottle = new ScopeCreatePersistenceMetricThrottle(
-  5 * 60_000,
-  () => Date.now(),
-  (payload) => {
-    emitRendererAgentMetric('scope_create_persistence_failed', { ...payload })
-  },
-)
-
-export async function callCreateLocalScopeWithMetric(
-  agent: string,
-  scopeId: string | null,
-  site: ScopeCreatePersistenceSite,
-  invoke: () => Promise<{ success: boolean; data?: unknown } | null | undefined>,
-): Promise<{ success: boolean; data?: unknown } | null> {
-  try {
-    const result = await invoke()
-    if (!result || !result.success || result.data == null) {
-      scopeCreatePersistenceMetricThrottle.maybeEmit(site, 'result_failure', scopeId, agent)
-      return result ?? null
-    }
-    return result
-  } catch {
-    scopeCreatePersistenceMetricThrottle.maybeEmit(site, 'ipc_rejected', scopeId, agent)
-    return null
-  }
-}
 
 const FALLBACK_AGENTS: readonly Agent[] = [
   { name: 'butler', displayName: '管家', avatar: '🤖', status: 'idle', selected: true },
@@ -146,18 +107,11 @@ export function mapRegistryToAgents(
   return { agents, currentAgent: nextCurrentAgent }
 }
 
-const TERMINAL_SESSION_STATES: ReadonlySet<SessionSliceState> = new Set([
-  'done',
-  'error',
-  'cancelled',
-  'closed',
-])
+const CLOSED_SESSION_STATES: ReadonlySet<SessionSliceState> = new Set(['closed'])
 
 export function makeEmptySessionSlice(conversationId: string | null = null): SessionSlice {
   return {
     messages: [],
-    pendingSendCount: 0,
-    pendingSendFlushAt: null,
     isStreaming: false,
     foregroundBusy: false,
     composerLocked: false,
@@ -165,8 +119,11 @@ export function makeEmptySessionSlice(conversationId: string | null = null): Ses
     streamingRequestId: null,
     scopeRunStates: {},
     taskDisclosureState: {},
+    lifecyclePendingAction: null,
+    lifecycleError: null,
     state: 'live',
     conversationId,
+    aliasGeneration: null,
     inputValue: '',
   }
 }
@@ -189,7 +146,6 @@ export function mapScopeToConversation(scope: ConversationScope): ChatConversati
   }
 }
 
-export const DEFAULT_SEND_COALESCE_WINDOW_MS = 1200
 const CONTINUATION_DRAFT_PATTERN =
   /^(?:请|请你|麻烦你)?(?:(?:继续(?:当前|这个|刚才|上次|任务|处理|执行|完成|一下)?|接着(?:来|做|处理|执行|完成)?|恢复(?:上次|刚才|当前)?|重试(?:一次|一下)?|重试刚才的任务|再试(?:一次|一下)?|再来(?:一次|一下)?|重新(?:跑|执行|做|开始)(?:一次|一下|一轮|一遍)?|从头(?:跑|来|做|开始|重新)(?:一次|一下|一轮|一遍)?|确认继续|暂不继续|我已完成|人工步骤已完成|请重试刚才的任务)(?:$|[\s，。,.!?！？])|继续后台任务(?:$|\s)|(?:continue|retry|resume)(?:$|\s))/i
 
@@ -225,19 +181,6 @@ export function selectActiveSessionSlice(state: AgentState): SessionSlice {
 /** W4.5 area S — direct field read for `sessionOrder`. */
 export function selectSessionOrder(state: AgentState): readonly string[] {
   return state.sessionOrder
-}
-
-/** W4.5 area P — direct field read for the active session's coalescing counters. */
-export function selectPendingSendForActive(state: AgentState): {
-  count: number
-  flushAt: number | null
-} {
-  // Read the top-level mirror (the per-session source of truth is mirrored
-  // here on every coalescing write; see `withSessionSliceAndActiveMirror`).
-  // Returning a fresh object on every call is intentional: shallow-stability
-  // contract uses the upstream `pendingSendCount` / `pendingSendFlushAt`
-  // primitives as the equality check rather than the wrapper identity.
-  return { count: state.pendingSendCount, flushAt: state.pendingSendFlushAt }
 }
 
 /** W4.5 area J — direct field read for the active session's scopeRunStates map. */
@@ -303,8 +246,6 @@ export function mirrorFromSessionSlice(
   AgentState,
   | 'messages'
   | 'inputValue'
-  | 'pendingSendCount'
-  | 'pendingSendFlushAt'
   | 'isStreaming'
   | 'foregroundBusy'
   | 'composerLocked'
@@ -331,8 +272,6 @@ export function mirrorFromSessionSlice(
   return {
     messages: slice.messages,
     inputValue: slice.inputValue,
-    pendingSendCount: slice.pendingSendCount,
-    pendingSendFlushAt: slice.pendingSendFlushAt,
     isStreaming: slice.isStreaming || aliases.isStreaming,
     foregroundBusy: slice.foregroundBusy || aliases.foregroundBusy,
     composerLocked: slice.composerLocked || aliases.composerLocked,
@@ -403,23 +342,16 @@ export function withActiveSessionMessagesMirror(
   return withSessionMessagesMirror(state, activeSessionKey(state), messages)
 }
 
-export function withActiveSessionConversationMirror(
-  state: AgentState,
-  conversationId: string | null,
-): Pick<AgentState, 'sessions'> {
-  return withSessionSlice(state, activeSessionKey(state), { conversationId })
-}
-
 // =============================================================================
 // V3.3d listener-side direct-setState routing helpers
 // =============================================================================
 
 /**
- * Returns true iff `id` resolves to a session slice that exists and is not
- * in a terminal state (`done` / `error` / `cancelled` / `closed`).
+ * Returns true iff `id` resolves to a session slice whose conversation alias
+ * is still open. A terminal turn does not retire its Codex thread; only an
+ * explicit close makes the renderer session unavailable.
  *
- * `lookupSessionByConversation` uses the same exclusion set so a terminated
- * session never re-enters via the conversationId fallback (v8 codex round-7).
+ * `lookupSessionByConversation` uses the same exclusion set.
  */
 export function isLiveSession(
   state: AgentState,
@@ -427,11 +359,11 @@ export function isLiveSession(
 ): id is string {
   if (!id) return false
   const slice = state.sessions[id]
-  return !!slice && !TERMINAL_SESSION_STATES.has(slice.state)
+  return !!slice && !CLOSED_SESSION_STATES.has(slice.state)
 }
 
 /**
- * Returns the id of the most-recent live session whose `slice.conversationId`
+ * Returns the id of an open session whose `slice.conversationId`
  * matches the given conversationId. When multiple live sessions match, the
  * one whose id equals `state.activeSessionId` is preferred; otherwise the
  * first encountered is returned. Returns `null` when no live match exists.
@@ -444,7 +376,7 @@ export function lookupSessionByConversation(
   const matches: string[] = []
   for (const [id, slice] of Object.entries(state.sessions)) {
     if (slice.conversationId !== conversationId) continue
-    if (TERMINAL_SESSION_STATES.has(slice.state)) continue
+    if (CLOSED_SESSION_STATES.has(slice.state)) continue
     matches.push(id)
   }
   if (matches.length === 0) return null
@@ -499,21 +431,10 @@ export interface CardRoutingDecision {
 }
 
 /**
- * Three-level fallback chain used by `initAgentInteractionListeners` to route
- * a pushed ask_user_questions card to the right session slice:
- *
- *   1. `event.sessionId` — accepted only when `isLiveSession` is true
- *   2. `lookupSessionByConversation(event.conversationId)` — terminated
- *      sessions are filtered out by the same exclusion set
- *   3. `state.activeSessionId` — last-resort so a live card still renders
- *
- * Returns `targetSessionId = null` only when all three resolve to null —
- * i.e. there is no live session and no active session to surface into. The
- * caller drops the card and records an orphan metric in that case.
- *
- * When `targetSessionId !== event.sessionId` we annotate the metric with
- * the reason the original `event.sessionId` was rejected: `null-sessionId`,
- * `unknown-session`, or `stale-or-terminated-session`.
+ * Resolve a pushed ask_user_questions card without crossing conversation
+ * boundaries. A durable conversation binding wins over a conflicting session
+ * id. The active session is only a fallback when the event carries no
+ * conversation identity at all.
  */
 export function routeCardToSession(
   state: AgentState,
@@ -521,7 +442,38 @@ export function routeCardToSession(
 ): CardRoutingDecision {
   const validSessionId = isLiveSession(state, event.sessionId) ? event.sessionId : null
   const byConversation = lookupSessionByConversation(state, event.conversationId)
-  const targetSessionId = validSessionId ?? byConversation ?? state.activeSessionId
+
+  if (event.conversationId) {
+    if (byConversation) {
+      if (validSessionId && validSessionId !== byConversation) {
+        return { targetSessionId: byConversation, metric: 'session-conversation-conflict' }
+      }
+      return {
+        targetSessionId: byConversation,
+        metric: validSessionId
+          ? null
+          : !event.sessionId
+            ? 'null-sessionId'
+            : !state.sessions[event.sessionId]
+              ? 'unknown-session'
+              : 'closed-session',
+      }
+    }
+
+    if (validSessionId) {
+      const boundConversationId = normalizeSessionSlice(state.sessions[validSessionId]).conversationId
+      if (!boundConversationId || boundConversationId === event.conversationId) {
+        return { targetSessionId: validSessionId, metric: null }
+      }
+      return { targetSessionId: null, metric: 'session-conversation-conflict' }
+    }
+    return { targetSessionId: null, metric: 'conversation-session-not-found' }
+  }
+
+  const activeSessionId = isLiveSession(state, state.activeSessionId)
+    ? state.activeSessionId
+    : null
+  const targetSessionId = validSessionId ?? activeSessionId
 
   if (!targetSessionId) {
     return { targetSessionId: null, metric: 'no-active-session-and-keys-null' }
@@ -532,7 +484,7 @@ export function routeCardToSession(
         ? 'null-sessionId'
         : !state.sessions[event.sessionId]
           ? 'unknown-session'
-          : 'stale-or-terminated-session'
+          : 'closed-session'
     return { targetSessionId, metric: reason }
   }
   return { targetSessionId, metric: null }
@@ -576,16 +528,6 @@ export function shouldPreserveContinuationIntent(params: {
   if (anchor && (next.startsWith(anchor) || anchor.startsWith(next))) return true
 
   return CONTINUATION_DRAFT_PATTERN.test(params.nextValue.trim())
-}
-
-export async function persistLocalConversationScope(scope: ConversationScope | null): Promise<void> {
-  if (!scope || scope.sourceKind !== 'local') return
-  if (typeof window === 'undefined' || !window.electronAPI?.chat?.createConversation) return
-  await window.electronAPI.chat.createConversation({
-    id: scope.id,
-    agent: scope.agent,
-    title: scope.title || '新对话',
-  }).catch(() => undefined)
 }
 
 interface ChatRowFromIPC {

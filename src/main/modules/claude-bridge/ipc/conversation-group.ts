@@ -1,12 +1,11 @@
 // Stage V V2.1e — ConversationGroup channel group.
 //
-// Bundles the 8 channels that expose conversation-scope state + attachment
+// Bundles the 7 read/cache channels that expose conversation-scope state + attachment
 // surface to the renderer:
 //
 //   agent:listConversationScopes        (list scopes, optionally filtered by agent)
 //   agent:listScopeRuns                 (list active/completed scope-runs)
 //   agent:getConversationScopeMessages  (full chat_messages stream for a scope)
-//   agent:createLocalScope              (mint a local-source conversation row)
 //   agent:listScopeAttachments          (filesystem-verified attachment rows)
 //   agent:getScopeAttachment            (one attachment by scope + attachmentId)
 //   agent:clearRemoteAttachmentCache    (wipe channel-attachments cache dir)
@@ -16,7 +15,7 @@
 // move — semantics must be byte-for-byte identical so the V5 IPC contract
 // gate stays green and downstream renderer flows do not notice the refactor).
 //
-// All eight channels live in one group because they share:
+// All seven channels live in one group because they share:
 //   • the same domain concept (conversation-scope reads + the attachment
 //     resource layer that hangs off a scope)
 //   • the same dispose lifecycle (renderer boots them together when opening
@@ -39,7 +38,6 @@ import type {
   ScopeRunEventPayload,
   ScopeRunSummary,
 } from '../../agent-control/contracts/types'
-import type { UpsertConversationScopeMode } from '../../database'
 import type { IpcChannelGroup, IpcDisposeHandle } from './types'
 
 /**
@@ -66,16 +64,6 @@ export interface ListScopeRunsPayload {
   channelKey?: string
   statuses?: string[]
   limit?: number
-}
-
-/**
- * Result shape from `runtime.createLocalScopeWithMode(agent, id)`. Mirrored
- * locally for the same reason as `IPCResponse`: avoid a back import from
- * runtime types into the lifted handler body.
- */
-export interface CreateLocalScopeResult {
-  scope: ConversationScope
-  mode: UpsertConversationScopeMode
 }
 
 /**
@@ -131,12 +119,6 @@ export interface ConversationGroupDeps {
    */
   getConversationScopeMessages(scopeId: string): ConversationScopeMessage[]
   /**
-   * Bound `runtime.createLocalScopeWithMode` — sync, returns the scope plus
-   * the upsert mode (`inserted` | `reused`). The handler logs the mode for
-   * post-hoc inspection of dedupe behavior.
-   */
-  createLocalScopeWithMode(agent: string, id?: string): CreateLocalScopeResult
-  /**
    * Bound `runtime.listScopeAttachments` — sync, returns attachment rows
    * that still exist on disk (the runtime filters via `existsSync`).
    */
@@ -157,8 +139,8 @@ export interface ConversationGroupDeps {
    */
   getRemoteAttachmentCacheStats(channelId?: string): RemoteAttachmentCacheStats
   /**
-   * Host log appender (rotating file logger). Two handlers — the scope-list
-   * read and the local-scope create — log start / failure lines pre-extraction;
+   * Host log appender (rotating file logger). The scope-list read logs start
+   * and failure lines;
    * the dep keeps the byte-for-byte log line behavior without forcing the
    * group to import the rotating-logger module directly.
    */
@@ -169,7 +151,6 @@ const CHANNELS = [
   'agent:listConversationScopes',
   'agent:listScopeRuns',
   'agent:getConversationScopeMessages',
-  'agent:createLocalScope',
   'agent:listScopeAttachments',
   'agent:getScopeAttachment',
   'agent:clearRemoteAttachmentCache',
@@ -223,17 +204,6 @@ export const conversationGroup: IpcChannelGroup<ConversationGroupDeps> = {
       try {
         return { success: true, data: deps.getConversationScopeMessages(payload.scopeId) }
       } catch (error) {
-        return { success: false, error: error instanceof Error ? error.message : String(error) }
-      }
-    })
-
-    ipcMain.handle('agent:createLocalScope', (_, payload: { agent: string; id?: string }): IPCResponse => {
-      try {
-        const { scope, mode } = deps.createLocalScopeWithMode(payload.agent, payload.id)
-        deps.log(`[ipc] agent:createLocalScope agent=${payload.agent} requestedId=${payload.id || 'auto'} actualId=${scope.id} mode=${mode}`)
-        return { success: true, data: scope }
-      } catch (error) {
-        deps.log(`[ipc] agent:createLocalScope failed agent=${payload.agent} requestedId=${payload.id || 'auto'} error=${error instanceof Error ? error.message : String(error)}`)
         return { success: false, error: error instanceof Error ? error.message : String(error) }
       }
     })

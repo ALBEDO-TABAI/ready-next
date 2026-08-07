@@ -1,17 +1,15 @@
-// B8-D R4 — ConversationScopeStore: conversation-scope CRUD (list/get/
-// delete/local-scope creation), row→contract mapping, the channel-scope
+// B8-D R4 — ConversationScopeStore: conversation-scope reads/local-scope
+// creation, row→contract mapping, the channel-scope
 // ensure path for remote IM, scope refresh, and message append, extracted
 // from AgentControlRuntime (runtime.ts) as a delegated sub-service. Method
-// bodies are mechanical moves; the only substitutions are `this.db` /
-// `this.scopeRunSummaries` / `this.taskProjectionStore` → `this.deps.*` and
+// bodies are mechanical moves; the only substitutions are `this.db` →
+// `this.deps.db` and
 // the cross-cluster calls (`emitConversationEvent` via ProjectionSync,
 // `channelConfig.mapChannelRow`, the remote-channel session-key helpers, and
 // the ReferenceHintService replay/persist hooks) becoming injected callbacks.
-// The service owns no state — `scopeRunSummaries` stays runtime-owned (shared
-// with run-dispatch/projection) and is injected by reference for the
-// `deleteConversation` cleanup only. `parseScopeMeta` migrated to
-// ReferenceHintService in R2 and is NOT part of this cluster (verified: no
-// remaining reference in these bodies).
+// The service owns no state. `parseScopeMeta` migrated to ReferenceHintService
+// in R2 and is NOT part of this cluster (verified: no remaining reference in
+// these bodies).
 //
 // Phase C landing point (surgery map §4): this service is the typed home for
 // the conversation-lifecycle merge — DirectChat's `sessions` Map is scheduled
@@ -27,24 +25,17 @@ import type {
   UpsertConversationScopeMode,
 } from '../../database'
 import type { MultimodalBlock } from '../contracts/run-contracts'
-import type { TaskProjectionRepository } from '../../repositories/task-projection-repository'
 import type {
   AgentChannelConfig,
   ConversationEventPayload,
   ConversationScope,
   ConversationScopeMessage,
-  ScopeRunSummary,
 } from '../contracts/types'
-import { forgetSession } from '../session/session-continuity'
 import { logAgentMetric } from '../metrics'
 import { tryParseJson } from './runtime-helpers'
 
 export interface ConversationScopeStoreDeps {
   db: DatabaseManager
-  /** Runtime-owned live run-summary map (shared with the run-dispatch and
-   *  projection clusters); `deleteConversation` drops the scope's entry. */
-  scopeRunSummaries: Map<string, ScopeRunSummary>
-  taskProjectionStore: TaskProjectionRepository
   /** Bound to `ProjectionSyncCoordinator.emitConversationEvent`. */
   emitConversationEvent: (payload: ConversationEventPayload) => void
   /** Bound to `ChannelConfigService.mapChannelRow`. */
@@ -81,13 +72,6 @@ export class ConversationScopeStore {
     return this.deps.db.getChatMessages(scopeId).map((row) => this.mapMessageRow(row))
   }
 
-  deleteConversation(scopeId: string): void {
-    this.deps.scopeRunSummaries.delete(scopeId)
-    forgetSession(scopeId)
-    this.deps.taskProjectionStore.deleteByScope(scopeId)
-    this.deps.db.deleteConversation(scopeId)
-  }
-
   createLocalScope(agent: string, id?: string): ConversationScope {
     return this.createLocalScopeWithMode(agent, id).scope
   }
@@ -101,7 +85,7 @@ export class ConversationScopeStore {
    * The IPC handler uses this to log mode; renderer callers stay on the
    * legacy scope-only signature.
    */
-  createLocalScopeWithMode(
+  private createLocalScopeWithMode(
     agent: string,
     id?: string,
   ): { scope: ConversationScope; mode: UpsertConversationScopeMode } {

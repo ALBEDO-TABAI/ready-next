@@ -1,31 +1,27 @@
 import { create } from 'zustand'
 import {
   createEmptyScopeRunState,
-  getActiveScopeRunState,
-  isActiveScopePhase,
   isForegroundBusyScopeRunState,
   isStreamingScopeRunState,
-  normalizeTerminalReason,
   phaseToToolTraceStatus,
 } from '../modules/agent/scopeRunState'
-import { runDocCommand as executeDocCommand } from '../modules/agent/documentActions'
-import { runSkillCommand as executeSkillCommand } from '../modules/agent/commandHandlers'
 import {
   buildComposedAgentInputWithDiagnostics,
   filterAttachmentsForComposedAgentInput,
-  persistMessage as persistChatMessage,
   resolveReferencedFilePoolAttachments,
   serializePersistedAttachments as serializeAttachments,
 } from '../modules/agent/messageComposer'
 import { mapBackendErrorToFriendly } from '../modules/agent/error-message-mapping'
 import { emitRendererAgentMetric } from '../modules/agent/rendererMetrics'
-import { boundedCancelWithFallback } from '../modules/agent/boundedCancelWithFallback'
-import { createAgentRuntimeDriver, syncActiveScopeRunAliases } from '../modules/agent/runtimeDriver'
+import { createAgentRuntimeDriver } from '../modules/agent/runtimeDriver'
 import { installAgentPanelTestHarness } from '../modules/agent/agentPanelTestHarness'
-import { computeDesiredRoots, useWorkspace } from './useWorkspace'
-import { useMode } from './useMode'
-import { MAX_AGENT_SESSIONS } from '../../shared/agent-session-limits'
-import { DEFAULT_DELIVERY_MODE, DELIVERY_MODE_SETTING_KEY, isDeliveryMode, type DeliveryMode } from '../../shared/dynamic-delivery'
+import {
+  mapSendScopedResponseToMessageResult,
+  type IngressAdmittedEvent,
+  type PrePersistenceErrorKind,
+  type SendMessageResult,
+  type TerminalErrorKind,
+} from '../../shared/ipc-contracts/agent-runtime'
 
 import type {
   Agent,
@@ -42,32 +38,27 @@ import type { AgentSendResult, AgentState, SessionSlice } from './agent-store-ty
 import type { AgentPersonalityListItem, AgentRegistryListItem } from './agent-store-helpers'
 import {
   activeSessionKey,
-  callCreateLocalScopeWithMetric,
   cloneFallbackAgents,
-  DEFAULT_SEND_COALESCE_WINDOW_MS,
   generateId,
   generateSessionId,
   getScopeRunStateForScope,
   isLiveSession,
   isSameAttachmentPoolEntry,
+  lookupSessionByConversation,
   makeEmptySessionSlice,
   mapPersonalitiesToAgents,
   mapRegistryToAgents,
-  mapScopeRunPhaseToSessionState,
   mapScopeToConversation,
   mirrorFromSessionSlice,
   normalizeSessionSlice,
-  persistLocalConversationScope,
   rebuildAgentMessageFromRow,
   recordCardFallback,
   recordOrphanedCard,
   removeFromFilePool,
   routeCardToSession,
-  scopeCreatePersistenceMetricThrottle,
   sessionKeyForScopeId,
   shouldKeepInFilePool,
   shouldPreserveContinuationIntent,
-  withActiveSessionConversationMirror,
   withActiveSessionMessagesMirror,
   withSessionSlice,
   withSessionSliceAndActiveMirror,
@@ -108,266 +99,167 @@ export {
   selectAttachments,
   selectConversations,
   selectFilePool,
-  selectPendingSendForActive,
   selectScopes,
   selectSessionOrder,
 } from './agent-store-helpers'
 
-// Concurrent-live session cap. Single source of truth lives in
-// `src/shared/agent-session-limits.ts` so the renderer "+" disable and the main
-// orchestrator's admission guard never diverge (a 5-vs-3 split let sessions look
-// creatable but get rejected on send). Re-exported for the existing call sites.
-export { MAX_AGENT_SESSIONS }
-
-/**
- * Stage V V3.3c — replace per-module `let` globals with per-sessionId Maps so
- * concurrent sessions (V3.3b roadmap) do not collide on a single shared
- * timer/buffer. Today only one session is active at a time; the Map keying
- * isolates against future multi-session selectors and against dev HMR
- * reloads that would otherwise re-evaluate this module and leak the
- * previous timer.
- */
-const pendingSendTimers = new Map<string, ReturnType<typeof setTimeout>>()
-const pendingSendBuffers = new Map<
-  string,
-  {
-    scopeId: string | null
-    agent: string
-    parts: string[]
-  }
->()
-let bypassCoalescingOnce = false
-
-/**
- * Pure cleanup routine shared by the Vite HMR dispose hook and the V3.3c
- * behavior test. Exported under a `__` prefix so it is obvious this is not a
- * production-call surface.
- */
-export function __disposePendingSendCoalescingForHMR(): void {
-  pendingSendTimers.forEach((timer) => clearTimeout(timer))
-  pendingSendTimers.clear()
-  pendingSendBuffers.clear()
+type PendingIngressSnapshot = {
+  requestId: string
+  scopeId: string
+  userMessageId: string
+  responseMessageId: string
+  agent: string
+  content: string
+  timestamp: Date
+  attachments: ChatAttachment[]
 }
 
-/**
- * V3.3c test introspection — returns the count of currently buffered sessions
- * and outstanding timers. The Maps themselves are intentionally not exported
- * so call sites cannot mutate the coalescing fleet directly.
- */
-export function __getPendingSendCoalescingFleetSizeForTesting(): {
-  timers: number
-  buffers: number
-  bufferedKeys: readonly string[]
-} {
+const pendingIngressSnapshots = new Map<string, PendingIngressSnapshot>()
+
+function rejectedMessageResult(errorKind: PrePersistenceErrorKind): SendMessageResult {
   return {
-    timers: pendingSendTimers.size,
-    buffers: pendingSendBuffers.size,
-    bufferedKeys: Array.from(pendingSendBuffers.keys()),
+    success: false,
+    disposition: 'rejected_before_persistence',
+    shouldClearInput: false,
+    preserveInput: true,
+    errorKind,
   }
 }
 
-// Vite HMR dispose — when this module is hot-replaced in dev we must clear any
-// outstanding setTimeout handles and discard buffered messages so they don't
-// fire against a stale store closure or duplicate-send after reload.
-if (typeof import.meta !== 'undefined' && (import.meta as unknown as { hot?: { dispose: (cb: () => void) => void } }).hot) {
-  ;(import.meta as unknown as { hot: { dispose: (cb: () => void) => void } }).hot.dispose(() => {
-    __disposePendingSendCoalescingForHMR()
-  })
+function hasUnresolvedLifecycleUncertainty(slice: SessionSlice): boolean {
+  return slice.lifecycleError?.code === 'interrupt_state_unknown'
+    || slice.lifecycleError?.code === 'compaction_state_unknown'
 }
 
-/**
- * Stage U (PR 1, B.5) — flip a card's renderer-only `localDisabled` flag.
- * Used by the sendMessage cancel hook when the IPC cancel times out: we keep
- * `status:'pending'` (no terminal write) but disable the submit button so
- * the user can't double-submit while the cancel races behind the scenes.
- */
-function setCardLocallyDisabled(cardId: string, disabled: boolean): void {
-  useAgent.setState((prev) => {
-    const messages = prev.messages.map((m) => {
-      if (m.id !== cardId || m.type !== 'ask_user_questions' || !m.askUserQuestions) return m
-      return {
-        ...m,
-        askUserQuestions: {
-          ...m.askUserQuestions,
-          localDisabled: disabled,
-        },
-      }
-    })
-    return withActiveSessionMessagesMirror(prev, messages)
-  })
-}
-
-interface CancelPendingAskUserQuestionsOptions {
-  /** Cap the wait at this many ms. After this, log a metric, mark the card
-   *  locally disabled, and let the caller proceed. Default 2000ms. */
-  timeoutMs?: number
-}
-
-/**
- * Stage U (PR 1, B.5) — cancel the most-recent pending ask_user_questions
- * card for the current scope, bounded by `timeoutMs` (default 2s).
- *
- * Algorithm lives in `boundedCancelWithFallback` for testability; this
- * function is the renderer-bound thin wrapper that resolves the target
- * cardId from useAgent state and wires up the side effects.
- *
- * Outcomes:
- *   - normal path (< timeoutMs): cancel IPC returns, card folds to
- *     `cancelled (user_typed_instead | cancel_persist_failed)`.
- *   - timeout path: card is marked `localDisabled = true` so submit is
- *     blocked, metric emitted, caller proceeds. Late cancel arrival still
- *     flips the card to terminal (the fold callback is idempotent — only
- *     applies if status is still 'pending').
- */
-async function cancelPendingAskUserQuestionsForCurrentScope(
-  options: CancelPendingAskUserQuestionsOptions = {},
-): Promise<{ kind: 'no_pending' | 'cancelled' | 'timeout' | 'error'; cardId?: string }> {
-  const timeoutMs = typeof options.timeoutMs === 'number' && options.timeoutMs > 0
-    ? options.timeoutMs
-    : 2000
-  const state = useAgent.getState()
-  const scopeId = state.currentScopeId
-  if (!scopeId) return { kind: 'no_pending' }
-  const api = window.electronAPI?.agentInteraction
-  if (!api) return { kind: 'no_pending' }
-
-  let targetCardId: string | null = null
-  for (let i = state.messages.length - 1; i >= 0; i -= 1) {
-    const msg = state.messages[i]
-    if (msg.type !== 'ask_user_questions') continue
-    if (!msg.askUserQuestions || msg.askUserQuestions.status !== 'pending') continue
-    targetCardId = msg.askUserQuestions.cardId
-    break
-  }
-  if (!targetCardId) return { kind: 'no_pending' }
-  const cardId = targetCardId
-
-  const outcome = await boundedCancelWithFallback({
-    cancelIpc: () => api.cancelAskUserQuestions({ cardId, reason: 'user_typed_instead' }),
-    onTimeout: () => {
-      setCardLocallyDisabled(cardId, true)
-      emitRendererAgentMetric('ask_user_questions_cancel_pre_send_timeout', {
-        cardId,
-        timeoutMs,
-      })
-    },
-    onCancelLanded: (result) => {
-      const r = result as { success: boolean; errorKind?: string }
-      const cancelledAt = Date.now()
-      useAgent.setState((prev) => {
-        const messages = prev.messages.map((m) => {
-          if (m.id !== cardId || m.type !== 'ask_user_questions' || !m.askUserQuestions) return m
-          // Only fold if still pending — if a previous timeout already locally
-          // disabled it and a late cancel arrives, override to cancelled.
-          if (m.askUserQuestions.status !== 'pending') return m
-          return {
-            ...m,
-            askUserQuestions: {
-              ...m.askUserQuestions,
-              status: 'cancelled' as const,
-              cancelReason: r.success
-                ? 'user_typed_instead'
-                : (r.errorKind === 'cancel_persist_failed' ? 'cancel_persist_failed' : 'user_typed_instead'),
-              cancelledAt,
-              localDisabled: false,
-            },
-          }
-        })
-        return withActiveSessionMessagesMirror(prev, messages)
-      })
-    },
-    onCancelError: (err) => {
-      // PR 1 B.5 (review patch) — cancel IPC rejected within the 2s window.
-      // Without this branch, the old card would stay pending + still
-      // submittable while sendMessage proceeds, re-opening the "stale card
-      // contaminates new turn" window. Mirror the timeout side effect:
-      //   - mark card locally disabled so submit is blocked
-      //   - emit metric so the failure is observable (re-uses the timeout
-      //     metric since both are "the cancel did not land cleanly before
-      //     the new message went out" — we differentiate via reason kind)
-      setCardLocallyDisabled(cardId, true)
-      emitRendererAgentMetric('ask_user_questions_cancel_pre_send_timeout', {
-        cardId,
-        timeoutMs,
-        kind: 'ipc_rejected',
-        errorMessage: err instanceof Error ? err.message.slice(0, 200) : String(err).slice(0, 200),
-      })
-    },
-    timeoutMs,
-  })
-
-  if (outcome.kind === 'cancelled') return { kind: 'cancelled', cardId }
-  if (outcome.kind === 'timeout') return { kind: 'timeout', cardId }
-  return { kind: 'error', cardId }
-}
-
-function clearPendingSendBufferState(sessionId?: string | null) {
-  let storeStateForKey: AgentState | null = null
-  try {
-    storeStateForKey = useAgent.getState()
-  } catch {
-    /* silent-catch: store may be unavailable during module bootstrap; buffer cleanup is best-effort */
-    storeStateForKey = null
-  }
-  const id = sessionId ?? activeSessionKey(storeStateForKey)
-  const existingTimer = pendingSendTimers.get(id)
-  if (existingTimer) {
-    clearTimeout(existingTimer)
-    pendingSendTimers.delete(id)
-  }
-  pendingSendBuffers.delete(id)
-  try {
-    useAgent.setState((state) => {
-      const activeId = activeSessionKey(state)
-      const slicePatch = withSessionSlice(state, id, { pendingSendCount: 0, pendingSendFlushAt: null })
-      // Mirror onto top-level only when the cleared session matches the
-      // currently-active one — otherwise we'd zero out the visible counter
-      // for a different session that is still buffering.
-      if (activeId === id) {
-        return {
-          ...slicePatch,
-          pendingSendCount: 0,
-          pendingSendFlushAt: null,
-        }
-      }
-      return slicePatch
-    })
-  } catch {
-    /* silent-catch: setState may be unavailable during bootstrap; timer cleanup already completed */
+function terminalReasonFromSendError(
+  errorKind: TerminalErrorKind,
+): ScopeRunState['terminalReason'] {
+  switch (errorKind) {
+    case 'superseded':
+      return 'cancelled_runtime'
+    case 'circuit_break':
+    case 'unknown':
+      return 'infra_error'
+    default:
+      return errorKind
   }
 }
 
-async function flushPendingSendBuffer(sessionId?: string | null) {
-  let storeStateForKey: AgentState | null = null
-  try {
-    storeStateForKey = useAgent.getState()
-  } catch {
-    /* silent-catch: store may be unavailable during module bootstrap; flush falls back to active session */
-    storeStateForKey = null
+function commitPersistedIngressSnapshot(input: {
+  requestId: string
+  scopeId: string
+  originUserMessageId: string
+  admittedAt: string
+}): boolean {
+  const pending = pendingIngressSnapshots.get(input.requestId)
+  if (
+    !pending
+    || pending.scopeId !== input.scopeId
+    || pending.userMessageId !== input.originUserMessageId
+  ) return false
+  const currentState = useAgent.getState()
+  const sessionKey = sessionKeyForScopeId(currentState, pending.scopeId)
+  if (
+    !currentState.sessions[sessionKey]
+    || !isLiveSession(currentState, sessionKey)
+    || normalizeSessionSlice(currentState.sessions[sessionKey]).conversationId !== pending.scopeId
+  ) {
+    pendingIngressSnapshots.delete(input.requestId)
+    return false
   }
-  const id = sessionId ?? activeSessionKey(storeStateForKey)
-  const buffered = pendingSendBuffers.get(id) ?? null
-  clearPendingSendBufferState(id)
-  if (!buffered) return
+  pendingIngressSnapshots.delete(input.requestId)
 
-  const merged = buffered.parts
-    .map((item) => item.trim())
-    .filter(Boolean)
-    .join('\n\n')
-  if (!merged) return
-
-  bypassCoalescingOnce = true
-  try {
-    const state = useAgent.getState()
-    if (buffered.scopeId && state.currentScopeId !== buffered.scopeId) {
-      await state.loadScope(buffered.scopeId).catch(() => undefined)
-    } else if (!buffered.scopeId && state.currentAgent !== buffered.agent) {
-      state.selectAgent(buffered.agent)
+  useAgent.setState((state) => {
+    const slice = normalizeSessionSlice(state.sessions[sessionKey])
+    const originIsActive = activeSessionKey(state) === sessionKey
+    const userMessage: AgentMessage = {
+      id: pending.userMessageId,
+      agent: pending.agent,
+      content: pending.content,
+      type: 'user',
+      timestamp: pending.timestamp,
+      attachments: pending.attachments.length > 0 ? pending.attachments : undefined,
     }
-    await useAgent.getState().sendMessage(merged)
-  } finally {
-    bypassCoalescingOnce = false
+    const responseMessage: AgentMessage = {
+      id: pending.responseMessageId,
+      agent: pending.agent,
+      content: '',
+      type: 'agent',
+      timestamp: new Date(input.admittedAt),
+      meta: { transient: true, runId: pending.requestId, scopeId: pending.scopeId },
+    }
+    const messages = [
+      ...slice.messages.filter((message) => (
+        message.id !== pending.userMessageId && message.id !== pending.responseMessageId
+      )),
+      userMessage,
+      responseMessage,
+    ]
+    const shouldClearComposer = slice.inputValue.trim() === pending.content.trim()
+    const next = withSessionSliceAndActiveMirror(state, sessionKey, {
+      messages,
+      inputValue: shouldClearComposer ? '' : slice.inputValue,
+      streamingMessageId: pending.responseMessageId,
+      streamingRequestId: pending.requestId,
+      isStreaming: true,
+      foregroundBusy: true,
+      composerLocked: true,
+      state: 'live',
+      scopeRunStates: {
+        ...slice.scopeRunStates,
+        [pending.scopeId]: {
+          ...createEmptyScopeRunState({
+            scopeId: pending.scopeId,
+            agent: pending.agent,
+            requestId: pending.requestId,
+            phase: 'planning',
+            responseMessageId: pending.responseMessageId,
+          }),
+          startedAt: input.admittedAt,
+          updatedAt: input.admittedAt,
+        },
+      },
+    })
+    return {
+      ...next,
+      ...(originIsActive
+        ? {
+            attachments: state.attachments.filter((attachment) => (
+              !pending.attachments.some((candidate) => candidate.id === attachment.id)
+            )),
+            pendingContinuationIntent: null,
+            pendingContinuationDraftAnchor: null,
+          }
+        : {}),
+    }
+  })
+
+  const state = useAgent.getState()
+  const scope = state.scopes.find((candidate) => candidate.id === pending.scopeId) || null
+  if (scope && (scope.title === '新对话' || scope.title === '未命名会话')) {
+    const title = pending.content.slice(0, 20)
+      || (pending.attachments[0]?.name ? `附件: ${pending.attachments[0].name}` : '新对话')
+    const nextScope = { ...scope, title, updatedAt: input.admittedAt }
+    useAgent.setState((current) => {
+      const scopes = current.scopes.map((candidate) => (
+        candidate.id === pending.scopeId ? nextScope : candidate
+      ))
+      return {
+        currentScope: current.currentScopeId === pending.scopeId ? nextScope : current.currentScope,
+        scopes,
+        conversations: scopes.map(mapScopeToConversation),
+      }
+    })
+    void window.electronAPI?.chat?.updateConversationTitle({ id: pending.scopeId, title })
+      .catch(() => undefined)
   }
+
+  agentRuntimeDriver.armInfrastructureWatchdog(pending.scopeId, pending.requestId)
+  return true
+}
+
+export function applyIngressAdmitted(event: IngressAdmittedEvent): boolean {
+  return commitPersistedIngressSnapshot(event)
 }
 
 export const useAgent = create<AgentState>((set, get) => ({
@@ -397,15 +289,7 @@ export const useAgent = create<AgentState>((set, get) => ({
     if (next.length === existing.length) return {}
     return { scopeLiveMessages: { ...state.scopeLiveMessages, [scopeId]: next } }
   }),
-  messages: [
-    {
-      id: 'welcome',
-      agent: 'butler',
-      content: '你好！我是 Ready 的管家 Agent。我可以帮你协调文案、剪辑、分析等 Agent 完成自媒体创作任务。今天想做什么？',
-      type: 'agent',
-      timestamp: new Date()
-    }
-  ],
+  messages: [],
   currentAgent: 'butler',
   inputValue: '',
   pendingContinuationIntent: null,
@@ -427,10 +311,6 @@ export const useAgent = create<AgentState>((set, get) => ({
   attachments: [],
   filePool: [],
   activeAttachmentPreview: null,
-  sendCoalescingEnabled: true,
-  sendCoalescingWindowMs: DEFAULT_SEND_COALESCE_WINDOW_MS,
-  pendingSendCount: 0,
-  pendingSendFlushAt: null,
   // V3.3a bootstrap — sessions Record + activeSessionId top-level fields.
   // The slice store starts empty; the first coalescing write seeds the
   // entry for the active session key (derived from `sessionId`).
@@ -539,49 +419,6 @@ export const useAgent = create<AgentState>((set, get) => ({
 
   setActiveAttachmentPreview: (preview) => set({ activeAttachmentPreview: preview }),
 
-  loadSendPreferences: async () => {
-    if (typeof window === 'undefined' || !window.electronAPI?.settings) return
-    try {
-      const [enabledResult, windowResult] = await Promise.all([
-        window.electronAPI.settings.get('agent_message_coalesce_enabled'),
-        window.electronAPI.settings.get('agent_message_coalesce_window_ms'),
-      ])
-      set({
-        sendCoalescingEnabled: enabledResult.success ? enabledResult.data !== 'false' : true,
-        sendCoalescingWindowMs: windowResult.success && Number(windowResult.data) > 0
-          ? Math.max(0, Math.min(5000, Number(windowResult.data)))
-          : DEFAULT_SEND_COALESCE_WINDOW_MS,
-      })
-    } catch {
-      set({
-        sendCoalescingEnabled: true,
-        sendCoalescingWindowMs: DEFAULT_SEND_COALESCE_WINDOW_MS,
-      })
-    }
-  },
-
-  setSendCoalescingEnabled: async (enabled) => {
-    set({ sendCoalescingEnabled: enabled })
-    if (typeof window !== 'undefined' && window.electronAPI?.settings) {
-      await window.electronAPI.settings
-        .set('agent_message_coalesce_enabled', enabled ? 'true' : 'false')
-        .catch(() => undefined)
-    }
-    if (!enabled) {
-      await flushPendingSendBuffer().catch(() => undefined)
-    }
-  },
-
-  setSendCoalescingWindowMs: async (windowMs) => {
-    const nextValue = Math.max(0, Math.min(5000, Math.round(windowMs)))
-    set({ sendCoalescingWindowMs: nextValue })
-    if (typeof window !== 'undefined' && window.electronAPI?.settings) {
-      await window.electronAPI.settings
-        .set('agent_message_coalesce_window_ms', String(nextValue))
-        .catch(() => undefined)
-    }
-  },
-
   setTaskSectionExpanded: (taskKey, sectionKey, expanded) => set((state) => {
     const sessionKey = activeSessionKey(state)
     const slice = normalizeSessionSlice(state.sessions[sessionKey])
@@ -611,15 +448,7 @@ export const useAgent = create<AgentState>((set, get) => ({
     })
   }),
 
-  // =========================================================================
-  // V3.4a — renderer-side session tab actions
-  // =========================================================================
-  // The renderer enforces the MAX_AGENT_SESSIONS live-session cap on the create
-  // side; the main-process orchestrator enforces the SAME shared cap (V3.5) as
-  // defense in depth. setActiveSessionId mirrors the
-  // per-session `inputValue` onto the top-level field to match the
-  // V3.3b.1 read-through-mirror contract; selectors that still read
-  // `state.inputValue` keep observing the active session's draft.
+  // Session tab actions commit only after the matching Main lifecycle promise.
 
   setActiveSessionId: (id) => set((state) => {
     // Defensive: a tab strip click should only ever target a session that
@@ -634,66 +463,113 @@ export const useAgent = create<AgentState>((set, get) => ({
     }
   }),
 
-  createNewSession: () => {
+  createNewSession: async () => {
+    const api = typeof window !== 'undefined' ? window.electronAPI?.agent : null
+    if (!api?.createSession) throw new Error('agent_create_session_unavailable')
+    const result = await api.createSession()
+    if (!result.ok) return result
+
     const state = get()
-    // Count only LIVE sessions against the cap. Terminal sessions
-    // (done/error/cancelled/closed) are finished work whose conversation is
-    // persisted and reachable via history (loadScope re-materializes it on
-    // demand), so they must neither block a new conversation nor linger in
-    // memory — prune them here. Without this the button silently dead-ends
-    // once N conversations exist, because there is no UI to close a session.
-    // Returns null only when N sessions are genuinely still live, which the
-    // caller surfaces as a disabled "+".
-    const liveOrder = state.sessionOrder.filter((sid) => isLiveSession(state, sid))
-    if (liveOrder.length >= MAX_AGENT_SESSIONS) return null
     const id = generateSessionId()
-    const slice = makeEmptySessionSlice()
-    // Keep live sessions plus anything still in flight, prune the rest. The
-    // streaming/busy guard matters because a re-activated terminal session can
-    // stream again without flipping back to 'live' (non-terminal run phases do
-    // not transition the slice state), so isLiveSession alone would mis-prune a
-    // session whose run is still going.
-    const kept = state.sessionOrder.filter((sid) => {
-      const existing = state.sessions[sid]
-      return isLiveSession(state, sid) || !!existing?.isStreaming || !!existing?.foregroundBusy
-    })
-    const nextSessions: Record<string, SessionSlice> = { [id]: slice }
-    for (const sid of kept) nextSessions[sid] = state.sessions[sid]
+    const scope: ConversationScope = {
+      id: result.aliasId,
+      aliasGeneration: result.aliasGeneration,
+      agent: state.currentAgent,
+      activeAgentId: state.currentAgent,
+      handoffGeneration: 0,
+      title: '新对话',
+      sourceKind: 'local',
+      sourceId: 'app',
+      threadKey: result.aliasId,
+      meta: { sourceLabel: '应用内', createdBy: 'app' },
+      createdAt: result.persistedAt,
+      updatedAt: result.persistedAt,
+      lastMessageAt: null,
+    }
+    const slice: SessionSlice = {
+      ...makeEmptySessionSlice(result.aliasId),
+      aliasGeneration: result.aliasGeneration,
+    }
+    const scopes = [scope, ...state.scopes.filter((candidate) => candidate.id !== scope.id)]
     set({
-      sessions: nextSessions,
-      sessionOrder: [...kept, id],
+      sessions: { ...state.sessions, [id]: slice },
+      sessionOrder: [...state.sessionOrder, id],
       activeSessionId: id,
-      // Mirror the fresh slice's defaults onto the top-level fields so the
-      // composer/coalescer selectors observe a clean slate for the new tab.
-      ...mirrorFromSessionSlice(state, slice),
+      sessionId: id,
+      scopes,
+      conversations: scopes.map(mapScopeToConversation),
+      ...mirrorFromSessionSlice({ ...state, scopes }, slice),
+      attachments: [],
+      pendingContinuationIntent: null,
+      pendingContinuationDraftAnchor: null,
+      toolTrace: [],
+      toolTraceStatus: 'idle',
     })
-    return id
+    return result
   },
 
-  closeSession: (id) => set((state) => {
-    if (!state.sessionOrder.includes(id)) return state
-    const nextOrder = state.sessionOrder.filter((entry) => entry !== id)
-    const nextSessions = { ...state.sessions }
-    delete nextSessions[id]
-    // Re-route the active session when the closed tab was active: pick the
-    // first remaining entry; if the list is now empty, drop activeSessionId
-    // to null (the bootstrap state SessionTabs treats as the empty case).
-    const nextActiveId = state.activeSessionId === id
-      ? (nextOrder[0] ?? null)
-      : state.activeSessionId
-    const nextSlice = nextActiveId ? normalizeSessionSlice(nextSessions[nextActiveId]) : null
-    const mirrorPatch = nextSlice
-      ? mirrorFromSessionSlice(state, nextSlice)
-      : state.activeSessionId === id
-        ? mirrorFromSessionSlice(state, makeEmptySessionSlice())
-        : {}
-    return {
-      sessions: nextSessions,
-      sessionOrder: nextOrder,
-      activeSessionId: nextActiveId,
-      ...mirrorPatch,
+  closeSession: async (id) => {
+    const state = get()
+    if (!state.sessionOrder.includes(id)) throw new Error('session_not_found')
+    const slice = normalizeSessionSlice(state.sessions[id])
+    const aliasId = slice.conversationId
+    if (
+      !aliasId
+      || slice.aliasGeneration === null
+      || !window.electronAPI?.agent?.closeSession
+    ) throw new Error('alias_not_bound')
+    if (slice.lifecyclePendingAction) throw new Error('lifecycle_action_pending')
+    if (hasUnresolvedLifecycleUncertainty(slice)) throw new Error('lifecycle_reconciliation_required')
+    set((current) => withSessionSliceAndActiveMirror(current, id, {
+      lifecyclePendingAction: 'closing',
+      lifecycleError: null,
+    }))
+    let result: Awaited<ReturnType<typeof window.electronAPI.agent.closeSession>>
+    try {
+      result = await window.electronAPI.agent.closeSession({
+        aliasId,
+        aliasGeneration: slice.aliasGeneration,
+      })
+    } catch (error) {
+      set((current) => withSessionSliceAndActiveMirror(current, id, {
+        lifecyclePendingAction: null,
+      }))
+      throw error
     }
-  }),
+    if (!result.ok) {
+      set((current) => withSessionSliceAndActiveMirror(current, id, {
+        lifecyclePendingAction: null,
+        lifecycleError: result,
+      }))
+      return result
+    }
+    if (result.action !== 'close') {
+      set((current) => withSessionSliceAndActiveMirror(current, id, {
+        lifecyclePendingAction: null,
+      }))
+      throw new Error('lifecycle_result_action_mismatch')
+    }
+
+    set((current) => {
+      const nextOrder = current.sessionOrder.filter((entry) => entry !== id)
+      const nextSessions = { ...current.sessions }
+      delete nextSessions[id]
+      const nextActiveId = current.activeSessionId === id
+        ? (nextOrder[0] ?? null)
+        : current.activeSessionId
+      const nextSlice = nextActiveId ? normalizeSessionSlice(nextSessions[nextActiveId]) : null
+      return {
+        sessions: nextSessions,
+        sessionOrder: nextOrder,
+        activeSessionId: nextActiveId,
+        sessionId: nextActiveId ?? current.sessionId,
+        ...(nextSlice
+          ? mirrorFromSessionSlice(current, nextSlice)
+          : mirrorFromSessionSlice(current, makeEmptySessionSlice())),
+      }
+    })
+    return result
+  },
 
   clearToolTrace: () => set((state) => {
     const scopeId = state.currentScopeId
@@ -726,219 +602,150 @@ export const useAgent = create<AgentState>((set, get) => ({
     })
   }),
 
-  stopStreaming: () => {
-    const { currentAgent, currentScopeId, isStreaming } = get()
-    const activeRunState = getActiveScopeRunState(get().scopeRunStates, currentScopeId)
-    const shouldStopForegroundRun = activeRunState
-      ? isForegroundBusyScopeRunState(activeRunState)
-      : isStreaming
-    if (!shouldStopForegroundRun) {
-      set((state) => ({
-        ...syncActiveScopeRunAliases({
-          currentScopeId: state.currentScopeId,
-          scopeRunStates: state.scopeRunStates,
-        }),
-      }))
-      return
-    }
-    if (currentScopeId) {
-      set((state) => {
-        const sessionKey = sessionKeyForScopeId(state, currentScopeId)
-        const slice = normalizeSessionSlice(state.sessions[sessionKey])
-        const previous = slice.scopeRunStates[currentScopeId] || createEmptyScopeRunState({
-          scopeId: currentScopeId,
-          agent: state.currentAgent,
-        })
-        const nextRun: ScopeRunState = {
-          ...previous,
-          phase: 'cancelled',
-          updatedAt: new Date().toISOString(),
-          blockedReason: '用户已停止',
-          toolTrace: [
-            ...(previous.toolTrace || []),
-            {
-              id: `cancel-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-              kind: 'result',
-              text: '已停止当前运行。',
-              timestamp: new Date(),
-            },
-          ],
-        }
-        const nextScopeRunStates = {
-          ...slice.scopeRunStates,
-          [currentScopeId]: nextRun,
-        }
-        return withSessionSliceAndActiveMirror(state, sessionKey, {
-          scopeRunStates: nextScopeRunStates,
-          streamingMessageId: null,
-          streamingRequestId: null,
-          isStreaming: false,
-          foregroundBusy: false,
-          composerLocked: false,
-        })
-      })
-    } else {
-      set((state) => ({
-        ...withSessionSliceAndActiveMirror(state, activeSessionKey(state), {
-          isStreaming: false,
-          foregroundBusy: false,
-          composerLocked: false,
-          streamingMessageId: null,
-          streamingRequestId: null,
-        }),
-        toolTraceStatus: 'cancelled',
-      }))
-    }
-    if (typeof window !== 'undefined' && window.electronAPI) {
-      window.electronAPI.agent.kill(currentAgent, currentScopeId || undefined).catch(console.error)
-    }
-    // Stage X2.6 — user-initiated stop clears the infrastructure
-    // watchdog for the active scope (any in-flight requestId for this
-    // scope).
-    if (currentScopeId) {
-      agentRuntimeDriver.clearInfrastructureWatchdog(currentScopeId, null)
-    }
-  },
-
-  undoLastMessage: () => {
-    const { messages, currentAgent, currentScopeId, isStreaming } = get()
-    if (isStreaming) return
-
-    let lastUserIdx = -1
-    for (let i = messages.length - 1; i >= 0; i--) {
-      if (messages[i].type === 'user') {
-        lastUserIdx = i
-        break
-      }
-    }
-    if (lastUserIdx <= 0) return
-
-    const undoneContent = messages[lastUserIdx].content
-    const restored = messages.slice(0, lastUserIdx)
-
-    if (typeof window !== 'undefined' && window.electronAPI) {
-      window.electronAPI.agent.newSession(currentAgent, currentScopeId || undefined).catch(console.error)
-    }
-
-    set((state) => ({
-      ...withSessionSliceAndActiveMirror(state, activeSessionKey(state), {
-        messages: restored,
-        inputValue: undoneContent,
-        isStreaming: false,
-        foregroundBusy: false,
-        composerLocked: false,
-        streamingMessageId: null,
-        streamingRequestId: null,
-        scopeRunStates: {},
-        taskDisclosureState: {},
-      }),
-      pendingContinuationIntent: null,
-      pendingContinuationDraftAnchor: null,
-      toolTrace: [],
-      toolTraceStatus: 'idle',
+  stopStreaming: async () => {
+    const state = get()
+    const aliasId = state.currentScopeId
+    if (!aliasId || !window.electronAPI?.agent?.kill) throw new Error('alias_not_bound')
+    const sessionKey = sessionKeyForScopeId(state, aliasId)
+    const slice = normalizeSessionSlice(state.sessions[sessionKey])
+    if (slice.aliasGeneration === null) throw new Error('alias_not_bound')
+    if (slice.lifecyclePendingAction) throw new Error('lifecycle_action_pending')
+    if (hasUnresolvedLifecycleUncertainty(slice)) throw new Error('lifecycle_reconciliation_required')
+    set((current) => withSessionSliceAndActiveMirror(current, sessionKey, {
+      lifecyclePendingAction: 'stopping',
+      lifecycleError: null,
     }))
+    let result: Awaited<ReturnType<typeof window.electronAPI.agent.kill>>
+    try {
+      result = await window.electronAPI.agent.kill({
+        aliasId,
+        aliasGeneration: slice.aliasGeneration,
+      })
+    } catch (error) {
+      set((current) => withSessionSliceAndActiveMirror(current, sessionKey, {
+        lifecyclePendingAction: null,
+      }))
+      throw error
+    }
+    if (!result.ok) {
+      set((current) => withSessionSliceAndActiveMirror(current, sessionKey, {
+        lifecyclePendingAction: null,
+        lifecycleError: result,
+      }))
+      return result
+    }
+    if (result.action !== 'stop') {
+      set((current) => withSessionSliceAndActiveMirror(current, sessionKey, {
+        lifecyclePendingAction: null,
+      }))
+      throw new Error('lifecycle_result_action_mismatch')
+    }
+    set((current) => withSessionSliceAndActiveMirror(current, sessionKey, {
+      lifecyclePendingAction: null,
+      lifecycleError: null,
+      streamingMessageId: null,
+      streamingRequestId: null,
+      isStreaming: false,
+      foregroundBusy: false,
+      composerLocked: false,
+    }))
+    agentRuntimeDriver.clearInfrastructureWatchdog(aliasId, null)
+    return result
   },
 
-  newSession: () => {
-    const { currentAgent } = get()
-    const agentData = get().agents.find(a => a.name === currentAgent)
-    const displayName = agentData?.displayName || '管家'
-    const fallbackScopeId = `conv-${generateId('local')}`
-    const nextSessionId = generateSessionId()
-    const fallbackScope: ConversationScope = {
-      id: fallbackScopeId,
-      agent: currentAgent,
-      activeAgentId: currentAgent,
-      handoffGeneration: 0,
-      title: '新对话',
-      sourceKind: 'local',
-      sourceId: 'app',
-      threadKey: fallbackScopeId,
-      meta: { sourceLabel: '应用内', createdBy: 'app' },
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      lastMessageAt: null,
+  resetCurrentConversation: async () => {
+    const state = get()
+    const aliasId = state.currentScopeId
+    if (!aliasId || !window.electronAPI?.agent?.resetSession) throw new Error('alias_not_bound')
+    const sessionKey = sessionKeyForScopeId(state, aliasId)
+    const slice = normalizeSessionSlice(state.sessions[sessionKey])
+    if (slice.aliasGeneration === null) throw new Error('alias_not_bound')
+    if (slice.lifecyclePendingAction) throw new Error('lifecycle_action_pending')
+    if (hasUnresolvedLifecycleUncertainty(slice)) throw new Error('lifecycle_reconciliation_required')
+    set((current) => withSessionSliceAndActiveMirror(current, sessionKey, {
+      lifecyclePendingAction: 'resetting',
+      lifecycleError: null,
+    }))
+    let result: Awaited<ReturnType<typeof window.electronAPI.agent.resetSession>>
+    try {
+      result = await window.electronAPI.agent.resetSession({
+        aliasId,
+        aliasGeneration: slice.aliasGeneration,
+      })
+    } catch (error) {
+      set((current) => withSessionSliceAndActiveMirror(current, sessionKey, {
+        lifecyclePendingAction: null,
+      }))
+      throw error
     }
-    const nextMessages: AgentMessage[] = [
-      {
-        id: `welcome-${Date.now()}`,
-        agent: currentAgent,
-        content: `你好！我是 Ready 的${displayName} Agent。新的对话已开始，有什么我可以帮你的？`,
-        type: 'agent',
-        timestamp: new Date()
-      }
-    ]
-
-    set((state) => {
-      const previousActiveSessionId = state.activeSessionId
-      const nextSessions = { ...state.sessions }
-      const sessionOrder = previousActiveSessionId && state.sessionOrder.includes(previousActiveSessionId)
-        ? state.sessionOrder.map((entry) => entry === previousActiveSessionId ? nextSessionId : entry)
-        : state.sessionOrder
-      const nextScopeRunStates = {
-        [fallbackScope.id]: createEmptyScopeRunState({ scopeId: fallbackScope.id, agent: currentAgent }),
-      }
-      return {
-        sessions: {
-          ...nextSessions,
-          [nextSessionId]: {
-            ...makeEmptySessionSlice(fallbackScope.id),
-            messages: nextMessages,
-            inputValue: '',
-            scopeRunStates: nextScopeRunStates,
-            taskDisclosureState: {},
-          },
-        },
-        activeSessionId: nextSessionId,
-        sessionOrder,
-        messages: nextMessages,
-        isStreaming: false,
-        foregroundBusy: false,
-        composerLocked: false,
-        streamingMessageId: null,
-        streamingRequestId: null,
-        sessionId: nextSessionId,
-        conversationId: fallbackScope.id,
-        currentScopeId: fallbackScope.id,
-        currentScope: fallbackScope,
-        scopes: [fallbackScope, ...state.scopes.filter((item) => item.id !== fallbackScope.id)],
-        conversations: [mapScopeToConversation(fallbackScope), ...state.conversations.filter((item) => item.id !== fallbackScope.id)],
-        scopeRunStates: nextScopeRunStates,
-        toolTrace: [],
-        toolTraceStatus: 'idle',
-        attachments: [],
-        filePool: [],
-        pendingContinuationIntent: null,
-        pendingContinuationDraftAnchor: null,
-        taskDisclosureState: {},
-      }
-    })
-    void persistLocalConversationScope(fallbackScope)
-
-    if (typeof window !== 'undefined' && window.electronAPI?.agent?.createLocalScope !== undefined) {
-      void window.electronAPI.agent.createLocalScope(currentAgent, fallbackScope.id)
-        .then((result) => {
-          if (!result.success || !result.data) {
-            scopeCreatePersistenceMetricThrottle.maybeEmit('newSession', 'result_failure', fallbackScope.id, currentAgent)
-            return
+    if (!result.ok) {
+      set((current) => withSessionSliceAndActiveMirror(current, sessionKey, {
+        lifecyclePendingAction: null,
+        lifecycleError: result,
+      }))
+      return result
+    }
+    if (result.action !== 'reset') {
+      set((current) => withSessionSliceAndActiveMirror(current, sessionKey, {
+        lifecyclePendingAction: null,
+      }))
+      throw new Error('lifecycle_result_action_mismatch')
+    }
+    set((current) => {
+      const next = withSessionSliceAndActiveMirror(current, sessionKey, {
+        ...makeEmptySessionSlice(aliasId),
+        aliasGeneration: result.newGeneration,
+      })
+      return activeSessionKey(current) === sessionKey
+        ? {
+            ...next,
+            attachments: [],
+            pendingContinuationIntent: null,
+            pendingContinuationDraftAnchor: null,
+            toolTrace: [],
+            toolTraceStatus: 'idle',
           }
-          const scope = result.data as unknown as ConversationScope
-          const currentState = useAgent.getState()
-          const updatedScopes = [scope, ...currentState.scopes.filter((item) => item.id !== scope.id)]
-          useAgent.setState((state) => ({
-            ...withActiveSessionConversationMirror(state, scope.id),
-            currentScopeId: scope.id,
-            currentScope: scope,
-            conversationId: scope.id,
-            scopes: updatedScopes,
-            conversations: updatedScopes.map(mapScopeToConversation),
-          }))
-        })
-        .catch((err) => {
-          scopeCreatePersistenceMetricThrottle.maybeEmit('newSession', 'ipc_rejected', fallbackScope.id, currentAgent)
-          console.error(err)
-        })
+        : next
+    })
+    return result
+  },
+
+  compactCurrentSession: async () => {
+    const state = get()
+    const aliasId = state.currentScopeId
+    if (!aliasId || !window.electronAPI?.agent?.compactSession) throw new Error('alias_not_bound')
+    const sessionKey = sessionKeyForScopeId(state, aliasId)
+    const slice = normalizeSessionSlice(state.sessions[sessionKey])
+    if (slice.aliasGeneration === null) throw new Error('alias_not_bound')
+    if (slice.lifecyclePendingAction) throw new Error('lifecycle_action_pending')
+    if (hasUnresolvedLifecycleUncertainty(slice)) throw new Error('lifecycle_reconciliation_required')
+    set((current) => withSessionSliceAndActiveMirror(current, sessionKey, {
+      lifecyclePendingAction: 'compacting',
+      lifecycleError: null,
+    }))
+    let result: Awaited<ReturnType<typeof window.electronAPI.agent.compactSession>>
+    try {
+      result = await window.electronAPI.agent.compactSession({
+        aliasId,
+        aliasGeneration: slice.aliasGeneration,
+      })
+    } catch (error) {
+      set((current) => withSessionSliceAndActiveMirror(current, sessionKey, {
+        lifecyclePendingAction: null,
+      }))
+      throw error
     }
+    if (result.ok && result.action !== 'manual_compact') {
+      set((current) => withSessionSliceAndActiveMirror(current, sessionKey, {
+        lifecyclePendingAction: null,
+      }))
+      throw new Error('lifecycle_result_action_mismatch')
+    }
+    set((current) => withSessionSliceAndActiveMirror(current, sessionKey, {
+      lifecyclePendingAction: null,
+      lifecycleError: result.ok ? null : result,
+    }))
+    return result
   },
 
   loadScopes: async () => {
@@ -953,26 +760,63 @@ export const useAgent = create<AgentState>((set, get) => ({
       const previousScopeId = get().currentScopeId
       const currentScope = scopes.find((scope) => scope.id === previousScopeId) || scopes[0] || null
       set((state) => {
-        const activeRunState = getScopeRunStateForScope(state, currentScope?.id || null)
-        const sessionKey = activeSessionKey(state)
-        const slice = normalizeSessionSlice(state.sessions[sessionKey])
+        const nextSessions = { ...state.sessions }
+        const nextOrder = [...state.sessionOrder]
+        const sessionByScope = new Map<string, string>()
+        for (const [sessionKey, sliceInput] of Object.entries(state.sessions)) {
+          const conversationId = normalizeSessionSlice(sliceInput).conversationId
+          if (conversationId) sessionByScope.set(conversationId, sessionKey)
+        }
+        for (const scope of scopes) {
+          const sessionKey = sessionByScope.get(scope.id) || scope.id
+          const slice = normalizeSessionSlice(nextSessions[sessionKey])
+          nextSessions[sessionKey] = {
+            ...slice,
+            conversationId: scope.id,
+            aliasGeneration: typeof scope.aliasGeneration === 'number'
+              ? scope.aliasGeneration
+              : null,
+          }
+          sessionByScope.set(scope.id, sessionKey)
+          if (!nextOrder.includes(sessionKey)) nextOrder.push(sessionKey)
+        }
+
+        const sessionKey = currentScope
+          ? (sessionByScope.get(currentScope.id) || activeSessionKey(state))
+          : activeSessionKey(state)
+        const slice = normalizeSessionSlice(nextSessions[sessionKey])
+        const activeRunState = getScopeRunStateForScope({
+          ...state,
+          sessions: nextSessions,
+        }, currentScope?.id || null)
         const nextScopeRunStates = currentScope?.id && activeRunState
           ? { ...slice.scopeRunStates, [currentScope.id]: activeRunState }
           : slice.scopeRunStates
-        return {
-        ...withSessionSliceAndActiveMirror({ ...state, scopes }, sessionKey, {
+        const nextSlice = {
+          ...slice,
           conversationId: currentScope?.id || null,
+          aliasGeneration: typeof currentScope?.aliasGeneration === 'number'
+            ? currentScope.aliasGeneration
+            : null,
           scopeRunStates: nextScopeRunStates,
           isStreaming: isStreamingScopeRunState(activeRunState),
           foregroundBusy: isForegroundBusyScopeRunState(activeRunState),
           composerLocked: isForegroundBusyScopeRunState(activeRunState),
           streamingRequestId: activeRunState?.requestId || null,
-        }),
-        scopes,
-        conversations: scopes.map(mapScopeToConversation),
-        currentAgent: currentScope?.agent || get().currentAgent,
-        pendingContinuationIntent: null,
-        pendingContinuationDraftAnchor: null,
+        }
+        nextSessions[sessionKey] = nextSlice
+        const stateWithScopes = { ...state, scopes }
+        return {
+          sessions: nextSessions,
+          sessionOrder: nextOrder,
+          activeSessionId: sessionKey,
+          sessionId: sessionKey,
+          ...mirrorFromSessionSlice(stateWithScopes, nextSlice),
+          scopes,
+          conversations: scopes.map(mapScopeToConversation),
+          currentAgent: currentScope?.agent || get().currentAgent,
+          pendingContinuationIntent: null,
+          pendingContinuationDraftAnchor: null,
         }
       })
       const hasOnlyWelcomeMessages = get().messages.every((message) => /^welcome(?:-|$)/.test(message.id))
@@ -984,6 +828,7 @@ export const useAgent = create<AgentState>((set, get) => ({
       ) {
         await get().loadScope(currentScope.id)
       }
+      await hydratePendingAskUserQuestionsCards()
     } catch { /* ignore */ }
   },
 
@@ -998,7 +843,8 @@ export const useAgent = create<AgentState>((set, get) => ({
       const messages: AgentMessage[] = result.data.map((m: { id: string; role: string; content: string; timestamp: string; meta?: Record<string, unknown> }) =>
         rebuildAgentMessageFromRow(m, scope?.agent || get().currentAgent),
       )
-      const currentMessages = get().currentScopeId === scopeId ? get().messages : []
+      const targetSessionKey = sessionKeyForScopeId(get(), scopeId)
+      const currentMessages = normalizeSessionSlice(get().sessions[targetSessionKey]).messages
       const transientMessages = currentMessages.filter((message) =>
         message.meta?.transient &&
         !messages.some((persisted) => persisted.id === message.id),
@@ -1034,28 +880,36 @@ export const useAgent = create<AgentState>((set, get) => ({
         })
       }
       set((state) => {
-        const sessionKey = activeSessionKey(state)
+        const sessionKey = sessionKeyForScopeId(state, scopeId)
         const slice = normalizeSessionSlice(state.sessions[sessionKey])
         const nextScopeRunStates = activeRunState
           ? { ...slice.scopeRunStates, [scopeId]: activeRunState }
           : slice.scopeRunStates
-        return {
-        ...withSessionSliceAndActiveMirror(state, sessionKey, {
+        const nextSlice: SessionSlice = {
+          ...slice,
           messages,
           conversationId: scopeId,
+          aliasGeneration: typeof scope?.aliasGeneration === 'number'
+            ? scope.aliasGeneration
+            : null,
           scopeRunStates: nextScopeRunStates,
           isStreaming: isStreamingScopeRunState(activeRunState),
           foregroundBusy: isForegroundBusyScopeRunState(activeRunState),
           composerLocked: isForegroundBusyScopeRunState(activeRunState),
           streamingMessageId: null,
           streamingRequestId: activeRunState?.requestId || null,
-        }),
-        currentScope: scope,
-        currentAgent: scope?.agent || get().currentAgent,
-        attachments: [],
-        filePool: [],
-        pendingContinuationIntent: null,
-        pendingContinuationDraftAnchor: null,
+        }
+        return {
+          sessions: { ...state.sessions, [sessionKey]: nextSlice },
+          activeSessionId: sessionKey,
+          sessionId: sessionKey,
+          ...mirrorFromSessionSlice(state, nextSlice),
+          currentScope: scope,
+          currentAgent: scope?.agent || get().currentAgent,
+          attachments: [],
+          filePool: [],
+          pendingContinuationIntent: null,
+          pendingContinuationDraftAnchor: null,
         }
       })
     } catch { /* ignore */ }
@@ -1077,19 +931,24 @@ export const useAgent = create<AgentState>((set, get) => ({
 
   // W2: Delete conversation
   deleteConversation: async (convId: string) => {
-    if (typeof window === 'undefined' || !window.electronAPI?.chat) return
-    try {
-      await window.electronAPI.chat.deleteConversation(convId)
-      const { conversations, scopes, currentScopeId } = get()
-      set({
-        conversations: conversations.filter(c => c.id !== convId),
-        scopes: scopes.filter(scope => scope.id !== convId),
-      })
-      // If we're viewing the deleted conversation, start fresh
-      if (currentScopeId === convId) {
-        get().newSession()
+    if (typeof window === 'undefined' || !window.electronAPI?.chat || !window.electronAPI.agent?.closeSession) {
+      throw new Error('conversation_delete_unavailable')
+    }
+    const visibleSessionId = lookupSessionByConversation(get(), convId)
+    if (!visibleSessionId) throw new Error('conversation_lifecycle_binding_unavailable')
+    const closeResult = await get().closeSession(visibleSessionId)
+    if (!closeResult.ok) throw new Error(closeResult.code)
+
+    set((state) => {
+      const scopes = state.scopes.filter((candidate) => candidate.id !== convId)
+      return {
+        conversations: state.conversations.filter((candidate) => candidate.id !== convId),
+        scopes,
+        currentScope: state.currentScope?.id === convId ? null : state.currentScope,
+        currentScopeId: state.currentScopeId === convId ? null : state.currentScopeId,
+        conversationId: state.conversationId === convId ? null : state.conversationId,
       }
-    } catch { /* ignore */ }
+    })
   },
 
   renameConversation: async (convId: string, title: string) => {
@@ -1160,249 +1019,34 @@ export const useAgent = create<AgentState>((set, get) => ({
     } catch { /* ignore */ }
   },
 
-  sendMessage: async (content: string, options?: { deliveryMode?: DeliveryMode }) => {
+  sendMessage: async (content: string) => {
     const normalizedContent = content.trim()
     const { attachments: pendingAttachments } = get()
     if (!normalizedContent && pendingAttachments.length === 0) {
-      return { success: false, shouldClearInput: false, preserveInput: true, errorKind: 'empty_input' }
+      throw new Error('empty_input')
     }
-
-    // agent_interaction — if there's a pending ask_user_questions card in
-    // this scope, cancel it BEFORE pushing the new prose into the model.
-    // The cancel reason 'user_typed_instead' tells the tool handler to
-    // return errorKind=user_skipped so the model treats it as "user
-    // replied with prose" instead of a hard failure.
-    //
-    // PR 1 B.5 — bounded await (2000ms hard cap). On timeout the old card is
-    // locally disabled (`localDisabled = true`) so the user can't double-submit
-    // while the late cancel races behind the scenes. We then proceed to send
-    // the new message — the user must never be blocked on a stuck IPC.
-    await cancelPendingAskUserQuestionsForCurrentScope({ timeoutMs: 2000 })
-
-    const stateBeforeSend = get()
-    const runBeforeSend = getScopeRunStateForScope(
-      stateBeforeSend,
-      stateBeforeSend.currentScopeId,
-    )
-    const foregroundBusyBeforeSend = runBeforeSend
-      ? isForegroundBusyScopeRunState(runBeforeSend)
-      : stateBeforeSend.isStreaming
-    const shouldCoalesce =
-      !bypassCoalescingOnce &&
-      !foregroundBusyBeforeSend &&
-      !stateBeforeSend.pendingContinuationIntent &&
-      stateBeforeSend.sendCoalescingEnabled &&
-      normalizedContent.length > 0 &&
-      !normalizedContent.startsWith('/') &&
-      stateBeforeSend.sendCoalescingWindowMs > 0
-
-    if (shouldCoalesce) {
-      const targetScopeId = stateBeforeSend.currentScopeId || null
-      const targetAgent = stateBeforeSend.currentAgent
-      const sessionKey = activeSessionKey(stateBeforeSend)
-      const existingBuffer = pendingSendBuffers.get(sessionKey) ?? null
-      const sameBufferedTarget =
-        existingBuffer &&
-        existingBuffer.scopeId === targetScopeId &&
-        existingBuffer.agent === targetAgent
-
-      if (existingBuffer && !sameBufferedTarget) {
-        await flushPendingSendBuffer(sessionKey)
-      }
-
-      let buffer = pendingSendBuffers.get(sessionKey) ?? null
-      if (buffer && sameBufferedTarget) {
-        buffer.parts.push(normalizedContent)
-      } else {
-        buffer = {
-          scopeId: targetScopeId,
-          agent: targetAgent,
-          parts: [normalizedContent],
-        }
-        pendingSendBuffers.set(sessionKey, buffer)
-      }
-
-      const existingTimer = pendingSendTimers.get(sessionKey)
-      if (existingTimer) clearTimeout(existingTimer)
-      const flushAt = Date.now() + stateBeforeSend.sendCoalescingWindowMs
-      pendingSendTimers.set(
-        sessionKey,
-        setTimeout(() => {
-          void flushPendingSendBuffer(sessionKey)
-        }, stateBeforeSend.sendCoalescingWindowMs),
-      )
-
-      const nextCount = buffer.parts.length
-      set((state) => {
-        const activeId = activeSessionKey(state)
-        const slicePatch = withSessionSlice(state, sessionKey, {
-          pendingSendCount: nextCount,
-          pendingSendFlushAt: flushAt,
-        })
-        // Mirror to top-level mirror only when the buffered session is the
-        // currently-active one (so ChatInput's coalescing indicator tracks the
-        // session the composer is bound to).
-        if (activeId === sessionKey) {
-          return {
-            ...slicePatch,
-            pendingSendCount: nextCount,
-            pendingSendFlushAt: flushAt,
-          }
-        }
-        return slicePatch
-      })
-      return { success: true, shouldClearInput: true, preserveInput: false }
-    }
-
-    bypassCoalescingOnce = false
     const {
       currentAgent,
-      addMessage,
-      setIsStreaming,
       attachments,
       currentScope,
       currentScopeId,
       pendingContinuationIntent,
     } = get()
 
-    let activeAgentName = currentAgent
-    let prerouteSuggestion: { targetAgentId: string; tier: 'state' | 'precedent' } | null = null
-    if (!currentScope && !currentScopeId && normalizedContent && typeof window !== 'undefined' && window.electronAPI?.agent?.sessionPrerouteEvaluate) {
-      const preroute = await window.electronAPI.agent.sessionPrerouteEvaluate(normalizedContent).catch(() => null)
-      const prerouteData = preroute?.success ? preroute.data : null
-      const decision = prerouteData?.decision ?? null
-      if (prerouteData && prerouteData.effect !== 'none' && decision && decision.tier !== 'fallback') {
-        if (prerouteData.effect === 'route') {
-          activeAgentName = decision.targetAgentId
-          set({ currentAgent: activeAgentName })
-        } else {
-          prerouteSuggestion = { targetAgentId: decision.targetAgentId, tier: decision.tier }
-        }
-      }
+    if (pendingContinuationIntent) return rejectedMessageResult('conversation_reset_required')
+    if (!currentScope || !currentScopeId) return rejectedMessageResult('scope_missing')
+    if (currentScope.agent !== currentAgent) {
+      return rejectedMessageResult('conversation_reset_required')
     }
-
-    let scope = currentScope
-    let scopeId = currentScopeId
-    let localScopeBootstrapAttempted = false
-    if ((!scope || !scopeId) && typeof window !== 'undefined' && window.electronAPI?.agent?.createLocalScope !== undefined) {
-      localScopeBootstrapAttempted = true
-      const created = await callCreateLocalScopeWithMetric(
-        activeAgentName,
-        null,
-        'sendMessage_no_scope',
-        () => window.electronAPI!.agent!.createLocalScope(activeAgentName),
-      )
-      if (created?.success && created.data) {
-        const nextScope = created.data as unknown as ConversationScope
-        scope = nextScope
-        scopeId = nextScope.id
-        const updatedScopes = [nextScope, ...get().scopes.filter((item) => item.id !== nextScope.id)]
-        set((state) => ({
-          ...withActiveSessionConversationMirror(state, nextScope.id),
-          currentScopeId: nextScope.id,
-          currentScope: nextScope,
-          conversationId: nextScope.id,
-          scopes: updatedScopes,
-          conversations: updatedScopes.map(mapScopeToConversation),
-        }))
-      }
+    const originSessionKey = sessionKeyForScopeId(get(), currentScopeId)
+    const originSlice = normalizeSessionSlice(get().sessions[originSessionKey])
+    if (originSlice.lifecyclePendingAction) return rejectedMessageResult('thread_busy')
+    if (hasUnresolvedLifecycleUncertainty(originSlice)) {
+      return rejectedMessageResult('conversation_reset_required')
     }
-    if (!scope || !scopeId) {
-      get().newSession()
-      scope = get().currentScope
-      scopeId = get().currentScopeId
-    }
-    if (
-      scope &&
-      scope.sourceKind === 'local' &&
-      !get().scopes.some((item) => item.id === scopeId) &&
-      typeof window !== 'undefined' &&
-      window.electronAPI?.agent?.createLocalScope !== undefined
-    ) {
-      localScopeBootstrapAttempted = true
-      const created = await callCreateLocalScopeWithMetric(
-        activeAgentName,
-        scopeId ?? null,
-        'sendMessage_local_scope_missing',
-        () => window.electronAPI!.agent!.createLocalScope(activeAgentName, scopeId || undefined),
-      )
-      if (created?.success && created.data) {
-        const nextScope = created.data as unknown as ConversationScope
-        scope = nextScope
-        scopeId = nextScope.id
-        const updatedScopes = [nextScope, ...get().scopes.filter((item) => item.id !== nextScope.id)]
-        set((state) => ({
-          ...withActiveSessionConversationMirror(state, nextScope.id),
-          currentScopeId: nextScope.id,
-          currentScope: nextScope,
-          conversationId: nextScope.id,
-          scopes: updatedScopes,
-          conversations: updatedScopes.map(mapScopeToConversation),
-        }))
-      }
-    }
-    if (
-      scope &&
-      scope.sourceKind === 'local' &&
-      scope.agent !== activeAgentName &&
-      typeof window !== 'undefined' &&
-      window.electronAPI?.agent?.createLocalScope !== undefined
-    ) {
-      localScopeBootstrapAttempted = true
-      const created = await callCreateLocalScopeWithMetric(
-        activeAgentName,
-        scopeId ?? null,
-        'sendMessage_agent_mismatch',
-        () => window.electronAPI!.agent!.createLocalScope(activeAgentName),
-      )
-      if (created?.success && created.data) {
-        const nextScope = created.data as unknown as ConversationScope
-        scope = nextScope
-        scopeId = nextScope.id
-        const updatedScopes = [nextScope, ...get().scopes.filter((item) => item.id !== nextScope.id)]
-        set((state) => ({
-          ...withActiveSessionConversationMirror(state, nextScope.id),
-          currentScopeId: nextScope.id,
-          currentScope: nextScope,
-          conversationId: nextScope.id,
-          scopes: updatedScopes,
-          conversations: updatedScopes.map(mapScopeToConversation),
-        }))
-      }
-    }
-    if (!scope || !scopeId) {
-      return { success: false, shouldClearInput: false, preserveInput: true, errorKind: 'scope_missing' }
-    }
-    let activeScope = scope
-    let activeScopeId = scopeId
-    await persistLocalConversationScope(activeScope)
-    if (
-      !localScopeBootstrapAttempted &&
-      activeScope.sourceKind === 'local' &&
-      typeof window !== 'undefined' &&
-      window.electronAPI?.agent?.createLocalScope !== undefined
-    ) {
-      const ensured = await callCreateLocalScopeWithMetric(
-        activeScope.agent,
-        activeScope.id,
-        'sendMessage_ensure',
-        () => window.electronAPI!.agent!.createLocalScope(activeScope.agent, activeScope.id),
-      )
-      if (ensured?.success && ensured.data) {
-        const nextScope = ensured.data as unknown as ConversationScope
-        activeScope = nextScope
-        activeScopeId = nextScope.id
-        const updatedScopes = [nextScope, ...get().scopes.filter((item) => item.id !== nextScope.id)]
-        set((state) => ({
-          ...withActiveSessionConversationMirror(state, nextScope.id),
-          currentScopeId: nextScope.id,
-          currentScope: nextScope,
-          conversationId: nextScope.id,
-          scopes: updatedScopes,
-          conversations: updatedScopes.map(mapScopeToConversation),
-        }))
-      }
-    }
+    const activeAgentName = currentAgent
+    const activeScope = currentScope
+    const activeScopeId = currentScopeId
 
     // Capture and validate attachments before clearing visible composer state.
     const currentAttachments = filterAttachmentsForComposedAgentInput(content, [...attachments])
@@ -1413,63 +1057,16 @@ export const useAgent = create<AgentState>((set, get) => ({
       filePool,
     })
     if (composedInput.diagnostics.inputFailedCount > 0) {
-      const firstFailure = composedInput.diagnostics.inputFailures[0]
-      const friendly = mapBackendErrorToFriendly({
-        error: firstFailure?.reason || 'attachment input failed',
-        errorKind: 'attachment_unavailable',
-      })
       emitRendererAgentMetric('renderer_attachment_input_failed', {
         scopeId: activeScopeId,
         agent: activeAgentName,
         failedCount: composedInput.diagnostics.inputFailedCount,
       })
-      emitRendererAgentMetric('renderer_friendly_error_surfaced', {
-        scopeId: activeScopeId,
-        agent: activeAgentName,
-        errorKind: 'attachment_unavailable',
-      })
-      addMessage({
-        id: `error-${Date.now()}`,
-        agent: activeAgentName,
-        content: friendly.friendlyMessage,
-        type: 'system',
-        timestamp: new Date(),
-      })
-      return {
-        success: false,
-        shouldClearInput: false,
-        preserveInput: true,
-        errorKind: 'attachment_unavailable',
-      }
-    }
-    set((state) => ({
-      attachments: [],
-      filePool: state.filePool,
-    }))
-
-    if (prerouteSuggestion) {
-      addMessage({
-        id: generateId('system'),
-        agent: activeAgentName,
-        content: prerouteSuggestion.tier === 'state'
-          ? `这条消息看起来和进行中的任务有关，建议交给 ${prerouteSuggestion.targetAgentId} 继续处理。`
-          : `这条消息命中了专项处理经验，建议交给 ${prerouteSuggestion.targetAgentId} 处理。`,
-        type: 'system',
-        timestamp: new Date(),
-      })
+      return rejectedMessageResult('attachment_unavailable')
     }
 
-    // Build display content (include @[filename] references)
     const userMsgId = generateId('msg')
     const userTimestamp = new Date()
-    addMessage({
-      id: userMsgId,
-      agent: activeAgentName,
-      content,
-      type: 'user',
-      timestamp: userTimestamp,
-      attachments: currentAttachments.length > 0 ? [...currentAttachments] : undefined
-    })
 
     const referencedPoolAttachments = resolveReferencedFilePoolAttachments(content, filePool)
     const messageAttachments = [...currentAttachments]
@@ -1487,400 +1084,157 @@ export const useAgent = create<AgentState>((set, get) => ({
       attachments: persistedAttachments.length > 0 ? persistedAttachments : undefined,
     }
 
-    if ((activeScope.title === '新对话' || activeScope.title === '未命名会话') && typeof window !== 'undefined' && window.electronAPI?.chat) {
-      const firstAttachmentName = currentAttachments[0]?.name
-      const title = content.slice(0, 20) || (firstAttachmentName ? `附件: ${firstAttachmentName}` : '新对话')
-      if (title) {
-        // fire-and-forget: persist the auto-generated conversation title; the optimistic in-memory update right below keeps the UI consistent regardless of IPC outcome.
-        void window.electronAPI.chat.updateConversationTitle({ id: activeScopeId, title }).catch(() => undefined)
-        const nextScope = { ...activeScope, title, updatedAt: new Date().toISOString() }
-        set((state) => {
-          const scopes = state.scopes.map((item) => item.id === activeScopeId ? nextScope : item)
-          return {
-            currentScope: nextScope,
-            scopes,
-            conversations: scopes.map(mapScopeToConversation),
-          }
-        })
-      }
-    }
-
-    const trimmedInput = content.trim()
-    if (trimmedInput.startsWith('/skill') || trimmedInput.startsWith('/doc')) {
-      const commandResult = trimmedInput.startsWith('/skill')
-        ? await executeSkillCommand(trimmedInput, currentAttachments)
-        : await executeDocCommand(trimmedInput)
-
-      if (commandResult.handled) {
-        await persistChatMessage(activeScopeId, userMsgId, 'user', content, userMessageMeta)
-        const responseId = generateId('response')
-        addMessage({
-          id: responseId,
-          agent: activeAgentName,
-          content: commandResult.text,
-          type: commandResult.isError ? 'system' : 'agent',
-          timestamp: new Date(),
-        })
-        persistChatMessage(scopeId, responseId, 'assistant', commandResult.text)
-        return { success: true, shouldClearInput: true, preserveInput: false }
-      }
-    }
-
     const requestId = generateId('req')
-    const ownerCandidate = getScopeRunStateForScope(get(), activeScopeId)
-    const previousOwnerRun = ownerCandidate
-      && !ownerCandidate.terminalReason
-      && isActiveScopePhase(ownerCandidate.phase)
-      ? ownerCandidate
-      : null
-    const ownsOptimisticRun = !previousOwnerRun?.requestId
-    const responseId = previousOwnerRun?.responseMessageId || generateId('response')
+    const responseId = generateId('response')
+    pendingIngressSnapshots.set(requestId, {
+      requestId,
+      scopeId: activeScopeId,
+      userMessageId: userMsgId,
+      responseMessageId: responseId,
+      agent: activeAgentName,
+      content,
+      timestamp: userTimestamp,
+      attachments: currentAttachments,
+    })
 
-    if (ownsOptimisticRun) {
-      setIsStreaming(true)
-      addMessage({
-        id: responseId,
-        agent: activeAgentName,
-        content: '',
-        type: 'agent',
-        timestamp: new Date(),
-        meta: { transient: true, runId: requestId, scopeId: activeScopeId },
-      })
-      set((state) => {
-        const sessionKey = sessionKeyForScopeId(state, activeScopeId)
-        const slice = normalizeSessionSlice(state.sessions[sessionKey])
-        return withSessionSliceAndActiveMirror(state, sessionKey, {
-          streamingMessageId: responseId,
-          streamingRequestId: requestId,
-          isStreaming: true,
-          foregroundBusy: true,
-          composerLocked: true,
-          scopeRunStates: {
-            ...slice.scopeRunStates,
-            [activeScopeId]: {
-              ...createEmptyScopeRunState({
-                scopeId: activeScopeId,
-                agent: activeAgentName,
-                requestId,
-                phase: 'planning',
-                responseMessageId: responseId,
-              }),
-              startedAt: new Date().toISOString(),
-              updatedAt: new Date().toISOString(),
+    try {
+      if (typeof window === 'undefined' || !window.electronAPI?.agent?.sendScoped) {
+        pendingIngressSnapshots.delete(requestId)
+        return rejectedMessageResult('host_unavailable')
+      }
+        const finalMessage = composedInput.message
+        const result: AgentSendResult = await window.electronAPI.agent.sendScoped({
+          scopeId: activeScopeId,
+          message: finalMessage,
+          requestId,
+          userMessage: {
+            id: userMsgId,
+            content,
+            timestamp: userTimestamp.toISOString(),
+            meta: userMessageMeta,
+            attachmentConfirmation: {
+              selectedCount: currentAttachments.length,
+              metadataCount: persistedAttachments.length,
+              inputIncludedCount: composedInput.diagnostics.inputIncludedCount,
+              inputFailedCount: composedInput.diagnostics.inputFailedCount,
             },
           },
         })
-      })
-    }
 
-    // Stage X2.6 — arm the infrastructure-timeout watchdog. The runtime
-    // driver auto-clears the watchdog on any terminal IPC (onError /
-    // onStream done / onScopeRunEvent terminal phase). If 60s elapses
-    // with no terminal event of any kind (e.g. main crashed, IPC dropped,
-    // request never reached provider), the watchdog unlocks the
-    // originating session and surfaces a "Ready lost track of this
-    // request; recovered automatically" toast. See plan §7.2 last
-    // paragraph.
-    if (ownsOptimisticRun) {
-      agentRuntimeDriver.armInfrastructureWatchdog(activeScopeId, requestId)
-    }
-
-    try {
-      if (typeof window !== 'undefined' && window.electronAPI) {
-        const finalMessage = composedInput.message
-        const workspaceState = useWorkspace.getState()
-        const workspaceRoots = computeDesiredRoots({
-          workspaceRoot: workspaceState.workspaceRoot,
-          pinnedFolders: workspaceState.pinnedFolders,
-        })
-
-        const settingsGet = window.electronAPI.settings?.get
-        const persistedModeResult = options?.deliveryMode || !settingsGet
-          ? null
-          : await settingsGet(DELIVERY_MODE_SETTING_KEY).catch(() => null)
-        const persistedMode = persistedModeResult?.success && isDeliveryMode(persistedModeResult.data)
-          ? persistedModeResult.data
-          : DEFAULT_DELIVERY_MODE
-        const deliveryMode = options?.deliveryMode ?? persistedMode
-
-        const sendWithCurrentScope = async (): Promise<AgentSendResult> => (
-          window.electronAPI.agent.sendScoped
-            ? window.electronAPI.agent.sendScoped({
-              scopeId: activeScopeId,
-              agent: activeScope.agent,
-              message: finalMessage,
-              requestId,
-              deliveryMode,
-              environmentHint: { workbenchMode: useMode.getState().workbenchMode },
-              ...(workspaceRoots.length > 0 ? { workspaceRoots } : {}),
-              userMessage: {
-                id: userMsgId,
-                content,
-                timestamp: userTimestamp.toISOString(),
-                meta: userMessageMeta,
-                attachmentConfirmation: {
-                  selectedCount: currentAttachments.length,
-                  metadataCount: persistedAttachments.length,
-                  inputIncludedCount: composedInput.diagnostics.inputIncludedCount,
-                  inputFailedCount: composedInput.diagnostics.inputFailedCount,
-                },
-              },
-              continuationIntent: pendingContinuationIntent || undefined,
-            })
-            : window.electronAPI.agent.send(activeAgentName, finalMessage, activeScopeId, requestId, deliveryMode)
-        )
-
-        let result = await sendWithCurrentScope()
         if (
-          !result.success &&
-          activeScope.sourceKind === 'local' &&
-          /Conversation scope not found:/i.test(String(result.error || ''))
+          pendingIngressSnapshots.has(requestId)
+          && (result.disposition === 'terminal_success'
+            || result.disposition === 'terminal_failure_after_persistence')
         ) {
-          await persistLocalConversationScope(activeScope)
-          if (window.electronAPI.agent.createLocalScope) {
-            const recovered = await window.electronAPI.agent.createLocalScope(activeScope.agent, activeScope.id).catch(() => null)
-            if (recovered?.success && recovered.data) {
-              const nextScope = recovered.data as unknown as ConversationScope
-              activeScope = nextScope
-              activeScopeId = nextScope.id
-              const updatedScopes = [nextScope, ...get().scopes.filter((item) => item.id !== nextScope.id)]
-              set((state) => ({
-                ...withActiveSessionConversationMirror(state, nextScope.id),
-                currentScopeId: nextScope.id,
-                currentScope: nextScope,
-                conversationId: nextScope.id,
-                scopes: updatedScopes,
-                conversations: updatedScopes.map(mapScopeToConversation),
-              }))
-            }
-          }
-          result = await sendWithCurrentScope()
+          commitPersistedIngressSnapshot({
+            requestId,
+            scopeId: activeScopeId,
+            originUserMessageId: userMsgId,
+            admittedAt: userTimestamp.toISOString(),
+          })
         }
 
         if (!result.success) {
-          // Stage X2.6 — local-failure unwind: the IPC returned an
-          // immediate failure (no terminal-event flow). Clear the
-          // infrastructure watchdog explicitly since the auto-clear
-          // path only fires on IPC terminal events.
-          if (!ownsOptimisticRun) {
-            if (result.persistence?.message !== 'persisted') {
-              set((state) => ({
-                attachments: [
-                  ...currentAttachments,
-                  ...state.attachments.filter((attachment) => (
-                    !currentAttachments.some((candidate) => isSameAttachmentPoolEntry(candidate, attachment))
-                  )),
-                ],
-              }))
-            }
-            emitRendererAgentMetric('renderer_steering_send_failed', {
-              scopeId: activeScopeId,
-              ownerRunId: previousOwnerRun?.requestId || null,
-              errorKind: result.errorKind || 'unknown',
-              messageStatus: result.persistence?.message || null,
-            })
-            const preserveInput = result.persistence?.message !== 'persisted'
-            return {
-              success: false,
-              shouldClearInput: !preserveInput,
-              preserveInput,
-              errorKind: result.errorKind || 'unknown',
-            }
+          const mapped = mapSendScopedResponseToMessageResult(result)
+          if (result.disposition !== 'terminal_failure_after_persistence') {
+            pendingIngressSnapshots.delete(requestId)
+            return mapped
           }
           agentRuntimeDriver.clearInfrastructureWatchdog(activeScopeId, requestId)
-          if (get().streamingRequestId !== requestId) {
-            return { success: false, shouldClearInput: false, preserveInput: true, errorKind: result.errorKind || 'stale_request' }
-          }
-          const messageStatus = result.persistence?.message || null
           const friendly = mapBackendErrorToFriendly({
-            error: result.error || undefined,
-            errorKind: result.errorKind || undefined,
-          })
-          const persistedUserMessage = messageStatus === 'persisted'
-          const failureTerminalReason = normalizeTerminalReason(result.errorKind)
-          const existingResponse = get().messages.find((message) => message.id === responseId) || null
-          const canKeepExistingResponse = Boolean(
-            failureTerminalReason === 'adjudication_degraded'
-            && String(existingResponse?.content || '').trim(),
-          )
-          emitRendererAgentMetric(
-            persistedUserMessage
-              ? 'renderer_send_failed_after_persisted_message'
-              : 'renderer_send_persistence_failed',
-            {
-              scopeId: activeScopeId,
-              agent: activeAgentName,
-              errorKind: result.errorKind || 'unknown',
-              messageStatus,
-              attachmentStatus: result.persistence?.attachments || null,
-            },
-          )
-          emitRendererAgentMetric('renderer_friendly_error_surfaced', {
-            scopeId: activeScopeId,
-            agent: activeAgentName,
-            errorKind: result.errorKind || 'unknown',
+            error: result.error,
+            errorKind: result.errorKind,
           })
           set((state) => {
-            const messages = state.messages.map(m =>
-              m.id === responseId
-                ? canKeepExistingResponse
-                  ? m
-                  : { ...m, content: friendly.friendlyMessage, type: 'system' as const }
-                : m
-            )
             const sessionKey = sessionKeyForScopeId(state, activeScopeId)
             const slice = normalizeSessionSlice(state.sessions[sessionKey])
-            return {
-              ...withSessionSliceAndActiveMirror(state, sessionKey, {
-                messages,
-                isStreaming: false,
-                foregroundBusy: false,
-                composerLocked: false,
-                streamingMessageId: null,
-                streamingRequestId: null,
-                scopeRunStates: {
-                  ...slice.scopeRunStates,
-                  [activeScopeId]: {
-                    ...(slice.scopeRunStates[activeScopeId] || {
-                      scopeId: activeScopeId,
-                      agent: activeAgentName,
-                      requestId,
-                      toolTrace: [],
-                      startedAt: new Date().toISOString(),
-                    }),
-                    requestId,
-                    phase: 'error',
-                    terminalReason: failureTerminalReason,
-                    updatedAt: new Date().toISOString(),
-                    error: friendly.friendlyMessage,
-                  },
-                },
-              }),
-              attachments: result.persistence?.message === 'failed' ? currentAttachments : state.attachments,
-              toolTraceStatus: 'error',
-            }
+            if (!state.sessions[sessionKey] || slice.conversationId !== activeScopeId) return {}
+            const currentRun = slice.scopeRunStates[activeScopeId]
+            const terminalReason = terminalReasonFromSendError(result.errorKind)
+            return withSessionSliceAndActiveMirror(state, sessionKey, {
+              messages: slice.messages.map((message) => (
+                message.id === responseId
+                  ? { ...message, content: friendly.friendlyMessage, type: 'system' as const }
+                  : message
+              )),
+              isStreaming: false,
+              foregroundBusy: false,
+              composerLocked: false,
+              streamingMessageId: null,
+              streamingRequestId: null,
+              scopeRunStates: currentRun
+                ? {
+                    ...slice.scopeRunStates,
+                    [activeScopeId]: {
+                      ...currentRun,
+                      phase: terminalReason === 'checkpoint_budget'
+                        ? 'checkpoint'
+                        : terminalReason === 'cancelled_user'
+                          || terminalReason === 'cancelled_runtime'
+                          || terminalReason === 'main_no_progress_timeout'
+                          ? 'cancelled'
+                          : 'error',
+                      terminalReason,
+                      error: result.error,
+                      updatedAt: new Date().toISOString(),
+                    },
+                  }
+                : slice.scopeRunStates,
+            })
           })
-          const preserveInput = result.persistence?.message !== 'persisted'
-          return {
-            success: false,
-            shouldClearInput: !preserveInput,
-            preserveInput,
-            errorKind: result.errorKind || 'unknown',
-          }
+          return mapped
         }
-        const canonicalMessage = result.canonicalMessage?.role === 'assistant'
-          ? result.canonicalMessage
-          : null
         agentRuntimeDriver.completeScopeRunAfterSendSuccess(activeScopeId, requestId, {
-          canonicalMessage,
-          canonicalMessageDigest: result.canonicalMessageDigest || null,
-          acceptedAsSteering: result.acceptedAsSteering === true,
-          ownerRunId: result.ownerRunId || null,
-          previousOwnerRun,
+          canonicalMessage: result.canonicalMessage,
+          canonicalMessageDigest: result.canonicalMessageDigest,
         })
-        set({ pendingContinuationIntent: null, pendingContinuationDraftAnchor: null })
-        // Stream data arrives via onStream listener
-        // Persistence of assistant message happens in onStream 'done' handler
-        return { success: true, shouldClearInput: true, preserveInput: false }
-      } else {
-        // Mock response for browser-only development
-        const mockResponses = [
-          `收到你的消息: "${content}"\n\n我正在处理中...这是模拟回复，在 Electron 环境中会连接到 Claude API。\n\n### 功能列表\n- **文案创作**: 帮助撰写高质量内容\n- **数据分析**: 分析热门趋势\n- *视频脚本*: 创作视频脚本\n\n\`\`\`javascript\nconsole.log("Hello Ready!")\n\`\`\``,
-          `好的，我来帮你处理: "${content}"\n\n当前运行在浏览器预览模式，Agent 功能需要在 Electron 中使用。\n\n## 提示\n1. 启动 Electron 应用\n2. 配置 \`ANTHROPIC_API_KEY\`\n3. 即可使用 **AI Agent** 能力`,
-          `了解！"${content}" 这个需求我可以帮你完成。\n\n提示：启动 Electron 应用并配置 ANTHROPIC_API_KEY 即可使用真实 AI 能力。`
-        ]
-        const mockReply = mockResponses[Math.floor(Math.random() * mockResponses.length)]
-
-        let i = 0
-        const typeInterval = setInterval(() => {
-          if (i < mockReply.length) {
-            const chunk = mockReply.slice(i, i + Math.floor(Math.random() * 3) + 1)
-            get().appendToMessage(responseId, chunk)
-            i += chunk.length
-          } else {
-            clearInterval(typeInterval)
-            if (get().streamingRequestId === requestId) {
-              set((state) => withSessionSliceAndActiveMirror(state, activeSessionKey(state), {
-                isStreaming: false,
-                foregroundBusy: false,
-                composerLocked: false,
-                streamingMessageId: null,
-                streamingRequestId: null,
-              }))
-            }
-          }
-        }, 30)
-        return { success: true, shouldClearInput: true, preserveInput: false }
-      }
+        return mapSendScopedResponseToMessageResult(result)
     } catch (error) {
-      // Stage X2.6 — local-failure unwind: the IPC threw synchronously
-      // (e.g. preload not available, network refused before IPC). Clear
-      // the watchdog so it doesn't fire 60s later after a long-since
-      // failed send.
-      if (!ownsOptimisticRun) {
-        set((state) => ({
-          attachments: [
-            ...currentAttachments,
-            ...state.attachments.filter((attachment) => (
-              !currentAttachments.some((candidate) => isSameAttachmentPoolEntry(candidate, attachment))
-            )),
-          ],
-        }))
-        emitRendererAgentMetric('renderer_steering_send_failed', {
-          scopeId: activeScopeId,
-          ownerRunId: previousOwnerRun?.requestId || null,
-          errorKind: 'ipc_exception',
-        })
-        return { success: false, shouldClearInput: false, preserveInput: true, errorKind: 'unknown' }
-      }
+      const admissionWasObserved = !pendingIngressSnapshots.has(requestId)
+      pendingIngressSnapshots.delete(requestId)
+      if (!admissionWasObserved) return rejectedMessageResult('host_unavailable')
       agentRuntimeDriver.clearInfrastructureWatchdog(activeScopeId, requestId)
-      if (get().streamingRequestId !== requestId) {
-        return { success: false, shouldClearInput: false, preserveInput: true, errorKind: 'stale_request' }
-      }
-      const rawError = error instanceof Error ? error.message : String(error)
-      const friendly = mapBackendErrorToFriendly({ error: rawError })
-      emitRendererAgentMetric('renderer_friendly_error_surfaced', {
-        scopeId: activeScopeId,
-        agent: activeAgentName,
+      const friendly = mapBackendErrorToFriendly({
+        error: error instanceof Error ? error.message : String(error),
         errorKind: 'unknown',
       })
       set((state) => {
-        const messages = state.messages.map(m =>
-          m.id === responseId
-            ? { ...m, content: friendly.friendlyMessage, type: 'system' as const }
-            : m
-        )
         const sessionKey = sessionKeyForScopeId(state, activeScopeId)
         const slice = normalizeSessionSlice(state.sessions[sessionKey])
-        return {
-          ...withSessionSliceAndActiveMirror(state, sessionKey, {
-            messages,
-            isStreaming: false,
-            foregroundBusy: false,
-            composerLocked: false,
-            streamingMessageId: null,
-            streamingRequestId: null,
-            scopeRunStates: {
-              ...slice.scopeRunStates,
-              [activeScopeId]: {
-                ...(slice.scopeRunStates[activeScopeId] || {
-                  scopeId: activeScopeId,
-                  agent: activeAgentName,
-                  requestId,
-                  toolTrace: [],
-                  startedAt: new Date().toISOString(),
-                }),
-                requestId,
-                phase: 'error',
-                updatedAt: new Date().toISOString(),
-                error: friendly.friendlyMessage,
-              },
-            },
-          }),
-          toolTraceStatus: 'error',
-        }
+        if (!state.sessions[sessionKey] || slice.conversationId !== activeScopeId) return {}
+        const currentRun = slice.scopeRunStates[activeScopeId]
+        return withSessionSliceAndActiveMirror(state, sessionKey, {
+          messages: slice.messages.map((message) => (
+            message.id === responseId
+              ? { ...message, content: friendly.friendlyMessage, type: 'system' as const }
+              : message
+          )),
+          isStreaming: false,
+          foregroundBusy: false,
+          composerLocked: false,
+          streamingMessageId: null,
+          streamingRequestId: null,
+          scopeRunStates: currentRun
+            ? {
+                ...slice.scopeRunStates,
+                [activeScopeId]: {
+                  ...currentRun,
+                  phase: 'error',
+                  terminalReason: 'infra_error',
+                  error: error instanceof Error ? error.message : String(error),
+                  updatedAt: new Date().toISOString(),
+                },
+              }
+            : slice.scopeRunStates,
+        })
       })
-      return { success: false, shouldClearInput: false, preserveInput: true, errorKind: 'unknown' }
+      return {
+        success: false,
+        disposition: 'terminal_failure_after_persistence',
+        shouldClearInput: true,
+        preserveInput: false,
+        errorKind: 'unknown',
+      }
     }
   }
   ,
@@ -1923,113 +1277,108 @@ function makeMessageFromPushedCard(
   }
 }
 
+function upsertAskUserCard(
+  targetSessionId: string,
+  event: {
+    cardId: string
+    conversationId: string | null
+    questions: AskUserQuestionsCardState['questions']
+    askedAt: number
+  },
+): void {
+  const agent = useAgent.getState().currentAgent
+  const message = makeMessageFromPushedCard({
+    ...event,
+    sessionId: targetSessionId,
+  }, agent)
+
+  useAgent.setState((prev) => {
+    const existingSlice = prev.sessions[targetSessionId]
+    if (
+      existingSlice?.conversationId
+      && event.conversationId
+      && existingSlice.conversationId !== event.conversationId
+    ) return {}
+
+    const existingMessages = existingSlice?.messages ?? []
+    const nextMessages = existingMessages.some((candidate) => candidate.id === message.id)
+      ? existingMessages
+      : [...existingMessages, message].sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime())
+    const nextSlice: SessionSlice = existingSlice
+      ? {
+          ...existingSlice,
+          messages: nextMessages,
+          conversationId: existingSlice.conversationId ?? event.conversationId,
+        }
+      : {
+          ...makeEmptySessionSlice(event.conversationId),
+          messages: nextMessages,
+        }
+    const sessions = {
+      ...prev.sessions,
+      [targetSessionId]: nextSlice,
+    }
+    return targetSessionId === activeSessionKey(prev)
+      ? { sessions, messages: nextMessages }
+      : { sessions }
+  })
+}
+
+export async function hydratePendingAskUserQuestionsCards(): Promise<void> {
+  const api = typeof window !== 'undefined' ? window.electronAPI?.agentInteraction : null
+  if (!api) return
+  const result = await api.listPendingAskUserQuestions()
+  if (!result || !result.success || !Array.isArray(result.data)) return
+  for (const card of result.data) {
+    const decision = routeCardToSession(useAgent.getState(), {
+      sessionId: null,
+      conversationId: card.conversationId,
+      cardId: card.cardId,
+    })
+    if (!decision.targetSessionId) {
+      recordOrphanedCard(card.cardId, decision.metric || 'pending-card-session-not-found')
+      continue
+    }
+    if (decision.metric) recordCardFallback(card.cardId, decision.metric)
+    upsertAskUserCard(decision.targetSessionId, {
+      cardId: card.cardId,
+      conversationId: card.conversationId,
+      questions: card.questions as AskUserQuestionsCardState['questions'],
+      askedAt: card.askedAt,
+    })
+  }
+}
+
 export function initAgentInteractionListeners(): () => void {
   const api = typeof window !== 'undefined' ? window.electronAPI?.agentInteraction : null
   if (!api) return () => {}
-  // Hydrate any pending cards left from a mid-flight renderer reload.
-  // fire-and-forget: bootstrap-time hydration; if it fails, the live onAskUserQuestionsCard subscription below will deliver the next card and the user can re-trigger any missing one.
-  api.listPendingAskUserQuestions().then((result) => {
-    if (!result || !result.success || !Array.isArray(result.data)) return
-    const state = useAgent.getState()
-    const agent = state.currentAgent
-    const existingIds = new Set(state.messages.map((m) => m.id))
-    const additions: AgentMessage[] = []
-    for (const card of result.data) {
-      if (existingIds.has(card.cardId)) continue
-      // Hydrate only into the current scope to avoid leaking cards from a
-      // different conversation into the active view. The DB row already
-      // belongs to the right conversation via conversation_id.
-      if (card.conversationId && state.currentScopeId && card.conversationId !== state.currentScopeId) continue
-      additions.push(makeMessageFromPushedCard({
-        cardId: card.cardId,
-        sessionId: state.currentScopeId,
-        conversationId: card.conversationId,
-        questions: card.questions as AskUserQuestionsCardState['questions'],
-        askedAt: card.askedAt,
-      }, agent))
-    }
-    if (additions.length > 0) {
-      useAgent.setState((prev) => {
-        const messages = [...prev.messages, ...additions].sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime())
-        return withActiveSessionMessagesMirror(prev, messages)
-      })
-    }
-    // fire-and-forget: hydrate-failure swallow — see the matching comment on listPendingAskUserQuestions above; the live subscription is the canonical card delivery path.
-  }).catch(() => { /* ignore hydrate failures */ })
+  // A true cold renderer starts with no session slices. `loadScopes` restores
+  // every durable alias and then calls the same hydrator. Hot remounts already
+  // have slices, so they can hydrate immediately.
+  if (Object.keys(useAgent.getState().sessions).length > 0) {
+    void hydratePendingAskUserQuestionsCards().catch(() => { /* ignore hydrate failures */ })
+  }
 
   const unsubscribePush = api.onAskUserQuestionsCard((event) => {
-    // V3.3d — route through the 3-level fallback chain instead of writing
-    // directly to top-level `messages`. The pre-V3.3d guard
-    // (`event.conversationId !== state.currentScopeId → drop`) is replaced
-    // by `routeCardToSession`, which preserves the "do not bleed across
-    // active scope" intent while also serving multi-session UIs: when the
-    // target session is not the active one, the card lands in that
-    // session's slice and surfaces when the user switches; only the
-    // double-null + no-active case drops outright.
+    // Route by the durable conversation binding. Background-session cards
+    // stay in that slice; conflicting identities never fall into the active
+    // conversation.
     const decision = routeCardToSession(useAgent.getState(), {
       sessionId: event.sessionId,
       conversationId: event.conversationId,
       cardId: event.cardId,
     })
     if (!decision.targetSessionId) {
-      recordOrphanedCard(event.cardId, 'no-active-session-and-keys-null')
+      recordOrphanedCard(event.cardId, decision.metric || 'ask-card-session-not-found')
       return
     }
     if (decision.metric) recordCardFallback(event.cardId, decision.metric)
 
-    const agent = useAgent.getState().currentAgent
-    const message = makeMessageFromPushedCard({
+    upsertAskUserCard(decision.targetSessionId, {
       cardId: event.cardId,
-      sessionId: decision.targetSessionId,
       conversationId: event.conversationId,
       questions: event.questions as AskUserQuestionsCardState['questions'],
       askedAt: event.askedAt,
-    }, agent)
-
-    useAgent.setState((prev) => {
-      // Lazily create the target slice (e.g. when the card lands in a
-      // session whose slice hasn't been touched yet) so the conversationId
-      // backing field is populated for future lookups.
-      const existingSlice = prev.sessions[decision.targetSessionId!]
-      const existingMessages = existingSlice?.messages ?? []
-      const nextMessages = existingMessages.some((m) => m.id === message.id)
-        ? existingMessages
-        : [...existingMessages, message].sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime())
-      const nextSlice: SessionSlice = existingSlice
-        ? {
-          ...existingSlice,
-          messages: nextMessages,
-          conversationId: existingSlice.conversationId ?? event.conversationId,
-        }
-        : {
-          ...makeEmptySessionSlice(event.conversationId),
-          messages: nextMessages,
-        }
-      const sessionsPatch: Pick<AgentState, 'sessions'> = {
-        sessions: {
-          ...prev.sessions,
-          [decision.targetSessionId!]: nextSlice,
-        },
-      }
-      // Mirror into top-level `messages` only when the routed target is the
-      // active session. Background-session cards stay parked in that slice
-      // and surface when the user switches tabs.
-      //
-      // Compare against `activeSessionKey(prev)`, NOT the raw `activeSessionId`
-      // field: top-level `messages` is the mirror of `sessions[activeSessionKey]`,
-      // and `activeSessionKey` falls back to `sessionId`/`PRIMARY_SESSION_KEY`
-      // when `activeSessionId` is null (the normal state after `loadScope`,
-      // which never assigns `activeSessionId`). Comparing against the raw
-      // null field left the routed card stranded in the active slice with no
-      // top-level mirror, so it only surfaced once an unrelated active-slice
-      // write (e.g. expanding a tool-trace section) re-ran the mirror.
-      if (decision.targetSessionId === activeSessionKey(prev)) {
-        return {
-          ...sessionsPatch,
-          messages: nextMessages,
-        }
-      }
-      return sessionsPatch
     })
   })
 
@@ -2052,10 +1401,14 @@ export function initAgentListeners(): () => void {
   }
   const offRuntime = agentRuntimeDriver.initAgentListeners()
   const offAgentInteraction = initAgentInteractionListeners()
+  const offIngressAdmitted = window.electronAPI?.agent?.onIngressAdmitted?.((event) => {
+    applyIngressAdmitted(event)
+  }) || (() => {})
   return () => {
     try { window.removeEventListener('ready:agent-registry-changed', onAgentRegistryChanged) } catch { /* ignore */ }
     try { offRuntime() } catch { /* ignore */ }
     try { offAgentInteraction() } catch { /* ignore */ }
+    try { offIngressAdmitted() } catch { /* ignore */ }
   }
 }
 

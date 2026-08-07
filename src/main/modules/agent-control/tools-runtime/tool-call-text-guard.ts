@@ -11,8 +11,8 @@
  *      to the renderer chat panel. This is the primary user-visible source.
  *   2. `TurnTranscript.finalChunks` — accumulator the backend uses to build
  *      the final assistant message persisted server-side.
- *   3. `chat:saveMessage` IPC — renderer-initiated chat_messages DB write
- *      after streaming completes; raw text persisted unless sanitized.
+ *   3. Canonical closeout persistence — final assistant text written to the
+ *      conversation after streaming completes.
  *
  * Extracting the helpers here lets `turn-engine.ts`, `turn-transcript.ts`,
  * and `claude-bridge/ipc-handler.ts` all import without circular deps
@@ -48,9 +48,9 @@ export interface SanitizeAssistantTextOptions {
   /**
    * Where the sanitization fired. Used by metric consumers to tell the
    * "session.messages push" leak path apart from the "transcript stream"
-   * path apart from the "chat:saveMessage IPC" path. Default 'unknown'.
+   * path apart from other canonical persistence paths. Default 'unknown'.
    */
-  source?: 'session_push' | 'transcript_emit' | 'chat_save_message' | 'unknown'
+  source?: 'session_push' | 'transcript_emit' | 'unknown'
 }
 
 /**

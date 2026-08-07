@@ -172,8 +172,7 @@ async function waitForDomSubmitEvidence(
       return { submitted: true, started: true }
     }
     if (
-      state.pendingSendCount > 0
-      || state.isStreaming
+      state.isStreaming
       || state.foregroundBusy
       || Boolean(currentRun?.requestId)
       || Boolean(currentRun?.taskId)
@@ -263,8 +262,7 @@ export function createAgentPanelTestHarness(store: StoreLike): AgentPanelTestHar
       const current = createAgentPanelSnapshot(store.getState())
       if (
         !current.composer.locked &&
-        !current.runtime.foregroundBusy &&
-        current.composer.pendingSendCount === 0
+        !current.runtime.foregroundBusy
       ) {
         return snapshot()
       }
@@ -303,54 +301,32 @@ export function createAgentPanelTestHarness(store: StoreLike): AgentPanelTestHar
     let domSubmitted = false
     let domClickSubmitted = false
     let domRunStarted = false
-    const coalescingState = store.getState()
-    const canDisableCoalescing = typeof store.setState === 'function'
-      && typeof coalescingState.sendCoalescingEnabled === 'boolean'
-      && typeof coalescingState.sendCoalescingWindowMs === 'number'
-    if (canDisableCoalescing) {
-      store.setState?.({
-        sendCoalescingEnabled: false,
-        sendCoalescingWindowMs: 0,
-      })
+    if (mode === 'dom') {
+      const maxDomAttempts = allowStoreFallback ? 1 : 3
+      for (let attempt = 0; attempt < maxDomAttempts; attempt += 1) {
+        domClickSubmitted = await submitViaDom(messageText) || domClickSubmitted
+        if (domClickSubmitted) {
+          const evidence = await waitForDomSubmitEvidence(store, before.messages.length, normalizedText)
+          domSubmitted = evidence.submitted
+          domRunStarted = domRunStarted || evidence.started
+        }
+        if (domSubmitted) break
+        await delay(250)
+      }
     }
 
-    try {
-      if (mode === 'dom') {
-        const maxDomAttempts = allowStoreFallback ? 1 : 3
-        for (let attempt = 0; attempt < maxDomAttempts; attempt += 1) {
-          domClickSubmitted = await submitViaDom(messageText) || domClickSubmitted
-          if (domClickSubmitted) {
-            const evidence = await waitForDomSubmitEvidence(store, before.messages.length, normalizedText)
-            domSubmitted = evidence.submitted
-            domRunStarted = domRunStarted || evidence.started
-          }
-          if (domSubmitted) break
-          await delay(250)
-        }
+    if ((!domClickSubmitted || (!domSubmitted && !domRunStarted)) && allowStoreFallback) {
+      inputMode = 'store'
+      const state = store.getState()
+      state.setInputValue(messageText, { preserveContinuationIntent: true })
+      const sendPromise = state.sendMessage(messageText)
+      if (options.awaitStoreSend === false) {
+        void sendPromise.catch(() => {})
+      } else {
+        sendResult = await sendPromise
       }
-
-      if ((!domClickSubmitted || (!domSubmitted && !domRunStarted)) && allowStoreFallback) {
-        inputMode = 'store'
-        const state = store.getState()
-        state.setInputValue(messageText, { preserveContinuationIntent: true })
-        const sendPromise = state.sendMessage(messageText)
-        if (options.awaitStoreSend === false) {
-          sendResult = { success: true, shouldClearInput: true, preserveInput: false }
-          // fire-and-forget: caller intentionally probes non-blocking store send behavior.
-          void sendPromise.catch(() => {})
-        } else {
-          sendResult = await sendPromise
-        }
-      } else if (domClickSubmitted && (domSubmitted || domRunStarted)) {
-        inputMode = 'dom'
-      }
-    } finally {
-      if (canDisableCoalescing) {
-        store.setState?.({
-          sendCoalescingEnabled: coalescingState.sendCoalescingEnabled,
-          sendCoalescingWindowMs: coalescingState.sendCoalescingWindowMs,
-        })
-      }
+    } else if (domClickSubmitted && (domSubmitted || domRunStarted)) {
+      inputMode = 'dom'
     }
 
     const after = options.waitForIdle === false
@@ -505,9 +481,12 @@ export function createAgentPanelTestHarness(store: StoreLike): AgentPanelTestHar
     store.getState().clearAttachments?.()
   }
 
-  const newSession = async (): Promise<AgentPanelSnapshot> => {
+  const createSession = async (): Promise<AgentPanelSnapshot> => {
     const beforeScopeId = store.getState().currentScopeId
-    store.getState().newSession?.()
+    const createNewSession = store.getState().createNewSession
+    if (!createNewSession) throw new Error('createNewSession not available')
+    const result = await createNewSession()
+    if (!result.ok) throw new Error(result.code)
     const startedAt = Date.now()
     while (Date.now() - startedAt < 5_000) {
       const current = store.getState()
@@ -583,8 +562,10 @@ export function createAgentPanelTestHarness(store: StoreLike): AgentPanelTestHar
     if (!createNewSession) {
       return { ok: false, summary: sessionSummary(), error: 'createNewSession not available' }
     }
-    const id = createNewSession()
-    if (!id) return { ok: false, id, summary: sessionSummary(), error: 'session limit reached' }
+    const result = await createNewSession()
+    if (!result.ok) return { ok: false, summary: sessionSummary(), error: result.code }
+    const id = store.getState().activeSessionId || null
+    if (!id) return { ok: false, id, summary: sessionSummary(), error: 'visible session id missing' }
     const startedAt = Date.now()
     while (Date.now() - startedAt < 2_000) {
       const summary = sessionSummary()
@@ -627,7 +608,7 @@ export function createAgentPanelTestHarness(store: StoreLike): AgentPanelTestHar
     answerPendingAskUserQuestions,
     attachFiles,
     clearAttachments,
-    newSession,
+    createSession,
     prepareWorkspace,
     waitForIdle,
     sessionSummary,

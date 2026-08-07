@@ -5,8 +5,8 @@
  * `initAgentInteractionListeners` when a pushed ask_user_questions card
  * arrives. The chain in `routeCardToSession` is:
  *
- *   1. `event.sessionId`                       — accepted iff `isLiveSession`
- *   2. `lookupSessionByConversation(event.conversationId)` — terminal sessions skipped
+ *   1. `event.sessionId`                       — accepted iff its alias is open
+ *   2. `lookupSessionByConversation(event.conversationId)` — closed sessions skipped
  *   3. `state.activeSessionId`                 — last-resort live target
  *   (none) → orphan; `{ targetSessionId: null, metric: 'no-active-session-and-keys-null' }`.
  *
@@ -18,10 +18,8 @@
  *            lookupSessionByConversation
  *   case 3 — both absent → must fall through to activeSessionId
  *
- * A bonus "stale sessionId" case proves the fallback does not silently
- * accept a terminated session as a level-1 hit; it must demote and try
- * level 2 then level 3, with the metric tagged
- * `stale-or-terminated-session`.
+ * A closed-session case proves an explicitly retired alias is demoted, while
+ * done/error/cancelled turn states remain reusable on the same Codex thread.
  *
  * Plan: docs/superpowers/plans/archive/2026-05-22-W4-useagent-ownership-implementation.md §3.7
  */
@@ -40,8 +38,6 @@ import {
 function makeSlice(patch: Partial<SessionSlice> = {}): SessionSlice {
   return {
     messages: [],
-    pendingSendCount: 0,
-    pendingSendFlushAt: null,
     isStreaming: false,
     foregroundBusy: false,
     composerLocked: false,
@@ -56,8 +52,9 @@ function makeSlice(patch: Partial<SessionSlice> = {}): SessionSlice {
   }
 }
 
-function seedThreeSessions() {
-  // Three sessions: A live (conv-A), B live (conv-B), C terminated (conv-C).
+function seedSessions() {
+  // A/B are running aliases, C has a cancelled turn but remains open, and D
+  // is explicitly closed. Active = A.
   // active = A. Used by all routing cases below; resetting before each test
   // is unnecessary because each test reseeds explicitly.
   useAgent.setState({
@@ -84,35 +81,32 @@ function seedThreeSessions() {
     attachments: [],
     filePool: [],
     activeAttachmentPreview: null,
-    sendCoalescingEnabled: true,
-    sendCoalescingWindowMs: 1200,
-    pendingSendCount: 0,
-    pendingSendFlushAt: null,
     sessions: {
       'session-A': makeSlice({ state: 'live', conversationId: 'conv-A' }),
       'session-B': makeSlice({ state: 'live', conversationId: 'conv-B' }),
       'session-C': makeSlice({ state: 'cancelled', conversationId: 'conv-C' }),
+      'session-D': makeSlice({ state: 'closed', conversationId: 'conv-D' }),
     },
     activeSessionId: 'session-A',
-    sessionOrder: ['session-A', 'session-B', 'session-C'],
+    sessionOrder: ['session-A', 'session-B', 'session-C', 'session-D'],
     taskDisclosureState: {},
   })
 }
 
 // ==========================================================================
-// Level 1 — sessionId set (live) wins
+// Conflicting identities — durable conversation binding wins
 // ==========================================================================
 
-test('W4.7 — level 1: live event.sessionId wins; metric is null (no fallback)', () => {
-  seedThreeSessions()
+test('W4.7 — conflicting live identities route only to the durable conversation binding', () => {
+  seedSessions()
   const state = useAgent.getState()
   const decision = routeCardToSession(state, {
     sessionId: 'session-B',
-    conversationId: 'conv-A', // even with a contradicting conv, sessionId wins
+    conversationId: 'conv-A',
     cardId: 'card-1',
   })
-  assert.equal(decision.targetSessionId, 'session-B', 'level 1 honors event.sessionId')
-  assert.equal(decision.metric, null, 'no fallback metric when level 1 hits')
+  assert.equal(decision.targetSessionId, 'session-A')
+  assert.equal(decision.metric, 'session-conversation-conflict')
 })
 
 // ==========================================================================
@@ -120,7 +114,7 @@ test('W4.7 — level 1: live event.sessionId wins; metric is null (no fallback)'
 // ==========================================================================
 
 test('W4.7 — level 2: null sessionId, live conversationId resolves to its session', () => {
-  seedThreeSessions()
+  seedSessions()
   const state = useAgent.getState()
   const decision = routeCardToSession(state, {
     sessionId: null,
@@ -140,7 +134,7 @@ test('W4.7 — level 2: null sessionId, live conversationId resolves to its sess
 // ==========================================================================
 
 test('W4.7 — level 3: both sessionId and conversationId absent → activeSessionId', () => {
-  seedThreeSessions()
+  seedSessions()
   const state = useAgent.getState()
   const decision = routeCardToSession(state, {
     sessionId: null,
@@ -156,25 +150,22 @@ test('W4.7 — level 3: both sessionId and conversationId absent → activeSessi
 })
 
 // ==========================================================================
-// Stale-session demotion — sessionId points at a terminated session
+// Closed-session demotion — only an explicitly retired alias is unavailable
 // ==========================================================================
 
-test('W4.7 — stale sessionId demotes: terminated session is not a level-1 hit', () => {
-  seedThreeSessions()
+test('W4.7 — closed sessionId demotes while cancelled turn remains reusable', () => {
+  seedSessions()
   const state = useAgent.getState()
-  // session-C is `cancelled`; it must not be accepted at level 1 even
-  // though it exists in the sessions Record.
+  assert.equal(isLiveSession(state, 'session-C'), true)
+  assert.equal(lookupSessionByConversation(state, 'conv-C'), 'session-C')
+
   const decision = routeCardToSession(state, {
-    sessionId: 'session-C',
+    sessionId: 'session-D',
     conversationId: null,
     cardId: 'card-4',
   })
   assert.equal(decision.targetSessionId, 'session-A', 'demoted to activeSessionId')
-  assert.equal(
-    decision.metric,
-    'stale-or-terminated-session',
-    'metric tagged stale-or-terminated-session',
-  )
+  assert.equal(decision.metric, 'closed-session')
 })
 
 // ==========================================================================
@@ -182,7 +173,7 @@ test('W4.7 — stale sessionId demotes: terminated session is not a level-1 hit'
 // ==========================================================================
 
 test('W4.7 — unknown sessionId demotes with metric unknown-session', () => {
-  seedThreeSessions()
+  seedSessions()
   const state = useAgent.getState()
   const decision = routeCardToSession(state, {
     sessionId: 'session-not-in-store',
@@ -223,10 +214,6 @@ test('W4.7 — orphan: no live target produces targetSessionId=null with orphan 
     attachments: [],
     filePool: [],
     activeAttachmentPreview: null,
-    sendCoalescingEnabled: true,
-    sendCoalescingWindowMs: 1200,
-    pendingSendCount: 0,
-    pendingSendFlushAt: null,
     sessions: {},
     activeSessionId: null,
     sessionOrder: [],
@@ -244,15 +231,16 @@ test('W4.7 — orphan: no live target produces targetSessionId=null with orphan 
 
 // ==========================================================================
 // Helper sanity — isLiveSession and lookupSessionByConversation agree with
-// the routing decision (no double-counting of terminal sessions).
+// the routing decision (only explicit close removes an alias).
 // ==========================================================================
 
-test('W4.7 — isLiveSession and lookupSessionByConversation share the terminal exclusion set', () => {
-  seedThreeSessions()
+test('W4.7 — isLiveSession and lookupSessionByConversation exclude only closed aliases', () => {
+  seedSessions()
   const state = useAgent.getState()
 
   assert.equal(isLiveSession(state, 'session-A'), true, 'live session passes isLiveSession')
-  assert.equal(isLiveSession(state, 'session-C'), false, 'cancelled session fails isLiveSession')
+  assert.equal(isLiveSession(state, 'session-C'), true, 'cancelled turn keeps its alias open')
+  assert.equal(isLiveSession(state, 'session-D'), false, 'closed alias fails isLiveSession')
   assert.equal(isLiveSession(state, 'session-missing'), false, 'unknown id fails isLiveSession')
   assert.equal(isLiveSession(state, null), false, 'null fails isLiveSession')
 
@@ -268,8 +256,13 @@ test('W4.7 — isLiveSession and lookupSessionByConversation share the terminal 
   )
   assert.equal(
     lookupSessionByConversation(state, 'conv-C'),
+    'session-C',
+    'conv-C remains reusable after a cancelled turn',
+  )
+  assert.equal(
+    lookupSessionByConversation(state, 'conv-D'),
     null,
-    'conv-C terminated — not returned by conversation lookup',
+    'conv-D is explicitly closed',
   )
   assert.equal(
     lookupSessionByConversation(state, null),
@@ -279,23 +272,20 @@ test('W4.7 — isLiveSession and lookupSessionByConversation share the terminal 
 })
 
 // ==========================================================================
-// 3-level order invariant — ensure the chain is exactly level1 → level2 → level3
+// Conversation isolation invariant
 // ==========================================================================
 
-test('W4.7 — resolution order is exactly sessionId → conversationId → activeSessionId', () => {
-  seedThreeSessions()
+test('W4.7 — a supplied conversation never falls through into an unrelated active session', () => {
+  seedSessions()
   const state = useAgent.getState()
 
-  // Set up: event provides BOTH a contradicting live sessionId (B) and a
-  // live conversationId (conv-A). Level 1 must win; level 2 must not be
-  // consulted. We assert the chosen target is the level-1 value, not the
-  // level-2 value.
   const decision = routeCardToSession(state, {
     sessionId: 'session-B',
     conversationId: 'conv-A',
     cardId: 'order-1',
   })
-  assert.equal(decision.targetSessionId, 'session-B', 'level 1 chosen over conflicting level 2')
+  assert.equal(decision.targetSessionId, 'session-A')
+  assert.equal(decision.metric, 'session-conversation-conflict')
 
   // Now drop sessionId; level 2 must win, but we provide conv-A so the
   // result must be session-A (the conversation lookup), not session-A by
@@ -313,15 +303,12 @@ test('W4.7 — resolution order is exactly sessionId → conversationId → acti
   // tag. The non-degenerate proof is the conversation having a non-active
   // mapping below.
 
-  // Final: drop both; level 3 fires and target is activeSessionId.
+  // A known-but-closed conversation is not allowed to bleed into active A.
   const decisionLvl3 = routeCardToSession(state, {
     sessionId: null,
-    conversationId: 'conv-C', // points at a terminated session → not eligible
+    conversationId: 'conv-D', // points at a closed alias → not eligible
     cardId: 'order-3',
   })
-  assert.equal(
-    decisionLvl3.targetSessionId,
-    'session-A',
-    'level 3 reached because conv-C is terminated and ineligible for level 2',
-  )
+  assert.equal(decisionLvl3.targetSessionId, null)
+  assert.equal(decisionLvl3.metric, 'conversation-session-not-found')
 })

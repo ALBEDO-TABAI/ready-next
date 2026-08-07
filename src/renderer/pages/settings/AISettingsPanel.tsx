@@ -81,11 +81,9 @@ export function AISettingsPanel() {
 
   const [showKey, setShowKey] = useState(false)
   const [pendingModelId, setPendingModelId] = useState('')
-  const [editorTab, setEditorTab] = useState<'basic' | 'models' | 'capabilities' | 'conversation'>('basic')
+  const [editorTab, setEditorTab] = useState<'basic' | 'models' | 'capabilities'>('basic')
   const [profileFilter, setProfileFilter] = useState<'all' | AIProviderCategory>('all')
   const [profileDetailOpen, setProfileDetailOpen] = useState(false)
-  const [messageCoalesceEnabled, setMessageCoalesceEnabled] = useState(true)
-  const [messageCoalesceWindowMs, setMessageCoalesceWindowMs] = useState('1200')
   const [capabilityRuntimeSnapshot, setCapabilityRuntimeSnapshot] = useState<CapabilityRuntimeSnapshot | null>(null)
   const [capabilityRuntimeSnapshotKey, setCapabilityRuntimeSnapshotKey] = useState<string | null>(null)
   const [capabilityRuntimeLoading, setCapabilityRuntimeLoading] = useState(false)
@@ -148,11 +146,6 @@ export function AISettingsPanel() {
   const managedModelIdSet = new Set(managedModelIds)
   const defaultModelOptions = Array.from(new Set([...managedModelIds, selectedConfig.model].filter(Boolean)))
 
-  const persistBridgeSetting = useCallback((key: string, value: string) => {
-    if (typeof window === 'undefined' || !window.electronAPI?.settings) return
-    void window.electronAPI.settings.set(key, value)
-  }, [])
-
   const refreshCapabilityRuntimeSnapshot = useCallback(async () => {
     if (typeof window === 'undefined' || !window.electronAPI?.agent) return
     setCapabilityRuntimeLoading(true)
@@ -169,22 +162,6 @@ export function AISettingsPanel() {
   useEffect(() => {
     if (!loaded) void loadConfig()
   }, [loaded, loadConfig])
-
-  useEffect(() => {
-    let cancelled = false
-    if (!loaded || typeof window === 'undefined' || !window.electronAPI?.settings) return
-
-    ;(async () => {
-      const allSettingsResult = await window.electronAPI.settings.getAll?.()
-      if (cancelled) return
-
-      const settings = allSettingsResult?.success && allSettingsResult.data ? allSettingsResult.data : {}
-      if (settings.agent_message_coalesce_enabled) setMessageCoalesceEnabled(settings.agent_message_coalesce_enabled !== 'false')
-      if (settings.agent_message_coalesce_window_ms) setMessageCoalesceWindowMs(settings.agent_message_coalesce_window_ms)
-    })()
-
-    return () => { cancelled = true }
-  }, [loaded])
 
   useEffect(() => {
     setEditorTab('basic')
@@ -261,7 +238,6 @@ export function AISettingsPanel() {
     { id: 'basic', label: '基础' },
     { id: 'models', label: '模型' },
     { id: 'capabilities', label: '能力' },
-    { id: 'conversation', label: '对话' },
   ]
 
   const selectedTestLabel = testStatus === 'testing'
@@ -914,44 +890,6 @@ export function AISettingsPanel() {
                 </div>
               )}
 
-              {editorTab === 'conversation' && (
-                <div className="grid gap-3">
-                  <div
-                    className="flex items-center justify-between gap-3 rounded-xl border px-4 py-3"
-                    style={{ borderColor: 'color-mix(in srgb, var(--surface-border) 18%, transparent)' }}
-                  >
-                    <span className="text-[12px] font-medium" style={{ color: 'var(--text-title)' }}>启用连续消息合并</span>
-                    <SettingsSwitch
-                      checked={messageCoalesceEnabled}
-                      onChange={(next) => {
-                        setMessageCoalesceEnabled(next)
-                        persistBridgeSetting('agent_message_coalesce_enabled', String(next))
-                      }}
-                    />
-                  </div>
-                  <label
-                    className="flex items-center justify-between gap-3 rounded-xl border px-4 py-3"
-                    style={{ borderColor: 'color-mix(in srgb, var(--surface-border) 18%, transparent)' }}
-                  >
-                    <span className="text-[12px] font-medium" style={{ color: 'var(--text-title)' }}>合并窗口</span>
-                    <select
-                      value={messageCoalesceWindowMs}
-                      onChange={(event) => {
-                        setMessageCoalesceWindowMs(event.target.value)
-                        persistBridgeSetting('agent_message_coalesce_window_ms', event.target.value)
-                      }}
-                      className="text-[12px] outline-none cursor-pointer"
-                      style={{ ...compactSelectStyle, width: 128, marginTop: 0, textAlign: 'center', textAlignLast: 'center' }}
-                    >
-                      <option value="600">0.6 秒</option>
-                      <option value="1000">1.0 秒</option>
-                      <option value="1200">1.2 秒</option>
-                      <option value="1800">1.8 秒</option>
-                      <option value="2500">2.5 秒</option>
-                    </select>
-                  </label>
-                </div>
-              )}
             </div>
           </div>
         </section>

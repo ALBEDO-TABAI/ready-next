@@ -209,8 +209,6 @@ const settingsStore = new Map<string, string>([
   ['sidecar_autostart', 'true'],
   ['sidecar_bind_host', '127.0.0.1'],
   ['sidecar_bind_port', '8765'],
-  ['agent_message_coalesce_enabled', 'true'],
-  ['agent_message_coalesce_window_ms', '1200'],
 ])
 
 let channelData = [
@@ -447,7 +445,7 @@ export function installSettingsPreviewMocks(): void {
       getRuntimeStatus: async () => ({
         success: true,
         data: {
-          orchestrator: 'ready-agent-sdk',
+          orchestrator: 'codex-native',
           sidecar: {
             status: 'running',
             port: 8765,

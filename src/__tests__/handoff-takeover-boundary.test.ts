@@ -3,8 +3,6 @@ import test from 'node:test'
 
 import { recoverPendingHandoffTakeovers } from '../main/modules/agent-control/agents/handoff-takeover-recovery'
 import { commitSameSessionHandoff } from '../main/modules/agent-control/agents/handoff-adoption-transaction'
-import { RunCoordinator } from '../main/modules/agent-control/task-projection/run-coordinator'
-import type { AgentExecutionProfile, TaskExecutionBinding } from '../shared/agent-execution-profile'
 import type { ConversationScope } from '../main/modules/agent-control/contracts/types'
 import { finalizeRunOutcome } from '../main/modules/agent-control/runtime-core/run-finalizer'
 import { hasAdvancedPastHandoffContinuation, runWithHandoffToolGate } from '../main/modules/agent-control/agents/handoff-control'
@@ -35,71 +33,6 @@ function scope(activeAgentId = 'butler', handoffGeneration = 0): ConversationSco
     createdAt: '2026-07-11T00:00:00.000Z', updatedAt: '2026-07-11T00:00:00.000Z',
   }
 }
-
-function profile(id: string): AgentExecutionProfile {
-  return {
-    requestedAgentId: id, effectiveAgentId: id, personaRef: id, name: `name:${id}`,
-    charter: id, personality: id, rules: id, knowledgeIndex: '', allowedKnowledgeRefs: [],
-    knowledgeWriteOwnerAgentId: id, knowledgeWriteNamespace: `agents/${id}/knowledge`,
-    executionMaterialHash: `hash:${id}`, readinessRevision: `ready:${id}`, redirectChain: [],
-    readiness: { conversationReady: true, handoffReady: true, autoRoutable: true, collaborationReady: true, reasons: [] },
-  }
-}
-
-test('same-session handoff stops the old run and starts a fresh bound run with verbatim plus canonical refs', async () => {
-  const promptInputs: Array<{ message: unknown; contextRefIds?: string[]; profile: string }> = []
-  const bindings: TaskExecutionBinding[] = []
-  let calls = 0
-  let consumed = 0
-  const coordinator = new RunCoordinator({
-    promptAssembly: {
-      buildForScopedRun: async (input) => {
-        promptInputs.push({ message: input.message, contextRefIds: input.contextRefIds, profile: input.executionProfile.effectiveAgentId })
-        return { systemPrompt: '', bootstrapMessages: [], memoryRefs: [], triggerHits: [], contextBudget: null }
-      },
-      applyToMessage: (message) => message,
-      recordRunOutcome: () => {},
-    },
-    executeAndCollect: async () => {
-      calls += 1
-      return calls === 1
-        ? { success: true, finalText: '', cancelled: false, usedTools: ['propose_handoff'], terminalReason: 'manual_suspend' }
-        : { success: true, finalText: '完成', cancelled: false, usedTools: [], terminalReason: 'done' }
-    },
-    emitScopeRunEvent: () => {},
-    reflectOnConversation: async () => null,
-    getTaskProjection: () => ({ ownerAgentId: calls === 0 ? 'butler' : 'collector', taskOrigin: 'user_root' }),
-    resolveExecutionProfile: async (id) => profile(id),
-    createExecutionBinding: ({ profile: resolved, runId, ownerAgentIdAtStart, runOrigin, ownerAssignmentSource }) => {
-      const binding: TaskExecutionBinding = {
-        schemaVersion: 1, runId, ownerAgentIdAtStart, runOrigin, kind: 'registered_agent',
-        requestedAgentId: resolved.requestedAgentId, effectiveAgentId: resolved.effectiveAgentId,
-        executionMaterialHash: resolved.executionMaterialHash, ownerAssignmentSource,
-        executionSelectionSource: 'task_owner', resolutionKind: 'direct',
-      }
-      bindings.push(binding)
-      return binding
-    },
-    getPendingHandoff: () => ({
-      targetAgentId: 'collector', handoffGeneration: 1,
-      userRequestVerbatim: original, contextRefIds: contextRefs,
-    }),
-    getConversationScope: () => scope('collector', 1),
-    markHandoffConsumed: () => { consumed += 1 },
-  })
-
-  const result = await coordinator.runScoped({
-    scope: scope(), message: original, requestId: 'old-run', taskId: 'task-1', coordinators: [],
-  })
-
-  assert.equal(result.success, true)
-  assert.equal(calls, 2)
-  assert.equal(promptInputs[1]?.message, original)
-  assert.deepEqual(promptInputs[1]?.contextRefIds, contextRefs)
-  assert.equal(promptInputs[1]?.profile, 'collector')
-  assert.deepEqual(bindings.map((binding) => binding.runOrigin), ['continuation', 'handoff_takeover'])
-  assert.equal(consumed, 1, 'consume only after the fresh target run succeeds')
-})
 
 test('same-session adoption rolls back both owner writes and never interrupts when the transaction fails', () => {
   const calls: string[] = []

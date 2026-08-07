@@ -300,15 +300,12 @@ test('remote IM channel delivery explains WeChat ret=-3 as an outbound session f
   assert.match(result.error || '', /从微信给 Ready 发一条新消息/)
 })
 
-test('sendScoped keeps successful Send IM attachment runs green when only the channel ack text fails', () => {
-  // eslint-disable-next-line ready/no-source-grep-test -- private AgentControlRuntime callback: this pins the narrow non-fatal guard without constructing the full Electron runtime.
+test('Codex sendScoped does not retain the retired Ready-owned channel acknowledgement callback', () => {
+  // eslint-disable-next-line ready/no-source-grep-test -- reviewed E1 live-graph contract: the old callback must not return as a hidden compatibility path.
   const source = readFileSync(new URL('../main/modules/agent-control/runtime-core/runtime.ts', import.meta.url), 'utf8')
-  const block = source.match(/onSuccess:\s*async\s*\(result\)[\s\S]*?throw new Error\(sendOk\.error \|\| 'Failed to send channel reply'\)/)?.[0] || ''
 
-  assert.match(block, /result\.success && result\.usedTools\.includes\('skill_send_im_file'\)/)
-  assert.match(block, /send_scoped_channel_ack_failed_after_send_im/)
-  assert.match(block, /return\s*\n\s*}/)
-  assert.match(block, /throw new Error\(sendOk\.error \|\| 'Failed to send channel reply'\)/)
+  assert.doesNotMatch(source, /send_scoped_channel_ack_failed_after_send_im/)
+  assert.doesNotMatch(source, /Failed to send channel reply/)
 })
 
 test('send-im skill only exposes the direct file send tool and no recipient option', () => {

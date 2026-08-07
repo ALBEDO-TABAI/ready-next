@@ -15,7 +15,7 @@ import { AgentSessionManager, parseSessionKey } from '../session/session-manager
 import { createScopedRunCollector, type SendAndCollectResult } from '../task-projection/run-collector'
 import { RunCleanupRegistry, type RunCleanupCallback } from '../task-projection/run-cleanup-registry'
 import type { DomainAdapter } from '../domain-adapters/domain-adapter'
-import type { AgentRuntimeKernel, AgentTaskState } from '../contracts/types'
+import type { AgentTaskState } from '../contracts/types'
 import {
   AgentSdkRuntime,
   type AgentSdkRuntimeDeps,
@@ -406,7 +406,7 @@ export class ReadyAgentOrchestrator extends EventEmitter {
     }
   }
 
-  getRuntimeKernel(): AgentRuntimeKernel {
+  getRuntimeKernel(): 'ready-agent-sdk' {
     return 'ready-agent-sdk'
   }
 

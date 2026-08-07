@@ -14,7 +14,6 @@ import test from 'node:test'
 import {
   getSessionSlice,
   useAgent,
-  MAX_AGENT_SESSIONS,
   type AgentMessage,
   type ScopeRunState,
   type SessionSlice,
@@ -33,8 +32,6 @@ function makeMessage(id: string, content: string, type: AgentMessage['type'] = '
 function makeSlice(opts: Partial<SessionSlice> = {}): SessionSlice {
   return {
     messages: [],
-    pendingSendCount: 0,
-    pendingSendFlushAt: null,
     isStreaming: false,
     foregroundBusy: false,
     composerLocked: false,
@@ -42,8 +39,11 @@ function makeSlice(opts: Partial<SessionSlice> = {}): SessionSlice {
     streamingRequestId: null,
     scopeRunStates: {},
     taskDisclosureState: {},
+    lifecyclePendingAction: null,
+    lifecycleError: null,
     state: 'live',
     conversationId: null,
+    aliasGeneration: null,
     inputValue: '',
     ...opts,
   }
@@ -79,10 +79,6 @@ function seedStore(opts: {
     attachments: [],
     filePool: [],
     activeAttachmentPreview: null,
-    sendCoalescingEnabled: true,
-    sendCoalescingWindowMs: 1200,
-    pendingSendCount: opts.sessions[opts.activeSessionId]?.pendingSendCount ?? 0,
-    pendingSendFlushAt: opts.sessions[opts.activeSessionId]?.pendingSendFlushAt ?? null,
     sessions: opts.sessions,
     activeSessionId: opts.activeSessionId,
     sessionOrder: Object.keys(opts.sessions),
@@ -175,111 +171,6 @@ test('V3.3b.2 — setComposerDraft writes active session slice, not just top-lev
   assert.equal(state.inputValue, 'new-A', 'top-level draft mirror updates')
   assert.equal(getSessionSlice(state, 'session-A').inputValue, 'new-A', 'active session draft updates')
   assert.equal(getSessionSlice(state, 'session-B').inputValue, 'old-B', 'parked session draft stays untouched')
-})
-
-test('V3.3b.2 — createNewSession switches to an empty message slice', () => {
-  const existing = makeMessage('msg-A1', 'existing A')
-  seedStore({
-    activeSessionId: 'session-A',
-    sessions: {
-      'session-A': makeSlice({ messages: [existing], inputValue: 'draft-A' }),
-    },
-  })
-
-  const newId = useAgent.getState().createNewSession()
-  assert.ok(newId, 'new session id is returned')
-
-  const state = useAgent.getState()
-  assert.equal(state.activeSessionId, newId, 'new session becomes active')
-  assert.deepEqual(state.messages, [], 'visible message mirror is empty for the fresh session')
-  assert.deepEqual(getSessionSlice(state, 'session-A').messages, [existing], 'old session messages stay parked')
-  assert.deepEqual(getSessionSlice(state, newId).messages, [], 'fresh session slice starts empty')
-})
-
-test('createNewSession — finished (terminal) sessions are pruned and never block a new one', () => {
-  const sessions: Record<string, SessionSlice> = {}
-  for (let i = 0; i < MAX_AGENT_SESSIONS; i++) {
-    sessions[`done-${i}`] = makeSlice({ state: 'done', conversationId: `conv-done-${i}` })
-  }
-  seedStore({ activeSessionId: 'done-0', sessions })
-
-  const newId = useAgent.getState().createNewSession()
-  assert.ok(newId, 'creating succeeds even with cap-many sessions when they are all terminal')
-
-  const state = useAgent.getState()
-  assert.equal(state.activeSessionId, newId, 'the fresh session becomes active')
-  assert.deepEqual(
-    state.sessionOrder,
-    [newId],
-    'terminal sessions are reclaimed (pruned) rather than dead-ending the "+" button',
-  )
-})
-
-test('createNewSession — returns null only when MAX_AGENT_SESSIONS are still LIVE', () => {
-  const sessions: Record<string, SessionSlice> = {}
-  for (let i = 0; i < MAX_AGENT_SESSIONS; i++) {
-    sessions[`live-${i}`] = makeSlice({ state: 'live', conversationId: `conv-live-${i}` })
-  }
-  seedStore({ activeSessionId: 'live-0', sessions })
-
-  const result = useAgent.getState().createNewSession()
-  assert.equal(result, null, 'blocked: cap-many unfinished conversations already open')
-
-  const state = useAgent.getState()
-  assert.equal(state.sessionOrder.length, MAX_AGENT_SESSIONS, 'session order is unchanged when blocked')
-  assert.equal(state.activeSessionId, 'live-0', 'active session is unchanged when blocked')
-})
-
-test('createNewSession — a still-streaming session survives pruning even if flagged terminal', () => {
-  seedStore({
-    activeSessionId: 'busy',
-    sessions: {
-      // A re-activated 'done' session whose run is streaming again: its state
-      // stays terminal (non-terminal phases do not flip it back), so the prune
-      // must rely on the in-flight guard, not the state flag, to keep it.
-      busy: makeSlice({ state: 'done', isStreaming: true, conversationId: 'conv-busy' }),
-      'idle-done': makeSlice({ state: 'done', conversationId: 'conv-idle' }),
-    },
-  })
-
-  const newId = useAgent.getState().createNewSession()
-  assert.ok(newId, 'a new session is still created')
-
-  const state = useAgent.getState()
-  assert.equal(state.sessionOrder.includes('busy'), true, 'the in-flight session is preserved across create')
-  assert.equal(state.sessionOrder.includes('idle-done'), false, 'the finished idle session is pruned')
-  assert.equal(state.sessionOrder.includes(newId), true, 'the fresh session is present and active')
-})
-
-test('V3.3b.2 — newSession writes welcome state into the newly active runtime session', () => {
-  const msgA = makeMessage('msg-A1', 'existing A')
-  const msgB = makeMessage('msg-B1', 'parked B')
-  seedStore({
-    activeSessionId: 'session-A',
-    sessions: {
-      'session-A': makeSlice({ messages: [msgA], inputValue: 'draft-A', conversationId: 'conv-A' }),
-      'session-B': makeSlice({ messages: [msgB], inputValue: 'draft-B', conversationId: 'conv-B' }),
-    },
-  })
-
-  useAgent.getState().newSession()
-
-  const state = useAgent.getState()
-  assert.ok(state.activeSessionId, 'new local session becomes active')
-  assert.equal(state.sessionId, state.activeSessionId, 'runtime session id mirrors active session id')
-  assert.equal(state.sessionOrder[0], state.activeSessionId, 'new local session replaces the old active tab')
-  assert.equal(state.sessionOrder.includes('session-A'), false, 'old active session is removed from the visible tab order')
-  assert.equal(getSessionSlice(state, state.activeSessionId).conversationId, state.currentScopeId)
-  assert.deepEqual(
-    getSessionSlice(state, state.activeSessionId).messages.map((message) => message.id),
-    state.messages.map((message) => message.id),
-    'top-level messages mirror the new active session',
-  )
-  assert.deepEqual(
-    getSessionSlice(state, 'session-B').messages.map((message) => message.id),
-    ['msg-B1'],
-    'parked background session stays untouched',
-  )
 })
 
 test('V3.3b.2 — a parked background card appears only after switching to that session', () => {

@@ -183,7 +183,7 @@ export interface RunControlGroupDeps {
   /**
    * Bound `runtime.suspendRun` — async, resolves to `{success, error?}`.
    */
-  suspendRun(payload: SuspendRunPayload): Promise<{ success: boolean; error?: string }>
+  suspendRun(payload: SuspendRunPayload): Promise<{ success: boolean; error?: string; errorKind?: string }>
   /**
    * Bound `runtime.reportInfrastructureTimeout` — async, renderer watchdog
    * report with request-id authority. A stale report is a successful no-op.
@@ -253,7 +253,7 @@ export const runControlGroup: IpcChannelGroup<RunControlGroupDeps> = {
     ipcMain.handle('agent:suspendRun', async (_, payload: SuspendRunPayload): Promise<IPCResponse> => {
       try {
         const result = await deps.suspendRun(payload)
-        return { success: result.success, error: result.error }
+        return { success: result.success, error: result.error, errorKind: result.errorKind }
       } catch (error) {
         return { success: false, error: error instanceof Error ? error.message : String(error) }
       }

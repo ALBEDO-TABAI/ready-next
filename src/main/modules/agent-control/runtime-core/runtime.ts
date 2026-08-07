@@ -19,24 +19,14 @@ import {
   type AgentChannelType,
   type ChatConversationRecord,
   type ConversationSourceKind,
-  type UpsertConversationScopeMode,
 } from '../../database'
-import { ReadyAgentOrchestrator } from './orchestrator'
-import { defaultSystemPrompt } from './agent-sdk-runtime'
+import { CodexHostOrchestrator } from './codex-host-orchestrator'
 import {
-  buildManualSuspendProjectionPatch,
-  finalizeRunOutcome,
   type RunMetaRepositoryLike,
-  writeRunCloseMetric,
 } from './run-finalizer'
 import { finalizeStaleWithoutHandleProjections } from './stale-projection-finalizer'
-import {
-  composePersonaSystemPrompt,
-  resolvePersonaProfileUserId,
-} from './persona-system-prompt'
 import { PromptAssemblyService } from '../prompt-assembly'
 import { selectScopeTaskIndexEntries } from '../session/daily-task-index-builder'
-import { selectFollowupTaskRefs } from '../intent-state-first'
 import { BeliefCardStore } from '../knowledge/belief-card-store'
 import type { MirrorDb } from '../knowledge/belief-card-mirror'
 import { bumpBeliefCardAccess, readBeliefCardAccessStats } from '../knowledge/belief-card-mirror'
@@ -47,9 +37,7 @@ import {
 import type { SpecialistContentEditProposalStore } from '../agents/specialist-content-edit-proposals'
 import { RunCoordinator } from '../task-projection/run-coordinator'
 import { AgentExecutionProfileResolver, resolveConversationAgentId } from '../agents/agent-execution-profile'
-import { recoverPendingHandoffTakeovers } from '../agents/handoff-takeover-recovery'
 import { commitSameSessionHandoff } from '../agents/handoff-adoption-transaction'
-import { hasAdvancedPastHandoffContinuation } from '../agents/handoff-control'
 import { getSpecialistBlueprintStore } from '../agents/specialist-blueprint-runtime'
 import type { DomainAdapter } from '../domain-adapters/domain-adapter'
 import { getSkillsRuntimeManager } from '../../skills-runtime/runtime-manager'
@@ -57,7 +45,6 @@ import { SkillTaskRunRepository } from '../../repositories/skill-task-run-reposi
 import {
   AgentSessionCheckpointRepository,
   type CanonicalCoreCloseoutInput,
-  workflowDigest,
 } from '../../repositories/agent-session-checkpoint-repository'
 import {
   cancelSkillChildRun,
@@ -77,7 +64,6 @@ import { ProjectionSyncCoordinator } from './projection-sync-coordinator'
 import { SessionPrerouteService } from './session-preroute-service'
 import { DetachedSkillService } from './detached-skill-service'
 import { SessionRecallFacade } from './session-recall-facade'
-import { NarrationContinuationService } from './narration-continuation-service'
 import { ReferenceHintService } from './reference-hint-service'
 import { ScheduleCoordinator } from '../../scheduled-tasks/schedule-coordinator'
 import { ScheduleRepository, type ScheduledTaskOccurrence } from '../../scheduled-tasks/schedule-repository'
@@ -101,35 +87,18 @@ import { SidecarPollService } from './sidecar-poll-service'
 import { ConversationScopeStore } from './conversation-scope-store'
 import { RemoteChannelService } from './remote-channel-service'
 import { reconcileTaskProjections } from '../task-projection/task-projection-reconciler'
-import {
-  reconcileInterruptedDeliveryState,
-  shouldReconcileInterruptedDeliveryProjection,
-} from './dynamic-delivery/delivery-reconciliation'
-import { canResumeAsUserPoint, type ResumePointHandle } from '../contracts/resume-handle'
 import { deriveTaskProjectionCanResume } from '../task-projection/task-projection-resume'
 import { assertSkillTaskRunInvariantConsistency } from '../skills/skill-task-tracker'
-import type { ProjectionTruthSnapshot, RunCoordinatorResult, TaskProjectionRecord } from '../contracts/run-contracts'
-import { getBudgetUsagePercent, restoreContinuationTaskBudgetRuntime } from '../task-projection/run-budget-policy'
+import type { ProjectionTruthSnapshot, TaskProjectionRecord } from '../contracts/run-contracts'
 import {
-  normalizeContinuationIntent,
   type ContinuationIntent,
 } from '../contracts/continuation-state'
-import { registerPendingTaskEventListener } from '../system-reminders/background-task-terminal-reminder'
 import { taskEventBridge } from '../../browser-engine/task-event-bridge'
 import { createTaskEventProofListener, createTaskProofSink } from '../quality/proof-collector'
 import { isKnowledgeSystemEnabled, runStartupBeliefSync, KnowledgeWatcher } from '../knowledge/knowledge-truth-source'
-import { trustedFolderReferencesFromMessageMeta } from '../contracts/request-envelope'
 import { logAgentMetric } from '../metrics'
-import { TOOL_ERROR_METRICS } from '../tools-runtime/tool-error-metrics'
-import {
-  classifySendScopedError,
-  normalizeSendScopedErrorKind,
-  runConfirmedSendScoped,
-  type SendScopedResponse,
-  type SendScopedUserMessage,
-} from '../send-scoped-confirmation'
+import { runConfirmedSendScoped } from '../send-scoped-confirmation'
 import { SessionRecallService } from '../session/session-recall-service'
-import { getInteractionLifecycleRegistry } from './interaction-lifecycle-registry'
 import { SidecarManager } from '../sidecar-manager'
 import { MemoryRepository } from '../../repositories/memory-repository'
 import { MemoryLifecycleManager } from '../memory/memory-lifecycle'
@@ -181,6 +150,17 @@ import {
 import { resolveTrustedBrowserEnvironment } from './trusted-browser-environment'
 import { BrowserContinuationRuntime } from './browser-continuation-runtime'
 import { buildContinuationIntent as buildContinuationIntentValue } from './continuation-intent-builder'
+import type { CodexRuntimeComposition } from '../codex-runtime/codex-runtime-composition'
+import {
+  preparedCodexProductRunMatchesIngress,
+  type PreparedCodexProductRun,
+} from '../codex-runtime/codex-product-run-preparer'
+import { TERMINAL_ERROR_KINDS } from '../../../../shared/ipc-contracts/agent-runtime'
+import type {
+  LifecycleRequest,
+  SendScopedRequest,
+  SendScopedResponse,
+} from '../../../../shared/ipc-contracts/agent-runtime'
 
 export type { UpsertChannelPayload } from './runtime-helpers'
 
@@ -194,7 +174,8 @@ export class AgentControlRuntime extends EventEmitter {
   private readonly agentRegistry = new AgentRegistryRepository(this.db)
   private readonly settingsRepository = new AppSettingsRepository()
   private readonly sidecar = new SidecarManager()
-  private readonly orchestrator: ReadyAgentOrchestrator
+  private readonly codexRuntime: CodexRuntimeComposition
+  private readonly orchestrator: CodexHostOrchestrator
   private readonly toolGateway = new ToolGateway()
   private readonly memoryRepository = new MemoryRepository()
   private readonly memoryLifecycle = new MemoryLifecycleManager(this.memoryRepository)
@@ -350,7 +331,6 @@ export class AgentControlRuntime extends EventEmitter {
   private beliefCardStore: BeliefCardStore | null = null
   private readonly skillTaskRunRepository = new SkillTaskRunRepository(this.db)
   private readonly detachedSkills: DetachedSkillService
-  private readonly narrationContinuation: NarrationContinuationService
   private readonly scopeRunSummaries = new Map<string, ScopeRunSummary>()
   // Channel connected/error counts are fetched from the sidecar over HTTP, which is too slow
   // to do on every getRuntimeStatus() call (it is on the Settings render path). Cache the last
@@ -450,8 +430,7 @@ export class AgentControlRuntime extends EventEmitter {
   private readonly scopeAttachments = new ScopeAttachmentService({ db: this.db })
   // B8-D R4 — the sidecar-poll / conversation-scope clusters live in delegated
   // sub-services; same one-line-delegate pattern as R1–R3. Declared AFTER
-  // `heartbeat` / `channelStateCache` / `scopeRunSummaries` /
-  // `taskProjectionStore` so the deps capture initialized object references
+  // `heartbeat` / `channelStateCache` so the deps capture initialized object references
   // (all are mutated in place, never reassigned). Every function dep is a
   // lazy closure, so constructor-assigned hubs (`projectionSync`) and the
   // remote-channel cluster methods (`handleInboundChannel`,
@@ -470,8 +449,6 @@ export class AgentControlRuntime extends EventEmitter {
   })
   private readonly conversationScopes = new ConversationScopeStore({
     db: this.db,
-    scopeRunSummaries: this.scopeRunSummaries,
-    taskProjectionStore: this.taskProjectionStore,
     emitConversationEvent: (payload) => this.projectionSync.emitConversationEvent(payload),
     mapChannelRow: (row) => this.channelConfig.mapChannelRow(row),
     getScopedRemoteThreadKey: (channelId, remoteThread, agent) =>
@@ -501,7 +478,11 @@ export class AgentControlRuntime extends EventEmitter {
     sidecar: this.sidecar,
     settingsRepository: this.settingsRepository,
     runCoordinator: {
-      runInboundChannel: (request, hooks) => this.runCoordinator.runInboundChannel(request, hooks),
+      runInboundChannel: async () => ({
+        success: false,
+        error: 'non_local_ingress_unsupported',
+        errorKind: 'blocked_config',
+      }),
     },
     getDomainAdapters: () => this.getDomainAdapters(),
     getTaskProjection: (taskId) => this.getTaskProjection(taskId),
@@ -520,10 +501,15 @@ export class AgentControlRuntime extends EventEmitter {
       this.orchestrator.refreshActiveRunProgress(agent, scopeId, requestId)
     },
   })
-  constructor(agentManager: AgentManager, browserController?: BrowserController) {
+  constructor(
+    agentManager: AgentManager,
+    browserController: BrowserController | undefined,
+    codexRuntime: CodexRuntimeComposition,
+  ) {
     super()
     this.agentManager = agentManager
     this.browserController = browserController || null
+    this.codexRuntime = codexRuntime
     this.browserController?.setHumanTakeoverIntentPort((input) => this.createHumanTakeoverIntent(input))
     this.browserController?.setBrowserTargetResumePort((input) => this.resumeBrowserTargetClaim(input))
     this.browserController?.setBrowserTargetCheckpointResolver((parentTaskId) =>
@@ -572,88 +558,41 @@ export class AgentControlRuntime extends EventEmitter {
     // RemoteChannelService 承担（工具侧只校验参数并消费结构化结果）。
     registerChannelOutboundSender((scopeId, file) =>
       this.remoteChannel.sendFileToScopeThread(scopeId, file))
-    this.orchestrator = new ReadyAgentOrchestrator({
+    this.orchestrator = new CodexHostOrchestrator({
       browserController,
-      sidecarManager: this.sidecar,
-      // EP2-I1 — lazy: taskProjectionStore is declared later; resolved at turn time.
-      agentSdkRuntimeDeps: {
-        getScopeTaskRefs: (scopeId) => selectFollowupTaskRefs(this.taskProjectionStore, scopeId),
-      },
-    })
-    this.orchestrator.setPersonaResolver((agent, scopeId) => {
-      const scope = scopeId ? this.getConversationScope(scopeId) : null
-      return composePersonaSystemPrompt(
-        agent,
-        this.agentPersonalityRepository,
-        this.userProfileRepository,
-        defaultSystemPrompt,
-        resolvePersonaProfileUserId(scope),
-      )
     })
     this.orchestrator.setRuntime(this)
     this.runCoordinator = new RunCoordinator({
-      promptAssembly: this.promptAssembly,
-      executeAndCollect: (request) => this.orchestrator.executeAndCollect(request),
-      emitScopeRunEvent: (payload, projectionTruth) => this.projectionSync.emitScopeRunEvent(payload, projectionTruth),
-      reflectOnConversation: (scope, usedTools) => this.reflectOnConversation(scope, usedTools),
-      getTaskProjection: (taskId) => this.taskProjectionStore.get(taskId),
-      resolveExecutionProfile: (agentId) => this.executionProfileResolver.resolve(agentId),
-      createExecutionBinding: (input) => this.executionProfileResolver.createBinding(input),
-      persistRunBinding: (input) => {
-        const repository = this.getRunMetaRepository()
-        if (!repository) throw new Error('[runtime] run_meta unavailable')
-        const existing = repository.get(input.runId)
-        if (existing) {
-          if (JSON.stringify(existing.executionBinding) !== JSON.stringify(input.executionBinding)) {
-            throw new Error('[runtime] conflicting run execution binding')
-          }
-          return
-        }
-        repository.create({
-          runId: input.runId,
-          taskId: input.taskId,
-          scopeId: input.scopeId,
-          agentId: input.sessionAgentId,
-          executionBinding: input.executionBinding,
-          status: 'running',
+      executeCodexPrepared: async (input) => {
+        return this.codexRuntime.lifecycleAdapter.executePreparedRun({
+          prepared: input.prepared,
+          expectedScopeId: input.scope.id,
+          emitStartedProjection: input.emitStartedProjection,
+          resolveContext: () => this.codexRuntime.preparedRunContextPort.resolve(input),
         })
       },
-      getConversationScope: (scopeId) => this.conversationScopes.getConversationScope(scopeId),
-      getPendingHandoff: (taskId) => {
-        const projection = this.taskProjectionStore.get(taskId)
-        const ref = projection?.continuationRef as Record<string, unknown> | null | undefined
-        if (!ref || ref.kind !== 'handoff_takeover' || ref.consumed === true) return null
-        const targetAgentId = typeof ref.targetAgentId === 'string' ? ref.targetAgentId : ''
-        const userRequestVerbatim = typeof ref.userRequestVerbatim === 'string' ? ref.userRequestVerbatim : ''
-        const handoffGeneration = Number(ref.handoffGeneration || 0)
-        if (!targetAgentId || !userRequestVerbatim || !Number.isInteger(handoffGeneration) || handoffGeneration < 1) return null
-        return {
-          targetAgentId,
-          userRequestVerbatim,
-          handoffGeneration,
-          contextRefIds: Array.isArray(ref.contextRefIds) ? ref.contextRefIds.map(String) : [],
-        }
-      },
-      markHandoffConsumed: async (taskId, handoffGeneration) => {
-        const projection = this.taskProjectionStore.get(taskId)
-        const ref = projection?.continuationRef as Record<string, unknown> | null | undefined
-        if (hasAdvancedPastHandoffContinuation(projection)) return
-        if (!projection || !ref || Number(ref.handoffGeneration) !== handoffGeneration) {
-          throw new Error('[runtime] handoff continuation changed before consume')
-        }
-        if (projection.requestAnchor) {
-          await this.agentSessionCheckpoints.settleHandoffTakeoverContinuation({
-            parentTaskId: taskId,
-            handoffGeneration,
-            outcome: 'consumed',
-          })
-          return
-        }
-        this.taskProjectionStore.update(taskId, {
-          continuationRef: { ...ref, consumed: true } as never,
-          updatedAt: new Date().toISOString(),
-        })
-      },
+      observeCodexCloseoutReadback: (input, onReadback) => (
+        this.codexRuntime.lifecycleAdapter.observeRunCloseout({
+          prepared: input.prepared,
+          expectedScopeId: input.scope.id,
+          pending: input.pending,
+        }, onReadback)
+      ),
+      emitStartedScopeRunEvent: (payload) => this.projectionSync.emitScopeRunEvent(payload),
+      publishCommittedTerminalEvent: (payload) => (
+        this.projectionSync.publishCommittedScopeRunEvent(payload)
+      ),
+      onRunStarted: ({ requestId, prepared, scope }) => this.orchestrator.beginActiveProductRun({
+        agent: scope.agent,
+        scopeId: scope.id,
+        requestId,
+        runId: prepared.runId,
+      }),
+      onRunSettled: ({ requestId, scope }) => this.orchestrator.finishActiveProductRun({
+        agent: scope.agent,
+        scopeId: scope.id,
+        requestId,
+      }),
     })
     this.runProjection = new RunProjection({
       getScope: (scopeId) => this.getConversationScope(scopeId),
@@ -675,31 +614,22 @@ export class AgentControlRuntime extends EventEmitter {
     this.browserContinuation = new BrowserContinuationRuntime({
       agentSessionCheckpoints: this.agentSessionCheckpoints,
       browserController: this.browserController,
-      orchestrator: this.orchestrator,
       taskProjectionStore: this.taskProjectionStore,
-      runCoordinator: this.runCoordinator,
       executionProfileResolver: this.executionProfileResolver,
       scopeRunSummaries: this.scopeRunSummaries,
       getConversationScope: (scopeId) => this.getConversationScope(scopeId),
       getTaskProjection: (taskId) => this.getTaskProjection(taskId),
       listTaskProjections: (scopeId) => this.listTaskProjections(scopeId),
-      getRunMetaRepositoryForFinalize: () => this.getRunMetaRepositoryForFinalize(),
-      getTaskProjectionStoreForFinalize: () => this.getTaskProjectionStoreForFinalize(),
       getDomainAdapters: () => this.getDomainAdapters(),
-      sendScoped: (payload) => this.sendScoped(payload),
+      dispatchSuccessor: async () => ({
+        success: false,
+        error: 'non_user_successor_unsupported',
+        errorKind: 'non_user_successor_unsupported',
+      }),
     })
     this.detachedSkills = new DetachedSkillService({
       publishScopeRunEvent: (payload) => this.projectionSync.publishScopeRunEvent(payload),
     })
-    this.narrationContinuation = new NarrationContinuationService({
-      db: this.db,
-      settingsRepository: this.settingsRepository,
-      orchestrator: this.orchestrator,
-      scopeRunSummaries: this.scopeRunSummaries,
-      getConversationScope: (scopeId) => this.getConversationScope(scopeId),
-      emitScopeRunEvent: (payload, projectionTruth) => this.emitScopeRunEvent(payload, projectionTruth),
-    })
-
     // Phase 5 — wire the skill child runner. The runner stays as a
     // module-level singleton so `skills-tools.ts` (Team 6) can call
     // `startSkillChildRun(...)` without crossing class boundaries. We
@@ -707,17 +637,16 @@ export class AgentControlRuntime extends EventEmitter {
     // repository is ready and `getSkillsRuntimeManager()` is safe to
     // call.
     try {
-      const childRunner = configureSkillChildRunner({
+      configureSkillChildRunner({
         runtimeManager: getSkillsRuntimeManager(),
         repository: this.skillTaskRunRepository,
         taskProjectionStore: this.taskProjectionStore,
         publishScopeRunEvent: (payload) => this.projectionSync.publishScopeRunEvent(payload),
       })
-      this.orchestrator.setChildLivenessProvider(childRunner)
     } catch (error) {
-      // Boot-time wiring failure is best-effort logged; the parent loop
-      // continues to function via legacy paths if the child runner
-      // can't be configured (e.g. DB unavailable in a test harness).
+      // This runner remains available only to its explicit management IPC.
+      // Codex ingress never depends on it, so a setup failure is observable
+      // without changing the native runtime branch.
       console.warn(
         '[AgentControlRuntime] configureSkillChildRunner failed:',
         error instanceof Error ? error.message : String(error),
@@ -758,10 +687,9 @@ export class AgentControlRuntime extends EventEmitter {
       }
       throw error
     }
-    registerPendingTaskEventListener(() => this.narrationContinuation.trigger())
   }
 
-  getOrchestrator(): ReadyAgentOrchestrator {
+  getOrchestrator(): CodexHostOrchestrator {
     return this.orchestrator
   }
 
@@ -882,6 +810,10 @@ export class AgentControlRuntime extends EventEmitter {
     userRequestVerbatim: string
     contextRefs: string[]
   }): { handoffGeneration: number } {
+    const scope = this.getConversationScope(input.scopeId)
+    if (scope && this.orchestrator.isScopeLive(scope.agent, scope.id)) {
+      throw new Error('codex_handoff_requires_native_terminal_reconciliation')
+    }
     const rawDb = this.db.getRawDb()
     if (!rawDb) throw new Error('[runtime] database unavailable')
     return commitSameSessionHandoff({
@@ -900,9 +832,7 @@ export class AgentControlRuntime extends EventEmitter {
       updateConversation: (scopeId, activeAgentId, handoffGeneration) => {
         this.db.updateConversationAgentState(scopeId, activeAgentId, handoffGeneration)
       },
-      onCommitted: (sessionAgentId, scopeId) => {
-        setTimeout(() => { this.orchestrator.interruptForSuspend(sessionAgentId, scopeId) }, 0)
-      },
+      onCommitted: () => {},
     }, input)
   }
 
@@ -1004,7 +934,6 @@ export class AgentControlRuntime extends EventEmitter {
     // memory lifecycle's own 60s initial tick).
     this.crystallizeScheduler.start()
     setTimeout(() => { void this.runCrystallizeRoundOnce(false) }, 90_000)
-    this.narrationContinuation.trigger()
 
     // EP2-Q3 — additive bridge listener: terminal task events become
     // task_event proofs on the owning projection (bridge itself untouched).
@@ -1012,26 +941,6 @@ export class AgentControlRuntime extends EventEmitter {
       createTaskEventProofListener(createTaskProofSink(this.taskProjectionStore)),
     )
     this.projectionSync.scheduleTerminalProjectionSyncRetryDrain('startup')
-    for (const projection of this.taskProjectionStore.listRecentTasksForPreroute(500) as TaskProjectionRecord[]) {
-      if (projection.requestAnchor) continue
-      if (!projection.deliveryState) continue
-      const runMetaStatus = this.getRunMetaRepository()?.get(projection.runId)?.status ?? null
-      if (!shouldReconcileInterruptedDeliveryProjection({ projectionStatus: projection.status, runMetaStatus })) continue
-      const reconciled = reconcileInterruptedDeliveryState(projection.deliveryState)
-      if (reconciled === projection.deliveryState) continue
-      this.taskProjectionStore.update(projection.taskId, {
-        deliveryState: reconciled,
-        status: 'recoverable_paused',
-        interactionState: 'suspended',
-        blockedReason: 'Dynamic Delivery 在应用退出时中断，可重新发送继续。',
-      })
-      logAgentMetric('dynamic_delivery_fallback', {
-        runId: projection.runId,
-        taskId: projection.taskId,
-        reason: 'startup_reconciliation',
-      })
-    }
-
     // EP2-K6 — truth-source boundary: startup full sync (K2 handover) +
     // hand-edit watcher, both behind the rollback switch. Files are never
     // written here — file → DB only.
@@ -1064,8 +973,6 @@ export class AgentControlRuntime extends EventEmitter {
       console.error('[runtime] knowledge truth-source wiring failed:', error)
     }
 
-    await this.recoverPendingHandoffsOnStartup()
-
     const sidecarEnabled = this.getSettingBool('remote_channels_enabled', true)
     const autostart = this.getSettingBool('sidecar_autostart', true)
     const bindHost = this.db.getSetting('sidecar_bind_host') || '127.0.0.1'
@@ -1075,120 +982,20 @@ export class AgentControlRuntime extends EventEmitter {
     await this.startSidecar()
   }
 
-  private async recoverPendingHandoffsOnStartup(): Promise<void> {
-    const rawDb = this.db.getRawDb()
-    if (!rawDb) return
-    const rows = rawDb.prepare(`
-      SELECT task_id, scope_id, continuation_ref_json
-      FROM task_projections
-      WHERE status = 'recoverable_paused'
-        AND continuation_ref_json IS NOT NULL
-      ORDER BY updated_at ASC
-    `).all() as Array<{ task_id: string; scope_id: string; continuation_ref_json: string }>
-
-    await recoverPendingHandoffTakeovers({
-      listPending: () => rows.map((row) => ({
-        taskId: row.task_id,
-        scopeId: row.scope_id,
-        continuationRef: parseRecordJson(row.continuation_ref_json),
-      })),
-      getScope: (scopeId) => {
-        const row = this.db.getConversationScope(scopeId)
-        return row ? this.mapConversationRow(row) : null
-      },
-      runTakeover: ({ taskId, scope, userRequestVerbatim, contextRefIds }) => this.runCoordinator.runScoped({
-        scope,
-        message: userRequestVerbatim,
-        taskId,
-        contextRefIds,
-        runOrigin: 'handoff_takeover',
-        coordinators: this.getDomainAdapters(),
-      }),
-      markConsumed: async (taskId, handoffGeneration) => {
-        const latest = this.taskProjectionStore.get(taskId)
-        const latestRef = latest?.continuationRef as Record<string, unknown> | null | undefined
-        if (hasAdvancedPastHandoffContinuation(latest)) return
-        if (!latest || !latestRef || Number(latestRef.handoffGeneration) !== handoffGeneration) {
-          throw new Error('handoff continuation changed before startup recovery consume')
-        }
-        if (latest.requestAnchor) {
-          await this.agentSessionCheckpoints.settleHandoffTakeoverContinuation({
-            parentTaskId: taskId,
-            handoffGeneration,
-            outcome: 'consumed',
-          })
-          return
-        }
-        this.taskProjectionStore.update(taskId, {
-          continuationRef: { ...latestRef, consumed: true } as never,
-          updatedAt: new Date().toISOString(),
-        })
-      },
-      markRecoveryFailed: async (taskId, handoffGeneration, attempts, error) => {
-        const latest = this.taskProjectionStore.get(taskId)
-        const latestRef = latest?.continuationRef as Record<string, unknown> | null | undefined
-        if (!latest || !latestRef || Number(latestRef.handoffGeneration) !== handoffGeneration) return
-        if (latest.requestAnchor) {
-          await this.agentSessionCheckpoints.settleHandoffTakeoverContinuation({
-            parentTaskId: taskId,
-            handoffGeneration,
-            outcome: 'recovery_failed',
-            attempts,
-            error,
-          })
-          return
-        }
-        this.taskProjectionStore.update(taskId, {
-          continuationRef: {
-            ...latestRef,
-            startupRecoveryAttempts: attempts,
-            startupRecoveryError: error,
-          } as never,
-          updatedAt: new Date().toISOString(),
-        })
-      },
-      markRecoveryTerminal: async (taskId, handoffGeneration, error) => {
-        const latest = this.taskProjectionStore.get(taskId)
-        const latestRef = latest?.continuationRef as Record<string, unknown> | null | undefined
-        if (!latest || !latestRef || Number(latestRef.handoffGeneration) !== handoffGeneration) return
-        if (latest.requestAnchor) {
-          await this.agentSessionCheckpoints.settleHandoffTakeoverContinuation({
-            parentTaskId: taskId,
-            handoffGeneration,
-            outcome: 'recovery_terminal',
-            error,
-          })
-          return
-        }
-        this.taskProjectionStore.update(taskId, {
-          continuationRef: {
-            ...latestRef,
-            consumed: true,
-            startupRecoveryAttempts: Math.max(3, Number(latestRef.startupRecoveryAttempts || 0)),
-            startupRecoveryTerminal: true,
-            startupRecoveryError: error,
-          } as never,
-          status: 'failed',
-          interactionState: 'suspended',
-          blockedReason: error,
-          resumableActions: [],
-          updatedAt: new Date().toISOString(),
-        })
-      },
-      log: (name, payload) => logAgentMetric(name, payload),
-    })
-  }
-
   async stop(): Promise<void> {
     this.browserController?.setHumanTakeoverIntentPort(null)
     this.browserController?.setBrowserTargetResumePort(null)
     this.browserController?.setBrowserWorkflowWriteAdmissionPort(null)
     this.browserController?.setBrowserWorkflowJournalUnitOfWork(null)
     this.scheduledTaskCoordinator.stop()
-    const terminalStates = new Set(['done', 'failed', 'cancelled', 'closed'])
     for (const session of this.orchestrator.listAllSessions()) {
-      if (terminalStates.has(session.state)) continue
-      await this.orchestrator.closeSession(session.agent, session.sessionId || undefined)
+      if (!session.sessionId) continue
+      const aliasGeneration = this.codexRuntime.aliasBindingPort.readAliasGeneration(session.sessionId)
+      if (aliasGeneration === null) continue
+      await this.codexRuntime.lifecycleAdapter.stopSession({
+        aliasId: session.sessionId,
+        aliasGeneration,
+      })
     }
 
     this.sidecarPoll.stopPollLoop()
@@ -1464,27 +1271,10 @@ export class AgentControlRuntime extends EventEmitter {
         })
         this.emitScheduledTasksChanged(current.scheduleId)
       },
-      send: (payload) => this.sendScoped({
-        scopeId: payload.scopeId,
-        agent: payload.agent,
-        message: payload.message,
-        requestId: payload.requestId,
-        taskId: payload.taskId,
-        workspaceRoots: payload.workspaceRoots,
-        taskOrigin: 'system_background',
-        runOrigin: 'scheduled_task',
-        scheduledTaskOccurrence: {
-          occurrenceId: payload.envelope.occurrenceId,
-          scheduleId: payload.envelope.scheduleId,
-          scheduledFor: payload.envelope.scheduledFor,
-          triggerSource: payload.envelope.triggerSource,
-        },
-        userMessage: {
-          id: `msg-${payload.requestId}`,
-          content: payload.message,
-          timestamp: new Date().toISOString(),
-          meta: { source: 'scheduled_task', scheduledTask: payload.envelope },
-        },
+      send: async () => ({
+        success: false,
+        error: 'scheduled_codex_ingress_unsupported',
+        errorKind: 'blocked_config',
       }),
       log: (message) => logAgentMetric('scheduled_task_dispatch', { message }),
     })
@@ -1523,7 +1313,7 @@ export class AgentControlRuntime extends EventEmitter {
     }
     this.heartbeat.orchestrator = {
       healthy: true,
-      activeTasks: this.orchestrator.getSessionManager().getActiveCount(),
+      activeTasks: this.orchestrator.getActiveRunCount(),
       lastBeatAt: new Date().toISOString()
     }
     this.heartbeat.toolGateway = {
@@ -1619,7 +1409,10 @@ export class AgentControlRuntime extends EventEmitter {
   }
 
   listConversationScopes(agent?: string): ConversationScope[] {
-    return this.conversationScopes.listConversationScopes(agent)
+    return this.conversationScopes.listConversationScopes(agent).map((scope) => ({
+      ...scope,
+      aliasGeneration: this.codexRuntime.aliasBindingPort.readAliasGeneration(scope.id),
+    }))
   }
 
   listScopeRuns(payload?: {
@@ -1790,11 +1583,6 @@ export class AgentControlRuntime extends EventEmitter {
     return this.referenceHints.getReferenceSkillHint(scopeId)
   }
 
-  /** Phase 1.1 — `chat:saveMessage` post-persist hook; delegated to ReferenceHintService. */
-  persistReferenceHintAfterAssistantMessage(scopeId: string, role: string): void {
-    this.referenceHints.persistReferenceHintAfterAssistantMessage(scopeId, role)
-  }
-
   startDetachedSkillAction(payload: {
     scopeId?: string | null
     sessionId?: string | null
@@ -1943,10 +1731,6 @@ export class AgentControlRuntime extends EventEmitter {
     return this.conversationScopes.getConversationScopeMessages(scopeId)
   }
 
-  deleteConversation(scopeId: string): void {
-    this.conversationScopes.deleteConversation(scopeId)
-  }
-
   listScopeAttachments(scopeId: string): ConversationAttachment[] {
     return this.scopeAttachments.listScopeAttachments(scopeId)
   }
@@ -1976,11 +1760,24 @@ export class AgentControlRuntime extends EventEmitter {
     return this.conversationScopes.createLocalScope(agent, id)
   }
 
-  createLocalScopeWithMode(
-    agent: string,
-    id?: string,
-  ): { scope: ConversationScope; mode: UpsertConversationScopeMode } {
-    return this.conversationScopes.createLocalScopeWithMode(agent, id)
+  createCodexSession() {
+    return this.codexRuntime.lifecycleAdapter.createSession()
+  }
+
+  resetCodexSession(request: LifecycleRequest) {
+    return this.codexRuntime.lifecycleAdapter.resetSession(request)
+  }
+
+  stopCodexSession(request: LifecycleRequest) {
+    return this.codexRuntime.lifecycleAdapter.stopSession(request)
+  }
+
+  closeCodexSession(request: LifecycleRequest) {
+    return this.codexRuntime.lifecycleAdapter.closeSession(request)
+  }
+
+  compactCodexSession(request: LifecycleRequest) {
+    return this.codexRuntime.lifecycleAdapter.compactSession(request)
   }
 
   private async resolveTrustedRequestEnvironment(
@@ -1999,195 +1796,90 @@ export class AgentControlRuntime extends EventEmitter {
     }
   }
 
-  async sendScoped(payload: {
-    scopeId: string
-    agent?: string
-    message: string | MultimodalBlock[]
-    requestId?: string
-    userMessage?: SendScopedUserMessage
-    taskId?: string
-    parentTaskId?: string
-    parentStepId?: string
-    sessionIdOverride?: string
-    workspaceRoots?: string[]
-    environmentHint?: {
-      workbenchMode?: 'browser' | 'document' | 'rss' | 'calendar'
-    }
-    continuationIntent?: ContinuationIntent | null
-    deliveryMode?: import('../../../../shared/dynamic-delivery').DeliveryMode
-    taskOrigin?: import('../../../../shared/agent-execution-profile').TaskCreationOrigin
-    runOrigin?: import('../../../../shared/agent-execution-profile').RunExecutionOrigin
-    scheduledTaskOccurrence?: import('../../../../shared/scheduled-tasks').ScheduledTaskOccurrenceSource
-  }): Promise<SendScopedResponse> {
-    const canonicalUserMessage: SendScopedUserMessage = payload.userMessage || {
-      id: `msg-${payload.requestId || randomUUID()}`,
-      content: this.extractTextFromMessage(payload.message),
-      timestamp: new Date().toISOString(),
-      meta: { source: 'main_canonical_ingress' },
-    }
+  async sendScoped(payload: SendScopedRequest): Promise<SendScopedResponse> {
+    const canonicalUserMessage = payload.userMessage
     return runConfirmedSendScoped({
       scopeId: payload.scopeId,
-      agent: payload.agent,
+      requestId: payload.requestId,
       userMessage: canonicalUserMessage,
       getScope: (scopeId) => this.db.getConversationScope(scopeId),
-      createLocalScope: (agent, scopeId) => {
-        const recoveredScope = this.createLocalScope(agent, scopeId)
-        const recoveredRow = this.db.getConversationScope(recoveredScope.id)
-        if (!recoveredRow) {
-          throw new Error(`Conversation scope not found after create: ${scopeId}`)
-        }
-        return recoveredRow
+      resolveStartIdentityMethods: (scopeRow) => this.codexRuntime.startIdentityPort.resolveMethods(
+        this.mapConversationRow(scopeRow).id,
+      ),
+      reserveStartIdentitySet: (input) => this.codexRuntime.startIdentityPort.reserve(input),
+      reconcileReservationContractFailure: (input) => (
+        this.codexRuntime.startIdentityPort.reconcileReservationContractFailure(input)
+      ),
+      prepareDispatch: ({ scope, reservation }) => this.codexRuntime.ingressPort.prepareIngress({
+        scope: this.mapConversationRow(scope),
+        request: payload,
+        reservation,
+      }),
+      validateDispatchContext: (value, input): value is PreparedCodexProductRun => {
+        const mappedScope = this.mapConversationRow(input.scope)
+        return preparedCodexProductRunMatchesIngress(value, {
+          scopeId: mappedScope.id,
+          aliasId: mappedScope.id,
+          aliasGeneration: this.codexRuntime.aliasBindingPort.readAliasGeneration(mappedScope.id),
+          requestId: input.requestId,
+          originUserMessageId: input.userMessage.id,
+          reservationSetId: input.reservation.reservationSetId,
+          reservationEvidenceDigest: input.reservation.reservationEvidenceDigest,
+        })
       },
-      persistUserMessage: (scopeRow, userMessage) => {
-        const scope = this.mapConversationRow(scopeRow)
-        this.db.addChatMessage(
-          userMessage.id,
-          scope.id,
-          'user',
-          userMessage.content,
-          userMessage.timestamp || new Date().toISOString(),
-          userMessage.meta,
-        )
+      persistIngressAtomic: async ({ scope, reservation, dispatchContext }) => {
+        const admission = await this.codexRuntime.ingressPort.persistIngressAtomic({
+          scope: this.mapConversationRow(scope),
+          request: payload,
+          reservation,
+          prepared: dispatchContext,
+        })
+        return {
+          persistence: admission.persistence,
+          event: admission.event,
+        }
       },
-      routeActiveOwner: async (scopeRow, userMessage, persistence) => {
-        const scope = this.mapConversationRow(scopeRow)
-        const activeRunId = this.orchestrator.getActiveRunId(scope.agent, scope.id)
-        if (!activeRunId) return null
-        const candidates = (this.taskProjectionStore.listByScope(scope.id) as TaskProjectionRecord[])
-          .filter((projection) => projection.runId === activeRunId)
-          .sort((left, right) => String(right.updatedAt || '').localeCompare(String(left.updatedAt || '')))
-        const parent = candidates.find((projection) => !projection.parentTaskId)
-          || candidates.find((projection) => projection.taskOrigin !== 'workflow_child')
-          || null
-        if (!parent) {
-          return {
-            success: false,
-            error: 'active_owner_parent_not_found',
-            errorKind: 'persistence_failed',
-            persistence,
-          }
-        }
-        if (!this.agentSessionCheckpoints.isBrowserWorkflowBound(parent.taskId, activeRunId)) {
-          return null
-        }
-        try {
-          await this.agentSessionCheckpoints.persistCanonicalMessageAndSteer({
-            parentTaskId: parent.taskId,
-            ownerRunId: activeRunId,
-            message: {
-              id: userMessage.id,
-              conversationId: scope.id,
-              content: userMessage.content,
-              structuredContent: payload.message,
-              timestamp: userMessage.timestamp || new Date().toISOString(),
-              meta: userMessage.meta,
-            },
-            repairDerivedState: async (message, messageDigest) => {
-              this.db.repairChatMessageDerivedIndexes(message, messageDigest)
-            },
-          })
-          this.orchestrator.refreshActiveRunProgress(scope.agent, scope.id, activeRunId)
+      releaseReservationAfterIngressFailure: (input) => (
+        this.codexRuntime.startIdentityPort.releaseAfterIngressFailure(input)
+      ),
+      releaseReservationAfterPrePersistenceRejection: (input) => (
+        this.codexRuntime.startIdentityPort.releaseAfterPrePersistenceRejection(input)
+      ),
+      emitIngressAdmitted: (event) => this.emit('ingressAdmitted', event),
+      runConfirmed: async ({ scope, persistence, dispatchContext }) => {
+        const result = await this.runCoordinator.runScoped({
+          requestId: payload.requestId,
+          scope: this.mapConversationRow(scope),
+          preparedCodexRun: dispatchContext,
+        })
+        if (result.success) {
           return {
             success: true,
-            acceptedAsSteering: true,
-            ownerRunId: activeRunId,
+            disposition: 'terminal_success',
+            ownerRunId: payload.requestId,
+            shouldClearInput: true,
+            preserveInput: false,
+            retryableByUser: false,
             persistence,
-          }
-        } catch (error) {
-          // silent-catch: steering persistence failures are returned to the caller as a typed failure.
-          return {
-            success: false,
-            error: error instanceof Error ? error.message : String(error),
-            errorKind: 'persistence_failed',
-            persistence,
+            responseText: result.responseText,
+            canonicalMessage: result.canonicalMessage,
+            canonicalMessageDigest: result.canonicalMessageDigest,
           }
         }
-      },
-      onLazyCreate: (scopeId, agent) => {
-        logAgentMetric('local_scope_lazy_created_on_send', { scopeId, agent })
-      },
-      runConfirmed: async (scopeRow, persistence) => {
-        const scope = this.mapConversationRow(scopeRow)
-        if (!payload.continuationIntent) {
-          await this.agentSessionCheckpoints.expirePendingBrowserConfirmations({ scopeId: scope.id })
-        }
-        const trustedEnvironment = await this.resolveTrustedRequestEnvironment(payload.environmentHint)
-        // skill-resume A1: restore reference-skill hint from persisted conv meta
-        // before any skill detection runs, so resumed sessions don't lose context
-        // after Ready restart (in-memory Map alone wouldn't survive).
-        this.referenceHints.restoreReferenceHintFromScope(scope, payload.scopeId)
-        const normalizedContinuationIntent = (() => {
-          const intent = normalizeContinuationIntent(payload.continuationIntent || null)
-          if (!intent) return null
-          const target = this.resolveTaskControlTarget(payload.scopeId, intent.taskId)
-          if (!target) return null
-          return this.buildContinuationIntent({
-            projection: target.projection,
-            scopeRunSummary: target.scopeRunSummary,
-            incoming: intent,
-          })
-        })()
-        let result: RunCoordinatorResult
-        try {
-          result = await this.runCoordinator.runScoped(
-            {
-              scope,
-              message: payload.message as
-                | string
-                | Array<{ type: string; text?: string; base64?: string; mimeType?: string }>,
-              requestId: payload.requestId,
-              sourceMessageId: canonicalUserMessage.id,
-              taskId: payload.taskId,
-              parentTaskId: payload.parentTaskId,
-              parentStepId: payload.parentStepId,
-              sessionIdOverride: payload.sessionIdOverride,
-              workspaceRoots: payload.workspaceRoots,
-              trustedFolderReferences: trustedFolderReferencesFromMessageMeta(canonicalUserMessage.meta),
-              trustedEnvironment,
-              continuationIntent: normalizedContinuationIntent,
-              deliveryMode: payload.deliveryMode,
-              taskOrigin: payload.taskOrigin,
-              runOrigin: payload.runOrigin,
-              scheduledTaskOccurrence: payload.scheduledTaskOccurrence,
-              coordinators: this.getDomainAdapters(),
-            },
-            {
-              onSuccess: async (result) => {
-                if (scope.sourceKind !== 'channel') return
-                const outboundText =
-                  result.finalText.trim() || '任务已完成，但本次没有产生可发送的文本结果。'
-                const sendOk = await this.sendLongTextToChannel(
-                  scope.sourceId,
-                  scope.threadKey,
-                  outboundText
-                )
-                if (!sendOk.success) {
-                  if (result.success && result.usedTools.includes('skill_send_im_file')) {
-                    logAgentMetric('send_scoped_channel_ack_failed_after_send_im', {
-                      scopeId: scope.id,
-                      channelId: scope.sourceId,
-                      taskId: result.taskId || null,
-                      runId: payload.requestId || null,
-                      usedTools: result.usedTools,
-                      error: sendOk.error || 'Failed to send channel reply',
-                    })
-                    return
-                  }
-                  throw new Error(sendOk.error || 'Failed to send channel reply')
-                }
-              }
-            }
-          )
-        } finally {
-          await this.finalizeStaleWithoutHandleProjectionsForScope(scope)
-          void this.scheduleDispatchQueue.drain(scope.id)
-        }
+        const errorKind = TERMINAL_ERROR_KINDS.includes(result.errorKind as never)
+          ? result.errorKind as typeof TERMINAL_ERROR_KINDS[number]
+          : 'persistence_failed'
         return {
-          ...result,
-          errorKind: result.scopeRunAuthority?.state === 'lost'
-            ? 'superseded'
-            : result.success ? undefined : normalizeSendScopedErrorKind(result.errorKind) || classifySendScopedError(result.error, 'run'),
+          success: false,
+          disposition: 'terminal_failure_after_persistence',
+          ownerRunId: payload.requestId,
+          shouldClearInput: true,
+          preserveInput: false,
+          retryableByUser: false,
           persistence,
+          error: result.error || 'codex_closeout_contract_invalid',
+          errorKind,
+          productOutcomeDigest: result.productOutcomeDigest,
         }
       },
     })
@@ -2216,8 +1908,8 @@ export class AgentControlRuntime extends EventEmitter {
   async suspendRun(payload: {
     scopeId: string
     taskId?: string
-  }): Promise<{ success: boolean; error?: string }> {
-  return this.browserContinuation.suspendRun(payload)
+  }): Promise<{ success: boolean; error?: string; errorKind?: string }> {
+    return this.browserContinuation.suspendRun(payload)
   }
 
   async reportInfrastructureTimeout(payload: {

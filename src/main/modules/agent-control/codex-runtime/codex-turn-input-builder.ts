@@ -1,0 +1,207 @@
+import { z } from 'zod'
+
+import type {
+  CodexAdditionalContextEntry,
+  CodexTurnStartParams,
+  CodexUserInput,
+} from './codex-native-runtime'
+
+export type ResourceVersionReference = {
+  logicalResourceId: string
+  currentVersion: string
+  currentDigest: string
+  supersedesVersion: string | null
+  policyEpoch: number
+}
+
+export type CanonicalCurrentInputRef = {
+  messageId: string
+  input: CodexUserInput[]
+}
+
+export type ExplicitResourceEnvelope = {
+  input: CodexUserInput[]
+  resourceRefs: ResourceVersionReference[]
+}
+
+export type UserIngress = {
+  kind: 'user_ingress'
+  attemptKind: 'user_ingress'
+  originUserMessageId: string
+  canonicalCurrentInputRef: CanonicalCurrentInputRef
+  explicitResourceEnvelope: ExplicitResourceEnvelope
+  resourceAdditionalContext: ResourceVersionReference[]
+}
+
+export type NonUserSuccessorIngress = {
+  kind: 'non_user_successor'
+  attemptKind: 'recovery_successor' | 'checkpoint_successor' | 'explicit_retry'
+  originUserMessageId: string
+  predecessorRunId: string
+  turnStartInput: []
+  signedContinuationContextRef: string
+  historyParityEvidenceDigest: string
+  currentThreadReadEvidenceDigest: string
+  continuationContractDigest: string
+}
+
+export type CodexTurnIngress = UserIngress | NonUserSuccessorIngress
+
+export type CodexTurnBuildContext = {
+  threadId: string
+  turnRequestId: string
+  readyRunId: string
+  toolSurfaceDigest: string
+  turnContractDigest: string
+  upstreamProfileSnapshotDigest: string
+}
+
+export type CodexTurnInputBuildResult =
+  | { ok: true; params: CodexTurnStartParams }
+  | {
+      ok: false
+      code:
+        | 'invalid_ingress'
+        | 'origin_message_mismatch'
+        | 'resource_reference_mismatch'
+        | 'non_user_successor_unsupported'
+    }
+
+const nonEmptyString = z.string().min(1)
+
+const resourceVersionReferenceSchema = z.object({
+  logicalResourceId: nonEmptyString,
+  currentVersion: nonEmptyString,
+  currentDigest: nonEmptyString,
+  supersedesVersion: nonEmptyString.nullable(),
+  policyEpoch: z.number().int().positive(),
+}).strict()
+
+const codexUserInputSchema = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('text'), text: z.string(), text_elements: z.tuple([]) }).strict(),
+  z.object({
+    type: z.literal('image'),
+    url: nonEmptyString,
+    detail: z.enum(['auto', 'low', 'high', 'original']).nullable(),
+  }).strict(),
+  z.object({ type: z.literal('audio'), url: nonEmptyString }).strict(),
+])
+
+const userIngressSchema = z.object({
+  kind: z.literal('user_ingress'),
+  attemptKind: z.literal('user_ingress'),
+  originUserMessageId: nonEmptyString,
+  canonicalCurrentInputRef: z.object({
+    messageId: nonEmptyString,
+    input: z.array(codexUserInputSchema).min(1),
+  }).strict(),
+  explicitResourceEnvelope: z.object({
+    input: z.array(codexUserInputSchema),
+    resourceRefs: z.array(resourceVersionReferenceSchema),
+  }).strict(),
+  resourceAdditionalContext: z.array(resourceVersionReferenceSchema),
+}).strict()
+
+const nonUserSuccessorIngressSchema = z.object({
+  kind: z.literal('non_user_successor'),
+  attemptKind: z.enum(['recovery_successor', 'checkpoint_successor', 'explicit_retry']),
+  originUserMessageId: nonEmptyString,
+  predecessorRunId: nonEmptyString,
+  turnStartInput: z.tuple([]),
+  signedContinuationContextRef: nonEmptyString,
+  historyParityEvidenceDigest: nonEmptyString,
+  currentThreadReadEvidenceDigest: nonEmptyString,
+  continuationContractDigest: nonEmptyString,
+}).strict()
+
+const codexTurnIngressSchema = z.discriminatedUnion('kind', [
+  userIngressSchema,
+  nonUserSuccessorIngressSchema,
+])
+
+function referenceKey(reference: ResourceVersionReference): string {
+  return JSON.stringify([
+    reference.logicalResourceId,
+    reference.currentVersion,
+    reference.currentDigest,
+    reference.supersedesVersion,
+    reference.policyEpoch,
+  ])
+}
+
+export function resourceReferenceSetsMatch(
+  envelopeReferences: readonly ResourceVersionReference[],
+  additionalContextReferences: readonly ResourceVersionReference[],
+): boolean {
+  const envelopeRefs = new Set(envelopeReferences.map(referenceKey))
+  const contextRefs = new Set(additionalContextReferences.map(referenceKey))
+  const envelopeResourceIds = new Set(
+    envelopeReferences.map((reference) => reference.logicalResourceId),
+  )
+  const contextResourceIds = new Set(
+    additionalContextReferences.map((reference) => reference.logicalResourceId),
+  )
+  return envelopeRefs.size === envelopeReferences.length
+    && contextRefs.size === additionalContextReferences.length
+    && envelopeResourceIds.size === envelopeReferences.length
+    && contextResourceIds.size === additionalContextReferences.length
+    && envelopeRefs.size === contextRefs.size
+    && [...envelopeRefs].every((key) => contextRefs.has(key))
+}
+
+function buildResourceContext(
+  references: ResourceVersionReference[],
+): Record<string, CodexAdditionalContextEntry> {
+  return Object.fromEntries(references.map((reference) => [
+    `ready-resource:${reference.logicalResourceId}`,
+    {
+      kind: 'application' as const,
+      value: JSON.stringify(reference),
+    },
+  ]))
+}
+
+export class CodexTurnInputBuilder {
+  build(rawIngress: unknown, context: CodexTurnBuildContext): CodexTurnInputBuildResult {
+    const parsed = codexTurnIngressSchema.safeParse(rawIngress)
+    if (!parsed.success) return { ok: false, code: 'invalid_ingress' }
+    const ingress = parsed.data
+
+    if (ingress.kind === 'non_user_successor') {
+      return { ok: false, code: 'non_user_successor_unsupported' }
+    }
+    if (ingress.canonicalCurrentInputRef.messageId !== ingress.originUserMessageId) {
+      return { ok: false, code: 'origin_message_mismatch' }
+    }
+
+    if (!resourceReferenceSetsMatch(
+      ingress.explicitResourceEnvelope.resourceRefs,
+      ingress.resourceAdditionalContext,
+    )) {
+      return { ok: false, code: 'resource_reference_mismatch' }
+    }
+
+    return {
+      ok: true,
+      params: {
+        threadId: context.threadId,
+        clientUserMessageId: context.turnRequestId,
+        input: [
+          ...ingress.canonicalCurrentInputRef.input,
+          ...ingress.explicitResourceEnvelope.input,
+        ],
+        additionalContext: buildResourceContext(ingress.resourceAdditionalContext),
+        responsesapiClientMetadata: {
+          readyRunId: context.readyRunId,
+          toolSurfaceDigest: context.toolSurfaceDigest,
+          turnContractDigest: context.turnContractDigest,
+          upstreamProfileSnapshotDigest: context.upstreamProfileSnapshotDigest,
+        },
+      },
+    }
+  }
+}
+
+export function textUserInput(text: string): CodexUserInput {
+  return { type: 'text', text, text_elements: [] }
+}

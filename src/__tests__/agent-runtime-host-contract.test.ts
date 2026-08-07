@@ -16,7 +16,7 @@ function assertMatchesAll(
   }
 }
 
-test('runtime host is split into run coordinator, run projection, and execution host contracts', () => {
+test('runtime host keeps projection contracts while the production sender is Codex-native', () => {
   const runtime = readWorkspaceFile('src/main/modules/agent-control/runtime-core/runtime.ts')
   const orchestrator = readWorkspaceFile('src/main/modules/agent-control/runtime-core/orchestrator.ts')
   const runCoordinator = readWorkspaceFile('src/main/modules/agent-control/task-projection/run-coordinator.ts')
@@ -62,7 +62,7 @@ test('runtime host is split into run coordinator, run projection, and execution 
   assert.match(runCoordinator, /export class RunCoordinator/)
   assert.match(runCoordinator, /async runScoped\(/)
   assert.match(runCoordinator, /async runInboundChannel\(/)
-  assert.match(runCoordinator, /private async executeRun\(/)
+  assert.doesNotMatch(runCoordinator, /promptAssembly|executeAndCollect|runtimeKernel|ready-agent-sdk-retired/)
 
   assert.match(runProjection, /export class RunProjection/)
   assert.match(runProjection, /recordEvent\(/)
@@ -150,7 +150,9 @@ test('runtime host is split into run coordinator, run projection, and execution 
   assert.match(runtime, /import \{ RunProjection \} from '\.\.\/task-projection\/run-projection'/)
   assert.match(runtime, /private readonly runCoordinator: RunCoordinator/)
   assert.match(runtime, /private readonly runProjection: RunProjection/)
-  assert.match(runtime, /(?:return|const\s+\w+\s*=\s*await|\w+\s*=\s*await)\s+this\.runCoordinator\.runScoped\(/)
+  assert.doesNotMatch(runtime, /runtimeKernel:\s*'codex-native'|ready-agent-sdk-retired/)
+  assert.match(runtime, /new CodexHostOrchestrator\(/)
+  assert.doesNotMatch(runtime, /new ReadyAgentOrchestrator\(|new AgentSdkRuntime\(/)
   // B8-D R5 — the inbound-channel dispatch moved into RemoteChannelService;
   // the runtime wires a narrowed `runCoordinator` face into the service, and
   // the service awaits the coordinator through that injected dep. Both sides
@@ -158,10 +160,7 @@ test('runtime host is split into run coordinator, run projection, and execution 
   const remoteChannelService = readWorkspaceFile(
     'src/main/modules/agent-control/runtime-core/remote-channel-service.ts',
   )
-  assert.match(
-    runtime,
-    /runCoordinator:\s*\{\s*\n?\s*runInboundChannel:\s*\(request,\s*hooks\)\s*=>\s*this\.runCoordinator\.runInboundChannel\(request,\s*hooks\)/,
-  )
+  assert.match(runtime, /runInboundChannel:\s*async \(\) => \(\{[\s\S]*?non_local_ingress_unsupported/)
   assert.match(remoteChannelService, /(?:return\s+|const\s+\w+\s*=\s*)?await\s+this\.deps\.runCoordinator\.runInboundChannel\(/)
   // B8-D R1 — projection event recording is delegated through the
   // ProjectionSyncCoordinator, which owns the single RunProjection.recordEvent
@@ -173,6 +172,13 @@ test('runtime host is split into run coordinator, run projection, and execution 
   assert.match(projectionSyncCoordinator, /return this\.deps\.runProjection\.recordEvent\(/)
   assert.doesNotMatch(runtime, /const promptAssembly = await this\.promptAssembly\.buildForScopedRun\(/)
   assert.doesNotMatch(runtime, /const result = await this\.orchestrator\.sendAndCollect\(agent, promptPayload, scope\.id, requestId\)/)
+  assert.match(runtime, /this\.codexRuntime\.ingressPort\.persistIngressAtomic\(/)
+  assert.match(
+    runtime,
+    /this\.codexRuntime\.lifecycleAdapter\.executePreparedRun\(\{[\s\S]*?emitStartedProjection:\s*input\.emitStartedProjection,[\s\S]*?resolveContext:\s*\(\)\s*=>\s*this\.codexRuntime\.preparedRunContextPort\.resolve\(input\)/,
+  )
+  assert.doesNotMatch(runtime, /preparedRunPort/)
+  assert.doesNotMatch(runtime, /codex_ingress_(?:repository|dispatch)_unavailable/)
 
   assert.match(orchestrator, /import type \{ ExecutionHostRequest, ExecutionHostResult \} from '\.\.\/contracts\/run-contracts'/)
   assert.match(orchestrator, /async executeAndCollect\(request: ExecutionHostRequest\): Promise<ExecutionHostResult>/)
@@ -213,8 +219,9 @@ test('runtime host is split into run coordinator, run projection, and execution 
 // 的复活由 check-directchat-turnengine-dormant-boundary 的存在性合同与全 src/main
 // import/构造扫描拦截。
 
-test('P6t keeps runtime ownership split with SDK as live sender and DomainAdapterHost as provider shell', () => {
-  const orchestrator = readWorkspaceFile('src/main/modules/agent-control/runtime-core/orchestrator.ts')
+test('production ownership keeps Codex as the only sender and DomainAdapterHost outside the core', () => {
+  const runtime = readWorkspaceFile('src/main/modules/agent-control/runtime-core/runtime.ts')
+  const codexHost = readWorkspaceFile('src/main/modules/agent-control/runtime-core/codex-host-orchestrator.ts')
   const contracts = readWorkspaceFile('src/main/modules/agent-control/contracts/run-contracts.ts')
 
   assertMatchesAll(contracts, [
@@ -224,40 +231,24 @@ test('P6t keeps runtime ownership split with SDK as live sender and DomainAdapte
     },
   ])
 
-  // 合同随实现同步（Phase C C4/C5，2026-07-05）：provider shell 从 DirectChatEngine
-  // 换为 DomainAdapterHost——orchestrator 构造 host 并把 adapter 装配面注入 SDK 引擎。
-  assertMatchesAll(orchestrator, [
+  assertMatchesAll(runtime, [
     {
-      label: 'orchestrator should own the DomainAdapterHost provider shell',
-      pattern: /this\.domainAdapterHost = new DomainAdapterHost\(\)/,
+      label: 'runtime should construct the Codex host',
+      pattern: /this\.orchestrator = new CodexHostOrchestrator\(/,
     },
     {
-      label: 'orchestrator should feed host adapters into the SDK engine',
-      pattern: /domainAdapters: this\.domainAdapterHost\.getDomainAdapters\(\)/,
-    },
-    {
-      label: 'orchestrator should feed host skill context orchestrator into the SDK engine',
-      pattern: /skillContextOrchestrator: this\.domainAdapterHost\.getSkillContextOrchestrator\(\)/,
+      label: 'runtime should construct the Codex coordinator without a legacy switch',
+      pattern: /this\.runCoordinator = new RunCoordinator\(\{[\s\S]*?executeCodexPrepared:/,
     },
   ])
-
-  assertMatchesAll(orchestrator, [
-    {
-      label: 'orchestrator should continue consuming execution host results rather than direct-chat internals',
-      pattern: /async executeAndCollect\(request: ExecutionHostRequest\): Promise<ExecutionHostResult>/,
-    },
-    {
-      label: 'orchestrator should read stable task projection ids from host results',
-      pattern: /taskProjectionId: result\.taskProjectionId/,
-    },
-    {
-      label: 'orchestrator should read stable execution diagnostics from host results',
-      pattern: /executionDiagnostics: result\.executionDiagnostics \|\| null/,
-    },
-  ])
+  assert.doesNotMatch(runtime, /codexProductRunPreparer|codexPreparationInput/)
+  assert.match(codexHost, /export class CodexHostOrchestrator/)
+  assert.match(codexHost, /private readonly domainAdapterHost = new DomainAdapterHost\(\)/)
+  assert.doesNotMatch(codexHost, /AgentSdkRuntime|ReadyAgentOrchestrator|sendMessage\(/)
 })
 
-test('live SDK browser completion reads one durable workflow inspection without a second active-plan truth', () => {
+test('retired SDK browser fixture still has one durable workflow inspection without entering production assembly', () => {
+  const runtime = readWorkspaceFile('src/main/modules/agent-control/runtime-core/runtime.ts')
   const sdkToolExecutor = readWorkspaceFile(
     'src/main/modules/agent-control/runtime-core/agent-sdk-tool-executor.ts',
   )
@@ -281,4 +272,5 @@ test('live SDK browser completion reads one durable workflow inspection without 
     `${sdkRuntime}\n${sdkTurnExecution}\n${sdkModelLoop}\n${sdkToolExecutor}`,
     /active-plan-step-reminder|noteToolResultForActivePlan|buildActivePlanReminderText|\.applyResult\(/,
   )
+  assert.doesNotMatch(runtime, /agent-sdk-turn-completion|new AgentSdkRuntime\(/)
 })

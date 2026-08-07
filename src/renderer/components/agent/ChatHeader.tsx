@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { createPortal } from 'react-dom'
-import { AtSign, ChevronDown, ChevronRight, MessageSquare, MoreHorizontal, PanelLeftClose, Pencil, Plus, Trash2 } from 'lucide-react'
+import { AtSign, ChevronDown, ChevronRight, MessageSquare, Minimize2, MoreHorizontal, PanelLeftClose, Pencil, Plus, RotateCcw, Trash2 } from 'lucide-react'
 import { IconButton } from '../ui/IconButton'
 import { LiquidFloatingPanel } from '../ui/liquid-glass/LiquidFloatingPanel'
 import Modal from '../ui/Modal'
@@ -26,11 +26,13 @@ interface ConversationChannelOption {
 interface ChatHeaderProps {
   currentChannel: ConversationChannelOption
   channelOptions: ConversationChannelOption[]
-  onChannelSelect: (channel: ConversationChannelOption) => void
-  onNewSession: () => void
-  /** When true the "+" buttons render disabled with an explanatory tooltip —
-   *  MAX_AGENT_SESSIONS conversations are still live. See ChatPanel. */
-  newSessionDisabled?: boolean
+  onChannelSelect: (channel: ConversationChannelOption) => void | Promise<void>
+  onNewSession: () => void | Promise<unknown>
+  onResetCurrentConversation: () => void | Promise<void>
+  onCompactCurrentSession: () => void | Promise<void>
+  currentConversationAvailable: boolean
+  lifecyclePendingAction: 'creating' | 'resetting' | 'stopping' | 'closing' | 'compacting' | null
+  lifecycleUncertainty: 'interrupt' | 'compaction' | null
   /** Per-channel live sessions (keyed by `${sourceKind}:${sourceId}`), newest
    *  first. Drives the expanded history list so every session — including a
    *  fresh remote `/new` — is individually selectable. */
@@ -65,7 +67,11 @@ export default function ChatHeader({
   channelOptions,
   onChannelSelect,
   onNewSession,
-  newSessionDisabled,
+  onResetCurrentConversation,
+  onCompactCurrentSession,
+  currentConversationAvailable,
+  lifecyclePendingAction,
+  lifecycleUncertainty,
   sessionsByChannelKey,
   onLoadConversation,
   onDeleteConversation,
@@ -93,11 +99,14 @@ export default function ChatHeader({
   const [pendingDeleteSession, setPendingDeleteSession] = useState<{ conversationId: string; title: string } | null>(null)
   const [pendingRenameSession, setPendingRenameSession] = useState<{ conversationId: string; title: string } | null>(null)
   const [rowMenu, setRowMenu] = useState<{ conversationId: string; title: string; position: FloatingMenuPosition } | null>(null)
+  const [operationMenuPosition, setOperationMenuPosition] = useState<FloatingMenuPosition | null>(null)
   const scopeTriggerRef = useRef<HTMLButtonElement>(null)
   const titleTriggerRef = useRef<HTMLButtonElement>(null)
   const historyMenuRef = useRef<HTMLDivElement>(null)
   const rowMenuRef = useRef<HTMLDivElement>(null)
   const rowMenuTriggerRef = useRef<HTMLButtonElement | null>(null)
+  const operationMenuRef = useRef<HTMLDivElement>(null)
+  const operationMenuTriggerRef = useRef<HTMLButtonElement>(null)
   const portalRoot = typeof document !== 'undefined' ? document.body : null
   const historyMenuWidth = 340
   const recallActionRailWidth = 72
@@ -132,7 +141,9 @@ export default function ChatHeader({
         historyMenuRef.current?.contains(target) ||
         titleTriggerRef.current?.contains(target) ||
         scopeTriggerRef.current?.contains(target) ||
-        rowMenuRef.current?.contains(target)
+        rowMenuRef.current?.contains(target) ||
+        operationMenuRef.current?.contains(target) ||
+        operationMenuTriggerRef.current?.contains(target)
       )
 
       if (showHistory && !clickedHistory) {
@@ -149,10 +160,17 @@ export default function ChatHeader({
           setRowMenu(null)
         }
       }
+      if (
+        operationMenuPosition
+        && !operationMenuRef.current?.contains(target)
+        && !operationMenuTriggerRef.current?.contains(target)
+      ) {
+        setOperationMenuPosition(null)
+      }
     }
     document.addEventListener('mousedown', handler)
     return () => document.removeEventListener('mousedown', handler)
-  }, [showHistory, rowMenu])
+  }, [operationMenuPosition, showHistory, rowMenu])
 
   // Close the per-row "更多" menu whenever the history dropdown closes, so a
   // detached menu never lingers after the list it belongs to is gone.
@@ -522,9 +540,45 @@ export default function ChatHeader({
 
           <IconButton
             icon={<Plus style={{ width: 14, height: 14 }} strokeWidth={2} />}
-            onClick={onNewSession}
-            disabled={newSessionDisabled}
-            title={newSessionDisabled ? '已有多个进行中的对话，完成后可再新建' : '新建对话'}
+            onClick={() => { void onNewSession() }}
+            title="新建对话"
+          />
+
+          {lifecyclePendingAction && (
+            <span style={{ fontSize: 11, color: 'var(--text-light)', whiteSpace: 'nowrap' }}>
+              {{
+                creating: '正在创建…',
+                resetting: '正在重置…',
+                stopping: '正在停止…',
+                closing: '正在关闭…',
+                compacting: '正在压缩…',
+              }[lifecyclePendingAction]}
+            </span>
+          )}
+
+          {!lifecyclePendingAction && lifecycleUncertainty && (
+            <span
+              data-codex-lifecycle-uncertain={lifecycleUncertainty}
+              style={{ fontSize: 11, color: 'var(--color-orange, #f59e0b)', whiteSpace: 'nowrap' }}
+            >
+              {lifecycleUncertainty === 'interrupt' ? '停止状态待确认' : '压缩状态待确认'}
+            </span>
+          )}
+
+          <IconButton
+            icon={<MoreHorizontal style={{ width: 14, height: 14 }} strokeWidth={2} />}
+            onClick={() => {
+              setOperationMenuPosition((current) => current
+                ? null
+                : computeMenuPosition(operationMenuTriggerRef.current, 176, 'right'))
+            }}
+            disabled={!currentConversationAvailable || Boolean(lifecyclePendingAction) || Boolean(lifecycleUncertainty)}
+            title={lifecyclePendingAction
+              ? '会话操作进行中'
+              : lifecycleUncertainty
+                ? '当前会话状态待确认，请新建对话'
+                : '当前对话操作'}
+            ref={operationMenuTriggerRef}
           />
 
           {onTogglePanel && (
@@ -536,6 +590,46 @@ export default function ChatHeader({
           )}
         </div>
       </div>
+
+      {portalRoot && operationMenuPosition && createPortal(
+        <LiquidFloatingPanel
+          ref={operationMenuRef}
+          className="chat-header-floating-menu"
+          style={{
+            ...buildChatHeaderFloatingMenuStyle(176),
+            position: 'fixed',
+            top: operationMenuPosition.top,
+            left: operationMenuPosition.left,
+            padding: 6,
+          }}
+        >
+          <button
+            type="button"
+            onClick={() => {
+              setOperationMenuPosition(null)
+              void onResetCurrentConversation()
+            }}
+            className="chat-header-floating-menu-item ready-floating-menu-item w-full flex items-center gap-2"
+            style={buildChatHeaderMenuItemStyle({ selected: false })}
+          >
+            <RotateCcw style={{ width: 14, height: 14 }} strokeWidth={2} />
+            <span style={{ fontSize: 12.5, fontWeight: 500 }}>重置当前对话</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setOperationMenuPosition(null)
+              void onCompactCurrentSession()
+            }}
+            className="chat-header-floating-menu-item ready-floating-menu-item w-full flex items-center gap-2"
+            style={buildChatHeaderMenuItemStyle({ selected: false })}
+          >
+            <Minimize2 style={{ width: 14, height: 14 }} strokeWidth={2} />
+            <span style={{ fontSize: 12.5, fontWeight: 500 }}>压缩上下文</span>
+          </button>
+        </LiquidFloatingPanel>,
+        portalRoot,
+      )}
 
       {portalRoot && showHistory && historyMenuPosition && createPortal(
         <LiquidFloatingPanel

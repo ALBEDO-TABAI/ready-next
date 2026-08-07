@@ -35,3 +35,25 @@ export type {
   TaskProjectionChangeEvent,
   TaskProjectionChangeReason,
 } from './task-projection'
+
+export type {
+  CreateSessionResult,
+  FailedIngress,
+  IngressPersistenceErrorKind,
+  IngressAdmittedEvent,
+  LifecycleFailureCode,
+  LifecycleRequest,
+  LifecycleResult,
+  PersistedIngress,
+  PrePersistenceErrorKind,
+  SendMessageResult,
+  SendScopedErrorKind,
+  SendScopedResponse,
+  SkippedIngress,
+  TerminalErrorKind,
+} from './agent-runtime'
+
+export type {
+  LifecycleOperationFacts,
+  LifecycleOperationSnapshot,
+} from './agent-lifecycle-snapshot'

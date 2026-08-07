@@ -17,6 +17,14 @@ import type { ScheduledTasksAPI } from '../../shared/scheduled-tasks'
 import type { CapabilityRuntimeSnapshot } from '../../shared/ai-capability-runtime'
 import type { RendererAgentMetricName } from '../../shared/renderer-agent-metrics'
 import type { CanonicalAssistantMessage } from '../../shared/ipc-contracts/canonical-message'
+import type {
+  CreateSessionResult,
+  IngressAdmittedEvent,
+  LifecycleRequest,
+  LifecycleResult,
+  SendScopedRequest,
+  SendScopedResponse,
+} from '../../shared/ipc-contracts/agent-runtime'
 import type { RendererStateFlushOutcome } from '../../shared/renderer-state-flush'
 import type { ContextUsageSnapshot } from '../../shared/context-usage-types'
 import type { ModelPackDownloadUpdate, ModelPackId, ModelPackSelfTestReport, ModelPackStatus, ModelSource } from '../../shared/model-pack-types'
@@ -132,23 +140,6 @@ interface IPCResponse<T = void> {
   error?: string
   mock?: boolean
   errorKind?: string
-}
-
-interface SendScopedResponse {
-  success: boolean
-  acceptedAsSteering?: boolean
-  ownerRunId?: string | null
-  error?: string | null
-  errorKind?: string | null
-  responseText?: string | null
-  canonicalMessage?: CanonicalAssistantMessage | null
-  canonicalMessageDigest?: string | null
-  persistence?: {
-    scope: 'pre-existing' | 'lazy-created' | 'failed'
-    message: 'persisted' | 'failed' | 'skipped'
-    attachments: 'metadata_persisted' | 'metadata_partial' | 'metadata_failed' | 'none'
-    inputAttachments: 'included' | 'partial' | 'failed' | 'none'
-  }
 }
 
 // =============================================================================
@@ -284,7 +275,7 @@ interface AgentHeartbeatSnapshot {
 }
 
 interface AgentRuntimeStatusData {
-  orchestrator: 'ready-agent-sdk'
+  orchestrator: 'codex-native'
   sidecarEnabled: boolean
   sidecar: AgentHeartbeatSnapshot['sidecar']
   channels: {
@@ -300,19 +291,6 @@ interface AgentRuntimeStatusData {
   }
   heartbeat: AgentHeartbeatSnapshot
 }
-
-interface AgentCompactSessionReportData {
-  beforeTokens: number
-  afterTokens: number
-  droppedItems: number
-  truncatedToolResults: number
-  summarized: boolean
-}
-
-type AgentCompactSessionData =
-  | { status: 'compacted' | 'noop'; report: AgentCompactSessionReportData }
-  | { status: 'queued' }
-  | { status: 'not_found' | 'superseded'; message: string }
 
 type CapabilityRuntimeSnapshotData = CapabilityRuntimeSnapshot
 
@@ -934,14 +912,8 @@ interface ElectronAgentAPI {
    *  build (the callers use optional-chaining). Declared optional so callers
    *  can `window.electronAPI?.agent?.metric?.(...)` without a TS error. */
   metric?: (payload: { name: string; payload?: Record<string, unknown> }) => void
-  send: (
-    agent: string,
-    message: string | Array<{ type: string; text?: string; base64?: string; mimeType?: string }>,
-    sessionId?: string,
-    requestId?: string,
-    deliveryMode?: 'standard' | 'adaptive' | 'thorough'
-  ) => Promise<{ success: boolean; error?: string | null }>
-  newSession: (agent: string, sessionId?: string) => Promise<{ success: boolean; error?: string }>
+  createSession: () => Promise<CreateSessionResult>
+  resetSession: (request: LifecycleRequest) => Promise<LifecycleResult>
   sessionPrerouteEvaluate: (firstMessage: string) => Promise<{
     success: boolean
     data?: {
@@ -955,11 +927,9 @@ interface ElectronAgentAPI {
   }>
   // Stage U PR U1.2 — removed `orchestrate / getStatus / getAll / getDiagnostics`
   // legacy AgentManager wrappers. Use `getRuntimeStatus` / `getCapabilityRuntimeSnapshot`.
-  kill: (agent: string, sessionId?: string) => Promise<{ success: boolean; error?: string }>
-  compactSession: (
-    agent: string,
-    sessionId?: string
-  ) => Promise<IPCResponse<AgentCompactSessionData>>
+  kill: (request: LifecycleRequest) => Promise<LifecycleResult>
+  closeSession: (request: LifecycleRequest) => Promise<LifecycleResult>
+  compactSession: (request: LifecycleRequest) => Promise<LifecycleResult>
   getRuntimeStatus: () => Promise<IPCResponse<AgentRuntimeStatusData>>
   getCapabilityRuntimeSnapshot: (config?: unknown) => Promise<IPCResponse<CapabilityRuntimeSnapshotData>>
   listChannels: () => Promise<IPCResponse<AgentChannelConfigData[]>>
@@ -1091,7 +1061,6 @@ interface ElectronAgentAPI {
   getConversationScopeMessages: (
     scopeId: string
   ) => Promise<IPCResponse<ConversationScopeMessageData[]>>
-  createLocalScope: (agent: string, id?: string) => Promise<IPCResponse<ConversationScopeData>>
   listScopeAttachments: (scopeId?: string) => Promise<IPCResponse<ConversationAttachmentData[]>>
   getScopeAttachment: (
     scopeId: string,
@@ -1103,48 +1072,24 @@ interface ElectronAgentAPI {
   getRemoteAttachmentCacheStats: (
     channelId?: string
   ) => Promise<IPCResponse<RemoteAttachmentCacheStatsData>>
-	  sendScoped: (
-	    payload: {
-	      scopeId: string
-	      agent?: string
-	      message: string | Array<{ type: string; text?: string; base64?: string; mimeType?: string }>
-	      requestId?: string
-	      workspaceRoots?: string[]
-	      environmentHint?: {
-	        workbenchMode?: 'browser' | 'document' | 'rss' | 'calendar'
-	      }
-	      deliveryMode?: 'standard' | 'adaptive' | 'thorough'
-	      userMessage?: {
-	        id: string
-	        content: string
-	        timestamp?: string
-	        meta?: Record<string, unknown>
-	        attachmentConfirmation?: {
-	          selectedCount: number
-	          metadataCount: number
-	          inputIncludedCount: number
-	          inputFailedCount: number
-	        }
-	      }
-	      continuationIntent?: ContinuationIntentData | null
-	    }
-	  ) => Promise<SendScopedResponse>
-	  emitRendererMetric: (
-	    name: RendererAgentMetricName,
-	    payload?: Record<string, unknown>
-	  ) => Promise<IPCResponse>
+  sendScoped: (payload: SendScopedRequest) => Promise<SendScopedResponse>
+  onIngressAdmitted: (callback: (event: IngressAdmittedEvent) => void) => () => void
+  emitRendererMetric: (
+    name: RendererAgentMetricName,
+    payload?: Record<string, unknown>
+  ) => Promise<IPCResponse>
   reportInfrastructureTimeout: (payload: {
     scopeId: string
     requestId: string
     elapsedMs?: number
-	  }) => Promise<IPCResponse<{
-	    state?: 'active' | 'stale' | 'not_found' | 'paused_user_input'
-	    activeRunId?: string | null
-	  }>>
+  }) => Promise<IPCResponse<{
+    state?: 'active' | 'stale' | 'not_found' | 'paused_user_input'
+    activeRunId?: string | null
+  }>>
   suspendRun: (payload: {
     scopeId: string
     taskId?: string
-  }) => Promise<{ success: boolean; error?: string | null }>
+  }) => Promise<{ success: boolean; error?: string | null; errorKind?: string | null }>
   resumeRun: (payload: {
     scopeId: string
     taskId?: string
@@ -3522,20 +3467,6 @@ interface ElectronChatAPI {
   getMessages: (
     conversationId: string
   ) => Promise<{ success: boolean; data?: ChatMessageData[]; error?: string }>
-  deleteConversation: (conversationId: string) => Promise<{ success: boolean; error?: string }>
-  saveMessage: (data: {
-    id: string
-    conversationId: string
-    role: string
-    content: string
-    timestamp: string
-    meta?: Record<string, unknown>
-  }) => Promise<{ success: boolean; error?: string }>
-  createConversation: (data: {
-    id: string
-    agent: string
-    title: string
-  }) => Promise<{ success: boolean; error?: string }>
   updateConversationTitle: (data: {
     id: string
     title: string

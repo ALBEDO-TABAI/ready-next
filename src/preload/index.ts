@@ -19,6 +19,16 @@ import type {
 } from '../shared/scheduled-tasks'
 import type { RendererAgentMetricName } from '../shared/renderer-agent-metrics'
 import type { CanonicalAssistantMessage } from '../shared/ipc-contracts/canonical-message'
+import {
+  parseIngressAdmittedEvent,
+  parseCreateSessionResult,
+  parseLifecycleRequest,
+  parseLifecycleResult,
+  parseSendScopedRequest,
+  parseSendScopedResponse,
+  type SendScopedRequest,
+  type LifecycleRequest,
+} from '../shared/ipc-contracts/agent-runtime'
 import type { ModelPackDownloadUpdate, ModelPackId, ModelSource } from '../shared/model-pack-types'
 import type { RendererStateFlushOutcome } from '../shared/renderer-state-flush'
 import type { RuntimeStatus, RuntimeProvisionTaskSnapshot } from '../shared/runtime-provision-types'
@@ -108,22 +118,26 @@ async function invokeAndNotifyAgentRegistry(channel: string, ...args: unknown[])
 
 // Agent API
 const agentAPI = {
-  send: (
-    agent: string,
-    message: string | Array<{ type: string; text?: string; base64?: string; mimeType?: string }>,
-    sessionId?: string,
-    requestId?: string,
-    deliveryMode?: 'standard' | 'adaptive' | 'thorough'
-  ) => ipcRenderer.invoke('agent:send', { agent, message, sessionId, requestId, deliveryMode }),
-  newSession: (agent: string, sessionId?: string) => ipcRenderer.invoke('agent:newSession', { agent, sessionId }),
+  createSession: async () => parseCreateSessionResult(
+    await ipcRenderer.invoke('agent:createSession'),
+  ),
+  resetSession: async (request: LifecycleRequest) => parseLifecycleResult(
+    await ipcRenderer.invoke('agent:resetSession', parseLifecycleRequest(request)),
+  ),
   sessionPrerouteEvaluate: (firstMessage: string) =>
     ipcRenderer.invoke('agent:sessionPreroute:evaluate', { firstMessage }),
   // Stage U PR U1.2 — removed `orchestrate / getStatus / getAll / getDiagnostics`
   // legacy AgentManager wrappers. Zero renderer callers (verified via grep).
   // Use `getRuntimeStatus` + `getCapabilityRuntimeSnapshot` for diagnostics.
-  kill: (agent: string, sessionId?: string) => ipcRenderer.invoke('agent:kill', { agent, sessionId }),
-  compactSession: (agent: string, sessionId?: string) =>
-    ipcRenderer.invoke('agent:compactSession', { agent, sessionId }),
+  kill: async (request: LifecycleRequest) => parseLifecycleResult(
+    await ipcRenderer.invoke('agent:kill', parseLifecycleRequest(request)),
+  ),
+  closeSession: async (request: LifecycleRequest) => parseLifecycleResult(
+    await ipcRenderer.invoke('agent:closeSession', parseLifecycleRequest(request)),
+  ),
+  compactSession: async (request: LifecycleRequest) => parseLifecycleResult(
+    await ipcRenderer.invoke('agent:compactSession', parseLifecycleRequest(request)),
+  ),
   getRuntimeStatus: () => ipcRenderer.invoke('agent:getRuntimeStatus'),
   getCapabilityRuntimeSnapshot: (config?: unknown) => ipcRenderer.invoke('agent:getCapabilityRuntimeSnapshot', config),
   listChannels: () => ipcRenderer.invoke('agent:listChannels'),
@@ -233,7 +247,6 @@ const agentAPI = {
     ipcRenderer.invoke('agent:resumeSessionCandidate', payload),
   getConversationScopeMessages: (scopeId: string) =>
     ipcRenderer.invoke('agent:getConversationScopeMessages', { scopeId }),
-  createLocalScope: (agent: string, id?: string) => ipcRenderer.invoke('agent:createLocalScope', { agent, id }),
   listScopeAttachments: (scopeId?: string) => ipcRenderer.invoke('agent:listScopeAttachments', { scopeId }),
   getScopeAttachment: (scopeId: string, attachmentId: string) =>
     ipcRenderer.invoke('agent:getScopeAttachment', { scopeId, attachmentId }),
@@ -241,32 +254,16 @@ const agentAPI = {
     ipcRenderer.invoke('agent:clearRemoteAttachmentCache', { channelId }),
   getRemoteAttachmentCacheStats: (channelId?: string) =>
     ipcRenderer.invoke('agent:getRemoteAttachmentCacheStats', { channelId }),
-  sendScoped: (
-    payload: {
-      scopeId: string
-      agent?: string
-      message: string | Array<{ type: string; text?: string; base64?: string; mimeType?: string }>
-      requestId?: string
-      workspaceRoots?: string[]
-      environmentHint?: {
-        workbenchMode?: 'browser' | 'document' | 'rss' | 'calendar'
-      }
-      deliveryMode?: 'standard' | 'adaptive' | 'thorough'
-      userMessage?: {
-        id: string
-        content: string
-        timestamp?: string
-        meta?: Record<string, unknown>
-        attachmentConfirmation?: {
-          selectedCount: number
-          metadataCount: number
-          inputIncludedCount: number
-          inputFailedCount: number
-        }
-      }
-      continuationIntent?: ContinuationIntentPayload | null
+  sendScoped: (payload: SendScopedRequest) => ipcRenderer
+    .invoke('agent:sendScoped', parseSendScopedRequest(payload))
+    .then(parseSendScopedResponse),
+  onIngressAdmitted: (callback: (event: ReturnType<typeof parseIngressAdmittedEvent>) => void) => {
+    const listener = (_event: IpcRendererEvent, payload: unknown) => {
+      callback(parseIngressAdmittedEvent(payload))
     }
-  ) => ipcRenderer.invoke('agent:sendScoped', payload),
+    ipcRenderer.on('agent:ingressAdmitted', listener)
+    return () => ipcRenderer.removeListener('agent:ingressAdmitted', listener)
+  },
   emitRendererMetric: (
     name: RendererAgentMetricName,
     payload: Record<string, unknown> = {},
@@ -1408,11 +1405,6 @@ const petAPI = {
 const chatAPI = {
   getConversations: (agent: string) => ipcRenderer.invoke('chat:getConversations', agent),
   getMessages: (conversationId: string) => ipcRenderer.invoke('chat:getMessages', conversationId),
-  deleteConversation: (conversationId: string) => ipcRenderer.invoke('chat:deleteConversation', conversationId),
-  saveMessage: (data: { id: string; conversationId: string; role: string; content: string; timestamp: string }) =>
-    ipcRenderer.invoke('chat:saveMessage', data),
-  createConversation: (data: { id: string; agent: string; title: string }) =>
-    ipcRenderer.invoke('chat:createConversation', data),
   updateConversationTitle: (data: { id: string; title: string }) =>
     ipcRenderer.invoke('chat:updateConversationTitle', data),
   pickFiles: () => ipcRenderer.invoke('chat:pickFiles'),

@@ -11,8 +11,7 @@ export function diagnoseAgentPanelSnapshot(snapshot: AgentPanelSnapshot): AgentP
   const lastUserIndex = [...snapshot.messages].reverse().findIndex((message) => message.type === 'user')
   const hasUserWithoutReply =
     lastMessage?.type === 'user' &&
-    !snapshot.runtime.foregroundBusy &&
-    !snapshot.composer.pendingSendCount
+    !snapshot.runtime.foregroundBusy
 
   if (!snapshot.currentScopeId) {
     diagnostics.push({
@@ -21,16 +20,6 @@ export function diagnoseAgentPanelSnapshot(snapshot: AgentPanelSnapshot): AgentP
       layer: 'input',
       message: '当前没有会话 Scope，输入层需要先创建本地会话。',
       evidence: { currentAgent: snapshot.currentAgent },
-    })
-  }
-
-  if (snapshot.composer.pendingSendCount > 0) {
-    diagnostics.push({
-      id: 'send_coalescing_pending',
-      severity: 'info',
-      layer: 'input',
-      message: '输入已进入连续消息合并窗口，运行尚未真正开始。',
-      evidence: { pendingSendCount: snapshot.composer.pendingSendCount, pendingSendFlushAt: snapshot.composer.pendingSendFlushAt },
     })
   }
 

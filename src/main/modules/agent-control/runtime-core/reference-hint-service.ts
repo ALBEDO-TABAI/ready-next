@@ -76,30 +76,6 @@ export class ReferenceHintService {
     }
   }
 
-  /**
-   * Phase 1.1 — Public hook the renderer's `chat:saveMessage` IPC calls after
-   * persisting a message, so a hint armed during the assistant's turn survives
-   * a Ready restart for LOCAL conversations too.
-   *
-   * Background: assistant messages saved via `chat:saveMessage` IPC go through
-   * `ChatRepository.saveMessage` (a thin wrapper over `db.addChatMessage`),
-   * which bypasses `runtime.createConversationMessage` — the only path that
-   * previously snapshot the in-memory hint into `meta_json.lastReferenceSkill`.
-   * Result before this hook: local sessions never persisted hints, so a Ready
-   * restart always re-armed `referenceSkillHintArmed=false` and the model lost
-   * VEA / other typed actions mid-flow.
-   *
-   * No-op for non-assistant roles. Safe to call after every message; the
-   * underlying `persistReferenceHintToScope` is idempotent (skips DB write
-   * when the persisted snapshot equals the in-memory one).
-   */
-  persistReferenceHintAfterAssistantMessage(scopeId: string, role: string): void {
-    if (role !== 'assistant') return
-    const normalizedScopeId = String(scopeId || '').trim()
-    if (!normalizedScopeId) return
-    this.persistReferenceHintToScope(normalizedScopeId)
-  }
-
   restoreReferenceHintFromScope(scope: ConversationScope, scopeId: string): void {
     try {
       const meta = this.parseScopeMeta(scope)

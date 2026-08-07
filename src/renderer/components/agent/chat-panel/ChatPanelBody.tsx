@@ -51,6 +51,7 @@ interface AgentSelectionMenuState {
 
 interface ChatPanelBodyProps extends Omit<TaskToolSnapshotProps, 'children'> {
   messages: AgentMessage[]
+  lifecycleInputBlocked: boolean
   scopeRunStates: Record<string, ScopeRunState>
   toolTrace: ToolTraceEvent[]
   toolTraceStatus: string | null
@@ -86,17 +87,12 @@ interface ChatPanelBodyProps extends Omit<TaskToolSnapshotProps, 'children'> {
   currentAgentAvatar: string
   currentAgentDisplayName: string
   isChannelScope: boolean
-  pendingSendCount: number
-  pendingSendCountdown: number
   isDragOver: boolean
   filePool: ChatAttachment[]
   chatInputRef: RefObject<ChatInputHandle | null>
   onInputChange: (value: string) => void
   onSend: () => void
-  thoroughOverride: boolean
-  onThoroughOverrideChange: (enabled: boolean) => void
   onStop: () => void
-  onUndo: () => void
   onPickFiles: () => void | Promise<void>
   onAgentSelect: (agentName: string) => void
   onSkillReference: (skill: ReadySkillReference) => void
@@ -117,6 +113,7 @@ export function ChatPanelBody(props: ChatPanelBodyProps): React.ReactElement {
     scopeRunStates,
     taskDisclosureState,
     isStreaming,
+    lifecycleInputBlocked,
     streamingMessageId,
     parseSerializedTaskSnapshot,
     parseSerializedToolTraceSnapshot,
@@ -163,15 +160,12 @@ export function ChatPanelBody(props: ChatPanelBodyProps): React.ReactElement {
     currentAgentAvatar,
     currentAgentDisplayName,
     isChannelScope,
-    pendingSendCount,
-    pendingSendCountdown,
     isDragOver,
     filePool,
     chatInputRef,
     onInputChange,
     onSend,
     onStop,
-    onUndo,
     onPickFiles,
     onAgentSelect,
     onSkillReference,
@@ -610,10 +604,9 @@ export function ChatPanelBody(props: ChatPanelBodyProps): React.ReactElement {
               ref={chatInputRef}
               inputValue={inputValue}
               isStreaming={isStreaming}
+              lifecycleInputBlocked={lifecycleInputBlocked}
               attachmentsCount={attachments.length}
               hasUserMessages={messages.some((m) => m.type === 'user')}
-              pendingSendCount={pendingSendCount}
-              pendingSendCountdown={pendingSendCountdown}
               isDragOver={isDragOver}
               contextUsage={currentRunForDurationMeter?.contextUsage ?? null}
               composerShellStyle={composerShellStyle}
@@ -626,10 +619,7 @@ export function ChatPanelBody(props: ChatPanelBodyProps): React.ReactElement {
               isChannelScope={isChannelScope}
               onInputChange={onInputChange}
               onSend={onSend}
-              thoroughOverride={props.thoroughOverride}
-              onThoroughOverrideChange={props.onThoroughOverrideChange}
               onStop={onStop}
-              onUndo={onUndo}
               onPickFiles={onPickFiles}
               onAgentSelect={onAgentSelect}
               onSkillReference={onSkillReference}

@@ -51,9 +51,15 @@ import { normalizeChannelDeliveryResult } from './channel-delivery-result'
 import { logAgentMetric } from '../metrics'
 import type { SidecarManager } from '../sidecar-manager'
 import type { AppSettingsRepository } from '../../repositories/app-settings-repository'
-import type { RunCoordinator } from '../task-projection/run-coordinator'
 import type { DomainAdapter } from '../domain-adapters/domain-adapter'
-import type { ExecutionHostResult, TaskProjectionRecord } from '../contracts/run-contracts'
+import type {
+  ExecutionHostResult,
+  ReflectionResultHook,
+  RunCompletionHooks,
+  RunCoordinatorRequest,
+  RunCoordinatorResult,
+  TaskProjectionRecord,
+} from '../contracts/run-contracts'
 import type {
   AgentRuntimeStatus,
   ChannelAttachment,
@@ -78,10 +84,12 @@ export interface RemoteChannelServiceDeps {
   db: DatabaseManager
   sidecar: SidecarManager
   settingsRepository: AppSettingsRepository
-  /** Narrowed lazy face over the constructor-assigned RunCoordinator hub
-   *  (the wiring closure defers the `this.runCoordinator` read to call
-   *  time, so the field-initializer declaration order stays safe). */
-  runCoordinator: Pick<RunCoordinator, 'runInboundChannel'>
+  runCoordinator: {
+    runInboundChannel(
+      request: RunCoordinatorRequest,
+      hooks?: RunCompletionHooks & ReflectionResultHook,
+    ): Promise<RunCoordinatorResult>
+  }
   /** Bound to the runtime `getDomainAdapters()` (orchestrator-backed). */
   getDomainAdapters: () => ReadonlyArray<DomainAdapter>
   /** Bound to the runtime public `getTaskProjection` so outbound attachment

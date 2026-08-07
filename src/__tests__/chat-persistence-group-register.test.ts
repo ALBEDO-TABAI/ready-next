@@ -1,4 +1,4 @@
-// Stage V V2.1m — behavior test for `chatPersistenceGroup.register` /
+// Codex E1 — behavior test for the narrowed `chatPersistenceGroup.register` /
 // `IpcDisposeHandle.dispose()`.
 //
 // V2.1m extracts the 8 chat-persistence + file-picker channels from
@@ -6,9 +6,6 @@
 //
 //   chat:getConversations            (list conversations for an agent)
 //   chat:getMessages                 (list messages in a conversation)
-//   chat:deleteConversation          (drop a conversation + its rows)
-//   chat:saveMessage                 (persist a chat_messages row)
-//   chat:createConversation          (insert a new conversation row)
 //   chat:updateConversationTitle     (rename a conversation)
 //   chat:pickFiles                   (multi-select file picker)
 //   chat:readFileForAI               (load + classify a file for inline use)
@@ -16,8 +13,8 @@
 // The V5 IPC contract gate proves the channel literals still exist on the
 // renderer side, but it cannot prove:
 //
-//   1. `register` wires EXACTLY the 8 channel names the group owns via
-//      `ipcMain.handle` (no extras, no missing ones — all 8 are invoke /
+//   1. `register` wires EXACTLY the 5 channel names the group owns via
+//      `ipcMain.handle` (no extras, no missing ones — all 5 are invoke /
 //      sync-return / async-return so they all live on the handle slot).
 //   2. The returned dispose handle calls `removeHandler` for each of those
 //      same 8 channels — so dev-reload re-registration and
@@ -75,18 +72,13 @@ function createMockDeps(): ChatPersistenceGroupDeps {
   return {
     getConversations: fail('getConversations') as ChatPersistenceGroupDeps['getConversations'],
     getMessages: fail('getMessages') as ChatPersistenceGroupDeps['getMessages'],
-    deleteConversation: fail('deleteConversation') as ChatPersistenceGroupDeps['deleteConversation'],
-    saveMessage: fail('saveMessage') as ChatPersistenceGroupDeps['saveMessage'],
-    createConversation: fail('createConversation') as ChatPersistenceGroupDeps['createConversation'],
     updateConversationTitle: fail('updateConversationTitle') as ChatPersistenceGroupDeps['updateConversationTitle'],
-    sanitizeAssistantText: fail('sanitizeAssistantText') as ChatPersistenceGroupDeps['sanitizeAssistantText'],
-    persistReferenceHintAfterAssistantMessage: fail('persistReferenceHintAfterAssistantMessage') as ChatPersistenceGroupDeps['persistReferenceHintAfterAssistantMessage'],
     pickFiles: fail('pickFiles') as ChatPersistenceGroupDeps['pickFiles'],
     readFileForAI: fail('readFileForAI') as ChatPersistenceGroupDeps['readFileForAI'],
   }
 }
 
-test('chatPersistenceGroup.register wires the 8 documented channels exactly once each via ipcMain.handle', () => {
+test('chatPersistenceGroup.register wires the 5 read/metadata/file channels exactly once each', () => {
   const { ipc, handleCalls } = createMockIpc()
   chatPersistenceGroup.register(ipc, createMockDeps())
 
@@ -95,9 +87,9 @@ test('chatPersistenceGroup.register wires the 8 documented channels exactly once
   assert.deepEqual(
     registered,
     expected,
-    'register must subscribe to exactly the 8 chat-persistence + file channels',
+    'register must subscribe to exactly the 5 chat metadata/read + file channels',
   )
-  assert.equal(handleCalls.length, 8, 'each channel must be registered exactly once')
+  assert.equal(handleCalls.length, 5, 'each channel must be registered exactly once')
 
   // Spot-check the exact channel literals per the plan (V2.1m, §3 V2.1) so
   // accidental renames trip this test even if the channel count happens to
@@ -106,9 +98,6 @@ test('chatPersistenceGroup.register wires the 8 documented channels exactly once
   for (const required of [
     'chat:getConversations',
     'chat:getMessages',
-    'chat:deleteConversation',
-    'chat:saveMessage',
-    'chat:createConversation',
     'chat:updateConversationTitle',
     'chat:pickFiles',
     'chat:readFileForAI',
@@ -127,7 +116,7 @@ test('chatPersistenceGroup namespace is the documented label so dispose ordering
   assert.equal(chatPersistenceGroup.namespace, 'chat:persistence')
 })
 
-test('IpcDisposeHandle.dispose removes the same 8 channels that register added', () => {
+test('IpcDisposeHandle.dispose removes the same 5 channels that register added', () => {
   const { ipc, removeHandlerCalls } = createMockIpc()
   const handle = chatPersistenceGroup.register(ipc, createMockDeps())
 

@@ -8,10 +8,10 @@ function readWorkspaceFile(path: string): string {
   return readFileSync(resolve(process.cwd(), path), 'utf8')
 }
 
-test('task run control actions are exposed through runtime, IPC, preload, renderer types, and UI entry points', () => {
+test('task controls remain separate while send uses the exact Codex lifecycle contract', () => {
   const runtime = readWorkspaceFile('src/main/modules/agent-control/runtime-core/runtime.ts')
   const runControlGroup = readWorkspaceFile('src/main/modules/claude-bridge/ipc/run-control-group.ts')
-  const agentLifecycleGroup = readWorkspaceFile('src/main/modules/claude-bridge/ipc/agent-lifecycle-group.ts')
+  const lifecycleGroup = readWorkspaceFile('src/main/modules/claude-bridge/ipc/agent-lifecycle-group.ts')
   const ipcHandler = readWorkspaceFile('src/main/modules/claude-bridge/ipc-handler.ts')
   const preload = readWorkspaceFile('src/preload/index.ts')
   const rendererTypes = readWorkspaceFile('src/renderer/types/electron.d.ts')
@@ -20,81 +20,47 @@ test('task run control actions are exposed through runtime, IPC, preload, render
   const chatPanel = readWorkspaceFile('src/renderer/components/agent/ChatPanel.tsx')
   const taskInteractionHandlers = readWorkspaceFile('src/renderer/components/agent/chat-panel/task-interaction/use-task-interaction-handlers.ts')
 
-  assert.match(runtime, /async suspendRun\(/)
-  assert.match(runtime, /async reportInfrastructureTimeout\(/)
-  assert.match(runtime, /async resumeRun\(/)
-  assert.match(runtime, /async respondToInteraction\(/)
-  assert.match(runtime, /scopeRunSummary\?\.taskId/)
-  assert.match(runtime, /scopeRunSummary\?\.taskContinuation\?\.taskId/)
-  assert.match(runtime, /taskTitle:\s*target\.projection\?\.taskTitle/)
-  assert.doesNotMatch(runtime, /taskTitle:\s*target\.projection\?\.taskId/)
+  for (const method of ['suspendRun', 'reportInfrastructureTimeout', 'resumeRun', 'respondToInteraction']) {
+    assert.match(runtime, new RegExp(`async ${method}\\(`))
+    assert.match(runControlGroup, new RegExp(`ipcMain\\.handle\\('agent:${method}'`))
+  }
+  assert.match(lifecycleGroup, /parseSendScopedRequest\(rawPayload\)/)
+  assert.match(lifecycleGroup, /parseSendScopedResponse\(await deps\.sendScoped\(payload\)\)/)
+  assert.match(ipcHandler, /sendScoped:\s*\(payload\)\s*=>\s*runtime!\.sendScoped\(payload\)/)
 
-  assert.match(runControlGroup, /ipcMain\.handle\('agent:suspendRun'/)
-  assert.match(runControlGroup, /ipcMain\.handle\('agent:reportInfrastructureTimeout'/)
-  assert.match(runControlGroup, /ipcMain\.handle\('agent:resumeRun'/)
-  assert.match(runControlGroup, /ipcMain\.handle\('agent:respondToInteraction'/)
-  assert.match(agentLifecycleGroup, /responseText:\s*result\.responseText/)
+  assert.match(preload, /type SendScopedRequest/)
+  assert.match(preload, /sendScoped:\s*\(payload: SendScopedRequest\)/)
+  assert.match(preload, /parseSendScopedRequest\(payload\)/)
+  assert.match(rendererTypes, /SendScopedRequest,/)
+  assert.match(rendererTypes, /sendScoped:\s*\(payload: SendScopedRequest\)/)
 
-  assert.match(preload, /sendScoped:\s*\(\s*payload:\s*\{\s*scopeId: string/)
-  assert.match(preload, /agent\?: string/)
-  assert.match(preload, /continuationIntent\?: ContinuationIntentPayload \| null/)
-  assert.match(preload, /ipcRenderer\.invoke\('agent:sendScoped', payload\)/)
-  assert.match(preload, /suspendRun:\s*\(payload:\s*\{\s*scopeId: string; taskId\?: string \}\)\s*=>\s*ipcRenderer\.invoke\('agent:suspendRun', payload\)/)
-  assert.match(preload, /reportInfrastructureTimeout:\s*\(payload:\s*\{\s*scopeId: string; requestId: string; elapsedMs\?: number \}\)\s*=>\s*ipcRenderer\.invoke\('agent:reportInfrastructureTimeout', payload\)/)
-  assert.match(preload, /resumeRun:\s*\(payload:\s*\{/)
-  assert.match(preload, /respondToInteraction:\s*\(payload:\s*\{/)
-  assert.match(preload, /responseText\?: string/)
-  assert.match(preload, /responseText: string/)
-
-  assert.match(rendererTypes, /suspendRun:\s*\(payload:\s*\{/)
-  assert.match(rendererTypes, /reportInfrastructureTimeout:\s*\(payload:\s*\{/)
-  assert.match(rendererTypes, /resumeRun:\s*\(payload:\s*\{/)
-  assert.match(rendererTypes, /respondToInteraction:\s*\(payload:\s*\{/)
-  assert.match(rendererTypes, /sendScoped:\s*\(\s*payload:\s*\{/)
-  assert.match(rendererTypes, /agent\?: string/)
-  assert.match(rendererTypes, /continuationIntent\?: ContinuationIntentData \| null/)
-  assert.match(rendererTypes, /responseText\?: string \| null/)
-
-  assert.match(agentStore, /pendingContinuationIntent:/)
-  assert.match(agentStore, /result\.canonicalMessage/)
-  assert.match(agentStore, /result\.canonicalMessageDigest/)
-  assert.doesNotMatch(agentStore, /result\.responseText/)
-  assert.match(agentStore, /setComposerDraft:/)
-  assert.match(agentStore, /agent:\s*currentAgent/)
-  assert.match(agentStore, /continuationIntent:\s*pendingContinuationIntent \|\| undefined/)
-  assert.match(ipcHandler, /agent\?: string/)
-  assert.match(runtime, /agent\?: string/)
-  // The recoverable-scope wiring extracts agent/scopeId from the inbound
-  // payload and forwards them to createLocalScope. Production now reads via
-  // local arrow params (`(agent, scopeId) => this.createLocalScope(agent, scopeId)`)
-  // — pin both shapes so a regression that drops the wiring still trips.
-  assert.match(runtime, /this\.createLocalScope\((?:payload\.agent,\s*payload\.scopeId|agent,\s*scopeId)\)/)
+  const sendStart = agentStore.indexOf("window.electronAPI.agent.sendScoped({")
+  const sendEnd = agentStore.indexOf('if (!result.success)', sendStart)
+  const sendCall = agentStore.slice(sendStart, sendEnd)
+  assert.ok(sendStart > 0 && sendEnd > sendStart)
+  assert.match(sendCall, /scopeId:\s*activeScopeId/)
+  assert.match(sendCall, /requestId/)
+  assert.match(sendCall, /userMessage:/)
+  assert.doesNotMatch(sendCall, /agent:|continuationIntent:|deliveryMode:|workspaceRoots:/)
 
   assert.match(taskPanel, /window\.electronAPI\.agent\.suspendRun\(/)
   assert.match(taskPanel, /window\.electronAPI\.agent\.resumeRun\(/)
   assert.match(taskPanel, /window\.electronAPI\.agent\.respondToInteraction\(/)
   assert.match(chatPanel, /useTaskInteractionHandlers/)
   assert.match(taskInteractionHandlers, /window\.electronAPI\.agent\.suspendRun\(/)
-  assert.match(taskInteractionHandlers, /window\.electronAPI\.agent\.resumeRun\(/)
-  assert.match(taskInteractionHandlers, /window\.electronAPI\.agent\.respondToInteraction\(/)
 })
-
-test('chat conversation deletion is routed through runtime cleanup before removing persisted records', () => {
+test('chat conversation deletion can only enter the Codex close lifecycle', () => {
   const runtime = readWorkspaceFile('src/main/modules/agent-control/runtime-core/runtime.ts')
-  // B8-D R4 — the deleteConversation body moved from runtime.ts into the
-  // delegated ConversationScopeStore (runtime keeps a one-line public
-  // delegate; the store receives the runtime-owned scopeRunSummaries map by
-  // reference). The cleanup-step assertions follow the body; the runtime-side
-  // assertion pins the delegate so the IPC → runtime → store chain holds.
   const scopeStore = readWorkspaceFile(
     'src/main/modules/agent-control/runtime-core/conversation-scope-store.ts'
   )
   const ipcHandler = readWorkspaceFile('src/main/modules/claude-bridge/ipc-handler.ts')
+  const preload = readWorkspaceFile('src/preload/index.ts')
+  const rendererTypes = readWorkspaceFile('src/renderer/types/electron.d.ts')
+  const agentStore = readWorkspaceFile('src/renderer/stores/useAgent.ts')
 
-  assert.match(runtime, /deleteConversation\(scopeId: string\): void/)
-  assert.match(runtime, /this\.conversationScopes\.deleteConversation\(scopeId\)/)
-  assert.match(scopeStore, /this\.deps\.scopeRunSummaries\.delete\(scopeId\)/)
-  assert.match(scopeStore, /forgetSession\(scopeId\)/)
-  assert.match(ipcHandler, /runtime!\.deleteConversation\(conversationId\)/)
-  assert.doesNotMatch(ipcHandler, /chatRepository\.deleteConversation\(conversationId\)/)
+  assert.match(agentStore, /deleteConversation:[\s\S]*?get\(\)\.closeSession\(visibleSessionId\)/)
+  for (const source of [runtime, scopeStore, ipcHandler, preload, rendererTypes]) {
+    assert.doesNotMatch(source, /chat:deleteConversation|\.deleteConversation\(conversationId\)|deleteConversation\(scopeId/)
+  }
 })

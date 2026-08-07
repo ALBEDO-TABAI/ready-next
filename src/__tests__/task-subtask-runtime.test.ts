@@ -1,29 +1,9 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { RunCoordinator } from '../main/modules/agent-control/task-projection/run-coordinator'
 import { syncTaskProjection } from '../main/modules/agent-control/task-projection/task-projection-sync'
 import type { TaskProjectionRecord, TaskProjectionStore } from '../main/modules/agent-control/contracts/run-contracts'
-import type {
-  ConversationScope,
-  ScopeRunEventPayload,
-  ScopeRunMemoryCapture,
-  ScopeRunSummary,
-} from '../main/modules/agent-control/contracts/types'
-
-function createScope(): ConversationScope {
-  return {
-    id: 'scope-1',
-    agent: 'butler',
-    title: '测试会话',
-    sourceKind: 'local',
-    sourceId: 'app',
-    threadKey: 'scope-1',
-    meta: {},
-    createdAt: '2026-04-16T10:00:00.000Z',
-    updatedAt: '2026-04-16T10:00:00.000Z',
-  }
-}
+import type { ScopeRunEventPayload, ScopeRunSummary } from '../main/modules/agent-control/contracts/types'
 
 test('syncTaskProjection backfills child task summary into the parent step state', async () => {
   const records = new Map<string, TaskProjectionRecord>()
@@ -269,51 +249,4 @@ test('syncTaskProjection keeps a running child placeholder and then upgrades it 
   assert.equal((parentAfterDone?.steps[0] as any)?.childTasks?.[0]?.status, 'completed')
   assert.match(parentAfterDone?.steps[0]?.detail || '', /已收集完成/)
   assert.match(parentAfterDone?.steps[0]?.detail || '', /引用列表/)
-})
-
-test('RunCoordinator preserves parent-child task linkage in emitted scope events', async () => {
-  const events: ScopeRunEventPayload[] = []
-
-  const coordinator = new RunCoordinator({
-    promptAssembly: {
-      buildForScopedRun: async () => ({
-        systemPrompt: 'system prompt',
-        bootstrapMessages: [],
-        memoryRefs: [],
-        triggerHits: [],
-        contextBudget: { totalChars: 20, l0Chars: 10, l1Chars: 10, l2Chars: 0, droppedRefs: [] },
-      }),
-      applyToMessage: (message) => message,
-      recordRunOutcome: () => {},
-    },
-    executeAndCollect: async () => ({
-      success: true,
-      finalText: 'child done',
-      cancelled: false,
-      usedTools: [],
-      taskId: 'child-1',
-      taskType: 'direct_answer',
-      interactionState: 'running',
-      taskProjectionId: 'child-1',
-    }),
-    emitScopeRunEvent: (payload) => {
-      events.push(payload)
-    },
-    reflectOnConversation: async (): Promise<ScopeRunMemoryCapture | null> => null,
-  })
-
-  await coordinator.runScoped({
-    scope: createScope(),
-    message: '整理引用',
-    requestId: 'req-child',
-    taskId: 'child-1',
-    parentTaskId: 'parent-1',
-    parentStepId: 'collect',
-    coordinators: []
-  } as any)
-
-  assert.equal((events[0] as any).parentTaskId, 'parent-1')
-  assert.equal((events[0] as any).parentStepId, 'collect')
-  assert.equal((events.at(-1) as any).parentTaskId, 'parent-1')
-  assert.equal((events.at(-1) as any).parentStepId, 'collect')
 })

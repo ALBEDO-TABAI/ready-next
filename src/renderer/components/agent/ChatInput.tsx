@@ -20,10 +20,9 @@ import {
 interface ChatInputProps {
   inputValue: string
   isStreaming: boolean
+  lifecycleInputBlocked: boolean
   attachmentsCount: number
   hasUserMessages: boolean
-  pendingSendCount: number
-  pendingSendCountdown: number
   isDragOver: boolean
   contextUsage: ContextUsageSnapshot | null
   composerShellStyle: React.CSSProperties
@@ -36,10 +35,7 @@ interface ChatInputProps {
   isChannelScope: boolean
   onInputChange: (value: string) => void
   onSend: () => void
-  thoroughOverride: boolean
-  onThoroughOverrideChange: (enabled: boolean) => void
   onStop: () => void
-  onUndo: () => void
   onPickFiles: () => void
   onAgentSelect: (agentName: string) => void
   onSkillReference: (skill: ReadySkillReference) => void
@@ -63,10 +59,9 @@ export interface ChatInputHandle {
 const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput({
   inputValue,
   isStreaming,
+  lifecycleInputBlocked,
   attachmentsCount,
   hasUserMessages,
-  pendingSendCount,
-  pendingSendCountdown,
   isDragOver,
   contextUsage,
   composerShellStyle,
@@ -79,10 +74,7 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
   isChannelScope,
   onInputChange,
   onSend,
-  thoroughOverride,
-  onThoroughOverrideChange,
   onStop,
-  onUndo,
   onPickFiles,
   onAgentSelect,
   onSkillReference,
@@ -104,7 +96,7 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
   const atMenuRef = useRef<HTMLDivElement>(null)
   const slashMenuRef = useRef<HTMLDivElement>(null)
   const composingRef = useRef(false)
-  const composerLocked = isStreaming
+  const composerLocked = isStreaming || lifecycleInputBlocked
 
   const syncComposerMenuFrame = useCallback(() => {
     const textarea = textareaRef.current
@@ -621,25 +613,6 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
         boxShadow: 'none',
       }}
     >
-      {pendingSendCount > 0 && !composerLocked && (
-        <div
-          className="flex items-center justify-between"
-          style={{
-            padding: '7px 10px',
-            borderRadius: 8,
-            border: '1px solid transparent',
-            background: 'transparent',
-            fontSize: 11,
-            color: 'var(--text-gray)',
-          }}
-        >
-          <span>正在合并 {pendingSendCount} 条连续消息，准备统一发送</span>
-          <span style={{ color: 'var(--text-light)' }}>
-            {Math.max(0.1, pendingSendCountdown / 1000).toFixed(1)}s
-          </span>
-        </div>
-      )}
-
       <div
         data-chat-composer-shell="true"
         data-drag-over={isDragOver ? 'true' : 'false'}
@@ -793,33 +766,14 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
             </div>
 
             <div className="flex items-center" style={{ gap: 6, flexShrink: 0 }}>
-              <button
-                type="button"
-                data-ready-delivery-thorough="true"
-                aria-pressed={thoroughOverride}
-                title="Boost：仅下一次发送启用强化协作与独立复核，发送后自动关闭"
-                onClick={() => onThoroughOverrideChange(!thoroughOverride)}
-                className="rounded-full hover:bg-black/5 active:scale-[0.98] transition-[background-color,color,transform] duration-150"
-                style={{
-                  height: 26,
-                  padding: '0 8px',
-                  fontSize: 10.5,
-                  lineHeight: 1,
-                  fontWeight: 550,
-                  border: '1px solid transparent',
-                  background: thoroughOverride ? 'color-mix(in srgb, var(--color-ready-orange) 14%, transparent)' : 'transparent',
-                  color: thoroughOverride ? 'var(--color-ready-orange)' : 'var(--text-light)',
-                }}
-              >
-                Boost
-              </button>
               <ContextUsageMeter usage={contextUsage} dimmed={composerLocked} />
 
               {composerLocked ? (
                 <button
                   onClick={onStop}
                   data-ready-agent-stop="true"
-                  title="停止生成"
+                  disabled={lifecycleInputBlocked}
+                  title={lifecycleInputBlocked ? '当前会话状态待确认' : '停止生成'}
                   className="flex items-center justify-center text-white hover:brightness-95 active:scale-[0.98] transition-[filter,transform] duration-200 ease-out"
                   style={{
                     width: 30,
@@ -834,7 +788,7 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
                 <button
                   onClick={onSend}
                   data-ready-agent-send="true"
-                  disabled={!inputValue.trim() && attachmentsCount === 0}
+                  disabled={lifecycleInputBlocked || (!inputValue.trim() && attachmentsCount === 0)}
                   className="flex items-center justify-center hover:brightness-95 active:scale-[0.98] disabled:cursor-not-allowed transition-[opacity,filter,transform] duration-200 ease-out"
                   style={{
                     width: 30,

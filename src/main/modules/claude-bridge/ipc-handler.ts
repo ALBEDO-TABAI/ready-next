@@ -1,10 +1,8 @@
 import { emitRunTimelineEvent } from './run-timeline-emitter'
 import { ipcMain, BrowserWindow, dialog } from 'electron'
-import { randomUUID } from 'crypto'
 import { AgentManager } from './agent-manager'
-// Stage V V2.1c — `MultimodalBlock` import retired: the only call sites
-// (`agent:send` + `agent:sendScoped` payload types) moved into
-// `agentLifecycleGroup`.
+// The Codex send payload is owned by the shared IPC contract and registered
+// through `agentLifecycleGroup`.
 // Stage V V2.1d — `AIModelConfig` import retired: the only call site
 // (`agent:getCapabilityRuntimeSnapshot` payload type) moved into
 // `agentRuntimeGroup`.
@@ -45,11 +43,11 @@ import {
 } from '../tools/builtins/ask-user-questions-store'
 import { getDatabase } from '../database'
 import { getSkillsRuntimeManager } from '../skills-runtime/runtime-manager'
-import { sanitizeAssistantText } from '../agent-control/tools-runtime/tool-call-text-guard'
 import { cancelChildRunForIpc, listActiveChildRunsForIpc } from './active-child-run-ipc'
 import { askUserGroup } from './ipc/ask-user-group'
 import { toolEventGroup } from './ipc/tool-event-group'
 import { agentLifecycleGroup } from './ipc/agent-lifecycle-group'
+import { createE1UnavailableCodexRuntimeComposition } from '../agent-control/codex-runtime/codex-runtime-composition'
 import { agentRuntimeGroup } from './ipc/agent-runtime-group'
 import { mcpGroup, runMcpBoot } from './ipc/mcp-group'
 import { agentRegistryGroup } from './ipc/agent-registry-group'
@@ -89,6 +87,7 @@ import { isRendererAgentMetricName } from '../../../shared/renderer-agent-metric
 // Stage V V2.1c — `SendScopedUserMessage` import retired: the only call
 // site (the `agent:sendScoped` payload type) moved into `agentLifecycleGroup`.
 import type { ScopeRunEventPayload } from '../agent-control/contracts/types'
+import type { IngressAdmittedEvent } from '../../../shared/ipc-contracts/agent-runtime'
 import type { TaskProjectionChangeEvent } from '../agent-control/contracts/run-contracts'
 import { getDocumentWorker } from '../document-engine/document-worker-bridge'
 import { readHeavyDocumentAttachmentForAI } from './document-attachment-text'
@@ -181,9 +180,9 @@ let askUserGroupDispose: IpcDisposeHandle | null = null
 let toolEventGroupDispose: IpcDisposeHandle | null = null
 
 /**
- * Stage V V2.1c — dispose handle returned by `agentLifecycleGroup.register`.
- * Owns the 4 channels `agent:send` + `agent:newSession` + `agent:kill` +
- * `agent:sendScoped`. Same lifecycle pattern as the other group dispose
+ * Dispose handle returned by `agentLifecycleGroup.register`.
+ * Owns the six exact Codex send/create/reset/stop/close/compact channels.
+ * Same lifecycle pattern as the other group dispose
  * slots: register on `setupAgentIPC`, dispose on dev-reload re-entry,
  * dispose on `cleanupAgentRuntime` shutdown.
  */
@@ -223,10 +222,10 @@ let emergenceFeedGroupDispose: IpcDisposeHandle | null = null
 
 /**
  * Stage V V2.1e — dispose handle returned by `conversationGroup.register`.
- * Owns the 8 conversation-scope + attachment channels
+ * Owns the 7 conversation-scope + attachment channels
  * (`agent:listConversationScopes`, `agent:listScopeRuns`,
- * `agent:getConversationScopeMessages`, `agent:createLocalScope`,
- * `agent:listScopeAttachments`, `agent:getScopeAttachment`,
+ * `agent:getConversationScopeMessages`, `agent:listScopeAttachments`,
+ * `agent:getScopeAttachment`,
  * `agent:clearRemoteAttachmentCache`, `agent:getRemoteAttachmentCacheStats`).
  * Same lifecycle pattern as the other group dispose slots: register on
  * `setupAgentIPC`, dispose on dev-reload re-entry, dispose on
@@ -308,9 +307,8 @@ let scheduledTaskChangedOff: (() => void) | null = null
 
 /**
  * Stage V V2.1m — dispose handle returned by `chatPersistenceGroup.register`.
- * Owns the 8 chat-persistence + file-picker channels
- * (`chat:getConversations`, `chat:getMessages`, `chat:deleteConversation`,
- * `chat:saveMessage`, `chat:createConversation`, `chat:updateConversationTitle`,
+ * Owns the 5 chat metadata/read + file-picker channels
+ * (`chat:getConversations`, `chat:getMessages`, `chat:updateConversationTitle`,
  * `chat:pickFiles`, `chat:readFileForAI`). Same lifecycle pattern as the other
  * group dispose slots: register on `setupAgentIPC`, dispose on dev-reload
  * re-entry, dispose on `cleanupAgentRuntime` shutdown.
@@ -362,24 +360,6 @@ function cleanupSkillSessionState(sessionId?: string, reason = 'Skill session st
   }
   clearAllReferenceSkillHints()
   clearSkillTaskProjection()
-  getEphemeralExecutionStore().clear()
-  getAskUserQuestionsStore().clear()
-}
-
-function cancelSkillSessionPendingInteractions(sessionId?: string, reason = 'Skill session interaction cancelled'): void {
-  if (sessionId) {
-    getEphemeralExecutionStore().rejectBySession(sessionId, new Error(reason))
-    getAskUserQuestionsStore().rejectBySession(sessionId, new Error(reason))
-    // PR 1 B.4c — keep DB aligned with in-memory store after a session-scoped
-    // interaction cancel.
-    try {
-      const swept = getDatabase().sweepPendingAskUserQuestionsCardsBySession(sessionId, 'session_reset')
-      if (swept > 0) {
-        logAgentMetric('ask_user_questions_session_reset_swept_db', { sessionId, swept })
-      }
-    } catch { /* swallow — best-effort */ }
-    return
-  }
   getEphemeralExecutionStore().clear()
   getAskUserQuestionsStore().clear()
 }
@@ -454,9 +434,7 @@ export async function cleanupAgentRuntime(): Promise<void> {
     try { toolEventGroupDispose.dispose() } catch { /* ignore */ }
     toolEventGroupDispose = null
   }
-  // Stage V V2.1c — symmetric release of the 4 agent-lifecycle channel
-  // handlers (`agent:send` + `agent:newSession` + `agent:kill` +
-  // `agent:sendScoped`).
+  // Symmetric release of the six Codex lifecycle channel handlers.
   if (agentLifecycleGroupDispose) {
     try { agentLifecycleGroupDispose.dispose() } catch { /* ignore */ }
     agentLifecycleGroupDispose = null
@@ -607,7 +585,11 @@ export async function reconcileAgentSchedulesOnResume(): Promise<void> {
 
 export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWindow, browserController?: BrowserController): void {
   if (!runtime) {
-    runtime = new AgentControlRuntime(agentManager, browserController)
+    runtime = new AgentControlRuntime(
+      agentManager,
+      browserController,
+      createE1UnavailableCodexRuntimeComposition(),
+    )
     void runtime.start()
     // Phase 1.3 — kick off the Python venv health check immediately after the
     // runtime starts. Fire-and-forget: a stale 3.14 venv (left over from a
@@ -773,86 +755,12 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
     agent: string
     sessionId: string
   }>()
-  // Reverse index: "${agent}|${sessionId}" → requestIds waiting on the renderer.
-  // Lets agent:kill / agent:newSession cancel in-flight requests instead of waiting for the 120s watchdog.
-  const sessionPendingIndex = new Map<string, Set<string>>()
-  const indexKey = (agent: string, sessionId?: string): string => `${agent || ''}|${sessionId || ''}`
   const releasePendingRequest = (requestId: string): void => {
     const entry = pendingToolActionRequests.get(requestId)
     if (!entry) return
     pendingToolActionRequests.delete(requestId)
     clearTimeout(entry.timer)
-    const key = indexKey(entry.agent, entry.sessionId)
-    const set = sessionPendingIndex.get(key)
-    if (set) {
-      set.delete(requestId)
-      if (set.size === 0) sessionPendingIndex.delete(key)
-    }
   }
-  const cancelToolActionRequestsBySession = (agent: string, sessionId?: string): void => {
-    const key = indexKey(agent, sessionId)
-    const requestIds = sessionPendingIndex.get(key)
-    if (!requestIds || requestIds.size === 0) return
-    const cancelled: string[] = []
-    for (const rid of Array.from(requestIds)) {
-      const entry = pendingToolActionRequests.get(rid)
-      if (!entry) continue
-      pendingToolActionRequests.delete(rid)
-      clearTimeout(entry.timer)
-      entry.reject(new Error('cancelled'))
-      cancelled.push(rid)
-    }
-    sessionPendingIndex.delete(key)
-    if (!mainWindow.isDestroyed() && cancelled.length > 0) {
-      // Stage V V3.2 — carry sessionId on the cancel push so the renderer
-      // can scope the cancellation to the correct session (multi-session UI
-      // ignores cancels destined for other sessions).
-      mainWindow.webContents.send('agent:cancelToolActionRequest', {
-        requestIds: cancelled,
-        agent,
-        sessionId: sessionId || null,
-      })
-    }
-  }
-  const requestRendererToolAction = async (payload: {
-    agent?: string
-    sessionId?: string
-    runId?: string
-    tool: string
-    args: Record<string, unknown>
-  }): Promise<Record<string, unknown>> => {
-    if (mainWindow.isDestroyed()) {
-      throw new Error('Main window is not available for design tool execution')
-    }
-    const requestId = randomUUID()
-    const agent = payload.agent || ''
-    const sessionId = payload.sessionId || ''
-    return await new Promise<Record<string, unknown>>((resolve, reject) => {
-      const timer = setTimeout(() => {
-        releasePendingRequest(requestId)
-        reject(new Error(`Timed out waiting for renderer tool action result: ${payload.tool}`))
-      }, 120_000)
-      pendingToolActionRequests.set(requestId, { resolve, reject, timer, agent, sessionId })
-      const key = indexKey(agent, sessionId)
-      let set = sessionPendingIndex.get(key)
-      if (!set) { set = new Set<string>(); sessionPendingIndex.set(key, set) }
-      set.add(requestId)
-      // Renderer resolves scopeId by scanning scopeRunStates when scopeId/sessionId absent.
-      //   Main's sessionId is the scopeId in practice — forward it explicitly so the renderer
-      //   short-circuits the scan even when its scope run state has been retired.
-      // Stage V V3.2 — explicit sessionId on the push (null when global)
-      // so multi-session renderer can route the request without aliasing
-      // through scopeId.
-      mainWindow.webContents.send('agent:toolActionRequest', {
-        requestId,
-        scopeId: sessionId || undefined,
-        ...payload,
-        sessionId: payload.sessionId ?? null,
-      })
-    })
-  }
-  orchestrator.setRendererToolActionRequester(requestRendererToolAction)
-  orchestrator.setCancelPendingToolActions(cancelToolActionRequestsBySession)
   log('setupAgentIPC called, Ready agent runtime initialized')
 
   // Stage V V2.1b — 2 toolEvent channels (`tools:logToolEvent` +
@@ -870,9 +778,8 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
     releasePendingRequest,
   })
 
-  // Stage V V2.1c — 4 agent-lifecycle channels (`agent:send`,
-  // `agent:newSession`, `agent:kill`, `agent:sendScoped`) moved into
-  // `agentLifecycleGroup`. The group handles dev-reload removeHandler
+  // The six Codex lifecycle channels are owned by `agentLifecycleGroup`.
+  // The group handles dev-reload removeHandler
   // pre-clear internally; we hold the dispose handle so `cleanupAgentRuntime`
   // can drop the handlers on shutdown. Re-binding on dev reload first calls
   // `dispose()` on the prior handle so listener slots stay clean.
@@ -886,11 +793,12 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
     agentLifecycleGroupDispose = null
   }
   agentLifecycleGroupDispose = agentLifecycleGroup.register(ipcMain, {
-    orchestrator,
     sendScoped: (payload) => runtime!.sendScoped(payload),
-    cancelToolActionRequestsBySession,
-    cleanupSkillSessionState,
-    cancelSkillSessionPendingInteractions,
+    createSession: () => runtime!.createCodexSession(),
+    resetSession: (request) => runtime!.resetCodexSession(request),
+    stopSession: (request) => runtime!.stopCodexSession(request),
+    closeSession: (request) => runtime!.closeCodexSession(request),
+    compactSession: (request) => runtime!.compactCodexSession(request),
     log,
   })
 
@@ -899,7 +807,7 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
   // were the AgentManager-era admission surface. Verified zero renderer callers
   // before deletion (see audit §1.1). Current production runs exclusively
   // through `agent:getRuntimeStatus` + `agent:getCapabilityRuntimeSnapshot` +
-  // the SDK runtime channels below. Reintroduction is fenced by
+  // the Codex runtime channels below. Reintroduction is fenced by
   // `scripts/check-no-legacy-agent-ipc.cjs`.
 
   // Stage V V2.1d — agent runtime introspection channels lifted into
@@ -1064,7 +972,6 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
     listConversationScopes: (agent) => runtime!.listConversationScopes(agent),
     listScopeRuns: (payload) => runtime!.listScopeRuns(payload),
     getConversationScopeMessages: (scopeId) => runtime!.getConversationScopeMessages(scopeId),
-    createLocalScopeWithMode: (agent, id) => runtime!.createLocalScopeWithMode(agent, id),
     listScopeAttachments: (scopeId) => runtime!.listScopeAttachments(scopeId),
     getScopeAttachment: (scopeId, attachmentId) => runtime!.getScopeAttachment(scopeId, attachmentId),
     clearRemoteAttachmentCache: (channelId) => runtime!.clearRemoteAttachmentCache(channelId),
@@ -1152,17 +1059,14 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
   // session-recall read channels). See the single `recallGroup.register`
   // call above.
 
-  // Stage V V2.1e — the 6 channels that used to live here
-  // (`agent:getConversationScopeMessages`, `agent:createLocalScope`,
-  // `agent:listScopeAttachments`, `agent:getScopeAttachment`,
+  // Stage V V2.1e — the 5 channels that used to live here
+  // (`agent:getConversationScopeMessages`, `agent:listScopeAttachments`,
+  // `agent:getScopeAttachment`,
   // `agent:clearRemoteAttachmentCache`, `agent:getRemoteAttachmentCacheStats`)
   // moved into `conversationGroup` along with the 2 earlier scope-list
   // channels. See the single `conversationGroup.register` call above.
 
-  // Stage V V2.1c — `agent:sendScoped` moved into `agentLifecycleGroup`
-  // (registered above, alongside `agent:send` + `agent:newSession` +
-  // `agent:kill`). Removed from this site to keep the lifecycle channels in
-  // a single group.
+  // `agent:sendScoped` is registered only through `agentLifecycleGroup`.
 
   // Stage V V2.1j — `agent:emitRendererMetric` moved into `telemetryGroup`.
   // Symmetric dispose lives in `cleanupAgentRuntime`; defensive dev-reload
@@ -1228,10 +1132,9 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
   scheduleRuntime.on('scheduledTasksChanged', onScheduledTaskChanged)
   scheduledTaskChangedOff = () => scheduleRuntime.removeListener('scheduledTasksChanged', onScheduledTaskChanged)
 
-  // Stage V V2.1m — the 8 chat-persistence + file-picker channels
-  // (chat:getConversations, chat:getMessages, chat:deleteConversation,
-  // chat:saveMessage, chat:createConversation, chat:updateConversationTitle,
-  // chat:pickFiles, chat:readFileForAI) moved into `chatPersistenceGroup`.
+  // Chat metadata reads/title updates and file-picker channels live in
+  // `chatPersistenceGroup`. Conversation lifecycle and message writes are
+  // owned by the Codex runtime path and are not exposed to Renderer IPC.
   // The group pre-clears internally; we hold the dispose handle so
   // `cleanupAgentRuntime` can drop the handlers on shutdown. Re-binding on
   // dev reload first calls `dispose()` on the prior handle so listener slots
@@ -1248,21 +1151,7 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
   chatPersistenceGroupDispose = chatPersistenceGroup.register(ipcMain, {
     getConversations: (agent) => chatRepository.getConversations(agent),
     getMessages: (conversationId) => chatRepository.getMessages(conversationId),
-    // Must be `runtime!.deleteConversation` (not `chatRepository.deleteConversation`):
-    // runtime piggybacks on the delete to drop in-memory scope state and emit
-    // detached-task cancellations. The pre-extraction handler made this same
-    // explicit choice.
-    deleteConversation: (conversationId) => runtime!.deleteConversation(conversationId),
-    saveMessage: (payload) => chatRepository.saveMessage(payload),
-    createConversation: (payload) => chatRepository.createConversation(payload),
     updateConversationTitle: (payload) => chatRepository.updateConversationTitle(payload),
-    sanitizeAssistantText: (text, options) => sanitizeAssistantText(text, options),
-    // `runtime` may be uninitialized when the chat panel is somehow racing
-    // setupAgentIPC; mirror the pre-extraction `runtime?.persist…` no-op via
-    // the `??` short-circuit so the group dep stays a non-optional function.
-    persistReferenceHintAfterAssistantMessage: (scopeId, role) => {
-      runtime?.persistReferenceHintAfterAssistantMessage(scopeId, role)
-    },
     pickFiles: async () => {
       const result = await dialog.showOpenDialog(mainWindow, {
         properties: ['openFile', 'multiSelections'],
@@ -1612,6 +1501,12 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
     }
   })
 
+  runtime.on('ingressAdmitted', (data: IngressAdmittedEvent) => {
+    if (!mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('agent:ingressAdmitted', data)
+    }
+  })
+
   runtime.on('scopeRunEvent', (data) => {
     if (!mainWindow.isDestroyed()) {
       // Stage V V3.2 — mirror scopeId to sessionId on the wire payload.
@@ -1648,14 +1543,14 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
   // bindings above. Keeping the legacy forwards meant the same channel
   // could receive two payload shapes: new (with recoverable/errorKind/
   // softError) and old (raw without those fields), polluting renderer
-  // error display. The SDK runtime path is the single producer now.
+  // error display. The Codex host path is the single producer now.
   // See plan §2 U1.3 / audit §1.1 / U1.1 tool error shape.
 
   // Stage U0.1 — legacy tool_execute bridge removed. The previous handler
   // used EventEmitter#emit on ipcMain to dispatch calendar create requests
   // and ORed the boolean result with a synthetic success payload, so every
   // call appeared to succeed regardless of whether the event was written.
-  // The Agent SDK runtime now owns every tool execution; see
+  // The Ready tool runtime owns product tool execution; see
   // docs/superpowers/audits/2026-05-20-ready-deep-review-and-refactor-plan.md
   // section 1.1 for the audit entry.
 
