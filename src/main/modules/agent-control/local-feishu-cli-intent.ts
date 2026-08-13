@@ -49,9 +49,7 @@ export function hasExplicitLocalFeishuCliTaskIntent(text: string): boolean {
     String.raw`${referencedCli}\s*(?:来|去|帮我|替我|to)?\s*(?:${LOCAL_FEISHU_DOCUMENT_OPERATION_PATTERN.source})`,
     'i',
   )
-  return (explicitUseBefore.test(taskText) || operationAfterCli.test(taskText))
-    && LOCAL_FEISHU_DOCUMENT_OPERATION_PATTERN.test(taskText)
-    && LOCAL_FEISHU_DOCUMENT_RESOURCE_PATTERN.test(taskText)
+  return explicitUseBefore.test(taskText) || operationAfterCli.test(taskText)
 }
 
 export function hasExplicitLocalFeishuCliStatusIntent(text: string): boolean {

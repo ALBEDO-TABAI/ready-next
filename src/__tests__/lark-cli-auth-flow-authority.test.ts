@@ -198,6 +198,45 @@ test('Lark CLI missing-scope evidence accepts the strict stderr error returned b
   clearLarkCliAuthFlowsForTests()
 })
 
+test('Lark CLI calendar reads can bind their exact missing scope for in-chat authorization', async () => {
+  clearLarkCliAuthFlowsForTests()
+  const sessionId = 'lark-cli-calendar-scope-evidence'
+  const skillId = 'lark-cli'
+  const executableAuthorityDigest = 'test-lark-cli-authority-digest'
+  const scope = 'calendar:calendar.event:read'
+  const command = 'lark-cli calendar +agenda --start 2026-08-10 --end 2026-08-17 --as user'
+  const result = await executeLarkCliCommandWithAuthAuthority({
+    sessionId,
+    skillId,
+    executableAuthorityDigest,
+    command,
+    execute: async () => createToolExecutionOutput('missing scope', {
+      shape: 'json',
+      data: {
+        exitCode: 3,
+        stderr: JSON.stringify({
+          ok: false,
+          error: {
+            type: 'authorization',
+            subtype: 'missing_scope',
+            missing_scopes: [scope],
+          },
+        }),
+      },
+    }),
+  })
+  assert.equal(result.ok, true)
+  assert.deepEqual(
+    getPendingLarkCliMissingScopeEvidenceForTests(sessionId, skillId)?.scopes,
+    [scope],
+  )
+  assert.equal(
+    classifyLarkCliCommand(`lark-cli auth login --scope "${scope}" --no-wait --json`),
+    'read_only',
+  )
+  clearLarkCliAuthFlowsForTests()
+})
+
 test('embedded Lark CLI auth flow binds missing scope, redaction, confirmation, secret restore, and readback', async () => {
   clearLarkCliAuthFlowsForTests()
   const skill = compileSkillDefinition({

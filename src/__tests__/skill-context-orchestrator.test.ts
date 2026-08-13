@@ -281,13 +281,26 @@ test('SkillContextOrchestrator treats explicit Feishu CLI wording as the embedde
     orchestrator.findExplicitlyRequestedSkills('请帮我查看飞书 CLI 有没有登录').map((skill) => skill.id),
     ['lark-cli'],
   )
-  assert.deepEqual(orchestrator.findExplicitlyRequestedSkills('用飞书 CLI 创建一个日程'), [])
+  assert.deepEqual(
+    orchestrator.findExplicitlyRequestedSkills('用飞书 cli 查一下我这周还有哪些安排').map((skill) => skill.id),
+    ['lark-cli'],
+  )
+  assert.deepEqual(
+    orchestrator.findExplicitlyRequestedSkills('用飞书 CLI 创建一个日程').map((skill) => skill.id),
+    ['lark-cli'],
+  )
   assert.deepEqual(orchestrator.findExplicitlyRequestedSkills('用飞书 CLI 上传本地文件到云盘'), [])
-  assert.deepEqual(orchestrator.findExplicitlyRequestedSkills('Use lark-cli to create a calendar event.'), [])
+  assert.deepEqual(
+    orchestrator.findExplicitlyRequestedSkills('Use lark-cli to create a calendar event.').map((skill) => skill.id),
+    ['lark-cli'],
+  )
   assert.deepEqual(orchestrator.findExplicitlyRequestedSkills('Use lark-cli to upload a local file to Drive.'), [])
   assert.deepEqual(orchestrator.findExplicitlyRequestedSkills('用飞书 CLI 更新本地文件'), [])
   assert.deepEqual(orchestrator.findExplicitlyRequestedSkills('Use lark-cli to read this local file'), [])
-  assert.deepEqual(orchestrator.findExplicitlyRequestedSkills('用 Lark CLI 创建一个日程'), [])
+  assert.deepEqual(
+    orchestrator.findExplicitlyRequestedSkills('用 Lark CLI 创建一个日程').map((skill) => skill.id),
+    ['lark-cli'],
+  )
   assert.deepEqual(orchestrator.findExplicitlyRequestedSkills('用 Lark CLI 上传本地文件到云盘'), [])
   assert.deepEqual(orchestrator.findExplicitlyRequestedSkills('不要用飞书 CLI，直接读取这份飞书文档'), [])
   assert.deepEqual(orchestrator.findExplicitlyRequestedSkills('我明确要求不要在这次任务中使用任何本地飞书 CLI，直接读取飞书文档'), [])

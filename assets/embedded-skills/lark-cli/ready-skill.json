@@ -1,11 +1,12 @@
 {
   "id": "lark-cli",
   "name": "Lark CLI",
-  "description": "通过本机全局 lark-cli 读写飞书中的在线文档、电子表格和云空间，并在 Ready Agent 对话中完成用户授权。",
+  "description": "通过本机全局 lark-cli 读写飞书中的在线文档、电子表格和云空间，查询日历日程，并在 Ready Agent 对话中完成用户授权。",
   "version": "1.0.0",
   "runtime": "reference",
   "execution": { "mode": "advisory" },
   "allowed_tools": ["skill_run_shell", "skill_read_artifact", "skill_ask_user"],
+  "capability_surface": { "composition": "exclusive", "exclusive_scope": "owner" },
   "actions": {
     "read_skill": {
       "runtime": "reference",

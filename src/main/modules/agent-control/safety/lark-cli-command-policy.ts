@@ -5,6 +5,9 @@ export type LarkCliCommandClass = 'not_lark_cli' | 'read_only' | 'external_write
 export const DELEGABLE_LARK_CLI_VERSION = 'lark-cli version 1.0.76'
 
 const READ_ONLY_SHORTCUTS: Readonly<Record<string, ReadonlySet<string>>> = {
+  calendar: new Set([
+    '+agenda', '+freebusy', '+get', '+meeting', '+search-event',
+  ]),
   drive: new Set([
     '+inspect', '+list-comments', '+search', '+secure-label-list', '+status', '+task_result',
     '+version-history',
@@ -53,7 +56,10 @@ const OUTBOUND_CONTENT_VALUE_FLAGS = new Set([
   '--comment', '--description', '--name', '--summary', '--text', '--title',
 ])
 
-const MINIMAL_DOCUMENT_SCOPES = new Set([
+const MINIMAL_LARK_CLI_SCOPES = new Set([
+  'calendar:calendar.event:read',
+  'calendar:calendar.free_busy:read',
+  'calendar:calendar:read',
   'docs:document.comment:create',
   'docs:document.comment:delete',
   'docs:document.comment:read',
@@ -85,8 +91,8 @@ const MINIMAL_DOCUMENT_SCOPES = new Set([
   'space:document:shortcut',
 ])
 
-const DOCUMENT_SKILL_ROOTS = new Set([
-  'lark-shared', 'lark-drive', 'lark-doc', 'lark-sheets',
+const LARK_CLI_SKILL_ROOTS = new Set([
+  'lark-shared', 'lark-drive', 'lark-doc', 'lark-sheets', 'lark-calendar',
 ])
 
 const BOOLEAN_LEADING_FLAGS = new Set([
@@ -329,21 +335,21 @@ function authLoginHasExactShape(authTokens: readonly string[], phase: 'initiate'
     : deviceCodeCount === 1 && noWaitCount === 0 && scopeCount === 0)
 }
 
-function isAllowedDocumentSkillPath(
+function isAllowedLarkCliSkillPath(
   value: string,
   action: 'list' | 'read',
 ): boolean {
   if (!value || value.includes('\\')) return false
   const segments = value.split('/')
   const skillRoot = segments.shift() || ''
-  if (!DOCUMENT_SKILL_ROOTS.has(skillRoot)) return false
+  if (!LARK_CLI_SKILL_ROOTS.has(skillRoot)) return false
   if (segments.length === 0) return true
   return segments[0] === 'references'
     && segments.every((segment) => Boolean(segment) && segment !== '.' && segment !== '..')
     && (action === 'list' || (segments.length > 1 && (segments.at(-1) || '').endsWith('.md')))
 }
 
-function isAllowedDocumentSkillInspection(
+function isAllowedLarkCliSkillInspection(
   tokens: readonly string[],
   primaryIndex: number,
   action: 'list' | 'read',
@@ -360,10 +366,10 @@ function isAllowedDocumentSkillInspection(
   const target = positional[0] || ''
   if (positional.length === 2) {
     if (action !== 'read' || target.includes('/')) return false
-    return DOCUMENT_SKILL_ROOTS.has(target)
-      && isAllowedDocumentSkillPath(`${target}/${positional[1] || ''}`, action)
+    return LARK_CLI_SKILL_ROOTS.has(target)
+      && isAllowedLarkCliSkillPath(`${target}/${positional[1] || ''}`, action)
   }
-  return isAllowedDocumentSkillPath(target, action)
+  return isAllowedLarkCliSkillPath(target, action)
 }
 
 export function isAnyLarkCliAuthCommand(command: unknown): boolean {
@@ -376,11 +382,11 @@ export function shouldPersistLarkCliOverflowArtifacts(command: unknown): boolean
   return !isAnyLarkCliAuthCommand(command)
 }
 
-export function isLarkCliDocumentBusinessCommand(command: unknown): boolean {
+export function isLarkCliBusinessCommand(command: unknown): boolean {
   if (typeof command !== 'string') return false
   const tokens = tokenizeLarkCliCommand(command)
   if (!tokens || tokens[0] !== 'lark-cli') return false
-  return ['drive', 'docs', 'sheets'].includes(tokens[findPrimaryIndex(tokens)] || '')
+  return ['calendar', 'drive', 'docs', 'sheets'].includes(tokens[findPrimaryIndex(tokens)] || '')
 }
 
 export function isDelegableLarkCliOnlineWrite(
@@ -480,8 +486,8 @@ export function larkCliOutboundContentValues(command: unknown): string[] {
   return [...values, values.join(''), values.join('\n')]
 }
 
-export function isLarkCliDocumentEvidenceCommand(command: unknown): boolean {
-  if (!isLarkCliDocumentBusinessCommand(command) || typeof command !== 'string') return false
+export function isLarkCliEvidenceCommand(command: unknown): boolean {
+  if (!isLarkCliBusinessCommand(command) || typeof command !== 'string') return false
   const tokens = tokenizeLarkCliCommand(command)
   if (!tokens) return false
   return !tokens.some((token) => (
@@ -546,8 +552,8 @@ export function inspectLarkCliAuthQrcodeCommand(command: unknown):
   }
 }
 
-export function isMinimalLarkCliDocumentScope(scope: string): boolean {
-  return MINIMAL_DOCUMENT_SCOPES.has(scope)
+export function isMinimalLarkCliScope(scope: string): boolean {
+  return MINIMAL_LARK_CLI_SCOPES.has(scope)
 }
 
 export function classifyLarkCliCommand(command: unknown): LarkCliCommandClass {
@@ -578,7 +584,7 @@ export function classifyLarkCliCommand(command: unknown): LarkCliCommandClass {
     if (action === 'login') {
       const authCommand = inspectLarkCliAuthCommand(command)
       if (authCommand?.phase === 'initiate') {
-        return isMinimalLarkCliDocumentScope(authCommand.scope) ? 'read_only' : 'unsupported_domain'
+        return isMinimalLarkCliScope(authCommand.scope) ? 'read_only' : 'unsupported_domain'
       }
       return authCommand?.phase === 'complete' ? 'external_write' : 'unsupported_domain'
     }
@@ -587,24 +593,33 @@ export function classifyLarkCliCommand(command: unknown): LarkCliCommandClass {
   if (primary === 'skills') {
     const action = tokens[primaryIndex + 1]
     if (action !== 'list' && action !== 'read') return 'local_management'
-    return isAllowedDocumentSkillInspection(tokens, primaryIndex, action)
+    return isAllowedLarkCliSkillInspection(tokens, primaryIndex, action)
       ? 'read_only'
       : 'unsupported_domain'
   }
   if (primary === 'whoami' || primary === 'doctor') return 'read_only'
   if (primary === 'schema') {
     const schemaTarget = tokens[primaryIndex + 1] || ''
-    return /^(?:docs?|docx|drive|sheets?)[.]/i.test(schemaTarget) ? 'read_only' : 'unsupported_domain'
+    return /^(?:calendar|docs?|docx|drive|sheets?)[.]/i.test(schemaTarget) ? 'read_only' : 'unsupported_domain'
   }
-  if (!['drive', 'docs', 'sheets'].includes(primary)) return 'unsupported_domain'
+  if (!['calendar', 'drive', 'docs', 'sheets'].includes(primary)) return 'unsupported_domain'
   if (
     (hasStandaloneFlag(tokens, '--help') && hasExactSingleBooleanFlag(tokens, '--help'))
     || (hasStandaloneFlag(tokens, '-h') && hasExactSingleBooleanFlag(tokens, '-h'))
   ) return 'read_only'
   const identities = scalarOptionValues(tokens, '--as')
-  if (identities.length !== 1 || identities[0]?.toLowerCase() !== 'user') return 'unsupported_domain'
   const actionIndex = findDomainActionIndex(tokens, primaryIndex)
   const shortcut = tokens[actionIndex]
+  if (primary === 'calendar') {
+    if (identities.length > 1 || (identities[0] && identities[0].toLowerCase() !== 'user')) {
+      return 'unsupported_domain'
+    }
+    if (hasForbiddenLocalInput(tokens)) return 'unsupported_domain'
+    if (shortcut && READ_ONLY_SHORTCUTS.calendar?.has(shortcut)) return 'read_only'
+    const method = tokens[actionIndex + 1]
+    return method && READ_ONLY_METHODS.has(method) ? 'read_only' : 'unsupported_domain'
+  }
+  if (identities.length !== 1 || identities[0]?.toLowerCase() !== 'user') return 'unsupported_domain'
   if (shortcut && LOCAL_INPUT_SHORTCUTS[primary]?.has(shortcut)) return 'unsupported_domain'
   if (hasForbiddenLocalInput(tokens)) return 'unsupported_domain'
   if (tokens.includes('--yes')) return 'external_write'

@@ -4,8 +4,8 @@ import type { ToolExecutionOutput } from '../tools-runtime/tool-result-types'
 import {
   inspectLarkCliAuthCommand,
   inspectLarkCliAuthQrcodeCommand,
-  isLarkCliDocumentEvidenceCommand,
-  isMinimalLarkCliDocumentScope,
+  isLarkCliEvidenceCommand,
+  isMinimalLarkCliScope,
 } from './lark-cli-command-policy'
 import { readScopeContextEpoch } from '../session/scope-context-epoch'
 
@@ -77,7 +77,7 @@ function parseMissingScopes(output: ToolExecutionOutput): string[] {
     if (detail.type !== 'authorization' || detail.subtype !== 'missing_scope') continue
     if (!Array.isArray(detail.missing_scopes) || detail.missing_scopes.length !== 1) continue
     const scope = detail.missing_scopes[0]
-    if (typeof scope === 'string' && isMinimalLarkCliDocumentScope(scope)) candidates.push(scope)
+    if (typeof scope === 'string' && isMinimalLarkCliScope(scope)) candidates.push(scope)
   }
   return candidates.length === 1 ? candidates : []
 }
@@ -95,7 +95,7 @@ function rememberMissingScopeEvidence(input: {
   const durable = readScopeContextEpoch(input.sessionId)
   if (durable.kind === 'closed' || durable.kind === 'unavailable') return
   if (durable.kind === 'open' && input.messageVisibilityEpoch !== durable.messageVisibilityEpoch) return
-  if (!isLarkCliDocumentEvidenceCommand(input.command)) return
+  if (!isLarkCliEvidenceCommand(input.command)) return
   const scopes = parseMissingScopes(input.output)
   if (scopes.length === 0) return
   const key = flowKey(input.sessionId, input.skillId)

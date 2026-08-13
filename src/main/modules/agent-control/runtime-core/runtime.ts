@@ -70,6 +70,7 @@ import {
   readLarkCliAuthReadback,
 } from '../codex-runtime/codex-external-read-slice'
 import { resolveDeclaredSiblingSkillReadRoots } from '../../skills-runtime/skill-sibling-reference-roots'
+import { resolveSkillSurfaceComposition } from '../skills/skill-surface-composition'
 import { resolveFrozenDesktopExecutableAuthority } from '../../skills-runtime/desktop-executable-authority'
 import {
   resolveCodexNativeSkillInput,
@@ -673,6 +674,7 @@ export class AgentControlRuntime extends EventEmitter {
             ),
             channelScopeBound: this.isScopeChannelBound(input.scopeId),
             authorization: input.authorization,
+            skillSurfaceComposition: resolveSkillSurfaceComposition(input.authorization, input.scopeId).composition,
             requestEnvelope: input.requestEnvelope,
             skillCatalogAvailable: getSkillsRuntimeManager().listSkills().length > 0,
           },

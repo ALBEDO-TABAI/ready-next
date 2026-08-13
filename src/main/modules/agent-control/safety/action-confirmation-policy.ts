@@ -170,11 +170,11 @@ function sensitiveLarkCliOutboundCandidates(args: Record<string, unknown>): stri
 const FIRST_BATCH_RULES: readonly ConfirmationRule[] = [
   {
     id: 'm1-lark-cli-unsupported-domain',
-    designRef: '2026-08-09 Ready 专用飞书 CLI 通道 — 只允许文档、表格与云空间',
+    designRef: '2026-08-13 Ready 专用飞书 CLI 通道 — 文档、表格、云空间与日历只读',
     mode: 'M1',
     tools: new Set(['skill_run_shell']),
     when: (args) => classifyLarkCliCommand(args.command) === 'unsupported_domain',
-    reason: 'Ready 的飞书 CLI 专用通道只允许文档、表格与云空间操作',
+    reason: 'Ready 的飞书 CLI 专用通道只允许文档、表格、云空间与日历只读查询',
   },
   {
     id: 'm1-lark-cli-local-management',
