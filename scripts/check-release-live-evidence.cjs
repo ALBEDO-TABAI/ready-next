@@ -1,235 +1,254 @@
 #!/usr/bin/env node
-/**
- * Release live-evidence gate.
- *
- * Stage Y's dogfood gate accepts `deferred-with-owner` records because its
- * job is to prove the closeout bundle is complete. This gate is stricter:
- * a release candidate must have live pass evidence for every in-scope Stage Y
- * dogfood surface, so deferred records are a red light except for product
- * surfaces deliberately excluded from the current release goal.
- */
 'use strict'
 
-const fs = require('node:fs')
 const path = require('node:path')
-
 const {
-  main: lintStageYDogfoodEvidence,
-  parseFrontmatter,
-  REQUIRED_BAI_SPOTCHECK_SUBFIELDS,
-} = require('./check-stage-y-dogfood-evidence.cjs')
+  RELEASE_EVIDENCE_PREFIX,
+  readStableRegularFile,
+  loadVerifiedStructuralReceipt,
+  receiptIdentity,
+  safeRelativePath,
+} = require('./release-package-identity.cjs')
 
 const ROOT = path.resolve(__dirname, '..')
-const DOGFOOD_DIR_REL =
-  'docs/superpowers/audits/2026-05-23-stage-y-closeout/dogfood'
 const EXPECTED_SURFACE_COUNT = 20
-const EXPECTED_SURFACE_IDS = Array.from(
-  { length: EXPECTED_SURFACE_COUNT },
-  (_, i) => i + 1,
+const surfaceContracts = Object.fromEntries(
+  Array.from({ length: EXPECTED_SURFACE_COUNT }, (_, index) => [index + 1, 'live-observation']),
 )
-const OUT_OF_SCOPE_REMOTE_SURFACE_IDS = new Set([11])
+surfaceContracts[9] = 'task-continuation-retired'
+surfaceContracts[11] = 'remote-resource-only'
+surfaceContracts[14] = 'agent-schedules-retired'
+const SURFACE_CONTRACTS = Object.freeze(surfaceContracts)
 
-function listSurfaceFiles(root = ROOT) {
-  const dirAbs = path.join(root, DOGFOOD_DIR_REL)
-  if (!fs.existsSync(dirAbs)) {
-    return {
-      ok: false,
-      records: [],
-      errors: [`dogfood directory missing: ${DOGFOOD_DIR_REL}`],
-    }
-  }
-
-  const records = fs
-    .readdirSync(dirAbs)
-    .filter((name) => /^surface-\d+-.+\.md$/.test(name))
-    .sort()
-    .map((fileName) => {
-      const abs = path.join(dirAbs, fileName)
-      const { fm } = parseFrontmatter(fs.readFileSync(abs, 'utf8'))
-      return { fileName, fm }
-    })
-
-  return { ok: true, records, errors: [] }
+function currentEvidenceDirectory(receipt) {
+  return `${RELEASE_EVIDENCE_PREFIX}${receipt.receiptId}`
 }
 
-function surfaceIdFromFileName(fileName) {
-  const m = fileName.match(/^surface-(\d+)-.+\.md$/)
-  return m ? Number(m[1]) : null
-}
-
-function collectSurfaceIds(records, label, getId) {
-  const byId = new Map()
-  const invalid = []
-
-  for (const record of records) {
-    const id = getId(record)
-    if (!Number.isInteger(id)) {
-      invalid.push(record.fileName)
-      continue
-    }
-    if (!byId.has(id)) byId.set(id, [])
-    byId.get(id).push(record.fileName)
-  }
-
-  const expected = new Set(EXPECTED_SURFACE_IDS)
-  const missing = EXPECTED_SURFACE_IDS.filter((id) => !byId.has(id))
-  const duplicate = Array.from(byId.entries())
-    .filter(([, files]) => files.length > 1)
-    .map(([id, files]) => `${id} (${files.join(', ')})`)
-  const outOfRange = Array.from(byId.keys()).filter((id) => !expected.has(id))
-
-  return { invalid, missing, duplicate, outOfRange }
-}
-
-function validateSurfaceCoverage(records) {
+function identityErrors(candidate, expected, label) {
   const errors = []
-  const fileNameCoverage = collectSurfaceIds(records, 'filename', ({ fileName }) =>
-    surfaceIdFromFileName(fileName),
-  )
-  const frontmatterCoverage = collectSurfaceIds(records, 'frontmatter', ({ fm }) =>
-    fm ? Number(fm.surface_id) : null,
-  )
-
-  for (const [label, coverage] of [
-    ['filename', fileNameCoverage],
-    ['frontmatter surface_id', frontmatterCoverage],
+  for (const key of [
+    'receiptId',
+    'appVersion',
+    'sourceTreeDigest',
+    'runtimeManifestSha256',
+    'packageSha256',
   ]) {
-    if (coverage.invalid.length > 0) {
-      errors.push(`${label}: invalid surface id in ${coverage.invalid.join(', ')}`)
-    }
-    if (coverage.missing.length > 0) {
-      errors.push(`${label}: missing surface id(s) ${coverage.missing.join(', ')}`)
-    }
-    if (coverage.duplicate.length > 0) {
-      errors.push(`${label}: duplicate surface id(s) ${coverage.duplicate.join('; ')}`)
-    }
-    if (coverage.outOfRange.length > 0) {
-      errors.push(`${label}: out-of-range surface id(s) ${coverage.outOfRange.join(', ')}`)
-    }
+    if (candidate?.[key] !== expected[key]) errors.push(`${label}: ${key} does not match the structural package`)
   }
-
   return errors
 }
 
-function evaluateLiveEvidence(records) {
-  const errors = []
-  const statusCounts = new Map()
-  let passCount = 0
-  const outOfScopeSurfaceIds = new Set()
-
-  for (const { fileName, fm } of records) {
-    if (!fm) {
-      errors.push(`${fileName}: missing or unparseable frontmatter`)
-      continue
+function proofErrors(surface) {
+  const proof = surface?.proof || {}
+  if (surface.contract === 'task-continuation-retired') {
+    const expected = {
+      publicContinuationActions: 0,
+      resumeRunCalls: 0,
+      respondToInteractionCalls: 0,
+      startDetachedTaskCalls: 0,
+      childCancelAvailable: true,
+      detachedCancelAvailable: true,
+      historyReadOnly: true,
     }
-
-    const surfaceId = Number.isInteger(Number(fm.surface_id))
-      ? Number(fm.surface_id)
-      : surfaceIdFromFileName(fileName)
-    const status = fm.status || '(missing)'
-    statusCounts.set(status, (statusCounts.get(status) || 0) + 1)
-    if (OUT_OF_SCOPE_REMOTE_SURFACE_IDS.has(surfaceId)) {
-      if (status === 'deferred-with-owner' && fm.deferred_owner && fm.deferred_reason) {
-        outOfScopeSurfaceIds.add(surfaceId)
-      } else {
-        errors.push(
-          `${fileName}: out-of-scope remote surface must remain status=deferred-with-owner with owner and reason, got ${status}`,
-        )
-      }
-      continue
-    }
-    if (status === 'pass') {
-      passCount += 1
-    } else {
-      const owner = fm.deferred_owner ? ` owner=${fm.deferred_owner}` : ''
-      errors.push(`${fileName}: release requires status=pass, got ${status}${owner}`)
-      continue
-    }
-
-    if (fm.operator_class && fm.operator_class !== 'agent-only') {
-      if (!fm.bai_spotcheck || typeof fm.bai_spotcheck !== 'object') {
-        errors.push(`${fileName}: release pass requires bai_spotcheck block`)
-        continue
-      }
-      for (const field of REQUIRED_BAI_SPOTCHECK_SUBFIELDS) {
-        if (!fm.bai_spotcheck[field]) {
-          errors.push(`${fileName}: bai_spotcheck missing ${field}`)
-        }
-      }
-    }
+    return Object.entries(expected)
+      .filter(([key, value]) => proof[key] !== value)
+      .map(([key, value]) => `surface 9: proof.${key} must equal ${value}`)
   }
-
-  if (records.length !== EXPECTED_SURFACE_COUNT) {
-    errors.push(
-      `release requires ${EXPECTED_SURFACE_COUNT} dogfood surfaces, found ${records.length}`,
-    )
+  if (surface.contract === 'remote-resource-only') {
+    const expected = {
+      agentTriggeredRuns: 0,
+      typingEvents: 0,
+      automaticReplies: 0,
+      resourcesPersisted: true,
+    }
+    return Object.entries(expected)
+      .filter(([key, value]) => proof[key] !== value)
+      .map(([key, value]) => `surface 11: proof.${key} must equal ${value}`)
   }
-  errors.push(...validateSurfaceCoverage(records))
-
-  return {
-    ok: errors.length === 0,
-    errors,
-    passCount,
-    total: records.length - outOfScopeSurfaceIds.size,
-    outOfScopeSurfaceIds: Array.from(outOfScopeSurfaceIds).sort((a, b) => a - b),
-    statusCounts: Object.fromEntries(statusCounts),
+  if (surface.contract === 'agent-schedules-retired') {
+    const expected = {
+      agentScheduleUiActions: 0,
+      agentScheduleIpcCalls: 0,
+      agentScheduleRuns: 0,
+      skillSchedulesAvailable: true,
+    }
+    return Object.entries(expected)
+      .filter(([key, value]) => proof[key] !== value)
+      .map(([key, value]) => `surface 14: proof.${key} must equal ${value}`)
   }
+  return []
 }
 
-function main({ root = ROOT } = {}) {
-  const evidenceLintResult = lintStageYDogfoodEvidence({ root })
-  const listed = listSurfaceFiles(root)
-  if (!listed.ok) {
-    return {
-      ok: false,
-      errors: [...evidenceLintResult.errors, ...listed.errors],
-      passCount: 0,
-      total: 0,
-      statusCounts: {},
+function observedArtifactErrors(artifact, surface, receipt) {
+  const errors = []
+  const expected = receipt?.verification || {}
+  const packageReadback = artifact?.packageReadback || {}
+  for (const [key, value] of Object.entries({
+    appExecutableSha256: expected.appExecutableSha256,
+    appAsarSha256: expected.appAsarSha256,
+    appVersion: receipt.appVersion,
+    packageSha256: receipt.artifact.sha256,
+    receiptId: receipt.receiptId,
+  })) {
+    if (packageReadback[key] !== value) {
+      errors.push(`surface ${surface.id}: evidence packageReadback.${key} does not match the inspected package`)
     }
   }
-  const liveResult = evaluateLiveEvidence(listed.records)
-  return {
-    ...liveResult,
-    ok: evidenceLintResult.ok && liveResult.ok,
-    errors: [...evidenceLintResult.errors, ...liveResult.errors],
+  if (!artifact?.observedOutput?.path || !artifact?.observedOutput?.sha256) {
+    errors.push(`surface ${surface.id}: evidence artifact must bind an observed output file`)
   }
+  const capture = artifact?.packagedAppCapture || {}
+  const captureExpected = {
+    kind: 'ready-packaged-live-proof-v1',
+    success: true,
+    execSha256: expected.appExecutableSha256,
+    asarSha256: expected.appAsarSha256,
+    sourceManifestDigest: expected.browserSourceManifestDigest,
+    appVersion: receipt.appVersion,
+    packageSha256: receipt.artifact.sha256,
+    receiptId: receipt.receiptId,
+  }
+  for (const [key, value] of Object.entries(captureExpected)) {
+    if (capture[key] !== value) {
+      errors.push(`surface ${surface.id}: packaged-app capture.${key} does not match the inspected package`)
+    }
+  }
+  if (!/^[0-9a-f]{32,}$/i.test(String(capture.proofNonce || ''))
+    || !Number.isInteger(capture.pid) || capture.pid <= 0
+    || typeof capture.bootIncarnationId !== 'string' || !capture.bootIncarnationId) {
+    errors.push(`surface ${surface.id}: packaged-app capture is missing live process identity`)
+  }
+  return errors
+}
+
+function evaluateCurrentLiveEvidence({ root, receipt, manifest }) {
+  const errors = []
+  const identity = receiptIdentity(receipt)
+  const receiptTime = Date.parse(receipt.createdAt)
+  errors.push(...identityErrors(manifest, identity, 'live evidence manifest'))
+  if (manifest?.schemaVersion !== 1 || manifest?.status !== 'LIVE_ACCEPTANCE_PASS') {
+    errors.push('live evidence manifest: schemaVersion=1 and status=LIVE_ACCEPTANCE_PASS are required')
+  }
+  if (!Number.isFinite(Date.parse(String(manifest?.completedAt || '')))
+    || Date.parse(manifest.completedAt) < receiptTime) {
+    errors.push('live evidence manifest: completedAt must be after the structural receipt')
+  }
+  const surfaces = Array.isArray(manifest?.surfaces) ? manifest.surfaces : []
+  const byId = new Map()
+  for (const surface of surfaces) {
+    const id = Number(surface?.id)
+    if (!Number.isInteger(id) || id < 1 || id > EXPECTED_SURFACE_COUNT) {
+      errors.push(`live evidence manifest: invalid surface id ${surface?.id}`)
+      continue
+    }
+    if (byId.has(id)) errors.push(`live evidence manifest: duplicate surface id ${id}`)
+    byId.set(id, surface)
+  }
+  for (let id = 1; id <= EXPECTED_SURFACE_COUNT; id += 1) {
+    const surface = byId.get(id)
+    if (!surface) {
+      errors.push(`live evidence manifest: missing surface id ${id}`)
+      continue
+    }
+    if (surface.status !== 'pass' || surface.contract !== SURFACE_CONTRACTS[id]) {
+      errors.push(`surface ${id}: status=pass and contract=${SURFACE_CONTRACTS[id]} are required`)
+    }
+    errors.push(...identityErrors(surface, identity, `surface ${id}`))
+    if (!Number.isFinite(Date.parse(String(surface.observedAt || '')))
+      || Date.parse(surface.observedAt) < receiptTime) {
+      errors.push(`surface ${id}: observedAt must be after the structural receipt`)
+    }
+    const evidencePath = String(surface.evidencePath || '')
+    let artifact = null
+    try {
+      const resolved = safeRelativePath(root, evidencePath, {
+        prefix: `${currentEvidenceDirectory(receipt)}/`,
+      })
+      if (resolved.relativePath.endsWith('/live-evidence.json')) {
+        throw new Error('surface evidence must be independent from the live manifest')
+      }
+      const evidenceFile = readStableRegularFile(resolved.absolutePath, root, { includeContent: true })
+      if (evidenceFile.sha256 !== surface.evidenceSha256) {
+        throw new Error('surface evidence digest does not match')
+      }
+      artifact = JSON.parse(evidenceFile.content.toString('utf8'))
+    } catch (error) {
+      errors.push(`surface ${id}: invalid evidence artifact: ${error.message}`)
+    }
+    if (artifact) {
+      if (artifact.surfaceId !== id || artifact.status !== 'pass' || artifact.contract !== surface.contract) {
+        errors.push(`surface ${id}: evidence artifact identity or status is invalid`)
+      }
+      errors.push(...identityErrors(artifact, identity, `surface ${id} evidence artifact`))
+      if (artifact.observedAt !== surface.observedAt) {
+        errors.push(`surface ${id}: evidence artifact observedAt does not match manifest`)
+      }
+      errors.push(...observedArtifactErrors(artifact, surface, receipt))
+      if (JSON.stringify(artifact.proof || {}) !== JSON.stringify(surface.proof || {})) {
+        errors.push(`surface ${id}: evidence artifact proof does not match manifest`)
+      }
+      try {
+        const output = safeRelativePath(root, artifact.observedOutput.path, {
+          prefix: `${currentEvidenceDirectory(receipt)}/`,
+        })
+        if (readStableRegularFile(output.absolutePath, root).sha256 !== artifact.observedOutput.sha256) {
+          throw new Error('observed output digest does not match')
+        }
+      } catch (error) {
+        errors.push(`surface ${id}: invalid observed output: ${error.message}`)
+      }
+    }
+    errors.push(...proofErrors(surface))
+  }
+  errors.push('current-package live acceptance requires the trusted packaged-app evidence recorder, which is intentionally deferred for this structural-only package')
+  return { ok: false, errors, passCount: surfaces.filter((surface) => surface?.status === 'pass').length, total: EXPECTED_SURFACE_COUNT }
+}
+
+function main({
+  root = ROOT,
+  packageIdentity = loadVerifiedStructuralReceipt(root),
+  reverifyPackage = () => require('./verify-release-structural-package.cjs')
+    .verifyExistingStructuralReceipt({ root }),
+} = {}) {
+  const errors = []
+  if (!packageIdentity?.ok || !packageIdentity.receipt) {
+    return { ok: false, errors: packageIdentity?.errors || ['structural package receipt is invalid'], passCount: 0, total: EXPECTED_SURFACE_COUNT }
+  }
+  try {
+    reverifyPackage()
+  } catch (error) {
+    return { ok: false, errors: [`structural package revalidation failed: ${error.message}`], passCount: 0, total: EXPECTED_SURFACE_COUNT }
+  }
+  const receipt = packageIdentity.receipt
+  const manifestRel = `${currentEvidenceDirectory(receipt)}/live-evidence.json`
+  let manifest
+  try {
+    manifest = JSON.parse(readStableRegularFile(path.join(root, manifestRel), root, { includeContent: true }).content.toString('utf8'))
+  } catch {
+    errors.push(`${manifestRel}: current-package live evidence is missing or invalid`)
+    return { ok: false, errors, passCount: 0, total: EXPECTED_SURFACE_COUNT }
+  }
+  return evaluateCurrentLiveEvidence({ root, receipt, manifest })
 }
 
 if (require.main === module) {
   const result = main()
-  const statusSummary = Object.entries(result.statusCounts)
-    .map(([status, count]) => `${status}=${count}`)
-    .join(', ')
-
   if (result.ok) {
-    console.log('[check-release-live-evidence] OK')
-    console.log(`  in-scope live pass surfaces: ${result.passCount}/${result.total}`)
-    if (result.outOfScopeSurfaceIds?.length) {
-      console.log(`  out-of-scope remote surfaces: ${result.outOfScopeSurfaceIds.join(', ')}`)
-    }
-    process.exit(0)
+    console.log('[check-release-live-evidence] CURRENT_PACKAGE_LIVE_PASS')
+    console.log(`  surfaces: ${result.passCount}/${result.total}`)
+  } else {
+    console.error('[check-release-live-evidence] LIVE_ACCEPTANCE_DEFERRED')
+    for (const error of result.errors) console.error(`  - ${error}`)
   }
-
-  console.error('[check-release-live-evidence] FAIL:')
-  console.error(`  in-scope live pass surfaces: ${result.passCount}/${result.total}`)
-  if (result.outOfScopeSurfaceIds?.length) {
-    console.error(`  out-of-scope remote surfaces: ${result.outOfScopeSurfaceIds.join(', ')}`)
-  }
-  if (statusSummary) console.error(`  status summary: ${statusSummary}`)
-  for (const e of result.errors.slice(0, 30)) console.error('  - ' + e)
-  if (result.errors.length > 30) {
-    console.error(`  - ... ${result.errors.length - 30} more issue(s)`)
-  }
-  process.exit(1)
+  process.exit(result.ok ? 0 : 1)
 }
 
 module.exports = {
-  DOGFOOD_DIR_REL,
   EXPECTED_SURFACE_COUNT,
-  OUT_OF_SCOPE_REMOTE_SURFACE_IDS,
-  evaluateLiveEvidence,
-  listSurfaceFiles,
+  SURFACE_CONTRACTS,
+  currentEvidenceDirectory,
+  evaluateCurrentLiveEvidence,
+  identityErrors,
   main,
-  validateSurfaceCoverage,
+  observedArtifactErrors,
 }

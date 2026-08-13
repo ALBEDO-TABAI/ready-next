@@ -10,7 +10,7 @@ publish:
   releaseType: release
 files:
   - out/**/*
-  - build/browser-live-proof/**/*
+  - build/browser-live-proof/source-manifest.json
   - package.json
   - node_modules/**/*
   # Renderer-only packages are already bundled into out/renderer assets by Vite.
@@ -41,9 +41,24 @@ files:
   - "!node_modules/react-pdf/**"
   - "!node_modules/remotion/**"
   - "!node_modules/**/build/node_gyp_bins/**"
+  - "!node_modules/**/.npmrc*"
+  - "!node_modules/**/docs/**"
+  - "!node_modules/**/*.md"
+  - "!node_modules/**/test/**"
+  - "!node_modules/**/tests/**"
+  - "!node_modules/**/__tests__/**"
+  - "!node_modules/**/src/**/test/**"
+  - "!node_modules/**/src/**/tests/**"
 extraResources:
   - from: build/runtime-seeds/ai-settings.seed.json
     to: ai-settings.seed.json
+  - from: assets/codex-runtime
+    to: codex-runtime
+    filter:
+      - "**/*"
+      - "!evidence/**"
+  - from: build/codex/aarch64-apple-darwin/codex
+    to: codex-runtime/aarch64-apple-darwin/codex
   - from: node_modules/better-sqlite3/build
     to: better-sqlite3/build
     filter:
@@ -55,6 +70,8 @@ extraResources:
       - "**/*"
       - "!**/__pycache__/**"
       - "!**/*.py[co]"
+      - "!**/.env"
+      - "!**/.env.*"
   - from: assets/pets
     to: pets
     filter:

@@ -1,30 +1,13 @@
 #!/usr/bin/env node
 'use strict'
 
-const { spawnSync } = require('node:child_process')
-
-const npmBin = process.platform === 'win32' ? 'npm.cmd' : 'npm'
-
 const RELEASE_CANDIDATE_COMMANDS = [
-  { label: 'verify:release-live-evidence', cmd: npmBin, args: ['run', 'verify:release-live-evidence'] },
-  { label: 'verify:release-stage-z-readiness', cmd: npmBin, args: ['run', 'verify:release-stage-z-readiness'] },
-  { label: 'verify:native', cmd: npmBin, args: ['run', 'verify:native'] },
-  { label: 'typecheck', cmd: npmBin, args: ['run', 'typecheck'] },
-  { label: 'lint:check', cmd: npmBin, args: ['run', 'lint:check'] },
-  { label: 'verify:lint-budget', cmd: npmBin, args: ['run', 'verify:lint-budget'] },
-  { label: 'check-eslint-baseline', cmd: process.execPath, args: ['scripts/check-eslint-baseline.cjs'] },
-  { label: 'verify:ipc-contract', cmd: npmBin, args: ['run', 'verify:ipc-contract'] },
-  { label: 'verify:meta-paths', cmd: npmBin, args: ['run', 'verify:meta-paths'] },
-  { label: 'verify:stage-x-known-regressions', cmd: npmBin, args: ['run', 'verify:stage-x-known-regressions'] },
-  { label: 'verify:stage-y-known-regressions', cmd: npmBin, args: ['run', 'verify:stage-y-known-regressions'] },
-  { label: 'verify:stage-y-p0-ledger', cmd: npmBin, args: ['run', 'verify:stage-y-p0-ledger'] },
-  { label: 'verify:stage-y-dogfood-evidence', cmd: npmBin, args: ['run', 'verify:stage-y-dogfood-evidence'] },
-  { label: 'verify:agent-acceptance-checklist', cmd: npmBin, args: ['run', 'verify:agent-acceptance-checklist'] },
-  { label: 'test', cmd: npmBin, args: ['run', 'test'] },
-  { label: 'build', cmd: npmBin, args: ['run', 'build'] },
+  { label: 'verify:release-structural-receipt', cmd: process.execPath, args: ['scripts/verify-release-structural-package.cjs', '--existing'] },
+  { label: 'verify:release-live-evidence', cmd: process.execPath, args: ['scripts/check-release-live-evidence.cjs'] },
+  { label: 'verify:release-stage-z-readiness', cmd: process.execPath, args: ['scripts/check-release-stage-z-readiness.cjs'] },
 ]
 
-function runCommandSequence(commands, runner = spawnSync) {
+function runCommandSequence(commands, runner = require('node:child_process').spawnSync) {
   const failures = []
   let exitCode = 0
 
@@ -34,6 +17,13 @@ function runCommandSequence(commands, runner = spawnSync) {
       cwd: process.cwd(),
       stdio: 'inherit',
       encoding: 'utf8',
+      env: {
+        HOME: process.env.HOME,
+        LANG: process.env.LANG || 'C.UTF-8',
+        LC_ALL: process.env.LC_ALL || 'C.UTF-8',
+        PATH: '/usr/bin:/bin:/usr/sbin:/sbin',
+        TMPDIR: process.env.TMPDIR,
+      },
     })
     if (result.error) {
       console.error(`[release-candidate] ${command.label} failed to start: ${result.error.message}`)
@@ -60,8 +50,27 @@ function runCommandSequence(commands, runner = spawnSync) {
   return exitCode
 }
 
+function runCandidateSequence(commands, {
+  runner = require('node:child_process').spawnSync,
+  identity = () => require('./release-package-identity.cjs').loadVerifiedStructuralReceipt(process.cwd()),
+} = {}) {
+  const before = identity()
+  if (!before.ok) return 1
+  const exit = runCommandSequence(commands, runner)
+  if (exit !== 0) return exit
+  const after = identity()
+  if (!after.ok
+    || before.receipt.receiptId !== after.receipt.receiptId
+    || before.receipt.artifact.sha256 !== after.receipt.artifact.sha256
+    || before.receipt.source.digest !== after.receipt.source.digest) {
+    console.error('[release-candidate] package identity changed during candidate verification')
+    return 1
+  }
+  return 0
+}
+
 function main() {
-  return runCommandSequence(RELEASE_CANDIDATE_COMMANDS)
+  return runCandidateSequence(RELEASE_CANDIDATE_COMMANDS)
 }
 
 if (require.main === module) {
@@ -70,5 +79,6 @@ if (require.main === module) {
 
 module.exports = {
   RELEASE_CANDIDATE_COMMANDS,
+  runCandidateSequence,
   runCommandSequence,
 }
