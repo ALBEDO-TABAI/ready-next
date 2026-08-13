@@ -122,6 +122,13 @@ export type CodexTurnCollectionContext = {
     delta: string
     reversible: true
   }) => void
+  onActivity?: (event: CodexTurnActivityEvent) => void
+}
+
+export type CodexTurnActivityEvent = {
+  stage: 'started' | 'completed'
+  atMs: number
+  item: CodexThreadItem
 }
 
 export type CodexTurnReadbackContext = Pick<
@@ -362,8 +369,21 @@ export class CodexTurnCollector {
       }
       if (modelReroute && notification.method !== 'turn/completed') return
 
+      const publishActivity = (event: CodexTurnActivityEvent): void => {
+        try {
+          context.onActivity?.(event)
+        } catch {
+          // A projection observer never owns the native turn or its result.
+        }
+      }
+
       if (notification.method === 'item/started') {
         itemStarts.set(notification.params.item.id, notification.params.item)
+        publishActivity({
+          stage: 'started',
+          atMs: notification.params.startedAtMs,
+          item: notification.params.item,
+        })
         return
       }
       if (notification.method === 'item/agentMessage/delta') {
@@ -388,6 +408,11 @@ export class CodexTurnCollector {
       }
       if (notification.method === 'item/completed') {
         items.push({ item: notification.params.item, order: items.length })
+        publishActivity({
+          stage: 'completed',
+          atMs: notification.params.completedAtMs,
+          item: notification.params.item,
+        })
         return
       }
       if (notification.method === 'turn/completed') {

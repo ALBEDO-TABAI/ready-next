@@ -106,6 +106,7 @@ import {
   type ReadyToolTurnSnapshot,
 } from './codex-tool-surface'
 import { CodexTurnCollector, type CoreTurnCandidate } from './codex-turn-collector'
+import { createCodexTaskActivityProjector } from './codex-task-activity-projector'
 import { CodexTurnInputBuilder } from './codex-turn-input-builder'
 import {
   externalReadResourceReference,
@@ -3377,6 +3378,32 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
       gate.assertOpen()
       const detail = preparedDetails.get(prepared.runId)
       if (!detail || scope.id !== prepared.readyToolHostIdentity.scopeId) throw new Error('codex_prepared_context_mismatch')
+      const activityHost = host
+      const taskActivityProjector = activityHost
+        ? createCodexTaskActivityProjector({
+          store: activityHost.getTaskProjectionStore(),
+          publish: (patch) => activityHost.publishActivityProjection({
+            type: 'updated',
+            scopeId: scope.id,
+            aliasGeneration: prepared.conversationAlias.aliasGeneration,
+            messageVisibilityEpoch: scope.messageVisibilityEpoch,
+            visibilityOwnerKind: 'product_alias',
+            agent: scope.agent,
+            ownerAgentId: scope.activeAgentId || scope.agent,
+            taskOrigin: 'user_root',
+            handoffGeneration: scope.handoffGeneration,
+            runId: prepared.runId,
+            taskId: prepared.taskId,
+            module: prepared.externalReadSlice?.kind === 'lark_cli_read' ? 'feishu' : 'system',
+            taskProjectionId: prepared.taskId,
+            ...patch,
+          }),
+          taskId: prepared.taskId,
+          runId: prepared.runId,
+          messageVisibilityEpoch: scope.messageVisibilityEpoch,
+          larkCliRead: prepared.externalReadSlice?.kind === 'lark_cli_read',
+        })
+        : null
       return {
         turnBuildContext: {
           turnRequestId: detail.turnRequestId,
@@ -3408,6 +3435,9 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
           projectionPatchRefs: [],
           allowNullPhaseFallback: false,
           allowDirectProvisionalStream: codexAllowsDirectProvisionalStream(prepared),
+          onActivity(event) {
+            taskActivityProjector?.observe(event)
+          },
           onProvisionalDelta(event) {
             if (!codexAllowsDirectProvisionalStream(prepared)) return
             host?.emitProvisionalDelta({

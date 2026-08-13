@@ -125,6 +125,103 @@ test('collector buffers accepted-before-response notifications and selects only 
   assert.equal(result.runtimeDiagnostics.commentaryItemIds[0], 'commentary-1')
 })
 
+test('collector publishes Matrix-style commentary and tool item activity without making it answer truth', async () => {
+  const runtime = new FakeNativeRuntime()
+  const activities: Array<{ stage: string; itemId: string; type: string }> = []
+  const collector = new CodexTurnCollector(runtime)
+  const result = await collector.collect(context(runtime, async () => {
+    runtime.emit({
+      method: 'item/completed',
+      params: {
+        threadId: 'thread-1',
+        turnId: 'turn-1',
+        completedAtMs: 1,
+        item: { type: 'agentMessage', id: 'commentary-1', text: '正在查找飞书文档。', phase: 'commentary' },
+      },
+    })
+    runtime.emit({
+      method: 'item/started',
+      params: {
+        threadId: 'thread-1',
+        turnId: 'turn-1',
+        startedAtMs: 2,
+        item: {
+          type: 'dynamicToolCall', id: 'call-1', tool: 'skill_run_shell', namespace: null,
+          arguments: { command: 'must-not-be-projected' }, status: 'inProgress', success: null,
+        },
+      },
+    })
+    runtime.emit({
+      method: 'item/completed',
+      params: {
+        threadId: 'thread-1',
+        turnId: 'turn-1',
+        completedAtMs: 3,
+        item: {
+          type: 'dynamicToolCall', id: 'call-1', tool: 'skill_run_shell', namespace: null,
+          arguments: { command: 'must-not-be-projected' }, status: 'completed', success: true,
+        },
+      },
+    })
+    runtime.emit({
+      method: 'item/completed',
+      params: {
+        threadId: 'thread-1',
+        turnId: 'turn-1',
+        completedAtMs: 4,
+        item: { type: 'agentMessage', id: 'final-1', text: '共 89 条。', phase: 'final_answer' },
+      },
+    })
+    runtime.emit({ method: 'turn/completed', params: { threadId: 'thread-1', turn: turn('completed') } })
+    return { turn: turn('inProgress') }
+  }, {
+    onActivity: (event) => activities.push({
+      stage: event.stage,
+      itemId: event.item.id,
+      type: event.item.type,
+    }),
+  }))
+
+  assert.deepEqual(activities, [
+    { stage: 'completed', itemId: 'commentary-1', type: 'agentMessage' },
+    { stage: 'started', itemId: 'call-1', type: 'dynamicToolCall' },
+    { stage: 'completed', itemId: 'call-1', type: 'dynamicToolCall' },
+    { stage: 'completed', itemId: 'final-1', type: 'agentMessage' },
+  ])
+  assert.equal(result.candidateText, '共 89 条。')
+})
+
+test('collector isolates task activity observer failures from the native turn', async () => {
+  const runtime = new FakeNativeRuntime()
+  const collector = new CodexTurnCollector(runtime)
+  const result = await collector.collect(context(runtime, async () => {
+    runtime.emit({
+      method: 'item/completed',
+      params: {
+        threadId: 'thread-1',
+        turnId: 'turn-1',
+        completedAtMs: 1,
+        item: { type: 'agentMessage', id: 'commentary-1', text: '正在处理。', phase: 'commentary' },
+      },
+    })
+    runtime.emit({
+      method: 'item/completed',
+      params: {
+        threadId: 'thread-1',
+        turnId: 'turn-1',
+        completedAtMs: 2,
+        item: { type: 'agentMessage', id: 'final-1', text: '完成。', phase: 'final_answer' },
+      },
+    })
+    runtime.emit({ method: 'turn/completed', params: { threadId: 'thread-1', turn: turn('completed') } })
+    return { turn: turn('inProgress') }
+  }, {
+    onActivity: () => { throw new Error('projection listener down') },
+  }))
+
+  assert.equal(result.candidateText, '完成。')
+})
+
 test('collector rejects delta/completed mismatch and multiple explicit finals', async () => {
   for (const fixture of ['delta_mismatch', 'multiple_finals'] as const) {
     const runtime = new FakeNativeRuntime()

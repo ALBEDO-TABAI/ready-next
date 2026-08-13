@@ -151,6 +151,7 @@ export interface CodexRuntimeHostPort {
     taskId: string
     delta: string
   }): void
+  publishActivityProjection(event: ScopeRunEventPayload): void
   publishCommittedTerminalEvent(event: ScopeRunEventPayload): void
 }
 

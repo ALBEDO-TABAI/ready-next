@@ -755,6 +755,9 @@ export class AgentControlRuntime extends EventEmitter {
       publishCommittedTerminalEvent: (event) => {
         this.projectionSync.publishCommittedScopeRunEvent(event)
       },
+      publishActivityProjection: (event) => {
+        this.projectionSync.publishScopeRunEvent(event)
+      },
       emitProvisionalDelta: (input) => {
         this.projectionSync.emitScopeRunEvent({
           type: 'updated',
