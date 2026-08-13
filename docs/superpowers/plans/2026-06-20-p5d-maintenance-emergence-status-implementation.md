@@ -9,55 +9,36 @@ scope: P5d / C26
 
 ## Goal
 
-维护回合 / 涌现候选未启用。
-
-> **边界演进（2026-07-05 D7 gate-flip）**：上句在本文成文时同时覆盖两者；现
-> `runMaintenanceLlmRound` 已经 `maintenance-llm-driver` 挂上 crystallize tick
-> 生产驱动（mandated 表 live-required 条目 + 三层预算闸），**「未启用」自
-> 07-05 起仅指涌现候选（candidate-maintenance）**。合同见
-> `2026-07-05-p3-backlog-closeout-implementation.md` §2。
-
-This slice closes the stale C26 assumption without connecting dormant lifecycle code to production. It makes the current boundary explicit:
-
-- `cas-merge.ts` is live and stays live.
-- `getLastMaintenanceRoundStatus` is a live settings status surface and stays wired.
-- `runMaintenanceLlmRound`, crystallize runner/scheduler, candidate maintenance, and emergence feed helpers have no production driver in this slice. (2026-07-05 起 `runMaintenanceLlmRound` 除外，见上注。)
+自动模型维护回合已退役。生产启动与定时 tick 只保留本地确定性 crystallize 和 belief-decay，两者都不得读取 provider 配置或发起模型请求。candidate-maintenance 仍是未接入的独立边界；`cas-merge.ts` 和已上线的 emergence feed 不受影响。
 
 ## Implementation
 
-1. Extend `scripts/check-unwired-capability-markers.cjs` to cover P5d alongside P5c.
-2. Mark only the dormant driver surfaces as `P5d/C26 unwired`.
-3. Keep the settings payload and renderer surface, but render the empty `llmRound` state as `未接入驱动`.
-4. Positively guard live CAS wiring and the consumed maintenance status surface.
+1. 删除自动模型维护驱动、回合实现与伪状态面。
+2. 从 runtime crystallize tick 移除 provider caller，保留本地确定性 crystallize 和 belief-decay。
+3. 设置页只展示真实的本地维护状态，并明示说明不调用 AI 模型。
+4. 负向门禁要求退役文件不存在，runtime 不得重新引用模型回合或 provider 配置。
 
 ## In Scope
 
-- File-level dormant markers:
-  - `src/main/modules/agent-control/maintenance/crystallize-gate.ts`
-  - `src/main/modules/agent-control/emergence/candidate-maintenance.ts`
-  - `src/main/modules/agent-control/emergence/emergence-cards.ts`
-- Function-level dormant marker:
-  - `runMaintenanceLlmRound` in `maintenance-llm-round.ts`
-- Gate/test coverage for:
-  - no production import of dormant maintenance/emergence modules;
-  - no production reference to `runMaintenanceLlmRound`;
-  - `cas-merge.ts` not marked unwired;
-  - runtime still references `runUserPictureCasMerge`;
-  - settings status still carries `llmRound`;
-  - renderer null-state copy says `未接入驱动`.
+- `runtime.ts` 中的维护 tick。
+- `maintenance-llm-driver.ts` 与 `maintenance-llm-round.ts` 的退役。
+- 信念卡 IPC、Renderer 类型与设置文案的真实状态。
+- provider calls = 0 行为测试和防回归负向门。
 
 ## Out Of Scope
 
-- Do not delete `getLastMaintenanceRoundStatus`.
-- Do not mark `cas-merge.ts` unwired.
-- Do not connect `runMaintenanceLlmRound`, `runCrystallizeRound`, `CrystallizeScheduler`, `maintainAgentCandidates`, or emergence feed helpers into production.
-- Do not add scheduling, run/finalizer writes, migrations, or lifecycle jobs.
+- 不改变 `cas-merge.ts`、确定性 crystallize/belief-decay 或 emergence feed 的生产地位。
+- 不接入 `maintainAgentCandidates`。
+- 不新增调度、run/finalizer 写入、迁移或生命周期 job。
 - Do not alter P5c packet files, P5b handoff, P5a preroute, P5e derivation, P6 compaction, browser isolation, or specialist agent product routes.
 
 ## Verification
 
 - `node scripts/check-unwired-capability-markers.cjs`
 - `node --test scripts/__tests__/check-unwired-capability-markers.test.cjs`
+- `node scripts/check-mandated-capability-is-live.cjs`
+- `node --test scripts/__tests__/check-mandated-capability-is-live.test.cjs`
+- `npx tsx@^4.19.2 --test src/__tests__/maintenance-llm-round.test.ts`
 - `npm run verify:evolution-p3`
 - `npm run verify:evolution-p4`
 - `npm run typecheck`

@@ -2,11 +2,18 @@
 title: Skill Child-Loop Boundary
 date: 2026-07-12
 kind: architecture
-status: current
-enforce: true
+status: historical
+enforce: false
+superseded_by:
+  - docs/architecture/current-runtime-contracts.md
 ---
 
 # Skill Child-Loop Boundary
+
+> 历史说明：本文记录旧 SDK child-loop 的设计与内部持久化形态，不是当前 Codex
+> 生产合同。Codex 主链不准入 child-loop 控制、恢复或公开续跑；现行产品只保留
+> 历史投影的只读查询，以及 detached/child 任务各自的精确取消入口。不得按本文
+> 的 parent/resume/continue 章节恢复模型工具、任务卡按钮或第二条运行主链。
 
 ## 0. 权威边界
 

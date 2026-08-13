@@ -83,7 +83,7 @@ Existing rows created by the first defect must be repaired without reclassifying
 
 - Persona fallback receives the public conversation scope identity instead of reading a process-global user.
 - An unbound local scope resolves `default-user`; a bound remote scope resolves only its bound user; an unbound remote scope reads no local user profile.
-- Background narration and other calls without an explicit system prompt use the same scope-aware resolver, so local long-term preferences cannot leak into remote output.
+- Calls without an explicit system prompt use the same scope-aware resolver, so local long-term preferences cannot leak into remote output. The former background narration caller is retired and has no production entrypoint.
 
 ## Behavior gates
 

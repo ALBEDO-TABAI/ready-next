@@ -46,7 +46,7 @@ pairs_with:
 
 ## 3. 回滚开关 `knowledge_system_enabled`
 
-1. settings 表布尔惯例（取证：`agent-auto-narration-setting.ts` 范式——`getSetting(key) !== 'false'`，默认开）。键名 `agent.knowledgeSystemEnabled`。
+1. settings 表布尔惯例由 knowledge 模块自身封装（`getSetting(key) !== 'false'`，默认开）。键名 `agent.knowledgeSystemEnabled`。旧自动播报设置范式已退役，不是可复用入口。
 2. **关闭语义**：停止 index/RULES 注入（prompt-assembly 检查开关）+ `memory_read_card`/`memory_write_card` 工具不暴露 + watcher 停止 + 启动同步跳过。**文件零触碰**——回滚无损。
 3. **重新打开**：下一次启动/下一轮注入恢复，无需迁移。
 4. 开关读取点必须收敛在 knowledge 模块单一入口函数（防散落判断漂移）。

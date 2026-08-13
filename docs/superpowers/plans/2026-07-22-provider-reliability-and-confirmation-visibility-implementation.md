@@ -33,7 +33,7 @@ superseded_by:
 3. TTFT 锚点修正：`provider_stream_first_delta` 自请求发出计时并携带 `headersMs`，新增 `provider_stream_first_reasoning`；
 4. K3 默认输出上限 4096 → 65536（override 仍优先）。
 
-Gate 全绿：typecheck / verify:streaming / verify:agent-continuation-clock / verify:dynamic-delivery / verify:stability，触及套件 31/31。行数余量警示：`agent-sdk-provider.ts` 978/999、`agent-sdk-turn-orchestrator.ts` 999/999（上限 1000）、`agent-sdk-turn-execution.ts` 897/900——本合同新增逻辑一律优先下沉子模块，不得顶破。
+Gate 全绿：typecheck / verify:streaming / verify:provider-checkpoint / verify:stability。旧 continuation 与 Dynamic Delivery gate 已退役，不再作为当前验收入口。行数余量警示：`agent-sdk-provider.ts` 978/999、`agent-sdk-turn-orchestrator.ts` 999/999（上限 1000）、`agent-sdk-turn-execution.ts` 897/900——本合同新增逻辑一律优先下沉子模块，不得顶破。
 
 ## 2. Codex 工单（按序）
 
@@ -85,7 +85,7 @@ Gate：对已建 Browser child 的 run 注入连续 fetch failure → 收口为�
 npm run typecheck
 npm run verify:streaming
 npm run verify:agent-continuation-clock
-npm run verify:dynamic-delivery
+npm run verify:provider-checkpoint
 npm run verify:browser-target-claims
 npm run verify:stability
 npm run verify:native
@@ -134,7 +134,7 @@ P1 另需真机注入验收（power confirmation 卡可见性无法用纯单测�
 | `npm run typecheck` | EXIT 0 |
 | `npm run verify:streaming` | EXIT 0，195 tests，194 pass，1 skip |
 | `npm run verify:agent-continuation-clock` | EXIT 0，58 tests，56 pass，2 ABI skip；随后的 Browser target native 套件 10/10 pass |
-| `npm run verify:dynamic-delivery` | EXIT 0，含 agent foundation、真实 native ABI、类型和单写者现有库存检查 |
+| `npm run verify:provider-checkpoint` | EXIT 0，含 provider checkpoint、真实 native ABI、类型和单写者现有库存检查 |
 | `npm run verify:browser-target-claims` | EXIT 0，行为 14/14 pass，native 10/10 pass |
 | `npm run verify:stability` | EXIT 0，主套件与 Send IM 套件均 0 fail |
 | `npm run verify:native` | EXIT 0，Electron 42.3 / ABI 146 |
@@ -173,7 +173,7 @@ P2/P3/P4 通过（映射/收口/回执/时钟别名/遥测/路由直测均以代
 
 ### 5.4 第三轮验证记录（commit `9dc3037d3`）
 
-typecheck / verify:browser-target-claims / verify:agent-continuation-clock / verify:stability / verify:native / verify:streaming / verify:dynamic-delivery 全部 EXIT=0；新套件 `agent-session-cursor-selfheal` 12/12（重建零操作/漂移重建+指标/无路由惰性/persistence_failed 分类/checkpoint id 隔离/lastRequest 语义）。
+typecheck / verify:browser-target-claims / verify:stability / verify:native / verify:streaming / verify:provider-checkpoint 全部 EXIT=0；旧 continuation 与 Dynamic Delivery gate 已退役。新套件 `agent-session-cursor-selfheal` 12/12（重建零操作/漂移重建+指标/无路由惰性/persistence_failed 分类/checkpoint id 隔离/lastRequest 语义）。
 
 ### 5.5 P7–P9 实施结果（Codex）
 
@@ -193,7 +193,7 @@ typecheck / verify:browser-target-claims / verify:agent-continuation-clock / ver
 | `npm run verify:agent-continuation-clock` | EXIT 0，主套件 58（56 pass，2 ABI skip），随后行为 15/15、原生 19/19 |
 | `npm run verify:streaming` | EXIT 0 |
 | `npm run verify:stability` | EXIT 0，主套件 154（0 fail），Send IM 142（0 fail） |
-| `npm run verify:dynamic-delivery` | EXIT 0，含原生 ABI 与 typecheck |
+| `npm run verify:provider-checkpoint` | EXIT 0，含原生 ABI 与 typecheck |
 | `npm run typecheck` | EXIT 0 |
 | `npm run build` | EXIT 0 |
 | 隔离 Electron 真实确认与重启验收 | 触发六项、重启两项全部为 true |

@@ -152,7 +152,7 @@ note: >
 工具数量是设计参考，不是强制固定值。强约束是：
 
 - 层级、效果、所需附件、是否长任务、是否高级等标签只在 catalog 维护；observation、collection、batch 等暴露集合从 metadata 生成，不再手写多份工具名数组。
-- 动态暴露修改 live 的 AgentSdkRuntime / SDK tool executor 主链；不得只改 dormant parity resolver，也不得复活 direct-chat 或旧 turn engine。
+- 动态暴露修改 Codex 准入前的 Ready tool snapshot 与执行授权主链；不得只改 dormant SDK parity resolver，也不得复活 `AgentSdkRuntime`、direct-chat 或旧 turn engine。
 - 常见阅读回合模型可见浏览器工具不超过 10 个。
 - 常见单页交互回合为 15 个；低频交互、长任务和高级能力只按当前主指令追加。
 - 不同时把采集全集、诊断全集和 Power 全集暴露给模型。
@@ -441,7 +441,7 @@ Gate：旧 ref、导航、页内路由、frame、shadow、超长页面和截断�
 
 - 按第 3、4 节建立新 catalog 和按意图暴露层。
 - observation、collection、batch、advanced 集合全部从 catalog metadata 生成，删除共享层手工名称白名单。
-- 在 AgentSdkRuntime 和 SDK tool executor 的 live 主链完成曝光与执行接线；dormant parity 路径只同步合同，不冒充生产证明。
+- 在 Codex 准入 tool snapshot 与 Ready executor 权威点完成曝光和执行接线；`AgentSdkRuntime` / SDK parity 路径只同步合同，不冒充生产证明。
 - 同一变更中迁完内部调用方、测试和 prompt，然后删除旧工具定义与旧名称 handler。
 - 不保留 browser_execute_js、browser_run_workflow 或其他旧名兼容分支。
 - browser_query_gemini 移到站点 skill；browser_stage_site_strategy 留内部。

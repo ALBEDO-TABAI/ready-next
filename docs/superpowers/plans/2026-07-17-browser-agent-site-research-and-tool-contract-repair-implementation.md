@@ -457,7 +457,7 @@ Gate：真实 Electron/better-sqlite3 repository 覆盖 create、progress、term
 - 新建站内研究 runner 与 current-site search primitive；复用 BrowserActionExecutor、SnapshotService、trusted input、origin budget 和既有 tab/session 服务。
 - 完成 query -> cards -> metrics -> details -> aggregate checkpoint 状态机。
 - 以小红书 current-origin adapter/fixture 完成本次生产事故；未适配站点明确失败，URL 集研究保持通用。后续站点必须新增 adapter，不得用外部搜索 fallback，也不得绕过统一执行器。
-- TaskEventBridge 在长任务完成后唤醒 Owner；无活跃 run 时保留 pending narration/continuation。
+- TaskEventBridge 只发布任务投影；完成后的 Owner/UI 从 canonical task/projection readback，不保留 pending narration/continuation，也不启动无用户输入的新 turn。
 
 Gate：本地受控站点夹具完成 18 query、重复 URL、多 query 命中、详情缺失、登录墙、429、重启恢复与用户接管。
 

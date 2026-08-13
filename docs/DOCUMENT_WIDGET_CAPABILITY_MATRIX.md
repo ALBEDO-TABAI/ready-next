@@ -19,7 +19,6 @@
 | `day_schedule_card` | read snapshot + action trigger | supported | HTML snapshot | stable |
 | `week_schedule_card` | read snapshot + action trigger | supported | HTML snapshot | stable |
 | `time_allocation_chart` | read snapshot + action trigger | supported | SVG snapshot | stable |
-| `schedule_runtime_card` | action trigger | supported | HTML snapshot | stable |
 | `todo_list_manual` | local toggle | optional | HTML snapshot | stable |
 | `weekly_plan_board_manual` | local reorder-light | optional | HTML snapshot | stable |
 | `habit_streak_manual` | local toggle | optional | HTML snapshot | stable |

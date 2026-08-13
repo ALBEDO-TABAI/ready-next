@@ -131,6 +131,8 @@ live 主 agent 从不设 `modelSettings.maxTokens`，anthropic wire `max_tokens:
 
 ## R-CTX · 估算器校准 + 估算/实耗对账（P3；**方向翻案**）
 
+> 2026-07-23 纠偏：本节“data URL 也固定按 1600 token”的结论已被 K3 文本协议真实 HTTP 400 反例取代。现行合同见 `docs/architecture/current-runtime-contracts.md` §4：data URL/截图按 `max(1600, base64字符数/4)` 计，只有 opaque image ref 保留 1600 下限。本节以下内容仅保留为历史决策记录，不再约束生产。
+
 ### 问题重述（本轮侦查翻案，取代 07-07 契约"阶段二"两个候选方向）
 Round-1 计量（`provider_request_bill`）与压缩触发共用同一估算器 `estimateInputItemTokens`，而该估算器对图片**严重通胀**：`context-budget-types.ts` 中 data-URL 字符串按**全字符长度**计数（一张 400KB 截图 ≈ 数十万"token"），opaque 图片引用按常数 `OPAQUE_IMAGE_REF_TOKENS=85_000` 计——**而真实 Claude 图片成本按 tile 计、单张典型 ≤~1600 token**。诊断中"565–633K、3× 窗口、图片≈85K/张"的数字是**估算器自身的假数**：
 - **真实损伤链**：假 token 数 → 0.8×200K 软门（`compact-agent-input.ts`）被虚触发 → 单 run 22 次误压缩、每次真丢 16–78 条**有用文本**（head 图片反而钉死不掉）→ 上下文撕碎 → 写盘参数畸形/路径遗忘（诊断 §3C 的放大器）。

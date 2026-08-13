@@ -15,6 +15,9 @@ revision_history:
   - v3.1 (2026-06-10): 执行期事实修正（Codex 施工 S0-3 时停工上报）：runtime 现存 abort
     点只有用户停止与抢占两处，无 run 级超时 abort；S0-3 范围改为两点，其余 initiator
     词汇为后续工单保留。不改变任何合同条款。
+  - v3.2 (2026-08-12): S2 自动播报设计已退役；当前 TaskEventBridge 仅服务任务投影，
+    不再向 Agent 注入后台终态，不存在 pending 自动续跑或用户开关。通用 parent/run 的
+    resume/respond/human-takeover successor 也同步退役；只保留技能 child/detached 的精确句柄。
 owner: 白
 author: Claude (Fable 5)
 executor: Codex
@@ -104,15 +107,15 @@ related:
 ### S1-4 行动宣告守卫（C1.2）
 
 - **改动文件**：`run-finalizer.ts`（done 前置检查）、新增 `src/main/modules/agent-control/system-reminders/action-announcement-steer-reminder.ts`（经 `SystemReminderRegistry` 注册）、`agent-sdk-runtime.ts`（一次有界续轮）、新增 `src/__tests__/action-announcement-guard.test.ts`
-- **实施要点**：三条件判据（见 roadmap C1.2，注意不是空输出判据）：(a) 末段助手文本以行动宣告句式收尾（正则集中在守卫模块，含"让我|我现在|我马上|接下来|现在去|I'll now|let me"+句尾冒号形态）；(b) 末段零工具调用；(c) TurnFrame 存在未完成任务指涉。命中 → 注入 steer 提醒并允许一次续轮；二次命中 → 转 `checkpoint_steered` outcome（复用 Plan L checkpoint writer 写 durable handle）+ honest 收口消息（"我准备执行 X 但未能启动，已保存断点，回复'继续'可恢复"）。守卫每 run 至多触发一次（防循环）。
-- **测试（先红）**：scripted seam：模型只输出"让我先打开这篇笔记："→ 断言一次 steer 续轮；续轮仍零工具 → 断言 checkpoint_steered + 收口消息 + handle 可过 `canResumeShape()`；正常对话回答（无任务指涉）→ 断言不触发。
+- **实施要点**：三条件判据（见 roadmap C1.2，注意不是空输出判据）：(a) 末段助手文本以行动宣告句式收尾；(b) 末段零工具调用；(c) TurnFrame 存在未完成任务指涉。命中后只允许当前 run 内一次有界 steer；二次命中必须明确非成功收口，不写通用 continuation handle，不声称“回复继续可恢复”。后续工作只能由下一条真实用户输入单独准入。
+- **测试（先红）**：scripted seam：模型只输出"让我先打开这篇笔记："→ 断言一次当前 run 内 steer；再次零工具 → 明确非成功终态、0 continuation action、0 successor；正常对话回答（无任务指涉）→ 断言不触发。
 - **验证**：`npx tsx@^4.19.2 --test src/__tests__/action-announcement-guard.test.ts && npm run typecheck`
 - **规模**：~280 行。
 
 ### S1-5 启动 reconcile 泛化（C1.3）
 
 - **改动文件**：新增 `src/main/modules/app-control/startup-run-reconciler.ts`、`src/main/index.ts`（启动调用点）、`content-task-runner.ts`（吸收 note_collect 特判入统一入口）、复用 `skill-task-run-repository.reconcileRunningRowsOnStartup()`、新增 `src/__tests__/startup-run-reconciler.test.ts`
-- **实施要点**：单一启动入口顺序处理：run_meta `working`→`interrupted(initiator=process_exit, terminalReason=main_process_restarted)`；task_projections 活跃行→按 `canResumeShape(continuationRef)` 分流 `recoverable_paused` / `interrupted`；browser_tasks `running`→有有效 checkpoint 则 `paused` 否则 `cancelled(restart)`。三类各出 reconcile 计数 metric。**不重复造轮子**：skill 行复用 Plan L WP8 已落的 reconcile，仅由统一入口调度。
+- **实施要点**：单一启动入口顺序处理：精确持有 Codex product fence 的当前轮交专用 recovery owner 对账；其他 `working | running` 无主行按类型定态并释放写权。历史 checkpoint/manual_suspend 投影只读保留，不转成通用 resume action。只有带 `childRunId`、`detachedTaskId` 或 `outputDir + runStatePath` 的专用技能句柄按各自 reconciler 恢复。
 - **测试（先红）**：临时 SQLite 种入三类 stale 行 → 跑 reconciler → 断言终态与 metric 计数。
 - **验证**：`npx tsx@^4.19.2 --test src/__tests__/startup-run-reconciler.test.ts && npm run verify:native && npm run typecheck`
 - **规模**：~280 行。
@@ -121,37 +124,27 @@ related:
 
 ## S2 阶段：后台任务事件桥
 
+> **已退役，非当前生产合同（2026-08-12）。** 现行 `TaskEventBridge` 只向任务投影消费者发布；
+> 不再注册 Agent notifier，不向模型输入注入后台终态，不启动无用户输入的新 turn。
+> `pending_task_events` 仅作历史数据兼容，生产路径不写入、不消费。
+
 ### S2-1 事件桥发布侧（C2.1）
 
-- **改动文件**：新增 `src/main/modules/browser-engine/task-event-bridge.ts`、`content-task-runner.ts`（终态/阻塞迁移统一经桥发布；scheduleTask 无注册路由时运行时断言）、`task-persistence-service.ts`（终态写入点挂桥）、新增 `src/__tests__/task-event-bridge.test.ts`
-- **实施要点**：桥 = 进程内单例，双消费者注册：既有 projection sink（搬迁现有调用，不改行为）+ `agentNotifier`（S2-2 实现，先注册空实现）。消费侧按 `taskId+终态` 幂等去重。发布点覆盖：completed/failed/paused/needs_attention/waiting_human。
-- **测试（先红）**：任务终态 → 两个消费者各收到一次；重复发布 → 去重；未注册路由的 scheduleTask → 断言抛出。
+- **现行合同**：桥只保留 projection sink，终态按 `taskId+状态` 幂等去重；无 Agent 消费者。
+- **测试**：投影消费者单次收到事件，重复终态只发布一次，未注册路由仍失败关闭。
 - **验证**：`npx tsx@^4.19.2 --test src/__tests__/task-event-bridge.test.ts && npm run typecheck`
-- **规模**：~220 行。
 
 ### S2-2 活跃 run 内提醒注入（C2.2 上半）
 
-- **改动文件**：新增 `src/main/modules/agent-control/system-reminders/background-task-terminal-reminder.ts`、`agent-sdk-runtime.ts`（scope 活跃 run 查询 + 下一模型调用前消费 pending 提醒）、新增 `src/__tests__/background-task-reminder-injection.test.ts`
-- **实施要点**：agentNotifier 实现之一：scope 有活跃 run → 把任务终态摘要（含 S2-4 的失败明细）写入该 scope 的 pending reminder 队列；SDK 循环在每次模型调用前 drain 队列经 `SystemReminderRegistry` 组装注入。
-- **测试（先红）**：scripted run 进行中 → 桥发布任务完成 → 断言下一轮模型输入含终态提醒文本。
-- **验证**：`npx tsx@^4.19.2 --test src/__tests__/background-task-reminder-injection.test.ts && npm run typecheck`
-- **规模**：~200 行。
+- **退役**：该 reminder、注册与测试全部删除。会话恢复、验收标准与研究进度等通用提醒仍通过 `SystemReminderRegistry` 独立工作。
 
-### S2-3 无活跃 run：pending 事件 + 有界自动播报续跑（C2.2 下半）
+### S2-3 [已退役] 无活跃 run 自动播报设计（C2.2 下半）
 
-- **改动文件**：`src/main/modules/migrations.ts`（新表 `pending_task_events`）、`src/main/modules/agent-control/runtime-core/runtime.ts`（自动续跑入口）、`src/main/modules/agent-control/domain-adapters/run-capability-controller.ts`（`narration` 能力档：禁浏览器 resume/写分类工具/高风控动作）、新增 `src/__tests__/auto-narration-continuation.test.ts`
-- **实施要点**：scope 无活跃 run → 落 `pending_task_events` 行 → 触发 `taskType=continuation` 的播报续跑（走 Plan L WP3 续跑机制 + 单飞守卫）。**硬权限边界**（roadmap C2.2）：续跑 run 的能力解析强制 narration 档，由 `resolveRunCapabilities` 单点裁决（不在上游加挡板）；执行类动作只生成建议文本。播报完成后 pending 行标记 consumed。若续跑自身失败 → pending 行保留 + projection 红点，不静默。
-- **测试（先红）**：无活跃 run 时任务完成 → 自动出现一条播报消息且 run 能力为 narration 档（断言浏览器写工具不在暴露面）；并发两次触发 → 单飞只跑一个；续跑失败 → pending 保留。
-- **验证**：`npx tsx@^4.19.2 --test src/__tests__/auto-narration-continuation.test.ts && npm run verify:native && npm run typecheck`
-- **规模**：~300 行。
+- **退役**：Codex 仅接受真实用户入场；不存在 `system_background` 准入、无用户新 turn、runner 或冷启动重放。
 
 ### S2-4 设置开关 + 失败明细 payload + waiting_human 回路（C2.2 开关 + C2.3 + C2.4）
 
-- **改动文件**：`src/main/modules/settings-engine/*`（键 `agent.autoNarrationContinuation`，默认 true）、`src/preload/index.ts`、renderer 类型声明、`src/renderer/pages/Settings.tsx`（开关项）、`src/main/modules/tools/browser-tools.ts`（`browser_get_task` payload 增 `failedItems[{url,reason,attempts,retryable}]` 与 `suggestedNextAction`）、`content-task-runner.ts`（waiting_human 的用户确认经桥回原任务）、新增 `src/__tests__/auto-narration-setting-and-payload.test.ts`
-- **实施要点**：跨进程功能最小闭环七件套齐全（IPC/preload/类型/UI/测试/文档）。waiting_human：用户在会话说"好了/已验证"（S4-1 分类为 continue_task）→ 经桥对原 browser-task 调 resume（对齐既有 L2 规则与 Plan L WP6.6 显式 continue）。
-- **测试（先红）**：开关 off → 仅 pending+红点不续跑；payload 含明细且 retryable 标注正确；waiting_human 确认后任务恢复。
-- **验证**：`npx tsx@^4.19.2 --test src/__tests__/auto-narration-setting-and-payload.test.ts && npm run typecheck`
-- **规模**：~280 行（如超限，把 Settings UI 拆为 S2-4b）。
+- **退役**：自动播报设置的 Main handler、Preload API、Renderer 类型与 UI 全部删除。其他 Browser payload 与显式 `waiting_human` 交互合同不由本退役条款改写。
 
 ---
 
@@ -182,7 +175,7 @@ related:
 ### S3-3 单项失败账本与重试（C3.4）
 
 - **改动文件**：`src/main/modules/browser-engine/agent-collection-plan.ts`（failures 带 attempts/retryable；末轮重试游标）、`browser-collector-engine.ts`（末轮 retry pass）、`content-task-runner.ts`（整任务重试消费失败账本：只重试失败项）、新增 `src/__tests__/collection-item-retry.test.ts`
-- **实施要点**：单项失败分类 retryable（超时/导航失败/临时风控）vs 非（已删除/权限/终态跳过）；retryable 末轮重试 ≤2 次/项；重试仍败记终态原因。`browser_resume_task` 对含失败账本的任务 → 只跑失败项。
+- **实施要点**：单项失败分类 retryable（超时/导航失败/临时风控）vs 非（已删除/权限/终态跳过）；retryable 只在同一存活 run 的末轮做有界重试，重试仍败记终态原因。`browser_resume_task` 已退役；终态后需再处理失败项时，下一条真实用户输入建立新 run 并显式引用失败账本。
 - **测试（先红）**：5 项中 2 项首轮失败（retryable）→ 末轮重试后 1 项成功 → 终态 4/5 recoverable，失败账本含 attempts=3 的 1 项；重试整任务 → 只执行失败项。
 - **验证**：`npx tsx@^4.19.2 --test src/__tests__/collection-item-retry.test.ts && npm run typecheck`
 - **规模**：~280 行。
@@ -210,8 +203,8 @@ related:
 ### S4-2 status_query 路由与能力暴露保持（C4.4）
 
 - **改动文件**：`agent-sdk-runtime.ts`（status_query 分支：读 projection/事件桥生成状态播报，不重启任务）、collection exposure 判定改为消费 S4-1 分类（替换正则白名单路径）、新增 `src/__tests__/status-query-routing.test.ts`
-- **实施要点**：status_query → 走 narration 档播报（复用 S2-3 能力档）；continue_task → 维持上轮能力暴露与任务指涉（TurnFrame 读取，不再每轮正则重猜）。
-- **测试（先红）**："怎么样了" → 状态播报且不新建 browser task；"继续" → 原任务恢复且浏览器工具暴露保持（复演 99f c8 修过的场景，防回归）。
+- **实施要点**：status_query 是一条真实用户输入，只读当前投影并回答用户，不复用已退役的 S2-3 能力档，也不启动旧任务。continue_task 不再解析为通用 successor；若用户继续描述需求，它作为新 user ingress 准入并重新解析工具面。
+- **测试（先红）**："怎么样了" → 只读状态且不恢复旧 browser task；"继续" → 新 user ingress、0 generic continuation token、0 non-user successor，旧投影保持不变。
 - **验证**：`npx tsx@^4.19.2 --test src/__tests__/status-query-routing.test.ts && npm run typecheck`
 - **规模**：~220 行。
 
@@ -262,8 +255,7 @@ related:
 
 ## L 收尾轨（归 Plan L 合同管辖，此处仅登记追踪）
 
-- **L-f1 续跑预算累加**：`rebindTaskBudgetRuntime`/`resumeBudgetRuntime` 恢复 checkpoint 中 usage 并累加（对齐 Plan L I1"同一账本"），禁止续跑重置。测试：耗尽→续跑→剩余预算 = 上限 −已用。
-- **L-f2 续跑单飞补全**：补齐 budgetCheckpointFlights 的定义与生命周期；并发"继续"测试收敛为一个 run。
+- **L-f1/L-f2 [通用 Agent 退役]**：通用 parent/run checkpoint 的预算恢复与“继续”单飞入口不得恢复。技能 child/detached 句柄仍在其专用 supervisor 内累加预算和做 exact identity 单飞，不借用 generic continuation。
 - **L-f3 70/90% 转向注入落地**（WP2.9 若仍未实现）：warning 阈值后下一模型调用前注入 converge-or-ask 转向；测试断言注入时机在干净工具批次后。
 - **L-f4 taskType 单源**：run 准入时一次解析，run_meta 与 projection budget_json 同源写入；测试断言两账本一致（修复实测 research/60 vs short_task/24 矛盾）。
 - **L-f5 滚动 checkpoint**：每 N 个干净工具批次更新 run_state.json（N=4 起步），耗尽时仅做最终化；测试断言中途 kill 后 checkpoint 不超过 N 批次落后。
@@ -280,7 +272,7 @@ related:
 ### S6-2 场景级 E2E + dogfood 证据
 
 - **改动文件**：新增 `src/__tests__/e2e/agent-stability-scenarios.e2e.ts`（scripted seam 驱动 roadmap §6 三场景）
-- **实施要点**：Henry.L 场景（无声 run 消失/宣告守卫/轮播 10 图/自动播报）、研究预算场景（转向→受控 checkpoint→续跑累加）、重启场景（reconcile + 懒恢复）。E2E 绿后做一次真实 dogfood 并在 PR 记录证据（复用 stage-y dogfood evidence 模式）。
+- **实施要点**：Henry.L 场景（无声 run 消失/宣告守卫/轮播 10 图/自动播报生产入口为 0）、研究预算场景（同一存活 run 的有界收口，终态后 0 successor）、重启场景（Codex product fence 对账 + 无主行定态 + 历史投影只读）。E2E 绿后做一次真实 dogfood 并在 PR 记录证据（复用 stage-y dogfood evidence 模式）。
 - **验证**：`npm run verify:f:e2e && npm run verify:stability && npm run verify:native && npm run test && npm run typecheck`
 
 ---

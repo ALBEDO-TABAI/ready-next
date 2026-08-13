@@ -1,6 +1,6 @@
 # Ready 开发文档
 
-> 更新时间：2026-07-12
+> 更新时间：2026-08-12
 > 本文是开发入口，不保存阶段流水账。代码与 `package.json` 优先；详细运行时合同见 `docs/architecture/current-runtime-contracts.md`。
 
 ## 1. 先确定真值源
@@ -53,28 +53,28 @@ UI 文件定位先看 `UI_ADJUSTMENT_GUIDE.md`。
 
 ## 4. Agent 生产主链
 
-当前生产执行由 `AgentSdkRuntime` 与 `AgentSdkTurnOrchestrator` 承担：
+当前生产执行由 Codex 主链承担：
 
 ```text
 IPC request
-  -> resolve scope/resources
-  -> build prompt + tool surface
-  -> provider stream / tool loop
-  -> collect proof
-  -> finalizeRunOutcome
-  -> persist run meta, projection and assistant output
+  -> CodexHostOrchestrator
+  -> prepare ingress + atomic persistence
+  -> freeze resources + tool surface
+  -> ReadyCodexLifecycleAdapter / native app-server turn
+  -> canonical closeout transaction
+  -> persist projection and visible response
 ```
 
 关键文件：
 
-- `src/main/modules/agent-control/runtime-core/agent-sdk-runtime.ts`
-- `src/main/modules/agent-control/runtime-core/agent-sdk-turn-orchestrator.ts`
-- `src/main/modules/agent-control/runtime-core/agent-sdk-tool-executor.ts`
-- `src/main/modules/agent-control/runtime-core/run-finalizer.ts`
+- `src/main/modules/agent-control/runtime-core/runtime.ts`
+- `src/main/modules/agent-control/runtime-core/codex-host-orchestrator.ts`
+- `src/main/modules/agent-control/codex-runtime/codex-runtime-production-composition.ts`
+- `src/main/modules/agent-control/codex-runtime/ready-codex-lifecycle-adapter.ts`
 - `src/main/modules/agent-control/task-projection/`
 - `src/main/modules/tools/tool-executor.ts`
 
-`direct-chat.ts` 和 `turn-engine.ts` 已退役删除。遇到旧文档或注释引用时，不能据此新建兼容入口。
+`AgentSdkRuntime`、`ReadyAgentOrchestrator`、`direct-chat.ts`、`turn-engine.ts` 与旧 Dynamic Delivery/Boost 均不是生产入口。遇到旧文档、脚本或注释引用时，不能据此新建兼容入口。
 
 ## 5. 新功能与修改流程
 

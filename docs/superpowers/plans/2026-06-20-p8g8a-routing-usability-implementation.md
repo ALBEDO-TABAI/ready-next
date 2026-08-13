@@ -2,13 +2,15 @@
 title: P8g-8a Routing Usability Implementation
 date: 2026-06-20
 branch: agent-evolution/phase1
-enforce: true
+enforce: false
 scope:
   - outputs/agent-audit/fix-plan/164-CONSENSUS-BROWSER-ISOLATION-SPECIALIST-PRODUCT-ROUTE.md
   - docs/superpowers/plans/2026-06-20-p8g8a-specialist-create-entry-reliability-implementation.md
 ---
 
 # P8g-8a Routing Usability
+
+> Historical snapshot. Studio routing simulation, session preroute and specialist creation controls are retired from the current Codex product graph. Historical blueprints and routing rows remain audit-only; this file must not be used to recreate public IPC or controls.
 
 ## Goal
 

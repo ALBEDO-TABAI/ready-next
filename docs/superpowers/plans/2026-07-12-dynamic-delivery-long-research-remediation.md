@@ -1,9 +1,11 @@
 # Dynamic Delivery 长研究任务根因修复计划
 
 > 日期: 2026-07-12
-> 状态: complete
-> enforce: true
+> 状态: historical; Dynamic Delivery 已于 2026-08-12 全面退役
+> enforce: false
 > 范围: 研究能力保真、技能选择、长任务进度时限、真实来源/多文件验收、失败恢复与任务卡状态。
+
+> **历史快照，不得恢复旧架构。** 本文中 Owner/worker、Dynamic Delivery 进度钟、任务卡四态与 `verify:dynamic-delivery` 均不再是生产合同或可执行验收入口。研究取证、真实来源、交付读回与候选隔离的通用原则已迁入当前 Codex/Browser 合同；现行入口只见 `docs/architecture/current-runtime-contracts.md`。
 
 ## 1. 事故事实
 
@@ -45,21 +47,12 @@
 
 ## 4. 验收入口
 
-先跑新增焦点测试，再跑：
-
-```bash
-npm run verify:dynamic-delivery
-npm run verify:stability
-npm run verify:native
-npm run typecheck
-```
-
-最后用同一条宝矿力请求做 live seam：必须看到研究工具在场、不会在有工具进展时于 120 秒中断、未完整导出前不会返回成功，且任务卡状态与数据库终态一致。
+历史 `verify:dynamic-delivery` 已随旧入口退役；本段原命令不得作为当前验收。当前专项命令以 `package.json`、根指引和 `docs/architecture/current-runtime-contracts.md` 为准。
 
 ## 5. Closeout（2026-07-12）
 
 - 对抗复审先实证 3 个 P0 与 3 个 P1：同轮选技未真开放、页面 map/后台句柄伪造正文、auto-export 目标 proof 缺失、普通错误伪续命、旧 run proof 混入、跨域 research 绕过 grounded worker 门。修复后由同一复审代理逐条重放，6/6 关闭，无残留 finding。
 - 事故原话、skill 目录/选技、研究＋文档混合工具面、滚动进度、目标 auto-export、current-run 读回、旧文件反例、索引覆盖、来源正文与伪正文、恢复/终态/UI 文案均已有行为测试。
-- `npm run verify:dynamic-delivery` 通过：Node 专项 187 项无失败（177 通过，10 个 host ABI 检查由后续原生门覆盖），Electron 原生 9/9；Agent Foundation、所有 gate、真实 SQLite 与双端类型检查均通过。
+- 历史 `verify:dynamic-delivery` 曾在当时实现上通过，但该命令和主链已退役，不表示当前产品能力。
 - `npm run verify:stability` 通过：主稳定性 176 项无失败，Send IM 链 140 项无失败；模块边界 gate 将 turn execution 保持在 900 行以内。
 - `npm run build` 通过：原生模块、主进程、preload、renderer 正式构建全部成功；`git diff --check` 无格式错误。

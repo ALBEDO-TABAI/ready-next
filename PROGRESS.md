@@ -1,15 +1,15 @@
 # Ready 开发进展
 
-> 更新时间：2026-07-17
+> 更新时间：2026-08-12
 > 本文件只保留当前看板。完整历史见 `CHANGELOG.md`、Git 与 `docs/superpowers/plans/`；旧测试流水账不再在这里累积。
 
 ## 1. 当前基线
 
-- 应用版本：`0.7.1`（以 `package.json` 为准）。
+- 应用版本以 `package.json` 为准。
 - 技术基线：Electron 42.3、React 19、TypeScript 5.7、Vite 6、Tailwind CSS 4、SQLite/better-sqlite3。
 - Workbench mode：`browser | document | rss | calendar`。
-- Agent live 主链：`AgentSdkRuntime -> AgentSdkTurnOrchestrator -> finalizeRunOutcome`。
-- `direct-chat.ts`、`turn-engine.ts` 与 `skill_executions` workflow 状态机均已退役，不是待继续拆分的现行入口。
+- Agent live 主链：`CodexHostOrchestrator -> Codex ingress/product composition -> ReadyCodexLifecycleAdapter -> canonical closeout/projection`。
+- `AgentSdkRuntime`、`ReadyAgentOrchestrator`、`direct-chat.ts`、`turn-engine.ts` 与 `skill_executions` workflow 状态机均已退役，不是待继续拆分的现行入口。
 - 当前代码与依赖地图：`docs/architecture/codebase-map.md`。
 - 当前不可破合同：`docs/architecture/current-runtime-contracts.md`。
 
@@ -17,16 +17,16 @@
 
 ### Agent 与交付
 
-- Agent foundation 与 Dynamic Delivery 已收口：默认 adaptive，worker 无工具，Owner 独占写入/确认/外部动作，候选稿先隔离再由 fresh verifier 判定。
-- run 终态统一进入 `finalizeRunOutcome()`，连续性、watchdog、no-progress 与旧 run 晚到覆盖问题建立专项合同。
+- Codex 主链已替换旧 Agent 模型循环；旧 Dynamic Delivery/Boost/worker 设置和验收入口已退役，Browser fresh verifier 保留为独立产品证据门。
+- Codex run 终态统一进入 lifecycle adapter 与 canonical closeout transaction，连续性、watchdog、no-progress 与旧 run 晚到覆盖问题建立专项合同。
 - OpenAI-compatible chat/responses 与 Anthropic provider 已进入真 SSE 路径，并保留受控降级。
-- 阶段一、三、四的知识卡、专项 Agent、任务包、最小传话、预路由与生命周期合同已有对应 `verify:evolution-*` 入口。
+- 历史知识卡、人格、专项 Agent 与路由资料继续无损可读，但不进入当前 Codex 提示、准入、工具面或聊天 Agent 选择器；相关 `verify:evolution-*` 入口只验证历史数据兼容与退役边界。
 
 ### Skills 与工具面
 
-- 新增内置「运营」agent（`operator`）：与文案/美术/智识同款五件套预设（soul/RULES/FOUNDATION/知识卡/路由卡）；迁移 079 补种并保护所有同 slug 用户身份，迁移 080 只修复证据明确的历史人格错绑。配套 embedded 技能 `social-media-ops`（reference/advisory，SKILL.md 意图路由 + 九篇方法论参考：科学卡组/账号诊断/选题/内容工艺/数据复盘/平台机制/增长变现/合规风控/浏览器工作流）。
+- 历史内置 `operator` 及 soul/RULES/FOUNDATION/知识卡/路由卡种子按原数据保留，不作为当前 Codex 的可选 Agent 或提示资料。配套 embedded 技能 `social-media-ops` 作为独立 reference/advisory 技能继续可用。
 - 工具总闸门关闭时，用户明确请求的能力会得到真实阻断原因；明确开启需本机确认并只修改当前模型配置，远程会话不能代答。设置页显示 `auto` 的真实生效值，线上工具统计直接取实际请求，不再把未启用工具算进去。
-- capability floor 已由 SDK executor 与 orchestrator live 强制；current document 与 local resource 的读写边界分开。
+- capability floor 已由 Codex 准入工具快照 live 强制；current document 与 local resource 的读写边界分开。
 - embedded skill 改为目录扫描和 drop-in 注册，`use_skill` 负责模型侧显式激活，custom shell 需要逐技能同意。
 - Creative Production 技能组已嵌入；Tag Forge 已从只读方法论扩展为受 receipt、授权路径与索引 readback 约束的结构化能力。
 - MCP、安装命令与远程文件回传已有代码侧授权和确认入口。
@@ -57,7 +57,7 @@
 
 以下是对应功能 closeout 已记录的证据，不代表本次文档整理重新执行了全量产品回归：
 
-- Agent foundation / Dynamic Delivery：`verify:agent-foundation`、`verify:dynamic-delivery`、SQLite 覆盖与隔离快照验证。
+- Codex runtime：`verify:codex-runtime-source`、`verify:stability`、`verify:native` 与独立 Browser verifier 覆盖。
 - 文档 Widget：`verify:widget-ready` 与真实 Electron 亮暗主题、编辑、保存、重开验证。
 - 文件涌现 / Tag Forge：`verify:file-emergence`、`verify:tag-forge`、真实 Electron/SQLite、迁移连续性、`typecheck` 与生产构建。
 - 版本一致性：`npm run verify:version`。

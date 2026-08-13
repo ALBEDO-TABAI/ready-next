@@ -1,7 +1,7 @@
 ---
 date: 2026-06-09
-status: approved v4 — enforce after Claude final review
-enforce: true
+status: superseded historical contract
+enforce: false
 scope:
   - Agent SDK live budget accounting
   - task projection persistence
@@ -35,6 +35,8 @@ revision_history:
     resume unfreezes budget runtime, and keep the SDK maxTurns floor from being
     lowered by long-reading adjustments.
 ---
+
+> 当前合同说明（2026-08-12）：本文记录旧 Agent SDK 的公开暂停/续跑设计，仅保留为历史资料。当前 Codex 不提供 `resumeRun`、通用“继续处理”或由历史句柄派生后继任务；现行权威见 `docs/architecture/current-runtime-contracts.md`。
 
 # Agent Long Task Budget And Resumability Closure
 

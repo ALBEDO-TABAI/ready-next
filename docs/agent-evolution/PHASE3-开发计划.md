@@ -1,6 +1,7 @@
 # 阶段三开发计划（配套 2026-06-12-agent-evolution-phase3-implementation.md）
 
-> 合同是"做什么、验收什么"；本文是"按什么顺序做、并行度多少、风险在哪盯"。合同 approved v3（2026-06-12 Codex 三轮复审 4 点全 PASS / enforce: true），可按波次开工（A1 先行含 055/056，PK1=057 在 A1 合入后）；遗留轨 R 样本时钟起点=253b6768，且 typedTerminalRuns === totalTerminalRuns（unknown=0）为硬条件。
+> 历史开发排期：配套合同已于 2026-08-12 被 Codex 生产主链合同取代，当前不可按波次开工。
+> 下文的 handoff、专项 Agent、人格/知识注入和自动维护 LLM 只保留审计价值，不是 live 能力。
 
 ## 1. 工单总览
 

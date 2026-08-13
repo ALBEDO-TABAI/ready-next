@@ -50,9 +50,6 @@
     "time_allocation_chart": {
       "$ref": "#/$defs/time_allocation_chart"
     },
-    "schedule_runtime_card": {
-      "$ref": "#/$defs/schedule_runtime_card"
-    },
     "todo_list_manual": {
       "$ref": "#/$defs/todo_list_manual"
     },
@@ -83,7 +80,6 @@
     "day_schedule_card",
     "week_schedule_card",
     "time_allocation_chart",
-    "schedule_runtime_card",
     "todo_list_manual",
     "weekly_plan_board_manual",
     "habit_streak_manual",
@@ -929,53 +925,6 @@
       ],
       "additionalProperties": false,
       "id": "time_allocation_chart"
-    },
-    "schedule_runtime_card": {
-      "type": "object",
-      "properties": {
-        "heading": {
-          "type": "string"
-        },
-        "jobs": {
-          "minItems": 1,
-          "maxItems": 8,
-          "type": "array",
-          "items": {
-            "type": "object",
-            "properties": {
-              "name": {
-                "type": "string",
-                "minLength": 1
-              },
-              "status": {
-                "type": "string",
-                "enum": [
-                  "enabled",
-                  "paused",
-                  "running",
-                  "error"
-                ]
-              },
-              "nextRun": {
-                "type": "string"
-              },
-              "lastRun": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "name",
-              "status"
-            ],
-            "additionalProperties": false
-          }
-        }
-      },
-      "required": [
-        "jobs"
-      ],
-      "additionalProperties": false,
-      "id": "schedule_runtime_card"
     },
     "todo_list_manual": {
       "type": "object",

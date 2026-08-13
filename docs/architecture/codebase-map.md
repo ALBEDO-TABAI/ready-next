@@ -1,6 +1,6 @@
 # Ready 当前代码地图
 
-> 更新时间：2026-07-12
+> 更新时间：2026-08-12
 > 本文合并并取代根目录旧的模块图、依赖图和结构快照。它只记录稳定入口，不维护容易失真的文件数量。
 
 ## 1. 运行结构
@@ -39,7 +39,7 @@ Agent、文件面板、技能中心和设置页是跨工作面的能力，不是
 
 | 目录 | 职责 |
 | --- | --- |
-| `agent-control/` | Agent SDK 回合、会话、任务投影、工具策略、记忆、专项 Agent 与维护回合 |
+| `agent-control/` | Codex 主链、会话、任务投影、工具策略，以及历史记忆/Agent 资料的本地维护 |
 | `claude-bridge/` | Agent IPC 与 provider 宿主接线；不是旧 DirectChat 执行主链 |
 | `tools/` | 工具定义、参数校验、授权后的执行分发 |
 | `skills-runtime/` | embedded/custom skill 扫描、安装、运行与长期任务句柄 |
@@ -65,35 +65,35 @@ find src/main/modules -mindepth 1 -maxdepth 1 -type d | sort
 
 ```text
 claude-bridge IPC
-  -> AgentSdkRuntime
-  -> AgentSdkTurnOrchestrator
-  -> tool definitions / provider stream
-  -> tool executor
-  -> finalizeRunOutcome
-  -> durable projection + visible closeout
+  -> CodexHostOrchestrator
+  -> Codex ingress + atomic persistence
+  -> ReadyCodexLifecycleAdapter / native app-server turn
+  -> canonical closeout transaction
+  -> durable projection + visible response
 ```
 
 关键入口：
 
-- `src/main/modules/agent-control/runtime-core/agent-sdk-runtime.ts`
-- `src/main/modules/agent-control/runtime-core/agent-sdk-turn-orchestrator.ts`
-- `src/main/modules/agent-control/runtime-core/agent-sdk-tool-executor.ts`
-- `src/main/modules/agent-control/runtime-core/run-finalizer.ts`
+- `src/main/modules/agent-control/runtime-core/runtime.ts`
+- `src/main/modules/agent-control/runtime-core/codex-host-orchestrator.ts`
+- `src/main/modules/agent-control/codex-runtime/codex-runtime-production-composition.ts`
+- `src/main/modules/agent-control/codex-runtime/ready-codex-lifecycle-adapter.ts`
 - `src/main/modules/tools/tool-executor.ts`
 
-`direct-chat.ts` 与 `turn-engine.ts` 已删除。`run-capability-controller.ts` 仍有 live helper；只有 `resolveRunCapabilities` 没有生产调用方并保留 SDK-shaped parity，不能把该函数当作 live 工具面的权威入口。
+`AgentSdkRuntime`、`ReadyAgentOrchestrator`、`direct-chat.ts`、`turn-engine.ts` 与旧 Dynamic Delivery/Boost 都不是生产入口。Codex 工具面以准入前冻结的 Ready tool snapshot 为权威，不得从旧 SDK-shaped parity 入口旁路。
 
 ## 5. Agent Control 分区
 
 在 `src/main/modules/agent-control/` 修改前，先按职责定位：
 
-- `runtime-core/`：生产回合、provider、frame、终止与连续性。
+- `codex-runtime/`：Codex 准入、原生 thread/turn、工具桥、生命周期与 canonical closeout。
+- `runtime-core/`：产品宿主、DomainAdapter、连续性，以及不在生产图中的旧 SDK 支撑代码。
 - `domain-adapters/`：域能力、工具面准备与 capability floors 纯函数。
 - `tools-runtime/`、`tool-policy/`：工具注册、结果形状与执行策略。
 - `task-projection/`：任务卡与 run 元数据真值。
-- `skills/`、`child-run/`、`sub-agent/`：技能或子任务生命周期。
+- `skills/`、`child-run/`、`sub-agent/`：历史技能或子任务账本及非 Codex 支撑代码；当前 Codex 不从这些模块启动 child-loop 或公开续跑。
 - `session/`、`compaction/`、`system-reminders/`：上下文与会话生命周期。
-- `agents/`、`knowledge/`、`maintenance/`、`emergence/`：专项 Agent、知识卡、维护与涌现。
+- `agents/`、`knowledge/`、`maintenance/`、`emergence/`：历史 Agent/知识资料的读取与本地确定性维护；不是 Codex 人格、知识注入、预路由或专项 Agent 创建入口。
 - `safety/`、`quality/`：确认闸门、证据与完成判定。
 
 ## 6. Renderer 入口

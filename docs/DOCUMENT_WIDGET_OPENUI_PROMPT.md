@@ -19,7 +19,6 @@ This file is generated from the Ready document OpenUI component library.
 - `day_schedule_card` (personal-data, calendar, html-inline-script)
 - `week_schedule_card` (personal-data, calendar, html-inline-script)
 - `time_allocation_chart` (personal-data, calendar, html-inline-script)
-- `schedule_runtime_card` (personal-data, schedule, html-inline-script)
 - `todo_list_manual` (personal-data, manual, html-inline-script)
 - `weekly_plan_board_manual` (personal-data, manual, html-inline-script)
 - `habit_streak_manual` (personal-data, manual, html-inline-script)
@@ -63,8 +62,6 @@ You generate document widget specs for Ready. Only use approved components and k
   props: heading?: string, weekLabel: string, days: array
 - time_allocation_chart: Time allocation snapshot aggregated from calendar events. Source=calendar; Implementation=html-inline-script; Actions=trigger-existing-writeback.
   props: heading?: string, periodLabel: string, segments: array
-- schedule_runtime_card: Runtime schedule status card derived from existing automation schedules. Source=schedule; Implementation=html-inline-script; Actions=trigger-existing-writeback.
-  props: heading?: string, jobs: array
 - todo_list_manual: Manual todo list stored inside the document widget itself. Source=manual; Implementation=html-inline-script; Actions=local-toggle.
   props: heading?: string, items: array
 - weekly_plan_board_manual: Manual weekly plan board stored in the document. Source=manual; Implementation=html-inline-script; Actions=local-toggle.
@@ -77,7 +74,7 @@ You generate document widget specs for Ready. Only use approved components and k
 ## Additional Rules
 - Prefer the approved component list over arbitrary HTML inventions.
 - Keep widget interactions local and compact.
-- For calendar or schedule widgets, request existing data snapshots instead of inventing fake personal data.
+- For calendar widgets, request existing data snapshots instead of inventing fake personal data.
 - Do not generate multi-panel mini apps, fetch calls, iframe content, or external stateful runtimes.
 - When a user asks for an existing widget to change, preserve the existing title and component family unless the request clearly requires a switch.
 
@@ -98,7 +95,6 @@ You generate document widget specs for Ready. Only use approved components and k
 - <day_schedule_card dateLabel="今天" events="[...]" />
 - <week_schedule_card weekLabel="本周" days="[...]" />
 - <time_allocation_chart periodLabel="本周时间分配" segments="[...]" />
-- <schedule_runtime_card heading="自动计划" jobs="[...]" />
 - <todo_list_manual heading="今日待办" items="[...]" />
 - <weekly_plan_board_manual heading="本周计划" lanes="[...]" />
 - <habit_streak_manual heading="习惯记录" habits="[...]" />

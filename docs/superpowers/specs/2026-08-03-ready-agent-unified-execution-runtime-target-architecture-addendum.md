@@ -639,7 +639,7 @@ environment/launch-chain digest readback
 
 ### 10.1 唯一 owner admission
 
-所有 ingress——本地发送、渠道消息、自动播报、定时任务、安装/认证 wake——先经过 canonical Supervisor。
+所有仍合法的 ingress——本地发送、渠道消息、定时任务、安装/认证 wake——先经过 canonical Supervisor。自动播报整链已经退役，不属于 Supervisor ingress，生产入口为 0。
 Orchestrator 不得在 admission 前清理旧 owner 或写第二个 running run。
 
 同一 Task 最多一个 active Turn：

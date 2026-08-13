@@ -83,7 +83,7 @@ note: >
 1. 受控 Layout A、Layout B 与 SQLite、tool trace、provider trace 是当前事实基线；模型最终文字不是完成证据。
 2. Layout A 的 HTTP 522 是外部 provider 故障；Layout B 的 Enter、click 和 submit 不生效是独立浏览器驱动故障，两者不得混为一谈。
 3. 只默认保留已被真实行为证明可靠的底座：CDP/WebContents transport、BrowserWriteLease、BrowserSnapshotService、SQLite 与 AgentSdk 主循环。BrowserActionExecutor、BrowserCapabilityTask/TaskProjection repository 可按新合同重构；旧 planner、runner、session、event/continuation glue 不因“已经存在”而保留。
-4. 不新建 Browser action/task ledger；模型第一次调用 observe/mutate Browser 工具时，在实际执行前原子绑定一个现有 browser_tasks 记录作为唯一 action journal。仅因用户正处于 Browser 工作台而未使用 Browser 工具时，不创建空 child。只新增一个同库 agent_session_checkpoints 表承载 Agent session blob；pending_task_events 保持 legacy 用途，不新增第二个后台 runner、双写或条件回退。
+4. 不新建 Browser action/task ledger；模型第一次调用 observe/mutate Browser 工具时，在实际执行前原子绑定一个现有 browser_tasks 记录作为唯一 action journal。仅因用户正处于 Browser 工作台而未使用 Browser 工具时，不创建空 child。只新增一个同库 agent_session_checkpoints 表承载 Agent session blob；pending_task_events 仅保留历史表结构，生产路径不写入、不消费，也不新增第二个后台 runner、双写或条件回退。
 5. 站点、域名、语言、按钮文案、查询内容和固定工具顺序均不得决定生产执行路径或完成真值。
 6. 本轮终稿无丢失/去重合同以 Ready 本地 conversation 为验收范围；远程渠道仍验证任务状态不会先于 Browser child 伪完成，但外部网络投递的 exactly-once 需要独立 outbox 项目，不塞进本次 Browser 根因修复。
 7. 本轮以结果架构最简为目标，允许在 Browser orchestration scope 内整段替换旧控制层；不以 diff 最小或兼容旧内部 API 为目标。Renderer/Preload 对外产品能力保持，内部旧入口在一次 cutover 中删除，不留 wrapper、双写、feature flag 或 legacy fallback。
@@ -113,7 +113,7 @@ note: >
 19. 专项 gate、native gate、typecheck、全量测试、build、真实 Electron 和最终独立对抗性审查全部通过；随后提交应提交的全部工作并把工作区清洁到零。
 20. content-task-runner/browser collect/note/card loop 和 browser sub-agent 不得在工具公开返回后继续发起归属于该工具/worker 的 BrowserView 读写。所有 Agent 页面 dispatch 都绑定当前 ownerRunId、registry operation 与 workflow journal；detached worker 只做无 Browser 工具的文件/网络后处理。正常页面渲染、用户接管输入和之后合法新 owner 的动作不计入旧工具的后置写。
 21. 任何 bound Parent writer 都必须用 revision CAS 和字段所有权合并；generic sync/terminal patch 不能整组覆盖 steps_json、runId、executionBinding、continuation、status、child receipt 或 proof。
-22. BrowserWorkflowStore 只提供同一 raw connection 上的 Unit of Work、CAS 和同库 checkpoint，不承载语义裁决；纯 resolver 留在 AgentSdkTurnOrchestrator/CompletionVerifier。核心事务内无 await、无嵌套事务；只对 SQLITE_BUSY/LOCKED 在事务外短时异步退避并重读 CAS。Renderer 通知直接来自 post-commit push，丢失时读 Parent/message；pending_task_events 保持原有 legacy reminder 职责，不升级成本地 workflow outbox。
+22. BrowserWorkflowStore 只提供同一 raw connection 上的 Unit of Work、CAS 和同库 checkpoint，不承载语义裁决；纯 resolver 留在 AgentSdkTurnOrchestrator/CompletionVerifier。核心事务内无 await、无嵌套事务；只对 SQLITE_BUSY/LOCKED 在事务外短时异步退避并重读 CAS。Renderer 通知直接来自 post-commit push，丢失时读 Parent/message；pending_task_events 的生产 reminder 职责已退役，不升级成本地 workflow outbox。
 
 ### 0.4 实施中性能合同校正（2026-07-19）
 
@@ -551,7 +551,7 @@ expected_effect 是有限的通用机械谓词 union，只允许：`navigation_i
 - 工具 executor、research、runner、reminder、projection 和 Renderer 都不能关闭 workflow。只有统一 finalizeRunOutcome() 在无工具 terminal candidate 后调用 closeCandidate()；末轮文字在核心 commit 前只存在 isolated candidate-session fork。
 - closeCandidate() 在事务外读取 Parent/child/run_meta、requestAnchor、全部 steering receipts/plan mutations、resources 与 evidence，构造 sealed bundle；存在尚未 content-checkpointed 的 steering receipt 时直接拒绝 terminal candidate并进入 checkpoint_steered，不运行 verifier。已消费 receipt 的 canonical message digest 必须同时存在于 checkpoint effective input 和 sealed bundle。现有唯一 CompletionVerifier 只返回 verdict/session delta。accept 前不得 merge MemorySession、写 scope snapshot、chat row 或用户终态。missing 只有在真实 plan/evidence/交付 revision 前进后才能形成新 candidate；transport unavailable/invalid 对同一 sealed candidate 最多重试一次且 Browser dispatch=0。
 - accept 后纯 resolver 构造 completionReceipt 与 Parent next-state。一个 BEGIN IMMEDIATE 核心事务只做：CAS child receipt/terminal、CAS Parent dependency/terminal/continuation、CAS current run_meta、以确定性 messageId 写 canonical chat_messages，并更新必要 conversation 外键/updated_at。Browser 齐但文件/文档交付未齐时 child 可 completed，Parent 保持 delivery_incomplete 且不写“已完成”终稿。
-- FTS、recall、reference hint、学习副作用、scope snapshot 与 Renderer/TaskEventBridge push 全在核心 commit 后幂等执行；失败不回滚真实完成。canonical message metadata 固化派生修复所需的 digest/hint snapshot，startup/read path 可由 Parent/message 重建索引与 UI。pending_task_events 不承担 Browser owner、完成或本地通知可靠性。
+- FTS、recall、reference hint、学习副作用、scope snapshot 与 Renderer/TaskEventBridge push 全在核心 commit 后幂等执行；失败不回滚真实完成。canonical message metadata 固化派生修复所需的 digest/hint snapshot，startup/read path 可由 Parent/message 重建索引与 UI。pending_task_events 是只读历史兼容表，不承担任何生产职责。
 - Dynamic Delivery 的 candidate-session-fork 只产生 sealed delta；核心 DB commit 后才 commitAccepted/merge MemorySession。任一核心 SQL fault 或 verifier rejection 后，committed MemorySession、scope snapshot、chat row 与 Renderer 中 terminal candidate 均为 0；commit 后内存 merge 失败从 canonical row 重建。
 - 核心 transaction context 使用 Main 同一 raw connection，体内无 await/嵌套事务。SQLITE_BUSY/LOCKED 只在事务外按 Phase 0 短预算重试；每次重读 CAS/fence，stop/takeover 可先赢。派生索引故障不得走 persistence_failed。
 - stop/takeover/closeout 竞争同一 Parent revision、owner binding 和 run_meta running CAS：只有一个赢家。失去 owner 的 finalizer不能改 Parent/child/message；run_meta 已终态时零写 no-op。用户改变目标只以 Parent CAS 写 goal/dependency supersession，旧 receipt 不能复活。
@@ -713,7 +713,7 @@ Gate：日语、意大利语、中文、英文和无文本控件使用同一路�
 2. provider classifier收为单一入口；只有具备同库checkpoint、required child与真实进展的Browser workflow可自动交接，且只由AgentSdkTurnOrchestrator调用resumeOwner。
 3. 实现agent_session_checkpoints schema/serializer/readback；fresh `prepareAgentSdkTurn` 生产并持有 live SkillTurnIdentity/SkillToolAuthorization/surfaceComposition/exclusiveScopeRef，same-run use_skill 同步更新；恢复只走纯 `revalidateSavedSkillAuthorization`。prepared surface 含直接/latent Browser 时，SDK Runner 从第一轮起不传可写共享 MemorySession，而是从 committed snapshot 创建并在同一 owner 的外层 Runner 间复用 owner-local 非共享 Session；即使 `use_browser` 在某个 Runner 最后一次 filter 后才激活，下一 Runner 也能看到激活前的完整 assistant/tool 历史。Browser 激活后的首个 clean boundary 恰好写一份完整 checkpoint；此后每个外层新 Runner 以当前 checkpoint final effective input为显式 seed重建 owner-local cache，first filter校验 seed hash并重置 runner-local cursor；同 Runner 后续 `callModelInputFilter` 回读当前 owner 最新 final input，验证 source cursor并只合并新增 suffix，compact 后把按序 pending canonical steering 原样追加到 callback result，直接序列化 final provider items与下一 cursor；checkpoint rotate 与 contentCheckpointId 同事务，不从共享 MemorySession 重读。seed/source mismatch进入明确 failed ExitClass，provider=0，不产生 waiting。验证call/result成对、pending/terminal candidate为空、required operation存在、精确 authorization allow-set 与全部 requiredFloorToolNames 可按当前 registry/policy/consent 复核且serializer/registry/safety major兼容。新增 skill tool 不扩权，任一保存 floor tool 消失则 waiting；exclusive 只由匹配 terminal receipt或owner transition结束；additive minor、描述和新增 Browser 只读operation不阻断。resume 必须在同一事务写匹配下一 Runner seed 的 owner base并 rotate 掉未引用旧 row。
 4. 实现post-tool-result suspend边界和durable suspension intent，question/confirmation/foreground/takeover共用；每种intent/result/exit崩溃窗口恢复一致，intent 后/result 前只恢复最后干净 base 与 waiting fence，不伪造 tool result。
-5. startup先恢复user_stop/human_takeover/foreground/action_in_flight scoped fence，再处理running owner_crash与Parent continuation；run_meta continuation始终NULL，pending_task_events保持legacy用途。
+5. startup先恢复user_stop/human_takeover/foreground/action_in_flight scoped fence，再处理running owner_crash与Parent continuation；run_meta continuation始终NULL，pending_task_events 只保留历史表结构且无生产读写。
 6. 按 §3.7 穷尽 wake-source 表实现 resumeOwner：事务外验证、单事务消费 receipt/绑定 running owner/写新 owner base checkpoint、commit后调用provider；无adoption_pending、activate/failPendingActivation、文件checkpoint或第二恢复状态机。
 7. 全部新路径仍只挂test factory；Gate通过前不切production。
 
@@ -743,7 +743,7 @@ Gate：matrix每个旧route/writer真实计数为0；任何任务只有一个Par
 6. npm run verify:native
 7. npm run verify:stability
 8. npm run verify:streaming
-9. npm run verify:dynamic-delivery
+9. npm run verify:browser-grounded-orchestration-native
 10. npm run verify:tag-forge
 11. npm run typecheck
 12. npm run test
@@ -812,7 +812,7 @@ Gate：matrix每个旧route/writer真实计数为0；任何任务只有一个Par
 | Dynamic Delivery coordinator/verifier、candidate-session-fork、scope-session-snapshot | 复用唯一 CompletionVerifier；只返回 sealed delta，DB commit 后才 merge/snapshot，rollback 零候选泄露 |
 | chat repository、FTS/recall/conversation metadata、reference-hint-service | 核心事务只写canonical message/conversation；FTS/recall/hint post-commit幂等修复与startup read-repair |
 | ipc stream payload、preload types、renderer runtimeDriver | Main canonical messageId/digest、commit 后显示、重复 done/重启去重，不再由 Renderer 随机生成终稿 id |
-| task-event-bridge、pending-task-event/reminder、narration continuation | pending表保持legacy；通知只post-commit，删除projection/owner claim与平行完成权威 |
+| task-event-bridge、pending-task-event/reminder、narration continuation | 自动旁白整链已退役；pending表只保留历史结构且无生产读写，通知只走 post-commit projection |
 | provider error classifier、model loop、AgentSdkTurnOrchestrator、turn closeout、cleanup registry | 通用ExitClass、post-tool suspend、522分类、单一resumeOwner、旧owner fence |
 | RequestEnvelope、Renderer `useAgent`/Main sendScoped message ingress、runConfirmed/runCoordinator/AgentSdkRunLifecycle.beginRun、resource readback、messageComposer、RuntimeContext/latent activation、browser-workflow-intent、task-type-resolver、agent-sdk-tool-executor | 普通追问先持久为未消费 steering，不在ingress分类；clean boundary注入，terminal pending走checkpoint_steered；删除Renderer预发送kill与Main未裁决抢占；Main固化requestAnchor、结构化workbenchMode/browserPageRef、独立activatedCapabilityGroups、latent use_browser；删除词表route与budget语义覆盖 |
 | prepareAgentSdkTurn、SkillTurnIdentity/SkillToolAuthorization、capability-floors、same-run-skill-activation、skill terminal/child receipt、RunCapabilityController | fresh turn 单次产出live identity/authorization/composition/exclusiveScopeRef；恢复纯复核saved truth；all-saved-tools required floor；exclusive只由匹配terminal receipt或owner transition结束，additive/exclusive组合不在Browser层硬编码skillId |

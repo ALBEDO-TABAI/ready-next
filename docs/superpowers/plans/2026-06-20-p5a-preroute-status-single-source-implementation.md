@@ -3,7 +3,7 @@ title: P5a preroute status single source implementation
 date: 2026-06-20
 phase: P5a
 covers: [C25]
-enforce: true
+enforce: false
 source:
   - outputs/agent-audit/fix-plan/P5-unwired-capability-decision.md
   - outputs/agent-audit/fix-plan/225-CLAUDE-P5-PLAN-RESCOPE-REVIEW.md
@@ -13,6 +13,8 @@ source:
 ---
 
 # P5a Preroute Status Single Source Implementation
+
+> Historical snapshot. Session preroute, its setting, Studio simulation and public IPC are retired from the current Codex product graph. Do not recreate the deleted paths; current authority is `docs/architecture/current-runtime-contracts.md`.
 
 ## Goal
 

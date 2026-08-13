@@ -1,12 +1,14 @@
 ---
 title: Ready Agent 定时任务产品与架构设计
 date: 2026-07-13
-status: completed
-enforce: true
+status: superseded
+enforce: false
 implementation_plan: ../plans/2026-07-13-agent-scheduled-tasks-implementation.md
 ---
 
 # Ready Agent 定时任务产品与架构设计
+
+> 历史记录：该产品入口所依赖的 Agent 执行链已被 Codex 生产主链替换。2026-08-12 起公开入口、IPC 与调度器完整退役；旧数据仅保留为审计历史。本文不再是当前产品合同。
 
 ## 0. 结论
 

@@ -1,6 +1,6 @@
 # Ready 项目说明
 
-> 更新时间：2026-07-12
+> 更新时间：2026-08-12
 
 ## 1. 产品定位
 
@@ -17,10 +17,10 @@ Workbench 只有四个 mode，代码真值在 `src/renderer/stores/useMode.ts`�
 
 跨工作面的公共能力：
 
-- Agent：统一 scope、任务投影、后台任务、恢复、完成判定与 Dynamic Delivery。
+- Agent：统一 scope、任务投影、后台任务、恢复、完成判定与 Browser 独立复核。
 - Skills：embedded/custom skill 扫描、显式激活、授权、导入、长期句柄和 MCP/安装入口。
 - Files：文件树、搜索、阅读进度、项目身份、文件涌现与 Tag Forge。
-- Settings / Remote：AI provider、模型能力、MCP、知识系统、远程消息和文件回传。
+- Settings / Remote：AI provider、模型能力、MCP、历史资料卡管理、远程消息和文件回传。
 
 Design/Video 已不是 Workbench mode；相关需求由文档、画板、媒体工具或技能承载，不得为旧文档复活已删除页面。
 
@@ -30,14 +30,14 @@ Design/Video 已不是 Workbench mode；相关需求由文档、画板、媒体�
 
 ```text
 claude-bridge IPC
-  -> AgentSdkRuntime
-  -> AgentSdkTurnOrchestrator
-  -> provider / tool executor
-  -> finalizeRunOutcome
-  -> durable projection + visible closeout
+  -> CodexHostOrchestrator
+  -> Codex ingress + atomic persistence
+  -> ReadyCodexLifecycleAdapter / native app-server turn
+  -> canonical closeout transaction
+  -> durable projection + visible response
 ```
 
-`direct-chat.ts` 与 `turn-engine.ts` 已删除。工具面由 SDK executor 与 orchestrator 在本轮按能力、授权、资源引用和 capability floor 生成。`run-capability-controller.ts` 仍提供 live helper；只有其中的 `resolveRunCapabilities` 当前没有生产调用方，只作 SDK-shaped parity。
+`AgentSdkRuntime`、`ReadyAgentOrchestrator`、`direct-chat.ts` 与 `turn-engine.ts` 都不是生产入口。工具面由 Ready 在 Codex 准入前按能力、授权、资源引用和 capability floor 解析并冻结；旧 Dynamic Delivery/Boost 不得重新接回。
 
 详细入口见 `docs/architecture/codebase-map.md`，不可破合同见 `docs/architecture/current-runtime-contracts.md`。
 

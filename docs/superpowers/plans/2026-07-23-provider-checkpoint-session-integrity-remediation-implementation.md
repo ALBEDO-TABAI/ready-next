@@ -495,7 +495,7 @@ npm run verify:agent-continuation-clock
 npm run verify:browser-orchestration
 npm run verify:browser-reliability
 npm run verify:streaming
-npm run verify:dynamic-delivery
+npm run verify:provider-checkpoint
 npm run verify:stability
 ```
 
@@ -592,7 +592,7 @@ The delivery is not complete until deterministic native gates, packaged runtime 
 | `npm run verify:browser-orchestration` | EXIT 0 |
 | `npm run verify:browser-reliability` | EXIT 0 |
 | `npm run verify:streaming` | EXIT 0，194 pass / 1 非 native skip |
-| `npm run verify:dynamic-delivery` | EXIT 0，含 native ABI 和 typecheck |
+| `npm run verify:provider-checkpoint` | EXIT 0，含 native ABI 和 typecheck |
 | `npm run verify:stability` | EXIT 0，主套件 133 pass / 21 条件 skip，Send IM 142 pass / 1 skip |
 
 ### 11.3 外部验收纪律

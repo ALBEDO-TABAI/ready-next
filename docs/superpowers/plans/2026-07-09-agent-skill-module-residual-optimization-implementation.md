@@ -69,7 +69,7 @@ S4-5 在稳定性契约中登记为 **blocked，不排期**（`2026-06-10-agent-
 deferred register D11（`2026-07-03-deferred-work-register.md:179` 一带；注意该项无独立 `# D11` 标题、内容嵌于 D10-c 段）：browser 工具 receipt 的 `nextSuggestedAction` 被投进 steps/criteria 形状，造成"假 100%"呈现伪装（锚 `browser-tools :3318/:3055`）。register 已铲掉部分文案源头，结构修未做。
 
 ### 契约 / 测试
-- 契约：receipt 建议只进 narration/meta 通道，**永不**进 steps/criteria 投影形状（renderer 不新增本地猜测的既有红线的写侧对偶）。
+- 契约：receipt 建议只进 advisory/meta 通道，**永不**进 steps/criteria 投影形状（renderer 不新增本地猜测的既有红线的写侧对偶）；这里不依赖已退役的 narration 运行模式。
 - 测试（先红）：投影 shape 测试——带 `nextSuggestedAction` 的 receipt 终态后 steps/criteria 不含其派生项。
 - 波及：browser-lane 测试链（`verify:browser-lane`）须绿。若对抗复审认为波及超出本轮预算，允许降回 register 缓议（须写理由）。
 

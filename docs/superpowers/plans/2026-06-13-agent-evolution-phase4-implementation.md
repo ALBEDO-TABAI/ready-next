@@ -1,5 +1,5 @@
 ---
-status: approved v3 — Codex 终核 APPROVED 可 enforce（2026-06-13；三决策条款完整可机器验证，红测口径足以防行为歪），可逐单开工（建议首单 K-mirror，A 轨 A5 起步）
+status: historical; live preroute, specialist creation and handoff superseded by Codex E1 retirement on 2026-08-12
 revision_history:
   - v3 (2026-06-13): 吸收 Codex 追加意见 2P1/1P2。P1①K-mirror index 落点定死——root index.md 只收 global 作用域卡（crystallize 维护回合的 writeIndexFile 唯一写入口与 01 §7b DEFAULT_FILES 合同不变）；agent 卡只参与本作用域 backlink 解析与衰减信号，不产 per-agent index 文件（无读者=幽灵产物，禁止）；红测钉死"agent 卡不泄入 root index.md"。P1②A7 "自然失活"改为显式机制——A2 owner 注入解析在 prompt-assembly 处增加 registry status 查验（复用既有 getAgentRoster dep）：非 active 的 owner 降级 global-only（与"显式非法 id"同一降级语义），老任务聊天历史不受影响、后续轮不再吃 retired 知识；红测钉死。P2 specialist id 字符规则——A6 派生 id 强制小写 slug（^[a-z0-9][a-z0-9._-]*$，与卡片文件名字符集一致，否则 routing-<id>.md 撞 NORMAL_CARD 小写正则永不被 listRoutingCards 读到）；isSafeAgentScopeId 保持宽容兼容存量，新派生收紧。P3（文案尾巴）store 拒绝原因补 [sites/] 已随 84103acb 直接落地（唯一先行代码改动；其余 P1/P2 决策均为合同条款，代码与红测按各工单施工时交付）。
   - v2 (2026-06-13): 吸收 Codex 一轮评审 6P1/3P2/3 开放问题。P1：①K-mirror 同步必须带作用域（agent 卡 scope_id='agent:<id>'，不得落 'global'）；②backlink/index 构建改 scope-aware（同 slug 跨 agent 不互相计）；③候选卡晋升字段改 stage→emerged（status 联合无 emerged，C5 已立 stage 封闭联合）；④B6 对 active 卡零自动改写——学习产物一律 staged 旁卡/建议卡；⑤A5 routing 卡 triggers 约定完整定义（封闭关键词列表 frontmatter 字段+确定性匹配+冲突兜底+写侧校验）；⑥B6 前置论证补全（只消费失败事实不读 enforce 行为，信源接口点名）。P2：四 gate 点名+迁移连续 gate 进 A6a 验证；共享文件矩阵补 knowledge-index-builder/settings/preload/UI/prompt 资产；计划改"058 被占须先修订合同"。开放问题：B6 信源=resolveCollectionVerdict 产物+CheckInRecord.blockers+工具信封 errorKind 闭集；triggers=关键词列表非正则非向量；A7 非 active agent 卡片自然失活+镜像行保留，无需清扫。
@@ -8,7 +8,7 @@ owner: 白
 author: Claude (Fable 5)
 executor: 待定（Claude / Codex 逐单施工）
 reviewer: Codex（共识）+ Claude（终审）
-enforce: true
+enforce: false
 note: >
   阶段三（2026-06-12-agent-evolution-phase3-implementation.md approved v3）已交付
   "组织与维护智能"全部主轨单（A1-A4 / C3-C5 / PK1-PK4 / I4 / G3，整轮审查零 P1，
@@ -27,6 +27,8 @@ related:
 ---
 
 # Agent Evolution 阶段四实施子计划
+
+> **历史快照，不得按本文恢复入口。** A5 会话预路由、A6 专项 Agent 创建/派生和 A7 handoff 过滤已从当前 Codex 生产链退役；历史数据只读兼容，现行规则只见 `docs/architecture/current-runtime-contracts.md`。
 
 ## 0. 总则
 
@@ -79,7 +81,7 @@ related:
 
 ### EP4-A5 会话创建预路由 + agent_auto_routing 设置项
 - **routing 卡 triggers 约定（本合同新立，04 档位二的"routing 卡命中"在此机器化）**：belief-card frontmatter 增可选 `triggers` 字段（additive，沿 C5 `stage` 字段先例）——**逗号分隔的字面关键词列表**（≤8 个、每个 1-32 字符、禁正则/禁通配/非向量），写侧由 store `validateFrontmatter` 校验（坏格式拒卡）。匹配规则（确定性）：对新会话首条消息做大小写折叠后的**字面包含**判定；目标 agent = 卡文件名 `routing-<agentId>.md` 绑定且 registry 中 status=active（retired/不存在 → 该卡不参与）；**多卡命中按命中关键词数取最高，并列 = 冲突 → 兜底主 agent 且建议条列出冲突卡**；无 `triggers` 字段（含 C5 存量修复卡）或 staged 卡不参与匹配。
-- **改动文件**：`belief-card-store.ts`（frontmatter `triggers` 字段：解析/校验/序列化，additive）、新增 `agent-control/agents/session-preroute.ts`（纯函数路由器，三级判定：**状态优先**——新会话首条消息经 I1 `intent-state-first` 分类为 continue_task/status_query 且存在最近 active/blocked/check_in_pending 任务携 ownerAgentId → 续用该 agent；**先例次之**——按上述 triggers 约定命中 ACTIVE routing 卡 → 目标 agent；**兜底**——主 agent，走 A4 档位一提案）、设置项 `agent_auto_routing: off | suggest | auto`（默认 suggest；对齐 `agent-auto-narration-setting.ts` 的跨进程设置范式：settings repository + IPC + Settings UI 可见）、会话创建链接线（runtime/scope 创建路径读设置：off=零行为变化；suggest=路由结果作为会话头部建议条数据下发，用户点击才切换；auto=先例命中直建到目标 agent 且头部显示"已按惯例转给 X，点此改回"）、新增 `src/__tests__/session-preroute.test.ts`
+- **改动文件**：`belief-card-store.ts`（frontmatter `triggers` 字段：解析/校验/序列化，additive）、新增 `agent-control/agents/session-preroute.ts`（纯函数路由器，三级判定：**状态优先**——新会话首条消息经 I1 `intent-state-first` 分类为 continue_task/status_query 且存在最近 active/blocked/check_in_pending 任务携 ownerAgentId → 续用该 agent；**先例次之**——按上述 triggers 约定命中 ACTIVE routing 卡 → 目标 agent；**兜底**——主 agent，走 A4 档位一提案）、设置项 `agent_auto_routing: off | suggest | auto`（默认 suggest；采用 settings repository + IPC + Settings UI 的跨进程设置范式；旧自动播报设置已退役，不是可复用依赖）、会话创建链接线（runtime/scope 创建路径读设置：off=零行为变化；suggest=路由结果作为会话头部建议条数据下发，用户点击才切换；auto=先例命中直建到目标 agent 且头部显示"已按惯例转给 X，点此改回"）、新增 `src/__tests__/session-preroute.test.ts`
 - **实施要点**：路由器是查表+分类，不是模型调用；**continue 类永远回原 agent**（C4.1 协同硬断言）；off 档下整条链路零触碰（存量零感知）；suggest/auto 的 UI 面走 §7 最小闭环（IPC/preload/类型/组件——建议条为轻量横幅，复用既有会话头部区域）。
 - **测试（先红）**：三级判定矩阵（状态命中/先例命中/兜底）；continue 类回原 agent；off 档零变化；auto 档先例直建+改回数据完整；triggers 边界全覆盖——malformed 格式拒卡、多卡并列命中兜底+冲突列出、retired 目标不参与、无 triggers 不参与、staged 不参与、超长/超数关键词拒卡。
 - **验证**：`npx tsx@^4.19.2 --test src/__tests__/session-preroute.test.ts && npm run typecheck`

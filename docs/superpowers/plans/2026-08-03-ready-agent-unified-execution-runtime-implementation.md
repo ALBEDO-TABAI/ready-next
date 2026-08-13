@@ -231,7 +231,6 @@ verify:desktop-environment-parity.red
    - 本地 `sendScoped`；
    - raw Orchestrator/internal send；
    - remote channel inbound；
-   - narration continuation；
    - scheduled task；
    - recovery/wake。
 2. admission 成功前禁止：
@@ -258,7 +257,7 @@ verify:desktop-environment-parity.red
 - 本地 follow-up；
 - raw Orchestrator 第二 ingress；
 - 同一渠道线程再次入站；
-- narration 与活动用户任务碰撞；
+- 已退役自动旁白入口保持 0 生产调用；
 - ownerRunId、Task active Turn、外层 liveness 始终一致；
 - admission rejection 无遗留 running row。
 
@@ -784,7 +783,7 @@ verify:xhs-research-fixture
 
 ### 14.3 Task 与恢复矩阵
 
-- 第二条本地消息、渠道入站、自动播报、定时任务碰撞；
+- 第二条本地消息、渠道入站、定时任务碰撞；另以负向反例证明已退役自动播报入口不能被重新注册或派发；
 - Provider timeout/transient/rate limit 的总 wire call 预算；
 - install approval 前后重启；
 - auth challenge 过期、重复提交、跨重启；

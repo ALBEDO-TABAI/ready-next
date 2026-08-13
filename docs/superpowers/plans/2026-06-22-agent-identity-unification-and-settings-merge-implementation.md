@@ -1,8 +1,8 @@
 ---
 title: Agent 身份统一 + 生命周期补全 + 设置页合并
 date: 2026-06-22
-status: reviewed-by-codex; governing-decision-locked (§6① 内置实体); ready-for-build
-enforce: true
+status: historical; superseded by Codex E1 retirement contract on 2026-08-12
+enforce: false
 owners:
   - workstream-A (Settings UI): Claude
   - workstream-B (data model + lifecycle + IPC): Codex
@@ -13,7 +13,9 @@ related:
 
 # Agent 身份统一 + 生命周期补全 + 设置页合并
 
-> 本文是先合同后代码的实施合同(CLAUDE.md §0.5)。三个问题共用一条根因:系统里存在**两套并行的 "agent" 概念,从未合并**。本文给出统一架构、可机器验证的不变量,并把工作拆成两条**可并行**的工作流(A=设置页 UI / B=数据模型+生命周期+IPC),seam 明确,互不踩线。
+> **历史快照，不得按本文恢复功能。** 当前 Codex 生产链不读取人格、知识、路由、registry 或 specialist blueprint；聊天选择器不从历史人格生成 Agent，公开预路由、派生、handoff 与 specialist 写入工具/IPC/UI 已退役。历史表、资产与档案只作无损查阅、整理和审计，不改变当前 Codex。现行规则只见 `docs/architecture/current-runtime-contracts.md`。
+
+> 以下内容保留 2026-06-22 时的问题分析与迁移历史，不再是实施合同。
 
 ---
 
@@ -184,7 +186,7 @@ agent_personalities: butler|管家  copywriter|文案  video-editor|剪辑  anal
 一个「Agent」入口,内部 4 个子区(子导航,非平铺);**默认首屏直接进"Agent 管理"**,复杂的派生/维护/路由卡**不在第一屏全摊开**:
 
 1. **Agent 管理(默认首屏)**:统一列表 → 点进单个 agent 看人格 / 知识 / 路由 / 启用状态 + 操作(停用/启用/合并/删除)。← 问题 2/3 的 UI 落点。
-2. **行为**:全局开关(后台自动播报、新会话智能路由)+ 知识系统总开关。
+2. **行为**:新会话智能路由 + 知识系统总开关。后台自动播报及其设置入口已经退役，生产调用为 0。
 3. **派生与路由**:派生候选确认、routing 卡、blueprint、preroute 轨迹。
 4. **知识与维护**:staged 信念卡确认、站点卡风险、维护回合状态。
 
@@ -256,7 +258,7 @@ agent_personalities: butler|管家  copywriter|文案  video-editor|剪辑  anal
 **范围(纯 renderer,仅 `Settings.tsx` + 新容器组件):**
 - `Settings.tsx`:把 `agent` / `personalities` / `agent-system` 三个 `settingsData` 条目(`:115-182`)收敛为单个 `agent` 条目;改 `:3170-3180` 渲染分派为单一容器。
 - 新建容器 `AgentSettingsHub`(renderer 组件):4 个子区 + 子导航(段控/左侧子 nav),负责合并后的布局与"避免臃肿"的视觉设计(以 workbench 极简优雅为基准)。
-- 把两个内联控件(后台自动播报 `:120-126` / 新会话智能路由 `:128-138`)迁入"行为"子区,沿用现有 settings getter/setter IPC(只读现成契约,不依赖 B)。
+- 把新会话智能路由内联控件迁入"行为"子区，沿用现有 settings getter/setter IPC(只读现成契约,不依赖 B)；已退役的后台自动播报控件与 IPC 不迁移、不保留。
 - 把现有叶子组件按 §4.3 摆进对应子区。
 
 **A 对契约的依赖(只读约定,不改后端):**
@@ -283,7 +285,7 @@ agent_personalities: butler|管家  copywriter|文案  video-editor|剪辑  anal
 
 | 子区 | 组件 | 谁交付 |
 |---|---|---|
-| 行为 | 内联控件(自动播报 / 预路由)+ 知识系统总开关 | A 摆位;开关若需新 IPC 由 B 补 |
+| 行为 | 内联控件(预路由)+ 知识系统总开关；无自动播报入口 | A 摆位;开关若需新 IPC 由 B 补 |
 | Agent 管理 | `AgentManagementPanel`(B 可由 `PersonalityEditor`+`AgentRegistryPanel` 合并而来;若不合并则两者并列) | B 交付内部;A 摆位 |
 | 派生与路由 | `AgentDerivationPanel` + 路由/blueprint(取自 `AgentSystemStudio` 子区) | B 交付内部;A 摆位 |
 | 知识与维护 | 信念卡确认 / 站点卡风险 / 维护状态(取自 `AgentSystemStudio` 子区) | B 交付内部;A 摆位 |

@@ -9,7 +9,7 @@ scope: kimi-k3-agent-specialization
 
 ## 1. 目标与假设
 
-目标是在现有 `AgentSdkRuntime -> AgentSdkTurnOrchestrator` 主链中支持 Kimi Coding 的 `k3`，不新建第二套 Agent 路径。
+当前目标是在 Codex 准入冻结的 provider 路由与 Ready 上游网关中保留 Kimi Coding `k3` 的思考块与签名合同，不新建第二套 Agent 路径。原 `AgentSdkRuntime -> AgentSdkTurnOrchestrator` 记载是历史实施背景，不是现行生产主链。
 
 本实施基于以下已核实事实：
 
@@ -50,7 +50,7 @@ K3 的阻塞请求与流式请求必须发送同一合同：
 - 下一轮序列化必须把思考文本及签名原样放回同一个 assistant 消息。
 - 流式与非流式路径最终形成相同的历史结构。
 - 会话快照和压缩不得剥离保留下来的 K3 身份或思考块。
-- Dynamic Delivery 候选在 verifier 接受前仍不得进入共享会话；接受后重建的最终 assistant 消息必须继承最后一条已接受 K3 回复的完整 providerData，不能用无身份纯文本替换。
+- Browser fresh verifier 的候选在 canonical closeout 接受前不得进入共享会话；接受后的最终 assistant 消息必须继承已接受 K3 回复的完整 providerData，不能用无身份纯文本替换。这不得用来恢复旧 Dynamic Delivery。
 
 ### K3-4 模型切换保护
 
@@ -71,7 +71,7 @@ K3 的阻塞请求与流式请求必须发送同一合同：
 3. 行为测试：普通文字和工具调用的思考块均能跨轮原样回传。
 4. 行为测试：空白会话与纯 K3 会话放行；其他模型、旧版无身份历史与来源不明压缩摘要拒绝，且拒绝发生在 fetch 前。
 5. 行为测试：压缩后的纯 K3 摘要保留身份；混合或无身份历史不伪装成 K3。
-6. 行为测试：Dynamic Delivery 拒绝候选不泄漏思考历史；接受候选把 K3 providerData 附到最终共享消息，下一轮仍通过 K3 历史检查。
+6. 行为测试：Browser fresh verifier 拒绝候选不泄漏思考历史；接受候选把 K3 providerData 附到最终共享消息，下一条真实用户轮仍通过 K3 历史检查。
 7. 运行 `npm run verify:streaming`、`npm run typecheck`，再检查改动范围与密钥痕迹。
 8. 使用用户临时提供的凭据对 `low / high / max` 以及两轮历史回传做隔离实测；凭据只进进程环境，不写文件、不进日志。联网前置不可用时不得把该项宣告通过。
 

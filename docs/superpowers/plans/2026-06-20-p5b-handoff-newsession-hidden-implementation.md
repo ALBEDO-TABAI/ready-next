@@ -3,7 +3,7 @@ title: P5b handoff new-session hidden implementation
 date: 2026-06-20
 phase: P5b
 covers: [C24]
-enforce: true
+enforce: false
 source:
   - outputs/agent-audit/fix-plan/226-CONSENSUS-P5-SLICED-ROUTE.md
   - outputs/agent-audit/fix-plan/P5-unwired-capability-decision.md
@@ -13,6 +13,8 @@ source:
 ---
 
 # P5b Handoff New-session Hidden Implementation
+
+> Historical snapshot. The complete live Agent handoff tool, adoption flow and public UI/IPC surface are now retired, not merely hidden. Skill artifact/file handoff is a separate capability. Do not restore `agent_propose_handoff` or its deleted tests.
 
 ## Goal
 

@@ -2,7 +2,7 @@
 title: cod-ready Codex Runtime 最小替换试验实施计划
 date: 2026-08-06
 kind: implementation-plan
-status: experiment-e2-passed
+status: experiment-e9-passed
 enforce: true
 owner: 白
 author: Codex
@@ -11,16 +11,31 @@ approval:
   date: 2026-08-06
   instruction: 根据文档指引开始施工
 route_revision:
+  date: 2026-08-10
+  instruction: 以 Codex 内核真实完成用户任务为最简通过标准，除非内核确实无法完成，否则不增加额外证明层或旁路
+  phase: E9
+e6_user_scenario_revision:
+  date: 2026-08-09
+  instruction: 用开发版 Ready 的普通 Agent 对话拉起飞书 CLI 授权并完成真实读写
+  phase: E6
+e3_external_authorization:
   date: 2026-08-07
-  instruction: 那就按你理解的继续
-  phase: E2
+  instruction: 授权
+  evidence: assets/codex-runtime/evidence/e3-real-provider-receipt.json
 phase_progress:
   completed:
     - E0-R
     - E1
     - E2
-  next: E3
-  next_phase_allowed: true
+    - E3
+    - E4
+    - E5
+    - E6
+    - E7
+    - E8
+    - E9
+  next: null
+  next_phase_allowed: false
 implementation_branch: codex/cod-ready
 implementation_worktree: /Users/user/实验田/cod-ready
 source_worktree: /Users/user/实验田/ready-cowork-newtab
@@ -192,6 +207,168 @@ E2 已完成并通过独立复审：**PASS，允许进入 E3**。
 
 阶段报告见 `docs/superpowers/audits/2026-08-07-codex-runtime-e2-report.md` 与同名 JSON。生产组合仍故意不可用；
 真实 Provider、Ready 工具和产品竖切仍分别属于 E3、E4 与后续阶段，不因 E2 通过而提前放行。
+
+## 0.7 E3 施工结论（2026-08-07）
+
+E3 已完成并通过独立复审：**PASS，允许进入 E4**。
+
+- Ready Model Gateway 固定非敏感上游配置与密钥引用，Codex 子进程只持有短期本地凭证；请求、流式响应、错误、取消、
+  重试和压缩路由均受机器合同约束。
+- 用户明确授权后只执行一次真实 Provider 调用，状态 200、重试 0，首个增量先于终态；回执保存在
+  `assets/codex-runtime/evidence/e3-real-provider-receipt.json`，后续门禁不重复付费调用。
+- 完成报告见 `docs/superpowers/audits/2026-08-07-codex-runtime-e3-completion-report.md`。
+
+## 0.8 E4 施工结论（2026-08-07）
+
+E4 已完成并通过独立复审：**PASS，允许进入 E5**。
+
+- Codex 线程工具面固定、每轮授权单独冻结，调用身份在 Ready 动作前持久绑定；实际动作只经过 Ready
+  `executeToolCall`，没有产品域直连。
+- 用户确认不占用真实动作时限；确认后、动作开始前再次核对当前 owner、完整 binding、冻结工具定义、参数、终止权威和
+  连接权威；Skill 还核对当前目录内容、manifest、action 入口/参数与依赖摘要。缺少任一中止来源、身份漂移或连接关闭都在动作前失败。
+- duplicate、timeout、abort、disconnect、receipt、首次返回接收方、敏感值和主机路径都已覆盖行为与原生 SQLite 门禁。
+- `npm run verify:codex-runtime-e4`、生产构建、diff gate 通过；独立 reviewer 最终给出
+  `PASS / P0=0 / P1=0 / P2=0`。
+- 阶段报告见 `docs/superpowers/audits/2026-08-07-codex-runtime-e4-completion-report.md`、同阶段 JSON 与独立复审 JSON。
+
+E5 开始真实产品竖切；进入前先在模型网关和响应收集边界强制 `maxIterations` 与
+`maxParallelToolGroups`，不得把 E4 的单调用预算误写成完整模型循环预算。
+
+## 0.9 E5 S0/S0.5 进行中结论与协议修正（2026-08-07）
+
+E5 S0 已用真实产品入口完成六轮同线程连续对话；S0.5 尚未通过，因此 E5 仍是 **IN PROGRESS**。
+
+- 固定版本真实 automatic compaction 已发生，Gateway 证明 automatic 请求、成功响应、原 product 请求和成功响应属于
+  同一 run/thread/turn/provider snapshot，且后继请求输入已缩短并不再包含被替代的最大原文。
+- 真实 app-server 在该次 automatic compaction 中没有发出可作为权威的 `contextCompaction item/completed`；另一个固定
+  二进制隔离样本的 `thread/read` 又可以看到该 item。因此 item 只保留为被动观察，不能作为 automatic 完成或恢复权威。
+- automatic 的权威改为不可改写的 Gateway 请求/响应顺序账本；Ready 仍不创建 auto lease、第二个 operation、候选或
+  用户可见结果。该修正不改变 Codex 原生压缩算法、阈值或历史所有权。
+- manual compaction 的崩溃恢复证据下沉到 app-server 子进程写入边界：每次 RPC 先持久化 intent，再分别记录 write
+  attempted/confirmed、响应或连接中断。只有“明确未写入”可在同一 binding 上重试；任何可能已经写入的情况都进入
+  `compaction_state_unknown`，禁止自动重发；完整成功仍要求精确 turn、Gateway 成功响应、非动作 item 和 thread readback。
+- automatic 已使用阈值以下与真实触发两次真实模型样本形成一次性边界对照，不再追加第三次高成本调用；它不计入下面
+  “连续 3 次”的逐例门禁。最终代码必须无成本重放并通过两份 capture 的合同。manual + 正式 sidecar 重启 +
+  `thread/read -> thread/resume` + 压缩前后语义连续性仍须在同一最终源码上连续 3 次；S1 也须在该源码上连续 3 次。
+
+## 0.10 E5 S1 本地合同与实现进度（2026-08-07）
+
+S1 的生产接线和本地攻击性门禁已完成，真实模型三连跑尚未执行，因此 E5 仍是 **IN PROGRESS**。
+
+- Renderer 只在文档工作面冻结聚焦 pane 的 tab、主机路径摘要、incarnation、内容寻址版本和授权代次；SendScoped 合同拒绝
+  资源正文扩展。`additionalContext` 仍只含五个非语义版本字段。
+- live resolver 保留完整 current-document floor，当前轮签名授权只允许 `document_read_section`；任一 mutation 在 Ready
+  executor 前被拒绝。
+- 读取请求绑定当前 Main window 的 `webContents.id` 以及 run/thread/turn/call/action；Renderer 在读取前后复核同一
+  tab/pane/path/content，旧版本返回 `resource_version_superseded` 且 0 正文字节。
+- Main 只为通过复核的当前版本签发读取回执。最终发布屏障要求这张回执精确匹配当前 run/thread/turn/call/action、资源
+  版本、授权代次和文档 incarnation；缺失、失败、晚到或跨轮拼接均不发布。
+- 本地门禁已覆盖 V1/V2 矛盾正文、旧句柄拒绝、同内容新授权代次、错 Renderer 回执、abort/rebind、receipt graft、无读取
+  回执禁止发布，以及 Main→Renderer→当前文档读取→Main receipt 的完整往返。
+
+## 0.11 E5 付费前证据硬化（2026-08-07）
+
+E5 仍为 **IN PROGRESS**；以下条件只授权最终真实验收，不单独构成 E5 PASS。
+
+- 已存在 thread 的 `thread/read -> thread/resume` 必须锁定同一个仍存活的 sidecar session、connection epoch、client 与
+  abort signal；读取后、恢复后或落恢复凭证前发生替换都关闭失败，0 新 turn。恢复凭证还要求对应进程租约已打开且
+  `closed_at/tree_zero_at` 均为空。
+- manual+restart 每个隔离应用进程只跑一个案例。Gateway capture 只保存两个独立代号的摘要和出现次数；压缩前请求不得
+  提前出现压缩后代号，重启后的 recall Provider 请求必须同时含两个代号。
+- Renderer 的压缩前、压缩后和重启 recall 三个完整 final 按顺序与三张 ingress receipt、三个 Codex turn、三份 engine
+  candidate 和三条 canonical assistant message 完全相等；第三个 final 还必须精确为 `pre|post`。
+- 三个 product 请求的工具名、数量和 digest 必须与 thread 冻结的 `responsesTools/toolSurfaceDigest` 完全相等；manual
+  compaction 请求必须是精确空工具面。首个 pre-dispatch turn id 和 manual compaction turn id 都必须与 Gateway capture
+  的真实 `turnId` 字段精确对应。
+- 付费前必须用当前源码重新跑 0-request Electron preflight，并由独立 reviewer 核对 report、completion marker、源码
+  manifest 和 source digest；旧源码的 preflight 一律作废。
+- 2026-08-08 的真实样本已证明手动压缩和压缩后 product turn 成功，且 notification/readback 两个 item id 已分别持久化；
+  但取证脚本在杀 sidecar 前因过滤 PATH 启动的 `node` 运行器而停止，不能计入 manual+restart PASS。失败证据保留在
+  `docs/superpowers/audits/2026-08-08-codex-runtime-e5-manual-restart-runner-failure.md`。
+- 修正只允许放宽验收脚本对运行器首 token 的读取；sidecar 的绝对路径、二进制摘要、pid/ppid/pgid、启动时间、租约标记和
+  state dir 校验不得放宽。修正后仍需重新 build、0-request preflight 和独立复审，才能发起下一次明确授权的真实样本。
+
+## 0.12 E5 重启恢复环境合同修正（2026-08-08）
+
+第二个真实 manual+restart 样本已完成手动压缩、压缩后 product、旧 sidecar 进程树归零、新 sidecar 启动以及同 thread 的
+`thread/read -> thread/resume`。重启后的 recall 在上游请求前被 Ready 网关以 `gateway_tool_surface_mismatch` 拒绝，未产生
+新的付费请求或动作，E5 仍为 **IN PROGRESS**。
+
+- 固定版本在 `thread/start.environments=[]` 时只发送冻结 Ready dynamic tools；其 `thread/resume` schema 不含
+  `environments`，恢复后 app-server 重新选择本地环境，Provider 请求额外出现 `exec_command`、`write_stdin`、
+  `view_image`。dynamic tools 本身已完整恢复，漂移来自 environment selection，不是资源、压缩或工具快照丢失。
+- 同一固定 schema 的 `TurnStartParams.environments` 明确允许空数组，并定义为空数组时关闭当前及后续轮 environment access。
+  因此 host 必须在每个 `turn/start` 固定重申 `environments=[]`，不能只依赖 thread 创建时的 sticky 值。
+- typed client 与 builder 把空环境加入 exact outbound 合同；缺失、非空或 caller override 必须在 child stdin 前失败。网关仍
+  精确比较完整工具面，不删除工具、不接受子集，也不修改 Codex 二进制。
+- 真实 pinned app-server 回归必须覆盖“重启后再发 product”，并断言 Provider 只收到冻结 Ready 工具。旧测试只做到
+  重启后 read/resume 再 archive，遗漏了真正失败边界。
+- 失败证据与请求摘要见
+  `docs/superpowers/audits/2026-08-08-codex-runtime-e5-resume-environment-regression.md`。任何源码变化后仍须重新完成
+  build、0-request preflight、独立复审和同源码真实三连，旧样本不能计入最终次数。
+
+## 0.13 E5 Provider 失败收尾回归修正（2026-08-08）
+
+第三个真实 manual+restart 样本在压缩后 product turn 遇到一次上游 HTTP 525。Gateway 没有重试，
+但 Ready 已持久化的 native failed terminal 因运行中任务投影被错误降级为 `short_task` 而无法完成严格收尾，
+随后重试错误被静默吞掉，导致 Main 一直报告 run active。E5 仍为 **IN PROGRESS**。
+
+- Codex `started` 投影现在显式携带已录取的 `direct_answer/system`，不再触发投影同步的
+  `short_task` 默认值；失败 closeout 的 scope/run/binding/status/task-type CAS 未放宽。
+- native failed/interrupted 在上下文仍为默认 `done` 提示时，分别收窄为 `blocked_external` 和
+  `cancelled_runtime`；显式非 `done` 提示保留。
+- failed native thread 仍按固定 history-publication parity 合同走 `publication_diverged` 退役，未因本次修正
+  放宽为 same-thread continuation。
+- closeout observer 对同一错误只记录一次可检索诊断，仍必须等持久化 closeout 读回才允许终止。
+- 详细证据见
+  `docs/superpowers/audits/2026-08-08-codex-runtime-e5-provider-failure-closeout-regression.md`。当前源码已通过完整 E4、
+  native、build、automatic replay 与有效 0-request preflight；独立复审已 PASS 且 P0/P1/P2 均为 0。由于复审记录改变了
+  源码清单，仍须对最终清单重新 build 并完成一次 0-request preflight；通过后才允许恰好一次同源码
+  manual+restart 真实样本。
+
+## 0.14 E5 真实失败收尾验证与外部阻塞（2026-08-08）
+
+最终同源码 0-request preflight 通过后，唯一授权的 manual+restart 样本
+`d59782d9092a39ea183817f1ec34f74e70559c29` 在第一个 product request 遇到上游 HTTP 502。它只产生一次
+外部请求，没有自动重试，也没有进入 manual compaction 或 restart recall，因此不计入 E5 PASS。
+
+- 本地修正已被这条真实失败路径验证：engine terminal、publication receipt 和 product closeout 在 14ms 内依次持久化；
+  projection 保持 `direct_answer` 并转为 failed；run 转为 `error/blocked_external`。
+- 旧 native thread 按合同退役为 `publication_diverged`，0 canonical assistant message、0 剩余 dispatch fence，应用正常退出且进程树归零。
+- 该样本可计为“Provider 失败收尾修正”的真实验证，但不可计为 manual+restart 功能验收。
+- E5 仍因外部成功样本缺失而未通过；根据 phase advance rule，E6 不得开工。不允许静默再次付费重试；
+  新样本需显式授权，并在当时最终源码上重新 build 与 0-request preflight。
+
+## 0.15 E5 成功终态可见性竞态修正（2026-08-08）
+
+用户授权的新样本 `7f2ee21ba200c7d863e3a329b99da424749ec7d2` 已证明上游恢复：压缩前 product、manual
+compaction、压缩后 product 三个请求均成功且没有自动重试。但样本在重启前停止，因此 E5 仍为 **IN PROGRESS**。
+
+- 两轮 canonical assistant 和 `done/done` run metadata 均已持久化；失败来自 Renderer 在 canonical message
+  对账完成前被成功 scope event / send-success 旁路提前解锁，验收器在空 transient placeholder 窗口取样。
+- 成功 scope event 现在只记录终态，不再解锁；stream-done 或 send-success 先完成 canonical 对账，再解锁。
+  两条成功路径并发时仍只保留一个 canonical assistant message。
+- error、cancelled 和 manual suspend 继续按各自终态立即释放，不用固定延时掩盖竞态。
+- E5 runner 失败报告新增脱敏 message identity/type/content-length/meta-key 证据，避免未来只能靠旁证还原瞬时状态。
+- 完整旧门禁同时发现 Codex ingress 不应取得通用 run-meta repository。现已收窄为 host 侧专用 active-row 创建，
+  强制 `running` 且 `initiator=null`；terminal 写入仍只走 finalizer funnel。
+- 详细证据见
+  `docs/superpowers/audits/2026-08-08-codex-runtime-e5-renderer-canonical-visibility-regression.md`。必须在最终源码上
+  重新 build 和完成 0-request preflight，之后仍需一次显式授权的 same-source manual+restart 样本；禁止自动付费重试，
+  E5 通过前 E6 继续关闭。
+
+## 0.16 E5 完成结论（2026-08-08）
+
+最终同源码 manual+restart 样本 `7238a027935f5b60b42eb6cea83770d7d7c899ee` 已通过，E5 结论为 **PASS，允许进入 E6**。
+
+- Gateway 恰好产生 4 次请求，顺序为 product、manual compaction、product、sidecar restart 后 product；没有自动重试。
+- manual compaction 工具面为空；三个 product turn 使用同一冻结工具面，且同一 Ready conversation、Codex thread 与两个代号在
+  restart 后完整找回。
+- 旧 sidecar 进程树先归零，再产生新 process lease；新连接严格完成 `thread/read -> thread/resume` 后才开始 recall turn。
+- 三个 product run 均唯一完成并持有 canonical assistant、publication 与 terminal receipt；源 Ready 数据库 main/WAL 运行前后摘要一致。
+- 应用正常退出，无强制关闭，隔离进程树最终为零。独立攻击性复审 PASS，P0/P1/P2 均为 0。
+- 正式证据见 `docs/superpowers/audits/2026-08-08-codex-runtime-e5-report.json` 与
+  `docs/superpowers/audits/2026-08-08-codex-runtime-e5-completion-report.md`；此前失败报告全部保留为历史证据。
 
 ## 1. 开工假设与不确定项
 
@@ -994,6 +1171,8 @@ codex_manual_compaction_bindings
   thread_binding_id LOGICAL_PARENT
   codex_thread_id
   codex_compaction_turn_id NULLABLE_UNTIL_OBSERVED
+  notification_context_compaction_item_id NULLABLE  # item/completed namespace; live observation only
+  context_compaction_item_id NULLABLE                # canonical thread/read namespace
   codex_model_provider_id                # fixed ready_gateway
   codex_model
   upstream_profile_snapshot_ref
@@ -1278,7 +1457,7 @@ orphan-insert/update/restart 测试证明关闭失败。任一直接 SQL 写者�
    body digest 必须相等；finalizer 不得改写正文。
 5. 旧 turn 的迟到事件不能覆盖新 run。
 6. Codex call binding 只能引用 Ready receipt，不得自行宣布 action success/effect_unknown。
-7. automatic `contextCompaction` item 属于其 active product turn，但只进入 native-compaction observer；manual
+7. automatic `contextCompaction` item 若出现则属于其 active product turn，但只进入非权威 native-compaction observer；manual
    compaction 的 item/terminal 只进入 manual controller。两者都产生 0 candidate、0 projection terminal、0 finalizer
    call、0 canonical message；automatic compaction 所在 product turn 的最终 terminal仍按 product binding 进入 Ready
    closeout。
@@ -1288,8 +1467,10 @@ orphan-insert/update/restart 测试证明关闭失败。任一直接 SQL 写者�
 1. `item/started`/`item/completed` 提供 `itemId + agentMessage.phase`；delta 只按 `itemId` 归并。phase 只能是
    `commentary | final_answer | null`。未知值关闭失败。
 2. `phase=commentary` 只可投影为临时进度，永不进入 candidate/canonical body。
-3. 若成功 turn 恰好有一个 completed `phase=final_answer`，选它的 completed `text`；多个 explicit final 关闭失败。
-   null-phase item 只可出现在该 explicit final 之前，之后再出现 null agentMessage 视为顺序违规。
+3. Codex 的 Chat Completions 转换层无法在文字先于 tool call 到达时预知 `finish_reason=tool_calls`，因此后续又出现
+   dynamic tool call 的 `phase=final_answer` 只算 pre-tool preamble，不是 terminal candidate。最后一个 tool call 之后若
+   恰好有一个 completed `phase=final_answer`，选它的 completed `text`；该位置出现多个 explicit final 关闭失败。
+   null-phase item 只可出现在该 terminal explicit final 之前，之后再出现 null agentMessage 视为顺序违规。
 4. 若 pinned release 在该 turn 没有 explicit final，则启用 manifest 中的 legacy-null fallback：选择**最后一个工具结果
    之后、turn terminal 之前的最后一个 completed null-phase agentMessage**。此前的 null item 只作 working message；没有
    合法候选则失败。E0 必须用 direct、multi-tool、interrupt fixture 证明这个固定规则；不按文字相似度猜测。
@@ -1303,6 +1484,10 @@ orphan-insert/update/restart 测试证明关闭失败。任一直接 SQL 写者�
    canonical/持久写入，必须为 0。
 7. interrupted/failed turn 不接受 final body；任何已显示 provisional delta 必须清掉，再由 Ready 写独立 typed product
    outcome。Ready 不把 commentary、被排除的 null item 或 partial delta 拼成替代回答。
+8. interrupted/failed 的原生 readback 若省略已录取工具调用，只允许两类确定性收口：未到 Ready host 的调用可按
+   pre-host abandonment 关闭；已绑定调用必须逐项证明 Ready action receipt 已 confirmed 或已 proven_absent，且完整冻结身份、
+   result/receipt 或 absence evidence 均一致，随后按 `publication_diverged` 退役旧 thread。pending/indeterminate 继续关闭失败；
+   completed terminal 不适用任何省略豁免，也不得发布正文或重放动作。
 
 若 Codex 已完成 final agentMessage，但 Ready 因 Browser/action receipt、proof 或目标 readback 不足而拒绝发布，Codex
 history 已经包含该正文，Ready UI history 却没有；该分叉不能被忽略。最小试验写死：
@@ -1312,8 +1497,8 @@ history 已经包含该正文，Ready UI history 却没有；该分叉不能被�
    第六种 thread status；
 2. 被拒绝的 Codex 正文不写 canonical assistant message，Ready 也不生成替代正文；该旧 thread 不再接受 follow-up、
    active-turn input、manual compact 或 resume-for-product-use；
-3. UI 保留审计状态并要求用户显式开始新 conversation alias/root thread。不得自动重播原用户消息或把旧历史注入新
-   thread；其他独立 thread 不受影响；
+3. UI 保留审计状态；用户下一条真实输入可在同一 Ready conversation alias 下显式开启空的新 generation/root thread。
+   不得自动重播原用户消息或把旧历史注入新 thread；其他独立 thread 不受影响；
 4. 本 POC 不开放 deprecated `thread/rollback`、raw item inject 或 Ready history replay 来“修齐”两边。未来只有另立合同
    证明 native rollback 到最后一条已发布 turn 的 exact readback/identity 后，才可讨论原 thread 复用。
 
@@ -1452,7 +1637,9 @@ Codex 使用 Ready 专属、预先创建的状态目录，位于实验 profile �
 resource/tool bridge 输入，防止 app-server 自动发现项目 `AGENTS.md`、skills 或本地文件。
 
 `thread/start/resume` 返回的 `instructionSources` 必须为空（不计 Codex 二进制自身的 native base）；任何从 cwd 祖先、
-用户 HOME 或 Ready 仓库发现的 `AGENTS.md`/instruction file 都阻断 S0。唯一 Ready overlay 只能来自 §7.4 版本化常量。
+用户 HOME 或 Ready 仓库发现的 `AGENTS.md`/instruction file 都阻断 S0。Ready developer overlay 只能来自 §7.4 的
+版本化宿主常量，以及首次创建 thread 时与冻结工具面同源、由 instruction digest 精确绑定的已选
+reference/advisory skill 方法正文；不得从 cwd、HOME、资源正文或历史重放发现。
 
 ### 7.4 进程合同
 
@@ -1525,6 +1712,7 @@ thread/start.environments = []
 thread/start.dynamicTools = exact ReadyToolSurface.tools  # bound by toolSurfaceDigest
 thread/start.baseInstructions = omitted       # field absent; preserve pinned Codex native base instructions
 thread/start.developerInstructions = minimal Ready host/tool/safety adapter contract
+                                   + exact selected reference/advisory SKILL.md methodology when the frozen surface selects one
 thread/start.personality = omitted
 thread/start.multiAgentMode = omitted
 turn/start.collaborationMode = omitted
@@ -1539,8 +1727,11 @@ config.<all schema-listed auto-compact threshold override fields> = unset
 开启 `experimentalApi` 不代表允许其他实验能力，任何非 allowlist server request/item 仍按协议违规处理。
 
 Ready 当前完整 `prepared.systemPrompt` 含旧 Agent 编排、人格、历史、memory、compaction 和 workflow 提醒，不能进入
-Codex live path。E0 先做 instruction census，最终 overlay 只允许“Ready dynamic tools 由宿主提供”“外部动作以工具
-回执为准”“不得虚构动作完成”三类固定产品边界；Provider identity 走协议配置，资源非语义版本引用走原生
+Codex live path。E0 先做 instruction census，固定宿主 overlay 只允许“Ready dynamic tools 由宿主提供”“外部动作以工具
+回执为准”“不得虚构动作完成”三类产品边界。首次创建 thread 时，如果 live authorization 与冻结工具面已经选中
+reference/advisory skill，允许在固定宿主 overlay 后附加同一技能 snapshot 的 capped `SKILL.md` 方法正文；正文、技能身份、
+截断状态与 native base 共同进入 `instruction_contract_digest`，恢复未启动 thread 时必须重算一致。该方法正文只随 thread
+创建一次，不是 per-turn system，不得用来承载资源事实、用户历史、memory、workflow 或权限扩张。Provider identity 走协议配置，资源非语义版本引用走原生
 `additionalContext`，资源正文走当前授权的只读 Ready tool，用户显式角色要求留在用户消息。Ready 旧 multi-agent/
 Dynamic Delivery/旧压缩/旧 SDK loop 指令全部剔除，Codex native base instructions、native compact prompt 与 native
 automatic threshold 保持原样。
@@ -1565,7 +1756,7 @@ JSON 序列化前失败，child stdin 新增字节必须为 0。
 | `thread/read` | 已绑定或正在 reconciliation 的精确 thread id；read mode/includeTurns 取固定常量 | 任意路径、config、permissions、跨 profile id |
 | `thread/resume` | 已绑定 thread id；固定 schema 若要求可重申隔离 sandbox/cwd/approval，则只能取原 manifest 值 | history 注入、path/config/permissions/environment/workspace roots 放宽、provider/model 偷换 |
 | `thread/archive` | 仅 supervisor；精确已退役或已证明 orphan 的 root thread id、无 active dispatch fence、pending call/receipt/unresolved start tombstone，并由 ancestor/parent list 证明 descendant=0，具名 cleanup reason；reconciled late-response guard保留并继续校验 | active/current/有 descendant/unresolved start identity 的 thread、Renderer/模型调用、批量/通配 archive |
-| `turn/start` | 已绑定 thread id、唯一 clientUserMessageId、已验证 tagged union 的 `CodexTurnInputBuilder` input/签名 additionalContext，以及 host 构造的 exact 4-key `responsesapiClientMetadata={readyRunId,toolSurfaceDigest,turnContractDigest,upstreamProfileSnapshotDigest}`；model/provider/route 一律继承 thread | ingress union 混搭、model/provider/serviceTier/effort/summary/personality override、history/base/developer/compact prompt、cwd/env/root、sandbox/approval/permission/config/collaboration override、caller metadata、额外/保留 metadata key |
+| `turn/start` | 已绑定 thread id、唯一 clientUserMessageId、host 固定 `environments=[]`、已验证 tagged union 的 `CodexTurnInputBuilder` input/签名 additionalContext，以及 host 构造的 exact 4-key `responsesapiClientMetadata={readyRunId,toolSurfaceDigest,turnContractDigest,upstreamProfileSnapshotDigest}`；model/provider/route 一律继承 thread | ingress union 混搭、model/provider/serviceTier/effort/summary/personality override、history/base/developer/compact prompt、非空或 caller 提供的 env、cwd/root、sandbox/approval/permission/config/collaboration override、caller metadata、额外/保留 metadata key |
 | `turn/interrupt` | 当前 active thread/turn id 与 host abort reason enum | 任意 target、配置或附带输入 |
 | `thread/compact/start` | idle manual binding 对应的精确 thread id；无 prompt/model/tool override | active turn、任意 compact prompt/threshold/model/tools/context |
 
@@ -1602,7 +1793,7 @@ item/completed
 turn/interrupt
 turn/completed(completed/interrupted/failed)
 second turn with changed non-semantic resource reference, retained old native history, current-version tool receipt, and no Ready history replay
-native automatic compaction -> contextCompaction item/completed -> product turn continues -> thread/read
+native automatic compaction -> Gateway compact response -> successor product request/response -> thread/read
 manual binding -> thread/compact/start -> contextCompaction item/completed -> compaction turn/completed -> thread/read
 process restart -> thread/read -> thread/resume
 ```
@@ -1697,6 +1888,7 @@ Tool Bridge 在执行前必须同时核对：
 - active owner；
 - thread-level tool surface digest 与 run-level turn contract digest；
 - tool 名与 schema；
+- Skill 的当前目录内容、manifest、action runtime/entry/baseArgs 与依赖声明摘要；
 - Skill authorization；
 - Browser target/lease/document token 等域内合同；
 - abort signal 与截止时间。
@@ -1717,6 +1909,10 @@ Ready `ToolExecutionOutput` 映射为 Codex dynamic tool response：
 | audio content | `inputAudio` data URL |
 | artifact path | 先经 Ready 资源层读取/授权，再转内容或引用；不裸露主机路径 |
 | interaction waiting | 继续走 Ready confirmation/ask-user 机制，不伪造 tool success |
+
+会产生 `framePatch` 或 `contextModifier` 的技能工具，在 Codex Tool Bridge 尚未接入与 SDK 相同的状态消费者前属于
+typed unsupported，必须在 thread 工具面冻结前拒绝；不得先执行再静默丢弃状态。普通 `projectionPatch` 只作为经递归
+脱敏的模型可见结果，不获得状态写入权威。
 
 Tool call 只有一个 terminal response。断线发生在外部动作后、Codex 收到结果前时：
 
@@ -1933,8 +2129,8 @@ sequenceDiagram
 ### 10.2 事件投影
 
 app-server notification router 必须在广播前按 `(threadId, turnId, itemType)` 做互斥分类：普通 product item/terminal 只
-命中 active product turn binding；automatic `contextCompaction` item 命中该 active turn，但只进入 native-compaction
-observer；manual compaction item/terminal 只命中 active `codex_manual_compaction_bindings`，已 abandoned 的旧 identity 只
+命中 active product turn binding；automatic `contextCompaction` item 若出现则命中该 active turn，但只进入非权威
+native-compaction observer；manual compaction item/terminal 只命中 active `codex_manual_compaction_bindings`，已 abandoned 的旧 identity 只
 命中 quarantine observer。automatic path 没有 Ready lease，
 也不从 product binding 分裂出第二个 operation。任一 identity/event-order 不匹配，或 manual/product 两边同时命中或都不
 命中，都按 typed protocol identity error 关闭失败。
@@ -1960,7 +2156,7 @@ Renderer 不解析 Codex JSON，不持有 thread/turn 真值。Codex delta 不�
 canonical writer，防止“先展示、后判失败”。Ready 旧 Dynamic Delivery/worker verifier 不在 live graph。
 
 任何 `contextCompaction` item、manual/quarantined compaction turn 的 terminal、deprecated notification都不得进入上表，不得
-emit output/status/toolAction，不得形成 `CoreTurnCandidate`。automatic item 仅由 native observer 消费，manual item/terminal
+emit output/status/toolAction，不得形成 `CoreTurnCandidate`。automatic item 若出现仅由非权威 native observer 消费，manual item/terminal
 仅由 §10.6 controller 消费。automatic compaction 所在 product turn 的最终 terminal仍按上表处理，但 compact item 本身
 必须保持 0 candidate/0 projection。
 
@@ -2032,13 +2228,13 @@ Codex 自己决定何时压缩、压缩什么、如何总结以及如何把摘�
    fixture 触发临界点，但不得改写 compact prompt/summary 算法、production threshold 或 collaboration mode。
 2. automatic compaction 是 active Codex product turn 的内部步骤，不创建 Ready lease、binding、Task/Run、额外 dispatch
    fence 或 host operation。它直接继承该 Codex thread/turn 的 provider/model、credential ref、retry 与工具安全合同。
-3. E0 从固定候选二进制真实捕获 compact wire signature、thread/turn correlation、`contextCompaction` item 顺序、工具面
-   与后续 `thread/read`。Gateway 用这组固定证据把 compact request 与同一 active turn 唯一关联，并只允许实测的空工具
-   形状和非动作响应；Ready 不预先调度、授权、触发或总结它。若安全 identity/history 无法稳定验证则试验 FAIL，但
+3. 固定候选二进制真实捕获 compact wire signature、thread/turn correlation、空工具面、Gateway 请求/成功响应顺序与
+   后继 product 请求/成功响应。Gateway 用不可改写的 exchange ledger 把 automatic request 与同一 active turn 唯一关联，
+   并证明后继输入已经采用压缩后上下文；Ready 不预先调度、授权、触发或总结它。若安全 identity/history 无法稳定验证则试验 FAIL，但
    “无法预建 Ready auto lease”不是失败条件，也不得用禁掉 automatic compaction 过关。
-4. `contextCompaction` item 只进入 native observer，不成为 output/status/toolAction/projection/candidate。product
-   `turn/completed` 仍属于原 Ready run并进入正常 closeout；closeout 前只需 thread readback 核对 native compact 已进入
-   Codex history，不存在 consume Ready auto lease 的步骤。
+4. `contextCompaction` item/notification/readback 只进入被动 observer，不成为完成权威，也不成为
+   output/status/toolAction/projection/candidate。product `turn/completed` 仍属于原 Ready run并进入正常 closeout；closeout
+   前由 exchange ledger 核对 automatic response 与后继 product request/response，不存在 consume Ready auto lease 的步骤。
 
 #### B. Idle thread manual compaction
 
@@ -2048,10 +2244,16 @@ Codex 自己决定何时压缩、压缩什么、如何总结以及如何把摘�
    digest 与 runtime/schema digest；它只做调用/crash 身份，不决定摘要。
 2. Ready 调用只含 `threadId` 的 `thread/compact/start`。Gateway 通过固定版本真实 reserved `thread_id/turn_id`
    metadata 命中 manual binding并 CAS 绑定 compaction turn；同一 turn 的受控 Provider retry 可复用，第二个 turn不得复用。
-3. 权威完成必须同时观察同一 thread/turn 的 `contextCompaction item/completed` 与 manual compaction
-   `turn/completed` terminal，再 thread readback；`consumed_at + consume evidence + owner/revision dispatch-fence release` 必须在
-   同一个 SQLite transaction CAS。transaction 前崩溃仍归 `manual_compaction_pending` 并幂等重试，transaction 后直接 idle；
-   不存在“manual 已 consumed、fence release pending”的合法状态。deprecated `thread/compacted` 仅记日志。
+3. dispatch intent、子进程写入 attempted/confirmed、RPC response/timeout/connection-close 先在 transport 边界持久化。
+   权威完成必须同时存在同一 thread/turn 的精确非动作 compaction item、`turn/completed` terminal、Gateway 成功响应与
+   thread readback；`consumed_at + consume evidence + owner/revision dispatch-fence release` 必须在同一个 SQLite transaction
+   CAS。只有持久证据证明 child write 未尝试时才可在同一 binding 重试；可能已写入但未完成的情况一律 unknown 且不重发。
+   transaction 后直接 idle，不存在“manual 已 consumed、fence release pending”的合法状态。deprecated `thread/compacted` 仅记日志。
+   固定版本的实时 `item/completed` item id 与 `thread/read` 重建 item id 属于不同命名域，不能要求相等。Ready 以精确
+   thread id + turn id + 唯一非动作 `contextCompaction` + completed terminal + Gateway 成功响应完成关联；实时通知 id 若被
+   观察到则作为独立、不可变的审计字段保存，公开结果与恢复权威使用 `thread/read` item id。丢失实时通知的 crash recovery
+   可以把通知 id 留空，但仍必须满足其余全部完成证据。实时通知、terminal 或 readback 出现歧义时必须先把 binding
+   持久化为 unknown 并保留 fence，不能只向调用方返回 unknown、却把数据库留在貌似可继续的 pending 状态。
 
 两条路径共同遵守：
 
@@ -2059,8 +2261,8 @@ Codex 自己决定何时压缩、压缩什么、如何总结以及如何把摘�
   前失败。
 - compaction 不创建 Ready Task/Run、不写用户消息、projection、candidate 或 canonical final，也不触发
   `finalizeRunOutcome()`。
-- sidecar/Main crash 后，automatic path 按原 active product turn reconciliation + thread readback 裁决；manual path按
-  manual binding + thread readback 判断“完成 / 明确未开始 / 不明”。不明则 `compaction_state_unknown` 阻断该 alias
+- sidecar/Main crash 后，automatic path 按原 active product turn reconciliation + Gateway exchange ledger + thread readback
+  裁决；manual path按 transport attempt + manual binding + Gateway response + thread readback 判断“完成 / 明确未开始 / 不明”。不明则 `compaction_state_unknown` 阻断该 alias
   generation，不能猜成功。
 - manual compaction 持有 thread dispatch fence 时，同一 thread 的 ingress/第二个 manual compact 返回 busy；不同 thread
   仍可原生并行。automatic compaction 属于已有 product turn，不额外阻塞其他 thread。
@@ -2080,7 +2282,7 @@ drain/restart：
 如果固定版本无法把未知 manual compact 的 late events 隔离到旧 thread identity，manual recovery 这一能力 FAIL/BLOCKED；
 不能牺牲其他 Codex thread 的原生独立性作为正常 escape path。
 
-若固定版本的 automatic/manual identity、Provider routing、空工具请求、item/turn 顺序、native summary 或 readback 任一
+若固定版本的 automatic/manual identity、Provider routing、空工具请求、automatic Gateway exchange 顺序、manual item/turn 顺序、native summary 或 readback 任一
 无法稳定证明，
 S0.5 与整个试验 FAIL。
 
@@ -2099,7 +2301,7 @@ S0.5 与整个试验 FAIL。
 
 证明：
 
-- Codex native base instructions 未被 Ready 覆盖；只附加最小 Ready host/tool/safety contract；
+- Codex native base instructions 未被 Ready 覆盖；无技能的 S0 只附加最小 Ready host/tool/safety contract；
 - 固定候选二进制对同一 S0 输入的 native base prefix/hash 与未接 Ready 的控制样本一致；所有 Codex/compact instruction
   override 字段均 absent；
 - Ready 用户消息 -> Codex -> Gateway -> Ready finalizer；
@@ -2113,13 +2315,14 @@ S0.5 与整个试验 FAIL。
 1. 同一 thread 完成多轮消息，并在 Ready conversation store 保留完整用户可见历史；每轮 Provider input 逐 item
    证明当前消息与 Codex 既有历史各一次，Ready PromptAssembly/history/persona/memory/summary 注入均为 0。
 2. 受控长上下文让固定 Codex 版本在 product turn 内真实触发 automatic compaction；证明 active native turn -> 同一
-   thread/provider/model routing -> 实测 compact wire/`tools=[]` -> `contextCompaction item/completed` -> 原 product turn
-   继续并由正常 Ready closeout 完成。Ready 不创建 auto lease，不改 native threshold/prompt/summary。
+   thread/provider/model routing -> 实测 compact wire/`tools=[]` -> compact Gateway success -> 后继 product request 使用缩短后
+   上下文 -> product success/Ready closeout。Ready 不创建 auto lease，不改 native threshold/prompt/summary；
+   `contextCompaction` item 只作被动观察。
 3. 无 active turn 时再验证 manual path：durable manual binding -> `thread/compact/start` -> 同一 turn 的
    `contextCompaction item/completed` + terminal `turn/completed` -> readback/consume。active turn 中 manual compact
    必须被拒绝且不破坏当前 turn；deprecated `thread/compacted` 不参与判定。
-4. 两种路径的 `thread/read` 都证明 compact item/summary 只出现一次；下一轮 Provider 请求只包含压缩后的上下文与
-   压缩后新增轮次，不重复已被替代的原始上下文。
+4. automatic 由 Gateway exchange ledger 证明后继 Provider 请求只包含压缩后的上下文与压缩后新增轮次，不重复已被
+   替代的最大原始输入；manual 由精确 turn/item/Gateway response/thread readback 证明一次完成。
 5. kill/restart sidecar，`thread/read -> thread/resume` 后再次追问压缩前后各一个 sentinel，回答和请求 transcript 都
    证明上下文连续。
 6. Ready canonical conversation、Task/Run/projection 不被 Codex 内部压缩删改；compaction item 不产生用户可见 final。
@@ -2437,10 +2640,16 @@ history-publication parity/readback 与 non-user continuation gate；所有调�
 4. live-resolved Document read 竖切；完整 floor 保留，实际调用仅 read。
 5. app/Renderer reload、interrupt、late event 故障注入。
 
-退出：S0/S0.5/S1 各连续 3 次通过，同一 build/source/schema/thread-surface digest；逐轮 turn digest 可变且可读回；
+退出：S0、S0.5 manual+restart、S1 各连续 3 次通过，同一 build/source/schema digest；同一 slice 内
+thread-surface digest 固定，跨 slice 允许由合法 capability floor 产生不同 surface。automatic 子门由 §0.9 固定的“阈值以下 +
+真实触发”边界对照一次性满足，并在最终源码上无成本重放，不要求第三次高成本真实调用。逐轮 turn digest 可变且可读回；
 无 Codex 额外工具、历史丢失/重复、重复 final 或状态分裂。
 
 ### E6. S2 + S2.5：Feishu typed read 与 Lark CLI
+
+#### 全阶段最简状态原则（Owner，2026-08-10）
+
+阶段目标只验证 Ready 是否把 Codex 内核正确接到用户真实入口，并让内核按预期完成任务。只要普通用户路径能够完成目标、必要确认有效、结果可直接读回且退出后无本阶段进程残留，就视为满足；不得为了证明已经发生的事实再叠加独立 runner、复制状态机、关系账本或额外证据外壳。只有真实运行证明 Codex 内核本身无法完成目标时，才允许增加最小的宿主实现，并以该失败为修改依据。
 
 实施：
 
@@ -2452,7 +2661,41 @@ history-publication parity/readback 与 non-user continuation gate；所有调�
 
 退出：typed 与 CLI 各连续 3 次通过；CLI 不可用/未认证/拒绝三条失败路径诚实收口。
 
+#### E6 当前结论（2026-08-08）
+
+E6 本地实现、失败语义、精确资源授权、必需方法冻结、证据封存、并发构建租约与防伪造晋级门已通过完整本地验证。当前 Lark CLI 已认证，且已用一份 direct Docx 验证真实读取能力；但 Ready 数据库仍没有已启用的 `feishu-app` 通道，也未准备 E6 所需的两份相互独立验收文档。因此 typed 与 CLI 各连续 3 次真实成功的退出条件仍然无法执行，E6 结论为 **BLOCKED**，不允许进入 E7。
+
+恢复条件是：在 Ready 中配置一条已启用、能读文档 A 的飞书应用通道，文档 A 只包含一条唯一 `ANSWER=<sentinel A>`；另准备一份当前 Lark 用户可直读的 direct Docx 文档 B，只包含一条不同的 `ANSWER=<sentinel B>`，且输入 Docx token 必须等于返回的 `document_id`。恢复后从 E6 真实 3+3 读取门重跑，不从 E7 继续。持久证据见 `docs/superpowers/audits/2026-08-08-codex-runtime-e6-blocked-report.md`。
+
+#### E6 用户场景验收修订（2026-08-09）
+
+Owner 后续明确要求 E6 改用开发中 Ready 的真实用户路径，不再为了旧 3+3 方案配置独立 `feishu-app` 通道，也不允许用安装版、调试菜单、测试 harness 或数据库注入代替普通 Agent 对话。旧阻塞报告保留为“旧双通道验收路线未执行”的历史证据，不改写成通过；本修订取代它作为 E6 当前退出条件。
+
+当前唯一真实任务是从开发版 Ready 的普通 Agent 输入框发送：
+
+> 用飞书 cli 读一下我名为 测试 0807 的文档，随便新增一列内容并填写一些内容，然后再在我的 第二季度工作总结 文档里润色一下
+
+执行与验收边界：
+
+1. Ready 必须由当前工作树启动，并使用隔离用户数据目录；不得打开已安装版 Ready。
+2. 普通 Agent 语义选择必须绑定内置 `lark-cli` Skill 和冻结的全局原生 CLI，不得启用通用 shell、Browser 回退或 `channel_feishu` 旁路。
+3. 若当前用户尚未授权，必须由 Agent 发起最小文档权限授权；Ready 内确认卡可按 owner 授权点击。二维码、Passkey、验证码、系统解锁或二次验证只能由 owner 完成。
+4. 每个真实写入必须经过 Ready 的代码侧行动确认；确认只能释放已冻结的当前调用，不能放开后续写入。
+5. Sheet A 必须先读后写，新增一列并写入非空内容；Docx B 必须先读后润色。两项写入都要用同一 CLI 身份做独立读回，证明目标身份、版本或修订已变化且结果存在。
+6. 永久证据只保留源码身份、运行身份、工具名、确认回执、资源引用摘要、前后版本/内容摘要、结果摘要和清理状态；不得保留正文、授权码、Cookie、Token 或凭据。
+7. E6 必须同时满足完整机器门禁、对抗复审无 P0/P1/P2、真实普通对话成功、两项外部写入独立读回和零孤儿进程，才可改为 PASS 并进入 E7。
+
+截至 2026-08-09，macOS 已解锁，开发版 Ready 已从当前工作树和隔离用户数据目录启动，固定任务也已从普通 Agent 输入框发送。首次有效模型回合暴露 `expected_outputs=[]` 与 Ready 工具参数合同不一致，现已收窄为与省略字段等价并加入回归；后续普通对话请求在任何工具或外部写入前由模型上游返回“服务暂时不可用”，设置页的独立模型连接测试也失败。完整 E6 机器门禁、类型检查、生产构建、原生依赖检查和原生恢复组合测试均通过，但两项飞书写入与独立读回仍未发生。当前结论继续为 **BLOCKED**，failure code 为 `upstream_model_unavailable`，且 E7–E9 不得提前开始。当前恢复证据见 `docs/superpowers/audits/2026-08-09-codex-runtime-e6-user-scenario-resume.md`。
+
+2026-08-10 续跑时，上游已恢复；普通 Agent 正确选择内置 Lark CLI、读取两项目标资源、展示并取得 Ready 写入确认。电子表格写入预检通过，云文档预检真实返回缺少 `docx:document:write_only`，所以 0 外部写入。Ready 只从 stdout 读取授权缺口的根因已修为严格接受单一 stderr 缺权证据，完整 E6 门禁与独立对抗复审再次通过。重建后的旧原生会话因冻结工具范围变化而在持久化前安全拒绝三次续问，下一次必须从当前版本新建普通对话；Mac 当前锁屏，尚不能执行该新对话。E6 仍为 **BLOCKED**，E7–E9 继续关闭。
+
+2026-08-10 最终恢复从当前工作树的开发版 Ready、隔离用户数据目录和普通 Agent 输入框完成。两个连续运行都显式选择内置 `lark-cli` Skill，并冻结为同一工具面；Sheet H1 从 revision 44 经一次非覆盖写入到 revision 45，Docx 从 revision 5 经追加与只针对新增段落的格式修正到 revision 7。三项真实写入均取得独立 Ready 确认，随后由同一 CLI 身份分别读回；两个运行均唯一成功终结且发布回执闭合。退出开发版后 Electron、Codex app-server 与 sidecar 进程均为 0，隔离 profile 已删除。但复审确认旧晋级文件只是一份可手写摘要，不能把确认卡、真实动作、读回和运行身份绑定成不可替换证据；旧证据因此撤销为历史观察，不作为阶段通过依据。当前正在用同一普通用户场景重跑强证据外壳；在该证据、完整门禁与复审全部通过前，E6 结论为 **BLOCKED**，E7–E9 继续关闭。
+
+2026-08-10 按 Owner 的最简状态原则重新验收：从当前工作树的开发版 Ready 普通输入框发送原始自然语言任务，Codex 内核自行选择内置 `lark-cli`。表格写入在代码侧确认后落到 `V1:V2`，独立回读为“测试备注 / 已由 Ready 添加”，revision 为 47；文档写入在代码侧确认后把“系统可用约 30 秒生成”润色为“系统可在约 30 秒内生成”，独立回读 revision 为 8。全过程未使用 Browser、通用 shell 或飞书旁路；最后一次文档运行唯一成功终结。开发版测试进程已退出，未留下该隔离运行的 Electron、app-server 或 sidecar。额外强证据 runner 不再是通过条件，E6 结论改为 **PASS**，允许进入 E7。
+
 ### E7. S3：Browser observe + mutation
+
+2026-08-10 按 Owner 的最简状态原则完成真实验收：开发版 Ready 用隔离数据目录隐藏启动，普通 Agent 输入先读到本地测试页计数 0，再通过后台表单输入与提交把计数改为 1，最后独立读回 1并唯一成功终结（run `req-1786359302423-sotiv2`）。全程选中 Ready，没有调用截图、全局键鼠、Trae 或前台窗口。按当前验收口径，不再要求为同一能力另造 kill-seam runner 或额外证明层；E7 结论为 **PASS**，允许进入 E8。
 
 实施：
 
@@ -2467,6 +2710,10 @@ parity/readback + continuation 双门通过时才可由 successor 消费已验�
 checkpoint/effect_unknown 暂停。任何分支都不能伪称原 turn 恢复或让 counter `+2`。
 
 ### E8. 全生命周期、恢复与唯一终态收口
+
+2026-08-10 按最简状态原则复用本轮已发生的真实重启恢复，不再人为重复制造故障。Browser run `req-1786357849040-2vcr6x` 在 10:31:10 已持久化模型终态与工具回执，但产品结果尚未关闭；开发版 Ready 重启后从持久状态恢复，于 10:45:21 唯一写入最终回复。该 run 的终态消息计数和 assistant 消息计数均为 1，恢复后又有 3 个独立任务正常成功，证明没有重放外部动作、双 final 或全局封锁。E8 结论为 **PASS**，允许进入 E9。
+
+2026-08-10 E9 从当前工作树生成 Ready 0.7.5 arm64 正式 DMG。打包前发现 Codex 内核只在开发路径存在，最小修复为把固定内核、许可和校验资料接入安装包；未修改 Codex 内核。DMG 校验、应用签名、arm64 架构、内核版本与哈希均通过。挂载后的成品用隔离数据目录隐藏启动，前台始终是用户原有应用；后台读回显示 Agent 为 Ready、不是 Trae，且实际启动的 app-server 来自包内路径。通过后台正常退出后 Ready、Codex app-server 与 Python sidecar 进程均为 0。E9 结论为 **PASS**，本最小替换试验最终结论为 **PASS**。
 
 实施：
 
@@ -2695,7 +2942,7 @@ codex-runtime.e2e.ts
 | Codex live ingress 调用 PromptAssembly/Ready compactor/session recall/agent routing | gate 失败；期望调用数为 0 |
 | 第二轮显式 resource version 改变 | 旧引用与旧 tool output 可见；stale read/write 拒绝；当前 V2 read receipt 存在；候选只含 V2；Ready history replay=0 |
 | Codex base/compact prompt/production threshold/collaboration override | 字段 absent，控制样本 native base prefix/hash 不变 |
-| native automatic compact | 无 Ready lease/table；继承 active turn routing，observer 记录 item，0 product side effect |
+| native automatic compact | 无 Ready lease/table；继承 active turn routing，Gateway exchange 顺序可证；item 仅被动观察，0 product side effect |
 | 无 active turn 手动 compact | manual binding create/CAS；contextCompaction item + terminal 各一次；readback 后消费 |
 | manual terminal/readback 与 consume+fence transaction 前后 kill | commit 前保持 pending并幂等重试；commit 后 `consumed_at/evidence + fence release` 同时存在；0 consumed-with-fence |
 | active turn 手动 compact | 明确拒绝，不破坏当前 turn |
@@ -2804,7 +3051,8 @@ codex-runtime.e2e.ts
 - projection delete/rebuild；
 - commentary message 只作 progress，永不进入 canonical body；
 - direct final_answer delta 可作 provisional stream，item completed text 必须逐字相等；
-- explicit final_answer 多个/顺序违规 -> typed protocol failure；无 explicit final 时只按 pinned legacy-last-null 规则选择；
+- 最后一个 tool call 之后 explicit final_answer 多个/顺序违规 -> typed protocol failure；tool 前 preamble 不作 terminal；
+  无 terminal explicit final 时只按 pinned legacy-last-null 规则选择；
 - Browser mutation candidate 在 action receipt + 独立 readback 前不可见；
 - Ready Dynamic Delivery/child-run/session-cap live call 为 0；
 - pre-CAS dynamic-tool server request -> 0 response/0 effect；CAS 后恰好一次 call binding、execution 与 response；
@@ -2969,6 +3217,7 @@ GO 的默认门槛：
 - Codex live path 调用 Ready PromptAssembly、旧 compactor、persona/memory/history/agent routing 或 Dynamic Delivery/child-run；
 - Ready 输入与 Codex thread 在同一 Provider request 重复当前消息或历史；
 - Ready 覆盖 Codex base instructions、compact prompt、production auto threshold 或 collaboration mode；
+- 已选 reference/advisory skill 方法正文未与首轮冻结工具面及 instruction digest 同源，按轮追加/替换，或混入资源正文、历史、memory、workflow 与额外权限；
 - 为通过测试而关闭 native automatic compaction，或为 automatic compaction建立 Ready lease/第二个 operation；
 - automatic/manual compaction 无法用 native identity/manual binding/空工具面确定路由、完成、readback/resume，或造成历史丢失/重复；
 - compaction 读取漂移后的当前 Provider settings、与 product turn 并发、产生 product candidate/final，或 manual
@@ -3235,7 +3484,7 @@ start-capacity existing-thread one-slot/lazy-root two-slot all-or-none + delayed
 exit-authority matrix coverage
 all command names + exit codes + output artifact hashes
 S0-S3 (including S0.5 and S2.5) per-run session/task/thread/turn/call identities
-automatic native compaction/no-Ready-lease + manual binding/item+turn terminal/readback/restart continuity results
+automatic native compaction/no-Ready-lease/Gateway exchange + manual binding/item+turn terminal/readback/restart continuity results
 Renderer send/lifecycle click E2E: no coalescing settings/indicator/harness surface + direct send + ingress-admitted ordering + pending ask-user prose busy with 0 cancel + `/skill`/`/doc` local bypass 0 + create/reset/stop/close/manual-compact channels + shared exact result-union and pure lifecycle-snapshot evidence, including four mutually-exclusive close success dispositions, pending-start/manual-compact typed failures, no-native 0-archive, quiescent 0-finalizer, atomic product/host closeout+member+fence and manual consume+fence
 same-Ready-scope two-root concurrency: shared scope id + distinct thread/turn ids + overlapping progress timestamps + outcomes
 different-scope two-root concurrency: distinct scope/thread/turn ids + overlapping progress timestamps + outcomes
