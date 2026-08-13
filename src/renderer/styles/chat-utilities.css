@@ -27,6 +27,16 @@ html[data-skin='liquid-glass']:is([data-glass-variant='solid-green'], [data-glas
     inset 0 1px 0 rgba(255, 255, 255, 0.52);
 }
 
+.ready-chat-user-message {
+  min-width: 0;
+}
+
+.ready-chat-user-message-content {
+  width: 100%;
+  overflow-wrap: anywhere;
+  text-align: left;
+}
+
 /* Agent activity language — compact, factual and aligned with Ready's dot-matrix
    state system. Motion is reserved for work that is actually still running. */
 .ready-thinking-state {
@@ -69,7 +79,7 @@ html[data-skin='liquid-glass']:is([data-glass-variant='solid-green'], [data-glas
 
 .ready-thinking-reasoning {
   position: relative;
-  padding-left: 12px;
+  padding-left: 20px;
   color: var(--text-gray);
 }
 
@@ -77,11 +87,15 @@ html[data-skin='liquid-glass']:is([data-glass-variant='solid-green'], [data-glas
   position: absolute;
   top: 0.25em;
   bottom: 0.25em;
-  left: 0;
+  left: 5px;
   width: 1px;
   border-radius: var(--radius-full);
   background: color-mix(in srgb, var(--border-default) 84%, transparent);
   content: '';
+}
+
+.ready-task-content-line {
+  padding-left: 20px;
 }
 
 .ready-thinking-reasoning[data-ready-thinking-reasoning='running'] {

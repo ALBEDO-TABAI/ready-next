@@ -14,7 +14,7 @@ export function TaskCardFooter({
   if (!terminal && !taskKindBadge) return null
 
   return (
-    <div className="flex items-end justify-between" style={{ gap: 10 }}>
+    <div className="ready-task-content-line flex items-end justify-between" style={{ gap: 10 }}>
       <div style={{ minWidth: 0 }}>
         {terminal && !detached && taskId ? <RunFeedbackStars taskId={taskId} /> : null}
       </div>

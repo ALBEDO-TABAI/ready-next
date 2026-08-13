@@ -144,7 +144,7 @@ test('task card child-run exposes exact cancel without a retired continuation ac
   }
 })
 
-test('task card stays frameless while retaining its inset interactive header', () => {
+test('task card stays frameless while its interactive header shares the task content column', () => {
   document.documentElement.dataset.skin = 'liquid-glass'
   document.documentElement.dataset.glassVariant = 'solid-green'
   const style = document.createElement('style')
@@ -157,7 +157,7 @@ test('task card stays frameless while retaining its inset interactive header', (
     assert.equal(card?.style.borderWidth, '0px')
     assert.equal(card?.style.background, 'transparent')
     assert.equal(card ? window.getComputedStyle(card).backgroundColor : null, 'rgba(0, 0, 0, 0)')
-    assert.equal(header?.style.paddingLeft, '10px')
+    assert.equal(header?.style.paddingLeft, '0px')
   } finally {
     unmount()
     style.remove()

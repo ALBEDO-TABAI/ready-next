@@ -69,8 +69,8 @@ export function DynamicDeliveryTaskSummary({ run }: { run: TaskCardRun }) {
   return (
     <div
       data-ready-dynamic-delivery-summary="true"
-      className="t-meta"
-      style={{ padding: '0 10px 7px 31px', color: 'var(--text-light)' }}
+      className="ready-task-content-line t-meta"
+      style={{ paddingBottom: 7, color: 'var(--text-light)' }}
     >
       {run.deliveryState.packages.length > 0
         ? `协作者 ${run.deliveryState.packages.map((item) => item.binding.effectiveAgentId).join('、')}`
@@ -112,7 +112,7 @@ const CAPSULE_HEADER_STYLE: React.CSSProperties = {
 
 const TASK_CARD_HEADER_STYLE: React.CSSProperties = {
   ...CAPSULE_HEADER_STYLE,
-  padding: '7px 10px',
+  padding: '7px 0',
 }
 
 function TaskStepStatusGlyph({ status }: { status: string }) {
@@ -453,7 +453,7 @@ export function TaskCard({
       ) : null}
 
       {showProgressRow ? (
-        <div style={{ padding: '0 0 8px' }}>
+        <div className="ready-task-content-line" style={{ paddingBottom: 8 }}>
           <div className="flex items-center justify-between" style={{ gap: 8 }}>
             <span
               className="t-meta"
@@ -503,7 +503,7 @@ export function TaskCard({
       ) : null}
 
       {compactPrimaryArtifact ? (
-        <div style={{ padding: '0 0 8px' }}>
+        <div className="ready-task-content-line" style={{ paddingBottom: 8 }}>
           <button
             type="button"
             data-ready-task-primary-artifact="true"
@@ -531,7 +531,7 @@ export function TaskCard({
           }}
         >
           {metaBadges.length > 0 && (
-            <div className="flex flex-wrap gap-1.5">
+            <div className="ready-task-content-line flex flex-wrap gap-1.5">
               {metaBadges.map((badge) => (
                 <span
                   key={badge}
@@ -565,7 +565,7 @@ export function TaskCard({
           ) : null}
 
           {expanded && vm.currentStep && !hasTerminalTaskStatus ? (
-            <div className="t-meta" data-typography-role="meta" style={{ color: 'var(--text-light)' }}>
+            <div className="ready-task-content-line t-meta" data-typography-role="meta" style={{ color: 'var(--text-light)' }}>
               当前步骤：{vm.currentStep.title}
             </div>
           ) : null}
@@ -600,6 +600,7 @@ export function TaskCard({
                   onClick={() => setShowAllPlanSteps(true)}
                   style={{
                     alignSelf: 'flex-start',
+                    marginLeft: 20,
                     padding: '2px 8px',
                     borderRadius: 999,
                     border: '1px dashed var(--border-default)',
@@ -620,6 +621,7 @@ export function TaskCard({
                   onClick={() => setShowAllPlanSteps(false)}
                   style={{
                     alignSelf: 'flex-start',
+                    marginLeft: 20,
                     padding: '2px 8px',
                     borderRadius: 999,
                     border: '1px dashed var(--border-default)',
@@ -640,7 +642,7 @@ export function TaskCard({
           <ToolTimeline items={timelineItems} />
 
           {recentArtifacts.length > 0 && (
-            <div className="flex flex-wrap gap-1.5">
+            <div className="ready-task-content-line flex flex-wrap gap-1.5">
               {recentArtifacts.slice(-3).map((artifact) => (
                 <button
                   key={artifact.id}

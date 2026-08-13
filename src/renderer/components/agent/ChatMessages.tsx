@@ -194,7 +194,7 @@ export default function ChatMessages({
             <div className={`flex gap-2.5 ${msg.type === 'user' ? 'flex-row-reverse' : ''}`}>
               {msg.type === 'user' ? (
                 <div
-                  className="max-w-[85%] t-body"
+                  className="ready-chat-user-message max-w-[85%] t-body"
                   data-typography-role="body"
                   style={{
                     color: 'var(--text-body)',
@@ -289,7 +289,11 @@ export default function ChatMessages({
                       })}
                     </div>
                   )}
-                  {msg.content && <div style={{ whiteSpace: 'pre-wrap', textAlign: 'left' }}>{msg.content}</div>}
+                  {msg.content && (
+                    <div className="ready-chat-user-message-content" style={{ whiteSpace: 'pre-wrap' }}>
+                      {msg.content}
+                    </div>
+                  )}
                 </div>
               ) : msg.type === 'system' ? (
                 <div

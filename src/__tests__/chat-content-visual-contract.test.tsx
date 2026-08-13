@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import test from 'node:test'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
@@ -177,8 +179,32 @@ test('terminal duration replaces the stale planning title without removing the d
   assert.match(html, /data-ready-task-terminal-duration="true"[^>]*>00:05</)
   assert.doesNotMatch(html, />正在理解需求</)
   assert.match(html, /<button/)
-  assert.match(html, /class="flex items-end justify-between"/)
+  assert.match(html, /class="ready-task-content-line flex items-end justify-between"/)
   assert.match(html, /data-ready-task-kind-badge="true"[^>]*>短任务</)
+})
+
+test('task activity and multiline user messages share stable text columns', () => {
+  const taskCardSource = readFileSync(
+    resolve(process.cwd(), 'src/renderer/components/agent/chat-panel/task/TaskCard.tsx'),
+    'utf8',
+  )
+  const chatMessagesSource = readFileSync(
+    resolve(process.cwd(), 'src/renderer/components/agent/ChatMessages.tsx'),
+    'utf8',
+  )
+  const chatUtilities = readFileSync(
+    resolve(process.cwd(), 'src/renderer/styles/chat-utilities.css'),
+    'utf8',
+  )
+
+  assert.match(taskCardSource, /const TASK_CARD_HEADER_STYLE:[\s\S]*?padding: '7px 0'/)
+  assert.match(taskCardSource, /ready-task-content-line t-meta/)
+  assert.match(chatUtilities, /\.ready-task-content-line\s*\{\s*padding-left: 20px;/)
+  assert.match(chatUtilities, /\.ready-thinking-reasoning\s*\{[\s\S]*?padding-left: 20px;/)
+  assert.match(chatUtilities, /\.ready-thinking-reasoning::before\s*\{[\s\S]*?left: 5px;/)
+  assert.match(chatMessagesSource, /className="ready-chat-user-message max-w-\[85%\] t-body"/)
+  assert.match(chatMessagesSource, /className="ready-chat-user-message-content"/)
+  assert.match(chatUtilities, /\.ready-chat-user-message-content\s*\{[\s\S]*?width: 100%;[\s\S]*?text-align: left;/)
 })
 
 test('a running follow-up cannot borrow a generated image from the previous turn', () => {
