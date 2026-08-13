@@ -77,7 +77,7 @@ test('resolveExecutionIntentContext keeps live external info lookups out of docu
   })
 
   assert.equal(context.userInstructionText, '今天广州天气怎么样')
-  assert.equal(context.intentClassification.primaryDomain, 'browser')
+  assert.equal(context.intentClassification.primaryDomain, 'research')
   assert.equal(context.hasDocumentEnvironment, false)
   assert.equal(context.documentWidgetTaskKind, null)
 })
@@ -114,7 +114,7 @@ test('resolveExecutionIntentContext keeps a previous widget context from hiding 
   assert.match(context.contextualUserInput, /Video Expert Analyzer/)
 })
 
-test('buildExecutionToolState keeps browser tools visible for live external info lookups even before browser workflow planning is attached', () => {
+test('buildExecutionToolState uses research APIs for live info and only adds browser tools when the browser surface is already trusted', () => {
   const requestEnvelope = buildRequestEnvelope({
     userText: '明天广州天气怎么样',
   })
@@ -138,8 +138,31 @@ test('buildExecutionToolState keeps browser tools visible for live external info
     feishuConnected: true,
   })
 
-  assert.equal(state.toolPolicy.allowBrowserTools, true)
-  assert.ok(state.capabilityResolution.visibleCapabilityGroupIds.includes('browser_interaction'))
+  const browserSurfaceState = buildExecutionToolState({
+    supportsToolCalls: true,
+    hasVideoInputs: false,
+    hasIncomingVideo: false,
+    keepToolsWithVideo: false,
+    preferredSkillToolNames: null,
+    contextualUserInput: '明天广州天气怎么样',
+    userInstructionText: '明天广州天气怎么样',
+    intentClassification: intent,
+    hasDocumentEnvironment: false,
+    hasWidgetTargetContext: false,
+    explicitWidgetCreateIntent: false,
+    documentWidgetTaskKind: null,
+    documentWidgetProfile: null,
+    browserDecisionMode: 'browser_workflow',
+    browserHostAvailable: true,
+    feishuConnected: true,
+  })
+
+  assert.equal(state.toolPolicy.allowBrowserTools, false)
+  assert.ok(state.capabilityResolution.visibleCapabilityGroupIds.includes('general_research'))
+  assert.ok(!state.capabilityResolution.visibleCapabilityGroupIds.includes('browser_interaction'))
+  assert.equal(browserSurfaceState.toolPolicy.allowBrowserTools, true)
+  assert.ok(browserSurfaceState.capabilityResolution.visibleCapabilityGroupIds.includes('general_research'))
+  assert.ok(browserSurfaceState.capabilityResolution.visibleCapabilityGroupIds.includes('browser_interaction'))
 })
 
 test('buildExecutionToolState suppresses rss, calendar, and feishu tools for generic local design requests', () => {

@@ -153,12 +153,19 @@ function detectDomainSignals(
   }
 
   if (liveInfoIntent.needsLiveInfo) {
-    const liveInfoSignals = liveInfoIntent.signals.map((signal) => `browser-live-info-${signal}`)
+    // Public live facts belong to the lightweight research surface first:
+    // Ready can answer them through configured search/fetch APIs without
+    // opening or taking over a visible BrowserView. Platform ranking queries
+    // remain browser-owned because their truth commonly depends on the live
+    // site/session rather than a public search backend.
+    const requiresBrowserSession = liveInfoIntent.signals.includes('dynamic-public-ranking-object')
+    const liveInfoOwner = requiresBrowserSession ? 'browser' : 'research'
+    const liveInfoSignals = liveInfoIntent.signals.map((signal) => `${liveInfoOwner}-live-info-${signal}`)
     signals.push({
-      domain: 'browser',
+      domain: liveInfoOwner,
       score: liveInfoIntent.confidence === 'high' ? 6 : 4,
       signals: dedupe([
-        'browser-live-info-object',
+        `${liveInfoOwner}-live-info-object`,
         ...liveInfoSignals,
       ]),
     })

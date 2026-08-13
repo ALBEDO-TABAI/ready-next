@@ -48,14 +48,24 @@ test('intent classifier recognizes explicit skill workflow requests', () => {
   assert.ok(result.actionSignals.length > 0)
 })
 
-test('intent classifier recognizes live external info lookups as browser intent', () => {
+test('intent classifier routes public live info to research APIs instead of visible browser control', () => {
   const result = classifyIntent(buildRequestEnvelope({
     userText: '帮我看看今天广州天气怎么样',
   }))
 
-  assert.equal(result.primaryDomain, 'browser')
+  assert.equal(result.primaryDomain, 'research')
   assert.equal(result.crossDomain, false)
-  assert.ok(result.objectSignals.some((item) => /browser-live-info/.test(item)))
+  assert.ok(result.objectSignals.some((item) => /research-live-info/.test(item)))
+  assert.ok(!result.objectSignals.some((item) => /browser-live-info/.test(item)))
+})
+
+test('intent classifier keeps an explicitly named public weather source on research search and fetch', () => {
+  const result = classifyIntent(buildRequestEnvelope({
+    userText: '去中国气象网查今天广州天气',
+  }))
+
+  assert.equal(result.primaryDomain, 'research')
+  assert.ok(result.objectSignals.some((item) => /research-live-info/.test(item)))
 })
 
 test('intent classifier recognizes platform public-ranking lookups as browser intent', () => {

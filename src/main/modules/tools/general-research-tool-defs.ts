@@ -42,13 +42,13 @@ export const GENERAL_RESEARCH_TOOLS: GeneralResearchToolDef[] = [
   {
     name: 'web_search',
     description:
-      '在公开互联网上检索资料，返回标题/链接/摘要列表。可使用 AnySearch、Tavily 或 DuckDuckGo；需要垂直领域时先调用 web_search_domains。引用结果时请标明 source。',
+      '在公开互联网上检索资料，返回标题/链接/摘要列表。天气、新闻、股价、汇率、比分、航班、路况、空气质量和官网公告等公开实时信息优先用此工具，不需要打开可见浏览器。可使用 AnySearch、Tavily 或 DuckDuckGo；需要垂直领域时先调用 web_search_domains。引用结果时请标明 source。',
     params: zodObjectToParamList(GENERAL_RESEARCH_SCHEMAS.web_search!) as ToolParam[],
   },
   {
     name: 'web_fetch',
     description:
-      '抓取指定 URL 并返回纯文本正文（最多 4096 字符）。可使用 Jina Reader、AnySearch Extract 或 Tavily Extract。仅用于公开 http/https 页面。',
+      '在后台抓取指定 URL 并返回纯文本正文（最多 4096 字符）。用户指定公开网站但不需要登录、点击或可见页面交互时优先用此工具。可使用 Jina Reader、AnySearch Extract 或 Tavily Extract。仅用于公开 http/https 页面。',
     params: zodObjectToParamList(GENERAL_RESEARCH_SCHEMAS.web_fetch!) as ToolParam[],
   },
   {

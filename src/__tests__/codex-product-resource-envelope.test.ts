@@ -186,7 +186,7 @@ test('ordinary product ingress rebuilds a trusted live-info envelope from the us
   assert.equal(envelope.environmentHints.workbenchMode, 'browser')
   assert.equal(envelope.scopeId, weatherRequest.scopeId)
   assert.equal(envelope.sessionId, weatherRequest.scopeId)
-  assert.equal(classifyIntent(envelope).primaryDomain, 'browser')
+  assert.equal(classifyIntent(envelope).primaryDomain, 'research')
   assert.equal(JSON.stringify(envelope).includes('forged renderer instruction'), false)
 })
 

@@ -15,7 +15,7 @@ const CONFIG: AIModelConfig = {
   model: 'gpt-test',
 }
 
-test('weather intent in a non-browser workbench has Browser tools on the first turn', () => {
+test('weather intent in a non-browser workbench has research tools without visible Browser control', () => {
   const runtime = new AgentSdkRuntime({ domainAdapters: [] })
   const executor = (runtime as unknown as {
     toolExecutor: {
@@ -49,7 +49,9 @@ test('weather intent in a non-browser workbench has Browser tools on the first t
     suppressed: capability?.suppressedCapabilityGroupIds,
   })
 
-  assert.ok(names.includes('browser_search'), diagnostic)
-  assert.ok(names.includes('browser_read'), diagnostic)
-  assert.equal(names.includes('use_browser'), false)
+  assert.ok(names.includes('web_search'), diagnostic)
+  assert.ok(names.includes('web_fetch'), diagnostic)
+  assert.equal(names.includes('browser_search'), false, diagnostic)
+  assert.equal(names.includes('browser_read'), false, diagnostic)
+  assert.ok(names.includes('use_browser'), diagnostic)
 })
