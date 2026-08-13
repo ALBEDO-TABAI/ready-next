@@ -36,6 +36,17 @@ export type CodexBrowserVerificationProjection = Pick<
   'criteria' | 'modelCriteria' | 'proofRefs' | 'recentArtifacts' | 'expectedOutputs'
 >
 
+export function codexBrowserVerifierFailureCode(error: unknown): string {
+  const value = error instanceof Error
+    ? error.message
+    : error && typeof error === 'object' && 'code' in error
+      ? String((error as { code?: unknown }).code || '')
+      : ''
+  return /^codex_[a-z0-9_:-]{1,90}$/i.test(value)
+    ? value
+    : 'codex_browser_verifier_provider_unavailable'
+}
+
 function isChatGptOAuthSnapshot(snapshot: CodexUpstreamProfileSnapshot): boolean {
   return snapshot.profileId === CHATGPT_OAUTH_PROFILE_ID
     && snapshot.baseUrl === CHATGPT_OAUTH_BASE_URL
@@ -84,6 +95,7 @@ export function createCodexFrozenVerifierConfig(input: {
 export async function verifyCodexBrowserWorkflowCandidate(input: {
   readyRunId: string
   readyTaskId: string
+  transportModel: string
   runStartedAtMs: number
   candidateText: string
   workflowBundle: BrowserWorkflowVerifierBundle
@@ -98,6 +110,9 @@ export async function verifyCodexBrowserWorkflowCandidate(input: {
     runAgent?: (params: ReadyAgentSdkRunParams) => Promise<ReadyAgentSdkRunResult>
   }
 }): Promise<Awaited<ReturnType<typeof verifyStandaloneDeliveryCandidate>>> {
+  if (input.transportModel !== 'ready-e0-model') {
+    throw new Error('codex_browser_verifier_transport_model_identity_drift')
+  }
   const config = createCodexFrozenVerifierConfig({
     snapshot: input.snapshot,
     snapshotDigest: input.snapshotDigest,

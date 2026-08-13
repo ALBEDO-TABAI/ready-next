@@ -130,6 +130,7 @@ import {
   resolveCodexExplicitResources,
 } from './codex-explicit-resources'
 import {
+  codexBrowserVerifierFailureCode,
   codexBrowserVerifierFrozenIdentityDigest,
   verifyCodexBrowserWorkflowCandidate,
 } from './codex-browser-workflow-verifier'
@@ -1950,9 +1951,6 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
               product.upstreamProfileSnapshotRef,
               product.upstreamProfileSnapshotDigest,
             )
-            if (snapshot.model !== product.codexModel) {
-              throw new Error('codex_browser_verifier_model_identity_drift')
-            }
             const credential = credentialStore.resolve({
               credentialReferenceId: snapshot.credentialReferenceId,
               snapshot,
@@ -1969,6 +1967,7 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
             const verification = await verifyCodexBrowserWorkflowCandidate({
               readyRunId: product.readyRunId,
               readyTaskId: product.readyTaskId,
+              transportModel: product.codexModel,
               runStartedAtMs: Date.parse(product.admittedAt),
               candidateText: acceptedCandidateText,
               workflowBundle,
@@ -2028,6 +2027,7 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
             })
           } catch (error) {
             if (isAbortFailure(error, verifierAbortSignal)) throw error
+            logAgentMetric('codex_browser_verifier_failed', { readyRunId: product.readyRunId, reason: codexBrowserVerifierFailureCode(error) })
             const settledAt = isoNow()
             verifierAttempt = repository.settleBrowserVerifierAttempt({
               readyRunId: product.readyRunId,

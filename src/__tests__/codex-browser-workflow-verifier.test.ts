@@ -3,6 +3,7 @@ import test from 'node:test'
 
 import type { BrowserWorkflowVerifierBundle } from '../main/modules/repositories/agent-session-checkpoint-types'
 import {
+  codexBrowserVerifierFailureCode,
   codexBrowserVerifierFrozenIdentityDigest,
   createCodexFrozenVerifierConfig,
   verifyCodexBrowserWorkflowCandidate,
@@ -73,6 +74,7 @@ function verifierInput(finalText: string) {
     input: {
       readyRunId: 'run-browser-verifier',
       readyTaskId: 'task-browser-verifier',
+      transportModel: 'ready-e0-model',
       runStartedAtMs: Date.parse(startedAt),
       candidateText: '广州天气候选答案',
       workflowBundle: workflowBundle(),
@@ -117,6 +119,33 @@ test('Codex Browser verifier uses the frozen profile and a real single-turn empt
   assert.equal(fixture.captured()?.maxTurns, 1)
   assert.match(String(fixture.captured()?.input), /查询并核对天气/)
   assert.match(String(fixture.captured()?.input), /browser_workflow_request/)
+})
+
+test('Codex Browser verifier keeps the native transport model separate from the frozen upstream model', async () => {
+  const fixture = verifierInput(JSON.stringify({
+    version: 1,
+    verdict: 'accept',
+    gaps: [],
+    summary: '通过',
+  }))
+  assert.notEqual(fixture.input.transportModel, fixture.input.snapshot.model)
+  assert.equal((await verifyCodexBrowserWorkflowCandidate(fixture.input)).verdict.verdict, 'accept')
+
+  await assert.rejects(
+    () => verifyCodexBrowserWorkflowCandidate({
+      ...fixture.input,
+      transportModel: fixture.input.snapshot.model,
+    }),
+    /codex_browser_verifier_transport_model_identity_drift/,
+  )
+  assert.equal(
+    codexBrowserVerifierFailureCode(new Error('codex_browser_verifier_abort_signal_missing')),
+    'codex_browser_verifier_abort_signal_missing',
+  )
+  assert.equal(
+    codexBrowserVerifierFailureCode(new Error('provider leaked secret material')),
+    'codex_browser_verifier_provider_unavailable',
+  )
 })
 
 test('Codex Browser verifier keeps repair, block, invalid, and provider throw fail-closed', async () => {
