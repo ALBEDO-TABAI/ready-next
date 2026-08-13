@@ -610,23 +610,20 @@ export function classifyLarkCliCommand(command: unknown): LarkCliCommandClass {
   const identities = scalarOptionValues(tokens, '--as')
   const actionIndex = findDomainActionIndex(tokens, primaryIndex)
   const shortcut = tokens[actionIndex]
-  if (primary === 'calendar') {
-    if (identities.length > 1 || (identities[0] && identities[0].toLowerCase() !== 'user')) {
-      return 'unsupported_domain'
-    }
-    if (hasForbiddenLocalInput(tokens)) return 'unsupported_domain'
-    if (shortcut && READ_ONLY_SHORTCUTS.calendar?.has(shortcut)) return 'read_only'
-    const method = tokens[actionIndex + 1]
-    return method && READ_ONLY_METHODS.has(method) ? 'read_only' : 'unsupported_domain'
+  if (identities.length > 1 || (identities[0] && identities[0].toLowerCase() !== 'user')) {
+    return 'unsupported_domain'
   }
-  if (identities.length !== 1 || identities[0]?.toLowerCase() !== 'user') return 'unsupported_domain'
   if (shortcut && LOCAL_INPUT_SHORTCUTS[primary]?.has(shortcut)) return 'unsupported_domain'
   if (hasForbiddenLocalInput(tokens)) return 'unsupported_domain'
-  if (tokens.includes('--yes')) return 'external_write'
-  if (hasStandaloneFlag(tokens, '--dry-run') && hasExactSingleBooleanFlag(tokens, '--dry-run')) return 'read_only'
-  if (tokens.some((token) => token === '--overwrite' || token.startsWith('--overwrite='))) return 'external_write'
+  if (tokens.includes('--yes')
+    || tokens.some((token) => token === '--overwrite' || token.startsWith('--overwrite='))) {
+    return identities.length === 1 ? 'external_write' : 'unsupported_domain'
+  }
   if (shortcut && READ_ONLY_SHORTCUTS[primary]?.has(shortcut)) return 'read_only'
   const method = tokens[actionIndex + 1]
   if (method && READ_ONLY_METHODS.has(method)) return 'read_only'
+  if (primary === 'calendar') return 'unsupported_domain'
+  if (identities.length !== 1) return 'unsupported_domain'
+  if (hasStandaloneFlag(tokens, '--dry-run') && hasExactSingleBooleanFlag(tokens, '--dry-run')) return 'read_only'
   return 'external_write'
 }
