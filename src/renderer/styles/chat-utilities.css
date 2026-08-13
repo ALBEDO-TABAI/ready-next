@@ -49,6 +49,11 @@ html[data-skin='liquid-glass']:is([data-glass-variant='solid-green'], [data-glas
 }
 
 .ready-thinking-state-label {
+  min-width: 0;
+  max-width: min(68vw, 560px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   background-image: linear-gradient(
     100deg,
     var(--text-gray) 0%,

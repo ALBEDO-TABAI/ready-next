@@ -716,6 +716,7 @@ export function createEmptyScopeRunState(params: {
     phase: params.phase || 'idle',
     terminalReason: null,
     toolTrace: [],
+    activityNarration: null,
     startedAt: null,
     updatedAt: null,
     latestText: null,
@@ -792,6 +793,12 @@ export function deriveScopeRunStatePatch(
     contextBudget?: AgentContextBudget | null
     contextUsage?: ContextUsageSnapshot | Record<string, unknown> | null
     toolEvent?: { kind: ToolTraceEvent['kind']; text: string; timestamp: string }
+    activityNarration?: {
+      itemId: string
+      source: 'commentary' | 'reasoning_summary'
+      text: string
+      status: 'streaming' | 'completed'
+    } | null
     error?: string
     errorKind?: string
     recoverable?: boolean
@@ -823,6 +830,14 @@ export function deriveScopeRunStatePatch(
     typeof event.taskSummary === 'string'
       ? event.taskSummary
       : null
+  const hasActivityNarrationPatch = Object.prototype.hasOwnProperty.call(event, 'activityNarration')
+  const structuredActivityNarration = event.activityNarration
+    && typeof event.activityNarration.itemId === 'string'
+    && (event.activityNarration.source === 'commentary' || event.activityNarration.source === 'reasoning_summary')
+    && typeof event.activityNarration.text === 'string'
+    && (event.activityNarration.status === 'streaming' || event.activityNarration.status === 'completed')
+    ? { ...event.activityNarration }
+    : null
   const structuredSteps = normalizeTaskSteps(
     event.steps,
     event.timestamp
@@ -922,6 +937,14 @@ export function deriveScopeRunStatePatch(
       structuredTaskTitle ?? null,
     taskSummary:
       structuredTaskSummary ?? null,
+    activityNarration:
+      event.phase === 'done' || event.phase === 'error' || event.phase === 'cancelled'
+        ? null
+        : hasActivityNarrationPatch
+          ? structuredActivityNarration
+          : isNewRun
+            ? null
+            : previous?.activityNarration ?? null,
     steps: mergeTaskSteps(
       shouldClearStaleProgress ? undefined : previous?.steps,
       structuredSteps.length > 0

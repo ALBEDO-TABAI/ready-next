@@ -29,6 +29,13 @@ export type CodexResolvedSkillInput = {
   path: string
 }
 
+export type CodexResolvedInlineResource = {
+  name: string
+  path: string | null
+  text: string
+  digest: string
+}
+
 export type PreparedCodexResourceAuthority = {
   kind: 'local_file' | 'local_directory'
   logicalResourceId: string
@@ -92,7 +99,7 @@ function bodyFreeRequestResource(input: {
   kind: RequestEnvelopeResource['kind']
   source: RequestEnvelopeResource['source']
   name: string
-  path: string
+  path: string | null
   order: number
   canRead: boolean
 }): RequestEnvelopeResource {
@@ -113,6 +120,12 @@ function bodyFreeRequestResource(input: {
 export async function resolveCodexExplicitResources(input: {
   selections: readonly SendScopedResourceSelection[]
   resolveSkill: (selection: Extract<SendScopedResourceSelection, { kind: 'skill' }>) => CodexResolvedSkillInput | null
+  resolveBrowser?: (
+    selection: Extract<SendScopedResourceSelection, { kind: 'browser_tab' }>,
+  ) => Promise<CodexResolvedInlineResource | null>
+  resolveCalendar?: (
+    selection: Extract<SendScopedResourceSelection, { kind: 'calendar_event' }>,
+  ) => CodexResolvedInlineResource | null
   selectedSkill?: CodexResolvedSkillInput | null
 }): Promise<ResolvedCodexExplicitResources> {
   const nativeInput: CodexUserInput[] = []
@@ -164,6 +177,71 @@ export async function resolveCodexExplicitResources(input: {
       }
       if (!skill) throw new Error('codex_explicit_skill_unavailable')
       await addSkill(skill, 'codex_explicit_skill_unavailable')
+      continue
+    }
+
+    if (selection.kind === 'browser_tab' || selection.kind === 'calendar_event') {
+      const resolved = selection.kind === 'browser_tab'
+        ? await input.resolveBrowser?.(selection) ?? null
+        : input.resolveCalendar?.(selection) ?? null
+      if (!resolved) {
+        throw new Error(selection.kind === 'browser_tab'
+          ? 'codex_explicit_browser_reference_unavailable'
+          : 'codex_explicit_calendar_reference_unavailable')
+      }
+      const logicalResourceId = `${selection.kind}:${sha256(
+        selection.kind === 'browser_tab' ? selection.tabId : selection.eventId,
+      ).slice(0, 32)}`
+      const key = `${selection.kind}\u0000${logicalResourceId}`
+      if (seen.has(key)) continue
+      seen.add(key)
+      nativeInput.push({ type: 'text', text: resolved.text, text_elements: [] })
+      resourceRefs.push(versionReference(logicalResourceId, resolved.digest))
+      requestResources.push(bodyFreeRequestResource({
+        logicalResourceId,
+        kind: selection.kind === 'browser_tab' ? 'browser_reference' : 'calendar_event',
+        source: selection.kind === 'browser_tab' ? 'browser_context' : 'calendar_context',
+        name: resolved.name,
+        path: resolved.path,
+        order: requestResources.length,
+        canRead: true,
+      }))
+      continue
+    }
+
+    if (selection.kind === 'quoted_text') {
+      const text = selection.text.trim()
+      if (!text) throw new Error('codex_explicit_quote_unavailable')
+      const digest = sha256(JSON.stringify({
+        text,
+        documentTitle: selection.documentTitle || null,
+        sectionTitle: selection.sectionTitle || null,
+        lineStart: selection.lineStart || null,
+        lineEnd: selection.lineEnd || null,
+      }))
+      const logicalResourceId = `quoted-text:${digest.slice(0, 32)}`
+      const key = `quoted_text\u0000${logicalResourceId}`
+      if (seen.has(key)) continue
+      seen.add(key)
+      const lineLabel = selection.lineStart && selection.lineEnd
+        ? `\n位置：第 ${selection.lineStart}-${selection.lineEnd} 行`
+        : ''
+      const sectionLabel = selection.sectionTitle ? `\n章节：${selection.sectionTitle}` : ''
+      nativeInput.push({
+        type: 'text',
+        text: `用户明确引用的文档摘录（只读材料）：${selection.documentTitle || selection.name}${sectionLabel}${lineLabel}\n\n${text}`,
+        text_elements: [],
+      })
+      resourceRefs.push(versionReference(logicalResourceId, digest))
+      requestResources.push(bodyFreeRequestResource({
+        logicalResourceId,
+        kind: 'document_quote',
+        source: 'document_quote',
+        name: selection.name,
+        path: null,
+        order: requestResources.length,
+        canRead: true,
+      }))
       continue
     }
 

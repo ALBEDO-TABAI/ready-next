@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { buildCodexIngressInputWithDiagnostics } from '../renderer/modules/agent/messageComposer'
+import {
+  buildCodexIngressInputWithDiagnostics,
+  resolveReferencedFilePoolAttachments,
+} from '../renderer/modules/agent/messageComposer'
 
 test('Codex renderer ingress sends verbatim user text and a body-free local image selection', async () => {
   const priorWindow = globalThis.window
@@ -99,15 +102,74 @@ test('directory and installed-skill selections use distinct body-free contracts'
   assert.equal(result.diagnostics.inputFailedCount, 0)
 })
 
-test('browser and document-tab references stay rejected until the host can read them exactly', async () => {
+test('browser, calendar and selected document text use narrow structured reference contracts', async () => {
   const result = await buildCodexIngressInputWithDiagnostics({
     content: '看看这个',
+    attachments: [
+      {
+        id: 'browser-1', name: '网页', path: 'browser-tab://tab-1', type: 'other',
+        size: 0, ext: '', source: 'browser-tab', browserTabId: 'tab-1',
+      },
+      {
+        id: 'calendar-1', name: '评审会', path: 'calendar-event://event-1', type: 'text',
+        size: 0, ext: '.calendar', source: 'calendar-event', eventId: 'event-1',
+      },
+      {
+        id: 'quote-1', name: '方案.md', path: '/workspace/方案.md', type: 'text',
+        size: 4, ext: '.quote', source: 'document-quote', selection: '准确摘录',
+        documentTitle: '方案.md', lineStart: 4, lineEnd: 4,
+      },
+    ],
+  })
+  assert.deepEqual(result.resources, [
+    { kind: 'browser_tab', id: 'browser-1', name: '网页', tabId: 'tab-1' },
+    { kind: 'calendar_event', id: 'calendar-1', name: '评审会', eventId: 'event-1' },
+    {
+      kind: 'quoted_text', id: 'quote-1', name: '方案.md', text: '准确摘录',
+      documentTitle: '方案.md', lineStart: 4, lineEnd: 4,
+    },
+  ])
+  assert.equal(result.message, '看看这个')
+  assert.equal(result.diagnostics.inputIncludedCount, 3)
+  assert.equal(result.diagnostics.inputFailedCount, 0)
+})
+
+test('a clean Windows document tab remains a file reference instead of being mistaken for an unsaved quote', async () => {
+  const result = await buildCodexIngressInputWithDiagnostics({
+    content: '阅读这个文档',
     attachments: [{
-      id: 'browser-1', name: '网页', path: 'https://example.com', type: 'other',
-      size: 0, ext: '', source: 'browser-tab', url: 'https://example.com',
+      id: 'windows-doc', name: '方案.md', path: 'C:\\workspace\\方案.md', type: 'text',
+      size: 12, ext: '.md', source: 'document-tab', dirty: false, selection: 'visible selection',
     }],
   })
-  assert.equal(result.resources.length, 0)
-  assert.equal(result.diagnostics.inputIncludedCount, 0)
-  assert.equal(result.diagnostics.inputFailedCount, 1)
+  assert.deepEqual(result.resources, [{
+    kind: 'local_file', id: 'windows-doc', name: '方案.md', path: 'C:\\workspace\\方案.md',
+    size: 12, ext: '.md', rendererType: 'text',
+  }])
+})
+
+test('@ references reuse the same structured resource identities without duplicating a repeated mention', async () => {
+  const filePool = [
+    {
+      id: 'browser-pool', name: '网页资料', path: 'browser-tab://tab-pool', type: 'text' as const,
+      size: 0, ext: '.url', source: 'browser-tab' as const, browserTabId: 'tab-pool',
+    },
+    {
+      id: 'quote-pool', name: '摘录', path: 'document-quote://quote-pool', type: 'text' as const,
+      size: 4, ext: '.quote', source: 'document-quote' as const, selection: '原文事实',
+    },
+  ]
+  const referenced = resolveReferencedFilePoolAttachments(
+    '比较 @[网页资料] 和 @[摘录]，再看一次 @[网页资料]',
+    filePool,
+  )
+  assert.deepEqual(referenced.map((item) => item.id), ['browser-pool', 'quote-pool'])
+  const result = await buildCodexIngressInputWithDiagnostics({
+    content: '比较 @[网页资料] 和 @[摘录]',
+    attachments: referenced,
+  })
+  assert.deepEqual(result.resources, [
+    { kind: 'browser_tab', id: 'browser-pool', name: '网页资料', tabId: 'tab-pool' },
+    { kind: 'quoted_text', id: 'quote-pool', name: '摘录', text: '原文事实' },
+  ])
 })

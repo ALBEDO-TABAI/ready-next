@@ -125,11 +125,21 @@ export type CodexTurnCollectionContext = {
   onActivity?: (event: CodexTurnActivityEvent) => void
 }
 
-export type CodexTurnActivityEvent = {
-  stage: 'started' | 'completed'
-  atMs: number
-  item: CodexThreadItem
-}
+export type CodexTurnActivityEvent =
+  | {
+      kind: 'item'
+      stage: 'started' | 'completed'
+      atMs: number
+      item: CodexThreadItem
+    }
+  | {
+      kind: 'narration'
+      source: 'commentary' | 'reasoning_summary'
+      stage: 'streaming' | 'completed'
+      atMs: number
+      itemId: string
+      text: string
+    }
 
 export type CodexTurnReadbackContext = Pick<
   CodexTurnCollectionContext,
@@ -301,6 +311,7 @@ export class CodexTurnCollector {
     const items: Array<{ item: CodexThreadItem; order: number }> = []
     const itemStarts = new Map<string, CodexThreadItem>()
     const deltas = new Map<string, string[]>()
+    const reasoningSummaryParts = new Map<string, Map<number, string>>()
     let expectedTurnId: string | null = null
     let terminal: CodexTurn | null = null
     let modelReroute: Extract<
@@ -380,9 +391,38 @@ export class CodexTurnCollector {
       if (notification.method === 'item/started') {
         itemStarts.set(notification.params.item.id, notification.params.item)
         publishActivity({
+          kind: 'item',
           stage: 'started',
           atMs: notification.params.startedAtMs,
           item: notification.params.item,
+        })
+        return
+      }
+      if (notification.method === 'item/reasoning/summaryPartAdded') {
+        const started = itemStarts.get(notification.params.itemId)
+        if (started?.type !== 'other' || started.nativeType !== 'reasoning') return
+        const parts = reasoningSummaryParts.get(notification.params.itemId) || new Map<number, string>()
+        if (!parts.has(notification.params.summaryIndex)) parts.set(notification.params.summaryIndex, '')
+        reasoningSummaryParts.set(notification.params.itemId, parts)
+        return
+      }
+      if (notification.method === 'item/reasoning/summaryTextDelta') {
+        const started = itemStarts.get(notification.params.itemId)
+        if (started?.type !== 'other' || started.nativeType !== 'reasoning') return
+        const parts = reasoningSummaryParts.get(notification.params.itemId) || new Map<number, string>()
+        const current = parts.get(notification.params.summaryIndex) || ''
+        parts.set(notification.params.summaryIndex, `${current}${notification.params.delta}`)
+        reasoningSummaryParts.set(notification.params.itemId, parts)
+        publishActivity({
+          kind: 'narration',
+          source: 'reasoning_summary',
+          stage: 'streaming',
+          atMs: Date.now(),
+          itemId: notification.params.itemId,
+          text: [...parts.entries()]
+            .sort(([left], [right]) => left - right)
+            .map(([, text]) => text)
+            .join('\n'),
         })
         return
       }
@@ -391,6 +431,16 @@ export class CodexTurnCollector {
         itemDeltas.push(notification.params.delta)
         deltas.set(notification.params.itemId, itemDeltas)
         const started = itemStarts.get(notification.params.itemId)
+        if (started?.type === 'agentMessage' && started.phase === 'commentary') {
+          publishActivity({
+            kind: 'narration',
+            source: 'commentary',
+            stage: 'streaming',
+            atMs: Date.now(),
+            itemId: notification.params.itemId,
+            text: itemDeltas.join(''),
+          })
+        }
         if (
           context.allowDirectProvisionalStream
           && started?.type === 'agentMessage'
@@ -409,10 +459,43 @@ export class CodexTurnCollector {
       if (notification.method === 'item/completed') {
         items.push({ item: notification.params.item, order: items.length })
         publishActivity({
+          kind: 'item',
           stage: 'completed',
           atMs: notification.params.completedAtMs,
           item: notification.params.item,
         })
+        if (
+          notification.params.item.type === 'agentMessage'
+          && notification.params.item.phase === 'commentary'
+        ) {
+          publishActivity({
+            kind: 'narration',
+            source: 'commentary',
+            stage: 'completed',
+            atMs: notification.params.completedAtMs,
+            itemId: notification.params.item.id,
+            text: notification.params.item.text,
+          })
+        }
+        if (
+          notification.params.item.type === 'other'
+          && notification.params.item.nativeType === 'reasoning'
+        ) {
+          const parts = reasoningSummaryParts.get(notification.params.item.id)
+          if (parts) {
+            publishActivity({
+              kind: 'narration',
+              source: 'reasoning_summary',
+              stage: 'completed',
+              atMs: notification.params.completedAtMs,
+              itemId: notification.params.item.id,
+              text: [...parts.entries()]
+                .sort(([left], [right]) => left - right)
+                .map(([, text]) => text)
+                .join('\n'),
+            })
+          }
+        }
         return
       }
       if (notification.method === 'turn/completed') {

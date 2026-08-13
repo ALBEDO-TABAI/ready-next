@@ -147,59 +147,19 @@ export function useAttachmentIntake(params: UseAttachmentIntakeParams): Attachme
             const next = trimmedEnd.length === 0 ? mention : `${trimmedEnd} ${mention}`
             setInputValue(`${next} `)
             focusInputWithResize()
-          } else if (data.type === 'browser-tab' && data.url) {
-            void (async () => {
-              const fallbackTitle = data.title || data.name || '网页标签'
-              let snapshot = {
-                title: fallbackTitle,
-                url: data.url,
-                heading: data.heading || '',
-                selection: data.selection || '',
-                excerpt: data.excerpt || '',
-                capturedAt: Date.now()
-              }
-              try {
-                if (window.electronAPI?.browser?.getTabContext && data.tabId) {
-                  const ctx = await window.electronAPI.browser.getTabContext(data.tabId)
-                  if (ctx.success && ctx.data) {
-                    snapshot = {
-                      title: ctx.data.title || snapshot.title,
-                      url: ctx.data.url || snapshot.url,
-                      heading: ctx.data.heading || snapshot.heading,
-                      selection: ctx.data.selection || snapshot.selection,
-                      excerpt: ctx.data.excerpt || snapshot.excerpt,
-                      capturedAt: ctx.data.capturedAt || snapshot.capturedAt
-                    }
-                  }
-                }
-              } catch {
-                // keep fallback snapshot
-              }
-
-              const fallbackPath = data.tabId
-                ? `browser-tab://${data.tabId}`
-                : `browser-tab://${Date.now()}`
-              if (!isComposerAuthorityCurrent(useAgent.getState(), composerAuthority)) return
-              addAttachments([
-                {
-                  id: `attach-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-                  name: snapshot.title || fallbackTitle,
-                  path: snapshot.url || fallbackPath,
-                  type: 'text',
-                  size: snapshot.excerpt.length,
-                  ext: '.url',
-                  source: 'browser-tab',
-                  browserTabId: data.tabId,
-                  url: snapshot.url || data.url,
-                  title: snapshot.title || fallbackTitle,
-                  heading: snapshot.heading,
-                  selection: snapshot.selection,
-                  excerpt: snapshot.excerpt,
-                  capturedAt: snapshot.capturedAt
-                }
-              ])
-              focusInputWithResize()
-            })()
+          } else if (data.type === 'browser-tab' && data.tabId) {
+            addAttachments([{
+              id: `attach-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+              name: data.title || data.name || '网页标签',
+              path: `browser-tab://${data.tabId}`,
+              type: 'text',
+              size: 0,
+              ext: '.url',
+              source: 'browser-tab',
+              browserTabId: data.tabId,
+              title: data.title || data.name || '网页标签'
+            }])
+            focusInputWithResize()
           } else if (data.type === 'design-project') {
             const designData = data as typeof data & {
               selectedElementCount?: number
@@ -267,20 +227,33 @@ export function useAttachmentIntake(params: UseAttachmentIntakeParams): Attachme
             setInputValue(currentInput ? `${currentInput}\n${snippet}` : snippet)
             focusInputWithResize()
           } else if (data.type === 'calendar-event') {
-            const start = data.startTime ? new Date(data.startTime) : null
-            const end = data.endTime ? new Date(data.endTime) : null
-            const hasValidTime =
-              !!start && !!end && !Number.isNaN(start.getTime()) && !Number.isNaN(end.getTime())
-            const lines = [
-              '### 日程事件引用',
-              `- 标题: ${data.title || data.name}`,
-              hasValidTime ? `- 时间: ${start.toLocaleString()} - ${end.toLocaleString()}` : null,
-              data.calendarId ? `- 日历: ${data.calendarId}` : null,
-              data.description ? `- 备注: ${data.description.slice(0, 600)}` : null
-            ].filter(Boolean)
-            const currentInput = useAgent.getState().inputValue
-            const snippet = lines.join('\n')
-            setInputValue(currentInput ? `${currentInput}\n${snippet}` : snippet)
+            if (data.eventId) {
+              addAttachments([{
+                id: `attach-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+                name: data.title || data.name || '日程',
+                path: `calendar-event://${data.eventId}`,
+                type: 'text',
+                size: 0,
+                ext: '.calendar',
+                source: 'calendar-event',
+                eventId: data.eventId,
+              }])
+              focusInputWithResize()
+            }
+          } else if (data.type === 'doc-tab' && data.selection?.trim() && (data.dirty || !data.path)) {
+            addAttachments([{
+              id: `attach-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+              name: data.title || data.name || '文档标签页',
+              path: data.path || `doc-tab://${encodeURIComponent(data.tabId || data.name)}`,
+              type: 'text',
+              size: data.selection.length,
+              ext: data.ext || '.md',
+              source: 'document-tab',
+              documentTitle: data.title || data.name || '文档标签页',
+              tabId: data.tabId,
+              selection: data.selection.slice(0, 30_000),
+              dirty: true,
+            }])
             focusInputWithResize()
           } else if (
             (data.type === 'file' || data.type === 'doc-tab' || data.type === 'folder') &&

@@ -2,6 +2,7 @@ import { describe, it } from 'node:test'
 import assert from 'node:assert'
 
 import {
+  createEmptyScopeRunState,
   deriveScopeRunStatePatch,
   isForegroundBusyScopeRunState,
   isActiveScopePhase,
@@ -78,6 +79,47 @@ describe('scope run state helpers', () => {
     )
 
     assert.strictEqual(patch.terminalReason, 'context_overflow')
+  })
+
+  it('keeps safe live narration on the active run and clears it at terminal', () => {
+    const previous = createEmptyScopeRunState({
+      scopeId: 'scope-narration',
+      agent: 'assistant',
+      requestId: 'run-narration',
+      phase: 'planning',
+    })
+    const livePatch = deriveScopeRunStatePatch({
+      runId: 'run-narration',
+      phase: 'tool_running',
+      timestamp: '2026-08-13T00:00:01.000Z',
+      activityNarration: {
+        itemId: 'reasoning-1',
+        source: 'reasoning_summary',
+        text: '正在核对天气来源',
+        status: 'streaming',
+      },
+    }, previous)
+
+    assert.deepStrictEqual(livePatch.activityNarration, {
+      itemId: 'reasoning-1',
+      source: 'reasoning_summary',
+      text: '正在核对天气来源',
+      status: 'streaming',
+    })
+
+    const terminalPatch = deriveScopeRunStatePatch({
+      runId: 'run-narration',
+      phase: 'done',
+      timestamp: '2026-08-13T00:00:02.000Z',
+    }, { ...previous, ...livePatch })
+    assert.strictEqual(terminalPatch.activityNarration, null)
+
+    const nextRunPatch = deriveScopeRunStatePatch({
+      runId: 'run-next',
+      phase: 'planning',
+      timestamp: '2026-08-13T00:00:03.000Z',
+    }, { ...previous, ...livePatch })
+    assert.strictEqual(nextRunPatch.activityNarration, null)
   })
 
   it('treats manual suspend as a real terminal boundary while preserving takeover guidance', () => {

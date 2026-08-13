@@ -136,6 +136,7 @@ export function installRuntimeDriverScopeEvents(deps: {
           repairScope: patch.repairScope ?? previousForRun?.repairScope ?? null,
           taskTitle: patch.taskTitle ?? previousForRun?.taskTitle ?? null,
           taskSummary: patch.taskSummary ?? previousForRun?.taskSummary ?? null,
+          activityNarration: patch.activityNarration ?? null,
           steps: patch.steps ?? previousForRun?.steps ?? [],
           currentStepId: patch.currentStepId ?? previousForRun?.currentStepId ?? null,
           waitingFor: patch.waitingFor ?? previousForRun?.waitingFor ?? 'none',

@@ -46,7 +46,7 @@ interface AgentSelectionMenuState {
   boundary: { left: number; top: number; right: number; bottom: number }
 }
 
-interface ChatPanelBodyProps extends Omit<TaskToolSnapshotProps, 'children'> {
+interface ChatPanelBodyProps extends Omit<TaskToolSnapshotProps, 'children' | 'currentActivityNarration'> {
   messages: AgentMessage[]
   lifecycleInputBlocked: boolean
   stopPending: boolean
@@ -218,6 +218,7 @@ export function ChatPanelBody(props: ChatPanelBodyProps): React.ReactElement {
       isStreaming={isStreaming}
       streamingMessageId={streamingMessageId}
       terminalDurationLabel={terminalDurationLabel}
+      currentActivityNarration={currentRunForDurationMeter?.activityNarration ?? null}
       parseSerializedTaskSnapshot={parseSerializedTaskSnapshot}
       parseSerializedToolTraceSnapshot={parseSerializedToolTraceSnapshot}
       setTaskSectionExpanded={setTaskSectionExpanded}

@@ -107,6 +107,68 @@ function mountTaskCard(
   }
 }
 
+test('short turn keeps live narration visible alongside tool activity', () => {
+  const host = document.getElementById('root')
+  assert.ok(host)
+  host.innerHTML = ''
+  const root = createRoot(host)
+  const noop = () => {}
+  const run = makeRun({
+    taskId: 'direct-tool-turn',
+    phase: 'tool_running',
+    status: 'running',
+    taskType: 'direct_answer',
+    waitingFor: 'none',
+    resumableActions: [],
+    canResume: false,
+    recentArtifacts: [],
+    toolTrace: [{
+      id: 'tool-1:call',
+      kind: 'call',
+      text: '正在查询网页',
+      timestamp: new Date('2026-08-13T00:00:01.000Z'),
+      toolName: 'web_search',
+    }],
+  })
+
+  flushSync(() => {
+    root.render(createElement(TaskToolSnapshot, {
+      messages: [{ id: 'stream-1', role: 'assistant', content: '', timestamp: new Date() }],
+      currentTaskRun: run,
+      currentActivityNarration: {
+        itemId: 'reasoning-1',
+        source: 'reasoning_summary',
+        text: '正在核对天气来源',
+        status: 'streaming',
+      },
+      backgroundTaskRuns: [],
+      liveTaskRuns: [run],
+      currentScopeId: 'conv-a',
+      taskDisclosureState: {},
+      isStreaming: true,
+      streamingMessageId: 'stream-1',
+      parseSerializedTaskSnapshot: () => null,
+      parseSerializedToolTraceSnapshot: () => [],
+      setTaskSectionExpanded: noop,
+      onOpenTaskArtifact: noop,
+      onDismissMemoryCapture: noop,
+      onUndoMemoryCapture: noop,
+      onSupplementMemoryCapture: noop,
+      onOpenScope: noop,
+      onCancelDetachedTask: noop,
+      onCancelChildRun: noop,
+    }, ({ pendingTaskRun, pendingToolTrace }) => createElement('div', null, pendingTaskRun, pendingToolTrace)))
+  })
+
+  try {
+    assert.match(host.textContent || '', /正在核对天气来源/)
+    assert.ok(host.querySelector('[data-ready-thinking-summary="true"]'))
+    assert.ok(host.querySelector('[data-ready-tool-trace-card="true"]'))
+  } finally {
+    flushSync(() => root.unmount())
+  }
+})
+
 function clickButton(container: HTMLElement, label: string) {
   const button = Array.from(container.querySelectorAll('button'))
     .find((candidate) => candidate.textContent?.trim() === label)

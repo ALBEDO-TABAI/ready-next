@@ -113,15 +113,11 @@ async function withMountedIntake(
   }
 }
 
-test('late browser-tab context cannot attach to a different composer session', async () => {
-  const context = deferred<{
-    success: boolean
-    data: { title: string; url: string; excerpt: string; capturedAt: number }
-  }>()
+test('browser-tab drag rejects a presentation-only payload without an exact tab identity', async () => {
   setComposerSession('a')
 
   await withMountedIntake({
-    browser: { getTabContext: () => context.promise },
+    browser: { getTabContext: () => { throw new Error('renderer snapshot must not be called') } },
   }, async (handle, focusCount) => {
     await handle.handleDrop(makeDropEvent({
       readyPayload: {
@@ -129,21 +125,8 @@ test('late browser-tab context cannot attach to a different composer session', a
         name: 'A tab',
         title: 'A tab',
         url: 'https://a.example',
-        tabId: 'tab-a',
       },
     }))
-    setComposerSession('b')
-    context.resolve({
-      success: true,
-      data: {
-        title: 'A resolved tab',
-        url: 'https://a.example/resolved',
-        excerpt: 'A only',
-        capturedAt: 123,
-      },
-    })
-    await context.promise
-    await new Promise((resolve) => setTimeout(resolve, 0))
 
     assert.deepEqual(useAgent.getState().attachments, [])
     assert.deepEqual(useAgent.getState().filePool, [])
@@ -151,15 +134,12 @@ test('late browser-tab context cannot attach to a different composer session', a
   })
 })
 
-test('browser-tab context attaches normally while the originating composer stays current', async () => {
-  const context = deferred<{
-    success: boolean
-    data: { title: string; url: string; excerpt: string; capturedAt: number }
-  }>()
+test('browser-tab drag stores only the exact tab identity and never trusts a renderer snapshot', async () => {
+  let rendererSnapshotCalls = 0
   setComposerSession('a')
 
   await withMountedIntake({
-    browser: { getTabContext: () => context.promise },
+    browser: { getTabContext: () => { rendererSnapshotCalls += 1 } },
   }, async (handle, focusCount) => {
     await handle.handleDrop(makeDropEvent({
       readyPayload: {
@@ -170,21 +150,41 @@ test('browser-tab context attaches normally while the originating composer stays
         tabId: 'tab-a',
       },
     }))
-    context.resolve({
-      success: true,
-      data: {
-        title: 'A resolved tab',
-        url: 'https://a.example/resolved',
-        excerpt: 'A only',
-        capturedAt: 123,
-      },
-    })
-    await context.promise
-    await new Promise((resolve) => setTimeout(resolve, 0))
 
     assert.equal(useAgent.getState().attachments.length, 1)
-    assert.equal(useAgent.getState().attachments[0]?.title, 'A resolved tab')
+    assert.equal(useAgent.getState().attachments[0]?.title, 'A tab')
+    assert.equal(useAgent.getState().attachments[0]?.browserTabId, 'tab-a')
+    assert.equal(rendererSnapshotCalls, 0)
     assert.equal(focusCount(), 1)
+  })
+})
+
+test('calendar and unsaved document drags remain structured resources instead of composer text', async () => {
+  setComposerSession('a')
+  await withMountedIntake({}, async (handle, focusCount) => {
+    await handle.handleDrop(makeDropEvent({
+      readyPayload: {
+        type: 'calendar-event',
+        name: '评审会',
+        eventId: 'event-1',
+      },
+    }))
+    await handle.handleDrop(makeDropEvent({
+      readyPayload: {
+        type: 'doc-tab',
+        name: '未命名草稿',
+        tabId: 'doc-draft',
+        selection: '尚未落盘的准确正文',
+        dirty: true,
+      },
+    }))
+
+    const state = useAgent.getState()
+    assert.equal(state.inputValue, '')
+    assert.deepEqual(state.attachments.map((item) => item.source), ['calendar-event', 'document-tab'])
+    assert.equal(state.attachments[0]?.eventId, 'event-1')
+    assert.equal(state.attachments[1]?.selection, '尚未落盘的准确正文')
+    assert.equal(focusCount(), 2)
   })
 })
 

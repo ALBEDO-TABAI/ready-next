@@ -273,39 +273,34 @@ test('native notification normalization ignores passive telemetry but rejects un
   })
 })
 
-test('native notification normalization ignores the pinned reasoning stream notifications', () => {
-  const notifications = [
-    {
-      method: 'item/reasoning/summaryPartAdded',
-      params: { threadId: 'thread-1', turnId: 'turn-1', itemId: 'reasoning-1', summaryIndex: 0 },
+test('native notification normalization projects safe reasoning summaries but keeps raw reasoning passive', () => {
+  assert.equal(normalizeCodexNativeNotification({
+    method: 'item/reasoning/summaryPartAdded',
+    params: { threadId: 'thread-1', turnId: 'turn-1', itemId: 'reasoning-1', summaryIndex: 0 },
+  }).kind, 'accepted')
+  assert.equal(normalizeCodexNativeNotification({
+    method: 'item/reasoning/summaryTextDelta',
+    params: {
+      threadId: 'thread-1',
+      turnId: 'turn-1',
+      itemId: 'reasoning-1',
+      summaryIndex: 0,
+      delta: '我先核对天气来源。',
     },
-    {
-      method: 'item/reasoning/summaryTextDelta',
-      params: {
-        threadId: 'thread-1',
-        turnId: 'turn-1',
-        itemId: 'reasoning-1',
-        summaryIndex: 0,
-        delta: 'thinking',
-      },
+  }).kind, 'accepted')
+  assert.deepEqual(normalizeCodexNativeNotification({
+    method: 'item/reasoning/textDelta',
+    params: {
+      threadId: 'thread-1',
+      turnId: 'turn-1',
+      itemId: 'reasoning-1',
+      contentIndex: 0,
+      delta: 'private reasoning',
     },
-    {
-      method: 'item/reasoning/textDelta',
-      params: {
-        threadId: 'thread-1',
-        turnId: 'turn-1',
-        itemId: 'reasoning-1',
-        contentIndex: 0,
-        delta: 'private reasoning',
-      },
-    },
-  ]
-  for (const notification of notifications) {
-    assert.deepEqual(normalizeCodexNativeNotification(notification), {
-      kind: 'ignored',
-      method: notification.method,
-    })
-  }
+  }), {
+    kind: 'ignored',
+    method: 'item/reasoning/textDelta',
+  })
 })
 
 test('native notification normalization rejects unknown or unsupported active item types', () => {

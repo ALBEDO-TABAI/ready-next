@@ -36,7 +36,7 @@
 import { useCallback, useMemo, useState } from 'react'
 import type React from 'react'
 import type { AgentMessage, ToolTraceEvent } from '../../../../stores/useAgent'
-import type { AgentArtifact } from '../../../../modules/agent/types'
+import type { AgentArtifact, ScopeRunActivityNarration } from '../../../../modules/agent/types'
 import {
   createDefaultTaskDisclosureState,
   getTaskRunDisplayKey,
@@ -47,6 +47,7 @@ import { filterUserVisibleToolTraceEvents } from '../../../../modules/agent/tool
 import { readBrowserConfirmationRequest } from '../../../../../shared/browser-confirmation-card'
 import type { TaskCardRun } from '../../task-card-from-projection'
 import { TaskCard, ToolTraceCard } from '../task/TaskCard'
+import { ThinkingIndicator } from '../ThinkingIndicator'
 
 export interface TaskToolSnapshotRenderValues {
   messageTaskSnapshots: Record<string, React.ReactNode>
@@ -68,6 +69,7 @@ export interface TaskToolSnapshotProps {
   isStreaming: boolean
   streamingMessageId: string | null
   terminalDurationLabel?: string | null
+  currentActivityNarration?: ScopeRunActivityNarration | null
 
   // --- Serialized payload parsers (kept in ChatPanel for source-grep
   // contract; passed in here as stable useCallback identities) ---
@@ -251,6 +253,7 @@ export function TaskToolSnapshot(props: TaskToolSnapshotProps): React.ReactEleme
     isStreaming,
     streamingMessageId,
     terminalDurationLabel = null,
+    currentActivityNarration = null,
     parseSerializedTaskSnapshot,
     parseSerializedToolTraceSnapshot,
     setTaskSectionExpanded,
@@ -491,15 +494,26 @@ export function TaskToolSnapshot(props: TaskToolSnapshotProps): React.ReactEleme
     const streamMessage = messages.find((message) => message.id === streamingMessageId)
     if (!currentTaskRun || !isStreaming || !streamingMessageId) return null
     if (streamMessage && streamMessage.content.length > 0) return null
-    if (!shouldRenderPendingTaskCard(currentTaskRun, currentVisibleToolTraceSegment.length)) return null
-    return renderTaskSnapshotCard(
-      currentTaskRun,
-      `pending-task-${currentTaskRun.scopeId}`,
-      false,
-      currentVisibleToolTraceSegment,
-      true,
-    )
-  }, [currentTaskRun, currentVisibleToolTraceSegment, isStreaming, messages, renderTaskSnapshotCard, streamingMessageId])
+    if (shouldRenderPendingTaskCard(currentTaskRun, currentVisibleToolTraceSegment.length)) {
+      return renderTaskSnapshotCard(
+        currentTaskRun,
+        `pending-task-${currentTaskRun.scopeId}`,
+        false,
+        currentVisibleToolTraceSegment,
+        true,
+      )
+    }
+    const narration = currentActivityNarration?.text.trim()
+    return narration ? <ThinkingIndicator message={narration} /> : null
+  }, [
+    currentActivityNarration,
+    currentTaskRun,
+    currentVisibleToolTraceSegment,
+    isStreaming,
+    messages,
+    renderTaskSnapshotCard,
+    streamingMessageId,
+  ])
 
   const pendingToolTrace = useMemo<React.ReactNode | null>(() => {
     const streamMessage = messages.find((message) => message.id === streamingMessageId)

@@ -715,6 +715,10 @@ export default function DocumentMode({
         type: 'doc-tab' as const,
         path: tab.path,
         name: tab.title,
+        title: tab.title,
+        tabId: tab.id,
+        selection: tab.isDirty ? tab.content : undefined,
+        dirty: tab.isDirty,
         ext: ext ? `.${ext}` : undefined,
       })
       e.dataTransfer.setData('application/x-ready-document-tab', data)
@@ -726,6 +730,14 @@ export default function DocumentMode({
       // Untitled draft (未保存的新建文档): dropping it onto a file-tree
       // directory confirms the save location.
       setUntitledDocTabDragPayload(e, { tabId: tab.id, title: tab.title })
+      e.dataTransfer.setData('application/x-ready-drag', JSON.stringify({
+        type: 'doc-tab' as const,
+        name: tab.title,
+        title: tab.title,
+        tabId: tab.id,
+        selection: tab.content,
+        dirty: true,
+      }))
     }
   }, [])
 

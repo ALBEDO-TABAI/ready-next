@@ -306,6 +306,13 @@ interface ScopeRunTraceItemData {
   detail?: string
 }
 
+interface ScopeRunActivityNarrationData {
+  itemId: string
+  source: 'commentary' | 'reasoning_summary'
+  text: string
+  status: 'streaming' | 'completed'
+}
+
 interface ScopeRunMemoryRefData {
   id: string
   layer: 'l0' | 'l1' | 'l2' | 'recall'
@@ -790,6 +797,7 @@ interface ScopeRunEventData {
   ownerResourceId?: string
   lastEvidenceAt?: string
   toolEvent?: ScopeRunTraceItemData
+  activityNarration?: ScopeRunActivityNarrationData | null
   error?: string
   blockedReason?: string
   controllerId?: string

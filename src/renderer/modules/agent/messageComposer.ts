@@ -49,6 +49,10 @@ interface RendererAIConfigForCapabilities {
   endpointId?: string
 }
 
+function isAbsoluteLocalPath(path: string): boolean {
+  return path.startsWith('/') || /^[A-Za-z]:[\\/]/.test(path)
+}
+
 function normalizeRendererAIConfigForCapabilities(config: RendererAIConfigForCapabilities | null | undefined): AIModelConfig | null {
   if (!config) return null
   const provider = normalizeProviderId(config.provider, config.baseUrl)
@@ -461,6 +465,57 @@ export async function buildCodexIngressInputWithDiagnostics(params: {
       diagnostics.inputIncludedCount += 1
       continue
     }
+    if (attachment.source === 'browser-tab' && attachment.browserTabId) {
+      resources.push({
+        kind: 'browser_tab',
+        id: attachment.id,
+        name: attachment.name,
+        tabId: attachment.browserTabId,
+      })
+      diagnostics.inputIncludedCount += 1
+      continue
+    }
+    if (attachment.source === 'calendar-event' && attachment.eventId) {
+      resources.push({
+        kind: 'calendar_event',
+        id: attachment.id,
+        name: attachment.name,
+        eventId: attachment.eventId,
+      })
+      diagnostics.inputIncludedCount += 1
+      continue
+    }
+    if (
+      (attachment.source === 'document-quote'
+        || (attachment.source === 'document-tab' && (!isAbsoluteLocalPath(attachment.path) || attachment.dirty)))
+      && attachment.selection?.trim()
+    ) {
+      resources.push({
+        kind: 'quoted_text',
+        id: attachment.id,
+        name: attachment.name,
+        text: attachment.selection.trim().slice(0, 30_000),
+        ...(attachment.documentTitle ? { documentTitle: attachment.documentTitle } : {}),
+        ...(attachment.sectionTitle ? { sectionTitle: attachment.sectionTitle } : {}),
+        ...(attachment.lineStart ? { lineStart: attachment.lineStart } : {}),
+        ...(attachment.lineEnd ? { lineEnd: attachment.lineEnd } : {}),
+      })
+      diagnostics.inputIncludedCount += 1
+      continue
+    }
+    if (attachment.source === 'document-tab' && isAbsoluteLocalPath(attachment.path) && !attachment.dirty) {
+      resources.push({
+        kind: 'local_file',
+        id: attachment.id,
+        name: attachment.name,
+        path: attachment.path,
+        size: attachment.size,
+        ext: attachment.ext,
+        rendererType: attachment.type === 'video' ? 'other' : attachment.type,
+      })
+      diagnostics.inputIncludedCount += 1
+      continue
+    }
     if (attachment.source !== 'file' && attachment.source !== 'generated-image') {
       diagnostics.inputFailedCount += 1
       diagnostics.inputFailures.push({
@@ -510,11 +565,19 @@ export async function buildCodexIngressInputWithDiagnostics(params: {
 
 export function resolveReferencedFilePoolAttachments(content: string, filePool: ChatAttachment[]): ChatAttachment[] {
   const references = content.match(/@\[([^\]]+)\]/g) ?? []
-  return references.flatMap((reference) => {
+  const resolved = references.flatMap((reference) => {
     const name = reference.slice(2, -1)
     const attachment = [...filePool].reverse().find((candidate) => candidate.name === name)
     return attachment ? [attachment] : []
   })
+  return resolved.filter((attachment, index) => resolved.findIndex((candidate) => (
+    candidate.source === attachment.source
+    && candidate.path === attachment.path
+    && candidate.name === attachment.name
+    && candidate.lineStart === attachment.lineStart
+    && candidate.lineEnd === attachment.lineEnd
+    && (candidate.selection || '') === (attachment.selection || '')
+  )) === index)
 }
 
 export async function buildComposedAgentInputWithDiagnostics(params: {

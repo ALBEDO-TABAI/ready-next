@@ -127,9 +127,27 @@ test('collector buffers accepted-before-response notifications and selects only 
 
 test('collector publishes Matrix-style commentary and tool item activity without making it answer truth', async () => {
   const runtime = new FakeNativeRuntime()
-  const activities: Array<{ stage: string; itemId: string; type: string }> = []
+  const activities: Array<Record<string, string>> = []
   const collector = new CodexTurnCollector(runtime)
   const result = await collector.collect(context(runtime, async () => {
+    runtime.emit({
+      method: 'item/started',
+      params: {
+        threadId: 'thread-1',
+        turnId: 'turn-1',
+        startedAtMs: 0,
+        item: { type: 'agentMessage', id: 'commentary-1', text: '', phase: 'commentary' },
+      },
+    })
+    runtime.emit({
+      method: 'item/agentMessage/delta',
+      params: {
+        threadId: 'thread-1',
+        turnId: 'turn-1',
+        itemId: 'commentary-1',
+        delta: '正在查找飞书文档。',
+      },
+    })
     runtime.emit({
       method: 'item/completed',
       params: {
@@ -145,6 +163,43 @@ test('collector publishes Matrix-style commentary and tool item activity without
         threadId: 'thread-1',
         turnId: 'turn-1',
         startedAtMs: 2,
+        item: { type: 'other', id: 'reasoning-1', nativeType: 'reasoning' },
+      },
+    })
+    runtime.emit({
+      method: 'item/reasoning/summaryPartAdded',
+      params: {
+        threadId: 'thread-1',
+        turnId: 'turn-1',
+        itemId: 'reasoning-1',
+        summaryIndex: 0,
+      },
+    })
+    runtime.emit({
+      method: 'item/reasoning/summaryTextDelta',
+      params: {
+        threadId: 'thread-1',
+        turnId: 'turn-1',
+        itemId: 'reasoning-1',
+        summaryIndex: 0,
+        delta: '正在核对统计口径。',
+      },
+    })
+    runtime.emit({
+      method: 'item/completed',
+      params: {
+        threadId: 'thread-1',
+        turnId: 'turn-1',
+        completedAtMs: 3,
+        item: { type: 'other', id: 'reasoning-1', nativeType: 'reasoning' },
+      },
+    })
+    runtime.emit({
+      method: 'item/started',
+      params: {
+        threadId: 'thread-1',
+        turnId: 'turn-1',
+        startedAtMs: 4,
         item: {
           type: 'dynamicToolCall', id: 'call-1', tool: 'skill_run_shell', namespace: null,
           arguments: { command: 'must-not-be-projected' }, status: 'inProgress', success: null,
@@ -156,7 +211,7 @@ test('collector publishes Matrix-style commentary and tool item activity without
       params: {
         threadId: 'thread-1',
         turnId: 'turn-1',
-        completedAtMs: 3,
+        completedAtMs: 5,
         item: {
           type: 'dynamicToolCall', id: 'call-1', tool: 'skill_run_shell', namespace: null,
           arguments: { command: 'must-not-be-projected' }, status: 'completed', success: true,
@@ -168,25 +223,41 @@ test('collector publishes Matrix-style commentary and tool item activity without
       params: {
         threadId: 'thread-1',
         turnId: 'turn-1',
-        completedAtMs: 4,
+        completedAtMs: 6,
         item: { type: 'agentMessage', id: 'final-1', text: '共 89 条。', phase: 'final_answer' },
       },
     })
     runtime.emit({ method: 'turn/completed', params: { threadId: 'thread-1', turn: turn('completed') } })
     return { turn: turn('inProgress') }
   }, {
-    onActivity: (event) => activities.push({
-      stage: event.stage,
-      itemId: event.item.id,
-      type: event.item.type,
-    }),
+    onActivity: (event) => activities.push(event.kind === 'narration'
+      ? {
+          kind: event.kind,
+          stage: event.stage,
+          itemId: event.itemId,
+          source: event.source,
+          text: event.text,
+        }
+      : {
+          kind: event.kind,
+          stage: event.stage,
+          itemId: event.item.id,
+          type: event.item.type,
+        }),
   }))
 
   assert.deepEqual(activities, [
-    { stage: 'completed', itemId: 'commentary-1', type: 'agentMessage' },
-    { stage: 'started', itemId: 'call-1', type: 'dynamicToolCall' },
-    { stage: 'completed', itemId: 'call-1', type: 'dynamicToolCall' },
-    { stage: 'completed', itemId: 'final-1', type: 'agentMessage' },
+    { kind: 'item', stage: 'started', itemId: 'commentary-1', type: 'agentMessage' },
+    { kind: 'narration', stage: 'streaming', itemId: 'commentary-1', source: 'commentary', text: '正在查找飞书文档。' },
+    { kind: 'item', stage: 'completed', itemId: 'commentary-1', type: 'agentMessage' },
+    { kind: 'narration', stage: 'completed', itemId: 'commentary-1', source: 'commentary', text: '正在查找飞书文档。' },
+    { kind: 'item', stage: 'started', itemId: 'reasoning-1', type: 'other' },
+    { kind: 'narration', stage: 'streaming', itemId: 'reasoning-1', source: 'reasoning_summary', text: '正在核对统计口径。' },
+    { kind: 'item', stage: 'completed', itemId: 'reasoning-1', type: 'other' },
+    { kind: 'narration', stage: 'completed', itemId: 'reasoning-1', source: 'reasoning_summary', text: '正在核对统计口径。' },
+    { kind: 'item', stage: 'started', itemId: 'call-1', type: 'dynamicToolCall' },
+    { kind: 'item', stage: 'completed', itemId: 'call-1', type: 'dynamicToolCall' },
+    { kind: 'item', stage: 'completed', itemId: 'final-1', type: 'agentMessage' },
   ])
   assert.equal(result.candidateText, '共 89 条。')
 })

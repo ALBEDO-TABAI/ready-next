@@ -23,6 +23,7 @@ import {
   type RequestEnvelopeResource,
 } from '../contracts/request-envelope'
 import { classifyIntent, type IntentClassification } from '../intent-classifier'
+import { CURRENT_DOCUMENT_CONTEXT_FLOOR_TOOL_NAMES } from '../domain-adapters/capability-floors'
 import {
   buildSelectedSkillToolAuthorization,
   type SkillToolAuthorization
@@ -129,7 +130,9 @@ import {
 import { createBrowserTurnLease, type BrowserTurnLease } from '../../browser-engine/agent-browser-turn-lease'
 import {
   resolveCodexExplicitResources,
+  type CodexResolvedInlineResource,
 } from './codex-explicit-resources'
+import { resolveTrustedBrowserReference } from '../runtime-core/trusted-browser-environment'
 import {
   codexBrowserVerifierFailureCode,
   codexBrowserVerifierFrozenIdentityDigest,
@@ -179,6 +182,61 @@ function sha256(value: string): string {
 
 function isoNow(): string {
   return new Date().toISOString()
+}
+
+function trustedBrowserReferenceInput(
+  reference: Awaited<ReturnType<typeof resolveTrustedBrowserReference>>,
+): CodexResolvedInlineResource | null {
+  if (!reference) return null
+  const context = reference.context
+  const text = [
+    '用户明确引用的网页（由 Ready 主进程现场读取）：',
+    `标题：${context.title || '(无标题)'}`,
+    `链接：${context.url}`,
+    context.heading ? `主标题：${context.heading}` : null,
+    context.selection ? `页面选中文本：${context.selection}` : null,
+    context.excerpt ? `页面正文摘录：${context.excerpt}` : null,
+  ].filter(Boolean).join('\n')
+  return {
+    name: context.title || context.url,
+    path: context.url,
+    text,
+    digest: sha256(JSON.stringify({
+      pageRef: reference.environment.browserPageRef,
+      context,
+    })),
+  }
+}
+
+function trustedCalendarReferenceInput(event: NonNullable<ReturnType<DatabaseManager['getCalendarEventById']>>): CodexResolvedInlineResource {
+  const canonical = {
+    id: event.id,
+    calendarId: event.calendar_id,
+    title: event.title,
+    description: event.description,
+    location: event.location,
+    startTime: event.start_time,
+    endTime: event.end_time,
+    allDay: event.all_day === 1,
+    recurrenceRule: event.recurrence_rule,
+    startTimezone: event.start_tz,
+    endTimezone: event.end_tz,
+    updatedAt: event.updated_at,
+  }
+  return {
+    name: event.title || '日程',
+    path: `calendar-event://${event.id}`,
+    text: [
+      '用户明确引用的日程（由 Ready 主进程现场读取）：',
+      `标题：${event.title || '(无标题日程)'}`,
+      `开始：${new Date(event.start_time).toISOString()}`,
+      `结束：${new Date(event.end_time).toISOString()}`,
+      `全天：${event.all_day === 1 ? '是' : '否'}`,
+      event.location ? `地点：${event.location}` : null,
+      event.description ? `备注：${event.description}` : null,
+    ].filter(Boolean).join('\n'),
+    digest: sha256(JSON.stringify(canonical)),
+  }
 }
 
 function stableErrorCode(error: unknown, fallback: string): string {
@@ -398,6 +456,7 @@ export function buildCodexProductRequestEnvelope(
   actionAuthorizationMode: ActionAuthorizationMode = DEFAULT_ACTION_AUTHORIZATION_MODE,
   trustedEnvironment: import('../contracts/request-envelope').TrustedRequestEnvironment = {},
   trustedResources: readonly RequestEnvelopeResource[] = [],
+  currentDocumentCanWrite = false,
 ): RequestEnvelope {
   const envelope = request.currentDocumentAnchor
     ? buildRequestEnvelope({
@@ -437,7 +496,7 @@ export function buildCodexProductRequestEnvelope(
       summary: null,
       order: envelope.resources.length,
       canRead: true,
-      canWrite: false,
+      canWrite: currentDocumentCanWrite,
     })
     envelope.environmentHints.hasDocumentContext = true
   }
@@ -451,6 +510,7 @@ export function resolveCodexProductTurnAuthorization(input: {
   externalReadSlice: PreparedCodexExternalReadSlice | null
   trustedEnvironment?: import('../contracts/request-envelope').TrustedRequestEnvironment
   trustedResources?: readonly RequestEnvelopeResource[]
+  currentDocumentCanWrite?: boolean
 }): { requestEnvelope: RequestEnvelope; authorization: SkillToolAuthorization } {
   const persistedScope = input.host.getScope(input.scopeId)
   if (!persistedScope) throw new Error('codex_conversation_scope_not_found')
@@ -462,6 +522,7 @@ export function resolveCodexProductTurnAuthorization(input: {
     actionAuthorizationMode,
     input.trustedEnvironment,
     input.trustedResources,
+    input.currentDocumentCanWrite,
   )
   const authorization = input.externalReadSlice?.kind === 'lark_cli_read'
     ? buildSelectedSkillToolAuthorization({
@@ -489,34 +550,42 @@ export function readCodexPreparedActionAuthorizationEnvelope(
     currentDigest: string
     policyEpoch: number
   }>
-  environmentHints?: { workspaceRoots: string[] }
+  environmentHints?: {
+    workspaceRoots: string[]
+    workbenchMode?: 'browser'
+    browserPageRef?: NonNullable<import('../contracts/request-envelope').TrustedRequestEnvironment['browserPageRef']>
+  }
 } {
   const authorities = product.prepared.resourceAuthorities ?? []
+  const browserPageRef = product.prepared.browserPageRef
   return {
     actionAuthorizationMode: parseActionAuthorizationMode(
       product.prepared.actionAuthorizationMode,
     ),
-    ...(authorities.length > 0
+    ...(authorities.length > 0 || browserPageRef
       ? {
-          resources: authorities.map((authority, order) => ({
-            id: authority.logicalResourceId,
-            kind: authority.kind === 'local_directory' ? 'folder_reference' as const : 'attachment' as const,
-            source: authority.kind === 'local_directory' ? 'folder_reference' as const : 'user_attachment' as const,
-            name: authority.name,
-            path: authority.path,
-            text: '',
-            summary: null,
-            order,
-            canRead: true,
-            canWrite: false,
-            currentVersion: authority.currentVersion,
-            currentDigest: authority.currentDigest,
-            policyEpoch: authority.policyEpoch,
-          })),
+          ...(authorities.length > 0 ? {
+            resources: authorities.map((authority, order) => ({
+              id: authority.logicalResourceId,
+              kind: authority.kind === 'local_directory' ? 'folder_reference' as const : 'attachment' as const,
+              source: authority.kind === 'local_directory' ? 'folder_reference' as const : 'user_attachment' as const,
+              name: authority.name,
+              path: authority.path,
+              text: '',
+              summary: null,
+              order,
+              canRead: true,
+              canWrite: false,
+              currentVersion: authority.currentVersion,
+              currentDigest: authority.currentDigest,
+              policyEpoch: authority.policyEpoch,
+            })),
+          } : {}),
           environmentHints: {
             workspaceRoots: authorities
               .filter((authority) => authority.kind === 'local_directory')
               .map((authority) => authority.path),
+            ...(browserPageRef ? { workbenchMode: 'browser' as const, browserPageRef } : {}),
           },
         }
       : {}),
@@ -564,6 +633,7 @@ export function buildCurrentDocumentReadToolSnapshot(input: {
   resolved: ReadyToolTurnSnapshot
   authorizationId: string
   authorization: SkillToolAuthorization
+  allowWrite?: boolean
 }): ReadyToolTurnSnapshot {
   return {
     readyToolSurface: input.resolved.readyToolSurface,
@@ -571,9 +641,23 @@ export function buildCurrentDocumentReadToolSnapshot(input: {
       authorizationId: input.authorizationId,
       authorization: input.authorization,
       toolSurface: input.resolved.readyToolSurface,
-      allowedToolNames: ['document_read_section'],
+      allowedToolNames: input.allowWrite
+        ? CURRENT_DOCUMENT_CONTEXT_FLOOR_TOOL_NAMES
+        : ['document_read_section'],
     }),
   }
+}
+
+export function hasExplicitCurrentDocumentWriteIntent(text: string): boolean {
+  const normalized = String(text || '').trim()
+  if (!normalized) return false
+  if (/(?:只|仅)(?:需|要)?(?:阅读|读取|查看|总结|概括|分析|检查|审阅)|(?:不要|无需|不必|禁止).{0,8}(?:修改|编辑|改写|替换|删除|插入|追加|写入|保存)/.test(normalized)) {
+    return false
+  }
+  if (/(?:如何|怎么|建议|方案|讨论).{0,8}(?:修改|编辑|改写|替换|删除|插入|追加|写入|保存)/.test(normalized)) {
+    return false
+  }
+  return /(?:修改|编辑|改写|重写|润色|替换|删除|删掉|移除|插入|追加|补充|更新|调整|排版|格式化|保存|写入|写到|做成|制作|生成|修复|修正)/.test(normalized)
 }
 
 export function buildExternalReadToolSnapshot(input: {
@@ -681,10 +765,45 @@ export function createCurrentDocumentReadRequester(input: {
   resourceAnchorDigest: string
   abortSignal: AbortSignal
   requestRendererToolAction: CodexRendererToolActionRequester
+  allowWrite?: boolean
+  hasExactRead?: () => boolean
+  onExactRead?: () => void
 }): (tool: string, args: Record<string, unknown>) => Promise<Record<string, unknown>> {
   return async (tool, args) => {
-    if (tool !== 'document.readSection') {
+    const readTool = tool === 'document.readSection'
+    const readOnlyTools = new Set(['document.listWidgets'])
+    const writeTools = new Set([
+      'document.insertWidget',
+      'document.updateWidget',
+      'document.removeWidget',
+      'document.replaceExact',
+      'document.saveTab',
+    ])
+    if (!readTool && !readOnlyTools.has(tool) && !writeTools.has(tool)) {
       throw new CodexToolBridgeError('resource_tool_not_authorized')
+    }
+    if (writeTools.has(tool) && !input.allowWrite) {
+      throw new CodexToolBridgeError('resource_tool_not_authorized')
+    }
+    if (writeTools.has(tool) && !input.hasExactRead?.()) {
+      throw new CodexToolBridgeError('resource_write_requires_exact_read')
+    }
+    if (!readTool) {
+      const nextArgs: Record<string, unknown> = { ...args, tabId: input.anchor.tabId }
+      if (tool === 'document.saveTab') delete nextArgs.path
+      return input.requestRendererToolAction({
+        agent: input.agent,
+        sessionId: input.sessionId,
+        runId: input.readyRunId,
+        codexThreadId: input.codexThreadId,
+        codexTurnId: input.codexTurnId,
+        codexCallId: input.codexCallId,
+        readyActionId: input.readyActionId,
+        actionIdentityDigest: input.actionIdentityDigest,
+        tool,
+        args: nextArgs,
+        abortSignal: input.abortSignal,
+      })
     }
     const requestBindingDigest = digestCanonicalJson({
       readyRunId: input.readyRunId,
@@ -725,6 +844,7 @@ export function createCurrentDocumentReadRequester(input: {
       requestBindingDigest,
     })
     if (payload.ok === false) return payload
+    input.onExactRead?.()
     const resourceRead = payload.resourceRead as Record<string, unknown>
     const unsignedReceipt = {
       readyRunId: input.readyRunId,
@@ -1377,6 +1497,7 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
   const preparedDetails = new Map<string, PreparedDetail>()
   const detailPrepared = new Map<string, PreparedCodexProductRun>()
   const browserTurnLeases = new Map<string, BrowserTurnLease>()
+  const currentDocumentExactReadRuns = new Set<string>()
   const loadedThreads = new Set<string>()
   type PendingEngineTerminalFinalization = {
     identity: { aliasId: string; aliasGeneration: number }
@@ -1419,6 +1540,7 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
   const releaseBrowserTurnLease = (readyRunId: string): void => {
     browserTurnLeases.get(readyRunId)?.release()
     browserTurnLeases.delete(readyRunId)
+    currentDocumentExactReadRuns.delete(readyRunId)
   }
   let host: CodexRuntimeHostPort | null = null
   let state: PreparedCodexRuntimeState | null = null
@@ -3059,14 +3181,30 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
           ? await boundHost.resolveExternalReadSlice(externalReadRequest)
           : null
         const requestedWorkbenchMode = request.userMessage.meta.workbenchMode
-        const trustedEnvironment = await boundHost.runtime.resolveTrustedRequestEnvironment(
-          requestedWorkbenchMode === 'browser'
-            || requestedWorkbenchMode === 'document'
-            || requestedWorkbenchMode === 'rss'
-            || requestedWorkbenchMode === 'calendar'
-            ? { workbenchMode: requestedWorkbenchMode }
-            : undefined,
+        const browserSelections = (request.resources ?? []).filter(
+          (selection): selection is Extract<NonNullable<SendScopedRequest['resources']>[number], { kind: 'browser_tab' }> => (
+            selection.kind === 'browser_tab'
+          ),
         )
+        if (browserSelections.length > 1) throw new Error('codex_explicit_browser_reference_ambiguous')
+        const browserReference = browserSelections[0]
+          ? await (boundHost.browserController
+              ? resolveTrustedBrowserReference(boundHost.browserController, browserSelections[0].tabId)
+              : Promise.resolve(null))
+          : null
+        if (browserSelections[0] && !browserReference) {
+          throw new Error('codex_explicit_browser_reference_unavailable')
+        }
+        const trustedEnvironment = browserReference?.environment
+          ?? await boundHost.runtime.resolveTrustedRequestEnvironment(
+            requestedWorkbenchMode === 'browser'
+              || requestedWorkbenchMode === 'document'
+              || requestedWorkbenchMode === 'rss'
+              || requestedWorkbenchMode === 'calendar'
+              ? { workbenchMode: requestedWorkbenchMode }
+              : undefined,
+          )
+        const resolvedBrowserInput = trustedBrowserReferenceInput(browserReference)
         const explicitResources = await resolveCodexExplicitResources({
           selections: request.resources ?? [],
           resolveSkill: (selection) => {
@@ -3076,7 +3214,16 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
             })
             return resolved ? { name: resolved.name, path: resolved.path } : null
           },
+          resolveBrowser: async (selection) => (
+            browserSelections[0]?.id === selection.id ? resolvedBrowserInput : null
+          ),
+          resolveCalendar: (selection) => {
+            const event = input.database.getCalendarEventById(selection.eventId)
+            return event ? trustedCalendarReferenceInput(event) : null
+          },
         })
+        const currentDocumentWriteIntent = Boolean(request.currentDocumentAnchor)
+          && hasExplicitCurrentDocumentWriteIntent(request.userMessage.content)
         const { requestEnvelope, authorization } = resolveCodexProductTurnAuthorization({
           host: boundHost,
           request,
@@ -3084,6 +3231,7 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
           externalReadSlice,
           trustedEnvironment,
           trustedResources: explicitResources.requestResources,
+          currentDocumentCanWrite: currentDocumentWriteIntent,
         })
         const intentClassification = classifyIntent(requestEnvelope)
         const resolvedToolSnapshot = boundHost.resolveToolTurnSnapshot({
@@ -3103,6 +3251,7 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
               resolved: resolvedToolSnapshot,
               authorizationId: `codex-auth:${request.requestId}`,
               authorization,
+              allowWrite: currentDocumentWriteIntent,
             })
           : externalReadSlice
             ? buildExternalReadToolSnapshot({
@@ -3161,10 +3310,7 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
           ...explicitResources.input,
           ...(selectedSkillResources?.input ?? []),
         ].filter((entry, index, all) => all.findIndex((candidate) => (
-          candidate.type === entry.type
-          && 'path' in candidate
-          && 'path' in entry
-          && candidate.path === entry.path
+          digestCanonicalJson(candidate) === digestCanonicalJson(entry)
         )) === index)
         const preparedResult = preparer.prepare({
           taskId: `codex-task-${sha256(request.requestId).slice(0, 24)}`,
@@ -3184,6 +3330,9 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
           currentDocumentAnchor,
           externalReadSlice,
           resourceAuthorities: explicitResources.authorities,
+          ...(trustedEnvironment.browserPageRef
+            ? { browserPageRef: trustedEnvironment.browserPageRef }
+            : {}),
           actionAuthorizationMode: readActionAuthorizationModeFromEnvelope(requestEnvelope),
           readyToolSurface: toolSnapshot.readyToolSurface,
           readyTurnToolAuthorization: toolSnapshot.readyTurnToolAuthorization,
@@ -3570,6 +3719,15 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
                 resourceAnchorDigest: binding.authorization.resourceAnchorDigest,
                 abortSignal,
                 requestRendererToolAction: input.requestRendererToolAction,
+                allowWrite: binding.authorization.allowedToolNames.some((toolName) => (
+                  toolName === 'document_insert_widget'
+                  || toolName === 'document_update_widget'
+                  || toolName === 'document_remove_widget'
+                  || toolName === 'document_replace_exact'
+                  || toolName === 'document_save_tab'
+                )),
+                hasExactRead: () => currentDocumentExactReadRuns.has(binding.readyRunId),
+                onExactRead: () => { currentDocumentExactReadRuns.add(binding.readyRunId) },
               })
             : undefined,
           feishuReadAuthority: externalReadSlice?.kind === 'feishu_typed_read'

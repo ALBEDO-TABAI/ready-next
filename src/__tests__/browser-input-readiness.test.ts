@@ -7,7 +7,10 @@ import {
   browserInputReadiness,
 } from '../main/modules/browser-engine/browser-input-readiness'
 import type { BrowserHostPresentationState } from '../main/modules/browser-engine/host-layout-service'
-import { resolveTrustedBrowserEnvironment } from '../main/modules/agent-control/runtime-core/trusted-browser-environment'
+import {
+  resolveTrustedBrowserEnvironment,
+  resolveTrustedBrowserReference,
+} from '../main/modules/agent-control/runtime-core/trusted-browser-environment'
 
 function controllerFor(
   hostPresentation: BrowserHostPresentationState,
@@ -149,4 +152,53 @@ test('Browser workbench keeps its trusted page identity while an overlay detache
       profileId: 'default',
     },
   })
+})
+
+test('explicit Browser reference reads the named tab and rejects a page identity change during capture', async () => {
+  let frameToken = 'document-v1'
+  const controller = {
+    getTabList: () => [
+      { id: 'tab-background', profile: 'profile-a', url: 'https://example.test/background' },
+      { id: 'tab-active', profile: 'profile-a', url: 'https://example.test/active' },
+    ],
+    getActiveTab: () => ({ id: 'tab-active', profile: 'profile-a' }),
+    getPhysicalTargetToken: (tabId: string) => `physical:${tabId}`,
+    executeJS: async (tabId: string) => ({
+      url: tabId === 'tab-background' ? 'https://example.test/background' : 'https://example.test/active',
+      title: 'Background page',
+      timeOrigin: 42,
+      mutationRevision: 0,
+      frameDocumentToken: frameToken,
+    }),
+    getTabContext: async (tabId: string) => ({
+      title: 'Background page',
+      url: tabId === 'tab-background' ? 'https://example.test/background' : 'https://example.test/active',
+      domain: 'example.test',
+      heading: 'Exact heading',
+      selection: '',
+      excerpt: 'Exact body',
+      capturedAt: 1,
+    }),
+  } as unknown as BrowserController
+
+  const exact = await resolveTrustedBrowserReference(controller, 'tab-background')
+  assert.equal(exact?.environment.browserPageRef?.tabId, 'tab-background')
+  assert.equal(exact?.context.excerpt, 'Exact body')
+
+  let reads = 0
+  const drifting = {
+    ...controller,
+    executeJS: async (tabId: string) => {
+      reads += 1
+      frameToken = reads === 1 ? 'document-v1' : 'document-v2'
+      return {
+        url: tabId === 'tab-background' ? 'https://example.test/background' : 'https://example.test/active',
+        title: 'Background page',
+        timeOrigin: 42,
+        mutationRevision: 0,
+        frameDocumentToken: frameToken,
+      }
+    },
+  } as unknown as BrowserController
+  assert.equal(await resolveTrustedBrowserReference(drifting, 'tab-background'), null)
 })

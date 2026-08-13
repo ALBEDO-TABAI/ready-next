@@ -388,6 +388,13 @@ export interface ScopeRunStepMetrics {
   lastToolAt: string | null
 }
 
+export interface ScopeRunActivityNarration {
+  itemId: string
+  source: 'commentary' | 'reasoning_summary'
+  text: string
+  status: 'streaming' | 'completed'
+}
+
 export type ScopeRunTerminalReason =
   | 'done'
   | 'checkpoint_budget'
@@ -453,6 +460,7 @@ export interface ScopeRunState {
     | 'cancelled'
   terminalReason?: ScopeRunTerminalReason | null
   toolTrace: ToolTraceEvent[]
+  activityNarration?: ScopeRunActivityNarration | null
   startedAt: string | null
   updatedAt: string | null
   latestText?: string | null

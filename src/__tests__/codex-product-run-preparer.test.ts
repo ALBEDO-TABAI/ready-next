@@ -107,6 +107,25 @@ test('product run preparer freezes the conversation authorization mode and old r
   }), { ok: false, code: 'invalid_product_ingress' })
 })
 
+test('product run preparer persists the exact browser page identity in the resource anchor', () => {
+  const browserPageRef = {
+    tabId: 'tab-referenced',
+    physicalTargetToken: 'physical-target-1',
+    mainFrameId: '0',
+    mainFrameDocumentToken: 'document-token-1',
+    profileId: 'browser',
+  }
+  const result = preparer.prepare({ ...base, browserPageRef })
+  assert.equal(result.ok, true)
+  if (!result.ok) return
+  assert.deepEqual(result.prepared.browserPageRef, browserPageRef)
+  assert.equal(isPreparedCodexProductRun(result.prepared), true)
+  assert.equal(isPreparedCodexProductRun({
+    ...result.prepared,
+    browserPageRef: { ...browserPageRef, tabId: 'tab-swapped' },
+  }), false)
+})
+
 test('product run preparer persists exact resource authority only with matching refs and tool authorization', () => {
   const resourceDigest = 'd'.repeat(64)
   const reference = {

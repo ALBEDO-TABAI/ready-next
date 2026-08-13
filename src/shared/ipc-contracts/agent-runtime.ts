@@ -77,6 +77,28 @@ export type SendScopedResourceSelection =
       path: string
       skillId?: string
     }
+  | {
+      kind: 'browser_tab'
+      id: string
+      name: string
+      tabId: string
+    }
+  | {
+      kind: 'calendar_event'
+      id: string
+      name: string
+      eventId: string
+    }
+  | {
+      kind: 'quoted_text'
+      id: string
+      name: string
+      text: string
+      documentTitle?: string
+      sectionTitle?: string
+      lineStart?: number
+      lineEnd?: number
+    }
 
 export type SendScopedAttachmentConfirmationInput = {
   selectedCount: number
@@ -479,6 +501,28 @@ export const sendScopedRequestSchema: z.ZodType<SendScopedRequest> = z.object({
       name: nonEmptyString,
       path: nonEmptyString,
       skillId: nonEmptyString.optional(),
+    }).strict(),
+    z.object({
+      kind: z.literal('browser_tab'),
+      id: nonEmptyString,
+      name: nonEmptyString,
+      tabId: nonEmptyString,
+    }).strict(),
+    z.object({
+      kind: z.literal('calendar_event'),
+      id: nonEmptyString,
+      name: nonEmptyString,
+      eventId: nonEmptyString,
+    }).strict(),
+    z.object({
+      kind: z.literal('quoted_text'),
+      id: nonEmptyString,
+      name: nonEmptyString,
+      text: z.string().min(1).max(30_000),
+      documentTitle: z.string().optional(),
+      sectionTitle: z.string().optional(),
+      lineStart: z.number().int().positive().safe().optional(),
+      lineEnd: z.number().int().positive().safe().optional(),
     }).strict(),
   ])).max(32).optional(),
   currentDocumentAnchor: codexCurrentDocumentAnchorSchema.optional(),

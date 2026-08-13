@@ -36,7 +36,7 @@ function projection(): TaskProjectionRecord {
   }
 }
 
-test('Codex task activity projects safe Lark narration and durable tool progress into the current task', () => {
+test('Codex task activity streams safe narration alongside durable tool progress', () => {
   let row = projection()
   const patches: CodexTaskActivityPatch[] = []
   const projector = createCodexTaskActivityProjector({
@@ -55,11 +55,20 @@ test('Codex task activity projects safe Lark narration and durable tool progress
   })
 
   projector.observe({
-    stage: 'completed',
+    kind: 'narration',
+    source: 'commentary',
+    stage: 'streaming',
     atMs: 1,
-    item: { type: 'agentMessage', id: 'commentary-1', text: '我先定位文档，再统计 7 月数据。', phase: 'commentary' },
+    itemId: 'commentary-1',
+    text: '我先定位文档，再统计 7 月数据。',
   })
   assert.equal(row.taskSummary, '我先定位文档，再统计 7 月数据。')
+  assert.deepEqual(patches.at(-1)?.activityNarration, {
+    itemId: 'commentary-1',
+    source: 'commentary',
+    text: '我先定位文档，再统计 7 月数据。',
+    status: 'streaming',
+  })
 
   const toolItem = {
     type: 'dynamicToolCall' as const,
@@ -70,8 +79,8 @@ test('Codex task activity projects safe Lark narration and durable tool progress
     status: 'inProgress' as const,
     success: null,
   }
-  projector.observe({ stage: 'started', atMs: 2, item: toolItem })
-  projector.observe({ stage: 'started', atMs: 2, item: toolItem })
+  projector.observe({ kind: 'item', stage: 'started', atMs: 2, item: toolItem })
+  projector.observe({ kind: 'item', stage: 'started', atMs: 2, item: toolItem })
 
   assert.equal(row.taskTitle, '正在通过飞书查询')
   assert.equal(row.taskSummary, '正在读取并整理飞书信息')
@@ -81,6 +90,18 @@ test('Codex task activity projects safe Lark narration and durable tool progress
   assert.doesNotMatch(JSON.stringify(patches), /lark-cli|super-secret|--token/)
 
   projector.observe({
+    kind: 'narration',
+    source: 'reasoning_summary',
+    stage: 'streaming',
+    atMs: 2,
+    itemId: 'reasoning-1',
+    text: '正在核对统计口径。',
+  })
+  assert.equal(patches.at(-1)?.phase, 'tool_running')
+  assert.equal(patches.at(-1)?.activityNarration?.text, '正在核对统计口径。')
+
+  projector.observe({
+    kind: 'item',
     stage: 'completed',
     atMs: 3,
     item: { ...toolItem, status: 'completed', success: true },
@@ -106,12 +127,16 @@ test('Codex task activity ignores final answers, stale runs, and unsafe raw-comm
   })
 
   projector.observe({
-    stage: 'completed',
+    kind: 'narration',
+    source: 'commentary',
+    stage: 'streaming',
     atMs: 1,
-    item: { type: 'agentMessage', id: 'commentary-1', text: 'lark-cli doc search --token super-secret', phase: 'commentary' },
+    itemId: 'commentary-1',
+    text: 'lark-cli doc search --token super-secret',
   })
   assert.equal(row.taskSummary, '正在通过飞书查询并整理信息')
   projector.observe({
+    kind: 'item',
     stage: 'completed',
     atMs: 2,
     item: { type: 'agentMessage', id: 'final-1', text: '不应提前展示', phase: 'final_answer' },
@@ -120,6 +145,7 @@ test('Codex task activity ignores final answers, stale runs, and unsafe raw-comm
 
   row = { ...row, runId: 'run-2' }
   projector.observe({
+    kind: 'item',
     stage: 'started',
     atMs: 3,
     item: {
@@ -193,6 +219,7 @@ test('Codex task activity stays in the single run projection and survives termin
     },
   })
   projector.observe({
+    kind: 'item',
     stage: 'started',
     atMs: 2,
     item: {

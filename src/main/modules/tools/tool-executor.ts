@@ -49,6 +49,7 @@ import {
 import { executeBrowserTool } from './browser-tools'
 import type { BrowserTurnLease } from '../browser-engine/agent-browser-turn-lease'
 import { resolveBrowserToolSurfaceBinding } from '../browser-engine/browser-surface-binding'
+import { browserSnapshotService } from '../browser-engine/browser-snapshot-service'
 import { executeCalendarTool } from './calendar-tools'
 import { executeDocumentTool } from './document-tools'
 import { executeGeneralResearchTool } from './general-research-tools'
@@ -209,6 +210,38 @@ function requestEnvelopeWorkspaceRoots(value: unknown): string[] {
   return Array.isArray(roots)
     ? roots.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
     : []
+}
+
+type TrustedBrowserPageRef = {
+  tabId: string
+  physicalTargetToken: string
+  mainFrameDocumentToken: string
+}
+
+function requestEnvelopeBrowserPageRef(value: unknown): TrustedBrowserPageRef | null {
+  if (!value || typeof value !== 'object') return null
+  const hints = (value as { environmentHints?: unknown }).environmentHints
+  if (!hints || typeof hints !== 'object') return null
+  const page = (hints as { browserPageRef?: unknown }).browserPageRef
+  if (!page || typeof page !== 'object') return null
+  const record = page as Record<string, unknown>
+  const tabId = typeof record.tabId === 'string' ? record.tabId.trim() : ''
+  const physicalTargetToken = typeof record.physicalTargetToken === 'string'
+    ? record.physicalTargetToken.trim()
+    : ''
+  const mainFrameDocumentToken = typeof record.mainFrameDocumentToken === 'string'
+    ? record.mainFrameDocumentToken.trim()
+    : ''
+  return tabId && physicalTargetToken && mainFrameDocumentToken
+    ? { tabId, physicalTargetToken, mainFrameDocumentToken }
+    : null
+}
+
+function browserToolTargetsReferencedPage(toolName: string, args: Record<string, unknown>): boolean {
+  if (toolName === 'browser_task' || toolName === 'browser_research') return false
+  if (toolName !== 'browser_tabs') return true
+  const action = typeof args.action === 'string' ? args.action : 'list'
+  return action === 'switch' || action === 'close'
 }
 
 function browserOriginOf(value: string | null | undefined): string | null {
@@ -457,6 +490,22 @@ async function executeToolCallInner(
     args = outcome.data
   }
 
+  const trustedBrowserPageRef = definition.domain === 'browser'
+    ? requestEnvelopeBrowserPageRef(context.requestEnvelope)
+    : null
+  if (trustedBrowserPageRef && browserToolTargetsReferencedPage(toolName, args)) {
+    const requestedTabId = typeof args.tab_id === 'string' ? args.tab_id.trim() : ''
+    if (requestedTabId && requestedTabId !== trustedBrowserPageRef.tabId) {
+      return browserFailureOutput({
+        ok: false,
+        errorKind: 'browser_reference_target_mismatch',
+        expectedTabId: trustedBrowserPageRef.tabId,
+        requestedTabId,
+      })
+    }
+    args = { ...args, tab_id: trustedBrowserPageRef.tabId }
+  }
+
   // EP1-I3-1/I3-2 — action-confirmation gate (05 §3.1/§3.2). Sits AFTER
   // registration / authorization / internal-visibility / allowlist admission
   // and input validation, immediately before dispatch: admission signals must
@@ -631,6 +680,22 @@ async function executeToolCallInner(
         case 'browser': {
           if (!context.browserController) {
             return 'Browser controller is not available'
+          }
+          if (trustedBrowserPageRef && browserToolTargetsReferencedPage(toolName, args)) {
+            const identity = await browserSnapshotService.documentIdentity(
+              context.browserController,
+              trustedBrowserPageRef.tabId,
+            )
+            if (
+              identity.physicalTargetToken !== trustedBrowserPageRef.physicalTargetToken
+              || identity.frameDocumentToken !== trustedBrowserPageRef.mainFrameDocumentToken
+            ) {
+              return browserFailureOutput({
+                ok: false,
+                errorKind: 'browser_reference_stale',
+                tabId: trustedBrowserPageRef.tabId,
+              })
+            }
           }
           const browserCapability = resolveBrowserCapability(toolName, args)
           if (!browserCapability) {

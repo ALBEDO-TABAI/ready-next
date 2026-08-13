@@ -12,6 +12,7 @@ import {
   addDocumentQuoteReference,
   addReadyContextReferenceToAgentInput,
   createSkillReferenceAttachment,
+  showBrowserTabContextMenu,
   showReferenceToInputMenu,
 } from '../renderer/modules/agent/chat-input-bridge'
 import { useAgent } from '../renderer/stores/useAgent'
@@ -85,7 +86,7 @@ function installDom() {
   }
 }
 
-test('unsupported browser/document reference menu stays hidden', async () => {
+test('reference menus expose the input-reference action and preserve close-tab', async () => {
   const { restore } = installDom()
   try {
     let menuRequest: unknown = null
@@ -98,8 +99,26 @@ test('unsupported browser/document reference menu stays hidden', async () => {
       },
     }
 
-    assert.equal(await showReferenceToInputMenu({ x: 12, y: 34 }), false)
-    assert.equal(menuRequest, null)
+    assert.equal(await showReferenceToInputMenu({ x: 12, y: 34 }), true)
+    assert.deepEqual(menuRequest, {
+      x: 12,
+      y: 34,
+      items: [{ id: 'reference-to-input', label: '引用到输入框', iconText: '@' }],
+    })
+
+    ;(window as TestWindow).electronAPI = {
+      ui: {
+        showNativeContextMenu: async (options: unknown) => {
+          menuRequest = options
+          return { success: true, selectedId: 'close-tab' }
+        },
+      },
+    }
+    assert.equal(await showBrowserTabContextMenu({ x: 5, y: 6 }), 'close-tab')
+    assert.deepEqual((menuRequest as { items: Array<{ id: string }> }).items.map((item) => item.id), [
+      'reference-to-input',
+      'close-tab',
+    ])
 
     ;(window as TestWindow).electronAPI = {
       ui: {
@@ -112,28 +131,9 @@ test('unsupported browser/document reference menu stays hidden', async () => {
   }
 })
 
-test('only Main-verifiable skill references become agent attachments', async () => {
+test('browser, draft document, calendar and skill references become identity-preserving attachments', async () => {
   const { restore } = installDom()
   try {
-    ;(window as TestWindow).electronAPI = {
-      browser: {
-        getTabContext: async (tabId: string) => {
-          assert.equal(tabId, 'tab-1')
-          return {
-            success: true,
-            data: {
-              title: 'Ready Browser',
-              url: 'https://example.com/page',
-              heading: 'Heading',
-              selection: 'Selected text',
-              excerpt: 'Snapshot excerpt',
-              capturedAt: 123,
-            },
-          }
-        },
-      },
-    }
-
     useAgent.setState({ attachments: [], filePool: [], inputValue: '' })
     useWorkspace.setState({ chatPanelVisible: false })
     let focusEvents = 0
@@ -172,13 +172,20 @@ test('only Main-verifiable skill references become agent attachments', async () 
 
     const attachments = useAgent.getState().attachments
     assert.equal(useWorkspace.getState().chatPanelVisible, true)
-    assert.equal(focusEvents, 1)
-    assert.equal(attachments.length, 1)
+    assert.equal(focusEvents, 4)
+    assert.equal(attachments.length, 4)
     assert.deepEqual(attachments.map((attachment) => attachment.source), [
+      'browser-tab',
+      'document-tab',
+      'calendar-event',
       'skill-folder',
     ])
-    assert.equal(attachments[0]?.skillId, 'image-analysis-router')
-    assert.equal(attachments[0]?.skillFolderPath, '/skills/image-analysis-router')
+    assert.equal(attachments[0]?.browserTabId, 'tab-1')
+    assert.equal(attachments[0]?.excerpt, undefined)
+    assert.equal(attachments[1]?.selection, 'Draft body')
+    assert.equal(attachments[2]?.eventId, 'event-1')
+    assert.equal(attachments[3]?.skillId, 'image-analysis-router')
+    assert.equal(attachments[3]?.skillFolderPath, '/skills/image-analysis-router')
   } finally {
     useAgent.setState({ attachments: [], filePool: [], inputValue: '' })
     useWorkspace.setState({ chatPanelVisible: true })
@@ -232,7 +239,7 @@ test('file and folder references become local-path agent attachments and open th
   }
 })
 
-test('document quote UI stays disabled until exact host readback exists', () => {
+test('document quote enters both the active composer and @ reference pool as user-selected text', () => {
   const { restore } = installDom()
   try {
     useAgent.setState({ attachments: [], filePool: [], inputValue: '' })
@@ -252,10 +259,15 @@ test('document quote UI stays disabled until exact host readback exists', () => 
     })
 
     const state = useAgent.getState()
-    assert.equal(useWorkspace.getState().chatPanelVisible, false)
-    assert.equal(focusEvents, 0)
-    assert.equal(state.attachments.length, 0)
-    assert.equal(state.filePool.length, 0)
+    assert.equal(useWorkspace.getState().chatPanelVisible, true)
+    assert.equal(focusEvents, 1)
+    assert.equal(state.attachments.length, 1)
+    assert.equal(state.filePool.length, 1)
+    assert.equal(state.attachments[0]?.source, 'document-quote')
+    assert.equal(state.attachments[0]?.selection, '这一段需要 agent 能直接看到。')
+    assert.equal(state.attachments[0]?.sectionTitle, '第二章')
+    assert.equal(state.attachments[0]?.lineStart, 12)
+    assert.equal(state.attachments[0]?.lineEnd, 14)
   } finally {
     useAgent.setState({ attachments: [], filePool: [], inputValue: '' })
     useWorkspace.setState({ chatPanelVisible: true })

@@ -1,4 +1,5 @@
 import type {
+  ScopeRunActivityNarration,
   ScopeRunTraceItem,
 } from '../contracts/types'
 import type {
@@ -16,6 +17,7 @@ export type CodexTaskActivityPatch = {
   taskTitle?: string
   taskSummary?: string
   toolEvent?: ScopeRunTraceItem
+  activityNarration?: ScopeRunActivityNarration
   timestamp: string
 }
 
@@ -128,6 +130,7 @@ export function createCodexTaskActivityProjector(input: {
 }): { observe(event: CodexTurnActivityEvent): void } {
   const now = input.now || (() => new Date().toISOString())
   const publishedToolStages = new Set<string>()
+  let activityPhase: CodexTaskActivityPatch['phase'] = 'planning'
 
   return {
     observe(event) {
@@ -139,18 +142,24 @@ export function createCodexTaskActivityProjector(input: {
         || TERMINAL_TASK_STATUSES.has(current.status)
       ) return
 
-      if (event.item.type === 'agentMessage') {
-        if (event.stage !== 'completed' || event.item.phase !== 'commentary') return
-        const taskSummary = safeCommentary(event.item.text, input.larkCliRead)
+      if (event.kind === 'narration') {
+        const taskSummary = safeCommentary(event.text, input.larkCliRead)
         if (!taskSummary) return
         input.publish({
-          phase: 'planning',
+          phase: activityPhase,
           taskSummary,
+          activityNarration: {
+            itemId: event.itemId,
+            source: event.source,
+            text: taskSummary,
+            status: event.stage,
+          },
           timestamp: now(),
         })
         return
       }
 
+      if (event.item.type === 'agentMessage') return
       if (event.item.type !== 'dynamicToolCall') return
       const stageKey = `${event.item.id}:${event.stage}`
       if (publishedToolStages.has(stageKey)) return
@@ -160,8 +169,9 @@ export function createCodexTaskActivityProjector(input: {
       const done = event.stage === 'completed' && !failed
       const updatedAt = now()
       const stepId = `codex-tool:${event.item.id}`
+      activityPhase = 'tool_running'
       input.publish({
-        phase: 'tool_running',
+        phase: activityPhase,
         taskTitle: failed ? copy.failedTitle : done ? copy.completedTitle : copy.runningTitle,
         taskSummary: failed ? copy.failedSummary : done ? copy.completedSummary : copy.runningSummary,
         toolEvent: {

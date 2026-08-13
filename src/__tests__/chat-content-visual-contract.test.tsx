@@ -32,6 +32,16 @@ test('thinking indicator is a compact live status without an assistant avatar', 
   assert.doesNotMatch(html, />R</)
 })
 
+test('thinking indicator can replace its fallback with a safe live narration', () => {
+  const html = renderToStaticMarkup(createElement(ThinkingIndicator, {
+    message: '正在核对天气来源',
+  }))
+
+  assert.match(html, /data-ready-thinking-summary="true"/)
+  assert.match(html, />正在核对天气来源</)
+  assert.doesNotMatch(html, />思考中</)
+})
+
 test('streaming prose exposes a steady caret while completed prose does not', () => {
   const streaming = renderToStaticMarkup(createElement(MarkdownContent, {
     content: '正在整理结果',

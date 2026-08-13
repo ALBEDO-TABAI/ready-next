@@ -87,6 +87,61 @@ test('explicit and selected skill inputs are Main-validated and deduplicated by 
   }
 })
 
+test('browser, calendar and document-quote references use Main-resolved or explicit-user text without widening file authority', async () => {
+  const result = await resolveCodexExplicitResources({
+    selections: [
+      { kind: 'browser_tab', id: 'browser-1', name: 'forged title', tabId: 'tab-1' },
+      { kind: 'calendar_event', id: 'calendar-1', name: 'forged event', eventId: 'event-1' },
+      {
+        kind: 'quoted_text', id: 'quote-1', name: '方案.md', text: '用户选中的准确原文',
+        documentTitle: '方案.md', sectionTitle: '结论', lineStart: 8, lineEnd: 9,
+      },
+    ],
+    resolveSkill: () => null,
+    resolveBrowser: async () => ({
+      name: 'Main read title',
+      path: 'https://example.com/main-read',
+      text: 'MAIN_BROWSER_CONTEXT',
+      digest: 'a'.repeat(64),
+    }),
+    resolveCalendar: () => ({
+      name: 'Main calendar title',
+      path: 'calendar-event://event-1',
+      text: 'MAIN_CALENDAR_CONTEXT',
+      digest: 'b'.repeat(64),
+    }),
+  })
+
+  assert.deepEqual(result.input.map((entry) => entry.type === 'text' ? entry.text : entry.type), [
+    'MAIN_BROWSER_CONTEXT',
+    'MAIN_CALENDAR_CONTEXT',
+    '用户明确引用的文档摘录（只读材料）：方案.md\n章节：结论\n位置：第 8-9 行\n\n用户选中的准确原文',
+  ])
+  assert.deepEqual(result.requestResources.map((resource) => ({
+    kind: resource.kind,
+    source: resource.source,
+    name: resource.name,
+    path: resource.path,
+    text: resource.text,
+    canWrite: resource.canWrite,
+  })), [
+    {
+      kind: 'browser_reference', source: 'browser_context', name: 'Main read title',
+      path: 'https://example.com/main-read', text: '', canWrite: false,
+    },
+    {
+      kind: 'calendar_event', source: 'calendar_context', name: 'Main calendar title',
+      path: 'calendar-event://event-1', text: '', canWrite: false,
+    },
+    {
+      kind: 'document_quote', source: 'document_quote', name: '方案.md',
+      path: null, text: '', canWrite: false,
+    },
+  ])
+  assert.deepEqual(result.authorities, [])
+  assert.equal(result.resourceRefs.length, 3)
+})
+
 test('legacy DOC/RTF/ODT selections remain explicitly unsupported', async () => {
   const root = await mkdtemp(join(tmpdir(), 'ready-codex-unsupported-'))
   try {

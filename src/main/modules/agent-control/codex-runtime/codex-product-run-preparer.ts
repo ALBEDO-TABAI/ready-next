@@ -35,6 +35,7 @@ import {
   preparedCodexResourceAuthoritySchema,
   type PreparedCodexResourceAuthority,
 } from './codex-explicit-resources'
+import type { TrustedRequestEnvironment } from '../contracts/request-envelope'
 
 export type ReadyToolSurfaceRef = ReadyToolSurface
 
@@ -69,6 +70,7 @@ export type PreparedCodexProductRun = {
   readyToolHostIdentity: ReadyToolHostIdentity
   externalReadSlice?: PreparedCodexExternalReadSlice
   resourceAuthorities?: PreparedCodexResourceAuthority[]
+  browserPageRef?: NonNullable<TrustedRequestEnvironment['browserPageRef']>
   productBudgetSeed: {
     maxIterations: number
     maxToolCalls: number
@@ -104,6 +106,7 @@ export type CodexProductRunPreparationInput = {
   resourceOwnerId: string
   externalReadSlice?: PreparedCodexExternalReadSlice | null
   resourceAuthorities?: PreparedCodexResourceAuthority[]
+  browserPageRef?: NonNullable<TrustedRequestEnvironment['browserPageRef']>
   productBudgetSeed: {
     maxIterations: number
     maxToolCalls: number
@@ -152,6 +155,13 @@ const preparedExternalReadSliceSchema = z.custom<PreparedCodexExternalReadSlice>
     return false
   }
 })
+const browserPageRefSchema = z.object({
+  tabId: nonEmptyString,
+  physicalTargetToken: nonEmptyString,
+  mainFrameId: nonEmptyString,
+  mainFrameDocumentToken: nonEmptyString,
+  profileId: z.string().nullable().optional(),
+}).strict()
 const userIngressPreparationSchema = z.object({
   kind: z.literal('user_ingress'),
   attemptKind: z.literal('user_ingress'),
@@ -193,6 +203,7 @@ const preparationInputSchema = z.object({
   resourceOwnerId: nonEmptyString,
   externalReadSlice: preparedExternalReadSliceSchema.nullable().optional(),
   resourceAuthorities: z.array(preparedCodexResourceAuthoritySchema).optional(),
+  browserPageRef: browserPageRefSchema.optional(),
   productBudgetSeed: budgetSeedSchema,
 }).strict()
 const preparedRunSchema = z.object({
@@ -222,6 +233,7 @@ const preparedRunSchema = z.object({
   }).strict(),
   externalReadSlice: preparedExternalReadSliceSchema.optional(),
   resourceAuthorities: z.array(preparedCodexResourceAuthoritySchema).optional(),
+  browserPageRef: browserPageRefSchema.optional(),
   productBudgetSeed: budgetSeedSchema,
   neutralProjectionSeed: z.object({
     phase: z.literal('planning'),
@@ -259,6 +271,7 @@ export function isPreparedCodexProductRun(value: unknown): value is PreparedCode
           ...(prepared.resourceAuthorities?.length
             ? { resourceAuthorities: prepared.resourceAuthorities }
             : {}),
+          ...(prepared.browserPageRef ? { browserPageRef: prepared.browserPageRef } : {}),
         })
 }
 
@@ -392,6 +405,7 @@ export class CodexProductRunPreparer {
                 ? { externalReadResourceAuthority: externalReadResourceAuthority(externalReadSlice) }
                 : {}),
               ...(resourceAuthorities.length > 0 ? { resourceAuthorities } : {}),
+              ...(input.browserPageRef ? { browserPageRef: input.browserPageRef } : {}),
             }),
         recoveredContextDigest: null,
         actionAuthorizationMode: parseActionAuthorizationMode(input.actionAuthorizationMode),
@@ -405,6 +419,7 @@ export class CodexProductRunPreparer {
         },
         ...(externalReadSlice ? { externalReadSlice } : {}),
         ...(resourceAuthorities.length > 0 ? { resourceAuthorities } : {}),
+        ...(input.browserPageRef ? { browserPageRef: input.browserPageRef } : {}),
         productBudgetSeed: input.productBudgetSeed,
         neutralProjectionSeed: {
           phase: 'planning',

@@ -129,8 +129,14 @@ function normalizeAttachmentExt(value: string | undefined, fallback = '.txt'): s
 }
 
 export async function showReferenceToInputMenu(point: { x: number; y: number }): Promise<boolean> {
-  void point
-  return false
+  const api = typeof window !== 'undefined' ? window.electronAPI?.ui : null
+  if (!api?.showNativeContextMenu) return false
+  const result = await api.showNativeContextMenu({
+    x: point.x,
+    y: point.y,
+    items: [{ id: 'reference-to-input', label: '引用到输入框', iconText: '@' }],
+  }).catch(() => null)
+  return result?.success === true && result.selectedId === 'reference-to-input'
 }
 
 export type BrowserTabContextMenuAction = 'reference-to-input' | 'close-tab'
@@ -142,7 +148,9 @@ export async function showBrowserTabContextMenu(
   const api = typeof window !== 'undefined' ? window.electronAPI?.ui : null
   if (!api?.showNativeContextMenu) return null
   const items: Array<{ id: string; label: string; iconText: string }> = []
-  void options
+  if (options?.canReference !== false) {
+    items.push({ id: 'reference-to-input', label: '引用到输入框', iconText: '@' })
+  }
   items.push({ id: 'close-tab', label: '关闭标签页', iconText: '✕' })
   const result = await api.showNativeContextMenu({ x: point.x, y: point.y, items }).catch(() => null)
   if (!result?.success) return null
@@ -185,47 +193,17 @@ async function createReadyContextAttachment(reference: ReadyContextReference): P
 
   if (reference.type === 'browser-tab') {
     const fallbackTitle = reference.title || reference.name || '网页标签'
-    let snapshot = {
-      title: fallbackTitle,
-      url: reference.url || '',
-      heading: reference.heading || '',
-      selection: reference.selection || '',
-      excerpt: reference.excerpt || '',
-      capturedAt: Date.now(),
-    }
-    try {
-      if (window.electronAPI?.browser?.getTabContext && reference.tabId) {
-        const ctx = await window.electronAPI.browser.getTabContext(reference.tabId)
-        if (ctx.success && ctx.data) {
-          snapshot = {
-            title: ctx.data.title || snapshot.title,
-            url: ctx.data.url || snapshot.url,
-            heading: ctx.data.heading || snapshot.heading,
-            selection: ctx.data.selection || snapshot.selection,
-            excerpt: ctx.data.excerpt || snapshot.excerpt,
-            capturedAt: ctx.data.capturedAt || snapshot.capturedAt,
-          }
-        }
-      }
-    } catch {
-      // silent-catch: tab context lookup may legitimately fail (tab closed mid-attachment). The fallback tab metadata is still useful as a reference and no user-facing impact.
-    }
-    const path = snapshot.url || (reference.tabId ? `browser-tab://${reference.tabId}` : `browser-tab://${Date.now()}`)
+    const path = reference.tabId ? `browser-tab://${reference.tabId}` : `browser-tab://${Date.now()}`
     return {
       id: createAttachmentId('attach-browser'),
-      name: snapshot.title || fallbackTitle,
+      name: fallbackTitle,
       path,
       type: 'text',
-      size: snapshot.excerpt.length,
+      size: 0,
       ext: '.url',
       source: 'browser-tab',
       browserTabId: reference.tabId,
-      url: snapshot.url || reference.url,
-      title: snapshot.title || fallbackTitle,
-      heading: snapshot.heading,
-      selection: snapshot.selection,
-      excerpt: snapshot.excerpt,
-      capturedAt: snapshot.capturedAt,
+      title: fallbackTitle,
     }
   }
 
@@ -244,7 +222,7 @@ async function createReadyContextAttachment(reference: ReadyContextReference): P
       documentTitle: title,
       tabId: reference.tabId,
       title,
-      excerpt: content.slice(0, 12000),
+      selection: content.slice(0, 30_000),
       dirty: reference.dirty,
       saveStatus: reference.saveStatus,
     }
@@ -277,7 +255,6 @@ async function createReadyContextAttachment(reference: ReadyContextReference): P
 }
 
 export async function addReadyContextReferenceToAgentInput(reference: ReadyContextReference): Promise<void> {
-  if (reference.type !== 'file' && reference.type !== 'skill-folder') return
   const composerAuthority = captureComposerAuthority(useAgent.getState())
   const attachment = await createReadyContextAttachment(reference)
   if (!isComposerAuthorityCurrent(useAgent.getState(), composerAuthority)) return
@@ -305,5 +282,23 @@ export function addDocumentWidgetTargetReference(context: DocumentWidgetTargetCo
 }
 
 export function addDocumentQuoteReference(context: DocumentQuoteContext): void {
-  void context
+  const selection = context.selection.trim()
+  if (!selection) return
+  const attachment: ChatAttachment = {
+    id: createAttachmentId('attach-document-quote'),
+    name: context.title || '文档摘录',
+    path: context.path || `document-quote://${Date.now()}`,
+    type: 'text',
+    size: selection.length,
+    ext: '.quote',
+    source: 'document-quote',
+    documentTitle: context.title,
+    selection: selection.slice(0, 30_000),
+    sectionTitle: context.sectionTitle || undefined,
+    lineStart: context.lineStart || undefined,
+    lineEnd: context.lineEnd || undefined,
+  }
+  useWorkspace.setState({ chatPanelVisible: true })
+  useAgent.getState().addAttachments([attachment])
+  window.dispatchEvent(new CustomEvent(READY_FOCUS_CHAT_INPUT_EVENT))
 }

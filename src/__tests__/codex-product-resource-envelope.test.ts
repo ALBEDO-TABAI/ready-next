@@ -8,6 +8,7 @@ import {
   buildExternalReadToolSnapshot,
   buildCodexProductRequestEnvelope,
   createCurrentDocumentReadRequester,
+  hasExplicitCurrentDocumentWriteIntent,
   validateCurrentDocumentReadPayload,
 } from '../main/modules/agent-control/codex-runtime/codex-runtime-production-composition'
 import { digestCanonicalJson } from '../main/modules/agent-control/codex-runtime/codex-model-gateway-contract'
@@ -36,6 +37,7 @@ import { AgentSdkToolExecutor } from '../main/modules/agent-control/runtime-core
 import type { AIModelConfig } from '../shared/ai-providers'
 import { classifyIntent } from '../main/modules/agent-control/intent-classifier'
 import { __setSkillsRuntimeManagerForTests } from '../main/modules/skills-runtime/runtime-manager'
+import { executeModuleToolAction } from '../renderer/modules/agent/moduleExecutor'
 
 const digest = 'a'.repeat(64)
 const baseConfig: AIModelConfig = {
@@ -232,6 +234,78 @@ test('current-document turn keeps the full legal surface but authorizes only exa
     'document_replace_exact',
   ])
   assert.deepEqual(narrowed.readyTurnToolAuthorization.allowedToolNames, ['document_read_section'])
+})
+
+test('current-document write intent is explicit and keeps advice or read-only requests read-only', () => {
+  assert.equal(hasExplicitCurrentDocumentWriteIntent('把当前文档第二段改成更简洁的表述并保存'), true)
+  assert.equal(hasExplicitCurrentDocumentWriteIntent('在当前文档插入一张信息卡'), true)
+  assert.equal(hasExplicitCurrentDocumentWriteIntent('只阅读当前文档并总结'), false)
+  assert.equal(hasExplicitCurrentDocumentWriteIntent('建议我如何修改当前文档'), false)
+  assert.equal(hasExplicitCurrentDocumentWriteIntent('不要修改，只检查是否有错字'), false)
+})
+
+test('current-document write turn requires exact read, pins every mutation to the anchored tab and forbids save-as', async () => {
+  let exactRead = false
+  const calls: Array<{ tool: string; args: Record<string, unknown> }> = []
+  const requester = createCurrentDocumentReadRequester({
+    anchor,
+    agent: 'ready',
+    sessionId: 'scope-1',
+    scopeId: 'scope-1',
+    readyRunId: 'run-write',
+    codexThreadId: 'thread-write',
+    codexTurnId: 'turn-write',
+    codexCallId: 'call-write',
+    readyActionId: 'action-write',
+    actionIdentityDigest: 'action-write-digest',
+    resourceAnchorDigest: 'resource-write-digest',
+    abortSignal: new AbortController().signal,
+    allowWrite: true,
+    hasExactRead: () => exactRead,
+    onExactRead: () => { exactRead = true },
+    requestRendererToolAction: async (payload) => {
+      calls.push({ tool: payload.tool, args: payload.args })
+      if (payload.tool !== 'document.readSection') return { ok: true, mutated: true }
+      const summary = 'anchored document body'
+      const requestBindingDigest = (payload.args.__readyResourceRead as { requestBindingDigest: string }).requestBindingDigest
+      return {
+        ok: true,
+        summary,
+        resourceRead: {
+          logicalResourceId: anchor.logicalResourceId,
+          currentVersion: anchor.currentVersion,
+          currentDigest: anchor.currentDigest,
+          policyEpoch: anchor.policyEpoch,
+          tabId: anchor.tabId,
+          pane: anchor.pane,
+          pathDigest: anchor.pathDigest,
+          incarnationKey: anchor.incarnationKey,
+          operation: 'read_section',
+          requestBindingDigest,
+          summaryDigest: createHash('sha256').update(summary).digest('hex'),
+          bodyBytes: Buffer.byteLength(summary),
+        },
+      }
+    },
+  })
+
+  await assert.rejects(
+    requester('document.replaceExact', { tabId: 'other-tab', target: 'old', replacement: 'new' }),
+    /resource_write_requires_exact_read/,
+  )
+  await requester('document.readSection', { tabId: 'other-tab', range: 'full' })
+  await requester('document.replaceExact', { tabId: 'other-tab', target: 'old', replacement: 'new' })
+  await requester('document.saveTab', { tabId: 'other-tab', path: '/tmp/escaped.md' })
+
+  assert.equal(calls[0]?.args.tabId, anchor.tabId)
+  assert.deepEqual(calls[1], {
+    tool: 'document.replaceExact',
+    args: { tabId: anchor.tabId, target: 'old', replacement: 'new' },
+  })
+  assert.deepEqual(calls[2], {
+    tool: 'document.saveTab',
+    args: { tabId: anchor.tabId },
+  })
 })
 
 test('external read keeps the full frozen Provider surface but binds the turn to one typed reader', () => {
@@ -437,4 +511,96 @@ test('main-to-renderer current-document read returns one exact receipt and rejec
     requester('document.replaceExact', { target: 'x', replacement: 'y' }),
     /resource_tool_not_authorized/,
   )
+})
+
+test('current-document write authorization reaches the anchored renderer tab and saves only its existing path', async () => {
+  resetCodexCurrentDocumentAnchorStateForTest()
+  useMode.setState({ workbenchMode: 'document', splitMode: null })
+  useDocTabs.setState({
+    tabs: [{
+      id: 'doc-write-integrated',
+      path: '/tmp/codex-current-write.md',
+      title: 'codex-current-write.md',
+      content: '# 标题\n\n旧句\n',
+      isDirty: false,
+    }],
+    activeTabId: 'doc-write-integrated',
+    splitTabId: null,
+    focusedPaneTabId: 'doc-write-integrated',
+  })
+  const captured = await buildCodexCurrentDocumentAnchor('scope-write-integrated')
+  assert.ok(captured)
+  let exactRead = false
+  const writes: Array<{ path: string; content: string }> = []
+  const priorWindow = globalThis.window
+  Object.defineProperty(globalThis, 'window', {
+    configurable: true,
+    value: {
+      electronAPI: {
+        document: {
+          readFile: async () => ({ success: true, content: '# 标题\n\n旧句\n' }),
+          writeFile: async (path: string, content: string) => {
+            writes.push({ path, content })
+            return { success: true }
+          },
+        },
+      },
+      localStorage: { getItem: () => null },
+    },
+  })
+  try {
+    const requester = createCurrentDocumentReadRequester({
+      anchor: captured,
+      agent: 'ready',
+      sessionId: 'scope-write-integrated',
+      scopeId: 'scope-write-integrated',
+      readyRunId: 'run-write-integrated',
+      codexThreadId: 'thread-write-integrated',
+      codexTurnId: 'turn-write-integrated',
+      codexCallId: 'call-write-integrated',
+      readyActionId: 'action-write-integrated',
+      actionIdentityDigest: 'action-write-integrated-digest',
+      resourceAnchorDigest: 'resource-write-integrated-digest',
+      abortSignal: new AbortController().signal,
+      allowWrite: true,
+      hasExactRead: () => exactRead,
+      onExactRead: () => { exactRead = true },
+      requestRendererToolAction: async (payload) => {
+        const result = await executeModuleToolAction({
+          scopeId: payload.scopeId,
+          agentName: payload.agent || 'ready',
+          tool: payload.tool,
+          args: payload.args,
+          runId: payload.runId,
+          activateWorkbenchMode: () => {},
+          upsertScopeRunState: () => {},
+        })
+        if (!result.handled || !result.payload) throw new Error('renderer_did_not_handle_document_action')
+        return result.payload
+      },
+    })
+
+    await requester('document.readSection', { range: 'full' })
+    await requester('document.replaceExact', {
+      tabId: 'other-tab',
+      target: '旧句',
+      replacement: '新句',
+    })
+    await requester('document.saveTab', {
+      tabId: 'other-tab',
+      path: '/tmp/escaped.md',
+    })
+
+    assert.deepEqual(writes, [{
+      path: '/tmp/codex-current-write.md',
+      content: '# 标题\n\n新句\n',
+    }])
+    const saved = useDocTabs.getState().tabs.find((tab) => tab.id === 'doc-write-integrated')
+    assert.equal(saved?.path, '/tmp/codex-current-write.md')
+    assert.equal(saved?.content, '# 标题\n\n新句\n')
+    assert.equal(saved?.isDirty, false)
+  } finally {
+    if (priorWindow === undefined) delete (globalThis as { window?: unknown }).window
+    else Object.defineProperty(globalThis, 'window', { configurable: true, value: priorWindow })
+  }
 })

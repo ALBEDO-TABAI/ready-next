@@ -204,6 +204,14 @@ export type CodexNativeNotification =
       params: { threadId: string; turnId: string; item: CodexThreadItem; completedAtMs: number }
     }
   | { method: 'item/agentMessage/delta'; params: { threadId: string; turnId: string; itemId: string; delta: string } }
+  | {
+      method: 'item/reasoning/summaryPartAdded'
+      params: { threadId: string; turnId: string; itemId: string; summaryIndex: number }
+    }
+  | {
+      method: 'item/reasoning/summaryTextDelta'
+      params: { threadId: string; turnId: string; itemId: string; summaryIndex: number; delta: string }
+    }
   | { method: 'turn/completed'; params: { threadId: string; turn: CodexTurn } }
   | {
       method: 'error'
@@ -233,6 +241,8 @@ export const CODEX_PROJECTED_NOTIFICATION_METHODS = [
   'item/started',
   'item/completed',
   'item/agentMessage/delta',
+  'item/reasoning/summaryPartAdded',
+  'item/reasoning/summaryTextDelta',
 ] as const
 
 export const CODEX_PASSIVE_NOTIFICATION_METHODS = [
@@ -240,8 +250,6 @@ export const CODEX_PASSIVE_NOTIFICATION_METHODS = [
   'thread/status/changed',
   'thread/tokenUsage/updated',
   'thread/settings/updated',
-  'item/reasoning/summaryPartAdded',
-  'item/reasoning/summaryTextDelta',
   'item/reasoning/textDelta',
   'account/rateLimits/updated',
   'remoteControl/status/changed',
@@ -758,6 +766,45 @@ export function normalizeCodexNativeNotification(
     return {
       kind: 'accepted',
       notification: { method, params: { threadId, turnId, itemId, delta } },
+    }
+  }
+  if (method === 'item/reasoning/summaryPartAdded') {
+    const threadId = stringField(params, 'threadId')
+    const turnId = stringField(params, 'turnId')
+    const itemId = stringField(params, 'itemId')
+    const summaryIndex = params.summaryIndex
+    if (!threadId || !turnId || !itemId || !Number.isSafeInteger(summaryIndex)) {
+      return { kind: 'invalid', code: 'invalid_params' }
+    }
+    return {
+      kind: 'accepted',
+      notification: {
+        method,
+        params: { threadId, turnId, itemId, summaryIndex: summaryIndex as number },
+      },
+    }
+  }
+  if (method === 'item/reasoning/summaryTextDelta') {
+    const threadId = stringField(params, 'threadId')
+    const turnId = stringField(params, 'turnId')
+    const itemId = stringField(params, 'itemId')
+    const summaryIndex = params.summaryIndex
+    const delta = stringField(params, 'delta')
+    if (
+      !threadId
+      || !turnId
+      || !itemId
+      || !Number.isSafeInteger(summaryIndex)
+      || delta === null
+    ) {
+      return { kind: 'invalid', code: 'invalid_params' }
+    }
+    return {
+      kind: 'accepted',
+      notification: {
+        method,
+        params: { threadId, turnId, itemId, summaryIndex: summaryIndex as number, delta },
+      },
     }
   }
   if (method === 'error') {

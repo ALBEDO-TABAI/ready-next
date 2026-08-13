@@ -167,6 +167,13 @@ export interface ScopeRunTraceItem {
   detail?: string
 }
 
+export interface ScopeRunActivityNarration {
+  itemId: string
+  source: 'commentary' | 'reasoning_summary'
+  text: string
+  status: 'streaming' | 'completed'
+}
+
 export type ScopeRunMemorySourceType =
   | 'resident_agent'
   | 'resident_user'
@@ -491,6 +498,7 @@ export interface ScopeRunEventPayload {
   ownerResourceId?: string
   lastEvidenceAt?: string
   toolEvent?: ScopeRunTraceItem
+  activityNarration?: ScopeRunActivityNarration | null
   error?: string
   /** Phase 3: structured error classification surfaced at the agent:error boundary. */
   errorKind?: string

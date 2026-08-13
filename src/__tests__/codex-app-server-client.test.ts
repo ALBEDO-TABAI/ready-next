@@ -481,7 +481,7 @@ test('initialize and typed methods serialize only their exact public protocol su
   assert.equal((await reading).thread.id, 'thread-1')
 })
 
-test('pinned 0.146.1 notifications close exactly as 7 projected, 12 passive, 1 reroute, and 50 opted out', () => {
+test('pinned 0.146.1 notifications close exactly as 9 projected, 10 passive, 1 reroute, and 50 opted out', () => {
   const schema = JSON.parse(readFileSync(resolve(
     'assets/codex-runtime/schemas/stable/codex_app_server_protocol.v2.schemas.json',
   ), 'utf8')) as {
@@ -501,8 +501,8 @@ test('pinned 0.146.1 notifications close exactly as 7 projected, 12 passive, 1 r
     ...CODEX_OPT_OUT_NOTIFICATION_METHODS,
   ]
 
-  assert.equal(CODEX_PROJECTED_NOTIFICATION_METHODS.length, 7)
-  assert.equal(CODEX_PASSIVE_NOTIFICATION_METHODS.length, 12)
+  assert.equal(CODEX_PROJECTED_NOTIFICATION_METHODS.length, 9)
+  assert.equal(CODEX_PASSIVE_NOTIFICATION_METHODS.length, 10)
   assert.equal(CODEX_OPT_OUT_NOTIFICATION_METHODS.length, 50)
   assert.equal(pinnedMethods.length, 70)
   assert.equal(new Set(pinnedMethods).size, 70)
@@ -811,7 +811,7 @@ test('response-first turn reconciliation leaves the inbound line open for later 
   assert.equal((await starting).turn.id, 'turn-1')
 })
 
-test('reasoning stream notifications stay passive through the final native turn', async () => {
+test('safe reasoning summary notifications broadcast while raw reasoning stays passive', async () => {
   const input = makeClient()
   await initializeClient(input)
   const observed: string[] = []
@@ -883,6 +883,8 @@ test('reasoning stream notifications stay passive through the final native turn'
   assert.equal(input.transport.closedReason, null)
   assert.deepEqual(observed, [
     'item/started',
+    'item/reasoning/summaryPartAdded',
+    'item/reasoning/summaryTextDelta',
     'item/completed',
     'item/agentMessage/delta',
     'turn/completed',
