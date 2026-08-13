@@ -59,7 +59,9 @@ build/runtime-seeds/
 .claude/scheduled_tasks.lock
 .claude/worktrees/
 .impeccable/
+.lark-cli/
 outputs/agent-audit/live/
+outputs/codex-runtime-e5/
 outputs/send-im-live-*/
 index-*.css
 index-*.js
