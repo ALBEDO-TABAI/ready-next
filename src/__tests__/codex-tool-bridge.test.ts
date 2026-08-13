@@ -1234,10 +1234,11 @@ test('proven-absent, indeterminate, and timeout branches are typed and do not re
         signal.addEventListener('abort', () => reject(signal.reason), { once: true })
       }),
     })
-    await assert.rejects(
-      () => f.bridge.execute(request()),
-      (error) => error instanceof CodexToolBridgeError && error.code === 'tool_timeout_effect_unknown',
-    )
+    const response = await f.bridge.execute(request())
+    assert.equal(response.success, false)
+    assert.match(JSON.stringify(response), /tool_execution_timeout/)
+    assert.equal(f.receipts.records.size, 1)
+    assert.equal(f.persistence.deliveryCount, 1)
     assert.equal(f.executions(), 1)
   })
   await t.test('confirmation wait is outside the frozen tool effect deadline', async () => {
@@ -1358,14 +1359,13 @@ test('proven-absent, indeterminate, and timeout branches are typed and do not re
       timeoutMs: 5,
       execute: async () => new Promise<ToolExecutionOutput>((resolve) => { release = resolve }),
     })
-    await assert.rejects(
-      () => f.bridge.execute(request()),
-      (error) => error instanceof CodexToolBridgeError && error.code === 'tool_timeout_effect_unknown',
-    )
+    const response = await f.bridge.execute(request())
+    assert.equal(response.success, false)
+    assert.match(JSON.stringify(response), /tool_execution_timeout/)
     release(createToolExecutionOutput('late result'))
     await new Promise((resolve) => setImmediate(resolve))
     assert.equal(f.receipts.records.size, 1)
-    assert.equal(f.persistence.deliveryCount, 0)
+    assert.equal(f.persistence.deliveryCount, 1)
     await assert.rejects(
       () => f.bridge.execute({ ...request(), requestId: 8 }),
       (error) => error instanceof CodexToolBridgeError && error.code === 'tool_result_replay_forbidden',
@@ -1411,8 +1411,13 @@ test('proven-absent, indeterminate, and timeout branches are typed and do not re
 })
 
 test('frozen per-tool timeout controls execution under the host hard cap', async () => {
+  const writeDefinition: ToolDefinition = {
+    ...definition('document_read', 5),
+    kind: 'write',
+    concurrency: 'serialized',
+  }
   const fastDeadline = fixture({
-    executionBinding: binding(undefined, 5),
+    executionBinding: binding(undefined, 5, writeDefinition),
     timeoutMs: 100,
     execute: async () => new Promise((resolve) => {
       setTimeout(() => resolve(createToolExecutionOutput('too late')), 20)

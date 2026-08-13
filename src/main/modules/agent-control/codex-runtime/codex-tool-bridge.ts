@@ -550,6 +550,7 @@ export class CodexReadyToolBridge implements CodexBoundServerRequestExecutor {
     let externallyAborted = false
     let connectionAborted = false
     let effectStarted = false
+    let settledReadTimeout = false
     let timer: ReturnType<typeof setTimeout> | null = null
     let rejectCancellation!: (reason: Error) => void
     const cancellation = new Promise<never>((_resolve, reject) => { rejectCancellation = reject })
@@ -699,34 +700,56 @@ export class CodexReadyToolBridge implements CodexBoundServerRequestExecutor {
           ? 'sidecar_disconnected_before_effect'
           : 'tool_effect_proven_absent')
       }
-      if (timedOut || externallyAborted || connectionAborted) {
-        void readyExecution.then((lateOutput) => this.persistLateResult(input, lateOutput)).catch(() => undefined)
-      }
-      const recovered = await this.deps.receipts.read(input.readyActionId)
-      if (recovered.state === 'confirmed') {
-        this.persistResult(input, recovered)
-        if (timedOut) throw new CodexToolBridgeError('tool_timeout_after_effect')
-        if (externallyAborted || externalSignal.aborted) {
-          throw new CodexToolBridgeError('tool_abort_after_effect')
+      if (
+        timedOut
+        && !externallyAborted
+        && !connectionAborted
+        && input.frozenEntry.effectProfile.kind === 'read'
+        && this.deps.isConnectionLive(input.connectionEpoch)
+      ) {
+        settledReadTimeout = true
+        void readyExecution.catch(() => undefined)
+        output = createToolExecutionOutput(
+          'The read operation timed out. Continue with prior evidence or use another source.',
+          {
+            shape: 'json',
+            data: {
+              errorKind: 'tool_execution_timeout',
+              toolName: input.toolName,
+              timeoutMs: input.executionTimeoutMs,
+            },
+          },
+        )
+      } else {
+        if (timedOut || externallyAborted || connectionAborted) {
+          void readyExecution.then((lateOutput) => this.persistLateResult(input, lateOutput)).catch(() => undefined)
         }
-        if (connectionAborted || connectionSignal.aborted) {
+        const recovered = await this.deps.receipts.read(input.readyActionId)
+        if (recovered.state === 'confirmed') {
+          this.persistResult(input, recovered)
+          if (timedOut) throw new CodexToolBridgeError('tool_timeout_after_effect')
+          if (externallyAborted || externalSignal.aborted) {
+            throw new CodexToolBridgeError('tool_abort_after_effect')
+          }
+          if (connectionAborted || connectionSignal.aborted) {
+            throw new CodexToolBridgeError('sidecar_disconnected_after_effect')
+          }
+          if (this.deps.isConnectionLive(input.connectionEpoch)) {
+            const response = mapReadyToolOutput(recovered.output, input.sensitiveValues)
+            return this.prepareDelivery(input, response)
+          }
           throw new CodexToolBridgeError('sidecar_disconnected_after_effect')
         }
-        if (this.deps.isConnectionLive(input.connectionEpoch)) {
-          const response = mapReadyToolOutput(recovered.output, input.sensitiveValues)
-          return this.prepareDelivery(input, response)
+        if (recovered.state === 'proven_absent') {
+          throw new CodexToolBridgeError('tool_effect_proven_absent')
         }
-        throw new CodexToolBridgeError('sidecar_disconnected_after_effect')
+        if (timedOut) throw new CodexToolBridgeError('tool_timeout_effect_unknown')
+        if (connectionAborted) throw new CodexToolBridgeError('tool_effect_unknown')
+        if (externallyAborted || controller.signal.aborted) {
+          throw new CodexToolBridgeError('tool_abort_effect_unknown')
+        }
+        throw new CodexToolBridgeError('tool_effect_unknown')
       }
-      if (recovered.state === 'proven_absent') {
-        throw new CodexToolBridgeError('tool_effect_proven_absent')
-      }
-      if (timedOut) throw new CodexToolBridgeError('tool_timeout_effect_unknown')
-      if (connectionAborted) throw new CodexToolBridgeError('tool_effect_unknown')
-      if (externallyAborted || controller.signal.aborted) {
-        throw new CodexToolBridgeError('tool_abort_effect_unknown')
-      }
-      throw new CodexToolBridgeError('tool_effect_unknown')
     } finally {
       if (timer) clearTimeout(timer)
       externalSignal.removeEventListener('abort', onExternalAbort)
@@ -752,7 +775,7 @@ export class CodexReadyToolBridge implements CodexBoundServerRequestExecutor {
     if (!this.deps.isConnectionLive(input.connectionEpoch)) {
       throw new CodexToolBridgeError('sidecar_disconnected_after_effect')
     }
-    if (timedOut) throw new CodexToolBridgeError('tool_timeout_after_effect')
+    if (timedOut && !settledReadTimeout) throw new CodexToolBridgeError('tool_timeout_after_effect')
     return this.prepareDelivery(input, response)
   }
 

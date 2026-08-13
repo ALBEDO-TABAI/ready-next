@@ -251,10 +251,6 @@ export class AgentSdkToolExecutor {
       && typeof (browserPageRef as Record<string, unknown>).physicalTargetToken === 'string'
       && typeof (browserPageRef as Record<string, unknown>).mainFrameDocumentToken === 'string'
     )
-    const directBrowserSurface = params.browserHostAvailable
-      && composition === 'additive'
-      && environmentHints?.workbenchMode === 'browser'
-      && hasTrustedBrowserPageRef
     const manifestSkillAllowedTools = resolveActiveSkillAllowedTools(params.authorization)
     const readOnlyResearchSkill = isReadOnlyResearchSkillToolSet(manifestSkillAllowedTools)
     const requiredCapabilityGroupIds = resolveCapabilityGroupIdsForAllowedTools(
@@ -267,6 +263,11 @@ export class AgentSdkToolExecutor {
       authorization: params.authorization,
       requiredCapabilityGroupIds
     })
+    const directBrowserSurface = params.browserHostAvailable
+      && composition === 'additive'
+      && environmentHints?.workbenchMode === 'browser'
+      && hasTrustedBrowserPageRef
+      && sdkIntentSurface.primaryIntentDomain !== 'research'
     const preResolvedBrowserSurface = params.browserHostAvailable
       && composition === 'additive'
       && (
@@ -411,6 +412,16 @@ export class AgentSdkToolExecutor {
       definitions = definitions.filter(
         (definition) => definition.name !== 'declare_completion_criteria',
       )
+    }
+    if (
+      params.authorization.mode === 'none'
+      && sdkIntentSurface.primaryIntentDomain === 'research'
+    ) {
+      definitions = definitions.filter((definition) => (
+        GENERAL_RESEARCH_TOOL_NAME_SET.has(definition.name)
+        || definition.name === 'use_browser'
+        || capabilityFloors.toolNames.has(definition.name)
+      ))
     }
     // P1-3 硬地板：地板工具即便被组不可见/意图压制而缺席，也从注册表补回（取不到则记 reason 跳过）。
     const floorRecovery = recoverAbsentFloorsFromRegistry(

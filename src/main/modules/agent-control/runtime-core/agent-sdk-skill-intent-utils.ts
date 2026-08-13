@@ -9,7 +9,7 @@ import { } from '../compaction/compact-agent-input'
 import { buildRequestEnvelope } from '../contracts/request-envelope'
 import type { RunMessage } from '../contracts/run-contracts'
 import { resolveIntentCapabilityGroupModes } from '../execution-intent-resolver'
-import { classifyIntent } from '../intent-classifier'
+import { classifyIntent, type IntentDomain } from '../intent-classifier'
 import {
   applyMapSemanticIntentToIntentClassification,
   classifyMapSemanticIntentFallback
@@ -334,6 +334,7 @@ function resolveAuthorizationPreferredToolNames(
 }
 
 interface SdkDefaultIntentSurface {
+  primaryIntentDomain: IntentDomain
   intentGroupModes: Partial<Record<CapabilityGroupId, boolean>>
   requestedIntentGroupIds: CapabilityGroupId[]
   forceDocumentTool: boolean
@@ -407,6 +408,7 @@ export function resolveSdkDefaultIntentSurface(params: {
   ]))
 
   return {
+    primaryIntentDomain: intentClassification.primaryDomain,
     intentGroupModes,
     requestedIntentGroupIds,
     forceDocumentTool: intentModes.forceDocumentTool,
