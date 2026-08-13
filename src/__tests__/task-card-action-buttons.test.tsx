@@ -503,3 +503,95 @@ test('historical browser pending-consent state exposes no live confirmation acti
     unmount()
   }
 })
+
+test('turn snapshots render direct answers, tool activity, and real tasks as distinct surfaces', () => {
+  const host = document.getElementById('root')
+  assert.ok(host)
+  const noop = () => {}
+  const message = {
+    id: 'agent-result',
+    agent: 'ready',
+    content: '结果',
+    type: 'agent' as const,
+    timestamp: new Date('2026-08-13T00:00:05.000Z'),
+  }
+  const toolTrace = [{
+    id: 'tool-call',
+    kind: 'call' as const,
+    text: '正在读取飞书文档',
+    timestamp: new Date('2026-08-13T00:00:01.000Z'),
+    toolName: 'skill_run_shell',
+  }]
+
+  function renderSnapshot(run: TaskCardRun): Root {
+    host.innerHTML = ''
+    const root = createRoot(host)
+    flushSync(() => {
+      root.render(createElement(TaskToolSnapshot, {
+        messages: [message],
+        currentTaskRun: run,
+        backgroundTaskRuns: [],
+        liveTaskRuns: [run],
+        currentScopeId: 'conv-a',
+        taskDisclosureState: {},
+        isStreaming: false,
+        streamingMessageId: null,
+        parseSerializedTaskSnapshot: () => null,
+        parseSerializedToolTraceSnapshot: () => [],
+        setTaskSectionExpanded: noop,
+        onOpenTaskArtifact: noop,
+        onDismissMemoryCapture: noop,
+        onUndoMemoryCapture: noop,
+        onSupplementMemoryCapture: noop,
+        onOpenScope: noop,
+        onCancelDetachedTask: noop,
+        onCancelChildRun: noop,
+      }, ({ messageTaskSnapshots, messageToolTraceSnapshots }) => createElement(
+        'div',
+        null,
+        messageTaskSnapshots[message.id] || null,
+        messageToolTraceSnapshots[message.id] || null,
+      )))
+    })
+    return root
+  }
+
+  const directRun = makeRun({
+    phase: 'done',
+    status: 'completed',
+    waitingFor: 'none',
+    resumableActions: [],
+    taskContinuation: null,
+    taskTitle: '正在理解需求',
+    taskSummary: '正在整理任务边界、上下文与可用能力',
+    responseMessageId: message.id,
+    toolTrace: [],
+  })
+  let root = renderSnapshot(directRun)
+  assert.equal(host.querySelector('[data-ready-task-card="true"]'), null)
+  assert.equal(host.querySelector('[data-ready-tool-trace-card="true"]'), null)
+  root.unmount()
+
+  const shortToolRun = makeRun({
+    ...directRun,
+    toolTrace,
+  })
+  root = renderSnapshot(shortToolRun)
+  assert.equal(host.querySelector('[data-ready-task-card="true"]'), null)
+  assert.ok(host.querySelector('[data-ready-tool-trace-card="true"]'))
+  root.unmount()
+
+  const longRun = makeRun({
+    ...shortToolRun,
+    taskTitle: '整理飞书项目统计',
+    taskSummary: '读取文档并汇总统计',
+    steps: [
+      { id: 'read', title: '读取文档', status: 'done', updatedAt: '2026-08-13T00:00:02.000Z' },
+      { id: 'summarize', title: '汇总统计', status: 'done', updatedAt: '2026-08-13T00:00:04.000Z' },
+    ],
+  })
+  root = renderSnapshot(longRun)
+  assert.ok(host.querySelector('[data-ready-task-card="true"]'))
+  assert.equal(host.querySelector('[data-ready-tool-trace-card="true"]'), null)
+  root.unmount()
+})

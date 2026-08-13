@@ -75,10 +75,7 @@ test('Codex task activity projects safe Lark narration and durable tool progress
 
   assert.equal(row.taskTitle, '正在通过飞书查询')
   assert.equal(row.taskSummary, '正在读取并整理飞书信息')
-  assert.equal(row.steps.length, 1)
-  assert.equal(row.steps[0]?.status, 'running')
-  assert.equal(row.steps[0]?.title, '飞书查询')
-  assert.equal(row.steps.length, 1, 'duplicate item start must not duplicate the visible step')
+  assert.equal(row.steps.length, 0, 'tool calls stay activity items instead of becoming fake plan steps')
   assert.equal(patches.filter((patch) => patch.toolEvent?.kind === 'call').length, 1)
   assert.equal(patches.at(-1)?.toolEvent?.toolName, 'skill_run_shell')
   assert.doesNotMatch(JSON.stringify(patches), /lark-cli|super-secret|--token/)
@@ -88,7 +85,7 @@ test('Codex task activity projects safe Lark narration and durable tool progress
     atMs: 3,
     item: { ...toolItem, status: 'completed', success: true },
   })
-  assert.equal(row.steps[0]?.status, 'done')
+  assert.equal(row.steps.length, 0)
   assert.equal(row.taskTitle, '正在整理查询结果')
   assert.equal(row.taskSummary, '飞书查询已完成，正在整理结果')
   assert.equal(patches.at(-1)?.toolEvent?.kind, 'result')
@@ -203,7 +200,8 @@ test('Codex task activity stays in the single run projection and survives termin
       arguments: {}, status: 'inProgress', success: null,
     },
   })
-  assert.equal(summary?.steps[0]?.title, '飞书查询')
+  assert.equal(summary?.steps.length, 0)
+  assert.equal(summary?.taskTitle, '正在通过飞书查询')
 
   runProjection.recordEvent({
     ...base,
@@ -214,5 +212,5 @@ test('Codex task activity stays in the single run projection and survives termin
   })
   assert.equal(summary?.phase, 'done')
   assert.equal(summary?.taskTitle, '正在通过飞书查询')
-  assert.equal(summary?.steps[0]?.title, '飞书查询')
+  assert.equal(summary?.steps.length, 0)
 })

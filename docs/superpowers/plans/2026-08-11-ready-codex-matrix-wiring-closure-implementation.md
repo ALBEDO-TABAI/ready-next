@@ -54,6 +54,7 @@ enforce: true
 | 16. Renderer 冷启动与会话切换 | lifecycle snapshot、scope events、session slices、根监听 owner | UI 从持久 current turn projection恢复 | 已修：持久 lifecycle snapshot 精确回填；runtime-ready 用 push+pull 补冷启动丢边；scope、run、卡片和异步资源结果同时核对 generation、context epoch 与本地 authority，关闭 tombstone 阻止迟到列表/事件复活。reset/close 持久成功后经单一 Main 同步收口清理远程合并入站、Browser claim、技能/授权/续跑上下文、交互卡与快照；持久身份读回不精确时失败关闭 | 冷启动可见真实 running/terminal 状态；后台轮、旧 context 与切换前的附件/预览/搜索结果不串会话；关闭后重启不再出现幽灵 scope |
 | 17. 错误、重连与可观测性 | lifecycle error、gateway/sidecar metrics、UI soft error | 协议/连接错误按 host/turn 分类 | 已修：sidecar 由单一有界恢复 owner 接管，旧 lease 结算后才重启；工作台启动与 Agent 首启解耦，预算耗尽后可显式重试 | Main 调用有 start/done；用户看得到可操作错误；瞬时服务失败同进程可恢复；局部旧 run 不关闭全局 ingress |
 | 18. IPC 与发布边界 | shared contracts、preload、Main handlers、Renderer types | 单一 typed bridge | 已修条件注册常量识别并重锚 Browser typed forwarder，`verify:ipc-contract` 真绿 | shared/Main/preload/Renderer 四边一致；IPC gate 真绿且无过期 allowlist |
+| 19. 回合活动与任务呈现 | Codex item activity、ProjectionSyncCoordinator、TaskToolSnapshot | Matrix 将直答、同轮工具活动、真实计划/后台任务分层呈现 | 已修：原生工具调用只投影为同轮活动，不再伪造计划步骤；直答不建卡，短工具任务终态折叠，真实多步、产物、等待动作或后台身份才显示任务卡；活动位于最终答复之前且三类不会重复渲染 | 直答只显示答复；短工具任务运行时展开真实活动、终态折叠；只有真实多步、产物、等待动作或后台身份显示任务卡；三类不得重复渲染 |
 
 ## 修复顺序
 
@@ -62,6 +63,8 @@ enforce: true
 3. 工具与资源：工具面、技能、确认、附件/当前文档的真实可用性。
 4. Browser 与 closeout：动作—观察—研究证据—最终消息—子任务/fence 的完整闭环。
 5. IPC、原生数据库门禁、P0/P1/P2 对抗审查清零、manifest 重算与出包校验。安装后实机复测不是本计划的自动完成项。
+
+界面呈现遵循同一条额外约束：Renderer 不从“正在理解需求”之类的占位文案猜任务类型，也不因为某轮曾经存在 projection 就永久显示任务卡。只有真实步骤、结构进度、产物、等待动作或后台身份能建立任务表面；原生 item 活动只建立可折叠活动表面；两者都不存在时由普通思考状态和最终答复承载。
 
 当前状态仍为 `in-progress`：接线修复已进入最终门禁与对抗审查；只有审查 P0/P1/P2 清零、最终 manifest 与安装包校验完成后才能收口，本文不声称已出包或已手工复测。
 

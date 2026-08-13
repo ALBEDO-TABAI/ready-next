@@ -7,7 +7,6 @@ import {
   formatTaskProgressLabel,
   formatTaskStepDisplayTitle,
   getTaskStartModeLabel,
-  isInternalAgentHandoffTask,
 } from '../../../../modules/agent/taskCardViewModel'
 import { formatSingleLinePreview, formatToolTracePreview } from '../../../../modules/agent/toolTracePreview'
 import { deriveToolTimelineItems } from '../../../../modules/agent/toolTraceRows'
@@ -31,17 +30,10 @@ import {
 } from '../../../../../shared/browser-confirmation-card'
 
 // ---------------------------------------------------------------------------
-// 2026-07-10 activity-capsule redesign — `TaskCard` 与 `ToolTraceCard` 共享
-// 同一套「单行折叠 → 时间线 → 逐工具详情」三层披露渲染（Claude web / Matrix
-// 风格）：
-//   L1 折叠态只占一行（状态点 + 标题/最新动态 + 工具计数 + chevron）；
-//   L2 展开成竖向时间线（进度 / 计划步骤 / 工具条目 / 产物 / 记忆 / 评分）；
-//   L3 单个工具条目可再展开完整调用行与输出文本。
-// 需要用户动作的行（继续/确认/取消…）不受折叠门控——有动作就直接露出，
-// 交互闸门语义（Stage Q canResume、browser consent、detached/child-run 精确
-// 路由）与旧卡片逐字保持。
-// 两个导出组件都是纯 props 驱动（无 store / IPC），供 TaskToolSnapshot 消费；
-// 时间线组件族（L2 条目 + L3 详情）在 ./ToolTimeline.tsx。
+// Matrix-style disclosure primitives. TaskCard is reserved for observable
+// long/background work; ToolTraceCard owns same-turn tool activity. Both use
+// one-line collapse, timeline disclosure, and per-tool details without
+// inventing a second runtime state machine in Renderer.
 // ---------------------------------------------------------------------------
 
 export const TASK_ACTION_BUTTON_STYLE: React.CSSProperties = {
@@ -202,7 +194,7 @@ export function TaskCard({
       source: hit,
     })
   }, [vm.legacyHandoffHit, vm.key, run.scopeId, run.taskId])
-  const steps = vm.steps
+  const steps = vm.steps.filter((step) => !step.id.startsWith('codex-tool:'))
   const PLAN_STEP_COLLAPSE_THRESHOLD = 10
   const [showAllPlanSteps, setShowAllPlanSteps] = useState(false)
   const [swipeOffset, setSwipeOffset] = useState(0)
@@ -219,7 +211,6 @@ export function TaskCard({
     : null
   const isDetachedTask = typeof run.taskId === 'string' && run.taskId.startsWith('detached:')
   const childRunId = run.taskContinuation?.childRunId || null
-  const isAgentHandoff = isInternalAgentHandoffTask(run)
   const shouldShowOpenScopeButton = Boolean(compact && run.scopeId !== sessionId)
   const progressLabel = formatTaskProgressLabel(run.progress)
   const progressValue = progressPercent(run.progress)
@@ -236,8 +227,9 @@ export function TaskCard({
     || run.status === 'killed'
   )
   const hasPlaceholderTitle = vm.title === '正在理解需求' || vm.title === '正在生成…'
-  const useDurationDisclosure = hasTerminalTaskStatus && (Boolean(terminalDuration) || hasPlaceholderTitle)
-  const primaryTitle = useDurationDisclosure ? '本轮用时' : vm.title
+  const primaryTitle = hasPlaceholderTitle
+    ? (hasTerminalTaskStatus ? vm.statusLabel : '任务进行中')
+    : vm.title
   const shouldShowInteractionBadge = Boolean(
     run.interactionState
     && run.interactionState !== 'running'
@@ -262,13 +254,7 @@ export function TaskCard({
   const toolCount = timelineItems.length
   // 运行态折叠时自动浮出最近动态（P0-2 语义，与 ToolTraceCard 一致）。
   const recentItems = pending && !expanded && !compact ? timelineItems.slice(-3) : []
-  const headerPreviewSource = useDurationDisclosure
-    ? (
-        vm.title === '正在理解需求' || vm.title === '正在生成…'
-          ? ''
-          : vm.title
-      )
-    : pending && timelineEvents.length > 0
+  const headerPreviewSource = pending && timelineEvents.length > 0
       ? formatToolTracePreview(timelineEvents[timelineEvents.length - 1]?.text)
       : summaryPreview
   const headerPreview = headerPreviewSource === primaryTitle || headerPreviewSource === vm.statusLabel
@@ -366,14 +352,14 @@ export function TaskCard({
         >
           {primaryTitle}
         </span>
-        {useDurationDisclosure && terminalDuration ? (
+        {hasTerminalTaskStatus && terminalDuration ? (
           <span
             className="t-data"
             data-ready-task-terminal-duration="true"
             data-typography-role="data"
             style={{ color: 'var(--text-body)', flexShrink: 0 }}
           >
-            {terminalDuration}
+            用时 {terminalDuration}
           </span>
         ) : null}
         {headerPreview ? (
@@ -784,11 +770,13 @@ export function ToolTraceCard({
   events,
   pending = false,
   expanded = false,
+  terminalDuration = null,
   onToggleExpanded
 }: {
   events: ToolTraceEvent[]
   pending?: boolean
   expanded?: boolean
+  terminalDuration?: string | null
   onToggleExpanded?: () => void
 }) {
   const items = useMemo(() => deriveToolTimelineItems(events), [events])
@@ -812,7 +800,25 @@ export function ToolTraceCard({
           style={{ width: 12, height: 12, color: 'var(--text-light)', flexShrink: 0 }}
           strokeWidth={2}
         />
-        {!expanded && recentItems.length === 0 && latestEvent ? (
+        {!pending && terminalDuration ? (
+          <>
+            <span
+              className="t-ui"
+              data-typography-role="ui"
+              style={{ color: 'var(--text-body)', whiteSpace: 'nowrap', minWidth: 0 }}
+            >
+              本轮用时
+            </span>
+            <span
+              className="t-data"
+              data-ready-tool-terminal-duration="true"
+              data-typography-role="data"
+              style={{ color: 'var(--text-body)', flex: 1, minWidth: 0 }}
+            >
+              {terminalDuration}
+            </span>
+          </>
+        ) : !expanded && recentItems.length === 0 && latestEvent ? (
           <span
             className="t-meta"
             data-typography-role="meta"

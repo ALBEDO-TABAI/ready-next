@@ -8,7 +8,7 @@ function readWorkspaceFile(path: string): string {
   return readFileSync(resolve(process.cwd(), path), 'utf8')
 }
 
-test('chat messages render task snapshots directly under agent replies', () => {
+test('chat messages render work activity before the resulting agent reply', () => {
   const chatMessages = readWorkspaceFile('src/renderer/components/agent/ChatMessages.tsx')
 
   assert.match(chatMessages, /messageTaskSnapshots:\s*Record<string,/)
@@ -22,6 +22,16 @@ test('chat messages render task snapshots directly under agent replies', () => {
   assert.match(chatMessages, /data-chat-message-tool-trace/)
   assert.match(chatMessages, /data-chat-message-task-snapshot=\{msg\.id\}[\s\S]*max-w-\[90%\]/)
   assert.match(chatMessages, /shouldRenderGlobalToolTraceCapsule/)
+  assert.ok(
+    chatMessages.indexOf('data-chat-message-task-snapshot={msg.id}')
+      < chatMessages.indexOf('renderMarkdown(msg.content, isStreamingMessage)'),
+    'task activity is shown before the answer it produced',
+  )
+  assert.ok(
+    chatMessages.indexOf('data-chat-message-tool-trace={msg.id}')
+      < chatMessages.indexOf('renderMarkdown(msg.content, isStreamingMessage)'),
+    'tool activity is shown before the answer it produced',
+  )
 })
 
 test('chat messages expose a temporary pending task block while the next reply is still empty', () => {

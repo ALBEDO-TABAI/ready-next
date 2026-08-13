@@ -191,6 +191,26 @@ export default function ChatMessages({
 
         return (
           <div key={msg.id} className="flex flex-col" style={{ gap: 10 }}>
+            {taskSnapshot ? (
+              <div
+                data-chat-message-task-snapshot={msg.id}
+                className="max-w-[90%] w-full"
+                style={{ paddingRight: 18, boxSizing: 'border-box' }}
+              >
+                {taskSnapshot}
+              </div>
+            ) : null}
+
+            {toolTraceSnapshot ? (
+              <div
+                data-chat-message-tool-trace={msg.id}
+                className="max-w-[90%] w-full"
+                style={{ paddingRight: 18, boxSizing: 'border-box' }}
+              >
+                {toolTraceSnapshot}
+              </div>
+            ) : null}
+
             <div className={`flex gap-2.5 ${msg.type === 'user' ? 'flex-row-reverse' : ''}`}>
               {msg.type === 'user' ? (
                 <div
@@ -367,26 +387,6 @@ export default function ChatMessages({
                 </div>
               )}
             </div>
-
-            {taskSnapshot ? (
-              <div
-                data-chat-message-task-snapshot={msg.id}
-                className="max-w-[90%] w-full"
-                style={{ paddingRight: 18, boxSizing: 'border-box' }}
-              >
-                {taskSnapshot}
-              </div>
-            ) : null}
-
-            {toolTraceSnapshot ? (
-              <div
-                data-chat-message-tool-trace={msg.id}
-                className="max-w-[90%] w-full"
-                style={{ paddingRight: 18, boxSizing: 'border-box' }}
-              >
-                {toolTraceSnapshot}
-              </div>
-            ) : null}
 
             {showMessageDivider ? (
               <div

@@ -113,6 +113,22 @@ test('ToolTraceCard: completed run auto-collapses to a single line (count + late
   })
 })
 
+test('ToolTraceCard: completed foreground activity collapses to worked duration', () => {
+  withDom((render) => {
+    const container = render(createElement(ToolTraceCard, {
+      events: makeEvents(),
+      pending: false,
+      expanded: false,
+      terminalDuration: '01:08',
+    }))
+    const text = String(container.textContent || '')
+    assert.ok(text.includes('本轮用时'))
+    assert.ok(text.includes('01:08'))
+    assert.ok(text.includes('3 个工具'))
+    assert.equal(container.querySelectorAll('[data-ready-tool-timeline-item]').length, 0)
+  })
+})
+
 test('ToolTraceCard: historical trace row is frameless and aligns with the message edge', () => {
   withDom((render) => {
     document.documentElement.dataset.skin = 'liquid-glass'

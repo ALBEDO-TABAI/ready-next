@@ -47,7 +47,6 @@ import { filterUserVisibleToolTraceEvents } from '../../../../modules/agent/tool
 import { readBrowserConfirmationRequest } from '../../../../../shared/browser-confirmation-card'
 import type { TaskCardRun } from '../../task-card-from-projection'
 import { TaskCard, ToolTraceCard } from '../task/TaskCard'
-import { isTaskPlaceholderOnly, isTaskVisible } from '../helpers/badges'
 
 export interface TaskToolSnapshotRenderValues {
   messageTaskSnapshots: Record<string, React.ReactNode>
@@ -159,11 +158,62 @@ export function newerTaskSnapshot(snapshot: TaskCardRun, liveTaskRuns: TaskCardR
   return liveUpdatedAt >= snapshotUpdatedAt ? liveRun : snapshot
 }
 
+export type TurnActivityPresentation = 'none' | 'activity' | 'task'
+
+function isTerminalTaskRun(run: Omit<TaskCardRun, '__brand'>): boolean {
+  return run.phase === 'done'
+    || run.phase === 'error'
+    || run.phase === 'cancelled'
+    || run.status === 'completed'
+    || run.status === 'failed'
+    || run.status === 'killed'
+}
+
+function hasLongTaskEvidence(run: Omit<TaskCardRun, '__brand'>): boolean {
+  const taskId = stableTaskIdentity(run.taskId)
+  const continuationTaskId = stableTaskIdentity(run.taskContinuation?.taskId)
+  const hasOwnedBackgroundIdentity = Boolean(
+    run.taskContinuation?.childRunId
+    || run.taskContinuation?.detachedTaskId
+    || taskId?.startsWith('skill-child:')
+    || taskId?.startsWith('detached:')
+    || continuationTaskId?.startsWith('skill-child:')
+    || continuationTaskId?.startsWith('detached:'),
+  )
+  const hasOpenWait = !isTerminalTaskRun(run)
+    && Boolean(run.waitingFor && run.waitingFor !== 'none')
+  const planStepCount = (run.steps || []).filter((step) => !step.id.startsWith('codex-tool:')).length
+  const progressTotal = typeof run.progress?.total === 'number' ? run.progress.total : 0
+  return Boolean(
+    readBrowserConfirmationRequest(run.taskContinuation)
+    || hasOwnedBackgroundIdentity
+    || hasOpenWait
+    || planStepCount >= 2
+    || progressTotal >= 2
+    || (run.recentArtifacts?.length ?? 0) > 0
+    || (run.memoryCapture && run.memoryCapture.status !== 'dismissed'),
+  )
+}
+
+/**
+ * Matrix-style turn presentation is derived from observable work, never from
+ * the generic planning seed or a hopeful taskType classification.
+ */
+export function resolveTurnActivityPresentation(
+  run: Omit<TaskCardRun, '__brand'> | null | undefined,
+  visibleToolEventCount: number,
+): TurnActivityPresentation {
+  if (!run) return visibleToolEventCount > 0 ? 'activity' : 'none'
+  if (hasLongTaskEvidence(run)) return 'task'
+  if (visibleToolEventCount > 0) return 'activity'
+  return 'none'
+}
+
 export function shouldRenderPendingTaskCard(
   run: TaskCardRun,
   visibleToolEventCount: number,
 ): boolean {
-  return !(isTaskPlaceholderOnly(run) && visibleToolEventCount === 0)
+  return resolveTurnActivityPresentation(run, visibleToolEventCount) === 'task'
 }
 
 export function terminalGeneratedImageArtifacts(run: TaskCardRun | null): AgentArtifact[] {
@@ -321,12 +371,16 @@ export function TaskToolSnapshot(props: TaskToolSnapshotProps): React.ReactEleme
       const taskRun = snapshot
         ? newerTaskSnapshot(snapshot, liveTaskRuns)
         : liveMessageRun
-      if (!taskRun || !isTaskVisible(taskRun)) continue
+      if (!taskRun) continue
       const generatedImages = terminalGeneratedImageArtifacts(taskRun)
       if (generatedImages.length > 0) nextGeneratedImages[message.id] = generatedImages
       const segmentEvents = filterUserVisibleToolTraceEvents(
         parseSerializedToolTraceSnapshot(message.meta?.toolTraceSnapshot),
       )
+      const visibleEventCount = segmentEvents.length > 0
+        ? segmentEvents.length
+        : filterUserVisibleToolTraceEvents(taskRun.toolTrace || []).length
+      if (resolveTurnActivityPresentation(taskRun, visibleEventCount) !== 'task') continue
       nextSnapshots[message.id] = renderTaskSnapshotCard(
         taskRun,
         `task-snapshot-${message.id}`,
@@ -340,7 +394,7 @@ export function TaskToolSnapshot(props: TaskToolSnapshotProps): React.ReactEleme
       currentTaskRun.responseMessageId &&
       messages.find((message) => message.id === currentTaskRun.responseMessageId)?.content.trim() &&
       !nextSnapshots[currentTaskRun.responseMessageId] &&
-      isTaskVisible(currentTaskRun)
+      resolveTurnActivityPresentation(currentTaskRun, currentVisibleToolTraceSegment.length) === 'task'
     ) {
       nextSnapshots[currentTaskRun.responseMessageId] = renderTaskSnapshotCard(
         currentTaskRun,
@@ -364,11 +418,13 @@ export function TaskToolSnapshot(props: TaskToolSnapshotProps): React.ReactEleme
   }, [
     currentTaskRun,
     currentVisibleToolTraceSegment,
+    isStreaming,
     liveTaskRuns,
     messages,
     parseSerializedTaskSnapshot,
     parseSerializedToolTraceSnapshot,
     renderTaskSnapshotCard,
+    streamingMessageId,
   ])
 
   const messageToolTraceSnapshots = useMemo<Record<string, React.ReactNode>>(() => {
@@ -386,6 +442,12 @@ export function TaskToolSnapshot(props: TaskToolSnapshotProps): React.ReactEleme
         <ToolTraceCard
           key={toolKey}
           events={visibleEvents}
+          terminalDuration={
+            terminalDurationLabel
+            && currentTaskRun?.responseMessageId === message.id
+              ? terminalDurationLabel
+              : null
+          }
           expanded={expanded}
           onToggleExpanded={() => setTaskSectionExpanded(toolKey, 'overview', !expanded)}
         />
@@ -406,6 +468,7 @@ export function TaskToolSnapshot(props: TaskToolSnapshotProps): React.ReactEleme
         <ToolTraceCard
           key={toolKey}
           events={currentVisibleToolTraceSegment}
+          terminalDuration={terminalDurationLabel}
           expanded={expanded}
           onToggleExpanded={() => setTaskSectionExpanded(toolKey, 'overview', !expanded)}
         />
@@ -420,7 +483,8 @@ export function TaskToolSnapshot(props: TaskToolSnapshotProps): React.ReactEleme
     messages,
     parseSerializedToolTraceSnapshot,
     setTaskSectionExpanded,
-    taskDisclosureState
+    taskDisclosureState,
+    terminalDurationLabel,
   ])
 
   const pendingTaskRun = useMemo<React.ReactNode | null>(() => {
@@ -442,8 +506,7 @@ export function TaskToolSnapshot(props: TaskToolSnapshotProps): React.ReactEleme
     if (!currentTaskRun || !isStreaming || !streamingMessageId) return null
     if (streamMessage && streamMessage.content.length > 0) return null
     if (currentVisibleToolTraceSegment.length === 0) return null
-    // 任务胶囊已在 pendingTaskRun 里承载时间线时，不再渲染独立工具卡。
-    if (isTaskVisible(currentTaskRun)) return null
+    if (resolveTurnActivityPresentation(currentTaskRun, currentVisibleToolTraceSegment.length) !== 'activity') return null
     const toolKey = `pending-tool-${currentTaskRun.scopeId}`
     const expanded = Boolean(taskDisclosureState[toolKey]?.overview)
     return (
@@ -466,53 +529,14 @@ export function TaskToolSnapshot(props: TaskToolSnapshotProps): React.ReactEleme
   ])
 
   const bottomTaskCard = useMemo<React.ReactNode | null>(() => {
-    // The bottom task card is reserved for tasks that genuinely benefit from
-    // a stationary progress surface — work that runs long enough and emits
-    // enough rolling output that the user wants a fixed anchor to glance
-    // at without scrolling the chat. For everything else (chit-chat, single-
-    // tool calls, planning-phase placeholders, the ask_user_questions wait
-    // state), the floating "正在思考" capsule plus the inline task snapshot
-    // already carry the signal and the bottom card just steals room.
-    //
-    // Three suppression rules:
-    //   (a) A pending `ask_user_questions` card already owns the "I'm waiting
-    //       on you" signal — the bottom card would be pure duplication.
-    //   (b) Task isn't classified as heavy yet (`taskType` is undefined,
-    //       `direct_answer`, `short_task`, or a `multi_step_task` that has
-    //       NOT produced concrete multi-step evidence). Even when planning
-    //       phase is active, stay silent rather than render a "正在理解需求"
-    //       placeholder.
-    //   (c) "Heavy" means one of:
-    //         - `media_task` (always heavy by construction — VEA-style)
-    //         - `continuation` (resumed work, usually long)
-    //         - `multi_step_task` WITH ≥2 tracked steps OR a structured
-    //           progress total OR at least one artifact emitted (i.e. the
-    //           task is actually multi-stepping, not just classified as
-    //           such by a hopeful intent classifier).
-    //
-    // Background tasks are unaffected and continue to surface regardless —
-    // those represent independent long-running work that owns the bottom
-    // strip even when the foreground turn is light.
+    // Only real long/background work owns a stationary surface. Direct
+    // answers and short tool activity remain in the turn that produced them.
     const hasPendingAskUserCard = messages.some(
       (m) => m.type === 'ask_user_questions' && m.askUserQuestions?.status === 'pending',
     )
     const hasPendingBrowserConfirmation = Boolean(
       currentTaskRun && readBrowserConfirmationRequest(currentTaskRun.taskContinuation),
     )
-
-    function isHeavyOngoing(run: typeof currentTaskRun): boolean {
-      if (!run) return false
-      const taskType = run.taskType
-      if (taskType === 'media_task') return true
-      if (taskType === 'continuation') return true
-      if (taskType === 'multi_step_task') {
-        const stepCount = run.steps?.length ?? 0
-        const totalSteps = typeof run.progress?.total === 'number' ? run.progress.total : 0
-        const artifactCount = run.recentArtifacts?.length ?? 0
-        return stepCount >= 2 || totalSteps >= 2 || artifactCount >= 1
-      }
-      return false
-    }
 
     const foregroundActive = Boolean(
       currentTaskRun &&
@@ -529,7 +553,10 @@ export function TaskToolSnapshot(props: TaskToolSnapshotProps): React.ReactEleme
     )
     const suppressForeground = foregroundActive
       && !hasPendingBrowserConfirmation
-      && (hasPendingAskUserCard || !isHeavyOngoing(currentTaskRun))
+      && (
+        hasPendingAskUserCard
+        || resolveTurnActivityPresentation(currentTaskRun, currentVisibleToolTraceSegment.length) !== 'task'
+      )
     const effectiveForegroundActive = foregroundActive && !suppressForeground
 
     const foregroundDismissed = currentTaskRun
@@ -608,7 +635,7 @@ export function TaskToolSnapshot(props: TaskToolSnapshotProps): React.ReactEleme
         )}
       </div>
     )
-  }, [backgroundTaskRuns, currentTaskRun, dismissedBottomTaskKeys, isStreaming, messages, renderTaskSnapshotCard])
+  }, [backgroundTaskRuns, currentTaskRun, currentVisibleToolTraceSegment.length, dismissedBottomTaskKeys, isStreaming, messages, renderTaskSnapshotCard])
 
   return (
     <>

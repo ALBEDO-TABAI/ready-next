@@ -14,10 +14,10 @@ import {
 } from '../renderer/components/agent/chat-panel/task/ToolTimeline'
 import { taskProjectionToTaskCardRun } from '../renderer/components/agent/task-card-from-projection'
 import {
-  isTaskPlaceholderOnly,
   isTaskVisible,
 } from '../renderer/components/agent/chat-panel/helpers/badges'
 import {
+  resolveTurnActivityPresentation,
   shouldRenderPendingTaskCard,
   terminalGeneratedImageArtifacts,
 } from '../renderer/components/agent/chat-panel/task-snapshot/TaskToolSnapshot'
@@ -121,49 +121,81 @@ test('tool activity presentation uses typed, truthful labels from existing trace
   assert.match(html, /搜索网页 · Ready Electron 42/)
 })
 
-test('placeholder-only progress yields to thinking while terminal direct answers hide the stale card', () => {
-  const placeholder = {
+test('turn activity presentation separates direct answers, tool activity, and real tasks', () => {
+  const placeholder = taskProjectionToTaskCardRun({
     scopeId: 'scope-1',
     taskId: 'task-1',
     phase: 'planning',
     status: 'running',
+    title: '测试会话',
     taskTitle: '正在理解需求',
     taskSummary: '正在整理任务边界、上下文与可用能力',
     steps: [],
     toolTrace: [],
     recentArtifacts: [],
-  } as any
+    updatedAt: '2026-08-13T00:00:00.000Z',
+  })
 
-  assert.equal(isTaskPlaceholderOnly(placeholder), true)
   assert.equal(isTaskVisible(placeholder), true)
   assert.equal(isTaskVisible({ ...placeholder, phase: 'done', status: 'completed' }), true)
   const placeholderWithTrace = {
     ...placeholder,
     toolTrace: [{ id: 'tool-1', kind: 'call', text: 'web_search()', timestamp: new Date() }],
   }
-  assert.equal(isTaskPlaceholderOnly(placeholderWithTrace), true)
   assert.equal(isTaskVisible({ ...placeholderWithTrace, phase: 'done', status: 'completed' }), true)
   assert.equal(shouldRenderPendingTaskCard(placeholder, 0), false)
-  assert.equal(shouldRenderPendingTaskCard(placeholder, 1), true)
+  assert.equal(shouldRenderPendingTaskCard(placeholder, 1), false)
+  assert.equal(resolveTurnActivityPresentation(placeholder, 0), 'none')
+  assert.equal(resolveTurnActivityPresentation(placeholder, 1), 'activity')
+  assert.equal(resolveTurnActivityPresentation({
+    ...placeholder,
+    steps: [
+      { id: 'codex-tool:one', title: '飞书查询', status: 'done', updatedAt: '2026-08-13T00:00:01.000Z' },
+      { id: 'codex-tool:two', title: '飞书查询', status: 'running', updatedAt: '2026-08-13T00:00:02.000Z' },
+    ],
+  }, 2), 'activity', 'multiple tool calls are activity, not a model-authored plan')
+  assert.equal(resolveTurnActivityPresentation({
+    ...placeholder,
+    taskType: 'multi_step_task',
+    steps: [
+      { id: 'one', title: '读取资料', status: 'done', updatedAt: '2026-08-13T00:00:01.000Z' },
+      { id: 'two', title: '整理结果', status: 'running', updatedAt: '2026-08-13T00:00:02.000Z' },
+    ],
+  }, 1), 'task')
+  assert.equal(resolveTurnActivityPresentation({
+    ...placeholder,
+    taskType: 'short_task',
+    recentArtifacts: [{
+      id: 'artifact-1',
+      module: 'document',
+      kind: 'document',
+      label: '整理结果',
+      path: '/tmp/result.md',
+      createdAt: '2026-08-13T00:00:02.000Z',
+    }],
+  }, 1), 'task')
 })
 
-test('terminal duration replaces the stale planning title without removing the disclosure', () => {
+test('real task cards keep their useful title instead of becoming a generic duration card', () => {
   const run = taskProjectionToTaskCardRun({
     scopeId: 'scope-duration',
     taskId: 'task-duration',
     phase: 'done',
     status: 'completed',
     title: '原始会话标题',
-    taskTitle: '正在理解需求',
-    taskSummary: '正在整理任务边界、上下文与可用能力',
-    steps: [],
+    taskTitle: '整理发布材料',
+    taskSummary: '已整理并核对发布材料',
+    steps: [
+      { id: 'one', title: '整理材料', status: 'done', updatedAt: '2026-07-23T00:00:03.000Z' },
+      { id: 'two', title: '核对结果', status: 'done', updatedAt: '2026-07-23T00:00:04.000Z' },
+    ],
     waitingFor: 'none',
     resumableActions: [],
     recentArtifacts: [],
     taskContinuation: null,
     progress: null,
     memoryCapture: null,
-    taskType: 'short_task',
+    taskType: 'multi_step_task',
     interactionState: 'suspended',
     canResume: false,
     updatedAt: '2026-07-23T00:00:05.000Z',
@@ -175,19 +207,21 @@ test('terminal duration replaces the stale planning title without removing the d
     expanded: true,
   }))
 
-  assert.match(html, />本轮用时</)
-  assert.match(html, /data-ready-task-terminal-duration="true"[^>]*>00:05</)
-  assert.doesNotMatch(html, />正在理解需求</)
+  assert.match(html, />整理发布材料</)
+  assert.match(html, /data-ready-task-terminal-duration="true"[^>]*>用时 00:05</)
+  assert.doesNotMatch(html, />本轮用时</)
   assert.match(html, /<button/)
   assert.match(html, /class="ready-task-content-line flex items-end justify-between"/)
-  assert.match(html, /data-ready-task-kind-badge="true"[^>]*>短任务</)
+  assert.match(html, /data-ready-task-kind-badge="true"[^>]*>多步任务</)
 })
 
 test('task activity and multiline user messages share stable text columns', () => {
+  // eslint-disable-next-line ready/no-source-grep-test -- reviewed hard contract: CSS alignment crosses separately-rendered message and task surfaces
   const taskCardSource = readFileSync(
     resolve(process.cwd(), 'src/renderer/components/agent/chat-panel/task/TaskCard.tsx'),
     'utf8',
   )
+  // eslint-disable-next-line ready/no-source-grep-test -- reviewed hard contract: CSS alignment crosses separately-rendered message and task surfaces
   const chatMessagesSource = readFileSync(
     resolve(process.cwd(), 'src/renderer/components/agent/ChatMessages.tsx'),
     'utf8',

@@ -1,6 +1,5 @@
 import type {
   ScopeRunTraceItem,
-  ScopeRunTaskStep,
 } from '../contracts/types'
 import type {
   TaskProjectionRecord,
@@ -16,14 +15,11 @@ export type CodexTaskActivityPatch = {
   phase: 'planning' | 'tool_running'
   taskTitle?: string
   taskSummary?: string
-  steps?: ScopeRunTaskStep[]
-  currentStepId?: string | null
   toolEvent?: ScopeRunTraceItem
   timestamp: string
 }
 
 type ToolActivityCopy = {
-  stepTitle: string
   runningTitle: string
   runningSummary: string
   completedTitle: string
@@ -49,7 +45,6 @@ function safeCommentary(text: string, larkCliRead: boolean): string | null {
 function toolActivityCopy(toolName: string, larkCliRead: boolean): ToolActivityCopy {
   if (larkCliRead && toolName === 'skill_read_artifact') {
     return {
-      stepTitle: '准备飞书查询',
       runningTitle: '正在准备飞书查询',
       runningSummary: '正在确认飞书查询方式',
       completedTitle: '正在准备飞书查询',
@@ -60,7 +55,6 @@ function toolActivityCopy(toolName: string, larkCliRead: boolean): ToolActivityC
   }
   if (larkCliRead && toolName === 'skill_run_shell') {
     return {
-      stepTitle: '飞书查询',
       runningTitle: '正在通过飞书查询',
       runningSummary: '正在读取并整理飞书信息',
       completedTitle: '正在整理查询结果',
@@ -71,7 +65,6 @@ function toolActivityCopy(toolName: string, larkCliRead: boolean): ToolActivityC
   }
   if (toolName.startsWith('browser_')) {
     return {
-      stepTitle: '网页查询',
       runningTitle: '正在浏览网页',
       runningSummary: '正在读取并核对网页信息',
       completedTitle: '正在整理网页信息',
@@ -82,7 +75,6 @@ function toolActivityCopy(toolName: string, larkCliRead: boolean): ToolActivityC
   }
   if (toolName.startsWith('research_') || toolName.includes('search')) {
     return {
-      stepTitle: '信息查询',
       runningTitle: '正在查询信息',
       runningSummary: '正在查找并核对相关信息',
       completedTitle: '正在整理查询结果',
@@ -93,7 +85,6 @@ function toolActivityCopy(toolName: string, larkCliRead: boolean): ToolActivityC
   }
   if (toolName.startsWith('document_')) {
     return {
-      stepTitle: '处理文档',
       runningTitle: '正在处理文档',
       runningSummary: '正在读取并处理文档内容',
       completedTitle: '正在整理文档结果',
@@ -104,7 +95,6 @@ function toolActivityCopy(toolName: string, larkCliRead: boolean): ToolActivityC
   }
   if (toolName.startsWith('skill_')) {
     return {
-      stepTitle: '执行技能步骤',
       runningTitle: '正在执行技能',
       runningSummary: '正在使用所需能力处理任务',
       completedTitle: '正在整理处理结果',
@@ -114,7 +104,6 @@ function toolActivityCopy(toolName: string, larkCliRead: boolean): ToolActivityC
     }
   }
   return {
-    stepTitle: '调用工具',
     runningTitle: '正在调用工具',
     runningSummary: '正在使用所需工具处理任务',
     completedTitle: '正在整理处理结果',
@@ -138,23 +127,7 @@ export function createCodexTaskActivityProjector(input: {
   now?: () => string
 }): { observe(event: CodexTurnActivityEvent): void } {
   const now = input.now || (() => new Date().toISOString())
-  const observedSteps = new Map<string, ScopeRunTaskStep>()
   const publishedToolStages = new Set<string>()
-
-  function currentSteps(current: TaskProjectionRecord): ScopeRunTaskStep[] {
-    const steps = new Map<string, ScopeRunTaskStep>()
-    for (const candidate of current.steps) {
-      steps.set(candidate.id, {
-        id: candidate.id,
-        title: candidate.title || candidate.description,
-        status: candidate.status || 'pending',
-        detail: candidate.detail ?? candidate.description,
-        updatedAt: candidate.updatedAt || current.updatedAt,
-      })
-    }
-    for (const candidate of observedSteps.values()) steps.set(candidate.id, candidate)
-    return [...steps.values()]
-  }
 
   return {
     observe(event) {
@@ -187,20 +160,10 @@ export function createCodexTaskActivityProjector(input: {
       const done = event.stage === 'completed' && !failed
       const updatedAt = now()
       const stepId = `codex-tool:${event.item.id}`
-      const step: ScopeRunTaskStep = {
-        id: stepId,
-        title: copy.stepTitle,
-        status: failed ? 'error' : done ? 'done' : 'running',
-        detail: failed ? copy.failedSummary : done ? copy.completedSummary : copy.runningSummary,
-        updatedAt,
-      }
-      observedSteps.set(stepId, step)
       input.publish({
         phase: 'tool_running',
         taskTitle: failed ? copy.failedTitle : done ? copy.completedTitle : copy.runningTitle,
         taskSummary: failed ? copy.failedSummary : done ? copy.completedSummary : copy.runningSummary,
-        steps: currentSteps(current),
-        currentStepId: stepId,
         toolEvent: {
           id: `${stepId}:${event.stage}`,
           kind: event.stage === 'started' ? 'call' : 'result',

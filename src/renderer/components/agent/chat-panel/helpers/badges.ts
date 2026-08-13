@@ -90,27 +90,6 @@ export function isTaskVisible(run: Omit<TaskCardRun, '__brand'> | null | undefin
   )
 }
 
-export function isTaskPlaceholderOnly(
-  run: Omit<TaskCardRun, '__brand'> | null | undefined,
-): boolean {
-  if (!run) return false
-  const title = String(run.taskTitle || '').trim()
-  const summary = String(run.taskSummary || '').trim()
-  const placeholderTitle = !title || title === '正在理解需求' || title === '正在生成…'
-  const placeholderSummary = !summary
-    || summary === '正在整理任务边界、上下文与可用能力'
-    || summary === '正在生成…'
-  return Boolean(
-    placeholderTitle
-    && placeholderSummary
-    && !run.progress
-    && (!run.steps || run.steps.length === 0)
-    && (!run.recentArtifacts || run.recentArtifacts.length === 0)
-    && !run.taskContinuation
-    && (!run.memoryCapture || run.memoryCapture.status === 'dismissed')
-  )
-}
-
 export function isBackgroundTaskRun(run: TaskCardRun | null | undefined): boolean {
   if (!run) return false
   // Stage O §1.9 — both the visual state ("after-the-fact label") and
