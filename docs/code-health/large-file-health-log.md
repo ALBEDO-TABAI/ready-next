@@ -21,7 +21,15 @@
 
 | 评估日期 | 任务 | 文件 | 总行数 | 本次新增 | 结论 | 判断与后续动作 | 状态 |
 | --- | --- | --- | ---: | ---: | --- | --- | --- |
-| 2026-08-13 | Codex 工具过程可见性接线 | `src/main/modules/agent-control/codex-runtime/codex-runtime-production-composition.ts` | 4057 | 净 +30 | 危险 | 文件仍混合网关、生命周期、工具、资源与发布收口；本轮只把原生 turn 的旁白和工具阶段送入既有任务投影，判断已放入 215 行的独立叶子。后续仍按 gateway/lifecycle/tool/resource/verifier 边界拆分。 | 后续拆分；交付时提醒 |
+| 2026-08-13 | Codex 引用入口与启动就绪收口 | `src/preload/index.ts` | 1513 | 净 +18 | 健康 | 本轮只把既有 Agent、Skill 与 ask-user IPC 机械接到统一就绪门，通道定义仍是单一声明表面。 | 无需处理 |
+| 2026-08-13 | Codex 引用入口与启动就绪收口 | `src/renderer/stores/useAgent.ts` | 2365 | 净 +20 | 危险 | 会话、消息、准入与生命周期状态仍集中在同一 store；本轮只消除显式创建与启动 hydration 的竞态。后续按会话目录、准入和生命周期三个 owner 拆分。 | 待独立拆分合同；交付时提醒 |
+| 2026-08-13 | Codex 引用入口与启动就绪收口 | `src/main/modules/tools/tool-executor.ts` | 1317 | 净 +65 | 危险 | 文件继续混合多个产品域工具执行；本轮只把 Browser 工具钉到引用时冻结的页面并逐次重验。后续按 Browser、Document 与通用工具域拆分。 | 待独立拆分合同；交付时提醒 |
+| 2026-08-13 | Codex 引用入口与启动就绪收口 | `src/renderer/pages/modes/DocumentMode.tsx` | 1027 | 净 +12 | 一般 | 文档模式仍聚焦单一工作面；本轮只在拖拽载荷中补齐标签、路径、脏状态和选区身份。2026-09-13 复查拖拽桥是否可下沉到独立 hook。 | 已排期：2026-09-13 |
+| 2026-08-13 | Codex 安全旁白实时接线 | `src/__tests__/codex-app-server-client.test.ts` | 1504 | 净 +2 | 一般 | 套件仍聚焦固定 app-server 协议、请求所有者与关闭顺序；本轮只补安全摘要与原始推理的通知分类对照。2026-09-13 复查是否按请求、通知和关闭恢复拆套件。 | 已排期：2026-09-13 |
+| 2026-08-13 | Codex 安全旁白实时接线 | `src/__tests__/scope-run-state.test.ts` | 1285 | 净 +42 | 一般 | 套件仍聚焦 Renderer 运行状态归一化；本轮只补活动旁白的保留、终态清除与换轮隔离。2026-09-13 复查是否按活动、终态和持久恢复拆套件。 | 已排期：2026-09-13 |
+| 2026-08-13 | Codex 安全旁白实时接线 | `src/renderer/modules/agent/scopeRunState.ts` | 1046 | 净 +23 | 一般 | 文件仍是 Renderer 运行状态归一化单一边界；本轮只接收当前 run 的安全旁白，并在终态或换轮时清除。2026-09-13 复查事件归一化与终态派生的拆分收益。 | 已排期：2026-09-13 |
+| 2026-08-13 | Codex 安全旁白实时接线 | `src/renderer/types/electron.d.ts` | 3832 | 净 +8 | 健康 | 只机械补齐安全旁白的跨进程声明，由类型检查和行为门覆盖。 | 无需处理 |
+| 2026-08-13 | Codex 工具活动与结构化引用接线 | `src/main/modules/agent-control/codex-runtime/codex-runtime-production-composition.ts` | 4215 | 净 +158 | 危险 | 文件仍混合网关、生命周期、工具、资源与发布收口；本轮接入安全旁白、工具活动、Main 侧资源解析与当前文档精确写回。后续仍按 gateway/lifecycle/tool/resource/verifier 边界拆分。 | 后续拆分；交付时提醒 |
 | 2026-08-13 | Codex 工具过程可见性接线 | `src/main/modules/agent-control/runtime-core/runtime.ts` | 2000 | 净 +3 | 危险 | 文件仍是运行服务组合根；本轮只把既有任务投影发布入口交给 Codex 组合层，不加入产品判断。后续继续按既有合同下沉运行时装配。 | 待独立拆分合同；交付时提醒 |
 | 2026-08-13 | 飞书 CLI 日历查询接线 | `src/main/modules/agent-control/runtime-core/runtime.ts` | 1997 | 净 +2 | 危险 | 文件仍是运行服务组合根；本轮只在 Codex 工具面冻结前传入已选技能的独占面声明，业务判断留在技能叶子。后续继续按既有合同下沉运行时装配。 | 待独立拆分合同；交付时提醒 |
 | 2026-08-13 | 实时查询工具面与只读超时收口 | `src/main/modules/agent-control/runtime-core/agent-sdk-tool-executor.ts` | 1166 | 当前共享差异净 +3 | 一般 | 文件仍聚焦 SDK 工具面组装与执行包装；本轮只在既有意图裁决点收窄实时查询工具面。沿用 2026-09-12 对工具包装与工具面组装拆分收益的复查。 | 已排期：2026-09-12 |

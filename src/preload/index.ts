@@ -73,55 +73,71 @@ import type {
   FastCardResolveVideoRequest,
   FastCardTranslateRequest,
 } from '../shared/fastcard'
+import { createAgentRuntimeInvokeGate } from './agent-runtime-invoke-gate'
+
+const readAgentRuntimeReady = async (): Promise<AgentRuntimeReadinessSnapshot> => (
+  parseAgentRuntimeReadinessSnapshot(await ipcRenderer.invoke('agent:readRuntimeReady'))
+)
+
+const subscribeAgentRuntimeReady = (
+  callback: (snapshot: AgentRuntimeReadinessSnapshot) => void,
+): (() => void) => {
+  const listener = (_event: IpcRendererEvent, payload: unknown) => {
+    callback(parseAgentRuntimeReadinessSnapshot(payload))
+  }
+  ipcRenderer.on('agent:runtimeReady', listener)
+  return () => ipcRenderer.removeListener('agent:runtimeReady', listener)
+}
+
+const agentRuntimeInvokeGate = createAgentRuntimeInvokeGate({
+  read: readAgentRuntimeReady,
+  subscribe: subscribeAgentRuntimeReady,
+})
+
+const invokeAgentRuntime = <T = unknown>(channel: string, ...args: unknown[]): Promise<T> => (
+  agentRuntimeInvokeGate.invoke(() => ipcRenderer.invoke(channel, ...args) as Promise<T>)
+)
 
 // Agent API
 const agentAPI = {
   createSession: async (request: CreateSessionRequest) => parseCreateSessionResult(
-    await ipcRenderer.invoke('agent:createSession', parseCreateSessionRequest(request)),
+    await invokeAgentRuntime('agent:createSession', parseCreateSessionRequest(request)),
   ),
   resetSession: async (request: ProductLifecycleRequest) => parseLifecycleResult(
-    await ipcRenderer.invoke('agent:resetSession', parseProductLifecycleRequest(request)),
+    await invokeAgentRuntime('agent:resetSession', parseProductLifecycleRequest(request)),
   ),
   // Stage U PR U1.2 — removed `orchestrate / getStatus / getAll / getDiagnostics`
   // legacy AgentManager wrappers. Zero renderer callers (verified via grep).
   // Use `getRuntimeStatus` + `getCapabilityRuntimeSnapshot` for diagnostics.
   kill: async (request: StopLifecycleRequest) => parseLifecycleResult(
-    await ipcRenderer.invoke('agent:kill', parseStopLifecycleRequest(request)),
+    await invokeAgentRuntime('agent:kill', parseStopLifecycleRequest(request)),
   ),
   closeSession: async (request: ProductLifecycleRequest) => parseLifecycleResult(
-    await ipcRenderer.invoke('agent:closeSession', parseProductLifecycleRequest(request)),
+    await invokeAgentRuntime('agent:closeSession', parseProductLifecycleRequest(request)),
   ),
   compactSession: async (request: LifecycleRequest) => parseLifecycleResult(
-    await ipcRenderer.invoke('agent:compactSession', parseLifecycleRequest(request)),
+    await invokeAgentRuntime('agent:compactSession', parseLifecycleRequest(request)),
   ),
-  getRuntimeStatus: () => ipcRenderer.invoke('agent:getRuntimeStatus'),
-  getCapabilityRuntimeSnapshot: (config?: unknown) => ipcRenderer.invoke('agent:getCapabilityRuntimeSnapshot', config),
-  listChannels: () => ipcRenderer.invoke('agent:listChannels'),
-  listRegistry: () => ipcRenderer.invoke('agent:registry:list'),
-  listRegistryKnowledge: (id: string) => ipcRenderer.invoke('agent:registry:listKnowledge', { id }),
-  getSystemStudioSnapshot: () => ipcRenderer.invoke('agent:systemStudio:getSnapshot'),
+  getRuntimeStatus: () => invokeAgentRuntime('agent:getRuntimeStatus'),
+  getCapabilityRuntimeSnapshot: (config?: unknown) => invokeAgentRuntime('agent:getCapabilityRuntimeSnapshot', config),
+  listChannels: () => invokeAgentRuntime('agent:listChannels'),
+  listRegistry: () => invokeAgentRuntime('agent:registry:list'),
+  listRegistryKnowledge: (id: string) => invokeAgentRuntime('agent:registry:listKnowledge', { id }),
+  getSystemStudioSnapshot: () => invokeAgentRuntime('agent:systemStudio:getSnapshot'),
   stageSystemStudioContentEdit: (payload: unknown) =>
-    ipcRenderer.invoke('agent:systemStudio:stageContentEdit', payload),
+    invokeAgentRuntime('agent:systemStudio:stageContentEdit', payload),
   confirmSystemStudioContentEdit: (proposalId: string) =>
-    ipcRenderer.invoke('agent:systemStudio:confirmContentEdit', { proposalId }),
+    invokeAgentRuntime('agent:systemStudio:confirmContentEdit', { proposalId }),
   rejectSystemStudioContentEdit: (proposalId: string) =>
-    ipcRenderer.invoke('agent:systemStudio:rejectContentEdit', { proposalId }),
-  listSpecialistBlueprints: () => ipcRenderer.invoke('agent:specialistBlueprint:list'),
-  listConversationScopes: (agent?: string) => ipcRenderer.invoke('agent:listConversationScopes', { agent }),
-  readRuntimeReady: async () => parseAgentRuntimeReadinessSnapshot(
-    await ipcRenderer.invoke('agent:readRuntimeReady'),
-  ),
-  onRuntimeReady: (callback: (snapshot: AgentRuntimeReadinessSnapshot) => void) => {
-    const listener = (_event: IpcRendererEvent, payload: unknown) => {
-      callback(parseAgentRuntimeReadinessSnapshot(payload))
-    }
-    ipcRenderer.on('agent:runtimeReady', listener)
-    return () => ipcRenderer.removeListener('agent:runtimeReady', listener)
-  },
+    invokeAgentRuntime('agent:systemStudio:rejectContentEdit', { proposalId }),
+  listSpecialistBlueprints: () => invokeAgentRuntime('agent:specialistBlueprint:list'),
+  listConversationScopes: (agent?: string) => invokeAgentRuntime('agent:listConversationScopes', { agent }),
+  readRuntimeReady: readAgentRuntimeReady,
+  onRuntimeReady: subscribeAgentRuntimeReady,
   listScopeRuns: (payload?: { channelKey?: string; statuses?: string[]; limit?: number }) =>
-    ipcRenderer.invoke('agent:listScopeRuns', payload || {}),
+    invokeAgentRuntime('agent:listScopeRuns', payload || {}),
   readCodexLifecycleSnapshot: async (request: LifecycleRequest) => {
-    const result = await ipcRenderer.invoke('agent:readCodexLifecycleSnapshot', parseLifecycleRequest(request)) as {
+    const result = await invokeAgentRuntime('agent:readCodexLifecycleSnapshot', parseLifecycleRequest(request)) as {
       success: boolean
       data?: unknown
       error?: string
@@ -131,9 +147,9 @@ const agentAPI = {
       : result
   },
   listTaskProjections: (scopeId: string) =>
-    ipcRenderer.invoke('agent:listTaskProjections', { scopeId }),
+    invokeAgentRuntime('agent:listTaskProjections', { scopeId }),
   getTaskProjection: (taskId: string) =>
-    ipcRenderer.invoke('agent:getTaskProjection', { taskId }),
+    invokeAgentRuntime('agent:getTaskProjection', { taskId }),
   searchSessionRecall: (payload?: {
     query?: string
     channelKey?: string
@@ -142,7 +158,7 @@ const agentAPI = {
     hasAttachments?: boolean
     currentScopeId?: string
     limit?: number
-  }) => ipcRenderer.invoke('agent:searchSessionRecall', payload || {}),
+  }) => invokeAgentRuntime('agent:searchSessionRecall', payload || {}),
   listRecentSessions: (payload?: {
     channelKey?: string
     sourceKind?: 'local' | 'channel'
@@ -150,27 +166,27 @@ const agentAPI = {
     hasAttachments?: boolean
     currentScopeId?: string
     limit?: number
-  }) => ipcRenderer.invoke('agent:listRecentSessions', payload || {}),
+  }) => invokeAgentRuntime('agent:listRecentSessions', payload || {}),
   getSessionRecallCapsule: (conversationId: string) =>
-    ipcRenderer.invoke('agent:getSessionRecallCapsule', { conversationId }),
+    invokeAgentRuntime('agent:getSessionRecallCapsule', { conversationId }),
   listAttachedSessionRecallContexts: (scopeId: string) =>
-    ipcRenderer.invoke('agent:listAttachedSessionRecallContexts', { scopeId }),
+    invokeAgentRuntime('agent:listAttachedSessionRecallContexts', { scopeId }),
   getReferenceSkillHint: (scopeId: string) =>
-    ipcRenderer.invoke('agent:getReferenceSkillHint', { scopeId }),
+    invokeAgentRuntime('agent:getReferenceSkillHint', { scopeId }),
   inspectDetachedSkillTask: (taskId: string, scopeId: string) =>
-    ipcRenderer.invoke('agent:inspectDetachedSkillTask', { taskId, scopeId }),
+    invokeAgentRuntime('agent:inspectDetachedSkillTask', { taskId, scopeId }),
   listDetachedSkillTasks: (payload?: { scopeId?: string }) =>
-    ipcRenderer.invoke('agent:listDetachedSkillTasks', payload || {}),
+    invokeAgentRuntime('agent:listDetachedSkillTasks', payload || {}),
   cancelDetachedSkillTask: (taskId: string, scopeId: string) =>
-    ipcRenderer.invoke('agent:cancelDetachedSkillTask', { taskId, scopeId }),
-  listActiveChildRuns: () => ipcRenderer.invoke('agent:listActiveChildRuns'),
+    invokeAgentRuntime('agent:cancelDetachedSkillTask', { taskId, scopeId }),
+  listActiveChildRuns: () => invokeAgentRuntime('agent:listActiveChildRuns'),
   cancelChildRun: (childRunId: string) =>
-    ipcRenderer.invoke('agent:cancelChildRun', { childRunId }),
+    invokeAgentRuntime('agent:cancelChildRun', { childRunId }),
   attachSessionRecallContext: (
     currentScopeId: string,
     conversationId: string,
     expectedMessageVisibilityEpoch: number,
-  ) => ipcRenderer.invoke('agent:attachSessionRecallContext', {
+  ) => invokeAgentRuntime('agent:attachSessionRecallContext', {
     currentScopeId,
     conversationId,
     expectedMessageVisibilityEpoch,
@@ -179,33 +195,35 @@ const agentAPI = {
     currentScopeId: string,
     conversationId: string,
     expectedMessageVisibilityEpoch: number,
-  ) => ipcRenderer.invoke('agent:detachSessionRecallContext', {
+  ) => invokeAgentRuntime('agent:detachSessionRecallContext', {
     currentScopeId,
     conversationId,
     expectedMessageVisibilityEpoch,
   }),
   resumeSessionCandidate: (payload: { conversationId?: string; resumeTitle?: string }) =>
-    ipcRenderer.invoke('agent:resumeSessionCandidate', payload),
+    invokeAgentRuntime('agent:resumeSessionCandidate', payload),
   getConversationScopeMessages: (scopeId: string) =>
-    ipcRenderer.invoke('agent:getConversationScopeMessages', { scopeId }),
+    invokeAgentRuntime('agent:getConversationScopeMessages', { scopeId }),
   setActionAuthorizationMode: (
     scopeId: string,
     mode: ActionAuthorizationMode,
     expectedMessageVisibilityEpoch: number,
-  ) => ipcRenderer.invoke('agent:setActionAuthorizationMode', {
+  ) => invokeAgentRuntime('agent:setActionAuthorizationMode', {
     scopeId,
     mode,
     expectedMessageVisibilityEpoch,
   }),
-  listScopeAttachments: (scopeId?: string) => ipcRenderer.invoke('agent:listScopeAttachments', { scopeId }),
+  listScopeAttachments: (scopeId?: string) => invokeAgentRuntime('agent:listScopeAttachments', { scopeId }),
   getScopeAttachment: (scopeId: string, attachmentId: string) =>
-    ipcRenderer.invoke('agent:getScopeAttachment', { scopeId, attachmentId }),
+    invokeAgentRuntime('agent:getScopeAttachment', { scopeId, attachmentId }),
   clearRemoteAttachmentCache: (channelId?: string) =>
-    ipcRenderer.invoke('agent:clearRemoteAttachmentCache', { channelId }),
+    invokeAgentRuntime('agent:clearRemoteAttachmentCache', { channelId }),
   getRemoteAttachmentCacheStats: (channelId?: string) =>
-    ipcRenderer.invoke('agent:getRemoteAttachmentCacheStats', { channelId }),
-  sendScoped: (payload: SendScopedRequest) => ipcRenderer
-    .invoke('agent:sendScoped', parseSendScopedRequest(payload))
+    invokeAgentRuntime('agent:getRemoteAttachmentCacheStats', { channelId }),
+  sendScoped: (payload: SendScopedRequest) => invokeAgentRuntime(
+    'agent:sendScoped',
+    parseSendScopedRequest(payload),
+  )
     .then(parseSendScopedResponse),
   onIngressAdmitted: (callback: (event: ReturnType<typeof parseIngressAdmittedEvent>) => void) => {
     const listener = (_event: IpcRendererEvent, payload: unknown) => {
@@ -217,41 +235,41 @@ const agentAPI = {
   emitRendererMetric: (
     name: RendererAgentMetricName,
     payload: Record<string, unknown> = {},
-  ) => ipcRenderer.invoke('agent:emitRendererMetric', { name, payload }),
+  ) => invokeAgentRuntime('agent:emitRendererMetric', { name, payload }),
   reportInfrastructureTimeout: (payload: { scopeId: string; requestId: string; elapsedMs?: number }) =>
-    ipcRenderer.invoke('agent:reportInfrastructureTimeout', payload),
+    invokeAgentRuntime('agent:reportInfrastructureTimeout', payload),
   upsertChannel: (payload: {
     id?: string
     type: 'local-debug' | 'generic-webhook' | 'feishu-bot' | 'feishu-app' | 'telegram-bot' | 'wechat-openclaw'
     name: string
     enabled?: boolean
     config?: Record<string, unknown>
-  }) => ipcRenderer.invoke('agent:upsertChannel', payload),
+  }) => invokeAgentRuntime('agent:upsertChannel', payload),
   testChannel: (payload: {
     id?: string
     type: 'local-debug' | 'generic-webhook' | 'feishu-bot' | 'feishu-app' | 'telegram-bot' | 'wechat-openclaw'
     name: string
     enabled?: boolean
     config?: Record<string, unknown>
-  }) => ipcRenderer.invoke('agent:testChannel', payload),
+  }) => invokeAgentRuntime('agent:testChannel', payload),
   startWechatLogin: (payload: {
     id?: string
     force?: boolean
-  }) => ipcRenderer.invoke('agent:startWechatLogin', payload),
+  }) => invokeAgentRuntime('agent:startWechatLogin', payload),
   getWechatLoginStatus: (payload: {
     channelId: string
     sessionKey: string
-  }) => ipcRenderer.invoke('agent:getWechatLoginStatus', payload),
+  }) => invokeAgentRuntime('agent:getWechatLoginStatus', payload),
   submitWechatLoginVerifyCode: (payload: {
     channelId: string
     sessionKey: string
     code: string
-  }) => ipcRenderer.invoke('agent:submitWechatLoginVerifyCode', payload),
-  deleteChannel: (id: string) => ipcRenderer.invoke('agent:deleteChannel', { id }),
+  }) => invokeAgentRuntime('agent:submitWechatLoginVerifyCode', payload),
+  deleteChannel: (id: string) => invokeAgentRuntime('agent:deleteChannel', { id }),
   setChannelEnabled: (id: string, enabled: boolean) =>
-    ipcRenderer.invoke('agent:setChannelEnabled', { id, enabled }),
+    invokeAgentRuntime('agent:setChannelEnabled', { id, enabled }),
   sendChannelProbe: (id: string, text: string) =>
-    ipcRenderer.invoke('agent:sendChannelProbe', { id, text }),
+    invokeAgentRuntime('agent:sendChannelProbe', { id, text }),
   // Stage V V3.2 — push payloads carry `sessionId: string | null`
   // (not optional). null = global event (not session-scoped); a string
   // means the event belongs to a specific session and renderer routes by it.
@@ -306,7 +324,7 @@ const agentAPI = {
     handled: boolean
     payload?: Record<string, unknown>
     error?: string
-  }) => ipcRenderer.invoke('agent:completeToolActionRequest', payload),
+  }) => invokeAgentRuntime('agent:completeToolActionRequest', payload),
   // Stage V V3.2 — sessionId field surfaced on the wire payload. unknown
   // shape retained for forward compat (renderer narrows further), but
   // callers may always read `data.sessionId` per V3.2 contract.
@@ -356,48 +374,48 @@ const agentAPI = {
 
 // Memory API
 const memoryAPI = {
-  query: (filters: unknown) => ipcRenderer.invoke('agent:memory:query', filters),
-  create: (entry: unknown) => ipcRenderer.invoke('agent:memory:create', entry),
-  update: (id: string, updates: unknown) => ipcRenderer.invoke('agent:memory:update', { id, updates }),
-  delete: (id: string) => ipcRenderer.invoke('agent:memory:delete', id),
-  stats: () => ipcRenderer.invoke('agent:memory:stats'),
-  createFromConversation: (payload: unknown) => ipcRenderer.invoke('agent:memory:createFromConversation', payload),
+  query: (filters: unknown) => invokeAgentRuntime('agent:memory:query', filters),
+  create: (entry: unknown) => invokeAgentRuntime('agent:memory:create', entry),
+  update: (id: string, updates: unknown) => invokeAgentRuntime('agent:memory:update', { id, updates }),
+  delete: (id: string) => invokeAgentRuntime('agent:memory:delete', id),
+  stats: () => invokeAgentRuntime('agent:memory:stats'),
+  createFromConversation: (payload: unknown) => invokeAgentRuntime('agent:memory:createFromConversation', payload),
 }
 
 const memoryCardsAPI = {
-  list: () => ipcRenderer.invoke('agent:beliefCards:list'),
+  list: () => invokeAgentRuntime('agent:beliefCards:list'),
   transition: (payload: { relPath: string; action: 'approve' | 'reject' }) =>
-    ipcRenderer.invoke('agent:beliefCards:transition', payload),
+    invokeAgentRuntime('agent:beliefCards:transition', payload),
 }
 
 // P0-4 (2026-07-02 P0 visibility batch) — read-only run quality stats.
 const runQualityAPI = {
-  stats: () => ipcRenderer.invoke('agent:runQuality:stats'),
+  stats: () => invokeAgentRuntime('agent:runQuality:stats'),
 }
 
 // D5 后端切片 (2026-07-03) — per-run 用户反馈（评分/信号/评论）。
 const runFeedbackAPI = {
-  submit: (payload: unknown) => ipcRenderer.invoke('agent:runFeedback:submit', payload),
-  list: (options?: unknown) => ipcRenderer.invoke('agent:runFeedback:list', options),
+  submit: (payload: unknown) => invokeAgentRuntime('agent:runFeedback:submit', payload),
+  list: (options?: unknown) => invokeAgentRuntime('agent:runFeedback:list', options),
 }
 
 // 梯队三 (2026-07-03) — emergence feed（拉取式组装，四类卡）。
 const emergenceAPI = {
-  feed: () => ipcRenderer.invoke('agent:emergence:feed'),
+  feed: () => invokeAgentRuntime('agent:emergence:feed'),
 }
 
 // Trigger API
 const triggerAPI = {
-  list: (filters?: unknown) => ipcRenderer.invoke('agent:trigger:list', filters),
-  create: (trigger: unknown) => ipcRenderer.invoke('agent:trigger:create', trigger),
-  update: (id: string, updates: unknown) => ipcRenderer.invoke('agent:trigger:update', { id, updates }),
-  createWithMemories: (payload: unknown) => ipcRenderer.invoke('agent:trigger:createWithMemories', payload),
+  list: (filters?: unknown) => invokeAgentRuntime('agent:trigger:list', filters),
+  create: (trigger: unknown) => invokeAgentRuntime('agent:trigger:create', trigger),
+  update: (id: string, updates: unknown) => invokeAgentRuntime('agent:trigger:update', { id, updates }),
+  createWithMemories: (payload: unknown) => invokeAgentRuntime('agent:trigger:createWithMemories', payload),
 }
 
 // Memory Lifecycle API
 const memoryLifecycleAPI = {
-  status: () => ipcRenderer.invoke('agent:memory:lifecycle:status'),
-  runMaintenance: () => ipcRenderer.invoke('agent:memory:lifecycle:runMaintenance'),
+  status: () => invokeAgentRuntime('agent:memory:lifecycle:status'),
+  runMaintenance: () => invokeAgentRuntime('agent:memory:lifecycle:runMaintenance'),
 }
 
 // Browser API
@@ -1054,8 +1072,8 @@ const skillsAPI = {
   // B Phase 1 PR2 — ask_user: submit the user's answer to a pending ephemeral
   // question. Question metadata is pushed separately via `skill:askUserQuestion`.
   submitAskUserAnswer: (payload: { executionId: string; answer: string }) =>
-    ipcRenderer.invoke('skills:askUser:submit', payload),
-  listPendingAskUser: () => ipcRenderer.invoke('skills:askUser:pending'),
+    invokeAgentRuntime('skills:askUser:submit', payload),
+  listPendingAskUser: () => invokeAgentRuntime('skills:askUser:pending'),
 	  onAskUserQuestion: (
 	    handler: (event: {
 	      executionId: string
@@ -1396,15 +1414,15 @@ const agentInteractionAPI = {
   submitAskUserQuestions: (payload: {
     cardId: string
     answers: Array<{ id: string; answer: string | string[] }>
-  }) => ipcRenderer.invoke('agent:askUserQuestions:submit', payload),
+  }) => invokeAgentRuntime('agent:askUserQuestions:submit', payload),
   cancelAskUserQuestions: (payload: { cardId: string; reason?: string }) =>
-    ipcRenderer.invoke('agent:askUserQuestions:cancel', payload),
+    invokeAgentRuntime('agent:askUserQuestions:cancel', payload),
   listPendingAskUserQuestions: () =>
-    ipcRenderer.invoke('agent:askUserQuestions:listPending'),
+    invokeAgentRuntime('agent:askUserQuestions:listPending'),
   // EP1-I3-2 — confirm/deny a frozen tool call awaiting user confirmation.
   // Programmatic equivalent of answering the confirmation card variant.
   respondFrozenCall: (payload: { frozenCallId: string; decision: 'confirm' | 'deny' }) =>
-    ipcRenderer.invoke('agent:frozenCall:respond', payload),
+    invokeAgentRuntime('agent:frozenCall:respond', payload),
   onAskUserQuestionsCard: (handler: (event: AgentInteractionCardEvent) => void) => {
     const listener = (_event: unknown, payload: AgentInteractionCardEvent) => handler(payload)
     ipcRenderer.on('agent:askUserQuestions:push', listener)

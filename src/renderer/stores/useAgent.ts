@@ -125,6 +125,17 @@ type PendingIngressSnapshot = {
 const pendingIngressSnapshots = new Map<string, PendingIngressSnapshot>()
 const actionAuthorizationModeRequestRevisions = new Map<string, number>()
 let createSessionRequestRevision = 0
+const sessionCreationsInFlight = new Set<Promise<void>>()
+
+function beginSessionCreation(): () => void {
+  let release!: () => void
+  const completion = new Promise<void>((resolve) => { release = resolve })
+  sessionCreationsInFlight.add(completion)
+  return () => {
+    sessionCreationsInFlight.delete(completion)
+    release()
+  }
+}
 
 function pendingIngressOriginMatches(
   state: AgentState,
@@ -789,97 +800,102 @@ export const useAgent = create<AgentState>((set, get) => ({
   createNewSession: async () => {
     const api = typeof window !== 'undefined' ? window.electronAPI?.agent : null
     if (!api?.createSession) throw new Error('agent_create_session_unavailable')
-    const state = get()
-    const requestedAgent = state.currentAgent
-    const composerAuthority = captureComposerAuthority(state)
-    const requestRevision = ++createSessionRequestRevision
-    const result = await api.createSession({ agentId: requestedAgent })
-    if (!result.ok) return result
+    const finishCreation = beginSessionCreation()
+    try {
+      const state = get()
+      const requestedAgent = state.currentAgent
+      const composerAuthority = captureComposerAuthority(state)
+      const requestRevision = ++createSessionRequestRevision
+      const result = await api.createSession({ agentId: requestedAgent })
+      if (!result.ok) return result
 
-    const id = generateSessionId()
-    const scope: ConversationScope = {
-      id: result.aliasId,
-      aliasGeneration: result.aliasGeneration,
-      messageVisibilityEpoch: 0,
-      agent: requestedAgent,
-      activeAgentId: requestedAgent,
-      handoffGeneration: 0,
-      title: '新对话',
-      sourceKind: 'local',
-      sourceId: 'app',
-      threadKey: result.aliasId,
-      meta: { sourceLabel: '应用内', createdBy: 'app' },
-      createdAt: result.persistedAt,
-      updatedAt: result.persistedAt,
-      lastMessageAt: null,
-    }
-    const slice: SessionSlice = {
-      ...makeEmptySessionSlice(result.aliasId),
-      aliasGeneration: result.aliasGeneration,
-      messageVisibilityEpoch: 0,
-    }
-    set((current) => {
-      if (current.retiredScopeIds[result.aliasId]) return current
-      const existingScope = current.scopes.find((candidate) => candidate.id === result.aliasId)
-      const reconciledGeneration = Math.max(
-        result.aliasGeneration,
-        typeof existingScope?.aliasGeneration === 'number' ? existingScope.aliasGeneration : 0,
-      )
-      const reconciledScope = existingScope
-        ? { ...scope, ...existingScope, aliasGeneration: reconciledGeneration }
-        : { ...scope, aliasGeneration: reconciledGeneration }
-      const retainedScopes = current.scopes.filter((candidate) => (
-        candidate.id !== scope.id && !current.retiredScopeIds[candidate.id]
-      ))
-      const scopes = [reconciledScope, ...retainedScopes]
-      const matchingSessionIds = Object.entries(current.sessions)
-        .filter(([, candidate]) => normalizeSessionSlice(candidate).conversationId === result.aliasId)
-        .map(([sessionId]) => sessionId)
-      const targetSessionId = matchingSessionIds[0] || id
-      const existingSlice = normalizeSessionSlice(current.sessions[targetSessionId])
-      const reconciledSlice: SessionSlice = {
-        ...(matchingSessionIds.length > 0 ? existingSlice : slice),
-        conversationId: result.aliasId,
-        aliasGeneration: Math.max(
-          reconciledGeneration,
-          existingSlice.aliasGeneration ?? 0,
-        ),
+      const id = generateSessionId()
+      const scope: ConversationScope = {
+        id: result.aliasId,
+        aliasGeneration: result.aliasGeneration,
+        messageVisibilityEpoch: 0,
+        agent: requestedAgent,
+        activeAgentId: requestedAgent,
+        handoffGeneration: 0,
+        title: '新对话',
+        sourceKind: 'local',
+        sourceId: 'app',
+        threadKey: result.aliasId,
+        meta: { sourceLabel: '应用内', createdBy: 'app' },
+        createdAt: result.persistedAt,
+        updatedAt: result.persistedAt,
+        lastMessageAt: null,
       }
-      const nextSessions = Object.fromEntries(
-        Object.entries(current.sessions).filter(([sessionId]) => (
+      const slice: SessionSlice = {
+        ...makeEmptySessionSlice(result.aliasId),
+        aliasGeneration: result.aliasGeneration,
+        messageVisibilityEpoch: 0,
+      }
+      set((current) => {
+        if (current.retiredScopeIds[result.aliasId]) return current
+        const existingScope = current.scopes.find((candidate) => candidate.id === result.aliasId)
+        const reconciledGeneration = Math.max(
+          result.aliasGeneration,
+          typeof existingScope?.aliasGeneration === 'number' ? existingScope.aliasGeneration : 0,
+        )
+        const reconciledScope = existingScope
+          ? { ...scope, ...existingScope, aliasGeneration: reconciledGeneration }
+          : { ...scope, aliasGeneration: reconciledGeneration }
+        const retainedScopes = current.scopes.filter((candidate) => (
+          candidate.id !== scope.id && !current.retiredScopeIds[candidate.id]
+        ))
+        const scopes = [reconciledScope, ...retainedScopes]
+        const matchingSessionIds = Object.entries(current.sessions)
+          .filter(([, candidate]) => normalizeSessionSlice(candidate).conversationId === result.aliasId)
+          .map(([sessionId]) => sessionId)
+        const targetSessionId = matchingSessionIds[0] || id
+        const existingSlice = normalizeSessionSlice(current.sessions[targetSessionId])
+        const reconciledSlice: SessionSlice = {
+          ...(matchingSessionIds.length > 0 ? existingSlice : slice),
+          conversationId: result.aliasId,
+          aliasGeneration: Math.max(
+            reconciledGeneration,
+            existingSlice.aliasGeneration ?? 0,
+          ),
+        }
+        const nextSessions = Object.fromEntries(
+          Object.entries(current.sessions).filter(([sessionId]) => (
+            !matchingSessionIds.includes(sessionId) || sessionId === targetSessionId
+          )),
+        ) as Record<string, SessionSlice>
+        nextSessions[targetSessionId] = reconciledSlice
+        const nextOrder = current.sessionOrder.filter((sessionId) => (
           !matchingSessionIds.includes(sessionId) || sessionId === targetSessionId
-        )),
-      ) as Record<string, SessionSlice>
-      nextSessions[targetSessionId] = reconciledSlice
-      const nextOrder = current.sessionOrder.filter((sessionId) => (
-        !matchingSessionIds.includes(sessionId) || sessionId === targetSessionId
-      ))
-      if (!nextOrder.includes(targetSessionId)) nextOrder.push(targetSessionId)
-      const durableMerge = {
-        sessions: nextSessions,
-        sessionOrder: nextOrder,
-        scopes,
-        conversations: scopes.map(mapScopeToConversation),
-        scopeAuthorityRevision: current.scopeAuthorityRevision + 1,
-      }
-      if (requestRevision !== createSessionRequestRevision
-        || !isComposerAuthorityCurrent(current, composerAuthority)) return durableMerge
-      return {
-        ...durableMerge,
-        activeSessionId: targetSessionId,
-        sessionId: targetSessionId,
-        ...mirrorFromSessionSlice({ ...current, scopes }, reconciledSlice),
-        attachments: [],
-        filePool: [],
-        activeAttachmentPreview: null,
-        pendingContinuationIntent: null,
-        pendingContinuationDraftAnchor: null,
-        toolTrace: [],
-        toolTraceStatus: 'idle',
-        composerAuthorityRevision: current.composerAuthorityRevision + 1,
-      }
-    })
-    return result
+        ))
+        if (!nextOrder.includes(targetSessionId)) nextOrder.push(targetSessionId)
+        const durableMerge = {
+          sessions: nextSessions,
+          sessionOrder: nextOrder,
+          scopes,
+          conversations: scopes.map(mapScopeToConversation),
+          scopeAuthorityRevision: current.scopeAuthorityRevision + 1,
+        }
+        if (requestRevision !== createSessionRequestRevision
+          || !isComposerAuthorityCurrent(current, composerAuthority)) return durableMerge
+        return {
+          ...durableMerge,
+          activeSessionId: targetSessionId,
+          sessionId: targetSessionId,
+          ...mirrorFromSessionSlice({ ...current, scopes }, reconciledSlice),
+          attachments: [],
+          filePool: [],
+          activeAttachmentPreview: null,
+          pendingContinuationIntent: null,
+          pendingContinuationDraftAnchor: null,
+          toolTrace: [],
+          toolTraceStatus: 'idle',
+          composerAuthorityRevision: current.composerAuthorityRevision + 1,
+        }
+      })
+      return result
+    } finally {
+      finishCreation()
+    }
   },
 
   closeSession: async (id) => {
@@ -2027,6 +2043,10 @@ let initialSessionCreation: Promise<void> | null = null
 export async function hydrateAgentScopesAfterRuntimeReady(): Promise<void> {
   const loaded = await useAgent.getState().loadScopes()
   if (!loaded || useAgent.getState().scopes.length > 0) return
+  if (sessionCreationsInFlight.size > 0) {
+    await Promise.all([...sessionCreationsInFlight])
+    if (useAgent.getState().scopes.length > 0) return
+  }
   if (!initialSessionCreation) {
     const creation = useAgent.getState().createNewSession().then(() => undefined)
     initialSessionCreation = creation.finally(() => { initialSessionCreation = null })

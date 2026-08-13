@@ -597,6 +597,41 @@ describe('useAgent scope list contract', () => {
     assert.equal(Object.values(state.sessions)[0].aliasGeneration, 2)
   })
 
+  it('startup hydration waits for an explicit session create instead of stealing activation', async () => {
+    const created = deferred<unknown>()
+    let createCalls = 0
+    installElectronApiMock({
+      listConversationScopes: async () => ({ success: true, data: [] }),
+      createSession: () => {
+        createCalls += 1
+        return created.promise
+      },
+    })
+
+    const creating = useAgent.getState().createNewSession()
+    await new Promise<void>((resolve) => setImmediate(resolve))
+    const hydrating = hydrateAgentScopesAfterRuntimeReady()
+    await new Promise<void>((resolve) => setImmediate(resolve))
+
+    created.resolve({
+      ok: true,
+      action: 'create',
+      aliasId: 'scope-explicit-during-startup',
+      aliasGeneration: 1,
+      persistedAt: '2026-08-13T00:00:00.000Z',
+    })
+    await Promise.all([creating, hydrating])
+
+    const state = useAgent.getState()
+    assert.equal(createCalls, 1)
+    assert.equal(state.currentScopeId, 'scope-explicit-during-startup')
+    assert.ok(state.activeSessionId)
+    assert.equal(
+      state.sessions[state.activeSessionId!]?.conversationId,
+      'scope-explicit-during-startup',
+    )
+  })
+
   it('never redirects a send for a closed target into the current active scope', async () => {
     const activeScope = {
       id: 'scope-send-active',
