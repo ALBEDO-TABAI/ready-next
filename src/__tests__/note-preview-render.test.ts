@@ -406,6 +406,20 @@ test('NotePreview preserves ordered, unordered and nested markdown list structur
   assert.doesNotMatch(html, /<p class="note-preview-markdown-p">- 无序列表项<\/p>/)
 })
 
+test('NotePreview keeps source line breaks visible inside markdown paragraphs', () => {
+  const html = renderToStaticMarkup(
+    React.createElement(NotePreview, {
+      content: '△ 第一行。\n△ 第二行。\n**母亲**：第三行。',
+      notePath: '/tmp/line-breaks.md',
+    }),
+  )
+  const css = readRendererStyles()
+  const paragraphRule = css.match(/\.note-preview-markdown-p\s*\{[^}]+\}/)?.[0] || ''
+
+  assert.match(html, /△ 第一行。\n△ 第二行。\n<strong>母亲<\/strong>：第三行。/)
+  assert.match(paragraphRule, /white-space:\s*pre-wrap/)
+})
+
 test('NotePreview only applies ebook reading class to imported ebook markdown', () => {
   const plainHtml = renderToStaticMarkup(
     React.createElement(NotePreview, {

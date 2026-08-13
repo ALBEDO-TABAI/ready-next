@@ -85,8 +85,6 @@ export function mapComponentSpecToSkeletonSpec(
       return wrap('vertical_timeline', mapWeekSchedule(props), backgroundMode)
     case 'time_allocation_chart':
       return wrap('chart_focus', mapTimeAllocationChart(props), backgroundMode)
-    case 'schedule_runtime_card':
-      return wrap('vertical_timeline', mapScheduleRuntimeCard(props), backgroundMode)
     case 'todo_list_manual':
       return wrap('vertical_timeline', mapTodoListManual(props), backgroundMode)
     case 'weekly_plan_board_manual':
@@ -411,20 +409,6 @@ function mapTimeAllocationChart(props: Record_): Record_ {
   }
 }
 
-function mapScheduleRuntimeCard(props: Record_): Record_ {
-  const title = pickNonEmpty(props.heading, props.title, '自动计划')
-  const jobs = readArray(props.jobs).slice(0, 12).map((entry) => {
-    const record = toRecord(entry)
-    return {
-      time: pickNonEmpty(record.nextRun, record.schedule, '—'),
-      heading: pickNonEmpty(record.name, record.title, '任务'),
-      body: readString(record.summary) || undefined,
-      status: mapJobStatus(record.status),
-    }
-  })
-  return { title, events: ensureEvents(jobs) }
-}
-
 function mapTodoListManual(props: Record_): Record_ {
   const title = pickNonEmpty(props.heading, props.title, '待办')
   const items = readArray(props.items).slice(0, 12).map((entry, index) => {
@@ -516,15 +500,6 @@ function pickDeltaDirection(value: unknown): 'up' | 'down' | 'flat' | undefined 
 function mapEventStatus(value: unknown): 'done' | 'active' | 'pending' | 'blocked' {
   const text = readString(value)
   if (text === 'done' || text === 'active' || text === 'pending' || text === 'blocked') return text
-  return 'pending'
-}
-
-function mapJobStatus(value: unknown): 'done' | 'active' | 'pending' | 'blocked' {
-  const text = readString(value)
-  if (text === 'running') return 'active'
-  if (text === 'failed') return 'blocked'
-  if (text === 'idle' || text === 'scheduled') return 'pending'
-  if (text === 'succeeded' || text === 'done') return 'done'
   return 'pending'
 }
 

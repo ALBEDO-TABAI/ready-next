@@ -10,6 +10,7 @@ import {
 } from './documentActions'
 import type { AgentArtifact, AgentModuleKind, ScopeRunState, ScopeRunTaskStepStatus, ToolTraceEvent } from './types'
 import { useDocTabs } from '../../stores/useDocTabs'
+import { executeCodexCurrentDocumentRead } from './codexCurrentDocumentRead'
 
 function toExecutionKind(tool: string): ScopeRunState['executionKind'] {
   if (tool === 'rss.analyzeItem') return 'pipeline'
@@ -114,6 +115,11 @@ export async function executeModuleToolAction(
 ): Promise<ModuleToolActionExecutionResult> {
   const { scopeId, agentName, tool, args, runId, activateWorkbenchMode, upsertScopeRunState, getScopeRunState } = params
   if (!tool) return { handled: false }
+
+  if (tool === 'document.readSection') {
+    const authoritativeRead = await executeCodexCurrentDocumentRead(args)
+    if (authoritativeRead) return { handled: true, payload: authoritativeRead }
+  }
 
   if(tool==='tagForge.checkRevision'){
     const path=typeof args.path==='string'?args.path:'';const tab=useDocTabs.getState().tabs.find((item)=>item.path===path)

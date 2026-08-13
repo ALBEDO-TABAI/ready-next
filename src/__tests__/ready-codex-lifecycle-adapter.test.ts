@@ -12,15 +12,28 @@ import type {
 } from '../main/modules/agent-control/codex-runtime/codex-native-runtime'
 import type { PreparedCodexProductRun } from '../main/modules/agent-control/codex-runtime/codex-product-run-preparer'
 import { CodexTurnInputBuilder, textUserInput } from '../main/modules/agent-control/codex-runtime/codex-turn-input-builder'
+import { createCodexToolFixture } from './utils/codex-tool-fixture'
+import {
+  CodexThreadResumeAuthority,
+  type CodexThreadResumeSession,
+} from '../main/modules/agent-control/codex-runtime/codex-thread-resume-authority'
+import {
+  buildCodexEngineTerminalFinalizationKey,
+  CodexProductCloseoutExpectationGuard,
+  runCodexEngineTerminalFinalization,
+} from '../main/modules/agent-control/codex-runtime/codex-runtime-production-composition'
 import {
   CodexTurnCollector,
   type CoreTurnCandidate,
 } from '../main/modules/agent-control/codex-runtime/codex-turn-collector'
 import {
+  RECOVERED_CLOSEOUT_TOMBSTONE_LIMIT,
   ReadyCodexLifecycleAdapter,
   ReadyCodexLifecyclePortError,
   type ReadyCodexLifecycleStore,
+  type ReadyCodexThreadResumePort,
 } from '../main/modules/agent-control/codex-runtime/ready-codex-lifecycle-adapter'
+import { CodexAppServerClientError } from '../main/modules/agent-control/codex-runtime/codex-app-server-client'
 
 const stableScalarSources = ['cli', 'vscode', 'exec', 'appServer', 'unknown'] as const
 
@@ -63,6 +76,9 @@ const rootThread: CodexThread = {
 
 const activeTurn: CodexTurn = { id: 'turn-1', items: [], status: 'inProgress', error: null }
 const aliasIdentity = { aliasId: 'alias-1', aliasGeneration: 1 }
+const stopIdentity = { ...aliasIdentity, readyRunId: 'run-1' }
+const activeLifecycleIdentity = { ...aliasIdentity, readyRunId: 'run-1' }
+const idleLifecycleIdentity = { ...aliasIdentity, readyRunId: null }
 
 class FakeNativeRuntime implements CodexNativeRuntime {
   readonly calls: string[] = []
@@ -72,6 +88,11 @@ class FakeNativeRuntime implements CodexNativeRuntime {
   suppressTurnTerminal = false
   pendingThreadStart = false
   pendingTurnStart = false
+  manualCompactionStarted = false
+  manualCompactionReadbackItemId = 'compact-readback-item-1'
+  interruptError: Error | null = null
+  interruptReadTurnId = 'turn-1'
+  interruptReadTurnStatus: CodexTurn['status'] = 'completed'
   private readonly listeners = new Set<(notification: CodexNativeNotification) => void>()
 
   private failIfRequested(method: string): void {
@@ -92,10 +113,26 @@ class FakeNativeRuntime implements CodexNativeRuntime {
     if (this.pendingThreadStart) return new Promise(() => undefined)
     return { thread: { ...this.thread, cwd: params.cwd }, instructionSources: [] }
   }
-  async threadRead(): Promise<{ thread: CodexThread }> {
+  async threadRead(_params: { threadId: string; includeTurns: true }): Promise<{ thread: CodexThread }> {
     this.calls.push('threadRead')
     this.failIfRequested('threadRead')
-    return { thread: { ...this.thread, turns: [{ ...activeTurn, status: 'completed' }] } }
+    return {
+      thread: {
+        ...this.thread,
+        turns: this.manualCompactionStarted
+          ? [{
+              id: 'compact-turn-1',
+              status: 'completed',
+              error: null,
+              items: [{ type: 'contextCompaction', id: this.manualCompactionReadbackItemId }],
+            }]
+          : [{
+              ...activeTurn,
+              id: this.interruptReadTurnId,
+              status: this.interruptReadTurnStatus,
+            }],
+      },
+    }
   }
   async threadList(): Promise<{ data: CodexThread[]; nextCursor: string | null }> {
     throw new Error('not used')
@@ -135,11 +172,13 @@ class FakeNativeRuntime implements CodexNativeRuntime {
     this.calls.push('turnInterrupt')
     this.interrupts.push(params)
     this.failIfRequested('turnInterrupt')
+    if (this.interruptError) throw this.interruptError
     return {}
   }
   async threadCompactStart(): Promise<Record<string, never>> {
     this.calls.push('threadCompactStart')
     this.failIfRequested('threadCompactStart')
+    this.manualCompactionStarted = true
     return {}
   }
 }
@@ -169,8 +208,17 @@ class FakeLifecycleStore implements ReadyCodexLifecycleStore {
   facts: LifecycleOperationFacts = { ...idleNever }
   factsAfterFirstRead: LifecycleOperationFacts | null = null
   lifecycleFactReadCount = 0
+  activeReadyRunId: string | null = 'run-1'
+  activeReadyRunIdAfterFirstRead: string | null | undefined
+  activeManualCompactionId: string | null = null
+  requestedAction: 'stop' | 'close' | 'reset' | null = null
   threadState: 'unstarted' | 'loaded' | 'resume_required' = 'unstarted'
+  activeConnectionEpoch = 'epoch-1'
   failEvidenceDigest = false
+  consumedManualCompaction: Parameters<ReadyCodexLifecycleStore['consumeManualCompaction']>[0] | null = null
+  retryUserStopFinalization: Awaited<ReturnType<
+    ReadyCodexLifecycleStore['retryEngineTerminalUserStopFinalization']
+  >> = null
 
   private failIfRequested(method: string): void {
     const code = this.failAt.get(method)
@@ -218,17 +266,54 @@ class FakeLifecycleStore implements ReadyCodexLifecycleStore {
     this.boundThreads.push(input)
     this.threadState = 'loaded'
   }
-  async markThreadResumed() { this.calls.push('markThreadResumed'); this.threadState = 'loaded' }
+  async markThreadResumed(input: Parameters<ReadyCodexLifecycleStore['markThreadResumed']>[0]) {
+    if (input.connectionEpoch !== this.activeConnectionEpoch) {
+      throw new Error('resumed_thread_connection_epoch_mismatch')
+    }
+    assert.ok(input.preResumeThreadReadDigest)
+    assert.ok(input.resumedThreadDigest)
+    this.calls.push('markThreadResumed')
+    this.threadState = 'loaded'
+  }
   async readLifecycleOperation(request: { aliasId: string }) {
     this.failIfRequested('readLifecycleOperation')
     this.lifecycleFactReadCount += 1
     const facts = this.lifecycleFactReadCount > 1 && this.factsAfterFirstRead
       ? this.factsAfterFirstRead
       : this.facts
+    const exactActiveReadyRunId = this.lifecycleFactReadCount > 1
+      && this.activeReadyRunIdAfterFirstRead !== undefined
+      ? this.activeReadyRunIdAfterFirstRead
+      : this.activeReadyRunId
+    const activeReadyRunId = facts.activeFence === 'product_turn'
+      || facts.threadStartUnreconciled
+      || facts.turnStartUnreconciled
+      || (facts.hostFailureEvidenceComplete && !facts.hostFailureProductTerminalCommitted)
+      ? exactActiveReadyRunId
+      : null
     return {
       identity: { aliasId: request.aliasId, aliasGeneration: 1 },
+      activeReadyRunId,
+      activeManualCompactionId: this.activeManualCompactionId,
+      requestedAction: this.requestedAction,
       facts,
     }
+  }
+  async requestProductInterrupt(input: Parameters<ReadyCodexLifecycleStore['requestProductInterrupt']>[0]) {
+    this.calls.push('requestProductInterrupt')
+    this.failIfRequested('requestProductInterrupt')
+    if (this.requestedAction && this.requestedAction !== input.action) {
+      throw new ReadyCodexLifecyclePortError('binding_conflict')
+    }
+    this.requestedAction = input.action
+  }
+  async acknowledgeProductInterrupt() {
+    this.calls.push('acknowledgeProductInterrupt')
+    this.failIfRequested('acknowledgeProductInterrupt')
+  }
+  async markProductInterruptUnknown() {
+    this.calls.push('markProductInterruptUnknown')
+    this.failIfRequested('markProductInterruptUnknown')
   }
   failureEvidenceDigest(input: { action: string; snapshot: string }) {
     if (this.failEvidenceDigest) throw new Error('digest_store_failed')
@@ -246,6 +331,18 @@ class FakeLifecycleStore implements ReadyCodexLifecycleStore {
       transactionDigest: 'reset-digest',
     }
   }
+  async quarantineUnknownManualCompaction() {
+    this.calls.push('quarantineUnknownManualCompaction')
+    this.failIfRequested('quarantineUnknownManualCompaction')
+    return {
+      ok: true as const,
+      action: 'reset' as const,
+      aliasId: 'alias-1',
+      retiredGeneration: 1,
+      newGeneration: 2,
+      transactionDigest: 'manual-quarantine-digest',
+    }
+  }
   async awaitProductCloseout() {
     this.calls.push('awaitProductCloseout')
     this.failIfRequested('awaitProductCloseout')
@@ -255,15 +352,71 @@ class FakeLifecycleStore implements ReadyCodexLifecycleStore {
       codexThreadId: 'thread-1',
       allNativeThreadAttemptsSettled: true,
     }
+    return this.productCloseoutEvidence('closeout-digest', 2)
+  }
+  async settleEngineTerminalUserStop(
+    _identity?: Parameters<ReadyCodexLifecycleStore['settleEngineTerminalUserStop']>[0],
+    action: 'stop' | 'close' | 'reset' = 'stop',
+  ) {
+    this.calls.push('settleEngineTerminalUserStop')
+    this.failIfRequested('settleEngineTerminalUserStop')
+    this.requestedAction = action
+    this.facts = {
+      ...idleNever,
+      readyRunCreated: true,
+      codexThreadId: 'thread-1',
+      allNativeThreadAttemptsSettled: true,
+    }
+    return this.productCloseoutEvidence('user-stop-closeout-digest', 3)
+  }
+  async settleReadbackTerminalUserStop(
+    _input?: Parameters<ReadyCodexLifecycleStore['settleReadbackTerminalUserStop']>[0],
+    action: 'stop' | 'close' | 'reset' = 'stop',
+  ) {
+    this.calls.push('settleReadbackTerminalUserStop')
+    this.failIfRequested('settleReadbackTerminalUserStop')
+    this.requestedAction = action
+    this.facts = {
+      ...idleNever,
+      readyRunCreated: true,
+      codexThreadId: 'thread-1',
+      allNativeThreadAttemptsSettled: true,
+    }
+    return this.productCloseoutEvidence('readback-user-stop-closeout-digest', 4)
+  }
+  private productCloseoutEvidence(closeoutDigest: string, fenceReleaseRevision: number) {
+    const lifecycleAction = this.requestedAction
+    const retirementTransactionDigest = lifecycleAction ? 'a'.repeat(64) : undefined
     return {
       aliasId: 'alias-1',
       aliasGeneration: 1,
       codexThreadId: 'thread-1',
       codexTurnId: 'turn-1',
       terminal: 'interrupted' as const,
-      closeoutDigest: 'closeout-digest',
-      fenceReleaseRevision: 2,
+      closeoutDigest,
+      fenceReleaseRevision,
+      ...(lifecycleAction
+        ? {
+            lifecycleAction,
+            lifecycleActionEvidenceDigest: `action-${lifecycleAction}-digest`,
+            retiredGeneration: 1,
+            retirementTransactionDigest,
+            archiveIntentDigest: 'b'.repeat(64),
+            scopeClosureEvidenceDigest: lifecycleAction === 'close'
+              ? retirementTransactionDigest
+              : null,
+            newGeneration: lifecycleAction === 'reset' ? 2 : null,
+            newThreadBindingId: lifecycleAction === 'reset' ? 'thread-binding-2' : null,
+          }
+        : {}),
     }
+  }
+  async retryEngineTerminalUserStopFinalization() {
+    this.calls.push('retryEngineTerminalUserStopFinalization')
+    this.failIfRequested('retryEngineTerminalUserStopFinalization')
+    const result = this.retryUserStopFinalization
+    this.retryUserStopFinalization = null
+    return result
   }
   async settleHostFailureCloseout() {
     this.calls.push('settleHostFailureCloseout')
@@ -282,8 +435,12 @@ class FakeLifecycleStore implements ReadyCodexLifecycleStore {
     return {
       aliasId: 'alias-1',
       retiredGeneration: 1,
-      retirementTransactionDigest: 'retirement-digest',
-      archiveDisposition: snapshot === 'idle_native_thread' ? 'queued_cleanup' as const : 'not_required' as const,
+      retirementTransactionDigest: 'c'.repeat(64),
+      archiveDisposition: snapshot === 'idle_native_thread'
+        ? 'durable_cleanup_pending' as const
+        : 'not_required' as const,
+      archiveIntentDigest: snapshot === 'idle_native_thread' ? 'd'.repeat(64) : null,
+      scopeClosureEvidenceDigest: 'c'.repeat(64),
       lastCommittedReadyTerminalTransactionDigest: snapshot === 'idle_ready_terminal_no_native'
         ? 'ready-terminal-digest'
         : null,
@@ -299,11 +456,18 @@ class FakeLifecycleStore implements ReadyCodexLifecycleStore {
   async awaitManualCompaction() {
     this.calls.push('awaitManualCompaction')
     this.failIfRequested('awaitManualCompaction')
-    return { contextCompactionItemId: 'compact-item-1', codexTurnId: 'compact-turn-1' }
+    return {
+      notificationContextCompactionItemId: 'compact-notification-item-1',
+      codexTurnId: 'compact-turn-1',
+    }
   }
-  async consumeManualCompaction() {
+  async consumeManualCompaction(input: Parameters<ReadyCodexLifecycleStore['consumeManualCompaction']>[0]) {
     this.calls.push('consumeManualCompaction')
     this.failIfRequested('consumeManualCompaction')
+    this.consumedManualCompaction = input
+  }
+  async markManualCompactionUnknown() {
+    this.calls.push('markManualCompactionUnknown')
   }
   digestThreadRead() { return 'thread-read-digest' }
 }
@@ -328,8 +492,7 @@ const prepared: PreparedCodexProductRun = {
   },
   resourceAnchorDigest: 'resource-digest',
   recoveredContextDigest: null,
-  readyToolSurface: { surfaceId: 'surface-1', toolSurfaceDigest: 'surface-digest', toolNames: [] },
-  readyTurnToolAuthorization: { authorizationId: 'auth-1', authorizationDigest: 'auth-digest' },
+  ...createCodexToolFixture([]),
   readyToolHostIdentity: {
     scopeId: 'scope-1',
     aliasId: 'alias-1',
@@ -344,7 +507,17 @@ const prepared: PreparedCodexProductRun = {
   },
 }
 
-function createHarness(options: { rejectCloseout?: boolean; rejectRecovery?: boolean } = {}) {
+function createHarness(options: {
+  rejectCloseout?: boolean
+  rejectRecovery?: boolean
+  deferReadback?: boolean
+  threadResumePort?: ReadyCodexThreadResumePort
+  closeCandidate?: (candidate: CoreTurnCandidate) => Promise<{
+    authority: string
+    text: string | null
+    candidateKind: CoreTurnCandidate['kind']
+  }>
+} = {}) {
   const nativeRuntime = new FakeNativeRuntime()
   const lifecycleStore = new FakeLifecycleStore()
   const candidates: CoreTurnCandidate[] = []
@@ -352,12 +525,21 @@ function createHarness(options: { rejectCloseout?: boolean; rejectRecovery?: boo
   const closeoutWaiters: CoreTurnCandidate[] = []
   const adapter = new ReadyCodexLifecycleAdapter({
     nativeRuntime,
+    threadResumePort: options.threadResumePort || {
+      async readThenResume({ threadId, validateRead }) {
+        const read = await nativeRuntime.threadRead({ threadId, includeTurns: true })
+        validateRead(read.thread)
+        const resumed = await nativeRuntime.threadResume({ threadId })
+        return { connectionEpoch: 'epoch-1', read, resumed }
+      },
+    },
     collector: new CodexTurnCollector(nativeRuntime),
     inputBuilder: new CodexTurnInputBuilder(),
     lifecycleStore,
     closeout: {
       async closeCandidate(candidate) {
         candidates.push(candidate)
+        if (options.closeCandidate) return options.closeCandidate(candidate)
         if (options.rejectCloseout) throw new Error('ready_closeout_persistence_failed')
         return { authority: 'ready-closeout', text: candidate.candidateText, candidateKind: candidate.kind }
       },
@@ -373,11 +555,13 @@ function createHarness(options: { rejectCloseout?: boolean; rejectRecovery?: boo
       observeCandidateReadback({ candidate }, onReadback) {
         assert.notEqual(candidate, null)
         closeoutWaiters.push(candidate as CoreTurnCandidate)
-        onReadback({
-          authority: 'ready-closeout-waiter',
-          text: candidate?.candidateText || null,
-          candidateKind: candidate?.kind || 'host_failure',
-        })
+        if (!options.deferReadback) {
+          onReadback({
+            authority: 'ready-closeout-waiter',
+            text: candidate?.candidateText || null,
+            candidateKind: candidate?.kind || 'host_failure',
+          })
+        }
         return () => undefined
       },
     },
@@ -390,6 +574,46 @@ function createHarness(options: { rejectCloseout?: boolean; rejectRecovery?: boo
     closeoutRecoveries,
     closeoutWaiters,
   }
+}
+
+function executeNativeTerminal(adapter: ReadyCodexLifecycleAdapter<{
+  authority: string
+  text: string | null
+  candidateKind: CoreTurnCandidate['kind']
+}>) {
+  return adapter.executePreparedRun({
+    prepared,
+    expectedScopeId: prepared.readyToolHostIdentity.scopeId,
+    emitStartedProjection: () => {},
+    resolveContext: async () => ({
+      turnBuildContext: {
+        turnRequestId: 'turn-request-closeout-race',
+        readyRunId: prepared.runId,
+        toolSurfaceDigest: 'surface-digest',
+        turnContractDigest: 'turn-digest',
+        upstreamProfileSnapshotDigest: 'profile-digest',
+      },
+      collection: {
+        terminalTimeoutMs: 1_000,
+        actionReceiptRefs: [],
+        interactionState: null,
+        waitingFor: null,
+        terminalReasonCandidate: 'done' as const,
+        abortInitiator: null,
+        budgetState: {},
+        contextState: {},
+        providerDiagnostics: {},
+        recoveryCheckpointRef: null,
+        browserContinuationRef: null,
+        browserProofRefs: [],
+        otherProofRefs: [],
+        projectionPatchRefs: [],
+        allowNullPhaseFallback: true,
+        allowDirectProvisionalStream: true,
+        onProvisionalDelta: () => {},
+      },
+    }),
+  })
 }
 
 test('canonical runtime contract root source is accepted, bound, and reaches Ready closeout', async () => {
@@ -423,7 +647,6 @@ test('canonical runtime contract root source is accepted, bound, and reaches Rea
         projectionPatchRefs: [],
         allowNullPhaseFallback: true,
         allowDirectProvisionalStream: true,
-        onAutomaticCompactionObserved: () => {},
         onProvisionalDelta: () => {},
       },
     }),
@@ -450,11 +673,187 @@ test('canonical runtime contract root source is accepted, bound, and reaches Rea
   assert.equal(candidates[0]?.candidateText, 'native answer')
 })
 
+test('existing root thread is read and durably marked before resume can start a turn', async () => {
+  const { adapter, nativeRuntime, lifecycleStore } = createHarness()
+  lifecycleStore.threadState = 'resume_required'
+  const result = await adapter.executePreparedRun({
+    prepared,
+    expectedScopeId: prepared.readyToolHostIdentity.scopeId,
+    emitStartedProjection: () => {},
+    resolveContext: async () => ({
+      turnBuildContext: {
+        turnRequestId: 'turn-request-resume',
+        readyRunId: 'run-1',
+        toolSurfaceDigest: 'surface-digest',
+        turnContractDigest: 'turn-digest',
+        upstreamProfileSnapshotDigest: 'profile-digest',
+      },
+      collection: {
+        terminalTimeoutMs: 1_000,
+        actionReceiptRefs: [],
+        interactionState: null,
+        waitingFor: null,
+        terminalReasonCandidate: 'done',
+        abortInitiator: null,
+        budgetState: {},
+        contextState: {},
+        providerDiagnostics: {},
+        recoveryCheckpointRef: null,
+        browserContinuationRef: null,
+        browserProofRefs: [],
+        otherProofRefs: [],
+        projectionPatchRefs: [],
+        allowNullPhaseFallback: true,
+        allowDirectProvisionalStream: true,
+        onProvisionalDelta: () => {},
+      },
+    }),
+  })
+  assert.equal(result.state, 'closed')
+  assert.deepEqual(nativeRuntime.calls, ['threadRead', 'threadResume', 'turnStart'])
+  assert.deepEqual(lifecycleStore.calls, ['markThreadResumed'])
+})
+
+test('connection replacement after thread read cannot resume on a new client or start a turn', async () => {
+  const firstClient = new FakeNativeRuntime()
+  const replacementClient = new FakeNativeRuntime()
+  const firstAbort = new AbortController()
+  const replacementAbort = new AbortController()
+  let activeSession: CodexThreadResumeSession
+  const firstSession: CodexThreadResumeSession = {
+    getActiveConnectionEpoch: () => 'epoch-first',
+    getClient: () => firstClient,
+    getConnectionAbortSignal: (epoch) => epoch === 'epoch-first' ? firstAbort.signal : null,
+    isConnectionLive: (epoch) => epoch === 'epoch-first' && !firstAbort.signal.aborted,
+  }
+  const replacementSession: CodexThreadResumeSession = {
+    getActiveConnectionEpoch: () => 'epoch-replacement',
+    getClient: () => replacementClient,
+    getConnectionAbortSignal: (epoch) => epoch === 'epoch-replacement' ? replacementAbort.signal : null,
+    isConnectionLive: (epoch) => epoch === 'epoch-replacement',
+  }
+  activeSession = firstSession
+  const originalRead = firstClient.threadRead.bind(firstClient)
+  firstClient.threadRead = async (params) => {
+    const read = await originalRead(params)
+    firstAbort.abort(new Error('connection_replaced'))
+    activeSession = replacementSession
+    return read
+  }
+  const { adapter, nativeRuntime, lifecycleStore, candidates } = createHarness({
+    threadResumePort: new CodexThreadResumeAuthority(() => activeSession),
+  })
+  lifecycleStore.threadState = 'resume_required'
+
+  const result = await adapter.executePreparedRun({
+    prepared,
+    expectedScopeId: prepared.readyToolHostIdentity.scopeId,
+    emitStartedProjection: () => {},
+    resolveContext: async () => ({
+      turnBuildContext: {
+        turnRequestId: 'turn-request-replaced-connection',
+        readyRunId: 'run-1',
+        toolSurfaceDigest: 'surface-digest',
+        turnContractDigest: 'turn-digest',
+        upstreamProfileSnapshotDigest: 'profile-digest',
+      },
+      collection: {
+        terminalTimeoutMs: 1_000,
+        actionReceiptRefs: [],
+        interactionState: null,
+        waitingFor: null,
+        terminalReasonCandidate: 'done',
+        abortInitiator: null,
+        budgetState: {},
+        contextState: {},
+        providerDiagnostics: {},
+        recoveryCheckpointRef: null,
+        browserContinuationRef: null,
+        browserProofRefs: [],
+        otherProofRefs: [],
+        projectionPatchRefs: [],
+        allowNullPhaseFallback: true,
+        allowDirectProvisionalStream: true,
+        onProvisionalDelta: () => {},
+      },
+    }),
+  })
+
+  assert.equal(result.state, 'closed')
+  assert.deepEqual(firstClient.calls, ['threadRead'])
+  assert.deepEqual(replacementClient.calls, [])
+  assert.equal(nativeRuntime.calls.includes('turnStart'), false)
+  assert.equal(lifecycleStore.calls.includes('markThreadResumed'), false)
+  assert.equal(candidates.length, 1)
+  assert.equal(candidates[0].kind, 'host_failure')
+})
+
+test('connection replacement after resume but before evidence marking cannot load or start the thread', async () => {
+  let lifecycleStore: FakeLifecycleStore
+  const { adapter, nativeRuntime, lifecycleStore: store, candidates } = createHarness({
+    threadResumePort: {
+      async readThenResume({ threadId, validateRead }) {
+        const read = { thread: rootThread }
+        validateRead(read.thread)
+        lifecycleStore.activeConnectionEpoch = 'epoch-replacement'
+        return {
+          connectionEpoch: 'epoch-first',
+          read,
+          resumed: { thread: rootThread, instructionSources: [] },
+        }
+      },
+    },
+  })
+  lifecycleStore = store
+  lifecycleStore.threadState = 'resume_required'
+
+  const result = await adapter.executePreparedRun({
+    prepared,
+    expectedScopeId: prepared.readyToolHostIdentity.scopeId,
+    emitStartedProjection: () => {},
+    resolveContext: async () => ({
+      turnBuildContext: {
+        turnRequestId: 'turn-request-post-resume-replacement',
+        readyRunId: 'run-1',
+        toolSurfaceDigest: 'surface-digest',
+        turnContractDigest: 'turn-digest',
+        upstreamProfileSnapshotDigest: 'profile-digest',
+      },
+      collection: {
+        terminalTimeoutMs: 1_000,
+        actionReceiptRefs: [],
+        interactionState: null,
+        waitingFor: null,
+        terminalReasonCandidate: 'done',
+        abortInitiator: null,
+        budgetState: {},
+        contextState: {},
+        providerDiagnostics: {},
+        recoveryCheckpointRef: null,
+        browserContinuationRef: null,
+        browserProofRefs: [],
+        otherProofRefs: [],
+        projectionPatchRefs: [],
+        allowNullPhaseFallback: true,
+        allowDirectProvisionalStream: true,
+        onProvisionalDelta: () => {},
+      },
+    }),
+  })
+
+  assert.equal(result.state, 'closed')
+  assert.equal(nativeRuntime.calls.includes('turnStart'), false)
+  assert.deepEqual(lifecycleStore.calls, [])
+  assert.equal(lifecycleStore.threadState, 'resume_required')
+  assert.equal(candidates.length, 1)
+  assert.equal(candidates[0].kind, 'host_failure')
+})
+
 test('non-pinned native root source metadata is rejected before binding or turn start', async () => {
   const cases: Array<{
     threadState: 'unstarted' | 'resume_required'
     thread: CodexThread
-    expectedNativeCall: 'threadStart' | 'threadResume'
+    expectedNativeCall: 'threadStart' | 'threadRead'
   }> = [
     {
       threadState: 'unstarted',
@@ -469,7 +868,7 @@ test('non-pinned native root source metadata is rejected before binding or turn 
     {
       threadState: 'resume_required',
       thread: { ...rootThread, source: { custom: 'ready-e1' } },
-      expectedNativeCall: 'threadResume',
+      expectedNativeCall: 'threadRead',
     },
     {
       threadState: 'resume_required',
@@ -481,7 +880,7 @@ test('non-pinned native root source metadata is rejected before binding or turn 
           },
         },
       },
-      expectedNativeCall: 'threadResume',
+      expectedNativeCall: 'threadRead',
     },
     {
       threadState: 'unstarted',
@@ -529,7 +928,6 @@ test('non-pinned native root source metadata is rejected before binding or turn 
           projectionPatchRefs: [],
           allowNullPhaseFallback: true,
           allowDirectProvisionalStream: true,
-          onAutomaticCompactionObserved: () => {},
           onProvisionalDelta: () => {},
         },
       }),
@@ -641,6 +1039,204 @@ test('double closeout failure becomes an explicit pending lifecycle state', asyn
   assert.equal(closeoutWaiters.length, 1)
 })
 
+test('boot closeout broker settles the original pending observer exactly once', async () => {
+  const { adapter, closeoutWaiters } = createHarness({
+    rejectCloseout: true,
+    rejectRecovery: true,
+    deferReadback: true,
+  })
+  const result = await adapter.executePreparedRun({
+    prepared,
+    expectedScopeId: prepared.readyToolHostIdentity.scopeId,
+    emitStartedProjection: () => {},
+    resolveContext: async () => { throw new Error('prepared_context_resolution_failed') },
+  })
+  assert.equal(result.state, 'ready_closeout_pending')
+  if (result.state !== 'ready_closeout_pending') throw new Error('pending_closeout_expected')
+  const recovered: unknown[] = []
+  adapter.observeRunCloseout({
+    prepared,
+    expectedScopeId: prepared.readyToolHostIdentity.scopeId,
+    pending: result,
+  }, (readback) => { recovered.push(readback) })
+  assert.equal(closeoutWaiters.length, 1)
+  const readback = {
+    authority: 'boot-recovery',
+    text: null,
+    candidateKind: 'host_failure',
+  }
+  assert.equal(adapter.deliverRecoveredCloseout(prepared.runId, readback), 'delivered')
+  assert.deepEqual(recovered, [readback])
+  assert.equal(adapter.deliverRecoveredCloseout(prepared.runId, readback), 'duplicate')
+})
+
+test('boot closeout broker replays recovery that finishes before observer registration', async () => {
+  const { adapter, closeoutWaiters } = createHarness({
+    rejectCloseout: true,
+    rejectRecovery: true,
+    deferReadback: true,
+  })
+  const result = await adapter.executePreparedRun({
+    prepared,
+    expectedScopeId: prepared.readyToolHostIdentity.scopeId,
+    emitStartedProjection: () => {},
+    resolveContext: async () => { throw new Error('prepared_context_resolution_failed') },
+  })
+  assert.equal(result.state, 'ready_closeout_pending')
+  if (result.state !== 'ready_closeout_pending') throw new Error('pending_closeout_expected')
+  const readback = {
+    authority: 'boot-recovery-before-observer',
+    text: null,
+    candidateKind: 'host_failure',
+  }
+  assert.equal(adapter.deliverRecoveredCloseout(prepared.runId, readback), 'buffered')
+  const recovered: unknown[] = []
+  adapter.observeRunCloseout({
+    prepared,
+    expectedScopeId: prepared.readyToolHostIdentity.scopeId,
+    pending: result,
+  }, (value) => { recovered.push(value) })
+  assert.deepEqual(recovered, [readback])
+  assert.equal(closeoutWaiters.length, 0)
+  assert.equal(adapter.deliverRecoveredCloseout(prepared.runId, readback), 'duplicate')
+})
+
+test('production closeout guard buffers a user-stop winner before initial pending return', async () => {
+  const guard = new CodexProductCloseoutExpectationGuard()
+  let enteredCloseout!: () => void
+  let continueCloseout!: () => void
+  const closeoutEntered = new Promise<void>((resolve) => { enteredCloseout = resolve })
+  const closeoutMayContinue = new Promise<void>((resolve) => { continueCloseout = resolve })
+  let durableStopCommitted = false
+  const { adapter, closeoutWaiters } = createHarness({
+    rejectRecovery: true,
+    deferReadback: true,
+    closeCandidate: async () => {
+      enteredCloseout()
+      await closeoutMayContinue
+      const token = guard.acquire(prepared.runId, 'product')
+      try {
+        if (durableStopCommitted) throw new Error('codex_product_closeout_already_committed')
+        return { authority: 'normal-closeout', text: 'native answer', candidateKind: 'native_terminal' }
+      } finally {
+        guard.release(prepared.runId, token)
+      }
+    },
+  })
+  const execution = executeNativeTerminal(adapter)
+  await closeoutEntered
+
+  const stopReadback = {
+    authority: 'user-stop-closeout',
+    text: null,
+    candidateKind: 'native_terminal' as const,
+  }
+  await assert.rejects(async () => {
+    const stopToken = guard.acquire(prepared.runId, 'publication_diverged')
+    try {
+      assert.equal(guard.readMode(prepared.runId), 'publication_diverged')
+      durableStopCommitted = true
+      assert.equal(adapter.deliverRecoveredCloseout(prepared.runId, stopReadback), 'buffered')
+    } finally {
+      guard.release(prepared.runId, stopToken)
+    }
+    throw new Error('post_commit_memory_cleanup_failed')
+  }, /post_commit_memory_cleanup_failed/)
+  continueCloseout()
+
+  const outcome = await execution
+  assert.equal(outcome.state, 'ready_closeout_pending')
+  if (outcome.state !== 'ready_closeout_pending') throw new Error('pending_closeout_expected')
+  const delivered: unknown[] = []
+  adapter.observeRunCloseout({
+    prepared,
+    expectedScopeId: prepared.readyToolHostIdentity.scopeId,
+    pending: outcome,
+  }, (readback) => { delivered.push(readback) })
+  assert.deepEqual(delivered, [stopReadback])
+  assert.equal(closeoutWaiters.length, 0)
+  assert.equal(adapter.deliverRecoveredCloseout(prepared.runId, stopReadback), 'duplicate')
+})
+
+test('production closeout guard preserves a normal winner and rejects a concurrent stop mode', async () => {
+  const guard = new CodexProductCloseoutExpectationGuard()
+  let normalAcquired!: () => void
+  let finishNormal!: () => void
+  const acquired = new Promise<void>((resolve) => { normalAcquired = resolve })
+  const finish = new Promise<void>((resolve) => { finishNormal = resolve })
+  const { adapter } = createHarness({
+    deferReadback: true,
+    closeCandidate: async () => {
+      const token = guard.acquire(prepared.runId, 'product')
+      normalAcquired()
+      try {
+        await finish
+        return { authority: 'normal-closeout', text: 'native answer', candidateKind: 'native_terminal' }
+      } finally {
+        guard.release(prepared.runId, token)
+      }
+    },
+  })
+  const execution = executeNativeTerminal(adapter)
+  await acquired
+  assert.equal(guard.readMode(prepared.runId), 'product')
+  assert.throws(
+    () => guard.acquire(prepared.runId, 'publication_diverged'),
+    /codex_product_closeout_in_flight/,
+  )
+  guard.release(prepared.runId, Symbol('foreign-closeout'))
+  assert.equal(guard.readMode(prepared.runId), 'product')
+  finishNormal()
+
+  const outcome = await execution
+  assert.equal(outcome.state, 'closed')
+  assert.equal(guard.readMode(prepared.runId), null)
+  assert.equal(adapter.deliverRecoveredCloseout(prepared.runId, {
+    authority: 'late-user-stop',
+    text: null,
+    candidateKind: 'native_terminal',
+  }), 'duplicate')
+})
+
+test('boot closeout without an active same-Main run retries publication until acknowledged', () => {
+  const { adapter } = createHarness({ deferReadback: true })
+  const readback = {
+    authority: 'new-main-boot-recovery',
+    text: null,
+    candidateKind: 'host_failure',
+  }
+  assert.equal(adapter.deliverRecoveredCloseout('new-main-run', readback), 'publish_only')
+  assert.equal(adapter.deliverRecoveredCloseout('new-main-run', readback), 'publish_only')
+  adapter.acknowledgePublishedRecoveredCloseout('new-main-run')
+  assert.equal(adapter.deliverRecoveredCloseout('new-main-run', readback), 'duplicate')
+})
+
+test('recovered closeout tombstones evict the oldest entry at the fixed bound', () => {
+  const { adapter } = createHarness({ deferReadback: true })
+  const readback = {
+    authority: 'bounded-recovery-tombstone',
+    text: null,
+    candidateKind: 'host_failure' as const,
+  }
+  for (let index = 0; index <= RECOVERED_CLOSEOUT_TOMBSTONE_LIMIT; index += 1) {
+    const readyRunId = `bounded-recovery-${index}`
+    assert.equal(adapter.deliverRecoveredCloseout(readyRunId, readback), 'publish_only')
+    adapter.acknowledgePublishedRecoveredCloseout(readyRunId)
+  }
+
+  assert.equal(
+    adapter.deliverRecoveredCloseout('bounded-recovery-0', readback),
+    'publish_only',
+  )
+  assert.equal(
+    adapter.deliverRecoveredCloseout(
+      `bounded-recovery-${RECOVERED_CLOSEOUT_TOMBSTONE_LIMIT}`,
+      readback,
+    ),
+    'duplicate',
+  )
+})
+
 test('turn start transport failure still reaches Ready closeout exactly once', async () => {
   const { adapter, nativeRuntime, candidates } = createHarness()
   nativeRuntime.failAt.add('turnStart')
@@ -674,7 +1270,6 @@ test('turn start transport failure still reaches Ready closeout exactly once', a
         projectionPatchRefs: [],
         allowNullPhaseFallback: true,
         allowDirectProvisionalStream: false,
-        onAutomaticCompactionObserved: () => {},
         onProvisionalDelta: () => {},
       },
     }),
@@ -731,7 +1326,6 @@ test('unresolved native start remains pending without creating a Ready failure o
           projectionPatchRefs: [],
           allowNullPhaseFallback: true,
           allowDirectProvisionalStream: false,
-          onAutomaticCompactionObserved: () => {},
           onProvisionalDelta: () => {},
         },
       }),
@@ -780,7 +1374,6 @@ test('native terminal timeout still reaches Ready closeout exactly once', async 
         projectionPatchRefs: [],
         allowNullPhaseFallback: true,
         allowDirectProvisionalStream: false,
-        onAutomaticCompactionObserved: () => {},
         onProvisionalDelta: () => {},
       },
     }),
@@ -809,13 +1402,163 @@ test('stop awaits interrupt acknowledgement and the same Ready closeout before s
     activeFence: 'product_turn',
     productRunNonterminal: true,
   }
-  const result = await adapter.stopSession(aliasIdentity)
+  const result = await adapter.stopSession(stopIdentity)
   assert.equal(result.ok, true)
   assert.equal(result.action, 'stop')
   assert.deepEqual(nativeRuntime.calls, ['turnInterrupt'])
   assert.deepEqual(nativeRuntime.interrupts, [{ threadId: 'thread-1', turnId: 'turn-1' }])
-  assert.deepEqual(lifecycleStore.calls, ['awaitProductCloseout'])
+  assert.deepEqual(lifecycleStore.calls, [
+    'requestProductInterrupt',
+    'acknowledgeProductInterrupt',
+    'awaitProductCloseout',
+  ])
   assert.equal(lifecycleStore.lifecycleFactReadCount, 1)
+})
+
+test('stop durably settles an engine-terminal product turn instead of waiting for normal publication', async () => {
+  const { adapter, nativeRuntime, lifecycleStore } = createHarness()
+  lifecycleStore.facts = {
+    ...idleNever,
+    readyRunCreated: true,
+    codexThreadId: 'thread-1',
+    codexTurnId: 'turn-1',
+    activeFence: 'product_turn',
+    productRunNonterminal: true,
+    engineTerminalRecorded: true,
+  }
+
+  const result = await adapter.stopSession(stopIdentity)
+
+  assert.deepEqual(result, {
+    ok: true,
+    action: 'stop',
+    aliasId: 'alias-1',
+    codexThreadId: 'thread-1',
+    codexTurnId: 'turn-1',
+    terminal: 'interrupted',
+    closeoutDigest: 'user-stop-closeout-digest',
+    fenceReleaseRevision: 3,
+  })
+  assert.deepEqual(nativeRuntime.calls, [])
+  assert.deepEqual(lifecycleStore.calls, ['settleEngineTerminalUserStop'])
+  assert.equal(lifecycleStore.lifecycleFactReadCount, 1)
+})
+
+test('engine-terminal user stop returns a visible persistence failure without clearing the active UI', async () => {
+  const { adapter, nativeRuntime, lifecycleStore } = createHarness()
+  lifecycleStore.facts = {
+    ...idleNever,
+    readyRunCreated: true,
+    codexThreadId: 'thread-1',
+    codexTurnId: 'turn-1',
+    activeFence: 'product_turn',
+    productRunNonterminal: true,
+    engineTerminalRecorded: true,
+  }
+  lifecycleStore.failAt.set('settleEngineTerminalUserStop', 'persistence_failed')
+
+  const result = await adapter.stopSession(stopIdentity)
+
+  assert.deepEqual(result, {
+    ok: false,
+    action: 'stop',
+    code: 'persistence_failed',
+    preserveUi: true,
+    aliasId: 'alias-1',
+    aliasGeneration: 1,
+    evidenceDigest: 'evidence:stop:product_turn_engine_terminal_closeout_pending',
+  })
+  assert.deepEqual(nativeRuntime.calls, [])
+  assert.deepEqual(lifecycleStore.calls, ['settleEngineTerminalUserStop'])
+})
+
+test('boot recovery treats durable closeout as complete when only its UI notification fails', () => {
+  const failures: string[] = []
+  let cleaned = 0
+  runCodexEngineTerminalFinalization({
+    deliver() { throw new Error('terminal_publish_failed') },
+    cleanup() { cleaned += 1 },
+    onDeliveryFailure(error) {
+      failures.push(error instanceof Error ? error.message : String(error))
+    },
+  })
+  assert.equal(cleaned, 1)
+  assert.deepEqual(failures, ['terminal_publish_failed'])
+})
+
+test('pending engine-terminal finalizations cannot overwrite another run in the same generation', () => {
+  const pending = new Map<string, string>()
+  pending.set(buildCodexEngineTerminalFinalizationKey({
+    ...aliasIdentity,
+    readyRunId: 'run-A',
+  }), 'A')
+  pending.set(buildCodexEngineTerminalFinalizationKey({
+    ...aliasIdentity,
+    readyRunId: 'run-B',
+  }), 'B')
+
+  assert.equal(pending.size, 2)
+  assert.equal(pending.get(buildCodexEngineTerminalFinalizationKey({
+    ...aliasIdentity,
+    readyRunId: 'run-A',
+  })), 'A')
+  assert.equal(pending.get(buildCodexEngineTerminalFinalizationKey({
+    ...aliasIdentity,
+    readyRunId: 'run-B',
+  })), 'B')
+})
+
+test('failed publish still cleans up and the next idle stop publishes the pending terminal once', async () => {
+  const { adapter, lifecycleStore } = createHarness()
+  lifecycleStore.facts = {
+    ...idleNever,
+    readyRunCreated: true,
+    codexThreadId: 'thread-1',
+    allNativeThreadAttemptsSettled: true,
+  }
+  let pending = true
+  let publishAttempts = 0
+  let published = 0
+  let cleanupRuns = 0
+  lifecycleStore.retryEngineTerminalUserStopFinalization = async () => {
+    lifecycleStore.calls.push('retryEngineTerminalUserStopFinalization')
+    if (!pending) return null
+    runCodexEngineTerminalFinalization({
+      deliver() {
+        publishAttempts += 1
+        if (publishAttempts === 1) throw new Error('terminal_publish_failed')
+        published += 1
+      },
+      cleanup() { cleanupRuns += 1 },
+    })
+    pending = false
+    return {
+      aliasId: 'alias-1',
+      aliasGeneration: 1,
+      codexThreadId: 'thread-1',
+      codexTurnId: 'turn-1',
+      terminal: 'interrupted',
+      closeoutDigest: 'user-stop-closeout-digest',
+      fenceReleaseRevision: 3,
+    }
+  }
+
+  const first = await adapter.stopSession(stopIdentity)
+  assert.equal(first.ok, false)
+  if (!first.ok) assert.equal(first.code, 'persistence_failed')
+  assert.equal(cleanupRuns, 1)
+  assert.equal(published, 0)
+
+  const second = await adapter.stopSession(stopIdentity)
+  assert.equal(second.ok, true)
+  assert.equal(cleanupRuns, 2)
+  assert.equal(publishAttempts, 2)
+  assert.equal(published, 1)
+
+  const third = await adapter.stopSession(stopIdentity)
+  assert.equal(third.ok, false)
+  if (!third.ok) assert.equal(third.code, 'no_active_operation')
+  assert.equal(published, 1)
 })
 
 test('interrupt uses the identifiers from the single classified lifecycle read', async () => {
@@ -834,14 +1577,133 @@ test('interrupt uses the identifiers from the single classified lifecycle read',
     codexTurnId: 'turn-changed',
   }
 
-  const result = await adapter.stopSession(aliasIdentity)
+  const result = await adapter.stopSession(stopIdentity)
 
   assert.equal(result.ok, true)
   assert.equal(lifecycleStore.lifecycleFactReadCount, 1)
   assert.deepEqual(nativeRuntime.interrupts, [{ threadId: 'thread-1', turnId: 'turn-1' }])
 })
 
-test('interrupt unknown and pending start preserve UI without another native call', async () => {
+test('a late stop for run A cannot interrupt run B in the same alias generation', async () => {
+  const { adapter, nativeRuntime, lifecycleStore } = createHarness()
+  lifecycleStore.activeReadyRunId = 'run-B'
+  lifecycleStore.facts = {
+    ...idleNever,
+    readyRunCreated: true,
+    codexThreadId: 'thread-1',
+    codexTurnId: 'turn-B',
+    activeFence: 'product_turn',
+    productRunNonterminal: true,
+  }
+
+  const result = await adapter.stopSession(stopIdentity)
+
+  assert.equal(result.ok, false)
+  if (!result.ok) assert.equal(result.code, 'no_active_operation')
+  assert.equal(lifecycleStore.lifecycleFactReadCount, 1)
+  assert.deepEqual(lifecycleStore.calls, [])
+  assert.deepEqual(nativeRuntime.calls, [])
+})
+
+test('late close and reset requests cannot act on a different run in the same generation', async () => {
+  for (const action of ['close', 'reset'] as const) {
+    for (const request of [
+      { ...aliasIdentity, readyRunId: 'run-A' },
+      idleLifecycleIdentity,
+    ]) {
+      const { adapter, nativeRuntime, lifecycleStore } = createHarness()
+      lifecycleStore.activeReadyRunId = 'run-B'
+      lifecycleStore.facts = {
+        ...idleNever,
+        readyRunCreated: true,
+        codexThreadId: 'thread-1',
+        codexTurnId: 'turn-B',
+        activeFence: 'product_turn',
+        productRunNonterminal: true,
+      }
+
+      const result = action === 'close'
+        ? await adapter.closeSession(request)
+        : await adapter.resetSession(request)
+
+      assert.equal(result.ok, false)
+      if (!result.ok) assert.equal(result.code, 'no_active_operation')
+      assert.equal(lifecycleStore.lifecycleFactReadCount, 1)
+      assert.deepEqual(lifecycleStore.calls, [])
+      assert.deepEqual(nativeRuntime.calls, [])
+    }
+  }
+})
+
+test('close and reset retry only their own durable unknown action', async () => {
+  for (const action of ['close', 'reset'] as const) {
+    const { adapter, nativeRuntime, lifecycleStore } = createHarness()
+    lifecycleStore.requestedAction = action
+    lifecycleStore.facts = {
+      ...idleNever,
+      readyRunCreated: true,
+      codexThreadId: 'thread-1',
+      codexTurnId: 'turn-1',
+      activeFence: 'product_turn',
+      productRunNonterminal: true,
+      interruptStateUnknown: true,
+    }
+    nativeRuntime.interruptReadTurnStatus = 'completed'
+
+    const result = action === 'close'
+      ? await adapter.closeSession(activeLifecycleIdentity)
+      : await adapter.resetSession(activeLifecycleIdentity)
+
+    assert.equal(result.ok, true)
+    assert.deepEqual(nativeRuntime.calls, ['threadRead'])
+    assert.equal(lifecycleStore.calls.includes('settleReadbackTerminalUserStop'), true)
+
+    const conflicting = createHarness()
+    conflicting.lifecycleStore.requestedAction = action === 'close' ? 'reset' : 'close'
+    conflicting.lifecycleStore.facts = { ...lifecycleStore.facts }
+    const conflict = action === 'close'
+      ? await conflicting.adapter.closeSession(activeLifecycleIdentity)
+      : await conflicting.adapter.resetSession(activeLifecycleIdentity)
+    assert.equal(conflict.ok, false)
+    if (!conflict.ok) assert.equal(conflict.code, 'binding_conflict')
+    assert.deepEqual(conflicting.nativeRuntime.calls, [])
+    assert.deepEqual(conflicting.lifecycleStore.calls, [])
+  }
+})
+
+test('host-failure settlement cannot retarget an old close or reset request to a new run', async () => {
+  for (const action of ['close', 'reset'] as const) {
+    const { adapter, nativeRuntime, lifecycleStore } = createHarness()
+    lifecycleStore.activeReadyRunId = 'run-A'
+    lifecycleStore.activeReadyRunIdAfterFirstRead = 'run-B'
+    lifecycleStore.facts = {
+      ...idleNever,
+      readyRunCreated: true,
+      hostFailureEvidenceComplete: true,
+    }
+    lifecycleStore.factsAfterFirstRead = {
+      ...idleNever,
+      readyRunCreated: true,
+      codexThreadId: 'thread-1',
+      codexTurnId: 'turn-B',
+      activeFence: 'product_turn',
+      productRunNonterminal: true,
+    }
+
+    const request = { ...aliasIdentity, readyRunId: 'run-A' }
+    const result = action === 'close'
+      ? await adapter.closeSession(request)
+      : await adapter.resetSession(request)
+
+    assert.equal(result.ok, false)
+    if (!result.ok) assert.equal(result.code, 'binding_conflict')
+    assert.equal(lifecycleStore.lifecycleFactReadCount, 2)
+    assert.deepEqual(lifecycleStore.calls, ['settleHostFailureCloseout'])
+    assert.deepEqual(nativeRuntime.calls, [])
+  }
+})
+
+test('reset remains blocked while interrupt state is unknown or a native start is pending', async () => {
   for (const facts of [
     {
       ...idleNever,
@@ -856,12 +1718,115 @@ test('interrupt unknown and pending start preserve UI without another native cal
   ]) {
     const { adapter, nativeRuntime, lifecycleStore } = createHarness()
     lifecycleStore.facts = facts
-    const result = await adapter.resetSession(aliasIdentity)
+    const result = await adapter.resetSession(activeLifecycleIdentity)
     assert.equal(result.ok, false)
     if (result.ok) continue
     assert.equal(result.preserveUi, true)
     assert.deepEqual(nativeRuntime.calls, [])
   }
+})
+
+test('reset quarantines an exact unknown manual compaction and advances the alias generation', async () => {
+  const { adapter, nativeRuntime, lifecycleStore } = createHarness()
+  lifecycleStore.activeReadyRunId = null
+  lifecycleStore.activeManualCompactionId = 'manual-unknown-1'
+  lifecycleStore.facts = {
+    ...idleNever,
+    readyRunCreated: true,
+    codexThreadId: 'thread-1',
+    activeFence: 'manual_compaction',
+    allNativeThreadAttemptsSettled: true,
+    manualCompactionState: 'unknown',
+  }
+
+  const result = await adapter.resetSession(idleLifecycleIdentity)
+
+  assert.deepEqual(result, {
+    ok: true,
+    action: 'reset',
+    aliasId: 'alias-1',
+    retiredGeneration: 1,
+    newGeneration: 2,
+    transactionDigest: 'manual-quarantine-digest',
+  })
+  assert.deepEqual(lifecycleStore.calls, ['quarantineUnknownManualCompaction'])
+  assert.deepEqual(nativeRuntime.calls, [])
+})
+
+test('stop retries an exact interrupt-unknown run after reading the bound native turn', async () => {
+  const { adapter, nativeRuntime, lifecycleStore } = createHarness()
+  lifecycleStore.facts = {
+    ...idleNever,
+    readyRunCreated: true,
+    codexThreadId: 'thread-1',
+    codexTurnId: 'turn-1',
+    activeFence: 'product_turn',
+    productRunNonterminal: true,
+    interruptStateUnknown: true,
+  }
+  nativeRuntime.interruptReadTurnStatus = 'inProgress'
+
+  const result = await adapter.stopSession(stopIdentity)
+
+  assert.equal(result.ok, true)
+  assert.deepEqual(nativeRuntime.calls, ['threadRead', 'turnInterrupt'])
+  assert.deepEqual(nativeRuntime.interrupts, [{ threadId: 'thread-1', turnId: 'turn-1' }])
+  assert.deepEqual(lifecycleStore.calls, [
+    'requestProductInterrupt',
+    'acknowledgeProductInterrupt',
+    'awaitProductCloseout',
+  ])
+})
+
+test('stop closes an exact terminal readback without dispatching another interrupt', async () => {
+  const { adapter, nativeRuntime, lifecycleStore } = createHarness()
+  lifecycleStore.facts = {
+    ...idleNever,
+    readyRunCreated: true,
+    codexThreadId: 'thread-1',
+    codexTurnId: 'turn-1',
+    activeFence: 'product_turn',
+    productRunNonterminal: true,
+    interruptStateUnknown: true,
+  }
+  nativeRuntime.interruptReadTurnStatus = 'interrupted'
+
+  const result = await adapter.stopSession(stopIdentity)
+
+  assert.deepEqual(result, {
+    ok: true,
+    action: 'stop',
+    aliasId: 'alias-1',
+    codexThreadId: 'thread-1',
+    codexTurnId: 'turn-1',
+    terminal: 'interrupted',
+    closeoutDigest: 'readback-user-stop-closeout-digest',
+    fenceReleaseRevision: 4,
+  })
+  assert.deepEqual(nativeRuntime.calls, ['threadRead'])
+  assert.deepEqual(lifecycleStore.calls, ['settleReadbackTerminalUserStop'])
+})
+
+test('stop keeps interrupt state unknown when native readback cannot prove the exact turn', async () => {
+  const { adapter, nativeRuntime, lifecycleStore } = createHarness()
+  lifecycleStore.facts = {
+    ...idleNever,
+    readyRunCreated: true,
+    codexThreadId: 'thread-1',
+    codexTurnId: 'turn-1',
+    activeFence: 'product_turn',
+    productRunNonterminal: true,
+    interruptStateUnknown: true,
+  }
+  nativeRuntime.interruptReadTurnId = 'turn-other'
+
+  const result = await adapter.stopSession(stopIdentity)
+
+  assert.equal(result.ok, false)
+  if (!result.ok) assert.equal(result.code, 'interrupt_state_unknown')
+  assert.deepEqual(nativeRuntime.calls, ['threadRead'])
+  assert.deepEqual(nativeRuntime.interrupts, [])
+  assert.deepEqual(lifecycleStore.calls, [])
 })
 
 test('close has four evidence-distinct success variants and never archives directly', async () => {
@@ -878,7 +1843,7 @@ test('close has four evidence-distinct success variants and never archives direc
   for (const [facts, disposition] of variants) {
     const { adapter, nativeRuntime, lifecycleStore } = createHarness()
     lifecycleStore.facts = facts
-    const result = await adapter.closeSession(aliasIdentity)
+    const result = await adapter.closeSession(idleLifecycleIdentity)
     assert.equal(result.ok, true)
     if (!result.ok || result.action !== 'close') continue
     assert.equal(result.closeoutDisposition, disposition)
@@ -894,7 +1859,7 @@ test('close has four evidence-distinct success variants and never archives direc
     activeFence: 'product_turn',
     productRunNonterminal: true,
   }
-  const active = await adapter.closeSession(aliasIdentity)
+  const active = await adapter.closeSession(activeLifecycleIdentity)
   assert.equal(active.ok, true)
   if (active.ok && active.action === 'close') {
     assert.equal(active.closeoutDisposition, 'completed_active_product_turn')
@@ -912,6 +1877,17 @@ test('manual compact requires idle native thread, item terminal evidence, and re
   }
   const result = await adapter.compactSession(aliasIdentity)
   assert.equal(result.ok, true)
+  if (result.ok && result.action === 'manual_compact') {
+    assert.equal(result.contextCompactionItemId, 'compact-readback-item-1')
+  }
+  assert.equal(
+    lifecycleStore.consumedManualCompaction?.notificationContextCompactionItemId,
+    'compact-notification-item-1',
+  )
+  assert.equal(
+    lifecycleStore.consumedManualCompaction?.contextCompactionItemId,
+    'compact-readback-item-1',
+  )
   assert.deepEqual(nativeRuntime.calls, ['threadCompactStart', 'threadRead'])
   assert.deepEqual(lifecycleStore.calls, [
     'beginManualCompaction',
@@ -920,11 +1896,30 @@ test('manual compact requires idle native thread, item terminal evidence, and re
   ])
 })
 
+test('pinned native capture keeps manual compaction notification and readback item identities separate', () => {
+  const capture = JSON.parse(readFileSync(
+    new URL('../../assets/codex-runtime/fixtures/native-protocol-capture.json', import.meta.url),
+    'utf8',
+  )) as {
+    manualCompaction: {
+      item: { params: { item: { id: string }; turnId: string } }
+      readback: { thread: { turns: CodexTurn[] } }
+    }
+  }
+  const notification = capture.manualCompaction.item.params
+  const readbackTurn = capture.manualCompaction.readback.thread.turns.find(
+    (turn) => turn.id === notification.turnId,
+  )
+  const readbackItems = readbackTurn?.items.filter((item) => item.type === 'contextCompaction') || []
+  assert.equal(readbackItems.length, 1)
+  assert.notEqual(notification.item.id, readbackItems[0].id)
+})
+
 test('reset persistence failure preserves the current generation and performs no native operation', async () => {
   const { adapter, nativeRuntime, lifecycleStore } = createHarness()
   lifecycleStore.failAt.set('resetIdleAlias', 'persistence_failed')
 
-  const result = await adapter.resetSession(aliasIdentity)
+  const result = await adapter.resetSession(idleLifecycleIdentity)
 
   assert.deepEqual(result, {
     ok: false,
@@ -942,7 +1937,7 @@ test('create and identity read failures return exact typed lifecycle failures', 
   {
     const { adapter, lifecycleStore } = createHarness()
     lifecycleStore.failAt.set('createAlias', 'persistence_failed')
-    const result = await adapter.createSession()
+    const result = await adapter.createSession({ agentId: 'butler' })
     assert.equal(result.ok, false)
     if (result.ok) return
     assert.equal(result.action, 'create')
@@ -953,7 +1948,7 @@ test('create and identity read failures return exact typed lifecycle failures', 
   {
     const { adapter, lifecycleStore } = createHarness()
     lifecycleStore.failAt.set('readLifecycleOperation', 'persistence_failed')
-    assert.deepEqual(await adapter.resetSession(aliasIdentity), {
+    assert.deepEqual(await adapter.resetSession(idleLifecycleIdentity), {
       ok: false,
       action: 'reset',
       code: 'persistence_failed',
@@ -968,7 +1963,7 @@ test('create and identity read failures return exact typed lifecycle failures', 
     const { adapter, lifecycleStore } = createHarness()
     lifecycleStore.failAt.set('readLifecycleOperation', 'persistence_failed')
     lifecycleStore.failEvidenceDigest = true
-    const result = await adapter.resetSession(aliasIdentity)
+    const result = await adapter.resetSession(idleLifecycleIdentity)
     assert.equal(result.ok, false)
     if (result.ok) return
     assert.equal(result.code, 'persistence_failed')
@@ -978,7 +1973,9 @@ test('create and identity read failures return exact typed lifecycle failures', 
 
 test('stale alias generation fails closed after one consistent lifecycle read and no native operation', async () => {
   const { adapter, nativeRuntime, lifecycleStore } = createHarness()
-  const result = await adapter.closeSession({ aliasId: 'alias-1', aliasGeneration: 2 })
+  const result = await adapter.closeSession({
+    aliasId: 'alias-1', aliasGeneration: 2, readyRunId: null,
+  })
 
   assert.deepEqual(result, {
     ok: false,
@@ -993,8 +1990,12 @@ test('stale alias generation fails closed after one consistent lifecycle read an
   assert.deepEqual(nativeRuntime.calls, [])
 })
 
-test('interrupt rejection and closeout timeout remain interrupt_state_unknown', async () => {
-  for (const failAt of ['turnInterrupt', 'awaitProductCloseout'] as const) {
+test('interrupt rejection, Ready acknowledgement failure, and closeout timeout remain interrupt_state_unknown', async () => {
+  for (const failAt of [
+    'turnInterrupt',
+    'acknowledgeProductInterrupt',
+    'awaitProductCloseout',
+  ] as const) {
     const { adapter, nativeRuntime, lifecycleStore } = createHarness()
     lifecycleStore.facts = {
       ...idleNever,
@@ -1007,12 +2008,79 @@ test('interrupt rejection and closeout timeout remain interrupt_state_unknown', 
     if (failAt === 'turnInterrupt') nativeRuntime.failAt.add(failAt)
     else lifecycleStore.failAt.set(failAt, 'interrupt_state_unknown')
 
-    const result = await adapter.stopSession(aliasIdentity)
+    const result = await adapter.stopSession(stopIdentity)
 
     assert.equal(result.ok, false)
     if (result.ok) continue
     assert.equal(result.code, 'interrupt_state_unknown')
     assert.equal(result.preserveUi, true)
+    assert.equal(lifecycleStore.calls.includes('requestProductInterrupt'), true)
+    assert.equal(lifecycleStore.calls.includes('markProductInterruptUnknown'), true)
+  }
+})
+
+test('benign no-active interrupt rejection reconciles only the exact terminal turn', async () => {
+  for (const readback of [
+    { turnId: 'turn-1', status: 'completed' as const, expectedOk: true },
+    { turnId: 'turn-1', status: 'inProgress' as const, expectedOk: false },
+    { turnId: 'turn-other', status: 'completed' as const, expectedOk: false },
+  ]) {
+    const { adapter, nativeRuntime, lifecycleStore } = createHarness()
+    lifecycleStore.facts = {
+      ...idleNever,
+      readyRunCreated: true,
+      codexThreadId: 'thread-1',
+      codexTurnId: 'turn-1',
+      activeFence: 'product_turn',
+      productRunNonterminal: true,
+    }
+    nativeRuntime.interruptError = new CodexAppServerClientError('rpc_rejected', {
+      code: -32600,
+      message: 'no active turn to interrupt',
+    })
+    nativeRuntime.interruptReadTurnId = readback.turnId
+    nativeRuntime.interruptReadTurnStatus = readback.status
+
+    const result = await adapter.stopSession(stopIdentity)
+
+    assert.equal(result.ok, readback.expectedOk)
+    assert.deepEqual(nativeRuntime.calls.slice(0, 2), ['turnInterrupt', 'threadRead'])
+    if (readback.expectedOk) {
+      assert.equal(lifecycleStore.calls.includes('acknowledgeProductInterrupt'), false)
+      assert.equal(lifecycleStore.calls.includes('markProductInterruptUnknown'), false)
+      assert.equal(lifecycleStore.calls.includes('awaitProductCloseout'), true)
+    } else {
+      assert.equal(lifecycleStore.calls.includes('markProductInterruptUnknown'), true)
+      assert.equal(lifecycleStore.calls.includes('awaitProductCloseout'), false)
+    }
+  }
+})
+
+test('close and reset share the same exact-terminal interrupt reconciliation', async () => {
+  for (const action of ['close', 'reset'] as const) {
+    const { adapter, nativeRuntime, lifecycleStore } = createHarness()
+    lifecycleStore.facts = {
+      ...idleNever,
+      readyRunCreated: true,
+      codexThreadId: 'thread-1',
+      codexTurnId: 'turn-1',
+      activeFence: 'product_turn',
+      productRunNonterminal: true,
+    }
+    nativeRuntime.interruptError = new CodexAppServerClientError('rpc_rejected', {
+      code: -32600,
+      message: 'no active turn to interrupt',
+    })
+
+    const result = action === 'close'
+      ? await adapter.closeSession(activeLifecycleIdentity)
+      : await adapter.resetSession(activeLifecycleIdentity)
+
+    assert.equal(result.ok, true)
+    assert.deepEqual(nativeRuntime.calls.slice(0, 2), ['turnInterrupt', 'threadRead'])
+    assert.equal(lifecycleStore.calls.includes('acknowledgeProductInterrupt'), false)
+    assert.equal(lifecycleStore.calls.includes('markProductInterruptUnknown'), false)
+    assert.equal(lifecycleStore.calls.includes('awaitProductCloseout'), true)
   }
 })
 
@@ -1054,5 +2122,6 @@ test('manual compaction uncertainty and consume persistence failure never report
       assert.equal(result.code, 'compaction_state_unknown')
       assert.equal(result.preserveUi, true)
     }
+    assert.equal(lifecycleStore.calls.includes('markManualCompactionUnknown'), true)
   }
 })

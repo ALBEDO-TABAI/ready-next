@@ -13,6 +13,8 @@ import { executeSendImFileTool } from '../main/modules/tools/send-im-skill-tool'
 function createScope(): ConversationScope {
   return {
     id: 'scope-browser-send-im',
+    aliasGeneration: 1,
+    messageVisibilityEpoch: 0,
     agent: 'butler',
     title: '测试会话',
     sourceKind: 'local',
@@ -172,7 +174,11 @@ test('downloaded media flows through projection recentArtifacts into send-im att
     const summary = projection.recordEvent({
       type: 'updated',
       scopeId: 'scope-browser-send-im',
+      aliasGeneration: 1,
+      messageVisibilityEpoch: 0,
+      visibilityOwnerKind: 'product_alias',
       agent: 'butler',
+      runId: 'run-download-send-im',
       phase: 'tool_running',
       recentArtifacts: downloadOutput.projectionPatch?.recentArtifacts as ScopeRunSummary['recentArtifacts'],
       timestamp: '2026-06-18T00:00:00.000Z',

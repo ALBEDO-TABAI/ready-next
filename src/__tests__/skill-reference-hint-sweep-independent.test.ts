@@ -14,7 +14,7 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import test, { mock } from 'node:test'
+import test, { after, before, mock } from 'node:test'
 
 import {
   rememberLastReferenceSkill,
@@ -25,6 +25,12 @@ import {
   setReferenceHintChangeEmitter,
 } from '../main/modules/agent-control/skills/skill-reference-hints'
 import { SkillsRuntimeManager } from '../main/modules/skills-runtime/runtime-manager'
+import { __setScopeContextEpochDatabaseForTests } from '../main/modules/agent-control/session/scope-context-epoch'
+
+before(() => {
+  __setScopeContextEpochDatabaseForTests({ getRawDb: () => ({ prepare: () => ({ get: () => undefined }) }) as never })
+})
+after(() => __setScopeContextEpochDatabaseForTests(null))
 
 test('runtime-manager reference-hint sweep removes stale hints on its boot timer', () => {
   _resetLastReferenceSkillHintsForTests()

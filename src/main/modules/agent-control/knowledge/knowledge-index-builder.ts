@@ -50,7 +50,7 @@ export function stripBacklinksBlock(body: string): string {
 export function extractForwardLinks(body: string): string[] {
   const stripped = stripBacklinksBlock(body)
   const out: string[] = []
-  for (const match of stripped.matchAll(/\[\[([^\[\]\n]+)\]\]/g)) {
+  for (const match of stripped.matchAll(/\[\[([^[\]\n]+)\]\]/g)) {
     const slug = match[1].trim()
     if (slug && !out.includes(slug)) out.push(slug)
   }

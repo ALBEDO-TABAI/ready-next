@@ -28,6 +28,7 @@ import {
   type SkillToolAuthorization,
 } from '../agent-control/skills/skill-tool-authorization'
 import { resolveConfirmationGate, m3GrantCandidateOf } from '../agent-control/safety/action-confirmation-policy'
+import { readActionAuthorizationModeFromEnvelope } from '../../../shared/action-authorization-mode'
 import { matchToolNegationFamily } from '../agent-control/safety/negation-state'
 import { createTaskProofSink, collectTaskEventProof } from '../agent-control/quality/proof-collector'
 import type { FollowupNegationFamily } from '../../../shared/agent-followup-intent'
@@ -55,11 +56,6 @@ import { executeImageGenerationTool } from './image-generation-tools'
 import { executeMapTool } from './map-tools'
 import { executeAskUserQuestions } from './builtins/ask-user-questions'
 import { executeDeclareCompletionCriteria } from './builtins/declare-completion-criteria'
-import { executeConfirmSpecialistBlueprint } from './builtins/confirm-specialist-blueprint'
-import { executeProposeHandoff } from './builtins/propose-handoff'
-import { executeProposeSpecialistBlueprint } from './builtins/propose-specialist-blueprint'
-import { executeRenameSpecialistAgent } from './builtins/rename-specialist-agent'
-import { resolveSpecialistFoundationSemanticJudge } from '../agent-control/agents/specialist-foundation-semantic-judge-provider'
 import { executeInstallSkill } from './builtins/install-skill'
 import { executeUseSkill } from './builtins/use-skill'
 import { executeChannelSendFile } from './builtins/channel-send-file'
@@ -75,14 +71,17 @@ import { executeRSSTool } from './rss-tools'
 import { executeSkillTool, findSkillToolByNameForExecution } from './skills-tools'
 import { executeSystemTool } from './system-tools'
 import { executeFeishuTool } from './feishu-tools'
+import type { FeishuReadAuthority } from './feishu-tools'
+import type { RunShellHandlerDeps } from './skill-primitives/run-shell'
+import type { ReadArtifactExactResource } from './skill-primitives/read-artifact'
 import { executeMemoryTool } from './memory-tools'
 import { executePetTool } from './pet-tools'
 import { executeSessionRecallTool } from './session-recall-tools'
-import {
-  getSpecialistBlueprintConfirmationStore,
-  getSpecialistBlueprintStore,
-} from '../agent-control/agents/specialist-blueprint-runtime'
 import { getSkillsRuntimeManager } from '../skills-runtime/runtime-manager'
+import {
+  resolveGlobalLarkCliExecutableAuthority,
+} from '../skills-runtime/lark-cli-executable-authority'
+import type { FrozenDesktopExecutableAuthority } from '../skills-runtime/desktop-executable-authority'
 import { readReferenceSkillDocCapped } from '../skills-runtime/reference-skill-doc'
 import { rememberLastReferenceSkill } from '../agent-control/skills/skill-reference-hints'
 import {
@@ -120,11 +119,22 @@ export interface ToolContext {
   allowedToolNames?: Set<string> | string[] | null
   emitToolAction?: (tool: string, args: Record<string, unknown>) => void
   requestModuleToolAction?: (tool: string, args: Record<string, unknown>) => Promise<Record<string, unknown>>
+  feishuReadAuthority?: FeishuReadAuthority | null
+  larkCliExecutableAuthority?: FrozenDesktopExecutableAuthority | null
+  runShellRequiredMethod?: RunShellHandlerDeps['requiredMethod'] | null
+  runShellRequiredMethodPreflight?: (() => Promise<void>) | null
+  assertRequiredResourcesRead?: (() => void) | null
+  readArtifactRequiredResources?: readonly ReadArtifactExactResource[] | null
+  onExactResourceRead?: ((logicalPath: string) => void) | null
+  codexHostPrimitiveOnly?: boolean
   abortSignal?: AbortSignal
+  onToolEffectStart?: () => void
+  onToolEffectEnd?: () => void
   /** EP2-I2 — standing user negation families for this scope (dispatch interception). */
   activeNegations?: ReadonlyArray<FollowupNegationFamily>
   sessionId?: string
   scopeId?: string
+  messageVisibilityEpoch?: number
   currentUserText?: string
   sourceMessageId?: string | null
   sourceMessageUnavailableReason?: SpecialistBlueprintSourceMessageUnavailableReason | null
@@ -447,9 +457,6 @@ async function executeToolCallInner(
     args = outcome.data
   }
 
-  if (definition.domain === 'browser') {
-  }
-
   // EP1-I3-1/I3-2 — action-confirmation gate (05 §3.1/§3.2). Sits AFTER
   // registration / authorization / internal-visibility / allowlist admission
   // and input validation, immediately before dispatch: admission signals must
@@ -491,7 +498,29 @@ async function executeToolCallInner(
   }
 
   if (invoker !== 'host' && !releaseGrant) {
-    const confirmation = resolveConfirmationGate(toolName, args, { scopeId: context.scopeId || context.scope?.id || context.sessionId || null })
+    if (toolName === 'skill_run_shell'
+      && context.authorization.mode === 'selected'
+      && context.authorization.skillId === 'lark-cli'
+      && !context.larkCliExecutableAuthority) {
+      const requiredMethodAuthority = context.runShellRequiredMethod?.executableAuthority
+      if (requiredMethodAuthority) {
+        context.larkCliExecutableAuthority = requiredMethodAuthority
+      } else {
+        try {
+          context.larkCliExecutableAuthority = await resolveGlobalLarkCliExecutableAuthority({
+            env: getSkillsRuntimeManager().getRuntimeEnv({ allowPackaged: true }),
+          })
+        } catch {
+          context.larkCliExecutableAuthority = null
+        }
+      }
+    }
+    const confirmation = resolveConfirmationGate(toolName, args, {
+      scopeId: context.scopeId || context.scope?.id || context.sessionId || null,
+      messageVisibilityEpoch: context.messageVisibilityEpoch,
+      actionAuthorizationMode: readActionAuthorizationModeFromEnvelope(context.requestEnvelope),
+      larkCliExecutableVersion: context.larkCliExecutableAuthority?.version || null,
+    })
     const deniedOutput = (
       errorKind: string,
       text: string,
@@ -543,6 +572,7 @@ async function executeToolCallInner(
         agentId: context.agent ?? context.scope?.agent ?? null,
         taskId: context.taskId ?? null,
         scopeId: context.scopeId || context.scope?.id || null,
+        messageVisibilityEpoch: context.messageVisibilityEpoch,
         signal: context.abortSignal,
         emitCard: getAskUserQuestionsCardEmitter(),
         persistCard: getAskUserQuestionsCardPersistor(),
@@ -582,13 +612,19 @@ async function executeToolCallInner(
             { frozenCallId: outcome.frozenCallId },
           )
         case 'pending_exists':
+          return deniedOutput(ACTION_CONFIRMATION_ERROR_KINDS.deniedPendingConfirmation.code, pendingDeniedText)
         case 'unavailable':
+          return deniedOutput(
+            ACTION_CONFIRMATION_ERROR_KINDS.confirmationUnavailable.code,
+            `确认状态未能安全保存，工具 ${toolName} 未执行。这不是用户做出的决定，请稍后重新发起。`,
+          )
         default:
           return deniedOutput(ACTION_CONFIRMATION_ERROR_KINDS.deniedPendingConfirmation.code, pendingDeniedText)
       }
     }
   }
 
+  context.onToolEffectStart?.()
   try {
     const rawResult = await (async () => {
       switch (definition.domain) {
@@ -670,6 +706,7 @@ async function executeToolCallInner(
               registerRunCleanup: context.registerRunCleanup,
               inputSource: invoker === 'model' ? 'model' : 'trusted_internal',
               browserTurnLease: turnLease,
+              messageVisibilityEpoch: context.messageVisibilityEpoch,
             },
           )
           if (typeof browserResult === 'string' && browserResult.startsWith('Error:')) {
@@ -693,11 +730,15 @@ async function executeToolCallInner(
           {
             const {
               executeFileManagementTool,
+              resolveFileToolExplicitReadableResources,
+              resolveFileToolExplicitReadablePaths,
               resolveFileToolWorkspaceRoots,
             } = await import('./file-management-tools')
             const fileContext = {
               abortSignal: context.abortSignal,
               workspaceRoots: resolveFileToolWorkspaceRoots(toolName, context.requestEnvelope),
+              explicitReadablePaths: resolveFileToolExplicitReadablePaths(context.requestEnvelope),
+              explicitReadableResources: resolveFileToolExplicitReadableResources(context.requestEnvelope),
               runId: context.runId ?? null,
               sessionId: context.sessionId ?? null,
               scopeId: context.scopeId ?? null,
@@ -729,6 +770,7 @@ async function executeToolCallInner(
           return executeSkillTool(toolName, args, context.sessionId, context.registerRunCleanup, context.abortSignal, context.agentContext, {
             scopeId: context.scopeId || context.scope?.id || context.sessionId,
             runId: context.runId,
+            messageVisibilityEpoch: context.messageVisibilityEpoch,
             agent: context.agent || context.scope?.agent || null,
             taskId: context.taskId,
             taskProjectionId: context.taskProjectionId,
@@ -751,13 +793,23 @@ async function executeToolCallInner(
             // primitive fence (referencePrimitiveLifecycleFence) without
             // reading process.env in the hot path.
             turnFeatureFlags: context.turnFeatureFlags,
+            runShellRequiredMethod: context.runShellRequiredMethod ?? null,
+            larkCliExecutableAuthority: context.larkCliExecutableAuthority ?? null,
+            runShellRequiredMethodPreflight: context.runShellRequiredMethodPreflight ?? null,
+            assertRequiredResourcesRead: context.assertRequiredResourcesRead ?? null,
+            readArtifactRequiredResources: context.readArtifactRequiredResources ?? null,
+            onExactResourceRead: context.onExactResourceRead ?? null,
+            codexHostPrimitiveOnly: context.codexHostPrimitiveOnly === true,
           })
 
         case 'system':
           return executeSystemTool(toolName, args)
 
         case 'feishu':
-          return executeFeishuTool(toolName, args, { sidecarManager: context.sidecarManager })
+          return executeFeishuTool(toolName, args, {
+            sidecarManager: context.sidecarManager,
+            feishuReadAuthority: context.feishuReadAuthority ?? null,
+          })
 
         case 'memory':
           return executeMemoryTool(toolName, args, context)
@@ -895,33 +947,6 @@ async function executeToolCallInner(
           })
 
         case 'agent_interaction':
-          if (toolName === 'resume_task') {
-            const runtime = context.runtime
-            const taskId = String((args as Record<string, unknown>).task_id || '').trim()
-            const checkpointId = String((args as Record<string, unknown>).checkpoint_id || '').trim() || null
-            const candidate = context.activeFrame?.resumableCandidates?.find((item) => item.taskId === taskId)
-            if (!runtime || !context.scopeId) {
-              return createToolExecutionOutput('任务未恢复：当前运行环境不可用。', {
-                shape: 'json',
-                data: { success: false, errorKind: 'runtime_unavailable' },
-              })
-            }
-            if (!candidate || candidate.checkpointId !== checkpointId) {
-              return createToolExecutionOutput('任务未恢复：候选身份已变化，请重新读取当前候选。', {
-                shape: 'json',
-                data: { success: false, errorKind: 'stale_resume_candidate', taskId },
-              })
-            }
-            const result = await runtime.resumeRun({
-              scopeId: context.scopeId,
-              taskId,
-              responseText: '继续已选择的任务。',
-            })
-            return createToolExecutionOutput(result.success ? '已恢复所选任务。' : `任务未恢复：${result.error || '未知原因'}`, {
-              shape: 'json',
-              data: { ...result, taskId, checkpointId },
-            })
-          }
           // D4 — 声明验收标准：校验在 builtin 内代码强制，落 projection 行
           // modelCriteria（整组替换），finalizer 终态合并裁决。
           if (toolName === 'declare_completion_criteria') {
@@ -952,114 +977,6 @@ async function executeToolCallInner(
               },
             })
           }
-          const semanticJudge = toolName === 'confirm_specialist_blueprint' || toolName === 'propose_specialist_blueprint'
-            ? resolveSpecialistFoundationSemanticJudge()
-            : null
-          if (toolName === 'confirm_specialist_blueprint') {
-            const runtime = context.runtime
-            if (!runtime) {
-              return createToolExecutionOutput('专项 agent 创建未执行：runtime 不可用。', {
-                shape: 'json',
-                data: {
-                  errorKind: 'runtime_unavailable',
-                  toolName,
-                },
-              })
-            }
-            const specialistSemanticJudge = semanticJudge as NonNullable<typeof semanticJudge>
-            return executeConfirmSpecialistBlueprint(
-              args as Parameters<typeof executeConfirmSpecialistBlueprint>[0],
-              {
-                getBlueprintStore: getSpecialistBlueprintStore,
-                getConfirmationStore: getSpecialistBlueprintConfirmationStore,
-                getBeliefCardStore: () => runtime.getBeliefCardStore(),
-                getAgentRegistry: () => runtime.getAgentRegistry(),
-                runSemanticFoundationJudge: specialistSemanticJudge.judge,
-                semanticFoundationJudgeUnavailableReason: specialistSemanticJudge.unavailableReason,
-                sessionId: context.sessionId ?? context.scope?.id ?? null,
-                runId: context.runId ?? null,
-                currentUserText: context.currentUserText ?? null,
-              },
-            )
-          }
-          if (toolName === 'rename_specialist_agent') {
-            const runtime = context.runtime
-            if (!runtime) {
-              return createToolExecutionOutput('专项 agent 未改名：runtime 不可用。', {
-                shape: 'json',
-                data: {
-                  errorKind: 'runtime_unavailable',
-                  toolName,
-                },
-              })
-            }
-            return executeRenameSpecialistAgent(
-              args as Parameters<typeof executeRenameSpecialistAgent>[0],
-              {
-                registry: runtime.getAgentRegistry(),
-                currentUserText: context.currentUserText ?? null,
-              },
-            )
-          }
-          if (toolName === 'propose_specialist_blueprint') {
-            const runtime = context.runtime
-            if (!runtime) {
-              return createToolExecutionOutput('专项 agent 蓝图未保存：runtime 不可用。', {
-                shape: 'json',
-                data: {
-                  errorKind: 'runtime_unavailable',
-                  toolName,
-                },
-              })
-            }
-            const specialistSemanticJudge = semanticJudge as NonNullable<typeof semanticJudge>
-            const sourceMessageId = typeof context.sourceMessageId === 'string' && context.sourceMessageId.trim()
-              ? context.sourceMessageId.trim()
-              : null
-            return executeProposeSpecialistBlueprint(
-              args as Parameters<typeof executeProposeSpecialistBlueprint>[0],
-              {
-                blueprintStore: getSpecialistBlueprintStore(),
-                registry: runtime.getAgentRegistry(),
-                sessionId: context.sessionId ?? null,
-                runId: context.runId ?? null,
-                sourceMessageId,
-                sourceMessageUnavailableReason: sourceMessageId
-                  ? null
-                  : context.sourceMessageUnavailableReason || 'message_id_unavailable',
-                currentUserText: context.currentUserText ?? null,
-                runSemanticFoundationJudge: specialistSemanticJudge.judge,
-                semanticFoundationJudgeUnavailableReason: specialistSemanticJudge.unavailableReason,
-              },
-            )
-          }
-          // EP3-A4 — handoff proposal: same card machinery, plus registry
-          // lookup and the codebase's ONLY ownerAgentId value write (via
-          // the runtime's projection repository).
-          if (toolName === 'agent_propose_handoff') {
-            const runtime = context.runtime
-            if (!runtime) {
-              return createToolExecutionOutput('转办提议无效：runtime 不可用', {
-                shape: 'json',
-                data: { outcome: { kind: 'invalid', reason: 'runtime_unavailable' } },
-              })
-            }
-            return executeProposeHandoff(args as Parameters<typeof executeProposeHandoff>[0], {
-              getAgent: (id) => runtime.getAgentRegistry().get(id),
-              getAgentHandoffReadiness: async (id) => (await runtime.resolveAgentExecutionProfile(id)).readiness,
-              adoptTaskHandoff: (input) => runtime.adoptSameSessionHandoff(input),
-              currentActiveAgentId: context.scope?.activeAgentId ?? null,
-              sessionId: context.sessionId,
-              conversationId: context.scope?.id || context.sessionId,
-              scopeId: context.scopeId,
-              runId: context.runId,
-              agentId: context.agent || context.scope?.agent || null,
-              signal: context.abortSignal,
-              emitCard: getAskUserQuestionsCardEmitter(),
-              persistCard: getAskUserQuestionsCardPersistor(),
-              taskId: context.taskId ?? null,
-            })
-          }
           // `ask_user_questions`. Emitter + persistor are looked up via the
           // bridge so the handler stays electron-free and testable under
           // `tsx --test`. Conversation id falls back to the session/scope
@@ -1078,9 +995,9 @@ async function executeToolCallInner(
           })
 
         case 'skill_install':
-          // Two-phase remote skill installer. Phase 1 resolves read-only; phase 2
-          // installs only with trustAck after the user approved via
-          // ask_user_questions. The manager enforces the trustAck invariant.
+          // Two-phase remote skill installer. Phase 1 resolves read-only;
+          // trustAck selects phase 2, whose exact args have already passed the
+          // FrozenCall confirmation gate above.
           return executeInstallSkill(args as Parameters<typeof executeInstallSkill>[0], {
             manager: getSkillsRuntimeManager(),
           })
@@ -1094,7 +1011,10 @@ async function executeToolCallInner(
             sessionId: context.sessionId || context.scopeId || context.scope?.id,
             listSkills: () => getSkillsRuntimeManager().listSkills(),
             readSkillDoc: (managedPath) => readReferenceSkillDocCapped(managedPath),
-            rememberReferenceSkill: rememberLastReferenceSkill,
+            rememberReferenceSkill: (sessionId, info) => rememberLastReferenceSkill(sessionId, {
+              ...info,
+              messageVisibilityEpoch: context.messageVisibilityEpoch,
+            }),
           })
 
         case 'channel':
@@ -1106,8 +1026,8 @@ async function executeToolCallInner(
           })
 
         case 'mcp_install':
-          // Phase M —— agent 代装 MCP server：两阶段确认合同在工具内执行
-          // （install_skill 同款范式）；命令白名单/包名校验由代码强制。
+          // Phase M —— agent 代装 MCP server：confirmAck 只选择写入阶段；
+          // exact pendingConfig 已由上方 FrozenCall 闸门逐次确认。
           return executeInstallMcpServer(args as Record<string, unknown>, {
             getSetting: (key) => getDatabase().getSetting(key),
             setSetting: (key, value) => getDatabase().setSetting(key, value),
@@ -1153,6 +1073,8 @@ async function executeToolCallInner(
         detail,
       },
     })
+  } finally {
+    context.onToolEffectEnd?.()
   }
 }
 

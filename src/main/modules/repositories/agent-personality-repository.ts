@@ -1,7 +1,5 @@
-/**
- * Repository for managing agent personalities (SOUL.md data).
- * Each agent can have a custom personality definition that shapes its behavior.
- */
+/** Historical personality/profile records. These rows are not Codex runtime
+ * instructions and do not create or mutate live Agent identities. */
 
 import { isValidAgentSlug } from '../../../shared/agent-identity'
 
@@ -92,21 +90,6 @@ export class AgentPersonalityRepository {
         personality.updatedAt || now
       )
 
-    db.prepare(`
-      INSERT INTO agents (id, name, charter, persona_ref, status, parent_agent_id, derivation_reason, merged_into_agent_id, created_at)
-      VALUES (?, ?, ?, ?, 'active', NULL, ?, NULL, ?)
-      ON CONFLICT(id) DO UPDATE SET
-        name = excluded.name,
-        persona_ref = excluded.persona_ref
-    `).run(
-      agentName,
-      displayName,
-      `用户创建的 ${displayName} agent`,
-      agentName,
-      'personality:create',
-      new Date().toISOString(),
-    )
-
     const created = await this.getPersonality(agentName)
     if (!created) {
       throw new Error(`Failed to create agent personality: ${personality.agentName}`)
@@ -156,10 +139,6 @@ export class AgentPersonalityRepository {
       .prepare(`UPDATE agent_personalities SET ${fields.join(', ')} WHERE agent_name = ?`)
       .run(...values)
 
-    if (updates.displayName !== undefined && String(updates.displayName || '').trim()) {
-      db.prepare('UPDATE agents SET name = ? WHERE id = ?')
-        .run(String(updates.displayName).trim(), agentName)
-    }
   }
 
   /**

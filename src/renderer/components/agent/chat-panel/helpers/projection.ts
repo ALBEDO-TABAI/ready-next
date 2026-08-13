@@ -33,6 +33,7 @@ import {
  */
 export interface PersistedScopeRunSummary {
   scopeId: string
+  messageVisibilityEpoch: number
   agent: string
   title: string
   sourceKind: 'local' | 'channel'
@@ -231,6 +232,7 @@ export function activeChildRunDebugRow(row: ActiveChildRunSummaryData, fallbackS
   ].filter((value): value is NonNullable<ScopeRunState['recentArtifacts']>[number] => value !== null)
   return buildPlaceholderProjectionFromActiveChildRun({
     scopeId,
+    messageVisibilityEpoch: row.messageVisibilityEpoch,
     taskId: `skill-child:${row.childRunId}`,
     phase: childRunPhase(row),
     status,

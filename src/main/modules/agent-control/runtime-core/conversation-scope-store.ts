@@ -17,6 +17,10 @@
 // createConversationMessage) instead of into the runtime monolith. This batch
 // performs NO Phase C migration; it only fixes the boundary.
 import { randomUUID } from 'crypto'
+import {
+  parseActionAuthorizationMode,
+  type ActionAuthorizationMode,
+} from '../../../../shared/action-authorization-mode'
 import type {
   AgentChannelRecord,
   ChatConversationRecord,
@@ -52,8 +56,9 @@ export interface ConversationScopeStoreDeps {
   /** Bound to `ReferenceHintService` — hint replay on channel-scope ensure
    *  and hint persist after each assistant message append. */
   restoreReferenceHintFromScope: (scope: ConversationScope, scopeId: string) => void
-  persistReferenceHintToScope: (scopeId: string) => void
+  persistReferenceHintToScope: (scopeId: string, expectedMessageVisibilityEpoch: number) => void
   resolveConversationAgentId: (requestedAgentId: string) => string
+  readAliasGeneration: (aliasId: string) => number | null
 }
 
 export class ConversationScopeStore {
@@ -69,7 +74,37 @@ export class ConversationScopeStore {
   }
 
   getConversationScopeMessages(scopeId: string): ConversationScopeMessage[] {
+    if (!this.deps.db.getConversationScope(scopeId)) {
+      throw new Error(`conversation_scope_closed_or_missing:${scopeId}`)
+    }
     return this.deps.db.getChatMessages(scopeId).map((row) => this.mapMessageRow(row))
+  }
+
+  setActionAuthorizationMode(
+    scopeId: string,
+    mode: ActionAuthorizationMode,
+    expectedMessageVisibilityEpoch: number,
+  ): ConversationScope {
+    const existing = this.deps.db.getConversationScope(scopeId)
+    if (!existing) throw new Error(`Conversation scope not found: ${scopeId}`)
+    if (existing.source_kind !== 'local') {
+      throw new Error('action_authorization_mode_local_scope_required')
+    }
+    const normalizedMode = parseActionAuthorizationMode(mode)
+    if (normalizedMode !== mode) throw new Error('action_authorization_mode_invalid')
+    const meta = tryParseJson<Record<string, unknown>>(existing.meta_json || '{}', {})
+    const updated = this.deps.db.updateConversationScopeMeta(
+      scopeId,
+      {
+        ...meta,
+        actionAuthorizationMode: normalizedMode,
+      },
+      expectedMessageVisibilityEpoch,
+    )
+    if (!updated) throw new Error('action_authorization_scope_identity_changed')
+    const scope = this.mapConversationRow(updated)
+    this.deps.emitConversationEvent({ type: 'scope_updated', scope })
+    return scope
   }
 
   createLocalScope(agent: string, id?: string): ConversationScope {
@@ -112,6 +147,8 @@ export class ConversationScopeStore {
   ): ConversationScope {
     return {
       id: row.id,
+      aliasGeneration: this.deps.readAliasGeneration(row.id),
+      messageVisibilityEpoch: row.message_visibility_epoch ?? 0,
       agent: row.agent,
       activeAgentId: row.active_agent_id || row.agent,
       handoffGeneration: row.handoff_generation ?? 0,
@@ -199,7 +236,8 @@ export class ConversationScopeStore {
       role: string
       content: string
       meta?: Record<string, unknown>
-    }
+    },
+    expectedMessageVisibilityEpoch: number,
   ): ConversationScopeMessage {
     const messageId = `msg-${randomUUID()}`
     const timestamp = new Date().toISOString()
@@ -209,13 +247,14 @@ export class ConversationScopeStore {
       payload.role,
       payload.content,
       timestamp,
-      payload.meta
+      payload.meta,
+      expectedMessageVisibilityEpoch,
     )
     // skill-resume A1: snapshot reference-skill hint after each assistant
     // message and persist it to the conversation's meta_json so a Ready
     // restart can re-arm the in-memory hint on session resume.
     if (payload.role === 'assistant') {
-      this.deps.persistReferenceHintToScope(scopeId)
+      this.deps.persistReferenceHintToScope(scopeId, expectedMessageVisibilityEpoch)
     }
     return this.mapMessageRow(this.deps.db.getChatMessages(scopeId).find((row) => row.id === messageId)!)
   }

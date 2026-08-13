@@ -16,20 +16,34 @@
 import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { readScopeContextEpoch } from './scope-context-epoch'
 
 export interface ScopeSessionSnapshot {
-  version: 1
+  version: 2
   scope: string
+  messageVisibilityEpoch: number
   items: unknown[]
   updatedAt: string
 }
 
 export type ScopeSessionSnapshotLoad =
   | { ok: true; items: unknown[]; updatedAt: string }
-  | { ok: false; reason: 'missing' | 'corrupt' }
+  | {
+      ok: false
+      reason:
+        | 'missing'
+        | 'corrupt'
+        | 'context_epoch_mismatch'
+        | 'legacy_context_epoch_missing'
+    }
 
 function safeScopeDirName(scope: string): string {
   return scope.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 120) || 'scope'
+}
+
+function publicScopeId(scope: string): string {
+  const separator = scope.indexOf('::')
+  return separator >= 0 ? scope.slice(separator + 2) : scope
 }
 
 export function scopeSessionSnapshotPath(scope: string, rootOverride?: string): string {
@@ -40,14 +54,30 @@ export function scopeSessionSnapshotPath(scope: string, rootOverride?: string): 
 export function writeScopeSessionSnapshot(
   scope: string,
   items: unknown[],
+  messageVisibilityEpoch: number,
   rootOverride?: string,
 ): { ok: boolean; path: string; error?: string } {
   const path = scopeSessionSnapshotPath(scope, rootOverride)
   try {
+    if (!Number.isSafeInteger(messageVisibilityEpoch) || messageVisibilityEpoch < 0) {
+      throw new Error('scope_session_snapshot_message_visibility_epoch_invalid')
+    }
+    const durable = readScopeContextEpoch(publicScopeId(scope))
+    if (
+      durable.kind === 'closed'
+      || durable.kind === 'unavailable'
+      || (
+        durable.kind === 'open'
+        && durable.messageVisibilityEpoch !== messageVisibilityEpoch
+      )
+    ) {
+      throw new Error('scope_session_snapshot_context_stale')
+    }
     mkdirSync(join(path, '..'), { recursive: true })
     const snapshot: ScopeSessionSnapshot = {
-      version: 1,
+      version: 2,
       scope,
+      messageVisibilityEpoch,
       items,
       updatedAt: new Date().toISOString(),
     }
@@ -61,8 +91,16 @@ export function writeScopeSessionSnapshot(
   }
 }
 
-export function loadScopeSessionSnapshot(scope: string, rootOverride?: string): ScopeSessionSnapshotLoad {
+export function loadScopeSessionSnapshot(
+  scope: string,
+  expectedMessageVisibilityEpoch: number,
+  rootOverride?: string,
+): ScopeSessionSnapshotLoad {
   const path = scopeSessionSnapshotPath(scope, rootOverride)
+  if (!Number.isSafeInteger(expectedMessageVisibilityEpoch) || expectedMessageVisibilityEpoch < 0) {
+    clearScopeSessionSnapshot(scope, rootOverride)
+    return { ok: false, reason: 'corrupt' }
+  }
   let raw: string
   try {
     raw = readFileSync(path, 'utf8')
@@ -71,10 +109,30 @@ export function loadScopeSessionSnapshot(scope: string, rootOverride?: string): 
     return { ok: false, reason: 'missing' }
   }
   try {
-    const parsed = JSON.parse(raw) as Partial<ScopeSessionSnapshot>
-    if (parsed?.version !== 1 || parsed.scope !== scope || !Array.isArray(parsed.items)) {
+    const parsed = JSON.parse(raw) as {
+      version?: number
+      scope?: string
+      messageVisibilityEpoch?: number
+      items?: unknown[]
+      updatedAt?: string
+    }
+    if (parsed?.version === 1) {
+      clearScopeSessionSnapshot(scope, rootOverride)
+      return { ok: false, reason: 'legacy_context_epoch_missing' }
+    }
+    if (
+      parsed?.version !== 2
+      || parsed.scope !== scope
+      || !Number.isSafeInteger(parsed.messageVisibilityEpoch)
+      || Number(parsed.messageVisibilityEpoch) < 0
+      || !Array.isArray(parsed.items)
+    ) {
       clearScopeSessionSnapshot(scope, rootOverride)
       return { ok: false, reason: 'corrupt' }
+    }
+    if (parsed.messageVisibilityEpoch !== expectedMessageVisibilityEpoch) {
+      clearScopeSessionSnapshot(scope, rootOverride)
+      return { ok: false, reason: 'context_epoch_mismatch' }
     }
     return { ok: true, items: parsed.items, updatedAt: String(parsed.updatedAt || '') }
   } catch {

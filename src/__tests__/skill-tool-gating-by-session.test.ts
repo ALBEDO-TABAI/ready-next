@@ -9,7 +9,7 @@
  */
 
 import assert from 'node:assert/strict'
-import { afterEach, test } from 'node:test'
+import { after, afterEach, before, test } from 'node:test'
 
 import {
   filterSkillPrimitivesBySession,
@@ -22,6 +22,14 @@ import {
   clearActiveSkillContext,
   rememberActiveSkillContext,
 } from '../main/modules/agent-control/session/active-skill-context'
+import { __setScopeContextEpochDatabaseForTests } from '../main/modules/agent-control/session/scope-context-epoch'
+
+before(() => {
+  __setScopeContextEpochDatabaseForTests({
+    getRawDb: () => ({ prepare: () => ({ get: () => undefined }) }) as never,
+  })
+})
+after(() => __setScopeContextEpochDatabaseForTests(null))
 
 const STANDARD_PRIMITIVES = [
   'skill_ask_user',

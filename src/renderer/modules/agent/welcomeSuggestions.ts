@@ -49,6 +49,7 @@ const BUCKET_PRIORITY: Record<FileEmergenceBucket, number> = {
 function compactText(value: string, maxLength: number): string {
   const compact = value
     .normalize('NFKC')
+    // eslint-disable-next-line no-control-regex -- normalize untrusted control bytes before rendering
     .replace(/[\u0000-\u001f\u007f]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim()

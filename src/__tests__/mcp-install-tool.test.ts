@@ -76,7 +76,7 @@ test('phase 1 is read-only: returns pendingConfig + riskNotes and never writes t
   )
   assert.match(output.text, /已只读解析（未安装）/)
   assert.match(output.text, /npx -y @modelcontextprotocol\/server-filesystem \/Users\/demo\/Docs/)
-  assert.match(output.text, /ask_user_questions/)
+  assert.match(output.text, /Ready 确认卡/)
   const data = output.data as Record<string, unknown>
   assert.equal(data.needsConfirmation, true)
   assert.ok(Array.isArray(data.riskNotes) && (data.riskNotes as string[]).some((note) => note.includes('/Users/demo/Docs')))

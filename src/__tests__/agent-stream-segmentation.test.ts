@@ -35,6 +35,69 @@ if (typeof (globalThis as any).window === 'undefined') {
 const { useAgent } = await import('../renderer/stores/useAgent')
 const { collapseAdjacentDuplicateAssistantTail } = await import('../renderer/modules/agent/runtimeDriver')
 
+const TEST_ALIAS_GENERATION = 1
+const TEST_MESSAGE_VISIBILITY_EPOCH = 0
+
+function bindAuthoritativeScope(scopeId: string, requestId: string): void {
+  useAgent.setState((state: any) => {
+    const currentScope = state.currentScope?.id === scopeId
+      ? {
+          ...state.currentScope,
+          aliasGeneration: TEST_ALIAS_GENERATION,
+          messageVisibilityEpoch: TEST_MESSAGE_VISIBILITY_EPOCH,
+        }
+      : state.currentScope
+    const scopes = (state.scopes || []).map((scope: any) => (
+      scope.id === scopeId
+        ? {
+            ...scope,
+            aliasGeneration: TEST_ALIAS_GENERATION,
+            messageVisibilityEpoch: TEST_MESSAGE_VISIBILITY_EPOCH,
+          }
+        : scope
+    ))
+    const runState = state.scopeRunStates?.[scopeId] || null
+    return {
+      currentScope,
+      scopes,
+      activeSessionId: scopeId,
+      sessionId: scopeId,
+      conversationId: scopeId,
+      sessions: {
+        ...(state.sessions || {}),
+        [scopeId]: {
+          messages: state.messages || [],
+          isStreaming: Boolean(state.isStreaming || runState),
+          foregroundBusy: Boolean(runState),
+          composerLocked: Boolean(runState),
+          streamingMessageId: state.streamingMessageId ?? runState?.responseMessageId ?? null,
+          streamingRequestId: requestId,
+          scopeRunStates: state.scopeRunStates || {},
+          taskDisclosureState: {},
+          lifecyclePendingAction: null,
+          lifecycleError: null,
+          state: 'live',
+          conversationId: scopeId,
+          aliasGeneration: TEST_ALIAS_GENERATION,
+          messageVisibilityEpoch: TEST_MESSAGE_VISIBILITY_EPOCH,
+          inputValue: '',
+        },
+      },
+    }
+  })
+}
+
+function exactScopeEvent<T extends Record<string, unknown>>(event: T): T & {
+  aliasGeneration: number
+  messageVisibilityEpoch: number
+} {
+  return {
+    ...event,
+    aliasGeneration: TEST_ALIAS_GENERATION,
+    messageVisibilityEpoch: TEST_MESSAGE_VISIBILITY_EPOCH,
+  }
+}
+
 // b933a763 Phase D D2（2026-07-05）：runtimeDriver 单枢纽内注册了两个
 // onScopeRunEvent 订阅（主 run-state 处理在前、会话路由终态转移在后）。
 // preload 走 ipcRenderer.on 多播，两个订阅都收事件；mock 必须扇出到全部
@@ -61,6 +124,9 @@ describe('agent stream segmentation', () => {
       streamingRequestId: null,
       conversations: [],
       conversationId: null,
+      sessions: {},
+      activeSessionId: null,
+      retiredScopeIds: {},
       attachments: [],
       filePool: [],
     })
@@ -182,8 +248,9 @@ describe('agent stream segmentation', () => {
         },
       },
     })
+    bindAuthoritativeScope('scope-a', 'req-a')
 
-    listeners.onScopeRunEvent?.({
+    listeners.onScopeRunEvent?.(exactScopeEvent({
       scopeId: 'scope-a',
       agent: 'butler',
       runId: 'req-a',
@@ -195,7 +262,7 @@ describe('agent stream segmentation', () => {
         text: 'browser_click(x=512,y=880)',
         timestamp: '2026-03-07T09:00:02.000Z',
       },
-    })
+    }))
 
     listeners.onStream?.({
       agent: 'butler',
@@ -344,6 +411,7 @@ describe('agent stream segmentation', () => {
         },
       },
     })
+    bindAuthoritativeScope('scope-a', 'req-a')
 
     listeners.onStream?.({
       agent: 'butler',
@@ -355,7 +423,7 @@ describe('agent stream segmentation', () => {
 
     await new Promise((resolve) => setTimeout(resolve, 0))
 
-    listeners.onScopeRunEvent?.({
+    listeners.onScopeRunEvent?.(exactScopeEvent({
       scopeId: 'scope-a',
       agent: 'butler',
       runId: 'req-a',
@@ -374,7 +442,7 @@ describe('agent stream segmentation', () => {
         },
       ],
       timestamp: '2026-03-07T09:00:03.000Z',
-    })
+    }))
 
     await new Promise((resolve) => setTimeout(resolve, 0))
 
@@ -514,8 +582,9 @@ describe('agent stream segmentation', () => {
         },
       },
     })
+    bindAuthoritativeScope('scope-detail', 'req-detail')
 
-    listeners.onScopeRunEvent?.({
+    listeners.onScopeRunEvent?.(exactScopeEvent({
       scopeId: 'scope-detail',
       agent: 'butler',
       runId: 'req-detail',
@@ -529,7 +598,7 @@ describe('agent stream segmentation', () => {
         toolName: 'skill_read_artifact',
         detail: '{\n  "relativePath": "参考/mapping.md"\n}',
       },
-    })
+    }))
 
     const traceAfterAppend = useAgent.getState().scopeRunStates['scope-detail']?.toolTrace || []
     assert.strictEqual(traceAfterAppend.length, 1)
@@ -545,7 +614,7 @@ describe('agent stream segmentation', () => {
     })
     await new Promise((resolve) => setTimeout(resolve, 0))
 
-    listeners.onScopeRunEvent?.({
+    listeners.onScopeRunEvent?.(exactScopeEvent({
       scopeId: 'scope-detail',
       agent: 'butler',
       runId: 'req-detail',
@@ -555,7 +624,7 @@ describe('agent stream segmentation', () => {
       waitingFor: 'none',
       resumableActions: [],
       timestamp: '2026-03-07T09:00:03.000Z',
-    })
+    }))
     await new Promise((resolve) => setTimeout(resolve, 0))
 
     const finalTrace = useAgent.getState().scopeRunStates['scope-detail']?.toolTrace || []
@@ -690,6 +759,7 @@ describe('agent stream segmentation', () => {
         },
       },
     })
+    bindAuthoritativeScope('scope-stuck', 'req-stuck')
 
     listeners.onStream?.({
       agent: 'butler',
@@ -713,7 +783,7 @@ describe('agent stream segmentation', () => {
     cleanup()
   })
 
-  it('clears streaming state when the final scope event arrives without a stream done event', async () => {
+  it('keeps the composer locked when a done scope event has no canonical terminal message', async () => {
     const listeners: {
       onStream?: (data: { agent: string; sessionId?: string; runId?: string; chunk: string; type: string }) => void
       onStatusChange?: (data: unknown) => void
@@ -837,22 +907,23 @@ describe('agent stream segmentation', () => {
         },
       },
     })
+    bindAuthoritativeScope('scope-final-only', 'req-final-only')
 
-    listeners.onScopeRunEvent?.({
+    listeners.onScopeRunEvent?.(exactScopeEvent({
       scopeId: 'scope-final-only',
       agent: 'butler',
       runId: 'req-final-only',
       phase: 'done',
       terminalReason: 'done',
       timestamp: '2026-03-07T09:00:03.000Z',
-    })
+    }))
 
     await new Promise((resolve) => setTimeout(resolve, 0))
 
     const state = useAgent.getState()
-    assert.strictEqual(state.isStreaming, false)
-    assert.strictEqual(state.streamingMessageId, null)
-    assert.strictEqual(state.streamingRequestId, null)
+    assert.strictEqual(state.isStreaming, true)
+    assert.strictEqual(state.streamingMessageId, 'msg-final-only')
+    assert.strictEqual(state.streamingRequestId, 'req-final-only')
     assert.strictEqual(state.toolTraceStatus, 'done')
     assert.strictEqual(state.scopeRunStates['scope-final-only']?.phase, 'done')
     assert.strictEqual(state.scopeRunStates['scope-final-only']?.terminalReason, 'done')

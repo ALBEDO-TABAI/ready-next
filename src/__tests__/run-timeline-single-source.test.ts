@@ -10,7 +10,7 @@
  */
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
 import { join } from 'node:path'
 import { emitRunTimelineEvent } from '../main/modules/claude-bridge/run-timeline-emitter'
 
@@ -59,8 +59,9 @@ test('emitRunTimelineEvent stays silent for a destroyed or missing window', () =
 })
 
 test('D2: useAgent no longer keeps a parallel scopeRunEvent subscription (single renderer hub)', () => {
-  const useAgentSource = readFileSync(join(process.cwd(), 'src/renderer/stores/useAgent.ts'), 'utf8')
-  assert.doesNotMatch(useAgentSource, /onScopeRunEvent\(/, 'useAgent must not subscribe scopeRunEvent directly')
-  const driverSource = readFileSync(join(process.cwd(), 'src/renderer/modules/agent/runtimeDriver.ts'), 'utf8')
-  assert.match(driverSource, /mapScopeRunPhaseToSessionState/, 'session routing transition must live in the driver hub')
+  assert.doesNotThrow(() => execFileSync(
+    process.execPath,
+    [join(process.cwd(), 'scripts/check-run-timeline-single-source.cjs')],
+    { stdio: 'pipe' },
+  ))
 })

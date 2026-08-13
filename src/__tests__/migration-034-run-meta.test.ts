@@ -96,11 +96,16 @@ test('RunMetaRepository — create + get round-trips record', async (t) => {
   const repo = new RunMetaRepository(db as unknown as ConstructorParameters<typeof RunMetaRepository>[0])
 
   const now = 1_700_000_000_000
+  db.prepare(
+    `INSERT INTO chat_conversations (id, agent, title, created_at, updated_at)
+     VALUES ('scope-1', 'butler', 'Run meta scope', ?, ?)`,
+  ).run(String(now), String(now))
   const created = repo.create(
     {
       runId: 'run-1',
       taskId: 'task-1',
       scopeId: 'scope-1',
+      messageVisibilityEpoch: 0,
       agentId: 'agent-1',
       status: 'running',
       inputTokens: 100,
@@ -187,9 +192,14 @@ test('RunMetaRepository — list filters by scopeId / taskId', async (t) => {
   )
   const repo = new RunMetaRepository(db as unknown as ConstructorParameters<typeof RunMetaRepository>[0])
 
-  repo.create({ runId: 'r1', scopeId: 's1', taskId: 't1', status: 'done' }, 1)
-  repo.create({ runId: 'r2', scopeId: 's1', taskId: 't2', status: 'done' }, 2)
-  repo.create({ runId: 'r3', scopeId: 's2', taskId: 't1', status: 'done' }, 3)
+  db.prepare(
+    `INSERT INTO chat_conversations (id, agent, title, thread_key, created_at, updated_at)
+     VALUES ('s1', 'butler', 'Scope 1', 's1', '1', '1'),
+            ('s2', 'butler', 'Scope 2', 's2', '1', '1')`,
+  ).run()
+  repo.create({ runId: 'r1', scopeId: 's1', messageVisibilityEpoch: 0, taskId: 't1', status: 'done' }, 1)
+  repo.create({ runId: 'r2', scopeId: 's1', messageVisibilityEpoch: 0, taskId: 't2', status: 'done' }, 2)
+  repo.create({ runId: 'r3', scopeId: 's2', messageVisibilityEpoch: 0, taskId: 't1', status: 'done' }, 3)
 
   const byScope = repo.list({ scopeId: 's1' })
   assert.equal(byScope.length, 2)

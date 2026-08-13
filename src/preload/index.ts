@@ -11,24 +11,33 @@ import type {
 } from '../shared/document-index-events'
 import type { NativeContextMenuRequest } from '../shared/native-context-menu'
 import type { RSSAutoRefreshSnapshot } from '../shared/rss-auto-refresh'
-import type {
-  ScheduleCreateRequest,
-  SchedulePreviewRequest,
-  ScheduledTasksAPI,
-  ScheduleUpdateRequest,
-} from '../shared/scheduled-tasks'
 import type { RendererAgentMetricName } from '../shared/renderer-agent-metrics'
 import type { CanonicalAssistantMessage } from '../shared/ipc-contracts/canonical-message'
 import {
   parseIngressAdmittedEvent,
+  parseCreateSessionRequest,
   parseCreateSessionResult,
   parseLifecycleRequest,
   parseLifecycleResult,
+  parseProductLifecycleRequest,
+  parseStopLifecycleRequest,
   parseSendScopedRequest,
   parseSendScopedResponse,
+  type CreateSessionRequest,
   type SendScopedRequest,
   type LifecycleRequest,
+  type ProductLifecycleRequest,
+  type StopLifecycleRequest,
 } from '../shared/ipc-contracts/agent-runtime'
+import type { ActionAuthorizationMode } from '../shared/action-authorization-mode'
+import {
+  parseAgentRuntimeReadinessSnapshot,
+  type AgentRuntimeReadinessSnapshot,
+} from '../shared/ipc-contracts/agent-runtime-readiness'
+import {
+  parseLifecycleOperationProjection,
+  type LifecycleOperationProjection,
+} from '../shared/ipc-contracts/agent-lifecycle-snapshot'
 import type { ModelPackDownloadUpdate, ModelPackId, ModelSource } from '../shared/model-pack-types'
 import type { RendererStateFlushOutcome } from '../shared/renderer-state-flush'
 import type { RuntimeStatus, RuntimeProvisionTaskSnapshot } from '../shared/runtime-provision-types'
@@ -56,7 +65,6 @@ import type {
   VerticalRailOverlayCommand,
   VerticalRailOverlaySnapshot,
 } from '../shared/browser-vertical-rail-overlay'
-import type { BrowserTargetResumeRequest } from '../shared/browser-workflow-control'
 import type {
   BrowserFastCardContextActionEvent,
   FastCardOverlayCommand,
@@ -66,74 +74,22 @@ import type {
   FastCardTranslateRequest,
 } from '../shared/fastcard'
 
-type ContinuationIntentPayload = {
-  taskId: string
-  executionId?: string
-  stepId?: string
-  blockedReason?: string
-  responseText?: string
-  todoId?: string
-  todoTitle?: string
-  resumeKind?: 'snapshot' | 'paused' | 'done_residual'
-  pauseReason?: string
-  detachedTaskId?: string
-  taskRunId?: string
-  jobId?: string
-  skillId?: string
-  action?: string
-  runStatePath?: string
-  outputDir?: string
-  progressFingerprint?: string
-  /**
-   * Stage Q (Stage 11) — child run identifier. Renderer-side resume
-   * paths (`buildRunContinuationIntent`) read childRunId from the live
-   * `taskContinuation` and propagate it through this payload to main,
-   * where `runtime.buildContinuationIntent`'s canResumeShape gate
-   * uses it to validate resumability.
-   */
-  childRunId?: string
-}
-
-function notifyAgentRegistryChanged(): void {
-  try {
-    queueMicrotask(() => {
-      try {
-        window.dispatchEvent(new CustomEvent('ready:agent-registry-changed'))
-      } catch {
-        // ignore — preview/test environments may not provide DOM events.
-      }
-    })
-  } catch {
-    // ignore
-  }
-}
-
-async function invokeAndNotifyAgentRegistry(channel: string, ...args: unknown[]): Promise<unknown> {
-  const result = await ipcRenderer.invoke(channel, ...args)
-  if (result && typeof result === 'object' && (result as { success?: unknown }).success === true) {
-    notifyAgentRegistryChanged()
-  }
-  return result
-}
-
 // Agent API
 const agentAPI = {
-  createSession: async () => parseCreateSessionResult(
-    await ipcRenderer.invoke('agent:createSession'),
+  createSession: async (request: CreateSessionRequest) => parseCreateSessionResult(
+    await ipcRenderer.invoke('agent:createSession', parseCreateSessionRequest(request)),
   ),
-  resetSession: async (request: LifecycleRequest) => parseLifecycleResult(
-    await ipcRenderer.invoke('agent:resetSession', parseLifecycleRequest(request)),
+  resetSession: async (request: ProductLifecycleRequest) => parseLifecycleResult(
+    await ipcRenderer.invoke('agent:resetSession', parseProductLifecycleRequest(request)),
   ),
-  sessionPrerouteEvaluate: (firstMessage: string) =>
-    ipcRenderer.invoke('agent:sessionPreroute:evaluate', { firstMessage }),
   // Stage U PR U1.2 — removed `orchestrate / getStatus / getAll / getDiagnostics`
   // legacy AgentManager wrappers. Zero renderer callers (verified via grep).
   // Use `getRuntimeStatus` + `getCapabilityRuntimeSnapshot` for diagnostics.
-  kill: async (request: LifecycleRequest) => parseLifecycleResult(
-    await ipcRenderer.invoke('agent:kill', parseLifecycleRequest(request)),
+  kill: async (request: StopLifecycleRequest) => parseLifecycleResult(
+    await ipcRenderer.invoke('agent:kill', parseStopLifecycleRequest(request)),
   ),
-  closeSession: async (request: LifecycleRequest) => parseLifecycleResult(
-    await ipcRenderer.invoke('agent:closeSession', parseLifecycleRequest(request)),
+  closeSession: async (request: ProductLifecycleRequest) => parseLifecycleResult(
+    await ipcRenderer.invoke('agent:closeSession', parseProductLifecycleRequest(request)),
   ),
   compactSession: async (request: LifecycleRequest) => parseLifecycleResult(
     await ipcRenderer.invoke('agent:compactSession', parseLifecycleRequest(request)),
@@ -144,8 +100,6 @@ const agentAPI = {
   listRegistry: () => ipcRenderer.invoke('agent:registry:list'),
   listRegistryKnowledge: (id: string) => ipcRenderer.invoke('agent:registry:listKnowledge', { id }),
   getSystemStudioSnapshot: () => ipcRenderer.invoke('agent:systemStudio:getSnapshot'),
-  simulateSystemStudioRouting: (firstMessage: string) =>
-    ipcRenderer.invoke('agent:systemStudio:simulateRouting', { firstMessage }),
   stageSystemStudioContentEdit: (payload: unknown) =>
     ipcRenderer.invoke('agent:systemStudio:stageContentEdit', payload),
   confirmSystemStudioContentEdit: (proposalId: string) =>
@@ -153,48 +107,29 @@ const agentAPI = {
   rejectSystemStudioContentEdit: (proposalId: string) =>
     ipcRenderer.invoke('agent:systemStudio:rejectContentEdit', { proposalId }),
   listSpecialistBlueprints: () => ipcRenderer.invoke('agent:specialistBlueprint:list'),
-  upsertSpecialistBlueprintDraft: (blueprint: unknown) =>
-    ipcRenderer.invoke('agent:specialistBlueprint:upsertDraft', { blueprint }),
-  runSpecialistBlueprintAdmission: (payload: { blueprint?: unknown; blueprintId?: string }) =>
-    ipcRenderer.invoke('agent:specialistBlueprint:runAdmission', payload),
-  requestSpecialistBlueprintConfirmation: (payload: {
-    blueprintId: string
-    sessionId: string
-    runId?: string | null
-    unverifiedSemanticReviewAck?: { kind: 'unverified_semantic_review'; contentHash: string }
-  }) =>
-    ipcRenderer.invoke('agent:specialistBlueprint:requestConfirmation', payload),
-  confirmSpecialistDraftCreate: (payload: { blueprintId: string; sessionId: string; runId?: string | null; tokenId: string; migrateCardRelPaths?: string[] }) =>
-    invokeAndNotifyAgentRegistry('agent:specialistBlueprint:confirmCreate', payload),
-  rejectSpecialistBlueprint: (blueprintId: string) =>
-    ipcRenderer.invoke('agent:specialistBlueprint:reject', { blueprintId }),
-  expireSpecialistBlueprint: (blueprintId: string) =>
-    ipcRenderer.invoke('agent:specialistBlueprint:expire', { blueprintId }),
-  updateRegistryStatus: (payload: {
-    id: string
-    status: 'active' | 'disabled' | 'retired' | 'merged'
-    mergedIntoAgentId?: string | null
-    migrateCardRelPaths?: string[]
-  }) =>
-    invokeAndNotifyAgentRegistry('agent:registry:updateStatus', payload),
-  deleteRegistryAgent: (id: string) =>
-    invokeAndNotifyAgentRegistry('agent:registry:delete', { id }),
-  listDerivationCandidates: () => ipcRenderer.invoke('agent:derivation:listCandidates'),
-  confirmDerivation: (payload: {
-    candidateRelPath: string
-    specialistId: string
-    name: string
-    charter?: string | null
-    seedRulesText: string
-    routingTriggers: string[]
-    activateRouting?: boolean
-    migrateCardRelPaths?: string[]
-  }) => ipcRenderer.invoke('agent:derivation:confirm', payload),
-  rejectDerivation: (candidateRelPath: string) =>
-    ipcRenderer.invoke('agent:derivation:reject', { candidateRelPath }),
   listConversationScopes: (agent?: string) => ipcRenderer.invoke('agent:listConversationScopes', { agent }),
+  readRuntimeReady: async () => parseAgentRuntimeReadinessSnapshot(
+    await ipcRenderer.invoke('agent:readRuntimeReady'),
+  ),
+  onRuntimeReady: (callback: (snapshot: AgentRuntimeReadinessSnapshot) => void) => {
+    const listener = (_event: IpcRendererEvent, payload: unknown) => {
+      callback(parseAgentRuntimeReadinessSnapshot(payload))
+    }
+    ipcRenderer.on('agent:runtimeReady', listener)
+    return () => ipcRenderer.removeListener('agent:runtimeReady', listener)
+  },
   listScopeRuns: (payload?: { channelKey?: string; statuses?: string[]; limit?: number }) =>
     ipcRenderer.invoke('agent:listScopeRuns', payload || {}),
+  readCodexLifecycleSnapshot: async (request: LifecycleRequest) => {
+    const result = await ipcRenderer.invoke('agent:readCodexLifecycleSnapshot', parseLifecycleRequest(request)) as {
+      success: boolean
+      data?: unknown
+      error?: string
+    }
+    return result.success && result.data
+      ? { ...result, data: parseLifecycleOperationProjection(result.data) as LifecycleOperationProjection }
+      : result
+  },
   listTaskProjections: (scopeId: string) =>
     ipcRenderer.invoke('agent:listTaskProjections', { scopeId }),
   getTaskProjection: (taskId: string) =>
@@ -222,14 +157,6 @@ const agentAPI = {
     ipcRenderer.invoke('agent:listAttachedSessionRecallContexts', { scopeId }),
   getReferenceSkillHint: (scopeId: string) =>
     ipcRenderer.invoke('agent:getReferenceSkillHint', { scopeId }),
-  startDetachedSkillAction: (payload: {
-    scopeId?: string
-    sessionId?: string
-    agent?: string
-    skillId: string
-    action: string
-    params?: Record<string, unknown>
-  }) => ipcRenderer.invoke('agent:startDetachedSkillAction', payload),
   inspectDetachedSkillTask: (taskId: string, scopeId: string) =>
     ipcRenderer.invoke('agent:inspectDetachedSkillTask', { taskId, scopeId }),
   listDetachedSkillTasks: (payload?: { scopeId?: string }) =>
@@ -239,14 +166,37 @@ const agentAPI = {
   listActiveChildRuns: () => ipcRenderer.invoke('agent:listActiveChildRuns'),
   cancelChildRun: (childRunId: string) =>
     ipcRenderer.invoke('agent:cancelChildRun', { childRunId }),
-  attachSessionRecallContext: (currentScopeId: string, conversationId: string) =>
-    ipcRenderer.invoke('agent:attachSessionRecallContext', { currentScopeId, conversationId }),
-  detachSessionRecallContext: (currentScopeId: string, conversationId: string) =>
-    ipcRenderer.invoke('agent:detachSessionRecallContext', { currentScopeId, conversationId }),
+  attachSessionRecallContext: (
+    currentScopeId: string,
+    conversationId: string,
+    expectedMessageVisibilityEpoch: number,
+  ) => ipcRenderer.invoke('agent:attachSessionRecallContext', {
+    currentScopeId,
+    conversationId,
+    expectedMessageVisibilityEpoch,
+  }),
+  detachSessionRecallContext: (
+    currentScopeId: string,
+    conversationId: string,
+    expectedMessageVisibilityEpoch: number,
+  ) => ipcRenderer.invoke('agent:detachSessionRecallContext', {
+    currentScopeId,
+    conversationId,
+    expectedMessageVisibilityEpoch,
+  }),
   resumeSessionCandidate: (payload: { conversationId?: string; resumeTitle?: string }) =>
     ipcRenderer.invoke('agent:resumeSessionCandidate', payload),
   getConversationScopeMessages: (scopeId: string) =>
     ipcRenderer.invoke('agent:getConversationScopeMessages', { scopeId }),
+  setActionAuthorizationMode: (
+    scopeId: string,
+    mode: ActionAuthorizationMode,
+    expectedMessageVisibilityEpoch: number,
+  ) => ipcRenderer.invoke('agent:setActionAuthorizationMode', {
+    scopeId,
+    mode,
+    expectedMessageVisibilityEpoch,
+  }),
   listScopeAttachments: (scopeId?: string) => ipcRenderer.invoke('agent:listScopeAttachments', { scopeId }),
   getScopeAttachment: (scopeId: string, attachmentId: string) =>
     ipcRenderer.invoke('agent:getScopeAttachment', { scopeId, attachmentId }),
@@ -270,27 +220,6 @@ const agentAPI = {
   ) => ipcRenderer.invoke('agent:emitRendererMetric', { name, payload }),
   reportInfrastructureTimeout: (payload: { scopeId: string; requestId: string; elapsedMs?: number }) =>
     ipcRenderer.invoke('agent:reportInfrastructureTimeout', payload),
-  suspendRun: (payload: { scopeId: string; taskId?: string }) =>
-    ipcRenderer.invoke('agent:suspendRun', payload),
-  resumeRun: (payload: {
-    scopeId: string
-    taskId?: string
-    requestId?: string
-    responseText?: string
-    continuationIntent?: ContinuationIntentPayload | null
-  }) =>
-    ipcRenderer.invoke('agent:resumeRun', payload),
-  respondToInteraction: (payload: {
-    scopeId: string
-    taskId?: string
-    requestId?: string
-    responseText: string
-    confirmed?: boolean
-    continuationIntent?: ContinuationIntentPayload | null
-  }) =>
-    ipcRenderer.invoke('agent:respondToInteraction', payload),
-  completeHumanTakeover: (payload: { taskId: string; takeoverId: string }) =>
-    ipcRenderer.invoke('agent:completeHumanTakeover', payload),
   upsertChannel: (payload: {
     id?: string
     type: 'local-debug' | 'generic-webhook' | 'feishu-bot' | 'feishu-app' | 'telegram-bot' | 'wechat-openclaw'
@@ -425,27 +354,6 @@ const agentAPI = {
   },
 }
 
-const scheduledTasksAPI: ScheduledTasksAPI = {
-  list: () => ipcRenderer.invoke('scheduledTasks:list'),
-  get: (id: string) => ipcRenderer.invoke('scheduledTasks:get', { id }),
-  preview: (request: SchedulePreviewRequest) => ipcRenderer.invoke('scheduledTasks:preview', request),
-  create: (request: ScheduleCreateRequest) => ipcRenderer.invoke('scheduledTasks:create', request),
-  update: (request: ScheduleUpdateRequest) => ipcRenderer.invoke('scheduledTasks:update', request),
-  pause: (id: string) => ipcRenderer.invoke('scheduledTasks:pause', { id }),
-  resume: (id: string) => ipcRenderer.invoke('scheduledTasks:resume', { id }),
-  delete: (id: string) => ipcRenderer.invoke('scheduledTasks:delete', { id }),
-  runNow: (id: string) => ipcRenderer.invoke('scheduledTasks:runNow', { id }),
-  listOccurrences: (scheduleId: string, limit?: number) =>
-    ipcRenderer.invoke('scheduledTasks:listOccurrences', { scheduleId, limit }),
-  onChanged: (callback: (scheduleId?: string) => void) => {
-    const handler = (_: IpcRendererEvent, scheduleId?: unknown): void => {
-      callback(typeof scheduleId === 'string' ? scheduleId : undefined)
-    }
-    ipcRenderer.on('scheduledTasks:changed', handler)
-    return () => ipcRenderer.removeListener('scheduledTasks:changed', handler)
-  },
-}
-
 // Memory API
 const memoryAPI = {
   query: (filters: unknown) => ipcRenderer.invoke('agent:memory:query', filters),
@@ -460,8 +368,6 @@ const memoryCardsAPI = {
   list: () => ipcRenderer.invoke('agent:beliefCards:list'),
   transition: (payload: { relPath: string; action: 'approve' | 'reject' }) =>
     ipcRenderer.invoke('agent:beliefCards:transition', payload),
-  setKnowledgeSystemEnabled: (enabled: boolean) =>
-    ipcRenderer.invoke('agent:beliefCards:setKnowledgeSystemEnabled', { enabled }),
 }
 
 // P0-4 (2026-07-02 P0 visibility batch) — read-only run quality stats.
@@ -539,8 +445,6 @@ const browserAPI = {
   // Agent-browser supervision: one-step takeover + task listing.
   getAgentSupervisionState: () => ipcRenderer.invoke('browser:getAgentSupervisionState'),
   requestAgentInterruption: () => ipcRenderer.invoke('browser:requestAgentInterruption'),
-  resumeTargetClaim: (request: BrowserTargetResumeRequest) =>
-    ipcRenderer.invoke('browser:resumeTargetClaim', request),
   onAgentControlChanged: (callback: (data: { state: string; takeoverError?: string | null }) => void) => {
     const handler = (_event: unknown, data: { state: string; takeoverError?: string | null }) => callback(data)
     ipcRenderer.on('browser:agentControlChanged', handler)
@@ -1215,6 +1119,9 @@ const skillsAPI = {
 // App / Auto-update API
 const appAPI = {
   browserLiveProofHandshake: (nonce: string) => ipcRenderer.invoke('app:browserLiveProofHandshake', nonce),
+  browserLiveProofInspectFrozenCall: (payload: unknown) =>
+    ipcRenderer.invoke('app:browserLiveProofInspectFrozenCall', payload),
+  browserLiveProofQuit: (nonce: string) => ipcRenderer.invoke('app:browserLiveProofQuit', nonce),
   checkUpdate: () => ipcRenderer.invoke('app:check-update'),
   installUpdate: () => ipcRenderer.invoke('app:install-update'),
   captureWindow: () => ipcRenderer.invoke('app:captureWindow'),
@@ -1324,12 +1231,6 @@ const settingsAPI = {
   get: (key: string) => ipcRenderer.invoke('settings:get', key),
   set: (key: string, value: string) => ipcRenderer.invoke('settings:set', { key, value }),
   getAll: () => ipcRenderer.invoke('settings:getAll'),
-  getAgentAutoNarrationContinuation: () => ipcRenderer.invoke('settings:getAgentAutoNarrationContinuation'),
-  setAgentAutoNarrationContinuation: (enabled: boolean) =>
-    ipcRenderer.invoke('settings:setAgentAutoNarrationContinuation', { enabled }),
-  getAgentSessionPrerouteMode: () => ipcRenderer.invoke('settings:getAgentSessionPrerouteMode'),
-  setAgentSessionPrerouteMode: (mode: 'off' | 'suggest' | 'auto') =>
-    ipcRenderer.invoke('settings:setAgentSessionPrerouteMode', { mode }),
   getAIConfig: () => ipcRenderer.invoke('settings:getAIConfig'),
   setAIConfig: (config: unknown) => ipcRenderer.invoke('settings:setAIConfig', config),
   getAIWorkspace: () => ipcRenderer.invoke('settings:getAIWorkspace'),
@@ -1443,14 +1344,14 @@ const agentPersonalityAPI = {
     personalityText: string
     tone?: string
     metaJson?: Record<string, unknown>
-  }) => invokeAndNotifyAgentRegistry('agentPersonality:create', personality),
+  }) => ipcRenderer.invoke('agentPersonality:create', personality),
   update: (agentName: string, updates: {
     displayName?: string
     personalityText?: string
     tone?: string
     metaJson?: Record<string, unknown>
-  }) => invokeAndNotifyAgentRegistry('agentPersonality:update', agentName, updates),
-  delete: (agentName: string) => invokeAndNotifyAgentRegistry('agentPersonality:delete', agentName),
+  }) => ipcRenderer.invoke('agentPersonality:update', agentName, updates),
+  delete: (agentName: string) => ipcRenderer.invoke('agentPersonality:delete', agentName),
 }
 
 const toolsAPI = {
@@ -1484,6 +1385,9 @@ interface AgentInteractionCardEvent {
   cardId: string
   sessionId: string | null
   conversationId: string | null
+  readyRunId?: string | null
+  aliasGeneration?: number | null
+  messageVisibilityEpoch?: number | null
   questions: AgentInteractionQuestionPayload[]
   askedAt: number
 }
@@ -1518,7 +1422,6 @@ const mcpAPI = {
 
 contextBridge.exposeInMainWorld('electronAPI', {
   agent: agentAPI,
-  scheduledTasks: scheduledTasksAPI,
   memory: memoryAPI,
   memoryCards: memoryCardsAPI,
   runQuality: runQualityAPI,
@@ -1558,7 +1461,6 @@ declare global {
   interface Window {
     electronAPI: {
       agent: typeof agentAPI
-      scheduledTasks: typeof scheduledTasksAPI
       mcp: typeof mcpAPI
       memory: typeof memoryAPI
       memoryCards: typeof memoryCardsAPI

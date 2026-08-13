@@ -5,14 +5,12 @@ import type {
   AgentArtifact,
   AgentMessage,
   ChatAttachment,
-  ConversationScope,
-  ScopeRunMemoryCapture,
-  ScopeRunSkillProgress,
+  ConversationScope, ScopeRunSkillProgress,
   ScopeRunState,
   ScopeRunTaskContinuation,
   ScopeRunTaskStep,
   ScopeRunWaitingFor,
-  ToolTraceEvent,
+  ToolTraceEvent
 } from './types'
 
 export type SendMessageResultLike = SendMessageResult
@@ -43,7 +41,9 @@ export type StoreState = {
   composerLocked: boolean
   streamingMessageId: string | null
   streamingRequestId: string | null
-  sendMessage: (content: string) => Promise<SendMessageResultLike>
+  sendMessage: (content: string, options?: {
+    codexExternalReadSlice?: Record<string, unknown>
+  }) => Promise<SendMessageResultLike>
   setInputValue: (value: string, options?: { preserveContinuationIntent?: boolean }) => void
   addAttachments?: (files: ChatAttachment[]) => void
   clearAttachments?: () => void
@@ -203,8 +203,10 @@ export interface AgentPanelSubmitOptions {
   attachments?: AgentPanelTestAttachmentInput[]
   expectedToolNames?: string[]
   forbiddenToolNames?: string[]
+  requireAssistantMessage?: boolean
   allowStoreFallback?: boolean
   awaitStoreSend?: boolean
+  codexExternalReadSlice?: Record<string, unknown>
 }
 
 export interface AgentPanelSubmitResult {
@@ -272,6 +274,17 @@ export interface AgentPanelTestHarness {
     id: string
     summary: AgentPanelSessionSummary
     snapshot: AgentPanelSnapshot
+    error?: string
+  }>
+  setDocumentFixture: (input: {
+    title: string
+    content: string
+    tabId?: string | null
+  }) => Promise<{
+    ok: boolean
+    tabId?: string
+    title?: string
+    contentLength?: number
     error?: string
   }>
   events: () => AgentPanelHarnessEvent[]

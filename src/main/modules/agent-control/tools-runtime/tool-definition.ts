@@ -71,6 +71,9 @@ export interface ToolDefinition {
   executionTimeoutMs?: number
   executionVisibility: ToolExecutionVisibility
   requiresExplicitAllowlist?: boolean
+  /** Host-only admission bit. It is recomputed from live runtime state and is
+   * intentionally excluded from the persisted/provider tool surface. */
+  codexExecutionSafe?: boolean
   resultShape: ToolResultShape
 }
 

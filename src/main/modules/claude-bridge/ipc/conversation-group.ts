@@ -1,10 +1,11 @@
 // Stage V V2.1e — ConversationGroup channel group.
 //
-// Bundles the 7 read/cache channels that expose conversation-scope state + attachment
+// Bundles the read/write/cache channels that expose conversation-scope state + attachment
 // surface to the renderer:
 //
 //   agent:listConversationScopes        (list scopes, optionally filtered by agent)
 //   agent:listScopeRuns                 (list active/completed scope-runs)
+//   agent:readCodexLifecycleSnapshot    (durable Codex operation projection)
 //   agent:getConversationScopeMessages  (full chat_messages stream for a scope)
 //   agent:listScopeAttachments          (filesystem-verified attachment rows)
 //   agent:getScopeAttachment            (one attachment by scope + attachmentId)
@@ -15,7 +16,7 @@
 // move — semantics must be byte-for-byte identical so the V5 IPC contract
 // gate stays green and downstream renderer flows do not notice the refactor).
 //
-// All seven channels live in one group because they share:
+// All eight channels live in one group because they share:
 //   • the same domain concept (conversation-scope reads + the attachment
 //     resource layer that hangs off a scope)
 //   • the same dispose lifecycle (renderer boots them together when opening
@@ -31,6 +32,12 @@
 // reserved for true singletons; mixed/bound surfaces stay on the per-group
 // interface where they belong.
 import type { IpcMain } from 'electron'
+import { parseLifecycleRequest, type LifecycleRequest } from '../../../../shared/ipc-contracts/agent-runtime'
+import type { LifecycleOperationProjection } from '../../../../shared/ipc-contracts/agent-lifecycle-snapshot'
+import {
+  parseActionAuthorizationMode,
+  type ActionAuthorizationMode,
+} from '../../../../shared/action-authorization-mode'
 import type {
   ConversationAttachment,
   ConversationScope,
@@ -113,11 +120,17 @@ export interface ConversationGroupDeps {
     statuses?: Array<ScopeRunEventPayload['phase']>
     limit?: number
   }): ScopeRunSummary[]
+  readCodexLifecycleSnapshot(request: LifecycleRequest): LifecycleOperationProjection
   /**
    * Bound `runtime.getConversationScopeMessages` — sync, returns the full
    * chat_messages stream for the scope.
    */
   getConversationScopeMessages(scopeId: string): ConversationScopeMessage[]
+  setActionAuthorizationMode(
+    scopeId: string,
+    mode: ActionAuthorizationMode,
+    expectedMessageVisibilityEpoch: number,
+  ): ConversationScope
   /**
    * Bound `runtime.listScopeAttachments` — sync, returns attachment rows
    * that still exist on disk (the runtime filters via `existsSync`).
@@ -150,7 +163,9 @@ export interface ConversationGroupDeps {
 const CHANNELS = [
   'agent:listConversationScopes',
   'agent:listScopeRuns',
+  'agent:readCodexLifecycleSnapshot',
   'agent:getConversationScopeMessages',
+  'agent:setActionAuthorizationMode',
   'agent:listScopeAttachments',
   'agent:getScopeAttachment',
   'agent:clearRemoteAttachmentCache',
@@ -200,9 +215,55 @@ export const conversationGroup: IpcChannelGroup<ConversationGroupDeps> = {
       }
     })
 
+    ipcMain.handle('agent:readCodexLifecycleSnapshot', (_, payload: unknown): IPCResponse => {
+      try {
+        return {
+          success: true,
+          data: deps.readCodexLifecycleSnapshot(parseLifecycleRequest(payload)),
+        }
+      } catch (error) {
+        return { success: false, error: error instanceof Error ? error.message : String(error) }
+      }
+    })
+
     ipcMain.handle('agent:getConversationScopeMessages', (_, payload: { scopeId: string }): IPCResponse => {
       try {
         return { success: true, data: deps.getConversationScopeMessages(payload.scopeId) }
+      } catch (error) {
+        return { success: false, error: error instanceof Error ? error.message : String(error) }
+      }
+    })
+
+    ipcMain.handle('agent:setActionAuthorizationMode', (_, payload?: {
+      scopeId?: unknown
+      mode?: unknown
+      expectedMessageVisibilityEpoch?: unknown
+    }): IPCResponse => {
+      try {
+        const scopeId = typeof payload?.scopeId === 'string' ? payload.scopeId.trim() : ''
+        if (!scopeId) return { success: false, error: 'action_authorization_scope_invalid' }
+        const mode = parseActionAuthorizationMode(payload?.mode)
+        if (mode !== payload?.mode) {
+          return { success: false, error: 'action_authorization_mode_invalid' }
+        }
+        const expectedMessageVisibilityEpoch = payload?.expectedMessageVisibilityEpoch
+        if (!Number.isSafeInteger(expectedMessageVisibilityEpoch)
+          || Number(expectedMessageVisibilityEpoch) < 0) {
+          return { success: false, error: 'action_authorization_scope_identity_invalid' }
+        }
+        const updated = deps.setActionAuthorizationMode(
+          scopeId,
+          mode,
+          Number(expectedMessageVisibilityEpoch),
+        )
+        return {
+          success: true,
+          data: {
+            scopeId: updated.id,
+            mode,
+            messageVisibilityEpoch: Number(expectedMessageVisibilityEpoch),
+          },
+        }
       } catch (error) {
         return { success: false, error: error instanceof Error ? error.message : String(error) }
       }

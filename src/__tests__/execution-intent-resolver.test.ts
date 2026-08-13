@@ -223,7 +223,7 @@ test('buildExecutionToolState keeps rss and feishu tools available only when use
 
 test('local Feishu CLI intent does not request the sidecar-backed channel_feishu surface', () => {
   const envelope = buildRequestEnvelope({
-    userText: '用飞书 CLI 查一下我这周的会话记录',
+    userText: '用飞书 CLI 读取并更新这份文档',
   })
   const state = buildExecutionToolState({
     supportsToolCalls: true,
@@ -241,16 +241,80 @@ test('local Feishu CLI intent does not request the sidecar-backed channel_feishu
     documentWidgetProfile: null,
     browserDecisionMode: 'free_tool_loop',
     capabilityProfile: 'local_chat',
-    feishuConnected: false,
+    feishuConnected: true,
   })
 
+  assert.equal(state.capabilityResolution.visibleCapabilityGroupIds.includes('channel_feishu'), false)
   assert.equal(state.capabilityResolution.requestedButSuppressed.some(
     (conflict) => conflict.groupId === 'channel_feishu',
   ), false)
+
+  const negativeText = '不要用飞书 CLI，直接读取这份飞书文档'
+  const negativeEnvelope = buildRequestEnvelope({ userText: negativeText })
+  const negativeState = buildExecutionToolState({
+    supportsToolCalls: true,
+    hasVideoInputs: false,
+    hasIncomingVideo: false,
+    keepToolsWithVideo: false,
+    preferredSkillToolNames: null,
+    contextualUserInput: negativeText,
+    userInstructionText: negativeText,
+    intentClassification: classifyIntent(negativeEnvelope),
+    hasDocumentEnvironment: false,
+    hasWidgetTargetContext: false,
+    explicitWidgetCreateIntent: false,
+    documentWidgetTaskKind: null,
+    documentWidgetProfile: null,
+    browserDecisionMode: 'free_tool_loop',
+    capabilityProfile: 'local_chat',
+    feishuConnected: true,
+  })
+  assert.equal(negativeState.capabilityResolution.visibleCapabilityGroupIds.includes('channel_feishu'), true)
+
+  for (const mentionOnlyText of [
+    'Read the Feishu document mentioning lark-cli.',
+    "Summarize the Feishu document titled 'lark-cli installation guide'.",
+    '总结飞书文档《lark-cli 更新说明》',
+    '阅读标题为“lark-cli 更新文档”的表格',
+    '总结名为“飞书 CLI 登录状态说明”的文档',
+    'not using lark-cli to update the Feishu document',
+    '不是用飞书 CLI 更新文档',
+    "don't run lark-cli to update the Feishu document",
+    'do not execute feishu-cli to update the Feishu document',
+    "I don't want lark-cli to update the Feishu document",
+    '我不是要用飞书 CLI 更新文档',
+    '用飞书 CLI 更新本地文件',
+    'Use lark-cli to read this local file',
+  ]) {
+    const mentionOnlyEnvelope = buildRequestEnvelope({ userText: mentionOnlyText })
+    const mentionOnlyState = buildExecutionToolState({
+      supportsToolCalls: true,
+      hasVideoInputs: false,
+      hasIncomingVideo: false,
+      keepToolsWithVideo: false,
+      preferredSkillToolNames: null,
+      contextualUserInput: mentionOnlyText,
+      userInstructionText: mentionOnlyText,
+      intentClassification: classifyIntent(mentionOnlyEnvelope),
+      hasDocumentEnvironment: false,
+      hasWidgetTargetContext: false,
+      explicitWidgetCreateIntent: false,
+      documentWidgetTaskKind: null,
+      documentWidgetProfile: null,
+      browserDecisionMode: 'free_tool_loop',
+      capabilityProfile: 'local_chat',
+      feishuConnected: true,
+    })
+    assert.equal(
+      mentionOnlyState.capabilityResolution.visibleCapabilityGroupIds.includes('channel_feishu'),
+      true,
+      mentionOnlyText,
+    )
+  }
 })
 
 test('local CLI reads do not expose the install/config command while explicit setup still does', () => {
-  const readText = '用飞书 CLI 查一下我这周的会话记录'
+  const readText = '用飞书 CLI 读取并更新这份文档'
   const readEnvelope = buildRequestEnvelope({ userText: readText })
   const readState = buildExecutionToolState({
     supportsToolCalls: true,
@@ -294,9 +358,67 @@ test('local CLI reads do not expose the install/config command while explicit se
 
   assert.equal(readState.capabilityResolution.visibleCapabilityGroupIds.includes('command_exec'), false)
   assert.equal(setupState.capabilityResolution.visibleCapabilityGroupIds.includes('command_exec'), true)
+
+  const statusText = '请帮我查看飞书 CLI 有没有登录'
+  const statusEnvelope = buildRequestEnvelope({ userText: statusText })
+  const statusState = buildExecutionToolState({
+    supportsToolCalls: true,
+    hasVideoInputs: false,
+    hasIncomingVideo: false,
+    keepToolsWithVideo: false,
+    preferredSkillToolNames: null,
+    contextualUserInput: statusText,
+    userInstructionText: statusText,
+    intentClassification: classifyIntent(statusEnvelope),
+    hasDocumentEnvironment: false,
+    hasWidgetTargetContext: false,
+    explicitWidgetCreateIntent: false,
+    documentWidgetTaskKind: null,
+    documentWidgetProfile: null,
+    browserDecisionMode: 'free_tool_loop',
+    capabilityProfile: 'local_chat',
+    feishuConnected: true,
+  })
+  assert.equal(statusState.capabilityResolution.visibleCapabilityGroupIds.includes('command_exec'), false)
+  assert.equal(statusState.capabilityResolution.visibleCapabilityGroupIds.includes('channel_feishu'), false)
   assert.equal(hasExplicitSetupCommandIntent('看看飞书 CLI 有没有登录'), false)
+  assert.equal(hasExplicitSetupCommandIntent('请帮我查看飞书 CLI 有没有登录'), false)
   assert.equal(hasExplicitSetupCommandIntent('为什么安装飞书 CLI 会超时'), false)
+  assert.equal(hasExplicitSetupCommandIntent('用飞书 CLI 更新文档'), false)
+  assert.equal(hasExplicitSetupCommandIntent('用飞书 CLI 读取配置文档'), false)
+  assert.equal(hasExplicitSetupCommandIntent('读取《安装配置指南》文档时请用飞书 CLI'), false)
+  assert.equal(hasExplicitSetupCommandIntent('用飞书 CLI 总结《安装配置指南》文档'), false)
+  assert.equal(hasExplicitSetupCommandIntent('总结《飞书 CLI 更新说明》文档'), false)
+  assert.equal(hasExplicitSetupCommandIntent('读取《Lark CLI 更新指南》这份飞书文档'), false)
+  assert.equal(hasExplicitSetupCommandIntent('阅读标题为“lark-cli 更新文档”的表格'), false)
+  assert.equal(hasExplicitSetupCommandIntent('总结名为“飞书 CLI 登录状态说明”的文档'), false)
+  assert.equal(hasExplicitSetupCommandIntent('不要安装飞书 CLI，直接用现有的飞书 CLI 读取文档'), false)
+  assert.equal(hasExplicitSetupCommandIntent('不需要安装飞书 CLI，直接用现有的飞书 CLI 读取文档'), false)
+  assert.equal(hasExplicitSetupCommandIntent('不要再安装飞书 CLI，直接用现有的飞书 CLI 读取文档'), false)
+  assert.equal(hasExplicitSetupCommandIntent('无需再安装飞书 CLI，直接用现有的飞书 CLI 读取文档'), false)
+  assert.equal(hasExplicitSetupCommandIntent('不必安装飞书 CLI，直接用现有的飞书 CLI 读取文档'), false)
+  assert.equal(hasExplicitSetupCommandIntent('没必要安装飞书 CLI，直接用现有的飞书 CLI 读取文档'), false)
+  assert.equal(hasExplicitSetupCommandIntent("don't install lark-cli; use the existing lark-cli to read the document"), false)
+  assert.equal(hasExplicitSetupCommandIntent("I don't need to install lark-cli, use it to edit the document"), false)
+  assert.equal(hasExplicitSetupCommandIntent('No need to install lark-cli; use it to edit the document'), false)
+  assert.equal(hasExplicitSetupCommandIntent('别更新 CLI，直接用飞书 CLI 读取文档'), false)
+  assert.equal(hasExplicitSetupCommandIntent('不要配置命令行，直接用现有的飞书 CLI 读取文档'), false)
+  assert.equal(hasExplicitSetupCommandIntent('不更新飞书 CLI，直接用它读取文档'), false)
+  assert.equal(hasExplicitSetupCommandIntent('不安装飞书 CLI，直接用现有的飞书 CLI 读取文档'), false)
+  assert.equal(hasExplicitSetupCommandIntent('勿配置飞书 CLI，直接读取文档'), false)
+  assert.equal(hasExplicitSetupCommandIntent('不要安装飞书 CLI'), false)
+  assert.equal(hasExplicitSetupCommandIntent('我明确要求不要在这次任务中使用任何本地飞书 CLI，直接读取飞书文档'), false)
+  assert.equal(hasExplicitSetupCommandIntent('Feishu CLI 在这个任务里无论如何都不要用；直接读取文档'), false)
+  assert.equal(hasExplicitSetupCommandIntent('不要使用 lark-cli；请安装 npm 包 foo'), true)
+  assert.equal(hasExplicitSetupCommandIntent("Don't use lark-cli, install ffmpeg instead"), true)
   assert.equal(hasExplicitSetupCommandIntent('安装飞书 CLI'), true)
+  assert.equal(hasExplicitSetupCommandIntent('给飞书 CLI 配置文档权限'), true)
+  assert.equal(hasExplicitSetupCommandIntent('帮我安装飞书 CLI，然后读取文档'), true)
+  assert.equal(hasExplicitSetupCommandIntent('帮我更新飞书 CLI，再编辑文档'), true)
+  assert.equal(hasExplicitSetupCommandIntent('用飞书 CLI 读取文档，然后更新 CLI'), true)
+  assert.equal(hasExplicitSetupCommandIntent('用飞书 CLI 更新这个 CLI'), true)
+  assert.equal(hasExplicitSetupCommandIntent('先读取安装说明文档并安装飞书 CLI'), true)
+  assert.equal(hasExplicitSetupCommandIntent('帮我安装最新版且适合当前 Apple Silicon Mac 的飞书 CLI，然后读取文档'), true)
   assert.equal(hasExplicitSetupCommandIntent('安装失败了，帮我修复飞书 CLI'), true)
 })
 

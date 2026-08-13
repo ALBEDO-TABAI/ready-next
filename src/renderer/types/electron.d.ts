@@ -13,18 +13,22 @@ import type {
 } from '../../shared/browser-privacy'
 import type { NativeContextMenuRequest, NativeContextMenuResponse } from '../../shared/native-context-menu'
 import type { RSSAutoRefreshSnapshot } from '../../shared/rss-auto-refresh'
-import type { ScheduledTasksAPI } from '../../shared/scheduled-tasks'
 import type { CapabilityRuntimeSnapshot } from '../../shared/ai-capability-runtime'
 import type { RendererAgentMetricName } from '../../shared/renderer-agent-metrics'
 import type { CanonicalAssistantMessage } from '../../shared/ipc-contracts/canonical-message'
 import type {
+  CreateSessionRequest,
   CreateSessionResult,
   IngressAdmittedEvent,
   LifecycleRequest,
   LifecycleResult,
+  ProductLifecycleRequest,
+  StopLifecycleRequest,
   SendScopedRequest,
   SendScopedResponse,
 } from '../../shared/ipc-contracts/agent-runtime'
+import type { LifecycleOperationProjection } from '../../shared/ipc-contracts/agent-lifecycle-snapshot'
+import type { AgentRuntimeReadinessSnapshot } from '../../shared/ipc-contracts/agent-runtime-readiness'
 import type { RendererStateFlushOutcome } from '../../shared/renderer-state-flush'
 import type { ContextUsageSnapshot } from '../../shared/context-usage-types'
 import type { ModelPackDownloadUpdate, ModelPackId, ModelPackSelfTestReport, ModelPackStatus, ModelSource } from '../../shared/model-pack-types'
@@ -47,11 +51,8 @@ import type {
 } from '../../shared/pet'
 import type {
   RSSBenchmarkResultData,
-  RSSDiagnosticsData,
-  RSSHubChromiumStatusData,
-  RSSHubRuntimeStatusData,
-  RSSStatusData,
-  RSSUpdateTaskStatusData
+  RSSDiagnosticsData, RSSHubRuntimeStatusData,
+  RSSStatusData
 } from '../modules/rss/types'
 import type { ThemeOption, ResolvedTheme, ThemeSkin } from '../stores/useTheme'
 import type { TaskType } from '../../shared/task-types'
@@ -116,16 +117,10 @@ import type {
   AgentSystemStudioConfirmContentEditInput,
   AgentSystemStudioContentEditProposal,
   AgentSystemStudioRejectContentEditInput,
-  AgentSystemStudioRoutingSimulation,
   AgentSystemStudioSnapshot,
   AgentSystemStudioStageContentEditInput,
 } from '../../shared/agent-system-studio'
-import type {
-  SpecialistAgentBlueprint,
-  SpecialistBlueprintAdmissionVerdict,
-  SpecialistBlueprintStatus,
-} from '../../shared/agent-specialist-blueprint'
-import type { SpecialistBlueprintClarificationContract } from '../../shared/agent-specialist-blueprint-clarification'
+import type { SpecialistAgentBlueprint } from '../../shared/agent-specialist-blueprint'
 
 // Type declarations for window.electronAPI exposed by preload
 
@@ -178,65 +173,6 @@ interface AgentRegistryRecordData {
   createdAt: string
 }
 
-interface AgentDerivationMigrationCandidateData {
-  relPath: string
-  title: string
-  description: string
-}
-
-interface AgentDerivationCandidateData {
-  candidateRelPath: string
-  title: string
-  description: string
-  bodyPreview: string
-  evidenceDates: string[]
-  defaultSpecialistId: string
-  defaultName: string
-  defaultCharter: string
-  defaultSeedRulesText: string
-  defaultRoutingTriggers: string[]
-  migrationCandidates: AgentDerivationMigrationCandidateData[]
-}
-
-interface AgentDerivationConfirmData {
-  blueprint: SpecialistAgentBlueprint
-  blueprintId: string
-  specialistId: string
-  status: SpecialistBlueprintStatus
-  verdict: SpecialistBlueprintAdmissionVerdict
-  missing: string[]
-  clarification?: SpecialistBlueprintClarificationContract
-  createdAgent: false
-  routingActivated: false
-  migratedCards: []
-}
-
-interface SpecialistAgentCreateResultData {
-  agent: AgentRegistryRecordData
-  rulesRelPath: string
-  foundationRelPath?: string
-  seedRelPaths: string[]
-  routingCardRelPath: string
-  migratedCards: Array<{ from: string; to: string }>
-}
-
-interface SpecialistBlueprintAdmissionData {
-  blueprint: SpecialistAgentBlueprint
-  verdict: SpecialistBlueprintAdmissionVerdict
-  missing: string[]
-}
-
-interface SpecialistBlueprintConfirmationData {
-  blueprint: SpecialistAgentBlueprint
-  tokenId: string
-  contentHash: string
-}
-
-interface SpecialistBlueprintConfirmCreateData {
-  blueprint: SpecialistAgentBlueprint
-  result: SpecialistAgentCreateResultData
-}
-
 interface AgentRegistryKnowledgeCardData {
   relPath: string
   title: string
@@ -285,10 +221,6 @@ interface AgentRuntimeStatusData {
     errors: number
     byType: Record<string, number>
   }
-  schedules: {
-    total: number
-    enabled: number
-  }
   heartbeat: AgentHeartbeatSnapshot
 }
 
@@ -298,6 +230,8 @@ type ConversationSourceKind = 'local' | 'channel'
 
 interface ConversationScopeData {
   id: string
+  aliasGeneration: number | null
+  messageVisibilityEpoch: number
   agent: string
   activeAgentId: string
   handoffGeneration: number
@@ -427,6 +361,7 @@ interface ScopeRunContextBudgetData {
 
 type ScopeRunTaskStepStatusData = 'pending' | 'running' | 'blocked' | 'done' | 'error'
 type ScopeRunWaitingForData = 'input' | 'confirmation' | 'agent_result' | 'background' | 'verification' | 'none'
+type ActionAuthorizationModeData = 'ask' | 'auto' | 'full'
 type ScopeRunResumableActionData = 'continue' | 'retry' | 'open_artifact' | 'cancel' | 'none'
 
 interface ScopeRunTaskStepData {
@@ -490,27 +425,6 @@ interface ScopeRunSkillHandoffData {
   taskPath: string | null
   outputPath: string | null
   updatedAt: string | null
-}
-
-interface ContinuationIntentData {
-  taskId: string
-  executionId?: string
-  stepId?: string
-  blockedReason?: string
-  responseText?: string
-  todoId?: string
-  todoTitle?: string
-  resumeKind?: 'snapshot' | 'paused' | 'done_residual'
-  pauseReason?: string
-  childRunId?: string
-  detachedTaskId?: string
-  taskRunId?: string
-  jobId?: string
-  skillId?: string
-  action?: string
-  runStatePath?: string
-  outputDir?: string
-  progressFingerprint?: string
 }
 
 interface ScopeRunMemoryCaptureItemData {
@@ -591,28 +505,7 @@ interface ScopeRunExecutionDiagnosticsData {
 
 type TaskTypeData = TaskType
 
-type TaskInteractionStateData =
-  | 'running'
-  | 'awaiting_clarification'
-  | 'awaiting_confirmation'
-  | 'human_takeover'
-  | 'suspended'
-  | 'resuming'
-  | 'check_in_pending'
-
 type TaskProjectionStatusData = 'queued' | 'running' | 'recoverable_paused' | 'budget_paused' | 'blocked' | 'completed' | 'failed' | 'killed'
-
-interface TaskBudgetData {
-  taskType: TaskTypeData
-  maxIterations: number
-  maxToolCalls: number
-  maxParallelToolGroups: number
-  stepBudget?: {
-    stepId?: string | null
-    maxIterations: number
-    remainingIterations?: number
-  } | null
-}
 
 interface RecoveryRecordData {
   kind:
@@ -761,6 +654,8 @@ interface ReferenceSkillHintData {
 interface DetachedSkillTaskData {
   id: string
   scopeId?: string | null
+  ownerRunId?: string | null
+  messageVisibilityEpoch?: number
   sessionId?: string | null
   agent?: string | null
   skillId: string
@@ -782,6 +677,7 @@ interface ActiveChildRunSummaryData {
   skillId: string
   sessionId: string | null
   scopeId: string | null
+  messageVisibilityEpoch: number
   status: string
   startedAt: string
   outputDir: string
@@ -820,6 +716,16 @@ type ScopeRunTerminalReasonData =
 interface ScopeRunEventData {
   type: 'started' | 'updated' | 'finished'
   scopeId: string
+  /** Exact product alias identity; renderer drops events that omit or drift. */
+  aliasGeneration: number
+  /** Exact visible conversation epoch; renderer drops stale events after reset. */
+  messageVisibilityEpoch: number
+  /** Durable owner used by Main to prove this event is still current. */
+  visibilityOwnerKind: 'product_alias' | 'context_background'
+  visibilityOwnerLedger?: {
+    kind: 'run_meta' | 'skill_task_run' | 'task_projection'
+    id: string
+  }
   /**
    * Stage V V3.2 — top-level mirror of `scopeId` so multi-session
    * renderer wiring routes per-session without aliasing through scopeId.
@@ -912,80 +818,34 @@ interface ElectronAgentAPI {
    *  build (the callers use optional-chaining). Declared optional so callers
    *  can `window.electronAPI?.agent?.metric?.(...)` without a TS error. */
   metric?: (payload: { name: string; payload?: Record<string, unknown> }) => void
-  createSession: () => Promise<CreateSessionResult>
-  resetSession: (request: LifecycleRequest) => Promise<LifecycleResult>
-  sessionPrerouteEvaluate: (firstMessage: string) => Promise<{
-    success: boolean
-    data?: {
-      decision:
-        | { tier: 'state'; targetAgentId: string; taskId: string | null }
-        | { tier: 'precedent'; targetAgentId: string; cardRelPath: string; matchedKeywords: string[] }
-        | { tier: 'fallback'; targetAgentId: string; reason: string; conflicts?: Array<{ cardRelPath: string; targetAgentId: string }> }
-      effect: 'none' | 'suggest' | 'route'
-    }
-    error?: string
-  }>
+  createSession: (request: CreateSessionRequest) => Promise<CreateSessionResult>
+  resetSession: (request: ProductLifecycleRequest) => Promise<LifecycleResult>
   // Stage U PR U1.2 — removed `orchestrate / getStatus / getAll / getDiagnostics`
   // legacy AgentManager wrappers. Use `getRuntimeStatus` / `getCapabilityRuntimeSnapshot`.
-  kill: (request: LifecycleRequest) => Promise<LifecycleResult>
-  closeSession: (request: LifecycleRequest) => Promise<LifecycleResult>
+  kill: (request: StopLifecycleRequest) => Promise<LifecycleResult>
+  closeSession: (request: ProductLifecycleRequest) => Promise<LifecycleResult>
   compactSession: (request: LifecycleRequest) => Promise<LifecycleResult>
+  readRuntimeReady: () => Promise<AgentRuntimeReadinessSnapshot>
+  onRuntimeReady: (callback: (snapshot: AgentRuntimeReadinessSnapshot) => void) => () => void
   getRuntimeStatus: () => Promise<IPCResponse<AgentRuntimeStatusData>>
   getCapabilityRuntimeSnapshot: (config?: unknown) => Promise<IPCResponse<CapabilityRuntimeSnapshotData>>
   listChannels: () => Promise<IPCResponse<AgentChannelConfigData[]>>
   listRegistry: () => Promise<IPCResponse<AgentRegistryRecordData[]>>
   listRegistryKnowledge: (id: string) => Promise<IPCResponse<AgentRegistryKnowledgeCardData[]>>
   getSystemStudioSnapshot: () => Promise<IPCResponse<AgentSystemStudioSnapshot>>
-  simulateSystemStudioRouting: (firstMessage: string) => Promise<IPCResponse<AgentSystemStudioRoutingSimulation>>
   stageSystemStudioContentEdit: (payload: AgentSystemStudioStageContentEditInput) => Promise<IPCResponse<AgentSystemStudioContentEditProposal>>
   confirmSystemStudioContentEdit: (proposalId: AgentSystemStudioConfirmContentEditInput['proposalId']) => Promise<IPCResponse<AgentSystemStudioContentEditProposal>>
   rejectSystemStudioContentEdit: (proposalId: AgentSystemStudioRejectContentEditInput['proposalId']) => Promise<IPCResponse<AgentSystemStudioContentEditProposal>>
   listSpecialistBlueprints: () => Promise<IPCResponse<SpecialistAgentBlueprint[]>>
-  upsertSpecialistBlueprintDraft: (blueprint: unknown) => Promise<IPCResponse<SpecialistAgentBlueprint>>
-  runSpecialistBlueprintAdmission: (payload: {
-    blueprint?: unknown
-    blueprintId?: string
-  }) => Promise<IPCResponse<SpecialistBlueprintAdmissionData>>
-  requestSpecialistBlueprintConfirmation: (payload: {
-    blueprintId: string
-    sessionId: string
-    runId?: string | null
-    unverifiedSemanticReviewAck?: { kind: 'unverified_semantic_review'; contentHash: string }
-  }) => Promise<IPCResponse<SpecialistBlueprintConfirmationData>>
-	  confirmSpecialistDraftCreate: (payload: {
-	    blueprintId: string
-	    sessionId: string
-	    runId?: string | null
-	    tokenId: string
-	    migrateCardRelPaths?: string[]
-	  }) => Promise<IPCResponse<SpecialistBlueprintConfirmCreateData>>
-  rejectSpecialistBlueprint: (blueprintId: string) => Promise<IPCResponse<SpecialistAgentBlueprint>>
-  expireSpecialistBlueprint: (blueprintId: string) => Promise<IPCResponse<SpecialistAgentBlueprint>>
-  updateRegistryStatus: (payload: {
-    id: string
-    status: 'active' | 'disabled' | 'retired' | 'merged'
-    mergedIntoAgentId?: string | null
-    migrateCardRelPaths?: string[]
-  }) => Promise<IPCResponse<AgentRegistryRecordData>>
-  deleteRegistryAgent: (id: string) => Promise<IPCResponse<AgentRegistryRecordData>>
-  listDerivationCandidates: () => Promise<IPCResponse<AgentDerivationCandidateData[]>>
-  confirmDerivation: (payload: {
-    candidateRelPath: string
-    specialistId: string
-    name: string
-    charter?: string | null
-    seedRulesText: string
-    routingTriggers: string[]
-    activateRouting?: boolean
-    migrateCardRelPaths?: string[]
-  }) => Promise<IPCResponse<AgentDerivationConfirmData>>
-  rejectDerivation: (candidateRelPath: string) => Promise<IPCResponse<AgentDerivationCandidateData[]>>
   listConversationScopes: (agent?: string) => Promise<IPCResponse<ConversationScopeData[]>>
   listScopeRuns: (payload?: {
     channelKey?: string
     statuses?: string[]
     limit?: number
   }) => Promise<IPCResponse<ScopeRunSummaryData[]>>
+  readCodexLifecycleSnapshot: (
+    request: LifecycleRequest,
+  ) => Promise<IPCResponse<LifecycleOperationProjection>>
   listTaskProjections: (scopeId: string) => Promise<IPCResponse<TaskProjectionRecordData[]>>
   getTaskProjection: (taskId: string) => Promise<IPCResponse<TaskProjectionRecordData>>
   searchSessionRecall: (payload?: {
@@ -1014,14 +874,6 @@ interface ElectronAgentAPI {
   getReferenceSkillHint: (
     scopeId: string
   ) => Promise<IPCResponse<ReferenceSkillHintData | null>>
-  startDetachedSkillAction: (payload: {
-    scopeId?: string
-    sessionId?: string
-    agent?: string
-    skillId: string
-    action: string
-    params?: Record<string, unknown>
-  }) => Promise<IPCResponse<DetachedSkillTaskData>>
   inspectDetachedSkillTask: (
     taskId: string,
     scopeId: string
@@ -1039,7 +891,8 @@ interface ElectronAgentAPI {
   ) => Promise<IPCResponse<unknown>>
   attachSessionRecallContext: (
     currentScopeId: string,
-    conversationId: string
+    conversationId: string,
+    expectedMessageVisibilityEpoch: number,
   ) => Promise<
     IPCResponse<{
       scope: ConversationScopeData
@@ -1048,7 +901,8 @@ interface ElectronAgentAPI {
   >
   detachSessionRecallContext: (
     currentScopeId: string,
-    conversationId: string
+    conversationId: string,
+    expectedMessageVisibilityEpoch: number,
   ) => Promise<
     IPCResponse<{
       scope: ConversationScopeData
@@ -1061,6 +915,15 @@ interface ElectronAgentAPI {
   getConversationScopeMessages: (
     scopeId: string
   ) => Promise<IPCResponse<ConversationScopeMessageData[]>>
+  setActionAuthorizationMode: (
+    scopeId: string,
+    mode: ActionAuthorizationModeData,
+    expectedMessageVisibilityEpoch: number
+  ) => Promise<IPCResponse<{
+    scopeId: string
+    mode: ActionAuthorizationModeData
+    messageVisibilityEpoch: number
+  }>>
   listScopeAttachments: (scopeId?: string) => Promise<IPCResponse<ConversationAttachmentData[]>>
   getScopeAttachment: (
     scopeId: string,
@@ -1086,29 +949,6 @@ interface ElectronAgentAPI {
     state?: 'active' | 'stale' | 'not_found' | 'paused_user_input'
     activeRunId?: string | null
   }>>
-  suspendRun: (payload: {
-    scopeId: string
-    taskId?: string
-  }) => Promise<{ success: boolean; error?: string | null; errorKind?: string | null }>
-  resumeRun: (payload: {
-    scopeId: string
-    taskId?: string
-    requestId?: string
-    responseText?: string
-    continuationIntent?: ContinuationIntentData | null
-  }) => Promise<{ success: boolean; error?: string | null }>
-  respondToInteraction: (payload: {
-    scopeId: string
-    taskId?: string
-    requestId?: string
-    responseText: string
-    confirmed?: boolean
-    continuationIntent?: ContinuationIntentData | null
-  }) => Promise<{ success: boolean; error?: string | null }>
-  completeHumanTakeover: (payload: {
-    taskId: string
-    takeoverId: string
-  }) => Promise<{ success: boolean; error?: string | null }>
   upsertChannel: (payload: {
     id?: string
     type: ChannelAdapterType
@@ -1455,14 +1295,6 @@ interface ElectronBrowserAPI {
     error?: string
   }>
   requestAgentInterruption: () => Promise<{ state: AgentBrowserControlState; frozen: boolean; takeoverTabId?: string | null; error?: string }>
-  resumeTargetClaim: (request: {
-    parentTaskId: string
-    browserTaskId: string
-    claimId: string
-    oldGeneration: number
-    checkpointId: string
-    wakeNonce: string
-  }) => Promise<{ success: boolean; error?: string; errorKind?: string }>
   onAgentControlChanged: (callback: (data: { state: AgentBrowserControlState; takeoverError?: string | null }) => void) => () => void
   onLeaseChanged: (callback: (data: {
     claims?: BrowserTargetClaimSnapshot[]
@@ -2855,22 +2687,6 @@ interface CalendarDetectedTimeExpression {
 }
 
 // =============================================================================
-// Video API Types
-// =============================================================================
-
-interface ElectronVideoInfo {
-  duration: number
-  width: number
-  height: number
-  codec: string
-  fps: number
-  bitrate: number
-  audioCodec: string | null
-  format: string
-  size: number
-}
-
-// =============================================================================
 // Skills Runtime API Types
 // =============================================================================
 
@@ -3206,11 +3022,23 @@ interface ElectronAppAPI {
     asarPath?: string | null
     asarSha256?: string | null
     sourceManifestDigest?: string
+    appPath?: string
+    runtimeOutputManifestDigest?: string | null
     bootIncarnationId?: string
     userDataPath?: string
     databasePath?: string
     appVersion?: string
   }>
+  browserLiveProofInspectFrozenCall: (payload: unknown) => Promise<{
+    success: boolean
+    error?: string
+    frozenCallId?: string
+    readyRunId?: string | null
+    scopeId?: string | null
+    toolName?: string
+    proof?: Record<string, unknown>
+  }>
+  browserLiveProofQuit: (nonce: string) => Promise<{ success: boolean; error?: string }>
   checkUpdate: () => Promise<{ success: boolean; version?: string | null; error?: string }>
   installUpdate: () => Promise<void>
   captureWindow: () => Promise<{ success: boolean; path?: string; error?: string }>
@@ -3349,10 +3177,6 @@ interface ElectronSettingsAPI {
   get: (key: string) => Promise<{ success: boolean; data?: string | null; error?: string }>
   set: (key: string, value: string) => Promise<{ success: boolean; error?: string }>
   getAll: () => Promise<{ success: boolean; data?: Record<string, string>; error?: string }>
-  getAgentAutoNarrationContinuation: () => Promise<{ success: boolean; data?: boolean; error?: string }>
-  setAgentAutoNarrationContinuation: (enabled: boolean) => Promise<{ success: boolean; error?: string }>
-  getAgentSessionPrerouteMode: () => Promise<{ success: boolean; data?: 'off' | 'suggest' | 'auto'; error?: string }>
-  setAgentSessionPrerouteMode: (mode: 'off' | 'suggest' | 'auto') => Promise<{ success: boolean; error?: string }>
   getAIConfig: () => Promise<{ success: boolean; data?: AIModelConfigData | null; error?: string }>
   setAIConfig: (config: AIModelConfigData) => Promise<{ success: boolean; error?: string }>
   getAIWorkspace: () => Promise<{ success: boolean; data?: AIProviderWorkspaceData; error?: string }>
@@ -3680,24 +3504,12 @@ interface BeliefCardSettingsSummaryData {
   riskSuggestions: number
 }
 
-interface BeliefCardMaintenanceRoundData {
-  lastRunAt: string
-  decision: 'run' | 'skip'
-  reason: string
-  llmCalls: number
-  applied: number
-  rejected: number
-  terminal: string
-}
-
 interface BeliefCardSettingsSnapshotData {
-  knowledgeSystemEnabled: boolean
   cards: BeliefCardSettingsItemData[]
   summary: BeliefCardSettingsSummaryData
   maintenance: {
     lifecycleRunning: boolean
     lastLifecycleMaintenanceAt: string | null
-    llmRound: BeliefCardMaintenanceRoundData | null
   }
 }
 
@@ -3721,7 +3533,6 @@ interface ElectronMemoryCardsAPI {
   list: () => Promise<IPCResponse<BeliefCardSettingsSnapshotData>>
   transition: (payload: { relPath: string; action: 'approve' | 'reject' }) =>
     Promise<IPCResponse<BeliefCardSettingsSnapshotData>>
-  setKnowledgeSystemEnabled: (enabled: boolean) => Promise<IPCResponse<BeliefCardSettingsSnapshotData>>
 }
 
 // P0-4 (2026-07-02 P0 visibility batch) — run quality dashboard payload.
@@ -3780,16 +3591,14 @@ interface ElectronRunFeedbackAPI {
 interface EmergenceCardData {
   id: string
   projectKey?: string
-  type: 'resume' | 'follow_up' | 'crystallize' | 'prepare' | 'harvest' | 'forming'
+  type: 'follow_up' | 'crystallize' | 'prepare' | 'harvest' | 'forming'
   title: string
   evidence: Array<{ fact: string; ref: string }>
   confidence: number
   action: {
     kind:
-      | 'resume_task'
       | 'adjudicate_task'
       | 'supply_input'
-      | 'adopt_candidate'
       | 'review_duplicate'
       | 'open_project'
       | 'open_artifact'
@@ -3868,6 +3677,9 @@ interface AskUserQuestionsCardPushEvent {
   cardId: string
   sessionId: string | null
   conversationId: string | null
+  readyRunId?: string | null
+  aliasGeneration?: number | null
+  messageVisibilityEpoch?: number | null
   questions: AskUserQuestionsCardQuestionPayload[]
   askedAt: number
 }
@@ -3875,6 +3687,9 @@ interface AskUserQuestionsCardPushEvent {
 interface AskUserQuestionsPendingCard {
   cardId: string
   conversationId: string | null
+  readyRunId?: string | null
+  aliasGeneration?: number | null
+  messageVisibilityEpoch?: number | null
   askedAt: number
   questions: AskUserQuestionsCardQuestionPayload[]
 }
@@ -3912,7 +3727,6 @@ interface ElectronTagForgeAPI {
 
 interface ElectronAPI {
   agent: ElectronAgentAPI
-  scheduledTasks: ScheduledTasksAPI
   memory: ElectronMemoryAPI
   memoryCards: ElectronMemoryCardsAPI
   runQuality: ElectronRunQualityAPI
@@ -4001,8 +3815,6 @@ export type {
   RunFeedbackRecordData,
   EmergenceCardData,
   EmergenceFeedEntryData,
-  AgentDerivationCandidateData,
-  AgentDerivationConfirmData,
   AgentRegistryKnowledgeCardData,
   TaskProjectionRecordData,
   RecoveryRecordData,

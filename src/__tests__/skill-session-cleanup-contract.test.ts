@@ -17,5 +17,5 @@ test('Codex lifecycle handlers do not clear product state before authoritative c
   assert.match(ipcHandler, /cleanupSkillSessionState\(undefined, 'Agent runtime shut down'\)/)
   assert.doesNotMatch(ipcHandler, /agent:newSession/)
   assert.doesNotMatch(lifecycleGroup, /cleanupSkillSessionState|cancelSkillSessionPendingInteractions|rejectBySession/)
-  assert.match(lifecycleGroup, /parseLifecycleResult\(await deps\.stopSession\(parseLifecycleRequest\(payload\)\)\)/)
+  assert.match(lifecycleGroup, /const request = parseStopLifecycleRequest\(payload\)[\s\S]*parseLifecycleResult\(await deps\.stopSession\(request\)\)/)
 })

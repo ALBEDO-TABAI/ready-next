@@ -273,8 +273,7 @@ export function migrateAgentKnowledgeCards(
   }
 }
 
-// P5e/C23 legacy dormant derivation path: retained for candidate-era tests only.
-// Production specialist creation must use deriveSpecialistAgentFromBlueprint via agent:specialistBlueprint:confirmCreate.
+// Historical candidate-era materializer. It is not exposed through live IPC or Codex tools.
 export function prepareSpecialistAgentDerivation(
   registry: AgentFactoryRegistry,
   store: BeliefCardStore,
@@ -326,8 +325,7 @@ export function prepareSpecialistAgentDerivation(
   }
 }
 
-// P5e/C23 legacy dormant derivation path: retained for candidate-era tests only.
-// Production specialist creation must use deriveSpecialistAgentFromBlueprint via agent:specialistBlueprint:confirmCreate.
+// Historical candidate-era materializer. It is not exposed through live IPC or Codex tools.
 export function deriveSpecialistAgent(
   registry: AgentFactoryRegistry,
   store: BeliefCardStore,

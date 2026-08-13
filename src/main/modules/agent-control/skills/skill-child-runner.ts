@@ -132,6 +132,9 @@ const PROGRESS_POLL_INTERVAL_MS = 5_000
 export interface StartSkillChildRunParams {
   scopeId: string | null
   sessionId: string | null
+  /** Frozen parent writer identity; scoped Agent launches must provide it. */
+  parentRunId?: string | null
+  messageVisibilityEpoch?: number
   skillId: string
   action: string
   requestedInput: Record<string, unknown>
@@ -214,6 +217,7 @@ interface ActiveRun {
   skillId: string
   action: string
   scopeId: string | null
+  messageVisibilityEpoch: number
   sessionId: string | null
   status: SkillChildRunStatus
   startedAt: string
@@ -246,6 +250,7 @@ interface ChildRunSummary {
   skillId: string
   sessionId: string | null
   scopeId: string | null
+  messageVisibilityEpoch: number
   status: SkillChildRunStatus
   startedAt: string
   outputDir: string
@@ -469,10 +474,13 @@ class SkillChildRunner {
     }
 
     // Persist the child-run row.
+    let frozenMessageVisibilityEpoch = params.scopeId ? params.messageVisibilityEpoch : -1
     try {
-      this.config.repository.createChildRun({
+      const created = this.config.repository.createChildRun({
         childRunId,
         scopeId: params.scopeId,
+        parentRunId: params.parentRunId ?? null,
+        messageVisibilityEpoch: params.messageVisibilityEpoch,
         sessionId: params.sessionId,
         skillId: params.skillId,
         skillName: null,
@@ -486,6 +494,7 @@ class SkillChildRunner {
         status: 'running',
         userRequestVerbatim: params.userRequestVerbatim ?? null,
       })
+      frozenMessageVisibilityEpoch = created.messageVisibilityEpoch
     } catch (error) {
       return makePausedOnLaunchResult({
         skillId: params.skillId,
@@ -512,7 +521,10 @@ class SkillChildRunner {
 
     return this.beginRunLoop({
       childRunId,
-      params,
+      params: {
+        ...params,
+        messageVisibilityEpoch: frozenMessageVisibilityEpoch,
+      },
       launchParams,
       outputDir,
       runStatePath,
@@ -525,7 +537,7 @@ class SkillChildRunner {
     childRunId: string,
     options: ResumeSkillChildRunOptions = {},
   ): Promise<StartSkillChildRunResult> {
-    const record = this.config.repository.get(childRunId)
+    const record = this.config.repository.getCurrentVisible(childRunId)
     if (!record) {
       return makePausedOnLaunchResult({
         skillId: 'unknown',
@@ -758,6 +770,8 @@ class SkillChildRunner {
     const params: StartSkillChildRunParams = {
       scopeId: payload.parentScopeId ?? record.scopeId ?? null,
       sessionId: payload.parentSessionId ?? record.sessionId ?? null,
+      parentRunId: record.runId ?? null,
+      messageVisibilityEpoch: record.messageVisibilityEpoch,
       skillId: payload.skillId,
       action: payload.requestedAction,
       requestedInput: payload.requestedInput,
@@ -809,6 +823,10 @@ class SkillChildRunner {
     reasonOrOptions?: string | CancelSkillChildRunOptions,
   ): Promise<SkillChildCloseEvent> {
     const cancelOptions = normalizeCancelSkillChildRunOptions(reasonOrOptions)
+    const rawRecord = this.tryGetRecord(childRunId)
+    if (rawRecord && !this.tryGetCurrentRecord(childRunId)) {
+      throw new Error('skill_child_run_context_stale')
+    }
     // Compatible with multi-lifecycle resume: if the row was resumed and is
     // active again, this targets the new ActiveRun's controller (active.get
     // returns the resumed entry). The old paused close in `recentCloses` is
@@ -924,9 +942,26 @@ class SkillChildRunner {
 
   private tryGetRecord(childRunId: string): ReturnType<SkillTaskRunRepository['get']> | null {
     try {
-      return this.config.repository.get(childRunId)
+      return this.config.repository.getRaw(childRunId)
     } catch (error) {
       logAgentMetric('skill_child_runner_lookup_error', {
+        childRunId,
+        error: errorMessage(error),
+      })
+      return null
+    }
+  }
+
+  private tryGetCurrentRecord(childRunId: string): ReturnType<SkillTaskRunRepository['get']> | null {
+    try {
+      const repository = this.config.repository as SkillTaskRunRepository & {
+        getCurrentVisible?: (id: string) => ReturnType<SkillTaskRunRepository['get']>
+      }
+      return typeof repository.getCurrentVisible === 'function'
+        ? repository.getCurrentVisible(childRunId)
+        : this.tryGetRecord(childRunId)
+    } catch (error) {
+      logAgentMetric('skill_child_runner_current_lookup_error', {
         childRunId,
         error: errorMessage(error),
       })
@@ -1087,6 +1122,8 @@ class SkillChildRunner {
       const resumeStartParams: StartSkillChildRunParams = {
         scopeId: payload.parentScopeId ?? params.scopeId,
         sessionId: payload.parentSessionId ?? params.sessionId,
+        parentRunId: existing.runId ?? params.parentRunId ?? null,
+        messageVisibilityEpoch: existing.messageVisibilityEpoch,
         skillId: payload.skillId,
         action: payload.requestedAction,
         requestedInput: payload.requestedInput,
@@ -1242,6 +1279,7 @@ class SkillChildRunner {
       skillId: params.params.skillId,
       action: params.params.action,
       scopeId: params.params.scopeId,
+      messageVisibilityEpoch: params.params.messageVisibilityEpoch ?? -1,
       sessionId: params.params.sessionId,
       status: 'running',
       startedAt,
@@ -1878,7 +1916,12 @@ class SkillChildRunner {
       publish({
         type: 'finished',
         scopeId,
+        messageVisibilityEpoch: active.messageVisibilityEpoch,
+        visibilityOwnerKind: 'context_background',
+        visibilityOwnerLedger: { kind: 'skill_task_run', id: active.childRunId },
         agent: 'assistant',
+        ownerAgentId: 'assistant',
+        taskOrigin: 'workflow_child',
         runId: active.childRunId,
         taskId,
         taskProjectionId: taskId,
@@ -2046,6 +2089,7 @@ class SkillChildRunner {
       skillId: active.skillId,
       sessionId: active.sessionId,
       scopeId: active.scopeId,
+      messageVisibilityEpoch: active.messageVisibilityEpoch,
       status: active.status,
       startedAt: active.startedAt,
       outputDir: active.outputDir,
@@ -2064,6 +2108,7 @@ class SkillChildRunner {
       skillId: active.skillId,
       sessionId: active.sessionId,
       scopeId: active.scopeId,
+      messageVisibilityEpoch: active.messageVisibilityEpoch,
       status: close.status,
       startedAt: active.startedAt,
       outputDir: close.outputDir ?? active.outputDir,
@@ -2184,7 +2229,8 @@ class SkillChildRunner {
     const record = args.record
     const payload = args.payload
     const scopeId = payload?.parentScopeId ?? record?.scopeId ?? record?.sessionId ?? null
-    if (!scopeId) return
+    const messageVisibilityEpoch = record?.messageVisibilityEpoch
+    if (!scopeId || typeof messageVisibilityEpoch !== 'number' || !Number.isSafeInteger(messageVisibilityEpoch)) return
     const skillId = payload?.skillId ?? record?.skillId ?? args.close.skillId
     const action = payload?.requestedAction ?? record?.action ?? 'unknown'
     const outputDir = args.close.outputDir ?? payload?.outputDir ?? record?.outputDir ?? ''
@@ -2194,6 +2240,7 @@ class SkillChildRunner {
       skillId,
       action,
       scopeId,
+      messageVisibilityEpoch,
       sessionId: payload?.parentSessionId ?? record?.sessionId ?? null,
       status: args.close.status,
       startedAt: record?.createdAt ?? record?.updatedAt ?? new Date().toISOString(),

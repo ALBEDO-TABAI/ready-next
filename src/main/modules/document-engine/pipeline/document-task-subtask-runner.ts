@@ -160,6 +160,9 @@ export async function runDocumentTaskPlanWithSubtasks(params: {
     await params.publishParentScopeRunEvent?.({
       type: 'updated',
       scopeId: params.scope.id,
+      aliasGeneration: params.scope.aliasGeneration,
+      messageVisibilityEpoch: params.scope.messageVisibilityEpoch,
+      visibilityOwnerKind: 'product_alias',
       agent: params.scope.agent,
       runId: params.parentRunId || undefined,
       taskId: params.parentTaskId,

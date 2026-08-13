@@ -69,6 +69,8 @@ export interface BrowserActionOutcome {
   identity: BrowserActionTargetIdentity
   /** Page identity read back after the transport returned. */
   successorIdentity: BrowserActionTargetIdentity
+  /** Exact tab created or followed by the transport before document identity was available. */
+  postActionTabId?: string
   search?: {
     searchActionId: string
     queryDigest: string

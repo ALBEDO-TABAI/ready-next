@@ -1,354 +1,73 @@
 import { EventEmitter } from 'events'
-import { randomUUID } from 'crypto'
-import { existsSync } from 'fs'
-import { mkdir, readFile, writeFile } from 'fs/promises'
-import { tmpdir } from 'os'
-import { basename, join } from 'path'
 import {
-  Agent,
-  MemorySession,
-  OpenAIProvider,
-  Runner,
-  Usage,
-  tool,
-  type AgentInputItem,
-  type AgentOutputItem,
-  type Model,
-  type ModelProvider,
-  type ModelRequest,
-  type ModelResponse,
-  type RunStreamEvent,
-  type StreamEvent,
-  type Tool as AgentSdkTool,
+  MemorySession, type AgentInputItem
 } from '@openai/agents'
 import type { BrowserController } from '../../browser-engine/ipc-handler'
 import type { SidecarManager } from '../sidecar-manager'
 import type { AgentControlRuntime } from './runtime'
 import type { DomainAdapter } from '../domain-adapters/domain-adapter'
 import type {
-  BudgetWarningLevel,
-  ExecutionTurnResult,
-  RunBudgetSeed,
-  RunBudgetUsage,
-  RunMessage,
-  TaskBudgetRuntime,
-  TaskType,
-  TaskProjectionRecord,
-  TurnTranscriptEvent,
+  ExecutionTurnResult, RunMessage, TaskProjectionRecord
 } from '../contracts/run-contracts'
-import {
-  TARGET_DOCUMENT_ERROR_KINDS,
-  TOOL_ADMISSION_ERROR_KINDS,
-} from '../contracts/error-kinds'
 import type { CheckInRecord } from '../quality/task-adjudicator'
 import type { AbortInitiator } from '../contracts/run-contracts-internal'
-import type { ScopeRunEventPayload } from '../contracts/types'
-import type { TurnTerminalReason } from './turn-frame'
-import type { ContinuationIntent, ContinuationState } from '../contracts/continuation-state'
 import {
   resumeSkillChildRun as defaultResumeSkillChildRun,
   waitForSkillChildRunClose as defaultWaitForSkillChildRunClose,
 } from '../skills/skill-child-runner'
-import {
-  isCompletedChildCloseStatus,
-  isFailedChildCloseStatus,
-  isKilledChildCloseStatus,
-  type SkillChildCloseEvent,
-} from '../skills/skill-child-run-types'
 import type { MultimodalBlock } from '../contracts/run-contracts'
-import {
-  buildTextToolBridgePrompt,
-  buildTextToolResultMessage,
-  parseTextToolBridgeResponse,
-} from '../../claude-bridge/tool-bridge'
-import {
-  hasExplicitDocumentWidgetCreateIntent,
-  inferDocumentWidgetTaskKind,
-} from '../../claude-bridge/tool-policy-heuristics'
 import {
   readAIConfigDetailed,
   type AIConfigLoad,
 } from '../../claude-bridge/direct-chat-ai-config'
 import { AppSettingsRepository } from '../../repositories/app-settings-repository'
 import {
-  getProviderDef,
-  normalizeAIConfig,
-  resolveAIConfigCapabilities,
-  type AIModelDef,
-  type AIModelConfig,
-  type AIProviderDef,
-} from '../../../../shared/ai-providers'
-import type { CapabilityGroupId } from '../../../../shared/ai-capability-groups'
-import {
-  DEFAULT_CONTEXT_WINDOW,
-  resolveModelContextWindow,
+  DEFAULT_CONTEXT_WINDOW
 } from '../../../../shared/context-budget-types'
-import {
-  buildContextUsageSnapshot,
-} from '../../../../shared/context-usage-types'
-import type {
-  SpecialistBlueprintSourceMessageUnavailableReason,
-} from '../../../../shared/agent-specialist-blueprint'
-import {
-  applyProviderRequestPatch,
-  applyProviderResponsePatch,
-  resolveProviderDefaultPatchers,
-  resolveProviderPatchProfile,
-  type PatchContext,
-} from '../../../../shared/ai-providers/index'
-import {
-  parseJsonOrEventStreamResponse,
-} from '../../openai-responses'
-import {
-  buildChatCompletionsToolCalls,
-  buildResponsesToolCalls,
-} from '../../claude-bridge/provider-tool-arguments'
-import { buildProviderHttpError } from '../../claude-bridge/provider-terminal-error'
-import { resolveOpenAIProviderRuntime } from '../provider-runtime-resolver'
-import {
-  assertCurrentMessageCapability,
-  sanitizeHistoricalMessagesByCapability,
-  type CapabilityMessage,
-  type MessageCapabilitySnapshot,
-} from '../domain-adapters/message-capability-filter'
-import { assertManualThinkingModeProviderSafe } from '../thinking-compatibility'
 import { logAgentMetric } from '../metrics'
-import { TOOL_ERROR_METRICS } from '../tools-runtime/tool-error-metrics'
-import type { BrowserTaskDecisionMode } from '../../../../shared/browser-agent-task'
-import { defaultToolRegistry } from '../tools-runtime/tool-registry'
 import { getSkillsRuntimeManager } from '../../skills-runtime/runtime-manager'
 import type { ToolDefinition } from '../tools-runtime/tool-definition'
 import type { PreparedSkillTurnTruth } from '../contracts/browser-workflow-control'
-import {
-  buildExplicitNoSkillAuthorization,
-  buildSelectedSkillToolAuthorization,
-  type SkillToolAuthorization,
-} from '../skills/skill-tool-authorization'
+import type { SkillToolAuthorization } from '../skills/skill-tool-authorization'
 import { resolveCurrentLegalAuthorizationForSavedSkill } from '../skills/prepared-skill-turn'
 import { getSkillActionOwnersForTrustedResume } from '../../tools/skills-tools'
-import { resolveCapabilityResolution } from '../domain-adapters/capability-resolver'
-import { resolveActiveSkillAllowedTools } from '../domain-adapters/run-capability-controller'
-import { buildRequestEnvelope } from '../contracts/request-envelope'
-import { classifyIntent } from '../intent-classifier'
-import { resolveIntentCapabilityGroupModes } from '../execution-intent-resolver'
-import {
-  applyMapSemanticIntentToIntentClassification,
-  classifyMapSemanticIntentFallback,
-} from '../map-semantic-intent'
-import { resolvePolicyConflictFacts } from '../policy-arbitration'
-import { hasLocalSendImFileIntent } from '../../../../shared/remote-im-file-intent'
-import { classifyFollowupIntent, followupConsultsRecalledContext, detectNegationReleases, hasContinuableTaskRef, type FollowupTaskRef } from '../../../../shared/agent-followup-intent'
-import { isRetryOnlyTurn } from '../skills/skill-detection-inputs'
-import { peekLastReferenceSkill } from '../skills/skill-reference-hints'
-import { shouldDisplayReferenceSkillHintForLatestUserText } from '../reference-skill-hint-display'
+import { type FollowupTaskRef } from '../../../../shared/agent-followup-intent'
 import { wrapRunMetaRepositoryWithCloseoutSnapshot } from '../task-projection/run-meta-snapshot'
-import { recordNegations, releaseNegations, activeNegations } from '../safety/negation-state'
 import { stageSpecialistTaskEvolutionProposal } from '../agents/specialist-task-evolution-proposals'
-import { detectVerbatimGrants, recordVerbatimGrant, revokeAuthorizationsForCategories, authCategoriesForNegationFamilies } from '../safety/authorization-fact-store'
-import { classifyBrowserToolCall } from '../../browser-engine/browser-tool-write-classification'
-import { createBrowserTurnLease, type BrowserTurnLease } from '../../browser-engine/agent-browser-turn-lease'
-import { filterToolsByAllowedTools, filterToolsByVisionCapability } from '../tools-runtime/tool-gateway'
-import { sanitizeAssistantText } from '../tools-runtime/tool-call-text-guard'
-import {
-  buildToolRuntimeContext,
-  toToolExecutorContext,
-} from '../tools-runtime/tool-runtime-context-builder'
-import {
-  applyContextModifier,
-  createEmptyActiveFrameContext,
-  type ToolRuntimeActiveFrameContext,
-} from '../tools-runtime/tool-runtime'
-import { snapshotTurnFeatureFlags } from './turn-feature-flags'
-import { buildAgentSpawnContextFromAIConfig } from '../../skills-runtime/agent-context-source'
 import { resolveSkillShellAllowed, isEmbeddedSkill, getSkillShellConsent } from '../../skills-runtime/skill-shell-consent'
 import { executeToolCall as executeReadyToolCall } from '../../tools'
-import { appendToolCapabilityLog } from '../../tools/tool-event-log'
-import { PRIMITIVE_TOOL_DEFS, PRIMITIVE_TOOL_NAME_SET } from '../../tools/skill-primitives/tool-defs'
 import {
-  createToolExecutionOutput,
   normalizeToolExecutionOutput,
-  type ToolExecutionOutput,
+  type ToolExecutionOutput
 } from '../tools-runtime/tool-result-types'
-import {
-  buildModelVisibleToolResultPayload,
-  redactModelVisibleToolText,
-} from '../tools-runtime/model-visible-tool-output'
-import {
-  collectToolOutputProofs,
-  createTaskProofSink,
-} from '../quality/proof-collector'
-import type { AgentSpawnContext } from '../../../../shared/skill-host-contract'
-import { findDocumentVisualSyntaxIssue } from '../../../../shared/document-visual-syntax'
-import {
-  normalizeSessionSnapshotForSeed,
-  type CompactResult,
-} from '../compaction/compact-agent-input'
-import {
-  consumeToolCallBudget,
-  createTaskBudgetRuntime,
-  getBudgetUsagePercent,
-  getBudgetWarningLevel,
-  rebindTaskBudgetRuntime,
-  resumeBudgetRuntime,
-} from '../task-projection/run-budget-policy'
-import { readResumeKind, type ResumeKind } from '../contracts/resume-handle'
 import { createRotatingLogger } from '../../../utils/rotating-logger'
-import { finalizeRunOutcome, type RunOutcome, writeRunCloseMetric } from './run-finalizer'
 import {
   learnSiteCardFromFailure,
   siteCardLearningSignalFromToolFailure,
   siteCardLearningSignalsFromCheckIn,
 } from '../knowledge/site-card-learning'
 import {
-  buildActionAnnouncementCheckpointMessage,
-  buildActionAnnouncementSteerInput,
-  evaluateActionAnnouncementGuard,
-} from './action-announcement-guard'
-import {
-  buildSkillClarificationCheckpointMessage,
-  buildSkillClarificationSteerInput,
-  buildSkillClarificationSteerReminder,
-  evaluateSkillClarificationGuard,
-} from './skill-clarification-guard'
-import { buildRuntimePreambleBill, emitContextBill, RUNTIME_PREAMBLE_STAGE } from '../context-bill'
-import { createSystemReminderRegistry } from '../system-reminders/system-reminder-registry'
-import { registerActionAnnouncementSteerReminder } from '../system-reminders/action-announcement-steer-reminder'
-import {
-  beginBackgroundTaskTerminalReminderRun,
-  drainBackgroundTaskTerminalReminders,
-  prependSystemReminderInput,
-  registerBackgroundTaskTerminalReminder,
-} from '../system-reminders/background-task-terminal-reminder'
-import {
-  loadScopeSessionSnapshot,
-  writeScopeSessionSnapshot,
+  clearScopeSessionSnapshot,
 } from '../session/scope-session-snapshot'
-import { classifyExecutionError } from '../../claude-bridge/error-classifier'
-import { buildRecoveryPlan } from '../../claude-bridge/recovery-router'
 
 // ─── V3 Phase 1: extracted helpers (split into sibling modules) ───
 import type {
-  AgentSdkBudgetCheckpoint,
-  AgentSdkBudgetCheckpointRestore,
-  AgentSdkExecutionOptions,
-  AgentSdkProviderDiagnostics,
-  AgentSdkRuntimeDeps,
-  AgentSdkSession,
-  BeginRunResult,
-  CompactReason,
-  CompactSessionResult,
-  DocumentTargetGuard,
-  ObservedDocumentToolTarget,
-  ReadyAgentSdkRunParams,
+  AgentSdkExecutionOptions, AgentSdkRuntimeDeps, CompactReason,
+  CompactSessionResult, ReadyAgentSdkRunParams,
   ReadyAgentSdkRunResult,
   RunHandle,
-  RunMetaRepositoryLike,
-  SdkLongSkillCheckpoint,
-  SkillContextOrchestratorLike,
+  RunMetaRepositoryLike, SkillContextOrchestratorLike,
   ToolBridgeResultItem,
-  ToolBridgeRuntimeContext,
+  ToolBridgeRuntimeContext
 } from './agent-sdk-types'
 import {
-  DOCUMENT_TARGET_MUTATION_TOOL_NAMES,
-  MAX_ORPHAN_RUNS,
-  PREEMPT_SETTLE_TIMEOUT_MS,
-  ROLLING_BUDGET_CHECKPOINT_TOOL_INTERVAL,
-  SDK_CHILD_RESUME_AWAIT_TIMEOUT_MS,
-  acquireBudgetCheckpointFlight,
-  allowedPrimitiveToolsForSdkSkillTurn,
-  asRecord,
-  authorizedPrimitiveToolNames,
-  buildDocumentTargetContentRepairInput,
-  buildDocumentTargetContinuationRepairInput,
-  buildDocumentTargetInstruction,
-  buildDocumentTargetRepairInput,
-  buildLocalDocumentExcerptInstruction,
-  buildLocalDocumentExcerptRepairInput,
-  buildLocalSendImSkillAuthorization,
-  buildNewDocumentSaveRepairInput,
-  buildTerminalFailureProjectionPatch,
-  classifySdkRuntimeError,
-  continuationChildRunId,
-  continuationHandleFromLongSkillCheckpoint,
-  continuationRunStatePath,
-  defaultFetchWithTimeout,
-  defaultSystemPrompt,
-  documentSaveSucceeded,
-  documentToolMutatedContent,
-  errorMessage,
-  resolveExplicitReferenceSkillExecutableSurface,
-  extractLongSkillCheckpoint,
-  extractSdkMissingToolName,
-  filterSelectedSkillToolSurface,
-  finalTextIndicatesIncompleteDocument,
-  formatToolCallTrace,
-  formatToolResultTrace,
-  hasLocalSendImIntentForTurn,
-  hasRecalledTaskContext,
-  hydrateDocumentTargetPreservation,
-  inspectDocumentTargetContent,
-  isAbortError,
-  isCheckpointTerminalReason,
-  isDocumentToolFailureText,
-  isDocumentToolFailure,
-  mergeProjectionPatches,
-  isLocalDocumentToolDefinition,
-  isLocalSendImRetryFollowup,
-  isSameObservedDocumentTarget,
-  mapToolFailureClose,
-  messageToText,
-  nonEmptyString,
-  normalizeExplicitDocumentTargetToolArgs,
-  parseEnvelopeResourceReferences,
-  primaryInstructionText,
-  projectionPatchFromChildClose,
-  publicAgentName,
-  raceWithTimeout,
-  readDocumentToolTarget,
-  readSkillReferenceNames,
-  readStructuredResultRecord,
-  readTextField,
-  recoverLooseXmlToolCallText,
-  releaseBudgetCheckpointFlight,
-  removeAlreadyEmittedNativeText,
-  resolveAgentSdkMaxTurns,
-  resolveAgentSdkProviderDiagnostics,
-  resolveAgentSdkTaskBudgetRuntime,
-  resolveConfiguredModelDef,
-  resolveDocumentTargetGuard,
-  resolveSkillHintRelevanceForTurn,
-  resolveManifestBoundSkillTools,
-  resolveSourceMessageProvenance,
-  resolveToolFailurePageUrl,
-  restoreCheckpointToolSurface,
-  safeContinuationPathSegment,
-  scopeRunModuleForTool,
-  shouldPreferCurrentDocumentRead,
-  shouldRecoverLongSkillCheckpoint,
-  shouldRequireLocalDocumentExcerpt,
-  shouldRequireLocalDocumentWriteOutput,
-  shouldSuppressAskUserQuestionsForOpenConversation,
-  shouldSuppressSkillAskUserForArtifactDelivery,
-  shouldSuppressVisibleTextOnToolCall,
-  shouldUseLocalDocumentToolSet,
-  skillAuthorizationTextCandidates,
-  skillContextMessagesToInstruction,
-  splitNativeTextBufferForSafeFlush,
-  stringField,
-  stringifyToolResult,
-  stripMediaBlocksForLocalSendIm,
-  summarizeChildResume,
-  summarizeLongSkillCheckpoint,
-  supplementAuthorizedSkillPrimitiveDefinitions,
-  taskBudgetDiagnostics,
-  toOpenAIToolSchemas,
-  toSdkInput,
-  validatePreservedDocumentMutation,
+  allowedPrimitiveToolsForSdkSkillTurn, defaultFetchWithTimeout,
+  defaultSystemPrompt, errorMessage,
+  resolveExplicitReferenceSkillExecutableSurface, readStructuredResultRecord,
+  readTextField, resolveManifestBoundSkillTools, resolveToolFailurePageUrl, skillAuthorizationTextCandidates
 } from './agent-sdk-utils'
 import {
-  log,
-  resolveAgentSdkProvider,
-  runWithOpenAIAgentsSdk,
+  log, runWithOpenAIAgentsSdk
 } from './agent-sdk-provider'
 import { AgentSdkIntentTracker } from './agent-sdk-intent-tracker'
 import { AgentSdkCompactor } from './agent-sdk-compactor'
@@ -359,6 +78,7 @@ import { updateActiveToolUseMode } from './tool-use-mode-config-update'
 import { DynamicDeliveryCoordinator } from './dynamic-delivery/dynamic-delivery-coordinator'
 import { DynamicDeliveryTaskStore } from './dynamic-delivery/dynamic-delivery-task-store'
 import { AgentSdkSessionManager } from './agent-sdk-session'
+import { resolveSemanticSkillAuthorizationForTurn } from './skill-turn-authorization-resolver'
 
 
 const agentSdkLogger = createRotatingLogger('ready-agent-sdk.log')
@@ -392,16 +112,6 @@ interface MapPlaceAmbiguityPrompt {
 }
 
 const MAP_PLACE_AMBIGUITY_QUESTION_ID = 'map_place_choice'
-
-function registeredSkillOrFallback(skillId: string, fallback: unknown): unknown {
-  try {
-    return getSkillsRuntimeManager().listSkills()
-      .find((candidate) => candidate.id === skillId) ?? fallback
-  } catch {
-    // silent-catch: early boot and lightweight test hosts may not have Electron app paths yet.
-    return fallback
-  }
-}
 
 function truncateForQuestionOption(value: string, maxLength: number): string {
   const text = value.trim()
@@ -582,6 +292,7 @@ export class AgentSdkRuntime extends EventEmitter {
     this.getScopeTaskRefs = deps.getScopeTaskRefs || null
     this.listToolDefinitionsForTurn = deps.listToolDefinitions || ((params) =>
       this.toolExecutor.listDefaultToolDefinitionsForTurn(params))
+    // eslint-disable-next-line @typescript-eslint/no-this-alias -- adapter getters must retain the runtime instance receiver
     const self = this
     this.dynamicDelivery = new DynamicDeliveryCoordinator({
       getProjection: (taskId) => {
@@ -670,10 +381,10 @@ export class AgentSdkRuntime extends EventEmitter {
       learnSiteCardsFromCheckIn: (input) => self.learnSiteCardsFromCheckIn(input),
       newSession: (name, systemPrompt) => self.newSession(name, systemPrompt),
       resolveMapPlaceAmbiguityIfNeeded: (params) => self.resolveMapPlaceAmbiguityIfNeeded(params),
-      resolveSkillAuthorizationForTurn: (message, sessionId, requestEnvelope, forceLocalSendImIntent, skillHintRelevantForTurn) =>
-        self.resolveSkillAuthorizationForTurn(message, sessionId, requestEnvelope, forceLocalSendImIntent, skillHintRelevantForTurn),
-      resolvePreparedSkillTurnForTurn: (message, sessionId, requestEnvelope, forceLocalSendImIntent, skillHintRelevantForTurn) =>
-        self.resolvePreparedSkillTurnForTurn(message, sessionId, requestEnvelope, forceLocalSendImIntent, skillHintRelevantForTurn),
+      resolveSkillAuthorizationForTurn: (message, sessionId, messageVisibilityEpoch, requestEnvelope, forceLocalSendImIntent, skillHintRelevantForTurn) =>
+        self.resolveSkillAuthorizationForTurn(message, sessionId, messageVisibilityEpoch, requestEnvelope, forceLocalSendImIntent, skillHintRelevantForTurn),
+      resolvePreparedSkillTurnForTurn: (message, sessionId, messageVisibilityEpoch, requestEnvelope, forceLocalSendImIntent, skillHintRelevantForTurn) =>
+        self.resolvePreparedSkillTurnForTurn(message, sessionId, messageVisibilityEpoch, requestEnvelope, forceLocalSendImIntent, skillHintRelevantForTurn),
       resolveSavedSkillAuthorizationForResume: (saved) =>
         self.resolveSavedSkillAuthorizationForResume(saved),
       emit: (event, ...args) => self.emit(event, ...args),
@@ -800,13 +511,14 @@ export class AgentSdkRuntime extends EventEmitter {
       const store = this.runtime?.getBeliefCardStore?.()
       const registry = this.runtime?.getAgentRegistry?.()
       const proposalStore = this.runtime?.getSpecialistContentEditProposalStore?.()
-      const runMetaRepository = this.runtime?.getRunMetaRepository?.()
-      if (!store || !registry || !proposalStore || !runMetaRepository) return
+      if (!store || !registry || !proposalStore) return
       const result = stageSpecialistTaskEvolutionProposal({
         registry,
         store,
         proposalStore,
-        getRunExecutionBinding: (runId) => runMetaRepository.get(runId)?.executionBinding ?? null,
+        getRunExecutionBinding: (runId) => runId === input.projection.runId
+          ? input.projection.executionBinding ?? null
+          : null,
         now: input.now,
       }, {
         projection: input.projection,
@@ -838,7 +550,7 @@ export class AgentSdkRuntime extends EventEmitter {
           proposalStore,
           getRunExecutionBinding: (runId) => runId === contribution.binding.runId
             ? contribution.binding
-            : runMetaRepository.get(runId)?.executionBinding ?? null,
+            : null,
           now: input.now,
         }, {
           projection: contributionProjection,
@@ -929,6 +641,7 @@ export class AgentSdkRuntime extends EventEmitter {
     this.sessionManager.set(name, {
       sdkSession: new MemorySession({ sessionId: name }),
       systemPrompt: systemPrompt || defaultSystemPrompt(),
+      messageVisibilityEpoch: 0,
       generation: 0,
       currentRun: null,
       orphanCount: 0,
@@ -970,6 +683,26 @@ export class AgentSdkRuntime extends EventEmitter {
       currentRun.abortController.abort(createInitiatorAbort(currentRun, initiator, message))
       currentRun.abortController = null
     }
+  }
+
+  clearScopeContext(scopeId: string): void {
+    this.intentTracker.clearScope(scopeId)
+    this.turnOrchestrator.discardScopeContext(scopeId)
+  }
+
+  resetSessionContext(
+    name: string,
+    scopeId: string,
+    messageVisibilityEpoch: number,
+  ): void {
+    const existing = this.sessionManager.get(name)
+    const systemPrompt = existing?.systemPrompt
+    this.stopGeneration(name, 'preempted')
+    this.clearScopeContext(scopeId)
+    clearScopeSessionSnapshot(name)
+    this.newSession(name, systemPrompt)
+    const replacement = this.sessionManager.get(name)
+    if (replacement) replacement.messageVisibilityEpoch = messageVisibilityEpoch
   }
 
   async compactSession(name: string, reason: CompactReason = 'manual'): Promise<CompactSessionResult> {
@@ -1075,149 +808,27 @@ export class AgentSdkRuntime extends EventEmitter {
   private resolveSkillAuthorizationForTurn(
     message: RunMessage,
     sessionId?: string,
+    messageVisibilityEpoch?: number,
     requestEnvelope?: unknown,
     forceLocalSendImIntent = false,
     skillHintRelevantForTurn = false,
   ): SkillToolAuthorization {
-    const localSendImIntent = forceLocalSendImIntent || hasLocalSendImIntentForTurn(message, requestEnvelope)
-    const orchestrator = this.skillContextOrchestrator
-    if (!orchestrator) {
-      return localSendImIntent
-        ? buildLocalSendImSkillAuthorization('local_send_im_intent')
-        : buildExplicitNoSkillAuthorization('no_skill_signal')
-    }
-    const userTextCandidates = skillAuthorizationTextCandidates(message, requestEnvelope)
-    // P1-2 — typed envelope skill_reference 是授权第一信源：命中即以 typed_ref 直接构造 selected 授权，
-    //   正则文本候选降为兜底。localSendImIntent 轮不走此快路（保留既有 send-im 合成）。
-    //   最小传话铁律不受影响：typed ref 只把"技能识别"从正则扫文本换成结构化 refs；工具面/交付意图
-    //   推导仍吃全量用户文本（userTextCandidates），因此不丢失 target-folder delivery 等语义。
-    if (!localSendImIntent) {
-      // typed ref 是本轮显式结构化引用，不消费任何 stale reference hint（后者仍由文本兜底路径按
-      //   skillHintRelevantForTurn 裁决）；因此这里绝不 eager 调 getCurrentReferenceSkillHint。
-      for (const skillName of readSkillReferenceNames(requestEnvelope)) {
-        const syntheticMention = `@[${skillName}]`
-        const matchedSkill = (orchestrator.findExplicitlyRequestedSkills?.(syntheticMention) || [])
-          .find((skill) => skill && (skill.id || skill.skillId))
-        const typedRefSkillId = matchedSkill?.id || matchedSkill?.skillId
-        if (!matchedSkill || !typedRefSkillId) continue
-        try {
-          orchestrator.rememberExplicitReferenceSkillHint?.(syntheticMention, sessionId)
-        } catch (error) {
-          log(`rememberExplicitReferenceSkillHint failed: ${errorMessage(error)}`)
-        }
-        const typedRefPreferredTexts = [...userTextCandidates, syntheticMention]
-        const typedRefActionNames = new Set(
-          typedRefPreferredTexts
-            .flatMap((text) => orchestrator.buildPreferredSkillToolNames?.(text, sessionId) || [])
-            .filter((toolName) => toolName.startsWith('skill_') && !PRIMITIVE_TOOL_NAME_SET.has(toolName)),
-        )
-        const typedRefActions = Array.from(typedRefActionNames)
-        const typedRefExecutableSurface =
-          resolveExplicitReferenceSkillExecutableSurface(matchedSkill, typedRefActions)
-        const typedRefAllowRunShell = resolveSkillShellAllowed({
-          ...typedRefExecutableSurface,
-          isEmbedded: isEmbeddedSkill(typedRefSkillId),
-          hasConsent: getSkillShellConsent(typedRefSkillId),
-        })
-        const typedRefAllowAskUser = !shouldSuppressSkillAskUserForArtifactDelivery(typedRefPreferredTexts)
-        const typedRefManifestTools = resolveManifestBoundSkillTools(
-          registeredSkillOrFallback(typedRefSkillId, matchedSkill),
-          typedRefActions,
-          allowedPrimitiveToolsForSdkSkillTurn({
-            skillId: typedRefSkillId,
-            allowRunShell: typedRefAllowRunShell,
-            allowAskUser: typedRefAllowAskUser,
-          }),
-        )
-        log(`[skill_authorization] source=typed_ref skill=${typedRefSkillId}`)
-        return buildSelectedSkillToolAuthorization({
-          skillId: typedRefSkillId,
-          allowedTypedActions: typedRefManifestTools.typedActions,
-          allowedPrimitives: typedRefManifestTools.primitives,
-          source: 'explicit',
-          reason: 'typed_ref:explicit_user_mention',
-        })
-      }
-    }
-    if (userTextCandidates.length === 0) return buildExplicitNoSkillAuthorization('no_skill_signal')
-    const explicitSkillMatches: Array<{
-      text: string
-      skill: {
-        id?: string
-        skillId?: string
-        name?: string
-        managedPath?: string
-        requiredBins?: readonly string[]
-      }
-    }> = []
-    for (const text of userTextCandidates) {
-      const skills = orchestrator.findExplicitlyRequestedSkills?.(text) || []
-      for (const skill of skills) {
-        if (!skill) continue
-        const skillId = skill.id || skill.skillId
-        if (!skillId) continue
-        if (explicitSkillMatches.some((entry) => (entry.skill.id || entry.skill.skillId) === skillId)) continue
-        explicitSkillMatches.push({ text, skill })
-      }
-    }
-    const explicitSkillEntry = explicitSkillMatches[0] || null
-    const explicitSkill = explicitSkillEntry?.skill || null
-    const explicitSkillId = explicitSkill?.id || explicitSkill?.skillId || (localSendImIntent ? 'send-im' : null)
-    if (explicitSkillId) {
-      try {
-        orchestrator.rememberExplicitReferenceSkillHint?.(explicitSkillEntry?.text || userTextCandidates[0], sessionId)
-      } catch (error) {
-        log(`rememberExplicitReferenceSkillHint failed: ${errorMessage(error)}`)
-      }
-    }
-    if (!localSendImIntent && !explicitSkillId && !skillHintRelevantForTurn) {
-      return buildExplicitNoSkillAuthorization('no_skill_signal')
-    }
-
-    const referenceHint = orchestrator.getCurrentReferenceSkillHint?.(sessionId) || null
-    const preferredToolNames = userTextCandidates.flatMap((text) =>
-      orchestrator.buildPreferredSkillToolNames?.(text, sessionId) || [],
-    )
-    const typedActionNames = new Set(preferredToolNames
-      .filter((name) => name.startsWith('skill_') && !PRIMITIVE_TOOL_NAME_SET.has(name)))
-    if (localSendImIntent) {
-      typedActionNames.add('skill_send_im_file')
-    }
-    const typedActions = Array.from(typedActionNames)
-    const skillId = explicitSkillId || (skillHintRelevantForTurn ? referenceHint?.id || null : null)
-    if (!skillId) return buildExplicitNoSkillAuthorization('no_skill_signal')
-    const selectedSkillCandidate = explicitSkill
-      ?? (orchestrator.findExplicitlyRequestedSkills?.(`@[${skillId}]`) || [])
-        .find((candidate) => (candidate.id || candidate.skillId) === skillId)
-    const executableSurface =
-      resolveExplicitReferenceSkillExecutableSurface(selectedSkillCandidate || null, typedActions)
-    const allowRunShell = resolveSkillShellAllowed({
-      ...executableSurface,
-      isEmbedded: isEmbeddedSkill(skillId),
-      hasConsent: getSkillShellConsent(skillId),
-    })
-    const allowAskUser = !shouldSuppressSkillAskUserForArtifactDelivery(userTextCandidates)
-    const selectedSkill = registeredSkillOrFallback(skillId, selectedSkillCandidate)
-    const manifestTools = resolveManifestBoundSkillTools(
-      selectedSkill,
-      typedActions,
-      allowedPrimitiveToolsForSdkSkillTurn({ skillId, allowRunShell, allowAskUser }),
-    )
-
-    // P1-2 — 文本候选（正则启发式）是兜底信源；typed ref 未命中才走到这里。
-    log(`[skill_authorization] source=text_fallback skill=${skillId}`)
-    return buildSelectedSkillToolAuthorization({
-      skillId,
-      allowedTypedActions: manifestTools.typedActions,
-      allowedPrimitives: manifestTools.primitives,
-      source: explicitSkillId ? 'explicit' : 'active_task',
-      reason: explicitSkillId ? 'explicit_user_mention' : 'reference_hint',
+    return resolveSemanticSkillAuthorizationForTurn({
+      message,
+      sessionId,
+      messageVisibilityEpoch,
+      requestEnvelope,
+      forceLocalSendImIntent,
+      skillHintRelevantForTurn,
+      orchestrator: this.skillContextOrchestrator,
+      log,
     })
   }
 
   private resolvePreparedSkillTurnForTurn(
     message: RunMessage,
     sessionId?: string,
+    messageVisibilityEpoch?: number,
     requestEnvelope?: unknown,
     forceLocalSendImIntent = false,
     skillHintRelevantForTurn = false,
@@ -1228,6 +839,7 @@ export class AgentSdkRuntime extends EventEmitter {
     const authorization = this.resolveSkillAuthorizationForTurn(
       message,
       sessionId,
+      messageVisibilityEpoch,
       requestEnvelope,
       forceLocalSendImIntent,
       skillHintRelevantForTurn,

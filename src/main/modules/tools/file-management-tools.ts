@@ -1,6 +1,7 @@
-import { realpathSync, statSync } from 'fs'
+import { createReadStream, realpathSync, statSync } from 'fs'
 import { readFile, realpath } from 'fs/promises'
-import { extname, isAbsolute } from 'path'
+import { createHash } from 'crypto'
+import { dirname, extname, isAbsolute } from 'path'
 import { fileURLToPath } from 'url'
 
 import type { SearchEngine } from '../search-engine/indexer'
@@ -81,6 +82,54 @@ export function resolveFileToolWorkspaceRoots(
     }
   }
   return roots.length > 0 ? roots : null
+}
+
+export function resolveFileToolExplicitReadablePaths(envelope: unknown): string[] | null {
+  return resolveFileToolExplicitReadableResources(envelope)?.map((resource) => resource.path) ?? null
+}
+
+export function resolveFileToolExplicitReadableResources(
+  envelope: unknown,
+): Array<{ path: string; currentDigest: string }> | null {
+  if (!envelope || typeof envelope !== 'object' || Array.isArray(envelope)) return null
+  const resources = (envelope as { resources?: unknown }).resources
+  if (!Array.isArray(resources)) return null
+  const resourcesByPath = new Map<string, { path: string; currentDigest: string }>()
+  for (const resource of resources) {
+    if (!resource || typeof resource !== 'object' || Array.isArray(resource)) continue
+    const candidate = resource as {
+      kind?: unknown
+      source?: unknown
+      path?: unknown
+      canRead?: unknown
+      currentDigest?: unknown
+    }
+    if (candidate.kind !== 'attachment' || candidate.source !== 'user_attachment' || candidate.canRead !== true) continue
+    const path = typeof candidate.path === 'string' ? candidate.path.trim() : ''
+    try {
+      const canonical = path ? realpathSync(path) : ''
+      const currentDigest = typeof candidate.currentDigest === 'string'
+        && /^[a-f0-9]{64}$/.test(candidate.currentDigest)
+        ? candidate.currentDigest
+        : ''
+      if (canonical && currentDigest && statSync(canonical).isFile()) {
+        resourcesByPath.set(canonical, { path: canonical, currentDigest })
+      }
+    } catch {
+      // Missing or changed paths do not retain authority.
+    }
+  }
+  return resourcesByPath.size > 0 ? [...resourcesByPath.values()] : null
+}
+
+async function digestFile(path: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const hash = createHash('sha256')
+    const stream = createReadStream(path)
+    stream.on('data', (chunk) => hash.update(chunk))
+    stream.once('error', reject)
+    stream.once('end', () => resolve(hash.digest('hex')))
+  })
 }
 
 // ---------------------------------------------------------------------------
@@ -351,6 +400,37 @@ async function resolveReadableDocumentPath(
 > {
   let path = rawPath.trim()
   if (!path) return { ok: false, output: { ok: false, error: 'path is required' } }
+  const explicitReadableResources = context?.explicitReadableResources ?? []
+  const explicitReadablePaths = context?.explicitReadablePaths ?? []
+  if (explicitReadableResources.length || explicitReadablePaths.length) {
+    const allowed = new Map<string, string | null>([
+      ...explicitReadablePaths.map((candidate) => [candidate, null] as const),
+      ...explicitReadableResources.map((resource) => [resource.path, resource.currentDigest] as const),
+    ])
+    for (const candidate of buildFileLocatePathCandidates(path)) {
+      if (!isAbsolute(candidate)) continue
+      try {
+        const canonical = await realpath(candidate)
+        const metadata = statSync(canonical)
+        const expectedDigest = allowed.get(canonical)
+        if (metadata.isFile() && expectedDigest !== undefined) {
+          if (expectedDigest && await digestFile(canonical) !== expectedDigest) {
+            return {
+              ok: false,
+              output: { ok: false, path: canonical, error: 'selected file changed after authorization' },
+            }
+          }
+          return { ok: true, path: canonical, readPath: canonical, root: dirname(canonical) }
+        }
+      } catch {
+        // Continue to the indexed/workspace path, which remains independently guarded.
+      }
+    }
+    return {
+      ok: false,
+      output: { ok: false, path, error: 'path is not an explicitly selected readable file' },
+    }
+  }
   const resolved = resolveFileLocateCandidate(path, engine)
   let sourceType = 'document'
   if (resolved.row) {

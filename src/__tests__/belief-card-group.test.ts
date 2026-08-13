@@ -36,21 +36,9 @@ function makeRoot(): string {
 }
 
 function createDeps(store: BeliefCardStore): BeliefCardGroupDeps {
-  let enabled = true
   return {
     getBeliefCardStore: () => store,
-    getKnowledgeSystemEnabled: () => enabled,
-    setKnowledgeSystemEnabled: (next) => { enabled = next },
     getLifecycleStatus: () => ({ running: true, lastMaintenanceAt: new Date('2026-06-13T12:00:00.000Z') }),
-    getMaintenanceRoundStatus: () => ({
-      lastRunAt: '2026-06-13T12:01:00.000Z',
-      decision: 'skip',
-      reason: 'no_signals',
-      llmCalls: 0,
-      applied: 0,
-      rejected: 0,
-      terminal: 'gated_skip',
-    }),
   }
 }
 
@@ -68,7 +56,7 @@ test('beliefCardGroup registers and disposes its documented channels', () => {
   }
 })
 
-test('beliefCardGroup lists cards, flips the knowledge switch, and only confirms staged cards', async () => {
+test('beliefCardGroup lists archive cards and only confirms staged cards', async () => {
   const root = makeRoot()
   try {
     const store = new BeliefCardStore({ memoryRoot: root })
@@ -105,10 +93,13 @@ test('beliefCardGroup lists cards, flips the knowledge switch, and only confirms
     const listed = await invoke('agent:beliefCards:list')
     assert.equal(listed.success, true)
     assert.equal(listed.data.summary.staged, 1)
-    assert.equal(listed.data.maintenance.llmRound.decision, 'skip')
+    assert.deepEqual(listed.data.maintenance, {
+      lifecycleRunning: true,
+      lastLifecycleMaintenanceAt: '2026-06-13T12:00:00.000Z',
+    })
 
-    const disabled = await invoke('agent:beliefCards:setKnowledgeSystemEnabled', { enabled: false })
-    assert.equal(disabled.data.knowledgeSystemEnabled, false)
+    assert.equal(handlers.has('agent:beliefCards:setKnowledgeSystemEnabled'), false)
+    assert.equal('knowledgeSystemEnabled' in listed.data, false)
 
     const rejected = await invoke('agent:beliefCards:transition', { relPath: 'knowledge/active.md', action: 'reject' })
     assert.equal(rejected.success, false)

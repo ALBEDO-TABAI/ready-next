@@ -162,6 +162,7 @@ export interface RecallGroupDeps {
   attachSessionRecallContext(
     currentScopeId: string,
     conversationId: string,
+    expectedMessageVisibilityEpoch: number,
   ): AttachSessionRecallContextResult
   /**
    * Bound `runtime.detachSessionRecallContext` — sync, detaches the named
@@ -170,6 +171,7 @@ export interface RecallGroupDeps {
   detachSessionRecallContext(
     currentScopeId: string,
     conversationId: string,
+    expectedMessageVisibilityEpoch: number,
   ): DetachSessionRecallContextResult
   /**
    * Bound `runtime.resumeSessionCandidate` — sync, probes whether a resume
@@ -244,17 +246,45 @@ export const recallGroup: IpcChannelGroup<RecallGroupDeps> = {
       }
     })
 
-    ipcMain.handle('agent:attachSessionRecallContext', (_, payload: { currentScopeId: string; conversationId: string }): IPCResponse => {
+    ipcMain.handle('agent:attachSessionRecallContext', (_, payload: {
+      currentScopeId: string
+      conversationId: string
+      expectedMessageVisibilityEpoch: number
+    }): IPCResponse => {
       try {
-        return { success: true, data: deps.attachSessionRecallContext(payload.currentScopeId, payload.conversationId) }
+        if (!Number.isSafeInteger(payload.expectedMessageVisibilityEpoch)) {
+          return { success: false, error: 'expectedMessageVisibilityEpoch is required' }
+        }
+        return {
+          success: true,
+          data: deps.attachSessionRecallContext(
+            payload.currentScopeId,
+            payload.conversationId,
+            payload.expectedMessageVisibilityEpoch,
+          ),
+        }
       } catch (error) {
         return { success: false, error: error instanceof Error ? error.message : String(error) }
       }
     })
 
-    ipcMain.handle('agent:detachSessionRecallContext', (_, payload: { currentScopeId: string; conversationId: string }): IPCResponse => {
+    ipcMain.handle('agent:detachSessionRecallContext', (_, payload: {
+      currentScopeId: string
+      conversationId: string
+      expectedMessageVisibilityEpoch: number
+    }): IPCResponse => {
       try {
-        return { success: true, data: deps.detachSessionRecallContext(payload.currentScopeId, payload.conversationId) }
+        if (!Number.isSafeInteger(payload.expectedMessageVisibilityEpoch)) {
+          return { success: false, error: 'expectedMessageVisibilityEpoch is required' }
+        }
+        return {
+          success: true,
+          data: deps.detachSessionRecallContext(
+            payload.currentScopeId,
+            payload.conversationId,
+            payload.expectedMessageVisibilityEpoch,
+          ),
+        }
       } catch (error) {
         return { success: false, error: error instanceof Error ? error.message : String(error) }
       }

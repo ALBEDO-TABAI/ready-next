@@ -1,4 +1,4 @@
-import { describe, it, beforeEach } from 'node:test'
+import { after, before, describe, it, beforeEach } from 'node:test'
 import assert from 'node:assert/strict'
 
 import { SkillContextOrchestrator } from '../main/modules/agent-control/skills/skill-context-orchestrator'
@@ -6,6 +6,14 @@ import {
   getLastReferenceSkill,
   _resetLastReferenceSkillHintsForTests,
 } from '../main/modules/agent-control/skills/skill-reference-hints'
+import { __setScopeContextEpochDatabaseForTests } from '../main/modules/agent-control/session/scope-context-epoch'
+
+before(() => {
+  __setScopeContextEpochDatabaseForTests({
+    getRawDb: () => ({ prepare: () => ({ get: () => undefined }) }) as never,
+  })
+})
+after(() => __setScopeContextEpochDatabaseForTests(null))
 
 // skill-resume G2 — orchestrator must reverse-resolve `skill_*` tool names from
 // prior assistant tool_use blocks back to the owning skill, then arm the

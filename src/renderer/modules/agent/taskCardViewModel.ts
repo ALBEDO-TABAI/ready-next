@@ -20,6 +20,7 @@ export type TaskDisclosureState = Partial<Record<TaskSectionKey, boolean>>
 
 export interface TaskCardRunLike {
   scopeId: string
+  messageVisibilityEpoch?: number | null
   ownerAgentId?: string | null
   executionBinding?: import('../../../shared/agent-execution-profile').TaskExecutionBinding | null
   deliveryState?: import('../../../shared/dynamic-delivery').DeliveryStateV1 | null
@@ -197,17 +198,17 @@ interface InternalAgentHandoffInfo {
 const VEA_AUDIOVISUAL_HANDOFF_LABELS: Record<string, InternalAgentHandoffInfo> = {
   body: {
     taskName: 'body',
-    summary: '视听报告正文还需要继续生成。点击“继续处理”即可，系统会接上剩余步骤。',
+    summary: '视听报告正文仍有未完成内容；这是历史任务记录，不会自动接续。',
     progressLabel: '生成视听报告',
   },
   diagram: {
     taskName: 'diagram',
-    summary: '视听报告图表还需要继续生成。点击“继续处理”即可，系统会接上剩余步骤。',
+    summary: '视听报告图表仍有未完成内容；这是历史任务记录，不会自动接续。',
     progressLabel: '生成报告图表',
   },
   illustrate: {
     taskName: 'illustrate',
-    summary: '视听报告插图说明还需要继续生成。点击“继续处理”即可，系统会接上剩余步骤。',
+    summary: '视听报告插图说明仍有未完成内容；这是历史任务记录，不会自动接续。',
     progressLabel: '生成报告插图说明',
   },
 }
@@ -226,7 +227,7 @@ function classifyInternalAgentHandoffText(text: string | null | undefined): Inte
       : 'rawIncludes'
   const base = VEA_AUDIOVISUAL_HANDOFF_LABELS[taskName] || {
     taskName: taskName || 'handoff',
-    summary: '视听报告还有收尾内容需要继续生成。点击“继续处理”即可，系统会接上剩余步骤。',
+    summary: '视听报告仍有未完成内容；这是历史任务记录，不会自动接续。',
     progressLabel: '生成视听报告',
   }
   return { ...base, legacyHit }

@@ -58,7 +58,6 @@ import type { CapabilityGroupId } from '../../../../shared/ai-capability-groups'
 import type { SkillChildRunStatus as SharedSkillChildRunStatus } from '../../../../shared/skill-child-run-status'
 import type { ContextUsageSnapshot } from '../../../../shared/context-usage-types'
 import type { TaskCreationOrigin, TaskExecutionBinding } from '../../../../shared/agent-execution-profile'
-import type { ScheduledTaskOccurrenceSource } from '../../../../shared/scheduled-tasks'
 import type { CanonicalAssistantMessage } from '../../../../shared/ipc-contracts/canonical-message'
 import type {
   AgentCheckpointRefs,
@@ -351,6 +350,8 @@ export interface TaskProjectionRecord {
   revision?: number
   dependencyGeneration?: number
   scopeId: string
+  /** Conversation context generation frozen by the run that owns this row. */
+  messageVisibilityEpoch?: number
   runId: string
   parentTaskId?: string | null
   parentStepId?: string | null
@@ -389,8 +390,9 @@ export interface TaskProjectionRecord {
   checkins?: unknown[] | null
   proofRefs?: unknown[] | null
   learningRefs?: unknown[] | null
-  /** EP3-A1 — task owner agent (migration 056). Write value comes ONLY from
-   *  the A4 handoff adoption; everything else reads. */
+  /** EP3-A1 — task owner identity (migration 056). Current production runs
+   *  freeze this value from the admitted execution binding; historical rows
+   *  remain readable after live handoff retirement. */
   ownerAgentId?: string | null
   taskOrigin: TaskCreationOrigin
   executionBinding?: TaskExecutionBinding | null
@@ -562,7 +564,6 @@ export interface RunCoordinatorRequest {
   continuationIntent?: ContinuationIntent | null
   taskOrigin?: TaskCreationOrigin
   runOrigin?: import('../../../../shared/agent-execution-profile').RunExecutionOrigin
-  scheduledTaskOccurrence?: ScheduledTaskOccurrenceSource
   deliveryMode?: import('../../../../shared/dynamic-delivery').DeliveryMode
   /**
    * A binding already committed by the same durable workflow transaction.
@@ -595,10 +596,10 @@ export interface ExecutionHostRequest {
   executionBinding: TaskExecutionBinding
   executionProfile: import('../../../../shared/agent-execution-profile').AgentExecutionProfile
   sessionId?: string
+  messageVisibilityEpoch?: number
   sessionIdOverride?: string
   requestId?: string
   sourceMessageId?: string | null
-  scheduledTaskOccurrence?: ScheduledTaskOccurrenceSource
   taskId?: string
   parentTaskId?: string
   parentStepId?: string

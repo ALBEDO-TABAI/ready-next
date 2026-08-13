@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import test from 'node:test'
 
@@ -78,8 +78,9 @@ test('Codex terminal publication only broadcasts the closeout readback', () => {
   assert.equal((coordinator.match(/emitStartedScopeRunEvent\(/g) || []).length, 1)
   assert.equal((coordinator.match(/publishCommittedTerminalEvent\(/g) || []).length, 1)
   assert.doesNotMatch(coordinator, /emitScopeRunEvent\(/)
-  assert.match(committedPublisher, /this\.deps\.emit\('scopeRunEvent', payload\)/)
-  assert.doesNotMatch(committedPublisher, /recordScopeRunEvent|runProjection|syncTaskProjection/)
+  assert.match(committedPublisher, /this\.deps\.emit\('scopeRunEvent', authoritativePayload\)/)
+  assert.match(committedPublisher, /publishedCommittedProductTerminals\.has\(runId\)/)
+  assert.doesNotMatch(committedPublisher, /syncTaskProjection/)
 })
 
 test('runtime startup does not relaunch retired delivery or handoff workflows', () => {
@@ -99,12 +100,19 @@ test('runtime startup does not relaunch retired delivery or handoff workflows', 
 test('Codex lifecycle control has no synthetic suspend or close shortcut', () => {
   const runtime = source('src/main/modules/agent-control/runtime-core/runtime.ts')
   const host = source('src/main/modules/agent-control/runtime-core/codex-host-orchestrator.ts')
-  const browserContinuation = source('src/main/modules/agent-control/runtime-core/browser-continuation-runtime.ts')
+  assert.equal(
+    existsSync(resolve(process.cwd(), 'src/main/modules/agent-control/runtime-core/browser-continuation-runtime.ts')),
+    false,
+  )
   assert.doesNotMatch(host, /interruptForSuspend|async closeSession/)
-  assert.match(runtime, /lifecycleAdapter\.stopSession\(\{/)
-  assert.match(runtime, /codex_handoff_requires_native_terminal_reconciliation/)
-  assert.match(browserContinuation, /errorKind: 'unsupported'/)
-  assert.doesNotMatch(browserContinuation, /finalizeRunOutcome|interruptForSuspend/)
+  assert.match(runtime, /lifecycleAdapter\.stopSession\(request\)/)
+  assert.doesNotMatch(runtime, /codex_handoff_requires_native_terminal_reconciliation/)
+  assert.doesNotMatch(runtime, /async (?:suspendRun|resumeRun|respondToInteraction|completeHumanTakeover)\(/)
+  const lifecycleControls = between(runtime, 'createCodexSession(', 'async resolveTrustedRequestEnvironment')
+  assert.doesNotMatch(lifecycleControls, /abortActiveProductRunByAlias/)
+  assert.match(lifecycleControls, /lifecycleAdapter\.resetSession\(request\)/)
+  assert.match(lifecycleControls, /lifecycleAdapter\.stopSession\(request\)/)
+  assert.match(lifecycleControls, /lifecycleAdapter\.closeSession\(request\)/)
 })
 
 test('native runtime and collector cannot write Ready product truth', () => {
@@ -134,10 +142,21 @@ test('renderer and IPC send surfaces contain no retired Boost or workflow fields
   const preload = source('src/preload/index.ts')
   const rendererTypes = source('src/renderer/types/electron.d.ts')
   const lifecycleGroup = source('src/main/modules/claude-bridge/ipc/agent-lifecycle-group.ts')
+  const settingsHub = source('src/renderer/components/agent-system/AgentSettingsHub.tsx')
+  const packageJson = JSON.parse(source('package.json')) as { scripts?: Record<string, string> }
 
   for (const value of [chatInput, chatPanel, store]) {
     assert.doesNotMatch(value, /thoroughOverride|data-ready-delivery-thorough|DELIVERY_MODE_SETTING_KEY/)
   }
+  assert.doesNotMatch(
+    settingsHub,
+    /Dynamic Delivery|agent\.dynamicDeliveryMode|data-ready-delivery-mode|data-ready-delivery-thorough/,
+  )
+  assert.equal(packageJson.scripts?.['verify:dynamic-delivery'], undefined)
+  assert.doesNotMatch(
+    JSON.stringify(packageJson.scripts ?? {}),
+    /dynamic-delivery-live|run-dynamic-delivery-tests|check-dynamic-delivery-live/,
+  )
   assert.match(preload, /sendScoped: \(payload: SendScopedRequest\)/)
   assert.match(rendererTypes, /sendScoped: \(payload: SendScopedRequest\)/)
   assert.match(lifecycleGroup, /parseSendScopedRequest\(rawPayload\)/)
@@ -149,6 +168,33 @@ test('renderer and IPC send surfaces contain no retired Boost or workflow fields
   for (const value of sendSurfaces) {
     assert.doesNotMatch(value, /deliveryMode\?:|continuationIntent\?:|workspaceRoots\?:|agent\?: string/)
   }
+})
+
+test('retired Agent schedules have no public or production execution entry', () => {
+  const runtime = source('src/main/modules/agent-control/runtime-core/runtime.ts')
+  const ipc = source('src/main/modules/claude-bridge/ipc-handler.ts')
+  const preload = source('src/preload/index.ts')
+  const rendererTypes = source('src/renderer/types/electron.d.ts')
+  const workbench = source('src/renderer/pages/WorkbenchMode.tsx')
+  const chatPanel = source('src/renderer/components/agent/ChatPanel.tsx')
+  const widgetGuidance = source('src/main/modules/claude-bridge/widget-guidance.ts')
+  const widgetCatalog = source('src/shared/document-widget-openui.ts')
+  const packageJson = JSON.parse(source('package.json')) as { scripts?: Record<string, string> }
+
+  for (const value of [runtime, ipc, preload, rendererTypes, workbench, chatPanel]) {
+    assert.doesNotMatch(value, /scheduledTasks|ScheduledTasks|scheduledTaskCoordinator|runScheduledTaskNow|createScheduledTask/)
+  }
+  assert.doesNotMatch(runtime, /dispatchScheduledOccurrence|scheduled_codex_ingress_unsupported/)
+  assert.doesNotMatch(preload, /electronAPI\.scheduledTasks|scheduledTasks:/)
+  assert.doesNotMatch(rendererTypes, /scheduledTasks:/)
+  assert.doesNotMatch(widgetGuidance, /schedule_runtime_card|自动计划状态概览/)
+  assert.doesNotMatch(widgetCatalog, /schedule_runtime_card/)
+  assert.equal(packageJson.scripts?.['verify:agent-schedules'], undefined)
+
+  const skillsRuntime = source('src/main/modules/skills-runtime/ipc-handler.ts')
+  const skillScheduler = source('src/main/modules/skills-runtime/skill-job-scheduler.ts')
+  assert.match(skillsRuntime, /skills:schedules:/)
+  assert.match(skillScheduler, /runScheduledTask/)
 })
 
 test('renderer cannot bypass Codex lifecycle or canonical persistence with legacy write IPC', () => {
@@ -172,14 +218,27 @@ test('renderer cannot bypass Codex lifecycle or canonical persistence with legac
 test('Codex composition is explicit and has no SDK fallback constructor', () => {
   const runtime = source('src/main/modules/agent-control/runtime-core/runtime.ts')
   const composition = source('src/main/modules/agent-control/codex-runtime/codex-runtime-composition.ts')
+  const production = source(
+    'src/main/modules/agent-control/codex-runtime/codex-runtime-production-composition.ts',
+  )
   const ipc = source('src/main/modules/claude-bridge/ipc-handler.ts')
   assert.match(runtime, /codexRuntime: CodexRuntimeComposition/)
   const constructorSignature = between(runtime, 'constructor(', 'super()')
   assert.doesNotMatch(constructorSignature, /codexRuntime\?:|codexRuntime\s*=/)
-  assert.match(ipc, /createE2UnavailableCodexRuntimeComposition\(\)/)
+  assert.match(ipc, /createCodexRuntimeComposition\(\{/)
+  assert.match(ipc, /new RuntimeStartupSlot\(candidate\)[\s\S]*?startingRuntime = startup[\s\S]*?runtime = started/)
+  assert.match(ipc, /await startup\.cancelAndDrain\(\)/)
+  assert.doesNotMatch(ipc, /createE2UnavailableCodexRuntimeComposition/)
   assert.match(composition, /ingressPort: CodexIngressPort/)
   assert.match(composition, /preparedRunContextPort: CodexPreparedRunContextPort/)
   assert.match(composition, /lifecycleAdapter: ReadyCodexLifecycleAdapter<ReadyClosedCodexProductRun>/)
+  assert.match(composition, /from ['"]\.\/codex-runtime-production-composition['"]/)
   assert.doesNotMatch(composition, /preparedRunPort/)
   assert.doesNotMatch(composition, /AgentSdkRuntime|ReadyAgentOrchestrator|fallback/i)
+  assert.match(production, /export function createCodexRuntimeComposition/)
+  assert.match(production, /sealIngress\(reason\)/)
+  assert.doesNotMatch(
+    production,
+    /PromptAssembly|AgentSdkRuntime|AgentSdkTurnOrchestrator|finalizeRunOutcome|createE2Unavailable/i,
+  )
 })

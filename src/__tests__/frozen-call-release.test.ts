@@ -40,6 +40,7 @@ import {
   runFrozenCallConfirmation,
 } from '../main/modules/agent-control/safety/frozen-call-confirmation'
 import { resolveConfirmationGate } from '../main/modules/agent-control/safety/action-confirmation-policy'
+import { digestCanonicalJson } from '../main/modules/agent-control/codex-runtime/codex-model-gateway-contract'
 import { getAskUserQuestionsStore } from '../main/modules/tools/builtins/ask-user-questions-store'
 import { buildExplicitNoSkillAuthorization } from '../main/modules/agent-control/skills/skill-tool-authorization'
 import { askUserGroup, type AskUserGroupDeps } from '../main/modules/claude-bridge/ipc/ask-user-group'
@@ -71,20 +72,22 @@ function createFakeDb(): FakeDb {
               created_at: createdAt, expires_at: expiresAt, status,
               released_at: null,
             })
-          } else if (/UPDATE pending_confirmations SET status = \?, released_at = \? WHERE id = \?/i.test(sql)) {
+          } else if (/UPDATE pending_confirmations SET status = \?, released_at = \? WHERE id = \? AND status = 'pending'/i.test(sql)) {
             const [status, releasedAt, id] = params
             const row = rows.get(String(id))
-            if (row) {
+            if (row?.status === 'pending') {
               row.status = status
               row.released_at = releasedAt
+              return { changes: 1 }
             }
+            return { changes: 0 }
           } else if (/SET status = 'expired' WHERE status = 'pending'/i.test(sql)) {
             // constructor restart sweep — expire every leftover pending row
             for (const row of rows.values()) {
               if (row.status === 'pending') row.status = 'expired'
             }
           }
-          return undefined
+          return { changes: 0 }
         },
       }
     },
@@ -137,8 +140,11 @@ test('freeze → confirm → release executes the frozen params byte-identical, 
 
   const sessionId = nextSessionId()
   const executed: Array<Record<string, unknown>> = []
+  const effectPhases: string[] = []
   const originalArgs = { id: 'evt-42' }
   const pending = executeToolCall('calendar_delete_event', originalArgs, modelContext(sessionId, {
+    onToolEffectStart: () => effectPhases.push('start'),
+    onToolEffectEnd: () => effectPhases.push('end'),
     requestModuleToolAction: async (_action, args) => {
       executed.push(args)
       return { summary: '事件已删除' }
@@ -150,14 +156,17 @@ test('freeze → confirm → release executes the frozen params byte-identical, 
   assert.ok(frozenRow, 'freeze must persist a pending_confirmations row')
   assert.equal(frozenRow.status, 'pending')
   assert.equal(frozenRow.tool_name, 'calendar_delete_event')
+  assert.deepEqual(effectPhases, [], 'confirmation wait must not start the tool effect deadline')
   // Durable row is ONLY a value-free structural shape + sha256 fingerprint —
   // no parameter value, sensitive or not (Codex review P1#4 strict form).
   const audit = JSON.parse(String(frozenRow.params_json)) as {
     __audit: string
+    canonicalSha256: string
     sha256: string
     shape: Record<string, unknown>
   }
   assert.equal(audit.__audit, 'redacted')
+  assert.equal(audit.canonicalSha256, digestCanonicalJson(originalArgs))
   assert.equal(audit.sha256, createHash('sha256').update(JSON.stringify(originalArgs)).digest('hex'))
   assert.deepEqual(audit.shape, { id: '<string>' }, 'shape carries key names + types only')
   assert.ok(!String(frozenRow.params_json).includes('evt-42'), 'no parameter value may persist')
@@ -172,6 +181,7 @@ test('freeze → confirm → release executes the frozen params byte-identical, 
     'executed params must be byte-identical to the frozen serialization',
   )
   assert.deepEqual(executed[0], originalArgs)
+  assert.deepEqual(effectPhases, ['start', 'end'])
   assert.match(output.text, /事件已删除/)
   assert.equal(frozenRow.status, 'released', 'row must be marked released')
   assert.ok(frozenRow.released_at, 'released_at must be stamped')
@@ -225,6 +235,80 @@ test('store: a frozen call releases exactly once; the second release is rejected
   assert.deepEqual(second, { ok: false, reason: 'not_pending' })
 })
 
+test('store: confirmation audit failure consumes the token but never releases action parameters', () => {
+  const base = createFakeDb()
+  const store = new FrozenCallStore({
+    prepare(sql: string) {
+      const statement = base.prepare(sql)
+      if (/UPDATE pending_confirmations SET status = \?, released_at = \? WHERE id = \? AND status = 'pending'/i.test(sql)) {
+        return { run: () => { throw new Error('audit unavailable') } }
+      }
+      return statement
+    },
+  })
+  const frozen = store.freeze({
+    toolName: 'calendar_delete_event',
+    params: { id: 'dangerous-event' },
+    sessionId: 's-audit-failure',
+  })
+  assert.ok(frozen.ok)
+  if (!frozen.ok) return
+
+  const released = store.release(frozen.id, frozen.token)
+  assert.deepEqual(released, { ok: false, reason: 'store_unavailable' })
+  assert.equal('params' in released, false)
+  assert.equal(store.get(frozen.id), null)
+  assert.deepEqual(store.release(frozen.id, frozen.token), { ok: false, reason: 'not_pending' })
+})
+
+test('store: expiry audit failure is typed and never claims the durable row expired', () => {
+  const base = createFakeDb()
+  const store = new FrozenCallStore({
+    prepare(sql: string) {
+      const statement = base.prepare(sql)
+      if (/UPDATE pending_confirmations SET status = \?, released_at = \? WHERE id = \? AND status = 'pending'/i.test(sql)) {
+        return { run: () => { throw new Error('audit unavailable') } }
+      }
+      return statement
+    },
+  })
+  const frozen = store.freeze({
+    toolName: 'calendar_delete_event',
+    params: { id: 'expiry-audit-failure' },
+    sessionId: 's-expiry-audit-failure',
+  })
+  assert.ok(frozen.ok)
+  if (!frozen.ok) return
+
+  assert.deepEqual(store.expire(frozen.id), { ok: false, reason: 'store_unavailable' })
+  assert.equal(base.rows.get(frozen.id)?.status, 'pending')
+  assert.equal(store.get(frozen.id), null, 'failed audit still revokes the in-memory execution token')
+  assert.deepEqual(store.expire(frozen.id), { ok: false, reason: 'not_pending' })
+})
+
+test('store: an external durable terminal wins the release race and action parameters stay sealed', () => {
+  const db = createFakeDb()
+  const store = new FrozenCallStore(db)
+  const frozen = store.freeze({
+    toolName: 'calendar_delete_event',
+    params: { id: 'externally-expired-event' },
+    sessionId: 's-external-terminal',
+  })
+  assert.ok(frozen.ok)
+  if (!frozen.ok) return
+
+  const row = db.rows.get(frozen.id)
+  assert.ok(row)
+  row.status = 'expired'
+
+  const released = store.release(frozen.id, frozen.token)
+  assert.deepEqual(released, { ok: false, reason: 'not_pending' })
+  assert.equal('params' in released, false)
+  assert.equal(row.status, 'expired')
+  assert.equal(store.get(frozen.id), null)
+  assert.deepEqual(store.release(frozen.id, frozen.token), { ok: false, reason: 'not_pending' })
+})
+
 test('store: a wrong token never releases', () => {
   const store = new FrozenCallStore(createFakeDb())
   const frozen = store.freeze({ toolName: 'calendar_delete_event', params: { id: 'evt-1' }, sessionId: 's-token' })
@@ -253,7 +337,26 @@ test('store: an expired frozen call cannot be released (no execution after conte
   nowMs += 51
   const released = store.release(frozen.id, frozen.token)
   assert.deepEqual(released, { ok: false, reason: 'expired' })
-  assert.equal(store.get(frozen.id)?.status, 'expired')
+  assert.equal(store.get(frozen.id), null, 'terminal memory must not retain frozen params')
+})
+
+test('store: a denial arriving after TTL records expiry instead of a false user denial', () => {
+  let nowMs = 1_000_000
+  const db = createFakeDb()
+  const store = new FrozenCallStore(db, { now: () => nowMs })
+  const frozen = store.freeze({
+    toolName: 'calendar_delete_event',
+    params: { id: 'evt-late-deny' },
+    sessionId: 's-late-deny',
+    ttlMs: 10,
+  })
+  assert.ok(frozen.ok)
+  if (!frozen.ok) return
+  nowMs += 11
+
+  assert.deepEqual(store.deny(frozen.id), { ok: false, reason: 'expired' })
+  assert.equal(db.rows.get(frozen.id)?.status, 'expired')
+  assert.equal(store.get(frozen.id), null)
 })
 
 test('restart sweep: leftover pending rows expire at construction even INSIDE their TTL (token was memory-only)', () => {
@@ -284,8 +387,11 @@ test('abort while waiting → frozen call expired, structured timeout-cancel res
   const sessionId = nextSessionId()
   const executed: string[] = []
   const controller = new AbortController()
+  const effectPhases: string[] = []
   const pending = executeToolCall('calendar_delete_event', { id: 'evt-abort' }, modelContext(sessionId, {
     abortSignal: controller.signal,
+    onToolEffectStart: () => effectPhases.push('start'),
+    onToolEffectEnd: () => effectPhases.push('end'),
     requestModuleToolAction: async (action) => {
       executed.push(action)
       return { summary: 'deleted' }
@@ -297,6 +403,7 @@ test('abort while waiting → frozen call expired, structured timeout-cancel res
   const output = await pending
 
   assert.equal(output.data?.errorKind, 'confirmation_expired')
+  assert.deepEqual(effectPhases, [], 'aborted confirmation must never enter the effect phase')
   assert.match(output.text, /取消/)
   const frozenRow = [...db.rows.values()][0]
   assert.equal(frozenRow.status, 'expired')
@@ -305,6 +412,40 @@ test('abort while waiting → frozen call expired, structured timeout-cancel res
   const lateCard = getAskUserQuestionsStore().findPendingForSession(sessionId)
   assert.equal(lateCard, null, 'confirmation card must be gone after abort')
   assert.deepEqual(executed, [], 'tool must never execute after expiry')
+})
+
+test('abort with an unavailable durable audit reports unavailable and keeps the action revoked', async (t) => {
+  const base = createFakeDb()
+  const store = new FrozenCallStore({
+    prepare(sql: string) {
+      const statement = base.prepare(sql)
+      if (/UPDATE pending_confirmations SET status = \?, released_at = \? WHERE id = \? AND status = 'pending'/i.test(sql)) {
+        return { run: () => { throw new Error('audit unavailable') } }
+      }
+      return statement
+    },
+  })
+  registerFrozenCallStore(store)
+  t.after(() => _resetFrozenCallBridgeForTests())
+
+  const sessionId = nextSessionId()
+  const controller = new AbortController()
+  const executed: string[] = []
+  const pending = executeToolCall('calendar_delete_event', { id: 'evt-abort-audit-failure' }, modelContext(sessionId, {
+    abortSignal: controller.signal,
+    requestModuleToolAction: async (action) => {
+      executed.push(action)
+      return { summary: 'deleted' }
+    },
+  }))
+
+  await waitFor(() => getAskUserQuestionsStore().findPendingForSession(sessionId))
+  controller.abort()
+  const output = await pending
+
+  assert.equal(output.data?.errorKind, 'confirmation_unavailable')
+  assert.deepEqual(executed, [])
+  assert.equal([...base.rows.values()][0].status, 'pending')
 })
 
 // ---------------------------------------------------------------------------
@@ -332,6 +473,131 @@ test('user denial feeds a structured confirmation_denied_by_user back to the mod
   assert.equal(output.data?.errorKind, 'confirmation_denied_by_user')
   assert.deepEqual(executed, [])
   assert.equal([...db.rows.values()][0].status, 'denied')
+})
+
+test('confirmed action with an unavailable durable audit reports unavailable, never timeout, and executes nothing', async (t) => {
+  const base = createFakeDb()
+  const store = new FrozenCallStore({
+    prepare(sql: string) {
+      const statement = base.prepare(sql)
+      if (/UPDATE pending_confirmations SET status = \?, released_at = \? WHERE id = \? AND status = 'pending'/i.test(sql)) {
+        return { run: () => { throw new Error('audit unavailable') } }
+      }
+      return statement
+    },
+  })
+  registerFrozenCallStore(store)
+  t.after(() => _resetFrozenCallBridgeForTests())
+
+  const sessionId = nextSessionId()
+  const executed: string[] = []
+  const pending = executeToolCall('calendar_delete_event', { id: 'evt-confirm-audit-failure' }, modelContext(sessionId, {
+    requestModuleToolAction: async (action) => {
+      executed.push(action)
+      return { summary: 'deleted' }
+    },
+  }))
+
+  await waitFor(() => getAskUserQuestionsStore().findPendingForSession(sessionId))
+  answerPendingCard(sessionId, FROZEN_CALL_CONFIRM_OPTION)
+  const output = await pending
+
+  assert.equal(output.data?.errorKind, 'confirmation_unavailable')
+  assert.doesNotMatch(output.text, /超时/)
+  assert.deepEqual(executed, [])
+  assert.equal([...base.rows.values()][0].status, 'pending')
+})
+
+test('deny durable race and audit failure never become a false user-denied result', async (t) => {
+  const racedDb = createFakeDb()
+  const racedStore = new FrozenCallStore(racedDb)
+  const racedSession = nextSessionId()
+  const racedProofs: string[] = []
+  const raced = runFrozenCallConfirmation(
+    'calendar_delete_event',
+    { id: 'evt-deny-cas-race' },
+    resolveConfirmationGate('calendar_delete_event', { id: 'evt-deny-cas-race' }),
+    {
+      store: racedStore,
+      sessionId: racedSession,
+      conversationId: racedSession,
+      taskId: 'task-deny-cas-race',
+      appendProof: (_taskId, ref) => racedProofs.push(ref),
+    },
+  )
+  await waitFor(() => getAskUserQuestionsStore().findPendingForSession(racedSession))
+  const racedRow = [...racedDb.rows.values()][0]
+  racedRow.status = 'expired'
+  answerPendingCard(racedSession, FROZEN_CALL_DENY_OPTION)
+  const racedOutcome = await raced
+  assert.equal(racedOutcome.kind, 'expired')
+  assert.equal(racedProofs.some((ref) => ref.endsWith('|denied')), false)
+
+  const base = createFakeDb()
+  const unavailableStore = new FrozenCallStore({
+    prepare(sql: string) {
+      const statement = base.prepare(sql)
+      if (/UPDATE pending_confirmations SET status = \?, released_at = \? WHERE id = \? AND status = 'pending'/i.test(sql)) {
+        return { run: () => { throw new Error('audit unavailable') } }
+      }
+      return statement
+    },
+  })
+  const unavailableSession = nextSessionId()
+  const unavailableProofs: string[] = []
+  const unavailable = runFrozenCallConfirmation(
+    'calendar_delete_event',
+    { id: 'evt-deny-audit-failure' },
+    resolveConfirmationGate('calendar_delete_event', { id: 'evt-deny-audit-failure' }),
+    {
+      store: unavailableStore,
+      sessionId: unavailableSession,
+      conversationId: unavailableSession,
+      taskId: 'task-deny-audit-failure',
+      appendProof: (_taskId, ref) => unavailableProofs.push(ref),
+    },
+  )
+  await waitFor(() => getAskUserQuestionsStore().findPendingForSession(unavailableSession))
+  answerPendingCard(unavailableSession, FROZEN_CALL_DENY_OPTION)
+  const unavailableOutcome = await unavailable
+  assert.deepEqual(unavailableOutcome, { kind: 'unavailable', reason: 'store_unavailable' })
+  assert.equal(unavailableProofs.length, 0)
+  assert.equal([...base.rows.values()][0].status, 'pending')
+
+  t.after(() => {
+    const racedPending = getAskUserQuestionsStore().findPendingForSession(racedSession)
+    if (racedPending) getAskUserQuestionsStore().reject(racedPending.cardId, new Error('test cleanup'))
+    const unavailablePending = getAskUserQuestionsStore().findPendingForSession(unavailableSession)
+    if (unavailablePending) getAskUserQuestionsStore().reject(unavailablePending.cardId, new Error('test cleanup'))
+  })
+})
+
+test('a deny answer after the frozen TTL is reported as expiry, never as a false user denial', async () => {
+  let nowMs = 1_000
+  const db = createFakeDb()
+  const store = new FrozenCallStore(db, { now: () => nowMs })
+  const sessionId = nextSessionId()
+  const pending = runFrozenCallConfirmation(
+    'calendar_delete_event',
+    { id: 'evt-deny-race' },
+    resolveConfirmationGate('calendar_delete_event', { id: 'evt-deny-race' }),
+    {
+      store,
+      sessionId,
+      conversationId: sessionId,
+      timeoutMs: 10_000,
+    },
+  )
+
+  await waitFor(() => getAskUserQuestionsStore().findPendingForSession(sessionId))
+  nowMs += 10_001
+  answerPendingCard(sessionId, FROZEN_CALL_DENY_OPTION)
+
+  const outcome = await pending
+  assert.equal(outcome.kind, 'expired')
+  if (outcome.kind !== 'expired') return
+  assert.equal(outcome.reason, 'expired')
+  assert.equal(db.rows.get(outcome.frozenCallId)?.status, 'expired')
 })
 
 // ---------------------------------------------------------------------------
@@ -425,7 +691,8 @@ test('store: sensitively-named keys are masked in the audit copy even without th
 // ---------------------------------------------------------------------------
 
 test('card timeout follows the frozen-call TTL — no 24h ask-user default', async () => {
-  const store = new FrozenCallStore(createFakeDb())
+  const db = createFakeDb()
+  const store = new FrozenCallStore(db)
   const outcome = await runFrozenCallConfirmation(
     'calendar_delete_event',
     { id: 'evt-ttl' },
@@ -439,12 +706,36 @@ test('card timeout follows the frozen-call TTL — no 24h ask-user default', asy
   )
   assert.equal(outcome.kind, 'expired', 'card must time out on the frozen-call TTL, not the 24h default')
   if (outcome.kind !== 'expired') return
-  assert.equal(store.get(outcome.frozenCallId)?.status, 'expired')
+  assert.equal(store.get(outcome.frozenCallId), null, 'terminal memory must not retain frozen params')
+  assert.equal(db.rows.get(outcome.frozenCallId)?.status, 'expired')
   assert.equal(
     getAskUserQuestionsStore().findPendingForSession('ttl-session'),
     null,
     'card slot must be freed when the TTL fires',
   )
+})
+
+test('terminal frozen calls retain only a bounded id tombstone without parameter bytes', () => {
+  const store = new FrozenCallStore(null)
+  for (let index = 0; index < 10_000; index += 1) {
+    const frozen = store.freeze({
+      toolName: 'calendar_delete_event',
+      params: { id: `sensitive-event-${index}` },
+      sessionId: `terminal-memory-${index}`,
+    })
+    assert.ok(frozen.ok)
+    if (!frozen.ok) continue
+    if (index % 3 === 0) assert.deepEqual(store.deny(frozen.id), { ok: true })
+    else if (index % 3 === 1) assert.deepEqual(store.expire(frozen.id), { ok: true })
+    else assert.equal(store.release(frozen.id, frozen.token).ok, true)
+  }
+
+  const state = store as unknown as {
+    records: Map<string, unknown>
+    terminalCallIds: Set<string>
+  }
+  assert.equal(state.records.size, 0)
+  assert.equal(state.terminalCallIds.size, 2_048)
 })
 
 // ---------------------------------------------------------------------------

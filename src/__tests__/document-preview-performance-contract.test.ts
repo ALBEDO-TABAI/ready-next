@@ -171,6 +171,12 @@ test('document save target follows the focused visible pane and safely falls bac
 
 test('document save shortcut only intercepts keys while a document pane is visible in workbench', () => {
   assert.equal(isDocumentSaveShortcutAvailable({
+    pathname: '/',
+    appMode: 'workbench',
+    workbenchMode: 'document',
+    splitMode: null,
+  }), true)
+  assert.equal(isDocumentSaveShortcutAvailable({
     pathname: '/workbench',
     appMode: 'workbench',
     workbenchMode: 'document',

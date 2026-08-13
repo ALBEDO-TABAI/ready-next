@@ -18,6 +18,7 @@ import type { WorkflowRawDatabase } from './browser-workflow-unit-of-work'
 export interface BrowserWorkflowParentRecord {
   taskId: string
   scopeId: string
+  messageVisibilityEpoch: number
   runId: string
   revision: number
   dependencyGeneration: number
@@ -57,6 +58,7 @@ export interface AgentSessionCheckpoint {
 export interface WorkflowParentRow {
   task_id: string
   scope_id: string
+  message_visibility_epoch: number
   run_id: string
   revision: number | null
   dependency_generation: number | null
@@ -116,6 +118,7 @@ export function mapWorkflowParentRow(row: WorkflowParentRow): BrowserWorkflowPar
   return {
     taskId: row.task_id,
     scopeId: row.scope_id,
+    messageVisibilityEpoch: row.message_visibility_epoch,
     runId: row.run_id,
     revision: Number(row.revision || 0),
     dependencyGeneration: Number(row.dependency_generation || 0),
@@ -129,7 +132,7 @@ export function mapWorkflowParentRow(row: WorkflowParentRow): BrowserWorkflowPar
 
 export function readWorkflowParent(db: WorkflowRawDatabase, taskId: string): BrowserWorkflowParentRecord {
   const row = db.prepare(
-    `SELECT task_id, scope_id, run_id, revision, dependency_generation, status,
+    `SELECT task_id, scope_id, message_visibility_epoch, run_id, revision, dependency_generation, status,
             request_anchor_json, steering_receipts_json, human_takeover_ref_json, checkpoint_refs_json
        FROM task_projections WHERE task_id = ? LIMIT 1`,
   ).get<WorkflowParentRow>(taskId)

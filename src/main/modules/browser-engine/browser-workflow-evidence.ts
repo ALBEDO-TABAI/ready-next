@@ -316,6 +316,9 @@ function parsePersistedOutcome(value: unknown, path: string): BrowserActionOutco
     mayHaveCommitted: outcome.mayHaveCommitted,
     identity: parsePersistedIdentity(outcome.identity, `${path}.identity`),
     successorIdentity: parsePersistedIdentity(outcome.successorIdentity, `${path}.successorIdentity`),
+    ...(outcome.postActionTabId === undefined
+      ? {}
+      : { postActionTabId: requiredString(outcome.postActionTabId, `${path}.postActionTabId`) }),
     ...(outcome.search === undefined
       ? {}
       : { search: parsePersistedSearchOutcome(outcome.search, `${path}.search`) }),
@@ -430,10 +433,14 @@ export function parseBrowserWorkflowActionJournal(
       if (causalKeys.has(key)) corruptBrowserWorkflowState('actionJournal.observationReceipts.causalActions')
       causalKeys.add(key)
       const action = settled.find((item) => item.actionId === causal.actionId && item.actionSeq === causal.actionSeq)
+      const expectedSuccessor = action
+        ? resolveBrowserObservationSuccessorIdentity(action.outcome, causal.successorIdentity)
+        : null
       if (
         !action
         || browserWorkflowStableDigest(causal.predecessorIdentity) !== browserWorkflowStableDigest(action.outcome.identity)
-        || browserWorkflowStableDigest(causal.successorIdentity) !== browserWorkflowStableDigest(action.outcome.successorIdentity)
+        || !expectedSuccessor
+        || browserWorkflowStableDigest(causal.successorIdentity) !== browserWorkflowStableDigest(expectedSuccessor)
         || causal.searchActionId !== (action.outcome.search?.searchActionId || null)
         || causal.queryDigest !== (action.outcome.search?.queryDigest || null)
       ) corruptBrowserWorkflowState('actionJournal.observationReceipts.causalActions')
@@ -642,6 +649,38 @@ export function hasCompleteBrowserDocumentIdentity(identity: BrowserActionTarget
     && Boolean(identity.frameDocumentToken)
 }
 
+function sameBrowserActionTargetIdentity(
+  left: BrowserActionTargetIdentity,
+  right: BrowserActionTargetIdentity,
+): boolean {
+  if (left.documentState === 'no_document' || right.documentState === 'no_document') {
+    return left.documentState === right.documentState
+  }
+  return sameBrowserDocumentIdentity(left, right) && left.targetRef === right.targetRef
+}
+
+export function resolveBrowserObservationSuccessorIdentity(
+  outcome: BrowserActionOutcome,
+  observedIdentity: BrowserActionTargetIdentity,
+): BrowserActionTargetIdentity | null {
+  const deferredTabsOpenTabId = outcome.operationId === 'tabs_open'
+    && sameBrowserActionTargetIdentity(outcome.identity, outcome.successorIdentity)
+    && typeof outcome.postActionTabId === 'string'
+    ? outcome.postActionTabId
+    : null
+  if (deferredTabsOpenTabId) {
+    return hasCompleteBrowserDocumentIdentity(observedIdentity)
+      && observedIdentity.tabId === deferredTabsOpenTabId
+      ? observedIdentity
+      : null
+  }
+  if (
+    hasCompleteBrowserDocumentIdentity(outcome.successorIdentity)
+    && sameBrowserDocumentIdentity(outcome.successorIdentity, observedIdentity)
+  ) return outcome.successorIdentity
+  return null
+}
+
 export function assessBrowserResearch(
   taskId: string,
   state: BrowserResearchPayloadState,
@@ -735,6 +774,19 @@ export function verifyBrowserObservationResource(
   return resource
 }
 
+export function browserObservationResourceUsableAsResearchEvidence(
+  resource: BrowserWorkflowObservationResource,
+): boolean {
+  try {
+    const content = asRecord(JSON.parse(resource.content))
+    const result = asRecord(content?.result)
+    return content?.usableAsResearchEvidence !== false
+      && result?.usableAsResearchEvidence !== false
+  } catch {
+    return false
+  }
+}
+
 export function readVerifiedBrowserWorkflowEvidence(
   taskId: string,
   payload: Record<string, unknown>,
@@ -778,6 +830,9 @@ export function readVerifiedBrowserWorkflowEvidence(
     const resource = resources.get(ref.resourceId)
     if (!resource) throw new Error(`browser_research_observation_resource_not_found:${ref.resourceId}`)
     verifyBrowserObservationResource(taskId, resource, receipt)
+    if (!browserObservationResourceUsableAsResearchEvidence(resource)) {
+      throw new Error(`browser_research_observation_not_usable_as_evidence:${ref.observationReceiptId}`)
+    }
     if (receipt.observationSeq !== ref.observationSeq
       || receipt.operationId !== ref.operationId
       || receipt.resultDigest !== ref.resultDigest

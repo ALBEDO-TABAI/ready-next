@@ -391,34 +391,10 @@ export async function executeBrowserSystemTool(
           && confirmed.target.targetDigest === targetDigest,
         )
         if (!exactConfirmation) {
-          const suspension: BrowserPermissionSuspensionRequest = {
-            version: 1,
-            kind: 'browser_permission',
-            requestId: `browser-permission-confirmation-${targetDigest.slice(0, 32)}`,
-            wakeKind: 'browser_permission',
-            toolName: 'browser_permission',
-            actionIntent: {
-              siteRequestId,
-              permission: pendingPermission,
-              origin: pendingOrigin,
-              decision,
-              inputHash,
-            },
-            target: {
-              scopeId: pending.target!.scopeId || envelope.scopeId,
-              ownerRunId: pending.target!.ownerRunId,
-              browserTaskId: pending.target!.browserTaskId,
-              tabId: pending.target!.tabId,
-              targetDigest,
-            },
-            purpose: 'site_permission_request',
-          }
           return createBrowserStructuredOutput({
             ok: false,
-            errorKind: 'browser_permission_confirmation_required',
-            phase: 'confirmation_required',
-            suspendAfterToolResult: true,
-            browserSuspensionRequest: suspension,
+            errorKind: 'browser_permission_confirmation_unavailable',
+            phase: 'blocked',
           })
         }
       }

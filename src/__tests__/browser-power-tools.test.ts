@@ -91,14 +91,11 @@ test.beforeEach(() => {
   setBrowserPowerGlobalModeReader(() => true)
 })
 
-type ConfirmedPowerRequest = NonNullable<Parameters<typeof executeBrowserTool>[8]>['confirmedBrowserPowerRequest']
-
 async function executePower(
   toolName: BrowserPublicToolName,
   operationId: BrowserOperationId,
   args: Record<string, unknown>,
   fixture: ReturnType<typeof controllerFixture>,
-  confirmedBrowserPowerRequest?: ConfirmedPowerRequest,
 ): Promise<Record<string, unknown>> {
   await browserSnapshotService.capture(
     fixture.controller,
@@ -118,72 +115,46 @@ async function executePower(
     undefined,
     {
       ...powerTaskContext(toolName, operationId, args),
-      confirmedBrowserPowerRequest,
     },
   ))
 }
 
-test('browser_eval executes only after an exact durable confirmation and records its outcome', async () => {
+test('browser_eval fails closed without creating a retired confirmation checkpoint', async () => {
   const fixture = controllerFixture()
   const args = { code: 'document.title', purpose: 'read title' }
-  const pending = await executePower('browser_eval', 'eval', args, fixture)
-  assert.equal(pending.errorKind, 'grant_required')
-  assert.equal(pending.browserActionOutcome, undefined)
-  assert.equal(pending.actionId, undefined)
-  const output = await executePower(
-    'browser_eval',
-    'eval',
-    args,
-    fixture,
-    pending.browserSuspensionRequest as ConfirmedPowerRequest,
-  )
-
-  assert.equal(output.ok, true, JSON.stringify(output))
-  assert.equal(output.result, 'Example Title')
-  assert.equal((output.browserActionOutcome as { dispatch?: string })?.dispatch, 'accepted')
-  assert.equal((output.browserActionOutcome as { delivery?: string })?.delivery, 'delivered')
-  assert.ok(fixture.calls.includes('Runtime.evaluate'))
-  assert.equal(__browserPowerAuditEventsForTests().length, 1)
-})
-
-test('browser_eval confirmation is bound to the exact task and input', async () => {
-  const fixture = controllerFixture(42)
-  const args = { code: 'fetch("/pay")', purpose: 'submit a payment' }
   const denied = await executePower('browser_eval', 'eval', args, fixture)
   assert.equal(denied.errorKind, 'grant_required')
-  assert.equal(fixture.calls.length, 0)
-
-  const allowed = await executePower(
-    'browser_eval',
-    'eval',
-    args,
-    fixture,
-    denied.browserSuspensionRequest as ConfirmedPowerRequest,
-  )
-  assert.equal(allowed.ok, true)
-  assert.match(String(allowed.preflightAuditId || ''), /^browser-power-preflight-/)
-  assert.equal(fixture.preflights.length, 1)
-  assert.equal(fixture.preflights[0].confirmation_source, 'confirmation_card')
-  assert.match(String(fixture.preflights[0].input_hash || ''), /^[a-f0-9]{64}$/)
-  assert.ok(fixture.calls.indexOf('persist-preflight') < fixture.calls.indexOf('Runtime.evaluate'))
+  assert.equal(denied.browserSuspensionRequest, undefined)
+  assert.equal(denied.suspendAfterToolResult, undefined)
+  assert.equal(denied.browserActionOutcome, undefined)
+  assert.equal(denied.actionId, undefined)
+  assert.equal(fixture.calls.includes('Runtime.evaluate'), false)
+  assert.equal(__browserPowerAuditEventsForTests().length, 0)
 })
 
-test('destructive browser_eval fails closed before page execution when persistent preflight storage fails', async () => {
+test('repeating browser_eval cannot mint a grant or persistent preflight receipt', async () => {
+  const fixture = controllerFixture(42)
+  const args = { code: 'fetch("/pay")', purpose: 'submit a payment' }
+  const first = await executePower('browser_eval', 'eval', args, fixture)
+  const second = await executePower('browser_eval', 'eval', args, fixture)
+  assert.equal(first.errorKind, 'grant_required')
+  assert.equal(second.errorKind, 'grant_required')
+  assert.equal(first.browserSuspensionRequest, undefined)
+  assert.equal(second.browserSuspensionRequest, undefined)
+  assert.equal(fixture.preflights.length, 0)
+  assert.equal(fixture.calls.includes('Runtime.evaluate'), false)
+})
+
+test('browser_eval does not touch retired preflight storage while failing closed', async () => {
   const fixture = controllerFixture(42)
   ;(fixture.controller as unknown as { recordBrowserPowerPreflightAudit: () => void }).recordBrowserPowerPreflightAudit = () => {
     throw new Error('disk unavailable')
   }
   const args = { code: 'fetch("/pay")', purpose: 'submit a payment' }
-  const pending = await executePower('browser_eval', 'eval', args, fixture)
-  const output = await executePower(
-    'browser_eval',
-    'eval',
-    args,
-    fixture,
-    pending.browserSuspensionRequest as ConfirmedPowerRequest,
-  )
+  const output = await executePower('browser_eval', 'eval', args, fixture)
 
-  assert.equal(output.errorKind, 'power_preflight_audit_failed')
+  assert.equal(output.errorKind, 'grant_required')
+  assert.equal(output.browserSuspensionRequest, undefined)
   assert.equal(output.browserActionOutcome, undefined)
   assert.equal(fixture.calls.includes('Runtime.evaluate'), false)
 })
@@ -210,27 +181,21 @@ test('natural-language confirmation text cannot mint a Power grant', async () =>
   assert.equal(fixture.calls.includes('Runtime.evaluate'), false)
 })
 
-test('production confirmation receipt mints a one-shot exact Power grant', async () => {
+test('browser_cdp fails closed without issuing a confirmation receipt', async () => {
   const fixture = controllerFixture('confirmed')
   const args = {
     method: 'Experimental.doAnything',
     purpose: 'inspect an experimental target',
     tab_id: 'tab-1',
   }
-  const pending = await executePower('browser_cdp', 'cdp', args, fixture)
-  assert.equal(pending.errorKind, 'grant_required')
-  const output = await executePower(
-    'browser_cdp',
-    'cdp',
-    args,
-    fixture,
-    pending.browserSuspensionRequest as ConfirmedPowerRequest,
-  )
-  assert.equal(output.ok, true)
-  assert.equal(fixture.preflights[0].confirmation_source, 'confirmation_card')
+  const output = await executePower('browser_cdp', 'cdp', args, fixture)
+  assert.equal(output.errorKind, 'grant_required')
+  assert.equal(output.browserSuspensionRequest, undefined)
+  assert.equal(output.suspendAfterToolResult, undefined)
+  assert.equal(fixture.preflights.length, 0)
 })
 
-test('a confirmation receipt from an old owner run cannot mint a grant for a new owner', async () => {
+test('browser_eval denial exposes no owner-bound receipt that a later run could replay', async () => {
   const fixture = controllerFixture('submitted')
   const args = {
     code: 'fetch("/pay", { method: "POST" })',
@@ -238,43 +203,8 @@ test('a confirmation receipt from an old owner run cannot mint a grant for a new
     tab_id: 'tab-1',
   }
   const first = await executePower('browser_eval', 'eval', args, fixture)
-  const oldReceipt = first.browserSuspensionRequest
   assert.equal(first.errorKind, 'grant_required', JSON.stringify(first))
-  assert.equal((oldReceipt as { target?: { ownerRunId?: string } })?.target?.ownerRunId, 'run-1')
-
-  const replacementContext = powerTaskContext('browser_eval', 'eval', args)
-  replacementContext.ownerRunId = 'run-2'
-  replacementContext.taskEnvelope = {
-    ...replacementContext.taskEnvelope,
-    runId: 'run-2',
-  }
-  await browserSnapshotService.capture(
-    fixture.controller,
-    'tab-1',
-    10_000,
-    async () => ({ targets: [] }),
-    { force: true },
-  )
-  const replayed = parseOutput(await executeBrowserTool(
-    'browser_eval',
-    args,
-    fixture.controller,
-    undefined,
-    'session-1',
-    undefined,
-    undefined,
-    undefined,
-    {
-      ...replacementContext,
-      confirmedBrowserPowerRequest: oldReceipt as ConfirmedPowerRequest,
-    },
-  ))
-
-  assert.equal(replayed.errorKind, 'grant_required')
-  assert.equal(
-    (replayed.browserSuspensionRequest as { target?: { ownerRunId?: string } })?.target?.ownerRunId,
-    'run-2',
-  )
+  assert.equal(first.browserSuspensionRequest, undefined)
   assert.equal(fixture.preflights.length, 0)
   assert.equal(fixture.calls.includes('Runtime.evaluate'), false)
 })

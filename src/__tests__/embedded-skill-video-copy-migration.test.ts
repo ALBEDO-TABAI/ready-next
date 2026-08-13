@@ -32,6 +32,7 @@ import {
   _resetLastReferenceSkillHintsForTests,
   getLastReferenceSkill,
 } from '../main/modules/agent-control/skills/skill-reference-hints'
+import { __setScopeContextEpochDatabaseForTests } from '../main/modules/agent-control/session/scope-context-epoch'
 import { completeVideoCopyAnalyzeResult } from '../main/modules/tools/video-copy-deliverable-postprocess'
 import { __skillsToolsInternalsForTests } from '../main/modules/tools/skills-tools'
 import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
@@ -39,6 +40,13 @@ import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
 const __dirname = dirname(fileURLToPath(import.meta.url))
 // src/__tests__ → repo root → assets/embedded-skills/video-copy-analyzer
 const SKILL_DIR = join(__dirname, '..', '..', 'assets', 'embedded-skills', 'video-copy-analyzer')
+
+test.before(() => {
+  __setScopeContextEpochDatabaseForTests({
+    getRawDb: () => ({ prepare: () => ({ get: () => undefined }) }) as never,
+  })
+})
+test.after(() => __setScopeContextEpochDatabaseForTests(null))
 
 function findPython39(): string | null {
   const candidates = [
@@ -850,6 +858,7 @@ test('orchestrator inline-injects SKILL.md and arms the primitive-gating hint', 
     userText: '用 video-copy-analyzer 分析这个视频 https://example.com/video.mp4',
     session,
     sessionId: 'test-session-videocopy',
+    messageVisibilityEpoch: 0,
     emitOutput: () => {},
     emitToolAction: () => { toolCalls += 1 },
     executeTool: async () => {

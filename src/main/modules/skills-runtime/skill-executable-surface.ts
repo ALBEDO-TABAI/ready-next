@@ -29,9 +29,10 @@ export function skillHasDeclaredBins(skill: {
 export function buildSkillShellBaseAllowlist(input: {
   baseAllowlist: ReadonlySet<string>
   requiredBins?: readonly string[] | null
+  hasScripts: boolean
   allowSkillScripts: boolean
 }): Set<string> {
-  const allowlist = input.allowSkillScripts
+  const allowlist = input.hasScripts && input.allowSkillScripts
     ? new Set(input.baseAllowlist)
     : new Set<string>()
   for (const bin of input.requiredBins || []) {

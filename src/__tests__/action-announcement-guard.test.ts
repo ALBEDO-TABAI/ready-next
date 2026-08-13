@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
-import { describe, test } from 'node:test'
+import { after, before, describe, test } from 'node:test'
 
 import {
   AgentSdkRuntime,
@@ -14,10 +14,18 @@ import {
 import { canResumeShape } from '../main/modules/agent-control/contracts/resume-handle'
 import type { ToolDefinition } from '../main/modules/agent-control/tools-runtime/tool-definition'
 import { createToolExecutionOutput } from '../main/modules/agent-control/tools-runtime/tool-result-types'
+import { __setScopeContextEpochDatabaseForTests } from '../main/modules/agent-control/session/scope-context-epoch'
 import { ScriptedAgentRunner } from './helpers/scripted-agent-runner'
 import { canonicalCoreCloseoutTestPort } from './helpers/canonical-core-closeout-test-port'
 
 import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
+
+before(() => {
+  __setScopeContextEpochDatabaseForTests({
+    getRawDb: () => ({ prepare: () => ({ get: () => undefined }) }) as never,
+  })
+})
+after(() => __setScopeContextEpochDatabaseForTests(null))
 
 test('action-announcement-guard declares transitive sqlite ABI guard', (t) => {
   skipIfSqliteUnavailable(t, 'action-announcement-guard transitive sqlite load')

@@ -9,6 +9,7 @@ import type { CanonicalAssistantMessageReceipt } from '../../../shared/ipc-contr
 import { parseObjectStrict, serializeWorkflowJson, workflowDigest } from './browser-workflow-codec'
 import type { WorkflowRawDatabase } from './browser-workflow-unit-of-work'
 import { buildCanonicalCoreCloseoutMessage } from './canonical-core-closeout-message'
+import { requireRunMessageVisibilityEpoch } from './agent-session-message-visibility'
 
 interface ChatMessageRow {
   id: string
@@ -17,6 +18,7 @@ interface ChatMessageRow {
   content: string
   timestamp: string
   meta_json?: string | null
+  message_visibility_epoch?: number
 }
 
 function resolveCheckpointNotice(input: {
@@ -66,9 +68,14 @@ export function writeCanonicalCheckpointNotice(
     ...(input.suspensionRequest ? { browserConfirmationRequest: input.suspensionRequest } : {}),
   }
   const canonicalMessageDigest = workflowDigest(canonicalMessage)
+  const messageVisibilityEpoch = requireRunMessageVisibilityEpoch(db, {
+    ownerRunId: input.ownerRunId,
+    conversationId: input.conversationId,
+  })
   db.prepare(
-    `INSERT INTO chat_messages (id, conversation_id, role, content, timestamp, meta_json)
-     VALUES (?, ?, 'assistant', ?, ?, ?)
+    `INSERT INTO chat_messages (
+       id, conversation_id, role, content, timestamp, meta_json, message_visibility_epoch
+     ) VALUES (?, ?, 'assistant', ?, ?, ?, ?)
      ON CONFLICT(id) DO NOTHING`,
   ).run(
     canonicalMessage.id,
@@ -76,12 +83,15 @@ export function writeCanonicalCheckpointNotice(
     canonicalMessage.content,
     canonicalMessage.timestamp,
     serializeWorkflowJson(canonicalMessage.meta, 'checkpoint_canonical_assistant_meta_json'),
+    messageVisibilityEpoch,
   )
   const messageReadback = db.prepare(
-    `SELECT id, conversation_id, role, content, timestamp, meta_json
+    `SELECT id, conversation_id, role, content, timestamp, meta_json,
+            message_visibility_epoch
        FROM chat_messages WHERE id = ? LIMIT 1`,
   ).get<Required<ChatMessageRow>>(canonicalMessage.id)
-  if (!messageReadback || messageReadback.role !== 'assistant') {
+  if (!messageReadback || messageReadback.role !== 'assistant'
+    || messageReadback.message_visibility_epoch !== messageVisibilityEpoch) {
     throw new Error('checkpoint_canonical_assistant_message_readback_failed')
   }
   const readbackCanonical = {

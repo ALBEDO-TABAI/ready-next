@@ -8,6 +8,10 @@ import type {
   CodexThreadItem,
   CodexTurn,
 } from './codex-native-runtime'
+import type {
+  CodexServerRequestResponse,
+  CodexToolResponseDeliveryAttemptIdentity,
+} from './codex-tool-response-delivery'
 
 type BufferedNotification = {
   kind: 'notification'
@@ -69,12 +73,15 @@ export type CodexToolServerRequestParams = {
 }
 
 export interface CodexBoundServerRequestExecutor {
-  execute(input: {
+  executeServerRequest(input: {
     bindingId: string
     connectionEpoch: string
     requestId: number | string
     params: CodexToolServerRequestParams
-  }): Promise<unknown>
+  }): Promise<CodexServerRequestResponse>
+  confirmServerResponseTransportWrite(
+    attempt: CodexToolResponseDeliveryAttemptIdentity,
+  ): void | PromiseLike<void>
 }
 
 export interface CodexStartInboundQuarantinePort {
@@ -179,10 +186,27 @@ function frameBytes(value: unknown): number {
 export class CodexProvisionalInboundBuffer implements CodexInboundFramePort {
   private readonly threads = new Map<string, ProvisionalThreadOwner>()
   private readonly turns = new Map<string, ProvisionalTurnOwner>()
-  private readonly boundThreads = new Map<string, string>()
+  private readonly boundThreads = new Map<string, {
+    bindingId: string
+    connectionEpoch: string
+  }>()
   private readonly boundTurns = new Map<string, {
     bindingId: string
     allowServerRequests: boolean
+    connectionEpoch: string
+  }>()
+  private readonly unknownOwners = new Map<string, {
+    kind: 'thread' | 'turn'
+    bindingId: string
+    connectionEpoch: string
+    unknownReason: string
+  }>()
+  private readonly pendingQuarantines = new Map<string, {
+    method: 'thread/start' | 'turn/start'
+    kind: 'thread' | 'turn'
+    bindingId: string
+    connectionEpoch: string
+    reason: string
   }>()
   private releasePort: CodexInboundFrameReleasePort | null = null
   private sequence = 0
@@ -190,6 +214,7 @@ export class CodexProvisionalInboundBuffer implements CodexInboundFramePort {
   constructor(private readonly deps: {
     maxFramesPerOwner: number
     maxBytesPerOwner: number
+    maxActiveOwners?: number
     nowMs: () => number
     serverRequestExecutor: CodexBoundServerRequestExecutor
     startInboundQuarantinePort: CodexStartInboundQuarantinePort
@@ -199,6 +224,9 @@ export class CodexProvisionalInboundBuffer implements CodexInboundFramePort {
       || deps.maxFramesPerOwner <= 0
       || !Number.isSafeInteger(deps.maxBytesPerOwner)
       || deps.maxBytesPerOwner <= 0
+      || (deps.maxActiveOwners !== undefined && (
+        !Number.isSafeInteger(deps.maxActiveOwners) || deps.maxActiveOwners <= 0
+      ))
     ) throw new CodexProvisionalInboundBufferError('buffer_limits_invalid')
   }
 
@@ -210,6 +238,16 @@ export class CodexProvisionalInboundBuffer implements CodexInboundFramePort {
     }
   }
 
+  confirmServerResponseTransportWrite(
+    attempt: CodexToolResponseDeliveryAttemptIdentity,
+  ): void | PromiseLike<void> {
+    return this.deps.serverRequestExecutor.confirmServerResponseTransportWrite(attempt)
+  }
+
+  assertProvisionalOwnerCapacityAvailable(): void {
+    this.assertOwnerCapacity()
+  }
+
   registerProvisionalThread(input: {
     bindingId: string
     connectionEpoch: string
@@ -218,8 +256,10 @@ export class CodexProvisionalInboundBuffer implements CodexInboundFramePort {
     deadlineAtMs: number
   }): void {
     this.assertRegistration(input)
+    this.assertOwnerCapacity()
     if (
       this.threads.has(input.bindingId)
+      || this.isUnknownOwner('thread', input.bindingId, input.connectionEpoch)
       || [...this.threads.values()].some((owner) => (
         owner.state === 'provisional'
         && owner.connectionEpoch === input.connectionEpoch
@@ -248,10 +288,12 @@ export class CodexProvisionalInboundBuffer implements CodexInboundFramePort {
     deadlineAtMs: number
   }): void {
     this.assertRegistration(input)
+    this.assertOwnerCapacity()
     if (
       !nonEmpty(input.threadId)
       || !nonEmpty(input.clientUserMessageId)
       || this.turns.has(input.bindingId)
+      || this.isUnknownOwner('turn', input.bindingId, input.connectionEpoch)
       || [...this.turns.values()].some((owner) => (
         owner.state === 'provisional'
         && owner.threadId === input.threadId
@@ -286,9 +328,11 @@ export class CodexProvisionalInboundBuffer implements CodexInboundFramePort {
       connectionEpoch: input.connectionEpoch,
       deadlineAtMs: input.deadlineAtMs,
     })
+    this.assertOwnerCapacity()
     if (
       !nonEmpty(input.threadId)
       || this.turns.has(input.manualCompactionId)
+      || this.isUnknownOwner('turn', input.manualCompactionId, input.connectionEpoch)
       || [...this.turns.values()].some((owner) => (
         owner.state === 'provisional' && owner.threadId === input.threadId
       ))
@@ -320,6 +364,9 @@ export class CodexProvisionalInboundBuffer implements CodexInboundFramePort {
     nativeThreadId: string
   }, commitAccepted: (disposition: 'bound') => void = () => undefined): Promise<'released' | 'unknown'> {
     const owner = this.threads.get(input.bindingId)
+    if (!owner && this.isUnknownOwner('thread', input.bindingId, input.connectionEpoch)) {
+      return 'unknown'
+    }
     if (!owner || owner.connectionEpoch !== input.connectionEpoch) {
       throw new CodexProvisionalInboundBufferError('provisional_thread_not_found')
     }
@@ -335,8 +382,12 @@ export class CodexProvisionalInboundBuffer implements CodexInboundFramePort {
     owner.observedNativeThreadId = input.nativeThreadId
     owner.state = 'bound'
     this.clearDeadline(owner)
-    this.boundThreads.set(input.nativeThreadId, input.bindingId)
+    this.boundThreads.set(input.nativeThreadId, {
+      bindingId: input.bindingId,
+      connectionEpoch: input.connectionEpoch,
+    })
     await this.release(owner)
+    this.threads.delete(owner.bindingId)
     return 'released'
   }
 
@@ -349,6 +400,9 @@ export class CodexProvisionalInboundBuffer implements CodexInboundFramePort {
     disposition: 'bound'
   ) => void = () => undefined): Promise<'released' | 'unknown'> {
     const owner = this.turns.get(input.bindingId)
+    if (!owner && this.isUnknownOwner('turn', input.bindingId, input.connectionEpoch)) {
+      return 'unknown'
+    }
     if (
       !owner
       || owner.connectionEpoch !== input.connectionEpoch
@@ -392,40 +446,47 @@ export class CodexProvisionalInboundBuffer implements CodexInboundFramePort {
     }
     const identity = notificationTurnIdentity(input.notification)
     if (!identity) throw new CodexProvisionalInboundBufferError('notification_identity_missing')
-    const bound = this.boundTurns.get(this.turnKey(identity.threadId, identity.turnId))
-    if (bound) return 'broadcast'
+    const turnKey = this.turnKey(identity.threadId, identity.turnId)
+    const bound = this.boundTurns.get(turnKey)
+    if (bound) {
+      if (this.isTerminalTurnNotification(input.notification)) this.boundTurns.delete(turnKey)
+      return 'broadcast'
+    }
     const pending = this.provisionalTurnsForThread(input.connectionEpoch, identity.threadId)
     if (pending.length !== 1) {
       for (const owner of pending) this.markUnknown(owner, 'turn_owner_ambiguous')
       throw new CodexProvisionalInboundBufferError('turn_owner_not_unique')
     }
     const owner = pending[0]
-    if (this.expire(owner) || owner.state === 'unknown') return 'buffered'
+    if (this.expire(owner) || owner.state === 'unknown') {
+      return this.failProtocol('turn_owner_unknown')
+    }
     if (
       owner.pendingReconciliation
       && owner.pendingReconciliation.nativeTurnId !== identity.turnId
     ) {
       this.markUnknown(owner, 'turn_reconciliation_identity_conflict')
-      return 'buffered'
+      return this.failProtocol('turn_reconciliation_identity_conflict')
     }
     if (owner.identityMode === 'manual_compaction') {
       owner.candidateNativeTurnIds.add(identity.turnId)
       if (owner.candidateNativeTurnIds.size > 1) {
         this.markUnknown(owner, 'manual_compaction_turn_identity_conflict')
-        return 'buffered'
+        return this.failProtocol('manual_compaction_turn_identity_conflict')
       }
       const item = identity.item
       if (item?.type === 'dynamicToolCall' || item?.type === 'userMessage') {
         this.markUnknown(owner, 'manual_compaction_item_forbidden')
+        return this.failProtocol('manual_compaction_item_forbidden')
       } else {
         owner.observedNativeTurnId = identity.turnId
       }
-      this.buffer(owner, {
+      if (!this.buffer(owner, {
         kind: 'notification',
         sequence: this.nextSequence(),
         bytes: frameBytes(input.frame),
         notification: input.notification,
-      })
+      })) return this.failProtocol('provisional_buffer_overflow')
       if (
         owner.state === 'provisional'
         && owner.observedNativeTurnId
@@ -435,23 +496,24 @@ export class CodexProvisionalInboundBuffer implements CodexInboundFramePort {
     const clientIds = clientUserMessageIds(identity.turn, identity.item)
     if (clientIds.length > 1 || (clientIds.length === 1 && clientIds[0] !== owner.clientUserMessageId)) {
       this.markUnknown(owner, 'turn_client_identity_conflict')
-      return 'buffered'
+      return this.failProtocol('turn_client_identity_conflict')
     }
     owner.candidateNativeTurnIds.add(identity.turnId)
     if (owner.candidateNativeTurnIds.size > 1) {
       this.markUnknown(owner, 'turn_native_identity_conflict')
-      return 'buffered'
+      return this.failProtocol('turn_native_identity_conflict')
     }
     if (clientIds.length === 1) owner.observedNativeTurnId = identity.turnId
     else if (!owner.observedNativeTurnId && isActionBearing(input.notification, identity)) {
       this.markUnknown(owner, 'action_before_turn_identity')
+      return this.failProtocol('action_before_turn_identity')
     }
-    this.buffer(owner, {
+    if (!this.buffer(owner, {
       kind: 'notification',
       sequence: this.nextSequence(),
       bytes: frameBytes(input.frame),
       notification: input.notification,
-    })
+    })) return this.failProtocol('provisional_buffer_overflow')
     if (
       owner.state === 'provisional'
       && owner.observedNativeTurnId
@@ -466,7 +528,7 @@ export class CodexProvisionalInboundBuffer implements CodexInboundFramePort {
     params: unknown
   }): Promise<
     | { disposition: 'buffered' }
-    | { disposition: 'respond'; result: unknown }
+    | ({ disposition: 'respond' } & CodexServerRequestResponse)
   > {
     const params = parseToolServerRequest(input.params)
     const bound = this.boundTurns.get(this.turnKey(params.threadId, params.turnId))
@@ -476,7 +538,7 @@ export class CodexProvisionalInboundBuffer implements CodexInboundFramePort {
       }
       return {
         disposition: 'respond',
-        result: await this.deps.serverRequestExecutor.execute({
+        ...await this.deps.serverRequestExecutor.executeServerRequest({
           bindingId: bound.bindingId,
           connectionEpoch: input.connectionEpoch,
           requestId: input.requestId,
@@ -490,29 +552,62 @@ export class CodexProvisionalInboundBuffer implements CodexInboundFramePort {
       throw new CodexProvisionalInboundBufferError('server_request_owner_not_unique')
     }
     const owner = pending[0]
-    if (this.expire(owner) || owner.state === 'unknown') return { disposition: 'buffered' }
+    if (this.expire(owner) || owner.state === 'unknown') {
+      return this.failProtocol('server_request_owner_unknown')
+    }
     if (owner.identityMode === 'manual_compaction') {
       this.markUnknown(owner, 'manual_compaction_tool_forbidden')
-      return { disposition: 'buffered' }
+      return this.failProtocol('manual_compaction_tool_forbidden')
     }
     if (owner.observedNativeTurnId !== params.turnId) {
       this.markUnknown(owner, 'server_request_before_turn_identity')
+      return this.failProtocol('server_request_before_turn_identity')
     }
-    this.buffer(owner, {
+    if (!this.buffer(owner, {
       kind: 'server_request',
       sequence: this.nextSequence(),
       bytes: frameBytes(input.params),
       connectionEpoch: input.connectionEpoch,
       requestId: input.requestId,
       params,
-    })
+    })) return this.failProtocol('provisional_buffer_overflow')
     return { disposition: 'buffered' }
   }
 
   markConnectionClosed(connectionEpoch: string): void {
+    const failures: unknown[] = []
+    for (const quarantine of [...this.pendingQuarantines.values()]) {
+      if (quarantine.connectionEpoch !== connectionEpoch) continue
+      try {
+        this.commitPendingQuarantine(quarantine)
+      } catch (error) {
+        failures.push(error)
+      }
+    }
     for (const owner of [...this.threads.values(), ...this.turns.values()]) {
-      if (owner.connectionEpoch === connectionEpoch && owner.state === 'provisional') {
-        this.markUnknown(owner, 'connection_closed_before_binding')
+      if (owner.connectionEpoch !== connectionEpoch || owner.state === 'bound') continue
+      try {
+        this.markUnknown(owner, 'connection_closed_before_binding', { quarantineDurable: false })
+      } catch (error) {
+        failures.push(error)
+      }
+    }
+    for (const [threadId, bound] of this.boundThreads) {
+      if (bound.connectionEpoch === connectionEpoch) this.boundThreads.delete(threadId)
+    }
+    for (const [turnId, bound] of this.boundTurns) {
+      if (bound.connectionEpoch === connectionEpoch) this.boundTurns.delete(turnId)
+    }
+    if (failures.length > 0) throw new AggregateError(failures, 'provisional_close_failed')
+  }
+
+  retireThread(connectionEpoch: string, codexThreadId: string): void {
+    const bound = this.boundThreads.get(codexThreadId)
+    if (bound?.connectionEpoch === connectionEpoch) this.boundThreads.delete(codexThreadId)
+    const prefix = `${codexThreadId}\0`
+    for (const [key, turn] of this.boundTurns) {
+      if (turn.connectionEpoch === connectionEpoch && key.startsWith(prefix)) {
+        this.boundTurns.delete(key)
       }
     }
   }
@@ -521,6 +616,11 @@ export class CodexProvisionalInboundBuffer implements CodexInboundFramePort {
     let expired = 0
     for (const owner of [...this.threads.values(), ...this.turns.values()]) {
       if (this.expire(owner)) expired += 1
+    }
+    if (expired > 0) {
+      this.releasePort?.failProtocol(
+        new CodexProvisionalInboundBufferError('provisional_buffer_deadline_exceeded'),
+      )
     }
     return expired
   }
@@ -612,7 +712,20 @@ export class CodexProvisionalInboundBuffer implements CodexInboundFramePort {
       unknownReason: owner.unknownReason,
       frameCount: owner.frames.length,
       bufferedBytes: owner.bufferedBytes,
-    }))
+    })).concat([
+      ...this.unknownOwners.values(),
+      ...[...this.pendingQuarantines.values()].map((owner) => ({
+        ...owner,
+        unknownReason: owner.reason,
+      })),
+    ].map((owner) => ({
+      kind: owner.kind,
+      bindingId: owner.bindingId,
+      state: 'unknown' as const,
+      unknownReason: owner.unknownReason,
+      frameCount: 0,
+      bufferedBytes: 0,
+    })))
   }
 
   private routeThreadStarted(
@@ -632,7 +745,9 @@ export class CodexProvisionalInboundBuffer implements CodexInboundFramePort {
       throw new CodexProvisionalInboundBufferError('thread_owner_not_unique')
     }
     const owner = matches[0]
-    if (this.expire(owner) || owner.state === 'unknown') return 'buffered'
+    if (this.expire(owner) || owner.state === 'unknown') {
+      return this.failProtocol('thread_owner_unknown')
+    }
     const thread = notification.params.thread
     if (
       thread.sessionId !== thread.id
@@ -641,15 +756,15 @@ export class CodexProvisionalInboundBuffer implements CodexInboundFramePort {
       || (owner.observedNativeThreadId && owner.observedNativeThreadId !== thread.id)
     ) {
       this.markUnknown(owner, 'thread_metadata_conflict')
-      return 'buffered'
+      return this.failProtocol('thread_metadata_conflict')
     }
     owner.observedNativeThreadId = thread.id
-    this.buffer(owner, {
+    if (!this.buffer(owner, {
       kind: 'notification',
       sequence: this.nextSequence(),
       bytes: frameBytes(notification),
       notification,
-    })
+    })) return this.failProtocol('provisional_buffer_overflow')
     return 'buffered'
   }
 
@@ -662,8 +777,10 @@ export class CodexProvisionalInboundBuffer implements CodexInboundFramePort {
     this.boundTurns.set(this.turnKey(owner.threadId, owner.observedNativeTurnId), {
       bindingId: owner.bindingId,
       allowServerRequests: owner.identityMode === 'user_message',
+      connectionEpoch: owner.connectionEpoch,
     })
     await this.release(owner)
+    this.turns.delete(owner.bindingId)
   }
 
   private async finishPendingTurnReconciliation(owner: ProvisionalTurnOwner): Promise<void> {
@@ -694,29 +811,38 @@ export class CodexProvisionalInboundBuffer implements CodexInboundFramePort {
     for (const frame of frames) {
       if (frame.kind === 'notification') {
         port.broadcastNotification(frame.notification)
+        const identity = notificationTurnIdentity(frame.notification)
+        if (identity && this.isTerminalTurnNotification(frame.notification)) {
+          this.boundTurns.delete(this.turnKey(identity.threadId, identity.turnId))
+        }
         continue
       }
-      const result = await this.deps.serverRequestExecutor.execute({
+      const response = await this.deps.serverRequestExecutor.executeServerRequest({
         bindingId: owner.bindingId,
         connectionEpoch: frame.connectionEpoch,
         requestId: frame.requestId,
         params: frame.params,
       })
-      port.respondServerRequest(frame.requestId, result)
+      port.respondServerRequest(
+        frame.requestId,
+        response.result,
+        response.deliveryAttempt,
+      )
     }
   }
 
-  private buffer(owner: ProvisionalOwner, frame: BufferedFrame): void {
-    if (owner.state === 'unknown') return
+  private buffer(owner: ProvisionalOwner, frame: BufferedFrame): boolean {
+    if (owner.state === 'unknown') return false
     if (
       owner.frames.length + 1 > this.deps.maxFramesPerOwner
       || owner.bufferedBytes + frame.bytes > this.deps.maxBytesPerOwner
     ) {
       this.markUnknown(owner, 'provisional_buffer_overflow')
-      return
+      return false
     }
     owner.frames.push(frame)
     owner.bufferedBytes += frame.bytes
+    return true
   }
 
   private provisionalTurnsForThread(
@@ -736,29 +862,56 @@ export class CodexProvisionalInboundBuffer implements CodexInboundFramePort {
     return true
   }
 
-  private markUnknown(owner: ProvisionalOwner, reason: string): void {
+  private markUnknown(
+    owner: ProvisionalOwner,
+    reason: string,
+    options: { quarantineDurable?: boolean } = {},
+  ): void {
     if (owner.state === 'bound') throw new CodexProvisionalInboundBufferError('bound_owner_cannot_be_unknown')
     if (owner.state === 'unknown') return
     const turnOwner = 'identityMode' in owner ? owner as ProvisionalTurnOwner : null
+    const threadOwner = turnOwner ? null : owner as ProvisionalThreadOwner
     const pending = turnOwner?.pendingReconciliation || null
     if (turnOwner) turnOwner.pendingReconciliation = null
     owner.state = 'unknown'
     owner.unknownReason = reason
     this.clearDeadline(owner)
+    owner.frames = []
+    owner.bufferedBytes = 0
+    const kind = threadOwner ? 'thread' as const : 'turn' as const
+    if (threadOwner) {
+      threadOwner.expectedCwd = ''
+      threadOwner.expectedSource = ''
+      threadOwner.observedNativeThreadId = null
+    } else {
+      turnOwner!.threadId = ''
+      turnOwner!.clientUserMessageId = null
+      turnOwner!.observedNativeTurnId = null
+      turnOwner!.reconciledNativeTurnId = null
+      turnOwner!.candidateNativeTurnIds.clear()
+    }
+    const unknownOwner = {
+      kind,
+      bindingId: owner.bindingId,
+      connectionEpoch: owner.connectionEpoch,
+      unknownReason: reason,
+    }
+    if (kind === 'thread') this.threads.delete(owner.bindingId)
+    else this.turns.delete(owner.bindingId)
+    const quarantine = options.quarantineDurable !== false
+      && (threadOwner || turnOwner?.identityMode === 'user_message')
+      ? {
+          method: threadOwner ? 'thread/start' as const : 'turn/start' as const,
+          kind,
+          bindingId: owner.bindingId,
+          connectionEpoch: owner.connectionEpoch,
+          reason,
+        }
+      : null
+    if (quarantine) this.pendingQuarantines.set(this.unknownOwnerKey(quarantine), quarantine)
+    else this.rememberUnknownOwner(unknownOwner)
     try {
-      if ('expectedCwd' in owner) {
-        this.deps.startInboundQuarantinePort.quarantine({
-          method: 'thread/start',
-          bindingId: owner.bindingId,
-          reason,
-        })
-      } else if ('identityMode' in owner && owner.identityMode === 'user_message') {
-        this.deps.startInboundQuarantinePort.quarantine({
-          method: 'turn/start',
-          bindingId: owner.bindingId,
-          reason,
-        })
-      }
+      if (quarantine) this.commitPendingQuarantine(quarantine)
     } catch (error) {
       pending?.reject(
         error instanceof Error
@@ -776,7 +929,11 @@ export class CodexProvisionalInboundBuffer implements CodexInboundFramePort {
     const delayMs = Math.max(0, owner.deadlineAtMs - this.deps.nowMs() + 1)
     owner.deadlineTimer = setTimeout(() => {
       try {
-        this.expire(owner)
+        if (this.expire(owner)) {
+          this.releasePort?.failProtocol(
+            new CodexProvisionalInboundBufferError('provisional_buffer_deadline_exceeded'),
+          )
+        }
       } catch (error) {
         this.releasePort?.failProtocol(
           error instanceof Error ? error : new CodexProvisionalInboundBufferError('deadline_failure'),
@@ -802,6 +959,80 @@ export class CodexProvisionalInboundBuffer implements CodexInboundFramePort {
       || !Number.isSafeInteger(input.deadlineAtMs)
       || input.deadlineAtMs <= this.deps.nowMs()
     ) throw new CodexProvisionalInboundBufferError('provisional_registration_invalid')
+  }
+
+  private assertOwnerCapacity(): void {
+    const limit = this.deps.maxActiveOwners ?? 2_048
+    if (
+      this.threads.size + this.turns.size + this.boundThreads.size + this.boundTurns.size
+      + this.pendingQuarantines.size
+      >= limit
+    ) {
+      throw new CodexProvisionalInboundBufferError('provisional_owner_capacity_exhausted')
+    }
+  }
+
+  private rememberUnknownOwner(owner: {
+    kind: 'thread' | 'turn'
+    bindingId: string
+    connectionEpoch: string
+    unknownReason: string
+  }): void {
+    const key = this.unknownOwnerKey(owner)
+    this.unknownOwners.delete(key)
+    this.unknownOwners.set(key, owner)
+    if (this.unknownOwners.size <= 2_048) return
+    const oldest = this.unknownOwners.keys().next().value as string | undefined
+    if (oldest) this.unknownOwners.delete(oldest)
+  }
+
+  private isUnknownOwner(
+    kind: 'thread' | 'turn',
+    bindingId: string,
+    connectionEpoch: string,
+  ): boolean {
+    const key = this.unknownOwnerKey({ kind, connectionEpoch, bindingId })
+    return this.unknownOwners.has(key) || this.pendingQuarantines.has(key)
+  }
+
+  private commitPendingQuarantine(quarantine: {
+    method: 'thread/start' | 'turn/start'
+    kind: 'thread' | 'turn'
+    bindingId: string
+    connectionEpoch: string
+    reason: string
+  }): void {
+    this.deps.startInboundQuarantinePort.quarantine({
+      method: quarantine.method,
+      bindingId: quarantine.bindingId,
+      reason: quarantine.reason,
+    })
+    this.rememberUnknownOwner({
+      kind: quarantine.kind,
+      bindingId: quarantine.bindingId,
+      connectionEpoch: quarantine.connectionEpoch,
+      unknownReason: quarantine.reason,
+    })
+    this.pendingQuarantines.delete(this.unknownOwnerKey(quarantine))
+  }
+
+  private unknownOwnerKey(owner: {
+    kind: 'thread' | 'turn'
+    bindingId: string
+    connectionEpoch: string
+  }): string {
+    return `${owner.kind}\0${owner.connectionEpoch}\0${owner.bindingId}`
+  }
+
+  private failProtocol(code: string): never {
+    const error = new CodexProvisionalInboundBufferError(code)
+    this.releasePort?.failProtocol(error)
+    throw error
+  }
+
+  private isTerminalTurnNotification(notification: CodexNativeNotification): boolean {
+    return notification.method === 'turn/completed'
+      || (notification.method === 'error' && notification.params.willRetry === false)
   }
 
   private nextSequence(): number {

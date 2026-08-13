@@ -7,12 +7,15 @@ import { upsertDetachedSkillTaskRun } from './skills/skill-task-tracker'
 import type { NormalizedRunStateStatus } from './task-projection/run-state-schema'
 import { selectRunStateCandidate } from './task-projection/run-state-selection'
 import { logAgentMetric } from './metrics'
+import { isSafeMessageVisibilityEpoch, readScopeContextEpoch } from './session/scope-context-epoch'
 
 export type DetachedSkillTaskStatus = NormalizedRunStateStatus
 
 export interface DetachedSkillTaskRecord {
   id: string
   scopeId?: string | null
+  ownerRunId?: string | null
+  messageVisibilityEpoch?: number
   sessionId?: string | null
   agent?: string | null
   parentTaskId?: string | null
@@ -34,6 +37,8 @@ export interface DetachedSkillTaskRecord {
 
 export interface DetachedSkillTaskStartRequest {
   scopeId?: string | null
+  ownerRunId?: string | null
+  messageVisibilityEpoch?: number
   sessionId?: string | null
   agent?: string | null
   parentTaskId?: string | null
@@ -168,6 +173,10 @@ function normalizeRecord(raw: unknown): DetachedSkillTaskRecord | null {
   return {
     id,
     scopeId: stringField(item.scopeId),
+    ownerRunId: stringField(item.ownerRunId),
+    messageVisibilityEpoch: Number.isSafeInteger(item.messageVisibilityEpoch)
+      ? Number(item.messageVisibilityEpoch)
+      : undefined,
     sessionId: stringField(item.sessionId),
     agent: stringField(item.agent),
     parentTaskId: stringField(item.parentTaskId),
@@ -200,11 +209,22 @@ export class DetachedSkillTaskTracker {
   }
 
   start(request: DetachedSkillTaskStartRequest): DetachedSkillTaskRecord {
+    const scopeId = request.scopeId || request.sessionId || null
+    const durable = readScopeContextEpoch(scopeId)
+    if (durable.kind === 'closed' || durable.kind === 'unavailable') {
+      throw new Error('detached_skill_scope_unavailable')
+    }
+    if (
+      durable.kind === 'open'
+      && request.messageVisibilityEpoch !== durable.messageVisibilityEpoch
+    ) throw new Error('detached_skill_message_visibility_epoch_stale')
     const nowIso = new Date().toISOString()
     const id = `dst-${randomUUID().slice(0, 8)}`
     const record: DetachedSkillTaskRecord = {
       id,
       scopeId: request.scopeId || null,
+      ownerRunId: request.ownerRunId || null,
+      messageVisibilityEpoch: request.messageVisibilityEpoch,
       sessionId: request.sessionId || request.scopeId || null,
       agent: request.agent || null,
       parentTaskId: request.parentTaskId || null,
@@ -252,16 +272,33 @@ export class DetachedSkillTaskTracker {
     return record ? clone(record) : null
   }
 
-  list(params?: { scopeId?: string | null }): DetachedSkillTaskRecord[] {
+  list(params?: {
+    scopeId?: string | null
+    messageVisibilityEpoch?: number
+  }): DetachedSkillTaskRecord[] {
     const scopeId = String(params?.scopeId || '').trim()
+    const durable = readScopeContextEpoch(scopeId)
+    if (durable.kind === 'closed' || durable.kind === 'unavailable') return []
+    const requestedEpoch = isSafeMessageVisibilityEpoch(params?.messageVisibilityEpoch)
+      ? params.messageVisibilityEpoch
+      : undefined
+    if (
+      durable.kind === 'open'
+      && requestedEpoch !== undefined
+      && requestedEpoch !== durable.messageVisibilityEpoch
+    ) return []
+    const currentEpoch = durable.kind === 'open'
+      ? durable.messageVisibilityEpoch
+      : requestedEpoch
     return Array.from(this.records.values())
       .filter((record) => (scopeId ? record.scopeId === scopeId || record.sessionId === scopeId : true))
+      .filter((record) => currentEpoch === undefined || record.messageVisibilityEpoch === currentEpoch)
       .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
       .map(clone)
   }
 
-  findLatestForScope(scopeId: string): DetachedSkillTaskRecord | null {
-    return this.list({ scopeId })[0] || null
+  findLatestForScope(scopeId: string, messageVisibilityEpoch?: number): DetachedSkillTaskRecord | null {
+    return this.list({ scopeId, messageVisibilityEpoch })[0] || null
   }
 
   cancel(taskId: string): DetachedSkillTaskRecord | null {
@@ -354,8 +391,8 @@ export class DetachedSkillTaskTracker {
         })
         record.status = 'blocked'
         record.error = record.runStatePath
-          ? 'Ready restarted before this detached task finished. Send continue to resume from its run_state.'
-          : 'Ready restarted before this detached task finished. No run_state path was found yet; send continue to restart from the original params.'
+          ? 'Ready restarted before this detached task finished. Its run_state remains available for inspection; no automatic resume was started.'
+          : 'Ready restarted before this detached task finished. No run_state path was found; no automatic restart was started.'
         record.updatedAt = nowIso
         changed = true
       }

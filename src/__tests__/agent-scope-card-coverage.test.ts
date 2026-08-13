@@ -17,7 +17,7 @@ import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
 import { BeliefCardStore } from '../main/modules/agent-control/knowledge/belief-card-store'
 import { syncBeliefCards, type MirrorDb } from '../main/modules/agent-control/knowledge/belief-card-mirror'
 import { buildKnowledgeGraphPlan } from '../main/modules/agent-control/knowledge/knowledge-index-builder'
-import { collectBeliefDecaySignals } from '../main/modules/agent-control/maintenance/maintenance-llm-round'
+import { collectBeliefDecaySignals } from '../main/modules/agent-control/memory/belief-decay'
 
 test('agent-scope-card-coverage declares transitive sqlite ABI guard', (t) => {
   skipIfSqliteUnavailable(t, 'agent-scope-card-coverage transitive sqlite load')

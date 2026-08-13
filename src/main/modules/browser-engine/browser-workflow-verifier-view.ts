@@ -1,8 +1,9 @@
-import type {
-  BrowserResearchAssessment,
-  BrowserWorkflowActionJournal,
-  BrowserWorkflowObservationResource,
-  VerifiedBrowserWorkflowEvidence,
+import {
+  browserObservationResourceUsableAsResearchEvidence,
+  type BrowserResearchAssessment,
+  type BrowserWorkflowActionJournal,
+  type BrowserWorkflowObservationResource,
+  type VerifiedBrowserWorkflowEvidence,
 } from './browser-workflow-evidence'
 
 interface BrowserWorkflowVerifierResourceView {
@@ -69,15 +70,10 @@ function projectPageIdentity(value: unknown): unknown {
 function projectPageMap(value: unknown): unknown {
   const pageMap = asRecord(value)
   if (!pageMap) return value
-  const {
-    targets: _targets,
-    viewport: _viewport,
-    structureHints: _structureHints,
-    targetDefaults: _targetDefaults,
-    nextCursor: _nextCursor,
-    generation: _generation,
-    ...semanticPageMap
-  } = pageMap
+  const semanticPageMap = { ...pageMap }
+  for (const field of ['targets', 'viewport', 'structureHints', 'targetDefaults', 'nextCursor', 'generation']) {
+    delete semanticPageMap[field]
+  }
   return {
     ...semanticPageMap,
     ...(typeof semanticPageMap.text === 'string'
@@ -89,13 +85,10 @@ function projectPageMap(value: unknown): unknown {
 function projectObservationResult(value: unknown): unknown {
   const result = asRecord(value)
   if (!result) return value
-  const {
-    interactionReadiness: _interactionReadiness,
-    nextAllowedActions: _nextAllowedActions,
-    ambiguityGroups: _ambiguityGroups,
-    summary: _summary,
-    ...semanticResult
-  } = result
+  const semanticResult = { ...result }
+  for (const field of ['interactionReadiness', 'nextAllowedActions', 'ambiguityGroups', 'summary']) {
+    delete semanticResult[field]
+  }
   return {
     ...semanticResult,
     ...(Object.hasOwn(semanticResult, 'pageIdentity')
@@ -201,9 +194,11 @@ export function buildBrowserWorkflowVerifierEvidenceView(
       researchState: evidence.researchState,
       researchAssessment: projectResearchAssessment(evidence.researchAssessment),
     }),
-    resources: evidence.resources.map((resource) => ({
-      resource,
-      excerpt: projectObservationContent(resource),
-    })),
+    resources: evidence.resources.flatMap((resource) => {
+      const excerpt = projectObservationContent(resource)
+      return browserObservationResourceUsableAsResearchEvidence(resource)
+        ? [{ resource, excerpt }]
+        : []
+    }),
   }
 }

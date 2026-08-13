@@ -42,8 +42,7 @@ import {
 } from '../main/modules/agent-control/skills/skill-child-drivers'
 import type {
   SkillChildCloseEvent,
-  SkillChildDriverAction,
-  SkillChildDriverState,
+  SkillChildDriverAction
 } from '../main/modules/agent-control/skills/skill-child-run-types'
 import type {
   SkillRunResult,
@@ -81,6 +80,7 @@ function makeFakeRepository(): { repo: SkillTaskRunRepository; state: FakeRepoSt
       const record: SkillTaskRunRecord = {
         id: input.childRunId,
         scopeId: input.scopeId ?? null,
+        messageVisibilityEpoch: input.messageVisibilityEpoch ?? 0,
         sessionId: input.sessionId ?? null,
         agent: null,
         runId: null,
@@ -153,6 +153,8 @@ function makeFakeRepository(): { repo: SkillTaskRunRepository; state: FakeRepoSt
       return null
     },
     findLatestChildRunBySkill: () => null,
+    getRaw: (id: string) => state.rows.get(id) ?? null,
+    getCurrentVisible: (id: string) => state.rows.get(id) ?? null,
     get: (id: string) => state.rows.get(id) ?? null,
   } as unknown as SkillTaskRunRepository
   return { repo, state }

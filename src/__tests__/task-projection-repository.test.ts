@@ -106,7 +106,7 @@ test('TaskProjectionRepository persists and updates structured task projection r
             }
           }
 
-          if (sql.includes('WHERE task_id = ? LIMIT 1')) {
+          if (sql.includes('WHERE task_id = ?')) {
             return {
               run() {
                 return { changes: 0 }
@@ -142,6 +142,7 @@ test('TaskProjectionRepository persists and updates structured task projection r
     taskId: 'task-1',
     taskOrigin: 'system_background',
     scopeId: 'scope-1',
+    messageVisibilityEpoch: 0,
     runId: 'run-1',
     parentTaskId: 'parent-1',
     parentStepId: 'collect',
@@ -289,6 +290,7 @@ test('TaskProjectionRepository supports child-task lookup by parent task id', as
     taskId: 'child-1',
     taskOrigin: 'system_background',
     scopeId: 'scope-1',
+    messageVisibilityEpoch: 0,
     runId: 'run-1',
     parentTaskId: 'parent-1',
     parentStepId: 'collect',
@@ -307,6 +309,7 @@ test('TaskProjectionRepository supports child-task lookup by parent task id', as
     taskId: 'child-2',
     taskOrigin: 'system_background',
     scopeId: 'scope-1',
+    messageVisibilityEpoch: 0,
     runId: 'run-1',
     parentTaskId: 'parent-1',
     parentStepId: 'collect',

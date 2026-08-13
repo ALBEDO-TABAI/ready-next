@@ -43,6 +43,7 @@ import type {
   ToolTraceEvent,
 } from '../renderer/modules/agent/types'
 import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
+import { __setScopeContextEpochDatabaseForTests } from '../main/modules/agent-control/session/scope-context-epoch'
 import { __setSkillsRuntimeManagerForTests } from '../main/modules/skills-runtime/runtime-manager'
 
 const STAGE_Z_ROOT = 'docs/superpowers/audits/2026-05-24-stage-z-closeout'
@@ -64,6 +65,9 @@ const fakeConfig = {
 } as const
 
 before(() => {
+  __setScopeContextEpochDatabaseForTests({
+    getRawDb: () => ({ prepare: () => ({ get: () => undefined }) }) as never,
+  })
   __setSkillsRuntimeManagerForTests({
     listSkills: () => [
       { id: 'hfp-space-design', name: 'hfp-space-design', allowedTools: ['document_create_tab', 'document_set_content', 'document_save_tab'] },
@@ -78,6 +82,7 @@ before(() => {
 
 after(() => {
   __setSkillsRuntimeManagerForTests(null)
+  __setScopeContextEpochDatabaseForTests(null)
 })
 
 test('agent acceptance checklist declares transitive sqlite coverage', (t) => {
@@ -539,6 +544,7 @@ async function runChecklistItem(params: ChecklistRunParams): Promise<ChecklistRu
   const taskId = `task-${sessionId}`
   const result = await runtime.sendMessage(`butler::${sessionId}`, params.input, runId, {
     publicSessionId: sessionId,
+    messageVisibilityEpoch: 0,
     taskId,
   })
 

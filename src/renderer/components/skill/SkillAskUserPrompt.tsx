@@ -2,13 +2,12 @@
  * B Phase 1 PR2 T1-8 — renders a capsule asking the user to clarify a
  * skill-driven question. Subscribes to the `skill:askUserQuestion` IPC push,
  * stores pending questions locally, and submits the user's answer via
- * `skillsAPI.submitAskUserAnswer`. The listener is mounted once at the app
- * shell, but the visible card is portaled into the chat message stream so it
- * stays inside the agent panel instead of covering the workspace.
+ * `skillsAPI.submitAskUserAnswer`. The component is owned by the active chat
+ * message stream so the question cannot be portaled into a stale or hidden
+ * panel while the matching Agent turn is blocked.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react'
-import { createPortal } from 'react-dom'
 
 interface AskUserEvent {
   executionId: string
@@ -44,12 +43,12 @@ function getSkillsAPI(): SkillsAPIShape | null {
 
 export function SkillAskUserPrompt(): ReactElement | null {
   const [queue, setQueue] = useState<AskUserEvent[]>([])
-  const [portalTarget, setPortalTarget] = useState<HTMLElement | null>(null)
   const [draft, setDraft] = useState('')
   const [selectedOption, setSelectedOption] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const inputRef = useRef<HTMLTextAreaElement | null>(null)
+  const anchorRef = useRef<HTMLDivElement | null>(null)
 
   // Subscribe to pushes + hydrate with anything already pending (e.g. after
   // a renderer reload while the main side had an open question).
@@ -58,17 +57,19 @@ export function SkillAskUserPrompt(): ReactElement | null {
     if (!skillsAPI) return
 
     let cancelled = false
-    // fire-and-forget: bootstrap-time fetch of pending ask-user questions; if the main side isn't ready, the live onAskUserQuestion subscription below will deliver them as they arrive.
-    skillsAPI
-      .listPendingAskUser()
+    const reconcilePending = (): void => {
+      skillsAPI.listPendingAskUser()
       .then((list) => {
         if (cancelled) return
-        setQueue((prev) => {
-          if (prev.length > 0) return prev
-          return Array.isArray(list) ? list : []
-        })
+        setQueue(Array.isArray(list) ? list : [])
       })
       .catch(() => { /* ignore — main not ready yet */ })
+    }
+    reconcilePending()
+    // The push is only a wake-up hint. Reconcile with the Main-owned pending
+    // store as well so a renderer reload or a missed IPC event cannot strand
+    // an already-blocked tool call until its timeout.
+    const reconcileTimer = window.setInterval(reconcilePending, 500)
 
     const unsubscribe = skillsAPI.onAskUserQuestion((event) => {
       setQueue((prev) => {
@@ -81,23 +82,10 @@ export function SkillAskUserPrompt(): ReactElement | null {
     }) || (() => undefined)
     return () => {
       cancelled = true
+      window.clearInterval(reconcileTimer)
       unsubscribe()
       unsubscribeCleared()
     }
-  }, [])
-
-  useEffect(() => {
-    if (typeof document === 'undefined') return
-    const findTarget = (): void => {
-      const next = document.querySelector('[data-skill-ask-user-anchor="true"]') as HTMLElement | null
-      setPortalTarget((prev) => (prev === next ? prev : next))
-    }
-    findTarget()
-    const Observer = window.MutationObserver
-    if (!Observer) return
-    const observer = new Observer(findTarget)
-    observer.observe(document.body, { childList: true, subtree: true })
-    return () => observer.disconnect()
   }, [])
 
   const current = queue[0] || null
@@ -109,18 +97,19 @@ export function SkillAskUserPrompt(): ReactElement | null {
   }, [current?.executionId])
 
   useEffect(() => {
-    if (!current || !portalTarget) return
+    const anchor = anchorRef.current
+    if (!current || !anchor) return
     window.requestAnimationFrame(() => {
-      const scrollRoot = portalTarget.closest('[data-liquid-scroll-root="chat-messages"]') as HTMLElement | null
-        || portalTarget.parentElement
-        || portalTarget
+      const scrollRoot = anchor.closest('[data-liquid-scroll-root="chat-messages"]') as HTMLElement | null
+        || anchor.parentElement
+        || anchor
       if (typeof scrollRoot.scrollTo === 'function') {
         scrollRoot.scrollTo({ top: scrollRoot.scrollHeight, behavior: 'smooth' })
       } else {
         scrollRoot.scrollTop = scrollRoot.scrollHeight
       }
     })
-  }, [current?.executionId, portalTarget])
+  }, [current?.executionId])
 
   const submit = useCallback(async (answer: string) => {
     if (!current) return
@@ -159,7 +148,9 @@ export function SkillAskUserPrompt(): ReactElement | null {
     color: 'var(--text-body)',
   }), [])
 
-  if (!current || !portalTarget) return null
+  if (!current) {
+    return <div ref={anchorRef} data-skill-ask-user-anchor="true" style={{ flex: '0 0 auto', width: '100%' }} />
+  }
 
   const card = (
     <div
@@ -285,7 +276,11 @@ export function SkillAskUserPrompt(): ReactElement | null {
     </div>
   )
 
-  return createPortal(card, portalTarget)
+  return (
+    <div ref={anchorRef} data-skill-ask-user-anchor="true" style={{ flex: '0 0 auto', width: '100%' }}>
+      {card}
+    </div>
+  )
 }
 
 export default SkillAskUserPrompt

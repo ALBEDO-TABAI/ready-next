@@ -81,7 +81,7 @@ async function primeSnapshot(context: ToolContext): Promise<void> {
   )
 }
 
-test('advanced execution failure returns structured browser failure data and envelope', async () => {
+test('retired browser power confirmation remains fail-closed before execution', async () => {
   const context = writeContext(makeController({
     sendCdpCommand: async (_tabId, method) => {
       if (method === 'Page.getFrameTree') return { frameTree: { frame: { id: 'main' } } }
@@ -96,16 +96,9 @@ test('advanced execution failure returns structured browser failure data and env
     context,
   )
   assert.equal(pending.data?.errorKind, 'grant_required')
-  context.confirmedBrowserPowerRequest = pending.data?.browserSuspensionRequest as ToolContext['confirmedBrowserPowerRequest']
-  const output = await executeToolCall(
-    'browser_eval',
-    { code: 'document.title', purpose: 'read title' },
-    context,
-  )
-
-  assert.equal(output.data?.errorKind, 'browser_eval_failed', JSON.stringify(output))
-  assert.equal(output.envelope?.ok, false)
-  assert.equal(output.envelope?.kind, 'internal_error')
+  assert.equal(pending.data?.browserSuspensionRequest, undefined)
+  assert.equal(pending.envelope?.ok, false)
+  assert.equal(pending.envelope?.kind, 'denied_by_policy')
 })
 
 test('browser structured output keeps errorKind as a bounded token', () => {

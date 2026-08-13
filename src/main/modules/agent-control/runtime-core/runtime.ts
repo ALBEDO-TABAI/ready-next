@@ -1,6 +1,5 @@
 import { app } from 'electron'
 import { EventEmitter } from 'events'
-import { randomUUID } from 'node:crypto'
 import { join } from 'path'
 import { existsSync, readFileSync } from 'node:fs'
 import {
@@ -9,7 +8,7 @@ import {
   type AIModelConfig
 } from '../../../../shared/ai-providers'
 import type { BrowserController } from '../../browser-engine/ipc-handler'
-import type { BrowserHumanTakeoverIntentInput, BrowserTargetResumeRequest } from '../../../../shared/browser-workflow-control'
+import { getBrowserTargetClaimService } from '../../browser-engine/browser-target-claim-singleton'
 import type { AskUserQuestionsCardEvent } from '../../tools/builtins/ask-user-questions'
 import { registerChannelOutboundSender } from '../channel-outbound-bridge'
 import type { AgentManager } from '../../claude-bridge/agent-manager'
@@ -37,7 +36,6 @@ import {
 import type { SpecialistContentEditProposalStore } from '../agents/specialist-content-edit-proposals'
 import { RunCoordinator } from '../task-projection/run-coordinator'
 import { AgentExecutionProfileResolver, resolveConversationAgentId } from '../agents/agent-execution-profile'
-import { commitSameSessionHandoff } from '../agents/handoff-adoption-transaction'
 import { getSpecialistBlueprintStore } from '../agents/specialist-blueprint-runtime'
 import type { DomainAdapter } from '../domain-adapters/domain-adapter'
 import { getSkillsRuntimeManager } from '../../skills-runtime/runtime-manager'
@@ -59,28 +57,30 @@ import '../video-expert-child-driver'
 import { assertStageNChildLoopInvariants } from '../stage-n-boot-assertion'
 import { defaultToolRegistry } from '../tools-runtime/tool-registry'
 import { ToolNameCollisionError } from '../tools-runtime/tool-registry-errors'
+import { AgentSdkToolExecutor } from './agent-sdk-tool-executor'
+import { AgentSdkSessionManager } from './agent-sdk-session'
+import { executeToolCall as executeReadyToolCall } from '../../tools/tool-executor'
+import { resolveReadyToolTurnSnapshot } from '../codex-runtime/codex-tool-surface'
+import {
+  digestFeishuChannelSnapshot,
+} from '../../tools/feishu-tools'
+import {
+  prepareFeishuExternalReadSlice,
+  prepareLarkExternalReadSlice,
+  readLarkCliAuthReadback,
+} from '../codex-runtime/codex-external-read-slice'
+import { resolveDeclaredSiblingSkillReadRoots } from '../../skills-runtime/skill-sibling-reference-roots'
+import { resolveFrozenDesktopExecutableAuthority } from '../../skills-runtime/desktop-executable-authority'
+import {
+  resolveCodexNativeSkillInput,
+  resolveCodexSelectedSkillMethodology,
+} from '../codex-runtime/codex-thread-instructions'
+import { createCodexHostExecutionBinding } from '../codex-runtime/codex-host-execution-binding'
 import { RunProjection } from '../task-projection/run-projection'
 import { ProjectionSyncCoordinator } from './projection-sync-coordinator'
-import { SessionPrerouteService } from './session-preroute-service'
 import { DetachedSkillService } from './detached-skill-service'
 import { SessionRecallFacade } from './session-recall-facade'
 import { ReferenceHintService } from './reference-hint-service'
-import { ScheduleCoordinator } from '../../scheduled-tasks/schedule-coordinator'
-import { ScheduleRepository, type ScheduledTaskOccurrence } from '../../scheduled-tasks/schedule-repository'
-import { ScheduleDispatchQueue } from '../../scheduled-tasks/schedule-dispatch-queue'
-import { dispatchScheduledOccurrence } from '../../scheduled-tasks/schedule-execution'
-import { recoverScheduledOccurrenceAfterRestart } from '../../scheduled-tasks/schedule-recovery'
-import { getNextScheduleRuns } from '../../scheduled-tasks/schedule-next-run'
-import { validateWorkspaceRoot } from '../../../../shared/workspace-validation'
-import type {
-  AgentScheduleDefinition,
-  AgentScheduleOccurrence,
-  ScheduleBlockedReason,
-  ScheduleCreateRequest,
-  SchedulePreview,
-  SchedulePreviewRequest,
-  ScheduleUpdateRequest,
-} from '../../../../shared/scheduled-tasks'
 import { ChannelConfigService } from './channel-config-service'
 import { ScopeAttachmentService } from './scope-attachment-service'
 import { SidecarPollService } from './sidecar-poll-service'
@@ -90,29 +90,34 @@ import { reconcileTaskProjections } from '../task-projection/task-projection-rec
 import { deriveTaskProjectionCanResume } from '../task-projection/task-projection-resume'
 import { assertSkillTaskRunInvariantConsistency } from '../skills/skill-task-tracker'
 import type { ProjectionTruthSnapshot, TaskProjectionRecord } from '../contracts/run-contracts'
-import {
-  type ContinuationIntent,
-} from '../contracts/continuation-state'
-import { taskEventBridge } from '../../browser-engine/task-event-bridge'
-import { createTaskEventProofListener, createTaskProofSink } from '../quality/proof-collector'
-import { isKnowledgeSystemEnabled, runStartupBeliefSync, KnowledgeWatcher } from '../knowledge/knowledge-truth-source'
+import { TaskEventProofSubscription } from './task-event-proof-subscription'
+import { runStartupBeliefSync, KnowledgeWatcher } from '../knowledge/knowledge-truth-source'
 import { logAgentMetric } from '../metrics'
-import { runConfirmedSendScoped } from '../send-scoped-confirmation'
+import {
+  createRejectedBeforePersistence,
+  runConfirmedSendScoped
+} from '../send-scoped-confirmation'
 import { SessionRecallService } from '../session/session-recall-service'
+import { clearActiveSkillContext } from '../session/active-skill-context'
+import { clearScopeSessionSnapshot } from '../session/scope-session-snapshot'
+import { forgetSession } from '../session/session-continuity'
+import { clearAuthorizationFactsForScope } from '../safety/authorization-fact-store'
+import { clearNegationsForScope } from '../safety/negation-state'
+import { clearLarkCliAuthFlowsForSession } from '../safety/lark-cli-auth-flow-authority'
+import { clearLastReferenceSkill } from '../skills/skill-reference-hints'
+import { clearSkillTaskProjection } from '../skills/skill-task-tracker'
+import { getEphemeralExecutionStore } from '../../tools/skill-primitives/ephemeral-execution-store'
+import { getAskUserQuestionsStore } from '../../tools/builtins/ask-user-questions-store'
 import { SidecarManager } from '../sidecar-manager'
 import { MemoryRepository } from '../../repositories/memory-repository'
 import { MemoryLifecycleManager } from '../memory/memory-lifecycle'
 import { CrystallizeScheduler, createCrystallizeEffectors, runCrystallizeRound, type CrystallizeSignals } from '../maintenance/crystallize-gate'
-import { runMaintenanceLlmRoundTick } from '../maintenance/maintenance-llm-driver'
-import { readAIConfigDetailed } from '../../claude-bridge/direct-chat-ai-config'
 import { ReflectionService } from '../reflection-service'
 import { runUserPictureCasMerge } from '../maintenance/cas-merge'
 import { UserProfileRepository } from '../../repositories/user-profile-repository'
 import { AgentPersonalityRepository } from '../../repositories/agent-personality-repository'
 import { AppSettingsRepository } from '../../repositories/app-settings-repository'
-import type { PrerouteResult } from '../agents/session-preroute'
 import type { CapabilityRuntimeSnapshot } from '../../../../shared/ai-capability-runtime'
-import type { AgentSystemStudioPrerouteTrace, AgentSystemStudioRoutingSimulation } from '../../../../shared/agent-system-studio'
 import { ExternalMemoryProviderSlot } from '../memory/external-memory-provider-slot'
 import { ToolGateway } from '../tools-runtime/tool-gateway'
 import { buildCapabilityRuntimeSnapshot } from '../domain-adapters/capability-runtime-snapshot'
@@ -137,19 +142,12 @@ import type {
 import type { SessionRecallCapsule, SessionRecallHit } from '../../../../shared/session-recall'
 
 import {
-  parseRecordJson,
-  parseArrayJson,
-  stringFromUnknown,
-  progressFromUnknown,
-  artifactMetaString,
-  childRunSummaryStatusFromProjection,
+  filterCurrentScopeRunSummaries,
+  listCurrentProjectionBackedChildRunSummaries,
   type ActiveChildRunSummaryForRuntime,
-  type TaskProjectionChildSummaryRow,
   type UpsertChannelPayload,
 } from './runtime-helpers'
 import { resolveTrustedBrowserEnvironment } from './trusted-browser-environment'
-import { BrowserContinuationRuntime } from './browser-continuation-runtime'
-import { buildContinuationIntent as buildContinuationIntentValue } from './continuation-intent-builder'
 import type { CodexRuntimeComposition } from '../codex-runtime/codex-runtime-composition'
 import {
   preparedCodexProductRunMatchesIngress,
@@ -158,9 +156,18 @@ import {
 import { TERMINAL_ERROR_KINDS } from '../../../../shared/ipc-contracts/agent-runtime'
 import type {
   LifecycleRequest,
+  ProductLifecycleRequest,
+  StopLifecycleRequest,
   SendScopedRequest,
   SendScopedResponse,
 } from '../../../../shared/ipc-contracts/agent-runtime'
+import type { LifecycleOperationProjection } from '../../../../shared/ipc-contracts/agent-lifecycle-snapshot'
+import {
+  settleScopeContextCloseLifecycleResult,
+  settleScopeContextResetLifecycleResult,
+  type ScopeContextResetCommitDeps,
+} from './scope-context-reset'
+import { getInteractionLifecycleRegistry } from './interaction-lifecycle-registry'
 
 export type { UpsertChannelPayload } from './runtime-helpers'
 
@@ -168,7 +175,6 @@ export class AgentControlRuntime extends EventEmitter {
   private readonly db = getDatabase()
   private readonly agentSessionCheckpoints: AgentSessionCheckpointRepository
   private readonly browserController: BrowserController | null
-  private readonly browserContinuation: BrowserContinuationRuntime
   // EP3-A3: declared BEFORE promptAssembly so the roster closure can never
   // observe an uninitialized field (empty/dead table degrades to []).
   private readonly agentRegistry = new AgentRegistryRepository(this.db)
@@ -179,6 +185,7 @@ export class AgentControlRuntime extends EventEmitter {
   private readonly toolGateway = new ToolGateway()
   private readonly memoryRepository = new MemoryRepository()
   private readonly memoryLifecycle = new MemoryLifecycleManager(this.memoryRepository)
+  private readonly taskEventProofSubscription = new TaskEventProofSubscription()
   // P2-1 (2026-07-03) — the deterministic crystallize round (backlink rewrite /
   // staged-expiry / duplicate marking / index rebuild) existed but was never
   // instantiated. Wire it to the same 6h rhythm as memory lifecycle. The gate
@@ -196,7 +203,6 @@ export class AgentControlRuntime extends EventEmitter {
       const path = join(app.getPath('userData'), 'agent-memory', relPath)
       return existsSync(path) ? readFileSync(path, 'utf8') : ''
     },
-    isKnowledgeEnabled: () => isKnowledgeSystemEnabled(this.db),
     listBlueprints: () => getSpecialistBlueprintStore().list(['confirmed']),
   })
   private readonly externalMemoryProviderSlot = new ExternalMemoryProviderSlot()
@@ -292,8 +298,6 @@ export class AgentControlRuntime extends EventEmitter {
     // index (registry declared above; empty/dead table degrades to []).
     getAgentRoster: () => this.agentRegistry.list(),
     getAgentReadiness: (agentId) => this.executionProfileResolver.resolveReadiness(agentId),
-    // EP2-K6: rollback switch (single read entry in the knowledge module).
-    isKnowledgeSystemEnabled: () => isKnowledgeSystemEnabled(this.db),
     // P1 (2026-07-03, 7/01 reliability contract D) — active browser tab URL
     // so site cards match the current domain mid-run, not only user text.
     getActiveBrowserUrl: () => this.orchestrator.getActiveBrowserUrl(),
@@ -303,18 +307,11 @@ export class AgentControlRuntime extends EventEmitter {
   private readonly runCoordinator: RunCoordinator
   private readonly runProjection: RunProjection
   private readonly taskProjectionStore = new TaskProjectionRepository(this.db)
-  // B8-D R1 — projection-sync/preroute/detached-skill clusters live in
-  // delegated sub-services; the runtime keeps one-line public delegates.
+  // B8-D R1 — projection-sync and detached-skill clusters live in delegated
+  // sub-services; the runtime keeps one-line public delegates.
   private readonly projectionSync: ProjectionSyncCoordinator
-  private readonly sessionPreroute = new SessionPrerouteService({
-    settingsRepository: this.settingsRepository,
-    agentRegistry: this.agentRegistry,
-    taskProjectionStore: this.taskProjectionStore,
-    getBeliefCardStore: () => this.getBeliefCardStore(),
-    getAgentReadiness: (agentId) => this.executionProfileResolver.resolveReadiness(agentId),
-  })
-  // B8-D R2 — session-recall/reference-hint/narration-continuation clusters
-  // live in delegated sub-services; same one-line-delegate pattern as R1.
+  // B8-D R2 — session-recall/reference-hint clusters live in delegated
+  // sub-services; same one-line-delegate pattern as R1.
   private readonly referenceHints = new ReferenceHintService({
     db: this.db,
     mapConversationRow: (row) => this.mapConversationRow(row),
@@ -324,8 +321,12 @@ export class AgentControlRuntime extends EventEmitter {
     mapConversationRow: (row) => this.mapConversationRow(row),
     emitConversationEvent: (payload) => this.emitConversationEvent(payload),
     extractTextFromMessage: (message) => this.extractTextFromMessage(message),
-    armReferenceHintFromCapsules: (scopeId, capsules) =>
-      this.referenceHints.maybeArmReferenceHintFromCapsules(scopeId, capsules),
+    armReferenceHintFromCapsules: (scopeId, messageVisibilityEpoch, capsules) =>
+      this.referenceHints.maybeArmReferenceHintFromCapsules(
+        scopeId,
+        messageVisibilityEpoch,
+        capsules,
+      ),
   })
   private knowledgeWatcher: KnowledgeWatcher | null = null
   private beliefCardStore: BeliefCardStore | null = null
@@ -348,79 +349,6 @@ export class AgentControlRuntime extends EventEmitter {
       lastBeatAt: new Date().toISOString()
     }
   }
-  private readonly scheduleRepository = new ScheduleRepository(this.db)
-  private readonly scheduleDispatchQueue = new ScheduleDispatchQueue({
-    isScopeBusy: (scopeId) => {
-      const row = this.db.getConversationScope(scopeId)
-      if (!row) return false
-      const scope = this.mapConversationRow(row)
-      return this.orchestrator.isScopeLive(scope.agent, scope.id)
-    },
-    dispatch: async (item) => {
-      const occurrence = this.scheduleRepository.getOccurrence(item.occurrenceId)
-      if (!occurrence) return
-      await this.dispatchScheduledTaskOccurrence(occurrence)
-    },
-    markSkippedCoalesced: (item) => {
-      const updated = this.scheduleRepository.updateOccurrenceStatus(item.occurrenceId, 'skipped_coalesced', {
-        finishedAt: new Date().toISOString(),
-      })
-      if (updated) logAgentMetric('scheduled_task_occurrence_status', {
-        scheduleId: updated.scheduleId, occurrenceId: updated.id, status: updated.claimStatus,
-      })
-      this.emitScheduledTasksChanged(item.scheduleId)
-    },
-    onDispatchError: (item, error) => logAgentMetric('scheduled_task_dispatch_failed', {
-      scheduleId: item.scheduleId,
-      occurrenceId: item.occurrenceId,
-      reason: error instanceof Error ? error.message : String(error),
-    }),
-  })
-  private readonly scheduledTaskCoordinator = new ScheduleCoordinator({
-    repository: {
-      listEnabled: () => this.scheduleRepository.listEnabled().map((schedule) => ({
-        id: schedule.id,
-        spec: schedule.scheduleSpec,
-        timezone: schedule.timezone,
-        nextRunAt: schedule.nextRunAt,
-        missedPolicy: schedule.missedPolicy,
-        claimedExecutionCount: this.scheduleRepository.countScheduledExecutionClaims(schedule.id),
-      })),
-      reconcile: (input) => {
-        const occurrences = this.scheduleRepository.reconcile(input)
-        for (const occurrence of occurrences) {
-          logAgentMetric('scheduled_task_occurrence_status', {
-            scheduleId: occurrence.scheduleId,
-            occurrenceId: occurrence.id,
-            scheduledFor: occurrence.scheduledFor,
-            triggerSource: occurrence.triggerSource,
-            status: occurrence.claimStatus,
-          })
-        }
-        if (input.occurrences.length > 0 || input.disableAfterReconcile) {
-          this.emitScheduledTasksChanged(input.scheduleId)
-        }
-        return occurrences
-      },
-      listRecoverable: () => this.scheduleRepository.listRecoverable(),
-    },
-    enqueue: (occurrence) => {
-      const durable = this.scheduleRepository.getOccurrence(occurrence.id)
-      if (!durable) return
-      recoverScheduledOccurrenceAfterRestart(durable, {
-        markInterrupted: (item) => {
-          this.scheduleRepository.updateOccurrenceStatus(item.id, 'dispatch_failed', {
-            errorKind: 'interrupted_restart',
-            errorMessage: 'Ready restarted before Agent acceptance could be proven',
-            finishedAt: new Date().toISOString(),
-          })
-          this.emitScheduledTasksChanged(item.scheduleId)
-        },
-        enqueue: (item) => this.enqueueScheduledOccurrence(item),
-      })
-    },
-    log: (message) => logAgentMetric('scheduled_task_reconcile', { message }),
-  })
   private readonly channelConfig = new ChannelConfigService({
     db: this.db,
     sidecar: this.sidecar,
@@ -457,43 +385,42 @@ export class AgentControlRuntime extends EventEmitter {
       this.getRemoteChannelSessionSettingKey(channelId, remoteThread, agent),
     restoreReferenceHintFromScope: (scope, scopeId) =>
       this.referenceHints.restoreReferenceHintFromScope(scope, scopeId),
-    persistReferenceHintToScope: (scopeId) =>
-      this.referenceHints.persistReferenceHintToScope(scopeId),
+    persistReferenceHintToScope: (scopeId, expectedMessageVisibilityEpoch) =>
+      this.referenceHints.persistReferenceHintToScope(
+        scopeId,
+        expectedMessageVisibilityEpoch,
+      ),
     resolveConversationAgentId: (requestedAgentId) =>
       resolveConversationAgentId(requestedAgentId, this.agentRegistry).effectiveAgentId,
+    readAliasGeneration: (aliasId) =>
+      this.codexRuntime.aliasBindingPort.readAliasGeneration(aliasId),
   })
   // B8-D R5 — the remote-channel / inbound-IM cluster lives in a delegated
   // sub-service; same one-line-delegate pattern as R1–R4. Declared AFTER
   // `conversationScopes` so the store-backed callbacks close over an
-  // initialized field. Every function dep is a lazy closure, so
-  // constructor-assigned hubs (`runCoordinator`, `projectionSync`) and
-  // lifecycle methods are safe to reference here. The runtime keeps one-line
+  // initialized field. Every function dep is a lazy closure, so the
+  // constructor-assigned `projectionSync` hub and lifecycle methods are safe
+  // to reference here. The runtime keeps one-line
   // delegates for `handleInboundChannel` / `getScopedRemoteThreadKey` /
   // `getRemoteChannelSessionSettingKey` (the R4 SidecarPollService /
   // ConversationScopeStore injection closures bind those runtime methods and
-  // re-bind through this service automatically) and `sendLongTextToChannel`
-  // (called from the stay-behind `sendScoped` channel ack path).
+  // re-bind through this service automatically).
   private readonly remoteChannel = new RemoteChannelService({
     db: this.db,
     sidecar: this.sidecar,
     settingsRepository: this.settingsRepository,
-    runCoordinator: {
-      runInboundChannel: async () => ({
-        success: false,
-        error: 'non_local_ingress_unsupported',
-        errorKind: 'blocked_config',
-      }),
-    },
-    getDomainAdapters: () => this.getDomainAdapters(),
-    getTaskProjection: (taskId) => this.getTaskProjection(taskId),
     getRuntimeStatus: () => this.getRuntimeStatus(),
     emitConversationEvent: (payload) => this.projectionSync.emitConversationEvent(payload),
     recordChannelDeliveryResult: (channelId, result) =>
       this.channelConfig.recordChannelDeliveryResult(channelId, result),
     ensureChannelScope: (channelId, remoteThread, agent, sender) =>
       this.conversationScopes.ensureChannelScope(channelId, remoteThread, agent, sender),
-    createConversationMessage: (scopeId, payload) =>
-      this.conversationScopes.createConversationMessage(scopeId, payload),
+    createConversationMessage: (scopeId, payload, expectedMessageVisibilityEpoch) =>
+      this.conversationScopes.createConversationMessage(
+        scopeId,
+        payload,
+        expectedMessageVisibilityEpoch,
+      ),
     refreshScope: (scopeId) => this.conversationScopes.refreshScope(scopeId),
     // Phase I P0 —— 渠道答案提交后与本地 IPC submit 同构刷新 run 进度
     // （懒闭包：orchestrator 在构造函数中才赋值，调用发生在答案时刻）。
@@ -514,8 +441,6 @@ export class AgentControlRuntime extends EventEmitter {
       this.db,
       codexRuntime.canonicalCloseoutTransactionParticipant,
     )
-    this.browserController?.setHumanTakeoverIntentPort((input) => this.createHumanTakeoverIntent(input))
-    this.browserController?.setBrowserTargetResumePort((input) => this.resumeBrowserTargetClaim(input))
     this.browserController?.setBrowserTargetCheckpointResolver((parentTaskId) =>
       this.getTaskProjection(parentTaskId)?.checkpointRefs?.cleanBaseCheckpointId || null)
     this.browserController?.setBrowserWorkflowWriteAdmissionPort((input) =>
@@ -589,21 +514,32 @@ export class AgentControlRuntime extends EventEmitter {
       onRunStarted: ({ requestId, prepared, scope }) => this.orchestrator.beginActiveProductRun({
         agent: scope.agent,
         scopeId: scope.id,
+        aliasId: prepared.conversationAlias.aliasId,
         requestId,
         runId: prepared.runId,
       }),
-      onRunSettled: ({ requestId, scope }) => this.orchestrator.finishActiveProductRun({
+      onRunSettled: ({ requestId, prepared, scope }) => this.orchestrator.finishActiveProductRun({
         agent: scope.agent,
         scopeId: scope.id,
         requestId,
+        runId: prepared.runId,
       }),
     })
     this.runProjection = new RunProjection({
       getScope: (scopeId) => this.getConversationScope(scopeId),
       getPrevious: (scopeId) => this.scopeRunSummaries.get(scopeId),
       setSummary: (scopeId, summary) => {
+        if (!this.db.updateConversationRecallTaskState(
+          scopeId,
+          summary.taskTitle,
+          summary.taskSummary,
+          summary.messageVisibilityEpoch,
+        )) {
+          this.scopeRunSummaries.delete(scopeId)
+          return false
+        }
         this.scopeRunSummaries.set(scopeId, summary)
-        this.db.updateConversationRecallTaskState(scopeId, summary.taskTitle, summary.taskSummary)
+        return true
       },
       toChannelKey: (scope) => this.toChannelKey(scope)
     })
@@ -611,25 +547,15 @@ export class AgentControlRuntime extends EventEmitter {
       db: this.db,
       taskProjectionStore: this.taskProjectionStore,
       runProjection: this.runProjection,
+      readAliasGeneration: (aliasId) =>
+        this.codexRuntime.aliasBindingPort.readAliasGeneration(aliasId),
+      readActiveProductRunVisibilityIdentity: (readyRunId) =>
+        this.codexRuntime.aliasBindingPort.readActiveProductRunVisibilityIdentity(readyRunId),
+      readCommittedProductRunVisibilityIdentity: (readyRunId) =>
+        this.codexRuntime.aliasBindingPort.readCommittedProductRunVisibilityIdentity(readyRunId),
       emit: (event, payload) => {
         this.emit(event, payload)
       },
-    })
-    this.browserContinuation = new BrowserContinuationRuntime({
-      agentSessionCheckpoints: this.agentSessionCheckpoints,
-      browserController: this.browserController,
-      taskProjectionStore: this.taskProjectionStore,
-      executionProfileResolver: this.executionProfileResolver,
-      scopeRunSummaries: this.scopeRunSummaries,
-      getConversationScope: (scopeId) => this.getConversationScope(scopeId),
-      getTaskProjection: (taskId) => this.getTaskProjection(taskId),
-      listTaskProjections: (scopeId) => this.listTaskProjections(scopeId),
-      getDomainAdapters: () => this.getDomainAdapters(),
-      dispatchSuccessor: async () => ({
-        success: false,
-        error: 'non_user_successor_unsupported',
-        errorKind: 'non_user_successor_unsupported',
-      }),
     })
     this.detachedSkills = new DetachedSkillService({
       publishScopeRunEvent: (payload) => this.projectionSync.publishScopeRunEvent(payload),
@@ -691,6 +617,162 @@ export class AgentControlRuntime extends EventEmitter {
       }
       throw error
     }
+    this.codexRuntime.bindHost({
+      runtime: this,
+      browserController: this.browserController,
+      sidecarManager: this.sidecar,
+      getScope: (scopeId) => this.getConversationScope(scopeId),
+      createLocalScope: (agent, id) => this.createLocalScope(agent, id),
+      getTaskProjectionStore: () => this.taskProjectionStore,
+      createCodexActiveRunMetaInOpenTransaction: (input) => {
+        const repository = this.getRunMetaRepository()
+        if (!repository) throw new Error('codex_run_meta_repository_unavailable')
+        repository.create({ ...input, status: 'running', initiator: null })
+      },
+      createInitialExecutionBinding: async ({ runId, ownerAgentIdAtStart }) => (
+        createCodexHostExecutionBinding({ runId, ownerAgentIdAtStart })
+      ),
+      resolveSkillAuthorizationForTurn: (input) =>
+        this.orchestrator.resolveSkillAuthorizationForTurn(input),
+      resolveSelectedSkillMethodology: (skillId) => resolveCodexSelectedSkillMethodology({
+        skillId,
+        skills: getSkillsRuntimeManager().listSkills(),
+      }),
+      resolveNativeSkillInput: ({ skillId, path }) => resolveCodexNativeSkillInput({
+        skillId,
+        path,
+        skills: getSkillsRuntimeManager().listSkills(),
+      }),
+      resolveToolTurnSnapshot: (input) => {
+        const source = new AgentSdkToolExecutor({
+          executeToolCall: executeReadyToolCall,
+          sessionManager: new AgentSdkSessionManager(),
+          browserController: this.browserController,
+          sidecarManager: this.sidecar,
+          runtime: this,
+          runCleanupRegistry: null,
+          async compactCapturedSession() {
+            throw new Error('codex_native_compaction_owned_by_sidecar')
+          },
+          async resolveMapPlaceAmbiguityIfNeeded() { return false },
+        })
+        return resolveReadyToolTurnSnapshot({
+          surfaceId: input.surfaceId,
+          authorizationId: input.authorizationId,
+          authorization: input.authorization,
+          source,
+          frozenToolSurface: input.frozenToolSurface,
+          resolutionInput: {
+            message: input.message,
+            sessionId: input.sessionId,
+            scopeId: input.scopeId,
+            config: input.config,
+            browserHostAvailable: Boolean(this.browserController),
+            feishuConnected: this.sidecar.isRunning() && this.listChannels().some(
+              (channel) => channel.enabled && channel.type === 'feishu-app',
+            ),
+            channelScopeBound: this.isScopeChannelBound(input.scopeId),
+            authorization: input.authorization,
+            requestEnvelope: input.requestEnvelope,
+            skillCatalogAvailable: getSkillsRuntimeManager().listSkills().length > 0,
+          },
+        })
+      },
+      resolveExternalReadSlice: async (request) => {
+        if (request.kind === 'feishu_typed_read') {
+          const sidecarRunning = this.sidecar.isRunning()
+          const listed = sidecarRunning ? await this.sidecar.listChannels() : { channels: [] }
+          const channels = Array.isArray(listed.channels) ? listed.channels : []
+          const channel = channels.find((candidate) => candidate
+            && typeof candidate === 'object'
+            && !Array.isArray(candidate)
+            && (candidate as Record<string, unknown>).id === request.channelId)
+          return prepareFeishuExternalReadSlice({
+            request,
+            sidecarRunning,
+            channelIdentityDigest: channel ? digestFeishuChannelSnapshot(channel) : null,
+          })
+        }
+        const skills = getSkillsRuntimeManager().listSkills()
+        const selected = skills.find((skill) => skill.id === 'lark-doc' && skill.installed)
+        const skillRoot = selected?.managedPath || selected?.sourcePath || ''
+        if (!skillRoot || !existsSync(join(skillRoot, 'SKILL.md'))
+          || !existsSync(join(skillRoot, 'references', 'lark-doc-fetch.md'))) {
+          throw new Error('codex_external_read_lark_resources_unavailable')
+        }
+        const siblingReadRoots = resolveDeclaredSiblingSkillReadRoots({
+          selectedSkillId: 'lark-doc',
+          skills,
+        }).filter((root) => existsSync(join(root, 'SKILL.md')))
+        const program = process.platform === 'darwin'
+          ? '/opt/homebrew/lib/node_modules/@larksuite/cli/bin/lark-cli'
+          : 'lark-cli'
+        const executableAuthority = await resolveFrozenDesktopExecutableAuthority({
+          program,
+          directPayloadRequired: true,
+        })
+        const authReadback = await readLarkCliAuthReadback({ executableAuthority })
+        return prepareLarkExternalReadSlice({
+          request,
+          skillRoot,
+          siblingReadRoots,
+          executableAuthority,
+          authReadback,
+        })
+      },
+      commitCanonicalCoreCloseout: (input) => this.commitCanonicalCoreCloseout(input),
+      commitCodexFailureCoreCloseout: async (input) => {
+        const committed = await this.agentSessionCheckpoints.commitCodexFailureCoreCloseout(input)
+        return committed.value
+      },
+      getActiveRunAbortSignal: (input) => this.orchestrator.getActiveRunAbortSignal(input),
+      abortActiveProductRun: (input) => this.orchestrator.abortActiveProductRun(input),
+      restoreActiveProductRun: (input) => {
+        const scope = this.getConversationScope(input.readyScopeId)
+        if (!scope || scope.id !== input.readyAliasId) {
+          throw new Error('codex_recovered_product_scope_mismatch')
+        }
+        this.orchestrator.beginActiveProductRun({
+          agent: scope.agent,
+          scopeId: scope.id,
+          aliasId: input.readyAliasId,
+          requestId: input.requestId,
+          runId: input.readyRunId,
+        })
+      },
+      finishActiveProductRun: (input) => {
+        const scope = this.getConversationScope(input.readyScopeId)
+        if (!scope || scope.id !== input.readyAliasId) return
+        this.orchestrator.finishActiveProductRun({
+          agent: scope.agent,
+          scopeId: scope.id,
+          requestId: input.requestId,
+          runId: input.readyRunId,
+        })
+      },
+      publishCommittedTerminalEvent: (event) => {
+        this.projectionSync.publishCommittedScopeRunEvent(event)
+      },
+      emitProvisionalDelta: (input) => {
+        this.projectionSync.emitScopeRunEvent({
+          type: 'updated',
+          scopeId: input.scopeId,
+          aliasGeneration: input.aliasGeneration,
+          messageVisibilityEpoch: input.messageVisibilityEpoch,
+          visibilityOwnerKind: 'product_alias',
+          agent: input.agent,
+          ownerAgentId: input.ownerAgentId,
+          taskOrigin: 'user_root',
+          handoffGeneration: input.handoffGeneration,
+          runId: input.runId,
+          taskId: input.taskId,
+          phase: 'responding',
+          latestText: input.delta,
+          taskProjectionId: input.taskId,
+          timestamp: new Date().toISOString(),
+        })
+      },
+    })
   }
 
   getOrchestrator(): CodexHostOrchestrator {
@@ -726,12 +808,6 @@ export class AgentControlRuntime extends EventEmitter {
     expectedOutputs: string[]
   }): Promise<void> {
     await this.agentSessionCheckpoints.updateBrowserWorkflowCompletionDeclaration(input)
-  }
-
-  async createHumanTakeoverIntent(
-    input: BrowserHumanTakeoverIntentInput,
-  ): Promise<{ takeoverId: string }> {
-  return this.browserContinuation.createHumanTakeoverIntent(input)
   }
 
   async commitCanonicalCoreCloseout(
@@ -807,39 +883,6 @@ export class AgentControlRuntime extends EventEmitter {
     })
   }
 
-  adoptSameSessionHandoff(input: {
-    taskId: string
-    scopeId: string
-    targetAgentId: string
-    userRequestVerbatim: string
-    contextRefs: string[]
-  }): { handoffGeneration: number } {
-    const scope = this.getConversationScope(input.scopeId)
-    if (scope && this.orchestrator.isScopeLive(scope.agent, scope.id)) {
-      throw new Error('codex_handoff_requires_native_terminal_reconciliation')
-    }
-    const rawDb = this.db.getRawDb()
-    if (!rawDb) throw new Error('[runtime] database unavailable')
-    return commitSameSessionHandoff({
-      getTask: (taskId) => {
-        const task = this.taskProjectionStore.get(taskId)
-        return task ? { scopeId: task.scopeId, runId: task.runId } : null
-      },
-      getConversation: (scopeId) => {
-        const scope = this.db.getConversationScope(scopeId)
-        return scope ? { agent: scope.agent, handoffGeneration: scope.handoff_generation ?? 0 } : null
-      },
-      begin: () => rawDb.exec('BEGIN'),
-      commit: () => rawDb.exec('COMMIT'),
-      rollback: () => rawDb.exec('ROLLBACK'),
-      updateTask: (taskId, patch) => this.taskProjectionStore.update(taskId, patch as never),
-      updateConversation: (scopeId, activeAgentId, handoffGeneration) => {
-        this.db.updateConversationAgentState(scopeId, activeAgentId, handoffGeneration)
-      },
-      onCommitted: () => {},
-    }, input)
-  }
-
   /** EP1-K1: belief card store rooted at the same agent memory root. */
   getBeliefCardStore(): BeliefCardStore {
     if (!this.beliefCardStore) {
@@ -857,12 +900,11 @@ export class AgentControlRuntime extends EventEmitter {
   /**
    * P2-1 — run one deterministic crystallize round. The gate decides run/skip;
    * we only advance `lastCrystallizeRunAt` when it actually ran, so the 6h
-   * interval math stays honest. Guarded by the knowledge-system switch and a
-   * live belief store. Never throws into the scheduler (round logs its own
+   * interval math stays honest. Requires a live belief store. Never throws
+   * into the scheduler (round logs its own
    * maintenance_audit; unexpected errors are swallowed by the scheduler).
    */
   async runCrystallizeRoundOnce(forced: boolean): Promise<void> {
-    if (!isKnowledgeSystemEnabled(this.db)) return
     const store = this.getBeliefCardStore()
     if (!store) return
     const now = new Date()
@@ -902,24 +944,18 @@ export class AgentControlRuntime extends EventEmitter {
         logAgentMetric('belief_decay_round_failed', { reason: error instanceof Error ? error.message : String(error) })
       }
     }
-    // D7 —— LLM 维护回合捎带同一确定性 tick（合同 2026-07-05-p3-backlog-closeout §2）。
-    // 驱动自带三层预算闸：专项开关 / durable lastRunAt 进 EP2-C2 门控（6h 内
-    // skip=零调用）/ 空信号跳过；单轮单调用、强制 staged 写。失败面包屑化，
-    // 绝不破坏 crystallize tick。
-    try {
-      const aiSettings = new AppSettingsRepository()
-      await runMaintenanceLlmRoundTick({
-        settings: this.db,
-        store,
-        loadAIConfig: () => readAIConfigDetailed(() => aiSettings.getSetting('ai_model_config')),
-      })
-    } catch (error) {
-      logAgentMetric('maintenance_llm_round_failed', { reason: error instanceof Error ? error.message : String(error) })
-    }
   }
 
   private getDomainAdapters(): ReadonlyArray<DomainAdapter> {
     return this.orchestrator.getDomainAdapters()
+  }
+
+  private registerTaskEventProofSink(): void {
+    this.taskEventProofSubscription.start(this.taskProjectionStore)
+  }
+
+  private unregisterTaskEventProofSink(): void {
+    this.taskEventProofSubscription.stop()
   }
 
   getExternalMemoryProviderSlot(): ExternalMemoryProviderSlot {
@@ -927,35 +963,39 @@ export class AgentControlRuntime extends EventEmitter {
   }
 
   async start(): Promise<void> {
+    try {
+      await this.codexRuntime.start()
+    } catch (error) {
+      const code = error && typeof error === 'object' && 'code' in error
+        ? String((error as { code?: unknown }).code || '')
+        : ''
+      logAgentMetric('codex_runtime_start_degraded', {
+        reason: /^[a-z0-9_:-]{1,96}$/i.test(code) ? code : 'codex_runtime_start_failed',
+      })
+    }
     this.cleanupLegacyCopawSettings()
     this.detachedSkills.publishRestoredDetachedSkillTasks()
-    await this.scheduledTaskCoordinator.start()
 
     // Start memory lifecycle manager
     this.memoryLifecycle.start()
     // P2-1 — deterministic crystallize round on the same 6h rhythm + a startup
     // pass (deferred 90s so it trails first-run belief sync / seeding above the
     // memory lifecycle's own 60s initial tick).
-    this.crystallizeScheduler.start()
-    setTimeout(() => { void this.runCrystallizeRoundOnce(false) }, 90_000)
+    this.crystallizeScheduler.start({ startupDelayMs: 90_000 })
 
     // EP2-Q3 — additive bridge listener: terminal task events become
     // task_event proofs on the owning projection (bridge itself untouched).
-    taskEventBridge.registerProjectionSink(
-      createTaskEventProofListener(createTaskProofSink(this.taskProjectionStore)),
-    )
+    this.registerTaskEventProofSink()
     this.projectionSync.scheduleTerminalProjectionSyncRetryDrain('startup')
-    // EP2-K6 — truth-source boundary: startup full sync (K2 handover) +
-    // hand-edit watcher, both behind the rollback switch. Files are never
-    // written here — file → DB only.
+    // Local archive mirror: startup full sync + hand-edit watcher. Files are
+    // never written here — file → DB only.
     try {
-      const knowledgeEnabled = isKnowledgeSystemEnabled(this.db)
       const rawDb = this.db.getRawDb?.()
       if (rawDb) {
         // Identity asset reconciliation (064 reserved-slug reassign → move agents/<old> to
         // agents/<new>) must run regardless of the knowledge toggle: the DB id already
-        // changed in the migration, so the on-disk asset dir has to follow even when the
-        // knowledge system is off. Idempotent via agent_identity_migration.asset_reconciled_at.
+        // changed in the migration, so the on-disk asset dir has to follow.
+        // Idempotent via agent_identity_migration.asset_reconciled_at.
         reconcileAgentIdentityAssets(rawDb as never, this.getBeliefCardStore())
         // 内置专项 agent（文案/美术/智识）预设资产 seed。独立 try/catch：seed 失败不得
         // 拖垮后续知识同步与 watcher 启动。幂等（缺失才写 + soul 守卫更新）。
@@ -967,11 +1007,9 @@ export class AgentControlRuntime extends EventEmitter {
         } catch (seedError) {
           console.error('[runtime] builtin agent preset seeding failed:', seedError)
         }
-        if (knowledgeEnabled) {
-          runStartupBeliefSync(rawDb as never, this.getBeliefCardStore(), true)
-          this.knowledgeWatcher = new KnowledgeWatcher({ db: rawDb as never, store: this.getBeliefCardStore() })
-          this.knowledgeWatcher.start()
-        }
+        runStartupBeliefSync(rawDb as never, this.getBeliefCardStore())
+        this.knowledgeWatcher = new KnowledgeWatcher({ db: rawDb as never, store: this.getBeliefCardStore() })
+        this.knowledgeWatcher.start()
       }
     } catch (error) {
       console.error('[runtime] knowledge truth-source wiring failed:', error)
@@ -987,20 +1025,15 @@ export class AgentControlRuntime extends EventEmitter {
   }
 
   async stop(): Promise<void> {
-    this.browserController?.setHumanTakeoverIntentPort(null)
-    this.browserController?.setBrowserTargetResumePort(null)
+    this.unregisterTaskEventProofSink()
+    this.codexRuntime.sealIngress('runtime_stop')
     this.browserController?.setBrowserWorkflowWriteAdmissionPort(null)
     this.browserController?.setBrowserWorkflowJournalUnitOfWork(null)
-    this.scheduledTaskCoordinator.stop()
     for (const session of this.orchestrator.listAllSessions()) {
       if (!session.sessionId) continue
-      const aliasGeneration = this.codexRuntime.aliasBindingPort.readAliasGeneration(session.sessionId)
-      if (aliasGeneration === null) continue
-      await this.codexRuntime.lifecycleAdapter.stopSession({
-        aliasId: session.sessionId,
-        aliasGeneration,
-      })
+      this.orchestrator.abortActiveProductRunByAlias(session.sessionId)
     }
+    await this.codexRuntime.stop()
 
     this.sidecarPoll.stopPollLoop()
 
@@ -1011,277 +1044,6 @@ export class AgentControlRuntime extends EventEmitter {
     await this.externalMemoryProviderSlot.shutdown()
 
     await this.sidecar.stop()
-  }
-
-  async reconcileScheduledTasks(source: 'timer' | 'startup' | 'resume'): Promise<void> {
-    await this.scheduledTaskCoordinator.reconcile(source)
-  }
-
-  listScheduledTasks(): AgentScheduleDefinition[] {
-    return this.scheduleRepository.list().map((schedule) => this.mapScheduledTask(schedule))
-  }
-
-  getScheduledTask(id: string): AgentScheduleDefinition | null {
-    const schedule = this.scheduleRepository.get(id)
-    return schedule ? this.mapScheduledTask(schedule) : null
-  }
-
-  previewScheduledTask(request: SchedulePreviewRequest): SchedulePreview {
-    const occurrences = getNextScheduleRuns({
-      spec: request.scheduleSpec,
-      timezone: request.timezone,
-      after: request.from || new Date().toISOString(),
-      count: request.count ?? 3,
-    })
-    return { occurrences, nextRunAt: occurrences[0] ?? null, blockedReason: null }
-  }
-
-  async createScheduledTask(request: ScheduleCreateRequest): Promise<AgentScheduleDefinition> {
-    const instruction = request.instruction.trim()
-    if (!instruction) throw new Error('Schedule instruction is required')
-    const name = request.name.trim() || instruction.split(/\r?\n/, 1)[0].slice(0, 48)
-    const scopeId = this.resolveScheduleMutationScope(request, null)
-    const nextRunAt = request.enabled
-      ? this.previewScheduledTask({ scheduleSpec: request.scheduleSpec, timezone: request.timezone, count: 1 }).nextRunAt
-      : null
-    if (request.enabled && !nextRunAt) throw new Error('Schedule does not produce a future time')
-    this.assertScheduleTargetAvailable(scopeId, request.agentId, request.workspaceRoots)
-    const created = this.scheduleRepository.create({
-      id: `schedule-${randomUUID()}`,
-      name,
-      instruction,
-      scheduleSpec: request.scheduleSpec,
-      timezone: request.timezone,
-      scopeId,
-      scopeMode: request.scopeMode,
-      agentId: request.agentId,
-      workspaceRoots: request.workspaceRoots,
-      enabled: request.enabled,
-      nextRunAt,
-      missedPolicy: request.missedPolicy,
-    })
-    await this.scheduledTaskCoordinator.reschedule()
-    return this.mapScheduledTask(created)
-  }
-
-  async updateScheduledTask(request: ScheduleUpdateRequest): Promise<AgentScheduleDefinition | null> {
-    const existing = this.scheduleRepository.get(request.id)
-    if (!existing) return null
-    const instruction = request.instruction.trim()
-    if (!instruction) throw new Error('Schedule instruction is required')
-    const name = request.name.trim() || instruction.split(/\r?\n/, 1)[0].slice(0, 48)
-    const scopeId = this.resolveScheduleMutationScope(request, existing)
-    const nextRunAt = request.enabled
-      ? this.previewScheduledTask({ scheduleSpec: request.scheduleSpec, timezone: request.timezone, count: 1 }).nextRunAt
-      : null
-    if (request.enabled && !nextRunAt) throw new Error('Schedule does not produce a future time')
-    this.assertScheduleTargetAvailable(scopeId, request.agentId, request.workspaceRoots)
-    const updated = this.scheduleRepository.update(request.id, {
-      name,
-      instruction,
-      scheduleSpec: request.scheduleSpec,
-      timezone: request.timezone,
-      scopeId,
-      scopeMode: request.scopeMode,
-      agentId: request.agentId,
-      workspaceRoots: request.workspaceRoots,
-      enabled: request.enabled,
-      nextRunAt,
-      missedPolicy: request.missedPolicy,
-      migrationState: null,
-    })
-    await this.scheduledTaskCoordinator.reschedule()
-    return updated ? this.mapScheduledTask(updated) : null
-  }
-
-  async pauseScheduledTask(id: string): Promise<AgentScheduleDefinition | null> {
-    const updated = this.scheduleRepository.update(id, { enabled: false, nextRunAt: null })
-    await this.scheduledTaskCoordinator.reschedule()
-    return updated ? this.mapScheduledTask(updated) : null
-  }
-
-  async resumeScheduledTask(id: string): Promise<AgentScheduleDefinition | null> {
-    const existing = this.scheduleRepository.get(id)
-    if (!existing || !existing.scopeId) return null
-    this.assertScheduleTargetAvailable(existing.scopeId, existing.agentId, existing.workspaceRoots)
-    const nextRunAt = this.previewScheduledTask({
-      scheduleSpec: existing.scheduleSpec,
-      timezone: existing.timezone,
-      count: 1,
-    }).nextRunAt
-    if (!nextRunAt) throw new Error('Schedule does not produce a future time')
-    const updated = this.scheduleRepository.update(id, { enabled: true, nextRunAt, migrationState: null })
-    await this.scheduledTaskCoordinator.reschedule()
-    return updated ? this.mapScheduledTask(updated) : null
-  }
-
-  async deleteScheduledTask(id: string): Promise<boolean> {
-    const removed = this.scheduleRepository.delete(id)
-    await this.scheduledTaskCoordinator.reschedule()
-    return removed
-  }
-
-  async runScheduledTaskNow(id: string): Promise<AgentScheduleOccurrence | null> {
-    const schedule = this.scheduleRepository.get(id)
-    if (!schedule || !schedule.enabled || !schedule.scopeId) return null
-    this.assertScheduleTargetAvailable(schedule.scopeId, schedule.agentId, schedule.workspaceRoots)
-    const now = new Date().toISOString()
-    const occurrence = this.scheduleRepository.claimDue({
-      scheduleId: id,
-      scheduledFor: now,
-      triggeredAt: now,
-      triggerSource: 'manual',
-      nextRunAt: schedule.nextRunAt,
-      occurrenceId: `occ-manual-${randomUUID()}`,
-    })
-    if (!occurrence) return null
-    logAgentMetric('scheduled_task_occurrence_status', {
-      scheduleId: occurrence.scheduleId,
-      occurrenceId: occurrence.id,
-      scheduledFor: occurrence.scheduledFor,
-      triggerSource: occurrence.triggerSource,
-      status: occurrence.claimStatus,
-    })
-    this.enqueueScheduledOccurrence(occurrence)
-    return occurrence
-  }
-
-  listScheduledTaskOccurrences(scheduleId: string, limit?: number): AgentScheduleOccurrence[] {
-    return this.scheduleRepository.listHistory(scheduleId, limit).map((occurrence) => {
-      const projection = occurrence.taskId ? this.taskProjectionStore.get(occurrence.taskId) : null
-      return {
-        ...occurrence,
-        runStatus: projection?.status ?? null,
-        interactionState: projection?.interactionState ?? null,
-        runBlockedReason: projection?.blockedReason ?? null,
-      }
-    })
-  }
-
-  private enqueueScheduledOccurrence(occurrence: ScheduledTaskOccurrence): void {
-    const schedule = this.scheduleRepository.get(occurrence.scheduleId)
-    if (!schedule?.scopeId) return
-    void this.scheduleDispatchQueue.enqueue({
-      occurrenceId: occurrence.id,
-      scheduleId: occurrence.scheduleId,
-      scopeId: schedule.scopeId,
-      scheduledFor: occurrence.scheduledFor,
-    })
-  }
-
-  private emitScheduledTasksChanged(scheduleId: string): void {
-    this.emit('scheduledTasksChanged', scheduleId)
-  }
-
-  private resolveScheduleMutationScope(
-    request: ScheduleCreateRequest | ScheduleUpdateRequest,
-    existing: import('../../scheduled-tasks/schedule-repository').ScheduledTaskDefinition | null,
-  ): string {
-    if (request.scopeMode === 'existing') {
-      if (!request.scopeId.trim()) throw new Error('Scheduled tasks require a scope')
-      return request.scopeId.trim()
-    }
-    if (existing?.scopeMode === 'dedicated' && existing.agentId === request.agentId && existing.scopeId) {
-      return existing.scopeId
-    }
-    return this.createLocalScope(request.agentId, `conv-scheduled-${randomUUID()}`).id
-  }
-
-  private assertScheduleTargetAvailable(scopeId: string, agentId: string, workspaceRoots: string[]): void {
-    if (!this.db.getConversationScope(scopeId)) throw new Error('Target conversation is missing')
-    if (!this.resolveAgentExecutionReadiness(agentId).conversationReady) throw new Error('Target Agent is unavailable')
-    if (workspaceRoots.some((root) => !validateWorkspaceRoot(root).ok)) {
-      throw new Error('Target workspace is unavailable')
-    }
-  }
-
-  private mapScheduledTask(schedule: import('../../scheduled-tasks/schedule-repository').ScheduledTaskDefinition): AgentScheduleDefinition {
-    const latest = this.scheduleRepository.listHistory(schedule.id, 1)[0]
-    const blockedReason = latest?.claimStatus === 'blocked_target' && latest.errorKind?.startsWith('blocked_')
-      ? latest.errorKind as ScheduleBlockedReason
-      : null
-    return {
-      id: schedule.id,
-      name: schedule.name,
-      instruction: schedule.instruction,
-      scheduleSpecVersion: schedule.scheduleSpecVersion,
-      scheduleSpec: schedule.scheduleSpec,
-      timezone: schedule.timezone,
-      scopeId: schedule.scopeId,
-      scopeMode: schedule.scopeMode,
-      agentId: schedule.agentId,
-      workspaceRoots: schedule.workspaceRoots,
-      enabled: schedule.enabled,
-      nextRunAt: schedule.nextRunAt,
-      lastOccurrenceAt: schedule.lastOccurrenceAt,
-      missedPolicy: schedule.missedPolicy,
-      blockedReason,
-      migrationState: schedule.migrationState,
-      createdAt: schedule.createdAt,
-      updatedAt: schedule.updatedAt,
-    }
-  }
-
-  private async dispatchScheduledTaskOccurrence(
-    occurrence: ScheduledTaskOccurrence,
-  ): Promise<{ success: boolean; error?: string; errorKind?: string }> {
-    return dispatchScheduledOccurrence(occurrence, {
-      getSchedule: (id) => this.scheduleRepository.get(id),
-      scopeExists: (scopeId) => Boolean(this.db.getConversationScope(scopeId)),
-      agentAvailable: (agentId) => this.resolveAgentExecutionReadiness(agentId).conversationReady,
-      workspaceAvailable: (root) => validateWorkspaceRoot(root).ok,
-      pauseSchedule: (id) => {
-        this.scheduleRepository.update(id, { enabled: false, nextRunAt: null })
-        this.emitScheduledTasksChanged(id)
-        void this.scheduledTaskCoordinator.reschedule()
-      },
-      markDispatching: (id, runId, taskId) => {
-        const updated = this.scheduleRepository.updateOccurrenceStatus(id, 'dispatching', { runId, taskId })
-        if (updated) {
-          logAgentMetric('scheduled_task_occurrence_status', {
-            scheduleId: updated.scheduleId, occurrenceId: updated.id, runId, taskId, status: updated.claimStatus,
-          })
-          this.emitScheduledTasksChanged(updated.scheduleId)
-        }
-        return Boolean(updated)
-      },
-      markDispatched: (id, runId, taskId) => {
-        this.scheduleRepository.updateOccurrenceStatus(id, 'dispatched', {
-          runId,
-          taskId,
-          finishedAt: new Date().toISOString(),
-        })
-        logAgentMetric('scheduled_task_occurrence_status', {
-          scheduleId: occurrence.scheduleId, occurrenceId: id, runId, taskId, status: 'dispatched',
-        })
-        this.emitScheduledTasksChanged(occurrence.scheduleId)
-      },
-      markFailed: (id, errorKind, errorMessage) => {
-        const current = this.scheduleRepository.getOccurrence(id)
-        if (!current) return
-        const status = errorKind.startsWith('blocked_') ? 'blocked_target' : 'dispatch_failed'
-        this.scheduleRepository.updateOccurrenceStatus(id, status, {
-          errorKind,
-          errorMessage,
-          finishedAt: new Date().toISOString(),
-        })
-        logAgentMetric('scheduled_task_occurrence_status', {
-          scheduleId: current.scheduleId,
-          occurrenceId: id,
-          runId: current.runId,
-          taskId: current.taskId,
-          status,
-          errorKind,
-        })
-        this.emitScheduledTasksChanged(current.scheduleId)
-      },
-      send: async () => ({
-        success: false,
-        error: 'scheduled_codex_ingress_unsupported',
-        errorKind: 'blocked_config',
-      }),
-      log: (message) => logAgentMetric('scheduled_task_dispatch', { message }),
-    })
   }
 
   async startSidecar(): Promise<void> {
@@ -1301,7 +1063,6 @@ export class AgentControlRuntime extends EventEmitter {
 
   async getRuntimeStatus(): Promise<AgentRuntimeStatus> {
     const channels = this.listChannels()
-    const schedules = this.listScheduledTasks()
     const byType: Record<string, number> = {}
     for (const channel of channels) {
       byType[channel.type] = (byType[channel.type] || 0) + 1
@@ -1342,10 +1103,6 @@ export class AgentControlRuntime extends EventEmitter {
         connected,
         errors,
         byType
-      },
-      schedules: {
-        total: schedules.length,
-        enabled: schedules.filter((item) => item.enabled).length
       },
       heartbeat: this.heartbeat
     }
@@ -1413,10 +1170,11 @@ export class AgentControlRuntime extends EventEmitter {
   }
 
   listConversationScopes(agent?: string): ConversationScope[] {
-    return this.conversationScopes.listConversationScopes(agent).map((scope) => ({
-      ...scope,
-      aliasGeneration: this.codexRuntime.aliasBindingPort.readAliasGeneration(scope.id),
-    }))
+    return this.conversationScopes.listConversationScopes(agent)
+  }
+
+  readCodexLifecycleSnapshot(request: LifecycleRequest): LifecycleOperationProjection {
+    return this.codexRuntime.aliasBindingPort.readLifecycleSnapshot(request)
   }
 
   listScopeRuns(payload?: {
@@ -1429,7 +1187,10 @@ export class AgentControlRuntime extends EventEmitter {
     const limit = Number.isFinite(Number(payload?.limit))
       ? Math.max(1, Math.min(100, Number(payload?.limit)))
       : 20
-    return Array.from(this.scopeRunSummaries.values())
+    return filterCurrentScopeRunSummaries(
+      this.scopeRunSummaries.values(),
+      (scopeId) => this.getConversationScope(scopeId),
+    )
       .filter((item) => (channelKey ? item.channelKey === channelKey : true))
       .filter((item) => (statuses ? statuses.has(item.phase) : true))
       .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
@@ -1450,6 +1211,18 @@ export class AgentControlRuntime extends EventEmitter {
   getRunMetaRepository(): RunMetaRepository | null {
     const rawDb = this.db.getRawDb()
     return rawDb ? new RunMetaRepository(rawDb) : null
+  }
+
+  readActiveRunMessageVisibilityEpoch(runId: string, scopeId: string): number | null {
+    const record = this.getRunMetaRepository()?.get(runId)
+    if (
+      record?.scopeId !== scopeId
+      || record.status !== 'running'
+      || !Number.isSafeInteger(record.messageVisibilityEpoch)
+    ) {
+      return null
+    }
+    return record.messageVisibilityEpoch
   }
 
   private getRunMetaRepositoryForFinalize(): RunMetaRepositoryLike | null {
@@ -1474,41 +1247,12 @@ export class AgentControlRuntime extends EventEmitter {
     return getSpecialistContentEditProposalStore()
   }
 
-  applyKnowledgeSystemEnabled(enabled: boolean): void {
-    const rawDb = this.db.getRawDb?.()
-    if (!rawDb) return
-    if (!enabled) {
-      this.knowledgeWatcher?.stop()
-      this.knowledgeWatcher = null
-      return
-    }
-    runStartupBeliefSync(rawDb as never, this.getBeliefCardStore(), true)
-    if (!this.knowledgeWatcher) {
-      this.knowledgeWatcher = new KnowledgeWatcher({ db: rawDb as never, store: this.getBeliefCardStore() })
-    }
-    this.knowledgeWatcher.start()
-  }
-
-  /** EP4-A5 — session-creation preroute; delegated to SessionPrerouteService. */
-  evaluateSessionPreroute(firstMessage: string): PrerouteResult {
-    return this.sessionPreroute.evaluateSessionPreroute(firstMessage)
-  }
-
-  /** P8g-8a — read-only Studio routing simulation; delegated to SessionPrerouteService. */
-  simulateSessionPrerouteForStudio(firstMessage: string): AgentSystemStudioRoutingSimulation {
-    return this.sessionPreroute.simulateSessionPrerouteForStudio(firstMessage)
-  }
-
-  listRecentSessionPrerouteTraces(limit = 10): AgentSystemStudioPrerouteTrace[] {
-    return this.sessionPreroute.listRecentSessionPrerouteTraces(limit)
-  }
-
   /**
    * 梯队三 emergence feed — 跨 scope 最近任务投影（resume/follow_up 卡信号源）。
-   * 只读，复用 preroute 的仓储入口；不做 reconcile（feed 是提示面，不是裁决面）。
+   * 只读，不做 reconcile（feed 是提示面，不是裁决面）。
    */
   listRecentTaskProjections(limit = 50): TaskProjectionRecord[] {
-    return this.taskProjectionStore.listRecentTasksForPreroute(limit) as TaskProjectionRecord[]
+    return this.taskProjectionStore.listRecentTasks(limit) as TaskProjectionRecord[]
   }
 
   listTaskProjections(scopeId: string): TaskProjectionRecord[] {
@@ -1587,20 +1331,6 @@ export class AgentControlRuntime extends EventEmitter {
     return this.referenceHints.getReferenceSkillHint(scopeId)
   }
 
-  startDetachedSkillAction(payload: {
-    scopeId?: string | null
-    sessionId?: string | null
-    agent?: string | null
-    parentTaskId?: string | null
-    parentStepId?: string | null
-    taskProjectionId?: string | null
-    skillId: string
-    action: string
-    params?: Record<string, unknown>
-  }): DetachedSkillTaskRecord {
-    return this.detachedSkills.startDetachedSkillAction(payload)
-  }
-
   inspectDetachedSkillTask(taskId: string, scopeId?: string | null): DetachedSkillTaskRecord | null {
     return this.detachedSkills.inspectDetachedSkillTask(taskId, scopeId)
   }
@@ -1634,6 +1364,10 @@ export class AgentControlRuntime extends EventEmitter {
       merged.set(row.childRunId, row)
     }
     for (const row of getSkillChildRunner()?.listActiveRuns() ?? []) {
+      const current = row.scopeId ? this.getConversationScope(row.scopeId) : null
+      if (row.scopeId
+        ? !current || row.messageVisibilityEpoch !== current.messageVisibilityEpoch
+        : row.messageVisibilityEpoch !== -1) continue
       merged.set(row.childRunId, row)
     }
     const rows = Array.from(merged.values())
@@ -1645,61 +1379,7 @@ export class AgentControlRuntime extends EventEmitter {
     rows: ActiveChildRunSummaryForRuntime[]
     failure: { reason: 'projection_db_error'; message: string } | null
   } {
-    const rawDb = this.db.getRawDb()
-    if (!rawDb) return { rows: [], failure: null }
-    let rows: TaskProjectionChildSummaryRow[] = []
-    try {
-      rows = rawDb.prepare(`
-        SELECT task_id, scope_id, status, blocked_reason, continuation_ref_json,
-               recent_artifacts_json, created_at, updated_at
-        FROM task_projections
-        WHERE task_id LIKE 'skill-child:%'
-          AND status IN ('queued', 'running', 'blocked', 'failed')
-        ORDER BY updated_at DESC
-        LIMIT 100
-      `).all<TaskProjectionChildSummaryRow>()
-    } catch (error) {
-      return {
-        rows: [],
-        failure: {
-          reason: 'projection_db_error',
-          message: error instanceof Error ? error.message : String(error),
-        },
-      }
-    }
-
-    const mapped = rows.map((row) => {
-      const continuation = parseRecordJson(row.continuation_ref_json)
-      const artifacts = parseArrayJson(row.recent_artifacts_json)
-      const childRunId = stringFromUnknown(continuation?.childRunId)
-        || row.task_id.replace(/^skill-child:/, '')
-      const skillId = stringFromUnknown(continuation?.skillId)
-        || artifactMetaString(artifacts, 'skillId')
-        || 'unknown'
-      const outputDir = stringFromUnknown(continuation?.outputDir)
-        || artifactMetaString(artifacts, 'outputDir')
-        || ''
-      const runStatePath = stringFromUnknown(continuation?.runStatePath)
-        || artifactMetaString(artifacts, 'runStatePath')
-        || ''
-      return {
-        childRunId,
-        skillId,
-        sessionId: null,
-        scopeId: row.scope_id,
-        status: childRunSummaryStatusFromProjection(row.status),
-        startedAt: row.created_at || row.updated_at,
-        outputDir,
-        runStatePath,
-        progress: progressFromUnknown(continuation?.progress),
-        blockedReason: row.blocked_reason,
-        liveness: row.status === 'queued' || row.status === 'running' || row.status === 'blocked'
-          ? 'background' as const
-          : null,
-        closeStatus: row.status === 'failed' ? 'failed' : null,
-      }
-    }).filter((row) => Boolean(row.childRunId))
-    return { rows: mapped, failure: null }
+    return listCurrentProjectionBackedChildRunSummaries(this.db.getRawDb())
   }
 
   async cancelChildRun(childRunId: string, options: { source: 'ui_button' }): Promise<unknown> {
@@ -1708,16 +1388,26 @@ export class AgentControlRuntime extends EventEmitter {
 
   attachSessionRecallContext(
     currentScopeId: string,
-    conversationId: string
+    conversationId: string,
+    expectedMessageVisibilityEpoch: number,
   ): { scope: ConversationScope; capsule: SessionRecallCapsule } {
-    return this.sessionRecall.attachSessionRecallContext(currentScopeId, conversationId)
+    return this.sessionRecall.attachSessionRecallContext(
+      currentScopeId,
+      conversationId,
+      expectedMessageVisibilityEpoch,
+    )
   }
 
   detachSessionRecallContext(
     currentScopeId: string,
-    conversationId: string
+    conversationId: string,
+    expectedMessageVisibilityEpoch: number,
   ): { scope: ConversationScope } {
-    return this.sessionRecall.detachSessionRecallContext(currentScopeId, conversationId)
+    return this.sessionRecall.detachSessionRecallContext(
+      currentScopeId,
+      conversationId,
+      expectedMessageVisibilityEpoch,
+    )
   }
 
   resumeSessionCandidate(payload: {
@@ -1733,6 +1423,18 @@ export class AgentControlRuntime extends EventEmitter {
 
   getConversationScopeMessages(scopeId: string): ConversationScopeMessage[] {
     return this.conversationScopes.getConversationScopeMessages(scopeId)
+  }
+
+  setActionAuthorizationMode(
+    scopeId: string,
+    mode: import('../../../../shared/action-authorization-mode').ActionAuthorizationMode,
+    expectedMessageVisibilityEpoch: number,
+  ): ConversationScope {
+    return this.conversationScopes.setActionAuthorizationMode(
+      scopeId,
+      mode,
+      expectedMessageVisibilityEpoch,
+    )
   }
 
   listScopeAttachments(scopeId: string): ConversationAttachment[] {
@@ -1764,27 +1466,102 @@ export class AgentControlRuntime extends EventEmitter {
     return this.conversationScopes.createLocalScope(agent, id)
   }
 
-  createCodexSession() {
-    return this.codexRuntime.lifecycleAdapter.createSession()
+  createCodexSession(request: import('../../../../shared/ipc-contracts/agent-runtime').CreateSessionRequest) {
+    return this.codexRuntime.lifecycleAdapter.createSession(request)
   }
 
-  resetCodexSession(request: LifecycleRequest) {
-    return this.codexRuntime.lifecycleAdapter.resetSession(request)
+  async resetCodexSession(request: ProductLifecycleRequest) {
+    const result = await this.codexRuntime.lifecycleAdapter.resetSession(request)
+    return settleScopeContextResetLifecycleResult({
+      requestAliasId: request.aliasId,
+      result,
+      readScope: (aliasId) => this.getConversationScope(aliasId),
+      deps: this.scopeContextCleanupDeps(result.aliasId, 'reset'),
+    })
   }
 
-  stopCodexSession(request: LifecycleRequest) {
+  private scopeContextCleanupDeps(
+    scopeIdForReport: string,
+    lifecycleAction: 'reset' | 'close',
+  ): ScopeContextResetCommitDeps {
+    return {
+      resetExecutionContext: (scopeId, agents) => this.orchestrator.resetScopeContext(scopeId, agents),
+      discardPendingRemoteInbound: (scopeId) => {
+        this.remoteChannel.discardScopeContext(scopeId)
+      },
+      closeBrowserTargetClaims: (scopeId) => {
+        getBrowserTargetClaimService().closeScopeContext(scopeId)
+      },
+      clearActiveSkillContext,
+      forgetContinuity: forgetSession,
+      clearAuthorizationFacts: clearAuthorizationFactsForScope,
+      clearNegations: clearNegationsForScope,
+      clearLarkAuthFlows: clearLarkCliAuthFlowsForSession,
+      clearReferenceHint: clearLastReferenceSkill,
+      clearSkillProjection: clearSkillTaskProjection,
+      cancelInteractionLifecycle: (scopeId) => {
+        getInteractionLifecycleRegistry().cancelScope(scopeId)
+      },
+      rejectEphemeralInteractions: (scopeId, error) => {
+        getEphemeralExecutionStore().rejectBySession(scopeId, error)
+      },
+      rejectAskUserInteractions: (scopeId, error) => {
+        getAskUserQuestionsStore().rejectBySession(scopeId, error)
+      },
+      sweepPendingAskUserCards: (scopeId) => {
+        const reason = lifecycleAction === 'reset' ? 'session_reset' : 'session_close'
+        const swept = this.db.sweepPendingAskUserQuestionsCardsBySession(scopeId, reason)
+        if (swept > 0) logAgentMetric('ask_user_questions_scope_context_swept_db', {
+          scopeId,
+          lifecycleAction,
+          swept,
+        })
+      },
+      clearSessionSnapshot: clearScopeSessionSnapshot,
+      clearRunSummary: (scopeId) => {
+        this.scopeRunSummaries.delete(scopeId)
+      },
+      reportCleanupFailure: (step, error) => {
+        logAgentMetric('scope_context_cleanup_failed', {
+          scopeId: scopeIdForReport,
+          lifecycleAction,
+          step,
+          error: error instanceof Error ? error.message : String(error),
+        })
+      },
+    }
+  }
+
+  stopCodexSession(request: StopLifecycleRequest) {
     return this.codexRuntime.lifecycleAdapter.stopSession(request)
   }
 
-  closeCodexSession(request: LifecycleRequest) {
-    return this.codexRuntime.lifecycleAdapter.closeSession(request)
+  async closeCodexSession(request: ProductLifecycleRequest) {
+    const closingScope = this.getConversationScope(request.aliasId)
+    const result = await this.codexRuntime.lifecycleAdapter.closeSession(request)
+    if (!result.ok || result.action !== 'close') return result
+    const closeIdentity = closingScope?.id === result.aliasId
+      ? {
+          scopeId: closingScope.id,
+          agents: [closingScope.agent, closingScope.activeAgentId],
+        }
+      : {
+          scopeId: result.aliasId,
+          agents: [],
+        }
+    return settleScopeContextCloseLifecycleResult({
+      requestAliasId: request.aliasId,
+      result,
+      readClosedScopeIdentity: () => closeIdentity,
+      deps: this.scopeContextCleanupDeps(result.aliasId, 'close'),
+    })
   }
 
   compactCodexSession(request: LifecycleRequest) {
     return this.codexRuntime.lifecycleAdapter.compactSession(request)
   }
 
-  private async resolveTrustedRequestEnvironment(
+  async resolveTrustedRequestEnvironment(
     hint?: { workbenchMode?: 'browser' | 'document' | 'rss' | 'calendar' },
   ): Promise<import('../contracts/request-envelope').TrustedRequestEnvironment> {
     const workbenchMode = hint?.workbenchMode
@@ -1802,6 +1579,17 @@ export class AgentControlRuntime extends EventEmitter {
 
   async sendScoped(payload: SendScopedRequest): Promise<SendScopedResponse> {
     const canonicalUserMessage = payload.userMessage
+    try {
+      await this.codexRuntime.ensureReadyForUserIngress()
+    } catch (error) {
+      return createRejectedBeforePersistence({
+        scope: 'pre-existing',
+        code: 'host_unavailable',
+        retryableByUser: true,
+        error: error instanceof Error ? error.message : 'sidecar_recovery_exhausted',
+        admissionEvidenceDigest: `runtime_retry_failed:${payload.scopeId}:${payload.requestId}`,
+      })
+    }
     return runConfirmedSendScoped({
       scopeId: payload.scopeId,
       requestId: payload.requestId,
@@ -1909,13 +1697,6 @@ export class AgentControlRuntime extends EventEmitter {
     return finalized
   }
 
-  async suspendRun(payload: {
-    scopeId: string
-    taskId?: string
-  }): Promise<{ success: boolean; error?: string; errorKind?: string }> {
-    return this.browserContinuation.suspendRun(payload)
-  }
-
   async reportInfrastructureTimeout(payload: {
     scopeId: string
     requestId: string
@@ -1976,61 +1757,6 @@ export class AgentControlRuntime extends EventEmitter {
       }
     }
     return { success: true, state: activeRun.state }
-  }
-
-  async resumeRun(payload: {
-    scopeId: string
-    taskId?: string
-    requestId?: string
-    responseText?: string
-    continuationIntent?: ContinuationIntent | null
-  }): Promise<{ success: boolean; error?: string; errorKind?: string }> {
-  return this.browserContinuation.resumeRun(payload)
-  }
-
-  async completeHumanTakeover(payload: {
-    taskId: string
-    takeoverId: string
-  }): Promise<{ success: boolean; error?: string; errorKind?: string }> {
-  return this.browserContinuation.completeHumanTakeover(payload)
-  }
-
-  async resumeBrowserTargetClaim(payload: BrowserTargetResumeRequest): Promise<{ success: boolean; error?: string; errorKind?: string }> {
-  return this.browserContinuation.resumeBrowserTargetClaim(payload)
-  }
-
-  private async resumeBrowserWorkflowFromCheckpoint(
-    projection: TaskProjectionRecord,
-    scope: ConversationScope,
-    trigger:
-      | {
-          kind: 'human_takeover'
-          takeoverId: string
-          wakeNonce?: string
-          targetClaim?: {
-            partition: string
-            tabId: string
-            physicalTargetToken: string
-            claimId: string
-            generation: number
-            suspensionCheckpointId: string
-            browserTaskId: string
-          }
-        }
-      | { kind: 'typed_wake'; requestId?: string; confirmationDecision?: 'confirmed' | 'denied' },
-  ): Promise<{ success: boolean; error?: string; errorKind?: string }> {
-  return this.browserContinuation.resumeBrowserWorkflowFromCheckpoint(projection, scope, trigger)
-  }
-
-  async respondToInteraction(payload: {
-    scopeId: string
-    taskId?: string
-    requestId?: string
-    responseText: string
-    confirmed?: boolean
-    continuationIntent?: ContinuationIntent | null
-  }): Promise<{ success: boolean; error?: string; errorKind?: string }> {
-    return this.browserContinuation.respondToInteraction(payload)
   }
 
   async upsertChannel(payload: UpsertChannelPayload): Promise<AgentChannelConfig> {
@@ -2183,36 +1909,6 @@ export class AgentControlRuntime extends EventEmitter {
           + 'migration that drops the CHECK before disabling the flag.',
       )
     }
-  }
-
-  private resolveTaskControlTarget(
-    scopeId: string,
-    taskId?: string,
-  ): {
-    scope: ConversationScope
-    projection: TaskProjectionRecord | null
-    scopeRunSummary: ScopeRunSummary | null
-  } | null {
-  return this.browserContinuation.resolveTaskControlTarget(scopeId, taskId)
-  }
-
-  private buildContinuationIntent(params: {
-    projection: TaskProjectionRecord | null
-    scopeRunSummary: ScopeRunSummary | null
-    incoming?: ContinuationIntent | null
-    responseText?: string
-  }): ContinuationIntent | null {
-    return buildContinuationIntentValue(params)
-  }
-
-  // B8-D R5 — body lives in RemoteChannelService; this delegate keeps the
-  // stay-behind `sendScoped` channel ack call site untouched.
-  private async sendLongTextToChannel(
-    channelId: string,
-    thread: string,
-    text: string
-  ): Promise<{ success: boolean; error?: string }> {
-    return this.remoteChannel.sendLongTextToChannel(channelId, thread, text)
   }
 
   private getSettingBool(key: string, fallback: boolean): boolean {

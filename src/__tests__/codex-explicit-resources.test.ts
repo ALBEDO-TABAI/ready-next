@@ -1,0 +1,143 @@
+import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
+import { mkdtemp, mkdir, realpath, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import test from 'node:test'
+
+import { resolveCodexExplicitResources } from '../main/modules/agent-control/codex-runtime/codex-explicit-resources'
+import { executeFileManagementTool } from '../main/modules/tools/file-management-tools'
+import type { SearchEngine } from '../main/modules/search-engine/indexer'
+
+test('Main revalidates selected files and emits body-free native/resource contracts', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'ready-codex-resources-'))
+  try {
+    const imagePath = join(root, 'image.png')
+    const textPath = join(root, 'notes.txt')
+    const directoryPath = join(root, '资料')
+    await writeFile(imagePath, Buffer.from('png-bytes'))
+    await writeFile(textPath, 'body stays on disk')
+    await mkdir(directoryPath)
+    const canonicalImagePath = await realpath(imagePath)
+    const canonicalTextPath = await realpath(textPath)
+    const canonicalDirectoryPath = await realpath(directoryPath)
+    const result = await resolveCodexExplicitResources({
+      selections: [
+        {
+          kind: 'local_file', id: 'image', name: 'image.png', path: imagePath,
+          size: 1, ext: '.forged', rendererType: 'text',
+        },
+        {
+          kind: 'local_file', id: 'text', name: 'notes.txt', path: textPath,
+          size: 99, ext: '.txt', rendererType: 'image',
+        },
+        { kind: 'local_directory', id: 'folder', name: '资料', path: directoryPath },
+      ],
+      resolveSkill: () => null,
+    })
+    assert.deepEqual(result.input, [
+      { type: 'localImage', path: canonicalImagePath, detail: null },
+      { type: 'mention', name: 'notes.txt', path: canonicalTextPath },
+      { type: 'mention', name: '资料', path: canonicalDirectoryPath },
+    ])
+    assert.equal(result.requestResources.every((resource) => (
+      resource.text === '' && resource.summary === null && resource.canWrite === false
+    )), true)
+    assert.equal(JSON.stringify(result.requestResources).includes('body stays on disk'), false)
+    assert.deepEqual(result.authorities.map((authority) => ({
+      path: authority.path,
+      allowedToolNames: authority.allowedToolNames,
+    })), [
+      { path: canonicalTextPath, allowedToolNames: ['file_extract_text', 'file_read_excerpt'] },
+      { path: canonicalDirectoryPath, allowedToolNames: ['file_inventory'] },
+    ])
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('explicit and selected skill inputs are Main-validated and deduplicated by canonical path', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'ready-codex-skill-'))
+  try {
+    const skillPath = join(root, 'summary')
+    await mkdir(skillPath)
+    await writeFile(join(skillPath, 'SKILL.md'), '# Summary\n')
+    const canonicalSkillPath = await realpath(skillPath)
+    const resolvedSkill = { name: 'summary', path: skillPath }
+    const result = await resolveCodexExplicitResources({
+      selections: [{
+        kind: 'skill', id: 'skill-1', name: 'forged renderer name',
+        path: '/forged/path', skillId: 'summary',
+      }],
+      resolveSkill: () => resolvedSkill,
+      selectedSkill: resolvedSkill,
+    })
+    assert.deepEqual(result.input, [{ type: 'skill', name: 'summary', path: canonicalSkillPath }])
+    assert.equal(result.resourceRefs.length, 1)
+    assert.equal(result.requestResources.length, 1)
+    await writeFile(join(skillPath, 'SKILL.md'), '# Changed summary\n')
+    const changed = await resolveCodexExplicitResources({
+      selections: [],
+      resolveSkill: () => null,
+      selectedSkill: resolvedSkill,
+    })
+    assert.notEqual(changed.resourceRefs[0]?.currentDigest, result.resourceRefs[0]?.currentDigest)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('legacy DOC/RTF/ODT selections remain explicitly unsupported', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'ready-codex-unsupported-'))
+  try {
+    for (const extension of ['.doc', '.rtf', '.odt']) {
+      const path = join(root, `legacy${extension}`)
+      await writeFile(path, 'unsupported')
+      await assert.rejects(resolveCodexExplicitResources({
+        selections: [{
+          kind: 'local_file', id: extension, name: `legacy${extension}`, path,
+          size: 11, ext: extension, rendererType: 'text',
+        }],
+        resolveSkill: () => null,
+      }), /codex_explicit_resource_unsupported/)
+    }
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('file tools read the exact selected file and fail closed for an unselected sibling', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'ready-codex-file-authority-'))
+  try {
+    const selectedPath = join(root, 'selected.txt')
+    const siblingPath = join(root, 'sibling.txt')
+    await writeFile(selectedPath, 'selected body')
+    await writeFile(siblingPath, 'private sibling body')
+    const canonicalSelectedPath = await realpath(selectedPath)
+    const context = {
+      searchEngine: {} as SearchEngine,
+      explicitReadableResources: [{
+        path: canonicalSelectedPath,
+        currentDigest: createHash('sha256').update('selected body').digest('hex'),
+      }],
+    }
+    const selected = JSON.parse(await executeFileManagementTool(
+      'file_read_excerpt', { path: selectedPath }, context,
+    )) as { ok: boolean; content?: string }
+    assert.equal(selected.ok, true)
+    assert.equal(selected.content, 'selected body')
+    const sibling = JSON.parse(await executeFileManagementTool(
+      'file_read_excerpt', { path: siblingPath }, context,
+    )) as { ok: boolean; error?: string }
+    assert.equal(sibling.ok, false)
+    assert.match(String(sibling.error), /not an explicitly selected readable file/)
+    await writeFile(selectedPath, 'changed body')
+    const stale = JSON.parse(await executeFileManagementTool(
+      'file_extract_text', { path: selectedPath }, context,
+    )) as { ok: boolean; error?: string }
+    assert.equal(stale.ok, false)
+    assert.match(String(stale.error), /changed after authorization/)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})

@@ -2,8 +2,8 @@
  * 梯队三 (2026-07-03) — emergence feed 面（TaskPanel 顶部段）。
  *
  * 只消费 `agent:emergence:feed` 组装结果；卡片必带证据与行动出口（合同
- * CLAUDE.md §2）。resume/adjudicate/supply 出口 = 打开宿主 scope；
- * adopt/review 出口 = 跳设置页确认面（涌现卡永不一键采纳，本组件不做
+ * CLAUDE.md §2）。adjudicate/supply 出口 = 打开宿主 scope；
+ * review 出口 = 跳设置页确认面（涌现卡永不一键采纳，本组件不做
  * 任何直接采纳写入）。空 feed / API 缺失时整段隐藏（零噪声）。
  */
 import { useCallback, useEffect, useState } from 'react'
@@ -12,18 +12,16 @@ import type { EmergenceFeedEntryData } from '../../types/electron'
 import { executeFileEmergenceAction } from '../../modules/file-emergence/emergenceAction'
 
 const ACTION_LABELS: Record<EmergenceFeedEntryData['card']['action']['kind'], string> = {
-  resume_task: '继续',
   adjudicate_task: '去裁决',
   supply_input: '去补充',
-  adopt_candidate: '去确认',
   review_duplicate: '去裁决',
   open_project: '打开',
   open_artifact: '打开',
   open_project_group: '打开',
 }
 
-const SCOPE_ACTIONS = new Set(['resume_task', 'adjudicate_task', 'supply_input'])
-const SETTINGS_ACTIONS = new Set(['adopt_candidate', 'review_duplicate'])
+const SCOPE_ACTIONS = new Set(['adjudicate_task', 'supply_input'])
+const SETTINGS_ACTIONS = new Set(['review_duplicate'])
 const FILE_ACTIONS = new Set(['open_project','open_artifact','open_project_group'])
 
 export function EmergenceFeedSection({

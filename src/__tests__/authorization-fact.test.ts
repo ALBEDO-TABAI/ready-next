@@ -8,7 +8,7 @@
  */
 
 import assert from 'node:assert/strict'
-import test from 'node:test'
+import test, { afterEach, beforeEach } from 'node:test'
 import { execFileSync } from 'node:child_process'
 
 import {
@@ -22,6 +22,18 @@ import {
   __clearAuthorizationFactsForTests,
 } from '../main/modules/agent-control/safety/authorization-fact-store'
 import { resolveConfirmationGate } from '../main/modules/agent-control/safety/action-confirmation-policy'
+import { __setScopeContextEpochDatabaseForTests } from '../main/modules/agent-control/session/scope-context-epoch'
+import { createFrozenCallAuditDb } from './helpers/frozen-call-audit-db'
+
+beforeEach(() => {
+  __setScopeContextEpochDatabaseForTests({
+    getRawDb: () => ({ prepare: () => ({ get: () => undefined }) }) as never,
+  })
+})
+
+afterEach(() => {
+  __setScopeContextEpochDatabaseForTests(null)
+})
 
 test('red line 1: vague requests yield zero grants; explicit naming yields canonicalizable grants', () => {
   assert.deepEqual(detectVerbatimGrants('帮我处理一下这些文件'), [])
@@ -97,6 +109,34 @@ test('confirmation grants (write entry 2) carry frozen-call evidence and consume
   assert.equal(consumeAuthorizationFact({ scopeId: 'scope-a', actionCategory: 'upload', objectRef: '/tmp/报告.pdf' }), true)
 })
 
+test('a prior upload fact never waives a later local-file upload confirmation', () => {
+  __clearAuthorizationFactsForTests()
+  const objectRef = '/tmp/report.pdf'
+  recordConfirmationGrant({
+    scopeId: 'scope-upload',
+    actionCategory: 'upload',
+    objectRef,
+    frozenCallId: 'fc-upload-1',
+    paramsSha256: 'b'.repeat(64),
+  })
+  const decision = resolveConfirmationGate('feishu_file_upload', {
+    channel_id: 'primary',
+    file_path: objectRef,
+    file_type: 'pdf',
+  }, {
+    scopeId: 'scope-upload',
+    actionAuthorizationMode: 'full',
+  })
+  assert.equal(decision.mode, 'M2')
+  assert.equal(decision.action, 'confirm')
+  assert.equal(decision.ruleId, 'm2-upload-file')
+  assert.equal(
+    consumeAuthorizationFact({ scopeId: 'scope-upload', actionCategory: 'upload', objectRef }),
+    true,
+    'the M2 upload decision must not consume or trust a stale path-only fact',
+  )
+})
+
 test('red lines 2+6: the closed write-surface gate is green (third-party paths cannot mint permissions)', () => {
   const output = execFileSync('node', ['scripts/check-authorization-fact-writes.cjs'], { encoding: 'utf-8' })
   assert.match(output, /check-authorization-fact-writes: ok/)
@@ -109,16 +149,8 @@ test('write entry 2 reachability: the M3 card session option mints the grant; pl
   const { FrozenCallStore } = await import('../main/modules/agent-control/safety/frozen-call-store')
   const { getAskUserQuestionsStore } = await import('../main/modules/tools/builtins/ask-user-questions-store')
 
-  const fakeDb = () => ({
-    prepare: (sql: string) => ({
-      run: () => undefined,
-      get: () => undefined,
-      all: () => [],
-    }),
-  })
-
   async function confirmVia(option: string, sessionId: string) {
-    const store = new FrozenCallStore(fakeDb() as never)
+    const store = new FrozenCallStore(createFrozenCallAuditDb())
     const pending = runFrozenCallConfirmation('feishu_message_send', { chat_id: 'oc_team' }, {
       mode: 'M3', action: 'confirm', ruleId: 'm3-send-external', designRef: 'x', reason: 'r',
     } as never, {
@@ -153,4 +185,121 @@ test('write entry 2 reachability: the M3 card session option mints the grant; pl
   const session = await confirmVia(FROZEN_CALL_SESSION_CONFIRM_OPTION, 'reach-session')
   assert.equal(session.kind, 'released')
   assert.equal(consumeAuthorizationFact({ scopeId: 'scope-grant', actionCategory: 'send_external', objectRef: 'oc_team' }), true)
+})
+
+test('reset epoch rejects old authorization facts and writers while same-epoch stop preserves current facts', () => {
+  __clearAuthorizationFactsForTests()
+  let epoch = 0
+  __setScopeContextEpochDatabaseForTests({
+    getRawDb: () => ({
+      prepare: () => ({
+        get: () => ({ message_visibility_epoch: epoch, closed_at: null }),
+      }),
+    }) as never,
+  })
+  try {
+    assert.ok(recordVerbatimGrant({
+      scopeId: 'scope-auth-epoch',
+      actionCategory: 'send_external',
+      objectRef: 'oc_old',
+      verbatim: '发给 oc_old',
+      messageVisibilityEpoch: 0,
+    }))
+    epoch = 1
+    assert.equal(consumeAuthorizationFact({
+      scopeId: 'scope-auth-epoch',
+      actionCategory: 'send_external',
+      objectRef: 'oc_old',
+      messageVisibilityEpoch: 0,
+    }), false)
+    assert.equal(consumeAuthorizationFact({
+      scopeId: 'scope-auth-epoch',
+      actionCategory: 'send_external',
+      objectRef: 'oc_old',
+      messageVisibilityEpoch: 1,
+    }), false)
+    assert.equal(recordVerbatimGrant({
+      scopeId: 'scope-auth-epoch',
+      actionCategory: 'send_external',
+      objectRef: 'oc_late',
+      verbatim: '发给 oc_late',
+      messageVisibilityEpoch: 0,
+    }), null)
+    assert.ok(recordVerbatimGrant({
+      scopeId: 'scope-auth-epoch',
+      actionCategory: 'send_external',
+      objectRef: 'oc_current',
+      verbatim: '发给 oc_current',
+      messageVisibilityEpoch: 1,
+    }))
+    assert.equal(consumeAuthorizationFact({
+      scopeId: 'scope-auth-epoch',
+      actionCategory: 'send_external',
+      objectRef: 'oc_current',
+      messageVisibilityEpoch: 1,
+    }), true)
+  } finally {
+    __setScopeContextEpochDatabaseForTests(null)
+    __clearAuthorizationFactsForTests()
+  }
+})
+
+test('authorization facts fail closed while durable scope identity is unavailable', () => {
+  __clearAuthorizationFactsForTests()
+  __setScopeContextEpochDatabaseForTests({
+    getRawDb: () => ({
+      prepare: () => ({ get: () => undefined }),
+    }) as never,
+  })
+  try {
+    assert.ok(recordConfirmationGrant({
+      scopeId: 'scope-auth-unavailable',
+      actionCategory: 'send_external',
+      objectRef: 'oc_old',
+      frozenCallId: 'frozen-old',
+      paramsSha256: 'params-old',
+      messageVisibilityEpoch: 0,
+    }))
+
+    __setScopeContextEpochDatabaseForTests({
+      getRawDb: () => null,
+    })
+    assert.equal(recordConfirmationGrant({
+      scopeId: 'scope-auth-unavailable',
+      actionCategory: 'send_external',
+      objectRef: 'oc_late',
+      frozenCallId: 'frozen-late',
+      paramsSha256: 'params-late',
+      messageVisibilityEpoch: 0,
+    }), null)
+    assert.equal(consumeAuthorizationFact({
+      scopeId: 'scope-auth-unavailable',
+      actionCategory: 'send_external',
+      objectRef: 'oc_old',
+      messageVisibilityEpoch: 1,
+    }), false)
+
+    __setScopeContextEpochDatabaseForTests({
+      getRawDb: () => {
+        throw new Error('database temporarily unavailable')
+      },
+    })
+    assert.equal(recordConfirmationGrant({
+      scopeId: 'scope-auth-unavailable',
+      actionCategory: 'send_external',
+      objectRef: 'oc_throw',
+      frozenCallId: 'frozen-throw',
+      paramsSha256: 'params-throw',
+      messageVisibilityEpoch: 0,
+    }), null)
+    assert.equal(consumeAuthorizationFact({
+      scopeId: 'scope-auth-unavailable',
+      actionCategory: 'send_external',
+      objectRef: 'oc_old',
+      messageVisibilityEpoch: 1,
+    }), false)
+  } finally {
+    __setScopeContextEpochDatabaseForTests(null)
+    __clearAuthorizationFactsForTests()
+  }
 })

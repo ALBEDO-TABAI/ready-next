@@ -11,6 +11,7 @@ import { Agent, MemorySession, tool } from '@openai/agents'
 
 import {
   billProviderRequestSections,
+  estimateImageDataTokens,
   estimateInputItemTokens,
   estimateTextTokens,
   IMAGE_EST_TOKENS
@@ -43,22 +44,20 @@ const screenshotResult = () => ({
   output: { type: 'computer_screenshot', data: `data:image/png;base64,${bigBase64}` }
 })
 
-test('vision: the REAL {type:input_image, image:data-url} shape is attributed at tile cost', () => {
+test('vision: the REAL {type:input_image, image:data-url} shape uses the text-protocol safety estimate', () => {
   const bill = billProviderRequestSections([
     imageItem(),
     { role: 'user', content: '一段历史文本' }
   ] as never)
-  assert.ok(bill.sections.vision >= IMAGE_EST_TOKENS)
-  assert.ok(bill.sections.vision < 10_000, 'base64 bytes must not inflate the estimate linearly')
+  assert.equal(bill.sections.vision, estimateInputItemTokens([imageItem()] as never))
   assert.equal(bill.visionItems, 1)
   assert.ok(bill.sections.history > 0)
   assert.equal(bill.sections.tool_results, 0)
 })
 
-test('vision: a computer_screenshot result is attributed to vision (image cost), not tool_results', () => {
+test('vision: a computer_screenshot result uses the text-protocol safety estimate, not tool_results', () => {
   const bill = billProviderRequestSections([screenshotResult()] as never)
-  assert.ok(bill.sections.vision >= IMAGE_EST_TOKENS)
-  assert.ok(bill.sections.vision < 10_000)
+  assert.equal(bill.sections.vision, estimateInputItemTokens([screenshotResult()] as never))
   assert.equal(bill.visionItems, 1)
   assert.equal(bill.sections.tool_results, 0)
 })
@@ -141,7 +140,7 @@ test('partition still holds with the real image shape (sections sum to total)', 
   assert.equal(sum, bill.totalTokens)
 })
 
-test('image estimate is fixed per item for large data URLs, opaque refs, and screenshots', () => {
+test('image estimate scales data URLs for text protocols while opaque refs keep the tile floor', () => {
   const small = { type: 'input_image', image: `data:image/png;base64,${'A'.repeat(1_000)}` }
   const large = { type: 'input_image', image: `data:image/png;base64,${'A'.repeat(500_000)}` }
   const opaque = { type: 'input_image', image: { id: 'image-1' } }
@@ -150,12 +149,18 @@ test('image estimate is fixed per item for large data URLs, opaque refs, and scr
     data: `data:image/png;base64,${'A'.repeat(500_000)}`
   }
   assert.equal(estimateInputItemTokens([small] as never), IMAGE_EST_TOKENS)
-  assert.equal(estimateInputItemTokens([large] as never), IMAGE_EST_TOKENS)
+  assert.equal(
+    estimateInputItemTokens([large] as never),
+    estimateImageDataTokens(String(large.image).length),
+  )
   assert.equal(estimateInputItemTokens([opaque] as never), IMAGE_EST_TOKENS)
-  assert.equal(estimateInputItemTokens([screenshot] as never), IMAGE_EST_TOKENS)
+  assert.equal(
+    estimateInputItemTokens([screenshot] as never),
+    estimateImageDataTokens(String(screenshot.data).length),
+  )
 })
 
-test('three large images no longer fake-trigger the 0.8 x 200K compaction threshold', () => {
+test('three large data URLs safely cross the 0.8 x 200K text-protocol compaction threshold', () => {
   const dataUrl = `data:image/webp;base64,${'A'.repeat(500_000)}`
   const items = [
     { role: 'user', content: [{ type: 'input_image', image: dataUrl }] },
@@ -167,7 +172,7 @@ test('three large images no longer fake-trigger the 0.8 x 200K compaction thresh
     dataUrl.length * 3 > 200_000 * 0.8,
     'legacy byte-like estimate crossed the soft threshold'
   )
-  assert.ok(estimateInputItemTokens(items as never) < 200_000 * 0.8)
+  assert.ok(estimateInputItemTokens(items as never) >= 200_000 * 0.8)
 })
 
 test('plain-text estimation remains unchanged by image calibration', () => {
@@ -211,6 +216,7 @@ test('SDK run usage counts every provider request around tool execution', () => 
     inputTokens: 240,
     outputTokens: 30,
     totalTokens: 270,
+    lastRequestInputTokens: 140,
   })
   assert.equal(usageFromModelResponses([]), undefined)
 })

@@ -50,6 +50,7 @@ export const FROZEN_CALL_SESSION_CONFIRM_OPTION = '确认（本次会话内同�
 const METRIC_FROZEN_CALL_RELEASED = 'frozen_call_released'
 const METRIC_FROZEN_CALL_DENIED = 'frozen_call_denied'
 const METRIC_FROZEN_CALL_EXPIRED = 'frozen_call_expired'
+const METRIC_FROZEN_CALL_UNAVAILABLE = 'frozen_call_unavailable'
 
 /**
  * Rules whose frozen params carry credentials / sensitive payloads — the
@@ -78,6 +79,7 @@ export interface FrozenCallConfirmationDeps {
   } | null
   taskId?: string | null
   scopeId?: string | null
+  messageVisibilityEpoch?: number
   signal?: AbortSignal
   emitCard?: EmitAskUserQuestionsCard
   persistCard?: PersistAskUserQuestionsCardPending
@@ -162,32 +164,49 @@ export async function runFrozenCallConfirmation(
     answer = typeof found?.answer === 'string' ? found.answer : null
   } catch (error) {
     const reason = error instanceof ToolDomainError ? error.errorKind : 'card_failed'
-    deps.store.expire(frozen.id)
+    const expired = deps.store.expire(frozen.id)
+    if (!expired.ok && expired.reason === 'store_unavailable') {
+      logAgentMetric(METRIC_FROZEN_CALL_UNAVAILABLE, {
+        frozenCallId: frozen.id,
+        toolName,
+        sessionId,
+        reason: expired.reason,
+        paramsSha256: frozen.paramsSha256,
+      })
+      return { kind: 'unavailable', reason: expired.reason }
+    }
     logAgentMetric(METRIC_FROZEN_CALL_EXPIRED, {
       frozenCallId: frozen.id,
       toolName,
       sessionId,
-      reason,
+      reason: expired.ok ? reason : expired.reason,
       paramsSha256: frozen.paramsSha256,
     })
     if (reason === 'overlapping_card') {
       return { kind: 'pending_exists' }
     }
     if (deps.taskId && deps.appendProof) deps.appendProof(deps.taskId, `frozen:${frozen.id}|expired`)
-    return { kind: 'expired', frozenCallId: frozen.id, reason }
+    return {
+      kind: 'expired',
+      frozenCallId: frozen.id,
+      reason: expired.ok ? reason : expired.reason,
+    }
   }
 
   if (answer === FROZEN_CALL_CONFIRM_OPTION || answer === FROZEN_CALL_SESSION_CONFIRM_OPTION) {
     const released = deps.store.release(frozen.id, frozen.token)
     if (!released.ok) {
       // Confirmed too late (TTL elapsed / state raced) — never execute.
-      logAgentMetric(METRIC_FROZEN_CALL_EXPIRED, {
+      const unavailable = released.reason === 'store_unavailable'
+      logAgentMetric(unavailable ? METRIC_FROZEN_CALL_UNAVAILABLE : METRIC_FROZEN_CALL_EXPIRED, {
         frozenCallId: frozen.id,
         toolName,
         sessionId,
         reason: released.reason,
         paramsSha256: frozen.paramsSha256,
+        messageVisibilityEpoch: deps.messageVisibilityEpoch,
       })
+      if (unavailable) return { kind: 'unavailable', reason: released.reason }
       if (deps.taskId && deps.appendProof) deps.appendProof(deps.taskId, `frozen:${frozen.id}|expired`)
       return { kind: 'expired', frozenCallId: frozen.id, reason: released.reason }
     }
@@ -210,7 +229,20 @@ export async function runFrozenCallConfirmation(
     return { kind: 'released', frozenCallId: frozen.id, params: released.params }
   }
 
-  deps.store.deny(frozen.id)
+  const denied = deps.store.deny(frozen.id)
+  if (!denied.ok) {
+    const unavailable = denied.reason === 'store_unavailable'
+    logAgentMetric(unavailable ? METRIC_FROZEN_CALL_UNAVAILABLE : METRIC_FROZEN_CALL_EXPIRED, {
+      frozenCallId: frozen.id,
+      toolName,
+      sessionId,
+      reason: denied.reason,
+      paramsSha256: frozen.paramsSha256,
+    })
+    if (unavailable) return { kind: 'unavailable', reason: denied.reason }
+    if (deps.taskId && deps.appendProof) deps.appendProof(deps.taskId, `frozen:${frozen.id}|expired`)
+    return { kind: 'expired', frozenCallId: frozen.id, reason: denied.reason }
+  }
   logAgentMetric(METRIC_FROZEN_CALL_DENIED, {
     frozenCallId: frozen.id,
     toolName,

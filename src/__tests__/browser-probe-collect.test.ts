@@ -63,12 +63,8 @@ class FakeElement {
   }
 
   closest(selector: string): FakeElement | null {
-    let current: FakeElement | null = this
-    while (current) {
-      if (selector === 'form' && current.tagName === 'FORM') return current
-      current = current.parentElement
-    }
-    return null
+    if (selector === 'form' && this.tagName === 'FORM') return this
+    return this.parentElement?.closest(selector) ?? null
   }
 
   focus(): void {

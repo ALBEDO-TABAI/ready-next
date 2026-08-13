@@ -1,4 +1,4 @@
-import { describe, it, beforeEach } from 'node:test'
+import { after, before, beforeEach, describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 
 import {
@@ -7,6 +7,12 @@ import {
   REFERENCE_SKILL_HINT_TTL_MS,
   _resetLastReferenceSkillHintsForTests,
 } from '../main/modules/agent-control/skills/skill-reference-hints'
+import { __setScopeContextEpochDatabaseForTests } from '../main/modules/agent-control/session/scope-context-epoch'
+
+before(() => {
+  __setScopeContextEpochDatabaseForTests({ getRawDb: () => ({ prepare: () => ({ get: () => undefined }) }) as never })
+})
+after(() => __setScopeContextEpochDatabaseForTests(null))
 
 // skill-resume G8 — getLastReferenceSkill must bump `at` on every successful
 // read so an actively-used hint doesn't expire mid-flow during a long

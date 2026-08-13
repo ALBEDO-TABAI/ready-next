@@ -6,6 +6,7 @@ import { logAgentMetric } from '../../metrics'
 import type { SealedDeliveryCandidate } from './seal-delivery-candidate'
 
 const MAX_VERIFIER_OUTPUT_TOKENS = 512
+const INVALID_VERIFIER_SUMMARY = '独立复核未能形成有效结论，已安全阻止交付。'
 
 export interface DeliveryVerificationVerdict {
   version: 1
@@ -64,8 +65,14 @@ function invalidVerifierVerdict(description: string): DeliveryVerificationVerdic
     version: 1,
     verdict: 'block',
     gaps: [{ kind: 'text', description }],
-    summary: '独立复核未能形成有效结论，已安全阻止交付。',
+    summary: INVALID_VERIFIER_SUMMARY,
   }
+}
+
+export function isInvalidDeliveryVerificationVerdict(
+  verdict: DeliveryVerificationVerdict,
+): boolean {
+  return verdict.summary === INVALID_VERIFIER_SUMMARY
 }
 
 export async function verifyDeliveryCandidate(input: {
@@ -77,10 +84,15 @@ export async function verifyDeliveryCandidate(input: {
   contextWindowTokens: number
   maxOutputTokens: number
   signal: AbortSignal
+  verifierAgentName?: string
   runAgent: (params: ReadyAgentSdkRunParams) => Promise<ReadyAgentSdkRunResult>
-}): Promise<{ verdict: DeliveryVerificationVerdict; usage: ReadyAgentSdkRunResult['usage'] }> {
+}): Promise<{
+  verdict: DeliveryVerificationVerdict
+  usage: ReadyAgentSdkRunResult['usage']
+  invalidOutput: boolean
+}> {
   const result = await input.runAgent({
-    agentName: 'dynamic-delivery-verifier',
+    agentName: input.verifierAgentName || 'dynamic-delivery-verifier',
     runId: `${input.runId}:verifier`,
     taskId: input.taskId,
     sessionId: `${input.runId}:verifier`,
@@ -97,15 +109,21 @@ export async function verifyDeliveryCandidate(input: {
     onTextDelta: () => undefined,
   })
   const verdict = parseDeliveryVerification(result.finalText)
-  if (verdict.summary === '独立复核未能形成有效结论，已安全阻止交付。') {
+  const invalidOutput = isInvalidDeliveryVerificationVerdict(verdict)
+  if (invalidOutput) {
     const raw = String(result.finalText || '')
-    logAgentMetric('dynamic_delivery_verifier_invalid_output', {
-      runId: input.runId,
-      taskId: input.taskId,
-      outputLength: raw.length,
-      outputHash: createHash('sha256').update(raw).digest('hex'),
-      outputShape: raw.trim().startsWith('{') ? 'json_object_candidate' : 'non_object_text',
-    })
+    logAgentMetric(
+      input.verifierAgentName === 'codex-browser-verifier'
+        ? 'codex_browser_verifier_invalid_output'
+        : 'dynamic_delivery_verifier_invalid_output',
+      {
+        runId: input.runId,
+        taskId: input.taskId,
+        outputLength: raw.length,
+        outputHash: createHash('sha256').update(raw).digest('hex'),
+        outputShape: raw.trim().startsWith('{') ? 'json_object_candidate' : 'non_object_text',
+      },
+    )
   }
-  return { verdict, usage: result.usage }
+  return { verdict, usage: result.usage, invalidOutput }
 }

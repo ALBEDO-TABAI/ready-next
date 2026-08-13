@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import test from 'node:test'
+import test, { after, before } from 'node:test'
 
 import {
   DetachedSkillTaskTracker,
@@ -10,6 +10,12 @@ import {
 import { registerSkillTaskRunRepository } from '../main/modules/agent-control/skills/skill-task-tracker'
 import type { SkillTaskRunRecord, SkillTaskRunRepository } from '../main/modules/repositories/skill-task-run-repository'
 import type { SkillRunRequest, SkillRunResult } from '../main/modules/skills-runtime/runtime-manager'
+import { __setScopeContextEpochDatabaseForTests } from '../main/modules/agent-control/session/scope-context-epoch'
+
+before(() => {
+  __setScopeContextEpochDatabaseForTests({ getRawDb: () => ({ prepare: () => ({ get: () => undefined }) }) as never })
+})
+after(() => __setScopeContextEpochDatabaseForTests(null))
 
 function storagePath(): string {
   return join(mkdtempSync(join(tmpdir(), 'ready-detached-skill-')), 'tasks.json')
@@ -132,6 +138,34 @@ test('DetachedSkillTaskTracker preserves parent task linkage for detached handof
   assert.equal(restored.inspect(started.id)?.parentTaskId, 'parent-task')
   assert.equal(restored.inspect(started.id)?.parentStepId, 'parent-step')
   assert.equal(restored.inspect(started.id)?.taskProjectionId, 'projection-parent')
+})
+
+test('DetachedSkillTaskTracker keeps raw audit records but current lists filter reset epochs', async () => {
+  const path = storagePath()
+  const tracker = new DetachedSkillTaskTracker({
+    storagePath: path,
+    runSkill: async (request) => successfulLongSkillResult(request),
+  })
+  const old = tracker.start({
+    scopeId: 'scope-context-epoch',
+    sessionId: 'scope-context-epoch',
+    ownerRunId: 'run-old-context',
+    messageVisibilityEpoch: 0,
+    skillId: 'long-report-skill',
+    action: 'run_report',
+  })
+  await tracker.waitForTask(old.id)
+
+  assert.equal(tracker.list({
+    scopeId: 'scope-context-epoch',
+    messageVisibilityEpoch: 0,
+  }).length, 1, 'same-epoch stop continuity remains visible')
+  assert.equal(tracker.list({
+    scopeId: 'scope-context-epoch',
+    messageVisibilityEpoch: 1,
+  }).length, 0, 'reset context excludes the old detached record')
+  assert.equal(tracker.findLatestForScope('scope-context-epoch', 1), null)
+  assert.equal(tracker.inspect(old.id)?.messageVisibilityEpoch, 0, 'exact raw read remains audit-visible')
 })
 
 test('DetachedSkillTaskTracker cancel aborts the running skill action', async () => {

@@ -77,6 +77,7 @@ export function buildBrowserTaskEventExtra(
     browserTaskId: task.taskId,
     kind: task.kind,
     scopeId: readString(payload, ['scopeId', 'sessionId', 'publicSessionId']),
+    messageVisibilityEpoch: readNumber(payload, ['messageVisibilityEpoch']),
     sourceTaskId,
     summary: buildTaskEventSummary(task.status, total, completed, failed, remaining, stopReason),
     progress: {

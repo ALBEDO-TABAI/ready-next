@@ -39,9 +39,9 @@ import type {
 } from '../../../../shared/browser-workflow-control'
 import { addRunUsage, mergeRunUsage } from './run-usage-accumulator'
 import { materializeDeliveryArtifacts } from './dynamic-delivery/delivery-artifact-readback'
+import { materializeBrowserWorkflowDeliveryVerifierResources } from './dynamic-delivery/browser-workflow-delivery-verifier'
 import type { CanonicalAssistantMessageReceipt } from '../../../../shared/ipc-contracts/canonical-message'
 import { workflowDigest } from '../../repositories/browser-workflow-codec'
-import { buildBrowserWorkflowVerifierEvidenceView } from '../../browser-engine/browser-workflow-verifier-view'
 import {
   buildBrowserVerifierRecoveryItem,
   withoutBrowserVerifierRecoveryItems,
@@ -403,10 +403,6 @@ export async function finalizeAgentSdkPreparedTurnResult(
       })
     }
     if (browserVerifierBundle) workflowCloseoutSeal = browserVerifierBundle.seal
-    const verifiedBrowserEvidence = browserVerifierBundle?.evidence ?? null
-    const browserVerifierEvidenceView = verifiedBrowserEvidence
-      ? buildBrowserWorkflowVerifierEvidenceView(verifiedBrowserEvidence)
-      : null
     const readVerifierResources = (projectionAfterOwner: {
       proofRefs?: ReadonlyArray<unknown> | null
       recentArtifacts?: ReadonlyArray<unknown> | null
@@ -422,34 +418,14 @@ export async function finalizeAgentSdkPreparedTurnResult(
         currentRunId: runId,
         runStartedAtMs: runStartedAt,
       })
-      return browserVerifierBundle && verifiedBrowserEvidence && browserVerifierEvidenceView
-        ? {
-            ...resources,
-            items: [
-              ...resources.items,
-              {
-                refId: `browser-workflow-evidence:${browserVerifierBundle.browserTaskId}`,
-                digest: workflowDigest({
-                  journal: verifiedBrowserEvidence.journal,
-                  researchState: verifiedBrowserEvidence.researchState,
-                  researchAssessment: verifiedBrowserEvidence.researchAssessment,
-                }),
-                provenance: `browser_workflow_request:${browserVerifierBundle.requestDigest}`,
-                excerpt: browserVerifierEvidenceView.journalExcerpt,
-                kind: 'action_receipt' as const,
-              },
-              ...browserVerifierEvidenceView.resources.map(({ resource, excerpt }) => ({
-                refId: resource.resourceId,
-                digest: workflowDigest({
-                  contentDigest: resource.contentDigest,
-                  provenanceDigest: resource.provenanceDigest,
-                }),
-                provenance: `browser_observation:${resource.provenanceDigest}`,
-                excerpt,
-                kind: 'action_receipt' as const,
-              })),
-            ],
-          }
+      return browserVerifierBundle
+        ? materializeBrowserWorkflowDeliveryVerifierResources({
+            bundle: browserVerifierBundle,
+            projection: projectionAfterOwner,
+            requestEnvelope: toolBridgeRuntimeContext.requestEnvelope,
+            currentRunId: runId,
+            runStartedAtMs: runStartedAt,
+          })
         : resources
     }
     if (deliveryDecision !== 'single_path') {
@@ -715,7 +691,15 @@ export async function finalizeAgentSdkPreparedTurnResult(
         const snapshotItems = normalizeSessionSnapshotForSeed(
           await runHandle.capturedSession.getItems()
         )
-        const written = writeScopeSessionSnapshot(name, snapshotItems)
+        const messageVisibilityEpoch = toolBridgeRuntimeContext.messageVisibilityEpoch
+        if (!Number.isSafeInteger(messageVisibilityEpoch) || Number(messageVisibilityEpoch) < 0) {
+          throw new Error('scope_session_snapshot_message_visibility_epoch_missing')
+        }
+        const written = writeScopeSessionSnapshot(
+          name,
+          snapshotItems,
+          Number(messageVisibilityEpoch),
+        )
         if (!written.ok) log(`scope session snapshot write failed: ${written.error}`)
       } catch (snapshotError) {
         log(`scope session snapshot write failed: ${errorMessage(snapshotError)}`)

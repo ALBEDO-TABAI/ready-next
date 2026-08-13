@@ -50,6 +50,21 @@ except ImportError:
 REQUIRED_SAMPLE_KEYS = ("primary", "start", "mid", "end")
 
 
+def _load_auto_scoring_validation(video_dir: Path) -> Dict[str, object]:
+    path = video_dir / "auto_scoring_validation.json"
+    if not path.exists():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _auto_scoring_scene_numbers(payload: Dict[str, object], key: str) -> List[int]:
+    return [int(value) for value in payload.get(key, []) if str(value).isdigit()]
+
+
 def delivery_report_path_for(video_dir: Path) -> Path:
     return video_dir / "delivery_report.json"
 
@@ -385,6 +400,8 @@ def build_verification_payload(
 ) -> Dict[str, object]:
     resource_issues = collect_scene_resource_issues(data)
     batch_receipt_issues = collect_host_batch_receipt_issues(video_dir)
+    auto_scoring_validation = _load_auto_scoring_validation(video_dir)
+    auto_scoring_blocking = _auto_scoring_scene_numbers(auto_scoring_validation, "blocking_scene_numbers")
     missing_outputs: List[str] = []
     required_outputs: Dict[str, str] = {}
 
@@ -414,11 +431,14 @@ def build_verification_payload(
             if item.get("missing_samples")
         ],
         "blocked_batches": [str(item["batch_id"]) for item in batch_receipt_issues],
+        "auto_scoring_validation": auto_scoring_validation,
+        "auto_scoring_blocking_scene_numbers": auto_scoring_blocking,
         "checked_at": datetime.now().isoformat(),
         "passed": (
             not collect_incomplete_scenes(data)
             and not resource_issues
             and not batch_receipt_issues
+            and not auto_scoring_blocking
             and (not include_output_checks or not missing_outputs)
         ),
     }
@@ -438,6 +458,17 @@ def write_delivery_report(video_dir: Path, data: Dict, requested_formats: Sequen
     incomplete_scenes = collect_incomplete_scenes(data)
     batch_receipt_issues = collect_host_batch_receipt_issues(video_dir)
     audiovisual_handoff = collect_audiovisual_handoff_status(video_dir)
+    auto_scoring_validation = _load_auto_scoring_validation(video_dir)
+    auto_scoring_blocking = _auto_scoring_scene_numbers(auto_scoring_validation, "blocking_scene_numbers")
+    auto_scoring_warnings = sorted(set(
+        _auto_scoring_scene_numbers(auto_scoring_validation, "validation_warning_scene_numbers")
+        + _auto_scoring_scene_numbers(auto_scoring_validation, "validation_failed_scene_numbers")
+    ))
+    verification = dict(state.get("verification") or {})
+    if auto_scoring_validation:
+        verification["auto_scoring_validation_passed"] = not auto_scoring_blocking
+        verification["auto_scoring_blocking_scene_numbers"] = auto_scoring_blocking
+        verification["passed"] = bool(verification.get("passed")) and not auto_scoring_blocking
     language_check = (
         collect_language_mismatch_outputs(video_dir, data.get("video_id", "unknown"), requested_formats)
         if output_checks_enabled
@@ -471,12 +502,18 @@ def write_delivery_report(video_dir: Path, data: Dict, requested_formats: Sequen
         "blocked_batches": [str(item["batch_id"]) for item in batch_receipt_issues],
         "incomplete_scene_numbers": [int(item["scene_number"]) for item in incomplete_scenes],
         "audiovisual_handoff": audiovisual_handoff,
+        "auto_scoring_validation": auto_scoring_validation,
+        "non_blocking_warnings": (
+            ["自动评分抽检提示：" + "、".join(f"Scene {number:03d}" for number in auto_scoring_warnings)]
+            if auto_scoring_warnings and not auto_scoring_blocking
+            else []
+        ),
         # 目标语言非中文时，四类最终报告若仍是中文稿会列在这里；
         # 该列表非空就不算交付完成（机器兜底 SKILL 的"没翻完不算交付"规则）
         "primary_language": language_check.get("primary_language", ""),
         "language_mismatch_outputs": list(language_check.get("mismatched_outputs", [])),
         "last_error": state.get("last_error", ""),
-        "verification": state.get("verification", {}),
+        "verification": verification,
         "updated_at": datetime.now().isoformat(),
     }
     delivery_report_path_for(video_dir).write_text(

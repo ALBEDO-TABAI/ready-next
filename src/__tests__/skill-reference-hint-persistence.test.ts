@@ -1,4 +1,4 @@
-import { describe, it, beforeEach } from 'node:test'
+import { after, before, beforeEach, describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 
 import {
@@ -11,6 +11,12 @@ import {
   _resetLastReferenceSkillHintsForTests,
   _peekLastReferenceSkillForTests,
 } from '../main/modules/agent-control/skills/skill-reference-hints'
+import { __setScopeContextEpochDatabaseForTests } from '../main/modules/agent-control/session/scope-context-epoch'
+
+before(() => {
+  __setScopeContextEpochDatabaseForTests({ getRawDb: () => ({ prepare: () => ({ get: () => undefined }) }) as never })
+})
+after(() => __setScopeContextEpochDatabaseForTests(null))
 
 // skill-resume plan A1 — verify the persistence shim that lets the in-memory
 // reference-skill hint survive Ready restart by being snapshotted to

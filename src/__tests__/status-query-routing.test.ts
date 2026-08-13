@@ -7,6 +7,14 @@ import { AgentSdkRuntime, type AgentSdkRuntimeDeps } from '../main/modules/agent
 import { createToolExecutionOutput } from '../main/modules/agent-control/tools-runtime/tool-result-types'
 import type { ToolDefinition } from '../main/modules/agent-control/tools-runtime/tool-definition'
 import { enabledSdkToolNames } from './utils/sdk-tool-visibility'
+import { __setScopeContextEpochDatabaseForTests } from '../main/modules/agent-control/session/scope-context-epoch'
+
+test.before(() => {
+  __setScopeContextEpochDatabaseForTests({
+    getRawDb: () => ({ prepare: () => ({ get: () => undefined }) }) as never,
+  })
+})
+test.after(() => __setScopeContextEpochDatabaseForTests(null))
 
 test('status-query-routing declares transitive sqlite ABI guard', (t) => {
   skipIfSqliteUnavailable(t, 'status-query-routing transitive sqlite load')

@@ -1,6 +1,7 @@
 import { createEmptyScopeRunState } from './scopeRunState'
 import type { ScopeRunState } from './types'
 import { emitRendererAgentMetric } from './rendererMetrics'
+import { reportInfrastructureTimeoutToMain } from './runtime-driver-watchdog-main-report'
 import {
   activeSessionKeyFromState,
   normalizeSessionSlice,
@@ -16,7 +17,6 @@ const ACTIVE_RUN_INFRASTRUCTURE_TIMEOUT_MS = 5 * 60_000
 // the 7 "lost" ones triggered the renderer's local false-recovery (contract
 // breach). A 5s ack lets a slow-but-alive main reliably answer so the renderer
 // only declares lost-track when main is genuinely unreachable.
-const INFRASTRUCTURE_TIMEOUT_REPORT_ACK_MS = 5_000
 // B step 2 (Option A) — when main is unreachable (report returns null after the
 // 5s ack) the renderer must NOT locally claim recovery. It re-arms a bounded
 // retry instead; a terminal event from main cancels it via clearInfrastructure-
@@ -35,16 +35,6 @@ interface InfrastructureWatchdog {
   /** B step 2 — main-unreachable report retries already attempted. */
   reportRetries?: number
 }
-
-type InfrastructureTimeoutMainReport =
-  | {
-      kind: 'authoritative'
-      state: 'active' | 'stale' | 'not_found' | 'paused_user_input'
-      activeRunId: string | null
-    }
-  | { kind: 'unreachable' }
-  | { kind: 'invalid_response' }
-
 
 export function createRuntimeDriverWatchdog(store: AgentStoreLike) {
   // Keyed by `${scopeId}::${requestId}` — at most one watchdog per
@@ -136,52 +126,6 @@ export function createRuntimeDriverWatchdog(store: AgentStoreLike) {
           : step
       )),
       updatedAt,
-    }
-  }
-
-  async function reportInfrastructureTimeoutToMain(
-    scopeId: string,
-    requestId: string,
-    elapsedMs: number,
-  ): Promise<InfrastructureTimeoutMainReport> {
-    const report = typeof window !== 'undefined'
-      ? window.electronAPI?.agent?.reportInfrastructureTimeout
-      : undefined
-    if (typeof report !== 'function') return { kind: 'unreachable' }
-    let timeout: ReturnType<typeof setTimeout> | null = null
-    try {
-      const response = await Promise.race<unknown>([
-        report({ scopeId, requestId, elapsedMs }),
-        new Promise<null>((resolve) => {
-          timeout = setTimeout(() => resolve(null), INFRASTRUCTURE_TIMEOUT_REPORT_ACK_MS)
-        }),
-      ])
-      if (!response || typeof response !== 'object') return { kind: 'unreachable' }
-      const record = response as {
-        success?: unknown
-        data?: { state?: unknown; activeRunId?: unknown }
-      }
-      if (record.success !== true) return { kind: 'unreachable' }
-      const state = record.data?.state
-      if (
-        state === 'active'
-        || state === 'stale'
-        || state === 'not_found'
-        || state === 'paused_user_input'
-      ) {
-        const activeRunId = typeof record.data?.activeRunId === 'string'
-          && record.data.activeRunId.trim()
-          ? record.data.activeRunId.trim()
-          : null
-        if (state === 'stale' && !activeRunId) return { kind: 'invalid_response' }
-        if (state !== 'stale' && activeRunId) return { kind: 'invalid_response' }
-        return { kind: 'authoritative', state, activeRunId }
-      }
-      return { kind: 'invalid_response' }
-    } catch {
-      return { kind: 'unreachable' }
-    } finally {
-      if (timeout) clearTimeout(timeout)
     }
   }
 

@@ -96,6 +96,57 @@ test('happy path: emits push event, persists, awaits resolver, returns shaped ou
   assert.match(result.text, /Pick one/)
 })
 
+test('push and pending-store reuse the exact identity returned by persistence', async () => {
+  const store = new AskUserQuestionsStore()
+  let emitted: AskUserQuestionsCardEvent | null = null
+  const promise = executeAskUserQuestions(makeArgs(), {
+    sessionId: 'session-epoch',
+    conversationId: 'scope-epoch',
+    requestId: 'run-old',
+    store,
+    persistCardPending: async () => {
+      await Promise.resolve()
+      return {
+        codexRunIdentity: {
+          readyRunId: 'run-old',
+          aliasGeneration: 4,
+          messageVisibilityEpoch: 2,
+        },
+      }
+    },
+    emitAskUserQuestionsCard: (event) => { emitted = event },
+  })
+
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  assert.deepEqual(
+    {
+      readyRunId: emitted?.readyRunId,
+      aliasGeneration: emitted?.aliasGeneration,
+      messageVisibilityEpoch: emitted?.messageVisibilityEpoch,
+    },
+    {
+      readyRunId: 'run-old',
+      aliasGeneration: 4,
+      messageVisibilityEpoch: 2,
+    },
+  )
+  assert.deepEqual(
+    store.list().map((card) => ({
+      readyRunId: card.readyRunId,
+      aliasGeneration: card.aliasGeneration,
+      messageVisibilityEpoch: card.messageVisibilityEpoch,
+    })),
+    [{
+      readyRunId: 'run-old',
+      aliasGeneration: 4,
+      messageVisibilityEpoch: 2,
+    }],
+  )
+
+  store.resolve(emitted!.cardId, { answers: [], answeredAt: 0 })
+  await promise
+})
+
 test('schema rejection: 6 questions exceeds .max(5)', async () => {
   const store = new AskUserQuestionsStore()
   const args: AskUserQuestionsArgs = {

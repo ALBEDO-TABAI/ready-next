@@ -113,6 +113,7 @@ import {
   getSkillOpenAITools,
   getSkillToolDefsForRegistry,
 } from '../../tools/skills-tools'
+import { isCodexSafeHostSkillPrimitive } from '../../tools/skill-tool-execution-authority'
 import { getToolInputSchemas } from '../../tools/schemas'
 import { getSystemAnthropicTools, getSystemOpenAITools } from '../../tools/system-tools'
 import { getLastReferenceSkill } from '../skills/skill-reference-hints'
@@ -1270,7 +1271,17 @@ export class ToolRegistry implements ToolRegistryReader {
     authorization: SkillToolAuthorization,
     scopeId?: string,
   ): ToolDefinition[] {
-    return this.getToolDefinitionsResolutionForGroup(groupId, sessionId, authorization, scopeId).definitions
+    const definitions = this.getToolDefinitionsResolutionForGroup(
+      groupId,
+      sessionId,
+      authorization,
+      scopeId,
+    ).definitions
+    if (groupId !== 'skills' || authorization.mode !== 'selected') return definitions
+    return definitions.map((definition) => ({
+      ...definition,
+      codexExecutionSafe: isCodexSafeHostSkillPrimitive(definition.name, authorization.skillId),
+    }))
   }
 
   getToolSchemasForGroup(

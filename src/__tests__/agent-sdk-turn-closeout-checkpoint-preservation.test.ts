@@ -28,7 +28,8 @@ test('late lifecycle snapshot preserves an atomic checkpoint continuation', asyn
   }
 
   await persistRunMetaSnapshot({
-    runtime: { getRunMetaRepository: () => repository },
+    runtime: {},
+    getRunMetaRepositoryForFinalize: () => repository,
   } as never, {
     agentName: 'butler',
     runId: 'run-1',

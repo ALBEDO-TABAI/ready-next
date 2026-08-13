@@ -3,6 +3,10 @@ import { useWorkspace } from '../../stores/useWorkspace'
 import type { ChatAttachment } from '../../stores/useAgent'
 import { createLocalPathAttachment } from '../../components/agent/chat-panel/attachments-helpers'
 import {
+  captureComposerAuthority,
+  isComposerAuthorityCurrent,
+} from './composer-authority'
+import {
   buildWidgetTargetUpdatePrompt,
   createDocumentWidgetTargetAttachment,
   type DocumentWidgetTargetContext,
@@ -125,20 +129,8 @@ function normalizeAttachmentExt(value: string | undefined, fallback = '.txt'): s
 }
 
 export async function showReferenceToInputMenu(point: { x: number; y: number }): Promise<boolean> {
-  const api = typeof window !== 'undefined' ? window.electronAPI?.ui : null
-  if (!api?.showNativeContextMenu) return false
-  const result = await api.showNativeContextMenu({
-    x: point.x,
-    y: point.y,
-    items: [
-      {
-        id: 'reference-to-input',
-        label: '引用到输入框',
-        iconText: '@',
-      },
-    ],
-  }).catch(() => null)
-  return Boolean(result?.success && result.selectedId === 'reference-to-input')
+  void point
+  return false
 }
 
 export type BrowserTabContextMenuAction = 'reference-to-input' | 'close-tab'
@@ -150,9 +142,7 @@ export async function showBrowserTabContextMenu(
   const api = typeof window !== 'undefined' ? window.electronAPI?.ui : null
   if (!api?.showNativeContextMenu) return null
   const items: Array<{ id: string; label: string; iconText: string }> = []
-  if (options?.canReference !== false) {
-    items.push({ id: 'reference-to-input', label: '引用到输入框', iconText: '@' })
-  }
+  void options
   items.push({ id: 'close-tab', label: '关闭标签页', iconText: '✕' })
   const result = await api.showNativeContextMenu({ x: point.x, y: point.y, items }).catch(() => null)
   if (!result?.success) return null
@@ -287,7 +277,10 @@ async function createReadyContextAttachment(reference: ReadyContextReference): P
 }
 
 export async function addReadyContextReferenceToAgentInput(reference: ReadyContextReference): Promise<void> {
+  if (reference.type !== 'file' && reference.type !== 'skill-folder') return
+  const composerAuthority = captureComposerAuthority(useAgent.getState())
   const attachment = await createReadyContextAttachment(reference)
+  if (!isComposerAuthorityCurrent(useAgent.getState(), composerAuthority)) return
   useWorkspace.setState({ chatPanelVisible: true })
   useAgent.getState().addAttachments([attachment])
   window.dispatchEvent(new CustomEvent(READY_FOCUS_CHAT_INPUT_EVENT))
@@ -312,33 +305,5 @@ export function addDocumentWidgetTargetReference(context: DocumentWidgetTargetCo
 }
 
 export function addDocumentQuoteReference(context: DocumentQuoteContext): void {
-  const selection = context.selection.trim()
-  if (!selection) return
-
-  const lineLabel = context.lineStart && context.lineEnd
-    ? context.lineStart === context.lineEnd
-      ? `#L${context.lineStart}`
-      : `#L${context.lineStart}-${context.lineEnd}`
-    : '#引用'
-
-  const attachmentName = `${context.title} ${lineLabel}`
-  const attachmentPath = context.path || `document-quote://${encodeURIComponent(context.title)}${lineLabel}`
-
-  useWorkspace.setState({ chatPanelVisible: true })
-  useAgent.getState().addAttachments([{
-    id: `attach-doc-quote-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-    name: attachmentName,
-    path: attachmentPath,
-    type: 'text',
-    size: selection.length,
-    ext: '.md',
-    source: 'document-quote',
-    title: context.title,
-    selection,
-    lineStart: context.lineStart ?? undefined,
-    lineEnd: context.lineEnd ?? undefined,
-    sectionTitle: context.sectionTitle ?? undefined,
-    excerpt: selection.slice(0, 2000),
-  }])
-  window.dispatchEvent(new CustomEvent(READY_FOCUS_CHAT_INPUT_EVENT))
+  void context
 }

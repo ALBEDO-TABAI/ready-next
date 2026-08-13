@@ -1,3 +1,5 @@
+import { z } from 'zod'
+
 export type LifecycleOperationSnapshot =
   | 'idle_never_started'
   | 'idle_ready_terminal_no_native'
@@ -11,6 +13,51 @@ export type LifecycleOperationSnapshot =
   | 'manual_compaction_pending'
   | 'manual_compaction_unknown'
   | 'invariant_violation'
+
+/** Read-only projection of the database-owned lifecycle state for Renderer reloads. */
+export type LifecycleOperationProjection = {
+  identity: { aliasId: string; aliasGeneration: number }
+  activeReadyRunId: string | null
+  latestReadyRunId: string | null
+  snapshot: LifecycleOperationSnapshot
+  interruptRequested: boolean
+  interruptAcknowledged: boolean
+  requestedAction: 'stop' | 'close' | 'reset' | null
+  evidenceDigest: string
+}
+
+const lifecycleOperationSnapshotSchema = z.enum([
+  'idle_never_started',
+  'idle_ready_terminal_no_native',
+  'idle_native_thread',
+  'thread_start_pending',
+  'turn_start_pending',
+  'product_turn_interruptible',
+  'product_turn_interrupt_unknown',
+  'product_turn_engine_terminal_closeout_pending',
+  'host_failure_closeout_pending',
+  'manual_compaction_pending',
+  'manual_compaction_unknown',
+  'invariant_violation',
+])
+
+export const lifecycleOperationProjectionSchema: z.ZodType<LifecycleOperationProjection> = z.object({
+  identity: z.object({
+    aliasId: z.string().min(1),
+    aliasGeneration: z.number().int().positive(),
+  }).strict(),
+  activeReadyRunId: z.string().min(1).nullable(),
+  latestReadyRunId: z.string().min(1).nullable(),
+  snapshot: lifecycleOperationSnapshotSchema,
+  interruptRequested: z.boolean(),
+  interruptAcknowledged: z.boolean(),
+  requestedAction: z.enum(['stop', 'close', 'reset']).nullable(),
+  evidenceDigest: z.string().min(1),
+}).strict()
+
+export function parseLifecycleOperationProjection(value: unknown): LifecycleOperationProjection {
+  return lifecycleOperationProjectionSchema.parse(value)
+}
 
 export type LifecycleOperationFacts = {
   readyRunCreated: boolean

@@ -1,7 +1,6 @@
 import { ipcMain } from 'electron'
 import type { AgentBrowserSurface } from './agent-browser-errors'
 import type { BrowserTargetClaimState } from './browser-target-claims'
-import type { BrowserTargetResumeRequest } from '../../../shared/browser-workflow-control'
 import type { BrowserCapabilityTaskHandle } from './capability-types'
 import {
   isBrowserSupervisionVisibleTaskStatus,
@@ -58,7 +57,6 @@ export interface BrowserSupervisionIPCController {
   getAgentTabId(): string | null
   getBrowserLeaseSnapshot(): BrowserLeaseSupervisionSnapshot
   listAgentCollectionTasks(): Promise<BrowserAgentSupervisionTask[]>
-  resumeBrowserTarget(input: BrowserTargetResumeRequest): Promise<{ success: boolean; error?: string; errorKind?: string }>
 }
 
 export function setupBrowserSupervisionIPC(controller: BrowserSupervisionIPCController): void {
@@ -86,11 +84,4 @@ export function setupBrowserSupervisionIPC(controller: BrowserSupervisionIPCCont
     }
   })
 
-  ipcMain.handle('browser:resumeTargetClaim', async (_, input: BrowserTargetResumeRequest) => {
-    try {
-      return await controller.resumeBrowserTarget(input)
-    } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : String(error), errorKind: 'resume_failed' }
-    }
-  })
 }

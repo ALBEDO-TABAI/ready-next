@@ -45,7 +45,6 @@ function inferWidgetFamily(userText: string): DocumentWidgetFamily {
   if (/(今天的?(日程|安排)卡?|今日(日程|安排)|单日(日程|安排)|day schedule|today schedule)/i.test(userText)) return 'day_schedule_card'
   if (/(周日程|本周安排|一周安排|week schedule)/i.test(userText)) return 'week_schedule_card'
   if (/(时间分配|时间投入|time allocation|时间占比)/i.test(userText)) return 'time_allocation_chart'
-  if (/(自动计划|定时任务|schedule runtime|cron)/i.test(userText)) return 'schedule_runtime_card'
   if (/(待办|todo|任务清单|task list)/i.test(userText)) return 'todo_list_manual'
   if (/(习惯|habit|streak|连续记录)/i.test(userText)) return 'habit_streak_manual'
   if (/(今日重点|today focus|重点摘要)/i.test(userText)) return 'today_focus_snapshot'
@@ -239,16 +238,6 @@ function buildFamilyGuidance(family: DocumentWidgetFamily): {
         guidanceBullets: [
           '更适合聚合分配，不要做深度钻取。',
           '优先按来源或类型做 3-6 段统计。',
-        ],
-      }
-    case 'schedule_runtime_card':
-      return {
-        interactionHint: '自动计划状态概览',
-        titleHint: 'schedule_runtime_card',
-        implementationHint: 'HTML + CSS',
-        guidanceBullets: [
-          '展示启用状态、下次运行、最近运行即可。',
-          '操作按钮复用现有计划入口。',
         ],
       }
     case 'todo_list_manual':

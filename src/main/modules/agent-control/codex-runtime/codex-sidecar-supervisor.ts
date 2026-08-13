@@ -1,7 +1,6 @@
 import { execFileSync, spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
 import { readFileSync } from 'node:fs'
-import { createInterface } from 'node:readline'
 
 import type { CodexJsonLineTransport } from './codex-app-server-client'
 import type {
@@ -18,6 +17,9 @@ const STABLE_ZERO_SAMPLE_INTERVAL_MS = 250
 const STABLE_ZERO_MAX_OBSERVATIONS = 40
 const SPAWN_VISIBILITY_DEADLINE_MS = 5_000
 const CRASH_BACKOFF_MS = [100, 250, 500] as const
+export const CODEX_SIDECAR_CRASH_ATTEMPT_LIMIT = 3
+export const CODEX_SIDECAR_MAX_STDOUT_LINE_BYTES = 2 * 1024 * 1024
+export const CODEX_SIDECAR_STDOUT_DRAIN_TIMEOUT_MS = 1_000
 
 type MatcherMode = 'pre_cas' | 'post_cas'
 type HardResetReason = 'app_quit' | 'protocol_failure' | 'sidecar_crash' | 'test_cleanup'
@@ -79,6 +81,7 @@ export interface CodexProcessLeaseStore {
     evidenceDigest: string
   }): CodexProcessLeaseRow
   readLiveProcessLease(): CodexProcessLeaseRow | null
+  readLatestProcessLeaseByOwnerMainBootId?(ownerMainBootId: string): CodexProcessLeaseRow | null
 }
 
 export interface CodexSidecarChild {
@@ -93,6 +96,15 @@ export interface CodexSidecarSpawnPort {
     cwd: string
     env: Record<string, string>
   }): CodexSidecarChild
+}
+
+export interface CodexSidecarSpawnCapabilityPort {
+  activate(identities: {
+    processLeaseId: string
+    sidecarSpawnInstanceId: string
+    connectionEpoch: string
+  }): Record<string, string>
+  revoke(sidecarSpawnInstanceId: string): void
 }
 
 export class CodexSidecarSupervisorError extends Error {
@@ -192,6 +204,7 @@ export class NodeCodexSidecarSpawnPort implements CodexSidecarSpawnPort {
       detached: true,
       stdio: ['pipe', 'pipe', 'pipe'],
     })
+    child.once('error', () => undefined)
     if (!child.pid || !child.stdin || !child.stdout || !child.stderr) {
       throw new CodexSidecarSupervisorError('sidecar_spawn_failed')
     }
@@ -203,30 +216,31 @@ export class CodexChildJsonLineTransport implements CodexJsonLineTransport {
   private readonly lineListeners = new Set<(line: string) => void>()
   private readonly closeListeners = new Set<(error: Error | null) => void>()
   private closed = false
+  private processExit: { error: Error | null } | null = null
+  private stdoutDrained = false
+  private stdoutLineBytes = 0
+  private stdoutLineChunks: Buffer[] = []
+  private stdoutDrainTimer: ReturnType<typeof setTimeout> | null = null
 
   constructor(
     private readonly child: ChildProcessWithoutNullStreams,
     private readonly onProtocolClose: (reason: string) => void,
     onStderr: (text: string) => void,
   ) {
-    const lines = createInterface({ input: child.stdout })
-    lines.on('line', (line) => {
-      for (const listener of this.lineListeners) listener(line)
+    child.stdout.on('data', (chunk) => {
+      this.acceptStdoutChunk(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
     })
+    child.stdout.once('end', () => this.drainStdout())
     child.stderr.on('data', (chunk) => onStderr(String(chunk)))
     child.once('exit', (code, signal) => {
-      this.closed = true
-      const expected = signal === 'SIGTERM' || signal === 'SIGKILL' || code === 0
-      const error = expected
-        ? null
-        : new CodexSidecarSupervisorError('sidecar_unexpected_exit')
-      for (const listener of this.closeListeners) listener(error)
+      this.recordProcessExit(code, signal)
+    })
+    child.once('close', (code, signal) => {
+      this.drainStdout()
+      this.recordProcessExit(code, signal)
     })
     child.once('error', () => {
-      this.closed = true
-      for (const listener of this.closeListeners) {
-        listener(new CodexSidecarSupervisorError('sidecar_process_error'))
-      }
+      this.closeOnce(new CodexSidecarSupervisorError('sidecar_process_error'))
     })
   }
 
@@ -250,11 +264,93 @@ export class CodexChildJsonLineTransport implements CodexJsonLineTransport {
 
   close(reason: string, details?: unknown): void {
     if (this.closed) return
-    this.closed = true
     this.child.stdin.destroy()
     const error = new CodexSidecarSupervisorError(reason || 'protocol_failure', details)
-    for (const listener of this.closeListeners) listener(error)
+    if (!this.closeOnce(error)) return
     this.onProtocolClose(reason)
+  }
+
+  private closeOnce(error: Error | null): boolean {
+    if (this.closed) return false
+    this.closed = true
+    if (this.stdoutDrainTimer) clearTimeout(this.stdoutDrainTimer)
+    this.stdoutDrainTimer = null
+    this.stdoutLineChunks = []
+    this.stdoutLineBytes = 0
+    const listeners = [...this.closeListeners]
+    this.closeListeners.clear()
+    this.lineListeners.clear()
+    for (const listener of listeners) listener(error)
+    return true
+  }
+
+  private acceptStdoutChunk(chunk: Buffer): void {
+    if (this.closed || this.stdoutDrained) return
+    let cursor = 0
+    while (cursor < chunk.length) {
+      const newline = chunk.indexOf(0x0a, cursor)
+      const segmentEnd = newline === -1 ? chunk.length : newline
+      const segmentBytes = segmentEnd - cursor
+      if (this.stdoutLineBytes + segmentBytes > CODEX_SIDECAR_MAX_STDOUT_LINE_BYTES) {
+        this.stdoutLineChunks = []
+        this.stdoutLineBytes = 0
+        this.close('sidecar_stdout_line_too_large', {
+          maxBytes: CODEX_SIDECAR_MAX_STDOUT_LINE_BYTES,
+        })
+        return
+      }
+      if (segmentBytes > 0) {
+        this.stdoutLineChunks.push(Buffer.from(chunk.subarray(cursor, segmentEnd)))
+        this.stdoutLineBytes += segmentBytes
+      }
+      if (newline === -1) return
+      this.publishStdoutLine()
+      if (this.closed) return
+      cursor = newline + 1
+    }
+  }
+
+  private publishStdoutLine(): void {
+    let line = Buffer.concat(this.stdoutLineChunks, this.stdoutLineBytes).toString('utf8')
+    this.stdoutLineChunks = []
+    this.stdoutLineBytes = 0
+    if (line.endsWith('\r')) line = line.slice(0, -1)
+    for (const listener of [...this.lineListeners]) listener(line)
+  }
+
+  private drainStdout(): void {
+    if (this.stdoutDrained) return
+    this.stdoutDrained = true
+    if (!this.closed && this.stdoutLineBytes > 0) this.publishStdoutLine()
+    this.stdoutLineChunks = []
+    this.stdoutLineBytes = 0
+    this.closeAfterProcessExit()
+  }
+
+  private recordProcessExit(code: number | null, signal: NodeJS.Signals | null): void {
+    if (!this.processExit) {
+      const expected = signal === 'SIGTERM' || signal === 'SIGKILL' || code === 0
+      this.processExit = {
+        error: expected ? null : new CodexSidecarSupervisorError('sidecar_unexpected_exit'),
+      }
+    }
+    if (!this.stdoutDrained && !this.closed && !this.stdoutDrainTimer) {
+      this.stdoutDrainTimer = setTimeout(() => {
+        this.stdoutDrainTimer = null
+        if (this.closed || this.stdoutDrained) return
+        this.stdoutLineChunks = []
+        this.stdoutLineBytes = 0
+        this.closeOnce(new CodexSidecarSupervisorError('sidecar_stdout_drain_timeout'))
+        this.child.stdout.destroy()
+      }, CODEX_SIDECAR_STDOUT_DRAIN_TIMEOUT_MS)
+      this.stdoutDrainTimer.unref?.()
+    }
+    this.closeAfterProcessExit()
+  }
+
+  private closeAfterProcessExit(): void {
+    if (!this.processExit || !this.stdoutDrained) return
+    this.closeOnce(this.processExit.error)
   }
 }
 
@@ -268,11 +364,7 @@ export class CodexSidecarSupervisor {
   constructor(private readonly deps: {
     runtime: VerifiedCodexRuntime
     state: PreparedCodexRuntimeState
-    childEnvironment: (identities: {
-      processLeaseId: string
-      sidecarSpawnInstanceId: string
-      connectionEpoch: string
-    }) => Record<string, string>
+    spawnCapability: CodexSidecarSpawnCapabilityPort
     leaseStore: CodexProcessLeaseStore
     inspector: CodexProcessInspector
     spawnPort: CodexSidecarSpawnPort
@@ -297,13 +389,14 @@ export class CodexSidecarSupervisor {
     if (this.active || this.deps.leaseStore.readLiveProcessLease()) {
       throw new CodexSidecarSupervisorError('active_process_lease_exists')
     }
-    if (this.crashCount >= 3) throw new CodexSidecarSupervisorError('sidecar_crash_loop_exhausted')
+    if (this.crashCount >= CODEX_SIDECAR_CRASH_ATTEMPT_LIMIT) {
+      throw new CodexSidecarSupervisorError('sidecar_crash_loop_exhausted')
+    }
     if (this.crashCount > 0) {
       await this.wait(CRASH_BACKOFF_MS[Math.min(this.crashCount - 1, CRASH_BACKOFF_MS.length - 1)])
     }
     const now = this.nowMs()
     const identities = this.allocateIdentities()
-    const environment = this.buildValidatedChildEnvironment(identities)
     let lease = this.deps.leaseStore.createProcessLeaseIntent({
       processLeaseId: identities.processLeaseId,
       ownerMainBootId: this.deps.ownerMainBootId,
@@ -318,6 +411,15 @@ export class CodexSidecarSupervisor {
       spawnIntentAt: iso(now),
       spawnVisibilityDeadlineAt: iso(now + SPAWN_VISIBILITY_DEADLINE_MS),
     })
+    let environment: Record<string, string>
+    try {
+      environment = this.buildValidatedChildEnvironment(identities)
+    } catch (error) {
+      this.deps.spawnCapability.revoke(identities.sidecarSpawnInstanceId)
+      await this.settlePreCasZero(lease)
+      this.crashCount += 1
+      throw error
+    }
     let child: CodexSidecarChild
     try {
       child = this.deps.spawnPort.spawn({
@@ -327,13 +429,28 @@ export class CodexSidecarSupervisor {
         env: environment,
       })
     } catch {
+      this.deps.spawnCapability.revoke(identities.sidecarSpawnInstanceId)
       await this.settlePreCasZero(lease)
       this.crashCount += 1
       throw new CodexSidecarSupervisorError('sidecar_spawn_failed')
     }
+    let childExited = false
+    let childError: Error | null = null
+    const processLeaseId = lease.processLeaseId
+    child.process.once('exit', () => {
+      childExited = true
+      this.deps.spawnCapability.revoke(identities.sidecarSpawnInstanceId)
+      if (this.active?.lease.processLeaseId === processLeaseId) this.crashCount += 1
+    })
+    child.process.once('error', (error) => {
+      childError = error instanceof Error ? error : new Error('sidecar_process_error')
+      this.deps.spawnCapability.revoke(identities.sidecarSpawnInstanceId)
+    })
 
     try {
       const owned = await this.waitForSpawnOwnership(lease, child.pid)
+      if (childExited) throw new CodexSidecarSupervisorError('sidecar_exited_during_start')
+      if (childError) throw new CodexSidecarSupervisorError('sidecar_errored_during_start', childError)
       lease = this.deps.leaseStore.confirmProcessLeaseOwnership({
         processLeaseId: lease.processLeaseId,
         expectedRevision: lease.revision,
@@ -347,7 +464,10 @@ export class CodexSidecarSupervisor {
         expectedRevision: lease.revision,
         openedAt: iso(this.nowMs()),
       })
+      if (childExited) throw new CodexSidecarSupervisorError('sidecar_exited_during_start')
+      if (childError) throw new CodexSidecarSupervisorError('sidecar_errored_during_start', childError)
     } catch (error) {
+      this.deps.spawnCapability.revoke(identities.sidecarSpawnInstanceId)
       const liveLease = this.deps.leaseStore.readLiveProcessLease()
       if (liveLease) {
         try {
@@ -363,12 +483,9 @@ export class CodexSidecarSupervisor {
     }
 
     this.active = { lease, child }
-    child.process.once('exit', () => {
-      if (this.active?.lease.processLeaseId === lease.processLeaseId) this.crashCount += 1
-    })
     const transport = new CodexChildJsonLineTransport(
       child.process,
-      () => { void this.hardReset('protocol_failure') },
+      () => undefined,
       this.deps.onStderr || (() => undefined),
     )
     return { transport, lease }
@@ -377,9 +494,43 @@ export class CodexSidecarSupervisor {
   async settleBootLease(): Promise<'none' | 'settled'> {
     let lease = this.deps.leaseStore.readLiveProcessLease()
     if (!lease) return 'none'
+    this.deps.spawnCapability.revoke(lease.sidecarSpawnInstanceId)
     lease = await this.proveLeaseOwner(lease)
     if (lease.pid === null) await this.settlePreCas(lease)
     else await this.settlePostCas(lease, 'sidecar_crash')
+    return 'settled'
+  }
+
+  resetCrashBudgetForExplicitRetry(): void {
+    if (this.active || this.deps.leaseStore.readLiveProcessLease()) {
+      throw new CodexSidecarSupervisorError('sidecar_retry_requires_settled_lease')
+    }
+    this.crashCount = 0
+  }
+
+  async settleFenceOwnerLease(ownerMainBootId: string): Promise<'current' | 'settled'> {
+    if (!ownerMainBootId.trim()) throw new CodexSidecarSupervisorError('fence_owner_identity_invalid')
+    if (ownerMainBootId === this.deps.ownerMainBootId) return 'current'
+    const lease = this.deps.leaseStore.readLatestProcessLeaseByOwnerMainBootId?.(ownerMainBootId)
+    if (!lease || !lease.treeZeroAt || !lease.treeZeroEvidenceDigest) {
+      throw new CodexSidecarSupervisorError('fence_owner_settled_lease_missing')
+    }
+    if (lease.ownerMainDeadAt && lease.ownerMainDeathEvidenceDigest) return 'settled'
+    const owner = (await this.deps.inspector.list()).find((process) => (
+      process.pid === lease.ownerMainPid
+      && process.processStartIdentity === lease.ownerMainProcessStartIdentity
+    ))
+    if (owner) throw new CodexSidecarSupervisorError('old_main_owner_still_alive')
+    this.deps.leaseStore.recordOldMainDeath({
+      processLeaseId: lease.processLeaseId,
+      expectedRevision: lease.revision,
+      deadAt: iso(this.nowMs()),
+      evidenceDigest: sha256(JSON.stringify({
+        pid: lease.ownerMainPid,
+        processStartIdentity: lease.ownerMainProcessStartIdentity,
+        observed: 'absent_or_reused_after_tree_zero',
+      })),
+    })
     return 'settled'
   }
 
@@ -389,9 +540,11 @@ export class CodexSidecarSupervisor {
     }
     const lease = this.deps.leaseStore.readLiveProcessLease()
     if (!lease) {
+      if (this.active) this.deps.spawnCapability.revoke(this.active.lease.sidecarSpawnInstanceId)
       this.active = null
       return
     }
+    this.deps.spawnCapability.revoke(lease.sidecarSpawnInstanceId)
     const owned = await this.proveLeaseOwner(lease)
     if (owned.pid === null) await this.settlePreCas(owned)
     else await this.settlePostCas(owned, reason)
@@ -619,7 +772,7 @@ export class CodexSidecarSupervisor {
   }): Record<string, string> {
     let environment: Record<string, string>
     try {
-      environment = this.deps.childEnvironment(identities)
+      environment = this.deps.spawnCapability.activate(identities)
     } catch {
       throw new CodexSidecarSupervisorError('child_environment_construction_failed')
     }

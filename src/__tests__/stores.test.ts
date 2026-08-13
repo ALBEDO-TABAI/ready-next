@@ -80,7 +80,8 @@ if (typeof (globalThis as any).window === 'undefined') {
 
 const { useMode } = await import('../renderer/stores/useMode')
 const { useDocTabs } = await import('../renderer/stores/useDocTabs')
-const { useAgent } = await import('../renderer/stores/useAgent')
+const { useAgent, getSessionSlice } = await import('../renderer/stores/useAgent')
+const { makeEmptySessionSlice } = await import('../renderer/stores/agent-store-helpers')
 const { phaseToToolTraceStatus } = await import('../renderer/modules/agent/scopeRunState')
 const {
     useWorkspace,
@@ -843,28 +844,43 @@ describe('useAgent Store', () => {
 
         const cleanup = (await import('../renderer/stores/useAgent')).initAgentListeners()
 
+        const remoteScope = {
+            id: 'scope-feishu-2',
+            aliasGeneration: 1,
+            messageVisibilityEpoch: 0,
+            agent: 'butler',
+            title: '飞书 · 李四',
+            sourceKind: 'channel' as const,
+            sourceId: 'channel-feishu-default',
+            threadKey: 'om_yyy',
+            meta: { sourceLabel: '飞书', sender: '李四' },
+            createdAt: '2026-03-06T10:00:00.000Z',
+            updatedAt: '2026-03-06T10:00:00.000Z',
+            lastMessageAt: null,
+        }
         useAgent.setState({
             currentScopeId: 'scope-feishu-2',
-            currentScope: {
-                id: 'scope-feishu-2',
-                agent: 'butler',
-                title: '飞书 · 李四',
-                sourceKind: 'channel',
-                sourceId: 'channel-feishu-default',
-                threadKey: 'om_yyy',
-                meta: { sourceLabel: '飞书', sender: '李四' },
-                createdAt: '2026-03-06T10:00:00.000Z',
-                updatedAt: '2026-03-06T10:00:00.000Z',
-                lastMessageAt: null,
-            },
-            scopes: [],
+            currentScope: remoteScope,
+            scopes: [remoteScope],
             messages: [],
+            sessions: {
+                'session-feishu-2': {
+                    ...makeEmptySessionSlice(remoteScope.id),
+                    aliasGeneration: 1,
+                    messageVisibilityEpoch: 0,
+                },
+            },
+            sessionOrder: ['session-feishu-2'],
+            activeSessionId: 'session-feishu-2',
+            sessionId: 'session-feishu-2',
         })
 
         listeners.onConversationEvent?.({
             type: 'message_added',
             scope: {
                 id: 'scope-feishu-2',
+                aliasGeneration: 1,
+                messageVisibilityEpoch: 0,
                 agent: 'butler',
                 title: '飞书 · 李四',
                 sourceKind: 'channel',
@@ -938,10 +954,33 @@ describe('useAgent Store', () => {
 
         const cleanup = (await import('../renderer/stores/useAgent')).initAgentListeners()
 
+        const runA = {
+            scopeId: 'scope-a',
+            agent: 'butler',
+            requestId: 'req-a',
+            phase: 'planning' as const,
+            toolTrace: [],
+            startedAt: '2026-03-07T09:00:00.000Z',
+            updatedAt: '2026-03-07T09:00:00.000Z',
+            latestText: null,
+            blockedReason: null,
+            controllerId: null,
+            ownerTabId: null,
+            checkpointExpiresAt: null,
+            responseMessageId: 'msg-a',
+            responseBuffer: '',
+            stepMetrics: { toolCalls: 0, toolResults: 0, lastToolAt: null },
+            error: null,
+        }
         useAgent.setState({
+            activeSessionId: 'session-b',
+            sessionId: 'session-b',
+            sessionOrder: ['session-a', 'session-b'],
             currentScopeId: 'scope-b',
             currentScope: {
                 id: 'scope-b',
+                aliasGeneration: 1,
+                messageVisibilityEpoch: 0,
                 agent: 'copywriter',
                 title: 'Scope B',
                 sourceKind: 'local',
@@ -954,6 +993,8 @@ describe('useAgent Store', () => {
             scopes: [
                 {
                     id: 'scope-a',
+                    aliasGeneration: 1,
+                    messageVisibilityEpoch: 0,
                     agent: 'butler',
                     title: 'Scope A',
                     sourceKind: 'local',
@@ -965,6 +1006,8 @@ describe('useAgent Store', () => {
                 },
                 {
                     id: 'scope-b',
+                    aliasGeneration: 1,
+                    messageVisibilityEpoch: 0,
                     agent: 'copywriter',
                     title: 'Scope B',
                     sourceKind: 'local',
@@ -976,24 +1019,22 @@ describe('useAgent Store', () => {
                 },
             ],
             messages: [],
-            scopeRunStates: {
-                'scope-a': {
-                    scopeId: 'scope-a',
-                    agent: 'butler',
-                    requestId: 'req-a',
-                    phase: 'planning',
-                    toolTrace: [],
-                    startedAt: '2026-03-07T09:00:00.000Z',
-                    updatedAt: '2026-03-07T09:00:00.000Z',
-                    latestText: null,
-                    blockedReason: null,
-                    controllerId: null,
-                    ownerTabId: null,
-                    checkpointExpiresAt: null,
-                    responseMessageId: 'msg-a',
-                    responseBuffer: '',
-                    stepMetrics: { toolCalls: 0, toolResults: 0, lastToolAt: null },
-                    error: null,
+            scopeRunStates: {},
+            sessions: {
+                'session-a': {
+                    ...makeEmptySessionSlice('scope-a'),
+                    aliasGeneration: 1,
+                    messageVisibilityEpoch: 0,
+                    streamingRequestId: 'req-a',
+                    isStreaming: true,
+                    foregroundBusy: true,
+                    composerLocked: true,
+                    scopeRunStates: { 'scope-a': runA },
+                },
+                'session-b': {
+                    ...makeEmptySessionSlice('scope-b'),
+                    aliasGeneration: 1,
+                    messageVisibilityEpoch: 0,
                 },
             },
         })
@@ -1008,8 +1049,9 @@ describe('useAgent Store', () => {
 
         const state = useAgent.getState()
         assert.strictEqual(state.currentScopeId, 'scope-b')
-        assert.strictEqual(state.scopeRunStates['scope-a']?.responseBuffer, '后台流式输出')
-        assert.strictEqual(state.scopeRunStates['scope-a']?.latestText, '后台流式输出')
+        const backgroundRun = getSessionSlice(state, 'session-a').scopeRunStates['scope-a']
+        assert.strictEqual(backgroundRun?.responseBuffer, '后台流式输出')
+        assert.strictEqual(backgroundRun?.latestText, '后台流式输出')
 
         cleanup()
     })

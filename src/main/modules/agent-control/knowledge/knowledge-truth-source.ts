@@ -1,11 +1,9 @@
 /**
- * EP2-K6 — truth-source boundary landing (approved sub-contract
- * docs/superpowers/plans/2026-06-12-EP2-K6-truth-source-boundary-implementation.md).
+ * Local belief-card mirror maintenance.
  *
- * file → DB, one direction only. Three sync points: write-time upsert (K2,
- * existing), the watcher here (user hand-edits), and the startup full sync
- * (K2 handover, wired here). The rollback switch stops injection, card-tool
- * exposure, and the watcher — files are NEVER touched (lossless rollback).
+ * File → DB, one direction only. Three sync points: write-time upsert, the
+ * watcher here (user hand-edits), and the startup full sync. These records are
+ * maintained locally and are not a control surface for the Codex runtime.
  */
 
 import { watch, type FSWatcher } from 'node:fs'
@@ -21,23 +19,6 @@ import {
   syncBeliefCards,
   type MirrorDb,
 } from './belief-card-mirror'
-
-export const KNOWLEDGE_SYSTEM_SETTING_KEY = 'agent.knowledgeSystemEnabled'
-
-/** Single read entry for the rollback switch (sub-contract §3.4). Default ON;
- *  a missing repository (host-node tests, early boot) is also ON. */
-export function isKnowledgeSystemEnabled(
-  repository?: { getSetting(key: string): string | null | undefined } | null,
-): boolean {
-  if (!repository) return true
-  try {
-    return repository.getSetting(KNOWLEDGE_SYSTEM_SETTING_KEY) !== 'false'
-  } catch {
-    // silent-catch: unreadable setting keeps the documented default-ON rollback semantics
-    return true
-  }
-}
-
 
 export type FileSyncResult = 'synced' | 'invalid' | 'recovered' | 'skipped'
 
@@ -202,9 +183,7 @@ export class KnowledgeWatcher {
 export function runStartupBeliefSync(
   db: MirrorDb,
   store: BeliefCardStore,
-  enabled: boolean,
 ): { synced: number; invalid: number } | null {
-  if (!enabled) return null
   try {
     const result = syncBeliefCards(db, store)
     logAgentMetric('belief_startup_sync', result)

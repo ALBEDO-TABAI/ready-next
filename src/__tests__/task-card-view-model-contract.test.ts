@@ -482,7 +482,7 @@ test('incomplete checkpoint is paused and resumable without pretending a backgro
 
   assert.deepEqual(deriveTaskCardRuntimeState(run), {
     visualState: 'waiting_input',
-    statusLabel: '等待继续',
+    statusLabel: '未完成',
     actionSet: ['continue', 'cancel'],
   })
   assert.equal(isStreamingScopeRunState(run), false)

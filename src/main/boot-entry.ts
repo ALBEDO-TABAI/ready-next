@@ -22,6 +22,7 @@ import { logBootStage, startBootStallProbe } from './boot-timing'
 app.setName('Ready')
 
 const READY_USER_DATA_DIR = process.env.READY_USER_DATA_DIR?.trim()
+const READY_START_HIDDEN = process.env.READY_START_HIDDEN === '1'
 if (READY_USER_DATA_DIR) {
   mkdirSync(READY_USER_DATA_DIR, { recursive: true })
   app.setPath('userData', READY_USER_DATA_DIR)
@@ -69,7 +70,7 @@ if (process.env.READY_PROC_DIAG === '1') {
 
 // index.ts 的 ensureRegularDockApp 服务后续 dock 显隐流转；这里只做启动期同款保证。
 if (process.platform === 'darwin') {
-  app.setActivationPolicy('regular')
+  app.setActivationPolicy(READY_START_HIDDEN ? 'prohibited' : 'regular')
 }
 
 // Register local-file as a privileged scheme BEFORE app.whenReady()
@@ -103,8 +104,10 @@ app.whenReady().then(async () => {
   // createStartupSplashWindow 内部会等到 splash 首帧真正呈现（ready-to-show +
   // 帧跑道回执）才 resolve。顺序不可倒置：窗口首帧 commit 期间若主线程被重模块
   // 求值阻塞，呈现管线会被卡死（真机复现过全程隐形/整段冻结）。
-  await createStartupSplashWindow()
-  logBootStage('splash-visible')
+  if (!READY_START_HIDDEN) {
+    await createStartupSplashWindow()
+    logBootStage('splash-visible')
+  }
   // 重模块分片预热：新窗口最初几秒的帧呈现耦合主进程活性（透明与否皆然），
   // 5.2MB 一次性求值的实心块会把启动动画整段冻住。按子系统切片 import、
   // 片间让出宏任务给合成器出帧；顺序与 index.ts 顶部 import 次序一致，

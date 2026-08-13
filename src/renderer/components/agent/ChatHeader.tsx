@@ -32,7 +32,7 @@ interface ChatHeaderProps {
   onCompactCurrentSession: () => void | Promise<void>
   currentConversationAvailable: boolean
   lifecyclePendingAction: 'creating' | 'resetting' | 'stopping' | 'closing' | 'compacting' | null
-  lifecycleUncertainty: 'interrupt' | 'compaction' | null
+  lifecycleUncertainty: 'stop' | 'close' | 'reset' | 'compaction' | null
   /** Per-channel live sessions (keyed by `${sourceKind}:${sourceId}`), newest
    *  first. Drives the expanded history list so every session — including a
    *  fresh remote `/new` — is individually selectable. */
@@ -561,7 +561,12 @@ export default function ChatHeader({
               data-codex-lifecycle-uncertain={lifecycleUncertainty}
               style={{ fontSize: 11, color: 'var(--color-orange, #f59e0b)', whiteSpace: 'nowrap' }}
             >
-              {lifecycleUncertainty === 'interrupt' ? '停止状态待确认' : '压缩状态待确认'}
+              {{
+                stop: '停止状态待确认',
+                close: '关闭状态待确认',
+                reset: '重置状态待确认',
+                compaction: '压缩状态待确认',
+              }[lifecycleUncertainty]}
             </span>
           )}
 
@@ -572,11 +577,22 @@ export default function ChatHeader({
                 ? null
                 : computeMenuPosition(operationMenuTriggerRef.current, 176, 'right'))
             }}
-            disabled={!currentConversationAvailable || Boolean(lifecyclePendingAction) || Boolean(lifecycleUncertainty)}
+            disabled={
+              !currentConversationAvailable
+              || Boolean(lifecyclePendingAction)
+              || lifecycleUncertainty === 'stop'
+              || lifecycleUncertainty === 'close'
+            }
             title={lifecyclePendingAction
               ? '会话操作进行中'
-              : lifecycleUncertainty
-                ? '当前会话状态待确认，请新建对话'
+              : lifecycleUncertainty === 'stop'
+                ? '当前会话停止状态待确认'
+                : lifecycleUncertainty === 'close'
+                  ? '关闭状态待确认，可在会话列表重试关闭'
+                  : lifecycleUncertainty === 'reset'
+                    ? '重置状态待确认，可重试重置'
+                : lifecycleUncertainty === 'compaction'
+                  ? '压缩状态待确认，可重置当前对话'
                 : '当前对话操作'}
             ref={operationMenuTriggerRef}
           />
@@ -623,6 +639,7 @@ export default function ChatHeader({
             }}
             className="chat-header-floating-menu-item ready-floating-menu-item w-full flex items-center gap-2"
             style={buildChatHeaderMenuItemStyle({ selected: false })}
+            disabled={Boolean(lifecycleUncertainty)}
           >
             <Minimize2 style={{ width: 14, height: 14 }} strokeWidth={2} />
             <span style={{ fontSize: 12.5, fontWeight: 500 }}>压缩上下文</span>

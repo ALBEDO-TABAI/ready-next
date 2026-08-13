@@ -12,12 +12,10 @@ import { assertAgentInputToolPairIntegrity } from '../agent-control/compaction/c
 import { readVerifiedBrowserWorkflowEvidence } from '../browser-engine/browser-workflow-evidence'
 import type { PreparedSkillTurnTruth } from '../agent-control/contracts/browser-workflow-control'
 import {
-  digestSerializedJson,
-  parseArrayStrict,
-  parseJsonStrict,
+  digestSerializedJson, parseJsonStrict,
   parseObjectStrict,
   serializeWorkflowJson,
-  workflowDigest,
+  workflowDigest
 } from './browser-workflow-codec'
 import type {
   WorkflowDatabaseAccessor,
@@ -32,6 +30,7 @@ import {
 } from './browser-workflow-row-mapping'
 import type { BrowserObservationGap } from './agent-session-checkpoint-types'
 import { writeCanonicalCheckpointNotice } from './agent-session-checkpoint-canonical-notice'
+import { requireRunMessageVisibilityEpoch } from './agent-session-message-visibility'
 
 interface ChatMessageRow {
   id: string
@@ -199,6 +198,10 @@ export class AgentSessionCheckpointStoreRepository {
     return this.unitOfWork.runImmediateWithRetry((db) => {
       const parent = readParent(db, input.parentTaskId)
       if (parent.runId !== input.ownerRunId) throw new Error('checkpoint_owner_mismatch')
+      requireRunMessageVisibilityEpoch(db, {
+        ownerRunId: input.ownerRunId,
+        conversationId: parent.scopeId,
+      })
       const suspensionReason = input.role === 'suspension'
         ? input.suspensionReason || (input.takeoverId ? 'human_takeover' : 'manual')
         : null

@@ -398,6 +398,16 @@ export async function executeDocumentTool(
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
+      if (toolName === 'document_read_section') {
+        return createToolExecutionOutput(`Document action failed: ${tool.action} - ${message}`, {
+          shape: 'json',
+          data: {
+            ok: false,
+            errorKind: 'document_read_failed',
+            bodyBytes: 0,
+          },
+        })
+      }
       return `Document action failed: ${tool.action} - ${message}`
     }
   }

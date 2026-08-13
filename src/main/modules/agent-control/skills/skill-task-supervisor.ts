@@ -12,11 +12,12 @@ import {
   SkillTaskRunRepository,
   type SkillTaskRunRecord,
 } from '../../repositories/skill-task-run-repository'
-import { selectRunStateCandidate, type RunStateCandidate, type RunStateSelection } from '../task-projection/run-state-selection'
+import { selectRunStateCandidate, type RunStateSelection } from '../task-projection/run-state-selection'
 import { parseRunStateJson } from '../task-projection/run-state-schema'
 import { inspectSkillProgressArtifacts } from './skill-progress-artifacts'
 import { isConfiguredChildLoopSkillAction } from '../../tools/child-loop-skill-actions'
 import { canResumeShape } from '../contracts/resume-handle'
+import { isSafeMessageVisibilityEpoch, readScopeContextEpoch } from '../session/scope-context-epoch'
 
 const RUN_STATE_FILENAME = 'run_state.json'
 const RUN_STATE_SEARCH_DEPTH = 1
@@ -136,6 +137,7 @@ export interface SkillTaskSupervisorSnapshot {
   skillId: string | null
   scopeId: string | null
   sessionId: string | null
+  messageVisibilityEpoch?: number | null
   action: string | null
   status: SkillTaskSupervisorStatus
   /**
@@ -171,6 +173,7 @@ export interface InspectSkillTaskParams {
   detachedTask?: DetachedSkillTaskRecord | null
   sessionId?: string | null
   scopeId?: string | null
+  messageVisibilityEpoch?: number | null
   skillId?: string | null
   action?: string | null
   outputDir?: string | null
@@ -181,7 +184,10 @@ export interface InspectSkillTaskParams {
 export interface SkillTaskSupervisorDependencies {
   now?: () => number
   getDetachedTask?: (taskId: string) => DetachedSkillTaskRecord | null
-  listDetachedTasks?: (params?: { scopeId?: string | null }) => DetachedSkillTaskRecord[]
+  listDetachedTasks?: (params?: {
+    scopeId?: string | null
+    messageVisibilityEpoch?: number
+  }) => DetachedSkillTaskRecord[]
   getTaskRun?: (taskRunId: string) => SkillTaskRunRecord | null
   findTaskRunByDetachedTaskId?: (detachedTaskId: string) => SkillTaskRunRecord | null
   listActiveTaskRuns?: (sessionId: string, limit?: number) => SkillTaskRunRecord[]
@@ -665,6 +671,13 @@ export class SkillTaskSupervisor {
       skillId,
       scopeId: params.scopeId || detached?.scopeId || lifecycleTaskRun?.scopeId || null,
       sessionId: params.sessionId || detached?.sessionId || lifecycleTaskRun?.sessionId || null,
+      messageVisibilityEpoch: isSafeMessageVisibilityEpoch(params.messageVisibilityEpoch)
+        ? params.messageVisibilityEpoch
+        : isSafeMessageVisibilityEpoch(detached?.messageVisibilityEpoch)
+          ? detached.messageVisibilityEpoch
+          : isSafeMessageVisibilityEpoch(lifecycleTaskRun?.messageVisibilityEpoch)
+            ? lifecycleTaskRun.messageVisibilityEpoch
+            : null,
       action: params.action || detached?.action || lifecycleTaskRun?.action || null,
       status,
       liveness,
@@ -690,16 +703,37 @@ export class SkillTaskSupervisor {
 
   inspectLatestSkillTask(params: { sessionId?: string | null; scopeId?: string | null; skillId?: string | null }): SkillTaskSupervisorSnapshot {
     const sessionId = nonEmpty(params.sessionId) || nonEmpty(params.scopeId)
+    const scopeEpoch = readScopeContextEpoch(sessionId)
+    if (scopeEpoch.kind === 'closed' || scopeEpoch.kind === 'unavailable') return this.emptySnapshot()
+    const messageVisibilityEpoch = scopeEpoch.kind === 'open'
+      ? scopeEpoch.messageVisibilityEpoch
+      : undefined
     const candidates: SkillTaskSupervisorSnapshot[] = []
     const matchingSkill = (skillId?: string | null): boolean => !params.skillId || skillId === params.skillId
     if (sessionId) {
       for (const run of this.listActiveTaskRuns(sessionId, 20).filter((item) => matchingSkill(item.skillId))) {
-        candidates.push(this.inspectSkillTask({ taskRunId: run.id, taskRun: run, sessionId, skillId: params.skillId || run.skillId }))
+        if (messageVisibilityEpoch !== undefined && run.messageVisibilityEpoch !== messageVisibilityEpoch) continue
+        candidates.push(this.inspectSkillTask({
+          taskRunId: run.id,
+          taskRun: run,
+          sessionId,
+          messageVisibilityEpoch,
+          skillId: params.skillId || run.skillId,
+        }))
       }
-      for (const task of this.listDetachedTasks({ scopeId: sessionId }).filter((item) =>
+      for (const task of this.listDetachedTasks({
+        scopeId: sessionId,
+        messageVisibilityEpoch,
+      }).filter((item) =>
         matchingSkill(item.skillId) && (item.status === 'running' || item.status === 'blocked'),
       )) {
-        candidates.push(this.inspectSkillTask({ detachedTaskId: task.id, detachedTask: task, sessionId, skillId: params.skillId || task.skillId }))
+        candidates.push(this.inspectSkillTask({
+          detachedTaskId: task.id,
+          detachedTask: task,
+          sessionId,
+          messageVisibilityEpoch,
+          skillId: params.skillId || task.skillId,
+        }))
       }
     }
     const latest = this.findLatestRecoverableTaskRun({
@@ -708,7 +742,15 @@ export class SkillTaskSupervisor {
       skillId: params.skillId,
       includeDone: true,
     })
-    if (latest) candidates.push(this.inspectSkillTask({ taskRunId: latest.id, taskRun: latest, sessionId, skillId: params.skillId || latest.skillId }))
+    if (latest && (messageVisibilityEpoch === undefined || latest.messageVisibilityEpoch === messageVisibilityEpoch)) {
+      candidates.push(this.inspectSkillTask({
+        taskRunId: latest.id,
+        taskRun: latest,
+        sessionId,
+        messageVisibilityEpoch,
+        skillId: params.skillId || latest.skillId,
+      }))
+    }
     if (candidates.length > 0) {
       return candidates
         .slice()
@@ -725,6 +767,7 @@ export class SkillTaskSupervisor {
       skillId: null,
       scopeId: null,
       sessionId: null,
+      messageVisibilityEpoch: null,
       action: null,
       status: 'unknown',
       liveness: null,
@@ -753,7 +796,10 @@ export class SkillTaskSupervisor {
     return getDetachedSkillTaskTracker()?.inspect(taskId) || null
   }
 
-  private listDetachedTasks(params?: { scopeId?: string | null }): DetachedSkillTaskRecord[] {
+  private listDetachedTasks(params?: {
+    scopeId?: string | null
+    messageVisibilityEpoch?: number
+  }): DetachedSkillTaskRecord[] {
     if (this.deps.listDetachedTasks) return this.deps.listDetachedTasks(params)
     return getDetachedSkillTaskTracker()?.list(params) || []
   }

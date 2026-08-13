@@ -29,6 +29,7 @@ import {
   getLastReferenceSkill,
   rememberLastReferenceSkill,
 } from '../main/modules/agent-control/skills/skill-reference-hints'
+import { __setScopeContextEpochDatabaseForTests } from '../main/modules/agent-control/session/scope-context-epoch'
 import {
   narrowToolSurfaceForLocalDocument,
   recoverEmptyToolSurface,
@@ -43,6 +44,13 @@ const BASE_CONFIG: AIModelConfig = {
   visionMode: 'auto',
   nativeVideoMode: 'auto',
 }
+
+test.before(() => {
+  __setScopeContextEpochDatabaseForTests({
+    getRawDb: () => ({ prepare: () => ({ get: () => undefined }) }) as never,
+  })
+})
+test.after(() => __setScopeContextEpochDatabaseForTests(null))
 
 test('P0-4 proxy: failing-round tool surface resolves to a non-empty skill+document floor', () => {
   const rawUserText = [
@@ -99,6 +107,7 @@ test('P0-4 proxy: failing-round tool surface resolves to a non-empty skill+docum
     resolveSkillAuthorizationForTurn: (
       message: string,
       sessionId?: string,
+      messageVisibilityEpoch?: number,
       requestEnvelope?: unknown,
     ) => SkillToolAuthorization
     toolExecutor: {
@@ -119,6 +128,7 @@ test('P0-4 proxy: failing-round tool surface resolves to a non-empty skill+docum
     const authorization = privateRuntime.resolveSkillAuthorizationForTurn(
       primaryInstruction,
       sessionId,
+      0,
       requestEnvelope,
     )
     assert.equal(authorization.mode, 'selected', 'D1: explicit skill mention must survive attachment markers')

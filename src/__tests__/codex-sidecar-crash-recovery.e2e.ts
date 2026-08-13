@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { createServer, type Server } from 'node:http'
 import { tmpdir } from 'node:os'
@@ -7,32 +7,41 @@ import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import test from 'node:test'
 
-import type { DatabaseConnection } from '../main/modules/database'
-import { __runMigrationForTests, type MigrationDatabase } from '../main/modules/migrations'
+import { DatabaseManager, type DatabaseConnection } from '../main/modules/database'
 import {
   CodexAppServerClient,
   type CodexJsonLineTransport,
 } from '../main/modules/agent-control/codex-runtime/codex-app-server-client'
 import {
+  buildCodexIngressAdmittedDigest,
   CodexBindingRepository,
   type CodexAdmittedBindingInput,
 } from '../main/modules/agent-control/codex-runtime/codex-binding-repository'
+import { digestCanonicalJson } from '../main/modules/agent-control/codex-runtime/codex-model-gateway-contract'
 import { CodexDefaultBootRecoveryActions } from '../main/modules/agent-control/codex-runtime/codex-boot-recovery-actions'
 import { CodexDurableStartDispatchPort } from '../main/modules/agent-control/codex-runtime/codex-durable-start-dispatch'
+import { buildCodexToolResponseDeliveryAttemptId } from '../main/modules/agent-control/codex-runtime/codex-tool-response-delivery'
 import type {
   CodexNativeNotification,
+  CodexTurn,
   CodexThreadStartParams,
   CodexTurnStartParams,
 } from '../main/modules/agent-control/codex-runtime/codex-native-runtime'
 import type { PreparedCodexProductRun } from '../main/modules/agent-control/codex-runtime/codex-product-run-preparer'
+import { createCodexToolFixture } from './utils/codex-tool-fixture'
 import { CodexProvisionalInboundBuffer } from '../main/modules/agent-control/codex-runtime/codex-provisional-inbound-buffer'
 import {
+  activateCodexGatewaySpawnConfig,
   buildCodexChildEnvironment,
   loadVerifiedCodexRuntime,
   prepareCodexRuntimeState,
   resolveCodexRuntimePaths,
 } from '../main/modules/agent-control/codex-runtime/codex-runtime-host'
 import { CodexRuntimeBootReconciler } from '../main/modules/agent-control/codex-runtime/codex-runtime-boot-reconciler'
+import {
+  CodexDurableThreadArchiveDispatchPort,
+  CodexThreadArchiveIntentStore,
+} from '../main/modules/agent-control/codex-runtime/codex-thread-archive-cleanup'
 import { CodexSidecarSession } from '../main/modules/agent-control/codex-runtime/codex-sidecar-session'
 import {
   CodexSidecarSupervisor,
@@ -42,6 +51,11 @@ import {
 } from '../main/modules/agent-control/codex-runtime/codex-sidecar-supervisor'
 import { createCodexStartIdentityRegistryForRuntime } from '../main/modules/agent-control/codex-runtime/codex-start-identity-registry'
 import type { StartIdentityReservationSet } from '../main/modules/agent-control/send-scoped-confirmation'
+import { RunMetaRepository } from '../main/modules/agent-control/task-projection/run-meta-repository'
+import { workflowDigest } from '../main/modules/repositories/browser-workflow-codec'
+import { TaskProjectionRepository } from '../main/modules/repositories/task-projection-repository'
+import { providerCheckpointExecutionBinding } from './provider-checkpoint-test-fixtures'
+import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
 
 type FaultMode = 'hold_response' | 'fail_write'
 
@@ -170,14 +184,7 @@ function prepared(
     },
     resourceAnchorDigest: `resource-${runId}`,
     recoveredContextDigest: null,
-    readyToolSurface: {
-      surfaceId: 'surface-recovery', toolSurfaceDigest: 'tool-surface-recovery',
-      toolNames: ['ready_read_probe'],
-    },
-    readyTurnToolAuthorization: {
-      authorizationId: `authorization-${runId}`,
-      authorizationDigest: `authorization-digest-${runId}`,
-    },
+    ...createCodexToolFixture(['ready_read_probe']),
     readyToolHostIdentity: {
       scopeId, aliasId, authorizationOwnerId: `owner-${runId}`,
       resourceOwnerId: `resource-owner-${runId}`,
@@ -197,13 +204,18 @@ function admission(
   manifestDigest: string,
   ownerMainBootId: string,
 ): CodexAdmittedBindingInput {
-  return {
+  const executionBinding = providerCheckpointExecutionBinding(run.runId)
+  const parentMeta = { requestId: run.ingressBinding.requestId }
+  const messageContent = run.ingress.canonicalCurrentInputRef.input
+    .filter((item) => item.type === 'text')
+    .map((item) => item.text)
+    .join('')
+  const input = {
     prepared: run,
     reservation,
     ownerMainBootId,
     admittedAt: new Date().toISOString(),
     ingressAdmittedRevision: 1,
-    ingressAdmittedDigest: `ingress-${run.runId}`,
     threadBindingId,
     isolatedThreadCwd: threadCwd,
     turnRequestId: `client-message-${run.runId}`,
@@ -215,13 +227,31 @@ function admission(
     upstreamProfileSnapshotDigest: 'profile-digest-recovery',
     additionalContextDigest: `additional-context-${run.runId}`,
     turnContractDigest: `turn-contract-${run.runId}`,
+    messageVisibilityEpoch: 0,
+    readyParentReceipt: {
+      messageRole: 'user' as const,
+      messageContent,
+      messageTimestamp: '2026-08-07T00:00:00.000Z',
+      messageMetaDigest: digestCanonicalJson(parentMeta),
+      executionBindingDigest: digestCanonicalJson(executionBinding),
+    },
   }
+  return { ...input, ingressAdmittedDigest: buildCodexIngressAdmittedDigest(input) }
 }
 
 function turnParams(run: PreparedCodexProductRun, threadId: string, text: string): CodexTurnStartParams {
   return {
     threadId,
     clientUserMessageId: `client-message-${run.runId}`,
+    collaborationMode: {
+      mode: 'default',
+      settings: {
+        model: 'ready-e0-model',
+        reasoning_effort: null,
+        developer_instructions: null,
+      },
+    },
+    environments: [],
     input: [{ type: 'text', text, text_elements: [] }],
     additionalContext: {},
     responsesapiClientMetadata: {
@@ -238,6 +268,7 @@ function threadParams(cwd: string): CodexThreadStartParams {
     model: 'ready-e0-model', modelProvider: 'ready_gateway', allowProviderModelFallback: false,
     cwd, approvalPolicy: 'never', sandbox: 'read-only', runtimeWorkspaceRoots: [],
     environments: [],
+    config: { model_context_window: 272_000 },
     dynamicTools: [{
       type: 'function', name: 'ready_read_probe', description: 'Read one fixture value.',
       inputSchema: {
@@ -385,8 +416,10 @@ test('real app-server crash recovery covers all six start seams and three-way re
     return
   }
 
-  const Database = (await import('better-sqlite3')).default
-  const db = new Database(':memory:')
+  if (skipIfSqliteUnavailable(t, 'Codex sidecar crash recovery database')) return
+  const database = new DatabaseManager(true)
+  const db = database.getRawDb()
+  assert.ok(db)
   const tempRoot = mkdtempSync(join(tmpdir(), 'ready-codex-e2-crash-'))
   const providerRequests: Array<Record<string, unknown>> = []
   let providerSequence = 0
@@ -407,28 +440,22 @@ test('real app-server crash recovery covers all six start seams and three-way re
   })
   const port = await listen(server)
   const gatewayUrl = `http://127.0.0.1:${port}/v1`
-  const gatewayToken = 'e2-crash-token'
   let activeSession: CodexSidecarSession | null = null
   let activeSupervisor: CodexSidecarSupervisor | null = null
   let activeFault: FaultingTransport | null = null
 
   try {
-    db.exec(`
-      CREATE TABLE chat_conversations (id TEXT PRIMARY KEY);
-      CREATE TABLE chat_messages (id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL);
-      CREATE TABLE task_projections (
-        task_id TEXT PRIMARY KEY, run_id TEXT NOT NULL, scope_id TEXT NOT NULL, status TEXT NOT NULL
-      );
-    `)
-    __runMigrationForTests('088_codex_runtime_bindings', db as unknown as MigrationDatabase)
-    __runMigrationForTests('089_codex_runtime_evidence_guards', db as unknown as MigrationDatabase)
     const repository = new CodexBindingRepository(db as unknown as DatabaseConnection)
+    const archiveDispatchPort = new CodexDurableThreadArchiveDispatchPort({
+      store: new CodexThreadArchiveIntentStore(db as unknown as DatabaseConnection),
+      now: () => new Date().toISOString(),
+    })
     const paths = resolveCodexRuntimePaths({
       appPath: repoRoot, resourcesPath: join(repoRoot, 'assets'), isPackaged: false,
     })
     const runtime = loadVerifiedCodexRuntime(paths)
     const state = prepareCodexRuntimeState({
-      userDataPath: tempRoot, gatewayUrl, gatewayToken, contracts: runtime.contracts,
+      userDataPath: tempRoot, gatewayUrl, contracts: runtime.contracts,
     })
     const inspector = new MacCodexProcessInspector()
     const main = (await inspector.list()).find((row) => row.pid === process.pid)
@@ -441,14 +468,55 @@ test('real app-server crash recovery covers all six start seams and three-way re
 
     const prepareParentRows = (run: PreparedCodexProductRun) => {
       const scopeId = run.readyToolHostIdentity.scopeId
-      db.prepare(`INSERT OR IGNORE INTO chat_conversations (id) VALUES (?)`).run(scopeId)
-      db.prepare(`INSERT INTO chat_messages (id, conversation_id) VALUES (?, ?)`).run(
-        run.ingress.originUserMessageId, scopeId,
+      const messageContent = run.ingress.canonicalCurrentInputRef.input
+        .filter((item) => item.type === 'text')
+        .map((item) => item.text)
+        .join('')
+      const parentMeta = { requestId: run.ingressBinding.requestId }
+      db.prepare(`
+        INSERT OR IGNORE INTO chat_conversations (
+          id, agent, active_agent_id, handoff_generation, title, source_kind, source_id,
+          thread_key, meta_json, created_at, updated_at, message_visibility_epoch
+        ) VALUES (?, 'butler', 'butler', 0, 'Codex E2', 'local', 'app', ?, '{}', ?, ?, 0)
+      `).run(scopeId, scopeId, '2026-08-07T00:00:00.000Z', '2026-08-07T00:00:00.000Z')
+      assert.deepEqual(
+        db.prepare('SELECT id, message_visibility_epoch FROM chat_conversations WHERE id = ?')
+          .get(scopeId),
+        { id: scopeId, message_visibility_epoch: 0 },
       )
       db.prepare(`
-        INSERT INTO task_projections (task_id, run_id, scope_id, status)
-        VALUES (?, ?, ?, 'running')
-      `).run(run.taskId, run.runId, scopeId)
+        INSERT INTO chat_messages (id, conversation_id, role, content, timestamp, meta_json, message_visibility_epoch)
+        VALUES (?, ?, 'user', ?, '2026-08-07T00:00:00.000Z', ?, 0)
+      `).run(
+        run.ingress.originUserMessageId, scopeId, messageContent, JSON.stringify(parentMeta),
+      )
+      const executionBinding = providerCheckpointExecutionBinding(run.runId)
+      new TaskProjectionRepository({ getRawDb: () => db }).create({
+        taskId: run.taskId,
+        scopeId,
+        messageVisibilityEpoch: 0,
+        runId: run.runId,
+        taskType: 'direct_answer',
+        module: 'system',
+        status: 'running',
+        interactionState: 'running',
+        waitingFor: 'none',
+        steps: [],
+        ownerAgentId: 'butler',
+        taskOrigin: 'user_root',
+        executionBinding,
+        createdAt: '2026-08-07T00:00:00.000Z',
+        updatedAt: '2026-08-07T00:00:00.000Z',
+      })
+      new RunMetaRepository(db).create({
+        runId: run.runId,
+        taskId: run.taskId,
+        scopeId,
+        messageVisibilityEpoch: 0,
+        agentId: 'butler',
+        executionBinding,
+        status: 'running',
+      }, Date.parse('2026-08-07T00:00:00.000Z'))
     }
 
     const createAlias = (scopeId: string, aliasId: string, bindingId: string, cwd: string) => {
@@ -491,16 +559,94 @@ test('real app-server crash recovery covers all six start seams and three-way re
       return run
     }
 
-    const closeRun = (runId: string, status: 'completed' | 'failed' = 'completed') => {
+    const closeRun = (
+      runId: string,
+      turn: CodexTurn,
+      status: 'completed' | 'failed' = 'completed',
+    ) => {
       const run = runById.get(runId)
       if (!run) throw new Error(`run_not_found:${runId}`)
+      const start = repository.readProductStartState(runId)
+      assert.ok(start.codexThreadId)
+      assert.equal(start.codexTurnId, turn.id)
+      const closeoutAt = new Date().toISOString()
+      const finalMessage = status === 'completed'
+        ? turn.items.filter((item) => item.type === 'agentMessage').at(-1)
+        : null
+      assert.ok(status !== 'completed' || finalMessage?.type === 'agentMessage')
+      const candidateText = finalMessage?.type === 'agentMessage' ? finalMessage.text : null
+      repository.recordEngineTerminalCandidate({
+        readyRunId: runId,
+        codexThreadId: start.codexThreadId,
+        codexTurnId: turn.id,
+        engineOutcome: status === 'completed' ? 'completed' : 'failed',
+        candidate: {
+          kind: 'native_terminal',
+          readyTaskId: run.taskId,
+          readyRunId: runId,
+          scopeId: run.readyToolHostIdentity.scopeId,
+          codexThreadId: start.codexThreadId,
+          codexTurnId: turn.id,
+          engineOutcome: status === 'completed' ? 'completed' : 'failed',
+          candidateSelection: status === 'completed'
+            ? { kind: 'accepted', itemId: finalMessage!.id }
+            : { kind: 'none', code: 'terminal_not_completed' },
+          candidateText,
+          candidateDigest: candidateText === null
+            ? null
+            : createHash('sha256').update(candidateText).digest('hex'),
+          usedToolCalls: [],
+          actionReceiptRefs: [],
+          interactionState: null,
+          waitingFor: null,
+          terminalReasonCandidate: status === 'completed' ? 'done' : 'failed',
+          abortInitiator: null,
+          budgetState: {},
+          contextState: {},
+          providerDiagnostics: {},
+          recoveryCheckpointRef: null,
+          browserContinuationRef: null,
+          browserProofRefs: [],
+          otherProofRefs: [],
+          projectionPatchRefs: [],
+          runtimeDiagnostics: {
+            finalDeltaItemIds: [], commentaryItemIds: [], nativeTurnError: turn.error?.message ?? null,
+          },
+        },
+        recordedAt: closeoutAt,
+      })
+      repository.recordToolPublicationReceipt({ readyRunId: runId, recordedAt: closeoutAt })
+      const terminalMeta = { taskId: run.taskId, runId, terminalReason: status === 'completed' ? 'done' : 'failed' }
+      const messageId = `assistant:${run.taskId}:${runId}:terminal`
+      const productTerminalDigest = status === 'completed' && candidateText !== null
+        ? workflowDigest({
+            id: messageId,
+            conversationId: run.readyToolHostIdentity.scopeId,
+            role: 'assistant',
+            content: candidateText,
+            timestamp: closeoutAt,
+            meta: terminalMeta,
+          })
+        : `terminal-${runId}-${status}`
       db.exec('BEGIN IMMEDIATE')
       try {
         db.prepare(`UPDATE task_projections SET status = ? WHERE task_id = ?`).run(status, run.taskId)
+        if (status === 'completed' && candidateText !== null) {
+          db.prepare(`
+            INSERT INTO chat_messages (id, conversation_id, role, content, timestamp, meta_json, message_visibility_epoch)
+            VALUES (?, ?, 'assistant', ?, ?, ?, 0)
+          `).run(
+            messageId,
+            run.readyToolHostIdentity.scopeId,
+            candidateText,
+            closeoutAt,
+            JSON.stringify(terminalMeta),
+          )
+        }
         repository.completeCanonicalProductCloseoutInOpenTransaction({
           readyRunId: runId,
-          productTerminalDigest: `terminal-${runId}-${status}`,
-          closeoutAt: new Date().toISOString(),
+          productTerminalDigest,
+          closeoutAt,
         })
         db.exec('COMMIT')
       } catch (error) {
@@ -510,36 +656,59 @@ test('real app-server crash recovery covers all six start seams and three-way re
     }
 
     const serverRequestExecutor = {
-      async execute(input: {
+      async executeServerRequest(input: {
         bindingId: string
+        connectionEpoch: string
+        requestId: number | string
         params: { threadId: string; turnId: string; callId: string; tool: string; arguments: unknown }
       }) {
-        repository.bindToolCall({
-          codexThreadId: input.params.threadId,
-          codexTurnId: input.params.turnId,
-          codexCallId: input.params.callId,
-          readyRunId: input.bindingId,
-          readyActionId: `action-${input.bindingId}-${input.params.callId}`,
-          toolName: input.params.tool,
-          argsDigest: JSON.stringify(input.params.arguments),
-          turnContractDigest: `turn-contract-${input.bindingId}`,
-          at: new Date().toISOString(),
-        })
+        const bridgeBinding = repository.readToolBridgeExecutionBinding(input.bindingId)
+        const surfaceEntry = bridgeBinding.toolSurface.entries.find(
+          (entry) => entry.name === input.params.tool,
+        )
+        assert.ok(surfaceEntry)
         toolExecutions += 1
-        return {
+        const result = {
           contentItems: [{ type: 'inputText', text: 'READY_TOOL_RESULT' }],
           success: true,
         }
+        const identity = {
+          codexThreadId: input.params.threadId,
+          codexTurnId: input.params.turnId,
+          codexCallId: input.params.callId,
+          readyActionId: `crash-recovery-action-${input.params.callId}`,
+          connectionEpoch: input.connectionEpoch,
+          requestRpcId: String(input.requestId),
+          toolResponseDigest: digestCanonicalJson(result),
+        }
+        return {
+          result,
+          deliveryAttempt: {
+            attemptId: buildCodexToolResponseDeliveryAttemptId(identity),
+            ...identity,
+          },
+        }
       },
+      confirmServerResponseTransportWrite() {},
     }
 
     const makeSupervisor = (bootId: string, processInspector: CodexProcessInspector) => (
       new CodexSidecarSupervisor({
         runtime,
         state,
-        childEnvironment: (identities) => buildCodexChildEnvironment({
-          state, ...identities, gatewayUrl, gatewayToken,
-        }),
+        spawnCapability: {
+          activate: (identities) => {
+            const gatewaySpawnConfig = activateCodexGatewaySpawnConfig({
+              state,
+              sidecarSpawnInstanceId: identities.sidecarSpawnInstanceId,
+              gatewayUrl,
+              gatewayToken: randomUUID(),
+              contracts: runtime.contracts,
+            })
+            return buildCodexChildEnvironment({ state, ...identities, gatewaySpawnConfig })
+          },
+          revoke() {},
+        },
         leaseStore: repository,
         inspector: processInspector,
         spawnPort: new NodeCodexSidecarSpawnPort(),
@@ -552,9 +721,9 @@ test('real app-server crash recovery covers all six start seams and three-way re
     const makeSession = (supervisor: CodexSidecarSupervisor) => new CodexSidecarSession({
       runtime,
       state,
-      gatewayToken,
       repository,
       supervisor,
+      threadArchiveDispatchPort: archiveDispatchPort,
       evidenceResolver: {
         async resolveTypedRejection() { return { resolution: 'unknown' } },
       },
@@ -603,6 +772,7 @@ test('real app-server crash recovery covers all six start seams and three-way re
         requestTimeoutMs,
         startDispatchPort: dispatch,
         inboundFramePort: inboundBuffer,
+        threadArchiveDispatchPort: archiveDispatchPort,
         threadArchiveAuthorizationPort: {
           assertEligible: (threadId) => repository.assertThreadArchiveEligible(threadId),
         },
@@ -635,8 +805,8 @@ test('real app-server crash recovery covers all six start seams and three-way re
       client, baseThread.thread.id, `client-message-${baseRun.runId}`,
     )
     await client.turnStart(turnParams(baseRun, baseThread.thread.id, 'BASE_TOKEN'))
-    await baseTerminal
-    closeRun(baseRun.runId)
+    const baseTerminalEvent = await baseTerminal
+    closeRun(baseRun.runId, baseTerminalEvent.params.turn)
     const createEstablishedPeer = async (suffix: string) => {
       const peerScope = `scope-recovery-${suffix}`
       const peerBinding = `thread-binding-recovery-${suffix}`
@@ -658,8 +828,8 @@ test('real app-server crash recovery covers all six start seams and three-way re
       await client.turnStart(turnParams(
         peerRun, peerThread.thread.id, `BASE_${suffix.toUpperCase()}_TOKEN`,
       ))
-      await terminal
-      closeRun(peerRun.runId)
+      const terminalEvent = await terminal
+      closeRun(peerRun.runId, terminalEvent.params.turn)
       return {
         scopeId: peerScope,
         aliasId: peerScope,
@@ -680,7 +850,7 @@ test('real app-server crash recovery covers all six start seams and three-way re
       text: 'EARLY_TOOL_TOKEN',
     })
     const earlyKey = `turn/start:${earlyRun.runId}`
-    let manual = await startFaultClient(activeSupervisor, new Map([[earlyKey, 'hold_response']]))
+    let manual = await startFaultClient(activeSupervisor, new Map([[earlyKey, 'hold_response']]), 1_000)
     client = manual.client
     await client.threadResume({ threadId: baseThread.thread.id })
     const earlyTerminal = waitForTerminal(
@@ -735,7 +905,8 @@ test('real app-server crash recovery covers all six start seams and three-way re
         recovery: repository.readRecoverySnapshot(() => true),
       })}`)
     }
-    closeRun(earlyRun.runId)
+    assert.ok(earlyTerminalResult.notification)
+    closeRun(earlyRun.runId, earlyTerminalResult.notification.params.turn)
     assert.equal(toolExecutions, 1)
     assert.equal(registry.snapshot().capacityCharged, 0)
 
@@ -838,8 +1009,8 @@ test('real app-server crash recovery covers all six start seams and three-way re
             await activeSession!.getClient().turnStart(turnParams(
               run, identity.threadId, runText.get(run.runId) as string,
             ))
-            await terminal
-            closeRun(run.runId)
+            const terminalEvent = await terminal
+            closeRun(run.runId, terminalEvent.params.turn)
             return 'accepted'
           },
         },
@@ -869,8 +1040,12 @@ test('real app-server crash recovery covers all six start seams and three-way re
             if (!run) throw new Error(`failure_run_missing:${failure.readyRunId}`)
             db.prepare(`UPDATE task_projections SET status = 'failed' WHERE task_id = ?`)
               .run(run.taskId)
-            return { productTerminalDigest: `terminal-${failure.readyRunId}-failed` }
+            return {
+              productTerminalDigest: `terminal-${failure.readyRunId}-failed`,
+              closeoutAt: new Date().toISOString(),
+            }
           },
+          async deliver() {},
         },
         manualCompaction: {
           async reconcile() { throw new Error('unexpected_manual_recovery') },
@@ -892,7 +1067,7 @@ test('real app-server crash recovery covers all six start seams and three-way re
             )))
             assert.equal(matching.length, 1)
             assert.notEqual(matching[0].status, 'inProgress')
-            closeRun(fence.readyRunId)
+            closeRun(fence.readyRunId, matching[0])
           },
         },
       })
@@ -958,7 +1133,7 @@ test('real app-server crash recovery covers all six start seams and three-way re
     const liveThreadKey = `thread/start:${liveThreadCwd}`
     manual = await startFaultClient(activeSupervisor, new Map([
       [liveThreadKey, 'hold_response'],
-    ]))
+    ]), 1_000)
     const liveThreadStartedBefore = manual.transport.rawCount('thread/started')
     let liveThreadSettled = false
     const liveThreadStart = manual.client.threadStart(threadParams(liveThreadCwd))
@@ -988,8 +1163,8 @@ test('real app-server crash recovery covers all six start seams and three-way re
       liveThread.thread.id,
       'THREAD_LIVE_TIMEOUT_TOKEN',
     ))
-    await liveThreadTerminal
-    closeRun(liveThreadRun.runId)
+    const liveThreadTerminalEvent = await liveThreadTerminal
+    closeRun(liveThreadRun.runId, liveThreadTerminalEvent.params.turn)
     assert.equal(registry.snapshot().capacityCharged, 0)
     manual.client.dispose()
     manual.transport.dispose()
@@ -1020,7 +1195,7 @@ test('real app-server crash recovery covers all six start seams and three-way re
     manual = await startFaultClient(activeSupervisor, new Map([
       [threadAcceptedKey, 'hold_response'],
       [threadAbsentKey, 'fail_write'],
-    ]))
+    ]), 10_000)
     const rawThreadStarted = manual.transport.rawCount('thread/started')
     void manual.client.threadStart(threadParams(acceptedCwd)).catch(() => undefined)
     await waitUntil(() => manual.transport.hasHeld(threadAcceptedKey) ? true : null)
@@ -1120,8 +1295,8 @@ test('real app-server crash recovery covers all six start seams and three-way re
     await activeSession.getClient().turnStart(turnParams(
       postUnknown, baseThread.thread.id, 'POST_UNKNOWN_OTHER_ROOT_TOKEN',
     ))
-    await postTerminal
-    closeRun(postUnknown.runId)
+    const postTerminalEvent = await postTerminal
+    closeRun(postUnknown.runId, postTerminalEvent.params.turn)
     assert.equal(registry.snapshot().capacityCharged, 2)
     assert.equal(
       providerRequests.some((body) => flattenText(body).join('\n').includes('THREAD_UNKNOWN_MUST_NOT_RUN')),
@@ -1133,7 +1308,7 @@ test('real app-server crash recovery covers all six start seams and three-way re
     if (activeSession) await activeSession.stop().catch(() => undefined)
     else if (activeSupervisor) await activeSupervisor.hardReset('test_cleanup').catch(() => undefined)
     await closeServer(server)
-    db.close()
+    database.close()
     rmSync(tempRoot, { recursive: true, force: true })
   }
 })

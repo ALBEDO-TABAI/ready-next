@@ -7,7 +7,7 @@
  */
 
 import assert from 'node:assert/strict'
-import test, { mock } from 'node:test'
+import test, { after, before, mock } from 'node:test'
 
 import {
   REFERENCE_SKILL_HINT_TTL_MS,
@@ -16,6 +16,12 @@ import {
   rememberLastReferenceSkill,
   sweepExpiredReferenceSkillHints,
 } from '../main/modules/agent-control/skills/skill-reference-hints'
+import { __setScopeContextEpochDatabaseForTests } from '../main/modules/agent-control/session/scope-context-epoch'
+
+before(() => {
+  __setScopeContextEpochDatabaseForTests({ getRawDb: () => ({ prepare: () => ({ get: () => undefined }) }) as never })
+})
+after(() => __setScopeContextEpochDatabaseForTests(null))
 
 test('sweep removes hints older than TTL and keeps fresh ones', () => {
   _resetLastReferenceSkillHintsForTests()

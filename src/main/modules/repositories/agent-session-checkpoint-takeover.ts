@@ -15,10 +15,7 @@ import {
   serializeWorkflowJson,
   workflowDigest,
 } from './browser-workflow-codec'
-import type {
-  WorkflowDatabaseAccessor,
-  WorkflowRawDatabase,
-} from './browser-workflow-unit-of-work'
+import type { WorkflowDatabaseAccessor, WorkflowRawDatabase } from './browser-workflow-unit-of-work'
 import { BrowserWorkflowUnitOfWork } from './browser-workflow-unit-of-work'
 import {
   mapWorkflowCheckpointRow,
@@ -26,12 +23,9 @@ import {
   type AgentSessionCheckpoint,
   type WorkflowCheckpointRow,
 } from './browser-workflow-row-mapping'
-import type {
-  HumanTakeoverResumeBinding,
-} from './agent-session-checkpoint-types'
-
+import type { HumanTakeoverResumeBinding } from './agent-session-checkpoint-types'
+import { requireRunMessageVisibilityEpoch } from './agent-session-message-visibility'
 const readParent = readWorkflowParent
-
 function changed(result: unknown): number {
   return Number((result as { changes?: unknown } | null)?.changes || 0)
 }
@@ -256,6 +250,13 @@ export class AgentSessionCheckpointTakeoverRepository {
   }): Promise<HumanTakeoverResumeBinding> {
     return this.unitOfWork.runImmediateWithRetry((db) => {
       const parent = readParent(db, input.taskId)
+      const messageVisibilityEpoch = requireRunMessageVisibilityEpoch(db, {
+        ownerRunId: parent.runId,
+        conversationId: parent.scopeId,
+      })
+      if (messageVisibilityEpoch !== parent.messageVisibilityEpoch) throw new Error(
+        'takeover_parent_message_visibility_epoch_mismatch',
+      )
       const takeover = parent.humanTakeoverRef
       if (
         takeover?.state === 'claimed'
@@ -568,13 +569,15 @@ export class AgentSessionCheckpointTakeoverRepository {
       const nowMs = Date.parse(createdAt) || Date.now()
       db.prepare(
         `INSERT INTO run_meta (
-          run_id, task_id, scope_id, execution_binding_json, status, initiator,
+          run_id, task_id, scope_id, message_visibility_epoch,
+          execution_binding_json, status, initiator,
           input_tokens, output_tokens, total_tokens, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, 'running', ?, 0, 0, 0, ?, ?)`,
+        ) VALUES (?, ?, ?, ?, ?, 'running', ?, 0, 0, 0, ?, ?)`,
       ).run(
         input.newOwnerRunId,
         parent.taskId,
         parent.scopeId,
+        parent.messageVisibilityEpoch,
         serializeWorkflowJson(input.executionBinding, 'takeover_run_execution_binding_json'),
         'human_takeover_resume',
         nowMs,

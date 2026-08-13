@@ -8,8 +8,6 @@ import IconRail from '../components/layout/IconRail'
 import SidePanel, { type SidePanelVariant } from '../components/layout/SidePanel'
 import WorkbenchModeOutlet from '../components/layout/WorkbenchModeOutlet'
 import ChatPanel from '../components/agent/ChatPanel'
-import { ScheduledTasksWorkspace } from '../components/agent/scheduled-tasks/ScheduledTasksWorkspace'
-import type { ScheduledTasksSummary } from '../components/agent/scheduled-tasks/ScheduledTasksPanel'
 import GraphWorkspace, { type GraphWorkspaceRequest } from '../components/graph/GraphWorkspace'
 import { invalidateGraphWorkspace } from '../components/graph/graph-session'
 import StatusBar from '../components/layout/StatusBar'
@@ -34,8 +32,6 @@ import type { BrowserHostLayoutPhase } from '../../shared/browser-view-layout'
 import { nextIntentId } from '../../shared/browser-view-intent'
 import { createModeSwitchAckWaiter } from '../modules/browser/modeSwitchAckWaiter'
 import { cancelRitual, withRitual, setPanelResizingSignal } from '../modules/overlay/useRitualOverlay'
-import { useAgent } from '../stores/useAgent'
-import '../styles/scheduled-tasks.css'
 import '../styles/knowledge-graph.css'
 
 const MIN_SIDE_PANEL_WIDTH = 220
@@ -142,12 +138,7 @@ export default function WorkbenchMode() {
   const renamingPath = useWorkspace((state) => state.renamingPath)
   const creatingType = useWorkspace((state) => state.creatingType)
   const workspaceRoot = useWorkspace((state) => state.workspaceRoot)
-  const pinnedFolders = useWorkspace((state) => state.pinnedFolders)
   const watcherFailure = useWorkspace((state) => state.watcherFailure)
-  const agents = useAgent((state) => state.agents)
-  const currentAgent = useAgent((state) => state.currentAgent)
-  const currentScopeId = useAgent((state) => state.currentScopeId)
-  const loadConversation = useAgent((state) => state.loadConversation)
   const chatPanelWidth = clampWorkbenchChatPanelWidth(rawChatPanelWidth)
   const sidePanelWidths = useMemo(
     () => ({ ...rawSidePanelWidths, shared: clampWorkbenchSidePanelWidth(rawSidePanelWidths.shared) }),
@@ -174,21 +165,10 @@ export default function WorkbenchMode() {
   const [modeScenePresentation, setModeScenePresentation] = useState<WorkbenchModeChangePresentation>('animated')
   const [isPanelResizing, setIsPanelResizing] = useState(false)
   const [browserLayoutMotionPhase, setBrowserLayoutMotionPhase] = useState<BrowserHostLayoutPhase>('idle')
-  const [scheduledTasksOpen, setScheduledTasksOpen] = useState(false)
   const [graphWorkspaceRequest, setGraphWorkspaceRequest] = useState<GraphWorkspaceRequest | null>(null)
-  const [scheduledTasksSummary, setScheduledTasksSummary] = useState<ScheduledTasksSummary>({
-    enabledCount: 0,
-    attentionCount: 0,
-  })
   const workspaceError = workspaceInitError ?? formatWorkspaceWatcherFailure(watcherFailure)
   const workbenchSurfaceRefreshTimersRef = useRef<number[]>([])
   const browserLayoutPhase = isPanelResizing ? 'dragging' : browserLayoutMotionPhase
-  const scheduledWorkspaceRoots = useMemo(() => (
-    workspaceRoot
-      ? [workspaceRoot, ...pinnedFolders.filter((path) => path !== workspaceRoot)]
-      : pinnedFolders
-  ), [pinnedFolders, workspaceRoot])
-
   const isSidebarContentVisible = sidebarVisible
   const chatPanelState: 'expanded' | 'collapsed' = chatPanelVisible ? 'expanded' : 'collapsed'
   const hasDocumentSplitPane = Boolean(documentSplitTabId) && (workbenchMode === 'document' || splitMode === 'document')
@@ -235,13 +215,7 @@ export default function WorkbenchMode() {
   }, [clearScheduledWorkbenchSurfaceRefresh])
 
   const handleGraphWorkspaceOpen = useCallback((request: GraphWorkspaceRequest) => {
-    setScheduledTasksOpen(false)
     setGraphWorkspaceRequest(request)
-  }, [])
-
-  const handleScheduledTasksToggle = useCallback(() => {
-    setGraphWorkspaceRequest(null)
-    setScheduledTasksOpen((value) => !value)
   }, [])
 
   useEffect(() => {
@@ -958,23 +932,6 @@ export default function WorkbenchMode() {
                 </div>
               )}
 
-              <ScheduledTasksWorkspace
-                open={scheduledTasksOpen}
-                onClose={() => setScheduledTasksOpen(false)}
-                currentScopeId={currentScopeId}
-                currentAgentId={currentAgent || 'butler'}
-                workspaceRoots={scheduledWorkspaceRoots}
-                agentOptions={agents.map((agent) => ({ id: agent.name, name: agent.displayName }))}
-                onSummaryChange={setScheduledTasksSummary}
-                onOpenOccurrence={(occurrence) => {
-                  void window.electronAPI.scheduledTasks.get(occurrence.scheduleId).then((response) => {
-                    if (response.success && response.data.scopeId) {
-                      void loadConversation(response.data.scopeId)
-                      setScheduledTasksOpen(false)
-                    }
-                  })
-                }}
-              />
               {graphWorkspaceRequest && (
                 <GraphWorkspace
                   request={graphWorkspaceRequest}
@@ -996,9 +953,6 @@ export default function WorkbenchMode() {
               onWorkbenchModeChange={handleWorkbenchModeChange}
               onWorkbenchSplitToggle={handleWorkbenchSplitToggle}
               onTogglePanel={handleToggleChatPanelWithResize}
-              scheduledTasksOpen={scheduledTasksOpen}
-              scheduledTasksSummary={scheduledTasksSummary}
-              onScheduledTasksToggle={handleScheduledTasksToggle}
             />
           </div>
 

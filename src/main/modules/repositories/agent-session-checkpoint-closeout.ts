@@ -19,6 +19,7 @@ import type {
   CanonicalCoreCloseoutResult,
 } from './agent-session-checkpoint-types'
 import { inspectWorkflowCloseoutFromDb } from './agent-session-checkpoint-route'
+import { requireRunMessageVisibilityEpoch } from './agent-session-message-visibility'
 
 interface ChatMessageRow {
   id: string
@@ -27,6 +28,7 @@ interface ChatMessageRow {
   content: string
   timestamp: string
   meta_json?: string | null
+  message_visibility_epoch?: number
 }
 
 export interface CanonicalCoreCloseoutTransactionParticipant {
@@ -37,10 +39,84 @@ export interface CanonicalCoreCloseoutTransactionParticipant {
   }): void
 }
 
+export type CodexFailureCoreCloseoutInput = {
+  parentTaskId: string
+  ownerRunId: string
+  conversationId: string
+  status: 'error' | 'cancelled' | 'interrupted'
+  terminalReason: string
+  initiator: string
+  durationMs: number
+  taskType: string
+  module: string
+  error: string
+  verifierReceiptDigest?: string
+  now: string
+}
+
+export type CodexFailureCoreCloseoutResult = {
+  productTerminalDigest: string
+  closeoutAt: string
+}
+
+type CodexFailureEvidence = {
+  contract: 'codex_failure_evidence_v1'
+  error: string
+  module: string
+  verifierReceiptDigest?: string
+}
+
 const readParent = readWorkflowParent
 
 function changed(result: unknown): number {
   return Number((result as { changes?: unknown } | null)?.changes || 0)
+}
+
+function codexFailureEvidence(input: Pick<
+  CodexFailureCoreCloseoutInput,
+  'error' | 'module' | 'verifierReceiptDigest'
+>): CodexFailureEvidence {
+  if (
+    input.verifierReceiptDigest !== undefined
+    && !/^[a-f0-9]{64}$/.test(input.verifierReceiptDigest)
+  ) throw new Error('codex_failure_verifier_receipt_digest_invalid')
+  return {
+    contract: 'codex_failure_evidence_v1',
+    error: input.error,
+    module: input.module,
+    ...(input.verifierReceiptDigest
+      ? { verifierReceiptDigest: input.verifierReceiptDigest }
+      : {}),
+  }
+}
+
+function expectedCodexRecoveryBrowserState(error: string):
+  | 'observation_required'
+  | 'action_in_flight'
+  | 'research_incomplete'
+  | null {
+  if (error === 'codex_browser_workflow_observation_required') return 'observation_required'
+  if (error === 'codex_browser_workflow_action_in_flight') return 'action_in_flight'
+  if (error === 'codex_browser_workflow_research_incomplete') return 'research_incomplete'
+  return null
+}
+
+function codexFailureTerminalDigest(input: {
+  parentTaskId: string
+  ownerRunId: string
+  conversationId: string
+  status: CodexFailureCoreCloseoutInput['status']
+  terminalReason: string
+  initiator: string
+  durationMs: number
+  taskType: string
+  failureEvidence: CodexFailureEvidence
+  closeoutAt: string
+}): string {
+  return workflowDigest({
+    contract: 'codex_failure_core_closeout_v1',
+    ...input,
+  })
 }
 
 function releaseHeldBrowserTargetClaims(
@@ -119,11 +195,284 @@ function releaseHeldBrowserTargetClaims(
   }
 }
 
+function cancelBoundBrowserChild(input: {
+  db: WorkflowRawDatabase
+  parentTaskId: string
+  ownerRunId: string
+  parentBindingJson: string
+  terminalReason: string
+  error: string
+  closeoutAt: string
+}): void {
+  const child = input.db.prepare(`
+    SELECT id, revision, status, active_execution_binding_json
+      FROM browser_tasks
+     WHERE parent_task_id = ? AND kind = 'browser_workflow'
+     LIMIT 1
+  `).get<{
+    id: string
+    revision: number | null
+    status: string
+    active_execution_binding_json: string | null
+  }>(input.parentTaskId)
+  if (!child) return
+  if (!child.active_execution_binding_json) {
+    throw new Error('codex_failure_closeout_browser_child_binding_missing')
+  }
+  const parentBinding = parseObjectStrict<TaskExecutionBinding>(
+    input.parentBindingJson,
+    'codex_failure_closeout_parent_execution_binding_json',
+  )
+  const childBinding = parseObjectStrict<TaskExecutionBinding>(
+    child.active_execution_binding_json,
+    'codex_failure_closeout_browser_execution_binding_json',
+  )
+  if (
+    parentBinding.runId !== input.ownerRunId
+    || workflowDigest(childBinding) !== workflowDigest(parentBinding)
+  ) {
+    throw new Error('codex_failure_closeout_browser_child_binding_mismatch')
+  }
+  if (['completed', 'failed', 'cancelled'].includes(child.status)) return
+  const updated = input.db.prepare(`
+    UPDATE browser_tasks
+       SET status = 'cancelled', result_json = ?, error = NULL, finished_at = ?,
+           revision = revision + 1, updated_at = ?
+     WHERE id = ? AND parent_task_id = ? AND kind = 'browser_workflow'
+       AND revision = ? AND status = ? AND active_execution_binding_json = ?
+  `).run(
+    serializeWorkflowJson({
+      terminalReason: input.terminalReason,
+      error: input.error,
+    }, 'codex_failure_browser_terminal_result_json'),
+    input.closeoutAt,
+    input.closeoutAt,
+    child.id,
+    input.parentTaskId,
+    Math.max(0, Math.floor(Number(child.revision || 0))),
+    child.status,
+    child.active_execution_binding_json,
+  )
+  if (changed(updated) !== 1) {
+    throw new Error('codex_failure_closeout_browser_child_conflict')
+  }
+}
+
 export class AgentSessionCheckpointCloseoutRepository {
   constructor(
     readonly unitOfWork: BrowserWorkflowUnitOfWork,
     private readonly transactionParticipant?: CanonicalCoreCloseoutTransactionParticipant,
   ) {}
+
+  async commitCodexFailureCoreCloseout(
+    input: CodexFailureCoreCloseoutInput,
+  ): Promise<DurableWriteResult<CodexFailureCoreCloseoutResult>> {
+    return this.unitOfWork.commitCoreCloseout({
+      writeCore: (db) => {
+        const nowMs = Date.parse(input.now)
+        if (!Number.isFinite(nowMs)) throw new Error('codex_failure_closeout_time_invalid')
+        const closeoutAt = new Date(nowMs).toISOString()
+        const durationMs = Math.max(0, Math.floor(input.durationMs))
+        const failureEvidence = codexFailureEvidence(input)
+        const parent = db.prepare(`
+          SELECT task_id, run_id, scope_id, status, task_type, module, revision, execution_binding_json
+            FROM task_projections WHERE task_id = ? LIMIT 1
+        `).get<{
+          task_id: string
+          run_id: string
+          scope_id: string
+          status: string
+          task_type: string | null
+          module: string | null
+          revision: number
+          execution_binding_json: string | null
+        }>(input.parentTaskId)
+        if (
+          !parent
+          || parent.run_id !== input.ownerRunId
+          || parent.scope_id !== input.conversationId
+          || !parent.execution_binding_json
+        ) throw new Error('codex_failure_closeout_parent_mismatch')
+
+        const projectionStatus = input.status === 'error' ? 'failed' : 'killed'
+        const existingRun = db.prepare(`
+          SELECT task_id, scope_id, status, terminal_reason, execution_binding_json, initiator,
+                 duration_ms, task_type, provider_diagnostics_json, updated_at
+            FROM run_meta WHERE run_id = ? LIMIT 1
+        `).get<{
+          task_id: string | null
+          scope_id: string | null
+          status: string
+          terminal_reason: string | null
+          execution_binding_json: string | null
+          initiator: string | null
+          duration_ms: number | null
+          task_type: string | null
+          provider_diagnostics_json: string | null
+          updated_at: number
+        }>(input.ownerRunId)
+        if (parent.status === 'completed' || parent.status === 'failed' || parent.status === 'killed') {
+          if (!existingRun) throw new Error('codex_failure_closeout_terminal_retry_conflict')
+          const persistedDiagnostics = parseObjectStrict<Record<string, unknown>>(
+            existingRun.provider_diagnostics_json,
+            'codex_failure_closeout_provider_diagnostics',
+          )
+          const persistedFailureEvidence = persistedDiagnostics.codexFailure
+          if (
+            parent.status !== projectionStatus
+            || parent.task_type !== input.taskType
+            || existingRun.status !== input.status
+            || existingRun.task_id !== input.parentTaskId
+            || existingRun.scope_id !== input.conversationId
+            || existingRun.terminal_reason !== input.terminalReason
+            || existingRun.execution_binding_json !== parent.execution_binding_json
+            || existingRun.initiator !== input.initiator
+            || existingRun.task_type !== input.taskType
+            || parent.module !== input.module
+            || workflowDigest(persistedFailureEvidence) !== workflowDigest(failureEvidence)
+          ) throw new Error('codex_failure_closeout_terminal_retry_conflict')
+          const persistedCloseoutAt = new Date(existingRun.updated_at).toISOString()
+          const productTerminalDigest = codexFailureTerminalDigest({
+            parentTaskId: input.parentTaskId,
+            ownerRunId: input.ownerRunId,
+            conversationId: input.conversationId,
+            status: input.status,
+            terminalReason: input.terminalReason,
+            initiator: existingRun.initiator,
+            durationMs: Math.max(0, Math.floor(existingRun.duration_ms || 0)),
+            taskType: existingRun.task_type,
+            failureEvidence,
+            closeoutAt: persistedCloseoutAt,
+          })
+          if (input.status === 'error' || input.status === 'cancelled' || input.status === 'interrupted') {
+            cancelBoundBrowserChild({
+              db,
+              parentTaskId: input.parentTaskId,
+              ownerRunId: input.ownerRunId,
+              parentBindingJson: parent.execution_binding_json,
+              terminalReason: input.terminalReason,
+              error: input.error,
+              closeoutAt: persistedCloseoutAt,
+            })
+            releaseHeldBrowserTargetClaims(db, input.ownerRunId, existingRun.updated_at)
+            db.prepare(
+              'DELETE FROM agent_session_checkpoints WHERE parent_task_id = ?',
+            ).run(input.parentTaskId)
+          }
+          this.transactionParticipant?.complete({
+            readyRunId: input.ownerRunId,
+            productTerminalDigest,
+            closeoutAt: persistedCloseoutAt,
+          })
+          return { productTerminalDigest, closeoutAt: persistedCloseoutAt }
+        }
+        if (!existingRun) throw new Error('codex_failure_closeout_run_missing')
+        if (
+          existingRun.task_id !== input.parentTaskId
+          || existingRun.scope_id !== input.conversationId
+          || existingRun.status !== 'running'
+          || existingRun.execution_binding_json !== parent.execution_binding_json
+          || parent.task_type !== input.taskType
+        ) throw new Error('codex_failure_closeout_run_mismatch')
+
+        const expectedBrowserState = input.initiator === 'codex_recovery'
+          ? expectedCodexRecoveryBrowserState(input.error)
+          : null
+        if (expectedBrowserState) {
+          const browserInspection = inspectWorkflowCloseoutFromDb(db, input.parentTaskId)
+          if (browserInspection.state !== expectedBrowserState) {
+            throw new Error('codex_failure_closeout_browser_state_conflict')
+          }
+        }
+
+        const providerDiagnostics = {
+          ...(existingRun.provider_diagnostics_json
+            ? parseObjectStrict<Record<string, unknown>>(
+                existingRun.provider_diagnostics_json,
+                'codex_failure_closeout_provider_diagnostics',
+              )
+            : {}),
+          codexFailure: failureEvidence,
+        }
+        const runUpdate = db.prepare(`
+          UPDATE run_meta
+             SET status = ?, initiator = ?, duration_ms = ?, task_type = ?, terminal_reason = ?,
+                 provider_diagnostics_json = ?, continuation_ref_json = NULL, updated_at = ?
+           WHERE run_id = ? AND task_id = ? AND scope_id = ? AND status = 'running'
+             AND execution_binding_json = ?
+        `).run(
+          input.status,
+          input.initiator,
+          durationMs,
+          input.taskType,
+          input.terminalReason,
+          serializeWorkflowJson(providerDiagnostics, 'codex_failure_closeout_provider_diagnostics'),
+          nowMs,
+          input.ownerRunId,
+          input.parentTaskId,
+          input.conversationId,
+          parent.execution_binding_json,
+        )
+        if (changed(runUpdate) !== 1) throw new Error('codex_failure_closeout_run_conflict')
+
+        const parentUpdate = db.prepare(`
+          UPDATE task_projections
+             SET status = ?, interaction_state = 'suspended', waiting_for = 'none',
+                 blocked_reason = NULL, resumable_actions_json = '["none"]',
+                 task_type = ?, module = ?, continuation_ref_json = NULL,
+                 checkpoint_refs_json = '{"cleanBaseCheckpointId":null,"suspensionCheckpointId":null}',
+                 revision = revision + 1, updated_at = ?
+           WHERE task_id = ? AND run_id = ? AND scope_id = ? AND revision = ?
+             AND status = ? AND execution_binding_json = ?
+        `).run(
+          projectionStatus,
+          input.taskType,
+          input.module,
+          closeoutAt,
+          input.parentTaskId,
+          input.ownerRunId,
+          input.conversationId,
+          parent.revision,
+          parent.status,
+          parent.execution_binding_json,
+        )
+        if (changed(parentUpdate) !== 1) throw new Error('codex_failure_closeout_parent_conflict')
+        if (input.status === 'error' || input.status === 'cancelled' || input.status === 'interrupted') {
+          cancelBoundBrowserChild({
+            db,
+            parentTaskId: input.parentTaskId,
+            ownerRunId: input.ownerRunId,
+            parentBindingJson: parent.execution_binding_json,
+            terminalReason: input.terminalReason,
+            error: input.error,
+            closeoutAt,
+          })
+          db.prepare(
+            'DELETE FROM agent_session_checkpoints WHERE parent_task_id = ?',
+          ).run(input.parentTaskId)
+        }
+        releaseHeldBrowserTargetClaims(db, input.ownerRunId, nowMs)
+        const productTerminalDigest = codexFailureTerminalDigest({
+          parentTaskId: input.parentTaskId,
+          ownerRunId: input.ownerRunId,
+          conversationId: input.conversationId,
+          status: input.status,
+          terminalReason: input.terminalReason,
+          initiator: input.initiator,
+          durationMs,
+          taskType: input.taskType,
+          failureEvidence,
+          closeoutAt,
+        })
+        this.transactionParticipant?.complete({
+          readyRunId: input.ownerRunId,
+          productTerminalDigest,
+          closeoutAt,
+        })
+        return { productTerminalDigest, closeoutAt }
+      },
+    })
+  }
 
   async commitCanonicalCoreCloseout(
     input: CanonicalCoreCloseoutInput,
@@ -135,6 +484,10 @@ export class AgentSessionCheckpointCloseoutRepository {
         if (parent.scopeId !== input.conversationId) {
           throw new Error('core_closeout_conversation_mismatch')
         }
+        const messageVisibilityEpoch = requireRunMessageVisibilityEpoch(db, {
+          ownerRunId: input.ownerRunId,
+          conversationId: input.conversationId,
+        })
         const runMetaStatus = input.status === 'done'
           ? 'done'
           : input.status === 'interrupted'
@@ -410,6 +763,10 @@ export class AgentSessionCheckpointCloseoutRepository {
           if (!receipt.sealedCandidateDigest || !receipt.verifiedAt) {
             throw new Error('core_closeout_verifier_receipt_invalid')
           }
+          if (
+            receipt.durableVerifierReceiptDigest !== undefined
+            && !/^[a-f0-9]{64}$/.test(receipt.durableVerifierReceiptDigest)
+          ) throw new Error('core_closeout_verifier_durable_receipt_invalid')
         } else if (input.completionVerifierReceipt) {
           throw new Error('core_closeout_verifier_receipt_not_allowed')
         }
@@ -453,10 +810,10 @@ export class AgentSessionCheckpointCloseoutRepository {
           throw new Error('canonical_assistant_message_conflict')
         }
         const canonicalMessageDigest = workflowDigest(canonicalMessage)
-
         db.prepare(
-          `INSERT INTO chat_messages (id, conversation_id, role, content, timestamp, meta_json)
-           VALUES (?, ?, 'assistant', ?, ?, ?)
+          `INSERT INTO chat_messages (
+             id, conversation_id, role, content, timestamp, meta_json, message_visibility_epoch
+           ) VALUES (?, ?, 'assistant', ?, ?, ?, ?)
            ON CONFLICT(id) DO NOTHING`,
         ).run(
           canonicalMessage.id,
@@ -464,12 +821,15 @@ export class AgentSessionCheckpointCloseoutRepository {
           canonicalMessage.content,
           canonicalMessage.timestamp,
           serializeWorkflowJson(canonicalMessage.meta, 'canonical_assistant_meta_json'),
+          messageVisibilityEpoch,
         )
         const messageReadback = db.prepare(
-          `SELECT id, conversation_id, role, content, timestamp, meta_json
+          `SELECT id, conversation_id, role, content, timestamp, meta_json,
+                  message_visibility_epoch
              FROM chat_messages WHERE id = ? LIMIT 1`,
         ).get<ChatMessageRow>(canonicalMessage.id)
-        if (!messageReadback || messageReadback.role !== 'assistant') {
+        if (!messageReadback || messageReadback.role !== 'assistant'
+          || messageReadback.message_visibility_epoch !== messageVisibilityEpoch) {
           throw new Error('canonical_assistant_message_readback_failed')
         }
         const readbackCanonical: CanonicalAssistantMessage = {

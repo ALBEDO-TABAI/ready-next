@@ -14,7 +14,9 @@ async function buildInMemoryDb(): Promise<MigrationDatabase> {
 function makeProjection(progress: TaskProjectionRecord['progress']): TaskProjectionRecord {
   return {
     taskId: 'task-progress',
+    taskOrigin: 'system_background',
     scopeId: 'scope-progress',
+    messageVisibilityEpoch: 0,
     runId: 'run-progress',
     parentTaskId: null,
     parentStepId: null,
@@ -46,6 +48,16 @@ test('task projection repository persists progress for renderer task cards', asy
   if (skipIfSqliteUnavailable(t, 'task projection progress persistence')) return
   const db = await buildInMemoryDb()
   runMigrations(db)
+  db.prepare(`
+    INSERT INTO chat_conversations (
+      id, agent, title, source_kind, source_id, thread_key, meta_json, created_at, updated_at
+    ) VALUES (?, 'assistant', 'scope', 'local', 'app', ?, '{}', ?, ?)
+  `).run(
+    'scope-progress',
+    'scope-progress',
+    '2026-05-25T00:00:00.000Z',
+    '2026-05-25T00:00:00.000Z',
+  )
   const repo = new TaskProjectionRepository({ getRawDb: () => db as never })
   const runningProgress = {
     stage: 'running',

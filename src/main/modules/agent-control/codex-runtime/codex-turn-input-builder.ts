@@ -1,10 +1,19 @@
 import { z } from 'zod'
 
+import {
+  codexCurrentDocumentAnchorSchema,
+  type CodexCurrentDocumentAnchor,
+} from '../../../../shared/ipc-contracts/agent-runtime'
+import type { AIReasoningEffort } from '../../../../shared/ai-providers'
+
 import type {
   CodexAdditionalContextEntry,
   CodexTurnStartParams,
-  CodexUserInput,
 } from './codex-native-runtime'
+import {
+  codexUserInputSchema,
+  type CodexUserInput,
+} from './codex-user-input'
 
 export type ResourceVersionReference = {
   logicalResourceId: string
@@ -31,6 +40,7 @@ export type UserIngress = {
   canonicalCurrentInputRef: CanonicalCurrentInputRef
   explicitResourceEnvelope: ExplicitResourceEnvelope
   resourceAdditionalContext: ResourceVersionReference[]
+  currentDocumentAnchor?: CodexCurrentDocumentAnchor | null
 }
 
 export type NonUserSuccessorIngress = {
@@ -50,6 +60,7 @@ export type CodexTurnIngress = UserIngress | NonUserSuccessorIngress
 export type CodexTurnBuildContext = {
   threadId: string
   turnRequestId: string
+  reasoningEffort: AIReasoningEffort | null
   readyRunId: string
   toolSurfaceDigest: string
   turnContractDigest: string
@@ -77,16 +88,6 @@ const resourceVersionReferenceSchema = z.object({
   policyEpoch: z.number().int().positive(),
 }).strict()
 
-const codexUserInputSchema = z.discriminatedUnion('type', [
-  z.object({ type: z.literal('text'), text: z.string(), text_elements: z.tuple([]) }).strict(),
-  z.object({
-    type: z.literal('image'),
-    url: nonEmptyString,
-    detail: z.enum(['auto', 'low', 'high', 'original']).nullable(),
-  }).strict(),
-  z.object({ type: z.literal('audio'), url: nonEmptyString }).strict(),
-])
-
 const userIngressSchema = z.object({
   kind: z.literal('user_ingress'),
   attemptKind: z.literal('user_ingress'),
@@ -100,6 +101,7 @@ const userIngressSchema = z.object({
     resourceRefs: z.array(resourceVersionReferenceSchema),
   }).strict(),
   resourceAdditionalContext: z.array(resourceVersionReferenceSchema),
+  currentDocumentAnchor: codexCurrentDocumentAnchorSchema.nullable().optional(),
 }).strict()
 
 const nonUserSuccessorIngressSchema = z.object({
@@ -186,6 +188,15 @@ export class CodexTurnInputBuilder {
       params: {
         threadId: context.threadId,
         clientUserMessageId: context.turnRequestId,
+        collaborationMode: {
+          mode: 'default',
+          settings: {
+            model: 'ready-e0-model',
+            reasoning_effort: context.reasoningEffort,
+            developer_instructions: null,
+          },
+        },
+        environments: [],
         input: [
           ...ingress.canonicalCurrentInputRef.input,
           ...ingress.explicitResourceEnvelope.input,

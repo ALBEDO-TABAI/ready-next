@@ -1,10 +1,10 @@
-import { useCallback, useLayoutEffect, useRef, useState } from 'react'
+import { useLayoutEffect, useRef, useState } from 'react'
 import type { CSSProperties, ReactNode, RefObject } from 'react'
 import { X, Puzzle, Copy, StickyNote } from 'lucide-react'
 import type {
+  AttachmentPreviewState,
   Agent,
   AgentMessage,
-  AttachmentPreviewState,
   ChatAttachment,
   ScopeRunState,
   ToolTraceEvent,
@@ -13,6 +13,7 @@ import type { ReadySkillReference } from '../../../modules/agent/chat-input-brid
 import { revealDocumentQuoteAttachment } from '../../../modules/agent/document-quote-navigation'
 import { WORKBENCH_CANVAS_OUTER_PADDING_BOTTOM } from '../../../modules/workbench/chrome'
 import type { ReferenceSkillHintData } from '../../../types/electron'
+import type { ActionAuthorizationMode } from '../../../../shared/action-authorization-mode'
 import { toLocalFileUrl } from '../../../utils/dragDrop'
 import ChatMessages from '../ChatMessages'
 import ChatInput, { type ChatInputHandle } from '../ChatInput'
@@ -20,7 +21,6 @@ import { SoftFailureCapsule } from '../SoftFailureCapsule'
 import ChatAttachments from '../ChatAttachments'
 import ContextMenu from '../../layout/ContextMenu'
 import { LiquidSurfaceLayer } from '../../ui/liquid-glass/LiquidFloatingPanel'
-import type { TaskCardRun } from '../task-card-from-projection'
 import { MarkdownContent } from './markdown'
 import ModelSelector from './model-selector/ModelSelector'
 import {
@@ -28,13 +28,10 @@ import {
   getAttachmentPreviewSrc,
 } from './attachments-preview'
 import {
-  formatDesignAttachmentSummary,
-  formatDocumentQuoteAttachmentSummary,
-  formatDocumentWidgetTargetSummary,
-  formatFolderAttachmentSummary,
   getAttachmentMetaSummary,
   getDocumentQuoteTooltip,
 } from './attachment-summary'
+import { useAttachmentPreview } from './attachments-preview/use-attachment-preview'
 import { formatTime } from './format-time'
 import {
   TaskToolSnapshot,
@@ -52,6 +49,8 @@ interface AgentSelectionMenuState {
 interface ChatPanelBodyProps extends Omit<TaskToolSnapshotProps, 'children'> {
   messages: AgentMessage[]
   lifecycleInputBlocked: boolean
+  stopPending: boolean
+  stopError: string | null
   scopeRunStates: Record<string, ScopeRunState>
   toolTrace: ToolTraceEvent[]
   toolTraceStatus: string | null
@@ -87,6 +86,7 @@ interface ChatPanelBodyProps extends Omit<TaskToolSnapshotProps, 'children'> {
   currentAgentAvatar: string
   currentAgentDisplayName: string
   isChannelScope: boolean
+  actionAuthorizationMode: ActionAuthorizationMode
   isDragOver: boolean
   filePool: ChatAttachment[]
   chatInputRef: RefObject<ChatInputHandle | null>
@@ -95,6 +95,7 @@ interface ChatPanelBodyProps extends Omit<TaskToolSnapshotProps, 'children'> {
   onStop: () => void
   onPickFiles: () => void | Promise<void>
   onAgentSelect: (agentName: string) => void
+  onActionAuthorizationModeChange: (mode: ActionAuthorizationMode) => void | Promise<void>
   onSkillReference: (skill: ReadySkillReference) => void
   onReferenceSelect: (attachment: ChatAttachment) => void
   setActiveAttachmentPreview: (preview: AttachmentPreviewState | null) => void
@@ -114,6 +115,8 @@ export function ChatPanelBody(props: ChatPanelBodyProps): React.ReactElement {
     taskDisclosureState,
     isStreaming,
     lifecycleInputBlocked,
+    stopPending,
+    stopError,
     streamingMessageId,
     parseSerializedTaskSnapshot,
     parseSerializedToolTraceSnapshot,
@@ -123,16 +126,8 @@ export function ChatPanelBody(props: ChatPanelBodyProps): React.ReactElement {
     onUndoMemoryCapture,
     onSupplementMemoryCapture,
     onOpenScope,
-    onContinueTaskInput,
-    onSubmitTaskConfirmation,
-    onSubmitTaskAgentResult,
-    onRetryTask,
-    onSuspendTask,
-    onResumeTask,
     onCancelDetachedTask,
-    onContinueDetachedTask,
     onCancelChildRun,
-    onContinueChildRun,
     toolTrace,
     toolTraceStatus,
     toolTraceExpanded,
@@ -160,6 +155,7 @@ export function ChatPanelBody(props: ChatPanelBodyProps): React.ReactElement {
     currentAgentAvatar,
     currentAgentDisplayName,
     isChannelScope,
+    actionAuthorizationMode,
     isDragOver,
     filePool,
     chatInputRef,
@@ -168,6 +164,7 @@ export function ChatPanelBody(props: ChatPanelBodyProps): React.ReactElement {
     onStop,
     onPickFiles,
     onAgentSelect,
+    onActionAuthorizationModeChange,
     onSkillReference,
     onReferenceSelect,
     setActiveAttachmentPreview,
@@ -205,75 +202,10 @@ export function ChatPanelBody(props: ChatPanelBodyProps): React.ReactElement {
     return () => observer?.disconnect()
   }, [])
 
-  const handleAttachmentPreview = useCallback(
-    async (attachment: ChatAttachment) => {
-      if (!attachment.path) return
-      if (attachment.source === 'document-quote') {
-        setActiveAttachmentPreview({
-          attachment,
-          mode: 'text',
-          content: formatDocumentQuoteAttachmentSummary(attachment)
-        })
-        return
-      }
-      if (attachment.source === 'document-widget-target') {
-        setActiveAttachmentPreview({
-          attachment,
-          mode: 'text',
-          content: formatDocumentWidgetTargetSummary(attachment)
-        })
-        return
-      }
-      if (attachment.source === 'design-project') {
-        setActiveAttachmentPreview({
-          attachment,
-          mode: 'text',
-          content: formatDesignAttachmentSummary(attachment)
-        })
-        return
-      }
-      if (attachment.isDirectory) {
-        setActiveAttachmentPreview({
-          attachment,
-          mode: 'text',
-          content: formatFolderAttachmentSummary(attachment)
-        })
-        return
-      }
-      if (attachment.type === 'image') {
-        setActiveAttachmentPreview({ attachment, mode: 'image' })
-        return
-      }
-      if (attachment.type === 'video') {
-        setActiveAttachmentPreview({ attachment, mode: 'video' })
-        return
-      }
-      if (attachment.type === 'text') {
-        setAttachmentPreviewLoading(true)
-        try {
-          const result = await window.electronAPI.chat.readFileForAI(attachment.path)
-          if (result.success && result.data?.type === 'text') {
-            setActiveAttachmentPreview({
-              attachment,
-              mode: 'text',
-              content: result.data.content || ''
-            })
-          } else {
-            setActiveAttachmentPreview({
-              attachment,
-              mode: 'file',
-              error: result.error || '无法读取附件内容'
-            })
-          }
-        } finally {
-          setAttachmentPreviewLoading(false)
-        }
-        return
-      }
-      setActiveAttachmentPreview({ attachment, mode: 'file' })
-    },
-    [setActiveAttachmentPreview, setAttachmentPreviewLoading]
-  )
+  const handleAttachmentPreview = useAttachmentPreview({
+    setActiveAttachmentPreview,
+    setAttachmentPreviewLoading,
+  })
 
   return (
     <TaskToolSnapshot
@@ -294,16 +226,8 @@ export function ChatPanelBody(props: ChatPanelBodyProps): React.ReactElement {
       onUndoMemoryCapture={onUndoMemoryCapture}
       onSupplementMemoryCapture={onSupplementMemoryCapture}
       onOpenScope={onOpenScope}
-      onContinueTaskInput={onContinueTaskInput}
-      onSubmitTaskConfirmation={onSubmitTaskConfirmation}
-      onSubmitTaskAgentResult={onSubmitTaskAgentResult}
-      onRetryTask={onRetryTask}
-      onSuspendTask={onSuspendTask}
-      onResumeTask={onResumeTask}
       onCancelDetachedTask={onCancelDetachedTask}
-      onContinueDetachedTask={onContinueDetachedTask}
       onCancelChildRun={onCancelChildRun}
-      onContinueChildRun={onContinueChildRun}
     >
       {({
         messageTaskSnapshots,
@@ -383,18 +307,6 @@ export function ChatPanelBody(props: ChatPanelBodyProps): React.ReactElement {
             />
           )}
 
-          {(() => {
-            const scopedRun = currentScopeId ? scopeRunStates[currentScopeId] : null
-            const softError = scopedRun?.softError || null
-            if (!softError || !currentScopeId) return null
-            return (
-              <SoftFailureCapsule
-                softError={softError}
-                onDismiss={() => dismissSoftError(currentScopeId)}
-              />
-            )
-          })()}
-
           <div
             ref={composerOverlayRef}
             className="ready-chat-composer-overlay"
@@ -416,6 +328,18 @@ export function ChatPanelBody(props: ChatPanelBodyProps): React.ReactElement {
               pointerEvents: 'none',
             }}
           >
+            {(() => {
+              const scopedRun = currentScopeId ? scopeRunStates[currentScopeId] : null
+              const softError = scopedRun?.softError || null
+              if (!softError || !currentScopeId) return null
+              return (
+                <SoftFailureCapsule
+                  softError={softError}
+                  onDismiss={() => dismissSoftError(currentScopeId)}
+                />
+              )
+            })()}
+
             {referenceSkillHint && (
               <div
                 className="ready-liquid-card"
@@ -605,6 +529,8 @@ export function ChatPanelBody(props: ChatPanelBodyProps): React.ReactElement {
               inputValue={inputValue}
               isStreaming={isStreaming}
               lifecycleInputBlocked={lifecycleInputBlocked}
+              stopPending={stopPending}
+              stopError={stopError}
               attachmentsCount={attachments.length}
               hasUserMessages={messages.some((m) => m.type === 'user')}
               isDragOver={isDragOver}
@@ -617,11 +543,13 @@ export function ChatPanelBody(props: ChatPanelBodyProps): React.ReactElement {
               currentAgentDisplayName={currentAgentDisplayName}
               agents={agents}
               isChannelScope={isChannelScope}
+              actionAuthorizationMode={actionAuthorizationMode}
               onInputChange={onInputChange}
               onSend={onSend}
               onStop={onStop}
               onPickFiles={onPickFiles}
               onAgentSelect={onAgentSelect}
+              onActionAuthorizationModeChange={onActionAuthorizationModeChange}
               onSkillReference={onSkillReference}
               onReferenceSelect={onReferenceSelect}
               renderAttachmentIcon={(attachment, size = 16) => (

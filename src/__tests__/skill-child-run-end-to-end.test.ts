@@ -177,6 +177,7 @@ function makeFakeRepository(): { repo: SkillTaskRunRepository; state: FakeRepoSt
       return null
     },
     get: (id: string) => state.rows.get(id) ?? null,
+    getCurrentVisible: (id: string) => state.rows.get(id) ?? null,
   } as unknown as SkillTaskRunRepository
   return { repo, state }
 }

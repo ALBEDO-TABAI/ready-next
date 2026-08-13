@@ -55,6 +55,8 @@ export type NoStatusUpdatePatch = Omit<Partial<SkillTaskRunRecord>, 'status' | '
 export interface SkillTaskRunRecord {
   id: string
   scopeId?: string | null
+  /** Frozen conversation generation. Scoped rows inherit this from their owner run. */
+  messageVisibilityEpoch?: number
   sessionId?: string | null
   agent?: string | null
   runId?: string | null
@@ -110,6 +112,7 @@ interface SkillTaskRunDatabaseAccessor {
 interface SkillTaskRunRow {
   id: string
   scope_id: string | null
+  message_visibility_epoch: number
   session_id: string | null
   agent: string | null
   run_id: string | null
@@ -178,6 +181,10 @@ export interface CreateChildRunInput {
   /** Pass an id minted via `createSkillChildRunId('vea' | 'skill' | 'detached')`. */
   childRunId: string
   scopeId: string | null
+  /** Exact owner run when the child is launched from an Agent turn. */
+  parentRunId?: string | null
+  /** Required for a real scoped launch that has no owner run. */
+  messageVisibilityEpoch?: number
   sessionId: string | null
   skillId: string
   skillName: string | null
@@ -275,6 +282,29 @@ const CHILD_RUN_TERMINAL_STATUSES: ReadonlyArray<SkillChildRunStatus> = [
   'killed',
 ]
 
+const CURRENT_VISIBLE_SKILL_TASK_RUN_SQL = `(
+  (skill_task_runs.scope_id IS NULL AND skill_task_runs.message_visibility_epoch = -1)
+  OR (
+    skill_task_runs.scope_id IS NOT NULL
+    AND skill_task_runs.message_visibility_epoch = -1
+    AND NOT EXISTS (
+      SELECT 1 FROM chat_conversations any_scope
+       WHERE any_scope.id = skill_task_runs.scope_id
+    )
+  )
+  OR EXISTS (
+    SELECT 1 FROM chat_conversations current_scope
+     WHERE current_scope.id = skill_task_runs.scope_id
+       AND current_scope.closed_at IS NULL
+       AND current_scope.message_visibility_epoch = skill_task_runs.message_visibility_epoch
+  )
+)`
+
+interface RunVisibilityIdentityRow {
+  scope_id: string | null
+  message_visibility_epoch: number
+}
+
 function sessionAbortKey(scopeId: string | null, sessionId: string | null): string {
   return `${scopeId ?? '_'}|${sessionId ?? '_'}`
 }
@@ -345,20 +375,80 @@ export class SkillTaskRunRepository {
     return null
   }
 
+  private resolveMessageVisibilityEpoch(
+    db: SkillTaskRunRawDatabase,
+    record: SkillTaskRunRecord,
+  ): number {
+    const scopeId = record.scopeId ?? null
+    const requestedEpoch = record.messageVisibilityEpoch
+    if (requestedEpoch !== undefined
+      && (!Number.isSafeInteger(requestedEpoch) || requestedEpoch < -1)) {
+      throw new Error('skill_task_run_message_visibility_epoch_invalid')
+    }
+
+    const runId = String(record.runId || '').trim()
+    if (runId) {
+      const owner = db.prepare(`
+        SELECT scope_id, message_visibility_epoch
+          FROM run_meta
+         WHERE run_id = ?
+         LIMIT 1
+      `).get<RunVisibilityIdentityRow>(runId)
+      if (owner) {
+        if (owner.scope_id !== scopeId) {
+          throw new Error('skill_task_run_owner_scope_mismatch')
+        }
+        if (!Number.isSafeInteger(owner.message_visibility_epoch)
+          || owner.message_visibility_epoch < (scopeId ? 0 : -1)) {
+          throw new Error('skill_task_run_owner_message_visibility_epoch_invalid')
+        }
+        if (requestedEpoch !== undefined && requestedEpoch !== owner.message_visibility_epoch) {
+          throw new Error('skill_task_run_owner_message_visibility_epoch_mismatch')
+        }
+        return owner.message_visibility_epoch
+      }
+    }
+
+    if (!scopeId) {
+      if (requestedEpoch !== undefined && requestedEpoch !== -1) {
+        throw new Error('skill_task_run_global_message_visibility_epoch_invalid')
+      }
+      return -1
+    }
+    if (requestedEpoch !== undefined) {
+      if (requestedEpoch < 0) throw new Error('skill_task_run_message_visibility_epoch_invalid')
+      return requestedEpoch
+    }
+
+    const realScope = db.prepare(`
+      SELECT id FROM chat_conversations WHERE id = ? LIMIT 1
+    `).get<{ id: string }>(scopeId)
+    if (realScope) {
+      throw new Error('skill_task_run_message_visibility_epoch_required')
+    }
+    // Legacy product/test rows may use an opaque session key in scope_id.
+    // They are not conversation-owned, so keep the global sentinel and never
+    // let them match a real conversation should that id later be created.
+    return -1
+  }
+
   create(record: SkillTaskRunRecord): void {
     const db = this.dbManager.getRawDb()
     if (!db) throw new Error('Database not available')
+    const messageVisibilityEpoch = this.resolveMessageVisibilityEpoch(db, record)
 
     db.prepare(`
       INSERT INTO skill_task_runs (
-        id, scope_id, session_id, agent, run_id, skill_id, skill_name, action, tool_name, run_kind,
+        id, scope_id, message_visibility_epoch, session_id, agent, run_id,
+        skill_id, skill_name, action, tool_name, run_kind,
         status, interaction_state, goal_text, resource_refs_json, params_json, steps_json, current_step_id,
         artifacts_json, output_dir, run_state_path, scene_scores_path, delivery_report_path, failure_kind,
         failure_detail, job_id, detached_task_id, resume_payload_json, created_at, started_at, updated_at, finished_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       record.id,
       record.scopeId ?? null,
+      messageVisibilityEpoch,
       record.sessionId ?? null,
       record.agent ?? null,
       record.runId ?? null,
@@ -425,6 +515,9 @@ export class SkillTaskRunRepository {
   ): void {
     const db = this.dbManager.getRawDb()
     if (!db) throw new Error('Database not available')
+    if ('messageVisibilityEpoch' in patch) {
+      throw new Error('skill_task_run_message_visibility_epoch_immutable')
+    }
 
     const updates: Array<[string, unknown]> = []
     const assign = (column: string, value: unknown): void => {
@@ -471,10 +564,27 @@ export class SkillTaskRunRepository {
     )
   }
 
-  get(id: string): SkillTaskRunRecord | null {
+  getRaw(id: string): SkillTaskRunRecord | null {
     const db = this.dbManager.getRawDb()
     if (!db) throw new Error('Database not available')
     const row = db.prepare('SELECT * FROM skill_task_runs WHERE id = ? LIMIT 1').get<SkillTaskRunRow>(id)
+    return row ? this.mapRow(row) : null
+  }
+
+  /** Exact audit/late-writer lookup. Prefer getCurrentVisible for product reads. */
+  get(id: string): SkillTaskRunRecord | null {
+    return this.getRaw(id)
+  }
+
+  getCurrentVisible(id: string): SkillTaskRunRecord | null {
+    const db = this.dbManager.getRawDb()
+    if (!db) throw new Error('Database not available')
+    const row = db.prepare(`
+      SELECT * FROM skill_task_runs
+       WHERE id = ?
+         AND ${CURRENT_VISIBLE_SKILL_TASK_RUN_SQL}
+       LIMIT 1
+    `).get<SkillTaskRunRow>(id)
     return row ? this.mapRow(row) : null
   }
 
@@ -484,6 +594,7 @@ export class SkillTaskRunRepository {
     return db.prepare(`
       SELECT * FROM skill_task_runs
       WHERE scope_id = ?
+        AND ${CURRENT_VISIBLE_SKILL_TASK_RUN_SQL}
       ORDER BY updated_at DESC
       LIMIT ?
     `).all<SkillTaskRunRow>(scopeId, limit).map((row) => this.mapRow(row))
@@ -496,6 +607,7 @@ export class SkillTaskRunRepository {
       SELECT * FROM skill_task_runs
       WHERE session_id = ?
         AND status IN ('queued', 'running', 'blocked')
+        AND ${CURRENT_VISIBLE_SKILL_TASK_RUN_SQL}
       ORDER BY updated_at DESC
       LIMIT ?
     `).all<SkillTaskRunRow>(sessionId, limit).map((row) => this.mapRow(row))
@@ -509,7 +621,7 @@ export class SkillTaskRunRepository {
   }): SkillTaskRunRecord | null {
     const db = this.dbManager.getRawDb()
     if (!db) throw new Error('Database not available')
-    const filters: string[] = []
+    const filters: string[] = [CURRENT_VISIBLE_SKILL_TASK_RUN_SQL]
     const values: unknown[] = []
     if (params.sessionId) {
       filters.push('session_id = ?')
@@ -543,7 +655,10 @@ export class SkillTaskRunRepository {
     const db = this.dbManager.getRawDb()
     if (!db) throw new Error('Database not available')
     const row = db.prepare(
-      'SELECT * FROM skill_task_runs WHERE detached_task_id = ? ORDER BY updated_at DESC LIMIT 1',
+      `SELECT * FROM skill_task_runs
+        WHERE detached_task_id = ?
+          AND ${CURRENT_VISIBLE_SKILL_TASK_RUN_SQL}
+        ORDER BY updated_at DESC LIMIT 1`,
     ).get<SkillTaskRunRow>(detachedTaskId)
     return row ? this.mapRow(row) : null
   }
@@ -551,6 +666,7 @@ export class SkillTaskRunRepository {
   reconcileRunningRowsOnStartup(opts: {
     now?: Date
     staleAfterMs?: number
+    excludedRunIds?: ReadonlySet<string>
   } = {}): SkillTaskRunStartupReconciliationResult {
     const db = this.dbManager.getRawDb()
     if (!db) throw new Error('Database not available')
@@ -561,8 +677,11 @@ export class SkillTaskRunRepository {
     const rows = db.prepare(`
       SELECT * FROM skill_task_runs
       WHERE status = 'running'
+        AND ${CURRENT_VISIBLE_SKILL_TASK_RUN_SQL}
       ORDER BY updated_at ASC
-    `).all<SkillTaskRunRow>().map((row) => this.mapRow(row))
+    `).all<SkillTaskRunRow>()
+      .filter((row) => !row.run_id || !opts.excludedRunIds?.has(row.run_id))
+      .map((row) => this.mapRow(row))
 
     const result: SkillTaskRunStartupReconciliationResult = {
       scanned: rows.length,
@@ -644,9 +763,10 @@ export class SkillTaskRunRepository {
     const record: SkillTaskRunRecord = {
       id: input.childRunId,
       scopeId: input.scopeId,
+      messageVisibilityEpoch: input.messageVisibilityEpoch,
       sessionId: input.sessionId,
       agent: null,
-      runId: null,
+      runId: input.parentRunId ?? null,
       skillId: input.skillId,
       skillName: input.skillName,
       action: input.action,
@@ -676,7 +796,7 @@ export class SkillTaskRunRepository {
     }
 
     this.create(record)
-    return record
+    return this.getRaw(record.id) ?? record
   }
 
   /**
@@ -687,7 +807,7 @@ export class SkillTaskRunRepository {
   updateChildRun(childRunId: string, patch: Partial<SkillChildRunPayload>): void {
     const db = this.dbManager.getRawDb()
     if (!db) throw new Error('Database not available')
-    const existing = this.get(childRunId)
+    const existing = this.getRaw(childRunId)
     if (!existing) {
       throw new Error(`updateChildRun: no row for child-run id ${childRunId}`)
     }
@@ -730,6 +850,7 @@ export class SkillTaskRunRepository {
       SELECT * FROM skill_task_runs
       WHERE json_extract(resume_payload_json, '$.childRun.singleFlightKey') = ?
         AND json_extract(resume_payload_json, '$.childRun.status') IN (${placeholders})
+        AND ${CURRENT_VISIBLE_SKILL_TASK_RUN_SQL}
       ORDER BY updated_at DESC
       LIMIT 1
     `).get<SkillTaskRunRow>(singleFlightKey, ...CHILD_RUN_SINGLE_FLIGHT_STATUSES)
@@ -755,7 +876,7 @@ export class SkillTaskRunRepository {
   }): SkillTaskRunRecord | null {
     const db = this.dbManager.getRawDb()
     if (!db) throw new Error('Database not available')
-    const filters: string[] = ['run_state_path = ?']
+    const filters: string[] = ['run_state_path = ?', CURRENT_VISIBLE_SKILL_TASK_RUN_SQL]
     const values: unknown[] = [opts.runStatePath]
     if (opts.skillId) {
       filters.push('skill_id = ?')
@@ -777,7 +898,7 @@ export class SkillTaskRunRepository {
   }): SkillTaskRunRecord | null {
     const db = this.dbManager.getRawDb()
     if (!db) throw new Error('Database not available')
-    const filters: string[] = ['output_dir = ?']
+    const filters: string[] = ['output_dir = ?', CURRENT_VISIBLE_SKILL_TASK_RUN_SQL]
     const values: unknown[] = [opts.outputDir]
     if (opts.skillId) {
       filters.push('skill_id = ?')
@@ -801,6 +922,7 @@ export class SkillTaskRunRepository {
     if (!db) throw new Error('Database not available')
     const filters: string[] = [
       "json_extract(resume_payload_json, '$.childRun.singleFlightKey') = ?",
+      CURRENT_VISIBLE_SKILL_TASK_RUN_SQL,
     ]
     const values: unknown[] = [opts.singleFlightKey]
     if (opts.skillId) {
@@ -829,7 +951,7 @@ export class SkillTaskRunRepository {
   }): SkillTaskRunRecord | null {
     const db = this.dbManager.getRawDb()
     if (!db) throw new Error('Database not available')
-    const filters: string[] = ['skill_id = ?']
+    const filters: string[] = ['skill_id = ?', CURRENT_VISIBLE_SKILL_TASK_RUN_SQL]
     const values: unknown[] = [opts.skillId]
     if (opts.sessionId) {
       filters.push('session_id = ?')
@@ -855,6 +977,7 @@ export class SkillTaskRunRepository {
     return {
       id: row.id,
       scopeId: row.scope_id,
+      messageVisibilityEpoch: row.message_visibility_epoch,
       sessionId: row.session_id,
       agent: row.agent,
       runId: row.run_id,

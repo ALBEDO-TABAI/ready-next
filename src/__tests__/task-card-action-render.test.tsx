@@ -90,9 +90,8 @@ function mount(element: ReactElement): { container: HTMLElement; root: Root; unm
   }
 }
 
-test('TaskCard renders only exact child-run continue action for suspended child runs', () => {
-  const continueChildCalls: Array<[string, string]> = []
-  const resumeCalls: string[] = []
+test('TaskCard keeps suspended child runs read-only except for exact cancellation', () => {
+  const cancelChildCalls: Array<[string, string]> = []
   const run = taskProjectionToTaskCardRun({
     scopeId: 'scope-1',
     taskId: 'skill-child:child-1',
@@ -126,11 +125,8 @@ test('TaskCard renders only exact child-run continue action for suspended child 
   const rendered = mount(createElement(TaskCard, {
     run,
     expanded: true,
-    onContinueChildRun: (scopeId, childRunId) => {
-      continueChildCalls.push([scopeId, childRunId])
-    },
-    onResumeRun: (scopeId) => {
-      resumeCalls.push(scopeId)
+    onCancelChildRun: (scopeId, childRunId) => {
+      cancelChildCalls.push([scopeId, childRunId])
     },
   }))
 
@@ -138,22 +134,19 @@ test('TaskCard renders only exact child-run continue action for suspended child 
     const buttons = Array.from(rendered.container.querySelectorAll('button'))
     const labels = buttons.map((button) => button.textContent?.trim() || '')
     assert.equal(labels.includes('继续运行'), false)
-    const continueButton = buttons.find((button) => {
-      const label = button.textContent?.trim() || ''
-      return label === '继续处理' || label === '继续生成报告'
-    })
-    assert.ok(continueButton, `expected exact child-run continue button, saw ${JSON.stringify(labels)}`)
-    continueButton.click()
-    assert.deepEqual(continueChildCalls, [['scope-1', 'child-1']])
-    assert.deepEqual(resumeCalls, [])
+    assert.equal(labels.includes('继续处理'), false)
+    assert.equal(labels.includes('继续生成报告'), false)
+    assert.match(rendered.container.textContent || '', /等待继续生成报告/)
+    const cancelButton = buttons.find((button) => button.textContent?.trim() === '取消')
+    assert.ok(cancelButton, `expected exact child-run cancel button, saw ${JSON.stringify(labels)}`)
+    cancelButton.click()
+    assert.deepEqual(cancelChildCalls, [['scope-1', 'child-1']])
   } finally {
     rendered.unmount()
   }
 })
 
-test('TaskCard renders a browser confirmation card with only typed allow and deny actions', () => {
-  const confirmationCalls: Array<[string, boolean, string | undefined]> = []
-  const resumeCalls: string[] = []
+test('TaskCard renders historical browser confirmation details without public decision actions', () => {
   const run = taskProjectionToTaskCardRun({
     scopeId: 'scope-confirmation',
     taskId: 'task-confirmation',
@@ -196,8 +189,6 @@ test('TaskCard renders a browser confirmation card with only typed allow and den
   const rendered = mount(createElement(TaskCard, {
     run,
     expanded: true,
-    onSubmitConfirmation: (scopeId, confirmed, requestId) => confirmationCalls.push([scopeId, confirmed, requestId]),
-    onResumeRun: (scopeId) => resumeCalls.push(scopeId),
   }))
 
   try {
@@ -207,18 +198,9 @@ test('TaskCard renders a browser confirmation card with only typed allow and den
     assert.match(card.textContent || '', /修改页面内容/)
     assert.match(card.textContent || '', /example\.com/)
     const buttons = Array.from(rendered.container.querySelectorAll('button'))
-    const allow = buttons.find((button) => button.textContent?.trim() === '允许并继续')
-    const deny = buttons.find((button) => button.textContent?.trim() === '拒绝')
-    assert.ok(allow)
-    assert.ok(deny)
+    assert.equal(buttons.some((button) => button.textContent?.trim() === '允许并继续'), false)
+    assert.equal(buttons.some((button) => button.textContent?.trim() === '拒绝'), false)
     assert.equal(buttons.some((button) => button.textContent?.trim() === '继续运行'), false)
-    allow.click()
-    deny.click()
-    assert.deepEqual(confirmationCalls, [
-      ['scope-confirmation', true, 'confirmation-1'],
-      ['scope-confirmation', false, 'confirmation-1'],
-    ])
-    assert.deepEqual(resumeCalls, [])
   } finally {
     rendered.unmount()
   }

@@ -16,7 +16,6 @@ import {
   syncBeliefCardFile,
   KnowledgeWatcher,
   runStartupBeliefSync,
-  isKnowledgeSystemEnabled,
   listKnowledgeWatchDirs,
   scopeIdForBeliefCardPath,
 } from '../main/modules/agent-control/knowledge/knowledge-truth-source'
@@ -166,48 +165,33 @@ const SCOPE: ConversationScope = {
   threadKey: 'scope-k6', meta: {}, createdAt: '2026-06-12T09:00:00.000Z', updatedAt: '2026-06-12T09:00:00.000Z',
 }
 
-test('A4/A5: invalid cards never reach the index; switch off removes cards but keeps rules and files untouched', async () => {
+test('A4/A5: invalid cards never reach the local archive index and source files stay untouched', async () => {
   const root = makeRoot()
   try {
     writeFileSync(join(root, 'knowledge', 'good.md'), cardText('GOOD_CARD'), 'utf-8')
     writeFileSync(join(root, 'knowledge', 'broken.md'), '---\ntitle: INVALID_CARD\n坏的', 'utf-8')
     writeFileSync(join(root, 'RULES.md'), 'RULES_MARKER', 'utf-8')
 
-    const build = (enabled: boolean) => new PromptAssemblyService({
+    const build = () => new PromptAssemblyService({
       getMemoryRoot: () => root,
       getScopeMessages: () => [],
       getBeliefCardStore: () => new BeliefCardStore({ memoryRoot: root }),
-      isKnowledgeSystemEnabled: () => enabled,
     }).buildForScopedRun({ scope: SCOPE, message: '你好', coordinators: [] })
 
-    const on = await build(true)
+    const on = await build()
     const onText = [on.systemPrompt, ...on.bootstrapMessages].join('\n')
     assert.ok(onText.includes('GOOD_CARD'))
     assert.ok(!onText.includes('INVALID_CARD'), 'A4: invalid card absent from injection')
     assert.ok(onText.includes('RULES_MARKER'))
 
     const beforeMtime = statSync(join(root, 'knowledge', 'good.md')).mtimeMs
-    const off = await build(false)
-    const offText = [off.systemPrompt, ...off.bootstrapMessages].join('\n')
-    assert.ok(!offText.includes('GOOD_CARD') && !offText.includes('## 知识索引'), 'A5: index gone')
-    assert.ok(offText.includes('RULES_MARKER') && offText.includes('## 运行规则'), 'A5: rules remain independent from card switch')
-    assert.equal(statSync(join(root, 'knowledge', 'good.md')).mtimeMs, beforeMtime, 'A5: files untouched')
-
-    const back = await build(true)
-    assert.ok(back.systemPrompt.includes('RULES_MARKER'), 'A5: re-enable restores')
+    assert.equal(statSync(join(root, 'knowledge', 'good.md')).mtimeMs, beforeMtime, 'A5: read path leaves files untouched')
   } finally {
     rmSync(root, { recursive: true, force: true })
   }
 })
 
-test('A5: switch defaults on; explicit false turns it off (single read entry)', () => {
-  assert.equal(isKnowledgeSystemEnabled(null), true)
-  assert.equal(isKnowledgeSystemEnabled({ getSetting: () => undefined }), true)
-  assert.equal(isKnowledgeSystemEnabled({ getSetting: () => 'false' }), false)
-  assert.equal(isKnowledgeSystemEnabled({ getSetting: () => { throw new Error('db') } }), true)
-})
-
-test('A6: startup sync upserts new + marks broken, zero deletions of existing rows; disabled skips', () => {
+test('A6: startup sync upserts new + marks broken with zero deletions of existing rows', () => {
   const root = makeRoot()
   try {
     const db = fakeMirrorDb()
@@ -216,10 +200,9 @@ test('A6: startup sync upserts new + marks broken, zero deletions of existing ro
     writeFileSync(join(root, 'knowledge', 'fresh.md'), cardText('新卡'), 'utf-8')
     writeFileSync(join(root, 'knowledge', 'bad.md'), '---\n坏', 'utf-8')
     const store = new BeliefCardStore({ memoryRoot: root })
-    const result = runStartupBeliefSync(db as never, store, true)
+    const result = runStartupBeliefSync(db as never, store)
     assert.deepEqual(result, { synced: 1, invalid: 1 })
     assert.ok(db.rows.has('mirror-orphan'), 'A6: orphan mirror row never deleted')
-    assert.equal(runStartupBeliefSync(db as never, store, false), null, 'disabled → skipped')
   } finally {
     rmSync(root, { recursive: true, force: true })
   }

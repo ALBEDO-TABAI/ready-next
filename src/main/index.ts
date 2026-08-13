@@ -1,6 +1,6 @@
 // 本文件是重模块：由 boot-entry.ts（构建入口）在 splash 可见后动态加载。
 // dotenv、userData 路径、协议注册、命令行开关等 pre-ready 配置都在 boot-entry 完成。
-import { app, shell, BrowserWindow, ipcMain, protocol, nativeImage, nativeTheme, Menu, dialog, clipboard, powerMonitor, type MenuItemConstructorOptions, type NativeImage } from 'electron'
+import { app, shell, BrowserWindow, ipcMain, protocol, nativeImage, nativeTheme, Menu, dialog, clipboard, type MenuItemConstructorOptions, type NativeImage } from 'electron'
 import { join, isAbsolute, basename, resolve } from 'path'
 import { statSync, existsSync, appendFileSync } from 'fs'
 import { writeFile } from 'fs/promises'
@@ -8,8 +8,10 @@ import { tmpdir } from 'os'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 
 // Import modules
-import { setupAgentIPC, cleanupAgentRuntime, reconcileAgentSchedulesOnResume } from './modules/claude-bridge/ipc-handler'
+import { setupAgentIPC, cleanupAgentRuntime } from './modules/claude-bridge/ipc-handler'
 import { AgentManager } from './modules/claude-bridge/agent-manager'
+import { startRendererBeforeRuntimeReady } from './modules/claude-bridge/runtime-startup-slot'
+import { registerAgentRuntimeReadinessIPC } from './modules/claude-bridge/agent-runtime-readiness'
 import { setupBrowserIPC, type BrowserController } from './modules/browser-engine/ipc-handler'
 import { setupBrowserLiveProofHandshake } from './modules/browser-engine/live-proof-handshake'
 import { setupDocumentIPC } from './modules/document-engine/ipc-handler'
@@ -41,6 +43,7 @@ import {
   type SyncScheduler,
 } from './modules/calendar-engine/sync-scheduler'
 import { setupSettingsIPC } from './modules/settings-engine/ipc-handler'
+import type { ChatGptOAuthService } from './modules/settings-engine/chatgpt-oauth-service'
 import {
   RSS_AUTO_REFRESH_INTERVAL_KEY,
 } from '../shared/rss-auto-refresh'
@@ -92,11 +95,12 @@ const { autoUpdater } = pkg
 // All environments: opt-in only via ENABLE_MOCK_SERVICES=true
 const ENABLE_MOCK_SERVICES = process.env.ENABLE_MOCK_SERVICES === 'true'
 const READY_NATIVE_FILE_DRAG_ENABLED = process.env.READY_NATIVE_FILE_DRAG_ENABLED !== '0'
+const READY_START_HIDDEN = process.env.READY_START_HIDDEN === '1'
 const READY_BROWSER_LOG_PATH = join(tmpdir(), 'ready-browser.log')
 const NATIVE_FILE_DRAG_FALLBACK_ICON_DATA_URL = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAJElEQVR42mP4////JUoww+AywOTyzP/E4FEDRg2grQFDMzMBAGl5WG7b5B5RAAAAAElFTkSuQmCC'
 
 function ensureRegularDockApp(): void {
-  if (process.platform !== 'darwin') return
+  if (process.platform !== 'darwin' || READY_START_HIDDEN) return
   app.setActivationPolicy('regular')
 }
 
@@ -117,6 +121,7 @@ let reminderScheduler: ReminderScheduler | null = null
 let reminderNotifierFire: ((payload: import('./modules/calendar-engine/reminder-scheduler').ReminderFirePayload) => void) | null = null
 let calendarSyncScheduler: SyncScheduler | null = null
 let rssAutoRefreshScheduler: RSSAutoRefreshScheduler | null = null
+let chatGptOAuthService: ChatGptOAuthService | null = null
 // Guard to prevent re-registering window-dependent IPC handlers on macOS dock re-open
 let windowIPCRegistered = false
 const THEME_SETTING_KEY = 'ui_theme_option'
@@ -233,7 +238,7 @@ function resolveNativeFileDragIcon(): NativeImage {
 }
 
 function ensureDockIconVisible(): void {
-  if (process.platform !== 'darwin') return
+  if (process.platform !== 'darwin' || READY_START_HIDDEN) return
   ensureRegularDockApp()
   if (!app.dock) return
   void app.dock.show().catch((error) => {
@@ -452,6 +457,7 @@ async function loadMainWindowRenderer(window: BrowserWindow): Promise<void> {
 }
 
 function showMainWindowAfterStartup(): void {
+  if (READY_START_HIDDEN) return
   const window = mainWindow
   if (!window || window.isDestroyed()) return
   window.webContents.setZoomFactor(1)
@@ -569,15 +575,32 @@ async function createWindow(): Promise<void> {
 
   // Setup window-dependent IPC only once (agent/browser handlers register ipcMain.handle
   // which cannot be registered twice without error)
+  let rendererLoadStarted = false
   if (!windowIPCRegistered) {
+    const window = mainWindow
     logBootStage('browser-ipc:start')
-    browserController = setupBrowserIPC(mainWindow, ENABLE_MOCK_SERVICES, {
+    const currentBrowserController = setupBrowserIPC(window, ENABLE_MOCK_SERVICES, {
       preloadPath: join(__dirname, '../preload/index.mjs'),
       rendererFile: join(__dirname, '../renderer/index.html'),
     })
-    setRSSBrowserController(browserController)
+    browserController = currentBrowserController
+    setRSSBrowserController(currentBrowserController)
     logBootStage('agent-ipc:start')
-    setupAgentIPC(agentManager, mainWindow, browserController)
+    await startRendererBeforeRuntimeReady({
+      startRuntime: () => setupAgentIPC(
+        agentManager,
+        window,
+        currentBrowserController,
+        chatGptOAuthService || undefined,
+      ),
+      startRenderer() {
+        rendererLoadStarted = true
+        logBootStage('renderer-load:kickoff')
+        void loadMainWindowRenderer(window).catch((error) => {
+          console.error('[main-window] renderer load failed:', error instanceof Error ? error.message : String(error))
+        })
+      },
+    })
     logBootStage('agent-ipc:done')
     windowIPCRegistered = true
   } else {
@@ -585,10 +608,12 @@ async function createWindow(): Promise<void> {
   }
   // HMR for renderer base on electron-vite cli.
   // Load the remote URL for development or the local html file for production.
-  logBootStage('renderer-load:kickoff')
-  void loadMainWindowRenderer(mainWindow).catch((error) => {
-    console.error('[main-window] renderer load failed:', error instanceof Error ? error.message : String(error))
-  })
+  if (!rendererLoadStarted) {
+    logBootStage('renderer-load:kickoff')
+    void loadMainWindowRenderer(mainWindow).catch((error) => {
+      console.error('[main-window] renderer load failed:', error instanceof Error ? error.message : String(error))
+    })
+  }
 
   // Auto-updater — only in production builds
   if (app.isPackaged) {
@@ -599,6 +624,7 @@ async function createWindow(): Promise<void> {
 // --- Register all ipcMain.handle() handlers once (not per-window) ---
 
 function setupGlobalIPC(): void {
+  registerAgentRuntimeReadinessIPC(ipcMain)
   setupBrowserLiveProofHandshake()
   // Module IPC handlers (no window dependency)
   setDirectoryChangeBroadcastTargetProvider(() => (
@@ -719,7 +745,7 @@ function setupGlobalIPC(): void {
     },
     syncScheduler: calendarSyncScheduler ?? undefined,
   })
-  setupSettingsIPC({
+  chatGptOAuthService = setupSettingsIPC({
     onSettingChanged: (key) => {
       if (key === RSS_AUTO_REFRESH_INTERVAL_KEY) {
         rssAutoRefreshScheduler?.onSettingChanged()
@@ -956,18 +982,11 @@ function setupAutoUpdater(mainWindow: BrowserWindow): void {
 
 // pre-ready 配置（协议注册、命令行开关、userAgent、userData）见 boot-entry.ts。
 // 本模块在 splash 可见后才被动态加载，此处 whenReady 已 resolve，回调立即执行。
-const handlePowerResume = (): void => {
-  void reconcileAgentSchedulesOnResume().catch((error) => {
-    console.warn('[scheduled-tasks] resume reconcile failed:', error)
-  })
-}
-
 app.whenReady().then(async () => {
   // Set app user model id for windows
   electronApp.setAppUserModelId('com.ready.app')
   applyAppIcon()
   setupApplicationMenu()
-  powerMonitor.on('resume', handlePowerResume)
   // boot-entry 已建 splash；此 await 幂等，保底"splash 先于 boot 清理与数据库门"。
   await createStartupSplashWindow()
 
@@ -1098,7 +1117,6 @@ app.on('window-all-closed', () => {
 })
 
 async function cleanupBeforeAppQuit(startedAt: number): Promise<void> {
-  powerMonitor.removeListener('resume', handlePowerResume)
   try {
     reminderScheduler?.stop()
   } catch (err) {

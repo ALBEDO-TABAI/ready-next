@@ -21,6 +21,7 @@ import type {
   SendMessageResult as SharedSendMessageResult,
   SendScopedResponse,
 } from '../../shared/ipc-contracts/agent-runtime'
+import type { ActionAuthorizationMode } from '../../shared/action-authorization-mode'
 
 export interface PendingContinuationIntent {
   taskId: string
@@ -87,6 +88,7 @@ export interface SessionSlice {
   /** V3.3d — backing field for `lookupSessionByConversation`. */
   conversationId: string | null
   aliasGeneration: number | null
+  messageVisibilityEpoch: number
   /**
    * V3.3b.1 — per-session composer draft. The top-level `inputValue` field
    * is a read-through mirror of `sessions[activeSessionId].inputValue`.
@@ -119,6 +121,14 @@ export interface AgentState {
   currentScopeId: string | null
   currentScope: ConversationScope | null
   scopes: ConversationScope[]
+  /** Scope ids whose durable close transaction has been acknowledged by Main. */
+  retiredScopeIds: Record<string, true>
+  /** Invalidates async scope reads when authoritative membership changes. */
+  scopeAuthorityRevision: number
+  /** Invalidates async composer work after a switch, reset, or resource clear. */
+  composerAuthorityRevision: number
+  /** Latest list request; older responses must not overwrite a newer hydration. */
+  scopeListRequestRevision: number
   scopeRunStates: Record<string, ScopeRunState>
   toolTrace: ToolTraceEvent[]
   toolTraceStatus: 'idle' | 'running' | 'done' | 'error' | 'cancelled'
@@ -145,14 +155,17 @@ export interface AgentState {
   addMessage: (message: AgentMessage) => void
   appendToMessage: (id: string, chunk: string) => void
   setInputValue: (value: string, options?: { preserveContinuationIntent?: boolean }) => void
+  setActionAuthorizationMode: (mode: ActionAuthorizationMode) => Promise<void>
   setComposerDraft: (value: string, continuationIntent?: PendingContinuationIntent | null) => void
   clearPendingContinuationIntent: () => void
   setIsStreaming: (streaming: boolean) => void
-  sendMessage: (content: string) => Promise<SendMessageResult>
+  sendMessage: (content: string, options?: {
+    codexExternalReadSlice?: Record<string, unknown>
+  }) => Promise<SendMessageResult>
   stopStreaming: () => Promise<LifecycleResult>
   resetCurrentConversation: () => Promise<LifecycleResult>
   compactCurrentSession: () => Promise<LifecycleResult>
-  loadScopes: () => Promise<void>
+  loadScopes: () => Promise<boolean>
   loadScope: (scopeId: string) => Promise<void>
   setCurrentScope: (scopeId: string) => Promise<void>
   sendMessageToScope: (scopeId: string, content: string) => Promise<void>

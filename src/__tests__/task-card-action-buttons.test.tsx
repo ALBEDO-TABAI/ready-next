@@ -114,7 +114,7 @@ function clickButton(container: HTMLElement, label: string) {
   button.dispatchEvent(new domHandle.dom.window.MouseEvent('click', { bubbles: true, cancelable: true }))
 }
 
-test('task card child-run buttons invoke continue and cancel handlers', () => {
+test('task card child-run exposes exact cancel without a retired continuation action', () => {
   const calls: Array<[string, string, string]> = []
   const run = makeRun({
     taskId: 'skill-child:child-a',
@@ -128,7 +128,6 @@ test('task card child-run buttons invoke continue and cancel handlers', () => {
     },
   })
   const { container, unmount } = mountTaskCard(run, {
-    onContinueChildRun: (scopeId: string, childRunId: string) => calls.push(['continue', scopeId, childRunId]),
     onCancelChildRun: (scopeId: string, childRunId: string) => calls.push(['cancel', scopeId, childRunId]),
   })
   try {
@@ -136,16 +135,10 @@ test('task card child-run buttons invoke continue and cancel handlers', () => {
     assert.equal(card?.getAttribute('data-ready-task-scope-id'), 'conv-a')
     assert.equal(card?.getAttribute('data-ready-task-id'), 'skill-child:child-a')
     assert.equal(card?.getAttribute('data-ready-task-child-run-id'), 'child-a')
-    const continueButton = container.querySelector('[data-ready-task-action="continue-child-run"]')
-    assert.equal(continueButton?.getAttribute('data-ready-task-scope-id'), 'conv-a')
-    assert.equal(continueButton?.getAttribute('data-ready-task-id'), 'skill-child:child-a')
-    assert.equal(continueButton?.getAttribute('data-ready-task-child-run-id'), 'child-a')
-    clickButton(container, '继续生成报告')
+    assert.equal(container.querySelector('[data-ready-task-action="continue-child-run"]'), null)
+    assert.equal(container.textContent?.includes('继续生成报告'), false)
     clickButton(container, '取消')
-    assert.deepEqual(calls, [
-      ['continue', 'conv-a', 'child-a'],
-      ['cancel', 'conv-a', 'child-a'],
-    ])
+    assert.deepEqual(calls, [['cancel', 'conv-a', 'child-a']])
   } finally {
     unmount()
   }
@@ -207,7 +200,7 @@ test('collapsed fixed collection card keeps its save destination directly openab
   }
 })
 
-test('task card suspended and cross-scope buttons invoke resume and open handlers', () => {
+test('task card keeps suspended history read-only while cross-scope open remains live', () => {
   const calls: Array<[string, string]> = []
   const suspendedRun = makeRun({
     scopeId: 'conv-b',
@@ -215,11 +208,9 @@ test('task card suspended and cross-scope buttons invoke resume and open handler
     interactionState: 'suspended',
     resumableActions: [],
   })
-  const suspended = mountTaskCard(suspendedRun, {
-    onResumeRun: (scopeId: string) => calls.push(['resume', scopeId]),
-  })
+  const suspended = mountTaskCard(suspendedRun, {})
   try {
-    clickButton(suspended.container, '继续运行')
+    assert.equal(suspended.container.textContent?.includes('继续运行'), false)
   } finally {
     suspended.unmount()
   }
@@ -241,14 +232,10 @@ test('task card suspended and cross-scope buttons invoke resume and open handler
     crossScope.unmount()
   }
 
-  assert.deepEqual(calls, [
-    ['resume', 'conv-b'],
-    ['open', 'conv-c'],
-  ])
+  assert.deepEqual(calls, [['open', 'conv-c']])
 })
 
-test('browser tasks use the canonical generic resume path without retired collection controls', () => {
-  const calls: Array<[string, string, string]> = []
+test('browser task history exposes no generic or collection resume controls', () => {
   const run = makeRun({
     scopeId: 'conv-browser',
     taskId: 'browser-task-visible-1',
@@ -266,17 +253,13 @@ test('browser tasks use the canonical generic resume path without retired collec
       action: 'browser_task',
     },
   })
-  const { container, unmount } = mountTaskCard(run, {
-    onResumeRun: (scopeId: string) => calls.push(['generic', scopeId, '']),
-  })
+  const { container, unmount } = mountTaskCard(run, {})
   try {
     const generic = Array.from(container.querySelectorAll('button'))
       .find((button) => button.textContent?.trim() === '继续运行')
-    assert.ok(generic)
+    assert.equal(generic, undefined)
     assert.equal(container.querySelector('[data-ready-task-action="resume-browser-task"]'), null)
     assert.equal(container.querySelector('[data-ready-task-action="cancel-browser-task"]'), null)
-    clickButton(container, '继续运行')
-    assert.deepEqual(calls, [['generic', 'conv-browser', '']])
   } finally {
     unmount()
   }
@@ -290,8 +273,32 @@ test('dismiss button clears only the task card presentation', () => {
   })
   try {
     const dismiss = container.querySelector('[data-ready-task-dismiss="true"]') as HTMLButtonElement | null
+    const card = container.querySelector('[data-ready-task-card="true"]') as HTMLElement | null
+    const header = card?.querySelector(':scope > button') as HTMLButtonElement | null
     assert.ok(dismiss)
+    assert.ok(card)
+    assert.ok(header)
     assert.equal(dismiss.title, '清除任务卡（不会停止任务）')
+    assert.ok(card.classList.contains('w-full'))
+    assert.ok(card.classList.contains('max-w-full'))
+    assert.ok(card.classList.contains('min-w-0'))
+    assert.ok(header.classList.contains('box-border'))
+    dismiss.dispatchEvent(new domHandle.dom.window.MouseEvent('pointerdown', {
+      bubbles: true,
+      button: 0,
+      clientX: 10,
+    }))
+    dismiss.dispatchEvent(new domHandle.dom.window.MouseEvent('pointermove', {
+      bubbles: true,
+      button: 0,
+      clientX: 100,
+    }))
+    dismiss.dispatchEvent(new domHandle.dom.window.MouseEvent('pointerup', {
+      bubbles: true,
+      button: 0,
+      clientX: 100,
+    }))
+    assert.equal(dismissed, 0, 'dismiss pointer must not start the card swipe gesture')
     dismiss.click()
     assert.equal(dismissed, 1)
   } finally {
@@ -365,18 +372,9 @@ test('cleared fixed task cards stay cleared after the task area remounts', () =>
         onUndoMemoryCapture: noop,
         onSupplementMemoryCapture: noop,
         onOpenScope: noop,
-        onContinueTaskInput: noop,
-        onSubmitTaskConfirmation: noop,
-        onSubmitTaskAgentResult: noop,
-        onRetryTask: noop,
-        onSuspendTask: noop,
-        onResumeTask: noop,
         onCancelDetachedTask: noop,
-        onContinueDetachedTask: noop,
         onCancelChildRun: noop,
-        onContinueChildRun: noop,
-        children: ({ bottomTaskCard }) => createElement('div', null, bottomTaskCard),
-      }))
+      }, ({ bottomTaskCard }) => createElement('div', null, bottomTaskCard)))
     })
     return root
   }
@@ -397,7 +395,7 @@ test('cleared fixed task cards stay cleared after the task area remounts', () =>
   }
 })
 
-test('pending browser confirmation stays visible in the fixed task area', () => {
+test('historical browser confirmation stays visible but has no responder actions', () => {
   const confirmationCalls: Array<[string, boolean, string | undefined]> = []
   const run = makeRun({
     scopeId: 'conv-confirmation',
@@ -456,20 +454,9 @@ test('pending browser confirmation stays visible in the fixed task area', () => 
       onUndoMemoryCapture: noop,
       onSupplementMemoryCapture: noop,
       onOpenScope: noop,
-      onContinueTaskInput: noop,
-      onSubmitTaskConfirmation: (scopeId: string, confirmed: boolean, requestId?: string) => {
-        confirmationCalls.push([scopeId, confirmed, requestId])
-      },
-      onSubmitTaskAgentResult: noop,
-      onRetryTask: noop,
-      onSuspendTask: noop,
-      onResumeTask: noop,
       onCancelDetachedTask: noop,
-      onContinueDetachedTask: noop,
       onCancelChildRun: noop,
-      onContinueChildRun: noop,
-      children: ({ bottomTaskCard }) => createElement('div', null, bottomTaskCard),
-    }))
+    }, ({ bottomTaskCard }) => createElement('div', null, bottomTaskCard)))
   })
 
   try {
@@ -478,22 +465,16 @@ test('pending browser confirmation stays visible in the fixed task area', () => 
     const buttons = Array.from(host.querySelectorAll('button'))
     const allow = buttons.find((button) => button.textContent?.trim() === '允许并继续')
     const deny = buttons.find((button) => button.textContent?.trim() === '拒绝')
-    assert.ok(allow)
-    assert.ok(deny)
+    assert.equal(allow, undefined)
+    assert.equal(deny, undefined)
     assert.equal(buttons.some((button) => button.textContent?.trim() === '继续运行'), false)
-    flushSync(() => allow.click())
-    flushSync(() => deny.click())
-    assert.deepEqual(confirmationCalls, [
-      ['conv-confirmation', true, 'confirmation-1'],
-      ['conv-confirmation', false, 'confirmation-1'],
-    ])
+    assert.deepEqual(confirmationCalls, [])
   } finally {
     root.unmount()
   }
 })
 
-test('browser confirmation uses the canonical task confirmation path without retired consent payloads', () => {
-  const calls: Array<[string, string, string]> = []
+test('historical browser pending-consent state exposes no live confirmation action', () => {
   const run = makeRun({
     scopeId: 'conv-browser',
     taskId: 'browser-task-visible-consent',
@@ -512,16 +493,12 @@ test('browser confirmation uses the canonical task confirmation path without ret
       lastError: null,
     },
   })
-  const { container, unmount } = mountTaskCard(run, {
-    onSubmitConfirmation: (scopeId: string, confirmed: boolean) => calls.push(['generic', scopeId, String(confirmed)]),
-  })
+  const { container, unmount } = mountTaskCard(run, {})
   try {
     const generic = Array.from(container.querySelectorAll('button'))
       .find((button) => button.textContent?.trim() === '确认继续')
-    assert.ok(generic)
+    assert.equal(generic, undefined)
     assert.equal(container.querySelector('[data-ready-task-action="confirm-browser-collection-consent"]'), null)
-    clickButton(container, '确认继续')
-    assert.deepEqual(calls, [['generic', 'conv-browser', 'true']])
   } finally {
     unmount()
   }

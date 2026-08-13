@@ -11,9 +11,8 @@ import BrowserAgentPointerWindow from './pages/BrowserAgentPointerWindow'
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import RitualOverlay from './components/overlay/RitualOverlay'
-import SkillAskUserPrompt from './components/skill/SkillAskUserPrompt'
 import SkillInlinedToast from './components/skill/SkillInlinedToast'
-import { initAgentListeners } from './stores/useAgent'
+import AgentRuntimeListenerRoot from './modules/agent/AgentRuntimeListenerRoot'
 import { usePetActivityBridge } from './modules/pet/usePetActivityBridge'
 import { fetchRSSWarmSnapshot } from './modules/rss/rssWarmLoader'
 import { primeRSSWarmCache } from './modules/rss/rssWarmCache'
@@ -85,13 +84,6 @@ function MainAppShell() {
     }
   }, [])
 
-  // Keep agent tool/event listeners alive at app root to avoid missed tool actions
-  // when chat panel remounts.
-  useEffect(() => {
-    const cleanup = initAgentListeners()
-    return cleanup
-  }, [])
-
   useEffect(() => {
     const subscribe = window.electronAPI?.document?.onWatcherFailed
     if (!subscribe) return
@@ -107,6 +99,7 @@ function MainAppShell() {
 
   return (
     <ErrorBoundary>
+      <AgentRuntimeListenerRoot />
       <div className="ready-app-shell h-screen w-screen flex flex-col bg-[var(--bg-primary)] overflow-hidden">
         <div className="ready-app-bg" aria-hidden="true" />
         <div className="ready-theme-ritual-tint" aria-hidden="true" />
@@ -138,7 +131,6 @@ function MainAppShell() {
         </div>
       </div>
       <RitualOverlay />
-      <SkillAskUserPrompt />
       <SkillInlinedToast />
       {captureFeedback && (
         <div

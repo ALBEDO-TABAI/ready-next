@@ -34,6 +34,7 @@ export interface BrowserTargetClaim {
   ownerRunId: string
   scopeId: string | null
   sessionId: string | null
+  messageVisibilityEpoch: number | null
   state: BrowserTargetClaimState
   suspensionCheckpointId: string | null
   suspensionReason: string | null
@@ -52,6 +53,7 @@ export interface BrowserTargetClaimAcquireInput extends BrowserPhysicalTargetKey
   ownerRunId: string
   scopeId: string | null
   sessionId: string | null
+  messageVisibilityEpoch?: number | null
   ttlMs?: number
 }
 
@@ -105,6 +107,7 @@ interface BrowserTargetClaimRow {
   owner_run_id: string
   scope_id: string | null
   session_id: string | null
+  message_visibility_epoch: number | null
   state: BrowserTargetClaimState
   suspension_checkpoint_id: string | null
   suspension_reason: string | null
@@ -129,6 +132,10 @@ function mapClaim(row: BrowserTargetClaimRow): BrowserTargetClaim {
     ownerRunId: row.owner_run_id,
     scopeId: row.scope_id,
     sessionId: row.session_id,
+    messageVisibilityEpoch: Number.isSafeInteger(row.message_visibility_epoch)
+      && Number(row.message_visibility_epoch) >= 0
+      ? Number(row.message_visibility_epoch)
+      : null,
     state: row.state,
     suspensionCheckpointId: row.suspension_checkpoint_id,
     suspensionReason: row.suspension_reason,
@@ -152,14 +159,22 @@ function samePhysicalIdentity(
 export interface BrowserTargetClaimStore {
   read(key: BrowserLogicalTargetKey): BrowserTargetClaim | null
   list(): BrowserTargetClaim[]
+  readScopeContextEpoch(scopeId: string): BrowserScopeContextEpochRead
   mutate<T>(body: (store: BrowserTargetClaimMutationStore) => T): T
 }
 
 export interface BrowserTargetClaimMutationStore {
   read(key: BrowserLogicalTargetKey): BrowserTargetClaim | null
+  readScopeContextEpoch(scopeId: string): BrowserScopeContextEpochRead
   write(claim: BrowserTargetClaim, expectedGeneration: number | null): boolean
   appendReceipt(receipt: Omit<BrowserControlReceipt, 'sequence'>): void
 }
+
+export type BrowserScopeContextEpochRead =
+  | { kind: 'open'; messageVisibilityEpoch: number }
+  | { kind: 'closed' }
+  | { kind: 'unavailable' }
+  | { kind: 'untracked' }
 
 export class BrowserTargetClaimRepository implements BrowserTargetClaimStore {
   private readonly unitOfWork: BrowserWorkflowUnitOfWork
@@ -185,6 +200,36 @@ export class BrowserTargetClaimRepository implements BrowserTargetClaimStore {
     return this.readFrom(this.db(), key)
   }
 
+  private readScopeContextEpochFrom(
+    db: WorkflowRawDatabase,
+    scopeId: string,
+  ): BrowserScopeContextEpochRead {
+    try {
+      const row = db.prepare(`
+        SELECT message_visibility_epoch, closed_at
+          FROM chat_conversations
+         WHERE id = ?
+         LIMIT 1
+      `).get<{ message_visibility_epoch: number; closed_at: string | null }>(scopeId)
+      if (!row) return { kind: 'untracked' }
+      if (row.closed_at !== null) return { kind: 'closed' }
+      if (!Number.isSafeInteger(row.message_visibility_epoch) || row.message_visibility_epoch < 0) {
+        return { kind: 'unavailable' }
+      }
+      return { kind: 'open', messageVisibilityEpoch: row.message_visibility_epoch }
+    } catch {
+      return { kind: 'unavailable' }
+    }
+  }
+
+  readScopeContextEpoch(scopeId: string): BrowserScopeContextEpochRead {
+    try {
+      return this.readScopeContextEpochFrom(this.db(), scopeId)
+    } catch {
+      return { kind: 'unavailable' }
+    }
+  }
+
   list(): BrowserTargetClaim[] {
     return this.db().prepare(
       'SELECT * FROM browser_target_claims ORDER BY updated_at DESC, partition, tab_id',
@@ -194,15 +239,17 @@ export class BrowserTargetClaimRepository implements BrowserTargetClaimStore {
   mutate<T>(body: (store: BrowserTargetClaimMutationStore) => T): T {
     return this.unitOfWork.runImmediate((db) => body({
       read: (key) => this.readFrom(db, key),
+      readScopeContextEpoch: (scopeId) => this.readScopeContextEpochFrom(db, scopeId),
       write: (claim, expectedGeneration) => {
         const result = db.prepare(`
           INSERT INTO browser_target_claims (
             partition, tab_id, physical_target_token, boot_incarnation_id,
             claim_id, generation, profile_id, surface,
             parent_task_id, browser_task_id, owner_run_id, scope_id, session_id,
+            message_visibility_epoch,
             state, suspension_checkpoint_id, suspension_reason,
             acquired_at, heartbeat_at, expires_at, updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           ON CONFLICT(partition, tab_id) DO UPDATE SET
             physical_target_token = excluded.physical_target_token,
             boot_incarnation_id = excluded.boot_incarnation_id,
@@ -215,6 +262,7 @@ export class BrowserTargetClaimRepository implements BrowserTargetClaimStore {
             owner_run_id = excluded.owner_run_id,
             scope_id = excluded.scope_id,
             session_id = excluded.session_id,
+            message_visibility_epoch = excluded.message_visibility_epoch,
             state = excluded.state,
             suspension_checkpoint_id = excluded.suspension_checkpoint_id,
             suspension_reason = excluded.suspension_reason,
@@ -237,6 +285,7 @@ export class BrowserTargetClaimRepository implements BrowserTargetClaimStore {
           claim.ownerRunId,
           claim.scopeId,
           claim.sessionId,
+          claim.messageVisibilityEpoch,
           claim.state,
           claim.suspensionCheckpointId,
           claim.suspensionReason,
@@ -279,6 +328,10 @@ export class MemoryBrowserTargetClaimRepository implements BrowserTargetClaimSto
   private readonly rows = new Map<string, BrowserTargetClaim>()
   private readonly receipts: BrowserControlReceipt[] = []
 
+  constructor(
+    private readonly scopeContextEpochReader: (scopeId: string) => BrowserScopeContextEpochRead = () => ({ kind: 'untracked' }),
+  ) {}
+
   private key(input: BrowserLogicalTargetKey): string {
     return `${input.partition}\u0000${input.tabId}`
   }
@@ -292,9 +345,14 @@ export class MemoryBrowserTargetClaimRepository implements BrowserTargetClaimSto
     return [...this.rows.values()].map((row) => structuredClone(row))
   }
 
+  readScopeContextEpoch(scopeId: string): BrowserScopeContextEpochRead {
+    return this.scopeContextEpochReader(scopeId)
+  }
+
   mutate<T>(body: (store: BrowserTargetClaimMutationStore) => T): T {
     return body({
       read: (key) => this.read(key),
+      readScopeContextEpoch: (scopeId) => this.readScopeContextEpoch(scopeId),
       write: (claim, expectedGeneration) => {
         const key = this.key(claim.logicalKey)
         const current = this.rows.get(key)
@@ -337,6 +395,7 @@ export class BrowserTargetClaimService {
   private readonly generateId: () => string
   private readonly transitionListeners = new Set<(transition: BrowserTargetClaimTransition) => void>()
   private readonly activeActions = new Map<string, Set<string>>()
+  private readonly locallyFencedClaimIds = new Set<string>()
 
   constructor(
     private readonly store: BrowserTargetClaimStore,
@@ -352,18 +411,70 @@ export class BrowserTargetClaimService {
     return () => this.transitionListeners.delete(listener)
   }
 
+  private scopeContextId(input: Pick<BrowserTargetClaim, 'scopeId' | 'sessionId'>): string | null {
+    const scopeId = String(input.scopeId || input.sessionId || '').trim()
+    return scopeId || null
+  }
+
+  private claimHasCurrentScopeContext(
+    claim: BrowserTargetClaim,
+    readEpoch: (scopeId: string) => BrowserScopeContextEpochRead,
+  ): boolean {
+    const scopeId = this.scopeContextId(claim)
+    if (!scopeId) return claim.messageVisibilityEpoch === null
+    const durable = readEpoch(scopeId)
+    if (durable.kind === 'untracked') return true
+    return durable.kind === 'open'
+      && claim.messageVisibilityEpoch === durable.messageVisibilityEpoch
+  }
+
+  private requestedScopeContextEpoch(
+    input: BrowserTargetClaimAcquireInput,
+    readEpoch: (scopeId: string) => BrowserScopeContextEpochRead,
+  ): { ok: true; messageVisibilityEpoch: number | null } | { ok: false; error: AgentBrowserStructuredError } {
+    const scopeId = this.scopeContextId(input)
+    const requestedEpoch = Number.isSafeInteger(input.messageVisibilityEpoch)
+      && Number(input.messageVisibilityEpoch) >= 0
+      ? Number(input.messageVisibilityEpoch)
+      : null
+    if (!scopeId) return { ok: true, messageVisibilityEpoch: null }
+    const durable = readEpoch(scopeId)
+    if (durable.kind === 'untracked') {
+      return { ok: true, messageVisibilityEpoch: requestedEpoch }
+    }
+    if (durable.kind !== 'open' || requestedEpoch !== durable.messageVisibilityEpoch) {
+      return {
+        ok: false,
+        error: agentBrowserError('lease_required', 'Browser target context is stale or unavailable.', {
+          scopeId,
+          requestedMessageVisibilityEpoch: requestedEpoch,
+          currentMessageVisibilityEpoch: durable.kind === 'open'
+            ? durable.messageVisibilityEpoch
+            : null,
+          contextState: durable.kind,
+        }),
+      }
+    }
+    return { ok: true, messageVisibilityEpoch: requestedEpoch }
+  }
+
   private emit(previous: BrowserTargetClaim | null, next: BrowserTargetClaim, source: BrowserTargetClaimTransition['source']): void {
     if (previous?.state === next.state && previous.claimId === next.claimId) return
+    const transition: BrowserTargetClaimTransition = {
+      logicalKey: next.logicalKey,
+      previousState: previous?.state ?? null,
+      state: next.state,
+      previousClaimId: previous?.claimId ?? null,
+      claimId: next.claimId,
+      generation: next.generation,
+      source,
+    }
     for (const listener of this.transitionListeners) {
-      listener({
-        logicalKey: next.logicalKey,
-        previousState: previous?.state ?? null,
-        state: next.state,
-        previousClaimId: previous?.claimId ?? null,
-        claimId: next.claimId,
-        generation: next.generation,
-        source,
-      })
+      try {
+        listener(transition)
+      } catch (error) {
+        console.warn('[BrowserTargetClaimService] transition listener failed:', error)
+      }
     }
   }
 
@@ -453,7 +564,12 @@ export class BrowserTargetClaimService {
         })
         return error
       }
-      if (current?.state === 'held') {
+      const requestedContext = this.requestedScopeContextEpoch(input, store.readScopeContextEpoch)
+      if (!requestedContext.ok) return reject(requestedContext.error)
+      const currentContextActive = current
+        ? this.claimHasCurrentScopeContext(current, store.readScopeContextEpoch)
+        : false
+      if (currentContextActive && current?.state === 'held') {
         if (
           current.ownerRunId === input.ownerRunId
           && current.parentTaskId === input.parentTaskId
@@ -472,7 +588,7 @@ export class BrowserTargetClaimService {
           generation: current.generation,
         }))
       }
-      if (current?.state === 'user_owned') {
+      if (currentContextActive && current?.state === 'user_owned') {
         return reject(agentBrowserError('lease_takeover', `Target ${input.tabId} is under user control.`, {
           partition: input.partition,
           tabId: input.tabId,
@@ -480,7 +596,7 @@ export class BrowserTargetClaimService {
           generation: current.generation,
         }))
       }
-      if (current?.state === 'suspended') {
+      if (currentContextActive && current?.state === 'suspended') {
         return reject(agentBrowserError('lease_required', `Target ${input.tabId} requires an authorized continuation before it can be resumed.`, {
           partition: input.partition,
           tabId: input.tabId,
@@ -502,6 +618,7 @@ export class BrowserTargetClaimService {
         ownerRunId: input.ownerRunId,
         scopeId: input.scopeId,
         sessionId: input.sessionId,
+        messageVisibilityEpoch: requestedContext.messageVisibilityEpoch,
         state: 'held',
         suspensionCheckpointId: null,
         suspensionReason: null,
@@ -515,6 +632,7 @@ export class BrowserTargetClaimService {
       return { previous: current, claim }
     })
     if ('previous' in result) {
+      if (result.previous) this.activeActions.delete(result.previous.claimId)
       this.emit(result.previous, result.claim, 'acquire')
       return result.claim
     }
@@ -544,6 +662,14 @@ export class BrowserTargetClaimService {
   heartbeat(identity: BrowserTargetClaimIdentity, ttlMs?: number): BrowserTargetClaim | AgentBrowserStructuredError {
     const current = this.read(identity)
     if (!current) return agentBrowserError('lease_required', `Target claim ${identity.claimId} was not found.`)
+    if (!this.claimHasCurrentScopeContext(current, (scopeId) => this.store.readScopeContextEpoch(scopeId))) {
+      return agentBrowserError('lease_required', 'Browser target owner belongs to a stale context.', {
+        state: current.state,
+        currentClaimId: current.claimId,
+        currentGeneration: current.generation,
+        messageVisibilityEpoch: current.messageVisibilityEpoch,
+      })
+    }
     if (
       current.state !== 'held'
       || current.claimId !== identity.claimId
@@ -570,8 +696,40 @@ export class BrowserTargetClaimService {
   }
 
   checkWrite(identity: BrowserTargetClaimIdentity): AgentBrowserStructuredError | null {
+    if (this.locallyFencedClaimIds.has(identity.claimId)) {
+      return agentBrowserError('lease_takeover', 'Browser target is under user control.')
+    }
     const current = this.heartbeat(identity)
     return 'ok' in current && current.ok === false ? current : null
+  }
+
+  takeOver(identity: BrowserTargetClaimIdentity): BrowserTargetClaim | AgentBrowserStructuredError {
+    const current = this.read(identity)
+    if (
+      !current
+      || current.state !== 'held'
+      || current.claimId !== identity.claimId
+      || current.generation !== identity.generation
+      || current.ownerRunId !== identity.ownerRunId
+      || !samePhysicalIdentity(current, identity)
+    ) {
+      return agentBrowserError('lease_required', 'Browser target owner changed before user takeover.')
+    }
+    // Fence the old writer before the durable transition. If persistence is
+    // unavailable, this process still cannot write through the stale claim.
+    this.locallyFencedClaimIds.add(current.claimId)
+    try {
+      const next = this.transition(current, {
+        state: 'user_owned',
+        suspensionCheckpointId: null,
+        suspensionReason: 'browser_target_user_owned',
+        expiresAt: this.now(),
+      }, 'user_signal')
+      this.locallyFencedClaimIds.delete(current.claimId)
+      return next
+    } catch {
+      return agentBrowserError('lease_takeover', 'Browser target is fenced for user control; durable state is unavailable.')
+    }
   }
 
   beginAgentAction(identity: BrowserTargetClaimIdentity): string | AgentBrowserStructuredError {
@@ -643,6 +801,23 @@ export class BrowserTargetClaimService {
     }, 'restart'))
   }
 
+  closeScopeContext(scopeId: string): BrowserTargetClaim[] {
+    const normalizedScopeId = String(scopeId || '').trim()
+    if (!normalizedScopeId) return []
+    const active = this.store.list().filter((claim) => (
+      (claim.scopeId === normalizedScopeId || claim.sessionId === normalizedScopeId)
+      && (claim.state === 'held' || claim.state === 'user_owned' || claim.state === 'suspended')
+    ))
+    return active.map((claim) => this.transition(claim, {
+      state: claim.state === 'user_owned' ? 'released' : 'expired',
+      physicalTargetToken: null,
+      bootIncarnationId: null,
+      suspensionCheckpointId: null,
+      suspensionReason: null,
+      expiresAt: this.now(),
+    }, 'close'))
+  }
+
   replacePhysicalTarget(
     target: BrowserPhysicalTargetKey,
     suspensionCheckpointId?: string | null,
@@ -682,9 +857,13 @@ export class BrowserTargetClaimService {
     suspensionReason?: string | null
   }): BrowserTargetClaim[] {
     const held = this.store.list()
-      .filter((claim) => claim.ownerRunId === input.ownerRunId && claim.state === 'held')
+      .filter((claim) => claim.ownerRunId === input.ownerRunId && (
+        claim.state === 'held' || claim.state === 'user_owned' || claim.state === 'suspended'
+      ))
     if (held.length === 0) return []
-    const canSuspend = Boolean(input.resumable && input.suspensionCheckpointId)
+    // Public continuation is retired: closing a run must always release its
+    // physical targets. Checkpoint rows remain historical evidence only.
+    const canSuspend = false
     const at = this.now()
     const transitions = held.map((claim) => {
       const patch: Partial<BrowserTargetClaim> = canSuspend ? {

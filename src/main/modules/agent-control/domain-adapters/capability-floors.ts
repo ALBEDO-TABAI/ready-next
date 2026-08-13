@@ -13,7 +13,10 @@ export interface CapabilityFloors {
 }
 
 /** 本地文档资源在场时的文档读取地板（提及≠授写：@文件只保证可读，不含任何写面）。 */
-export const LOCAL_DOCUMENT_RESOURCE_FLOOR_TOOL_NAMES: ReadonlyArray<string> = ['file_locate', 'file_read_excerpt']
+export const LOCAL_DOCUMENT_RESOURCE_FLOOR_TOOL_NAMES: ReadonlyArray<string> = [
+  'file_locate',
+  'file_read_excerpt',
+]
 /**
  * 当前编辑器文档上下文在场时的地板工具：用户正开着的文档是可编辑对象，任何轮
  * （含技能 selected 收窄轮）都必须保有精准编辑与 widget 通道——否则模型会被迫用

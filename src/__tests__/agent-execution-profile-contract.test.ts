@@ -50,11 +50,11 @@ test('execution material hash changes when active knowledge body changes', async
   assert.notEqual(before.executionMaterialHash, after.executionMaterialHash)
 })
 
-test('knowledge toggle removes cards and allowlist without removing agent rules', async () => {
+test('retired knowledge toggle no longer hides material in the historical profile reader', async () => {
   const profile = await resolver(baseRows, '正文一', false).resolve('analyst')
   assert.equal(profile.rules, 'analyst rules')
-  assert.equal(profile.knowledgeIndex, '')
-  assert.deepEqual(profile.allowedKnowledgeRefs, [])
+  assert.equal(profile.knowledgeIndex, '- A（H）: A → agents/analyst/knowledge/a.md')
+  assert.deepEqual(profile.allowedKnowledgeRefs, ['agents/analyst/knowledge/a.md'])
 })
 
 test('merged ids redirect while missing and disabled ids fall back without reading sibling assets', async () => {

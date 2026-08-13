@@ -38,7 +38,7 @@ test('research tab actions use the task-owned background tab without presenting 
   assert.deepEqual(calls, ['ensure:browser-task-1:https://example.test/work'])
 })
 
-test('default tab routing is research-only and falls back to the visible active tab without projection truth', () => {
+test('document auto-targeting remains research-only and falls back to the visible active tab without projection truth', () => {
   assert.equal(shouldUseResearchWorkTab({
     taskType: 'research',
     browserTaskId: 'browser-task',

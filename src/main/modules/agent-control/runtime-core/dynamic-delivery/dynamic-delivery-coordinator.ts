@@ -16,7 +16,6 @@ import type { RequestEnvelope } from '../../contracts/request-envelope'
 import type { TaskBudgetRuntime, TaskProjectionRecord } from '../../contracts/run-contracts'
 import { compileDynamicDeliveryPlan } from '../../quality/packet-compiler'
 import { dispatchDynamicDeliveryPackage } from '../../quality/packet-dispatch'
-import type { WorkerReport } from '../../quality/worker-report'
 import { createSubAgentCleanupHandle } from '../../sub-agent/sub-agent-cleanup'
 import { runSubAgent } from '../../sub-agent/sub-agent-runner'
 import { addRunUsage, type RunUsage } from '../run-usage-accumulator'
@@ -33,6 +32,7 @@ import { DynamicDeliveryPacketScheduler } from './packet-scheduler'
 import { sealDeliveryCandidate, type SealedDeliveryCandidate } from './seal-delivery-candidate'
 import { SpecialistModelSubAgent, type WorkerExecutionResult } from './specialist-model-subagent'
 import { verifyDeliveryCandidate, type DeliveryVerificationVerdict } from './delivery-verifier'
+import { verifyStandaloneDeliveryCandidate } from './standalone-delivery-verifier'
 import type { VerifierResourceBundle } from './verifier-resource-bundle'
 import type { WorkerResourceBundle } from './worker-resource-bundle'
 import { logAgentMetric } from '../../metrics'
@@ -581,30 +581,7 @@ export class DynamicDeliveryCoordinator {
     sealed: Readonly<SealedDeliveryCandidate>
     verificationUsage: ReadyAgentSdkRunResult['usage']
   }> {
-    const sealed = await sealDeliveryCandidate({
-      userRequestVerbatim: input.userRequestVerbatim,
-      candidateText: input.candidateText,
-      hostCriteria: input.hostCriteria,
-      modelCriteria: input.modelCriteria,
-      openQuestions: [],
-      materializeAndReadBack: input.materializeAndReadBack,
-    })
-    const verification = await this.verifySealedCandidate({
-      candidate: sealed,
-      runId: input.runId,
-      taskId: input.taskId,
-      model: input.model,
-      provider: input.provider,
-      contextWindowTokens: input.contextWindowTokens,
-      maxOutputTokens: input.maxOutputTokens,
-      signal: input.signal,
-      runAgent: this.runAgent,
-    })
-    return {
-      verdict: verification.verdict,
-      sealed,
-      verificationUsage: verification.usage,
-    }
+    return verifyStandaloneDeliveryCandidate({ ...input, runAgent: this.runAgent })
   }
 
   async buildSanitizedCheckpoint(runId: string, receipts: readonly AgentInputItem[] = []): Promise<AgentInputItem[] | null> {

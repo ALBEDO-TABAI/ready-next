@@ -67,7 +67,10 @@ test('migration 065 owns both persistent completion-declaration columns', () => 
   const statements: string[] = []
   __runMigrationForTests('065_task_projection_completion_declarations', {
     exec: (sql: string) => { statements.push(sql) },
-    prepare: () => { throw new Error('not used') },
+    prepare: (sql: string) => {
+      if (sql === 'PRAGMA foreign_keys') return { get: () => ({ foreign_keys: 0 }) }
+      throw new Error(`unexpected SQL: ${sql}`)
+    },
   } as never)
   assert.deepEqual(statements, [
     'ALTER TABLE task_projections ADD COLUMN model_criteria_json TEXT',
@@ -83,6 +86,7 @@ test('declaration persists across repository restart and drives terminal deliver
     taskOrigin: 'user_root',
     ownerAgentId: 'butler',
     scopeId: 'scope-crit-p',
+    messageVisibilityEpoch: 0,
     runId: 'run-crit-p',
     taskType: 'multi_step_task',
     module: 'skill',

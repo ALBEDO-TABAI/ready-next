@@ -1,6 +1,9 @@
 import { createHash } from 'node:crypto'
 
+import { APP_VERSION } from '../../../../shared/app-version'
+
 import {
+  CODEX_OPT_OUT_NOTIFICATION_METHODS,
   normalizeCodexNativeNotification,
   normalizeCodexThread,
   normalizeCodexTurn,
@@ -12,9 +15,14 @@ import {
   type CodexThreadListParams,
   type CodexThreadStartParams,
   type CodexTurn,
-  type CodexTurnStartParams,
-  type CodexUserInput,
+  type CodexTurnStartParams
 } from './codex-native-runtime'
+import { isCodexUserInput } from './codex-user-input'
+import { digestCanonicalJson } from './codex-model-gateway-contract'
+import type {
+  CodexServerRequestResponse,
+  CodexToolResponseDeliveryAttemptIdentity,
+} from './codex-tool-response-delivery'
 
 type JsonObject = Record<string, unknown>
 type StartMethod = 'thread/start' | 'turn/start'
@@ -71,6 +79,35 @@ export interface CodexStartDispatchPort {
   markConnectionClosed(connectionEpoch: string): Promise<void>
 }
 
+type ManualCompactionDispatchIdentity = {
+  connectionEpoch: string
+  rpcId: number
+  manualCompactionId: string
+}
+
+export interface CodexManualCompactionDispatchPort {
+  activate(input: Omit<ManualCompactionDispatchIdentity, 'manualCompactionId'> & {
+    codexThreadId: string
+    requestDigest: string
+  }): Promise<{ manualCompactionId: string }>
+  markWriteAttempted(input: ManualCompactionDispatchIdentity): Promise<void>
+  markChildWriteConfirmed(input: ManualCompactionDispatchIdentity & {
+    childWriteDigest: string
+  }): Promise<void>
+  markUnresolved(input: ManualCompactionDispatchIdentity & {
+    reason: 'response_timeout' | 'child_write_error' | 'connection_closed'
+  }): Promise<void>
+  reconcileResponse(input: ManualCompactionDispatchIdentity & {
+    responseKind: 'accepted' | 'rejected'
+    responseDigest: string
+  }): Promise<void>
+  consumeLateResponse(input: Omit<ManualCompactionDispatchIdentity, 'manualCompactionId'> & {
+    responseKind: 'accepted' | 'rejected'
+    responseDigest: string
+  }): Promise<boolean>
+  markConnectionClosed(connectionEpoch: string): Promise<void>
+}
+
 export interface CodexInboundFramePort {
   attachReleasePort?(port: CodexInboundFrameReleasePort): () => void
   routeNotification(input: {
@@ -85,13 +122,21 @@ export interface CodexInboundFramePort {
     params: unknown
   }): Promise<
     | { disposition: 'buffered' }
-    | { disposition: 'respond'; result: unknown }
+    | ({ disposition: 'respond' } & CodexServerRequestResponse)
   >
+  confirmServerResponseTransportWrite(
+    attempt: CodexToolResponseDeliveryAttemptIdentity,
+  ): void | PromiseLike<void>
+  retireThread?(connectionEpoch: string, codexThreadId: string): void
 }
 
 export interface CodexInboundFrameReleasePort {
   broadcastNotification(notification: CodexNativeNotification): void
-  respondServerRequest(requestId: number | string, result: unknown): void
+  respondServerRequest(
+    requestId: number | string,
+    result: unknown,
+    deliveryAttempt: CodexToolResponseDeliveryAttemptIdentity,
+  ): void
   failProtocol(error: Error): void
 }
 
@@ -99,11 +144,69 @@ export interface CodexThreadArchiveAuthorizationPort {
   assertEligible(threadId: string): void | Promise<void>
 }
 
+export interface CodexThreadArchiveDispatchPort {
+  assertReadbackListEligible(input: {
+    cwd: string
+    sourceKinds: ['vscode']
+    archived: boolean
+    cursor: string | null
+    useStateDbOnly: true
+  }): void | Promise<void>
+  activate(input: {
+    connectionEpoch: string
+    rpcId: number
+    codexThreadId: string
+    requestDigest: string
+  }): Promise<{ archiveIntentId: string }>
+  markWriteAttempted(input: {
+    connectionEpoch: string
+    rpcId: number
+    archiveIntentId: string
+  }): Promise<void>
+  markChildWriteConfirmed(input: {
+    connectionEpoch: string
+    rpcId: number
+    archiveIntentId: string
+    childWriteDigest: string
+  }): Promise<void>
+  markUnresolved(input: {
+    connectionEpoch: string
+    rpcId: number
+    archiveIntentId: string
+    reason: 'response_timeout' | 'child_write_error' | 'connection_closed'
+  }): Promise<void>
+  reconcileResponse(input: {
+    connectionEpoch: string
+    rpcId: number
+    archiveIntentId: string
+    responseKind: 'accepted' | 'rejected'
+    responseDigest: string
+  }): Promise<void>
+  consumeLateResponse(input: {
+    connectionEpoch: string
+    rpcId: number
+    responseKind: 'accepted' | 'rejected'
+    responseDigest: string
+  }): Promise<boolean>
+  reconcileArchivedNotification(input: {
+    connectionEpoch: string
+    codexThreadId: string
+    notificationDigest: string
+  }): Promise<boolean>
+  markConnectionClosed(connectionEpoch: string): Promise<void>
+}
+
 export class CodexAppServerClientError extends Error {
   constructor(readonly code: string, readonly details?: unknown) {
     super(code)
     this.name = 'CodexAppServerClientError'
   }
+}
+
+export function isCodexNoActiveTurnInterruptError(error: unknown): boolean {
+  if (!(error instanceof CodexAppServerClientError) || error.code !== 'rpc_rejected') return false
+  return isRecord(error.details)
+    && error.details.message === 'no active turn to interrupt'
 }
 
 type PendingRequest = {
@@ -143,30 +246,6 @@ function requireExactIdentityParams(value: unknown, keys: readonly string[]): Js
   return value
 }
 
-function validateUserInput(value: unknown): value is CodexUserInput {
-  if (!isRecord(value)) return false
-  if (value.type === 'text') {
-    return hasExactKeys(value, ['type', 'text', 'text_elements'])
-      && typeof value.text === 'string'
-      && Array.isArray(value.text_elements)
-      && value.text_elements.length === 0
-  }
-  if (value.type === 'image') {
-    return hasExactKeys(value, ['type', 'url', 'detail'])
-      && nonEmptyString(value.url)
-      && (
-        value.detail === null
-        || value.detail === 'auto'
-        || value.detail === 'low'
-        || value.detail === 'high'
-        || value.detail === 'original'
-      )
-  }
-  return value.type === 'audio'
-    && hasExactKeys(value, ['type', 'url'])
-    && nonEmptyString(value.url)
-}
-
 function validateDynamicTool(value: unknown): value is CodexDynamicToolSpec {
   if (!isRecord(value)) return false
   const keys = value.deferLoading === undefined
@@ -199,6 +278,7 @@ function validateThreadStartParams(value: unknown): asserts value is CodexThread
     'sandbox',
     'runtimeWorkspaceRoots',
     'environments',
+    'config',
     'dynamicTools',
     'developerInstructions',
   ])
@@ -213,6 +293,15 @@ function validateThreadStartParams(value: unknown): asserts value is CodexThread
     || params.runtimeWorkspaceRoots.length !== 0
     || !Array.isArray(params.environments)
     || params.environments.length !== 0
+    || (
+      params.config !== null
+      && (
+        !isRecord(params.config)
+        || !hasExactKeys(params.config, ['model_context_window'])
+        || !Number.isSafeInteger(params.config.model_context_window)
+        || Number(params.config.model_context_window) < 1
+      )
+    )
     || !Array.isArray(params.dynamicTools)
     || !params.dynamicTools.every(validateDynamicTool)
     || typeof params.developerInstructions !== 'string'
@@ -223,15 +312,35 @@ function validateTurnStartParams(value: unknown): asserts value is CodexTurnStar
   const params = requireExactIdentityParams(value, [
     'threadId',
     'clientUserMessageId',
+    'collaborationMode',
+    'environments',
     'input',
     'additionalContext',
     'responsesapiClientMetadata',
   ])
+  const collaborationMode = params.collaborationMode
+  const collaborationSettings = isRecord(collaborationMode)
+    ? collaborationMode.settings
+    : null
   if (
     !nonEmptyString(params.threadId)
     || !nonEmptyString(params.clientUserMessageId)
+    || !isRecord(collaborationMode)
+    || !hasExactKeys(collaborationMode, ['mode', 'settings'])
+    || collaborationMode.mode !== 'default'
+    || !isRecord(collaborationSettings)
+    || !hasExactKeys(collaborationSettings, [
+      'model', 'reasoning_effort', 'developer_instructions',
+    ])
+    || collaborationSettings.model !== 'ready-e0-model'
+    || (collaborationSettings.reasoning_effort !== null && ![
+      'none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max',
+    ].includes(String(collaborationSettings.reasoning_effort)))
+    || collaborationSettings.developer_instructions !== null
+    || !Array.isArray(params.environments)
+    || params.environments.length !== 0
     || !Array.isArray(params.input)
-    || !params.input.every(validateUserInput)
+    || !params.input.every(isCodexUserInput)
     || !validateAdditionalContext(params.additionalContext)
     || !isRecord(params.responsesapiClientMetadata)
     || !hasExactKeys(params.responsesapiClientMetadata, [
@@ -245,7 +354,11 @@ function validateTurnStartParams(value: unknown): asserts value is CodexTurnStar
 }
 
 function validateThreadListParams(value: unknown): asserts value is CodexThreadListParams {
-  const params = requireExactIdentityParams(value, ['limit', 'cwd', 'sourceKinds'])
+  if (!isRecord(value)) invalidParams()
+  const archiveReadback = Object.prototype.hasOwnProperty.call(value, 'archived')
+  const params = requireExactIdentityParams(value, archiveReadback
+    ? ['limit', 'cwd', 'sourceKinds', 'archived', 'cursor', 'useStateDbOnly']
+    : ['limit', 'cwd', 'sourceKinds'])
   if (
     !Number.isSafeInteger(params.limit)
     || (params.limit as number) <= 0
@@ -253,6 +366,11 @@ function validateThreadListParams(value: unknown): asserts value is CodexThreadL
     || !Array.isArray(params.sourceKinds)
     || params.sourceKinds.length !== 1
     || params.sourceKinds[0] !== 'vscode'
+    || (archiveReadback && (
+      typeof params.archived !== 'boolean'
+      || (params.cursor !== null && typeof params.cursor !== 'string')
+      || params.useStateDbOnly !== true
+    ))
   ) invalidParams()
 }
 
@@ -320,11 +438,28 @@ function startNativeId(method: StartMethod, result: unknown): string {
     : normalizeTurnStartResult(result).turn.id
 }
 
+const ACTIVE_SERVER_REQUEST_LIMIT = 2_048
+
+function canonicalServerRequestId(value: number | string): string {
+  const normalized = typeof value === 'number' ? String(value) : value.trim()
+  if (!normalized) throw new CodexAppServerClientError('server_request_id_invalid')
+  return normalized
+}
+
 export class CodexAppServerClient implements CodexNativeRuntime {
   private readonly listeners = new Set<(notification: CodexNativeNotification) => void>()
   private readonly pending = new Map<number, PendingRequest>()
+  private readonly serverResponseWrites = new Set<string>()
+  private readonly serverRequestIdentities = new Map<string, {
+    codexThreadId: string
+    codexTurnId: string
+    codexCallId: string
+  }>()
+  private readonly admissions = new Set<Promise<unknown>>()
+  private readonly inboundContinuations = new Set<Promise<unknown>>()
   private nextRpcId = 1
   private inboundChain: Promise<void> = Promise.resolve()
+  private closeSettlement: Promise<void> | null = null
   private closed = false
   private handshakeState: 'uninitialized' | 'initializing' | 'initialized' = 'uninitialized'
   private bootThreadListOpen = true
@@ -337,6 +472,8 @@ export class CodexAppServerClient implements CodexNativeRuntime {
     connectionEpoch: string
     requestTimeoutMs: number
     startDispatchPort: CodexStartDispatchPort
+    manualCompactionDispatchPort?: CodexManualCompactionDispatchPort
+    threadArchiveDispatchPort?: CodexThreadArchiveDispatchPort
     inboundFramePort: CodexInboundFramePort
     threadArchiveAuthorizationPort: CodexThreadArchiveAuthorizationPort
   }) {
@@ -346,21 +483,20 @@ export class CodexAppServerClient implements CodexNativeRuntime {
       || options.requestTimeoutMs <= 0
     ) throw new CodexAppServerClientError('client_options_invalid')
     this.unsubscribeLine = options.transport.onLine((line) => {
+      if (this.closed) return
       this.inboundChain = this.inboundChain
         .then(() => this.handleLine(line))
         .catch((error) => this.closeForProtocolFailure(error))
     })
     this.unsubscribeClose = options.transport.onClose((error) => {
-      void this.handleConnectionClosed(error)
+      this.queueConnectionClose(error)
     })
     this.unsubscribeInboundRelease = options.inboundFramePort.attachReleasePort?.({
       broadcastNotification: (notification) => {
-        for (const listener of this.listeners) listener(notification)
+        this.broadcastNotification(notification)
       },
-      respondServerRequest: (requestId, result) => {
-        this.options.transport.write(`${JSON.stringify({ id: requestId, result })}\n`, (error) => {
-          if (error) this.closeForProtocolFailure(error)
-        })
+      respondServerRequest: (requestId, result, deliveryAttempt) => {
+        this.writeServerRequestResponse(requestId, result, deliveryAttempt)
       },
       failProtocol: (error) => this.closeForProtocolFailure(error),
     }) || (() => undefined)
@@ -378,10 +514,11 @@ export class CodexAppServerClient implements CodexNativeRuntime {
         clientInfo: {
           name: 'ready_codex_experiment',
           title: 'Ready Codex Runtime',
-          version: '0.7.5',
+          version: APP_VERSION,
         },
         capabilities: {
           experimentalApi: true,
+          optOutNotificationMethods: CODEX_OPT_OUT_NOTIFICATION_METHODS,
           requestAttestation: false,
         },
       }, normalizeInitializeResult)
@@ -415,6 +552,18 @@ export class CodexAppServerClient implements CodexNativeRuntime {
       throw new CodexAppServerClientError('thread_list_outside_boot_reconciliation')
     }
     validateThreadListParams(params)
+    if (params.archived !== undefined) {
+      if (!this.options.threadArchiveDispatchPort) {
+        throw new CodexAppServerClientError('thread_archive_dispatch_port_missing')
+      }
+      await this.options.threadArchiveDispatchPort.assertReadbackListEligible({
+        cwd: params.cwd,
+        sourceKinds: params.sourceKinds,
+        archived: params.archived,
+        cursor: params.cursor as string | null,
+        useStateDbOnly: params.useStateDbOnly as true,
+      })
+    }
     return this.request('thread/list', params, normalizeThreadListResult) as Promise<{
       data: CodexThread[]
       nextCursor: string | null
@@ -446,6 +595,9 @@ export class CodexAppServerClient implements CodexNativeRuntime {
   async threadArchive(params: { threadId: string }): Promise<Record<string, never>> {
     const exact = requireExactIdentityParams(params, ['threadId'])
     if (!nonEmptyString(exact.threadId)) invalidParams()
+    if (!this.options.threadArchiveDispatchPort) {
+      throw new CodexAppServerClientError('thread_archive_dispatch_port_missing')
+    }
     await this.options.threadArchiveAuthorizationPort.assertEligible(exact.threadId)
     return this.request('thread/archive', params, normalizeEmptyResult) as Promise<Record<string, never>>
   }
@@ -453,6 +605,9 @@ export class CodexAppServerClient implements CodexNativeRuntime {
   async threadCompactStart(params: { threadId: string }): Promise<Record<string, never>> {
     const exact = requireExactIdentityParams(params, ['threadId'])
     if (!nonEmptyString(exact.threadId)) invalidParams()
+    if (!this.options.manualCompactionDispatchPort) {
+      throw new CodexAppServerClientError('manual_compaction_dispatch_port_missing')
+    }
     return this.request('thread/compact/start', params, normalizeEmptyResult) as Promise<Record<string, never>>
   }
 
@@ -477,47 +632,18 @@ export class CodexAppServerClient implements CodexNativeRuntime {
     return () => this.listeners.delete(listener)
   }
 
-  async settleRecoveredStartAccepted(input: StartDispatchIdentity & {
-    result: unknown
-    responsePending: true
-  }): Promise<void> {
-    const request = this.requirePendingStart(input)
-    if (request.startResponseKind !== 'none') {
-      throw new CodexAppServerClientError('start_response_already_received')
+  async shutdown(error: Error = new CodexAppServerClientError('connection_closed')): Promise<void> {
+    this.queueConnectionClose(error)
+    const settlement = this.closeSettlement
+    try {
+      await settlement
+    } catch (closeError) {
+      if (this.closeSettlement === settlement) this.closeSettlement = null
+      throw closeError
+    } finally {
+      this.dispose()
+      this.listeners.clear()
     }
-    request.startResponseKind = 'accepted'
-    const normalized = request.responseNormalizer(input.result)
-    const nativeId = startNativeId(input.method, input.result)
-    await this.options.startDispatchPort.reconcileAccepted({
-      connectionEpoch: input.connectionEpoch,
-      rpcId: input.rpcId,
-      method: input.method,
-      bindingId: input.bindingId,
-      nativeId,
-      nativeResult: input.result,
-      responseDigest: sha256(JSON.stringify(input.result)),
-      responsePending: true,
-    })
-    this.finishPending(request)
-    request.resolve(normalized)
-  }
-
-  async settleRecoveredStartProvenAbsent(input: StartDispatchIdentity & {
-    evidenceDigest: string
-  }): Promise<void> {
-    if (!nonEmptyString(input.evidenceDigest)) {
-      throw new CodexAppServerClientError('reconciliation_evidence_invalid')
-    }
-    const request = this.requirePendingStart(input)
-    if (request.startResponseKind === 'accepted') {
-      throw new CodexAppServerClientError('accepted_start_cannot_be_proven_absent')
-    }
-    this.finishPending(request)
-    request.reject(new CodexAppServerClientError('start_delivery_proven_absent', {
-      evidenceDigest: input.evidenceDigest,
-      method: input.method,
-      bindingId: input.bindingId,
-    }))
   }
 
   dispose(): void {
@@ -542,21 +668,59 @@ export class CodexAppServerClient implements CodexNativeRuntime {
     const line = `${JSON.stringify(frame)}\n`
     const requestDigest = sha256(line)
     const startMethod = method === 'thread/start' || method === 'turn/start' ? method : null
+    const manualMethod = method === 'thread/compact/start'
+    const archiveMethod = method === 'thread/archive'
     if (startMethod) {
       if (!bindingId) throw new CodexAppServerClientError('start_binding_identity_missing')
-      const activation = await this.options.startDispatchPort.activate({
+      const bindingLookupKey = bindingId
+      const activation = await this.trackAdmission(() => this.options.startDispatchPort.activate({
         connectionEpoch: this.options.connectionEpoch,
         rpcId: id,
         method: startMethod,
-        bindingLookupKey: bindingId,
+        bindingLookupKey,
         requestDigest,
-      })
+      }))
       if (!nonEmptyString(activation.bindingId)) {
         throw new CodexAppServerClientError('start_binding_identity_invalid')
       }
       bindingId = activation.bindingId
+    } else if (manualMethod) {
+      const port = this.options.manualCompactionDispatchPort
+      if (!port || !isRecord(params) || !nonEmptyString(params.threadId)) {
+        throw new CodexAppServerClientError('manual_compaction_dispatch_identity_missing')
+      }
+      const codexThreadId = params.threadId
+      const activation = await this.trackAdmission(() => port.activate({
+        connectionEpoch: this.options.connectionEpoch,
+        rpcId: id,
+        codexThreadId,
+        requestDigest,
+      }))
+      if (!nonEmptyString(activation.manualCompactionId)) {
+        throw new CodexAppServerClientError('manual_compaction_dispatch_identity_invalid')
+      }
+      bindingId = activation.manualCompactionId
+    } else if (archiveMethod) {
+      const port = this.options.threadArchiveDispatchPort
+      if (!port || !isRecord(params) || !nonEmptyString(params.threadId)) {
+        throw new CodexAppServerClientError('thread_archive_dispatch_identity_missing')
+      }
+      const codexThreadId = params.threadId
+      const activation = await this.trackAdmission(() => port.activate({
+        connectionEpoch: this.options.connectionEpoch,
+        rpcId: id,
+        codexThreadId,
+        requestDigest,
+      }))
+      if (!nonEmptyString(activation.archiveIntentId)) {
+        throw new CodexAppServerClientError('thread_archive_dispatch_identity_invalid')
+      }
+      bindingId = activation.archiveIntentId
     }
 
+    if (this.closed) throw new CodexAppServerClientError('connection_closed')
+
+    let trackedRequest: PendingRequest | null = null
     const result = new Promise<unknown>((resolve, reject) => {
       const request: PendingRequest = {
         id,
@@ -568,13 +732,33 @@ export class CodexAppServerClient implements CodexNativeRuntime {
         responseNormalizer,
         timer: null,
       }
-      request.timer = setTimeout(() => void this.handleTimeout(request), this.options.requestTimeoutMs)
+      trackedRequest = request
+      request.timer = setTimeout(() => {
+        void this.handleTimeout(request).catch((error) => this.closeForProtocolFailure(error))
+      }, this.options.requestTimeoutMs)
       this.pending.set(id, request)
     })
 
     try {
+      if (manualMethod && bindingId) {
+        await this.options.manualCompactionDispatchPort?.markWriteAttempted({
+          connectionEpoch: this.options.connectionEpoch,
+          rpcId: id,
+          manualCompactionId: bindingId,
+        })
+      } else if (archiveMethod && bindingId) {
+        await this.options.threadArchiveDispatchPort?.markWriteAttempted({
+          connectionEpoch: this.options.connectionEpoch,
+          rpcId: id,
+          archiveIntentId: bindingId,
+        })
+      }
+      if (this.closed || this.pending.get(id) !== trackedRequest) return result
       this.options.transport.write(line, (error) => {
+        const request = this.pending.get(id)
+        if (this.closed || request !== trackedRequest) return
         if (startMethod && bindingId) {
+          if (request.startResponseKind !== 'none') return
           const update = error
             ? this.options.startDispatchPort.markUnresolved({
                 connectionEpoch: this.options.connectionEpoch,
@@ -590,7 +774,53 @@ export class CodexAppServerClient implements CodexNativeRuntime {
                 bindingId,
                 childWriteDigest: requestDigest,
               })
-          void update.catch((portError) => this.closeForProtocolFailure(portError))
+          void update.then(() => {
+            if (error) this.closeForProtocolFailure(
+              new CodexAppServerClientError('start_delivery_unknown', {
+                method: startMethod,
+                reason: 'child_write_error',
+              }),
+            )
+          }).catch((portError) => this.closeForProtocolFailure(portError))
+          return
+        }
+        if (manualMethod && bindingId) {
+          const update = error
+            ? this.options.manualCompactionDispatchPort?.markUnresolved({
+                connectionEpoch: this.options.connectionEpoch,
+                rpcId: id,
+                manualCompactionId: bindingId,
+                reason: 'child_write_error',
+              })
+            : this.options.manualCompactionDispatchPort?.markChildWriteConfirmed({
+                connectionEpoch: this.options.connectionEpoch,
+                rpcId: id,
+                manualCompactionId: bindingId,
+                childWriteDigest: requestDigest,
+              })
+          void update?.catch((portError) => this.closeForProtocolFailure(portError))
+          if (error) this.rejectOrdinaryRequest(id, new CodexAppServerClientError('child_write_failed'))
+          return
+        }
+        if (archiveMethod && bindingId) {
+          const update = error
+            ? this.options.threadArchiveDispatchPort?.markUnresolved({
+                connectionEpoch: this.options.connectionEpoch,
+                rpcId: id,
+                archiveIntentId: bindingId,
+                reason: 'child_write_error',
+              })
+            : this.options.threadArchiveDispatchPort?.markChildWriteConfirmed({
+                connectionEpoch: this.options.connectionEpoch,
+                rpcId: id,
+                archiveIntentId: bindingId,
+                childWriteDigest: requestDigest,
+              })
+          void update?.catch((portError) => this.closeForProtocolFailure(portError))
+          if (error) {
+            this.rejectOrdinaryRequest(id, new CodexAppServerClientError('child_write_failed'))
+            this.closeForProtocolFailure(error)
+          }
           return
         }
         if (error) this.rejectOrdinaryRequest(id, new CodexAppServerClientError('child_write_failed'))
@@ -603,7 +833,35 @@ export class CodexAppServerClient implements CodexNativeRuntime {
           method: startMethod,
           bindingId,
           reason: 'child_write_error',
-        }).catch((portError) => this.closeForProtocolFailure(portError))
+        }).then(() => this.closeForProtocolFailure(
+          new CodexAppServerClientError('start_delivery_unknown', {
+            method: startMethod,
+            reason: 'child_write_error',
+          }),
+        )).catch((portError) => this.closeForProtocolFailure(portError))
+      } else if (manualMethod && bindingId) {
+        await this.options.manualCompactionDispatchPort?.markUnresolved({
+          connectionEpoch: this.options.connectionEpoch,
+          rpcId: id,
+          manualCompactionId: bindingId,
+          reason: 'child_write_error',
+        })
+        this.rejectOrdinaryRequest(
+          id,
+          error instanceof Error ? error : new CodexAppServerClientError('child_write_failed'),
+        )
+      } else if (archiveMethod && bindingId) {
+        await this.options.threadArchiveDispatchPort?.markUnresolved({
+          connectionEpoch: this.options.connectionEpoch,
+          rpcId: id,
+          archiveIntentId: bindingId,
+          reason: 'child_write_error',
+        })
+        const failure = error instanceof Error
+          ? error
+          : new CodexAppServerClientError('child_write_failed')
+        this.rejectOrdinaryRequest(id, failure)
+        this.closeForProtocolFailure(failure)
       } else {
         this.rejectOrdinaryRequest(
           id,
@@ -622,6 +880,7 @@ export class CodexAppServerClient implements CodexNativeRuntime {
   }
 
   private async handleTimeout(request: PendingRequest): Promise<void> {
+    if (this.pending.get(request.id) !== request) return
     request.timer = null
     if (request.method === 'thread/start' || request.method === 'turn/start') {
       await this.options.startDispatchPort.markUnresolved({
@@ -631,10 +890,38 @@ export class CodexAppServerClient implements CodexNativeRuntime {
         bindingId: request.bindingId as string,
         reason: 'response_timeout',
       })
+      this.closeForProtocolFailure(new CodexAppServerClientError('start_delivery_unknown', {
+        method: request.method,
+        reason: 'response_timeout',
+      }))
       return
     }
-    this.pending.delete(request.id)
-    request.reject(new CodexAppServerClientError('rpc_timeout', { method: request.method }))
+    if (request.method === 'thread/compact/start') {
+      await this.options.manualCompactionDispatchPort?.markUnresolved({
+        connectionEpoch: this.options.connectionEpoch,
+        rpcId: request.id,
+        manualCompactionId: request.bindingId as string,
+        reason: 'response_timeout',
+      })
+      this.finishPending(request)
+      request.reject(new CodexAppServerClientError('rpc_timeout', { method: request.method }))
+      return
+    }
+    if (request.method === 'thread/archive') {
+      await this.options.threadArchiveDispatchPort?.markUnresolved({
+        connectionEpoch: this.options.connectionEpoch,
+        rpcId: request.id,
+        archiveIntentId: request.bindingId as string,
+        reason: 'response_timeout',
+      })
+      const error = new CodexAppServerClientError('rpc_timeout', { method: request.method })
+      this.finishPending(request)
+      request.reject(error)
+      this.closeForProtocolFailure(error)
+      return
+    }
+    const error = new CodexAppServerClientError('rpc_timeout', { method: request.method })
+    this.closeForProtocolFailure(error)
   }
 
   private async handleLine(line: string): Promise<void> {
@@ -661,11 +948,15 @@ export class CodexAppServerClient implements CodexNativeRuntime {
     const id = frame.id as number
     const request = this.pending.get(id)
     if (!request) {
-      if (!hasExactKeys(frame, ['id', 'result'])) {
+      if (!hasExactKeys(frame, ['id', 'result']) && !hasExactKeys(frame, ['id', 'error'])) {
         throw new CodexAppServerClientError('unknown_response_id')
       }
       const consumed = await this.consumeLateStartResponse(id, frame)
-      if (!consumed) throw new CodexAppServerClientError('unknown_response_id')
+      if (!consumed
+        && !await this.consumeLateManualCompactionResponse(id, frame)
+        && !await this.consumeLateThreadArchiveResponse(id, frame)) {
+        throw new CodexAppServerClientError('unknown_response_id')
+      }
       return
     }
     if (
@@ -675,6 +966,46 @@ export class CodexAppServerClient implements CodexNativeRuntime {
 
     if (request.method === 'thread/start' || request.method === 'turn/start') {
       await this.handleStartResponse(request, frame)
+      return
+    }
+    if (request.method === 'thread/compact/start') {
+      const responseDigest = sha256(JSON.stringify(frame))
+      const responseKind = 'error' in frame ? 'rejected' as const : 'accepted' as const
+      if (responseKind === 'accepted') request.responseNormalizer(frame.result)
+      await this.options.manualCompactionDispatchPort?.reconcileResponse({
+        connectionEpoch: this.options.connectionEpoch,
+        rpcId: request.id,
+        manualCompactionId: request.bindingId as string,
+        responseKind,
+        responseDigest,
+      })
+      if (this.closed || this.pending.get(request.id) !== request) return
+      this.finishPending(request)
+      if (responseKind === 'rejected') {
+        request.reject(new CodexAppServerClientError('rpc_rejected', frame.error))
+      } else {
+        request.resolve({})
+      }
+      return
+    }
+    if (request.method === 'thread/archive') {
+      const responseDigest = sha256(JSON.stringify(frame))
+      const responseKind = 'error' in frame ? 'rejected' as const : 'accepted' as const
+      if (responseKind === 'accepted') request.responseNormalizer(frame.result)
+      await this.options.threadArchiveDispatchPort?.reconcileResponse({
+        connectionEpoch: this.options.connectionEpoch,
+        rpcId: request.id,
+        archiveIntentId: request.bindingId as string,
+        responseKind,
+        responseDigest,
+      })
+      if (this.closed || this.pending.get(request.id) !== request) return
+      this.finishPending(request)
+      if (responseKind === 'rejected') {
+        request.reject(new CodexAppServerClientError('rpc_rejected', frame.error))
+      } else {
+        request.resolve({})
+      }
       return
     }
     this.finishPending(request)
@@ -712,6 +1043,11 @@ export class CodexAppServerClient implements CodexNativeRuntime {
       if (resolution === 'proven_absent') {
         this.finishPending(request)
         request.reject(new CodexAppServerClientError('start_delivery_proven_absent', frame.error))
+      } else {
+        this.closeForProtocolFailure(new CodexAppServerClientError('start_delivery_unknown', {
+          method: identity.method,
+          reason: 'typed_rejection_unknown',
+        }))
       }
       return
     }
@@ -731,11 +1067,11 @@ export class CodexAppServerClient implements CodexNativeRuntime {
       responseDigest,
       responsePending: false,
     })
-    void reconciliation.then(() => {
-      if (this.pending.get(request.id) !== request) return
+    this.trackInboundContinuation(reconciliation.then(() => {
+      if (this.closed || this.pending.get(request.id) !== request) return
       this.finishPending(request)
       request.resolve(normalized)
-    }).catch((error) => this.closeForProtocolFailure(error))
+    }))
   }
 
   private async consumeLateStartResponse(id: number, frame: JsonObject): Promise<boolean> {
@@ -759,7 +1095,66 @@ export class CodexAppServerClient implements CodexNativeRuntime {
     return false
   }
 
+  private async consumeLateManualCompactionResponse(id: number, frame: JsonObject): Promise<boolean> {
+    const port = this.options.manualCompactionDispatchPort
+    if (!port) return false
+    const responseKind = 'error' in frame ? 'rejected' as const : 'accepted' as const
+    if (responseKind === 'accepted') {
+      try {
+        normalizeEmptyResult(frame.result)
+      } catch {
+        return false
+      }
+    }
+    return port.consumeLateResponse({
+      connectionEpoch: this.options.connectionEpoch,
+      rpcId: id,
+      responseKind,
+      responseDigest: sha256(JSON.stringify(frame)),
+    })
+  }
+
+  private async consumeLateThreadArchiveResponse(id: number, frame: JsonObject): Promise<boolean> {
+    const port = this.options.threadArchiveDispatchPort
+    if (!port) return false
+    const responseKind = 'error' in frame ? 'rejected' as const : 'accepted' as const
+    if (responseKind === 'accepted') {
+      try {
+        normalizeEmptyResult(frame.result)
+      } catch {
+        return false
+      }
+    }
+    return port.consumeLateResponse({
+      connectionEpoch: this.options.connectionEpoch,
+      rpcId: id,
+      responseKind,
+      responseDigest: sha256(JSON.stringify(frame)),
+    })
+  }
+
   private async handleNotification(frame: JsonObject): Promise<void> {
+    if (frame.method === 'thread/archived') {
+      if (!isRecord(frame.params)
+        || !nonEmptyString(frame.params.threadId)) {
+        throw new CodexAppServerClientError('notification_invalid_params', {
+          method: 'thread/archived',
+        })
+      }
+      const reconciled = await this.options.threadArchiveDispatchPort?.reconcileArchivedNotification({
+        connectionEpoch: this.options.connectionEpoch,
+        codexThreadId: frame.params.threadId,
+        notificationDigest: sha256(JSON.stringify(frame)),
+      })
+      if (reconciled !== true) {
+        throw new CodexAppServerClientError('thread_archive_notification_unowned')
+      }
+      this.options.inboundFramePort.retireThread?.(
+        this.options.connectionEpoch,
+        frame.params.threadId,
+      )
+      return
+    }
     const normalized = normalizeCodexNativeNotification(frame)
     if (normalized.kind === 'ignored') return
     if (normalized.kind !== 'accepted') {
@@ -773,9 +1168,10 @@ export class CodexAppServerClient implements CodexNativeRuntime {
       frame,
       notification: normalized.notification,
     })
+    if (this.closed) return
     if (disposition === 'buffered') return
     if (disposition !== 'broadcast') throw new CodexAppServerClientError('notification_route_invalid')
-    for (const listener of this.listeners) listener(normalized.notification)
+    this.broadcastNotification(normalized.notification)
   }
 
   private async handleServerRequest(frame: JsonObject): Promise<void> {
@@ -783,31 +1179,101 @@ export class CodexAppServerClient implements CodexNativeRuntime {
       !hasExactKeys(frame, ['id', 'method', 'params'])
       || (typeof frame.id !== 'string' && !Number.isSafeInteger(frame.id))
       || frame.method !== 'item/tool/call'
+      || !isRecord(frame.params)
+      || !nonEmptyString(frame.params.threadId)
+      || !nonEmptyString(frame.params.turnId)
+      || !nonEmptyString(frame.params.callId)
     ) throw new CodexAppServerClientError('server_request_invalid')
+    const serverRequestKey = canonicalServerRequestId(frame.id as number | string)
+    if (this.serverRequestIdentities.has(serverRequestKey)) {
+      throw new CodexAppServerClientError('server_request_duplicate')
+    }
+    if (this.serverRequestIdentities.size >= ACTIVE_SERVER_REQUEST_LIMIT) {
+      throw new CodexAppServerClientError('server_request_capacity_exhausted')
+    }
+    this.serverRequestIdentities.set(serverRequestKey, {
+      codexThreadId: frame.params.threadId as string,
+      codexTurnId: frame.params.turnId as string,
+      codexCallId: frame.params.callId as string,
+    })
     const routed = await this.options.inboundFramePort.routeServerRequest({
       connectionEpoch: this.options.connectionEpoch,
       requestId: frame.id as number | string,
       method: 'item/tool/call',
       params: frame.params,
     })
+    if (this.closed) return
     if (routed.disposition === 'buffered') return
     if (routed.disposition !== 'respond') throw new CodexAppServerClientError('server_request_route_invalid')
-    this.options.transport.write(`${JSON.stringify({ id: frame.id, result: routed.result })}\n`, (error) => {
-      if (error) this.closeForProtocolFailure(error)
-    })
+    this.writeServerRequestResponse(
+      frame.id as number | string,
+      routed.result,
+      routed.deliveryAttempt,
+    )
   }
 
-  private requirePendingStart(input: StartDispatchIdentity): PendingRequest {
-    if (input.connectionEpoch !== this.options.connectionEpoch) {
-      throw new CodexAppServerClientError('reconciliation_epoch_mismatch')
+  private writeServerRequestResponse(
+    requestId: number | string,
+    result: unknown,
+    deliveryAttempt: CodexToolResponseDeliveryAttemptIdentity,
+  ): void {
+    if (this.closed) return
+    const responseKey = canonicalServerRequestId(requestId)
+    if (this.serverResponseWrites.has(responseKey)) {
+      this.closeForProtocolFailure(new CodexAppServerClientError('server_response_duplicate'))
+      return
     }
-    const request = this.pending.get(input.rpcId)
+    const requestIdentity = this.serverRequestIdentities.get(
+      responseKey,
+    )
     if (
-      !request
-      || request.method !== input.method
-      || request.bindingId !== input.bindingId
-    ) throw new CodexAppServerClientError('reconciliation_identity_mismatch')
-    return request
+      !requestIdentity
+      || deliveryAttempt.codexThreadId !== requestIdentity.codexThreadId
+      || deliveryAttempt.codexTurnId !== requestIdentity.codexTurnId
+      || deliveryAttempt.codexCallId !== requestIdentity.codexCallId
+      || deliveryAttempt.connectionEpoch !== this.options.connectionEpoch
+      || deliveryAttempt.requestRpcId !== responseKey
+      || deliveryAttempt.toolResponseDigest !== digestCanonicalJson(result)
+    ) {
+      this.closeForProtocolFailure(
+        new CodexAppServerClientError('server_response_delivery_identity_mismatch'),
+      )
+      return
+    }
+    this.serverResponseWrites.add(responseKey)
+    this.options.transport.write(`${JSON.stringify({ id: requestId, result })}\n`, (error) => {
+      if (
+        this.closed
+        || !this.serverResponseWrites.has(responseKey)
+        || this.serverRequestIdentities.get(responseKey) !== requestIdentity
+      ) return
+      if (error) {
+        this.closeForProtocolFailure(error)
+        return
+      }
+      let confirmation: void | PromiseLike<void>
+      try {
+        confirmation = this.options.inboundFramePort.confirmServerResponseTransportWrite(deliveryAttempt)
+      } catch (confirmError) {
+        this.closeForProtocolFailure(confirmError)
+        return
+      }
+      void Promise.resolve(confirmation).then(() => {
+        if (
+          this.closed
+          || !this.serverResponseWrites.has(responseKey)
+          || this.serverRequestIdentities.get(responseKey) !== requestIdentity
+        ) return
+        this.serverResponseWrites.delete(responseKey)
+        this.serverRequestIdentities.delete(responseKey)
+      }, (confirmError) => {
+        this.closeForProtocolFailure(
+          confirmError instanceof Error
+            ? confirmError
+            : new CodexAppServerClientError('server_response_delivery_ack_failed'),
+        )
+      })
+    })
   }
 
   private finishPending(request: PendingRequest): void {
@@ -823,26 +1289,69 @@ export class CodexAppServerClient implements CodexNativeRuntime {
     request.reject(error)
   }
 
+  private trackAdmission<T>(operation: () => Promise<T>): Promise<T> {
+    const admission = operation()
+    this.admissions.add(admission)
+    void admission.finally(() => this.admissions.delete(admission)).catch(() => undefined)
+    return admission
+  }
+
+  private trackInboundContinuation(continuation: Promise<unknown>): void {
+    this.inboundContinuations.add(continuation)
+    void continuation.then(() => {
+      this.inboundContinuations.delete(continuation)
+    }, (error) => {
+      this.inboundContinuations.delete(continuation)
+      this.closeForProtocolFailure(error)
+    }).catch(() => undefined)
+  }
+
   private async handleConnectionClosed(error: Error | null): Promise<void> {
-    if (this.closed) return
-    this.closed = true
-    await this.options.startDispatchPort.markConnectionClosed(this.options.connectionEpoch)
-    for (const request of this.pending.values()) {
+    this.serverResponseWrites.clear()
+    this.serverRequestIdentities.clear()
+    await Promise.allSettled([...this.admissions])
+    const audits: Promise<unknown>[] = [
+      Promise.resolve().then(() => this.options.startDispatchPort.markConnectionClosed(
+        this.options.connectionEpoch,
+      )),
+    ]
+    if (this.options.manualCompactionDispatchPort) {
+      audits.push(Promise.resolve().then(() => (
+        this.options.manualCompactionDispatchPort?.markConnectionClosed(this.options.connectionEpoch)
+      )))
+    }
+    if (this.options.threadArchiveDispatchPort) {
+      audits.push(Promise.resolve().then(() => (
+        this.options.threadArchiveDispatchPort?.markConnectionClosed(this.options.connectionEpoch)
+      )))
+    }
+    const results = await Promise.allSettled(audits)
+    await Promise.allSettled([...this.inboundContinuations])
+    const requests = [...this.pending.values()]
+    for (const request of requests) {
       if (request.timer) clearTimeout(request.timer)
       request.timer = null
-      if (request.method === 'thread/start' || request.method === 'turn/start') {
-        await this.options.startDispatchPort.markUnresolved({
-          connectionEpoch: this.options.connectionEpoch,
-          rpcId: request.id,
-          method: request.method,
-          bindingId: request.bindingId as string,
-          reason: 'connection_closed',
-        })
-        continue
-      }
       this.pending.delete(request.id)
       request.reject(error || new CodexAppServerClientError('connection_closed'))
     }
+    const failures = results.flatMap((result) => result.status === 'rejected' ? [result.reason] : [])
+    if (failures.length > 0) throw new AggregateError(failures, 'connection_close_audit_failed')
+  }
+
+  private broadcastNotification(notification: CodexNativeNotification): void {
+    for (const listener of [...this.listeners]) {
+      try {
+        void Promise.resolve(listener(notification)).catch(() => undefined)
+      } catch { /* observer failures do not own the protocol */ }
+    }
+  }
+
+  private queueConnectionClose(error: Error | null): void {
+    if (this.closeSettlement) return
+    this.closed = true
+    this.closeSettlement = this.inboundChain
+      .then(() => this.handleConnectionClosed(error))
+    void this.closeSettlement.catch(() => undefined)
   }
 
   private closeForProtocolFailure(error: unknown): void {
@@ -850,12 +1359,14 @@ export class CodexAppServerClient implements CodexNativeRuntime {
     const reason = error instanceof CodexAppServerClientError
       ? error.code
       : 'protocol_failure'
-    this.options.transport.close(
-      reason,
-      error instanceof CodexAppServerClientError ? error.details : undefined,
-    )
-    void this.handleConnectionClosed(
+    this.queueConnectionClose(
       error instanceof Error ? error : new CodexAppServerClientError(reason),
     )
+    try {
+      this.options.transport.close(
+        reason,
+        error instanceof CodexAppServerClientError ? error.details : undefined,
+      )
+    } catch { /* local close ownership is authoritative */ }
   }
 }

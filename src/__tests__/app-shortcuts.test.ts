@@ -11,6 +11,7 @@ test('global shortcut resolver matches the shortcuts shown in Settings', () => {
   assert.equal(resolveReadyAppShortcut({ key: 'b', metaKey: true }), 'toggle-sidebar')
   assert.equal(resolveReadyAppShortcut({ key: 't', metaKey: true }), 'new-document')
   assert.equal(resolveReadyAppShortcut({ key: 's', metaKey: true }), 'save-document')
+  assert.equal(resolveReadyAppShortcut({ key: 's', ctrlKey: true }), 'save-document')
   assert.equal(resolveReadyAppShortcut({ key: 'w', metaKey: true }), 'close-document')
   assert.equal(resolveReadyAppShortcut({ key: '\\', metaKey: true }), 'toggle-theme')
   assert.equal(resolveReadyAppShortcut({ key: 'Home' }), 'open-ready')

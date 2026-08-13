@@ -13,7 +13,6 @@ const MINIMAL_FIXTURES: Partial<Record<(typeof BROWSER_PUBLIC_TOOL_NAMES)[number
   browser_type: { text: 'fixture' },
   browser_fill_form: { fields: [] },
   browser_press_key: { key: 'Enter' },
-  browser_request_takeover: { reason: 'verification required' },
   browser_upload: { target_id: 'upload-target', attachment_id: 'attachment-1' },
   browser_research: { action: 'start', work_items: [{ requirement: 'fixture' }] },
   browser_download: { mode: 'page', url: 'https://example.com/fixture' },
@@ -24,9 +23,9 @@ const MINIMAL_FIXTURES: Partial<Record<(typeof BROWSER_PUBLIC_TOOL_NAMES)[number
   browser_permission: { action: 'status', site_request_id: 'site-request-fixture' },
 }
 
-test('the canonical schema map exactly matches the 32 public browser tools', () => {
+test('the canonical schema map exactly matches the 31 public browser tools', () => {
   assert.deepEqual(Object.keys(BROWSER_TOOL_SCHEMAS), BROWSER_PUBLIC_TOOL_NAMES)
-  assert.equal(new Set(BROWSER_PUBLIC_TOOL_NAMES).size, 32)
+  assert.equal(new Set(BROWSER_PUBLIC_TOOL_NAMES).size, 31)
 })
 
 test('every public browser schema derives a model parameter list', () => {

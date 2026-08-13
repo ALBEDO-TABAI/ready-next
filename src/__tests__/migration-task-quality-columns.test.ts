@@ -153,6 +153,7 @@ function baseRecord(overrides: Record<string, unknown> = {}) {
     taskId: 'task-q1',
     taskOrigin: 'legacy',
     scopeId: 'scope-1',
+    messageVisibilityEpoch: 0,
     runId: 'run-1',
     taskType: 'short_task',
     module: 'chat',

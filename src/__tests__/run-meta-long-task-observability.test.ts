@@ -1,12 +1,20 @@
 import assert from 'node:assert/strict'
-import test from 'node:test'
+import test, { after, before } from 'node:test'
 
 import { AgentSdkRuntime, type AgentSdkRuntimeDeps } from '../main/modules/agent-control/runtime-core/agent-sdk-runtime'
 import { createTaskBudgetRuntime } from '../main/modules/agent-control/task-projection/run-budget-policy'
 import { RunMetaRepository } from '../main/modules/agent-control/task-projection/run-meta-repository'
+import { __setScopeContextEpochDatabaseForTests } from '../main/modules/agent-control/session/scope-context-epoch'
 
 import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
 import { canonicalCoreCloseoutTestPort } from './helpers/canonical-core-closeout-test-port'
+
+before(() => {
+  __setScopeContextEpochDatabaseForTests({
+    getRawDb: () => ({ prepare: () => ({ get: () => undefined }) }) as never,
+  })
+})
+after(() => __setScopeContextEpochDatabaseForTests(null))
 
 test('run-meta-long-task-observability declares transitive sqlite ABI guard', (t) => {
   skipIfSqliteUnavailable(t, 'run-meta-long-task-observability transitive sqlite load')
@@ -111,6 +119,9 @@ async function runLongTaskWithRepository(
   runtime.setRuntime({
     ...canonicalCoreCloseoutTestPort(),
     getRunMetaRepository: () => repo,
+    getConversationScope: (scopeId: string) => scopeId === 'scope-run-meta'
+      ? { id: scopeId, messageVisibilityEpoch: 0 }
+      : null,
   } as never)
   runtime.newSession('butler::scope-run-meta', 'system prompt')
 
@@ -120,6 +131,7 @@ async function runLongTaskWithRepository(
     runId,
     {
       publicSessionId: 'scope-run-meta',
+      messageVisibilityEpoch: 0,
       taskId: 'task-run-meta',
       taskBudgetRuntime: createTaskBudgetRuntime('research'),
     },
@@ -137,6 +149,7 @@ test('Agent SDK scoped run writes long-task run_meta fields on close', async () 
   assert.ok(row)
   assert.equal(row.taskId, 'task-run-meta')
   assert.equal(row.scopeId, 'scope-run-meta')
+  assert.equal(row.messageVisibilityEpoch, 0)
   assert.equal(row.status, 'done')
   assert.equal(row.taskType, 'research')
   assert.equal(row.terminalReason, 'done')

@@ -3,6 +3,7 @@ import { emitRendererAgentMetric } from './rendererMetrics'
 import {
   collapseAdjacentDuplicateAssistantTail,
   generateResponseSegmentId,
+  normalizeSessionSlice,
   sessionKeyForScopeId,
   upsertStreamedSegmentCache,
   withSessionSliceAndActiveRuntimeMirror,
@@ -13,17 +14,15 @@ import {
 export function installRuntimeDriverStreamEvents(deps: {
   store: AgentStoreLike
   resolveScopeIdForRunPayload(payload: RunPayloadLike): string | null
-  getScopeRunStateFromState(state: any, scopeId: string | null | undefined): ScopeRunState | null
   refreshInfrastructureWatchdog(scopeId: string, requestId: string | null | undefined): void
   clearInfrastructureWatchdog(scopeId: string, requestId: string | null | undefined): void
-  reconcileCanonicalTerminalMessage(scopeId: string, runState: ScopeRunState | null, canonicalMessage: any, digest?: string | null): Promise<boolean>
-  finalizeScopeRunAfterStreamDone(scopeId: string, fallbackRunState: ScopeRunState | null): void
+  reconcileCanonicalTerminalMessage(scopeId: string, requestId: string, canonicalMessage: any, digest?: string | null): Promise<boolean>
+  finalizeScopeRunAfterStreamDone(scopeId: string, requestId: string): void
   upsertScopeRunState(scopeId: string, updater: (previous: ScopeRunState | null) => ScopeRunState): void
 }): () => void {
   const {
     store,
     resolveScopeIdForRunPayload,
-    getScopeRunStateFromState,
     refreshInfrastructureWatchdog,
     clearInfrastructureWatchdog,
     reconcileCanonicalTerminalMessage,
@@ -33,28 +32,44 @@ export function installRuntimeDriverStreamEvents(deps: {
   const cleanupStream = window.electronAPI.agent.onStream((data) => {
     const scopeId = resolveScopeIdForRunPayload(data)
     if (!scopeId) return
+    if (data.type !== 'done' && data.type !== 'text') return
+    if (data.type === 'text' && !data.chunk) return
+
+    const requestId = typeof data.runId === 'string' && data.runId.trim()
+      ? data.runId.trim()
+      : null
+    if (!requestId) return
+    const currentState = store.getState()
+    const ownerSessionId = sessionKeyForScopeId(currentState, scopeId)
+    const ownerSlice = normalizeSessionSlice(currentState.sessions?.[ownerSessionId])
+    const runState = ownerSlice.scopeRunStates[scopeId] || null
+    if (
+      !currentState.sessions?.[ownerSessionId]
+      || ownerSlice.conversationId !== scopeId
+      || ownerSlice.streamingRequestId !== requestId
+      || runState?.requestId !== requestId
+    ) return
 
     if (data.type === 'done') {
       // Stage X2.6 — any terminal event for this scope clears the
       // infrastructure-timeout watchdog so it doesn't fire a false
       // positive after a normal completion.
-      const runState = getScopeRunStateFromState(store.getState(), scopeId)
       void (async () => {
         try {
           if (data.canonicalMessage) {
-            clearInfrastructureWatchdog(scopeId, runState?.requestId || (typeof data.runId === 'string' ? data.runId : null))
+            clearInfrastructureWatchdog(scopeId, requestId)
             await reconcileCanonicalTerminalMessage(
               scopeId,
-              runState,
+              requestId,
               data.canonicalMessage,
               data.canonicalMessageDigest,
             )
-            finalizeScopeRunAfterStreamDone(scopeId, getScopeRunStateFromState(store.getState(), scopeId) || runState)
+            finalizeScopeRunAfterStreamDone(scopeId, requestId)
             return
           }
           emitRendererAgentMetric('renderer_done_without_canonical_terminal', {
             scopeId,
-            requestId: runState?.requestId || (typeof data.runId === 'string' ? data.runId : null),
+            requestId,
           })
         } catch (error) {
           emitRendererAgentMetric('renderer_assistant_done_finalize_failed', {
@@ -67,11 +82,7 @@ export function installRuntimeDriverStreamEvents(deps: {
       return
     }
 
-    if (data.type !== 'text' || !data.chunk) return
-
-    const currentState = store.getState()
-    const runState = getScopeRunStateFromState(currentState, scopeId)
-    refreshInfrastructureWatchdog(scopeId, runState?.requestId || (typeof data.runId === 'string' ? data.runId : null))
+    refreshInfrastructureWatchdog(scopeId, requestId)
     const previousMessage = runState?.responseMessageId
       ? currentState.messages.find((item: AgentMessage) => item.id === runState.responseMessageId) || null
       : null
@@ -103,7 +114,7 @@ export function installRuntimeDriverStreamEvents(deps: {
         timestamp: new Date(),
         meta: {
           transient: true,
-          runId: runState?.requestId || (typeof data.runId === 'string' ? data.runId : null),
+          runId: requestId,
           scopeId,
         },
       })
@@ -130,7 +141,7 @@ export function installRuntimeDriverStreamEvents(deps: {
         chunkForDisplay,
         nextBuffer,
         executionAgentId,
-        runState?.requestId || (typeof data.runId === 'string' ? data.runId : null),
+        requestId,
       )
       if (
         chunkForDisplay &&
@@ -144,7 +155,7 @@ export function installRuntimeDriverStreamEvents(deps: {
     upsertScopeRunState(scopeId, (previous) => ({
       scopeId,
       agent: previous?.agent || data.agent,
-      requestId: previous?.requestId || (typeof data.runId === 'string' ? data.runId : null),
+      requestId: previous?.requestId || requestId,
       phase: previous?.phase === 'takeover' ? previous.phase : 'responding',
       toolTrace: previous?.toolTrace || [],
       startedAt: previous?.startedAt || new Date().toISOString(),

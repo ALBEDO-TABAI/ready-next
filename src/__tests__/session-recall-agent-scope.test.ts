@@ -126,8 +126,17 @@ class FakeSessionRecallDb implements SessionRecallDatabaseAdapter {
 class FakeDatabaseManagerConnection implements DatabaseConnection {
   readonly conversations = new Map<string, ChatConversationRecord>()
   readonly metadataWrites: unknown[][] = []
+  inTransaction = false
 
   exec(sql: string): void {
+    if (sql === 'BEGIN IMMEDIATE') {
+      this.inTransaction = true
+      return
+    }
+    if (sql === 'COMMIT' || sql === 'ROLLBACK') {
+      this.inTransaction = false
+      return
+    }
     throw new Error(`Unexpected exec SQL: ${sql}`)
   }
 
@@ -189,7 +198,10 @@ class FakeDatabaseManagerConnection implements DatabaseConnection {
         ) {
           return { changes: 1 }
         }
-        if (normalized === 'UPDATE chat_conversations SET updated_at = ? WHERE id = ?') {
+        if (
+          normalized === 'UPDATE chat_conversations SET updated_at = ? WHERE id = ?' ||
+          normalized === 'UPDATE chat_conversations SET updated_at = ? WHERE id = ? AND closed_at IS NULL'
+        ) {
           const conversation = conversations.get(String(params[1]))
           if (conversation) conversation.updated_at = String(params[0])
           return { changes: conversation ? 1 : 0 }
@@ -206,7 +218,24 @@ class FakeDatabaseManagerConnection implements DatabaseConnection {
         throw new Error(`Unexpected run SQL: ${normalized}`)
       },
       get<T = unknown>(...params: unknown[]): T | undefined {
-        if (normalized === 'SELECT * FROM chat_conversations WHERE id = ? LIMIT 1') {
+        if (normalized === 'SELECT closed_at, message_visibility_epoch FROM chat_conversations WHERE id = ? LIMIT 1') {
+          return (conversations.has(String(params[0]))
+            ? { closed_at: null, message_visibility_epoch: 0 }
+            : undefined) as T | undefined
+        }
+        if (normalized === 'SELECT message_visibility_epoch FROM chat_messages WHERE id = ? LIMIT 1') {
+          return undefined
+        }
+        if (normalized.startsWith('SELECT 1 AS visible FROM chat_messages message')) {
+          return { visible: 1 } as T
+        }
+        if (normalized === 'SELECT id FROM chat_conversations WHERE id = ? AND closed_at IS NOT NULL LIMIT 1') {
+          return undefined
+        }
+        if (
+          normalized === 'SELECT * FROM chat_conversations WHERE id = ? LIMIT 1' ||
+          normalized === 'SELECT * FROM chat_conversations WHERE id = ? AND closed_at IS NULL LIMIT 1'
+        ) {
           return conversations.get(String(params[0])) as T | undefined
         }
         if (normalized.startsWith('SELECT * FROM chat_conversations WHERE source_kind = ?')) {

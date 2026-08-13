@@ -1,4 +1,4 @@
-import { createEmptyScopeRunState, getActiveScopeRunState, isForegroundBusyScopeRunState, phaseToToolTraceStatus } from './scopeRunState'
+import { getActiveScopeRunState, isForegroundBusyScopeRunState, phaseToToolTraceStatus } from './scopeRunState'
 import type { AgentMessage, ScopeRunState } from './types'
 
 export interface AgentStoreLike {
@@ -52,6 +52,7 @@ export function makeEmptySessionSlice(conversationId: string | null = null): Rec
     state: 'live',
     conversationId,
     aliasGeneration: null,
+    messageVisibilityEpoch: 0,
     inputValue: '',
   }
 }

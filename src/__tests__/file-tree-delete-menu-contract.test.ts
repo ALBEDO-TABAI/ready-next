@@ -4,7 +4,7 @@ import { resolve } from 'node:path'
 import test from 'node:test'
 
 function readWorkspaceFile(path: string): string {
-  // eslint-disable-next-line ready/no-source-grep-test -- reviewed UI contract: FileTree context-menu and drag affordances are closure-local; live surface tests cover the user behavior.
+
   return readFileSync(resolve(process.cwd(), path), 'utf8')
 }
 

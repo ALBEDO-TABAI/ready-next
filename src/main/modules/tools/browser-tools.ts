@@ -300,6 +300,7 @@ export async function executeBrowserTool(
     registerRunCleanup?: (cleanup: () => void | Promise<void>) => void
     inputSource?: BrowserToolInputSource
     browserTurnLease?: BrowserTurnLease | null
+    messageVisibilityEpoch?: number
   },
 ): Promise<string | ToolExecutionOutput> {
   log(`executeBrowserTool ${JSON.stringify(sanitizeBrowserToolLogArgs(toolName, args))}`)
@@ -386,6 +387,7 @@ export async function executeBrowserTool(
         browserTaskId: taskExecutionContext.browserTaskId,
         scopeId: sessionId || null,
         sessionId: null,
+        messageVisibilityEpoch: taskExecutionContext.messageVisibilityEpoch,
       })
       if (isAgentBrowserError(ensured)) {
         return createBrowserStructuredOutput({
@@ -594,39 +596,10 @@ export async function executeBrowserTool(
               controller: actionController,
               abortSignal: signal,
               sessionId,
+              messageVisibilityEpoch: taskExecutionContext?.messageVisibilityEpoch,
               mutationBoundary,
-              agentOwnedWorkTab: researchWorkTab && browserTaskId ? { browserTaskId } : null,
+              agentOwnedWorkTab: browserTaskId ? { browserTaskId } : null,
               requestPowerConfirmation: taskExecutionContext?.requestPowerConfirmation,
-              createHumanTakeoverIntent: runtime
-                && taskExecutionContext?.parentTaskId
-                && taskExecutionContext.ownerRunId
-                && taskExecutionContext.browserTaskId
-                ? async ({ tabId: requestedTabId, ...userPrompt }) => {
-                    const groundedTabId = requestedTabId || initialTabId || controller.getActiveTab?.()?.id || null
-                    const groundedTab = groundedTabId
-                      ? controller.getTabList?.().find((tab) => tab.id === groundedTabId) || null
-                      : null
-                    const physicalTargetToken = groundedTabId
-                      ? controller.getPhysicalTargetToken(groundedTabId)
-                      : ''
-                    if (!groundedTabId || !physicalTargetToken) {
-                      throw new Error('takeover_physical_target_unavailable')
-                    }
-                    return runtime.createHumanTakeoverIntent({
-                      parentTaskId: taskExecutionContext.parentTaskId!,
-                      ownerRunId: taskExecutionContext.ownerRunId!,
-                      browserTaskId: taskExecutionContext.browserTaskId!,
-                      userPrompt,
-                      surface: groundedTab?.owner === 'agent' ? 'agent-view' : 'user-view',
-                      scopeId: sessionId || null,
-                      profileId: groundedTab?.profile || null,
-                      sessionId: null,
-                      tabId: groundedTabId,
-                      physicalTargetToken,
-                      source: 'supervision_button',
-                    })
-                  }
-                : undefined,
               attachBrowserToolOutput: attach,
             })
           case 'observe':

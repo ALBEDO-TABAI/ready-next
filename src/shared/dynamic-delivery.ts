@@ -3,7 +3,6 @@ import type { TaskType } from './task-types'
 
 export const DELIVERY_MODES = ['standard', 'adaptive', 'thorough'] as const
 export type DeliveryMode = typeof DELIVERY_MODES[number]
-export const DELIVERY_MODE_SETTING_KEY = 'agent.dynamicDeliveryMode'
 export const DEFAULT_DELIVERY_MODE: DeliveryMode = 'adaptive'
 
 export const COLLABORATION_DECISIONS = ['single_path', 'verify_only', 'support_and_verify'] as const

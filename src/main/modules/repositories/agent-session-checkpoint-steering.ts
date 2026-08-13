@@ -18,6 +18,7 @@ import {
   type BrowserWorkflowParentRecord,
 } from './browser-workflow-row-mapping'
 import type { PersistSteeringInput } from './agent-session-checkpoint-types'
+import { requireRunMessageVisibilityEpoch } from './agent-session-message-visibility'
 
 interface ChatMessageRow {
   id: string
@@ -26,6 +27,7 @@ interface ChatMessageRow {
   content: string
   timestamp: string
   meta_json?: string | null
+  message_visibility_epoch?: number
 }
 
 interface SteeringMessageResourceRow {
@@ -124,6 +126,10 @@ export class AgentSessionCheckpointSteeringRepository {
       writeCore: (db) => {
         const parent = readParent(db, input.parentTaskId)
         if (parent.runId !== input.ownerRunId) throw new Error('steering_owner_mismatch')
+        const messageVisibilityEpoch = requireRunMessageVisibilityEpoch(db, {
+          ownerRunId: input.ownerRunId,
+          conversationId: input.message.conversationId,
+        })
         const liveRun = db.prepare(
           `SELECT status FROM run_meta WHERE run_id = ? AND task_id = ? LIMIT 1`,
         ).get<{ status: string }>(input.ownerRunId, input.parentTaskId)
@@ -184,10 +190,10 @@ export class AgentSessionCheckpointSteeringRepository {
         }
         const digest = workflowDigest(canonicalValue)
         const existing = parent.steeringReceipts.find((receipt) => receipt.messageId === input.message.id)
-
         db.prepare(
-          `INSERT INTO chat_messages (id, conversation_id, role, content, timestamp, meta_json)
-           VALUES (?, ?, 'user', ?, ?, ?)
+          `INSERT INTO chat_messages (
+             id, conversation_id, role, content, timestamp, meta_json, message_visibility_epoch
+           ) VALUES (?, ?, 'user', ?, ?, ?, ?)
            ON CONFLICT(id) DO NOTHING`,
         ).run(
           input.message.id,
@@ -195,12 +201,16 @@ export class AgentSessionCheckpointSteeringRepository {
           input.message.content,
           input.message.timestamp,
           serializeWorkflowJson(sanitizedMeta, 'steering_message_meta'),
+          messageVisibilityEpoch,
         )
         const canonical = db.prepare(
-          `SELECT id, conversation_id, role, content, timestamp, meta_json
+          `SELECT id, conversation_id, role, content, timestamp, meta_json,
+                  message_visibility_epoch
              FROM chat_messages WHERE id = ? LIMIT 1`,
         ).get<ChatMessageRow>(input.message.id)
-        if (!canonical || canonical.role !== 'user' || canonical.conversation_id !== input.message.conversationId) {
+        if (!canonical || canonical.role !== 'user'
+          || canonical.conversation_id !== input.message.conversationId
+          || canonical.message_visibility_epoch !== messageVisibilityEpoch) {
           throw new Error('canonical_steering_message_readback_failed')
         }
         const canonicalDigest = workflowDigest({

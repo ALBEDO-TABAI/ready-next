@@ -139,9 +139,9 @@ export function runBeliefDecayRound(
 
 /**
  * P5d deterministic-parts migration (2026-07-03) — collect per-card decay
- * signals from the store + belief mirror. MOVED here from maintenance-llm-round
- * (the dark LLM round) so the live decay wiring never imports the dormant file
- * (audit §4.3: "A2 与 A1 解耦"). `readMirror` returns access_count (bumped at
+ * signals from the store + belief mirror. This keeps live decay independent
+ * from the retired model-maintenance chain (audit §4.3: "A2 与 A1 解耦").
+ * `readMirror` returns access_count (bumped at
  * injection by P2-4) + wasUsefulCount (0 until a mirror column exists).
  */
 export function collectBeliefDecaySignals(

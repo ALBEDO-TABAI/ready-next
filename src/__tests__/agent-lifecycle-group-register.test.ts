@@ -90,6 +90,30 @@ test('lifecycle handlers await the exact adapter result and pass immutable alias
   })
 })
 
+test('create handler requires and forwards the exact agent identity', async () => {
+  const { ipc, handleCalls } = createMockIpc()
+  const deps = createMockDeps()
+  const calls: unknown[] = []
+  deps.createSession = async (request) => {
+    calls.push(request)
+    return {
+      ok: true,
+      action: 'create',
+      aliasId: 'alias-created',
+      aliasGeneration: 1,
+      persistedAt: '2026-08-07T00:00:00.000Z',
+    }
+  }
+  agentLifecycleGroup.register(ipc, deps)
+  const handler = handleCalls.find((entry) => entry.channel === 'agent:createSession')?.handler
+  assert.ok(handler)
+  assert.equal((await handler({} as IpcMainInvokeEvent, { agentId: 'butler' }) as { ok: boolean }).ok, true)
+  assert.deepEqual(calls, [{ agentId: 'butler' }])
+  await assert.rejects(
+    () => handler({} as IpcMainInvokeEvent, { agentId: 'butler', aliasId: 'forged' }),
+  )
+})
+
 test('lifecycle result runtime schema rejects weak free-form handler output', async () => {
   const { ipc, handleCalls } = createMockIpc()
   const deps = createMockDeps()
@@ -101,17 +125,49 @@ test('lifecycle result runtime schema rejects weak free-form handler output', as
   await assert.rejects(
     () => Promise.resolve(handler(
       {} as IpcMainInvokeEvent,
-      { aliasId: 'alias-1', aliasGeneration: 1 },
+      { aliasId: 'alias-1', aliasGeneration: 1, readyRunId: 'run-1' },
     )),
   )
+})
+
+test('stop handler records whether the click reached Main and how it finished', async () => {
+  const { ipc, handleCalls } = createMockIpc()
+  const deps = createMockDeps()
+  const logs: string[] = []
+  deps.log = (message) => { logs.push(message) }
+  deps.stopSession = async (request) => ({
+    ok: true,
+    action: 'stop',
+    aliasId: request.aliasId,
+    codexThreadId: 'thread-1',
+    codexTurnId: 'turn-1',
+    terminal: 'interrupted',
+    closeoutDigest: 'stop-closeout-digest',
+    fenceReleaseRevision: 2,
+  })
+  agentLifecycleGroup.register(ipc, deps)
+
+  const handler = handleCalls.find((entry) => entry.channel === 'agent:kill')?.handler
+  assert.ok(handler)
+  await handler(
+    {} as IpcMainInvokeEvent,
+    { aliasId: 'alias-1', aliasGeneration: 4, readyRunId: 'run-4' },
+  )
+
+  assert.deepEqual(logs, [
+    '[ipc] agent:kill start aliasId=alias-1 aliasGeneration=4 readyRunId=run-4',
+    '[ipc] agent:kill done aliasId=alias-1 aliasGeneration=4 readyRunId=run-4 ok=true action=stop terminal=interrupted',
+  ])
 })
 
 test('lifecycle request runtime schema rejects missing, stale-shaped, and extended bindings', async () => {
   const { ipc, handleCalls } = createMockIpc()
   const deps = createMockDeps()
   let calls = 0
+  const received: unknown[] = []
   deps.resetSession = async (request) => {
     calls += 1
+    received.push(request)
     return {
       ok: false,
       action: 'reset',
@@ -130,11 +186,25 @@ test('lifecycle request runtime schema rejects missing, stale-shaped, and extend
     { aliasId: 'alias-1' },
     { aliasId: 'alias-1', aliasGeneration: 0 },
     { aliasId: 'alias-1', aliasGeneration: '1' },
-    { aliasId: 'alias-1', aliasGeneration: 1, sessionId: 'legacy' },
+    { aliasId: 'alias-1', aliasGeneration: 1, readyRunId: 1 },
+    { aliasId: 'alias-1', aliasGeneration: 1, readyRunId: null, sessionId: 'legacy' },
   ]) {
     await assert.rejects(() => Promise.resolve(handler({} as IpcMainInvokeEvent, payload)))
   }
   assert.equal(calls, 0)
+  await handler(
+    {} as IpcMainInvokeEvent,
+    { aliasId: 'alias-1', aliasGeneration: 1, readyRunId: null },
+  )
+  await handler(
+    {} as IpcMainInvokeEvent,
+    { aliasId: 'alias-1', aliasGeneration: 1, readyRunId: 'run-1' },
+  )
+  assert.equal(calls, 2)
+  assert.deepEqual(received, [
+    { aliasId: 'alias-1', aliasGeneration: 1, readyRunId: null },
+    { aliasId: 'alias-1', aliasGeneration: 1, readyRunId: 'run-1' },
+  ])
 })
 
 test('send handler accepts only the shared exact request and rejects retired workflow fields before dispatch', async () => {
@@ -165,6 +235,8 @@ test('send handler accepts only the shared exact request and rejects retired wor
   assert.ok(handler)
   const exactRequest = {
     scopeId: 'alias-1',
+    expectedAliasGeneration: 1,
+    expectedMessageVisibilityEpoch: 0,
     requestId: 'request-1',
     message: 'hello',
     userMessage: {

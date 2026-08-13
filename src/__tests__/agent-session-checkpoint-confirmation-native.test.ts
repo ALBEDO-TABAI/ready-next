@@ -1,38 +1,15 @@
 import assert from 'node:assert/strict'
-import { createRequire } from 'node:module'
 import test from 'node:test'
 
 import type { AgentInputItem } from '@openai/agents'
-import type { DatabaseConnection } from '../main/modules/database'
-import { runMigrations, type MigrationDatabase } from '../main/modules/migrations'
 import { AgentSessionCheckpointRepository, workflowDigest } from '../main/modules/repositories/agent-session-checkpoint-repository'
 import { TaskProjectionRepository } from '../main/modules/repositories/task-projection-repository'
 import { RunMetaRepository } from '../main/modules/agent-control/task-projection/run-meta-repository'
-import { browserWorkflowStableDigest } from '../main/modules/browser-engine/browser-workflow-evidence'
-import { reconcileStartupRunsOnStartup } from '../main/modules/app-control/startup-run-reconciler'
-import { buildPreparedSkillTurnTruth } from '../main/modules/agent-control/skills/prepared-skill-turn'
-import { buildExplicitNoSkillAuthorization } from '../main/modules/agent-control/skills/skill-tool-authorization'
-import { AgentSessionInputController } from '../main/modules/agent-control/runtime-core/agent-session-input-controller'
-import {
-  buildBrowserVerifierRecoveryItem,
-  createBrowserSuspensionController,
-  withoutBrowserVerifierRecoveryItems,
-} from '../main/modules/agent-control/runtime-core/agent-sdk-browser-suspension'
-import type { ToolBridgeRuntimeContext } from '../main/modules/agent-control/runtime-core/agent-sdk-types'
-import { createTaskBudgetRuntime } from '../main/modules/agent-control/task-projection/run-budget-policy'
-import {
-  KIMI_K3_SESSION_IDENTITY,
-  KIMI_K3_SESSION_IDENTITY_FIELD,
-  inspectKimiK3History,
-} from '../shared/ai-providers/kimi-k3'
 import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
-import { BrowserTargetClaimRepository, BrowserTargetClaimService } from '../main/modules/browser-engine/browser-target-claims'
-import { isAgentBrowserError } from '../main/modules/browser-engine/agent-browser-errors'
 import {
-  kimiK3ProviderTestData as k3ProviderData,
   openProviderCheckpointTestDb as openDb,
   providerCheckpointExecutionBinding as executionBinding,
-  providerCheckpointPreparedSkill as preparedSkill,
+  providerCheckpointPreparedSkill as preparedSkill
 } from './provider-checkpoint-test-fixtures'
 
 
@@ -48,9 +25,14 @@ test('browser confirmation suspension writes one canonical notice and audits rej
     const scopeId = 'scope-browser-confirmation'
     const ownerRunId = 'run-browser-confirmation'
     const now = '2026-07-22T01:00:00.000Z'
+    db.prepare(
+      `INSERT INTO chat_conversations (id, agent, title, created_at, updated_at)
+       VALUES (?, 'butler', 'Browser confirmation', ?, ?)`,
+    ).run(scopeId, now, now)
     projections.create({
       taskId: parentTaskId,
       scopeId,
+      messageVisibilityEpoch: 0,
       runId: ownerRunId,
       taskType: 'browser_transaction',
       module: 'browser',
@@ -68,18 +50,15 @@ test('browser confirmation suspension writes one canonical notice and audits rej
       runId: ownerRunId,
       taskId: parentTaskId,
       scopeId,
+      messageVisibilityEpoch: 0,
       agentId: 'butler',
       executionBinding: executionBinding(ownerRunId),
       status: 'running',
     }, Date.parse(now))
-    db.prepare(
-      `INSERT INTO chat_conversations (id, agent, title, created_at, updated_at)
-       VALUES (?, 'butler', 'Browser confirmation', ?, ?)`,
-    ).run(scopeId, now, now)
     const sourceMessageId = 'message-browser-confirmation'
     db.prepare(
-      `INSERT INTO chat_messages (id, conversation_id, role, content, timestamp, meta_json)
-       VALUES (?, ?, 'user', '执行页面脚本', ?, '{}')`,
+      `INSERT INTO chat_messages (id, conversation_id, role, content, timestamp, meta_json, message_visibility_epoch)
+       VALUES (?, ?, 'user', '执行页面脚本', ?, '{}', 0)`,
     ).run(sourceMessageId, scopeId, now)
     const route = await repository.bindBrowserWorkflowRoute({
       parentTaskId,
@@ -204,9 +183,12 @@ test('browser permission suspension writes its canonical notice in the checkpoin
     const scopeId = 'scope-browser-permission'
     const ownerRunId = 'run-browser-permission'
     const now = '2026-07-22T02:00:00.000Z'
+    db.prepare(`INSERT INTO chat_conversations (id, agent, title, created_at, updated_at)
+                VALUES (?, 'butler', 'Browser permission', ?, ?)`).run(scopeId, now, now)
     projections.create({
       taskId: parentTaskId,
       scopeId,
+      messageVisibilityEpoch: 0,
       runId: ownerRunId,
       taskType: 'browser_transaction',
       module: 'browser',
@@ -224,14 +206,13 @@ test('browser permission suspension writes its canonical notice in the checkpoin
       runId: ownerRunId,
       taskId: parentTaskId,
       scopeId,
+      messageVisibilityEpoch: 0,
       agentId: 'butler',
       executionBinding: executionBinding(ownerRunId),
       status: 'running',
     }, Date.parse(now))
-    db.prepare(`INSERT INTO chat_conversations (id, agent, title, created_at, updated_at)
-                VALUES (?, 'butler', 'Browser permission', ?, ?)`).run(scopeId, now, now)
-    db.prepare(`INSERT INTO chat_messages (id, conversation_id, role, content, timestamp, meta_json)
-                VALUES ('source-browser-permission', ?, 'user', 'allow camera', ?, '{}')`).run(scopeId, now)
+    db.prepare(`INSERT INTO chat_messages (id, conversation_id, role, content, timestamp, meta_json, message_visibility_epoch)
+                VALUES ('source-browser-permission', ?, 'user', 'allow camera', ?, '{}', 0)`).run(scopeId, now)
     const route = await repository.bindBrowserWorkflowRoute({
       parentTaskId,
       ownerRunId,

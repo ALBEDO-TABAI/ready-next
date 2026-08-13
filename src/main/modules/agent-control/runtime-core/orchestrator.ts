@@ -68,8 +68,8 @@ interface ActiveRunLiveness {
   /**
    * Per-run no-progress timeout (B step 3). Defaults to the global
    * mainRunNoProgressTimeoutMs (long) — only an EXPLICIT, proven-quick caller
-   * (e.g. a narration turn) passes a shorter value. We never infer a short
-   * timeout from a coarse task_type, so a long collection is never false-killed.
+   * passes a shorter value. We never infer a short timeout from a coarse
+   * task_type, so a long collection is never false-killed.
    */
   noProgressTimeoutMs: number
   defaultNoProgressTimeout: boolean
@@ -560,6 +560,7 @@ export class ReadyAgentOrchestrator extends EventEmitter {
     executionProfile?: ExecutionHostRequest['executionProfile'],
     noProgressTimeoutMs?: number,
     deliveryMode?: ExecutionHostRequest['deliveryMode'],
+    messageVisibilityEpoch?: number,
   ): Promise<{
     success: boolean
     error?: string
@@ -616,6 +617,7 @@ export class ReadyAgentOrchestrator extends EventEmitter {
       const result = await this.sdkEngine.sendMessage(internalKey, message, effectiveRequestId, {
         taskId,
         publicSessionId: sessionId,
+        messageVisibilityEpoch,
         requestEnvelope,
         intentClassification,
         budget,
@@ -657,6 +659,7 @@ export class ReadyAgentOrchestrator extends EventEmitter {
     executionBinding?: ExecutionHostRequest['executionBinding'],
     executionProfile?: ExecutionHostRequest['executionProfile'],
     deliveryMode?: ExecutionHostRequest['deliveryMode'],
+    messageVisibilityEpoch?: number,
   ): Promise<SendAndCollectExecutionResult> {
     const collector = createScopedRunCollector({ agent, sessionId, requestId })
     const cleanupFns: Array<() => void> = []
@@ -700,6 +703,7 @@ export class ReadyAgentOrchestrator extends EventEmitter {
       executionProfile,
       undefined,
       deliveryMode,
+      messageVisibilityEpoch,
     ).then((result) => {
       executionDiagnostics = result.executionDiagnostics || null
       resolvedTaskId = result.taskId
@@ -824,6 +828,7 @@ export class ReadyAgentOrchestrator extends EventEmitter {
       request.executionBinding,
       request.executionProfile,
       request.deliveryMode,
+      request.messageVisibilityEpoch,
     )
     return {
       success: result.success,
@@ -869,6 +874,27 @@ export class ReadyAgentOrchestrator extends EventEmitter {
     this.sessions.setState(this.toTaskKey(agent, sessionId), 'done')
   }
 
+  resetScopeContext(scopeId: string, messageVisibilityEpoch: number): void {
+    const normalizedScopeId = String(scopeId || '').trim()
+    if (!normalizedScopeId || !Number.isSafeInteger(messageVisibilityEpoch) || messageVisibilityEpoch < 0) {
+      throw new Error('scope_context_reset_identity_invalid')
+    }
+    this.sdkEngine.clearScopeContext(normalizedScopeId)
+    const resetAgents = new Set<string>()
+    for (const [internalKey, descriptor] of this.descriptors) {
+      if (descriptor.sessionId !== normalizedScopeId) continue
+      resetAgents.add(descriptor.agent)
+      this.stopActiveGeneration(descriptor.agent, normalizedScopeId, 'preempted')
+      this.sdkEngine.resetSessionContext(
+        internalKey,
+        normalizedScopeId,
+        messageVisibilityEpoch,
+      )
+      this.sessions.setState(this.toTaskKey(descriptor.agent, normalizedScopeId), 'done')
+    }
+    this.domainAdapterHost.resetScopeContext(normalizedScopeId, [...resetAgents])
+  }
+
   registerRunCleanup(runId: string, cleanup: RunCleanupCallback): void {
     this.runCleanupRegistry.register(runId, cleanup)
   }
@@ -901,10 +927,6 @@ export class ReadyAgentOrchestrator extends EventEmitter {
     const taskKey = this.toTaskKey(agent, sessionId)
     this.stopActiveGeneration(agent, sessionId, 'user_stop')
     this.sessions.setState(taskKey, 'cancelled')
-  }
-
-  interruptForSuspend(agent: string, sessionId?: string): StopActiveGenerationResult {
-    return this.stopActiveGeneration(agent, sessionId, 'manual_suspend')
   }
 
   hasActiveRun(agent: string, sessionId?: string): boolean {

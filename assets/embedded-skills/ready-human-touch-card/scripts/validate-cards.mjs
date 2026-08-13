@@ -105,7 +105,7 @@ for (const p of posters) {
       if (style === 'ready' && isText) {
         const ff = cs.fontFamily.toLowerCase();
         if (/(noto serif|songti|simsun|stsong|serif sc)/.test(ff))
-          fails.push(`C5 Ready 衬线红线：\"${(n.textContent || '').trim().slice(0, 14)}\" 用了 ${cs.fontFamily.slice(0, 40)}`);
+          fails.push(`C5 Ready 衬线红线："${(n.textContent || '').trim().slice(0, 14)}" 用了 ${cs.fontFamily.slice(0, 40)}`);
       }
     }
 

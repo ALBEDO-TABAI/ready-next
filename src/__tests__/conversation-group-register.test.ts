@@ -6,6 +6,7 @@
 //
 //   agent:listConversationScopes        (list scopes, optionally per-agent)
 //   agent:listScopeRuns                 (list active/completed scope-runs)
+//   agent:readCodexLifecycleSnapshot    (durable Codex operation projection)
 //   agent:getConversationScopeMessages  (full chat_messages stream)
 //   agent:listScopeAttachments          (filesystem-verified attachments)
 //   agent:getScopeAttachment            (one attachment by id)
@@ -74,7 +75,9 @@ function createMockDeps(): ConversationGroupDeps {
   return {
     listConversationScopes: fail('listConversationScopes') as ConversationGroupDeps['listConversationScopes'],
     listScopeRuns: fail('listScopeRuns') as ConversationGroupDeps['listScopeRuns'],
+    readCodexLifecycleSnapshot: fail('readCodexLifecycleSnapshot') as ConversationGroupDeps['readCodexLifecycleSnapshot'],
     getConversationScopeMessages: fail('getConversationScopeMessages') as ConversationGroupDeps['getConversationScopeMessages'],
+    setActionAuthorizationMode: fail('setActionAuthorizationMode') as ConversationGroupDeps['setActionAuthorizationMode'],
     listScopeAttachments: fail('listScopeAttachments') as ConversationGroupDeps['listScopeAttachments'],
     getScopeAttachment: fail('getScopeAttachment') as ConversationGroupDeps['getScopeAttachment'],
     clearRemoteAttachmentCache: fail('clearRemoteAttachmentCache') as ConversationGroupDeps['clearRemoteAttachmentCache'],
@@ -85,7 +88,7 @@ function createMockDeps(): ConversationGroupDeps {
   }
 }
 
-test('conversationGroup.register wires the 7 read/cache channels exactly once each via ipcMain.handle', () => {
+test('conversationGroup.register wires its channels exactly once each via ipcMain.handle', () => {
   const { ipc, handleCalls } = createMockIpc()
   conversationGroup.register(ipc, createMockDeps())
 
@@ -94,9 +97,9 @@ test('conversationGroup.register wires the 7 read/cache channels exactly once ea
   assert.deepEqual(
     registered,
     expected,
-    'register must subscribe to exactly the 7 conversation-scope channels',
+    'register must subscribe to exactly the conversation-scope channels',
   )
-  assert.equal(handleCalls.length, 7, 'each channel must be registered exactly once')
+  assert.equal(handleCalls.length, _conversationGroupChannelsForTest.length, 'each channel must be registered exactly once')
 
   // Spot-check the exact channel literals per the plan (V2.1e, §3 V2.1) so
   // accidental renames trip this test even if the channel count happens to
@@ -105,7 +108,9 @@ test('conversationGroup.register wires the 7 read/cache channels exactly once ea
   for (const required of [
     'agent:listConversationScopes',
     'agent:listScopeRuns',
+    'agent:readCodexLifecycleSnapshot',
     'agent:getConversationScopeMessages',
+    'agent:setActionAuthorizationMode',
     'agent:listScopeAttachments',
     'agent:getScopeAttachment',
     'agent:clearRemoteAttachmentCache',
@@ -125,7 +130,96 @@ test('conversationGroup namespace is the documented label so dispose ordering ca
   assert.equal(conversationGroup.namespace, 'agent:conversation')
 })
 
-test('IpcDisposeHandle.dispose removes the same 7 channels that register added', () => {
+test('action authorization handler validates the closed mode union before persistence', () => {
+  const { ipc, handleCalls } = createMockIpc()
+  const writes: Array<{ scopeId: string; mode: string; epoch: number }> = []
+  conversationGroup.register(ipc, {
+    ...createMockDeps(),
+    setActionAuthorizationMode(scopeId, mode, expectedMessageVisibilityEpoch) {
+      writes.push({ scopeId, mode, epoch: expectedMessageVisibilityEpoch })
+      return { id: scopeId, meta: { actionAuthorizationMode: mode } } as never
+    },
+  })
+  const handler = handleCalls.find((entry) => entry.channel === 'agent:setActionAuthorizationMode')?.handler
+  assert.ok(handler)
+  const invalid = handler({} as IpcMainInvokeEvent, { scopeId: 'scope-1', mode: 'always' }) as {
+    success: boolean
+    error?: string
+  }
+  assert.deepEqual(invalid, { success: false, error: 'action_authorization_mode_invalid' })
+  assert.deepEqual(writes, [])
+
+  const missingIdentity = handler(
+    {} as IpcMainInvokeEvent,
+    { scopeId: 'scope-1', mode: 'full' },
+  ) as { success: boolean; error?: string }
+  assert.deepEqual(missingIdentity, {
+    success: false,
+    error: 'action_authorization_scope_identity_invalid',
+  })
+  assert.deepEqual(writes, [])
+
+  const valid = handler({} as IpcMainInvokeEvent, {
+    scopeId: 'scope-1',
+    mode: 'full',
+    expectedMessageVisibilityEpoch: 3,
+  }) as {
+    success: boolean
+    data?: { scopeId: string; mode: string; messageVisibilityEpoch: number }
+  }
+  assert.equal(valid.success, true)
+  assert.deepEqual(valid.data, {
+    scopeId: 'scope-1',
+    mode: 'full',
+    messageVisibilityEpoch: 3,
+  })
+  assert.deepEqual(writes, [{ scopeId: 'scope-1', mode: 'full', epoch: 3 }])
+})
+
+test('lifecycle snapshot handler validates identity and returns the exact durable projection', () => {
+  const { ipc, handleCalls } = createMockIpc()
+  const reads: unknown[] = []
+  conversationGroup.register(ipc, {
+    ...createMockDeps(),
+    readCodexLifecycleSnapshot(request) {
+      reads.push(request)
+      return {
+        identity: request,
+        activeReadyRunId: 'run-1',
+        latestReadyRunId: 'run-1',
+        snapshot: 'product_turn_interruptible',
+        interruptRequested: false,
+        interruptAcknowledged: false,
+        evidenceDigest: 'readback-digest',
+      }
+    },
+  })
+  const handler = handleCalls.find(
+    (entry) => entry.channel === 'agent:readCodexLifecycleSnapshot',
+  )?.handler
+  assert.ok(handler)
+  assert.equal((handler({} as IpcMainInvokeEvent, {
+    aliasId: 'scope-1', aliasGeneration: 0,
+  }) as { success: boolean }).success, false)
+  assert.deepEqual(reads, [])
+  assert.deepEqual(handler({} as IpcMainInvokeEvent, {
+    aliasId: 'scope-1', aliasGeneration: 3,
+  }), {
+    success: true,
+    data: {
+      identity: { aliasId: 'scope-1', aliasGeneration: 3 },
+      activeReadyRunId: 'run-1',
+      latestReadyRunId: 'run-1',
+      snapshot: 'product_turn_interruptible',
+      interruptRequested: false,
+      interruptAcknowledged: false,
+      evidenceDigest: 'readback-digest',
+    },
+  })
+  assert.deepEqual(reads, [{ aliasId: 'scope-1', aliasGeneration: 3 }])
+})
+
+test('IpcDisposeHandle.dispose removes the same channels that register added', () => {
   const { ipc, removeHandlerCalls } = createMockIpc()
   const handle = conversationGroup.register(ipc, createMockDeps())
 

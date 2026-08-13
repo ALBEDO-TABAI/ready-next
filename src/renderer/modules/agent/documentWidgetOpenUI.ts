@@ -7,19 +7,19 @@
  *      `DocumentWidgetComponentSpec` shape (component name + props
  *      + optional dataSource) so downstream compile is deterministic.
  *
- *   2. For widgets whose `sourceType` is `calendar` / `schedule`, build
+ *   2. For widgets whose `sourceType` is `calendar`, build
  *      a `DocumentWidgetCompileContext` from the live calendar IPC.
  *      The compile pipeline reaches into the context whenever `props`
  *      are missing.
  *
  * Important bug fix in L5-A:
  *   Previously the compile context was only built when the LLM
- *   remembered to set `spec.dataSource`. The 5 calendar widgets
+ *   remembered to set `spec.dataSource`. The 4 calendar widgets
  *   (`day_schedule_card`, `week_schedule_card`, `time_allocation_chart`,
- *   `schedule_runtime_card`, `today_focus_snapshot`) silently rendered
+ *   `today_focus_snapshot`) silently rendered
  *   the "暂无安排" empty state whenever the model omitted that field.
  *   We now treat calendar-backed widgets as auto-fetch by default: if
- *   `props` is missing AND the widget is one of the five, we
+ *   `props` is missing AND the widget is one of the four, we
  *   transparently fill in a `dataSource` and pull live snapshots.
  *   The LLM can opt out by setting `dataSource.autoFetch: false`
  *   together with explicit `props` (manual data path).
@@ -54,12 +54,8 @@ const CALENDAR_SOURCED_WIDGETS: ReadonlySet<string> = new Set([
   'today_focus_snapshot',
 ])
 
-const SCHEDULE_RUNTIME_WIDGETS: ReadonlySet<string> = new Set([
-  'schedule_runtime_card',
-])
-
 function isCalendarBackedWidget(name: string): boolean {
-  return CALENDAR_SOURCED_WIDGETS.has(name) || SCHEDULE_RUNTIME_WIDGETS.has(name)
+  return CALENDAR_SOURCED_WIDGETS.has(name)
 }
 
 /* ------------------------------------------------------------------ */
@@ -141,7 +137,7 @@ function normalizeIncomingComponentSpec(spec: DocumentWidgetComponentSpec): Docu
 /* ------------------------------------------------------------------ */
 
 /**
- * For the 5 calendar-backed widgets, decide whether the compile path
+ * For the 4 calendar-backed widgets, decide whether the compile path
  * should fetch live data instead of just trusting the LLM's `props`.
  *
  * Rules:
@@ -159,10 +155,7 @@ function maybePromoteAutoFetch(spec: DocumentWidgetComponentSpec): DocumentWidge
   if (spec.dataSource) return spec
   if (!isCalendarBackedWidget(spec.component)) return spec
 
-  const type: DocumentWidgetComponentSpec['dataSource'] = SCHEDULE_RUNTIME_WIDGETS.has(spec.component)
-    ? { type: 'schedule' }
-    : { type: 'calendar' }
-  return { ...spec, dataSource: type }
+  return { ...spec, dataSource: { type: 'calendar' } }
 }
 
 /* ------------------------------------------------------------------ */
@@ -187,8 +180,6 @@ async function buildCompileContext(
       return { calendarWeek: await fetcher.fetchWeekSchedule(fetchOptions) }
     case 'time_allocation_chart':
       return { timeAllocation: await fetcher.fetchTimeAllocation(fetchOptions) }
-    case 'schedule_runtime_card':
-      return { schedule: await fetcher.fetchScheduleRuntime() }
     case 'today_focus_snapshot':
       return { todayFocus: await fetcher.fetchTodayFocusSnapshot(fetchOptions) }
     default:
@@ -224,6 +215,5 @@ export {
   type CalendarWidgetApi,
   type CalendarWidgetEventLike,
   type CalendarWidgetSourceLike,
-  type ScheduleRuntimeApi,
   type WidgetFetchOptions,
 } from '../calendar/widget-data-provider'

@@ -39,13 +39,13 @@ test('chat panel feeds message-level task snapshots into chat messages instead o
 test('chat panel can recover task snapshots from persisted assistant message metadata and current live runs', () => {
   const chatPanel = readWorkspaceFile('src/renderer/components/agent/ChatPanel.tsx')
   const taskToolSnapshot = readWorkspaceFile('src/renderer/components/agent/chat-panel/task-snapshot/TaskToolSnapshot.tsx')
-  const runtimeDriver = readWorkspaceFile('src/renderer/modules/agent/runtimeDriver.ts')
+  const runtimeScopeEvents = readWorkspaceFile('src/renderer/modules/agent/runtime-driver-scope-events.ts')
 
   assert.match(chatPanel, /parseSerializedTaskSnapshot/)
   // V1.8 follow-up: meta?.taskSnapshot/toolTraceSnapshot + currentTaskRun.responseMessageId moved to TaskToolSnapshot.tsx
   assert.match(taskToolSnapshot, /message\.meta\?\.taskSnapshot/)
   assert.match(taskToolSnapshot, /message\.meta\?\.toolTraceSnapshot/)
   assert.match(taskToolSnapshot, /currentTaskRun\.responseMessageId/)
-  assert.match(runtimeDriver, /responseSegmentBreakPending/)
-  assert.match(runtimeDriver, /responseSegmentToolTraceStart/)
+  assert.match(runtimeScopeEvents, /responseSegmentBreakPending/)
+  assert.match(runtimeScopeEvents, /responseSegmentToolTraceStart/)
 })

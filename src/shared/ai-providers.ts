@@ -597,6 +597,7 @@ export function resolveAIConfigCapabilities(
   const reasoningEffort = normalizedConfig.reasoningEffort || provider?.defaultReasoningEffort
   const isKimiCoding = baseUrl.includes('api.kimi.com/coding')
   const isKimiK3 = isKimiK3Config(normalizedConfig)
+  const isChatGptOAuth = normalizedConfig.authMode === 'chatgpt-oauth'
   const supportsToolCalls = applyCapabilityMode(
     normalizeCapabilityMode(normalizedConfig.toolUseMode),
     normalizedConfig.provider !== 'openai-compatible'
@@ -640,14 +641,14 @@ export function resolveAIConfigCapabilities(
     isKimiCoding ||
     (modelCap.supportsNativeVideo ??
       (visionDefault ? (providerCap.supportsNativeVideo ?? false) : false))
-  const thinkingDefault = isKimiK3
+  const thinkingDefault = isKimiK3 || isChatGptOAuth
     ? true
     : modelCap.supportsThinking ?? providerCap.supportsThinking ?? false
   const longContextDefault =
     modelCap.supportsLongContext ??
     providerCap.supportsLongContext ??
     (modelDef?.contextWindow ?? 0) >= 128000
-  const multiTurnThinkingPolicy = isKimiK3
+  const multiTurnThinkingPolicy = isKimiK3 || isChatGptOAuth
     ? 'echo_required'
     : modelCap.multiTurnThinkingPolicy ?? providerCap.multiTurnThinkingPolicy ?? 'unknown'
 

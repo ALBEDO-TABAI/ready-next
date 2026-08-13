@@ -67,7 +67,7 @@ test('chat and task surfaces consume role utilities (no dead pilot wrapper)', as
   const taskCard = await readRepoFile('src/renderer/components/agent/chat-panel/task/TaskCard.tsx')
 
   assert.match(chatMessages, /className="t-body"/)
-  assert.match(chatMessages, /data-typography-role="ui"/)
+  assert.match(chatMessages, /data-typography-role="body"/)
   assert.match(taskCard, /data-typography-role="meta"/)
   assert.match(taskCard, /data-typography-role="data"/)
 

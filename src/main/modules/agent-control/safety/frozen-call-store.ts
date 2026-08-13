@@ -32,6 +32,8 @@
 
 import { createHash, randomUUID } from 'node:crypto'
 
+import { digestCanonicalJson } from '../codex-runtime/codex-model-gateway-contract'
+
 export type FrozenCallStatus = 'pending' | 'released' | 'denied' | 'expired'
 
 // ---------------------------------------------------------------------------
@@ -146,6 +148,21 @@ interface FrozenCallRecord extends FrozenCallRecordView {
   releasedAt: number | null
 }
 
+function toRecordView(record: FrozenCallRecord): FrozenCallRecordView {
+  return {
+    id: record.id,
+    runId: record.runId,
+    taskId: record.taskId,
+    scopeId: record.scopeId,
+    sessionId: record.sessionId,
+    toolName: record.toolName,
+    paramsJson: record.paramsJson,
+    createdAt: record.createdAt,
+    expiresAt: record.expiresAt,
+    status: record.status,
+  }
+}
+
 export interface FreezeArgs {
   toolName: string
   params: Record<string, unknown>
@@ -177,25 +194,36 @@ export type FreezeResult =
 
 export type ReleaseResult =
   | { ok: true; toolName: string; params: Record<string, unknown>; paramsJson: string }
-  | { ok: false; reason: 'not_found' | 'invalid_token' | 'not_pending' | 'expired' }
+  | { ok: false; reason: 'not_found' | 'invalid_token' | 'not_pending' | 'expired' | 'store_unavailable' }
+
+export type DenyResult =
+  | { ok: true }
+  | { ok: false; reason: 'not_pending' | 'expired' | 'store_unavailable' }
+
+export type ExpireResult =
+  | { ok: true }
+  | { ok: false; reason: 'not_pending' | 'store_unavailable' }
+
+type TerminalAuditResult = 'committed' | 'not_pending' | 'store_unavailable'
 
 export const DEFAULT_FROZEN_CALL_TTL_MS = 10 * 60 * 1000
+const TERMINAL_FROZEN_CALL_TOMBSTONE_LIMIT = 2_048
 
 export class FrozenCallStore {
   private readonly records = new Map<string, FrozenCallRecord>()
+  private readonly terminalCallIds = new Set<string>()
   private readonly db: FrozenCallDb | null
   private readonly now: () => number
 
   constructor(db: FrozenCallDb | null, opts?: { now?: () => number }) {
     this.db = db
     this.now = opts?.now ?? Date.now
-    // Restart orphans: ANY DB row still 'pending' at construction belongs to
-    // a previous process — its release token and waiting context were
-    // memory-only, so it can never be released again, TTL elapsed or not
-    // (Codex review P2). Expire them all; the in-memory authority starts
-    // empty either way. Construction happens once per main-process lifetime
-    // (the bridge wiring guards re-registration on dev reload), so this can
-    // never expire a row belonging to a live waiter of this process.
+    // Restart orphans: the production Codex boot participant has already
+    // persisted app_restart evidence and closed any exactly bound product run.
+    // This constructor sweep is the standalone/non-Codex fallback: a remaining
+    // row has no live in-memory token or waiter, so it can only expire. The
+    // store is constructed once per main-process lifetime and therefore cannot
+    // expire a waiter created by this process.
     if (this.db) {
       try {
         this.db
@@ -241,6 +269,7 @@ export class FrozenCallStore {
         // byte-identical contract.
         const auditJson = JSON.stringify({
           __audit: 'redacted',
+          canonicalSha256: digestCanonicalJson(args.params),
           sha256: paramsSha256,
           shape: buildAuditShape(args.params),
         })
@@ -278,8 +307,7 @@ export class FrozenCallStore {
   get(id: string): FrozenCallRecordView | null {
     const record = this.records.get(id)
     if (!record) return null
-    const { token: _token, releasedAt: _releasedAt, ...view } = record
-    return view
+    return toRecordView(record)
   }
 
   findPendingForSession(sessionKey: string | null): FrozenCallRecordView | null {
@@ -288,8 +316,7 @@ export class FrozenCallStore {
     for (const record of this.records.values()) {
       if (record.status !== 'pending') continue
       if (record.sessionId === sessionKey || record.scopeId === sessionKey) {
-        const { token: _token, releasedAt: _releasedAt, ...view } = record
-        return view
+        return toRecordView(record)
       }
     }
     return null
@@ -302,14 +329,22 @@ export class FrozenCallStore {
    */
   release(id: string, token: string): ReleaseResult {
     const record = this.records.get(id)
-    if (!record) return { ok: false, reason: 'not_found' }
+    if (!record) {
+      return this.terminalCallIds.has(id)
+        ? { ok: false, reason: 'not_pending' }
+        : { ok: false, reason: 'not_found' }
+    }
     if (record.status === 'pending' && this.now() > record.expiresAt) {
-      this.transition(record, 'expired')
-      return { ok: false, reason: 'expired' }
+      const expired = this.transition(record, 'expired')
+      return {
+        ok: false,
+        reason: expired === 'committed' ? 'expired' : expired,
+      }
     }
     if (record.status !== 'pending') return { ok: false, reason: 'not_pending' }
     if (record.token !== token) return { ok: false, reason: 'invalid_token' }
-    this.transition(record, 'released')
+    const auditResult = this.transition(record, 'released')
+    if (auditResult !== 'committed') return { ok: false, reason: auditResult }
     return {
       ok: true,
       toolName: record.toolName,
@@ -318,19 +353,40 @@ export class FrozenCallStore {
     }
   }
 
-  /** User rejected the action — terminal. Returns false if not pending. */
-  deny(id: string): boolean {
+  /** User rejected the action — terminal, unless TTL or durable state won the race. */
+  deny(id: string): DenyResult {
     const record = this.records.get(id)
-    if (!record || record.status !== 'pending') return false
-    this.transition(record, 'denied')
-    return true
+    if (!record || record.status !== 'pending') return { ok: false, reason: 'not_pending' }
+    if (this.now() > record.expiresAt) {
+      const expired = this.transition(record, 'expired')
+      return {
+        ok: false,
+        reason: expired === 'committed' ? 'expired' : expired,
+      }
+    }
+    const denied = this.transition(record, 'denied')
+    return denied === 'committed'
+      ? { ok: true }
+      : { ok: false, reason: denied }
   }
 
-  /** Timeout / abort / run preempted — terminal. Returns false if not pending. */
-  expire(id: string): boolean {
+  /** Timeout / abort / run preempted — terminal, with durable truth readback. */
+  expire(id: string): ExpireResult {
+    const record = this.records.get(id)
+    if (!record || record.status !== 'pending') return { ok: false, reason: 'not_pending' }
+    const expired = this.transition(record, 'expired')
+    return expired === 'committed'
+      ? { ok: true }
+      : { ok: false, reason: expired }
+  }
+
+  /** Durable closeout already won; discard only this process's execution token. */
+  retireAfterDurableSettlement(id: string): boolean {
     const record = this.records.get(id)
     if (!record || record.status !== 'pending') return false
-    this.transition(record, 'expired')
+    record.status = 'expired'
+    record.releasedAt = null
+    this.retireInMemory(record)
     return true
   }
 
@@ -343,18 +399,37 @@ export class FrozenCallStore {
     }
   }
 
-  private transition(record: FrozenCallRecord, status: Exclude<FrozenCallStatus, 'pending'>): void {
+  private transition(
+    record: FrozenCallRecord,
+    status: Exclude<FrozenCallStatus, 'pending'>,
+  ): TerminalAuditResult {
     record.status = status
     record.releasedAt = status === 'released' ? this.now() : null
+    let auditResult: TerminalAuditResult = 'committed'
     if (this.db) {
       try {
-        this.db
-          .prepare('UPDATE pending_confirmations SET status = ?, released_at = ? WHERE id = ?')
-          .run(status, record.releasedAt ? new Date(record.releasedAt).toISOString() : null, record.id)
+        const updated = this.db
+          .prepare("UPDATE pending_confirmations SET status = ?, released_at = ? WHERE id = ? AND status = 'pending'")
+          .run(status, record.releasedAt ? new Date(record.releasedAt).toISOString() : null, record.id) as {
+            changes?: number
+          } | null
+        if (Number(updated?.changes || 0) !== 1) auditResult = 'not_pending'
       } catch {
-        // silent-catch: Audit-row drift is observable via the boot sweep; the in-memory
-        // authority has already transitioned, so execution semantics hold.
+        // silent-catch: a release without a matching durable pending row must
+        // never hand action parameters back to the dispatcher.
+        auditResult = 'store_unavailable'
       }
     }
+    this.retireInMemory(record)
+    return auditResult
+  }
+
+  private retireInMemory(record: FrozenCallRecord): void {
+    this.records.delete(record.id)
+    if (this.terminalCallIds.size >= TERMINAL_FROZEN_CALL_TOMBSTONE_LIMIT) {
+      const oldest = this.terminalCallIds.values().next().value
+      if (typeof oldest === 'string') this.terminalCallIds.delete(oldest)
+    }
+    this.terminalCallIds.add(record.id)
   }
 }

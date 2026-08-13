@@ -3,9 +3,32 @@ import test from 'node:test'
 
 import {
   classifyLifecycleOperation,
+  parseLifecycleOperationProjection,
   type LifecycleOperationFacts,
   type LifecycleOperationSnapshot,
 } from '../shared/ipc-contracts/agent-lifecycle-snapshot'
+
+test('renderer lifecycle projection is an exact typed read-only contract', () => {
+  const projection = {
+    identity: { aliasId: 'scope-1', aliasGeneration: 2 },
+    activeReadyRunId: 'run-1',
+    latestReadyRunId: 'run-1',
+    snapshot: 'product_turn_interruptible' as const,
+    interruptRequested: true,
+    interruptAcknowledged: false,
+    requestedAction: 'stop' as const,
+    evidenceDigest: 'projection-evidence',
+  }
+  assert.deepEqual(parseLifecycleOperationProjection(projection), projection)
+  assert.throws(() => parseLifecycleOperationProjection({
+    ...projection,
+    aliasGeneration: 1,
+  }))
+  assert.throws(() => parseLifecycleOperationProjection({
+    ...projection,
+    identity: { aliasId: 'scope-1', aliasGeneration: 0 },
+  }))
+})
 
 const idle: LifecycleOperationFacts = {
   readyRunCreated: false,

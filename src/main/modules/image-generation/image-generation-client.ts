@@ -113,6 +113,7 @@ export function buildImageGenerationEndpoint(
 }
 
 function sanitizeUploadName(value: string, index: number): string {
+  // eslint-disable-next-line no-control-regex -- normalize an untrusted upload filename before multipart use
   const name = basename(value).replace(/[\u0000-\u001f<>:"/\\|?*]+/g, '-').trim()
   return name || `reference-${index + 1}.png`
 }

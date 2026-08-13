@@ -144,6 +144,59 @@ test('applyIntent kind=show shows the target tab when shouldPresentHosts is true
   assert.deepEqual(calls.viewBounds, { x: 10, y: 20, width: 800, height: 600 })
 })
 
+test('applyIntent kind=show never reattaches a stale non-active tab', () => {
+  const activeView = makeStubView('active')
+  const staleView = makeStubView('stale')
+  const { service, calls } = makeShellService({
+    tabs: [makeTab('active', activeView), makeTab('stale', staleView)],
+    activeTabId: 'active',
+  })
+
+  const result = service.applyIntent({
+    kind: 'show',
+    intentId: 21,
+    tabId: 'stale',
+    bounds: { x: 0, y: 0, w: 500, h: 500 },
+    reason: 'tab-activate',
+  })
+
+  assert.equal(result.success, false)
+  assert.equal(calls.shown.length, 0)
+  assert.deepEqual(calls.detached.map((entry) => entry.view), [staleView])
+})
+
+test('applyIntent kind=show detaches every host outside the active and split pair', () => {
+  const activeView = makeStubView('active')
+  const splitView = makeStubView('split')
+  const strayView = makeStubView('stray')
+  const { service, calls } = makeShellService({
+    tabs: [
+      makeTab('active', activeView),
+      makeTab('split', splitView),
+      makeTab('stray', strayView),
+    ],
+    activeTabId: 'active',
+  })
+  service.applyIntent({
+    kind: 'secondary-set-bounds',
+    intentId: 22,
+    tabId: 'split',
+    bounds: { x: 500, y: 0, w: 500, h: 500 },
+  })
+  calls.detached.length = 0
+
+  const result = service.applyIntent({
+    kind: 'show',
+    intentId: 23,
+    tabId: 'active',
+    bounds: { x: 0, y: 0, w: 500, h: 500 },
+    reason: 'window-resize',
+  })
+
+  assert.equal(result.success, true)
+  assert.deepEqual(calls.detached.map((entry) => entry.view), [strayView])
+})
+
 test('applyIntent kind=show skips DOM-level show when shouldPresentHosts is false but still records bounds', () => {
   const v1 = makeStubView('t1')
   const { service, calls } = makeShellService({
@@ -308,6 +361,27 @@ test('applyIntent kind=secondary-set-bounds applies bounds to the secondary tab 
   assert.equal(calls.viewBounds, null)
 })
 
+test('applyIntent kind=secondary-set-bounds rejects a stale event targeting the active tab', () => {
+  const activeView = makeStubView('active')
+  const { service, calls } = makeShellService({
+    tabs: [makeTab('active', activeView)],
+    activeTabId: 'active',
+  })
+
+  const result = service.applyIntent({
+    kind: 'secondary-set-bounds',
+    intentId: 71,
+    tabId: 'active',
+    bounds: { x: 400, y: 0, w: 400, h: 600 },
+  })
+
+  assert.equal(result.success, false)
+  assert.equal(calls.splitTabId, null)
+  assert.equal(calls.splitViewBounds, null)
+  assert.deepEqual(calls.shown, [])
+  assert.deepEqual(calls.applied, [])
+})
+
 test('applyIntent kind=secondary-set-bounds preserves frozen split tab bounds during collection', () => {
   const v1 = makeStubView('t1')
   const v2 = makeStubView('t2')
@@ -345,6 +419,7 @@ test('applyIntent kind=secondary-set-bounds detaches the previous secondary tab 
     tabId: 't2',
     bounds: { x: 400, y: 0, w: 400, h: 600 },
   })
+  calls.detached.length = 0
   service.applyIntent({
     kind: 'secondary-set-bounds',
     intentId: 9,

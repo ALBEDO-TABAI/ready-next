@@ -28,10 +28,7 @@ export type ReminderTopic =
   // date so it can apply staleness judgement to web_search / web_fetch
   // citations. No conflicts with other topics.
   | 'current-date'
-  // S2-2 — background task terminal summaries drained before each model
-  // call (previously registered via an `as ReminderTopic` cast; now part of
-  // the honest vocabulary). No conflicts.
-  | 'background-task-terminal'
+  | 'session-restore-notice'
   // D2 (2026-07-03) — per-model-call acceptance-criteria self-check for
   // outcome-bearing task types (multi_step/research/media/browser_transaction).
   // Same template source as terminal adjudication (resolveCriteria). No conflicts.

@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
 
-// @ts-ignore -- the live-proof helper intentionally stays directly executable by Node.
+// @ts-expect-error -- the live-proof helper intentionally stays directly executable by Node.
 import {
   aggregateGroundedPerformance,
   compareGroundedPerformance,
@@ -48,8 +48,8 @@ test('live performance gate separates deterministic workflow shape from cross-wi
       metric('2026-07-19T04:00:03.000Z', { metric: 'provider_request_bill', runId: 'live-1', agentName: 'owner' }),
       metric('2026-07-19T04:00:06.000Z', { metric: 'provider_estimate_reconciliation', runId: 'live-1', agentName: 'owner', actualInputTokens: 52 }),
       metric('2026-07-19T04:00:06.100Z', { metric: 'provider_estimate_reconciliation', runId: 'live-1', agentName: 'owner', actualInputTokens: 53 }),
-      metric('2026-07-19T04:00:06.200Z', { metric: 'provider_request_bill', runId: 'live-1:verifier', agentName: 'dynamic-delivery-verifier', toolSchemaCount: 0 }),
-      metric('2026-07-19T04:00:08.000Z', { metric: 'provider_estimate_reconciliation', runId: 'live-1:verifier', agentName: 'dynamic-delivery-verifier', actualInputTokens: 4 }),
+      metric('2026-07-19T04:00:06.200Z', { metric: 'provider_request_bill', runId: 'live-1:verifier', agentName: 'codex-browser-verifier', toolSchemaCount: 0 }),
+      metric('2026-07-19T04:00:08.000Z', { metric: 'provider_estimate_reconciliation', runId: 'live-1:verifier', agentName: 'codex-browser-verifier', actualInputTokens: 4 }),
       metric('2026-07-19T04:00:08.100Z', { metric: 'run_close', runId: 'live-1', durationMs: 8_100 }),
     ].join('\n'))
 

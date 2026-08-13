@@ -13,9 +13,8 @@
  *   - `turn-engine-route.test.ts` (Stage N regression update):
  *     the refresh-after-inspect path, asserting at least one
  *     `turn_force_tool_blocked_child_owned` fires for VEA without childRunId.
- *   - `agent-vea-resume-probe.test.cjs`:
- *     the closed-loop smoke that exercises the full steering → engine
- *     → checkpoint path under the manifest fence.
+ * The retired Agent SDK closed-loop probe is intentionally absent; this file
+ * only preserves the dormant helper's pure truth table.
  *
  * Splitting predicate vs. integration coverage keeps each test focused and
  * lets the predicate test stay pure-helper (no DB, no full engine spin-up).

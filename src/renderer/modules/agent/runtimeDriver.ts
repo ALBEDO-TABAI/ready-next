@@ -1,24 +1,16 @@
-import { createEmptyScopeRunState, deriveScopeRunStatePatch, getActiveScopeRunState, isForegroundBusyScopeRunState, isScopeRunPhase, mergeArtifacts, phaseToToolTraceStatus } from './scopeRunState'
-import { extractAttachmentsFromMeta } from './messageComposer'
 import { executeModuleToolAction, handleModuleToolAction } from './moduleExecutor'
 import { cancelAllPendingWidgetWrites } from './documentActions'
-import type { Agent, AgentMessage, ConversationScope, ScopeRunState } from './types'
-import { useMode } from '../../stores/useMode'
+import type { Agent, ScopeRunState } from './types'
 import { mapBackendErrorToFriendly } from './error-message-mapping'
 import { emitRendererAgentMetric } from './rendererMetrics'
-import { mapScopeRunPhaseToSessionState, rebuildAgentMessageFromRow } from '../../stores/agent-store-helpers'
-import type { CanonicalAssistantMessage } from '../../../shared/ipc-contracts/canonical-message'
 import {
   createRuntimeDriverCanonicalTerminal,
 } from './runtime-driver-canonical-terminal'
 import { installRuntimeDriverScopeEvents } from './runtime-driver-scope-events'
 import {
-  collapseAdjacentDuplicateAssistantTail,
-  syncActiveScopeRunAliases,
-  upsertStreamedSegmentCache,
-  sessionKeyForScopeId,
+  normalizeSessionSlice, sessionKeyForScopeId,
   withSessionSliceAndActiveRuntimeMirror,
-  type AgentStoreLike,
+  type AgentStoreLike
 } from './runtime-driver-session-state'
 import { installRuntimeDriverStreamEvents } from './runtime-driver-stream-events'
 import { createRuntimeDriverWatchdog } from './runtime-driver-watchdog'
@@ -70,6 +62,42 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
     activateWorkbenchMode,
   } = canonicalTerminal
 
+  function normalizeRunId(value: unknown): string | null {
+    return typeof value === 'string' && value.trim() ? value.trim() : null
+  }
+
+  function isCurrentScopeRun(scopeId: string, rawRunId: unknown): boolean {
+    const runId = normalizeRunId(rawRunId)
+    if (!runId) return false
+    const state = store.getState()
+    const sessionId = sessionKeyForScopeId(state, scopeId)
+    const slice = normalizeSessionSlice(state.sessions?.[sessionId])
+    const streamingRequestId = normalizeRunId(slice.streamingRequestId)
+    const currentRun = slice.scopeRunStates[scopeId] || getScopeRunStateFromState(state, scopeId)
+    const scopeRunRequestId = normalizeRunId(currentRun?.requestId)
+    if (streamingRequestId && scopeRunRequestId) {
+      return streamingRequestId === runId && scopeRunRequestId === runId
+    }
+    if (streamingRequestId) return streamingRequestId === runId
+    if (scopeRunRequestId !== runId) return false
+    return !currentRun?.terminalReason
+      && currentRun?.phase !== 'done'
+      && currentRun?.phase !== 'error'
+      && currentRun?.phase !== 'cancelled'
+  }
+
+  function upsertCurrentScopeRun(
+    scopeId: string,
+    runId: string,
+    updater: (previous: ScopeRunState | null) => ScopeRunState,
+  ): void {
+    if (!isCurrentScopeRun(scopeId, runId)) return
+    upsertScopeRunState(scopeId, (previous) => {
+      if (previous?.requestId && previous.requestId !== runId) return previous
+      return updater(previous)
+    })
+  }
+
   function initAgentListeners(): () => void {
     if (listenersInitialized) return () => { /* already initialized */ }
     if (typeof window === 'undefined' || !window.electronAPI) return () => { /* no electronAPI */ }
@@ -79,7 +107,6 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
     const cleanupStream = installRuntimeDriverStreamEvents({
       store,
       resolveScopeIdForRunPayload,
-      getScopeRunStateFromState,
       refreshInfrastructureWatchdog,
       clearInfrastructureWatchdog,
       reconcileCanonicalTerminalMessage,
@@ -95,6 +122,7 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
     const cleanupError = window.electronAPI.agent.onError((data) => {
       const scopeId = resolveScopeIdForRunPayload(data)
       if (!scopeId) return
+      if (!isCurrentScopeRun(scopeId, data.runId)) return
 
       // Phase 3: double-defense — AbortError is already short-circuited inside
       // turn-engine before emitRuntimeError fires, but if anything ever leaks
@@ -270,7 +298,8 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
           const agentName = typeof data.agent === 'string' && data.agent.trim() ? data.agent : store.getState().currentAgent
           const tool = String(data.tool || '').trim()
           const args = (data.args || {}) as Record<string, unknown>
-          const runId = typeof data.runId === 'string' ? data.runId : null
+          const runId = normalizeRunId(data.runId)
+          if (!runId || !isCurrentScopeRun(scopeId, runId)) return
           const handled = await handleModuleToolAction({
             scopeId,
             agentName,
@@ -278,18 +307,25 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
             args,
             runId,
             activateWorkbenchMode,
-            upsertScopeRunState,
-            getScopeRunState: () => getScopeRunStateFromState(store.getState(), scopeId),
+            upsertScopeRunState: (targetScopeId, updater) => {
+              if (targetScopeId !== scopeId) return
+              upsertCurrentScopeRun(targetScopeId, runId, updater)
+            },
+            getScopeRunState: () => isCurrentScopeRun(scopeId, runId)
+              ? getScopeRunStateFromState(store.getState(), scopeId)
+              : null,
           })
+          if (!isCurrentScopeRun(scopeId, runId)) return
           if (!handled) return
         })
         .catch((error) => {
           const scopeId = resolveScopeIdForRunPayload(data)
-          if (!scopeId) return
-          upsertScopeRunState(scopeId, (previous) => ({
+          const runId = normalizeRunId(data.runId)
+          if (!scopeId || !runId || !isCurrentScopeRun(scopeId, runId)) return
+          upsertCurrentScopeRun(scopeId, runId, (previous) => ({
             scopeId,
             agent: previous?.agent || store.getState().currentAgent,
-            requestId: previous?.requestId || (typeof data.runId === 'string' ? data.runId : null),
+            requestId: previous?.requestId || runId,
             phase: 'error',
             toolTrace: [
               ...(previous?.toolTrace || []),
@@ -420,10 +456,27 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
         return
       }
 
+      const runId = normalizeRunId(data.runId)
+      if (!runId || !isCurrentScopeRun(scopeId, runId)) {
+        activeToolRequests.delete(requestId)
+        logToolEvent({
+          type: 'cancel',
+          requestId,
+          tool: String(data.tool || ''),
+          scopeId,
+          error: 'stale_run',
+        })
+        await window.electronAPI.agent.completeToolActionRequest({
+          requestId,
+          handled: false,
+          error: 'stale_run',
+        }).catch(() => { /* ignore */ })
+        return
+      }
+
       const agentName = typeof data.agent === 'string' && data.agent.trim() ? data.agent : store.getState().currentAgent
       const tool = String(data.tool || '').trim()
       const args = (data.args || {}) as Record<string, unknown>
-      const runId = typeof data.runId === 'string' ? data.runId : null
       const budgetMs = budgetForTool(tool)
 
       const startedAt = Date.now()
@@ -488,12 +541,33 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
             args,
             runId,
             activateWorkbenchMode,
-            upsertScopeRunState,
-            getScopeRunState: () => getScopeRunStateFromState(store.getState(), scopeId),
+            upsertScopeRunState: (targetScopeId, updater) => {
+              if (targetScopeId !== scopeId) return
+              upsertCurrentScopeRun(targetScopeId, runId, updater)
+            },
+            getScopeRunState: () => isCurrentScopeRun(scopeId, runId)
+              ? getScopeRunStateFromState(store.getState(), scopeId)
+              : null,
           }),
           watchdogPromise,
           cancelPromise,
         ])
+        if (!isCurrentScopeRun(scopeId, runId)) {
+          await window.electronAPI.agent.completeToolActionRequest({
+            requestId,
+            handled: false,
+            error: 'stale_run',
+          })
+          logToolEvent({
+            type: 'cancel',
+            requestId,
+            tool,
+            scopeId,
+            elapsedMs: Date.now() - startedAt,
+            error: 'stale_run',
+          })
+          return
+        }
         await window.electronAPI.agent.completeToolActionRequest({
           requestId,
           handled: result.handled,
@@ -507,7 +581,10 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
           elapsedMs: Date.now() - startedAt,
         })
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error)
+        const stillCurrent = isCurrentScopeRun(scopeId, runId)
+        const message = stillCurrent
+          ? error instanceof Error ? error.message : String(error)
+          : 'stale_run'
         // For cancelled we've already been told; still ack so main's pending map releases even if
         // the cancel IPC was missed. completeToolActionRequest on an unknown id is a no-op.
         await window.electronAPI.agent.completeToolActionRequest({
@@ -515,6 +592,7 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
           handled: false,
           error: message,
         }).catch(() => { /* ignore */ })
+        if (!stillCurrent) return
         throw error
       } finally {
         if (watchdog) clearTimeout(watchdog)
@@ -536,14 +614,6 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
             scopeId: scopeIdForLog,
             error: 'duplicate-dispatch',
           })
-          try {
-            // fire-and-forget: best-effort acknowledgement of a duplicate dispatch so the main side can clear the pending request; the duplicate is already a no-op upstream.
-            void window.electronAPI.agent.completeToolActionRequest?.({
-              requestId: data.requestId,
-              handled: false,
-              error: 'duplicate-dispatch',
-            }).catch(() => { /* ignore */ })
-          } catch { /* ignore */ }
           return
         }
         // Queue-level abort: flipping `cancelled` guarantees runWithWatchdog's entry check sees
@@ -572,11 +642,12 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
           .then(() => runWithWatchdog(data))
           .catch(async (error) => {
             const scopeId = resolveScopeIdForRunPayload(data)
-            if (scopeId) {
-              upsertScopeRunState(scopeId, (previous) => ({
+            const runId = normalizeRunId(data.runId)
+            if (scopeId && runId && isCurrentScopeRun(scopeId, runId)) {
+              upsertCurrentScopeRun(scopeId, runId, (previous) => ({
                 scopeId,
                 agent: previous?.agent || store.getState().currentAgent,
-                requestId: previous?.requestId || (typeof data.runId === 'string' ? data.runId : null),
+                requestId: previous?.requestId || runId,
                 phase: 'error',
                 toolTrace: [
                   ...(previous?.toolTrace || []),

@@ -1,13 +1,9 @@
 // B8-P (2026-07-05) — pure move of runtime.ts top-level helpers (HEAD lines
-// 178–393): studio preroute-action builder, channel/schedule payload types,
-// child-run summary types, and pending-task-event / projection parsing
+// 178–393): channel/schedule payload types,
+// child-run summary types and projection parsing
 // helpers. No behavior change; runtime.ts re-exports the public payload types
 // so the external import face is unchanged.
 import { isAwaitingUserInteractionState } from '../../../../shared/task-interaction-state'
-import type { AgentSystemStudioRoutingSimulation } from '../../../../shared/agent-system-studio'
-import type { TaskEventBridgePayload } from '../../browser-engine/task-event-bridge'
-import { MAIN_AGENT_ID } from '../../repositories/agent-registry-repository'
-import type { PrerouteResult } from '../agents/session-preroute'
 import type { TaskProjectionRecord } from '../contracts/run-contracts'
 import type {
   ChannelAdapterType,
@@ -15,38 +11,6 @@ import type {
   ScopeRunSkillProgress,
   ScopeRunSummary,
 } from '../contracts/types'
-import type { PendingTaskEventRow } from '../system-reminders/background-task-terminal-reminder'
-
-export function buildStudioPrerouteActions(input: {
-  result: PrerouteResult
-  targetName: string | null
-  targetStatus: string
-}): AgentSystemStudioRoutingSimulation['actions'] {
-  const targetId = input.result.decision.targetAgentId
-  const targetLabel = input.targetName || targetId
-  const hasSpecialistHit = targetId !== MAIN_AGENT_ID && input.targetStatus === 'active' && input.result.effect !== 'none'
-  const hasPrecedentHit = hasSpecialistHit && input.result.decision.tier === 'precedent'
-  return [{
-    kind: 'use_once',
-    label: hasSpecialistHit ? `本次用 ${targetLabel}` : '本次用专项 agent',
-    description: hasSpecialistHit
-      ? '只把这次请求交给该专项 agent，不改变路由卡。'
-      : '当前样例没有命中可用专项 agent。',
-    enabled: hasSpecialistHit,
-  }, {
-    kind: 'always_route',
-    label: '总是路由这类',
-    description: hasPrecedentHit
-      ? '需要用户确认后才会让这类触发词长期生效。'
-      : '只有命中可用路由卡后，才能把这类请求设成长期路由。',
-    enabled: hasPrecedentHit,
-  }, {
-    kind: 'keep_main',
-    label: '留在主 agent',
-    description: '保持主 agent 处理这次请求，不启用专项分派。',
-    enabled: true,
-  }]
-}
 
 export interface UpsertChannelPayload {
   id?: string
@@ -61,6 +25,7 @@ export type ActiveChildRunSummaryForRuntime = {
   skillId: string
   sessionId: string | null
   scopeId: string | null
+  messageVisibilityEpoch: number
   status: string
   startedAt: string
   outputDir: string
@@ -74,6 +39,7 @@ export type ActiveChildRunSummaryForRuntime = {
 export interface TaskProjectionChildSummaryRow {
   task_id: string
   scope_id: string
+  message_visibility_epoch: number
   status: string
   blocked_reason: string | null
   continuation_ref_json: string | null
@@ -82,9 +48,101 @@ export interface TaskProjectionChildSummaryRow {
   updated_at: string
 }
 
+interface CurrentVisibleSummaryStatement {
+  all<T = unknown>(): T[]
+}
+
+export interface CurrentVisibleSummaryDatabase {
+  prepare(sql: string): CurrentVisibleSummaryStatement
+}
+
+export function filterCurrentScopeRunSummaries(
+  summaries: Iterable<ScopeRunSummary>,
+  getConversationScope: (scopeId: string) => { messageVisibilityEpoch: number } | null,
+): ScopeRunSummary[] {
+  return Array.from(summaries).filter((item) => {
+    const scope = getConversationScope(item.scopeId)
+    return Boolean(
+      scope
+      && Number.isSafeInteger(item.messageVisibilityEpoch)
+      && item.messageVisibilityEpoch === scope.messageVisibilityEpoch,
+    )
+  })
+}
+
+export function listCurrentProjectionBackedChildRunSummaries(
+  rawDb: CurrentVisibleSummaryDatabase | null,
+): {
+  rows: ActiveChildRunSummaryForRuntime[]
+  failure: { reason: 'projection_db_error'; message: string } | null
+} {
+  if (!rawDb) return { rows: [], failure: null }
+  let rows: TaskProjectionChildSummaryRow[] = []
+  try {
+    rows = rawDb.prepare(`
+      SELECT task.task_id, task.scope_id, task.message_visibility_epoch,
+             task.status, task.blocked_reason, task.continuation_ref_json,
+             task.recent_artifacts_json, task.created_at, task.updated_at
+      FROM task_projections task
+      INNER JOIN chat_conversations scope
+        ON scope.id = task.scope_id
+       AND scope.closed_at IS NULL
+       AND scope.message_visibility_epoch = task.message_visibility_epoch
+      WHERE task.task_id LIKE 'skill-child:%'
+        AND task.status IN ('queued', 'running', 'blocked', 'failed')
+      ORDER BY task.updated_at DESC
+      LIMIT 100
+    `).all<TaskProjectionChildSummaryRow>()
+  } catch (error) {
+    return {
+      rows: [],
+      failure: {
+        reason: 'projection_db_error',
+        message: error instanceof Error ? error.message : String(error),
+      },
+    }
+  }
+
+  const mapped = rows.map((row) => {
+    const continuation = parseRecordJson(row.continuation_ref_json)
+    const artifacts = parseArrayJson(row.recent_artifacts_json)
+    const childRunId = stringFromUnknown(continuation?.childRunId)
+      || row.task_id.replace(/^skill-child:/, '')
+    const skillId = stringFromUnknown(continuation?.skillId)
+      || artifactMetaString(artifacts, 'skillId')
+      || 'unknown'
+    const outputDir = stringFromUnknown(continuation?.outputDir)
+      || artifactMetaString(artifacts, 'outputDir')
+      || ''
+    const runStatePath = stringFromUnknown(continuation?.runStatePath)
+      || artifactMetaString(artifacts, 'runStatePath')
+      || ''
+    return {
+      childRunId,
+      skillId,
+      sessionId: null,
+      scopeId: row.scope_id,
+      messageVisibilityEpoch: row.message_visibility_epoch,
+      status: childRunSummaryStatusFromProjection(row.status),
+      startedAt: row.created_at || row.updated_at,
+      outputDir,
+      runStatePath,
+      progress: progressFromUnknown(continuation?.progress),
+      blockedReason: row.blocked_reason,
+      liveness: row.status === 'queued' || row.status === 'running' || row.status === 'blocked'
+        ? 'background' as const
+        : null,
+      closeStatus: row.status === 'failed' ? 'failed' : null,
+    }
+  }).filter((row) => Boolean(row.childRunId))
+  return { rows: mapped, failure: null }
+}
+
 export type PendingInboundChannel = {
   channelId: string
   thread: string
+  scopeId: string | null
+  messageVisibilityEpoch: number | null
   sender: string
   eventIds: string[]
   texts: string[]
@@ -134,52 +192,6 @@ export function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? value as Record<string, unknown>
     : null
-}
-
-export function parsePendingTaskEventPayload(row: PendingTaskEventRow): TaskEventBridgePayload | null {
-  try {
-    const parsed = JSON.parse(row.eventPayload) as unknown
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null
-    const record = parsed as Partial<TaskEventBridgePayload>
-    if (typeof record.taskId !== 'string' || typeof record.status !== 'string') return null
-    return record as TaskEventBridgePayload
-  } catch {
-    return null
-  }
-}
-
-export function resolvePendingTaskEventScopeId(payload: TaskEventBridgePayload | null): string | null {
-  if (!payload) return null
-  const extra = asRecord(payload.extra)
-  return readScopeIdFromPendingEvent(extra)
-}
-
-export function readScopeIdFromPendingEvent(record: Record<string, unknown> | null): string | null {
-  if (!record) return null
-  const direct = stringFromUnknown(record.scopeId)
-    || stringFromUnknown(record.sessionId)
-    || stringFromUnknown(record.publicSessionId)
-  if (direct) return direct
-  return readScopeIdFromPendingEvent(asRecord(record.payload))
-}
-
-export function summarizePendingTaskEvent(payload: TaskEventBridgePayload): string {
-  const extra = asRecord(payload.extra)
-  const summary = stringFromUnknown(extra?.summary)
-    || stringFromUnknown(extra?.title)
-    || stringFromUnknown(extra?.message)
-    || stringFromUnknown(extra?.statusText)
-  return summary || `后台任务 ${payload.taskId} 已进入终态：${payload.status}`
-}
-
-export function buildPendingTaskNarrationPrompt(payload: TaskEventBridgePayload): string {
-  const summary = summarizePendingTaskEvent(payload)
-  return [
-    '请向用户简短播报这个后台任务的最新结果，只做说明和下一步建议，不执行任何写入、浏览器操作或高风险动作。',
-    `任务 ID：${payload.taskId}`,
-    `状态：${payload.status}`,
-    `摘要：${summary}`,
-  ].join('\n')
 }
 
 export function stringFromUnknown(value: unknown): string | null {

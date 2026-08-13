@@ -4,7 +4,7 @@ import { resolve } from 'node:path'
 import test from 'node:test'
 
 function readWorkspaceFile(path: string): string {
-  // eslint-disable-next-line ready/no-source-grep-test -- Phase M 管理面验收：Settings 页是 Zustand + Electron IPC 耦合的大型 React 组件，node-test 无 JSDOM harness；沿用 settings-ai-layout-contract.test.ts 的同一豁免。
+
   return readFileSync(resolve(process.cwd(), path), 'utf8')
 }
 

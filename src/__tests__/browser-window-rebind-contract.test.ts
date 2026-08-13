@@ -9,11 +9,11 @@ function readWorkspaceFile(path: string): string {
 
 test('browser controller rebinds to newly created windows instead of staying attached to the original main window', () => {
   const mainIndex = readWorkspaceFile('src/main/index.ts')
-  const ipcHandler = readWorkspaceFile('src/main/modules/browser-engine/ipc-handler.ts')
+  const hostRuntime = readWorkspaceFile('src/main/modules/browser-engine/browser-controller-host-runtime.ts')
   const hostLayout = readWorkspaceFile('src/main/modules/browser-engine/host-layout-service.ts')
 
-  assert.match(ipcHandler, /attachWindow\(mainWindow: BrowserWindow\): void/)
+  assert.match(hostRuntime, /attachWindow\(mainWindow: BrowserWindow\): void/)
   assert.match(hostLayout, /setMainWindow\(mainWindow: BrowserWindow\): void/)
-  assert.match(mainIndex, /if \(!windowIPCRegistered\) \{[\s\S]*browserController = setupBrowserIPC\(mainWindow, ENABLE_MOCK_SERVICES, \{[\s\S]*windowIPCRegistered = true[\s\S]*\} else \{[\s\S]*browserController\?\.attachWindow\(mainWindow\)/)
+  assert.match(mainIndex, /if \(!windowIPCRegistered\) \{[\s\S]*const window = mainWindow[\s\S]*setupBrowserIPC\(window, ENABLE_MOCK_SERVICES, \{[\s\S]*browserController = currentBrowserController[\s\S]*windowIPCRegistered = true[\s\S]*\} else \{[\s\S]*browserController\?\.attachWindow\(mainWindow\)/)
   assert.match(mainIndex, /const closedWindow = mainWindow[\s\S]*mainWindow\.on\('closed', \(\) => \{[\s\S]*if \(mainWindow === closedWindow\) \{[\s\S]*mainWindow = null/)
 })

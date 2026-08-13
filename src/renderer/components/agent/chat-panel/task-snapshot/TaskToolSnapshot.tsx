@@ -84,16 +84,8 @@ export interface TaskToolSnapshotProps {
   onUndoMemoryCapture: (scopeId: string) => void
   onSupplementMemoryCapture: (scopeId: string) => void
   onOpenScope: (scopeId: string) => void
-  onContinueTaskInput: (scopeId: string) => void
-  onSubmitTaskConfirmation: (scopeId: string, confirmed: boolean, requestId?: string) => void
-  onSubmitTaskAgentResult: (scopeId: string) => void
-  onRetryTask: (scopeId: string) => void
-  onSuspendTask: (scopeId: string) => void
-  onResumeTask: (scopeId: string) => void
   onCancelDetachedTask: (scopeId: string, taskId?: string | null) => void
-  onContinueDetachedTask: (scopeId: string, taskId?: string | null) => void
   onCancelChildRun: (scopeId: string, childRunId: string) => void
-  onContinueChildRun: (scopeId: string, childRunId: string) => void
 
   // --- Render-prop ---
   children: (values: TaskToolSnapshotRenderValues) => React.ReactNode
@@ -217,16 +209,8 @@ export function TaskToolSnapshot(props: TaskToolSnapshotProps): React.ReactEleme
     onUndoMemoryCapture,
     onSupplementMemoryCapture,
     onOpenScope,
-    onContinueTaskInput,
-    onSubmitTaskConfirmation,
-    onSubmitTaskAgentResult,
-    onRetryTask,
-    onSuspendTask,
-    onResumeTask,
     onCancelDetachedTask,
-    onContinueDetachedTask,
     onCancelChildRun,
-    onContinueChildRun,
     children,
   } = props
   const [dismissedBottomTaskKeys, setDismissedBottomTaskKeys] = useState<Set<string>>(readDismissedBottomTaskKeys)
@@ -271,16 +255,8 @@ export function TaskToolSnapshot(props: TaskToolSnapshotProps): React.ReactEleme
           onUndoMemoryCapture={onUndoMemoryCapture}
           onSupplementMemoryCapture={onSupplementMemoryCapture}
           onOpenScope={onOpenScope}
-          onContinueInput={onContinueTaskInput}
-          onSubmitConfirmation={onSubmitTaskConfirmation}
-          onSubmitAgentResult={onSubmitTaskAgentResult}
-          onRetry={onRetryTask}
-          onSuspendRun={onSuspendTask}
-          onResumeRun={onResumeTask}
           onCancelDetachedTask={onCancelDetachedTask}
-          onContinueDetachedTask={onContinueDetachedTask}
           onCancelChildRun={onCancelChildRun}
-          onContinueChildRun={onContinueChildRun}
           dismissible={dismissible}
           onDismiss={dismissible ? () => {
             setDismissedBottomTaskKeys((current) => {
@@ -296,18 +272,10 @@ export function TaskToolSnapshot(props: TaskToolSnapshotProps): React.ReactEleme
       currentScopeId,
       currentTaskRun,
       onOpenScope,
-      onContinueTaskInput,
       onCancelDetachedTask,
       onCancelChildRun,
-      onContinueDetachedTask,
-      onContinueChildRun,
       onDismissMemoryCapture,
       onOpenTaskArtifact,
-      onRetryTask,
-      onResumeTask,
-      onSuspendTask,
-      onSubmitTaskAgentResult,
-      onSubmitTaskConfirmation,
       onSupplementMemoryCapture,
       onUndoMemoryCapture,
       setTaskSectionExpanded,
@@ -578,7 +546,10 @@ export function TaskToolSnapshot(props: TaskToolSnapshotProps): React.ReactEleme
       // composer chrome (which is also `w-full`). Without the explicit
       // width some intrinsic-sized children inside TaskCard can collapse
       // the wrapper narrower than the input slot.
-      <div className="flex flex-col" style={{ gap: 6, width: '100%', boxSizing: 'border-box' }}>
+      <div
+        className="flex flex-col"
+        style={{ gap: 6, width: '100%', maxWidth: '100%', minWidth: 0, boxSizing: 'border-box' }}
+      >
         {visibleForegroundActive && currentTaskRun
           ? renderTaskSnapshotCard(
               currentTaskRun,

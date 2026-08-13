@@ -83,3 +83,97 @@ test('a resolved page challenge resumes while an expired challenge checkpoints',
   ])
   assert.equal(registry.hasPending(RUN), false)
 })
+
+test('conversation reset cancels only pending interactions in the exact scope', () => {
+  const registry = new InteractionLifecycleRegistry()
+  const other = { runId: 'run-other', agentId: 'butler', scopeId: 'scope-other' }
+  const phases: string[] = []
+  registry.subscribe((event) => phases.push(`${event.scopeId}:${event.phase}:${event.pendingCount}`))
+  registry.register({ ...RUN, interactionId: 'takeover-old', type: 'human_takeover' })
+  registry.register({ ...RUN, interactionId: 'challenge-old', type: 'page_challenge', timeoutMs: 60_000 })
+  registry.register({ ...other, interactionId: 'takeover-other', type: 'human_takeover' })
+
+  assert.equal(registry.cancelScope(RUN.scopeId), 2)
+  assert.equal(registry.hasPending(RUN), false)
+  assert.equal(registry.hasPending(other), true)
+  assert.ok(phases.includes('scope-1:terminated:0'))
+  registry.clear()
+})
+
+test('settled and cancelled interaction history stays bounded without retaining live records', () => {
+  const registry = new InteractionLifecycleRegistry()
+  for (let index = 0; index < 10_000; index += 1) {
+    const identity = {
+      runId: `run-${index}`,
+      agentId: 'butler',
+      scopeId: `scope-${index}`,
+      interactionId: `interaction-${index}`,
+      type: 'ask_user' as const,
+    }
+    assert.equal(registry.register(identity), true)
+    if (index % 3 === 0) {
+      assert.equal(registry.cancelScope(identity.scopeId), 1)
+    } else {
+      assert.equal(registry.settle({ ...identity, disposition: index % 2 === 0 ? 'checkpoint' : 'resume_with_result' }), true)
+    }
+  }
+
+  const state = registry as unknown as {
+    records: Map<string, unknown>
+    terminalInteractionIds: Set<string>
+  }
+  assert.equal(state.records.size, 0)
+  assert.equal(state.terminalInteractionIds.size, 2_048)
+  assert.equal(registry.register({ ...RUN, interactionId: 'interaction-9999', type: 'ask_user' }), false)
+})
+
+test('a throwing observer cannot interrupt registration, settlement, or healthy observers', () => {
+  const registry = new InteractionLifecycleRegistry()
+  const phases: string[] = []
+  registry.subscribe(() => { throw new Error('observer failed') })
+  registry.subscribe((event) => phases.push(event.phase))
+
+  assert.equal(registry.register({ ...RUN, interactionId: 'observer-isolation', type: 'ask_user' }), true)
+  assert.equal(registry.settle({ ...RUN, interactionId: 'observer-isolation', disposition: 'resume_with_result' }), true)
+  assert.equal(registry.hasPending(RUN), false)
+  assert.deepEqual(phases, ['suspended', 'resumed'])
+})
+
+test('a synchronous settlement observer cannot leave an orphan timeout behind', () => {
+  const registry = new InteractionLifecycleRegistry()
+  const originalSetTimeout = globalThis.setTimeout
+  const originalClearTimeout = globalThis.clearTimeout
+  let scheduled = 0
+  let cleared = 0
+  const fakeHandle = { unref() {} } as unknown as NodeJS.Timeout
+  globalThis.setTimeout = ((..._args: Parameters<typeof setTimeout>) => {
+    scheduled += 1
+    return fakeHandle
+  }) as typeof setTimeout
+  globalThis.clearTimeout = ((handle: Parameters<typeof clearTimeout>[0]) => {
+    if (handle === fakeHandle) cleared += 1
+  }) as typeof clearTimeout
+  try {
+    registry.subscribe((event) => {
+      if (event.phase !== 'suspended') return
+      registry.settle({
+        ...RUN,
+        interactionId: event.interactionId,
+        disposition: 'resume_with_result',
+      })
+    })
+    assert.equal(registry.register({
+      ...RUN,
+      interactionId: 'reentrant-timeout',
+      type: 'ask_user',
+      timeoutMs: 60_000,
+    }), true)
+  } finally {
+    globalThis.setTimeout = originalSetTimeout
+    globalThis.clearTimeout = originalClearTimeout
+  }
+
+  assert.equal(scheduled, 1)
+  assert.equal(cleared, 1)
+  assert.equal(registry.hasPending(RUN), false)
+})

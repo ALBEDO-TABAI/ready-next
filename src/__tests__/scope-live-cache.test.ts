@@ -15,6 +15,42 @@ const { useAgent } = await import('../renderer/stores/useAgent')
 
 const DB: Record<string, Array<{ id: string; role: string; content: string; timestamp: string; meta?: Record<string, unknown> }>> = {}
 
+function scope(id: string) {
+  return {
+    id,
+    agent: 'butler',
+    title: id,
+    sourceKind: 'local' as const,
+    sourceId: 'app',
+    threadKey: id,
+    meta: {},
+    aliasGeneration: 1,
+    messageVisibilityEpoch: 0,
+    createdAt: '2026-06-12T09:00:00.000Z',
+    updatedAt: '2026-06-12T09:00:00.000Z',
+  }
+}
+
+function sessionSlice(conversationId: string) {
+  return {
+    messages: [],
+    isStreaming: false,
+    foregroundBusy: false,
+    composerLocked: false,
+    streamingMessageId: null,
+    streamingRequestId: null,
+    scopeRunStates: {},
+    taskDisclosureState: {},
+    lifecyclePendingAction: null,
+    lifecycleError: null,
+    state: 'live',
+    conversationId,
+    aliasGeneration: 1,
+    messageVisibilityEpoch: 0,
+    inputValue: '',
+  }
+}
+
 function installApi(): void {
   ;(globalThis as any).electronAPI = {
     agent: {
@@ -33,10 +69,18 @@ beforeEach(() => {
   useAgent.setState({
     messages: [],
     currentScopeId: 'scope-a',
-    currentScope: null,
-    scopes: [],
+    currentScope: scope('scope-a'),
+    scopes: [scope('scope-a'), scope('scope-b')],
     scopeLiveMessages: {},
-    sessions: {},
+    sessions: {
+      'scope-a': sessionSlice('scope-a'),
+      'scope-b': sessionSlice('scope-b'),
+    },
+    activeSessionId: 'scope-a',
+    sessionId: 'scope-a',
+    conversationId: 'scope-a',
+    retiredScopeIds: {},
+    scopeAuthorityRevision: 0,
   } as never)
 })
 
@@ -104,9 +148,12 @@ test('real chain: send creates empty reply → first chunk seeds the cache → s
   useAgent.setState((state: any) => ({
     messages: [...state.messages, { id: replyId, agent: 'butler', content: '', type: 'agent', timestamp: new Date('2026-06-12T11:00:00.000Z'), meta: { transient: true } }],
     sessions: {
-      'sess-a': {
-        ...(state.sessions['sess-a'] || {}),
+      ...state.sessions,
+      'scope-a': {
+        ...(state.sessions['scope-a'] || {}),
         conversationId: 'scope-a',
+        aliasGeneration: 1,
+        messageVisibilityEpoch: 0,
         messages: [],
         scopeRunStates: {
           'scope-a': {
@@ -119,7 +166,8 @@ test('real chain: send creates empty reply → first chunk seeds the cache → s
         },
       },
     },
-    activeSessionId: 'sess-a',
+    activeSessionId: 'scope-a',
+    sessionId: 'scope-a',
   } as never))
 
   // first chunk arrives: previously a bare append would NO-OP (no cache twin)

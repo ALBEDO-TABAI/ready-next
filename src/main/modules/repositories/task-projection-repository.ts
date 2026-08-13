@@ -30,6 +30,7 @@ interface TaskProjectionRow {
   revision?: number | null
   dependency_generation?: number | null
   scope_id: string
+  message_visibility_epoch: number
   run_id: string
   parent_task_id: string | null
   parent_step_id: string | null
@@ -266,6 +267,9 @@ export class TaskProjectionRepository implements TaskProjectionStore {
   create(record: TaskProjectionRecord, options?: TaskProjectionWriteOptions): void {
     const db = this.dbManager.getRawDb()
     if (!db) throw new Error('Database not available')
+    if (!Number.isSafeInteger(record.messageVisibilityEpoch) || Number(record.messageVisibilityEpoch) < 0) {
+      throw new Error('[task-projection-repository] messageVisibilityEpoch is required on create')
+    }
     validateTaskQualityFields(record, 'create')
     if (record.executionBinding && record.executionBinding.runId !== record.runId) {
       throw new Error('[task-projection-repository] execution binding runId must match projection runId')
@@ -277,7 +281,7 @@ export class TaskProjectionRepository implements TaskProjectionStore {
 
     db.prepare(`
       INSERT INTO task_projections (
-        task_id, revision, dependency_generation, scope_id, run_id, parent_task_id, parent_step_id, task_type, module, task_title, task_summary, status, interaction_state, waiting_for,
+        task_id, revision, dependency_generation, scope_id, message_visibility_epoch, run_id, parent_task_id, parent_step_id, task_type, module, task_title, task_summary, status, interaction_state, waiting_for,
         steps_json, current_step_id, budget_json, budget_usage_percent, budget_warning_level,
         recovery_history_json, degradation_reason, blocked_reason, resumable_actions_json,
         continuation_ref_json, progress_json, recent_artifacts_json,
@@ -285,12 +289,13 @@ export class TaskProjectionRepository implements TaskProjectionStore {
         owner_agent_id, task_origin, execution_binding_json, packet_role, context_refs_json, delivery_state_json,
         request_anchor_json, goal_mutations_json, steering_receipts_json, human_takeover_ref_json, checkpoint_refs_json,
         created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       record.taskId,
       record.revision ?? 0,
       record.dependencyGeneration ?? 0,
       record.scopeId,
+      record.messageVisibilityEpoch,
       record.runId,
       record.parentTaskId ?? null,
       record.parentStepId ?? null,
@@ -670,18 +675,34 @@ export class TaskProjectionRepository implements TaskProjectionStore {
   get(taskId: string): TaskProjectionRecord | null {
     const db = this.dbManager.getRawDb()
     if (!db) throw new Error('Database not available')
-    const row = db.prepare(
-      'SELECT * FROM task_projections WHERE task_id = ? LIMIT 1',
-    ).get<TaskProjectionRow>(taskId)
+    const row = db.prepare(`
+      SELECT * FROM task_projections
+       WHERE task_id = ?
+         AND EXISTS (
+           SELECT 1 FROM chat_conversations scope
+            WHERE scope.id = task_projections.scope_id
+              AND scope.closed_at IS NULL
+              AND task_projections.message_visibility_epoch = scope.message_visibility_epoch
+         )
+       LIMIT 1
+    `).get<TaskProjectionRow>(taskId)
     return row ? this.mapRow(row) : null
   }
 
   listByScope(scopeId: string): TaskProjectionRecord[] {
     const db = this.dbManager.getRawDb()
     if (!db) throw new Error('Database not available')
-    return db.prepare(
-      'SELECT * FROM task_projections WHERE scope_id = ? ORDER BY updated_at DESC',
-    ).all<TaskProjectionRow>(scopeId).map((row) => this.mapRow(row))
+    return db.prepare(`
+      SELECT * FROM task_projections
+       WHERE scope_id = ?
+         AND EXISTS (
+           SELECT 1 FROM chat_conversations scope
+            WHERE scope.id = task_projections.scope_id
+              AND scope.closed_at IS NULL
+              AND task_projections.message_visibility_epoch = scope.message_visibility_epoch
+         )
+       ORDER BY updated_at DESC
+    `).all<TaskProjectionRow>(scopeId).map((row) => this.mapRow(row))
   }
 
   listByOwnerAgent(ownerAgentId: string, limit = 20): TaskProjectionRecord[] {
@@ -692,9 +713,15 @@ export class TaskProjectionRepository implements TaskProjectionStore {
       : 20
     const db = this.dbManager.getRawDb()
     if (!db) throw new Error('Database not available')
-    return db.prepare(
-      'SELECT * FROM task_projections WHERE owner_agent_id = ? ORDER BY updated_at DESC LIMIT ?',
-    ).all<TaskProjectionRow>(owner, normalizedLimit).map((row) => this.mapRow(row))
+    return db.prepare(`
+      SELECT projection.*
+        FROM task_projections projection
+        JOIN chat_conversations scope ON scope.id = projection.scope_id
+       WHERE projection.owner_agent_id = ?
+         AND scope.closed_at IS NULL
+         AND projection.message_visibility_epoch = scope.message_visibility_epoch
+       ORDER BY projection.updated_at DESC LIMIT ?
+    `).all<TaskProjectionRow>(owner, normalizedLimit).map((row) => this.mapRow(row))
   }
 
   /**
@@ -707,26 +734,35 @@ export class TaskProjectionRepository implements TaskProjectionStore {
     try {
       const db = this.dbManager.getRawDb()
       if (!db) return null
-      const row = db.prepare(
-        'SELECT owner_agent_id FROM task_projections WHERE scope_id = ? AND owner_agent_id IS NOT NULL ORDER BY updated_at DESC LIMIT 1',
-      ).get<{ owner_agent_id: string | null }>(scopeId)
+      const row = db.prepare(`
+        SELECT projection.owner_agent_id
+          FROM task_projections projection
+          JOIN chat_conversations scope ON scope.id = projection.scope_id
+         WHERE projection.scope_id = ?
+           AND projection.owner_agent_id IS NOT NULL
+           AND scope.closed_at IS NULL
+           AND projection.message_visibility_epoch = scope.message_visibility_epoch
+         ORDER BY projection.updated_at DESC LIMIT 1
+      `).get<{ owner_agent_id: string | null }>(scopeId)
       return row?.owner_agent_id ?? null
     } catch {
       return null
     }
   }
 
-  /** EP4-A5 — recent tasks (most recent first, ANY owner) feeding the
-   *  session preroute's state tier. Un-owned open tasks must be visible to
-   *  the classifier, or a genuine continuation of a main-agent task would
-   *  get hijacked by precedent matching. Dead DB → empty. */
-  listRecentTasksForPreroute(limit = 10): TaskProjectionRecord[] {
+  /** Recent current-epoch tasks, newest first. Dead DB → empty. */
+  listRecentTasks(limit = 10): TaskProjectionRecord[] {
     try {
       const db = this.dbManager.getRawDb()
       if (!db) return []
-      return db.prepare(
-        'SELECT * FROM task_projections ORDER BY updated_at DESC LIMIT ?',
-      ).all<TaskProjectionRow>(limit).map((row) => this.mapRow(row))
+      return db.prepare(`
+        SELECT projection.*
+          FROM task_projections projection
+          JOIN chat_conversations scope ON scope.id = projection.scope_id
+         WHERE scope.closed_at IS NULL
+           AND projection.message_visibility_epoch = scope.message_visibility_epoch
+         ORDER BY projection.updated_at DESC LIMIT ?
+      `).all<TaskProjectionRow>(limit).map((row) => this.mapRow(row))
     } catch {
       return []
     }
@@ -735,9 +771,17 @@ export class TaskProjectionRepository implements TaskProjectionStore {
   listByParentTask(parentTaskId: string): TaskProjectionRecord[] {
     const db = this.dbManager.getRawDb()
     if (!db) throw new Error('Database not available')
-    return db.prepare(
-      'SELECT * FROM task_projections WHERE parent_task_id = ? ORDER BY updated_at DESC',
-    ).all<TaskProjectionRow>(parentTaskId).map((row) => this.mapRow(row))
+    return db.prepare(`
+      SELECT * FROM task_projections
+       WHERE parent_task_id = ?
+         AND EXISTS (
+           SELECT 1 FROM chat_conversations scope
+            WHERE scope.id = task_projections.scope_id
+              AND scope.closed_at IS NULL
+              AND task_projections.message_visibility_epoch = scope.message_visibility_epoch
+         )
+       ORDER BY updated_at DESC
+    `).all<TaskProjectionRow>(parentTaskId).map((row) => this.mapRow(row))
   }
 
   deleteByScope(scopeId: string, options?: TaskProjectionWriteOptions): void {
@@ -801,9 +845,12 @@ export class TaskProjectionRepository implements TaskProjectionStore {
     // also excluded here so we never re-adopt a child-run row by path
     // similarity.
     const rows = db.prepare(
-      `SELECT *
+      `SELECT tp.*
        FROM task_projections tp
+       JOIN chat_conversations scope ON scope.id = tp.scope_id
        WHERE tp.scope_id = ?
+         AND scope.closed_at IS NULL
+         AND tp.message_visibility_epoch = scope.message_visibility_epoch
          AND tp.module = 'system'
          AND tp.task_type = 'short_task'
          AND tp.status NOT IN ('cancelled', 'done', 'killed', 'completed')
@@ -842,6 +889,7 @@ export class TaskProjectionRepository implements TaskProjectionStore {
       revision: row.revision ?? 0,
       dependencyGeneration: row.dependency_generation ?? 0,
       scopeId: row.scope_id,
+      messageVisibilityEpoch: row.message_visibility_epoch,
       runId: row.run_id,
       parentTaskId: row.parent_task_id ?? null,
       parentStepId: row.parent_step_id ?? null,

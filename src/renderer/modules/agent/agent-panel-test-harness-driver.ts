@@ -1,5 +1,7 @@
 import { useWorkspace } from '../../stores/useWorkspace'
-import type { AgentMessage, ChatAttachment, ScopeRunState } from './types'
+import { useDocTabs } from '../../stores/useDocTabs'
+import { useMode } from '../../stores/useMode'
+import type { AgentMessage, ChatAttachment } from './types'
 import { diagnoseAgentPanelSnapshot } from './agent-panel-test-harness-diagnostics'
 import {
   asRecord,
@@ -8,7 +10,6 @@ import {
   taskCardFromProjection,
 } from './agent-panel-test-harness-snapshot'
 import type {
-  AgentPanelDiagnostic,
   AgentPanelHarnessEvent,
   AgentPanelSessionSummary,
   AgentPanelSnapshot,
@@ -20,9 +21,8 @@ import type {
   AgentPanelTestWorkspaceResult,
   StoreLike,
   StoreState,
-  SendMessageResultLike,
+  SendMessageResultLike
 } from './agent-panel-test-harness-types'
-
 export function shouldEnableHarness(): boolean {
   if (typeof window === 'undefined') return false
   const meta = import.meta as unknown as { env?: { DEV?: boolean } }
@@ -184,8 +184,11 @@ async function waitForDomSubmitEvidence(
   return { submitted: false, started: false }
 }
 
-async function loadProjectionCards(scopeId: string | null): Promise<AgentPanelTaskCardSnapshot[]> {
-  if (!scopeId || typeof window === 'undefined') return []
+async function loadProjectionCards(
+  scopeId: string | null,
+  expectedMessageVisibilityEpoch: number | null,
+): Promise<AgentPanelTaskCardSnapshot[]> {
+  if (!scopeId || expectedMessageVisibilityEpoch === null || typeof window === 'undefined') return []
   const listTaskProjections = window.electronAPI?.agent?.listTaskProjections
   if (!listTaskProjections) return []
   const result = await Promise.race([
@@ -196,6 +199,8 @@ async function loadProjectionCards(scopeId: string | null): Promise<AgentPanelTa
   return result.data
     .map((item) => asRecord(item))
     .filter((item): item is Record<string, unknown> => Boolean(item))
+    .filter((item) => item.scopeId === scopeId
+      && item.messageVisibilityEpoch === expectedMessageVisibilityEpoch)
     .map(taskCardFromProjection)
 }
 
@@ -250,8 +255,18 @@ export function createAgentPanelTestHarness(store: StoreLike): AgentPanelTestHar
 
   const snapshot = async (): Promise<AgentPanelSnapshot> => {
     const state = store.getState()
-    const projectionCards = await loadProjectionCards(state.currentScopeId)
-    return createAgentPanelSnapshot(store.getState(), projectionCards)
+    const scopeId = state.currentScopeId
+    const expectedMessageVisibilityEpoch = scopeId
+      && state.currentScope?.id === scopeId
+      && Number.isSafeInteger(state.currentScope.messageVisibilityEpoch)
+      ? state.currentScope.messageVisibilityEpoch
+      : null
+    const projectionCards = await loadProjectionCards(scopeId, expectedMessageVisibilityEpoch)
+    const current = store.getState()
+    const authorityStillCurrent = current.currentScopeId === scopeId
+      && current.currentScope?.id === scopeId
+      && current.currentScope.messageVisibilityEpoch === expectedMessageVisibilityEpoch
+    return createAgentPanelSnapshot(current, authorityStillCurrent ? projectionCards : [])
   }
 
   const waitForIdle = async (options: { timeoutMs?: number; pollMs?: number } = {}) => {
@@ -295,6 +310,9 @@ export function createAgentPanelTestHarness(store: StoreLike): AgentPanelTestHar
     const messageText = attachmentContext ? `${text.trim()}\n\n${attachmentContext}` : text
     const normalizedText = messageText.trim()
     const mode = options.mode || 'dom'
+    if (options.codexExternalReadSlice && mode !== 'store') throw new Error(
+      'codex_external_read_slice_requires_store_mode',
+    )
     const allowStoreFallback = options.allowStoreFallback !== false
     let inputMode: 'dom' | 'store' = mode
     let sendResult: SendMessageResultLike | null = null
@@ -319,7 +337,9 @@ export function createAgentPanelTestHarness(store: StoreLike): AgentPanelTestHar
       inputMode = 'store'
       const state = store.getState()
       state.setInputValue(messageText, { preserveContinuationIntent: true })
-      const sendPromise = state.sendMessage(messageText)
+      const sendPromise = state.sendMessage(messageText, options.codexExternalReadSlice
+        ? { codexExternalReadSlice: options.codexExternalReadSlice }
+        : undefined)
       if (options.awaitStoreSend === false) {
         void sendPromise.catch(() => {})
       } else {
@@ -366,6 +386,25 @@ export function createAgentPanelTestHarness(store: StoreLike): AgentPanelTestHar
           sendResult,
           currentScopeId: after.currentScopeId,
           activeRun: after.runtime.activeRun,
+        },
+      })
+    }
+    if (
+      options.requireAssistantMessage
+      && !after.messages.slice(before.messages.length).some(
+        (message) => message.type === 'agent' && message.content.trim().length > 0,
+      )
+    ) {
+      diagnostics.push({
+        id: 'assistant_message_missing',
+        severity: 'error',
+        layer: 'runtime',
+        message: '本轮没有产生新的 Agent 最终回复，测试不能判定为通过。',
+        evidence: {
+          sendResult,
+          beforeMessageCount: before.messages.length,
+          afterMessageCount: after.messages.length,
+          currentScopeId: after.currentScopeId,
         },
       })
     }
@@ -601,6 +640,36 @@ export function createAgentPanelTestHarness(store: StoreLike): AgentPanelTestHar
     return { ok: false, id: normalizedId, summary: sessionSummary(), snapshot: await snapshot(), error: 'session did not become active' }
   }
 
+  const setDocumentFixture: AgentPanelTestHarness['setDocumentFixture'] = async (input) => {
+    const title = String(input.title || '').trim()
+    if (!title) return { ok: false, error: 'document title is required' }
+    const state = useDocTabs.getState()
+    let tabId = String(input.tabId || '').trim()
+    if (tabId && !state.tabs.some((tab) => tab.id === tabId)) {
+      return { ok: false, error: 'document fixture tab not found' }
+    }
+    if (!tabId) {
+      tabId = state.createBackgroundTab({ title, content: input.content })
+    } else {
+      state.renameTab(tabId, title)
+      state.setTabContent(tabId, input.content)
+    }
+    useMode.getState().setAppMode('workbench')
+    useMode.getState().setWorkbenchMode('document')
+    useDocTabs.getState().setActiveTab(tabId)
+    await delay(100)
+    const current = useDocTabs.getState().tabs.find((tab) => tab.id === tabId)
+    if (!current || useMode.getState().workbenchMode !== 'document') {
+      return { ok: false, error: 'document fixture did not become visible' }
+    }
+    return {
+      ok: true,
+      tabId,
+      title: current.title,
+      contentLength: current.content.length,
+    }
+  }
+
   return {
     snapshot,
     diagnose: async () => (await snapshot()).diagnostics,
@@ -614,6 +683,7 @@ export function createAgentPanelTestHarness(store: StoreLike): AgentPanelTestHar
     sessionSummary,
     createVisibleSession,
     activateSession,
+    setDocumentFixture,
     events: () => [...events],
     clearEvents: () => {
       events.splice(0, events.length)

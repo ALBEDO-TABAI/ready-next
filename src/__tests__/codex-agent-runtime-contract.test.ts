@@ -6,9 +6,12 @@ import {
   PRE_PERSISTENCE_ERROR_KINDS,
   TERMINAL_ERROR_KINDS,
   mapSendScopedResponseToMessageResult,
+  parseCreateSessionRequest,
   parseCreateSessionResult,
+  parseIngressAdmittedEvent,
   parseLifecycleRequest,
   parseLifecycleResult,
+  parseStopLifecycleRequest,
   parseSendScopedRequest,
   parseSendScopedResponse,
 } from '../shared/ipc-contracts/agent-runtime'
@@ -19,6 +22,7 @@ const mixedSuccessResponse: SendScopedResponse = {
   success: true,
   disposition: 'terminal_success',
   ownerRunId: 'run-mixed',
+  aliasGeneration: 2,
   shouldClearInput: true,
   preserveInput: false,
   retryableByUser: false,
@@ -62,6 +66,8 @@ const canonicalMessage = {
 const sendRequest = {
   scopeId: 'alias-1',
   requestId: 'request-1',
+  expectedAliasGeneration: 1,
+  expectedMessageVisibilityEpoch: 0,
   message: 'hello',
   userMessage: {
     id: 'message-1',
@@ -97,12 +103,59 @@ test('sendScoped request is exact and rejects retired workflow fields', () => {
   }))
 })
 
+test('sendScoped accepts only the body-free current-document anchor contract', () => {
+  const digest = 'a'.repeat(64)
+  const currentDocumentAnchor = {
+    kind: 'current_document',
+    logicalResourceId: 'ready-current-document:alias-1:doc-1',
+    tabId: 'doc-1',
+    title: 'Current',
+    pane: 'primary',
+    pathDigest: 'b'.repeat(64),
+    incarnationKey: 'c'.repeat(64),
+    currentVersion: `sha256:${digest}`,
+    currentDigest: digest,
+    supersedesVersion: null,
+    policyEpoch: 1,
+    readScope: { operation: 'read_section', maxChars: 30_000 },
+  }
+  assert.deepEqual(
+    parseSendScopedRequest({ ...sendRequest, currentDocumentAnchor }).currentDocumentAnchor,
+    currentDocumentAnchor,
+  )
+  assert.throws(() => parseSendScopedRequest({
+    ...sendRequest,
+    currentDocumentAnchor: { ...currentDocumentAnchor, resourceBody: 'forbidden' },
+  }))
+})
+
+test('ingress admission carries the exact positive alias generation', () => {
+  const event = {
+    type: 'ingress_admitted' as const,
+    requestId: 'request-1',
+    scopeId: 'scope-1',
+    originUserMessageId: 'user-1',
+    aliasGeneration: 6,
+    messageVisibilityEpoch: 3,
+    ingressAdmittedRevision: 1,
+    ingressAdmittedDigest: 'admission-digest',
+    admittedAt: '2026-08-07T00:00:00.000Z',
+  }
+  assert.deepEqual(parseIngressAdmittedEvent(event), event)
+  assert.throws(() => parseIngressAdmittedEvent({ ...event, aliasGeneration: 0 }))
+  const { aliasGeneration: _aliasGeneration, ...missingGeneration } = event
+  assert.throws(() => parseIngressAdmittedEvent(missingGeneration))
+  const { messageVisibilityEpoch: _messageVisibilityEpoch, ...missingVisibilityEpoch } = event
+  assert.throws(() => parseIngressAdmittedEvent(missingVisibilityEpoch))
+})
+
 test('sendScoped runtime schema accepts exactly four dispositions', () => {
   const fixtures = [
     {
       success: true,
       disposition: 'terminal_success',
       ownerRunId: 'run-1',
+      aliasGeneration: 2,
       shouldClearInput: true,
       preserveInput: false,
       retryableByUser: false,
@@ -147,6 +200,7 @@ test('sendScoped runtime schema accepts exactly four dispositions', () => {
       success: false,
       disposition: 'terminal_failure_after_persistence',
       ownerRunId: 'run-1',
+      aliasGeneration: 2,
       shouldClearInput: true,
       preserveInput: false,
       retryableByUser: false,
@@ -188,6 +242,7 @@ test('sendScoped runtime schema rejects mixed optional legacy shapes', () => {
     success: true,
     disposition: 'terminal_success',
     ownerRunId: 'run-1',
+    aliasGeneration: 2,
     shouldClearInput: true,
     preserveInput: false,
     retryableByUser: false,
@@ -232,6 +287,7 @@ test('renderer mapping preserves input only before durable admission', () => {
     success: false,
     disposition: 'terminal_failure_after_persistence',
     ownerRunId: 'run-1',
+    aliasGeneration: 2,
     shouldClearInput: true,
     preserveInput: false,
     retryableByUser: false,
@@ -245,6 +301,9 @@ test('renderer mapping preserves input only before durable admission', () => {
 })
 
 test('create and lifecycle results reject weak objects and free-form errors', () => {
+  assert.deepEqual(parseCreateSessionRequest({ agentId: 'butler' }), { agentId: 'butler' })
+  assert.throws(() => parseCreateSessionRequest({}))
+  assert.throws(() => parseCreateSessionRequest({ agentId: 'butler', aliasId: 'forged' }))
   assert.equal(parseCreateSessionResult({
     ok: true,
     action: 'create',
@@ -276,5 +335,28 @@ test('lifecycle request carries one exact immutable alias generation', () => {
     aliasId: 'alias-1',
     aliasGeneration: 1,
     sessionId: 'retired-shape',
+  }))
+})
+
+test('stop lifecycle request additionally binds one exact Ready run', () => {
+  assert.deepEqual(parseStopLifecycleRequest({
+    aliasId: 'alias-1',
+    aliasGeneration: 2,
+    readyRunId: 'run-1',
+  }), {
+    aliasId: 'alias-1',
+    aliasGeneration: 2,
+    readyRunId: 'run-1',
+  })
+  assert.throws(() => parseStopLifecycleRequest({ aliasId: 'alias-1', aliasGeneration: 2 }))
+  assert.throws(() => parseStopLifecycleRequest({
+    aliasId: 'alias-1',
+    aliasGeneration: 2,
+    readyRunId: '',
+  }))
+  assert.throws(() => parseLifecycleRequest({
+    aliasId: 'alias-1',
+    aliasGeneration: 2,
+    readyRunId: 'run-1',
   }))
 })

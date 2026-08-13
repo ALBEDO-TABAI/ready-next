@@ -1,6 +1,3 @@
-import type { SpecialistAgentBlueprint } from './agent-specialist-blueprint'
-import type { TaskProjectionRecord } from './ipc-contracts/task-projection'
-
 export type AgentSystemStudioAgentStatus = 'active' | 'disabled' | 'retired' | 'merged'
 export type AgentSystemStudioAgentKind = 'main' | 'specialist'
 
@@ -9,16 +6,6 @@ export type AgentSystemStudioRoutingDisabledReason =
   | 'missing_triggers'
   | 'target_inactive'
   | 'invalid_card'
-
-export type AgentSystemStudioPrerouteTraceReason =
-  | 'routing_off'
-  | 'suggest_only'
-  | 'card_staged'
-  | 'missing_triggers'
-  | 'target_inactive'
-  | 'no_keyword_match'
-  | 'precedent_conflict'
-  | 'state_owner_inactive'
 
 export interface AgentSystemStudioKnowledgeCard {
   relPath: string
@@ -56,17 +43,6 @@ export interface AgentSystemStudioRoutingCard {
   targetStatus: AgentSystemStudioAgentStatus | 'missing'
   triggers: string[] | null
   disabledReason: AgentSystemStudioRoutingDisabledReason | null
-}
-
-export interface AgentSystemStudioOwnedTask {
-  taskId: string
-  scopeId: string
-  title: string | null
-  summary: string | null
-  status: TaskProjectionRecord['status']
-  interactionState: TaskProjectionRecord['interactionState']
-  ownerAgentId: string | null
-  updatedAt: string
 }
 
 export type AgentSystemStudioContentEditTargetKind = 'rules' | 'foundation' | 'knowledge_card'
@@ -125,72 +101,17 @@ export interface AgentSystemStudioAgent {
   derivationReason: string | null
   mergedIntoAgentId: string | null
   createdAt: string
-  readinessRevision: string
-  readiness: import('./agent-execution-profile').AgentExecutionReadiness
   rules: AgentSystemStudioRulesFile
   foundation: AgentSystemStudioFoundationFile
   knowledgeCards: AgentSystemStudioKnowledgeCard[]
-  routingCards: AgentSystemStudioRoutingCard[]
-  ownedTasks: AgentSystemStudioOwnedTask[]
   contentSummary: {
     knowledgeCards: number
-    routingCards: number
-    ownedTasks: number
     stagedContentEdits: number
   }
   contentEditProposals: AgentSystemStudioContentEditProposal[]
 }
 
-export interface AgentSystemStudioDerivationCandidate {
-  candidateRelPath: string
-  title: string
-  description: string
-  defaultSpecialistId: string
-  defaultName: string
-  defaultRoutingTriggers: string[]
-}
-
-export interface AgentSystemStudioPrerouteTrace {
-  id: string
-  createdAt: string
-  firstMessagePreview: string
-  mode: 'off' | 'suggest' | 'auto'
-  effect: 'none' | 'suggest' | 'route'
-  decisionTier: 'state' | 'precedent' | 'fallback'
-  targetAgentId: string
-  reasons: AgentSystemStudioPrerouteTraceReason[]
-}
-
-export type AgentSystemStudioRoutingSimulationActionKind = 'use_once' | 'always_route' | 'keep_main'
-
-export interface AgentSystemStudioRoutingSimulationAction {
-  kind: AgentSystemStudioRoutingSimulationActionKind
-  label: string
-  description: string
-  enabled: boolean
-}
-
-export interface AgentSystemStudioRoutingSimulation {
-  sample: string
-  mode: 'off' | 'suggest' | 'auto'
-  effect: 'none' | 'suggest' | 'route'
-  decisionTier: 'state' | 'precedent' | 'fallback'
-  targetAgentId: string
-  targetAgentName: string | null
-  targetStatus: AgentSystemStudioAgentStatus | 'missing'
-  matchedKeywords: string[]
-  cardRelPath: string | null
-  fallbackReason: 'routing_off' | 'no_match' | 'precedent_conflict' | null
-  conflicts: Array<{ cardRelPath: string; targetAgentId: string }>
-  reasons: AgentSystemStudioPrerouteTraceReason[]
-  actions: AgentSystemStudioRoutingSimulationAction[]
-}
-
 export interface AgentSystemStudioSnapshot {
   generatedAt: string
   agents: AgentSystemStudioAgent[]
-  routingCards: AgentSystemStudioRoutingCard[]
-  derivationCandidates: AgentSystemStudioDerivationCandidate[]
-  stagedBlueprints: SpecialistAgentBlueprint[]
-  recentPrerouteTraces: AgentSystemStudioPrerouteTrace[]
 }

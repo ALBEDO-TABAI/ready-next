@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import test from 'node:test'
+import test, { after, before } from 'node:test'
 
 import {
   AgentSdkRuntime,
@@ -23,6 +23,12 @@ import {
 import type { CapabilityResolution } from '../main/modules/agent-control/domain-adapters/capability-resolver'
 import { ToolConsentRetryCoordinator } from '../main/modules/agent-control/runtime-core/tool-consent-retry-coordinator'
 import { __setSkillsRuntimeManagerForTests } from '../main/modules/skills-runtime/runtime-manager'
+import { __setScopeContextEpochDatabaseForTests } from '../main/modules/agent-control/session/scope-context-epoch'
+
+before(() => {
+  __setScopeContextEpochDatabaseForTests({ getRawDb: () => ({ prepare: () => ({ get: () => undefined }) }) as never })
+})
+after(() => __setScopeContextEpochDatabaseForTests(null))
 
 const COMPATIBLE_AUTO_CONFIG: AIModelConfig = {
   provider: 'openai-compatible',
@@ -171,7 +177,6 @@ test('selected advisory skill cannot remove site-research control and continuati
         'browser_screenshot',
         'browser_wait',
         'browser_scroll',
-        'browser_request_takeover',
       ],
     }],
   } as never)
@@ -209,7 +214,7 @@ test('selected advisory skill cannot remove site-research control and continuati
       }),
     })
     const names = definitions.map((definition) => definition.name)
-    for (const required of ['browser_research', 'browser_task', 'browser_request_takeover']) {
+    for (const required of ['browser_research', 'browser_task']) {
       assert.ok(names.includes(required), `${required} missing from ${names.join(',')}`)
     }
     assert.equal(names.includes('web_search'), false)
@@ -372,6 +377,41 @@ test('tool consent retry is bounded, reuses one request identity, and expires it
   })
   now = 101
   assert.equal(expiring.createDispatch('scope-expired', async () => undefined), undefined)
+})
+
+test('tool consent retry survives same-context stop but reset cancels a claimed retry before dispatch', async () => {
+  const stopCoordinator = new ToolConsentRetryCoordinator()
+  stopCoordinator.remember({
+    scopeId: 'scope-consent-stop',
+    sourceRunId: 'run-consent-stop',
+    agentName: 'operator',
+    content: 'same-context request',
+    taskId: 'task-consent-stop',
+  })
+  let stopDispatches = 0
+  const stopDispatch = stopCoordinator.createDispatch('scope-consent-stop', async () => {
+    stopDispatches += 1
+  })
+  stopDispatch?.()
+  await new Promise((resolve) => setTimeout(resolve, 10))
+  assert.equal(stopDispatches, 1, 'same-epoch stop does not discard pending consent continuity')
+
+  const resetCoordinator = new ToolConsentRetryCoordinator()
+  resetCoordinator.remember({
+    scopeId: 'scope-consent-reset',
+    sourceRunId: 'run-consent-reset',
+    agentName: 'operator',
+    content: 'old-context request',
+    taskId: 'task-consent-reset',
+  })
+  let resetDispatches = 0
+  const resetDispatch = resetCoordinator.createDispatch('scope-consent-reset', async () => {
+    resetDispatches += 1
+  })
+  resetDispatch?.()
+  resetCoordinator.discard('scope-consent-reset')
+  await new Promise((resolve) => setTimeout(resolve, 10))
+  assert.equal(resetDispatches, 0, 'reset discards the claimed old-context request before dispatch')
 })
 
 test('SDK live turn passes the exact capability conflict into ephemeral model instructions', async () => {

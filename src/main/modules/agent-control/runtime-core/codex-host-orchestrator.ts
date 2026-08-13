@@ -5,6 +5,11 @@ import type { AgentRuntimeKernel } from '../contracts/types'
 import type { DomainAdapter } from '../domain-adapters/domain-adapter'
 import { DomainAdapterHost } from '../domain-adapters/domain-adapter-host'
 import type { AgentControlRuntime } from './runtime'
+import type { RunMessage } from '../contracts/run-contracts'
+import type { SkillToolAuthorization } from '../skills/skill-tool-authorization'
+import { resolveSemanticSkillAuthorizationForTurn } from './skill-turn-authorization-resolver'
+import { hasLocalSendImIntentForTurn } from './agent-sdk-foundation-utils'
+import { resolveSkillHintRelevanceForTurn } from './agent-sdk-skill-intent-utils'
 import { getEphemeralExecutionStore } from '../../tools/skill-primitives/ephemeral-execution-store'
 import { getAskUserQuestionsStore } from '../../tools/builtins/ask-user-questions-store'
 
@@ -24,8 +29,10 @@ export type CodexActiveRunInspection =
 type CodexActiveProductRun = {
   agent: string
   scopeId: string
+  aliasId: string
   requestId: string
   runId: string
+  abortController: AbortController
   lastTurnAt: string
 }
 
@@ -62,6 +69,27 @@ export class CodexHostOrchestrator extends EventEmitter {
     return this.domainAdapterHost.getDomainAdapters()
   }
 
+  resolveSkillAuthorizationForTurn(input: {
+    message: RunMessage
+    sessionId?: string
+    messageVisibilityEpoch?: number
+    requestEnvelope?: unknown
+  }): SkillToolAuthorization {
+    const orchestrator = this.domainAdapterHost.getSkillContextOrchestrator()
+    const localSendImIntent = hasLocalSendImIntentForTurn(input.message, input.requestEnvelope)
+    const skillHintRelevance = resolveSkillHintRelevanceForTurn({
+      ...input,
+      orchestrator,
+      localSendImIntent,
+    })
+    return resolveSemanticSkillAuthorizationForTurn({
+      ...input,
+      forceLocalSendImIntent: localSendImIntent,
+      skillHintRelevantForTurn: skillHintRelevance.relevant,
+      orchestrator,
+    })
+  }
+
   setRuntime(runtime: AgentControlRuntime): void {
     this.domainAdapterHost.setRuntime(runtime)
   }
@@ -69,24 +97,83 @@ export class CodexHostOrchestrator extends EventEmitter {
   beginActiveProductRun(input: {
     agent: string
     scopeId: string
+    aliasId: string
     requestId: string
     runId: string
   }): void {
+    const key = activeRunKey(input.agent, input.scopeId)
+    this.activeProductRuns.get(key)?.abortController.abort(
+      new Error('codex_product_run_replaced'),
+    )
     const record: CodexActiveProductRun = {
       ...input,
+      abortController: new AbortController(),
       lastTurnAt: new Date().toISOString(),
     }
-    this.activeProductRuns.set(activeRunKey(input.agent, input.scopeId), record)
+    this.activeProductRuns.set(key, record)
   }
 
   finishActiveProductRun(input: {
     agent: string
     scopeId: string
     requestId: string
+    runId: string
   }): void {
     const key = activeRunKey(input.agent, input.scopeId)
     const active = this.activeProductRuns.get(key)
-    if (active?.requestId === input.requestId) this.activeProductRuns.delete(key)
+    if (active?.requestId === input.requestId && active.runId === input.runId) {
+      active.abortController.abort(new Error('codex_product_run_settled'))
+      this.activeProductRuns.delete(key)
+    }
+  }
+
+  getActiveRunAbortSignal(input: {
+    readyRunId: string
+    readyScopeId: string
+    readyAliasId: string
+  }): AbortSignal | null {
+    const matches = [...this.activeProductRuns.values()].filter((active) => (
+      active.runId === input.readyRunId
+      && active.scopeId === input.readyScopeId
+      && active.aliasId === input.readyAliasId
+    ))
+    return matches.length === 1 ? matches[0].abortController.signal : null
+  }
+
+  abortActiveProductRun(input: {
+    readyRunId: string
+    readyScopeId: string
+    readyAliasId: string
+  }): boolean {
+    const matches = [...this.activeProductRuns.values()].filter((active) => (
+      active.runId === input.readyRunId
+      && active.scopeId === input.readyScopeId
+      && active.aliasId === input.readyAliasId
+    ))
+    if (matches.length !== 1) return false
+    matches[0].abortController.abort(new Error('codex_product_run_stop_requested'))
+    return true
+  }
+
+  abortActiveProductRunByAlias(aliasId: string): boolean {
+    let aborted = false
+    for (const active of this.activeProductRuns.values()) {
+      if (active.aliasId !== aliasId) continue
+      active.abortController.abort(new Error('codex_product_run_stop_requested'))
+      aborted = true
+    }
+    return aborted
+  }
+
+  resetScopeContext(scopeId: string, agents: readonly string[]): void {
+    const resetAgents = new Set(agents)
+    for (const [key, active] of this.activeProductRuns) {
+      if (active.scopeId !== scopeId && active.aliasId !== scopeId) continue
+      resetAgents.add(active.agent)
+      active.abortController.abort(new Error('codex_product_run_context_reset'))
+      this.activeProductRuns.delete(key)
+    }
+    this.domainAdapterHost.resetScopeContext(scopeId, [...resetAgents])
   }
 
   refreshActiveRunProgress(
@@ -140,7 +227,7 @@ export class CodexHostOrchestrator extends EventEmitter {
   listAllSessions(): CodexHostSessionSummary[] {
     return [...this.activeProductRuns.values()].map((active) => ({
       agent: active.agent,
-      sessionId: active.scopeId,
+      sessionId: active.aliasId,
       state: 'responding',
       lastTurnAt: active.lastTurnAt,
     }))

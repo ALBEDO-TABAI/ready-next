@@ -48,7 +48,10 @@ export interface CodexBootRecoveryActions {
   }): Promise<CodexRecoveredStartResolution>
   commitHostFailureProductTerminal(input: {
     failure: CodexHostFailureRecovery
-  }): Promise<{ productTerminalDigest: string }>
+  }): Promise<{ productTerminalDigest: string; closeoutAt: string }>
+  deliverHostFailureProductTerminal(input: {
+    failure: CodexHostFailureRecovery
+  }): Promise<void>
   reconcileManualCompaction(input: CodexManualCompactionRecovery): Promise<void>
   reconcileProductFence(input: CodexProductFenceRecovery): Promise<void>
 }
@@ -82,10 +85,15 @@ export class CodexRuntimeBootReconciler {
       | 'readProductRunForThreadBinding'
       | 'quarantineStartInbound'
     >
-    supervisor: Pick<CodexSidecarSupervisor, 'settleBootLease'>
+    supervisor: Pick<CodexSidecarSupervisor, 'settleBootLease' | 'settleFenceOwnerLease'>
     sidecarSession: CodexBootSidecarSession
     actions: CodexBootRecoveryActions
+    threadArchiveCleanup?: {
+      reconcileForBoot(): Promise<unknown>
+      drain(): Promise<unknown>
+    }
     ingressGate: CodexRuntimeIngressGate
+    canCommitBoot?: () => boolean
     now: () => string
   }) {}
 
@@ -97,6 +105,13 @@ export class CodexRuntimeBootReconciler {
       const snapshot = this.deps.repository.readRecoverySnapshot(
         (epoch) => this.deps.sidecarSession.isConnectionLive(epoch),
       )
+      for (const ownerMainBootId of new Set(
+        snapshot.productFences
+          .filter((fence) => !fence.quarantinedAt)
+          .map((fence) => fence.ownerMainBootId),
+      )) {
+        await this.deps.supervisor.settleFenceOwnerLease(ownerMainBootId)
+      }
       const registry = createCodexStartIdentityRegistryForRuntime(this.deps.runtime, {
         capacity: this.deps.runtime.manifest.startIdentityRegistryCapacity,
         capacityCharged: snapshot.members.length,
@@ -119,6 +134,7 @@ export class CodexRuntimeBootReconciler {
         registry,
       )
       const deferredReservationSets = new Set<string>()
+      const deferredReadyRuns = new Set<string>()
       const unresolvedStartBindings: string[] = []
       const quarantinedFences = snapshot.productFences.filter((fence) => fence.quarantinedAt)
       const newlyQuarantinedReadyRuns = new Set<string>()
@@ -143,7 +159,12 @@ export class CodexRuntimeBootReconciler {
         }
         if (member.state === 'held') {
           const disposition = await this.deps.actions.dispatchHeldStart({ member, registry })
-          if (disposition === 'blocked') unresolvedStartBindings.push(member.bindingId)
+          if (disposition !== 'accepted') {
+            unresolvedStartBindings.push(member.bindingId)
+            deferredReadyRuns.add(member.method === 'turn/start'
+              ? member.bindingId
+              : this.deps.repository.readProductRunForThreadBinding(member.bindingId))
+          }
           if (member.method === 'thread/start' && disposition !== 'accepted') {
             deferredReservationSets.add(member.reservationSetId)
           }
@@ -217,14 +238,29 @@ export class CodexRuntimeBootReconciler {
         }
       }
       for (const manual of snapshot.manualCompactions) {
-        await this.deps.actions.reconcileManualCompaction(manual)
+        try {
+          await this.deps.actions.reconcileManualCompaction(manual)
+        } catch {
+          unresolvedStartBindings.push(`manual:${manual.manualCompactionId}`)
+        }
       }
       for (const fence of snapshot.productFences) {
-        if (fence.quarantinedAt || newlyQuarantinedReadyRuns.has(fence.readyRunId)) continue
+        if (fence.quarantinedAt
+          || newlyQuarantinedReadyRuns.has(fence.readyRunId)
+          || deferredReadyRuns.has(fence.readyRunId)) continue
         await this.deps.actions.reconcileProductFence(fence)
       }
+      try {
+        await this.deps.threadArchiveCleanup?.reconcileForBoot()
+      } catch {
+        // Durable intents remain pending; archive cleanup never blocks product boot.
+      }
       this.deps.sidecarSession.sealBootReconciliation()
+      if (this.deps.canCommitBoot && !this.deps.canCommitBoot()) {
+        throw new CodexRuntimeBootReconcilerError('boot_reconciliation_cancelled')
+      }
       this.deps.ingressGate.open()
+      void this.deps.threadArchiveCleanup?.drain().catch(() => undefined)
       this.booted = true
       return {
         connectionEpoch: session.connectionEpoch,
@@ -259,7 +295,7 @@ export class CodexRuntimeBootReconciler {
       readyRunId: failure.readyRunId,
       productTerminalDigest: terminal.productTerminalDigest,
       continuationBlockedReason: failure.continuationBlockedReason,
-      closeoutAt: this.deps.now(),
+      closeoutAt: terminal.closeoutAt,
     })
     if (completed.reservationSetId !== failure.reservationSetId) {
       throw new CodexRuntimeBootReconcilerError('host_failure_reservation_set_mismatch')
@@ -268,5 +304,6 @@ export class CodexRuntimeBootReconciler {
       reservationSetId: completed.reservationSetId,
       productTerminalDigest: terminal.productTerminalDigest,
     })
+    await this.deps.actions.deliverHostFailureProductTerminal({ failure })
   }
 }

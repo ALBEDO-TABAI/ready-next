@@ -36,7 +36,9 @@ test('migration 044 adds progress_json to existing task projections', async (t) 
   const migrationNames = __getMigrationNamesForTests()
   const migrationIndex = migrationNames.indexOf('044_add_task_projection_progress_json')
   assert.ok(migrationIndex > 0, 'migration 044 must be registered after existing migrations')
-  for (const name of migrationNames.slice(0, migrationIndex)) {
+  for (const name of migrationNames.filter(
+    (name) => name !== '044_add_task_projection_progress_json',
+  )) {
     db.prepare('INSERT INTO migrations (name, applied_at) VALUES (?, ?)').run(name, '2026-05-25T00:00:00.000Z')
   }
 

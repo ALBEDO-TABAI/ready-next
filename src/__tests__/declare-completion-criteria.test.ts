@@ -71,7 +71,6 @@ test('校验矩阵：空数组 / 超条数 / 空白条目 / 超长条目 / 无�
   )
   assert.equal((await executeDeclareCompletionCriteria({ criteria: ['合法', '   '] }, deps)).data?.errorKind, 'input_validation')
   assert.equal((await executeDeclareCompletionCriteria({ criteria: ['长'.repeat(121)] }, deps)).data?.errorKind, 'input_validation')
-  assert.equal((await executeDeclareCompletionCriteria({ criteria: ['合法'], expected_outputs: [] }, deps)).data?.errorKind, 'input_validation')
   assert.equal((await executeDeclareCompletionCriteria({ criteria: ['合法'], expected_outputs: ['x'.repeat(201)] }, deps)).data?.errorKind, 'input_validation')
   assert.equal((await executeDeclareCompletionCriteria({ criteria: ['合法'], expected_outputs: ['/Users/user/V/'] }, deps)).data?.errorKind, 'input_validation')
   assert.equal(writes.length, 0, '校验失败绝不落库')
@@ -81,6 +80,13 @@ test('校验矩阵：空数组 / 超条数 / 空白条目 / 超长条目 / 无�
     { taskId: null, updateTaskCompletionDeclaration: () => { throw new Error('must not write') } },
   )
   assert.equal(noTask.data?.errorKind, 'task_context_missing')
+})
+
+test('expected_outputs 空数组与省略字段等价', async () => {
+  const { writes, deps } = makeDeps()
+  const result = await executeDeclareCompletionCriteria({ criteria: ['合法'], expected_outputs: [] }, deps)
+  assert.deepEqual(result.data?.expectedOutputs, [])
+  assert.deepEqual(writes, [{ taskId: 'task-d4', modelCriteria: ['合法'], expectedOutputs: [] }])
 })
 
 test('重复声明是整组替换（幂等语义由写侧承载）', async () => {
@@ -110,10 +116,34 @@ test('appendModelCriteria 合流：m 命名空间追加、模板项不可覆盖'
 
 test('declare_completion_criteria 在 agent_interaction 双协议曝光面注册', () => {
   assert.ok(AGENT_INTERACTION_TOOL_NAMES.includes('declare_completion_criteria'))
-  const anthropicNames = getAgentInteractionAnthropicTools().map((tool) => tool.name)
-  const openaiNames = getAgentInteractionOpenAITools().map((tool) => (tool.function as { name?: string })?.name)
+  const anthropicTools = getAgentInteractionAnthropicTools()
+  const openaiTools = getAgentInteractionOpenAITools()
+  const anthropicNames = anthropicTools.map((tool) => tool.name)
+  const openaiNames = openaiTools.map((tool) => (tool.function as { name?: string })?.name)
   assert.ok(anthropicNames.includes('declare_completion_criteria'))
   assert.ok(openaiNames.includes('declare_completion_criteria'))
+  const schemas = [
+    anthropicTools.find((tool) => tool.name === 'declare_completion_criteria')?.input_schema,
+    openaiTools.find((tool) => (
+      (tool.function as { name?: string }).name === 'declare_completion_criteria'
+    ))?.function.parameters,
+  ]
+  for (const schema of schemas) {
+    const properties = (schema as {
+      properties?: Record<string, {
+        minItems?: number
+        maxItems?: number
+        items?: { type?: string; minLength?: number; maxLength?: number }
+      }>
+    } | undefined)?.properties
+    const expectedOutputs = properties?.expected_outputs
+    assert.ok(expectedOutputs)
+    assert.equal(expectedOutputs.minItems, undefined)
+    assert.equal(expectedOutputs.maxItems, 8)
+    assert.equal(expectedOutputs.items?.type, 'string')
+    assert.equal(expectedOutputs.items?.minLength, 1)
+    assert.equal(expectedOutputs.items?.maxLength, 200)
+  }
   const description = getAgentInteractionAnthropicTools()
     .find((tool) => tool.name === 'declare_completion_criteria')?.description || ''
   assert.match(description, /单次实时查询、简单搜索/)

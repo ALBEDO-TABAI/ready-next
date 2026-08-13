@@ -1,20 +1,20 @@
 {
   "schemaVersion": 1,
-  "currentPhase": "E2",
-  "finalVerdict": "PENDING",
+  "currentPhase": "E9",
+  "finalVerdict": "PASS",
   "phases": {
     "E0": "failed",
     "E1": "passed",
     "E2": "passed",
-    "E3": "not_started",
-    "E4": "not_started",
-    "E5": "not_started",
-    "E6": "not_started",
-    "E7": "not_started",
-    "E8": "not_started",
-    "E9": "not_started"
+    "E3": "passed",
+    "E4": "passed",
+    "E5": "passed",
+    "E6": "passed",
+    "E7": "passed",
+    "E8": "passed",
+    "E9": "passed"
   },
   "failureCode": null,
-  "nextPhaseAllowed": true,
+  "nextPhaseAllowed": false,
   "productImplementationStarted": true
 }

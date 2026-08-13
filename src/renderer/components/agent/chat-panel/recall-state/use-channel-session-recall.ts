@@ -1,9 +1,13 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { Dispatch, SetStateAction } from 'react'
 import { useAgent, type ConversationScope } from '../../../../stores/useAgent'
 import type { Agent } from '../../../../modules/agent/types'
 import type { SessionRecallCapsule, SessionRecallHit } from '../../../../../shared/session-recall'
 import { mapScopeToConversation } from '../helpers/projection'
+import {
+  captureComposerAuthority,
+  isComposerAuthorityCurrent,
+} from '../../../../modules/agent/composer-authority'
 
 const SESSION_RECALL_HISTORY_LIMIT = 60
 
@@ -52,6 +56,7 @@ export interface UseChannelSessionRecallParams {
   scopes: ConversationScope[]
   currentScope: ConversationScope | null
   currentScopeId: string | null
+  composerAuthorityRevision: number
 }
 
 export interface RecallStateHandle {
@@ -89,7 +94,14 @@ export interface UseChannelSessionRecallReturn {
 export function useChannelSessionRecall(
   params: UseChannelSessionRecallParams,
 ): UseChannelSessionRecallReturn {
-  const { agents, currentAgent, scopes, currentScope, currentScopeId } = params
+  const {
+    agents,
+    currentAgent,
+    scopes,
+    currentScope,
+    currentScopeId,
+    composerAuthorityRevision,
+  } = params
 
   const [selectedChannelKey, setSelectedChannelKey] = useState('local:app')
   const [sessionRecallQuery, setSessionRecallQuery] = useState('')
@@ -99,6 +111,8 @@ export function useChannelSessionRecall(
   >([])
   const [sessionRecallSearching, setSessionRecallSearching] = useState(false)
   const [sessionRecallError, setSessionRecallError] = useState<string | null>(null)
+  const attachedRecallRequestRevision = useRef(0)
+  const recallSearchRequestRevision = useRef(0)
 
   const currentAgentData = agents.find((a) => a.name === currentAgent)
 
@@ -200,13 +214,20 @@ export function useChannelSessionRecall(
   )
 
   const refreshAttachedSessionRecall = useCallback(async (scopeId?: string | null) => {
+    const requestRevision = ++attachedRecallRequestRevision.current
     if (!scopeId || !window.electronAPI?.agent?.listAttachedSessionRecallContexts) {
       setAttachedSessionRecallCapsules([])
       return
     }
+    const composerAuthority = captureComposerAuthority(useAgent.getState())
     const result = await window.electronAPI.agent
       .listAttachedSessionRecallContexts(scopeId)
       .catch(() => null)
+    if (
+      requestRevision !== attachedRecallRequestRevision.current
+      || composerAuthority.scopeId !== scopeId
+      || !isComposerAuthorityCurrent(useAgent.getState(), composerAuthority)
+    ) return
     if (!result?.success || !Array.isArray(result.data)) {
       setAttachedSessionRecallCapsules([])
       return
@@ -218,6 +239,8 @@ export function useChannelSessionRecall(
     async (query: string) => {
       if (!window.electronAPI?.agent?.searchSessionRecall) return
       const normalized = query.trim()
+      const requestRevision = ++recallSearchRequestRevision.current
+      const composerAuthority = captureComposerAuthority(useAgent.getState())
       setSessionRecallSearching(true)
       setSessionRecallError(null)
       try {
@@ -228,6 +251,10 @@ export function useChannelSessionRecall(
             limit: SESSION_RECALL_HISTORY_LIMIT
           })
           .catch(() => null)
+        if (
+          requestRevision !== recallSearchRequestRevision.current
+          || !isComposerAuthorityCurrent(useAgent.getState(), composerAuthority)
+        ) return
         if (!result?.success || !Array.isArray(result.data)) {
           setSessionRecallResults([])
           setSessionRecallError(result?.error || '旧会话搜索失败')
@@ -235,7 +262,10 @@ export function useChannelSessionRecall(
         }
         setSessionRecallResults(result.data as SessionRecallHit[])
       } finally {
-        setSessionRecallSearching(false)
+        if (
+          requestRevision === recallSearchRequestRevision.current
+          && isComposerAuthorityCurrent(useAgent.getState(), composerAuthority)
+        ) setSessionRecallSearching(false)
       }
     },
     [currentScopeId]
@@ -244,16 +274,23 @@ export function useChannelSessionRecall(
   const handleAttachSessionRecall = useCallback(
     async (conversationId: string) => {
       if (!currentScopeId || !window.electronAPI?.agent?.attachSessionRecallContext) return
+      const composerAuthority = captureComposerAuthority(useAgent.getState())
       setSessionRecallError(null)
       const result = await window.electronAPI.agent
-        .attachSessionRecallContext(currentScopeId, conversationId)
+        .attachSessionRecallContext(
+          currentScopeId,
+          conversationId,
+          composerAuthority.messageVisibilityEpoch,
+        )
         .catch(() => null)
+      if (!isComposerAuthorityCurrent(useAgent.getState(), composerAuthority)) return
       if (!result?.success || !result.data) {
         setSessionRecallError(result?.error || '引用旧会话失败')
         return
       }
       const payload = result.data as { scope: ConversationScope; capsule: SessionRecallCapsule }
       useAgent.setState((state) => {
+        if (!isComposerAuthorityCurrent(state, composerAuthority)) return state
         const nextScopes = state.scopes.map((scope) =>
           scope.id === payload.scope.id ? payload.scope : scope
         )
@@ -265,6 +302,7 @@ export function useChannelSessionRecall(
         }
       })
       setAttachedSessionRecallCapsules((current) => {
+        if (!isComposerAuthorityCurrent(useAgent.getState(), composerAuthority)) return current
         const filtered = current.filter(
           (item) => item.conversationId !== payload.capsule.conversationId
         )
@@ -277,16 +315,23 @@ export function useChannelSessionRecall(
   const handleDetachSessionRecall = useCallback(
     async (conversationId: string) => {
       if (!currentScopeId || !window.electronAPI?.agent?.detachSessionRecallContext) return
+      const composerAuthority = captureComposerAuthority(useAgent.getState())
       setSessionRecallError(null)
       const result = await window.electronAPI.agent
-        .detachSessionRecallContext(currentScopeId, conversationId)
+        .detachSessionRecallContext(
+          currentScopeId,
+          conversationId,
+          composerAuthority.messageVisibilityEpoch,
+        )
         .catch(() => null)
+      if (!isComposerAuthorityCurrent(useAgent.getState(), composerAuthority)) return
       if (!result?.success || !result.data) {
         setSessionRecallError(result?.error || '移除旧会话引用失败')
         return
       }
       const payload = result.data as { scope: ConversationScope }
       useAgent.setState((state) => {
+        if (!isComposerAuthorityCurrent(state, composerAuthority)) return state
         const nextScopes = state.scopes.map((scope) =>
           scope.id === payload.scope.id ? payload.scope : scope
         )
@@ -297,9 +342,11 @@ export function useChannelSessionRecall(
           conversations: nextScopes.map(mapScopeToConversation)
         }
       })
-      setAttachedSessionRecallCapsules((current) =>
-        current.filter((item) => item.conversationId !== conversationId)
-      )
+      setAttachedSessionRecallCapsules((current) => (
+        isComposerAuthorityCurrent(useAgent.getState(), composerAuthority)
+          ? current.filter((item) => item.conversationId !== conversationId)
+          : current
+      ))
     },
     [currentScopeId]
   )
@@ -313,7 +360,25 @@ export function useChannelSessionRecall(
   // Refresh attached session-recall capsules whenever the active scope flips.
   useEffect(() => {
     void refreshAttachedSessionRecall(currentScopeId)
-  }, [currentScopeId, refreshAttachedSessionRecall])
+  }, [
+    composerAuthorityRevision,
+    currentScope?.aliasGeneration,
+    currentScope?.messageVisibilityEpoch,
+    currentScopeId,
+    refreshAttachedSessionRecall,
+  ])
+
+  useEffect(() => {
+    recallSearchRequestRevision.current += 1
+    setSessionRecallResults([])
+    setSessionRecallSearching(false)
+    setSessionRecallError(null)
+  }, [
+    composerAuthorityRevision,
+    currentScope?.aliasGeneration,
+    currentScope?.messageVisibilityEpoch,
+    currentScopeId,
+  ])
 
   const recallState: RecallStateHandle = {
     capsules: attachedSessionRecallCapsules,

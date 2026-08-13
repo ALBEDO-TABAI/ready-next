@@ -1,14 +1,20 @@
 import type { IpcMain } from 'electron'
 
 import {
+  parseCreateSessionRequest,
   parseCreateSessionResult,
   parseLifecycleRequest,
   parseLifecycleResult,
+  parseProductLifecycleRequest,
+  parseStopLifecycleRequest,
   parseSendScopedRequest,
   parseSendScopedResponse,
+  type CreateSessionRequest,
   type CreateSessionResult,
   type LifecycleRequest,
   type LifecycleResult,
+  type ProductLifecycleRequest,
+  type StopLifecycleRequest,
   type SendScopedRequest,
   type SendScopedResponse,
 } from '../../../../shared/ipc-contracts/agent-runtime'
@@ -16,10 +22,10 @@ import type { IpcChannelGroup, IpcDisposeHandle } from './types'
 
 export interface AgentLifecycleGroupDeps {
   sendScoped(payload: SendScopedRequest): Promise<SendScopedResponse>
-  createSession(): Promise<CreateSessionResult>
-  resetSession(request: LifecycleRequest): Promise<LifecycleResult>
-  stopSession(request: LifecycleRequest): Promise<LifecycleResult>
-  closeSession(request: LifecycleRequest): Promise<LifecycleResult>
+  createSession(request: CreateSessionRequest): Promise<CreateSessionResult>
+  resetSession(request: ProductLifecycleRequest): Promise<LifecycleResult>
+  stopSession(request: StopLifecycleRequest): Promise<LifecycleResult>
+  closeSession(request: ProductLifecycleRequest): Promise<LifecycleResult>
   compactSession(request: LifecycleRequest): Promise<LifecycleResult>
   log(message: string): void
 }
@@ -45,24 +51,46 @@ export const agentLifecycleGroup: IpcChannelGroup<AgentLifecycleGroupDeps> = {
       const payload = parseSendScopedRequest(rawPayload)
       deps.log(`[ipc] agent:sendScoped start scopeId=${payload.scopeId} requestId=${payload.requestId}`)
       const result = parseSendScopedResponse(await deps.sendScoped(payload))
-      deps.log(`[ipc] agent:sendScoped done scopeId=${payload.scopeId} requestId=${payload.requestId} disposition=${result.disposition}`)
+      const safeReason = result.disposition === 'rejected_before_persistence'
+        && /^[A-Za-z0-9_.:-]{1,160}$/.test(result.error)
+        ? result.error
+        : null
+      const rejection = result.disposition === 'rejected_before_persistence'
+        ? ` errorKind=${result.errorKind} admissionEvidenceDigest=${result.admissionEvidenceDigest}${safeReason ? ` reason=${safeReason}` : ''}`
+        : ''
+      deps.log(`[ipc] agent:sendScoped done scopeId=${payload.scopeId} requestId=${payload.requestId} disposition=${result.disposition}${rejection}`)
       return result
     })
 
-    ipcMain.handle('agent:createSession', async (): Promise<CreateSessionResult> => (
-      parseCreateSessionResult(await deps.createSession())
+    ipcMain.handle('agent:createSession', async (_, rawPayload: unknown): Promise<CreateSessionResult> => (
+      parseCreateSessionResult(await deps.createSession(parseCreateSessionRequest(rawPayload)))
     ))
 
     ipcMain.handle('agent:resetSession', async (_, payload: unknown): Promise<LifecycleResult> => (
-      parseLifecycleResult(await deps.resetSession(parseLifecycleRequest(payload)))
+      parseLifecycleResult(await deps.resetSession(parseProductLifecycleRequest(payload)))
     ))
 
-    ipcMain.handle('agent:kill', async (_, payload: unknown): Promise<LifecycleResult> => (
-      parseLifecycleResult(await deps.stopSession(parseLifecycleRequest(payload)))
-    ))
+    ipcMain.handle('agent:kill', async (_, payload: unknown): Promise<LifecycleResult> => {
+      const request = parseStopLifecycleRequest(payload)
+      deps.log(`[ipc] agent:kill start aliasId=${request.aliasId} aliasGeneration=${request.aliasGeneration} readyRunId=${request.readyRunId}`)
+      try {
+        const result = parseLifecycleResult(await deps.stopSession(request))
+        const outcome = result.ok
+          ? `action=${result.action}${result.action === 'stop' ? ` terminal=${result.terminal}` : ''}`
+          : `code=${result.code}`
+        deps.log(`[ipc] agent:kill done aliasId=${request.aliasId} aliasGeneration=${request.aliasGeneration} readyRunId=${request.readyRunId} ok=${result.ok} ${outcome}`)
+        return result
+      } catch (error) {
+        const code = error && typeof error === 'object' && 'code' in error
+          ? String((error as { code?: unknown }).code || '')
+          : 'stop_failed'
+        deps.log(`[ipc] agent:kill failed aliasId=${request.aliasId} aliasGeneration=${request.aliasGeneration} readyRunId=${request.readyRunId} code=${/^[A-Za-z0-9_.:-]{1,96}$/.test(code) ? code : 'stop_failed'}`)
+        throw error
+      }
+    })
 
     ipcMain.handle('agent:closeSession', async (_, payload: unknown): Promise<LifecycleResult> => (
-      parseLifecycleResult(await deps.closeSession(parseLifecycleRequest(payload)))
+      parseLifecycleResult(await deps.closeSession(parseProductLifecycleRequest(payload)))
     ))
 
     ipcMain.handle('agent:compactSession', async (_, payload: unknown): Promise<LifecycleResult> => (

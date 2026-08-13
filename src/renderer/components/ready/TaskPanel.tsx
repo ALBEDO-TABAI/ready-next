@@ -21,6 +21,12 @@ import {
 } from '../../modules/agent/task-status-vocabulary'
 import { isForegroundBusyScopeRunState } from '../../modules/agent/scopeRunState'
 import { createDebouncedFetch } from '../../modules/agent/debouncedFetch'
+import {
+  captureScopeEpoch,
+  captureScopeReadAuthority,
+  isScopeReadAuthorityCurrent,
+  scopeRowMatchesReadAuthority,
+} from '../../modules/agent/scope-read-authority'
 import { useNavigate } from 'react-router-dom'
 import AgentSelector from './AgentSelector'
 import AgentTagRow from './AgentTagRow'
@@ -270,30 +276,15 @@ function selectFallbackProjection(items: TaskProjectionRecordData[]): TaskProjec
     || null
 }
 
-function buildProjectionContinuationIntent(
-  activeProjection: TaskProjectionRecordData | null,
-  responseText?: string,
-) {
-  const ref = activeProjection?.continuationRef || null
-  if (!activeProjection?.taskId) return undefined
-  return {
-    taskId: activeProjection.taskId,
-    executionId: ref?.executionId || undefined,
-    stepId: ref?.stepId || activeProjection.currentStepId || undefined,
-    blockedReason: activeProjection.blockedReason || undefined,
-    responseText: responseText || undefined,
-    todoId: ref?.todoId || undefined,
-    todoTitle: ref?.todoTitle || undefined,
-    pauseReason: ref?.pauseReason || undefined,
-    detachedTaskId: ref?.detachedTaskId || undefined,
-    taskRunId: ref?.taskRunId || undefined,
-    jobId: ref?.jobId || undefined,
-    skillId: ref?.skillId || undefined,
-    action: ref?.action || undefined,
-    runStatePath: ref?.runStatePath || undefined,
-    outputDir: ref?.outputDir || undefined,
-    progressFingerprint: ref?.progressFingerprint || undefined,
-  }
+function captureProjectionActionEpoch(
+  projection: Pick<TaskProjectionRecordData, 'scopeId' | 'messageVisibilityEpoch'> | null | undefined,
+): number | null {
+  if (!projection?.scopeId) return null
+  const expectedMessageVisibilityEpoch = captureScopeEpoch(useAgent.getState(), projection.scopeId)
+  return expectedMessageVisibilityEpoch !== null
+    && projection.messageVisibilityEpoch === expectedMessageVisibilityEpoch
+    ? expectedMessageVisibilityEpoch
+    : null
 }
 
 export default function TaskPanel() {
@@ -302,8 +293,8 @@ export default function TaskPanel() {
     isStreaming,
     messages,
     currentScopeId,
+    scopeAuthorityRevision,
     scopeRunStates,
-    setComposerDraft,
     setCurrentScope,
     setInputValue,
     sendMessage
@@ -311,7 +302,7 @@ export default function TaskPanel() {
   const navigate = useNavigate()
 
   const [taskProjections, setTaskProjections] = useState<TaskProjectionRecordData[]>([])
-  const currentScopeIdRef = useRef<string | null>(currentScopeId || null)
+  const taskProjectionsRequestRevisionRef = useRef(0)
   const activeRun = currentScopeId ? scopeRunStates[currentScopeId] || null : null
   const composerLocked = activeRun ? isForegroundBusyScopeRunState(activeRun) : isStreaming
   const activeProjection = useMemo(() => {
@@ -369,10 +360,6 @@ export default function TaskPanel() {
   const projectionRecoveryHistory = useMemo(() => {
     return (activeProjection?.recoveryHistory || []).slice(-3).reverse()
   }, [activeProjection])
-  const isAwaitingSupplement =
-    activeProjection?.interactionState === 'awaiting_clarification'
-    || activeRun?.waitingFor === 'input'
-    || activeRun?.waitingFor === 'clarification'
   const projectionConfirmationRequest = readBrowserConfirmationRequest(activeProjection?.continuationRef)
   const projectionConfirmationCard = projectionConfirmationRequest
     ? buildBrowserConfirmationCard(projectionConfirmationRequest)
@@ -413,24 +400,31 @@ export default function TaskPanel() {
     })
   }, [activeProjection])
 
-  useEffect(() => {
-    currentScopeIdRef.current = currentScopeId || null
-  }, [currentScopeId])
-
   const refreshTaskProjections = useCallback(async () => {
+    const requestRevision = ++taskProjectionsRequestRevisionRef.current
     const scopeId = currentScopeId
-    if (!scopeId || !window.electronAPI?.agent?.listTaskProjections) {
+    const authority = scopeId
+      ? captureScopeReadAuthority(useAgent.getState(), [scopeId])
+      : null
+    if (!scopeId || !authority || !window.electronAPI?.agent?.listTaskProjections) {
       setTaskProjections([])
       return
     }
     const result = await window.electronAPI.agent.listTaskProjections(scopeId).catch(() => null)
-    if (currentScopeIdRef.current !== scopeId) return
+    if (taskProjectionsRequestRevisionRef.current !== requestRevision
+      || !isScopeReadAuthorityCurrent(useAgent.getState(), authority)) return
     if (!result?.success || !Array.isArray(result.data)) {
       setTaskProjections([])
       return
     }
-    setTaskProjections(result.data)
-  }, [currentScopeId])
+    setTaskProjections(result.data.filter((row) => (
+      scopeRowMatchesReadAuthority(
+        authority,
+        row.scopeId,
+        row.messageVisibilityEpoch,
+      )
+    )))
+  }, [currentScopeId, scopeAuthorityRevision])
 
   const handleSend = async () => {
     if (!inputValue.trim() || composerLocked) return
@@ -442,87 +436,28 @@ export default function TaskPanel() {
     }
   }
 
-  const handleResumeProjection = useCallback(async () => {
-    if (!activeProjection?.scopeId) return
-    // Stage Q (Stage 11) — gate resume by canResume. Even if a stale
-    // projection has resumableActions=['continue'], we refuse to fire
-    // the IPC if main-side canResume is not true. Belt-and-braces:
-    // main also rejects empty-shell intents in `buildContinuationIntent`.
-    if (activeProjection.canResume !== true) return
-    await window.electronAPI.agent.resumeRun({
-      scopeId: activeProjection.scopeId,
-      taskId: activeProjection.taskId || undefined,
-      continuationIntent: buildProjectionContinuationIntent(activeProjection),
-    })
-  }, [activeProjection])
-
-  const handleRespondToProjection = useCallback(async () => {
-    if (!activeProjection?.scopeId) return
-    if (activeProjection.interactionState === 'human_takeover') {
-      const takeover = activeProjection.humanTakeoverRef
-      if (!takeover || takeover.state !== 'pending') return
-      await window.electronAPI.agent.completeHumanTakeover({
-        taskId: activeProjection.taskId,
-        takeoverId: takeover.takeoverId,
-      })
-      return
-    }
-    const placeholder =
-      activeProjection.interactionState === 'awaiting_confirmation'
-        ? '确认继续'
-        : '请继续，补充信息如下：'
-    const responseText = window.prompt('补充后继续', placeholder)
-    if (responseText == null) return
-    const trimmed = responseText.trim() || placeholder
-    if (!trimmed) return
-    await window.electronAPI.agent.respondToInteraction({
-      scopeId: activeProjection.scopeId,
-      taskId: activeProjection.taskId || undefined,
-      responseText: trimmed,
-      continuationIntent: buildProjectionContinuationIntent(activeProjection, trimmed),
-    })
-  }, [activeProjection])
-
-  const handleConfirmProjection = useCallback(async (confirmed: boolean) => {
-    if (!activeProjection?.scopeId) return
-    const responseText = confirmed ? '确认继续。' : '拒绝这次操作。'
-    await window.electronAPI.agent.respondToInteraction({
-      scopeId: activeProjection.scopeId,
-      taskId: activeProjection.taskId || undefined,
-      requestId: projectionConfirmationCard?.requestId,
-      responseText,
-      confirmed,
-      continuationIntent: buildProjectionContinuationIntent(activeProjection, responseText),
-    })
-  }, [activeProjection, projectionConfirmationCard?.requestId])
-
-  const handleRetryProjection = useCallback(() => {
-    // Stage Q (Stage 11) — gate retry by canResume in addition to the
-    // resumableActions list. Empty-shell projections can have stale
-    // 'retry' in resumableActions but canResume === false; refuse.
-    if (activeProjection?.canResume !== true) return
-    if (!(activeProjection?.resumableActions || []).includes('retry')) return
-    setComposerDraft(
-      '请重试刚才的任务，并在开始前先说明你准备怎么继续。',
-      buildProjectionContinuationIntent(activeProjection) || null,
-    )
-  }, [activeProjection, setComposerDraft])
-
   const handleCancelProjection = useCallback(async () => {
     if (!activeProjection?.scopeId) return
+    const expectedMessageVisibilityEpoch = captureProjectionActionEpoch(activeProjection)
+    if (expectedMessageVisibilityEpoch === null) return
     const detachedTaskId = activeProjection.continuationRef?.detachedTaskId || null
     if (detachedTaskId && window.electronAPI?.agent?.cancelDetachedSkillTask) {
       await window.electronAPI.agent.cancelDetachedSkillTask(detachedTaskId, activeProjection.scopeId).catch(() => null)
       return
     }
-    await window.electronAPI.agent.suspendRun({
-      scopeId: activeProjection.scopeId,
-      taskId: activeProjection.taskId || undefined,
-    })
+    const childRunId = activeProjection.continuationRef?.childRunId || null
+    if (childRunId && window.electronAPI?.agent?.cancelChildRun) {
+      await window.electronAPI.agent.cancelChildRun(childRunId).catch(() => null)
+    }
   }, [activeProjection])
 
   const phaseColors = phaseTone(activeRun?.phase)
   const projectionColors = projectionStatusTone(activeProjection?.status)
+
+  useEffect(() => {
+    taskProjectionsRequestRevisionRef.current += 1
+    setTaskProjections([])
+  }, [scopeAuthorityRevision])
 
   useEffect(() => {
     void refreshTaskProjections()
@@ -532,7 +467,7 @@ export default function TaskPanel() {
     if (!window.electronAPI?.agent?.onTaskProjectionsChanged) return
     const debouncer = createDebouncedFetch(refreshTaskProjections, 100)
     const off = window.electronAPI.agent.onTaskProjectionsChanged((event) => {
-      if (event.scopeId === currentScopeIdRef.current) {
+      if (event.scopeId === useAgent.getState().currentScopeId) {
         debouncer.run()
       }
     })
@@ -716,17 +651,10 @@ export default function TaskPanel() {
             )}
             {activeProjection && (
               <div className="flex flex-wrap gap-1.5">
-                {activeProjection.waitingFor !== 'confirmation' && projectionRuntimeState?.actionSet.includes('continue') && (
-                  <button
-                    type="button"
-                    onClick={handleResumeProjection}
-                    className="rounded-[8px] border px-2.5 py-1.5 text-[10.5px] transition-colors hover:bg-black/5"
-                    style={{ borderColor: 'var(--border-default)', color: 'var(--text-body)' }}
-                  >
-                    继续运行
-                  </button>
-                )}
-                {projectionRuntimeState?.actionSet.includes('cancel') && (
+                {projectionRuntimeState?.actionSet.includes('cancel') && Boolean(
+                  activeProjection.continuationRef?.detachedTaskId
+                  || activeProjection.continuationRef?.childRunId
+                ) && (
                   <button
                     type="button"
                     onClick={handleCancelProjection}
@@ -734,60 +662,6 @@ export default function TaskPanel() {
                     style={{ borderColor: 'var(--border-default)', color: 'var(--text-body)' }}
                   >
                     取消任务
-                  </button>
-                )}
-                {isAwaitingSupplement && (
-                  <button
-                    type="button"
-                    onClick={handleRespondToProjection}
-                    className="rounded-[8px] border px-2.5 py-1.5 text-[10.5px] transition-colors hover:bg-black/5"
-                    style={{ borderColor: 'var(--border-default)', color: 'var(--text-body)' }}
-                  >
-                    补充后继续
-                  </button>
-                )}
-                {activeProjection?.interactionState === 'human_takeover' && (
-                  <button
-                    type="button"
-                    onClick={handleRespondToProjection}
-                    className="rounded-[8px] border px-2.5 py-1.5 text-[10.5px] transition-colors hover:bg-black/5"
-                    style={{ borderColor: 'var(--border-default)', color: 'var(--text-body)' }}
-                  >
-                    我已完成
-                  </button>
-                )}
-                {activeProjection?.waitingFor === 'confirmation' && (
-                  <>
-                    <button
-                      type="button"
-                      data-ready-browser-confirmation-action="allow"
-                      data-ready-browser-confirmation-request-id={projectionConfirmationCard?.requestId}
-                      onClick={() => handleConfirmProjection(true)}
-                      className="rounded-[8px] border px-2.5 py-1.5 text-[10.5px] transition-colors hover:bg-black/5"
-                      style={{ borderColor: 'var(--border-default)', color: 'var(--text-body)' }}
-                    >
-                      {projectionConfirmationCard?.allowLabel || '允许并继续'}
-                    </button>
-                    <button
-                      type="button"
-                      data-ready-browser-confirmation-action="deny"
-                      data-ready-browser-confirmation-request-id={projectionConfirmationCard?.requestId}
-                      onClick={() => handleConfirmProjection(false)}
-                      className="rounded-[8px] border px-2.5 py-1.5 text-[10.5px] transition-colors hover:bg-black/5"
-                      style={{ borderColor: 'var(--border-default)', color: 'var(--text-body)' }}
-                    >
-                      {projectionConfirmationCard?.denyLabel || '拒绝'}
-                    </button>
-                  </>
-                )}
-                {projectionRuntimeState?.actionSet.includes('retry') && (
-                  <button
-                    type="button"
-                    onClick={handleRetryProjection}
-                    className="rounded-[8px] border px-2.5 py-1.5 text-[10.5px] transition-colors hover:bg-black/5"
-                    style={{ borderColor: 'var(--border-default)', color: 'var(--text-body)' }}
-                  >
-                    重试任务
                   </button>
                 )}
               </div>

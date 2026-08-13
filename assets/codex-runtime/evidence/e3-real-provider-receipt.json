@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "stage": "E3",
+  "candidateDigest": "246ab36c14a2bc1edc3404b2de9a4f735e22ab4545e874342bea9c0e890d7fb5",
+  "candidateFileCount": 50,
+  "dirtyFileCount": 29,
+  "gitHead": "29dcede162710f2278b20ee7421eaabe67c1c79b",
+  "modelGatewayContractDigest": "0e9eb3a7d98bda843a133f5d63b5a8309237311e6079ede08867a12b399b037f",
+  "providerId": "openai-compatible",
+  "profileId": "custom-mq0rg5ix-rmyay4",
+  "model": "gpt-5.6-sol",
+  "wireApi": "chat/completions",
+  "status": 200,
+  "upstreamRequestId": "7e70dcae-3ed8-404d-b07d-b4a97a760e6d",
+  "headersMs": 4245,
+  "firstDeltaMs": 20841,
+  "deltaBeforeTerminal": true,
+  "totalMs": 21753,
+  "outputDigest": "1c8ee1285e62e9e20f24e84397c71ef914232c0f30d5c34f4951c45fc5b1aa2a",
+  "expectedTokenPresent": true,
+  "retryCount": 0,
+  "secretMaterialPersisted": false
+}

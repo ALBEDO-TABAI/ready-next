@@ -26,8 +26,10 @@ export interface DeclareCompletionCriteriaDeps {
 }
 
 function normalizeExpectedOutputs(value: unknown): { ok: true; value: string[] } | { ok: false; message: string } {
-  if (value === undefined) return { ok: true, value: [] }
-  if (!Array.isArray(value) || value.length === 0 || value.length > DECLARE_CRITERIA_MAX_ITEMS) {
+  if (value === undefined || (Array.isArray(value) && value.length === 0)) {
+    return { ok: true, value: [] }
+  }
+  if (!Array.isArray(value) || value.length > DECLARE_CRITERIA_MAX_ITEMS) {
     return { ok: false, message: `未登记：expected_outputs 必须是 1-${DECLARE_CRITERIA_MAX_ITEMS} 个具体文件目标。` }
   }
   const outputs: string[] = []

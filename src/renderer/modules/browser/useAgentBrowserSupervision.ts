@@ -149,7 +149,6 @@ export function applyLeaseSnapshotToSupervisionState(
 
 export function useAgentBrowserSupervision(): AgentBrowserSupervisionState & {
   requestInterruption: () => Promise<void>
-  resumeTargetClaim: (claim: BrowserTargetClaimSnapshot) => Promise<{ success: boolean; error?: string; errorKind?: string }>
 } {
   const [state, setState] = useState<AgentBrowserSupervisionState>(EMPTY)
   const mounted = useRef(true)
@@ -214,21 +213,5 @@ export function useAgentBrowserSupervision(): AgentBrowserSupervisionState & {
     await refresh()
   }, [refresh])
 
-  const resumeTargetClaim = useCallback(async (claim: BrowserTargetClaimSnapshot) => {
-    if (!claim.suspensionCheckpointId) {
-      return { success: false, error: 'Target has no continuation checkpoint', errorKind: 'not_resumable' }
-    }
-    const result = await window.electronAPI?.browser?.resumeTargetClaim?.({
-      parentTaskId: claim.parentTaskId,
-      browserTaskId: claim.browserTaskId,
-      claimId: claim.claimId,
-      oldGeneration: claim.generation,
-      checkpointId: claim.suspensionCheckpointId,
-      wakeNonce: crypto.randomUUID(),
-    }) ?? { success: false, error: 'Browser runtime unavailable', errorKind: 'runtime_unavailable' }
-    await refresh()
-    return result
-  }, [refresh])
-
-  return { ...state, requestInterruption, resumeTargetClaim }
+  return { ...state, requestInterruption }
 }

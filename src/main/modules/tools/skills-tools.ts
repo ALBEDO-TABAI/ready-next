@@ -78,11 +78,18 @@ import {
 } from './skill-primitives'
 import { resolveWritableWithinRoot } from './skill-primitives/path-sandbox'
 import { defaultLookupSkillRoots } from './skill-primitives/root-resolver'
-import { SHELL_ALLOWLIST } from './skill-primitives/run-shell'
+import { SHELL_ALLOWLIST, type RunShellHandlerDeps } from './skill-primitives/run-shell'
 import { getAskUserQuestionEmitter } from '../agent-control/ask-user/ask-user-bridge'
 import { getSkillHostController } from '../skills-runtime/skill-host-controller'
 import { getSkillShellConsent, isEmbeddedSkill } from '../skills-runtime/skill-shell-consent'
-import { buildSkillShellBaseAllowlist } from '../skills-runtime/skill-executable-surface'
+import { buildSkillShellBaseAllowlist, skillDirHasScripts } from '../skills-runtime/skill-executable-surface'
+import { resolveGlobalLarkCliExecutableAuthority } from '../skills-runtime/lark-cli-executable-authority'
+import {
+  executeLarkCliCommandWithAuthAuthority,
+} from '../agent-control/safety/lark-cli-auth-flow-authority'
+import {
+  shouldPersistLarkCliOverflowArtifacts,
+} from '../agent-control/safety/lark-cli-command-policy'
 import { ToolDomainError } from './tool-errors'
 import {
   toAnthropicTool,
@@ -97,9 +104,24 @@ import { executeSendImFileTool, type SendImSkillRuntimeContext } from './send-im
 export { STATIC_SKILL_TOOL_NAMES_PURE as STATIC_SKILL_TOOL_NAMES }
 export { isChildLoopSkillAction } from './child-loop-skill-actions'
 
+type LarkCliRunShellExecutorForTests = (input: {
+  command: string
+  executableAuthority: Awaited<ReturnType<typeof resolveGlobalLarkCliExecutableAuthority>>
+  persistOverflowArtifacts: boolean
+}) => Promise<ToolExecutionOutput>
+
+let larkCliRunShellExecutorForTests: LarkCliRunShellExecutorForTests | null = null
+
+export function __setLarkCliRunShellExecutorForTests(
+  executor: LarkCliRunShellExecutorForTests | null,
+): void {
+  larkCliRunShellExecutorForTests = executor
+}
+
 interface SkillToolRuntimeContext {
   scopeId?: string
   runId?: string
+  messageVisibilityEpoch?: number
   taskId?: string
   parentTaskId?: string
   parentStepId?: string
@@ -141,6 +163,13 @@ interface SkillToolRuntimeContext {
    * the frozen object through.
    */
   turnFeatureFlags?: TurnFeatureFlags
+  runShellRequiredMethod?: RunShellHandlerDeps['requiredMethod'] | null
+  larkCliExecutableAuthority?: Awaited<ReturnType<typeof resolveGlobalLarkCliExecutableAuthority>> | null
+  runShellRequiredMethodPreflight?: (() => Promise<void>) | null
+  assertRequiredResourcesRead?: (() => void) | null
+  readArtifactRequiredResources?: readonly import('./skill-primitives/read-artifact').ReadArtifactExactResource[] | null
+  onExactResourceRead?: ((logicalPath: string) => void) | null
+  codexHostPrimitiveOnly?: boolean
 }
 
 function sanitizeToolToken(value: string): string {
@@ -1326,6 +1355,7 @@ function recordPrimitiveOutcome(params: {
   scopeId?: string
   sessionId?: string
   runId?: string | null
+  messageVisibilityEpoch?: number
   agent?: string | null
   skillId?: string | null
   skillName?: string
@@ -1456,7 +1486,7 @@ function recordPrimitiveOutcome(params: {
         runStatePath: paths.runStatePath,
       }),
       summary: (params.message || params.output?.text || params.toolName).slice(0, 240),
-    })
+    }, { messageVisibilityEpoch: params.messageVisibilityEpoch })
   }
   return recorded
 }
@@ -1587,6 +1617,9 @@ export async function executeSkillTool(
   if (!tool) {
     return `Unknown skill tool: ${toolName}`
   }
+  if (runtimeContext?.codexHostPrimitiveOnly && tool.kind !== 'primitive') {
+    throw new ToolDomainError('tool_execution_authority_unsupported', 'Codex 不执行可变技能程序。')
+  }
 
   let manager: ReturnType<typeof getSkillsRuntimeManager> | null = null
   const getManager = (): ReturnType<typeof getSkillsRuntimeManager> => {
@@ -1640,6 +1673,7 @@ export async function executeSkillTool(
     const recordPrimitive: typeof recordPrimitiveOutcome = (p) =>
       recordPrimitiveOutcome({
         ...p,
+        messageVisibilityEpoch: p.messageVisibilityEpoch ?? runtimeContext?.messageVisibilityEpoch,
         skillKind: p.skillKind ?? skillKind,
         featureFlags: p.featureFlags ?? featureFlags,
       })
@@ -1989,8 +2023,10 @@ export async function executeSkillTool(
       }
       try {
         const record = tracker.start({
-          scopeId: sessionId || null,
+          scopeId: runtimeContext?.scopeId || sessionId || null,
           sessionId: sessionId || null,
+          ownerRunId: runtimeContext?.runId || null,
+          messageVisibilityEpoch: runtimeContext?.messageVisibilityEpoch,
           agent: runtimeContext?.agent || null,
           parentTaskId: runtimeContext?.taskId || null,
           parentStepId: runtimeContext?.parentStepId || null,
@@ -2081,15 +2117,22 @@ export async function executeSkillTool(
         const skillDef = listSkillsSafely().find((skill) => skill.id === skillId)
         const allowPackagedRuntime = skillDef?.source === 'embedded'
         const hostRequirements = skillDef?.hostRequirements ?? null
-        const armedSkillId = referenceSkillId || activeSkillId
+        const authorizedSkillId = runtimeContext?.authorization.mode === 'selected'
+          ? runtimeContext.authorization.skillId
+          : null
+        const armedSkillId = authorizedSkillId || referenceSkillId || activeSkillId
         const skillIdentityMatches = armedSkillId === skillId
+        const hasScripts = skillDirHasScripts(skillDef?.managedPath)
         const allowSkillScripts = Boolean(
           skillIdentityMatches
+          && runtimeContext?.codexHostPrimitiveOnly !== true
+          && hasScripts
           && (allowPackagedRuntime || getSkillShellConsent(skillId) || isEmbeddedSkill(skillId))
         )
         const baseAllowlist = buildSkillShellBaseAllowlist({
           baseAllowlist: SHELL_ALLOWLIST,
           requiredBins: skillIdentityMatches ? skillDef?.requiredBins : [],
+          hasScripts,
           allowSkillScripts,
         })
         const effectiveAllowlist = getSkillHostController().getEffectiveShellAllowlist(
@@ -2098,21 +2141,58 @@ export async function executeSkillTool(
           baseAllowlist,
           allowSkillScripts ? hostRequirements : null,
         )
-        const output = await executeRunShell(
-          {
-            command: asString(args.command),
-            timeoutMs: typeof args.timeoutMs === 'number' ? args.timeoutMs : undefined,
-            stdin: typeof args.stdin === 'string' ? args.stdin : undefined,
-          },
-          {
-            skillId,
-            signal: abortSignal,
-            baseEnv: getManager().getRuntimeEnv({ allowPackaged: allowPackagedRuntime }),
-            runtimeBinDir: getManager().getRuntimeBinDir({ allowPackaged: allowPackagedRuntime }),
-            venvBinDir: getManager().getSharedVenvBinDir({ allowPackaged: allowPackagedRuntime }),
-            effectiveAllowlist,
-          },
+        const executableAuthority = skillId === 'lark-cli'
+          ? runtimeContext?.larkCliExecutableAuthority || await resolveGlobalLarkCliExecutableAuthority({
+            env: getManager().getRuntimeEnv({ allowPackaged: allowPackagedRuntime }),
+          })
+          : undefined
+        const command = asString(args.command)
+        const persistOverflowArtifacts = shouldPersistLarkCliOverflowArtifacts(command)
+        const executeCommand = (executionCommand: string) => (
+          skillId === 'lark-cli' && executableAuthority && larkCliRunShellExecutorForTests
+            ? larkCliRunShellExecutorForTests({
+                command: executionCommand,
+                executableAuthority,
+                persistOverflowArtifacts,
+              })
+            : executeRunShell(
+                {
+                  command: executionCommand,
+                  timeoutMs: typeof args.timeoutMs === 'number' ? args.timeoutMs : undefined,
+                  stdin: typeof args.stdin === 'string' ? args.stdin : undefined,
+                },
+                {
+                  skillId,
+                  signal: abortSignal,
+                  baseEnv: getManager().getRuntimeEnv({ allowPackaged: allowPackagedRuntime }),
+                  runtimeBinDir: getManager().getRuntimeBinDir({ allowPackaged: allowPackagedRuntime }),
+                  venvBinDir: getManager().getSharedVenvBinDir({ allowPackaged: allowPackagedRuntime }),
+                  effectiveAllowlist,
+                  executableAuthority,
+                  persistOverflowArtifacts,
+                  requiredMethod: runtimeContext?.runShellRequiredMethod || undefined,
+                  requiredMethodPreflight: runtimeContext?.runShellRequiredMethodPreflight || undefined,
+                  assertRequiredResourcesRead: runtimeContext?.assertRequiredResourcesRead || undefined,
+                },
+              )
         )
+        let output: ToolExecutionOutput
+        if (skillId === 'lark-cli') {
+          const authorized = await executeLarkCliCommandWithAuthAuthority({
+            sessionId: sessionId || null,
+            skillId,
+            command,
+            executableAuthorityDigest: executableAuthority?.authorityDigest || '',
+            messageVisibilityEpoch: runtimeContext?.messageVisibilityEpoch,
+            execute: executeCommand,
+          })
+          if (!authorized.ok) {
+            throw new ToolDomainError(authorized.errorKind, authorized.message)
+          }
+          output = authorized.output
+        } else {
+          output = await executeCommand(command)
+        }
         const status = inferSkillRunStatusFromOutput(output)
         recordPrimitive({
           scopeId: runtimeContext?.scopeId,
@@ -2472,6 +2552,8 @@ export async function executeSkillTool(
             skillId,
             additionalAllowedReadRoots: additionalRootCandidates,
             additionalAllowedReadRootKinds,
+            exactResources: runtimeContext?.readArtifactRequiredResources || undefined,
+            onExactResourceRead: runtimeContext?.onExactResourceRead || undefined,
           },
         )
         recordPrimitive({
@@ -2760,7 +2842,7 @@ export async function executeSkillTool(
       toolName,
     }),
     summary: formatted.slice(0, 240),
-  })
+  }, { messageVisibilityEpoch: runtimeContext?.messageVisibilityEpoch })
   const projectionPatch = {
     ...(buildSkillProjectionPatch({
       sessionId,
@@ -2931,6 +3013,8 @@ async function dispatchChildLoopSkillAction(params: {
     result = await startSkillChildRun({
       scopeId,
       sessionId: sessionId || null,
+      parentRunId: runtimeContext?.runId || null,
+      messageVisibilityEpoch: runtimeContext?.messageVisibilityEpoch,
       skillId,
       action,
       requestedInput: args,

@@ -1,6 +1,6 @@
 import { forwardRef, useRef, useEffect, useState, useImperativeHandle, useCallback, useMemo } from 'react'
 import { createPortal } from 'react-dom'
-import { ArrowUp, Plus, Square, ChevronDown, ImagePlus, Puzzle } from 'lucide-react'
+import { ArrowUp, Plus, Square, ChevronDown, ImagePlus, LoaderCircle, Puzzle, ShieldCheck } from 'lucide-react'
 import { LiquidLens } from '../ui/liquid-glass/LiquidLens'
 import { LiquidBackdropProjection } from '../ui/liquid-glass/LiquidBackdropProjection'
 import { LiquidFloatingPanel } from '../ui/liquid-glass/LiquidFloatingPanel'
@@ -10,6 +10,7 @@ import type { NativeContextMenuItem } from '../../../shared/native-context-menu'
 import type { ContextUsageSnapshot } from '../../../shared/context-usage-types'
 import { chatMenuItemStyle, chatMenuSurfaceStyle } from './chatMenuStyles'
 import { ContextUsageMeter } from './chat-panel/ContextUsageMeter'
+import type { ActionAuthorizationMode } from '../../../shared/action-authorization-mode'
 import {
   buildSlashSkillInsertion,
   buildSlashCommandInsertion,
@@ -21,6 +22,8 @@ interface ChatInputProps {
   inputValue: string
   isStreaming: boolean
   lifecycleInputBlocked: boolean
+  stopPending: boolean
+  stopError: string | null
   attachmentsCount: number
   hasUserMessages: boolean
   isDragOver: boolean
@@ -33,11 +36,13 @@ interface ChatInputProps {
   currentAgentDisplayName: string
   agents: Array<{ name: string; avatar: string; displayName: string; status: string }>
   isChannelScope: boolean
+  actionAuthorizationMode: ActionAuthorizationMode
   onInputChange: (value: string) => void
   onSend: () => void
   onStop: () => void
   onPickFiles: () => void
   onAgentSelect: (agentName: string) => void
+  onActionAuthorizationModeChange: (mode: ActionAuthorizationMode) => void | Promise<void>
   onSkillReference: (skill: ReadySkillReference) => void
   onReferenceSelect: (attachment: ChatAttachment) => void
   renderAttachmentIcon: (attachment: ChatAttachment, size?: number) => React.ReactNode
@@ -51,6 +56,12 @@ interface ComposerMenuFrame {
   maxHeight: number
 }
 
+interface AuthorizationMenuFrame {
+  left: number
+  bottom: number
+  width: number
+}
+
 export interface ChatInputHandle {
   focusWithResize: () => void
   resetHeight: () => void
@@ -60,6 +71,8 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
   inputValue,
   isStreaming,
   lifecycleInputBlocked,
+  stopPending,
+  stopError,
   attachmentsCount,
   hasUserMessages,
   isDragOver,
@@ -72,17 +85,21 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
   currentAgentDisplayName,
   agents,
   isChannelScope,
+  actionAuthorizationMode,
   onInputChange,
   onSend,
   onStop,
   onPickFiles,
   onAgentSelect,
+  onActionAuthorizationModeChange,
   onSkillReference,
   onReferenceSelect,
   renderAttachmentIcon,
   ModelSelector,
 }: ChatInputProps, ref) {
   const [showAgentSelect, setShowAgentSelect] = useState(false)
+  const [showAuthorizationModeSelect, setShowAuthorizationModeSelect] = useState(false)
+  const [authorizationModeUpdating, setAuthorizationModeUpdating] = useState(false)
   const [agentNativeMenuOpen, setAgentNativeMenuOpen] = useState(false)
   const [showAtMenu, setShowAtMenu] = useState(false)
   const [atFilter, setAtFilter] = useState('')
@@ -91,12 +108,16 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
   const [slashSelectedIndex, setSlashSelectedIndex] = useState(0)
   const [skills, setSkills] = useState<SkillMenuItem[]>([])
   const [composerMenuFrame, setComposerMenuFrame] = useState<ComposerMenuFrame | null>(null)
+  const [authorizationMenuFrame, setAuthorizationMenuFrame] = useState<AuthorizationMenuFrame | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const dropdownRef = useRef<HTMLDivElement>(null)
+  const authorizationModeRef = useRef<HTMLDivElement>(null)
+  const authorizationMenuRef = useRef<HTMLDivElement>(null)
   const atMenuRef = useRef<HTMLDivElement>(null)
   const slashMenuRef = useRef<HTMLDivElement>(null)
   const composingRef = useRef(false)
   const composerLocked = isStreaming || lifecycleInputBlocked
+  const composerSendLocked = composerLocked || authorizationModeUpdating
 
   const syncComposerMenuFrame = useCallback(() => {
     const textarea = textareaRef.current
@@ -115,6 +136,22 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
       bottom: Math.max(margin, Math.round(viewportHeight - rect.top + 6)),
       width: Math.round(width),
       maxHeight: Math.max(180, Math.round(rect.top - margin - 6)),
+    })
+  }, [])
+
+  const syncAuthorizationMenuFrame = useCallback(() => {
+    const anchor = authorizationModeRef.current
+    if (!anchor) return
+    const rect = anchor.getBoundingClientRect()
+    const viewportWidth = window.innerWidth || document.documentElement.clientWidth || 0
+    const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0
+    const margin = 12
+    const width = Math.max(230, Math.min(280, viewportWidth - margin * 2))
+    const left = Math.max(margin, Math.min(rect.right - width, viewportWidth - width - margin))
+    setAuthorizationMenuFrame({
+      left: Math.round(left),
+      bottom: Math.max(margin, Math.round(viewportHeight - rect.top + 6)),
+      width: Math.round(width),
     })
   }, [])
 
@@ -189,11 +226,29 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
     }
   }, [showAtMenu, showSlashMenu, syncComposerMenuFrame])
 
+  useEffect(() => {
+    if (!showAuthorizationModeSelect) return
+    syncAuthorizationMenuFrame()
+    window.addEventListener('resize', syncAuthorizationMenuFrame)
+    window.addEventListener('scroll', syncAuthorizationMenuFrame, true)
+    return () => {
+      window.removeEventListener('resize', syncAuthorizationMenuFrame)
+      window.removeEventListener('scroll', syncAuthorizationMenuFrame, true)
+    }
+  }, [showAuthorizationModeSelect, syncAuthorizationMenuFrame])
+
   // Close dropdowns when clicking outside
   useEffect(() => {
     const handler = (e: MouseEvent) => {
       if (showAgentSelect && dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
         setShowAgentSelect(false)
+      }
+      if (
+        showAuthorizationModeSelect
+        && !authorizationModeRef.current?.contains(e.target as Node)
+        && !authorizationMenuRef.current?.contains(e.target as Node)
+      ) {
+        setShowAuthorizationModeSelect(false)
       }
       if (showAtMenu && atMenuRef.current && !atMenuRef.current.contains(e.target as Node)) {
         setShowAtMenu(false)
@@ -206,7 +261,20 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
     }
     document.addEventListener('mousedown', handler)
     return () => document.removeEventListener('mousedown', handler)
-  }, [showAgentSelect, showAtMenu, showSlashMenu])
+  }, [showAgentSelect, showAtMenu, showAuthorizationModeSelect, showSlashMenu])
+
+  const authorizationModeOptions: Array<{
+    mode: ActionAuthorizationMode
+    label: string
+    description: string
+  }> = [
+    { mode: 'ask', label: '询问授权', description: '每个外部写入都先问我' },
+    { mode: 'auto', label: '替我决定', description: '普通小操作由 Ready 决定' },
+    { mode: 'full', label: '全部授权', description: '放行可委托动作，高危步骤仍会询问' },
+  ]
+  const currentAuthorizationMode = authorizationModeOptions.find(
+    (option) => option.mode === actionAuthorizationMode,
+  ) || authorizationModeOptions[0]
 
   const filteredFilePool = useMemo(() => {
     if (!atFilter) return filePool
@@ -415,7 +483,7 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
     }
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
-      if (inputValue.trim() || attachmentsCount > 0) {
+      if (!composerSendLocked && (inputValue.trim() || attachmentsCount > 0)) {
         onSend()
       }
     }
@@ -426,6 +494,9 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
   const composerMenuBottom = composerMenuFrame?.bottom ?? 120
   const composerMenuWidth = composerMenuFrame?.width ?? 'calc(100vw - 24px)'
   const composerMenuMaxHeight = composerMenuFrame?.maxHeight ?? 240
+  const authorizationMenuLeft = authorizationMenuFrame?.left ?? 12
+  const authorizationMenuBottom = authorizationMenuFrame?.bottom ?? 120
+  const authorizationMenuWidth = authorizationMenuFrame?.width ?? 260
 
   const atMenu = showAtMenu && filteredFilePool.length > 0 ? (
     <LiquidFloatingPanel
@@ -599,6 +670,52 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
     </LiquidFloatingPanel>
   ) : null
 
+  const authorizationMenu = showAuthorizationModeSelect ? (
+    <LiquidFloatingPanel
+      ref={authorizationMenuRef}
+      data-ready-action-authorization-menu="true"
+      style={{
+        ...chatMenuSurfaceStyle,
+        position: 'fixed',
+        left: authorizationMenuLeft,
+        bottom: authorizationMenuBottom,
+        width: authorizationMenuWidth,
+        maxWidth: 'calc(100vw - 24px)',
+        zIndex: 540,
+      }}
+      contentStyle={{ padding: 4 }}
+    >
+      {authorizationModeOptions.map((option) => (
+        <button
+          key={option.mode}
+          type="button"
+          data-ready-action-authorization-option={option.mode}
+          className={`ready-floating-menu-item w-full active:scale-[0.98] transition-[background-color,transform] duration-150 ${option.mode === actionAuthorizationMode ? 'is-selected' : ''}`}
+          style={{ ...chatMenuItemStyle, display: 'block', textAlign: 'left' }}
+          onClick={async () => {
+            if (option.mode === actionAuthorizationMode) {
+              setShowAuthorizationModeSelect(false)
+              return
+            }
+            setAuthorizationModeUpdating(true)
+            try {
+              await onActionAuthorizationModeChange(option.mode)
+              setShowAuthorizationModeSelect(false)
+            } catch {
+              // The parent updates the displayed mode only after Main
+              // persisted it. Keep the old value and menu on failure.
+            } finally {
+              setAuthorizationModeUpdating(false)
+            }
+          }}
+        >
+          <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-body)' }}>{option.label}</div>
+          <div style={{ marginTop: 2, fontSize: 10, lineHeight: 1.35, color: 'var(--text-light)' }}>{option.description}</div>
+        </button>
+      ))}
+    </LiquidFloatingPanel>
+  ) : null
+
   return (
     <div
       style={{
@@ -663,7 +780,7 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
             onCompositionEnd={() => {
               composingRef.current = false
             }}
-            disabled={composerLocked}
+            disabled={composerSendLocked}
             placeholder="Hi～今天有什么可以帮到你"
             className="ready-input-slot-inner w-full bg-transparent border-none outline-none resize-none"
             style={{
@@ -674,10 +791,24 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
               width: '100%',
               minHeight: 44,
               maxHeight: 120,
-              opacity: composerLocked ? 0.7 : 1,
+              opacity: composerSendLocked ? 0.7 : 1,
             }}
             rows={2}
           />
+
+          {stopError && (
+            <div
+              role="alert"
+              data-ready-agent-stop-error="true"
+              style={{
+                color: 'var(--color-red)',
+                fontSize: 11,
+                lineHeight: 1.35,
+              }}
+            >
+              {stopError}
+            </div>
+          )}
 
           <div className="flex items-center justify-between" style={{ gap: 8, minHeight: 32 }}>
             <div className="flex items-center" style={{ gap: 6, minWidth: 0, flex: '1 1 auto' }}>
@@ -763,6 +894,43 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
               <div style={{ minWidth: 0 }}>
                 <ModelSelector />
               </div>
+
+              {!isChannelScope && (
+                <div className="relative" ref={authorizationModeRef} style={{ flexShrink: 0 }}>
+                  <button
+                    type="button"
+                    data-ready-action-authorization-mode={actionAuthorizationMode}
+                    disabled={authorizationModeUpdating}
+                    onClick={() => {
+                      if (!showAuthorizationModeSelect) syncAuthorizationMenuFrame()
+                      setShowAuthorizationModeSelect((value) => !value)
+                    }}
+                    title={currentAuthorizationMode.description}
+                    className="flex items-center active:scale-[0.98] transition-[opacity,transform] duration-200 ease-out"
+                    style={{
+                      padding: '3px 8px',
+                      borderRadius: 8,
+                      border: '1px solid transparent',
+                      background: 'transparent',
+                      gap: 4,
+                      opacity: authorizationModeUpdating ? 0.55 : 1,
+                    }}
+                  >
+                    <ShieldCheck style={{ width: 12, height: 12 }} className="text-[var(--text-gray)]" strokeWidth={1.8} />
+                    <span style={{ fontSize: 11, color: 'var(--text-gray)' }}>{currentAuthorizationMode.label}</span>
+                    <ChevronDown
+                      style={{
+                        width: 10,
+                        height: 10,
+                        transform: showAuthorizationModeSelect ? 'rotate(180deg)' : 'rotate(0deg)',
+                        transition: 'transform 200ms ease',
+                      }}
+                      className="text-[var(--text-light)]"
+                    />
+                  </button>
+
+                </div>
+              )}
             </div>
 
             <div className="flex items-center" style={{ gap: 6, flexShrink: 0 }}>
@@ -772,23 +940,29 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
                 <button
                   onClick={onStop}
                   data-ready-agent-stop="true"
-                  disabled={lifecycleInputBlocked}
-                  title={lifecycleInputBlocked ? '当前会话状态待确认' : '停止生成'}
+                  disabled={stopPending}
+                  aria-busy={stopPending}
+                  aria-label={stopPending ? '正在停止' : '停止生成'}
+                  title={stopPending ? '正在停止' : '停止生成'}
                   className="flex items-center justify-center text-white hover:brightness-95 active:scale-[0.98] transition-[filter,transform] duration-200 ease-out"
                   style={{
                     width: 30,
                     height: 30,
                     borderRadius: 16,
                     background: 'var(--color-red)',
+                    cursor: stopPending ? 'wait' : 'pointer',
+                    opacity: stopPending ? 0.62 : 1,
                   }}
                 >
-                  <Square style={{ width: 12, height: 12 }} strokeWidth={0} fill="currentColor" />
+                  {stopPending
+                    ? <LoaderCircle className="animate-spin" style={{ width: 14, height: 14 }} />
+                    : <Square style={{ width: 12, height: 12 }} strokeWidth={0} fill="currentColor" />}
                 </button>
               ) : (
                 <button
                   onClick={onSend}
                   data-ready-agent-send="true"
-                  disabled={lifecycleInputBlocked || (!inputValue.trim() && attachmentsCount === 0)}
+                  disabled={composerSendLocked || (!inputValue.trim() && attachmentsCount === 0)}
                   className="flex items-center justify-center hover:brightness-95 active:scale-[0.98] disabled:cursor-not-allowed transition-[opacity,filter,transform] duration-200 ease-out"
                   style={{
                     width: 30,
@@ -810,6 +984,7 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
       </div>
       {portalRoot && atMenu ? createPortal(atMenu, portalRoot) : null}
       {portalRoot && slashMenu ? createPortal(slashMenu, portalRoot) : null}
+      {portalRoot && authorizationMenu ? createPortal(authorizationMenu, portalRoot) : null}
     </div>
   )
 })

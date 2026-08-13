@@ -28,6 +28,7 @@ import {
   type ReadyCodexCloseoutReadback,
 } from '../main/modules/agent-control/task-projection/run-coordinator'
 import { parseSendScopedResponse } from '../shared/ipc-contracts/agent-runtime'
+import { createCodexToolFixture } from './utils/codex-tool-fixture'
 
 const scope: ConversationScope = {
   id: 'alias-1',
@@ -59,15 +60,7 @@ const preparationInput = {
   currentInput: [textUserInput('hello')],
   explicitResourceEnvelope: { input: [], resourceRefs: [] },
   resourceAdditionalContext: [],
-  readyToolSurface: {
-    surfaceId: 'surface-1',
-    toolSurfaceDigest: 'surface-digest',
-    toolNames: ['ready_read'],
-  },
-  readyTurnToolAuthorization: {
-    authorizationId: 'authorization-1',
-    authorizationDigest: 'authorization-digest',
-  },
+  ...createCodexToolFixture(),
   authorizationOwnerId: 'authorization-owner-1',
   resourceOwnerId: 'resource-owner-1',
   productBudgetSeed: {
@@ -178,6 +171,9 @@ function createHostFailureAdapter(candidates: CoreTurnCandidate[]) {
     committedTerminalEvent: ScopeRunEventPayload
   }>({
     nativeRuntime,
+    threadResumePort: {
+      async readThenResume() { throw new Error('native runtime must not be called before context resolution') },
+    },
     collector: new CodexTurnCollector(nativeRuntime),
     inputBuilder: new CodexTurnInputBuilder(),
     lifecycleStore: {} as ReadyCodexLifecycleStore,
@@ -293,13 +289,15 @@ test('real runScoped Codex branch prepares neutrally and never touches prompt as
     onRunStarted: ({ requestId, prepared, scope: activeScope }) => host.beginActiveProductRun({
       agent: activeScope.agent,
       scopeId: activeScope.id,
+      aliasId: prepared.conversationAlias.aliasId,
       requestId,
       runId: prepared.runId,
     }),
-    onRunSettled: ({ requestId, scope: activeScope }) => host.finishActiveProductRun({
+    onRunSettled: ({ requestId, prepared, scope: activeScope }) => host.finishActiveProductRun({
       agent: activeScope.agent,
       scopeId: activeScope.id,
       requestId,
+      runId: prepared.runId,
     }),
   }
   const coordinator = new RunCoordinator(codexDeps)
@@ -314,8 +312,45 @@ test('real runScoped Codex branch prepares neutrally and never touches prompt as
   assert.equal(result.responseText, 'done')
   assert.equal(executions, 1)
   assert.deepEqual(events.map((event) => event.phase), ['planning', 'done'])
+  assert.equal(events[0]?.taskType, 'direct_answer')
+  assert.equal(events[0]?.module, 'system')
   assert.equal(host.isScopeLive(scope.agent, scope.id), false)
   assert.equal(host.getActiveRunCount(), 0)
+})
+
+test('Codex host abort authority requires the exact run, scope, and alias identity', () => {
+  const host = new CodexHostOrchestrator({})
+  host.beginActiveProductRun({
+    agent: 'general',
+    scopeId: 'scope-abort-authority',
+    aliasId: 'alias-abort-authority',
+    requestId: 'request-abort-authority',
+    runId: 'run-abort-authority',
+  })
+  const signal = host.getActiveRunAbortSignal({
+    readyRunId: 'run-abort-authority',
+    readyScopeId: 'scope-abort-authority',
+    readyAliasId: 'alias-abort-authority',
+  })
+  assert.ok(signal)
+  assert.equal(signal.aborted, false)
+  assert.equal(host.getActiveRunAbortSignal({
+    readyRunId: 'run-abort-authority',
+    readyScopeId: 'scope-abort-authority',
+    readyAliasId: 'wrong-alias',
+  }), null)
+  assert.equal(host.abortActiveProductRun({
+    readyRunId: 'run-abort-authority',
+    readyScopeId: 'scope-abort-authority',
+    readyAliasId: 'wrong-alias',
+  }), false)
+  assert.equal(signal.aborted, false)
+  assert.equal(host.abortActiveProductRun({
+    readyRunId: 'run-abort-authority',
+    readyScopeId: 'scope-abort-authority',
+    readyAliasId: 'alias-abort-authority',
+  }), true)
+  assert.equal(signal.aborted, true)
 })
 
 test('real runScoped routes prepared-context rejection through one Ready closeout', async () => {
@@ -349,16 +384,18 @@ test('real runScoped routes prepared-context rejection through one Ready closeou
       host.beginActiveProductRun({
         agent: activeScope.agent,
         scopeId: activeScope.id,
+        aliasId: prepared.conversationAlias.aliasId,
         requestId,
         runId: prepared.runId,
       })
     },
-    onRunSettled: ({ requestId, scope: activeScope }) => {
+    onRunSettled: ({ requestId, prepared, scope: activeScope }) => {
       settled += 1
       host.finishActiveProductRun({
         agent: activeScope.agent,
         scopeId: activeScope.id,
         requestId,
+        runId: prepared.runId,
       })
     },
   })
@@ -422,16 +459,18 @@ test('real runScoped routes started-projection failure through one Ready closeou
       host.beginActiveProductRun({
         agent: activeScope.agent,
         scopeId: activeScope.id,
+        aliasId: prepared.conversationAlias.aliasId,
         requestId,
         runId: prepared.runId,
       })
     },
-    onRunSettled: ({ requestId, scope: activeScope }) => {
+    onRunSettled: ({ requestId, prepared, scope: activeScope }) => {
       settled += 1
       host.finishActiveProductRun({
         agent: activeScope.agent,
         scopeId: activeScope.id,
         requestId,
+        runId: prepared.runId,
       })
     },
   })
@@ -712,6 +751,7 @@ test('an empty product digest cannot escape as a terminal failure wire', async (
     success: false,
     disposition: 'terminal_failure_after_persistence',
     ownerRunId: 'request-empty-product-digest',
+    aliasGeneration: 1,
     shouldClearInput: true,
     preserveInput: false,
     retryableByUser: false,

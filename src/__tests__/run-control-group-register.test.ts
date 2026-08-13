@@ -8,14 +8,11 @@
 //   agent:cancelChildRun         (cancel a background child-run by id)
 //   agent:reportInfrastructureTimeout
 //                                 (renderer watchdog reports a stuck run)
-//   agent:suspendRun             (pause a scope-run)
-//   agent:resumeRun              (resume a paused scope-run via durable handle)
-//   agent:respondToInteraction   (reply to an in-flight interaction request)
 //
 // The V5 IPC contract gate proves the channel literals still exist on the
 // renderer side, but it cannot prove:
 //
-//   1. `register` wires EXACTLY the 6 channel names the group owns via
+//   1. `register` wires EXACTLY the 3 channel names the group owns via
 //      `ipcMain.handle` (no extras, no missing ones — all are invoke /
 //      async so they all live on the handle slot).
 //   2. The returned dispose handle calls `removeHandler` for each of those
@@ -75,9 +72,6 @@ function createMockDeps(): RunControlGroupDeps {
     listActiveChildRuns: fail('listActiveChildRuns') as RunControlGroupDeps['listActiveChildRuns'],
     cancelChildRun: fail('cancelChildRun') as RunControlGroupDeps['cancelChildRun'],
     reportInfrastructureTimeout: fail('reportInfrastructureTimeout') as RunControlGroupDeps['reportInfrastructureTimeout'],
-    suspendRun: fail('suspendRun') as RunControlGroupDeps['suspendRun'],
-    resumeRun: fail('resumeRun') as RunControlGroupDeps['resumeRun'],
-    respondToInteraction: fail('respondToInteraction') as RunControlGroupDeps['respondToInteraction'],
   }
 }
 
@@ -102,9 +96,6 @@ test('runControlGroup.register wires the documented channels exactly once each v
     'agent:listActiveChildRuns',
     'agent:cancelChildRun',
     'agent:reportInfrastructureTimeout',
-    'agent:suspendRun',
-    'agent:resumeRun',
-    'agent:respondToInteraction',
   ]) {
     assert.ok(
       registered.includes(required),
@@ -138,26 +129,6 @@ test('IpcDisposeHandle.dispose removes the same channels that register added', (
     expected,
     'dispose must call removeHandler for every channel the group registered',
   )
-})
-
-test('manual suspend preserves the typed unsupported failure across IPC', async () => {
-  const { ipc, handleCalls } = createMockIpc()
-  const deps = createMockDeps()
-  deps.suspendRun = async () => ({
-    success: false,
-    error: 'Codex manual suspend requires native terminal reconciliation.',
-    errorKind: 'unsupported',
-  })
-  runControlGroup.register(ipc, deps)
-  const handler = handleCalls.find((entry) => entry.channel === 'agent:suspendRun')?.handler
-  assert.ok(handler)
-
-  const result = await handler!({} as IpcMainInvokeEvent, { scopeId: 'scope-A' })
-  assert.deepEqual(result, {
-    success: false,
-    error: 'Codex manual suspend requires native terminal reconciliation.',
-    errorKind: 'unsupported',
-  })
 })
 
 test('dispose is idempotent — calling twice does not throw and stays bounded', () => {

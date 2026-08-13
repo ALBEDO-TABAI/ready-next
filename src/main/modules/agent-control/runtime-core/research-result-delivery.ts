@@ -35,6 +35,7 @@ function validHttpUrl(value: unknown): string | null {
 
 function compactText(value: unknown, maxChars: number): string {
   const text = typeof value === 'string'
+    // eslint-disable-next-line no-control-regex -- normalize tool-output control bytes before projection
     ? value.replace(/[\u0000-\u001f\u007f]+/g, ' ').replace(/\s+/g, ' ').trim()
     : ''
   return text.length > maxChars ? `${text.slice(0, maxChars).trimEnd()}…` : text

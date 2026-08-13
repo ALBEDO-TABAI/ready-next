@@ -48,10 +48,15 @@ export class ToolConsentRetryCoordinator {
       return undefined
     }
     return () => {
+      if (this.pending.get(scopeId)?.sourceRunId !== pending.sourceRunId) return
       if (this.inFlight.has(pending.sourceRunId)) return
       this.inFlight.add(pending.sourceRunId)
       const requestId = `tool-consent-retry-${pending.sourceRunId}-${randomUUID()}`
       const runAttempt = async (attempt: number): Promise<void> => {
+        if (this.pending.get(scopeId)?.sourceRunId !== pending.sourceRunId) {
+          this.inFlight.delete(pending.sourceRunId)
+          return
+        }
         try {
           const result = await dispatch({
             scopeId,

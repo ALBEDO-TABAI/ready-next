@@ -128,7 +128,8 @@ export interface ChatConversation {
 
 export interface ConversationScope {
   id: string
-  aliasGeneration?: number | null
+  aliasGeneration: number | null
+  messageVisibilityEpoch: number
   agent: string
   activeAgentId: string
   handoffGeneration: number

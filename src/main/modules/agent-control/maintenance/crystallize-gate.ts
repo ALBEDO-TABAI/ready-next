@@ -1,8 +1,8 @@
 /**
  * LIVE (P5d cluster deterministic-parts migration, 2026-07-03): wired into
  * production via runtime.ts `CrystallizeScheduler` (startup + 6h), emitting a
- * `crystallize_round_fired` ledger. The LLM maintenance round + emergence feed
- * stay deferred; only the deterministic crystallize + belief-decay rounds are live.
+ * `crystallize_round_fired` ledger. Automatic model maintenance is retired;
+ * only deterministic crystallize + belief-decay rounds run on this tick.
  *
  * EP2-C2 — deterministic crystallize gate + v1 round runner (03 §3.2/§6).
  *
@@ -10,9 +10,8 @@
  * legal outcome that leaves a single auditable breadcrumb (单行 JSON 进
  * maintenance 日志). 门控管跑不跑，回合内管做不做 — two separate layers.
  *
- * v1 round: ONLY the C1 deterministic plan (backlinks rewrite, index.md,
- * staged expiry, duplicate marking). No LLM turn exists in v1 (03 §6 分期
- * 原则); C3 adds the model round later behind this same gate.
+ * The round only applies the C1 deterministic plan (backlinks rewrite,
+ * index.md, staged expiry, duplicate marking). It never invokes a model.
  */
 
 import { unlinkSync, writeFileSync } from 'node:fs'
@@ -150,21 +149,38 @@ export async function runCrystallizeRound(params: {
  */
 export class CrystallizeScheduler {
   private timer: ReturnType<typeof setInterval> | null = null
+  private startupTimer: ReturnType<typeof setTimeout> | null = null
 
   constructor(private readonly runRound: () => Promise<unknown>) {}
 
-  start(intervalMinutes = MIN_INTERVAL_MINUTES): void {
-    if (this.timer) return
+  start(options: { intervalMinutes?: number; startupDelayMs?: number } = {}): void {
+    if (this.timer || this.startupTimer) return
+    const intervalMinutes = options.intervalMinutes ?? MIN_INTERVAL_MINUTES
     this.timer = setInterval(() => {
-      void this.runRound().catch((error) => {
-        console.error('[CrystallizeScheduler] round failed:', error)
-      })
+      this.runRoundSafely('interval')
     }, intervalMinutes * 60_000)
+    if (options.startupDelayMs !== undefined) {
+      this.startupTimer = setTimeout(() => {
+        this.startupTimer = null
+        this.runRoundSafely('startup')
+      }, options.startupDelayMs)
+    }
   }
 
   stop(): void {
-    if (!this.timer) return
-    clearInterval(this.timer)
-    this.timer = null
+    if (this.timer) {
+      clearInterval(this.timer)
+      this.timer = null
+    }
+    if (this.startupTimer) {
+      clearTimeout(this.startupTimer)
+      this.startupTimer = null
+    }
+  }
+
+  private runRoundSafely(source: 'startup' | 'interval'): void {
+    void this.runRound().catch((error) => {
+      console.error(`[CrystallizeScheduler] ${source} round failed:`, error)
+    })
   }
 }

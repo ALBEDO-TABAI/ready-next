@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, beforeEach, test } from 'node:test'
+import { after, afterEach, before, beforeEach, test } from 'node:test'
 
 import {
   __resetSessionContinuityForTests,
@@ -12,8 +12,16 @@ import {
 import { syncTaskProjection } from '../main/modules/agent-control/task-projection/task-projection-sync'
 import type { TaskProjectionRecord, TaskProjectionStore } from '../main/modules/agent-control/contracts/run-contracts'
 import type { ScopeRunEventPayload, ScopeRunSummary } from '../main/modules/agent-control/contracts/types'
+import { __setScopeContextEpochDatabaseForTests } from '../main/modules/agent-control/session/scope-context-epoch'
 
 const TEST_STORAGE_PATH = join(tmpdir(), 'ready-task-projection-sync-continuity.json')
+
+before(() => {
+  __setScopeContextEpochDatabaseForTests({
+    getRawDb: () => ({ prepare: () => ({ get: () => undefined }) }) as never,
+  })
+})
+after(() => __setScopeContextEpochDatabaseForTests(null))
 
 beforeEach(() => {
   __setSessionContinuityStoragePathForTests(TEST_STORAGE_PATH)
@@ -29,6 +37,7 @@ afterEach(() => {
 function createSummary(): ScopeRunSummary {
   return {
     scopeId: 'scope-1',
+    messageVisibilityEpoch: 0,
     agent: 'butler',
     title: '测试会话',
     sourceKind: 'local',

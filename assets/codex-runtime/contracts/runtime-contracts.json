@@ -56,7 +56,8 @@
       "canonicalAssistantBodyWrites": 0,
       "replacementAssistantBodyWrites": 0,
       "automaticReplay": false,
-      "requiresExplicitNewAlias": true
+      "nextUserIngress": "same_alias_new_empty_generation",
+      "requiresExactCommittedCloseout": true
     }
   },
   "turnInputUnionContract": {
@@ -70,6 +71,10 @@
           "explicitResourceEnvelope",
           "resourceAdditionalContext"
         ],
+        "optional": [
+          "currentDocumentAnchor"
+        ],
+        "currentDocumentAnchor": "body_free_typed_anchor_bound_to_matching_resource_reference",
         "forbidden": [
           "predecessorRunId",
           "signedContinuationContextRef",
@@ -266,6 +271,7 @@
     ],
     "closeoutAtomicWrites": [
       "host_failure_product_terminal_digest",
+      "host_failure_closeout_at",
       "ready_product_terminal",
       "eligible_member_release",
       "dispatch_fence_release",
@@ -445,7 +451,612 @@
     "failureCode": "codex_additional_context_previous_value_retained",
     "nextPhaseAllowed": false
   },
+  "currentDocumentAuthorityContract": {
+    "anchorSource": "renderer_focused_visible_document",
+    "anchorBodyBytes": 0,
+    "anchorFields": [
+      "logicalResourceId",
+      "tabId",
+      "title",
+      "pane",
+      "pathDigest",
+      "incarnationKey",
+      "currentVersion",
+      "currentDigest",
+      "supersedesVersion",
+      "policyEpoch",
+      "readScope"
+    ],
+    "additionalContextFields": [
+      "logicalResourceId",
+      "currentVersion",
+      "currentDigest",
+      "supersedesVersion",
+      "policyEpoch"
+    ],
+    "surface": "full_live_current_document_floor",
+    "turnAuthorization": [
+      "document_read_section"
+    ],
+    "rendererAuthority": {
+      "expectedSender": "exact_main_window_web_contents_id",
+      "target": "focused_pane_tab_path_incarnation",
+      "preAndPostDigestMatch": true,
+      "staleError": "resource_version_superseded",
+      "staleBodyBytes": 0
+    },
+    "publicationBarrier": {
+      "requiresExactSuccessfulReadReceipt": true,
+      "boundFields": [
+        "readyRunId",
+        "codexThreadId",
+        "codexTurnId",
+        "codexCallId",
+        "readyActionId",
+        "actionIdentityDigest",
+        "logicalResourceId",
+        "currentVersion",
+        "currentDigest",
+        "policyEpoch",
+        "tabId",
+        "pane",
+        "pathDigest",
+        "incarnationKey"
+      ],
+      "missingOrStaleReceipt": "incomplete_no_publication"
+    }
+  },
+  "modelGatewayContract": {
+    "listener": {
+      "host": "127.0.0.1",
+      "route": "/v1/responses",
+      "method": "POST",
+      "contentType": "application/json",
+      "maxBodyBytes": 4194304,
+      "maxConcurrentRequests": 8,
+      "bodyDeadlineMs": 10000,
+      "bearerBytes": 32,
+      "remoteAddress": "127.0.0.1",
+      "tokenLogging": false,
+      "spawnCapability": {
+        "identity": "sidecar_spawn_instance_id",
+        "activePerListener": 1,
+        "activationOrder": [
+          "persist_spawn_intent",
+          "revoke_previous_and_abort_inflight",
+          "mint_random_bearer",
+          "atomic_config_rewrite_0600",
+          "spawn_sidecar"
+        ],
+        "revokeOn": [
+          "spawn_failure",
+          "child_error_or_exit_before_ownership",
+          "sidecar_stop",
+          "sidecar_crash",
+          "gateway_stop"
+        ],
+        "staleToken": "reject_before_authority"
+      }
+    },
+    "request": {
+      "exactKeys": [
+        "client_metadata",
+        "include",
+        "input",
+        "instructions",
+        "model",
+        "parallel_tool_calls",
+        "prompt_cache_key",
+        "reasoning",
+        "store",
+        "stream",
+        "tool_choice",
+        "tools"
+      ],
+      "requiredValues": {
+        "model": "ready-e0-model",
+        "store": false,
+        "stream": true
+      },
+      "metadataField": "client_metadata.x-codex-turn-metadata",
+      "metadataOuterExactKeys": [
+        "session_id",
+        "thread_id",
+        "turn_id",
+        "x-codex-installation-id",
+        "x-codex-turn-metadata",
+        "x-codex-window-id"
+      ],
+      "metadataBaseInnerExactKeys": [
+        "installation_id",
+        "request_kind",
+        "sandbox",
+        "session_id",
+        "thread_id",
+        "turn_id",
+        "turn_started_at_unix_ms",
+        "window_id"
+      ],
+      "productMetadataKeys": [
+        "readyRunId",
+        "toolSurfaceDigest",
+        "turnContractDigest",
+        "upstreamProfileSnapshotDigest"
+      ],
+      "metadataShapePolicy": "product_is_base_plus_ready_fields_automatic_compaction_is_base_plus_compaction_plus_ready_fields_manual_compaction_is_base_plus_compaction",
+      "metadataIdentityPolicy": "outer_inner_ids_exact_session_equals_thread_window_equals_thread_colon_nonnegative_index_prompt_cache_key_equals_thread",
+      "toolDigestAlgorithm": "sha256_canonical_json",
+      "instructionDigestAlgorithm": "sha256_canonical_native_base_and_ordered_semantic_developer_messages",
+      "instructionSystemMessagePolicy": "reject",
+      "instructionDeveloperContentPolicy": "text_only_with_protocol_ids_excluded",
+      "instructionAbsolutePositionPolicy": "codex_owned_reordering_allowed_but_developer_relative_order_exact",
+      "additionalContextDigestAlgorithm": "sha256_canonical_ready_resource_messages",
+      "turnIdentityPolicy": "first_provider_request_atomic_claim_then_exact_reconciliation",
+      "requestReplayPolicy": "same_kind_thread_turn_request_digest_rejected_before_credential",
+      "utf8Policy": "fatal_decode_before_json",
+      "toolSchemaPolicy": "exact_function_name_description_parameters_strict_keys_with_plain_object_parameters",
+      "toolChoicePolicy": "auto_none_required_or_exact_authorized_function_name",
+      "parallelToolCallsPolicy": "boolean_only",
+      "reasoningPolicy": "summary_auto_and_optional_effort_exactly_equal_to_snapshot",
+      "includePolicy": "exact_single_reasoning_encrypted_content",
+      "capabilityPolicy": "tools_require_native_tool_support_images_in_messages_or_function_outputs_require_vision_audio_in_messages_or_function_outputs_rejected_without_shared_capability",
+      "chatFunctionPairing": "unique_call_id_with_adjacent_complete_output_block",
+      "chatInputAudioPolicy": "conversion_shape_known_but_gateway_admission_rejects_until_shared_audio_capability_exists",
+      "chatFunctionOutputPolicy": "string_or_text_parts_only_multimodal_typed_unsupported"
+    },
+    "classification": {
+      "kinds": [
+        "product",
+        "automatic_compaction",
+        "manual_compaction"
+      ],
+      "latestRunFallback": false,
+      "unknown": "reject",
+      "compactionTools": [],
+      "automaticSignature": {
+        "trigger": "auto",
+        "reason": "context_limit",
+        "implementation": "responses",
+        "phase": "pre_turn",
+        "strategy": "memento"
+      },
+      "manualSignature": {
+        "trigger": "manual",
+        "reason": "user_requested",
+        "implementation": "responses",
+        "phase": "standalone_turn",
+        "strategy": "memento"
+      },
+      "completionEvidence": {
+        "automatic": {
+          "authority": "ordered_gateway_exchange_events_plus_successor_product_request_and_response",
+          "requiredOrder": [
+            "automatic_request_admitted",
+            "automatic_response_completed",
+            "successor_product_request_admitted",
+            "successor_product_response_completed"
+          ],
+          "sameIdentity": [
+            "ready_run_id",
+            "codex_thread_id",
+            "codex_turn_id",
+            "upstream_profile_snapshot_digest"
+          ],
+          "contextCompactionItemRole": "passive_non_authoritative_observation"
+        },
+        "manual": {
+          "dispatchAuthority": "durable_app_server_child_transport_attempt",
+          "itemIdentity": {
+            "notificationItemIdRole": "optional_immutable_observation",
+            "threadReadItemIdRole": "canonical_persisted_readback_identity",
+            "crossNamespaceEqualityRequired": false,
+            "correlationAuthority": "exact_thread_id_turn_id_single_non_action_context_compaction_item_completed_terminal_gateway_success_and_thread_readback"
+          },
+          "recoveryStates": [
+            "completed_with_exact_turn_gateway_response_and_thread_readback",
+            "proven_write_not_attempted_retry_same_binding_once",
+            "possible_write_unknown_no_redispatch"
+          ],
+          "lateResponsePolicy": "consume_by_connection_epoch_and_rpc_id_without_protocol_close",
+          "quarantinePolicy": "explicit_unknown_only_thread_local_new_alias"
+        }
+      }
+    },
+    "snapshot": {
+      "owner": "ready",
+      "immutable": true,
+      "credentialMaterialStored": false,
+      "credentialReferenceRequired": true,
+      "allowedWireApis": [
+        "responses",
+        "chat/completions"
+      ],
+      "modelChangePolicy": "new_thread_required",
+      "existingThreadPolicy": "model_snapshot_cwd_instructions_runtime_manifest_and_protocol_schema_must_equal_frozen_thread",
+      "manualCompactionPolicy": "route_matches_frozen_thread_snapshot_digest_matches_payload_and_tools_digest_is_empty",
+      "credentialRotationPolicy": "same_nonsecret_snapshot_only",
+      "routeDriftPolicy": "reject_before_turn_row_fence_credential_or_upstream",
+      "capabilityFields": [
+        "supportsToolCalls",
+        "supportsNativeToolCalls",
+        "supportsVision",
+        "supportsThinking",
+        "multiTurnThinkingPolicy"
+      ],
+      "thinkingPolicy": "chat_requires_proven_safe_responses_allows_proven_safe_or_echo_required"
+    },
+    "proofCandidate": {
+      "identityInputs": [
+        "git_head",
+        "explicit_e3_paths",
+        "recursive_shared_provider_dependencies"
+      ],
+      "dirtyPathPolicy": "reject_dirty_or_untracked_paths_outside_candidate",
+      "paidProofPolicy": "exact_preapproved_candidate_digest",
+      "wireApi": "chat/completions",
+      "identityReadback": "exact_before_and_after_paid_call",
+      "firstDeltaReceiptRequired": true,
+      "firstDeltaBeforeTerminalRequired": true,
+      "providerCredentialAbsentFromReceiptStream": true
+    },
+    "upstream": {
+      "retryOwner": "ready_gateway",
+      "readyGatewayMaxControlledRetries": 6,
+      "readyGatewayRetryBeforeOutputOnly": true,
+      "codexRequestRetries": 0,
+      "codexStreamRetries": 0,
+      "semantic4xxRetries": 0,
+      "allowProviderModelFallback": false,
+      "trueSseRequired": true,
+      "stopPolicy": "zero_new_upstream_after_stop",
+      "startStopRacePolicy": "stopped_is_terminal_during_listen",
+      "retryWaitAbortPolicy": "already_aborted_rejects_immediately",
+      "retryAfterMaxMs": 120000,
+      "headersDeadlineMs": 120000,
+      "errorBodyDeadlineMs": 120000,
+      "localDeadlineRetryPolicy": "no_retry_after_request_abort",
+      "responseModelPolicy": "exact_snapshot_model_required",
+      "providerErrorFields": [
+        "code",
+        "type",
+        "message"
+      ],
+      "providerErrorSecrets": "redacted",
+      "providerErrorHeaders": [
+        "x-ready-upstream-request-id",
+        "retry-after"
+      ]
+    },
+    "response": {
+      "unverifiedEventForwarding": 0,
+      "nativeEventShapePolicy": "exact_keys_per_event_response_item_part_usage_and_failure_shape",
+      "utf8Policy": "fatal_decode_before_sse_parse",
+      "maxSseBytes": 8388608,
+      "maxSseEvents": 4096,
+      "streamDeadlineMs": 120000,
+      "postTerminalDrainMs": 1000,
+      "allowedItemTypes": [
+        "message",
+        "function_call",
+        "reasoning"
+      ],
+      "forbiddenItemTypes": [
+        "shell_call",
+        "file_search_call",
+        "web_search_call",
+        "computer_call",
+        "mcp_call",
+        "local_shell_call"
+      ],
+      "allowedFunctionNames": "request_tools_exact",
+      "chatToolNameFinalPolicy": "all_function_events_buffered_until_full_name_id_and_arguments_validate_then_exact_allowlist",
+      "functionCallIdentity": [
+        "id",
+        "call_id",
+        "name"
+      ],
+      "functionArguments": "statefully_aggregated_exact_json_object_matching_signed_parameters_schema",
+      "actionArgumentSecretPolicy": "credential_or_bearer_in_function_arguments_typed_failure_zero_action_forwarding",
+      "nativeFunctionForwardingPolicy": "from_first_function_event_hold_full_tail_until_terminal_completed_and_full_validation_invalid_or_noncompleted_discards_action_tail",
+      "nativeItemTerminalStatusPolicy": "response_completed_requires_every_done_item_status_completed_implicit_status_is_completed",
+      "malformedToolCalls": "reject",
+      "chatKnownFieldTypePolicy": "present_known_fields_must_match_exact_supported_type",
+      "chatChunkAllowlistPolicy": "exact_known_top_level_choice_delta_tool_and_usage_fields_unknown_fields_typed_failure",
+      "chatStandardCompatibilityPolicy": "choice_logprobs_null_intermediate_usage_null_one_final_usage_object_and_standard_audio_prediction_details_allowed_and_validated",
+      "chatResponseIdentity": "first_present_nonempty_id_then_exact",
+      "chatToolIndexPolicy": "contiguous_first_seen_indexes",
+      "chatUnsupportedDeltaFields": [
+        "function_call",
+        "refusal",
+        "audio"
+      ],
+      "chatFinishBoundary": "after_finish_only_empty_choices_usage_or_metadata_until_done",
+      "chatIncompleteReasonMap": {
+        "length": "gateway_upstream_output_truncated",
+        "content_filter": "gateway_upstream_output_filtered"
+      },
+      "chatIncompleteAppServerPolicy": "text_and_reasoning_deltas_may_stream_but_item_done_is_withheld_then_typed_response_failed_yields_failed_turn_and_zero_candidate",
+      "reasoningFields": [
+        "reasoning_summary"
+      ],
+      "reasoningRawFieldPolicy": "reasoning_content_additional_reasoning_content_and_reasoning_details_typed_unsupported",
+      "reasoningHistoryPolicy": "explicit_summary_preserved_as_reasoning_summary_raw_or_encrypted_history_unsupported",
+      "reasoningToolTurnPolicy": "same_assistant_message_with_summary_field_boundary",
+      "providerErrorEvents": "official_flat_error_allowlisted_redacted_and_pinned_app_server_consumed",
+      "terminalForwarding": "after_stream_eof_and_full_validation",
+      "terminalStatus": "event_name_must_equal_response_status",
+      "terminalItemPolicy": "exact_output_item_done_digest_with_global_unique_item_and_call_ids",
+      "nativeInProgressPolicy": "at_most_once_before_items_with_empty_output",
+      "nativePartLifecycle": "part_done_forbids_later_text_delta_or_done",
+      "nativeItemDonePolicy": "every_observed_message_or_reasoning_part_requires_text_done_and_every_explicit_part_requires_part_done_before_item_done",
+      "nativeReasoningLifecycle": "summary_aggregated_encrypted_and_raw_content_may_appear_at_item_done_then_terminal_exact_readback",
+      "nativeMessagePartShape": {
+        "output_text": "text",
+        "refusal": "refusal"
+      },
+      "nativeMessageRolePolicy": "assistant_only_with_fixed_phase_and_status_enums",
+      "nativeTerminalSemantics": "completed_no_failure_fields_incomplete_known_reason_validated_then_converted_to_typed_failed_for_app_server_failed_nonempty_error",
+      "syntheticFailureRequiredFields": [
+        "id",
+        "model",
+        "status",
+        "output",
+        "error"
+      ],
+      "usagePolicy": "finite_nonnegative_safe_integers_with_exact_total",
+      "usageDetailsPolicy": "cached_and_reasoning_safe_integers_not_above_parent_totals",
+      "usagePresencePolicy": "chat_completed_and_native_completed_or_incomplete_require_upstream_usage_failed_native_optional_no_zero_synthesis",
+      "identityCredentialPolicy": "reject_without_rewriting_protocol_identity",
+      "streamCredentialPolicy": "actual_credential_and_quoted_or_unquoted_generic_bearer_canonically_redacted_across_delta_boundaries",
+      "redactedDeltaConsistency": "delta_aggregate_equals_done_item_done_and_terminal_value",
+      "trueSseProof": "output_text_delta_observed_before_upstream_terminal_for_chat_and_native",
+      "deferredDeltaBasePolicy": "cache_only_redacted_event_fields",
+      "nativeExtensionCredentialPolicy": "reject_if_secret_remains_after_allowlisted_text_redaction",
+      "failureBeforeCreatedPolicy": "synthetic_response_failed_accepted_by_pinned_app_server",
+      "unknownEvent": "reject",
+      "compactionActionItems": false
+    }
+  },
+  "toolBridgeContract": {
+    "surfaceSource": "live_finalized_turn_tool_definitions_after_capability_floor_enforcement",
+    "surfaceResolver": "AgentSdkToolExecutor.listDefaultToolDefinitionsForTurn",
+    "threadSurfacePolicy": "immutable_for_native_thread_lifetime",
+    "surfaceChangePolicy": "new_native_thread_required",
+    "dynamicToolConversion": "deterministic_name_sorted_openai_function_schema_to_dynamic_tool_spec",
+    "effectProfileFields": [
+      "groupId",
+      "domain",
+      "kind",
+      "concurrency",
+      "interruptBehavior",
+      "timeoutProfile",
+      "executionTimeoutMs",
+      "supportsTextBridge",
+      "projectionHint",
+      "requiresExplicitAllowlist",
+      "resultShape"
+    ],
+    "surfaceDigests": {
+      "providerToolSurface": "canonical_responses_tools",
+      "hostExecutionSurface": "canonical_entries_dynamic_tools_and_responses_tools"
+    },
+    "turnAuthorizationPolicy": "fresh_snapshot_per_ready_run_and_subset_of_frozen_thread_surface",
+    "callIdentityFields": [
+      "readyAliasId",
+      "codexSessionId",
+      "codexThreadId",
+      "codexTurnId",
+      "callId",
+      "readyTaskId",
+      "readyRunId",
+      "toolName",
+      "argsDigest",
+      "turnContractDigest",
+      "surfaceSnapshotDigest",
+      "authorizationSnapshotDigest",
+      "schemaDigest"
+    ],
+    "executionPath": "Ready_executeToolCall_only",
+    "directProductDomainCalls": false,
+    "argumentValidation": "full_frozen_entry_and_zod_before_binding_after_journal_and_after_lazy_executor_load",
+    "skillExecutionAuthorityPolicy": "codex_admits_only_host_native_primitives_from_scriptless_selected_skills_and_only_pinned_lark_cli_for_skill_run_shell_mutable_skill_programs_are_typed_unsupported",
+    "statePatchPolicy": "tools_that_emit_framePatch_or_contextModifier_are_typed_unsupported_before_codex_surface_admission_until_codex_has_the_shared_state_consumer",
+    "preEffectAuthority": "after_lazy_load_and_again_at_effect_start_after_confirmation_synchronously_recheck_abort_authorities_live_connection_active_owner_fence_full_binding_and_full_tool_entry_then_enter_ready_effect_without_await_gap",
+    "timeoutPolicy": "frozen_entry_execution_timeout_or_canonical_timeout_profile_capped_by_host_hard_timeout_and_active_only_between_ready_effect_start_end_callbacks",
+    "interactionPolicy": "original_dynamic_tool_rpc_and_pending_action_remain_open_until_ready_confirmation_resolves_to_final_output_with_confirmation_wait_outside_effect_deadline",
+    "connectionClosePolicy": "sidecar_transport_owned_epoch_abort_signal_is_mandatory_before_call_binding_and_cancels_confirmation_or_execution_with_pre_effect_close_proven_absent",
+    "deliveryPolicy": "first_delivery_creates_an_independent_canonical_response_attempt; confirmed_response_recovery_requires_the_exact_frozen_action_identity_a_new_rpc_on_a_new_live_connection_and_every_prior_delivery_connection_dead; action_execution_is_never_repeated; transport_ack_is_written_only_after_the_actual_write_callback_succeeds; publication_recomputes_the_candidate_response_digest_from_any_exact_attempt",
+    "confirmedResponseRecovery": {
+      "requiresConfirmedActionReceipt": true,
+      "requiresExactFrozenActionIdentity": true,
+      "requiresReplacementConnectionAndRpc": true,
+      "requiresEveryPriorConnectionDead": true,
+      "reexecutesReadyAction": false,
+      "sameLiveRpcDuplicateResponse": false
+    },
+    "budgetPolicy": {
+      "snapshot": "product_budget_seed_json_immutable_per_ready_run",
+      "maxToolCalls": "durable_call_binding_admission_counted_per_ready_run_before_effect",
+      "maxIterations": "model_loop_dimension_not_consumed_by_individual_tool_bridge_E5_gateway_gate_required_before_live_vertical",
+      "maxParallelToolGroups": "model_response_group_dimension_not_inferable_from_individual_server_request_E5_collector_gate_required_before_live_vertical"
+    },
+    "abortPolicy": {
+      "authorityMissing": "ready_run_or_connection_abort_authority_missing_rejects_before_call_binding_action_journal_and_effect",
+      "alreadyAborted": "reject_before_action_journal",
+      "activeAbort": "abort_signal_plus_prompt_deadline_even_if_executor_ignores_signal",
+      "lateResult": "confirm_receipt_and_persist_result_without_dead_rpc_delivery",
+      "unknownEffect": "typed_failure_and_no_retry"
+    },
+    "persistenceBoundary": {
+      "publicFacade": "CodexBindingRepository",
+      "internalToolStore": "CodexToolBindingRepository",
+      "directInternalConsumers": 1,
+      "callBindingResultBody": false,
+      "readyActionJournalResultBody": true,
+      "deliveryAttemptResponseBody": true,
+      "transportWriteAckBoundary": "actual_write_callback_success"
+    },
+    "journalStates": [
+      "pending",
+      "confirmed",
+      "proven_absent",
+      "indeterminate"
+    ],
+    "journalBeforeExecution": true,
+    "pendingAfterRestart": "effect_unknown",
+    "sameActionIdentityReplay": false,
+    "deadJsonRpcReplay": false,
+    "resultMapping": {
+      "success": "legacy_data_errorKind_or_ok_false_is_authoritative_over_optional_envelope",
+      "textJsonEnvelope": "inputText",
+      "image": "inputImage_data_url",
+      "audio": "inputAudio_data_url",
+      "hostPaths": "all_posix_windows_and_unc_absolute_paths_plus_path_fields_redacted_before_model_visibility",
+      "credentials": "current_ready_sensitive_values_structured_secret_fields_bearer_and_openai_style_tokens_redacted_before_model_visibility",
+      "remoteMediaUrl": "reject",
+      "artifactPath": "typed_resource_bridge_required",
+      "statePatch": "typed_unsupported_until_projection_bridge_exists",
+      "structuredErrorPreserved": true
+    },
+    "unexpectedTools": {
+      "builtinNamespace": "reject_before_action_journal",
+      "unknown": "reject_before_action_journal",
+      "unauthorized": "reject_before_action_journal",
+      "invalidArguments": "reject_before_call_binding_and_action_journal"
+    },
+    "recovery": {
+      "provenAbsent": "checkpoint_then_successor_may_replan_with_new_call_identity",
+      "confirmed": "checkpoint_with_digest_only_recovered_action_context_and_repeat_denied",
+      "indeterminate": "effect_unknown_and_mutation_frozen_until_readback",
+      "sameThreadSuccessorRequires": [
+        "history_publication_parity",
+        "current_thread_readback",
+        "non_user_continuation_gate"
+      ],
+      "unsupportedSuccessor": "retire_publication_diverged_without_fake_user_message"
+    }
+  },
+  "externalReadSliceContract": {
+    "contractVersion": 1,
+    "prerequisitePhase": "E5",
+    "threadPolicy": "new_root_thread_per_slice_with_immutable_exact_surface",
+    "turnContractFields": [
+      "toolSurfaceDigest",
+      "authorizationDigest",
+      "resourceAnchorDigest",
+      "methodConstraintDigest",
+      "dependencySnapshotDigest"
+    ],
+    "receiptIdentityFields": [
+      "readyTaskId",
+      "readyRunId",
+      "codexThreadId",
+      "codexTurnId",
+      "callId",
+      "toolSurfaceDigest",
+      "turnContractDigest",
+      "resultDigest"
+    ],
+    "credentialBoundary": "Ready_Main_to_existing_executor_only_never_Codex_child_env_provider_payload_tool_args_result_or_logs",
+    "fallbackPolicy": "none",
+    "feishuTypedRead": {
+      "implementationRef": "ready_connector:feishu",
+      "requiredSurfaceToolNames": [
+        "feishu_doc_read"
+      ],
+      "providerRequestToolPolicy": "full_frozen_thread_surface",
+      "turnAllowedToolNames": [
+        "feishu_doc_read"
+      ],
+      "forbiddenMethodIds": [
+        "browser",
+        "shell",
+        "lark-cli"
+      ],
+      "resourceAuthorityFields": [
+        "channelId",
+        "docToken",
+        "docType",
+        "logicalResourceId",
+        "currentVersion",
+        "currentDigest",
+        "policyEpoch"
+      ],
+      "preEffectPolicy": "exact_channel_document_type_and_version_authority_match",
+      "exactErrorKinds": [
+        "auth_required",
+        "auth_expired",
+        "permission_denied",
+        "not_found",
+        "rate_limited",
+        "network_error",
+        "upstream_error"
+      ]
+    },
+    "larkCliRead": {
+      "implementationRef": "local_program:lark-cli",
+      "skillId": "lark-doc",
+      "requiredSurfaceToolNames": [
+        "skill_read_artifact",
+        "skill_run_shell"
+      ],
+      "providerRequestToolPolicy": "full_frozen_thread_surface",
+      "turnAllowedToolNames": [
+        "skill_read_artifact",
+        "skill_run_shell"
+      ],
+      "forbiddenMethodIds": [
+        "browser",
+        "ready_connector:feishu",
+        "bash",
+        "sh",
+        "curl"
+      ],
+      "requiredReadOnlyResources": [
+        "lark-doc/SKILL.md",
+        "lark-shared/SKILL.md",
+        "lark-doc/references/lark-doc-fetch.md"
+      ],
+      "executableIdentityFields": [
+        "program",
+        "outerPath",
+        "realPath",
+        "payloadPath",
+        "spawnPath",
+        "payloadSha256",
+        "fileIdentity",
+        "launcherChain",
+        "version",
+        "wrapperExecutionForbidden",
+        "autoInstallForbidden"
+      ],
+      "wrapperExecutionForbidden": true,
+      "autoInstallForbidden": true,
+      "directPayloadInvariant": "payloadPath_equals_spawnPath",
+      "authIdentity": "user",
+      "exactErrorKinds": [
+        "dependency_unavailable",
+        "auth_required",
+        "permission_denied",
+        "confirmation_required",
+        "program_failed"
+      ],
+      "exit10Policy": "confirmation_required_without_automatic_yes_or_retry"
+    }
+  },
   "outboundRpcContract": {
+    "existingThreadResume": {
+      "requiredOrder": [
+        "thread/read",
+        "thread/resume"
+      ],
+      "sameConnectionEpoch": true,
+      "sameClientInstance": true,
+      "connectionMustRemainOpen": true,
+      "durableEvidenceTable": "codex_thread_resume_evidence",
+      "evidencePolicy": "exact_root_thread_read_and_resume_digests_from_one_live_client_epoch_before_loaded_state",
+      "failurePolicy": "no_turn_start_and_no_loaded_state"
+    },
     "clientMethods": [
       "initialize",
       "thread/start",
@@ -473,11 +1084,12 @@
         "allowProviderModelFallback",
         "cwd",
         "approvalPolicy",
-        "sandbox",
-        "runtimeWorkspaceRoots",
-        "environments",
-        "dynamicTools",
-        "developerInstructions"
+      "sandbox",
+      "runtimeWorkspaceRoots",
+      "environments",
+      "config",
+      "dynamicTools",
+      "developerInstructions"
       ],
       "mustEqual": {
         "modelProvider": "ready_gateway",
@@ -489,21 +1101,38 @@
       },
       "mustBeOmitted": [
         "baseInstructions",
-        "personality",
-        "multiAgentMode",
-        "history",
-        "config",
-        "permissions"
-      ]
+      "personality",
+      "multiAgentMode",
+      "history",
+      "permissions"
+    ],
+    "config": {
+      "nullable": true,
+      "exactKeysWhenPresent": [
+        "model_context_window"
+      ],
+      "modelContextWindow": "positive_safe_integer"
+    }
     },
     "turnStart": {
       "required": [
         "threadId",
         "clientUserMessageId",
+        "collaborationMode",
+        "environments",
         "input",
         "additionalContext",
         "responsesapiClientMetadata"
       ],
+      "mustEqual": {
+        "environments": []
+      },
+      "collaborationMode": {
+        "mode": "default",
+        "model": "ready-e0-model",
+        "reasoningEffort": "exact_frozen_upstream_snapshot",
+        "developerInstructions": null
+      },
       "metadataKeys": [
         "readyRunId",
         "toolSurfaceDigest",
@@ -518,12 +1147,10 @@
         "summary",
         "personality",
         "cwd",
-        "environments",
         "runtimeWorkspaceRoots",
         "sandboxPolicy",
         "approvalPolicy",
         "permissions",
-        "collaborationMode",
         "multiAgentMode",
         "baseInstructions",
         "developerInstructions",

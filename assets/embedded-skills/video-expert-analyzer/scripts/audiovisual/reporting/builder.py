@@ -287,6 +287,41 @@ def _validate_illustrated_markdown(
             window = window[-3:]
 
 
+def _remove_nearby_duplicate_inserted_images(illustrated: str, original: str) -> str:
+    pre_existing = set(_extract_image_paths(original))
+    recent_paths: List[str] = []
+    cleaned_blocks: List[str] = []
+    drop_caption = False
+
+    for block in illustrated.split("\n\n"):
+        stripped = block.strip()
+        if drop_caption and re.fullmatch(r"\*[^\n]+\*", stripped):
+            drop_caption = False
+            continue
+        drop_caption = False
+
+        kept_lines: List[str] = []
+        removed_duplicate = False
+        for line in block.splitlines():
+            match = _IMAGE_LINK_RE.search(line.strip())
+            path = match.group(1).strip() if match else ""
+            if path and path not in pre_existing and path in recent_paths:
+                removed_duplicate = True
+                continue
+            kept_lines.append(line)
+            if path and path not in pre_existing:
+                recent_paths.append(path)
+                recent_paths = recent_paths[-3:]
+
+        kept_block = "\n".join(kept_lines).strip()
+        if kept_block:
+            cleaned_blocks.append(kept_block)
+        elif removed_duplicate:
+            drop_caption = True
+
+    return "\n\n".join(cleaned_blocks) + ("\n" if illustrated.endswith("\n") else "")
+
+
 _TRAILING_BLOCKQUOTE_KEYWORD = "视听对齐度"
 _TRAILING_TABLE_KEYWORDS = ("本片在这一维", "这一维在看什么")
 
@@ -555,6 +590,7 @@ def _illustrate_scene_screenshots(markdown_text: str, data: Dict, report_dir: Pa
         recent_paths = recent_paths[-3:]
 
     illustrated = "\n".join(out)
+    illustrated = _remove_nearby_duplicate_inserted_images(illustrated, markdown_text)
     illustrated = _strip_trailing_orphan_images(illustrated, markdown_text)
     _validate_illustrated_markdown(illustrated, markdown_text, catalog)
     return _annotate_image_captions(illustrated, markdown_text, catalog)

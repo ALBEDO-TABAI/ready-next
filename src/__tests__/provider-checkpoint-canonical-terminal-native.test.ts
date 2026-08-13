@@ -64,16 +64,16 @@ test('provider_transfer suspension atomically persists exactly one canonical ass
     const scopeId = 'scope-provider-transfer-canonical'
     const now = '2026-07-23T00:00:00.000Z'
     const binding = executionBinding(runId)
+    db.prepare(`INSERT INTO chat_conversations (id, agent, title, created_at, updated_at)
+                VALUES (?, 'butler', 'Provider transfer', ?, ?)`).run(scopeId, now, now)
     projections.create({
-      taskId, scopeId, runId, taskType: 'research', module: 'browser', status: 'running',
+      taskId, scopeId, messageVisibilityEpoch: 0, runId, taskType: 'research', module: 'browser', status: 'running',
       interactionState: 'running', waitingFor: 'none', steps: [], ownerAgentId: 'butler',
       taskOrigin: 'user_root', executionBinding: binding, createdAt: now, updatedAt: now,
     })
-    runMeta.create({ runId, taskId, scopeId, agentId: 'butler', executionBinding: binding, status: 'running' }, Date.parse(now))
-    db.prepare(`INSERT INTO chat_conversations (id, agent, title, created_at, updated_at)
-                VALUES (?, 'butler', 'Provider transfer', ?, ?)`).run(scopeId, now, now)
-    db.prepare(`INSERT INTO chat_messages (id, conversation_id, role, content, timestamp, meta_json)
-                VALUES ('source-provider-transfer', ?, 'user', 'continue research', ?, '{}')`).run(scopeId, now)
+    runMeta.create({ runId, taskId, scopeId, messageVisibilityEpoch: 0, agentId: 'butler', executionBinding: binding, status: 'running' }, Date.parse(now))
+    db.prepare(`INSERT INTO chat_messages (id, conversation_id, role, content, timestamp, meta_json, message_visibility_epoch)
+                VALUES ('source-provider-transfer', ?, 'user', 'continue research', ?, '{}', 0)`).run(scopeId, now)
     const route = await repository.bindBrowserWorkflowRoute({
       parentTaskId: taskId,
       ownerRunId: runId,
@@ -137,17 +137,17 @@ test('every non-interactive Browser suspension atomically aligns checkpoint, run
         const scopeId = `scope-canonical-${reason}`
         const now = '2026-07-23T01:00:00.000Z'
         const binding = executionBinding(runId)
+        db.prepare(`INSERT INTO chat_conversations (id, agent, title, thread_key, created_at, updated_at)
+                    VALUES (?, 'butler', 'Canonical suspension', ?, ?, ?)`).run(scopeId, scopeId, now, now)
         projections.create({
-          taskId, scopeId, runId, taskType: 'research', module: 'browser', status: 'running',
+          taskId, scopeId, messageVisibilityEpoch: 0, runId, taskType: 'research', module: 'browser', status: 'running',
           interactionState: 'running', waitingFor: 'none', steps: [], ownerAgentId: 'butler',
           taskOrigin: 'user_root', executionBinding: binding, createdAt: now, updatedAt: now,
         })
-        runMeta.create({ runId, taskId, scopeId, agentId: 'butler', executionBinding: binding, status: 'running' }, Date.parse(now))
-        db.prepare(`INSERT INTO chat_conversations (id, agent, title, created_at, updated_at)
-                    VALUES (?, 'butler', 'Canonical suspension', ?, ?)`).run(scopeId, now, now)
+        runMeta.create({ runId, taskId, scopeId, messageVisibilityEpoch: 0, agentId: 'butler', executionBinding: binding, status: 'running' }, Date.parse(now))
         const sourceMessageId = `source-canonical-${reason}`
-        db.prepare(`INSERT INTO chat_messages (id, conversation_id, role, content, timestamp, meta_json)
-                    VALUES (?, ?, 'user', 'continue research', ?, '{}')`).run(sourceMessageId, scopeId, now)
+        db.prepare(`INSERT INTO chat_messages (id, conversation_id, role, content, timestamp, meta_json, message_visibility_epoch)
+                    VALUES (?, ?, 'user', 'continue research', ?, '{}', 0)`).run(sourceMessageId, scopeId, now)
         const route = await repository.bindBrowserWorkflowRoute({
           parentTaskId: taskId,
           ownerRunId: runId,
@@ -203,16 +203,16 @@ test('canonical assistant write failure rolls back every suspension state write'
     const scopeId = 'scope-canonical-rollback'
     const now = '2026-07-23T02:00:00.000Z'
     const binding = executionBinding(runId)
+    db.prepare(`INSERT INTO chat_conversations (id, agent, title, created_at, updated_at)
+                VALUES (?, 'butler', 'Rollback suspension', ?, ?)`).run(scopeId, now, now)
     projections.create({
-      taskId, scopeId, runId, taskType: 'research', module: 'browser', status: 'running',
+      taskId, scopeId, messageVisibilityEpoch: 0, runId, taskType: 'research', module: 'browser', status: 'running',
       interactionState: 'running', waitingFor: 'none', steps: [], ownerAgentId: 'butler',
       taskOrigin: 'user_root', executionBinding: binding, createdAt: now, updatedAt: now,
     })
-    runMeta.create({ runId, taskId, scopeId, agentId: 'butler', executionBinding: binding, status: 'running' }, Date.parse(now))
-    db.prepare(`INSERT INTO chat_conversations (id, agent, title, created_at, updated_at)
-                VALUES (?, 'butler', 'Rollback suspension', ?, ?)`).run(scopeId, now, now)
-    db.prepare(`INSERT INTO chat_messages (id, conversation_id, role, content, timestamp, meta_json)
-                VALUES ('source-canonical-rollback', ?, 'user', 'continue', ?, '{}')`).run(scopeId, now)
+    runMeta.create({ runId, taskId, scopeId, messageVisibilityEpoch: 0, agentId: 'butler', executionBinding: binding, status: 'running' }, Date.parse(now))
+    db.prepare(`INSERT INTO chat_messages (id, conversation_id, role, content, timestamp, meta_json, message_visibility_epoch)
+                VALUES ('source-canonical-rollback', ?, 'user', 'continue', ?, '{}', 0)`).run(scopeId, now)
     const route = await repository.bindBrowserWorkflowRoute({
       parentTaskId: taskId,
       ownerRunId: runId,

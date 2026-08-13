@@ -439,8 +439,8 @@ function makeDownloadUnavailableClose(
   //   ._download_remote_video_with_retry). What remains is a genuine "cannot fetch
   //   from source" wall that only the user can clear (download with Ready browser,
   //   resume with the local file). That is awaiting-user-action → blocked_external,
-  //   NOT checkpoint_background (which would falsely imply background progress and
-  //   trip the durable-resume narration path).
+  //   NOT checkpoint_background (which would falsely imply that resumable work is
+  //   still making progress).
   return {
     ...makeBaseClose(state, parsed, artifactProgress),
     status: 'blocked',

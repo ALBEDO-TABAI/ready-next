@@ -58,10 +58,28 @@ export class IngressPersistenceError extends Error {
   }
 }
 
+export class PrePersistenceAdmissionError extends Error {
+  constructor(
+    readonly code: PrePersistenceErrorKind,
+    readonly retryableByUser: boolean,
+    readonly admissionEvidenceDigest: string,
+    message: string,
+  ) {
+    super(message)
+    this.name = 'PrePersistenceAdmissionError'
+  }
+}
+
 type AdmittedSendScopedResponse = Extract<
   SendScopedResponse,
   { disposition: 'terminal_success' | 'terminal_failure_after_persistence' }
 >
+
+type ConfirmedRunOutcome = AdmittedSendScopedResponse extends infer Response
+  ? Response extends AdmittedSendScopedResponse
+    ? Omit<Response, 'aliasGeneration'>
+    : never
+  : never
 
 export type PrePersistenceDispatchResult<DispatchContext> =
   | { ok: true; dispatchContext: DispatchContext }
@@ -306,12 +324,21 @@ export async function runConfirmedSendScoped<ScopeRow, DispatchContext>(params: 
     persistence: PersistedIngress
     reservation: StartIdentityReservationSet
     dispatchContext: DispatchContext
-  }) => Promise<AdmittedSendScopedResponse>
+  }) => Promise<ConfirmedRunOutcome>
 }): Promise<SendScopedResponse> {
   let scope: ScopeRow | null
   try {
     scope = params.getScope(params.scopeId)
   } catch (error) {
+    if (error instanceof PrePersistenceAdmissionError) {
+      return createRejectedBeforePersistence({
+        scope: 'pre-existing',
+        code: error.code,
+        retryableByUser: error.retryableByUser,
+        error: error.message,
+        admissionEvidenceDigest: error.admissionEvidenceDigest,
+      })
+    }
     return hostUnavailableBeforePersistence({
       scope: 'failed',
       stage: 'scope_read',
@@ -337,6 +364,15 @@ export async function runConfirmedSendScoped<ScopeRow, DispatchContext>(params: 
     }
     methods = resolvedMethods
   } catch (error) {
+    if (error instanceof PrePersistenceAdmissionError) {
+      return createRejectedBeforePersistence({
+        scope: 'pre-existing',
+        code: error.code,
+        retryableByUser: error.retryableByUser,
+        error: error.message,
+        admissionEvidenceDigest: error.admissionEvidenceDigest,
+      })
+    }
     return hostUnavailableBeforePersistence({
       scope: 'pre-existing',
       stage: 'start_identity_resolution',
@@ -549,12 +585,16 @@ export async function runConfirmedSendScoped<ScopeRow, DispatchContext>(params: 
     // Durable admission already succeeded. A renderer delivery race must not
     // prevent the one native dispatch that owns this persisted request.
   }
-  return params.runConfirmed({
+  const outcome = await params.runConfirmed({
     scope,
     persistence: admission.persistence,
     reservation: reservationResult.reservation,
     dispatchContext,
   })
+  return {
+    ...outcome,
+    aliasGeneration: admission.event.aliasGeneration,
+  }
 }
 
 export function resolveAttachmentConfirmation(

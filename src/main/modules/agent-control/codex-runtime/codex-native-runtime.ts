@@ -1,12 +1,15 @@
+import type { AIReasoningEffort } from '../../../../shared/ai-providers'
+import {
+  normalizeCodexUserInput,
+  type CodexUserInput,
+} from './codex-user-input'
+
+export type { CodexUserInput } from './codex-user-input'
+
 export type CodexAdditionalContextEntry = {
   kind: 'application' | 'untrusted'
   value: string
 }
-
-export type CodexUserInput =
-  | { type: 'text'; text: string; text_elements: [] }
-  | { type: 'image'; url: string; detail: 'auto' | 'low' | 'high' | 'original' | null }
-  | { type: 'audio'; url: string }
 
 export type CodexDynamicToolSpec = {
   type: 'function'
@@ -25,6 +28,7 @@ export type CodexThreadStartParams = {
   sandbox: 'read-only'
   runtimeWorkspaceRoots: []
   environments: []
+  config: { model_context_window: number } | null
   dynamicTools: CodexDynamicToolSpec[]
   developerInstructions: string
 }
@@ -33,11 +37,23 @@ export type CodexThreadListParams = {
   limit: number
   cwd: string
   sourceKinds: ['vscode']
+  archived?: boolean
+  cursor?: string | null
+  useStateDbOnly?: true
 }
 
 export type CodexTurnStartParams = {
   threadId: string
   clientUserMessageId: string
+  collaborationMode: {
+    mode: 'default'
+    settings: {
+      model: 'ready-e0-model'
+      reasoning_effort: AIReasoningEffort | null
+      developer_instructions: null
+    }
+  }
+  environments: []
   input: CodexUserInput[]
   additionalContext: Record<string, CodexAdditionalContextEntry>
   responsesapiClientMetadata: {
@@ -111,6 +127,11 @@ export type CodexDynamicToolCallItem = {
   arguments: unknown
   status: 'inProgress' | 'completed' | 'failed'
   success?: boolean | null
+  contentItems?: Array<
+    | { type: 'inputText'; text: string }
+    | { type: 'inputImage'; imageUrl: string }
+    | { type: 'inputAudio'; audioUrl: string }
+  > | null
 }
 
 export type CodexContextCompactionItem = {
@@ -193,6 +214,94 @@ export type CodexNativeNotification =
         willRetry: boolean
       }
     }
+  | {
+      method: 'model/rerouted'
+      params: {
+        threadId: string
+        turnId: string
+        fromModel: string
+        toModel: string
+        reason: 'highRiskCyberActivity'
+      }
+    }
+
+export const CODEX_PROJECTED_NOTIFICATION_METHODS = [
+  'error',
+  'thread/started',
+  'turn/started',
+  'turn/completed',
+  'item/started',
+  'item/completed',
+  'item/agentMessage/delta',
+] as const
+
+export const CODEX_PASSIVE_NOTIFICATION_METHODS = [
+  'warning',
+  'thread/status/changed',
+  'thread/tokenUsage/updated',
+  'thread/settings/updated',
+  'item/reasoning/summaryPartAdded',
+  'item/reasoning/summaryTextDelta',
+  'item/reasoning/textDelta',
+  'account/rateLimits/updated',
+  'remoteControl/status/changed',
+  'serverRequest/resolved',
+  'thread/compacted',
+  'thread/archived',
+] as const
+
+export const CODEX_OPT_OUT_NOTIFICATION_METHODS = [
+  'thread/deleted',
+  'thread/unarchived',
+  'thread/closed',
+  'skills/changed',
+  'thread/name/updated',
+  'thread/goal/updated',
+  'thread/goal/cleared',
+  'thread/environment/connected',
+  'thread/environment/disconnected',
+  'hook/started',
+  'hook/completed',
+  'turn/diff/updated',
+  'turn/plan/updated',
+  'item/autoApprovalReview/started',
+  'item/autoApprovalReview/completed',
+  'item/plan/delta',
+  'command/exec/outputDelta',
+  'process/outputDelta',
+  'process/exited',
+  'item/commandExecution/outputDelta',
+  'item/commandExecution/terminalInteraction',
+  'item/fileChange/outputDelta',
+  'item/fileChange/patchUpdated',
+  'item/mcpToolCall/progress',
+  'mcpServer/oauthLogin/completed',
+  'mcpServer/startupStatus/updated',
+  'account/updated',
+  'app/list/updated',
+  'externalAgentConfig/import/progress',
+  'externalAgentConfig/import/completed',
+  'fs/changed',
+  'model/verification',
+  'turn/moderationMetadata',
+  'model/safetyBuffering/updated',
+  'guardianWarning',
+  'deprecationNotice',
+  'configWarning',
+  'fuzzyFileSearch/sessionUpdated',
+  'fuzzyFileSearch/sessionCompleted',
+  'thread/realtime/started',
+  'thread/realtime/itemAdded',
+  'thread/realtime/transcript/delta',
+  'thread/realtime/transcript/done',
+  'thread/realtime/outputAudio/delta',
+  'thread/realtime/sdp',
+  'thread/realtime/error',
+  'thread/realtime/closed',
+  'windows/worldWritableWarning',
+  'windowsSandbox/setupCompleted',
+  'account/login/completed',
+] as const
 
 export interface CodexNativeRuntime {
   initialize(): Promise<{ userAgent: string }>
@@ -219,18 +328,13 @@ export interface CodexNativeRuntime {
 export type CodexNotificationNormalizationResult =
   | { kind: 'accepted'; notification: CodexNativeNotification }
   | { kind: 'ignored'; method: string }
-  | { kind: 'invalid'; code: 'not_object' | 'missing_method' | 'invalid_params' | 'unknown_method' }
+  | {
+      kind: 'invalid'
+      code: 'not_object' | 'missing_method' | 'invalid_params' | 'opted_out_method' | 'unknown_method'
+    }
 
-const PASSIVE_NOTIFICATION_METHODS = new Set([
-  'warning',
-  'thread/status/changed',
-  'thread/tokenUsage/updated',
-  'account/rateLimits/updated',
-  'remoteControl/status/changed',
-  'serverRequest/resolved',
-  'thread/compacted',
-  'thread/archived',
-])
+const PASSIVE_NOTIFICATION_METHODS = new Set<string>(CODEX_PASSIVE_NOTIFICATION_METHODS)
+const OPT_OUT_NOTIFICATION_METHODS = new Set<string>(CODEX_OPT_OUT_NOTIFICATION_METHODS)
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
@@ -268,46 +372,25 @@ function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((entry) => typeof entry === 'string')
 }
 
-function normalizeUserInput(value: unknown): CodexUserInput | null {
-  if (!isRecord(value)) return null
-  if (value.type === 'text') {
-    if (typeof value.text !== 'string') return null
-    if (
-      value.text_elements !== undefined
-      && (!Array.isArray(value.text_elements) || value.text_elements.length !== 0)
-    ) return null
-    return { type: 'text', text: value.text, text_elements: [] }
+function normalizeDynamicToolContentItems(
+  value: unknown,
+): CodexDynamicToolCallItem['contentItems'] | undefined {
+  if (value === undefined || value === null) return null
+  if (!Array.isArray(value)) return undefined
+  const normalized: NonNullable<CodexDynamicToolCallItem['contentItems']> = []
+  for (const entry of value) {
+    if (!isRecord(entry)) return undefined
+    if (entry.type === 'inputText' && typeof entry.text === 'string') {
+      normalized.push({ type: 'inputText', text: entry.text })
+    } else if (entry.type === 'inputImage' && typeof entry.imageUrl === 'string') {
+      normalized.push({ type: 'inputImage', imageUrl: entry.imageUrl })
+    } else if (entry.type === 'inputAudio' && typeof entry.audioUrl === 'string') {
+      normalized.push({ type: 'inputAudio', audioUrl: entry.audioUrl })
+    } else {
+      return undefined
+    }
   }
-  if (value.type === 'image') {
-    if (typeof value.url !== 'string') return null
-    const detail = value.detail === undefined ? null : value.detail
-    if (
-      detail !== null
-      && detail !== 'auto'
-      && detail !== 'low'
-      && detail !== 'high'
-      && detail !== 'original'
-    ) return null
-    return { type: 'image', url: value.url, detail }
-  }
-  if (value.type === 'audio') {
-    return typeof value.url === 'string'
-      ? { type: 'audio', url: value.url }
-      : null
-  }
-  return null
-}
-
-function isDynamicToolContentItems(value: unknown): boolean {
-  if (value === undefined || value === null) return true
-  if (!Array.isArray(value)) return false
-  return value.every((entry) => {
-    if (!isRecord(entry)) return false
-    if (entry.type === 'inputText') return typeof entry.text === 'string'
-    if (entry.type === 'inputImage') return typeof entry.imageUrl === 'string'
-    if (entry.type === 'inputAudio') return typeof entry.audioUrl === 'string'
-    return false
-  })
+  return normalized
 }
 
 function normalizeThreadStatus(value: unknown): CodexThread['status'] | null {
@@ -392,13 +475,14 @@ function normalizeItem(value: unknown): CodexThreadItem | null {
   if (type === 'dynamicToolCall') {
     const tool = stringField(value, 'tool')
     const status = value.status
+    const contentItems = normalizeDynamicToolContentItems(value.contentItems)
     if (
       !tool
       || !Object.prototype.hasOwnProperty.call(value, 'arguments')
       || (status !== 'inProgress' && status !== 'completed' && status !== 'failed')
       || !isNullableString(value.namespace)
       || (value.success !== undefined && value.success !== null && typeof value.success !== 'boolean')
-      || !isDynamicToolContentItems(value.contentItems)
+      || contentItems === undefined
       || (
         value.durationMs !== undefined
         && value.durationMs !== null
@@ -413,13 +497,14 @@ function normalizeItem(value: unknown): CodexThreadItem | null {
       arguments: value.arguments,
       status,
       success: typeof value.success === 'boolean' ? value.success : null,
+      contentItems,
     }
   }
   if (type === 'contextCompaction') return { type, id }
   if (type === 'userMessage') {
     if (!Array.isArray(value.content)) return null
     if (!isNullableString(value.clientId)) return null
-    const content = value.content.map(normalizeUserInput)
+    const content = value.content.map(normalizeCodexUserInput)
     if (content.some((entry) => !entry)) return null
     return {
       type,
@@ -618,6 +703,9 @@ export function normalizeCodexNativeNotification(
   if (!isRecord(value)) return { kind: 'invalid', code: 'not_object' }
   const method = stringField(value, 'method')
   if (!method) return { kind: 'invalid', code: 'missing_method' }
+  if (OPT_OUT_NOTIFICATION_METHODS.has(method)) {
+    return { kind: 'invalid', code: 'opted_out_method' }
+  }
   if (PASSIVE_NOTIFICATION_METHODS.has(method)) return { kind: 'ignored', method }
   if (!isRecord(value.params)) return { kind: 'invalid', code: 'invalid_params' }
   const params = value.params
@@ -685,6 +773,26 @@ export function normalizeCodexNativeNotification(
       notification: {
         method,
         params: { error, threadId, turnId, willRetry },
+      },
+    }
+  }
+  if (method === 'model/rerouted') {
+    const threadId = stringField(params, 'threadId')
+    const turnId = stringField(params, 'turnId')
+    const fromModel = stringField(params, 'fromModel')
+    const toModel = stringField(params, 'toModel')
+    if (
+      !threadId
+      || !turnId
+      || !fromModel
+      || !toModel
+      || params.reason !== 'highRiskCyberActivity'
+    ) return { kind: 'invalid', code: 'invalid_params' }
+    return {
+      kind: 'accepted',
+      notification: {
+        method,
+        params: { threadId, turnId, fromModel, toModel, reason: params.reason },
       },
     }
   }

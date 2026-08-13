@@ -4,21 +4,18 @@
  * `emergence-cards.ts` 的确定性提取器 + 本 group 的信号注入 = feed 产出。
  * 拉取式生产：renderer 打开/刷新 feed 面时组装一次（信号源都是即时读，
  * 无失效缓存问题），每次组装打 `emergence_feed_assembled` 账本（正向 gate
- * 断言存在）。当前接入四类信号（resume/follow_up/crystallize/agent-candidate）；
+ * 断言存在）。当前接入两类信号（follow_up/crystallize）；
  * prepare/harvest/forming 的信号采集（日历联动/产物打开跟踪/文件聚类）
  * 尚无数据源，提取器保留在 emergence-cards.ts 待接。
  *
- * 卡片动作出口由 renderer 落地：resume/adjudicate/supply → 打开对应 scope；
- * adopt_candidate/review_duplicate → 跳设置页确认面（涌现卡永不一键采纳）。
+ * 卡片动作出口由 renderer 落地：adjudicate/supply → 打开对应 scope；
+ * review_duplicate → 跳设置页确认面（涌现卡永不一键采纳）。
  */
 import type { IpcMain } from 'electron'
 import {
   assembleEmergenceFeed,
-  extractAgentCandidateCards,
   extractCrystallizeCards,
   extractFollowUpCards,
-  extractResumeCards,
-  type AgentCandidateFeedSignal,
   type CrystallizeSignalCard,
   type EmergenceCard,
 } from '../../agent-control/emergence/emergence-cards'
@@ -43,7 +40,6 @@ export interface EmergenceFeedEntry {
 export interface EmergenceFeedGroupDeps {
   listRecentProjections: (limit: number) => TaskProjectionRecord[]
   listCrystallizeSignals: () => CrystallizeSignalCard[]
-  listCandidateSignals: () => AgentCandidateFeedSignal[]
   listFileIntentCards?: () => Promise<FileEmergenceIntentCard[]>
 }
 
@@ -75,16 +71,14 @@ export function assembleFeedEntries(deps: EmergenceFeedGroupDeps, fileIntentCard
   }
 
   const cards = assembleEmergenceFeed(dedupeByTypeAndTitle([
-    ...extractResumeCards(projections),
     ...extractFollowUpCards(projections),
     ...extractCrystallizeCards(deps.listCrystallizeSignals()),
-    ...extractAgentCandidateCards(deps.listCandidateSignals()),
     ...fileIntentCards.flatMap(fileIntentCardToEmergenceCard),
   ]))
 
   const entries = cards.map((card) => ({
     card,
-    scopeId: card.action.kind === 'resume_task' || card.action.kind === 'adjudicate_task' || card.action.kind === 'supply_input'
+    scopeId: card.action.kind === 'adjudicate_task' || card.action.kind === 'supply_input'
       ? scopeByTaskId.get(card.action.ref) ?? null
       : null,
   }))

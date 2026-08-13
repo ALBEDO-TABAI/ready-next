@@ -208,6 +208,37 @@ test('history row shows a changed responsible agent beside time without adding a
   }
 })
 
+test('compaction uncertainty keeps reset available while disabling another compaction', () => {
+  let resetCalls = 0
+  let compactCalls = 0
+  const { unmount } = mountChatHeader({
+    currentConversationAvailable: true,
+    lifecyclePendingAction: null,
+    lifecycleUncertainty: 'compaction',
+    onResetCurrentConversation: () => { resetCalls += 1 },
+    onCompactCurrentSession: () => { compactCalls += 1 },
+  })
+  try {
+    const operationButton = document.querySelector(
+      'button[title="压缩状态待确认，可重置当前对话"]',
+    )
+    assert.ok(operationButton)
+    assert.equal((operationButton as HTMLButtonElement).disabled, false)
+    click(operationButton)
+
+    const resetButton = findButtonByText('重置当前对话')
+    const compactButton = findButtonByText('压缩上下文')
+    assert.ok(resetButton)
+    assert.ok(compactButton)
+    assert.equal(compactButton.disabled, true)
+    click(resetButton)
+    assert.equal(resetCalls, 1)
+    assert.equal(compactCalls, 0)
+  } finally {
+    unmount()
+  }
+})
+
 test('one channel expands into every distinct session — each remote /new is selectable', () => {
   const wechatChannel = {
     key: 'channel:wechat-bot',

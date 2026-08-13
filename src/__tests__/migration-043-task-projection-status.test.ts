@@ -41,7 +41,9 @@ test('migration 043 rewrites projection-local terminal statuses to child-run sta
   `)
 
   const migrationNames = __getMigrationNamesForTests()
-  for (const name of migrationNames.slice(0, migrationNames.indexOf('043_migrate_task_projection_status_to_child_status'))) {
+  for (const name of migrationNames.filter(
+    (name) => name !== '043_migrate_task_projection_status_to_child_status',
+  )) {
     db.prepare('INSERT INTO migrations (name, applied_at) VALUES (?, ?)').run(name, '2026-05-22T00:00:00.000Z')
   }
 

@@ -73,6 +73,10 @@ export class SubtaskRuntime {
       await this.deps.publishScopeRunEvent({
         type: params.phase === 'planning' ? 'started' : 'updated',
         scopeId: request.scope.id,
+        aliasGeneration: request.scope.aliasGeneration,
+        messageVisibilityEpoch: request.scope.messageVisibilityEpoch,
+        visibilityOwnerKind: 'context_background',
+        visibilityOwnerLedger: { kind: 'task_projection', id: request.parentTaskId },
         agent: request.scope.agent,
         runId: identity.workerSessionId,
         taskId: identity.taskId,

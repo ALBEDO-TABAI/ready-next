@@ -9,10 +9,6 @@ import {
   browserWorkflowStableDigest,
 } from '../main/modules/browser-engine/browser-workflow-evidence'
 import { taskEventBridge, type TaskEventBridgePayload } from '../main/modules/browser-engine/task-event-bridge'
-import {
-  __resetBackgroundTaskTerminalReminderForTests,
-  __setPendingTaskEventDatabaseForTests,
-} from '../main/modules/agent-control/system-reminders/background-task-terminal-reminder'
 import type { DatabaseManager as DatabaseManagerInstance } from '../main/modules/database'
 import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
 
@@ -444,8 +440,6 @@ describe('browser task persistence', () => {
   })
 
   it('publishes only mapped browser task statuses to the task event bridge', () => {
-    __resetBackgroundTaskTerminalReminderForTests()
-    __setPendingTaskEventDatabaseForTests(null)
     const repository = new FakeBrowserRepository()
     const service = new BrowserTaskPersistenceService(repository as never)
     const events: TaskEventBridgePayload[] = []
@@ -484,14 +478,10 @@ describe('browser task persistence', () => {
       }
     } finally {
       unregister()
-      __resetBackgroundTaskTerminalReminderForTests()
-      __setPendingTaskEventDatabaseForTests(null)
     }
   })
 
   it('publishes scoped sanitized pause summaries for browser collection terminal events', () => {
-    __resetBackgroundTaskTerminalReminderForTests()
-    __setPendingTaskEventDatabaseForTests(null)
     const repository = new FakeBrowserRepository()
     const service = new BrowserTaskPersistenceService(repository as never)
     const taskId = 'browser-task-publish-sanitized-max-duration'
@@ -499,6 +489,7 @@ describe('browser task persistence', () => {
       ...makeRecord(taskId),
       payload_json: JSON.stringify({
         scopeId: 'scope-browser-collection',
+        messageVisibilityEpoch: 7,
         plan: {
           sourceTaskId: 'browser-task-visible-source',
           outputRootDir: '/tmp/ready-out',
@@ -543,6 +534,7 @@ describe('browser task persistence', () => {
       const extra = events[0].extra as Record<string, unknown>
       assert.equal(events[0].status, 'paused')
       assert.equal(extra.scopeId, 'scope-browser-collection')
+      assert.equal(extra.messageVisibilityEpoch, 7)
       assert.equal(extra.browserTaskId, taskId)
       assert.equal(extra.sourceTaskId, 'browser-task-visible-source')
       assert.equal(extra.stopReason, 'max_duration')
@@ -562,8 +554,6 @@ describe('browser task persistence', () => {
       assert.doesNotMatch(serialized, /xiaohongshu\.com\/explore\/n1/)
     } finally {
       unregister()
-      __resetBackgroundTaskTerminalReminderForTests()
-      __setPendingTaskEventDatabaseForTests(null)
     }
   })
 

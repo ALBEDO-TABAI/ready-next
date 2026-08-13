@@ -23,29 +23,6 @@ import {
 
 export type { PolicyArbitration, PolicyConflictType }
 
-export type RunCapabilityMode = 'default' | 'narration'
-
-const NARRATION_VISIBLE_CAPABILITY_GROUP_IDS: CapabilityGroupId[] = [
-  'file_management',
-  'memory',
-  'session_recall',
-  'general_research',
-]
-
-const NARRATION_ALLOWED_TOOL_NAMES = Object.freeze([
-  'file_search',
-  'file_locate',
-  'file_read_excerpt',
-  'file_get_backlinks',
-  'file_get_graph',
-  'file_inventory',
-  'memory_search',
-  'memory_list_recent',
-  'session_search',
-  'web_search',
-  'web_fetch',
-])
-
 export interface HostShortcutDecision {
   kind: 'none' | 'openclaw'
   reason: string
@@ -55,7 +32,6 @@ export interface HostShortcutDecision {
 
 interface RunCapabilityBaseParams {
   config: AIModelConfig
-  runCapabilityMode?: RunCapabilityMode
   capabilityProfile: CapabilityProfileId
   supportsToolCalls: boolean
   hasVideoInputs: boolean
@@ -275,53 +251,6 @@ function resolveRunCapabilities(
     feishuConnected: baseParams.runtimeAvailability.feishuConnected,
     sessionId: baseParams.sessionId,
   })
-
-  if (baseParams.runCapabilityMode === 'narration') {
-    visibilityPlan = {
-      ...visibilityPlan,
-      allowBrowserTools: false,
-      preferredSkillToolNames: null,
-      visibleCapabilityGroupIds: NARRATION_VISIBLE_CAPABILITY_GROUP_IDS,
-      suppressedCapabilityGroupIds: Array.from(new Set([
-        ...(visibilityPlan.suppressedCapabilityGroupIds || []),
-        'browser_interaction',
-        'browser_content_tasks',
-        'document',
-        'rss',
-        'calendar',
-        'skills',
-        'pet',
-        'channel_feishu',
-        'map_planning',
-        'mcp',
-        'agent_interaction',
-        'skill_install',
-      ] as CapabilityGroupId[])),
-    }
-    capabilityResolution = {
-      ...capabilityResolution,
-      visibleCapabilityGroupIds: NARRATION_VISIBLE_CAPABILITY_GROUP_IDS,
-      suppressedCapabilityGroupIds: visibilityPlan.suppressedCapabilityGroupIds || [],
-    }
-    toolPolicy = {
-      ...toolPolicy,
-      forceDocumentTool: false,
-      allowDocumentTools: false,
-      forceDesignTool: false,
-      preferredDesignTool: null,
-      primaryDesignInstruction: null,
-      allowMultipleDesignArtifacts: false,
-      preferSectionRewrite: false,
-      preferFormatOnly: false,
-      documentWidgetTaskKind: null,
-      documentWidgetProfile: null,
-      documentWidgetSourceText: null,
-      allowBrowserTools: false,
-      preferredSkillToolNames: null,
-      visibleCapabilityGroupIds: NARRATION_VISIBLE_CAPABILITY_GROUP_IDS,
-      activeSkillAllowedTools: NARRATION_ALLOWED_TOOL_NAMES,
-    }
-  }
 
   const { conflicts, demotedBrowserDecisionMode, skillPassthroughApplied } = resolvePolicyConflicts({
     toolPolicy,

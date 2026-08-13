@@ -1,9 +1,6 @@
 import {
-  BROWSER_CAPABILITY_TASK_KINDS,
-  type BrowserCapabilityTaskKind,
-  type BrowserCapabilityTaskStatus,
+  BROWSER_CAPABILITY_TASK_KINDS, type BrowserCapabilityTaskStatus
 } from './capability-types'
-import { enqueueBackgroundTaskTerminalReminderFromBridge } from '../agent-control/system-reminders/background-task-terminal-reminder'
 
 export type TaskEventBridgeStatus =
   | 'completed'
@@ -30,6 +27,8 @@ export interface TaskEventBridgePayload {
 
 export type TaskEventBridgeConsumer = (payload: TaskEventBridgePayload) => void
 
+const TERMINAL_EVENT_DEDUPE_LIMIT = 2_048
+
 export function isTaskEventBridgeStatus(status: string): status is TaskEventBridgeStatus {
   return status === 'completed'
     || status === 'failed'
@@ -44,7 +43,6 @@ export function toBridgeStatus(status: BrowserCapabilityTaskStatus): TaskEventBr
 
 class TaskEventBridge {
   private readonly projectionSinks = new Set<TaskEventBridgeConsumer>()
-  private readonly agentNotifiers = new Set<TaskEventBridgeConsumer>()
   private readonly publishedKeys = new Set<string>()
   private readonly registeredRoutes = new Set<string>(BROWSER_CAPABILITY_TASK_KINDS)
 
@@ -52,13 +50,6 @@ class TaskEventBridge {
     this.projectionSinks.add(fn)
     return () => {
       this.projectionSinks.delete(fn)
-    }
-  }
-
-  registerAgentNotifier(fn: TaskEventBridgeConsumer): () => void {
-    this.agentNotifiers.add(fn)
-    return () => {
-      this.agentNotifiers.delete(fn)
     }
   }
 
@@ -73,10 +64,13 @@ class TaskEventBridge {
     const key = `${payload.taskId}|${payload.status}`
     if (payload.status === 'completed' || payload.status === 'failed') {
       if (this.publishedKeys.has(key)) return
+      if (this.publishedKeys.size >= TERMINAL_EVENT_DEDUPE_LIMIT) {
+        const oldest = this.publishedKeys.values().next().value
+        if (typeof oldest === 'string') this.publishedKeys.delete(oldest)
+      }
       this.publishedKeys.add(key)
     }
     for (const sink of this.projectionSinks) sink(payload)
-    for (const notifier of this.agentNotifiers) notifier(payload)
   }
 
   scheduleTask(taskId: string, routeKey: string): void {
@@ -86,5 +80,3 @@ class TaskEventBridge {
 }
 
 export const taskEventBridge = new TaskEventBridge()
-
-taskEventBridge.registerAgentNotifier(enqueueBackgroundTaskTerminalReminderFromBridge)

@@ -1,9 +1,5 @@
 import type { TaskBudgetRuntime, TaskType } from '../contracts/run-contracts'
-import {
-  drainBackgroundTaskTerminalReminders,
-  prependSystemReminderInput,
-  registerBackgroundTaskTerminalReminder
-} from '../system-reminders/background-task-terminal-reminder'
+import { prependSystemReminderInput } from '../system-reminders/system-reminder-input'
 import {
   browserResearchProgressDigest,
   registerBrowserResearchProgressReminder
@@ -41,19 +37,24 @@ export function applyPerCallSystemReminders(input: {
   /** run 级稳定对象（如 runHandle），承载跨 bridge-turn 的注入节流状态。 */
   runScopeKey: object
   sessionId: string | undefined
+  messageVisibilityEpoch: number | undefined
   turnTaskType: TaskType
   host: Pick<TurnOrchestratorHost, 'readVerifiedBrowserWorkflowEvidence'>
   browserWorkflowRoute: { browserTaskId: string } | null
 }): void {
   const { state } = input
-  const terminalReminderTexts = drainBackgroundTaskTerminalReminders(input.sessionId)
+  const sessionRestoreNotice = state.sessionRestoreNotice
   if (state.sessionRestoreNotice) {
-    terminalReminderTexts.unshift(state.sessionRestoreNotice)
     state.sessionRestoreNotice = null
   }
   const registry = createSystemReminderRegistry()
-  if (terminalReminderTexts.length > 0) {
-    registerBackgroundTaskTerminalReminder(registry, terminalReminderTexts)
+  if (sessionRestoreNotice) {
+    registry.register({
+      topic: 'session-restore-notice',
+      priority: 90,
+      conflictsWith: [],
+      text: sessionRestoreNotice,
+    })
   }
   // D2 — 结果型任务的验收标准（事中自检），与终态裁决同一模板源。
   // 每 run 只注入一次（首个模型调用）：criteria 是 run 级静态清单，

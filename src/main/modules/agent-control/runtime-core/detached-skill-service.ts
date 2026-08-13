@@ -8,7 +8,7 @@
 // SkillTaskRunRepository is NOT migrated because it is shared with the
 // skill-child-runner wiring and session abort-controller registry that stay
 // on the runtime.
-import { app } from 'electron'
+import { createRequire } from 'node:module'
 import { join } from 'path'
 import {
   DetachedSkillTaskTracker,
@@ -17,35 +17,28 @@ import {
 } from '../detached-skill-task-tracker'
 import { getSkillsRuntimeManager } from '../../skills-runtime/runtime-manager'
 import type { ScopeRunEventPayload } from '../contracts/types'
+import { readScopeContextEpoch } from '../session/scope-context-epoch'
 
 export interface DetachedSkillServiceDeps {
   publishScopeRunEvent: (payload: ScopeRunEventPayload) => void
+  tracker?: DetachedSkillTaskTracker
 }
 
 export class DetachedSkillService {
   private readonly detachedSkillTasks: DetachedSkillTaskTracker
 
   constructor(private readonly deps: DetachedSkillServiceDeps) {
-    this.detachedSkillTasks = new DetachedSkillTaskTracker({
-      storagePath: join(app.getPath('userData'), 'skill-runtime', 'detached-tasks.json'),
-      runSkill: (request) => getSkillsRuntimeManager().runSkill(request),
-      onUpdate: (record) => this.publishDetachedSkillTaskUpdate(record),
-    })
+    if (deps.tracker) {
+      this.detachedSkillTasks = deps.tracker
+    } else {
+      const { app } = createRequire(import.meta.url)('electron') as typeof import('electron')
+      this.detachedSkillTasks = new DetachedSkillTaskTracker({
+        storagePath: join(app.getPath('userData'), 'skill-runtime', 'detached-tasks.json'),
+        runSkill: (request) => getSkillsRuntimeManager().runSkill(request),
+        onUpdate: (record) => this.publishDetachedSkillTaskUpdate(record),
+      })
+    }
     registerDetachedSkillTaskTracker(this.detachedSkillTasks)
-  }
-
-  startDetachedSkillAction(payload: {
-    scopeId?: string | null
-    sessionId?: string | null
-    agent?: string | null
-    parentTaskId?: string | null
-    parentStepId?: string | null
-    taskProjectionId?: string | null
-    skillId: string
-    action: string
-    params?: Record<string, unknown>
-  }): DetachedSkillTaskRecord {
-    return this.detachedSkillTasks.start(payload)
   }
 
   inspectDetachedSkillTask(taskId: string, scopeId?: string | null): DetachedSkillTaskRecord | null {
@@ -53,7 +46,7 @@ export class DetachedSkillService {
     if (!task) return null
     const normalizedScopeId = String(scopeId || '').trim()
     if (normalizedScopeId && task.scopeId !== normalizedScopeId && task.sessionId !== normalizedScopeId) return null
-    return task
+    return this.isTaskCurrent(task, normalizedScopeId) ? task : null
   }
 
   listDetachedSkillTasks(payload?: { scopeId?: string | null }): DetachedSkillTaskRecord[] {
@@ -65,7 +58,18 @@ export class DetachedSkillService {
     const task = this.detachedSkillTasks.inspect(taskId)
     if (!task) return null
     if (normalizedScopeId && task.scopeId !== normalizedScopeId && task.sessionId !== normalizedScopeId) return null
+    if (!this.isTaskCurrent(task, normalizedScopeId)) return null
     return this.detachedSkillTasks.cancel(taskId)
+  }
+
+  private isTaskCurrent(task: DetachedSkillTaskRecord, requestedScopeId: string): boolean {
+    const taskScopeId = requestedScopeId || String(task.scopeId || task.sessionId || '').trim()
+    const durable = readScopeContextEpoch(taskScopeId)
+    if (durable.kind === 'closed' || durable.kind === 'unavailable') return false
+    if (durable.kind === 'open') {
+      return task.messageVisibilityEpoch === durable.messageVisibilityEpoch
+    }
+    return true
   }
 
   publishRestoredDetachedSkillTasks(): void {
@@ -133,7 +137,12 @@ export class DetachedSkillService {
     this.deps.publishScopeRunEvent({
       type: record.status === 'running' ? 'started' : record.status === 'blocked' ? 'updated' : 'finished',
       scopeId,
+      messageVisibilityEpoch: record.messageVisibilityEpoch,
+      visibilityOwnerKind: 'context_background',
+      visibilityOwnerLedger: { kind: 'skill_task_run', id: record.id },
       agent: record.agent || 'assistant',
+      ownerAgentId: record.agent || 'assistant',
+      taskOrigin: 'system_background',
       runId: record.id,
       taskId,
       taskProjectionId: taskId,

@@ -19,7 +19,6 @@ interface AgentBrowserSupervisionPanelProps {
   tasks: AgentBrowserCollectionTask[]
   claims: BrowserTargetClaimSnapshot[]
   requestInterruption: () => Promise<void>
-  resumeTargetClaim: (claim: BrowserTargetClaimSnapshot) => Promise<{ success: boolean; error?: string; errorKind?: string }>
   surfaces?: Record<AgentBrowserSurface, BrowserLeaseSurfaceSnapshot> | null
   activeWriteSurface?: AgentBrowserSurface | null
   takeoverError?: string | null
@@ -73,7 +72,6 @@ export function AgentBrowserSupervisionPanel({
   tasks,
   claims = [],
   requestInterruption,
-  resumeTargetClaim = async () => ({ success: false, error: 'target_claim_resume_unavailable' }),
   surfaces,
   activeWriteSurface,
   takeoverError,
@@ -84,8 +82,6 @@ export function AgentBrowserSupervisionPanel({
 }: AgentBrowserSupervisionPanelProps): ReactElement | null {
   const [panelOpen, setPanelOpen] = useState(true)
   const [expandedTaskId, setExpandedTaskId] = useState<string | null>(null)
-  const [resumingClaimId, setResumingClaimId] = useState<string | null>(null)
-  const [resumeError, setResumeError] = useState<string | null>(null)
 
   const activeTasks = tasks.filter(isActiveTask)
   const userOwnedClaims = claims.filter((claim) => claim.state === 'user_owned')
@@ -100,7 +96,7 @@ export function AgentBrowserSupervisionPanel({
       ? browserTaskStatusLabel(visibleTasks[0].status)
       : controlState === 'active'
         ? '浏览中'
-        : userOwnedClaims.length > 0 ? `${userOwnedClaims.length} 页待继续` : '已接管'
+        : userOwnedClaims.length > 0 ? `${userOwnedClaims.length} 页已接管` : '已接管'
   const surfaceLockText = activeSurfaceLockText(surfaces, activeWriteSurface)
   const surfaceModeLabel = activeWriteSurface === 'user-view'
     ? '当前页协作'
@@ -290,31 +286,8 @@ export function AgentBrowserSupervisionPanel({
               <div className="mt-1 truncate text-[10px]" style={{ color: 'var(--text-gray)' }}>
                 任务 {claim.parentTaskId}
               </div>
-              <button
-                type="button"
-                disabled={resumingClaimId !== null || !claim.suspensionCheckpointId}
-                onClick={() => {
-                  setResumingClaimId(claim.claimId)
-                  setResumeError(null)
-                  void resumeTargetClaim(claim)
-                    .then((result) => {
-                      if (!result.success) setResumeError(result.error || '暂时无法继续')
-                    })
-                    .finally(() => setResumingClaimId(null))
-                }}
-                className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-[8px] py-1.5 text-[11px] font-semibold disabled:opacity-50"
-                style={{ background: 'var(--color-blue)', color: 'white' }}
-              >
-                {resumingClaimId === claim.claimId && <Loader2 style={{ width: 12, height: 12 }} className="animate-spin" strokeWidth={2} />}
-                继续 Agent
-              </button>
             </div>
           ))}
-          {resumeError && (
-            <div className="px-1 text-[10px]" role="alert" style={{ color: 'var(--color-orange)' }}>
-              {resumeError}
-            </div>
-          )}
 
           {/* Immediate takeover */}
           <div className="mt-0.5 px-0.5">

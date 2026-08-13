@@ -12,6 +12,7 @@ import {
 import {
   BrowserTargetClaimService,
   MemoryBrowserTargetClaimRepository,
+  type BrowserTargetClaimMutationStore,
 } from '../main/modules/browser-engine/browser-target-claims'
 
 describe('Browser target claims', () => {
@@ -90,6 +91,45 @@ describe('Browser target claims', () => {
     assert.equal(service.checkWrite(identityOf(b)), null)
   })
 
+  it('keeps the old writer fenced when durable user takeover persistence fails', () => {
+    class FailingTakeoverRepository extends MemoryBrowserTargetClaimRepository {
+      failWrites = false
+
+      override mutate<T>(body: (store: BrowserTargetClaimMutationStore) => T): T {
+        if (!this.failWrites) return super.mutate(body)
+        return super.mutate((store) => body({
+          ...store,
+          write: () => { throw new Error('takeover persistence failed') },
+        }))
+      }
+    }
+    const repository = new FailingTakeoverRepository()
+    const service = new BrowserTargetClaimService(repository)
+    const claim = acquireTarget(service)
+    repository.failWrites = true
+
+    const result = service.takeOver(identityOf(claim))
+
+    assert.ok(isAgentBrowserError(result))
+    if (!isAgentBrowserError(result)) return
+    assert.equal(result.errorCode, 'lease_takeover')
+    assert.equal(repository.read(claim.logicalKey)?.state, 'held')
+    repository.failWrites = false
+    assert.equal(service.checkWrite(identityOf(claim))?.errorCode, 'lease_takeover')
+  })
+
+  it('does not retain an in-memory fence after durable user takeover succeeds', () => {
+    const service = createTargetClaimService()
+    const claim = acquireTarget(service)
+
+    const result = service.takeOver(identityOf(claim))
+
+    assert.ok(!isAgentBrowserError(result))
+    const fences = (service as unknown as { locallyFencedClaimIds: Set<string> }).locallyFencedClaimIds
+    assert.equal(fences.size, 0)
+    assert.equal(service.checkWrite(identityOf(claim))?.errorCode, 'lease_takeover')
+  })
+
   it('settles logical close by current state without leaving a held owner', () => {
     const heldService = createTargetClaimService()
     const held = acquireTarget(heldService)
@@ -130,7 +170,7 @@ describe('Browser target claims', () => {
     assert.equal(service.read(oldClaim.logicalKey)?.physicalTargetToken, null)
   })
 
-  it('closeout settles every held target for the old run while preserving user-owned A', () => {
+  it('closeout releases every target for the old run even when a historical checkpoint exists', () => {
     const service = createTargetClaimService()
     const a = acquireTarget(service)
     acquireTarget(service, {
@@ -146,9 +186,119 @@ describe('Browser target claims', () => {
     })
 
     const states = new Map(service.list().map((claim) => [claim.logicalKey.tabId, claim.state]))
-    assert.equal(states.get('tab-a'), 'user_owned')
-    assert.equal(states.get('tab-b'), 'suspended')
+    assert.equal(states.get('tab-a'), 'released')
+    assert.equal(states.get('tab-b'), 'released')
     assert.equal(service.heldForRun('run-a').length, 0)
+  })
+
+  it('conversation reset releases only exact-scope claims and rejects the old owner after reacquire', () => {
+    const service = createTargetClaimService()
+    const old = acquireTarget(service, { scopeId: 'scope-reset', sessionId: 'scope-reset' })
+    const oldIdentity = identityOf(old)
+    setTargetUserOwnedForTest(service, old, 'checkpoint-old-context')
+    const other = acquireTarget(service, {
+      tabId: 'tab-other',
+      physicalTargetToken: 'boot-test:tab-other:1',
+      scopeId: 'scope-other',
+      sessionId: 'scope-other',
+      ownerRunId: 'run-other',
+    })
+
+    const closed = service.closeScopeContext('scope-reset')
+    assert.equal(closed.length, 1)
+    assert.equal(service.read(old.logicalKey)?.state, 'released')
+    assert.equal(service.checkWrite(oldIdentity)?.errorCode, 'lease_required')
+    assert.equal(service.checkWrite(identityOf(other)), null)
+
+    const current = acquireTarget(service, {
+      scopeId: 'scope-reset',
+      sessionId: 'scope-reset',
+      ownerRunId: 'run-new-context',
+      parentTaskId: 'task-new-context',
+      browserTaskId: 'browser-new-context',
+    })
+    assert.equal(service.checkWrite(identityOf(current)), null)
+    assert.ok(current.generation > old.generation)
+  })
+
+  it('conversation reset closes every old claim even when a transition observer throws', () => {
+    const service = createTargetClaimService()
+    const oldClaims = ['tab-a', 'tab-b', 'tab-c'].map((tabId, index) => acquireTarget(service, {
+      tabId,
+      physicalTargetToken: `boot-test:${tabId}:1`,
+      scopeId: 'scope-reset-observer',
+      sessionId: 'scope-reset-observer',
+      browserTaskId: `browser-task-${index}`,
+    }))
+    service.onTransition(() => {
+      throw new Error('observer failed')
+    })
+
+    const closed = service.closeScopeContext('scope-reset-observer')
+
+    assert.equal(closed.length, 3)
+    for (const claim of oldClaims) {
+      assert.notEqual(service.read(claim.logicalKey)?.state, 'held')
+      assert.ok(service.checkWrite(identityOf(claim)))
+    }
+  })
+
+  it('durable epoch permanently fences an old owner when reset cleanup writes keep failing', () => {
+    let durableEpoch = 0
+    class FailingClaimRepository extends MemoryBrowserTargetClaimRepository {
+      failWrites = false
+
+      override mutate<T>(body: (store: BrowserTargetClaimMutationStore) => T): T {
+        if (!this.failWrites) return super.mutate(body)
+        return super.mutate((store) => body({
+          ...store,
+          write: () => {
+            throw new Error('browser claim database write failed')
+          },
+        }))
+      }
+    }
+    const repository = new FailingClaimRepository(() => ({
+      kind: 'open',
+      messageVisibilityEpoch: durableEpoch,
+    }))
+    const service = new BrowserTargetClaimService(repository)
+    const old = acquireTarget(service, {
+      scopeId: 'scope-reset-failure',
+      sessionId: 'scope-reset-failure',
+      messageVisibilityEpoch: 0,
+    })
+    const oldIdentity = identityOf(old)
+
+    durableEpoch = 1
+    repository.failWrites = true
+    assert.throws(() => service.closeScopeContext('scope-reset-failure'), /database write failed/)
+    assert.throws(() => service.closeScopeContext('scope-reset-failure'), /database write failed/)
+    repository.failWrites = false
+
+    assert.equal(repository.read(old.logicalKey)?.state, 'held')
+    assert.equal(service.checkWrite(oldIdentity)?.errorCode, 'lease_required')
+    const lateOldAcquire = service.acquire({
+      ...TARGET_A,
+      scopeId: 'scope-reset-failure',
+      sessionId: 'scope-reset-failure',
+      messageVisibilityEpoch: 0,
+      ownerRunId: 'late-old-run',
+    })
+    assert.ok(isAgentBrowserError(lateOldAcquire))
+    if (!isAgentBrowserError(lateOldAcquire)) throw new Error('late old acquire unexpectedly succeeded')
+    assert.equal(lateOldAcquire.errorCode, 'lease_required')
+
+    const current = acquireTarget(service, {
+      scopeId: 'scope-reset-failure',
+      sessionId: 'scope-reset-failure',
+      messageVisibilityEpoch: 1,
+      ownerRunId: 'run-current-context',
+      parentTaskId: 'task-current-context',
+      browserTaskId: 'browser-current-context',
+    })
+    assert.equal(service.checkWrite(identityOf(current)), null)
+    assert.equal(service.checkWrite(identityOf(current)), null, 'same-epoch stop preserves the current owner')
   })
 
 })

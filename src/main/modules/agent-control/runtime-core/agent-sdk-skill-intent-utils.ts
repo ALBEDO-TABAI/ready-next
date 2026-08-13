@@ -5,7 +5,7 @@ import {
   inferDocumentWidgetTaskKind
 } from '../../claude-bridge/tool-policy-heuristics'
 import { PRIMITIVE_TOOL_DEFS, PRIMITIVE_TOOL_NAME_SET } from '../../tools/skill-primitives/tool-defs'
-import {} from '../compaction/compact-agent-input'
+import { } from '../compaction/compact-agent-input'
 import { buildRequestEnvelope } from '../contracts/request-envelope'
 import type { RunMessage } from '../contracts/run-contracts'
 import { resolveIntentCapabilityGroupModes } from '../execution-intent-resolver'
@@ -21,6 +21,7 @@ import type {
   AgentSdkBudgetCheckpointRestore,
   SkillContextOrchestratorLike
 } from './agent-sdk-types'
+import { hasLocalFeishuCliLocalInputIntent } from '../local-feishu-cli-intent'
 import {
   skillDirHasScripts,
   skillHasDeclaredBins
@@ -235,6 +236,12 @@ export function resolveSkillHintRelevanceForTurn(params: {
   }
   const referenceHint = resolveReferenceHintSnapshot(params.orchestrator, params.sessionId)
   if (!referenceHint) return { relevant: false, reason: 'no_reference_hint' }
+  if (
+    referenceHint.id === 'lark-cli'
+    && userTextCandidates.some(hasLocalFeishuCliLocalInputIntent)
+  ) {
+    return { relevant: false, reason: 'local_input_outside_lark_cli_boundary' }
+  }
   for (const text of userTextCandidates) {
     if (
       shouldDisplayReferenceSkillHintForLatestUserText({
@@ -391,19 +398,11 @@ export function resolveSdkDefaultIntentSurface(params: {
     requiredCapabilityGroupIds: params.requiredCapabilityGroupIds,
     mapSemanticIntent
   })
-  const intentGroupModes = {
-    ...intentModes.intentGroupModes,
-    // Browser is admitted only by trusted environment context or the
-    // structured use_browser tool in the SDK executor.
-    browser_interaction: false,
-    browser_content_tasks: false,
-  }
+  const intentGroupModes = intentModes.intentGroupModes
   const requestedIntentGroupIds = Array.from(new Set([
     ...Object.entries(intentGroupModes)
       .filter(([groupId, enabled]) =>
-        enabled === true
-        && groupId !== 'browser_interaction'
-        && groupId !== 'browser_content_tasks')
+        enabled === true)
       .map(([groupId]) => groupId as CapabilityGroupId),
   ]))
 

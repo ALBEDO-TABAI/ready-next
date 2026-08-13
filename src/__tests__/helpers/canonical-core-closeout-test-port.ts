@@ -5,7 +5,29 @@ import { workflowDigest } from '../../main/modules/repositories/browser-workflow
 export function canonicalCoreCloseoutTestPort(
   onCommit?: (input: CanonicalCoreCloseoutInput) => void | Promise<void>,
 ) {
+  const runMeta = new Map<string, Record<string, unknown>>()
   return {
+    getRunMetaRepository() {
+      return {
+        get(runId: string) {
+          return runMeta.get(runId) ?? null
+        },
+        create(input: Record<string, unknown>) {
+          const runId = String(input.runId || '')
+          if (!runId) throw new Error('canonical_core_closeout_test_run_id_required')
+          const record = { ...input }
+          runMeta.set(runId, record)
+          return record
+        },
+        update(runId: string, patch: Record<string, unknown>) {
+          const existing = runMeta.get(runId)
+          if (!existing) return null
+          const record = { ...existing, ...patch, runId }
+          runMeta.set(runId, record)
+          return record
+        },
+      }
+    },
     async commitCanonicalCoreCloseout(input: CanonicalCoreCloseoutInput) {
       if (!input.parentTaskId || !input.ownerRunId || !input.conversationId || !input.finalText.trim()) {
         throw new Error('canonical_core_closeout_test_input_invalid')

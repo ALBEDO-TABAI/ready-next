@@ -28,6 +28,21 @@ export interface ProjectionSyncCoordinatorDeps {
   db: DatabaseManager
   taskProjectionStore: TaskProjectionRepository
   runProjection: RunProjection
+  readAliasGeneration: (aliasId: string) => number | null
+  readActiveProductRunVisibilityIdentity: (readyRunId: string) => {
+    readyRunId: string
+    readyScopeId: string
+    readyAliasId: string
+    aliasGeneration: number
+    messageVisibilityEpoch: number
+  } | null
+  readCommittedProductRunVisibilityIdentity: (readyRunId: string) => {
+    readyRunId: string
+    readyScopeId: string
+    readyAliasId: string
+    aliasGeneration: number
+    messageVisibilityEpoch: number
+  } | null
   /** Bound to the runtime EventEmitter — preserves the
    *  `this.emit('scopeRunEvent'|'conversationEvent'|'projectionSyncFailed')`
    *  semantics so external listeners keep observing AgentControlRuntime. */
@@ -38,6 +53,7 @@ export interface ProjectionSyncCoordinatorDeps {
 }
 
 export class ProjectionSyncCoordinator {
+  private readonly publishedCommittedProductTerminals = new Set<string>()
   private readonly pendingProjectionSyncs: PendingProjectionSyncRepository
   private projectionSyncRetryDrainInFlight: Promise<void> | null = null
   private projectionSyncRetryTimer: NodeJS.Timeout | null = null
@@ -52,8 +68,13 @@ export class ProjectionSyncCoordinator {
   }
 
   emitScopeRunEvent(payload: ScopeRunEventPayload, projectionTruth?: ProjectionTruthSnapshot | null): void {
-    this.recordScopeRunEvent(payload, projectionTruth)
-    this.deps.emit('scopeRunEvent', payload)
+    const recorded = this.recordCanonicalScopeRunEvent(payload, projectionTruth)
+    if (!recorded) return
+    this.deps.emit('scopeRunEvent', {
+      ...recorded.payload,
+      aliasGeneration: recorded.summary.aliasGeneration,
+      messageVisibilityEpoch: recorded.summary.messageVisibilityEpoch,
+    })
   }
 
   publishScopeRunEvent(payload: ScopeRunEventPayload, projectionTruth?: ProjectionTruthSnapshot | null): void {
@@ -62,22 +83,129 @@ export class ProjectionSyncCoordinator {
 
   /** Publishes a terminal readback already committed by Ready closeout. */
   publishCommittedScopeRunEvent(payload: ScopeRunEventPayload): void {
-    this.deps.emit('scopeRunEvent', payload)
+    if (payload.visibilityOwnerKind !== 'product_alias'
+      || !['checkpoint', 'done', 'error', 'cancelled'].includes(payload.phase)) return
+    const authoritativePayload = this.resolveRunVisibilityIdentity(payload, true)
+    const runId = typeof authoritativePayload?.runId === 'string'
+      ? authoritativePayload.runId.trim()
+      : ''
+    if (!authoritativePayload || !runId || this.publishedCommittedProductTerminals.has(runId)) return
+
+    // The closeout transaction has already persisted the terminal projection.
+    // Refresh the in-memory summary only while the frozen context is still
+    // current; a reset-stale terminal must still be published for consumers
+    // that own the exact committed product identity.
+    this.recordRunProjectionEvent(authoritativePayload, null)
+    if (this.publishedCommittedProductTerminals.size >= 2_048) {
+      const oldest = this.publishedCommittedProductTerminals.values().next().value
+      if (typeof oldest === 'string') this.publishedCommittedProductTerminals.delete(oldest)
+    }
+    this.publishedCommittedProductTerminals.add(runId)
+    try {
+      this.deps.emit('scopeRunEvent', authoritativePayload)
+    } catch (error) {
+      this.publishedCommittedProductTerminals.delete(runId)
+      throw error
+    }
   }
 
   recordScopeRunEvent(payload: ScopeRunEventPayload, projectionTruth?: ProjectionTruthSnapshot | null): ScopeRunSummary | null {
-    const summary = this.recordRunProjectionEvent(payload, projectionTruth)
-    if (summary) {
+    return this.recordCanonicalScopeRunEvent(payload, projectionTruth)?.summary ?? null
+  }
+
+  private recordCanonicalScopeRunEvent(
+    payload: ScopeRunEventPayload,
+    projectionTruth?: ProjectionTruthSnapshot | null,
+    committedProductTerminal = false,
+    syncProjection = true,
+  ): { payload: ScopeRunEventPayload; summary: ScopeRunSummary } | null {
+    const authoritativePayload = this.resolveRunVisibilityIdentity(payload, committedProductTerminal)
+    if (!authoritativePayload) return null
+    const summary = this.recordRunProjectionEvent(authoritativePayload, projectionTruth)
+    if (summary && syncProjection) {
       // Stage U PR U2.1 — projection sync is still fire-and-forget (the
       // ScopeRunEvent acknowledgement path must not block on disk I/O),
       // but failures now surface through a metric + an IPC event so the
       // renderer can show a diagnostic instead of pretending sync went
       // through. See plan §3 U2.1 / audit §3.3 fire-and-forget remediation.
-      void syncTaskProjection(this.deps.taskProjectionStore, summary, payload, projectionTruth).catch((error) => {
-        this.handleProjectionSyncFailure(summary, payload, projectionTruth, error)
+      void syncTaskProjection(this.deps.taskProjectionStore, summary, authoritativePayload, projectionTruth).catch((error) => {
+        this.handleProjectionSyncFailure(summary, authoritativePayload, projectionTruth, error)
       })
     }
-    return summary
+    return summary ? { payload: authoritativePayload, summary } : null
+  }
+
+  private resolveRunVisibilityIdentity(
+    payload: ScopeRunEventPayload,
+    committedProductTerminal = false,
+  ): ScopeRunEventPayload | null {
+    const runId = typeof payload.runId === 'string' ? payload.runId.trim() : ''
+    if (!runId) return null
+    const db = this.deps.db.getRawDb()
+    if (!db) return null
+    const messageVisibilityEpoch = payload.messageVisibilityEpoch
+    if (!Number.isSafeInteger(messageVisibilityEpoch) || Number(messageVisibilityEpoch) < 0) return null
+    if (payload.visibilityOwnerKind === 'product_alias') {
+      const aliasGeneration = payload.aliasGeneration
+      if (!Number.isSafeInteger(aliasGeneration) || Number(aliasGeneration) < 1) return null
+      const owner = committedProductTerminal
+        ? this.deps.readCommittedProductRunVisibilityIdentity(runId)
+        : this.deps.readActiveProductRunVisibilityIdentity(runId)
+      if (!owner
+        || owner.readyScopeId !== payload.scopeId
+        || owner.readyAliasId !== payload.scopeId
+        || owner.aliasGeneration !== aliasGeneration
+        || owner.messageVisibilityEpoch !== messageVisibilityEpoch) return null
+      if (committedProductTerminal) return payload
+      const current = db.prepare(`
+        SELECT message_visibility_epoch
+          FROM chat_conversations
+         WHERE id = ? AND closed_at IS NULL
+         LIMIT 1
+      `).get<{ message_visibility_epoch: number }>(payload.scopeId)
+      if (!current
+        || current.message_visibility_epoch !== messageVisibilityEpoch) return null
+      return payload
+    }
+    if (payload.visibilityOwnerKind !== 'context_background') return null
+    const ledger = payload.visibilityOwnerLedger
+    if (!ledger || typeof ledger.id !== 'string' || !ledger.id.trim()) return null
+    const current = db.prepare(`
+      SELECT message_visibility_epoch
+        FROM chat_conversations
+       WHERE id = ? AND closed_at IS NULL
+       LIMIT 1
+    `).get<{ message_visibility_epoch: number }>(payload.scopeId)
+    if (!current || current.message_visibility_epoch !== messageVisibilityEpoch) return null
+    let ownerMatches = false
+    if (ledger.kind === 'run_meta') {
+      ownerMatches = Boolean(db.prepare(`
+        SELECT 1 AS found
+          FROM run_meta
+         WHERE run_id = ? AND scope_id = ? AND message_visibility_epoch = ?
+         LIMIT 1
+      `).get(ledger.id, payload.scopeId, messageVisibilityEpoch))
+    } else if (ledger.kind === 'skill_task_run') {
+      ownerMatches = Boolean(db.prepare(`
+        SELECT 1 AS found
+          FROM skill_task_runs
+         WHERE (id = ? OR detached_task_id = ?)
+           AND scope_id = ? AND message_visibility_epoch = ?
+         LIMIT 1
+      `).get(ledger.id, ledger.id, payload.scopeId, messageVisibilityEpoch))
+    } else if (ledger.kind === 'task_projection') {
+      ownerMatches = Boolean(db.prepare(`
+        SELECT 1 AS found
+          FROM task_projections
+         WHERE task_id = ? AND scope_id = ? AND message_visibility_epoch = ?
+         LIMIT 1
+      `).get(ledger.id, payload.scopeId, messageVisibilityEpoch))
+    }
+    if (!ownerMatches) return null
+    return {
+      ...payload,
+      aliasGeneration: this.deps.readAliasGeneration(payload.scopeId),
+    }
   }
 
   private handleProjectionSyncFailure(

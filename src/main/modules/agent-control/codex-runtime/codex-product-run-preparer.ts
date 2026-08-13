@@ -1,24 +1,44 @@
 import { createHash } from 'node:crypto'
 import { z } from 'zod'
 
-import type { CodexUserInput } from './codex-native-runtime'
+import {
+  codexCurrentDocumentAnchorSchema,
+  type CodexCurrentDocumentAnchor,
+} from '../../../../shared/ipc-contracts/agent-runtime'
+import {
+  parseActionAuthorizationMode,
+  type ActionAuthorizationMode,
+} from '../../../../shared/action-authorization-mode'
+
+import {
+  codexUserInputSchema,
+  type CodexUserInput,
+} from './codex-user-input'
 import type {
   CodexTurnIngress,
   ExplicitResourceEnvelope,
   ResourceVersionReference,
 } from './codex-turn-input-builder'
 import { resourceReferenceSetsMatch } from './codex-turn-input-builder'
+import {
+  assertReadyToolSurface,
+  assertReadyTurnToolAuthorization,
+  type ReadyToolSurface,
+  type ReadyTurnToolAuthorization,
+} from './codex-tool-surface'
+import {
+  assertPreparedCodexExternalReadSlice,
+  externalReadResourceAuthority,
+  type PreparedCodexExternalReadSlice,
+} from './codex-external-read-slice'
+import {
+  preparedCodexResourceAuthoritySchema,
+  type PreparedCodexResourceAuthority,
+} from './codex-explicit-resources'
 
-export type ReadyToolSurfaceRef = {
-  surfaceId: string
-  toolSurfaceDigest: string
-  toolNames: string[]
-}
+export type ReadyToolSurfaceRef = ReadyToolSurface
 
-export type ReadyTurnToolAuthorizationRef = {
-  authorizationId: string
-  authorizationDigest: string
-}
+export type ReadyTurnToolAuthorizationRef = ReadyTurnToolAuthorization
 
 export type ReadyToolHostIdentity = {
   scopeId: string
@@ -40,12 +60,15 @@ export type PreparedCodexProductRun = {
     reservationSetId: string
     reservationEvidenceDigest: string
   }
-  ingress: CodexTurnIngress
+  ingress: Extract<CodexTurnIngress, { kind: 'user_ingress' }>
   resourceAnchorDigest: string
   recoveredContextDigest: null
+  actionAuthorizationMode?: ActionAuthorizationMode
   readyToolSurface: ReadyToolSurfaceRef
   readyTurnToolAuthorization: ReadyTurnToolAuthorizationRef
   readyToolHostIdentity: ReadyToolHostIdentity
+  externalReadSlice?: PreparedCodexExternalReadSlice
+  resourceAuthorities?: PreparedCodexResourceAuthority[]
   productBudgetSeed: {
     maxIterations: number
     maxToolCalls: number
@@ -65,18 +88,22 @@ export type CodexProductRunPreparationInput = {
   scopeId: string
   aliasId: string
   aliasGeneration: number
-  taskOrigin: 'user_root' | 'system_background' | 'workflow_child'
+  taskOrigin: 'user_root' | 'workflow_child'
   runOrigin: 'initial' | 'continuation' | 'scheduled_task' | 'handoff_takeover'
-  originUserMessageId: string
+  originUserMessageId?: string
   reservationSetId: string
   reservationEvidenceDigest: string
   currentInput: CodexUserInput[]
   explicitResourceEnvelope: ExplicitResourceEnvelope
   resourceAdditionalContext: ResourceVersionReference[]
+  currentDocumentAnchor?: CodexCurrentDocumentAnchor | null
+  actionAuthorizationMode?: ActionAuthorizationMode
   readyToolSurface: ReadyToolSurfaceRef
   readyTurnToolAuthorization: ReadyTurnToolAuthorizationRef
   authorizationOwnerId: string
   resourceOwnerId: string
+  externalReadSlice?: PreparedCodexExternalReadSlice | null
+  resourceAuthorities?: PreparedCodexResourceAuthority[]
   productBudgetSeed: {
     maxIterations: number
     maxToolCalls: number
@@ -89,15 +116,6 @@ export type CodexProductRunPreparationResult =
   | { ok: false; code: 'unsupported_product_ingress' | 'invalid_product_ingress' }
 
 const nonEmptyString = z.string().min(1)
-const userInputSchema = z.discriminatedUnion('type', [
-  z.object({ type: z.literal('text'), text: z.string(), text_elements: z.tuple([]) }).strict(),
-  z.object({
-    type: z.literal('image'),
-    url: nonEmptyString,
-    detail: z.enum(['auto', 'low', 'high', 'original']).nullable(),
-  }).strict(),
-  z.object({ type: z.literal('audio'), url: nonEmptyString }).strict(),
-])
 const resourceRefSchema = z.object({
   logicalResourceId: nonEmptyString,
   currentVersion: nonEmptyString,
@@ -110,19 +128,44 @@ const budgetSeedSchema = z.object({
   maxToolCalls: z.number().int().nonnegative(),
   maxParallelToolGroups: z.number().int().nonnegative(),
 }).strict()
+const readyToolSurfaceSchema = z.custom<ReadyToolSurface>((value) => {
+  try {
+    assertReadyToolSurface(value as ReadyToolSurface)
+    return true
+  } catch {
+    return false
+  }
+})
+const readyTurnToolAuthorizationSchema = z.custom<ReadyTurnToolAuthorization>((value) => {
+  try {
+    assertReadyTurnToolAuthorization(value as ReadyTurnToolAuthorization)
+    return true
+  } catch {
+    return false
+  }
+})
+const preparedExternalReadSliceSchema = z.custom<PreparedCodexExternalReadSlice>((value) => {
+  try {
+    assertPreparedCodexExternalReadSlice(value)
+    return true
+  } catch {
+    return false
+  }
+})
 const userIngressPreparationSchema = z.object({
   kind: z.literal('user_ingress'),
   attemptKind: z.literal('user_ingress'),
   originUserMessageId: nonEmptyString,
   canonicalCurrentInputRef: z.object({
     messageId: nonEmptyString,
-    input: z.array(userInputSchema).min(1),
+    input: z.array(codexUserInputSchema).min(1),
   }).strict(),
   explicitResourceEnvelope: z.object({
-    input: z.array(userInputSchema),
+    input: z.array(codexUserInputSchema),
     resourceRefs: z.array(resourceRefSchema),
   }).strict(),
   resourceAdditionalContext: z.array(resourceRefSchema),
+  currentDocumentAnchor: codexCurrentDocumentAnchorSchema.nullable().optional(),
 }).strict()
 const preparationInputSchema = z.object({
   taskId: nonEmptyString,
@@ -131,28 +174,25 @@ const preparationInputSchema = z.object({
   scopeId: nonEmptyString,
   aliasId: nonEmptyString,
   aliasGeneration: z.number().int().positive(),
-  taskOrigin: z.enum(['user_root', 'system_background', 'workflow_child']),
+  taskOrigin: z.enum(['user_root', 'workflow_child']),
   runOrigin: z.enum(['initial', 'continuation', 'scheduled_task', 'handoff_takeover']),
-  originUserMessageId: nonEmptyString,
+  originUserMessageId: nonEmptyString.optional(),
   reservationSetId: nonEmptyString,
   reservationEvidenceDigest: nonEmptyString,
-  currentInput: z.array(userInputSchema).min(1),
+  currentInput: z.array(codexUserInputSchema).min(1),
   explicitResourceEnvelope: z.object({
-    input: z.array(userInputSchema),
+    input: z.array(codexUserInputSchema),
     resourceRefs: z.array(resourceRefSchema),
   }).strict(),
   resourceAdditionalContext: z.array(resourceRefSchema),
-  readyToolSurface: z.object({
-    surfaceId: nonEmptyString,
-    toolSurfaceDigest: nonEmptyString,
-    toolNames: z.array(nonEmptyString),
-  }).strict(),
-  readyTurnToolAuthorization: z.object({
-    authorizationId: nonEmptyString,
-    authorizationDigest: nonEmptyString,
-  }).strict(),
+  currentDocumentAnchor: codexCurrentDocumentAnchorSchema.nullable().optional(),
+  actionAuthorizationMode: z.enum(['ask', 'auto', 'full']).optional(),
+  readyToolSurface: readyToolSurfaceSchema,
+  readyTurnToolAuthorization: readyTurnToolAuthorizationSchema,
   authorizationOwnerId: nonEmptyString,
   resourceOwnerId: nonEmptyString,
+  externalReadSlice: preparedExternalReadSliceSchema.nullable().optional(),
+  resourceAuthorities: z.array(preparedCodexResourceAuthoritySchema).optional(),
   productBudgetSeed: budgetSeedSchema,
 }).strict()
 const preparedRunSchema = z.object({
@@ -171,21 +211,17 @@ const preparedRunSchema = z.object({
   ingress: userIngressPreparationSchema,
   resourceAnchorDigest: nonEmptyString,
   recoveredContextDigest: z.null(),
-  readyToolSurface: z.object({
-    surfaceId: nonEmptyString,
-    toolSurfaceDigest: nonEmptyString,
-    toolNames: z.array(nonEmptyString),
-  }).strict(),
-  readyTurnToolAuthorization: z.object({
-    authorizationId: nonEmptyString,
-    authorizationDigest: nonEmptyString,
-  }).strict(),
+  actionAuthorizationMode: z.enum(['ask', 'auto', 'full']).optional(),
+  readyToolSurface: readyToolSurfaceSchema,
+  readyTurnToolAuthorization: readyTurnToolAuthorizationSchema,
   readyToolHostIdentity: z.object({
     scopeId: nonEmptyString,
     aliasId: nonEmptyString,
     authorizationOwnerId: nonEmptyString,
     resourceOwnerId: nonEmptyString,
   }).strict(),
+  externalReadSlice: preparedExternalReadSliceSchema.optional(),
+  resourceAuthorities: z.array(preparedCodexResourceAuthoritySchema).optional(),
   productBudgetSeed: budgetSeedSchema,
   neutralProjectionSeed: z.object({
     phase: z.literal('planning'),
@@ -203,15 +239,27 @@ export function isPreparedCodexProductRun(value: unknown): value is PreparedCode
   if (!parsed.success) return false
   const prepared = parsed.data
   return prepared.conversationAlias.aliasId === prepared.readyToolHostIdentity.aliasId
+    && prepared.readyTurnToolAuthorization.allowedToolNames.every(
+      (toolName) => prepared.readyToolSurface.toolNames.includes(toolName),
+    )
     && prepared.ingress.originUserMessageId === prepared.ingress.canonicalCurrentInputRef.messageId
     && resourceReferenceSetsMatch(
       prepared.ingress.explicitResourceEnvelope.resourceRefs,
       prepared.ingress.resourceAdditionalContext,
     )
     && prepared.resourceAnchorDigest === digest({
-      explicitResourceEnvelope: prepared.ingress.explicitResourceEnvelope,
-      resourceAdditionalContext: prepared.ingress.resourceAdditionalContext,
-    })
+          explicitResourceEnvelope: prepared.ingress.explicitResourceEnvelope,
+          resourceAdditionalContext: prepared.ingress.resourceAdditionalContext,
+          ...(prepared.ingress.currentDocumentAnchor
+            ? { currentDocumentAnchor: prepared.ingress.currentDocumentAnchor }
+            : {}),
+          ...(prepared.externalReadSlice
+            ? { externalReadResourceAuthority: externalReadResourceAuthority(prepared.externalReadSlice) }
+            : {}),
+          ...(prepared.resourceAuthorities?.length
+            ? { resourceAuthorities: prepared.resourceAuthorities }
+            : {}),
+        })
 }
 
 export function preparedCodexProductRunMatchesIngress(
@@ -233,6 +281,7 @@ export function preparedCodexProductRunMatchesIngress(
     && value.ingressBinding.requestId === expected.requestId
     && value.ingressBinding.reservationSetId === expected.reservationSetId
     && value.ingressBinding.reservationEvidenceDigest === expected.reservationEvidenceDigest
+    && value.ingress.kind === 'user_ingress'
     && value.ingress.originUserMessageId === expected.originUserMessageId
 }
 
@@ -241,8 +290,12 @@ export class CodexProductRunPreparer {
     const parsed = preparationInputSchema.safeParse(rawInput)
     if (!parsed.success) return { ok: false, code: 'invalid_product_ingress' }
     const input = parsed.data
-    if (input.taskOrigin !== 'user_root' || input.runOrigin !== 'initial') {
+    const isUserIngress = input.taskOrigin === 'user_root' && input.runOrigin === 'initial'
+    if (!isUserIngress) {
       return { ok: false, code: 'unsupported_product_ingress' }
+    }
+    if (!input.originUserMessageId) {
+      return { ok: false, code: 'invalid_product_ingress' }
     }
     if (!resourceReferenceSetsMatch(
       input.explicitResourceEnvelope.resourceRefs,
@@ -250,18 +303,70 @@ export class CodexProductRunPreparer {
     )) {
       return { ok: false, code: 'invalid_product_ingress' }
     }
+    if (input.readyTurnToolAuthorization.allowedToolNames.some(
+      (toolName) => !input.readyToolSurface.toolNames.includes(toolName),
+    )) {
+      return { ok: false, code: 'invalid_product_ingress' }
+    }
+    const currentDocumentAnchor = input.currentDocumentAnchor ?? null
+    const externalReadSlice = input.externalReadSlice ?? null
+    const resourceAuthorities = input.resourceAuthorities ?? []
+    if (currentDocumentAnchor && externalReadSlice) {
+      return { ok: false, code: 'invalid_product_ingress' }
+    }
+    if (currentDocumentAnchor) {
+      const matchingReference = input.resourceAdditionalContext.find(
+        (reference) => reference.logicalResourceId === currentDocumentAnchor.logicalResourceId,
+      )
+      if (!matchingReference
+        || matchingReference.currentVersion !== currentDocumentAnchor.currentVersion
+        || matchingReference.currentDigest !== currentDocumentAnchor.currentDigest
+        || matchingReference.supersedesVersion !== currentDocumentAnchor.supersedesVersion
+        || matchingReference.policyEpoch !== currentDocumentAnchor.policyEpoch) {
+        return { ok: false, code: 'invalid_product_ingress' }
+      }
+    }
+    if (externalReadSlice) {
+      const matchingReference = input.resourceAdditionalContext.find(
+        (reference) => reference.logicalResourceId === externalReadSlice.logicalResourceId,
+      )
+      if (!matchingReference
+        || matchingReference.currentVersion !== externalReadSlice.currentVersion
+        || matchingReference.currentDigest !== externalReadSlice.currentDigest
+        || matchingReference.supersedesVersion !== null
+        || matchingReference.policyEpoch !== externalReadSlice.policyEpoch
+        || JSON.stringify(input.readyTurnToolAuthorization.allowedToolNames)
+          !== JSON.stringify([...externalReadSlice.allowedToolNames].sort())) {
+        return { ok: false, code: 'invalid_product_ingress' }
+      }
+    }
+    for (const authority of resourceAuthorities) {
+      const matchingReference = input.resourceAdditionalContext.find(
+        (reference) => reference.logicalResourceId === authority.logicalResourceId,
+      )
+      if (!matchingReference
+        || matchingReference.currentVersion !== authority.currentVersion
+        || matchingReference.currentDigest !== authority.currentDigest
+        || matchingReference.policyEpoch !== authority.policyEpoch
+        || authority.allowedToolNames.some(
+          (toolName) => !input.readyTurnToolAuthorization.allowedToolNames.includes(toolName),
+        )) {
+        return { ok: false, code: 'invalid_product_ingress' }
+      }
+    }
 
     const ingress: CodexTurnIngress = {
-      kind: 'user_ingress',
-      attemptKind: 'user_ingress',
-      originUserMessageId: input.originUserMessageId,
-      canonicalCurrentInputRef: {
-        messageId: input.originUserMessageId,
-        input: input.currentInput,
-      },
-      explicitResourceEnvelope: input.explicitResourceEnvelope,
-      resourceAdditionalContext: input.resourceAdditionalContext,
-    }
+          kind: 'user_ingress',
+          attemptKind: 'user_ingress',
+          originUserMessageId: input.originUserMessageId as string,
+          canonicalCurrentInputRef: {
+            messageId: input.originUserMessageId as string,
+            input: input.currentInput,
+          },
+          explicitResourceEnvelope: input.explicitResourceEnvelope,
+          resourceAdditionalContext: input.resourceAdditionalContext,
+          ...(currentDocumentAnchor ? { currentDocumentAnchor } : {}),
+        }
 
     return {
       ok: true,
@@ -280,10 +385,16 @@ export class CodexProductRunPreparer {
         },
         ingress,
         resourceAnchorDigest: digest({
-          explicitResourceEnvelope: input.explicitResourceEnvelope,
-          resourceAdditionalContext: input.resourceAdditionalContext,
-        }),
+              explicitResourceEnvelope: input.explicitResourceEnvelope,
+              resourceAdditionalContext: input.resourceAdditionalContext,
+              ...(currentDocumentAnchor ? { currentDocumentAnchor } : {}),
+              ...(externalReadSlice
+                ? { externalReadResourceAuthority: externalReadResourceAuthority(externalReadSlice) }
+                : {}),
+              ...(resourceAuthorities.length > 0 ? { resourceAuthorities } : {}),
+            }),
         recoveredContextDigest: null,
+        actionAuthorizationMode: parseActionAuthorizationMode(input.actionAuthorizationMode),
         readyToolSurface: input.readyToolSurface,
         readyTurnToolAuthorization: input.readyTurnToolAuthorization,
         readyToolHostIdentity: {
@@ -292,6 +403,8 @@ export class CodexProductRunPreparer {
           authorizationOwnerId: input.authorizationOwnerId,
           resourceOwnerId: input.resourceOwnerId,
         },
+        ...(externalReadSlice ? { externalReadSlice } : {}),
+        ...(resourceAuthorities.length > 0 ? { resourceAuthorities } : {}),
         productBudgetSeed: input.productBudgetSeed,
         neutralProjectionSeed: {
           phase: 'planning',

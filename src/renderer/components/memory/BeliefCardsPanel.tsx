@@ -15,7 +15,6 @@ interface BeliefCardsPanelProps {
   actionRunning: string | null
   onRefresh: () => Promise<void>
   onTransition: (relPath: string, action: 'approve' | 'reject') => Promise<void>
-  onSetKnowledgeSystemEnabled: (enabled: boolean) => Promise<void>
 }
 
 const statusLabel: Record<BeliefCardSettingsItemData['status'], string> = {
@@ -144,7 +143,6 @@ export default function BeliefCardsPanel({
   actionRunning,
   onRefresh,
   onTransition,
-  onSetKnowledgeSystemEnabled,
 }: BeliefCardsPanelProps) {
   const stagedCards = snapshot?.cards.filter((card) => card.status === 'staged') ?? []
   const siteCards = snapshot?.cards.filter((card) => card.isSiteCard) ?? []
@@ -163,11 +161,11 @@ export default function BeliefCardsPanel({
           <div className="flex items-center gap-2">
             <ShieldAlert className="w-4 h-4" style={{ color: 'var(--color-blue)' }} />
             <h3 className="text-[15px] font-semibold" style={{ color: 'var(--text-title)', margin: 0 }}>
-              信念卡确认
+              历史信念资料
             </h3>
           </div>
           <p className="text-[12px] leading-5" style={{ color: 'var(--text-muted)', margin: '6px 0 0' }}>
-            系统学到的新知识先停在待确认区，确认后才会进入 Agent 的实际记忆。
+            本机保存的信念卡先停在待确认区；确认只更新资料状态，不会把内容注入当前 Codex。
           </p>
         </div>
         <button
@@ -203,25 +201,6 @@ export default function BeliefCardsPanel({
               background: 'color-mix(in srgb, var(--surface-panel-bg) 50%, transparent)',
             }}
           >
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <div className="text-[13px] font-medium" style={{ color: 'var(--text-title)' }}>
-                  知识系统总开关
-                </div>
-                <div className="text-[12px] mt-1" style={{ color: 'var(--text-muted)' }}>
-                  关闭后停止知识注入和卡片工具，文件不会被删除。
-                </div>
-              </div>
-              <label className="inline-flex items-center gap-2 text-[13px]" style={{ color: 'var(--text-body)' }}>
-                <input
-                  type="checkbox"
-                  checked={snapshot.knowledgeSystemEnabled}
-                  disabled={actionRunning === 'knowledge-system'}
-                  onChange={(event) => void onSetKnowledgeSystemEnabled(event.target.checked).catch((err) => alert(err instanceof Error ? err.message : String(err)))}
-                />
-                {snapshot.knowledgeSystemEnabled ? '已开启' : '已关闭'}
-              </label>
-            </div>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-4">
               <Pill tone="blue">待确认 {snapshot.summary.staged}</Pill>
               <Pill tone="green">已生效 {snapshot.summary.active}</Pill>
@@ -229,11 +208,8 @@ export default function BeliefCardsPanel({
               <Pill tone={snapshot.summary.invalid > 0 ? 'red' : 'neutral'}>异常 {snapshot.summary.invalid}</Pill>
             </div>
             <div className="text-[12px] leading-5 mt-4" style={{ color: 'var(--text-muted)' }}>
-              维护：旧记忆维护{snapshot.maintenance.lifecycleRunning ? '运行中' : '已停止'}，
-              上次运行 {formatDate(snapshot.maintenance.lastLifecycleMaintenanceAt)}；
-              LLM 维护回合 {snapshot.maintenance.llmRound
-                ? `${snapshot.maintenance.llmRound.decision === 'skip' ? '跳过' : '运行'}，写入 ${snapshot.maintenance.llmRound.applied}，驳回 ${snapshot.maintenance.llmRound.rejected}`
-                : '未接入驱动'}。
+              本地资料维护：{snapshot.maintenance.lifecycleRunning ? '运行中' : '已停止'}，
+              上次运行 {formatDate(snapshot.maintenance.lastLifecycleMaintenanceAt)}。不会调用 AI 模型，也不会改变当前 Codex。
             </div>
           </div>
 

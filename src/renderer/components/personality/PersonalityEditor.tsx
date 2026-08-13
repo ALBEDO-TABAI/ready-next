@@ -19,7 +19,6 @@ import {
   settingsListItemStyle,
   settingsNoticeStyle,
 } from '../settings/settings-theme'
-import { useAgent } from '../../stores/useAgent'
 import { isReservedAgentSlug, isValidAgentSlug, normalizeAgentSlug } from '../../../shared/agent-identity'
 
 interface AgentPersonality {
@@ -34,7 +33,7 @@ interface AgentPersonality {
 }
 
 const toneOptions = [
-  { value: '', label: '默认语气', description: '沿用系统默认的表达习惯' },
+  { value: '', label: '未记录', description: '没有单独记录表达习惯' },
   { value: 'professional', label: '专业', description: '清晰、克制、强调结构和结论' },
   { value: 'friendly', label: '亲和', description: '更温和、更像协作伙伴' },
   { value: 'technical', label: '技术型', description: '优先精度、细节和工程判断' },
@@ -43,7 +42,7 @@ const toneOptions = [
 ]
 
 function toneLabel(value?: string): string {
-  return toneOptions.find((item) => item.value === (value || ''))?.label || '默认语气'
+  return toneOptions.find((item) => item.value === (value || ''))?.label || '未记录'
 }
 
 function normalizeAgentName(value: string): string {
@@ -63,8 +62,8 @@ function defaultPersonalityText(agentName: string, displayName: string): string 
   return [
     `# ${title}`,
     '',
-    '你是 Ready 工作台中的一个可切换 Agent。',
-    '请用清晰、稳定、符合当前人格定位的方式协助用户完成创作和分析任务。',
+    '这是一份历史人格资料，用于记录曾经采用的表达风格与协作偏好。',
+    '它不会改变当前 Codex 的身份、语气或执行行为。',
   ].join('\n')
 }
 
@@ -157,15 +156,6 @@ export default function PersonalityEditor() {
     }
   }
 
-  const refreshAgentSwitcher = async () => {
-    await useAgent.getState().reloadAgents()
-    // §7.1 统一刷新契约：人格的双建（create/delete 同时落 registry 行）后，广播事件让
-    // AgentRegistryPanel / AgentSettingsHub「管理」区一并刷新，不止刷新聊天选择器。
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(new CustomEvent('ready:agent-registry-changed'))
-    }
-  }
-
   const handleSelectPersonality = (agentName: string) => {
     setIsCreating(false)
     setDraftAgentName('')
@@ -250,12 +240,11 @@ export default function PersonalityEditor() {
         throw new Error(resultError(result, '后端保存失败'))
       }
 
-      setSuccessMessage('人格配置已保存。')
+      setSuccessMessage('历史人格资料已保存。')
       setIsCreating(false)
       setDraftAgentName('')
       setSelectedAgent(agentName)
       await loadPersonalities(agentName)
-      await refreshAgentSwitcher()
       setTimeout(() => setSuccessMessage(null), 3000)
     } catch (err) {
       setError(`保存失败：${err instanceof Error ? err.message : String(err)}`)
@@ -270,7 +259,7 @@ export default function PersonalityEditor() {
       return
     }
     if (!selectedAgent) return
-    if (!confirm(`确定删除 ${selectedAgent} 吗？旧会话和旧任务会保留为历史记录。`)) {
+    if (!confirm(`确定删除 ${selectedAgent} 的历史人格资料吗？`)) {
       return
     }
 
@@ -278,19 +267,16 @@ export default function PersonalityEditor() {
     setError(null)
 
     try {
-      const result = window.electronAPI.agent?.deleteRegistryAgent
-        ? await window.electronAPI.agent.deleteRegistryAgent(selectedAgent)
-        : await window.electronAPI.agentPersonality.delete(selectedAgent)
+      const result = await window.electronAPI.agentPersonality.delete(selectedAgent)
       if (!result.success) {
         throw new Error(resultError(result, '后端删除失败'))
       }
-      setSuccessMessage('人格配置已删除。')
+      setSuccessMessage('历史人格资料已删除。')
       setPersonalityText('')
       setDisplayName('')
       setTone('')
       setSelectedAgent(null)
       await loadPersonalities()
-      await refreshAgentSwitcher()
       setTimeout(() => setSuccessMessage(null), 3000)
     } catch (err) {
       setError(`删除失败：${err instanceof Error ? err.message : String(err)}`)
@@ -318,7 +304,7 @@ export default function PersonalityEditor() {
               }}
             >
               <Sparkles className="w-3.5 h-3.5" />
-              SOUL.md
+              历史资料
             </span>
             <span
               style={{
@@ -327,13 +313,13 @@ export default function PersonalityEditor() {
                 color: 'var(--text-muted)',
               }}
             >
-              {personalities.length} 个已配置 Agent
+              {personalities.length} 份人格档案
             </span>
           </div>
           <div>
-            <div style={SETTINGS_TITLE_STYLE}>把人格配置成可复用的表达基调</div>
+            <div style={SETTINGS_TITLE_STYLE}>整理历史人格档案</div>
             <div style={{ ...SETTINGS_SECTION_LEAD_STYLE, marginTop: 6, maxWidth: 620 }}>
-              人格定义会影响 Agent 的语气、判断偏好与协作方式。这里更适合写长期稳定的行为准则，而不是单次任务的即时说明。
+              这里保存曾经采用的人格、语气和协作偏好，供查阅与整理；不会改变当前 Codex 的身份、知识或任务行为。
             </div>
           </div>
         </div>
@@ -344,7 +330,7 @@ export default function PersonalityEditor() {
           style={SETTINGS_PRIMARY_BUTTON_STYLE}
         >
           <Plus className="w-4 h-4" />
-          新建人格
+          新建档案
         </button>
       </div>
 
@@ -376,10 +362,10 @@ export default function PersonalityEditor() {
           <div className="flex items-center justify-between gap-3 px-1">
             <div>
               <div className="text-[13px] font-semibold" style={{ color: 'var(--text-title)' }}>
-                Agent 列表
+                人格档案
               </div>
               <div style={{ ...SETTINGS_FIELD_HINT_STYLE, marginTop: 4 }}>
-                选择一个 Agent 继续编辑人格配置。
+                选择一份历史资料继续编辑。
               </div>
             </div>
             <Bot className="w-4 h-4" style={{ color: 'var(--text-light)' }} />
@@ -434,7 +420,7 @@ export default function PersonalityEditor() {
                   color: 'var(--text-muted)',
                 }}
               >
-                还没有任何人格配置。<br />点击右上角创建你的第一个 Agent 人格。
+                还没有历史人格资料。<br />点击右上角创建第一份档案。
               </div>
             )}
           </div>
@@ -458,7 +444,7 @@ export default function PersonalityEditor() {
                   </div>
                 </div>
                 <div style={{ ...SETTINGS_FIELD_HINT_STYLE, marginTop: 6 }}>
-                  先定义这个 Agent 的识别名、展示名和整体语气，再决定人格正文如何展开。
+                  记录这份历史资料的识别名、展示名和当时采用的语气。
                 </div>
               </div>
 
@@ -474,7 +460,7 @@ export default function PersonalityEditor() {
               </div>
 
               <div>
-                <div style={SETTINGS_FIELD_LABEL_STYLE}>推荐语气</div>
+                <div style={SETTINGS_FIELD_LABEL_STYLE}>历史语气</div>
                 <select
                   aria-label="推荐语气"
                   value={tone}
@@ -518,7 +504,7 @@ export default function PersonalityEditor() {
                     人格定义
                   </div>
                   <div style={{ ...SETTINGS_FIELD_HINT_STYLE, marginTop: 6, maxWidth: 620 }}>
-                    写清楚表达风格、判断优先级、协作边界与常见偏好。内容越稳定、越抽象，这份人格就越容易在不同任务中保持一致。
+                    记录当时的表达风格、判断优先级、协作边界与常见偏好，仅作为历史资料。
                   </div>
                 </div>
                 <span
@@ -549,7 +535,7 @@ export default function PersonalityEditor() {
                   }}
                 >
                   <div className="text-[12px]" style={{ color: 'var(--text-muted)' }}>
-                    当前人格已存在，最近更新于 {new Date(selectedPersonality.updatedAt * 1000).toLocaleString()}
+                    这份档案最近更新于 {new Date(selectedPersonality.updatedAt * 1000).toLocaleString()}
                   </div>
                   <span
                     style={{
@@ -558,7 +544,7 @@ export default function PersonalityEditor() {
                       color: 'var(--color-green)',
                     }}
                   >
-                    已保存配置
+                    已保存档案
                   </span>
                 </div>
               )}
@@ -572,7 +558,7 @@ export default function PersonalityEditor() {
                 style={SETTINGS_PRIMARY_BUTTON_STYLE}
               >
                 <Save className="w-4 h-4" />
-                {saving ? '保存中...' : '保存人格'}
+                {saving ? '保存中...' : '保存档案'}
               </button>
               <button
                 onClick={handleDelete}
@@ -607,10 +593,10 @@ export default function PersonalityEditor() {
               <Bot className="w-5 h-5" />
             </div>
             <div className="text-[15px] font-semibold mt-4" style={{ color: 'var(--text-title)' }}>
-              选择一个 Agent 开始编辑
+              选择一份人格档案开始编辑
             </div>
             <div style={{ ...SETTINGS_SECTION_LEAD_STYLE, marginTop: 8, maxWidth: 420 }}>
-              左侧可以切换已有人格，或者新建一个 Agent。保存之后，这份人格会持续影响它在聊天和执行任务时的语气与行为。
+              左侧可以切换已有档案，或者新建一份历史资料。保存不会改变当前 Codex 的语气或行为。
             </div>
             <button
               onClick={handleStartCreate}
@@ -618,7 +604,7 @@ export default function PersonalityEditor() {
               style={{ ...SETTINGS_SECONDARY_BUTTON_STYLE, marginTop: 18 }}
               className="hover:brightness-95 active:scale-[0.98] disabled:opacity-50"
             >
-              新建人格
+              新建档案
             </button>
           </div>
         )}

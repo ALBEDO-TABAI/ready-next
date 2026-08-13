@@ -77,12 +77,9 @@ test('chat task cards merge task projections and expose user-facing status and r
   assert.match(taskMerge, /blockedReason:\s*projection\?\.blockedReason\s*\?\? null/)
   assert.match(projectionHelpers, /projection\.waitingFor/)
   assert.doesNotMatch(taskMerge, /waitingFor:\s*projection\?\.status === 'blocked'/)
-  assert.match(taskInteraction, /detachedTaskId:\s*run\?\.taskContinuation\?\.detachedTaskId/)
-  assert.match(taskInteraction, /runStatePath:\s*run\?\.taskContinuation\?\.runStatePath/)
-  assert.match(taskInteraction, /outputDir:\s*run\?\.taskContinuation\?\.outputDir/)
   assert.doesNotMatch(taskMerge, /resumableActions:\s*\(run\.resumableActions && run\.resumableActions\.length > 0\)\s*\?\s*run\.resumableActions\s*:\s*\(projection\?\.resumableActions \|\| \[\]\)/)
-  assert.match(taskInteraction, /setComposerDraft\(/)
-  assert.match(taskInteraction, /continuationIntent:/)
+  assert.doesNotMatch(taskInteraction, /setComposerDraft\(/)
+  assert.doesNotMatch(taskInteraction, /continuationIntent:/)
   assert.doesNotMatch(chatPanel, /Task ID:/)
   assert.match(badgeHelpers, /function taskTypeBadgeLabel\(/)
   assert.match(badgeHelpers, /function interactionStateBadgeLabel\(/)
@@ -106,30 +103,40 @@ test('chat task cards merge task projections and expose user-facing status and r
   assert.match(viewModel, /recentArtifacts\?:/)
 })
 
-test('chat detached continue preserves structured continuation handles', () => {
+test('task cards expose no retry or continuation producer', () => {
   const taskInteraction = readWorkspaceFile(
     'src/renderer/components/agent/chat-panel/task-interaction/use-task-interaction-handlers.ts',
   )
+  const taskCard = readWorkspaceFile('src/renderer/components/agent/chat-panel/task/TaskCard.tsx')
+  const taskPanel = readWorkspaceFile('src/renderer/components/ready/TaskPanel.tsx')
 
-  assert.match(taskInteraction, /const handleContinueDetachedTask = useCallback/)
-  assert.match(taskInteraction, /item\.taskContinuation\?\.detachedTaskId === detachedTaskId/)
-  assert.match(taskInteraction, /item\.taskContinuation\?\.taskId === detachedTaskId/)
-  assert.match(taskInteraction, /pauseReason: 'background_running'/)
-  assert.match(taskInteraction, /const continuationRun:/)
-  assert.match(taskInteraction, /setComposerDraft\(`继续后台任务 \$\{detachedTaskId\}`,\s*buildRunContinuationIntent\(continuationRun\) \|\| null\)/)
-  assert.doesNotMatch(taskInteraction, /setInputValue\(`继续后台任务 \$\{detachedTaskId\}`/)
+  assert.doesNotMatch(taskInteraction, /handleRetryTask|handleContinueDetachedTask/)
+  assert.doesNotMatch(taskCard, /onRetry|onContinueDetachedTask|继续后台任务|重新发起/)
+  assert.doesNotMatch(taskPanel, /handleRetryProjection|重新发起/)
 })
 
-test('chat child-run continue button resumes directly instead of only drafting text', () => {
+test('chat detached tasks keep query and cancel but expose no continuation action', () => {
+  const taskInteraction = readWorkspaceFile(
+    'src/renderer/components/agent/chat-panel/task-interaction/use-task-interaction-handlers.ts',
+  )
+  const taskCard = readWorkspaceFile('src/renderer/components/agent/chat-panel/task/TaskCard.tsx')
+
+  assert.match(taskInteraction, /const handleCancelDetachedTask = useCallback/)
+  assert.match(taskInteraction, /cancelDetachedSkillTask\(detachedTaskId, _scopeId\)/)
+  assert.doesNotMatch(taskInteraction, /handleContinueDetachedTask/)
+  assert.doesNotMatch(taskCard, /onContinueDetachedTask/)
+  assert.doesNotMatch(taskCard, /继续后台任务/)
+})
+
+test('chat child-run exposes exact cancellation without a public resume path', () => {
   const taskInteraction = readWorkspaceFile(
     'src/renderer/components/agent/chat-panel/task-interaction/use-task-interaction-handlers.ts',
   )
 
-  assert.match(taskInteraction, /const handleContinueChildRun = useCallback\(async/)
-  assert.match(taskInteraction, /window\.electronAPI\.agent\.resumeRun\(\{/)
-  assert.match(taskInteraction, /taskId:\s*continuationRun\.taskId \|\| undefined/)
-  assert.match(taskInteraction, /continuationIntent:\s*buildRunContinuationIntent\(continuationRun\)/)
-  assert.doesNotMatch(taskInteraction, /setComposerDraft\(`继续后台任务 \$\{childRunId\}`/)
+  assert.match(taskInteraction, /const handleCancelChildRun = useCallback\(async/)
+  assert.match(taskInteraction, /window\.electronAPI\.agent\.cancelChildRun\(childRunId\)/)
+  assert.doesNotMatch(taskInteraction, /handleContinueChildRun/)
+  assert.doesNotMatch(taskInteraction, /window\.electronAPI\.agent\.resumeRun/)
 })
 
 test('compact task open-session button is wired to load the owning conversation', () => {

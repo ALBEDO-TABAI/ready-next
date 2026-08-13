@@ -25,13 +25,12 @@
  *     the labeled fields. We never invent times the IPC didn't carry.
  */
 
-import { format, startOfDay as dfStartOfDay, endOfDay as dfEndOfDay } from 'date-fns'
+import { format } from 'date-fns'
 import { zhCN } from 'date-fns/locale'
 import { Temporal } from '@js-temporal/polyfill'
 
 import type {
   DayScheduleSnapshot,
-  ScheduleRuntimeSnapshot,
   TimeAllocationSnapshot,
   TodayFocusSnapshot,
   WeekScheduleSnapshot,
@@ -79,20 +78,6 @@ export interface CalendarWidgetSourceLike {
   name: string
   color?: string
   enabled?: boolean
-}
-
-/**
- * Optional schedule runtime fetcher; threaded in by callers that want
- * the `schedule_runtime_card` to show real automation jobs. The
- * default adapter wires this to `window.electronAPI.scheduledTasks.list`.
- */
-export interface ScheduleRuntimeApi {
-  list(): Promise<CalendarWidgetIpcResponse<ReadonlyArray<{
-    name?: string
-    enabled?: boolean
-    nextRunAt?: string
-    lastOccurrenceAt?: string | null
-  }>>>
 }
 
 export interface WidgetFetchOptions {
@@ -240,12 +225,10 @@ export interface CalendarWidgetFetcher {
   fetchWeekSchedule(options?: WidgetFetchOptions): Promise<WeekScheduleSnapshot>
   fetchTimeAllocation(options?: WidgetFetchOptions): Promise<TimeAllocationSnapshot>
   fetchTodayFocusSnapshot(options?: WidgetFetchOptions): Promise<TodayFocusSnapshot>
-  fetchScheduleRuntime(): Promise<ScheduleRuntimeSnapshot>
 }
 
 export interface CreateFetcherDeps {
   calendar: CalendarWidgetApi
-  schedule?: ScheduleRuntimeApi
 }
 
 async function safeGetEvents(api: CalendarWidgetApi, start: Date, end: Date): Promise<CalendarWidgetEventLike[]> {
@@ -269,7 +252,7 @@ async function safeGetSources(api: CalendarWidgetApi): Promise<CalendarWidgetSou
 }
 
 export function createCalendarWidgetFetcher(deps: CreateFetcherDeps): CalendarWidgetFetcher {
-  const { calendar, schedule } = deps
+  const { calendar } = deps
 
   async function fetchDaySchedule(options: WidgetFetchOptions = {}): Promise<DayScheduleSnapshot> {
     const tz = resolveTimezone(options.tz)
@@ -375,45 +358,11 @@ export function createCalendarWidgetFetcher(deps: CreateFetcherDeps): CalendarWi
     }
   }
 
-  async function fetchScheduleRuntime(): Promise<ScheduleRuntimeSnapshot> {
-    if (!schedule) {
-      return {
-        heading: '自动计划',
-        jobs: [{ name: '当前没有自动计划', status: 'paused', nextRun: undefined, lastRun: undefined }],
-      }
-    }
-    let rows: ReadonlyArray<{ name?: string; enabled?: boolean; nextRunAt?: string; lastOccurrenceAt?: string | null }> = []
-    try {
-      const res = await schedule.list()
-      rows = res?.success && Array.isArray(res.data) ? res.data : []
-    } catch {
-      rows = []
-    }
-    const jobs: ScheduleRuntimeSnapshot['jobs'] = rows.slice(0, 6).map((row) => ({
-      name: String(row.name || '未命名计划'),
-      status: row.enabled ? 'enabled' : 'paused',
-      nextRun: typeof row.nextRunAt === 'string' ? row.nextRunAt : undefined,
-      lastRun: typeof row.lastOccurrenceAt === 'string' ? row.lastOccurrenceAt : undefined,
-    }))
-    return {
-      heading: '自动计划',
-      jobs: jobs.length > 0 ? jobs : [{
-        name: '当前没有自动计划',
-        status: 'paused',
-        nextRun: undefined,
-        lastRun: undefined,
-      }],
-    }
-  }
-
   async function fetchTodayFocusSnapshot(options: WidgetFetchOptions = {}): Promise<TodayFocusSnapshot> {
     const tz = resolveTimezone(options.tz)
     const now = options.now ?? new Date()
     const locale = options.locale ?? zhCN
-    const [day, runtime] = await Promise.all([
-      fetchDaySchedule({ tz, now, locale }),
-      fetchScheduleRuntime(),
-    ])
+    const day = await fetchDaySchedule({ tz, now, locale })
 
     // "Next event" = first event whose start is strictly after `now`,
     // falling back to the first event of the day if everything is in
@@ -434,7 +383,6 @@ export function createCalendarWidgetFetcher(deps: CreateFetcherDeps): CalendarWi
     const nowZdt = dateToZdt(now, tz)
     const dayLabel = format(toLabelDate(nowZdt), '今天 · M月d日', { locale })
 
-    const enabledCount = runtime.jobs.filter((job) => job.status === 'enabled').length
     return {
       dayLabel,
       highlights: [
@@ -443,11 +391,9 @@ export function createCalendarWidgetFetcher(deps: CreateFetcherDeps): CalendarWi
           : day.events[0]
             ? `今天的安排：${day.events[0].title}`
             : '今天还没有安排事件',
-        enabledCount > 0 ? `已启用 ${enabledCount} 个自动计划` : '当前没有启用中的自动计划',
       ],
       metrics: [
         { label: '今日事件', value: String(day.events.length) },
-        { label: '启用计划', value: String(enabledCount) },
       ],
     }
   }
@@ -457,7 +403,6 @@ export function createCalendarWidgetFetcher(deps: CreateFetcherDeps): CalendarWi
     fetchWeekSchedule,
     fetchTimeAllocation,
     fetchTodayFocusSnapshot,
-    fetchScheduleRuntime,
   }
 }
 
@@ -494,7 +439,6 @@ export function getDefaultCalendarWidgetFetcher(): CalendarWidgetFetcher {
   const electronAPI = (globalThis as { electronAPI?: unknown }).electronAPI
     ?? (globalThis as { window?: { electronAPI?: unknown } }).window?.electronAPI
   const calendarApi = (electronAPI as { calendar?: unknown })?.calendar as CalendarWidgetApi | undefined
-  const scheduleApi = (electronAPI as { scheduledTasks?: unknown })?.scheduledTasks as ScheduleRuntimeApi | undefined
 
   if (!calendarApi) {
     return createCalendarWidgetFetcher({
@@ -502,12 +446,10 @@ export function getDefaultCalendarWidgetFetcher(): CalendarWidgetFetcher {
         async getEvents() { return { success: false, data: [] } },
         async getSources() { return { success: false, data: [] } },
       },
-      schedule: scheduleApi,
     })
   }
   return createCalendarWidgetFetcher({
     calendar: wrapCalendarApiWithWireNormalization(calendarApi),
-    schedule: scheduleApi,
   })
 }
 

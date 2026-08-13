@@ -2,11 +2,10 @@ import { create } from 'zustand'
 import {
   createEmptyScopeRunState,
   isForegroundBusyScopeRunState,
-  isStreamingScopeRunState,
-  phaseToToolTraceStatus,
+  isStreamingScopeRunState
 } from '../modules/agent/scopeRunState'
 import {
-  buildComposedAgentInputWithDiagnostics,
+  buildCodexIngressInputWithDiagnostics,
   filterAttachmentsForComposedAgentInput,
   resolveReferencedFilePoolAttachments,
   serializePersistedAttachments as serializeAttachments,
@@ -14,7 +13,14 @@ import {
 import { mapBackendErrorToFriendly } from '../modules/agent/error-message-mapping'
 import { emitRendererAgentMetric } from '../modules/agent/rendererMetrics'
 import { createAgentRuntimeDriver } from '../modules/agent/runtimeDriver'
+import { installAgentRuntimeReadyHydration } from '../modules/agent/agent-runtime-ready'
 import { installAgentPanelTestHarness } from '../modules/agent/agentPanelTestHarness'
+import { buildCodexCurrentDocumentAnchor } from '../modules/agent/codexCurrentDocumentAnchor'
+import {
+  captureComposerAuthority,
+  isComposerAuthorityCurrent,
+} from '../modules/agent/composer-authority'
+import { useMode } from './useMode'
 import {
   mapSendScopedResponseToMessageResult,
   type IngressAdmittedEvent,
@@ -22,20 +28,16 @@ import {
   type SendMessageResult,
   type TerminalErrorKind,
 } from '../../shared/ipc-contracts/agent-runtime'
+import type { LifecycleOperationProjection } from '../../shared/ipc-contracts/agent-lifecycle-snapshot'
+import type { AgentRuntimeReadinessSnapshot } from '../../shared/ipc-contracts/agent-runtime-readiness'
 
 import type {
-  Agent,
   AgentMessage,
-  AskUserQuestionsCardState,
-  AttachmentPreviewState,
-  ChatAttachment,
-  ChatConversation,
-  ConversationScope,
-  ScopeRunState,
-  ToolTraceEvent,
+  AskUserQuestionsCardState, ChatAttachment, ConversationScope,
+  ScopeRunState
 } from '../modules/agent/types'
 import type { AgentSendResult, AgentState, SessionSlice } from './agent-store-types'
-import type { AgentPersonalityListItem, AgentRegistryListItem } from './agent-store-helpers'
+import type { AgentRegistryListItem } from './agent-store-helpers'
 import {
   activeSessionKey,
   cloneFallbackAgents,
@@ -46,7 +48,6 @@ import {
   isSameAttachmentPoolEntry,
   lookupSessionByConversation,
   makeEmptySessionSlice,
-  mapPersonalitiesToAgents,
   mapRegistryToAgents,
   mapScopeToConversation,
   mirrorFromSessionSlice,
@@ -63,6 +64,10 @@ import {
   withSessionSlice,
   withSessionSliceAndActiveMirror,
 } from './agent-store-helpers'
+import {
+  parseActionAuthorizationMode,
+  type ActionAuthorizationMode,
+} from '../../shared/action-authorization-mode'
 
 export type {
   Agent,
@@ -112,9 +117,31 @@ type PendingIngressSnapshot = {
   content: string
   timestamp: Date
   attachments: ChatAttachment[]
+  originAliasGeneration: number | null
+  originMessageVisibilityEpoch: number
+  originSessionKey: string
 }
 
 const pendingIngressSnapshots = new Map<string, PendingIngressSnapshot>()
+const actionAuthorizationModeRequestRevisions = new Map<string, number>()
+let createSessionRequestRevision = 0
+
+function pendingIngressOriginMatches(
+  state: AgentState,
+  pending: Pick<
+    PendingIngressSnapshot,
+    'scopeId' | 'originAliasGeneration' | 'originMessageVisibilityEpoch' | 'originSessionKey'
+  >,
+): boolean {
+  const slice = normalizeSessionSlice(state.sessions[pending.originSessionKey])
+  return Boolean(
+    state.sessions[pending.originSessionKey]
+    && !state.retiredScopeIds[pending.scopeId]
+    && slice.conversationId === pending.scopeId
+    && slice.aliasGeneration === pending.originAliasGeneration
+    && slice.messageVisibilityEpoch === pending.originMessageVisibilityEpoch,
+  )
+}
 
 function rejectedMessageResult(errorKind: PrePersistenceErrorKind): SendMessageResult {
   return {
@@ -131,6 +158,196 @@ function hasUnresolvedLifecycleUncertainty(slice: SessionSlice): boolean {
     || slice.lifecycleError?.code === 'compaction_state_unknown'
 }
 
+function canResetUnknownCompaction(slice: SessionSlice, aliasId: string): boolean {
+  const error = slice.lifecycleError
+  return error?.action === 'manual_compact'
+    && error.code === 'compaction_state_unknown'
+    && error.aliasId === aliasId
+    && error.aliasGeneration === slice.aliasGeneration
+}
+
+type LifecycleHydrationFingerprint = {
+  sessionKey: string
+  aliasGeneration: number
+  streamingRequestId: string | null
+  lifecyclePendingAction: SessionSlice['lifecyclePendingAction']
+  lifecycleErrorEvidence: string | null
+  runRequestId: string | null
+  runPhase: ScopeRunState['phase'] | null
+  runUpdatedAt: string | null
+}
+
+function lifecycleHydrationFingerprint(
+  state: AgentState,
+  aliasId: string,
+): LifecycleHydrationFingerprint | null {
+  const sessionKey = sessionKeyForScopeId(state, aliasId)
+  const slice = normalizeSessionSlice(state.sessions[sessionKey]) as SessionSlice
+  if (slice.conversationId !== aliasId || slice.aliasGeneration === null) return null
+  const run = slice.scopeRunStates[aliasId] || null
+  return {
+    sessionKey,
+    aliasGeneration: slice.aliasGeneration,
+    streamingRequestId: slice.streamingRequestId,
+    lifecyclePendingAction: slice.lifecyclePendingAction,
+    lifecycleErrorEvidence: slice.lifecycleError?.evidenceDigest || null,
+    runRequestId: run?.requestId || null,
+    runPhase: run?.phase || null,
+    runUpdatedAt: run?.updatedAt || null,
+  }
+}
+
+function lifecycleHydrationStillCurrent(
+  state: AgentState,
+  aliasId: string,
+  baseline: LifecycleHydrationFingerprint,
+): boolean {
+  const current = lifecycleHydrationFingerprint(state, aliasId)
+  return Boolean(current
+    && current.sessionKey === baseline.sessionKey
+    && current.aliasGeneration === baseline.aliasGeneration
+    && current.streamingRequestId === baseline.streamingRequestId
+    && current.lifecyclePendingAction === baseline.lifecyclePendingAction
+    && current.lifecycleErrorEvidence === baseline.lifecycleErrorEvidence
+    && current.runRequestId === baseline.runRequestId
+    && current.runPhase === baseline.runPhase
+    && current.runUpdatedAt === baseline.runUpdatedAt)
+}
+
+async function hydrateCodexLifecycleScope(scope: ConversationScope): Promise<void> {
+  const api = typeof window !== 'undefined'
+    ? window.electronAPI?.agent?.readCodexLifecycleSnapshot
+    : null
+  if (!api || typeof scope.aliasGeneration !== 'number') return
+  const baseline = lifecycleHydrationFingerprint(useAgent.getState(), scope.id)
+  if (!baseline || baseline.aliasGeneration !== scope.aliasGeneration) return
+  let result: Awaited<ReturnType<typeof api>>
+  try {
+    result = await api({ aliasId: scope.id, aliasGeneration: scope.aliasGeneration })
+  } catch {
+    return
+  }
+  if (!result.success || !result.data) return
+  const projection = result.data as LifecycleOperationProjection
+  if (
+    projection.identity.aliasId !== scope.id
+    || projection.identity.aliasGeneration !== scope.aliasGeneration
+    || projection.snapshot === 'invariant_violation'
+  ) return
+  const snapshotRunId = projection.activeReadyRunId || projection.latestReadyRunId
+  if (
+    baseline.streamingRequestId
+    && projection.snapshot !== 'idle_never_started'
+    && snapshotRunId !== baseline.streamingRequestId
+  ) return
+
+  useAgent.setState((state) => {
+    if (!lifecycleHydrationStillCurrent(state, scope.id, baseline)) return state
+    const sessionKey = baseline.sessionKey
+    const slice = normalizeSessionSlice(state.sessions[sessionKey]) as SessionSlice
+    const activeProduct = projection.activeReadyRunId && (
+      projection.snapshot === 'thread_start_pending'
+      || projection.snapshot === 'turn_start_pending'
+      || projection.snapshot === 'product_turn_interruptible'
+      || projection.snapshot === 'product_turn_interrupt_unknown'
+      || projection.snapshot === 'product_turn_engine_terminal_closeout_pending'
+      || projection.snapshot === 'host_failure_closeout_pending'
+    )
+
+    if (activeProduct) {
+      const previousRun = slice.scopeRunStates[scope.id]
+      const restoredRun = previousRun?.requestId === projection.activeReadyRunId
+        ? previousRun
+        : createEmptyScopeRunState({
+            scopeId: scope.id,
+            agent: scope.agent,
+            requestId: projection.activeReadyRunId,
+            phase: 'responding',
+          })
+      const run = isForegroundBusyScopeRunState(restoredRun)
+        ? restoredRun
+        : { ...restoredRun, phase: 'responding' as const, terminalReason: null, error: null }
+      const lifecycleError = projection.snapshot === 'product_turn_interrupt_unknown'
+        && projection.requestedAction
+        ? {
+            ok: false as const,
+            action: projection.requestedAction,
+            code: 'interrupt_state_unknown' as const,
+            preserveUi: true as const,
+            aliasId: scope.id,
+            aliasGeneration: projection.identity.aliasGeneration,
+            evidenceDigest: projection.evidenceDigest,
+          }
+        : null
+      return withSessionSliceAndActiveMirror(state, sessionKey, {
+        scopeRunStates: { ...slice.scopeRunStates, [scope.id]: run },
+        isStreaming: true,
+        foregroundBusy: true,
+        composerLocked: true,
+        streamingMessageId: run.responseMessageId || null,
+        streamingRequestId: projection.activeReadyRunId,
+        lifecyclePendingAction: projection.interruptRequested
+          && projection.requestedAction
+          && projection.snapshot !== 'product_turn_interrupt_unknown'
+          ? projection.requestedAction === 'stop'
+            ? 'stopping'
+            : projection.requestedAction === 'close'
+              ? 'closing'
+              : 'resetting'
+          : null,
+        lifecycleError,
+      })
+    }
+
+    if (
+      projection.snapshot === 'manual_compaction_pending'
+      || projection.snapshot === 'manual_compaction_unknown'
+    ) {
+      return withSessionSliceAndActiveMirror(state, sessionKey, {
+        isStreaming: false,
+        foregroundBusy: true,
+        composerLocked: true,
+        streamingMessageId: null,
+        streamingRequestId: null,
+        lifecyclePendingAction: projection.snapshot === 'manual_compaction_pending'
+          ? 'compacting'
+          : null,
+        lifecycleError: projection.snapshot === 'manual_compaction_unknown'
+          ? {
+              ok: false as const,
+              action: 'manual_compact' as const,
+              code: 'compaction_state_unknown' as const,
+              preserveUi: true as const,
+              aliasId: scope.id,
+              aliasGeneration: projection.identity.aliasGeneration,
+              evidenceDigest: projection.evidenceDigest,
+            }
+          : null,
+      })
+    }
+
+    if (
+      projection.snapshot === 'idle_never_started'
+      || projection.snapshot === 'idle_ready_terminal_no_native'
+      || projection.snapshot === 'idle_native_thread'
+    ) {
+      const scopeRunStates = { ...slice.scopeRunStates }
+      delete scopeRunStates[scope.id]
+      return withSessionSliceAndActiveMirror(state, sessionKey, {
+        scopeRunStates,
+        isStreaming: false,
+        foregroundBusy: false,
+        composerLocked: false,
+        streamingMessageId: null,
+        streamingRequestId: null,
+        lifecyclePendingAction: null,
+        lifecycleError: null,
+      })
+    }
+    return state
+  })
+}
+
 function terminalReasonFromSendError(
   errorKind: TerminalErrorKind,
 ): ScopeRunState['terminalReason'] {
@@ -145,32 +362,35 @@ function terminalReasonFromSendError(
   }
 }
 
-function commitPersistedIngressSnapshot(input: {
-  requestId: string
-  scopeId: string
-  originUserMessageId: string
-  admittedAt: string
-}): boolean {
+function commitPersistedIngressSnapshot(input: Pick<
+  IngressAdmittedEvent,
+  'requestId' | 'scopeId' | 'originUserMessageId' | 'aliasGeneration' | 'messageVisibilityEpoch' | 'admittedAt'
+>): boolean {
   const pending = pendingIngressSnapshots.get(input.requestId)
   if (
     !pending
     || pending.scopeId !== input.scopeId
     || pending.userMessageId !== input.originUserMessageId
+    || pending.originMessageVisibilityEpoch !== input.messageVisibilityEpoch
   ) return false
   const currentState = useAgent.getState()
-  const sessionKey = sessionKeyForScopeId(currentState, pending.scopeId)
-  if (
-    !currentState.sessions[sessionKey]
-    || !isLiveSession(currentState, sessionKey)
-    || normalizeSessionSlice(currentState.sessions[sessionKey]).conversationId !== pending.scopeId
-  ) {
+  const sessionKey = pending.originSessionKey
+  if (!pendingIngressOriginMatches(currentState, pending)
+    || !isLiveSession(currentState, sessionKey)) {
     pendingIngressSnapshots.delete(input.requestId)
     return false
   }
-  pendingIngressSnapshots.delete(input.requestId)
-
+  let committed = false
   useAgent.setState((state) => {
     const slice = normalizeSessionSlice(state.sessions[sessionKey])
+    if (!pendingIngressOriginMatches(state, pending)) return state
+    const admittedGeneration = input.aliasGeneration ?? pending.originAliasGeneration
+    const generationMatches = admittedGeneration !== null
+      && (pending.originAliasGeneration === null
+        || admittedGeneration >= pending.originAliasGeneration)
+      && slice.messageVisibilityEpoch === input.messageVisibilityEpoch
+    if (!generationMatches) return state
+    committed = true
     const originIsActive = activeSessionKey(state) === sessionKey
     const userMessage: AgentMessage = {
       id: pending.userMessageId,
@@ -205,6 +425,7 @@ function commitPersistedIngressSnapshot(input: {
       foregroundBusy: true,
       composerLocked: true,
       state: 'live',
+      aliasGeneration: admittedGeneration,
       scopeRunStates: {
         ...slice.scopeRunStates,
         [pending.scopeId]: {
@@ -220,8 +441,18 @@ function commitPersistedIngressSnapshot(input: {
         },
       },
     })
+    const scopes = state.scopes.map((candidate) => (
+      candidate.id === pending.scopeId
+        ? { ...candidate, aliasGeneration: admittedGeneration }
+        : candidate
+    ))
     return {
       ...next,
+      scopes,
+      conversations: scopes.map(mapScopeToConversation),
+      currentScope: state.currentScope?.id === pending.scopeId
+        ? { ...state.currentScope, aliasGeneration: admittedGeneration }
+        : state.currentScope,
       ...(originIsActive
         ? {
             attachments: state.attachments.filter((attachment) => (
@@ -233,6 +464,8 @@ function commitPersistedIngressSnapshot(input: {
         : {}),
     }
   })
+  pendingIngressSnapshots.delete(input.requestId)
+  if (!committed) return false
 
   const state = useAgent.getState()
   const scope = state.scopes.find((candidate) => candidate.id === pending.scopeId) || null
@@ -260,6 +493,22 @@ function commitPersistedIngressSnapshot(input: {
 
 export function applyIngressAdmitted(event: IngressAdmittedEvent): boolean {
   return commitPersistedIngressSnapshot(event)
+}
+
+function appendComposerAttachments(
+  state: AgentState,
+  files: ChatAttachment[],
+): Pick<AgentState, 'attachments' | 'filePool'> {
+  return {
+    attachments: [...state.attachments, ...files],
+    filePool: [
+      ...state.filePool,
+      ...files.filter((file) =>
+        shouldKeepInFilePool(file)
+        && !state.filePool.some((poolItem) => isSameAttachmentPoolEntry(poolItem, file)),
+      ),
+    ],
+  }
 }
 
 export const useAgent = create<AgentState>((set, get) => ({
@@ -305,6 +554,10 @@ export const useAgent = create<AgentState>((set, get) => ({
   currentScopeId: null,
   currentScope: null,
   scopes: [],
+  retiredScopeIds: {},
+  scopeAuthorityRevision: 0,
+  composerAuthorityRevision: 0,
+  scopeListRequestRevision: 0,
   scopeRunStates: {},
   toolTrace: [],
   toolTraceStatus: 'idle',
@@ -324,9 +577,7 @@ export const useAgent = create<AgentState>((set, get) => ({
   setAgents: (agents) => set({ agents }),
 
   reloadAgents: async () => {
-    const previousState = get()
     let registryAgents: AgentRegistryListItem[] = []
-    let personalities: AgentPersonalityListItem[] = []
     try {
       const api = typeof window !== 'undefined' ? window.electronAPI?.agent : undefined
       const result = await api?.listRegistry?.()
@@ -338,26 +589,33 @@ export const useAgent = create<AgentState>((set, get) => ({
       registryAgents = []
     }
 
-    if (registryAgents.length === 0) {
-      try {
-        const api = typeof window !== 'undefined' ? window.electronAPI?.agentPersonality : undefined
-        const result = await api?.list?.()
-      if (result?.success && Array.isArray(result.data)) {
-        personalities = result.data
+    set((current) => {
+      const resolved = mapRegistryToAgents(registryAgents, current.agents, current.currentAgent)
+      if (resolved.currentAgent === current.currentAgent) return resolved
+      return {
+        ...resolved,
+        attachments: [],
+        filePool: [],
+        activeAttachmentPreview: null,
+        pendingContinuationIntent: null,
+        pendingContinuationDraftAnchor: null,
+        composerAuthorityRevision: current.composerAuthorityRevision + 1,
       }
-      } catch {
-        // silent-catch: agent personalities are optional; fall back to built-in agents if the bridge is unavailable.
-        personalities = []
-      }
-    }
-
-    const { agents, currentAgent } = registryAgents.length > 0
-      ? mapRegistryToAgents(registryAgents, previousState.agents, previousState.currentAgent)
-      : mapPersonalitiesToAgents(personalities, previousState.agents, previousState.currentAgent)
-    set({ agents, currentAgent })
+    })
   },
 
-  selectAgent: (name) => set({ currentAgent: name }),
+  selectAgent: (name) => set((state) => {
+    if (state.currentAgent === name) return state
+    return {
+      currentAgent: name,
+      attachments: [],
+      filePool: [],
+      activeAttachmentPreview: null,
+      pendingContinuationIntent: null,
+      pendingContinuationDraftAnchor: null,
+      composerAuthorityRevision: state.composerAuthorityRevision + 1,
+    }
+  }),
 
   toggleAgentSelection: (name) => set((state) => ({
     agents: state.agents.map(a =>
@@ -394,6 +652,63 @@ export const useAgent = create<AgentState>((set, get) => ({
       pendingContinuationDraftAnchor: preserveContinuation ? state.pendingContinuationDraftAnchor : null,
     }
   }),
+
+  setActionAuthorizationMode: async (mode: ActionAuthorizationMode) => {
+    const normalizedMode = parseActionAuthorizationMode(mode)
+    if (normalizedMode !== mode) throw new Error('action_authorization_mode_invalid')
+    const state = get()
+    const scopeId = state.currentScopeId
+    const api = typeof window !== 'undefined' ? window.electronAPI?.agent : null
+    if (!scopeId || !api?.setActionAuthorizationMode) {
+      throw new Error('action_authorization_mode_unavailable')
+    }
+    const expectedMessageVisibilityEpoch = state.currentScope?.messageVisibilityEpoch
+    if (!Number.isSafeInteger(expectedMessageVisibilityEpoch)) {
+      throw new Error('action_authorization_scope_identity_invalid')
+    }
+    const requestRevision = (actionAuthorizationModeRequestRevisions.get(scopeId) || 0) + 1
+    actionAuthorizationModeRequestRevisions.set(scopeId, requestRevision)
+    const result = await api.setActionAuthorizationMode(
+      scopeId,
+      normalizedMode,
+      expectedMessageVisibilityEpoch as number,
+    )
+    if (!result.success
+      || !result.data
+      || result.data.scopeId !== scopeId
+      || result.data.mode !== normalizedMode
+      || result.data.messageVisibilityEpoch !== expectedMessageVisibilityEpoch) {
+      throw new Error(result.error || 'action_authorization_mode_persist_failed')
+    }
+    set((current) => {
+      if (actionAuthorizationModeRequestRevisions.get(scopeId) !== requestRevision
+        || current.retiredScopeIds[scopeId]
+        || !current.scopes.some((scope) => scope.id === scopeId)) return current
+      const scopes = current.scopes.map((scope) => scope.id === scopeId
+        ? {
+            ...scope,
+            meta: {
+              ...scope.meta,
+              actionAuthorizationMode: normalizedMode,
+            },
+          }
+        : scope)
+      return {
+        scopes,
+        ...(current.currentScopeId === scopeId && current.currentScope?.id === scopeId
+          ? {
+              currentScope: {
+                ...current.currentScope,
+                meta: {
+                  ...current.currentScope.meta,
+                  actionAuthorizationMode: normalizedMode,
+                },
+              },
+            }
+          : {}),
+      }
+    })
+  },
 
   setComposerDraft: (value, continuationIntent) => set((state) => ({
     ...withSessionSlice(state, activeSessionKey(state), { inputValue: value }),
@@ -456,26 +771,38 @@ export const useAgent = create<AgentState>((set, get) => ({
     // closed concurrently), do nothing — the SessionTabs renderer will
     // re-render with the up-to-date list on the next frame.
     if (!state.sessionOrder.includes(id)) return state
+    if (state.activeSessionId === id) return state
     const slice = normalizeSessionSlice(state.sessions[id])
     return {
       activeSessionId: id,
       ...mirrorFromSessionSlice(state, slice),
+      attachments: [],
+      filePool: [],
+      activeAttachmentPreview: null,
+      pendingContinuationIntent: null,
+      pendingContinuationDraftAnchor: null,
+      scopeAuthorityRevision: state.scopeAuthorityRevision + 1,
+      composerAuthorityRevision: state.composerAuthorityRevision + 1,
     }
   }),
 
   createNewSession: async () => {
     const api = typeof window !== 'undefined' ? window.electronAPI?.agent : null
     if (!api?.createSession) throw new Error('agent_create_session_unavailable')
-    const result = await api.createSession()
+    const state = get()
+    const requestedAgent = state.currentAgent
+    const composerAuthority = captureComposerAuthority(state)
+    const requestRevision = ++createSessionRequestRevision
+    const result = await api.createSession({ agentId: requestedAgent })
     if (!result.ok) return result
 
-    const state = get()
     const id = generateSessionId()
     const scope: ConversationScope = {
       id: result.aliasId,
       aliasGeneration: result.aliasGeneration,
-      agent: state.currentAgent,
-      activeAgentId: state.currentAgent,
+      messageVisibilityEpoch: 0,
+      agent: requestedAgent,
+      activeAgentId: requestedAgent,
       handoffGeneration: 0,
       title: '新对话',
       sourceKind: 'local',
@@ -489,21 +816,68 @@ export const useAgent = create<AgentState>((set, get) => ({
     const slice: SessionSlice = {
       ...makeEmptySessionSlice(result.aliasId),
       aliasGeneration: result.aliasGeneration,
+      messageVisibilityEpoch: 0,
     }
-    const scopes = [scope, ...state.scopes.filter((candidate) => candidate.id !== scope.id)]
-    set({
-      sessions: { ...state.sessions, [id]: slice },
-      sessionOrder: [...state.sessionOrder, id],
-      activeSessionId: id,
-      sessionId: id,
-      scopes,
-      conversations: scopes.map(mapScopeToConversation),
-      ...mirrorFromSessionSlice({ ...state, scopes }, slice),
-      attachments: [],
-      pendingContinuationIntent: null,
-      pendingContinuationDraftAnchor: null,
-      toolTrace: [],
-      toolTraceStatus: 'idle',
+    set((current) => {
+      if (current.retiredScopeIds[result.aliasId]) return current
+      const existingScope = current.scopes.find((candidate) => candidate.id === result.aliasId)
+      const reconciledGeneration = Math.max(
+        result.aliasGeneration,
+        typeof existingScope?.aliasGeneration === 'number' ? existingScope.aliasGeneration : 0,
+      )
+      const reconciledScope = existingScope
+        ? { ...scope, ...existingScope, aliasGeneration: reconciledGeneration }
+        : { ...scope, aliasGeneration: reconciledGeneration }
+      const retainedScopes = current.scopes.filter((candidate) => (
+        candidate.id !== scope.id && !current.retiredScopeIds[candidate.id]
+      ))
+      const scopes = [reconciledScope, ...retainedScopes]
+      const matchingSessionIds = Object.entries(current.sessions)
+        .filter(([, candidate]) => normalizeSessionSlice(candidate).conversationId === result.aliasId)
+        .map(([sessionId]) => sessionId)
+      const targetSessionId = matchingSessionIds[0] || id
+      const existingSlice = normalizeSessionSlice(current.sessions[targetSessionId])
+      const reconciledSlice: SessionSlice = {
+        ...(matchingSessionIds.length > 0 ? existingSlice : slice),
+        conversationId: result.aliasId,
+        aliasGeneration: Math.max(
+          reconciledGeneration,
+          existingSlice.aliasGeneration ?? 0,
+        ),
+      }
+      const nextSessions = Object.fromEntries(
+        Object.entries(current.sessions).filter(([sessionId]) => (
+          !matchingSessionIds.includes(sessionId) || sessionId === targetSessionId
+        )),
+      ) as Record<string, SessionSlice>
+      nextSessions[targetSessionId] = reconciledSlice
+      const nextOrder = current.sessionOrder.filter((sessionId) => (
+        !matchingSessionIds.includes(sessionId) || sessionId === targetSessionId
+      ))
+      if (!nextOrder.includes(targetSessionId)) nextOrder.push(targetSessionId)
+      const durableMerge = {
+        sessions: nextSessions,
+        sessionOrder: nextOrder,
+        scopes,
+        conversations: scopes.map(mapScopeToConversation),
+        scopeAuthorityRevision: current.scopeAuthorityRevision + 1,
+      }
+      if (requestRevision !== createSessionRequestRevision
+        || !isComposerAuthorityCurrent(current, composerAuthority)) return durableMerge
+      return {
+        ...durableMerge,
+        activeSessionId: targetSessionId,
+        sessionId: targetSessionId,
+        ...mirrorFromSessionSlice({ ...current, scopes }, reconciledSlice),
+        attachments: [],
+        filePool: [],
+        activeAttachmentPreview: null,
+        pendingContinuationIntent: null,
+        pendingContinuationDraftAnchor: null,
+        toolTrace: [],
+        toolTraceStatus: 'idle',
+        composerAuthorityRevision: current.composerAuthorityRevision + 1,
+      }
     })
     return result
   },
@@ -518,54 +892,106 @@ export const useAgent = create<AgentState>((set, get) => ({
       || slice.aliasGeneration === null
       || !window.electronAPI?.agent?.closeSession
     ) throw new Error('alias_not_bound')
+    const capturedReadyRunId = slice.streamingRequestId
     if (slice.lifecyclePendingAction) throw new Error('lifecycle_action_pending')
-    if (hasUnresolvedLifecycleUncertainty(slice)) throw new Error('lifecycle_reconciliation_required')
+    const exactInterruptRetry = slice.lifecycleError?.action === 'close'
+      && slice.lifecycleError.code === 'interrupt_state_unknown'
+      && slice.lifecycleError.aliasId === aliasId
+      && slice.lifecycleError.aliasGeneration === slice.aliasGeneration
+    const priorLifecycleError = exactInterruptRetry ? slice.lifecycleError : null
+    if (hasUnresolvedLifecycleUncertainty(slice) && !exactInterruptRetry) {
+      throw new Error('lifecycle_reconciliation_required')
+    }
     set((current) => withSessionSliceAndActiveMirror(current, id, {
       lifecyclePendingAction: 'closing',
       lifecycleError: null,
     }))
+    const setCloseTargetIfCurrent = (patch: Partial<SessionSlice>): boolean => {
+      let applied = false
+      set((current) => {
+        const currentSlice = normalizeSessionSlice(current.sessions[id])
+        if (
+          currentSlice.conversationId !== aliasId
+          || currentSlice.aliasGeneration !== slice.aliasGeneration
+          || currentSlice.streamingRequestId !== capturedReadyRunId
+          || currentSlice.lifecyclePendingAction !== 'closing'
+        ) return current
+        applied = true
+        return withSessionSliceAndActiveMirror(current, id, patch)
+      })
+      return applied
+    }
     let result: Awaited<ReturnType<typeof window.electronAPI.agent.closeSession>>
     try {
       result = await window.electronAPI.agent.closeSession({
         aliasId,
         aliasGeneration: slice.aliasGeneration,
+        readyRunId: capturedReadyRunId,
       })
     } catch (error) {
-      set((current) => withSessionSliceAndActiveMirror(current, id, {
+      setCloseTargetIfCurrent({
         lifecyclePendingAction: null,
-      }))
+        lifecycleError: priorLifecycleError,
+      })
       throw error
     }
     if (!result.ok) {
-      set((current) => withSessionSliceAndActiveMirror(current, id, {
+      setCloseTargetIfCurrent({
         lifecyclePendingAction: null,
         lifecycleError: result,
-      }))
+      })
       return result
     }
     if (result.action !== 'close') {
-      set((current) => withSessionSliceAndActiveMirror(current, id, {
+      setCloseTargetIfCurrent({
         lifecyclePendingAction: null,
-      }))
+        lifecycleError: priorLifecycleError,
+      })
       throw new Error('lifecycle_result_action_mismatch')
     }
 
     set((current) => {
-      const nextOrder = current.sessionOrder.filter((entry) => entry !== id)
-      const nextSessions = { ...current.sessions }
-      delete nextSessions[id]
-      const nextActiveId = current.activeSessionId === id
-        ? (nextOrder[0] ?? null)
-        : current.activeSessionId
+      const removedSessionIds = new Set(Object.entries(current.sessions)
+        .filter(([, candidate]) => normalizeSessionSlice(candidate).conversationId === aliasId)
+        .map(([sessionId]) => sessionId))
+      const nextOrder = current.sessionOrder.filter((entry) => !removedSessionIds.has(entry))
+      const nextSessions = Object.fromEntries(Object.entries(current.sessions)
+        .filter(([sessionId]) => !removedSessionIds.has(sessionId))) as Record<string, SessionSlice>
+      const nextActiveId = current.activeSessionId && !removedSessionIds.has(current.activeSessionId)
+        ? current.activeSessionId
+        : (nextOrder[0] ?? null)
       const nextSlice = nextActiveId ? normalizeSessionSlice(nextSessions[nextActiveId]) : null
+      const closedActiveSession = current.activeSessionId === null
+        || removedSessionIds.has(current.activeSessionId)
+      const nextScopes = current.scopes.filter((scope) => scope.id !== aliasId)
+      const nextLiveMessages = { ...current.scopeLiveMessages }
+      delete nextLiveMessages[aliasId]
+      const stateForMirror = {
+        ...current,
+        scopes: nextScopes,
+        currentScope: current.currentScope?.id === aliasId ? null : current.currentScope,
+      }
       return {
         sessions: nextSessions,
         sessionOrder: nextOrder,
         activeSessionId: nextActiveId,
         sessionId: nextActiveId ?? current.sessionId,
+        retiredScopeIds: { ...current.retiredScopeIds, [aliasId]: true },
+        scopeAuthorityRevision: current.scopeAuthorityRevision + 1,
+        scopeLiveMessages: nextLiveMessages,
+        scopes: nextScopes,
+        conversations: nextScopes.map(mapScopeToConversation),
         ...(nextSlice
-          ? mirrorFromSessionSlice(current, nextSlice)
-          : mirrorFromSessionSlice(current, makeEmptySessionSlice())),
+          ? mirrorFromSessionSlice(stateForMirror, nextSlice)
+          : mirrorFromSessionSlice(stateForMirror, makeEmptySessionSlice())),
+        ...(closedActiveSession ? {
+          attachments: [],
+          filePool: [],
+          activeAttachmentPreview: null,
+          pendingContinuationIntent: null,
+          pendingContinuationDraftAnchor: null,
+          composerAuthorityRevision: current.composerAuthorityRevision + 1,
+        } : {}),
       }
     })
     return result
@@ -609,38 +1035,77 @@ export const useAgent = create<AgentState>((set, get) => ({
     const sessionKey = sessionKeyForScopeId(state, aliasId)
     const slice = normalizeSessionSlice(state.sessions[sessionKey])
     if (slice.aliasGeneration === null) throw new Error('alias_not_bound')
+    const stoppedRequestId = slice.streamingRequestId
+    if (!stoppedRequestId) throw new Error('active_run_not_bound')
     if (slice.lifecyclePendingAction) throw new Error('lifecycle_action_pending')
-    if (hasUnresolvedLifecycleUncertainty(slice)) throw new Error('lifecycle_reconciliation_required')
+    const exactInterruptRetry = slice.lifecycleError?.action === 'stop'
+      && slice.lifecycleError.code === 'interrupt_state_unknown'
+      && slice.lifecycleError.aliasId === aliasId
+      && slice.lifecycleError.aliasGeneration === slice.aliasGeneration
+    const priorLifecycleError = exactInterruptRetry ? slice.lifecycleError : null
+    if (hasUnresolvedLifecycleUncertainty(slice) && !exactInterruptRetry) {
+      throw new Error('lifecycle_reconciliation_required')
+    }
     set((current) => withSessionSliceAndActiveMirror(current, sessionKey, {
       lifecyclePendingAction: 'stopping',
       lifecycleError: null,
     }))
+    const setStopTargetIfCurrent = (patch: Partial<SessionSlice>): boolean => {
+      let applied = false
+      set((current) => {
+        const currentSlice = normalizeSessionSlice(current.sessions[sessionKey])
+        if (
+          currentSlice.conversationId !== aliasId
+          || currentSlice.aliasGeneration !== slice.aliasGeneration
+          || currentSlice.streamingRequestId !== stoppedRequestId
+        ) return current
+        applied = true
+        return withSessionSliceAndActiveMirror(current, sessionKey, patch)
+      })
+      return applied
+    }
     let result: Awaited<ReturnType<typeof window.electronAPI.agent.kill>>
     try {
       result = await window.electronAPI.agent.kill({
         aliasId,
         aliasGeneration: slice.aliasGeneration,
+        readyRunId: stoppedRequestId,
       })
     } catch (error) {
-      set((current) => withSessionSliceAndActiveMirror(current, sessionKey, {
+      setStopTargetIfCurrent({
         lifecyclePendingAction: null,
-      }))
+        lifecycleError: priorLifecycleError,
+      })
       throw error
     }
     if (!result.ok) {
-      set((current) => withSessionSliceAndActiveMirror(current, sessionKey, {
+      if (result.code === 'no_active_operation') {
+        const applied = setStopTargetIfCurrent({
+          lifecyclePendingAction: null,
+          lifecycleError: null,
+          streamingMessageId: null,
+          streamingRequestId: null,
+          isStreaming: false,
+          foregroundBusy: false,
+          composerLocked: false,
+        })
+        if (applied) agentRuntimeDriver.clearInfrastructureWatchdog(aliasId, stoppedRequestId)
+        return result
+      }
+      setStopTargetIfCurrent({
         lifecyclePendingAction: null,
         lifecycleError: result,
-      }))
+      })
       return result
     }
     if (result.action !== 'stop') {
-      set((current) => withSessionSliceAndActiveMirror(current, sessionKey, {
+      setStopTargetIfCurrent({
         lifecyclePendingAction: null,
-      }))
+        lifecycleError: priorLifecycleError,
+      })
       throw new Error('lifecycle_result_action_mismatch')
     }
-    set((current) => withSessionSliceAndActiveMirror(current, sessionKey, {
+    const applied = setStopTargetIfCurrent({
       lifecyclePendingAction: null,
       lifecycleError: null,
       streamingMessageId: null,
@@ -648,8 +1113,8 @@ export const useAgent = create<AgentState>((set, get) => ({
       isStreaming: false,
       foregroundBusy: false,
       composerLocked: false,
-    }))
-    agentRuntimeDriver.clearInfrastructureWatchdog(aliasId, null)
+    })
+    if (applied) agentRuntimeDriver.clearInfrastructureWatchdog(aliasId, stoppedRequestId)
     return result
   },
 
@@ -660,53 +1125,137 @@ export const useAgent = create<AgentState>((set, get) => ({
     const sessionKey = sessionKeyForScopeId(state, aliasId)
     const slice = normalizeSessionSlice(state.sessions[sessionKey])
     if (slice.aliasGeneration === null) throw new Error('alias_not_bound')
+    const capturedReadyRunId = slice.streamingRequestId
     if (slice.lifecyclePendingAction) throw new Error('lifecycle_action_pending')
-    if (hasUnresolvedLifecycleUncertainty(slice)) throw new Error('lifecycle_reconciliation_required')
+    const exactInterruptRetry = slice.lifecycleError?.action === 'reset'
+      && slice.lifecycleError.code === 'interrupt_state_unknown'
+      && slice.lifecycleError.aliasId === aliasId
+      && slice.lifecycleError.aliasGeneration === slice.aliasGeneration
+    if (
+      hasUnresolvedLifecycleUncertainty(slice)
+      && !exactInterruptRetry
+      && !canResetUnknownCompaction(slice, aliasId)
+    ) throw new Error('lifecycle_reconciliation_required')
+    const priorLifecycleError = exactInterruptRetry || canResetUnknownCompaction(slice, aliasId)
+      ? slice.lifecycleError
+      : null
     set((current) => withSessionSliceAndActiveMirror(current, sessionKey, {
       lifecyclePendingAction: 'resetting',
       lifecycleError: null,
     }))
+    const setResetTargetIfCurrent = (patch: Partial<SessionSlice>): boolean => {
+      let applied = false
+      set((current) => {
+        const currentSlice = normalizeSessionSlice(current.sessions[sessionKey])
+        if (
+          currentSlice.conversationId !== aliasId
+          || currentSlice.aliasGeneration !== slice.aliasGeneration
+          || currentSlice.streamingRequestId !== capturedReadyRunId
+          || currentSlice.lifecyclePendingAction !== 'resetting'
+        ) return current
+        applied = true
+        return withSessionSliceAndActiveMirror(current, sessionKey, patch)
+      })
+      return applied
+    }
     let result: Awaited<ReturnType<typeof window.electronAPI.agent.resetSession>>
     try {
       result = await window.electronAPI.agent.resetSession({
         aliasId,
         aliasGeneration: slice.aliasGeneration,
+        readyRunId: capturedReadyRunId,
       })
     } catch (error) {
-      set((current) => withSessionSliceAndActiveMirror(current, sessionKey, {
+      setResetTargetIfCurrent({
         lifecyclePendingAction: null,
-      }))
+        lifecycleError: priorLifecycleError,
+      })
       throw error
     }
     if (!result.ok) {
-      set((current) => withSessionSliceAndActiveMirror(current, sessionKey, {
+      setResetTargetIfCurrent({
         lifecyclePendingAction: null,
         lifecycleError: result,
-      }))
+      })
       return result
     }
     if (result.action !== 'reset') {
-      set((current) => withSessionSliceAndActiveMirror(current, sessionKey, {
+      setResetTargetIfCurrent({
         lifecyclePendingAction: null,
-      }))
+        lifecycleError: priorLifecycleError,
+      })
       throw new Error('lifecycle_result_action_mismatch')
     }
+    const invalidatedIngressRequestIds: string[] = []
+    let resetApplied = false
     set((current) => {
+      const currentSlice = normalizeSessionSlice(current.sessions[sessionKey])
+      if (
+        currentSlice.conversationId !== aliasId
+        || currentSlice.aliasGeneration !== slice.aliasGeneration
+        || currentSlice.streamingRequestId !== capturedReadyRunId
+        || currentSlice.lifecyclePendingAction !== 'resetting'
+      ) return current
+      resetApplied = true
+      for (const [requestId, pending] of pendingIngressSnapshots) {
+        if (pending.scopeId === aliasId
+          && pending.originAliasGeneration === slice.aliasGeneration
+          && pending.originMessageVisibilityEpoch === slice.messageVisibilityEpoch) {
+          invalidatedIngressRequestIds.push(requestId)
+        }
+      }
+      const scopes = current.scopes.map((candidate) => (
+        candidate.id === aliasId
+          ? {
+              ...candidate,
+              aliasGeneration: result.newGeneration,
+              messageVisibilityEpoch: currentSlice.messageVisibilityEpoch + 1,
+            }
+          : candidate
+      ))
+      const currentScope = current.currentScope?.id === aliasId
+        ? {
+            ...current.currentScope,
+            aliasGeneration: result.newGeneration,
+            messageVisibilityEpoch: currentSlice.messageVisibilityEpoch + 1,
+          }
+        : current.currentScope
       const next = withSessionSliceAndActiveMirror(current, sessionKey, {
         ...makeEmptySessionSlice(aliasId),
         aliasGeneration: result.newGeneration,
+        messageVisibilityEpoch: currentSlice.messageVisibilityEpoch + 1,
       })
-      return activeSessionKey(current) === sessionKey
+      const lifecyclePatch = activeSessionKey(current) === sessionKey
         ? {
             ...next,
             attachments: [],
+            filePool: [],
+            activeAttachmentPreview: null,
             pendingContinuationIntent: null,
             pendingContinuationDraftAnchor: null,
             toolTrace: [],
-            toolTraceStatus: 'idle',
+            toolTraceStatus: 'idle' as const,
           }
         : next
+      const scopeLiveMessages = { ...current.scopeLiveMessages }
+      delete scopeLiveMessages[aliasId]
+      return {
+        ...lifecyclePatch,
+        scopes,
+        conversations: scopes.map(mapScopeToConversation),
+        currentScope,
+        scopeLiveMessages,
+        scopeAuthorityRevision: current.scopeAuthorityRevision + 1,
+        composerAuthorityRevision: current.composerAuthorityRevision + 1,
+      }
     })
+    if (resetApplied) {
+      for (const requestId of invalidatedIngressRequestIds) {
+        pendingIngressSnapshots.delete(requestId)
+        agentRuntimeDriver.clearInfrastructureWatchdog(aliasId, requestId)
+      }
+      agentRuntimeDriver.clearInfrastructureWatchdog(aliasId, capturedReadyRunId)
+    }
     return result
   },
 
@@ -749,41 +1298,119 @@ export const useAgent = create<AgentState>((set, get) => ({
   },
 
   loadScopes: async () => {
-    if (typeof window === 'undefined' || !window.electronAPI?.agent) return
+    if (typeof window === 'undefined' || !window.electronAPI?.agent) return false
     try {
+      const requestRevision = get().scopeListRequestRevision + 1
+      const authorityRevision = get().scopeAuthorityRevision
+      set({ scopeListRequestRevision: requestRevision })
       const { currentAgent } = get()
       const result = await window.electronAPI.agent.listConversationScopes(currentAgent)
-      const scopes: ConversationScope[] = result.success && Array.isArray(result.data)
-        ? result.data as unknown as ConversationScope[]
-        : []
-      if (scopes.length === 0) return
+      if (!result.success || !Array.isArray(result.data)) return false
+      const currentAuthority = get()
+      if (currentAuthority.scopeListRequestRevision !== requestRevision
+        || currentAuthority.scopeAuthorityRevision !== authorityRevision) return false
+      const scopes = (result.data as unknown as ConversationScope[])
+        .filter((scope) => !currentAuthority.retiredScopeIds[scope.id])
+      if (scopes.length === 0) {
+        const emptySlice = makeEmptySessionSlice()
+        set((state) => {
+          const composerInvalidated = Boolean(
+            state.activeSessionId
+            || state.currentScopeId
+            || state.attachments.length > 0
+            || state.filePool.length > 0
+            || state.activeAttachmentPreview
+            || state.pendingContinuationIntent,
+          )
+          return {
+            sessions: {},
+            sessionOrder: [],
+            activeSessionId: null,
+            sessionId: state.sessionId,
+            scopes: [],
+            conversations: [],
+            scopeLiveMessages: {},
+            scopeAuthorityRevision: state.scopeAuthorityRevision + 1,
+            ...mirrorFromSessionSlice({ ...state, scopes: [], currentScope: null }, emptySlice),
+            attachments: [],
+            filePool: [],
+            activeAttachmentPreview: null,
+            pendingContinuationIntent: null,
+            pendingContinuationDraftAnchor: null,
+            ...(composerInvalidated
+              ? { composerAuthorityRevision: state.composerAuthorityRevision + 1 }
+              : {}),
+          }
+        })
+        return true
+      }
       const previousScopeId = get().currentScopeId
-      const currentScope = scopes.find((scope) => scope.id === previousScopeId) || scopes[0] || null
+      const requestedCurrentScope = scopes.find((scope) => scope.id === previousScopeId) || scopes[0] || null
       set((state) => {
-        const nextSessions = { ...state.sessions }
-        const nextOrder = [...state.sessionOrder]
+        const loadedScopeIds = new Set(scopes.map((scope) => scope.id))
+        const nextSessions: typeof state.sessions = {}
+        const nextOrder = state.sessionOrder.filter((sessionKey) => {
+          const conversationId = normalizeSessionSlice(state.sessions[sessionKey]).conversationId
+          if (!conversationId || !loadedScopeIds.has(conversationId)) return false
+          nextSessions[sessionKey] = state.sessions[sessionKey]
+          return true
+        })
         const sessionByScope = new Map<string, string>()
-        for (const [sessionKey, sliceInput] of Object.entries(state.sessions)) {
+        for (const [sessionKey, sliceInput] of Object.entries(nextSessions)) {
           const conversationId = normalizeSessionSlice(sliceInput).conversationId
           if (conversationId) sessionByScope.set(conversationId, sessionKey)
         }
-        for (const scope of scopes) {
+        const reconciledScopes = scopes.map((scope) => {
           const sessionKey = sessionByScope.get(scope.id) || scope.id
           const slice = normalizeSessionSlice(nextSessions[sessionKey])
-          nextSessions[sessionKey] = {
-            ...slice,
-            conversationId: scope.id,
-            aliasGeneration: typeof scope.aliasGeneration === 'number'
-              ? scope.aliasGeneration
-              : null,
-          }
+          const loadedGeneration = typeof scope.aliasGeneration === 'number'
+            ? scope.aliasGeneration
+            : null
+          const aliasGeneration = slice.aliasGeneration === null
+            ? loadedGeneration
+            : loadedGeneration === null
+              ? slice.aliasGeneration
+              : Math.max(slice.aliasGeneration, loadedGeneration)
+          const loadedVisibilityEpoch = Number.isSafeInteger(scope.messageVisibilityEpoch)
+            ? scope.messageVisibilityEpoch
+            : 0
+          const messageVisibilityEpoch = Math.max(
+            slice.messageVisibilityEpoch,
+            loadedVisibilityEpoch,
+          )
+          nextSessions[sessionKey] = loadedVisibilityEpoch > slice.messageVisibilityEpoch
+            ? {
+                ...makeEmptySessionSlice(scope.id),
+                aliasGeneration,
+                messageVisibilityEpoch,
+              }
+            : {
+                ...slice,
+                conversationId: scope.id,
+                aliasGeneration,
+                messageVisibilityEpoch,
+              }
           sessionByScope.set(scope.id, sessionKey)
           if (!nextOrder.includes(sessionKey)) nextOrder.push(sessionKey)
+          return { ...scope, aliasGeneration, messageVisibilityEpoch }
+        })
+
+        const scopeLiveMessages = { ...state.scopeLiveMessages }
+        for (const scope of reconciledScopes) {
+          const previous = state.scopes.find((candidate) => candidate.id === scope.id)
+          if ((previous?.messageVisibilityEpoch ?? 0) < scope.messageVisibilityEpoch) {
+            delete scopeLiveMessages[scope.id]
+          }
         }
+
+        const currentScope = requestedCurrentScope
+          ? reconciledScopes.find((scope) => scope.id === requestedCurrentScope.id) || null
+          : null
 
         const sessionKey = currentScope
           ? (sessionByScope.get(currentScope.id) || activeSessionKey(state))
           : activeSessionKey(state)
+        const previousTargetSlice = normalizeSessionSlice(state.sessions[sessionKey])
         const slice = normalizeSessionSlice(nextSessions[sessionKey])
         const activeRunState = getScopeRunStateForScope({
           ...state,
@@ -795,9 +1422,7 @@ export const useAgent = create<AgentState>((set, get) => ({
         const nextSlice = {
           ...slice,
           conversationId: currentScope?.id || null,
-          aliasGeneration: typeof currentScope?.aliasGeneration === 'number'
-            ? currentScope.aliasGeneration
-            : null,
+          aliasGeneration: currentScope?.aliasGeneration ?? slice.aliasGeneration,
           scopeRunStates: nextScopeRunStates,
           isStreaming: isStreamingScopeRunState(activeRunState),
           foregroundBusy: isForegroundBusyScopeRunState(activeRunState),
@@ -805,20 +1430,40 @@ export const useAgent = create<AgentState>((set, get) => ({
           streamingRequestId: activeRunState?.requestId || null,
         }
         nextSessions[sessionKey] = nextSlice
-        const stateWithScopes = { ...state, scopes }
+        const stateWithScopes = { ...state, scopes: reconciledScopes }
+        const composerInvalidated = state.activeSessionId !== sessionKey
+          || state.currentScopeId !== (currentScope?.id || null)
+          || nextSlice.messageVisibilityEpoch > previousTargetSlice.messageVisibilityEpoch
+          || Boolean(currentScope && currentScope.agent !== state.currentAgent)
         return {
           sessions: nextSessions,
           sessionOrder: nextOrder,
           activeSessionId: sessionKey,
           sessionId: sessionKey,
           ...mirrorFromSessionSlice(stateWithScopes, nextSlice),
-          scopes,
-          conversations: scopes.map(mapScopeToConversation),
-          currentAgent: currentScope?.agent || get().currentAgent,
-          pendingContinuationIntent: null,
-          pendingContinuationDraftAnchor: null,
+          scopes: reconciledScopes,
+          conversations: reconciledScopes.map(mapScopeToConversation),
+          currentAgent: currentScope?.agent || state.currentAgent,
+          scopeLiveMessages,
+          scopeAuthorityRevision: state.scopeAuthorityRevision + 1,
+          ...(composerInvalidated ? {
+            pendingContinuationIntent: null,
+            pendingContinuationDraftAnchor: null,
+            attachments: [],
+            filePool: [],
+            activeAttachmentPreview: null,
+            composerAuthorityRevision: state.composerAuthorityRevision + 1,
+          } : {}),
         }
       })
+      // ChatPanel registers runtime listeners before calling loadScopes. Read
+      // the durable owner only after the alias slices exist, then apply it by
+      // exact generation/run CAS so a concurrent ingress or terminal event wins.
+      const reconciledScopes = get().scopes.filter((candidate) => (
+        scopes.some((loaded) => loaded.id === candidate.id)
+      ))
+      await Promise.all(reconciledScopes.map((candidate) => hydrateCodexLifecycleScope(candidate)))
+      const currentScope = get().currentScope
       const hasOnlyWelcomeMessages = get().messages.every((message) => /^welcome(?:-|$)/.test(message.id))
       if (
         currentScope?.id &&
@@ -829,14 +1474,24 @@ export const useAgent = create<AgentState>((set, get) => ({
         await get().loadScope(currentScope.id)
       }
       await hydratePendingAskUserQuestionsCards()
-    } catch { /* ignore */ }
+      return true
+    } catch {
+      return false
+    }
   },
 
   loadScope: async (scopeId: string) => {
     if (typeof window === 'undefined' || !window.electronAPI?.agent) return
     try {
+      const authorityRevision = get().scopeAuthorityRevision
+      if (get().retiredScopeIds[scopeId]
+        || !get().scopes.some((scope) => scope.id === scopeId)) return
       const result = await window.electronAPI.agent.getConversationScopeMessages(scopeId)
       if (!result.success || !result.data) return
+      const authoritative = get()
+      if (authoritative.scopeAuthorityRevision !== authorityRevision
+        || authoritative.retiredScopeIds[scopeId]
+        || !authoritative.scopes.some((scope) => scope.id === scopeId)) return
       const scopes = get().scopes
       const scope = scopes.find((item) => item.id === scopeId) || null
       const activeRunState = getScopeRunStateForScope(get(), scopeId)
@@ -882,6 +1537,14 @@ export const useAgent = create<AgentState>((set, get) => ({
       set((state) => {
         const sessionKey = sessionKeyForScopeId(state, scopeId)
         const slice = normalizeSessionSlice(state.sessions[sessionKey])
+        const loadedAliasGeneration = typeof scope?.aliasGeneration === 'number'
+          ? scope.aliasGeneration
+          : null
+        const aliasGeneration = slice.aliasGeneration === null
+          ? loadedAliasGeneration
+          : loadedAliasGeneration === null
+            ? slice.aliasGeneration
+            : Math.max(slice.aliasGeneration, loadedAliasGeneration)
         const nextScopeRunStates = activeRunState
           ? { ...slice.scopeRunStates, [scopeId]: activeRunState }
           : slice.scopeRunStates
@@ -889,9 +1552,8 @@ export const useAgent = create<AgentState>((set, get) => ({
           ...slice,
           messages,
           conversationId: scopeId,
-          aliasGeneration: typeof scope?.aliasGeneration === 'number'
-            ? scope.aliasGeneration
-            : null,
+          aliasGeneration,
+          messageVisibilityEpoch: scope?.messageVisibilityEpoch ?? slice.messageVisibilityEpoch,
           scopeRunStates: nextScopeRunStates,
           isStreaming: isStreamingScopeRunState(activeRunState),
           foregroundBusy: isForegroundBusyScopeRunState(activeRunState),
@@ -899,17 +1561,33 @@ export const useAgent = create<AgentState>((set, get) => ({
           streamingMessageId: null,
           streamingRequestId: activeRunState?.requestId || null,
         }
+        const nextScope = scope
+          ? { ...scope, aliasGeneration }
+          : null
+        const scopes = state.scopes.map((candidate) => (
+          candidate.id === scopeId && nextScope ? nextScope : candidate
+        ))
+        const composerInvalidated = state.activeSessionId !== sessionKey
+          || state.currentScopeId !== scopeId
+          || nextSlice.messageVisibilityEpoch > slice.messageVisibilityEpoch
+          || Boolean(nextScope && nextScope.agent !== state.currentAgent)
         return {
           sessions: { ...state.sessions, [sessionKey]: nextSlice },
           activeSessionId: sessionKey,
           sessionId: sessionKey,
           ...mirrorFromSessionSlice(state, nextSlice),
-          currentScope: scope,
-          currentAgent: scope?.agent || get().currentAgent,
-          attachments: [],
-          filePool: [],
-          pendingContinuationIntent: null,
-          pendingContinuationDraftAnchor: null,
+          scopes,
+          conversations: scopes.map(mapScopeToConversation),
+          currentScope: nextScope,
+          currentAgent: nextScope?.agent || state.currentAgent,
+          ...(composerInvalidated ? {
+            attachments: [],
+            filePool: [],
+            activeAttachmentPreview: null,
+            pendingContinuationIntent: null,
+            pendingContinuationDraftAnchor: null,
+            composerAuthorityRevision: state.composerAuthorityRevision + 1,
+          } : {}),
         }
       })
     } catch { /* ignore */ }
@@ -975,16 +1653,9 @@ export const useAgent = create<AgentState>((set, get) => ({
   },
 
   // W3: Add attachments
-  addAttachments: (files: ChatAttachment[]) => set((state) => ({
-    attachments: [...state.attachments, ...files],
-    filePool: [
-      ...state.filePool,
-      ...files.filter((file) =>
-        shouldKeepInFilePool(file) &&
-        !state.filePool.some((poolItem) => isSameAttachmentPoolEntry(poolItem, file)),
-      ),
-    ],
-  })),
+  addAttachments: (files: ChatAttachment[]) => set((state) => (
+    appendComposerAttachments(state, files)
+  )),
 
   removeAttachment: (id: string) => set((state) => {
     const removedAttachment = state.attachments.find((attachment) => attachment.id === id)
@@ -1002,6 +1673,7 @@ export const useAgent = create<AgentState>((set, get) => ({
   // W3: Pick files via system dialog
   pickFiles: async () => {
     if (typeof window === 'undefined' || !window.electronAPI?.chat) return
+    const composerAuthority = captureComposerAuthority(get())
     try {
       const result = await window.electronAPI.chat.pickFiles()
       if (result.success && result.data && result.data.length > 0) {
@@ -1014,12 +1686,18 @@ export const useAgent = create<AgentState>((set, get) => ({
           ext: f.ext,
           source: 'file',
         }))
-        get().addAttachments(attachments)
+        set((state) => (
+          isComposerAuthorityCurrent(state, composerAuthority)
+            ? appendComposerAttachments(state, attachments)
+            : state
+        ))
       }
     } catch { /* ignore */ }
   },
 
-  sendMessage: async (content: string) => {
+  sendMessage: async (content: string, options?: {
+    codexExternalReadSlice?: Record<string, unknown>
+  }) => {
     const normalizedContent = content.trim()
     const { attachments: pendingAttachments } = get()
     if (!normalizedContent && pendingAttachments.length === 0) {
@@ -1040,6 +1718,15 @@ export const useAgent = create<AgentState>((set, get) => ({
     }
     const originSessionKey = sessionKeyForScopeId(get(), currentScopeId)
     const originSlice = normalizeSessionSlice(get().sessions[originSessionKey])
+    const originComposerAuthority = captureComposerAuthority(get())
+    if (
+      originComposerAuthority.sessionId !== originSessionKey
+      || originComposerAuthority.scopeId !== currentScopeId
+      || originComposerAuthority.sessionConversationId !== currentScopeId
+    ) return rejectedMessageResult('conversation_reset_required')
+    if (originSlice.aliasGeneration === null) {
+      return rejectedMessageResult('conversation_reset_required')
+    }
     if (originSlice.lifecyclePendingAction) return rejectedMessageResult('thread_busy')
     if (hasUnresolvedLifecycleUncertainty(originSlice)) {
       return rejectedMessageResult('conversation_reset_required')
@@ -1051,10 +1738,16 @@ export const useAgent = create<AgentState>((set, get) => ({
     // Capture and validate attachments before clearing visible composer state.
     const currentAttachments = filterAttachmentsForComposedAgentInput(content, [...attachments])
     const { filePool } = get()
-    const composedInput = await buildComposedAgentInputWithDiagnostics({
+    const referencedPoolAttachments = resolveReferencedFilePoolAttachments(content, filePool)
+    const messageAttachments = [...currentAttachments]
+    for (const attachment of referencedPoolAttachments) {
+      if (!messageAttachments.some((candidate) => isSameAttachmentPoolEntry(candidate, attachment))) {
+        messageAttachments.push(attachment)
+      }
+    }
+    const composedInput = await buildCodexIngressInputWithDiagnostics({
       content,
-      attachments: currentAttachments,
-      filePool,
+      attachments: messageAttachments,
     })
     if (composedInput.diagnostics.inputFailedCount > 0) {
       emitRendererAgentMetric('renderer_attachment_input_failed', {
@@ -1064,24 +1757,41 @@ export const useAgent = create<AgentState>((set, get) => ({
       })
       return rejectedMessageResult('attachment_unavailable')
     }
+    let currentDocumentAnchor
+    try {
+      currentDocumentAnchor = await buildCodexCurrentDocumentAnchor(activeScopeId)
+    } catch {
+      return rejectedMessageResult('attachment_unavailable')
+    }
+    const beforeDispatch = get()
+    if (
+      !isComposerAuthorityCurrent(beforeDispatch, originComposerAuthority)
+      || activeSessionKey(beforeDispatch) !== originSessionKey
+      || !pendingIngressOriginMatches(beforeDispatch, {
+        scopeId: activeScopeId,
+        originAliasGeneration: originSlice.aliasGeneration,
+        originMessageVisibilityEpoch: originSlice.messageVisibilityEpoch,
+        originSessionKey,
+      })
+    ) return rejectedMessageResult('conversation_reset_required')
 
     const userMsgId = generateId('msg')
     const userTimestamp = new Date()
 
-    const referencedPoolAttachments = resolveReferencedFilePoolAttachments(content, filePool)
-    const messageAttachments = [...currentAttachments]
-    for (const attachment of referencedPoolAttachments) {
-      if (!messageAttachments.some((candidate) => isSameAttachmentPoolEntry(candidate, attachment))) {
-        messageAttachments.push(attachment)
-      }
-    }
     const persistedAttachments = serializeAttachments(messageAttachments)
     const userMessageMeta = {
       sourceKind: activeScope.sourceKind,
       sourceId: activeScope.sourceId,
       threadKey: activeScope.threadKey,
       direction: 'local-input',
+      workbenchMode: useMode.getState().workbenchMode,
+      actionAuthorizationMode: parseActionAuthorizationMode(
+        activeScope.meta.actionAuthorizationMode,
+      ),
       attachments: persistedAttachments.length > 0 ? persistedAttachments : undefined,
+      ...(options?.codexExternalReadSlice
+        ? { codexExternalReadSlice: options.codexExternalReadSlice }
+        : {}),
     }
 
     const requestId = generateId('req')
@@ -1094,7 +1804,10 @@ export const useAgent = create<AgentState>((set, get) => ({
       agent: activeAgentName,
       content,
       timestamp: userTimestamp,
-      attachments: currentAttachments,
+      attachments: messageAttachments,
+      originAliasGeneration: originSlice.aliasGeneration,
+      originMessageVisibilityEpoch: originSlice.messageVisibilityEpoch,
+      originSessionKey,
     })
 
     try {
@@ -1107,13 +1820,17 @@ export const useAgent = create<AgentState>((set, get) => ({
           scopeId: activeScopeId,
           message: finalMessage,
           requestId,
+          expectedAliasGeneration: originSlice.aliasGeneration as number,
+          expectedMessageVisibilityEpoch: originSlice.messageVisibilityEpoch,
+          resources: composedInput.resources,
+          currentDocumentAnchor,
           userMessage: {
             id: userMsgId,
             content,
             timestamp: userTimestamp.toISOString(),
             meta: userMessageMeta,
             attachmentConfirmation: {
-              selectedCount: currentAttachments.length,
+              selectedCount: messageAttachments.length,
               metadataCount: persistedAttachments.length,
               inputIncludedCount: composedInput.diagnostics.inputIncludedCount,
               inputFailedCount: composedInput.diagnostics.inputFailedCount,
@@ -1130,6 +1847,8 @@ export const useAgent = create<AgentState>((set, get) => ({
             requestId,
             scopeId: activeScopeId,
             originUserMessageId: userMsgId,
+            aliasGeneration: result.aliasGeneration,
+            messageVisibilityEpoch: originSlice.messageVisibilityEpoch,
             admittedAt: userTimestamp.toISOString(),
           })
         }
@@ -1137,7 +1856,49 @@ export const useAgent = create<AgentState>((set, get) => ({
         if (!result.success) {
           const mapped = mapSendScopedResponseToMessageResult(result)
           if (result.disposition !== 'terminal_failure_after_persistence') {
+            const pending = pendingIngressSnapshots.get(requestId)
+            const friendly = mapBackendErrorToFriendly({
+              error: result.error,
+              errorKind: result.errorKind,
+            })
+            const receivedAt = new Date().toISOString()
+            set((state) => {
+              if (!pending || pendingIngressSnapshots.get(requestId) !== pending
+                || !pendingIngressOriginMatches(state, pending)) return {}
+              const sessionKey = pending.originSessionKey
+              const slice = normalizeSessionSlice(state.sessions[sessionKey])
+              if (!state.sessions[sessionKey] || slice.conversationId !== activeScopeId) return {}
+              const currentRun = slice.scopeRunStates[activeScopeId]
+                || createEmptyScopeRunState({ scopeId: activeScopeId, agent: activeAgentName })
+              const nextScopeRunStates = {
+                ...slice.scopeRunStates,
+                [activeScopeId]: {
+                  ...currentRun,
+                  updatedAt: receivedAt,
+                  softError: {
+                    message: result.error,
+                    errorKind: result.errorKind,
+                    toolName: null,
+                    friendlyMessage: friendly.friendlyMessage,
+                    technicalDetails: friendly.technicalDetails || null,
+                    receivedAt,
+                  },
+                },
+              }
+              return {
+                sessions: {
+                  ...state.sessions,
+                  [sessionKey]: { ...slice, scopeRunStates: nextScopeRunStates },
+                },
+                ...(state.activeSessionId === sessionKey ? { scopeRunStates: nextScopeRunStates } : {}),
+              }
+            })
             pendingIngressSnapshots.delete(requestId)
+            emitRendererAgentMetric('renderer_friendly_error_surfaced', {
+              scopeId: activeScopeId,
+              agent: activeAgentName,
+              errorKind: result.errorKind,
+            })
             return mapped
           }
           agentRuntimeDriver.clearInfrastructureWatchdog(activeScopeId, requestId)
@@ -1146,9 +1907,14 @@ export const useAgent = create<AgentState>((set, get) => ({
             errorKind: result.errorKind,
           })
           set((state) => {
-            const sessionKey = sessionKeyForScopeId(state, activeScopeId)
+            const sessionKey = originSessionKey
             const slice = normalizeSessionSlice(state.sessions[sessionKey])
-            if (!state.sessions[sessionKey] || slice.conversationId !== activeScopeId) return {}
+            if (!state.sessions[sessionKey]
+              || slice.conversationId !== activeScopeId
+              || slice.messageVisibilityEpoch !== originSlice.messageVisibilityEpoch
+              || slice.streamingRequestId !== requestId
+              || (typeof result.aliasGeneration === 'number'
+                && slice.aliasGeneration !== result.aliasGeneration)) return {}
             const currentRun = slice.scopeRunStates[activeScopeId]
             const terminalReason = terminalReasonFromSendError(result.errorKind)
             return withSessionSliceAndActiveMirror(state, sessionKey, {
@@ -1184,7 +1950,7 @@ export const useAgent = create<AgentState>((set, get) => ({
           })
           return mapped
         }
-        agentRuntimeDriver.completeScopeRunAfterSendSuccess(activeScopeId, requestId, {
+        await agentRuntimeDriver.completeScopeRunAfterSendSuccess(activeScopeId, requestId, {
           canonicalMessage: result.canonicalMessage,
           canonicalMessageDigest: result.canonicalMessageDigest,
         })
@@ -1199,9 +1965,12 @@ export const useAgent = create<AgentState>((set, get) => ({
         errorKind: 'unknown',
       })
       set((state) => {
-        const sessionKey = sessionKeyForScopeId(state, activeScopeId)
+        const sessionKey = originSessionKey
         const slice = normalizeSessionSlice(state.sessions[sessionKey])
-        if (!state.sessions[sessionKey] || slice.conversationId !== activeScopeId) return {}
+        if (!state.sessions[sessionKey]
+          || slice.conversationId !== activeScopeId
+          || slice.messageVisibilityEpoch !== originSlice.messageVisibilityEpoch
+          || slice.streamingRequestId !== requestId) return {}
         const currentRun = slice.scopeRunStates[activeScopeId]
         return withSessionSliceAndActiveMirror(state, sessionKey, {
           messages: slice.messages.map((message) => (
@@ -1243,9 +2012,27 @@ export const useAgent = create<AgentState>((set, get) => ({
     if (get().currentScopeId !== scopeId) {
       await get().loadScope(scopeId)
     }
+    const authoritative = get()
+    if (authoritative.retiredScopeIds[scopeId]
+      || authoritative.currentScopeId !== scopeId
+      || authoritative.currentScope?.id !== scopeId) {
+      throw new Error('conversation_scope_closed_or_missing')
+    }
     await get().sendMessage(content)
   }
 }))
+
+let initialSessionCreation: Promise<void> | null = null
+
+export async function hydrateAgentScopesAfterRuntimeReady(): Promise<void> {
+  const loaded = await useAgent.getState().loadScopes()
+  if (!loaded || useAgent.getState().scopes.length > 0) return
+  if (!initialSessionCreation) {
+    const creation = useAgent.getState().createNewSession().then(() => undefined)
+    initialSessionCreation = creation.finally(() => { initialSessionCreation = null })
+  }
+  await initialSessionCreation
+}
 
 const agentRuntimeDriver = createAgentRuntimeDriver(useAgent as unknown as { getState: () => unknown; setState: (partial: unknown) => void })
 installAgentPanelTestHarness(useAgent as unknown as Parameters<typeof installAgentPanelTestHarness>[0])
@@ -1327,9 +2114,13 @@ function upsertAskUserCard(
 export async function hydratePendingAskUserQuestionsCards(): Promise<void> {
   const api = typeof window !== 'undefined' ? window.electronAPI?.agentInteraction : null
   if (!api) return
+  const authorityRevision = useAgent.getState().scopeAuthorityRevision
   const result = await api.listPendingAskUserQuestions()
   if (!result || !result.success || !Array.isArray(result.data)) return
+  if (useAgent.getState().scopeAuthorityRevision !== authorityRevision) return
   for (const card of result.data) {
+    if (useAgent.getState().scopeAuthorityRevision !== authorityRevision) return
+    if (!askUserCardMatchesCurrentIdentity(card)) continue
     const decision = routeCardToSession(useAgent.getState(), {
       sessionId: null,
       conversationId: card.conversationId,
@@ -1349,6 +2140,31 @@ export async function hydratePendingAskUserQuestionsCards(): Promise<void> {
   }
 }
 
+function askUserCardMatchesCurrentIdentity(card: {
+  conversationId: string | null
+  readyRunId?: string | null
+  aliasGeneration?: number | null
+  messageVisibilityEpoch?: number | null
+}): boolean {
+  if (typeof card.aliasGeneration !== 'number'
+    && typeof card.messageVisibilityEpoch !== 'number'
+    && !card.readyRunId) return true
+  if (!card.conversationId
+    || typeof card.messageVisibilityEpoch !== 'number'
+    || !card.readyRunId) return false
+  const state = useAgent.getState()
+  const sessionKey = sessionKeyForScopeId(state, card.conversationId)
+  const slice = normalizeSessionSlice(state.sessions[sessionKey])
+  const runId = slice.streamingRequestId
+    || slice.scopeRunStates[card.conversationId]?.requestId
+    || null
+  return slice.conversationId === card.conversationId
+    && (typeof card.aliasGeneration !== 'number'
+      || slice.aliasGeneration === card.aliasGeneration)
+    && slice.messageVisibilityEpoch === card.messageVisibilityEpoch
+    && runId === card.readyRunId
+}
+
 export function initAgentInteractionListeners(): () => void {
   const api = typeof window !== 'undefined' ? window.electronAPI?.agentInteraction : null
   if (!api) return () => {}
@@ -1360,6 +2176,7 @@ export function initAgentInteractionListeners(): () => void {
   }
 
   const unsubscribePush = api.onAskUserQuestionsCard((event) => {
+    if (!askUserCardMatchesCurrentIdentity(event)) return
     // Route by the durable conversation binding. Background-session cards
     // stay in that slice; conflicting identities never fall into the active
     // conversation.
@@ -1404,11 +2221,28 @@ export function initAgentListeners(): () => void {
   const offIngressAdmitted = window.electronAPI?.agent?.onIngressAdmitted?.((event) => {
     applyIngressAdmitted(event)
   }) || (() => {})
+  const runtimeReadyApi = window.electronAPI?.agent as {
+    readRuntimeReady?: () => Promise<AgentRuntimeReadinessSnapshot>
+    onRuntimeReady?: (listener: (snapshot: AgentRuntimeReadinessSnapshot) => void) => () => void
+  } | undefined
+  const readRuntimeReady = runtimeReadyApi?.readRuntimeReady
+  const onRuntimeReady = runtimeReadyApi?.onRuntimeReady
+  const offRuntimeReady = readRuntimeReady && onRuntimeReady
+    ? installAgentRuntimeReadyHydration({
+        read: readRuntimeReady,
+        subscribe: onRuntimeReady,
+        hydrate: async () => {
+          await useAgent.getState().reloadAgents()
+          await hydrateAgentScopesAfterRuntimeReady()
+        },
+      })
+    : () => {}
   return () => {
     try { window.removeEventListener('ready:agent-registry-changed', onAgentRegistryChanged) } catch { /* ignore */ }
     try { offRuntime() } catch { /* ignore */ }
     try { offAgentInteraction() } catch { /* ignore */ }
     try { offIngressAdmitted() } catch { /* ignore */ }
+    try { offRuntimeReady() } catch { /* ignore */ }
   }
 }
 

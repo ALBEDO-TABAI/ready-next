@@ -6,6 +6,7 @@ import type {
   LifecycleResult,
 } from '../shared/ipc-contracts/agent-runtime'
 import type { AgentMessage, ConversationScope } from '../renderer/modules/agent/types'
+import { createEmptyScopeRunState } from '../renderer/modules/agent/scopeRunState'
 import { makeEmptySessionSlice } from '../renderer/stores/agent-store-helpers'
 import { useAgent } from '../renderer/stores/useAgent'
 
@@ -52,6 +53,9 @@ function seedStore() {
     currentScopeId: aliasId,
     currentScope: scope,
     scopes: [scope],
+    retiredScopeIds: {},
+    scopeAuthorityRevision: 0,
+    scopeListRequestRevision: 0,
     conversations: [],
     attachments: [{
       id: 'attachment-before-lifecycle',
@@ -120,7 +124,10 @@ function failure(
 test('create shows no tab before persistence and creates no welcome transcript', async () => {
   seedStore()
   const pending = deferred<CreateSessionResult>()
-  const restore = installAgentApi({ createSession: () => pending.promise })
+  const requests: unknown[] = []
+  const restore = installAgentApi({
+    createSession: (request: unknown) => { requests.push(request); return pending.promise },
+  })
   try {
     const beforeOrder = [...useAgent.getState().sessionOrder]
     const promise = useAgent.getState().createNewSession()
@@ -135,6 +142,7 @@ test('create shows no tab before persistence and creates no welcome transcript',
     })
     const result = await promise
     assert.equal(result.ok, true)
+    assert.deepEqual(requests, [{ agentId: 'butler' }])
     assert.equal(useAgent.getState().sessionOrder.length, beforeOrder.length + 1)
     assert.deepEqual(useAgent.getState().messages, [])
     assert.deepEqual(useAgent.getState().attachments, [])
@@ -179,7 +187,7 @@ test('reload restores the immutable alias generation before lifecycle actions', 
       },
     },
   }))
-  let closeRequest: { aliasId: string; aliasGeneration: number } | null = null
+  let closeRequest: { aliasId: string; aliasGeneration: number; readyRunId: string | null } | null = null
   const closeFailure: LifecycleResult = {
     ok: false,
     action: 'close',
@@ -194,7 +202,7 @@ test('reload restores the immutable alias generation before lifecycle actions', 
       success: true,
       data: [{ ...scope, aliasGeneration: 7 }],
     }),
-    closeSession: async (request: { aliasId: string; aliasGeneration: number }) => {
+    closeSession: async (request: { aliasId: string; aliasGeneration: number; readyRunId: string | null }) => {
       closeRequest = request
       return closeFailure
     },
@@ -203,7 +211,284 @@ test('reload restores the immutable alias generation before lifecycle actions', 
     await useAgent.getState().loadScopes()
     assert.equal(useAgent.getState().sessions[sessionId]?.aliasGeneration, 7)
     assert.deepEqual(await useAgent.getState().closeSession(sessionId), closeFailure)
-    assert.deepEqual(closeRequest, { aliasId, aliasGeneration: 7 })
+    assert.deepEqual(closeRequest, { aliasId, aliasGeneration: 7, readyRunId: null })
+  } finally {
+    restore()
+  }
+})
+
+test('cold reload hydrates the exact durable running operation instead of the empty renderer cache', async () => {
+  useAgent.setState({
+    messages: [], currentAgent: 'butler', inputValue: '', currentScopeId: null,
+    currentScope: null, scopes: [], conversations: [], attachments: [], filePool: [],
+    pendingContinuationIntent: null, pendingContinuationDraftAnchor: null,
+    isStreaming: false, foregroundBusy: false, composerLocked: false,
+    streamingMessageId: null, streamingRequestId: null, scopeRunStates: {},
+    toolTrace: [], toolTraceStatus: 'idle', sessions: {}, activeSessionId: null,
+    sessionId: 'cold-placeholder', sessionOrder: [], taskDisclosureState: {},
+  })
+  const requests: unknown[] = []
+  const restore = installAgentApi({
+    listConversationScopes: async () => ({
+      success: true,
+      data: [{ ...scope, aliasGeneration: 4 }],
+    }),
+    getConversationScopeMessages: async () => ({ success: true, data: [] }),
+    readCodexLifecycleSnapshot: async (request: unknown) => {
+      requests.push(request)
+      return {
+        success: true,
+        data: {
+          identity: { aliasId, aliasGeneration: 4 },
+          activeReadyRunId: 'run-recovered',
+          latestReadyRunId: 'run-recovered',
+          snapshot: 'product_turn_interruptible',
+          interruptRequested: false,
+          interruptAcknowledged: false,
+          requestedAction: null,
+          evidenceDigest: 'lifecycle-readback-digest',
+        },
+      }
+    },
+  })
+  try {
+    await useAgent.getState().loadScopes()
+    assert.deepEqual(requests, [{ aliasId, aliasGeneration: 4 }])
+    const state = useAgent.getState()
+    const slice = state.sessions[state.activeSessionId || '']
+    assert.equal(slice?.aliasGeneration, 4)
+    assert.equal(slice?.streamingRequestId, 'run-recovered')
+    assert.equal(slice?.isStreaming, true)
+    assert.equal(slice?.composerLocked, true)
+    assert.equal(slice?.lifecyclePendingAction, null)
+    assert.equal(slice?.scopeRunStates[aliasId]?.requestId, 'run-recovered')
+  } finally {
+    restore()
+  }
+})
+
+test('cold lifecycle hydration restores the exact stop, close, or reset action from the persisted run', async () => {
+  for (const entry of [
+    {
+      snapshot: 'product_turn_interruptible',
+      requestedAction: 'stop',
+      pending: 'stopping',
+      error: null,
+    },
+    {
+      snapshot: 'product_turn_engine_terminal_closeout_pending',
+      requestedAction: 'close',
+      pending: 'closing',
+      error: null,
+    },
+    {
+      snapshot: 'product_turn_engine_terminal_closeout_pending',
+      requestedAction: 'reset',
+      pending: 'resetting',
+      error: null,
+    },
+    {
+      snapshot: 'product_turn_interrupt_unknown',
+      requestedAction: 'stop',
+      pending: null,
+      error: 'interrupt_state_unknown',
+    },
+    {
+      snapshot: 'product_turn_interrupt_unknown',
+      requestedAction: 'close',
+      pending: null,
+      error: 'interrupt_state_unknown',
+    },
+    {
+      snapshot: 'product_turn_interrupt_unknown',
+      requestedAction: 'reset',
+      pending: null,
+      error: 'interrupt_state_unknown',
+    },
+  ] as const) {
+    useAgent.setState({
+      messages: [], currentAgent: 'butler', inputValue: '', currentScopeId: null,
+      currentScope: null, scopes: [], conversations: [], attachments: [], filePool: [],
+      pendingContinuationIntent: null, pendingContinuationDraftAnchor: null,
+      isStreaming: false, foregroundBusy: false, composerLocked: false,
+      streamingMessageId: null, streamingRequestId: null, scopeRunStates: {},
+      toolTrace: [], toolTraceStatus: 'idle', sessions: {}, activeSessionId: null,
+      sessionId: 'cold-placeholder', sessionOrder: [], taskDisclosureState: {},
+    })
+    const restore = installAgentApi({
+      listConversationScopes: async () => ({
+        success: true,
+        data: [{ ...scope, aliasGeneration: 5, lastMessageAt: null }],
+      }),
+      readCodexLifecycleSnapshot: async () => ({
+        success: true,
+        data: {
+          identity: { aliasId, aliasGeneration: 5 },
+          activeReadyRunId: 'run-stopping',
+          latestReadyRunId: 'run-stopping',
+          snapshot: entry.snapshot,
+          interruptRequested: true,
+          interruptAcknowledged: false,
+          requestedAction: entry.requestedAction,
+          evidenceDigest: 'lifecycle-stop-readback-digest',
+        },
+      }),
+    })
+    try {
+      await useAgent.getState().loadScopes()
+      const state = useAgent.getState()
+      const slice = state.sessions[state.activeSessionId || '']
+      assert.equal(slice?.streamingRequestId, 'run-stopping')
+      assert.equal(slice?.lifecyclePendingAction, entry.pending)
+      assert.equal(slice?.lifecycleError?.code || null, entry.error)
+      assert.equal(slice?.lifecycleError?.action || null, entry.error ? entry.requestedAction : null)
+      assert.equal(slice?.composerLocked, true)
+    } finally {
+      restore()
+    }
+  }
+})
+
+test('durable terminal readback clears a stale matching composer lock after reload', async () => {
+  seedStore()
+  const restore = installAgentApi({
+    listConversationScopes: async () => ({
+      success: true,
+      data: [{ ...scope, aliasGeneration: 1, lastMessageAt: null }],
+    }),
+    readCodexLifecycleSnapshot: async () => ({
+      success: true,
+      data: {
+        identity: { aliasId, aliasGeneration: 1 },
+        activeReadyRunId: null,
+        latestReadyRunId: 'request-pending',
+        snapshot: 'idle_native_thread',
+        interruptRequested: false,
+        interruptAcknowledged: false,
+        requestedAction: null,
+        evidenceDigest: 'terminal-lifecycle-readback-digest',
+      },
+    }),
+  })
+  try {
+    await useAgent.getState().loadScopes()
+    const slice = useAgent.getState().sessions[sessionId]
+    assert.equal(slice?.streamingRequestId, null)
+    assert.equal(slice?.isStreaming, false)
+    assert.equal(slice?.composerLocked, false)
+    assert.equal(slice?.lifecyclePendingAction, null)
+    assert.equal(slice?.lifecycleError, null)
+  } finally {
+    restore()
+  }
+})
+
+test('an old terminal snapshot cannot clear a newer run already owned by the registered listener', async () => {
+  seedStore()
+  const newRun = createEmptyScopeRunState({
+    scopeId: aliasId,
+    agent: 'butler',
+    requestId: 'run-new',
+    phase: 'responding',
+  })
+  useAgent.setState((state) => ({
+    sessions: {
+      ...state.sessions,
+      [sessionId]: {
+        ...state.sessions[sessionId],
+        streamingRequestId: 'run-new',
+        scopeRunStates: { [aliasId]: newRun },
+      },
+    },
+    streamingRequestId: 'run-new',
+    scopeRunStates: { [aliasId]: newRun },
+  }))
+  const restore = installAgentApi({
+    listConversationScopes: async () => ({
+      success: true,
+      data: [{ ...scope, aliasGeneration: 1, lastMessageAt: null }],
+    }),
+    readCodexLifecycleSnapshot: async () => ({
+      success: true,
+      data: {
+        identity: { aliasId, aliasGeneration: 1 },
+        activeReadyRunId: null,
+        latestReadyRunId: 'request-pending',
+        snapshot: 'idle_native_thread',
+        interruptRequested: false,
+        interruptAcknowledged: false,
+        requestedAction: null,
+        evidenceDigest: 'old-terminal-lifecycle-readback-digest',
+      },
+    }),
+  })
+  try {
+    await useAgent.getState().loadScopes()
+    const slice = useAgent.getState().sessions[sessionId]
+    assert.equal(slice?.streamingRequestId, 'run-new')
+    assert.equal(slice?.isStreaming, true)
+    assert.equal(slice?.composerLocked, true)
+  } finally {
+    restore()
+  }
+})
+
+test('a late lifecycle snapshot cannot revive an old run after a newer exact run entered the same generation', async () => {
+  useAgent.setState({
+    messages: [], currentAgent: 'butler', inputValue: '', currentScopeId: null,
+    currentScope: null, scopes: [], conversations: [], attachments: [], filePool: [],
+    pendingContinuationIntent: null, pendingContinuationDraftAnchor: null,
+    isStreaming: false, foregroundBusy: false, composerLocked: false,
+    streamingMessageId: null, streamingRequestId: null, scopeRunStates: {},
+    toolTrace: [], toolTraceStatus: 'idle', sessions: {}, activeSessionId: null,
+    sessionId: 'cold-placeholder', sessionOrder: [], taskDisclosureState: {},
+  })
+  const pending = deferred<{ success: true; data: Record<string, unknown> }>()
+  const restore = installAgentApi({
+    listConversationScopes: async () => ({
+      success: true,
+      data: [{ ...scope, aliasGeneration: 6, lastMessageAt: null }],
+    }),
+    readCodexLifecycleSnapshot: () => pending.promise,
+  })
+  try {
+    const loading = useAgent.getState().loadScopes()
+    await new Promise<void>((resolve) => setImmediate(resolve))
+    const current = useAgent.getState()
+    const coldSessionId = current.activeSessionId || aliasId
+    useAgent.setState((state) => ({
+      sessions: {
+        ...state.sessions,
+        [coldSessionId]: {
+          ...state.sessions[coldSessionId],
+          isStreaming: true,
+          foregroundBusy: true,
+          composerLocked: true,
+          streamingRequestId: 'run-new',
+        },
+      },
+      isStreaming: true,
+      foregroundBusy: true,
+      composerLocked: true,
+      streamingRequestId: 'run-new',
+    }))
+    pending.resolve({
+      success: true,
+      data: {
+        identity: { aliasId, aliasGeneration: 6 },
+        activeReadyRunId: 'run-old',
+        latestReadyRunId: 'run-old',
+        snapshot: 'product_turn_interruptible',
+        interruptRequested: false,
+        interruptAcknowledged: false,
+        requestedAction: null,
+        evidenceDigest: 'stale-lifecycle-readback-digest',
+      },
+    })
+    await loading
+    const slice = useAgent.getState().sessions[coldSessionId]
+    assert.equal(slice?.streamingRequestId, 'run-new')
+    assert.equal(slice?.composerLocked, true)
   } finally {
     restore()
   }
@@ -241,6 +526,7 @@ test('close success removes only the confirmed tab and mirrors the next live ses
     retiredGeneration: 1,
     retirementTransactionDigest: 'close-success-digest',
     archiveDisposition: 'not_required',
+    scopeClosureEvidenceDigest: 'a'.repeat(64),
   }
   const restore = installAgentApi({ closeSession: async () => success })
   try {
@@ -364,6 +650,11 @@ test('reset success after a tab switch clears only the origin session', async ()
     assert.equal(state.toolTraceStatus, 'running')
     assert.deepEqual(state.sessions[sessionId]?.messages, [])
     assert.equal(state.sessions[sessionId]?.aliasGeneration, 2)
+    assert.equal(
+      state.scopes.find((candidate) => candidate.id === aliasId)?.aliasGeneration,
+      2,
+    )
+    assert.equal(state.retiredScopeIds[aliasId], undefined)
   } finally {
     restore()
   }
@@ -391,18 +682,54 @@ for (const entry of [
   })
 }
 
-test('unknown lifecycle state blocks repeat actions until reconciliation', async () => {
+test('stop reconciles a stale locked composer when Main proves no operation is active', async () => {
   seedStore()
-  let calls = 0
+  const noActive = failure('stop', 'no_active_operation')
+  const requests: unknown[] = []
+  const restore = installAgentApi({
+    kill: async (request: unknown) => { requests.push(request); return noActive },
+  })
+  try {
+    assert.deepEqual(await useAgent.getState().stopStreaming(), noActive)
+    assert.deepEqual(requests, [{
+      aliasId,
+      aliasGeneration: 1,
+      readyRunId: 'request-pending',
+    }])
+    const state = useAgent.getState()
+    const slice = state.sessions[sessionId]
+    assert.equal(state.isStreaming, false)
+    assert.equal(state.composerLocked, false)
+    assert.equal(state.streamingRequestId, null)
+    assert.equal(slice?.isStreaming, false)
+    assert.equal(slice?.composerLocked, false)
+    assert.equal(slice?.lifecyclePendingAction, null)
+    assert.equal(slice?.lifecycleError, null)
+    assert.deepEqual(state.messages, [message])
+    assert.equal(state.inputValue, '未发送草稿')
+  } finally {
+    restore()
+  }
+})
+
+test('interrupt uncertainty allows the exact stop to retry while send, reset, and close stay blocked', async () => {
+  seedStore()
+  const stopRequests: unknown[] = []
+  let resetCalls = 0
+  let closeCalls = 0
   let sendCalls = 0
   const restore = installAgentApi({
-    kill: async () => {
-      calls += 1
+    kill: async (request: unknown) => {
+      stopRequests.push(request)
       return failure('stop', 'interrupt_state_unknown')
     },
     resetSession: async () => {
-      calls += 1
+      resetCalls += 1
       return failure('reset')
+    },
+    closeSession: async () => {
+      closeCalls += 1
+      return failure('close')
     },
     sendScoped: async () => {
       sendCalls += 1
@@ -412,20 +739,588 @@ test('unknown lifecycle state blocks repeat actions until reconciliation', async
   try {
     const first = await useAgent.getState().stopStreaming()
     assert.equal(first.ok, false)
+    const second = await useAgent.getState().stopStreaming()
+    assert.equal(second.ok, false)
     await assert.rejects(
-      useAgent.getState().stopStreaming(),
+      useAgent.getState().resetCurrentConversation(),
       /lifecycle_reconciliation_required/,
     )
     await assert.rejects(
-      useAgent.getState().resetCurrentConversation(),
+      useAgent.getState().closeSession(sessionId),
       /lifecycle_reconciliation_required/,
     )
     const sendResult = await useAgent.getState().sendMessage('不能在状态未知时继续')
     assert.equal(sendResult.disposition, 'rejected_before_persistence')
     assert.equal(sendResult.errorKind, 'conversation_reset_required')
-    assert.equal(calls, 1)
+    assert.deepEqual(stopRequests, [
+      { aliasId, aliasGeneration: 1, readyRunId: 'request-pending' },
+      { aliasId, aliasGeneration: 1, readyRunId: 'request-pending' },
+    ])
+    assert.equal(resetCalls, 0)
+    assert.equal(closeCalls, 0)
     assert.equal(sendCalls, 0)
     assert.deepEqual(useAgent.getState().messages, [message])
+  } finally {
+    restore()
+  }
+})
+
+test('an exact interrupt uncertainty survives a transport failure and remains retryable', async () => {
+  seedStore()
+  const priorError = failure('stop', 'interrupt_state_unknown')
+  const requests: unknown[] = []
+  let calls = 0
+  const restore = installAgentApi({
+    kill: async (request: unknown) => {
+      requests.push(request)
+      calls += 1
+      if (calls === 1) throw new Error('stop_transport_failed')
+      return priorError
+    },
+  })
+  try {
+    useAgent.setState((state) => ({
+      sessions: {
+        ...state.sessions,
+        [sessionId]: {
+          ...state.sessions[sessionId],
+          lifecycleError: priorError,
+        },
+      },
+      lifecycleError: priorError,
+    }))
+
+    await assert.rejects(useAgent.getState().stopStreaming(), /stop_transport_failed/)
+    assert.deepEqual(useAgent.getState().sessions[sessionId]?.lifecycleError, priorError)
+    assert.equal(useAgent.getState().sessions[sessionId]?.lifecyclePendingAction, null)
+
+    assert.deepEqual(await useAgent.getState().stopStreaming(), priorError)
+    assert.equal(requests.length, 2)
+  } finally {
+    restore()
+  }
+})
+
+test('exact close and reset uncertainty survives transport failure and retries the captured run', async () => {
+  for (const action of ['close', 'reset'] as const) {
+    seedStore()
+    const priorError = failure(action, 'interrupt_state_unknown')
+    const requests: unknown[] = []
+    let calls = 0
+    const api = async (request: unknown) => {
+      requests.push(request)
+      calls += 1
+      if (calls === 1) throw new Error(`${action}_transport_failed`)
+      return priorError
+    }
+    const restore = installAgentApi(action === 'close'
+      ? { closeSession: api }
+      : { resetSession: api })
+    try {
+      useAgent.setState((state) => ({
+        sessions: {
+          ...state.sessions,
+          [sessionId]: {
+            ...state.sessions[sessionId],
+            lifecycleError: priorError,
+          },
+        },
+        lifecycleError: priorError,
+      }))
+
+      const invoke = () => action === 'close'
+        ? useAgent.getState().closeSession(sessionId)
+        : useAgent.getState().resetCurrentConversation()
+      await assert.rejects(invoke(), new RegExp(`${action}_transport_failed`))
+      assert.deepEqual(useAgent.getState().sessions[sessionId]?.lifecycleError, priorError)
+      assert.equal(useAgent.getState().sessions[sessionId]?.lifecyclePendingAction, null)
+      assert.deepEqual(await invoke(), priorError)
+      assert.deepEqual(requests, [
+        { aliasId, aliasGeneration: 1, readyRunId: 'request-pending' },
+        { aliasId, aliasGeneration: 1, readyRunId: 'request-pending' },
+      ])
+    } finally {
+      restore()
+    }
+  }
+})
+
+test('an exact manual-compaction uncertainty can reset into the returned generation', async () => {
+  seedStore()
+  const requests: unknown[] = []
+  const restore = installAgentApi({
+    resetSession: async (request: unknown) => {
+      requests.push(request)
+      return {
+        ok: true,
+        action: 'reset',
+        aliasId,
+        retiredGeneration: 1,
+        newGeneration: 2,
+        transactionDigest: 'manual-quarantine-reset',
+      }
+    },
+  })
+  try {
+    const current = useAgent.getState()
+    useAgent.setState({
+      sessions: {
+        ...current.sessions,
+        [sessionId]: {
+          ...current.sessions[sessionId],
+          composerLocked: true,
+          lifecycleError: failure('manual_compact', 'compaction_state_unknown'),
+        },
+      },
+      composerLocked: true,
+      lifecycleError: failure('manual_compact', 'compaction_state_unknown'),
+    })
+
+    const result = await useAgent.getState().resetCurrentConversation()
+
+    assert.equal(result.ok, true)
+    assert.deepEqual(requests, [{ aliasId, aliasGeneration: 1, readyRunId: 'request-pending' }])
+    const next = useAgent.getState().sessions[sessionId]
+    assert.equal(next.aliasGeneration, 2)
+    assert.equal(next.lifecycleError, null)
+    assert.equal(next.composerLocked, false)
+  } finally {
+    restore()
+  }
+})
+
+test('an exact manual-compaction uncertainty survives an action mismatch and remains resettable', async () => {
+  seedStore()
+  const priorError = failure('manual_compact', 'compaction_state_unknown')
+  let calls = 0
+  const restore = installAgentApi({
+    resetSession: async () => {
+      calls += 1
+      if (calls === 1) {
+        return {
+          ok: true,
+          action: 'stop',
+          aliasId,
+          codexThreadId: 'thread-mismatched',
+          codexTurnId: 'turn-mismatched',
+          terminal: 'interrupted',
+          closeoutDigest: 'mismatched-stop-result',
+          fenceReleaseRevision: 1,
+        }
+      }
+      return {
+        ok: true,
+        action: 'reset',
+        aliasId,
+        retiredGeneration: 1,
+        newGeneration: 2,
+        transactionDigest: 'manual-quarantine-reset-after-mismatch',
+      }
+    },
+  })
+  try {
+    useAgent.setState((state) => ({
+      sessions: {
+        ...state.sessions,
+        [sessionId]: {
+          ...state.sessions[sessionId],
+          lifecycleError: priorError,
+        },
+      },
+      lifecycleError: priorError,
+    }))
+
+    await assert.rejects(
+      useAgent.getState().resetCurrentConversation(),
+      /lifecycle_result_action_mismatch/,
+    )
+    assert.deepEqual(useAgent.getState().sessions[sessionId]?.lifecycleError, priorError)
+    assert.equal(useAgent.getState().sessions[sessionId]?.lifecyclePendingAction, null)
+
+    const result = await useAgent.getState().resetCurrentConversation()
+    assert.equal(result.ok, true)
+    assert.equal(calls, 2)
+    assert.equal(useAgent.getState().sessions[sessionId]?.aliasGeneration, 2)
+    assert.equal(useAgent.getState().sessions[sessionId]?.lifecycleError, null)
+  } finally {
+    restore()
+  }
+})
+
+test('a stale manual-compaction uncertainty cannot reset a different alias generation', async () => {
+  seedStore()
+  let resetCalls = 0
+  const restore = installAgentApi({
+    resetSession: async () => {
+      resetCalls += 1
+      return failure('reset')
+    },
+  })
+  try {
+    const current = useAgent.getState()
+    useAgent.setState({
+      sessions: {
+        ...current.sessions,
+        [sessionId]: {
+          ...current.sessions[sessionId],
+          aliasGeneration: 2,
+          lifecycleError: failure('manual_compact', 'compaction_state_unknown'),
+        },
+      },
+      aliasGeneration: 2,
+      lifecycleError: failure('manual_compact', 'compaction_state_unknown'),
+    })
+
+    await assert.rejects(
+      useAgent.getState().resetCurrentConversation(),
+      /lifecycle_reconciliation_required/,
+    )
+    assert.equal(resetCalls, 0)
+  } finally {
+    restore()
+  }
+})
+
+test('late interrupt_state_unknown cannot restore lifecycle uncertainty after the terminal already unlocked', async () => {
+  seedStore()
+  const pending = deferred<LifecycleResult>()
+  const restore = installAgentApi({ kill: () => pending.promise })
+  try {
+    const stop = useAgent.getState().stopStreaming()
+    assert.equal(useAgent.getState().sessions[sessionId]?.lifecyclePendingAction, 'stopping')
+    useAgent.setState((state) => ({
+      sessions: {
+        ...state.sessions,
+        [sessionId]: {
+          ...state.sessions[sessionId],
+          lifecyclePendingAction: null,
+          lifecycleError: null,
+          isStreaming: false,
+          foregroundBusy: false,
+          composerLocked: false,
+          streamingMessageId: null,
+          streamingRequestId: null,
+        },
+      },
+      isStreaming: false,
+      foregroundBusy: false,
+      composerLocked: false,
+      streamingMessageId: null,
+      streamingRequestId: null,
+    }))
+    const lateFailure = failure('stop', 'interrupt_state_unknown')
+    pending.resolve(lateFailure)
+    assert.deepEqual(await stop, lateFailure)
+
+    const state = useAgent.getState()
+    const slice = state.sessions[sessionId]
+    assert.equal(slice?.lifecyclePendingAction, null)
+    assert.equal(slice?.lifecycleError, null)
+    assert.equal(slice?.composerLocked, false)
+    assert.equal(slice?.streamingRequestId, null)
+  } finally {
+    restore()
+  }
+})
+
+test('late stop success or failure cannot clear or poison a new run after terminal rollover', async () => {
+  const outcomes: LifecycleResult[] = [
+    {
+      ok: true,
+      action: 'stop',
+      aliasId,
+      codexThreadId: 'thread-old',
+      codexTurnId: 'turn-old',
+      terminal: 'interrupted',
+      closeoutDigest: 'old-stop-closeout',
+      fenceReleaseRevision: 1,
+    },
+    failure('stop', 'interrupt_state_unknown'),
+  ]
+
+  for (const outcome of outcomes) {
+    seedStore()
+    const pending = deferred<LifecycleResult>()
+    const restore = installAgentApi({ kill: () => pending.promise })
+    try {
+      const stop = useAgent.getState().stopStreaming()
+      useAgent.setState((state) => ({
+        sessions: {
+          ...state.sessions,
+          [sessionId]: {
+            ...state.sessions[sessionId],
+            lifecyclePendingAction: null,
+            lifecycleError: null,
+            isStreaming: true,
+            foregroundBusy: true,
+            composerLocked: true,
+            streamingMessageId: 'response-next',
+            streamingRequestId: 'request-next',
+          },
+        },
+        isStreaming: true,
+        foregroundBusy: true,
+        composerLocked: true,
+        streamingMessageId: 'response-next',
+        streamingRequestId: 'request-next',
+      }))
+      pending.resolve(outcome)
+      assert.deepEqual(await stop, outcome)
+
+      assert.equal(useAgent.getState().retiredScopeIds[aliasId], undefined)
+      const slice = useAgent.getState().sessions[sessionId]
+      assert.equal(slice?.lifecyclePendingAction, null)
+      assert.equal(slice?.lifecycleError, null)
+      assert.equal(slice?.isStreaming, true)
+      assert.equal(slice?.foregroundBusy, true)
+      assert.equal(slice?.composerLocked, true)
+      assert.equal(slice?.streamingMessageId, 'response-next')
+      assert.equal(slice?.streamingRequestId, 'request-next')
+    } finally {
+      restore()
+    }
+  }
+})
+
+test('late transport failures cannot restore uncertainty after run or generation takeover', async () => {
+  for (const action of ['stop', 'reset'] as const) {
+    seedStore()
+    const release = deferred<void>()
+    const priorError = action === 'stop'
+      ? failure('stop', 'interrupt_state_unknown')
+      : failure('manual_compact', 'compaction_state_unknown')
+    const restore = installAgentApi(action === 'stop'
+      ? {
+          kill: async () => {
+            await release.promise
+            throw new Error('late_stop_transport_failed')
+          },
+        }
+      : {
+          resetSession: async () => {
+            await release.promise
+            throw new Error('late_reset_transport_failed')
+          },
+        })
+    try {
+      useAgent.setState((state) => ({
+        sessions: {
+          ...state.sessions,
+          [sessionId]: {
+            ...state.sessions[sessionId],
+            lifecycleError: priorError,
+          },
+        },
+        lifecycleError: priorError,
+      }))
+      const request = action === 'stop'
+        ? useAgent.getState().stopStreaming()
+        : useAgent.getState().resetCurrentConversation()
+
+      useAgent.setState((state) => ({
+        sessions: {
+          ...state.sessions,
+          [sessionId]: {
+            ...state.sessions[sessionId],
+            aliasGeneration: action === 'reset' ? 2 : 1,
+            lifecyclePendingAction: null,
+            lifecycleError: null,
+            streamingRequestId: action === 'stop' ? 'request-next' : null,
+          },
+        },
+        aliasGeneration: action === 'reset' ? 2 : 1,
+        lifecyclePendingAction: null,
+        lifecycleError: null,
+        streamingRequestId: action === 'stop' ? 'request-next' : null,
+      }))
+      release.resolve()
+      await assert.rejects(request, /late_(stop|reset)_transport_failed/)
+
+      const slice = useAgent.getState().sessions[sessionId]
+      assert.equal(slice?.lifecycleError, null)
+      assert.equal(slice?.lifecyclePendingAction, null)
+      assert.equal(slice?.aliasGeneration, action === 'reset' ? 2 : 1)
+      assert.equal(slice?.streamingRequestId, action === 'stop' ? 'request-next' : null)
+    } finally {
+      restore()
+    }
+  }
+})
+
+test('a late reset success cannot roll back a newer alias generation', async () => {
+  seedStore()
+  const pending = deferred<LifecycleResult>()
+  const priorError = failure('manual_compact', 'compaction_state_unknown')
+  const restore = installAgentApi({ resetSession: () => pending.promise })
+  try {
+    useAgent.setState((state) => ({
+      sessions: {
+        ...state.sessions,
+        [sessionId]: {
+          ...state.sessions[sessionId],
+          lifecycleError: priorError,
+        },
+      },
+      lifecycleError: priorError,
+    }))
+    const reset = useAgent.getState().resetCurrentConversation()
+
+    useAgent.setState((state) => ({
+      sessions: {
+        ...state.sessions,
+        [sessionId]: {
+          ...state.sessions[sessionId],
+          aliasGeneration: 3,
+          lifecyclePendingAction: null,
+          lifecycleError: null,
+        },
+      },
+      aliasGeneration: 3,
+      lifecyclePendingAction: null,
+      lifecycleError: null,
+    }))
+    pending.resolve({
+      ok: true,
+      action: 'reset',
+      aliasId,
+      retiredGeneration: 1,
+      newGeneration: 2,
+      transactionDigest: 'stale-reset-success',
+    })
+    const result = await reset
+    assert.equal(result.ok, true)
+
+    const slice = useAgent.getState().sessions[sessionId]
+    assert.equal(slice?.aliasGeneration, 3)
+    assert.equal(slice?.lifecycleError, null)
+    assert.equal(slice?.lifecyclePendingAction, null)
+  } finally {
+    restore()
+  }
+})
+
+test('durable close success wins over a renderer-only run that appeared while close was pending', async () => {
+  seedStore()
+  const pending = deferred<LifecycleResult>()
+  const requests: unknown[] = []
+  const restore = installAgentApi({
+    closeSession: (request: unknown) => {
+      requests.push(request)
+      return pending.promise
+    },
+  })
+  try {
+    const operation = useAgent.getState().closeSession(sessionId)
+    useAgent.setState((state) => ({
+      sessions: {
+        ...state.sessions,
+        [sessionId]: {
+          ...state.sessions[sessionId],
+          lifecyclePendingAction: null,
+          lifecycleError: null,
+          isStreaming: true,
+          foregroundBusy: true,
+          composerLocked: true,
+          streamingMessageId: 'response-B',
+          streamingRequestId: 'run-B',
+        },
+      },
+      lifecyclePendingAction: null,
+      lifecycleError: null,
+      isStreaming: true,
+      foregroundBusy: true,
+      composerLocked: true,
+      streamingMessageId: 'response-B',
+      streamingRequestId: 'run-B',
+    }))
+    pending.resolve({
+      ok: true,
+      action: 'close',
+      closeoutDisposition: 'completed_active_product_turn',
+      aliasId,
+      retiredGeneration: 1,
+      codexThreadId: 'thread-1',
+      codexTurnId: 'turn-1',
+      terminal: 'interrupted',
+      closeoutDigest: 'a'.repeat(64),
+      retirementTransactionDigest: 'b'.repeat(64),
+      archiveDisposition: 'durable_cleanup_pending',
+      archiveIntentDigest: 'c'.repeat(64),
+      scopeClosureEvidenceDigest: 'd'.repeat(64),
+    })
+    assert.equal((await operation).ok, true)
+    assert.deepEqual(requests, [{
+      aliasId,
+      aliasGeneration: 1,
+      readyRunId: 'request-pending',
+    }])
+    const state = useAgent.getState()
+    assert.equal(state.sessions[sessionId], undefined)
+    assert.equal(state.retiredScopeIds[aliasId], true)
+    assert.equal(state.scopes.some((candidate) => candidate.id === aliasId), false)
+    assert.equal(state.currentScopeId, null)
+    assert.equal(state.isStreaming, false)
+    assert.equal(state.composerLocked, false)
+  } finally {
+    restore()
+  }
+})
+
+test('late reset success cannot overwrite a new run in the same generation', async () => {
+  seedStore()
+  const pending = deferred<LifecycleResult>()
+  const requests: unknown[] = []
+  const restore = installAgentApi({
+    resetSession: (request: unknown) => {
+      requests.push(request)
+      return pending.promise
+    },
+  })
+  try {
+    const operation = useAgent.getState().resetCurrentConversation()
+    useAgent.setState((state) => ({
+      sessions: {
+        ...state.sessions,
+        [sessionId]: {
+          ...state.sessions[sessionId],
+          lifecyclePendingAction: null,
+          lifecycleError: null,
+          isStreaming: true,
+          foregroundBusy: true,
+          composerLocked: true,
+          streamingMessageId: 'response-B',
+          streamingRequestId: 'run-B',
+        },
+      },
+      lifecyclePendingAction: null,
+      lifecycleError: null,
+      isStreaming: true,
+      foregroundBusy: true,
+      composerLocked: true,
+      streamingMessageId: 'response-B',
+      streamingRequestId: 'run-B',
+    }))
+    pending.resolve({
+      ok: true,
+      action: 'reset',
+      aliasId,
+      retiredGeneration: 1,
+      newGeneration: 2,
+      transactionDigest: 'stale-reset-success-same-generation',
+    })
+    assert.equal((await operation).ok, true)
+    assert.deepEqual(requests, [{
+      aliasId,
+      aliasGeneration: 1,
+      readyRunId: 'request-pending',
+    }])
+    const slice = useAgent.getState().sessions[sessionId]
+    assert.ok(slice)
+    assert.equal(slice.aliasGeneration, 1)
+    assert.equal(slice.streamingRequestId, 'run-B')
+    assert.equal(slice.streamingMessageId, 'response-B')
+    assert.equal(slice.composerLocked, true)
+    assert.equal(useAgent.getState().retiredScopeIds[aliasId], undefined)
   } finally {
     restore()
   }

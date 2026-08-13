@@ -108,12 +108,11 @@ const CAPSULE_HEADER_STYLE: React.CSSProperties = {
   gap: 8,
   cursor: 'pointer',
   textAlign: 'left',
-  width: '100%',
 }
 
 const TASK_CARD_HEADER_STYLE: React.CSSProperties = {
   ...CAPSULE_HEADER_STYLE,
-  padding: '7px 0',
+  padding: '7px 10px',
 }
 
 function TaskStepStatusGlyph({ status }: { status: string }) {
@@ -122,7 +121,7 @@ function TaskStepStatusGlyph({ status }: { status: string }) {
     : status === 'running'
       ? { Icon: CircleDot, label: '步骤进行中' }
       : status === 'blocked'
-        ? { Icon: CirclePause, label: '步骤待继续' }
+        ? { Icon: CirclePause, label: '步骤已阻塞' }
         : status === 'error'
           ? { Icon: CircleX, label: '步骤失败' }
           : { Icon: Circle, label: '步骤待执行' }
@@ -153,16 +152,8 @@ export function TaskCard({
   onDismissMemoryCapture,
   onUndoMemoryCapture,
   onSupplementMemoryCapture,
-  onContinueInput,
-  onSubmitConfirmation,
-  onSubmitAgentResult,
-  onRetry,
-  onSuspendRun,
-  onResumeRun,
   onCancelDetachedTask,
-  onContinueDetachedTask,
   onCancelChildRun,
-  onContinueChildRun,
   dismissible = false,
   onDismiss,
 }: {
@@ -190,16 +181,8 @@ export function TaskCard({
   onDismissMemoryCapture?: (scopeId: string) => void
   onUndoMemoryCapture?: (scopeId: string) => void
   onSupplementMemoryCapture?: (scopeId: string) => void
-  onContinueInput?: (scopeId: string) => void
-  onSubmitConfirmation?: (scopeId: string, confirmed: boolean, requestId?: string) => void
-  onSubmitAgentResult?: (scopeId: string) => void
-  onRetry?: (scopeId: string) => void
-  onSuspendRun?: (scopeId: string) => void
-  onResumeRun?: (scopeId: string) => void
   onCancelDetachedTask?: (scopeId: string, taskId?: string | null) => void
-  onContinueDetachedTask?: (scopeId: string, taskId?: string | null) => void
   onCancelChildRun?: (scopeId: string, childRunId: string) => void
-  onContinueChildRun?: (scopeId: string, childRunId: string) => void
   /** Presentation-only removal. It never stops the underlying task. */
   dismissible?: boolean
   onDismiss?: () => void
@@ -292,49 +275,20 @@ export function TaskCard({
     ? ''
     : headerPreviewSource
 
-  // 动作行按钮逐个求值（单一来源，JSX 复用同名布尔），动作行 = 任一按钮
-  // 会渲染。阻塞型动作（等待补充/确认/可恢复/consent）折叠态也必须露出；
-  // 「暂停任务」属于运行态可选控制，只在展开时出现，保住折叠一行的承诺。
+  // Only actions with a live runtime owner remain interactive. Historical
+  // checkpoint/confirmation/takeover states stay readable but cannot create a
+  // successor run from the task card.
   const resumableActions = run.resumableActions || []
-  const showSuspendButton = Boolean(
-    expanded
-    && !isDetachedTask
-    && (run.phase === 'planning' || run.phase === 'tool_running' || run.phase === 'responding' || run.phase === 'resuming'),
-  )
   const showCancelDetached = isDetachedTask && resumableActions.includes('cancel')
-  /* Stage Q (Stage 11) — `continue` / `retry` gated by `run.canResume`
-     (main-derived truth); `cancel` stays ungated. Audit §C-9 / contract C7.
-     Defensive default: undefined canResume treated as false. */
-  const showContinueDetached = isDetachedTask && run.canResume === true && resumableActions.includes('continue')
-  const showContinueChild = Boolean(childRunId) && run.canResume === true && resumableActions.includes('continue')
+  /* Generic continuation is retired. Detached and child tasks retain only
+     their dedicated query/cancel controls; retry below starts a new user turn. */
   const showCancelChild = Boolean(childRunId) && resumableActions.includes('cancel')
-  /* Stage Q — generic 继续运行：suspended + canResume，且 child/detached
-     各自的精确按钮优先；waitingFor/resumable 残余条件保持动作行
-     外层门的语义（waitingFor='none' 且无可恢复动作时不出现）。 */
-  const showGenericResume = run.interactionState === 'suspended'
-    && run.canResume === true
-    && !childRunId
-    && !isDetachedTask
-    && run.waitingFor !== 'confirmation'
-    && (run.waitingFor !== 'none' || resumableActions.length > 0)
-  const showContinueInput = !isAgentHandoff && (run.waitingFor === 'input' || run.waitingFor === 'clarification')
-  const showConfirmationPair = run.waitingFor === 'confirmation'
   const confirmationRequest = readBrowserConfirmationRequest(run.taskContinuation)
   const confirmationCard = confirmationRequest
     ? buildBrowserConfirmationCard(confirmationRequest)
     : null
-  const showAgentResult = run.waitingFor === 'agent_result'
-  const showRetry = run.canResume === true && resumableActions.includes('retry')
-  const hasActionRow = showSuspendButton
-    || showCancelDetached
-    || showContinueDetached
-    || showContinueChild
+  const hasActionRow = showCancelDetached
     || showCancelChild
-    || showGenericResume
-    || showContinueInput
-    || showConfirmationPair
-    || showAgentResult
-    || showRetry
     || shouldShowOpenScopeButton
   const showProgressRow = Boolean(progressLabel && (expanded || compact || !hasTerminalTaskStatus))
 
@@ -345,8 +299,10 @@ export function TaskCard({
       data-ready-task-id={run.taskId || undefined}
       data-ready-task-child-run-id={childRunId || undefined}
       data-ready-task-dismissible={dismissible ? 'true' : undefined}
+      className="w-full max-w-full min-w-0 box-border"
       onPointerDown={(event) => {
         if (!dismissible || event.button !== 0) return
+        if ((event.target as HTMLElement).closest('[data-ready-task-dismiss="true"]')) return
         swipeStartXRef.current = event.clientX
         swipeOffsetRef.current = 0
         event.currentTarget.setPointerCapture?.(event.pointerId)
@@ -389,7 +345,7 @@ export function TaskCard({
           if (suppressHeaderClickRef.current) return
           onToggleExpanded?.()
         }}
-        className="hover:bg-[color-mix(in_srgb,var(--surface-card-bg)_44%,transparent)] transition-colors duration-160"
+        className="w-full max-w-full min-w-0 box-border overflow-hidden hover:bg-[color-mix(in_srgb,var(--surface-card-bg)_44%,transparent)] transition-colors duration-160"
         style={{ ...TASK_CARD_HEADER_STYLE, paddingRight: dismissible ? 26 : 0 }}
       >
         <span style={{ flexShrink: 0, display: 'flex', alignItems: 'center' }}>
@@ -472,7 +428,7 @@ export function TaskCard({
             color: 'var(--text-light)',
             cursor: 'pointer',
             display: 'grid',
-            placeItems: 'center',
+            placeItems: 'center', zIndex: 2,
           }}
         >
           <X size={13} strokeWidth={2} />
@@ -763,7 +719,7 @@ export function TaskCard({
         </div>
       )}
 
-      {showConfirmationPair && confirmationCard && (
+      {run.waitingFor === 'confirmation' && confirmationCard && (
         <div
           data-ready-browser-confirmation-card={confirmationCard.kind}
           data-ready-browser-confirmation-request-id={confirmationCard.requestId}
@@ -785,15 +741,6 @@ export function TaskCard({
       {/* 动作行不受折叠门控：等待用户/可恢复/需确认时必须一眼可点。 */}
       {hasActionRow && (
         <div className="flex flex-wrap gap-1.5" style={{ padding: '0 10px 9px' }}>
-          {showSuspendButton && (
-            <button
-              type="button"
-              onClick={() => onSuspendRun?.(run.scopeId)}
-              style={{ ...TASK_ACTION_BUTTON_STYLE }}
-            >
-              暂停任务
-            </button>
-          )}
           {showCancelDetached && (
             <button
               type="button"
@@ -801,28 +748,6 @@ export function TaskCard({
               style={{ ...TASK_ACTION_BUTTON_STYLE }}
             >
               取消后台任务
-            </button>
-          )}
-          {showContinueDetached && (
-            <button
-              type="button"
-              onClick={() => onContinueDetachedTask?.(run.scopeId, run.taskId || null)}
-              style={{ ...TASK_ACTION_BUTTON_STYLE }}
-            >
-              继续后台任务
-            </button>
-          )}
-          {showContinueChild && childRunId && (
-            <button
-              type="button"
-              data-ready-task-action="continue-child-run"
-              data-ready-task-scope-id={run.scopeId || undefined}
-              data-ready-task-id={run.taskId || undefined}
-              data-ready-task-child-run-id={childRunId}
-              onClick={() => onContinueChildRun?.(run.scopeId, childRunId)}
-              style={{ ...TASK_ACTION_BUTTON_STYLE }}
-            >
-              {isAgentHandoff ? '继续生成报告' : '继续处理'}
             </button>
           )}
           {showCancelChild && childRunId && (
@@ -836,64 +761,6 @@ export function TaskCard({
               style={{ ...TASK_ACTION_BUTTON_STYLE }}
             >
               取消
-            </button>
-          )}
-          {showGenericResume && (
-            <button
-              type="button"
-              onClick={() => onResumeRun?.(run.scopeId)}
-              style={{ ...TASK_ACTION_BUTTON_STYLE }}
-            >
-              继续运行
-            </button>
-          )}
-          {showContinueInput && (
-            <button
-              type="button"
-              onClick={() => onContinueInput?.(run.scopeId)}
-              style={{ ...TASK_ACTION_BUTTON_STYLE }}
-            >
-              补充后继续
-            </button>
-          )}
-          {showConfirmationPair && (
-            <>
-              <button
-                type="button"
-                data-ready-browser-confirmation-action="allow"
-                data-ready-browser-confirmation-request-id={confirmationCard?.requestId}
-                onClick={() => onSubmitConfirmation?.(run.scopeId, true, confirmationCard?.requestId)}
-                style={{ ...TASK_ACTION_BUTTON_STYLE }}
-              >
-                {confirmationCard?.allowLabel || '确认继续'}
-              </button>
-              <button
-                type="button"
-                data-ready-browser-confirmation-action="deny"
-                data-ready-browser-confirmation-request-id={confirmationCard?.requestId}
-                onClick={() => onSubmitConfirmation?.(run.scopeId, false, confirmationCard?.requestId)}
-                style={{ ...TASK_ACTION_BUTTON_STYLE }}
-              >
-                {confirmationCard?.denyLabel || '暂不继续'}
-              </button>
-            </>
-          )}
-          {showAgentResult && (
-            <button
-              type="button"
-              onClick={() => onSubmitAgentResult?.(run.scopeId)}
-              style={{ ...TASK_ACTION_BUTTON_STYLE }}
-            >
-              补交结果
-            </button>
-          )}
-          {showRetry && (
-            <button
-              type="button"
-              onClick={() => onRetry?.(run.scopeId)}
-              style={{ ...TASK_ACTION_BUTTON_STYLE }}
-            >
-              重试
             </button>
           )}
           {shouldShowOpenScopeButton && (

@@ -19,6 +19,8 @@ import {
 } from '../main/modules/agent-control/domain-adapters/run-capability-controller'
 import { resolveCapabilityResolution } from '../main/modules/agent-control/domain-adapters/capability-resolver'
 import { AgentSdkRuntime } from '../main/modules/agent-control/runtime-core/agent-sdk-runtime'
+import { resolveSkillHintRelevanceForTurn } from '../main/modules/agent-control/runtime-core/agent-sdk-skill-intent-utils'
+import { SkillContextOrchestrator } from '../main/modules/agent-control/skills/skill-context-orchestrator'
 import {
   buildExplicitNoSkillAuthorization,
   buildSelectedSkillToolAuthorization,
@@ -35,6 +37,8 @@ import {
   type ExecutionIntentContext,
 } from '../main/modules/agent-control/execution-intent-resolver'
 import { BROWSER_PUBLIC_TOOL_NAMES } from '../shared/browser-tool-surface'
+import { compileSkillDefinition } from '../main/modules/skills-runtime/skill-compiler'
+import { __setScopeContextEpochDatabaseForTests } from '../main/modules/agent-control/session/scope-context-epoch'
 
 const BASE_CONFIG: AIModelConfig = {
   provider: 'openai',
@@ -45,6 +49,13 @@ const BASE_CONFIG: AIModelConfig = {
   visionMode: 'auto',
   nativeVideoMode: 'auto',
 }
+
+test.before(() => {
+  __setScopeContextEpochDatabaseForTests({
+    getRawDb: () => ({ prepare: () => ({ get: () => undefined }) }) as never,
+  })
+})
+test.after(() => __setScopeContextEpochDatabaseForTests(null))
 
 const VISION_DENIED_CONFIG: AIModelConfig = {
   provider: 'openai-compatible',
@@ -566,6 +577,7 @@ test('selected reference-skill authorization exposes export artifact for target-
     resolveSkillAuthorizationForTurn: (
       message: string,
       sessionId?: string,
+      messageVisibilityEpoch?: number,
       requestEnvelope?: unknown,
       forceLocalSendImIntent?: boolean,
     ) => SkillToolAuthorization
@@ -629,6 +641,116 @@ test('selected reference-skill authorization exposes authorized primitives witho
     assert.ok(toolNames.includes('skill_write_artifact'))
     assert.ok(toolNames.includes('skill_export_artifact'))
     assert.equal(getLastReferenceSkill(sessionId), null)
+  } finally {
+    clearLastReferenceSkill(sessionId)
+  }
+})
+
+test('normal Feishu CLI request binds the embedded lark-cli skill and exposes its bounded runtime tools', () => {
+  const userText = '用飞书 cli 读一下我名为 测试 0807 的文档，随便新增一列内容并填写一些内容，然后再在我的 第二季度工作总结 文档里润色一下'
+  const requestEnvelope = buildRequestEnvelope({ userText })
+  const sessionId = 'scope-local-feishu-cli'
+  const embeddedSkillRoot = join(process.cwd(), 'assets', 'embedded-skills', 'lark-cli')
+  const compiled = compileSkillDefinition({ folderPath: embeddedSkillRoot, source: 'embedded' })
+  const larkCli = {
+    ...compiled,
+    installed: true,
+    installStatePath: '',
+    managedPath: embeddedSkillRoot,
+  } as any
+  const skillContextOrchestrator = new SkillContextOrchestrator({
+    extractPrimaryUserInstruction: (raw) => raw,
+    listSkills: () => [larkCli],
+    resolveSkillToolByAction: (_skillId, action) => ({ name: `skill_${action}`, action }) as any,
+  })
+  const runtime = new AgentSdkRuntime({
+    loadAIConfig: () => ({ ok: true, config: BASE_CONFIG, reason: 'present' }),
+    domainAdapters: [],
+    skillContextOrchestrator,
+  })
+  const privateRuntime = runtime as unknown as {
+    resolveSkillAuthorizationForTurn: (
+      message: string,
+      sessionId?: string,
+      requestEnvelope?: unknown,
+      forceLocalSendImIntent?: boolean,
+      skillHintRelevantForTurn?: boolean,
+    ) => SkillToolAuthorization
+    toolExecutor: {
+      listDefaultToolDefinitionsForTurn: (params: {
+        message: string
+        sessionId?: string
+        scopeId?: string
+        config: AIModelConfig
+        browserHostAvailable: boolean
+        feishuConnected: boolean
+        authorization: SkillToolAuthorization
+        requestEnvelope?: unknown
+      }) => Array<{ name: string }>
+    }
+  }
+
+  try {
+    const authorization = privateRuntime.resolveSkillAuthorizationForTurn(
+      userText,
+      sessionId,
+      requestEnvelope,
+    )
+    assert.equal(authorization.mode, 'selected')
+    if (authorization.mode !== 'selected') assert.fail('expected selected lark-cli authorization')
+    assert.equal(authorization.skillId, 'lark-cli')
+    assert.deepEqual(
+      [...authorization.allowedPrimitives].sort(),
+      ['skill_ask_user', 'skill_read_artifact', 'skill_run_shell'],
+    )
+
+    const toolNames = privateRuntime.toolExecutor.listDefaultToolDefinitionsForTurn({
+      message: userText,
+      sessionId,
+      scopeId: sessionId,
+      config: BASE_CONFIG,
+      browserHostAvailable: true,
+      feishuConnected: true,
+      authorization,
+      requestEnvelope,
+    }).map((definition) => definition.name)
+    assert.deepEqual(
+      toolNames.filter((name) => name.startsWith('skill_')).sort(),
+      ['skill_ask_user', 'skill_read_artifact', 'skill_run_shell'],
+    )
+    assert.equal(toolNames.includes('run_setup_command'), false)
+    assert.equal(toolNames.some((name) => name.startsWith('feishu_')), false)
+
+    const localUploadFollowup = '好，继续，把这个本地附件上传到云盘'
+    const localUploadEnvelope = buildRequestEnvelope({ userText: localUploadFollowup })
+    const relevance = resolveSkillHintRelevanceForTurn({
+      message: localUploadFollowup,
+      requestEnvelope: localUploadEnvelope,
+      sessionId,
+      orchestrator: skillContextOrchestrator,
+      localSendImIntent: false,
+    })
+    assert.equal(relevance.relevant, false)
+    assert.equal(relevance.reason, 'local_input_outside_lark_cli_boundary')
+    const followupAuthorization = privateRuntime.resolveSkillAuthorizationForTurn(
+      localUploadFollowup,
+      sessionId,
+      localUploadEnvelope,
+      false,
+      relevance.relevant,
+    )
+    assert.equal(followupAuthorization.mode, 'none')
+    const followupToolNames = privateRuntime.toolExecutor.listDefaultToolDefinitionsForTurn({
+      message: localUploadFollowup,
+      sessionId,
+      scopeId: sessionId,
+      config: BASE_CONFIG,
+      browserHostAvailable: true,
+      feishuConnected: true,
+      authorization: followupAuthorization,
+      requestEnvelope: localUploadEnvelope,
+    }).map((definition) => definition.name)
+    assert.equal(followupToolNames.includes('skill_run_shell'), false)
   } finally {
     clearLastReferenceSkill(sessionId)
   }
@@ -704,6 +826,7 @@ test('SDK authorization uses raw user text when primary instruction strips expli
     const authorization = privateRuntime.resolveSkillAuthorizationForTurn(
       primaryInstruction,
       sessionId,
+      0,
       requestEnvelope,
     )
     assert.equal(authorization.mode, 'selected')
@@ -782,6 +905,7 @@ test('SDK authorization keeps raw skill mention when attachment context strips r
     resolveSkillAuthorizationForTurn: (
       message: string,
       sessionId?: string,
+      messageVisibilityEpoch?: number,
       requestEnvelope?: unknown,
       forceLocalSendImIntent?: boolean,
     ) => SkillToolAuthorization
@@ -803,6 +927,7 @@ test('SDK authorization keeps raw skill mention when attachment context strips r
     const authorization = privateRuntime.resolveSkillAuthorizationForTurn(
       primaryInstruction,
       sessionId,
+      0,
       requestEnvelope,
     )
     assert.equal(authorization.mode, 'selected')
@@ -885,6 +1010,7 @@ test('explicit skill turn with local document attachment keeps document-read flo
     resolveSkillAuthorizationForTurn: (
       message: string,
       sessionId?: string,
+      messageVisibilityEpoch?: number,
       requestEnvelope?: unknown,
       forceLocalSendImIntent?: boolean,
     ) => SkillToolAuthorization
@@ -906,6 +1032,7 @@ test('explicit skill turn with local document attachment keeps document-read flo
     const authorization = privateRuntime.resolveSkillAuthorizationForTurn(
       primaryInstruction,
       sessionId,
+      0,
       requestEnvelope,
     )
     assert.equal(authorization.mode, 'selected')
@@ -1079,7 +1206,12 @@ function buildTypedRefRuntime(skillRoot: string) {
 
 function typedRefPrivate(runtime: AgentSdkRuntime) {
   return runtime as unknown as {
-    resolveSkillAuthorizationForTurn: (message: string, sessionId?: string, requestEnvelope?: unknown) => SkillToolAuthorization
+    resolveSkillAuthorizationForTurn: (
+      message: string,
+      sessionId?: string,
+      messageVisibilityEpoch?: number,
+      requestEnvelope?: unknown,
+    ) => SkillToolAuthorization
   }
 }
 
@@ -1107,7 +1239,7 @@ test('SDK authorization consumes a typed skill_reference before text heuristics 
   }
   try {
     const authorization = typedRefPrivate(buildTypedRefRuntime(skillRoot))
-      .resolveSkillAuthorizationForTurn('根据文档生成一个人文感风格 ppt', sessionId, requestEnvelope)
+      .resolveSkillAuthorizationForTurn('根据文档生成一个人文感风格 ppt', sessionId, 0, requestEnvelope)
     assert.equal(authorization.mode, 'selected')
     assert.equal(authorization.skillId, 'ready-human-touch-ppt')
     assert.ok(
@@ -1131,7 +1263,7 @@ test('SDK authorization still selects via text mention when envelope has no skil
   }
   try {
     const authorization = typedRefPrivate(buildTypedRefRuntime(skillRoot))
-      .resolveSkillAuthorizationForTurn('用@[ready-human-touch-ppt]生成 ppt', sessionId, requestEnvelope)
+      .resolveSkillAuthorizationForTurn('用@[ready-human-touch-ppt]生成 ppt', sessionId, 0, requestEnvelope)
     assert.equal(authorization.mode, 'selected')
     assert.equal(authorization.skillId, 'ready-human-touch-ppt')
     assert.ok(
@@ -1166,7 +1298,7 @@ test('SDK authorization stays none when a typed skill_reference names an unknown
   }
   try {
     const authorization = typedRefPrivate(buildTypedRefRuntime(skillRoot))
-      .resolveSkillAuthorizationForTurn('根据文档生成一个 ppt', sessionId, requestEnvelope)
+      .resolveSkillAuthorizationForTurn('根据文档生成一个 ppt', sessionId, 0, requestEnvelope)
     assert.equal(authorization.mode, 'none')
   } finally {
     clearLastReferenceSkill(sessionId)
@@ -1291,7 +1423,7 @@ test('typed skill_reference for an unknown skill does not hijack selection away 
   }
   try {
     const authorization = typedRefPrivate(buildTypedRefRuntime(skillRoot))
-      .resolveSkillAuthorizationForTurn('用@[ready-human-touch-ppt]生成 ppt', sessionId, requestEnvelope)
+      .resolveSkillAuthorizationForTurn('用@[ready-human-touch-ppt]生成 ppt', sessionId, 0, requestEnvelope)
     assert.equal(authorization.mode, 'selected')
     assert.equal(authorization.skillId, 'ready-human-touch-ppt') // text fallback wins; typed unknown ref did not hijack
     assert.ok(

@@ -8,7 +8,7 @@ import {
 import { TOOL_ADMISSION_ERROR_KINDS } from '../contracts/error-kinds'
 import type { ExecutionTurnResult, RunMessage, TaskBudgetRuntime, TaskType } from '../contracts/run-contracts'
 import { logAgentMetric } from '../metrics'
-import { prependSystemReminderInput } from '../system-reminders/background-task-terminal-reminder'
+import { prependSystemReminderInput } from '../system-reminders/system-reminder-input'
 import type { ToolDefinition } from '../tools-runtime/tool-definition'
 import {
   createToolExecutionOutput,
@@ -55,7 +55,6 @@ import type {
 } from './agent-sdk-types'
 import type { TurnTerminalReason } from './turn-frame'
 import { addRunUsage } from './run-usage-accumulator'
-import { isHandoffTakeoverToolOutput } from '../agents/handoff-control'
 import { createBrowserCandidateClosureController } from './agent-sdk-browser-candidate-closure'
 import {
   createModelLoopBudgetController,
@@ -328,6 +327,7 @@ export async function executeAgentSdkModelToolLoop(
           state,
           runScopeKey: runHandle,
           sessionId,
+          messageVisibilityEpoch: toolBridgeRuntimeContext.messageVisibilityEpoch,
           turnTaskType,
           host,
           browserWorkflowRoute: toolBridgeRuntimeContext.browserWorkflowRoute ?? null
@@ -586,9 +586,6 @@ export async function executeAgentSdkModelToolLoop(
             args: call.args,
             result: output
           })
-          if (isHandoffTakeoverToolOutput(output)) {
-            return finalizeEarlyReturn({ status: 'checkpoint', terminalReason: 'manual_suspend', finalText: '' })
-          }
         }
         {
           const observationClosureResult = await browserCandidateClosure.continueAfterObservationToolResults(
@@ -823,9 +820,6 @@ export async function executeAgentSdkModelToolLoop(
         args: call.args,
         result: output
       })
-      if (isHandoffTakeoverToolOutput(output)) {
-        return finalizeEarlyReturn({ status: 'checkpoint', terminalReason: 'manual_suspend', finalText: '' })
-      }
     }
     {
       const observationClosureResult = await browserCandidateClosure.continueAfterObservationToolResults(

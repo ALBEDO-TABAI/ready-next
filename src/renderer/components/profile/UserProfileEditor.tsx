@@ -93,7 +93,7 @@ export default function UserProfileEditor() {
 
   useEffect(() => {
     void loadProfile()
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- fixed default-user mount loader
+
   }, [])
 
   const loadProfile = async () => {

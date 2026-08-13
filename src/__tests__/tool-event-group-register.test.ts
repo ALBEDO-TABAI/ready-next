@@ -113,6 +113,43 @@ test('toolEventGroup namespace matches the documented label so dispose ordering 
   assert.equal(toolEventGroup.namespace, 'tools:logToolEvent+agent:completeToolActionRequest')
 })
 
+test('tool action acknowledgement is accepted only from the bound renderer webContents', async () => {
+  const { ipc, handleCalls } = createMockIpc()
+  let released = 0
+  let resolved: Record<string, unknown> | null = null
+  const pendingToolActionRequests: ToolEventGroupDeps['pendingToolActionRequests'] = new Map()
+  pendingToolActionRequests.set('request-bound', {
+    expectedSenderId: 41,
+    resolve: (payload) => { resolved = payload },
+    reject: () => undefined,
+  })
+  toolEventGroup.register(ipc, {
+    pendingToolActionRequests,
+    releasePendingRequest: (requestId) => {
+      released += 1
+      pendingToolActionRequests.delete(requestId)
+    },
+  })
+  const handler = handleCalls[0]?.handler
+  assert.ok(handler)
+  const wrong = await handler(
+    { sender: { id: 99 } } as IpcMainInvokeEvent,
+    { requestId: 'request-bound', handled: true, payload: { ok: true } },
+  ) as { success: boolean; error?: string }
+  assert.equal(wrong.success, false)
+  assert.match(String(wrong.error), /Wrong renderer/)
+  assert.equal(released, 0)
+  assert.equal(pendingToolActionRequests.has('request-bound'), true)
+
+  const correct = await handler(
+    { sender: { id: 41 } } as IpcMainInvokeEvent,
+    { requestId: 'request-bound', handled: true, payload: { ok: true } },
+  ) as { success: boolean }
+  assert.equal(correct.success, true)
+  assert.equal(released, 1)
+  assert.deepEqual(resolved, { ok: true })
+})
+
 test('IpcDisposeHandle.dispose releases both the listener slot and the handler slot', () => {
   const { ipc, removeHandlerCalls, removeAllListenersCalls } = createMockIpc()
   const handle = toolEventGroup.register(ipc, createMockDeps())

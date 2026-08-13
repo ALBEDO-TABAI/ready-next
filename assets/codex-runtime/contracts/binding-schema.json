@@ -1,7 +1,14 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 12,
   "sqliteForeignKeysAssumed": false,
-  "singleWriterModule": "CodexBindingRepository",
+  "singleWriterModule": {
+    "codex_*": "CodexBindingRepository",
+    "ready_model_gateway_*": "CodexModelGatewayRepository",
+    "ready_tool_action_receipts": "CodexToolActionJournal"
+  },
+  "internalWriterBoundary": {
+    "codex_tool_call_bindings": "CodexBindingRepository_facade_to_CodexToolBindingRepository"
+  },
   "tables": {
     "codex_thread_bindings": {
       "primaryKey": [
@@ -38,6 +45,8 @@
         "runtime_manifest_digest",
         "protocol_schema_digest",
         "tool_surface_digest",
+        "tool_surface_snapshot_digest",
+        "tool_surface_json",
         "instruction_contract_digest",
         "codex_model_provider_id",
         "codex_model",
@@ -107,6 +116,7 @@
         "thread_binding_id",
         "codex_thread_id",
         "codex_turn_id",
+        "gateway_claimed_codex_turn_id",
         "start_reservation_set_id",
         "start_reservation_required_member_count",
         "turn_start_reservation_member_id",
@@ -128,10 +138,14 @@
         "host_failure_recorded_at",
         "host_failure_evidence_digest",
         "host_failure_product_terminal_digest",
+        "host_failure_closeout_at",
+        "product_terminal_digest",
+        "product_closeout_at",
         "origin_user_message_id",
         "ingress_admitted_revision",
         "ingress_admitted_digest",
         "ingress_admitted_at",
+        "ingress_json",
         "predecessor_run_id",
         "attempt_kind",
         "history_parity_evidence_digest",
@@ -139,6 +153,8 @@
         "continuation_contract_digest",
         "tool_surface_digest",
         "authorization_snapshot_digest",
+        "authorization_snapshot_json",
+        "product_budget_seed_json",
         "effective_codex_model",
         "effective_upstream_snapshot_ref",
         "effective_upstream_snapshot_digest",
@@ -147,6 +163,14 @@
         "interrupt_requested_at",
         "interrupt_ack_at",
         "interrupt_state_unknown_at",
+        "engine_terminal_status",
+        "engine_terminal_candidate_json",
+        "engine_terminal_candidate_digest",
+        "engine_terminal_recorded_at",
+        "publication_receipt_refs_json",
+        "publication_receipt_digest",
+        "publication_recorded_at",
+        "fence_release_revision",
         "revision",
         "created_at",
         "updated_at"
@@ -178,6 +202,13 @@
             "predecessor_run_id"
           ],
           "where": "attempt_kind IN ('recovery_successor','checkpoint_successor','explicit_retry') AND predecessor_run_id IS NOT NULL"
+        },
+        {
+          "columns": [
+            "codex_thread_id",
+            "gateway_claimed_codex_turn_id"
+          ],
+          "where": "gateway_claimed_codex_turn_id IS NOT NULL"
         }
       ],
       "closedEnums": {
@@ -211,8 +242,22 @@
         "tool_name",
         "args_digest",
         "turn_contract_digest",
+        "ready_alias_id",
+        "codex_session_id",
+        "ready_task_id",
+        "surface_snapshot_digest",
+        "tool_surface_digest",
+        "authorization_snapshot_digest",
+        "tool_schema_digest",
+        "request_connection_epoch",
+        "request_rpc_id",
         "receipt_id",
         "result_digest",
+        "delivered_connection_epoch",
+        "delivered_rpc_id",
+        "tool_response_digest",
+        "legacy_delivery_evidence_unverifiable",
+        "delivery_intent_at",
         "revision",
         "created_at",
         "updated_at"
@@ -225,6 +270,77 @@
           "receipt_id"
         ]
       ]
+    },
+    "codex_tool_response_delivery_attempts": {
+      "primaryKey": [
+        "attempt_id"
+      ],
+      "columns": [
+        "attempt_id",
+        "codex_thread_id",
+        "codex_turn_id",
+        "codex_call_id",
+        "ready_action_id",
+        "connection_epoch",
+        "request_rpc_id",
+        "tool_response_json",
+        "tool_response_digest",
+        "transport_write_confirmed_at",
+        "created_at"
+      ],
+      "unique": [
+        [
+          "connection_epoch",
+          "request_rpc_id"
+        ],
+        [
+          "codex_thread_id",
+          "codex_turn_id",
+          "codex_call_id",
+          "connection_epoch",
+          "request_rpc_id"
+        ]
+      ],
+      "immutable": true,
+      "transportWriteConfirmedAt": "nullable_then_set_once_after_actual_write_callback_success",
+      "deleteForbidden": true
+    },
+    "ready_tool_action_receipts": {
+      "primaryKey": [
+        "ready_action_id"
+      ],
+      "columns": [
+        "ready_action_id",
+        "action_identity_digest",
+        "state",
+        "receipt_id",
+        "result_digest",
+        "result_json",
+        "resolution_reason",
+        "resolution_evidence_digest",
+        "revision",
+        "created_at",
+        "updated_at"
+      ],
+      "unique": [
+        [
+          "receipt_id"
+        ]
+      ],
+      "closedEnums": {
+        "state": [
+          "pending",
+          "confirmed",
+          "proven_absent",
+          "indeterminate"
+        ]
+      },
+      "immutableIdentity": [
+        "ready_action_id",
+        "action_identity_digest"
+      ],
+      "terminalStateImmutable": true,
+      "deleteForbidden": true
     },
     "codex_manual_compaction_bindings": {
       "primaryKey": [
@@ -242,7 +358,21 @@
         "provider_snapshot_json",
         "credential_reference_id",
         "expected_tools_digest",
+        "pre_dispatch_thread_read_digest",
+        "pre_dispatch_turn_ids_json",
+        "pre_dispatch_turn_ids_digest",
         "expires_at",
+        "unknown_at",
+        "unknown_reason",
+        "unknown_evidence_digest",
+        "notification_context_compaction_item_id",
+        "context_compaction_item_id",
+        "terminal_status",
+        "terminal_evidence_digest",
+        "thread_read_digest",
+        "gateway_request_receipt_id",
+        "gateway_request_evidence_digest",
+        "gateway_response_evidence_digest",
         "consumed_at",
         "consume_evidence_digest",
         "abandoned_at",
@@ -259,7 +389,69 @@
           ],
           "where": "consumed_at IS NULL AND abandoned_at IS NULL"
         }
-      ]
+      ],
+      "immutableRecoveryEvidence": true,
+      "notificationItemIdentityOptionalAndImmutable": true,
+      "notificationAndReadbackItemIdentityNamespacesAreDistinct": true,
+      "unknownBlocksConsume": true,
+      "quarantineRequiresUnknown": true
+    },
+    "codex_manual_compaction_dispatch_attempts": {
+      "primaryKey": [
+        "attempt_id"
+      ],
+      "columns": [
+        "attempt_id",
+        "manual_compaction_id",
+        "connection_epoch",
+        "rpc_id",
+        "request_digest",
+        "dispatch_intent_at",
+        "child_write_attempted_at",
+        "child_write_confirmed_at",
+        "child_write_digest",
+        "unresolved_at",
+        "unresolved_reason",
+        "response_kind",
+        "response_digest",
+        "response_at",
+        "proven_absent_at",
+        "proven_absent_reason",
+        "proven_absent_evidence_digest",
+        "revision",
+        "created_at",
+        "updated_at"
+      ],
+      "unique": [
+        [
+          "connection_epoch",
+          "rpc_id"
+        ]
+      ],
+      "partialUnique": [
+        {
+          "columns": [
+            "manual_compaction_id"
+          ],
+          "where": "proven_absent_at IS NULL"
+        }
+      ],
+      "closedEnums": {
+        "unresolved_reason": [
+          "response_timeout",
+          "child_write_error",
+          "connection_closed"
+        ],
+        "response_kind": [
+          "accepted",
+          "rejected"
+        ]
+      },
+      "writeBoundary": "app_server_child_transport",
+      "retryPolicy": "only_after_exact_write_not_attempted_proof",
+      "possibleWritePolicy": "durable_unknown_no_redispatch",
+      "immutable": true,
+      "deleteForbidden": true
     },
     "codex_thread_dispatch_fences": {
       "primaryKey": [
@@ -342,6 +534,163 @@
           "post_cas"
         ]
       }
+    },
+    "codex_thread_resume_evidence": {
+      "primaryKey": [
+        "resume_evidence_id"
+      ],
+      "columns": [
+        "resume_evidence_id",
+        "thread_binding_id",
+        "codex_thread_id",
+        "connection_epoch",
+        "pre_resume_thread_read_digest",
+        "resumed_thread_digest",
+        "evidence_digest",
+        "recorded_at"
+      ],
+      "unique": [
+        [
+          "thread_binding_id",
+          "connection_epoch"
+        ],
+        [
+          "evidence_digest"
+        ]
+      ],
+      "immutable": true,
+      "deleteForbidden": true,
+      "credentialMaterialStored": false
+    },
+    "codex_fence_owner_transfers": {
+      "primaryKey": [
+        "transfer_id"
+      ],
+      "columns": [
+        "transfer_id",
+        "thread_binding_id",
+        "operation_kind",
+        "owner_ready_run_id",
+        "owner_manual_compaction_id",
+        "previous_owner_main_boot_id",
+        "new_owner_main_boot_id",
+        "previous_fence_revision",
+        "new_fence_revision",
+        "process_lease_id",
+        "new_process_lease_id",
+        "evidence_digest",
+        "transferred_at"
+      ],
+      "unique": [
+        [
+          "thread_binding_id",
+          "previous_fence_revision"
+        ]
+      ],
+      "closedEnums": {
+        "operation_kind": [
+          "product_turn",
+          "manual_compaction"
+        ]
+      },
+      "exactlyOneOwner": [
+        "owner_ready_run_id",
+        "owner_manual_compaction_id"
+      ],
+      "immutable": true,
+      "deleteForbidden": true
+    },
+    "ready_model_gateway_profile_snapshots": {
+      "primaryKey": [
+        "snapshot_ref"
+      ],
+      "columns": [
+        "snapshot_ref",
+        "snapshot_digest",
+        "profile_id",
+        "snapshot_json",
+        "credential_reference_id",
+        "created_at"
+      ],
+      "unique": [
+        [
+          "snapshot_digest"
+        ]
+      ],
+      "immutable": true,
+      "credentialMaterialStored": false
+    },
+    "ready_model_gateway_request_receipts": {
+      "primaryKey": [
+        "receipt_id"
+      ],
+      "columns": [
+        "receipt_id",
+        "request_kind",
+        "codex_thread_id",
+        "codex_turn_id",
+        "ready_run_id",
+        "manual_compaction_id",
+        "upstream_profile_snapshot_ref",
+        "upstream_profile_snapshot_digest",
+        "request_digest",
+        "accepted_at"
+      ],
+      "closedEnums": {
+        "request_kind": [
+          "product",
+          "automatic_compaction",
+          "manual_compaction"
+        ]
+      },
+      "immutable": true,
+      "duplicateIdentity": "gateway_request_replayed",
+      "exactlyOneOwner": [
+        "ready_run_id",
+        "manual_compaction_id"
+      ]
+    },
+    "ready_model_gateway_exchange_events": {
+      "primaryKey": [
+        "event_sequence"
+      ],
+      "columns": [
+        "event_sequence",
+        "gateway_request_receipt_id",
+        "event_kind",
+        "instruction_digest",
+        "input_digest",
+        "input_items_json",
+        "input_total_string_characters",
+        "input_max_string_characters",
+        "tools_digest",
+        "tool_count",
+        "body_bytes",
+        "response_id",
+        "terminal_digest",
+        "output_digest",
+        "usage_digest",
+        "evidence_digest",
+        "recorded_at"
+      ],
+      "closedEnums": {
+        "event_kind": [
+          "request_admitted",
+          "response_completed"
+        ]
+      },
+      "unique": [
+        [
+          "gateway_request_receipt_id",
+          "event_kind"
+        ],
+        [
+          "evidence_digest"
+        ]
+      ],
+      "immutable": true,
+      "deleteForbidden": true,
+      "credentialMaterialStored": false
     }
   },
   "crossTableInvariants": [
@@ -354,6 +703,34 @@
     "non_user_successor_evidence_all_nonempty_and_immutable",
     "binding_writes_reject_stale_revision",
     "repository_reads_back_before_commit",
-    "no_repository_external_direct_sql_writer"
+    "no_repository_external_direct_sql_writer",
+    "gateway_snapshots_request_receipts_and_exchange_events_are_immutable",
+    "gateway_request_receipt_and_request_event_are_atomic",
+    "gateway_success_response_event_precedes_terminal_delivery",
+    "gateway_receipt_owner_matches_request_kind",
+    "gateway_first_provider_request_claims_native_turn_identity_once",
+    "gateway_request_identity_claim_is_once_only",
+    "native_turn_reconciliation_and_manual_compaction_consume_match_gateway_claim",
+    "manual_compaction_pre_dispatch_readback_precedes_dispatch_attempt",
+    "manual_compaction_dispatch_attempt_has_exact_parent_without_foreign_key_assumption",
+    "manual_compaction_retry_requires_proven_write_not_attempted",
+    "manual_compaction_possible_write_becomes_unknown_without_redispatch",
+    "manual_compaction_success_requires_exact_turn_single_readback_item_gateway_response_and_thread_readback_without_cross_namespace_item_id_equality",
+    "existing_thread_resume_requires_same_live_client_epoch_thread_read_evidence_before_resume",
+    "thread_resume_evidence_parent_requires_connection_opened_and_closed_at_tree_zero_null",
+    "thread_tool_surface_snapshot_is_immutable_after_first_hydration",
+    "turn_authorization_snapshot_is_immutable",
+    "tool_call_identity_matches_active_thread_turn_run_surface_schema_and_authorization",
+    "tool_call_result_requires_matching_confirmed_ready_action_receipt",
+    "tool_action_pending_precedes_ready_executeToolCall",
+    "tool_action_terminal_receipt_and_delivery_attempt_are_distinct",
+    "confirmed_tool_response_recovery_requires_exact_frozen_action_identity_and_dead_prior_connections",
+    "tool_delivery_transport_ack_requires_actual_write_callback_success",
+    "publication_recomputes_candidate_response_digest_from_any_exact_delivery_attempt",
+    "ingress_receipt_is_canonical_and_immutable",
+    "engine_terminal_candidate_precedes_ready_publication",
+    "tool_publication_receipt_recomputes_from_action_receipts",
+    "fence_release_revision_matches_atomic_terminal_closeout",
+    "fence_owner_transfer_requires_dead_old_owner_and_live_new_owner"
   ]
 }

@@ -7,6 +7,7 @@ export type ToolResultShape = 'text' | 'json' | 'projection_patch' | 'multimodal
 export type ToolExecutionContentPart =
   | { type: 'text'; text: string }
   | { type: 'image'; data: string; mediaType: string; detail?: 'low' | 'high' | 'auto' }
+  | { type: 'audio'; data: string; mediaType: string }
   | { type: 'artifact'; path: string; mediaType?: string; filename?: string }
 
 export type ToolInteractionHint =

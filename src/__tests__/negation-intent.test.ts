@@ -7,7 +7,7 @@
  */
 
 import assert from 'node:assert/strict'
-import test from 'node:test'
+import test, { afterEach, beforeEach } from 'node:test'
 
 import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
 import { detectNegations, detectNegationReleases } from '../shared/agent-followup-intent'
@@ -19,6 +19,17 @@ import {
   __clearNegationStateForTests,
 } from '../main/modules/agent-control/safety/negation-state'
 import { executeToolCall } from '../main/modules/tools/tool-executor'
+import { __setScopeContextEpochDatabaseForTests } from '../main/modules/agent-control/session/scope-context-epoch'
+
+beforeEach(() => {
+  __setScopeContextEpochDatabaseForTests({
+    getRawDb: () => ({ prepare: () => ({ get: () => undefined }) }) as never,
+  })
+})
+
+afterEach(() => {
+  __setScopeContextEpochDatabaseForTests(null)
+})
 
 test('negation-intent declares transitive sqlite ABI guard', (t) => {
   skipIfSqliteUnavailable(t, 'negation-intent transitive sqlite load')

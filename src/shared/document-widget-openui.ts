@@ -17,7 +17,7 @@ import {
 } from './document-widget-relation-graph'
 
 export type DocumentWidgetComponentGroup = 'common-display' | 'personal-data'
-export type DocumentWidgetDataSourceType = 'manual' | 'calendar' | 'schedule'
+export type DocumentWidgetDataSourceType = 'manual' | 'calendar'
 export type DocumentWidgetImplementation = 'svg' | 'chartjs' | 'html-inline-script'
 export type DocumentWidgetActionPolicy = 'readonly' | 'local-toggle' | 'trigger-existing-writeback'
 
@@ -72,13 +72,6 @@ const weekDaySchema = z.object({
   label: z.string().min(1),
   count: z.number().min(0),
   highlights: z.array(z.string()).optional(),
-})
-
-const scheduleJobSchema = z.object({
-  name: z.string().min(1),
-  status: z.enum(['enabled', 'paused', 'running', 'error']),
-  nextRun: z.string().optional(),
-  lastRun: z.string().optional(),
 })
 
 const todoItemSchema = z.object({
@@ -212,10 +205,6 @@ const componentSchemas = {
     periodLabel: z.string().min(1),
     segments: z.array(chartDatumSchema).min(1).max(8),
   }),
-  schedule_runtime_card: z.object({
-    heading: z.string().optional(),
-    jobs: z.array(scheduleJobSchema).min(1).max(8),
-  }),
   todo_list_manual: z.object({
     heading: z.string().optional(),
     items: z.array(todoItemSchema).min(1).max(12),
@@ -281,11 +270,6 @@ export interface TimeAllocationSnapshot {
   segments: Array<{ label: string; value: number; accent?: string }>
 }
 
-export interface ScheduleRuntimeSnapshot {
-  heading?: string
-  jobs: Array<{ name: string; status: 'enabled' | 'paused' | 'running' | 'error'; nextRun?: string; lastRun?: string }>
-}
-
 export interface TodayFocusSnapshot {
   dayLabel: string
   highlights: string[]
@@ -296,7 +280,6 @@ export interface DocumentWidgetCompileContext {
   calendar?: DayScheduleSnapshot
   calendarWeek?: WeekScheduleSnapshot
   timeAllocation?: TimeAllocationSnapshot
-  schedule?: ScheduleRuntimeSnapshot
   todayFocus?: TodayFocusSnapshot
 }
 
@@ -510,18 +493,6 @@ export const documentWidgetCatalog: DocumentWidgetCatalogEntry[] = [
     openuiExample: buildExampleTag('time_allocation_chart', { periodLabel: '本周时间分配', segments: '[...]' }),
   },
   {
-    name: 'schedule_runtime_card',
-    group: 'personal-data',
-    description: 'Runtime schedule status card derived from existing automation schedules.',
-    sourceType: 'schedule',
-    implementation: 'html-inline-script',
-    actionPolicy: 'trigger-existing-writeback',
-    styleTags: ['dashboard', 'bold_data'],
-    titleHint: 'schedule_runtime_card',
-    propsSchema: componentSchemas.schedule_runtime_card,
-    openuiExample: buildExampleTag('schedule_runtime_card', { heading: '自动计划', jobs: '[...]' }),
-  },
-  {
     name: 'todo_list_manual',
     group: 'personal-data',
     description: 'Manual todo list stored inside the document widget itself.',
@@ -587,7 +558,7 @@ export const documentWidgetOpenUIPrompt = documentWidgetOpenUILibrary.prompt({
   additionalRules: [
     'Prefer the approved component list over arbitrary HTML inventions.',
     'Keep widget interactions local and compact.',
-    'For calendar or schedule widgets, request existing data snapshots instead of inventing fake personal data.',
+    'For calendar widgets, request existing data snapshots instead of inventing fake personal data.',
     'Do not generate multi-panel mini apps, fetch calls, iframe content, or external stateful runtimes.',
     'When a user asks for an existing widget to change, preserve the existing title and component family unless the request clearly requires a switch.',
   ],
@@ -815,27 +786,6 @@ function compileTimeAllocationChart(props: z.infer<typeof componentSchemas.time_
   </div>`
 }
 
-function compileScheduleRuntimeCard(props: z.infer<typeof componentSchemas.schedule_runtime_card>): string {
-  const statusLabel: Record<z.infer<typeof scheduleJobSchema>['status'], string> = {
-    enabled: '已启用',
-    paused: '已暂停',
-    running: '运行中',
-    error: '异常',
-  }
-  return `<div class="card stack" style="gap:14px;">
-    ${renderHeader(props.heading || '自动计划')}
-    ${props.jobs.map((job) => `<section style="padding:14px;border-radius:12px;background:${widgetVar('canvas')};border:1px solid ${widgetVar('hair')};display:grid;gap:6px;">
-      <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;"><strong style="color:${widgetVar('ink')};font-weight:600;">${escapeHtml(job.name)}</strong><span style="display:inline-flex;align-items:center;gap:6px;font-size:12px;color:${widgetVar('ink2')};"><span class="dot${job.status === 'running' ? ' dot--active' : job.status === 'enabled' ? ' dot--done' : job.status === 'error' ? ' dot--blocked' : ''}"></span>${statusLabel[job.status]}</span></div>
-      ${job.nextRun ? `<div class="num" style="font-size:12px;color:${widgetVar('ink2')};">下次运行：${escapeHtml(job.nextRun)}</div>` : ''}
-      ${job.lastRun ? `<div class="num" style="font-size:12px;color:${widgetVar('ink3')};">最近运行：${escapeHtml(job.lastRun)}</div>` : ''}
-    </section>`).join('')}
-    ${buildButtonRow([
-      { label: '查看计划', message: '请打开当前项目里的自动计划列表。' },
-      { label: '调整计划', message: '请帮我调整当前自动计划的启用状态或时间。' },
-    ])}
-  </div>`
-}
-
 function compileTodoListManual(props: z.infer<typeof componentSchemas.todo_list_manual>): string {
   return `<div class="card stack" style="gap:14px;">
     ${renderHeader(props.heading)}
@@ -918,11 +868,6 @@ function resolvePropsFromSnapshots(
         heading: '时间分配',
         periodLabel: context.timeAllocation.periodLabel,
         segments: context.timeAllocation.segments,
-      } : null
-    case 'schedule_runtime_card':
-      return context?.schedule ? {
-        heading: context.schedule.heading || '自动计划',
-        jobs: context.schedule.jobs,
       } : null
     case 'today_focus_snapshot':
       return context?.todayFocus ? {
@@ -1125,8 +1070,6 @@ function compileByComponent(component: DocumentWidgetComponentName, props: Recor
       return compileWeekScheduleCard(componentSchemas.week_schedule_card.parse(props))
     case 'time_allocation_chart':
       return compileTimeAllocationChart(componentSchemas.time_allocation_chart.parse(props))
-    case 'schedule_runtime_card':
-      return compileScheduleRuntimeCard(componentSchemas.schedule_runtime_card.parse(props))
     case 'todo_list_manual':
       return compileTodoListManual(componentSchemas.todo_list_manual.parse(props))
     case 'weekly_plan_board_manual':

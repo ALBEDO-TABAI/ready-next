@@ -157,17 +157,21 @@ function findButton(document: Document, text: string): HTMLButtonElement {
   return button
 }
 
-test('useAgent.reloadAgents loads personalities into the chat switcher', async () => {
+test('useAgent.reloadAgents ignores historical personalities when hydrating the live Agent selector', async () => {
   const handle = installDomGlobals()
+  let personalityListCalls = 0
   installPersonalityAPI(handle.dom, {
     get: async () => ({ success: true, data: null }),
-    list: async () => ({
-      success: true,
-      data: [
-        samplePersonality({ agentName: 'designer', displayName: '设计师', metaJson: { emoji: '🎨' } }),
-        samplePersonality({ agentName: 'analyst', displayName: '分析师', metaJson: { emoji: '📊' } }),
-      ],
-    }),
+    list: async () => {
+      personalityListCalls += 1
+      return {
+        success: true,
+        data: [
+          samplePersonality({ agentName: 'designer', displayName: '设计师', metaJson: { emoji: '🎨' } }),
+          samplePersonality({ agentName: 'analyst', displayName: '分析师', metaJson: { emoji: '📊' } }),
+        ],
+      }
+    },
     create: async () => ({ success: true, data: samplePersonality() }),
     update: async () => ({ success: true }),
     delete: async () => ({ success: true }),
@@ -181,20 +185,16 @@ test('useAgent.reloadAgents loads personalities into the chat switcher', async (
     await useAgent.getState().reloadAgents()
 
     const state = useAgent.getState()
-    assert.equal(state.currentAgent, 'designer')
-    assert.deepEqual(
-      state.agents.map((agent) => [agent.name, agent.displayName, agent.avatar, agent.selected]),
-      [
-        ['designer', '设计师', '🎨', true],
-        ['analyst', '分析师', '📊', false],
-      ],
-    )
+    assert.equal(personalityListCalls, 0)
+    assert.equal(state.currentAgent, 'butler')
+    assert.equal(state.agents.some((agent) => agent.name === 'designer'), false)
+    assert.equal(state.agents.find((agent) => agent.name === 'butler')?.selected, true)
   } finally {
     handle.restore()
   }
 })
 
-test('PersonalityEditor creates a persisted personality and refreshes the switcher', async () => {
+test('PersonalityEditor creates a historical archive without changing the live selector', async () => {
   const handle = installDomGlobals()
   const created: PersonalityPayload[] = []
   let personalities = [samplePersonality()]
@@ -224,7 +224,7 @@ test('PersonalityEditor creates a persisted personality and refreshes the switch
   const { root, document } = await mountEditor(handle.dom)
   try {
     await act(async () => {
-      findButton(document, '新建人格').dispatchEvent(
+      findButton(document, '新建档案').dispatchEvent(
         new handle.dom.window.MouseEvent('click', { bubbles: true, cancelable: true }),
       )
       await new Promise((resolve) => setTimeout(resolve, 0))
@@ -233,7 +233,7 @@ test('PersonalityEditor creates a persisted personality and refreshes the switch
     assert.equal(created.length, 0)
 
     await act(async () => {
-      findButton(document, '保存人格').dispatchEvent(
+      findButton(document, '保存档案').dispatchEvent(
         new handle.dom.window.MouseEvent('click', { bubbles: true, cancelable: true }),
       )
       await new Promise((resolve) => setTimeout(resolve, 0))
@@ -245,7 +245,8 @@ test('PersonalityEditor creates a persisted personality and refreshes the switch
     assert.equal(created[0].displayName, 'designer')
     assert.equal(created[0].metaJson?.emoji, '🤖')
     assert.match(created[0].personalityText, /# designer/)
-    assert.ok(useAgent.getState().agents.some((agent) => agent.name === 'designer'))
+    assert.match(created[0].personalityText, /不会改变当前 Codex/)
+    assert.equal(useAgent.getState().agents.some((agent) => agent.name === 'designer'), false)
   } finally {
     await act(async () => { root.unmount() })
     handle.restore()
@@ -265,7 +266,7 @@ test('PersonalityEditor shows backend failure instead of fake save success', asy
   const { root, document } = await mountEditor(handle.dom)
   try {
     await act(async () => {
-      findButton(document, '保存人格').dispatchEvent(
+      findButton(document, '保存档案').dispatchEvent(
         new handle.dom.window.MouseEvent('click', { bubbles: true, cancelable: true }),
       )
       await new Promise((resolve) => setTimeout(resolve, 0))
@@ -275,7 +276,7 @@ test('PersonalityEditor shows backend failure instead of fake save success', asy
     const text = document.body.textContent || ''
     assert.match(text, /保存失败/)
     assert.match(text, /duplicate agent/)
-    assert.doesNotMatch(text, /人格配置已保存/)
+    assert.doesNotMatch(text, /历史人格资料已保存/)
   } finally {
     await act(async () => { root.unmount() })
     handle.restore()

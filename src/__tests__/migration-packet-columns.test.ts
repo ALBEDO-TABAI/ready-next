@@ -130,7 +130,7 @@ test('repository roundtrips packetRole/contextRefs; legacy rows read back NULL/[
   }
   const repository = new TaskProjectionRepository({ getRawDb: () => raw as never })
   repository.create({
-    taskId: 'packet-1', taskOrigin: 'system_background', scopeId: 's1', runId: 'r1', taskType: 'multi_step_task', module: 'system',
+    taskId: 'packet-1', taskOrigin: 'system_background', scopeId: 's1', messageVisibilityEpoch: 0, runId: 'r1', taskType: 'multi_step_task', module: 'system',
     status: 'running', interactionState: 'running', steps: [],
     packetRole: 'parent', contextRefs: ['docs/spec.md', 'card:routing-a'],
     createdAt: '2026-06-12T09:00:00.000Z', updatedAt: '2026-06-12T09:00:00.000Z',
@@ -152,7 +152,7 @@ test('repository roundtrips packetRole/contextRefs; legacy rows read back NULL/[
   // depth is enforced AT THE WRITE SIDE — the repository is the funnel,
   // not just a free validation function callers may forget (两层硬上限).
   const base = {
-    taskOrigin: 'system_background', scopeId: 's1', runId: 'r1', taskType: 'multi_step_task', module: 'system',
+    taskOrigin: 'system_background', scopeId: 's1', messageVisibilityEpoch: 0, runId: 'r1', taskType: 'multi_step_task', module: 'system',
     status: 'running', interactionState: 'running', steps: [],
     createdAt: '2026-06-12T09:00:00.000Z', updatedAt: '2026-06-12T09:00:00.000Z',
   }

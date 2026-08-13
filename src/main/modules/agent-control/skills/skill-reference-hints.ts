@@ -19,11 +19,13 @@
 
 import { logAgentMetric } from '../metrics'
 import { TOOL_ERROR_METRICS } from '../tools-runtime/tool-error-metrics'
+import { isSafeMessageVisibilityEpoch, readScopeContextEpoch } from '../session/scope-context-epoch'
 
 export interface ReferenceSkillHint {
   id: string
   name: string
   at: number
+  messageVisibilityEpoch?: number
 }
 
 /**
@@ -36,6 +38,7 @@ export interface PersistedReferenceSkillHint {
   id: string
   name: string
   at: number
+  messageVisibilityEpoch?: number
 }
 
 /**
@@ -87,16 +90,28 @@ function isExpired(hint: ReferenceSkillHint, at: number): boolean {
 
 export function rememberLastReferenceSkill(
   sessionId: string | undefined,
-  info: { id: string; name: string },
+  info: { id: string; name: string; messageVisibilityEpoch?: number },
 ): void {
   if (!sessionId) return
   const id = typeof info.id === 'string' ? info.id.trim() : ''
   const name = typeof info.name === 'string' ? info.name.trim() : ''
   if (!id) return
+  const durable = readScopeContextEpoch(sessionId)
+  if (durable.kind === 'closed' || durable.kind === 'unavailable') return
+  if (
+    durable.kind === 'open'
+    && info.messageVisibilityEpoch !== durable.messageVisibilityEpoch
+  ) return
+  const messageVisibilityEpoch = durable.kind === 'open'
+    ? durable.messageVisibilityEpoch
+    : isSafeMessageVisibilityEpoch(info.messageVisibilityEpoch)
+      ? info.messageVisibilityEpoch
+      : undefined
   lastReferenceSkillBySession.set(sessionId, {
     id,
     name: name || id,
     at: now(),
+    ...(messageVisibilityEpoch === undefined ? {} : { messageVisibilityEpoch }),
   })
   // Phase 5.3 — notify renderer the badge state may have changed.
   emitHintChange(sessionId, 'armed')
@@ -108,6 +123,13 @@ export function getLastReferenceSkill(
   if (!sessionId) return null
   const hint = lastReferenceSkillBySession.get(sessionId)
   if (!hint) return null
+  const durable = readScopeContextEpoch(sessionId)
+  if (durable.kind === 'closed' || durable.kind === 'unavailable'
+    || (durable.kind === 'open' && hint.messageVisibilityEpoch !== durable.messageVisibilityEpoch)) {
+    lastReferenceSkillBySession.delete(sessionId)
+    emitHintChange(sessionId, 'cleared')
+    return null
+  }
   const at = now()
   if (isExpired(hint, at)) {
     lastReferenceSkillBySession.delete(sessionId)
@@ -131,6 +153,11 @@ export function peekLastReferenceSkill(
   if (!sessionId) return null
   const hint = lastReferenceSkillBySession.get(sessionId)
   if (!hint) return null
+  const durable = readScopeContextEpoch(sessionId)
+  if (durable.kind === 'closed' || durable.kind === 'unavailable'
+    || (durable.kind === 'open' && hint.messageVisibilityEpoch !== durable.messageVisibilityEpoch)) {
+    return null
+  }
   if (isExpired(hint, now())) {
     lastReferenceSkillBySession.delete(sessionId)
     return null
@@ -200,7 +227,14 @@ export function snapshotLastReferenceSkill(
 ): PersistedReferenceSkillHint | null {
   const hint = getLastReferenceSkill(sessionId)
   if (!hint) return null
-  return { id: hint.id, name: hint.name, at: hint.at }
+  return {
+    id: hint.id,
+    name: hint.name,
+    at: hint.at,
+    ...(hint.messageVisibilityEpoch === undefined
+      ? {}
+      : { messageVisibilityEpoch: hint.messageVisibilityEpoch }),
+  }
 }
 
 /**
@@ -224,6 +258,12 @@ export function restoreLastReferenceSkill(
   const at = typeof hint.at === 'number' && Number.isFinite(hint.at) ? hint.at : 0
   if (!id || !at) return false
   if (now() - at > REFERENCE_SKILL_HINT_TTL_MS) return false
+  const durable = readScopeContextEpoch(sessionId)
+  if (durable.kind === 'closed' || durable.kind === 'unavailable') return false
+  const messageVisibilityEpoch = isSafeMessageVisibilityEpoch(hint.messageVisibilityEpoch)
+    ? hint.messageVisibilityEpoch
+    : undefined
+  if (durable.kind === 'open' && messageVisibilityEpoch !== durable.messageVisibilityEpoch) return false
   // Preserve the original `at` so TTL math survives across restarts; we
   // intentionally bypass `rememberLastReferenceSkill` because that one stamps
   // a fresh `at`.
@@ -231,6 +271,7 @@ export function restoreLastReferenceSkill(
     id,
     name: name || id,
     at,
+    ...(messageVisibilityEpoch === undefined ? {} : { messageVisibilityEpoch }),
   })
   // Phase 5.3 — restore is functionally an arming, notify renderer.
   emitHintChange(sessionId, 'armed')

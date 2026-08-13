@@ -219,6 +219,9 @@ export function writeRunMetaOutcome(
     runId: outcome.runId,
     taskId: outcome.taskId ?? null,
     scopeId: outcome.scopeId ?? null,
+    ...(Number.isSafeInteger(outcome.messageVisibilityEpoch)
+      ? { messageVisibilityEpoch: outcome.messageVisibilityEpoch }
+      : {}),
     status,
     terminalReason,
     initiator: outcome.initiator,

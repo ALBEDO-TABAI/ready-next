@@ -56,7 +56,13 @@ class FakeConversationConnection implements DatabaseConnection {
         return { changes: 1 }
       },
       get<T = unknown>(...params: unknown[]): T | undefined {
-        if (normalized === 'SELECT * FROM chat_conversations WHERE id = ? LIMIT 1') {
+        if (normalized === 'SELECT id FROM chat_conversations WHERE id = ? AND closed_at IS NOT NULL LIMIT 1') {
+          return undefined
+        }
+        if (
+          normalized === 'SELECT * FROM chat_conversations WHERE id = ? LIMIT 1' ||
+          normalized === 'SELECT * FROM chat_conversations WHERE id = ? AND closed_at IS NULL LIMIT 1'
+        ) {
           return conversations.get(String(params[0])) as T | undefined
         }
         if (normalized.startsWith('SELECT * FROM chat_conversations WHERE source_kind = ?')) {

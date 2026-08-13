@@ -17,6 +17,8 @@ function createScope(): ConversationScope {
   return {
     id: 'scope-1',
     agent: 'butler',
+    aliasGeneration: 1,
+    messageVisibilityEpoch: 1,
     title: '测试会话',
     sourceKind: 'local',
     sourceId: 'app',
@@ -133,6 +135,9 @@ async function seedParentTask(params: {
   await params.publishScopeRunEvent({
     type: 'started',
     scopeId: params.scope.id,
+    aliasGeneration: params.scope.aliasGeneration,
+    messageVisibilityEpoch: params.scope.messageVisibilityEpoch,
+    visibilityOwnerKind: 'product_alias',
     agent: params.scope.agent,
     runId: 'run-parent',
     taskId: 'parent-task',

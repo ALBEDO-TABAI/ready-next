@@ -48,37 +48,37 @@ async function withDom(
   }
 }
 
-const RESUME_ENTRY = {
+const FOLLOW_UP_ENTRY = {
   card: {
-    id: 'resume:task-1',
-    type: 'resume',
-    title: '「写周报」停在半路，可以续跑',
-    evidence: [{ fact: '状态 blocked', ref: 'task:task-1' }],
+    id: 'followup:adjudicate:task-1',
+    type: 'follow_up',
+    title: '「写周报」完成待裁决',
+    evidence: [{ fact: 'interaction_state=check_in_pending', ref: 'task:task-1' }],
     confidence: 0.85,
-    action: { kind: 'resume_task', ref: 'task-1' },
+    action: { kind: 'adjudicate_task', ref: 'task-1' },
     requiresExplicitConfirm: false,
   },
   scopeId: 'scope-1',
 }
 
-const CANDIDATE_ENTRY = {
+const SITE_REVIEW_ENTRY = {
   card: {
-    id: 'crystallize:agent-candidate:knowledge/x.md',
+    id: 'crystallize:site:knowledge/x.md',
     type: 'crystallize',
-    title: '最近多次出现同类请求：视频剪辑',
-    evidence: [{ fact: '同域请求出现于 2026-07-01', ref: 'knowledge/x.md' }],
+    title: '浏览器发现「站点规则」有风险提示待你处理',
+    evidence: [{ fact: 'staged 站点卡 source=possible-risk-update-of:site-x', ref: 'knowledge/x.md' }],
     confidence: 0.7,
-    action: { kind: 'adopt_candidate', ref: 'knowledge/x.md' },
+    action: { kind: 'review_duplicate', ref: 'knowledge/x.md' },
     requiresExplicitConfirm: true,
   },
   scopeId: null,
 }
 
-test('renders feed entries with evidence and routes actions to scope vs settings exits', async () => {
+test('renders live feed entries with evidence and routes scope vs site-review exits', async () => {
   const opened: string[] = []
   let settingsOpened = 0
   await withDom(
-    { feed: async () => ({ success: true, data: [RESUME_ENTRY, CANDIDATE_ENTRY] }) },
+    { feed: async () => ({ success: true, data: [FOLLOW_UP_ENTRY, SITE_REVIEW_ENTRY] }) },
     async (root, container) => {
       await act(async () => {
         root.render(createElement(EmergenceFeedSection, {
@@ -87,15 +87,15 @@ test('renders feed entries with evidence and routes actions to scope vs settings
         }))
       })
       assert.ok(container.querySelector('[data-ready-emergence-feed]'))
-      assert.match(container.textContent || '', /停在半路/)
-      assert.match(container.textContent || '', /状态 blocked/)
+      assert.match(container.textContent || '', /完成待裁决/)
+      assert.match(container.textContent || '', /check_in_pending/)
 
-      const resumeButton = container.querySelector('[data-ready-emergence-action="resume_task"]') as HTMLButtonElement
-      await act(async () => { resumeButton.click() })
+      const adjudicateButton = container.querySelector('[data-ready-emergence-action="adjudicate_task"]') as HTMLButtonElement
+      await act(async () => { adjudicateButton.click() })
       assert.deepEqual(opened, ['scope-1'])
 
-      const adoptButton = container.querySelector('[data-ready-emergence-action="adopt_candidate"]') as HTMLButtonElement
-      await act(async () => { adoptButton.click() })
+      const reviewButton = container.querySelector('[data-ready-emergence-action="review_duplicate"]') as HTMLButtonElement
+      await act(async () => { reviewButton.click() })
       assert.equal(settingsOpened, 1)
     },
   )

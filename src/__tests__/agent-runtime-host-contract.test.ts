@@ -61,7 +61,7 @@ test('runtime host keeps projection contracts while the production sender is Cod
 
   assert.match(runCoordinator, /export class RunCoordinator/)
   assert.match(runCoordinator, /async runScoped\(/)
-  assert.match(runCoordinator, /async runInboundChannel\(/)
+  assert.doesNotMatch(runCoordinator, /runInboundChannel/)
   assert.doesNotMatch(runCoordinator, /promptAssembly|executeAndCollect|runtimeKernel|ready-agent-sdk-retired/)
 
   assert.match(runProjection, /export class RunProjection/)
@@ -153,15 +153,14 @@ test('runtime host keeps projection contracts while the production sender is Cod
   assert.doesNotMatch(runtime, /runtimeKernel:\s*'codex-native'|ready-agent-sdk-retired/)
   assert.match(runtime, /new CodexHostOrchestrator\(/)
   assert.doesNotMatch(runtime, /new ReadyAgentOrchestrator\(|new AgentSdkRuntime\(/)
-  // B8-D R5 — the inbound-channel dispatch moved into RemoteChannelService;
-  // the runtime wires a narrowed `runCoordinator` face into the service, and
-  // the service awaits the coordinator through that injected dep. Both sides
-  // are pinned so the host chain cannot silently detach.
+  // Remote IM is resource ingress only. A hidden Agent dispatcher or typing
+  // loop here would silently reintroduce non-local execution.
   const remoteChannelService = readWorkspaceFile(
     'src/main/modules/agent-control/runtime-core/remote-channel-service.ts',
   )
-  assert.match(runtime, /runInboundChannel:\s*async \(\) => \(\{[\s\S]*?non_local_ingress_unsupported/)
-  assert.match(remoteChannelService, /(?:return\s+|const\s+\w+\s*=\s*)?await\s+this\.deps\.runCoordinator\.runInboundChannel\(/)
+  assert.doesNotMatch(runtime, /non_local_ingress_unsupported/)
+  assert.doesNotMatch(remoteChannelService, /runInboundChannel|sendChannelTyping/)
+  assert.match(remoteChannelService, /remote_inbound_resource_stored/)
   // B8-D R1 — projection event recording is delegated through the
   // ProjectionSyncCoordinator, which owns the single RunProjection.recordEvent
   // call site; the runtime wires its RunProjection instance into it.

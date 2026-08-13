@@ -63,16 +63,16 @@ const settingsData: SettingSection[] = [
   },
   {
     id: 'agent',
-    title: 'Agent',
+    title: 'Agent 历史资料',
     icon: Sparkles,
-    description: '管理 Agent 的人格、知识、路由、生命周期与后台行为',
-    settings: [] // Rendered dynamically via AgentSettingsHub（合并原 Agent / Agent 人格 / Agent 系统 三个 Tab）
+    description: '查阅和整理本机保存的人格档案，不改变当前 Codex',
+    settings: []
   },
   {
     id: 'remote-im',
     title: '远程 IM',
     icon: MessageSquare,
-    description: '连接飞书/Telegram，让 Agent 远程执行任务',
+    description: '接收远程消息和附件，并管理明确发送',
     settings: [] // Rendered dynamically via RemoteIMSettingsPanel
   },
   {
@@ -379,7 +379,6 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
       if (browserPowerResult?.success) {
         updateSetting('privacy', BROWSER_POWER_MODE_SETTING_KEY, browserPowerResult.data === 'true')
       }
-      // Agent 后台播报 / 新会话路由 的读写已迁入 AgentSettingsHub「行为」子区（自包含）。
     })()
     return () => { cancelled = true }
   }, [])
@@ -599,7 +598,7 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
                 )}
                 {currentSection.id === 'tag-forge' && <TagForgeSettingsPanel />}
 
-                {/* Agent — 单入口容器：人格 / registry / 派生 / 系统 + 行为开关 */}
+                {/* Historical personality records only; not a Codex control surface. */}
                 {currentSection.id === 'agent' && (
                   <AgentSettingsHub />
                 )}

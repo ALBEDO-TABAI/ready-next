@@ -7,7 +7,10 @@ import {
   resolveAIConfigCapabilities,
   type AIModelConfig,
 } from '../../../shared/ai-providers'
-import type { AgentIngressMessageBlock } from '../../../shared/ipc-contracts/agent-runtime'
+import type {
+  AgentIngressMessageBlock,
+  SendScopedResourceSelection,
+} from '../../../shared/ipc-contracts/agent-runtime'
 
 export type MultimodalBlock = AgentIngressMessageBlock
 
@@ -27,6 +30,7 @@ export interface ComposedAgentInputDiagnostics {
 export interface ComposedAgentInputResult {
   message: string | MultimodalBlock[]
   diagnostics: ComposedAgentInputDiagnostics
+  resources?: SendScopedResourceSelection[]
 }
 
 interface RendererAIConfigForCapabilities {
@@ -432,6 +436,76 @@ export async function buildComposedAgentInput(params: {
   filePool: ChatAttachment[]
 }): Promise<string | MultimodalBlock[]> {
   return (await buildComposedAgentInputWithDiagnostics(params)).message
+}
+
+export async function buildCodexIngressInputWithDiagnostics(params: {
+  content: string
+  attachments: ChatAttachment[]
+}): Promise<ComposedAgentInputResult> {
+  const diagnostics: ComposedAgentInputDiagnostics = {
+    inputIncludedCount: 0,
+    inputFailedCount: 0,
+    inputFailures: [],
+  }
+  const resources: SendScopedResourceSelection[] = []
+
+  for (const attachment of params.attachments) {
+    if (attachment.source === 'skill-folder') {
+      resources.push({
+        kind: 'skill',
+        id: attachment.id,
+        name: attachment.name,
+        path: attachment.skillFolderPath || attachment.path,
+        ...(attachment.skillId ? { skillId: attachment.skillId } : {}),
+      })
+      diagnostics.inputIncludedCount += 1
+      continue
+    }
+    if (attachment.source !== 'file' && attachment.source !== 'generated-image') {
+      diagnostics.inputFailedCount += 1
+      diagnostics.inputFailures.push({
+        id: attachment.id,
+        name: attachment.name,
+        path: attachment.path,
+        reason: 'codex_structured_resource_not_ready',
+      })
+      continue
+    }
+    if (attachment.isDirectory) {
+      resources.push({
+        kind: 'local_directory',
+        id: attachment.id,
+        name: attachment.name,
+        path: attachment.path,
+      })
+    } else if (attachment.type !== 'video') {
+      resources.push({
+        kind: 'local_file',
+        id: attachment.id,
+        name: attachment.name,
+        path: attachment.path,
+        size: attachment.size,
+        ext: attachment.ext,
+        rendererType: attachment.type,
+      })
+    } else {
+      diagnostics.inputFailedCount += 1
+      diagnostics.inputFailures.push({
+        id: attachment.id,
+        name: attachment.name,
+        path: attachment.path,
+        reason: 'codex_local_video_not_supported',
+      })
+      continue
+    }
+    diagnostics.inputIncludedCount += 1
+  }
+
+  return {
+    message: params.content,
+    diagnostics,
+    resources,
+  }
 }
 
 export function resolveReferencedFilePoolAttachments(content: string, filePool: ChatAttachment[]): ChatAttachment[] {

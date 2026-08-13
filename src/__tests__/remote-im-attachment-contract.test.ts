@@ -74,31 +74,21 @@ test('remote-im-attachment-contract declares transitive sqlite ABI guard', (t) =
   skipIfSqliteUnavailable(t, 'remote-im-attachment-contract transitive sqlite load')
 })
 
-test('remote IM attachment-only inbound messages continue into the agent payload', () => {
-  // B8-D R5 — the inbound-channel cluster moved from runtime.ts into the
-  // delegated RemoteChannelService; the pins below re-anchor onto the service.
-  // eslint-disable-next-line ready/no-source-grep-test -- private service guard: full AgentControlRuntime construction needs Electron/DB wiring; this locks the regression-prone early return.
+test('remote IM attachment-only inbound messages are retained as scope resources', () => {
+  // eslint-disable-next-line ready/no-source-grep-test -- resource metadata is the durable attachment contract consumed by listConversationAttachments.
   const source = readFileSync(new URL('../main/modules/agent-control/runtime-core/remote-channel-service.ts', import.meta.url), 'utf8')
-  const calendarMarker = 'this.maybeEmitRemoteCalendarSuggestions(pending, inboundText)'
-  const payloadMarker = 'const promptPayload = this.buildInboundChannelPayload(inboundText, pending.attachments)'
-  const calendarIndex = source.indexOf(calendarMarker)
-  const payloadIndex = source.indexOf(payloadMarker)
-
-  assert.notEqual(calendarIndex, -1)
-  assert.notEqual(payloadIndex, -1)
-  assert.ok(calendarIndex < payloadIndex)
-  const between = source.slice(calendarIndex, payloadIndex)
-  assert.doesNotMatch(between, /if\s*\(\s*!mergedText\s*\)/)
+  assert.match(source, /content:\s*inboundText/)
+  assert.match(source, /attachments:\s*pending\.attachments/)
+  assert.match(source, /remote_inbound_resource_stored/)
+  assert.doesNotMatch(source, /buildInboundChannelPayload|runInboundChannel/)
 })
 
-test('remote IM outbound file delivery uses projection artifact proofs', () => {
-  // eslint-disable-next-line ready/no-source-grep-test -- contract pins safe source of outbound files to task projection proofs, not final-text path scraping. B8-D R5: cluster lives in RemoteChannelService.
+test('remote IM does not infer an automatic outbound file from Agent projections', () => {
+  // eslint-disable-next-line ready/no-source-grep-test -- outbound files must use the explicit channel_send_file path.
   const source = readFileSync(new URL('../main/modules/agent-control/runtime-core/remote-channel-service.ts', import.meta.url), 'utf8')
 
-  assert.match(source, /collectOutboundChannelAttachments/)
-  assert.match(source, /record\.kind !== 'artifact'/)
-  assert.match(source, /record\.ref === 'present_file' \|\| record\.ref === 'document_save_tab'/)
-  assert.doesNotMatch(source, /finalText\.matchAll/)
+  assert.doesNotMatch(source, /collectOutboundChannelAttachments|taskProjectionId|proofRefs/)
+  assert.match(source, /async sendFileToScopeThread/)
 })
 
 test('remote IM outbound file intent requires directed send wording', () => {
@@ -322,34 +312,21 @@ test('send-im skill only exposes the direct file send tool and no recipient opti
   assert.doesNotMatch(serialized, /默认收件人|defaultTarget/)
 })
 
-test('remote IM outbound file delivery is gated by explicit inbound send intent', () => {
-  // eslint-disable-next-line ready/no-source-grep-test -- private service guard: attachment sending must be driven by the remote user's request, not a generic "已整理好" model reply. B8-D R5: cluster lives in RemoteChannelService.
+test('remote IM automatic outbound file collection is retired', () => {
+  // eslint-disable-next-line ready/no-source-grep-test -- ordinary inbound is resource-only; explicit outbound uses channel_send_file.
   const source = readFileSync(new URL('../main/modules/agent-control/runtime-core/remote-channel-service.ts', import.meta.url), 'utf8')
-  // eslint-disable-next-line ready/no-source-grep-test -- intent keyword coverage is a static shared-module contract.
-  const intentSource = readFileSync(new URL('../shared/remote-im-file-intent.ts', import.meta.url), 'utf8')
-
-  assert.match(intentSource, /笔记/)
-  assert.match(intentSource, /脚本/)
-  assert.match(intentSource, /报告/)
-  assert.match(intentSource, /资料/)
-  assert.match(intentSource, /搜索/)
-  assert.match(intentSource, /查/)
-  assert.doesNotMatch(source, /hasOutboundFileDeliveryClaim/)
-  assert.match(source, /collectOutboundChannelAttachments\(\s*executionResult,\s*inboundText,\s*pending\.channelId\s*\)/)
-  assert.doesNotMatch(source, /collectOutboundChannelAttachments\(\s*executionResult,\s*inboundText,\s*finalText\s*\)/)
-  assert.doesNotMatch(source, /collectOutboundChannelAttachments\(\s*executionResult,\s*inboundText,\s*failure\.reply\s*\)/)
-  assert.match(source, /remote_channel_outbound_attachments_collected/)
+  assert.doesNotMatch(source, /collectOutboundChannelAttachments|remote_channel_outbound_attachments_collected/)
+  assert.match(source, /sendFileToScopeThread/)
 })
 
-test('remote IM outbound attachments are limited to WeChat and explicit artifact proofs', () => {
-  // eslint-disable-next-line ready/no-source-grep-test -- private service guard: non-WeChat adapters drop attachments, so the service must not attach files for them. B8-D R5: cluster lives in RemoteChannelService.
+test('explicit remote IM outbound attachments remain limited to WeChat', () => {
+  // eslint-disable-next-line ready/no-source-grep-test -- direct send keeps its channel-type boundary.
   const source = readFileSync(new URL('../main/modules/agent-control/runtime-core/remote-channel-service.ts', import.meta.url), 'utf8')
-  const collectBlock = source.match(/private collectOutboundChannelAttachments[\s\S]*?\n\s{2}\}/)?.[0] || ''
 
-  assert.match(source, /channelSupportsOutboundAttachments\(channelId\)/)
+  assert.match(source, /private channelSupportsOutboundAttachments\(channelId/)
+  assert.match(source, /this\.channelSupportsOutboundAttachments\(thread\.channel_id\)/)
   assert.match(source, /channel\?\.type === 'wechat-openclaw'/)
-  assert.match(collectBlock, /record\.kind !== 'artifact'/)
-  assert.doesNotMatch(collectBlock, /projection\.recentArtifacts/)
+  assert.match(source, /async sendFileToScopeThread/)
 })
 
 test('remote IM probe treats sidecar body errors as failures', () => {
@@ -377,20 +354,12 @@ test('remote IM runtime status counts persisted outbound delivery errors', () =>
   assert.match(statusBlock, /Math\.max\(sidecarErrors,\s*persistedErrorCount\)/)
 })
 
-test('remote IM delayed progress uses native typing state instead of a chat message', () => {
-  // B8-D R5 — the flush pipeline (typing indicator included) lives in the
-  // delegated RemoteChannelService now, so the guard pins the service body.
-  // eslint-disable-next-line ready/no-source-grep-test -- private service guard: prevents regressing to a visible "处理中…" upstream message.
+test('ordinary remote IM inbound emits no typing state or automatic progress message', () => {
+  // eslint-disable-next-line ready/no-source-grep-test -- resource-only ingress has no background work to narrate.
   const serviceSource = readFileSync(new URL('../main/modules/agent-control/runtime-core/remote-channel-service.ts', import.meta.url), 'utf8')
-  // eslint-disable-next-line ready/no-source-grep-test -- sidecar typing bridge is a static channel contract.
-  const sidecarSource = readFileSync(new URL('../main/modules/agent-control/sidecar-manager.ts', import.meta.url), 'utf8')
 
-  assert.match(sidecarSource, /sendChannelTyping/)
-  assert.match(serviceSource, /sendChannelTyping/)
-  assert.match(serviceSource, /typing:\s*true/)
-  assert.match(serviceSource, /typing:\s*false/)
+  assert.doesNotMatch(serviceSource, /sendChannelTyping|typing:\s*(?:true|false)/)
   assert.doesNotMatch(serviceSource, /text:\s*'处理中…'/)
-  assert.doesNotMatch(serviceSource, /delayedStatusSent/)
 })
 
 test('WeChat settings preserves OpenClaw routing config before login', () => {
@@ -405,25 +374,18 @@ test('WeChat settings preserves OpenClaw routing config before login', () => {
   assert.match(source, /OpenClaw routeTag/)
 })
 
-test('remote IM slash commands are handled before agent execution', () => {
-  // B8-D R5 — flush/command pipeline lives in RemoteChannelService; the
-  // conversation-store and run-coordinator hub calls became injected deps
-  // (`this.deps.createConversationMessage` / `this.deps.runCoordinator`),
-  // so the ordering markers re-anchor onto the service body verbatim.
-  // eslint-disable-next-line ready/no-source-grep-test -- private service guard: command-only messages must not enter the Agent loop.
+test('remote IM slash commands are handled before ordinary resource persistence', () => {
+  // eslint-disable-next-line ready/no-source-grep-test -- command-only messages keep their explicit control path without an Agent loop.
   const source = readFileSync(new URL('../main/modules/agent-control/runtime-core/remote-channel-service.ts', import.meta.url), 'utf8')
   const commandMarker = 'const commandHandled = await this.handleInboundChannelCommand(pending, inboundText, agent)'
   const userMessageMarker = 'const inboundMessage = this.deps.createConversationMessage(scope.id, {'
-  const agentMarker = 'const result = await this.deps.runCoordinator.runInboundChannel('
   const commandIndex = source.indexOf(commandMarker)
   const userMessageIndex = source.indexOf(userMessageMarker)
-  const agentIndex = source.indexOf(agentMarker)
 
   assert.notEqual(commandIndex, -1)
   assert.notEqual(userMessageIndex, -1)
-  assert.notEqual(agentIndex, -1)
   assert.ok(commandIndex < userMessageIndex)
-  assert.ok(commandIndex < agentIndex)
+  assert.doesNotMatch(source, /runInboundChannel/)
   assert.match(source, /case 'status':/)
   assert.match(source, /case 'new':/)
   assert.match(source, /case 'model':/)

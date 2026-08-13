@@ -1,33 +1,16 @@
 import assert from 'node:assert/strict'
-import { createRequire } from 'node:module'
 import test from 'node:test'
 
 import type { AgentInputItem } from '@openai/agents'
-import type { DatabaseConnection } from '../main/modules/database'
-import { runMigrations, type MigrationDatabase } from '../main/modules/migrations'
 import { AgentSessionCheckpointRepository, workflowDigest } from '../main/modules/repositories/agent-session-checkpoint-repository'
 import { TaskProjectionRepository } from '../main/modules/repositories/task-projection-repository'
 import { RunMetaRepository } from '../main/modules/agent-control/task-projection/run-meta-repository'
 import { browserWorkflowStableDigest } from '../main/modules/browser-engine/browser-workflow-evidence'
-import { reconcileStartupRunsOnStartup } from '../main/modules/app-control/startup-run-reconciler'
-import { buildPreparedSkillTurnTruth } from '../main/modules/agent-control/skills/prepared-skill-turn'
-import { buildExplicitNoSkillAuthorization } from '../main/modules/agent-control/skills/skill-tool-authorization'
-import { AgentSessionInputController } from '../main/modules/agent-control/runtime-core/agent-session-input-controller'
 import {
-  buildBrowserVerifierRecoveryItem,
-  createBrowserSuspensionController,
-  withoutBrowserVerifierRecoveryItems,
-} from '../main/modules/agent-control/runtime-core/agent-sdk-browser-suspension'
-import type { ToolBridgeRuntimeContext } from '../main/modules/agent-control/runtime-core/agent-sdk-types'
-import { createTaskBudgetRuntime } from '../main/modules/agent-control/task-projection/run-budget-policy'
-import {
-  KIMI_K3_SESSION_IDENTITY,
-  KIMI_K3_SESSION_IDENTITY_FIELD,
-  inspectKimiK3History,
+  inspectKimiK3History
 } from '../shared/ai-providers/kimi-k3'
 import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
-import { BrowserTargetClaimRepository, BrowserTargetClaimService } from '../main/modules/browser-engine/browser-target-claims'
-import { isAgentBrowserError } from '../main/modules/browser-engine/agent-browser-errors'
+import { BrowserActionExecutor } from '../main/modules/tools/browser-action-executor'
 import {
   kimiK3ProviderTestData as k3ProviderData,
   openProviderCheckpointTestDb as openDb,
@@ -42,13 +25,19 @@ test('checkpoint rotation keeps 100 turns O(1) rows and losslessly round-trips K
   try {
     const accessor = { getRawDb: () => db }
     const projections = new TaskProjectionRepository(accessor)
+    const runMeta = new RunMetaRepository(db)
     const repository = new AgentSessionCheckpointRepository(accessor)
     const taskId = 'parent-checkpoint-100-turns'
     const runId = 'run-checkpoint-100-turns'
     const now = '2026-07-19T00:00:00.000Z'
+    db.prepare(
+      `INSERT INTO chat_conversations (id, agent, title, created_at, updated_at)
+       VALUES ('scope-checkpoint-100-turns', 'butler', 'Checkpoint rotation', ?, ?)`,
+    ).run(now, now)
     projections.create({
       taskId,
       scopeId: 'scope-checkpoint-100-turns',
+      messageVisibilityEpoch: 0,
       runId,
       taskType: 'research',
       module: 'browser',
@@ -62,6 +51,15 @@ test('checkpoint rotation keeps 100 turns O(1) rows and losslessly round-trips K
       createdAt: now,
       updatedAt: now,
     })
+    runMeta.create({
+      runId,
+      taskId,
+      scopeId: 'scope-checkpoint-100-turns',
+      messageVisibilityEpoch: 0,
+      agentId: 'butler',
+      executionBinding: executionBinding(runId),
+      status: 'running',
+    }, Date.parse(now))
     const sourceItems: AgentInputItem[] = [
       {
         type: 'message',
@@ -161,9 +159,14 @@ test('browser journal writes are owner-bound atomic transactions and corrupt obs
     const ownerRunId = 'run-browser-journal-old'
     const ownerBinding = executionBinding(ownerRunId)
     const now = '2026-07-19T01:00:00.000Z'
+    db.prepare(
+      `INSERT INTO chat_conversations (id, agent, title, created_at, updated_at)
+       VALUES (?, 'butler', 'Browser journal native', ?, ?)`,
+    ).run(scopeId, now, now)
     projections.create({
       taskId: parentTaskId,
       scopeId,
+      messageVisibilityEpoch: 0,
       runId: ownerRunId,
       taskType: 'research',
       module: 'browser',
@@ -181,18 +184,15 @@ test('browser journal writes are owner-bound atomic transactions and corrupt obs
       runId: ownerRunId,
       taskId: parentTaskId,
       scopeId,
+      messageVisibilityEpoch: 0,
       agentId: 'butler',
       executionBinding: ownerBinding,
       status: 'running',
     }, Date.parse(now))
-    db.prepare(
-      `INSERT INTO chat_conversations (id, agent, title, created_at, updated_at)
-       VALUES (?, 'butler', 'Browser journal native', ?, ?)`,
-    ).run(scopeId, now, now)
     const sourceMessageId = 'message-browser-journal-native'
     db.prepare(
-      `INSERT INTO chat_messages (id, conversation_id, role, content, timestamp, meta_json)
-       VALUES (?, ?, 'user', '读取当前页面并点击目标', ?, '{}')`,
+      `INSERT INTO chat_messages (id, conversation_id, role, content, timestamp, meta_json, message_visibility_epoch)
+       VALUES (?, ?, 'user', '读取当前页面并点击目标', ?, '{}', 0)`,
     ).run(sourceMessageId, scopeId, now)
     const route = await repository.bindBrowserWorkflowRoute({
       parentTaskId,
@@ -251,6 +251,7 @@ test('browser journal writes are owner-bound atomic transactions and corrupt obs
       runId: newOwnerRunId,
       taskId: parentTaskId,
       scopeId,
+      messageVisibilityEpoch: 0,
       agentId: 'butler',
       executionBinding: newOwnerBinding,
       status: 'running',
@@ -386,6 +387,87 @@ test('browser journal writes are owner-bound atomic transactions and corrupt obs
     ).get<{ progress_total: number; progress_completed: number }>(route.browserTaskId)
     assert.deepEqual(progress, { progress_total: 1, progress_completed: 1 })
     assert.equal(repository.inspectWorkflowCloseout(parentTaskId).state, 'sealable')
+
+    const openAction = repository.beginBrowserWorkflowAction({
+      taskId: route.browserTaskId,
+      operationId: 'tabs_open',
+      ownerRunId: newOwnerRunId,
+      argsDigest: 'open-weather-tab-args',
+      identity,
+    })
+    const openSettled = repository.settleBrowserWorkflowAction(route.browserTaskId, openAction.actionId, {
+      actionId: openAction.actionId,
+      actionSeq: openAction.actionSeq,
+      taskId: route.browserTaskId,
+      ownerRunId: newOwnerRunId,
+      operationId: 'tabs_open',
+      mode: 'mutate',
+      dispatch: 'accepted',
+      delivery: 'delivered',
+      effect: 'observed',
+      needsObservation: false,
+      mayHaveCommitted: true,
+      identity,
+      successorIdentity: identity,
+      postActionTabId: 'tab-weather-native',
+    })
+    assert.equal(repository.inspectWorkflowCloseout(parentTaskId).state, 'observation_required')
+    const weatherIdentity = {
+      documentState: 'document' as const,
+      tabId: 'tab-weather-native',
+      physicalTargetToken: 'physical-weather-native',
+      frameId: '0',
+      frameDocumentToken: 'document-weather-native',
+      targetRef: null,
+    }
+    let weatherObservation: ReturnType<typeof repository.recordBrowserWorkflowObservation> | null = null
+    await new BrowserActionExecutor().execute({
+      toolName: 'browser_wait',
+      args: {
+        tab_id: 'tab-weather-native',
+        condition: 'content_stable',
+        stable_iterations: 2,
+      },
+      resolveTargetIdentity: () => weatherIdentity,
+      journal: {
+        taskId: route.browserTaskId,
+        ownerRunId: newOwnerRunId,
+        beginAction(input) {
+          return repository.beginBrowserWorkflowAction({
+            taskId: route.browserTaskId,
+            ownerRunId: newOwnerRunId,
+            ...input,
+          })
+        },
+        settleAction(actionId, outcome) {
+          return repository.settleBrowserWorkflowAction(route.browserTaskId, actionId, outcome)
+        },
+        recordObservation(input) {
+          weatherObservation = repository.recordBrowserWorkflowObservation({
+            taskId: route.browserTaskId,
+            ownerRunId: newOwnerRunId,
+            ...input,
+          })
+          return weatherObservation
+        },
+      },
+      dispatch: async () => JSON.stringify({
+        matched: true,
+        value: { contentSignature: '3812:2964:26' },
+        observationFresh: true,
+        usableAsResearchEvidence: false,
+      }),
+    })
+    assert.ok(weatherObservation)
+    assert.equal(weatherObservation.observedAfterActionSeq, openAction.actionSeq)
+    assert.deepEqual(weatherObservation.causalActions.map((item) => ({
+      actionId: item.actionId,
+      successorTabId: item.successorIdentity.documentState === 'document'
+        ? item.successorIdentity.tabId
+        : null,
+    })), [{ actionId: openAction.actionId, successorTabId: 'tab-weather-native' }])
+    assert.equal(repository.inspectWorkflowCloseout(parentTaskId).state, 'sealable')
+
     // 内容不同的新工作项仍可正常扩展计划。
     const extended = repository.upsertBrowserResearchWorkItems(
       route.browserTaskId,
@@ -394,9 +476,57 @@ test('browser journal writes are owner-bound atomic transactions and corrupt obs
     )
     assert.equal(extended.workItems.length, 2)
     assert.deepEqual(extended.missingWorkItemIds, ['research-work-native-extra'])
+    assert.throws(
+      () => repository.bindBrowserResearchEvidence(
+        route.browserTaskId,
+        newOwnerRunId,
+        [{
+          workItemId: 'research-work-native-extra',
+          observationReceiptId: weatherObservation.receiptId,
+          actionReceiptId: openSettled.receiptId,
+        }],
+      ),
+      /browser_research_observation_not_usable_as_evidence/,
+    )
     assert.equal(repository.inspectWorkflowCloseout(parentTaskId).state, 'research_incomplete')
+
+    const wrongTargetAction = repository.beginBrowserWorkflowAction({
+      taskId: route.browserTaskId,
+      operationId: 'tabs_open',
+      ownerRunId: newOwnerRunId,
+      argsDigest: 'open-another-tab-args',
+      identity: weatherIdentity,
+    })
+    repository.settleBrowserWorkflowAction(route.browserTaskId, wrongTargetAction.actionId, {
+      actionId: wrongTargetAction.actionId,
+      actionSeq: wrongTargetAction.actionSeq,
+      taskId: route.browserTaskId,
+      ownerRunId: newOwnerRunId,
+      operationId: 'tabs_open',
+      mode: 'mutate',
+      dispatch: 'accepted',
+      delivery: 'delivered',
+      effect: 'observed',
+      needsObservation: false,
+      mayHaveCommitted: true,
+      identity: weatherIdentity,
+      successorIdentity: weatherIdentity,
+      postActionTabId: 'tab-expected-native',
+    })
+    const oldTabValue = { operationId: 'read', result: { text: 'old foreground tab' } }
+    const oldTabObservation = repository.recordBrowserWorkflowObservation({
+      taskId: route.browserTaskId,
+      operationId: 'read',
+      ownerRunId: newOwnerRunId,
+      identity: weatherIdentity,
+      resultDigest: browserWorkflowStableDigest(oldTabValue),
+      resourceContent: JSON.stringify(oldTabValue),
+      resourceTruncated: false,
+    })
+    assert.equal(oldTabObservation.observedAfterActionSeq, 0)
+    assert.deepEqual(oldTabObservation.causalActions, [])
+    assert.equal(repository.inspectWorkflowCloseout(parentTaskId).state, 'observation_required')
   } finally {
     db.close()
   }
 })
-

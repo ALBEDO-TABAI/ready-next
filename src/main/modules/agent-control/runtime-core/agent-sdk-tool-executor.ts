@@ -4,7 +4,6 @@ import type { RunMessage } from '../contracts/run-contracts'
 import { TARGET_DOCUMENT_ERROR_KINDS } from '../contracts/error-kinds'
 import { buildTextToolResultMessage } from '../../claude-bridge/tool-bridge'
 import type { AIModelConfig } from '../../../../shared/ai-providers'
-import type { CapabilityGroupId } from '../../../../shared/ai-capability-groups'
 import type { SkillSurfaceComposition } from '../../../../shared/browser-workflow-control'
 import { DEFAULT_CONTEXT_WINDOW } from '../../../../shared/context-budget-types'
 import { defaultToolRegistry } from '../tools-runtime/tool-registry'
@@ -24,7 +23,6 @@ import {
   resolveActiveSkillAllowedTools,
   resolveCapabilityGroupIdsForAllowedTools
 } from '../domain-adapters/run-capability-controller'
-import { isHandoffTakeoverToolOutput, runWithHandoffToolGate } from '../agents/handoff-control'
 import {
   BROWSER_CONTENT_TASK_TOOL_NAMES,
   BROWSER_INTERACTION_TOOL_NAMES
@@ -83,6 +81,8 @@ import { buildToolCallDetail, buildToolResultDetail } from './tool-trace-detail'
 import { log } from './agent-sdk-provider'
 import { AgentSdkSessionManager } from './agent-sdk-session'
 import { getRemainingToolCallBudget } from '../task-projection/run-budget-policy'
+import { getSkillsRuntimeManager } from '../../skills-runtime/runtime-manager'
+import { isCodexSafeHostSkillPrimitiveDefinition } from '../../tools/skill-tool-execution-authority'
 
 const BROWSER_INTERACTION_TOOL_NAME_SET = new Set<string>(BROWSER_INTERACTION_TOOL_NAMES)
 const BROWSER_CONTENT_TASK_TOOL_NAME_SET = new Set<string>(BROWSER_CONTENT_TASK_TOOL_NAMES)
@@ -205,6 +205,18 @@ export class AgentSdkToolExecutor {
       .filter((definition) => publicNames.has(definition.name))
   }
 
+  listCodexThreadToolDefinitions(): ToolDefinition[] {
+    const skills = getSkillsRuntimeManager().listSkills()
+    return defaultToolRegistry.listToolDefinitions().map((definition) => {
+      if (definition.domain !== 'skill') return definition
+      return {
+        ...definition,
+        codexExecutionSafe: skills.some((skill) =>
+          isCodexSafeHostSkillPrimitiveDefinition(definition.name, skill)),
+      }
+    })
+  }
+
   listDefaultToolDefinitionsForTurn(params: {
     message: RunMessage
     sessionId?: string
@@ -243,7 +255,6 @@ export class AgentSdkToolExecutor {
       && composition === 'additive'
       && environmentHints?.workbenchMode === 'browser'
       && hasTrustedBrowserPageRef
-    const browserDecisionMode = directBrowserSurface ? 'browser_workflow' : 'free_tool_loop'
     const manifestSkillAllowedTools = resolveActiveSkillAllowedTools(params.authorization)
     const readOnlyResearchSkill = isReadOnlyResearchSkillToolSet(manifestSkillAllowedTools)
     const requiredCapabilityGroupIds = resolveCapabilityGroupIdsForAllowedTools(
@@ -256,6 +267,14 @@ export class AgentSdkToolExecutor {
       authorization: params.authorization,
       requiredCapabilityGroupIds
     })
+    const preResolvedBrowserSurface = params.browserHostAvailable
+      && composition === 'additive'
+      && (
+        directBrowserSurface
+        || sdkIntentSurface.intentGroupModes.browser_interaction === true
+        || sdkIntentSurface.intentGroupModes.browser_content_tasks === true
+      )
+    const browserDecisionMode = preResolvedBrowserSurface ? 'browser_workflow' : 'free_tool_loop'
     const effectiveBrowserDecisionMode = browserDecisionMode
     const defaultBrowserNames = new Set<string>(BROWSER_PUBLIC_TOOL_NAMES)
     const collectionExposure = false
@@ -280,22 +299,19 @@ export class AgentSdkToolExecutor {
     const exposeSkillActivation = params.authorization.mode === 'none'
       && params.skillCatalogAvailable === true
     const exposeBrowserActivation = params.browserHostAvailable
-      && !directBrowserSurface
+      && !preResolvedBrowserSurface
       && composition === 'additive'
-    const defaultBrowserContentTaskRequested = directBrowserSurface
     const intentGroupModes = {
       ...sdkIntentSurface.intentGroupModes,
-      browser_interaction: directBrowserSurface,
-      browser_content_tasks: directBrowserSurface,
+      browser_interaction: directBrowserSurface
+        || sdkIntentSurface.intentGroupModes.browser_interaction === true,
+      browser_content_tasks: directBrowserSurface
+        || sdkIntentSurface.intentGroupModes.browser_content_tasks === true,
       skill_activation: exposeSkillActivation || exposeBrowserActivation
     }
     const requestedIntentGroupIds = Array.from(new Set([
-      ...sdkIntentSurface.requestedIntentGroupIds.filter((groupId) =>
-        groupId !== 'browser_interaction' && groupId !== 'browser_content_tasks'),
+      ...sdkIntentSurface.requestedIntentGroupIds,
       ...(directBrowserSurface ? ['browser_interaction', 'browser_content_tasks'] as const : []),
-      ...(defaultBrowserContentTaskRequested
-        ? ['browser_content_tasks'] as const
-        : []),
     ]))
     const capabilityResolution = resolveCapabilityResolution({
       config: params.config,
@@ -376,7 +392,7 @@ export class AgentSdkToolExecutor {
       hasCurrentDocumentContext: hasCurrentDocumentContextResource(params.requestEnvelope)
     })
     if (activeSkillAllowedTools) {
-      const preserveVisibleBrowserTool = directBrowserSurface && composition === 'additive'
+      const preserveVisibleBrowserTool = preResolvedBrowserSurface
         ? (name: string) => defaultBrowserNames.has(name)
         : undefined
       const preserveVisibleResearchTool =
@@ -388,8 +404,6 @@ export class AgentSdkToolExecutor {
         preserveToolName: (name) =>
           preserveVisibleBrowserTool?.(name) === true
           || preserveVisibleResearchTool?.(name) === true
-          || (composition === 'additive' && name === 'use_browser' && exposeBrowserActivation)
-          || name === 'agent_propose_handoff'
           || capabilityFloors.toolNames.has(name)
       })
     }
@@ -552,7 +566,7 @@ export class AgentSdkToolExecutor {
       timeoutMs: definition.executionTimeoutMs,
       isEnabled: async () => runtimeContext.allowedToolNames.includes(definition.name)
         && isToolEnabledForCurrentAuthorization(definition.name, runtimeContext.authorization),
-      execute: async (input) => runWithHandoffToolGate(runtimeContext, async () => {
+      execute: async (input) => {
         const args =
           input && typeof input === 'object' && !Array.isArray(input)
             ? (input as Record<string, unknown>)
@@ -601,9 +615,7 @@ export class AgentSdkToolExecutor {
           }
         }
         return toAgentSdkToolResult(output)
-      }, () => stringifyToolResult(createToolExecutionOutput('当前任务已由新 Agent 接管，旧身份不再执行后续工具。', {
-        shape: 'json', data: { errorKind: 'handoff_takeover', skipped: true },
-      }))),
+      },
       errorFunction: (_context, error) =>
         stringifyToolResult(
           createToolExecutionOutput(`工具 ${definition.name} 失败：${errorMessage(error)}`, {
@@ -614,7 +626,7 @@ export class AgentSdkToolExecutor {
               message: errorMessage(error)
             }
           })
-        )
+        ),
     }) as AgentSdkTool
   }
 
@@ -650,8 +662,12 @@ export class AgentSdkToolExecutor {
         abortSignal: runtimeContext.signal,
         sessionId: runtimeContext.sessionId,
         scopeId: runtimeContext.sessionId,
+        messageVisibilityEpoch: runtimeContext.messageVisibilityEpoch,
         // EP2-I2 — standing user negations for dispatch interception.
-        activeNegations: activeNegations(runtimeContext.sessionId),
+        activeNegations: activeNegations(
+          runtimeContext.sessionId,
+          runtimeContext.messageVisibilityEpoch,
+        ),
         currentUserText: runtimeContext.currentUserText,
         sourceMessageId: runtimeContext.sourceMessageId ?? null,
         sourceMessageUnavailableReason: runtimeContext.sourceMessageUnavailableReason ?? null,
@@ -669,8 +685,8 @@ export class AgentSdkToolExecutor {
         turnFeatureFlags: snapshotTurnFeatureFlags(),
         activeFrame: runtimeContext.activeFrame,
         authorization: runtimeContext.authorization
-      })
-    )
+      }
+    ))
     // WP2 — attach a turn-level user-view write lease so free-tool-loop browser
     // writes are gated and a user takeover suspends them. Lazy (no acquire until
     // a write); released on run cleanup (normal end / cancel / session close).
@@ -1047,9 +1063,6 @@ export class AgentSdkToolExecutor {
       })
       normalized = normalizeToolExecutionOutput(output)
     }
-    if (isHandoffTakeoverToolOutput(output)) {
-      runtimeContext.hostControl = 'handoff_takeover'
-    }
     if (
       guard &&
       definition.name === 'document_open_tab' &&
@@ -1090,7 +1103,10 @@ export class AgentSdkToolExecutor {
     detail: string | null
     projectionPatch?: Record<string, unknown> | null
   }): void {
+    if (!params.runtimeContext.canPublishScopeRunEvent()) return
     if (!params.runtimeContext.sessionId) return
+    const messageVisibilityEpoch = params.runtimeContext.messageVisibilityEpoch
+    if (!Number.isSafeInteger(messageVisibilityEpoch) || Number(messageVisibilityEpoch) < 0) return
     const timestamp = new Date().toISOString()
     const projectionPatch = params.projectionPatch || null
     try {
@@ -1098,7 +1114,12 @@ export class AgentSdkToolExecutor {
         {
           type: 'updated',
           scopeId: params.runtimeContext.sessionId,
+          messageVisibilityEpoch,
+          visibilityOwnerKind: 'context_background',
+          visibilityOwnerLedger: { kind: 'run_meta', id: params.runtimeContext.runId },
           agent: publicAgentName(params.runtimeContext.agentName),
+          ownerAgentId: publicAgentName(params.runtimeContext.agentName),
+          taskOrigin: 'user_root',
           runId: params.runtimeContext.runId,
           taskId: params.runtimeContext.taskId,
           phase: params.kind === 'call' ? 'tool_running' : 'responding',

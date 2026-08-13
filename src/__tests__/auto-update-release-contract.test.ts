@@ -4,7 +4,7 @@ import { resolve } from 'node:path'
 import test from 'node:test'
 
 function readWorkspaceFile(path: string): string {
-  // eslint-disable-next-line ready/no-source-grep-test -- Release update wiring spans electron-builder YAML and the Settings shell; this pins the product contract without launching Electron.
+
   return readFileSync(resolve(process.cwd(), path), 'utf8')
 }
 

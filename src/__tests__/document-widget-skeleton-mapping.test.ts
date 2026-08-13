@@ -385,27 +385,6 @@ describe('document widget skeleton mapping (openui components → skeletons)', (
     compileWidgetSkeletonSpec(spec)
   })
 
-  it('maps schedule_runtime_card → vertical_timeline with statuses', () => {
-    const spec = requireSpec(
-      mapComponentSpecToSkeletonSpec({
-        component: 'schedule_runtime_card',
-        props: {
-          heading: '自动计划',
-          jobs: [
-            { name: '数据同步', status: 'running', schedule: 'hourly' },
-            { name: '日报推送', status: 'failed', schedule: '18:00' },
-          ],
-        },
-      }),
-    )
-    assert.equal(spec.skeleton, 'vertical_timeline')
-    const props = requireRecord(spec.props)
-    const events = props.events as Array<Record<string, unknown>>
-    assert.equal(events[0].status, 'active')
-    assert.equal(events[1].status, 'blocked')
-    compileWidgetSkeletonSpec(spec)
-  })
-
   it('maps todo_list_manual → vertical_timeline with done state', () => {
     const spec = requireSpec(
       mapComponentSpecToSkeletonSpec({

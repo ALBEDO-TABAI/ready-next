@@ -1,111 +1,30 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import test from 'node:test'
 
-import {
-  ReadyAgentOrchestrator,
-} from '../main/modules/agent-control/runtime-core/orchestrator'
+import { createCodexHostExecutionBinding } from '../main/modules/agent-control/codex-runtime/codex-host-execution-binding'
 
-import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
+const repoRoot = resolve(import.meta.dirname, '../..')
 
-test('orchestrator-persona-resolver declares transitive sqlite ABI guard', (t) => {
-  skipIfSqliteUnavailable(t, 'orchestrator-persona-resolver transitive sqlite load')
+test('Codex admission uses a neutral host identity instead of an archived persona profile', () => {
+  const binding = createCodexHostExecutionBinding({
+    runId: 'run-1',
+    ownerAgentIdAtStart: 'scope-owner-1',
+  })
+
+  assert.equal(binding.ephemeralRole, 'codex_host')
+  assert.equal(binding.requestedAgentId, null)
+  assert.equal(binding.effectiveAgentId, null)
+  assert.equal(binding.executionMaterialHash, 'codex_host_identity:v1')
 })
 
-const fakeConfig = {
-  provider: 'openai',
-  baseUrl: 'https://api.openai.com/v1',
-  apiKey: 'test-key',
-  model: 'gpt-test',
-} as const
+test('the live Codex composition cannot reinstall the retired persona resolver', () => {
+  const liveSources = readFileSync(resolve(
+    repoRoot,
+    'src/main/modules/agent-control/codex-runtime/codex-runtime-production-composition.ts',
+  ), 'utf8')
 
-test('orchestrator resolves persona prompt when send has no explicit systemPrompt', async () => {
-  let resolverAgent: string | null = null
-  let resolverScopeId: string | undefined
-  let capturedInstructions = ''
-  const orchestrator = new ReadyAgentOrchestrator({
-    agentSdkRuntimeDeps: {
-      loadAIConfig: () => ({ ok: true, config: fakeConfig, reason: 'present' }),
-      domainAdapters: [],
-      skillContextOrchestrator: null,
-      listToolDefinitions: () => [],
-      runAgent: async ({ instructions }) => {
-        capturedInstructions = instructions
-        return { finalText: 'done' }
-      },
-    },
-  })
-
-  orchestrator.setPersonaResolver(async (agent, scopeId) => {
-    resolverAgent = agent
-    resolverScopeId = scopeId
-    return `resolved persona for ${agent}`
-  })
-
-  const result = await orchestrator.send('copywriter', 'hello', 'scope-1', 'run-1')
-
-  assert.equal(result.success, true)
-  assert.equal(resolverAgent, 'copywriter')
-  assert.equal(resolverScopeId, 'scope-1')
-  assert.match(capturedInstructions, /resolved persona for copywriter/)
-})
-
-test('orchestrator keeps explicit systemPrompt ahead of persona resolver', async () => {
-  let resolverCalls = 0
-  let capturedInstructions = ''
-  const orchestrator = new ReadyAgentOrchestrator({
-    agentSdkRuntimeDeps: {
-      loadAIConfig: () => ({ ok: true, config: fakeConfig, reason: 'present' }),
-      domainAdapters: [],
-      skillContextOrchestrator: null,
-      listToolDefinitions: () => [],
-      runAgent: async ({ instructions }) => {
-        capturedInstructions = instructions
-        return { finalText: 'done' }
-      },
-    },
-  })
-
-  orchestrator.setPersonaResolver(async () => {
-    resolverCalls += 1
-    return 'resolved persona'
-  })
-
-  const result = await orchestrator.send(
-    'butler',
-    'hello',
-    'scope-2',
-    'run-2',
-    undefined,
-    'explicit prompt',
-  )
-
-  assert.equal(result.success, true)
-  assert.equal(resolverCalls, 0)
-  assert.match(capturedInstructions, /explicit prompt/)
-  assert.doesNotMatch(capturedInstructions, /resolved persona/)
-})
-
-test('orchestrator marks the session failed when persona resolver throws', async () => {
-  const orchestrator = new ReadyAgentOrchestrator({
-    agentSdkRuntimeDeps: {
-      loadAIConfig: () => ({ ok: true, config: fakeConfig, reason: 'present' }),
-      domainAdapters: [],
-      skillContextOrchestrator: null,
-      listToolDefinitions: () => [],
-      runAgent: async () => ({ finalText: 'should not run' }),
-    },
-  })
-
-  orchestrator.setPersonaResolver(async () => {
-    throw new Error('resolver failed')
-  })
-
-  await assert.rejects(
-    () => orchestrator.send('analyst', 'hello', 'scope-3', 'run-3'),
-    /resolver failed/,
-  )
-
-  const session = orchestrator.listAllSessions().find((item) => item.sessionId === 'scope-3')
-  assert.equal(session?.state, 'failed')
-  assert.equal(session?.error, 'resolver failed')
+  assert.doesNotMatch(liveSources, /setPersonaResolver|AgentExecutionProfileResolver/)
+  assert.doesNotMatch(liveSources, /executionProfileResolver\s*\.\s*resolve/)
 })

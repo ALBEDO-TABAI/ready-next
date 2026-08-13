@@ -1030,7 +1030,8 @@ class VideoAnalysisPipeline:
                  extract_scenes: bool = True,
                  auto_select_best: bool = True,
                  best_threshold: float = 7.5,
-                 openclaw_mode: bool = False):
+                 openclaw_mode: bool = False,
+                 exact_output_dir: bool = False):
         self.url = url
         self.output_dir = Path(output_dir).resolve()
         self.scene_threshold = scene_threshold
@@ -1074,7 +1075,7 @@ class VideoAnalysisPipeline:
             self.video_info = {"title": self.video_id, "uploader": ""}
 
         # 创建视频专属子目录（使用标题命名）
-        self.video_output_dir = self.output_dir / self.folder_name
+        self.video_output_dir = self.output_dir if exact_output_dir else self.output_dir / self.folder_name
         self.video_output_dir.mkdir(parents=True, exist_ok=True)
 
         # Define output paths
@@ -1095,6 +1096,29 @@ class VideoAnalysisPipeline:
         self.report_path = self.video_output_dir / f"{self.video_id}_analysis_report.md"
         self.detailed_report_path = self.video_output_dir / f"{self.video_id}_detailed_analysis.md"
         self.analysis_state = load_analysis_state(self.state_path)
+
+        try:
+            from run_state import default_run_state, load_run_state, save_run_state
+        except ImportError:
+            sys.path.insert(0, str(Path(__file__).parent))
+            from run_state import default_run_state, load_run_state, save_run_state
+        existing_run_state = load_run_state(self.run_state_path)
+        task_id = os.environ.get("READY_SKILL_TASK_ID", "").strip()
+        child_run_id = os.environ.get("READY_SKILL_CHILD_RUN_ID", "").strip()
+        identity_changed = (
+            (task_id and existing_run_state.get("task_id") != task_id)
+            or (child_run_id and existing_run_state.get("child_run_id") != child_run_id)
+        )
+        if self.run_state_path.exists() and identity_changed:
+            self.scores_path.unlink(missing_ok=True)
+            (self.video_output_dir / "delivery_report.json").unlink(missing_ok=True)
+            fresh_state = default_run_state()
+            fresh_state.update({
+                "video_dir": str(self.video_output_dir),
+                "active_output_dir": str(self.video_output_dir),
+                "scores_path": str(self.scores_path),
+            })
+            save_run_state(self.run_state_path, fresh_state)
 
         # Results tracking
         self.results = {
@@ -1130,6 +1154,18 @@ class VideoAnalysisPipeline:
             video_dir=str(self.video_output_dir),
             active_output_dir=str(self.video_output_dir),
             **extra,
+        )
+
+    def _mark_prepare_progress(self, *, total_scenes: int, completed_scenes: int) -> None:
+        if total_scenes <= 0:
+            return
+        self._mark_run_stage(
+            "prepare",
+            status="running",
+            completed=False,
+            total_scenes=total_scenes,
+            completed_scenes=completed_scenes,
+            coverage_ratio=completed_scenes / total_scenes,
         )
 
     def _extract_audio_from_video(self) -> bool:
@@ -1525,6 +1561,7 @@ class VideoAnalysisPipeline:
 
             rendered: dict[int, Path] = {}
             done_count = 0
+            self._mark_prepare_progress(total_scenes=len(segments_to_render), completed_scenes=0)
             with _futures.ThreadPoolExecutor(max_workers=clip_workers) as executor:
                 futures = [
                     executor.submit(_render_segment, item)
@@ -1536,6 +1573,10 @@ class VideoAnalysisPipeline:
                     scene_codecs_used.add(trim_result["video_codec"])
                     codec_fallback_used = codec_fallback_used or trim_result["fallback_used"]
                     done_count += 1
+                    self._mark_prepare_progress(
+                        total_scenes=len(segments_to_render),
+                        completed_scenes=done_count,
+                    )
                     if done_count == 1 or done_count == len(segments_to_render) or done_count % 10 == 0:
                         print(f"   ⏳ 切片进度: {done_count}/{len(segments_to_render)}")
             scene_files.extend(rendered[index] for index in sorted(rendered))
@@ -2051,6 +2092,7 @@ Examples:
     )
     parser.add_argument("url", nargs="?", help="Video URL 或本地视频文件路径")
     parser.add_argument("-o", "--output", help="Output directory (default: from config)")
+    parser.add_argument("--exact-output-dir", action="store_true", help="Treat output as the exact video task directory")
     parser.add_argument("--setup", action="store_true", help="Setup output directory configuration")
     parser.add_argument("--scene-threshold", type=float, default=27.0, help="Scene detection threshold (default: 27.0)")
     parser.add_argument("--no-extract-scenes", action="store_true", help="Skip extracting individual scene clips")
@@ -2075,7 +2117,8 @@ Examples:
             output_dir=output_dir,
             scene_threshold=args.scene_threshold,
             extract_scenes=not args.no_extract_scenes,
-            best_threshold=args.best_threshold
+            best_threshold=args.best_threshold,
+            exact_output_dir=args.exact_output_dir,
         )
         results = pipeline.run()
         if args.json_output:

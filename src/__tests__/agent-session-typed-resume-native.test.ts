@@ -73,9 +73,14 @@ test('typed Browser resumes consume suspension once and preserve compacted recov
         const oldRunId = `run-${taskId}-old`
         const oldBinding = executionBinding(oldRunId)
         const now = new Date(Date.UTC(2026, 6, 22, 3, index, 0)).toISOString()
+        db.prepare(
+          `INSERT INTO chat_conversations (id, agent, title, created_at, updated_at, message_visibility_epoch)
+           VALUES (?, 'butler', ?, ?, ?, 0)`,
+        ).run(scopeId, `Typed resume ${reason}`, now, now)
         projections.create({
           taskId,
           scopeId,
+          messageVisibilityEpoch: 0,
           runId: oldRunId,
           taskType: 'research',
           module: 'browser',
@@ -93,18 +98,16 @@ test('typed Browser resumes consume suspension once and preserve compacted recov
           runId: oldRunId,
           taskId,
           scopeId,
+          messageVisibilityEpoch: 0,
           agentId: 'butler',
           executionBinding: oldBinding,
           status: 'running',
         }, Date.parse(now))
-        db.prepare(
-          `INSERT INTO chat_conversations (id, agent, title, created_at, updated_at)
-           VALUES (?, 'butler', ?, ?, ?)`,
-        ).run(scopeId, `Typed resume ${reason}`, now, now)
         const sourceMessageId = `message-${taskId}`
         db.prepare(
-          `INSERT INTO chat_messages (id, conversation_id, role, content, timestamp, meta_json)
-           VALUES (?, ?, 'user', 'continue browser work', ?, '{}')`,
+          `INSERT INTO chat_messages (
+             id, conversation_id, role, content, timestamp, meta_json, message_visibility_epoch
+           ) VALUES (?, ?, 'user', 'continue browser work', ?, '{}', 0)`,
         ).run(sourceMessageId, scopeId, now)
         const route = await repository.bindBrowserWorkflowRoute({
           parentTaskId: taskId,
@@ -198,6 +201,11 @@ test('typed Browser resumes consume suspension once and preserve compacted recov
             issuedAt: new Date(Date.parse(now) + 3).toISOString(),
           },
         })
+        assert.equal(
+          db.prepare('SELECT message_visibility_epoch FROM run_meta WHERE run_id = ?')
+            .get<{ message_visibility_epoch: number }>(newRunId)?.message_visibility_epoch,
+          0,
+        )
         assert.equal(repository.current(taskId, 'suspension'), null)
         assert.equal(repository.current(taskId, 'clean_base')?.checkpointId, resumed.checkpoint.checkpointId)
         if (reason === 'provider_transfer') {
@@ -271,23 +279,25 @@ test('physical pointer and chrome navigation signals commit one target-level tak
         const runId = `run-${taskId}`
         const binding = executionBinding(runId)
         const now = new Date(Date.UTC(2026, 6, 22, 4, index, 0)).toISOString()
+        db.prepare(
+          `INSERT INTO chat_conversations (id, agent, title, created_at, updated_at, message_visibility_epoch)
+           VALUES (?, 'butler', ?, ?, ?, 0)`,
+        ).run(scopeId, `Takeover ${signal}`, now, now)
         projections.create({
-          taskId, scopeId, runId, taskType: 'research', module: 'browser',
+          taskId, scopeId, messageVisibilityEpoch: 0, runId, taskType: 'research', module: 'browser',
           status: 'running', interactionState: 'running', waitingFor: 'none', steps: [],
           ownerAgentId: 'butler', taskOrigin: 'user_root', executionBinding: binding,
           createdAt: now, updatedAt: now,
         })
         runMeta.create({
-          runId, taskId, scopeId, agentId: 'butler', executionBinding: binding, status: 'running',
+          runId, taskId, scopeId, messageVisibilityEpoch: 0,
+          agentId: 'butler', executionBinding: binding, status: 'running',
         }, Date.parse(now))
-        db.prepare(
-          `INSERT INTO chat_conversations (id, agent, title, created_at, updated_at)
-           VALUES (?, 'butler', ?, ?, ?)`,
-        ).run(scopeId, `Takeover ${signal}`, now, now)
         const sourceMessageId = `message-${taskId}`
         db.prepare(
-          `INSERT INTO chat_messages (id, conversation_id, role, content, timestamp, meta_json)
-           VALUES (?, ?, 'user', 'drive browser', ?, '{}')`,
+          `INSERT INTO chat_messages (
+             id, conversation_id, role, content, timestamp, meta_json, message_visibility_epoch
+           ) VALUES (?, ?, 'user', 'drive browser', ?, '{}', 0)`,
         ).run(sourceMessageId, scopeId, now)
         const route = await repository.bindBrowserWorkflowRoute({
           parentTaskId: taskId, ownerRunId: runId, sourceMessageId, executionBinding: binding, now,
@@ -304,12 +314,14 @@ test('physical pointer and chrome navigation signals commit one target-level tak
           physicalTargetToken: `boot-live:tab-a:${index}`, bootIncarnationId: 'boot-live',
           profileId: null, surface: 'user-view', parentTaskId: taskId,
           browserTaskId: route.browserTaskId, ownerRunId: runId, scopeId, sessionId: null,
+          messageVisibilityEpoch: 0,
         })
         const sibling = claims.acquire({
           partition: 'persist:browser', tabId: 'tab-b',
           physicalTargetToken: `boot-live:tab-b:${index}`, bootIncarnationId: 'boot-live',
           profileId: null, surface: 'user-view', parentTaskId: taskId,
           browserTaskId: route.browserTaskId, ownerRunId: runId, scopeId, sessionId: null,
+          messageVisibilityEpoch: 0,
         })
         if (isAgentBrowserError(target) || isAgentBrowserError(sibling)) throw new Error('claim setup failed')
         await repository.createHumanTakeoverIntent({

@@ -413,6 +413,9 @@ export default function RemoteIMSettingsPanel() {
 
   return (
     <div className="flex flex-col" style={{ gap: 28 }}>
+      <div className="text-[12px] leading-6" style={{ color: 'var(--text-muted)' }}>
+        普通消息和附件只会保存到对应会话，不会自动启动 Agent。只有指令、确认回复或你在 Ready 中明确发送时才会执行额外操作。
+      </div>
       <div
         className="glass-surface-card border flex w-fit"
         style={{

@@ -160,7 +160,7 @@ test('场景3 重启：会话懒恢复有显式通知，损坏快照显式重置
   clearScopeSessionSnapshot(scope)
   writeScopeSessionSnapshot(scope, [
     { type: 'message', role: 'user', content: [{ type: 'input_text', text: '之前的任务上下文' }] },
-  ])
+  ], 0)
 
   const inputs: string[] = []
   const { runtime } = buildRuntime({
@@ -176,7 +176,7 @@ test('场景3 重启：会话懒恢复有显式通知，损坏快照显式重置
   // 损坏快照 → 显式重置
   const scope2 = `${scope}-corrupt`
   clearScopeSessionSnapshot(scope2)
-  writeScopeSessionSnapshot(scope2, [])
+  writeScopeSessionSnapshot(scope2, [], 0)
   writeFileSync(scopeSessionSnapshotPath(scope2), '{broken', 'utf8')
   const { runtime: runtime2 } = buildRuntime({
     runAgent: async ({ input }) => {

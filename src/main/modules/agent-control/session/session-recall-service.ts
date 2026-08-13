@@ -38,7 +38,11 @@ interface SessionRecallRawDb {
 export interface SessionRecallDatabaseAdapter {
   getRawDb(): SessionRecallRawDb | null
   getConversationScope(id: string): ChatConversationRecord | null
-  updateConversationScopeMeta(id: string, meta: Record<string, unknown>): ChatConversationRecord | null
+  updateConversationScopeMeta(
+    id: string,
+    meta: Record<string, unknown>,
+    expectedMessageVisibilityEpoch?: number,
+  ): ChatConversationRecord | null
 }
 
 interface SessionRecallVectorRow {
@@ -192,12 +196,19 @@ export class SessionRecallService {
       .filter(Boolean) as SessionRecallCapsule[]
   }
 
-  attachSessionRecallContext(params: { currentScopeId: string; conversationId: string }): {
+  attachSessionRecallContext(params: {
+    currentScopeId: string
+    conversationId: string
+    expectedMessageVisibilityEpoch: number
+  }): {
     scope: ChatConversationRecord
     capsule: SessionRecallCapsule
   } {
     const scope = this.db.getConversationScope(params.currentScopeId)
     if (!scope) throw new Error(`Conversation scope not found: ${params.currentScopeId}`)
+    if ((scope.message_visibility_epoch ?? 0) !== params.expectedMessageVisibilityEpoch) {
+      throw new Error('conversation_context_epoch_stale')
+    }
     const metadata = this.getMetadataRow(params.conversationId)
     if (!metadata) throw new Error(`Session recall capsule not found: ${params.conversationId}`)
     if (!this.canAttachSessionRecallContext(scope, metadata)) {
@@ -215,27 +226,42 @@ export class SessionRecallService {
       ...this.parseConversationMeta(scope),
       sessionRecallContext: refs,
     }
-    const updatedScope = this.db.updateConversationScopeMeta(params.currentScopeId, nextMeta)
-    if (!updatedScope) throw new Error(`Failed to update conversation scope: ${params.currentScopeId}`)
+    const updatedScope = this.db.updateConversationScopeMeta(
+      params.currentScopeId,
+      nextMeta,
+      params.expectedMessageVisibilityEpoch,
+    )
+    if (!updatedScope) throw new Error('conversation_context_epoch_stale')
     return {
       scope: updatedScope,
       capsule,
     }
   }
 
-  detachSessionRecallContext(params: { currentScopeId: string; conversationId: string }): {
+  detachSessionRecallContext(params: {
+    currentScopeId: string
+    conversationId: string
+    expectedMessageVisibilityEpoch: number
+  }): {
     scope: ChatConversationRecord
   } {
     const scope = this.db.getConversationScope(params.currentScopeId)
     if (!scope) throw new Error(`Conversation scope not found: ${params.currentScopeId}`)
+    if ((scope.message_visibility_epoch ?? 0) !== params.expectedMessageVisibilityEpoch) {
+      throw new Error('conversation_context_epoch_stale')
+    }
     const refs = this.readSessionRecallContextRefs(scope)
       .filter((item) => item.conversationId !== params.conversationId)
     const nextMeta = {
       ...this.parseConversationMeta(scope),
       sessionRecallContext: refs,
     }
-    const updatedScope = this.db.updateConversationScopeMeta(params.currentScopeId, nextMeta)
-    if (!updatedScope) throw new Error(`Failed to update conversation scope: ${params.currentScopeId}`)
+    const updatedScope = this.db.updateConversationScopeMeta(
+      params.currentScopeId,
+      nextMeta,
+      params.expectedMessageVisibilityEpoch,
+    )
+    if (!updatedScope) throw new Error('conversation_context_epoch_stale')
     return { scope: updatedScope }
   }
 
@@ -254,11 +280,15 @@ export class SessionRecallService {
   autoAttachOnResume(params: {
     currentScopeId: string
     intent: 'continue'
+    expectedMessageVisibilityEpoch: number
     limit?: number
   }): { attached: SessionRecallCapsule[] } {
     const limit = Math.max(1, Math.min(5, Number(params.limit ?? 3)))
     const scope = this.db.getConversationScope(params.currentScopeId)
     if (!scope) return { attached: [] }
+    if ((scope.message_visibility_epoch ?? 0) !== params.expectedMessageVisibilityEpoch) {
+      return { attached: [] }
+    }
     const existingRefs = this.readSessionRecallContextRefs(scope)
     if (existingRefs.length > 0) return { attached: [] }
     const lineageRootId = scope.lineage_root_id || scope.id
@@ -268,6 +298,11 @@ export class SessionRecallService {
       SELECT *
       FROM session_recall_metadata
       WHERE lineage_root_id = ? AND conversation_id != ? AND COALESCE(agent, '') = ?
+        AND EXISTS (
+          SELECT 1 FROM chat_conversations active
+           WHERE active.id = session_recall_metadata.conversation_id
+             AND active.closed_at IS NULL
+        )
       ORDER BY updated_at DESC
       LIMIT ?
     `).all<SessionRecallMetadataRow>(lineageRootId, params.currentScopeId, scope.agent || '', limit)
@@ -278,6 +313,7 @@ export class SessionRecallService {
         const result = this.attachSessionRecallContext({
           currentScopeId: params.currentScopeId,
           conversationId: row.conversation_id,
+          expectedMessageVisibilityEpoch: params.expectedMessageVisibilityEpoch,
         })
         attached.push(result.capsule)
       } catch {
@@ -300,19 +336,30 @@ export class SessionRecallService {
       SELECT *
       FROM session_recall_metadata
       WHERE resume_title = ?
+        AND EXISTS (
+          SELECT 1 FROM chat_conversations active
+           WHERE active.id = session_recall_metadata.conversation_id
+             AND active.closed_at IS NULL
+        )
       ORDER BY updated_at DESC
       LIMIT 1
     `).get<SessionRecallMetadataRow>(resumeTitle)
-    return metadata ? this.buildHit(metadata, ['recent'], 20, metadata.preview_text) : null
+    const active = metadata ? this.getMetadataRow(metadata.conversation_id) : null
+    return active ? this.buildHit(active, ['recent'], 20, active.preview_text) : null
   }
 
   private searchMessageMatches(query: string): SearchMessageRow[] {
     const db = this.db.getRawDb()
     if (!db) return []
     return db.prepare(`
-      SELECT conversation_id, snippet(chat_messages_fts, 2, '[', ']', ' … ', 18) as excerpt
+      SELECT chat_messages_fts.conversation_id,
+             snippet(chat_messages_fts, 2, '[', ']', ' … ', 18) as excerpt
       FROM chat_messages_fts
-      WHERE content MATCH ?
+      JOIN chat_messages message ON message.id = chat_messages_fts.message_id
+      JOIN chat_conversations active ON active.id = message.conversation_id
+      WHERE chat_messages_fts.content MATCH ?
+        AND active.closed_at IS NULL
+        AND message.message_visibility_epoch = active.message_visibility_epoch
       LIMIT 60
     `).all<SearchMessageRow>(this.toFtsQuery(query))
   }
@@ -322,9 +369,13 @@ export class SessionRecallService {
     if (!db) return []
     const likeQuery = `%${query}%`
     const attachmentConversationIds = db.prepare(`
-      SELECT DISTINCT conversation_id
-      FROM session_recall_attachment_index
-      WHERE name LIKE ?
+      SELECT DISTINCT attachment.conversation_id
+      FROM session_recall_attachment_index attachment
+      JOIN chat_messages message ON message.id = attachment.source_message_id
+      JOIN chat_conversations active ON active.id = message.conversation_id
+      WHERE attachment.name LIKE ?
+        AND active.closed_at IS NULL
+        AND message.message_visibility_epoch = active.message_visibility_epoch
     `).all<{ conversation_id: string }>(likeQuery).map((row) => row.conversation_id)
     const directMatches = db.prepare(`
       SELECT *
@@ -343,7 +394,9 @@ export class SessionRecallService {
     if (attachmentConversationIds.length === 0) {
       const merged = new Map<string, SessionRecallMetadataRow>()
       for (const row of [...directMatches, ...conversationMatches]) merged.set(row.conversation_id, row)
-      return Array.from(merged.values())
+      return Array.from(merged.values()).filter(
+        (row) => Boolean(this.db.getConversationScope(row.conversation_id)),
+      )
     }
     const placeholders = attachmentConversationIds.map(() => '?').join(', ')
     const attachmentMatches = db.prepare(`
@@ -353,7 +406,9 @@ export class SessionRecallService {
     `).all<SessionRecallMetadataRow>(...attachmentConversationIds)
     const merged = new Map<string, SessionRecallMetadataRow>()
     for (const row of [...directMatches, ...attachmentMatches, ...conversationMatches]) merged.set(row.conversation_id, row)
-    return Array.from(merged.values())
+    return Array.from(merged.values()).filter(
+      (row) => Boolean(this.db.getConversationScope(row.conversation_id)),
+    )
   }
 
   private listRecentMetadata(): SessionRecallMetadataRow[] {
@@ -362,6 +417,11 @@ export class SessionRecallService {
     const metadataRows = db.prepare(`
       SELECT *
       FROM session_recall_metadata
+      WHERE EXISTS (
+        SELECT 1 FROM chat_conversations active
+         WHERE active.id = session_recall_metadata.conversation_id
+           AND active.closed_at IS NULL
+      )
       ORDER BY updated_at DESC
       LIMIT 80
     `).all<SessionRecallMetadataRow>()
@@ -370,6 +430,7 @@ export class SessionRecallService {
       if (!merged.has(row.conversation_id)) merged.set(row.conversation_id, row)
     }
     return Array.from(merged.values())
+      .filter((row) => Boolean(this.db.getConversationScope(row.conversation_id)))
       .sort((a, b) => b.updated_at.localeCompare(a.updated_at))
       .slice(0, 80)
   }
@@ -380,12 +441,20 @@ export class SessionRecallService {
     return db.prepare(`
       SELECT *
       FROM session_recall_metadata
+      WHERE EXISTS (
+        SELECT 1 FROM chat_conversations active
+         WHERE active.id = session_recall_metadata.conversation_id
+           AND active.closed_at IS NULL
+      )
       ORDER BY updated_at DESC
       LIMIT 240
-    `).all<SessionRecallMetadataRow>()
+    `).all<SessionRecallMetadataRow>().filter(
+      (row) => Boolean(this.db.getConversationScope(row.conversation_id)),
+    )
   }
 
   private getMetadataRow(conversationId: string): SessionRecallMetadataRow | null {
+    if (!this.db.getConversationScope(conversationId)) return null
     const db = this.db.getRawDb()
     if (!db) return null
     const row = db.prepare(`
@@ -403,6 +472,7 @@ export class SessionRecallService {
     const rows = db.prepare(`
       SELECT *
       FROM chat_conversations
+      WHERE closed_at IS NULL
       ORDER BY updated_at DESC
       LIMIT 80
     `).all<ChatConversationRecord>()

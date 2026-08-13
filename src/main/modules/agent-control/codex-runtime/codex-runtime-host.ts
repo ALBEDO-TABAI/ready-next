@@ -39,6 +39,9 @@ export type CodexRuntimeManifest = {
   childEnvAllowlistDigest: string
   nativeIsolationConfigContractDigest: string
   resourceAdditionalContextContractDigest: string
+  modelGatewayContractDigest: string
+  toolBridgeContractDigest: string
+  externalReadSliceContractDigest: string
   outboundRpcContractDigest: string
   bindingSchemaDigest: string
   experimentContractDigest: string
@@ -81,6 +84,27 @@ export type CodexRuntimeContracts = {
     providerToolSurface: Record<string, unknown>
   }
   resourceAdditionalContextContract: JsonObject
+  toolBridgeContract: JsonObject
+  externalReadSliceContract: JsonObject
+  modelGatewayContract: {
+    listener: {
+      host: '127.0.0.1'
+      route: '/v1/responses'
+      method: 'POST'
+      contentType: 'application/json'
+      maxBodyBytes: number
+      maxConcurrentRequests: number
+      bodyDeadlineMs: number
+      bearerBytes: number
+      remoteAddress: '127.0.0.1'
+      tokenLogging: false
+    }
+    request: JsonObject
+    classification: JsonObject
+    snapshot: JsonObject
+    upstream: JsonObject
+    response: JsonObject
+  }
   outboundRpcContract: JsonObject
 }
 
@@ -101,9 +125,15 @@ export type PreparedCodexRuntimeState = {
   threadCwdRoot: string
   tmpDir: string
   configPath: string
-  configDigest: string
   gatewayUrl: string
+}
+
+export type ActiveCodexGatewaySpawnConfig = {
+  sidecarSpawnInstanceId: string
+  gatewayUrl: string
+  gatewayToken: string
   gatewayTokenDigest: string
+  configDigest: string
 }
 
 export class CodexRuntimeHostError extends Error {
@@ -177,6 +207,9 @@ function parseManifest(value: JsonObject): CodexRuntimeManifest {
     'childEnvAllowlistDigest',
     'nativeIsolationConfigContractDigest',
     'resourceAdditionalContextContractDigest',
+    'modelGatewayContractDigest',
+    'toolBridgeContractDigest',
+    'externalReadSliceContractDigest',
     'outboundRpcContractDigest',
     'bindingSchemaDigest',
     'experimentContractDigest',
@@ -219,6 +252,20 @@ function parseContracts(value: JsonObject): CodexRuntimeContracts {
     !isRecord(contracts.nativeIsolationConfigContract)
     || !Array.isArray(contracts.nativeIsolationConfigContract.launchArgv)
   ) throw new CodexRuntimeHostError('runtime_contract_isolation_invalid')
+  if (
+    !isRecord(contracts.modelGatewayContract)
+    || !isRecord(contracts.modelGatewayContract.listener)
+    || contracts.modelGatewayContract.listener.host !== '127.0.0.1'
+    || contracts.modelGatewayContract.listener.route !== '/v1/responses'
+    || contracts.modelGatewayContract.listener.method !== 'POST'
+    || contracts.modelGatewayContract.listener.tokenLogging !== false
+  ) throw new CodexRuntimeHostError('runtime_contract_model_gateway_invalid')
+  if (!isRecord(contracts.toolBridgeContract)) {
+    throw new CodexRuntimeHostError('runtime_contract_tool_bridge_invalid')
+  }
+  if (!isRecord(contracts.externalReadSliceContract)) {
+    throw new CodexRuntimeHostError('runtime_contract_external_read_slice_invalid')
+  }
   return contracts as CodexRuntimeContracts
 }
 
@@ -275,6 +322,17 @@ function verifyContractDigests(input: {
       contracts.resourceAdditionalContextContract,
       manifest.resourceAdditionalContextContractDigest,
       'resource_context_contract_digest_mismatch',
+    ],
+    [
+      contracts.modelGatewayContract,
+      manifest.modelGatewayContractDigest,
+      'model_gateway_contract_digest_mismatch',
+    ],
+    [contracts.toolBridgeContract, manifest.toolBridgeContractDigest, 'tool_bridge_contract_digest_mismatch'],
+    [
+      contracts.externalReadSliceContract,
+      manifest.externalReadSliceContractDigest,
+      'external_read_slice_contract_digest_mismatch',
     ],
     [contracts.outboundRpcContract, manifest.outboundRpcContractDigest, 'outbound_rpc_contract_digest_mismatch'],
   ]
@@ -399,7 +457,7 @@ export function loadVerifiedCodexRuntime(input: {
   }
 }
 
-function validateGateway(gatewayUrl: string, gatewayToken: string): URL {
+function validateGatewayUrl(gatewayUrl: string): URL {
   let parsed: URL
   try {
     parsed = new URL(gatewayUrl)
@@ -412,6 +470,11 @@ function validateGateway(gatewayUrl: string, gatewayToken: string): URL {
     || parsed.username
     || parsed.password
   ) throw new CodexRuntimeHostError('gateway_url_not_loopback')
+  return parsed
+}
+
+function validateGateway(gatewayUrl: string, gatewayToken: string): URL {
+  const parsed = validateGatewayUrl(gatewayUrl)
   if (!gatewayToken.trim()) throw new CodexRuntimeHostError('gateway_token_missing')
   return parsed
 }
@@ -535,11 +598,10 @@ function ensurePrivateDirectory(path: string): void {
 export function prepareCodexRuntimeState(input: {
   userDataPath: string
   gatewayUrl: string
-  gatewayToken: string
   contracts: CodexRuntimeContracts
 }): PreparedCodexRuntimeState {
   if (!isAbsolute(input.userDataPath)) throw new CodexRuntimeHostError('user_data_path_not_absolute')
-  validateGateway(input.gatewayUrl, input.gatewayToken)
+  validateGatewayUrl(input.gatewayUrl)
   const stateDir = join(input.userDataPath, 'codex-runtime')
   const homeDir = join(stateDir, 'home')
   const codexHome = join(stateDir, 'codex-home')
@@ -548,17 +610,12 @@ export function prepareCodexRuntimeState(input: {
   for (const path of [stateDir, homeDir, codexHome, threadCwdRoot, runtimeTmpDir]) {
     ensurePrivateDirectory(path)
   }
-  const config = renderIsolationConfig({
+  renderIsolationConfig({
     contract: input.contracts.nativeIsolationConfigContract,
     gatewayUrl: input.gatewayUrl,
-    gatewayToken: input.gatewayToken,
+    gatewayToken: 'inactive-before-sidecar-spawn',
   })
   const configPath = join(codexHome, 'config.toml')
-  const temporaryPath = join(codexHome, `.config-${randomUUID()}.tmp`)
-  writeFileSync(temporaryPath, config, { encoding: 'utf8', mode: 0o600 })
-  chmodSync(temporaryPath, 0o600)
-  renameSync(temporaryPath, configPath)
-  chmodSync(configPath, 0o600)
   return {
     stateDir,
     homeDir,
@@ -566,9 +623,42 @@ export function prepareCodexRuntimeState(input: {
     threadCwdRoot,
     tmpDir: runtimeTmpDir,
     configPath,
-    configDigest: sha256(config),
     gatewayUrl: input.gatewayUrl,
+  }
+}
+
+export function activateCodexGatewaySpawnConfig(input: {
+  state: PreparedCodexRuntimeState
+  sidecarSpawnInstanceId: string
+  gatewayUrl: string
+  gatewayToken: string
+  contracts: CodexRuntimeContracts
+}): ActiveCodexGatewaySpawnConfig {
+  validateGateway(input.gatewayUrl, input.gatewayToken)
+  validateOwnershipIdentity(input.sidecarSpawnInstanceId, 'spawn_identity_invalid')
+  if (input.gatewayUrl !== input.state.gatewayUrl) {
+    throw new CodexRuntimeHostError('gateway_state_mismatch')
+  }
+  const config = renderIsolationConfig({
+    contract: input.contracts.nativeIsolationConfigContract,
+    gatewayUrl: input.gatewayUrl,
+    gatewayToken: input.gatewayToken,
+  })
+  const temporaryPath = join(input.state.codexHome, `.config-${randomUUID()}.tmp`)
+  writeFileSync(temporaryPath, config, { encoding: 'utf8', mode: 0o600 })
+  chmodSync(temporaryPath, 0o600)
+  renameSync(temporaryPath, input.state.configPath)
+  chmodSync(input.state.configPath, 0o600)
+  if (
+    readFileSync(input.state.configPath, 'utf8') !== config
+    || (statSync(input.state.configPath).mode & 0o777) !== 0o600
+  ) throw new CodexRuntimeHostError('gateway_spawn_config_readback_mismatch')
+  return {
+    sidecarSpawnInstanceId: input.sidecarSpawnInstanceId,
+    gatewayUrl: input.gatewayUrl,
+    gatewayToken: input.gatewayToken,
     gatewayTokenDigest: sha256(input.gatewayToken),
+    configDigest: sha256(config),
   }
 }
 
@@ -581,13 +671,15 @@ export function buildCodexChildEnvironment(input: {
   processLeaseId: string
   sidecarSpawnInstanceId: string
   connectionEpoch: string
-  gatewayUrl: string
-  gatewayToken: string
+  gatewaySpawnConfig: ActiveCodexGatewaySpawnConfig
 }): Record<string, string> {
-  validateGateway(input.gatewayUrl, input.gatewayToken)
+  const { gatewaySpawnConfig } = input
+  validateGateway(gatewaySpawnConfig.gatewayUrl, gatewaySpawnConfig.gatewayToken)
   if (
-    input.gatewayUrl !== input.state.gatewayUrl
-    || sha256(input.gatewayToken) !== input.state.gatewayTokenDigest
+    gatewaySpawnConfig.gatewayUrl !== input.state.gatewayUrl
+    || gatewaySpawnConfig.sidecarSpawnInstanceId !== input.sidecarSpawnInstanceId
+    || sha256(gatewaySpawnConfig.gatewayToken) !== gatewaySpawnConfig.gatewayTokenDigest
+    || sha256(readFileSync(input.state.configPath, 'utf8')) !== gatewaySpawnConfig.configDigest
   ) throw new CodexRuntimeHostError('gateway_state_mismatch')
   validateOwnershipIdentity(input.processLeaseId, 'process_lease_identity_invalid')
   validateOwnershipIdentity(input.sidecarSpawnInstanceId, 'spawn_identity_invalid')
@@ -605,8 +697,8 @@ export function buildCodexChildEnvironment(input: {
     TMPDIR: input.state.tmpDir,
     HOME: input.state.homeDir,
     CODEX_HOME: input.state.codexHome,
-    READY_CODEX_GATEWAY_URL: input.gatewayUrl,
-    READY_CODEX_GATEWAY_TOKEN: input.gatewayToken,
+    READY_CODEX_GATEWAY_URL: gatewaySpawnConfig.gatewayUrl,
+    READY_CODEX_GATEWAY_TOKEN: gatewaySpawnConfig.gatewayToken,
     READY_CODEX_PROCESS_LEASE_ID: input.processLeaseId,
     READY_CODEX_SIDECAR_SPAWN_INSTANCE_ID: input.sidecarSpawnInstanceId,
     READY_CODEX_CONNECTION_EPOCH: input.connectionEpoch,

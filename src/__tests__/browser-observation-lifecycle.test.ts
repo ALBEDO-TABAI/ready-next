@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import type { ToolBridgeRuntimeContext } from '../main/modules/agent-control/runtime-core/agent-sdk-types'
+import type { BrowserActionTargetIdentity } from '../shared/browser-action-outcome'
 import {
   recordBrowserWorkflowToolResult,
   syncBrowserObservationGapsFromJournal,
@@ -117,6 +118,120 @@ test('definitively rejected mutation does not create an observation barrier', ()
     operationId: 'type_target',
     browserActionOutcome: outcome,
   })
+  assert.equal(context.browserObservationBarrier, null)
+})
+
+test('a later read clears a tabs_open gap only for the exact durably recorded tab', () => {
+  const context = runtimeContext()
+  const noDocumentIdentity = {
+    documentState: 'no_document' as const,
+    tabId: null,
+    physicalTargetToken: null,
+    frameId: null,
+    frameDocumentToken: null,
+    targetRef: null,
+  }
+  const openOutcome = {
+    actionId: 'action-open-weather',
+    actionSeq: 1,
+    taskId: browserTaskId,
+    ownerRunId: runId,
+    operationId: 'tabs_open',
+    mode: 'mutate',
+    dispatch: 'accepted',
+    delivery: 'delivered',
+    effect: 'observed',
+    needsObservation: false,
+    mayHaveCommitted: true,
+    identity: noDocumentIdentity,
+    successorIdentity: noDocumentIdentity,
+    postActionTabId: 'tab-weather',
+  }
+  recordBrowserWorkflowToolResult(context, 'browser_tabs', {
+    ok: true,
+    operationId: 'tabs_open',
+    browserActionOutcome: openOutcome,
+  })
+  assert.equal(context.browserObservationBarrier?.actionId, openOutcome.actionId)
+
+  const observation = (tabId: string, observationSeq: number) => ({
+    ok: true,
+    operationId: 'read',
+    browserObservationReceipt: {
+      observationSeq,
+      operationId: 'read',
+      ownerRunId: runId,
+      identity: { ...successorIdentity, tabId },
+      causalActions: [{
+        actionId: openOutcome.actionId,
+        actionSeq: openOutcome.actionSeq,
+        predecessorIdentity: noDocumentIdentity,
+        successorIdentity: { ...successorIdentity, tabId },
+      }],
+    },
+  })
+  recordBrowserWorkflowToolResult(context, 'browser_read', observation('tab-other', 1))
+  assert.equal(context.browserObservationBarrier?.actionId, openOutcome.actionId)
+
+  recordBrowserWorkflowToolResult(context, 'browser_read', observation('tab-weather', 2))
+  assert.equal(context.browserObservationBarrier, null)
+})
+
+test('a tabs_open successor probe fallback from a complete page clears only for the created tab', () => {
+  const context = runtimeContext()
+  const openOutcome = {
+    actionId: 'action-open-from-foreground',
+    actionSeq: 1,
+    taskId: browserTaskId,
+    ownerRunId: runId,
+    operationId: 'tabs_open',
+    mode: 'mutate',
+    dispatch: 'accepted',
+    delivery: 'delivered',
+    effect: 'observed',
+    needsObservation: false,
+    mayHaveCommitted: true,
+    identity,
+    successorIdentity: identity,
+    postActionTabId: 'tab-created-from-foreground',
+  }
+  recordBrowserWorkflowToolResult(context, 'browser_tabs', {
+    ok: true,
+    operationId: 'tabs_open',
+    browserActionOutcome: openOutcome,
+  })
+  assert.equal(context.browserObservationBarrier?.actionId, openOutcome.actionId)
+
+  const observation = (
+    observedIdentity: BrowserActionTargetIdentity,
+    observationSeq: number,
+  ) => {
+    return {
+      ok: true,
+      operationId: 'read',
+      browserObservationReceipt: {
+        observationSeq,
+        operationId: 'read',
+        ownerRunId: runId,
+        identity: observedIdentity,
+        causalActions: [{
+          actionId: openOutcome.actionId,
+          actionSeq: openOutcome.actionSeq,
+          predecessorIdentity: identity,
+          successorIdentity: observedIdentity,
+        }],
+      },
+    }
+  }
+  recordBrowserWorkflowToolResult(context, 'browser_read', observation(identity, 1))
+  assert.equal(context.browserObservationBarrier?.actionId, openOutcome.actionId)
+
+  recordBrowserWorkflowToolResult(context, 'browser_read', observation({
+    ...successorIdentity,
+    tabId: 'tab-created-from-foreground',
+    physicalTargetToken: 'physical-tab-created-from-foreground',
+    frameDocumentToken: 'document-tab-created-from-foreground',
+  }, 2))
   assert.equal(context.browserObservationBarrier, null)
 })
 

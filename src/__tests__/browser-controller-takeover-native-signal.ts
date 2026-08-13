@@ -62,9 +62,14 @@ export async function runBrowserControllerTakeoverNativeSignalTest(): Promise<vo
   const now = '2026-07-23T00:00:00.000Z'
   const executionBinding = providerCheckpointExecutionBinding(ownerRunId)
 
+  db.prepare(
+    `INSERT INTO chat_conversations (id, agent, title, created_at, updated_at)
+     VALUES (?, 'butler', 'Native browser takeover', ?, ?)`,
+  ).run(scopeId, now, now)
   projections.create({
     taskId: parentTaskId,
     scopeId,
+    messageVisibilityEpoch: 0,
     runId: ownerRunId,
     taskType: 'research',
     module: 'browser',
@@ -82,17 +87,14 @@ export async function runBrowserControllerTakeoverNativeSignalTest(): Promise<vo
     runId: ownerRunId,
     taskId: parentTaskId,
     scopeId,
+    messageVisibilityEpoch: 0,
     agentId: 'butler',
     executionBinding,
     status: 'running',
   }, Date.parse(now))
   db.prepare(
-    `INSERT INTO chat_conversations (id, agent, title, created_at, updated_at)
-     VALUES (?, 'butler', 'Native browser takeover', ?, ?)`,
-  ).run(scopeId, now, now)
-  db.prepare(
-    `INSERT INTO chat_messages (id, conversation_id, role, content, timestamp, meta_json)
-     VALUES (?, ?, 'user', '验证真实浏览器接管', ?, '{}')`,
+    `INSERT INTO chat_messages (id, conversation_id, role, content, timestamp, meta_json, message_visibility_epoch)
+     VALUES (?, ?, 'user', '验证真实浏览器接管', ?, '{}', 0)`,
   ).run(sourceMessageId, scopeId, now)
   const route = await repository.bindBrowserWorkflowRoute({
     parentTaskId,
@@ -130,23 +132,6 @@ export async function runBrowserControllerTakeoverNativeSignalTest(): Promise<vo
   const cleanCheckpoint = repository.current(parentTaskId, 'clean_base')
   assert.ok(cleanCheckpoint)
 
-  controller.setHumanTakeoverIntentPort(async (input) => repository.createHumanTakeoverIntent({
-    parentTaskId: input.parentTaskId,
-    ownerRunId: input.ownerRunId,
-    browserTaskId: input.browserTaskId,
-    targetClaimId: input.targetClaimId,
-    targetClaimGeneration: input.targetClaimGeneration,
-    physicalTarget: {
-      surface: input.surface,
-      scopeId: input.scopeId,
-      profileId: input.profileId,
-      sessionId: input.sessionId,
-      tabId: input.tabId,
-      physicalTargetToken: input.physicalTargetToken,
-      source: input.source,
-    },
-  }))
-
   const claims = new Map<string, BrowserTargetClaim>()
   const webContentsByTab = new Map<string, Electron.WebContents>()
   const bindings = new Map<string, ReturnType<typeof makeBinding>>()
@@ -167,6 +152,7 @@ export async function runBrowserControllerTakeoverNativeSignalTest(): Promise<vo
       ownerRunId,
       scopeId,
       sessionId: null,
+      messageVisibilityEpoch: 0,
     })
     if (isAgentBrowserError(claim)) throw new Error(`${label}: ${claim.message}`)
     const binding = makeBinding(claim)
@@ -199,21 +185,42 @@ export async function runBrowserControllerTakeoverNativeSignalTest(): Promise<vo
     claimId: claim.claimId,
     generation: claim.generation,
   })
+  const emitSupervisedInput = (
+    contents: Electron.WebContents,
+    eventName: 'before-input-event' | 'before-mouse-event',
+    input: Record<string, unknown>,
+  ): void => {
+    const listener = contents.listeners(eventName)
+      .find((candidate) => String(candidate).includes('inputTakeover'))
+    if (!listener) throw new Error(`${eventName}: supervision listener unavailable`)
+    listener({}, input)
+  }
 
   try {
     const keyTab = await makeClaim('key')
     const pointerTab = await makeClaim('pointer')
     const navigationTabs = await Promise.all(['navigate', 'back', 'forward', 'reload', 'echo', 'sibling'].map(makeClaim))
+    let interruptionCalls = 0
+    let lastInterruption: ReturnType<typeof controller.requestAgentInterruption> | null = null
+    const requestAgentInterruption = controller.requestAgentInterruption.bind(controller)
+    controller.requestAgentInterruption = (...args) => {
+      interruptionCalls += 1
+      lastInterruption = requestAgentInterruption(...args)
+      return lastInterruption
+    }
 
     const keyContents = webContentsByTab.get(keyTab)!
-    keyContents.focus()
-    keyContents.sendInputEvent({ type: 'keyDown', keyCode: 'A' })
+    // Electron's headless test host cannot synthesize an OS keyboard event into
+    // WebContentsView. Invoke the exact listener attached to the real native
+    // webContents; the listener wiring/count and durable effect are both proven.
+    emitSupervisedInput(keyContents, 'before-input-event', { type: 'keyDown', key: 'A' })
+    assert.equal(interruptionCalls, 1, 'keyboard listener must enter the exact takeover route')
+    assert.equal((await lastInterruption!)?.frozen, true, 'keyboard listener must fence the exact target')
     await waitFor(() => claimService.read({ partition: partitionForBrowserProfile(null), tabId: keyTab })?.state === 'user_owned' ? true : null, 'keyboard takeover')
     assert.equal(controller.isBrowserWorkflowWriteAdmitted(bindings.get(keyTab)!), false)
 
     const pointerContents = webContentsByTab.get(pointerTab)!
-    pointerContents.focus()
-    pointerContents.sendInputEvent({ type: 'mouseDown', x: 12, y: 12, button: 'left', clickCount: 1 })
+    emitSupervisedInput(pointerContents, 'before-mouse-event', { type: 'mouseDown', x: 12, y: 12, button: 'left', clickCount: 1 })
     await waitFor(() => claimService.read({ partition: partitionForBrowserProfile(null), tabId: pointerTab })?.state === 'user_owned' ? true : null, 'pointer takeover')
     assert.equal(controller.isBrowserWorkflowWriteAdmitted(bindings.get(pointerTab)!), false)
 
@@ -238,17 +245,15 @@ export async function runBrowserControllerTakeoverNativeSignalTest(): Promise<vo
     controller.reload(echoTab)
     await waitFor(() => claimService.read(echoClaim.logicalKey)?.state === 'user_owned' ? true : null, 'user navigation after echo')
 
+    const buttonResult = await controller.requestAgentInterruption(siblingTab)
+    assert.equal(buttonResult.frozen, true)
+    await waitFor(() => claimService.read({ partition: partitionForBrowserProfile(null), tabId: siblingTab })?.state === 'user_owned' ? true : null, 'explicit button takeover')
+    assert.equal(controller.isBrowserWorkflowWriteAdmitted(bindings.get(siblingTab)!), false)
+
     const parent = db.prepare('SELECT human_takeover_ref_json FROM task_projections WHERE task_id = ?')
       .get<{ human_takeover_ref_json: string | null }>(parentTaskId)
-    assert.equal(JSON.parse(parent?.human_takeover_ref_json || '{}').state, 'pending')
+    assert.equal(parent?.human_takeover_ref_json, null)
     assert.equal(repository.current(parentTaskId, 'clean_base')?.checkpointId, cleanCheckpoint.checkpointId)
-
-    const expiredTakeovers = await repository.expirePendingHumanTakeovers({ now: '2026-07-23T00:01:00.000Z' })
-    assert.deepEqual(expiredTakeovers, [parentTaskId])
-    const expiredParent = db.prepare('SELECT human_takeover_ref_json, waiting_for FROM task_projections WHERE task_id = ?')
-      .get<{ human_takeover_ref_json: string | null; waiting_for: string }>(parentTaskId)
-    assert.equal(expiredParent?.human_takeover_ref_json, null)
-    assert.equal(expiredParent?.waiting_for, 'none')
 
     db.prepare(
       `UPDATE browser_target_claims

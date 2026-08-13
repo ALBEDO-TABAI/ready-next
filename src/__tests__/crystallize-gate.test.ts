@@ -5,7 +5,7 @@
  */
 
 import assert from 'node:assert/strict'
-import test from 'node:test'
+import test, { mock } from 'node:test'
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -14,6 +14,7 @@ import {
   decideCrystallizeRun,
   runCrystallizeRound,
   createCrystallizeEffectors,
+  CrystallizeScheduler,
   type CrystallizeSignals,
 } from '../main/modules/agent-control/maintenance/crystallize-gate'
 import { BeliefCardStore } from '../main/modules/agent-control/knowledge/belief-card-store'
@@ -62,6 +63,49 @@ test('skip leaves a single auditable breadcrumb and touches nothing', async () =
     assert.ok((breadcrumbs[0] as unknown as { reason: string }).reason)
   } finally {
     __setMetricSinkForTests(null)
+  }
+})
+
+test('scheduler cancels the old startup round and start stays idempotent', async () => {
+  mock.timers.enable({ apis: ['setTimeout', 'setInterval'] })
+  let calls = 0
+  const scheduler = new CrystallizeScheduler(async () => { calls += 1 })
+  try {
+    scheduler.start({ startupDelayMs: 90_000 })
+    scheduler.stop()
+    mock.timers.tick(90_000)
+    await Promise.resolve()
+    assert.equal(calls, 0)
+
+    scheduler.start({ startupDelayMs: 90_000 })
+    scheduler.start({ startupDelayMs: 90_000 })
+    mock.timers.tick(90_000)
+    await Promise.resolve()
+    assert.equal(calls, 1)
+  } finally {
+    scheduler.stop()
+    mock.timers.reset()
+  }
+})
+
+test('scheduler contains a rejected startup round', async () => {
+  mock.timers.enable({ apis: ['setTimeout', 'setInterval'] })
+  const errors: string[] = []
+  const originalConsoleError = console.error
+  console.error = (...args: unknown[]) => { errors.push(args.map(String).join(' ')) }
+  const scheduler = new CrystallizeScheduler(async () => {
+    throw new Error('startup_round_rejected')
+  })
+  try {
+    scheduler.start({ startupDelayMs: 1 })
+    mock.timers.tick(1)
+    await Promise.resolve()
+    await Promise.resolve()
+    assert.match(errors.join('\n'), /startup round failed.*startup_round_rejected/)
+  } finally {
+    scheduler.stop()
+    console.error = originalConsoleError
+    mock.timers.reset()
   }
 })
 

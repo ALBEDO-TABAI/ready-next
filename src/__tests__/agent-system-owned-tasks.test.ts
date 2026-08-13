@@ -7,6 +7,7 @@ function row(overrides: Record<string, unknown>) {
   return {
     task_id: 'task-1',
     scope_id: 'scope-1',
+    message_visibility_epoch: 0,
     run_id: 'run-1',
     parent_task_id: null,
     parent_step_id: null,
@@ -53,7 +54,7 @@ test('TaskProjectionRepository lists recent tasks by owner agent only', () => {
     getRawDb() {
       return {
         prepare(sql: string) {
-          if (sql.includes('WHERE owner_agent_id = ?')) {
+          if (sql.includes('WHERE projection.owner_agent_id = ?')) {
             return {
               run() {},
               get() { return undefined },

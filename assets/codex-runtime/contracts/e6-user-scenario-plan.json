@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "proofMode": "ordinary-agent-lark-cli-two-resource-write-readback",
+  "sheetUrl": "https://ji3jaf9ul0l.feishu.cn/sheets/GfPlsXKO2hI3Sqtoh82c1i45nhf?from=from_copylink",
+  "docxUrl": "https://ji3jaf9ul0l.feishu.cn/docx/GedDd3EATovEz9xILmbcCTk5n4e?from=from_copylink",
+  "docxTitle": "2026 年第二季度工作总结",
+  "supportedCliVersion": "lark-cli version 1.0.76",
+  "sheetAppendPolicy": {
+    "inheritStyle": "before",
+    "structureInclude": "merges",
+    "templateInclude": "value,formula,style,data_validation"
+  },
+  "polishReplacements": [
+    ["逐步发展为", "逐步沉淀为"],
+    ["推动内容生产在", "使内容生产在"]
+  ]
+}

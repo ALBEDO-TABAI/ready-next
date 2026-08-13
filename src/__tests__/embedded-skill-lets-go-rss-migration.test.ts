@@ -30,9 +30,17 @@ import {
   _resetLastReferenceSkillHintsForTests,
   getLastReferenceSkill,
 } from '../main/modules/agent-control/skills/skill-reference-hints'
+import { __setScopeContextEpochDatabaseForTests } from '../main/modules/agent-control/session/scope-context-epoch'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const SKILL_DIR = join(__dirname, '..', '..', 'assets', 'embedded-skills', 'lets-go-rss')
+
+test.before(() => {
+  __setScopeContextEpochDatabaseForTests({
+    getRawDb: () => ({ prepare: () => ({ get: () => undefined }) }) as never,
+  })
+})
+test.after(() => __setScopeContextEpochDatabaseForTests(null))
 
 test('manifest compiles to advisory with read_skill default + 5 retained public python actions', () => {
   const def = compileSkillDefinition({ folderPath: SKILL_DIR, source: 'embedded' })
@@ -117,6 +125,7 @@ test('orchestrator inline-injects SKILL.md, arms primitive hint, creates no skil
     userText: '用 lets-go-rss 看一下今天有什么新更新',
     session,
     sessionId: 'test-session-letsgorss',
+    messageVisibilityEpoch: 0,
     emitOutput: () => {},
     emitToolAction: () => { toolCalls += 1 },
     executeTool: async () => {

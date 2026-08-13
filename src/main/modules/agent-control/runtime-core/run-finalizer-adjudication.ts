@@ -40,6 +40,17 @@ export function defaultVerifyRunStateTerminal(runStatePath: string): boolean {
   }
 }
 
+export function readExistingTerminalQualityPatch(
+  projection: TaskProjectionRecord,
+): NonNullable<TerminalAdjudicationDecision['terminalQualityPatch']> {
+  return {
+    proofRefs: projection.proofRefs ?? [],
+    checkins: projection.checkins ?? [],
+    criteria: projection.criteria ?? { items: [], satisfiedCount: 0, totalCount: 0 },
+    ...(projection.learningRefs?.length ? { learningRefs: projection.learningRefs } : {}),
+  }
+}
+
 export type TerminalFailureReason =
   | 'delivery_failed'
   | 'tool_unavailable'

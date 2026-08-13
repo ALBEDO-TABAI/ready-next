@@ -44,7 +44,7 @@ export function isDocumentSaveShortcutAvailable(input: {
   workbenchMode: WorkbenchMode
   splitMode: WorkbenchMode | null
 }): boolean {
-  return input.pathname === '/workbench'
+  return (input.pathname === '/' || input.pathname === '/workbench')
     && input.appMode === 'workbench'
     && (input.workbenchMode === 'document' || input.splitMode === 'document')
 }

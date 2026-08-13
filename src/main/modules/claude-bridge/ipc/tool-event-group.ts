@@ -45,8 +45,11 @@ interface IPCResponse<T = unknown> {
  * agent, sessionId) is managed by the host's lifecycle helpers.
  */
 export interface PendingToolActionEntry {
+  expectedSenderId: number
   resolve: (payload: Record<string, unknown>) => void
   reject: (error: Error) => void
+  timer?: ReturnType<typeof setTimeout>
+  cleanup?: () => void
 }
 
 /**
@@ -101,7 +104,7 @@ export const toolEventGroup: IpcChannelGroup<ToolEventGroupDeps> = {
     //   3. resolve OR reject the pending Promise based on the renderer payload
     //   4. on success, opportunistically persist `runCapture` diagnostic for
     //      design-run debugging (best-effort — errors swallowed)
-    ipcMain.handle('agent:completeToolActionRequest', async (_, payload: {
+    ipcMain.handle('agent:completeToolActionRequest', async (event, payload: {
       requestId: string
       handled: boolean
       payload?: Record<string, unknown>
@@ -111,6 +114,9 @@ export const toolEventGroup: IpcChannelGroup<ToolEventGroupDeps> = {
       const pending = deps.pendingToolActionRequests.get(requestId)
       if (!pending) {
         return { success: false, error: `Unknown tool action request: ${requestId}` }
+      }
+      if (event.sender.id !== pending.expectedSenderId) {
+        return { success: false, error: `Wrong renderer for tool action request: ${requestId}` }
       }
       deps.releasePendingRequest(requestId)
       if (payload?.error) {

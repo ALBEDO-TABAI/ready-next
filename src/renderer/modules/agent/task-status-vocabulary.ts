@@ -29,7 +29,7 @@ export type LabelSurface = 'taskCard' | 'taskPanel'
 export const __GATE_CANONICAL_LABELS: ReadonlyArray<string> = Object.freeze([
   // phase / projection-status / step / interaction-state — task-card surface
   '排队中', '规划中', '规划', '执行工具', '检查点', '人工接管', '恢复中',
-  '生成回复', '进行中', '等待继续', '等待补充', '待继续', '已完成', '完成',
+  '生成回复', '进行中', '未完成', '等待补充', '已阻塞', '已完成', '完成',
   '失败', '已停止', '已取消', '待命', '待处理',
   // visual-state surface
   '预算已暂停', '后台运行中',
@@ -66,7 +66,7 @@ export function taskCardVisualStateLabel(state: TaskCardVisualState): string {
     case 'failed': return '失败'
     case 'budget_paused': return '预算已暂停'
     case 'background_running': return '后台运行中'
-    case 'waiting_handoff': return '等待继续'
+    case 'waiting_handoff': return '未完成'
     case 'waiting_input': return '等待补充'
     case 'done': return '已完成'
     case 'running': return '进行中'
@@ -101,7 +101,7 @@ export function taskStepStatusToUserLabel(
 ): string {
   if (status === 'done') return '已完成'
   if (status === 'running') return '进行中'
-  if (status === 'blocked') return '待继续'
+  if (status === 'blocked') return '已阻塞'
   if (status === 'error') return '失败'
   return '待执行'
 }
@@ -168,7 +168,7 @@ export function phaseToUserLabel(
   // 'taskCard' surface (default) — 复刻 taskCardViewModel.ts 现有 mapping。
   if (phase === 'planning') return '规划中'
   if (phase === 'tool_running' || phase === 'responding' || phase === 'resuming') return '进行中'
-  if (phase === 'checkpoint' || phase === 'takeover') return '等待继续'
+  if (phase === 'checkpoint' || phase === 'takeover') return '已暂停'
   if (phase === 'done') return '已完成'
   if (phase === 'error') return '失败'
   if (phase === 'cancelled') return '已停止'
@@ -188,7 +188,7 @@ export function projectionStatusToUserLabel(
       case 'recoverable_paused':
       case 'budget_paused':
       case 'blocked':
-        return '待继续'
+        return '未完成'
       case 'completed':
         return '已完成'
       case 'failed':
@@ -202,7 +202,7 @@ export function projectionStatusToUserLabel(
   // 'taskCard' surface (default) — 复刻 taskCardViewModel.ts 现有 mapping。
   if (status === 'queued') return '排队中'
   if (status === 'running') return '进行中'
-  if (status === 'blocked' || status === 'recoverable_paused' || status === 'budget_paused') return '等待继续'
+  if (status === 'blocked' || status === 'recoverable_paused' || status === 'budget_paused') return '未完成'
   if (status === 'completed') return '已完成'
   if (status === 'failed') return '失败'
   if (status === 'killed') return '已停止'

@@ -32,7 +32,6 @@ const EXPECTED_PUBLIC_NAMES = [
   'browser_drag',
   'browser_upload',
   'browser_dialog',
-  'browser_request_takeover',
   'browser_research',
   'browser_collect',
   'browser_download',
@@ -100,7 +99,7 @@ const LEGACY_PUBLIC_NAMES = [
   'browser_confirm_collection_consent',
 ] as const
 
-test('browser catalog has one canonical 32-tool semantic surface', () => {
+test('browser catalog has one canonical 31-tool semantic surface', () => {
   assert.deepEqual(BROWSER_PUBLIC_TOOL_NAMES, EXPECTED_PUBLIC_NAMES)
   assert.deepEqual(BROWSER_TOOLS.map((tool) => tool.name), EXPECTED_PUBLIC_NAMES)
   assert.equal(BROWSER_TOOL_SURFACE_MANIFEST.length, EXPECTED_PUBLIC_NAMES.length)
@@ -132,7 +131,7 @@ test('every public browser tool has an explicit lease classification', () => {
   assert.equal(classifyBrowserToolCall('browser_task', { action: 'result' }), 'read')
   assert.equal(classifyBrowserToolCall('browser_dialog', { action: 'get' }), 'read')
   assert.equal(classifyBrowserToolCall('browser_dialog', { action: 'accept' }), 'write')
-  assert.equal(classifyBrowserToolCall('browser_request_takeover', {}), 'control')
+  assert.throws(() => classifyBrowserToolCall('browser_request_takeover', {}), /browser_operation_not_registered/)
   assert.equal(classifyBrowserToolCall('browser_research', { action: 'start' }), 'control')
   assert.equal(classifyBrowserToolCall('browser_research', { action: 'complete' }), 'read')
 })

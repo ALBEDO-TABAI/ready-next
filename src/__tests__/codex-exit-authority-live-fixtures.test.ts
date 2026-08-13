@@ -161,9 +161,6 @@ async function collectFixture(row: ExitMatrixRow): Promise<{
     projectionPatchRefs: [],
     allowNullPhaseFallback: true,
     allowDirectProvisionalStream: row.id === 'done_direct',
-    onAutomaticCompactionObserved: () => {
-      throw new Error('matrix terminal fixture must not contain compaction')
-    },
     onProvisionalDelta: () => {},
     startTurn: async () => {
       if (row.id === 'protocol_or_response_surface_failure') {

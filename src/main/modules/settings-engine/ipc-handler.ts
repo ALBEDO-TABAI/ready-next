@@ -2,10 +2,8 @@ import { app, ipcMain } from 'electron'
 import { join } from 'node:path'
 import {
   AIModelConfig,
-  getActiveAIConfig,
   getProviderDef,
   normalizeAIConfig,
-  normalizeAIWorkspace,
   normalizeProviderId,
   resolveAIConfigCapabilities,
   type AIProviderWorkspace,
@@ -23,26 +21,29 @@ import {
   applyKimiK3AnthropicRequestContract,
   isKimiK3Config,
 } from '../../../shared/ai-providers/kimi-k3'
-import { AppSettingsRepository } from '../repositories/app-settings-repository'
+import {
+  AppSettingsRepository,
+  registerAIWorkspaceAdmissionGuard,
+  registerAIWorkspaceMutationGuard,
+} from '../repositories/app-settings-repository'
 import { createRotatingLogger } from '../../utils/rotating-logger'
 import { parseJsonResponse } from '../openai-responses'
 import { ExternalServiceStore } from './external-service-store'
 import type { ExternalServiceUpdateInput, PublicExternalServiceProfile, ExternalServiceTestResult } from '../../../shared/external-services'
-import {
-  readAgentAutoNarrationContinuationSetting,
-  writeAgentAutoNarrationContinuationSetting,
-} from './agent-auto-narration-setting'
-import {
-  readAgentSessionPrerouteMode,
-  writeAgentSessionPrerouteMode,
-  type AgentSessionPrerouteMode,
-} from './agent-session-preroute-setting'
 import { BROWSER_POWER_MODE_SETTING_KEY } from '../../../shared/browser-power'
 import { setBrowserPowerGlobalModeReader } from '../browser-engine/browser-power-policy'
 import {
   ChatGptOAuthService,
   createChatGptOAuthService,
 } from './chatgpt-oauth-service'
+import { getDatabase } from '../database'
+import { CodexBindingRepository } from '../agent-control/codex-runtime/codex-binding-repository'
+import { ActiveAIProfileMutationGuard } from './active-ai-profile-mutation-guard'
+import { createGenericSettingIPCHandler } from './generic-setting-ipc-handler'
+import {
+  disconnectChatGptOAuthWithWorkspaceLifecycle,
+  persistAIWorkspaceWithChatGptOAuthLifecycle,
+} from './chatgpt-oauth-workspace-mutation'
 
 interface SettingsIPCResponse<T = unknown> {
   success: boolean
@@ -58,17 +59,33 @@ function logSettings(msg: string) {
 export function setupSettingsIPC(options?: {
   onSettingChanged?: (key: string, value: string) => void
   chatGptOAuthService?: ChatGptOAuthService
-}): void {
-  const repository = new AppSettingsRepository()
+}): ChatGptOAuthService {
+  const database = getDatabase()
+  const rawDb = database.getRawDb()
+  if (!rawDb) throw new Error('Database not available')
+  const codexBindings = new CodexBindingRepository(rawDb)
+  const profileMutationGuard = new ActiveAIProfileMutationGuard(
+    () => codexBindings.readActiveUpstreamProfileUsages(),
+  )
+  registerAIWorkspaceMutationGuard(
+    (current, next) => profileMutationGuard.assertWorkspaceMutationAllowed(current, next),
+  )
+  const repository = new AppSettingsRepository(() => database)
   const externalServices = new ExternalServiceStore(repository)
   const chatGptOAuth = options?.chatGptOAuthService || createChatGptOAuthService(
     join(app.getPath('userData'), 'openai-oauth', 'auth.json')
   )
+  registerAIWorkspaceAdmissionGuard(() => {
+    if (chatGptOAuth.isLifecycleBusy()) {
+      throw new Error('codex_chatgpt_oauth_lifecycle_busy')
+    }
+  })
   setBrowserPowerGlobalModeReader(() => repository.getSetting(BROWSER_POWER_MODE_SETTING_KEY) === 'true')
 
   const ensureChatGptOAuthReady = async (
     config: AIModelConfig | null | undefined,
     source = 'workspace',
+    afterReady?: (status: ChatGptOAuthStatus) => void | Promise<void>,
   ): Promise<void> => {
     if (!isChatGptOAuthConfig(config)) return
     if (!isChatGptOAuthConfigContractValid(config)) {
@@ -82,6 +99,7 @@ export function setupSettingsIPC(options?: {
     await chatGptOAuth.ensureReady(
       config?.modelIds || (config?.model ? [config.model] : []),
       config?.apiKey,
+      afterReady,
     )
     if (!wasRunning) {
       logSettings(`[oauth] resume ready source=${source} durationMs=${Date.now() - startedAt} models=${chatGptOAuth.getStatus().models.length}`)
@@ -106,56 +124,16 @@ export function setupSettingsIPC(options?: {
   })
 
   // Set a setting
-  ipcMain.handle('settings:set', (_, { key, value }: { key: string; value: string }): SettingsIPCResponse => {
-    try {
-      repository.setSetting(key, value)
-      options?.onSettingChanged?.(key, value)
-      return { success: true }
-    } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : String(error) }
-    }
-  })
+  ipcMain.handle('settings:set', createGenericSettingIPCHandler({
+    repository,
+    onSettingChanged: options?.onSettingChanged,
+  }))
 
   // Get all settings
   ipcMain.handle('settings:getAll', (): SettingsIPCResponse<Record<string, string>> => {
     try {
       const all = repository.getAllSettings()
       return { success: true, data: all }
-    } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : String(error) }
-    }
-  })
-
-  ipcMain.handle('settings:getAgentAutoNarrationContinuation', (): SettingsIPCResponse<boolean> => {
-    try {
-      return { success: true, data: readAgentAutoNarrationContinuationSetting(repository) }
-    } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : String(error) }
-    }
-  })
-
-  ipcMain.handle('settings:setAgentAutoNarrationContinuation', (_, payload: { enabled: boolean }): SettingsIPCResponse => {
-    try {
-      writeAgentAutoNarrationContinuationSetting(repository, payload?.enabled !== false)
-      return { success: true }
-    } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : String(error) }
-    }
-  })
-
-  // EP4-A5 — agent_auto_routing (off | suggest | auto, default suggest)
-  ipcMain.handle('settings:getAgentSessionPrerouteMode', (): SettingsIPCResponse<AgentSessionPrerouteMode> => {
-    try {
-      return { success: true, data: readAgentSessionPrerouteMode(repository) }
-    } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : String(error) }
-    }
-  })
-
-  ipcMain.handle('settings:setAgentSessionPrerouteMode', (_, payload: { mode: AgentSessionPrerouteMode }): SettingsIPCResponse => {
-    try {
-      writeAgentSessionPrerouteMode(repository, payload?.mode)
-      return { success: true }
     } catch (error) {
       return { success: false, error: error instanceof Error ? error.message : String(error) }
     }
@@ -201,18 +179,26 @@ export function setupSettingsIPC(options?: {
 
   ipcMain.handle('settings:setAIWorkspace', async (_, workspace: AIProviderWorkspace): Promise<SettingsIPCResponse> => {
     try {
-      const normalized = normalizeAIWorkspace(workspace)
-      const oauthProfiles = normalized.profiles.filter((profile) => isChatGptOAuthConfig(profile.config))
-      if (oauthProfiles.length > 1 || oauthProfiles.some((profile) => (
-        profile.id !== CHATGPT_OAUTH_PROFILE_ID
-        || profile.builtIn
-        || !isChatGptOAuthConfigContractValid(profile.config)
-      ))) {
-        throw new Error('ChatGPT OAuth 预设不符合固定安全合同，请断开后重新连接。')
-      }
-      const activeConfig = getActiveAIConfig(normalized)
-      await ensureChatGptOAuthReady(activeConfig, 'profile-switch')
-      repository.setAIWorkspace(normalized)
+      await persistAIWorkspaceWithChatGptOAuthLifecycle({
+        requestedWorkspace: workspace,
+        repository,
+        profileMutationGuard,
+        chatGptOAuth,
+        ensureOAuthReady: async (scope, config) => {
+          const wasRunning = chatGptOAuth.getStatus().running
+          const startedAt = Date.now()
+          if (!wasRunning) {
+            logSettings(`[oauth] resume start source=profile-switch cachedModels=${config.modelIds?.length || (config.model ? 1 : 0)}`)
+          }
+          await scope.ensureReady(
+            config.modelIds || (config.model ? [config.model] : []),
+            config.apiKey,
+          )
+          if (!wasRunning) {
+            logSettings(`[oauth] resume ready source=profile-switch durationMs=${Date.now() - startedAt} models=${chatGptOAuth.getStatus().models.length}`)
+          }
+        },
+      })
       return { success: true }
     } catch (error) {
       return { success: false, error: error instanceof Error ? error.message : String(error) }
@@ -226,22 +212,30 @@ export function setupSettingsIPC(options?: {
   ipcMain.handle('settings:connectChatGptOAuth', async (): Promise<SettingsIPCResponse<ChatGptOAuthStatus>> => {
     const startedAt = Date.now()
     try {
-      const workspace = repository.getAIWorkspace()
-      const existingProfile = workspace.profiles.find((profile) => isChatGptOAuthConfig(profile.config))
-      const existingConfig = isChatGptOAuthConfigContractValid(existingProfile?.config)
-        ? existingProfile?.config
-        : undefined
-      const savedModels = existingConfig?.modelIds || (existingConfig?.model ? [existingConfig.model] : [])
-      logSettings(`[oauth] authorize start cachedModels=${savedModels.length}`)
+      logSettings('[oauth] authorize start')
       const status = await chatGptOAuth.connect(
-        existingConfig?.apiKey,
-        savedModels,
+        undefined,
+        [],
+        {
+          beforeRestart: () => {
+            const latest = repository.getAIWorkspace()
+            const existingProfile = latest.profiles.find((profile) => isChatGptOAuthConfig(profile.config))
+            const existingConfig = isChatGptOAuthConfigContractValid(existingProfile?.config)
+              ? existingProfile?.config
+              : undefined
+            repository.setAIWorkspace(removeChatGptOAuthProfile(latest))
+            return {
+              existingProxyApiKey: existingConfig?.apiKey,
+              savedModels: existingConfig?.modelIds || (existingConfig?.model ? [existingConfig.model] : []),
+            }
+          },
+          afterReady: (readyStatus) => repository.setAIWorkspace(upsertChatGptOAuthProfile(
+            repository.getAIWorkspace(),
+            readyStatus.models,
+            chatGptOAuth.getProxyApiKey(),
+          )),
+        },
       )
-      repository.setAIWorkspace(upsertChatGptOAuthProfile(
-        workspace,
-        status.models,
-        chatGptOAuth.getProxyApiKey(),
-      ))
       logSettings(`[oauth] authorize ready durationMs=${Date.now() - startedAt} models=${status.models.length}`)
       return { success: true, data: status }
     } catch (error) {
@@ -263,10 +257,16 @@ export function setupSettingsIPC(options?: {
       ) {
         throw new Error('没有可恢复的 ChatGPT OAuth 预设，请重新授权。')
       }
-      await ensureChatGptOAuthReady(profile.config, 'manual-resume')
-      if (workspace.activeProfileId !== profile.id) {
-        repository.setAIWorkspace({ ...workspace, activeProfileId: profile.id })
-      }
+      await ensureChatGptOAuthReady(
+        profile.config,
+        'manual-resume',
+        () => {
+          const latest = repository.getAIWorkspace()
+          if (latest.activeProfileId !== profile.id) {
+            repository.setAIWorkspace({ ...latest, activeProfileId: profile.id })
+          }
+        },
+      )
       return { success: true, data: chatGptOAuth.getStatus() }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
@@ -277,10 +277,13 @@ export function setupSettingsIPC(options?: {
 
   ipcMain.handle('settings:disconnectChatGptOAuth', async (): Promise<SettingsIPCResponse<ChatGptOAuthStatus>> => {
     try {
-      const status = await chatGptOAuth.disconnect()
-      repository.setAIWorkspace(removeChatGptOAuthProfile(repository.getAIWorkspace()))
+      await disconnectChatGptOAuthWithWorkspaceLifecycle({
+        repository,
+        profileMutationGuard,
+        chatGptOAuth,
+      })
       logSettings('[oauth] disconnected credentialRemoved=true')
-      return { success: true, data: status }
+      return { success: true, data: chatGptOAuth.getStatus() }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       logSettings(`[oauth] disconnect failed error=${message}`)
@@ -429,14 +432,17 @@ export function setupSettingsIPC(options?: {
             model: finalModel,
             input: [{ role: 'user', content: [{ type: 'input_text', text: 'hi' }] }],
             stream: false,
-            max_output_tokens: 1,
+            max_output_tokens: 16,
             reasoning: { effort: configToUse.reasoningEffort || provider?.defaultReasoningEffort || 'high' },
           }),
           signal: AbortSignal.timeout(15000),
         })
         const latencyMs = Date.now() - startTime
 
-        if (responsesResp.ok || responsesResp.status === 400) {
+        if (responsesResp.ok || (
+          responsesResp.status === 400
+          && !isChatGptOAuthConfig(configToUse)
+        )) {
           return { success: true, data: { latencyMs } }
         }
         if (responsesResp.status === 401 || responsesResp.status === 403) {
@@ -522,4 +528,5 @@ export function setupSettingsIPC(options?: {
       return { success: false, error: error instanceof Error ? error.message : String(error) }
     }
   })
+  return chatGptOAuth
 }

@@ -29,6 +29,11 @@ import {
   isMapSemanticIntentActive,
   type MapSemanticIntent,
 } from './map-semantic-intent'
+import { hasExplicitLocalFeishuCliSkillIntent } from './local-feishu-cli-intent'
+import { hasExplicitSetupCommandIntent } from './setup-command-intent'
+
+export { hasExplicitLocalFeishuCliIntent } from './local-feishu-cli-intent'
+export { hasExplicitSetupCommandIntent } from './setup-command-intent'
 
 export interface ExecutionIntentContext {
   requestEnvelope: RequestEnvelope
@@ -51,24 +56,6 @@ const DOCUMENT_TOOL_SURFACE_PATTERN =
 
 const DOCUMENT_CONTEXT_CONTINUATION_PATTERN =
   /(这篇|这份|这个|上面|前面|刚才|继续|再|确认|整理|分段|合并|子标题|小标题|标题|补上|附上|加上|改一下|改成|保存|写入|替换)/i
-
-export function hasExplicitLocalFeishuCliIntent(text: string): boolean {
-  return /(?:\b(?:lark|feishu)[-_ ]?cli\b|飞书\s*(?:cli|命令行))/i.test(text)
-}
-
-export function hasExplicitSetupCommandIntent(text: string): boolean {
-  const setupAction =
-    /(?:安装|配置|初始化|接入|部署|升级|更新|重装|授权|认证|登录|修复(?:本机|本地)?(?:环境|配置|安装)|\binstall\b|\bsetup\b|\bset\s+up\b|\bconfigur(?:e|ation)\b|\binitiali[sz]e\b|\bupgrade\b|\bupdate\b|\bauthori[sz]e\b|\bauthenticat(?:e|ion)\b|\blog\s+in\b|\blogin\b)/i
-  const commandTarget =
-    /(?:\b(?:cli|command(?:[ -]?line)?|binary|executable|sdk|homebrew|brew|npm|npx|pnpm|yarn|pip|pipx|uv|uvx|cargo|winget|choco|apt|dnf|yum)\b|命令行|命令|本机程序|本地程序|开发环境|运行环境|依赖|软件|工具|(?:lark|feishu)[-_ ]?cli)/i
-  const diagnosticOnly =
-    /(?:为什么|为何|怎么回事|什么原因|报错|失败|超时|状态|是否|有没有|是不是|能否|能不能|成功了吗|好了吗|检查|查看|看看|验证|\bwhy\b|\bstatus\b|\bcheck\b|\bverify\b|\berror\b|\bfailed?\b|\btimeout\b)/i
-  const explicitDirective =
-    /(?:请|帮我|给我|现在|直接|开始|继续|重新|重装|修复|解决|处理|搞定|走.{0,8}流程|\bplease\b|\bfix\b|\brepair\b|\bstart\b|\bretry\b|\breinstall\b)/i
-  return setupAction.test(text)
-    && commandTarget.test(text)
-    && (!diagnosticOnly.test(text) || explicitDirective.test(text))
-}
 
 function hasWritableDocumentContext(envelope: RequestEnvelope): boolean {
   // Widget targets are hardcoded canWrite:true in the envelope, but a widget
@@ -255,9 +242,11 @@ export function resolveIntentCapabilityGroupModes(params: {
   const hasRSSIntent = positiveDomains.has('rss') && !excludedDomains.has('rss')
   const hasCalendarIntent = positiveDomains.has('calendar') && !excludedDomains.has('calendar')
   const hasFeishuIntent = positiveDomains.has('feishu') && !excludedDomains.has('feishu')
-  const hasLocalFeishuCliIntent = hasExplicitLocalFeishuCliIntent(params.userInstructionText)
+  const hasLocalFeishuCliSetupIntent = hasExplicitSetupCommandIntent(params.userInstructionText)
+  const hasLocalFeishuCliIntent = hasExplicitLocalFeishuCliSkillIntent(params.userInstructionText)
+    || hasLocalFeishuCliSetupIntent
   const allowCommandExec = params.hasTools && (
-    hasExplicitSetupCommandIntent(params.userInstructionText)
+    hasLocalFeishuCliSetupIntent
     || requiredCapabilityGroups.has('command_exec')
   )
   const hasPetIntent = positiveDomains.has('pet') && !excludedDomains.has('pet')

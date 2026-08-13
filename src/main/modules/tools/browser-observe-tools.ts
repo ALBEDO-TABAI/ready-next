@@ -42,8 +42,7 @@ import {
 } from '../browser-engine/browser-page-map-ambiguity-cache'
 import { createToolExecutionOutput, type ToolExecutionOutput } from '../agent-control/tools-runtime/tool-result-types'
 import {
-  createBrowserStructuredOutput as browserStructuredOutput,
-  stringifyBrowserJsonOrFailure,
+  createBrowserStructuredOutput as browserStructuredOutput
 } from './browser-failure-output'
 import {
   buildBrowserBlockingChallengeProbeJs,
@@ -58,10 +57,8 @@ import {
   getPageIdentity,
   listSubframesSafe,
   locateActionTargets,
-  resolveToolContextMeta,
-  truncate,
-  uniqueStrings,
-  type ActionTargetCandidate,
+  resolveToolContextMeta, uniqueStrings,
+  type ActionTargetCandidate
 } from './browser-tool-shared'
 
 const logger = createRotatingLogger('ready-tools.log', { buffered: true })
@@ -1172,7 +1169,11 @@ export async function executeBrowserObserveTool(
         const selector = typeof args.selector === 'string' ? args.selector : undefined
         let tabId = (args.tab_id as string) || null
         const ready = await waitForReady(controller, tabId, Math.max(500, Math.min(timeoutMs, 30_000)), selector, abortSignal)
-        return `Wait result: ready=${ready.ready}, selectorMatched=${ready.matchedSelector}, elapsed=${ready.elapsedMs}ms`
+        return JSON.stringify({
+          ...ready,
+          observationFresh: ready.ready,
+          usableAsResearchEvidence: false,
+        }, null, 2)
       }
 
       case 'wait_condition': {
@@ -1200,7 +1201,11 @@ export async function executeBrowserObserveTool(
           checkIntervalMs: Number(args.check_interval_ms || 0) || undefined,
           stableIterations: Number(args.stable_iterations || 0) || undefined,
         })
-        return JSON.stringify(result, null, 2)
+        return JSON.stringify({
+          ...result,
+          observationFresh: result.matched,
+          usableAsResearchEvidence: false,
+        }, null, 2)
       }
 
       default:

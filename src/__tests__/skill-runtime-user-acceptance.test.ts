@@ -16,6 +16,7 @@ import { TaskProjectionRepository } from '../main/modules/repositories/task-proj
 import type { TaskProjectionRecord } from '../main/modules/agent-control/contracts/run-contracts'
 import { buildTaskCardViewModel, deriveTaskCardRuntimeState, type TaskCardRunLike } from '../renderer/modules/agent/taskCardViewModel'
 import { filterSkillPrimitivesBySession } from '../main/modules/tools/skill-tool-session-gate'
+import { __setScopeContextEpochDatabaseForTests } from '../main/modules/agent-control/session/scope-context-epoch'
 
 type SqliteDatabase = {
   exec(sql: string): void
@@ -82,9 +83,26 @@ interface AcceptanceFixture {
 
 function setupSchema(db: SqliteDatabase): void {
   db.exec(`
+    CREATE TABLE chat_conversations (
+      id TEXT PRIMARY KEY,
+      closed_at TEXT,
+      message_visibility_epoch INTEGER NOT NULL
+    );
+    INSERT INTO chat_conversations (id, closed_at, message_visibility_epoch)
+    VALUES ('${SESSION_ID}', NULL, 0);
+
+    CREATE TABLE run_meta (
+      run_id TEXT PRIMARY KEY,
+      scope_id TEXT,
+      message_visibility_epoch INTEGER NOT NULL
+    );
+    INSERT INTO run_meta (run_id, scope_id, message_visibility_epoch)
+    VALUES ('run-acceptance', '${SESSION_ID}', 0);
+
     CREATE TABLE skill_task_runs (
       id TEXT PRIMARY KEY,
       scope_id TEXT,
+      message_visibility_epoch INTEGER NOT NULL,
       session_id TEXT,
       agent TEXT,
       run_id TEXT,
@@ -125,6 +143,7 @@ function setupSchema(db: SqliteDatabase): void {
       revision INTEGER NOT NULL DEFAULT 0,
       dependency_generation INTEGER NOT NULL DEFAULT 0,
       scope_id TEXT NOT NULL,
+      message_visibility_epoch INTEGER NOT NULL,
       run_id TEXT NOT NULL,
       parent_task_id TEXT,
       parent_step_id TEXT,
@@ -178,6 +197,7 @@ function createFixture(): AcceptanceFixture {
   const Db = getDatabaseCtor()
   const db = new Db(dbPath)
   setupSchema(db)
+  __setScopeContextEpochDatabaseForTests({ getRawDb: () => db } as never)
   const dbAccessor = { getRawDb: () => db }
   const outputDir = join(root, 'vea-output')
   mkdirSync(outputDir, { recursive: true })
@@ -207,6 +227,7 @@ function createFixture(): AcceptanceFixture {
 }
 
 function closeFixture(fixture: AcceptanceFixture): void {
+  __setScopeContextEpochDatabaseForTests(null)
   fixture.db.close()
   rmSync(fixture.root, { recursive: true, force: true })
 }
@@ -253,6 +274,7 @@ function writeDetachedStorage(fixture: AcceptanceFixture, status: DetachedSkillT
     tasks: [{
       id: fixture.detachedTaskId,
       scopeId: SESSION_ID,
+      messageVisibilityEpoch: 0,
       sessionId: SESSION_ID,
       agent: 'butler',
       skillId: SKILL_ID,
@@ -277,6 +299,7 @@ function makeSkillRun(fixture: AcceptanceFixture, status: SkillTaskRunRecord['st
   return {
     id: fixture.taskRunId,
     scopeId: SESSION_ID,
+    messageVisibilityEpoch: 0,
     sessionId: SESSION_ID,
     agent: 'butler',
     runId: 'run-acceptance',
@@ -332,6 +355,7 @@ function makeProjection(
     taskId: fixture.taskRunId,
     taskOrigin: 'legacy',
     scopeId: SESSION_ID,
+    messageVisibilityEpoch: 0,
     runId: 'run-acceptance',
     parentTaskId: null,
     parentStepId: null,
@@ -388,7 +412,11 @@ function updateRunAndProjection(
   options: { blockerType?: string; blockedReason?: string | null; pauseReason?: string | null } = {},
 ): void {
   // Stage 6 L1: status writes go through updateRowSync (acceptance harness path).
-  fixture.skillRuns.updateRowSync(fixture.taskRunId, makeSkillRun(fixture, runStatus))
+  const { messageVisibilityEpoch: _messageVisibilityEpoch, ...runPatch } = makeSkillRun(
+    fixture,
+    runStatus,
+  )
+  fixture.skillRuns.updateRowSync(fixture.taskRunId, runPatch)
   fixture.projections.update(fixture.taskRunId, makeProjection(fixture, projectionStatus, options))
 }
 
@@ -662,6 +690,7 @@ testWithSqlite('Phase 6 restart recovery keeps the same detached task identity a
     const Db = getDatabaseCtor()
     const restartedDb = new Db(fixture.dbPath)
     fixture.db = restartedDb
+    __setScopeContextEpochDatabaseForTests({ getRawDb: () => restartedDb } as never)
     fixture.skillRuns = new SkillTaskRunRepository({ getRawDb: () => restartedDb })
     fixture.projections = new TaskProjectionRepository({ getRawDb: () => restartedDb })
     const tracker = new DetachedSkillTaskTracker({

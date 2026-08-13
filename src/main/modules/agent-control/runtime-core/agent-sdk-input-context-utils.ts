@@ -94,6 +94,9 @@ export function parseEnvelopeResourceReferences(envelope: unknown): {
       source: typeof item.source === 'string' ? item.source : undefined,
       tabId: typeof item.tabId === 'string' ? item.tabId.trim() : undefined
     }))
-    .filter((item) => item.name && item.path)
+    .filter((item) => item.name && (
+      item.path
+      || ((item.kind === 'document_context' || item.source === 'current_document') && item.tabId)
+    ))
   return { primaryInstruction, resources }
 }

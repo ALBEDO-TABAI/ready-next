@@ -42,20 +42,18 @@ test('physical user input takes over only the exact driven target', () => {
   assert.doesNotMatch(preload, /confirmAgentInterruption|dismissAgentInterruption/)
 })
 
-test('target resume is wired through Main, preload, renderer types, and a concrete supervision action', () => {
+test('target resume has no public Main, preload, renderer, or supervision action', () => {
   const ipcSupervision = readWorkspaceFile('src/main/modules/browser-engine/ipc-supervision.ts')
   const preload = readWorkspaceFile('src/preload/index.ts')
   const rendererTypes = readWorkspaceFile('src/renderer/types/electron.d.ts')
   const hook = readWorkspaceFile('src/renderer/modules/browser/useAgentBrowserSupervision.ts')
   const panel = readWorkspaceFile('src/renderer/components/browser/AgentBrowserSupervisionPanel.tsx')
 
-  assert.match(ipcSupervision, /ipcMain\.handle\('browser:resumeTargetClaim'/)
-  assert.match(preload, /resumeTargetClaim:[\s\S]*ipcRenderer\.invoke\('browser:resumeTargetClaim'/)
-  assert.match(rendererTypes, /resumeTargetClaim:/)
-  assert.match(hook, /oldGeneration: claim\.generation/)
-  assert.match(hook, /checkpointId: claim\.suspensionCheckpointId/)
-  assert.match(hook, /wakeNonce: crypto\.randomUUID\(\)/)
-  assert.match(panel, /继续 Agent/)
+  assert.doesNotMatch(ipcSupervision, /browser:resumeTargetClaim/)
+  assert.doesNotMatch(preload, /resumeTargetClaim/)
+  assert.doesNotMatch(rendererTypes, /resumeTargetClaim:/)
+  assert.doesNotMatch(hook, /resumeTargetClaim/)
+  assert.doesNotMatch(panel, /继续 Agent/)
   assert.match(panel, /其他页面不受影响/)
 })
 

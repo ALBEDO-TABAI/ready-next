@@ -9,14 +9,12 @@ import {
 } from './tool-schema'
 import { MEMORY_SCHEMAS } from './schemas/memory-schemas'
 import {
-  isKnowledgeSystemEnabled,
   syncBeliefCardFile,
   type FileSyncResult,
 } from '../agent-control/knowledge/knowledge-truth-source'
 import { isSafeAgentScopeId, type BeliefCard, type BeliefCardStore } from '../agent-control/knowledge/belief-card-store'
 import type { MirrorDb } from '../agent-control/knowledge/belief-card-mirror'
 import { logAgentMetric } from '../agent-control/metrics'
-import { AppSettingsRepository } from '../repositories/app-settings-repository'
 import { zodObjectToParamList } from './zod-param-derivation'
 
 const logger = createRotatingLogger('ready-memory-tools.log')
@@ -74,8 +72,6 @@ const MEMORY_TOOLS: MemoryToolDef[] = [
     params: zodObjectToParamList(MEMORY_SCHEMAS.memory_read_card) as ToolParam[],
   },
 ]
-
-const CARD_TOOL_NAMES = new Set(['memory_write_card', 'memory_read_card'])
 
 type CardWriteStatus = 'staged' | 'active'
 
@@ -159,18 +155,8 @@ function isReservedModelCardSource(source: string | undefined, invoker: ToolCont
   return invoker === 'model' && isReservedCardSourceValue(source)
 }
 
-/** EP2-K6 — rollback switch: card tools disappear from exposure when the
- *  knowledge system is off (files untouched, injection already gated). */
-function filterCardTools(defs: typeof MEMORY_TOOLS): typeof MEMORY_TOOLS {
-  let enabled = true
-  try {
-    enabled = isKnowledgeSystemEnabled(new AppSettingsRepository())
-  } catch { /* silent-catch: unreadable setting keeps the default-ON rollback semantics */ enabled = true }
-  return enabled ? defs : defs.filter((def) => !CARD_TOOL_NAMES.has(def.name))
-}
-
 export function getMemoryAnthropicTools(): Array<Record<string, unknown>> {
-  return filterCardTools(MEMORY_TOOLS).map((tool) =>
+  return MEMORY_TOOLS.map((tool) =>
     normalizeAnthropicToolSchema({
       name: tool.name,
       description: tool.description,
@@ -186,7 +172,7 @@ export function getMemoryAnthropicTools(): Array<Record<string, unknown>> {
 }
 
 export function getMemoryOpenAITools(): Array<Record<string, unknown>> {
-  return filterCardTools(MEMORY_TOOLS).map((tool) =>
+  return MEMORY_TOOLS.map((tool) =>
     normalizeOpenAIToolSchema({
       type: 'function',
       function: {

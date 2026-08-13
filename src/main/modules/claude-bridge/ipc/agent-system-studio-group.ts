@@ -11,18 +11,13 @@ import {
 } from '../../agent-control/agents/specialist-content-edit-proposals'
 import type { BeliefCardStore } from '../../agent-control/knowledge/belief-card-store'
 import type { AgentRegistryRecord } from '../../repositories/agent-registry-repository'
-import type { TaskProjectionRecord } from '../../agent-control/contracts/run-contracts'
 import type {
   AgentSystemStudioConfirmContentEditInput,
   AgentSystemStudioContentEditProposal,
-  AgentSystemStudioPrerouteTrace,
   AgentSystemStudioRejectContentEditInput,
-  AgentSystemStudioRoutingSimulation,
   AgentSystemStudioSnapshot,
   AgentSystemStudioStageContentEditInput,
 } from '../../../../shared/agent-system-studio'
-import type { SpecialistAgentBlueprint } from '../../../../shared/agent-specialist-blueprint'
-import { listDerivationCandidates } from './agent-derivation-group'
 import type { IpcChannelGroup, IpcDisposeHandle } from './types'
 
 interface IPCResponse<T = unknown> {
@@ -37,16 +32,10 @@ export interface AgentSystemStudioGroupDeps {
   getAgentRegistry(): AgentRegistryReader
   getBeliefCardStore(): BeliefCardStore | null
   getContentEditProposalStore(): SpecialistContentEditProposalStore
-  listOwnedTasks(agentId: string): TaskProjectionRecord[]
-  listRecentPrerouteTraces(limit?: number): AgentSystemStudioPrerouteTrace[]
-  listStagedBlueprints(): SpecialistAgentBlueprint[]
-  getAgentReadiness(agentId: string): AgentSystemStudioSnapshot['agents'][number]['readiness']
-  simulateRouting(firstMessage: string): AgentSystemStudioRoutingSimulation
 }
 
 const CHANNELS = [
   'agent:systemStudio:getSnapshot',
-  'agent:systemStudio:simulateRouting',
   'agent:systemStudio:stageContentEdit',
   'agent:systemStudio:confirmContentEdit',
   'agent:systemStudio:rejectContentEdit',
@@ -69,23 +58,9 @@ export const agentSystemStudioGroup: IpcChannelGroup<AgentSystemStudioGroupDeps>
           data: buildAgentSystemStudioSnapshot({
             agents: deps.listAgents(),
             store,
-            listOwnedTasks: deps.listOwnedTasks,
             listContentEditProposals: (agentId) => deps.getContentEditProposalStore().listForAgent(agentId),
-            derivationCandidates: listDerivationCandidates(store),
-            stagedBlueprints: deps.listStagedBlueprints(),
-            resolveReadiness: deps.getAgentReadiness,
-            recentPrerouteTraces: deps.listRecentPrerouteTraces(10),
           }),
         }
-      } catch (error) {
-        return { success: false, error: error instanceof Error ? error.message : String(error) }
-      }
-    })
-
-    ipcMain.handle('agent:systemStudio:simulateRouting', (_, payload: { firstMessage?: string }): IPCResponse<AgentSystemStudioRoutingSimulation> => {
-      try {
-        const firstMessage = typeof payload?.firstMessage === 'string' ? payload.firstMessage : ''
-        return { success: true, data: deps.simulateRouting(firstMessage) }
       } catch (error) {
         return { success: false, error: error instanceof Error ? error.message : String(error) }
       }

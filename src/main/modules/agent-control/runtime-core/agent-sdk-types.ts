@@ -38,6 +38,8 @@ import type { SkillSurfaceComposition, ExclusiveScopeRef } from '../../../../sha
 export interface AgentSdkSession {
   sdkSession: MemorySession
   systemPrompt: string
+  /** Stable scope context generation owned by this in-memory transcript. */
+  messageVisibilityEpoch: number
   generation: number
   currentRun: RunHandle | null
   orphanCount: number
@@ -140,6 +142,7 @@ export interface ToolBridgeRuntimeContext {
   runId: string
   taskId: string
   sessionId?: string
+  messageVisibilityEpoch?: number
   executionBinding?: import('../../../../shared/agent-execution-profile').TaskExecutionBinding | null
   executionProfile?: import('../../../../shared/agent-execution-profile').AgentExecutionProfile | null
   currentUserText?: string
@@ -147,6 +150,7 @@ export interface ToolBridgeRuntimeContext {
   sourceMessageUnavailableReason?: SpecialistBlueprintSourceMessageUnavailableReason | null
   requestEnvelope?: unknown
   signal: AbortSignal
+  canPublishScopeRunEvent: () => boolean
   allowedToolNames: string[]
   definitionByName: Map<string, ToolDefinition>
   authorization: SkillToolAuthorization
@@ -297,6 +301,7 @@ export interface RunMetaRepositoryLike {
 export interface AgentSdkExecutionOptions {
   taskId?: string
   publicSessionId?: string
+  messageVisibilityEpoch?: number
   sourceMessageId?: string | null
   requestEnvelope?: unknown
   intentClassification?: unknown
@@ -344,11 +349,16 @@ export interface SkillContextOrchestratorLike {
   buildPreferredSkillToolNames?: (userText: string, sessionId?: string) => string[] | null
   peekCurrentReferenceSkillHint?: (sessionId?: string) => { id: string; name: string } | null
   getCurrentReferenceSkillHint?: (sessionId?: string) => { id: string; name: string } | null
-  rememberExplicitReferenceSkillHint?: (userText: string, sessionId?: string) => boolean
+  rememberExplicitReferenceSkillHint?: (
+    userText: string,
+    sessionId?: string,
+    messageVisibilityEpoch?: number,
+  ) => boolean
   maybeInjectExplicitSkillContext?: (params: {
     userText: string
     session: { messages: Array<{ role: string; content: string | Array<Record<string, unknown>> }> }
     sessionId?: string
+    messageVisibilityEpoch?: number
     emitOutput: (chunk: string, type: string) => void
     emitToolAction: (tool: string, args: Record<string, unknown>) => void
     executeTool: (tool: string, args: Record<string, unknown>) => Promise<ToolExecutionOutput>

@@ -63,6 +63,7 @@ export function buildToolRuntimeContext(params: {
   sessionId?: string
   activeNegations?: ReadonlyArray<string>
   scopeId?: string
+  messageVisibilityEpoch?: number
   currentUserText?: string
   sourceMessageId?: string | null
   sourceMessageUnavailableReason?: SpecialistBlueprintSourceMessageUnavailableReason | null
@@ -106,6 +107,7 @@ export function buildToolRuntimeContext(params: {
     sessionId: params.sessionId,
     activeNegations: params.activeNegations,
     scopeId,
+    messageVisibilityEpoch: params.messageVisibilityEpoch,
     currentUserText: params.currentUserText,
     sourceMessageId: params.sourceMessageId ?? null,
     sourceMessageUnavailableReason: params.sourceMessageUnavailableReason ?? null,
@@ -140,6 +142,7 @@ export function toToolExecutorContext(context: ToolRuntimeContext): ToolContext 
     sessionId: context.sessionId,
     activeNegations: context.activeNegations as never,
     scopeId: context.scopeId || context.scope?.id || context.sessionId,
+    messageVisibilityEpoch: context.messageVisibilityEpoch,
     currentUserText: context.currentUserText,
     sourceMessageId: context.sourceMessageId ?? null,
     sourceMessageUnavailableReason: context.sourceMessageUnavailableReason ?? null,

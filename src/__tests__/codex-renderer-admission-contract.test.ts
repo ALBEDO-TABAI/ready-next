@@ -11,6 +11,8 @@ import {
 
 const scope: ConversationScope = {
   id: 'scope-codex-renderer',
+  aliasGeneration: 1,
+  messageVisibilityEpoch: 0,
   agent: 'butler',
   activeAgentId: 'butler',
   handoffGeneration: 0,
@@ -24,11 +26,11 @@ const scope: ConversationScope = {
   lastMessageAt: null,
 }
 
-function seedStore(inputValue: string) {
+function seedStore(inputValue: string, aliasGeneration: number | null = 1) {
   const slice = {
     ...makeEmptySessionSlice(scope.id),
     inputValue,
-    aliasGeneration: 1,
+    aliasGeneration,
   }
   useAgent.setState({
     messages: [],
@@ -106,7 +108,7 @@ async function waitFor<T>(read: () => T | null): Promise<T> {
 }
 
 test('renderer keeps composer and transcript untouched until durable admission', async () => {
-  seedStore('请处理这条消息')
+  seedStore('请处理这条消息', 1)
   let capturedPayload: any = null
   let settle!: (result: SendScopedResponse) => void
   const terminal = new Promise<SendScopedResponse>((resolve) => { settle = resolve })
@@ -129,6 +131,8 @@ test('renderer keeps composer and transcript untouched until durable admission',
       requestId: payload.requestId,
       scopeId: payload.scopeId,
       originUserMessageId: payload.userMessage.id,
+      aliasGeneration: 6,
+      messageVisibilityEpoch: 0,
       ingressAdmittedRevision: 1,
       ingressAdmittedDigest: 'admission-digest',
       admittedAt: '2026-08-07T00:00:01.000Z',
@@ -138,11 +142,13 @@ test('renderer keeps composer and transcript untouched until durable admission',
     assert.equal(state.inputValue, '')
     assert.deepEqual(state.messages.map((message) => message.type), ['user', 'agent'])
     assert.equal(state.isStreaming, true)
+    assert.equal(state.sessions['session-codex-renderer']?.aliasGeneration, 6)
 
     settle({
       success: false,
       disposition: 'terminal_failure_after_persistence',
       ownerRunId: payload.requestId,
+      aliasGeneration: 6,
       shouldClearInput: true,
       preserveInput: false,
       retryableByUser: false,
@@ -159,6 +165,203 @@ test('renderer keeps composer and transcript untouched until durable admission',
     const result = await sendPromise
     assert.equal(result.disposition, 'terminal_failure_after_persistence')
     assert.equal(useAgent.getState().isStreaming, false)
+  } finally {
+    electron.restore()
+  }
+})
+
+test('same-history generation rollover admits the pending message without erasing history', async () => {
+  seedStore('新一轮消息', 1)
+  const oldMessage = {
+    id: 'history-before-rollover',
+    agent: 'butler',
+    content: '旧历史',
+    type: 'agent' as const,
+    timestamp: new Date('2026-08-07T00:00:00.000Z'),
+  }
+  useAgent.setState((state) => ({
+    messages: [oldMessage],
+    sessions: {
+      ...state.sessions,
+      'session-codex-renderer': {
+        ...state.sessions['session-codex-renderer'],
+        messages: [oldMessage],
+      },
+    },
+  }))
+  let capturedPayload: any = null
+  let settle!: (result: SendScopedResponse) => void
+  const terminal = new Promise<SendScopedResponse>((resolve) => { settle = resolve })
+  const electron = installElectronApi(async (payload) => {
+    capturedPayload = payload
+    return terminal
+  })
+
+  try {
+    const sending = useAgent.getState().sendMessage('新一轮消息')
+    const payload = await waitFor(() => capturedPayload)
+    assert.equal(payload.expectedAliasGeneration, 1)
+    assert.equal(payload.expectedMessageVisibilityEpoch, 0)
+
+    assert.equal(applyIngressAdmitted({
+      type: 'ingress_admitted',
+      requestId: payload.requestId,
+      scopeId: payload.scopeId,
+      originUserMessageId: payload.userMessage.id,
+      aliasGeneration: 2,
+      messageVisibilityEpoch: 0,
+      ingressAdmittedRevision: 2,
+      ingressAdmittedDigest: 'same-history-rollover-admission',
+      admittedAt: '2026-08-07T00:00:01.000Z',
+    }), true)
+
+    const admitted = useAgent.getState()
+    assert.equal(admitted.sessions['session-codex-renderer']?.aliasGeneration, 2)
+    assert.equal(admitted.sessions['session-codex-renderer']?.messageVisibilityEpoch, 0)
+    assert.equal(admitted.currentScope?.aliasGeneration, 2)
+    assert.deepEqual(admitted.messages.map((message) => message.id), [
+      oldMessage.id,
+      payload.userMessage.id,
+      admitted.streamingMessageId,
+    ])
+
+    settle({
+      success: false,
+      disposition: 'terminal_failure_after_persistence',
+      ownerRunId: payload.requestId,
+      aliasGeneration: 2,
+      shouldClearInput: true,
+      preserveInput: false,
+      retryableByUser: false,
+      persistence: {
+        scope: 'pre-existing',
+        message: 'persisted',
+        attachments: 'none',
+        inputAttachments: 'none',
+      },
+      error: 'provider_failed',
+      errorKind: 'blocked_external',
+      productOutcomeDigest: 'same-history-rollover-terminal',
+    })
+    await sending
+  } finally {
+    electron.restore()
+  }
+})
+
+test('new-history admission rejects a pending message from the previous visibility epoch', async () => {
+  seedStore('重置前的消息', 1)
+  let capturedPayload: any = null
+  let settle!: (result: SendScopedResponse) => void
+  const terminal = new Promise<SendScopedResponse>((resolve) => { settle = resolve })
+  const electron = installElectronApi(async (payload) => {
+    capturedPayload = payload
+    return terminal
+  })
+
+  try {
+    const sending = useAgent.getState().sendMessage('重置前的消息')
+    const payload = await waitFor(() => capturedPayload)
+    assert.equal(applyIngressAdmitted({
+      type: 'ingress_admitted',
+      requestId: payload.requestId,
+      scopeId: payload.scopeId,
+      originUserMessageId: payload.userMessage.id,
+      aliasGeneration: 2,
+      messageVisibilityEpoch: 1,
+      ingressAdmittedRevision: 3,
+      ingressAdmittedDigest: 'new-history-stale-admission',
+      admittedAt: '2026-08-07T00:00:01.000Z',
+    }), false)
+    assert.deepEqual(useAgent.getState().messages, [])
+    assert.equal(useAgent.getState().sessions['session-codex-renderer']?.aliasGeneration, 1)
+    assert.equal(useAgent.getState().sessions['session-codex-renderer']?.messageVisibilityEpoch, 0)
+
+    settle({
+      success: false,
+      disposition: 'rejected_before_persistence',
+      ownerRunId: null,
+      shouldClearInput: false,
+      preserveInput: true,
+      retryableByUser: false,
+      persistence: {
+        scope: 'none',
+        message: 'none',
+        attachments: 'none',
+        inputAttachments: 'none',
+      },
+      error: 'stale_generation',
+      errorKind: 'conversation_reset_required',
+      admissionEvidenceDigest: 'new-history-stale-rejection',
+    })
+    await sending
+  } finally {
+    electron.restore()
+  }
+})
+
+test('an admission from the pre-reset generation cannot roll back the current generation', async () => {
+  seedStore('旧轮等待中的消息', 1)
+  let capturedPayload: any = null
+  let settle!: (result: SendScopedResponse) => void
+  const terminal = new Promise<SendScopedResponse>((resolve) => { settle = resolve })
+  const electron = installElectronApi(async (payload) => {
+    capturedPayload = payload
+    return terminal
+  })
+
+  try {
+    const sendPromise = useAgent.getState().sendMessage('旧轮等待中的消息')
+    const payload = await waitFor(() => capturedPayload)
+    useAgent.setState((state) => ({
+      sessions: {
+        ...state.sessions,
+        'session-codex-renderer': {
+          ...state.sessions['session-codex-renderer'],
+          aliasGeneration: 2,
+        },
+      },
+      scopes: state.scopes.map((candidate) => (
+        candidate.id === scope.id ? { ...candidate, aliasGeneration: 2 } : candidate
+      )),
+      currentScope: state.currentScope?.id === scope.id
+        ? { ...state.currentScope, aliasGeneration: 2 }
+        : state.currentScope,
+      aliasGeneration: 2,
+    }))
+
+    assert.equal(applyIngressAdmitted({
+      type: 'ingress_admitted',
+      requestId: payload.requestId,
+      scopeId: payload.scopeId,
+      originUserMessageId: payload.userMessage.id,
+      aliasGeneration: 1,
+      messageVisibilityEpoch: 0,
+      ingressAdmittedRevision: 1,
+      ingressAdmittedDigest: 'stale-admission-digest',
+      admittedAt: '2026-08-07T00:00:01.000Z',
+    }), false)
+    assert.equal(useAgent.getState().sessions['session-codex-renderer']?.aliasGeneration, 2)
+    assert.equal(useAgent.getState().currentScope?.aliasGeneration, 2)
+
+    settle({
+      success: false,
+      disposition: 'rejected_before_persistence',
+      ownerRunId: null,
+      shouldClearInput: false,
+      preserveInput: true,
+      retryableByUser: false,
+      persistence: {
+        scope: 'none',
+        message: 'none',
+        attachments: 'none',
+        inputAttachments: 'none',
+      },
+      error: 'stale_generation',
+      errorKind: 'conversation_reset_required',
+      admissionEvidenceDigest: 'stale-generation-evidence',
+    })
+    await sendPromise
   } finally {
     electron.restore()
   }
@@ -191,6 +394,8 @@ test('terminal success replaces the transient bubble with one canonical assistan
       requestId: payload.requestId,
       scopeId: payload.scopeId,
       originUserMessageId: payload.userMessage.id,
+      aliasGeneration: 1,
+      messageVisibilityEpoch: 0,
       ingressAdmittedRevision: 2,
       ingressAdmittedDigest: 'success-admission-digest',
       admittedAt: '2026-08-07T00:00:01.000Z',
@@ -240,7 +445,7 @@ test('terminal success replaces the transient bubble with one canonical assistan
 })
 
 test('terminal response reconciles durable admission when its push event was lost', async () => {
-  seedStore('通知丢失也只能执行一次')
+  seedStore('通知丢失也只能执行一次', 1)
   let capturedPayload: any = null
   const electron = installElectronApi(async (payload) => {
     capturedPayload = payload
@@ -248,6 +453,7 @@ test('terminal response reconciles durable admission when its push event was los
       success: true,
       disposition: 'terminal_success',
       ownerRunId: payload.requestId,
+      aliasGeneration: 6,
       shouldClearInput: true,
       preserveInput: false,
       retryableByUser: false,
@@ -283,6 +489,76 @@ test('terminal response reconciles durable admission when its push event was los
     assert.equal(state.messages.filter((message) => message.type === 'user').length, 1)
     assert.equal(state.messages.filter((message) => message.type === 'agent').length, 1)
     assert.equal(state.isStreaming, false)
+    assert.equal(state.sessions['session-codex-renderer']?.aliasGeneration, 6)
+    assert.equal(state.currentScope?.aliasGeneration, 6)
+    assert.equal(state.scopes.find((candidate) => candidate.id === scope.id)?.aliasGeneration, 6)
+  } finally {
+    electron.restore()
+  }
+})
+
+test('stale terminal response cannot roll back a newer alias generation', async () => {
+  seedStore('旧轮终态不应覆盖新轮', 1)
+  let capturedPayload: any = null
+  let settle!: (result: SendScopedResponse) => void
+  const terminal = new Promise<SendScopedResponse>((resolve) => { settle = resolve })
+  const electron = installElectronApi(async (payload) => {
+    capturedPayload = payload
+    return terminal
+  })
+
+  try {
+    const sendPromise = useAgent.getState().sendMessage('旧轮终态不应覆盖新轮')
+    const payload = await waitFor(() => capturedPayload)
+    useAgent.setState((state) => ({
+      sessions: {
+        ...state.sessions,
+        'session-codex-renderer': {
+          ...state.sessions['session-codex-renderer'],
+          aliasGeneration: 2,
+        },
+      },
+      scopes: state.scopes.map((candidate) => (
+        candidate.id === scope.id ? { ...candidate, aliasGeneration: 2 } : candidate
+      )),
+      currentScope: state.currentScope?.id === scope.id
+        ? { ...state.currentScope, aliasGeneration: 2 }
+        : state.currentScope,
+      aliasGeneration: 2,
+    }))
+
+    settle({
+      success: true,
+      disposition: 'terminal_success',
+      ownerRunId: payload.requestId,
+      aliasGeneration: 1,
+      shouldClearInput: true,
+      preserveInput: false,
+      retryableByUser: false,
+      persistence: {
+        scope: 'pre-existing',
+        message: 'persisted',
+        attachments: 'none',
+        inputAttachments: 'none',
+      },
+      responseText: '旧轮答案',
+      canonicalMessage: {
+        id: 'assistant-stale-terminal',
+        conversationId: scope.id,
+        role: 'assistant',
+        content: '旧轮答案',
+        timestamp: new Date(new Date(payload.userMessage.timestamp).getTime() + 1).toISOString(),
+        meta: { ownerRunId: payload.requestId },
+      },
+      canonicalMessageDigest: 'stale-terminal-canonical-digest',
+    })
+    await sendPromise
+
+    const state = useAgent.getState()
+    assert.equal(state.sessions['session-codex-renderer']?.aliasGeneration, 2)
+    assert.equal(state.currentScope?.aliasGeneration, 2)
+    assert.equal(state.messages.length, 0)
+    assert.equal(state.inputValue, '旧轮终态不应覆盖新轮')
   } finally {
     electron.restore()
   }
@@ -303,9 +579,22 @@ test('unreadable attachment is rejected before admission without changing visibl
   let calls = 0
   const electron = installElectronApi(async () => {
     calls += 1
-    throw new Error('must_not_send')
-  }, {
-    readFileForAI: async () => ({ success: false, error: 'file_not_found' }),
+    return {
+      success: false,
+      disposition: 'rejected_before_persistence',
+      shouldClearInput: false,
+      preserveInput: true,
+      retryableByUser: true,
+      persistence: {
+        scope: 'pre-existing',
+        message: 'skipped',
+        attachments: 'none',
+        inputAttachments: 'none',
+      },
+      error: 'codex_explicit_resource_unavailable',
+      errorKind: 'attachment_unavailable',
+      admissionEvidenceDigest: 'missing-attachment-digest',
+    }
   })
 
   try {
@@ -313,7 +602,7 @@ test('unreadable attachment is rejected before admission without changing visibl
     const state = useAgent.getState()
     assert.equal(result.disposition, 'rejected_before_persistence')
     assert.equal(result.errorKind, 'attachment_unavailable')
-    assert.equal(calls, 0)
+    assert.equal(calls, 1)
     assert.equal(state.inputValue, '读取这个附件')
     assert.deepEqual(state.attachments, [attachment])
     assert.equal(state.messages.length, 0)
@@ -372,6 +661,8 @@ test('late admission for a removed origin session cannot bleed into the active s
       requestId: payload.requestId,
       scopeId: payload.scopeId,
       originUserMessageId: payload.userMessage.id,
+      aliasGeneration: 1,
+      messageVisibilityEpoch: 0,
       ingressAdmittedRevision: 3,
       ingressAdmittedDigest: 'removed-origin-admission-digest',
       admittedAt: '2026-08-07T00:00:01.000Z',
@@ -471,6 +762,8 @@ test('admission after a tab switch updates only the originating session', async 
       requestId: payload.requestId,
       scopeId: payload.scopeId,
       originUserMessageId: payload.userMessage.id,
+      aliasGeneration: 1,
+      messageVisibilityEpoch: 0,
       ingressAdmittedRevision: 4,
       ingressAdmittedDigest: 'switched-session-admission-digest',
       admittedAt: '2026-08-07T00:00:01.000Z',
@@ -558,6 +851,38 @@ for (const literal of ['/skill summarize', '/doc rewrite']) {
     }
   })
 }
+
+test('pre-persistence provider rejection keeps the draft and surfaces a visible failure', async () => {
+  seedStore('hi')
+  const electron = installElectronApi(async () => ({
+    success: false,
+    disposition: 'rejected_before_persistence',
+    shouldClearInput: false,
+    preserveInput: true,
+    retryableByUser: true,
+    persistence: {
+      scope: 'pre-existing',
+      message: 'skipped',
+      attachments: 'none',
+      inputAttachments: 'none',
+    },
+    error: 'gateway_reasoning_capability_unsupported',
+    errorKind: 'host_unavailable',
+    admissionEvidenceDigest: 'reasoning-capability-digest',
+  }))
+
+  try {
+    const result = await useAgent.getState().sendMessage('hi')
+    const state = useAgent.getState()
+    assert.equal(result.disposition, 'rejected_before_persistence')
+    assert.equal(state.inputValue, 'hi')
+    assert.equal(state.messages.length, 0)
+    assert.equal(state.scopeRunStates[scope.id]?.softError?.message, 'gateway_reasoning_capability_unsupported')
+    assert.match(state.scopeRunStates[scope.id]?.softError?.friendlyMessage || '', /模型|推理/)
+  } finally {
+    electron.restore()
+  }
+})
 
 test('pending ask-user card stays pending while Main admission returns thread_busy', async () => {
   seedStore('新的普通输入')

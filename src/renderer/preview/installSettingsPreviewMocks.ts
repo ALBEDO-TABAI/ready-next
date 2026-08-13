@@ -30,7 +30,7 @@ const now = Date.now()
 const mockAIConfig: AIModelConfig = {
   provider: 'moonshot',
   baseUrl: 'https://api.moonshot.cn/v1',
-  apiKey: 'sk-kimi-preview-1234567890',
+  apiKey: 'preview',
   model: 'kimi-k2-0905-preview',
   displayName: 'Kimi 代码主力',
   agentProtocol: 'openai',
@@ -452,9 +452,6 @@ export function installSettingsPreviewMocks(): void {
           },
           channels: {
             total: channelData.length,
-          },
-          schedules: {
-            total: 6,
           },
           heartbeat: {
             orchestrator: {

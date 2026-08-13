@@ -5,6 +5,7 @@ import {
   normalizeCodexNativeNotification,
   type CodexNativeRuntime,
 } from '../main/modules/agent-control/codex-runtime/codex-native-runtime'
+import { StableNativeRuntime } from '../main/modules/agent-control/codex-runtime/codex-stable-native-runtime'
 
 test('CodexNativeRuntime exposes only pinned native lifecycle methods', () => {
   const approved: Array<keyof CodexNativeRuntime> = [
@@ -22,6 +23,33 @@ test('CodexNativeRuntime exposes only pinned native lifecycle methods', () => {
   assert.equal(approved.includes('newSession' as keyof CodexNativeRuntime), false)
   assert.equal(approved.includes('compactSession' as keyof CodexNativeRuntime), false)
   assert.equal(approved.includes('setSystemPrompt' as keyof CodexNativeRuntime), false)
+})
+
+test('stable native runtime isolates a failing observer from healthy observers', () => {
+  let publish: ((notification: Parameters<Parameters<CodexNativeRuntime['subscribe']>[0]>[0]) => void)
+    | null = null
+  const attached = {
+    subscribe(listener: NonNullable<typeof publish>) {
+      publish = listener
+      return () => { publish = null }
+    },
+  } as unknown as CodexNativeRuntime
+  const stable = new StableNativeRuntime(() => attached)
+  stable.attach(attached)
+  const observed: string[] = []
+  stable.subscribe(() => { throw new Error('observer_down') })
+  stable.subscribe(async () => { throw new Error('async_observer_down') })
+  stable.subscribe((notification) => observed.push(notification.method))
+
+  publish?.({
+    method: 'model/rerouted',
+    params: {
+      threadId: 'thread-1', turnId: 'turn-1', fromModel: 'ready-e0-model',
+      toModel: 'fallback-model', reason: 'highRiskCyberActivity',
+    },
+  })
+
+  assert.deepEqual(observed, ['model/rerouted'])
 })
 
 test('native notification normalization accepts pinned item and terminal frames', () => {
@@ -232,6 +260,10 @@ test('native notification normalization ignores passive telemetry but rejects un
     params: {},
   }), { kind: 'ignored', method: 'thread/tokenUsage/updated' })
   assert.deepEqual(normalizeCodexNativeNotification({
+    method: 'thread/settings/updated',
+    params: {},
+  }), { kind: 'ignored', method: 'thread/settings/updated' })
+  assert.deepEqual(normalizeCodexNativeNotification({
     method: 'thread/rollback/completed',
     params: {},
   }), { kind: 'invalid', code: 'unknown_method' })
@@ -239,6 +271,41 @@ test('native notification normalization ignores passive telemetry but rejects un
     kind: 'invalid',
     code: 'invalid_params',
   })
+})
+
+test('native notification normalization ignores the pinned reasoning stream notifications', () => {
+  const notifications = [
+    {
+      method: 'item/reasoning/summaryPartAdded',
+      params: { threadId: 'thread-1', turnId: 'turn-1', itemId: 'reasoning-1', summaryIndex: 0 },
+    },
+    {
+      method: 'item/reasoning/summaryTextDelta',
+      params: {
+        threadId: 'thread-1',
+        turnId: 'turn-1',
+        itemId: 'reasoning-1',
+        summaryIndex: 0,
+        delta: 'thinking',
+      },
+    },
+    {
+      method: 'item/reasoning/textDelta',
+      params: {
+        threadId: 'thread-1',
+        turnId: 'turn-1',
+        itemId: 'reasoning-1',
+        contentIndex: 0,
+        delta: 'private reasoning',
+      },
+    },
+  ]
+  for (const notification of notifications) {
+    assert.deepEqual(normalizeCodexNativeNotification(notification), {
+      kind: 'ignored',
+      method: notification.method,
+    })
+  }
 })
 
 test('native notification normalization rejects unknown or unsupported active item types', () => {
@@ -338,6 +405,13 @@ test('native notification normalization closes malformed active item fields', ()
     },
   })
   assert.equal(validTool.kind, 'accepted')
+  if (validTool.kind === 'accepted' && validTool.notification.method === 'item/completed') {
+    const acceptedItem = validTool.notification.params.item
+    assert.equal(acceptedItem.type, 'dynamicToolCall')
+    if (acceptedItem.type === 'dynamicToolCall') {
+      assert.deepEqual(acceptedItem.contentItems, [{ type: 'inputText', text: 'readback' }])
+    }
+  }
 
   for (const [method, timestampKey] of [
     ['item/started', 'startedAtMs'],

@@ -285,7 +285,7 @@ describe('task card view model', () => {
     assert.strictEqual(vm.sections.overview.summary, '已完成')
   })
 
-  it('renders VEA audiovisual handoff blockers as user-facing continuation guidance', () => {
+  it('renders VEA audiovisual handoff blockers as read-only historical guidance', () => {
     const rawBlocker = '[qqyXmFYIdUo] 视听剖析子任务 `body` 待 agent 处理；请读取并完成 `audiovisual_handoff/body/task.md` 后重新运行 finalize。'
     const run = createRun({
       phase: 'checkpoint',
@@ -315,8 +315,8 @@ describe('task card view model', () => {
     const vm = buildTaskCardViewModel(run, createDefaultTaskDisclosureState(run))
     const progressLabel = formatTaskProgressLabel(run.progress, new Date('2026-05-04T10:00:00.000Z'))
 
-    assert.strictEqual(vm.statusLabel, '等待继续')
-    assert.strictEqual(vm.summary, '视听报告正文还需要继续生成。点击“继续处理”即可，系统会接上剩余步骤。')
+    assert.strictEqual(vm.statusLabel, '未完成')
+    assert.strictEqual(vm.summary, '视听报告正文仍有未完成内容；这是历史任务记录，不会自动接续。')
     assert.strictEqual(vm.sections.overview.summary, vm.summary)
     assert.strictEqual(vm.currentStep?.title, '生成视听报告')
     assert.strictEqual(vm.sections.plan.summary, '当前：生成视听报告')

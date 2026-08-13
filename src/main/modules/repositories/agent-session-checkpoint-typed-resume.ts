@@ -2,18 +2,10 @@ import { randomUUID } from 'node:crypto'
 import type { AgentInputItem } from '@openai/agents'
 import type {
   AgentCheckpointRefs,
-  BrowserCheckpointSuspensionReason,
-  BrowserCheckpointWakeKind,
-  BrowserConfirmationSuspensionRequest,
-  BrowserHumanTakeoverPrompt,
-  BrowserHumanTakeoverPhysicalTarget,
-  BrowserOwnerCrashRecoveryReceipt,
-  BrowserPowerConfirmationSuspensionRequest,
-  HumanTakeoverRef,
+  BrowserCheckpointSuspensionReason
 } from '../../../shared/browser-workflow-control'
-import { browserHumanTakeoverBlockedReason, browserWakeKindForSuspensionReason } from '../../../shared/browser-workflow-control'
+import { browserWakeKindForSuspensionReason } from '../../../shared/browser-workflow-control'
 import type { TaskExecutionBinding } from '../../../shared/agent-execution-profile'
-import { assertDeliveryState, type DeliveryStateV1 } from '../../../shared/dynamic-delivery'
 import { assertAgentInputToolPairIntegrity } from '../agent-control/compaction/compact-agent-input'
 import {
   digestSerializedJson,
@@ -38,12 +30,10 @@ import type {
 } from './agent-session-checkpoint-types'
 import {
   confirmationRequestFromContinuation,
-  ownerCrashReceiptFromContinuation,
-  permissionConfirmationRequestFromContinuation,
-  powerConfirmationRequestFromContinuation,
+  ownerCrashReceiptFromContinuation
 } from './agent-session-checkpoint-confirmations'
-import { suspendHeldBrowserTargetClaims } from './agent-session-checkpoint-store'
 import { buildTypedResumeCheckpointInput } from './typed-resume-checkpoint'
+import { requireRunMessageVisibilityEpoch } from './agent-session-message-visibility'
 
 const readParent = readWorkflowParent
 
@@ -67,6 +57,13 @@ export class AgentSessionCheckpointTypedResumeRepository {
     try {
       return await this.unitOfWork.runImmediateWithRetry((db) => {
       const parent = readParent(db, input.taskId)
+      const messageVisibilityEpoch = requireRunMessageVisibilityEpoch(db, {
+        ownerRunId: parent.runId,
+        conversationId: parent.scopeId,
+      })
+      if (messageVisibilityEpoch !== parent.messageVisibilityEpoch) {
+        throw new Error('checkpoint_resume_parent_message_visibility_epoch_mismatch')
+      }
       if (parent.humanTakeoverRef?.state === 'pending') throw new Error('typed_takeover_receipt_required')
       if (input.executionBinding.runId !== input.newOwnerRunId) {
         throw new Error('checkpoint_resume_execution_binding_run_mismatch')
@@ -378,13 +375,15 @@ export class AgentSessionCheckpointTypedResumeRepository {
       const nowMs = Date.parse(createdAt) || Date.now()
       const newRun = db.prepare(
         `INSERT INTO run_meta (
-          run_id, task_id, scope_id, execution_binding_json, status, initiator,
+          run_id, task_id, scope_id, message_visibility_epoch,
+          execution_binding_json, status, initiator,
           input_tokens, output_tokens, total_tokens, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, 'running', ?, 0, 0, 0, ?, ?)`,
+        ) VALUES (?, ?, ?, ?, ?, 'running', ?, 0, 0, 0, ?, ?)`,
       ).run(
         input.newOwnerRunId,
         parent.taskId,
         parent.scopeId,
+        parent.messageVisibilityEpoch,
         serializeWorkflowJson(input.executionBinding, 'checkpoint_resume_run_binding_json'),
         `browser_checkpoint_resume:${input.wake.kind}`,
         nowMs,

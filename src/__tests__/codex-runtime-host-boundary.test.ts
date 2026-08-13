@@ -15,8 +15,10 @@ import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
+import { parse as parseYaml } from 'yaml'
 
 import {
+  activateCodexGatewaySpawnConfig,
   buildCodexChildEnvironment,
   loadVerifiedCodexRuntime,
   prepareCodexRuntimeState,
@@ -93,17 +95,60 @@ test('runtime paths are manifest-rooted and never resolve through PATH', () => {
   }
 })
 
-test('Codex-owned tables have one runtime writer outside the schema declaration', () => {
+test('release package includes the verified Codex runtime and pinned binary', () => {
+  const config = parseYaml(readFileSync(join(repoRoot, 'electron-builder.yml'), 'utf8')) as {
+    extraResources?: Array<{ from?: string; to?: string }>
+  }
+  assert.ok(config.extraResources?.some((entry) => (
+    entry.from === 'assets/codex-runtime' && entry.to === 'codex-runtime'
+  )))
+  assert.ok(config.extraResources?.some((entry) => (
+    entry.from === 'build/codex/aarch64-apple-darwin/codex'
+    && entry.to === 'codex-runtime/aarch64-apple-darwin/codex'
+  )))
+})
+
+test('Codex-owned table mutations stay inside the declared storage owners', () => {
   const mainRoot = join(repoRoot, 'src/main')
+  const facade = join(
+    mainRoot,
+    'modules/agent-control/codex-runtime/codex-binding-repository.ts',
+  )
+  const internalToolStore = join(
+    mainRoot,
+    'modules/agent-control/codex-runtime/codex-tool-binding-repository.ts',
+  )
   const allowed = new Set([
-    join(mainRoot, 'modules/agent-control/codex-runtime/codex-binding-repository.ts'),
+    facade,
+    internalToolStore,
     join(mainRoot, 'modules/agent-control/codex-runtime/codex-binding-schema.ts'),
+    join(mainRoot, 'modules/agent-control/codex-runtime/codex-thread-archive-cleanup.ts'),
+    join(mainRoot, 'modules/agent-control/codex-runtime/codex-thread-archive-schema.ts'),
+    join(mainRoot, 'modules/agent-control/codex-runtime/codex-thread-retirement-cleanup-migration.ts'),
   ])
-  const tableName = /\bcodex_(?:thread_bindings|turn_bindings|tool_call_bindings|manual_compaction_bindings|thread_dispatch_fences|sidecar_process_leases)\b/
-  const unexpected = listSourceFiles(mainRoot).filter((path) => (
-    !allowed.has(path) && tableName.test(readFileSync(path, 'utf8'))
+  const schemaSource = readFileSync(
+    join(mainRoot, 'modules/agent-control/codex-runtime/codex-binding-schema.ts'),
+    'utf8',
+  )
+  const codexTableNames = [...new Set(
+    [...schemaSource.matchAll(/CREATE TABLE IF NOT EXISTS (codex_[a-z0-9_]+)/g)]
+      .map((match) => match[1]),
+  )]
+  assert.ok(codexTableNames.length > 0)
+  const tableName = `(?:${codexTableNames.join('|')})`
+  const tableMutation = new RegExp(
+    `\\b(?:INSERT\\s+(?:OR\\s+\\w+\\s+)?INTO|UPDATE|DELETE\\s+FROM|CREATE\\s+(?:TABLE|INDEX|TRIGGER)(?:\\s+IF\\s+NOT\\s+EXISTS)?|ALTER\\s+TABLE|DROP\\s+(?:TABLE|INDEX|TRIGGER)(?:\\s+IF\\s+EXISTS)?)\\s+${tableName}\\b`,
+    'i',
+  )
+  const unexpected = listSourceFiles(mainRoot).filter((sourcePath) => (
+    !allowed.has(sourcePath) && tableMutation.test(readFileSync(sourcePath, 'utf8'))
   ))
   assert.deepEqual(unexpected, [])
+  const internalConsumers = listSourceFiles(mainRoot).filter((sourcePath) => (
+    sourcePath !== internalToolStore
+    && readFileSync(sourcePath, 'utf8').includes("'./codex-tool-binding-repository'")
+  ))
+  assert.deepEqual(internalConsumers, [facade])
 })
 
 test('runtime verification joins the manifest, machine contracts, binary digest, mode, and version', () => {
@@ -120,6 +165,41 @@ test('runtime verification joins the manifest, machine contracts, binary digest,
     assert.equal(
       verified.contracts.turnClientIdentityExtractionContract.thread_start.pinnedAppServerSource,
       'vscode',
+    )
+    assert.equal(
+      canonicalContracts.modelGatewayContract.response.chatToolNameFinalPolicy,
+      'all_function_events_buffered_until_full_name_id_and_arguments_validate_then_exact_allowlist',
+    )
+    assert.deepEqual(
+      canonicalContracts.modelGatewayContract.response.chatIncompleteReasonMap,
+      {
+        length: 'gateway_upstream_output_truncated',
+        content_filter: 'gateway_upstream_output_filtered',
+      },
+    )
+    assert.match(
+      canonicalContracts.modelGatewayContract.response.nativeFunctionForwardingPolicy,
+      /hold_full_tail_until_terminal_completed/,
+    )
+    assert.equal(
+      canonicalContracts.modelGatewayContract.response.functionArguments,
+      'statefully_aggregated_exact_json_object_matching_signed_parameters_schema',
+    )
+    assert.equal(
+      canonicalContracts.modelGatewayContract.response.actionArgumentSecretPolicy,
+      'credential_or_bearer_in_function_arguments_typed_failure_zero_action_forwarding',
+    )
+    assert.match(
+      canonicalContracts.modelGatewayContract.response.chatChunkAllowlistPolicy,
+      /unknown_fields_typed_failure/,
+    )
+    assert.match(
+      canonicalContracts.modelGatewayContract.response.nativeItemTerminalStatusPolicy,
+      /requires_every_done_item_status_completed/,
+    )
+    assert.match(
+      canonicalContracts.modelGatewayContract.response.nativeTerminalSemantics,
+      /converted_to_typed_failed_for_app_server/,
     )
 
     chmodSync(fixture.binaryPath, 0o644)
@@ -170,6 +250,12 @@ test('isolated state and child environment contain only the canonical allowlist'
     const state = prepareCodexRuntimeState({
       userDataPath: root,
       gatewayUrl: 'http://127.0.0.1:4317',
+      contracts: canonicalContracts,
+    })
+    const gatewaySpawnConfig = activateCodexGatewaySpawnConfig({
+      state,
+      sidecarSpawnInstanceId: 'spawn-1',
+      gatewayUrl: 'http://127.0.0.1:4317',
       gatewayToken: 'short-lived-token',
       contracts: canonicalContracts,
     })
@@ -178,8 +264,7 @@ test('isolated state and child environment contain only the canonical allowlist'
       processLeaseId: 'lease-1',
       sidecarSpawnInstanceId: 'spawn-1',
       connectionEpoch: 'epoch-1',
-      gatewayUrl: 'http://127.0.0.1:4317',
-      gatewayToken: 'short-lived-token',
+      gatewaySpawnConfig,
     })
     const contracts = canonicalContracts as {
       childEnvAllowlist: { allowedKeys: string[]; fixedPath: string; locale: string }
@@ -236,13 +321,18 @@ test('external gateways and reused ownership identities fail before spawn enviro
       () => prepareCodexRuntimeState({
         userDataPath: root,
         gatewayUrl: 'https://api.openai.com/v1',
-        gatewayToken: 'token',
         contracts: canonicalContracts,
       }),
       /gateway_url_not_loopback/,
     )
     const state = prepareCodexRuntimeState({
       userDataPath: root,
+      gatewayUrl: 'http://127.0.0.1:4317',
+      contracts: canonicalContracts,
+    })
+    const gatewaySpawnConfig = activateCodexGatewaySpawnConfig({
+      state,
+      sidecarSpawnInstanceId: 'same-id',
       gatewayUrl: 'http://127.0.0.1:4317',
       gatewayToken: 'token',
       contracts: canonicalContracts,
@@ -253,8 +343,7 @@ test('external gateways and reused ownership identities fail before spawn enviro
         processLeaseId: 'same-id',
         sidecarSpawnInstanceId: 'same-id',
         connectionEpoch: 'epoch-1',
-        gatewayUrl: 'http://127.0.0.1:4317',
-        gatewayToken: 'token',
+        gatewaySpawnConfig,
       }),
       /sidecar_identity_reused/,
     )
@@ -274,7 +363,6 @@ test('unsupported isolation contract drift fails before state config is written'
       () => prepareCodexRuntimeState({
         userDataPath: root,
         gatewayUrl: 'http://127.0.0.1:4317',
-        gatewayToken: 'token',
         contracts: drifted,
       }),
       /native_isolation_contract_unsupported/,

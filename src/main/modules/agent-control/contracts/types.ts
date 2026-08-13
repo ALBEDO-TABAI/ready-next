@@ -96,16 +96,13 @@ export interface AgentRuntimeStatus {
     errors: number
     byType: Record<string, number>
   }
-  schedules: {
-    total: number
-    enabled: number
-  }
   heartbeat: HeartbeatSnapshot
 }
 
 export interface ConversationScope {
   id: string
-  aliasGeneration?: number | null
+  aliasGeneration: number | null
+  messageVisibilityEpoch: number
   agent: string
   activeAgentId: string
   handoffGeneration: number
@@ -380,6 +377,9 @@ export interface ScopeRunExecutionDiagnostics {
 
 export interface ScopeRunSummary {
   scopeId: string
+  aliasGeneration?: number | null
+  messageVisibilityEpoch?: number
+  visibilityOwnerKind?: 'product_alias' | 'context_background'
   agent: string
   title: string
   sourceKind: ConversationSourceKind
@@ -427,6 +427,13 @@ export interface ScopeRunSummary {
 export interface ScopeRunEventPayload {
   type: 'started' | 'updated' | 'finished'
   scopeId: string
+  aliasGeneration?: number | null
+  messageVisibilityEpoch?: number
+  visibilityOwnerKind?: 'product_alias' | 'context_background'
+  visibilityOwnerLedger?: {
+    kind: 'run_meta' | 'skill_task_run' | 'task_projection'
+    id: string
+  }
   agent: string
   ownerAgentId?: string | null
   taskOrigin?: import('../../../../shared/agent-execution-profile').TaskCreationOrigin

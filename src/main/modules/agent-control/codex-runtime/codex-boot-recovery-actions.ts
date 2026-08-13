@@ -36,7 +36,11 @@ export interface CodexStableStartAbsenceProof {
 }
 
 export interface CodexHostFailureTerminalPort {
-  commit(input: CodexHostFailureRecovery): Promise<{ productTerminalDigest: string }>
+  commit(input: CodexHostFailureRecovery): Promise<{
+    productTerminalDigest: string
+    closeoutAt: string
+  }>
+  deliver(input: CodexHostFailureRecovery): Promise<void>
 }
 
 export interface CodexManualCompactionBootPort {
@@ -102,7 +106,20 @@ export class CodexDefaultBootRecoveryActions implements CodexBootRecoveryActions
   }): Promise<CodexRecoveredStartResolution> {
     const zeroDigests: string[] = []
     for (let readIndex = 0; readIndex < this.deps.stableZeroReadCount; readIndex += 1) {
-      const readback = await this.readStart(input.member)
+      let readback: ReadbackResult
+      try {
+        readback = await this.readStart(input.member)
+      } catch (error) {
+        return {
+          resolution: 'unknown',
+          evidenceDigest: evidence({
+            method: input.member.method,
+            bindingId: input.member.bindingId,
+            readIndex,
+            readError: error instanceof Error ? error.message : String(error),
+          }),
+        }
+      }
       if (readback.kind === 'accepted') {
         return {
           resolution: 'accepted',
@@ -135,8 +152,14 @@ export class CodexDefaultBootRecoveryActions implements CodexBootRecoveryActions
 
   commitHostFailureProductTerminal(input: {
     failure: CodexHostFailureRecovery
-  }): Promise<{ productTerminalDigest: string }> {
+  }): Promise<{ productTerminalDigest: string; closeoutAt: string }> {
     return this.deps.hostFailureTerminal.commit(input.failure)
+  }
+
+  deliverHostFailureProductTerminal(input: {
+    failure: CodexHostFailureRecovery
+  }): Promise<void> {
+    return this.deps.hostFailureTerminal.deliver(input.failure)
   }
 
   reconcileManualCompaction(input: CodexManualCompactionRecovery): Promise<void> {

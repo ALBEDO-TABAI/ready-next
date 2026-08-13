@@ -33,12 +33,6 @@ const FALLBACK_AGENTS: readonly Agent[] = [
   { name: 'operator', displayName: '运营', avatar: '📈', status: 'idle', selected: false },
 ]
 
-export interface AgentPersonalityListItem {
-  agentName: string
-  displayName?: string
-  metaJson?: Record<string, unknown>
-}
-
 export interface AgentRegistryListItem {
   id: string
   name: string
@@ -47,37 +41,6 @@ export interface AgentRegistryListItem {
 
 export function cloneFallbackAgents(): Agent[] {
   return FALLBACK_AGENTS.map((agent) => ({ ...agent }))
-}
-
-function readPersonalityEmoji(metaJson?: Record<string, unknown>): string {
-  const emoji = metaJson?.emoji
-  return typeof emoji === 'string' && emoji.trim() ? emoji : '🤖'
-}
-
-export function mapPersonalitiesToAgents(
-  personalities: AgentPersonalityListItem[],
-  previousAgents: Agent[],
-  currentAgent: string,
-): { agents: Agent[]; currentAgent: string } {
-  const source = personalities.length > 0 ? personalities : cloneFallbackAgents().map((agent) => ({
-    agentName: agent.name,
-    displayName: agent.displayName,
-    metaJson: { emoji: agent.avatar },
-  }))
-  const nextCurrentAgent = source.some((item) => item.agentName === currentAgent)
-    ? currentAgent
-    : source[0].agentName
-  const agents = source.map((item) => {
-    const previous = previousAgents.find((agent) => agent.name === item.agentName)
-    return {
-      name: item.agentName,
-      displayName: item.displayName || item.agentName,
-      avatar: readPersonalityEmoji(item.metaJson),
-      status: 'idle' as const,
-      selected: previous?.selected ?? item.agentName === nextCurrentAgent,
-    }
-  })
-  return { agents, currentAgent: nextCurrentAgent }
 }
 
 export function mapRegistryToAgents(
@@ -124,6 +87,7 @@ export function makeEmptySessionSlice(conversationId: string | null = null): Ses
     state: 'live',
     conversationId,
     aliasGeneration: null,
+    messageVisibilityEpoch: 0,
     inputValue: '',
   }
 }

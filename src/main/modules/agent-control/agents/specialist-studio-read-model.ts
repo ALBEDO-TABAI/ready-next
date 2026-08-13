@@ -2,30 +2,14 @@ import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { MAIN_AGENT_ID, type AgentRegistryRecord } from '../../repositories/agent-registry-repository'
 import { agentScopeKnowledgeDir, type BeliefCardStore } from '../knowledge/belief-card-store'
-import type { TaskProjectionRecord } from '../contracts/run-contracts'
 import type {
   AgentSystemStudioAgent,
   AgentSystemStudioContentEditProposal,
-  AgentSystemStudioDerivationCandidate,
   AgentSystemStudioFoundationFile,
   AgentSystemStudioKnowledgeCard,
-  AgentSystemStudioOwnedTask,
-  AgentSystemStudioPrerouteTrace,
   AgentSystemStudioSnapshot,
 } from '../../../../shared/agent-system-studio'
-import type { SpecialistAgentBlueprint } from '../../../../shared/agent-specialist-blueprint'
 import { hashSpecialistStudioContent } from './specialist-content-edit-proposals'
-import { createHash } from 'node:crypto'
-import { isAgentFoundationReady } from './agent-foundation-readiness'
-
-export interface SpecialistStudioDerivationCandidateLike {
-  candidateRelPath: string
-  title: string
-  description: string
-  defaultSpecialistId: string
-  defaultName: string
-  defaultRoutingTriggers: string[]
-}
 
 function cleanPreview(text: string): string {
   return text.trim().replace(/\s+/g, ' ').slice(0, 240)
@@ -79,68 +63,17 @@ function listAgentKnowledge(store: BeliefCardStore, agentId: string): AgentSyste
     .map((card) => toKnowledgeCard(isMain ? 'global' : `agent:${agentId}`, card.relPath, card))
 }
 
-function toOwnedTask(record: TaskProjectionRecord): AgentSystemStudioOwnedTask {
-  return {
-    taskId: record.taskId,
-    scopeId: record.scopeId,
-    title: record.taskTitle ?? null,
-    summary: record.taskSummary ?? null,
-    status: record.status,
-    interactionState: record.interactionState,
-    ownerAgentId: record.ownerAgentId ?? null,
-    updatedAt: record.updatedAt,
-  }
-}
-
-function toDerivationCandidate(candidate: SpecialistStudioDerivationCandidateLike): AgentSystemStudioDerivationCandidate {
-  return {
-    candidateRelPath: candidate.candidateRelPath,
-    title: candidate.title,
-    description: candidate.description,
-    defaultSpecialistId: candidate.defaultSpecialistId,
-    defaultName: candidate.defaultName,
-    defaultRoutingTriggers: candidate.defaultRoutingTriggers,
-  }
-}
-
 export function buildAgentSystemStudioSnapshot(input: {
   agents: AgentRegistryRecord[]
   store: BeliefCardStore
-  listOwnedTasks: (agentId: string) => TaskProjectionRecord[]
   listContentEditProposals?: (agentId: string) => AgentSystemStudioContentEditProposal[]
-  derivationCandidates?: SpecialistStudioDerivationCandidateLike[]
-  stagedBlueprints?: SpecialistAgentBlueprint[]
-  recentPrerouteTraces?: AgentSystemStudioPrerouteTrace[]
-  resolveReadiness?: (agentId: string) => AgentSystemStudioAgent['readiness']
   now?: Date
 }): AgentSystemStudioSnapshot {
-  const routingCards = input.store.listRoutingCardInventory(input.agents)
   const agents: AgentSystemStudioAgent[] = input.agents.map((agent) => {
     const knowledgeCards = listAgentKnowledge(input.store, agent.id)
-    const agentRoutingCards = routingCards.filter((card) => card.targetAgentId === agent.id)
-    const ownedTasks = input.listOwnedTasks(agent.id).map(toOwnedTask)
     const contentEditProposals = input.listContentEditProposals?.(agent.id) ?? []
     const rules = readRules(input.store, agent.id)
     const foundation = readFoundation(input.store, agent.id)
-    const isMain = agent.id === MAIN_AGENT_ID
-    const conversationReady = agent.status === 'active'
-    const handoffReady = conversationReady && !isMain && Boolean(agent.charter?.trim()) && rules.exists
-    const autoRoutable = handoffReady && agentRoutingCards.some((card) => card.status === 'active' && !card.disabledReason)
-    const foundationReady = !isMain && isAgentFoundationReady({
-      agentId: agent.id,
-      foundation: foundation.content ?? '',
-      blueprints: input.stagedBlueprints ?? [],
-    })
-    const collaborationReady = handoffReady && foundationReady
-    const reasons = [
-      ...(agent.status !== 'active' ? ['agent_not_active'] : []),
-      ...(!isMain && !rules.exists ? ['rules_missing'] : []),
-      ...(!isMain && !foundation.exists ? ['foundation_missing'] : []),
-      ...(!isMain && foundation.exists && !foundationReady ? ['foundation_invalid'] : []),
-      ...(!isMain && !autoRoutable ? ['active_routing_missing'] : []),
-    ]
-    const readiness = input.resolveReadiness?.(agent.id)
-      ?? { conversationReady, handoffReady, autoRoutable, collaborationReady, reasons }
     return {
       id: agent.id,
       name: agent.name,
@@ -151,17 +84,11 @@ export function buildAgentSystemStudioSnapshot(input: {
       derivationReason: agent.derivationReason ?? null,
       mergedIntoAgentId: agent.mergedIntoAgentId ?? null,
       createdAt: agent.createdAt,
-      readinessRevision: createHash('sha256').update(JSON.stringify({ status: agent.status, charter: agent.charter, rules: rules.contentHash, foundation: foundation.contentHash, autoRoutable })).digest('hex'),
-      readiness,
       rules,
       foundation,
       knowledgeCards,
-      routingCards: agentRoutingCards,
-      ownedTasks,
       contentSummary: {
         knowledgeCards: knowledgeCards.length,
-        routingCards: agentRoutingCards.length,
-        ownedTasks: ownedTasks.length,
         stagedContentEdits: contentEditProposals.filter((proposal) => proposal.status === 'staged').length,
       },
       contentEditProposals,
@@ -170,9 +97,5 @@ export function buildAgentSystemStudioSnapshot(input: {
   return {
     generatedAt: (input.now ?? new Date()).toISOString(),
     agents,
-    routingCards,
-    derivationCandidates: (input.derivationCandidates ?? []).map(toDerivationCandidate),
-    stagedBlueprints: input.stagedBlueprints ?? [],
-    recentPrerouteTraces: input.recentPrerouteTraces ?? [],
   }
 }

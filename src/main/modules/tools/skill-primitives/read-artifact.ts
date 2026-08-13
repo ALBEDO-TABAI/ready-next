@@ -7,6 +7,8 @@
  */
 
 import { existsSync, lstatSync, openSync, readSync, closeSync, statSync } from 'node:fs'
+import { readFileSync } from 'node:fs'
+import { createHash } from 'node:crypto'
 import { isAbsolute, resolve } from 'node:path'
 
 import { createToolExecutionOutput, type ToolExecutionOutput } from '../../agent-control/tools-runtime/tool-result-types'
@@ -22,6 +24,20 @@ const HARD_CAP_BYTES = 1_048_576
 export interface ReadArtifactArgs {
   relativePath: string
   maxBytes?: number
+}
+
+export interface ReadArtifactExactResource {
+  logicalPath: string
+  root: string
+  relativePath: string
+  sha256: string
+  fileIdentity: {
+    device: string
+    inode: string
+    size: number
+    mode: number
+    mtimeMs: number
+  }
 }
 
 export interface ReadArtifactHandlerDeps {
@@ -45,6 +61,8 @@ export interface ReadArtifactHandlerDeps {
    */
   additionalAllowedReadRoots?: string[]
   additionalAllowedReadRootKinds?: Record<string, 'sibling_asset' | 'sibling_output'>
+  exactResources?: readonly ReadArtifactExactResource[]
+  onExactResourceRead?: (logicalPath: string) => void
 }
 
 interface ReadArtifactPathResolution {
@@ -121,16 +139,36 @@ export async function executeReadArtifact(
   // relative-path semantics keep working), then any active TurnFrame read
   // roots, then the skill's read-only bundled assets (SKILL.md, references/*,
   // templates/*). Writes still resolve only against artifactRoot.
+  const exactResource = deps.exactResources
+    ? deps.exactResources.find((resource) => resource.logicalPath === args.relativePath)
+    : null
+  if (deps.exactResources && !exactResource) {
+    throw new ToolDomainError(
+      'resource_not_authorized',
+      'skill_read_artifact: this turn only permits the pinned read-only resources.',
+      { logicalPath: args.relativePath },
+    )
+  }
   const additionalRoots = Array.isArray(deps.additionalAllowedReadRoots)
     ? deps.additionalAllowedReadRoots.filter((root): root is string => typeof root === 'string' && root.trim().length > 0)
     : []
-  const candidateRoots = Array.from(new Set([roots.artifactRoot, ...additionalRoots, roots.assetRoot]))
+  const candidateRoots = exactResource
+    ? [exactResource.root]
+    : Array.from(new Set([roots.artifactRoot, ...additionalRoots, roots.assetRoot]))
+  const requestedRelativePath = exactResource?.relativePath || args.relativePath
 
   let resolution: ReadArtifactPathResolution
   try {
-    resolution = resolveReadableExistingWithinAnyRoot(candidateRoots, args.relativePath)
+    resolution = resolveReadableExistingWithinAnyRoot(candidateRoots, requestedRelativePath)
   } catch (error) {
     if (error instanceof PathSandboxError) {
+      if (exactResource) {
+        throw new ToolDomainError(
+          'dependency_identity_drift',
+          'skill_read_artifact: the pinned resource identity is no longer valid.',
+          { resourcePath: exactResource.logicalPath },
+        )
+      }
       logAgentMetric(TOOL_ERROR_METRICS.skillPrimitiveRejected, {
         primitive: 'skill_read_artifact',
         reason: error.reason,
@@ -165,9 +203,11 @@ export async function executeReadArtifact(
       relativePath: args.relativePath,
     })
     throw new ToolDomainError(
-      'not_found',
-      `Artifact not found: ${args.relativePath}`,
-      {
+      exactResource ? 'dependency_identity_drift' : 'not_found',
+      exactResource
+        ? 'skill_read_artifact: the pinned resource identity is no longer valid.'
+        : `Artifact not found: ${args.relativePath}`,
+      exactResource ? { resourcePath: exactResource.logicalPath } : {
         relativePath: args.relativePath,
         absolutePath: absPath,
         attemptedRoots: resolution.attemptedRoots,
@@ -182,9 +222,9 @@ export async function executeReadArtifact(
   // rejects symlinks pointing OUT of the sandbox, but a symlink that loops
   // back inside still bypasses the LLM's mental model of "I asked to read
   // file X" so we refuse it here.
-  const requestedPath = isAbsolute(args.relativePath)
-    ? args.relativePath
-    : resolve(resolution.matchedRoot, args.relativePath)
+  const requestedPath = isAbsolute(requestedRelativePath)
+    ? requestedRelativePath
+    : resolve(resolution.matchedRoot, requestedRelativePath)
   const linkStats = lstatSync(requestedPath)
   if (linkStats.isSymbolicLink()) {
     logAgentMetric(TOOL_ERROR_METRICS.skillPrimitiveRejected, {
@@ -193,9 +233,13 @@ export async function executeReadArtifact(
       relativePath: args.relativePath,
     })
     throw new ToolDomainError(
-      'symlink_rejected',
-      `Refusing to read symlink: ${args.relativePath}`,
-      { relativePath: args.relativePath, absolutePath: absPath },
+      exactResource ? 'dependency_identity_drift' : 'symlink_rejected',
+      exactResource
+        ? 'skill_read_artifact: the pinned resource identity is no longer valid.'
+        : `Refusing to read symlink: ${args.relativePath}`,
+      exactResource
+        ? { resourcePath: exactResource.logicalPath }
+        : { relativePath: args.relativePath, absolutePath: absPath },
     )
   }
 
@@ -207,10 +251,33 @@ export async function executeReadArtifact(
       relativePath: args.relativePath,
     })
     throw new ToolDomainError(
-      'not_a_file',
-      `Artifact path is not a regular file: ${args.relativePath}`,
-      { relativePath: args.relativePath, absolutePath: absPath },
+      exactResource ? 'dependency_identity_drift' : 'not_a_file',
+      exactResource
+        ? 'skill_read_artifact: the pinned resource identity is no longer valid.'
+        : `Artifact path is not a regular file: ${args.relativePath}`,
+      exactResource
+        ? { resourcePath: exactResource.logicalPath }
+        : { relativePath: args.relativePath, absolutePath: absPath },
     )
+  }
+
+  if (exactResource) {
+    const currentIdentity = {
+      device: String(stats.dev),
+      inode: String(stats.ino),
+      size: stats.size,
+      mode: stats.mode,
+      mtimeMs: stats.mtimeMs,
+    }
+    const currentSha256 = createHash('sha256').update(readFileSync(absPath)).digest('hex')
+    if (JSON.stringify(currentIdentity) !== JSON.stringify(exactResource.fileIdentity)
+      || currentSha256 !== exactResource.sha256) {
+      throw new ToolDomainError(
+        'dependency_identity_drift',
+        'skill_read_artifact: the pinned resource identity is no longer valid.',
+        { resourcePath: exactResource.logicalPath },
+      )
+    }
   }
 
   const requestedMax = typeof args.maxBytes === 'number' && args.maxBytes > 0
@@ -239,10 +306,12 @@ export async function executeReadArtifact(
       matchedRootKind,
     })
 
+    if (exactResource && !truncated) deps.onExactResourceRead?.(exactResource.logicalPath)
+
     return createToolExecutionOutput(text, {
       shape: 'json',
       data: {
-        absolutePath: absPath,
+        ...(exactResource ? { resourcePath: exactResource.logicalPath } : { absolutePath: absPath }),
         bytesRead: readLen,
         totalBytes,
         truncated,

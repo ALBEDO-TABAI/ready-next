@@ -12,23 +12,25 @@ export class AgentSessionCheckpointTakeoverExpiryRepository {
   async expirePendingHumanTakeovers(input: {
     scopeId?: string | null
     now?: string
+    excludedRunIds?: ReadonlySet<string>
   } = {}): Promise<string[]> {
     return this.unitOfWork.runImmediateWithRetry((db) => {
       const now = input.now || new Date().toISOString()
       const rows = db.prepare(
-        `SELECT task_id, human_takeover_ref_json, revision
+        `SELECT task_id, run_id, human_takeover_ref_json, revision
            FROM task_projections
           WHERE human_takeover_ref_json IS NOT NULL
             AND interaction_state = 'human_takeover'
             AND waiting_for = 'confirmation'
             AND (? IS NULL OR scope_id = ?)
           ORDER BY updated_at ASC`,
-      ).all<{ task_id: string; human_takeover_ref_json: string; revision: number }>(
+      ).all<{ task_id: string; run_id: string | null; human_takeover_ref_json: string; revision: number }>(
         input.scopeId || null,
         input.scopeId || null,
       )
       const expiredTaskIds: string[] = []
       for (const row of rows) {
+        if (row.run_id && input.excludedRunIds?.has(row.run_id)) continue
         const takeover = parseObjectStrict<HumanTakeoverRef>(
           row.human_takeover_ref_json,
           'human_takeover_expiration_ref_json',

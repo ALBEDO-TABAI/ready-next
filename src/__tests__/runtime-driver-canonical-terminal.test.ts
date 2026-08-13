@@ -1,16 +1,11 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
-  captured,
-  fireOnError,
-  fireOnScopeRunEvent,
+  driverApi, fireOnScopeRunEvent,
   fireOnStream,
   fixtureState,
-  getSessionSlice,
-  infrastructureTimeoutReports,
-  makeLockedSlice,
-  seedTwoSessions,
-  useAgent,
+  getSessionSlice, seedTwoSessions,
+  useAgent
 } from './runtime-driver-test-fixtures'
 
 test('started event for a new request does not inherit the previous response segment', () => {
@@ -264,6 +259,10 @@ test('canonical done readback replaces the transient response exactly once', asy
   }
   fireOnStream(payload)
   fireOnStream(payload)
+  await driverApi.completeScopeRunAfterSendSuccess('scope-A', 'req-A', {
+    canonicalMessage: canonical,
+    canonicalMessageDigest: 'digest-A',
+  })
   await new Promise((resolve) => setTimeout(resolve, 20))
 
   const state = useAgent.getState()
@@ -274,6 +273,303 @@ test('canonical done readback replaces the transient response exactly once', asy
   assert.equal(afterSlice.scopeRunStates['scope-A']?.responseMessageId, canonical.id)
   assert.equal(afterSlice.scopeRunStates['scope-A']?.responseBuffer, canonical.content)
   fixtureState.conversationScopeMessages = []
+})
+
+test('stale text stream cannot append to the current run', () => {
+  seedTwoSessions({
+    activeSessionId: 'session-A',
+    lockedSessionId: 'session-A',
+    lockedScopeId: 'scope-A',
+    otherScopeId: 'scope-B',
+    requestId: 'req-new',
+  })
+  fireOnStream({
+    type: 'text',
+    agent: 'butler',
+    sessionId: 'session-A',
+    runId: 'req-new',
+    chunk: '新请求的回复',
+  })
+
+  const beforeSlice = getSessionSlice(useAgent.getState(), 'session-A')
+  const beforeLive = useAgent.getState().scopeLiveMessages['scope-A']
+  fireOnStream({
+    type: 'text',
+    agent: 'butler',
+    sessionId: 'session-A',
+    runId: 'req-old',
+    chunk: '迟到的旧文本',
+  })
+
+  const after = useAgent.getState()
+  const afterSlice = getSessionSlice(after, 'session-A')
+  assert.deepEqual(afterSlice, beforeSlice, 'stale text cannot mutate the owner session')
+  assert.deepEqual(after.scopeLiveMessages['scope-A'], beforeLive, 'stale text cannot mutate the live transcript')
+  assert.equal(afterSlice.scopeRunStates['scope-A']?.requestId, 'req-new')
+  assert.equal(afterSlice.scopeRunStates['scope-A']?.responseBuffer, '新请求的回复')
+})
+
+test('stale done stream is a complete no-op when a new request owns the scope', async () => {
+  seedTwoSessions({
+    activeSessionId: 'session-A',
+    lockedSessionId: 'session-A',
+    lockedScopeId: 'scope-A',
+    otherScopeId: 'scope-B',
+    requestId: 'req-new',
+  })
+  fireOnStream({
+    type: 'text',
+    agent: 'butler',
+    sessionId: 'session-A',
+    runId: 'req-new',
+    chunk: '新请求的瞬影',
+  })
+
+  const canonical = {
+    id: 'assistant:scope-A:req-old:terminal',
+    conversationId: 'scope-A',
+    role: 'assistant' as const,
+    content: '旧请求的终稿',
+    timestamp: '2026-08-11T10:00:01.000Z',
+    meta: { runId: 'req-old' },
+  }
+  const beforeSlice = getSessionSlice(useAgent.getState(), 'session-A')
+  const beforeLive = useAgent.getState().scopeLiveMessages['scope-A'] || []
+  let readbackCount = 0
+  const originalGetMessages = window.electronAPI.agent.getConversationScopeMessages
+  window.electronAPI.agent.getConversationScopeMessages = async () => {
+    readbackCount += 1
+    return { success: true, data: [canonical] }
+  }
+
+  try {
+    fireOnStream({
+      type: 'done',
+      agent: 'butler',
+      sessionId: 'session-A',
+      runId: 'req-old',
+      chunk: '',
+      canonicalMessage: canonical,
+      canonicalMessageDigest: 'digest-old',
+    })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    const after = useAgent.getState()
+    const afterSlice = getSessionSlice(after, 'session-A')
+    assert.equal(readbackCount, 0, 'stale done must be rejected before canonical readback')
+    assert.deepEqual(afterSlice, beforeSlice, 'stale done cannot finish or unlock the new run')
+    assert.deepEqual(after.scopeLiveMessages['scope-A'] || [], beforeLive)
+    assert.equal(afterSlice.streamingRequestId, 'req-new')
+    assert.equal(afterSlice.scopeRunStates['scope-A']?.terminalReason ?? null, null)
+  } finally {
+    window.electronAPI.agent.getConversationScopeMessages = originalGetMessages
+  }
+})
+
+test('old done readback cannot overwrite a new request that starts while readback is pending', async () => {
+  seedTwoSessions({
+    activeSessionId: 'session-A',
+    lockedSessionId: 'session-A',
+    lockedScopeId: 'scope-A',
+    otherScopeId: 'scope-B',
+    requestId: 'req-old',
+  })
+
+  const canonical = {
+    id: 'assistant:scope-A:req-old:terminal',
+    conversationId: 'scope-A',
+    role: 'assistant' as const,
+    content: '旧请求的终稿',
+    timestamp: '2026-08-11T10:00:01.000Z',
+    meta: { runId: 'req-old' },
+  }
+
+  let releaseReadback!: () => void
+  let markReadbackStarted!: () => void
+  const readbackStarted = new Promise<void>((resolve) => { markReadbackStarted = resolve })
+  const readbackGate = new Promise<void>((resolve) => { releaseReadback = resolve })
+  const originalGetMessages = window.electronAPI.agent.getConversationScopeMessages
+  window.electronAPI.agent.getConversationScopeMessages = async () => {
+    markReadbackStarted()
+    await readbackGate
+    return { success: true, data: [canonical] }
+  }
+
+  try {
+    fireOnStream({
+      type: 'done',
+      agent: 'butler',
+      sessionId: 'session-A',
+      runId: 'req-old',
+      chunk: '',
+      canonicalMessage: canonical,
+      canonicalMessageDigest: 'digest-old',
+    })
+    await readbackStarted
+
+    fireOnScopeRunEvent({
+      type: 'started',
+      scopeId: 'scope-A',
+      sessionId: 'session-A',
+      agent: 'butler',
+      runId: 'req-new',
+      phase: 'planning',
+      latestText: '新请求正在处理',
+      timestamp: '2026-08-11T10:00:02.000Z',
+    })
+    fireOnStream({
+      type: 'text',
+      agent: 'butler',
+      sessionId: 'session-A',
+      runId: 'req-new',
+      chunk: '新请求的瞬影',
+    })
+    const beforeReleaseSlice = getSessionSlice(useAgent.getState(), 'session-A')
+    const beforeReleaseLive = useAgent.getState().scopeLiveMessages['scope-A']
+
+    releaseReadback()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    const after = useAgent.getState()
+    const afterSlice = getSessionSlice(after, 'session-A')
+    const afterRun = afterSlice.scopeRunStates['scope-A']
+    assert.deepEqual(afterSlice, beforeReleaseSlice, 'old readback cannot finish or unlock the new request')
+    assert.deepEqual(after.scopeLiveMessages['scope-A'], beforeReleaseLive, 'old readback cannot remove the new live message')
+    assert.equal(afterSlice.streamingRequestId, 'req-new')
+    assert.equal(afterSlice.isStreaming, true)
+    assert.equal(afterSlice.foregroundBusy, true)
+    assert.equal(afterSlice.composerLocked, true)
+    assert.equal(afterRun?.requestId, 'req-new')
+    assert.equal(afterRun?.phase, 'responding')
+    assert.equal(afterRun?.terminalReason ?? null, null)
+    assert.equal(afterSlice.messages.some((message) => message.id === canonical.id), false)
+  } finally {
+    releaseReadback()
+    window.electronAPI.agent.getConversationScopeMessages = originalGetMessages
+  }
+})
+
+test('send success keeps the composer locked until the canonical assistant message is visible', async () => {
+  seedTwoSessions({
+    activeSessionId: 'session-A',
+    lockedSessionId: 'session-A',
+    lockedScopeId: 'scope-A',
+    otherScopeId: 'scope-B',
+    requestId: 'req-A',
+  })
+
+  const canonical = {
+    id: 'assistant:task-A:req-A:terminal',
+    conversationId: 'scope-A',
+    role: 'assistant' as const,
+    content: '已提交的唯一终稿',
+    timestamp: '2026-07-18T10:00:01.000Z',
+    meta: { runId: 'req-A' },
+  }
+  fixtureState.conversationScopeMessages = [canonical]
+
+  let releaseReadback!: () => void
+  const readbackGate = new Promise<void>((resolve) => { releaseReadback = resolve })
+  const originalGetMessages = window.electronAPI.agent.getConversationScopeMessages
+  window.electronAPI.agent.getConversationScopeMessages = async () => {
+    await readbackGate
+    return { success: true, data: fixtureState.conversationScopeMessages }
+  }
+
+  try {
+    const completion = driverApi.completeScopeRunAfterSendSuccess('scope-A', 'req-A', {
+      canonicalMessage: canonical,
+      canonicalMessageDigest: 'digest-A',
+    })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    const during = getSessionSlice(useAgent.getState(), 'session-A')
+    assert.equal(during.composerLocked, true, 'composer must stay locked while canonical readback is pending')
+    assert.equal(during.foregroundBusy, true, 'foreground remains busy until the assistant message is visible')
+    assert.equal(during.messages.some((message) => message.id === canonical.id), false)
+
+    releaseReadback()
+    await completion
+
+    const after = getSessionSlice(useAgent.getState(), 'session-A')
+    assert.equal(after.composerLocked, false)
+    assert.equal(after.foregroundBusy, false)
+    assert.equal(after.messages.some((message) => (
+      message.id === canonical.id && message.content === canonical.content
+    )), true)
+  } finally {
+    window.electronAPI.agent.getConversationScopeMessages = originalGetMessages
+    fixtureState.conversationScopeMessages = []
+  }
+})
+
+test('successful scope event cannot unlock before delayed stream-done reconciliation', async () => {
+  seedTwoSessions({
+    activeSessionId: 'session-A',
+    lockedSessionId: 'session-A',
+    lockedScopeId: 'scope-A',
+    otherScopeId: 'scope-B',
+    requestId: 'req-A',
+  })
+
+  const canonical = {
+    id: 'assistant:task-A:req-A:terminal',
+    conversationId: 'scope-A',
+    role: 'assistant' as const,
+    content: '已提交的唯一终稿',
+    timestamp: '2026-07-18T10:00:01.000Z',
+    meta: { runId: 'req-A' },
+  }
+  fixtureState.conversationScopeMessages = [canonical]
+
+  let releaseReadback!: () => void
+  const readbackGate = new Promise<void>((resolve) => { releaseReadback = resolve })
+  const originalGetMessages = window.electronAPI.agent.getConversationScopeMessages
+  window.electronAPI.agent.getConversationScopeMessages = async () => {
+    await readbackGate
+    return { success: true, data: fixtureState.conversationScopeMessages }
+  }
+
+  try {
+    fireOnStream({
+      type: 'done',
+      agent: 'butler',
+      sessionId: 'session-A',
+      runId: 'req-A',
+      chunk: '',
+      canonicalMessage: canonical,
+      canonicalMessageDigest: 'digest-A',
+    })
+    fireOnScopeRunEvent({
+      type: 'finished',
+      scopeId: 'scope-A',
+      sessionId: 'session-A',
+      agent: 'butler',
+      runId: 'req-A',
+      phase: 'done',
+      terminalReason: 'done',
+      timestamp: '2026-07-18T10:00:01.000Z',
+    })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    const during = getSessionSlice(useAgent.getState(), 'session-A')
+    assert.equal(during.composerLocked, true)
+    assert.equal(during.foregroundBusy, true)
+    assert.equal(during.messages.some((message) => message.id === canonical.id), false)
+
+    releaseReadback()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    const after = getSessionSlice(useAgent.getState(), 'session-A')
+    assert.equal(after.composerLocked, false)
+    assert.equal(after.foregroundBusy, false)
+    assert.equal(after.messages.some((message) => (
+      message.id === canonical.id && message.content === canonical.content
+    )), true)
+  } finally {
+    window.electronAPI.agent.getConversationScopeMessages = originalGetMessages
+    fixtureState.conversationScopeMessages = []
+  }
 })
 
 test('scope run events ignore stale non-started run ids but allow takeover and started handoff', () => {
@@ -342,4 +638,102 @@ test('scope run events ignore stale non-started run ids but allow takeover and s
   assert.equal(afterStarted?.requestId, 'req-next')
   assert.equal(afterStarted?.phase, 'planning')
   assert.equal(afterStarted?.taskSummary, 'next run planning')
+})
+
+test('matching late terminal reconciles an unknown stop and unlocks its session', () => {
+  seedTwoSessions({
+    activeSessionId: 'session-A',
+    lockedSessionId: 'session-A',
+    lockedScopeId: 'scope-A',
+    otherScopeId: 'scope-B',
+    requestId: 'req-current',
+  })
+  useAgent.setState((state: any) => ({
+    sessions: {
+      ...state.sessions,
+      'session-A': {
+        ...getSessionSlice(state, 'session-A'),
+        lifecyclePendingAction: null,
+        lifecycleError: {
+          ok: false,
+          action: 'stop',
+          code: 'interrupt_state_unknown',
+          preserveUi: true,
+          aliasId: 'scope-A',
+          aliasGeneration: 1,
+          evidenceDigest: 'unknown-stop',
+        },
+      },
+    },
+  }))
+
+  fireOnScopeRunEvent({
+    type: 'finished',
+    scopeId: 'scope-A',
+    sessionId: 'session-A',
+    agent: 'butler',
+    runId: 'req-current',
+    phase: 'cancelled',
+    terminalReason: 'cancelled_user',
+    timestamp: '2026-08-11T09:00:00.000Z',
+  })
+
+  const slice = getSessionSlice(useAgent.getState(), 'session-A')
+  assert.equal(slice.isStreaming, false)
+  assert.equal(slice.foregroundBusy, false)
+  assert.equal(slice.composerLocked, false)
+  assert.equal(slice.streamingRequestId, null)
+  assert.equal(slice.lifecyclePendingAction, null)
+  assert.equal(slice.lifecycleError, null)
+  assert.equal(slice.state, 'cancelled')
+})
+
+test('stale old-run terminal cannot reconcile or unlock the current unknown stop', () => {
+  seedTwoSessions({
+    activeSessionId: 'session-A',
+    lockedSessionId: 'session-A',
+    lockedScopeId: 'scope-A',
+    otherScopeId: 'scope-B',
+    requestId: 'req-current',
+  })
+  const lifecycleError = {
+    ok: false as const,
+    action: 'stop' as const,
+    code: 'interrupt_state_unknown' as const,
+    preserveUi: true as const,
+    aliasId: 'scope-A',
+    aliasGeneration: 1,
+    evidenceDigest: 'unknown-stop',
+  }
+  useAgent.setState((state: any) => ({
+    sessions: {
+      ...state.sessions,
+      'session-A': {
+        ...getSessionSlice(state, 'session-A'),
+        lifecyclePendingAction: null,
+        lifecycleError,
+      },
+    },
+  }))
+
+  fireOnScopeRunEvent({
+    type: 'finished',
+    scopeId: 'scope-A',
+    sessionId: 'session-A',
+    agent: 'butler',
+    runId: 'req-old',
+    phase: 'cancelled',
+    terminalReason: 'cancelled_user',
+    timestamp: '2026-08-11T09:00:00.000Z',
+  })
+
+  const slice = getSessionSlice(useAgent.getState(), 'session-A')
+  assert.equal(slice.isStreaming, true)
+  assert.equal(slice.foregroundBusy, true)
+  assert.equal(slice.composerLocked, true)
+  assert.equal(slice.streamingRequestId, 'req-current')
+  assert.deepEqual(slice.lifecycleError, lifecycleError)
+  assert.equal(slice.scopeRunStates['scope-A']?.requestId, 'req-current')
+  assert.equal(slice.scopeRunStates['scope-A']?.terminalReason ?? null, null)
+  assert.equal(slice.state, 'live')
 })

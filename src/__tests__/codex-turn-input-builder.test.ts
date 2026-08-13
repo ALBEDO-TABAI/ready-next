@@ -10,6 +10,7 @@ const builder = new CodexTurnInputBuilder()
 const context = {
   threadId: 'thread-1',
   turnRequestId: 'turn-request-1',
+  reasoningEffort: 'high' as const,
   readyRunId: 'run-1',
   toolSurfaceDigest: 'surface-digest',
   turnContractDigest: 'turn-digest',
@@ -41,6 +42,15 @@ test('user ingress emits current canonical input once and thin resource referenc
 
   assert.equal(result.ok, true)
   if (!result.ok) return
+  assert.deepEqual(result.params.collaborationMode, {
+    mode: 'default',
+    settings: {
+      model: 'ready-e0-model',
+      reasoning_effort: 'high',
+      developer_instructions: null,
+    },
+  })
+  assert.deepEqual(result.params.environments, [])
   assert.deepEqual(result.params.input, [textUserInput('CURRENT_USER_TOKEN')])
   const encoded = result.params.additionalContext['ready-resource:document-1'].value
   assert.deepEqual(JSON.parse(encoded), resource)
@@ -51,6 +61,51 @@ test('user ingress emits current canonical input once and thin resource referenc
     'turnContractDigest',
     'upstreamProfileSnapshotDigest',
   ])
+})
+
+test('current-document anchor is persisted ingress only and never copied into native input', () => {
+  const digest = 'a'.repeat(64)
+  const anchor = {
+    kind: 'current_document',
+    logicalResourceId: 'document-1',
+    tabId: 'doc-1',
+    title: 'PRIVATE_TITLE',
+    pane: 'primary',
+    pathDigest: 'b'.repeat(64),
+    incarnationKey: 'c'.repeat(64),
+    currentVersion: `sha256:${digest}`,
+    currentDigest: digest,
+    supersedesVersion: null,
+    policyEpoch: 3,
+    readScope: { operation: 'read_section', maxChars: 30_000 },
+  } as const
+  const thinReference = {
+    logicalResourceId: anchor.logicalResourceId,
+    currentVersion: anchor.currentVersion,
+    currentDigest: anchor.currentDigest,
+    supersedesVersion: anchor.supersedesVersion,
+    policyEpoch: anchor.policyEpoch,
+  }
+  const result = builder.build({
+    kind: 'user_ingress',
+    attemptKind: 'user_ingress',
+    originUserMessageId: 'message-anchor',
+    canonicalCurrentInputRef: {
+      messageId: 'message-anchor',
+      input: [textUserInput('read current document')],
+    },
+    explicitResourceEnvelope: { input: [], resourceRefs: [thinReference] },
+    resourceAdditionalContext: [thinReference],
+    currentDocumentAnchor: anchor,
+  }, context)
+  assert.equal(result.ok, true)
+  if (!result.ok) return
+  const nativeWire = JSON.stringify(result.params)
+  assert.equal(nativeWire.includes('PRIVATE_TITLE'), false)
+  assert.equal(nativeWire.includes('doc-1'), false)
+  assert.deepEqual(JSON.parse(
+    result.params.additionalContext['ready-resource:document-1'].value,
+  ), thinReference)
 })
 
 test('user ingress rejects every successor cross-field and resource body extension', () => {
@@ -147,6 +202,15 @@ test('all three non-user successor variants are well-shaped but fail closed befo
       continuationContractDigest: 'continuation-digest',
     }, context), { ok: false, code: 'non_user_successor_unsupported' })
   }
+})
+
+test('retired system background input cannot enter a native Codex turn', () => {
+  assert.deepEqual(builder.build({
+    kind: 'system_background',
+    attemptKind: 'system_background',
+    originUserMessageId: 'forged-system-message',
+    eventPayload: 'must-not-reach-provider',
+  }, context), { ok: false, code: 'invalid_ingress' })
 })
 
 test('successor branch rejects fake user input and user-ingress fields', () => {

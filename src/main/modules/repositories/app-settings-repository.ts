@@ -19,9 +19,36 @@ interface SettingsDatabaseLike {
   getRawDb(): { exec(sql: string): void } | null
 }
 
+type AIWorkspaceMutationGuard = (
+  current: AIProviderWorkspace,
+  next: AIProviderWorkspace,
+) => void
+
+let registeredAIWorkspaceMutationGuard: AIWorkspaceMutationGuard | null = null
+let registeredAIWorkspaceAdmissionGuard: (() => void) | null = null
+
+export function registerAIWorkspaceMutationGuard(guard: AIWorkspaceMutationGuard): void {
+  if (registeredAIWorkspaceMutationGuard && registeredAIWorkspaceMutationGuard !== guard) {
+    throw new Error('ai_workspace_mutation_guard_already_registered')
+  }
+  registeredAIWorkspaceMutationGuard = guard
+}
+
+export function registerAIWorkspaceAdmissionGuard(guard: () => void): void {
+  if (registeredAIWorkspaceAdmissionGuard && registeredAIWorkspaceAdmissionGuard !== guard) {
+    throw new Error('ai_workspace_admission_guard_already_registered')
+  }
+  registeredAIWorkspaceAdmissionGuard = guard
+}
+
+export function assertAIWorkspaceAdmissionAllowed(): void {
+  registeredAIWorkspaceAdmissionGuard?.()
+}
+
 export class AppSettingsRepository {
   constructor(
     private readonly getSettingsDatabase: () => SettingsDatabaseLike = getDatabase,
+    private readonly assertAIWorkspaceMutationAllowed?: AIWorkspaceMutationGuard,
   ) {}
 
   getSetting(key: string): string | undefined {
@@ -58,7 +85,8 @@ export class AppSettingsRepository {
     })
 
     if (this.getSetting('ai_model_config') || this.getSetting('ai_saved_configs')) {
-      this.persistAIWorkspace(normalizeAIWorkspace(migrated))
+      const normalized = normalizeAIWorkspace(migrated)
+      this.persistAIWorkspace(normalized, normalized)
       return migrated
     }
 
@@ -148,10 +176,13 @@ export class AppSettingsRepository {
   setAIWorkspace(workspace: AIProviderWorkspace): void {
     const normalizedWorkspace = normalizeAIWorkspace(workspace)
     assertAIWorkspaceThinkingModesValid(normalizedWorkspace)
-    this.persistAIWorkspace(normalizedWorkspace)
+    this.persistAIWorkspace(normalizedWorkspace, this.getAIWorkspace())
   }
 
-  private persistAIWorkspace(normalizedWorkspace: AIProviderWorkspace): void {
+  private persistAIWorkspace(
+    normalizedWorkspace: AIProviderWorkspace,
+    currentWorkspace: AIProviderWorkspace,
+  ): void {
     const legacyPayload = deriveLegacyAISettingsPayload(normalizedWorkspace)
     const activeConfig = legacyPayload.aiModelConfig || getActiveAIConfig(normalizedWorkspace)
     const database = this.getSettingsDatabase()
@@ -160,6 +191,8 @@ export class AppSettingsRepository {
 
     rawDb.exec('BEGIN IMMEDIATE')
     try {
+      const mutationGuard = this.assertAIWorkspaceMutationAllowed ?? registeredAIWorkspaceMutationGuard
+      mutationGuard?.(currentWorkspace, normalizedWorkspace)
       database.setSetting('ai_provider_workspace', JSON.stringify(normalizedWorkspace))
       if (activeConfig) {
         database.setSetting('ai_model_config', JSON.stringify(activeConfig))

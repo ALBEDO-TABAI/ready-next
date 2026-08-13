@@ -1,8 +1,8 @@
 /**
  * L5-A — Behavior tests for the calendar widget data provider.
  *
- * Verifies the DI-form fetcher against fake `CalendarWidgetApi` /
- * `ScheduleRuntimeApi` implementations. No window globals are touched
+ * Verifies the DI-form fetcher against fake `CalendarWidgetApi`
+ * implementations. No window globals are touched
  * — the global default adapter is exercised only by the dedicated
  * "default adapter no-op" test below.
  */
@@ -16,7 +16,6 @@ import {
   type CalendarWidgetApi,
   type CalendarWidgetEventLike,
   type CalendarWidgetSourceLike,
-  type ScheduleRuntimeApi,
 } from '../renderer/modules/calendar/widget-data-provider'
 
 /* ------------------------------------------------------------------ */
@@ -210,36 +209,6 @@ describe('calendar widget data provider — fetchTodayFocusSnapshot', () => {
     assert.match(snapshot.highlights[0], /还没有安排事件/)
     const today = snapshot.metrics.find((metric) => metric.label === '今日事件')
     assert.equal(today?.value, '0')
-  })
-})
-
-describe('calendar widget data provider — fetchScheduleRuntime', () => {
-  it('maps schedule rows into job entries', async () => {
-    const schedule: ScheduleRuntimeApi = {
-      async list() {
-        return {
-          success: true,
-          data: [
-            { name: '每日总结', enabled: true, nextRunAt: '2026-05-17T18:00:00Z', lastOccurrenceAt: '2026-05-16T18:00:00Z' },
-            { name: '关闭中', enabled: false },
-          ],
-        }
-      },
-    }
-    const fetcher = createCalendarWidgetFetcher({ calendar: makeApi([]), schedule })
-    const snapshot = await fetcher.fetchScheduleRuntime()
-    assert.equal(snapshot.jobs.length, 2)
-    assert.equal(snapshot.jobs[0].name, '每日总结')
-    assert.equal(snapshot.jobs[0].status, 'enabled')
-    assert.equal(snapshot.jobs[1].status, 'paused')
-  })
-
-  it('emits a placeholder job when no schedule API is wired', async () => {
-    const fetcher = createCalendarWidgetFetcher({ calendar: makeApi([]) })
-    const snapshot = await fetcher.fetchScheduleRuntime()
-    assert.equal(snapshot.jobs.length, 1)
-    assert.equal(snapshot.jobs[0].status, 'paused')
-    assert.match(snapshot.jobs[0].name, /没有自动计划/)
   })
 })
 

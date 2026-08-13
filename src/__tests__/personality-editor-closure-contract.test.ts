@@ -145,7 +145,7 @@ afterEach(async () => {
 })
 
 describe('PersonalityEditor closure contract', () => {
-  it('creates a real personality and refreshes the chat switcher', async () => {
+  it('creates a historical personality archive without refreshing the chat switcher', async () => {
     const personalities: PersonalityRecord[] = []
     const createCalls: Record<string, unknown>[] = []
     let reloadCalls = 0
@@ -167,22 +167,22 @@ describe('PersonalityEditor closure contract', () => {
     })
 
     await act(async () => {
-      click(dom, findButton(container, '新建人格'))
+      click(dom, findButton(container, '新建档案'))
       await flush()
     })
     assert.equal(createCalls.length, 0)
     assert.match(container.textContent || '', /Agent 标识/)
 
     await act(async () => {
-      click(dom, findButton(container, '保存人格'))
+      click(dom, findButton(container, '保存档案'))
       await flush()
     })
 
     assert.equal(createCalls.length, 1)
     assert.equal(createCalls[0].agentName, 'designer')
-    assert.match(String(createCalls[0].personalityText), /Ready 工作台中的一个可切换 Agent/)
-    assert.equal(reloadCalls, 1)
-    assert.match(container.textContent || '', /人格配置已保存|designer/)
+    assert.match(String(createCalls[0].personalityText), /不会改变当前 Codex/)
+    assert.equal(reloadCalls, 0)
+    assert.match(container.textContent || '', /历史人格资料已保存|designer/)
   })
 
   it('selects an existing personality and loads the matching fields', async () => {
@@ -222,7 +222,7 @@ describe('PersonalityEditor closure contract', () => {
     assert.equal(definition?.value, 'designer personality')
   })
 
-  it('deletes a real personality and refreshes the chat switcher', async () => {
+  it('deletes a historical personality archive without refreshing the chat switcher', async () => {
     const personalities: PersonalityRecord[] = [
       {
         id: 'p-butler',
@@ -266,8 +266,8 @@ describe('PersonalityEditor closure contract', () => {
     })
 
     assert.deepEqual(deleteCalls, ['butler'])
-    assert.equal(reloadCalls, 1)
-    assert.match(container.textContent || '', /人格配置已删除/)
+    assert.equal(reloadCalls, 0)
+    assert.match(container.textContent || '', /历史人格资料已删除/)
     assert.match(container.textContent || '', /设计审稿师/)
   })
 
@@ -295,7 +295,7 @@ describe('PersonalityEditor closure contract', () => {
       await flush()
     })
     await act(async () => {
-      click(dom, findButton(container, '保存人格'))
+      click(dom, findButton(container, '保存档案'))
       await flush()
     })
 

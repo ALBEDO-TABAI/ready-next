@@ -4,7 +4,6 @@ import {
   buildBeliefCardSettingsSnapshot,
   type BeliefCardSettingsSnapshot,
 } from '../../agent-control/knowledge/belief-card-settings-view'
-import type { MaintenanceRoundStatusSnapshot } from '../../agent-control/maintenance/maintenance-llm-round'
 import type { IpcChannelGroup, IpcDisposeHandle } from './types'
 
 interface IPCResponse<T = unknown> {
@@ -16,11 +15,9 @@ interface IPCResponse<T = unknown> {
 export interface BeliefCardMaintenanceStatus {
   lifecycleRunning: boolean
   lastLifecycleMaintenanceAt: string | null
-  llmRound: MaintenanceRoundStatusSnapshot | null
 }
 
 export interface BeliefCardListResponse extends BeliefCardSettingsSnapshot {
-  knowledgeSystemEnabled: boolean
   maintenance: BeliefCardMaintenanceStatus
 }
 
@@ -31,16 +28,12 @@ export interface BeliefCardTransitionPayload {
 
 export interface BeliefCardGroupDeps {
   getBeliefCardStore(): BeliefCardStore | null
-  getKnowledgeSystemEnabled(): boolean
-  setKnowledgeSystemEnabled(enabled: boolean): void
   getLifecycleStatus(): { running: boolean; lastMaintenanceAt: Date | null }
-  getMaintenanceRoundStatus(): MaintenanceRoundStatusSnapshot | null
 }
 
 const CHANNELS = [
   'agent:beliefCards:list',
   'agent:beliefCards:transition',
-  'agent:beliefCards:setKnowledgeSystemEnabled',
 ] as const
 
 function listBeliefCards(deps: BeliefCardGroupDeps): IPCResponse<BeliefCardListResponse> {
@@ -51,11 +44,9 @@ function listBeliefCards(deps: BeliefCardGroupDeps): IPCResponse<BeliefCardListR
     success: true,
     data: {
       ...buildBeliefCardSettingsSnapshot(store),
-      knowledgeSystemEnabled: deps.getKnowledgeSystemEnabled(),
       maintenance: {
         lifecycleRunning: lifecycle.running,
         lastLifecycleMaintenanceAt: lifecycle.lastMaintenanceAt?.toISOString() ?? null,
-        llmRound: deps.getMaintenanceRoundStatus(),
       },
     },
   }
@@ -121,18 +112,6 @@ export const beliefCardGroup: IpcChannelGroup<BeliefCardGroupDeps> = {
           if (!store.transition(relPath, target)) {
             return { success: false, error: 'Belief card transition failed' }
           }
-          return listBeliefCards(deps)
-        } catch (error) {
-          return { success: false, error: error instanceof Error ? error.message : String(error) }
-        }
-      },
-    )
-
-    ipcMain.handle(
-      'agent:beliefCards:setKnowledgeSystemEnabled',
-      async (_, payload: { enabled?: boolean }): Promise<IPCResponse<BeliefCardListResponse>> => {
-        try {
-          deps.setKnowledgeSystemEnabled(payload?.enabled !== false)
           return listBeliefCards(deps)
         } catch (error) {
           return { success: false, error: error instanceof Error ? error.message : String(error) }

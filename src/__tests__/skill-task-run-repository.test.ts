@@ -52,35 +52,36 @@ function createRepositoryHarness() {
                 rows.set(String(params[0]), {
                   id: params[0],
                   scope_id: params[1],
-                  session_id: params[2],
-                  agent: params[3],
-                  run_id: params[4],
-                  skill_id: params[5],
-                  skill_name: params[6],
-                  action: params[7],
-                  tool_name: params[8],
-                  run_kind: params[9],
-                  status: params[10],
-                  interaction_state: params[11],
-                  goal_text: params[12],
-                  resource_refs_json: params[13],
-                  params_json: params[14],
-                  steps_json: params[15],
-                  current_step_id: params[16],
-                  artifacts_json: params[17],
-                  output_dir: params[18],
-                  run_state_path: params[19],
-                  scene_scores_path: params[20],
-                  delivery_report_path: params[21],
-                  failure_kind: params[22],
-                  failure_detail: params[23],
-                  job_id: params[24],
-                  detached_task_id: params[25],
-                  resume_payload_json: params[26],
-                  created_at: params[27],
-                  started_at: params[28],
-                  updated_at: params[29],
-                  finished_at: params[30],
+                  message_visibility_epoch: params[2],
+                  session_id: params[3],
+                  agent: params[4],
+                  run_id: params[5],
+                  skill_id: params[6],
+                  skill_name: params[7],
+                  action: params[8],
+                  tool_name: params[9],
+                  run_kind: params[10],
+                  status: params[11],
+                  interaction_state: params[12],
+                  goal_text: params[13],
+                  resource_refs_json: params[14],
+                  params_json: params[15],
+                  steps_json: params[16],
+                  current_step_id: params[17],
+                  artifacts_json: params[18],
+                  output_dir: params[19],
+                  run_state_path: params[20],
+                  scene_scores_path: params[21],
+                  delivery_report_path: params[22],
+                  failure_kind: params[23],
+                  failure_detail: params[24],
+                  job_id: params[25],
+                  detached_task_id: params[26],
+                  resume_payload_json: params[27],
+                  created_at: params[28],
+                  started_at: params[29],
+                  updated_at: params[30],
+                  finished_at: params[31],
                 })
                 return { changes: 1 }
               },
@@ -122,6 +123,21 @@ function createRepositoryHarness() {
               },
               get(id: string) {
                 return rows.get(id) as any
+              },
+              all() {
+                return []
+              },
+            }
+          }
+
+          if (sql.includes('FROM run_meta')
+            || sql.includes('SELECT id FROM chat_conversations WHERE id')) {
+            return {
+              run() {
+                return { changes: 0 }
+              },
+              get() {
+                return undefined
               },
               all() {
                 return []

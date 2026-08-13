@@ -591,7 +591,7 @@ function findTaskRunForLifecycleEvent(
   // 'skill_lifecycle', producing the very `run_kind='primitive' AND
   // tool_name='skill_lifecycle'` violation Stage Q schema CHECK forbids.
   if (event.taskRunId) {
-    const exact = repository.get(event.taskRunId)
+    const exact = repository.getRaw(event.taskRunId)
     if (exact && !isChildRunRecord(exact)) {
       if (SKILL_TASK_RUN_INVARIANT_ENFORCED && exact.runKind === 'primitive') {
         // fall through; lifecycle should NOT reuse a primitive row.
@@ -1114,6 +1114,8 @@ function readLiveRunStateStatus(runStatePath?: string | null, outputDir?: string
 export function upsertDetachedSkillTaskRun(record: {
   id: string
   scopeId?: string | null
+  ownerRunId?: string | null
+  messageVisibilityEpoch?: number
   sessionId?: string | null
   agent?: string | null
   skillId: string
@@ -1176,9 +1178,10 @@ export function upsertDetachedSkillTaskRun(record: {
       repository.create({
       id: createSkillTaskRunId(),
       scopeId: record.scopeId ?? record.sessionId ?? null,
+      messageVisibilityEpoch: record.messageVisibilityEpoch,
       sessionId: record.sessionId ?? record.scopeId ?? null,
       agent: record.agent ?? null,
-      runId: record.id,
+      runId: record.ownerRunId ?? null,
       skillId: record.skillId,
       skillName: record.skillId,
       action: record.action,

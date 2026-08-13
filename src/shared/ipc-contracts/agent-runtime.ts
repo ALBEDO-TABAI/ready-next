@@ -5,6 +5,8 @@ import type { CanonicalAssistantMessage } from './canonical-message'
 export const PRE_PERSISTENCE_ERROR_KINDS = [
   'scope_missing',
   'attachment_unavailable',
+  'configuration_unavailable',
+  'external_service_unavailable',
   'host_unavailable',
   'thread_busy',
   'start_identity_capacity_exhausted',
@@ -52,6 +54,30 @@ export type AgentIngressMessageBlock =
   | { type: 'image'; base64: string; mimeType: string }
   | { type: 'video'; base64: string; mimeType: string }
 
+export type SendScopedResourceSelection =
+  | {
+      kind: 'local_file'
+      id: string
+      name: string
+      path: string
+      size: number
+      ext: string
+      rendererType: 'image' | 'text' | 'spreadsheet' | 'other'
+    }
+  | {
+      kind: 'local_directory'
+      id: string
+      name: string
+      path: string
+    }
+  | {
+      kind: 'skill'
+      id: string
+      name: string
+      path: string
+      skillId?: string
+    }
+
 export type SendScopedAttachmentConfirmationInput = {
   selectedCount: number
   metadataCount: number
@@ -67,11 +93,33 @@ export type SendScopedUserMessage = {
   attachmentConfirmation: SendScopedAttachmentConfirmationInput
 }
 
+export type CodexCurrentDocumentAnchor = {
+  kind: 'current_document'
+  logicalResourceId: string
+  tabId: string
+  title: string
+  pane: 'primary' | 'split'
+  pathDigest: string | null
+  incarnationKey: string
+  currentVersion: string
+  currentDigest: string
+  supersedesVersion: string | null
+  policyEpoch: number
+  readScope: {
+    operation: 'read_section'
+    maxChars: 30_000
+  }
+}
+
 export type SendScopedRequest = {
   scopeId: string
   requestId: string
+  expectedAliasGeneration: number
+  expectedMessageVisibilityEpoch: number
   message: string | AgentIngressMessageBlock[]
   userMessage: SendScopedUserMessage
+  resources?: SendScopedResourceSelection[]
+  currentDocumentAnchor?: CodexCurrentDocumentAnchor
 }
 
 export type PersistedIngress = {
@@ -100,6 +148,7 @@ export type SendScopedResponse =
       success: true
       disposition: 'terminal_success'
       ownerRunId: string
+      aliasGeneration: number
       shouldClearInput: true
       preserveInput: false
       retryableByUser: false
@@ -154,6 +203,7 @@ export type SendScopedResponse =
       success: false
       disposition: 'terminal_failure_after_persistence'
       ownerRunId: string
+      aliasGeneration: number
       shouldClearInput: true
       preserveInput: false
       retryableByUser: false
@@ -204,6 +254,8 @@ export type IngressAdmittedEvent = {
   requestId: string
   scopeId: string
   originUserMessageId: string
+  aliasGeneration: number
+  messageVisibilityEpoch: number
   ingressAdmittedRevision: number
   ingressAdmittedDigest: string
   admittedAt: string
@@ -225,9 +277,21 @@ export type CreateSessionResult =
       evidenceDigest: string
     }
 
+export type CreateSessionRequest = {
+  agentId: string
+}
+
 export type LifecycleRequest = {
   aliasId: string
   aliasGeneration: number
+}
+
+export type StopLifecycleRequest = LifecycleRequest & {
+  readyRunId: string
+}
+
+export type ProductLifecycleRequest = LifecycleRequest & {
+  readyRunId: string | null
 }
 
 export type LifecycleFailureCode =
@@ -267,6 +331,7 @@ export type LifecycleResult =
       retiredGeneration: number
       retirementTransactionDigest: string
       archiveDisposition: 'not_required'
+      scopeClosureEvidenceDigest: string
     }
   | {
       ok: true
@@ -277,6 +342,7 @@ export type LifecycleResult =
       lastCommittedReadyTerminalTransactionDigest: string
       retirementTransactionDigest: string
       archiveDisposition: 'not_required'
+      scopeClosureEvidenceDigest: string
     }
   | {
       ok: true
@@ -287,7 +353,9 @@ export type LifecycleResult =
       idleThreadReadDigest: string
       lastCommittedProductTerminalDigest: string
       retirementTransactionDigest: string
-      archiveDisposition: 'not_required' | 'queued_cleanup'
+      archiveDisposition: 'durable_cleanup_pending'
+      archiveIntentDigest: string
+      scopeClosureEvidenceDigest: string
     }
   | {
       ok: true
@@ -300,7 +368,9 @@ export type LifecycleResult =
       terminal: 'completed' | 'interrupted' | 'failed'
       closeoutDigest: string
       retirementTransactionDigest: string
-      archiveDisposition: 'not_required' | 'queued_cleanup'
+      archiveDisposition: 'durable_cleanup_pending'
+      archiveIntentDigest: string
+      scopeClosureEvidenceDigest: string
     }
   | {
       ok: true
@@ -323,6 +393,7 @@ export type LifecycleResult =
 
 const nonEmptyString = z.string().min(1)
 const digestString = z.string().min(1)
+const JITLESS_PARSE = { jitless: true } as const
 
 const canonicalAssistantMessageSchema = z.object({
   id: nonEmptyString,
@@ -347,9 +418,32 @@ const agentIngressMessageBlockSchema = z.discriminatedUnion('type', [
   }).strict(),
 ])
 
+const sha256Digest = z.string().regex(/^[0-9a-f]{64}$/)
+const sha256Version = z.string().regex(/^sha256:[0-9a-f]{64}$/)
+
+export const codexCurrentDocumentAnchorSchema: z.ZodType<CodexCurrentDocumentAnchor> = z.object({
+  kind: z.literal('current_document'),
+  logicalResourceId: nonEmptyString,
+  tabId: nonEmptyString,
+  title: z.string(),
+  pane: z.enum(['primary', 'split']),
+  pathDigest: sha256Digest.nullable(),
+  incarnationKey: sha256Digest,
+  currentVersion: sha256Version,
+  currentDigest: sha256Digest,
+  supersedesVersion: sha256Version.nullable(),
+  policyEpoch: z.number().int().positive().safe(),
+  readScope: z.object({
+    operation: z.literal('read_section'),
+    maxChars: z.literal(30_000),
+  }).strict(),
+}).strict()
+
 export const sendScopedRequestSchema: z.ZodType<SendScopedRequest> = z.object({
   scopeId: nonEmptyString,
   requestId: nonEmptyString,
+  expectedAliasGeneration: z.number().int().positive(),
+  expectedMessageVisibilityEpoch: z.number().int().nonnegative(),
   message: z.union([z.string(), z.array(agentIngressMessageBlockSchema).min(1)]),
   userMessage: z.object({
     id: nonEmptyString,
@@ -363,6 +457,31 @@ export const sendScopedRequestSchema: z.ZodType<SendScopedRequest> = z.object({
       inputFailedCount: z.number().int().nonnegative(),
     }).strict(),
   }).strict(),
+  resources: z.array(z.discriminatedUnion('kind', [
+    z.object({
+      kind: z.literal('local_file'),
+      id: nonEmptyString,
+      name: nonEmptyString,
+      path: nonEmptyString,
+      size: z.number().int().nonnegative().safe(),
+      ext: z.string(),
+      rendererType: z.enum(['image', 'text', 'spreadsheet', 'other']),
+    }).strict(),
+    z.object({
+      kind: z.literal('local_directory'),
+      id: nonEmptyString,
+      name: nonEmptyString,
+      path: nonEmptyString,
+    }).strict(),
+    z.object({
+      kind: z.literal('skill'),
+      id: nonEmptyString,
+      name: nonEmptyString,
+      path: nonEmptyString,
+      skillId: nonEmptyString.optional(),
+    }).strict(),
+  ])).max(32).optional(),
+  currentDocumentAnchor: codexCurrentDocumentAnchorSchema.optional(),
 }).strict()
 
 export const ingressAdmittedEventSchema: z.ZodType<IngressAdmittedEvent> = z.object({
@@ -370,6 +489,8 @@ export const ingressAdmittedEventSchema: z.ZodType<IngressAdmittedEvent> = z.obj
   requestId: nonEmptyString,
   scopeId: nonEmptyString,
   originUserMessageId: nonEmptyString,
+  aliasGeneration: z.number().int().positive(),
+  messageVisibilityEpoch: z.number().int().nonnegative(),
   ingressAdmittedRevision: z.number().int().positive(),
   ingressAdmittedDigest: digestString,
   admittedAt: nonEmptyString,
@@ -401,6 +522,7 @@ export const sendScopedResponseSchema: z.ZodType<SendScopedResponse> = z.union([
     success: z.literal(true),
     disposition: z.literal('terminal_success'),
     ownerRunId: nonEmptyString,
+    aliasGeneration: z.number().int().positive(),
     shouldClearInput: z.literal(true),
     preserveInput: z.literal(false),
     retryableByUser: z.literal(false),
@@ -435,6 +557,7 @@ export const sendScopedResponseSchema: z.ZodType<SendScopedResponse> = z.union([
     success: z.literal(false),
     disposition: z.literal('terminal_failure_after_persistence'),
     ownerRunId: nonEmptyString,
+    aliasGeneration: z.number().int().positive(),
     shouldClearInput: z.literal(true),
     preserveInput: z.literal(false),
     retryableByUser: z.literal(false),
@@ -446,15 +569,15 @@ export const sendScopedResponseSchema: z.ZodType<SendScopedResponse> = z.union([
 ])
 
 export function parseSendScopedResponse(value: unknown): SendScopedResponse {
-  return sendScopedResponseSchema.parse(value)
+  return sendScopedResponseSchema.parse(value, JITLESS_PARSE)
 }
 
 export function parseSendScopedRequest(value: unknown): SendScopedRequest {
-  return sendScopedRequestSchema.parse(value)
+  return sendScopedRequestSchema.parse(value, JITLESS_PARSE)
 }
 
 export function parseIngressAdmittedEvent(value: unknown): IngressAdmittedEvent {
-  return ingressAdmittedEventSchema.parse(value)
+  return ingressAdmittedEventSchema.parse(value, JITLESS_PARSE)
 }
 
 export const createSessionResultSchema: z.ZodType<CreateSessionResult> = z.union([
@@ -474,9 +597,25 @@ export const createSessionResultSchema: z.ZodType<CreateSessionResult> = z.union
   }).strict(),
 ])
 
+export const createSessionRequestSchema: z.ZodType<CreateSessionRequest> = z.object({
+  agentId: nonEmptyString,
+}).strict()
+
 export const lifecycleRequestSchema: z.ZodType<LifecycleRequest> = z.object({
   aliasId: nonEmptyString,
   aliasGeneration: z.number().int().positive(),
+}).strict()
+
+export const stopLifecycleRequestSchema: z.ZodType<StopLifecycleRequest> = z.object({
+  aliasId: nonEmptyString,
+  aliasGeneration: z.number().int().positive(),
+  readyRunId: nonEmptyString,
+}).strict()
+
+export const productLifecycleRequestSchema: z.ZodType<ProductLifecycleRequest> = z.object({
+  aliasId: nonEmptyString,
+  aliasGeneration: z.number().int().positive(),
+  readyRunId: nonEmptyString.nullable(),
 }).strict()
 
 const lifecycleFailureSchema = z.object({
@@ -525,6 +664,7 @@ export const lifecycleResultSchema: z.ZodType<LifecycleResult> = z.union([
     retiredGeneration: z.number().int().positive(),
     retirementTransactionDigest: digestString,
     archiveDisposition: z.literal('not_required'),
+    scopeClosureEvidenceDigest: digestString,
   }).strict(),
   z.object({
     ok: z.literal(true),
@@ -535,6 +675,7 @@ export const lifecycleResultSchema: z.ZodType<LifecycleResult> = z.union([
     lastCommittedReadyTerminalTransactionDigest: digestString,
     retirementTransactionDigest: digestString,
     archiveDisposition: z.literal('not_required'),
+    scopeClosureEvidenceDigest: digestString,
   }).strict(),
   z.object({
     ok: z.literal(true),
@@ -545,7 +686,9 @@ export const lifecycleResultSchema: z.ZodType<LifecycleResult> = z.union([
     idleThreadReadDigest: digestString,
     lastCommittedProductTerminalDigest: digestString,
     retirementTransactionDigest: digestString,
-    archiveDisposition: z.enum(['not_required', 'queued_cleanup']),
+    archiveDisposition: z.literal('durable_cleanup_pending'),
+    archiveIntentDigest: digestString,
+    scopeClosureEvidenceDigest: digestString,
   }).strict(),
   z.object({
     ok: z.literal(true),
@@ -558,7 +701,9 @@ export const lifecycleResultSchema: z.ZodType<LifecycleResult> = z.union([
     terminal: z.enum(['completed', 'interrupted', 'failed']),
     closeoutDigest: digestString,
     retirementTransactionDigest: digestString,
-    archiveDisposition: z.enum(['not_required', 'queued_cleanup']),
+    archiveDisposition: z.literal('durable_cleanup_pending'),
+    archiveIntentDigest: digestString,
+    scopeClosureEvidenceDigest: digestString,
   }).strict(),
   z.object({
     ok: z.literal(true),
@@ -573,15 +718,27 @@ export const lifecycleResultSchema: z.ZodType<LifecycleResult> = z.union([
 ])
 
 export function parseCreateSessionResult(value: unknown): CreateSessionResult {
-  return createSessionResultSchema.parse(value)
+  return createSessionResultSchema.parse(value, JITLESS_PARSE)
+}
+
+export function parseCreateSessionRequest(value: unknown): CreateSessionRequest {
+  return createSessionRequestSchema.parse(value, JITLESS_PARSE)
 }
 
 export function parseLifecycleResult(value: unknown): LifecycleResult {
-  return lifecycleResultSchema.parse(value)
+  return lifecycleResultSchema.parse(value, JITLESS_PARSE)
 }
 
 export function parseLifecycleRequest(value: unknown): LifecycleRequest {
-  return lifecycleRequestSchema.parse(value)
+  return lifecycleRequestSchema.parse(value, JITLESS_PARSE)
+}
+
+export function parseStopLifecycleRequest(value: unknown): StopLifecycleRequest {
+  return stopLifecycleRequestSchema.parse(value, JITLESS_PARSE)
+}
+
+export function parseProductLifecycleRequest(value: unknown): ProductLifecycleRequest {
+  return productLifecycleRequestSchema.parse(value, JITLESS_PARSE)
 }
 
 function assertNever(value: never): never {

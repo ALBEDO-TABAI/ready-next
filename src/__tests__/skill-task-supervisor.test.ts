@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import test from 'node:test'
+import test, { after, before } from 'node:test'
 
 import {
   SkillTaskSupervisor,
@@ -12,6 +12,12 @@ import {
 } from '../main/modules/agent-control/skills/skill-task-supervisor'
 import type { DetachedSkillTaskRecord } from '../main/modules/agent-control/detached-skill-task-tracker'
 import type { SkillTaskRunRecord } from '../main/modules/repositories/skill-task-run-repository'
+import { __setScopeContextEpochDatabaseForTests } from '../main/modules/agent-control/session/scope-context-epoch'
+
+before(() => {
+  __setScopeContextEpochDatabaseForTests({ getRawDb: () => ({ prepare: () => ({ get: () => undefined }) }) as never })
+})
+after(() => __setScopeContextEpochDatabaseForTests(null))
 
 const NOW = Date.parse('2026-04-28T02:00:00.000Z')
 

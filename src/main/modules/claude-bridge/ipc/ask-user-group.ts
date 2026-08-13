@@ -217,11 +217,21 @@ export const askUserGroup: IpcChannelGroup<AskUserGroupDeps> = {
           .filter((entry) => liveIds.has(entry.messageId))
           .map((entry) => {
             const aug = entry.meta.askUserQuestions as Record<string, unknown>
+            const codexIdentity = aug.codexRunIdentity && typeof aug.codexRunIdentity === 'object'
+              ? aug.codexRunIdentity as Record<string, unknown>
+              : null
             return {
               cardId: entry.messageId,
               conversationId: entry.conversationId,
               askedAt: typeof aug.askedAt === 'number' ? aug.askedAt : Date.parse(entry.timestamp),
               questions: Array.isArray(aug.questions) ? aug.questions : [],
+              ...(codexIdentity
+                ? {
+                    readyRunId: codexIdentity.readyRunId,
+                    aliasGeneration: codexIdentity.aliasGeneration,
+                    messageVisibilityEpoch: codexIdentity.messageVisibilityEpoch,
+                  }
+                : {}),
             }
           })
         return { success: true, data: cards }

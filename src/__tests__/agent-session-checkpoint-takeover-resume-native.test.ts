@@ -1,17 +1,10 @@
 import assert from 'node:assert/strict'
-import { createRequire } from 'node:module'
 import test from 'node:test'
 
 import type { AgentInputItem } from '@openai/agents'
-import type { DatabaseConnection } from '../main/modules/database'
-import { runMigrations, type MigrationDatabase } from '../main/modules/migrations'
 import { AgentSessionCheckpointRepository, workflowDigest } from '../main/modules/repositories/agent-session-checkpoint-repository'
 import { TaskProjectionRepository } from '../main/modules/repositories/task-projection-repository'
 import { RunMetaRepository } from '../main/modules/agent-control/task-projection/run-meta-repository'
-import { browserWorkflowStableDigest } from '../main/modules/browser-engine/browser-workflow-evidence'
-import { reconcileStartupRunsOnStartup } from '../main/modules/app-control/startup-run-reconciler'
-import { buildPreparedSkillTurnTruth } from '../main/modules/agent-control/skills/prepared-skill-turn'
-import { buildExplicitNoSkillAuthorization } from '../main/modules/agent-control/skills/skill-tool-authorization'
 import { AgentSessionInputController } from '../main/modules/agent-control/runtime-core/agent-session-input-controller'
 import {
   buildBrowserVerifierRecoveryItem,
@@ -20,19 +13,13 @@ import {
 } from '../main/modules/agent-control/runtime-core/agent-sdk-browser-suspension'
 import type { ToolBridgeRuntimeContext } from '../main/modules/agent-control/runtime-core/agent-sdk-types'
 import { createTaskBudgetRuntime } from '../main/modules/agent-control/task-projection/run-budget-policy'
-import {
-  KIMI_K3_SESSION_IDENTITY,
-  KIMI_K3_SESSION_IDENTITY_FIELD,
-  inspectKimiK3History,
-} from '../shared/ai-providers/kimi-k3'
 import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
 import { BrowserTargetClaimRepository, BrowserTargetClaimService } from '../main/modules/browser-engine/browser-target-claims'
 import { isAgentBrowserError } from '../main/modules/browser-engine/agent-browser-errors'
 import {
-  kimiK3ProviderTestData as k3ProviderData,
   openProviderCheckpointTestDb as openDb,
   providerCheckpointExecutionBinding as executionBinding,
-  providerCheckpointPreparedSkill as preparedSkill,
+  providerCheckpointPreparedSkill as preparedSkill
 } from './provider-checkpoint-test-fixtures'
 
 
@@ -49,9 +36,15 @@ test('verifier rejection facts survive incomplete suspension and reach the resum
     const ownerRunId = 'run-browser-incomplete-suspension'
     const ownerBinding = executionBinding(ownerRunId)
     const now = '2026-07-19T01:30:00.000Z'
+    db.prepare(
+      `INSERT INTO chat_conversations (
+         id, agent, title, created_at, updated_at, message_visibility_epoch
+       ) VALUES (?, 'butler', 'Browser incomplete suspension', ?, ?, 0)`,
+    ).run(scopeId, now, now)
     projections.create({
       taskId: parentTaskId,
       scopeId,
+      messageVisibilityEpoch: 0,
       runId: ownerRunId,
       taskType: 'research',
       module: 'browser',
@@ -69,18 +62,16 @@ test('verifier rejection facts survive incomplete suspension and reach the resum
       runId: ownerRunId,
       taskId: parentTaskId,
       scopeId,
+      messageVisibilityEpoch: 0,
       agentId: 'butler',
       executionBinding: ownerBinding,
       status: 'running',
     }, Date.parse(now))
-    db.prepare(
-      `INSERT INTO chat_conversations (id, agent, title, created_at, updated_at)
-       VALUES (?, 'butler', 'Browser incomplete suspension', ?, ?)`,
-    ).run(scopeId, now, now)
     const sourceMessageId = 'message-browser-incomplete-suspension'
     db.prepare(
-      `INSERT INTO chat_messages (id, conversation_id, role, content, timestamp, meta_json)
-       VALUES (?, ?, 'user', '完成多个网页研究目标', ?, '{}')`,
+      `INSERT INTO chat_messages (
+         id, conversation_id, role, content, timestamp, meta_json, message_visibility_epoch
+       ) VALUES (?, ?, 'user', '完成多个网页研究目标', ?, '{}', 0)`,
     ).run(sourceMessageId, scopeId, now)
     const route = await repository.bindBrowserWorkflowRoute({
       parentTaskId,
@@ -229,6 +220,11 @@ test('verifier rejection facts survive incomplete suspension and reach the resum
       now: '2026-07-19T01:31:01.000Z',
     })
     assert.equal(resumed.checkpoint.ownerRunId, newOwnerRunId)
+    assert.equal(
+      db.prepare('SELECT message_visibility_epoch FROM run_meta WHERE run_id = ?')
+        .get<{ message_visibility_epoch: number }>(newOwnerRunId)?.message_visibility_epoch,
+      0,
+    )
     assert.deepEqual(
       resumed.checkpoint.finalInput.find((item) => Boolean(
         (item as { providerData?: Record<string, unknown> }).providerData
@@ -284,9 +280,15 @@ test('human takeover keeps its exact user instruction in the durable suspension 
     const ownerRunId = 'run-browser-human-takeover'
     const ownerBinding = executionBinding(ownerRunId)
     const now = '2026-07-20T00:00:00.000Z'
+    db.prepare(
+      `INSERT INTO chat_conversations (
+         id, agent, title, created_at, updated_at, message_visibility_epoch
+       ) VALUES (?, 'butler', 'Browser human takeover', ?, ?, 0)`,
+    ).run(scopeId, now, now)
     projections.create({
       taskId: parentTaskId,
       scopeId,
+      messageVisibilityEpoch: 0,
       runId: ownerRunId,
       taskType: 'research',
       module: 'browser',
@@ -304,18 +306,16 @@ test('human takeover keeps its exact user instruction in the durable suspension 
       runId: ownerRunId,
       taskId: parentTaskId,
       scopeId,
+      messageVisibilityEpoch: 0,
       agentId: 'butler',
       executionBinding: ownerBinding,
       status: 'running',
     }, Date.parse(now))
-    db.prepare(
-      `INSERT INTO chat_conversations (id, agent, title, created_at, updated_at)
-       VALUES (?, 'butler', 'Browser human takeover', ?, ?)`,
-    ).run(scopeId, now, now)
     const sourceMessageId = 'message-browser-human-takeover'
     db.prepare(
-      `INSERT INTO chat_messages (id, conversation_id, role, content, timestamp, meta_json)
-       VALUES (?, ?, 'user', '完成网页任务', ?, '{}')`,
+      `INSERT INTO chat_messages (
+         id, conversation_id, role, content, timestamp, meta_json, message_visibility_epoch
+       ) VALUES (?, ?, 'user', '完成网页任务', ?, '{}', 0)`,
     ).run(sourceMessageId, scopeId, now)
     const route = await repository.bindBrowserWorkflowRoute({
       parentTaskId,
@@ -355,6 +355,7 @@ test('human takeover keeps its exact user instruction in the durable suspension 
       ownerRunId,
       scopeId,
       sessionId: null,
+      messageVisibilityEpoch: 0,
     })
     if (isAgentBrowserError(claim)) throw new Error(claim.message)
     const siblingClaim = claimService.acquire({
@@ -369,6 +370,7 @@ test('human takeover keeps its exact user instruction in the durable suspension 
       ownerRunId,
       scopeId,
       sessionId: null,
+      messageVisibilityEpoch: 0,
     })
     if (isAgentBrowserError(siblingClaim)) throw new Error(siblingClaim.message)
     const additionalUserClaim = claimService.acquire({
@@ -383,6 +385,7 @@ test('human takeover keeps its exact user instruction in the durable suspension 
       ownerRunId,
       scopeId,
       sessionId: null,
+      messageVisibilityEpoch: 0,
     })
     if (isAgentBrowserError(additionalUserClaim)) throw new Error(additionalUserClaim.message)
     const takeover = await repository.createHumanTakeoverIntent({
@@ -525,6 +528,11 @@ test('human takeover keeps its exact user instruction in the durable suspension 
     const resumed = claimService.read(claim.logicalKey)
     assert.equal(resumed?.state, 'held')
     assert.equal(resumed?.ownerRunId, newOwnerRunId)
+    assert.equal(
+      db.prepare('SELECT message_visibility_epoch FROM run_meta WHERE run_id = ?')
+        .get<{ message_visibility_epoch: number }>(newOwnerRunId)?.message_visibility_epoch,
+      0,
+    )
     assert.equal(resumed?.generation, claim.generation + 2)
     assert.equal(claimService.read(siblingClaim.logicalKey)?.state, 'suspended')
     const additionalResume = concurrentWake[1]
@@ -564,4 +572,3 @@ test('human takeover keeps its exact user instruction in the durable suspension 
     db.close()
   }
 })
-

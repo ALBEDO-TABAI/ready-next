@@ -8,6 +8,7 @@ import type { BrowserMutationBoundary } from './browser-action-executor'
 
 const DIRECT_DELIVERY_TRANSPORTS = new Set<PropertyKey>([
   'createTab',
+  'ensureAgentWorkTab',
   'switchTab',
   'closeTab',
   'navigate',
@@ -27,6 +28,7 @@ const DIRECT_DELIVERY_TRANSPORTS = new Set<PropertyKey>([
 
 const TRANSPORT_METHODS = new Set<PropertyKey>([
   'createTab',
+  'ensureAgentWorkTab',
   'switchTab',
   'closeTab',
   'navigate',
@@ -143,11 +145,12 @@ export function browserMutationController(
           if (DIRECT_DELIVERY_TRANSPORTS.has(property)) {
             boundary.recordMechanicalFact({
               delivery: transportSucceeded(resolved) ? 'delivered' : 'not_delivered',
-              ...(property === 'createTab' && resolved && typeof resolved === 'object'
+              ...((property === 'createTab' || property === 'ensureAgentWorkTab')
+                && resolved && typeof resolved === 'object'
                 ? {
                     effect: 'popup' as const,
-                    postActionTabId: typeof (resolved as Record<string, unknown>).id === 'string'
-                      ? String((resolved as Record<string, unknown>).id)
+                    postActionTabId: typeof (resolved as Record<string, unknown>).tabId === 'string'
+                      ? String((resolved as Record<string, unknown>).tabId)
                       : null,
                   }
                 : {}),

@@ -44,6 +44,7 @@ export async function recordAdmissionRejection(
     runId: string
     taskId: string
     scopeId: string | null
+    messageVisibilityEpoch?: number
     status: string
     terminalReason: TurnTerminalReason
     finalText: string
@@ -62,6 +63,7 @@ export async function recordAdmissionRejection(
     runId: params.runId,
     taskId: params.taskId,
     scopeId: params.scopeId,
+    messageVisibilityEpoch: params.messageVisibilityEpoch,
     durationMs: 1,
     toolCallsUsed: 0,
     initiator: 'admission',
@@ -97,6 +99,7 @@ export async function recordAdmissionRejection(
       runId: params.runId,
       taskId: params.taskId,
       scopeId: params.scopeId,
+      messageVisibilityEpoch: params.messageVisibilityEpoch,
       status: params.status,
       terminalReason: params.terminalReason,
       taskBudgetRuntime: null,
@@ -127,6 +130,7 @@ export async function persistRunMetaSnapshot(
     runId: string
     taskId: string
     scopeId: string | null
+    messageVisibilityEpoch?: number
     status: string
     terminalReason: TurnTerminalReason | null
     taskBudgetRuntime: TaskBudgetRuntime | null
@@ -136,14 +140,18 @@ export async function persistRunMetaSnapshot(
     firstMessageText: string
     finalText: string
   }
-): Promise<void> {
+): Promise<boolean> {
+  // Lightweight SDK hosts used outside the full Ready runtime do not own the
+  // canonical run_meta ledger. Their absence is not a failed persistence
+  // attempt; production hosts expose the factory and must return a repository.
+  if (!host.runtime) return true
   let repository: RunMetaRepositoryLike | null = null
   try {
-    repository = (host.runtime?.getRunMetaRepository?.() || null) as RunMetaRepositoryLike | null
+    repository = host.getRunMetaRepositoryForFinalize()
   } catch {
-    repository = null // silent-catch: missing repository skips the best-effort run-meta snapshot
+    repository = null
   }
-  if (!repository) return
+  if (!repository) return false
   const budgetDiagnostics = taskBudgetDiagnostics(params.taskBudgetRuntime)
   let status = params.status || (params.terminalReason === 'done' ? 'done' : 'running')
   let terminalReason = params.terminalReason
@@ -191,6 +199,7 @@ export async function persistRunMetaSnapshot(
     runId: params.runId,
     taskId: params.taskId,
     scopeId: params.scopeId,
+    messageVisibilityEpoch: params.messageVisibilityEpoch,
     agentId: publicAgentName(params.agentName),
     status,
     taskType:
@@ -224,8 +233,10 @@ export async function persistRunMetaSnapshot(
   try {
     if (repository.get(params.runId)) repository.update(params.runId, input)
     else repository.create(input)
+    return true
   } catch (error) {
     log(`persist run_meta failed runId=${params.runId}: ${errorMessage(error)}`)
+    return false
   }
 }
 
@@ -303,6 +314,7 @@ export interface TurnErrorCloseoutContext {
   runId: string
   taskId: string
   sessionId?: string
+  messageVisibilityEpoch?: number
   runStartedAt: number
   runHandle: RunHandle
   abortController: AbortController
@@ -352,6 +364,7 @@ export interface TurnErrorCloseoutContext {
   buildLocalDocumentWriteBudgetCheckpoint: () => string
   buildToolProgressBudgetCheckpoint: (usedTools: string[]) => string
   buildResult: (params: Parameters<typeof buildExecutionTurnResult>[1]) => ExecutionTurnResult
+  isCurrentVisibilityContext: () => boolean
 }
 
 export function shouldCheckpointProviderFailure(
@@ -456,6 +469,26 @@ export async function handleAgentSdkTurnError(
         : abortInitiator === 'user_stop'
           ? '已手动停止，进度已保存至当前会话。'
           : '任务已停止。'
+    if (!ctx.isCurrentVisibilityContext()) {
+      return buildResult({
+        success: false,
+        finalText: '',
+        cancelled: true,
+        taskId,
+        usedTools,
+        transcriptEvents,
+        projectionPatches,
+        terminalReason,
+        taskBudgetRuntime: runMetaBudgetRuntime,
+        providerDiagnostics: runMetaProviderDiagnostics,
+        usage: runMetaUsage,
+        scopeRunAuthority: {
+          state: 'lost',
+          reason: 'preempted_by_same_user',
+          currentRunId: latestRunId && latestRunId !== runId ? latestRunId : null,
+        },
+      })
+    }
     const finalized = await finalizeRunOutcome(
       {
         kind: deliveryWallClockExceeded
@@ -650,6 +683,7 @@ export async function finalizeAgentSdkTurnLifecycle(ctx: {
   runId: string
   taskId: string
   sessionId?: string
+  messageVisibilityEpoch?: number
   status: string
   terminalReason: TurnTerminalReason | null
   taskBudgetRuntime: TaskBudgetRuntime | null
@@ -660,7 +694,6 @@ export async function finalizeAgentSdkTurnLifecycle(ctx: {
   finalText: string
   session: AgentSdkSession
   runHandle: RunHandle
-  finishBackgroundTaskTerminalReminderRun: () => void
   ownsBudgetCheckpointFlight: boolean
   budgetCheckpointFlightKey: string | null
 }): Promise<void> {
@@ -670,6 +703,7 @@ export async function finalizeAgentSdkTurnLifecycle(ctx: {
       runId: ctx.runId,
       taskId: ctx.taskId,
       scopeId: ctx.sessionId || null,
+      messageVisibilityEpoch: ctx.messageVisibilityEpoch,
       status: ctx.status,
       terminalReason: ctx.terminalReason,
       taskBudgetRuntime: ctx.taskBudgetRuntime,
@@ -681,7 +715,6 @@ export async function finalizeAgentSdkTurnLifecycle(ctx: {
     })
     await ctx.host.runLifecycle.finalizeRun(ctx.name, ctx.session, ctx.runHandle)
   } finally {
-    ctx.finishBackgroundTaskTerminalReminderRun()
     if (ctx.ownsBudgetCheckpointFlight) releaseBudgetCheckpointFlight(ctx.budgetCheckpointFlightKey)
   }
 }

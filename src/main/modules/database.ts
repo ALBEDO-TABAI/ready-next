@@ -1,6 +1,5 @@
 import { createRequire } from 'module'
 import { createHash } from 'crypto'
-import { join } from 'path'
 import { resolveReadyDatabasePath } from './database-path'
 import { runMigrations } from './migrations'
 import {
@@ -440,6 +439,10 @@ export interface ChatConversationRecord {
   source_id: string
   thread_key: string
   meta_json: string | null
+  closed_at?: string | null
+  closed_reason?: string | null
+  close_evidence_digest?: string | null
+  message_visibility_epoch?: number
   created_at: string
   updated_at: string
 }
@@ -458,6 +461,7 @@ export interface ChatMessageRecord {
   content: string
   timestamp: string
   meta_json: string | null
+  message_visibility_epoch?: number
 }
 
 export interface ConversationAttachmentRecord {
@@ -2288,8 +2292,9 @@ export class DatabaseManager {
   updateConversationTitle(id: string, title: string): void {
     if (!this.db) return
     const existing = this.getConversationScope(id)
+    if (!existing) return
     this.db.prepare(
-      'UPDATE chat_conversations SET title = ?, resume_title = ?, updated_at = ? WHERE id = ?'
+      'UPDATE chat_conversations SET title = ?, resume_title = ?, updated_at = ? WHERE id = ? AND closed_at IS NULL'
     ).run(title, title, new Date().toISOString(), id)
     if (existing) this.syncConversationRecallMetadata(id)
   }
@@ -2299,7 +2304,7 @@ export class DatabaseManager {
     return this.db.prepare(
       `SELECT id, agent, title, created_at, updated_at
        FROM chat_conversations
-       WHERE agent = ? AND source_kind = 'local'
+       WHERE agent = ? AND source_kind = 'local' AND closed_at IS NULL
        ORDER BY updated_at DESC LIMIT ?`
     ).all<{ id: string; agent: string; title: string; created_at: string; updated_at: string }>(agent, limit)
   }
@@ -2307,7 +2312,7 @@ export class DatabaseManager {
   getConversationScope(id: string): ChatConversationRecord | null {
     if (!this.db) return null
     const row = this.db.prepare(
-      'SELECT * FROM chat_conversations WHERE id = ? LIMIT 1'
+      'SELECT * FROM chat_conversations WHERE id = ? AND closed_at IS NULL LIMIT 1'
     ).get<ChatConversationRecord>(id)
     return row ?? null
   }
@@ -2322,6 +2327,7 @@ export class DatabaseManager {
     const row = this.db.prepare(
       `SELECT * FROM chat_conversations
        WHERE source_kind = ? AND source_id = ? AND thread_key = ? AND agent = ?
+         AND closed_at IS NULL
        LIMIT 1`
     ).get<ChatConversationRecord>(sourceKind, sourceId, threadKey, agent)
     return row ?? null
@@ -2343,6 +2349,10 @@ export class DatabaseManager {
   }): UpsertConversationScopeResult {
     if (!this.db) throw new Error('Database not available')
     const now = new Date().toISOString()
+    const closedIdentity = this.db.prepare(
+      'SELECT id FROM chat_conversations WHERE id = ? AND closed_at IS NOT NULL LIMIT 1',
+    ).get<{ id: string }>(payload.id)
+    if (closedIdentity) throw new Error(`Conversation scope closed: ${payload.id}`)
     const existing =
       this.getConversationScope(payload.id) ||
       this.findConversationScope(payload.sourceKind, payload.sourceId, payload.threadKey, payload.agent)
@@ -2393,7 +2403,7 @@ export class DatabaseManager {
   ): ChatConversationRecord {
     if (!this.db) throw new Error('Database not available')
     this.db.prepare(
-      'UPDATE chat_conversations SET active_agent_id = ?, handoff_generation = ?, updated_at = ? WHERE id = ?',
+      'UPDATE chat_conversations SET active_agent_id = ?, handoff_generation = ?, updated_at = ? WHERE id = ? AND closed_at IS NULL',
     ).run(activeAgentId, handoffGeneration, new Date().toISOString(), id)
     const row = this.getConversationScope(id)
     if (!row) throw new Error(`Conversation not found: ${id}`)
@@ -2407,16 +2417,21 @@ export class DatabaseManager {
     if (!this.db) return []
     const sql = agent
       ? `SELECT c.*, (
-           SELECT MAX(timestamp) FROM chat_messages m WHERE m.conversation_id = c.id
+           SELECT MAX(timestamp) FROM chat_messages m
+            WHERE m.conversation_id = c.id
+              AND m.message_visibility_epoch = c.message_visibility_epoch
          ) AS last_message_at
          FROM chat_conversations c
-         WHERE c.agent = ?
+         WHERE c.agent = ? AND c.closed_at IS NULL
          ORDER BY c.updated_at DESC
          LIMIT ?`
       : `SELECT c.*, (
-           SELECT MAX(timestamp) FROM chat_messages m WHERE m.conversation_id = c.id
+           SELECT MAX(timestamp) FROM chat_messages m
+            WHERE m.conversation_id = c.id
+              AND m.message_visibility_epoch = c.message_visibility_epoch
          ) AS last_message_at
          FROM chat_conversations c
+         WHERE c.closed_at IS NULL
          ORDER BY c.updated_at DESC
          LIMIT ?`
     return agent
@@ -2440,19 +2455,47 @@ export class DatabaseManager {
     content: string,
     timestamp: string,
     meta?: Record<string, unknown>,
+    expectedMessageVisibilityEpoch?: number,
   ): void {
     if (!this.db) throw new Error('Database not available')
+    const ownsTransaction = this.db.inTransaction !== true
+    if (ownsTransaction) this.db.exec('BEGIN IMMEDIATE')
+    try {
+    const scope = this.db.prepare(
+      `SELECT closed_at, message_visibility_epoch
+         FROM chat_conversations WHERE id = ? LIMIT 1`,
+    ).get<{ closed_at: string | null; message_visibility_epoch: number }>(conversationId)
+    if (!scope || scope.closed_at) throw new Error(`Conversation scope closed: ${conversationId}`)
+    if (expectedMessageVisibilityEpoch !== undefined
+      && scope.message_visibility_epoch !== expectedMessageVisibilityEpoch) {
+      throw new Error(`Conversation message visibility epoch mismatch: ${conversationId}`)
+    }
+    const existing = this.db.prepare(`
+      SELECT message_visibility_epoch FROM chat_messages WHERE id = ? LIMIT 1
+    `).get<{ message_visibility_epoch: number }>(id)
+    if (existing && existing.message_visibility_epoch !== scope.message_visibility_epoch) {
+      throw new Error(`Conversation message visibility epoch mismatch: ${conversationId}`)
+    }
     const metaJson = JSON.stringify(meta || {})
     this.db.prepare(
-      `INSERT INTO chat_messages (id, conversation_id, role, content, timestamp, meta_json)
-       VALUES (?, ?, ?, ?, ?, ?)
+      `INSERT INTO chat_messages (
+         id, conversation_id, role, content, timestamp, meta_json, message_visibility_epoch
+       ) VALUES (?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
          conversation_id = excluded.conversation_id,
          role = excluded.role,
          content = excluded.content,
          timestamp = excluded.timestamp,
          meta_json = excluded.meta_json`
-    ).run(id, conversationId, role, content, timestamp, metaJson)
+    ).run(id, conversationId, role, content, timestamp, metaJson, scope.message_visibility_epoch)
+    const visible = this.db.prepare(`
+      SELECT 1 AS visible FROM chat_messages message
+      JOIN chat_conversations active ON active.id = message.conversation_id
+      WHERE message.id = ? AND active.id = ? AND active.closed_at IS NULL
+        AND message.message_visibility_epoch = active.message_visibility_epoch
+      LIMIT 1
+    `).get<{ visible: number }>(id, conversationId)
+    if (!visible) throw new Error(`Conversation message visibility epoch mismatch: ${conversationId}`)
     this.db.prepare('DELETE FROM chat_messages_fts WHERE message_id = ?').run(id)
     this.db.prepare(
       'INSERT INTO chat_messages_fts (message_id, conversation_id, content) VALUES (?, ?, ?)'
@@ -2466,7 +2509,14 @@ export class DatabaseManager {
       updatedAt: timestamp,
     })
     // Touch conversation updated_at
-    this.db.prepare('UPDATE chat_conversations SET updated_at = ? WHERE id = ?').run(timestamp, conversationId)
+    this.db.prepare(
+      'UPDATE chat_conversations SET updated_at = ? WHERE id = ? AND closed_at IS NULL',
+    ).run(timestamp, conversationId)
+    if (ownsTransaction) this.db.exec('COMMIT')
+    } catch (error) {
+      if (ownsTransaction && this.db.inTransaction === true) this.db.exec('ROLLBACK')
+      throw error
+    }
   }
 
   /** Repair indexes for an already-committed canonical message without ever
@@ -2485,8 +2535,13 @@ export class DatabaseManager {
   ): void {
     if (!this.db) throw new Error('Database not available')
     const row = this.db.prepare(
-      `SELECT id, conversation_id, role, content, timestamp, meta_json
-         FROM chat_messages WHERE id = ? LIMIT 1`,
+      `SELECT message.id, message.conversation_id, message.role, message.content,
+              message.timestamp, message.meta_json
+         FROM chat_messages message
+         JOIN chat_conversations scope ON scope.id = message.conversation_id
+        WHERE message.id = ? AND scope.closed_at IS NULL
+          AND message.message_visibility_epoch = scope.message_visibility_epoch
+        LIMIT 1`,
     ).get<{
       id: string
       conversation_id: string
@@ -2496,6 +2551,9 @@ export class DatabaseManager {
       meta_json: string | null
     }>(expected.id)
     if (!row) throw new Error('canonical_chat_message_missing_for_repair')
+    if (!this.getConversationScope(row.conversation_id)) {
+      throw new Error(`Conversation scope closed: ${row.conversation_id}`)
+    }
     const actual = {
       id: row.id,
       conversationId: row.conversation_id,
@@ -2527,31 +2585,67 @@ export class DatabaseManager {
       previewText: actual.content,
       updatedAt: actual.timestamp,
     })
-    this.db.prepare('UPDATE chat_conversations SET updated_at = ? WHERE id = ?')
+    this.db.prepare('UPDATE chat_conversations SET updated_at = ? WHERE id = ? AND closed_at IS NULL')
       .run(actual.timestamp, actual.conversationId)
   }
 
-  updateConversationScopeMeta(id: string, meta: Record<string, unknown>): ChatConversationRecord | null {
+  updateConversationScopeMeta(
+    id: string,
+    meta: Record<string, unknown>,
+    expectedMessageVisibilityEpoch?: number,
+  ): ChatConversationRecord | null {
     if (!this.db) return null
     const existing = this.getConversationScope(id)
     if (!existing) return null
-    this.db.prepare('UPDATE chat_conversations SET meta_json = ?, updated_at = ? WHERE id = ?')
-      .run(JSON.stringify(meta || {}), new Date().toISOString(), id)
+    if (
+      expectedMessageVisibilityEpoch !== undefined
+      && existing.message_visibility_epoch !== expectedMessageVisibilityEpoch
+    ) return null
+    const result = this.db.prepare(`
+      UPDATE chat_conversations
+         SET meta_json = ?, updated_at = ?
+       WHERE id = ?
+         AND closed_at IS NULL
+         AND (? IS NULL OR message_visibility_epoch = ?)
+    `).run(
+      JSON.stringify(meta || {}),
+      new Date().toISOString(),
+      id,
+      expectedMessageVisibilityEpoch ?? null,
+      expectedMessageVisibilityEpoch ?? null,
+    ) as { changes?: number }
+    if ((result.changes ?? 0) !== 1) return null
     return this.getConversationScope(id)
   }
 
-  updateConversationRecallTaskState(conversationId: string, taskTitle?: string | null, taskSummary?: string | null): void {
-    if (!this.db) return
+  updateConversationRecallTaskState(
+    conversationId: string,
+    taskTitle?: string | null,
+    taskSummary?: string | null,
+    expectedMessageVisibilityEpoch?: number,
+  ): boolean {
+    if (!this.db) return false
+    const scope = this.db.prepare(`
+      SELECT message_visibility_epoch
+        FROM chat_conversations WHERE id = ? AND closed_at IS NULL LIMIT 1
+    `).get<{ message_visibility_epoch: number }>(conversationId)
+    if (!scope || (expectedMessageVisibilityEpoch !== undefined
+      && scope.message_visibility_epoch !== expectedMessageVisibilityEpoch)) return false
     this.syncConversationRecallMetadata(conversationId, {
       latestTaskTitle: taskTitle ?? null,
       latestTaskSummary: taskSummary ?? null,
     })
+    return true
   }
 
   getChatMessages(conversationId: string): ChatMessageRecord[] {
     if (!this.db) return []
     return this.db.prepare(
-      'SELECT * FROM chat_messages WHERE conversation_id = ? ORDER BY timestamp ASC'
+      `SELECT message.* FROM chat_messages message
+        JOIN chat_conversations scope ON scope.id = message.conversation_id
+       WHERE message.conversation_id = ? AND scope.closed_at IS NULL
+         AND message.message_visibility_epoch = scope.message_visibility_epoch
+       ORDER BY message.timestamp ASC`
     ).all<ChatMessageRecord>(conversationId)
   }
 
@@ -2575,7 +2669,12 @@ export class DatabaseManager {
     const nextContent = typeof options?.content === 'string' ? options.content : null
     if (nextContent !== null) {
       const info = this.db.prepare(
-        'UPDATE chat_messages SET meta_json = ?, content = ? WHERE id = ?'
+        `UPDATE chat_messages SET meta_json = ?, content = ? WHERE id = ?
+           AND EXISTS (
+             SELECT 1 FROM chat_conversations active
+              WHERE active.id = chat_messages.conversation_id AND active.closed_at IS NULL
+                AND chat_messages.message_visibility_epoch = active.message_visibility_epoch
+           )`
       ).run(metaJson, nextContent, messageId)
       if ((info as { changes?: number }).changes === 0) return false
       const conversationId = (this.db.prepare(
@@ -2588,7 +2687,12 @@ export class DatabaseManager {
       return true
     }
     const info = this.db.prepare(
-      'UPDATE chat_messages SET meta_json = ? WHERE id = ?'
+      `UPDATE chat_messages SET meta_json = ? WHERE id = ?
+         AND EXISTS (
+           SELECT 1 FROM chat_conversations active
+            WHERE active.id = chat_messages.conversation_id AND active.closed_at IS NULL
+              AND chat_messages.message_visibility_epoch = active.message_visibility_epoch
+         )`
     ).run(metaJson, messageId)
     return (info as { changes?: number }).changes !== 0
   }
@@ -2596,7 +2700,10 @@ export class DatabaseManager {
   getChatMessageById(messageId: string): ChatMessageRecord | null {
     if (!this.db) return null
     return this.db.prepare(
-      'SELECT * FROM chat_messages WHERE id = ?'
+      `SELECT message.* FROM chat_messages message
+        JOIN chat_conversations active ON active.id = message.conversation_id
+       WHERE message.id = ? AND active.closed_at IS NULL
+         AND message.message_visibility_epoch = active.message_visibility_epoch`
     ).get<ChatMessageRecord>(messageId) ?? null
   }
 
@@ -2622,7 +2729,12 @@ export class DatabaseManager {
   }> {
     if (!this.db) return []
     const rows = this.db.prepare(
-      "SELECT id, conversation_id, timestamp, meta_json FROM chat_messages WHERE role = 'agent_card' AND meta_json LIKE '%\"status\":\"pending\"%'"
+      `SELECT message.id, message.conversation_id, message.timestamp, message.meta_json
+         FROM chat_messages message
+         JOIN chat_conversations active ON active.id = message.conversation_id
+        WHERE message.role = 'agent_card' AND active.closed_at IS NULL
+          AND message.message_visibility_epoch = active.message_visibility_epoch
+          AND message.meta_json LIKE '%"status":"pending"%'`
     ).all<{ id: string; conversation_id: string; timestamp: string; meta_json: string | null }>()
     const out: Array<{ messageId: string; conversationId: string; timestamp: string; meta: Record<string, unknown> }> = []
     for (const row of rows) {
@@ -3065,6 +3177,24 @@ export class DatabaseManager {
       now,
     )
     return this.getAgentChannelEvent(payload.eventId)!
+  }
+
+  /**
+   * An inbound event is removed from the sidecar queue before Ready finishes
+   * persisting it. After a process restart, a legacy `running` row therefore
+   * has no live owner and must not remain permanently in progress. Mark the
+   * unknown outcome failed so an adapter redelivery can be admitted again.
+   */
+  failRunningAgentChannelEventsOnBoot(
+    reason: string = 'app_restart_before_inbound_settlement',
+  ): number {
+    if (!this.db) return 0
+    const result = this.db.prepare(
+      `UPDATE agent_channel_events
+          SET status = 'failed', error = ?, updated_at = ?
+        WHERE status = 'running'`,
+    ).run(reason, new Date().toISOString()) as { changes?: number }
+    return Number(result.changes || 0)
   }
 
   close(): void {

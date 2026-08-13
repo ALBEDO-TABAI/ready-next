@@ -24,26 +24,6 @@ function generateArtifactId(): string {
   return `artifact-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
 }
 
-function readHumanTakeoverSignal(text: string): Record<string, unknown> | null {
-  // Narrow fallback: only used for `browser_request_takeover` tool output.
-  // Main process does not yet surface human_required / takeover_state through
-  // ScopeRunEventPayload; once it does, this parser can be deleted entirely.
-  if (!text) return null
-  const trimmed = text.trim()
-  if (!trimmed.startsWith('{')) return null
-  try {
-    const parsed = JSON.parse(trimmed)
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null
-    const record = parsed as Record<string, unknown>
-    if (record.phase === 'human_required' || record.takeover_state === 'submitted') {
-      return record
-    }
-  } catch {
-    // ignore parse errors
-  }
-  return null
-}
-
 export function isActiveScopePhase(phase: ScopeRunState['phase'] | undefined): boolean {
   return (
     phase === 'queued' ||
@@ -632,7 +612,7 @@ function parseSkillProgress(input: unknown): ScopeRunSkillProgress | null {
       kind: handoffKind,
       taskName: readHandoffString('taskName') || 'handoff',
       userMessage: readHandoffString('userMessage') || '',
-      actionLabel: readHandoffString('actionLabel') || '继续处理',
+      actionLabel: readHandoffString('actionLabel') || '查看记录',
       attemptCount: readHandoffNumber('attemptCount'),
       lastErrorKind: readHandoffString('lastErrorKind'),
       lastErrorMessage: readHandoffString('lastErrorMessage'),
@@ -822,12 +802,6 @@ export function deriveScopeRunStatePatch(
   },
   previous: ScopeRunState | null
 ): Partial<ScopeRunState> {
-  const takeoverSignal =
-    event.toolEvent?.kind === 'result' && event.toolEvent.text
-      ? readHumanTakeoverSignal(event.toolEvent.text)
-      : event.latestText
-        ? readHumanTakeoverSignal(event.latestText)
-        : null
   const eventModule = toAgentModule(event.module)
   const artifactInputs = Array.isArray(event.recentArtifacts)
     ? event.recentArtifacts
@@ -997,19 +971,7 @@ export function deriveScopeRunStatePatch(
     patch.stepMetrics = nextMetrics
   }
 
-  if (takeoverSignal) {
-    patch.phase = 'takeover'
-    patch.blockedReason =
-      [
-        typeof takeoverSignal.call_to_action === 'string' ? takeoverSignal.call_to_action : '',
-        typeof takeoverSignal.details === 'string' ? takeoverSignal.details : ''
-      ]
-        .filter(Boolean)
-        .join(' · ') || '需要人工接管'
-    if (Number.isFinite(Number(takeoverSignal.timeout_sec || 0))) {
-      patch.checkpointExpiresAt = Date.now() + Number(takeoverSignal.timeout_sec || 0) * 1000
-    }
-  } else if (previous?.phase === 'takeover' && event.phase === 'tool_running') {
+  if (previous?.phase === 'takeover' && event.phase === 'tool_running') {
     patch.phase = 'resuming'
     patch.blockedReason = null
     patch.checkpointExpiresAt = null

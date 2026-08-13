@@ -30,7 +30,7 @@ export function agentStatusGlyph(state: TaskCardVisualState): AgentStatusGlyph {
       return { kind: 'running', glyph: 'running', tone: 'neutral', pulse: true, label }
     case 'waiting_input':
     case 'waiting_handoff':
-    // over-budget pause is a genuine "needs decision" signal
+      // falls through: over-budget pause is a genuine "needs decision" signal
     case 'budget_paused':
       return { kind: 'needs_input', glyph: 'needs_input', tone: 'signal', pulse: false, label }
     case 'done':

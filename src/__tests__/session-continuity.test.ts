@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, test } from 'node:test'
 
 import * as sessionContinuityModule from '../main/modules/agent-control/session/session-continuity'
+import { __setScopeContextEpochDatabaseForTests } from '../main/modules/agent-control/session/scope-context-epoch'
 import {
   __reloadSessionContinuityFromDiskForTests,
   __resetSessionContinuityForTests,
@@ -24,11 +25,13 @@ import {
 const TEST_STORAGE_PATH = join(tmpdir(), 'ready-session-continuity-persisted.json')
 
 beforeEach(() => {
+  __setScopeContextEpochDatabaseForTests({ getRawDb: () => ({ prepare: () => ({ get: () => undefined }) }) as never })
   __setSessionContinuityStoragePathForTests(TEST_STORAGE_PATH)
   __resetSessionContinuityForTests()
 })
 
 afterEach(() => {
+  __setScopeContextEpochDatabaseForTests(null)
   __resetSessionContinuityForTests()
   __setSessionContinuityStoragePathForTests(null)
   rmSync(TEST_STORAGE_PATH, { force: true })
@@ -424,7 +427,73 @@ test('skill run continuity preserves resume fields while loading legacy success 
   assert.equal(latest?.runStatePath, '/tmp/vea-budget/run_state.json')
   assert.equal(latest?.pauseReason, 'budget_exhausted')
   assert.equal(latest?.resumePayload?.detachedTaskId, 'dst-budget')
-  assert.equal(JSON.parse(readFileSync(TEST_STORAGE_PATH, 'utf8')).version, 4)
+  assert.equal(JSON.parse(readFileSync(TEST_STORAGE_PATH, 'utf8')).version, 5)
+})
+
+test('session continuity isolates reset epochs while preserving same-epoch stop continuity', () => {
+  const scopeId = 'scope-context-epoch'
+  rememberBrowserAction(scopeId, 'search', '新加坡天气', { messageVisibilityEpoch: 0 })
+  rememberBrowserWorkflowState(scopeId, {
+    url: 'https://example.test/weather',
+    title: 'Weather',
+    workflowKind: 'research',
+    stage: 'reading',
+    evidence: [],
+    running: true,
+    uploadMounted: false,
+    promptFilled: false,
+    status: 'running',
+    canResume: true,
+    lastEvidence: [],
+  }, { messageVisibilityEpoch: 0 })
+  rememberSkillRun(scopeId, {
+    toolName: 'skill_old_context',
+    skillId: 'old-context-skill',
+    action: 'run',
+    success: false,
+    status: 'blocked',
+    summary: 'old context',
+  }, { messageVisibilityEpoch: 0 })
+  rememberContinuationState(scopeId, {
+    taskId: 'task-old-context',
+    scopeId,
+    runId: 'run-old-context',
+    taskType: 'short_task',
+    interactionState: 'suspended',
+    steps: [],
+    resumableActions: ['continue'],
+    continuationRef: {
+      taskId: 'task-old-context',
+      taskRunId: 'skill-task-old-context',
+      skillId: 'old-context-skill',
+    },
+  }, { messageVisibilityEpoch: 0 })
+
+  // Stop only rolls the Codex alias. The message context epoch is unchanged,
+  // so all continuity remains visible.
+  assert.equal(getRecentBrowserActions(scopeId, { messageVisibilityEpoch: 0 }).length, 1)
+  assert.equal(getBrowserWorkflowState(scopeId, { messageVisibilityEpoch: 0 })?.title, 'Weather')
+  assert.equal(getLatestSkillRun(scopeId, { messageVisibilityEpoch: 0 })?.skillId, 'old-context-skill')
+  assert.equal(getContinuationState(scopeId, { messageVisibilityEpoch: 0 })?.taskId, 'task-old-context')
+
+  // Reset advances the message context epoch. Old records remain durable but
+  // every current getter must fail closed for the new context.
+  assert.deepEqual(getRecentBrowserActions(scopeId, { messageVisibilityEpoch: 1 }), [])
+  assert.equal(getBrowserWorkflowState(scopeId, { messageVisibilityEpoch: 1 }), null)
+  assert.equal(getLatestSkillRun(scopeId, { messageVisibilityEpoch: 1 }), null)
+  assert.equal(getContinuationState(scopeId, { messageVisibilityEpoch: 1 }), null)
+  assert.deepEqual(listContinuationStates(scopeId, { messageVisibilityEpoch: 1 }), [])
+
+  // A late writer owned by the old run cannot populate the new context.
+  rememberSkillRun(scopeId, {
+    toolName: 'skill_late_old_context',
+    skillId: 'late-old-context-skill',
+    action: 'run',
+    success: false,
+    status: 'blocked',
+    summary: 'late old context',
+  }, { messageVisibilityEpoch: 0, currentMessageVisibilityEpoch: 1 })
+  assert.equal(getLatestSkillRun(scopeId, { messageVisibilityEpoch: 1 }), null)
 })
 
 test('resume selection prefers active task handles over old recent skill runs and honors expected task identity', () => {

@@ -82,6 +82,12 @@ export const ASK_USER_ERROR_KINDS = {
     noMetric: true,
     description: 'Session already has a pending ask_user_questions card.',
   },
+  /** A locally owned confirmation card was submitted from a remote channel. */
+  confirmationSurfaceDenied: {
+    code: 'confirmation_surface_denied',
+    noMetric: true,
+    description: 'Local-only confirmation was submitted from a remote channel.',
+  },
   /** Cancel reason was `user_typed_instead` — the user sent a new message
    *  rather than answering the card; surfaced as "user replied with prose". */
   userSkipped: {
@@ -245,6 +251,65 @@ export const SEND_IM_ERROR_KINDS = {
 
 export type SendImErrorKindKey = keyof typeof SEND_IM_ERROR_KINDS
 export type SendImErrorKind = (typeof SEND_IM_ERROR_KINDS)[SendImErrorKindKey]['code']
+
+// ---------- Feishu typed reads ----------
+
+export const FEISHU_TOOL_ERROR_KINDS = {
+  invalidRequest: {
+    code: 'feishu_invalid_request',
+    noMetric: true,
+    description: 'The Feishu tool request is missing a required argument or names an unsupported tool.',
+  },
+  authorityMismatch: {
+    code: 'feishu_authority_mismatch',
+    noMetric: true,
+    description: 'The Feishu read request does not exactly match the frozen channel, document, type, and tool authority.',
+  },
+  sidecarUnavailable: {
+    code: 'feishu_sidecar_unavailable',
+    noMetric: true,
+    description: 'The Feishu sidecar manager is unavailable before dispatch.',
+  },
+  authRequired: {
+    code: 'feishu_auth_required',
+    noMetric: true,
+    description: 'The Feishu credential is missing, expired, or rejected.',
+  },
+  permissionDenied: {
+    code: 'feishu_permission_denied',
+    noMetric: true,
+    description: 'Feishu denied access to the requested resource for the active identity.',
+  },
+  notFound: {
+    code: 'feishu_not_found',
+    noMetric: true,
+    description: 'The requested Feishu resource does not exist or is no longer visible.',
+  },
+  rateLimited: {
+    code: 'feishu_rate_limited',
+    noMetric: true,
+    description: 'Feishu rate-limited the request.',
+  },
+  networkError: {
+    code: 'feishu_network_error',
+    noMetric: true,
+    description: 'The Feishu request failed at the network or transport layer.',
+  },
+  upstreamUnavailable: {
+    code: 'feishu_upstream_unavailable',
+    noMetric: true,
+    description: 'Feishu returned a transient 5xx or equivalent upstream outage.',
+  },
+  operationFailed: {
+    code: 'feishu_operation_failed',
+    noMetric: true,
+    description: 'Feishu returned a non-success result that did not match a narrower category.',
+  },
+} as const satisfies Record<string, ErrorKindMeta>
+
+export type FeishuToolErrorKindKey = keyof typeof FEISHU_TOOL_ERROR_KINDS
+export type FeishuToolErrorKind =
+  (typeof FEISHU_TOOL_ERROR_KINDS)[FeishuToolErrorKindKey]['code']
 
 // ---------- document target guards ----------
 
@@ -491,6 +556,11 @@ export const ACTION_CONFIRMATION_ERROR_KINDS = {
     code: 'confirmation_expired',
     noMetric: true,
     description: 'The pending action confirmation request expired before user approval.',
+  },
+  confirmationUnavailable: {
+    code: 'confirmation_unavailable',
+    noMetric: true,
+    description: 'The action confirmation could not be settled durably, so the action was not executed.',
   },
 } as const satisfies Record<string, ErrorKindMeta>
 

@@ -10,6 +10,7 @@ import {
   type CodexTurn,
 } from '../main/modules/agent-control/codex-runtime/codex-native-runtime'
 import { CodexTurnCollector } from '../main/modules/agent-control/codex-runtime/codex-turn-collector'
+import { digestCanonicalJson } from '../main/modules/agent-control/codex-runtime/codex-model-gateway-contract'
 
 class FakeNativeRuntime implements CodexNativeRuntime {
   private readonly listeners = new Set<(notification: CodexNativeNotification) => void>()
@@ -71,7 +72,6 @@ function context(
     projectionPatchRefs: [],
     allowNullPhaseFallback: true,
     allowDirectProvisionalStream: true,
-    onAutomaticCompactionObserved: () => {},
     onProvisionalDelta: () => {},
     ...overrides,
   }
@@ -165,10 +165,58 @@ test('collector rejects delta/completed mismatch and multiple explicit finals', 
   }
 })
 
-test('collector preserves tool, compaction, action, proof, waiting, and checkpoint evidence without deciding outcome', async () => {
+test('collector treats an assistant preamble before a tool call as non-terminal', async () => {
   const runtime = new FakeNativeRuntime()
   const collector = new CodexTurnCollector(runtime)
-  const automaticCompactionObservations: unknown[] = []
+  const result = await collector.collect(context(runtime, async () => {
+    runtime.emit({
+      method: 'item/completed',
+      params: {
+        threadId: 'thread-1',
+        turnId: 'turn-1',
+        completedAtMs: 1,
+        item: {
+          type: 'agentMessage', id: 'preamble-1', text: 'I will read it.', phase: 'final_answer',
+        },
+      },
+    })
+    runtime.emit({
+      method: 'item/completed',
+      params: {
+        threadId: 'thread-1',
+        turnId: 'turn-1',
+        completedAtMs: 2,
+        item: {
+          type: 'dynamicToolCall',
+          id: 'call-1',
+          tool: 'document_read_section',
+          namespace: null,
+          arguments: {},
+          status: 'completed',
+          success: true,
+        },
+      },
+    })
+    runtime.emit({
+      method: 'item/completed',
+      params: {
+        threadId: 'thread-1',
+        turnId: 'turn-1',
+        completedAtMs: 3,
+        item: { type: 'agentMessage', id: 'final-1', text: 'answer', phase: 'final_answer' },
+      },
+    })
+    runtime.emit({ method: 'turn/completed', params: { threadId: 'thread-1', turn: turn('completed') } })
+    return { turn: turn('inProgress') }
+  }))
+
+  assert.deepEqual(result.candidateSelection, { kind: 'accepted', itemId: 'final-1' })
+  assert.equal(result.candidateText, 'answer')
+})
+
+test('collector treats compaction items as passive while preserving product evidence', async () => {
+  const runtime = new FakeNativeRuntime()
+  const collector = new CodexTurnCollector(runtime)
   const result = await collector.collect(context(runtime, async () => {
     runtime.emit({
       method: 'item/completed',
@@ -184,7 +232,17 @@ test('collector preserves tool, compaction, action, proof, waiting, and checkpoi
           arguments: {},
           status: 'completed',
           success: true,
+          contentItems: [{ type: 'inputText', text: 'clicked' }],
         },
+      },
+    })
+    runtime.emit({
+      method: 'item/completed',
+      params: {
+        threadId: 'thread-1',
+        turnId: 'turn-1',
+        completedAtMs: 2,
+        item: { type: 'contextCompaction', id: 'compact-1' },
       },
     })
     runtime.emit({
@@ -218,21 +276,21 @@ test('collector preserves tool, compaction, action, proof, waiting, and checkpoi
     browserProofRefs: ['browser-proof-1'],
     otherProofRefs: ['proof-1'],
     projectionPatchRefs: ['patch-1'],
-    onAutomaticCompactionObserved: (event) => automaticCompactionObservations.push(event),
   }))
 
-  assert.deepEqual(result.usedToolCalls, [{ itemId: 'call-1', tool: 'browser_click', status: 'completed' }])
+  assert.deepEqual(result.usedToolCalls, [{
+    itemId: 'call-1', tool: 'browser_click', status: 'completed', success: true,
+    responseDigest: digestCanonicalJson({
+      contentItems: [{ type: 'inputText', text: 'clicked' }],
+      success: true,
+    }),
+  }])
   assert.deepEqual(result.actionReceiptRefs, ['receipt-1'])
   assert.equal(result.terminalReasonCandidate, 'browser_transaction_unconfirmed')
-  assert.deepEqual(automaticCompactionObservations, [{
-    threadId: 'thread-1',
-    turnId: 'turn-1',
-    itemId: 'compact-1',
-  }])
-  assert.equal(JSON.stringify(result).includes('compact-1'), false)
+  assert.deepEqual(result.contextState, {})
 })
 
-test('deprecated thread compaction notification is passive while the typed item remains authoritative', () => {
+test('deprecated thread compaction notification is passive; gateway exchange evidence is authoritative', () => {
   assert.deepEqual(normalizeCodexNativeNotification({
     method: 'thread/compacted',
     params: { threadId: 'thread-1' },
@@ -280,6 +338,25 @@ test('collector covers product exit hints while engine outcome remains native tr
     }, { terminalReasonCandidate }))
     assert.equal(result.terminalReasonCandidate, terminalReasonCandidate)
     assert.equal(result.engineOutcome, terminalStatus === 'completed' ? 'completed' : terminalStatus)
+  }
+})
+
+test('collector replaces the default success hint for native failure and interruption', async () => {
+  for (const [status, expected] of [
+    ['failed', 'blocked_external'],
+    ['interrupted', 'cancelled_runtime'],
+  ] as const) {
+    const runtime = new FakeNativeRuntime()
+    const collector = new CodexTurnCollector(runtime)
+    const result = await collector.collect(context(runtime, async () => {
+      runtime.emit({
+        method: 'turn/completed',
+        params: { threadId: 'thread-1', turn: turn(status) },
+      })
+      return { turn: turn('inProgress') }
+    }))
+    assert.equal(result.engineOutcome, status)
+    assert.equal(result.terminalReasonCandidate, expected)
   }
 })
 
@@ -354,6 +431,151 @@ test('collector keeps the turn alive when the pinned error notification will ret
   assert.equal(result.candidateText, 'answer after retry')
 })
 
+test('model reroute fails only its exact turn and blocks every later assistant byte', async () => {
+  const runtime = new FakeNativeRuntime()
+  const collector = new CodexTurnCollector(runtime)
+  const reroutedProvisional: string[] = []
+  const otherProvisional: string[] = []
+  const reroutedCollection = collector.collect(context(
+    runtime,
+    async () => ({ turn: turn('inProgress', 'turn-rerouted') }),
+    {
+      readyRunId: 'run-rerouted',
+      codexThreadId: 'thread-rerouted',
+      onProvisionalDelta: (event) => reroutedProvisional.push(event.delta),
+    },
+  ))
+  const otherCollection = collector.collect(context(
+    runtime,
+    async () => ({ turn: turn('inProgress', 'turn-other') }),
+    {
+      readyRunId: 'run-other',
+      codexThreadId: 'thread-other',
+      onProvisionalDelta: (event) => otherProvisional.push(event.delta),
+    },
+  ))
+  await new Promise<void>((resolve) => setImmediate(resolve))
+
+  runtime.emit({
+    method: 'item/started',
+    params: {
+      threadId: 'thread-rerouted',
+      turnId: 'turn-rerouted',
+      startedAtMs: 1,
+      item: { type: 'agentMessage', id: 'final-rerouted', text: '', phase: 'final_answer' },
+    },
+  })
+  runtime.emit({
+    method: 'item/agentMessage/delta',
+    params: {
+      threadId: 'thread-rerouted', turnId: 'turn-rerouted',
+      itemId: 'final-rerouted', delta: 'before-reroute',
+    },
+  })
+  runtime.emit({
+    method: 'model/rerouted',
+    params: {
+      threadId: 'thread-rerouted',
+      turnId: 'turn-rerouted',
+      fromModel: 'ready-e0-model',
+      toModel: 'fallback-model',
+      reason: 'highRiskCyberActivity',
+    },
+  })
+  runtime.emit({
+    method: 'item/agentMessage/delta',
+    params: {
+      threadId: 'thread-rerouted', turnId: 'turn-rerouted',
+      itemId: 'final-rerouted', delta: 'must-not-publish',
+    },
+  })
+  runtime.emit({
+    method: 'item/completed',
+    params: {
+      threadId: 'thread-rerouted', turnId: 'turn-rerouted', completedAtMs: 2,
+      item: {
+        type: 'agentMessage', id: 'final-rerouted',
+        text: 'before-reroutemust-not-publish', phase: 'final_answer',
+      },
+    },
+  })
+  runtime.emit({
+    method: 'turn/completed',
+    params: {
+      threadId: 'thread-rerouted',
+      turn: {
+        ...turn('completed', 'turn-rerouted'),
+        items: [{
+          type: 'agentMessage', id: 'final-rerouted',
+          text: 'before-reroutemust-not-publish', phase: 'final_answer',
+        }],
+      },
+    },
+  })
+
+  runtime.emit({
+    method: 'item/completed',
+    params: {
+      threadId: 'thread-other', turnId: 'turn-other', completedAtMs: 3,
+      item: { type: 'agentMessage', id: 'final-other', text: 'other answer', phase: 'final_answer' },
+    },
+  })
+  runtime.emit({
+    method: 'turn/completed',
+    params: { threadId: 'thread-other', turn: turn('completed', 'turn-other') },
+  })
+
+  const [rerouted, other] = await Promise.all([reroutedCollection, otherCollection])
+  assert.equal(rerouted.kind, 'native_terminal')
+  assert.equal(rerouted.engineOutcome, 'failed')
+  assert.deepEqual(rerouted.candidateSelection, {
+    kind: 'protocol_failure', code: 'model_rerouted',
+  })
+  assert.equal(rerouted.candidateText, null)
+  assert.deepEqual(reroutedProvisional, ['before-reroute'])
+  assert.equal(other.engineOutcome, 'completed')
+  assert.equal(other.candidateText, 'other answer')
+  assert.deepEqual(otherProvisional, [])
+})
+
+test('collector terminal timeout measures inactivity instead of total multi-tool turn duration', async () => {
+  const runtime = new FakeNativeRuntime()
+  const collector = new CodexTurnCollector(runtime)
+  const collection = collector.collect(context(runtime, async () => ({ turn: turn('inProgress') }), {
+    terminalTimeoutMs: 80,
+  }))
+  setTimeout(() => {
+    runtime.emit({
+      method: 'item/completed',
+      params: {
+        threadId: 'thread-1',
+        turnId: 'turn-1',
+        completedAtMs: 1,
+        item: {
+          type: 'dynamicToolCall', id: 'call-1', tool: 'skill_run_shell', namespace: null,
+          arguments: {}, status: 'completed', success: true, contentItems: [],
+        },
+      },
+    })
+  }, 50)
+  setTimeout(() => {
+    runtime.emit({
+      method: 'item/completed',
+      params: {
+        threadId: 'thread-1',
+        turnId: 'turn-1',
+        completedAtMs: 2,
+        item: { type: 'agentMessage', id: 'final-1', text: 'done', phase: 'final_answer' },
+      },
+    })
+    runtime.emit({ method: 'turn/completed', params: { threadId: 'thread-1', turn: turn('completed') } })
+  }, 100)
+
+  const result = await collection
+  assert.equal(result.engineOutcome, 'completed')
+  assert.equal(result.candidateText, 'done')
+})
+
 test('collector closes a non-retry native error only when its required terminal never arrives', async () => {
   const runtime = new FakeNativeRuntime()
   const collector = new CodexTurnCollector(runtime)
@@ -378,4 +600,22 @@ test('collector closes a non-retry native error only when its required terminal 
     assert.equal(result.hostFailure.code, 'codex_nonretry_error_without_terminal')
     assert.equal(result.codexTurnId, 'turn-1')
   }
+})
+
+test('boot readback wakes a collector whose original turn start never resolves', async () => {
+  const runtime = new FakeNativeRuntime()
+  const collector = new CodexTurnCollector(runtime)
+  const collection = collector.collect(context(runtime, () => new Promise(() => undefined)))
+  await new Promise<void>((resolve) => setImmediate(resolve))
+  const readbackContext = context(runtime, async () => ({ turn: turn('inProgress') }))
+  const recovered = collector.buildReadbackCandidate(readbackContext, {
+    ...turn('completed'),
+    items: [{ type: 'agentMessage', id: 'final-recovered', text: 'recovered', phase: 'final_answer' }],
+  })
+
+  assert.equal(collector.deliverRecoveredCandidate(recovered), true)
+  assert.equal((await collection).candidateText, 'recovered')
+  assert.equal(collector.deliverRecoveredCandidate(recovered), true)
+  collector.releaseRun('run-1')
+  assert.equal(collector.deliverRecoveredCandidate(recovered), false)
 })

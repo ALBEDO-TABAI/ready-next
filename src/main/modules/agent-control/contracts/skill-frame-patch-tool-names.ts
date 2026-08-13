@@ -16,6 +16,10 @@ export const FRAME_PATCH_EMITTING_TOOL_NAMES: readonly string[] = [
   'skill_inspect_detached',
 ] as const
 
+export const CONTEXT_MODIFIER_EMITTING_TOOL_NAMES: readonly string[] = [
+  'browser_download',
+] as const
+
 /**
  * Predicate matching any tool name that emits a frame-patch `runContract`
  * update — both the static primitives in `FRAME_PATCH_EMITTING_TOOL_NAMES`
@@ -35,9 +39,11 @@ export function isFramePatchEmittingToolName(toolName: string): boolean {
   if (!toolName.startsWith('skill_')) return false
   const PRIMITIVE_NAMES = new Set([
     'skill_ask_user',
+    'skill_compact_context',
     'skill_run_shell',
     'skill_write_artifact',
     'skill_read_artifact',
+    'skill_export_artifact',
     'skill_patch_config',
     'skill_start_detached',
     'skill_inspect_detached',
@@ -45,4 +51,9 @@ export function isFramePatchEmittingToolName(toolName: string): boolean {
     'skill_inspect_run_state',
   ])
   return !PRIMITIVE_NAMES.has(toolName)
+}
+
+export function isToolStatePatchEmittingToolName(toolName: string): boolean {
+  return CONTEXT_MODIFIER_EMITTING_TOOL_NAMES.includes(toolName)
+    || isFramePatchEmittingToolName(toolName)
 }

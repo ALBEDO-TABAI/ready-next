@@ -22,6 +22,7 @@ import {
 import { submitAskUserQuestionsAnswers, cancelAskUserQuestionsCard } from '../../stores/useAgent'
 import { isImageGenerationReferencePath } from '../../../shared/image-generation'
 import WelcomePanel from './WelcomePanel'
+import SkillAskUserPrompt from '../skill/SkillAskUserPrompt'
 
 // The session-tab strip + chat header overflow ~24px into the top of this
 // scroll region (MotionLayer's header row is a fixed 44px). The top padding
@@ -106,10 +107,13 @@ export default function ChatMessages({
     () => (hasUserMessage ? messages.filter((msg) => !/^welcome(?:-|$)/.test(msg.id)) : messages),
     [messages, hasUserMessage],
   )
+  const hasLiveActivity = isStreaming || Boolean(pendingTaskRun) || Boolean(pendingToolTrace)
   // "无对话历史" 状态：只有 welcome 文案、没有任何用户消息也没有真正的 agent
   // 回复。这一状态下欢迎语应竖直居中（更像登陆页），用户一旦输入立刻进入
   // bottom-anchored 流：欢迎语从可见列表里消失，新消息从底部向上"顶"。
-  const onlyWelcomePresent = !hasUserMessage && visibleMessages.every((msg) => /^welcome(?:-|$)/.test(msg.id))
+  const onlyWelcomePresent = !hasLiveActivity
+    && !hasUserMessage
+    && visibleMessages.every((msg) => /^welcome(?:-|$)/.test(msg.id))
 
   // Auto-scroll to bottom when new messages arrive — but only while the user is
   // already near the bottom. If they have scrolled up (reading a tall ask-user
@@ -143,7 +147,7 @@ export default function ChatMessages({
       }}
     >
       {/* Welcome Card */}
-      {visibleMessages.length === 0 && messages.length === 0 && (
+      {visibleMessages.length === 0 && messages.length === 0 && !hasLiveActivity && (
         <WelcomePanel onSetInputSuggestion={onSetInputSuggestion} />
       )}
 
@@ -449,7 +453,7 @@ export default function ChatMessages({
         </div>
       ) : runDurationMeter}
 
-      <div data-skill-ask-user-anchor="true" aria-hidden="true" style={{ flex: '0 0 auto', width: '100%' }} />
+      <SkillAskUserPrompt />
 
       {!onlyWelcomePresent && bottomOverlayInset > 0 && (
         <div

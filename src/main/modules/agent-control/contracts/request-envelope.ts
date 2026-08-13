@@ -1,5 +1,6 @@
 import { extractPrimaryUserInstruction as extractPrimaryUserInstructionFromText } from '../../claude-bridge/tool-policy-heuristics'
 import { validateWorkspaceRoot } from '../../../../shared/workspace-validation'
+import type { ActionAuthorizationMode } from '../../../../shared/action-authorization-mode'
 
 export type InputChunkSource =
   | 'user_message'
@@ -119,6 +120,7 @@ export interface RequestEnvelope {
    * raw `TurnEngineRequest`. Also optional.
    */
   sessionId?: string
+  actionAuthorizationMode?: ActionAuthorizationMode
 }
 
 const LEADING_BOOTSTRAP_TITLES = new Set([
@@ -521,6 +523,7 @@ export function buildRequestEnvelope(params: {
   contextRefIds?: string[]
   trustedFolderReferences?: TrustedFolderReference[]
   trustedEnvironment?: TrustedRequestEnvironment
+  actionAuthorizationMode?: ActionAuthorizationMode
 }): RequestEnvelope {
   const rawUserText = String(params.userText || '')
   const pureUserText = extractPureUserInput(rawUserText)
@@ -636,5 +639,8 @@ export function buildRequestEnvelope(params: {
     // `undefined` rather than empty strings.
     ...(params.sessionId ? { sessionId: params.sessionId } : {}),
     ...(params.scopeId ? { scopeId: params.scopeId } : {}),
+    ...(params.actionAuthorizationMode
+      ? { actionAuthorizationMode: params.actionAuthorizationMode }
+      : {}),
   }
 }

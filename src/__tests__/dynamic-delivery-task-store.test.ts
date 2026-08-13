@@ -14,9 +14,15 @@ const now = '2026-07-11T00:00:00.000Z'
 
 function createSchema(db: { exec(sql: string): void }): void {
   db.exec(`
+    CREATE TABLE chat_conversations (
+      id TEXT PRIMARY KEY, closed_at TEXT, message_visibility_epoch INTEGER NOT NULL
+    );
+    INSERT INTO chat_conversations (id, closed_at, message_visibility_epoch)
+    VALUES ('scope', NULL, 0);
     CREATE TABLE task_projections (
       task_id TEXT PRIMARY KEY, revision INTEGER NOT NULL DEFAULT 0,
-      dependency_generation INTEGER NOT NULL DEFAULT 0, scope_id TEXT NOT NULL, run_id TEXT NOT NULL,
+      dependency_generation INTEGER NOT NULL DEFAULT 0, scope_id TEXT NOT NULL,
+      message_visibility_epoch INTEGER NOT NULL, run_id TEXT NOT NULL,
       parent_task_id TEXT, parent_step_id TEXT, task_type TEXT NOT NULL, module TEXT NOT NULL,
       task_title TEXT, task_summary TEXT, status TEXT NOT NULL, interaction_state TEXT NOT NULL,
       waiting_for TEXT, steps_json TEXT NOT NULL, current_step_id TEXT, budget_json TEXT,
@@ -47,7 +53,8 @@ function binding(runId: string, effectiveAgentId = 'analyst'): TaskExecutionBind
 
 function projection(overrides: Partial<TaskProjectionRecord> = {}): TaskProjectionRecord {
   return {
-    taskId: 'parent', scopeId: 'scope', runId: 'run-parent', parentTaskId: null, parentStepId: null,
+    taskId: 'parent', scopeId: 'scope', messageVisibilityEpoch: 0,
+    runId: 'run-parent', parentTaskId: null, parentStepId: null,
     taskType: 'research', module: 'agent', taskTitle: 'Parent', taskSummary: '', status: 'running',
     interactionState: 'running', steps: [], ownerAgentId: 'butler', taskOrigin: 'user_root',
     executionBinding: binding('run-parent', 'butler'), createdAt: now, updatedAt: now,

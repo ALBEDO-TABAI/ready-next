@@ -28,7 +28,11 @@ export interface SessionRecallFacadeDeps {
   extractTextFromMessage: (message: string | MultimodalBlock[]) => string
   /** Bound to `ReferenceHintService.maybeArmReferenceHintFromCapsules` —
    *  the skill-resume G4 last-recourse hint recovery for old conversations. */
-  armReferenceHintFromCapsules: (scopeId: string, capsules: SessionRecallCapsule[]) => void
+  armReferenceHintFromCapsules: (
+    scopeId: string,
+    messageVisibilityEpoch: number,
+    capsules: SessionRecallCapsule[],
+  ) => void
 }
 
 export class SessionRecallFacade {
@@ -69,11 +73,13 @@ export class SessionRecallFacade {
 
   attachSessionRecallContext(
     currentScopeId: string,
-    conversationId: string
+    conversationId: string,
+    expectedMessageVisibilityEpoch: number,
   ): { scope: ConversationScope; capsule: SessionRecallCapsule } {
     const result = this.deps.sessionRecallService.attachSessionRecallContext({
       currentScopeId,
-      conversationId
+      conversationId,
+      expectedMessageVisibilityEpoch,
     })
     const scope = this.deps.mapConversationRow(result.scope)
     this.deps.emitConversationEvent({
@@ -85,11 +91,13 @@ export class SessionRecallFacade {
 
   detachSessionRecallContext(
     currentScopeId: string,
-    conversationId: string
+    conversationId: string,
+    expectedMessageVisibilityEpoch: number,
   ): { scope: ConversationScope } {
     const result = this.deps.sessionRecallService.detachSessionRecallContext({
       currentScopeId,
-      conversationId
+      conversationId,
+      expectedMessageVisibilityEpoch,
     })
     const scope = this.deps.mapConversationRow(result.scope)
     this.deps.emitConversationEvent({
@@ -109,6 +117,7 @@ export class SessionRecallFacade {
   maybeAutoAttachSessionRecallOnResume(
     scopeId: string,
     message: string | MultimodalBlock[],
+    expectedMessageVisibilityEpoch: number,
   ): void {
     try {
       const text = this.deps.extractTextFromMessage(message)
@@ -116,6 +125,7 @@ export class SessionRecallFacade {
       const result = this.deps.sessionRecallService.autoAttachOnResume({
         currentScopeId: scopeId,
         intent: 'continue',
+        expectedMessageVisibilityEpoch,
         limit: 3,
       })
       if (result.attached.length > 0) {
@@ -130,7 +140,11 @@ export class SessionRecallFacade {
         // tool names. This is the only signal we have about prior skill usage
         // when the conversation predates A1 persistence.
         if (!getLastReferenceSkill(scopeId)) {
-          this.deps.armReferenceHintFromCapsules(scopeId, result.attached)
+          this.deps.armReferenceHintFromCapsules(
+            scopeId,
+            expectedMessageVisibilityEpoch,
+            result.attached,
+          )
         }
       }
     } catch (error) {

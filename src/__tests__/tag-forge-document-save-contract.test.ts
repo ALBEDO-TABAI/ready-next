@@ -245,7 +245,7 @@ test('creation final readback verifies automatic tags without rejecting preserve
   if(!validated.ok)return
   const wrap=(tags:string[],nextBody=body)=>`---\ntags:\n${tags.map((tag)=>`  - ${tag}`).join('\n')}\nready_state: 待整理\n---\n${nextBody}`
   const built=buildTagForgeCreationContent(policy,'---\ntags: [旧标签]\ntitle: 保留\n---\n'+body,validated.tags)
-  assert.match(built,/tags:\n  - 旧标签\n  - 教程\n  - AI工作流/)
+  assert.match(built,/tags:\n {2}- 旧标签\n {2}- 教程\n {2}- AI工作流/)
   assert.match(built,/title: 保留/)
   assert.match(built,/ready_state: 待整理/)
   assert.equal(verifyTagForgeCreationFinalContent(policy,wrap(['教程','AI工作流']),validated.tags,validated.bodyRevision).ok,true)

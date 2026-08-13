@@ -7,14 +7,12 @@
  * orphans behind (see `boot-reaper.ts` for the reap-on-next-boot fallback).
  *
  * Contract:
- *   - Runtime cleanups (`cleanupAgentRuntime`, `agentManager.cleanup`,
- *     `rsshubManager.cleanup`) are run in parallel via `Promise.allSettled`
- *     so a hang in one does not block the others.
- *   - The whole batch is bounded by a hard timeout (default 5s) so quit is
- *     never blocked by a stuck sidecar.
- *   - The database is closed last, after runtime cleanups settle (or the
- *     timeout elapses) — closing while skill_run_shell handlers are still
- *     touching the DB would surface confusing errors during shutdown.
+ *   - The agent runtime is a critical DB writer and must settle before the
+ *     database can close.
+ *   - Remaining cleanups run in parallel and are bounded by a hard timeout
+ *     (default 5s), so unrelated workers cannot block quit indefinitely.
+ *   - The database is closed last, after the critical runtime and the bounded
+ *     cleanup batch settle.
  *
  * This module is intentionally electron-free so it can be unit tested.
  */
@@ -86,8 +84,8 @@ function safeInvoke(
 }
 
 /**
- * Run the ordered shutdown sequence. Returns when cleanup completes or the
- * timeout elapses — never throws.
+ * Run the ordered shutdown sequence. A critical agent-runtime failure rejects
+ * the quit attempt before any other cleanup or database close can begin.
  */
 export async function runBeforeQuitCleanup(
   deps: BeforeQuitCleanupDeps,
@@ -107,8 +105,14 @@ export async function runBeforeQuitCleanup(
     }
   })
 
+  try {
+    await deps.cleanupAgentRuntime()
+  } catch (error) {
+    logger.warn('[before-quit] cleanupAgentRuntime rejected; quit cancelled', error)
+    throw error
+  }
+
   const tasks: Array<Promise<void>> = [
-    safeInvoke(deps.cleanupAgentRuntime, 'cleanupAgentRuntime', logger),
     safeInvoke(deps.cleanupAgentManager, 'agentManager.cleanup', logger),
     safeInvoke(deps.cleanupRsshubManager, 'rsshubManager.cleanup', logger),
   ]

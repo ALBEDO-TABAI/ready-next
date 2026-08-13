@@ -103,6 +103,12 @@ export const captured: CapturedHandlers = {
 }
 
 export const infrastructureTimeoutReports: Array<{ scopeId: string; requestId: string; elapsedMs?: number }> = []
+export const completedToolActionRequests: Array<{
+  requestId: string
+  handled: boolean
+  error?: string
+  payload?: Record<string, unknown>
+}> = []
 export const fixtureState: {
   infrastructureTimeoutReportResult: unknown
   conversationScopeMessages: Array<{
@@ -141,7 +147,15 @@ export const electronAPIStub = {
     onProjectionSyncFailed: register('onProjectionSyncFailed'),
     onReferenceSkillHintChanged: register('onReferenceSkillHintChanged'),
     onTaskProjectionsChanged: register('onTaskProjectionsChanged'),
-    completeToolActionRequest: async () => ({ success: true }),
+    completeToolActionRequest: async (payload: {
+      requestId: string
+      handled: boolean
+      error?: string
+      payload?: Record<string, unknown>
+    }) => {
+      completedToolActionRequests.push(payload)
+      return { success: true }
+    },
     reportInfrastructureTimeout: async (payload: { scopeId: string; requestId: string; elapsedMs?: number }) => {
       infrastructureTimeoutReports.push(payload)
       return fixtureState.infrastructureTimeoutReportResult
@@ -199,7 +213,7 @@ type DriverApi = {
       ownerRunId?: string | null
       previousOwnerRun?: SessionSlice['scopeRunStates'][string] | null
     },
-  ) => void
+  ) => Promise<void>
 }
 export const driverApi = driver as unknown as DriverApi
 
@@ -231,6 +245,8 @@ export function makeLockedSlice(scopeId: string, requestId: string): SessionSlic
     taskDisclosureState: {},
     state: 'live',
     conversationId: scopeId,
+    aliasGeneration: 1,
+    messageVisibilityEpoch: 0,
     inputValue: '',
   }
 }
@@ -249,6 +265,8 @@ export function makeEmptySlice(scopeId: string): SessionSlice {
     taskDisclosureState: {},
     state: 'live',
     conversationId: scopeId,
+    aliasGeneration: 1,
+    messageVisibilityEpoch: 0,
     inputValue: '',
   }
 }
@@ -272,6 +290,25 @@ export function seedTwoSessions(opts: {
     delete (sessions as Record<string, SessionSlice>)[opts.lockedSessionId === opts.activeSessionId ? '_extra_' : '']
   }
   const activeSlice = sessions[opts.activeSessionId]
+  const scopes = [...new Set(Object.values(sessions)
+    .map((slice) => slice.conversationId)
+    .filter((scopeId): scopeId is string => Boolean(scopeId)))]
+    .map((scopeId) => ({
+      id: scopeId,
+      aliasGeneration: 1,
+      messageVisibilityEpoch: 0,
+      agent: 'butler',
+      activeAgentId: 'butler',
+      handoffGeneration: 0,
+      title: scopeId,
+      sourceKind: 'local' as const,
+      sourceId: 'app',
+      threadKey: scopeId,
+      meta: {},
+      createdAt: '2026-05-22T00:00:00.000Z',
+      updatedAt: '2026-05-22T00:00:00.000Z',
+      lastMessageAt: null,
+    }))
   useAgent.setState({
     agents: [{ name: 'butler', displayName: '管家', avatar: '', status: 'idle', selected: true }],
     currentAgent: 'butler',
@@ -283,8 +320,11 @@ export function seedTwoSessions(opts: {
     sessionId: opts.activeSessionId,
     conversationId: activeSlice.conversationId,
     currentScopeId: activeSlice.conversationId,
-    currentScope: null,
-    scopes: [],
+    currentScope: scopes.find((scope) => scope.id === activeSlice.conversationId) || null,
+    scopes,
+    retiredScopeIds: {},
+    scopeAuthorityRevision: 0,
+    scopeListRequestRevision: 0,
     scopeRunStates: activeSlice.scopeRunStates,
     isStreaming: activeSlice.isStreaming,
     foregroundBusy: activeSlice.foregroundBusy,
@@ -303,7 +343,13 @@ export function seedTwoSessions(opts: {
     sendCoalescingEnabled: true,
     sendCoalescingWindowMs: 1200,
     taskDisclosureState: {},
-    conversations: [],
+    conversations: scopes.map((scope) => ({
+      id: scope.id,
+      agent: scope.agent,
+      title: scope.title,
+      created_at: scope.createdAt,
+      updated_at: scope.updatedAt,
+    })),
   })
 }
 
@@ -316,7 +362,37 @@ export function fireOnStream(data: Record<string, unknown>): void {
 }
 
 export function fireOnScopeRunEvent(data: Record<string, unknown>): void {
+  const state = useAgent.getState()
+  const scopeId = typeof data.scopeId === 'string' ? data.scopeId : ''
+  const scope = state.scopes.find((candidate) => candidate.id === scopeId)
+  const sessionId = scopeId
+    ? Object.keys(state.sessions).find((candidate) => (
+        getSessionSlice(state, candidate).conversationId === scopeId
+      )) || null
+    : null
+  const slice = sessionId ? getSessionSlice(state, sessionId) : null
+  const event = {
+    aliasGeneration: slice?.aliasGeneration ?? scope?.aliasGeneration,
+    messageVisibilityEpoch: slice?.messageVisibilityEpoch ?? scope?.messageVisibilityEpoch,
+    ...data,
+  }
+  for (const handler of captured.onScopeRunEvent) handler(event)
+}
+
+export function fireRawOnScopeRunEvent(data: Record<string, unknown>): void {
   for (const handler of captured.onScopeRunEvent) handler(data)
+}
+
+export function fireOnConversationEvent(data: Record<string, unknown>): void {
+  for (const handler of captured.onConversationEvent) handler(data)
+}
+
+export function fireOnToolAction(data: Record<string, unknown>): void {
+  for (const handler of captured.onToolAction) handler(data)
+}
+
+export function fireOnToolActionRequest(data: Record<string, unknown>): void {
+  for (const handler of captured.onToolActionRequest) handler(data)
 }
 
 // ---------------------------------------------------------------------------

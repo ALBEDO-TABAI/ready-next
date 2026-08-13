@@ -3,7 +3,7 @@ import test from 'node:test'
 
 import type { AgentInputItem, MemorySession } from '@openai/agents'
 import { AgentSdkCompactor } from '../main/modules/agent-control/runtime-core/agent-sdk-compactor'
-import { prependSystemReminderInput } from '../main/modules/agent-control/system-reminders/background-task-terminal-reminder'
+import { prependSystemReminderInput } from '../main/modules/agent-control/system-reminders/system-reminder-input'
 import {
   buildSkillCatalogText,
   CATALOG_HEADER as HEADER

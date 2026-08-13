@@ -36,7 +36,6 @@ export interface AgentExecutionProfileResolverDeps {
   personality: ProfilePersonalityReader
   getKnowledgeStore: () => ProfileKnowledgeStore
   readAsset: (relPath: string) => string
-  isKnowledgeEnabled: () => boolean
   listBlueprints?: () => SpecialistAgentBlueprint[]
 }
 
@@ -154,27 +153,20 @@ export class AgentExecutionProfileResolver {
 
     const rules = this.deps.readAsset(`agents/${record.id}/RULES.md`).trim()
     const foundation = this.deps.readAsset(`agents/${record.id}/FOUNDATION.md`).trim()
-    const knowledgeEnabled = this.deps.isKnowledgeEnabled()
     const store = this.deps.getKnowledgeStore()
-    const scopedCards = knowledgeEnabled
-      ? store.listCards({ dir: `agents/${record.id}/knowledge` })
-        .filter((card) => card.frontmatter.status === 'active')
-        .sort((left, right) => left.relPath.localeCompare(right.relPath))
-      : []
-    const globalCards = knowledgeEnabled
-      ? store.listCards()
-        .filter((card) => card.frontmatter.status === 'active' && !/(^|\/)routing-[a-z0-9._-]+\.md$/.test(card.relPath))
-        .sort((left, right) => left.relPath.localeCompare(right.relPath))
-      : []
+    const scopedCards = store.listCards({ dir: `agents/${record.id}/knowledge` })
+      .filter((card) => card.frontmatter.status === 'active')
+      .sort((left, right) => left.relPath.localeCompare(right.relPath))
+    const globalCards = store.listCards()
+      .filter((card) => card.frontmatter.status === 'active' && !/(^|\/)routing-[a-z0-9._-]+\.md$/.test(card.relPath))
+      .sort((left, right) => left.relPath.localeCompare(right.relPath))
     const inventory = [...scopedCards, ...globalCards]
     const routingCards = store.listRoutingCards()
-    const rendered = knowledgeEnabled
-      ? store.renderKnowledgeIndex({
-        maxChars: AGENT_KNOWLEDGE_INDEX_MAX_CHARS,
-        ownerAgentId: record.id,
-        excludeRelPaths: routingCards.map((card) => card.relPath),
-      })
-      : { text: '', renderedCount: 0, renderedRelPaths: [], omittedCount: 0 }
+    const rendered = store.renderKnowledgeIndex({
+      maxChars: AGENT_KNOWLEDGE_INDEX_MAX_CHARS,
+      ownerAgentId: record.id,
+      excludeRelPaths: routingCards.map((card) => card.relPath),
+    })
     const allowedKnowledgeRefs = rendered.renderedRelPaths
     const allowedSet = new Set(allowedKnowledgeRefs)
     const cards = inventory.filter((card) => allowedSet.has(card.relPath))

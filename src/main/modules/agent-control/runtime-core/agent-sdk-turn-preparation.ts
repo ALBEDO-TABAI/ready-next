@@ -226,6 +226,7 @@ export function prepareAgentSdkTurn(
     resolveSemantic: () => host.resolvePreparedSkillTurnForTurn(
         content as RunMessage,
         sessionId,
+        effectiveExecutionOptions?.messageVisibilityEpoch,
         effectiveExecutionOptions?.requestEnvelope,
         localSendImTurn,
         skillHintRelevanceForTurn.relevant
@@ -378,15 +379,24 @@ export function prepareAgentSdkTurn(
   // 了") lifts them. Dispatch-layer interception consults this state.
   if (sessionId) {
     if (turnTextPolicy.negations.length > 0) {
-      recordNegations(sessionId, turnTextPolicy.negations)
+      recordNegations(
+        sessionId,
+        turnTextPolicy.negations,
+        effectiveExecutionOptions?.messageVisibilityEpoch,
+      )
       // EP2-I-auth: 拒绝权优先于既往批准 — negations revoke matching grants
       revokeAuthorizationsForCategories(
         sessionId,
-        authCategoriesForNegationFamilies(turnTextPolicy.negations)
+        authCategoriesForNegationFamilies(turnTextPolicy.negations),
+        effectiveExecutionOptions?.messageVisibilityEpoch,
       )
     }
     if (turnTextPolicy.releasedNegations.length > 0) {
-      releaseNegations(sessionId, turnTextPolicy.releasedNegations)
+      releaseNegations(
+        sessionId,
+        turnTextPolicy.releasedNegations,
+        effectiveExecutionOptions?.messageVisibilityEpoch,
+      )
     }
     // EP2-I-auth WRITE ENTRY 1 (classifier consumption chain): explicit
     // object+action naming in USER text becomes a provable grant.
@@ -395,7 +405,8 @@ export function prepareAgentSdkTurn(
         scopeId: sessionId,
         actionCategory: grant.actionCategory,
         objectRef: grant.objectRef,
-        verbatim: turnFollowupPrimary
+        verbatim: turnFollowupPrimary,
+        messageVisibilityEpoch: effectiveExecutionOptions?.messageVisibilityEpoch,
       })
     }
   }

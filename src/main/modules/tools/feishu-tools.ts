@@ -1,6 +1,16 @@
+import { createHash } from 'node:crypto'
+
 import { buildToolParamSchema, normalizeAnthropicToolSchema, normalizeOpenAIToolSchema, type ToolParamSchemaSpec } from './tool-schema'
 import { FEISHU_SCHEMAS } from './schemas/feishu-schemas'
 import { zodObjectToParamList } from './zod-param-derivation'
+import {
+  FEISHU_TOOL_ERROR_KINDS,
+  type FeishuToolErrorKind,
+} from '../agent-control/contracts/error-kinds'
+import {
+  createToolExecutionOutput,
+  type ToolExecutionOutput,
+} from '../agent-control/tools-runtime/tool-result-types'
 
 type ToolParam = ToolParamSchemaSpec
 
@@ -13,8 +23,18 @@ interface FeishuToolDef {
   params: ToolParam[]
 }
 
-interface FeishuToolContext {
+export interface FeishuReadAuthority {
+  channelId: string
+  docToken: string
+  docType: string
+  allowedToolName: 'feishu_doc_read'
+  channelIdentityDigest: string
+  expectedResultDigest: string
+}
+
+export interface FeishuToolContext {
   sidecarManager?: {
+    listChannels: () => Promise<Record<string, unknown>>
     feishuDocRead: (channelId: string, docToken: string, docType: string) => Promise<Record<string, unknown>>
     feishuDocCreate: (channelId: string, title: string, docType: string, content: unknown, folderToken?: string) => Promise<Record<string, unknown>>
     feishuDocUpdate: (channelId: string, docToken: string, docType: string, updates: unknown) => Promise<Record<string, unknown>>
@@ -33,6 +53,47 @@ interface FeishuToolContext {
     feishuFileDownload: (channelId: string, fileToken: string, savePath: string) => Promise<Record<string, unknown>>
   } | null
   channelId?: string
+  feishuReadAuthority?: FeishuReadAuthority | null
+}
+
+function sortJson(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(sortJson)
+  if (!value || typeof value !== 'object') return value
+  const record = value as Record<string, unknown>
+  return Object.fromEntries(Object.keys(record).sort().map((key) => [key, sortJson(record[key])]))
+}
+
+function sha256Canonical(value: unknown): string {
+  return createHash('sha256').update(JSON.stringify(sortJson(value))).digest('hex')
+}
+
+export function digestFeishuReadResult(value: unknown): string {
+  return sha256Canonical(value)
+}
+
+export function digestFeishuChannelSnapshot(value: unknown): string {
+  const channel = value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null
+  const config = channel?.config && typeof channel.config === 'object' && !Array.isArray(channel.config)
+    ? channel.config as Record<string, unknown>
+    : null
+  if (!channel || channel.type !== 'feishu-app' || channel.enabled !== true
+    || typeof channel.id !== 'string' || !channel.id.trim()
+    || !config || typeof config.appId !== 'string' || !config.appId.trim()
+    || typeof config.appSecret !== 'string' || !config.appSecret.trim()) {
+    throw new Error('codex_external_read_feishu_channel_invalid')
+  }
+  return sha256Canonical({
+    id: channel.id,
+    type: channel.type,
+    enabled: channel.enabled,
+    appId: config.appId,
+    appSecret: config.appSecret,
+    domain: typeof config.domain === 'string' && config.domain.trim()
+      ? config.domain.replace(/\/+$/, '')
+      : 'https://open.feishu.cn',
+  })
 }
 
 /**
@@ -196,15 +257,127 @@ const FEISHU_TOOLS: FeishuToolDef[] = [
   },
 ]
 
-function toStructuredResult(tool: FeishuToolDef, message: string, extra?: Record<string, unknown>): string {
-  return JSON.stringify({
+function toStructuredOutput(
+  tool: FeishuToolDef,
+  message: string,
+  extra?: Record<string, unknown>,
+): ToolExecutionOutput {
+  const data = {
     module: 'feishu',
     intent: tool.intent,
     executionKind: tool.executionKind,
     action: tool.action,
     message,
     ...(extra || {}),
+  }
+  return createToolExecutionOutput(JSON.stringify(data), { shape: 'json', data })
+}
+
+const KNOWN_FEISHU_ERROR_KINDS = new Set<string>(
+  Object.values(FEISHU_TOOL_ERROR_KINDS).map((entry) => entry.code),
+)
+
+function firstNumber(record: Record<string, unknown>, keys: string[]): number | null {
+  for (const key of keys) {
+    const value = record[key]
+    if (typeof value === 'number' && Number.isFinite(value)) return value
+    if (typeof value === 'string' && /^\d+$/.test(value.trim())) return Number(value.trim())
+  }
+  return null
+}
+
+function firstMessage(record: Record<string, unknown>): string {
+  for (const key of ['error', 'message', 'msg', 'detail']) {
+    const value = record[key]
+    if (typeof value === 'string' && value.trim()) return value.trim()
+  }
+  return 'Feishu operation failed'
+}
+
+function classifyFeishuFailure(record: Record<string, unknown>): FeishuToolErrorKind {
+  const explicit = typeof record.errorKind === 'string' ? record.errorKind.trim() : ''
+  if (KNOWN_FEISHU_ERROR_KINDS.has(explicit)) return explicit as FeishuToolErrorKind
+
+  const status = firstNumber(record, ['status_code', 'statusCode', 'http_status', 'httpStatus', 'status'])
+  const code = firstNumber(record, ['feishu_code', 'feishuCode', 'code'])
+  const message = firstMessage(record).toLowerCase()
+
+  if (status === 401 || code === 401 || /unauthori[sz]ed|invalid (?:access )?token|token (?:is )?expired|auth(?:entication)? required|not authenticated/.test(message)) {
+    return FEISHU_TOOL_ERROR_KINDS.authRequired.code
+  }
+  if (status === 403 || code === 403 || /permission denied|forbidden|no permission|access denied/.test(message)) {
+    return FEISHU_TOOL_ERROR_KINDS.permissionDenied.code
+  }
+  if (status === 404 || code === 404 || /not found|does not exist|resource missing/.test(message)) {
+    return FEISHU_TOOL_ERROR_KINDS.notFound.code
+  }
+  if (status === 429 || code === 429 || /rate.?limit|too many requests|throttl/.test(message)) {
+    return FEISHU_TOOL_ERROR_KINDS.rateLimited.code
+  }
+  if ((status !== null && status >= 500 && status <= 599) || (code !== null && code >= 500 && code <= 599)) {
+    return FEISHU_TOOL_ERROR_KINDS.upstreamUnavailable.code
+  }
+  if (/network|econn|socket|dns|enotfound|eai_again|fetch failed|connection (?:reset|refused)|timed? ?out/.test(message)) {
+    return FEISHU_TOOL_ERROR_KINDS.networkError.code
+  }
+  return FEISHU_TOOL_ERROR_KINDS.operationFailed.code
+}
+
+function failureOutput(
+  tool: FeishuToolDef,
+  errorKind: FeishuToolErrorKind,
+  message: string,
+  extra?: Record<string, unknown>,
+): ToolExecutionOutput {
+  return toStructuredOutput(tool, message, {
+    ...(extra || {}),
+    success: false,
+    ok: false,
+    errorKind,
+    message,
   })
+}
+
+function successOutput(tool: FeishuToolDef, result: Record<string, unknown>): ToolExecutionOutput {
+  const data = { ...result }
+  delete data.errorKind
+  return toStructuredOutput(tool, 'Success', {
+    ...data,
+    success: true,
+    ok: true,
+    message: 'Success',
+  })
+}
+
+function authorityMatches(
+  authority: FeishuReadAuthority,
+  toolName: string,
+  args: Record<string, unknown>,
+  channelId: string,
+): boolean {
+  return toolName === authority.allowedToolName
+    && channelId === authority.channelId
+    && typeof args.doc_token === 'string'
+    && args.doc_token === authority.docToken
+    && typeof args.doc_type === 'string'
+    && args.doc_type === authority.docType
+}
+
+async function currentFeishuChannelIdentityMatches(
+  authority: FeishuReadAuthority,
+  sidecarManager: NonNullable<FeishuToolContext['sidecarManager']>,
+): Promise<boolean> {
+  try {
+    const listed = await sidecarManager.listChannels()
+    const channels = Array.isArray(listed.channels) ? listed.channels : []
+    const current = channels.find((candidate) => candidate
+      && typeof candidate === 'object'
+      && !Array.isArray(candidate)
+      && (candidate as Record<string, unknown>).id === authority.channelId)
+    return Boolean(current) && digestFeishuChannelSnapshot(current) === authority.channelIdentityDigest
+  } catch {
+    return false
+  }
 }
 
 export function getFeishuAnthropicTools(): Array<Record<string, unknown>> {
@@ -238,19 +411,55 @@ export async function executeFeishuTool(
   toolName: string,
   args: Record<string, unknown>,
   context: FeishuToolContext
-): Promise<string> {
+): Promise<ToolExecutionOutput> {
   const tool = FEISHU_TOOLS.find((t) => t.name === toolName)
   if (!tool) {
-    return toStructuredResult({ name: toolName } as FeishuToolDef, `Unknown Feishu tool: ${toolName}`)
-  }
-
-  if (!context.sidecarManager) {
-    return toStructuredResult(tool, 'Feishu sidecar manager not available')
+    return failureOutput(
+      {
+        name: toolName,
+        description: '',
+        action: 'feishu.unknown',
+        intent: 'unknown_feishu_operation',
+        executionKind: 'deterministic',
+        params: [],
+      },
+      FEISHU_TOOL_ERROR_KINDS.invalidRequest.code,
+      `Unknown Feishu tool: ${toolName}`,
+    )
   }
 
   const channelId = String(args.channel_id || context.channelId || '')
   if (!channelId) {
-    return toStructuredResult(tool, 'Feishu channel_id is required')
+    return failureOutput(
+      tool,
+      FEISHU_TOOL_ERROR_KINDS.invalidRequest.code,
+      'Feishu channel_id is required',
+    )
+  }
+
+  if (context.feishuReadAuthority && !authorityMatches(context.feishuReadAuthority, toolName, args, channelId)) {
+    return failureOutput(
+      tool,
+      FEISHU_TOOL_ERROR_KINDS.authorityMismatch.code,
+      'Feishu read authority does not match this request',
+    )
+  }
+
+  if (!context.sidecarManager) {
+    return failureOutput(
+      tool,
+      FEISHU_TOOL_ERROR_KINDS.sidecarUnavailable.code,
+      'Feishu sidecar manager not available',
+    )
+  }
+
+  if (context.feishuReadAuthority
+    && !await currentFeishuChannelIdentityMatches(context.feishuReadAuthority, context.sidecarManager)) {
+    return failureOutput(
+      tool,
+      FEISHU_TOOL_ERROR_KINDS.authorityMismatch.code,
+      'Feishu channel identity changed after this read was authorized',
+    )
   }
 
   try {
@@ -264,6 +473,14 @@ export async function executeFeishuTool(
           String(args.doc_token),
           String(args.doc_type)
         )
+        if (context.feishuReadAuthority && result.success !== false
+          && digestFeishuReadResult(result) !== context.feishuReadAuthority.expectedResultDigest) {
+          return failureOutput(
+            tool,
+            FEISHU_TOOL_ERROR_KINDS.authorityMismatch.code,
+            'Feishu document content does not match the authorized resource version',
+          )
+        }
         break
 
       case 'feishu.docCreate':
@@ -399,12 +616,27 @@ export async function executeFeishuTool(
         break
 
       default:
-        return toStructuredResult(tool, `Unimplemented Feishu action: ${tool.action}`)
+        return failureOutput(
+          tool,
+          FEISHU_TOOL_ERROR_KINDS.invalidRequest.code,
+          `Unimplemented Feishu action: ${tool.action}`,
+        )
     }
 
-    return toStructuredResult(tool, 'Success', result)
+    if (result.success === false || result.ok === false) {
+      const errorKind = classifyFeishuFailure(result)
+      return failureOutput(tool, errorKind, firstMessage(result), result)
+    }
+
+    return successOutput(tool, result)
   } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : String(error)
-    return toStructuredResult(tool, `Error: ${errorMessage}`)
+    const errorRecord: Record<string, unknown> = error && typeof error === 'object'
+      ? {
+          ...(error as unknown as Record<string, unknown>),
+          message: error instanceof Error ? error.message : String(error),
+        }
+      : { message: String(error) }
+    const errorMessage = firstMessage(errorRecord)
+    return failureOutput(tool, classifyFeishuFailure(errorRecord), errorMessage, errorRecord)
   }
 }

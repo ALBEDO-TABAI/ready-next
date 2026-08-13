@@ -167,7 +167,7 @@ test('tag forge stages automatic ownership before indexing while preserving manu
     assert.equal(observedDuringIndex.find((item)=>item.label==='团队分享')?.ownership,'automatic')
     assert.equal(repo.listAssignments(file.fileKey).find((item)=>item.label==='AI工作流')?.ownership,'manual')
     assert.equal(repo.listAssignments(file.fileKey).find((item)=>item.label==='参考资料')?.ownership,'manual')
-    assert.match(await readFile(path,'utf8'),/tags:\n  - AI工作流\n  - 参考资料\n  - 团队分享/)
+    assert.match(await readFile(path,'utf8'),/tags:\n {2}- AI工作流\n {2}- 参考资料\n {2}- 团队分享/)
   }finally{db.close()}
 })
 
@@ -233,7 +233,7 @@ test('skipped indexing succeeds when strict readback already matches', async (t)
       ],
     },engine,{workspaceRoots:[root],runId:'run-skipped'}))
     assert.equal(output.status,'completed')
-    assert.match(await readFile(path,'utf8'),/tags:\n  - 教程\n  - AI工作流/)
+    assert.match(await readFile(path,'utf8'),/tags:\n {2}- 教程\n {2}- AI工作流/)
     assert.deepEqual(repo.listAssignments(file.fileKey).filter((item)=>item.facet!=='state').map((item)=>({label:item.label,ownership:item.ownership,suppressed:item.suppressed})),[
       {label:'AI工作流',ownership:'automatic',suppressed:false},
       {label:'教程',ownership:'automatic',suppressed:false},

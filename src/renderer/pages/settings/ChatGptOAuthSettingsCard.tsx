@@ -97,13 +97,16 @@ export function ChatGptOAuthSettingsCard({
 
   const ready = status?.state === 'ready'
   const connected = status?.connected === true
+  const authorizationExpired = status?.state === 'error'
   const statusText = ready
     ? `已连接 · ${status.models.length} 个模型`
-    : connected
-      ? '登录有效，服务待恢复'
-      : status
-        ? '未授权'
-        : '正在读取状态'
+    : authorizationExpired
+      ? '登录已失效，需要重新授权'
+      : connected
+        ? '登录有效，服务待恢复'
+        : status
+          ? '未授权'
+          : '正在读取状态'
 
   return (
     <AISettingsFieldCard
@@ -149,7 +152,7 @@ export function ChatGptOAuthSettingsCard({
             {!ready && (
               <button
                 type="button"
-                onClick={() => void (connected ? resume() : authorize())}
+                onClick={() => void (connected && !authorizationExpired ? resume() : authorize())}
                 disabled={busy !== null || status === null}
                 className="inline-flex items-center gap-2 rounded-full font-semibold transition-[filter,transform] hover:brightness-95 active:scale-[0.98] disabled:opacity-50"
                 style={{ ...SETTINGS_FLAT_BUTTON_STYLE, padding: '10px 15px', borderRadius: 999 }}
@@ -159,12 +162,14 @@ export function ChatGptOAuthSettingsCard({
                   ? '等待浏览器授权'
                   : busy === 'resume'
                     ? '正在恢复'
-                    : connected
+                    : connected && !authorizationExpired
                       ? '恢复并使用'
-                      : '使用 ChatGPT 登录'}
+                      : authorizationExpired
+                        ? '重新授权'
+                        : '使用 ChatGPT 登录'}
               </button>
             )}
-            {connected && (
+            {connected && !authorizationExpired && (
               <button
                 type="button"
                 onClick={() => void authorize()}

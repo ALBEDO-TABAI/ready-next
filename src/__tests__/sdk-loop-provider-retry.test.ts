@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { setTimeout as delay } from 'node:timers/promises'
-import test from 'node:test'
+import test, { after, before } from 'node:test'
 
 import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
 
@@ -13,6 +13,12 @@ import { createToolExecutionOutput } from '../main/modules/agent-control/tools-r
 import type { ToolDefinition } from '../main/modules/agent-control/tools-runtime/tool-definition'
 import { handleAgentSdkTurnError, shouldCheckpointProviderFailure } from '../main/modules/agent-control/runtime-core/agent-sdk-turn-closeout'
 import { buildProviderHttpError } from '../main/modules/claude-bridge/provider-terminal-error'
+import { __setScopeContextEpochDatabaseForTests } from '../main/modules/agent-control/session/scope-context-epoch'
+
+before(() => {
+  __setScopeContextEpochDatabaseForTests({ getRawDb: () => ({ prepare: () => ({ get: () => undefined }) }) as never })
+})
+after(() => __setScopeContextEpochDatabaseForTests(null))
 
 test('sdk-loop-provider-retry declares transitive sqlite ABI guard', (t) => {
   skipIfSqliteUnavailable(t, 'sdk-loop-provider-retry transitive sqlite load')

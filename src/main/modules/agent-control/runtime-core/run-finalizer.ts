@@ -1,57 +1,20 @@
-import { existsSync, readFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
 
 import { logAgentMetric } from '../metrics'
 import {
-  collectResponseDigestProof,
-  collectRunStateProof,
-  collectArtifactProof,
-  appendProofRefs
-} from '../quality/proof-collector'
-import { parseRunStateJson } from '../task-projection/run-state-schema'
-import {
-  adjudicateTerminalOutcome,
-  appendCheckIns,
-  type CheckInRecord
-} from '../quality/task-adjudicator'
-import {
-  appendModelCriteria,
-  normalizeDeliveryTarget,
-  resolveCriteria,
-  type SkillExecutionForm
-} from '../quality/criteria-templates'
-import type { TaskType } from '../../../../shared/task-types'
-import {
-  isRunMetaTerminalStatus,
   type RunMetaTerminalStatus
 } from '../../../../shared/run-meta-terminal-status'
 import type {
-  BudgetWarningLevel,
-  TaskBudget,
-  TaskBudgetRuntime,
-  TaskProjectionRecord,
+  TaskBudgetRuntime
 } from '../contracts/run-contracts'
-import { canResumeAsUserPoint } from '../contracts/resume-handle'
-import type { DeliveryStateV1 } from '../../../../shared/dynamic-delivery'
-import { assertDeliveryState } from '../../../../shared/dynamic-delivery'
 import {
-  getBudgetUsagePercent,
-  rebindTaskBudgetRuntime,
+  rebindTaskBudgetRuntime
 } from '../task-projection/run-budget-policy'
-import type { CanonicalAssistantMessageReceipt } from '../../../../shared/ipc-contracts/canonical-message'
-import type {
-  BrowserWorkflowCloseoutSeal,
-  BrowserWorkflowCompletionVerifierReceipt,
-} from '../../../../shared/browser-workflow-control'
-import { workflowDigest } from '../../repositories/browser-workflow-codec'
 import { closeoutBrowserTargetClaimsForRun } from '../../browser-engine/browser-target-claim-closeout'
 import type {
   FinalizedRunOutcome,
   RunCloseMetric,
   RunFinalizerDeps,
-  RunOutcome,
-  RunOutcomeUsage,
-  TerminalAdjudicationDecision,
+  RunOutcome
 } from './run-finalizer-contracts'
 export type {
   FinalizedRunOutcome,
@@ -78,28 +41,8 @@ export const defaultRunFinalizerDeps: RunFinalizerDeps = {
   writeRunCloseMetric
 }
 
-import {
-  deriveCoverageTargets,
-  deriveLearningRefs,
-  hasDocumentDeliveryProof,
-  hasPlannedStepsRequiringProof,
-  hasProofKind,
-  isBrowserTransactionTask,
-  resolveEffectiveTaskFacts,
-  type EffectiveTaskFacts,
-} from './run-finalizer-task-facts'
 export { deriveCoverageTargets } from './run-finalizer-task-facts'
 
-import {
-  canKeepProofBearingDegradedVisible,
-  continuationFromProjectionPatch,
-  recordTerminalAdjudication,
-  resolveDynamicDeliveryFinalizerBlocker,
-  resolveTerminalFailureReason,
-  runTerminalAdjudicationDerivedEffects,
-  terminalTaskBudgetSnapshot,
-} from './run-finalizer-adjudication'
-export { resolveDynamicDeliveryFinalizerBlocker } from './run-finalizer-adjudication'
 import {
   isValidContinuationHandle,
   requiresCheckpointContinuationHandle,
@@ -107,6 +50,7 @@ import {
   writeRunMetaOutcome,
   writeTerminalOutcome,
 } from './run-finalizer-persistence'
+export { resolveDynamicDeliveryFinalizerBlocker } from './run-finalizer-adjudication'
 
 export {
   buildManualSuspendProjectionPatch,
@@ -151,9 +95,9 @@ export async function finalizeRunOutcome(
     const finalized = await writeTerminalOutcome(outcome, deps, 'checkpoint', outcome.terminalReason || 'checkpoint')
     closeoutBrowserClaimsIfOwned(outcome, deps, {
       ownerRunId: outcome.runId,
-      resumable: true,
-      suspensionCheckpointId: outcome.continuationHandle,
-      suspensionReason: outcome.terminalReason || 'checkpoint',
+      resumable: false,
+      suspensionCheckpointId: null,
+      suspensionReason: null,
     })
     return finalized
   }
@@ -164,17 +108,11 @@ export async function finalizeRunOutcome(
     statusFromOutcomeKind(outcome.kind),
     outcome.terminalReason
   )
-  const recoverable = Boolean(
-    outcome.projectionPatch
-    && ['recoverable_paused', 'paused'].includes(String(outcome.projectionPatch.status || '')),
-  )
   closeoutBrowserClaimsIfOwned(outcome, deps, {
     ownerRunId: outcome.runId,
-    resumable: recoverable,
-    suspensionCheckpointId: recoverable
-      ? String(outcome.projectionPatch?.continuationHandle || outcome.projectionPatch?.checkpointId || '') || null
-      : null,
-    suspensionReason: recoverable ? outcome.terminalReason : null,
+    resumable: false,
+    suspensionCheckpointId: null,
+    suspensionReason: null,
   })
   return finalized
 }

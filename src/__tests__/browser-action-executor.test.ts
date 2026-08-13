@@ -417,6 +417,25 @@ test('failed or cached observations never create a receipt', async () => {
   assert.equal(port.observations.length, 1)
 })
 
+test('a successful conditional wait records a causal-only page observation', async () => {
+  const port = journal()
+  const result = await new BrowserActionExecutor().execute({
+    toolName: 'browser_wait',
+    args: { tab_id: 'tab-1', condition: 'content_stable', stable_iterations: 2 },
+    journal: port,
+    resolveTargetIdentity: resolveDocumentIdentity,
+    dispatch: async () => JSON.stringify({
+      matched: true,
+      value: { contentSignature: '3812:2964:26' },
+      observationFresh: true,
+      usableAsResearchEvidence: false,
+    }),
+  })
+  assert.equal(port.observations.length, 1)
+  assert.equal(port.observations[0].operationId, 'wait_condition')
+  assert.equal(outputData(result).usableAsResearchEvidence, false)
+})
+
 test('workflow metadata results never masquerade as page observation receipts', async () => {
   const port = journal()
   const result = await new BrowserActionExecutor().execute({
@@ -478,4 +497,36 @@ test('a typed followed tab becomes the settled successor identity', async () => 
   })
   assert.equal(port.outcomes[0].successorIdentity.tabId, 'tab-popup')
   assert.equal(port.outcomes[0].successorIdentity.physicalTargetToken, 'popup-physical')
+})
+
+test('a newly opened tab remains durably identifiable when the successor probe times out', async () => {
+  const port = journal()
+  const controller = {
+    createTab: async () => ({ success: true, tabId: 'tab-weather' }),
+  } as unknown as BrowserController
+
+  await new BrowserActionExecutor().execute({
+    toolName: 'browser_tabs',
+    args: { action: 'open', url: 'https://example.test/weather' },
+    journal: port,
+    identityProbeTimeoutMs: 5,
+    resolveTargetIdentity: (phase) => phase === 'predecessor'
+      ? {
+          documentState: 'no_document' as const,
+          tabId: null,
+          physicalTargetToken: null,
+          frameId: null,
+          frameDocumentToken: null,
+          targetRef: null,
+        }
+      : new Promise(() => {}),
+    dispatch: async (invocation, _signal, boundary) => {
+      const actionController = browserMutationController(controller, invocation.operation, boundary)
+      return JSON.stringify(await actionController.createTab('https://example.test/weather'))
+    },
+  })
+
+  assert.equal(port.outcomes.length, 1)
+  assert.equal(port.outcomes[0].successorIdentity.documentState, 'no_document')
+  assert.equal(port.outcomes[0].postActionTabId, 'tab-weather')
 })

@@ -67,6 +67,7 @@ interface RunOutcomeBase {
   runId: string
   taskId?: string | null
   scopeId?: string | null
+  messageVisibilityEpoch?: number
   durationMs: number
   toolCallsUsed: number
   initiator: string

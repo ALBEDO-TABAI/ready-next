@@ -3,6 +3,7 @@ import { getDatabase } from '../database'
 import { canResumeAsUserPoint } from '../agent-control/contracts/resume-handle'
 import { logAgentMetric } from '../agent-control/metrics'
 import { isRunMetaTerminalStatus } from '../../../shared/run-meta-terminal-status'
+import { CodexBindingRepository } from '../agent-control/codex-runtime/codex-binding-repository'
 import {
   SkillTaskRunRepository,
   type SkillTaskRunStartupReconciliationResult
@@ -33,6 +34,7 @@ export interface StartupRunReconcilerOptions {
   db?: StartupRunReconcilerDb | null
   now?: Date
   skillTaskRunRepository?: Pick<SkillTaskRunRepository, 'reconcileRunningRowsOnStartup'>
+  codexBindingRepository?: Pick<CodexBindingRepository, 'readOpenProductRunIds'>
   agentSessionCheckpointRepository?: Pick<AgentSessionCheckpointRepository, 'settleOwnerFailure' | 'expirePendingBrowserConfirmations' | 'expirePendingHumanTakeovers'>
   skillStaleAfterMs?: number
   logMetric?: (name: string, payload: Record<string, unknown>) => void
@@ -40,6 +42,7 @@ export interface StartupRunReconcilerOptions {
 
 interface TaskProjectionStartupRow {
   task_id: string
+  run_id: string | null
   continuation_ref_json: string | null
   run_status: string | null
   terminal_reason: string | null
@@ -47,6 +50,7 @@ interface TaskProjectionStartupRow {
 
 interface BrowserTaskStartupRow {
   id: string
+  owner_run_id: string | null
   checkpoint_json: string | null
   result_json: string | null
 }
@@ -82,29 +86,42 @@ function resultWithRerunMarker(raw: string | null): string {
   return JSON.stringify({ ...result, resumeKind: 'rerun_from_request', restartReason: 'restart' })
 }
 
-function reconcileRunMeta(db: StartupRunReconcilerDb, nowMs: number): number {
+function reconcileRunMeta(
+  db: StartupRunReconcilerDb,
+  nowMs: number,
+  openCodexRunIds: ReadonlySet<string>,
+): number {
   // run-finalizer-exempt: startup-recovery-only active-owner->interrupted
-  return changed(
-    db
-      .prepare(
-        `
+  const rows = db.prepare(`
+    SELECT rm.run_id
+      FROM run_meta rm
+      LEFT JOIN chat_conversations scope ON scope.id = rm.scope_id
+     WHERE rm.status IN ('working', 'running')
+       AND (
+         rm.scope_id IS NULL
+         OR (
+           scope.id IS NOT NULL
+           AND scope.closed_at IS NULL
+           AND rm.message_visibility_epoch = scope.message_visibility_epoch
+         )
+       )
+  `).all<{ run_id: string }>()
+  const update = db.prepare(`
     UPDATE run_meta
-    SET
-      status = 'interrupted',
-      initiator = 'process_exit',
-      terminal_reason = 'main_process_restarted',
-      updated_at = ?
-    WHERE status IN ('working', 'running')
-  `
-      )
-      .run(nowMs)
-  )
+     SET status = 'interrupted', initiator = 'process_exit',
+           terminal_reason = 'main_process_restarted', updated_at = ?
+     WHERE status IN ('working', 'running') AND run_id = ?
+  `)
+  return rows.reduce((count, row) => (
+    openCodexRunIds.has(row.run_id) ? count : count + changed(update.run(nowMs, row.run_id))
+  ), 0)
 }
 
 async function reconcileBrowserWorkflowOwners(
   db: StartupRunReconcilerDb,
   repository: Pick<AgentSessionCheckpointRepository, 'settleOwnerFailure'>,
   nowIso: string,
+  openCodexRunIds: ReadonlySet<string>,
 ): Promise<{ count: number; failures: Array<{ taskId: string; reason: string }> }> {
   const rows = db.prepare(`
     SELECT DISTINCT p.task_id, p.run_id
@@ -117,11 +134,23 @@ async function reconcileBrowserWorkflowOwners(
        AND c.browser_task_id = b.id
        AND c.owner_run_id = p.run_id
        AND c.role = 'clean_base'
+      LEFT JOIN chat_conversations scope ON scope.id = p.scope_id
      WHERE p.status = 'running'
        AND rm.status = 'running'
        AND b.status = 'running'
+       AND p.scope_id IS rm.scope_id
+       AND p.message_visibility_epoch = rm.message_visibility_epoch
+       AND (
+         p.scope_id IS NULL
+         OR (
+           scope.id IS NOT NULL
+           AND scope.closed_at IS NULL
+           AND p.message_visibility_epoch = scope.message_visibility_epoch
+         )
+       )
      ORDER BY p.updated_at ASC
   `).all<BrowserWorkflowOwnerStartupRow>()
+    .filter((row) => !openCodexRunIds.has(row.run_id))
 
   let count = 0
   const failures: Array<{ taskId: string; reason: string }> = []
@@ -198,22 +227,40 @@ function terminalProjectionTarget(row: TaskProjectionStartupRow): {
   }
 }
 
-function reconcileTaskProjections(db: StartupRunReconcilerDb, nowIso: string): number {
+function reconcileTaskProjections(
+  db: StartupRunReconcilerDb,
+  nowIso: string,
+  openCodexRunIds: ReadonlySet<string>,
+): number {
   const rows = db
     .prepare(
       `
     SELECT
       p.task_id,
+      p.run_id,
       p.continuation_ref_json,
       rm.status AS run_status,
       rm.terminal_reason
     FROM task_projections p
-    LEFT JOIN run_meta rm ON rm.run_id = p.run_id
+    LEFT JOIN run_meta rm
+      ON rm.run_id = p.run_id
+     AND rm.scope_id IS p.scope_id
+     AND rm.message_visibility_epoch = p.message_visibility_epoch
+    LEFT JOIN chat_conversations scope ON scope.id = p.scope_id
     WHERE p.status IN ('queued', 'running', 'blocked', 'budget_paused')
+      AND (
+        p.scope_id IS NULL
+        OR (
+          scope.id IS NOT NULL
+          AND scope.closed_at IS NULL
+          AND p.message_visibility_epoch = scope.message_visibility_epoch
+        )
+      )
     ORDER BY p.updated_at ASC
   `
     )
     .all<TaskProjectionStartupRow>()
+    .filter((row) => !row.run_id || !openCodexRunIds.has(row.run_id))
 
   const recoverable = db.prepare(`
     UPDATE task_projections
@@ -287,17 +334,34 @@ function reconcileTaskProjections(db: StartupRunReconcilerDb, nowIso: string): n
   return count
 }
 
-function reconcileBrowserTasks(db: StartupRunReconcilerDb, nowIso: string): number {
+function reconcileBrowserTasks(
+  db: StartupRunReconcilerDb,
+  nowIso: string,
+  openCodexRunIds: ReadonlySet<string>,
+): number {
   const rows = db
     .prepare(
       `
-    SELECT id, checkpoint_json, result_json
-    FROM browser_tasks
-    WHERE status = 'running'
-    ORDER BY updated_at ASC
+    SELECT browser.id, browser.checkpoint_json, browser.result_json,
+           owner.run_id AS owner_run_id
+      FROM browser_tasks browser
+      LEFT JOIN task_projections owner ON owner.task_id = browser.parent_task_id
+      LEFT JOIN chat_conversations scope ON scope.id = owner.scope_id
+     WHERE browser.status = 'running'
+       AND (
+         owner.task_id IS NULL
+         OR owner.scope_id IS NULL
+         OR (
+           scope.id IS NOT NULL
+           AND scope.closed_at IS NULL
+           AND owner.message_visibility_epoch = scope.message_visibility_epoch
+         )
+       )
+     ORDER BY browser.updated_at ASC
   `
     )
     .all<BrowserTaskStartupRow>()
+    .filter((row) => !row.owner_run_id || !openCodexRunIds.has(row.owner_run_id))
 
   // B3 — every running browser task pauses (never silent cancel) WITH a rerun
   // marker. The marker is a "resumable floor": canResumeTask is guaranteed true.
@@ -329,9 +393,14 @@ function reconcileBrowserTasks(db: StartupRunReconcilerDb, nowIso: string): numb
 function reconcileSkillRuns(
   repository: Pick<SkillTaskRunRepository, 'reconcileRunningRowsOnStartup'>,
   now: Date,
-  staleAfterMs: number | undefined
+  staleAfterMs: number | undefined,
+  openCodexRunIds: ReadonlySet<string>,
 ): { count: number; result: SkillTaskRunStartupReconciliationResult } {
-  const result = repository.reconcileRunningRowsOnStartup({ now, staleAfterMs })
+  const result = repository.reconcileRunningRowsOnStartup({
+    now,
+    staleAfterMs,
+    excludedRunIds: openCodexRunIds,
+  })
   return {
     count: result.recoverablePaused + result.failedWithoutHandle,
     result
@@ -348,24 +417,30 @@ export async function reconcileStartupRunsOnStartup(
   const skillTaskRunRepository =
     options.skillTaskRunRepository ||
     new SkillTaskRunRepository({ getRawDb: () => db as DatabaseConnection })
+  const codexBindingRepository = options.codexBindingRepository
+    || new CodexBindingRepository(db as DatabaseConnection)
+  const openCodexRunIds = codexBindingRepository.readOpenProductRunIds()
   const agentSessionCheckpointRepository =
     options.agentSessionCheckpointRepository ||
     new AgentSessionCheckpointRepository({ getRawDb: () => db as DatabaseConnection })
   const expiredBrowserConfirmations = await agentSessionCheckpointRepository.expirePendingBrowserConfirmations({
     now: now.toISOString(),
+    excludedRunIds: openCodexRunIds,
   })
   const expiredHumanTakeovers = await agentSessionCheckpointRepository.expirePendingHumanTakeovers({
     now: now.toISOString(),
+    excludedRunIds: openCodexRunIds,
   })
   const browserWorkflowOwners = await reconcileBrowserWorkflowOwners(
     db,
     agentSessionCheckpointRepository,
     now.toISOString(),
+    openCodexRunIds,
   )
-  const runMeta = browserWorkflowOwners.count + reconcileRunMeta(db, now.getTime())
-  const taskProjections = expiredBrowserConfirmations.length + expiredHumanTakeovers.length + browserWorkflowOwners.count + reconcileTaskProjections(db, now.toISOString())
-  const browserTasks = browserWorkflowOwners.count + reconcileBrowserTasks(db, now.toISOString())
-  const skillRuns = reconcileSkillRuns(skillTaskRunRepository, now, options.skillStaleAfterMs)
+  const runMeta = browserWorkflowOwners.count + reconcileRunMeta(db, now.getTime(), openCodexRunIds)
+  const taskProjections = expiredBrowserConfirmations.length + expiredHumanTakeovers.length + browserWorkflowOwners.count + reconcileTaskProjections(db, now.toISOString(), openCodexRunIds)
+  const browserTasks = browserWorkflowOwners.count + reconcileBrowserTasks(db, now.toISOString(), openCodexRunIds)
+  const skillRuns = reconcileSkillRuns(skillTaskRunRepository, now, options.skillStaleAfterMs, openCodexRunIds)
   const reconcileCount: StartupRunReconcileCount = {
     runMeta,
     taskProjections,

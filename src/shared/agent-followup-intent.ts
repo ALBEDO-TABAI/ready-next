@@ -185,8 +185,8 @@ export function classifyFollowupIntent(
   }
 
   // A natural-language continuation cue may keep unfinished-task safety guards
-  // active, but it is deliberately not a routing decision. The live turn must
-  // select a structured candidate through resume_task (or ask when ambiguous).
+  // active, but it is deliberately not a routing decision. Public task-resume
+  // actions are retired; the current message remains a new user request.
   const TOPIC_SHIFT = /(?:聊聊|换个|别的话题|其他话题|另一个话题|new topic|something else)/i
   const hasContinuationState = continuable === null
     ? ctx.hasActiveTaskContext

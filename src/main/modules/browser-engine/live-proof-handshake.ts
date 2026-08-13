@@ -1,15 +1,34 @@
 import { createHash } from 'node:crypto'
 import { createRequire } from 'node:module'
-import { createReadStream, existsSync, readFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { createReadStream, existsSync, lstatSync, readFileSync, readdirSync } from 'node:fs'
+import { join, relative } from 'node:path'
 import { tmpdir } from 'node:os'
 import { app, ipcMain } from 'electron'
 
 import { resolveReadyDatabasePath } from '../database-path'
 import { getBrowserBootIncarnationId } from './automation-service'
+import { getFrozenCallStore } from '../agent-control/safety/frozen-call-bridge'
+import {
+  inspectE6UserScenarioFrozenCall,
+  type E6UserScenarioConfirmationExpectation,
+} from './e6-user-scenario-confirmation-proof'
 
-const CHANNEL = 'app:browserLiveProofHandshake'
+const HANDSHAKE_CHANNEL = 'app:browserLiveProofHandshake'
+const QUIT_CHANNEL = 'app:browserLiveProofQuit'
+const INSPECT_FROZEN_CALL_CHANNEL = 'app:browserLiveProofInspectFrozenCall'
 const originalFs = createRequire(import.meta.url)('original-fs') as typeof import('node:fs')
+
+function isE6UserScenarioConfirmationExpectation(
+  value: unknown,
+): value is E6UserScenarioConfirmationExpectation {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  const candidate = value as Record<string, unknown>
+  return ['sheet_insert', 'sheet_write', 'docx_write'].includes(String(candidate.stage || ''))
+    && typeof candidate.sheetUrl === 'string'
+    && typeof candidate.docxUrl === 'string'
+    && typeof candidate.sheetSentinel === 'string'
+    && typeof candidate.docxTaskMarker === 'string'
+}
 
 async function sha256File(path: string, physicalArchive = false): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -21,11 +40,36 @@ async function sha256File(path: string, physicalArchive = false): Promise<string
   })
 }
 
+async function runtimeOutputManifestDigest(appPath: string): Promise<string> {
+  const outputRoot = join(appPath, 'out')
+  const visit = (directory: string): string[] => readdirSync(directory, { withFileTypes: true })
+    .flatMap((entry) => {
+      const absolutePath = join(directory, entry.name)
+      if (entry.isSymbolicLink() || lstatSync(absolutePath).isSymbolicLink()) {
+        throw new Error('browser_live_proof_output_symlink_rejected')
+      }
+      if (entry.isDirectory()) return visit(absolutePath)
+      return entry.isFile() ? [absolutePath] : []
+    })
+  const files = visit(outputRoot).sort().map((path) => ({
+    path: relative(appPath, path),
+    bytes: lstatSync(path).size,
+    pathOnDisk: path,
+  }))
+  const rows: string[] = []
+  for (const file of files) {
+    rows.push(`${file.path}\0${file.bytes}\0${await sha256File(file.pathOnDisk)}\n`)
+  }
+  return createHash('sha256').update(rows.join('')).digest('hex')
+}
+
 export function setupBrowserLiveProofHandshake(): void {
   const expectedNonce = process.env.READY_BROWSER_LIVE_PROOF_NONCE?.trim()
   if (!expectedNonce) return
-  ipcMain.removeHandler(CHANNEL)
-  ipcMain.handle(CHANNEL, async (_event, suppliedNonce: unknown) => {
+  ipcMain.removeHandler(HANDSHAKE_CHANNEL)
+  ipcMain.removeHandler(QUIT_CHANNEL)
+  ipcMain.removeHandler(INSPECT_FROZEN_CALL_CHANNEL)
+  ipcMain.handle(HANDSHAKE_CHANNEL, async (_event, suppliedNonce: unknown) => {
     if (String(suppliedNonce || '') !== expectedNonce) {
       return { success: false, error: 'proof_nonce_mismatch' }
     }
@@ -46,12 +90,60 @@ export function setupBrowserLiveProofHandshake(): void {
       asarPath,
       asarSha256: asarPath ? await sha256File(asarPath, true) : null,
       sourceManifestDigest: String(sourceManifest.digest || ''),
+      appPath,
+      runtimeOutputManifestDigest: asarPath ? null : await runtimeOutputManifestDigest(appPath),
       bootIncarnationId: getBrowserBootIncarnationId(),
       userDataPath,
       databasePath,
       tempDir: tmpdir(),
       metricsPath: join(tmpdir(), 'ready-agent-metrics.log'),
       appVersion: app.getVersion(),
+    }
+  })
+  ipcMain.handle(QUIT_CHANNEL, (_event, suppliedNonce: unknown) => {
+    if (String(suppliedNonce || '') !== expectedNonce) {
+      return { success: false, error: 'proof_nonce_mismatch' }
+    }
+    setImmediate(() => app.quit())
+    return { success: true }
+  })
+  ipcMain.handle(INSPECT_FROZEN_CALL_CHANNEL, (
+    _event,
+    rawPayload: unknown,
+  ) => {
+    const payload = rawPayload as {
+      nonce?: unknown
+      frozenCallId?: unknown
+      expectation?: E6UserScenarioConfirmationExpectation
+    }
+    if (String(payload?.nonce || '') !== expectedNonce) {
+      return { success: false, error: 'proof_nonce_mismatch' }
+    }
+    if (!isE6UserScenarioConfirmationExpectation(payload?.expectation)) {
+      return { success: false, error: 'confirmation_expectation_invalid' }
+    }
+    const frozenCallId = typeof payload?.frozenCallId === 'string' ? payload.frozenCallId : ''
+    const record = frozenCallId ? getFrozenCallStore()?.get(frozenCallId) : null
+    if (!record || record.status !== 'pending') {
+      return { success: false, error: 'pending_frozen_call_missing' }
+    }
+    let params: Record<string, unknown>
+    try { params = JSON.parse(record.paramsJson) as Record<string, unknown> } catch {
+      return { success: false, error: 'pending_frozen_call_invalid' }
+    }
+    const proof = inspectE6UserScenarioFrozenCall(
+      record.toolName,
+      params,
+      payload.expectation,
+    )
+    if (!proof) return { success: false, error: 'e6_confirmation_not_allowlisted' }
+    return {
+      success: true,
+      frozenCallId: record.id,
+      readyRunId: record.runId,
+      scopeId: record.scopeId,
+      toolName: record.toolName,
+      proof,
     }
   })
 }

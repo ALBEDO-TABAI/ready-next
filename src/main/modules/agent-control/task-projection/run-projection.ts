@@ -64,14 +64,35 @@ export class RunProjection {
   constructor(private readonly deps: {
     getScope: (scopeId: string) => ConversationScope | null
     getPrevious: (scopeId: string) => ScopeRunSummary | undefined
-    setSummary: (scopeId: string, summary: ScopeRunSummary) => void
+    setSummary: (scopeId: string, summary: ScopeRunSummary) => boolean | void
     toChannelKey: (scope: ConversationScope) => string
   }) {}
 
   recordEvent(payload: ScopeRunEventPayload, projectionTruth?: ProjectionTruthSnapshot | null): ScopeRunSummary | null {
     const scope = this.deps.getScope(payload.scopeId)
     if (!scope) return null
-    const previous = this.deps.getPrevious(payload.scopeId)
+    const eventAliasGeneration = payload.aliasGeneration
+    const eventVisibilityEpoch = payload.messageVisibilityEpoch
+    if (eventVisibilityEpoch === undefined || eventAliasGeneration === undefined) return null
+    const contextBackground = payload.visibilityOwnerKind === 'context_background'
+    let previous = this.deps.getPrevious(payload.scopeId)
+    if (contextBackground && previous && (
+      previous.runId !== payload.runId
+      || previous.messageVisibilityEpoch !== eventVisibilityEpoch
+    )) previous = undefined
+    if (payload.type === 'started' && (
+      previous?.runId !== payload.runId
+      || (!contextBackground && previous?.aliasGeneration !== eventAliasGeneration)
+      || previous?.messageVisibilityEpoch !== eventVisibilityEpoch
+    )) previous = undefined
+    if (scope.aliasGeneration !== null && payload.type === 'started'
+      && eventAliasGeneration !== scope.aliasGeneration) return null
+    if (eventVisibilityEpoch !== scope.messageVisibilityEpoch) return null
+    if (payload.type !== 'started' && previous && (
+      previous.messageVisibilityEpoch !== scope.messageVisibilityEpoch
+      || eventVisibilityEpoch !== previous.messageVisibilityEpoch
+      || (!contextBackground && eventAliasGeneration !== previous.aliasGeneration)
+    )) return null
     if (
       payload.type !== 'started'
       && payload.runId
@@ -121,6 +142,9 @@ export class RunProjection {
       || payload.phase === 'responding'
     const summary: ScopeRunSummary = {
       scopeId: payload.scopeId,
+      aliasGeneration: eventAliasGeneration,
+      messageVisibilityEpoch: eventVisibilityEpoch,
+      visibilityOwnerKind: payload.visibilityOwnerKind,
       agent: payload.agent,
       title: scope.title,
       sourceKind: scope.sourceKind,
@@ -230,7 +254,7 @@ export class RunProjection {
         nextTaskTitle: summary.taskTitle,
       })
     }
-    this.deps.setSummary(payload.scopeId, summary)
+    if (this.deps.setSummary(payload.scopeId, summary) === false) return null
     return summary
   }
 }

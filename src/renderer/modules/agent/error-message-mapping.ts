@@ -90,6 +90,15 @@ export function mapBackendErrorToFriendly(input: {
     }
   }
 
+  if (/gateway_reasoning_(capability_unsupported|policy_unsupported|effort_mismatch)/i.test(source)) {
+    return {
+      friendlyMessage: '当前模型的推理设置不匹配，请重新选择模型或推理强度',
+      technicalDetails: error || undefined,
+      recoverable: true,
+      retryStrategy: 'user_action',
+    }
+  }
+
   if (/(^|\n)(host_unavailable|circuit_break)(\n|$)|ToolHostUnavailableError|circuit breaker/i.test(source)) {
     return {
       friendlyMessage: '服务暂时不可用，稍后重试',
@@ -115,6 +124,7 @@ export function mapBackendErrorToFriendly(input: {
   if (
     errorKind === 'auth_required' ||
     errorKind === 'auth' ||
+    errorKind === 'configuration_unavailable' ||
     errorKind === 'blocked_config' ||
     /\bhttp\s*(401|403)\b/i.test(source) ||
     /invalid[\s_-]*(api[\s_-]*)?key|invalid_key|unauthorized|forbidden|permission_denied|api key/i.test(source)
@@ -124,6 +134,15 @@ export function mapBackendErrorToFriendly(input: {
       technicalDetails: error || undefined,
       recoverable: true,
       retryStrategy: 'user_action',
+    }
+  }
+
+  if (errorKind === 'external_service_unavailable') {
+    return {
+      friendlyMessage: '模型服务暂时不可用，请稍后重试',
+      technicalDetails: error || undefined,
+      recoverable: true,
+      retryStrategy: 'auto',
     }
   }
 

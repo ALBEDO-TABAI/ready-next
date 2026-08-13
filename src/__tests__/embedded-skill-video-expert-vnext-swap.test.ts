@@ -26,10 +26,18 @@ import {
   _resetLastReferenceSkillHintsForTests,
   getLastReferenceSkill,
 } from '../main/modules/agent-control/skills/skill-reference-hints'
+import { __setScopeContextEpochDatabaseForTests } from '../main/modules/agent-control/session/scope-context-epoch'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 // src/__tests__ → repo root → assets/embedded-skills/video-expert-analyzer
 const SKILL_DIR = join(__dirname, '..', '..', 'assets', 'embedded-skills', 'video-expert-analyzer')
+
+test.before(() => {
+  __setScopeContextEpochDatabaseForTests({
+    getRawDb: () => ({ prepare: () => ({ get: () => undefined }) }) as never,
+  })
+})
+test.after(() => __setScopeContextEpochDatabaseForTests(null))
 
 function runPythonCompile(scriptPaths: string[]): void {
   const pycachePrefix = mkdtempSync(join(tmpdir(), 'ready-pycompile-'))
@@ -891,6 +899,7 @@ test('orchestrator inline-injects SKILL.md, arms primitive hint, creates no skil
     userText: '用 video-expert-analyzer 深度分析这个视频 https://example.com/video.mp4',
     session,
     sessionId: 'test-session-vexpert',
+    messageVisibilityEpoch: 0,
     emitOutput: () => {},
     emitToolAction: () => { toolCalls += 1 },
     executeTool: async () => {
@@ -952,6 +961,7 @@ test('vnext SKILL.md fits the existing 12K JS-char cap and is inlined without tr
     userText: '用 video-expert-analyzer 分析视频',
     session,
     sessionId: 'test-session-vexpert-cap',
+    messageVisibilityEpoch: 0,
     emitOutput: () => {},
     emitToolAction: () => {},
     executeTool: async () => ({ text: '', shape: 'text', data: null, projectionPatch: null, interactionHint: null }),

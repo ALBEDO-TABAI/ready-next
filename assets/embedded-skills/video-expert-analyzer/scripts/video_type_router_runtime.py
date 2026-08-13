@@ -479,6 +479,13 @@ def generate_classification_result(
     classifier_fn: Optional[Callable[[Dict[str, Any], Dict[str, Any]], Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     summary_payload = build_classification_summary_payload(data)
+    cached = load_classification_result(video_dir)
+    cached_source = cached.get("summary_source") if isinstance(cached, dict) else None
+    if (
+        isinstance(cached_source, dict)
+        and cached_source.get("summary_hash") == classification_summary_hash(summary_payload)
+    ):
+        return cached
     classifier = classifier_fn or classify_summary_with_model
     raw_result = classifier(summary_payload, runtime_config or {})
     final_result = build_classification_result_payload(summary_payload, raw_result)

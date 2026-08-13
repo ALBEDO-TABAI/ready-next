@@ -248,20 +248,5 @@ export function useBeliefCards() {
     }
   }, [])
 
-  const setKnowledgeSystemEnabled = useCallback(async (enabled: boolean) => {
-    try {
-      setActionRunning('knowledge-system')
-      const result = await window.electronAPI.memoryCards.setKnowledgeSystemEnabled(enabled)
-      if (result.success && result.data) {
-        setSnapshot(result.data)
-        setError(null)
-        return
-      }
-      throw new Error(result.error || 'Failed to update knowledge system')
-    } finally {
-      setActionRunning(null)
-    }
-  }, [])
-
-  return { snapshot, loading, error, actionRunning, refresh, transitionCard, setKnowledgeSystemEnabled }
+  return { snapshot, loading, error, actionRunning, refresh, transitionCard }
 }

@@ -25,26 +25,56 @@ export interface ChatGptOAuthServiceDeps {
   removeCredential(): Promise<void>
 }
 
+type ChatGptOAuthConnectHooks = {
+  beforeRestart?: () => void | {
+    existingProxyApiKey?: string
+    savedModels?: string[]
+  } | Promise<void | {
+    existingProxyApiKey?: string
+    savedModels?: string[]
+  }>
+  afterReady?: (status: ChatGptOAuthStatus) => void | Promise<void>
+}
+
+type ChatGptOAuthDisconnectHooks = {
+  beforeDisconnect?: () => void | Promise<void>
+  restoreAfterFailure?: (input: { credentialExists: boolean }) => void | Promise<void>
+}
+
+export type ChatGptOAuthLifecycleScope = {
+  ensureReady(
+    savedModels?: string[],
+    proxyApiKey?: string,
+  ): Promise<ChatGptOAuthStatus>
+}
+
 export class ChatGptOAuthService {
   private server: ChatGptOAuthServer | null = null
   private startPromise: Promise<ChatGptOAuthStatus> | null = null
   private models: string[] = []
   private proxyApiKey: string | null = null
   private lastError: string | null = null
+  private lifecycleBusy = false
+  private readonly lifecycleQueue: Array<() => void> = []
 
   constructor(private readonly deps: ChatGptOAuthServiceDeps) {}
 
+  isLifecycleBusy(): boolean {
+    return this.lifecycleBusy
+  }
+
+  runInLifecycleLane<T>(
+    operation: (scope: ChatGptOAuthLifecycleScope) => T | Promise<T>,
+  ): Promise<T> {
+    return this.runLifecycle(() => Promise.resolve(operation({
+      ensureReady: (savedModels = [], proxyApiKey) => (
+        this.ensureReadyUnlocked(savedModels, proxyApiKey)
+      ),
+    })))
+  }
+
   getStatus(): ChatGptOAuthStatus {
     const connected = this.deps.credentialExists()
-    if (this.server) {
-      return {
-        state: 'ready',
-        connected,
-        running: true,
-        baseUrl: CHATGPT_OAUTH_BASE_URL,
-        models: [...this.models],
-      }
-    }
     if (this.lastError) {
       return {
         state: 'error',
@@ -53,6 +83,15 @@ export class ChatGptOAuthService {
         baseUrl: CHATGPT_OAUTH_BASE_URL,
         models: [...this.models],
         error: this.lastError,
+      }
+    }
+    if (this.server) {
+      return {
+        state: 'ready',
+        connected,
+        running: true,
+        baseUrl: CHATGPT_OAUTH_BASE_URL,
+        models: [...this.models],
       }
     }
     return {
@@ -67,20 +106,51 @@ export class ChatGptOAuthService {
   async connect(
     existingProxyApiKey?: string,
     savedModels: string[] = [],
+    hooks: ChatGptOAuthConnectHooks = {},
   ): Promise<ChatGptOAuthStatus> {
-    this.lastError = null
-    try {
-      await this.deps.login()
-      await this.stopServer()
-      const proxyApiKey = normalizeProxyApiKey(existingProxyApiKey) || randomBytes(32).toString('base64url')
-      return await this.ensureReady(savedModels, proxyApiKey)
-    } catch (error) {
-      this.lastError = error instanceof Error ? error.message : String(error)
-      throw error
-    }
+    return this.runLifecycle(async () => {
+      this.lastError = null
+      let authorizationStarted = false
+      try {
+        const prepared = await hooks.beforeRestart?.()
+        const preparedProxyApiKey = prepared?.existingProxyApiKey ?? existingProxyApiKey
+        const preparedModels = prepared?.savedModels ?? savedModels
+        authorizationStarted = true
+        await this.stopServerUnlocked()
+        await this.deps.login()
+        const proxyApiKey = normalizeProxyApiKey(preparedProxyApiKey) || randomBytes(32).toString('base64url')
+        const status = await this.ensureReadyUnlocked(preparedModels, proxyApiKey)
+        await hooks.afterReady?.(status)
+        return status
+      } catch (error) {
+        if (authorizationStarted) {
+          await this.stopServerUnlocked().catch(() => undefined)
+          await this.deps.removeCredential().catch(() => undefined)
+          this.models = []
+          this.proxyApiKey = null
+          this.lastError = error instanceof Error ? error.message : String(error)
+        }
+        throw error
+      }
+    })
   }
 
-  async ensureReady(savedModels: string[] = [], proxyApiKey?: string): Promise<ChatGptOAuthStatus> {
+  async ensureReady(
+    savedModels: string[] = [],
+    proxyApiKey?: string,
+    afterReady?: (status: ChatGptOAuthStatus) => void | Promise<void>,
+  ): Promise<ChatGptOAuthStatus> {
+    return this.runLifecycle(async () => {
+      const status = await this.ensureReadyUnlocked(savedModels, proxyApiKey)
+      await afterReady?.(status)
+      return status
+    })
+  }
+
+  private async ensureReadyUnlocked(
+    savedModels: string[] = [],
+    proxyApiKey?: string,
+  ): Promise<ChatGptOAuthStatus> {
     if (this.server) return this.getStatus()
     if (this.startPromise) return this.startPromise
     if (!this.deps.credentialExists()) {
@@ -117,13 +187,44 @@ export class ChatGptOAuthService {
     return this.startPromise
   }
 
-  async disconnect(): Promise<ChatGptOAuthStatus> {
-    await this.stopServer()
-    await this.deps.removeCredential()
-    this.models = []
-    this.proxyApiKey = null
-    this.lastError = null
-    return this.getStatus()
+  async disconnect(hooks: ChatGptOAuthDisconnectHooks = {}): Promise<ChatGptOAuthStatus> {
+    return this.runLifecycle(async () => {
+      let disconnectPrepared = false
+      try {
+        await hooks.beforeDisconnect?.()
+        disconnectPrepared = true
+        await this.stopServerUnlocked()
+        await this.deps.removeCredential()
+        this.models = []
+        this.proxyApiKey = null
+        this.lastError = null
+        return this.getStatus()
+      } catch (error) {
+        if (disconnectPrepared) {
+          this.lastError = error instanceof Error ? error.message : String(error)
+          const credentialExists = this.deps.credentialExists()
+          if (!credentialExists) {
+            this.models = []
+            this.proxyApiKey = null
+          }
+          try {
+            await hooks.restoreAfterFailure?.({
+              credentialExists,
+            })
+          } catch (restoreError) {
+            const message = restoreError instanceof Error ? restoreError.message : String(restoreError)
+            await this.deps.removeCredential().catch(() => undefined)
+            if (!this.deps.credentialExists()) {
+              this.models = []
+              this.proxyApiKey = null
+            }
+            this.lastError = `chatgpt_oauth_disconnect_recovery_failed: ${message}`
+            throw new Error(this.lastError, { cause: error })
+          }
+        }
+        throw error
+      }
+    })
   }
 
   getProxyApiKey(): string {
@@ -133,17 +234,54 @@ export class ChatGptOAuthService {
     return this.proxyApiKey
   }
 
-  async stop(): Promise<void> {
-    await this.stopServer()
+  readBoundProxyApiKey(): string | null {
+    return this.proxyApiKey
   }
 
-  private async stopServer(): Promise<void> {
+  async stop(): Promise<void> {
+    await this.runLifecycle(() => this.stopServerUnlocked())
+  }
+
+  private async stopServerUnlocked(): Promise<void> {
     if (this.startPromise) {
       await this.startPromise.catch(() => undefined)
     }
     const server = this.server
-    this.server = null
-    if (server) await server.close()
+    if (server) {
+      await server.close()
+      if (this.server === server) this.server = null
+    }
+  }
+
+  private runLifecycle<T>(operation: () => Promise<T>): Promise<T> {
+    return new Promise<T>((resolve, reject) => {
+      const execute = () => {
+        this.lifecycleBusy = true
+        let outcome: Promise<T>
+        try {
+          outcome = operation()
+        } catch (error) {
+          outcome = Promise.reject(error)
+        }
+        const finish = () => {
+          const next = this.lifecycleQueue.shift()
+          if (next) next()
+          else this.lifecycleBusy = false
+        }
+        void outcome.then(
+          (value) => {
+            finish()
+            resolve(value)
+          },
+          (error) => {
+            finish()
+            reject(error)
+          },
+        )
+      }
+      if (this.lifecycleBusy) this.lifecycleQueue.push(execute)
+      else execute()
+    })
   }
 }
 
@@ -159,11 +297,10 @@ export function createChatGptOAuthService(authFilePath: string): ChatGptOAuthSer
       })
       await chmod(authFilePath, 0o600)
     },
-    startServer: async (models, proxyApiKey) => {
+    startServer: async (_models, proxyApiKey) => {
       await secureAuthStorage(authFilePath)
       const oauthHandler = createOpenAIOAuthFetchHandler({
         authFilePath,
-        models,
       })
       const expectedAuthorization = `Bearer ${proxyApiKey}`
       const server = await startAuthenticatedServer(async (request) => {
@@ -178,7 +315,7 @@ export function createChatGptOAuthService(authFilePath: string): ChatGptOAuthSer
         return oauthHandler(request)
       })
       try {
-        const resolvedModels = models || await loadOAuthModels(proxyApiKey)
+        const resolvedModels = await loadOAuthModels(proxyApiKey)
         return {
           models: resolvedModels,
           close: () => closeServer(server),

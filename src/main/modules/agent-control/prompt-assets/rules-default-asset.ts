@@ -20,6 +20,8 @@ const FALLBACK = [
 
 let cached: string | null = null
 
+export const __breaksInvariants = ['rules-default prompt cache'] as const
+
 export function loadRulesDefaultBody(): string {
   if (cached !== null) return cached
   try {

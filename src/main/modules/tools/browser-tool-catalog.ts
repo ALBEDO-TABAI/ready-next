@@ -42,7 +42,6 @@ const DESCRIPTIONS: Record<BrowserPublicToolName, string> = {
   browser_drag: '在两个目标或坐标间拖拽。',
   browser_upload: '上传任务中明确提供的附件。',
   browser_dialog: '读取或处理页面对话框。',
-  browser_request_takeover: '请求用户接管验证步骤并保留续跑点。',
   browser_research: '管理研究项；start 需 work_items，evidence 需 evidence_bindings。',
   browser_collect: '采集图片、结构内容或长列表。',
   browser_download: '下载 URL、页面或媒体并校验文件。',

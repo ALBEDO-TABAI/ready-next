@@ -29,7 +29,7 @@ import { _resetLastReferenceSkillHintsForTests } from '../main/modules/agent-con
 import type { SkillState } from '../main/modules/skills-runtime/runtime-manager'
 
 function readWorkspaceFile(path: string): string {
-  // eslint-disable-next-line ready/no-source-grep-test -- reviewed hard contract: reference-skill output wording is a source-surface prompt contract
+
   return readFileSync(resolve(process.cwd(), path), 'utf8')
 }
 

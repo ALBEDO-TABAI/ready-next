@@ -1,48 +1,21 @@
-import { randomUUID } from 'node:crypto'
-import type { AgentInputItem } from '@openai/agents'
 import type {
-  AgentCheckpointRefs,
-  BrowserCheckpointSuspensionReason,
-  BrowserCheckpointWakeKind,
-  BrowserConfirmationSuspensionRequest,
-  BrowserHumanTakeoverPrompt,
-  BrowserHumanTakeoverPhysicalTarget,
-  BrowserOwnerCrashRecoveryReceipt,
-  BrowserPowerConfirmationSuspensionRequest,
-  HumanTakeoverRef,
+  BrowserConfirmationSuspensionRequest, BrowserPowerConfirmationSuspensionRequest
 } from '../../../shared/browser-workflow-control'
-import { browserHumanTakeoverBlockedReason, browserWakeKindForSuspensionReason } from '../../../shared/browser-workflow-control'
-import type { TaskExecutionBinding } from '../../../shared/agent-execution-profile'
-import { assertDeliveryState, type DeliveryStateV1 } from '../../../shared/dynamic-delivery'
-import { assertAgentInputToolPairIntegrity } from '../agent-control/compaction/compact-agent-input'
 import {
-  digestSerializedJson,
   parseObjectStrict,
-  serializeWorkflowJson,
-  workflowDigest,
+  serializeWorkflowJson
 } from './browser-workflow-codec'
 import type {
-  WorkflowDatabaseAccessor,
-  WorkflowRawDatabase,
+  WorkflowDatabaseAccessor
 } from './browser-workflow-unit-of-work'
 import { BrowserWorkflowUnitOfWork } from './browser-workflow-unit-of-work'
 import {
-  mapWorkflowCheckpointRow,
-  readWorkflowParent,
-  type AgentSessionCheckpoint,
-  type WorkflowCheckpointRow,
+  readWorkflowParent
 } from './browser-workflow-row-mapping'
-import type {
-  BrowserCheckpointWakeReceiptInput,
-  HumanTakeoverResumeBinding,
-} from './agent-session-checkpoint-types'
 import {
-  ownerCrashReceiptFromContinuation,
   permissionConfirmationRequestFromContinuation,
-  powerConfirmationRequestFromContinuation,
+  powerConfirmationRequestFromContinuation
 } from './agent-session-checkpoint-confirmations'
-import { suspendHeldBrowserTargetClaims } from './agent-session-checkpoint-store'
-import { buildTypedResumeCheckpointInput } from './typed-resume-checkpoint'
 
 const readParent = readWorkflowParent
 
@@ -91,23 +64,25 @@ export class AgentSessionCheckpointConfirmationLifecycleRepository {
   async expirePendingBrowserConfirmations(input: {
     scopeId?: string | null
     now?: string
+    excludedRunIds?: ReadonlySet<string>
   } = {}): Promise<string[]> {
     return this.unitOfWork.runImmediateWithRetry((db) => {
       const now = input.now || new Date().toISOString()
       const rows = db.prepare(
-        `SELECT task_id, continuation_ref_json, revision
+        `SELECT task_id, run_id, continuation_ref_json, revision
            FROM task_projections
           WHERE status = 'recoverable_paused'
             AND waiting_for = 'confirmation'
             AND blocked_reason IN ('browser_power_confirmation_checkpoint', 'browser_permission_checkpoint')
             AND (? IS NULL OR scope_id = ?)
           ORDER BY updated_at ASC`,
-      ).all<{ task_id: string; continuation_ref_json: string | null; revision: number }>(
+      ).all<{ task_id: string; run_id: string | null; continuation_ref_json: string | null; revision: number }>(
         input.scopeId || null,
         input.scopeId || null,
       )
       const expiredTaskIds: string[] = []
       for (const row of rows) {
+        if (row.run_id && input.excludedRunIds?.has(row.run_id)) continue
         let continuation: Record<string, unknown> = {}
         try {
           continuation = parseObjectStrict<Record<string, unknown>>(

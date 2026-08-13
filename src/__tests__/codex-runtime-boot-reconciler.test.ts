@@ -79,6 +79,10 @@ function sixSeamSnapshot(): CodexBindingRecoverySnapshot {
     manualCompactions: [{
       manualCompactionId: 'manual-1', threadBindingId: 'thread-manual-1',
       codexThreadId: 'thread-native-manual-1', state: 'pending', fenceQuarantined: false,
+      codexCompactionTurnId: null, preDispatchThreadReadDigest: 'pre-read',
+      preDispatchTurnIds: [], aliasId: 'alias-manual-1', aliasGeneration: 1,
+      upstreamProfileSnapshotDigest: 'snapshot-manual-1', unknownAt: null,
+      unknownReason: null, latestAttempt: null,
     }],
     productFences: [{
       threadBindingId: 'thread-product-1', readyRunId: 'run-product-1',
@@ -122,8 +126,12 @@ test('boot settles process ownership, restores capacity, covers six seams, then 
       return 1
     },
     readProductRunForThreadBinding(threadBindingId: string) {
-      assert.equal(threadBindingId, 'thread-seam-3')
-      return 'run-seam-3'
+      const runId = new Map([
+        ['thread-seam-1', 'run-after-seam-1'],
+        ['thread-seam-3', 'run-seam-3'],
+      ]).get(threadBindingId)
+      assert.ok(runId)
+      return runId
     },
     quarantineStartInbound(input: { bindingId: string }) {
       events.push(`quarantine:${input.bindingId}`)
@@ -151,13 +159,21 @@ test('boot settles process ownership, restores capacity, covers six seams, then 
     },
     async commitHostFailureProductTerminal({ failure }) {
       events.push(`product-terminal:${failure.readyRunId}`)
-      return { productTerminalDigest: `terminal-${failure.readyRunId}` }
+      return {
+        productTerminalDigest: `terminal-${failure.readyRunId}`,
+        closeoutAt: '2026-08-07T01:59:59.000Z',
+      }
+    },
+    async deliverHostFailureProductTerminal({ failure }) {
+      events.push(`product-delivery:${failure.readyRunId}`)
     },
     async reconcileManualCompaction(input) {
       events.push(`manual:${input.manualCompactionId}`)
     },
     async reconcileProductFence(input) {
-      events.push(`product-fence:${input.readyRunId}`)
+      events.push(`product-fence:start:${input.readyRunId}`)
+      await new Promise<void>((resolve) => setImmediate(resolve))
+      events.push(`product-fence:done:${input.readyRunId}`)
     },
   }
   const gate: CodexRuntimeIngressGate = {
@@ -169,6 +185,7 @@ test('boot settles process ownership, restores capacity, covers six seams, then 
     repository: repository as never,
     supervisor: {
       async settleBootLease() { events.push('process-lease'); return 'settled' },
+      async settleFenceOwnerLease() { events.push('fence-owner'); return 'settled' },
     },
     sidecarSession: {
       async startAndInitialize() {
@@ -185,11 +202,16 @@ test('boot settles process ownership, restores capacity, covers six seams, then 
 
   const result = await reconciler.boot()
   assert.equal(result.connectionEpoch, 'new-epoch')
-  assert.deepEqual(result.unresolvedStartBindings, ['run-seam-6'])
+  assert.deepEqual(result.unresolvedStartBindings, [
+    'thread-seam-1',
+    'run-after-seam-2',
+    'run-seam-6',
+  ])
   assert.equal(result.registry.snapshot().capacityCharged, 4)
   assert.ok(events.indexOf('process-lease') < events.indexOf('snapshot'))
   assert.ok(events.indexOf('snapshot') < events.indexOf('sidecar-initialized'))
   assert.ok(events.indexOf('failure-closeout:run-host-failure') < events.indexOf('intent:2:thread-seam-2'))
+  assert.ok(events.indexOf('failure-closeout:run-host-failure') < events.indexOf('product-delivery:run-host-failure'))
   assert.ok(events.includes('held:1:thread-seam-1'))
   assert.equal(events.includes('held:4:run-after-seam-1'), false)
   assert.ok(events.includes('held:4:run-after-seam-2'))
@@ -199,9 +221,10 @@ test('boot settles process ownership, restores capacity, covers six seams, then 
   assert.ok(events.includes('intent:5:run-seam-5'))
   assert.ok(events.includes('intent:6:run-seam-6'))
   assert.ok(events.includes('quarantine:run-seam-6'))
-  assert.deepEqual(events.slice(-4), [
+  assert.deepEqual(events.slice(-5), [
     'manual:manual-1',
-    'product-fence:run-product-1',
+    'product-fence:start:run-product-1',
+    'product-fence:done:run-product-1',
     'sidecar-sealed',
     'gate:open',
   ])
@@ -242,7 +265,10 @@ test('unknown root intent keeps the held turn in the same reservation set blocke
         events.push(`quarantine:${input.bindingId}`)
       },
     } as never,
-    supervisor: { async settleBootLease() { return 'none' } },
+    supervisor: {
+      async settleBootLease() { return 'none' },
+      async settleFenceOwnerLease() { return 'settled' },
+    },
     sidecarSession: {
       async startAndInitialize() { return { connectionEpoch: 'new-epoch' } },
       isConnectionLive() { return false },
@@ -257,6 +283,7 @@ test('unknown root intent keeps the held turn in the same reservation set blocke
         return { resolution: 'unknown', evidenceDigest: 'unknown-root-evidence' }
       },
       async commitHostFailureProductTerminal() { throw new Error('unexpected') },
+      async deliverHostFailureProductTerminal() { throw new Error('unexpected') },
       async reconcileManualCompaction() { throw new Error('unexpected') },
       async reconcileProductFence() { events.push('unexpected-fence') },
     },
@@ -267,6 +294,46 @@ test('unknown root intent keeps the held turn in the same reservation set blocke
   const result = await reconciler.boot()
   assert.deepEqual(result.unresolvedStartBindings, ['thread-unknown'])
   assert.deepEqual(events, ['quarantine:thread-unknown', 'sealed', 'open'])
+})
+
+test('a quarantined manual readback failure remains local and does not seal global ingress', async () => {
+  const events: string[] = []
+  const snapshot: CodexBindingRecoverySnapshot = {
+    members: [], lateResponseGuards: [], hostFailureCloseouts: [], productFences: [],
+    manualCompactions: [{
+      manualCompactionId: 'manual-unreadable', threadBindingId: 'thread-old',
+      codexThreadId: 'thread-native-old', state: 'quarantined', fenceQuarantined: true,
+      codexCompactionTurnId: 'turn-old', preDispatchThreadReadDigest: 'pre-read',
+      preDispatchTurnIds: [], aliasId: 'alias-old', aliasGeneration: 1,
+      upstreamProfileSnapshotDigest: 'snapshot-old', unknownAt: null,
+      unknownReason: null, latestAttempt: null,
+    }],
+  }
+  const result = await new CodexRuntimeBootReconciler({
+    runtime: runtime(),
+    repository: { readRecoverySnapshot: () => snapshot } as never,
+    supervisor: {
+      async settleBootLease() { return 'none' },
+      async settleFenceOwnerLease() { return 'settled' },
+    },
+    sidecarSession: {
+      async startAndInitialize() { return { connectionEpoch: 'new-epoch' } },
+      isConnectionLive() { return false },
+      sealBootReconciliation() { events.push('sealed') },
+    },
+    actions: {
+      async dispatchHeldStart() { throw new Error('unexpected') },
+      async resolveIntentStart() { throw new Error('unexpected') },
+      async commitHostFailureProductTerminal() { throw new Error('unexpected') },
+      async deliverHostFailureProductTerminal() { throw new Error('unexpected') },
+      async reconcileManualCompaction() { throw new Error('old_thread_unreadable') },
+      async reconcileProductFence() { throw new Error('unexpected') },
+    },
+    ingressGate: { close() {}, open() { events.push('open') } },
+    now: () => '2026-08-07T02:00:00.000Z',
+  }).boot()
+  assert.deepEqual(result.unresolvedStartBindings, ['manual:manual-unreadable'])
+  assert.deepEqual(events, ['sealed', 'open'])
 })
 
 test('capacity recovery overflow keeps ingress closed and performs no binding action', async () => {
@@ -296,7 +363,10 @@ test('capacity recovery overflow keeps ingress closed and performs no binding ac
     repository: {
       readRecoverySnapshot: () => overflow,
     } as never,
-    supervisor: { async settleBootLease() { return 'none' } },
+    supervisor: {
+      async settleBootLease() { return 'none' },
+      async settleFenceOwnerLease() { return 'settled' },
+    },
     sidecarSession: {
       async startAndInitialize() { return { connectionEpoch: 'new-epoch' } },
       isConnectionLive() { return false },
@@ -306,6 +376,7 @@ test('capacity recovery overflow keeps ingress closed and performs no binding ac
       async dispatchHeldStart() { events.push('unexpected-action'); return 'pending' },
       async resolveIntentStart() { throw new Error('unexpected-action') },
       async commitHostFailureProductTerminal() { throw new Error('unexpected-action') },
+      async deliverHostFailureProductTerminal() { throw new Error('unexpected-action') },
       async reconcileManualCompaction() { throw new Error('unexpected-action') },
       async reconcileProductFence() { throw new Error('unexpected-action') },
     },
@@ -331,6 +402,7 @@ test('process ownership failure prevents sidecar start, snapshot reads, and ingr
         events.push('process-lease')
         throw new Error('old_main_owner_still_alive')
       },
+      async settleFenceOwnerLease() { throw new Error('unexpected') },
     },
     sidecarSession: {
       async startAndInitialize() { events.push('sidecar'); return { connectionEpoch: 'epoch' } },
@@ -349,5 +421,84 @@ test('process ownership failure prevents sidecar start, snapshot reads, and ingr
     'closed:boot_reconciliation_pending',
     'process-lease',
     'closed:old_main_owner_still_alive',
+  ])
+})
+
+test('a quarantined old-owner fence cannot block a healthy boot root', async () => {
+  const events: string[] = []
+  const snapshot: CodexBindingRecoverySnapshot = {
+    members: [], lateResponseGuards: [], hostFailureCloseouts: [], manualCompactions: [],
+    productFences: [{
+      threadBindingId: 'thread-quarantined', readyRunId: 'run-quarantined',
+      ownerMainBootId: 'missing-old-owner', quarantinedAt: '2026-08-07T01:00:00.000Z',
+      quarantineReason: 'start_resolution_unknown',
+    }],
+  }
+  const result = await new CodexRuntimeBootReconciler({
+    runtime: runtime(),
+    repository: { readRecoverySnapshot: () => snapshot } as never,
+    supervisor: {
+      async settleBootLease() { events.push('lease'); return 'none' },
+      async settleFenceOwnerLease() { events.push('unexpected-owner-settlement'); throw new Error('unexpected') },
+    },
+    sidecarSession: {
+      async startAndInitialize() { events.push('sidecar'); return { connectionEpoch: 'epoch' } },
+      isConnectionLive() { return false },
+      sealBootReconciliation() { events.push('sealed') },
+    },
+    actions: {
+      async dispatchHeldStart() { throw new Error('unexpected') },
+      async resolveIntentStart() { throw new Error('unexpected') },
+      async commitHostFailureProductTerminal() { throw new Error('unexpected') },
+      async deliverHostFailureProductTerminal() { throw new Error('unexpected') },
+      async reconcileManualCompaction() { throw new Error('unexpected') },
+      async reconcileProductFence() { events.push('unexpected-fence') },
+    },
+    ingressGate: { close() {}, open() { events.push('open') } },
+    now: () => '2026-08-07T02:00:00.000Z',
+  }).boot()
+  assert.deepEqual(result.unresolvedStartBindings, [])
+  assert.deepEqual(events, ['lease', 'sidecar', 'sealed', 'open'])
+})
+
+test('a cancelled boot seals the new sidecar but never reopens ingress', async () => {
+  const events: string[] = []
+  let commitAllowed = true
+  const snapshot: CodexBindingRecoverySnapshot = {
+    members: [], lateResponseGuards: [], hostFailureCloseouts: [], manualCompactions: [],
+    productFences: [],
+  }
+  const reconciler = new CodexRuntimeBootReconciler({
+    runtime: runtime(),
+    repository: { readRecoverySnapshot: () => snapshot } as never,
+    supervisor: {
+      async settleBootLease() { return 'none' },
+      async settleFenceOwnerLease() { return 'settled' },
+    },
+    sidecarSession: {
+      async startAndInitialize() { return { connectionEpoch: 'epoch' } },
+      isConnectionLive() { return false },
+      sealBootReconciliation() { events.push('sealed'); commitAllowed = false },
+    },
+    actions: {
+      async dispatchHeldStart() { throw new Error('unexpected') },
+      async resolveIntentStart() { throw new Error('unexpected') },
+      async commitHostFailureProductTerminal() { throw new Error('unexpected') },
+      async deliverHostFailureProductTerminal() { throw new Error('unexpected') },
+      async reconcileManualCompaction() { throw new Error('unexpected') },
+      async reconcileProductFence() { throw new Error('unexpected') },
+    },
+    ingressGate: {
+      close(reason) { events.push(`closed:${reason}`) },
+      open() { events.push('unexpected-open') },
+    },
+    canCommitBoot: () => commitAllowed,
+    now: () => '2026-08-07T02:00:00.000Z',
+  })
+  await assert.rejects(reconciler.boot(), /boot_reconciliation_cancelled/)
+  assert.deepEqual(events, [
+    'closed:boot_reconciliation_pending',
+    'sealed',
+    'closed:boot_reconciliation_cancelled',
   ])
 })

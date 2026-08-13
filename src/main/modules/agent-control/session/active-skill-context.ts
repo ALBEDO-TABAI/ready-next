@@ -13,6 +13,7 @@ import {
   type SkillTaskSupervisorSnapshot,
 } from '../skills/skill-task-supervisor'
 import { isVeaAction, resolveVeaResumeAction } from '../vea-resume-action'
+import { isSafeMessageVisibilityEpoch, readScopeContextEpoch } from './scope-context-epoch'
 
 export type ActiveSkillContextSource =
   | 'explicit'
@@ -22,6 +23,7 @@ export type ActiveSkillContextSource =
   | 'reference_hint'
 
 export interface ActiveSkillContext {
+  messageVisibilityEpoch?: number
   skillId: string
   skillName: string | null
   taskRunId: string | null
@@ -40,6 +42,7 @@ export interface ActiveSkillContext {
 
 export interface ResolveActiveSkillContextInputs {
   sessionId?: string | null
+  messageVisibilityEpoch?: number
   explicitSkillId?: string | null
   explicitSkillName?: string | null
   supervisorSnapshot?: SkillTaskSupervisorSnapshot | null
@@ -64,6 +67,34 @@ function sessionKey(sessionId?: string | null): string | null {
 
 function nowIso(): string {
   return new Date().toISOString()
+}
+
+type ActiveContextEpoch = { admitted: true; epoch?: number } | { admitted: false }
+
+function resolveActiveContextEpoch(
+  sessionId: string | null,
+  expectedMessageVisibilityEpoch?: number,
+): ActiveContextEpoch {
+  const expected = isSafeMessageVisibilityEpoch(expectedMessageVisibilityEpoch)
+    ? expectedMessageVisibilityEpoch
+    : undefined
+  const durable = readScopeContextEpoch(sessionId)
+  if (durable.kind === 'closed' || durable.kind === 'unavailable') return { admitted: false }
+  if (durable.kind === 'open') {
+    if (expected !== undefined && expected !== durable.messageVisibilityEpoch) {
+      return { admitted: false }
+    }
+    return { admitted: true, epoch: durable.messageVisibilityEpoch }
+  }
+  return expected === undefined ? { admitted: true } : { admitted: true, epoch: expected }
+}
+
+function activeContextMatchesEpoch(
+  context: ActiveSkillContext | null,
+  resolved: ActiveContextEpoch,
+): context is ActiveSkillContext {
+  if (!context || !resolved.admitted) return false
+  return resolved.epoch === undefined || context.messageVisibilityEpoch === resolved.epoch
 }
 
 function parseTime(value: string | null | undefined): number {
@@ -179,6 +210,7 @@ function contextFromProjection(projection: TaskProjectionRecord): ActiveSkillCon
     || projection.currentStepId
     || null
   return {
+    messageVisibilityEpoch: projection.messageVisibilityEpoch,
     skillId,
     skillName: null,
     taskRunId: continuation?.taskRunId || null,
@@ -221,6 +253,7 @@ function contextFromSupervisor(snapshot: SkillTaskSupervisorSnapshot | null | un
   )
   if (!hasHandle) return null
   return {
+    messageVisibilityEpoch: snapshot.messageVisibilityEpoch ?? undefined,
     skillId: snapshot.skillId,
     skillName: null,
     taskRunId: snapshot.taskRunId,
@@ -247,6 +280,7 @@ function contextFromTaskRun(run: SkillTaskRunRecord | null | undefined): ActiveS
   if (!run?.skillId) return null
   if (run.status === 'done' && !run.resumePayload && !run.runStatePath && !run.outputDir) return null
   return {
+    messageVisibilityEpoch: run.messageVisibilityEpoch,
     skillId: run.skillId,
     skillName: run.skillName || null,
     taskRunId: run.id,
@@ -272,6 +306,7 @@ function contextFromTaskRun(run: SkillTaskRunRecord | null | undefined): ActiveS
 function contextFromReferenceHint(hint: ReferenceSkillHint | null | undefined): ActiveSkillContext | null {
   if (!hint?.id) return null
   return {
+    messageVisibilityEpoch: hint.messageVisibilityEpoch,
     skillId: hint.id,
     skillName: hint.name || hint.id,
     taskRunId: null,
@@ -325,10 +360,17 @@ function readTaskRunContexts(sessionId: string | null): ActiveSkillContext[] {
   }
 }
 
-function rememberedContext(sessionId: string | null): ActiveSkillContext | null {
+function rememberedContext(
+  sessionId: string | null,
+  expectedMessageVisibilityEpoch?: number,
+): ActiveSkillContext | null {
   if (!sessionId) return null
   const context = rememberedContexts.get(sessionId) || null
   if (!context) return null
+  if (!activeContextMatchesEpoch(
+    context,
+    resolveActiveContextEpoch(sessionId, expectedMessageVisibilityEpoch),
+  )) return null
   if (Date.now() - parseTime(context.observedAt) > ACTIVE_CONTEXT_TTL_MS) {
     rememberedContexts.delete(sessionId)
     return null
@@ -341,24 +383,41 @@ function rememberedContext(sessionId: string | null): ActiveSkillContext | null 
 // snapshot collector so shadow reads cannot mutate the legacy state under
 // inspection. Treat expired-as-invisible exactly like `rememberedContext`
 // would, just without the side-effect.
-function peekRememberedContext(sessionId: string | null): ActiveSkillContext | null {
+function peekRememberedContext(
+  sessionId: string | null,
+  expectedMessageVisibilityEpoch?: number,
+): ActiveSkillContext | null {
   if (!sessionId) return null
   const context = rememberedContexts.get(sessionId) || null
   if (!context) return null
+  if (!activeContextMatchesEpoch(
+    context,
+    resolveActiveContextEpoch(sessionId, expectedMessageVisibilityEpoch),
+  )) return null
   if (Date.now() - parseTime(context.observedAt) > ACTIVE_CONTEXT_TTL_MS) {
     return null
   }
   return context
 }
 
-export function getRememberedActiveSkillContext(sessionId?: string | null): ActiveSkillContext | null {
-  return rememberedContext(sessionKey(sessionId))
+export function getRememberedActiveSkillContext(
+  sessionId?: string | null,
+  messageVisibilityEpoch?: number,
+): ActiveSkillContext | null {
+  return rememberedContext(sessionKey(sessionId), messageVisibilityEpoch)
 }
 
 export function rememberActiveSkillContext(sessionId: string | null | undefined, context: ActiveSkillContext | null): void {
   const key = sessionKey(sessionId)
   if (!key || !context) return
-  rememberedContexts.set(key, { ...context, observedAt: context.observedAt || nowIso() })
+  const resolvedEpoch = resolveActiveContextEpoch(key, context.messageVisibilityEpoch)
+  if (!resolvedEpoch.admitted) return
+  if (resolvedEpoch.epoch !== undefined && context.messageVisibilityEpoch !== resolvedEpoch.epoch) return
+  rememberedContexts.set(key, {
+    ...context,
+    ...(resolvedEpoch.epoch === undefined ? {} : { messageVisibilityEpoch: resolvedEpoch.epoch }),
+    observedAt: context.observedAt || nowIso(),
+  })
 }
 
 export function clearActiveSkillContext(sessionId?: string | null): void {
@@ -392,24 +451,36 @@ export function resolveActiveSkillContextFromInputs(
       observedAt: nowIso(),
     }
   }
+  const resolvedEpoch = resolveActiveContextEpoch(
+    sessionId,
+    inputs.messageVisibilityEpoch,
+  )
+  if (!resolvedEpoch.admitted) return null
 
   const supervisor = contextFromSupervisor(inputs.supervisorSnapshot)
-  if (supervisor) return supervisor
+  if (activeContextMatchesEpoch(supervisor, resolvedEpoch)) return supervisor
 
-  const projection = newestContext((inputs.projections || []).map(contextFromProjection))
+  const projection = newestContext((inputs.projections || [])
+    .map(contextFromProjection)
+    .filter((context) => activeContextMatchesEpoch(context, resolvedEpoch)))
   if (projection) return projection
 
-  const taskRun = newestContext((inputs.taskRuns || []).map(contextFromTaskRun))
+  const taskRun = newestContext((inputs.taskRuns || [])
+    .map(contextFromTaskRun)
+    .filter((context) => activeContextMatchesEpoch(context, resolvedEpoch)))
   if (taskRun) return taskRun
 
-  const remembered = rememberedContext(sessionId)
+  const remembered = rememberedContext(sessionId, inputs.messageVisibilityEpoch)
   if (remembered) return remembered
 
-  return contextFromReferenceHint(inputs.referenceHint ?? null)
+  const referenceHint = contextFromReferenceHint(inputs.referenceHint ?? null)
+  return activeContextMatchesEpoch(referenceHint, resolvedEpoch) ? referenceHint : null
 }
 
 export function resolveActiveSkillContext(inputs: ResolveActiveSkillContextInputs = {}): ActiveSkillContext | null {
   const sessionId = sessionKey(inputs.sessionId)
+  const resolvedEpoch = resolveActiveContextEpoch(sessionId, inputs.messageVisibilityEpoch)
+  if (!resolvedEpoch.admitted && !inputs.explicitSkillId) return null
   const explicitOrProvidedContext = resolveActiveSkillContextFromInputs({
     ...inputs,
     sessionId: null,
@@ -420,24 +491,27 @@ export function resolveActiveSkillContext(inputs: ResolveActiveSkillContextInput
   const inspectedSupervisor = inputs.inspectSupervisor === false || !sessionId
     ? null
     : contextFromSupervisor(inspectLatestSkillTask({ sessionId, scopeId: sessionId, skillId: inputs.explicitSkillId || null }))
-  if (inspectedSupervisor) return inspectedSupervisor
+  if (activeContextMatchesEpoch(inspectedSupervisor, resolvedEpoch)) return inspectedSupervisor
 
   const projection = newestContext([
     ...(inputs.projections || []).map(contextFromProjection),
     ...readProjectionContexts(sessionId),
-  ])
+  ].filter((context) => activeContextMatchesEpoch(context, resolvedEpoch)))
   if (projection) return projection
 
   const taskRun = newestContext([
     ...(inputs.taskRuns || []).map(contextFromTaskRun),
     ...readTaskRunContexts(sessionId),
-  ])
+  ].filter((context) => activeContextMatchesEpoch(context, resolvedEpoch)))
   if (taskRun) return taskRun
 
-  const remembered = rememberedContext(sessionId)
+  const remembered = rememberedContext(sessionId, inputs.messageVisibilityEpoch)
   if (remembered) return remembered
 
-  return contextFromReferenceHint(inputs.referenceHint ?? (sessionId ? getLastReferenceSkill(sessionId) : null))
+  const referenceHint = contextFromReferenceHint(
+    inputs.referenceHint ?? (sessionId ? getLastReferenceSkill(sessionId) : null),
+  )
+  return activeContextMatchesEpoch(referenceHint, resolvedEpoch) ? referenceHint : null
 }
 
 // Stage 4 W1 — pure-read variant of `resolveActiveSkillContext` for the
@@ -458,6 +532,8 @@ export function resolveActiveSkillContextReadOnly(
   inputs: ResolveActiveSkillContextInputs = {},
 ): ActiveSkillContext | null {
   const sessionId = sessionKey(inputs.sessionId)
+  const resolvedEpoch = resolveActiveContextEpoch(sessionId, inputs.messageVisibilityEpoch)
+  if (!resolvedEpoch.admitted && !inputs.explicitSkillId) return null
 
   const explicitOrProvidedContext = resolveActiveSkillContextFromInputs({
     ...inputs,
@@ -469,26 +545,27 @@ export function resolveActiveSkillContextReadOnly(
   // Pure-read: NO `inspectLatestSkillTask` call here. Caller must supply
   // `supervisorSnapshot` if it has one (collected once at snapshot time).
   const supervisor = contextFromSupervisor(inputs.supervisorSnapshot)
-  if (supervisor) return supervisor
+  if (activeContextMatchesEpoch(supervisor, resolvedEpoch)) return supervisor
 
   const projection = newestContext([
     ...(inputs.projections || []).map(contextFromProjection),
     ...readProjectionContexts(sessionId),
-  ])
+  ].filter((context) => activeContextMatchesEpoch(context, resolvedEpoch)))
   if (projection) return projection
 
   const taskRun = newestContext([
     ...(inputs.taskRuns || []).map(contextFromTaskRun),
     ...readTaskRunContexts(sessionId),
-  ])
+  ].filter((context) => activeContextMatchesEpoch(context, resolvedEpoch)))
   if (taskRun) return taskRun
 
-  const remembered = peekRememberedContext(sessionId)
+  const remembered = peekRememberedContext(sessionId, inputs.messageVisibilityEpoch)
   if (remembered) return remembered
 
   // Pure-read: only use the reference hint the caller already collected.
   // Do NOT call getLastReferenceSkill (which would bump TTL).
-  return contextFromReferenceHint(inputs.referenceHint ?? null)
+  const referenceHint = contextFromReferenceHint(inputs.referenceHint ?? null)
+  return activeContextMatchesEpoch(referenceHint, resolvedEpoch) ? referenceHint : null
 }
 
 export function hasActiveSkillContext(sessionId?: string | null, skillId?: string | null): boolean {

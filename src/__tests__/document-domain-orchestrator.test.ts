@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { DocumentDomainOrchestrator } from '../main/modules/agent-control/domain-adapters/document-domain-orchestrator'
@@ -18,7 +19,7 @@ function unusedLlmCall(): Promise<string> {
 }
 
 test('document deterministic direct summary redacts model-visible target paths but keeps raw tool action args', async () => {
-  const dir = await mkdtemp(join(process.cwd(), '.tmp-p6g-doc-'))
+  const dir = await mkdtemp(join(tmpdir(), 'ready-p6g-doc-'))
   const targetPath = join(dir, 'report.md')
   await writeFile(targetPath, '# 第一章\n\n已经整理好的段落。\n')
 
@@ -58,8 +59,8 @@ test('document deterministic direct summary redacts model-visible target paths b
       ...emitted.map((entry) => entry.chunk),
       ...summaries,
     ].join('\n')
-    assert.doesNotMatch(visibleText, /\/Users\/bai/)
-    assert.match(visibleText, /~\/实验田\//)
+    assert.equal(visibleText.includes(targetPath), false)
+    assert.match(visibleText, /(?:~\/|<tmp>)/)
   } finally {
     await rm(dir, { recursive: true, force: true })
   }

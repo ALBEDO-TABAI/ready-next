@@ -1,87 +1,8 @@
 import assert from 'node:assert/strict'
-import { describe, it, test } from 'node:test'
+import { describe, it } from 'node:test'
 
 import { isTaskEventBridgeStatus, taskEventBridge, toBridgeStatus, type TaskEventBridgePayload } from '../main/modules/browser-engine/task-event-bridge'
 import type { BrowserCapabilityTaskStatus } from '../main/modules/browser-engine/capability-types'
-import {
-  __resetBackgroundTaskTerminalReminderForTests,
-  __setPendingTaskEventDatabaseForTests,
-  listPendingTaskEventsForTests,
-  markPendingTaskEventConsumed,
-  type PendingTaskEventDatabase,
-} from '../main/modules/agent-control/system-reminders/background-task-terminal-reminder'
-import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
-
-test('task-event-bridge declares transitive sqlite ABI guard', (t) => {
-  skipIfSqliteUnavailable(t, 'task-event-bridge transitive sqlite load')
-})
-
-
-interface PendingRow {
-  id: number
-  event_payload: string
-  task_run_id: string | null
-  created_at: number
-  consumed: number
-}
-
-class PendingTaskEventMemoryDb implements PendingTaskEventDatabase {
-  readonly rows: PendingRow[] = []
-  private nextId = 1
-
-  prepare(sql: string) {
-    const normalized = sql.replace(/\s+/g, ' ').trim()
-    if (normalized.startsWith('SELECT id FROM pending_task_events')) {
-      const consumedFilter = normalized.includes('AND consumed = 0')
-      return {
-        get: (taskRunId: unknown, like: unknown) => {
-          const status = String(like).replace(/%/g, '').replace('"status":"', '').replace('"', '')
-          const hit = this.rows.find((row) =>
-            String(row.task_run_id) === String(taskRunId)
-            && row.event_payload.includes(`"status":"${status}"`)
-            && (!consumedFilter || row.consumed === 0))
-          return hit ? { id: hit.id } : undefined
-        },
-        run: () => undefined,
-        all: () => [],
-      }
-    }
-    if (normalized.startsWith('INSERT INTO pending_task_events')) {
-      return {
-        run: (eventPayload: unknown, taskRunId: unknown, createdAt: unknown) => {
-          this.rows.push({
-            id: this.nextId++,
-            event_payload: String(eventPayload),
-            task_run_id: taskRunId == null ? null : String(taskRunId),
-            created_at: Number(createdAt),
-            consumed: 0,
-          })
-          return { lastInsertRowid: this.rows[this.rows.length - 1].id }
-        },
-        get: () => undefined,
-        all: () => [],
-      }
-    }
-    if (normalized.startsWith('SELECT id, event_payload, task_run_id, created_at, consumed FROM pending_task_events ORDER BY')) {
-      return {
-        all: () => [...this.rows].sort((left, right) => left.id - right.id),
-        run: () => undefined,
-        get: () => undefined,
-      }
-    }
-    if (normalized.startsWith('UPDATE pending_task_events SET consumed = 1 WHERE id = ?')) {
-      return {
-        run: (id: unknown) => {
-          const hit = this.rows.find((row) => row.id === Number(id))
-          if (hit) hit.consumed = 1
-        },
-        get: () => undefined,
-        all: () => [],
-      }
-    }
-    throw new Error(`unexpected pending_task_events SQL: ${normalized}`)
-  }
-}
 
 describe('task event bridge', () => {
   it('exports a singleton bridge', () => {
@@ -110,26 +31,65 @@ describe('task event bridge', () => {
 
   it('publishes events to registered consumers', () => {
     const projectionEvents: TaskEventBridgePayload[] = []
-    const agentEvents: TaskEventBridgePayload[] = []
-    taskEventBridge.registerProjectionSink((payload) => projectionEvents.push(payload))
-    taskEventBridge.registerAgentNotifier((payload) => agentEvents.push(payload))
+    const unregister = taskEventBridge.registerProjectionSink((payload) => projectionEvents.push(payload))
 
     const payload: TaskEventBridgePayload = { taskId: 'task-event-bridge-consumers', status: 'completed', extra: { ok: true } }
-    taskEventBridge.publish(payload)
+    try {
+      taskEventBridge.publish(payload)
+    } finally {
+      unregister()
+    }
 
     assert.deepEqual(projectionEvents, [payload])
-    assert.deepEqual(agentEvents, [payload])
+    assert.equal('registerAgentNotifier' in taskEventBridge, false)
   })
 
   it('deduplicates repeated terminal taskId and status publishes', () => {
     const events: TaskEventBridgePayload[] = []
-    taskEventBridge.registerProjectionSink((payload) => events.push(payload))
+    const unregister = taskEventBridge.registerProjectionSink((payload) => events.push(payload))
 
     const payload: TaskEventBridgePayload = { taskId: 'task-event-bridge-idempotent', status: 'failed' }
-    taskEventBridge.publish(payload)
-    taskEventBridge.publish(payload)
+    try {
+      taskEventBridge.publish(payload)
+      taskEventBridge.publish(payload)
+    } finally {
+      unregister()
+    }
 
     assert.deepEqual(events, [payload])
+  })
+
+  it('bounds terminal dedupe memory while retaining recent duplicate protection', () => {
+    const recent: TaskEventBridgePayload = {
+      taskId: 'task-event-bridge-bounded-recent',
+      status: 'completed',
+    }
+    for (let index = 0; index < 10_000; index += 1) {
+      taskEventBridge.publish({
+        taskId: `task-event-bridge-bounded-${index}`,
+        status: 'completed',
+      })
+    }
+    const events: TaskEventBridgePayload[] = []
+    const unregister = taskEventBridge.registerProjectionSink((payload) => events.push(payload))
+    try {
+      taskEventBridge.publish(recent)
+      taskEventBridge.publish(recent)
+      taskEventBridge.publish({ taskId: 'task-event-bridge-bounded-0', status: 'completed' })
+      for (let index = 0; index < 10_000; index += 1) {
+        taskEventBridge.publish({ taskId: `task-event-bridge-paused-${index}`, status: 'paused' })
+      }
+    } finally {
+      unregister()
+    }
+
+    const state = taskEventBridge as unknown as { publishedKeys: Set<string> }
+    assert.equal(state.publishedKeys.size, 2_048)
+    assert.deepEqual(events.slice(0, 2), [
+      recent,
+      { taskId: 'task-event-bridge-bounded-0', status: 'completed' },
+    ])
+    assert.equal(events.length, 10_002, 'non-terminal events remain re-enterable without consuming dedupe capacity')
   })
 
   it('allows re-enterable statuses through the bridge repeatedly', () => {
@@ -138,11 +98,14 @@ describe('task event bridge', () => {
 
     const paused: TaskEventBridgePayload = { taskId: 'task-event-bridge-reentrant', status: 'paused' }
     const needsAttention: TaskEventBridgePayload = { taskId: 'task-event-bridge-reentrant', status: 'needs_attention' }
-    taskEventBridge.publish(paused)
-    taskEventBridge.publish(paused)
-    taskEventBridge.publish(needsAttention)
-    taskEventBridge.publish(needsAttention)
-    unregister()
+    try {
+      taskEventBridge.publish(paused)
+      taskEventBridge.publish(paused)
+      taskEventBridge.publish(needsAttention)
+      taskEventBridge.publish(needsAttention)
+    } finally {
+      unregister()
+    }
 
     assert.deepEqual(events, [paused, paused, needsAttention, needsAttention])
   })
@@ -154,70 +117,4 @@ describe('task event bridge', () => {
     )
   })
 
-  it('stores terminal events in pending_task_events when no active scope run can receive them', () => {
-    __resetBackgroundTaskTerminalReminderForTests()
-    const db = new PendingTaskEventMemoryDb()
-    __setPendingTaskEventDatabaseForTests(db)
-
-    const payload: TaskEventBridgePayload = {
-      taskId: 'task-event-bridge-pending-no-active-run',
-      status: 'completed',
-      extra: {
-        scopeId: 'scope-task-event-bridge-pending',
-        summary: '后台任务已完成',
-      },
-    }
-    taskEventBridge.publish(payload)
-
-    const rows = listPendingTaskEventsForTests()
-    assert.equal(rows.length, 1)
-    assert.equal(rows[0].taskRunId, payload.taskId)
-    assert.equal(rows[0].consumed, 0)
-    assert.deepEqual(JSON.parse(rows[0].eventPayload), payload)
-  })
-
-  it('allows a consumed paused event to be enqueued durably again', () => {
-    __resetBackgroundTaskTerminalReminderForTests()
-    const db = new PendingTaskEventMemoryDb()
-    __setPendingTaskEventDatabaseForTests(db)
-
-    const payload: TaskEventBridgePayload = {
-      taskId: 'task-event-bridge-paused-reentry',
-      status: 'paused',
-      extra: {
-        scopeId: 'scope-task-event-bridge-paused-reentry',
-        summary: '后台任务等待继续',
-      },
-    }
-    taskEventBridge.publish(payload)
-    const firstRows = listPendingTaskEventsForTests()
-    assert.equal(firstRows.length, 1)
-
-    markPendingTaskEventConsumed(firstRows[0].id)
-    taskEventBridge.publish(payload)
-
-    const rows = listPendingTaskEventsForTests()
-    assert.equal(rows.length, 2)
-    assert.equal(rows[0].consumed, 1)
-    assert.equal(rows[1].consumed, 0)
-    assert.deepEqual(JSON.parse(rows[1].eventPayload), payload)
-  })
-
-  it('does not enqueue auto-continue segment pauses for narration', () => {
-    __resetBackgroundTaskTerminalReminderForTests()
-    const db = new PendingTaskEventMemoryDb()
-    __setPendingTaskEventDatabaseForTests(db)
-
-    taskEventBridge.publish({
-      taskId: 'task-event-bridge-auto-continue-segment',
-      status: 'paused',
-      extra: {
-        scopeId: 'scope-task-event-bridge-auto-continue',
-        autoContinue: true,
-        summary: '单段运行保护暂停，正在继续下一段',
-      },
-    })
-
-    assert.equal(listPendingTaskEventsForTests().length, 0)
-  })
 })

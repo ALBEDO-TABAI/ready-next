@@ -501,7 +501,7 @@ function resolveTerminalBlockedReason(reason?: ScopeRunSummary['terminalReason']
   if (reason === 'blocked_config') return '当前模型或配置不支持这次请求，请切换模型、修复设置或移除不支持的附件后重新发送。'
   if (reason === 'blocked_external') return '等待外部条件'
   if (reason === 'blocked_tool_error') return '工具执行遇到问题'
-  if (reason === 'browser_transaction_unconfirmed') return '网页操作还没有成功证据，可以继续这项任务。'
+  if (reason === 'browser_transaction_unconfirmed') return '网页操作还没有成功证据；本轮已结束，请根据当前页面重新发起任务。'
   if (reason === 'context_overflow') return '上下文已超限'
   if (reason === 'adjudication_degraded') return '已生成结果，仍有待确认项'
   if (reason === 'delivery_failed') return '发送没有完成'
@@ -509,9 +509,9 @@ function resolveTerminalBlockedReason(reason?: ScopeRunSummary['terminalReason']
   if (reason === 'no_artifact') return '没有找到可发送文件'
   if (reason === 'proof_gap') return '缺少完成证据'
   if (reason === 'checkpoint_user_input') return '等待补充信息'
-  if (reason === 'manual_suspend') return '任务已暂停，等待继续。'
+  if (reason === 'manual_suspend') return '任务已暂停；这是历史记录，不会自动继续。'
   if (reason === 'checkpoint_budget') return '预算已暂停'
-  if (reason === 'checkpoint_incomplete') return '任务进度已保存，可以继续。'
+  if (reason === 'checkpoint_incomplete') return '任务进度已保存，但当前没有公开续跑入口。'
   if (reason === 'checkpoint_background') return '后台任务仍在运行'
   return null
 }
@@ -645,7 +645,7 @@ function formatChildTaskStatus(status: TaskProjectionRecord['status']): string {
   if (status === 'completed') return '已完成'
   if (status === 'failed') return '失败'
   if (status === 'killed') return '已取消'
-  if (status === 'blocked') return '待继续'
+  if (status === 'blocked') return '已阻塞'
   if (status === 'queued') return '排队中'
   return '进行中'
 }
@@ -825,6 +825,7 @@ export function buildTaskProjectionRecord(
     taskId,
     taskOrigin,
     scopeId: effectiveSummary.scopeId,
+    messageVisibilityEpoch: effectiveSummary.messageVisibilityEpoch,
     runId: payload.runId || previous?.runId || taskId,
     parentTaskId: effectiveSummary.parentTaskId ?? payload.parentTaskId ?? previous?.parentTaskId ?? null,
     parentStepId: effectiveSummary.parentStepId ?? payload.parentStepId ?? previous?.parentStepId ?? null,
@@ -926,9 +927,12 @@ export async function syncTaskProjection(
   ) {
     rememberContinuationState(next.scopeId, buildContinuationStateFromProjection(next), {
       updatedAt: toContinuationUpdatedAt(next.updatedAt),
+      messageVisibilityEpoch: next.messageVisibilityEpoch,
     })
   } else {
-    clearContinuationState(next.scopeId, next.taskId)
+    clearContinuationState(next.scopeId, next.taskId, {
+      messageVisibilityEpoch: next.messageVisibilityEpoch,
+    })
   }
   await syncParentProjectionFromChild(store, next)
   await supersedeLegacySiblings(store, next, resolveSkillArtifactIdentity(summary, truthPatch, contract))

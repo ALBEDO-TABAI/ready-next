@@ -12,6 +12,10 @@ import { wrapRunMetaRepositoryWithCloseoutSnapshot } from '../main/modules/agent
 import { finalizeRunOutcome } from '../main/modules/agent-control/runtime-core/run-finalizer'
 import { finalizeStaleWithoutHandleProjections } from '../main/modules/agent-control/runtime-core/stale-projection-finalizer'
 import type { TaskProjectionRecord } from '../main/modules/agent-control/contracts/run-contracts'
+import { setBrowserTargetClaimRunCloseoutPort } from '../main/modules/browser-engine/browser-target-claim-closeout'
+
+test.before(() => setBrowserTargetClaimRunCloseoutPort(() => undefined))
+test.after(() => setBrowserTargetClaimRunCloseoutPort(null))
 
 function fakeRunMetaRepository() {
   const rows = new Map<string, Record<string, unknown>>()

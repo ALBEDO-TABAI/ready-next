@@ -8,7 +8,7 @@ function readWorkspaceFile(path: string): string {
   return readFileSync(resolve(process.cwd(), path), 'utf8')
 }
 
-test('task controls remain separate while send uses the exact Codex lifecycle contract', () => {
+test('only exact child cancellation and watchdog controls remain public', () => {
   const runtime = readWorkspaceFile('src/main/modules/agent-control/runtime-core/runtime.ts')
   const runControlGroup = readWorkspaceFile('src/main/modules/claude-bridge/ipc/run-control-group.ts')
   const lifecycleGroup = readWorkspaceFile('src/main/modules/claude-bridge/ipc/agent-lifecycle-group.ts')
@@ -20,9 +20,9 @@ test('task controls remain separate while send uses the exact Codex lifecycle co
   const chatPanel = readWorkspaceFile('src/renderer/components/agent/ChatPanel.tsx')
   const taskInteractionHandlers = readWorkspaceFile('src/renderer/components/agent/chat-panel/task-interaction/use-task-interaction-handlers.ts')
 
-  for (const method of ['suspendRun', 'reportInfrastructureTimeout', 'resumeRun', 'respondToInteraction']) {
-    assert.match(runtime, new RegExp(`async ${method}\\(`))
-    assert.match(runControlGroup, new RegExp(`ipcMain\\.handle\\('agent:${method}'`))
+  assert.match(runtime, /async reportInfrastructureTimeout\(/)
+  for (const channel of ['listActiveChildRuns', 'cancelChildRun', 'reportInfrastructureTimeout']) {
+    assert.match(runControlGroup, new RegExp(`ipcMain\\.handle\\('agent:${channel}'`))
   }
   assert.match(lifecycleGroup, /parseSendScopedRequest\(rawPayload\)/)
   assert.match(lifecycleGroup, /parseSendScopedResponse\(await deps\.sendScoped\(payload\)\)/)
@@ -43,11 +43,17 @@ test('task controls remain separate while send uses the exact Codex lifecycle co
   assert.match(sendCall, /userMessage:/)
   assert.doesNotMatch(sendCall, /agent:|continuationIntent:|deliveryMode:|workspaceRoots:/)
 
-  assert.match(taskPanel, /window\.electronAPI\.agent\.suspendRun\(/)
-  assert.match(taskPanel, /window\.electronAPI\.agent\.resumeRun\(/)
-  assert.match(taskPanel, /window\.electronAPI\.agent\.respondToInteraction\(/)
+  assert.match(taskPanel, /window\.electronAPI\.agent\.cancelDetachedSkillTask\(/)
+  assert.match(taskPanel, /window\.electronAPI\.agent\.cancelChildRun\(/)
   assert.match(chatPanel, /useTaskInteractionHandlers/)
-  assert.match(taskInteractionHandlers, /window\.electronAPI\.agent\.suspendRun\(/)
+  assert.match(taskInteractionHandlers, /window\.electronAPI\.agent\.cancelDetachedSkillTask\(/)
+  assert.match(taskInteractionHandlers, /window\.electronAPI\.agent\.cancelChildRun\(/)
+
+  for (const retired of ['suspendRun', 'resumeRun', 'respondToInteraction', 'completeHumanTakeover']) {
+    for (const value of [runtime, runControlGroup, ipcHandler, preload, rendererTypes, taskPanel, taskInteractionHandlers]) {
+      assert.doesNotMatch(value, new RegExp(`\\b${retired}\\b`))
+    }
+  }
 })
 test('chat conversation deletion can only enter the Codex close lifecycle', () => {
   const runtime = readWorkspaceFile('src/main/modules/agent-control/runtime-core/runtime.ts')

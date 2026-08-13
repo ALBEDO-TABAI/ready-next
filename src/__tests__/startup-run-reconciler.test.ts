@@ -48,15 +48,20 @@ async function openDb(): Promise<TestDb> {
   const Sqlite = (await import('better-sqlite3')).default as SqliteCtor
   const db = new Sqlite(':memory:')
   runMigrations(db as unknown as MigrationDatabase)
+  db.prepare(`
+    INSERT INTO chat_conversations (id, agent, created_at, updated_at)
+    VALUES (?, ?, ?, ?)
+  `).run('scope-a', 'agent-a', '2026-06-10T00:00:00.000Z', '2026-06-10T00:00:00.000Z')
   return db
 }
 
 function seedRunMeta(db: TestDb): void {
   db.prepare(`
     INSERT INTO run_meta (
-      run_id, task_id, scope_id, agent_id, status, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?)
-  `).run('run-stale', 'task-run-meta', 'scope-a', 'agent-a', 'working', 1000, 1000)
+      run_id, task_id, scope_id, agent_id, status, created_at, updated_at,
+      message_visibility_epoch
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `).run('run-stale', 'task-run-meta', 'scope-a', 'agent-a', 'working', 1000, 1000, 0)
 }
 
 function seedTerminalRunMeta(
@@ -71,8 +76,8 @@ function seedTerminalRunMeta(
   db.prepare(`
     INSERT INTO run_meta (
       run_id, task_id, scope_id, agent_id, status, created_at, updated_at,
-      terminal_reason, initiator, duration_ms
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      terminal_reason, initiator, duration_ms, message_visibility_epoch
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     input.runId,
     input.taskId,
@@ -84,6 +89,7 @@ function seedTerminalRunMeta(
     input.terminalReason,
     'error',
     60000,
+    0,
   )
 }
 
@@ -94,6 +100,7 @@ function seedTaskProjection(
     runId: string
     status: string
     continuationRef: Record<string, unknown> | null
+    messageVisibilityEpoch?: number
   },
 ): void {
   db.prepare(`
@@ -102,8 +109,9 @@ function seedTaskProjection(
       task_title, task_summary, status, interaction_state, waiting_for, steps_json,
       current_step_id, budget_json, budget_usage_percent, budget_warning_level,
       recovery_history_json, degradation_reason, blocked_reason, resumable_actions_json,
-      continuation_ref_json, progress_json, recent_artifacts_json, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      continuation_ref_json, progress_json, recent_artifacts_json, created_at, updated_at,
+      message_visibility_epoch
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     input.taskId,
     'scope-a',
@@ -131,6 +139,7 @@ function seedTaskProjection(
     null,
     '2026-06-10T00:00:00.000Z',
     '2026-06-10T00:00:00.000Z',
+    input.messageVisibilityEpoch ?? 0,
   )
 }
 
@@ -140,17 +149,20 @@ function seedBrowserTask(
     id: string
     status: string
     checkpoint: Record<string, unknown> | null
+    parentTaskId?: string | null
+    kind?: string
   },
 ): void {
   db.prepare(`
     INSERT INTO browser_tasks (
-      id, kind, status, payload_json, checkpoint_json, result_json,
+      id, parent_task_id, kind, status, payload_json, checkpoint_json, result_json,
       progress_total, progress_completed, progress_failed, current_label, error,
       created_at, started_at, updated_at, finished_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     input.id,
-    'note_collect',
+    input.parentTaskId ?? null,
+    input.kind ?? 'note_collect',
     input.status,
     '{}',
     input.checkpoint ? JSON.stringify(input.checkpoint) : null,
@@ -167,12 +179,40 @@ function seedBrowserTask(
   )
 }
 
+function seedCleanBaseCheckpoint(
+  db: TestDb,
+  input: { checkpointId: string; taskId: string; browserTaskId: string; runId: string },
+): void {
+  db.prepare(`
+    INSERT INTO agent_session_checkpoints (
+      checkpoint_id, role, parent_task_id, browser_task_id, owner_run_id,
+      ancestor_owner_run_id, ancestor_checkpoint_digest, schema_major,
+      serializer_major, registry_major, safety_major, final_input_json,
+      final_input_digest, sdk_source_item_count, sdk_source_prefix_digest,
+      last_effective_browser_action_seq, steering_receipt_ids_json,
+      steering_receipt_digests_json, required_operation_ids_json,
+      resource_refs_json, prepared_skill_json, activated_capability_groups_json,
+      created_at
+    ) VALUES (?, 'clean_base', ?, ?, ?, NULL, NULL, 1, 1, 1, 1, '[]', ?, 0, ?,
+              0, '[]', '[]', '[]', '[]', '{}', '["browser"]', ?)
+  `).run(
+    input.checkpointId,
+    input.taskId,
+    input.browserTaskId,
+    input.runId,
+    `input-${input.runId}`,
+    `source-${input.runId}`,
+    '2026-06-10T00:00:00.000Z',
+  )
+}
+
 function seedSkillRun(
   db: TestDb,
   input: {
     id: string
     outputDir: string | null
     runStatePath: string | null
+    runId?: string | null
   },
 ): void {
   db.prepare(`
@@ -181,14 +221,15 @@ function seedSkillRun(
       run_kind, status, interaction_state, goal_text, resource_refs_json, params_json,
       steps_json, current_step_id, artifacts_json, output_dir, run_state_path,
       scene_scores_path, delivery_report_path, failure_kind, failure_detail, job_id,
-      detached_task_id, resume_payload_json, created_at, started_at, updated_at, finished_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      detached_task_id, resume_payload_json, created_at, started_at, updated_at, finished_at,
+      message_visibility_epoch
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     input.id,
     'scope-a',
     'scope-a',
     'butler',
-    null,
+    input.runId ?? null,
     'skill-a',
     'Skill A',
     'run',
@@ -224,6 +265,51 @@ function seedSkillRun(
     '2026-06-10T00:00:00.000Z',
     '2026-06-10T00:00:00.000Z',
     null,
+    0,
+  )
+}
+
+function seedOpenCodexOwner(db: TestDb, input: { runId: string; taskId: string }): void {
+  db.prepare(`
+    INSERT INTO codex_thread_bindings (
+      thread_binding_id, ready_conversation_alias, alias_generation, ready_scope_id,
+      runtime_manifest_digest, protocol_schema_digest, revision, created_at, updated_at
+    ) VALUES (?, ?, 1, 'scope-a', 'manifest', 'schema', 1, ?, ?)
+  `).run(
+    `thread-${input.runId}`,
+    `alias-${input.runId}`,
+    '2026-06-10T00:00:00.000Z',
+    '2026-06-10T00:00:00.000Z',
+  )
+  db.prepare(`
+    INSERT INTO codex_turn_bindings (
+      ready_run_id, ready_task_id, thread_binding_id, start_reservation_set_id,
+      start_reservation_required_member_count, turn_start_reservation_member_id,
+      turn_start_reservation_admitted_at, turn_request_id, ingress_admitted_revision,
+      ingress_admitted_digest, ingress_admitted_at, origin_user_message_id,
+      attempt_kind, tool_surface_digest,
+      authorization_snapshot_digest, authorization_snapshot_json, product_budget_seed_json,
+      effective_codex_model, effective_upstream_snapshot_ref,
+      effective_upstream_snapshot_digest, additional_context_digest,
+      turn_contract_digest, ingress_json, revision, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, 1, ?, ?, ?, 1, ?, ?, ?, 'user_ingress', ?, ?, '{}', '{}',
+              'model', 'snapshot', 'snapshot-digest', 'context-digest',
+              'turn-contract', '{}', 1, ?, ?)
+  `).run(
+    input.runId,
+    input.taskId,
+    `thread-${input.runId}`,
+    `reservation-${input.runId}`,
+    `member-${input.runId}`,
+    '2026-06-10T00:00:00.000Z',
+    `request-${input.runId}`,
+    `ingress-${input.runId}`,
+    '2026-06-10T00:00:00.000Z',
+    `message-${input.runId}`,
+    `surface-${input.runId}`,
+    `authorization-${input.runId}`,
+    '2026-06-10T00:00:00.000Z',
+    '2026-06-10T00:00:00.000Z',
   )
 }
 
@@ -365,6 +451,128 @@ test('startup run reconciler closes stale run, projection, browser, and skill ro
     assert.equal(metrics.length, 1)
     assert.equal(metrics[0].name, 'startup_run_reconciler.reconciled')
     assert.deepEqual(metrics[0].payload.reconcileCount, result.reconcileCount)
+  } finally {
+    db.close()
+  }
+})
+
+test('startup reconciliation leaves every open Codex-owned row to Codex recovery', async (t) => {
+  if (skipIfSqliteUnavailable(t, 'startup Codex owner isolation')) return
+  const db = await openDb()
+  const runId = 'run-codex-owned'
+  const taskId = 'task-codex-owned'
+  try {
+    db.prepare(`
+      INSERT INTO run_meta (
+        run_id, task_id, scope_id, agent_id, status, created_at, updated_at,
+        message_visibility_epoch
+      ) VALUES (?, ?, 'scope-a', 'agent-a', 'running', 1000, 1000, 0)
+    `).run(runId, taskId)
+    seedTaskProjection(db, {
+      taskId,
+      runId,
+      status: 'running',
+      continuationRef: null,
+    })
+    seedOpenCodexOwner(db, { runId, taskId })
+    seedBrowserTask(db, {
+      id: 'browser-codex-owned',
+      status: 'running',
+      checkpoint: null,
+      parentTaskId: taskId,
+      kind: 'browser_workflow',
+    })
+    seedCleanBaseCheckpoint(db, {
+      checkpointId: 'checkpoint-codex-owned',
+      taskId,
+      browserTaskId: 'browser-codex-owned',
+      runId,
+    })
+    seedSkillRun(db, {
+      id: 'skill-codex-owned',
+      outputDir: null,
+      runStatePath: null,
+      runId,
+    })
+    const confirmationRunId = 'run-codex-confirmation'
+    const confirmationTaskId = 'task-codex-confirmation'
+    db.prepare(`
+      INSERT INTO run_meta (
+        run_id, task_id, scope_id, agent_id, status, created_at, updated_at,
+        message_visibility_epoch
+      ) VALUES (?, ?, 'scope-a', 'agent-a', 'running', 1000, 1000, 0)
+    `).run(confirmationRunId, confirmationTaskId)
+    seedTaskProjection(db, {
+      taskId: confirmationTaskId,
+      runId: confirmationRunId,
+      status: 'recoverable_paused',
+      continuationRef: { suspensionRequest: { kind: 'browser_permission' } },
+    })
+    db.prepare(`
+      UPDATE task_projections
+         SET waiting_for = 'confirmation',
+             blocked_reason = 'browser_permission_checkpoint'
+       WHERE task_id = ?
+    `).run(confirmationTaskId)
+    seedOpenCodexOwner(db, { runId: confirmationRunId, taskId: confirmationTaskId })
+
+    const takeoverRunId = 'run-codex-takeover'
+    const takeoverTaskId = 'task-codex-takeover'
+    db.prepare(`
+      INSERT INTO run_meta (
+        run_id, task_id, scope_id, agent_id, status, created_at, updated_at,
+        message_visibility_epoch
+      ) VALUES (?, ?, 'scope-a', 'agent-a', 'running', 1000, 1000, 0)
+    `).run(takeoverRunId, takeoverTaskId)
+    seedTaskProjection(db, {
+      taskId: takeoverTaskId,
+      runId: takeoverRunId,
+      status: 'recoverable_paused',
+      continuationRef: null,
+    })
+    db.prepare(`
+      UPDATE task_projections
+         SET interaction_state = 'human_takeover', waiting_for = 'confirmation',
+             human_takeover_ref_json = '{"state":"pending"}'
+       WHERE task_id = ?
+    `).run(takeoverTaskId)
+    seedOpenCodexOwner(db, { runId: takeoverRunId, taskId: takeoverTaskId })
+
+    const result = await reconcileStartupRunsOnStartup({
+      db,
+      now: new Date('2026-06-10T01:00:00.000Z'),
+      skillTaskRunRepository: new SkillTaskRunRepository({ getRawDb: () => db as never }),
+    })
+
+    assert.deepEqual(result.reconcileCount, {
+      runMeta: 0,
+      taskProjections: 0,
+      browserTasks: 0,
+      skillRuns: 0,
+    })
+    assert.equal(db.prepare(`SELECT status FROM run_meta WHERE run_id = ?`)
+      .get<{ status: string }>(runId)?.status, 'running')
+    assert.equal(db.prepare(`SELECT status FROM task_projections WHERE run_id = ?`)
+      .get<{ status: string }>(runId)?.status, 'running')
+    assert.equal(db.prepare(`SELECT status FROM browser_tasks WHERE id = 'browser-codex-owned'`)
+      .get<{ status: string }>()?.status, 'running')
+    assert.equal(db.prepare(`SELECT status FROM skill_task_runs WHERE id = 'skill-codex-owned'`)
+      .get<{ status: string }>()?.status, 'running')
+    assert.deepEqual(db.prepare(`
+      SELECT waiting_for, blocked_reason
+        FROM task_projections WHERE task_id = ?
+    `).get(confirmationTaskId), {
+      waiting_for: 'confirmation',
+      blocked_reason: 'browser_permission_checkpoint',
+    })
+    assert.deepEqual(db.prepare(`
+      SELECT interaction_state, waiting_for, human_takeover_ref_json
+        FROM task_projections WHERE task_id = ?
+    `).get(takeoverTaskId), {
+      interaction_state: 'human_takeover',
+      waiting_for: 'confirmation',
+      human_takeover_ref_json: '{"state":"pending"}',
+    })
   } finally {
     db.close()
   }
@@ -550,6 +758,75 @@ test('startup run reconciler preserves terminal run reasons instead of rewriting
     assert.equal(configProjection.degradation_reason, 'blocked_config')
     assert.match(configProjection.blocked_reason || '', /当前模型或配置不支持/)
     assert.deepEqual(JSON.parse(configProjection.resumable_actions_json), [])
+  } finally {
+    db.close()
+  }
+})
+
+test('startup reconciliation ignores prior context epochs without blocking current cleanup', async (t) => {
+  if (skipIfSqliteUnavailable(t, 'startup context epoch isolation')) return
+  const db = await openDb()
+  try {
+    db.prepare(`
+      INSERT INTO run_meta (
+        run_id, task_id, scope_id, agent_id, status, created_at, updated_at,
+        message_visibility_epoch
+      ) VALUES (?, ?, 'scope-a', 'agent-a', 'running', 1000, 1000, 0)
+    `).run('run-old-context', 'task-old-context')
+    seedTaskProjection(db, {
+      taskId: 'task-old-context',
+      runId: 'run-old-context',
+      status: 'running',
+      continuationRef: null,
+      messageVisibilityEpoch: 0,
+    })
+
+    db.prepare(`
+      UPDATE chat_conversations
+         SET message_visibility_epoch = 1, updated_at = ?
+       WHERE id = 'scope-a'
+    `).run('2026-06-10T00:30:00.000Z')
+
+    db.prepare(`
+      INSERT INTO run_meta (
+        run_id, task_id, scope_id, agent_id, status, created_at, updated_at,
+        message_visibility_epoch
+      ) VALUES (?, ?, 'scope-a', 'agent-a', 'running', 2000, 2000, 1)
+    `).run('run-current-context', 'task-current-context')
+    seedTaskProjection(db, {
+      taskId: 'task-current-context',
+      runId: 'run-current-context',
+      status: 'running',
+      continuationRef: null,
+      messageVisibilityEpoch: 1,
+    })
+
+    const result = await reconcileStartupRunsOnStartup({
+      db,
+      now: new Date('2026-06-10T01:00:00.000Z'),
+      skillTaskRunRepository: new SkillTaskRunRepository({ getRawDb: () => db as never }),
+    })
+
+    assert.equal(result.reconcileCount.runMeta, 1)
+    assert.equal(result.reconcileCount.taskProjections, 1)
+    assert.deepEqual(db.prepare(`
+      SELECT status FROM run_meta WHERE run_id = ?
+    `).get('run-old-context'), { status: 'running' })
+    assert.deepEqual(db.prepare(`
+      SELECT status FROM task_projections WHERE task_id = ?
+    `).get('task-old-context'), { status: 'running' })
+    assert.deepEqual(db.prepare(`
+      SELECT status, terminal_reason FROM run_meta WHERE run_id = ?
+    `).get('run-current-context'), {
+      status: 'interrupted',
+      terminal_reason: 'main_process_restarted',
+    })
+    assert.deepEqual(db.prepare(`
+      SELECT status, degradation_reason FROM task_projections WHERE task_id = ?
+    `).get('task-current-context'), {
+      status: 'failed',
+      degradation_reason: 'main_process_restarted',
+    })
   } finally {
     db.close()
   }

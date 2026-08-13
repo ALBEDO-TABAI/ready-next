@@ -5,6 +5,7 @@ import type { BrowserActionOutcome } from '../../../shared/browser-action-outcom
 import { browserOperationCapability } from '../../../shared/browser-capability-registry'
 import {
   assessBrowserResearch,
+  browserObservationResourceUsableAsResearchEvidence,
   browserObservationProvenanceDigest,
   browserResearchBoundedString,
   browserWorkflowStableDigest,
@@ -12,8 +13,7 @@ import {
   parseBrowserResearchState,
   parseBrowserWorkflowActionJournal,
   parseBrowserWorkflowObservationResources,
-  sameBrowserDocumentIdentity,
-  stableBrowserResearchWorkItem,
+  resolveBrowserObservationSuccessorIdentity, stableBrowserResearchWorkItem,
   verifyBrowserObservationResource,
   type BeginBrowserWorkflowActionInput,
   type BrowserResearchAssessment,
@@ -26,7 +26,7 @@ import {
   type BrowserWorkflowObservationReceipt,
   type BrowserWorkflowObservationResource,
   type RecordBrowserWorkflowObservationInput,
-  type SettledBrowserWorkflowAction,
+  type SettledBrowserWorkflowAction
 } from '../browser-engine/browser-workflow-evidence'
 import {
   parseObjectStrict,
@@ -407,9 +407,8 @@ export class AgentSessionCheckpointJournalRepository {
       const causalActions: BrowserWorkflowObservationReceipt['causalActions'] = []
       let cursorIdentity = input.identity
       for (const item of candidates) {
-        const successor = item.outcome.successorIdentity
-        if (!hasCompleteBrowserDocumentIdentity(successor)) continue
-        if (!sameBrowserDocumentIdentity(successor, cursorIdentity)) continue
+        const successor = resolveBrowserObservationSuccessorIdentity(item.outcome, cursorIdentity)
+        if (!successor) continue
         causalActions.unshift({
           actionId: item.actionId,
           actionSeq: item.actionSeq,
@@ -598,6 +597,9 @@ export class AgentSessionCheckpointJournalRepository {
           throw new Error(`browser_research_observation_resource_not_found:${observation.resourceId}`)
         }
         verifyBrowserObservationResource(taskId, resource, observation)
+        if (!browserObservationResourceUsableAsResearchEvidence(resource)) {
+          throw new Error(`browser_research_observation_not_usable_as_evidence:${observationReceiptId}`)
+        }
         const action = actionReceiptId
           ? journal.settledOutcomes.find((receipt) => receipt.receiptId === actionReceiptId)
           : null

@@ -51,57 +51,6 @@ describe('scope run state helpers', () => {
     )
   })
 
-  it('turns human_required payloads into takeover state with checkpoint metadata', () => {
-    const originalDateNow = Date.now
-    Date.now = () => 1_700_000_000_000
-
-    try {
-      const patch = deriveScopeRunStatePatch(
-        {
-          phase: 'tool_running',
-          module: 'browser',
-          intent: 'browser_request_takeover',
-          controllerId: 'controller-1',
-          ownerTabId: 'tab-9',
-          timestamp: '2026-03-07T00:00:00.000Z',
-          toolEvent: {
-            kind: 'result',
-            timestamp: '2026-03-07T00:00:00.000Z',
-            text: JSON.stringify({
-              phase: 'human_required',
-              call_to_action: '请检查登录状态',
-              details: '页面出现验证码',
-              timeout_sec: 30
-            })
-          }
-        },
-        {
-          scopeId: 'scope-1',
-          agent: 'butler',
-          requestId: 'run-1',
-          phase: 'tool_running',
-          toolTrace: [],
-          startedAt: '2026-03-07T00:00:00.000Z',
-          updatedAt: '2026-03-07T00:00:00.000Z',
-          artifactRefs: [],
-          checkpointExpiresAt: null,
-          responseBuffer: '',
-          stepMetrics: { toolCalls: 0, toolResults: 0, lastToolAt: null }
-        }
-      )
-
-      assert.strictEqual(patch.phase, 'takeover')
-      assert.strictEqual(patch.module, 'browser')
-      assert.strictEqual(patch.intent, 'browser_request_takeover')
-      assert.strictEqual(patch.blockedReason, '请检查登录状态 · 页面出现验证码')
-      assert.strictEqual(patch.controllerId, 'controller-1')
-      assert.strictEqual(patch.ownerTabId, 'tab-9')
-      assert.strictEqual(patch.checkpointExpiresAt, 1_700_000_030_000)
-    } finally {
-      Date.now = originalDateNow
-    }
-  })
-
   it('marks active phases consistently for alias sync', () => {
     assert.strictEqual(isActiveScopePhase('tool_running'), true)
     assert.strictEqual(isActiveScopePhase('responding'), true)
@@ -519,6 +468,7 @@ describe('scope run state helpers', () => {
       runStatePath: '/tmp/ready/output/run_state.json',
       pauseReason: 'budget_exhausted',
       progressFingerprint: 'fp-1',
+      suspensionRequest: null,
     })
   })
 

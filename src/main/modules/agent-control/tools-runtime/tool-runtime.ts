@@ -62,6 +62,7 @@ export interface ToolRuntimeContext {
   activeNegations?: ReadonlyArray<string>
   sessionId?: string
   scopeId?: string
+  messageVisibilityEpoch?: number
   currentUserText?: string
   sourceMessageId?: string | null
   sourceMessageUnavailableReason?: SpecialistBlueprintSourceMessageUnavailableReason | null

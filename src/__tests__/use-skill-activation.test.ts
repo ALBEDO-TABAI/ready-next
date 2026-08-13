@@ -29,11 +29,22 @@ import {
   clearLastReferenceSkill,
   getLastReferenceSkill,
   rememberLastReferenceSkill,
+  _resetLastReferenceSkillHintsForTests,
 } from '../main/modules/agent-control/skills/skill-reference-hints'
 import { executeUseSkill } from '../main/modules/tools/builtins/use-skill'
 import { USE_SKILL_TOOL_NAMES } from '../main/modules/tools/use-skill-tool-defs'
 import { readReferenceSkillDocCapped, REFERENCE_SKILL_INLINE_CAP_CHARS } from '../main/modules/skills-runtime/reference-skill-doc'
 import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
+import { __setScopeContextEpochDatabaseForTests } from '../main/modules/agent-control/session/scope-context-epoch'
+
+test.before(() => {
+  __setScopeContextEpochDatabaseForTests({
+    getRawDb: () => ({ prepare: () => ({ get: () => undefined }) }) as never,
+  })
+})
+test.after(() => __setScopeContextEpochDatabaseForTests(null))
+test.beforeEach(() => _resetLastReferenceSkillHintsForTests())
+test.afterEach(() => _resetLastReferenceSkillHintsForTests())
 
 test('use-skill-activation declares transitive sqlite coverage', (t) => {
   skipIfSqliteUnavailable(t, 'use-skill-activation transitive sqlite guard')
@@ -242,6 +253,7 @@ test('use_skill refreshes authorization and enables the selected skill tool in t
     taskId: 'task-use-skill-same-run',
     sessionId: 'scope-use-skill-same-run',
     signal: new AbortController().signal,
+    canPublishScopeRunEvent: () => true,
     allowedToolNames: ['use_skill'],
     definitionByName: new Map(),
     authorization: NONE_AUTH,
@@ -296,7 +308,8 @@ test('use_skill activation hint remains available to a later continuation turn',
   })
   const privateRuntime = runtime as unknown as {
     resolveSkillAuthorizationForTurn: (
-      message: string, sessionId?: string, requestEnvelope?: unknown,
+      message: string, sessionId?: string, messageVisibilityEpoch?: number,
+      requestEnvelope?: unknown,
       forceLocalSendImIntent?: boolean, skillHintRelevantForTurn?: boolean,
     ) => SkillToolAuthorization
   }
@@ -312,7 +325,7 @@ test('use_skill activation hint remains available to a later continuation turn',
       },
     )
     // Next turn: no explicit mention in text, but the hint is relevant (continuation) → selected.
-    const nextAuth = privateRuntime.resolveSkillAuthorizationForTurn('继续', sessionId, undefined, false, true)
+    const nextAuth = privateRuntime.resolveSkillAuthorizationForTurn('继续', sessionId, 0, undefined, false, true)
     assert.equal(nextAuth.mode, 'selected', 'armed hint must resolve to selected on the next hint-relevant turn')
     assert.equal(nextAuth.mode === 'selected' ? nextAuth.skillId : null, 'ready-human-touch-ppt')
   } finally {
@@ -340,7 +353,8 @@ test('use_skill same-run refresh exposes a declared local CLI without a consent 
   })
   const privateRuntime = runtime as unknown as {
     resolveSkillAuthorizationForTurn: (
-      message: string, sessionId?: string, requestEnvelope?: unknown,
+      message: string, sessionId?: string, messageVisibilityEpoch?: number,
+      requestEnvelope?: unknown,
       forceLocalSendImIntent?: boolean, skillHintRelevantForTurn?: boolean,
     ) => SkillToolAuthorization
   }
@@ -348,6 +362,7 @@ test('use_skill same-run refresh exposes a declared local CLI without a consent 
   const authorization = privateRuntime.resolveSkillAuthorizationForTurn(
     '继续查询',
     'scope-lark-cli-same-run',
+    0,
     undefined,
     false,
     true,

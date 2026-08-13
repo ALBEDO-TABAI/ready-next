@@ -178,6 +178,9 @@ export interface AskUserQuestionsCardEvent {
   scopeId?: string | null
   agent?: string | null
   requestId?: string | null
+  readyRunId?: string | null
+  aliasGeneration?: number | null
+  messageVisibilityEpoch?: number | null
   lifecycleType?: InteractionLifecycleIdentity['type']
   responsePolicy?: AskUserQuestionsResponsePolicy
   questions: AskUserQuestionSpec[]
@@ -186,6 +189,16 @@ export interface AskUserQuestionsCardEvent {
 
 export type EmitAskUserQuestionsCard = (event: AskUserQuestionsCardEvent) => void
 
+export interface AskUserQuestionsCodexRunIdentity {
+  readyRunId: string
+  aliasGeneration: number | null
+  messageVisibilityEpoch: number
+}
+
+export interface AskUserQuestionsCardPersistenceReceipt {
+  codexRunIdentity: AskUserQuestionsCodexRunIdentity | null
+}
+
 export interface PersistCardPendingArgs {
   cardId: string
   sessionId: string | null
@@ -193,12 +206,18 @@ export interface PersistCardPendingArgs {
   scopeId?: string | null
   agent?: string | null
   requestId?: string | null
+  lifecycleType?: InteractionLifecycleIdentity['type']
   responsePolicy?: AskUserQuestionsResponsePolicy
   questions: AskUserQuestionSpec[]
   askedAt: number
 }
 
-export type PersistAskUserQuestionsCardPending = (args: PersistCardPendingArgs) => void | Promise<void>
+export type PersistAskUserQuestionsCardPending = (
+  args: PersistCardPendingArgs,
+) =>
+  | void
+  | AskUserQuestionsCardPersistenceReceipt
+  | Promise<void | AskUserQuestionsCardPersistenceReceipt>
 
 export interface AskUserQuestionsHandlerDeps {
   sessionId?: string
@@ -342,7 +361,7 @@ export function submitAskUserQuestionsAnswersCore(
   ) {
     return {
       success: false,
-      errorKind: 'confirmation_surface_denied',
+      errorKind: ASK_USER_ERROR_KINDS.confirmationSurfaceDenied.code,
       error: 'This confirmation must be answered in the local app.',
     }
   }
@@ -588,14 +607,16 @@ export async function executeAskUserQuestions(
   // never observe a card in IPC that DB hasn't seen yet. A persistence
   // failure should fail the tool call — we do not want to push an event
   // for a card that will never be retrievable on restart.
+  let persistenceReceipt: AskUserQuestionsCardPersistenceReceipt | void
   try {
-    await persist({
+    persistenceReceipt = await persist({
       cardId,
       sessionId,
       conversationId,
       scopeId,
       agent,
       requestId,
+      lifecycleType: deps.lifecycleType,
       responsePolicy,
       questions,
       askedAt,
@@ -609,6 +630,12 @@ export async function executeAskUserQuestions(
     })
     throw new ToolDomainError('persistence_failed', `Failed to persist card: ${message}`)
   }
+
+  // The persistence receipt is the only authoritative identity for this
+  // card. In particular, do not re-read the scope's current identity after
+  // this point: reset may advance the visible epoch between the durable
+  // INSERT and the renderer push.
+  const codexRunIdentity = persistenceReceipt?.codexRunIdentity ?? null
 
   const answerSet = await new Promise<AskUserQuestionsAnswerSet>((resolvePromise, rejectPromise) => {
     const timeoutHandle = setTimeout(() => {
@@ -636,6 +663,9 @@ export async function executeAskUserQuestions(
         scopeId,
         agent,
         requestId,
+        readyRunId: codexRunIdentity?.readyRunId ?? null,
+        aliasGeneration: codexRunIdentity?.aliasGeneration ?? null,
+        messageVisibilityEpoch: codexRunIdentity?.messageVisibilityEpoch ?? null,
         responsePolicy,
         lifecycleType: deps.lifecycleType,
         questions,
@@ -667,6 +697,9 @@ export async function executeAskUserQuestions(
         scopeId,
         agent,
         requestId,
+        readyRunId: codexRunIdentity?.readyRunId ?? null,
+        aliasGeneration: codexRunIdentity?.aliasGeneration ?? null,
+        messageVisibilityEpoch: codexRunIdentity?.messageVisibilityEpoch ?? null,
         responsePolicy,
         questions,
         askedAt,

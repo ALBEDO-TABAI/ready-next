@@ -17,6 +17,14 @@ import {
 import { AgentSdkRuntime, type AgentSdkRuntimeDeps } from '../main/modules/agent-control/runtime-core/agent-sdk-runtime'
 import { createToolExecutionOutput } from '../main/modules/agent-control/tools-runtime/tool-result-types'
 import type { ToolDefinition } from '../main/modules/agent-control/tools-runtime/tool-definition'
+import { __setScopeContextEpochDatabaseForTests } from '../main/modules/agent-control/session/scope-context-epoch'
+
+test.before(() => {
+  __setScopeContextEpochDatabaseForTests({
+    getRawDb: () => ({ prepare: () => ({ get: () => undefined }) }) as never,
+  })
+})
+test.after(() => __setScopeContextEpochDatabaseForTests(null))
 
 const fakeConfig = {
   provider: 'openai',

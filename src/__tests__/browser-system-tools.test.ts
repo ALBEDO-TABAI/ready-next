@@ -11,7 +11,6 @@ import { browserInvocationArgsDigest } from '../main/modules/tools/browser-task-
 import { browserSnapshotService } from '../main/modules/browser-engine/browser-snapshot-service'
 import type { BrowserOperationId, BrowserPublicToolName } from '../shared/browser-capability-registry'
 import type { BrowserTaskEnvelope } from '../shared/browser-task-envelope'
-import type { BrowserPermissionSuspensionRequest } from '../shared/browser-workflow-control'
 
 function dataOf(result: Awaited<ReturnType<typeof executeBrowserTool>>): Record<string, unknown> {
   if (typeof result === 'string') return JSON.parse(result) as Record<string, unknown>
@@ -25,7 +24,6 @@ function taskContext(params: {
   tabId?: string
   origin?: string
   requestPowerConfirmation?: (details: Record<string, unknown>) => Promise<boolean>
-  confirmedBrowserPermissionRequest?: BrowserPermissionSuspensionRequest | null
 }) {
   const taskEnvelope: BrowserTaskEnvelope = {
     version: 3,
@@ -47,7 +45,6 @@ function taskContext(params: {
     browserTaskId: 'browser-child-1',
     taskEnvelope,
     requestPowerConfirmation: params.requestPowerConfirmation,
-    confirmedBrowserPermissionRequest: params.confirmedBrowserPermissionRequest,
   }
 }
 
@@ -288,7 +285,7 @@ test('browser_archive only writes through an authorized task root', async () => 
   }
 })
 
-test('browser_permission allow suspends for the exact request and applies only with its exact confirmation', async () => {
+test('browser_permission allow fails closed without creating a retired confirmation checkpoint', async () => {
   let writes = 0
   const pending = pendingPermissionReadback()
   const controller = {
@@ -324,22 +321,10 @@ test('browser_permission allow suspends for the exact request and applies only w
     args: allowedArgs,
   })))
   assert.equal(awaiting.ok, false)
-  assert.equal(awaiting.errorKind, 'browser_permission_confirmation_required')
+  assert.equal(awaiting.errorKind, 'browser_permission_confirmation_unavailable')
+  assert.equal(awaiting.browserSuspensionRequest, undefined)
+  assert.equal(awaiting.suspendAfterToolResult, undefined)
   assert.equal(writes, 0)
-  const confirmation = awaiting.browserSuspensionRequest as BrowserPermissionSuspensionRequest
-  assert.equal(confirmation.actionIntent.siteRequestId, 'site-request-1')
-  assert.equal(confirmation.target.ownerRunId, 'previous-owner-run')
-
-  const applied = dataOf(await executeBrowserTool('browser_permission', allowedArgs, controller, undefined, undefined, undefined, undefined, undefined, taskContext({
-    toolName: 'browser_permission',
-    operationId: 'permission_set',
-    args: allowedArgs,
-    confirmedBrowserPermissionRequest: confirmation,
-  })))
-  assert.equal(applied.ok, true)
-  assert.equal(applied.state, 'applied')
-  assert.equal(applied.requestId, 'site-request-1')
-  assert.equal(writes, 1)
 })
 
 test('browser task envelope blocks a model-expanded permission mutation', async () => {

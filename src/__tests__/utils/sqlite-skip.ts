@@ -40,6 +40,20 @@ export interface SqliteSkipOptions {
   probe?: () => void
 }
 
+export interface SqliteTestDatabaseConstructor {
+  new (
+    filename: string,
+    options?: import('better-sqlite3').Options,
+  ): import('better-sqlite3').Database
+}
+
+/** Load the constructor only after the outer test has passed the ABI guard. */
+export function loadSqliteAfterGuardForTest(): SqliteTestDatabaseConstructor {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const mod = requireFromHere('better-sqlite3') as any
+  return (mod.default ?? mod) as SqliteTestDatabaseConstructor
+}
+
 export function skipIfSqliteUnavailable(
   t: Pick<TestContext, 'skip'>,
   label: string,
@@ -58,9 +72,7 @@ export function skipIfSqliteUnavailable(
 }
 
 function defaultProbe(): void {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const mod = requireFromHere('better-sqlite3') as any
-  const Sqlite = mod.default ?? mod
+  const Sqlite = loadSqliteAfterGuardForTest()
   const db = new Sqlite(':memory:')
   db.close()
 }

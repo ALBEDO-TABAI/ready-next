@@ -38,6 +38,7 @@ interface ScopeRow {
   source_id: string
   thread_key: string
   meta_json: string | null
+  message_visibility_epoch?: number
   created_at: string
   updated_at: string
 }
@@ -87,11 +88,38 @@ class FakeAdapter {
     }
   }
 
-  getConversationScope(id: string) { return this.scopes.get(id) || null }
+  getConversationScope(id: string) {
+    const scope = this.scopes.get(id)
+    if (scope) return scope
+    const metadata = this.metaRows.get(id)
+    if (!metadata) return null
+    return {
+      id,
+      agent: metadata.agent || '',
+      title: metadata.title,
+      lineage_root_id: metadata.lineage_root_id,
+      resume_title: metadata.resume_title,
+      source_kind: metadata.source_kind,
+      source_id: metadata.source_id,
+      thread_key: metadata.thread_key,
+      meta_json: '{}',
+      message_visibility_epoch: 0,
+      created_at: metadata.updated_at,
+      updated_at: metadata.updated_at,
+    }
+  }
 
-  updateConversationScopeMeta(id: string, meta: Record<string, unknown>) {
+  updateConversationScopeMeta(
+    id: string,
+    meta: Record<string, unknown>,
+    expectedMessageVisibilityEpoch?: number,
+  ) {
     const scope = this.scopes.get(id)
     if (!scope) return null
+    if (
+      expectedMessageVisibilityEpoch !== undefined
+      && (scope.message_visibility_epoch ?? 0) !== expectedMessageVisibilityEpoch
+    ) return null
     const updated = { ...scope, meta_json: JSON.stringify(meta) }
     this.scopes.set(id, updated)
     return updated
@@ -157,7 +185,7 @@ test('autoAttachOnResume: attaches top-N predecessors in same lineage when no re
   adapter.addMetaRow(buildMetaRow({ id: 'other', lineageRootId: 'L_other', updatedAt: '2026-04-24T14:00:00.000Z' }))
 
   const service = new SessionRecallService(adapter as never)
-  const result = service.autoAttachOnResume({ currentScopeId: 'curr', intent: 'continue', limit: 3 })
+  const result = service.autoAttachOnResume({ currentScopeId: 'curr', intent: 'continue', expectedMessageVisibilityEpoch: 0, limit: 3 })
 
   assert.equal(result.attached.length, 3, 'attached top 3')
   // newest first
@@ -189,7 +217,7 @@ test('autoAttachOnResume: never attaches same-lineage sessions owned by another 
   }))
 
   const service = new SessionRecallService(adapter as never)
-  const result = service.autoAttachOnResume({ currentScopeId: 'curr', intent: 'continue', limit: 3 })
+  const result = service.autoAttachOnResume({ currentScopeId: 'curr', intent: 'continue', expectedMessageVisibilityEpoch: 0, limit: 3 })
 
   assert.deepEqual(
     result.attached.map((capsule) => capsule.conversationId),
@@ -207,7 +235,7 @@ test('autoAttachOnResume: no-op when scope already has manually-attached refs', 
   adapter.addMetaRow(buildMetaRow({ id: 'p1', lineageRootId: 'L1', updatedAt: '2026-04-24T10:00:00.000Z' }))
 
   const service = new SessionRecallService(adapter as never)
-  const result = service.autoAttachOnResume({ currentScopeId: 'curr', intent: 'continue' })
+  const result = service.autoAttachOnResume({ currentScopeId: 'curr', intent: 'continue', expectedMessageVisibilityEpoch: 0 })
 
   assert.equal(result.attached.length, 0, 'skipped because manual refs exist')
 })
@@ -219,7 +247,7 @@ test('autoAttachOnResume: no-op when scope is the only conv in its lineage', () 
   adapter.addMetaRow(buildMetaRow({ id: 'curr', lineageRootId: 'L_solo', updatedAt: '2026-04-25T00:00:00.000Z' }))
 
   const service = new SessionRecallService(adapter as never)
-  const result = service.autoAttachOnResume({ currentScopeId: 'curr', intent: 'continue' })
+  const result = service.autoAttachOnResume({ currentScopeId: 'curr', intent: 'continue', expectedMessageVisibilityEpoch: 0 })
 
   assert.equal(result.attached.length, 0, 'no peers → no attach')
 })
@@ -227,7 +255,7 @@ test('autoAttachOnResume: no-op when scope is the only conv in its lineage', () 
 test('autoAttachOnResume: no-op when scope not found', () => {
   const adapter = new FakeAdapter()
   const service = new SessionRecallService(adapter as never)
-  const result = service.autoAttachOnResume({ currentScopeId: 'missing', intent: 'continue' })
+  const result = service.autoAttachOnResume({ currentScopeId: 'missing', intent: 'continue', expectedMessageVisibilityEpoch: 0 })
   assert.equal(result.attached.length, 0)
 })
 
@@ -243,7 +271,7 @@ test('autoAttachOnResume: respects custom limit', () => {
   }
 
   const service = new SessionRecallService(adapter as never)
-  const result = service.autoAttachOnResume({ currentScopeId: 'curr', intent: 'continue', limit: 2 })
+  const result = service.autoAttachOnResume({ currentScopeId: 'curr', intent: 'continue', expectedMessageVisibilityEpoch: 0, limit: 2 })
 
   assert.equal(result.attached.length, 2, 'capped at limit=2')
 })
@@ -254,7 +282,7 @@ test('autoAttachOnResume: persists refs into scope.meta_json', () => {
   adapter.addMetaRow(buildMetaRow({ id: 'p1', lineageRootId: 'L1', updatedAt: '2026-04-24T10:00:00.000Z' }))
 
   const service = new SessionRecallService(adapter as never)
-  service.autoAttachOnResume({ currentScopeId: 'curr', intent: 'continue' })
+  service.autoAttachOnResume({ currentScopeId: 'curr', intent: 'continue', expectedMessageVisibilityEpoch: 0 })
 
   const scope = adapter.getConversationScope('curr')
   assert.ok(scope?.meta_json, 'meta_json populated')

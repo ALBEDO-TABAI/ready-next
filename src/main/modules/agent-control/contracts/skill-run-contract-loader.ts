@@ -433,8 +433,8 @@ export function loadSkillRunContract(
     try {
       // Step 1 — explicit childRunId.
       const explicitChildRunId = trimmed(params.childRunId)
-      if (!childRow && explicitChildRunId && typeof repo.get === 'function') {
-        const candidate = repo.get(explicitChildRunId) as ReturnType<Repo['findLatestChildRunBySkill']> | null
+      if (!childRow && explicitChildRunId && typeof repo.getCurrentVisible === 'function') {
+        const candidate = repo.getCurrentVisible(explicitChildRunId) as ReturnType<Repo['findLatestChildRunBySkill']> | null
         // Apply the skillId filter post-lookup so a stale or wrong-skill
         // explicit id never attaches.
         if (candidate && candidate.skillId === skillId) {

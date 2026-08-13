@@ -239,3 +239,27 @@ test('verifier view rejects malformed resource content instead of silently dropp
     /browser_verifier_observation_content_invalid:resource-1/,
   )
 })
+
+test('verifier view keeps causal-only waits in the journal but not in page evidence', () => {
+  const waitResource = resource({
+    operationId: 'wait_condition',
+    result: {
+      matched: true,
+      observationFresh: true,
+      usableAsResearchEvidence: false,
+    },
+  })
+  waitResource.operationId = 'wait_condition'
+  const waitView = buildBrowserWorkflowVerifierEvidenceView(evidence(waitResource))
+  assert.equal(waitView.resources.length, 0)
+  assert.equal(JSON.parse(waitView.journalExcerpt).observationReceipts.length, 1)
+
+  const readResource = resource({
+    operationId: 'read',
+    result: { observationFresh: true, content: 'Guangzhou 35 C' },
+  })
+  readResource.operationId = 'read'
+  const readView = buildBrowserWorkflowVerifierEvidenceView(evidence(readResource))
+  assert.equal(readView.resources.length, 1)
+  assert.equal(readView.resources[0].resource.resourceId, 'resource-1')
+})

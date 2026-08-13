@@ -47,7 +47,7 @@ function insertSubmittedReviewCard(
     id: question.id,
     answer: input.selected.filter((option) => (question.options as string[]).includes(option)),
   }))
-  db.prepare(`INSERT INTO chat_messages(id,conversation_id,role,content,timestamp,meta_json) VALUES(?,?,?,?,?,?)`).run(
+  db.prepare(`INSERT INTO chat_messages(id,conversation_id,role,content,timestamp,meta_json,message_visibility_epoch) VALUES(?,?,?,?,?,?,0)`).run(
     input.cardId,
     input.scopeId,
     'agent_card',
@@ -319,7 +319,7 @@ test('an existing manual label never creates a redundant review question', async
     }, context))
     assert.equal(applied.done, true)
     assert.equal(applied.reviewRequired, false)
-    assert.match(await readFile(path, 'utf8'), /  - 钉钉/)
+    assert.match(await readFile(path, 'utf8'), / {2}- 钉钉/)
     assert.equal(new TagForgeRepository(db).listOverlay().some((entry) => entry.label === '钉钉'), false)
   } finally {
     db.close()
@@ -896,7 +896,7 @@ test('extra manual form tags are preserved without blocking the automatic contra
     assert.equal(applied.results[0].status, 'completed')
     assert.equal(applied.done, true)
     const written = await readFile(path, 'utf8')
-    assert.match(written, /tags:\n  - 教程\n  - 参考资料\n  - AI工作流/)
+    assert.match(written, /tags:\n {2}- 教程\n {2}- 参考资料\n {2}- AI工作流/)
     assert.match(written, /ready_state: 待整理/)
     assert.match(written, /# 教程资料/)
   } finally {

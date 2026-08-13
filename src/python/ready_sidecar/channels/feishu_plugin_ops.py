@@ -12,6 +12,7 @@ Provides comprehensive Feishu plugin capabilities including:
 from __future__ import annotations
 
 import json
+import re
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -22,6 +23,25 @@ import requests
 class FeishuPluginOperations:
     """Feishu plugin capability operations"""
 
+    _FAILURE_ERROR_KINDS = frozenset({
+        "feishu_invalid_request",
+        "feishu_auth_required",
+        "feishu_permission_denied",
+        "feishu_not_found",
+        "feishu_rate_limited",
+        "feishu_network_error",
+        "feishu_upstream_unavailable",
+        "feishu_operation_failed",
+    })
+    _CREDENTIAL_ASSIGNMENT = re.compile(
+        r'''(?ix)
+        ["']?(?:app_id|app_secret|access_token|tenant_access_token)["']?
+        \s*[:=]\s*
+        (?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s,;}\]&]+)
+        ''',
+    )
+    _BEARER_CREDENTIAL = re.compile(r"(?i)\bBearer\s+[^\s,;}\]]+")
+
     def __init__(self, app_id: str, app_secret: str, domain: str = "https://open.feishu.cn"):
         self.app_id = app_id
         self.app_secret = app_secret
@@ -29,7 +49,93 @@ class FeishuPluginOperations:
         self._access_token: Optional[str] = None
         self._access_token_exp_at = 0.0
 
-    def _refresh_access_token(self, force: bool = False) -> tuple[Optional[str], Optional[str]]:
+    @staticmethod
+    def _optional_int(value: Any) -> Optional[int]:
+        try:
+            return int(value) if value is not None else None
+        except (TypeError, ValueError):
+            return None
+
+    def _sanitize_failure_message(self, message: Any) -> str:
+        safe_message = str(message or "飞书操作失败")
+        safe_message = self._CREDENTIAL_ASSIGNMENT.sub("[credential redacted]", safe_message)
+        safe_message = self._BEARER_CREDENTIAL.sub("Bearer [redacted]", safe_message)
+        for credential in (self.app_id, self.app_secret, self._access_token):
+            if credential:
+                safe_message = safe_message.replace(str(credential), "[redacted]")
+        return safe_message
+
+    def _failure_record(
+        self,
+        message: str,
+        *,
+        status_code: Optional[int] = None,
+        feishu_code: Optional[int] = None,
+        default_kind: str = "feishu_operation_failed",
+    ) -> Dict[str, Any]:
+        raw_message = str(message or "飞书操作失败")
+        safe_message = self._sanitize_failure_message(raw_message)
+        lowered = raw_message.lower()
+        if status_code == 401 or feishu_code == 401 or any(
+            marker in lowered
+            for marker in ("unauthorized", "invalid token", "token expired", "鉴权", "认证")
+        ):
+            error_kind = "feishu_auth_required"
+        elif status_code == 403 or feishu_code == 403 or any(
+            marker in lowered for marker in ("forbidden", "permission denied", "no permission", "权限")
+        ):
+            error_kind = "feishu_permission_denied"
+        elif status_code == 404 or feishu_code == 404 or any(
+            marker in lowered for marker in ("not found", "does not exist", "不存在")
+        ):
+            error_kind = "feishu_not_found"
+        elif status_code == 429 or feishu_code == 429 or any(
+            marker in lowered for marker in ("rate limit", "too many requests", "限流")
+        ):
+            error_kind = "feishu_rate_limited"
+        elif status_code is not None and 500 <= status_code <= 599:
+            error_kind = "feishu_upstream_unavailable"
+        elif any(
+            marker in lowered
+            for marker in ("network", "connection", "socket", "dns", "timed out", "timeout")
+        ):
+            error_kind = "feishu_network_error"
+        else:
+            error_kind = default_kind
+        result: Dict[str, Any] = {
+            "success": False,
+            "ok": False,
+            "errorKind": error_kind,
+            "error": safe_message,
+        }
+        if status_code is not None:
+            result["status_code"] = status_code
+        if feishu_code is not None:
+            result["feishu_code"] = feishu_code
+        return result
+
+    def _failure(self, error: Any) -> Dict[str, Any]:
+        if isinstance(error, dict):
+            message = error.get("error") or error.get("message") or error.get("msg") or "飞书操作失败"
+            error_kind = error.get("errorKind")
+            default_kind = (
+                str(error_kind)
+                if isinstance(error_kind, str) and error_kind in self._FAILURE_ERROR_KINDS
+                else "feishu_operation_failed"
+            )
+            return self._failure_record(
+                str(message),
+                status_code=self._optional_int(
+                    error.get("status_code", error.get("statusCode"))
+                ),
+                feishu_code=self._optional_int(
+                    error.get("feishu_code", error.get("feishuCode"))
+                ),
+                default_kind=default_kind,
+            )
+        return self._failure_record(str(error or "飞书操作失败"))
+
+    def _refresh_access_token(self, force: bool = False) -> tuple[Optional[str], Optional[Dict[str, Any]]]:
         """Refresh tenant access token"""
         if (not force) and self._access_token and time.time() < self._access_token_exp_at - 60:
             return self._access_token, None
@@ -43,18 +149,31 @@ class FeishuPluginOperations:
             data = resp.json()
             code = int(data.get("code", -1))
             if code != 0:
-                return None, str(data.get("msg") or data.get("message") or "tenant token 获取失败")
+                return None, self._failure_record(
+                    str(data.get("msg") or data.get("message") or "tenant token 获取失败"),
+                    status_code=resp.status_code,
+                    feishu_code=code,
+                    default_kind="feishu_auth_required",
+                )
 
             token = str(data.get("tenant_access_token") or "")
             expire = int(data.get("expire", 7200))
             if not token:
-                return None, "飞书 tenant_access_token 为空"
+                return None, self._failure_record(
+                    "飞书 tenant_access_token 为空",
+                    status_code=resp.status_code,
+                    feishu_code=code,
+                    default_kind="feishu_auth_required",
+                )
 
             self._access_token = token
             self._access_token_exp_at = time.time() + max(300, expire)
             return token, None
         except Exception as exc:
-            return None, str(exc)
+            return None, self._failure_record(
+                str(exc),
+                default_kind="feishu_network_error",
+            )
 
     def _make_request(
         self,
@@ -63,11 +182,14 @@ class FeishuPluginOperations:
         params: Optional[Dict[str, Any]] = None,
         json_data: Optional[Dict[str, Any]] = None,
         timeout: int = 15,
-    ) -> tuple[bool, Optional[str], Optional[Dict[str, Any]]]:
+    ) -> tuple[bool, Optional[Dict[str, Any]], Optional[Dict[str, Any]]]:
         """Make authenticated request to Feishu API"""
         token, err = self._refresh_access_token()
         if not token:
-            return False, err or "飞书鉴权失败", None
+            return False, err or self._failure_record(
+                "飞书鉴权失败",
+                default_kind="feishu_auth_required",
+            ), None
 
         try:
             url = f"{self.domain}{path}"
@@ -87,12 +209,23 @@ class FeishuPluginOperations:
 
             data = resp.json()
             code = int(data.get("code", -1))
-            if code != 0:
-                return False, str(data.get("msg") or data.get("message") or "飞书 API 调用失败"), None
+            if resp.status_code >= 400 or code != 0:
+                return False, self._failure_record(
+                    str(data.get("msg") or data.get("message") or "飞书 API 调用失败"),
+                    status_code=resp.status_code,
+                    feishu_code=code,
+                ), None
 
             return True, None, data.get("data")
         except Exception as exc:
-            return False, str(exc), None
+            return False, self._failure_record(
+                str(exc),
+                default_kind=(
+                    "feishu_upstream_unavailable"
+                    if isinstance(exc, (ValueError, json.JSONDecodeError))
+                    else "feishu_network_error"
+                ),
+            ), None
 
     # ============================================================
     # Document Operations
@@ -125,10 +258,13 @@ class FeishuPluginOperations:
                 f"/open-apis/bitable/v1/apps/{doc_token}",
             )
         else:
-            return {"success": False, "error": f"不支持的文档类型: {doc_type}"}
+            return self._failure_record(
+                f"不支持的文档类型: {doc_type}",
+                default_kind="feishu_invalid_request",
+            )
 
         if not success:
-            return {"success": False, "error": error}
+            return self._failure(error)
 
         return {"success": True, "data": data}
 
@@ -167,10 +303,13 @@ class FeishuPluginOperations:
                 json_data=payload,
             )
         else:
-            return {"success": False, "error": f"不支持的文档类型: {doc_type}"}
+            return self._failure_record(
+                f"不支持的文档类型: {doc_type}",
+                default_kind="feishu_invalid_request",
+            )
 
         if not success:
-            return {"success": False, "error": error}
+            return self._failure(error)
 
         return {"success": True, "data": data}
 
@@ -200,10 +339,13 @@ class FeishuPluginOperations:
                 json_data=updates,
             )
         else:
-            return {"success": False, "error": f"不支持的文档类型: {doc_type}"}
+            return self._failure_record(
+                f"不支持的文档类型: {doc_type}",
+                default_kind="feishu_invalid_request",
+            )
 
         if not success:
-            return {"success": False, "error": error}
+            return self._failure(error)
 
         return {"success": True, "data": data}
 
@@ -229,7 +371,7 @@ class FeishuPluginOperations:
         )
 
         if not success:
-            return {"success": False, "error": error}
+            return self._failure(error)
 
         return {"success": True, "data": data}
 
@@ -258,7 +400,7 @@ class FeishuPluginOperations:
         )
 
         if not success:
-            return {"success": False, "error": error}
+            return self._failure(error)
 
         return {"success": True, "data": data}
 
@@ -289,7 +431,7 @@ class FeishuPluginOperations:
         )
 
         if not success:
-            return {"success": False, "error": error}
+            return self._failure(error)
 
         return {"success": True, "data": data}
 
@@ -312,7 +454,7 @@ class FeishuPluginOperations:
         )
 
         if not success:
-            return {"success": False, "error": error}
+            return self._failure(error)
 
         return {"success": True, "data": data}
 
@@ -341,7 +483,7 @@ class FeishuPluginOperations:
         )
 
         if not success:
-            return {"success": False, "error": error}
+            return self._failure(error)
 
         return {"success": True, "data": data}
 
@@ -356,7 +498,7 @@ class FeishuPluginOperations:
         )
 
         if not success:
-            return {"success": False, "error": error}
+            return self._failure(error)
 
         return {"success": True, "data": data}
 
@@ -376,7 +518,7 @@ class FeishuPluginOperations:
         )
 
         if not success:
-            return {"success": False, "error": error}
+            return self._failure(error)
 
         return {"success": True, "data": data}
 
@@ -394,7 +536,7 @@ class FeishuPluginOperations:
         )
 
         if not success:
-            return {"success": False, "error": error}
+            return self._failure(error)
 
         return {"success": True, "data": data}
 
@@ -413,7 +555,7 @@ class FeishuPluginOperations:
         )
 
         if not success:
-            return {"success": False, "error": error}
+            return self._failure(error)
 
         return {"success": True, "data": data}
 
@@ -426,7 +568,7 @@ class FeishuPluginOperations:
         )
 
         if not success:
-            return {"success": False, "error": error}
+            return self._failure(error)
 
         return {"success": True, "data": data}
 
@@ -438,7 +580,7 @@ class FeishuPluginOperations:
         )
 
         if not success:
-            return {"success": False, "error": error}
+            return self._failure(error)
 
         return {"success": True, "data": data}
 
@@ -455,12 +597,18 @@ class FeishuPluginOperations:
         """Upload file to Feishu"""
         token, err = self._refresh_access_token()
         if not token:
-            return {"success": False, "error": err or "飞书鉴权失败"}
+            return self._failure(err or self._failure_record(
+                "飞书鉴权失败",
+                default_kind="feishu_auth_required",
+            ))
 
         try:
             path = Path(file_path)
             if not path.exists():
-                return {"success": False, "error": f"文件不存在: {file_path}"}
+                return self._failure_record(
+                    f"文件不存在: {file_path}",
+                    default_kind="feishu_not_found",
+                )
 
             with open(path, "rb") as f:
                 files = {"file": (path.name, f, file_type)}
@@ -480,20 +628,24 @@ class FeishuPluginOperations:
                 result = resp.json()
                 code = int(result.get("code", -1))
                 if code != 0:
-                    return {
-                        "success": False,
-                        "error": str(result.get("msg") or result.get("message") or "文件上传失败"),
-                    }
+                    return self._failure_record(
+                        str(result.get("msg") or result.get("message") or "文件上传失败"),
+                        status_code=resp.status_code,
+                        feishu_code=code,
+                    )
 
                 return {"success": True, "data": result.get("data")}
         except Exception as exc:
-            return {"success": False, "error": str(exc)}
+            return self._failure_record(str(exc))
 
     async def file_download(self, file_token: str, save_path: str) -> Dict[str, Any]:
         """Download file from Feishu"""
         token, err = self._refresh_access_token()
         if not token:
-            return {"success": False, "error": err or "飞书鉴权失败"}
+            return self._failure(err or self._failure_record(
+                "飞书鉴权失败",
+                default_kind="feishu_auth_required",
+            ))
 
         try:
             resp = requests.get(
@@ -503,7 +655,10 @@ class FeishuPluginOperations:
             )
 
             if resp.status_code >= 400:
-                return {"success": False, "error": f"文件下载失败: HTTP {resp.status_code}"}
+                return self._failure_record(
+                    f"文件下载失败: HTTP {resp.status_code}",
+                    status_code=resp.status_code,
+                )
 
             path = Path(save_path)
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -517,4 +672,4 @@ class FeishuPluginOperations:
                 },
             }
         except Exception as exc:
-            return {"success": False, "error": str(exc)}
+            return self._failure_record(str(exc))

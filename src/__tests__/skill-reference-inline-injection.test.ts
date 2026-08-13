@@ -12,7 +12,7 @@
  */
 
 import assert from 'node:assert/strict'
-import test from 'node:test'
+import test, { after, before } from 'node:test'
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -24,6 +24,14 @@ import {
   getLastReferenceSkill,
 } from '../main/modules/agent-control/skills/skill-reference-hints'
 import { TOOL_ERROR_METRICS } from '../main/modules/agent-control/tools-runtime/tool-error-metrics'
+import { __setScopeContextEpochDatabaseForTests } from '../main/modules/agent-control/session/scope-context-epoch'
+
+before(() => {
+  __setScopeContextEpochDatabaseForTests({
+    getRawDb: () => ({ prepare: () => ({ get: () => undefined }) }) as never,
+  })
+})
+after(() => __setScopeContextEpochDatabaseForTests(null))
 
 function makeSkill(managedPath: string | null): any {
   return {

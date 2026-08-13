@@ -20,9 +20,14 @@ import type { TaskProjectionRecord, TaskProjectionStore } from '../main/modules/
 import { createTaskBudgetRuntime } from '../main/modules/agent-control/task-projection/run-budget-policy'
 import { createToolExecutionOutput } from '../main/modules/agent-control/tools-runtime/tool-result-types'
 import type { ToolDefinition } from '../main/modules/agent-control/tools-runtime/tool-definition'
+import { __setScopeContextEpochDatabaseForTests } from '../main/modules/agent-control/session/scope-context-epoch'
 
 import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
 import { canonicalCoreCloseoutTestPort } from './helpers/canonical-core-closeout-test-port'
+
+__setScopeContextEpochDatabaseForTests({
+  getRawDb: () => ({ prepare: () => ({ get: () => undefined }) }) as never,
+})
 
 test('run-finalizer-all-paths declares transitive sqlite ABI guard', (t) => {
   skipIfSqliteUnavailable(t, 'run-finalizer-all-paths transitive sqlite load')
@@ -339,6 +344,7 @@ describe('run finalizer all paths', () => {
 
     const result = await runtime.sendMessage('butler::scope-done', 'finish', 'run-done', {
       publicSessionId: 'scope-done',
+      messageVisibilityEpoch: 0,
       taskId: 'task-done',
     })
 
@@ -359,6 +365,7 @@ describe('run finalizer all paths', () => {
 
     const result = await runtime.sendMessage('butler::scope-error', 'fail', 'run-error', {
       publicSessionId: 'scope-error',
+      messageVisibilityEpoch: 0,
       taskId: 'task-error',
     })
 
@@ -385,6 +392,7 @@ describe('run finalizer all paths', () => {
 
     const result = await runtime.sendMessage('butler::scope-config-finalizer', 'hello', 'run-config-finalizer', {
       publicSessionId: 'scope-config-finalizer',
+      messageVisibilityEpoch: 0,
       taskId: 'task-config-finalizer',
     })
 
@@ -428,6 +436,7 @@ describe('run finalizer all paths', () => {
       'run-budget-finalizer',
       {
         publicSessionId: 'scope-budget-finalizer',
+        messageVisibilityEpoch: 0,
         taskId: 'task-budget-finalizer',
         taskBudgetRuntime: createTaskBudgetRuntime('research', {
           budget: {
@@ -505,6 +514,7 @@ describe('run finalizer all paths', () => {
         'run-max-turn-done-finalizer',
         {
           publicSessionId: 'scope-max-turn-done-finalizer',
+          messageVisibilityEpoch: 0,
           taskId: 'task-max-turn-done-finalizer',
           requestEnvelope: {
             primaryInstruction: '把内容写入@[report.md]里。',
@@ -600,6 +610,7 @@ describe('run finalizer all paths', () => {
         `run-child-${item.label}`,
         {
           publicSessionId: `scope-child-${item.label}`,
+          messageVisibilityEpoch: 0,
           taskId: `task-child-${item.label}`,
           continuationIntent: { childRunId: `child-${item.label}` },
         },
@@ -640,6 +651,7 @@ describe('run finalizer all paths', () => {
 
     const pending = runtime.sendMessage('butler::scope-stop', 'stop later', 'run-stop', {
       publicSessionId: 'scope-stop',
+      messageVisibilityEpoch: 0,
       taskId: 'task-stop',
     })
     await signalReady
@@ -677,16 +689,19 @@ describe('run finalizer all paths', () => {
 
     const first = runtime.sendMessage('butler::scope-preempt', 'first', 'run-preempt-old', {
       publicSessionId: 'scope-preempt',
+      messageVisibilityEpoch: 0,
       taskId: 'task-preempt-old',
     })
     await firstSignalReady
     const second = await runtime.sendMessage('butler::scope-preempt', 'second', 'run-preempt-new', {
       publicSessionId: 'scope-preempt',
+      messageVisibilityEpoch: 0,
       taskId: 'task-preempt-new',
     })
     assert.equal(second.success, false)
     assert.equal(second.terminalReason, 'blocked_external')
-    assert.equal(repository.get('run-preempt-old'), null)
+    assert.equal(repository.get('run-preempt-old')?.status, 'running')
+    assert.equal(repository.get('run-preempt-new'), null)
 
     runtime.stopGeneration('butler::scope-preempt')
     const firstResult = await first
@@ -783,6 +798,7 @@ describe('run finalizer all paths', () => {
       runId: 'run-steered',
       taskId: 'task-steered',
       scopeId: 'scope-steered',
+      messageVisibilityEpoch: 0,
       continuationHandle: '/tmp/ready-action-steered/run_state.json',
       durationMs: 100,
       toolCallsUsed: 0,

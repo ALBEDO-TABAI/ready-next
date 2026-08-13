@@ -12,8 +12,12 @@ import {
   createRunBudgetSeed,
   createTaskBudgetRuntime,
 } from '../main/modules/agent-control/task-projection/run-budget-policy'
+import { setBrowserTargetClaimRunCloseoutPort } from '../main/modules/browser-engine/browser-target-claim-closeout'
 
 const NOW = new Date('2026-07-15T08:25:35.767Z')
+
+test.before(() => setBrowserTargetClaimRunCloseoutPort(() => undefined))
+test.after(() => setBrowserTargetClaimRunCloseoutPort(null))
 
 function bootstrapShortTaskRuntime() {
   return createTaskBudgetRuntime('short_task', {

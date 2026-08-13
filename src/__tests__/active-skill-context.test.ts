@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import test from 'node:test'
+import test, { after, before } from 'node:test'
 
 import {
   clearActiveSkillContext,
@@ -9,6 +9,12 @@ import {
 } from '../main/modules/agent-control/session/active-skill-context'
 import type { TaskProjectionRecord } from '../main/modules/agent-control/contracts/run-contracts'
 import type { SkillTaskSupervisorSnapshot } from '../main/modules/agent-control/skills/skill-task-supervisor'
+import { __setScopeContextEpochDatabaseForTests } from '../main/modules/agent-control/session/scope-context-epoch'
+
+before(() => {
+  __setScopeContextEpochDatabaseForTests({ getRawDb: () => ({ prepare: () => ({ get: () => undefined }) }) as never })
+})
+after(() => __setScopeContextEpochDatabaseForTests(null))
 
 function projection(overrides: Partial<TaskProjectionRecord>): TaskProjectionRecord {
   return {
@@ -203,4 +209,39 @@ test('active skill context resolves VEA progress stage to executable action when
 
   assert.equal(context?.skillId, 'video-expert-analyzer')
   assert.equal(context?.action, 'video_expert_ai_analyze')
+})
+
+test('remembered active skill context is visible across stop but not across reset', () => {
+  const scopeId = 'conv-active-context-epoch'
+  clearActiveSkillContext(scopeId)
+  rememberActiveSkillContext(scopeId, {
+    skillId: 'old-context-skill',
+    skillName: 'Old Context Skill',
+    taskRunId: 'skill-task-old',
+    detachedTaskId: 'detached-old',
+    runStatePath: '/tmp/old/run_state.json',
+    outputDir: '/tmp/old',
+    sceneScoresPath: null,
+    deliveryReportPath: null,
+    action: 'run',
+    source: 'task_run',
+    confidence: 80,
+    status: 'blocked',
+    staleBlockerReason: null,
+    observedAt: new Date().toISOString(),
+    messageVisibilityEpoch: 0,
+  })
+
+  try {
+    assert.equal(resolveActiveSkillContextFromInputs({
+      sessionId: scopeId,
+      messageVisibilityEpoch: 0,
+    })?.skillId, 'old-context-skill')
+    assert.equal(resolveActiveSkillContextFromInputs({
+      sessionId: scopeId,
+      messageVisibilityEpoch: 1,
+    }), null)
+  } finally {
+    clearActiveSkillContext(scopeId)
+  }
 })

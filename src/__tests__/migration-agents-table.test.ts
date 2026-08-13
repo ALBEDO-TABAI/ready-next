@@ -229,7 +229,7 @@ test('ownerAgentId roundtrips through the projection repository; NULL-compatible
   }
   const repository = new TaskProjectionRepository({ getRawDb: () => raw as never })
   repository.create({
-    taskId: 'task-owner', taskOrigin: 'user_root', scopeId: 's1', runId: 'r1', taskType: 'short_task', module: 'chat',
+    taskId: 'task-owner', taskOrigin: 'user_root', scopeId: 's1', messageVisibilityEpoch: 0, runId: 'r1', taskType: 'short_task', module: 'chat',
     status: 'running', interactionState: 'running', steps: [],
     ownerAgentId: 'writer',
     createdAt: '2026-06-12T09:00:00.000Z', updatedAt: '2026-06-12T09:00:00.000Z',

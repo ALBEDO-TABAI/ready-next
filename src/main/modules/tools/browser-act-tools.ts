@@ -6,7 +6,7 @@
  * browser_type / browser_type / browser_type /
  * browser_find / browser_upload /
  * browser_click / browser_type / browser_scroll / browser_press_key /
- * browser_request_takeover / browser_navigate(action=back)，经 executeBrowserActTool 统一
+ * browser_navigate(action=back)，经 executeBrowserActTool 统一
  * 入口分发）与本组独占 helper（tab 跟随快照、动作前后 delta 回读、
  * click-by-text 帧穿透定位、scope 附件上传的选择/验证/恢复、
  * recentScopeUploads 单例）。
@@ -43,14 +43,12 @@ import {
   buildBrowserBlockingChallengeProbeJs,
   buildFocusedEditableProbeJs,
   buildBrowserTargetFormSubmitJs,
-  buildBrowserTargetProbeJs,
-  buildTargetSemanticsLibraryJs,
-  buildTransientNoticeProbeJs,
+  buildBrowserTargetProbeJs, buildTransientNoticeProbeJs,
   throwIfLiveTargetGuardBlocked,
   buildBrowserActionDeltaJs,
   normalizeBrowserBlockingChallengeProbe,
   probeCoordinateTargetOrThrow,
-  callBrowserBackendTarget,
+  callBrowserBackendTarget
 } from './browser-probe'
 import { browserInputEnvironmentReadiness } from '../browser-engine/browser-input-readiness'
 import {
@@ -58,15 +56,13 @@ import {
   resolveCssPoint,
   runGuardedCoordinateClick,
   runGuardedCoordinateType,
-  runGuardedTargetType,
-  type GuardedCoordinateTypeResult,
-  runGuardedSelectorClick,
+  runGuardedTargetType, runGuardedSelectorClick,
   runGuardedSelectorType,
   sendKeyStroke,
   settleAfterAction,
   sleepWithAbort,
   throwIfAborted,
-  waitForReady,
+  waitForReady
 } from './browser-input-actions'
 import {
   describeComposedPointTarget,
@@ -80,15 +76,9 @@ import {
 import {
   activeBrowserToolUrl,
   activePageLikelyMatchesTarget,
-  browserStructuredErrorOutput,
-  getPageIdentity,
-  listSubframesSafe,
+  browserStructuredErrorOutput, listSubframesSafe,
   locateActionTargets,
-  resolveToolContextMeta,
-  truncate,
-  uniqueStrings,
-  type ActionTargetCandidate,
-  type BrowserActionFollowedTab,
+  resolveToolContextMeta, uniqueStrings, type BrowserActionFollowedTab
 } from './browser-tool-shared'
 
 const logger = createRotatingLogger('ready-tools.log', { buffered: true })
@@ -740,6 +730,7 @@ export interface BrowserActToolContext {
   controller: BrowserController
   abortSignal?: AbortSignal
   sessionId?: string
+  messageVisibilityEpoch?: number
   mutationBoundary: BrowserMutationBoundary
   agentOwnedWorkTab?: { browserTaskId: string } | null
   requestPowerConfirmation?: (details: {
@@ -750,12 +741,6 @@ export interface BrowserActToolContext {
     objectRef: string
     inputHash: string
   }) => Promise<boolean>
-  createHumanTakeoverIntent?: (prompt: {
-    callToAction: string
-    details: string
-    timeoutSec: number
-    tabId: string
-  }) => Promise<{ takeoverId: string }>
   attachBrowserToolOutput: (
     result: string | ToolExecutionOutput,
     params: {
@@ -910,7 +895,15 @@ export async function executeBrowserActTool(
         // (the scoped agent facade forces agentTabId), else the active tab.
         const navTabId = (args.tab_id as string) || null
         const allowRepeat = args.allow_repeat === true
-        const duplicate = !allowRepeat ? findRecentBrowserAction(sessionId, 'navigate', url) : null
+        const duplicate = !allowRepeat
+          ? findRecentBrowserAction(
+            sessionId,
+            'navigate',
+            url,
+            45_000,
+            { messageVisibilityEpoch: ctx.messageVisibilityEpoch },
+          )
+          : null
         const activeBefore = navTabId
           ? controller.getTabList().find((t) => t.id === navTabId)
           : controller.getActiveTab()
@@ -920,7 +913,9 @@ export async function executeBrowserActTool(
         }
         const result = await controller.navigate(navTabId, url)
         if (!result.success) return `Error: ${result.error}`
-        rememberBrowserAction(sessionId, 'navigate', url)
+        rememberBrowserAction(sessionId, 'navigate', url, {
+          messageVisibilityEpoch: ctx.messageVisibilityEpoch,
+        })
         // Wait a moment for page to start loading
         await sleepWithAbort(1500, abortSignal)
         const tabs = controller.getTabList()
@@ -1206,7 +1201,9 @@ export async function executeBrowserActTool(
         const submitDelivery = submitOutcome?.delivery || 'unknown'
         const effectObserved = submitOutcome?.effect === 'observed'
         const submitted = submitDelivery === 'delivered'
-        if (submitted) rememberBrowserAction(sessionId, 'search', `${searchTabId}:${query}`)
+        if (submitted) rememberBrowserAction(sessionId, 'search', `${searchTabId}:${query}`, {
+          messageVisibilityEpoch: ctx.messageVisibilityEpoch,
+        })
         const actionIds = mutationBoundary.searchActionIds()
         return browserStructuredOutput({
           ok: submitted,
@@ -2452,42 +2449,6 @@ export async function executeBrowserActTool(
           tabId,
           confirmation,
           nextSuggestedAction: confirmation ? 'finish with transaction proof' : 'read map again',
-        })
-      }
-
-      case 'request_takeover': {
-        const callToAction = String(args.reason || args.call_to_action || '').trim()
-        if (!callToAction) return 'Error: reason is required'
-        const tabId = String(args.tab_id || controller.getActiveTab?.()?.id || '').trim()
-        if (!tabId) {
-          return browserStructuredOutput({ ok: false, errorKind: 'human_takeover_not_grounded' })
-        }
-        const grounding = normalizeBrowserBlockingChallengeProbe(
-          await controller.executeJS(tabId, buildBrowserBlockingChallengeProbeJs()),
-        )
-        if (!grounding.blocked && !grounding.pageError && !grounding.emptyShell) {
-          return browserStructuredOutput({ ok: false, errorKind: 'human_takeover_not_grounded' })
-        }
-        if (!ctx.createHumanTakeoverIntent) {
-          return browserStructuredOutput({
-            ok: false,
-            operationId: 'request_takeover',
-            errorKind: 'browser_workflow_route_required',
-          })
-        }
-        const details = String(args.instruction || args.details || '')
-        const timeoutSec = Math.max(30, Math.min(1200, Number(args.timeout_sec || 300)))
-        log(`[browser-v3][human-required] reasonLength=${callToAction.length} timeout=${timeoutSec}s`)
-        const takeover = await ctx.createHumanTakeoverIntent({ callToAction, details, timeoutSec, tabId })
-        return browserStructuredOutput({
-          ok: true,
-          operationId: 'request_takeover',
-          phase: 'human_required',
-          takeoverId: takeover.takeoverId,
-          suspendAfterToolResult: true,
-          callToAction,
-          details,
-          timeoutSec,
         })
       }
 

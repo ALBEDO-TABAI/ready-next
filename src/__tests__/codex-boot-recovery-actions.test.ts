@@ -105,7 +105,13 @@ function actions(input: {
         },
       },
       hostFailureTerminal: {
-        async commit(failure) { return { productTerminalDigest: `terminal-${failure.readyRunId}` } },
+        async commit(failure) {
+          return {
+            productTerminalDigest: `terminal-${failure.readyRunId}`,
+            closeoutAt: '2026-08-07T00:00:00.000Z',
+          }
+        },
+        async deliver() {},
       },
       manualCompaction: { async reconcile() {} },
       productFence: { async reconcile() {} },
@@ -186,4 +192,16 @@ test('ambiguous readback blocks the binding and held dispatch is forwarded once'
     registry: {} as never,
   }), 'pending')
   assert.deepEqual(fixture.held, ['binding-thread'])
+})
+
+test('native read failure becomes binding-local unknown evidence', async () => {
+  const fixture = actions({
+    async threadList() { throw new Error('native_thread_list_unavailable') },
+  })
+  const result = await fixture.value.resolveIntentStart({
+    member: threadMember,
+    registry: {} as never,
+  })
+  assert.equal(result.resolution, 'unknown')
+  assert.match(result.evidenceDigest, /^[a-f0-9]{64}$/)
 })

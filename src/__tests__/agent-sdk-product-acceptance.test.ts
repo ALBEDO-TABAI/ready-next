@@ -28,6 +28,14 @@ import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
 import { enabledSdkToolNames } from './utils/sdk-tool-visibility'
 import { canonicalCoreCloseoutTestPort } from './helpers/canonical-core-closeout-test-port'
 import { __setSkillsRuntimeManagerForTests } from '../main/modules/skills-runtime/runtime-manager'
+import { __setScopeContextEpochDatabaseForTests } from '../main/modules/agent-control/session/scope-context-epoch'
+
+test.before(() => {
+  __setScopeContextEpochDatabaseForTests({
+    getRawDb: () => ({ prepare: () => ({ get: () => undefined }) }) as never,
+  })
+})
+test.after(() => __setScopeContextEpochDatabaseForTests(null))
 
 const fakeConfig = {
   provider: 'openai',

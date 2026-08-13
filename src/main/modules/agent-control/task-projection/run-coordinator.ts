@@ -331,6 +331,9 @@ export class RunCoordinator {
             this.deps.emitStartedScopeRunEvent({
               type: 'started',
               scopeId: request.scope.id,
+              aliasGeneration: prepared.conversationAlias.aliasGeneration,
+              messageVisibilityEpoch: request.scope.messageVisibilityEpoch,
+              visibilityOwnerKind: 'product_alias',
               agent: request.scope.agent,
               runId: prepared.runId,
               taskId: prepared.taskId,
@@ -341,6 +344,8 @@ export class RunCoordinator {
               taskTitle: prepared.neutralProjectionSeed.taskTitle,
               taskSummary: prepared.neutralProjectionSeed.taskSummary,
               taskProjectionId: prepared.taskId,
+              taskType: 'direct_answer',
+              module: 'system',
               executionDiagnostics: {
                 taskId: prepared.taskId,
                 budget: prepared.productBudgetSeed,
@@ -408,13 +413,6 @@ export class RunCoordinator {
         }
       }
     }
-  }
-
-  async runInboundChannel(
-    request: CodexRunCoordinatorRequest,
-    hooks?: RunCompletionHooks & ReflectionResultHook,
-  ): Promise<CodexRunCoordinatorResult> {
-    return this.runScoped(request, hooks)
   }
 
   private waitForValidCloseout(

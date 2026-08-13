@@ -27,10 +27,8 @@ export interface EmergenceEvidence {
 
 export interface EmergenceAction {
   kind:
-    | 'resume_task'
     | 'adjudicate_task'
     | 'supply_input'
-    | 'adopt_candidate'
     | 'review_duplicate'
     | 'open_project'
     | 'open_artifact'
@@ -43,7 +41,7 @@ export interface EmergenceAction {
 export interface EmergenceCard {
   id: string
   projectKey?: string
-  type: 'resume' | 'follow_up' | 'crystallize' | 'prepare' | 'harvest' | 'forming'
+  type: 'follow_up' | 'crystallize' | 'prepare' | 'harvest' | 'forming'
   title: string
   evidence: EmergenceEvidence[]
   confidence: number
@@ -55,32 +53,6 @@ export interface EmergenceCard {
 export const EMERGENCE_GLOBAL_LIMIT = 8
 export const EMERGENCE_PER_TYPE_LIMIT = 3
 export const EMERGENCE_CONFIDENCE_FLOOR = 0.5
-
-const RESUMABLE_STATUSES = new Set(['blocked', 'recoverable_paused', 'budget_paused'])
-
-/** "我刚才/昨天做到哪了" — blocked/paused tasks with a continuation handle. */
-export function extractResumeCards(projections: ReadonlyArray<TaskProjectionRecord>): EmergenceCard[] {
-  const out: EmergenceCard[] = []
-  for (const record of projections) {
-    if (!RESUMABLE_STATUSES.has(String(record.status))) continue
-    const ref = record.continuationRef as Record<string, unknown> | null | undefined
-    if (!ref && record.canResume !== true) continue
-    const blockerType = ref && typeof ref.blockerType === 'string' ? ref.blockerType : null
-    out.push({
-      id: `resume:${record.taskId}`,
-      type: 'resume',
-      title: `「${record.taskTitle || record.taskId}」停在半路，可以续跑`,
-      evidence: [
-        { fact: `状态 ${record.status}${blockerType ? `，阻塞类型 ${blockerType}` : ''}`, ref: `task:${record.taskId}` },
-        { fact: `最后更新 ${record.updatedAt}`, ref: `task:${record.taskId}` },
-      ],
-      confidence: record.canResume === true ? 0.85 : 0.65,
-      action: { kind: 'resume_task', ref: record.taskId },
-      requiresExplicitConfirm: false,
-    })
-  }
-  return out
-}
 
 /** "有什么在等我" — pending adjudication or missing user input. */
 export function extractFollowUpCards(projections: ReadonlyArray<TaskProjectionRecord>): EmergenceCard[] {
@@ -151,18 +123,6 @@ export function extractCrystallizeCards(cards: ReadonlyArray<CrystallizeSignalCa
       })
       continue
     }
-    if (card.tag === 'aspire') {
-      out.push({
-        id: `crystallize:candidate:${card.relPath}`,
-        type: 'crystallize',
-        title: `观察到一个可沉淀的模式：${card.title}`,
-        evidence: [{ fact: `候选卡 status=${card.status}`, ref: card.relPath }],
-        confidence: 0.7,
-        action: { kind: 'adopt_candidate', ref: card.relPath },
-        requiresExplicitConfirm: true,
-      })
-      continue
-    }
     // D10-b（2026-07-04 真机实锚）：浏览器失败学习产出的 staged 站点卡
     // （新卡/旁卡/风险建议）此前在 feed 完全不可见——agent 带着已学到但
     // 未确认的知识原地重摔（site_card_user_override_skipped）。这里只投影
@@ -178,7 +138,7 @@ export function extractCrystallizeCards(cards: ReadonlyArray<CrystallizeSignalCa
           : `浏览器学到了「${card.title}」，确认后下次生效`,
         evidence: [{ fact: `staged 站点卡 source=${card.source}`, ref: card.relPath }],
         confidence: 0.7,
-        action: { kind: 'adopt_candidate', ref: card.relPath },
+        action: { kind: 'review_duplicate', ref: card.relPath },
         requiresExplicitConfirm: true,
       })
     }
@@ -191,43 +151,6 @@ const SITE_CARD_LEARNING_SOURCE_PREFIXES = ['failure-learning:', 'possible-updat
 function isSiteCardLearningSource(source: string | null): boolean {
   if (!source) return false
   return SITE_CARD_LEARNING_SOURCE_PREFIXES.some((prefix) => source.startsWith(prefix))
-}
-
-export interface AgentCandidateFeedSignal {
-  relPath: string
-  title: string
-  /** EP3-C5 candidate lifecycle stage from card frontmatter. */
-  stage: string
-  /** Dated evidence entries parsed from the card body. */
-  evidenceDates: string[]
-}
-
-/**
- * EP3-C5 — candidate → intent-feed projection: ONLY stage 'candidate' with
- * ≥3 dated evidence entries projects; reuses the crystallize explicit-
- * confirm discipline (never one-click). The action exit is the phase-3
- * placeholder — confirmation records adoption; derivation itself is the
- * phase-4 A6 flow.
- */
-export function extractAgentCandidateCards(signals: ReadonlyArray<AgentCandidateFeedSignal>): EmergenceCard[] {
-  const out: EmergenceCard[] = []
-  for (const signal of signals) {
-    if (signal.stage !== 'candidate') continue
-    if (signal.evidenceDates.length < 3) continue
-    out.push({
-      id: `crystallize:agent-candidate:${signal.relPath}`,
-      type: 'crystallize',
-      title: `最近多次出现同类请求：${signal.title}`,
-      evidence: [
-        ...signal.evidenceDates.slice(0, 3).map((date) => ({ fact: `同域请求出现于 ${date}`, ref: signal.relPath })),
-        { fact: '确认后仅记录采纳——派生流程属阶段四', ref: signal.relPath },
-      ],
-      confidence: 0.7,
-      action: { kind: 'adopt_candidate', ref: signal.relPath },
-      requiresExplicitConfirm: true,
-    })
-  }
-  return out
 }
 
 export interface PrepareCardSignal {

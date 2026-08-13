@@ -19,9 +19,7 @@ import { readWorkflowParent } from './browser-workflow-row-mapping'
 import type {
   BindBrowserWorkflowRouteInput,
   BrowserWorkflowCloseoutInspection,
-  BrowserWorkflowRouteBinding,
-  BrowserWorkflowVerifierBundle,
-  BrowserWorkflowVerifierInspection,
+  BrowserWorkflowRouteBinding, BrowserWorkflowVerifierInspection
 } from './agent-session-checkpoint-types'
 import { readVerifiedBrowserWorkflowEvidence } from '../browser-engine/browser-workflow-evidence'
 
@@ -119,6 +117,73 @@ function changed(result: unknown): number {
   return Number((result as { changes?: unknown } | null)?.changes || 0)
 }
 
+export function readWorkflowVerifierBundleFromDb(
+  db: WorkflowRawDatabase,
+  parentTaskId: string,
+): BrowserWorkflowVerifierInspection {
+  const inspection = inspectWorkflowCloseoutFromDb(db, parentTaskId)
+  if (inspection.state !== 'sealable') return { inspection, bundle: null }
+  const parent = readParent(db, parentTaskId)
+  const anchor = parent.requestAnchor
+  if (!anchor) throw new Error('browser_verifier_request_anchor_missing')
+  const source = db.prepare(
+    `SELECT id, conversation_id, role, content, timestamp
+       FROM chat_messages WHERE id = ? LIMIT 1`,
+  ).get<ChatMessageRow>(anchor.messageId)
+  if (!source || source.role !== 'user' || source.conversation_id !== parent.scopeId) {
+    throw new Error('browser_verifier_source_message_missing')
+  }
+  const sourceDigest = workflowDigest({
+    id: source.id,
+    conversationId: source.conversation_id,
+    role: source.role,
+    content: source.content,
+    timestamp: source.timestamp,
+  })
+  if (sourceDigest !== anchor.messageDigest) throw new Error('browser_verifier_source_message_drift')
+  const steering = parent.steeringReceipts
+    .slice()
+    .sort((left, right) => left.sequence - right.sequence)
+    .map((receipt) => {
+      if (!receipt.contentCheckpointId) throw new Error('browser_verifier_pending_steering')
+      const row = db.prepare(
+        `SELECT id, conversation_id, role, content, timestamp
+           FROM chat_messages WHERE id = ? LIMIT 1`,
+      ).get<ChatMessageRow>(receipt.messageId)
+      if (!row || row.role !== 'user' || row.conversation_id !== parent.scopeId) {
+        throw new Error('browser_verifier_steering_message_missing')
+      }
+      const digest = workflowDigest({
+        id: row.id,
+        conversationId: row.conversation_id,
+        role: row.role,
+        content: row.content,
+        timestamp: row.timestamp,
+      })
+      if (digest !== receipt.messageDigest) throw new Error('browser_verifier_steering_message_drift')
+      return { sequence: receipt.sequence, messageId: row.id, content: row.content, digest }
+    })
+  const child = db.prepare(
+    `SELECT id FROM browser_tasks
+      WHERE parent_task_id = ? AND kind = 'browser_workflow' LIMIT 1`,
+  ).get<{ id: string }>(parentTaskId)
+  if (!child?.id) throw new Error('browser_verifier_child_missing')
+  const requestText = [
+    anchor.canonicalMessageSnapshot.content,
+    ...steering.map((item) => `[用户补充 ${item.sequence}]\n${item.content}`),
+  ].join('\n\n')
+  return {
+    inspection,
+    bundle: {
+      requestText,
+      requestDigest: workflowDigest({ anchor, steering }),
+      browserTaskId: child.id,
+      seal: inspection.seal,
+      evidence: inspection.evidence,
+    },
+  }
+}
+
 export class AgentSessionCheckpointRouteRepository {
   constructor(
     private readonly accessor: WorkflowDatabaseAccessor,
@@ -147,67 +212,7 @@ export class AgentSessionCheckpointRouteRepository {
   readWorkflowVerifierBundle(parentTaskId: string): BrowserWorkflowVerifierInspection {
     const db = this.accessor.getRawDb()
     if (!db) throw new Error('Database not available')
-    const inspection = inspectWorkflowCloseoutFromDb(db, parentTaskId)
-    if (inspection.state !== 'sealable') return { inspection, bundle: null }
-    const parent = readParent(db, parentTaskId)
-    const anchor = parent.requestAnchor
-    if (!anchor) throw new Error('browser_verifier_request_anchor_missing')
-    const source = db.prepare(
-      `SELECT id, conversation_id, role, content, timestamp
-         FROM chat_messages WHERE id = ? LIMIT 1`,
-    ).get<ChatMessageRow>(anchor.messageId)
-    if (!source || source.role !== 'user' || source.conversation_id !== parent.scopeId) {
-      throw new Error('browser_verifier_source_message_missing')
-    }
-    const sourceDigest = workflowDigest({
-      id: source.id,
-      conversationId: source.conversation_id,
-      role: source.role,
-      content: source.content,
-      timestamp: source.timestamp,
-    })
-    if (sourceDigest !== anchor.messageDigest) throw new Error('browser_verifier_source_message_drift')
-    const steering = parent.steeringReceipts
-      .slice()
-      .sort((left, right) => left.sequence - right.sequence)
-      .map((receipt) => {
-        if (!receipt.contentCheckpointId) throw new Error('browser_verifier_pending_steering')
-        const row = db.prepare(
-          `SELECT id, conversation_id, role, content, timestamp
-             FROM chat_messages WHERE id = ? LIMIT 1`,
-        ).get<ChatMessageRow>(receipt.messageId)
-        if (!row || row.role !== 'user' || row.conversation_id !== parent.scopeId) {
-          throw new Error('browser_verifier_steering_message_missing')
-        }
-        const digest = workflowDigest({
-          id: row.id,
-          conversationId: row.conversation_id,
-          role: row.role,
-          content: row.content,
-          timestamp: row.timestamp,
-        })
-        if (digest !== receipt.messageDigest) throw new Error('browser_verifier_steering_message_drift')
-        return { sequence: receipt.sequence, messageId: row.id, content: row.content, digest }
-      })
-    const child = db.prepare(
-      `SELECT id, revision, status, payload_json, checkpoint_json, result_json,
-              progress_total, progress_completed, progress_failed, current_label, error
-         FROM browser_tasks
-        WHERE parent_task_id = ? AND kind = 'browser_workflow' LIMIT 1`,
-    ).get<Record<string, unknown>>(parentTaskId)
-    if (!child || typeof child.id !== 'string') throw new Error('browser_verifier_child_missing')
-    const requestText = [
-      anchor.canonicalMessageSnapshot.content,
-      ...steering.map((item) => `[用户补充 ${item.sequence}]\n${item.content}`),
-    ].join('\n\n')
-    const bundle: BrowserWorkflowVerifierBundle = {
-      requestText,
-      requestDigest: workflowDigest({ anchor, steering }),
-      browserTaskId: child.id,
-      seal: inspection.seal,
-      evidence: inspection.evidence,
-    }
-    return { inspection, bundle }
+    return readWorkflowVerifierBundleFromDb(db, parentTaskId)
   }
 
   async bindBrowserWorkflowRoute(

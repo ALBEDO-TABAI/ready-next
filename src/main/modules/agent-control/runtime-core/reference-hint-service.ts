@@ -91,6 +91,7 @@ export class ReferenceHintService {
 
   maybeArmReferenceHintFromCapsules(
     scopeId: string,
+    messageVisibilityEpoch: number,
     capsules: Array<{
       summary?: string | null
       latestTaskTitle?: string | null
@@ -113,7 +114,11 @@ export class ReferenceHintService {
         listSkills: () => getSkillsRuntimeManager().listSkills(),
       })
       if (!recovered) return
-      rememberLastReferenceSkill(scopeId, { id: recovered.skillId, name: recovered.skillName })
+      rememberLastReferenceSkill(scopeId, {
+        id: recovered.skillId,
+        name: recovered.skillName,
+        messageVisibilityEpoch,
+      })
       logAgentMetric('skill_reference_hint_recovered_from_capsule', {
         scopeId,
         skillId: recovered.skillId,
@@ -124,17 +129,25 @@ export class ReferenceHintService {
     }
   }
 
-  persistReferenceHintToScope(scopeId: string): void {
+  persistReferenceHintToScope(
+    scopeId: string,
+    expectedMessageVisibilityEpoch: number,
+  ): void {
     try {
       const hint = snapshotLastReferenceSkill(scopeId)
       const scopeRow = this.deps.db.getConversationScope(scopeId)
       if (!scopeRow) return
+      if ((scopeRow.message_visibility_epoch ?? 0) !== expectedMessageVisibilityEpoch) return
       const scope = this.deps.mapConversationRow(scopeRow)
       const meta = this.parseScopeMeta(scope)
       if (!hint) {
         if ('lastReferenceSkill' in meta) {
           delete meta['lastReferenceSkill']
-          this.deps.db.updateConversationScopeMeta(scopeId, meta)
+          this.deps.db.updateConversationScopeMeta(
+            scopeId,
+            meta,
+            expectedMessageVisibilityEpoch,
+          )
         }
         return
       }
@@ -149,7 +162,11 @@ export class ReferenceHintService {
         return
       }
       meta['lastReferenceSkill'] = hint
-      this.deps.db.updateConversationScopeMeta(scopeId, meta)
+      this.deps.db.updateConversationScopeMeta(
+        scopeId,
+        meta,
+        expectedMessageVisibilityEpoch,
+      )
     } catch (error) {
       console.warn('[AgentControlRuntime] persistReferenceHintToScope failed', error)
     }

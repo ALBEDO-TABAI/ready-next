@@ -144,7 +144,23 @@ function observationCoversGap(
   if (String(receipt.ownerRunId || '') !== ownerRunId) return false
   const outcomeIdentity = asPlainRecord(gap.outcome.identity)
   const successorIdentity = asPlainRecord(gap.outcome.successorIdentity)
-  if (!outcomeIdentity || !isCompleteBrowserIdentity(successorIdentity)) return false
+  const sameFallbackIdentity = (left: Record<string, unknown> | null, right: Record<string, unknown> | null): boolean =>
+    Boolean(
+      left
+      && right
+      && left.documentState === right.documentState
+      && left.tabId === right.tabId
+      && left.physicalTargetToken === right.physicalTargetToken
+      && left.frameId === right.frameId
+      && left.frameDocumentToken === right.frameDocumentToken
+      && left.targetRef === right.targetRef,
+    )
+  const deferredTabId = gap.operationId === 'tabs_open'
+    && sameFallbackIdentity(outcomeIdentity, successorIdentity)
+    && typeof gap.outcome.postActionTabId === 'string'
+    ? gap.outcome.postActionTabId
+    : null
+  if (!outcomeIdentity || (!isCompleteBrowserIdentity(successorIdentity) && !deferredTabId)) return false
   const predecessorCompatible = (candidate: unknown): boolean =>
     browserDocumentIdentityCompatible(candidate, outcomeIdentity)
     || (
@@ -153,19 +169,31 @@ function observationCoversGap(
       && isNoDocumentBrowserIdentity(outcomeIdentity)
     )
   const causalActions = Array.isArray(receipt.causalActions) ? receipt.causalActions : []
-  const linked = causalActions.some((value) => {
-    const action = asPlainRecord(value)
+  const linked = causalActions.map(asPlainRecord).find((action) => {
+    const actionSuccessor = asPlainRecord(action?.successorIdentity)
+    const successorCompatible = deferredTabId
+      ? Boolean(
+          deferredTabId
+          && isCompleteBrowserIdentity(actionSuccessor)
+          && actionSuccessor.tabId === deferredTabId,
+        )
+      : isCompleteBrowserIdentity(successorIdentity)
+        && browserDocumentIdentityCompatible(actionSuccessor, successorIdentity)
     return Boolean(
       action
       && action.actionId === gap.actionId
       && Math.floor(Number(action.actionSeq || 0)) === gap.actionSeq
       && predecessorCompatible(action.predecessorIdentity)
-      && browserDocumentIdentityCompatible(action.successorIdentity, successorIdentity)
+      && successorCompatible
     )
   })
-  return linked
+  const linkedSuccessor = asPlainRecord(linked?.successorIdentity)
+  return Boolean(
+    linked
+    && isCompleteBrowserIdentity(linkedSuccessor)
     && isCompleteBrowserIdentity(receipt.identity)
-    && browserDocumentIdentityCompatible(receipt.identity, successorIdentity)
+    && browserDocumentIdentityCompatible(receipt.identity, linkedSuccessor),
+  )
 }
 
 function outcomeRequiresObservation(outcome: Record<string, unknown>): boolean {

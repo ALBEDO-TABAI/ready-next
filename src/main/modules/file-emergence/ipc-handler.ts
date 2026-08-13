@@ -30,6 +30,7 @@ import { getSearchEngine } from '../search-engine/ipc-handler'
 import { FileEmergenceService, isFileEmergenceEnabled } from './service'
 import type { ChatPort, FileProjectIdentityPort, RecentConversation, StructuralProjectHintPort } from './types'
 import { createDocumentMetadataPort } from './document-metadata-port'
+import { listCurrentVisibleTaskProjections } from './current-visible-task-projections'
 
 interface IPCResponse<T = void> {
   success: boolean
@@ -370,9 +371,9 @@ function createAttentionPort(rawDb: DatabaseConnection): import('./types').Atten
     },
     activeIntentFileKeys: (now) => {
       const terminal=new Set(['completed','failed','cancelled','canceled','done'])
-      const tasks=rawDb.prepare(`SELECT task_id AS taskId,status,expected_outputs_json AS outputs,recent_artifacts_json AS artifacts,updated_at AS updatedAt FROM task_projections ORDER BY updated_at DESC LIMIT 200`).all<{taskId:string;status:string;outputs:string|null;artifacts:string|null;updatedAt:string}>()
+      const tasks=listCurrentVisibleTaskProjections(rawDb,200)
       for(const task of tasks){
-        const paths=uniqueWorkspacePaths([...pathsFromJson(task.outputs),...pathsFromJson(task.artifacts)], rootsForKnownFiles(rawDb))
+        const paths=uniqueWorkspacePaths([...pathsFromJson(task.expectedOutputs),...pathsFromJson(task.recentArtifacts)], rootsForKnownFiles(rawDb))
         const files=paths.flatMap((path)=>rawDb.prepare(`SELECT f.file_key AS fileKey,m.project_key AS projectKey FROM file_identities f JOIN project_identity_members m ON m.file_key=f.file_key WHERE f.current_path=?`).all<{fileKey:string;projectKey:string}>(path))
         for(const projectKey of new Set(files.map((file)=>file.projectKey))){
           const intentId=`task:${task.taskId}:${projectKey}`;const fileKeys=files.filter((file)=>file.projectKey===projectKey).map((file)=>file.fileKey)
@@ -396,13 +397,8 @@ function createStructuralHintPort(rawDb: DatabaseConnection): StructuralProjectH
   return {
     listHints(workspaceRoots) {
       const hints: ReturnType<StructuralProjectHintPort['listHints']> = []
-      const tasks = rawDb.prepare(`
-        SELECT task_title AS title, expected_outputs_json AS expectedOutputs,
-               recent_artifacts_json AS recentArtifacts, updated_at AS updatedAt
-        FROM task_projections
-        WHERE task_title IS NOT NULL
-        ORDER BY updated_at DESC LIMIT 100
-      `).all<{ title: string; expectedOutputs: string | null; recentArtifacts: string | null; updatedAt: string }>()
+      const tasks = listCurrentVisibleTaskProjections(rawDb,100)
+        .filter((task): task is typeof task & { title: string } => task.title !== null)
       for (const task of tasks) {
         const paths = uniqueWorkspacePaths([
           ...pathsFromJson(task.expectedOutputs),
@@ -416,10 +412,14 @@ function createStructuralHintPort(rawDb: DatabaseConnection): StructuralProjectH
         })
       }
       const attachments = rawDb.prepare(`
-        SELECT name, path, created_at AS createdAt
-        FROM session_recall_attachment_index
-        WHERE path IS NOT NULL AND path <> ''
-        ORDER BY created_at DESC LIMIT 200
+        SELECT attachment.name, attachment.path, attachment.created_at AS createdAt
+        FROM session_recall_attachment_index attachment
+        JOIN chat_messages message ON message.id = attachment.source_message_id
+        JOIN chat_conversations scope ON scope.id = message.conversation_id
+        WHERE attachment.path IS NOT NULL AND attachment.path <> ''
+          AND scope.closed_at IS NULL
+          AND message.message_visibility_epoch = scope.message_visibility_epoch
+        ORDER BY attachment.created_at DESC LIMIT 200
       `).all<{ name: string; path: string; createdAt: string }>()
       for (const attachment of attachments) {
         const paths = uniqueWorkspacePaths([attachment.path], workspaceRoots)

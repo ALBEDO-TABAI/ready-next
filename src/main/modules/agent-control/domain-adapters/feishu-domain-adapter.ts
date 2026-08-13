@@ -21,6 +21,7 @@ interface FeishuAdapterState {
   taskSummary: string | null
   currentStepId: string | null
   dispatchedAt: string | null
+  failureReason: string | null
 }
 
 function createState(domainState: unknown): FeishuAdapterState {
@@ -36,6 +37,7 @@ function createState(domainState: unknown): FeishuAdapterState {
       taskSummary: record.taskSummary ?? null,
       currentStepId: record.currentStepId ?? null,
       dispatchedAt: record.dispatchedAt ?? null,
+      failureReason: record.failureReason ?? null,
     }
   }
   return {
@@ -43,6 +45,7 @@ function createState(domainState: unknown): FeishuAdapterState {
     taskSummary: null,
     currentStepId: null,
     dispatchedAt: null,
+    failureReason: null,
   }
 }
 
@@ -63,6 +66,18 @@ function buildSummary(record: Record<string, unknown> | null, toolName: string, 
     .map((key) => input[key])
     .find((value) => typeof value === 'string' && value.trim().length > 0)
   return typeof target === 'string' ? `${action}（${target.trim()}）：${message}` : `${action}：${message}`
+}
+
+function readFailureReason(record: Record<string, unknown> | null): string | null {
+  const failed = record?.ok === false || (typeof record?.errorKind === 'string' && record.errorKind.trim().length > 0)
+  if (!failed) return null
+  const errorKind = typeof record?.errorKind === 'string' && record.errorKind.trim()
+    ? record.errorKind.trim()
+    : 'feishu_operation_failed'
+  const message = typeof record?.message === 'string' && record.message.trim()
+    ? record.message.trim()
+    : '飞书操作失败'
+  return `${errorKind}: ${message}`
 }
 
 export class FeishuDomainAdapter implements DomainAdapter {
@@ -164,6 +179,7 @@ export class FeishuDomainAdapter implements DomainAdapter {
       for (const executedTool of params.toolBatch?.executedTools || []) {
         if (!executedTool.name.startsWith('feishu_')) continue
         const record = readStructuredToolResultRecord(executedTool.result)
+        const failureReason = readFailureReason(record)
         const stepId = buildStepId(nextState.steps, executedTool.name)
         nextState = {
           steps: [
@@ -171,7 +187,7 @@ export class FeishuDomainAdapter implements DomainAdapter {
             {
               id: stepId,
               title: executedTool.name,
-              status: 'done',
+              status: failureReason ? 'error' : 'done',
               detail: buildSummary(record, executedTool.name, executedTool.input),
               updatedAt: new Date().toISOString(),
             },
@@ -179,12 +195,25 @@ export class FeishuDomainAdapter implements DomainAdapter {
           currentStepId: stepId,
           taskSummary: buildSummary(record, executedTool.name, executedTool.input),
           dispatchedAt: nextState.dispatchedAt,
+          failureReason: nextState.failureReason || failureReason,
         }
       }
       return { domainState: nextState }
     }
 
     if (params.phase === 'no_tool_call' && state.currentStepId) {
+      if (state.failureReason) {
+        return {
+          domainState: state,
+          projection: {
+            phase: 'blocked',
+            summary: state.taskSummary || '飞书任务执行失败',
+            waitingFor: 'none',
+            resumableActions: ['retry', 'cancel'],
+            blockedReason: state.failureReason,
+          },
+        }
+      }
       return {
         domainState: state,
         projection: {

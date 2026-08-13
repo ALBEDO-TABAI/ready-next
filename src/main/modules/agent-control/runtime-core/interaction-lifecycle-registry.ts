@@ -1,5 +1,7 @@
 export type InteractionDisposition = 'resume_with_result' | 'checkpoint' | 'terminate'
 
+export const __breaksInvariants = ['interaction lifecycle singleton state'] as const
+
 export interface InteractionLifecycleIdentity {
   interactionId: string
   runId: string
@@ -23,8 +25,11 @@ function runKey(input: Pick<InteractionLifecycleIdentity, 'runId' | 'agentId' | 
   return `${input.agentId}\u0000${input.scopeId}\u0000${input.runId}`
 }
 
+const TERMINAL_INTERACTION_TOMBSTONE_LIMIT = 2_048
+
 export class InteractionLifecycleRegistry {
   private readonly records = new Map<string, InteractionRecord>()
+  private readonly terminalInteractionIds = new Set<string>()
   private readonly listeners = new Set<(event: InteractionLifecycleEvent) => void>()
 
   subscribe(listener: (event: InteractionLifecycleEvent) => void): () => void {
@@ -42,7 +47,13 @@ export class InteractionLifecycleRegistry {
       phase,
       pendingCount: this.pendingCount(record),
     }
-    for (const listener of this.listeners) listener(event)
+    for (const listener of this.listeners) {
+      try {
+        listener(event)
+      } catch (error) {
+        console.error('[InteractionLifecycleRegistry] listener failed:', error)
+      }
+    }
   }
 
   register(input: InteractionLifecycleIdentity & {
@@ -50,10 +61,9 @@ export class InteractionLifecycleRegistry {
     timeoutDisposition?: InteractionDisposition
   }): boolean {
     if (!input.interactionId || !input.runId || !input.agentId || !input.scopeId) return false
-    if (this.records.has(input.interactionId)) return false
+    if (this.records.has(input.interactionId) || this.terminalInteractionIds.has(input.interactionId)) return false
     const record: InteractionRecord = { ...input, state: 'pending', disposition: null, timeoutHandle: null }
     this.records.set(input.interactionId, record)
-    this.emit(record, 'suspended')
     if (Number.isFinite(input.timeoutMs) && Number(input.timeoutMs) > 0) {
       record.timeoutHandle = setTimeout(() => {
         this.settle({
@@ -66,6 +76,7 @@ export class InteractionLifecycleRegistry {
       }, Number(input.timeoutMs))
       record.timeoutHandle.unref?.()
     }
+    this.emit(record, 'suspended')
     return true
   }
 
@@ -90,22 +101,43 @@ export class InteractionLifecycleRegistry {
     record.disposition = input.disposition
 
     if (input.disposition === 'terminate' || input.disposition === 'checkpoint') {
-      for (const candidate of this.records.values()) {
+      for (const candidate of [...this.records.values()]) {
         if (candidate.state === 'pending' && runKey(candidate) === runKey(record)) {
           if (candidate.timeoutHandle) clearTimeout(candidate.timeoutHandle)
           candidate.timeoutHandle = null
           candidate.state = 'cancelled'
+          this.retire(candidate)
         }
       }
+      this.retire(record)
       this.emit(record, input.disposition === 'terminate' ? 'terminated' : 'checkpointed')
       return true
     }
+    this.retire(record)
     if (this.pendingCount(record) === 0) this.emit(record, 'resumed')
     return true
   }
 
   hasPending(input: { runId: string; agentId: string; scopeId: string }): boolean {
     return this.pendingCount(input) > 0
+  }
+
+  cancelScope(scopeId: string): number {
+    const normalizedScopeId = String(scopeId || '').trim()
+    if (!normalizedScopeId) return 0
+    const representatives = new Map<string, InteractionRecord>()
+    let cancelled = 0
+    for (const record of [...this.records.values()]) {
+      if (record.scopeId !== normalizedScopeId || record.state !== 'pending') continue
+      if (record.timeoutHandle) clearTimeout(record.timeoutHandle)
+      record.timeoutHandle = null
+      record.state = 'cancelled'
+      representatives.set(runKey(record), record)
+      this.retire(record)
+      cancelled += 1
+    }
+    for (const record of representatives.values()) this.emit(record, 'terminated')
+    return cancelled
   }
 
   private pendingCount(input: { runId: string; agentId: string; scopeId: string }): number {
@@ -117,11 +149,21 @@ export class InteractionLifecycleRegistry {
     return count
   }
 
+  private retire(record: InteractionRecord): void {
+    this.records.delete(record.interactionId)
+    if (this.terminalInteractionIds.size >= TERMINAL_INTERACTION_TOMBSTONE_LIMIT) {
+      const oldest = this.terminalInteractionIds.values().next().value
+      if (typeof oldest === 'string') this.terminalInteractionIds.delete(oldest)
+    }
+    this.terminalInteractionIds.add(record.interactionId)
+  }
+
   clear(): void {
     for (const record of this.records.values()) {
       if (record.timeoutHandle) clearTimeout(record.timeoutHandle)
     }
     this.records.clear()
+    this.terminalInteractionIds.clear()
   }
 }
 

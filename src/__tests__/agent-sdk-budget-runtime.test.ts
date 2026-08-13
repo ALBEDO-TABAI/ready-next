@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import test from 'node:test'
+import test, { after, before } from 'node:test'
 
 import {
   AgentSdkRuntime,
@@ -11,9 +11,17 @@ import {
 import { createTaskBudgetRuntime } from '../main/modules/agent-control/task-projection/run-budget-policy'
 import { createToolExecutionOutput } from '../main/modules/agent-control/tools-runtime/tool-result-types'
 import type { ToolDefinition } from '../main/modules/agent-control/tools-runtime/tool-definition'
+import { __setScopeContextEpochDatabaseForTests } from '../main/modules/agent-control/session/scope-context-epoch'
 
 import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
 import { canonicalCoreCloseoutTestPort } from './helpers/canonical-core-closeout-test-port'
+
+before(() => {
+  __setScopeContextEpochDatabaseForTests({
+    getRawDb: () => ({ prepare: () => ({ get: () => undefined }) }) as never,
+  })
+})
+after(() => __setScopeContextEpochDatabaseForTests(null))
 
 test('agent-sdk-budget-runtime declares transitive sqlite ABI guard', (t) => {
   skipIfSqliteUnavailable(t, 'agent-sdk-budget-runtime transitive sqlite load')

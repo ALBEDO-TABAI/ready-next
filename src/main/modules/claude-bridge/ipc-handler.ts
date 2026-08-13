@@ -1,5 +1,5 @@
 import { emitRunTimelineEvent } from './run-timeline-emitter'
-import { ipcMain, BrowserWindow, dialog } from 'electron'
+import { app, ipcMain, BrowserWindow, dialog } from 'electron'
 import { AgentManager } from './agent-manager'
 // The Codex send payload is owned by the shared IPC contract and registered
 // through `agentLifecycleGroup`.
@@ -39,7 +39,6 @@ import { registerSkillReferenceInlinedEmitter } from '../agent-control/skills/sk
 import { getEphemeralExecutionStore } from '../tools/skill-primitives/ephemeral-execution-store'
 import {
   getAskUserQuestionsStore,
-  type AskUserQuestionSpec,
 } from '../tools/builtins/ask-user-questions-store'
 import { getDatabase } from '../database'
 import { getSkillsRuntimeManager } from '../skills-runtime/runtime-manager'
@@ -47,21 +46,19 @@ import { cancelChildRunForIpc, listActiveChildRunsForIpc } from './active-child-
 import { askUserGroup } from './ipc/ask-user-group'
 import { toolEventGroup } from './ipc/tool-event-group'
 import { agentLifecycleGroup } from './ipc/agent-lifecycle-group'
-import { createE2UnavailableCodexRuntimeComposition } from '../agent-control/codex-runtime/codex-runtime-composition'
+import { createCodexRuntimeComposition } from '../agent-control/codex-runtime/codex-runtime-composition'
 import { agentRuntimeGroup } from './ipc/agent-runtime-group'
 import { mcpGroup, runMcpBoot } from './ipc/mcp-group'
 import { agentRegistryGroup } from './ipc/agent-registry-group'
-import { agentDerivationGroup } from './ipc/agent-derivation-group'
 import { agentSystemStudioGroup } from './ipc/agent-system-studio-group'
 import { agentSpecialistBlueprintGroup } from './ipc/agent-specialist-blueprint-group'
-import { sessionPrerouteGroup } from './ipc/session-preroute-group'
 import { beliefCardGroup } from './ipc/belief-card-group'
 import { runQualityGroup } from './ipc/run-quality-group'
 import { runFeedbackGroup } from './ipc/run-feedback-group'
 import { RunFeedbackRepository } from '../agent-control/task-projection/run-feedback-repository'
+import { AppSettingsRepository } from '../repositories/app-settings-repository'
 import { emergenceFeedGroup } from './ipc/emergence-feed-group'
 import { getFileEmergenceIntentCardsForFeed } from '../file-emergence/ipc-handler'
-import { listDerivationCandidates } from './ipc/agent-derivation-group'
 import { conversationGroup } from './ipc/conversation-group'
 import { taskProjectionGroup } from './ipc/task-projection-group'
 import { recallGroup } from './ipc/recall-group'
@@ -69,20 +66,13 @@ import { detachedTaskGroup } from './ipc/detached-task-group'
 import { runControlGroup } from './ipc/run-control-group'
 import { telemetryGroup } from './ipc/telemetry-group'
 import { channelManagementGroup } from './ipc/channel-management-group'
-import { scheduleGroup } from './ipc/schedule-group'
 import { chatPersistenceGroup } from './ipc/chat-persistence-group'
 import { memoryGroup } from './ipc/memory-group'
 import { triggerGroup } from './ipc/trigger-group'
 import type { IpcDisposeHandle } from './ipc/types'
-import {
-  getSpecialistBlueprintConfirmationStore,
-  getSpecialistBlueprintStore,
-} from '../agent-control/agents/specialist-blueprint-runtime'
+import { getSpecialistBlueprintStore } from '../agent-control/agents/specialist-blueprint-runtime'
 import { getSpecialistContentEditProposalStore } from '../agent-control/agents/specialist-content-edit-runtime'
-import { resolveSpecialistFoundationSemanticJudge } from '../agent-control/agents/specialist-foundation-semantic-judge-provider'
 import { logAgentMetric } from '../agent-control/metrics'
-import { KNOWLEDGE_SYSTEM_SETTING_KEY, isKnowledgeSystemEnabled } from '../agent-control/knowledge/knowledge-truth-source'
-import { getLastMaintenanceRoundStatus } from '../agent-control/maintenance/maintenance-llm-round'
 import { isRendererAgentMetricName } from '../../../shared/renderer-agent-metrics'
 // Stage V V2.1c — `SendScopedUserMessage` import retired: the only call
 // site (the `agent:sendScoped` payload type) moved into `agentLifecycleGroup`.
@@ -91,6 +81,16 @@ import type { IngressAdmittedEvent } from '../../../shared/ipc-contracts/agent-r
 import type { TaskProjectionChangeEvent } from '../agent-control/contracts/run-contracts'
 import { getDocumentWorker } from '../document-engine/document-worker-bridge'
 import { readHeavyDocumentAttachmentForAI } from './document-attachment-text'
+import { RuntimeStartupSlot } from './runtime-startup-slot'
+import {
+  beginAgentRuntimeRegistration,
+  markAgentRuntimeUnavailable,
+  publishAgentRuntimeReady,
+} from './agent-runtime-readiness'
+import { RendererToolActionBridge } from './ipc/renderer-tool-action-bridge'
+import type { ChatGptOAuthService } from '../settings-engine/chatgpt-oauth-service'
+import { createCodexProviderReadinessPort } from '../agent-control/codex-runtime/codex-provider-readiness'
+import { persistAskUserQuestionsCardPending } from './ask-user-questions-card-persistence'
 
 const directChatLogger = createRotatingLogger('ready-directchat.log', { buffered: true })
 function log(msg: string) {
@@ -132,7 +132,9 @@ export interface IPCResponse<T = unknown> {
 }
 
 let runtime: AgentControlRuntime | null = null
+let startingRuntime: RuntimeStartupSlot<AgentControlRuntime> | null = null
 const chatRepository = new ChatRepository()
+const rendererToolActionBridge = new RendererToolActionBridge()
 
 /**
  * Stage O — module-scoped slot holding the unsubscribe function returned
@@ -200,17 +202,11 @@ let agentRuntimeGroupDispose: IpcDisposeHandle | null = null
 /** EP4-A7 — dispose handle for agent registry lifecycle channels. */
 let agentRegistryGroupDispose: IpcDisposeHandle | null = null
 
-/** EP4-A6b — dispose handle for candidate-to-agent derivation channels. */
-let agentDerivationGroupDispose: IpcDisposeHandle | null = null
-
 /** P8a/P8b — dispose handle for read-only Agent System Studio snapshot. */
 let agentSystemStudioGroupDispose: IpcDisposeHandle | null = null
 
 /** P8c/P8f — dispose handle for specialist blueprint draft/admission channels. */
 let agentSpecialistBlueprintGroupDispose: IpcDisposeHandle | null = null
-
-/** EP4-A5 — dispose handle for the session preroute evaluate channel. */
-let sessionPrerouteGroupDispose: IpcDisposeHandle | null = null
 
 /** EP4 settings surface — belief-card truth-source review/confirmation. */
 let beliefCardGroupDispose: IpcDisposeHandle | null = null
@@ -256,8 +252,8 @@ let recallGroupDispose: IpcDisposeHandle | null = null
 
 /**
  * Stage V V2.1h — dispose handle returned by `detachedTaskGroup.register`.
- * Owns the 4 detached-skill task channels (`agent:startDetachedSkillAction`,
- * `agent:inspectDetachedSkillTask`, `agent:listDetachedSkillTasks`,
+ * Owns the 3 detached-skill task channels (`agent:inspectDetachedSkillTask`,
+ * `agent:listDetachedSkillTasks`,
  * `agent:cancelDetachedSkillTask`). Same lifecycle pattern as the other group
  * dispose slots: register on `setupAgentIPC`, dispose on dev-reload re-entry,
  * dispose on `cleanupAgentRuntime` shutdown.
@@ -266,9 +262,8 @@ let detachedTaskGroupDispose: IpcDisposeHandle | null = null
 
 /**
  * Stage V V2.1i — dispose handle returned by `runControlGroup.register`.
- * Owns the 5 run-control channels (`agent:listActiveChildRuns`,
- * `agent:cancelChildRun`, `agent:suspendRun`, `agent:resumeRun`,
- * `agent:respondToInteraction`). Same lifecycle pattern as the other group
+ * Owns the supported run-control channels (`agent:listActiveChildRuns`,
+ * `agent:cancelChildRun`, `agent:reportInfrastructureTimeout`). Same lifecycle pattern as the other group
  * dispose slots: register on `setupAgentIPC`, dispose on dev-reload re-entry,
  * dispose on `cleanupAgentRuntime` shutdown.
  */
@@ -293,17 +288,6 @@ let telemetryGroupDispose: IpcDisposeHandle | null = null
  * dev-reload re-entry, dispose on `cleanupAgentRuntime` shutdown.
  */
 let channelManagementGroupDispose: IpcDisposeHandle | null = null
-
-/**
- * Dispose handle returned by `scheduleGroup.register`.
- * Owns the structured `scheduledTasks:*` read, mutation, preview, history,
- * and manual-run channels.
- * Same lifecycle pattern as the other group dispose slots: register on
- * `setupAgentIPC`, dispose on dev-reload re-entry, dispose on
- * `cleanupAgentRuntime` shutdown.
- */
-let scheduleGroupDispose: IpcDisposeHandle | null = null
-let scheduledTaskChangedOff: (() => void) | null = null
 
 /**
  * Stage V V2.1m — dispose handle returned by `chatPersistenceGroup.register`.
@@ -364,53 +348,9 @@ function cleanupSkillSessionState(sessionId?: string, reason = 'Skill session st
   getAskUserQuestionsStore().clear()
 }
 
-interface PersistAskUserQuestionsCardArgs {
-  cardId: string
-  sessionId: string | null
-  conversationId: string | null
-  scopeId?: string | null
-  requestId?: string | null
-  responsePolicy?: 'local_or_remote' | 'local_renderer_only'
-  questions: AskUserQuestionSpec[]
-  askedAt: number
-}
-
-/**
- * Persist a card row in `chat_messages` with status='pending'. Runs BEFORE
- * the IPC push so renderer hydrate (`agent:askUserQuestions:listPending`)
- * can never observe a card in IPC that DB hasn't seen yet.
- *
- * Returns the chat_messages row id (= cardId, by design — the cardId IS the
- * message id so submit / cancel / boot-sweep can target it without a join).
- */
-function persistAskUserQuestionsCardPending(args: PersistAskUserQuestionsCardArgs): void {
-  const conversationId = args.conversationId || args.sessionId || ''
-  if (!conversationId) {
-    throw new Error('ask_user_questions persist requires a conversationId or sessionId')
-  }
-  const askedAt = new Date(args.askedAt).toISOString()
-  const summary = `等待用户回答 ${args.questions.length} 个问题`
-  getDatabase().addChatMessage(
-    args.cardId,
-    conversationId,
-    'agent_card',
-    summary,
-    askedAt,
-    {
-      askUserQuestions: {
-        cardId: args.cardId,
-        status: 'pending',
-        questions: args.questions,
-        askedAt: args.askedAt,
-        scopeId: args.scopeId || null,
-        requestId: args.requestId || null,
-        responsePolicy: args.responsePolicy || 'local_or_remote',
-      },
-    },
-  )
-}
-
 export async function cleanupAgentRuntime(): Promise<void> {
+  markAgentRuntimeUnavailable()
+  rendererToolActionBridge.cancelAll('agent_runtime_cleanup')
   // Stage O — drop the projection-change subscription BEFORE stopping the
   // runtime so any trailing emit during stop() doesn't reach a destroyed
   // mainWindow. Idempotent: the slot is null on first call.
@@ -450,10 +390,6 @@ export async function cleanupAgentRuntime(): Promise<void> {
     try { agentRegistryGroupDispose.dispose() } catch { /* ignore */ }
     agentRegistryGroupDispose = null
   }
-  if (agentDerivationGroupDispose) {
-    try { agentDerivationGroupDispose.dispose() } catch { /* ignore */ }
-    agentDerivationGroupDispose = null
-  }
   if (agentSystemStudioGroupDispose) {
     try { agentSystemStudioGroupDispose.dispose() } catch { /* ignore */ }
     agentSystemStudioGroupDispose = null
@@ -461,11 +397,6 @@ export async function cleanupAgentRuntime(): Promise<void> {
   if (agentSpecialistBlueprintGroupDispose) {
     try { agentSpecialistBlueprintGroupDispose.dispose() } catch { /* ignore */ }
     agentSpecialistBlueprintGroupDispose = null
-  }
-  // EP4-A5 — symmetric release of the session preroute evaluate channel.
-  if (sessionPrerouteGroupDispose) {
-    try { sessionPrerouteGroupDispose.dispose() } catch { /* ignore */ }
-    sessionPrerouteGroupDispose = null
   }
   if (beliefCardGroupDispose) {
     try { beliefCardGroupDispose.dispose() } catch { /* ignore */ }
@@ -507,16 +438,14 @@ export async function cleanupAgentRuntime(): Promise<void> {
     try { recallGroupDispose.dispose() } catch { /* ignore */ }
     recallGroupDispose = null
   }
-  // Stage V V2.1h — symmetric release of the 4 detached-skill task channel
-  // handlers (startDetachedSkillAction / inspectDetachedSkillTask /
+  // Stage V V2.1h — symmetric release of the 3 detached-skill task channel
+  // handlers (inspectDetachedSkillTask /
   // listDetachedSkillTasks / cancelDetachedSkillTask).
   if (detachedTaskGroupDispose) {
     try { detachedTaskGroupDispose.dispose() } catch { /* ignore */ }
     detachedTaskGroupDispose = null
   }
-  // Stage V V2.1i — symmetric release of the 5 run-control channel handlers
-  // (listActiveChildRuns / cancelChildRun / suspendRun / resumeRun /
-  // respondToInteraction).
+  // Symmetric release of the supported run-control channel handlers.
   if (runControlGroupDispose) {
     try { runControlGroupDispose.dispose() } catch { /* ignore */ }
     runControlGroupDispose = null
@@ -534,15 +463,6 @@ export async function cleanupAgentRuntime(): Promise<void> {
   if (channelManagementGroupDispose) {
     try { channelManagementGroupDispose.dispose() } catch { /* ignore */ }
     channelManagementGroupDispose = null
-  }
-  // Symmetric release of the structured scheduled-task handlers.
-  if (scheduleGroupDispose) {
-    try { scheduleGroupDispose.dispose() } catch { /* ignore */ }
-    scheduleGroupDispose = null
-  }
-  if (scheduledTaskChangedOff) {
-    scheduledTaskChangedOff()
-    scheduledTaskChangedOff = null
   }
   // Stage V V2.1m — symmetric release of the 8 chat-persistence +
   // file-picker channel handlers (getConversations / getMessages /
@@ -567,9 +487,15 @@ export async function cleanupAgentRuntime(): Promise<void> {
     try { triggerGroupDispose.dispose() } catch { /* ignore */ }
     triggerGroupDispose = null
   }
+  const startup = startingRuntime
+  if (startup) {
+    await startup.cancelAndDrain()
+    if (startingRuntime === startup) startingRuntime = null
+  }
   if (runtime) {
-    await runtime.stop()
-    runtime = null
+    const active = runtime
+    await active.stop()
+    if (runtime === active) runtime = null
   }
   cleanupSkillSessionState(undefined, 'Agent runtime shut down')
   // RE-AUDIT FIX 5.4 — release the reference-skill hint emitter so its
@@ -579,18 +505,45 @@ export async function cleanupAgentRuntime(): Promise<void> {
   registerSkillReferenceInlinedEmitter(null)
 }
 
-export async function reconcileAgentSchedulesOnResume(): Promise<void> {
-  await runtime?.reconcileScheduledTasks('resume')
-}
-
-export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWindow, browserController?: BrowserController): void {
+export async function setupAgentIPC(
+  agentManager: AgentManager,
+  mainWindow: BrowserWindow,
+  browserController?: BrowserController,
+  chatGptOAuthService?: ChatGptOAuthService,
+): Promise<void> {
+  beginAgentRuntimeRegistration()
+  rendererToolActionBridge.bindTarget(mainWindow.webContents)
   if (!runtime) {
-    runtime = new AgentControlRuntime(
+    if (startingRuntime) {
+      await startingRuntime.startPromise
+      if (!runtime) throw new Error('agent_runtime_start_cancelled')
+    }
+  }
+  if (!runtime) {
+    if (!chatGptOAuthService) throw new Error('chatgpt_oauth_readiness_unbound')
+    const candidate = new AgentControlRuntime(
       agentManager,
       browserController,
-      createE2UnavailableCodexRuntimeComposition(),
+      createCodexRuntimeComposition({
+        appPath: app.getAppPath(),
+        resourcesPath: process.resourcesPath,
+        userDataPath: app.getPath('userData'),
+        isPackaged: app.isPackaged,
+        database: getDatabase(),
+        settings: new AppSettingsRepository(),
+        requestRendererToolAction: (payload) => rendererToolActionBridge.request(payload),
+        providerReadiness: createCodexProviderReadinessPort(chatGptOAuthService),
+      }),
     )
-    void runtime.start()
+    const startup = new RuntimeStartupSlot(candidate)
+    startingRuntime = startup
+    try {
+      const started = await startup.promote()
+      if (startingRuntime !== startup) throw new Error('agent_runtime_start_cancelled')
+      runtime = started
+    } finally {
+      if (startingRuntime === startup) startingRuntime = null
+    }
     // Phase 1.3 — kick off the Python venv health check immediately after the
     // runtime starts. Fire-and-forget: a stale 3.14 venv (left over from a
     // prior install) gets nuked + rebuilt in the background BEFORE the first
@@ -616,9 +569,10 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
 	    mainWindow.webContents.send('skill:askUserCleared', event)
 	  })
   // agent_interaction — wire `ask_user_questions` emitter + persistor.
-  // Boot sweep runs FIRST (synchronously, before any renderer hydrate) so
-  // pending cards from a previous app run never resurrect with a missing
-  // Promise resolver.
+  // Production Codex boot has already settled exact pending interactions,
+  // their Ready parent/Browser child and product fence before recovery. This
+  // older card-only sweep stays as an idempotent fallback for standalone or
+  // non-Codex wiring; it must never revive a missing Promise resolver.
   //
   // Stage U (PR 1, B.4b) — guarded by `askUserQuestionsSweepRanForBoot` so
   // the sweep happens once per main-process lifetime. Even within that one
@@ -638,8 +592,8 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
         logAgentMetric('ask_user_questions_boot_sweep_skipped_live', { skippedLive })
       }
     } catch (sweepErr) {
-      // Don't crash boot — the worst case is one stale pending card we'll
-      // hide via renderer-side timestamp check.
+      // Production Codex startup either completed its earlier canonical sweep
+      // or failed closed; this fallback failure remains observable only.
       log(`ask_user_questions boot sweep failed: ${sweepErr instanceof Error ? sweepErr.message : String(sweepErr)}`)
     }
     askUserQuestionsSweepRanForBoot = true
@@ -678,9 +632,9 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
   }
   // EP1-I3-2 — frozen-call confirmation store (M2/M3 action-confirmation
   // gate). Register once per main-process lifetime: a dev reload must not
-  // replace a store that may hold live pending waiters. The constructor's
-  // boot sweep expires DB-pending orphans from a previous run (the release
-  // token is memory-only — there is no context to resume into).
+  // replace a store that may hold live pending waiters. Production Codex boot
+  // has already atomically settled exact rows; the constructor sweep is only
+  // a fail-closed fallback for standalone/non-Codex orphan rows.
   if (!getFrozenCallStore()) {
     try {
       registerFrozenCallStore(new FrozenCallStore(getDatabase().getRawDb()))
@@ -748,19 +702,6 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
 	      runtime!.getOrchestrator().refreshActiveRunProgress(agent, sessionId, requestId),
 	  })
   const orchestrator = runtime.getOrchestrator()
-  const pendingToolActionRequests = new Map<string, {
-    resolve: (payload: Record<string, unknown>) => void
-    reject: (error: Error) => void
-    timer: NodeJS.Timeout
-    agent: string
-    sessionId: string
-  }>()
-  const releasePendingRequest = (requestId: string): void => {
-    const entry = pendingToolActionRequests.get(requestId)
-    if (!entry) return
-    pendingToolActionRequests.delete(requestId)
-    clearTimeout(entry.timer)
-  }
   log('setupAgentIPC called, Ready agent runtime initialized')
 
   // Stage V V2.1b — 2 toolEvent channels (`tools:logToolEvent` +
@@ -774,8 +715,8 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
     toolEventGroupDispose = null
   }
   toolEventGroupDispose = toolEventGroup.register(ipcMain, {
-    pendingToolActionRequests,
-    releasePendingRequest,
+    pendingToolActionRequests: rendererToolActionBridge.pendingToolActionRequests,
+    releasePendingRequest: (requestId) => rendererToolActionBridge.releasePendingRequest(requestId),
   })
 
   // The six Codex lifecycle channels are owned by `agentLifecycleGroup`.
@@ -794,7 +735,7 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
   }
   agentLifecycleGroupDispose = agentLifecycleGroup.register(ipcMain, {
     sendScoped: (payload) => runtime!.sendScoped(payload),
-    createSession: () => runtime!.createCodexSession(),
+    createSession: (request) => runtime!.createCodexSession(request),
     resetSession: (request) => runtime!.resetCodexSession(request),
     stopSession: (request) => runtime!.stopCodexSession(request),
     closeSession: (request) => runtime!.closeCodexSession(request),
@@ -830,30 +771,13 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
   agentRegistryGroupDispose = agentRegistryGroup.register(ipcMain, {
     listAgents: () => runtime!.getAgentRegistry().list(),
     getBeliefCardStore: () => runtime?.getBeliefCardStore() ?? null,
-    updateStatus: (id, status, options) => runtime!.getAgentRegistry().updateStatus(id, status, options),
-    deleteAgent: (id) => runtime!.getAgentRegistry().deleteAgent(id),
-  })
-  if (agentDerivationGroupDispose) {
-    try { agentDerivationGroupDispose.dispose() } catch { /* ignore — handlers may already be gone */ }
-    agentDerivationGroupDispose = null
-  }
-  agentDerivationGroupDispose = agentDerivationGroup.register(ipcMain, {
-    getBeliefCardStore: () => runtime?.getBeliefCardStore() ?? null,
-    getAgentRegistry: () => runtime!.getAgentRegistry(),
-    getBlueprintStore: getSpecialistBlueprintStore,
   })
   if (agentSpecialistBlueprintGroupDispose) {
     try { agentSpecialistBlueprintGroupDispose.dispose() } catch { /* ignore — handlers may already be gone */ }
     agentSpecialistBlueprintGroupDispose = null
   }
-  const specialistSemanticJudge = resolveSpecialistFoundationSemanticJudge()
   agentSpecialistBlueprintGroupDispose = agentSpecialistBlueprintGroup.register(ipcMain, {
     getBlueprintStore: getSpecialistBlueprintStore,
-    getConfirmationStore: getSpecialistBlueprintConfirmationStore,
-    getBeliefCardStore: () => runtime?.getBeliefCardStore() ?? null,
-    getAgentRegistry: () => runtime!.getAgentRegistry(),
-    runSemanticFoundationJudge: specialistSemanticJudge.judge,
-    semanticFoundationJudgeUnavailableReason: specialistSemanticJudge.unavailableReason,
   })
   if (agentSystemStudioGroupDispose) {
     try { agentSystemStudioGroupDispose.dispose() } catch { /* ignore — handlers may already be gone */ }
@@ -864,20 +788,6 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
     getAgentRegistry: () => runtime!.getAgentRegistry(),
     getBeliefCardStore: () => runtime?.getBeliefCardStore() ?? null,
     getContentEditProposalStore: getSpecialistContentEditProposalStore,
-    listOwnedTasks: (agentId) => runtime!.listTaskProjectionsByOwner(agentId, 8),
-    listRecentPrerouteTraces: (limit) => runtime!.listRecentSessionPrerouteTraces(limit),
-    listStagedBlueprints: () => getSpecialistBlueprintStore().list(['draft', 'needs_clarification', 'staged', 'confirmed']),
-    getAgentReadiness: (agentId) => runtime!.resolveAgentExecutionReadiness(agentId),
-    simulateRouting: (firstMessage) => runtime!.simulateSessionPrerouteForStudio(firstMessage),
-  })
-
-  // EP4-A5 — session preroute evaluate (pure, read-only; renderer acts).
-  if (sessionPrerouteGroupDispose) {
-    try { sessionPrerouteGroupDispose.dispose() } catch { /* ignore — handlers may already be gone */ }
-    sessionPrerouteGroupDispose = null
-  }
-  sessionPrerouteGroupDispose = sessionPrerouteGroup.register(ipcMain, {
-    evaluateSessionPreroute: (firstMessage) => runtime!.evaluateSessionPreroute(firstMessage),
   })
 
   if (beliefCardGroupDispose) {
@@ -886,16 +796,10 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
   }
   beliefCardGroupDispose = beliefCardGroup.register(ipcMain, {
     getBeliefCardStore: () => runtime?.getBeliefCardStore() ?? null,
-    getKnowledgeSystemEnabled: () => isKnowledgeSystemEnabled(getDatabase()),
-    setKnowledgeSystemEnabled: (enabled) => {
-      getDatabase().setSetting(KNOWLEDGE_SYSTEM_SETTING_KEY, enabled ? 'true' : 'false')
-      runtime?.applyKnowledgeSystemEnabled(enabled)
-    },
     getLifecycleStatus: () => {
       const manager = runtime!.getMemoryLifecycleManager()
       return { running: manager.isRunning(), lastMaintenanceAt: manager.getLastMaintenanceAt() }
     },
-    getMaintenanceRoundStatus: () => getLastMaintenanceRoundStatus(),
   })
 
   // P0-4 (2026-07-02 P0 visibility batch) — read-only run quality stats.
@@ -925,8 +829,7 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
   })
 
   // 梯队三 — emergence feed 组装。信号源三路：跨 scope 最近投影（resume/
-  // follow_up）、belief 卡（crystallize：staged aspire + 疑似重复）、涌现候选
-  // （复用 derivation 的 stage=candidate + 证据≥3 投影）。
+  // follow_up）、belief 卡（crystallize：staged 资料 + 疑似重复）。
   if (emergenceFeedGroupDispose) {
     try { emergenceFeedGroupDispose.dispose() } catch { /* ignore — handlers may already be gone */ }
     emergenceFeedGroupDispose = null
@@ -945,16 +848,6 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
         stage: card.frontmatter.stage ?? null,
       }))
     },
-    listCandidateSignals: () => {
-      const store = runtime?.getBeliefCardStore() ?? null
-      if (!store) return []
-      return listDerivationCandidates(store).map((candidate) => ({
-        relPath: candidate.candidateRelPath,
-        title: candidate.title,
-        stage: 'candidate',
-        evidenceDates: candidate.evidenceDates,
-      }))
-    },
     listFileIntentCards: () => getFileEmergenceIntentCardsForFeed(),
   })
 
@@ -971,7 +864,11 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
   conversationGroupDispose = conversationGroup.register(ipcMain, {
     listConversationScopes: (agent) => runtime!.listConversationScopes(agent),
     listScopeRuns: (payload) => runtime!.listScopeRuns(payload),
+    readCodexLifecycleSnapshot: (request) => runtime!.readCodexLifecycleSnapshot(request),
     getConversationScopeMessages: (scopeId) => runtime!.getConversationScopeMessages(scopeId),
+    setActionAuthorizationMode: (scopeId, mode, expectedMessageVisibilityEpoch) => (
+      runtime!.setActionAuthorizationMode(scopeId, mode, expectedMessageVisibilityEpoch)
+    ),
     listScopeAttachments: (scopeId) => runtime!.listScopeAttachments(scopeId),
     getScopeAttachment: (scopeId, attachmentId) => runtime!.getScopeAttachment(scopeId, attachmentId),
     clearRemoteAttachmentCache: (channelId) => runtime!.clearRemoteAttachmentCache(channelId),
@@ -1011,13 +908,23 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
     getSessionRecallCapsule: (conversationId) => runtime!.getSessionRecallCapsule(conversationId),
     listAttachedSessionRecallContexts: (scopeId) => runtime!.listAttachedSessionRecallContexts(scopeId),
     getReferenceSkillHint: (scopeId) => runtime!.getReferenceSkillHint(scopeId),
-    attachSessionRecallContext: (currentScopeId, conversationId) => runtime!.attachSessionRecallContext(currentScopeId, conversationId),
-    detachSessionRecallContext: (currentScopeId, conversationId) => runtime!.detachSessionRecallContext(currentScopeId, conversationId),
+    attachSessionRecallContext: (currentScopeId, conversationId, expectedMessageVisibilityEpoch) =>
+      runtime!.attachSessionRecallContext(
+        currentScopeId,
+        conversationId,
+        expectedMessageVisibilityEpoch,
+      ),
+    detachSessionRecallContext: (currentScopeId, conversationId, expectedMessageVisibilityEpoch) =>
+      runtime!.detachSessionRecallContext(
+        currentScopeId,
+        conversationId,
+        expectedMessageVisibilityEpoch,
+      ),
     resumeSessionCandidate: (payload) => runtime!.resumeSessionCandidate(payload),
   })
 
-  // Stage V V2.1h — the 4 detached-skill task channels
-  // (`agent:startDetachedSkillAction`, `agent:inspectDetachedSkillTask`,
+  // Stage V V2.1h — the 3 detached-skill task channels
+  // (`agent:inspectDetachedSkillTask`,
   // `agent:listDetachedSkillTasks`, `agent:cancelDetachedSkillTask`) moved
   // into `detachedTaskGroup`. Symmetric dispose lives in
   // `cleanupAgentRuntime`; defensive dev-reload re-entry disposes the
@@ -1027,15 +934,12 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
     detachedTaskGroupDispose = null
   }
   detachedTaskGroupDispose = detachedTaskGroup.register(ipcMain, {
-    startDetachedSkillAction: (payload) => runtime!.startDetachedSkillAction(payload),
     inspectDetachedSkillTask: (taskId, scopeId) => runtime!.inspectDetachedSkillTask(taskId, scopeId),
     listDetachedSkillTasks: (payload) => runtime!.listDetachedSkillTasks(payload),
     cancelDetachedSkillTask: (taskId, scopeId) => runtime!.cancelDetachedSkillTask(taskId, scopeId),
   })
 
-  // Stage V V2.1i — the 5 run-control channels (`agent:listActiveChildRuns`,
-  // `agent:cancelChildRun`, `agent:suspendRun`, `agent:resumeRun`,
-  // `agent:respondToInteraction`) moved into `runControlGroup`. Symmetric
+  // Supported run-control channels live in `runControlGroup`. Symmetric
   // dispose lives in `cleanupAgentRuntime`; defensive dev-reload re-entry
   // disposes the previous handle first so `ipcMain.handle` does not
   // double-register.
@@ -1047,10 +951,6 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
     listActiveChildRuns: () => listActiveChildRunsForIpc(runtime),
     cancelChildRun: (payload) => cancelChildRunForIpc(runtime, payload),
     reportInfrastructureTimeout: (payload) => runtime!.reportInfrastructureTimeout(payload),
-    suspendRun: (payload) => runtime!.suspendRun(payload),
-    resumeRun: (payload) => runtime!.resumeRun(payload),
-    respondToInteraction: (payload) => runtime!.respondToInteraction(payload),
-    completeHumanTakeover: (payload) => runtime!.completeHumanTakeover(payload),
   })
 
   // Stage V V2.1g — `agent:attachSessionRecallContext`,
@@ -1103,35 +1003,6 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
     sendChannelProbe: (id, text) => runtime!.sendChannelProbe(id, text),
   })
 
-  // Structured scheduled-task handlers. Symmetric dispose lives in
-  // `cleanupAgentRuntime` above and the dev-reload re-entry block below.
-  if (scheduleGroupDispose) {
-    try { scheduleGroupDispose.dispose() } catch { /* ignore — handlers may already be gone */ }
-    scheduleGroupDispose = null
-  }
-  scheduleGroupDispose = scheduleGroup.register(ipcMain, {
-    list: () => runtime!.listScheduledTasks(),
-    get: (id) => runtime!.getScheduledTask(id),
-    preview: (payload) => runtime!.previewScheduledTask(payload),
-    create: (payload) => runtime!.createScheduledTask(payload),
-    update: (payload) => runtime!.updateScheduledTask(payload),
-    runNow: (id) => runtime!.runScheduledTaskNow(id),
-    pause: (id) => runtime!.pauseScheduledTask(id),
-    resume: (id) => runtime!.resumeScheduledTask(id),
-    delete: (id) => runtime!.deleteScheduledTask(id),
-    listOccurrences: (scheduleId, limit) => runtime!.listScheduledTaskOccurrences(scheduleId, limit),
-    emitChanged: (scheduleId) => {
-      if (!mainWindow.isDestroyed()) mainWindow.webContents.send('scheduledTasks:changed', scheduleId)
-    },
-  })
-  if (scheduledTaskChangedOff) scheduledTaskChangedOff()
-  const scheduleRuntime = runtime
-  const onScheduledTaskChanged = (scheduleId: string) => {
-    if (!mainWindow.isDestroyed()) mainWindow.webContents.send('scheduledTasks:changed', scheduleId)
-  }
-  scheduleRuntime.on('scheduledTasksChanged', onScheduledTaskChanged)
-  scheduledTaskChangedOff = () => scheduleRuntime.removeListener('scheduledTasksChanged', onScheduledTaskChanged)
-
   // Chat metadata reads/title updates and file-picker channels live in
   // `chatPersistenceGroup`. Conversation lifecycle and message writes are
   // owned by the Codex runtime path and are not exposed to Renderer IPC.
@@ -1162,7 +1033,7 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
               'png', 'jpg', 'jpeg', 'gif', 'webp',
               'mp4', 'mov', 'webm', 'mkv', 'avi', 'm4v',
               'txt', 'md', 'csv', 'json', 'html',
-              'docx', 'doc', 'rtf', 'odt',
+              'docx',
               'xlsx', 'xls', 'pdf',
             ],
           }
@@ -1174,7 +1045,7 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
         const stat = statSync(filePath)
         const imageExts = ['.png', '.jpg', '.jpeg', '.gif', '.webp']
         const videoExts = ['.mp4', '.mov', '.webm', '.mkv', '.avi', '.m4v']
-        const textExts = ['.txt', '.md', '.csv', '.json', '.html', '.pdf', '.docx', '.doc', '.rtf', '.odt']
+        const textExts = ['.txt', '.md', '.csv', '.json', '.html', '.pdf', '.docx']
         const spreadExts = ['.xlsx', '.xls']
         let type: string = 'other'
         if (imageExts.includes(ext)) type = 'image'
@@ -1273,76 +1144,11 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
       })
       if (data.sessionId) {
         const timestamp = new Date().toISOString()
-        if (data.type === 'tool_use' || data.type === 'tool_result') {
-          const structured = data.projectionPatch && typeof data.projectionPatch === 'object'
-            ? data.projectionPatch as Record<string, unknown>
-            : null
-          const structuredText = typeof structured?.message === 'string' && structured.message.trim()
-            ? structured.message.trim()
-            : typeof structured?.taskSummary === 'string' && structured.taskSummary.trim()
-              ? structured.taskSummary.trim()
-              : typeof structured?.taskTitle === 'string' && structured.taskTitle.trim()
-                ? structured.taskTitle.trim()
-                : ''
-          const toolText = structured ? (structuredText || '状态已更新') : (data.chunk || '')
-          const structuredHas = (key: string): boolean => Boolean(
-            structured
-            && Object.prototype.hasOwnProperty.call(structured, key)
-            && structured[key] !== undefined,
-          )
-          const payload = {
-            type: 'updated',
-            scopeId: data.sessionId,
-            // Stage V V3.2 — explicit per-session sessionId on the push so
-            // multi-session renderer wiring doesn't depend on the scopeId alias.
-            sessionId: data.sessionId,
-            agent: data.agent,
-            runId: data.runId,
-            taskId: typeof data.taskId === 'string'
-              ? data.taskId
-              : structured?.taskContinuation && typeof structured.taskContinuation === 'object' && typeof (structured.taskContinuation as Record<string, unknown>).taskId === 'string'
-                ? (structured.taskContinuation as Record<string, unknown>).taskId as string
-                : undefined,
-            phase: 'tool_running',
-            latestText: toolText,
-            module: structured?.module === 'browser' || structured?.module === 'document' || structured?.module === 'design' || structured?.module === 'skill'
-              ? structured.module as ScopeRunEventPayload['module']
-              : undefined,
-            taskTitle: typeof structured?.taskTitle === 'string' ? structured.taskTitle : undefined,
-            taskSummary: typeof structured?.taskSummary === 'string' ? structured.taskSummary : undefined,
-            steps: Array.isArray(structured?.steps) ? structured.steps : undefined,
-            currentStepId: typeof structured?.currentStepId === 'string' ? structured.currentStepId : undefined,
-            waitingFor: typeof structured?.waitingFor === 'string' ? structured.waitingFor as ScopeRunEventPayload['waitingFor'] : undefined,
-            resumableActions: Array.isArray(structured?.resumableActions) ? structured.resumableActions as ScopeRunEventPayload['resumableActions'] : undefined,
-            ...(structuredHas('blockedReason') && (typeof structured?.blockedReason === 'string' || structured?.blockedReason === null)
-              ? { blockedReason: typeof structured.blockedReason === 'string' ? structured.blockedReason : null }
-              : {}),
-            ...(structuredHas('taskContinuation') && (structured?.taskContinuation === null || (structured?.taskContinuation && typeof structured.taskContinuation === 'object'))
-              ? { taskContinuation: structured.taskContinuation && typeof structured.taskContinuation === 'object' ? structured.taskContinuation as ScopeRunEventPayload['taskContinuation'] : null }
-              : {}),
-            ...(structuredHas('progress') && (structured?.progress === null || (structured?.progress && typeof structured.progress === 'object'))
-              ? { progress: structured.progress && typeof structured.progress === 'object' ? structured.progress as ScopeRunEventPayload['progress'] : null }
-              : {}),
-            recentArtifacts: Array.isArray(structured?.recentArtifacts) ? structured.recentArtifacts : undefined,
-            toolEvent: {
-              id: `${data.type}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-              kind: data.type === 'tool_use' ? 'call' : 'result',
-              text: toolText,
-              timestamp,
-            },
-            timestamp,
-          } as const
-          runtime?.recordScopeRunEvent(
-            payload,
-            structured
-              ? {
-                projectionPatch: structured,
-                transcriptEvents: [{ kind: 'structured_payload', projectionPatch: structured }],
-              }
-              : null,
-          )
-          emitRunTimelineEvent(mainWindow, 'agent:scopeRunEvent', payload)
-        } else if (data.type === 'done') {
+        // Tool call/result scope events are published once by
+        // AgentSdkToolExecutor, where the full trace detail and frozen owner
+        // identity are available. The raw agent:stream push above remains the
+        // transport stream and is not a second canonical projection event.
+        if (data.type === 'done') {
           const structured = data.projectionPatch && typeof data.projectionPatch === 'object'
             ? data.projectionPatch as Record<string, unknown>
             : null
@@ -1354,6 +1160,11 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
           const payload = {
             type: 'finished',
             scopeId: data.sessionId,
+            messageVisibilityEpoch: data.messageVisibilityEpoch,
+            visibilityOwnerKind: 'context_background',
+            visibilityOwnerLedger: { kind: 'run_meta', id: data.runId },
+            ownerAgentId: data.agent,
+            taskOrigin: 'user_root',
             sessionId: data.sessionId, // Stage V V3.2
             agent: data.agent,
             runId: data.runId,
@@ -1381,7 +1192,7 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
             recentArtifacts: Array.isArray(structured?.recentArtifacts) ? structured.recentArtifacts : undefined,
             timestamp,
           } as const
-          runtime?.recordScopeRunEvent(
+          runtime?.publishScopeRunEvent(
             payload,
             structured
               ? {
@@ -1390,11 +1201,15 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
               }
               : null,
           )
-          emitRunTimelineEvent(mainWindow, 'agent:scopeRunEvent', payload)
         } else if (data.type === 'text') {
           const payload = {
             type: 'updated',
             scopeId: data.sessionId,
+            messageVisibilityEpoch: data.messageVisibilityEpoch,
+            visibilityOwnerKind: 'context_background',
+            visibilityOwnerLedger: { kind: 'run_meta', id: data.runId },
+            ownerAgentId: data.agent,
+            taskOrigin: 'user_root',
             sessionId: data.sessionId, // Stage V V3.2
             agent: data.agent,
             runId: data.runId,
@@ -1402,8 +1217,7 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
             latestText: data.chunk || '',
             timestamp,
           } as const
-          runtime?.recordScopeRunEvent(payload)
-          emitRunTimelineEvent(mainWindow, 'agent:scopeRunEvent', payload)
+          runtime?.publishScopeRunEvent(payload)
         }
       }
     }
@@ -1426,6 +1240,11 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
         const payload: ScopeRunEventPayload = {
           type: mapAgentStatusToScopeRunEventType(data.status),
           scopeId: data.sessionId,
+          messageVisibilityEpoch: data.messageVisibilityEpoch,
+          visibilityOwnerKind: 'context_background',
+          visibilityOwnerLedger: { kind: 'run_meta', id: data.runId },
+          ownerAgentId: data.agent,
+          taskOrigin: 'user_root',
           agent: data.agent,
           runId: data.runId,
           phase,
@@ -1433,13 +1252,7 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
           latestText: typeof data.status === 'string' ? `状态：${data.status}` : undefined,
           timestamp: new Date().toISOString(),
         }
-        runtime?.recordScopeRunEvent(payload)
-        // Stage V V3.2 — mirror scopeId to sessionId on the wire so renderer
-        // listeners can route per-session without aliasing knowledge.
-        emitRunTimelineEvent(mainWindow, 'agent:scopeRunEvent', {
-          ...payload,
-          sessionId: data.sessionId,
-        })
+        runtime?.publishScopeRunEvent(payload)
       }
     }
   })
@@ -1458,6 +1271,11 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
         const payload = {
           type: 'finished',
           scopeId: data.sessionId,
+          messageVisibilityEpoch: data.messageVisibilityEpoch,
+          visibilityOwnerKind: 'context_background',
+          visibilityOwnerLedger: { kind: 'run_meta', id: data.runId },
+          ownerAgentId: data.agent,
+          taskOrigin: 'user_root',
           sessionId: data.sessionId, // Stage V V3.2
           agent: data.agent,
           runId: data.runId,
@@ -1469,8 +1287,7 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
           recoverable: data.recoverable,
           toolName: data.toolName,
         } as const
-        runtime?.recordScopeRunEvent(payload)
-        emitRunTimelineEvent(mainWindow, 'agent:scopeRunEvent', payload)
+        runtime?.publishScopeRunEvent(payload)
       }
     }
   })
@@ -1608,4 +1425,5 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
     getMemoryRepository: () => runtime?.getMemoryRepository() ?? null,
     getPromptAssembly: () => runtime?.getPromptAssembly() ?? null,
   })
+  publishAgentRuntimeReady(mainWindow.webContents)
 }

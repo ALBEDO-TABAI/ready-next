@@ -168,12 +168,6 @@ export const BROWSER_TOOL_SCHEMAS = {
     prompt_text: z.string().optional().describe('prompt 对话框的输入'),
     tab_id: tabId,
   }),
-  browser_request_takeover: z.object({
-    reason: z.string().describe('需要用户接管的原因'),
-    instruction: z.string().optional().describe('用户需要完成的步骤'),
-    tab_id: tabId,
-  }),
-
   browser_research: z.object({
     action: z.enum(['start', 'evidence', 'complete']).optional().describe('研究工作项动作，默认 start'),
     work_items: z.array(z.object({

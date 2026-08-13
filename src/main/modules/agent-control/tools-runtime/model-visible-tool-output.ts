@@ -5,7 +5,7 @@ import {
   type ToolExecutionResultLike,
 } from './tool-result-types'
 
-function redactModelVisibleValue(value: unknown): unknown {
+export function redactModelVisibleValue(value: unknown): unknown {
   if (typeof value === 'string') return redactHostPaths(value)
   if (Array.isArray(value)) return value.map((item) => redactModelVisibleValue(item))
   if (!value || typeof value !== 'object') return value
@@ -47,9 +47,13 @@ export function buildModelVisibleToolResultPayload(output: ToolExecutionOutput):
     ...(normalized.interactionHint ? { interactionHint: normalized.interactionHint } : {}),
     ...(normalized.content?.length
       ? {
-          content: normalized.content.map((part) => part.type === 'image'
-            ? { type: 'image', mediaType: part.mediaType, detail: part.detail || 'auto' }
-            : redactModelVisibleValue(part)),
+          content: normalized.content.map((part) => {
+            if (part.type === 'image') {
+              return { type: 'image', mediaType: part.mediaType, detail: part.detail || 'auto' }
+            }
+            if (part.type === 'audio') return { type: 'audio', mediaType: part.mediaType }
+            return redactModelVisibleValue(part)
+          }),
         }
       : {}),
   }

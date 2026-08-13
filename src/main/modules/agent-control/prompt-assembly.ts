@@ -120,8 +120,6 @@ export interface PromptAssemblyDeps {
   /** EP3-A3: agents-table roster for the main-session charter/routing index. */
   getAgentRoster?: () => Array<{ id: string; name: string; charter: string | null; status: string; personaRef?: string | null }>
   getAgentReadiness?: (agentId: string) => AgentExecutionProfile['readiness']
-  /** EP2-K6: rollback switch — false stops knowledge cards, not Agent RULES. */
-  isKnowledgeSystemEnabled?: () => boolean
   /** P1 (2026-07-03, 7/01 reliability contract D) — active browser tab URL so
    *  site-card fragments can match by current domain, not only user-text
    *  aliases. Absent/null → user-text matching only (prior behavior). */
@@ -1098,8 +1096,7 @@ export class PromptAssemblyService {
           ? ownerCandidate
           : MAIN_AGENT_ID
         : ownerCandidate
-      const knowledgeEnabledForFallback = this.deps.isKnowledgeSystemEnabled?.() ?? true
-      const fallbackStore = knowledgeEnabledForFallback ? this.deps.getBeliefCardStore?.() : null
+      const fallbackStore = this.deps.getBeliefCardStore?.() ?? null
       const fallbackRoutingPaths = fallbackStore?.listRoutingCardInventory?.((fallbackRoster ?? [])
         .filter((agent): agent is { id: string; name: string; charter: string | null; status: AgentSystemStudioAgentStatus } => isAgentSystemStudioAgentStatus(agent.status)))
         .map((card) => card.relPath) ?? []
@@ -1115,7 +1112,7 @@ export class PromptAssemblyService {
         name: fallbackAgentId,
         charter: '',
         personality: await this.loadSOUL(fallbackAgentId),
-        rules: knowledgeEnabledForFallback ? this.readMemoryFile(`agents/${fallbackAgentId}/RULES.md`).trim() : '',
+        rules: this.readMemoryFile(`agents/${fallbackAgentId}/RULES.md`).trim(),
         knowledgeIndex: fallbackIndex.omittedCount > 0
           ? `${fallbackIndex.text}\n（另有 ${fallbackIndex.omittedCount} 条低置信度条目）`
           : fallbackIndex.text,
@@ -1155,7 +1152,6 @@ export class PromptAssemblyService {
     // missing user RULES.md falls back to the default asset so fresh
     // installs carry the confirmation-hygiene rules; an empty knowledge dir
     // still omits the index section.
-    const knowledgeEnabled = this.deps.isKnowledgeSystemEnabled?.() ?? true
     // EP3-A2 — injection owner: explicit ownerAgentId wins; scope.agent is
     // the fallback ONLY when no owner was provided at all. An explicit but
     // unsafe id degrades to global-only — it must not re-route to
@@ -1183,10 +1179,10 @@ export class PromptAssemblyService {
         .filter(Boolean).join('\n\n'),
       MAX_RULES_CHARS,
     )
-    let knowledgeIndexText = knowledgeEnabled ? params.executionProfile.knowledgeIndex : ''
+    let knowledgeIndexText = params.executionProfile.knowledgeIndex
     let mainSessionRoutingCards: Array<{ relPath: string; title: string; description: string; targetAgentId: string }> = []
     try {
-      const beliefStore = knowledgeEnabled ? (this.deps.getBeliefCardStore?.() ?? null) : null
+      const beliefStore = this.deps.getBeliefCardStore?.() ?? null
       if (beliefStore) {
 	        const rawRoutingCards = params.scope.agent === MAIN_AGENT_ID
 	          ? (beliefStore.listRoutingCards?.() ?? [])
@@ -1221,7 +1217,7 @@ export class PromptAssemblyService {
     // 保持薄的反面约束). Empty roster + no routing cards → section omitted.
     let agentRoutingText = ''
     try {
-      if (knowledgeEnabled && params.executionProfile.effectiveAgentId === MAIN_AGENT_ID) {
+      if (params.executionProfile.effectiveAgentId === MAIN_AGENT_ID) {
         const activeRoster = (roster ?? [])
           .filter((agent) => handoffReadyAgentIds?.has(agent.id))
         const lines: string[] = []

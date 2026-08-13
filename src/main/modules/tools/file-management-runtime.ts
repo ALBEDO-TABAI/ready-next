@@ -12,6 +12,8 @@ export interface FileManagementToolContext {
   abortSignal?: AbortSignal
   organizeStoreDir?: string | null
   workspaceRoots?: string[] | null
+  explicitReadablePaths?: string[] | null
+  explicitReadableResources?: Array<{ path: string; currentDigest: string }> | null
   runId?: string | null
   sessionId?: string | null
   scopeId?: string | null

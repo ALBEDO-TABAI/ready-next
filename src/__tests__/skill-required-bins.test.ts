@@ -36,6 +36,7 @@ test('declared bins are immediate without unlocking the generic shell allowlist'
     [...buildSkillShellBaseAllowlist({
       baseAllowlist,
       requiredBins: ['lark-cli'],
+      hasScripts: false,
       allowSkillScripts: false,
     })],
     ['lark-cli'],
@@ -44,6 +45,16 @@ test('declared bins are immediate without unlocking the generic shell allowlist'
     [...buildSkillShellBaseAllowlist({
       baseAllowlist,
       requiredBins: ['lark-cli'],
+      hasScripts: false,
+      allowSkillScripts: true,
+    })],
+    ['lark-cli'],
+  )
+  assert.deepEqual(
+    [...buildSkillShellBaseAllowlist({
+      baseAllowlist,
+      requiredBins: ['lark-cli'],
+      hasScripts: true,
       allowSkillScripts: true,
     })],
     ['bash', 'curl', 'lark-cli'],

@@ -1,10 +1,8 @@
 // Stage V V2.1h — DetachedTaskGroup channel group.
 //
-// Bundles the 4 channels that expose the detached-skill task surface to the
+// Bundles the 3 channels that expose the detached-skill task surface to the
 // renderer:
 //
-//   agent:startDetachedSkillAction    (kick off a skill action in the
-//                                      background, returns the tracker record)
 //   agent:inspectDetachedSkillTask    (lookup one task by id, scope-gated)
 //   agent:listDetachedSkillTasks      (list tasks, optional scope filter)
 //   agent:cancelDetachedSkillTask     (cancel one task by id, scope-gated)
@@ -15,7 +13,7 @@
 //
 // All four channels live in one group because they share:
 //   • the same domain concept (detached-skill task lifecycle:
-//     start / inspect / list / cancel)
+//     inspect / list / cancel)
 //   • the same dispose lifecycle (renderer boots them together when the
 //     detached-task panel mounts)
 //   • a closely-coupled dep surface (every handler is a one-line forward to
@@ -45,20 +43,6 @@ interface IPCResponse<T = unknown> {
 }
 
 /**
- * Payload for `agent:startDetachedSkillAction`. Mirrors the inline anonymous
- * type from the pre-extraction handler. Only `skillId` + `action` are
- * required; the rest are optional scoping hints forwarded to the tracker.
- */
-export interface StartDetachedSkillActionPayload {
-  scopeId?: string
-  sessionId?: string
-  agent?: string
-  skillId: string
-  action: string
-  params?: Record<string, unknown>
-}
-
-/**
  * Per-group deps. Mixed surface — see file header for why this is not
  * `Pick<EngineDeps, …>`.
  *
@@ -67,11 +51,6 @@ export interface StartDetachedSkillActionPayload {
  * concrete class).
  */
 export interface DetachedTaskGroupDeps {
-  /**
-   * Bound `runtime.startDetachedSkillAction` — sync, returns the new tracker
-   * record.
-   */
-  startDetachedSkillAction(payload: StartDetachedSkillActionPayload): DetachedSkillTaskRecord
   /**
    * Bound `runtime.inspectDetachedSkillTask` — sync, returns the task or
    * `null` when it is missing OR the scope-gate rejects.
@@ -90,7 +69,6 @@ export interface DetachedTaskGroupDeps {
 }
 
 const CHANNELS = [
-  'agent:startDetachedSkillAction',
   'agent:inspectDetachedSkillTask',
   'agent:listDetachedSkillTasks',
   'agent:cancelDetachedSkillTask',
@@ -106,14 +84,6 @@ export const detachedTaskGroup: IpcChannelGroup<DetachedTaskGroupDeps> = {
     for (const channel of CHANNELS) {
       try { ipcMain.removeHandler(channel) } catch { /* ignore — handler may not exist */ }
     }
-
-    ipcMain.handle('agent:startDetachedSkillAction', (_, payload: StartDetachedSkillActionPayload): IPCResponse => {
-      try {
-        return { success: true, data: deps.startDetachedSkillAction(payload) }
-      } catch (error) {
-        return { success: false, error: error instanceof Error ? error.message : String(error) }
-      }
-    })
 
     ipcMain.handle('agent:inspectDetachedSkillTask', (_, payload: { taskId: string; scopeId?: string }): IPCResponse => {
       try {

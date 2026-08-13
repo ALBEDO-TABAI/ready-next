@@ -14,7 +14,11 @@ import type {
 function createScope(): ConversationScope {
   return {
     id: 'scope-1',
+    aliasGeneration: null,
+    messageVisibilityEpoch: 0,
     agent: 'butler',
+    activeAgentId: 'butler',
+    handoffGeneration: 0,
     title: '测试会话',
     sourceKind: 'local',
     sourceId: 'app',
@@ -60,10 +64,15 @@ function createHarness() {
   })
 
   const publishScopeRunEvent = async (payload: ScopeRunEventPayload, projectionTruth?: TaskProjectionRecord['continuationRef']) => {
-    events.push(payload)
-    const summary = projection.recordEvent(payload, projectionTruth as any)
+    const canonicalPayload = {
+      aliasGeneration: scope.aliasGeneration,
+      messageVisibilityEpoch: scope.messageVisibilityEpoch,
+      ...payload,
+    }
+    events.push(canonicalPayload)
+    const summary = projection.recordEvent(canonicalPayload, projectionTruth as any)
     if (summary) {
-      await syncTaskProjection(store, summary, payload, projectionTruth as any)
+      await syncTaskProjection(store, summary, canonicalPayload, projectionTruth as any)
     }
   }
 

@@ -16,4 +16,9 @@ export class AgentSdkIntentTracker {
     else this.localSendImIntentTtl.delete(sid)
     return recent
   }
+
+  clearScope(sessionId: string | null | undefined): void {
+    const sid = String(sessionId || '').trim()
+    if (sid) this.localSendImIntentTtl.delete(sid)
+  }
 }

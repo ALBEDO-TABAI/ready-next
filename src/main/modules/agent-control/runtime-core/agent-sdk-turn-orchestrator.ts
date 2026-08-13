@@ -9,7 +9,6 @@ import {
 import { resolveModelContextWindow } from '../../../../shared/context-budget-types'
 import { buildAgentSpawnContextFromAIConfig } from '../../skills-runtime/agent-context-source'
 import { appendToolCapabilityLog } from '../../tools/tool-event-log'
-import { normalizeSessionSnapshotForSeed } from '../compaction/compact-agent-input'
 import type {
   ExecutionTurnResult,
   MultimodalBlock,
@@ -24,14 +23,10 @@ import {
 } from '../domain-adapters/capability-floors'
 import { buildPreparedSkillTurnTruth, preparedSkillDigest } from '../skills/prepared-skill-turn'
 import type { CheckInRecord } from '../quality/task-adjudicator'
-import { loadScopeSessionSnapshot } from '../session/scope-session-snapshot'
-import { beginBackgroundTaskTerminalReminderRun } from '../system-reminders/background-task-terminal-reminder'
 import { createTaskBudgetRuntime } from '../task-projection/run-budget-policy'
-import { sanitizeAssistantText } from '../tools-runtime/tool-call-text-guard'
 import { createEmptyActiveFrameContext } from '../tools-runtime/tool-runtime'
 import { mergeProjectionPatches } from './agent-sdk-document-utils'
 import {
-  errorMessage,
   hasCurrentDocumentContextResource,
   hasLocalDocumentResource
 } from './agent-sdk-execution-utils'
@@ -73,9 +68,14 @@ import {
   buildExecutionTurnResult,
   finalizeAgentSdkTurnLifecycle,
   handleAgentSdkTurnError,
+  persistRunMetaSnapshot,
   recordAdmissionRejection
 } from './agent-sdk-turn-closeout'
-import type { TurnOrchestratorHost } from './agent-sdk-turn-context'
+import {
+  createAgentSdkTurnEventPublishers,
+  prepareAgentSdkScopeSession,
+  type TurnOrchestratorHost,
+} from './agent-sdk-turn-context'
 import {
   executeAgentSdkPreparedTurn,
   type AgentSdkPreparedTurnState
@@ -103,6 +103,10 @@ export class AgentSdkTurnOrchestrator {
 
   constructor(private readonly host: TurnOrchestratorHost) {}
 
+  discardScopeContext(scopeId: string): void {
+    this.toolConsentRetries.discard(scopeId)
+  }
+
   async sendMessage(
     name: string,
     content: string | MultimodalBlock[],
@@ -112,26 +116,6 @@ export class AgentSdkTurnOrchestrator {
     const runStartedAt = Date.now()
     const runId = requestId || randomUUID()
     let lastRollingCheckpointToolCalls = 0
-    // S5-1: lazy restore — a missing session after a process restart seeds
-    // from the persisted scope snapshot with an explicit notice; a corrupt
-    // snapshot resets with an explicit notice. Never silent amnesia.
-    let sessionRestoreNotice: string | null = null
-    if (!this.host.sessionManager.has(name)) {
-      this.host.newSession(name)
-      const restored = loadScopeSessionSnapshot(name)
-      if (restored.ok && restored.items.length > 0) {
-        const seeded = this.host.sessionManager.get(name)
-        if (seeded) {
-          seeded.sdkSession = new MemorySession({
-            sessionId: name,
-            initialItems: normalizeSessionSnapshotForSeed(restored.items as never[])
-          })
-          sessionRestoreNotice = '已恢复上次会话上下文（应用此前重启过）。如与当前请求无关可忽略。'
-        }
-      } else if (!restored.ok && restored.reason === 'corrupt') {
-        sessionRestoreNotice = '上次会话快照损坏，会话已重置（无法恢复早前上下文）。'
-      }
-    }
     const taskId = executionOptions?.taskId || `task-${runId}`
     const sessionId =
       executionOptions?.publicSessionId ||
@@ -140,6 +124,27 @@ export class AgentSdkTurnOrchestrator {
     const usedTools: string[] = []
     const toolArgsByName = new Map<string, Record<string, unknown>[]>()
     const projectionPatches: Record<string, unknown>[] = []
+    const messageVisibilityEpoch = executionOptions?.messageVisibilityEpoch
+    const scopeSession = prepareAgentSdkScopeSession({
+      host: this.host,
+      name,
+      sessionId,
+      messageVisibilityEpoch,
+    })
+    if (scopeSession.rejectionError) {
+      return buildExecutionTurnResult(this.host, {
+        success: false,
+        error: scopeSession.rejectionError,
+        finalText: '',
+        cancelled: false,
+        taskId,
+        usedTools,
+        transcriptEvents,
+        projectionPatches,
+        terminalReason: 'persistence_failed'
+      })
+    }
+    let sessionRestoreNotice = scopeSession.sessionRestoreNotice
     const activeFrame = createEmptyActiveFrameContext()
     let longSkillCheckpoint: SdkLongSkillCheckpoint | null = null
     let finalText = ''
@@ -187,6 +192,7 @@ export class AgentSdkTurnOrchestrator {
         runId,
         taskId,
         scopeId: sessionId || null,
+        messageVisibilityEpoch,
         status: 'error',
         terminalReason: 'persistence_failed',
         finalText: '',
@@ -216,6 +222,7 @@ export class AgentSdkTurnOrchestrator {
           runId,
           taskId,
           scopeId: sessionId || null,
+          messageVisibilityEpoch,
           status: 'checkpoint',
           terminalReason: 'checkpoint_budget',
           finalText: '这项任务已经在继续执行，请等待当前续跑完成。',
@@ -245,6 +252,7 @@ export class AgentSdkTurnOrchestrator {
           runId,
           taskId,
           scopeId: sessionId || null,
+          messageVisibilityEpoch,
           status: rejection.status,
           terminalReason: rejection.terminalReason,
           finalText: '',
@@ -272,6 +280,35 @@ export class AgentSdkTurnOrchestrator {
       })
     }
     const { session, runHandle, abortController, runGeneration } = begin
+    const ownerPersisted = await persistRunMetaSnapshot(this.host, {
+      agentName: name,
+      runId,
+      taskId,
+      scopeId: sessionId || null,
+      messageVisibilityEpoch,
+      status: 'running',
+      terminalReason: null,
+      taskBudgetRuntime: executionOptions?.taskBudgetRuntime ?? null,
+      providerDiagnostics: null,
+      continuationRef: executionOptions?.continuationIntent as Record<string, unknown> | null ?? null,
+      usage: null,
+      firstMessageText: messageToText(content as RunMessage),
+      finalText: '',
+    })
+    if (!ownerPersisted) {
+      await this.host.runLifecycle.finalizeRun(name, session, runHandle)
+      return buildExecutionTurnResult(this.host, {
+        success: false,
+        error: 'Conversation context identity could not be persisted.',
+        finalText: '',
+        cancelled: false,
+        taskId,
+        usedTools,
+        transcriptEvents,
+        projectionPatches,
+        terminalReason: 'persistence_failed'
+      })
+    }
     // This remains the only committed/shared SDK session until the canonical
     // core closeout succeeds.  Checkpoint restore is a run-local seed only.
     const committedPublicSession = runHandle.capturedSession
@@ -281,10 +318,6 @@ export class AgentSdkTurnOrchestrator {
       ? checkpointRepository.current(taskId, 'suspension')
         || checkpointRepository.current(taskId, 'clean_base')
       : null
-    const finishBackgroundTaskTerminalReminderRun = beginBackgroundTaskTerminalReminderRun(
-      sessionId,
-      taskId
-    )
     const effectiveExecutionOptions: AgentSdkExecutionOptions | undefined = checkpointRestore
       ? {
           ...(executionOptions || {}),
@@ -315,110 +348,30 @@ export class AgentSdkTurnOrchestrator {
       sessionRestoreNotice = '已从上一个完整操作边界恢复任务。'
     }
 
-    const isCurrentRun = (): boolean => {
-      const latest = this.host.sessionManager.get(name)
-      return Boolean(
-        latest && latest.generation === runGeneration && latest.currentRun?.runId === runId
-      )
-    }
-    const emitOutputForRun = (
-      chunk: string,
-      type: string,
-      projectionPatch?: Record<string, unknown> | null,
-      canonicalReceipt?: CanonicalAssistantMessageReceipt,
-    ): void => {
-      const safeChunk =
-        type === 'text'
-          ? sanitizeAssistantText(chunk, {
-              sessionId: sessionId || undefined,
-              source: 'transcript_emit'
-            })
-          : chunk
-      if (type === 'text' && !safeChunk) return
-      transcriptEvents.push({
-        kind: 'output',
-        type,
-        chunk: safeChunk,
-        projectionPatch: projectionPatch || null
-      })
-      this.host.emit('output', {
-        agent: name,
-        sessionId,
-        runId,
-        taskId,
-        chunk: safeChunk,
-        type,
-        projectionPatch: projectionPatch || null,
-        ...(canonicalReceipt || {}),
-      })
-    }
-    // P0-1 (2026-07-02 P0 visibility batch) — response-boundary release for
-    // hold-until-final turns. A native tool execution proves the response
-    // that produced the buffered narration cannot become the run-final
-    // clarification text (the guard only converts run-final text), so the
-    // buffer flushes right before each tool row. Armed per model call and
-    // disarmed the moment runAgent settles: post-run tool executions
-    // (leaked-call recovery) must never flush the guard-pending final text.
-    const nativeTextToolBoundaryFlush: { current: (() => void) | null } = { current: null }
-    const emitOutput = (
-      chunk: string,
-      type: string,
-      projectionPatch?: Record<string, unknown> | null
-    ): void => {
-      if (!isCurrentRun()) return
-      if (type === 'tool_use') nativeTextToolBoundaryFlush.current?.()
-      emitOutputForRun(chunk, type, projectionPatch)
-    }
-    // P0-3 (2026-07-02 P0 visibility batch) — pre-first-event heartbeats.
-    // Phase stays 'planning' (no new enum value) and only latestText
-    // progresses; publishScopeRunEvent reuses the runtime's recorded
-    // scope-run channel, so this adds zero IPC surface. isCurrentRun keeps a
-    // superseded run's late heartbeat away from the newer run's visible
-    // state (run-continuity contract).
-    const emitHeartbeat = (text: string): void => {
-      if (!isCurrentRun() || !sessionId) return
-      this.host.runtime?.publishScopeRunEvent?.({
-        type: 'updated',
-        scopeId: sessionId,
-        agent: name,
-        runId,
-        ...(taskId ? { taskId } : {}),
-        phase: 'planning',
-        latestText: text,
-        timestamp: new Date().toISOString()
-      })
-    }
-    const emitStatusForRun = (status: string, terminalReason?: TurnTerminalReason | null): void => {
-      runMetaStatus = status
-      if (terminalReason !== undefined) runMetaTerminalReason = terminalReason || null
-      transcriptEvents.push({ kind: 'status', status, terminalReason: terminalReason || null })
-      this.host.emit('status', {
-        agent: name,
-        sessionId,
-        runId,
-        status,
-        ...(typeof terminalReason === 'undefined' ? {} : { terminalReason }),
-        isMock: false
-      })
-    }
-    const emitStatus = (status: string, terminalReason?: TurnTerminalReason | null): void => {
-      if (!isCurrentRun()) return
-      emitStatusForRun(status, terminalReason)
-    }
-    const emitRuntimeError = (error: unknown, terminalReason: TurnTerminalReason): void => {
-      if (!isCurrentRun()) return
-      const message = errorMessage(error)
-      transcriptEvents.push({ kind: 'error', error: message })
-      this.host.emit('error', {
-        agent: name,
-        sessionId,
-        runId,
-        error: message,
-        type: 'runtime',
-        errorKind: terminalReason,
-        recoverable: false
-      })
-    }
+    const {
+      isCurrentRun,
+      isCurrentVisibilityContext,
+      emitOutputForRun,
+      emitOutput,
+      emitHeartbeat,
+      emitStatusForRun,
+      emitStatus,
+      emitRuntimeError,
+      nativeTextToolBoundaryFlush,
+    } = createAgentSdkTurnEventPublishers({
+      host: this.host,
+      name,
+      runId,
+      taskId,
+      sessionId,
+      messageVisibilityEpoch,
+      runGeneration,
+      transcriptEvents,
+      onStatus: (status, terminalReason) => {
+        runMetaStatus = status
+        if (terminalReason !== undefined) runMetaTerminalReason = terminalReason || null
+      },
+    })
     let preparedTurnState: AgentSdkPreparedTurnState | null = null
     const syncOuterFromPreparedTurn = (): void => {
       if (!preparedTurnState) return
@@ -475,6 +428,7 @@ export class AgentSdkTurnOrchestrator {
         runId,
         taskId,
         scopeId: sessionId || null,
+        messageVisibilityEpoch,
         durationMs: Math.max(1, Date.now() - runStartedAt),
         toolCallsUsed: usedTools.length,
         initiator: params.initiator || params.status,
@@ -749,8 +703,15 @@ export class AgentSdkTurnOrchestrator {
             executionOptions: effectiveExecutionOptions,
           })
         }
-        const consentRetryDispatch = sessionId
+        let consentRetryClaimed = false
+        const pendingConsentRetryDispatch = sessionId
           ? this.toolConsentRetries.createDispatch(sessionId, this.host.dispatchToolConsentRetry)
+          : undefined
+        const consentRetryDispatch = pendingConsentRetryDispatch
+          ? () => {
+              consentRetryClaimed = true
+              pendingConsentRetryDispatch()
+            }
           : undefined
         const consentResult = await maybeHandleToolCapabilityConsent({
           conflicts: requestedCapabilityConflicts,
@@ -771,7 +732,7 @@ export class AgentSdkTurnOrchestrator {
           onEnabledAfterFinalize: consentRetryDispatch
         })
         if (consentResult) {
-          if (sessionId) this.toolConsentRetries.discard(sessionId)
+          if (sessionId && !consentRetryClaimed) this.toolConsentRetries.discard(sessionId)
           return consentResult
         }
       }
@@ -869,6 +830,7 @@ export class AgentSdkTurnOrchestrator {
         committedPublicSession,
         session,
         isCurrentRun,
+        isCurrentVisibilityContext,
         toolArgsByName,
         transcriptEvents,
         usedTools,
@@ -929,6 +891,7 @@ export class AgentSdkTurnOrchestrator {
         runId,
         taskId,
         sessionId,
+        messageVisibilityEpoch,
         runStartedAt,
         runHandle,
         abortController,
@@ -971,6 +934,7 @@ export class AgentSdkTurnOrchestrator {
         finalizeBudgetCheckpointReturn,
         buildLocalDocumentWriteBudgetCheckpoint,
         buildToolProgressBudgetCheckpoint,
+        isCurrentVisibilityContext,
         buildResult: (params) => buildExecutionTurnResult(this.host, params)
       })
     } finally {
@@ -981,6 +945,7 @@ export class AgentSdkTurnOrchestrator {
         runId,
         taskId,
         sessionId,
+        messageVisibilityEpoch,
         status: runMetaStatus,
         terminalReason: runMetaTerminalReason,
         taskBudgetRuntime: runMetaBudgetRuntime,
@@ -991,7 +956,6 @@ export class AgentSdkTurnOrchestrator {
         finalText,
         session,
         runHandle,
-        finishBackgroundTaskTerminalReminderRun,
         ownsBudgetCheckpointFlight,
         budgetCheckpointFlightKey
       })

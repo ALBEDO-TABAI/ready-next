@@ -37,6 +37,9 @@ type PushHandler = (event: {
   conversationId: string | null
   questions: AskUserQuestionsCardState['questions']
   askedAt: number
+  readyRunId?: string | null
+  aliasGeneration?: number | null
+  messageVisibilityEpoch?: number | null
 }) => void
 
 function makeSlice(patch: Partial<SessionSlice> = {}): SessionSlice {
@@ -203,6 +206,77 @@ test('pushed card for a background session does NOT bleed into the active top-le
     assert.ok(
       state.sessions['session-B'].messages.some((m) => m.id === 'card-bg'),
       'background card stays parked in its own slice until the user switches',
+    )
+  } finally {
+    teardown()
+  }
+})
+
+test('queued card from before reset cannot refill the new visible epoch', () => {
+  seedStore({
+    sessions: {
+      'session-reset': makeSlice({
+        state: 'live',
+        conversationId: 'conv-reset',
+        aliasGeneration: 5,
+        messageVisibilityEpoch: 1,
+        streamingRequestId: 'run-new',
+      }),
+    },
+    activeSessionId: 'session-reset',
+    sessionId: 'session-reset',
+  })
+  const { push, teardown } = driveListener()
+  try {
+    push({
+      cardId: 'card-before-reset',
+      sessionId: 'session-reset',
+      conversationId: 'conv-reset',
+      readyRunId: 'run-old',
+      aliasGeneration: 4,
+      messageVisibilityEpoch: 0,
+      questions: SAMPLE_QUESTIONS,
+      askedAt: Date.now(),
+    })
+    assert.equal(
+      useAgent.getState().sessions['session-reset'].messages.some((message) => (
+        message.id === 'card-before-reset'
+      )),
+      false,
+    )
+
+    push({
+      cardId: 'card-after-reset',
+      sessionId: 'session-reset',
+      conversationId: 'conv-reset',
+      readyRunId: 'run-new',
+      aliasGeneration: 5,
+      messageVisibilityEpoch: 1,
+      questions: SAMPLE_QUESTIONS,
+      askedAt: Date.now(),
+    })
+    assert.equal(
+      useAgent.getState().sessions['session-reset'].messages.some((message) => (
+        message.id === 'card-after-reset'
+      )),
+      true,
+    )
+
+    push({
+      cardId: 'card-sdk-current',
+      sessionId: 'session-reset',
+      conversationId: 'conv-reset',
+      readyRunId: 'run-new',
+      aliasGeneration: null,
+      messageVisibilityEpoch: 1,
+      questions: SAMPLE_QUESTIONS,
+      askedAt: Date.now(),
+    })
+    assert.equal(
+      useAgent.getState().sessions['session-reset'].messages.some((message) => (
+        message.id === 'card-sdk-current'
+      )),
+      true,
     )
   } finally {
     teardown()

@@ -25,6 +25,14 @@ import type {
   SkillTaskRunRecord,
   SkillTaskRunRepository,
 } from '../main/modules/repositories/skill-task-run-repository'
+import { __setScopeContextEpochDatabaseForTests } from '../main/modules/agent-control/session/scope-context-epoch'
+
+test.before(() => {
+  __setScopeContextEpochDatabaseForTests({
+    getRawDb: () => ({ prepare: () => ({ get: () => undefined }) }) as never,
+  })
+})
+test.after(() => __setScopeContextEpochDatabaseForTests(null))
 
 function createTaskRunRepositoryHarness(): {
   repository: SkillTaskRunRepository
@@ -59,6 +67,7 @@ function createTaskRunRepositoryHarness(): {
         .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0] || null
     },
     get(id: string) { return rows.get(id) || null },
+    getRaw(id: string) { return rows.get(id) || null },
     findByDetachedTaskId(detachedTaskId: string) {
       return Array.from(rows.values()).find((r) => r.detachedTaskId === detachedTaskId) || null
     },

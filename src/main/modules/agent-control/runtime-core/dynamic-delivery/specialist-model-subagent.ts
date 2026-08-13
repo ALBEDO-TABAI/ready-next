@@ -29,6 +29,7 @@ export class SpecialistModelSubAgent implements SubAgent {
     },
   ) {}
 
+  // eslint-disable-next-line require-yield -- retired one-shot worker returns only its terminal result
   async *run(context: SubAgentContext): AsyncGenerator<SubAgentWorkEvent, SubAgentRunResult, void> {
     assertWorkerResourceBundle(this.input.resourceBundle)
     if (context.userRequestVerbatim !== undefined && context.userRequestVerbatim !== this.input.userRequestVerbatim) {

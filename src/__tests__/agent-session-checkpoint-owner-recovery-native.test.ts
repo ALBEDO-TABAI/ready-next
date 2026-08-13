@@ -1,38 +1,18 @@
 import assert from 'node:assert/strict'
-import { createRequire } from 'node:module'
 import test from 'node:test'
 
 import type { AgentInputItem } from '@openai/agents'
-import type { DatabaseConnection } from '../main/modules/database'
-import { runMigrations, type MigrationDatabase } from '../main/modules/migrations'
 import { AgentSessionCheckpointRepository, workflowDigest } from '../main/modules/repositories/agent-session-checkpoint-repository'
 import { TaskProjectionRepository } from '../main/modules/repositories/task-projection-repository'
 import { RunMetaRepository } from '../main/modules/agent-control/task-projection/run-meta-repository'
-import { browserWorkflowStableDigest } from '../main/modules/browser-engine/browser-workflow-evidence'
 import { reconcileStartupRunsOnStartup } from '../main/modules/app-control/startup-run-reconciler'
-import { buildPreparedSkillTurnTruth } from '../main/modules/agent-control/skills/prepared-skill-turn'
-import { buildExplicitNoSkillAuthorization } from '../main/modules/agent-control/skills/skill-tool-authorization'
-import { AgentSessionInputController } from '../main/modules/agent-control/runtime-core/agent-session-input-controller'
-import {
-  buildBrowserVerifierRecoveryItem,
-  createBrowserSuspensionController,
-  withoutBrowserVerifierRecoveryItems,
-} from '../main/modules/agent-control/runtime-core/agent-sdk-browser-suspension'
-import type { ToolBridgeRuntimeContext } from '../main/modules/agent-control/runtime-core/agent-sdk-types'
-import { createTaskBudgetRuntime } from '../main/modules/agent-control/task-projection/run-budget-policy'
-import {
-  KIMI_K3_SESSION_IDENTITY,
-  KIMI_K3_SESSION_IDENTITY_FIELD,
-  inspectKimiK3History,
-} from '../shared/ai-providers/kimi-k3'
 import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
 import { BrowserTargetClaimRepository, BrowserTargetClaimService } from '../main/modules/browser-engine/browser-target-claims'
 import { isAgentBrowserError } from '../main/modules/browser-engine/agent-browser-errors'
 import {
-  kimiK3ProviderTestData as k3ProviderData,
   openProviderCheckpointTestDb as openDb,
   providerCheckpointExecutionBinding as executionBinding,
-  providerCheckpointPreparedSkill as preparedSkill,
+  providerCheckpointPreparedSkill as preparedSkill
 } from './provider-checkpoint-test-fixtures'
 
 
@@ -49,9 +29,14 @@ test('startup recovery converts a stale Browser owner with a clean checkpoint in
     const ownerRunId = 'run-browser-startup-recovery'
     const ownerBinding = executionBinding(ownerRunId)
     const now = '2026-07-19T01:45:00.000Z'
+    db.prepare(
+      `INSERT INTO chat_conversations (id, agent, title, created_at, updated_at)
+       VALUES (?, 'butler', 'Browser startup recovery', ?, ?)`,
+    ).run(scopeId, now, now)
     projections.create({
       taskId: parentTaskId,
       scopeId,
+      messageVisibilityEpoch: 0,
       runId: ownerRunId,
       taskType: 'research',
       module: 'browser',
@@ -69,18 +54,15 @@ test('startup recovery converts a stale Browser owner with a clean checkpoint in
       runId: ownerRunId,
       taskId: parentTaskId,
       scopeId,
+      messageVisibilityEpoch: 0,
       agentId: 'butler',
       executionBinding: ownerBinding,
       status: 'running',
     }, Date.parse(now))
-    db.prepare(
-      `INSERT INTO chat_conversations (id, agent, title, created_at, updated_at)
-       VALUES (?, 'butler', 'Browser startup recovery', ?, ?)`,
-    ).run(scopeId, now, now)
     const sourceMessageId = 'message-browser-startup-recovery'
     db.prepare(
-      `INSERT INTO chat_messages (id, conversation_id, role, content, timestamp, meta_json)
-       VALUES (?, ?, 'user', '完成多个网页研究目标', ?, '{}')`,
+      `INSERT INTO chat_messages (id, conversation_id, role, content, timestamp, meta_json, message_visibility_epoch)
+       VALUES (?, ?, 'user', '完成多个网页研究目标', ?, '{}', 0)`,
     ).run(sourceMessageId, scopeId, now)
     const route = await repository.bindBrowserWorkflowRoute({
       parentTaskId,
@@ -115,6 +97,7 @@ test('startup recovery converts a stale Browser owner with a clean checkpoint in
       ownerRunId,
       scopeId,
       sessionId: null,
+      messageVisibilityEpoch: 0,
     })
     if (isAgentBrowserError(heldClaim)) throw new Error(heldClaim.message)
 
@@ -198,9 +181,14 @@ test('non-done core closeout terminates all browser ledgers without requiring a 
     const ownerRunId = 'run-browser-non-done-closeout'
     const ownerBinding = executionBinding(ownerRunId)
     const now = '2026-07-19T02:00:00.000Z'
+    db.prepare(
+      `INSERT INTO chat_conversations (id, agent, title, created_at, updated_at)
+       VALUES (?, 'butler', 'Browser non-done closeout', ?, ?)`,
+    ).run(scopeId, now, now)
     projections.create({
       taskId: parentTaskId,
       scopeId,
+      messageVisibilityEpoch: 0,
       runId: ownerRunId,
       taskType: 'research',
       module: 'browser',
@@ -218,6 +206,7 @@ test('non-done core closeout terminates all browser ledgers without requiring a 
       runId: ownerRunId,
       taskId: parentTaskId,
       scopeId,
+      messageVisibilityEpoch: 0,
       agentId: 'butler',
       executionBinding: ownerBinding,
       status: 'running',
@@ -233,14 +222,10 @@ test('non-done core closeout terminates all browser ledgers without requiring a 
         runStatePath: '/tmp/stale-browser-closeout-snapshot.json',
       },
     }, Date.parse(now))
-    db.prepare(
-      `INSERT INTO chat_conversations (id, agent, title, created_at, updated_at)
-       VALUES (?, 'butler', 'Browser non-done closeout', ?, ?)`,
-    ).run(scopeId, now, now)
     const sourceMessageId = 'message-browser-non-done-closeout'
     db.prepare(
-      `INSERT INTO chat_messages (id, conversation_id, role, content, timestamp, meta_json)
-       VALUES (?, ?, 'user', '在页面上执行动作', ?, '{}')`,
+      `INSERT INTO chat_messages (id, conversation_id, role, content, timestamp, meta_json, message_visibility_epoch)
+       VALUES (?, ?, 'user', '在页面上执行动作', ?, '{}', 0)`,
     ).run(sourceMessageId, scopeId, now)
     const route = await repository.bindBrowserWorkflowRoute({
       parentTaskId,
@@ -262,6 +247,7 @@ test('non-done core closeout terminates all browser ledgers without requiring a 
       ownerRunId,
       scopeId,
       sessionId: null,
+      messageVisibilityEpoch: 0,
     })
     if (isAgentBrowserError(heldClaim)) throw new Error(heldClaim.message)
     db.prepare(
@@ -417,6 +403,260 @@ test('non-done core closeout terminates all browser ledgers without requiring a 
   }
 })
 
+test('Codex failure closeout retries preserve the first durable terminal identity', async (t) => {
+  if (skipIfSqliteUnavailable(t, 'codex-failure-closeout-retry-native')) return
+  const db = openDb()
+  try {
+    const accessor = { getRawDb: () => db }
+    const projections = new TaskProjectionRepository(accessor)
+    const runMeta = new RunMetaRepository(db)
+    let durableTerminal: {
+      readyRunId: string
+      productTerminalDigest: string
+      closeoutAt: string
+    } | null = null
+    const repository = new AgentSessionCheckpointRepository(accessor, {
+      complete(input) {
+        assert.equal(db.inTransaction, true)
+        if (durableTerminal) assert.deepEqual(input, durableTerminal)
+        else durableTerminal = input
+      },
+    })
+    const parentTaskId = 'parent-codex-failure-retry'
+    const scopeId = 'scope-codex-failure-retry'
+    const ownerRunId = 'run-codex-failure-retry'
+    const ownerBinding = executionBinding(ownerRunId)
+    const startedAt = '2026-08-07T01:00:00.000Z'
+    db.prepare(
+      `INSERT INTO chat_conversations (id, agent, title, created_at, updated_at)
+       VALUES (?, 'butler', 'Codex failure retry', ?, ?)`,
+    ).run(scopeId, startedAt, startedAt)
+    projections.create({
+      taskId: parentTaskId,
+      scopeId,
+      messageVisibilityEpoch: 0,
+      runId: ownerRunId,
+      taskType: 'direct_answer',
+      module: 'system',
+      status: 'running',
+      interactionState: 'running',
+      waitingFor: 'none',
+      steps: [],
+      ownerAgentId: 'butler',
+      taskOrigin: 'user_root',
+      executionBinding: ownerBinding,
+      createdAt: startedAt,
+      updatedAt: startedAt,
+    })
+    runMeta.create({
+      runId: ownerRunId,
+      taskId: parentTaskId,
+      scopeId,
+      messageVisibilityEpoch: 0,
+      agentId: 'butler',
+      executionBinding: ownerBinding,
+      status: 'running',
+    }, Date.parse(startedAt))
+
+    const first = await repository.commitCodexFailureCoreCloseout({
+      parentTaskId,
+      ownerRunId,
+      conversationId: scopeId,
+      status: 'error',
+      terminalReason: 'provider_failed',
+      initiator: 'error',
+      durationMs: 1200,
+      taskType: 'direct_answer',
+      module: 'system',
+      error: 'upstream_unavailable',
+      now: '2026-08-07T01:00:02.000Z',
+    })
+    const retry = await repository.commitCodexFailureCoreCloseout({
+      parentTaskId,
+      ownerRunId,
+      conversationId: scopeId,
+      status: 'error',
+      terminalReason: 'provider_failed',
+      initiator: 'error',
+      durationMs: 9999,
+      taskType: 'direct_answer',
+      module: 'system',
+      error: 'upstream_unavailable',
+      now: '2026-08-07T01:05:00.000Z',
+    })
+    assert.equal(retry.value.productTerminalDigest, first.value.productTerminalDigest)
+    assert.equal(first.value.closeoutAt, '2026-08-07T01:00:02.000Z')
+    assert.equal(retry.value.closeoutAt, first.value.closeoutAt)
+    assert.equal(durableTerminal?.closeoutAt, '2026-08-07T01:00:02.000Z')
+    assert.deepEqual(
+      db.prepare(`
+        SELECT status, terminal_reason, duration_ms, provider_diagnostics_json, updated_at
+          FROM run_meta WHERE run_id = ?
+      `).get(ownerRunId),
+      {
+        status: 'error',
+        terminal_reason: 'provider_failed',
+        duration_ms: 1200,
+        provider_diagnostics_json: JSON.stringify({
+          codexFailure: {
+            contract: 'codex_failure_evidence_v1',
+            error: 'upstream_unavailable',
+            module: 'system',
+          },
+        }),
+        updated_at: Date.parse('2026-08-07T01:00:02.000Z'),
+      },
+    )
+    assert.equal(
+      db.prepare(`SELECT COUNT(*) AS count FROM chat_messages WHERE conversation_id = ? AND role = 'assistant'`)
+        .get<{ count: number }>(scopeId)?.count,
+      0,
+    )
+    await assert.rejects(
+      repository.commitCodexFailureCoreCloseout({
+        parentTaskId,
+        ownerRunId,
+        conversationId: scopeId,
+        status: 'error',
+        terminalReason: 'different_terminal',
+        initiator: 'error',
+        durationMs: 1200,
+        taskType: 'direct_answer',
+        module: 'system',
+        error: 'upstream_unavailable',
+        now: '2026-08-07T01:06:00.000Z',
+      }),
+      /codex_failure_closeout_terminal_retry_conflict/,
+    )
+  } finally {
+    db.close()
+  }
+})
+
+test('Codex failure closeout rolls back when the running owner record is missing or mismatched', async (t) => {
+  if (skipIfSqliteUnavailable(t, 'codex-failure-closeout-owner-mismatch-native')) return
+  const db = openDb()
+  try {
+    const accessor = { getRawDb: () => db }
+    const projections = new TaskProjectionRepository(accessor)
+    const runMeta = new RunMetaRepository(db)
+    let participantCalls = 0
+    const repository = new AgentSessionCheckpointRepository(accessor, {
+      complete() {
+        participantCalls += 1
+      },
+    })
+    const cases = [
+      {
+        suffix: 'run-missing',
+        expectedError: /codex_failure_closeout_run_missing/,
+        runState: null,
+      },
+      {
+        suffix: 'scope-mismatch',
+        expectedError: /codex_failure_closeout_run_mismatch/,
+        runState: 'foreign_scope',
+      },
+      {
+        suffix: 'binding-mismatch',
+        expectedError: /codex_failure_closeout_run_mismatch/,
+        runState: 'foreign_binding',
+      },
+      {
+        suffix: 'status-mismatch',
+        expectedError: /codex_failure_closeout_run_mismatch/,
+        runState: 'terminal_status',
+      },
+    ] as const
+
+    for (const fixture of cases) {
+      const parentTaskId = `parent-codex-failure-${fixture.suffix}`
+      const scopeId = `scope-codex-failure-${fixture.suffix}`
+      const ownerRunId = `run-codex-failure-${fixture.suffix}`
+      const ownerBinding = executionBinding(ownerRunId)
+      const startedAt = '2026-08-07T02:00:00.000Z'
+      db.prepare(
+        `INSERT INTO chat_conversations (id, agent, title, thread_key, created_at, updated_at)
+         VALUES (?, 'butler', ?, ?, ?, ?)`,
+      ).run(scopeId, `Codex failure ${fixture.suffix}`, scopeId, startedAt, startedAt)
+      projections.create({
+        taskId: parentTaskId,
+        scopeId,
+        messageVisibilityEpoch: 0,
+        runId: ownerRunId,
+        taskType: 'direct_answer',
+        module: 'system',
+        status: 'running',
+        interactionState: 'running',
+        waitingFor: 'none',
+        steps: [],
+        ownerAgentId: 'butler',
+        taskOrigin: 'user_root',
+        executionBinding: ownerBinding,
+        createdAt: startedAt,
+        updatedAt: startedAt,
+      })
+      if (fixture.runState) {
+        const runScopeId = fixture.runState === 'foreign_scope'
+          ? `${scopeId}-foreign`
+          : scopeId
+        if (runScopeId !== scopeId) {
+          db.prepare(
+            `INSERT INTO chat_conversations (id, agent, title, thread_key, created_at, updated_at)
+             VALUES (?, 'butler', 'Foreign scope', ?, ?, ?)`,
+          ).run(runScopeId, runScopeId, startedAt, startedAt)
+        }
+        runMeta.create({
+          runId: ownerRunId,
+          taskId: parentTaskId,
+          scopeId: runScopeId,
+          messageVisibilityEpoch: 0,
+          agentId: 'butler',
+          executionBinding: fixture.runState === 'foreign_binding'
+            ? executionBinding(`${ownerRunId}-foreign`)
+            : ownerBinding,
+          status: fixture.runState === 'terminal_status' ? 'error' : 'running',
+        }, Date.parse(startedAt))
+      }
+      const projectionBefore = db.prepare(
+        'SELECT * FROM task_projections WHERE task_id = ?',
+      ).get(parentTaskId)
+      const runBefore = db.prepare('SELECT * FROM run_meta WHERE run_id = ?').get(ownerRunId)
+      const callsBefore = participantCalls
+
+      await assert.rejects(
+        repository.commitCodexFailureCoreCloseout({
+          parentTaskId,
+          ownerRunId,
+          conversationId: scopeId,
+          status: 'error',
+          terminalReason: 'provider_failed',
+          initiator: 'error',
+          durationMs: 1200,
+          taskType: 'direct_answer',
+          module: 'system',
+          error: 'upstream_unavailable',
+          now: '2026-08-07T02:00:02.000Z',
+        }),
+        fixture.expectedError,
+      )
+
+      assert.deepEqual(
+        db.prepare('SELECT * FROM task_projections WHERE task_id = ?').get(parentTaskId),
+        projectionBefore,
+      )
+      assert.deepEqual(
+        db.prepare('SELECT * FROM run_meta WHERE run_id = ?').get(ownerRunId),
+        runBefore,
+      )
+      assert.equal(projections.get(parentTaskId)?.status, 'running')
+      assert.equal(participantCalls, callsBefore)
+    }
+  } finally {
+    db.close()
+  }
+})
+
 test('bound Browser Parent handoff recovery settlements stay inside the workflow transaction', async (t) => {
   if (skipIfSqliteUnavailable(t, 'browser-handoff-recovery-settlement-native')) return
   const db = openDb()
@@ -431,9 +671,14 @@ test('bound Browser Parent handoff recovery settlements stay inside the workflow
       const scopeId = `scope-handoff-recovery-${suffix}`
       const ownerRunId = `run-handoff-recovery-${suffix}`
       const binding = executionBinding(ownerRunId)
+      db.prepare(
+        `INSERT INTO chat_conversations (id, agent, title, thread_key, created_at, updated_at)
+         VALUES (?, 'butler', 'Browser handoff recovery', ?, ?, ?)`,
+      ).run(scopeId, scopeId, now, now)
       projections.create({
         taskId: parentTaskId,
         scopeId,
+        messageVisibilityEpoch: 0,
         runId: ownerRunId,
         taskType: 'research',
         module: 'browser',
@@ -455,14 +700,10 @@ test('bound Browser Parent handoff recovery settlements stay inside the workflow
         createdAt: now,
         updatedAt: now,
       })
-      db.prepare(
-        `INSERT INTO chat_conversations (id, agent, title, created_at, updated_at)
-         VALUES (?, 'butler', 'Browser handoff recovery', ?, ?)`,
-      ).run(scopeId, now, now)
       const sourceMessageId = `message-handoff-recovery-${suffix}`
       db.prepare(
-        `INSERT INTO chat_messages (id, conversation_id, role, content, timestamp, meta_json)
-         VALUES (?, ?, 'user', '继续原任务', ?, '{}')`,
+        `INSERT INTO chat_messages (id, conversation_id, role, content, timestamp, meta_json, message_visibility_epoch)
+         VALUES (?, ?, 'user', '继续原任务', ?, '{}', 0)`,
       ).run(sourceMessageId, scopeId, now)
       await repository.bindBrowserWorkflowRoute({
         parentTaskId,

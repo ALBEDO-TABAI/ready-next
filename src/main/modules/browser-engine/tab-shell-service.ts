@@ -344,6 +344,13 @@ export class BrowserTabShellService {
       case 'hide-all':
         return this.hideAllHosts()
       case 'show': {
+        const activeTabId = this.host.getActiveTabId()
+        const splitTabId = this.host.getSplitTabId()
+        const visibleTabIds = new Set<string>()
+        if (activeTabId) visibleTabIds.add(activeTabId)
+        if (splitTabId && splitTabId !== activeTabId) visibleTabIds.add(splitTabId)
+        this.detachNonTargetHosts(visibleTabIds)
+        if (intent.tabId !== activeTabId) return { success: false }
         const tab = this.ensureTabView(intent.tabId)
         if (!tab.success) return { success: false }
         const bounds = rectToBrowserRect(intent.bounds)
@@ -373,6 +380,13 @@ export class BrowserTabShellService {
         return { success: true }
       }
       case 'set-bounds': {
+        const activeTabId = this.host.getActiveTabId()
+        const splitTabId = this.host.getSplitTabId()
+        const visibleTabIds = new Set<string>()
+        if (activeTabId) visibleTabIds.add(activeTabId)
+        if (splitTabId && splitTabId !== activeTabId) visibleTabIds.add(splitTabId)
+        this.detachNonTargetHosts(visibleTabIds)
+        if (intent.tabId !== activeTabId) return { success: false }
         const bounds = rectToBrowserRect(intent.bounds)
         const hostBounds = this.boundsForTab(intent.tabId, bounds)
         this.host.setViewBounds(bounds)
@@ -383,12 +397,16 @@ export class BrowserTabShellService {
         return { success: true }
       }
       case 'secondary-set-bounds': {
+        const activeTabId = this.host.getActiveTabId()
+        if (intent.tabId === activeTabId) return { success: false }
         const bounds = rectToBrowserRect(intent.bounds)
         const hostBounds = this.boundsForTab(intent.tabId, bounds)
-        const activeTabId = this.host.getActiveTabId()
         const tab = this.ensureTabView(intent.tabId)
         if (!tab.success) return { success: false }
-        this.replaceSplitHostState(intent.tabId, activeTabId ? new Set([activeTabId]) : new Set())
+        this.host.setSplitTabId(intent.tabId)
+        const visibleTabIds = new Set<string>([intent.tabId])
+        if (activeTabId) visibleTabIds.add(activeTabId)
+        this.detachNonTargetHosts(visibleTabIds)
         this.host.setSplitViewBounds(bounds)
         if (!this.host.shouldPresentHosts()) return { success: true }
         this.host.showHost(tab.record.view, hostBounds)

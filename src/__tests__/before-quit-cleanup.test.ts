@@ -93,8 +93,8 @@ test('runBeforeQuitCleanup honours the timeout when one cleanup hangs', async ()
 
   const start = Date.now()
   await runBeforeQuitCleanup({
-    cleanupAgentRuntime: () => hang,
-    cleanupAgentManager: async () => { order.push('agent') },
+    cleanupAgentRuntime: async () => { order.push('runtime') },
+    cleanupAgentManager: () => hang,
     cleanupRsshubManager: async () => { order.push('rss') },
     closeDatabase: () => { order.push('db') },
     logger,
@@ -103,13 +103,32 @@ test('runBeforeQuitCleanup honours the timeout when one cleanup hangs', async ()
 
   // The DB must still close, and we must not have waited for the hung cleanup.
   assert.equal(order[order.length - 1], 'db')
-  assert.ok(order.includes('agent'))
+  assert.ok(order.includes('runtime'))
   assert.ok(order.includes('rss'))
   assert.ok(elapsed < 180, `expected timeout-bounded exit (~50ms), elapsed=${elapsed}ms`)
   assert.ok(rec.warn.some((m) => m.includes('cleanup timed out')), 'expected timeout warning')
 
   // Drain the lingering cleanup so node:test sees a clean event loop.
   await hang
+})
+
+test('runBeforeQuitCleanup never closes DB while the critical agent runtime is still settling', async () => {
+  const order: string[] = []
+  const { logger } = makeLogger()
+  const runtime = deferred<void>()
+  const cleanup = runBeforeQuitCleanup({
+    cleanupAgentRuntime: async () => { await runtime.promise; order.push('runtime') },
+    cleanupAgentManager: async () => { order.push('agent') },
+    cleanupRsshubManager: async () => { order.push('rss') },
+    closeDatabase: () => { order.push('db') },
+    logger,
+  }, { timeoutMs: 10 })
+
+  await new Promise((resolve) => setTimeout(resolve, 30))
+  assert.deepEqual(order, [])
+  runtime.resolve()
+  await cleanup
+  assert.deepEqual(order, ['runtime', 'agent', 'rss', 'db'])
 })
 
 test('runBeforeQuitCleanup runs cleanups in parallel, not sequentially', async () => {
@@ -126,21 +145,19 @@ test('runBeforeQuitCleanup runs cleanups in parallel, not sequentially', async (
   assert.ok(elapsed < 200, `parallel cleanups should complete in ~60ms, elapsed=${elapsed}ms`)
 })
 
-test('runBeforeQuitCleanup does not let one rejecting cleanup abort the others or the DB close', async () => {
+test('runBeforeQuitCleanup cancels quit when the critical runtime cannot prove shutdown', async () => {
   const order: string[] = []
   const { logger, rec } = makeLogger()
 
-  await runBeforeQuitCleanup({
+  await assert.rejects(runBeforeQuitCleanup({
     cleanupAgentRuntime: async () => { throw new Error('runtime boom') },
     cleanupAgentManager: async () => { order.push('agent') },
     cleanupRsshubManager: async () => { order.push('rss') },
     closeDatabase: () => { order.push('db') },
     logger,
-  }, { timeoutMs: 1_000 })
+  }, { timeoutMs: 1_000 }), /runtime boom/)
 
-  assert.ok(order.includes('agent'))
-  assert.ok(order.includes('rss'))
-  assert.equal(order[order.length - 1], 'db')
+  assert.deepEqual(order, [])
   assert.ok(rec.warn.some((m) => m.includes('cleanupAgentRuntime')), 'expected warn about failing cleanup')
 })
 

@@ -79,6 +79,7 @@ export function mergeTaskRuns(params: UseTaskRunMergeParams): TaskCardRun[] {
     return taskProjectionToTaskCardRun({
       // O1 whitelist fields (persisted scope-run runtime data)
       scopeId: run.scopeId,
+      messageVisibilityEpoch: projection?.messageVisibilityEpoch ?? run.messageVisibilityEpoch,
       ownerAgentId: projection?.ownerAgentId ?? null,
         executionBinding: projection?.executionBinding ?? null,
         deliveryState: projection?.deliveryState ?? null,
@@ -131,6 +132,7 @@ export function mergeTaskRuns(params: UseTaskRunMergeParams): TaskCardRun[] {
     const cardRun = taskProjectionToTaskCardRun({
       // O1 whitelist fields copied from inMemoryTaskRuns shell
       scopeId: run.scopeId,
+      messageVisibilityEpoch: projection?.messageVisibilityEpoch ?? run.messageVisibilityEpoch,
       ownerAgentId: projection?.ownerAgentId ?? null,
       executionBinding: projection?.executionBinding ?? null,
       deliveryState: projection?.deliveryState ?? null,
@@ -225,6 +227,7 @@ export function mergeTaskRuns(params: UseTaskRunMergeParams): TaskCardRun[] {
       const cardRun = taskProjectionToTaskCardRun({
         // O1 whitelist
         scopeId: scope.id,
+        messageVisibilityEpoch: projection.messageVisibilityEpoch,
         ownerAgentId: projection.ownerAgentId ?? null,
         executionBinding: projection.executionBinding ?? null,
         deliveryState: projection.deliveryState ?? null,

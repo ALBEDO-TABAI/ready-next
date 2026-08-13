@@ -107,7 +107,7 @@ function BackdropScene({ scene, animate }: { scene: LabScene; animate: boolean }
               <p><strong>需要你协助：</strong>请在浏览器中打开第一篇笔记页面，然后我可以用 browser_collect 接力下载全部图片。</p>
               <p>或者你可以告诉我你希望怎么处理——是只记录 URL 列表，还是需要我等你操作后继续下载？</p>
               <div className="lab-chat__capsule">
-                <span><strong>正在理解需求</strong>　正在整理任务边界、上下文与可用能力</span>
+                <span><strong>正在理解需求</strong> · 正在整理任务边界、上下文与可用能力</span>
                 <em>已完成</em>
               </div>
               <p>采集发现阶段完成，共找到 11 张图片 URL。但 browser_collect 只完成了发现，还没有实际下载到本地。</p>

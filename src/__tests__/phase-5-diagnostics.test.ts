@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
+import { __setScopeContextEpochDatabaseForTests } from '../main/modules/agent-control/session/scope-context-epoch'
 
 import { executeInspectRunState } from '../main/modules/tools/skill-primitives/inspect-run-state'
 import {
@@ -25,13 +26,23 @@ const PYTHON_RUNTIME_PROVISIONER_PATH = new URL('../main/modules/skills-runtime/
 const CONTINUATION_STATE_PATH = new URL('../main/modules/agent-control/contracts/continuation-state.ts', import.meta.url)
 const IPC_HANDLER_PATH = new URL('../main/modules/claude-bridge/ipc-handler.ts', import.meta.url)
 const PRELOAD_PATH = new URL('../preload/index.ts', import.meta.url)
-const CHAT_PANEL_PATH = new URL('../renderer/components/agent/ChatPanel.tsx', import.meta.url)
+const REFERENCE_SKILL_HINT_HOOK_PATH = new URL(
+  '../renderer/components/agent/chat-panel/reference-skill/use-reference-skill-hint.ts',
+  import.meta.url,
+)
 const SKILLS_TOOLS_STATIC_PATH = new URL('../main/modules/tools/skills-tools-static.ts', import.meta.url)
 const PRIMITIVE_DEFS_PATH = new URL('../main/modules/tools/skill-primitives/tool-defs.ts', import.meta.url)
 
 function readSource(url: URL): string {
   return readFileSync(url, 'utf8')
 }
+
+test.before(() => {
+  __setScopeContextEpochDatabaseForTests({
+    getRawDb: () => ({ prepare: () => ({ get: () => undefined }) }) as never,
+  })
+})
+test.after(() => __setScopeContextEpochDatabaseForTests(null))
 
 // --- Phase 5.1 — skill_inspect_run_state ------------------------------------
 
@@ -250,11 +261,11 @@ test('Phase 5.3 wiring — preload exposes onReferenceSkillHintChanged subscribe
   assert.match(source, /ipcRenderer\.on\('agent:referenceSkillHintChanged'/)
 })
 
-test('Phase 5.3 wiring — ChatPanel subscribes to push events and refreshes badge', () => {
-  const source = readSource(CHAT_PANEL_PATH)
+test('Phase 5.3 wiring — reference-skill hook subscribes to push events and refreshes badge', () => {
+  const source = readSource(REFERENCE_SKILL_HINT_HOOK_PATH)
   assert.match(source, /onReferenceSkillHintChanged\(\(data\)\s*=>\s*\{/)
   // Must filter to the current scope (otherwise unrelated scope events would
   // trigger noisy refetches).
   assert.match(source, /data\.scopeId\s*!==\s*currentScopeId/)
-  assert.match(source, /void refreshReferenceSkillHint\(currentScopeId\)/)
+  assert.match(source, /void refresh\(currentScopeId\)/)
 })

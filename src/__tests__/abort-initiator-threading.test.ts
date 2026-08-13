@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import test from 'node:test'
+import test, { after, before } from 'node:test'
 
 import {
   AgentSdkRuntime,
@@ -16,6 +16,12 @@ import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
 import { canonicalCoreCloseoutTestPort } from './helpers/canonical-core-closeout-test-port'
 import { createTaskBudgetRuntime } from '../main/modules/agent-control/task-projection/run-budget-policy'
 import { setBrowserTargetClaimRunCloseoutPort } from '../main/modules/browser-engine/browser-target-claim-closeout'
+import { __setScopeContextEpochDatabaseForTests } from '../main/modules/agent-control/session/scope-context-epoch'
+
+before(() => {
+  __setScopeContextEpochDatabaseForTests({ getRawDb: () => ({ prepare: () => ({ get: () => undefined }) }) as never })
+})
+after(() => __setScopeContextEpochDatabaseForTests(null))
 
 test('abort-initiator-threading declares transitive sqlite ABI guard', (t) => {
   skipIfSqliteUnavailable(t, 'abort-initiator-threading transitive sqlite load')
@@ -275,6 +281,7 @@ test('S0 R3: delivery deadline preserves a durable Browser task as a resumable c
     taskId: 'task-delivery-browser',
     scopeId: 'scope-delivery-browser',
     runId: 'run-delivery-browser',
+    messageVisibilityEpoch: 0,
     taskType: 'research',
     module: 'browser',
     status: 'running',
@@ -305,7 +312,6 @@ test('S0 R3: delivery deadline preserves a durable Browser task as a resumable c
   })
   runtime.setRuntime({
     ...canonicalCoreCloseoutTestPort(),
-    getRunMetaRepository: () => null,
     getTaskProjection: () => projection,
     getTaskProjectionStore: () => ({
       get: () => projection,
@@ -325,6 +331,7 @@ test('S0 R3: delivery deadline preserves a durable Browser task as a resumable c
     'run-delivery-browser',
     {
       publicSessionId: 'scope-delivery-browser',
+      messageVisibilityEpoch: 0,
       taskId: 'task-delivery-browser',
       deliveryMode: 'standard',
       taskBudgetRuntime: createTaskBudgetRuntime('research'),

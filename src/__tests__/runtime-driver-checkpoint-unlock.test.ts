@@ -346,9 +346,20 @@ test('X2.6 — hung main timeout report still releases the renderer lock', async
   driverApi.armInfrastructureWatchdog('scope-A', 'req-A', { timeoutMs: 10 })
 
   // A hung report resolves at the 5s ack window; B step 2 then RETRIES once
-  // (another ~5s ack + 2s delay) before declaring main unreachable. Wait past
-  // both attempts (~12s) + headroom.
-  await new Promise((resolve) => setTimeout(resolve, 12500))
+  // (another ~5s ack + 2s delay) before declaring main unreachable. Under the
+  // full parallel suite the event loop can be stalled past several expired
+  // timers at once, so wait for the observable terminal state instead of
+  // racing the implementation with one fixed wall-clock sleep.
+  const deadline = Date.now() + 30_000
+  while (
+    Date.now() < deadline
+    && (
+      infrastructureTimeoutReports.length < 2
+      || getSessionSlice(useAgent.getState(), 'session-A').composerLocked
+    )
+  ) {
+    await new Promise((resolve) => setTimeout(resolve, 100))
+  }
 
   const state = useAgent.getState()
   const slice = getSessionSlice(state, 'session-A')

@@ -106,6 +106,7 @@ function makeRecord(taskId: string, scopeId: string): TaskProjectionRecord {
     taskId,
     taskOrigin: 'legacy',
     scopeId,
+    messageVisibilityEpoch: 0,
     runId: 'r',
     parentTaskId: null,
     parentStepId: null,

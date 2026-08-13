@@ -11,7 +11,7 @@ import SkillInlinedToast from '../renderer/components/skill/SkillInlinedToast'
 type TestGlobal = typeof globalThis & Record<string, unknown>
 
 function installDom() {
-  const dom = new JSDOM('<!doctype html><div id="root"></div><div data-liquid-scroll-root="chat-messages"><div data-skill-ask-user-anchor="true"></div><div data-chat-bottom-overlay-spacer="true"></div></div>', {
+  const dom = new JSDOM('<!doctype html><div data-liquid-scroll-root="chat-messages"><div id="root"></div><div data-chat-bottom-overlay-spacer="true"></div></div>', {
     url: 'http://localhost/workbench',
     pretendToBeVisual: true,
   })
@@ -102,9 +102,11 @@ test('SkillAskUserPrompt hydrates pending skill questions from electronAPI.skill
 	    const spacer = handle.dom.window.document.querySelector('[data-chat-bottom-overlay-spacer="true"]') as HTMLElement | null
 	    assert.ok(prompt)
 	    assert.ok(chatRoot?.contains(prompt), 'skill ask-user prompt should render inside the chat message stream')
-	    assert.equal(prompt.parentElement, anchor, 'skill ask-user prompt should portal into the fixed chat-stream anchor')
-	    assert.equal(anchor?.parentElement, chatRoot)
-	    assert.equal(anchor?.nextElementSibling, spacer, 'anchor sits before the composer spacer')
+	    assert.equal(prompt.parentElement, anchor, 'skill ask-user prompt should stay in its chat-owned anchor')
+	    assert.equal(anchor?.parentElement, handle.rootElement)
+	    assert.equal(handle.rootElement.parentElement, chatRoot)
+	    assert.equal(handle.rootElement.nextElementSibling, spacer, 'chat-owned prompt sits before the composer spacer')
+	    assert.equal(anchor?.getAttribute('aria-hidden'), null)
 	    assert.notEqual(prompt.style.position, 'fixed')
     assert.equal(prompt.style.zIndex, '')
     assert.equal(prompt.style.width, '100%')
@@ -124,6 +126,54 @@ test('SkillAskUserPrompt hydrates pending skill questions from electronAPI.skill
     })
 
     assert.deepEqual(submitted, { executionId: 'ask-1', answer: '任务 A' })
+  } finally {
+    if (root) {
+      await act(async () => {
+        root?.unmount()
+      })
+    }
+    handle.restore()
+  }
+})
+
+test('SkillAskUserPrompt reconciles a pending question when the IPC push is missed', async () => {
+  const handle = installDom()
+  let root: Root | null = null
+  try {
+    let pending: Array<Record<string, unknown>> = []
+    Object.defineProperty(handle.dom.window, 'electronAPI', {
+      configurable: true,
+      value: {
+        skills: {
+          listPendingAskUser: async () => pending,
+          onAskUserQuestion: () => () => undefined,
+          onAskUserCleared: () => () => undefined,
+          submitAskUserAnswer: async () => ({ success: true }),
+        },
+      },
+    })
+
+    root = createRoot(handle.rootElement)
+    await act(async () => {
+      root?.render(createElement(SkillAskUserPrompt))
+    })
+    await flush()
+    assert.doesNotMatch(handle.dom.window.document.body.textContent || '', /授权完成了吗/)
+
+    pending = [{
+      executionId: 'ask-late',
+      sessionId: 'session-1',
+      skillId: 'lark-cli',
+      question: '授权完成了吗',
+      options: ['已完成'],
+      placeholder: null,
+      askedAt: 2,
+    }]
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 550))
+    })
+
+    assert.match(handle.dom.window.document.body.textContent || '', /授权完成了吗/)
   } finally {
     if (root) {
       await act(async () => {

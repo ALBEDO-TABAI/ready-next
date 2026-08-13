@@ -1,4 +1,4 @@
-import { describe, it, beforeEach } from 'node:test'
+import { after, before, describe, it, beforeEach } from 'node:test'
 import assert from 'node:assert/strict'
 
 import { SkillContextOrchestrator } from '../main/modules/agent-control/skills/skill-context-orchestrator'
@@ -6,6 +6,14 @@ import {
   rememberLastReferenceSkill,
   _resetLastReferenceSkillHintsForTests,
 } from '../main/modules/agent-control/skills/skill-reference-hints'
+import { __setScopeContextEpochDatabaseForTests } from '../main/modules/agent-control/session/scope-context-epoch'
+
+before(() => {
+  __setScopeContextEpochDatabaseForTests({
+    getRawDb: () => ({ prepare: () => ({ get: () => undefined }) }) as never,
+  })
+})
+after(() => __setScopeContextEpochDatabaseForTests(null))
 
 // skill-resume G6 — when the user fires a retry intent, G3 synthesizes a
 // skillContextInjectionText so findExplicitlyRequestedSkills succeeds. That

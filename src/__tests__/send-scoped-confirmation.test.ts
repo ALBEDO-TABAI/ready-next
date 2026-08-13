@@ -1,14 +1,16 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import type { PersistedIngress } from '../shared/ipc-contracts/agent-runtime'
+import type { IngressAdmittedEvent, PersistedIngress } from '../shared/ipc-contracts/agent-runtime'
 import {
   CodexProductRunPreparer,
   preparedCodexProductRunMatchesIngress,
 } from '../main/modules/agent-control/codex-runtime/codex-product-run-preparer'
 import { textUserInput } from '../main/modules/agent-control/codex-runtime/codex-turn-input-builder'
+import { createCodexToolFixture } from './utils/codex-tool-fixture'
 import {
   IngressPersistenceError,
+  PrePersistenceAdmissionError,
   resolveAttachmentConfirmation,
   runConfirmedSendScoped,
   type StartIdentityReservationMethods,
@@ -50,6 +52,48 @@ const canonicalMessage = {
   meta: {},
 }
 
+test('typed identity-resolution rejection preserves busy and reset-required semantics', async () => {
+  for (const failure of [
+    new PrePersistenceAdmissionError('thread_busy', true, 'busy-evidence', 'codex_thread_busy'),
+    new PrePersistenceAdmissionError(
+      'conversation_reset_required', false, 'reset-evidence', 'codex_conversation_reset_required',
+    ),
+  ]) {
+    const harness = createHarness({ resolveError: failure })
+    const result = await harness.send()
+    assert.equal(result.success, false)
+    assert.equal(result.disposition, 'rejected_before_persistence')
+    assert.equal(result.errorKind, failure.code)
+    assert.equal(result.retryableByUser, failure.retryableByUser)
+    assert.deepEqual(harness.calls, ['resolve:turn/start'])
+  }
+})
+
+test('typed prepare rejection preserves configuration and external-service semantics', async () => {
+  for (const code of ['configuration_unavailable', 'external_service_unavailable'] as const) {
+    const harness = createHarness({
+      rawPrepareResult: {
+        ok: false,
+        code,
+        retryableByUser: true,
+        error: `codex_${code}`,
+        admissionEvidenceDigest: `${code}-digest`,
+      },
+    })
+    const result = await harness.send()
+    assert.equal(result.success, false)
+    assert.equal(result.disposition, 'rejected_before_persistence')
+    assert.equal(result.errorKind, code)
+    assert.equal(result.retryableByUser, true)
+    assert.deepEqual(harness.calls, [
+      'resolve:turn/start',
+      'reserve:turn/start',
+      'prepare-dispatch',
+      'release-pre-persistence-reservation',
+    ])
+  }
+})
+
 function createHarness(overrides: Partial<{
   scope: Record<string, unknown> | null
   methods: StartIdentityReservationMethods
@@ -68,9 +112,11 @@ function createHarness(overrides: Partial<{
   prepareFactory: () => unknown
 }> = {}) {
   const calls: string[] = []
+  const emittedEvents: IngressAdmittedEvent[] = []
   const methods = overrides.methods || (['turn/start'] as const)
   return {
     calls,
+    emittedEvents,
     send: () => runConfirmedSendScoped({
       scopeId: 'scope-1',
       requestId: 'request-1',
@@ -166,14 +212,16 @@ function createHarness(overrides: Partial<{
             requestId: 'request-1',
             scopeId: 'scope-1',
             originUserMessageId: 'user-1',
+            aliasGeneration: 6,
             ingressAdmittedRevision: 1,
             ingressAdmittedDigest: 'ingress-admitted-digest',
             admittedAt: '2026-08-07T00:00:00.000Z',
           },
         }
       },
-      emitIngressAdmitted: () => {
+      emitIngressAdmitted: (event) => {
         calls.push('emit-ingress-admitted')
+        emittedEvents.push(event)
         if (overrides.emitError) throw overrides.emitError
       },
       releaseReservationAfterIngressFailure: async () => {
@@ -219,6 +267,10 @@ test('existing thread reserves its complete one-member set before any persistenc
   const result = await harness.send()
 
   assert.equal(result.disposition, 'terminal_success')
+  if (result.disposition === 'terminal_success') {
+    assert.equal(result.aliasGeneration, 6)
+  }
+  assert.equal(harness.emittedEvents[0]?.aliasGeneration, 6)
   assert.deepEqual(harness.calls, [
     'resolve:turn/start',
     'reserve:turn/start',
@@ -322,15 +374,7 @@ test('a well-shaped prepared run for another scope is rejected before persistenc
     currentInput: [textUserInput('hello')],
     explicitResourceEnvelope: { input: [], resourceRefs: [] },
     resourceAdditionalContext: [],
-    readyToolSurface: {
-      surfaceId: 'surface-1',
-      toolSurfaceDigest: 'surface-digest',
-      toolNames: ['ready_read'],
-    },
-    readyTurnToolAuthorization: {
-      authorizationId: 'authorization-1',
-      authorizationDigest: 'authorization-digest',
-    },
+    ...createCodexToolFixture(),
     authorizationOwnerId: 'authorization-owner-1',
     resourceOwnerId: 'resource-owner-1',
     productBudgetSeed: {
@@ -388,15 +432,7 @@ test('resource version conflict from the real preparer cannot begin ingress pers
         currentInput: [textUserInput('hello')],
         explicitResourceEnvelope: { input: [], resourceRefs: [currentResource] },
         resourceAdditionalContext: [{ ...currentResource, currentDigest: 'conflicting-digest-v2' }],
-        readyToolSurface: {
-          surfaceId: 'surface-1',
-          toolSurfaceDigest: 'surface-digest',
-          toolNames: ['ready_read'],
-        },
-        readyTurnToolAuthorization: {
-          authorizationId: 'authorization-1',
-          authorizationDigest: 'authorization-digest',
-        },
+        ...createCodexToolFixture(),
         authorizationOwnerId: 'authorization-owner-1',
         resourceOwnerId: 'resource-owner-1',
         productBudgetSeed: {

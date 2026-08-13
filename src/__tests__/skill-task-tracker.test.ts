@@ -59,6 +59,9 @@ function createTaskRunRepositoryHarness() {
     get(id: string) {
       return rows.get(id) || null
     },
+    getRaw(id: string) {
+      return rows.get(id) || null
+    },
     findByDetachedTaskId(detachedTaskId: string) {
       return Array.from(rows.values())
         .filter((row) => row.detachedTaskId === detachedTaskId)

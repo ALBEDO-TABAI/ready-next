@@ -65,6 +65,9 @@ export interface AskUserQuestionsCardRecord {
   scopeId?: string | null
   agent?: string | null
   requestId?: string | null
+  readyRunId?: string | null
+  aliasGeneration?: number | null
+  messageVisibilityEpoch?: number | null
   responsePolicy?: AskUserQuestionsResponsePolicy
   lifecycleType?: InteractionLifecycleIdentity['type']
   questions: AskUserQuestionSpec[]
@@ -81,6 +84,9 @@ export interface PendingAskUserQuestionsCardView {
   scopeId?: string | null
   agent?: string | null
   requestId?: string | null
+  readyRunId?: string | null
+  aliasGeneration?: number | null
+  messageVisibilityEpoch?: number | null
   responsePolicy?: AskUserQuestionsResponsePolicy
   lifecycleType?: InteractionLifecycleIdentity['type']
   questions: AskUserQuestionSpec[]
@@ -268,6 +274,9 @@ export class AskUserQuestionsStore {
         scopeId: record.scopeId ?? record.sessionId,
         agent: record.agent ?? null,
         requestId: record.requestId ?? null,
+        readyRunId: record.readyRunId ?? null,
+        aliasGeneration: record.aliasGeneration ?? null,
+        messageVisibilityEpoch: record.messageVisibilityEpoch ?? null,
         responsePolicy: record.responsePolicy,
         lifecycleType: record.lifecycleType,
         questions: record.questions,

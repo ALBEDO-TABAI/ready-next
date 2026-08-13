@@ -79,6 +79,8 @@ export function toAgentSdkToolResult(output: ToolExecutionOutput): string | Tool
         image: { data: part.data, mediaType: part.mediaType },
         detail: part.detail || 'auto',
       })
+    } else if (part.type === 'audio') {
+      throw new Error('agent_sdk_audio_tool_result_unsupported')
     } else {
       content.push({ type: 'file', file: part.path })
     }

@@ -21,6 +21,7 @@
 import { createHash } from 'node:crypto'
 
 import { logAgentMetric } from '../metrics'
+import { isSafeMessageVisibilityEpoch, readScopeContextEpoch } from '../session/scope-context-epoch'
 
 export type AuthActionCategory = 'login' | 'upload' | 'send_external' | 'collect_risky_site'
 
@@ -31,6 +32,7 @@ export interface AuthorizationFact {
   source: 'user_verbatim' | 'confirmation_card'
   evidence: string
   scopeId: string
+  messageVisibilityEpoch?: number
   createdAt: number
   expiresAt: number
   consumedCount: number
@@ -42,6 +44,14 @@ const factsByScope = new Map<string, Map<string, AuthorizationFact>>()
 
 export function __clearAuthorizationFactsForTests(): void {
   factsByScope.clear()
+}
+
+export function clearAuthorizationFactsForScope(scopeId: string): number {
+  const normalizedScopeId = String(scopeId || '').trim()
+  if (!normalizedScopeId) return 0
+  const count = factsByScope.get(normalizedScopeId)?.size ?? 0
+  factsByScope.delete(normalizedScopeId)
+  return count
 }
 
 /** Canonical object id per category (05 §3.4.2). Null = not canonicalizable
@@ -91,8 +101,15 @@ function buildFact(params: {
   evidence: string
   now: number
   ttlMs?: number
+  messageVisibilityEpoch?: number
 }): AuthorizationFact | null {
   if (!params.scopeId) return null
+  const durable = readScopeContextEpoch(params.scopeId)
+  if (durable.kind === 'closed' || durable.kind === 'unavailable') return null
+  if (
+    durable.kind === 'open'
+    && params.messageVisibilityEpoch !== durable.messageVisibilityEpoch
+  ) return null
   const canonical = canonicalObjectId(params.actionCategory, params.objectRef)
   if (!canonical) return null
   const fingerprint = objectFingerprintOf(canonical)
@@ -103,6 +120,11 @@ function buildFact(params: {
     source: params.source,
     evidence: params.evidence,
     scopeId: params.scopeId,
+    ...(durable.kind === 'open'
+      ? { messageVisibilityEpoch: durable.messageVisibilityEpoch }
+      : isSafeMessageVisibilityEpoch(params.messageVisibilityEpoch)
+        ? { messageVisibilityEpoch: params.messageVisibilityEpoch }
+        : {}),
     createdAt: params.now,
     expiresAt: params.now + (params.ttlMs ?? AUTHORIZATION_FACT_TTL_MS),
     consumedCount: 0,
@@ -117,6 +139,7 @@ export function recordVerbatimGrant(params: {
   verbatim: string
   now?: number
   ttlMs?: number
+  messageVisibilityEpoch?: number
 }): AuthorizationFact | null {
   const fact = buildFact({
     ...params,
@@ -136,6 +159,7 @@ export function recordConfirmationGrant(params: {
   paramsSha256: string
   now?: number
   ttlMs?: number
+  messageVisibilityEpoch?: number
 }): AuthorizationFact | null {
   const fact = buildFact({
     ...params,
@@ -151,9 +175,16 @@ export function consumeAuthorizationFact(params: {
   scopeId: string | null | undefined
   actionCategory: AuthActionCategory
   objectRef: string | null | undefined
+  messageVisibilityEpoch?: number
   now?: number
 }): boolean {
   if (!params.scopeId || !params.objectRef) return false
+  const durable = readScopeContextEpoch(params.scopeId)
+  if (durable.kind === 'closed' || durable.kind === 'unavailable') return false
+  if (
+    durable.kind === 'open'
+    && params.messageVisibilityEpoch !== durable.messageVisibilityEpoch
+  ) return false
   const canonical = canonicalObjectId(params.actionCategory, params.objectRef)
   if (!canonical) return false
   const scoped = factsByScope.get(params.scopeId)
@@ -161,6 +192,13 @@ export function consumeAuthorizationFact(params: {
   const key = factKey(objectFingerprintOf(canonical), params.actionCategory)
   const fact = scoped.get(key)
   if (!fact) return false
+  if (
+    durable.kind === 'open'
+    && fact.messageVisibilityEpoch !== durable.messageVisibilityEpoch
+  ) {
+    scoped.delete(key)
+    return false
+  }
   const now = params.now ?? Date.now()
   if (now >= fact.expiresAt) {
     scoped.delete(key)
@@ -181,7 +219,11 @@ export function consumeAuthorizationFact(params: {
 export function revokeAuthorizationsForCategories(
   scopeId: string,
   categories: ReadonlyArray<AuthActionCategory>,
+  messageVisibilityEpoch?: number,
 ): number {
+  const durable = readScopeContextEpoch(scopeId)
+  if (durable.kind === 'closed' || durable.kind === 'unavailable') return 0
+  if (durable.kind === 'open' && messageVisibilityEpoch !== durable.messageVisibilityEpoch) return 0
   const scoped = factsByScope.get(scopeId)
   if (!scoped) return 0
   let revoked = 0

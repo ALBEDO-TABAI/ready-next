@@ -12,6 +12,7 @@ import {
   type BrowserActionKind,
   type BrowserActionRecord,
 } from '../domain-adapters/browser-action-heuristics'
+import { isSafeMessageVisibilityEpoch, readScopeContextEpoch } from './scope-context-epoch'
 
 export { domainsLikelyMatch, normalizeDomain }
 export type { BrowserActionKind, BrowserActionRecord }
@@ -20,8 +21,63 @@ function normalizeWhitespace(value: string): string {
   return String(value || '').trim().replace(/\s+/g, ' ')
 }
 
+type ResolvedContinuityEpoch = { admitted: true; epoch?: number } | { admitted: false }
+
+function resolveContinuityReadEpoch(
+  sessionId: string,
+  options?: SessionContinuityEpochOptions,
+): ResolvedContinuityEpoch {
+  const requestedEpoch = isSafeMessageVisibilityEpoch(options?.messageVisibilityEpoch)
+    ? options.messageVisibilityEpoch
+    : undefined
+  const currentOverride = isSafeMessageVisibilityEpoch(options?.currentMessageVisibilityEpoch)
+    ? options.currentMessageVisibilityEpoch
+    : undefined
+  const durable = readScopeContextEpoch(sessionId)
+  if (durable.kind === 'closed' || durable.kind === 'unavailable') return { admitted: false }
+  if (durable.kind === 'open') {
+    if (requestedEpoch !== undefined && requestedEpoch !== durable.messageVisibilityEpoch) {
+      return { admitted: false }
+    }
+    if (currentOverride !== undefined && currentOverride !== durable.messageVisibilityEpoch) {
+      return { admitted: false }
+    }
+    return { admitted: true, epoch: durable.messageVisibilityEpoch }
+  }
+  const epoch = currentOverride ?? requestedEpoch
+  return epoch === undefined ? { admitted: true } : { admitted: true, epoch }
+}
+
+function resolveContinuityWriteEpoch(
+  sessionId: string,
+  options?: SessionContinuityEpochOptions,
+): ResolvedContinuityEpoch {
+  const frozenEpoch = isSafeMessageVisibilityEpoch(options?.messageVisibilityEpoch)
+    ? options.messageVisibilityEpoch
+    : undefined
+  const currentOverride = isSafeMessageVisibilityEpoch(options?.currentMessageVisibilityEpoch)
+    ? options.currentMessageVisibilityEpoch
+    : undefined
+  const durable = readScopeContextEpoch(sessionId)
+  if (durable.kind === 'closed' || durable.kind === 'unavailable') return { admitted: false }
+  const currentEpoch = durable.kind === 'open'
+    ? durable.messageVisibilityEpoch
+    : currentOverride
+  if (currentEpoch !== undefined) {
+    if (frozenEpoch === undefined || frozenEpoch !== currentEpoch) return { admitted: false }
+    return { admitted: true, epoch: frozenEpoch }
+  }
+  return frozenEpoch === undefined ? { admitted: true } : { admitted: true, epoch: frozenEpoch }
+}
+
+function continuityEpochMatches(recordEpoch: number | undefined, resolved: ResolvedContinuityEpoch): boolean {
+  if (!resolved.admitted) return false
+  return resolved.epoch === undefined || recordEpoch === resolved.epoch
+}
+
 export interface BrowserWorkflowState {
   sessionId: string
+  messageVisibilityEpoch?: number
   tabId?: string
   url: string
   title: string
@@ -43,6 +99,7 @@ export interface BrowserWorkflowState {
 }
 
 export interface SkillRunRecord {
+  messageVisibilityEpoch?: number
   toolName: string
   skillId: string
   action: string
@@ -61,11 +118,21 @@ export interface SkillRunRecord {
 }
 
 interface ContinuationStateRecord {
+  messageVisibilityEpoch?: number
   updatedAt: number
   state: ContinuationState
 }
 
-const recentBrowserActions = new Map<string, BrowserActionRecord[]>()
+type ContextBrowserActionRecord = BrowserActionRecord & { messageVisibilityEpoch?: number }
+
+export interface SessionContinuityEpochOptions {
+  /** Frozen epoch owned by the writer, or expected epoch for a current read. */
+  messageVisibilityEpoch?: number
+  /** Test/transaction readback hook used to prove stale late-writer rejection. */
+  currentMessageVisibilityEpoch?: number
+}
+
+const recentBrowserActions = new Map<string, ContextBrowserActionRecord[]>()
 const browserWorkflowStates = new Map<string, BrowserWorkflowState>()
 const recentSkillRuns = new Map<string, SkillRunRecord[]>()
 const recentContinuationStates = new Map<string, ContinuationStateRecord[]>()
@@ -81,14 +148,18 @@ function pruneToRecent<T extends { updatedAt: number }>(items: T[], limit: numbe
 }
 
 interface PersistedSessionContinuity {
-  version: 1 | 2 | 3 | 4
-  recentBrowserActions: Array<{ sessionId: string; records: BrowserActionRecord[] }>
+  version: 1 | 2 | 3 | 4 | 5
+  recentBrowserActions: Array<{ sessionId: string; records: ContextBrowserActionRecord[] }>
   browserWorkflowStates: BrowserWorkflowState[]
   recentSkillRuns: Array<{ sessionId: string; records: SkillRunRecord[] }>
   recentContinuationStates?: Array<{
     sessionId: string
     state?: ContinuationState
-    states?: Array<{ updatedAt: number; state: ContinuationState }>
+    states?: Array<{
+      messageVisibilityEpoch?: number
+      updatedAt: number
+      state: ContinuationState
+    }>
   }>
 }
 
@@ -100,13 +171,14 @@ function resolveContinuityStoragePath(): string {
 
 function toPersistedPayload(): PersistedSessionContinuity {
   return {
-    version: 4,
+    version: 5,
     recentBrowserActions: Array.from(recentBrowserActions.entries()).map(([sessionId, records]) => ({ sessionId, records })),
     browserWorkflowStates: Array.from(browserWorkflowStates.values()),
     recentSkillRuns: Array.from(recentSkillRuns.entries()).map(([sessionId, records]) => ({ sessionId, records })),
     recentContinuationStates: Array.from(recentContinuationStates.entries()).map(([sessionId, states]) => ({
       sessionId,
       states: states.map((item) => ({
+        messageVisibilityEpoch: item.messageVisibilityEpoch,
         updatedAt: item.updatedAt,
         state: item.state,
       })),
@@ -188,10 +260,13 @@ function hydrateFromDisk(): void {
       for (const item of parsed.recentBrowserActions) {
         if (!item || typeof item !== 'object') continue
         const sessionId = normalizeWhitespace((item as { sessionId?: string }).sessionId || '')
-        const records = Array.isArray((item as { records?: BrowserActionRecord[] }).records)
+        const records = Array.isArray((item as { records?: ContextBrowserActionRecord[] }).records)
           ? pruneToRecent(
-            (item as { records: BrowserActionRecord[] }).records.map((record) => ({
+            (item as { records: ContextBrowserActionRecord[] }).records.map((record) => ({
               ...record,
+              messageVisibilityEpoch: isSafeMessageVisibilityEpoch(record.messageVisibilityEpoch)
+                ? record.messageVisibilityEpoch
+                : undefined,
               kind: record.kind,
               value: normalizeWhitespace(record.value),
               normalizedValue: normalizeWhitespace(record.normalizedValue),
@@ -211,6 +286,9 @@ function hydrateFromDisk(): void {
         browserWorkflowStates.set(record.sessionId, {
           ...record,
           sessionId: normalizeWhitespace(record.sessionId),
+          messageVisibilityEpoch: isSafeMessageVisibilityEpoch(record.messageVisibilityEpoch)
+            ? record.messageVisibilityEpoch
+            : undefined,
           url: normalizeWhitespace(record.url),
           title: normalizeWhitespace(record.title),
           domain: normalizeWhitespace(record.domain),
@@ -256,10 +334,25 @@ function hydrateFromDisk(): void {
       for (const item of parsed.recentContinuationStates) {
         if (!item || typeof item !== 'object') continue
         const sessionId = normalizeWhitespace((item as { sessionId?: string }).sessionId || '')
-        const states = Array.isArray((item as { states?: Array<{ updatedAt: number; state: ContinuationState }> }).states)
+        const states = Array.isArray((item as {
+          states?: Array<{
+            messageVisibilityEpoch?: number
+            updatedAt: number
+            state: ContinuationState
+          }>
+        }).states)
           ? pruneContinuationStateRecords(
-            ((item as { states: Array<{ updatedAt: number; state: ContinuationState }> }).states || [])
+            ((item as {
+              states: Array<{
+                messageVisibilityEpoch?: number
+                updatedAt: number
+                state: ContinuationState
+              }>
+            }).states || [])
               .map((record) => ({
+                messageVisibilityEpoch: isSafeMessageVisibilityEpoch(record.messageVisibilityEpoch)
+                  ? record.messageVisibilityEpoch
+                  : undefined,
                 updatedAt: Number(record.updatedAt || 0),
                 state: record.state,
               })),
@@ -267,6 +360,7 @@ function hydrateFromDisk(): void {
           : (() => {
             const state = normalizeContinuationState((item as { state?: ContinuationState }).state || null)
             return state ? [{
+              messageVisibilityEpoch: undefined,
               updatedAt: 0,
               state,
             }] : []
@@ -299,9 +393,14 @@ function pruneContinuationStateRecords(records: ContinuationStateRecord[]): Cont
   for (const record of records) {
     const state = normalizeContinuationState(record.state)
     if (!state) continue
-    const existing = deduped.get(state.taskId)
+    const messageVisibilityEpoch = isSafeMessageVisibilityEpoch(record.messageVisibilityEpoch)
+      ? record.messageVisibilityEpoch
+      : undefined
+    const identity = `${messageVisibilityEpoch ?? 'legacy'}:${state.taskId}`
+    const existing = deduped.get(identity)
     if (!existing || Number(record.updatedAt || 0) >= existing.updatedAt) {
-      deduped.set(state.taskId, {
+      deduped.set(identity, {
+        messageVisibilityEpoch,
         updatedAt: Number(record.updatedAt || 0),
         state,
       })
@@ -313,16 +412,20 @@ function pruneContinuationStateRecords(records: ContinuationStateRecord[]): Cont
 }
 
 function cloneContinuationStateRecords(records: ContinuationStateRecord[] | null | undefined): ContinuationStateRecord[] {
-  return (records || [])
-    .map((record) => {
-      const state = normalizeContinuationState(record.state)
-      if (!state) return null
-      return {
-        updatedAt: Number(record.updatedAt || 0),
-        state,
-      }
-    })
-    .filter((record): record is ContinuationStateRecord => Boolean(record))
+  const cloned: ContinuationStateRecord[] = []
+  for (const record of records || []) {
+    const state = normalizeContinuationState(record.state)
+    if (!state) continue
+    const next: ContinuationStateRecord = {
+      updatedAt: Number(record.updatedAt || 0),
+      state,
+    }
+    if (isSafeMessageVisibilityEpoch(record.messageVisibilityEpoch)) {
+      next.messageVisibilityEpoch = record.messageVisibilityEpoch
+    }
+    cloned.push(next)
+  }
+  return cloned
 }
 
 function normalizeOptionalString(value: unknown): string | undefined {
@@ -337,6 +440,9 @@ function normalizeResumePayload(value: unknown): Record<string, unknown> | undef
 
 function normalizeSkillRunRecord(record: Omit<SkillRunRecord, 'updatedAt'> & { updatedAt?: number }): SkillRunRecord {
   const normalized: SkillRunRecord = {
+    messageVisibilityEpoch: isSafeMessageVisibilityEpoch(record.messageVisibilityEpoch)
+      ? record.messageVisibilityEpoch
+      : undefined,
     toolName: normalizeWhitespace(record.toolName),
     skillId: normalizeWhitespace(record.skillId),
     action: normalizeWhitespace(record.action),
@@ -414,11 +520,23 @@ export function rememberBrowserAction(
   sessionId: string | undefined,
   kind: BrowserActionKind,
   value: string,
+  options?: SessionContinuityEpochOptions,
 ): void {
   hydrateFromDisk()
   const normalizedSessionId = normalizeWhitespace(sessionId || '')
   if (!normalizedSessionId) return
-  const next = rememberRecentBrowserAction(recentBrowserActions.get(normalizedSessionId) || [], kind, value)
+  const resolvedEpoch = resolveContinuityWriteEpoch(normalizedSessionId, options)
+  if (!resolvedEpoch.admitted) return
+  const next = rememberRecentBrowserAction(
+    recentBrowserActions.get(normalizedSessionId) || [],
+    kind,
+    value,
+  ).map((record) => (
+    record.kind === kind
+    && record.value === normalizeWhitespace(value)
+      ? { ...record, messageVisibilityEpoch: resolvedEpoch.epoch }
+      : record
+  ))
   if (next.length === 0) return
   recentBrowserActions.set(normalizedSessionId, next)
   pruneStaleSessions()
@@ -430,18 +548,32 @@ export function findRecentBrowserAction(
   kind: BrowserActionKind,
   value: string,
   withinMs = 45_000,
+  options?: SessionContinuityEpochOptions,
 ): BrowserActionRecord | null {
   hydrateFromDisk()
   const normalizedSessionId = normalizeWhitespace(sessionId || '')
   if (!normalizedSessionId) return null
-  return findRecentBrowserActionInRecords(recentBrowserActions.get(normalizedSessionId) || [], kind, value, withinMs)
+  const resolvedEpoch = resolveContinuityReadEpoch(normalizedSessionId, options)
+  return findRecentBrowserActionInRecords(
+    (recentBrowserActions.get(normalizedSessionId) || [])
+      .filter((record) => continuityEpochMatches(record.messageVisibilityEpoch, resolvedEpoch)),
+    kind,
+    value,
+    withinMs,
+  )
 }
 
-export function getRecentBrowserActions(sessionId: string | undefined): BrowserActionRecord[] {
+export function getRecentBrowserActions(
+  sessionId: string | undefined,
+  options?: SessionContinuityEpochOptions,
+): BrowserActionRecord[] {
   hydrateFromDisk()
   const normalizedSessionId = normalizeWhitespace(sessionId || '')
   if (!normalizedSessionId) return []
-  return (recentBrowserActions.get(normalizedSessionId) || []).slice()
+  const resolvedEpoch = resolveContinuityReadEpoch(normalizedSessionId, options)
+  return (recentBrowserActions.get(normalizedSessionId) || [])
+    .filter((record) => continuityEpochMatches(record.messageVisibilityEpoch, resolvedEpoch))
+    .slice()
 }
 
 export function rememberBrowserWorkflowState(
@@ -450,13 +582,17 @@ export function rememberBrowserWorkflowState(
     updatedAt?: number
     domain?: string
   },
+  options?: SessionContinuityEpochOptions,
 ): BrowserWorkflowState | null {
   hydrateFromDisk()
   const normalizedSessionId = normalizeWhitespace(sessionId || '')
   if (!normalizedSessionId) return null
+  const resolvedEpoch = resolveContinuityWriteEpoch(normalizedSessionId, options)
+  if (!resolvedEpoch.admitted) return null
   const updatedAt = payload.updatedAt || Date.now()
   const state: BrowserWorkflowState = {
     sessionId: normalizedSessionId,
+    messageVisibilityEpoch: resolvedEpoch.epoch,
     tabId: payload.tabId,
     url: normalizeWhitespace(payload.url),
     title: normalizeWhitespace(payload.title),
@@ -482,22 +618,34 @@ export function rememberBrowserWorkflowState(
   return state
 }
 
-export function getBrowserWorkflowState(sessionId: string | undefined): BrowserWorkflowState | null {
+export function getBrowserWorkflowState(
+  sessionId: string | undefined,
+  options?: SessionContinuityEpochOptions,
+): BrowserWorkflowState | null {
   hydrateFromDisk()
   const normalizedSessionId = normalizeWhitespace(sessionId || '')
   if (!normalizedSessionId) return null
-  return browserWorkflowStates.get(normalizedSessionId) || null
+  const state = browserWorkflowStates.get(normalizedSessionId) || null
+  if (!state) return null
+  return continuityEpochMatches(
+    state.messageVisibilityEpoch,
+    resolveContinuityReadEpoch(normalizedSessionId, options),
+  ) ? state : null
 }
 
 export function rememberSkillRun(
   sessionId: string | undefined,
   payload: Omit<SkillRunRecord, 'updatedAt'> & { updatedAt?: number },
+  options?: SessionContinuityEpochOptions,
 ): void {
   hydrateFromDisk()
   const normalizedSessionId = normalizeWhitespace(sessionId || '')
   if (!normalizedSessionId) return
+  const resolvedEpoch = resolveContinuityWriteEpoch(normalizedSessionId, options)
+  if (!resolvedEpoch.admitted) return
   const nextRecord: SkillRunRecord = {
     ...normalizeSkillRunRecord(payload),
+    messageVisibilityEpoch: resolvedEpoch.epoch,
     updatedAt: payload.updatedAt || Date.now(),
   }
   const existing = recentSkillRuns.get(normalizedSessionId) || []
@@ -513,23 +661,29 @@ export function rememberSkillRun(
   persistToDisk()
 }
 
-export function getLatestSkillRun(sessionId: string | undefined): SkillRunRecord | null {
+export function getLatestSkillRun(
+  sessionId: string | undefined,
+  options?: SessionContinuityEpochOptions,
+): SkillRunRecord | null {
   hydrateFromDisk()
   const normalizedSessionId = normalizeWhitespace(sessionId || '')
   if (!normalizedSessionId) return null
-  return (recentSkillRuns.get(normalizedSessionId) || [])[0] || null
+  const resolvedEpoch = resolveContinuityReadEpoch(normalizedSessionId, options)
+  return (recentSkillRuns.get(normalizedSessionId) || [])
+    .find((record) => continuityEpochMatches(record.messageVisibilityEpoch, resolvedEpoch)) || null
 }
 
 export function resolveSkillRunForResume(params: {
   sessionId?: string | undefined
   expectedTaskId?: string | null
+  messageVisibilityEpoch?: number
   candidates?: Array<SkillRunRecord | null | undefined>
 }): SkillRunRecord | null {
   hydrateFromDisk()
   const expectedTaskId = normalizeWhitespace(params.expectedTaskId || '')
   const candidates = [
     ...(params.candidates || []),
-    getLatestSkillRun(params.sessionId),
+    getLatestSkillRun(params.sessionId, { messageVisibilityEpoch: params.messageVisibilityEpoch }),
   ]
     .filter((item): item is SkillRunRecord => Boolean(item?.skillId))
     .map((item) => normalizeSkillRunRecord(item))
@@ -559,20 +713,26 @@ export function resolveSkillRunForResume(params: {
 export function rememberContinuationState(
   sessionId: string | undefined,
   payload: ContinuationState,
-  options?: { updatedAt?: number },
+  options?: SessionContinuityEpochOptions & { updatedAt?: number },
 ): ContinuationState | null {
   hydrateFromDisk()
   const normalizedSessionId = normalizeWhitespace(sessionId || '')
   if (!normalizedSessionId) return null
+  const resolvedEpoch = resolveContinuityWriteEpoch(normalizedSessionId, options)
+  if (!resolvedEpoch.admitted) return null
   const normalized = normalizeContinuationState(payload)
   if (!normalized) return null
   const existing = recentContinuationStates.get(normalizedSessionId) || []
   recentContinuationStates.set(normalizedSessionId, pruneContinuationStateRecords([
     {
+      messageVisibilityEpoch: resolvedEpoch.epoch,
       updatedAt: Number(options?.updatedAt || Date.now()),
       state: normalized,
     },
-    ...existing.filter((record) => record.state.taskId !== normalized.taskId),
+    ...existing.filter((record) => (
+      record.state.taskId !== normalized.taskId
+      || record.messageVisibilityEpoch !== resolvedEpoch.epoch
+    )),
   ]))
   pruneStaleSessions()
   persistToDisk()
@@ -581,36 +741,63 @@ export function rememberContinuationState(
 
 export function getContinuationState(
   sessionId: string | undefined,
-  options?: { taskId?: string | null },
+  options?: SessionContinuityEpochOptions & { taskId?: string | null },
 ): ContinuationState | null {
   hydrateFromDisk()
   const normalizedSessionId = normalizeWhitespace(sessionId || '')
   if (!normalizedSessionId) return null
-  const records = recentContinuationStates.get(normalizedSessionId) || []
+  const resolvedEpoch = resolveContinuityReadEpoch(normalizedSessionId, options)
+  const records = (recentContinuationStates.get(normalizedSessionId) || [])
+    .filter((record) => continuityEpochMatches(record.messageVisibilityEpoch, resolvedEpoch))
   if (options?.taskId) {
     return normalizeContinuationState(records.find((record) => record.state.taskId === options.taskId)?.state || null)
   }
   return normalizeContinuationState(records[0]?.state || null)
 }
 
-export function listContinuationStates(sessionId: string | undefined): ContinuationState[] {
+export function listContinuationStates(
+  sessionId: string | undefined,
+  options?: SessionContinuityEpochOptions,
+): ContinuationState[] {
   hydrateFromDisk()
   const normalizedSessionId = normalizeWhitespace(sessionId || '')
   if (!normalizedSessionId) return []
-  return cloneContinuationStateRecords(recentContinuationStates.get(normalizedSessionId)).map((record) => record.state)
+  const resolvedEpoch = resolveContinuityReadEpoch(normalizedSessionId, options)
+  return cloneContinuationStateRecords(recentContinuationStates.get(normalizedSessionId))
+    .filter((record) => continuityEpochMatches(record.messageVisibilityEpoch, resolvedEpoch))
+    .map((record) => record.state)
 }
 
-export function clearContinuationState(sessionId: string | undefined, taskId?: string | null): void {
+export function clearContinuationState(
+  sessionId: string | undefined,
+  taskId?: string | null,
+  options?: SessionContinuityEpochOptions,
+): void {
   hydrateFromDisk()
   const normalizedSessionId = normalizeWhitespace(sessionId || '')
   if (!normalizedSessionId) return
+  const resolvedEpoch = resolveContinuityWriteEpoch(normalizedSessionId, options)
+  if (!resolvedEpoch.admitted) return
   if (!recentContinuationStates.has(normalizedSessionId)) return
   if (!taskId) {
-    recentContinuationStates.delete(normalizedSessionId)
+    if (resolvedEpoch.epoch === undefined) {
+      recentContinuationStates.delete(normalizedSessionId)
+    } else {
+      const retained = (recentContinuationStates.get(normalizedSessionId) || [])
+        .filter((record) => record.messageVisibilityEpoch !== resolvedEpoch.epoch)
+      if (retained.length > 0) recentContinuationStates.set(normalizedSessionId, retained)
+      else recentContinuationStates.delete(normalizedSessionId)
+    }
     persistToDisk()
     return
   }
-  const next = (recentContinuationStates.get(normalizedSessionId) || []).filter((record) => record.state.taskId !== taskId)
+  const next = (recentContinuationStates.get(normalizedSessionId) || []).filter((record) => (
+    record.state.taskId !== taskId
+    || (
+      resolvedEpoch.epoch !== undefined
+      && record.messageVisibilityEpoch !== resolvedEpoch.epoch
+    )
+  ))
   if (next.length === 0) {
     recentContinuationStates.delete(normalizedSessionId)
   } else {

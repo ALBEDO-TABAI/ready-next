@@ -165,7 +165,7 @@ test('an existing credential resumes with cached models without browser login', 
   })
 })
 
-test('a failed explicit reauthorization leaves an already running session available', async () => {
+test('a failed explicit reauthorization retires the old proxy and credential', async () => {
   const harness = createHarness()
   harness.setCredential(true)
   harness.resolveStart()
@@ -177,11 +177,84 @@ test('a failed explicit reauthorization leaves an already running session availa
     /browser login timed out/,
   )
 
+  assert.equal(harness.service.getStatus().state, 'error')
+  assert.equal(harness.service.getStatus().connected, false)
+  assert.equal(harness.service.getStatus().running, false)
+  assert.deepEqual(harness.counts(), {
+    startCount: 1,
+    closeCount: 1,
+    loginCount: 1,
+    removeCount: 1,
+  })
+})
+
+test('reauthorization guard runs before login and preserves the active proxy on rejection', async () => {
+  const harness = createHarness()
+  harness.setCredential(true)
+  harness.resolveStart()
+  await harness.service.ensureReady(['gpt-5.6-terra'], PROXY_API_KEY)
+  let guardCalls = 0
+
+  await assert.rejects(
+    harness.service.connect(PROXY_API_KEY, ['gpt-5.6-terra'], {
+      beforeRestart: () => {
+        guardCalls += 1
+        throw new Error('ai_profile_in_use_by_active_turn')
+      },
+    }),
+    /ai_profile_in_use_by_active_turn/,
+  )
+
+  assert.equal(guardCalls, 1)
   assert.equal(harness.service.getStatus().state, 'ready')
   assert.deepEqual(harness.counts(), {
     startCount: 1,
     closeCount: 0,
-    loginCount: 1,
+    loginCount: 0,
     removeCount: 0,
+  })
+})
+
+test('reauthorization preparation supplies the latest proxy key and models inside the lifecycle lane', async () => {
+  const harness = createHarness()
+  const latestKey = 'ready-oauth-proxy-key-latest-12345678901234567890'
+  const connecting = harness.service.connect(undefined, [], {
+    beforeRestart: () => ({
+      existingProxyApiKey: latestKey,
+      savedModels: ['gpt-5.6-sol'],
+    }),
+  })
+
+  harness.resolveStart()
+  await connecting
+
+  assert.deepEqual(harness.startedKeys, [latestKey])
+  assert.deepEqual(harness.startedModels, [['gpt-5.6-sol']])
+})
+
+test('connect persistence and disconnect cleanup share one lifecycle lane', async () => {
+  const harness = createHarness()
+  const events: string[] = []
+  const connecting = harness.service.connect(PROXY_API_KEY, ['gpt-5.6-terra'], {
+    beforeRestart: () => { events.push('connect-before') },
+    afterReady: () => { events.push('connect-after') },
+  })
+  const disconnecting = harness.service.disconnect({
+    beforeDisconnect: () => {
+      events.push('disconnect-before')
+    },
+  })
+
+  harness.resolveStart()
+  const [connected, disconnected] = await Promise.all([connecting, disconnecting])
+
+  assert.equal(connected.state, 'ready')
+  assert.equal(disconnected.state, 'signed_out')
+  assert.deepEqual(events, ['connect-before', 'connect-after', 'disconnect-before'])
+  assert.deepEqual(harness.counts(), {
+    startCount: 1,
+    closeCount: 1,
+    loginCount: 1,
+    removeCount: 1,
   })
 })

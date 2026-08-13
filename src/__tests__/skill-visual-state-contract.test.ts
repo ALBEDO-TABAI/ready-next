@@ -13,7 +13,9 @@ test('reference skill hint is exposed from main process to the chat panel', () =
   const recallGroup = readWorkspaceFile('src/main/modules/claude-bridge/ipc/recall-group.ts')
   const preload = readWorkspaceFile('src/preload/index.ts')
   const electronTypes = readWorkspaceFile('src/renderer/types/electron.d.ts')
-  const chatPanel = readWorkspaceFile('src/renderer/components/agent/ChatPanel.tsx')
+  const referenceSkillHintHook = readWorkspaceFile(
+    'src/renderer/components/agent/chat-panel/reference-skill/use-reference-skill-hint.ts',
+  )
   const chatPanelBody = readWorkspaceFile('src/renderer/components/agent/chat-panel/ChatPanelBody.tsx')
 
   assert.match(runtime, /getReferenceSkillHint\(scopeId: string\)/)
@@ -25,7 +27,7 @@ test('reference skill hint is exposed from main process to the chat panel', () =
   assert.match(preload, /getReferenceSkillHint:/)
   assert.match(electronTypes, /interface ReferenceSkillHintData/)
   assert.match(electronTypes, /getReferenceSkillHint:/)
-  assert.match(chatPanel, /getReferenceSkillHint/)
+  assert.match(referenceSkillHintHook, /getReferenceSkillHint/)
   assert.match(chatPanelBody, /data-reference-skill-hint/)
   assert.match(chatPanelBody, /技能上下文/)
   assert.match(chatPanelBody, /上下文已启用/)
@@ -33,12 +35,15 @@ test('reference skill hint is exposed from main process to the chat panel', () =
 })
 
 test('ChatPanel clears stale reference skill hint immediately when switching scope', () => {
-  const chatPanel = readWorkspaceFile('src/renderer/components/agent/ChatPanel.tsx')
+  const referenceSkillHintHook = readWorkspaceFile(
+    'src/renderer/components/agent/chat-panel/reference-skill/use-reference-skill-hint.ts',
+  )
 
   assert.match(
-    chatPanel,
-    /useEffect\(\(\) => \{\s*setReferenceSkillHint\(null\)\s*\}, \[currentScopeId\]\)/,
+    referenceSkillHintHook,
+    /requestRevision\.current \+= 1\s*setReferenceSkillHint\(null\)/,
   )
+  assert.match(referenceSkillHintHook, /activeSessionId,[\s\S]*currentScopeId,[\s\S]*messageVisibilityEpoch,/)
 })
 
 test('skill task cards can show VEA structured output paths', () => {
@@ -81,42 +86,47 @@ test('skill action spawn receives the current turn agent context', () => {
   assert.match(hostController, /agentContext \?\? await this\.readAgentContext\(\)/)
 })
 
-test('detached skill tasks have IPC and renderer API contracts', () => {
+test('detached skill tasks expose only inspect, list, and cancel renderer contracts', () => {
   const runtime = readWorkspaceFile('src/main/modules/agent-control/runtime-core/runtime.ts')
   const detachedGroup = readWorkspaceFile('src/main/modules/claude-bridge/ipc/detached-task-group.ts')
+  const ipcHandler = readWorkspaceFile('src/main/modules/claude-bridge/ipc-handler.ts')
   const preload = readWorkspaceFile('src/preload/index.ts')
   const electronTypes = readWorkspaceFile('src/renderer/types/electron.d.ts')
   const primitiveSchemas = readWorkspaceFile('src/main/modules/tools/skill-primitives/primitive-schemas.ts')
 
-  assert.match(runtime, /startDetachedSkillAction/)
+  assert.doesNotMatch(runtime, /startDetachedSkillAction/)
   assert.match(runtime, /inspectDetachedSkillTask/)
   assert.match(runtime, /cancelDetachedSkillTask/)
   // B8-D R1：scope 归属校验体随簇入 detached-skill-service（runtime 留委托）。
   const detachedService = readWorkspaceFile('src/main/modules/agent-control/runtime-core/detached-skill-service.ts')
   assert.match(detachedService, /task\.scopeId !== normalizedScopeId && task\.sessionId !== normalizedScopeId/)
   assert.match(runtime, /this\.detachedSkills\.inspectDetachedSkillTask\(/)
-  assert.match(detachedGroup, /agent:startDetachedSkillAction/)
+  assert.doesNotMatch(detachedGroup, /agent:startDetachedSkillAction/)
+  assert.doesNotMatch(ipcHandler, /startDetachedSkillAction/)
   assert.match(detachedGroup, /agent:inspectDetachedSkillTask/)
   assert.match(detachedGroup, /agent:cancelDetachedSkillTask/)
   assert.match(detachedGroup, /scopeId is required/)
-  assert.match(preload, /startDetachedSkillAction:/)
+  assert.doesNotMatch(preload, /startDetachedSkillAction:/)
+  assert.doesNotMatch(electronTypes, /startDetachedSkillAction:/)
   assert.match(electronTypes, /interface DetachedSkillTaskData/)
   const taskCard = readWorkspaceFile('src/renderer/components/agent/chat-panel/task/TaskCard.tsx')
   assert.match(taskCard, /取消后台任务/)
-  assert.match(taskCard, /继续后台任务/)
+  assert.doesNotMatch(taskCard, /继续后台任务/)
   assert.match(primitiveSchemas, /skill_start_detached/)
   assert.match(primitiveSchemas, /skill_inspect_detached/)
   assert.match(primitiveSchemas, /skill_cancel_detached/)
 })
 
 test('structured projection events do not expose raw JSON as tool trace text', () => {
+  const sdkToolExecutor = readWorkspaceFile('src/main/modules/agent-control/runtime-core/agent-sdk-tool-executor.ts')
   const ipcHandler = readWorkspaceFile('src/main/modules/claude-bridge/ipc-handler.ts')
-  const outputBlock = ipcHandler.match(/orchestrator\.on\('output'[\s\S]*?runtime\?\.recordScopeRunEvent/)
+  const outputBlock = ipcHandler.match(/orchestrator\.on\('output'[\s\S]*?orchestrator\.on\('status'/)
   assert.ok(outputBlock, 'expected orchestrator output bridge block')
 
-  assert.match(outputBlock[0], /const structuredText =/)
-  assert.match(outputBlock[0], /structured\?\.taskSummary/)
-  assert.match(outputBlock[0], /structured\?\.taskTitle/)
-  assert.match(outputBlock[0], /structured \? \(structuredText \|\| '状态已更新'\) : \(data\.chunk \|\| ''\)/)
-  assert.doesNotMatch(outputBlock[0], /const toolText = typeof structured\?\.message === 'string' \? structured\.message : \(data\.chunk \|\| ''\)/)
+  assert.match(sdkToolExecutor, /buildToolResultDetail\(normalized\)/)
+  assert.match(sdkToolExecutor, /projectionPatch: normalized\.projectionPatch/)
+  assert.match(sdkToolExecutor, /visibilityOwnerKind: 'context_background'/)
+  assert.match(sdkToolExecutor, /visibilityOwnerLedger: \{ kind: 'run_meta'/)
+  assert.doesNotMatch(outputBlock[0], /data\.type === 'tool_use' \|\| data\.type === 'tool_result'/)
+  assert.doesNotMatch(outputBlock[0], /const toolText = typeof structured\?\.message/)
 })

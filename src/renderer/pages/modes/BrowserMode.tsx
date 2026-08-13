@@ -1282,7 +1282,6 @@ export default function BrowserMode({
                       tasks={agentSupervision.tasks}
                       claims={agentSupervision.claims}
                       requestInterruption={agentSupervision.requestInterruption}
-                      resumeTargetClaim={agentSupervision.resumeTargetClaim}
                       surfaces={agentSupervision.surfaces}
                       activeWriteSurface={agentSupervision.activeWriteSurface}
                       takeoverError={agentSupervision.takeoverError}
@@ -1314,7 +1313,6 @@ export default function BrowserMode({
                         tasks={agentSupervision.tasks}
                         claims={agentSupervision.claims}
                         requestInterruption={agentSupervision.requestInterruption}
-                        resumeTargetClaim={agentSupervision.resumeTargetClaim}
                         surfaces={agentSupervision.surfaces}
                         activeWriteSurface={agentSupervision.activeWriteSurface}
                         takeoverError={agentSupervision.takeoverError}

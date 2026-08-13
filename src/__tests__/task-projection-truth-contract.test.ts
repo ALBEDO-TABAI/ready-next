@@ -9,7 +9,11 @@ import type { ConversationScope, ScopeRunEventPayload, ScopeRunSummary } from '.
 function createScope(): ConversationScope {
   return {
     id: 'scope-1',
+    aliasGeneration: 1,
+    messageVisibilityEpoch: 0,
     agent: 'butler',
+    activeAgentId: 'butler',
+    handoffGeneration: 0,
     title: '测试会话',
     sourceKind: 'local',
     sourceId: 'app',
@@ -58,6 +62,8 @@ test('projection truth snapshots override planning text when building persisted 
   const payload: ScopeRunEventPayload = {
     type: 'updated',
     scopeId: 'scope-1',
+    aliasGeneration: 1,
+    messageVisibilityEpoch: 0,
     agent: 'butler',
     runId: 'run-1',
     taskId: 'task-1',

@@ -4,11 +4,34 @@ import type { AgentMessage, ConversationScope, ScopeRunState } from './types'
 import { mapScopeRunPhaseToSessionState } from '../../stores/agent-store-helpers'
 import {
   makeEmptySessionSlice,
+  normalizeSessionSlice,
   sessionKeyForScopeId,
   withActiveSessionMessagesMirror,
   withSessionSliceAndActiveRuntimeMirror,
   type AgentStoreLike,
 } from './runtime-driver-session-state'
+
+function scopeRunEventMatchesCurrentIdentity(
+  state: any,
+  event: {
+    scopeId?: unknown
+    aliasGeneration?: unknown
+    messageVisibilityEpoch?: unknown
+  },
+): boolean {
+  if (typeof event.scopeId !== 'string'
+    || !Number.isSafeInteger(event.aliasGeneration)
+    || !Number.isSafeInteger(event.messageVisibilityEpoch)) return false
+  const scope = state.scopes?.find((candidate: ConversationScope) => candidate.id === event.scopeId)
+  if (!scope
+    || scope.aliasGeneration !== event.aliasGeneration
+    || scope.messageVisibilityEpoch !== event.messageVisibilityEpoch) return false
+  const sessionKey = sessionKeyForScopeId(state, event.scopeId)
+  const slice = normalizeSessionSlice(state.sessions?.[sessionKey])
+  return slice.conversationId === event.scopeId
+    && slice.aliasGeneration === event.aliasGeneration
+    && slice.messageVisibilityEpoch === event.messageVisibilityEpoch
+}
 
 export function installRuntimeDriverScopeEvents(deps: {
   store: AgentStoreLike
@@ -21,6 +44,9 @@ export function installRuntimeDriverScopeEvents(deps: {
     ? window.electronAPI.agent.onScopeRunEvent((event: any) => {
       if (!event.scopeId) return
       if (!isScopeRunPhase(event.phase) || event.phase === 'idle') return
+      const authoritative = store.getState()
+      if (authoritative.retiredScopeIds?.[event.scopeId]
+        || !scopeRunEventMatchesCurrentIdentity(authoritative, event)) return
 
       upsertScopeRunState(event.scopeId, (previous) => {
         const startedNewRun = Boolean(
@@ -121,60 +147,99 @@ export function installRuntimeDriverScopeEvents(deps: {
         }
       })
 
-      const currentState = store.getState()
+      if (!scopeRunEventMatchesCurrentIdentity(store.getState(), event)) return
       const detachedJobEvent = event.module === 'skill' && event.executionKind === 'job' && String(event.taskId || '').startsWith('detached:')
       refreshInfrastructureWatchdog(event.scopeId, event.runId || store.getState().scopeRunStates[event.scopeId]?.requestId || null)
-      // Stage X2.4 — `started` mirror still keys off the active scope
-      // (the `streamingRequestId` mirror is the top-level alias and is
-      // only meaningful for the active session; parked sessions read
-      // their own slice's `streamingRequestId` directly).
+      // Every foreground run owns its session slice even when that session is
+      // parked. The helper mirrors to top-level state only when the owner is
+      // active, so background started events cannot leave two run identities.
       if (
-        currentState.currentScopeId === event.scopeId &&
         event.type === 'started' &&
-        !detachedJobEvent
+        !detachedJobEvent &&
+        typeof event.runId === 'string' &&
+        event.runId.trim()
       ) {
-        store.setState((state: any) => withSessionSliceAndActiveRuntimeMirror(
-          state,
-          sessionKeyForScopeId(state, event.scopeId),
-          { streamingRequestId: event.runId || currentState.streamingRequestId },
+        store.setState((state: any) => (
+          scopeRunEventMatchesCurrentIdentity(state, event)
+            ? withSessionSliceAndActiveRuntimeMirror(
+                state,
+                sessionKeyForScopeId(state, event.scopeId),
+                { streamingRequestId: event.runId.trim() },
+              )
+            : state
         ))
       }
-      // Stage X2.4 — terminal events always unwind the originating
-      // session's slice, even when the user has switched away. See the
-      // onError comment block above for the rationale.
+      // Failure and cancellation events unwind the originating session's
+      // slice even when the user has switched away. Successful completion
+      // stays locked until the canonical assistant message is reconciled by
+      // the stream-done or send-success path.
       const terminalRunEvent = Boolean(
         store.getState().scopeRunStates[event.scopeId]?.terminalReason ||
         event.phase === 'done' ||
         event.phase === 'error' ||
         event.phase === 'cancelled',
       )
-      if (terminalRunEvent) {
-        const latestRunState = store.getState().scopeRunStates[event.scopeId] || null
+      const stateAfterRunPatch = store.getState()
+      if (!scopeRunEventMatchesCurrentIdentity(stateAfterRunPatch, event)) return
+      const ownerSessionId = sessionKeyForScopeId(stateAfterRunPatch, event.scopeId)
+      const ownerSlice = normalizeSessionSlice(stateAfterRunPatch.sessions?.[ownerSessionId])
+      const eventRunId = typeof event.runId === 'string' && event.runId.trim()
+        ? event.runId.trim()
+        : null
+      const scopeRunRequestId = typeof ownerSlice.scopeRunStates[event.scopeId]?.requestId === 'string'
+        && ownerSlice.scopeRunStates[event.scopeId]?.requestId?.trim()
+        ? ownerSlice.scopeRunStates[event.scopeId]?.requestId?.trim()
+        : null
+      const exactTerminalRunEvent = Boolean(
+        terminalRunEvent &&
+        eventRunId &&
+        ownerSlice.streamingRequestId === eventRunId &&
+        scopeRunRequestId === eventRunId,
+      )
+      const reconcileUnknownStop = ownerSlice.lifecyclePendingAction === 'stopping'
+        || (
+          ownerSlice.lifecycleError?.action === 'stop'
+          && ownerSlice.lifecycleError.code === 'interrupt_state_unknown'
+        )
+      const unlockFromScopeEvent = exactTerminalRunEvent && event.phase !== 'done'
+      if (exactTerminalRunEvent) {
+        if (!scopeRunEventMatchesCurrentIdentity(store.getState(), event)) return
+        const latestRunState = ownerSlice.scopeRunStates[event.scopeId] || null
         // Stage X2.6 — terminal scope-run event clears the
         // infrastructure watchdog for this scope.
         clearInfrastructureWatchdog(
           event.scopeId,
-          latestRunState?.requestId || (typeof event.runId === 'string' ? event.runId : null),
+          eventRunId,
         )
-        store.setState((state: any) => ({
-          ...withSessionSliceAndActiveRuntimeMirror(
-            state,
-            sessionKeyForScopeId(state, event.scopeId),
-            {
-              isStreaming: false,
-              foregroundBusy: false,
-              composerLocked: false,
-              streamingMessageId: null,
-              streamingRequestId: null,
-            },
-          ),
-          // Top-level toolTraceStatus is the active-session mirror, so
-          // only refresh it when the terminal event belongs to the
-          // currently-visible scope.
-          ...(state.currentScopeId === event.scopeId
-            ? { toolTraceStatus: phaseToToolTraceStatus(latestRunState?.phase || event.phase, latestRunState?.terminalReason || event.terminalReason) }
-            : {}),
-        }))
+        store.setState((state: any) => {
+          if (!scopeRunEventMatchesCurrentIdentity(state, event)) return state
+          return {
+            ...withSessionSliceAndActiveRuntimeMirror(
+              state,
+              sessionKeyForScopeId(state, event.scopeId),
+              {
+                ...(reconcileUnknownStop
+                  ? { lifecyclePendingAction: null, lifecycleError: null }
+                  : {}),
+                ...(unlockFromScopeEvent
+                  ? {
+                    isStreaming: false,
+                    foregroundBusy: false,
+                    composerLocked: false,
+                    streamingMessageId: null,
+                    streamingRequestId: null,
+                  }
+                  : {}),
+              },
+            ),
+            // Top-level toolTraceStatus is the active-session mirror, so
+            // only refresh it when the terminal event belongs to the
+            // currently-visible scope.
+            ...(state.currentScopeId === event.scopeId
+              ? { toolTraceStatus: phaseToToolTraceStatus(latestRunState?.phase || event.phase, latestRunState?.terminalReason || event.terminalReason) }
+              : {}),
+          }
+        })
       }
     })
     : () => { /* older test stubs */ }
@@ -190,13 +255,18 @@ export function installRuntimeDriverScopeEvents(deps: {
       const nextState = mapScopeRunPhaseToSessionState(event.phase)
       if (!nextState) return
       store.setState((prev: any) => {
+        if (prev.retiredScopeIds?.[event.scopeId]
+          || !scopeRunEventMatchesCurrentIdentity(prev, event)) return prev
+        const eventRunId = typeof event.runId === 'string' && event.runId.trim()
+          ? event.runId.trim()
+          : null
+        const ownerSessionId = sessionKeyForScopeId(prev, event.scopeId)
+        const ownerSlice = normalizeSessionSlice(prev.sessions?.[ownerSessionId])
+        const currentRunId = ownerSlice.scopeRunStates[event.scopeId]?.requestId || null
+        if (eventRunId && currentRunId && eventRunId !== currentRunId) return prev
         const existing = prev.sessions[sessionId]
-        // Skip lazy creation only for non-terminal phases — terminal ones
-        // must always be recorded so a late `done` for an unseen session
-        // doesn't leave routing accepting it.
-        const nextSlice = existing
-          ? { ...existing, state: nextState }
-          : { ...makeEmptySessionSlice(), state: nextState }
+        if (!existing) return prev
+        const nextSlice = { ...existing, state: nextState }
         return {
           sessions: {
             ...prev.sessions,
@@ -220,11 +290,85 @@ export function installRuntimeDriverScopeEvents(deps: {
       }
     }
     store.setState((state: any) => {
+      if (state.retiredScopeIds?.[event.scope.id]) return state
       const existing = state.scopes.find((scope: ConversationScope) => scope.id === event.scope.id)
+      if (!existing && event.type !== 'scope_created') return state
+      const existingVisibilityEpoch = existing?.messageVisibilityEpoch ?? 0
+      const eventVisibilityEpoch = Number.isSafeInteger(event.scope.messageVisibilityEpoch)
+        ? event.scope.messageVisibilityEpoch
+        : 0
+      const eventAliasGeneration = Number.isSafeInteger(event.scope.aliasGeneration)
+        ? event.scope.aliasGeneration
+        : existing?.aliasGeneration
+      event.scope = {
+        ...event.scope,
+        aliasGeneration: eventAliasGeneration,
+        messageVisibilityEpoch: eventVisibilityEpoch,
+      }
+      if (existing && eventVisibilityEpoch < existingVisibilityEpoch) return state
+      if (existing
+        && typeof existing.aliasGeneration === 'number'
+        && typeof event.scope.aliasGeneration === 'number'
+        && event.scope.aliasGeneration < existing.aliasGeneration) return state
+      let workingState = state
+      if (existing && eventVisibilityEpoch > existingVisibilityEpoch) {
+        const sessionKey = sessionKeyForScopeId(state, event.scope.id)
+        const previousSlice = normalizeSessionSlice(state.sessions?.[sessionKey])
+        const nextSlice = {
+          ...makeEmptySessionSlice(event.scope.id),
+          aliasGeneration: typeof event.scope.aliasGeneration === 'number'
+            ? Math.max(event.scope.aliasGeneration, previousSlice.aliasGeneration ?? 0)
+            : previousSlice.aliasGeneration,
+          messageVisibilityEpoch: eventVisibilityEpoch,
+        }
+        const scopeLiveMessages = { ...(state.scopeLiveMessages || {}) }
+        delete scopeLiveMessages[event.scope.id]
+        const sessions = { ...state.sessions, [sessionKey]: nextSlice }
+        workingState = {
+          ...state,
+          sessions,
+          scopeLiveMessages,
+          ...(state.currentScopeId === event.scope.id
+            ? {
+                messages: [],
+                scopeRunStates: {},
+                isStreaming: false,
+                foregroundBusy: false,
+                composerLocked: false,
+                streamingMessageId: null,
+                streamingRequestId: null,
+                attachments: [],
+                filePool: [],
+                activeAttachmentPreview: null,
+                pendingContinuationIntent: null,
+                pendingContinuationDraftAnchor: null,
+                toolTrace: [],
+                toolTraceStatus: 'idle',
+                composerAuthorityRevision: Number(state.composerAuthorityRevision || 0) + 1,
+              }
+            : {}),
+        }
+      } else if (existing && typeof eventAliasGeneration === 'number') {
+        const sessionKey = sessionKeyForScopeId(state, event.scope.id)
+        const previousSlice = normalizeSessionSlice(state.sessions?.[sessionKey])
+        if (previousSlice.aliasGeneration !== eventAliasGeneration) {
+          workingState = {
+            ...state,
+            sessions: {
+              ...state.sessions,
+              [sessionKey]: {
+                ...previousSlice,
+                aliasGeneration: eventAliasGeneration,
+              },
+            },
+          }
+        }
+      }
       const mergedScopes = existing
-        ? state.scopes.map((scope: ConversationScope) => scope.id === event.scope.id ? event.scope : scope)
-        : [event.scope, ...state.scopes]
+        ? workingState.scopes.map((scope: ConversationScope) => scope.id === event.scope.id ? event.scope : scope)
+        : [event.scope, ...workingState.scopes]
       const nextState: Record<string, unknown> = {
+        ...workingState,
         scopes: mergedScopes,
         conversations: mergedScopes.map((scope: ConversationScope) => ({
           id: scope.id,
@@ -233,9 +377,12 @@ export function installRuntimeDriverScopeEvents(deps: {
           created_at: scope.createdAt,
           updated_at: scope.updatedAt,
         })),
+        ...(!existing || eventVisibilityEpoch > existingVisibilityEpoch
+          ? { scopeAuthorityRevision: Number(workingState.scopeAuthorityRevision || 0) + 1 }
+          : {}),
       }
 
-      if (state.currentScopeId === event.scope.id) {
+      if (workingState.currentScopeId === event.scope.id) {
         nextState.currentScope = event.scope
       }
 
@@ -246,21 +393,36 @@ export function installRuntimeDriverScopeEvents(deps: {
         // renderer 流出来的瞬影段（不同 id、相同内容、meta.transient）——
         // 渠道 run 的 renderer 不再持久化，瞬影只在此处被真值行替换。
         const incomingContent = String(event.message.content || '').trim()
+        const incomingRunId = typeof event.message.meta?.runId === 'string'
+          ? event.message.meta.runId.trim()
+          : ''
+        const activeRunId = typeof workingState.scopeRunStates?.[event.scope.id]?.requestId === 'string'
+          ? workingState.scopeRunStates[event.scope.id].requestId.trim()
+          : ''
         const supersedesTransientTwin = (item: AgentMessage): boolean => Boolean(
           event.message!.role === 'assistant'
           && item.type === 'agent'
           && (item.meta as { transient?: boolean } | undefined)?.transient
+          && (() => {
+            const transientRunId = typeof item.meta?.runId === 'string'
+              ? item.meta.runId.trim()
+              : ''
+            if (incomingRunId || transientRunId) {
+              return Boolean(incomingRunId && transientRunId && incomingRunId === transientRunId)
+            }
+            return !activeRunId
+          })()
           && String(item.content || '').trim() === incomingContent,
         )
-        const live = state.scopeLiveMessages?.[event.scope.id]
+        const live = workingState.scopeLiveMessages?.[event.scope.id]
         if (live && live.some((item: AgentMessage) => item.id === event.message!.id || supersedesTransientTwin(item))) {
           nextState.scopeLiveMessages = {
-            ...state.scopeLiveMessages,
+            ...workingState.scopeLiveMessages,
             [event.scope.id]: live.filter((item: AgentMessage) =>
               item.id !== event.message!.id && !supersedesTransientTwin(item)),
           }
         }
-        if (state.currentScopeId === event.scope.id) {
+        if (workingState.currentScopeId === event.scope.id) {
           const nextMessage: AgentMessage = {
             id: event.message.id,
             agent: event.scope.agent,
@@ -270,12 +432,12 @@ export function installRuntimeDriverScopeEvents(deps: {
             attachments: extractAttachmentsFromMeta(event.message.meta),
             meta: event.message.meta || {},
           }
-          const baseMessages = state.messages.filter((item: AgentMessage) => !supersedesTransientTwin(item))
+          const baseMessages = workingState.messages.filter((item: AgentMessage) => !supersedesTransientTwin(item))
           const hasMessage = baseMessages.some((message: AgentMessage) => message.id === nextMessage.id)
           Object.assign(
             nextState,
             withActiveSessionMessagesMirror(
-              state,
+              workingState,
               hasMessage ? baseMessages : [...baseMessages, nextMessage],
             ),
           )

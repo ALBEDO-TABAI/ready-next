@@ -93,34 +93,6 @@ export interface BrowserHumanTakeoverPhysicalTarget {
   source: 'physical_input' | 'supervision_button'
 }
 
-/** The Browser controller may request this durable boundary, but never writes
- * Parent or Browser-child state itself. */
-export interface BrowserHumanTakeoverIntentInput extends BrowserHumanTakeoverPhysicalTarget {
-  parentTaskId: string
-  ownerRunId: string
-  browserTaskId: string
-  targetClaimId?: string | null
-  targetClaimGeneration?: number | null
-  userPrompt?: BrowserHumanTakeoverPrompt | null
-}
-
-export type BrowserHumanTakeoverIntentPort = (
-  input: BrowserHumanTakeoverIntentInput,
-) => Promise<{ takeoverId: string }>
-
-export interface BrowserTargetResumeRequest {
-  parentTaskId: string
-  browserTaskId: string
-  claimId: string
-  oldGeneration: number
-  checkpointId: string
-  wakeNonce: string
-}
-
-export type BrowserTargetResumePort = (
-  input: BrowserTargetResumeRequest,
-) => Promise<{ success: boolean; error?: string; errorKind?: string }>
-
 export interface BrowserWorkflowWriteTarget {
   partition: string
   parentTaskId: string
@@ -285,6 +257,7 @@ export interface BrowserWorkflowCompletionVerifierReceipt {
   workflowCloseoutSealDigest: string
   sealedCandidateDigest: string
   terminalQualityPatchDigest: string
+  durableVerifierReceiptDigest?: string
   verifiedAt: string
 }
 

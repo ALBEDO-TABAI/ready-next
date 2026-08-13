@@ -10,6 +10,10 @@ import { emitSkillReferenceInlined } from './skill-reference-inlined-bridge'
 import { isRetryOnlyTurn } from './skill-detection-inputs'
 import { TOOL_ERROR_METRICS } from '../tools-runtime/tool-error-metrics'
 import { redactModelVisibleToolText } from '../tools-runtime/model-visible-tool-output'
+import {
+  hasExplicitLocalFeishuCliSkillIntent,
+} from '../local-feishu-cli-intent'
+import { hasExplicitSetupCommandIntent } from '../setup-command-intent'
 
 /**
  * Filenames we try to read from the skill's managedPath when inlining a
@@ -101,8 +105,11 @@ export class SkillContextOrchestrator {
     const aliasMatches: Array<{ skill: SkillState; position: number; index: number }> = []
     const sendImSkill = skills.find((skill) => skill.id === 'send-im')
     if (sendImSkill && hasLocalSendImFileIntent(primary)) return [sendImSkill]
+    if (hasExplicitSetupCommandIntent(primary)) return []
+    const localFeishuCliSkillIntent = hasExplicitLocalFeishuCliSkillIntent(primary)
 
     skills.forEach((skill, index) => {
+      if (skill.id === 'lark-cli' && !localFeishuCliSkillIntent) return
       const candidates = [skill.id, skill.name]
         .map((item) => this.normalizeLooseToken(item))
         .filter((item) => item.length >= 6)
@@ -123,6 +130,11 @@ export class SkillContextOrchestrator {
         return
       }
     })
+
+    if (exactMatches.length === 0 && aliasMatches.length === 0 && localFeishuCliSkillIntent) {
+      const larkCli = skills.find((skill) => skill.id === 'lark-cli')
+      if (larkCli) return [larkCli]
+    }
 
     const strongestMatches = exactMatches.length > 0
       ? exactMatches.filter((match) => {
@@ -238,20 +250,25 @@ export class SkillContextOrchestrator {
   rememberReferenceSkillFromRunStateResource(
     skillId: string,
     sessionId?: string,
+    messageVisibilityEpoch?: number,
   ): { armed: boolean; skillId?: string; skillName?: string } {
     if (!sessionId || !skillId) return { armed: false }
     const skill = this.deps.listSkills().find((candidate) => candidate.id === skillId)
     if (!skill || !this.isReferenceLikeSkill(skill)) return { armed: false }
-    rememberLastReferenceSkill(sessionId, { id: skill.id, name: skill.name })
+    rememberLastReferenceSkill(sessionId, { id: skill.id, name: skill.name, messageVisibilityEpoch })
     return { armed: true, skillId: skill.id, skillName: skill.name }
   }
 
-  rememberExplicitReferenceSkillHint(userText: string, sessionId?: string): boolean {
+  rememberExplicitReferenceSkillHint(
+    userText: string,
+    sessionId?: string,
+    messageVisibilityEpoch?: number,
+  ): boolean {
     if (!sessionId) return false
     const skill = this.findExplicitlyRequestedSkills(userText)
       .find((candidate) => this.isReferenceLikeSkill(candidate))
     if (!skill) return false
-    rememberLastReferenceSkill(sessionId, { id: skill.id, name: skill.name })
+    rememberLastReferenceSkill(sessionId, { id: skill.id, name: skill.name, messageVisibilityEpoch })
     return true
   }
 
@@ -275,6 +292,7 @@ export class SkillContextOrchestrator {
   rememberReferenceSkillFromPriorToolUses(
     priorToolNames: string[],
     sessionId?: string,
+    messageVisibilityEpoch?: number,
   ): { armed: boolean; skillId?: string; skillName?: string } {
     if (!sessionId || !priorToolNames.length) return { armed: false }
     const resolveByName = this.deps.resolveSkillToolByName
@@ -286,7 +304,7 @@ export class SkillContextOrchestrator {
       const skill = skills.find((entry) => entry.id === def.skillId)
       if (!skill) continue
       if (!this.isReferenceLikeSkill(skill)) continue
-      rememberLastReferenceSkill(sessionId, { id: skill.id, name: skill.name })
+      rememberLastReferenceSkill(sessionId, { id: skill.id, name: skill.name, messageVisibilityEpoch })
       return { armed: true, skillId: skill.id, skillName: skill.name }
     }
     return { armed: false }
@@ -301,6 +319,7 @@ export class SkillContextOrchestrator {
     userText: string
     session: SkillSessionLike
     sessionId?: string
+    messageVisibilityEpoch?: number
     emitOutput: (chunk: string, type: string) => void
     emitToolAction: (tool: string, args: Record<string, unknown>) => void
     executeTool: (tool: string, args: Record<string, unknown>) => Promise<ToolExecutionOutput>
@@ -360,7 +379,11 @@ export class SkillContextOrchestrator {
           truncated: inlined.truncated,
           at: Date.now(),
         })
-        rememberLastReferenceSkill(params.sessionId, { id: skill.id, name: skill.name })
+        rememberLastReferenceSkill(params.sessionId, {
+          id: skill.id,
+          name: skill.name,
+          messageVisibilityEpoch: params.messageVisibilityEpoch,
+        })
         continue
       }
 
@@ -409,7 +432,11 @@ export class SkillContextOrchestrator {
       // P0-T3: remember this reference skill so the primitive tools
       // (skill_ask_user / skill_run_shell / ...) stay session-gated correctly
       // and the next turn knows which skill methodology was loaded.
-      rememberLastReferenceSkill(params.sessionId, { id: skill.id, name: skill.name })
+      rememberLastReferenceSkill(params.sessionId, {
+        id: skill.id,
+        name: skill.name,
+        messageVisibilityEpoch: params.messageVisibilityEpoch,
+      })
     }
   }
 

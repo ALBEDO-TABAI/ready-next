@@ -144,7 +144,6 @@ const stats: MemoryStats = {
 }
 
 const beliefSnapshot: BeliefCardSettingsSnapshotData = {
-  knowledgeSystemEnabled: true,
   cards: [
     {
       relPath: 'knowledge/new-learning.md',
@@ -197,15 +196,6 @@ const beliefSnapshot: BeliefCardSettingsSnapshotData = {
   maintenance: {
     lifecycleRunning: true,
     lastLifecycleMaintenanceAt: '2026-06-13T12:00:00.000Z',
-    llmRound: {
-      lastRunAt: '2026-06-13T12:01:00.000Z',
-      decision: 'skip',
-      reason: 'no_signals',
-      llmCalls: 0,
-      applied: 0,
-      rejected: 0,
-      terminal: 'gated_skip',
-    },
   },
 }
 
@@ -215,7 +205,6 @@ interface MemoryHarness {
   maintenanceCalls: number
   beliefCardListCalls: number
   beliefCardTransitions: Array<{ relPath: string; action: 'approve' | 'reject' }>
-  knowledgeSwitches: boolean[]
   createFromConversationCalls: Array<{
     scopeId: string
     category: 'summary' | 'learning'
@@ -238,7 +227,6 @@ function installElectronAPI(
     maintenanceCalls: 0,
     beliefCardListCalls: 0,
     beliefCardTransitions: [],
-    knowledgeSwitches: [],
     createFromConversationCalls: [],
     deleteCalls: [],
     alerts: [],
@@ -305,10 +293,6 @@ function installElectronAPI(
           },
         }
       },
-      setKnowledgeSystemEnabled: async (enabled: boolean) => {
-        harness.knowledgeSwitches.push(enabled)
-        return { success: true, data: { ...snapshot, knowledgeSystemEnabled: enabled } }
-      },
     },
     trigger: {
       list: async () => ({ success: true, data: [] }),
@@ -374,8 +358,9 @@ test('WP5 memory settings default view hides internal tools and re-queries when 
   try {
     const document = handle.dom.window.document
     assert.ok(document.body.textContent?.includes('最近记住了什么'))
-    assert.ok(document.body.textContent?.includes('信念卡确认'), 'belief-card confirmation panel must render by default')
-    assert.ok(document.body.textContent?.includes('知识系统总开关'), 'knowledge-system switch must be visible')
+    assert.ok(document.body.textContent?.includes('历史信念资料'), 'belief-card archive panel must render by default')
+    assert.ok(document.body.textContent?.includes('不会把内容注入当前 Codex'), 'archive boundary must be visible')
+    assert.ok(!document.body.textContent?.includes('知识系统总开关'), 'retired knowledge toggle must stay absent')
     assert.ok(document.body.textContent?.includes('系统新学到的东西'), 'staged belief cards must be visible')
     assert.ok(document.body.textContent?.includes('站点卡风险'), 'site-card risk summary must be visible')
     assert.ok(document.body.textContent?.includes('xiaohongshu.com'), 'high-risk site card domain must be visible')
@@ -410,18 +395,14 @@ test('WP5 memory settings default view hides internal tools and re-queries when 
   }
 })
 
-test('WP5 memory settings labels missing LLM maintenance driver explicitly', async () => {
+test('WP5 memory settings describes maintenance as local and provider-free', async () => {
   const handle = installDomGlobals()
-  const { root } = await mountMemorySettings(handle, {
-    ...beliefSnapshot,
-    maintenance: { ...beliefSnapshot.maintenance, llmRound: null },
-  })
+  const { root } = await mountMemorySettings(handle)
   try {
-    assert.ok(
-      handle.dom.window.document.body.textContent?.includes('LLM 维护回合 未接入驱动'),
-      'null maintenance LLM status must read as disabled driver, not a missing record',
-    )
-    assert.ok(!handle.dom.window.document.body.textContent?.includes('LLM 维护回合 尚未记录'))
+    const text = handle.dom.window.document.body.textContent || ''
+    assert.match(text, /本地资料维护：运行中/)
+    assert.match(text, /不会调用 AI 模型/)
+    assert.doesNotMatch(text, /LLM 维护回合|未接入驱动/)
   } finally {
     await act(async () => { root.unmount() })
     await new Promise((resolve) => setTimeout(resolve, 25))

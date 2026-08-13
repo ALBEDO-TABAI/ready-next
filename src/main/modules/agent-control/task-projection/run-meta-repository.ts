@@ -19,6 +19,7 @@ export interface RunMetaRecord {
   runId: string
   taskId: string | null
   scopeId: string | null
+  messageVisibilityEpoch: number
   agentId: string | null
   executionBinding: TaskExecutionBinding | null
   status: string
@@ -47,6 +48,7 @@ export interface RunMetaCreateInput {
   runId: string
   taskId?: string | null
   scopeId?: string | null
+  messageVisibilityEpoch?: number
   agentId?: string | null
   executionBinding?: TaskExecutionBinding | null
   status: string
@@ -89,6 +91,7 @@ interface RunMetaRow {
   run_id: string
   task_id: string | null
   scope_id: string | null
+  message_visibility_epoch: number
   agent_id: string | null
   execution_binding_json?: string | null
   status: string
@@ -135,6 +138,7 @@ function rowToRecord(row: RunMetaRow): RunMetaRecord {
     runId: row.run_id,
     taskId: row.task_id,
     scopeId: row.scope_id,
+    messageVisibilityEpoch: row.message_visibility_epoch,
     agentId: row.agent_id,
     executionBinding,
     status: row.status,
@@ -164,10 +168,16 @@ export class RunMetaRepository {
   constructor(private readonly db: DatabaseConnection) {}
 
   create(input: RunMetaCreateInput, now: number = Date.now()): RunMetaRecord {
+    const scopeId = input.scopeId ?? null
+    const messageVisibilityEpoch = input.messageVisibilityEpoch ?? (scopeId === null ? -1 : NaN)
+    if (!Number.isSafeInteger(messageVisibilityEpoch) || messageVisibilityEpoch < (scopeId === null ? -1 : 0)) {
+      throw new Error('[run-meta-repository] messageVisibilityEpoch is required for a scoped run')
+    }
     const record: RunMetaRecord = {
       runId: input.runId,
       taskId: input.taskId ?? null,
-      scopeId: input.scopeId ?? null,
+      scopeId,
+      messageVisibilityEpoch,
       agentId: input.agentId ?? null,
       executionBinding: input.executionBinding ? assertTaskExecutionBinding(input.executionBinding) : null,
       status: input.status,
@@ -194,19 +204,20 @@ export class RunMetaRepository {
     this.db
       .prepare(
         `INSERT INTO run_meta (
-          run_id, task_id, scope_id, agent_id, execution_binding_json, status,
+          run_id, task_id, scope_id, message_visibility_epoch, agent_id, execution_binding_json, status,
           initiator, duration_ms,
           task_type, terminal_reason, provider_protocol, wire_api, context_window,
           provider_diagnostics_json, budget_json, continuation_ref_json, recovery_history_json,
           input_tokens, output_tokens, total_tokens,
           first_message_text, last_message_text, follow_up_text,
           created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         record.runId,
         record.taskId,
         record.scopeId,
+        record.messageVisibilityEpoch,
         record.agentId,
         jsonOrNull(record.executionBinding),
         record.status,
@@ -257,22 +268,40 @@ export class RunMetaRepository {
         throw new Error('[run-meta-repository] execution binding is immutable')
       }
     }
+    if (patch.scopeId !== undefined && patch.scopeId !== existing.scopeId) {
+      throw new Error('[run-meta-repository] scopeId is immutable')
+    }
+    if (patch.messageVisibilityEpoch !== undefined
+      && patch.messageVisibilityEpoch !== existing.messageVisibilityEpoch) {
+      throw new Error('[run-meta-repository] messageVisibilityEpoch is immutable')
+    }
 
-    this.db
+    const result = this.db
       .prepare(
         `UPDATE run_meta SET
-          task_id = ?, scope_id = ?, agent_id = ?, execution_binding_json = ?, status = ?,
+          task_id = ?, scope_id = ?, message_visibility_epoch = ?, agent_id = ?, execution_binding_json = ?, status = ?,
           initiator = ?, duration_ms = ?,
           task_type = ?, terminal_reason = ?, provider_protocol = ?, wire_api = ?, context_window = ?,
           provider_diagnostics_json = ?, budget_json = ?, continuation_ref_json = ?, recovery_history_json = ?,
           input_tokens = ?, output_tokens = ?, total_tokens = ?,
           first_message_text = ?, last_message_text = ?, follow_up_text = ?,
           updated_at = ?
-         WHERE run_id = ?`
+         WHERE run_id = ?
+           AND (
+             (scope_id IS NULL AND message_visibility_epoch = -1)
+             OR EXISTS (
+               SELECT 1
+                 FROM chat_conversations scope
+                WHERE scope.id = run_meta.scope_id
+                  AND scope.closed_at IS NULL
+                  AND scope.message_visibility_epoch = run_meta.message_visibility_epoch
+             )
+           )`
       )
       .run(
         merged.taskId,
         merged.scopeId,
+        merged.messageVisibilityEpoch,
         merged.agentId,
         jsonOrNull(merged.executionBinding),
         merged.status,
@@ -296,6 +325,7 @@ export class RunMetaRepository {
         merged.updatedAt,
         merged.runId,
       )
+    if ((result as { changes?: number } | undefined)?.changes === 0) return null
     return merged
   }
 
@@ -316,14 +346,25 @@ export class RunMetaRepository {
       updatedAt: now,
     }
 
-    this.db
+    const result = this.db
       .prepare(
         `UPDATE run_meta SET
           input_tokens = ?, output_tokens = ?, total_tokens = ?, updated_at = ?
-         WHERE run_id = ?`
+         WHERE run_id = ?
+           AND (
+             (scope_id IS NULL AND message_visibility_epoch = -1)
+             OR EXISTS (
+               SELECT 1
+                 FROM chat_conversations scope
+                WHERE scope.id = run_meta.scope_id
+                  AND scope.closed_at IS NULL
+                  AND scope.message_visibility_epoch = run_meta.message_visibility_epoch
+             )
+           )`
       )
       .run(next.inputTokens, next.outputTokens, next.totalTokens, next.updatedAt, runId)
 
+    if ((result as { changes?: number } | undefined)?.changes === 0) return null
     return next
   }
 

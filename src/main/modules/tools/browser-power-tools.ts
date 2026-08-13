@@ -41,8 +41,7 @@ import {
 import { downloadUrlsToDirectory, normalizeResourceKinds, resolveAuthorizedBrowserDownloadDirectory } from './browser-media-download'
 import { createRotatingLogger } from '../../utils/rotating-logger'
 import {
-  activeBrowserToolUrl,
-  truncate,
+  activeBrowserToolUrl
 } from './browser-tool-shared'
 import { browserSnapshotService } from '../browser-engine/browser-snapshot-service'
 import type { BrowserTaskEnvelope } from '../../../shared/browser-task-envelope'
@@ -347,34 +346,10 @@ async function resolvePowerDecisionWithTaskAuthority(params: {
       destination: params.destination || null,
     })
   }
-  const requestId = `browser-power-confirmation-${powerInputHash({
-    targetDigest,
-    toolName: publicToolName,
-    effects: base.effects,
-    inputHash,
-  }).slice(0, 32)}`
-  return {
-    ...base,
-    browserSuspensionRequest: {
-      version: 1,
-      kind: 'browser_power_confirmation',
-      requestId,
-      wakeKind: 'browser_power_confirmation',
-      toolName: publicToolName,
-      effects: [...base.effects],
-      actionIntent: { objectRef: params.objectRef, inputHash },
-      target: {
-        scopeId: envelope.scopeId,
-        ownerRunId: envelope.runId,
-        browserTaskId: envelope.browserTaskId,
-        tabId: params.tabId,
-        documentKeyHash,
-        origin,
-        targetDigest,
-      },
-      purpose: params.purpose,
-    },
-  }
+  // Public task continuation is retired. A grant-required operation remains
+  // fail-closed in the current turn and must not create an unanswerable
+  // confirmation checkpoint.
+  return base
 }
 
 export async function executeBrowserPowerTool(

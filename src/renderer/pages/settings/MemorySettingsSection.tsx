@@ -83,7 +83,6 @@ export function MemorySettingsSection() {
             actionRunning={beliefCards.actionRunning}
             onRefresh={beliefCards.refresh}
             onTransition={beliefCards.transitionCard}
-            onSetKnowledgeSystemEnabled={beliefCards.setKnowledgeSystemEnabled}
           />
           <RunQualityPanel />
           <div

@@ -1,11 +1,11 @@
 import type {
   CodexStartDispatchPort,
 } from './codex-app-server-client'
-import {
+import type {
   CodexBindingRepository,
 } from './codex-binding-repository'
 import type { CodexProvisionalInboundBuffer } from './codex-provisional-inbound-buffer'
-import { CodexStartIdentityRegistry } from './codex-start-identity-registry'
+import type { CodexStartIdentityRegistry } from './codex-start-identity-registry'
 
 type StartMethod = 'thread/start' | 'turn/start'
 
@@ -41,6 +41,7 @@ export class CodexDurableStartDispatchPort implements CodexStartDispatchPort {
     bindingLookupKey: string
     requestDigest: string
   }): Promise<{ bindingId: string }> {
+    this.deps.inboundBuffer.assertProvisionalOwnerCapacityAvailable()
     const dispatchedAt = this.deps.now()
     const activated = this.deps.repository.activateStartDispatch({
       ...input,
@@ -190,9 +191,28 @@ export class CodexDurableStartDispatchPort implements CodexStartDispatchPort {
   }
 
   async markConnectionClosed(connectionEpoch: string): Promise<void> {
-    this.deps.repository.closeLateResponseGuardsForConnection(connectionEpoch, this.deps.now())
-    this.deps.registry.markConnectionClosed(connectionEpoch)
-    this.deps.inboundBuffer.markConnectionClosed(connectionEpoch)
+    const closedAt = this.deps.now()
+    const settle = (close: () => void): Promise<void> => {
+      try {
+        close()
+        return Promise.resolve()
+      } catch (error) {
+        return Promise.reject(error)
+      }
+    }
+    const results = await Promise.allSettled([
+      settle(() => (
+        this.deps.repository.closeLateResponseGuardsForConnection(connectionEpoch, closedAt)
+      )),
+      settle(() => this.deps.registry.markConnectionClosed(connectionEpoch)),
+      settle(() => this.deps.inboundBuffer.markConnectionClosed(connectionEpoch)),
+    ])
+    const failures = results.flatMap((result) => (
+      result.status === 'rejected' ? [result.reason] : []
+    ))
+    if (failures.length > 0) {
+      throw new AggregateError(failures, 'start_dispatch_close_failed')
+    }
   }
 
   completeHostFailureCloseout(input: {

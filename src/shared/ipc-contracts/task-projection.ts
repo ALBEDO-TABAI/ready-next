@@ -144,6 +144,7 @@ export interface TaskProjectionRecord {
   revision?: number
   dependencyGeneration?: number
   scopeId: string
+  messageVisibilityEpoch?: number
   runId: string
   parentTaskId?: string | null
   parentStepId?: string | null

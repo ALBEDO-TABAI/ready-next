@@ -311,6 +311,7 @@ describe('agent panel test harness', () => {
     }
 
     let state = baseState()
+    let receivedExternalReadSlice: Record<string, unknown> | null = null
     const listeners = new Set<(next: HarnessState, previous: HarnessState) => void>()
     const notify = (next: HarnessState, previous: HarnessState) => {
       for (const listener of listeners) listener(next, previous)
@@ -322,7 +323,8 @@ describe('agent panel test harness', () => {
         state = { ...state, inputValue: value }
         notify(state, previous)
       },
-      sendMessage: async (content) => {
+      sendMessage: async (content, options) => {
+        receivedExternalReadSlice = options?.codexExternalReadSlice || null
         const previous = state
         state = {
           ...state,
@@ -360,6 +362,22 @@ describe('agent panel test harness', () => {
     assert.equal(result.after.messages.at(-1)?.content, '收到，测试完成。')
     assert.ok(harness.events().some((event) => event.kind === 'message_count'))
 
+    const externalReadSlice = { kind: 'lark_cli_read', docRef: 'fixture-token' }
+    await harness.submit('外部只读测试', {
+      mode: 'store',
+      waitForIdle: false,
+      codexExternalReadSlice: externalReadSlice,
+    })
+    assert.deepEqual(receivedExternalReadSlice, externalReadSlice)
+    await assert.rejects(
+      harness.submit('错误的 DOM 外部读取测试', {
+        mode: 'dom',
+        waitForIdle: false,
+        codexExternalReadSlice: externalReadSlice,
+      }),
+      /codex_external_read_slice_requires_store_mode/,
+    )
+
     const domFallback = await harness.submit('DOM 空点提交', { mode: 'dom', waitForIdle: false })
     assert.equal(domClickCount, 1)
     assert.equal(domFallback.inputMode, 'store')
@@ -394,6 +412,58 @@ describe('agent panel test harness', () => {
     })
     assert.equal(missingTool.ok, false)
     assert.ok(missingTool.diagnostics.some((item) => item.id === 'expected_tool_not_called'))
+
+    state = {
+      ...state,
+      sendMessage: async (content) => {
+        const previous = state
+        state = {
+          ...state,
+          messages: [
+            ...state.messages,
+            message({ id: 'user-no-final', type: 'user', content }),
+          ],
+        }
+        notify(state, previous)
+        return {
+          success: false,
+          disposition: 'terminal_failure_after_persistence',
+          shouldClearInput: true,
+          preserveInput: false,
+        }
+      },
+    }
+    const missingFinal = await harness.submit('模拟无最终回复', {
+      mode: 'store',
+      waitForIdle: false,
+      requireAssistantMessage: true,
+    })
+    assert.equal(missingFinal.ok, false)
+    assert.ok(missingFinal.diagnostics.some((item) => item.id === 'assistant_message_missing'))
+
+    state = {
+      ...state,
+      sendMessage: async (content) => {
+        const previous = state
+        state = {
+          ...state,
+          messages: [
+            ...state.messages,
+            message({ id: 'user-empty-final', type: 'user', content }),
+            message({ id: 'agent-empty-final', type: 'agent', content: '   ' }),
+          ],
+        }
+        notify(state, previous)
+        return { success: true }
+      },
+    }
+    const emptyFinal = await harness.submit('模拟空白最终回复', {
+      mode: 'store',
+      waitForIdle: false,
+      requireAssistantMessage: true,
+    })
+    assert.equal(emptyFinal.ok, false)
+    assert.ok(emptyFinal.diagnostics.some((item) => item.id === 'assistant_message_missing'))
 
     harness.dispose()
     ;(globalThis as { window?: unknown }).window = originalWindow

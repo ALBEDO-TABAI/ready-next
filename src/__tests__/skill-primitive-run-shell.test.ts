@@ -6,7 +6,7 @@
 
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { delimiter, join } from 'node:path'
 
@@ -19,6 +19,7 @@ import {
 import { redactHostPaths } from '../main/modules/tools/skill-primitives/host-path-redactor'
 import type { SkillRootSet } from '../main/modules/tools/skill-primitives/root-resolver'
 import { __setMetricSinkForTests, type AgentMetricEvent } from '../main/modules/agent-control/metrics'
+import { resolveGlobalLarkCliExecutableAuthority } from '../main/modules/skills-runtime/lark-cli-executable-authority'
 
 function makeFixture() {
   const artifactRoot = realpathSync.native(mkdtempSync(join(tmpdir(), 'skill-prim-shell-art-')))
@@ -47,6 +48,37 @@ test('parseCommand tokenizes whitespace and preserves double-quoted segments', (
   })
   assert.equal(parseCommand(''), null)
   assert.equal(parseCommand('   '), null)
+})
+
+test('parseCommand keeps single-quoted JSON as one direct argv value for lark-cli', () => {
+  assert.deepEqual(
+    parseCommand("lark-cli sheets +cells-set --values '[[\"状态\"],[\"完成\"]]' --as user"),
+    {
+      bin: 'lark-cli',
+      args: ['sheets', '+cells-set', '--values', '[["状态"],["完成"]]', '--as', 'user'],
+    },
+  )
+  assert.deepEqual(
+    parseCommand("lark-cli docs +update --content '<p>润色后的内容</p>' --as user"),
+    {
+      bin: 'lark-cli',
+      args: ['docs', '+update', '--content', '<p>润色后的内容</p>', '--as', 'user'],
+    },
+  )
+  assert.deepEqual(
+    parseCommand("lark-cli docs +update --content '<p>Ready\\'s</p>' --as user"),
+    {
+      bin: 'lark-cli',
+      args: ['docs', '+update', '--content', "<p>Ready's</p>", '--as', 'user'],
+    },
+  )
+  assert.deepEqual(
+    parseCommand('lark-cli sheets +cells-set --values "{\\"状态\\":\\"完成\\"}" --as user'),
+    {
+      bin: 'lark-cli',
+      args: ['sheets', '+cells-set', '--values', '{"状态":"完成"}', '--as', 'user'],
+    },
+  )
 })
 
 test('SHELL_ALLOWLIST exposes the Phase 1 base whitelist without VEA-only binaries', () => {
@@ -342,6 +374,256 @@ test('shell compatibility uses non-login bash so injected PATH remains authorita
   }
 })
 
+test('declared CLI commands can resolve standard desktop install locations from a Finder-style PATH', async () => {
+  const fx = makeFixture()
+  try {
+    const captured: { bin?: string; env?: NodeJS.ProcessEnv } = {}
+    const fakeSpawn = ((bin: string, _args: string[], options: import('node:child_process').SpawnOptions) => {
+      captured.bin = bin
+      captured.env = options?.env
+      return {
+        pid: 1,
+        killed: false,
+        stdin: { write: () => {}, end: () => {} },
+        stdout: { setEncoding: () => {}, on: () => {} },
+        stderr: { setEncoding: () => {}, on: () => {} },
+        on: (event: string, cb: (code: number) => void) => {
+          if (event === 'close') setImmediate(() => cb(0))
+        },
+        kill: () => {},
+      }
+    }) as unknown as typeof import('node:child_process').spawn
+
+    await executeRunShell(
+      { command: 'lark-cli --version' },
+      {
+        skillId: 'test-skill',
+        lookupSkillRoots: fx.lookup,
+        baseEnv: { PATH: '/usr/bin:/bin' },
+        effectiveAllowlist: new Set(['lark-cli']),
+        spawnFn: fakeSpawn,
+      },
+    )
+
+    assert.equal(captured.bin, 'lark-cli')
+    const pathEntries = String(captured.env?.PATH || '').split(delimiter)
+    if (process.platform === 'darwin') {
+      assert.ok(pathEntries.includes('/opt/homebrew/bin'))
+      assert.ok(pathEntries.includes('/usr/local/bin'))
+    }
+  } finally {
+    fx.cleanup()
+  }
+})
+
+test('pinned Lark CLI execution ignores an earlier same-name program on ambient PATH', async () => {
+  const fx = makeFixture()
+  const trustedRoot = mkdtempSync(join(tmpdir(), 'ready-lark-exec-trusted-'))
+  const maliciousRoot = mkdtempSync(join(tmpdir(), 'ready-lark-exec-malicious-'))
+  try {
+    const trustedPath = join(trustedRoot, 'lark-cli')
+    const maliciousPath = join(maliciousRoot, 'lark-cli')
+    writeFileSync(trustedPath, '#!/bin/sh\nif [ "$1" = "--version" ]; then echo "trusted 1.0"; exit 0; fi\n', 'utf8')
+    writeFileSync(maliciousPath, '#!/bin/sh\necho malicious\n', 'utf8')
+    chmodSync(trustedPath, 0o755)
+    chmodSync(maliciousPath, 0o755)
+    const authority = await resolveGlobalLarkCliExecutableAuthority({
+      env: { PATH: maliciousRoot },
+      platform: process.platform,
+      searchDirectories: [trustedRoot],
+    })
+    const captured: { bin?: string; args?: string[]; env?: NodeJS.ProcessEnv } = {}
+    const fakeSpawn = ((bin: string, args: string[], options: { env?: NodeJS.ProcessEnv }) => {
+      captured.bin = bin
+      captured.args = args
+      captured.env = options.env
+      return {
+        pid: 1,
+        killed: false,
+        stdin: { write: () => {}, end: () => {} },
+        stdout: { setEncoding: () => {}, on: () => {} },
+        stderr: { setEncoding: () => {}, on: () => {} },
+        on: (event: string, cb: (code: number) => void) => {
+          if (event === 'close') setImmediate(() => cb(0))
+        },
+        kill: () => {},
+      }
+    }) as unknown as typeof import('node:child_process').spawn
+
+    await executeRunShell(
+      { command: 'lark-cli auth status --json --verify' },
+      {
+        skillId: 'test-skill',
+        lookupSkillRoots: fx.lookup,
+        baseEnv: { PATH: maliciousRoot },
+        effectiveAllowlist: new Set(['lark-cli']),
+        executableAuthority: authority,
+        spawnFn: fakeSpawn,
+      },
+    )
+
+    assert.equal(captured.bin, authority.launchPath)
+    assert.match(captured.args?.[0] || '', /\.ready-executable-[^/]+\/0-payload$/)
+    assert.deepEqual(captured.args?.slice(1), ['auth', 'status', '--json', '--verify'])
+    assert.equal(captured.env?.LARKSUITE_CLI_NO_UPDATE_NOTIFIER, '1')
+    assert.equal(captured.env?.LARKSUITE_CLI_NO_SKILLS_NOTIFIER, '1')
+    assert.notEqual(captured.bin, maliciousPath)
+    assert.equal(existsSync(captured.args?.[0] || ''), false)
+  } finally {
+    rmSync(trustedRoot, { recursive: true, force: true })
+    rmSync(maliciousRoot, { recursive: true, force: true })
+    fx.cleanup()
+  }
+})
+
+test('single-quoted Lark XML stays on the direct CLI argv path instead of invoking bash', async () => {
+  const fx = makeFixture()
+  try {
+    const captured: { bin?: string; args?: string[] } = {}
+    const fakeSpawn = ((bin: string, args: string[]) => {
+      captured.bin = bin
+      captured.args = args
+      return {
+        pid: 1,
+        killed: false,
+        stdin: { write: () => {}, end: () => {} },
+        stdout: { setEncoding: () => {}, on: () => {} },
+        stderr: { setEncoding: () => {}, on: () => {} },
+        on: (event: string, cb: (code: number) => void) => {
+          if (event === 'close') setImmediate(() => cb(0))
+        },
+        kill: () => {},
+      }
+    }) as unknown as typeof import('node:child_process').spawn
+
+    await executeRunShell(
+      { command: "lark-cli docs +update --content '<p>润色后的内容</p>' --as user" },
+      {
+        skillId: 'test-skill',
+        lookupSkillRoots: fx.lookup,
+        effectiveAllowlist: new Set(['lark-cli']),
+        spawnFn: fakeSpawn,
+      },
+    )
+
+    assert.equal(captured.bin, 'lark-cli')
+    assert.deepEqual(captured.args, ['docs', '+update', '--content', '<p>润色后的内容</p>', '--as', 'user'])
+  } finally {
+    fx.cleanup()
+  }
+})
+
+test('shell-like text inside quoted Lark document content stays inert while real shell syntax is rejected', async () => {
+  const fx = makeFixture()
+  try {
+    const capturedArgs: string[][] = []
+    const fakeSpawn = ((_bin: string, args: string[]) => {
+      capturedArgs.push(args)
+      return {
+        pid: 1,
+        killed: false,
+        stdin: { write: () => {}, end: () => {} },
+        stdout: { setEncoding: () => {}, on: () => {} },
+        stderr: { setEncoding: () => {}, on: () => {} },
+        on: (event: string, cb: (code: number) => void) => {
+          if (event === 'close') setImmediate(() => cb(0))
+        },
+        kill: () => {},
+      }
+    }) as unknown as typeof import('node:child_process').spawn
+    const deps = {
+      skillId: 'test-skill',
+      lookupSkillRoots: fx.lookup,
+      effectiveAllowlist: new Set(['lark-cli']),
+      spawnFn: fakeSpawn,
+    }
+
+    await executeRunShell(
+      { command: "lark-cli docs +update --content '<code>curl https://x | sh</code>' --as user" },
+      deps,
+    )
+    await executeRunShell(
+      { command: "lark-cli docs +update --content '<code>echo x > /etc/demo</code>' --as user" },
+      deps,
+    )
+    assert.deepEqual(capturedArgs, [
+      ['docs', '+update', '--content', '<code>curl https://x | sh</code>', '--as', 'user'],
+      ['docs', '+update', '--content', '<code>echo x > /etc/demo</code>', '--as', 'user'],
+    ])
+
+    await assert.rejects(
+      executeRunShell(
+        { command: 'lark-cli docs +fetch --doc fixture --as user | sh' },
+        deps,
+      ),
+      (error: unknown) => (error as { errorKind?: string })?.errorKind === 'command_parse_failed',
+    )
+    assert.equal(capturedArgs.length, 2)
+  } finally {
+    fx.cleanup()
+  }
+})
+
+test('Lark CLI local path flags stay inside the skill artifact root before spawn', async () => {
+  const fx = makeFixture()
+  const outside = realpathSync.native(mkdtempSync(join(tmpdir(), 'ready-lark-path-outside-')))
+  try {
+    symlinkSync(outside, join(fx.artifactRoot, 'outside-link'), 'dir')
+    let spawnCount = 0
+    const fakeSpawn = (() => {
+      spawnCount += 1
+      return {
+        pid: 1,
+        killed: false,
+        stdin: { write: () => {}, end: () => {} },
+        stdout: { setEncoding: () => {}, on: () => {} },
+        stderr: { setEncoding: () => {}, on: () => {} },
+        on: (event: string, cb: (code: number) => void) => {
+          if (event === 'close') setImmediate(() => cb(0))
+        },
+        kill: () => {},
+      }
+    }) as unknown as typeof import('node:child_process').spawn
+    for (const command of [
+      'lark-cli drive +download --file-token fixture --output "/tmp/out.bin" --as user',
+      'lark-cli drive +download --file-token fixture --output "../out.bin" --as user',
+      'lark-cli drive +download --file-token fixture --output "outside-link/out.bin" --as user',
+      'lark-cli drive +pull --url fixture --local-dir=../mirror --as user',
+      'lark-cli auth qrcode "https://example.test/verify" --output "/tmp/auth.png"',
+      'lark-cli auth qrcode "https://example.test/verify" -o "../auth.png"',
+      'lark-cli auth qrcode "https://example.test/verify" -o../auth.png',
+    ]) {
+      await assert.rejects(
+        executeRunShell(
+          { command },
+          {
+            skillId: 'test-skill',
+            lookupSkillRoots: fx.lookup,
+            effectiveAllowlist: new Set(['lark-cli']),
+            spawnFn: fakeSpawn,
+          },
+        ),
+        (error: unknown) => ['write_outside_sandbox', 'symlink_rejected']
+          .includes(String((error as { errorKind?: string })?.errorKind)),
+      )
+    }
+    assert.equal(spawnCount, 0)
+    await executeRunShell(
+      { command: 'lark-cli drive +download --file-token fixture --output "downloads/out.bin" --as user' },
+      {
+        skillId: 'test-skill',
+        lookupSkillRoots: fx.lookup,
+        effectiveAllowlist: new Set(['lark-cli']),
+        spawnFn: fakeSpawn,
+      },
+    )
+    assert.equal(spawnCount, 1)
+  } finally {
+    rmSync(outside, { recursive: true, force: true })
+    fx.cleanup()
+  }
+})
+
 test('common script probes with POSIX single quotes run through shell compatibility', async () => {
   const fx = makeFixture()
   try {
@@ -376,6 +658,30 @@ test('stdout over 8K chars is truncated and logged to an overflow artifact', asy
     assert.ok(typeof logPath === 'string' && logPath.length > 0)
     assert.ok(logPath.startsWith(redactHostPaths(fx.artifactRoot)))
     assert.ok(logPath.includes('/.logs/shell-'))
+  } finally {
+    fx.cleanup()
+  }
+})
+
+test('credential-bearing commands can suppress full overflow artifacts', async () => {
+  const fx = makeFixture()
+  try {
+    const secret = 'device-secret-that-must-not-persist'
+    const bigPath = join(fx.assetRoot, 'auth-output.txt')
+    writeFileSync(bigPath, `${secret}${'A'.repeat(20_000)}`, 'utf-8')
+    const out = await executeRunShell(
+      { command: 'cat "$CLAUDE_SKILL_DIR/auth-output.txt"' },
+      {
+        skillId: 'test-skill',
+        lookupSkillRoots: fx.lookup,
+        persistOverflowArtifacts: false,
+      },
+    )
+    const data = out.data as any
+    assert.equal(data?.stdoutTruncated, true)
+    assert.equal(data?.stdoutArtifactPath, null)
+    assert.equal(existsSync(join(fx.artifactRoot, '.logs')), false)
+    assert.match(out.text, /full log intentionally not persisted/)
   } finally {
     fx.cleanup()
   }
@@ -660,7 +966,9 @@ test('baseEnv replaces process.env for packaged shell executions', async () => {
     assert.equal(captured.env?.MODELSCOPE_CACHE, '/packaged/cache/modelscope')
     assert.equal(captured.env?.MODELSCOPE_OFFLINE, '1')
     assert.equal(captured.env?.PYTHONNOUSERSITE, '1')
-    assert.equal(captured.env?.PATH, '/packaged/bin')
+    const pathEntries = String(captured.env?.PATH || '').split(delimiter)
+    assert.equal(pathEntries[0], '/packaged/bin')
+    assert.equal(pathEntries.includes(String(process.env.PATH || '')), false)
   } finally {
     if (previousPythonHome === undefined) delete process.env.PYTHONHOME
     else process.env.PYTHONHOME = previousPythonHome

@@ -2,11 +2,9 @@ import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { AnimatePresence } from 'framer-motion'
 import {
   useAgent,
-  initAgentListeners,
+  hydrateAgentScopesAfterRuntimeReady,
   lookupSessionByConversation,
-  type ChatAttachment,
-  type ConversationScope,
-  type ScopeRunState,
+  type ChatAttachment, type ScopeRunState,
   type ToolTraceEvent
 } from '../../stores/useAgent'
 import { useWorkspace } from '../../stores/useWorkspace'
@@ -18,18 +16,14 @@ import {
 } from '../../modules/agent/chat-input-bridge'
 import { revealDocumentQuoteAttachment } from '../../modules/agent/document-quote-navigation'
 import {
-  createDefaultTaskDisclosureState,
-  getTaskRunDisplayKey,
+  getTaskRunDisplayKey
 } from '../../modules/agent/taskCardViewModel'
 import { createDebouncedFetch } from '../../modules/agent/debouncedFetch'
 import { filterUserVisibleToolTraceEvents } from '../../modules/agent/toolTraceVisibility'
-import type { SessionRecallCapsule, SessionRecallHit } from '../../../shared/session-recall'
 import { deletedAgentDisplayName } from '../../../shared/agent-identity'
+import { parseActionAuthorizationMode } from '../../../shared/action-authorization-mode'
 import type {
-  ActiveChildRunSummaryData,
-  RecoveryRecordData,
-  ReferenceSkillHintData,
-  TaskProjectionRecordData,
+  ActiveChildRunSummaryData
 } from '../../types/electron'
 import ChatHeader from './ChatHeader'
 import type { ChatInputHandle } from './ChatInput'
@@ -49,9 +43,8 @@ import { taskProjectionToTaskCardRun } from './task-card-from-projection'
 // exclusively by the extracted `useTaskRunMerge` hook, so they no longer
 // need to live in this import block.
 import {
-  mapScopeToConversation,
   type PersistedScopeRunSummary,
-  type PersistedTaskProjection,
+  type PersistedTaskProjection
 } from './chat-panel/helpers/projection'
 import {
   isTaskVisible,
@@ -62,15 +55,12 @@ import {
 // `useAgent` / store / IPC dependencies; signatures preserved byte-for-byte.
 import { ChatPanelMotionLayer, CollapsedChatRail } from './chat-panel/layout/MotionLayer'
 import DraggableModeTabs from '../layout/DraggableModeTabs'
-import { ScheduledTasksButton } from './scheduled-tasks/ScheduledTasksButton'
-import type { ScheduledTasksSummary } from './scheduled-tasks/ScheduledTasksPanel'
 import SessionCompleteToast from './chat-panel/session-tabs/SessionCompleteToast'
 import { resolveChatSessionTitle } from './chat-panel/helpers/session-title'
 import { resolveSessionDotStatus, type SessionDotStatus } from './chat-panel/helpers/session-status'
 import {
   AttachmentPreviewModal
 } from './chat-panel/attachments-preview'
-import { createLocalPathAttachment } from './chat-panel/attachments-helpers'
 import { useAttachmentIntake } from './chat-panel/drag-drop/use-attachment-intake'
 // Stage V V1.7 — pure 4-pass merge that combines persistedScopeRuns,
 // inMemoryTaskRuns, activeChildRuns and cold-start projection synthesis
@@ -98,9 +88,16 @@ import {
   useChannelSessionRecall,
   type ConversationChannelOption,
 } from './chat-panel/recall-state/use-channel-session-recall'
+import { useReferenceSkillHint } from './chat-panel/reference-skill/use-reference-skill-hint'
+import {
+  captureScopeReadAuthority,
+  isScopeReadAuthorityCurrent,
+  scopeRowMatchesReadAuthority,
+} from '../../modules/agent/scope-read-authority'
 
 interface SerializedTaskSnapshot {
   scopeId: string
+  messageVisibilityEpoch?: number | null
   agent: string
   ownerAgentId?: string | null
   executionBinding?: import('../../../shared/agent-execution-profile').TaskExecutionBinding | null
@@ -158,9 +155,13 @@ interface ChatPanelProps {
   onWorkbenchModeChange?: (mode: WorkbenchMode) => void | Promise<void>
   onWorkbenchSplitToggle?: (mode: WorkbenchMode) => void
   onTogglePanel?: () => void
-  scheduledTasksOpen?: boolean
-  scheduledTasksSummary?: ScheduledTasksSummary
-  onScheduledTasksToggle?: () => void
+}
+
+function stopFailureMessage(code: string): string {
+  if (code === 'interrupt_state_unknown') return '停止状态待确认，可以再次停止'
+  if (code === 'thread_busy') return '当前任务仍在收尾，请稍后再试'
+  if (code === 'binding_conflict') return '当前会话已变化，请重试'
+  return '停止失败，请重试'
 }
 
 export default function ChatPanel({
@@ -171,9 +172,6 @@ export default function ChatPanel({
   onWorkbenchModeChange,
   onWorkbenchSplitToggle,
   onTogglePanel,
-  scheduledTasksOpen = false,
-  scheduledTasksSummary = { enabledCount: 0, attentionCount: 0 },
-  onScheduledTasksToggle,
 }: ChatPanelProps) {
   const {
     agents,
@@ -186,7 +184,6 @@ export default function ChatPanel({
     isStreaming,
     streamingMessageId,
     selectAgent,
-    setComposerDraft,
     setInputValue,
     sendMessage,
     stopStreaming,
@@ -215,7 +212,10 @@ export default function ChatPanel({
     sessions,
     sessionOrder,
     activeSessionId,
-    dismissSoftError
+    composerAuthorityRevision,
+    scopeAuthorityRevision,
+    dismissSoftError,
+    setActionAuthorizationMode,
   } = useAgent()
 
   const { toggleChatPanel: toggleChatPanelStore } = useWorkspace()
@@ -223,6 +223,12 @@ export default function ChatPanel({
 
   const [toolTraceExpanded, setToolTraceExpanded] = useState(false)
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null)
+  const [stopRequestError, setStopRequestError] = useState<string | null>(null)
+  const stopRequestTargetRef = useRef<{
+    sessionId: string
+    scopeId: string
+    requestId: string
+  } | null>(null)
   const [agentSelectionMenu, setAgentSelectionMenu] = useState<{
     x: number
     y: number
@@ -235,7 +241,9 @@ export default function ChatPanel({
     Record<string, PersistedTaskProjection[]>
   >({})
   const [activeChildRuns, setActiveChildRuns] = useState<ActiveChildRunSummaryData[]>([])
-  const [referenceSkillHint, setReferenceSkillHint] = useState<ReferenceSkillHintData | null>(null)
+  const persistedScopeRunsRequestRevisionRef = useRef(0)
+  const persistedTaskProjectionsRequestRevisionRef = useRef(0)
+  const activeChildRunsRequestRevisionRef = useRef(0)
   const copyFeedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const chatInputRef = useRef<ChatInputHandle | null>(null)
   const focusInputWithResize = useCallback(() => {
@@ -263,6 +271,7 @@ export default function ChatPanel({
     scopes,
     currentScope,
     currentScopeId,
+    composerAuthorityRevision,
   })
   const currentAgentDisplayName = currentAgentData?.displayName
     || (currentAgent && currentAgent !== 'butler' ? deletedAgentDisplayName(currentAgent) : '管家')
@@ -283,9 +292,24 @@ export default function ChatPanel({
   const currentScopeRunUpdatedAt = currentScopeId
     ? scopeRunStates[currentScopeId]?.updatedAt || null
     : null
+  const referenceSkillHint = useReferenceSkillHint({
+    activeSessionId,
+    currentScopeId,
+    composerAuthorityRevision,
+    aliasGeneration: currentScope?.aliasGeneration,
+    messageVisibilityEpoch: currentScope?.messageVisibilityEpoch,
+    currentScopeRunUpdatedAt,
+    isStreaming,
+  })
 
   const refreshPersistedScopeRuns = useCallback(async () => {
-    if (!window.electronAPI?.agent?.listScopeRuns) return
+    const requestRevision = ++persistedScopeRunsRequestRevisionRef.current
+    const scopeIds = filteredScopes.map((scope) => scope.id)
+    const authority = captureScopeReadAuthority(useAgent.getState(), scopeIds)
+    if (!window.electronAPI?.agent?.listScopeRuns || !authority || scopeIds.length === 0) {
+      setPersistedScopeRuns([])
+      return
+    }
     const result = await window.electronAPI.agent
       .listScopeRuns({
         channelKey: selectedChannelKey,
@@ -303,16 +327,29 @@ export default function ChatPanel({
         limit: 12
       })
       .catch(() => null)
-    if (!result?.success || !Array.isArray(result.data)) return
-    setPersistedScopeRuns(result.data as PersistedScopeRunSummary[])
-  }, [selectedChannelKey])
+    if (persistedScopeRunsRequestRevisionRef.current !== requestRevision
+      || !isScopeReadAuthorityCurrent(useAgent.getState(), authority)) return
+    const rows = result?.success && Array.isArray(result.data)
+      ? (result.data as PersistedScopeRunSummary[]).filter((row) => (
+          scopeRowMatchesReadAuthority(
+            authority,
+            row.scopeId,
+            row.messageVisibilityEpoch,
+          )
+        ))
+      : []
+    setPersistedScopeRuns(rows)
+  }, [filteredScopes, scopeAuthorityRevision, selectedChannelKey])
 
   const refreshPersistedTaskProjections = useCallback(async () => {
-    if (!window.electronAPI?.agent?.listTaskProjections) {
+    const requestRevision = ++persistedTaskProjectionsRequestRevisionRef.current
+    const scopeIds = filteredScopes.map((scope) => scope.id)
+    const authority = captureScopeReadAuthority(useAgent.getState(), scopeIds)
+    if (!window.electronAPI?.agent?.listTaskProjections || !authority) {
       setPersistedTaskProjections({})
       return
     }
-    if (filteredScopes.length === 0) {
+    if (scopeIds.length === 0) {
       setPersistedTaskProjections({})
       return
     }
@@ -322,28 +359,45 @@ export default function ChatPanel({
         if (!result?.success || !Array.isArray(result.data)) {
           return [scope.id, []] as const
         }
-        return [scope.id, result.data as PersistedTaskProjection[]] as const
+        return [
+          scope.id,
+          (result.data as PersistedTaskProjection[]).filter((row) => (
+            scopeRowMatchesReadAuthority(
+              authority,
+              row.scopeId,
+              row.messageVisibilityEpoch,
+            )
+          )),
+        ] as const
       })
     )
+    if (persistedTaskProjectionsRequestRevisionRef.current !== requestRevision
+      || !isScopeReadAuthorityCurrent(useAgent.getState(), authority)) return
     setPersistedTaskProjections(Object.fromEntries(entries))
-  }, [filteredScopes])
+  }, [filteredScopes, scopeAuthorityRevision])
 
-  const { refreshAttachedSessionRecall } = channelEffects
-
-  const refreshReferenceSkillHint = useCallback(async (scopeId?: string | null) => {
-    if (!scopeId || !window.electronAPI?.agent?.getReferenceSkillHint) {
-      setReferenceSkillHint(null)
+  const refreshActiveChildRuns = useCallback(async () => {
+    const requestRevision = ++activeChildRunsRequestRevisionRef.current
+    const scopeIds = filteredScopes.map((scope) => scope.id)
+    const authority = captureScopeReadAuthority(useAgent.getState(), scopeIds)
+    if (!window.electronAPI?.agent?.listActiveChildRuns || !authority || scopeIds.length === 0) {
+      setActiveChildRuns([])
       return
     }
-    const result = await window.electronAPI.agent
-      .getReferenceSkillHint(scopeId)
-      .catch(() => null)
-    if (!result?.success || !result.data) {
-      setReferenceSkillHint(null)
-      return
-    }
-    setReferenceSkillHint(result.data as ReferenceSkillHintData)
-  }, [])
+    const result = await window.electronAPI.agent.listActiveChildRuns().catch(() => null)
+    if (activeChildRunsRequestRevisionRef.current !== requestRevision
+      || !isScopeReadAuthorityCurrent(useAgent.getState(), authority)) return
+    const rows = result?.success && Array.isArray(result.data)
+      ? result.data.filter((row) => (
+          scopeRowMatchesReadAuthority(
+            authority,
+            row.scopeId,
+            row.messageVisibilityEpoch,
+          )
+        ))
+      : []
+    setActiveChildRuns(rows)
+  }, [filteredScopes, scopeAuthorityRevision])
 
   // Stage V V1.9a — runSessionRecallSearch / handleAttachSessionRecall /
   // handleDetachSessionRecall moved into `useChannelSessionRecall` and
@@ -378,6 +432,7 @@ export default function ChatPanel({
         return taskProjectionToTaskCardRun({
           // O1 whitelist
           scopeId: scope.id,
+          messageVisibilityEpoch: scope.messageVisibilityEpoch,
           ownerAgentId: run.ownerAgentId ?? null,
           executionBinding: run.executionBinding ?? null,
           taskId: run.taskId || run.taskContinuation?.taskId || null,
@@ -504,6 +559,7 @@ export default function ChatPanel({
     if (!projection.scopeId || !projection.updatedAt) return null
     return taskProjectionToTaskCardRun({
       scopeId: projection.scopeId,
+      messageVisibilityEpoch: projection.messageVisibilityEpoch,
       ownerAgentId: projection.ownerAgentId ?? null,
       executionBinding: projection.executionBinding ?? null,
       taskId: projection.taskId || projection.taskContinuation?.taskId || null,
@@ -630,51 +686,28 @@ export default function ChatPanel({
     await window.electronAPI.document.showInFolder(attachment.path).catch(() => undefined)
   }, [])
 
-  // Initialize agent stream listeners (once)
   useEffect(() => {
-    const cleanup = initAgentListeners()
-    return cleanup
-  }, [])
-
-  useEffect(() => {
-    void loadScopes().then(() => {
-      if (useAgent.getState().scopes.length === 0) {
-        return useAgent.getState().createNewSession()
-      }
-      return null
-    }).catch(() => undefined)
+    void hydrateAgentScopesAfterRuntimeReady().catch(() => undefined)
   }, [currentAgent, loadScopes])
 
   useEffect(() => {
-    if (!currentScope) return
-    setSelectedChannelKey(getScopeChannelKey(currentScope))
-  }, [currentScope, getScopeChannelKey])
+    setAttachmentPreviewLoading(false)
+  }, [
+    activeSessionId,
+    composerAuthorityRevision,
+    currentScope?.aliasGeneration,
+    currentScope?.messageVisibilityEpoch,
+    currentScopeId,
+  ])
 
   useEffect(() => {
-    void refreshAttachedSessionRecall(currentScopeId)
-  }, [currentScopeId, refreshAttachedSessionRecall])
-
-  useEffect(() => {
-    setReferenceSkillHint(null)
-  }, [currentScopeId])
-
-  useEffect(() => {
-    void refreshReferenceSkillHint(currentScopeId)
-  }, [currentScopeId, currentScopeRunUpdatedAt, isStreaming, refreshReferenceSkillHint])
-
-  // Phase 5.3 — subscribe to push-based hint changes from main so the badge
-  // updates the instant the orchestrator arms/clears/sweeps a hint, instead
-  // of lagging behind scope-run-event ticks. Audit Phase 5 §E3.
-  useEffect(() => {
-    if (!window.electronAPI?.agent?.onReferenceSkillHintChanged) return
-    const unsubscribe = window.electronAPI.agent.onReferenceSkillHintChanged((data) => {
-      // Only refresh when the event targets the currently displayed scope —
-      // hint changes for other scopes shouldn't ping this view.
-      if (!currentScopeId || data.scopeId !== currentScopeId) return
-      void refreshReferenceSkillHint(currentScopeId)
-    })
-    return unsubscribe
-  }, [currentScopeId, refreshReferenceSkillHint])
+    persistedScopeRunsRequestRevisionRef.current += 1
+    persistedTaskProjectionsRequestRevisionRef.current += 1
+    activeChildRunsRequestRevisionRef.current += 1
+    setPersistedScopeRuns([])
+    setPersistedTaskProjections({})
+    setActiveChildRuns([])
+  }, [scopeAuthorityRevision])
 
   useEffect(() => {
     void refreshPersistedScopeRuns()
@@ -728,19 +761,8 @@ export default function ChatPanel({
   // surface through the projection push channel, which is the canonical
   // primary path.
   useEffect(() => {
-    let cancelled = false
-    const refresh = async () => {
-      if (!window.electronAPI?.agent?.listActiveChildRuns) {
-        if (!cancelled) setActiveChildRuns([])
-        return
-      }
-      const result = await window.electronAPI.agent.listActiveChildRuns().catch(() => null)
-      if (cancelled) return
-      setActiveChildRuns(result?.success && Array.isArray(result.data) ? result.data : [])
-    }
-    void refresh()
-    return () => { cancelled = true }
-  }, [currentScopeId])
+    void refreshActiveChildRuns()
+  }, [refreshActiveChildRuns])
 
   useEffect(() => {
     return () => {
@@ -760,6 +782,46 @@ export default function ChatPanel({
       sendingRef.current = false
     }
   }, [attachments.length, inputValue, sendMessage])
+
+  const handleStop = useCallback(async () => {
+    setStopRequestError(null)
+    const current = useAgent.getState()
+    const sessionId = current.activeSessionId
+    const scopeId = current.currentScopeId
+    const requestId = sessionId
+      ? current.sessions[sessionId]?.streamingRequestId ?? null
+      : null
+    const target = sessionId && scopeId && requestId
+      ? { sessionId, scopeId, requestId }
+      : null
+    stopRequestTargetRef.current = target
+    const targetIsStillVisible = () => {
+      if (!target || stopRequestTargetRef.current !== target) return false
+      const latest = useAgent.getState()
+      return latest.activeSessionId === target.sessionId
+        && latest.currentScopeId === target.scopeId
+        && latest.sessions[target.sessionId]?.streamingRequestId === target.requestId
+    }
+    try {
+      const result = await stopStreaming()
+      if (!result.ok && result.code !== 'no_active_operation' && targetIsStillVisible()) {
+        setStopRequestError(stopFailureMessage(result.code))
+      } else if (stopRequestTargetRef.current === target) {
+        stopRequestTargetRef.current = null
+      }
+    } catch {
+      if (targetIsStillVisible()) {
+        setStopRequestError('停止失败，请重试')
+      } else if (stopRequestTargetRef.current === target) {
+        stopRequestTargetRef.current = null
+      }
+    }
+  }, [stopStreaming])
+
+  useEffect(() => {
+    setStopRequestError(null)
+    stopRequestTargetRef.current = null
+  }, [currentScopeId])
 
   const handleAgentSelect = useCallback(
     (name: string) => {
@@ -876,31 +938,20 @@ export default function ChatPanel({
   )
 
   const {
-    handleContinueTaskInput,
-    handleSubmitTaskConfirmation,
-    handleSubmitTaskAgentResult,
-    handleSuspendTask,
     handleCancelDetachedTask,
-    handleContinueDetachedTask,
     handleCancelChildRun,
-    handleContinueChildRun,
-    handleResumeTask,
-    handleRetryTask,
     handleOpenTaskArtifact,
     handleDismissMemoryCapture,
     handleUndoMemoryCapture,
     handleSupplementMemoryCapture,
   } = useTaskInteractionHandlers({
     mergedTaskRuns,
-    currentScopeId,
-    setComposerDraft,
     setInputValue,
-    loadConversation,
     setPersistedScopeRuns,
-    setActiveChildRuns,
     focusInputWithResize,
     refreshPersistedScopeRuns,
     refreshPersistedTaskProjections,
+    refreshActiveChildRuns,
   })
 
   // Stage V V1.8 — task/tool snapshot rendering region (renderTaskSnapshotCard
@@ -938,13 +989,52 @@ export default function ChatPanel({
   const sessionTitle = resolveChatSessionTitle(currentScope?.title)
   const activeLifecycleSlice = activeSessionId ? sessions[activeSessionId] : null
   const activeLifecycleError = activeLifecycleSlice?.lifecycleError ?? null
+  const activeScopeRun = currentScopeId
+    ? activeLifecycleSlice?.scopeRunStates[currentScopeId] ?? null
+    : null
+  const stopPending = activeLifecycleSlice?.lifecyclePendingAction === 'stopping'
   const lifecycleUncertainty = activeLifecycleError?.code === 'interrupt_state_unknown'
-    ? 'interrupt' as const
+    ? activeLifecycleError.action === 'stop'
+      ? 'stop' as const
+      : activeLifecycleError.action === 'close'
+        ? 'close' as const
+        : 'reset' as const
     : activeLifecycleError?.code === 'compaction_state_unknown'
       ? 'compaction' as const
       : null
   const lifecycleInputBlocked = Boolean(
     activeLifecycleSlice?.lifecyclePendingAction || lifecycleUncertainty,
+  )
+  const stopError = stopRequestError || (
+    activeLifecycleError?.action === 'stop' && activeLifecycleError.code !== 'no_active_operation'
+      ? stopFailureMessage(activeLifecycleError.code)
+      : null
+  )
+  useEffect(() => {
+    const target = stopRequestTargetRef.current
+    if (
+      !stopRequestError
+      || !target
+      || activeSessionId !== target.sessionId
+      || currentScopeId !== target.scopeId
+      || activeLifecycleSlice?.lifecyclePendingAction !== null
+      || activeLifecycleSlice?.lifecycleError !== null
+      || activeScopeRun?.requestId !== target.requestId
+      || !activeScopeRun.terminalReason
+    ) return
+    stopRequestTargetRef.current = null
+    setStopRequestError(null)
+  }, [
+    activeSessionId,
+    activeLifecycleSlice?.lifecycleError,
+    activeLifecycleSlice?.lifecyclePendingAction,
+    activeScopeRun?.requestId,
+    activeScopeRun?.terminalReason,
+    currentScopeId,
+    stopRequestError,
+  ])
+  const actionAuthorizationMode = parseActionAuthorizationMode(
+    currentScope?.meta.actionAuthorizationMode,
   )
   const modeSwitcher = workbenchMode && onWorkbenchModeChange
     ? (
@@ -956,12 +1046,6 @@ export default function ChatPanel({
               void onWorkbenchModeChange(mode)
             }}
             onSplitToggle={onWorkbenchSplitToggle}
-          />
-          <ScheduledTasksButton
-            active={scheduledTasksOpen}
-            enabledCount={scheduledTasksSummary.enabledCount}
-            attentionCount={scheduledTasksSummary.attentionCount}
-            onClick={() => onScheduledTasksToggle?.()}
           />
         </div>
       )
@@ -1022,6 +1106,8 @@ export default function ChatPanel({
       taskDisclosureState={taskDisclosureState}
       isStreaming={isStreaming}
       lifecycleInputBlocked={lifecycleInputBlocked}
+      stopPending={stopPending}
+      stopError={stopError}
       streamingMessageId={streamingMessageId}
       parseSerializedTaskSnapshot={parseSerializedTaskSnapshot}
       parseSerializedToolTraceSnapshot={parseSerializedToolTraceSnapshot}
@@ -1031,16 +1117,8 @@ export default function ChatPanel({
       onUndoMemoryCapture={handleUndoMemoryCapture}
       onSupplementMemoryCapture={handleSupplementMemoryCapture}
       onOpenScope={handleLoadConversation}
-      onContinueTaskInput={handleContinueTaskInput}
-      onSubmitTaskConfirmation={handleSubmitTaskConfirmation}
-      onSubmitTaskAgentResult={handleSubmitTaskAgentResult}
-      onRetryTask={handleRetryTask}
-      onSuspendTask={handleSuspendTask}
-      onResumeTask={handleResumeTask}
       onCancelDetachedTask={handleCancelDetachedTask}
-      onContinueDetachedTask={handleContinueDetachedTask}
       onCancelChildRun={handleCancelChildRun}
-      onContinueChildRun={handleContinueChildRun}
       toolTrace={userVisibleToolTrace}
       toolTraceStatus={toolTraceStatus}
       toolTraceExpanded={toolTraceExpanded}
@@ -1068,6 +1146,7 @@ export default function ChatPanel({
       currentAgentAvatar={currentAgentData?.avatar || '🤖'}
       currentAgentDisplayName={currentAgentDisplayName}
       isChannelScope={currentScope?.sourceKind === 'channel'}
+      actionAuthorizationMode={actionAuthorizationMode}
       isDragOver={isDragOver}
       filePool={filePool}
       chatInputRef={chatInputRef}
@@ -1075,11 +1154,10 @@ export default function ChatPanel({
       onSend={() => {
         void handleSend()
       }}
-      onStop={() => {
-        void stopStreaming().catch(() => undefined)
-      }}
+      onStop={() => { void handleStop() }}
       onPickFiles={pickFiles}
       onAgentSelect={handleAgentSelect}
+      onActionAuthorizationModeChange={(mode) => setActionAuthorizationMode(mode)}
       onSkillReference={handleSkillReference}
       onReferenceSelect={handleReferenceSelect}
       setActiveAttachmentPreview={setActiveAttachmentPreview}

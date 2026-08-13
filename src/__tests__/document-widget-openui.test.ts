@@ -35,7 +35,7 @@ describe('document widget OpenUI artifacts', () => {
     assert.ok(defs.callout_block)
     assert.ok(defs.relationship_graph)
     assert.ok(defs.day_schedule_card)
-    assert.ok(defs.schedule_runtime_card)
+    assert.equal(defs.schedule_runtime_card, undefined)
   })
 
   it('writes generated prompt and schema documents for repo-side review', () => {

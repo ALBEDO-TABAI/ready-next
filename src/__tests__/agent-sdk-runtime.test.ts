@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import test, { beforeEach } from 'node:test'
+import test, { after, beforeEach } from 'node:test'
 
 import {
   AgentSdkRuntime,
@@ -40,6 +40,7 @@ import { BROWSER_PUBLIC_TOOL_NAMES } from '../shared/browser-tool-surface'
 import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
 import { enabledSdkToolNames, enabledSdkTools } from './utils/sdk-tool-visibility'
 import { canonicalCoreCloseoutTestPort } from './helpers/canonical-core-closeout-test-port'
+import { __setScopeContextEpochDatabaseForTests } from '../main/modules/agent-control/session/scope-context-epoch'
 
 const fakeConfig = {
   provider: 'openai',
@@ -49,6 +50,9 @@ const fakeConfig = {
 } as const
 
 beforeEach(() => {
+  __setScopeContextEpochDatabaseForTests({
+    getRawDb: () => ({ prepare: () => ({ get: () => undefined }) }) as never,
+  })
   __setSkillsRuntimeManagerForTests({
     listSkills: () => [
       {
@@ -68,8 +72,17 @@ beforeEach(() => {
         allowedTools: ['tag_forge_prepare_batch', 'tag_forge_apply_batch'],
         capabilitySurface: { composition: 'exclusive', exclusiveScope: 'owner' },
       },
+      {
+        id: 'browser-advisory',
+        name: 'Browser Advisory',
+        allowedTools: ['use_browser'],
+      },
     ],
   } as never)
+})
+
+after(() => {
+  __setScopeContextEpochDatabaseForTests(null)
 })
 
 test('agent sdk runtime declares transitive sqlite ABI guard', (t) => {
@@ -601,9 +614,40 @@ test('agent sdk runtime applies selected skill allowed_tools to default surface'
   assert.equal(result.success, true)
   assert.deepEqual(toolNames, [
     'skill_send_im_file',
-    'agent_propose_handoff',
     'declare_completion_criteria'
   ])
+})
+
+test('agent sdk runtime keeps explicitly allowed browser activation only when the browser host exists', () => {
+  const runtime = createRuntime({})
+  const privateRuntime = runtime as unknown as {
+    toolExecutor: {
+      listDefaultToolDefinitionsForTurn: (params: Record<string, unknown>) => Array<{ name: string }>
+    }
+  }
+  const authorization = buildSelectedSkillToolAuthorization({
+    skillId: 'browser-advisory',
+    allowedTypedActions: [],
+    allowedPrimitives: [],
+    source: 'explicit',
+    reason: 'test_explicit_browser_activation',
+  })
+  const requestEnvelope = buildRequestEnvelope({ userText: 'Use the browser advisory skill' })
+  const listNames = (browserHostAvailable: boolean) => (
+    privateRuntime.toolExecutor.listDefaultToolDefinitionsForTurn({
+      message: 'Use the browser advisory skill',
+      sessionId: 'scope-browser-advisory',
+      scopeId: 'scope-browser-advisory',
+      config: fakeConfig,
+      browserHostAvailable,
+      feishuConnected: false,
+      authorization,
+      requestEnvelope,
+    }).map((definition) => definition.name)
+  )
+
+  assert.ok(listNames(true).includes('use_browser'))
+  assert.equal(listNames(false).includes('use_browser'), false)
 })
 
 test('agent sdk runtime preserves base tools when selected skill tools are unavailable', () => {
@@ -691,7 +735,7 @@ test('agent sdk runtime keeps research acquisition tools beside a selected refer
   }
 })
 
-test('agent sdk runtime keeps handoff available when a fuzzy skill match narrows the turn', () => {
+test('agent sdk runtime does not revive retired handoff when a fuzzy skill match narrows the turn', () => {
   const runtime = createRuntime({})
   const privateRuntime = runtime as unknown as {
     toolExecutor: {
@@ -715,7 +759,7 @@ test('agent sdk runtime keeps handoff available when a fuzzy skill match narrows
     requestEnvelope: buildRequestEnvelope({ userText: '请把当前任务转交给文案 Agent' })
   })
 
-  assert.ok(definitions.some((definition) => definition.name === 'agent_propose_handoff'))
+  assert.equal(definitions.some((definition) => definition.name === 'agent_propose_handoff'), false)
 })
 
 test('agent sdk runtime sanitizes raw tool-call text before transcript output', async () => {
@@ -1095,38 +1139,6 @@ test('agent sdk runtime exposes Ready tool definitions and preserves structured 
     taskTitle: 'Research',
     taskSummary: 'Search done'
   })
-})
-
-test('native handoff tool result checkpoints before reading a stale model final output', async () => {
-  const handoffDefinition = createToolDefinition({
-    name: 'agent_propose_handoff',
-    groupId: 'agent_interaction',
-    domain: 'agent_interaction'
-  })
-  const runtime = createRuntime({
-    listToolDefinitions: () => [handoffDefinition],
-    executeToolCall: async () => createToolExecutionOutput('已采纳交接', {
-      shape: 'json',
-      data: { outcome: { control: 'handoff_takeover' } }
-    }),
-    runAgent: async ({ tools }) => {
-      const sdkTool = tools[0] as { invoke: (context: unknown, input: string) => Promise<string> }
-      await sdkTool.invoke({}, JSON.stringify({ targetAgentId: 'copywriter' }))
-      return { finalText: '旧身份不应继续输出' }
-    }
-  })
-  runtime.newSession('butler::scope-native-handoff', 'system prompt')
-
-  const result = await runtime.sendMessage(
-    'butler::scope-native-handoff',
-    '转交给文案',
-    'run-native-handoff',
-    { publicSessionId: 'scope-native-handoff', taskId: 'task-native-handoff' }
-  )
-
-  assert.equal(result.status, 'checkpoint')
-  assert.equal(result.terminalReason, 'manual_suspend')
-  assert.equal(result.finalText, '')
 })
 
 test('agent sdk runtime discards uncommitted narration while recovering XML tool calls', async () => {
@@ -2070,6 +2082,7 @@ test('agent sdk runtime emits tool trace truth and registers run cleanup', async
 
   const result = await runtime.sendMessage('butler::scope-host', '查一下资料', 'run-host', {
     publicSessionId: 'scope-host',
+    messageVisibilityEpoch: 0,
     taskId: 'task-host'
   })
 
@@ -2114,6 +2127,15 @@ test('agent sdk runtime emits tool trace truth and registers run cleanup', async
     toolScopeEvents.map((entry) => (entry.payload as { phase?: string }).phase),
     ['tool_running', 'responding']
   )
+  assert.ok(toolScopeEvents.every((entry) => {
+    const payload = entry.payload as Record<string, unknown>
+    return payload.messageVisibilityEpoch === 0
+      && payload.visibilityOwnerKind === 'context_background'
+      && (payload.visibilityOwnerLedger as Record<string, unknown>)?.kind === 'run_meta'
+      && (payload.visibilityOwnerLedger as Record<string, unknown>)?.id === 'run-host'
+      && payload.ownerAgentId === 'butler'
+      && payload.taskOrigin === 'user_root'
+  }))
 })
 
 test('agent sdk runtime uses Ready Anthropic model adapter with SDK tool loop', async () => {
@@ -7371,18 +7393,15 @@ test('same-run Tag Forge selection replaces generic file tools with the controll
     'file_organize_apply',
     'tag_forge_prepare_batch',
     'tag_forge_apply_batch',
-    'agent_propose_handoff',
     'declare_completion_criteria',
   ]
   const definitions = names.map((name) => createToolDefinition({
     name,
     groupId: name === 'use_skill'
       ? 'skill_activation'
-      : name === 'agent_propose_handoff'
-        ? 'agent_interaction'
-        : name === 'declare_completion_criteria'
-          ? 'system_host'
-          : 'file_management',
+      : name === 'declare_completion_criteria'
+        ? 'system_host'
+        : 'file_management',
     domain: name.startsWith('file_') || name.startsWith('tag_forge_') ? 'file' : 'system',
   }))
   const runtime = createRuntime({

@@ -36,6 +36,7 @@ const MIME_EXTENSIONS = new Map<string, string>([
 
 function sanitizeFileName(value: string): string {
   return value
+    // eslint-disable-next-line no-control-regex -- normalize an untrusted remote filename before filesystem use
     .replace(/[<>:"/\\|?*\u0000-\u001f]/g, '-')
     .replace(/\s+/g, ' ')
     .trim()

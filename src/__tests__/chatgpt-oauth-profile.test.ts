@@ -130,6 +130,8 @@ test('OAuth config resolves to Responses with native tools and no native video',
   assert.equal(capabilities?.supportsToolCalls, true)
   assert.equal(capabilities?.supportsNativeToolCalls, true)
   assert.equal(capabilities?.supportsNativeVideo, false)
+  assert.equal(capabilities?.supportsThinking, true)
+  assert.equal(capabilities?.multiTurnThinkingPolicy, 'echo_required')
 })
 
 test('disconnect removes only the OAuth profile and restores built-in OpenAI', () => {

@@ -19,14 +19,14 @@ export function createRuntimeDriverCanonicalTerminal(deps: {
   finalizeDoneRunState(previous: ScopeRunState, scopeId: string): ScopeRunState
 }) {
   const { store, clearInfrastructureWatchdog, getScopeRunStateFromState, findScopeIdByRunId, finalizeDoneRunState } = deps
-  function completeScopeRunAfterSendSuccess(
+  async function completeScopeRunAfterSendSuccess(
     scopeId: string,
     requestId: string,
     options: {
       canonicalMessage: CanonicalAssistantMessage
       canonicalMessageDigest: string
     },
-  ): void {
+  ): Promise<void> {
     clearInfrastructureWatchdog(scopeId, requestId)
     let persistedRunState: ScopeRunState | null = null
     store.setState((state: any) => {
@@ -58,23 +58,38 @@ export function createRuntimeDriverCanonicalTerminal(deps: {
             [scopeId]: nextRun,
           }
           : currentSlice.scopeRunStates,
-        isStreaming: false,
-        foregroundBusy: false,
-        composerLocked: false,
-        streamingMessageId: null,
-        streamingRequestId: null,
       })
     })
 
     if (persistedRunState) {
-      const state = store.getState()
-      const latestRunState = getScopeRunStateFromState(state, scopeId) || persistedRunState
-      void reconcileCanonicalTerminalMessage(
+      await reconcileCanonicalTerminalMessage(
         scopeId,
-        latestRunState,
+        requestId,
         options.canonicalMessage,
         options.canonicalMessageDigest,
       )
+      store.setState((nextState: any) => {
+        const sessionId = sessionKeyForScopeId(nextState, scopeId)
+        const currentSlice = normalizeSessionSlice(nextState.sessions?.[sessionId])
+        if (!nextState.sessions?.[sessionId] || currentSlice.conversationId !== scopeId) return {}
+        const previous = currentSlice.scopeRunStates[scopeId] || getScopeRunStateFromState(nextState, scopeId)
+        if (currentSlice.streamingRequestId !== requestId || previous?.requestId !== requestId) return {}
+        return withSessionSliceAndActiveRuntimeMirror(nextState, sessionId, {
+          scopeRunStates: previous
+            ? {
+              ...currentSlice.scopeRunStates,
+              [scopeId]: previous.terminalReason
+                ? previous
+                : finalizeDoneRunState(previous, scopeId),
+            }
+            : currentSlice.scopeRunStates,
+          isStreaming: false,
+          foregroundBusy: false,
+          composerLocked: false,
+          streamingMessageId: null,
+          streamingRequestId: null,
+        })
+      })
     }
   }
 
@@ -107,29 +122,24 @@ export function createRuntimeDriverCanonicalTerminal(deps: {
     })
   }
 
-  function finalizeScopeRunAfterStreamDone(scopeId: string, fallbackRunState: ScopeRunState | null): void {
+  function finalizeScopeRunAfterStreamDone(scopeId: string, requestId: string): void {
     store.setState((state: any) => {
       const sessionId = sessionKeyForScopeId(state, scopeId)
       const currentSlice = normalizeSessionSlice(state.sessions?.[sessionId])
-      const previous = currentSlice.scopeRunStates[scopeId] || getScopeRunStateFromState(state, scopeId) || fallbackRunState || null
-      const nextScopeRunStates = previous
-        ? {
-          ...currentSlice.scopeRunStates,
-          [scopeId]: finalizeDoneRunState(previous, scopeId),
-        }
-        : currentSlice.scopeRunStates
+      if (!state.sessions?.[sessionId] || currentSlice.conversationId !== scopeId) return {}
+      const previous = currentSlice.scopeRunStates[scopeId] || null
+      if (currentSlice.streamingRequestId !== requestId || previous?.requestId !== requestId) return {}
 
       return withSessionSliceAndActiveRuntimeMirror(state, sessionId, {
-        scopeRunStates: nextScopeRunStates,
-        ...(currentSlice.conversationId === scopeId
-          ? {
-            isStreaming: false,
-            foregroundBusy: false,
-            composerLocked: false,
-            streamingMessageId: null,
-            streamingRequestId: null,
-          }
-          : {}),
+        scopeRunStates: {
+          ...currentSlice.scopeRunStates,
+          [scopeId]: finalizeDoneRunState(previous, scopeId),
+        },
+        isStreaming: false,
+        foregroundBusy: false,
+        composerLocked: false,
+        streamingMessageId: null,
+        streamingRequestId: null,
       })
     })
   }
@@ -159,7 +169,7 @@ export function createRuntimeDriverCanonicalTerminal(deps: {
 
   async function reconcileCanonicalTerminalMessage(
     scopeId: string,
-    runState: ScopeRunState | null,
+    requestId: string,
     expected: CanonicalAssistantMessage,
     canonicalMessageDigest: string | null | undefined,
   ): Promise<boolean> {
@@ -219,13 +229,15 @@ export function createRuntimeDriverCanonicalTerminal(deps: {
       }
     }
 
+    let reconciled = false
     store.setState((state: any) => {
       const sessionId = sessionKeyForScopeId(state, scopeId)
       const currentSlice = normalizeSessionSlice(state.sessions?.[sessionId])
       if (!state.sessions?.[sessionId] || currentSlice.conversationId !== scopeId) return {}
-      const previous = currentSlice.scopeRunStates[scopeId] || getScopeRunStateFromState(state, scopeId) || runState
-      const transientResponseId = previous?.responseMessageId || runState?.responseMessageId || null
-      const ownerRunId = previous?.requestId || runState?.requestId || null
+      const previous = currentSlice.scopeRunStates[scopeId] || null
+      if (currentSlice.streamingRequestId !== requestId || previous?.requestId !== requestId) return {}
+      const transientResponseId = previous.responseMessageId || null
+      const ownerRunId = previous.requestId
       const scope = state.scopes.find((item: ConversationScope) => item.id === scopeId) || state.currentScope || null
       const canonicalMessage = rebuildAgentMessageFromRow(
         canonicalRow,
@@ -259,6 +271,7 @@ export function createRuntimeDriverCanonicalTerminal(deps: {
         const meta = (item.meta || {}) as Record<string, unknown>
         return !(ownerRunId && meta.transient === true && meta.runId === ownerRunId)
       })
+      reconciled = true
       return {
         ...withSessionSliceAndActiveRuntimeMirror(state, sessionId, {
           messages: nextMessages,
@@ -273,7 +286,7 @@ export function createRuntimeDriverCanonicalTerminal(deps: {
         },
       }
     })
-    return true
+    return reconciled
   }
 
 

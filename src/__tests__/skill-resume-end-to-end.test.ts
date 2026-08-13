@@ -1,4 +1,4 @@
-import { describe, it, beforeEach } from 'node:test'
+import { after, before, describe, it, beforeEach } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -32,6 +32,14 @@ import {
 } from '../main/modules/agent-control/skills/skill-task-tracker'
 import type { TaskProjectionRecord } from '../main/modules/agent-control/contracts/run-contracts'
 import { shouldExposeSkillAction } from '../main/modules/tools/skills-tools'
+import { __setScopeContextEpochDatabaseForTests } from '../main/modules/agent-control/session/scope-context-epoch'
+
+before(() => {
+  __setScopeContextEpochDatabaseForTests({
+    getRawDb: () => ({ prepare: () => ({ get: () => undefined }) }) as never,
+  })
+})
+after(() => __setScopeContextEpochDatabaseForTests(null))
 
 const SKILL_TURN_IDENTITY_PATH = new URL('../main/modules/agent-control/skills/skill-turn-identity.ts', import.meta.url)
 

@@ -7,6 +7,7 @@ import type {
   CodexThreadItem,
   CodexTurn,
 } from './codex-native-runtime'
+import { digestCanonicalJson } from './codex-model-gateway-contract'
 
 type CoreTurnCandidateBase = {
   readyTaskId: string
@@ -25,11 +26,18 @@ type CoreTurnCandidateBase = {
           | 'null_after_explicit_final'
           | 'no_legal_candidate'
           | 'turn_identity_mismatch'
+          | 'model_rerouted'
           | 'native_host_failure'
       }
   candidateText: string | null
   candidateDigest: string | null
-  usedToolCalls: Array<{ itemId: string; tool: string; status: string }>
+  usedToolCalls: Array<{
+    itemId: string
+    tool: string
+    status: string
+    success: boolean | null
+    responseDigest?: string | null
+  }>
   actionReceiptRefs: string[]
   interactionState: string | null
   waitingFor: string | null
@@ -107,11 +115,6 @@ export type CodexTurnCollectionContext = {
   projectionPatchRefs: string[]
   allowNullPhaseFallback: boolean
   allowDirectProvisionalStream: boolean
-  onAutomaticCompactionObserved: (event: {
-    threadId: string
-    turnId: string
-    itemId: string
-  }) => void
   onProvisionalDelta: (event: {
     threadId: string
     turnId: string
@@ -120,6 +123,28 @@ export type CodexTurnCollectionContext = {
     reversible: true
   }) => void
 }
+
+export type CodexTurnReadbackContext = Pick<
+  CodexTurnCollectionContext,
+  | 'readyTaskId'
+  | 'readyRunId'
+  | 'scopeId'
+  | 'codexThreadId'
+  | 'actionReceiptRefs'
+  | 'interactionState'
+  | 'waitingFor'
+  | 'terminalReasonCandidate'
+  | 'abortInitiator'
+  | 'budgetState'
+  | 'contextState'
+  | 'providerDiagnostics'
+  | 'recoveryCheckpointRef'
+  | 'browserContinuationRef'
+  | 'browserProofRefs'
+  | 'otherProofRefs'
+  | 'projectionPatchRefs'
+  | 'allowNullPhaseFallback'
+>
 
 type AgentMessageRecord = {
   item: CodexAgentMessageItem
@@ -135,6 +160,16 @@ function normalizeEngineOutcome(status: CodexTurn['status']): CoreTurnCandidate[
   if (status === 'interrupted') return 'interrupted'
   if (status === 'failed') return 'failed'
   return 'completed'
+}
+
+function resolveTerminalReasonCandidate(
+  hint: string,
+  status: CodexTurn['status'],
+): string {
+  if (hint !== 'done') return hint
+  if (status === 'failed') return 'blocked_external'
+  if (status === 'interrupted') return 'cancelled_runtime'
+  return hint
 }
 
 type HostFailureCandidateContext = Pick<
@@ -227,18 +262,71 @@ export function createHostFailureCandidate(
 }
 
 export class CodexTurnCollector {
+  private readonly activeRuns = new Set<string>()
+  private readonly recoveryWaiters = new Map<string, {
+    readyTaskId: string
+    scopeId: string
+    codexThreadId: string
+    resolve: (candidate: CoreTurnCandidate) => void
+  }>()
+
   constructor(private readonly nativeRuntime: CodexNativeRuntime) {}
 
+  deliverRecoveredCandidate(candidate: CoreTurnCandidate): boolean {
+    const waiter = this.recoveryWaiters.get(candidate.readyRunId)
+    if (!waiter) return this.activeRuns.has(candidate.readyRunId)
+    if (candidate.readyTaskId !== waiter.readyTaskId
+      || candidate.scopeId !== waiter.scopeId
+      || candidate.codexThreadId !== waiter.codexThreadId) return false
+    waiter.resolve(candidate)
+    return true
+  }
+
+  releaseRun(readyRunId: string): void {
+    this.activeRuns.delete(readyRunId)
+    this.recoveryWaiters.delete(readyRunId)
+  }
+
   async collect(context: CodexTurnCollectionContext): Promise<CoreTurnCandidate> {
+    if (this.activeRuns.has(context.readyRunId)) throw new Error('codex_turn_collection_duplicate')
+    this.activeRuns.add(context.readyRunId)
     const pending: CodexNativeNotification[] = []
     const items: Array<{ item: CodexThreadItem; order: number }> = []
     const itemStarts = new Map<string, CodexThreadItem>()
     const deltas = new Map<string, string[]>()
     let expectedTurnId: string | null = null
     let terminal: CodexTurn | null = null
+    let modelReroute: Extract<
+      CodexNativeNotification,
+      { method: 'model/rerouted' }
+    >['params'] | null = null
     let nativeErrorWithoutTerminal: { turnId: string; message: string } | null = null
     let resolveTerminal: (() => void) | null = null
     const terminalPromise = new Promise<void>((resolve) => { resolveTerminal = resolve })
+    let resolveRecovered: ((candidate: CoreTurnCandidate) => void) | null = null
+    const recoveredPromise = new Promise<CoreTurnCandidate>((resolve) => {
+      resolveRecovered = resolve
+    })
+    const recoveryWaiter = {
+      readyTaskId: context.readyTaskId,
+      scopeId: context.scopeId,
+      codexThreadId: context.codexThreadId,
+      resolve: (candidate: CoreTurnCandidate) => resolveRecovered?.(candidate),
+    }
+    this.recoveryWaiters.set(context.readyRunId, recoveryWaiter)
+    let timeoutHandle: ReturnType<typeof setTimeout> | null = null
+    let timeoutSettled = false
+    let resolveTimeout: ((value: 'timeout') => void) | null = null
+    const timeoutPromise = new Promise<'timeout'>((resolve) => { resolveTimeout = resolve })
+    const resetTerminalTimeout = (): void => {
+      if (timeoutSettled) return
+      if (timeoutHandle) clearTimeout(timeoutHandle)
+      timeoutHandle = setTimeout(() => {
+        timeoutHandle = null
+        timeoutSettled = true
+        resolveTimeout?.('timeout')
+      }, context.terminalTimeoutMs)
+    }
 
     const processNotification = (notification: CodexNativeNotification): void => {
       if (notification.method === 'thread/started') return
@@ -249,6 +337,7 @@ export class CodexTurnCollector {
           return
         }
         if (notification.params.turnId !== expectedTurnId) return
+        resetTerminalTimeout()
         if (notification.params.willRetry) return
         nativeErrorWithoutTerminal = {
           turnId: notification.params.turnId,
@@ -265,6 +354,13 @@ export class CodexTurnCollector {
         return
       }
       if (turnId !== expectedTurnId) return
+      resetTerminalTimeout()
+
+      if (notification.method === 'model/rerouted') {
+        modelReroute = { ...notification.params }
+        return
+      }
+      if (modelReroute && notification.method !== 'turn/completed') return
 
       if (notification.method === 'item/started') {
         itemStarts.set(notification.params.item.id, notification.params.item)
@@ -291,14 +387,6 @@ export class CodexTurnCollector {
         return
       }
       if (notification.method === 'item/completed') {
-        if (notification.params.item.type === 'contextCompaction') {
-          context.onAutomaticCompactionObserved({
-            threadId: notification.params.threadId,
-            turnId: notification.params.turnId,
-            itemId: notification.params.item.id,
-          })
-          return
-        }
         items.push({ item: notification.params.item, order: items.length })
         return
       }
@@ -310,33 +398,35 @@ export class CodexTurnCollector {
 
     const unsubscribe = this.nativeRuntime.subscribe(processNotification)
     try {
-      let started: { turn: CodexTurn }
-      try {
-        started = await context.startTurn()
-      } catch (error) {
+      const startOutcome = await Promise.race([
+        context.startTurn().then(
+          (started) => ({ kind: 'started' as const, started }),
+          (error: unknown) => ({ kind: 'failed' as const, error }),
+        ),
+        recoveredPromise.then((candidate) => ({ kind: 'recovered' as const, candidate })),
+      ])
+      if (startOutcome.kind === 'recovered') return startOutcome.candidate
+      if (startOutcome.kind === 'failed') {
         return createHostFailureCandidate(context, {
           stage: 'turn_start',
           code: 'turn_start_failed',
-          error,
+          error: startOutcome.error,
           codexTurnId: null,
         })
       }
+      const started = startOutcome.started
       expectedTurnId = started.turn.id
       for (const notification of pending.splice(0)) processNotification(notification)
 
       if (!terminal) {
-        let timeoutHandle: ReturnType<typeof setTimeout> | null = null
-        const timeoutPromise = new Promise<'timeout'>((resolve) => {
-          timeoutHandle = setTimeout(
-            () => resolve('timeout'),
-            context.terminalTimeoutMs,
-          )
-        })
+        resetTerminalTimeout()
         const settledBy = await Promise.race([
           terminalPromise.then(() => 'notification' as const),
           timeoutPromise,
+          recoveredPromise.then((candidate) => ({ recovered: candidate } as const)),
         ])
         if (timeoutHandle) clearTimeout(timeoutHandle)
+        if (typeof settledBy === 'object') return settledBy.recovered
         if (settledBy === 'timeout') {
           const settledNativeError = nativeErrorWithoutTerminal as {
             turnId: string
@@ -366,6 +456,33 @@ export class CodexTurnCollector {
           code: 'turn_identity_mismatch',
         }, null)
       }
+      const settledModelReroute = modelReroute as Extract<
+        CodexNativeNotification,
+        { method: 'model/rerouted' }
+      >['params'] | null
+      if (settledModelReroute) {
+        const rejected = this.buildCandidate(
+          {
+            ...context,
+            providerDiagnostics: {
+              ...context.providerDiagnostics,
+              modelReroute: { ...settledModelReroute },
+              nativeTurnStatusAfterModelReroute: settledTurn.status,
+            },
+          },
+          {
+            ...settledTurn,
+            status: 'failed',
+            error: { message: 'codex_model_rerouted' },
+          },
+          items,
+          deltas,
+          { kind: 'protocol_failure', code: 'model_rerouted' },
+          null,
+        )
+        rejected.runtimeDiagnostics.nativeTurnError = 'codex_model_rerouted'
+        return rejected
+      }
       const sourceItems = items.length > 0
         ? items
         : settledTurn.items.map((item, order) => ({ item, order }))
@@ -379,8 +496,21 @@ export class CodexTurnCollector {
         selection.message,
       )
     } finally {
+      if (timeoutHandle) clearTimeout(timeoutHandle)
       unsubscribe()
+      if (this.recoveryWaiters.get(context.readyRunId) === recoveryWaiter) {
+        this.recoveryWaiters.delete(context.readyRunId)
+      }
     }
+  }
+
+  buildReadbackCandidate(context: CodexTurnReadbackContext, turn: CodexTurn): CoreTurnCandidate {
+    if (turn.status === 'inProgress') throw new Error('codex_turn_readback_not_terminal')
+    const items = turn.items.map((item, order) => ({ item, order }))
+    const deltas = new Map<string, string[]>()
+    const selection = this.selectCandidate(turn, items, deltas, context.allowNullPhaseFallback)
+    return this.buildCandidate(context, turn, items, deltas,
+      selection.result, selection.message)
   }
 
   private selectCandidate(
@@ -420,7 +550,9 @@ export class CodexTurnCollector {
       messages.push({ item, order, deltas: itemDeltas })
     }
 
-    const explicitFinals = messages.filter(({ item }) => item.phase === 'final_answer')
+    const explicitFinals = messages.filter(({ item, order }) => (
+      item.phase === 'final_answer' && order > lastToolOrder
+    ))
     if (explicitFinals.length > 1) {
       return {
         result: { kind: 'protocol_failure', code: 'multiple_explicit_finals' },
@@ -459,7 +591,7 @@ export class CodexTurnCollector {
   }
 
   private buildCandidate(
-    context: CodexTurnCollectionContext,
+    context: CodexTurnReadbackContext,
     turn: CodexTurn,
     items: Array<{ item: CodexThreadItem; order: number }>,
     deltas: Map<string, string[]>,
@@ -478,12 +610,23 @@ export class CodexTurnCollector {
       candidateText: selectedMessage?.text ?? null,
       candidateDigest: selectedMessage ? digestText(selectedMessage.text) : null,
       usedToolCalls: items.flatMap(({ item }) => item.type === 'dynamicToolCall'
-        ? [{ itemId: item.id, tool: item.tool, status: item.status }]
+        ? [{
+            itemId: item.id,
+            tool: item.tool,
+            status: item.status,
+            success: item.success ?? null,
+            responseDigest: item.contentItems && typeof item.success === 'boolean'
+              ? digestCanonicalJson({ contentItems: item.contentItems, success: item.success })
+              : null,
+          }]
         : []),
       actionReceiptRefs: [...context.actionReceiptRefs],
       interactionState: context.interactionState,
       waitingFor: context.waitingFor,
-      terminalReasonCandidate: context.terminalReasonCandidate,
+      terminalReasonCandidate: resolveTerminalReasonCandidate(
+        context.terminalReasonCandidate,
+        turn.status,
+      ),
       abortInitiator: context.abortInitiator,
       budgetState: { ...context.budgetState },
       contextState: { ...context.contextState },

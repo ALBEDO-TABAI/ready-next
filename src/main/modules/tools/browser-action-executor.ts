@@ -469,6 +469,7 @@ export class BrowserActionExecutor {
           && (data.mayHaveCommitted === true || delivery === 'delivered' || delivery === 'unknown'),
         identity: predecessor,
         successorIdentity: successor.identity,
+        ...(postActionTabId ? { postActionTabId } : {}),
       }
       if (invocation.operation === 'search') {
         outcome.search = {

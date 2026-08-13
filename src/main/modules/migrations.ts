@@ -22,9 +22,29 @@ import { BROWSER_CHECKPOINT_WAKE_KINDS } from '../../shared/browser-workflow-con
 import { migrateCanonicalRSSItemIdentities } from './rss-engine/item-identity-migration'
 import { migrateFalseFailedDirectAnswers } from './agent-control/task-projection/direct-answer-history-migration'
 import {
+  applyCodexE5BudgetAdmissionMigration,
+  applyCodexBrowserVerifierReceiptMigration,
+  applyCodexGatewayTurnClaimMigration,
+  applyCodexGatewayCompletionEvidenceMigration,
+  applyCodexFenceOwnerTransferMigration,
+  applyCodexHostFailureCloseoutMigration,
+  applyCodexLifecycleRecoveryEvidenceMigration,
+  applyCodexManualCompactionRecoveryEvidenceMigration,
+  applyCodexManualCompactionItemIdentityMigration,
+  applyCodexProductRecoveryFailureMigration,
+  applyCodexStartupOwnerHandoffMigration,
+  applyCodexThreadResumeEvidenceMigration,
+  applyCodexThreadResumeActiveLeaseMigration,
+  applyCodexToolBridgeMigration,
+  applyCodexToolResponseDeliveryAttemptMigration,
+  applyCodexToolRequestRpcBindingMigration,
+  applyCodexToolResponseEvidenceMigration,
+  applyCodexTurnLifecycleActionMigration,
   CODEX_BINDING_EVIDENCE_GUARDS_SQL,
   CODEX_BINDING_SCHEMA_SQL,
 } from './agent-control/codex-runtime/codex-binding-schema'
+import { applyCodexThreadRetirementCleanupMigration } from './agent-control/codex-runtime/codex-thread-retirement-cleanup-migration'
+import { applyBrowserTargetClaimUserTakeoverMigration } from './browser-engine/browser-target-claim-user-takeover-migration'
 
 const BROWSER_CHECKPOINT_WAKE_KIND_SQL = BROWSER_CHECKPOINT_WAKE_KINDS
   .map((kind) => `'${kind}'`)
@@ -36,8 +56,10 @@ export interface MigrationDatabase {
   exec(sql: string): void
   prepare(sql: string): {
     run(...params: unknown[]): unknown
+    get<T = unknown>(...params: unknown[]): T | undefined
     all<T = unknown>(...params: unknown[]): T[]
   }
+  readonly inTransaction?: boolean
 }
 
 interface Migration {
@@ -3822,6 +3844,7 @@ const migrations: Migration[] = [
           owner_run_id TEXT NOT NULL,
           scope_id TEXT,
           session_id TEXT,
+          message_visibility_epoch INTEGER,
           state TEXT NOT NULL,
           suspension_checkpoint_id TEXT,
           suspension_reason TEXT,
@@ -3836,8 +3859,9 @@ const migrations: Migration[] = [
           CHECK ((physical_target_token IS NULL) = (boot_incarnation_id IS NULL)),
           CHECK (state != 'held' OR physical_target_token IS NOT NULL),
           CHECK (
-            (state IN ('user_owned', 'suspended')
+            (state = 'suspended'
               AND suspension_checkpoint_id IS NOT NULL AND suspension_reason IS NOT NULL)
+            OR (state = 'user_owned' AND suspension_reason IS NOT NULL)
             OR (state IN ('held', 'expired', 'released')
               AND suspension_checkpoint_id IS NULL AND suspension_reason IS NULL)
           )
@@ -3881,6 +3905,7 @@ const migrations: Migration[] = [
           partition, tab_id, physical_target_token, boot_incarnation_id,
           claim_id, generation, profile_id, surface,
           parent_task_id, browser_task_id, owner_run_id, scope_id, session_id,
+          message_visibility_epoch,
           state, suspension_checkpoint_id, suspension_reason,
           acquired_at, heartbeat_at, expires_at, updated_at
         )
@@ -3902,6 +3927,7 @@ const migrations: Migration[] = [
           json_extract(human_takeover_ref_json, '$.ownerRunId'),
           scope_id,
           NULLIF(json_extract(human_takeover_ref_json, '$.physicalTarget.sessionId'), ''),
+          NULL,
           'user_owned',
           json_extract(checkpoint_refs_json, '$.suspensionCheckpointId'),
           'browser_target_user_owned',
@@ -3934,6 +3960,205 @@ const migrations: Migration[] = [
         DROP TRIGGER IF EXISTS codex_process_lease_identity_immutable_update;
       `)
       db.exec(CODEX_BINDING_EVIDENCE_GUARDS_SQL)
+    },
+  },
+  {
+    name: '090_codex_model_gateway_authority',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS ready_model_gateway_profile_snapshots (
+          snapshot_ref TEXT PRIMARY KEY,
+          snapshot_digest TEXT NOT NULL UNIQUE,
+          profile_id TEXT NOT NULL,
+          snapshot_json TEXT NOT NULL,
+          credential_reference_id TEXT NOT NULL,
+          created_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS ready_model_gateway_request_receipts (
+          receipt_id TEXT PRIMARY KEY,
+          request_kind TEXT NOT NULL CHECK (request_kind IN (
+            'product', 'automatic_compaction', 'manual_compaction'
+          )),
+          codex_thread_id TEXT NOT NULL,
+          codex_turn_id TEXT NOT NULL,
+          ready_run_id TEXT,
+          manual_compaction_id TEXT,
+          upstream_profile_snapshot_ref TEXT NOT NULL,
+          upstream_profile_snapshot_digest TEXT NOT NULL,
+          request_digest TEXT NOT NULL,
+          accepted_at TEXT NOT NULL,
+          CHECK ((ready_run_id IS NULL) != (manual_compaction_id IS NULL)),
+          CHECK (
+            (request_kind IN ('product', 'automatic_compaction')
+              AND ready_run_id IS NOT NULL AND manual_compaction_id IS NULL)
+            OR
+            (request_kind = 'manual_compaction'
+              AND ready_run_id IS NULL AND manual_compaction_id IS NOT NULL)
+          )
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_ready_model_gateway_request_identity
+          ON ready_model_gateway_request_receipts(
+            request_kind, codex_thread_id, codex_turn_id, request_digest
+          );
+
+        CREATE TRIGGER IF NOT EXISTS ready_model_gateway_snapshot_immutable_update
+        BEFORE UPDATE ON ready_model_gateway_profile_snapshots
+        BEGIN SELECT RAISE(ABORT, 'ready_model_gateway_snapshot_immutable'); END;
+
+        CREATE TRIGGER IF NOT EXISTS ready_model_gateway_snapshot_immutable_delete
+        BEFORE DELETE ON ready_model_gateway_profile_snapshots
+        BEGIN SELECT RAISE(ABORT, 'ready_model_gateway_snapshot_immutable'); END;
+
+        CREATE TRIGGER IF NOT EXISTS ready_model_gateway_receipt_immutable_update
+        BEFORE UPDATE ON ready_model_gateway_request_receipts
+        BEGIN SELECT RAISE(ABORT, 'ready_model_gateway_receipt_immutable'); END;
+
+        CREATE TRIGGER IF NOT EXISTS ready_model_gateway_receipt_immutable_delete
+        BEFORE DELETE ON ready_model_gateway_request_receipts
+        BEGIN SELECT RAISE(ABORT, 'ready_model_gateway_receipt_immutable'); END;
+      `)
+    },
+  },
+  {
+    name: '091_codex_model_gateway_turn_claim',
+    up: (db) => {
+      applyCodexGatewayTurnClaimMigration(db)
+    },
+  },
+  {
+    name: '092_codex_tool_bridge',
+    up: (db) => {
+      applyCodexToolBridgeMigration(db)
+    },
+  },
+  {
+    name: '093_codex_e5_budget_admission',
+    up: (db) => {
+      applyCodexE5BudgetAdmissionMigration(db)
+    },
+  },
+  {
+    name: '094_codex_host_failure_closeout_readback',
+    up: (db) => {
+      applyCodexHostFailureCloseoutMigration(db)
+    },
+  },
+  {
+    name: '095_codex_lifecycle_recovery_evidence',
+    up: (db) => {
+      applyCodexLifecycleRecoveryEvidenceMigration(db)
+    },
+  },
+  {
+    name: '096_codex_fence_owner_transfer',
+    up: (db) => {
+      applyCodexFenceOwnerTransferMigration(db)
+    },
+  },
+  {
+    name: '097_codex_gateway_completion_evidence',
+    up: (db) => {
+      applyCodexGatewayCompletionEvidenceMigration(db)
+    },
+  },
+  {
+    name: '098_codex_manual_compaction_recovery_evidence',
+    up: (db) => {
+      applyCodexManualCompactionRecoveryEvidenceMigration(db)
+    },
+  },
+  {
+    name: '099_codex_thread_resume_evidence',
+    up: (db) => {
+      applyCodexThreadResumeEvidenceMigration(db)
+    },
+  },
+  {
+    name: '100_codex_thread_resume_active_lease',
+    up: (db) => {
+      applyCodexThreadResumeActiveLeaseMigration(db)
+    },
+  },
+  {
+    name: '101_codex_manual_compaction_item_identity',
+    up: (db) => {
+      applyCodexManualCompactionItemIdentityMigration(db)
+    },
+  },
+  {
+    name: '102_codex_startup_owner_handoff',
+    up: (db) => {
+      applyCodexStartupOwnerHandoffMigration(db)
+    },
+  },
+  {
+    name: '103_codex_tool_response_evidence',
+    up: (db) => {
+      applyCodexToolResponseEvidenceMigration(db)
+    },
+  },
+  {
+    name: '104_codex_product_recovery_failure',
+    up: (db) => {
+      applyCodexProductRecoveryFailureMigration(db)
+    },
+  },
+  {
+    name: '105_codex_tool_response_delivery_attempts',
+    up: (db) => {
+      applyCodexToolResponseDeliveryAttemptMigration(db)
+    },
+  },
+  {
+    name: '106_codex_browser_verifier_receipts',
+    up: (db) => {
+      applyCodexBrowserVerifierReceiptMigration(db)
+    },
+  },
+  {
+    name: '107_codex_turn_lifecycle_action',
+    up: (db) => {
+      applyCodexTurnLifecycleActionMigration(db)
+    },
+  },
+  {
+    name: '108_codex_thread_retirement_cleanup',
+    up: (db) => {
+      applyCodexThreadRetirementCleanupMigration(db)
+      const retiredAt = new Date().toISOString()
+      const hasScheduledTasks = Boolean(db.prepare(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'scheduled_tasks'",
+      ).get())
+      if (hasScheduledTasks) {
+        db.prepare(`UPDATE scheduled_tasks
+          SET enabled = 0, next_run_at = NULL, updated_at = ?
+          WHERE enabled != 0 OR next_run_at IS NOT NULL`).run(retiredAt)
+      }
+      const hasScheduledOccurrences = Boolean(db.prepare(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'agent_schedule_occurrences'",
+      ).get())
+      if (hasScheduledOccurrences) {
+        db.prepare(`UPDATE agent_schedule_occurrences
+          SET claim_status = 'dispatch_failed',
+              finished_at = COALESCE(finished_at, ?),
+              error_kind = 'feature_retired',
+              error_message = 'Agent scheduled tasks were retired before Codex production release',
+              updated_at = ?
+          WHERE claim_status IN ('queued', 'dispatching')`).run(retiredAt, retiredAt)
+      }
+    },
+  },
+  {
+    name: '109_browser_target_claim_user_takeover',
+    up: (db) => {
+      applyBrowserTargetClaimUserTakeoverMigration(db)
+    },
+  },
+  {
+    name: '110_codex_tool_request_rpc_binding',
+    up: (db) => {
+      applyCodexToolRequestRpcBindingMigration(db)
     },
   },
 ]
@@ -3982,9 +4207,17 @@ export function runMigrations(db: MigrationDatabase): void {
       continue
     }
 
-    // Wrap each migration in a transaction for atomicity
-    db.exec('BEGIN')
+    const foreignKeysBefore = migration.name === '109_browser_target_claim_user_takeover'
+      ? Number(db.prepare('PRAGMA foreign_keys').get<{ foreign_keys: number }>()?.foreign_keys || 0)
+      : 0
+    if (foreignKeysBefore) db.exec('PRAGMA foreign_keys = OFF')
+    let began = false
     try {
+      // Wrap each migration in a transaction for atomicity. BEGIN belongs
+      // inside the restoration scope because migration 109 temporarily
+      // disables foreign keys before opening its transaction.
+      db.exec('BEGIN')
+      began = true
       migration.up(db)
 
       db.prepare('INSERT INTO migrations (name, applied_at) VALUES (?, ?)').run(
@@ -3993,11 +4226,20 @@ export function runMigrations(db: MigrationDatabase): void {
       )
 
       db.exec('COMMIT')
+      began = false
       console.log(`[migrations] applied: ${migration.name}`)
     } catch (error) {
-      db.exec('ROLLBACK')
+      if (began) {
+        try {
+          db.exec('ROLLBACK')
+        } catch (rollbackError) {
+          console.error(`[migrations] rollback failed: ${migration.name}`, rollbackError)
+        }
+      }
       console.error(`[migrations] failed: ${migration.name}`, error)
       throw error
+    } finally {
+      if (foreignKeysBefore) db.exec('PRAGMA foreign_keys = ON')
     }
   }
 }

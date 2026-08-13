@@ -18,7 +18,7 @@ import { resolve } from 'node:path'
 import test from 'node:test'
 
 function readWorkspaceFile(path: string): string {
-  // eslint-disable-next-line ready/no-source-grep-test -- reviewed hard contract: cross-process error IPC surface lacks a stable electron-free behavior harness
+
   return readFileSync(resolve(process.cwd(), path), 'utf8')
 }
 
@@ -92,4 +92,9 @@ test('ChatPanel mounts SoftFailureCapsule gated by currentScopeRunState.softErro
   assert.match(source, /from ['"]\.\.\/SoftFailureCapsule['"]/)
   assert.match(source, /<SoftFailureCapsule/)
   assert.match(source, /dismissSoftError\(currentScopeId\)/)
+  const overlayIndex = source.indexOf('className="ready-chat-composer-overlay"')
+  const softFailureIndex = source.indexOf('<SoftFailureCapsule')
+  const inputIndex = source.indexOf('<ChatInput', softFailureIndex)
+  assert.ok(overlayIndex >= 0 && overlayIndex < softFailureIndex)
+  assert.ok(inputIndex > softFailureIndex)
 })

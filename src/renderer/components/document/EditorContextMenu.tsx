@@ -7,7 +7,6 @@ import {
   MousePointer2,
   Undo2,
   Redo2,
-  MessageSquareQuote,
   StickyNote,
 } from 'lucide-react'
 import ContextMenu, { type ContextMenuItem } from '../layout/ContextMenu'
@@ -28,7 +27,6 @@ export default function EditorContextMenu({
   position,
   onClose,
   canQuote = false,
-  onQuoteToAgent,
   onPasteToStickyNote,
 }: EditorContextMenuProps) {
   if (!visible) return null
@@ -50,15 +48,6 @@ export default function EditorContextMenu({
       icon: <Copy style={{ width: 16, height: 16 }} />,
       onClick: () => {
         document.execCommand('copy')
-      },
-    },
-    {
-      id: 'quote-to-agent',
-      label: '引用到输入框',
-      icon: <MessageSquareQuote style={{ width: 16, height: 16 }} />,
-      disabled: !canQuote,
-      onClick: () => {
-        onQuoteToAgent?.()
       },
     },
     {

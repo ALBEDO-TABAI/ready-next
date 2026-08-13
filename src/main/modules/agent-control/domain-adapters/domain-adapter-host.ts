@@ -299,6 +299,13 @@ export class DomainAdapterHost {
     this.widgetEditLeaseStore.release(name)
   }
 
+  resetScopeContext(scopeId: string, agents: readonly string[]): void {
+    for (const agent of agents) {
+      this.documentTaskPipelineExecutor.clearSessionCache(`${agent}::${scopeId}`)
+      this.widgetEditLeaseStore.release(agent, scopeId)
+    }
+  }
+
   private extractPrimaryUserInstruction(raw: string): string {
     return extractPrimaryUserInstructionFromText(raw)
   }

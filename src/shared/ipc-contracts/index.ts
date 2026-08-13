@@ -37,6 +37,7 @@ export type {
 } from './task-projection'
 
 export type {
+  CreateSessionRequest,
   CreateSessionResult,
   FailedIngress,
   IngressPersistenceErrorKind,
@@ -44,6 +45,7 @@ export type {
   LifecycleFailureCode,
   LifecycleRequest,
   LifecycleResult,
+  StopLifecycleRequest,
   PersistedIngress,
   PrePersistenceErrorKind,
   SendMessageResult,
@@ -55,5 +57,11 @@ export type {
 
 export type {
   LifecycleOperationFacts,
+  LifecycleOperationProjection,
   LifecycleOperationSnapshot,
+} from './agent-lifecycle-snapshot'
+
+export {
+  lifecycleOperationProjectionSchema,
+  parseLifecycleOperationProjection,
 } from './agent-lifecycle-snapshot'

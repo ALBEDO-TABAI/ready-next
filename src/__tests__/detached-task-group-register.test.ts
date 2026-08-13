@@ -1,11 +1,9 @@
 // Stage V V2.1h — behavior test for `detachedTaskGroup.register` /
 // `IpcDisposeHandle.dispose()`.
 //
-// V2.1h extracts the 4 detached-skill task channels from claude-bridge's
+// V2.1h owns the 3 detached-skill task read/cancel channels from claude-bridge's
 // `setupAgentIPC`:
 //
-//   agent:startDetachedSkillAction    (kick off a skill action in the
-//                                      background, returns tracker record)
 //   agent:inspectDetachedSkillTask    (lookup one task by id, scope-gated)
 //   agent:listDetachedSkillTasks      (list tasks, optional scope filter)
 //   agent:cancelDetachedSkillTask     (cancel one task by id, scope-gated)
@@ -13,8 +11,8 @@
 // The V5 IPC contract gate proves the channel literals still exist on the
 // renderer side, but it cannot prove:
 //
-//   1. `register` wires EXACTLY the 4 channel names the group owns via
-//      `ipcMain.handle` (no extras, no missing ones — all 4 are invoke /
+//   1. `register` wires EXACTLY the 3 channel names the group owns via
+//      `ipcMain.handle` (no extras, no missing ones — all 3 are invoke /
 //      sync-return so they all live on the handle slot).
 //   2. The returned dispose handle calls `removeHandler` for each of those
 //      same 4 channels — so dev-reload re-registration and
@@ -70,14 +68,13 @@ function createMockDeps(): DetachedTaskGroupDeps {
     throw new Error(`mock dep ${label} should not be called from registration test`)
   }
   return {
-    startDetachedSkillAction: fail('startDetachedSkillAction') as DetachedTaskGroupDeps['startDetachedSkillAction'],
     inspectDetachedSkillTask: fail('inspectDetachedSkillTask') as DetachedTaskGroupDeps['inspectDetachedSkillTask'],
     listDetachedSkillTasks: fail('listDetachedSkillTasks') as DetachedTaskGroupDeps['listDetachedSkillTasks'],
     cancelDetachedSkillTask: fail('cancelDetachedSkillTask') as DetachedTaskGroupDeps['cancelDetachedSkillTask'],
   }
 }
 
-test('detachedTaskGroup.register wires the 4 documented channels exactly once each via ipcMain.handle', () => {
+test('detachedTaskGroup registers only inspect, list, and cancel channels', () => {
   const { ipc, handleCalls } = createMockIpc()
   detachedTaskGroup.register(ipc, createMockDeps())
 
@@ -86,16 +83,15 @@ test('detachedTaskGroup.register wires the 4 documented channels exactly once ea
   assert.deepEqual(
     registered,
     expected,
-    'register must subscribe to exactly the 4 detached-skill task channels',
+    'register must subscribe to exactly the 3 detached-skill task channels',
   )
-  assert.equal(handleCalls.length, 4, 'each channel must be registered exactly once')
+  assert.equal(handleCalls.length, 3, 'each channel must be registered exactly once')
 
   // Spot-check the exact channel literals per the plan (V2.1h, §3 V2.1) so
   // accidental renames trip this test even if the channel count happens to
-  // still be 4. The V5 IPC contract gate catches the renderer side; this
+  // still be 3. The V5 IPC contract gate catches the renderer side; this
   // pins the main-side literals.
   for (const required of [
-    'agent:startDetachedSkillAction',
     'agent:inspectDetachedSkillTask',
     'agent:listDetachedSkillTasks',
     'agent:cancelDetachedSkillTask',
@@ -105,6 +101,11 @@ test('detachedTaskGroup.register wires the 4 documented channels exactly once ea
       `expected channel "${required}" to be registered`,
     )
   }
+  assert.equal(
+    registered.includes('agent:startDetachedSkillAction'),
+    false,
+    'renderer must not retain a detached background-start channel',
+  )
 })
 
 test('detachedTaskGroup namespace is the documented label so dispose ordering can rely on it', () => {
@@ -114,7 +115,7 @@ test('detachedTaskGroup namespace is the documented label so dispose ordering ca
   assert.equal(detachedTaskGroup.namespace, 'agent:detachedTask')
 })
 
-test('IpcDisposeHandle.dispose removes the same 4 channels that register added', () => {
+test('IpcDisposeHandle.dispose removes the same 3 channels that register added', () => {
   const { ipc, removeHandlerCalls } = createMockIpc()
   const handle = detachedTaskGroup.register(ipc, createMockDeps())
 
@@ -145,7 +146,7 @@ test('dispose is idempotent — calling twice does not throw and stays bounded',
   // invocation must NOT throw. We allow the call to issue removeHandler
   // again — what we care about is no exception, no handler-slot leak.
   assert.doesNotThrow(() => handle.dispose())
-  // Second dispose runs the same 4 removeHandler calls; total count grows by
+  // Second dispose runs the same 3 removeHandler calls; total count grows by
   // exactly the channel count, never more.
   assert.equal(
     removeHandlerCalls.length - afterFirst,

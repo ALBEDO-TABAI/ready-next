@@ -1,34 +1,20 @@
-import { type AgentInputItem, type ModelProvider } from '@openai/agents'
-import { classifyFollowupIntent } from '../../../../shared/agent-followup-intent'
-import { resolveAIConfigCapabilities } from '../../../../shared/ai-providers'
-import { buildAgentSpawnContextFromAIConfig } from '../../skills-runtime/agent-context-source'
+import { type AgentInputItem } from '@openai/agents'
 import { appendToolCapabilityLog } from '../../tools/tool-event-log'
 import type {
   ExecutionTurnResult,
-  RunMessage,
-  TaskBudgetRuntime,
-  TurnTranscriptEvent
+  RunMessage
 } from '../contracts/run-contracts'
 import { computeCapabilityFloors } from '../domain-adapters/capability-floors'
 import { createTaskProofSink } from '../quality/proof-collector'
-import type { SkillToolAuthorization } from '../skills/skill-tool-authorization'
 import { resolveSkillSurfaceComposition } from '../skills/skill-surface-composition'
 import { buildPreparedSkillTurnTruth } from '../skills/prepared-skill-turn'
-import { prependSystemReminderInput } from '../system-reminders/background-task-terminal-reminder'
-import type { ToolDefinition } from '../tools-runtime/tool-definition'
-import { createEmptyActiveFrameContext } from '../tools-runtime/tool-runtime'
-import {
-  resolveAgentSdkTaskBudgetRuntime,
-  resolveSourceMessageProvenance,
-} from './agent-sdk-foundation-utils'
+import { prependSystemReminderInput } from '../system-reminders/system-reminder-input'
+import { resolveAgentSdkTaskBudgetRuntime, resolveSourceMessageProvenance } from './agent-sdk-foundation-utils'
 import { messageToText, parseEnvelopeResourceReferences } from './agent-sdk-input-context-utils'
 import {
-  resolveSkillHintRelevanceForTurn,
   skillContextMessagesToInstruction
 } from './agent-sdk-skill-intent-utils'
-import { buildExecutionTurnResult } from './agent-sdk-turn-closeout'
 import { finalizeAgentSdkPreparedTurnResult } from './agent-sdk-turn-completion'
-import type { TurnOrchestratorHost } from './agent-sdk-turn-context'
 import { armDynamicDeliveryDeadline, bindModelStreamLiveness } from './dynamic-delivery/delivery-deadline'
 import { DeliveryOutputBuffer } from './dynamic-delivery/delivery-output-buffer'
 import { buildSanitizedCheckpointFromSession } from './dynamic-delivery/candidate-session-fork'
@@ -43,27 +29,11 @@ import { createAgentSdkToolExecutionLifecycle } from './agent-sdk-tool-execution
 import { ensureLongRunningTaskBudgetCapacity } from '../task-projection/run-budget-policy'
 import { createBrowserSuspensionController } from './agent-sdk-browser-suspension'
 import type {
-  AgentSdkBudgetCheckpointRestore,
-  AgentSdkExecutionOptions,
-  AgentSdkProviderDiagnostics,
-  AgentSdkSession,
-  DocumentTargetGuard,
-  ObservedDocumentToolTarget,
-  ReadyAgentSdkRunResult,
-  RunHandle,
-  SdkLongSkillCheckpoint,
-  ToolBridgeRuntimeContext
+  ReadyAgentSdkRunResult, ToolBridgeRuntimeContext
 } from './agent-sdk-types'
-import type { TurnTerminalReason } from './turn-frame'
 import { mergeRunUsage } from './run-usage-accumulator'
-import {
-  activateBrowserCapabilityForCurrentRun,
-  installSameRunSkillActivation,
-} from './same-run-skill-activation'
-import {
-  isReadOnlyResearchSkillToolSet,
-  resolveActiveSkillAllowedTools,
-} from '../domain-adapters/run-capability-controller'
+import { activateBrowserCapabilityForCurrentRun, installSameRunSkillActivation } from './same-run-skill-activation'
+import { isReadOnlyResearchSkillToolSet, resolveActiveSkillAllowedTools } from '../domain-adapters/run-capability-controller'
 
 export type { AgentSdkPreparedTurnContext, AgentSdkPreparedTurnState } from './agent-sdk-turn-execution-types'
 
@@ -92,6 +62,7 @@ export async function executeAgentSdkPreparedTurn(
     committedPublicSession,
     session,
     isCurrentRun,
+    isCurrentVisibilityContext,
     toolArgsByName,
     transcriptEvents,
     usedTools,
@@ -340,6 +311,7 @@ export async function executeAgentSdkPreparedTurn(
       runId,
       taskId,
       sessionId,
+      messageVisibilityEpoch: effectiveExecutionOptions?.messageVisibilityEpoch,
       executionBinding: effectiveExecutionOptions?.executionBinding ?? null,
       executionProfile: effectiveExecutionOptions?.executionProfile ?? null,
       currentUserText: pureUserTurnText,
@@ -347,6 +319,7 @@ export async function executeAgentSdkPreparedTurn(
       sourceMessageUnavailableReason: sourceMessageProvenance.sourceMessageUnavailableReason,
       requestEnvelope: effectiveExecutionOptions?.requestEnvelope,
       signal: abortController.signal,
+      canPublishScopeRunEvent: () => isCurrentRun() && isCurrentVisibilityContext(),
       allowedToolNames,
       definitionByName,
       authorization,
@@ -393,7 +366,12 @@ export async function executeAgentSdkPreparedTurn(
       runtimeContext: toolBridgeRuntimeContext,
       latentDefinitions: latentSkillToolDefinitions,
       resolvePreparedSkill: () => host.resolvePreparedSkillTurnForTurn(
-        content as RunMessage, sessionId, effectiveExecutionOptions?.requestEnvelope, false, true,
+        content as RunMessage,
+        sessionId,
+        toolBridgeRuntimeContext.messageVisibilityEpoch,
+        effectiveExecutionOptions?.requestEnvelope,
+        false,
+        true,
       ),
       resolveComposition: (nextAuthorization) => resolveSkillSurfaceComposition(nextAuthorization, runId),
       buildPreparedTruth: ({ authorization: nextAuthorization, identity, surface }) => {
@@ -465,6 +443,7 @@ export async function executeAgentSdkPreparedTurn(
         userText: messageToText(content as RunMessage),
         session: { messages: skillContextMessages },
         sessionId,
+        messageVisibilityEpoch: toolBridgeRuntimeContext.messageVisibilityEpoch,
         emitOutput: () => undefined,
         emitToolAction: () => undefined,
         executeTool: async (toolName, args) =>

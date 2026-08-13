@@ -1,7 +1,5 @@
 import type { IpcMain } from 'electron'
-import type { AgentRegistryRecord, AgentRegistryStatus } from '../../repositories/agent-registry-repository'
-import { deleteAgentIdentityAssets } from '../../agent-control/agents/agent-identity-assets'
-import { migrateAgentKnowledgeCards, rollbackAgentKnowledgeCardMigrations } from '../../agent-control/agents/agent-factory'
+import type { AgentRegistryRecord } from '../../repositories/agent-registry-repository'
 import { agentScopeKnowledgeDir, type BeliefCardStore } from '../../agent-control/knowledge/belief-card-store'
 import type { IpcChannelGroup, IpcDisposeHandle } from './types'
 
@@ -15,19 +13,11 @@ interface IPCResponse<T = unknown> {
 export interface AgentRegistryGroupDeps {
   listAgents(): AgentRegistryRecord[]
   getBeliefCardStore(): BeliefCardStore | null
-  updateStatus(
-    id: string,
-    status: AgentRegistryStatus,
-    options?: { mergedIntoAgentId?: string | null },
-  ): AgentRegistryRecord
-  deleteAgent(id: string): AgentRegistryRecord
 }
 
 const CHANNELS = [
   'agent:registry:list',
   'agent:registry:listKnowledge',
-  'agent:registry:updateStatus',
-  'agent:registry:delete',
 ] as const
 
 export interface AgentRegistryKnowledgeCard {
@@ -55,8 +45,7 @@ export const agentRegistryGroup: IpcChannelGroup<AgentRegistryGroupDeps> = {
 
     ipcMain.handle('agent:registry:listKnowledge', (_, payload: { id?: string }): IPCResponse<AgentRegistryKnowledgeCard[]> => {
       try {
-        const id = String(payload?.id || '').trim()
-        const dir = agentScopeKnowledgeDir(id)
+        const dir = agentScopeKnowledgeDir(String(payload?.id || '').trim())
         if (!dir) return { success: false, error: 'invalid agent id', errorKind: 'input_validation' }
         const store = deps.getBeliefCardStore()
         if (!store) return { success: false, error: 'Belief card store not available' }
@@ -67,69 +56,6 @@ export const agentRegistryGroup: IpcChannelGroup<AgentRegistryGroupDeps> = {
           status: card.frontmatter.status,
         }))
         return { success: true, data: cards }
-      } catch (error) {
-        return { success: false, error: error instanceof Error ? error.message : String(error) }
-      }
-    })
-
-    ipcMain.handle('agent:registry:updateStatus', (_, payload: {
-      id?: string
-      status?: AgentRegistryStatus
-      mergedIntoAgentId?: string | null
-      migrateCardRelPaths?: string[]
-    }): IPCResponse<AgentRegistryRecord> => {
-      let migratedCards: Array<{ from: string; to: string }> = []
-      let rollbackStore: BeliefCardStore | null = null
-      try {
-        const status = payload?.status
-        if (status !== 'active' && status !== 'disabled' && status !== 'merged') {
-          return { success: false, error: 'unsupported lifecycle status', errorKind: 'input_validation' }
-        }
-        const migrated = Array.isArray(payload?.migrateCardRelPaths)
-          ? payload.migrateCardRelPaths.map((item) => String(item || '').trim()).filter(Boolean)
-          : []
-        if (status === 'merged' && migrated.length > 0) {
-          const id = String(payload?.id || '').trim()
-          const targetId = String(payload?.mergedIntoAgentId || '').trim()
-          const agents = deps.listAgents()
-          const source = agents.find((agent) => agent.id === id)
-          const target = agents.find((agent) => agent.id === targetId)
-          if (!source || source.status !== 'active') {
-            return { success: false, error: 'agent not found or inactive', errorKind: 'input_validation' }
-          }
-          if (!target || target.status !== 'active' || target.id === id) {
-            return { success: false, error: 'merged target must be active', errorKind: 'input_validation' }
-          }
-          const store = deps.getBeliefCardStore()
-          if (!store) return { success: false, error: 'Belief card store not available' }
-          rollbackStore = store
-          migratedCards = migrateAgentKnowledgeCards(store, id, targetId, migrated)
-        }
-        const record = deps.updateStatus(String(payload?.id || ''), status, {
-          mergedIntoAgentId: payload?.mergedIntoAgentId ?? null,
-        })
-        return { success: true, data: record }
-      } catch (error) {
-        if (rollbackStore && migratedCards.length > 0) {
-          try {
-            rollbackAgentKnowledgeCardMigrations(rollbackStore, migratedCards)
-          } catch (rollbackError) {
-            console.warn('[agent-registry] rollback migrated cards failed:', rollbackError)
-          }
-        }
-        return { success: false, error: error instanceof Error ? error.message : String(error) }
-      }
-    })
-
-    ipcMain.handle('agent:registry:delete', (_, payload: { id?: string }): IPCResponse<AgentRegistryRecord> => {
-      try {
-        const id = String(payload?.id || '').trim()
-        if (!id) return { success: false, error: 'agent id is required', errorKind: 'input_validation' }
-        const store = deps.getBeliefCardStore()
-        if (!store) return { success: false, error: 'Belief card store not available' }
-        deleteAgentIdentityAssets(store, id)
-        const record = deps.deleteAgent(id)
-        return { success: true, data: record }
       } catch (error) {
         return { success: false, error: error instanceof Error ? error.message : String(error) }
       }

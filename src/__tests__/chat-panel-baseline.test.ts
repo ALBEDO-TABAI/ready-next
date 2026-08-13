@@ -154,6 +154,8 @@ function emptyArrayResult(): ElectronAPIStubResult<unknown[]> {
   return { success: true, data: [] }
 }
 
+const scopeRunEventHandlers = new Set<(event: unknown) => void>()
+
 /**
  * Defensive electronAPI surface — ChatPanel + useAgent + runtimeDriver touch
  * 30+ channels across multiple namespaces. Listing every one by hand is
@@ -198,6 +200,10 @@ const electronAPIStub = {
     searchSessionRecall: async () => emptyArrayResult(),
     getConversationScopeMessages: async () => emptyArrayResult(),
     listConversationScopes: async () => emptyArrayResult(),
+    onScopeRunEvent: (callback: (event: unknown) => void) => {
+      scopeRunEventHandlers.add(callback)
+      return () => { scopeRunEventHandlers.delete(callback) }
+    },
   }),
   agentInteraction: makeChannelProxy({
     listPendingAskUserQuestions: async () => emptyArrayResult(),
@@ -225,6 +231,7 @@ const electronAPIStub = {
 const { MemoryRouter } = await import('react-router-dom')
 const { useAgent } = await import('../renderer/stores/useAgent')
 const { useWorkspace } = await import('../renderer/stores/useWorkspace')
+const AgentRuntimeListenerRoot = (await import('../renderer/modules/agent/AgentRuntimeListenerRoot')).default
 const ChatPanelModule = await import('../renderer/components/agent/ChatPanel')
 const ChatPanel = ChatPanelModule.default
 
@@ -424,6 +431,7 @@ function mountChatPanel(panelState: 'collapsed' | 'expanded' = 'expanded'): Moun
       createElement(
         MemoryRouter,
         { initialEntries: ['/workbench'] },
+        createElement(AgentRuntimeListenerRoot),
         createElement(ChatPanel, {
           shellWidth: 380,
           panelState,
@@ -439,6 +447,10 @@ function mountChatPanel(panelState: 'collapsed' | 'expanded' = 'expanded'): Moun
       try { host.removeChild(container) } catch { /* silent-catch: detach best-effort */ }
     },
   }
+}
+
+function fireScopeRunEvent(event: Record<string, unknown>): void {
+  for (const handler of [...scopeRunEventHandlers]) handler(event)
 }
 
 // ---------------------------------------------------------------------------
@@ -599,6 +611,276 @@ test('V1.0 fixture / case 2 — streaming-text: assistant mid-stream keeps singl
       'streaming shell baseline markers',
     )
   } finally {
+    unmount()
+  }
+})
+
+test('late stop terminal clears the matching error, while a stale terminal leaves it visible and locked', async () => {
+  resetStores()
+  const scopeId = 'scope-stop-reconcile'
+  const sessionId = 'session-stop-reconcile'
+  const requestId = 'req-stop-current'
+  const scopeRunState = {
+    scopeId,
+    agent: 'butler',
+    requestId,
+    phase: 'responding' as const,
+    terminalReason: null,
+    toolTrace: [],
+    startedAt: '2026-08-11T09:00:00.000Z',
+    updatedAt: '2026-08-11T09:00:01.000Z',
+  }
+  const sessionSlice = {
+    messages: [],
+    pendingSendCount: 0,
+    pendingSendFlushAt: null,
+    isStreaming: true,
+    foregroundBusy: true,
+    composerLocked: true,
+    streamingMessageId: 'response-stop-current',
+    streamingRequestId: requestId,
+    scopeRunStates: { [scopeId]: scopeRunState },
+    taskDisclosureState: {},
+    lifecyclePendingAction: null,
+    lifecycleError: null,
+    state: 'live' as const,
+    conversationId: scopeId,
+    aliasGeneration: 1,
+    messageVisibilityEpoch: 0,
+    inputValue: '',
+  }
+  const stopScope = {
+    id: scopeId,
+    aliasGeneration: 1,
+    messageVisibilityEpoch: 0,
+    agent: 'butler',
+    activeAgentId: 'butler',
+    handoffGeneration: 0,
+    title: '停止收口测试',
+    sourceKind: 'local' as const,
+    sourceId: 'app',
+    threadKey: scopeId,
+    meta: {},
+    createdAt: '2026-08-11T09:00:00.000Z',
+    updatedAt: '2026-08-11T09:00:01.000Z',
+    lastMessageAt: null,
+  }
+  useAgent.setState({
+    agents: [{ name: 'butler', displayName: '管家', avatar: '', status: 'idle', selected: true }],
+    currentAgent: 'butler',
+    currentScopeId: scopeId,
+    currentScope: stopScope,
+    scopes: [stopScope],
+    messages: [],
+    scopeRunStates: { [scopeId]: scopeRunState },
+    isStreaming: true,
+    foregroundBusy: true,
+    composerLocked: true,
+    streamingMessageId: 'response-stop-current',
+    streamingRequestId: requestId,
+    inputValue: '',
+    conversations: [],
+    conversationId: scopeId,
+    toolTrace: [],
+    toolTraceStatus: 'running',
+    attachments: [],
+    filePool: [],
+    activeAttachmentPreview: null,
+    pendingSendCount: 0,
+    pendingSendFlushAt: null,
+    taskDisclosureState: {},
+    sessions: { [sessionId]: sessionSlice },
+    activeSessionId: sessionId,
+    sessionId,
+    sessionOrder: [sessionId],
+  })
+
+  const agentApi = electronAPIStub.agent as Record<string, unknown>
+  const previousKill = agentApi.kill
+  const previousListConversationScopes = agentApi.listConversationScopes
+  agentApi.listConversationScopes = async () => ({ success: true, data: [stopScope] })
+  agentApi.kill = async () => ({
+    ok: false,
+    action: 'stop',
+    code: 'interrupt_state_unknown',
+    preserveUi: true,
+    aliasId: scopeId,
+    aliasGeneration: 1,
+    evidenceDigest: 'stop-unknown',
+  })
+
+  const { container, unmount } = mountChatPanel('expanded')
+  try {
+    const stopButton = container.querySelector<HTMLButtonElement>('[data-ready-agent-stop="true"]')
+    assert.ok(stopButton)
+    stopButton.click()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    assert.match(
+      container.querySelector('[data-ready-agent-stop-error="true"]')?.textContent || '',
+      /停止状态待确认/,
+    )
+
+    flushSync(() => {
+      fireScopeRunEvent({
+        aliasGeneration: 1,
+        messageVisibilityEpoch: 0,
+        type: 'finished',
+        scopeId,
+        sessionId,
+        agent: 'butler',
+        runId: 'req-stop-old',
+        phase: 'cancelled',
+        terminalReason: 'cancelled_user',
+        timestamp: '2026-08-11T09:00:02.000Z',
+      })
+    })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    assert.ok(container.querySelector('[data-ready-agent-stop-error="true"]'))
+    assert.equal(useAgent.getState().sessions[sessionId]?.composerLocked, true)
+    assert.equal(useAgent.getState().sessions[sessionId]?.streamingRequestId, requestId)
+
+    flushSync(() => {
+      fireScopeRunEvent({
+        aliasGeneration: 1,
+        messageVisibilityEpoch: 0,
+        type: 'finished',
+        scopeId,
+        sessionId,
+        agent: 'butler',
+        runId: requestId,
+        phase: 'cancelled',
+        terminalReason: 'cancelled_user',
+        timestamp: '2026-08-11T09:00:03.000Z',
+      })
+    })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    assert.equal(container.querySelector('[data-ready-agent-stop-error="true"]'), null)
+    const reconciled = useAgent.getState().sessions[sessionId]
+    assert.equal(reconciled?.composerLocked, false)
+    assert.equal(reconciled?.streamingRequestId, null)
+    assert.equal(reconciled?.lifecycleError, null)
+
+    let resolveLateStop!: (value: unknown) => void
+    agentApi.kill = () => new Promise((resolve) => { resolveLateStop = resolve })
+    flushSync(() => {
+      useAgent.setState((state) => ({
+        sessions: {
+          ...state.sessions,
+          [sessionId]: {
+            ...state.sessions[sessionId],
+            state: 'live',
+            isStreaming: true,
+            foregroundBusy: true,
+            composerLocked: true,
+            streamingMessageId: 'response-cross-scope',
+            streamingRequestId: 'req-cross-scope',
+            scopeRunStates: {
+              [scopeId]: {
+                ...scopeRunState,
+                requestId: 'req-cross-scope',
+                terminalReason: null,
+              },
+            },
+          },
+        },
+        scopeRunStates: {
+          [scopeId]: {
+            ...scopeRunState,
+            requestId: 'req-cross-scope',
+            terminalReason: null,
+          },
+        },
+        isStreaming: true,
+        foregroundBusy: true,
+        composerLocked: true,
+        streamingMessageId: 'response-cross-scope',
+        streamingRequestId: 'req-cross-scope',
+      }))
+    })
+    container.querySelector<HTMLButtonElement>('[data-ready-agent-stop="true"]')?.click()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    const otherScopeId = 'scope-stop-other'
+    const otherSessionId = 'session-stop-other'
+    flushSync(() => {
+      useAgent.setState((state) => ({
+        sessions: {
+          ...state.sessions,
+          [otherSessionId]: {
+            ...sessionSlice,
+            conversationId: otherScopeId,
+            aliasGeneration: 1,
+            messageVisibilityEpoch: 0,
+            isStreaming: false,
+            foregroundBusy: false,
+            composerLocked: false,
+            streamingMessageId: null,
+            streamingRequestId: null,
+            scopeRunStates: {},
+          },
+        },
+        activeSessionId: otherSessionId,
+        sessionId: otherSessionId,
+        sessionOrder: [sessionId, otherSessionId],
+        currentScopeId: otherScopeId,
+        currentScope: {
+          id: otherScopeId,
+          aliasGeneration: 1,
+          messageVisibilityEpoch: 0,
+          agent: 'butler',
+          activeAgentId: 'butler',
+          handoffGeneration: 0,
+          title: '其他任务',
+          sourceKind: 'local',
+          sourceId: 'app',
+          threadKey: otherScopeId,
+          meta: {},
+          createdAt: '2026-08-11T09:00:04.000Z',
+          updatedAt: '2026-08-11T09:00:04.000Z',
+        },
+        scopes: [
+          stopScope,
+          {
+            id: otherScopeId,
+            aliasGeneration: 1,
+            messageVisibilityEpoch: 0,
+            agent: 'butler',
+            activeAgentId: 'butler',
+            handoffGeneration: 0,
+            title: '其他任务',
+            sourceKind: 'local',
+            sourceId: 'app',
+            threadKey: otherScopeId,
+            meta: {},
+            createdAt: '2026-08-11T09:00:04.000Z',
+            updatedAt: '2026-08-11T09:00:04.000Z',
+            lastMessageAt: null,
+          },
+        ],
+        scopeRunStates: {},
+        isStreaming: false,
+        foregroundBusy: false,
+        composerLocked: false,
+        streamingMessageId: null,
+        streamingRequestId: null,
+      }))
+    })
+    resolveLateStop({
+      ok: false,
+      action: 'stop',
+      code: 'interrupt_state_unknown',
+      preserveUi: true,
+      aliasId: scopeId,
+      aliasGeneration: 1,
+      evidenceDigest: 'late-cross-scope-stop',
+    })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    assert.equal(container.querySelector('[data-ready-agent-stop-error="true"]'), null)
+    assert.equal(useAgent.getState().currentScopeId, otherScopeId)
+    assert.equal(useAgent.getState().sessions[otherSessionId]?.lifecycleError, null)
+  } finally {
+    agentApi.kill = previousKill
+    agentApi.listConversationScopes = previousListConversationScopes
     unmount()
   }
 })

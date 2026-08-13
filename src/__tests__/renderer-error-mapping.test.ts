@@ -135,6 +135,22 @@ test('maps provider auth failures to settings action', () => {
   assert.equal(result.retryStrategy, 'user_action')
 })
 
+test('keeps pre-persistence configuration and external-service failures distinct', () => {
+  const configuration = mapBackendErrorToFriendly({
+    error: 'codex_active_profile_missing',
+    errorKind: 'configuration_unavailable',
+  })
+  const external = mapBackendErrorToFriendly({
+    error: 'gateway_credential_unavailable',
+    errorKind: 'external_service_unavailable',
+  })
+
+  assert.equal(configuration.friendlyMessage, 'API Key 无效或没有权限，请检查设置里的模型配置')
+  assert.equal(configuration.retryStrategy, 'user_action')
+  assert.equal(external.friendlyMessage, '模型服务暂时不可用，请稍后重试')
+  assert.equal(external.retryStrategy, 'auto')
+})
+
 test('maps website HTML responses to an API address correction instead of an outage', () => {
   const result = mapBackendErrorToFriendly({
     error: 'API 返回了网页内容，不是 JSON。请检查 API 地址是否填成了官网页或登录页。',

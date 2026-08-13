@@ -8,7 +8,7 @@ function readWorkspaceFile(path: string): string {
   return readFileSync(resolve(process.cwd(), path), 'utf8')
 }
 
-test('task panel reads task projections and renders user-facing progress hints', () => {
+test('task panel reads task projections as progress truth without public continuation drafting', () => {
   const source = readWorkspaceFile('src/renderer/components/ready/TaskPanel.tsx')
 
   assert.match(source, /window\.electronAPI\.agent\.listTaskProjections/)
@@ -34,11 +34,11 @@ test('task panel reads task projections and renders user-facing progress hints',
   assert.match(source, /formatTaskStepDisplayTitle/)
   assert.match(source, /自动恢复/)
   assert.match(source, /activeProjection\?\.recoveryHistory/)
-  assert.match(source, /activeProjection\?\.interactionState/)
+  assert.match(source, /interactionStateToUserLabel\(activeProjection\.interactionState\)/)
   assert.doesNotMatch(source, /任务类型/)
   assert.doesNotMatch(source, /预算进度/)
   assert.doesNotMatch(source, /当前步骤额度/)
   assert.doesNotMatch(source, /degradationReason:\s*\{activeProjection\.degradationReason\}/)
-  assert.match(source, /setComposerDraft\(/)
+  assert.doesNotMatch(source, /setComposerDraft\(/)
   assert.doesNotMatch(source, /继续前上下文：/)
 })

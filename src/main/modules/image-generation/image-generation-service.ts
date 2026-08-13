@@ -132,6 +132,7 @@ export function resolveOrderedImageReferences(
 }
 
 function cleanFileStem(value: string): string {
+  // eslint-disable-next-line no-control-regex -- normalize an untrusted generated filename before filesystem use
   const stem = value.replace(/\.[^.]+$/, '').replace(/[\u0000-\u001f<>:"/\\|?*]+/g, '-').trim()
   return stem.slice(0, 80) || 'generated-image'
 }

@@ -693,7 +693,8 @@ export class AgentMessageAdapter implements IndexSourceAdapter {
     const db = ctx.repository.getConnection()
     const conversations = db
       .prepare(
-        `SELECT id, agent, title, updated_at FROM chat_conversations ORDER BY updated_at DESC LIMIT 500`,
+        `SELECT id, agent, title, updated_at FROM chat_conversations
+         WHERE closed_at IS NULL ORDER BY updated_at DESC LIMIT 500`,
       )
       .all<{ id: string; agent: string; title: string; updated_at: string }>()
     const rows: Array<{
@@ -707,9 +708,13 @@ export class AgentMessageAdapter implements IndexSourceAdapter {
     for (const conv of conversations) {
       const messages = db
         .prepare(
-          `SELECT role, content, timestamp FROM chat_messages
-           WHERE conversation_id = ?
-           ORDER BY timestamp DESC LIMIT 40`,
+          `SELECT message.role, message.content, message.timestamp
+             FROM chat_messages message
+             JOIN chat_conversations scope ON scope.id = message.conversation_id
+            WHERE message.conversation_id = ?
+              AND scope.closed_at IS NULL
+              AND message.message_visibility_epoch = scope.message_visibility_epoch
+            ORDER BY message.timestamp DESC LIMIT 40`,
         )
         .all<{ role: string; content: string; timestamp: string }>(conv.id)
       if (messages.length === 0) continue

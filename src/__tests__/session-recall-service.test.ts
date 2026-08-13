@@ -56,7 +56,7 @@ class FakeSessionRecallDb implements SessionRecallDatabaseAdapter {
                 .filter((item) => item.query.toLowerCase().includes(query))
                 .map((item) => item.row) as T[]
             }
-            if (sql.includes('FROM session_recall_attachment_index') && sql.includes('SELECT DISTINCT conversation_id')) {
+            if (sql.includes('FROM session_recall_attachment_index') && sql.includes('SELECT DISTINCT attachment.conversation_id')) {
               const likeQuery = String(params[0] || '').replaceAll('%', '').toLowerCase()
               return attachmentRows
                 .filter((item) => item.name.toLowerCase().includes(likeQuery))
@@ -127,12 +127,38 @@ class FakeSessionRecallDb implements SessionRecallDatabaseAdapter {
   }
 
   getConversationScope(id: string): ChatConversationRecord | null {
-    return this.conversations.find((row) => row.id === id) || null
+    const conversation = this.conversations.find((row) => row.id === id)
+    if (conversation) return conversation
+    const metadata = this.metadataRows.find((row) => row.conversation_id === id)
+    return metadata ? {
+      id,
+      agent: metadata.agent || 'butler',
+      user_id: metadata.user_id,
+      title: metadata.title,
+      parent_conversation_id: null,
+      lineage_root_id: metadata.lineage_root_id,
+      resume_title: metadata.resume_title,
+      source_kind: metadata.source_kind,
+      source_id: metadata.source_id,
+      thread_key: metadata.thread_key,
+      meta_json: '{}',
+      message_visibility_epoch: 0,
+      created_at: metadata.updated_at,
+      updated_at: metadata.updated_at,
+    } : null
   }
 
-  updateConversationScopeMeta(id: string, meta: Record<string, unknown>): ChatConversationRecord | null {
+  updateConversationScopeMeta(
+    id: string,
+    meta: Record<string, unknown>,
+    expectedMessageVisibilityEpoch?: number,
+  ): ChatConversationRecord | null {
     const conversation = this.conversations.find((row) => row.id === id)
     if (!conversation) return null
+    if (
+      expectedMessageVisibilityEpoch !== undefined
+      && (conversation.message_visibility_epoch ?? 0) !== expectedMessageVisibilityEpoch
+    ) return null
     conversation.meta_json = JSON.stringify(meta)
     return conversation
   }
@@ -163,6 +189,7 @@ function createConversation(params: {
     source_id: params.sourceId || 'app',
     thread_key: params.threadKey || params.id,
     meta_json: JSON.stringify(params.meta || {}),
+    message_visibility_epoch: 0,
     created_at: '2026-04-12T09:00:00.000Z',
     updated_at: params.updatedAt || '2026-04-12T09:00:00.000Z',
   }
@@ -488,6 +515,7 @@ test('SessionRecallService can attach, list, detach, and resume recall contexts'
   const attach = service.attachSessionRecallContext({
     currentScopeId: 'scope-current',
     conversationId: 'conv-old-2',
+    expectedMessageVisibilityEpoch: 0,
   })
 
   assert.equal(attach.scope.id, 'scope-current')
@@ -503,6 +531,7 @@ test('SessionRecallService can attach, list, detach, and resume recall contexts'
   const detached = service.detachSessionRecallContext({
     currentScopeId: 'scope-current',
     conversationId: 'conv-old-2',
+    expectedMessageVisibilityEpoch: 0,
   })
   assert.equal(detached.scope.id, 'scope-current')
   assert.equal(service.listAttachedSessionRecallContexts('scope-current').length, 0)
@@ -559,7 +588,11 @@ test('SessionRecallService rejects and filters attached recall contexts from ano
   const service = new SessionRecallService(db)
 
   assert.throws(
-    () => service.attachSessionRecallContext({ currentScopeId: 'scope-current', conversationId: 'conv-beta' }),
+    () => service.attachSessionRecallContext({
+      currentScopeId: 'scope-current',
+      conversationId: 'conv-beta',
+      expectedMessageVisibilityEpoch: 0,
+    }),
     /different agent/,
     'manual attach must not smuggle another agent lineage into the current prompt',
   )
@@ -569,11 +602,49 @@ test('SessionRecallService rejects and filters attached recall contexts from ano
     'pre-existing cross-agent refs are ignored before prompt assembly',
   )
 
-  service.attachSessionRecallContext({ currentScopeId: 'scope-current', conversationId: 'conv-alpha' })
+  service.attachSessionRecallContext({
+    currentScopeId: 'scope-current',
+    conversationId: 'conv-alpha',
+    expectedMessageVisibilityEpoch: 0,
+  })
   assert.deepEqual(
     service.listAttachedSessionRecallContexts('scope-current').map((capsule) => capsule.conversationId),
     ['conv-alpha'],
     'same-agent refs remain attachable',
+  )
+})
+
+test('SessionRecallService rejects stale context mutations after reset and accepts the new epoch', () => {
+  const current = createConversation({ id: 'scope-reset', title: 'current' })
+  current.message_visibility_epoch = 1
+  const prior = createConversation({ id: 'scope-prior', title: 'prior' })
+  const db = new FakeSessionRecallDb(
+    [current, prior],
+    [createMetadata({ conversation_id: 'scope-prior', title: 'prior' })],
+    [],
+    [],
+  )
+  const service = new SessionRecallService(db)
+
+  assert.throws(
+    () => service.attachSessionRecallContext({
+      currentScopeId: 'scope-reset',
+      conversationId: 'scope-prior',
+      expectedMessageVisibilityEpoch: 0,
+    }),
+    /conversation_context_epoch_stale/,
+  )
+  assert.deepEqual(JSON.parse(current.meta_json || '{}'), {})
+
+  service.attachSessionRecallContext({
+    currentScopeId: 'scope-reset',
+    conversationId: 'scope-prior',
+    expectedMessageVisibilityEpoch: 1,
+  })
+  assert.equal(
+    (JSON.parse(current.meta_json || '{}') as { sessionRecallContext?: unknown[] })
+      .sessionRecallContext?.length,
+    1,
   )
 })
 

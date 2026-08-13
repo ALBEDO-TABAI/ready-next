@@ -3,7 +3,7 @@
  *
  * 提取器语义已由 emergence-card-extractors.test.ts / emergence-remaining-
  * cards.test.ts 覆盖；此处测 group 层：信号三路注入、scopeId 富化（任务类
- * 卡带宿主 scope、知识类卡为 null）、feed 控制生效、handler 响应形状与
+ * 卡带宿主 scope、已退役的知识候选不再进入 feed）、feed 控制生效、handler 响应形状与
  * dispose 对称。
  */
 import assert from 'node:assert/strict'
@@ -35,7 +35,7 @@ const EMPTY_DEPS: EmergenceFeedGroupDeps = {
   listCandidateSignals: () => [],
 }
 
-test('assembles resume/follow_up cards with their host scopeId attached', () => {
+test('assembles follow_up cards with their host scopeId and does not expose retired resume actions', () => {
   const entries = assembleFeedEntries({
     ...EMPTY_DEPS,
     listRecentProjections: () => [
@@ -44,19 +44,14 @@ test('assembles resume/follow_up cards with their host scopeId attached', () => 
     ],
   })
 
-  const resume = entries.find((entry) => entry.card.type === 'resume')
-  assert.ok(resume, 'blocked+canResume projects a resume card')
-  assert.equal(resume?.scopeId, 'scope-1')
-  assert.equal(resume?.card.action.kind, 'resume_task')
-  assert.equal(resume?.card.action.ref, 'task-1')
-
   const followUp = entries.find((entry) => entry.card.type === 'follow_up')
   assert.ok(followUp, 'check_in_pending projects a follow_up card')
   assert.equal(followUp?.scopeId, 'scope-2')
   assert.equal(followUp?.card.action.kind, 'adjudicate_task')
+  assert.equal(entries.some((entry) => entry.card.action.ref === 'task-1'), false)
 })
 
-test('knowledge cards (crystallize/candidate) carry null scopeId — their exit is the settings surface', () => {
+test('retired personality and generic knowledge candidates never enter the live feed', () => {
   const entries = assembleFeedEntries({
     ...EMPTY_DEPS,
     listCrystallizeSignals: () => [
@@ -67,15 +62,10 @@ test('knowledge cards (crystallize/candidate) carry null scopeId — their exit 
     ],
   })
 
-  assert.equal(entries.length, 2)
-  for (const entry of entries) {
-    assert.equal(entry.card.type, 'crystallize')
-    assert.equal(entry.scopeId, null)
-    assert.equal(entry.card.requiresExplicitConfirm, true, '涌现知识卡永不一键采纳')
-  }
+  assert.equal(entries.length, 0)
 })
 
-test('same-titled retries collapse to one card (dedupe by type+title, newest projection first)', () => {
+test('blocked historical projections do not create a public resume card', () => {
   const entries = assembleFeedEntries({
     ...EMPTY_DEPS,
     listRecentProjections: () => [
@@ -83,17 +73,15 @@ test('same-titled retries collapse to one card (dedupe by type+title, newest pro
       projection({ taskId: 'task-old', scopeId: 'scope-old', status: 'recoverable_paused', canResume: true, taskTitle: '浏览器逐张点开采集' }),
     ],
   })
-  const resume = entries.filter((entry) => entry.card.type === 'resume')
-  assert.equal(resume.length, 1, '同名重试只留一张卡')
-  assert.equal(resume[0]?.scopeId, 'scope-new', '保留最近的投影（列表序在前者）')
+  assert.equal(entries.length, 0)
 })
 
 test('feed controls apply: per-type cap and confidence ordering survive the group layer', () => {
   const projections = Array.from({ length: 6 }, (_, index) =>
-    projection({ taskId: `task-${index}`, scopeId: `scope-${index}`, status: 'blocked', canResume: true, taskTitle: `任务 ${index}` }))
+    projection({ taskId: `task-${index}`, scopeId: `scope-${index}`, status: 'completed', interactionState: 'check_in_pending', taskTitle: `任务 ${index}` }))
   const entries = assembleFeedEntries({ ...EMPTY_DEPS, listRecentProjections: () => projections })
-  const resumeCount = entries.filter((entry) => entry.card.type === 'resume').length
-  assert.equal(resumeCount, 3, 'per-type limit (3) applies through assembleEmergenceFeed')
+  const followUpCount = entries.filter((entry) => entry.card.type === 'follow_up').length
+  assert.equal(followUpCount, 3, 'per-type limit (3) applies through assembleEmergenceFeed')
 })
 
 test('handler answers success with entries and dispose removes the channel symmetrically', async () => {
@@ -112,7 +100,7 @@ test('handler answers success with entries and dispose removes the channel symme
   const dispose = emergenceFeedGroup.register(ipcMain, {
     ...EMPTY_DEPS,
     listRecentProjections: () => [
-      projection({ taskId: 'task-9', scopeId: 'scope-9', status: 'blocked', canResume: true }),
+      projection({ taskId: 'task-9', scopeId: 'scope-9', status: 'completed', interactionState: 'check_in_pending' }),
     ],
   })
   const feed = handlers.get('agent:emergence:feed')!

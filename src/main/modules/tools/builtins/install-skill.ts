@@ -9,10 +9,9 @@
  *     read-only descriptor with concrete risk reasons. NEVER installs. The model
  *     is told (via the tool description) to surface those risks through
  *     `ask_user_questions` and obtain explicit user approval.
- *   Phase 2 (trustAck:true): `{ source, trustAck:true }` echoed back after the
- *     user approved → manager.installSkillFromSource. The echoed source mirrors
- *     how the renderer front door carries its resolved `source` back; the host
- *     still gates on `trustAck`.
+ *   Phase 2 (trustAck:true): `{ source, trustAck:true }` selects the write
+ *     phase. The dispatch layer freezes that exact call and obtains the user's
+ *     Ready-card confirmation before this handler can install anything.
  *
  * Electron-free + injectable so it runs under `tsx --test`: the manager is
  * passed in via deps (the executor wires `getSkillsRuntimeManager()`).
@@ -172,7 +171,7 @@ export async function executeInstallSkill(
   const reasons = resolution.risk.reasons
   const nextStep = !resolution.installable
     ? '该来源不可安装，请把 reason 告知用户并停止，不要进入安装阶段。'
-    : '请用 ask_user_questions 把 riskReasons 的每条 detail 讲清楚再让用户决定；用户明确同意后，再用 install_skill({ source, trustAck:true }) 回传 source 完成安装。'
+    : '请把 riskReasons 的每条 detail 讲清楚，再用 install_skill({ source, trustAck:true }) 原样回传 source；宿主会冻结参数并显示 Ready 确认卡，用户同意后才安装。'
 
   const riskLine = reasons.length
     ? `风险（${resolution.risk.tier}）：${reasons.map((r) => r.detail).join('；')}`

@@ -386,7 +386,7 @@ export async function executeInstallMcpServer(
   const text = [
     `已只读解析（未安装）。将写入的配置：${commandLine}（id: ${resolved.pendingConfig.id}）`,
     `风险提示：${riskNotes.join(' ')}`,
-    '下一步：用 ask_user_questions 把命令与风险讲清楚让用户决定；用户明确同意后，用 install_mcp_server({ confirmAck: true, pendingConfig }) 原样回传 pendingConfig 完成安装。',
+    '下一步：把命令与风险讲清楚，再用 install_mcp_server({ confirmAck: true, pendingConfig }) 原样回传 pendingConfig；宿主会冻结配置并显示 Ready 确认卡，用户同意后才写入和连接。',
   ].join('\n')
   return createToolExecutionOutput(text, {
     shape: 'json',

@@ -1,6 +1,10 @@
 import { useCallback } from 'react'
 import type { DragEvent } from 'react'
 import { useAgent, type ChatAttachment } from '../../../../stores/useAgent'
+import {
+  captureComposerAuthority,
+  isComposerAuthorityCurrent,
+} from '../../../../modules/agent/composer-authority'
 import { createLocalPathAttachment, getPathBasename } from '../attachments-helpers'
 import {
   parseReadyBoardResourceDragPayload,
@@ -28,6 +32,7 @@ export function useAttachmentIntake(params: UseAttachmentIntakeParams): Attachme
       e.preventDefault()
       e.stopPropagation()
       setIsDragOver(false)
+      const composerAuthority = captureComposerAuthority(useAgent.getState())
 
       const boardRaw = e.dataTransfer.getData(READY_BOARD_RESOURCE_MIME)
       const boardPayload = parseReadyBoardResourceDragPayload(boardRaw)
@@ -174,6 +179,7 @@ export function useAttachmentIntake(params: UseAttachmentIntakeParams): Attachme
               const fallbackPath = data.tabId
                 ? `browser-tab://${data.tabId}`
                 : `browser-tab://${Date.now()}`
+              if (!isComposerAuthorityCurrent(useAgent.getState(), composerAuthority)) return
               addAttachments([
                 {
                   id: `attach-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -323,6 +329,7 @@ export function useAttachmentIntake(params: UseAttachmentIntakeParams): Attachme
           })
         })
       )
+      if (!isComposerAuthorityCurrent(useAgent.getState(), composerAuthority)) return
       addAttachments(newAttachments.filter(Boolean) as ChatAttachment[])
       focusInputWithResize()
     },

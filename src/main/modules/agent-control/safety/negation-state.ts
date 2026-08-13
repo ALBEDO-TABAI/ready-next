@@ -12,26 +12,68 @@
  */
 
 import type { FollowupNegationFamily } from '../../../../shared/agent-followup-intent'
+import { readScopeContextEpoch } from '../session/scope-context-epoch'
 
-const scopeNegations = new Map<string, Set<FollowupNegationFamily>>()
+type ScopedNegations = {
+  messageVisibilityEpoch?: number
+  families: Set<FollowupNegationFamily>
+}
 
-export function recordNegations(scopeId: string, families: ReadonlyArray<FollowupNegationFamily>): void {
+const scopeNegations = new Map<string, ScopedNegations>()
+
+function currentWriteEpoch(scopeId: string, expected?: number): { admitted: boolean; epoch?: number } {
+  const durable = readScopeContextEpoch(scopeId)
+  if (durable.kind === 'closed' || durable.kind === 'unavailable') return { admitted: false }
+  if (durable.kind === 'open') {
+    return expected === durable.messageVisibilityEpoch
+      ? { admitted: true, epoch: durable.messageVisibilityEpoch }
+      : { admitted: false }
+  }
+  return { admitted: true, ...(Number.isSafeInteger(expected) ? { epoch: expected } : {}) }
+}
+
+export function recordNegations(
+  scopeId: string,
+  families: ReadonlyArray<FollowupNegationFamily>,
+  messageVisibilityEpoch?: number,
+): void {
   if (!scopeId || families.length === 0) return
-  const set = scopeNegations.get(scopeId) ?? new Set<FollowupNegationFamily>()
-  for (const family of families) set.add(family)
-  scopeNegations.set(scopeId, set)
+  const resolved = currentWriteEpoch(scopeId, messageVisibilityEpoch)
+  if (!resolved.admitted) return
+  const existing = scopeNegations.get(scopeId)
+  const scoped: ScopedNegations = existing && existing.messageVisibilityEpoch === resolved.epoch
+    ? existing
+    : { messageVisibilityEpoch: resolved.epoch, families: new Set<FollowupNegationFamily>() }
+  for (const family of families) scoped.families.add(family)
+  scopeNegations.set(scopeId, scoped)
 }
 
-export function releaseNegations(scopeId: string, families: ReadonlyArray<FollowupNegationFamily>): void {
-  const set = scopeNegations.get(scopeId)
-  if (!set) return
-  for (const family of families) set.delete(family)
-  if (set.size === 0) scopeNegations.delete(scopeId)
+export function releaseNegations(
+  scopeId: string,
+  families: ReadonlyArray<FollowupNegationFamily>,
+  messageVisibilityEpoch?: number,
+): void {
+  const resolved = currentWriteEpoch(scopeId, messageVisibilityEpoch)
+  const scoped = scopeNegations.get(scopeId)
+  if (!resolved.admitted || !scoped || scoped.messageVisibilityEpoch !== resolved.epoch) return
+  for (const family of families) scoped.families.delete(family)
+  if (scoped.families.size === 0) scopeNegations.delete(scopeId)
 }
 
-export function activeNegations(scopeId: string | null | undefined): FollowupNegationFamily[] {
+export function activeNegations(
+  scopeId: string | null | undefined,
+  messageVisibilityEpoch?: number,
+): FollowupNegationFamily[] {
   if (!scopeId) return []
-  return [...(scopeNegations.get(scopeId) ?? [])]
+  const resolved = currentWriteEpoch(scopeId, messageVisibilityEpoch)
+  const scoped = scopeNegations.get(scopeId)
+  if (!resolved.admitted || !scoped || scoped.messageVisibilityEpoch !== resolved.epoch) return []
+  return [...scoped.families]
+}
+
+export function clearNegationsForScope(scopeId: string): void {
+  const normalizedScopeId = String(scopeId || '').trim()
+  if (normalizedScopeId) scopeNegations.delete(normalizedScopeId)
 }
 
 export function __clearNegationStateForTests(): void {

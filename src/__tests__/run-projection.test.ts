@@ -1,13 +1,15 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { RunProjection } from '../main/modules/agent-control/task-projection/run-projection'
+import { RunProjection as ProductionRunProjection } from '../main/modules/agent-control/task-projection/run-projection'
 import type { ProjectionTruthSnapshot } from '../main/modules/agent-control/contracts/run-contracts'
 import type { ConversationScope, ScopeRunEventPayload, ScopeRunSummary } from '../main/modules/agent-control/contracts/types'
 
 function createScope(): ConversationScope {
   return {
     id: 'scope-1',
+    aliasGeneration: null,
+    messageVisibilityEpoch: 0,
     agent: 'butler',
     title: '测试会话',
     sourceKind: 'local',
@@ -19,6 +21,40 @@ function createScope(): ConversationScope {
     lastMessageAt: '2026-04-09T10:00:00.000Z',
   }
 }
+
+class RunProjection extends ProductionRunProjection {
+  override recordEvent(
+    payload: ScopeRunEventPayload,
+    projectionTruth?: ProjectionTruthSnapshot | null,
+  ): ScopeRunSummary | null {
+    return super.recordEvent({
+      aliasGeneration: null,
+      messageVisibilityEpoch: 0,
+      ...payload,
+    }, projectionTruth)
+  }
+}
+
+test('RunProjection rejects an event whose frozen visibility identity is missing or stale after reset', () => {
+  const scope = { ...createScope(), messageVisibilityEpoch: 1 }
+  const projection = new ProductionRunProjection({
+    getScope: () => scope,
+    getPrevious: () => undefined,
+    setSummary: () => true,
+    toChannelKey: () => 'local:app',
+  })
+  const base = {
+    type: 'started' as const,
+    scopeId: scope.id,
+    aliasGeneration: null,
+    agent: scope.agent,
+    runId: 'run-old',
+    phase: 'planning' as const,
+    timestamp: '2026-04-09T10:00:00.000Z',
+  }
+  assert.equal(projection.recordEvent(base), null)
+  assert.equal(projection.recordEvent({ ...base, messageVisibilityEpoch: 0 }), null)
+})
 
 test('RunProjection does not derive browser task metadata from legacy planning text without structured truth', () => {
   const store = new Map<string, ScopeRunSummary>()

@@ -48,7 +48,7 @@ test('Phase 1.1 — canonical conversation-message persistence snapshots assista
   assert.ok(blockMatch, 'canonical createConversationMessage block exists')
   assert.match(
     blockMatch![0],
-    /payload\.role\s*===\s*'assistant'[\s\S]*this\.deps\.persistReferenceHintToScope\(scopeId\)/,
+    /payload\.role\s*===\s*'assistant'[\s\S]*this\.deps\.persistReferenceHintToScope\(scopeId,\s*expectedMessageVisibilityEpoch\)/,
     'canonical assistant-message persistence snapshots the reference hint',
   )
   assert.doesNotMatch(runtimeSource, /persistReferenceHintAfterAssistantMessage/)
@@ -181,7 +181,7 @@ test('Phase 1.3 — setupAgentIPC fires ensurePythonRuntimeReady after runtime.s
     /import\s*\{\s*getSkillsRuntimeManager\s*\}\s*from\s*'\.\.\/skills-runtime\/runtime-manager'/,
   )
 
-  const setupMatch = source.match(/export function setupAgentIPC[\s\S]*?if \(!runtime\)\s*\{[\s\S]*?\}/)
+  const setupMatch = source.match(/export async function setupAgentIPC[\s\S]*?void getSkillsRuntimeManager\(\)\.ensurePythonRuntimeReady\(\)/)
   assert.ok(setupMatch, 'setupAgentIPC block with runtime construction exists')
   const block = setupMatch![0]
 
@@ -193,7 +193,7 @@ test('Phase 1.3 — setupAgentIPC fires ensurePythonRuntimeReady after runtime.s
     /void getSkillsRuntimeManager\(\)\.ensurePythonRuntimeReady\(\)/,
     'startup wires the venv health check fire-and-forget',
   )
-  const startIdx = block.indexOf('runtime.start()')
+  const startIdx = block.indexOf('startup.promote()')
   const ensureIdx = block.indexOf('ensurePythonRuntimeReady')
   assert.ok(startIdx >= 0 && ensureIdx > startIdx, 'venv check runs after runtime.start()')
 })

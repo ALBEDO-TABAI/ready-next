@@ -1,4 +1,4 @@
-import test from 'node:test'
+import test, { after, before } from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -29,6 +29,17 @@ import {
   writeScopeSessionSnapshot,
 } from '../main/modules/agent-control/session/scope-session-snapshot'
 import { ToolDomainError } from '../main/modules/tools/tool-errors'
+import { __setScopeContextEpochDatabaseForTests } from '../main/modules/agent-control/session/scope-context-epoch'
+
+before(() => {
+  __setScopeContextEpochDatabaseForTests({
+    getRawDb: () => ({ prepare: () => ({ get: () => undefined }) }) as never,
+  })
+})
+
+after(() => {
+  __setScopeContextEpochDatabaseForTests(null)
+})
 
 function unknownThinkingConfig(): AIModelConfig {
   return {
@@ -188,9 +199,9 @@ test('scope snapshot round-trip preserves K3 thinking content, signature, and se
     },
   }]
 
-  const written = writeScopeSessionSnapshot('butler::scope-kimi-k3', items, root)
+  const written = writeScopeSessionSnapshot('butler::scope-kimi-k3', items, 0, root)
   assert.equal(written.ok, true)
-  const loaded = loadScopeSessionSnapshot('butler::scope-kimi-k3', root)
+  const loaded = loadScopeSessionSnapshot('butler::scope-kimi-k3', 0, root)
   assert.equal(loaded.ok, true)
   if (!loaded.ok) return
   assert.deepEqual(loaded.items, items)

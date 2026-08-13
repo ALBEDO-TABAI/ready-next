@@ -37,12 +37,12 @@ describe('browser tool write classification', () => {
     }
   })
 
-  it('treats pure observation as reads and takeover as control', () => {
+  it('treats pure observation as reads and rejects the retired takeover tool', () => {
     for (const name of ['browser_read', 'browser_snapshot', 'browser_tabs', 'browser_screenshot', 'browser_status']) {
       assert.equal(classifyBrowserToolCall(name), 'read', `${name} should be read`)
     }
     assert.equal(classifyBrowserToolCall('browser_task', { action: 'get' }), 'read')
-    assert.equal(classifyBrowserToolCall('browser_request_takeover'), 'control')
+    assert.throws(() => classifyBrowserToolCall('browser_request_takeover'), /browser_operation_not_registered/)
   })
 
   it('keeps browser_resources observational, including response-body forensics', () => {

@@ -5,7 +5,11 @@ import type { TaskProjectionRecord } from '../main/modules/agent-control/contrac
 import { finalizeRunOutcome } from '../main/modules/agent-control/runtime-core/run-finalizer'
 import { createTaskBudgetRuntime } from '../main/modules/agent-control/task-projection/run-budget-policy'
 import { wrapRunMetaRepositoryWithCloseoutSnapshot } from '../main/modules/agent-control/task-projection/run-meta-snapshot'
+import { setBrowserTargetClaimRunCloseoutPort } from '../main/modules/browser-engine/browser-target-claim-closeout'
 import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
+
+test.before(() => setBrowserTargetClaimRunCloseoutPort(() => undefined))
+test.after(() => setBrowserTargetClaimRunCloseoutPort(null))
 
 test('run-meta-closeout-precedence declares transitive sqlite coverage', (t) => {
   skipIfSqliteUnavailable(t, 'run-meta-closeout-precedence transitive sqlite guard')

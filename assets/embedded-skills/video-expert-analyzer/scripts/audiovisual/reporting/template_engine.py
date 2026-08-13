@@ -111,7 +111,8 @@ _FIGURE_RE = re.compile(r"<!--\s*FIGURE:([a-zA-Z0-9_\-]+)\s*-->")
 _UNRESOLVED_PLACEHOLDER_RE = re.compile(r"\{\{(\w+)\}\}")
 _REQUIRED_SECTION_RE = re.compile(r"^##\s+.+$", re.MULTILINE)
 _SCENE_EVIDENCE_RE = re.compile(
-    r"Scene\s+\d{3}|(?:\d{2}:)?\d{2}:\d{2}(?:[,.:]\d{2,3})?(?:\s*[–-]\s*(?:\d{2}:)?\d{2}:\d{2}(?:[,.:]\d{2,3})?)?"
+    r"(?:Scene|场景)\s*0*\d{1,4}|(?:\d{2}:)?\d{2}:\d{2}(?:[,.:]\d{2,3})?(?:\s*[–-]\s*(?:\d{2}:)?\d{2}:\d{2}(?:[,.:]\d{2,3})?)?",
+    re.IGNORECASE,
 )
 _FIGURE_MARKER_RATIONALES = {
     "opening": "对应开场入口的关键镜头，用来钉住后文分析的观看起点。",
@@ -1561,6 +1562,13 @@ def _assemble_final_report(
 ) -> str:
     body = agent_text.strip()
     body = _compact_summary_section_if_needed(body, validation_rules or {})
+    if source == "raw_prompt":
+        body = _repair_raw_prompt_scene_evidence(
+            body,
+            data,
+            required_sections or (),
+            validation_rules or {},
+        )
     try:
         body = _validate_required_sections(body, required_sections or (), source=source, validation_rules=validation_rules or {})
     except ValueError as exc:
@@ -1805,7 +1813,7 @@ def _extract_required_sections(tasks_text: str) -> List[str]:
     return required
 
 
-_SCENE_NUMBER_RE = re.compile(r"Scene\s+(\d{2,4})")
+_SCENE_NUMBER_RE = re.compile(r"(?:Scene|场景)\s*0*(\d{1,4})", re.IGNORECASE)
 
 
 def _split_body_sections(text: str) -> Dict[str, str]:
@@ -1940,6 +1948,75 @@ def _normalize_heading_for_match(text: str) -> str:
     normalized = normalized.replace("‘", "'").replace("’", "'").replace("＇", "'")
     normalized = re.sub(r"^#{1,6}\s*", "", normalized.strip())
     return re.sub(r"\s+", " ", normalized).strip()
+
+
+def _repair_raw_prompt_scene_evidence(
+    text: str,
+    data: Dict[str, Any],
+    required_sections: Sequence[str],
+    validation_rules: Dict[str, Any],
+) -> str:
+    required_by_normalized = {
+        _normalize_heading_for_match(section): section
+        for section in required_sections
+    }
+    lines = text.splitlines()
+    for index, line in enumerate(lines):
+        if line.strip().startswith("## "):
+            canonical = required_by_normalized.get(_normalize_heading_for_match(line))
+            if canonical:
+                lines[index] = canonical
+
+    minimum = int(validation_rules.get("min_scene_evidence_per_section") or 0)
+    if not validation_rules.get("require_scene_evidence_per_section") or minimum <= 0:
+        return "\n".join(lines)
+
+    evidence: List[tuple[str, str]] = []
+    for scene in data.get("scenes", []):
+        try:
+            number = int(scene.get("scene_number") or 0)
+        except (TypeError, ValueError):
+            continue
+        if number <= 0:
+            continue
+        timestamp = _safe_text(scene.get("timestamp_range") or scene.get("timestamp"))
+        description = _safe_text(
+            scene.get("description")
+            or scene.get("visual_description")
+            or scene.get("visual")
+        )
+        detail = ""
+        if timestamp:
+            detail += f"（{timestamp}）"
+        if description:
+            detail += description
+        evidence.append((str(number), f"Scene {number:03d}{detail}"))
+
+    index = 0
+    while index < len(lines):
+        heading = lines[index].strip()
+        if heading not in required_sections:
+            index += 1
+            continue
+        end = index + 1
+        while end < len(lines) and not lines[end].strip().startswith("## "):
+            end += 1
+        section_text = "\n".join(lines[index + 1:end])
+        present = _distinct_scene_numbers(section_text)
+        additions: List[str] = []
+        for number, rendered in evidence:
+            if number in present:
+                continue
+            additions.append(rendered)
+            present.add(number)
+            if len(present) >= minimum:
+                break
+        if additions:
+            lines[end:end] = ["", "证据补充：" + "；".join(additions) + "。"]
+            index = end + 2
+        else:
+            index = end
+    return "\n".join(lines)
 
 
 def _heading_lookup(mapping: Dict[str, Any]) -> Dict[str, str]:

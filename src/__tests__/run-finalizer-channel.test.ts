@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { describe, test } from 'node:test'
+import { after, before, describe, test } from 'node:test'
 import {
   finalizeRunOutcome,
   type RunCloseMetric,
@@ -8,10 +8,18 @@ import {
 import { AgentSdkRuntime, type AgentSdkRuntimeDeps } from '../main/modules/agent-control/runtime-core/agent-sdk-runtime'
 import { RunMetaRepository } from '../main/modules/agent-control/task-projection/run-meta-repository'
 import { __setMetricSinkForTests } from '../main/modules/agent-control/metrics'
+import { __setScopeContextEpochDatabaseForTests } from '../main/modules/agent-control/session/scope-context-epoch'
 import { ScriptedAgentRunner } from './helpers/scripted-agent-runner'
 import { canonicalCoreCloseoutTestPort } from './helpers/canonical-core-closeout-test-port'
 
 import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
+
+before(() => {
+  __setScopeContextEpochDatabaseForTests({
+    getRawDb: () => ({ prepare: () => ({ get: () => undefined }) }) as never,
+  })
+})
+after(() => __setScopeContextEpochDatabaseForTests(null))
 
 test('run-finalizer-channel declares transitive sqlite ABI guard', (t) => {
   skipIfSqliteUnavailable(t, 'run-finalizer-channel transitive sqlite load')
@@ -304,6 +312,9 @@ describe('finalizeRunOutcome', () => {
           } as never)
         }),
         getRunMetaRepository: () => repository,
+        getConversationScope: (scopeId: string) => scopeId === 'scope-run-finalizer'
+          ? { id: scopeId, messageVisibilityEpoch: 0 }
+          : null,
       } as never)
       runtime.newSession('butler::scope-run-finalizer', 'system prompt')
 
@@ -313,6 +324,7 @@ describe('finalizeRunOutcome', () => {
         'run-finalizer-scripted',
         {
           publicSessionId: 'scope-run-finalizer',
+          messageVisibilityEpoch: 0,
           taskId: 'task-run-finalizer-scripted',
         },
       )

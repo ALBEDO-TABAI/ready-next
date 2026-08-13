@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { createServer, type Server } from 'node:http'
 import { tmpdir } from 'node:os'
@@ -8,16 +8,27 @@ import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import test from 'node:test'
 
-import type { DatabaseConnection } from '../main/modules/database'
-import { __runMigrationForTests, type MigrationDatabase } from '../main/modules/migrations'
+import { DatabaseManager, type DatabaseConnection } from '../main/modules/database'
 import {
+  buildCodexIngressAdmittedDigest,
   CodexBindingRepository,
   type CodexAdmittedBindingInput,
 } from '../main/modules/agent-control/codex-runtime/codex-binding-repository'
+import { digestCanonicalJson } from '../main/modules/agent-control/codex-runtime/codex-model-gateway-contract'
 import { CodexDefaultBootRecoveryActions } from '../main/modules/agent-control/codex-runtime/codex-boot-recovery-actions'
-import type { CodexNativeNotification, CodexTurnStartParams } from '../main/modules/agent-control/codex-runtime/codex-native-runtime'
-import type { PreparedCodexProductRun } from '../main/modules/agent-control/codex-runtime/codex-product-run-preparer'
 import {
+  buildCodexToolResponseDeliveryAttemptId,
+  type CodexServerRequestResponse,
+} from '../main/modules/agent-control/codex-runtime/codex-tool-response-delivery'
+import type {
+  CodexNativeNotification,
+  CodexTurn,
+  CodexTurnStartParams,
+} from '../main/modules/agent-control/codex-runtime/codex-native-runtime'
+import type { PreparedCodexProductRun } from '../main/modules/agent-control/codex-runtime/codex-product-run-preparer'
+import { createCodexToolFixture } from './utils/codex-tool-fixture'
+import {
+  activateCodexGatewaySpawnConfig,
   buildCodexChildEnvironment,
   loadVerifiedCodexRuntime,
   prepareCodexRuntimeState,
@@ -25,6 +36,10 @@ import {
 } from '../main/modules/agent-control/codex-runtime/codex-runtime-host'
 import { CodexSidecarSession } from '../main/modules/agent-control/codex-runtime/codex-sidecar-session'
 import { CodexRuntimeBootReconciler } from '../main/modules/agent-control/codex-runtime/codex-runtime-boot-reconciler'
+import {
+  CodexDurableThreadArchiveDispatchPort,
+  CodexThreadArchiveIntentStore,
+} from '../main/modules/agent-control/codex-runtime/codex-thread-archive-cleanup'
 import { CodexTurnCollector } from '../main/modules/agent-control/codex-runtime/codex-turn-collector'
 import {
   CodexSidecarSupervisor,
@@ -33,12 +48,19 @@ import {
 } from '../main/modules/agent-control/codex-runtime/codex-sidecar-supervisor'
 import { createCodexStartIdentityRegistryForRuntime } from '../main/modules/agent-control/codex-runtime/codex-start-identity-registry'
 import type { StartIdentityReservationSet } from '../main/modules/agent-control/send-scoped-confirmation'
+import { RunMetaRepository } from '../main/modules/agent-control/task-projection/run-meta-repository'
+import { workflowDigest } from '../main/modules/repositories/browser-workflow-codec'
+import { TaskProjectionRepository } from '../main/modules/repositories/task-projection-repository'
+import { providerCheckpointExecutionBinding } from './provider-checkpoint-test-fixtures'
+import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
 
-type NativeDb = import('better-sqlite3').Database
+type NativeDb = DatabaseConnection
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
 const scopeId = 'scope-e2e'
 const threadBindingId = 'thread-binding-e2e'
+const providerSnapshot = { route: 'fixture', credentialReferenceId: 'credential-e2e' }
+const providerSnapshotDigest = digestCanonicalJson(providerSnapshot)
 
 function listen(server: Server): Promise<number> {
   return new Promise((resolvePort, reject) => {
@@ -193,15 +215,7 @@ function prepared(
     },
     resourceAnchorDigest: `resource-${runId}`,
     recoveredContextDigest: null,
-    readyToolSurface: {
-      surfaceId: 'surface-e2e',
-      toolSurfaceDigest: 'tool-surface-e2e',
-      toolNames: ['ready_read_probe'],
-    },
-    readyTurnToolAuthorization: {
-      authorizationId: `authorization-${runId}`,
-      authorizationDigest: `authorization-digest-${runId}`,
-    },
+    ...createCodexToolFixture(['ready_read_probe']),
     readyToolHostIdentity: {
       scopeId: targetScopeId,
       aliasId: targetAliasId,
@@ -217,15 +231,58 @@ function prepared(
 
 function prepareParentRows(db: NativeDb, run: PreparedCodexProductRun): void {
   const targetScopeId = run.readyToolHostIdentity.scopeId
-  db.prepare(`INSERT OR IGNORE INTO chat_conversations (id) VALUES (?)`).run(targetScopeId)
-  db.prepare(`INSERT INTO chat_messages (id, conversation_id) VALUES (?, ?)`).run(
-    run.ingress.originUserMessageId,
-    targetScopeId,
+  const messageContent = run.ingress.canonicalCurrentInputRef.input
+    .filter((item) => item.type === 'text')
+    .map((item) => item.text)
+    .join('')
+  const parentMeta = { requestId: run.ingressBinding.requestId }
+  db.prepare(`
+    INSERT OR IGNORE INTO chat_conversations (
+      id, agent, active_agent_id, handoff_generation, title, source_kind, source_id,
+      thread_key, meta_json, created_at, updated_at, message_visibility_epoch
+    ) VALUES (?, 'butler', 'butler', 0, 'Codex E2', 'local', 'app', ?, '{}', ?, ?, 0)
+  `).run(targetScopeId, targetScopeId, '2026-08-07T00:00:00.000Z', '2026-08-07T00:00:00.000Z')
+  assert.deepEqual(
+    db.prepare('SELECT id, message_visibility_epoch FROM chat_conversations WHERE id = ?')
+      .get(targetScopeId),
+    { id: targetScopeId, message_visibility_epoch: 0 },
   )
   db.prepare(`
-    INSERT INTO task_projections (task_id, run_id, scope_id, status)
-    VALUES (?, ?, ?, 'running')
-  `).run(run.taskId, run.runId, targetScopeId)
+    INSERT INTO chat_messages (id, conversation_id, role, content, timestamp, meta_json, message_visibility_epoch)
+    VALUES (?, ?, 'user', ?, '2026-08-07T00:00:00.000Z', ?, 0)
+  `).run(
+    run.ingress.originUserMessageId,
+    targetScopeId,
+    messageContent,
+    JSON.stringify(parentMeta),
+  )
+  const executionBinding = providerCheckpointExecutionBinding(run.runId)
+  new TaskProjectionRepository({ getRawDb: () => db }).create({
+    taskId: run.taskId,
+    scopeId: targetScopeId,
+    messageVisibilityEpoch: 0,
+    runId: run.runId,
+    taskType: 'direct_answer',
+    module: 'system',
+    status: 'running',
+    interactionState: 'running',
+    waitingFor: 'none',
+    steps: [],
+    ownerAgentId: 'butler',
+    taskOrigin: 'user_root',
+    executionBinding,
+    createdAt: '2026-08-07T00:00:00.000Z',
+    updatedAt: '2026-08-07T00:00:00.000Z',
+  })
+  new RunMetaRepository(db).create({
+    runId: run.runId,
+    taskId: run.taskId,
+    scopeId: targetScopeId,
+    messageVisibilityEpoch: 0,
+    agentId: 'butler',
+    executionBinding,
+    status: 'running',
+  }, Date.parse('2026-08-07T00:00:00.000Z'))
 }
 
 function admission(
@@ -235,13 +292,18 @@ function admission(
   runtimeManifestDigest: string,
   targetThreadBindingId = threadBindingId,
 ): CodexAdmittedBindingInput {
-  return {
+  const executionBinding = providerCheckpointExecutionBinding(run.runId)
+  const parentMeta = { requestId: run.ingressBinding.requestId }
+  const messageContent = run.ingress.canonicalCurrentInputRef.input
+    .filter((item) => item.type === 'text')
+    .map((item) => item.text)
+    .join('')
+  const input = {
     prepared: run,
     reservation,
     ownerMainBootId: 'main-boot-e2e',
     admittedAt: new Date().toISOString(),
     ingressAdmittedRevision: 1,
-    ingressAdmittedDigest: `ingress-${run.runId}`,
     threadBindingId: targetThreadBindingId,
     isolatedThreadCwd: threadCwd,
     turnRequestId: `client-message-${run.runId}`,
@@ -250,10 +312,19 @@ function admission(
     instructionContractDigest: 'instruction-e2e',
     codexModel: 'ready-e0-model',
     upstreamProfileSnapshotRef: 'profile-e2e',
-    upstreamProfileSnapshotDigest: 'profile-digest-e2e',
+    upstreamProfileSnapshotDigest: providerSnapshotDigest,
     additionalContextDigest: `additional-context-${run.runId}`,
     turnContractDigest: `turn-contract-${run.runId}`,
+    messageVisibilityEpoch: 0,
+    readyParentReceipt: {
+      messageRole: 'user' as const,
+      messageContent,
+      messageTimestamp: '2026-08-07T00:00:00.000Z',
+      messageMetaDigest: digestCanonicalJson(parentMeta),
+      executionBindingDigest: digestCanonicalJson(executionBinding),
+    },
   }
+  return { ...input, ingressAdmittedDigest: buildCodexIngressAdmittedDigest(input) }
 }
 
 async function waitForNotification(
@@ -304,10 +375,12 @@ test('real app-server uses durable bindings, exact tools, compaction, and proces
     t.skip('pinned E2 runtime is macOS arm64 only')
     return
   }
-  const Database = (await import('better-sqlite3')).default
-  const db = new Database(':memory:')
+  if (skipIfSqliteUnavailable(t, 'Codex sidecar process lease database')) return
+  const database = new DatabaseManager(true)
+  const db = database.getRawDb()
+  assert.ok(db)
   const tempRoot = mkdtempSync(join(tmpdir(), 'ready-codex-e2-'))
-  const gatewayToken = 'e2-short-lived-token'
+  const gatewayTokens: string[] = []
   const priorCanary = process.env.READY_E2_HOST_SECRET_CANARY
   process.env.READY_E2_HOST_SECRET_CANARY = 'host-secret-must-not-cross'
   const providerRequests: Array<Record<string, unknown>> = []
@@ -367,16 +440,11 @@ test('real app-server uses durable bindings, exact tools, compaction, and proces
   const stderr: string[] = []
   let session: CodexSidecarSession | null = null
   try {
-    db.exec(`
-      CREATE TABLE chat_conversations (id TEXT PRIMARY KEY);
-      CREATE TABLE chat_messages (id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL);
-      CREATE TABLE task_projections (
-        task_id TEXT PRIMARY KEY, run_id TEXT NOT NULL, scope_id TEXT NOT NULL, status TEXT NOT NULL
-      );
-    `)
-    __runMigrationForTests('088_codex_runtime_bindings', db as unknown as MigrationDatabase)
-    __runMigrationForTests('089_codex_runtime_evidence_guards', db as unknown as MigrationDatabase)
     const repository = new CodexBindingRepository(db as unknown as DatabaseConnection)
+    const archiveDispatchPort = new CodexDurableThreadArchiveDispatchPort({
+      store: new CodexThreadArchiveIntentStore(db as unknown as DatabaseConnection),
+      now: () => new Date().toISOString(),
+    })
     const paths = resolveCodexRuntimePaths({
       appPath: repoRoot,
       resourcesPath: join(repoRoot, 'assets'),
@@ -386,7 +454,6 @@ test('real app-server uses durable bindings, exact tools, compaction, and proces
     const state = prepareCodexRuntimeState({
       userDataPath: tempRoot,
       gatewayUrl,
-      gatewayToken,
       contracts: runtime.contracts,
     })
     const threadCwd = join(state.threadCwdRoot, threadBindingId)
@@ -398,12 +465,18 @@ test('real app-server uses durable bindings, exact tools, compaction, and proces
     const supervisor = new CodexSidecarSupervisor({
       runtime,
       state,
-      childEnvironment: (identities) => buildCodexChildEnvironment({
-        state,
-        ...identities,
-        gatewayUrl,
-        gatewayToken,
-      }),
+      spawnCapability: {
+        activate(identities) {
+          const gatewayToken = `e2-${randomUUID()}`
+          gatewayTokens.push(gatewayToken)
+          const gatewaySpawnConfig = activateCodexGatewaySpawnConfig({
+            state, sidecarSpawnInstanceId: identities.sidecarSpawnInstanceId,
+            gatewayUrl, gatewayToken, contracts: runtime.contracts,
+          })
+          return buildCodexChildEnvironment({ state, ...identities, gatewaySpawnConfig })
+        },
+        revoke() {},
+      },
       leaseStore: repository,
       inspector,
       spawnPort: new NodeCodexSidecarSpawnPort(),
@@ -413,18 +486,18 @@ test('real app-server uses durable bindings, exact tools, compaction, and proces
       onStderr: (text) => stderr.push(text),
     })
     let registry = createCodexStartIdentityRegistryForRuntime(runtime)
-    const toolResults = new Map<string, unknown>()
+    const toolResults = new Map<string, CodexServerRequestResponse>()
     session = new CodexSidecarSession({
       runtime,
       state,
-      gatewayToken,
       repository,
       supervisor,
+      threadArchiveDispatchPort: archiveDispatchPort,
       evidenceResolver: {
         async resolveTypedRejection() { return { resolution: 'unknown' } },
       },
       serverRequestExecutor: {
-        async execute(input) {
+        async executeServerRequest(input) {
           const boundTurn = db.prepare(`
             SELECT codex_turn_id FROM codex_turn_bindings WHERE ready_run_id = ?
           `).get<{ codex_turn_id: string | null }>(input.bindingId)
@@ -432,18 +505,12 @@ test('real app-server uses durable bindings, exact tools, compaction, and proces
           const key = `${input.bindingId}\0${input.params.callId}`
           const prior = toolResults.get(key)
           if (prior) return prior
-          const bound = repository.bindToolCall({
-            codexThreadId: input.params.threadId,
-            codexTurnId: input.params.turnId,
-            codexCallId: input.params.callId,
-            readyRunId: input.bindingId,
-            readyActionId: `action-${input.bindingId}-${input.params.callId}`,
-            toolName: input.params.tool,
-            argsDigest: JSON.stringify(input.params.arguments),
-            turnContractDigest: `turn-contract-${input.bindingId}`,
-            at: new Date().toISOString(),
-          })
-          if (!bound.duplicate) toolExecutions += 1
+          const bridgeBinding = repository.readToolBridgeExecutionBinding(input.bindingId)
+          const surfaceEntry = bridgeBinding.toolSurface.entries.find(
+            (entry) => entry.name === input.params.tool,
+          )
+          assert.ok(surfaceEntry)
+          toolExecutions += 1
           if (input.bindingId === 'run-interrupt') {
             markInterruptToolEntered?.()
             await new Promise<void>((resolveRelease) => { releaseInterruptTool = resolveRelease })
@@ -452,9 +519,26 @@ test('real app-server uses durable bindings, exact tools, compaction, and proces
             contentItems: [{ type: 'inputText', text: 'READY_TOOL_RESULT' }],
             success: true,
           }
-          toolResults.set(key, result)
-          return result
+          const identity = {
+            codexThreadId: input.params.threadId,
+            codexTurnId: input.params.turnId,
+            codexCallId: input.params.callId,
+            readyActionId: `e2e-action-${input.params.callId}`,
+            connectionEpoch: input.connectionEpoch,
+            requestRpcId: String(input.requestId),
+            toolResponseDigest: digestCanonicalJson(result),
+          }
+          const response = {
+            result,
+            deliveryAttempt: {
+              attemptId: buildCodexToolResponseDeliveryAttemptId(identity),
+              ...identity,
+            },
+          }
+          toolResults.set(key, response)
+          return response
         },
+        confirmServerResponseTransportWrite() {},
       },
       requestTimeoutMs: 10_000,
       inboundDeadlineMs: 20_000,
@@ -509,6 +593,9 @@ test('real app-server uses durable bindings, exact tools, compaction, and proces
     })
     const liveLease = repository.readLiveProcessLease()
     assert.ok(liveLease?.pid)
+    const liveConnectionAbortSignal = session.getConnectionAbortSignal(liveLease.connectionEpoch)
+    assert.ok(liveConnectionAbortSignal)
+    assert.equal(liveConnectionAbortSignal.aborted, false)
     const childEnvironment = execFileSync('/bin/ps', [
       'eww', '-p', String(liveLease.pid), '-o', 'command=',
     ], { encoding: 'utf8', maxBuffer: 2 * 1024 * 1024 })
@@ -525,6 +612,7 @@ test('real app-server uses durable bindings, exact tools, compaction, and proces
       sandbox: 'read-only',
       runtimeWorkspaceRoots: [],
       environments: [],
+      config: null,
       dynamicTools: [{
         type: 'function',
         name: 'ready_read_probe',
@@ -541,6 +629,105 @@ test('real app-server uses durable bindings, exact tools, compaction, and proces
     assert.equal(threadStarted.instructionSources.length, 0)
     assert.equal(threadStarted.thread.cwd, threadCwd)
     assert.equal(threadStarted.thread.sessionId, threadStarted.thread.id)
+    const closeRun = (
+      run: PreparedCodexProductRun,
+      turn: CodexTurn,
+      projectionStatus: 'completed' | 'killed' = 'completed',
+    ) => {
+      const start = repository.readProductStartState(run.runId)
+      assert.ok(start.codexThreadId)
+      assert.equal(start.codexTurnId, turn.id)
+      const closeoutAt = new Date().toISOString()
+      const finalMessage = projectionStatus === 'completed'
+        ? turn.items.filter((item) => item.type === 'agentMessage').at(-1)
+        : null
+      assert.ok(projectionStatus !== 'completed' || finalMessage?.type === 'agentMessage')
+      const candidateText = finalMessage?.type === 'agentMessage' ? finalMessage.text : null
+      const engineOutcome = projectionStatus === 'completed' ? 'completed' as const : 'interrupted' as const
+      repository.recordEngineTerminalCandidate({
+        readyRunId: run.runId,
+        codexThreadId: start.codexThreadId,
+        codexTurnId: turn.id,
+        engineOutcome,
+        candidate: {
+          kind: 'native_terminal',
+          readyTaskId: run.taskId,
+          readyRunId: run.runId,
+          scopeId: run.readyToolHostIdentity.scopeId,
+          codexThreadId: start.codexThreadId,
+          codexTurnId: turn.id,
+          engineOutcome,
+          candidateSelection: projectionStatus === 'completed'
+            ? { kind: 'accepted', itemId: finalMessage!.id }
+            : { kind: 'none', code: 'terminal_not_completed' },
+          candidateText,
+          candidateDigest: candidateText === null
+            ? null
+            : createHash('sha256').update(candidateText).digest('hex'),
+          usedToolCalls: [],
+          actionReceiptRefs: [],
+          interactionState: null,
+          waitingFor: null,
+          terminalReasonCandidate: projectionStatus === 'completed' ? 'done' : 'cancelled',
+          abortInitiator: projectionStatus === 'completed' ? null : 'user',
+          budgetState: {},
+          contextState: {},
+          providerDiagnostics: {},
+          recoveryCheckpointRef: null,
+          browserContinuationRef: null,
+          browserProofRefs: [],
+          otherProofRefs: [],
+          projectionPatchRefs: [],
+          runtimeDiagnostics: {
+            finalDeltaItemIds: [], commentaryItemIds: [], nativeTurnError: turn.error?.message ?? null,
+          },
+        },
+        recordedAt: closeoutAt,
+      })
+      repository.recordToolPublicationReceipt({ readyRunId: run.runId, recordedAt: closeoutAt })
+      const terminalMeta = {
+        taskId: run.taskId,
+        runId: run.runId,
+        terminalReason: projectionStatus === 'completed' ? 'done' : 'cancelled',
+      }
+      const messageId = `assistant:${run.taskId}:${run.runId}:terminal`
+      const productTerminalDigest = projectionStatus === 'completed' && candidateText !== null
+        ? workflowDigest({
+            id: messageId,
+            conversationId: run.readyToolHostIdentity.scopeId,
+            role: 'assistant',
+            content: candidateText,
+            timestamp: closeoutAt,
+            meta: terminalMeta,
+          })
+        : `terminal-${run.runId}`
+      db.exec('BEGIN IMMEDIATE')
+      try {
+        db.prepare(`UPDATE task_projections SET status = ? WHERE task_id = ?`)
+          .run(projectionStatus, run.taskId)
+        if (projectionStatus === 'completed' && candidateText !== null) {
+          db.prepare(`
+            INSERT INTO chat_messages (id, conversation_id, role, content, timestamp, meta_json, message_visibility_epoch)
+            VALUES (?, ?, 'assistant', ?, ?, ?, 0)
+          `).run(
+            messageId,
+            run.readyToolHostIdentity.scopeId,
+            candidateText,
+            closeoutAt,
+            JSON.stringify(terminalMeta),
+          )
+        }
+        repository.completeCanonicalProductCloseoutInOpenTransaction({
+          readyRunId: run.runId,
+          productTerminalDigest,
+          closeoutAt,
+        })
+        db.exec('COMMIT')
+      } catch (error) {
+        db.exec('ROLLBACK')
+        throw error
+      }
+    }
     const runProductTurn = async (
       run: PreparedCodexProductRun,
       text: string,
@@ -553,13 +740,22 @@ test('real app-server uses durable bindings, exact tools, compaction, and proces
       const params: CodexTurnStartParams = {
         threadId: targetCodexThreadId,
         clientUserMessageId: `client-message-${run.runId}`,
+        collaborationMode: {
+          mode: 'default',
+          settings: {
+            model: 'ready-e0-model',
+            reasoning_effort: null,
+            developer_instructions: null,
+          },
+        },
+        environments: [],
         input: [{ type: 'text', text, text_elements: [] }],
         additionalContext: {},
         responsesapiClientMetadata: {
           readyRunId: run.runId,
           toolSurfaceDigest: 'tool-surface-e2e',
           turnContractDigest: `turn-contract-${run.runId}`,
-          upstreamProfileSnapshotDigest: 'profile-digest-e2e',
+          upstreamProfileSnapshotDigest: providerSnapshotDigest,
         },
       }
       const started = await client.turnStart(params)
@@ -567,20 +763,7 @@ test('real app-server uses durable bindings, exact tools, compaction, and proces
       assert.equal(terminal.method, 'turn/completed')
       if (terminal.method !== 'turn/completed') throw new Error('terminal_missing')
       assert.equal(terminal.params.turn.id, started.turn.id)
-      const closeoutAt = new Date().toISOString()
-      db.exec('BEGIN IMMEDIATE')
-      try {
-        db.prepare(`UPDATE task_projections SET status = 'completed' WHERE task_id = ?`).run(run.taskId)
-        repository.completeCanonicalProductCloseoutInOpenTransaction({
-          readyRunId: run.runId,
-          productTerminalDigest: `terminal-${run.runId}`,
-          closeoutAt,
-        })
-        db.exec('COMMIT')
-      } catch (error) {
-        db.exec('ROLLBACK')
-        throw error
-      }
+      closeRun(run, terminal.params.turn)
       return terminal.params.turn
     }
 
@@ -616,13 +799,22 @@ test('real app-server uses durable bindings, exact tools, compaction, and proces
     const interruptStarted = await client.turnStart({
       threadId: threadStarted.thread.id,
       clientUserMessageId: 'client-message-run-interrupt',
+      collaborationMode: {
+        mode: 'default',
+        settings: {
+          model: 'ready-e0-model',
+          reasoning_effort: null,
+          developer_instructions: null,
+        },
+      },
+      environments: [],
       input: [{ type: 'text', text: 'INTERRUPT_TOKEN', text_elements: [] }],
       additionalContext: {},
       responsesapiClientMetadata: {
         readyRunId: interruptRun.runId,
         toolSurfaceDigest: 'tool-surface-e2e',
         turnContractDigest: 'turn-contract-run-interrupt',
-        upstreamProfileSnapshotDigest: 'profile-digest-e2e',
+        upstreamProfileSnapshotDigest: providerSnapshotDigest,
       },
     })
     await interruptObserved
@@ -642,20 +834,7 @@ test('real app-server uses durable bindings, exact tools, compaction, and proces
       const read = await client.threadRead({ threadId: threadStarted.thread.id, includeTurns: true })
       return read.thread.status.type === 'idle' ? read : null
     })
-    db.exec('BEGIN IMMEDIATE')
-    try {
-      const closeoutAt = new Date().toISOString()
-      db.prepare(`UPDATE task_projections SET status = 'killed' WHERE task_id = ?`).run(interruptRun.taskId)
-      repository.completeCanonicalProductCloseoutInOpenTransaction({
-        readyRunId: interruptRun.runId,
-        productTerminalDigest: 'terminal-run-interrupt',
-        closeoutAt,
-      })
-      db.exec('COMMIT')
-    } catch (error) {
-      db.exec('ROLLBACK')
-      throw error
-    }
+    closeRun(interruptRun, interrupted.params.turn, 'killed')
 
     const postInterruptRun = reserveAndAdmit('run-post-interrupt', true)
     const postInterruptTurn = await runProductTurn(postInterruptRun, 'POST_INTERRUPT_TOKEN')
@@ -664,11 +843,6 @@ test('real app-server uses durable bindings, exact tools, compaction, and proces
     const autoCompactArmRun = reserveAndAdmit('run-auto-compact-arm', true)
     await runProductTurn(autoCompactArmRun, 'AUTO_COMPACT_ARM_TOKEN')
     const autoCompactObserveRun = reserveAndAdmit('run-auto-compact-observe', true)
-    const automaticCompactionObservations: Array<{
-      threadId: string
-      turnId: string
-      itemId: string
-    }> = []
     const collectedAfterCompaction = await new CodexTurnCollector(client).collect({
       readyTaskId: autoCompactObserveRun.taskId,
       readyRunId: autoCompactObserveRun.runId,
@@ -677,13 +851,22 @@ test('real app-server uses durable bindings, exact tools, compaction, and proces
       startTurn: () => client.turnStart({
         threadId: threadStarted.thread.id,
         clientUserMessageId: 'client-message-run-auto-compact-observe',
+        collaborationMode: {
+          mode: 'default',
+          settings: {
+            model: 'ready-e0-model',
+            reasoning_effort: null,
+            developer_instructions: null,
+          },
+        },
+        environments: [],
         input: [{ type: 'text', text: 'AUTO_COMPACT_OBSERVE_TOKEN', text_elements: [] }],
         additionalContext: {},
         responsesapiClientMetadata: {
           readyRunId: autoCompactObserveRun.runId,
           toolSurfaceDigest: 'tool-surface-e2e',
           turnContractDigest: 'turn-contract-run-auto-compact-observe',
-          upstreamProfileSnapshotDigest: 'profile-digest-e2e',
+          upstreamProfileSnapshotDigest: providerSnapshotDigest,
         },
       }),
       terminalTimeoutMs: 20_000,
@@ -702,7 +885,6 @@ test('real app-server uses durable bindings, exact tools, compaction, and proces
       projectionPatchRefs: [],
       allowNullPhaseFallback: true,
       allowDirectProvisionalStream: false,
-      onAutomaticCompactionObserved: (event) => automaticCompactionObservations.push(event),
       onProvisionalDelta: () => undefined,
     })
     assert.equal(
@@ -710,7 +892,6 @@ test('real app-server uses durable bindings, exact tools, compaction, and proces
       'native_terminal',
       JSON.stringify({
         collectedAfterCompaction,
-        automaticCompactionObservations,
         providerRequestCount: providerRequests.length,
         activeProviderResponses,
         stderr,
@@ -718,26 +899,18 @@ test('real app-server uses durable bindings, exact tools, compaction, and proces
       }),
     )
     assert.equal(collectedAfterCompaction.engineOutcome, 'completed')
-    assert.equal(automaticCompactionObservations.length, 1)
-    assert.equal(automaticCompactionObservations[0].threadId, threadStarted.thread.id)
     assert.equal(db.prepare(`
       SELECT COUNT(*) AS count FROM codex_manual_compaction_bindings
     `).get<{ count: number }>()?.count, 0)
-    db.exec('BEGIN IMMEDIATE')
-    try {
-      const closeoutAt = new Date().toISOString()
-      db.prepare(`UPDATE task_projections SET status = 'completed' WHERE task_id = ?`)
-        .run(autoCompactObserveRun.taskId)
-      repository.completeCanonicalProductCloseoutInOpenTransaction({
-        readyRunId: autoCompactObserveRun.runId,
-        productTerminalDigest: 'terminal-run-auto-compact-observe',
-        closeoutAt,
-      })
-      db.exec('COMMIT')
-    } catch (error) {
-      db.exec('ROLLBACK')
-      throw error
-    }
+    const autoCompactRead = await client.threadRead({
+      threadId: threadStarted.thread.id,
+      includeTurns: true,
+    })
+    const autoCompactTurn = autoCompactRead.thread.turns.find(
+      (turn) => turn.id === collectedAfterCompaction.codexTurnId,
+    )
+    assert.ok(autoCompactTurn)
+    closeRun(autoCompactObserveRun, autoCompactTurn)
 
     const secondScopeId = 'scope-e2e-second-root'
     const secondThreadBindingId = 'thread-binding-e2e-second-root'
@@ -768,6 +941,7 @@ test('real app-server uses durable bindings, exact tools, compaction, and proces
       sandbox: 'read-only',
       runtimeWorkspaceRoots: [],
       environments: [],
+      config: null,
       dynamicTools: [{
         type: 'function',
         name: 'ready_read_probe',
@@ -813,6 +987,7 @@ test('real app-server uses durable bindings, exact tools, compaction, and proces
       sandbox: 'read-only',
       runtimeWorkspaceRoots: [],
       environments: [],
+      config: null,
       dynamicTools: [{
         type: 'function',
         name: 'ready_read_probe',
@@ -863,10 +1038,12 @@ test('real app-server uses durable bindings, exact tools, compaction, and proces
       ownerMainBootId,
       codexModel: 'ready-e0-model',
       upstreamProfileSnapshotRef: 'profile-e2e',
-      upstreamProfileSnapshotDigest: 'profile-digest-e2e',
-      providerSnapshot: { route: 'fixture' },
+      upstreamProfileSnapshotDigest: providerSnapshotDigest,
+      providerSnapshot,
       credentialReferenceId: 'credential-e2e',
-      expectedToolsDigest: 'empty-tools-digest',
+      expectedToolsDigest: digestCanonicalJson([]),
+      preDispatchThreadReadDigest: 'pre-dispatch-thread-read',
+      preDispatchTurnIds: [],
       expiresAt: new Date(Date.now() + 20_000).toISOString(),
       createdAt: new Date().toISOString(),
     })
@@ -910,11 +1087,19 @@ test('real app-server uses durable bindings, exact tools, compaction, and proces
     })
     assert.equal(manualEvidence.terminalStatus, 'completed')
     const compactRead = await client.threadRead({ threadId: threadStarted.thread.id, includeTurns: true })
+    const compactTurn = compactRead.thread.turns.find((turn) => turn.id === manualEvidence.turnId)
+    const readbackCompactionItems = compactTurn?.items.filter((item) => item.type === 'contextCompaction') || []
+    assert.equal(readbackCompactionItems.length, 1)
     repository.consumeManualCompaction({
       manualCompactionId: 'manual-e2e',
       codexCompactionTurnId: manualEvidence.turnId,
-      contextCompactionItemId: manualEvidence.contextCompactionItemId,
+      notificationContextCompactionItemId: manualEvidence.contextCompactionItemId,
+      contextCompactionItemId: readbackCompactionItems[0].id,
       threadReadDigest: JSON.stringify(compactRead.thread),
+      terminalEvidenceDigest: digestCanonicalJson(compactTurn),
+      gatewayRequestReceiptId: 'gateway-receipt-e2e',
+      gatewayRequestEvidenceDigest: 'gateway-request-evidence-e2e',
+      gatewayResponseEvidenceDigest: 'gateway-response-evidence-e2e',
       consumedAt: new Date().toISOString(),
     })
     await session.getInboundBuffer().reconcileTurn({
@@ -928,6 +1113,7 @@ test('real app-server uses durable bindings, exact tools, compaction, and proces
     assert.equal(resumed.instructionSources.length, 0)
 
     await session.stop()
+    assert.equal(liveConnectionAbortSignal.aborted, true)
     assert.equal(repository.readLiveProcessLease(), null)
     const ingressGateEvents: string[] = []
     const bootActions = new CodexDefaultBootRecoveryActions({
@@ -949,6 +1135,7 @@ test('real app-server uses durable bindings, exact tools, compaction, and proces
       },
       hostFailureTerminal: {
         async commit() { throw new Error('unexpected_host_failure_during_clean_restart') },
+        async deliver() { throw new Error('unexpected_host_failure_during_clean_restart') },
       },
       manualCompaction: {
         async reconcile() { throw new Error('unexpected_manual_recovery_during_clean_restart') },
@@ -987,6 +1174,14 @@ test('real app-server uses durable bindings, exact tools, compaction, and proces
     assert.ok(restartedSameScopeRead.thread.turns.length >= 1)
     const restartedResume = await client.threadResume({ threadId: threadStarted.thread.id })
     assert.equal(restartedResume.thread.id, threadStarted.thread.id)
+    const restartRequestCount = providerRequests.length
+    const restartedRun = reserveAndAdmit('run-after-process-restart', true)
+    const restartedTurn = await runProductTurn(restartedRun, 'AFTER_PROCESS_RESTART_TOKEN')
+    assert.equal(restartedTurn.status, 'completed')
+    assert.deepEqual(
+      providerToolNames(providerRequests[restartRequestCount]),
+      ['ready_read_probe'],
+    )
     await assert.rejects(
       client.threadArchive({ threadId: threadStarted.thread.id }),
       /thread_archive_not_retired/,
@@ -994,23 +1189,20 @@ test('real app-server uses durable bindings, exact tools, compaction, and proces
     repository.resetIdleAlias({
       aliasId: scopeId,
       expectedGeneration: 1,
-      retirementEvidenceDigest: 'retire-main-e2e',
+      retirementEvidenceDigest: digestCanonicalJson({ contract: 'e2e_idle_reset', aliasId: scopeId }),
       resetAt: new Date().toISOString(),
     })
-    await assert.rejects(
-      client.threadArchive({ threadId: threadStarted.thread.id }),
-      /thread_archive_call_unresolved/,
-    )
+    await client.threadArchive({ threadId: threadStarted.thread.id })
     repository.resetIdleAlias({
       aliasId: secondScopeId,
       expectedGeneration: 1,
-      retirementEvidenceDigest: 'retire-second-e2e',
+      retirementEvidenceDigest: digestCanonicalJson({ contract: 'e2e_idle_reset', aliasId: secondScopeId }),
       resetAt: new Date().toISOString(),
     })
     repository.resetIdleAlias({
       aliasId: sameScopeAliasId,
       expectedGeneration: 1,
-      retirementEvidenceDigest: 'retire-same-scope-e2e',
+      retirementEvidenceDigest: digestCanonicalJson({ contract: 'e2e_idle_reset', aliasId: sameScopeAliasId }),
       resetAt: new Date().toISOString(),
     })
     await client.threadArchive({ threadId: secondThreadStarted.thread.id })
@@ -1019,7 +1211,7 @@ test('real app-server uses durable bindings, exact tools, compaction, and proces
     assert.equal(registry.snapshot().capacityCharged, 0)
     assert.equal(toolExecutions, 2)
     assert.equal(preBindingToolExecutions, 0)
-    assert.equal(stderr.join('').includes(gatewayToken), false)
+    assert.equal(gatewayTokens.some((token) => stderr.join('').includes(token)), false)
     assert.ok(providerRequests.length >= 5)
     const providerToolSurfaces = providerRequests.map(providerToolNames)
     assert.ok(providerToolSurfaces.some((surface) => surface.length === 0))
@@ -1030,13 +1222,13 @@ test('real app-server uses durable bindings, exact tools, compaction, and proces
       surface.length === 0
       || (surface.length === 1 && surface[0] === 'ready_read_probe')
     )), true)
-    assert.equal(JSON.stringify(providerRequests).includes(gatewayToken), false)
+    assert.equal(gatewayTokens.some((token) => JSON.stringify(providerRequests).includes(token)), false)
     assert.equal(JSON.stringify(providerRequests).includes('host-secret-must-not-cross'), false)
     assert.equal(db.pragma('quick_check', { simple: true }), 'ok')
   } finally {
     if (session) await session.stop().catch(() => undefined)
     await closeServer(server)
-    db.close()
+    database.close()
     rmSync(tempRoot, { recursive: true, force: true })
     if (priorCanary === undefined) delete process.env.READY_E2_HOST_SECRET_CANARY
     else process.env.READY_E2_HOST_SECRET_CANARY = priorCanary

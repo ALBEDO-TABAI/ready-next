@@ -37,7 +37,7 @@ describe('useAgent personality switcher contract', () => {
     ;(globalThis as any).window.electronAPI = undefined
   })
 
-  it('reloadAgents maps agent personalities into the chat switcher', async () => {
+  it('reloadAgents never maps historical personalities into the live chat selector', async () => {
     useAgent.setState((state) => ({
       currentAgent: 'analyst',
       agents: state.agents.map((agent) => ({ ...agent, selected: agent.name === 'analyst' })),
@@ -68,11 +68,7 @@ describe('useAgent personality switcher contract', () => {
     await useAgent.getState().reloadAgents()
 
     const state = useAgent.getState()
-    assert.deepEqual(state.agents.map((agent) => agent.name), ['designer', 'analyst'])
-    assert.equal(state.agents[0].displayName, '设计审稿师')
-    assert.equal(state.agents[0].avatar, '🎨')
-    assert.equal(state.agents[1].avatar, '🤖')
-    assert.equal(state.agents[1].selected, true)
+    assert.deepEqual(state.agents.map((agent) => agent.name), ['butler', 'copywriter', 'video-editor', 'analyst', 'operator'])
     assert.equal(state.currentAgent, 'analyst')
   })
 
@@ -97,7 +93,7 @@ describe('useAgent personality switcher contract', () => {
     assert.equal(state.currentAgent, 'butler')
   })
 
-  it('reloadAgents falls back to built-in agents when the personality list is empty or fails', async () => {
+  it('reloadAgents falls back to built-in identities when registry is unavailable', async () => {
     useAgent.setState({ currentAgent: 'missing-agent' })
     installPersonalityListMock(async () => ({ success: true, data: [] }))
 
