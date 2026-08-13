@@ -92,6 +92,160 @@
       "owner": "Runtime driver split-test retirement contract",
       "expiresAt": "2027-12-31",
       "addedBy": "2026-08-06 cod-ready E0 baseline repair"
+    },
+    {
+      "path": "src/main/modules/agent-control/agents/handoff-proposal.ts",
+      "reason": "Intentional negative-existence fixture in check-agent-handoff-retired.cjs; recreating the live Agent handoff proposal path must fail verification.",
+      "owner": "Agent handoff retirement contract",
+      "expiresAt": "2027-12-31",
+      "addedBy": "2026-08-12 P012 retirement closure"
+    },
+    {
+      "path": "src/main/modules/agent-control/agents/handoff-adoption-transaction.ts",
+      "reason": "Intentional negative-existence fixture in check-agent-handoff-retired.cjs; live handoff adoption remains retired.",
+      "owner": "Agent handoff retirement contract",
+      "expiresAt": "2027-12-31",
+      "addedBy": "2026-08-12 P012 retirement closure"
+    },
+    {
+      "path": "src/main/modules/agent-control/agents/handoff-control.ts",
+      "reason": "Intentional negative-existence fixture in check-agent-handoff-retired.cjs; live handoff control remains retired.",
+      "owner": "Agent handoff retirement contract",
+      "expiresAt": "2027-12-31",
+      "addedBy": "2026-08-12 P012 retirement closure"
+    },
+    {
+      "path": "src/main/modules/agent-control/agents/handoff-takeover-recovery.ts",
+      "reason": "Intentional negative-existence fixture in check-agent-handoff-retired.cjs; live handoff takeover recovery remains retired.",
+      "owner": "Agent handoff retirement contract",
+      "expiresAt": "2027-12-31",
+      "addedBy": "2026-08-12 P012 retirement closure"
+    },
+    {
+      "path": "src/main/modules/tools/builtins/propose-handoff.ts",
+      "reason": "Intentional negative-existence fixture in check-agent-handoff-retired.cjs; the model-visible handoff tool must not return.",
+      "owner": "Agent handoff retirement contract",
+      "expiresAt": "2027-12-31",
+      "addedBy": "2026-08-12 P012 retirement closure"
+    },
+    {
+      "path": "src/main/modules/agent-control/contracts/system-background-contract.ts",
+      "reason": "Intentional negative-existence fixture in check-codex-auto-narration-retired.cjs; Codex automatic background narration remains production-inert.",
+      "owner": "Codex automatic narration retirement contract",
+      "expiresAt": "2027-12-31",
+      "addedBy": "2026-08-12 P012 retirement closure"
+    },
+    {
+      "path": "src/main/modules/agent-control/runtime-core/narration-continuation-service.ts",
+      "reason": "Intentional negative-existence fixture in check-codex-auto-narration-retired.cjs; the narration continuation consumer must stay absent.",
+      "owner": "Codex automatic narration retirement contract",
+      "expiresAt": "2027-12-31",
+      "addedBy": "2026-08-12 P012 retirement closure"
+    },
+    {
+      "path": "src/main/modules/agent-control/system-reminders/background-task-terminal-reminder.ts",
+      "reason": "Intentional negative-existence fixture in check-codex-auto-narration-retired.cjs; terminal task events must not trigger paid background turns.",
+      "owner": "Codex automatic narration retirement contract",
+      "expiresAt": "2027-12-31",
+      "addedBy": "2026-08-12 P012 retirement closure"
+    },
+    {
+      "path": "src/main/modules/settings-engine/agent-auto-narration-setting.ts",
+      "reason": "Intentional negative-existence fixture in check-codex-auto-narration-retired.cjs; the retired automatic narration control must stay absent.",
+      "owner": "Codex automatic narration retirement contract",
+      "expiresAt": "2027-12-31",
+      "addedBy": "2026-08-12 P012 retirement closure"
+    },
+    {
+      "path": "src/main/modules/agent-control/maintenance/maintenance-llm-driver.ts",
+      "reason": "Intentional negative-existence fixture in check-mandated-capability-is-live.cjs; automatic paid maintenance model calls remain retired.",
+      "owner": "Automatic maintenance LLM retirement contract",
+      "expiresAt": "2027-12-31",
+      "addedBy": "2026-08-12 P012 retirement closure"
+    },
+    {
+      "path": "src/main/modules/agent-control/maintenance/maintenance-llm-round.ts",
+      "reason": "Intentional negative-existence fixture in check-mandated-capability-is-live.cjs; automatic paid maintenance model rounds remain retired.",
+      "owner": "Automatic maintenance LLM retirement contract",
+      "expiresAt": "2027-12-31",
+      "addedBy": "2026-08-12 P012 retirement closure"
+    },
+    {
+      "path": "src/main/modules/agent-control/agents/session-preroute.ts",
+      "reason": "Intentional negative-existence fixture in preroute retirement gates; archive settings must not become a live Codex router.",
+      "owner": "Agent preroute retirement contract",
+      "expiresAt": "2027-12-31",
+      "addedBy": "2026-08-12 P012 retirement closure"
+    },
+    {
+      "path": "src/main/modules/agent-control/agents/session-preroute-trace.ts",
+      "reason": "Intentional negative-existence fixture in preroute retirement gates; live routing trace production remains retired.",
+      "owner": "Agent preroute retirement contract",
+      "expiresAt": "2027-12-31",
+      "addedBy": "2026-08-12 P012 retirement closure"
+    },
+    {
+      "path": "src/main/modules/agent-control/runtime-core/session-preroute-service.ts",
+      "reason": "Intentional negative-existence fixture in preroute retirement gates; Codex admission must not call the retired preroute service.",
+      "owner": "Agent preroute retirement contract",
+      "expiresAt": "2027-12-31",
+      "addedBy": "2026-08-12 P012 retirement closure"
+    },
+    {
+      "path": "src/main/modules/claude-bridge/ipc/session-preroute-group.ts",
+      "reason": "Intentional negative-existence fixture in preroute retirement gates; the public preroute IPC surface must stay absent.",
+      "owner": "Agent preroute retirement contract",
+      "expiresAt": "2027-12-31",
+      "addedBy": "2026-08-12 P012 retirement closure"
+    },
+    {
+      "path": "src/main/modules/settings-engine/agent-session-preroute-setting.ts",
+      "reason": "Intentional negative-existence fixture in preroute retirement gates; the retired routing control must stay absent.",
+      "owner": "Agent preroute retirement contract",
+      "expiresAt": "2027-12-31",
+      "addedBy": "2026-08-12 P012 retirement closure"
+    },
+    {
+      "path": "src/main/modules/tools/builtins/propose-specialist-blueprint.ts",
+      "reason": "Intentional negative-existence fixture in specialist retirement gates; the model-visible specialist creation tool must stay absent.",
+      "owner": "Specialist live-control retirement contract",
+      "expiresAt": "2027-12-31",
+      "addedBy": "2026-08-12 P012 retirement closure"
+    },
+    {
+      "path": "src/main/modules/tools/builtins/confirm-specialist-blueprint.ts",
+      "reason": "Intentional negative-existence fixture in specialist retirement gates; live specialist creation confirmation must stay absent.",
+      "owner": "Specialist live-control retirement contract",
+      "expiresAt": "2027-12-31",
+      "addedBy": "2026-08-12 P012 retirement closure"
+    },
+    {
+      "path": "src/main/modules/tools/builtins/rename-specialist-agent.ts",
+      "reason": "Intentional negative-existence fixture in specialist retirement gates; the model-visible specialist mutation tool must stay absent.",
+      "owner": "Specialist live-control retirement contract",
+      "expiresAt": "2027-12-31",
+      "addedBy": "2026-08-12 P012 retirement closure"
+    },
+    {
+      "path": "src/main/modules/claude-bridge/ipc/agent-derivation-group.ts",
+      "reason": "Intentional negative-existence fixture in specialist retirement gates; public specialist derivation mutations must stay absent.",
+      "owner": "Specialist live-control retirement contract",
+      "expiresAt": "2027-12-31",
+      "addedBy": "2026-08-12 P012 retirement closure"
+    },
+    {
+      "path": "src/renderer/components/personality/AgentDerivationPanel.tsx",
+      "reason": "Intentional negative-existence fixture in specialist retirement gates; the retired live derivation panel must stay absent.",
+      "owner": "Specialist live-control retirement contract",
+      "expiresAt": "2027-12-31",
+      "addedBy": "2026-08-12 P012 retirement closure"
+    },
+    {
+      "path": "src/renderer/components/personality/AgentRegistryPanel.tsx",
+      "reason": "Intentional negative-existence fixture in specialist retirement gates; the retired live specialist registry control must stay absent.",
+      "owner": "Specialist live-control retirement contract",
+      "expiresAt": "2027-12-31",
+      "addedBy": "2026-08-12 P012 retirement closure"
     }
   ]
 }

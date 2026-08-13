@@ -188,11 +188,6 @@
       "snippetHash": "227e0adea33c54c9"
     },
     {
-      "file": "src/main/modules/agent-control/runtime-core/narration-continuation-service.ts",
-      "line": 222,
-      "snippetHash": "7fa34d6c8a4e3b62"
-    },
-    {
       "file": "src/main/modules/agent-control/runtime-core/reference-hint-service.ts",
       "line": 59,
       "snippetHash": "b500c2470cf18eb9"
@@ -536,11 +531,6 @@
       "file": "src/main/modules/agent-control/skills/skill-turn-identity-snapshot.ts",
       "line": 175,
       "snippetHash": "599c02dab9ffcc50"
-    },
-    {
-      "file": "src/main/modules/agent-control/system-reminders/background-task-terminal-reminder.ts",
-      "line": 386,
-      "snippetHash": "7fa34d6c8a4e3b62"
     },
     {
       "file": "src/main/modules/agent-control/task-projection/run-meta-repository.ts",

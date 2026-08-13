@@ -54,6 +54,10 @@ const DIRECT_ANSWER_HISTORY_MIGRATION_MARKER =
 const STARTUP_RUN_RECONCILER_REL = 'src/main/modules/app-control/startup-run-reconciler.ts'
 const STARTUP_RECONCILER_EXEMPT_MARKER =
   'run-finalizer-exempt: startup-recovery-only active-owner->interrupted'
+const CODEX_BINDING_SCHEMA_REL =
+  'src/main/modules/agent-control/codex-runtime/codex-binding-schema.ts'
+const CODEX_STARTUP_OWNER_HANDOFF_MARKER =
+  'run-finalizer-exempt: migration-101 restores only exact interrupted Codex owners'
 const MIGRATIONS_REL = 'src/main/modules/migrations.ts'
 const WORKFLOW_STATUS_MIGRATION_MARKER =
   'run-finalizer-exempt: migration-083 normalizes legacy working owners into the running workflow state'
@@ -124,15 +128,20 @@ function isAllowedRunMetaWriter(rel, text) {
 }
 
 function sourceForRunMetaRules(rel, text) {
+  let source = text
   if (rel === MIGRATIONS_REL && text.includes(WORKFLOW_STATUS_MIGRATION_MARKER)) {
     const normalized = /UPDATE\s+run_meta\s+SET\s+status\s*=\s*['"]running['"]\s+WHERE\s+status\s*=\s*['"]working['"]/i
-    return text.replace(normalized, (match) => match.replace(/[^\r\n]/g, ' '))
+    source = source.replace(normalized, (match) => match.replace(/[^\r\n]/g, ' '))
   }
-  if (rel !== STARTUP_RUN_RECONCILER_REL || !text.includes(STARTUP_RECONCILER_EXEMPT_MARKER)) {
-    return text
+  if (rel === CODEX_BINDING_SCHEMA_REL && text.includes(CODEX_STARTUP_OWNER_HANDOFF_MARKER)) {
+    const exactOwnerRestore = /UPDATE\s+run_meta\s+SET\s+status\s*=\s*['"]running['"]\s*,\s*initiator\s*=\s*NULL\s*,\s*terminal_reason\s*=\s*NULL\s*,\s*duration_ms\s*=\s*NULL\s+WHERE\s+status\s*=\s*['"]interrupted['"]\s+AND\s+initiator\s*=\s*['"]process_exit['"]\s+AND\s+terminal_reason\s*=\s*['"]main_process_restarted['"][\s\S]*?AND\s+codex\.host_failure_product_terminal_digest\s+IS\s+NULL\s*\);/i
+    source = source.replace(exactOwnerRestore, (match) => match.replace(/[^\r\n]/g, ' '))
   }
-  const startupRecoverySql = /UPDATE\s+run_meta\s+SET\s+status\s*=\s*['"]interrupted['"]\s*,\s*initiator\s*=\s*['"]process_exit['"]\s*,\s*terminal_reason\s*=\s*['"]main_process_restarted['"]\s*,\s*updated_at\s*=\s*\?\s*WHERE\s+status\s+IN\s*\(\s*['"]working['"]\s*,\s*['"]running['"]\s*\)/i
-  return text.replace(startupRecoverySql, (match) => match.replace(/[^\r\n]/g, ' '))
+  if (rel === STARTUP_RUN_RECONCILER_REL && text.includes(STARTUP_RECONCILER_EXEMPT_MARKER)) {
+    const startupRecoverySql = /UPDATE\s+run_meta\s+SET\s+status\s*=\s*['"]interrupted['"]\s*,\s*initiator\s*=\s*['"]process_exit['"]\s*,\s*terminal_reason\s*=\s*['"]main_process_restarted['"]\s*,\s*updated_at\s*=\s*\?\s*WHERE\s+status\s+IN\s*\(\s*['"]working['"]\s*,\s*['"]running['"]\s*\)/i
+    source = source.replace(startupRecoverySql, (match) => match.replace(/[^\r\n]/g, ' '))
+  }
+  return source
 }
 
 function isAllowedProjectionPatchConstructor(rel) {
@@ -460,7 +469,10 @@ function main() {
         // accessors (acquire only to hand into finalizeRunOutcome) are the
         // two structurally-compliant access shapes besides the snapshot.
         const providerDefinition = /getRunMetaRepository\s*\(\)\s*:\s*RunMetaRepository/.test(text)
-        const finalizeAccessor = text.includes('ForFinalize') && text.includes('finalizeRunOutcome')
+        const finalizeAccessor = rel === AGENT_SDK_RUNTIME_REL
+          && text.includes('getRunMetaRepositoryForFinalize: () => self.getRunMetaRepositoryForFinalize()')
+          && /private\s+getRunMetaRepositoryForFinalize\(\):\s*RunMetaRepositoryLike\s*\|\s*null\s*\{[\s\S]*?wrapRunMetaRepositoryWithCloseoutSnapshot\(/.test(text)
+          && (text.match(/runtime\?\.getRunMetaRepository\?\.\(\)/g) || []).length === 1
         const exempt = exemptSnapshot || providerDefinition || finalizeAccessor
         if (!exempt) {
           violations.push({

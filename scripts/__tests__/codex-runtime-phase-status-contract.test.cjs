@@ -30,30 +30,44 @@ function readCurrentPhaseReport(phase) {
   return readJson(path.join(auditRoot, matches[0]))
 }
 
-test('rolling Codex implementation status agrees with the plan and current phase report', () => {
+test('rolling Codex implementation status agrees with the plan and current phase report', async () => {
   const status = readJson(path.join(assetRoot, 'implementation-status.json'))
   const plan = readPlanFrontmatter()
   const completed = plan.phase_progress?.completed
   assert.ok(Array.isArray(completed) && completed.length > 0, 'plan completed phases missing')
-  const currentPhase = completed.at(-1)
-  assert.match(currentPhase, /^E[1-9]$/, 'current completed phase must be an implementation phase')
+  const lastCompletedPhase = completed.at(-1)
+  const currentPhase = plan.route_revision?.phase
+  assert.match(lastCompletedPhase, /^E[1-9]$/, 'last completed phase must be an implementation phase')
+  assert.match(currentPhase, /^E[1-9]$/, 'current phase must be an implementation phase')
 
   const report = readCurrentPhaseReport(currentPhase)
   assert.equal(report.phase, currentPhase)
-  assert.equal(report.status, 'PASS')
-  assert.equal(report.nextPhaseAllowed, true)
   assert.equal(status.currentPhase, currentPhase)
-  assert.equal(status.phases[currentPhase], 'passed')
   assert.equal(status.nextPhaseAllowed, report.nextPhaseAllowed)
   assert.equal(status.productImplementationStarted, true)
-  assert.equal(status.failureCode, null)
-  assert.equal(plan.status, `experiment-${currentPhase.toLowerCase()}-passed`)
-  assert.equal(plan.route_revision?.phase, currentPhase)
   assert.equal(plan.phase_progress?.next, report.nextPhase)
   assert.equal(plan.phase_progress?.next_phase_allowed, report.nextPhaseAllowed)
 
   assert.equal(status.phases.E0, 'failed', 'the original E0 route remains historical FAIL')
   const currentNumber = Number(currentPhase.slice(1))
+  if (report.status === 'PASS') {
+    assert.equal(lastCompletedPhase, currentPhase)
+    assert.equal(report.nextPhaseAllowed, currentPhase !== 'E9')
+    assert.equal(report.nextPhase, currentPhase === 'E9' ? null : `E${currentNumber + 1}`)
+    assert.equal(status.phases[currentPhase], 'passed')
+    assert.equal(status.failureCode, null)
+    assert.equal(plan.status, `experiment-${currentPhase.toLowerCase()}-passed`)
+  } else {
+    assert.equal(report.status, 'BLOCKED')
+    assert.equal(report.nextPhase, currentPhase)
+    assert.equal(report.nextPhaseAllowed, false)
+    assert.equal(Number(currentPhase.slice(1)), Number(lastCompletedPhase.slice(1)) + 1)
+    assert.equal(status.phases[lastCompletedPhase], 'passed')
+    assert.equal(status.phases[currentPhase], 'blocked')
+    assert.equal(status.failureCode, report.failureCode)
+    assert.equal(plan.status, `experiment-${currentPhase.toLowerCase()}-blocked`)
+  }
+
   for (let phaseNumber = currentNumber + 1; phaseNumber <= 9; phaseNumber += 1) {
     assert.equal(status.phases[`E${phaseNumber}`], 'not_started')
   }

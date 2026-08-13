@@ -9,11 +9,7 @@ const test = require('node:test')
 const {
   checkNoParentForceForChildLoop,
   checkDefaultResumeTable,
-  checkSynthesisFence,
-  checkGuardWriteBelt,
 } = require('../check-no-parent-force-for-child-loop.cjs')
-
-const REPO = join(__dirname, '..', '..')
 
 function withTempRoot(fn) {
   const root = mkdtempSync(join(tmpdir(), 'stage-n-no-force-gate-'))
@@ -64,74 +60,4 @@ test('negative #1: VEA in DEFAULT_RESUME_ACTION_BY_SKILL_ID fails', () => {
     assert.match(r.reason, /child-loop action in default-resume table/)
     assert.match(r.reason, /video-expert-analyzer:video_expert_pipeline/)
   })
-})
-
-test('negative #2: synthesis fence missing manifest predicate fails', () => {
-  withTempRoot((root) => {
-    const turnEngineFile = join(root, 'turn-engine.ts')
-    writeFileSync(
-      turnEngineFile,
-      [
-        '// fixture',
-        'function loop() {',
-        '  const childOwnedByContract = !shouldParentForceLongSkillTool(contract)',
-        '  // legacy fixture without manifest predicate reference',
-        '  const forceToolName = childOwnedByContract ? null : "x"',
-        '}',
-        '',
-      ].join('\n'),
-    )
-    const r = checkSynthesisFence(turnEngineFile)
-    assert.equal(r.ok, false)
-    assert.match(r.reason, /isParentForceForbiddenByManifest/)
-  })
-})
-
-test('negative #2 alt: synthesis fence missing contract predicate fails', () => {
-  withTempRoot((root) => {
-    const turnEngineFile = join(root, 'turn-engine.ts')
-    writeFileSync(
-      turnEngineFile,
-      [
-        '// fixture',
-        'function loop() {',
-        '  const childOwnedByContract = isParentForceForbiddenByManifest("x")',
-        '  // legacy fixture without contract predicate reference',
-        '  const forceToolName = childOwnedByContract ? null : "x"',
-        '}',
-        '',
-      ].join('\n'),
-    )
-    const r = checkSynthesisFence(turnEngineFile)
-    assert.equal(r.ok, false)
-    assert.match(r.reason, /shouldParentForceLongSkillTool/)
-  })
-})
-
-test('negative #3: guardPatch write site missing invariant belt fails', () => {
-  withTempRoot((root) => {
-    const turnEngineFile = join(root, 'turn-engine.ts')
-    const filler = Array(120).fill('  // unrelated line').join('\n')
-    writeFileSync(
-      turnEngineFile,
-      [
-        '// fixture',
-        filler,
-        '  if (turnFrame && turnFrame.skill) {',
-        '    const guardPatch: TurnFramePatch = {',
-        '      runContract: { skillId: "x" },',
-        '    }',
-        '  }',
-        '',
-      ].join('\n'),
-    )
-    const r = checkGuardWriteBelt(turnEngineFile)
-    assert.equal(r.ok, false)
-    assert.match(r.reason, /isParentForceForbiddenByManifest/)
-  })
-})
-
-test('positive #3: real turn-engine.ts has the belt', () => {
-  const r = checkGuardWriteBelt(join(REPO, 'src/main/modules/agent-control/turn-engine.ts'))
-  assert.equal(r.ok, true, `expected belt to be present: ${r.reason || ''}`)
 })

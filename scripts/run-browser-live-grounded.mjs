@@ -163,7 +163,8 @@ async function connect(url) {
     const item = pending.get(message.id)
     if (!item) return
     pending.delete(message.id)
-    message.error ? item.reject(new Error(message.error.message)) : item.resolve(message.result)
+    if (message.error) item.reject(new Error(message.error.message))
+    else item.resolve(message.result)
   })
   await new Promise((resolveOpen, rejectOpen) => {
     socket.addEventListener('open', resolveOpen, { once: true })

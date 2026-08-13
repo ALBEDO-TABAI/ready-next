@@ -12,6 +12,7 @@ const result = spawnSync(electron, [
   '--test',
   '--test-concurrency=1',
   'src/__tests__/browser-target-claims-native.test.ts',
+  'src/__tests__/migration-109-browser-target-claim-user-takeover-native.test.ts',
 ], {
   cwd: root,
   env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },

@@ -30,7 +30,6 @@ const limits = new Map([
   ['src/main/modules/browser-engine/browser-controller-interaction-runtime.ts', 650],
   ['src/main/modules/browser-engine/browser-live-proof-runtime.ts', 300],
   ['src/main/modules/agent-control/runtime-core/runtime.ts', 2658],
-  ['src/main/modules/agent-control/runtime-core/browser-continuation-runtime.ts', 700],
   ['src/renderer/modules/agent/runtimeDriver.ts', 800],
   ['src/renderer/modules/agent/runtime-driver-session-state.ts', 320],
   ['src/renderer/modules/agent/runtime-driver-watchdog.ts', 400],

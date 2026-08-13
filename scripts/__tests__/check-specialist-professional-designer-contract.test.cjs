@@ -33,18 +33,7 @@ function seed(root, overrides = {}) {
       'createdAgent: false',
       'routingActivated: false',
     ].join('\n'),
-    'src/main/modules/tools/agent-interaction-tool-defs.ts': [
-      'workScope、boundaryExamples、inputsKnowledgeTools',
-      '不要把它们合成一道大作文题',
-      'P8g-9c foundation pack',
-      '原始 user_request_verbatim',
-    ].join('\n'),
-    'src/main/modules/tools/builtins/propose-specialist-blueprint.ts': [
-      'buildSpecialistBlueprintProfessionalInterviewContract',
-      'shouldUseProfessionalInterview',
-      'renderSpecialistBlueprintProfessionalInterviewInstruction',
-      "contractKind === 'professional_interview'",
-    ].join('\n'),
+    'src/main/modules/tools/agent-interaction-tool-defs.ts': "const names = ['ask_user_questions', 'declare_completion_criteria']\n",
     'src/main/modules/agent-control/agents/specialist-blueprint-quality.ts': [
       "SPECIALIST_FOUNDATION_PACK_VERSION = 'p8g-9c.v1'",
       'SPECIALIST_FOUNDATION_PACK_SECTIONS',
@@ -78,18 +67,14 @@ test('professional designer contract gate passes aligned contract surfaces', (t)
   assert.match(result.stdout, /check-specialist-professional-designer-contract.*OK/)
 })
 
-test('professional designer contract gate fails when interview ids drift from tool text', (t) => {
+test('professional designer contract gate rejects a returned live specialist tool', (t) => {
   const root = makeRoot(t)
   seed(root, {
-    'src/main/modules/tools/agent-interaction-tool-defs.ts': [
-      '不要把它们合成一道大作文题',
-      'P8g-9c foundation pack',
-      '原始 user_request_verbatim',
-    ].join('\n'),
+    'src/main/modules/tools/agent-interaction-tool-defs.ts': "const names = ['ask_user_questions', 'propose_specialist_blueprint']\n",
   })
   const result = run(root)
   assert.equal(result.status, 1)
-  assert.match(result.stderr, /workScope/)
+  assert.match(result.stderr, /retired live text/)
 })
 
 test('professional designer contract gate fails when foundation pack sections drift', (t) => {
@@ -106,16 +91,20 @@ test('professional designer contract gate fails when foundation pack sections dr
   assert.match(result.stderr, /Operating Model/)
 })
 
-test('professional designer contract gate fails when runtime interview wiring is missing', (t) => {
+test('professional designer contract gate fails when historical interview compiler is missing', (t) => {
   const root = makeRoot(t)
   seed(root, {
-    'src/main/modules/tools/builtins/propose-specialist-blueprint.ts': [
+    'src/shared/agent-specialist-blueprint-clarification.ts': [
+      "SPECIALIST_BLUEPRINT_PROFESSIONAL_INTERVIEW_VERSION = 'p8g-9b.v1'",
+      "'workScope'",
+      "'boundaryExamples'",
+      "'inputsKnowledgeTools'",
       'buildSpecialistBlueprintProfessionalInterviewContract',
-      'renderSpecialistBlueprintProfessionalInterviewInstruction',
-      "contractKind === 'professional_interview'",
+      'createdAgent: false',
+      'routingActivated: false',
     ].join('\n'),
   })
   const result = run(root)
   assert.equal(result.status, 1)
-  assert.match(result.stderr, /shouldUseProfessionalInterview/)
+  assert.match(result.stderr, /compileSpecialistBlueprintProfessionalInterviewAnswers/)
 })

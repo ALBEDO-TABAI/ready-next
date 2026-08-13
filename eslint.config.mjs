@@ -8,7 +8,7 @@ import readyPlugin from './eslint-rules/index.mjs'
 
 export default [
   {
-    ignores: ['out/**', 'dist/**', 'exports/**', 'Packer/.staging/**', 'node_modules/**', '.claude/codex-audit/**', '.claude/worktrees/**', '.worktrees/**']
+    ignores: ['out/**', 'dist/**', 'exports/**', 'outputs/**', 'Packer/.staging/**', 'node_modules/**', '.claude/codex-audit/**', '.claude/worktrees/**', '.worktrees/**']
   },
   js.configs.recommended,
   {
@@ -49,12 +49,23 @@ export default [
       ...reactPlugin.configs.recommended.rules,
       ...reactHooksPlugin.configs.recommended.rules,
       'no-undef': 'off',
+      'no-empty': ['error', { allowEmptyCatch: true }],
+      'no-irregular-whitespace': ['error', {
+        skipComments: true,
+        skipRegExps: true,
+        skipStrings: true,
+        skipTemplates: true,
+      }],
       'react/react-in-jsx-scope': 'off',
       'react/jsx-uses-react': 'off',
       'no-redeclare': 'off',
       'react-refresh/only-export-components': ['warn', { allowConstantExport: true }],
       '@typescript-eslint/no-require-imports': 'off',
-      '@typescript-eslint/no-unused-vars': ['warn', { argsIgnorePattern: '^_' }],
+      '@typescript-eslint/no-unused-vars': ['warn', {
+        argsIgnorePattern: '^_',
+        caughtErrorsIgnorePattern: '^_',
+        varsIgnorePattern: '^_',
+      }],
       '@typescript-eslint/no-explicit-any': 'warn',
       'ready/no-source-grep-test': 'error',
       'ready/no-legacy-backdoor': 'error',
@@ -70,5 +81,16 @@ export default [
     rules: {
       'ready/test-helper-must-declare-invariant-breach': 'error'
     }
+  },
+  {
+    // Historical AgentSdk Dynamic Delivery support; the current Codex graph is
+    // guarded separately and cannot import this retired subtree.
+    files: [
+      'src/main/modules/agent-control/runtime-core/dynamic-delivery/dynamic-delivery-coordinator.ts',
+      'src/main/modules/agent-control/runtime-core/dynamic-delivery/specialist-model-subagent.ts',
+    ],
+    rules: {
+      'ready/no-subagent-leak': 'off',
+    },
   }
 ]

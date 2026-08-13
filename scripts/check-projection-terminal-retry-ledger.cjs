@@ -64,9 +64,21 @@ function findMethodBody(source, name) {
   return null
 }
 
+function findMethodSection(source, name) {
+  const signature = new RegExp(`(?:^|\\n)  (?:(?:private|public|protected)\\s+)?(?:async\\s+)?${name}\\s*\\(`)
+  const match = signature.exec(source)
+  if (!match) return null
+  const start = match.index + (source[match.index] === '\n' ? 1 : 0)
+  const nextMethod = /\n {2}(?:(?:private|public|protected)\s+)?(?:async\s+)?[A-Za-z_$][\w$]*\s*\(/g
+  nextMethod.lastIndex = start + 1
+  const next = nextMethod.exec(source)
+  return source.slice(start, next?.index ?? source.length)
+}
+
 function validateProjectionTerminalRetrySources({ runtime, coordinator, ledger, migrations }) {
   const errors = []
   const recordBody = findMethodBody(coordinator, 'recordScopeRunEvent') || ''
+  const canonicalRecordBody = findMethodSection(coordinator, 'recordCanonicalScopeRunEvent') || ''
   const failureBody = findMethodBody(coordinator, 'handleProjectionSyncFailure') || ''
   const scheduleBody = findMethodBody(coordinator, 'scheduleTerminalProjectionSyncRetryDrain') || ''
   const drainBody = findMethodBody(coordinator, 'drainTerminalProjectionSyncRetries') || ''
@@ -85,7 +97,10 @@ function validateProjectionTerminalRetrySources({ runtime, coordinator, ledger, 
   if (!runtimeRecordBody.includes('this.projectionSync.recordScopeRunEvent(')) {
     errors.push('runtime recordScopeRunEvent must delegate to the ProjectionSyncCoordinator')
   }
-  if (!recordBody.includes('syncTaskProjection(') || !recordBody.includes('handleProjectionSyncFailure(')) {
+  const projectionSyncBody = recordBody.includes('recordCanonicalScopeRunEvent(')
+    ? canonicalRecordBody
+    : recordBody
+  if (!projectionSyncBody.includes('syncTaskProjection(') || !projectionSyncBody.includes('handleProjectionSyncFailure(')) {
     errors.push('recordScopeRunEvent catch must delegate sync failures to handleProjectionSyncFailure')
   }
   if (!failureBody.includes("logAgentMetric('projection.sync_failed'")) {

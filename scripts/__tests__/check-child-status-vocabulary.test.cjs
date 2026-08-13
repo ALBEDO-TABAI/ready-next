@@ -115,7 +115,7 @@ test('accepts explicit W0 whitelist status mappings', () => {
         "export const TERMINAL_CHILD_CLOSE_STATUSES = new Set(['completed', 'failed', 'killed'])",
         '',
       ].join('\n'),
-      'turn-engine.ts': [
+      'skill-child-runner.ts': [
         'export function renderChildCommandOutcome(close: { status: string }): string {',
         '  switch (close.status) {',
         "    case 'completed': return 'done'",
@@ -123,14 +123,6 @@ test('accepts explicit W0 whitelist status mappings', () => {
         "    case 'killed': return 'cancelled'",
         "    default: return 'paused'",
         '  }',
-        '}',
-        'export function routeTerminal(childStatus: string): string {',
-        '  const turnTerminalReason =',
-        "    childStatus === 'completed' ? 'done'",
-        "    : childStatus === 'failed' ? 'failed_skill'",
-        "    : childStatus === 'killed' ? 'cancelled_user'",
-        "    : 'done'",
-        '  return turnTerminalReason',
         '}',
         '',
       ].join('\n'),
@@ -169,32 +161,6 @@ test('supports CLI --root', () => {
       })
       assert.equal(result.status, 0, result.stderr)
       assert.match(result.stdout, /child status vocabulary: ok/)
-    },
-  )
-})
-
-test('rejects manual childCloseEvent assignment in resume branch', () => {
-  withAgentControlFixture(
-    {
-      'skill-child-run-types.ts': [
-        "export const TERMINAL_CHILD_CLOSE_STATUSES = new Set(['completed', 'failed', 'killed'])",
-        '',
-      ].join('\n'),
-      'turn-engine.ts': [
-        'export async function execute(contract: { childCloseEvent: unknown }, resumed: { closeEvent: unknown }) {',
-        '  const isSkillResumeTurnDetected = true',
-        '  if (isSkillResumeTurnDetected) {',
-        '    contract.childCloseEvent = resumed.closeEvent',
-        '  }',
-        '}',
-        '',
-      ].join('\n'),
-    },
-    (root) => {
-      const result = checkChildStatusVocabulary({ root })
-      assert.equal(result.violations.length, 1)
-      assert.match(result.violations[0].message, /forbidden resume childCloseEvent assignment/)
-      assert.equal(result.violations[0].line, 4)
     },
   )
 })

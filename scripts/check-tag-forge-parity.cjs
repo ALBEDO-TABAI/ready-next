@@ -10,7 +10,7 @@ const a=files(author);const b=files(bundled)
 if(JSON.stringify(a)!==JSON.stringify(b)) throw new Error(`Tag Forge file parity failed\nauthor=${a.join(',')}\nbundled=${b.join(',')}`)
 for(const file of a){if(readFileSync(join(author,file)).compare(readFileSync(join(bundled,file)))!==0)throw new Error(`Tag Forge content parity failed: ${file}`)}
 const skill=readFileSync(join(bundled,'SKILL.md'),'utf8')
-for(const match of skill.matchAll(/\]\(\.\/([^\)]+)\)/g)){if(!existsSync(join(bundled,match[1])))throw new Error(`Broken Tag Forge relative link: ${match[1]}`)}
+for(const match of skill.matchAll(/\]\(\.\/([^)]+)\)/g)){if(!existsSync(join(bundled,match[1])))throw new Error(`Broken Tag Forge relative link: ${match[1]}`)}
 if(/['"`]tf['"`]/i.test(skill)) throw new Error('Unimplemented tf alias remains advertised')
 if(/写回\s*tag-lexicon\.yaml/.test(skill)) throw new Error('Bundled read-only lexicon is still advertised as writable')
 console.log(`[check-tag-forge-parity] OK (${a.length} shared files)`)

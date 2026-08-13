@@ -155,10 +155,25 @@ export function fail(ToolDomainError) { throw new ToolDomainError(PROVIDER_ERROR
 import { PROVIDER_ERROR_KINDS } from '../agent-control/contracts/error-kinds'
 export const terminalKinds = new Set([PROVIDER_ERROR_KINDS.providerRequestFailed.code, PROVIDER_ERROR_KINDS.providerThinkingEchoRequired.code])
 `)
-  writeFile(root, 'src/main/modules/agent-control/runtime-core/agent-sdk-runtime.ts', `
-import { TARGET_DOCUMENT_ERROR_KINDS, TOOL_ADMISSION_ERROR_KINDS } from '../contracts/error-kinds'
+  writeFile(root, 'src/main/modules/agent-control/runtime-core/agent-sdk-document-utils.ts', `
+import { TARGET_DOCUMENT_ERROR_KINDS } from '../contracts/error-kinds'
 export const output = { data: { errorKind: TARGET_DOCUMENT_ERROR_KINDS.required.code } }
+`)
+  writeFile(root, 'src/main/modules/agent-control/runtime-core/agent-sdk-tool-executor.ts', `
+import { TARGET_DOCUMENT_ERROR_KINDS } from '../contracts/error-kinds'
+export const output = { data: { errorKind: TARGET_DOCUMENT_ERROR_KINDS.openFailed.code } }
+`)
+  writeFile(root, 'src/main/modules/agent-control/runtime-core/agent-sdk-turn-model-loop.ts', `
+import { TOOL_ADMISSION_ERROR_KINDS } from '../contracts/error-kinds'
 export const admission = TOOL_ADMISSION_ERROR_KINDS.toolRestrictedThisTurn.code
+`)
+  writeFile(root, 'src/main/modules/agent-control/runtime-core/agent-sdk-provider-utils.ts', `
+import { TOOL_ADMISSION_ERROR_KINDS } from '../contracts/error-kinds'
+export const admission = TOOL_ADMISSION_ERROR_KINDS.authorizationDenied.code
+`)
+  writeFile(root, 'src/main/modules/agent-control/runtime-core/agent-sdk-runtime-outcome-utils.ts', `
+import { TOOL_ADMISSION_ERROR_KINDS } from '../contracts/error-kinds'
+export const admission = TOOL_ADMISSION_ERROR_KINDS.toolNotRegistered.code
 `)
   writeFile(root, 'src/main/modules/tools/browser-failure-output.ts', `
 import { BROWSER_TOOL_ERROR_KINDS } from '../agent-control/contracts/error-kinds'
@@ -377,7 +392,7 @@ export const SEND_IM_ERROR_KINDS = {
 
 test('shared enum drift gate fails when target-document errorKind copies a registered literal', (t) => {
   const root = makeHarnessRoot(t)
-  writeFile(root, 'src/main/modules/agent-control/runtime-core/agent-sdk-runtime.ts', `
+  writeFile(root, 'src/main/modules/agent-control/runtime-core/agent-sdk-document-utils.ts', `
 import { TARGET_DOCUMENT_ERROR_KINDS } from '../contracts/error-kinds'
 export const output = { data: { errorKind: 'target_document_required' } }
 `)
@@ -498,9 +513,9 @@ export const output = { data: { errorKind: 'tool_restricted_this_turn' } }
   assert.match(result.stderr, /local_error_kind_literal/)
 })
 
-test('shared enum drift gate fails when agent-sdk-runtime compares copied tool admission literal', (t) => {
+test('shared enum drift gate fails when agent-sdk outcome compares copied tool admission literal', (t) => {
   const root = makeHarnessRoot(t)
-  writeFile(root, 'src/main/modules/agent-control/runtime-core/agent-sdk-runtime.ts', `
+  writeFile(root, 'src/main/modules/agent-control/runtime-core/agent-sdk-runtime-outcome-utils.ts', `
 import { TOOL_ADMISSION_ERROR_KINDS } from '../contracts/error-kinds'
 export const blocked = errorKind === 'tool_not_registered'
 `)
@@ -616,81 +631,6 @@ test('shared enum drift gate fails when specialist blueprint codes are registere
   const result = runIn(root)
   assert.equal(result.status, 1)
   assert.match(result.stderr, /error_kind_family_missing/)
-})
-
-test('shared enum drift gate fails when specialist blueprint target misses registry usage', (t) => {
-  const root = makeHarnessRoot(t)
-  writeFile(root, 'src/main/modules/tools/builtins/propose-specialist-blueprint.ts', `
-export const value = 'no specialist blueprint constants here'
-`)
-  const result = runIn(root)
-  assert.equal(result.status, 1)
-  assert.match(result.stderr, /error_kind_registry_not_imported/)
-})
-
-test('shared enum drift gate fails when specialist blueprint target uses the registry without importing it', (t) => {
-  const root = makeHarnessRoot(t)
-  writeFile(root, 'src/main/modules/tools/builtins/propose-specialist-blueprint.ts', `
-export const output = SPECIALIST_BLUEPRINT_ERROR_KINDS.verbatimMismatch.code
-`)
-  const result = runIn(root)
-  assert.equal(result.status, 1)
-  assert.match(result.stderr, /error_kind_registry_not_imported/)
-})
-
-test('shared enum drift gate fails when specialist blueprint imports registry from the wrong path', (t) => {
-  const root = makeHarnessRoot(t)
-  writeFile(root, 'src/main/modules/tools/builtins/propose-specialist-blueprint.ts', `
-import { SPECIALIST_BLUEPRINT_ERROR_KINDS } from '../../fake/contracts/error-kinds'
-export const output = SPECIALIST_BLUEPRINT_ERROR_KINDS.verbatimMismatch.code
-`)
-  const result = runIn(root)
-  assert.equal(result.status, 1)
-  assert.match(result.stderr, /error_kind_registry_not_imported/)
-})
-
-test('shared enum drift gate fails when specialist blueprint copies an errorKind property literal', (t) => {
-  const root = makeHarnessRoot(t)
-  writeFile(root, 'src/main/modules/tools/builtins/propose-specialist-blueprint.ts', `
-import { SPECIALIST_BLUEPRINT_ERROR_KINDS } from '../../agent-control/contracts/error-kinds'
-export const output = { data: { errorKind: 'confirmed_blueprint_immutable' } }
-`)
-  const result = runIn(root)
-  assert.equal(result.status, 1)
-  assert.match(result.stderr, /local_error_kind_literal/)
-})
-
-test('shared enum drift gate fails when specialist blueprint copies a positional literal', (t) => {
-  const root = makeHarnessRoot(t)
-  writeFile(root, 'src/main/modules/tools/builtins/propose-specialist-blueprint.ts', `
-import { SPECIALIST_BLUEPRINT_ERROR_KINDS } from '../../agent-control/contracts/error-kinds'
-export function bad(makeError) { return makeError('verbatim_mismatch') }
-`)
-  const result = runIn(root)
-  assert.equal(result.status, 1)
-  assert.match(result.stderr, /local_error_kind_literal/)
-})
-
-test('shared enum drift gate fails when specialist blueprint copies a type union literal', (t) => {
-  const root = makeHarnessRoot(t)
-  writeFile(root, 'src/main/modules/tools/builtins/propose-specialist-blueprint.ts', `
-import { SPECIALIST_BLUEPRINT_ERROR_KINDS } from '../../agent-control/contracts/error-kinds'
-export type VerbatimFailure = 'verbatim_source_unavailable' | 'verbatim_mismatch'
-`)
-  const result = runIn(root)
-  assert.equal(result.status, 1)
-  assert.match(result.stderr, /local_error_kind_literal/)
-})
-
-test('shared enum drift gate fails when specialist blueprint copies an object-map key', (t) => {
-  const root = makeHarnessRoot(t)
-  writeFile(root, 'src/main/modules/tools/builtins/propose-specialist-blueprint.ts', `
-import { SPECIALIST_BLUEPRINT_ERROR_KINDS } from '../../agent-control/contracts/error-kinds'
-export const map = { verbatim_mismatch: 'bad' }
-`)
-  const result = runIn(root)
-  assert.equal(result.status, 1)
-  assert.match(result.stderr, /local_error_kind_literal/)
 })
 
 test('shared enum drift gate fails when web research codes are registered in the wrong family', (t) => {

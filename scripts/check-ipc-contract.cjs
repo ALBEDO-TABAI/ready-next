@@ -500,6 +500,7 @@ function visitMainFile({
   pushEmitted,
   nonLiteralPushSites,
 }) {
+  const stringConstants = collectTopLevelStringConstants(sourceFile)
   function visit(node) {
     if (ts.isCallExpression(node)) {
       const calleePath = propertyPath(node.expression)
@@ -508,12 +509,12 @@ function visitMainFile({
 
       // ipcMain.handle('channel', ...)
       if (calleePath.length >= 2 && prevSegment === 'ipcMain' && lastSegment === 'handle') {
-        const ch = stringLiteralArg(node, 0)
+        const ch = stringLiteralArg(node, 0, stringConstants)
         if (ch !== null) invokeHandled.add(ch)
       }
       // ipcMain.on('channel', ...)
       else if (calleePath.length >= 2 && prevSegment === 'ipcMain' && lastSegment === 'on') {
-        const ch = stringLiteralArg(node, 0)
+        const ch = stringLiteralArg(node, 0, stringConstants)
         if (ch !== null) sendReceived.add(ch)
       }
       // PUSH: *.sendToRenderer(...)
@@ -549,6 +550,22 @@ function visitMainFile({
     ts.forEachChild(node, visit)
   }
   visit(sourceFile)
+}
+
+function collectTopLevelStringConstants(sourceFile) {
+  const constants = new Map()
+  for (const statement of sourceFile.statements) {
+    if (!ts.isVariableStatement(statement)) continue
+    if ((statement.declarationList.flags & ts.NodeFlags.Const) === 0) continue
+    for (const declaration of statement.declarationList.declarations) {
+      if (!ts.isIdentifier(declaration.name) || !declaration.initializer) continue
+      if (
+        ts.isStringLiteral(declaration.initializer)
+        || ts.isNoSubstitutionTemplateLiteral(declaration.initializer)
+      ) constants.set(declaration.name.text, declaration.initializer.text)
+    }
+  }
+  return constants
 }
 
 function recordPush({
@@ -682,10 +699,11 @@ function propertyPath(expr) {
   return ['<expr>']
 }
 
-function stringLiteralArg(callExpr, index) {
+function stringLiteralArg(callExpr, index, stringConstants = new Map()) {
   const arg = callExpr.arguments[index]
   if (arg && ts.isStringLiteral(arg)) return arg.text
   if (arg && ts.isNoSubstitutionTemplateLiteral(arg)) return arg.text
+  if (arg && ts.isIdentifier(arg)) return stringConstants.get(arg.text) ?? null
   return null
 }
 

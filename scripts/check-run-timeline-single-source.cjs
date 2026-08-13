@@ -6,8 +6,8 @@
  *    conversationEvent）的 `webContents.send` 全仓只允许出现在
  *    run-timeline-emitter.ts（唯一发射漏斗，负载盖 timeline 信封戳）。
  * 2. renderer：五通道的订阅（onStream/onStatusChange/onError/
- *    onScopeRunEvent/onConversationEvent 调用）只允许出现在
- *    runtimeDriver.ts 单枢纽（preload 桥定义、类型声明、preview mock 豁免）。
+ *    onScopeRunEvent/onConversationEvent 调用）只允许出现在 runtimeDriver
+ *    安装的固定 stream/scope leaf hubs（preload 桥定义、类型声明、preview mock 豁免）。
  * 3. 漏斗自身必须盖戳（timeline: stampRunTimeline）。
  */
 'use strict'
@@ -18,11 +18,14 @@ const path = require('node:path')
 const ROOT = process.cwd()
 const EMITTER_REL = 'src/main/modules/claude-bridge/run-timeline-emitter.ts'
 const RENDERER_HUB_REL = 'src/renderer/modules/agent/runtimeDriver.ts'
+const RENDERER_LEAF_HUB_RELS = new Set([
+  'src/renderer/modules/agent/runtime-driver-stream-events.ts',
+  'src/renderer/modules/agent/runtime-driver-scope-events.ts',
+])
 
 const RENDERER_EXEMPT = new Set([
   RENDERER_HUB_REL,
-  'src/renderer/modules/agent/runtime-driver-stream-events.ts',
-  'src/renderer/modules/agent/runtime-driver-scope-events.ts',
+  ...RENDERER_LEAF_HUB_RELS,
   'src/renderer/types/electron.d.ts',
   'src/renderer/preview/installSettingsPreviewMocks.ts',
 ])
@@ -90,6 +93,17 @@ if (!fs.existsSync(emitterAbs)) {
 
 // 3) renderer 订阅面（.test/.spec 不扫；preview/类型声明豁免）
 const RENDERER_SUB_RE = /\.(onStream|onStatusChange|onError|onScopeRunEvent|onConversationEvent)\(/g
+const rendererHub = fs.readFileSync(path.join(ROOT, RENDERER_HUB_REL), 'utf8')
+for (const leafRel of RENDERER_LEAF_HUB_RELS) {
+  const installer = path.basename(leafRel, '.ts')
+    .split('-')
+    .map((part, index) => index === 0 ? part : `${part[0].toUpperCase()}${part.slice(1)}`)
+    .join('')
+    .replace(/^runtimeDriver/, 'installRuntimeDriver')
+  if (!rendererHub.includes(installer)) {
+    errors.push(`renderer_leaf_hub_not_installed:${leafRel}`)
+  }
+}
 for (const abs of listFiles(path.join(ROOT, 'src/renderer'), ['.ts', '.tsx'])) {
   const fileRel = rel(abs)
   if (fileRel.includes('__tests__')) continue

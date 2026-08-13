@@ -25,6 +25,13 @@ function assertIncludes(relPath, needles) {
   return source
 }
 
+function assertExcludes(relPath, needles) {
+  const source = read(relPath)
+  for (const needle of needles) {
+    if (source.includes(needle)) fail(`${relPath} contains retired live text: ${needle}`)
+  }
+}
+
 assertIncludes('src/shared/agent-specialist-blueprint-clarification.ts', [
   "SPECIALIST_BLUEPRINT_PROFESSIONAL_INTERVIEW_VERSION = 'p8g-9b.v1'",
   "'workScope'",
@@ -36,19 +43,18 @@ assertIncludes('src/shared/agent-specialist-blueprint-clarification.ts', [
   'routingActivated: false',
 ])
 
-assertIncludes('src/main/modules/tools/agent-interaction-tool-defs.ts', [
-  'workScope、boundaryExamples、inputsKnowledgeTools',
-  '不要把它们合成一道大作文题',
-  'P8g-9c foundation pack',
-  '原始 user_request_verbatim',
+assertExcludes('src/main/modules/tools/agent-interaction-tool-defs.ts', [
+  'propose_specialist_blueprint',
+  'confirm_specialist_blueprint',
+  'rename_specialist_agent',
 ])
-
-assertIncludes('src/main/modules/tools/builtins/propose-specialist-blueprint.ts', [
-  'buildSpecialistBlueprintProfessionalInterviewContract',
-  'shouldUseProfessionalInterview',
-  'renderSpecialistBlueprintProfessionalInterviewInstruction',
-  "contractKind === 'professional_interview'",
-])
+for (const relPath of [
+  'src/main/modules/tools/builtins/propose-specialist-blueprint.ts',
+  'src/main/modules/tools/builtins/confirm-specialist-blueprint.ts',
+  'src/main/modules/tools/builtins/rename-specialist-agent.ts',
+]) {
+  if (fs.existsSync(path.join(ROOT, relPath))) fail(`retired live tool still exists: ${relPath}`)
+}
 
 assertIncludes('src/main/modules/agent-control/agents/specialist-blueprint-quality.ts', [
   "SPECIALIST_FOUNDATION_PACK_VERSION = 'p8g-9c.v1'",

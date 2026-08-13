@@ -106,6 +106,9 @@ function buildRuntimeManifest() {
     resourceAdditionalContextContractDigest: digestJson(
       contracts.resourceAdditionalContextContract
     ),
+    modelGatewayContractDigest: digestJson(contracts.modelGatewayContract),
+    toolBridgeContractDigest: digestJson(contracts.toolBridgeContract),
+    externalReadSliceContractDigest: digestJson(contracts.externalReadSliceContract),
     outboundRpcContractDigest: digestJson(contracts.outboundRpcContract),
     bindingSchemaDigest: digestJson(bindingSchema),
     experimentContractDigest: digestJson(experimentContract),

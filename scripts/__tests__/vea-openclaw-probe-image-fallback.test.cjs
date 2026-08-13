@@ -19,7 +19,7 @@ tmp = Path(tempfile.mkdtemp())
 paths = {}
 for label in ("primary", "start", "mid", "end"):
     path = tmp / f"{label}.jpg"
-    path.write_bytes(b"fake-jpeg")
+    path.write_bytes(label.encode("utf-8"))
     paths[label] = str(path)
 
 calls = []

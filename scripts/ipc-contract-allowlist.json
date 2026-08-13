@@ -7,42 +7,6 @@
       "reason": "Stage Y Y1.4 keep-with-reason: defensive teardown hook registered by the 5-channel SourceIndexGroup at src/main/modules/search-engine/ipc/source-index-group.ts:183-193 (the group bundles document:listSources/indexDocument/reindexAllSources/reindexWorkspace/cancelReindex per Stage V V2.4a). The handler exists as the abort hook for in-flight worker reindex jobs (deps.getWorkerBridge().cancelReindex()); the renderer-side caller (workspace-close / app-quit teardown) is Stage Z workspace lifecycle work per the Stage Y roadmap §13 contract. Removing now would break the 5-channel group invariant + lose the defensive abort; the Stage Z lifecycle work will add the renderer caller without any IPC contract change.",
       "owner": "stage-y-bootstrap",
       "expiry": "2026-08-21"
-    },
-    {
-      "channel": "agent:registry:delete",
-      "reason": "Agent 身份两表拆分（B' 方案）：codex 侧数据模型+生命周期 IPC 已落（registry delete/updateStatus、personality CRUD、specialistBlueprint confirmCreate），renderer 设置页管理 UI 是同拆分计划的 Claude 侧后续工单（派生/退役/合并确认流），届时补 invoke 调用，无 IPC 合同变更。",
-      "owner": "agent-identity-two-table-split",
-      "expiry": "2026-08-31"
-    },
-    {
-      "channel": "agent:registry:updateStatus",
-      "reason": "Agent 身份两表拆分（B' 方案）：codex 侧数据模型+生命周期 IPC 已落（registry delete/updateStatus、personality CRUD、specialistBlueprint confirmCreate），renderer 设置页管理 UI 是同拆分计划的 Claude 侧后续工单（派生/退役/合并确认流），届时补 invoke 调用，无 IPC 合同变更。",
-      "owner": "agent-identity-two-table-split",
-      "expiry": "2026-08-31"
-    },
-    {
-      "channel": "agent:specialistBlueprint:confirmCreate",
-      "reason": "Agent 身份两表拆分（B' 方案）：codex 侧数据模型+生命周期 IPC 已落（registry delete/updateStatus、personality CRUD、specialistBlueprint confirmCreate），renderer 设置页管理 UI 是同拆分计划的 Claude 侧后续工单（派生/退役/合并确认流），届时补 invoke 调用，无 IPC 合同变更。",
-      "owner": "agent-identity-two-table-split",
-      "expiry": "2026-08-31"
-    },
-    {
-      "channel": "agentPersonality:create",
-      "reason": "Agent 身份两表拆分（B' 方案）：codex 侧数据模型+生命周期 IPC 已落（registry delete/updateStatus、personality CRUD、specialistBlueprint confirmCreate），renderer 设置页管理 UI 是同拆分计划的 Claude 侧后续工单（派生/退役/合并确认流），届时补 invoke 调用，无 IPC 合同变更。",
-      "owner": "agent-identity-two-table-split",
-      "expiry": "2026-08-31"
-    },
-    {
-      "channel": "agentPersonality:delete",
-      "reason": "Agent 身份两表拆分（B' 方案）：codex 侧数据模型+生命周期 IPC 已落（registry delete/updateStatus、personality CRUD、specialistBlueprint confirmCreate），renderer 设置页管理 UI 是同拆分计划的 Claude 侧后续工单（派生/退役/合并确认流），届时补 invoke 调用，无 IPC 合同变更。",
-      "owner": "agent-identity-two-table-split",
-      "expiry": "2026-08-31"
-    },
-    {
-      "channel": "agentPersonality:update",
-      "reason": "Agent 身份两表拆分（B' 方案）：codex 侧数据模型+生命周期 IPC 已落（registry delete/updateStatus、personality CRUD、specialistBlueprint confirmCreate），renderer 设置页管理 UI 是同拆分计划的 Claude 侧后续工单（派生/退役/合并确认流），届时补 invoke 调用，无 IPC 合同变更。",
-      "owner": "agent-identity-two-table-split",
-      "expiry": "2026-08-31"
     }
   ],
   "invoke_unhandled": [],
@@ -52,7 +16,7 @@
   "methods_typed_only": [],
   "non_literal_push": [
     {
-      "callsite": "src/main/modules/browser-engine/ipc-handler.ts:278",
+      "callsite": "src/main/modules/browser-engine/browser-controller-composition.ts:143",
       "variable": "channel",
       "channels": [
         "browser:downloadUpdate"
@@ -62,7 +26,7 @@
       "expiry": "2026-08-21"
     },
     {
-      "callsite": "src/main/modules/browser-engine/ipc-handler.ts:313",
+      "callsite": "src/main/modules/browser-engine/browser-controller-composition.ts:178",
       "variable": "channel",
       "channels": [
         "app:shortcut"
@@ -72,7 +36,7 @@
       "expiry": "2026-08-21"
     },
     {
-      "callsite": "src/main/modules/browser-engine/ipc-handler.ts:328",
+      "callsite": "src/main/modules/browser-engine/browser-controller-composition.ts:193",
       "variable": "channel",
       "channels": [
         "board:activeBoardExternalImageAdded",
@@ -83,7 +47,7 @@
       "expiry": "2026-08-21"
     },
     {
-      "callsite": "src/main/modules/browser-engine/ipc-handler.ts:337",
+      "callsite": "src/main/modules/browser-engine/browser-controller-composition.ts:202",
       "variable": "channel",
       "channels": [
         "browser:bookmarksChanged"
@@ -93,7 +57,7 @@
       "expiry": "2026-08-21"
     },
     {
-      "callsite": "src/main/modules/browser-engine/ipc-handler.ts:376",
+      "callsite": "src/main/modules/browser-engine/browser-controller-composition.ts:241",
       "variable": "channel",
       "channels": [
         "browser:previewUpdate"
@@ -103,7 +67,7 @@
       "expiry": "2026-08-21"
     },
     {
-      "callsite": "src/main/modules/browser-engine/ipc-handler.ts:466",
+      "callsite": "src/main/modules/browser-engine/browser-controller-composition.ts:331",
       "variable": "channel",
       "channels": [
         "browser:tabOpened"
@@ -113,7 +77,7 @@
       "expiry": "2026-08-21"
     },
     {
-      "callsite": "src/main/modules/browser-engine/ipc-handler.ts:523",
+      "callsite": "src/main/modules/browser-engine/browser-controller-composition.ts:387",
       "variable": "channel",
       "channels": [
         "browser:adblockUpdate"
@@ -123,7 +87,7 @@
       "expiry": "2026-08-21"
     },
     {
-      "callsite": "src/main/modules/browser-engine/ipc-handler.ts:568",
+      "callsite": "src/main/modules/browser-engine/browser-controller-composition.ts:432",
       "variable": "channel",
       "channels": [
         "browser:bookmarksChanged",
@@ -134,7 +98,7 @@
       "expiry": "2026-08-21"
     },
     {
-      "callsite": "src/main/modules/browser-engine/ipc-handler.ts:776",
+      "callsite": "src/main/modules/browser-engine/browser-controller-host-runtime.ts:207",
       "variable": "channel",
       "channels": [
         "app:shortcut",

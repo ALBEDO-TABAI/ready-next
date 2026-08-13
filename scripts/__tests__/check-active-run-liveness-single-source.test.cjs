@@ -103,7 +103,7 @@ export class AgentControlRuntime {
   assert.match(r.stderr, /must not bypass isScopeLive/)
 })
 
-test('gate fails when runtime does not wire child liveness', (t) => {
+test('gate accepts runtime without the retired child-liveness wiring', (t) => {
   const root = makeHarnessRoot(t, {
     runtime: `
 export class AgentControlRuntime {
@@ -122,8 +122,7 @@ export class AgentControlRuntime {
 `,
   })
   const r = runIn(root)
-  assert.equal(r.status, 1)
-  assert.match(r.stderr, /must keep the configured child runner/)
+  assert.equal(r.status, 0, r.stdout + r.stderr)
 })
 
 test('gate fails when child runner has no scope liveness provider', (t) => {

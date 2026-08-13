@@ -62,12 +62,6 @@ if (!/this\.active\.values\(\)/.test(childMethod) || !/run\.scopeId\s*===\s*norm
   fail('SkillChildRunner.hasActiveChildRunForScope must read the active child-run map by scopeId')
 }
 
-if (!/const\s+childRunner\s*=\s*configureSkillChildRunner\(/.test(runtime)) {
-  fail('runtime must keep the configured child runner for liveness wiring')
-}
-if (!/this\.orchestrator\.setChildLivenessProvider\(childRunner\)/.test(runtime)) {
-  fail('runtime must wire SkillChildRunner into orchestrator child liveness')
-}
 const staleCloseout = sliceBetween(
   runtime,
   'private async finalizeStaleWithoutHandleProjectionsForScope',

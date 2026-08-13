@@ -54,7 +54,13 @@ test('pinned schema exposes the required identity, context, phase and fixed thre
   assert.ok(threadStart.environments)
   assert.ok(threadStart.allowProviderModelFallback)
   assert.equal(threadResume.dynamicTools, undefined)
-  for (const field of ['clientUserMessageId', 'input', 'additionalContext', 'responsesapiClientMetadata']) {
+  for (const field of [
+    'clientUserMessageId',
+    'environments',
+    'input',
+    'additionalContext',
+    'responsesapiClientMetadata',
+  ]) {
     assert.ok(turnStart[field], `turn/start is missing ${field}`)
   }
   const itemVariants = definitions.ThreadItem.oneOf.map((variant) => variant.properties)
@@ -64,6 +70,17 @@ test('pinned schema exposes the required identity, context, phase and fixed thre
   assert.ok(agentMessage.phase)
   assert.ok(itemVariants.some((properties) => properties.type.enum[0] === 'contextCompaction'))
   assert.deepEqual(definitions.AdditionalContextKind.enum.sort(), ['application', 'untrusted'])
+})
+
+test('thread start contract matches the production context-window override', () => {
+  const threadStart = contracts.outboundRpcContract.threadStart
+  assert.equal(threadStart.required.includes('config'), true)
+  assert.equal(threadStart.mustBeOmitted.includes('config'), false)
+  assert.deepEqual(threadStart.config, {
+    nullable: true,
+    exactKeysWhenPresent: ['model_context_window'],
+    modelContextWindow: 'positive_safe_integer'
+  })
 })
 
 test('real pinned app-server capture freezes native identity, isolation and exact tool surfaces', () => {
@@ -148,7 +165,7 @@ test('E0 failure report matches its evidence and cannot authorize E1', () => {
   const evidence = report.protocol.evidenceDigests
   assert.equal(
     evidence.runtimeManifest,
-    digestFile(path.join(assetRoot, 'runtime-manifest.json'))
+    digestFile(path.join(assetRoot, 'evidence/e0-runtime-manifest.json'))
   )
   assert.equal(
     evidence.applicationContextCapture,
@@ -221,6 +238,17 @@ test('response selection fixtures enforce exact completed body and fail closed',
   }
 })
 
+test('failed native turns retire an unproven history instead of continuing it', () => {
+  assert.equal(
+    contracts.historyPublicationParityContract.failureClasses.engine_failed,
+    'retire_publication_diverged'
+  )
+  assert.equal(
+    contracts.historyPublicationParityContract.failureClasses.provider_failed,
+    'retire_publication_diverged'
+  )
+})
+
 test('start delivery is one three-way table independent of write-confirmed state', () => {
   for (const fixture of fixtures.startDelivery) {
     assert.equal(resolveStartDelivery(fixture.evidence), fixture.expected, fixture.id)
@@ -289,18 +317,143 @@ test('outbound RPC contract rejects an extra metadata key before child bytes', (
   )
 })
 
-test('all six binding tables and critical cross-table invariants are frozen', () => {
-  assert.deepEqual(Object.keys(bindingSchema.tables).sort(), [
+test('tool bridge contract freezes one Ready execution path and conservative action recovery', () => {
+  const bridge = contracts.toolBridgeContract
+  const bridgeSource = fs.readFileSync(path.join(
+    repoRoot,
+    'src/main/modules/agent-control/codex-runtime/codex-tool-bridge.ts'
+  ), 'utf8')
+  assert.equal(bridge.executionPath, 'Ready_executeToolCall_only')
+  assert.equal(bridge.directProductDomainCalls, false)
+  assert.equal(bridge.journalBeforeExecution, true)
+  assert.equal(bridge.pendingAfterRestart, 'effect_unknown')
+  assert.equal(bridge.sameActionIdentityReplay, false)
+  assert.equal(bridge.deadJsonRpcReplay, false)
+  assert.equal(bridge.persistenceBoundary.callBindingResultBody, false)
+  assert.equal(bridge.persistenceBoundary.readyActionJournalResultBody, true)
+  assert.match(bridge.argumentValidation, /after_lazy_executor_load/)
+  assert.match(bridge.preEffectAuthority, /active_owner_fence/)
+  assert.match(bridge.preEffectAuthority, /effect_start_after_confirmation/)
+  assert.match(bridge.timeoutPolicy, /effect_start_end/)
+  assert.match(bridge.connectionClosePolicy, /abort_signal/)
+  assert.match(bridge.connectionClosePolicy, /sidecar_transport_owned/)
+  assert.match(bridge.abortPolicy.authorityMissing, /rejects_before_call_binding/)
+  assert.match(bridge.deliveryPolicy, /exact_frozen_action_identity/)
+  assert.equal(bridge.confirmedResponseRecovery.requiresConfirmedActionReceipt, true)
+  assert.equal(bridge.confirmedResponseRecovery.requiresEveryPriorConnectionDead, true)
+  assert.equal(bridge.confirmedResponseRecovery.reexecutesReadyAction, false)
+  assert.equal(bridge.confirmedResponseRecovery.sameLiveRpcDuplicateResponse, false)
+  assert.equal(
+    bridge.persistenceBoundary.transportWriteAckBoundary,
+    'actual_write_callback_success'
+  )
+  assert.match(bridge.resultMapping.success, /legacy_data_errorKind_or_ok_false/)
+  assert.equal(
+    bridge.budgetPolicy.maxToolCalls,
+    'durable_call_binding_admission_counted_per_ready_run_before_effect'
+  )
+  assert.match(bridge.budgetPolicy.maxIterations, /E5_gateway_gate_required/)
+  assert.match(bridge.budgetPolicy.maxParallelToolGroups, /E5_collector_gate_required/)
+  assert.equal(
+    bindingSchema.tables.codex_tool_call_bindings.columns.includes('result_json'),
+    false
+  )
+  assert.equal(
+    bindingSchema.tables.ready_tool_action_receipts.columns.includes('result_json'),
+    true
+  )
+  assert.equal(
+    bindingSchema.tables.codex_turn_bindings.columns.includes('product_budget_seed_json'),
+    true
+  )
+  assert.deepEqual(bridge.journalStates, [
+    'pending',
+    'confirmed',
+    'proven_absent',
+    'indeterminate'
+  ])
+  assert.deepEqual(bridge.recovery.sameThreadSuccessorRequires, [
+    'history_publication_parity',
+    'current_thread_readback',
+    'non_user_continuation_gate'
+  ])
+  assert.match(bridgeSource, /await import\('\.\.\/\.\.\/tools\/tool-executor'\)/)
+  for (const forbidden of [
+    '/browser-engine/',
+    '/domain-adapters/',
+    '/document/',
+    '/mcp/',
+    '/shell/'
+  ]) assert.doesNotMatch(bridgeSource, new RegExp(forbidden.replaceAll('/', '\\/')))
+})
+
+test('all binding tables and critical cross-table invariants are frozen', () => {
+  const codexTables = Object.keys(bindingSchema.tables)
+    .filter((name) => name.startsWith('codex_'))
+    .sort()
+  assert.deepEqual(codexTables, [
+    'codex_fence_owner_transfers',
     'codex_manual_compaction_bindings',
+    'codex_manual_compaction_dispatch_attempts',
     'codex_sidecar_process_leases',
     'codex_thread_bindings',
     'codex_thread_dispatch_fences',
+    'codex_thread_resume_evidence',
     'codex_tool_call_bindings',
+    'codex_tool_response_delivery_attempts',
     'codex_turn_bindings'
   ])
   assert.equal(bindingSchema.sqliteForeignKeysAssumed, false)
-  assert.equal(bindingSchema.singleWriterModule, 'CodexBindingRepository')
+  assert.equal(bindingSchema.singleWriterModule['codex_*'], 'CodexBindingRepository')
   assert.ok(bindingSchema.crossTableInvariants.includes('thread_turn_call_parent_identity_exact'))
+  assert.deepEqual(bindingSchema.tables.codex_thread_resume_evidence.unique, [
+    ['thread_binding_id', 'connection_epoch'],
+    ['evidence_digest']
+  ])
+  assert.equal(bindingSchema.tables.codex_thread_resume_evidence.immutable, true)
+  assert.equal(bindingSchema.tables.codex_thread_resume_evidence.deleteForbidden, true)
+  assert.equal(bindingSchema.tables.codex_tool_response_delivery_attempts.immutable, true)
+  assert.equal(bindingSchema.tables.codex_tool_response_delivery_attempts.deleteForbidden, true)
+  assert.ok(bindingSchema.crossTableInvariants.includes(
+    'publication_recomputes_candidate_response_digest_from_any_exact_delivery_attempt'
+  ))
+  assert.ok(bindingSchema.crossTableInvariants.includes(
+    'existing_thread_resume_requires_same_live_client_epoch_thread_read_evidence_before_resume'
+  ))
+  assert.ok(bindingSchema.crossTableInvariants.includes(
+    'thread_resume_evidence_parent_requires_connection_opened_and_closed_at_tree_zero_null'
+  ))
+  assert.deepEqual(contracts.outboundRpcContract.existingThreadResume.requiredOrder, [
+    'thread/read',
+    'thread/resume'
+  ])
+  assert.equal(contracts.outboundRpcContract.existingThreadResume.sameConnectionEpoch, true)
+  assert.equal(contracts.outboundRpcContract.existingThreadResume.sameClientInstance, true)
+  assert.equal(contracts.outboundRpcContract.existingThreadResume.connectionMustRemainOpen, true)
+  assert.equal(
+    bindingSchema.tables.codex_manual_compaction_dispatch_attempts.retryPolicy,
+    'only_after_exact_write_not_attempted_proof'
+  )
+  assert.deepEqual(
+    Object.keys(bindingSchema.tables).filter((name) => name.startsWith('ready_model_gateway_')).sort(),
+    [
+      'ready_model_gateway_exchange_events',
+      'ready_model_gateway_profile_snapshots',
+      'ready_model_gateway_request_receipts'
+    ]
+  )
+  assert.equal(
+    bindingSchema.singleWriterModule['ready_model_gateway_*'],
+    'CodexModelGatewayRepository'
+  )
+  assert.equal(
+    bindingSchema.singleWriterModule.ready_tool_action_receipts,
+    'CodexToolActionJournal'
+  )
+  assert.deepEqual(
+    bindingSchema.tables.ready_tool_action_receipts.closedEnums.state,
+    ['pending', 'confirmed', 'proven_absent', 'indeterminate']
+  )
 })
 
 test('exit authority matrix has no undecided row and covers every current terminal reason', () => {

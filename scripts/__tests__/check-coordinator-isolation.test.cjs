@@ -34,7 +34,7 @@ test('check-coordinator-isolation accepts adapter-owned product behavior', () =>
   }
 })
 
-test('check-coordinator-isolation rejects turn-engine id checks and product prompt triggers', () => {
+test('check-coordinator-isolation rejects product prompt triggers after turn-engine retirement', () => {
   const root = makeFixture()
   try {
     writeFile(root, 'src/main/modules/agent-control/turn-engine.ts', [
@@ -53,9 +53,7 @@ test('check-coordinator-isolation rejects turn-engine id checks and product prom
     const result = checkCoordinatorIsolation({ root })
 
     assert.equal(result.ok, false)
-    assert.equal(result.errors.length, 4)
-    assert.match(result.errors.join('\n'), /adapter id comparison/)
-    assert.match(result.errors.join('\n'), /forbidden import/)
+    assert.equal(result.errors.length, 1)
     assert.match(result.errors.join('\n'), /product trigger module "rss"/)
   } finally {
     rmSync(root, { recursive: true, force: true })

@@ -76,12 +76,6 @@
       "owner": "browser-target-claims"
     },
     {
-      "path": "src/__tests__/agent-continuation-clock.test.ts",
-      "reason": "Continuation coverage uses TurnFrame candidates, an injected runtime, and in-memory tool context; it never opens getDatabase or a repository, while tool-executor transitive imports reach database.ts.",
-      "since": "2026-07-22",
-      "owner": "agent-continuation-clock"
-    },
-    {
       "path": "src/__tests__/browser-agent-work-tab.test.ts",
       "reason": "Agent work-tab routing coverage invokes browser tools with a fully injected controller and in-memory call log; no path opens getDatabase or better-sqlite3.",
       "since": "2026-07-22",
@@ -238,10 +232,10 @@
       "owner": "agent-foundation-remediation"
     },
     {
-      "path": "src/__tests__/agent-system-studio-read-model.test.ts",
-      "reason": "Agent Foundation: exercises the Studio read model with injected in-memory agent and projection repositories; no path opens better-sqlite3 or reads the real database. Transitive service imports trigger the scanner, while host-Node coverage must remain active for readiness and task-count presentation.",
-      "since": "2026-07-11",
-      "owner": "agent-foundation-remediation"
+      "path": "src/__tests__/agent-sdk-runtime-specialist-blueprint-clarification.test.ts",
+      "reason": "Specialist live-tool retirement: inspects only the static tool registry and schema resolver to prove retired names are absent. It never constructs the runtime, opens a repository, or loads better-sqlite3; the registry import graph alone triggers C4.",
+      "since": "2026-08-12",
+      "owner": "specialist-control-retirement"
     },
     {
       "path": "src/__tests__/belief-injection-usage-count.test.ts",
@@ -856,12 +850,6 @@
       "owner": "agent-audit-p1b-c16"
     },
     {
-      "path": "src/__tests__/agent-registry-group.test.ts",
-      "reason": "P6/baseline: tests agent registry grouping with fake/in-memory fixtures; transitive imports reach sqlite-capable modules but no test path opens better-sqlite3 (verified passing host-Node, 0 skip).",
-      "since": "2026-06-24",
-      "owner": "stability-baseline-restore"
-    },
-    {
       "path": "src/__tests__/builtin-agent-presets.test.ts",
       "reason": "baseline: tests builtin agent preset resolution as a pure function; transitive imports reach sqlite-capable modules but no test path opens better-sqlite3 (verified passing host-Node, 0 skip).",
       "since": "2026-06-24",
@@ -886,10 +874,202 @@
       "owner": "document-widget-ready-w10"
     },
     {
-      "path": "src/__tests__/browser-research-progress-reminder.test.ts",
-      "reason": "Progress reminder and per-call reminder tests inject fake evidence via a plain object host; no path opens getDatabase or better-sqlite3. The transitive import of browser-workflow-evidence reaches the module but never instantiates a SQLite repository.",
-      "since": "2026-07-23",
-      "owner": "browser-research-progress"
+      "path": "src/__tests__/active-ai-profile-mutation-guard.test.ts",
+      "reason": "Profile mutation coverage uses literal workspace objects, an injected active-profile callback, and an injected settings reader. It never constructs AppSettingsRepository or opens getDatabase; only the repository registration import reaches SQLite transitively.",
+      "since": "2026-08-12",
+      "owner": "codex-context-epoch-closure"
+    },
+    {
+      "path": "src/__tests__/agent-sdk-context-epoch.test.ts",
+      "reason": "SDK epoch coverage injects an in-memory run_meta Map, canonical closeout test port, scope reader, provider, and tool executor. No production repository or getDatabase path is called; the AgentSdkRuntime import alone reaches SQLite transitively.",
+      "since": "2026-08-12",
+      "owner": "codex-context-epoch-closure"
+    },
+    {
+      "path": "src/__tests__/authorization-fact.test.ts",
+      "reason": "Authorization coverage uses the in-memory fact store, a FrozenCallStore backed by a prepare/get/all fake, and an injected scope-epoch database object. It never opens the production database or loads better-sqlite3.",
+      "since": "2026-08-12",
+      "owner": "codex-context-epoch-closure"
+    },
+    {
+      "path": "src/__tests__/codex-browser-preturn-capability.test.ts",
+      "reason": "Browser preturn coverage only asks an AgentSdkRuntime with injected configuration for its deterministic tool-definition surface. It never sends a turn, dispatches a tool, constructs a repository, or opens getDatabase.",
+      "since": "2026-08-12",
+      "owner": "codex-context-epoch-closure"
+    },
+    {
+      "path": "src/__tests__/codex-browser-workflow-verifier.test.ts",
+      "reason": "Browser verifier unit coverage injects a fake provider and runAgent implementation and exercises frozen config, digest, verdict parsing, and lifecycle request ports. It never constructs a durable repository or opens SQLite.",
+      "since": "2026-08-12",
+      "owner": "codex-context-epoch-closure"
+    },
+    {
+      "path": "src/__tests__/codex-explicit-resources.test.ts",
+      "reason": "Explicit-resource coverage exercises deterministic resource normalization and validation with literal envelopes and filesystem-shaped references. It never constructs a runtime repository or calls getDatabase; only imported production types reach SQLite transitively.",
+      "since": "2026-08-12",
+      "owner": "codex-context-epoch-closure"
+    },
+    {
+      "path": "src/__tests__/codex-model-gateway-contract.test.ts",
+      "reason": "Gateway contract coverage only builds and validates immutable profile snapshots, canonical JSON digests, instruction transcripts, and request identities. All inputs are literals and no authority repository or database is constructed.",
+      "since": "2026-08-12",
+      "owner": "codex-context-epoch-closure"
+    },
+    {
+      "path": "src/__tests__/codex-product-explicit-resource-envelope.test.ts",
+      "reason": "Product explicit-resource coverage uses literal renderer resources and injected preparation ports to verify envelope identity. It does not create a binding repository or open getDatabase; the production composition import is the only transitive SQLite path.",
+      "since": "2026-08-12",
+      "owner": "codex-context-epoch-closure"
+    },
+    {
+      "path": "src/__tests__/codex-product-resource-envelope.test.ts",
+      "reason": "Product resource-envelope coverage runs deterministic preparation against injected resources, buffers, and authorization fixtures. It never constructs CodexBindingRepository or calls getDatabase; SQLite is reachable only through the import graph.",
+      "since": "2026-08-12",
+      "owner": "codex-context-epoch-closure"
+    },
+    {
+      "path": "src/__tests__/codex-run-coordinator-live-path.test.ts",
+      "reason": "Run-coordinator live-path coverage injects lifecycle callbacks and in-memory ownership records and observes emitted calls. It does not instantiate a production binding store or database; transitive coordinator imports alone reach SQLite.",
+      "since": "2026-08-12",
+      "owner": "codex-context-epoch-closure"
+    },
+    {
+      "path": "src/__tests__/codex-tool-bridge.test.ts",
+      "reason": "Tool bridge coverage uses explicit FakePersistence and FakeReceipts classes plus an injected tool executor. Every durable read and write is captured in memory, and no path constructs CodexToolActionJournal or opens getDatabase.",
+      "since": "2026-08-12",
+      "owner": "codex-context-epoch-closure"
+    },
+    {
+      "path": "src/__tests__/codex-tool-surface.test.ts",
+      "reason": "Tool-surface coverage composes literal ToolDefinition arrays and in-memory authorization identities, then compares deterministic digests and subsets. It never executes a tool, constructs a repository, or opens SQLite.",
+      "since": "2026-08-12",
+      "owner": "codex-context-epoch-closure"
+    },
+    {
+      "path": "src/__tests__/embedded-skill-lark-cli.test.ts",
+      "reason": "Embedded lark-cli coverage reads packaged skill files and validates manifests, scripts, and command text. It never starts SkillsRuntimeManager background storage or opens a database; runtime imports trigger C4 only transitively.",
+      "since": "2026-08-12",
+      "owner": "codex-context-epoch-closure"
+    },
+    {
+      "path": "src/__tests__/embedded-skill-lets-go-rss-migration.test.ts",
+      "reason": "Lets-go-rss migration coverage inspects embedded filesystem assets and deterministic migration text. It does not construct the production skill store, call getDatabase, or load better-sqlite3.",
+      "since": "2026-08-12",
+      "owner": "codex-context-epoch-closure"
+    },
+    {
+      "path": "src/__tests__/embedded-skill-video-expert-vnext-swap.test.ts",
+      "reason": "Video-expert swap coverage uses temporary files and controlled Python subprocess fixtures with fake probe and model modules. It never creates a Ready repository or opens getDatabase; the embedded-skill import graph alone reaches SQLite.",
+      "since": "2026-08-12",
+      "owner": "codex-context-epoch-closure"
+    },
+    {
+      "path": "src/__tests__/lark-cli-auth-flow-authority.test.ts",
+      "reason": "Lark CLI auth-flow coverage exercises argv and authorization-state decisions with injected command results and literal identities. It never invokes the production settings repository or opens SQLite.",
+      "since": "2026-08-12",
+      "owner": "codex-context-epoch-closure"
+    },
+    {
+      "path": "src/__tests__/lark-cli-channel-composition.test.ts",
+      "reason": "Lark CLI channel composition coverage combines literal channel and skill configuration and asserts deterministic tool exposure. It does not dispatch a command, construct a repository, or call getDatabase.",
+      "since": "2026-08-12",
+      "owner": "codex-context-epoch-closure"
+    },
+    {
+      "path": "src/__tests__/phase-5-diagnostics.test.ts",
+      "reason": "Phase-5 diagnostics coverage reads source and diagnostic fixtures and validates static wiring and messages. It does not initialize the application database or instantiate a SQLite-backed repository.",
+      "since": "2026-08-12",
+      "owner": "codex-context-epoch-closure"
+    },
+    {
+      "path": "src/__tests__/ready-codex-lifecycle-adapter.test.ts",
+      "reason": "Lifecycle adapter coverage uses FakeNativeRuntime and FakeLifecycleStore implementations for every read, write, interrupt, and recovery operation. No production lifecycle repository or database is constructed.",
+      "since": "2026-08-12",
+      "owner": "codex-context-epoch-closure"
+    },
+    {
+      "path": "src/__tests__/same-run-capability-composition.test.ts",
+      "reason": "Same-run capability coverage builds a hand-authored ToolBridgeRuntimeContext with in-memory definitions and authorization state. It never runs a production repository or calls getDatabase.",
+      "since": "2026-08-12",
+      "owner": "codex-context-epoch-closure"
+    },
+    {
+      "path": "src/__tests__/session-continuity.test.ts",
+      "reason": "Session continuity coverage redirects persistence to a temporary JSON file and resets the in-memory maps between tests. The module never opens SQLite on these paths; database reachability is transitive only.",
+      "since": "2026-08-12",
+      "owner": "codex-context-epoch-closure"
+    },
+    {
+      "path": "src/__tests__/skill-context-orchestrator-ref-skill-hint.test.ts",
+      "reason": "Reference-skill hint coverage uses an injected skill catalog and in-memory hint state to assemble context. It never starts the production skill store or opens getDatabase.",
+      "since": "2026-08-12",
+      "owner": "codex-context-epoch-closure"
+    },
+    {
+      "path": "src/__tests__/skill-detection-primitive-gating-sync.test.ts",
+      "reason": "Skill primitive-gating sync coverage compares deterministic detection and authorization results over literal manifests. It never executes the primitive, constructs a skill repository, or opens SQLite.",
+      "since": "2026-08-12",
+      "owner": "codex-context-epoch-closure"
+    },
+    {
+      "path": "src/__tests__/skill-orchestrator-preferred-tools-expose-when-armed.test.ts",
+      "reason": "Preferred-tool exposure coverage uses a fake skill catalog, in-memory armed hint, and literal tool names. It does not run a tool or initialize any SQLite-backed skill state.",
+      "since": "2026-08-12",
+      "owner": "codex-context-epoch-closure"
+    },
+    {
+      "path": "src/__tests__/skill-orchestrator-rearm-from-prior-tooluses.test.ts",
+      "reason": "Skill rearm coverage reconstructs prior tool-use messages in an in-memory session and injects the skill catalog. It never constructs a database-backed session or skill repository.",
+      "since": "2026-08-12",
+      "owner": "codex-context-epoch-closure"
+    },
+    {
+      "path": "src/__tests__/skill-read-artifact-exact-resource.test.ts",
+      "reason": "Exact-resource artifact coverage uses temporary filesystem roots and injected authorization and frame state. It reads only the named test file and never calls getDatabase or a production repository.",
+      "since": "2026-08-12",
+      "owner": "codex-context-epoch-closure"
+    },
+    {
+      "path": "src/__tests__/skill-reference-hint-persistence.test.ts",
+      "reason": "Reference-hint persistence coverage snapshots and restores the module's in-memory Map only; the persisted row is represented as a plain value. No chat repository or SQLite database is opened.",
+      "since": "2026-08-12",
+      "owner": "codex-context-epoch-closure"
+    },
+    {
+      "path": "src/__tests__/skill-reference-hint-ttl-bump.test.ts",
+      "reason": "Reference-hint TTL bump coverage mutates and reads the in-memory hint Map with timers. It never invokes session persistence, a repository, or getDatabase.",
+      "since": "2026-08-12",
+      "owner": "codex-context-epoch-closure"
+    },
+    {
+      "path": "src/__tests__/skill-reference-hints-ttl.test.ts",
+      "reason": "Reference-hint sweep coverage uses mocked Date values against the in-memory hint Map. It does not persist a session or open a SQLite-backed repository.",
+      "since": "2026-08-12",
+      "owner": "codex-context-epoch-closure"
+    },
+    {
+      "path": "src/__tests__/skill-reference-inline-injection.test.ts",
+      "reason": "Reference inline-injection coverage combines in-memory hint records, literal SKILL.md text, and an injected context builder. No production database accessor or repository is called.",
+      "since": "2026-08-12",
+      "owner": "codex-context-epoch-closure"
+    },
+    {
+      "path": "src/__tests__/skill-run-shell-required-method.test.ts",
+      "reason": "Required-method shell coverage validates manifest and method gating with temporary skill files and injected execution context. It never reaches a database-backed skill execution store or opens SQLite.",
+      "since": "2026-08-12",
+      "owner": "codex-context-epoch-closure"
+    },
+    {
+      "path": "src/__tests__/task-projection-supersede.test.ts",
+      "reason": "Projection supersede coverage supplies an in-memory TaskProjectionStore and redirects continuity state to a temporary JSON file. It never constructs TaskProjectionRepository or opens getDatabase.",
+      "since": "2026-08-12",
+      "owner": "codex-context-epoch-closure"
+    },
+    {
+      "path": "src/__tests__/task-projection-sync.test.ts",
+      "reason": "Projection sync coverage uses Map-backed TaskProjectionStore fakes, including synthetic constraint errors, and a temporary JSON continuity file. It never invokes the SQLite repository implementation.",
+      "since": "2026-08-12",
+      "owner": "codex-context-epoch-closure"
     }
   ]
 }

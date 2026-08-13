@@ -165,7 +165,7 @@ async function main() {
         try { buffer = await download(url); break } catch (error) { lastErr = error }
       }
       if (!buffer) {
-        console.error(`[pin] FAIL ${asset.platform}/${asset.id}/${archive.filename}: ${lastErr?.message || 'unreachable'}`) // eslint-disable-line no-console
+        console.error(`[pin] FAIL ${asset.platform}/${asset.id}/${archive.filename}: ${lastErr?.message || 'unreachable'}`)
         process.exitCode = 1
         continue
       }
@@ -174,7 +174,7 @@ async function main() {
       try {
         inspection = inspectArchive(buffer, archive)
       } catch (error) {
-        console.error(`[pin] FAIL ${asset.platform}/${asset.id}/${archive.filename}: ${error?.message || error}`) // eslint-disable-line no-console
+        console.error(`[pin] FAIL ${asset.platform}/${asset.id}/${archive.filename}: ${error?.message || error}`)
         process.exitCode = 1
         continue
       }
@@ -193,13 +193,13 @@ async function main() {
         outputs: inspection.outputChecks,
       })
       const layout = layoutOk ? 'OK' : `MISSING ${missing.join(',')} BAD_SHA ${badSha.join(',')}`
-      console.log(`[pin] ${asset.platform}/${asset.id}/${archive.filename}  sha256=${sha256}  bytes=${buffer.length}  layout=${layout}`) // eslint-disable-line no-console
+      console.log(`[pin] ${asset.platform}/${asset.id}/${archive.filename}  sha256=${sha256}  bytes=${buffer.length}  layout=${layout}`)
     }
   }
   mkdirSync(dirname(outPath), { recursive: true })
   writeFileSync(outPath, `${JSON.stringify(pins, null, 2)}\n`, 'utf8')
-  console.log(`\n[pin] wrote ${outPath}`) // eslint-disable-line no-console
-  console.log('[pin] compare these digests with src/shared/runtime-asset-registry.ts and update only reviewed changes.') // eslint-disable-line no-console
+  console.log(`\n[pin] wrote ${outPath}`)
+  console.log('[pin] compare these digests with src/shared/runtime-asset-registry.ts and update only reviewed changes.')
 }
 
-main().catch((error) => { console.error(error); process.exit(1) }) // eslint-disable-line no-console
+main().catch((error) => { console.error(error); process.exit(1) })

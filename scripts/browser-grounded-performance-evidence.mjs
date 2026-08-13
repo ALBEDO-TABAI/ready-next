@@ -35,23 +35,23 @@ export function enrichProviderPerformanceEvidence(cases, metricsLogPath) {
     const ownerBills = events.filter((event) => (
       event.metric === 'provider_request_bill'
       && event.runId === runId
-      && event.agentName !== 'dynamic-delivery-verifier'
+      && event.agentName !== 'codex-browser-verifier'
     ))
     const ownerReconciliations = events.filter((event) => (
       event.metric === 'provider_estimate_reconciliation'
       && event.runId === runId
-      && event.agentName !== 'dynamic-delivery-verifier'
+      && event.agentName !== 'codex-browser-verifier'
     ))
     const verifierRunId = `${runId}:verifier`
     const verifierBills = events.filter((event) => (
       event.metric === 'provider_request_bill'
       && event.runId === verifierRunId
-      && event.agentName === 'dynamic-delivery-verifier'
+      && event.agentName === 'codex-browser-verifier'
     ))
     const verifierReconciliations = events.filter((event) => (
       event.metric === 'provider_estimate_reconciliation'
       && event.runId === verifierRunId
-      && event.agentName === 'dynamic-delivery-verifier'
+      && event.agentName === 'codex-browser-verifier'
     ))
     const runClose = events.find((event) => event.metric === 'run_close' && event.runId === runId)
     item.metrics = {

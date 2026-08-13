@@ -37,19 +37,12 @@ function write(root, rel, text) {
 const WIRED_RUNTIME = `
 import { runBeliefDecayRound } from '../memory/belief-decay'
 import { CrystallizeScheduler } from '../maintenance/crystallize-gate'
-import { runMaintenanceLlmRoundTick } from '../maintenance/maintenance-llm-driver'
-const scheduler = new CrystallizeScheduler(() => {})
+const crystallizeScheduler = new CrystallizeScheduler(() => {})
+crystallizeScheduler.start({ startupDelayMs: 90_000 })
 logAgentMetric('crystallize_round_fired', {})
 runBeliefDecayRound([], effectors, now)
 logAgentMetric('belief_decay_round_fired', {})
-await runMaintenanceLlmRoundTick({ settings, store, loadAIConfig })
-reconcileInterruptedDeliveryState(state)
 `
-
-// D7 gate-flip fixture: the driver invokes the pinned round and the round
-// carries the maintenance_audit fired ledger (no dormant markers).
-const MAINTENANCE_DRIVER_REL = 'src/main/modules/agent-control/maintenance/maintenance-llm-driver.ts'
-const MAINTENANCE_ROUND_REL = 'src/main/modules/agent-control/maintenance/maintenance-llm-round.ts'
 
 function writeBaseline(root) {
   write(root, LIFECYCLE_REL, `
@@ -70,15 +63,10 @@ for (const row of rows) {
   write(root, EMERGENCE_GROUP_REL, "const cards = assembleEmergenceFeed([])\nlogAgentMetric('emergence_feed_assembled', {})\n")
   write(root, EMERGENCE_SECTION_REL, 'export const marker = "data-ready-emergence-feed"\n')
   write(root, 'src/renderer/components/ready/TaskPanel.tsx', 'export const panel = <EmergenceFeedSection onOpenScope={open} onOpenSettings={openSettings} />\n')
-  write(root, MAINTENANCE_DRIVER_REL, 'import { runMaintenanceLlmRound } from "./maintenance-llm-round"\nexport async function runMaintenanceLlmRoundTick(deps) { return runMaintenanceLlmRound({}) }\n')
-  write(root, MAINTENANCE_ROUND_REL, "export async function runMaintenanceLlmRound(deps) { logAgentMetric('maintenance_audit', {}) }\n")
-  write(root, 'src/main/modules/agent-control/runtime-core/dynamic-delivery/dynamic-delivery-coordinator.ts', "compileDynamicDeliveryPlan({})\nlogAgentMetric('dynamic_delivery_fired', {})\n")
-  write(root, 'src/main/modules/agent-control/runtime-core/agent-sdk-runtime.ts', 'const coordinator = new DynamicDeliveryCoordinator({})\n')
-  write(root, 'src/main/modules/agent-control/quality/packet-compiler.ts', 'export function compileDynamicDeliveryPlan() {}\n')
   // D4 gate-flip fixture: declare tool + executor dispatch + finalizer merge/ledger
   write(root, 'src/main/modules/tools/agent-interaction-tool-defs.ts', "export const AGENT_INTERACTION_TOOL_NAMES = ['ask_user_questions', 'declare_completion_criteria']\n")
   write(root, 'src/main/modules/tools/tool-executor.ts', 'import { executeDeclareCompletionCriteria } from "./builtins/declare-completion-criteria"\nexport const dispatch = () => executeDeclareCompletionCriteria({}, {})\n')
-  write(root, 'src/main/modules/agent-control/runtime-core/run-finalizer.ts', "const criteriaItems = appendModelCriteria(criteria.items, declared)\nlogAgentMetric('model_criteria_merged', {})\n")
+  write(root, 'src/main/modules/agent-control/runtime-core/run-finalizer-adjudication.ts', "const criteriaItems = appendModelCriteria(criteria.items, declared)\nlogAgentMetric('model_criteria_merged', {})\n")
 }
 
 test('gate passes on a fully-consistent baseline (also exercises deferred handshake against real unwired lists)', (t) => {
@@ -93,12 +81,105 @@ test('gate passes on the real repository', () => {
   assert.equal(result.ok, true, result.errors.join('\n'))
 })
 
+test('local maintenance no-provider boundary rejects the retired model path', (t) => {
+  const root = makeRoot(t)
+  writeBaseline(root)
+  write(
+    root,
+    'src/main/modules/agent-control/maintenance/maintenance-llm-driver.ts',
+    'export async function runMaintenanceLlmRoundTick() {}\n',
+  )
+  const result = check({ root })
+  assert.equal(result.ok, false)
+  assert.ok(result.errors.some((error) => error.includes('[maintenance-local-no-provider]')))
+})
+
+test('retired remote automatic Agent ingress cannot return', (t) => {
+  const root = makeRoot(t)
+  writeBaseline(root)
+  write(
+    root,
+    'src/main/modules/agent-control/runtime-core/remote-channel-service.ts',
+    'await deps.runInboundChannel(request)\n',
+  )
+  const result = check({ root })
+  assert.equal(result.ok, false)
+  assert.ok(result.errors.some((error) => error.includes('[remote-im-automatic-agent-ingress]')))
+})
+
+test('retired remote-specific coordinator alias cannot return', (t) => {
+  const root = makeRoot(t)
+  writeBaseline(root)
+  write(
+    root,
+    'src/main/modules/agent-control/task-projection/run-coordinator.ts',
+    'async runInboundChannel(request) { return this.runScoped(request) }\n',
+  )
+  const result = check({ root })
+  assert.equal(result.ok, false)
+  assert.ok(result.errors.some((error) => error.includes('[remote-im-automatic-agent-ingress]')))
+})
+
+test('an unowned crystallize startup timer cannot return', (t) => {
+  const root = makeRoot(t)
+  writeBaseline(root)
+  write(root, RUNTIME_REL, `${WIRED_RUNTIME}\nsetTimeout(() => { void runCrystallizeRoundOnce(false) }, 90_000)\n`)
+  const result = check({ root })
+  assert.equal(result.ok, false)
+  assert.ok(result.errors.some((error) => error.includes('[unowned-crystallize-startup-timer]')))
+})
+
+test('retired persona and preroute controls cannot return through preload', (t) => {
+  const root = makeRoot(t)
+  writeBaseline(root)
+  write(root, PRELOAD_REL, `${fs.readFileSync(path.join(root, PRELOAD_REL), 'utf8')}\nsimulateSystemStudioRouting()\n`)
+  const result = check({ root })
+  assert.equal(result.ok, false)
+  assert.ok(result.errors.some((error) => error.includes('[persona-knowledge-preroute-live-controls]')))
+})
+
+test('historical personalities cannot repopulate the live Agent selector', (t) => {
+  const root = makeRoot(t)
+  writeBaseline(root)
+  write(root, 'src/renderer/stores/useAgent.ts', 'await window.electronAPI.agentPersonality.list()\n')
+  const result = check({ root })
+  assert.equal(result.ok, false)
+  assert.ok(result.errors.some((error) => error.includes('[persona-knowledge-preroute-live-controls]')))
+})
+
+test('historical personality CRUD cannot recreate live Agent registry side effects', (t) => {
+  const root = makeRoot(t)
+  writeBaseline(root)
+  write(
+    root,
+    'src/main/modules/repositories/agent-personality-repository.ts',
+    "db.prepare('INSERT INTO agents (id, name) VALUES (?, ?)').run(id, name)\n",
+  )
+  const result = check({ root })
+  assert.equal(result.ok, false)
+  assert.ok(result.errors.some((error) => error.includes('[persona-knowledge-preroute-live-controls]')))
+})
+
+test('retired specialist mutation tools cannot return to the Codex surface', (t) => {
+  const root = makeRoot(t)
+  writeBaseline(root)
+  write(
+    root,
+    'src/main/modules/tools/agent-interaction-tool-defs.ts',
+    "export const AGENT_INTERACTION_TOOL_NAMES = ['ask_user_questions', 'propose_specialist_blueprint']\n",
+  )
+  const result = check({ root })
+  assert.equal(result.ok, false)
+  assert.ok(result.errors.some((error) => error.includes('[specialist-agent-live-mutation-tools]')))
+})
+
 test('排除即托付：exclusion present but belief-decay unwired fails', (t) => {
   const root = makeRoot(t)
   writeBaseline(root)
   write(root, RUNTIME_REL, `
 import { CrystallizeScheduler } from '../maintenance/crystallize-gate'
-const scheduler = new CrystallizeScheduler(() => {})
+const crystallizeScheduler = new CrystallizeScheduler(() => {})
+crystallizeScheduler.start({ startupDelayMs: 90_000 })
 logAgentMetric('crystallize_round_fired', {})
 `)
   const result = check({ root })

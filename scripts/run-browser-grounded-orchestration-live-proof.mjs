@@ -17,12 +17,6 @@ const proofMode = String(process.env.READY_GROUNDED_PROOF_MODE || 'verify').trim
 const correctnessRepeats = positiveInteger(process.env.READY_GROUNDED_CORRECTNESS_REPEATS, 3)
 const performanceRepeats = positiveInteger(process.env.READY_GROUNDED_PERFORMANCE_REPEATS, 20)
 const caseFilter = String(process.env.READY_GROUNDED_CASE_FILTER || '').trim()
-const requestedDeliveryMode = String(
-  process.env.READY_GROUNDED_DELIVERY_MODE || 'adaptive',
-).trim()
-if (!['adaptive', 'thorough'].includes(requestedDeliveryMode)) {
-  throw new Error(`unsupported READY_GROUNDED_DELIVERY_MODE: ${requestedDeliveryMode}`)
-}
 const baselineReportPath = process.env.READY_GROUNDED_BASELINE_REPORT
   ? resolve(process.env.READY_GROUNDED_BASELINE_REPORT)
   : null
@@ -427,7 +421,7 @@ async function evaluate(client, expression, timeoutMs = 420_000) {
   }
 }
 
-function buildCaseExpression(fixtureUrl, fixtureTitle, prompt, latentRoute, deliveryMode) {
+function buildCaseExpression(fixtureUrl, fixtureTitle, prompt, latentRoute) {
   return `(
     async () => {
       const api = window.electronAPI?.browser
@@ -492,12 +486,6 @@ function buildCaseExpression(fixtureUrl, fixtureTitle, prompt, latentRoute, deli
           harness.newSession(),
           new Promise((_, reject) => setTimeout(() => reject(new Error('new-session-timeout')), 10000)),
         ])
-        const thoroughButton = document.querySelector('[data-ready-delivery-thorough="true"]')
-        if (!thoroughButton) return JSON.stringify({ ok: false, error: 'delivery-mode-button-not-found' })
-        const thoroughEnabled = thoroughButton.getAttribute('aria-pressed') === 'true'
-        if ((${JSON.stringify(deliveryMode)} === 'thorough') !== thoroughEnabled) thoroughButton.click()
-        await new Promise((resolveWait) => setTimeout(resolveWait, 100))
-        const thoroughPressedBeforeSubmit = thoroughButton.getAttribute('aria-pressed') === 'true'
         const startedAt = Date.now()
         const result = await harness.submit(${JSON.stringify(prompt)}, {
           mode: 'dom',
@@ -518,8 +506,6 @@ function buildCaseExpression(fixtureUrl, fixtureTitle, prompt, latentRoute, deli
           scopeId,
           sourceTabId,
           inputMode: result.inputMode,
-          requestedDeliveryMode: ${JSON.stringify(deliveryMode)},
-          thoroughPressedBeforeSubmit,
           sendResult: result.sendResult,
           toolTrace: snapshot.toolTrace,
           diagnostics: result.diagnostics,
@@ -865,12 +851,9 @@ function compactCaseResult(instance, rawResult, databaseEvidence, architectureRe
   const diagnostics = (rawResult?.diagnostics || []).map((diagnostic) => diagnostic.id === 'tool_result_failure' && /"delivery"\s*:\s*"not_delivered"[\s\S]*"effectObserved"\s*:\s*false[\s\S]*"needsObservation"\s*:\s*false/.test(String(diagnostic.evidence?.text || '')) ? { ...diagnostic, severity: 'warning', message: '工具尝试未送达且未产生页面影响，最终结果将按真实页面证据验收。' } : diagnostic)
   const diagnosticErrors = diagnostics.filter((diagnostic) => diagnostic.severity === 'error')
   const markerLeak = instance.goals.some((goal) => goal.marker && buildPrompt(instance.fixture).includes(goal.marker))
-  const deliveryModeOk = rawResult?.requestedDeliveryMode === requestedDeliveryMode
-    && rawResult?.thoroughPressedBeforeSubmit === (requestedDeliveryMode === 'thorough')
   const harnessOk = diagnosticErrors.length === 0
   const ok = harnessOk
     && !markerLeak
-    && deliveryModeOk
     && goalChecks.every((check) => check.ok)
     && fixtureGoalChecks.every((check) => check.ok)
     && duplicateDispatches === 0
@@ -884,9 +867,7 @@ function compactCaseResult(instance, rawResult, databaseEvidence, architectureRe
     repeat: instance.repeat,
     ok,
     harnessOk,
-    requestedDeliveryMode,
-    thoroughPressedBeforeSubmit: rawResult?.thoroughPressedBeforeSubmit === true,
-    deliveryModeOk,
+    runtimeContract: 'codex-native-browser-v1',
     scopeId: rawResult?.scopeId || null,
     runId: rawResult?.activeRun?.requestId || databaseEvidence.runMeta?.run_id || null,
     parentTaskId: parent?.task_id || rawResult?.activeRun?.taskId || null,
@@ -927,7 +908,7 @@ const fixtureServer = await startFixtureServer(instances)
 const report = {
   generatedAt: new Date().toISOString(),
   proofMode,
-  requestedDeliveryMode,
+  runtimeContract: 'codex-native-browser-v1',
   inputTokenAccounting: 'cumulative_provider_requests_v1',
   remoteDebuggingPort,
   rendererUrl: rendererUrl || null,
@@ -977,7 +958,6 @@ try {
         fixtureCase.title,
         prompt,
         Boolean(fixtureCase.latentRoute),
-        requestedDeliveryMode,
       ),
       420_000,
     )

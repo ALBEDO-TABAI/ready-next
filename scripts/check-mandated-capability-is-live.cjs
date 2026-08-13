@@ -30,13 +30,149 @@ const REPO_ROOT = path.resolve(__dirname, '..')
 const {
   UNWIRED_PACKET_FILES,
   UNWIRED_MAINTENANCE_FILES,
-  MIXED_MAINTENANCE_ROUND_REL,
 } = require('./check-unwired-capability-markers.cjs')
 
 const RUNTIME_REL = 'src/main/modules/agent-control/runtime-core/runtime.ts'
 const DEFER_REGISTER_REL = 'docs/superpowers/plans/2026-07-03-deferred-work-register.md'
 
 const REGISTRY = Object.freeze([
+  {
+    capability: 'maintenance-local-no-provider',
+    status: 'retired',
+    absentFiles: [
+      'src/main/modules/agent-control/maintenance/maintenance-llm-driver.ts',
+      'src/main/modules/agent-control/maintenance/maintenance-llm-round.ts',
+    ],
+    forbidden: [
+      {
+        file: RUNTIME_REL,
+        pattern: /runMaintenanceLlmRound|maintenance_llm_round|readAIConfigDetailed/,
+        meaning: 'deterministic maintenance must not reach an AI provider',
+      },
+      {
+        file: 'src/main/modules/claude-bridge/ipc/belief-card-group.ts',
+        pattern: /llmRound|MaintenanceRoundStatus/,
+        meaning: 'settings must not advertise a retired model-maintenance round',
+      },
+    ],
+  },
+  {
+    capability: 'remote-im-automatic-agent-ingress',
+    status: 'retired',
+    forbidden: [
+      {
+        file: 'src/main/modules/agent-control/runtime-core/remote-channel-service.ts',
+        pattern: /runInboundChannel|sendChannelTyping|buildInboundChannelPayload|maybeEmitRemoteCalendarSuggestions/,
+        meaning: 'ordinary remote inbound is resource-only',
+      },
+      {
+        file: 'src/main/modules/agent-control/task-projection/run-coordinator.ts',
+        pattern: /runInboundChannel/,
+        meaning: 'the retired remote-specific Agent alias must not remain callable',
+      },
+      {
+        file: RUNTIME_REL,
+        pattern: /non_local_ingress_unsupported/,
+        meaning: 'runtime must not keep a fake remote Agent dispatcher',
+      },
+    ],
+  },
+  {
+    capability: 'unowned-crystallize-startup-timer',
+    status: 'retired',
+    forbidden: [{
+      file: RUNTIME_REL,
+      pattern: /setTimeout\s*\(\s*\(\)\s*=>[\s\S]{0,120}runCrystallizeRoundOnce/,
+      meaning: 'startup maintenance must be owned and cancelled by CrystallizeScheduler',
+    }],
+  },
+  {
+    capability: 'persona-knowledge-preroute-live-controls',
+    status: 'retired',
+    absentFiles: [
+      'src/main/modules/agent-control/agents/session-preroute.ts',
+      'src/main/modules/agent-control/agents/session-preroute-trace.ts',
+      'src/main/modules/agent-control/runtime-core/session-preroute-service.ts',
+      'src/main/modules/claude-bridge/ipc/session-preroute-group.ts',
+      'src/main/modules/settings-engine/agent-session-preroute-setting.ts',
+    ],
+    forbidden: [
+      {
+        file: RUNTIME_REL,
+        pattern: /evaluateSessionPreroute|applySessionPreroute|isKnowledgeSystemEnabled|applyKnowledgeSystemEnabled/,
+        meaning: 'historical persona and belief records must not steer or inject the Codex run',
+      },
+      {
+        file: 'src/preload/index.ts',
+        pattern: /evaluateSessionPreroute|simulateSystemStudioRouting|setKnowledgeSystemEnabled|getAgentSessionPrerouteMode|setAgentSessionPrerouteMode/,
+        meaning: 'renderer must not receive retired routing or knowledge-control APIs',
+      },
+      {
+        file: 'src/renderer/components/agent-system/AgentSettingsHub.tsx',
+        pattern: /新会话智能路由|知识系统总开关|simulateSystemStudioRouting|setKnowledgeSystemEnabled/,
+        meaning: 'Settings must describe archives honestly instead of advertising fake controls',
+      },
+      {
+        file: 'src/renderer/components/agent-system/studio/AgentSystemStudioView.tsx',
+        pattern: /simulateSystemStudioRouting|confirmSpecialistBlueprint|confirmDerivation|updateRegistryStatus|adopt_candidate/,
+        meaning: 'the historical Studio must not expose routing, adoption, or Agent mutation',
+      },
+      {
+        file: 'src/renderer/stores/useAgent.ts',
+        pattern: /agentPersonality|mapPersonalitiesToAgents/,
+        meaning: 'historical personalities must not populate the live Agent selector',
+      },
+      {
+        file: 'src/main/modules/repositories/agent-personality-repository.ts',
+        pattern: /AgentRegistryRepository|INSERT\s+(?:OR\s+IGNORE\s+)?INTO\s+agents|UPDATE\s+agents|DELETE\s+FROM\s+agents/i,
+        meaning: 'historical personality CRUD must not mutate live Agent registry rows',
+      },
+    ],
+  },
+  {
+    capability: 'specialist-agent-live-mutation-tools',
+    status: 'retired',
+    absentFiles: [
+      'src/main/modules/tools/builtins/propose-specialist-blueprint.ts',
+      'src/main/modules/tools/builtins/confirm-specialist-blueprint.ts',
+      'src/main/modules/tools/builtins/rename-specialist-agent.ts',
+      'src/main/modules/claude-bridge/ipc/agent-derivation-group.ts',
+      'src/renderer/components/personality/AgentDerivationPanel.tsx',
+      'src/renderer/components/personality/AgentRegistryPanel.tsx',
+    ],
+    forbidden: [
+      {
+        file: 'src/main/modules/tools/agent-interaction-tool-defs.ts',
+        pattern: /propose_specialist_blueprint|confirm_specialist_blueprint|rename_specialist_agent/,
+        meaning: 'Codex must not be offered inert specialist mutation tools',
+      },
+      {
+        file: 'src/main/modules/tools/schemas/agent-interaction-schemas.ts',
+        pattern: /propose_specialist_blueprint|confirm_specialist_blueprint|rename_specialist_agent/,
+        meaning: 'retired specialist tools must not retain executable schemas',
+      },
+      {
+        file: 'src/main/modules/tools/tool-executor.ts',
+        pattern: /executeProposeSpecialistBlueprint|executeConfirmSpecialistBlueprint|executeRenameSpecialistAgent|propose_specialist_blueprint|confirm_specialist_blueprint|rename_specialist_agent/,
+        meaning: 'retired specialist tools must not retain executor dispatch',
+      },
+      {
+        file: 'src/main/modules/claude-bridge/ipc/agent-specialist-blueprint-group.ts',
+        pattern: /upsertDraft|runAdmission|requestConfirmation|confirmCreate|reject|expire/,
+        meaning: 'historical specialist blueprint IPC is read-only',
+      },
+      {
+        file: 'src/main/modules/claude-bridge/ipc/agent-registry-group.ts',
+        pattern: /updateStatus|deleteAgent|registry\.create|registry\.update|registry\.delete/,
+        meaning: 'historical specialist registry IPC is read-only',
+      },
+      {
+        file: 'src/preload/index.ts',
+        pattern: /proposeSpecialistBlueprint|confirmSpecialistBlueprint|renameSpecialistAgent|confirmDerivation|rejectDerivation|updateRegistryStatus|deleteRegistryAgent/,
+        meaning: 'renderer must not receive specialist Agent mutation APIs',
+      },
+    ],
+  },
   {
     capability: 'belief-decay',
     status: 'live-required',
@@ -63,6 +199,11 @@ const REGISTRY = Object.freeze([
     wiring: [
       { name: 'runtime imports crystallize-gate', file: RUNTIME_REL, pattern: /from '\.\.\/maintenance\/crystallize-gate'/ },
       { name: 'runtime constructs CrystallizeScheduler', file: RUNTIME_REL, pattern: /new CrystallizeScheduler\s*\(/ },
+      {
+        name: 'runtime delegates the startup one-shot to CrystallizeScheduler',
+        file: RUNTIME_REL,
+        pattern: /crystallizeScheduler\.start\(\{\s*startupDelayMs:\s*90_000\s*\}\)/,
+      },
     ],
     firedLedger: { file: RUNTIME_REL, event: 'crystallize_round_fired' },
     noStaleMarker: {
@@ -109,62 +250,6 @@ const REGISTRY = Object.freeze([
     },
     noStaleMarker: {
       file: 'src/main/modules/agent-control/emergence/emergence-cards.ts',
-      pattern: /P5d\/C26 unwired|not in production driver path/i,
-    },
-  },
-  {
-    capability: 'dynamic-delivery',
-    status: 'live-required',
-    wiring: [
-      {
-        name: 'coordinator calls bounded packet compiler',
-        file: 'src/main/modules/agent-control/runtime-core/dynamic-delivery/dynamic-delivery-coordinator.ts',
-        pattern: /compileDynamicDeliveryPlan\s*\(/,
-      },
-      {
-        name: 'SDK runtime constructs the coordinator',
-        file: 'src/main/modules/agent-control/runtime-core/agent-sdk-runtime.ts',
-        pattern: /new DynamicDeliveryCoordinator\s*\(/,
-      },
-      {
-        name: 'runtime reconciles interrupted delivery on startup',
-        file: RUNTIME_REL,
-        pattern: /reconcileInterruptedDeliveryState\s*\(/,
-      },
-    ],
-    firedLedger: {
-      file: 'src/main/modules/agent-control/runtime-core/dynamic-delivery/dynamic-delivery-coordinator.ts',
-      event: 'dynamic_delivery_fired',
-    },
-    noStaleMarker: {
-      file: 'src/main/modules/agent-control/quality/packet-compiler.ts',
-      pattern: /P5c\/C22 unwired|not in production path/i,
-    },
-  },
-  {
-    // D7 gate-flip (2026-07-05)：crystallize tick 捎带驱动，三层预算闸在
-    // maintenance-llm-driver（专项开关 / durable lastRunAt 进 EP2-C2 门控 /
-    // 空信号跳过），LLM 写卡强制 staged。
-    capability: 'maintenance-llm-round (runMaintenanceLlmRound)',
-    status: 'live-required',
-    wiring: [
-      {
-        name: 'runtime crystallize tick drives the llm round',
-        file: RUNTIME_REL,
-        pattern: /runMaintenanceLlmRoundTick\s*\(/,
-      },
-      {
-        name: 'driver invokes the pinned maintenance round',
-        file: 'src/main/modules/agent-control/maintenance/maintenance-llm-driver.ts',
-        pattern: /runMaintenanceLlmRound\s*\(\{/,
-      },
-    ],
-    firedLedger: {
-      file: MIXED_MAINTENANCE_ROUND_REL,
-      event: 'maintenance_audit',
-    },
-    noStaleMarker: {
-      file: MIXED_MAINTENANCE_ROUND_REL,
       pattern: /P5d\/C26 unwired|not in production driver path/i,
     },
   },
@@ -239,7 +324,6 @@ function readOrNull(root, rel) {
 // registry 仅测试态可注入（机制覆盖用合成条目）；生产恒用本表。
 function check({ root = REPO_ROOT, registry = REGISTRY } = {}) {
   const errors = []
-  // D7 gate-flip: MIXED_MAINTENANCE_ROUND_REL 已 live，不再计入 unwired 约束面。
   const allUnwired = new Set([
     ...UNWIRED_PACKET_FILES,
     ...UNWIRED_MAINTENANCE_FILES,
@@ -247,6 +331,21 @@ function check({ root = REPO_ROOT, registry = REGISTRY } = {}) {
 
   for (const entry of registry) {
     const tag = `[${entry.capability}]`
+
+    if (entry.status === 'retired') {
+      for (const rel of entry.absentFiles || []) {
+        if (readOrNull(root, rel) !== null) {
+          errors.push(`${tag} retired module still exists: ${rel}`)
+        }
+      }
+      for (const item of entry.forbidden || []) {
+        const source = readOrNull(root, item.file)
+        if (source && item.pattern.test(source)) {
+          errors.push(`${tag} retired path returned in ${item.file}: ${item.meaning}`)
+        }
+      }
+      continue
+    }
 
     if (entry.status === 'live-required') {
       // 表内矛盾：live-required 的文件绝不能同时挂在任何 unwired 表里。

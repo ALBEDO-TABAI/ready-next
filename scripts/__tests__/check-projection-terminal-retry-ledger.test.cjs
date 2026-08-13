@@ -36,13 +36,16 @@ class ProjectionSyncCoordinator {
     this.pendingProjectionSyncs = new PendingProjectionSyncRepository(deps.db)
   }
   recordScopeRunEvent(payload, projectionTruth) {
+    return this.recordCanonicalScopeRunEvent(payload, projectionTruth)?.summary ?? null
+  }
+  private recordCanonicalScopeRunEvent(payload, projectionTruth) {
     const summary = this.recordRunProjectionEvent(payload, projectionTruth)
     if (summary) {
       void syncTaskProjection(this.deps.taskProjectionStore, summary, payload, projectionTruth).catch((error) => {
         this.handleProjectionSyncFailure(summary, payload, projectionTruth, error)
       })
     }
-    return summary
+    return summary ? { payload, summary } : null
   }
   private handleProjectionSyncFailure(summary, payload, projectionTruth, error): void {
     logAgentMetric('projection.sync_failed', {})

@@ -5,101 +5,86 @@ const fs = require('node:fs')
 const path = require('node:path')
 
 const ROOT = process.cwd()
-
-function read(relPath) {
-  return fs.readFileSync(path.join(ROOT, relPath), 'utf8')
-}
-
-function fail(message) {
-  console.error(`[check-specialist-studio-readonly] FAIL: ${message}`)
-  process.exit(1)
+const failures = []
+const fail = (message) => failures.push(message)
+const read = (rel) => {
+  const abs = path.join(ROOT, rel)
+  if (!fs.existsSync(abs)) {
+    fail(`missing required file: ${rel}`)
+    return ''
+  }
+  return fs.readFileSync(abs, 'utf8')
 }
 
 const ipc = read('src/main/modules/claude-bridge/ipc/agent-system-studio-group.ts')
-if (!ipc.includes("'agent:systemStudio:getSnapshot'")) {
-  fail('Studio IPC must expose the read-only snapshot channel')
-}
-if (!ipc.includes("'agent:systemStudio:simulateRouting'")) {
-  fail('Studio IPC must expose the read-only routing simulation channel')
-}
-for (const required of [
+for (const channel of [
+  'agent:systemStudio:getSnapshot',
   'agent:systemStudio:stageContentEdit',
   'agent:systemStudio:confirmContentEdit',
   'agent:systemStudio:rejectContentEdit',
 ]) {
-  if (!ipc.includes(`'${required}'`)) fail(`Studio IPC must expose the content proposal channel: ${required}`)
+  if (!ipc.includes(channel)) fail(`Studio IPC is missing preserved file-proposal channel: ${channel}`)
 }
-for (const forbidden of [
+for (const retired of [
+  'agent:systemStudio:simulateRouting',
   'agent:systemStudio:create',
   'agent:systemStudio:transition',
-  'agent:systemStudio:updateStatus',
-  'agent:systemStudio:merge',
-  'agent:systemStudio:retire',
-  'agent:derivation:confirm',
-  'agent:beliefCards:transition',
-  'updateStatus(',
-  '.create(',
+  'confirmSpecialistBlueprint',
+  'confirmDerivation',
+  'updateRegistryStatus',
 ]) {
-  if (ipc.includes(forbidden)) fail(`Studio IPC contains a forbidden write token: ${forbidden}`)
+  if (ipc.includes(retired)) fail(`Studio IPC still exposes retired control: ${retired}`)
 }
 
 const preload = read('src/preload/index.ts')
-if (!preload.includes('getSystemStudioSnapshot')) {
-  fail('preload must expose getSystemStudioSnapshot')
-}
-if (!preload.includes("ipcRenderer.invoke('agent:systemStudio:getSnapshot')")) {
-  fail('preload Studio method must call the snapshot channel')
-}
-if (!preload.includes('simulateSystemStudioRouting')) {
-  fail('preload must expose simulateSystemStudioRouting')
-}
-if (!preload.includes("ipcRenderer.invoke('agent:systemStudio:simulateRouting'")) {
-  fail('preload Studio method must call the routing simulation channel')
-}
 for (const required of [
+  'getSystemStudioSnapshot',
   'stageSystemStudioContentEdit',
   'confirmSystemStudioContentEdit',
   'rejectSystemStudioContentEdit',
 ]) {
-  if (!preload.includes(required)) fail(`preload must expose ${required}`)
+  if (!preload.includes(required)) fail(`preload is missing preserved archive/file method: ${required}`)
 }
-
-const component = [
-  read('src/renderer/components/agent-system/AgentSystemStudio.tsx'),
-  read('src/renderer/components/agent-system/studio/AgentSystemStudioView.tsx'),
-].join('\n')
-for (const forbidden of [
+for (const retired of [
+  'simulateSystemStudioRouting',
+  'confirmSpecialistBlueprint',
+  'renameSpecialistAgent',
   'confirmDerivation',
   'rejectDerivation',
   'updateRegistryStatus',
-  'transitionCard',
-  'setKnowledgeSystemEnabled',
-  'agent:systemStudio:create',
-  'agent:systemStudio:transition',
+  'deleteRegistryAgent',
 ]) {
-  if (component.includes(forbidden)) fail(`Studio component contains a forbidden write token: ${forbidden}`)
+  if (preload.includes(retired)) fail(`preload still exposes retired Agent control: ${retired}`)
 }
-if (!component.includes('getSystemStudioSnapshot')) {
-  fail('Studio component must load through the read-only snapshot method')
+
+const component = read('src/renderer/components/agent-system/studio/AgentSystemStudioView.tsx')
+if (!component.includes('getSystemStudioSnapshot')) fail('Studio must load the historical snapshot')
+for (const required of ['confirmSystemStudioContentEdit', 'rejectSystemStudioContentEdit']) {
+  if (!component.includes(required)) fail(`Studio must preserve explicit file-proposal action: ${required}`)
 }
-if (!component.includes('simulateSystemStudioRouting')) {
-  fail('Studio component must use the read-only routing simulation method')
-}
-for (const required of [
-  'stageSystemStudioContentEdit',
-  'confirmSystemStudioContentEdit',
-  'rejectSystemStudioContentEdit',
+for (const retired of [
+  'simulateSystemStudioRouting',
+  'confirmSpecialistBlueprint',
+  'renameSpecialistAgent',
+  'confirmDerivation',
+  'updateRegistryStatus',
+  'adopt_candidate',
 ]) {
-  if (!component.includes(required)) fail(`Studio component must use ${required}`)
+  if (component.includes(retired)) fail(`Studio component still exposes retired Agent control: ${retired}`)
 }
+if (!component.includes('不会改变当前 Codex')) fail('Studio must state that historical records do not change Codex')
+if (!component.includes('不会自动创建或分配 Agent')) fail('Studio must state that records do not create or assign Agent')
+
+const hub = read('src/renderer/components/agent-system/AgentSettingsHub.tsx')
+if (!hub.includes('<PersonalityEditor />')) fail('Agent Settings must preserve personality archive CRUD')
+if (!hub.includes('<AgentSystemStudio />')) fail('Agent Settings must preserve historical specialist audit')
+if (!hub.includes('不会改变当前 Codex')) fail('Agent Settings must describe archive behavior honestly')
 
 const settings = read('src/renderer/pages/Settings.tsx')
-const hub = read('src/renderer/components/agent-system/AgentSettingsHub.tsx')
-if (!settings.includes('<AgentSettingsHub />')) {
-  fail('Settings must render the agent settings hub')
-}
-if (!hub.includes('<AgentSystemStudio />')) {
-  fail('AgentSettingsHub must render AgentSystemStudio')
-}
+if (!settings.includes('<AgentSettingsHub />')) fail('Settings must render the historical Agent archive hub')
 
+if (failures.length > 0) {
+  console.error(`[check-specialist-studio-readonly] FAIL: ${failures.join('\n')}`)
+  process.exit(1)
+}
 console.log('[check-specialist-studio-readonly] OK')

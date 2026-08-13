@@ -300,7 +300,7 @@ async function connect(url) {
   socket.addEventListener('message', (event) => {
     const message = JSON.parse(event.data); const item = pending.get(message.id)
     if (!item) return; pending.delete(message.id)
-    message.error ? item.reject(new Error(message.error.message)) : item.resolve(message.result)
+    if (message.error) item.reject(new Error(message.error.message)); else item.resolve(message.result)
   })
   await new Promise((resolveOpen, rejectOpen) => { socket.addEventListener('open', resolveOpen, { once: true }); socket.addEventListener('error', rejectOpen, { once: true }) })
   return { send(method, params = {}) { return new Promise((resolveSend, rejectSend) => {

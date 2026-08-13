@@ -78,7 +78,7 @@ function check({ root = ROOT } = {}) {
   // Rebuild path: preserve groupId by spreading the persisted tab into the recovered
   // tab (fresh backend ids ⇒ the id-merge would NOT apply here).
   const rebuildEnd = effects.indexOf('store.setTabs(recoveredTabs)')
-  const decl = /const recoveredTab\b[^=]*=\s*\{/.exec(effects)
+  const decl = /(?:const recoveredTab\b[^=]*=\s*\{|const recoveredTabs\b[^=]*=\s*\w+\.map\s*\()/.exec(effects)
   if (rebuildEnd === -1 || !decl || decl.index > rebuildEnd) {
     errors.push('rebuild_path_shape_unrecognized')
   } else if (!/\{\s*\.\.\.\w+/.test(effects.slice(decl.index, rebuildEnd))) {
