@@ -765,12 +765,26 @@ export class BrowserAutomationService {
         const selector = ${JSON.stringify(selector)}
         const targetToken = ${JSON.stringify(targetToken)}
         const expectedDocumentToken = ${JSON.stringify(frameDocumentToken)}
-        if (targetToken) {
-          const state = globalThis.__readyBrowserTargetIdentityV3
-          if (!state || state.document !== document || state.documentToken !== expectedDocumentToken) {
-            return { ok: false, targetDescription: targetToken, inputFound: false, reason: 'stale_target_document' }
+        let targetState = globalThis.__readyBrowserTargetIdentityV3
+        if (!targetState || targetState.document !== document || !(targetState.nodesByToken instanceof Map) || !(targetState.tokenByNode instanceof WeakMap)) {
+          const bytes = new Uint32Array(4)
+          try { globalThis.crypto.getRandomValues(bytes) } catch {
+            for (let index = 0; index < bytes.length; index += 1) bytes[index] = Math.floor(Math.random() * 0xffffffff)
           }
-          input = toInput(state.nodesByToken instanceof Map ? state.nodesByToken.get(targetToken) : null)
+          targetState = {
+            document,
+            documentToken: Array.from(bytes).map((value) => value.toString(36)).join('-'),
+            nextTargetSequence: 1,
+            nodesByToken: new Map(),
+            tokenByNode: new WeakMap(),
+          }
+          globalThis.__readyBrowserTargetIdentityV3 = targetState
+        }
+        if (expectedDocumentToken && String(targetState.documentToken || '') !== expectedDocumentToken) {
+          return { ok: false, targetDescription: targetToken || selector || 'explicit file input', inputFound: false, reason: 'stale_target_document' }
+        }
+        if (targetToken) {
+          input = toInput(targetState.nodesByToken instanceof Map ? targetState.nodesByToken.get(targetToken) : null)
         }
         if (!input && selector) input = toInput(document.querySelector(selector))
         if (!(input instanceof HTMLInputElement)) {

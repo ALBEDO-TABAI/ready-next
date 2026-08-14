@@ -408,6 +408,38 @@ async function retainTrustedInputSequence(
     : () => undefined
 }
 
+export function pointerPhaseOutput(
+  blocked: ToolExecutionOutput,
+  pressed: boolean,
+): ToolExecutionOutput {
+  if (!pressed) return blocked
+  const data = blocked.data && typeof blocked.data === 'object'
+    ? blocked.data as Record<string, unknown>
+    : {}
+  return createBrowserStructuredOutput({
+    ...data,
+    ok: false,
+    errorKind: String(data.errorKind || 'browser_reference_stale'),
+    dispatch: 'accepted',
+    delivery: 'unknown',
+    effect: 'unknown',
+    mayHaveCommitted: true,
+    needsObservation: true,
+  })
+}
+
+export function pointerPhaseFailure(pressed: boolean, errorKind = 'browser_operation_failed'): ToolExecutionOutput {
+  return createBrowserStructuredOutput({
+    ok: false,
+    errorKind,
+    dispatch: pressed ? 'accepted' : 'rejected',
+    delivery: pressed ? 'unknown' : 'not_delivered',
+    effect: pressed ? 'unknown' : 'not_applicable',
+    mayHaveCommitted: pressed,
+    needsObservation: pressed,
+  })
+}
+
 export async function dispatchClickAt(
   controller: BrowserController,
   tabId: string | null,
@@ -476,7 +508,7 @@ export async function dispatchClickAt(
     throw Object.assign(new Error('browser_input_not_ready:pointer'), {
       code: 'INPUT_NOT_READY',
       readiness: released.data,
-      blockedOutput: released,
+      blockedOutput: pointerPhaseOutput(released, true),
     })
   }
   const deliveryCount = deliveryToken

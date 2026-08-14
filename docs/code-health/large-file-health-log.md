@@ -21,6 +21,10 @@
 
 | 评估日期 | 任务 | 文件 | 总行数 | 本次新增 | 结论 | 判断与后续动作 | 状态 |
 | --- | --- | --- | ---: | ---: | --- | --- | --- |
+| 2026-08-14 | Codex 工作面硬化与拆分 | `src/main/modules/tools/browser-act-tools.ts` | 79 | 净 -约2513 | 健康 | 已按动作族拆到 navigation/form/target/pointer/upload/shared；本文件只留 facade 路由与 re-export。 | 无需处理 |
+| 2026-08-14 | Codex 工作面硬化与拆分 | `src/main/modules/tools/browser-act-form.ts` | 840 | 新文件 | 一般 | 表单与嵌套 type/press 仍集中。2026-09-14 复查是否继续下沉 search。 | 已排期：2026-09-14 |
+| 2026-08-14 | Codex 工作面硬化与拆分 | `src/main/modules/tools/browser-act-pointer.ts` | 682 | 新文件 | 一般 | 指针动作与 click-by-text 回退。2026-09-14 复查。 | 已排期：2026-09-14 |
+| 2026-08-14 | Codex 工作面硬化与拆分 | `src/main/modules/tools/browser-input-actions.ts` | 1537 | 净 +约32 | 一般 | 只补 click press 阶段结算。2026-09-14 复查。 | 已排期：2026-09-14 |
 | 2026-08-14 | Codex Browser Enter 部分按键结算 | `src/main/modules/tools/browser-input-actions.ts` | 1505 | 净 +约34 | 一般 | 一次完整按键按已发送次数结算。2026-09-14 复查。 | 已排期：2026-09-14 |
 | 2026-08-14 | Codex Browser 文字按键发送前核对 | `src/main/modules/tools/browser-input-actions.ts` | 1471 | 净 +约34 | 一般 | 抽出共用发送前页面核对，覆盖指针/文字/键盘。2026-09-14 复查。 | 已排期：2026-09-14 |
 | 2026-08-14 | Codex Browser 换页核对与部分滚动复审 | `src/main/modules/tools/browser-act-tools.ts` | 2591 | 净 +约19 | 危险 | 只把冻结文档身份绑到 click/type 投递，并回收指针拒绝。 | 待独立拆分合同；交付时提醒 |

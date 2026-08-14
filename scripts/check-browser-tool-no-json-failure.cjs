@@ -4,19 +4,26 @@
 const fs = require('node:fs')
 const path = require('node:path')
 
-const ROOT = process.cwd()
-// B4（2026-07-04）—— Power 工具组拆至 browser-power-tools.ts 后，拆出实现体
-// 同样受"浏览器失败必须走 ToolExecutionOutput、不得裸 JSON 字符串"合同约束。
-// B5（2026-07-05）—— 采集/内容任务组拆至 browser-collection-tools.ts，同上。
-// B6（2026-07-05）—— 观察/感知组拆至 browser-observe-tools.ts，同上。
-// B7（2026-07-05）—— 行动/导航组拆至 browser-act-tools.ts，同上。
-const TARGETS = [
-  'src/main/modules/tools/browser-tools.ts',
-  'src/main/modules/tools/browser-power-tools.ts',
-  'src/main/modules/tools/browser-collection-tools.ts',
-  'src/main/modules/tools/browser-observe-tools.ts',
-  'src/main/modules/tools/browser-act-tools.ts',
-]
+const ROOT = process.env.BROWSER_TOOL_SCAN_ROOT || process.cwd()
+
+function listBrowserActToolFiles(root = ROOT) {
+  const dir = path.join(root, 'src/main/modules/tools')
+  if (!fs.existsSync(dir)) return []
+  return fs.readdirSync(dir)
+    .filter((name) => name.startsWith('browser-act-') && name.endsWith('.ts'))
+    .sort()
+    .map((name) => path.join('src/main/modules/tools', name))
+}
+
+function listBrowserToolScanTargets(root = ROOT) {
+  return [
+    'src/main/modules/tools/browser-tools.ts',
+    'src/main/modules/tools/browser-power-tools.ts',
+    'src/main/modules/tools/browser-collection-tools.ts',
+    'src/main/modules/tools/browser-observe-tools.ts',
+    ...listBrowserActToolFiles(root),
+  ]
+}
 
 function stripComments(source) {
   return source
@@ -93,7 +100,7 @@ function findMatchingParen(source, openIndex) {
 
 function main() {
   let failed = false
-  for (const target of TARGETS) {
+  for (const target of listBrowserToolScanTargets()) {
     const source = fs.readFileSync(path.join(ROOT, target), 'utf8')
     const findings = findJsonFailureReturns(source)
     if (findings.length > 0) {
@@ -112,4 +119,10 @@ if (require.main === module) {
   main()
 }
 
-module.exports = { findJsonFailureReturns, findMatchingParen, hasDynamicFailureOk }
+module.exports = {
+  findJsonFailureReturns,
+  findMatchingParen,
+  hasDynamicFailureOk,
+  listBrowserActToolFiles,
+  listBrowserToolScanTargets,
+}

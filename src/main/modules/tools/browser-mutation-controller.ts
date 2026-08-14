@@ -15,7 +15,6 @@ const DIRECT_DELIVERY_TRANSPORTS = new Set<PropertyKey>([
   'goBack',
   'goForward',
   'reload',
-  'setFileInputFiles',
   'handleBrowserDialog',
   'archivePage',
   'clearConsoleMessages',
@@ -156,7 +155,6 @@ export function browserMutationController(
                 : {}),
               ...(property === 'handleBrowserDialog' ? { effect: 'dialog' as const } : {}),
               ...(property === 'archivePage' ? { effect: 'download' as const } : {}),
-              ...(property === 'setFileInputFiles' ? { effect: 'target_value' as const } : {}),
             })
           }
           return resolved

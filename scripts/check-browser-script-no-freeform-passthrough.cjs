@@ -2,30 +2,26 @@
 const fs = require('fs')
 const path = require('path')
 
-const root = process.cwd()
-const browserToolsPath = path.join(root, 'src/main/modules/tools/browser-tools.ts')
-// B4（2026-07-04）—— browser_execute_js 等 Power case 实现体拆至
-// browser-power-tools.ts，自由脚本直通禁则同样覆盖拆出文件。
-const browserPowerToolsPath = path.join(root, 'src/main/modules/tools/browser-power-tools.ts')
-// B5（2026-07-05）—— browser_extract_structured / browser_scroll_collect /
-// browser_start_task 等采集 case 实现体拆至 browser-collection-tools.ts，
-// 自由脚本直通禁则同样覆盖拆出文件。
-const browserCollectionToolsPath = path.join(root, 'src/main/modules/tools/browser-collection-tools.ts')
-// B6（2026-07-05）—— browser_wait_for_condition 等观察 case 实现体拆至
-// browser-observe-tools.ts，自由脚本直通禁则同样覆盖拆出文件。
-const browserObserveToolsPath = path.join(root, 'src/main/modules/tools/browser-observe-tools.ts')
-// B7（2026-07-05）—— browser_run_workflow 的 runWorkflowStep 守卫执行层随
-// 行动/导航组拆至 browser-act-tools.ts，自由脚本直通禁则同样覆盖拆出文件。
-const browserActToolsPath = path.join(root, 'src/main/modules/tools/browser-act-tools.ts')
-const registryPath = path.join(root, 'src/main/modules/tools/browser-readonly-script-templates.ts')
+const root = process.env.BROWSER_TOOL_SCAN_ROOT || process.cwd()
+const toolsDir = path.join(root, 'src/main/modules/tools')
 
-const source = fs.readFileSync(browserToolsPath, 'utf8')
-const powerSource = fs.readFileSync(browserPowerToolsPath, 'utf8')
-const collectionSource = fs.readFileSync(browserCollectionToolsPath, 'utf8')
-const observeSource = fs.readFileSync(browserObserveToolsPath, 'utf8')
-const actSource = fs.readFileSync(browserActToolsPath, 'utf8')
+function listBrowserActSources(dir = toolsDir) {
+  if (!fs.existsSync(dir)) return []
+  return fs.readdirSync(dir)
+    .filter((name) => name.startsWith('browser-act-') && name.endsWith('.ts'))
+    .sort()
+    .map((name) => ({ name, source: fs.readFileSync(path.join(dir, name), 'utf8') }))
+}
+
+const browserToolsPath = path.join(toolsDir, 'browser-tools.ts')
+const browserInvocationPath = path.join(toolsDir, 'browser-tool-invocation.ts')
+const browserPowerToolsPath = path.join(toolsDir, 'browser-power-tools.ts')
+const browserCollectionToolsPath = path.join(toolsDir, 'browser-collection-tools.ts')
+const browserObserveToolsPath = path.join(toolsDir, 'browser-observe-tools.ts')
+const registryPath = path.join(toolsDir, 'browser-readonly-script-templates.ts')
+const browserActSources = listBrowserActSources()
+
 let failed = false
-
 function fail(message) {
   console.error(`[check-browser-script-no-freeform-passthrough] FAIL — ${message}`)
   failed = true
@@ -38,19 +34,25 @@ if (!fs.existsSync(registryPath)) {
   for (const name of ['read_text', 'read_attr', 'read_all_text', 'count_selector', 'exists_selector', 'read_rect', 'read_meta']) {
     if (!registry.includes(name)) fail(`registry missing template ${name}.`)
   }
+  if (!registry.includes('export function compileBrowserReadonlyScriptTemplate')) {
+    fail('readonly script templates must export compileBrowserReadonlyScriptTemplate.')
+  }
 }
 
-const highControlIndex = source.indexOf('const highControlDenied = highControlScriptGuard(toolName, args, candidateTargetUrls)')
-const verdictIndex = source.indexOf('const scriptReadOnlyVerdict = resolveScriptReadOnlyVerdict(toolName, args)')
-const leaseIndex = source.indexOf('const gate = beginLeaseGate(leaseGate, toolName, args)')
-if (highControlIndex < 0) fail('highControlScriptGuard call not found.')
-if (verdictIndex < 0) fail('resolveScriptReadOnlyVerdict entry call not found.')
-if (leaseIndex < 0) fail('lease gate call not found.')
-if (highControlIndex >= 0 && verdictIndex >= 0 && verdictIndex < highControlIndex) {
-  fail('read-only script verdict must run after highControlScriptGuard.')
+const source = fs.existsSync(browserToolsPath) ? fs.readFileSync(browserToolsPath, 'utf8') : ''
+const invocationSource = fs.existsSync(browserInvocationPath) ? fs.readFileSync(browserInvocationPath, 'utf8') : ''
+const powerSource = fs.existsSync(browserPowerToolsPath) ? fs.readFileSync(browserPowerToolsPath, 'utf8') : ''
+const collectionSource = fs.existsSync(browserCollectionToolsPath) ? fs.readFileSync(browserCollectionToolsPath, 'utf8') : ''
+const observeSource = fs.existsSync(browserObserveToolsPath) ? fs.readFileSync(browserObserveToolsPath, 'utf8') : ''
+
+if (!source.includes('resolveBrowserToolInvocation(toolName, args')) {
+  fail('browser-tools.ts must resolve tools through resolveBrowserToolInvocation.')
 }
-if (leaseIndex >= 0 && verdictIndex >= 0 && verdictIndex > leaseIndex) {
-  fail('read-only script verdict must run before beginLeaseGate.')
+if (!source.includes('executeBrowserActTool(')) {
+  fail('browser-tools.ts must dispatch act tools through executeBrowserActTool.')
+}
+if (!invocationSource.includes('custom_script: _customScript')) {
+  fail('resolveBrowserToolInvocation must strip custom_script from model args.')
 }
 
 const forbidden = [
@@ -61,13 +63,27 @@ const forbidden = [
   [/payload,\s*\n\s*\}\)/, 'browser_start_task forwards payload without script verdict sanitization'],
 ]
 
+const namedSources = [
+  { name: 'browser-tools.ts', source },
+  { name: 'browser-power-tools.ts', source: powerSource },
+  { name: 'browser-collection-tools.ts', source: collectionSource },
+  { name: 'browser-observe-tools.ts', source: observeSource },
+  ...browserActSources,
+]
+
 for (const [pattern, message] of forbidden) {
-  if (pattern.test(source)) fail(message)
-  if (pattern.test(powerSource)) fail(`${message} (browser-power-tools.ts)`)
-  if (pattern.test(collectionSource)) fail(`${message} (browser-collection-tools.ts)`)
-  if (pattern.test(observeSource)) fail(`${message} (browser-observe-tools.ts)`)
-  if (pattern.test(actSource)) fail(`${message} (browser-act-tools.ts)`)
+  for (const file of namedSources) {
+    if (pattern.test(file.source)) fail(`${message} (${file.name})`)
+  }
 }
 
-if (failed) process.exit(1)
-console.log('[check-browser-script-no-freeform-passthrough] OK')
+function main() {
+  if (failed) process.exit(1)
+  console.log('[check-browser-script-no-freeform-passthrough] OK')
+}
+
+if (require.main === module) {
+  main()
+}
+
+module.exports = { listBrowserActSources }

@@ -10,8 +10,9 @@ note: >
   2026-08-14 已关闭执行绑定、技能零 Browser、页签越界、指针异步空窗、
   关闭通知重放、摘要结算身份，以及 observe/mutate 换页核对、观察入账前
   身份闸、click/type/collect 冻结代次、文字/按键发送前共用页面核对、
-  Enter 按下后换页按部分生效结算，以及部分滚动结算。整份计划的下载
-  消费者与 Electron fixture 大门仍未做。后续硬化与拆分见
+  Enter 按下后换页按部分生效结算，以及部分滚动结算。后续硬化计划已补
+  click/drag 的 press 结算和 upload 精确回读/赋值前身份；下载消费者仍隐藏。
+  08-14 §10 已删除的 BrowserView 巨门不移交、不重开。后续见
   docs/superpowers/plans/2026-08-14-codex-surface-hardening-and-split-implementation.md。
 enforce: true
 depends_on:
