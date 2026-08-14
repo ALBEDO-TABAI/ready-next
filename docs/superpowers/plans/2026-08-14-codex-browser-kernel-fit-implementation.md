@@ -11,7 +11,8 @@ note: >
   关闭通知重放、摘要结算身份，以及 observe/mutate 换页核对、观察入账前
   身份闸、click/type/collect 冻结代次、文字/按键发送前共用页面核对、
   Enter 按下后换页按部分生效结算，以及部分滚动结算。整份计划的下载
-  消费者与 Electron fixture 大门仍未做。
+  消费者与 Electron fixture 大门仍未做。后续硬化与拆分见
+  docs/superpowers/plans/2026-08-14-codex-surface-hardening-and-split-implementation.md。
 enforce: true
 depends_on:
   - docs/architecture/current-runtime-contracts.md

@@ -40,6 +40,7 @@
 | Codex 下领域技能与资料库（专项能力后继，未开工） | `docs/superpowers/plans/2026-08-13-codex-domain-skill-and-library-implementation.md` |
 | Codex 工作面重接线（文档/RSS/日程/Tag Forge 等，已落地） | `docs/superpowers/plans/2026-08-13-codex-workbench-surface-rewire-implementation.md` |
 | Codex 内核下 Browser 接线（实施切片：执行绑定与关闭收口） | `docs/superpowers/plans/2026-08-14-codex-browser-kernel-fit-implementation.md` |
+| Codex 工作面硬化与手术式拆分（多事件结算、去全局 bind、act-tools 拆分） | `docs/superpowers/plans/2026-08-14-codex-surface-hardening-and-split-implementation.md` |
 | 架构原则的反例与自检 | `.claude/architectural-principles.md` |
 | 测试边界与 SQLite 验收 | `docs/superpowers/testing-conventions.md` |
 | UI 修改入口 | `UI_ADJUSTMENT_GUIDE.md` |
