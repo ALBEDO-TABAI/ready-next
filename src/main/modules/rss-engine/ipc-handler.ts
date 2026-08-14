@@ -905,6 +905,10 @@ async function loadLatestBenchmarkSnapshot(): Promise<{
  * group itself before this runs, so this function is only invoked in
  * real-mode.
  */
+export async function addRSSSourceCore(input: AddSourceCoreInput): Promise<AddSourceCoreResult> {
+  return runAddSourceCore(input)
+}
+
 async function runAddSourceCore(input: AddSourceCoreInput): Promise<AddSourceCoreResult> {
   const startedAt = Date.now()
   let feedUrl: string

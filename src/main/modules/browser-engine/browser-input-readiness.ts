@@ -114,6 +114,7 @@ export async function browserInputReadiness(
 ): Promise<BrowserInputReadiness> {
   const environmentReadiness = browserInputEnvironmentReadiness(controller, tabId, transport)
   if (!environmentReadiness.ready) return environmentReadiness
+  const expectedPhysicalTargetToken = environmentReadiness.physicalTargetToken
   const focus = documentState || await controller.executeJS(tabId, `(() => ({
     ready: document.readyState === 'interactive' || document.readyState === 'complete',
     focused: document.hasFocus(),
@@ -133,8 +134,17 @@ export async function browserInputReadiness(
         || ['textbox', 'searchbox'].includes(String(el.getAttribute('role') || '').toLowerCase());
     })()
   }))()`).catch(() => null) as { ready?: unknown; focused?: unknown; activeElementEditable?: unknown } | null
+  const afterWait = browserInputEnvironmentReadiness(controller, tabId, transport)
+  if (!afterWait.ready) return afterWait
+  if (
+    afterWait.physicalTargetToken
+    && expectedPhysicalTargetToken
+    && afterWait.physicalTargetToken !== expectedPhysicalTargetToken
+  ) {
+    return { ...afterWait, ready: false, reason: 'physical_target_unavailable' }
+  }
   const base = {
-    ...environmentReadiness,
+    ...afterWait,
     documentFocused: typeof focus?.focused === 'boolean' ? focus.focused : null,
     activeElementEditable: typeof (focus as { activeElementEditable?: unknown } | null)?.activeElementEditable === 'boolean'
       ? (focus as { activeElementEditable: boolean }).activeElementEditable

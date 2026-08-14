@@ -12,8 +12,8 @@
 import { z } from 'zod'
 
 export const CalendarListWindowSchema = z.object({
-  start: z.string().describe('开始时间 ISO 字符串'),
-  end: z.string().describe('结束时间 ISO 字符串'),
+  start: z.string().optional().describe('开始时间 ISO 字符串；省略时使用本轮日历窗口'),
+  end: z.string().optional().describe('结束时间 ISO 字符串；省略时使用本轮日历窗口'),
 })
 
 const ReminderSchema = z.object({
@@ -36,7 +36,7 @@ export const CalendarCreateEventSchema = z.object({
 })
 
 export const CalendarUpdateEventSchema = z.object({
-  id: z.string().describe('事件 ID'),
+  id: z.string().optional().describe('事件 ID；省略时使用本轮唯一日程目标或列表回执'),
   title: z.string().optional().describe('可选，更新后的标题'),
   startTime: z.string().optional().describe('可选，新的开始时间 ISO 字符串'),
   endTime: z.string().optional().describe('可选，新的结束时间 ISO 字符串'),
@@ -48,7 +48,7 @@ export const CalendarUpdateEventSchema = z.object({
 })
 
 export const CalendarDeleteEventSchema = z.object({
-  id: z.string().describe('事件 ID'),
+  id: z.string().optional().describe('事件 ID；省略时使用本轮唯一日程目标或列表回执'),
 })
 
 export const CalendarCaptureSessionSchema = z.object({})

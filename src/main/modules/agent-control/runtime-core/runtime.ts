@@ -9,6 +9,10 @@ import {
 } from '../../../../shared/ai-providers'
 import type { BrowserController } from '../../browser-engine/ipc-handler'
 import { getBrowserTargetClaimService } from '../../browser-engine/browser-target-claim-singleton'
+import {
+  commitCodexFailureCoreCloseoutAndReconcileClaims,
+  reconcileReleasedBrowserClaims,
+} from '../../browser-engine/browser-claim-closeout'
 import type { AskUserQuestionsCardEvent } from '../../tools/builtins/ask-user-questions'
 import { registerChannelOutboundSender } from '../channel-outbound-bridge'
 import type { AgentManager } from '../../claude-bridge/agent-manager'
@@ -723,10 +727,9 @@ export class AgentControlRuntime extends EventEmitter {
         })
       },
       commitCanonicalCoreCloseout: (input) => this.commitCanonicalCoreCloseout(input),
-      commitCodexFailureCoreCloseout: async (input) => {
-        const committed = await this.agentSessionCheckpoints.commitCodexFailureCoreCloseout(input)
-        return committed.value
-      },
+      commitCodexFailureCoreCloseout: (input) => (
+        commitCodexFailureCoreCloseoutAndReconcileClaims(this.agentSessionCheckpoints, input)
+      ),
       getActiveRunAbortSignal: (input) => this.orchestrator.getActiveRunAbortSignal(input),
       abortActiveProductRun: (input) => this.orchestrator.abortActiveProductRun(input),
       restoreActiveProductRun: (input) => {
@@ -831,6 +834,7 @@ export class AgentControlRuntime extends EventEmitter {
         reason: committed.derivedRepairError.message,
       })
     }
+    reconcileReleasedBrowserClaims(input.ownerRunId)
     return {
       canonicalMessage: committed.value.canonicalMessage,
       canonicalMessageDigest: committed.value.canonicalMessageDigest,

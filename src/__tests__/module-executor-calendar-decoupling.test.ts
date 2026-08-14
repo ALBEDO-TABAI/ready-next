@@ -50,15 +50,18 @@ describe('executeModuleToolAction · 日程 agent 与可见模式解耦', () => 
     assert.deepEqual(activated, [], '不应触发任何工作台模式切换')
   })
 
-  it('rss.* 工具仍切换到 rss 模式以触发其惰性处理器注册', async () => {
+  it('只有 rss.selectItem 会切换到 RSS 工作面', async () => {
     const activated: WorkbenchMode[] = []
     installHandlers({
       rss: () => ({ intent: 'rss_action', summary: '已处理' }),
     })
 
-    const result = await runModuleTool('rss.listFeeds', (mode) => activated.push(mode))
+    const analyzed = await runModuleTool('rss.analyzeItem', (mode) => activated.push(mode))
+    assert.equal(analyzed.handled, true)
+    assert.deepEqual(activated, [], '分析不得切换可见工作面')
 
-    assert.equal(result.handled, true)
-    assert.deepEqual(activated, ['rss'], 'rss 仍需要模式切换以注册处理器')
+    const selected = await runModuleTool('rss.selectItem', (mode) => activated.push(mode))
+    assert.equal(selected.handled, true)
+    assert.deepEqual(activated, ['rss'], '只有选中条目才允许导航到 RSS')
   })
 })

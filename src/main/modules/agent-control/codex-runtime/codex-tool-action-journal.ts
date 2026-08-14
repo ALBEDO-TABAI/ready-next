@@ -34,6 +34,13 @@ export interface ReadyToolActionReceiptPort {
     evidenceDigest: string
     at: string
   }): void
+  markIndeterminate(input: {
+    readyActionId: string
+    actionIdentityDigest: string
+    reason: string
+    evidenceDigest: string
+    at: string
+  }): void
 }
 
 export function buildReadyToolActionAbsenceEvidenceDigest(input: {

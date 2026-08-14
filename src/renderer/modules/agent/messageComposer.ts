@@ -7,6 +7,7 @@ import {
   resolveAIConfigCapabilities,
   type AIModelConfig,
 } from '../../../shared/ai-providers'
+import { persistableCalendarEventId } from '../../../shared/calendar-event-identity'
 import type {
   AgentIngressMessageBlock,
   SendScopedResourceSelection,
@@ -445,6 +446,7 @@ export async function buildComposedAgentInput(params: {
 export async function buildCodexIngressInputWithDiagnostics(params: {
   content: string
   attachments: ChatAttachment[]
+  currentDocumentAnchor?: import('../../../shared/ipc-contracts/agent-runtime').CodexCurrentDocumentAnchor | null
 }): Promise<ComposedAgentInputResult> {
   const diagnostics: ComposedAgentInputDiagnostics = {
     inputIncludedCount: 0,
@@ -476,11 +478,60 @@ export async function buildCodexIngressInputWithDiagnostics(params: {
       continue
     }
     if (attachment.source === 'calendar-event' && attachment.eventId) {
+      const eventId = persistableCalendarEventId(attachment.eventId) || attachment.eventId
       resources.push({
         kind: 'calendar_event',
         id: attachment.id,
         name: attachment.name,
-        eventId: attachment.eventId,
+        eventId,
+      })
+      diagnostics.inputIncludedCount += 1
+      continue
+    }
+    if (attachment.source === 'rss-item' && attachment.rssItemId) {
+      resources.push({
+        kind: 'rss_item',
+        id: attachment.id,
+        name: attachment.name,
+        itemId: attachment.rssItemId,
+      })
+      diagnostics.inputIncludedCount += 1
+      continue
+    }
+    if (attachment.source === 'rss-source' && attachment.rssSourceId) {
+      resources.push({
+        kind: 'rss_source',
+        id: attachment.id,
+        name: attachment.name,
+        sourceId: attachment.rssSourceId,
+      })
+      diagnostics.inputIncludedCount += 1
+      continue
+    }
+    if (attachment.source === 'document-widget-target') {
+      const anchor = params.currentDocumentAnchor
+      const widgetId = String(attachment.widgetId || '').trim()
+      if (!anchor || !widgetId) {
+        diagnostics.inputFailedCount += 1
+        diagnostics.inputFailures.push({
+          id: attachment.id,
+          name: attachment.name,
+          path: attachment.path,
+          reason: 'codex_widget_target_requires_current_document',
+        })
+        continue
+      }
+      resources.push({
+        kind: 'widget_target',
+        id: attachment.id,
+        name: attachment.name,
+        logicalResourceId: anchor.logicalResourceId,
+        tabId: anchor.tabId,
+        widgetId,
+        currentVersion: anchor.currentVersion,
+        currentDigest: anchor.currentDigest,
+        policyEpoch: anchor.policyEpoch,
+        incarnationKey: anchor.incarnationKey,
       })
       diagnostics.inputIncludedCount += 1
       continue

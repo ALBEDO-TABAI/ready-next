@@ -464,10 +464,7 @@ export async function executeModuleToolAction(
 
   if (tool.startsWith('rss.') || tool.startsWith('calendar.')) {
     const module = tool.startsWith('rss.') ? 'rss' : 'calendar'
-    // Calendar registers its agent handler unconditionally (its scene is always
-    // mounted), so calendar tools run in the background without yanking the
-    // visible mode. RSS still mounts/registers lazily, so it keeps the switch.
-    if (module === 'rss') activateWorkbenchMode(module)
+    if (module === 'rss' && tool === 'rss.selectItem') activateWorkbenchMode(module)
     pushTrace('call', `执行 ${tool}`, 'tool_running', {
       module,
       executionKind: toExecutionKind(tool),

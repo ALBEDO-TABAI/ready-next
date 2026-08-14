@@ -18,10 +18,10 @@ const EXPECTED_ANTHROPIC = [
     input_schema: {
       type: 'object',
       properties: {
-        start: { type: 'string', description: '开始时间 ISO 字符串' },
-        end: { type: 'string', description: '结束时间 ISO 字符串' },
+        start: { type: 'string', description: '开始时间 ISO 字符串；省略时使用本轮日历窗口' },
+        end: { type: 'string', description: '结束时间 ISO 字符串；省略时使用本轮日历窗口' },
       },
-      required: ['start', 'end'],
+      required: [],
     },
   },
   {
@@ -49,7 +49,7 @@ const EXPECTED_ANTHROPIC = [
     input_schema: {
       type: 'object',
       properties: {
-        id: { type: 'string', description: '事件 ID' },
+        id: { type: 'string', description: '事件 ID；省略时使用本轮唯一日程目标或列表回执' },
         title: { type: 'string', description: '可选，更新后的标题' },
         startTime: { type: 'string', description: '可选，新的开始时间 ISO 字符串' },
         endTime: { type: 'string', description: '可选，新的结束时间 ISO 字符串' },
@@ -59,7 +59,7 @@ const EXPECTED_ANTHROPIC = [
         reminders: { type: 'array', description: '可选，新的提醒列表（整组替换）' },
         recurrenceRule: { type: 'string', description: '可选，新的 RFC 5545 RRULE 字符串' },
       },
-      required: ['id'],
+      required: [],
     },
   },
   {
@@ -68,9 +68,9 @@ const EXPECTED_ANTHROPIC = [
     input_schema: {
       type: 'object',
       properties: {
-        id: { type: 'string', description: '事件 ID' },
+        id: { type: 'string', description: '事件 ID；省略时使用本轮唯一日程目标或列表回执' },
       },
-      required: ['id'],
+      required: [],
     },
   },
   {

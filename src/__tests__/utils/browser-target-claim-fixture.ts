@@ -59,6 +59,32 @@ export function setTargetUserOwnedForTest(
   return next
 }
 
+export function releaseTargetWithoutServiceForTest(
+  service: BrowserTargetClaimService,
+  claim: BrowserTargetClaim,
+): BrowserTargetClaim {
+  const repository = repositories.get(service)
+  if (!repository) throw new Error('test_target_claim_repository_missing')
+  const current = repository.read(claim.logicalKey)
+  if (!current) throw new Error('test_target_claim_missing')
+  const next = {
+    ...current,
+    claimId: `test-released-${current.claimId}`,
+    generation: current.generation + 1,
+    state: 'released' as const,
+    physicalTargetToken: null,
+    bootIncarnationId: null,
+    suspensionCheckpointId: null,
+    suspensionReason: null,
+    expiresAt: current.updatedAt,
+    updatedAt: current.updatedAt + 1,
+  }
+  repository.mutate((store) => {
+    if (!store.write(next, current.generation)) throw new Error('test_target_claim_cas_conflict')
+  })
+  return next
+}
+
 export function acquireTarget(
   service: BrowserTargetClaimService,
   patch: Partial<BrowserTargetClaimAcquireInput> = {},

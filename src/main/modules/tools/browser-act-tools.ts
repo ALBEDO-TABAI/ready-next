@@ -62,8 +62,13 @@ import {
   settleAfterAction,
   sleepWithAbort,
   throwIfAborted,
+  bindTrustedPointerExpected,
+  dispatchTrustedPointer,
+  dispatchTrustedText,
+  TrustedPointerBlockedError,
   waitForReady
 } from './browser-input-actions'
+import { buildBrowserEnvironmentSummary } from '../browser-engine/browser-action-receipt'
 import {
   describeComposedPointTarget,
   scanClosedShadowHostForClickPoint,
@@ -756,6 +761,23 @@ export interface BrowserActToolContext {
       changeReceipt?: BrowserActionReceipt | null
     },
   ) => string | ToolExecutionOutput
+  trustedPageRef?: {
+    tabId: string
+    physicalTargetToken: string
+    mainFrameDocumentToken: string
+  } | null
+}
+
+function trustedPointerExpected(
+  ctx: BrowserActToolContext,
+  tabId: string | null,
+): { physicalTargetToken: string; mainFrameDocumentToken: string } | null {
+  const ref = ctx.trustedPageRef
+  if (!ref || (tabId && ref.tabId !== tabId)) return null
+  return {
+    physicalTargetToken: ref.physicalTargetToken,
+    mainFrameDocumentToken: ref.mainFrameDocumentToken,
+  }
 }
 
 async function confirmLivePasswordFill(
@@ -861,6 +883,11 @@ export async function executeBrowserActTool(
   ctx: BrowserActToolContext,
 ): Promise<string | ToolExecutionOutput> {
   const { controller, abortSignal, sessionId, mutationBoundary, attachBrowserToolOutput } = ctx
+  const releaseExpected = bindTrustedPointerExpected(trustedPointerExpected(
+    ctx,
+    typeof args.tab_id === 'string' ? args.tab_id : null,
+  ))
+  try {
   switch (toolName) {
       case 'tabs_open': {
         const url = String(args.url || 'about:blank')
@@ -1355,8 +1382,27 @@ export async function executeBrowserActTool(
         }
         if (!Number.isFinite(x) || !Number.isFinite(y)) return 'Error: hover target not found'
         const point = await resolveCssPoint(controller, tabId, x, y)
-        await controller.dispatchMouse(tabId, { type: 'mouseMoved', x: point.cssX, y: point.cssY, button: 'none', buttons: 0 })
-        return browserStructuredOutput({ ok: true, normalized: { x: point.nx, y: point.ny }, css: { x: point.cssX, y: point.cssY } })
+        const blocked = await dispatchTrustedPointer(controller, tabId, {
+          type: 'mouseMoved',
+          x: point.cssX,
+          y: point.cssY,
+          button: 'none',
+          buttons: 0,
+        }, trustedPointerExpected(ctx, tabId))
+        if (blocked) return blocked
+        const tab = tabId
+          ? controller.getTabList?.().find((item) => item.id === tabId) || null
+          : null
+        return browserStructuredOutput({
+          ok: true,
+          normalized: { x: point.nx, y: point.ny },
+          css: { x: point.cssX, y: point.cssY },
+          environmentSummary: buildBrowserEnvironmentSummary({
+            targetTabId: tabId,
+            url: tab?.url,
+            title: tab?.title,
+          }),
+        })
       }
 
       case 'drag': {
@@ -1385,19 +1431,54 @@ export async function executeBrowserActTool(
         const source = await resolveCssPoint(controller, tabId, sourceX, sourceY)
         const target = await resolveCssPoint(controller, tabId, targetX, targetY)
         const releaseInputSequence = await retainCompositeTrustedInputSequence(controller, tabId)
+        const pointerExpected = trustedPointerExpected(ctx, tabId)
         try {
-          await controller.dispatchMouse(tabId, { type: 'mouseMoved', x: source.cssX, y: source.cssY, button: 'left', buttons: 0 })
-          await controller.dispatchMouse(tabId, { type: 'mousePressed', x: source.cssX, y: source.cssY, button: 'left', buttons: 1, clickCount: 1 })
+          const start = await dispatchTrustedPointer(controller, tabId, {
+            type: 'mouseMoved',
+            x: source.cssX,
+            y: source.cssY,
+            button: 'left',
+            buttons: 0,
+          }, pointerExpected)
+          if (start) return start
+          const press = await dispatchTrustedPointer(controller, tabId, {
+            type: 'mousePressed',
+            x: source.cssX,
+            y: source.cssY,
+            button: 'left',
+            buttons: 1,
+            clickCount: 1,
+          }, pointerExpected)
+          if (press) return press
           for (let step = 1; step <= 8; step += 1) {
-            await controller.dispatchMouse(tabId, {
+            const moved = await dispatchTrustedPointer(controller, tabId, {
               type: 'mouseMoved',
               x: source.cssX + ((target.cssX - source.cssX) * step) / 8,
               y: source.cssY + ((target.cssY - source.cssY) * step) / 8,
               button: 'left',
               buttons: 1,
-            })
+            }, pointerExpected)
+            if (moved) return moved
           }
-          await controller.dispatchMouse(tabId, { type: 'mouseReleased', x: target.cssX, y: target.cssY, button: 'left', buttons: 0, clickCount: 1 })
+          const released = await dispatchTrustedPointer(controller, tabId, {
+            type: 'mouseReleased',
+            x: target.cssX,
+            y: target.cssY,
+            button: 'left',
+            buttons: 0,
+            clickCount: 1,
+          })
+          if (released) return released
+        } catch {
+          return browserStructuredOutput({
+            ok: false,
+            errorKind: 'browser_surface_required',
+            dispatch: 'accepted',
+            delivery: 'unknown',
+            effect: 'unknown',
+            mayHaveCommitted: true,
+            needsObservation: true,
+          })
         } finally {
           releaseInputSequence()
         }
@@ -1709,19 +1790,20 @@ export async function executeBrowserActTool(
             ...(formSubmit ? { formSubmit } : {}),
           }
         } else if (action === 'hover') {
-          await controller.dispatchMouse(tabId, {
+          const blocked = await dispatchTrustedPointer(controller, tabId, {
             type: 'mouseMoved',
             x: point.cssX,
             y: point.cssY,
             button: 'none',
             buttons: 0,
-          })
+          }, trustedPointerExpected(ctx, tabId))
+          if (blocked) return blocked
           actionResult = { ok: true, trustedInput: true, hoverPoint: trustedClickPoint }
         } else if (action === 'choose') {
           const releaseInputSequence = await retainCompositeTrustedInputSequence(controller, tabId)
           try {
             await runGuardedCoordinateClick(controller, tabId, presentedPoint!.x, presentedPoint!.y, abortSignal)
-            await controller.typeTextDirectly(tabId, String(value || ''))
+            await dispatchTrustedText(controller, tabId, String(value || ''))
             await sendKeyStroke(controller, tabId, 'Enter')
           } finally {
             releaseInputSequence()
@@ -2408,7 +2490,7 @@ export async function executeBrowserActTool(
         const point = await resolveCssPoint(controller, tabId, x, y)
         const deltaY = direction === 'up' ? -magnitude : direction === 'down' ? magnitude : 0
         const deltaX = direction === 'left' ? -magnitude : direction === 'right' ? magnitude : 0
-        await controller.dispatchMouse(tabId, {
+        const blocked = await dispatchTrustedPointer(controller, tabId, {
           type: 'mouseWheel',
           x: point.cssX,
           y: point.cssY,
@@ -2416,7 +2498,8 @@ export async function executeBrowserActTool(
           deltaY,
           button: 'none',
           buttons: 0,
-        })
+        }, trustedPointerExpected(ctx, tabId))
+        if (blocked) return blocked
         return `Scrolled ${direction} at normalized(${point.nx},${point.ny})`
       }
 
@@ -2493,5 +2576,17 @@ export async function executeBrowserActTool(
 
       default:
         return `Unknown browser tool: ${toolName}`
+  }
+  } catch (error) {
+    if (error instanceof TrustedPointerBlockedError) return error.output
+    const blocked = error && typeof error === 'object'
+      ? (error as { blockedOutput?: unknown }).blockedOutput
+      : null
+    if (blocked && typeof blocked === 'object') {
+      return blocked as ToolExecutionOutput
+    }
+    throw error
+  } finally {
+    releaseExpected()
   }
 }

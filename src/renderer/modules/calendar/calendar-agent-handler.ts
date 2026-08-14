@@ -105,6 +105,14 @@ export function createCalendarAgentHandler(deps: CalendarAgentHandlerDeps): Modu
   }
 
   return async ({ action, args }) => {
+    if (action === 'calendar.reloadWindow') {
+      await deps.loadCalendarData(true)
+      return {
+        intent: 'reload_calendar_window',
+        summary: '日程视图已从数据库刷新。',
+      }
+    }
+
     if (action === 'calendar.captureSession') {
       const { start, end } = deps.getDateRange(deps.currentDate, deps.viewType)
       const events = deps.getEvents()

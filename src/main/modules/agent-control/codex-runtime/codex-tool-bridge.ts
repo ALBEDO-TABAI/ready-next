@@ -138,6 +138,7 @@ export type CodexReadyToolBridgeDeps = {
     binding: CodexToolBridgeExecutionBinding,
     abortSignal: AbortSignal,
     executionIdentity: {
+      executingToolName: string
       codexThreadId: string
       codexTurnId: string
       codexCallId: string
@@ -621,6 +622,7 @@ export class CodexReadyToolBridge implements CodexBoundServerRequestExecutor {
       assertCurrentEffectAuthority()
       const firstOutput = await executeToolCall(input.toolName, input.args, {
         ...this.deps.buildToolContext(input.binding, controller.signal, {
+          executingToolName: input.toolName,
           codexThreadId: input.binding.codexThreadId,
           codexTurnId: input.binding.codexTurnId,
           codexCallId: input.callId,

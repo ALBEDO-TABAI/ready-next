@@ -18,13 +18,14 @@ export const LOCAL_DOCUMENT_RESOURCE_FLOOR_TOOL_NAMES: ReadonlyArray<string> = [
   'file_read_excerpt',
 ]
 /**
- * 当前编辑器文档上下文在场时的地板工具：用户正开着的文档是可编辑对象，任何轮
- * （含技能 selected 收窄轮）都必须保有精准编辑与 widget 通道——否则模型会被迫用
- * artifact 整文件覆写或 markdown 表格冒充信息卡（2026-07-11 dogfood 两例）。
- * 刻意不含 set_content / append_content 这类整文覆写工具。
+ * 当前文档无条件地板只有精确读取。Widget/replace/save 是明确写意图的条件地板，
+ * 由 Codex 产品组合层并入，不能作为无条件 floor 再被后续过滤。
  */
 export const CURRENT_DOCUMENT_CONTEXT_FLOOR_TOOL_NAMES: ReadonlyArray<string> = [
   'document_read_section',
+]
+
+export const CURRENT_DOCUMENT_WRITE_FLOOR_TOOL_NAMES: ReadonlyArray<string> = [
   'document_list_widgets',
   'document_insert_widget',
   'document_update_widget',
@@ -37,6 +38,7 @@ export function computeCapabilityFloors(params: {
   authorization: SkillToolAuthorization
   hasLocalDocumentResource: boolean
   hasCurrentDocumentContext: boolean
+  hasCurrentDocumentWriteIntent?: boolean
 }): CapabilityFloors {
   const toolNames = new Set<string>()
   const reasons: string[] = []
@@ -52,6 +54,10 @@ export function computeCapabilityFloors(params: {
   if (params.hasCurrentDocumentContext) {
     for (const name of CURRENT_DOCUMENT_CONTEXT_FLOOR_TOOL_NAMES) toolNames.add(name)
     reasons.push('current_document_context')
+    if (params.hasCurrentDocumentWriteIntent) {
+      for (const name of CURRENT_DOCUMENT_WRITE_FLOOR_TOOL_NAMES) toolNames.add(name)
+      reasons.push('current_document_write_intent')
+    }
   }
 
   return { toolNames, reasons }

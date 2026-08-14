@@ -7,6 +7,19 @@ import {
   BrowserTargetClaimRepository,
   BrowserTargetClaimService,
 } from '../main/modules/browser-engine/browser-target-claims'
+import { commitCodexFailureCoreCloseoutAndReconcileClaims } from '../main/modules/browser-engine/browser-claim-closeout'
+import {
+  __resetBrowserTargetClaimServiceForTests,
+  __setBrowserTargetClaimServiceForTests,
+} from '../main/modules/browser-engine/browser-target-claim-singleton'
+import { isAgentBrowserError } from '../main/modules/browser-engine/agent-browser-errors'
+import { AgentSessionCheckpointRepository } from '../main/modules/repositories/agent-session-checkpoint-repository'
+import { TaskProjectionRepository } from '../main/modules/repositories/task-projection-repository'
+import { RunMetaRepository } from '../main/modules/agent-control/task-projection/run-meta-repository'
+import {
+  openProviderCheckpointTestDb as openDb,
+  providerCheckpointExecutionBinding as executionBinding,
+} from './provider-checkpoint-test-fixtures'
 import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
 
 test('migration 087 upgrades a pending target fence, is idempotent, and passes quick_check', async (t) => {
@@ -262,6 +275,166 @@ test('durable epoch fences a persisted old owner even when reset cleanup never r
     assert.equal('ok' in current && current.ok === false, false)
     assert.equal(db.pragma('quick_check', { simple: true }), 'ok')
   } finally {
+    db.close()
+  }
+})
+
+test('production failure closeout releases live claims and an in-flight action once', async (t) => {
+  if (skipIfSqliteUnavailable(t, 'production closeout claim release')) return
+  const db = openDb()
+  try {
+    const accessor = { getRawDb: () => db }
+    const projections = new TaskProjectionRepository(accessor)
+    const runMeta = new RunMetaRepository(db)
+    const repository = new AgentSessionCheckpointRepository(accessor)
+    const parentTaskId = 'parent-closeout-claims'
+    const scopeId = 'scope-closeout-claims'
+    const ownerRunId = 'run-closeout-claims'
+    const ownerBinding = executionBinding(ownerRunId)
+    const startedAt = '2026-08-14T04:00:00.000Z'
+    const closeoutAt = '2026-08-14T04:01:00.000Z'
+    db.prepare(`
+      INSERT INTO chat_conversations (id, agent, title, created_at, updated_at)
+      VALUES (?, 'butler', 'Closeout claims', ?, ?)
+    `).run(scopeId, startedAt, startedAt)
+    projections.create({
+      taskId: parentTaskId,
+      scopeId,
+      messageVisibilityEpoch: 0,
+      runId: ownerRunId,
+      taskType: 'direct_answer',
+      module: 'system',
+      status: 'running',
+      interactionState: 'running',
+      waitingFor: 'none',
+      steps: [],
+      ownerAgentId: 'butler',
+      taskOrigin: 'user_root',
+      executionBinding: ownerBinding,
+      createdAt: startedAt,
+      updatedAt: startedAt,
+    })
+    runMeta.create({
+      runId: ownerRunId,
+      taskId: parentTaskId,
+      scopeId,
+      messageVisibilityEpoch: 0,
+      agentId: 'butler',
+      executionBinding: ownerBinding,
+      status: 'running',
+    }, Date.parse(startedAt))
+    const sourceMessageId = 'message-closeout-claims'
+    db.prepare(`
+      INSERT INTO chat_messages (id, conversation_id, role, content, timestamp, meta_json, message_visibility_epoch)
+      VALUES (?, ?, 'user', 'close claims', ?, '{}', 0)
+    `).run(sourceMessageId, scopeId, startedAt)
+    const route = await repository.bindBrowserWorkflowRoute({
+      parentTaskId,
+      ownerRunId,
+      sourceMessageId,
+      executionBinding: ownerBinding,
+      now: startedAt,
+    })
+    const service = new BrowserTargetClaimService(new BrowserTargetClaimRepository(accessor))
+    __setBrowserTargetClaimServiceForTests(service)
+    const acquire = (tabId: string, physicalTargetToken: string) => {
+      const claim = service.acquire({
+        partition: 'persist:browser',
+        tabId,
+        physicalTargetToken,
+        bootIncarnationId: 'boot-current',
+        profileId: null,
+        surface: 'user-view',
+        parentTaskId,
+        browserTaskId: route.browserTaskId,
+        ownerRunId,
+        scopeId,
+        sessionId: scopeId,
+        messageVisibilityEpoch: 0,
+      })
+      if (isAgentBrowserError(claim)) throw new Error(claim.message)
+      return claim
+    }
+    const held = acquire('tab-held', 'boot-current:tab-held:1')
+    const owned = acquire('tab-owned', 'boot-current:tab-owned:1')
+    const heldForSuspend = acquire('tab-suspended', 'boot-current:tab-suspended:1')
+    const heldIdentity = {
+      partition: held.logicalKey.partition,
+      tabId: held.logicalKey.tabId,
+      physicalTargetToken: held.physicalTargetToken!,
+      bootIncarnationId: held.bootIncarnationId!,
+      claimId: held.claimId,
+      generation: held.generation,
+      ownerRunId: held.ownerRunId,
+    }
+    const actionId = service.beginAgentAction(heldIdentity)
+    if (typeof actionId !== 'string') throw new Error(actionId.message)
+    assert.equal(service.hasActiveAgentAction(heldIdentity), true)
+    const userOwned = service.takeOver({
+      partition: owned.logicalKey.partition,
+      tabId: owned.logicalKey.tabId,
+      physicalTargetToken: owned.physicalTargetToken!,
+      bootIncarnationId: owned.bootIncarnationId!,
+      claimId: owned.claimId,
+      generation: owned.generation,
+      ownerRunId: owned.ownerRunId,
+    })
+    if (isAgentBrowserError(userOwned)) throw new Error(userOwned.message)
+    const suspended = service.replacePhysicalTarget({
+      partition: heldForSuspend.logicalKey.partition,
+      tabId: heldForSuspend.logicalKey.tabId,
+      physicalTargetToken: 'boot-current:tab-suspended:2',
+      bootIncarnationId: 'boot-current',
+    }, 'checkpoint-suspended')
+    assert.equal(userOwned.state, 'user_owned')
+    assert.equal(suspended?.state, 'suspended')
+    assert.equal(service.read(held.logicalKey)?.state, 'held')
+    assert.equal(service.hasActiveAgentAction(heldIdentity), true)
+
+    const closeoutInput = {
+      parentTaskId,
+      ownerRunId,
+      conversationId: scopeId,
+      status: 'interrupted' as const,
+      terminalReason: 'cancelled_user',
+      initiator: 'user_stop',
+      durationMs: 1_000,
+      taskType: 'direct_answer',
+      module: 'system',
+      error: 'cancelled_user',
+      now: closeoutAt,
+    }
+    const committed = await commitCodexFailureCoreCloseoutAndReconcileClaims(repository, closeoutInput)
+    assert.ok(committed.productTerminalDigest)
+    assert.equal(service.read(held.logicalKey)?.state, 'released')
+    assert.equal(service.read(userOwned.logicalKey)?.state, 'released')
+    assert.equal(service.read(heldForSuspend.logicalKey)?.state, 'released')
+    assert.equal(service.hasActiveAgentAction(heldIdentity), false)
+    assert.equal(
+      db.prepare(`
+        SELECT COUNT(*) AS count FROM browser_control_receipts
+         WHERE owner_run_id = ? AND kind = 'claim_released'
+      `).get<{ count: number }>(ownerRunId)?.count,
+      3,
+    )
+    assert.ok(service.checkWrite(heldIdentity))
+
+    const transitions: Array<{ previousState: string | null; state: string }> = []
+    service.onTransition((transition) => {
+      transitions.push({ previousState: transition.previousState, state: transition.state })
+    })
+    await commitCodexFailureCoreCloseoutAndReconcileClaims(repository, closeoutInput)
+    assert.equal(transitions.length, 0)
+    assert.equal(service.hasActiveAgentAction(heldIdentity), false)
+    assert.equal(
+      db.prepare(`
+        SELECT COUNT(*) AS count FROM browser_control_receipts
+         WHERE owner_run_id = ? AND kind = 'claim_released'
+      `).get<{ count: number }>(ownerRunId)?.count,
+      3,
+    )
+  } finally {
+    __resetBrowserTargetClaimServiceForTests()
     db.close()
   }
 })

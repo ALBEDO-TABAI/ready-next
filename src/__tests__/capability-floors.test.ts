@@ -66,26 +66,36 @@ const DOC_CONTEXT_EDIT_FLOOR = [
   'document_update_widget',
 ]
 
-test('computeCapabilityFloors: current document context floors the document editing surface (read + widget CRUD + precise edit + save)', () => {
+test('computeCapabilityFloors: current document context floors only exact read', () => {
   const floors = computeCapabilityFloors({ authorization: none, hasLocalDocumentResource: false, hasCurrentDocumentContext: true })
-  assert.deepEqual([...floors.toolNames].sort(), DOC_CONTEXT_EDIT_FLOOR)
+  assert.deepEqual([...floors.toolNames].sort(), ['document_read_section'])
   assert.ok(floors.reasons.includes('current_document_context'))
-  // 刻意不含整文覆写工具
   assert.equal(floors.toolNames.has('document_set_content'), false)
-  assert.equal(floors.toolNames.has('document_append_content'), false)
+  assert.equal(floors.toolNames.has('document_insert_widget'), false)
 })
 
-test('computeCapabilityFloors: skill-selected turn cannot exclude widget insertion for the open document (2026-07-11 dogfood regression)', () => {
+test('computeCapabilityFloors: write intent adds the fixed document write floor', () => {
+  const floors = computeCapabilityFloors({
+    authorization: none,
+    hasLocalDocumentResource: false,
+    hasCurrentDocumentContext: true,
+    hasCurrentDocumentWriteIntent: true,
+  })
+  assert.deepEqual([...floors.toolNames].sort(), DOC_CONTEXT_EDIT_FLOOR)
+  assert.ok(floors.reasons.includes('current_document_write_intent'))
+})
+
+test('computeCapabilityFloors: skill-selected turn keeps document read without automatic widget write', () => {
   const floors = computeCapabilityFloors({ authorization: selected, hasLocalDocumentResource: true, hasCurrentDocumentContext: true })
-  assert.ok(floors.toolNames.has('document_insert_widget'))
-  assert.ok(floors.toolNames.has('document_replace_exact'))
+  assert.equal(floors.toolNames.has('document_read_section'), true)
+  assert.equal(floors.toolNames.has('document_insert_widget'), false)
 })
 
 test('computeCapabilityFloors: full union (selected + doc resource + doc context)', () => {
   const floors = computeCapabilityFloors({ authorization: selected, hasLocalDocumentResource: true, hasCurrentDocumentContext: true })
   assert.deepEqual(
     [...floors.toolNames].sort(),
-    [...DOC_CONTEXT_EDIT_FLOOR, 'file_locate', 'file_read_excerpt', 'skill_make_ppt', 'skill_read_artifact', 'skill_run_shell'].sort(),
+    ['document_read_section', 'file_locate', 'file_read_excerpt', 'skill_make_ppt', 'skill_read_artifact', 'skill_run_shell'].sort(),
   )
   assert.deepEqual(floors.reasons, ['skill_selected:ready-human-touch-ppt', 'local_document_resource', 'current_document_context'])
 })

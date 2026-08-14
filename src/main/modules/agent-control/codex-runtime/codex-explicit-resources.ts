@@ -117,6 +117,34 @@ function bodyFreeRequestResource(input: {
   }
 }
 
+const ISO_WINDOW = /^\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?(?:Z|[+-]\d{2}:\d{2})?)?$/
+const MAX_CALENDAR_WINDOW_MS = 366 * 24 * 60 * 60 * 1000
+
+export function validateCodexCalendarWindow(input: {
+  start: string
+  end: string
+  calendarId?: string
+}): { start: string; end: string; calendarId?: string } {
+  const start = String(input.start || '').trim()
+  const end = String(input.end || '').trim()
+  if (!ISO_WINDOW.test(start) || !ISO_WINDOW.test(end)) {
+    throw new Error('codex_calendar_window_invalid')
+  }
+  const startMs = Date.parse(start)
+  const endMs = Date.parse(end)
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) {
+    throw new Error('codex_calendar_window_invalid')
+  }
+  if (startMs >= endMs) throw new Error('codex_calendar_window_order_invalid')
+  if (endMs - startMs > MAX_CALENDAR_WINDOW_MS) {
+    throw new Error('codex_calendar_window_span_invalid')
+  }
+  const calendarId = typeof input.calendarId === 'string' && input.calendarId.trim()
+    ? input.calendarId.trim()
+    : undefined
+  return { start, end, ...(calendarId ? { calendarId } : {}) }
+}
+
 export async function resolveCodexExplicitResources(input: {
   selections: readonly SendScopedResourceSelection[]
   resolveSkill: (selection: Extract<SendScopedResourceSelection, { kind: 'skill' }>) => CodexResolvedSkillInput | null
@@ -125,6 +153,12 @@ export async function resolveCodexExplicitResources(input: {
   ) => Promise<CodexResolvedInlineResource | null>
   resolveCalendar?: (
     selection: Extract<SendScopedResourceSelection, { kind: 'calendar_event' }>,
+  ) => CodexResolvedInlineResource | null
+  resolveRssItem?: (
+    selection: Extract<SendScopedResourceSelection, { kind: 'rss_item' }>,
+  ) => CodexResolvedInlineResource | null
+  resolveRssSource?: (
+    selection: Extract<SendScopedResourceSelection, { kind: 'rss_source' }>,
   ) => CodexResolvedInlineResource | null
   selectedSkill?: CodexResolvedSkillInput | null
 }): Promise<ResolvedCodexExplicitResources> {
@@ -206,6 +240,85 @@ export async function resolveCodexExplicitResources(input: {
         order: requestResources.length,
         canRead: true,
       }))
+      continue
+    }
+
+    if (selection.kind === 'rss_item' || selection.kind === 'rss_source') {
+      const resolved = selection.kind === 'rss_item'
+        ? input.resolveRssItem?.(selection) ?? null
+        : input.resolveRssSource?.(selection) ?? null
+      if (!resolved) {
+        throw new Error(selection.kind === 'rss_item'
+          ? 'codex_explicit_rss_item_unavailable'
+          : 'codex_explicit_rss_source_unavailable')
+      }
+      const identity = selection.kind === 'rss_item' ? selection.itemId : selection.sourceId
+      const logicalResourceId = `${selection.kind}:${sha256(identity).slice(0, 32)}`
+      const key = `${selection.kind}\u0000${logicalResourceId}`
+      if (seen.has(key)) continue
+      seen.add(key)
+      nativeInput.push({ type: 'text', text: resolved.text, text_elements: [] })
+      resourceRefs.push(versionReference(logicalResourceId, resolved.digest))
+      requestResources.push(bodyFreeRequestResource({
+        logicalResourceId,
+        kind: selection.kind,
+        source: 'rss_context',
+        name: resolved.name,
+        path: resolved.path,
+        order: requestResources.length,
+        canRead: true,
+      }))
+      continue
+    }
+
+    if (selection.kind === 'calendar_window') {
+      const window = validateCodexCalendarWindow(selection)
+      const digest = sha256(JSON.stringify(window))
+      const logicalResourceId = `calendar-window:${digest.slice(0, 32)}`
+      const key = `calendar_window\u0000${logicalResourceId}`
+      if (seen.has(key)) continue
+      seen.add(key)
+      nativeInput.push({
+        type: 'text',
+        text: `当前日历可见窗口（结构事实，不含事件正文）：${window.start} 至 ${window.end}${window.calendarId ? `，日历 ${window.calendarId}` : ''}`,
+        text_elements: [],
+      })
+      resourceRefs.push(versionReference(logicalResourceId, digest))
+      requestResources.push({
+        ...bodyFreeRequestResource({
+          logicalResourceId,
+          kind: 'calendar_window',
+          source: 'calendar_context',
+          name: selection.name,
+          path: null,
+          order: requestResources.length,
+          canRead: true,
+        }),
+        summary: `${window.start}/${window.end}`,
+      })
+      continue
+    }
+
+    if (selection.kind === 'widget_target') {
+      const digest = selection.currentDigest
+      const logicalResourceId = selection.logicalResourceId
+      const key = `widget_target\u0000${logicalResourceId}\u0000${selection.widgetId}`
+      if (seen.has(key)) continue
+      seen.add(key)
+      resourceRefs.push(versionReference(logicalResourceId, digest))
+      requestResources.push({
+        ...bodyFreeRequestResource({
+          logicalResourceId,
+          kind: 'widget_target',
+          source: 'widget_target',
+          name: selection.name,
+          path: null,
+          order: requestResources.length,
+          canRead: true,
+        }),
+        tabId: selection.tabId,
+        widgetId: selection.widgetId,
+      })
       continue
     }
 

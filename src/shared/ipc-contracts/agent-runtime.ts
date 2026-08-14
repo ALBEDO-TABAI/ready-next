@@ -99,6 +99,38 @@ export type SendScopedResourceSelection =
       lineStart?: number
       lineEnd?: number
     }
+  | {
+      kind: 'rss_item'
+      id: string
+      name: string
+      itemId: string
+    }
+  | {
+      kind: 'rss_source'
+      id: string
+      name: string
+      sourceId: string
+    }
+  | {
+      kind: 'calendar_window'
+      id: string
+      name: string
+      start: string
+      end: string
+      calendarId?: string
+    }
+  | {
+      kind: 'widget_target'
+      id: string
+      name: string
+      logicalResourceId: string
+      tabId: string
+      widgetId: string
+      currentVersion: string
+      currentDigest: string
+      policyEpoch: number
+      incarnationKey: string
+    }
 
 export type SendScopedAttachmentConfirmationInput = {
   selectedCount: number
@@ -523,6 +555,38 @@ export const sendScopedRequestSchema: z.ZodType<SendScopedRequest> = z.object({
       sectionTitle: z.string().optional(),
       lineStart: z.number().int().positive().safe().optional(),
       lineEnd: z.number().int().positive().safe().optional(),
+    }).strict(),
+    z.object({
+      kind: z.literal('rss_item'),
+      id: nonEmptyString,
+      name: nonEmptyString,
+      itemId: nonEmptyString,
+    }).strict(),
+    z.object({
+      kind: z.literal('rss_source'),
+      id: nonEmptyString,
+      name: nonEmptyString,
+      sourceId: nonEmptyString,
+    }).strict(),
+    z.object({
+      kind: z.literal('calendar_window'),
+      id: nonEmptyString,
+      name: nonEmptyString,
+      start: nonEmptyString,
+      end: nonEmptyString,
+      calendarId: nonEmptyString.optional(),
+    }).strict(),
+    z.object({
+      kind: z.literal('widget_target'),
+      id: nonEmptyString,
+      name: nonEmptyString,
+      logicalResourceId: nonEmptyString,
+      tabId: nonEmptyString,
+      widgetId: nonEmptyString,
+      currentVersion: sha256Version,
+      currentDigest: sha256Digest,
+      policyEpoch: z.number().int().positive().safe(),
+      incarnationKey: sha256Digest,
     }).strict(),
   ])).max(32).optional(),
   currentDocumentAnchor: codexCurrentDocumentAnchorSchema.optional(),

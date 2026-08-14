@@ -11,11 +11,45 @@
  * never fail the underlying write action.
  */
 
+import type { BrowserEnvironmentSummary } from '../../../shared/browser-action-outcome'
+
+export type { BrowserEnvironmentSummary }
+
 export interface BrowserActionReceiptProbe {
   url?: unknown
   title?: unknown
   activeElement?: unknown
   visibleSignal?: unknown
+}
+
+const ENVIRONMENT_URL_MAX = 512
+const ENVIRONMENT_TITLE_MAX = 160
+
+export function buildBrowserEnvironmentSummary(input: {
+  targetTabId?: string | null
+  url?: string | null
+  title?: string | null
+  dialogState?: 'open' | 'closed'
+  fileChooserState?: 'open' | 'closed'
+  downloadState?: 'in_flight' | 'settled'
+  sampledAt?: string | null
+}): BrowserEnvironmentSummary {
+  const sampledAt = input.sampledAt && Number.isFinite(Date.parse(input.sampledAt))
+    ? input.sampledAt
+    : new Date().toISOString()
+  const url = String(input.url || '').replace(/^[a-z][a-z0-9+.-]*:\/\/[^/@]*@/i, (match) => (
+    match.replace(/\/\/[^/@]*@/, '//')
+  )).slice(0, ENVIRONMENT_URL_MAX)
+  const title = String(input.title || '').replace(/\s+/g, ' ').trim().slice(0, ENVIRONMENT_TITLE_MAX)
+  return {
+    sampledAt,
+    ...(input.targetTabId ? { targetTabId: input.targetTabId } : {}),
+    ...(url ? { url } : {}),
+    ...(title ? { title } : {}),
+    ...(input.dialogState ? { dialogState: input.dialogState } : {}),
+    ...(input.fileChooserState ? { fileChooserState: input.fileChooserState } : {}),
+    ...(input.downloadState ? { downloadState: input.downloadState } : {}),
+  }
 }
 
 export interface BrowserActionReceipt {

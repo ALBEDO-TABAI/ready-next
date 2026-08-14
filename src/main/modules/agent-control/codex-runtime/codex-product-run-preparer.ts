@@ -71,6 +71,13 @@ export type PreparedCodexProductRun = {
   externalReadSlice?: PreparedCodexExternalReadSlice
   resourceAuthorities?: PreparedCodexResourceAuthority[]
   browserPageRef?: NonNullable<TrustedRequestEnvironment['browserPageRef']>
+  productSurfaceTargets?: {
+    rssItemId?: string | null
+    rssSourceId?: string | null
+    calendarEventId?: string | null
+    calendarWindow?: { start: string; end: string; calendarId?: string } | null
+    widgetId?: string | null
+  }
   productBudgetSeed: {
     maxIterations: number
     maxToolCalls: number
@@ -107,6 +114,7 @@ export type CodexProductRunPreparationInput = {
   externalReadSlice?: PreparedCodexExternalReadSlice | null
   resourceAuthorities?: PreparedCodexResourceAuthority[]
   browserPageRef?: NonNullable<TrustedRequestEnvironment['browserPageRef']>
+  productSurfaceTargets?: PreparedCodexProductRun['productSurfaceTargets']
   productBudgetSeed: {
     maxIterations: number
     maxToolCalls: number
@@ -204,6 +212,17 @@ const preparationInputSchema = z.object({
   externalReadSlice: preparedExternalReadSliceSchema.nullable().optional(),
   resourceAuthorities: z.array(preparedCodexResourceAuthoritySchema).optional(),
   browserPageRef: browserPageRefSchema.optional(),
+  productSurfaceTargets: z.object({
+    rssItemId: z.string().nullable().optional(),
+    rssSourceId: z.string().nullable().optional(),
+    calendarEventId: z.string().nullable().optional(),
+    calendarWindow: z.object({
+      start: z.string(),
+      end: z.string(),
+      calendarId: z.string().optional(),
+    }).strict().nullable().optional(),
+    widgetId: z.string().nullable().optional(),
+  }).strict().optional(),
   productBudgetSeed: budgetSeedSchema,
 }).strict()
 const preparedRunSchema = z.object({
@@ -234,6 +253,17 @@ const preparedRunSchema = z.object({
   externalReadSlice: preparedExternalReadSliceSchema.optional(),
   resourceAuthorities: z.array(preparedCodexResourceAuthoritySchema).optional(),
   browserPageRef: browserPageRefSchema.optional(),
+  productSurfaceTargets: z.object({
+    rssItemId: z.string().nullable().optional(),
+    rssSourceId: z.string().nullable().optional(),
+    calendarEventId: z.string().nullable().optional(),
+    calendarWindow: z.object({
+      start: z.string(),
+      end: z.string(),
+      calendarId: z.string().optional(),
+    }).strict().nullable().optional(),
+    widgetId: z.string().nullable().optional(),
+  }).strict().optional(),
   productBudgetSeed: budgetSeedSchema,
   neutralProjectionSeed: z.object({
     phase: z.literal('planning'),
@@ -324,9 +354,6 @@ export class CodexProductRunPreparer {
     const currentDocumentAnchor = input.currentDocumentAnchor ?? null
     const externalReadSlice = input.externalReadSlice ?? null
     const resourceAuthorities = input.resourceAuthorities ?? []
-    if (currentDocumentAnchor && externalReadSlice) {
-      return { ok: false, code: 'invalid_product_ingress' }
-    }
     if (currentDocumentAnchor) {
       const matchingReference = input.resourceAdditionalContext.find(
         (reference) => reference.logicalResourceId === currentDocumentAnchor.logicalResourceId,
@@ -348,8 +375,9 @@ export class CodexProductRunPreparer {
         || matchingReference.currentDigest !== externalReadSlice.currentDigest
         || matchingReference.supersedesVersion !== null
         || matchingReference.policyEpoch !== externalReadSlice.policyEpoch
-        || JSON.stringify(input.readyTurnToolAuthorization.allowedToolNames)
-          !== JSON.stringify([...externalReadSlice.allowedToolNames].sort())) {
+        || externalReadSlice.allowedToolNames.some(
+          (toolName) => !input.readyTurnToolAuthorization.allowedToolNames.includes(toolName),
+        )) {
         return { ok: false, code: 'invalid_product_ingress' }
       }
     }
@@ -420,6 +448,7 @@ export class CodexProductRunPreparer {
         ...(externalReadSlice ? { externalReadSlice } : {}),
         ...(resourceAuthorities.length > 0 ? { resourceAuthorities } : {}),
         ...(input.browserPageRef ? { browserPageRef: input.browserPageRef } : {}),
+        ...(input.productSurfaceTargets ? { productSurfaceTargets: input.productSurfaceTargets } : {}),
         productBudgetSeed: input.productBudgetSeed,
         neutralProjectionSeed: {
           phase: 'planning',

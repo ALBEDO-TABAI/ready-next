@@ -1,6 +1,6 @@
 # 代码行数健康度台账
 
-> 更新时间：2026-08-13
+> 更新时间：2026-08-14
 
 这份台账记录“任务给代码文件增加行数后，文件总行数已超过 1000 行”的健康度评估。它不是按行数自动要求拆分，而是把真正影响维护、验证和协作的风险持续留下来。
 
@@ -21,6 +21,31 @@
 
 | 评估日期 | 任务 | 文件 | 总行数 | 本次新增 | 结论 | 判断与后续动作 | 状态 |
 | --- | --- | --- | ---: | ---: | --- | --- | --- |
+| 2026-08-14 | Codex Browser Enter 部分按键结算 | `src/main/modules/tools/browser-input-actions.ts` | 1505 | 净 +约34 | 一般 | 一次完整按键按已发送次数结算。2026-09-14 复查。 | 已排期：2026-09-14 |
+| 2026-08-14 | Codex Browser 文字按键发送前核对 | `src/main/modules/tools/browser-input-actions.ts` | 1471 | 净 +约34 | 一般 | 抽出共用发送前页面核对，覆盖指针/文字/键盘。2026-09-14 复查。 | 已排期：2026-09-14 |
+| 2026-08-14 | Codex Browser 换页核对与部分滚动复审 | `src/main/modules/tools/browser-act-tools.ts` | 2591 | 净 +约19 | 危险 | 只把冻结文档身份绑到 click/type 投递，并回收指针拒绝。 | 待独立拆分合同；交付时提醒 |
+| 2026-08-14 | Codex Browser 换页核对与部分滚动复审 | `src/main/modules/tools/browser-input-actions.ts` | 1437 | 净 +约15 | 一般 | 指针绑定仍在输入簇。2026-09-14 复查。 | 已排期：2026-09-14 |
+| 2026-08-14 | Codex Browser 换页核对与部分滚动复审 | `src/main/modules/tools/tool-executor.ts` | 1365 | 净 +1 | 危险 | 只把返回前身份核对限制为 observe。 | 待独立拆分合同；交付时提醒 |
+| 2026-08-14 | Codex Browser 文档代次与关闭复审 | `src/main/modules/tools/browser-act-tools.ts` | 2572 | 净 +约18 | 危险 | 只把冻结文档身份传入指针投递。 | 待独立拆分合同；交付时提醒 |
+| 2026-08-14 | Codex Browser 文档代次与关闭复审 | `src/main/modules/tools/browser-input-actions.ts` | 1422 | 净 +约31 | 一般 | 投递前补文档代次核对。2026-09-14 复查。 | 已排期：2026-09-14 |
+| 2026-08-14 | Codex Browser 文档代次与关闭复审 | `src/main/modules/tools/tool-executor.ts` | 1364 | 净 +约21 | 危险 | 读取入账前再核冻结页面身份。 | 待独立拆分合同；交付时提醒 |
+| 2026-08-14 | Codex Browser 页签/指针/关闭复审 | `src/main/modules/tools/browser-input-actions.ts` | 1391 | 净 +约24 | 一般 | 只在投递前补同步再读。2026-09-14 复查键鼠簇是否继续下沉。 | 已排期：2026-09-14 |
+| 2026-08-14 | Codex Browser 页签/指针/关闭复审 | `src/main/modules/tools/tool-executor.ts` | 1343 | 净 +约13 | 危险 | 只拒绝模型 open 页签并收紧 list 绑定。 | 待独立拆分合同；交付时提醒 |
+| 2026-08-14 | Codex Browser 页签/指针/关闭复审 | `src/main/modules/tools/browser-observe-tools.ts` | 1218 | 净 +约5 | 一般 | 只让 tabs_list 在钉死后过滤到本页。2026-09-14 复查观察分派器密度。 | 已排期：2026-09-14 |
+| 2026-08-14 | Codex Browser 执行绑定与关闭收口 | `src/main/modules/tools/browser-act-tools.ts` | 2554 | 净 +约30 | 危险 | 只把 hover/drag/scroll 改成投递前再读；分派器职责未扩大。 | 待独立拆分合同；交付时提醒 |
+| 2026-08-14 | Codex Browser 执行绑定与关闭收口 | `src/main/modules/tools/browser-input-actions.ts` | 1367 | 净 +约70 | 一般 | 抽出 `dispatchTrustedPointer` 作为投递前重读入口。2026-09-14 复查键鼠簇是否继续下沉。 | 已排期：2026-09-14 |
+| 2026-08-14 | Codex Browser 执行绑定与关闭收口 | `src/main/modules/tools/tool-executor.ts` | 1330 | 净 +约15 | 危险 | 只补模型调用缺 pageRef 时失败关闭，不扩大分派职责。 | 待独立拆分合同；交付时提醒 |
+| 2026-08-14 | Codex Browser 执行绑定与关闭收口 | `src/main/modules/agent-control/runtime-core/runtime.ts` | 2013 | 净 +约20 | 危险 | 只在 canonical/failure 事务提交后 reconcile 页面控制副作用。 | 待独立拆分合同；交付时提醒 |
+| 2026-08-14 | Codex Browser 接线切片 | `src/main/modules/agent-control/codex-runtime/codex-runtime-production-composition.ts` | 3211 | 净 +29 | 危险 | 本轮只把 Browser 准入快照接到既有 send 组合；factory 仍是单一闭包装配根。 | 后续拆分；交付时提醒 |
+| 2026-08-14 | Codex Browser 接线切片 | `src/main/modules/tools/browser-act-tools.ts` | 2524 | 净 +约40 | 危险 | 只给 hover/scroll/drag 补同一指针 preflight，未扩大分派器职责。 | 待独立拆分合同；交付时提醒 |
+| 2026-08-14 | Codex Browser 接线切片 | `src/main/modules/tools/browser-input-actions.ts` | 1298 | 净 +约30 | 一般 | 仍是输入/键鼠动作簇；本轮只抽出共用 pointer 拒绝回执。2026-09-14 复查是否继续下沉。 | 已排期：2026-09-14 |
+| 2026-08-14 | Ready host/store 拆分 | `src/main/modules/agent-control/codex-runtime/codex-runtime-production-composition.ts` | 3182 | 净 -1218 | 危险 | 已把资源 ingress、closeout 辅助、turn 授权和 lifecycle store 迁出，公开 facade 与 re-export 保持不变。factory 仍是单一闭包装配根（ingress/host/closeCandidate），不宜再机械切片。后续若再拆，只允许按显式 port 上下文对象下沉，不得复制第二条生产路径。 | 后续拆分；交付时提醒 |
+| 2026-08-14 | Ready host/store 拆分 | `src/renderer/stores/useAgent.ts` | 2001 | 净 -423 | 危险 | 发送编排与工作面资源已迁出；`sendMessage` 仍是单一 facade，pending ingress Map 由编排模块独占。监听、会话选择和生命周期动作仍在同一 store，再拆需先解 listener 对 `useAgent.getState` 的环。 | 待独立拆分合同；交付时提醒 |
+| 2026-08-14 | Codex 工作面重接线审查修复 | `src/main/modules/agent-control/codex-runtime/codex-runtime-production-composition.ts` | 4400 | 净 +58 | 危险 | 文件仍混合网关、生命周期、工具、资源与发布收口；本轮只补 Tag Forge 别名授权、RSS 分析端口和日程列表回执接线。后续仍按 gateway/lifecycle/tool/resource 边界拆分。 | 后续拆分；交付时提醒 |
+| 2026-08-14 | Codex 工作面重接线审查修复 | `src/renderer/stores/useAgent.ts` | 2424 | 净 +2 | 危险 | 会话发送仍集中在同一 store；本轮只把循环日程选择映射为可持久 parent id。后续按发送编排与会话选择拆分。 | 待独立拆分合同；交付时提醒 |
+| 2026-08-14 | Codex 工作面重接线 | `src/main/modules/agent-control/codex-runtime/codex-runtime-production-composition.ts` | 4342 | 净 +127 | 危险 | 文件仍混合网关、生命周期、工具、资源与发布收口；本轮只把产品动作桥与工具面组合接到既有 send/tool 入口。后续仍按 gateway/lifecycle/tool/resource 边界拆分。 | 后续拆分；交付时提醒 |
+| 2026-08-14 | Codex 工作面重接线审查修复 | `src/renderer/stores/useAgent.ts` | 2431 | 净 +9 | 危险 | 会话发送仍集中在同一 store；本轮只把循环日程选择映射为可持久 parent id。后续按发送编排与会话选择拆分。 | 待独立拆分合同；交付时提醒 |
+| 2026-08-14 | Codex 工作面重接线 | `src/renderer/stores/useAgent.ts` | 2422 | 净 +57 | 危险 | 会话发送仍集中在同一 store；本轮只调整发送顺序并附带工作面结构化资源。后续按发送编排与会话选择拆分。 | 待独立拆分合同；交付时提醒 |
 | 2026-08-13 | Codex 引用入口与启动就绪收口 | `src/preload/index.ts` | 1513 | 净 +18 | 健康 | 本轮只把既有 Agent、Skill 与 ask-user IPC 机械接到统一就绪门，通道定义仍是单一声明表面。 | 无需处理 |
 | 2026-08-13 | Codex 引用入口与启动就绪收口 | `src/renderer/stores/useAgent.ts` | 2365 | 净 +20 | 危险 | 会话、消息、准入与生命周期状态仍集中在同一 store；本轮只消除显式创建与启动 hydration 的竞态。后续按会话目录、准入和生命周期三个 owner 拆分。 | 待独立拆分合同；交付时提醒 |
 | 2026-08-13 | Codex 引用入口与启动就绪收口 | `src/main/modules/tools/tool-executor.ts` | 1317 | 净 +65 | 危险 | 文件继续混合多个产品域工具执行；本轮只把 Browser 工具钉到引用时冻结的页面并逐次重验。后续按 Browser、Document 与通用工具域拆分。 | 待独立拆分合同；交付时提醒 |

@@ -251,15 +251,28 @@ function truncateRruleWithUntil(rawRule: string, occurrenceStartUnix: number): s
   return transformed.join('\n')
 }
 
+let calendarEventChangedNotifier: ((eventId: string) => void) | null = null
+
+export function notifyCalendarEventChanged(eventId: string): void {
+  try {
+    calendarEventChangedNotifier?.(eventId)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    console.warn(`[calendar-ipc] onEventChanged(${eventId}) threw:`, message)
+  }
+}
+
 // --- IPC Setup ---
 
 export function setupCalendarIPC(useMock = false, options: CalendarIPCOptions = {}): void {
   const repository = new CalendarRepository()
   const notifyEventChanged = (eventId: string): void => {
+    notifyCalendarEventChanged(eventId)
+  }
+  calendarEventChangedNotifier = (eventId: string): void => {
     try {
       options.onEventChanged?.(eventId)
     } catch (error) {
-      // Scheduler crash must never break the IPC reply path. Log and move on.
       const message = error instanceof Error ? error.message : String(error)
       console.warn(`[calendar-ipc] onEventChanged(${eventId}) threw:`, message)
     }

@@ -3,6 +3,7 @@ import { createHash } from 'crypto'
 import type {
   BrowserActionOutcome,
   BrowserActionTargetIdentity,
+  BrowserEnvironmentSummary,
 } from '../../../shared/browser-action-outcome'
 import {
   BROWSER_OPERATION_IDS,
@@ -319,9 +320,40 @@ function parsePersistedOutcome(value: unknown, path: string): BrowserActionOutco
     ...(outcome.postActionTabId === undefined
       ? {}
       : { postActionTabId: requiredString(outcome.postActionTabId, `${path}.postActionTabId`) }),
+    ...(outcome.environmentSummary === undefined
+      ? {}
+      : { environmentSummary: parsePersistedEnvironmentSummary(outcome.environmentSummary, `${path}.environmentSummary`) }),
     ...(outcome.search === undefined
       ? {}
       : { search: parsePersistedSearchOutcome(outcome.search, `${path}.search`) }),
+  }
+}
+
+function parsePersistedEnvironmentSummary(value: unknown, path: string): BrowserEnvironmentSummary {
+  const summary = requiredRecord(value, path)
+  const sampledAt = requiredTimestamp(summary.sampledAt, `${path}.sampledAt`)
+  const dialogState = summary.dialogState
+  const fileChooserState = summary.fileChooserState
+  const downloadState = summary.downloadState
+  if (dialogState !== undefined && dialogState !== 'open' && dialogState !== 'closed') {
+    corruptBrowserWorkflowState(`${path}.dialogState`)
+  }
+  if (fileChooserState !== undefined && fileChooserState !== 'open' && fileChooserState !== 'closed') {
+    corruptBrowserWorkflowState(`${path}.fileChooserState`)
+  }
+  if (downloadState !== undefined && downloadState !== 'in_flight' && downloadState !== 'settled') {
+    corruptBrowserWorkflowState(`${path}.downloadState`)
+  }
+  return {
+    sampledAt,
+    ...(summary.targetTabId === undefined
+      ? {}
+      : { targetTabId: requiredString(summary.targetTabId, `${path}.targetTabId`) }),
+    ...(summary.url === undefined ? {} : { url: requiredString(summary.url, `${path}.url`) }),
+    ...(summary.title === undefined ? {} : { title: requiredString(summary.title, `${path}.title`) }),
+    ...(dialogState === undefined ? {} : { dialogState }),
+    ...(fileChooserState === undefined ? {} : { fileChooserState }),
+    ...(downloadState === undefined ? {} : { downloadState }),
   }
 }
 

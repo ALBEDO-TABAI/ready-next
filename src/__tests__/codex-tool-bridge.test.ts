@@ -413,6 +413,18 @@ class FakeReceipts implements ReadyToolActionReceiptPort {
       evidenceDigest: input.evidenceDigest,
     })
   }
+  markIndeterminate(input: {
+    readyActionId: string
+    actionIdentityDigest: string
+    reason: string
+    evidenceDigest: string
+    at: string
+  }): void {
+    assert.ok(input.actionIdentityDigest)
+    assert.ok(input.at)
+    this.pending.delete(input.readyActionId)
+    this.indeterminate = true
+  }
 }
 
 function request(overrides: Record<string, unknown> = {}) {

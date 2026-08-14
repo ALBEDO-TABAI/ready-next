@@ -445,11 +445,16 @@ export class BrowserCapabilityService {
    * NOTE: the humanized-input migration (WP5) will route this through the
    * unified write channel; today it is a single instant scroll step.
    */
-  async scrollViewportOnce(tabId: string | null, signal?: AbortSignal): Promise<{ scrollY: number; atBottom: boolean }> {
+  async scrollViewportOnce(
+    tabId: string | null,
+    signal?: AbortSignal,
+    beforeScroll?: () => Promise<void>,
+  ): Promise<{ scrollY: number; atBottom: boolean }> {
     if (!this.host.dispatchMouse) throw new Error('browser_trusted_scroll_unavailable')
     throwIfAborted(signal)
     const before = await this.readScrollMetrics(tabId)
     throwIfAborted(signal)
+    if (beforeScroll) await beforeScroll()
     await this.host.dispatchMouse(tabId, {
       type: 'mouseWheel',
       x: before.x,
@@ -477,7 +482,16 @@ export class BrowserCapabilityService {
     let previous = await this.readScrollMetrics(tabId)
     while (scrolls < maxScrolls && unchangedRounds < stableRounds) {
       throwIfAborted(signal)
-      const scroll = await this.scrollViewportOnce(tabId, signal)
+      let scroll: { scrollY: number; atBottom: boolean }
+      try {
+        if (options.beforeScroll) await options.beforeScroll()
+        scroll = await this.scrollViewportOnce(tabId, signal, options.beforeScroll)
+      } catch (error) {
+        if (scrolls > 0 && error && typeof error === 'object') {
+          (error as { dispatchedScrolls?: number }).dispatchedScrolls = scrolls
+        }
+        throw error
+      }
       scrolls += 1
       const next = await this.readScrollMetrics(tabId)
       const unchanged = next.height === previous.height && next.y === previous.y

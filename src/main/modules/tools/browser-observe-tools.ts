@@ -655,9 +655,13 @@ export async function executeBrowserObserveTool(
   const { controller, abortSignal, sessionId,  attachBrowserToolOutput } = ctx
   switch (toolName) {
       case 'tabs_list': {
-        const tabs = controller.getTabList() as Array<ReturnType<BrowserController['getTabList']>[number] & {
+        const allowedTabId = typeof args.tab_id === 'string' ? args.tab_id.trim() : ''
+        const listed = controller.getTabList() as Array<ReturnType<BrowserController['getTabList']>[number] & {
           openerTabId?: string | null
         }>
+        const tabs = allowedTabId
+          ? listed.filter((tab) => tab.id === allowedTabId)
+          : listed
         if (tabs.length === 0) return 'No tabs open.'
         const byId = new Map(tabs.map((tab) => [tab.id, tab]))
         const rootTabId = (tabId: string): string => {

@@ -904,7 +904,7 @@ test('ordering: M2 tool missing from allowedToolNames → tool_restricted_this_t
 })
 
 test('ordering: M2 tool with invalid input → input validation error, NOT pending confirmation', async () => {
-  const output = await executeToolCall('calendar_delete_event', {}, modelContext())
+  const output = await executeToolCall('calendar_create_event', {}, modelContext())
   assert.equal(output.data?.errorKind, 'input_validation')
 })
 

@@ -26,6 +26,68 @@ import {
   truncate,
 } from './browser-tool-shared'
 import { parseBrowserResearchPublicRequest } from './browser-action-contracts'
+import {
+  assertTrustedPointerDelivery,
+  bindTrustedPointerExpected,
+  TrustedPointerBlockedError,
+  trustedInputPageDenied,
+} from './browser-input-actions'
+
+function collectionTrustedPointerExpected(
+  ctx: BrowserCollectionToolContext,
+  tabId: string | null,
+): { physicalTargetToken: string; mainFrameDocumentToken: string } | null {
+  const ref = ctx.taskExecutionContext?.trustedPageRef
+  if (!ref || (tabId && ref.tabId !== tabId)) return null
+  return {
+    physicalTargetToken: ref.physicalTargetToken,
+    mainFrameDocumentToken: ref.mainFrameDocumentToken,
+  }
+}
+
+async function assertCollectScrollAdmission(
+  controller: BrowserController,
+  tabId: string | null,
+  mutationBoundary: BrowserMutationBoundary,
+  expected?: { physicalTargetToken: string; mainFrameDocumentToken: string } | null,
+): Promise<void> {
+  await assertTrustedPointerDelivery(controller, tabId)
+  const stale = await trustedInputPageDenied(controller, tabId, expected)
+  if (stale) throw new TrustedPointerBlockedError(stale)
+  mutationBoundary.invokeTransport(() => undefined)
+}
+
+function collectScrollAdmissionFailure(error: unknown): ToolExecutionOutput | null {
+  const dispatchedScrolls = Number((error as { dispatchedScrolls?: unknown })?.dispatchedScrolls || 0)
+  const partial = Number.isFinite(dispatchedScrolls) && dispatchedScrolls > 0
+  const partialFacts = {
+    mayHaveCommitted: partial,
+    needsObservation: partial,
+    dispatchedScrolls: Math.max(0, Math.floor(Number.isFinite(dispatchedScrolls) ? dispatchedScrolls : 0)),
+    dispatch: partial ? 'accepted' : 'rejected',
+    delivery: partial ? 'unknown' : 'not_delivered',
+    effect: partial ? 'unknown' : 'not_applicable',
+  } as const
+  if (error instanceof TrustedPointerBlockedError) {
+    const data = error.output.data && typeof error.output.data === 'object'
+      ? error.output.data as Record<string, unknown>
+      : {}
+    return browserStructuredOutput({
+      ...data,
+      ok: false,
+      errorKind: String(data.errorKind || 'browser_surface_required'),
+      ...partialFacts,
+    })
+  }
+  if (error instanceof Error && error.name === 'BrowserMutationFenceError') {
+    return browserStructuredOutput({
+      ok: false,
+      errorKind: 'browser_workflow_write_fenced',
+      ...partialFacts,
+    })
+  }
+  return null
+}
 
 interface BrowserTaskFailedItem {
   url: string
@@ -123,6 +185,11 @@ export interface BrowserCollectionToolContext {
     executionBinding?: import('../../../shared/agent-execution-profile').TaskExecutionBinding | null
     workspaceRoots?: string[]
     registerRunCleanup?: (cleanup: () => void | Promise<void>) => void
+    trustedPageRef?: {
+      tabId: string
+      physicalTargetToken: string
+      mainFrameDocumentToken: string
+    } | null
   }
 }
 
@@ -456,14 +523,25 @@ export async function executeBrowserCollectionTool(
       case 'collect_scroll': {
         const template = String(args.template || 'card_list') as never
         const tabId = (args.tab_id as string) || null
-        const result = await controller.scrollCollect(tabId, {
-          template,
-          itemSelector: typeof args.item_selector === 'string' ? args.item_selector : undefined,
-          limit: Number(args.limit || 0) || undefined,
-          maxScrolls: Number(args.max_scrolls || 0) || undefined,
-          scrollDelayMs: Number(args.scroll_delay_ms || 0) || undefined,
-        }, abortSignal)
-        return JSON.stringify({ ok: true, observationFresh: true, result }, null, 2)
+        const expected = collectionTrustedPointerExpected(ctx, tabId)
+        const releaseExpected = bindTrustedPointerExpected(expected)
+        try {
+          const result = await controller.scrollCollect(tabId, {
+            template,
+            itemSelector: typeof args.item_selector === 'string' ? args.item_selector : undefined,
+            limit: Number(args.limit || 0) || undefined,
+            maxScrolls: Number(args.max_scrolls || 0) || undefined,
+            scrollDelayMs: Number(args.scroll_delay_ms || 0) || undefined,
+            beforeScroll: () => assertCollectScrollAdmission(controller, tabId, mutationBoundary, expected),
+          }, abortSignal)
+          return JSON.stringify({ ok: true, observationFresh: true, result }, null, 2)
+        } catch (error) {
+          const blocked = collectScrollAdmissionFailure(error)
+          if (blocked) return blocked
+          throw error
+        } finally {
+          releaseExpected()
+        }
       }
 
       case 'task_get': {
@@ -498,14 +576,25 @@ export async function executeBrowserCollectionTool(
 
       case 'collect_visible': {
         const tabId = (args.tab_id as string) || null
-        const result = await controller.scrollCollect(tabId, {
-          template: String(args.template || 'card_list') as never,
-          itemSelector: typeof args.item_selector === 'string' ? args.item_selector : undefined,
-          limit: Number(args.limit || args.max_items || 0) || undefined,
-          maxScrolls: Number(args.max_scrolls || args.max_rounds || 0) || undefined,
-          scrollDelayMs: Number(args.scroll_delay_ms || 0) || undefined,
-        }, abortSignal)
-        return JSON.stringify({ ok: true, observationFresh: true, result }, null, 2)
+        const expected = collectionTrustedPointerExpected(ctx, tabId)
+        const releaseExpected = bindTrustedPointerExpected(expected)
+        try {
+          const result = await controller.scrollCollect(tabId, {
+            template: String(args.template || 'card_list') as never,
+            itemSelector: typeof args.item_selector === 'string' ? args.item_selector : undefined,
+            limit: Number(args.limit || args.max_items || 0) || undefined,
+            maxScrolls: Number(args.max_scrolls || args.max_rounds || 0) || undefined,
+            scrollDelayMs: Number(args.scroll_delay_ms || 0) || undefined,
+            beforeScroll: () => assertCollectScrollAdmission(controller, tabId, mutationBoundary, expected),
+          }, abortSignal)
+          return JSON.stringify({ ok: true, observationFresh: true, result }, null, 2)
+        } catch (error) {
+          const blocked = collectScrollAdmissionFailure(error)
+          if (blocked) return blocked
+          throw error
+        } finally {
+          releaseExpected()
+        }
       }
 
       default:

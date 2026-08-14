@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from 'node:crypto'
+import { randomUUID } from 'node:crypto'
 import { appendFileSync, mkdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
@@ -10,6 +10,7 @@ import {
   readActionAuthorizationModeFromEnvelope,
   type ActionAuthorizationMode,
 } from '../../../../shared/action-authorization-mode'
+import { persistableCalendarEventId } from '../../../../shared/calendar-event-identity'
 import type {
   CodexCurrentDocumentAnchor,
   SendScopedRequest,
@@ -23,7 +24,15 @@ import {
   type RequestEnvelopeResource,
 } from '../contracts/request-envelope'
 import { classifyIntent, type IntentClassification } from '../intent-classifier'
-import { CURRENT_DOCUMENT_CONTEXT_FLOOR_TOOL_NAMES } from '../domain-adapters/capability-floors'
+import { TAG_FORGE_EXCLUSIVE_TOOL_NAMES } from './codex-product-action-map'
+import { createCodexProductActionRequester } from './codex-product-action-requester'
+import { createProductionProductActionHandlers } from './codex-product-action-handlers'
+import { composeCodexTurnToolSnapshot } from './codex-tool-surface-composition'
+import {
+  buildBrowserAdmissionAuthoritySnapshot,
+  resolveBrowserExecutionPageRef,
+} from './codex-browser-admission'
+import { isCodexFolderTagForgeAlias } from './codex-folder-tag-forge-alias'
 import {
   buildSelectedSkillToolAuthorization,
   type SkillToolAuthorization
@@ -41,7 +50,6 @@ import { createRunBudgetSeed } from '../task-projection/run-budget-policy'
 import {
   buildCodexIngressAdmittedDigest,
   CodexBindingRepository,
-  CodexBindingRepositoryError,
   type CodexHostFailureRecovery,
   type CodexBrowserVerifierAttemptRead,
   type CodexBrowserVerifierAttemptOutcome,
@@ -118,9 +126,7 @@ import {
 import {
   ReadyCodexLifecycleAdapter,
   ReadyCodexLifecyclePortError,
-  type CloseRetirementEvidence,
   type ProductTurnCloseoutEvidence,
-  type ReadyCodexLifecycleStore,
 } from './ready-codex-lifecycle-adapter'
 import { workflowDigest } from '../../repositories/browser-workflow-codec'
 import {
@@ -139,19 +145,88 @@ import {
   verifyCodexBrowserWorkflowCandidate,
 } from './codex-browser-workflow-verifier'
 
-export type CodexRendererToolActionRequester = (payload: {
-  agent?: string
-  sessionId: string
-  runId: string
-  codexThreadId: string
-  codexTurnId: string
-  codexCallId: string
-  readyActionId: string
-  actionIdentityDigest: string
-  tool: string
-  args: Record<string, unknown>
-  abortSignal: AbortSignal
-}) => Promise<Record<string, unknown>>
+import {
+  assertWidgetTargetsMatchAnchor,
+  extractProductSurfaceTargets,
+  sha256,
+  trustedBrowserReferenceInput,
+  trustedCalendarReferenceInput,
+  trustedRssItemInput,
+  trustedRssSourceInput,
+  type CodexRendererToolActionRequester,
+} from './codex-product-surface-ingress'
+import {
+  buildCodexEngineTerminalFinalizationKey,
+  CodexCloseCandidateInFlightOwner,
+  CodexProductCloseoutExpectationGuard,
+  requestCodexEngineTerminalLifecycleActionBeforeCloseout,
+  requestCodexEngineTerminalUserStopBeforeCloseout,
+  runCodexEngineTerminalFinalization,
+  type CodexProductCloseoutMode,
+} from './codex-product-closeout-support'
+import {
+  buildCodexProductRequestEnvelope,
+  buildCurrentDocumentReadToolSnapshot,
+  buildExplicitResourceReadToolSnapshot,
+  buildExternalReadToolSnapshot,
+  codexAllowsDirectProvisionalStream,
+  createCodexProductBudgetSeed,
+  createCodexProductUpstreamProfileSnapshot,
+  createCurrentDocumentReadRequester,
+  hasExplicitCurrentDocumentWriteIntent,
+  readCodexInstructionContractDigest,
+  readCodexPreparedActionAuthorizationEnvelope,
+  resolveCodexBrowserWorkflowVerifierBundle,
+  resolveCodexProductTurnAuthorization,
+  resolveCodexThreadInstructionContract,
+  resourceReferenceForAnchor,
+  RuntimeGate,
+  toCodexInput,
+  toRunMessage,
+  validateCurrentDocumentReadPayload,
+} from './codex-product-turn-authorization'
+import {
+  createLifecycleStore,
+  terminalEvent,
+} from './codex-product-lifecycle-store'
+
+export type { CodexRendererToolActionRequester } from './codex-product-surface-ingress'
+export type { CodexProductCloseoutMode } from './codex-product-closeout-support'
+export {
+  buildCodexEngineTerminalFinalizationKey,
+  CodexCloseCandidateInFlightOwner,
+  CodexProductCloseoutExpectationGuard,
+  requestCodexEngineTerminalLifecycleActionBeforeCloseout,
+  requestCodexEngineTerminalUserStopBeforeCloseout,
+  runCodexEngineTerminalFinalization,
+} from './codex-product-closeout-support'
+export {
+  buildCodexProductRequestEnvelope,
+  buildCurrentDocumentReadToolSnapshot,
+  buildExplicitResourceReadToolSnapshot,
+  buildExternalReadToolSnapshot,
+  codexAllowsDirectProvisionalStream,
+  createCodexProductBudgetSeed,
+  createCodexProductUpstreamProfileSnapshot,
+  createCurrentDocumentReadRequester,
+  hasExplicitCurrentDocumentWriteIntent,
+  readCodexInstructionContractDigest,
+  readCodexPreparedActionAuthorizationEnvelope,
+  resolveCodexBrowserWorkflowVerifierBundle,
+  resolveCodexProductTurnAuthorization,
+  resolveCodexThreadInstructionContract,
+  resourceReferenceForAnchor,
+  RuntimeGate,
+  toCodexInput,
+  toRunMessage,
+  validateCurrentDocumentReadPayload,
+} from './codex-product-turn-authorization'
+export { buildCodexThreadDeveloperInstructions }
+export { retireCodexAliasForClose } from './codex-product-lifecycle-store'
+
+function isoNow(): string {
+  return new Date().toISOString()
+}
 
 type FactoryInput = {
   appPath: string
@@ -174,69 +249,6 @@ type PreparedDetail = {
   developerInstructions: string
   instructionContractDigest: string
   turnContractDigest: string
-}
-
-function sha256(value: string): string {
-  return createHash('sha256').update(value).digest('hex')
-}
-
-function isoNow(): string {
-  return new Date().toISOString()
-}
-
-function trustedBrowserReferenceInput(
-  reference: Awaited<ReturnType<typeof resolveTrustedBrowserReference>>,
-): CodexResolvedInlineResource | null {
-  if (!reference) return null
-  const context = reference.context
-  const text = [
-    '用户明确引用的网页（由 Ready 主进程现场读取）：',
-    `标题：${context.title || '(无标题)'}`,
-    `链接：${context.url}`,
-    context.heading ? `主标题：${context.heading}` : null,
-    context.selection ? `页面选中文本：${context.selection}` : null,
-    context.excerpt ? `页面正文摘录：${context.excerpt}` : null,
-  ].filter(Boolean).join('\n')
-  return {
-    name: context.title || context.url,
-    path: context.url,
-    text,
-    digest: sha256(JSON.stringify({
-      pageRef: reference.environment.browserPageRef,
-      context,
-    })),
-  }
-}
-
-function trustedCalendarReferenceInput(event: NonNullable<ReturnType<DatabaseManager['getCalendarEventById']>>): CodexResolvedInlineResource {
-  const canonical = {
-    id: event.id,
-    calendarId: event.calendar_id,
-    title: event.title,
-    description: event.description,
-    location: event.location,
-    startTime: event.start_time,
-    endTime: event.end_time,
-    allDay: event.all_day === 1,
-    recurrenceRule: event.recurrence_rule,
-    startTimezone: event.start_tz,
-    endTimezone: event.end_tz,
-    updatedAt: event.updated_at,
-  }
-  return {
-    name: event.title || '日程',
-    path: `calendar-event://${event.id}`,
-    text: [
-      '用户明确引用的日程（由 Ready 主进程现场读取）：',
-      `标题：${event.title || '(无标题日程)'}`,
-      `开始：${new Date(event.start_time).toISOString()}`,
-      `结束：${new Date(event.end_time).toISOString()}`,
-      `全天：${event.all_day === 1 ? '是' : '否'}`,
-      event.location ? `地点：${event.location}` : null,
-      event.description ? `备注：${event.description}` : null,
-    ].filter(Boolean).join('\n'),
-    digest: sha256(JSON.stringify(canonical)),
-  }
 }
 
 function stableErrorCode(error: unknown, fallback: string): string {
@@ -318,126 +330,6 @@ function isAbortFailure(error: unknown, signal: AbortSignal | null): boolean {
     || (error instanceof Error && error.name === 'AbortError')
     || (error instanceof Error && error.message === 'browser_verifier_settlement_interrupted')
 }
-
-export type CodexProductCloseoutMode = 'product' | 'verifier_accepted' | 'verifier_rejected' | 'publication_diverged' | 'recovery_failure' | 'lifecycle_stop' | 'lifecycle_close' | 'lifecycle_reset'
-
-export class CodexProductCloseoutExpectationGuard {
-  private readonly expected = new Map<string, {
-    mode: CodexProductCloseoutMode
-    token: symbol
-    recoveryFailure: null | {
-      code: string
-      evidenceDigest: string
-      pendingInteractionRestart: CodexPendingInteractionRestartPlan | null
-    }
-  }>()
-
-  acquire(readyRunId: string, mode: CodexProductCloseoutMode): symbol {
-    if (this.expected.has(readyRunId)) {
-      throw new Error('codex_product_closeout_in_flight')
-    }
-    const token = Symbol(readyRunId)
-    this.expected.set(readyRunId, { mode, token, recoveryFailure: null })
-    return token
-  }
-
-  acquireRecoveryFailure(
-    readyRunId: string,
-    input: {
-      code: string
-      evidenceDigest: string
-      pendingInteractionRestart?: CodexPendingInteractionRestartPlan | null
-    },
-  ): symbol {
-    const token = this.acquire(readyRunId, 'recovery_failure')
-    const expected = this.expected.get(readyRunId)
-    if (!expected || expected.token !== token) throw new Error('codex_product_closeout_in_flight')
-    expected.recoveryFailure = {
-      ...input,
-      pendingInteractionRestart: input.pendingInteractionRestart || null,
-    }
-    return token
-  }
-
-  release(readyRunId: string, token: symbol): void {
-    if (this.expected.get(readyRunId)?.token === token) this.expected.delete(readyRunId)
-  }
-
-  readMode(readyRunId: string): CodexProductCloseoutMode | null {
-    return this.expected.get(readyRunId)?.mode ?? null
-  }
-
-  readRecoveryFailure(readyRunId: string): {
-    code: string
-    evidenceDigest: string
-    pendingInteractionRestart: CodexPendingInteractionRestartPlan | null
-  } | null {
-    const expected = this.expected.get(readyRunId)
-    return expected?.mode === 'recovery_failure' ? expected.recoveryFailure : null
-  }
-}
-
-export class CodexCloseCandidateInFlightOwner<T> {
-  private readonly inFlight = new Map<string, {
-    candidateIdentityDigest: string
-    promise: Promise<T>
-  }>()
-
-  run(input: {
-    readyRunId: string
-    candidateIdentityDigest: string
-    close: () => Promise<T>
-  }): Promise<T> {
-    const existing = this.inFlight.get(input.readyRunId)
-    if (existing) {
-      if (existing.candidateIdentityDigest !== input.candidateIdentityDigest) {
-        return Promise.reject(new Error('codex_closeout_in_flight_candidate_conflict'))
-      }
-      return existing.promise
-    }
-    const promise = input.close()
-    this.inFlight.set(input.readyRunId, {
-      candidateIdentityDigest: input.candidateIdentityDigest,
-      promise,
-    })
-    const release = () => {
-      if (this.inFlight.get(input.readyRunId)?.promise === promise) {
-        this.inFlight.delete(input.readyRunId)
-      }
-    }
-    void promise.then(release, release)
-    return promise
-  }
-}
-
-export function runCodexEngineTerminalFinalization(input: {
-  deliver: () => void
-  cleanup: () => void
-  onDeliveryFailure?: (error: unknown) => void
-}): void {
-  let deliveryError: unknown = null
-  try {
-    input.deliver()
-  } catch (error) {
-    deliveryError = error
-  }
-  input.cleanup()
-  if (!deliveryError) return
-  if (input.onDeliveryFailure) {
-    input.onDeliveryFailure(deliveryError)
-    return
-  }
-  throw deliveryError
-}
-
-export function buildCodexEngineTerminalFinalizationKey(input: {
-  aliasId: string
-  aliasGeneration: number
-  readyRunId: string
-}): string {
-  return `${input.aliasId}\u0000${input.aliasGeneration}\u0000${input.readyRunId}`
-}
-
 function readE5ProofSentinels(): string[] {
   const raw = String(process.env.READY_CODEX_E5_PROOF_SENTINELS_JSON || '').trim()
   const values = raw
@@ -451,1018 +343,12 @@ function readE5ProofSentinels(): string[] {
   return values
 }
 
-export function buildCodexProductRequestEnvelope(
-  request: SendScopedRequest,
-  actionAuthorizationMode: ActionAuthorizationMode = DEFAULT_ACTION_AUTHORIZATION_MODE,
-  trustedEnvironment: import('../contracts/request-envelope').TrustedRequestEnvironment = {},
-  trustedResources: readonly RequestEnvelopeResource[] = [],
-  currentDocumentCanWrite = false,
-): RequestEnvelope {
-  const envelope = request.currentDocumentAnchor
-    ? buildRequestEnvelope({
-        userText: request.userMessage.content,
-        sessionId: request.scopeId,
-        scopeId: request.scopeId,
-        trustedEnvironment: { ...trustedEnvironment, workbenchMode: 'document' },
-        actionAuthorizationMode,
-      })
-    : buildRequestEnvelope({
-        userText: request.userMessage.content,
-        sessionId: request.scopeId,
-        scopeId: request.scopeId,
-        trustedEnvironment,
-        actionAuthorizationMode,
-      })
-  for (const resource of trustedResources) {
-    envelope.resources.push({ ...resource, order: envelope.resources.length })
-  }
-  if (trustedResources.some((resource) => resource.kind === 'attachment')) {
-    envelope.environmentHints.hasAttachments = true
-  }
-  const workspaceRoots = trustedResources
-    .filter((resource) => resource.kind === 'folder_reference' && resource.canRead && resource.path)
-    .map((resource) => resource.path as string)
-  if (workspaceRoots.length > 0) envelope.environmentHints.workspaceRoots = workspaceRoots
-  if (request.currentDocumentAnchor) {
-    const anchor = request.currentDocumentAnchor
-    envelope.resources.push({
-      id: anchor.logicalResourceId,
-      kind: 'document_context',
-      source: 'current_document',
-      name: anchor.title || '当前文档',
-      path: null,
-      tabId: anchor.tabId,
-      text: '',
-      summary: null,
-      order: envelope.resources.length,
-      canRead: true,
-      canWrite: currentDocumentCanWrite,
-    })
-    envelope.environmentHints.hasDocumentContext = true
-  }
-  return envelope
-}
-
-export function resolveCodexProductTurnAuthorization(input: {
-  host: Pick<CodexRuntimeHostPort, 'getScope' | 'resolveSkillAuthorizationForTurn'>
-  request: SendScopedRequest
-  scopeId: string
-  externalReadSlice: PreparedCodexExternalReadSlice | null
-  trustedEnvironment?: import('../contracts/request-envelope').TrustedRequestEnvironment
-  trustedResources?: readonly RequestEnvelopeResource[]
-  currentDocumentCanWrite?: boolean
-}): { requestEnvelope: RequestEnvelope; authorization: SkillToolAuthorization } {
-  const persistedScope = input.host.getScope(input.scopeId)
-  if (!persistedScope) throw new Error('codex_conversation_scope_not_found')
-  const actionAuthorizationMode = persistedScope.sourceKind === 'local'
-    ? parseActionAuthorizationMode(persistedScope.meta.actionAuthorizationMode)
-    : DEFAULT_ACTION_AUTHORIZATION_MODE
-  const requestEnvelope = buildCodexProductRequestEnvelope(
-    input.request,
-    actionAuthorizationMode,
-    input.trustedEnvironment,
-    input.trustedResources,
-    input.currentDocumentCanWrite,
-  )
-  const authorization = input.externalReadSlice?.kind === 'lark_cli_read'
-    ? buildSelectedSkillToolAuthorization({
-        skillId: 'lark-doc',
-        allowedTypedActions: [],
-        allowedPrimitives: input.externalReadSlice.allowedToolNames,
-        source: 'explicit',
-        reason: 'codex_external_read_slice',
-      })
-    : input.host.resolveSkillAuthorizationForTurn({
-        message: toRunMessage(input.request),
-        sessionId: input.scopeId,
-        messageVisibilityEpoch: persistedScope.messageVisibilityEpoch,
-        requestEnvelope,
-      })
-  return { requestEnvelope, authorization }
-}
-
-export function readCodexPreparedActionAuthorizationEnvelope(
-  product: Pick<CodexProductTurnRuntimeRead, 'prepared'>,
-): {
-  actionAuthorizationMode: ActionAuthorizationMode
-  resources?: Array<RequestEnvelopeResource & {
-    currentVersion: string
-    currentDigest: string
-    policyEpoch: number
-  }>
-  environmentHints?: {
-    workspaceRoots: string[]
-    workbenchMode?: 'browser'
-    browserPageRef?: NonNullable<import('../contracts/request-envelope').TrustedRequestEnvironment['browserPageRef']>
-  }
-} {
-  const authorities = product.prepared.resourceAuthorities ?? []
-  const browserPageRef = product.prepared.browserPageRef
-  return {
-    actionAuthorizationMode: parseActionAuthorizationMode(
-      product.prepared.actionAuthorizationMode,
-    ),
-    ...(authorities.length > 0 || browserPageRef
-      ? {
-          ...(authorities.length > 0 ? {
-            resources: authorities.map((authority, order) => ({
-              id: authority.logicalResourceId,
-              kind: authority.kind === 'local_directory' ? 'folder_reference' as const : 'attachment' as const,
-              source: authority.kind === 'local_directory' ? 'folder_reference' as const : 'user_attachment' as const,
-              name: authority.name,
-              path: authority.path,
-              text: '',
-              summary: null,
-              order,
-              canRead: true,
-              canWrite: false,
-              currentVersion: authority.currentVersion,
-              currentDigest: authority.currentDigest,
-              policyEpoch: authority.policyEpoch,
-            })),
-          } : {}),
-          environmentHints: {
-            workspaceRoots: authorities
-              .filter((authority) => authority.kind === 'local_directory')
-              .map((authority) => authority.path),
-            ...(browserPageRef ? { workbenchMode: 'browser' as const, browserPageRef } : {}),
-          },
-        }
-      : {}),
-  }
-}
-
-export function createCodexProductUpstreamProfileSnapshot(input: {
-  profileId: string
-  config: AIModelConfig
-}): ReturnType<typeof createCodexProfileRouteSnapshot> {
-  return createCodexProfileRouteSnapshot(input)
-}
-
-export function createCodexProductBudgetSeed(input: {
-  skillAuthorization: { mode: 'none' | 'selected' }
-  intentClassification?: Pick<IntentClassification, 'primaryDomain'>
-}): { maxIterations: number; maxToolCalls: number; maxParallelToolGroups: 1 } {
-  const taskType = input.skillAuthorization.mode === 'selected'
-    ? 'multi_step_task'
-    : (
-        input.intentClassification?.primaryDomain === 'research'
-        || input.intentClassification?.primaryDomain === 'browser'
-      )
-      ? 'browser_transaction'
-      : 'direct_answer'
-  const preset = createRunBudgetSeed(taskType)
-  return {
-    maxIterations: Math.max(preset.maxIterations, preset.maxToolCalls + 1),
-    maxToolCalls: preset.maxToolCalls,
-    maxParallelToolGroups: 1,
-  }
-}
-
-function resourceReferenceForAnchor(anchor: CodexCurrentDocumentAnchor) {
-  return {
-    logicalResourceId: anchor.logicalResourceId,
-    currentVersion: anchor.currentVersion,
-    currentDigest: anchor.currentDigest,
-    supersedesVersion: anchor.supersedesVersion,
-    policyEpoch: anchor.policyEpoch,
-  }
-}
-
-export function buildCurrentDocumentReadToolSnapshot(input: {
-  resolved: ReadyToolTurnSnapshot
-  authorizationId: string
-  authorization: SkillToolAuthorization
-  allowWrite?: boolean
-}): ReadyToolTurnSnapshot {
-  return {
-    readyToolSurface: input.resolved.readyToolSurface,
-    readyTurnToolAuthorization: buildReadyTurnToolAuthorization({
-      authorizationId: input.authorizationId,
-      authorization: input.authorization,
-      toolSurface: input.resolved.readyToolSurface,
-      allowedToolNames: input.allowWrite
-        ? CURRENT_DOCUMENT_CONTEXT_FLOOR_TOOL_NAMES
-        : ['document_read_section'],
-    }),
-  }
-}
-
-export function hasExplicitCurrentDocumentWriteIntent(text: string): boolean {
-  const normalized = String(text || '').trim()
-  if (!normalized) return false
-  if (/(?:只|仅)(?:需|要)?(?:阅读|读取|查看|总结|概括|分析|检查|审阅)|(?:不要|无需|不必|禁止).{0,8}(?:修改|编辑|改写|替换|删除|插入|追加|写入|保存)/.test(normalized)) {
-    return false
-  }
-  if (/(?:如何|怎么|建议|方案|讨论).{0,8}(?:修改|编辑|改写|替换|删除|插入|追加|写入|保存)/.test(normalized)) {
-    return false
-  }
-  return /(?:修改|编辑|改写|重写|润色|替换|删除|删掉|移除|插入|追加|补充|更新|调整|排版|格式化|保存|写入|写到|做成|制作|生成|修复|修正)/.test(normalized)
-}
-
-export function buildExternalReadToolSnapshot(input: {
-  resolved: ReadyToolTurnSnapshot
-  authorizationId: string
-  authorization: SkillToolAuthorization
-  externalReadSlice: PreparedCodexExternalReadSlice
-}): ReadyToolTurnSnapshot {
-  return {
-    readyToolSurface: input.resolved.readyToolSurface,
-    readyTurnToolAuthorization: buildReadyTurnToolAuthorization({
-      authorizationId: input.authorizationId,
-      authorization: input.authorization,
-      toolSurface: input.resolved.readyToolSurface,
-      allowedToolNames: input.externalReadSlice.allowedToolNames,
-    }),
-  }
-}
-
-export function buildExplicitResourceReadToolSnapshot(input: {
-  resolved: ReadyToolTurnSnapshot
-  authorizationId: string
-  authorization: SkillToolAuthorization
-  allowedResourceToolNames: readonly string[]
-}): ReadyToolTurnSnapshot {
-  const allowedResourceToolNames = new Set(input.allowedResourceToolNames)
-  const allowedToolNames = input.resolved.readyTurnToolAuthorization.allowedToolNames.filter((toolName) => {
-    const entry = input.resolved.readyToolSurface.entries.find((candidate) => candidate.name === toolName)
-    return entry?.effectProfile.domain !== 'file' || allowedResourceToolNames.has(toolName)
-  })
-  for (const toolName of allowedResourceToolNames) allowedToolNames.push(toolName)
-  return {
-    readyToolSurface: input.resolved.readyToolSurface,
-    readyTurnToolAuthorization: buildReadyTurnToolAuthorization({
-      authorizationId: input.authorizationId,
-      authorization: input.authorization,
-      toolSurface: input.resolved.readyToolSurface,
-      allowedToolNames: [...new Set(allowedToolNames)],
-    }),
-  }
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
-}
-
-export function validateCurrentDocumentReadPayload(input: {
-  payload: Record<string, unknown>
-  anchor: CodexCurrentDocumentAnchor
-  requestBindingDigest: string
-}): Record<string, unknown> {
-  if (input.payload.ok === false) {
-    if (input.payload.errorKind !== 'resource_version_superseded'
-      || 'resourceRead' in input.payload) {
-      throw new CodexToolBridgeError('resource_read_rejection_evidence_invalid')
-    }
-    return {
-      ok: false,
-      errorKind: 'resource_version_superseded',
-      summary: '当前文档版本已经失效，请重新读取当前版本。',
-      bodyBytes: 0,
-      requestedVersion: input.anchor.currentVersion,
-    }
-  }
-  const summary = typeof input.payload.summary === 'string' ? input.payload.summary : ''
-  const modelVisibleSummary = summary.trim()
-  const resourceRead = isRecord(input.payload.resourceRead) ? input.payload.resourceRead : null
-  if (!modelVisibleSummary || !resourceRead
-    || resourceRead.logicalResourceId !== input.anchor.logicalResourceId
-    || resourceRead.currentVersion !== input.anchor.currentVersion
-    || resourceRead.currentDigest !== input.anchor.currentDigest
-    || resourceRead.policyEpoch !== input.anchor.policyEpoch
-    || resourceRead.tabId !== input.anchor.tabId
-    || resourceRead.pane !== input.anchor.pane
-    || resourceRead.pathDigest !== input.anchor.pathDigest
-    || resourceRead.incarnationKey !== input.anchor.incarnationKey
-    || resourceRead.operation !== 'read_section'
-    || resourceRead.requestBindingDigest !== input.requestBindingDigest
-    || resourceRead.summaryDigest !== sha256(summary)
-    || resourceRead.bodyBytes !== Buffer.byteLength(summary)) {
-    throw new CodexToolBridgeError('resource_read_success_evidence_invalid')
-  }
-  return {
-    ...input.payload,
-    summary: modelVisibleSummary,
-    resourceRead: {
-      ...resourceRead,
-      summaryDigest: sha256(modelVisibleSummary),
-      bodyBytes: Buffer.byteLength(modelVisibleSummary),
-    },
-  }
-}
-
-export function createCurrentDocumentReadRequester(input: {
-  anchor: CodexCurrentDocumentAnchor
-  agent?: string
-  sessionId: string
-  scopeId: string
-  readyRunId: string
-  codexThreadId: string
-  codexTurnId: string
-  codexCallId: string
-  readyActionId: string
-  actionIdentityDigest: string
-  resourceAnchorDigest: string
-  abortSignal: AbortSignal
-  requestRendererToolAction: CodexRendererToolActionRequester
-  allowWrite?: boolean
-  hasExactRead?: () => boolean
-  onExactRead?: () => void
-}): (tool: string, args: Record<string, unknown>) => Promise<Record<string, unknown>> {
-  return async (tool, args) => {
-    const readTool = tool === 'document.readSection'
-    const readOnlyTools = new Set(['document.listWidgets'])
-    const writeTools = new Set([
-      'document.insertWidget',
-      'document.updateWidget',
-      'document.removeWidget',
-      'document.replaceExact',
-      'document.saveTab',
-    ])
-    if (!readTool && !readOnlyTools.has(tool) && !writeTools.has(tool)) {
-      throw new CodexToolBridgeError('resource_tool_not_authorized')
-    }
-    if (writeTools.has(tool) && !input.allowWrite) {
-      throw new CodexToolBridgeError('resource_tool_not_authorized')
-    }
-    if (writeTools.has(tool) && !input.hasExactRead?.()) {
-      throw new CodexToolBridgeError('resource_write_requires_exact_read')
-    }
-    if (!readTool) {
-      const nextArgs: Record<string, unknown> = { ...args, tabId: input.anchor.tabId }
-      if (tool === 'document.saveTab') delete nextArgs.path
-      return input.requestRendererToolAction({
-        agent: input.agent,
-        sessionId: input.sessionId,
-        runId: input.readyRunId,
-        codexThreadId: input.codexThreadId,
-        codexTurnId: input.codexTurnId,
-        codexCallId: input.codexCallId,
-        readyActionId: input.readyActionId,
-        actionIdentityDigest: input.actionIdentityDigest,
-        tool,
-        args: nextArgs,
-        abortSignal: input.abortSignal,
-      })
-    }
-    const requestBindingDigest = digestCanonicalJson({
-      readyRunId: input.readyRunId,
-      codexThreadId: input.codexThreadId,
-      codexTurnId: input.codexTurnId,
-      codexCallId: input.codexCallId,
-      readyActionId: input.readyActionId,
-      actionIdentityDigest: input.actionIdentityDigest,
-      resourceAnchorDigest: input.resourceAnchorDigest,
-    })
-    const payload = validateCurrentDocumentReadPayload({
-      payload: await input.requestRendererToolAction({
-        agent: input.agent,
-        sessionId: input.sessionId,
-        runId: input.readyRunId,
-        codexThreadId: input.codexThreadId,
-        codexTurnId: input.codexTurnId,
-        codexCallId: input.codexCallId,
-        readyActionId: input.readyActionId,
-        actionIdentityDigest: input.actionIdentityDigest,
-        tool,
-        args: {
-          ...args,
-          tabId: input.anchor.tabId,
-          maxChars: Math.min(
-            input.anchor.readScope.maxChars,
-            typeof args.maxChars === 'number' ? args.maxChars : input.anchor.readScope.maxChars,
-          ),
-          __readyResourceRead: {
-            scopeId: input.scopeId,
-            requestBindingDigest,
-            anchor: input.anchor,
-          },
-        },
-        abortSignal: input.abortSignal,
-      }),
-      anchor: input.anchor,
-      requestBindingDigest,
-    })
-    if (payload.ok === false) return payload
-    input.onExactRead?.()
-    const resourceRead = payload.resourceRead as Record<string, unknown>
-    const unsignedReceipt = {
-      readyRunId: input.readyRunId,
-      codexThreadId: input.codexThreadId,
-      codexTurnId: input.codexTurnId,
-      codexCallId: input.codexCallId,
-      readyActionId: input.readyActionId,
-      actionIdentityDigest: input.actionIdentityDigest,
-      logicalResourceId: input.anchor.logicalResourceId,
-      currentVersion: input.anchor.currentVersion,
-      currentDigest: input.anchor.currentDigest,
-      policyEpoch: input.anchor.policyEpoch,
-      tabId: input.anchor.tabId,
-      pane: input.anchor.pane,
-      pathDigest: input.anchor.pathDigest,
-      incarnationKey: input.anchor.incarnationKey,
-      operation: 'read_section',
-      summaryDigest: resourceRead.summaryDigest,
-      bodyBytes: resourceRead.bodyBytes,
-    }
-    return {
-      ...payload,
-      resourceReadReceipt: {
-        ...unsignedReceipt,
-        receiptDigest: digestCanonicalJson(unsignedReceipt),
-      },
-    }
-  }
-}
-
-function toRunMessage(request: SendScopedRequest): RunMessage {
-  return request.message as RunMessage
-}
-
-export function toCodexInput(request: SendScopedRequest): CodexUserInput[] | null {
-  const result: CodexUserInput[] = []
-  if (request.userMessage.content || (request.resources?.length ?? 0) > 0) {
-    result.push({ type: 'text', text: request.userMessage.content, text_elements: [] })
-  }
-  if (Array.isArray(request.message)) {
-    for (const block of request.message) {
-      if (block.type === 'image') {
-        result.push({ type: 'image', url: `data:${block.mimeType};base64,${block.base64}`, detail: null })
-        continue
-      }
-      if (block.type === 'video') return null
-    }
-  }
-  return result.length > 0 ? result : null
-}
-
-class RuntimeGate implements CodexRuntimeIngressGate {
-  private opened = false
-  private reason = 'runtime_not_started'
-
-  open(): void {
-    this.opened = true
-    this.reason = ''
-  }
-
-  close(reason: string): void {
-    this.opened = false
-    this.reason = reason || 'runtime_closed'
-  }
-
-  assertOpen(): void {
-    if (!this.opened) throw new Error(this.reason || 'runtime_closed')
-  }
-}
-
-export function readCodexInstructionContractDigest(
-  assetRoot: string,
-  developerInstructions: string = CODEX_HOST_OVERLAY,
-): string {
-  const fixture = JSON.parse(readFileSync(
-    join(assetRoot, 'fixtures/native-protocol-capture.json'),
-    'utf8',
-  )) as { provider?: { requests?: Array<{ request?: { instructions?: unknown; input?: unknown } }> } }
-  const request = fixture.provider?.requests?.[0]?.request
-  if (!request) throw new Error('codex_instruction_fixture_missing')
-  return instructionTranscriptDigest(request.instructions, [{
-    type: 'message',
-    role: 'developer',
-    content: [{ type: 'input_text', text: developerInstructions }],
-  }])
-}
-
-export function resolveCodexBrowserWorkflowVerifierBundle(
-  workflowInspection: BrowserWorkflowVerifierInspection,
-): BrowserWorkflowVerifierBundle | null {
-  if (workflowInspection.inspection.state === 'absent') return null
-  if (workflowInspection.inspection.state !== 'sealable' || !workflowInspection.bundle) {
-    throw new Error(`codex_browser_workflow_${workflowInspection.inspection.state}`)
-  }
-  return workflowInspection.bundle
-}
-
-export function codexAllowsDirectProvisionalStream(
-  prepared: Pick<PreparedCodexProductRun, 'readyTurnToolAuthorization'>,
-): boolean {
-  return !prepared.readyTurnToolAuthorization.allowedToolNames
-    .some(isBrowserPublicToolName)
-}
-
-export function requestCodexEngineTerminalLifecycleActionBeforeCloseout(input: {
-  repository: Pick<CodexBindingRepository, 'requestProductInterrupt'>
-  host: Pick<CodexRuntimeHostPort, 'abortActiveProductRun'>
-  product: Pick<
-    CodexProductTurnRuntimeRead,
-    | 'readyRunId'
-    | 'readyScopeId'
-    | 'readyAliasId'
-    | 'aliasGeneration'
-    | 'codexThreadId'
-    | 'codexTurnId'
-  >
-  action: CodexLifecycleAction
-  requestedAt: string
-}): void {
-  if (!input.product.codexThreadId || !input.product.codexTurnId) {
-    throw new ReadyCodexLifecyclePortError('persistence_failed')
-  }
-  input.repository.requestProductInterrupt({
-    action: input.action,
-    aliasId: input.product.readyAliasId,
-    aliasGeneration: input.product.aliasGeneration,
-    readyRunId: input.product.readyRunId,
-    codexThreadId: input.product.codexThreadId,
-    codexTurnId: input.product.codexTurnId,
-    requestedAt: input.requestedAt,
-  })
-  const aborted = input.host.abortActiveProductRun({
-    readyRunId: input.product.readyRunId,
-    readyScopeId: input.product.readyScopeId,
-    readyAliasId: input.product.readyAliasId,
-  })
-  if (!aborted) throw new ReadyCodexLifecyclePortError('persistence_failed')
-}
-
-export function requestCodexEngineTerminalUserStopBeforeCloseout(input: Omit<
-  Parameters<typeof requestCodexEngineTerminalLifecycleActionBeforeCloseout>[0],
-  'action'
->): void {
-  requestCodexEngineTerminalLifecycleActionBeforeCloseout({ ...input, action: 'stop' })
-}
-
-export { buildCodexThreadDeveloperInstructions }
-
-export function resolveCodexThreadInstructionContract(input: {
-  assetRoot: string
-  host: Pick<CodexRuntimeHostPort, 'resolveSelectedSkillMethodology'> | null
-  skillAuthorization: { mode: 'none' } | { mode: 'selected'; skillId: string }
-  expectedDigest?: string
-}): { developerInstructions: string; instructionContractDigest: string } {
-  void input.host
-  const developerInstructions = buildCodexThreadDeveloperInstructions()
-  const instructionContractDigest = readCodexInstructionContractDigest(
-    input.assetRoot,
-    developerInstructions,
-  )
-  if (input.expectedDigest && instructionContractDigest !== input.expectedDigest) {
-    throw new Error('codex_recovered_instruction_contract_drift')
-  }
-  return { developerInstructions, instructionContractDigest }
-}
-
 function activeProfile(settings: AppSettingsRepository): { profileId: string; config: AIModelConfig } {
   const workspace = settings.getAIWorkspace()
   const profileId = settings.getActiveAIProfileId()
   const profile = profileId ? workspace.profiles.find((entry) => entry.id === profileId) : null
   if (!profile) throw new Error('codex_active_profile_missing')
   return { profileId: profileId as string, config: profile.config }
-}
-
-type IdleCloseSnapshot =
-  | 'idle_never_started'
-  | 'idle_ready_terminal_no_native'
-  | 'idle_native_thread'
-
-export async function retireCodexAliasForClose(input: {
-  repository: CodexBindingRepository
-  nativeRuntime: CodexNativeRuntime
-  loadedThreads: Set<string>
-  identity: { aliasId: string; aliasGeneration: number }
-  snapshot: IdleCloseSnapshot
-  retiredAt: string
-  scheduleThreadArchiveCleanup: () => void
-}): Promise<CloseRetirementEvidence> {
-  const current = input.repository.readActiveAliasBinding(input.identity.aliasId)
-  if (!current || current.aliasGeneration !== input.identity.aliasGeneration) {
-    throw new ReadyCodexLifecyclePortError('binding_conflict')
-  }
-
-  let idleThreadReadDigest: string | null = null
-  if (input.snapshot === 'idle_native_thread') {
-    if (!current.codexThreadId || !current.codexSessionId || !current.isolatedThreadCwd) {
-      throw new ReadyCodexLifecyclePortError('native_protocol_error')
-    }
-    let readback: Awaited<ReturnType<CodexNativeRuntime['threadRead']>>
-    try {
-      readback = await input.nativeRuntime.threadRead({
-        threadId: current.codexThreadId,
-        includeTurns: true,
-      })
-    } catch {
-      throw new ReadyCodexLifecyclePortError('native_protocol_error')
-    }
-    const thread = readback.thread
-    if (
-      thread.id !== current.codexThreadId
-      || thread.sessionId !== current.codexSessionId
-      || thread.cwd !== current.isolatedThreadCwd
-      || thread.parentThreadId !== null
-      || thread.forkedFromId !== null
-      || thread.source !== 'vscode'
-      || thread.threadSource !== null
-    ) throw new ReadyCodexLifecyclePortError('native_protocol_error')
-    if (
-      thread.status.type === 'active'
-      || thread.turns.some((turn) => turn.status === 'inProgress')
-    ) throw new ReadyCodexLifecyclePortError('thread_busy')
-    idleThreadReadDigest = digestCanonicalJson(thread)
-  } else if (current.codexThreadId !== null) {
-    throw new ReadyCodexLifecyclePortError('native_protocol_error')
-  }
-
-  const retirementEvidenceDigest = digestCanonicalJson({
-    identity: input.identity,
-    snapshot: input.snapshot,
-    retiredAt: input.retiredAt,
-    idleThreadReadDigest,
-  })
-  let retired: ReturnType<CodexBindingRepository['retireIdleAliasForClose']>
-  try {
-    retired = input.repository.retireIdleAliasForClose({
-      aliasId: input.identity.aliasId,
-      expectedGeneration: input.identity.aliasGeneration,
-      expectedSnapshot: input.snapshot,
-      retirementEvidenceDigest,
-      retiredAt: input.retiredAt,
-      idleThreadReadDigest,
-    })
-  } catch (error) {
-    if (error instanceof CodexBindingRepositoryError) {
-      if (
-        error.code === 'active_alias_generation_mismatch'
-        || error.code === 'alias_close_cas_failed'
-      ) throw new ReadyCodexLifecyclePortError('binding_conflict')
-      if (
-        error.code === 'alias_not_idle'
-        || error.code === 'alias_close_turn_unresolved'
-        || error.code === 'thread_archive_fence_active'
-        || error.code === 'thread_archive_turn_unresolved'
-        || error.code === 'thread_archive_call_unresolved'
-        || error.code === 'thread_archive_descendant_exists'
-      ) throw new ReadyCodexLifecyclePortError('thread_busy')
-      if (
-        error.code === 'alias_close_thread_readback_invalid'
-        || error.code === 'alias_close_snapshot_mismatch'
-      ) throw new ReadyCodexLifecyclePortError('native_protocol_error')
-    }
-    throw new ReadyCodexLifecyclePortError('persistence_failed')
-  }
-
-  if (retired.codexThreadId) {
-    input.loadedThreads.delete(retired.codexThreadId)
-    input.scheduleThreadArchiveCleanup()
-  }
-  return {
-    aliasId: retired.aliasId,
-    retiredGeneration: retired.retiredGeneration,
-    retirementTransactionDigest: retired.transactionDigest,
-    archiveDisposition: retired.codexThreadId ? 'durable_cleanup_pending' : 'not_required',
-    archiveIntentDigest: retired.archiveIntentDigest,
-    scopeClosureEvidenceDigest: retired.scopeClosureEvidenceDigest,
-    lastCommittedReadyTerminalTransactionDigest:
-      retired.lastCommittedReadyTerminalTransactionDigest,
-    idleThreadReadDigest,
-    lastCommittedProductTerminalDigest: retired.lastCommittedProductTerminalDigest,
-  }
-}
-
-function createLifecycleStore(input: {
-  repository: CodexBindingRepository
-  nativeRuntime: CodexNativeRuntime
-  getHost: () => CodexRuntimeHostPort | null
-  getRegistry: () => CodexStartIdentityRegistry | null
-  createAliasAtomic: (value: {
-    aliasId: string
-    agentId: string
-    persistedAt: string
-  }) => void
-  loadedThreads: Set<string>
-  getActiveConnectionEpoch: () => string
-  settleHostFailureCloseout: (identity: {
-    aliasId: string
-    aliasGeneration: number
-  }) => Promise<void>
-  scheduleThreadArchiveCleanup: () => void
-  settleEngineTerminalUserStop: (identity: {
-    aliasId: string
-    aliasGeneration: number
-    readyRunId: string
-  }, action?: CodexLifecycleAction) => Promise<ProductTurnCloseoutEvidence>
-  settleReadbackTerminalUserStop: (input: {
-    aliasId: string
-    aliasGeneration: number
-    readyRunId: string
-    codexThreadId: string
-    turn: CodexTurn
-  }, action?: CodexLifecycleAction) => Promise<ProductTurnCloseoutEvidence>
-  retryEngineTerminalUserStopFinalization: (identity: {
-    aliasId: string
-    aliasGeneration: number
-    readyRunId: string
-  }) => Promise<ProductTurnCloseoutEvidence | null>
-  manualCompactionController: CodexManualCompactionController
-  getDeveloperInstructions: (prepared: PreparedCodexProductRun) => string
-  getNativeModelSettings: (
-    prepared: PreparedCodexProductRun,
-  ) => ReturnType<typeof resolveCodexNativeModelSettings>
-}): ReadyCodexLifecycleStore {
-  return {
-    async createAlias(request) {
-      const boundHost = input.getHost()
-      if (!boundHost) throw new Error('codex_runtime_host_unbound')
-      const agentId = request.agentId.trim()
-      if (!agentId) throw new Error('codex_create_agent_invalid')
-      const aliasId = `conv-${randomUUID()}`
-      const persistedAt = isoNow()
-      input.createAliasAtomic({ aliasId, agentId, persistedAt })
-      return { ok: true, action: 'create', aliasId, aliasGeneration: 1, persistedAt }
-    },
-    async readAliasIdentity(aliasId) {
-      const binding = input.repository.readActiveAliasBinding(aliasId)
-      if (!binding || binding.retiredAt) throw new Error('active_alias_binding_missing')
-      return { aliasId: binding.aliasId, aliasGeneration: binding.aliasGeneration }
-    },
-    async resolveThreadBinding(identity, prepared) {
-      const binding = input.repository.readActiveAliasBinding(identity.aliasId)
-      if (
-        !binding
-        || binding.aliasGeneration !== identity.aliasGeneration
-        || binding.readyScopeId !== prepared.readyToolHostIdentity.scopeId
-        || !binding.isolatedThreadCwd
-      ) throw new Error('active_alias_binding_mismatch')
-      if (!binding.codexThreadId) {
-        const nativeModelSettings = input.getNativeModelSettings(prepared)
-        return {
-          state: 'unstarted' as const,
-          params: {
-            model: 'ready-e0-model',
-            modelProvider: 'ready_gateway',
-            allowProviderModelFallback: false as const,
-            cwd: binding.isolatedThreadCwd,
-            approvalPolicy: 'never' as const,
-            sandbox: 'read-only' as const,
-            runtimeWorkspaceRoots: [] as [],
-            environments: [] as [],
-            config: nativeModelSettings.threadConfig,
-            dynamicTools: prepared.readyToolSurface.dynamicTools,
-            developerInstructions: input.getDeveloperInstructions(prepared),
-          },
-        }
-      }
-      return input.loadedThreads.has(binding.codexThreadId)
-        ? { state: 'loaded' as const, threadId: binding.codexThreadId }
-        : { state: 'resume_required' as const, threadId: binding.codexThreadId }
-    },
-    async bindStartedThread(binding) {
-      if (
-        binding.sessionId !== binding.threadId
-        || binding.parentThreadId !== null
-        || binding.forkedFromId !== null
-        || binding.source !== 'vscode'
-        || binding.threadSource !== null
-      ) throw new Error('started_thread_identity_mismatch')
-      const current = input.repository.readActiveAliasBinding(binding.identity.aliasId)
-      if (
-        !current
-        || current.aliasGeneration !== binding.identity.aliasGeneration
-        || current.codexThreadId !== binding.threadId
-        || current.codexSessionId !== binding.sessionId
-        || current.isolatedThreadCwd !== binding.cwd
-      ) throw new Error('started_thread_durable_readback_mismatch')
-      input.loadedThreads.add(binding.threadId)
-    },
-    async markThreadResumed(binding) {
-      if (input.getActiveConnectionEpoch() !== binding.connectionEpoch) {
-        throw new Error('resumed_thread_connection_epoch_mismatch')
-      }
-      const current = input.repository.readActiveAliasBinding(binding.identity.aliasId)
-      if (!current || current.aliasGeneration !== binding.identity.aliasGeneration || current.codexThreadId !== binding.threadId) {
-        throw new Error('resumed_thread_binding_mismatch')
-      }
-      input.repository.recordThreadResumeEvidence({
-        aliasId: binding.identity.aliasId,
-        aliasGeneration: binding.identity.aliasGeneration,
-        threadId: binding.threadId,
-        connectionEpoch: binding.connectionEpoch,
-        preResumeThreadReadDigest: binding.preResumeThreadReadDigest,
-        resumedThreadDigest: binding.resumedThreadDigest,
-        recordedAt: isoNow(),
-      })
-      input.loadedThreads.add(binding.threadId)
-    },
-    async readLifecycleOperation(identity) {
-      return input.repository.readLifecycleOperation(identity)
-    },
-    async requestProductInterrupt(interrupt) {
-      const owner = input.repository.requestProductInterrupt({
-        action: interrupt.action,
-        aliasId: interrupt.identity.aliasId,
-        aliasGeneration: interrupt.identity.aliasGeneration,
-        readyRunId: interrupt.readyRunId,
-        codexThreadId: interrupt.codexThreadId,
-        codexTurnId: interrupt.codexTurnId,
-        requestedAt: isoNow(),
-      })
-      const boundHost = input.getHost()
-      if (!boundHost || !boundHost.abortActiveProductRun({
-        readyRunId: owner.readyRunId,
-        readyScopeId: owner.readyScopeId,
-        readyAliasId: owner.readyAliasId,
-      })) throw new Error('product_interrupt_ready_abort_failed')
-    },
-    async acknowledgeProductInterrupt(interrupt) {
-      const owner = input.repository.resolveProductInterruptOwner({
-        aliasId: interrupt.identity.aliasId,
-        aliasGeneration: interrupt.identity.aliasGeneration,
-        readyRunId: interrupt.readyRunId,
-        codexThreadId: interrupt.codexThreadId,
-        codexTurnId: interrupt.codexTurnId,
-      })
-      input.repository.acknowledgeProductInterrupt({
-        readyRunId: owner.readyRunId,
-        acknowledgedAt: isoNow(),
-      })
-    },
-    async markProductInterruptUnknown(interrupt) {
-      const owner = input.repository.resolveProductInterruptOwner({
-        aliasId: interrupt.identity.aliasId,
-        aliasGeneration: interrupt.identity.aliasGeneration,
-        readyRunId: interrupt.readyRunId,
-        codexThreadId: interrupt.codexThreadId,
-        codexTurnId: interrupt.codexTurnId,
-      })
-      input.repository.markProductInterruptUnknown({
-        readyRunId: owner.readyRunId,
-        unknownAt: isoNow(),
-      })
-    },
-    failureEvidenceDigest(value) { return digestCanonicalJson(value) },
-    async resetIdleAlias({ identity, snapshot }) {
-      const current = input.repository.readActiveAliasBinding(identity.aliasId)
-      if (!current || current.aliasGeneration !== identity.aliasGeneration) {
-        throw new ReadyCodexLifecyclePortError('persistence_failed')
-      }
-      const resetAt = isoNow()
-      const result = input.repository.resetIdleAlias({
-        aliasId: identity.aliasId,
-        expectedGeneration: identity.aliasGeneration,
-        retirementEvidenceDigest: digestCanonicalJson({ identity, snapshot, resetAt }),
-        resetAt,
-      })
-      if (current.codexThreadId) input.loadedThreads.delete(current.codexThreadId)
-      if (result.archiveIntentDigest) input.scheduleThreadArchiveCleanup()
-      return {
-        ok: true,
-        action: 'reset',
-        aliasId: result.aliasId,
-        retiredGeneration: result.retiredGeneration,
-        newGeneration: result.newGeneration,
-        transactionDigest: result.transactionDigest,
-      }
-    },
-    async quarantineUnknownManualCompaction({ identity, manualCompactionId }) {
-      const current = input.repository.readActiveAliasBinding(identity.aliasId)
-      const operation = input.repository.readLifecycleOperation(identity)
-      if (
-        !current
-        || current.aliasGeneration !== identity.aliasGeneration
-        || operation.activeManualCompactionId !== manualCompactionId
-        || classifyLifecycleOperation(operation.facts) !== 'manual_compaction_unknown'
-      ) throw new ReadyCodexLifecyclePortError('persistence_failed')
-      const quarantinedAt = isoNow()
-      const result = input.repository.quarantineUnknownManualCompaction({
-        aliasId: identity.aliasId,
-        aliasGeneration: identity.aliasGeneration,
-        manualCompactionId,
-        reason: 'user_reset_after_manual_compaction_unknown',
-        evidenceDigest: digestCanonicalJson({
-          identity,
-          manualCompactionId,
-          action: 'reset',
-          snapshot: 'manual_compaction_unknown',
-        }),
-        quarantinedAt,
-      })
-      if (current.codexThreadId) input.loadedThreads.delete(current.codexThreadId)
-      return {
-        ok: true,
-        action: 'reset',
-        aliasId: result.aliasId,
-        retiredGeneration: result.retiredGeneration,
-        newGeneration: result.nextAliasGeneration,
-        transactionDigest: result.transactionDigest,
-      }
-    },
-    async awaitProductCloseout(identity, readyRunId) {
-      const deadline = Date.now() + 30_000
-      while (Date.now() < deadline) {
-        try {
-          if (readyRunId && input.repository.readProductLifecycleAction(readyRunId)) {
-            const read = input.repository.readLifecycleActionCloseout(readyRunId)
-            return {
-              aliasId: read.aliasId,
-              aliasGeneration: read.aliasGeneration,
-              codexThreadId: read.codexThreadId,
-              codexTurnId: read.codexTurnId,
-              terminal: read.terminal,
-              closeoutDigest: read.closeoutDigest,
-              fenceReleaseRevision: read.fenceReleaseRevision,
-              lifecycleAction: read.action,
-              lifecycleActionEvidenceDigest: read.lifecycleActionEvidenceDigest,
-              retiredGeneration: read.retiredGeneration,
-              retirementTransactionDigest: read.retirementTransactionDigest,
-              archiveIntentDigest: read.archiveIntentDigest,
-              scopeClosureEvidenceDigest: read.scopeClosureEvidenceDigest,
-              newGeneration: read.newGeneration,
-              newThreadBindingId: read.newThreadBindingId,
-            }
-          }
-          const read = input.repository.readLatestLifecycleCloseout({ ...identity, readyRunId })
-          return {
-            aliasId: read.aliasId,
-            aliasGeneration: read.aliasGeneration,
-            codexThreadId: read.codexThreadId,
-            codexTurnId: read.codexTurnId,
-            terminal: read.terminal,
-            closeoutDigest: read.closeoutDigest,
-            fenceReleaseRevision: read.fenceReleaseRevision,
-          }
-        } catch {
-          await new Promise((resolve) => setTimeout(resolve, 25))
-        }
-      }
-      throw new ReadyCodexLifecyclePortError('interrupt_state_unknown')
-    },
-    settleEngineTerminalUserStop(identity, action) {
-      return input.settleEngineTerminalUserStop(identity, action)
-    },
-    settleReadbackTerminalUserStop(value, action) {
-      return input.settleReadbackTerminalUserStop(value, action)
-    },
-    retryEngineTerminalUserStopFinalization(identity) {
-      return input.retryEngineTerminalUserStopFinalization(identity)
-    },
-    async settleHostFailureCloseout(identity) {
-      await input.settleHostFailureCloseout(identity)
-    },
-    retireAliasForClose({ identity, snapshot }) {
-      return retireCodexAliasForClose({
-        repository: input.repository,
-        nativeRuntime: input.nativeRuntime,
-        loadedThreads: input.loadedThreads,
-        identity,
-        snapshot,
-        retiredAt: isoNow(),
-        scheduleThreadArchiveCleanup: input.scheduleThreadArchiveCleanup,
-      })
-    },
-    beginManualCompaction(identity) {
-      return input.manualCompactionController.begin(identity)
-    },
-    awaitManualCompaction(value) {
-      return input.manualCompactionController.awaitCompletion(value)
-    },
-    consumeManualCompaction(value) {
-      return input.manualCompactionController.consume(value)
-    },
-    async markManualCompactionUnknown(value) {
-      input.manualCompactionController.markUnknown(value)
-    },
-    digestThreadRead(thread) { return digestCanonicalJson(thread) },
-  }
-}
-
-function terminalEvent(input: {
-  scope: ConversationScope
-  product: {
-    readyRunId: string
-    readyTaskId: string
-    ingress?: PreparedCodexProductRun['ingress']
-  }
-  execution: ExecutionHostResult
-  terminalAt: string
-}): ReadyClosedCodexProductRun['committedTerminalEvent'] {
-  const reason = input.execution.terminalReason || 'persistence_failed'
-  return {
-    type: 'updated',
-    scopeId: input.scope.id,
-    aliasGeneration: input.scope.aliasGeneration,
-    messageVisibilityEpoch: input.scope.messageVisibilityEpoch,
-    visibilityOwnerKind: 'product_alias',
-    agent: input.scope.agent,
-    ownerAgentId: input.scope.activeAgentId || input.scope.agent,
-    taskOrigin: 'user_root',
-    handoffGeneration: input.scope.handoffGeneration,
-    runId: input.product.readyRunId,
-    taskId: input.product.readyTaskId,
-    phase: input.execution.success ? 'done' : input.execution.cancelled ? 'cancelled' : 'error',
-    terminalReason: reason,
-    latestText: input.execution.finalText,
-    module: 'system',
-    taskProjectionId: input.product.readyTaskId,
-    timestamp: input.terminalAt,
-  }
 }
 
 export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntimeComposition {
@@ -1498,6 +384,10 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
   const detailPrepared = new Map<string, PreparedCodexProductRun>()
   const browserTurnLeases = new Map<string, BrowserTurnLease>()
   const currentDocumentExactReadRuns = new Set<string>()
+  const calendarListedEventIdsByRun = new Map<string, string[]>()
+  const calendarNotifyReady = import('../../calendar-engine/ipc-handler')
+    .then((module) => module.notifyCalendarEventChanged)
+    .catch(() => null)
   const loadedThreads = new Set<string>()
   type PendingEngineTerminalFinalization = {
     identity: { aliasId: string; aliasGeneration: number }
@@ -3195,15 +2085,34 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
         if (browserSelections[0] && !browserReference) {
           throw new Error('codex_explicit_browser_reference_unavailable')
         }
-        const trustedEnvironment = browserReference?.environment
-          ?? await boundHost.runtime.resolveTrustedRequestEnvironment(
-            requestedWorkbenchMode === 'browser'
-              || requestedWorkbenchMode === 'document'
-              || requestedWorkbenchMode === 'rss'
-              || requestedWorkbenchMode === 'calendar'
-              ? { workbenchMode: requestedWorkbenchMode }
-              : undefined,
-          )
+        const hostEnvironment = await boundHost.runtime.resolveTrustedRequestEnvironment(
+          requestedWorkbenchMode === 'browser'
+            || requestedWorkbenchMode === 'document'
+            || requestedWorkbenchMode === 'rss'
+            || requestedWorkbenchMode === 'calendar'
+            ? { workbenchMode: requestedWorkbenchMode }
+            : undefined,
+        )
+        const activeWorkbenchMode = requestedWorkbenchMode === 'browser'
+          || requestedWorkbenchMode === 'document'
+          || requestedWorkbenchMode === 'rss'
+          || requestedWorkbenchMode === 'calendar'
+          ? requestedWorkbenchMode
+          : hostEnvironment.workbenchMode
+        const executionPageRef = resolveBrowserExecutionPageRef(buildBrowserAdmissionAuthoritySnapshot({
+          authorityId: `browser-exec:${request.requestId}`,
+          activeWorkbenchMode,
+          currentBrowserPageRef: activeWorkbenchMode === 'browser'
+            ? hostEnvironment.browserPageRef || null
+            : null,
+          explicitBrowserReadRefs: browserReference?.environment.browserPageRef
+            ? [browserReference.environment.browserPageRef]
+            : [],
+        }))
+        const trustedEnvironment = {
+          ...(activeWorkbenchMode ? { workbenchMode: activeWorkbenchMode } : {}),
+          ...(executionPageRef ? { browserPageRef: executionPageRef } : {}),
+        }
         const resolvedBrowserInput = trustedBrowserReferenceInput(browserReference)
         const explicitResources = await resolveCodexExplicitResources({
           selections: request.resources ?? [],
@@ -3218,11 +2127,22 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
             browserSelections[0]?.id === selection.id ? resolvedBrowserInput : null
           ),
           resolveCalendar: (selection) => {
-            const event = input.database.getCalendarEventById(selection.eventId)
+            const eventId = persistableCalendarEventId(selection.eventId) || selection.eventId
+            const event = input.database.getCalendarEventById(eventId)
             return event ? trustedCalendarReferenceInput(event) : null
           },
+          resolveRssItem: (selection) => {
+            const item = input.database.getRSSItemsByIds([selection.itemId])[0]
+            return item ? trustedRssItemInput(item) : null
+          },
+          resolveRssSource: (selection) => {
+            const source = input.database.getRSSSources().find((candidate) => candidate.id === selection.sourceId)
+            return source ? trustedRssSourceInput(source) : null
+          },
         })
-        const currentDocumentWriteIntent = Boolean(request.currentDocumentAnchor)
+        const currentDocumentAnchor = request.currentDocumentAnchor ?? null
+        assertWidgetTargetsMatchAnchor(request.resources ?? [], currentDocumentAnchor)
+        const currentDocumentWriteIntent = Boolean(currentDocumentAnchor)
           && hasExplicitCurrentDocumentWriteIntent(request.userMessage.content)
         const { requestEnvelope, authorization } = resolveCodexProductTurnAuthorization({
           host: boundHost,
@@ -3245,36 +2165,43 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
           requestEnvelope,
           frozenToolSurface: binding.toolSurface || undefined,
         })
-        const currentDocumentAnchor = request.currentDocumentAnchor ?? null
-        const baseToolSnapshot = currentDocumentAnchor
-          ? buildCurrentDocumentReadToolSnapshot({
-              resolved: resolvedToolSnapshot,
-              authorizationId: `codex-auth:${request.requestId}`,
-              authorization,
-              allowWrite: currentDocumentWriteIntent,
-            })
-          : externalReadSlice
-            ? buildExternalReadToolSnapshot({
-                resolved: resolvedToolSnapshot,
-                authorizationId: `codex-auth:${request.requestId}`,
-                authorization,
-                externalReadSlice,
-              })
-          : resolvedToolSnapshot
         const explicitAllowedToolNames = [...new Set(
           explicitResources.authorities.flatMap((authority) => authority.allowedToolNames),
         )]
-        const hasExplicitLocalResources = explicitResources.requestResources.some(
-          (resource) => resource.kind === 'attachment' || resource.kind === 'folder_reference',
-        )
-        const toolSnapshot = hasExplicitLocalResources
-          ? buildExplicitResourceReadToolSnapshot({
-              resolved: baseToolSnapshot,
-              authorizationId: `codex-auth:${request.requestId}`,
-              authorization,
-              allowedResourceToolNames: explicitAllowedToolNames,
-            })
-          : baseToolSnapshot
+        const exclusiveAllowSet = authorization.mode === 'selected' && authorization.skillId === 'tag-forge'
+          ? TAG_FORGE_EXCLUSIVE_TOOL_NAMES
+          : null
+        const browserAdmission = buildBrowserAdmissionAuthoritySnapshot({
+          authorityId: `browser-auth:${request.requestId}`,
+          activeWorkbenchMode,
+          currentBrowserPageRef: activeWorkbenchMode === 'browser'
+            ? hostEnvironment.browserPageRef || null
+            : null,
+          explicitBrowserReadRefs: browserReference?.environment.browserPageRef
+            ? [browserReference.environment.browserPageRef]
+            : [],
+          selectedSkillToolNames: authorization.mode === 'selected'
+            ? [...authorization.allowedTypedActions, ...authorization.allowedPrimitives]
+            : [],
+          hasExplicitAttachment: explicitResources.requestResources.some((resource) => resource.kind === 'attachment'),
+          hasWritableRoot: explicitResources.requestResources.some((resource) => (
+            resource.kind === 'folder_reference' && resource.canWrite
+          )),
+          tagForgeExclusive: exclusiveAllowSet !== null,
+        })
+        const toolSnapshot = composeCodexTurnToolSnapshot({
+          resolved: resolvedToolSnapshot,
+          authorizationId: `codex-auth:${request.requestId}`,
+          authorization,
+          currentDocument: currentDocumentAnchor
+            ? { present: true, allowWrite: currentDocumentWriteIntent }
+            : undefined,
+          externalReadAllowedToolNames: externalReadSlice?.allowedToolNames,
+          explicitResourceAllowedToolNames: explicitAllowedToolNames,
+          workbenchMode: trustedEnvironment.workbenchMode,
+          exclusiveAllowSet,
+          browserAdmission,
+        })
         const selectedSkill = toolSnapshot.readyTurnToolAuthorization.skillAuthorization
         const selectedNativeSkill = selectedSkill.mode === 'selected'
           ? boundHost.resolveNativeSkillInput?.({ skillId: selectedSkill.skillId }) ?? null
@@ -3298,9 +2225,8 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
           skillAuthorization: selectedSkill,
         })
         const resourceReferences = [
-          ...(currentDocumentAnchor
-            ? [resourceReferenceForAnchor(currentDocumentAnchor)]
-            : externalReadSlice ? [externalReadResourceReference(externalReadSlice)] : []),
+          ...(currentDocumentAnchor ? [resourceReferenceForAnchor(currentDocumentAnchor)] : []),
+          ...(externalReadSlice ? [externalReadResourceReference(externalReadSlice)] : []),
           ...explicitResources.resourceRefs,
           ...(selectedSkillResources?.resourceRefs ?? []),
         ].filter((reference, index, all) => all.findIndex(
@@ -3330,9 +2256,10 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
           currentDocumentAnchor,
           externalReadSlice,
           resourceAuthorities: explicitResources.authorities,
-          ...(trustedEnvironment.browserPageRef
-            ? { browserPageRef: trustedEnvironment.browserPageRef }
+          ...(executionPageRef
+            ? { browserPageRef: executionPageRef }
             : {}),
+          productSurfaceTargets: extractProductSurfaceTargets(request.resources ?? []),
           actionAuthorizationMode: readActionAuthorizationModeFromEnvelope(requestEnvelope),
           readyToolSurface: toolSnapshot.readyToolSurface,
           readyTurnToolAuthorization: toolSnapshot.readyTurnToolAuthorization,
@@ -3704,32 +2631,114 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
               })
             : undefined,
           requestEnvelope: readCodexPreparedActionAuthorizationEnvelope(product),
-          requestModuleToolAction: anchor
-            ? createCurrentDocumentReadRequester({
-                anchor,
-                agent: scope?.activeAgentId || scope?.agent,
-                sessionId: binding.readyAliasId,
-                scopeId: binding.readyScopeId,
-                readyRunId: binding.readyRunId,
-                codexThreadId: executionIdentity.codexThreadId,
-                codexTurnId: executionIdentity.codexTurnId,
-                codexCallId: executionIdentity.codexCallId,
-                readyActionId: executionIdentity.readyActionId,
-                actionIdentityDigest: executionIdentity.actionIdentityDigest,
-                resourceAnchorDigest: binding.authorization.resourceAnchorDigest,
-                abortSignal,
-                requestRendererToolAction: input.requestRendererToolAction,
-                allowWrite: binding.authorization.allowedToolNames.some((toolName) => (
-                  toolName === 'document_insert_widget'
-                  || toolName === 'document_update_widget'
-                  || toolName === 'document_remove_widget'
-                  || toolName === 'document_replace_exact'
-                  || toolName === 'document_save_tab'
-                )),
-                hasExactRead: () => currentDocumentExactReadRuns.has(binding.readyRunId),
-                onExactRead: () => { currentDocumentExactReadRuns.add(binding.readyRunId) },
-              })
-            : undefined,
+          requestModuleToolAction: createCodexProductActionRequester({
+            executingToolName: executionIdentity.executingToolName,
+            allowedToolNames: binding.authorization.allowedToolNames,
+            readyRunId: binding.readyRunId,
+            scopeId: binding.readyScopeId,
+            messageVisibilityEpoch: product.messageVisibilityEpoch,
+            codexThreadId: executionIdentity.codexThreadId,
+            codexTurnId: executionIdentity.codexTurnId,
+            codexCallId: executionIdentity.codexCallId,
+            readyActionId: executionIdentity.readyActionId,
+            actionIdentityDigest: executionIdentity.actionIdentityDigest,
+            abortSignal,
+            journal,
+            assertEffectAuthority: () => {
+              if (abortSignal.aborted) throw new CodexToolBridgeError('tool_execution_aborted')
+              const currentScope = host?.getScope(binding.readyScopeId)
+              if (!currentScope || currentScope.messageVisibilityEpoch !== product.messageVisibilityEpoch) {
+                throw new CodexToolBridgeError('product_action_authority_drift')
+              }
+              const current = repository.readProductTurnRuntime(binding.readyRunId)
+              if (current.readyRunId !== binding.readyRunId) {
+                throw new CodexToolBridgeError('product_action_authority_drift')
+              }
+            },
+            handlers: createProductionProductActionHandlers({
+              database: input.database,
+              rss: {
+                async fetchUpdates() {
+                  const { fetchAllRSSFeeds } = await import('../../rss-engine/ipc-handler')
+                  return fetchAllRSSFeeds()
+                },
+                async addSource(payload) {
+                  const { addRSSSourceCore } = await import('../../rss-engine/ipc-handler')
+                  return addRSSSourceCore(payload)
+                },
+                async analyzeItem(payload) {
+                  const { getRSSItemAnalysisManager } = await import('../../rss-engine/item-analysis-manager')
+                  const job = await getRSSItemAnalysisManager().startItemAnalysis({
+                    itemId: payload.itemId,
+                    action: payload.analysisType,
+                    link: payload.link,
+                    title: payload.title,
+                    targetDir: join(input.userDataPath, 'rss-analysis'),
+                    source: payload.source,
+                    summary: payload.summary,
+                    force: true,
+                  })
+                  const failed = job.status === 'failed'
+                  return {
+                    ok: !failed,
+                    summary: failed
+                      ? `RSS 条目分析失败：${payload.title}`
+                      : `RSS 条目分析已启动：${payload.title}`,
+                    jobId: job.id,
+                    status: job.status,
+                    itemId: payload.itemId,
+                    outputDir: job.output_dir,
+                    reportPath: job.report_path,
+                    errorKind: failed ? 'rss_analyze_failed' : undefined,
+                  }
+                },
+              },
+              requestRendererToolAction: input.requestRendererToolAction,
+              documentRequester: anchor
+                ? createCurrentDocumentReadRequester({
+                    anchor,
+                    agent: scope?.activeAgentId || scope?.agent,
+                    sessionId: binding.readyAliasId,
+                    scopeId: binding.readyScopeId,
+                    readyRunId: binding.readyRunId,
+                    codexThreadId: executionIdentity.codexThreadId,
+                    codexTurnId: executionIdentity.codexTurnId,
+                    codexCallId: executionIdentity.codexCallId,
+                    readyActionId: executionIdentity.readyActionId,
+                    actionIdentityDigest: executionIdentity.actionIdentityDigest,
+                    resourceAnchorDigest: binding.authorization.resourceAnchorDigest,
+                    abortSignal,
+                    requestRendererToolAction: input.requestRendererToolAction,
+                    allowWrite: binding.authorization.allowedToolNames.some((toolName) => (
+                      toolName === 'document_insert_widget'
+                      || toolName === 'document_update_widget'
+                      || toolName === 'document_remove_widget'
+                      || toolName === 'document_replace_exact'
+                      || toolName === 'document_save_tab'
+                    )),
+                    hasExactRead: () => currentDocumentExactReadRuns.has(binding.readyRunId),
+                    onExactRead: () => { currentDocumentExactReadRuns.add(binding.readyRunId) },
+                  })
+                : undefined,
+              targets: product.prepared.productSurfaceTargets,
+              recordListedCalendarEventIds: (eventIds) => {
+                calendarListedEventIdsByRun.set(binding.readyRunId, [...eventIds])
+              },
+              listedCalendarEventIds: () => calendarListedEventIdsByRun.get(binding.readyRunId) || [],
+              onCalendarMutated: (eventId) => {
+                void calendarNotifyReady.then((notify) => { notify?.(eventId) })
+              },
+              agent: scope?.activeAgentId || scope?.agent || undefined,
+              sessionId: binding.readyAliasId,
+              runId: binding.readyRunId,
+              codexThreadId: executionIdentity.codexThreadId,
+              codexTurnId: executionIdentity.codexTurnId,
+              codexCallId: executionIdentity.codexCallId,
+              readyActionId: executionIdentity.readyActionId,
+              actionIdentityDigest: executionIdentity.actionIdentityDigest,
+              abortSignal,
+            }),
+          }),
           feishuReadAuthority: externalReadSlice?.kind === 'feishu_typed_read'
             ? externalReadSlice.authority
             : null,

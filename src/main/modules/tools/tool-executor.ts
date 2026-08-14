@@ -218,6 +218,24 @@ type TrustedBrowserPageRef = {
   mainFrameDocumentToken: string
 }
 
+async function assertTrustedBrowserPageIdentity(
+  controller: NonNullable<ToolContext['browserController']>,
+  pageRef: TrustedBrowserPageRef,
+): Promise<ReturnType<typeof browserFailureOutput> | null> {
+  const identity = await browserSnapshotService.documentIdentity(controller, pageRef.tabId)
+  if (
+    identity.physicalTargetToken !== pageRef.physicalTargetToken
+    || identity.frameDocumentToken !== pageRef.mainFrameDocumentToken
+  ) {
+    return browserFailureOutput({
+      ok: false,
+      errorKind: 'browser_reference_stale',
+      tabId: pageRef.tabId,
+    })
+  }
+  return null
+}
+
 function requestEnvelopeBrowserPageRef(value: unknown): TrustedBrowserPageRef | null {
   if (!value || typeof value !== 'object') return null
   const hints = (value as { environmentHints?: unknown }).environmentHints
@@ -237,11 +255,15 @@ function requestEnvelopeBrowserPageRef(value: unknown): TrustedBrowserPageRef | 
     : null
 }
 
+function browserTabsAction(args: Record<string, unknown>): string {
+  return typeof args.action === 'string' && args.action.trim() ? args.action.trim() : 'list'
+}
+
 function browserToolTargetsReferencedPage(toolName: string, args: Record<string, unknown>): boolean {
   if (toolName === 'browser_task' || toolName === 'browser_research') return false
   if (toolName !== 'browser_tabs') return true
-  const action = typeof args.action === 'string' ? args.action : 'list'
-  return action === 'switch' || action === 'close'
+  const action = browserTabsAction(args)
+  return action === 'list' || action === 'switch' || action === 'close'
 }
 
 function browserOriginOf(value: string | null | undefined): string | null {
@@ -493,6 +515,17 @@ async function executeToolCallInner(
   const trustedBrowserPageRef = definition.domain === 'browser'
     ? requestEnvelopeBrowserPageRef(context.requestEnvelope)
     : null
+  if (invoker !== 'host' && toolName === 'browser_tabs' && browserTabsAction(args) === 'open') {
+    return browserFailureOutput({
+      ok: false,
+      errorKind: 'browser_tabs_successor_unbound',
+      toolName,
+      dispatch: 'rejected',
+      delivery: 'not_delivered',
+      effect: 'not_applicable',
+      mayHaveCommitted: false,
+    })
+  }
   if (trustedBrowserPageRef && browserToolTargetsReferencedPage(toolName, args)) {
     const requestedTabId = typeof args.tab_id === 'string' ? args.tab_id.trim() : ''
     if (requestedTabId && requestedTabId !== trustedBrowserPageRef.tabId) {
@@ -682,20 +715,11 @@ async function executeToolCallInner(
             return 'Browser controller is not available'
           }
           if (trustedBrowserPageRef && browserToolTargetsReferencedPage(toolName, args)) {
-            const identity = await browserSnapshotService.documentIdentity(
+            const stale = await assertTrustedBrowserPageIdentity(
               context.browserController,
-              trustedBrowserPageRef.tabId,
+              trustedBrowserPageRef,
             )
-            if (
-              identity.physicalTargetToken !== trustedBrowserPageRef.physicalTargetToken
-              || identity.frameDocumentToken !== trustedBrowserPageRef.mainFrameDocumentToken
-            ) {
-              return browserFailureOutput({
-                ok: false,
-                errorKind: 'browser_reference_stale',
-                tabId: trustedBrowserPageRef.tabId,
-              })
-            }
+            if (stale) return stale
           }
           const browserCapability = resolveBrowserCapability(toolName, args)
           if (!browserCapability) {
@@ -715,6 +739,17 @@ async function executeToolCallInner(
               })
             }
             context.browserWorkflowRoute = await context.ensureBrowserWorkflowRoute()
+          }
+          if (invoker !== 'host' && browserToolTargetsReferencedPage(toolName, args) && !trustedBrowserPageRef) {
+            return browserFailureOutput({
+              ok: false,
+              errorKind: 'browser_page_ref_required',
+              toolName,
+              dispatch: 'rejected',
+              delivery: 'not_delivered',
+              effect: 'not_applicable',
+              mayHaveCommitted: false,
+            })
           }
           const unresolvedObservationBarrier = context.browserObservationBarrier
             && context.browserObservationBarrier.clearedByObservationSeq === null
@@ -772,8 +807,21 @@ async function executeToolCallInner(
               inputSource: invoker === 'model' ? 'model' : 'trusted_internal',
               browserTurnLease: turnLease,
               messageVisibilityEpoch: context.messageVisibilityEpoch,
+              trustedPageRef: trustedBrowserPageRef,
             },
           )
+          if (
+            trustedBrowserPageRef
+            && browserCapability.mode === 'observe'
+            && browserToolTargetsReferencedPage(toolName, args)
+            && context.browserController
+          ) {
+            const stale = await assertTrustedBrowserPageIdentity(
+              context.browserController,
+              trustedBrowserPageRef,
+            )
+            if (stale) return stale
+          }
           if (typeof browserResult === 'string' && browserResult.startsWith('Error:')) {
             return browserFailureOutput({
               ok: false,

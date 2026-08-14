@@ -132,6 +132,12 @@ export async function executeRSSTool(
   if (context?.requestModuleToolAction) {
     try {
       const payload = await context.requestModuleToolAction(tool.action, args)
+      if (payload.ok === false) {
+        return toStructuredResult(tool, typeof payload.summary === 'string' ? payload.summary : `${tool.action} 失败`, {
+          ...payload,
+          ok: false,
+        })
+      }
       const summary = typeof payload.summary === 'string' && payload.summary.trim()
         ? payload.summary.trim()
         : `${tool.action} 已完成。`
@@ -145,8 +151,9 @@ export async function executeRSSTool(
     }
   }
 
-  context?.emitToolAction?.(tool.action, args)
-  return toStructuredResult(tool, `${tool.action} 已排队执行。`, {
+  return toStructuredResult(tool, `${tool.action} 缺少产品动作桥。`, {
+    ok: false,
+    errorKind: 'product_action_bridge_missing',
     ownerResourceId: typeof args.itemId === 'string' ? args.itemId : null,
   })
 }

@@ -28,8 +28,8 @@ const REMINDER_ITEMS: Record<string, unknown> = {
 
 test('derives calendar_list_window params identical to legacy hand-rolled list', () => {
   const expected: SkillParamDefinition[] = [
-    { name: 'start', type: 'string', description: '开始时间 ISO 字符串', required: true },
-    { name: 'end', type: 'string', description: '结束时间 ISO 字符串', required: true },
+    { name: 'start', type: 'string', description: '开始时间 ISO 字符串；省略时使用本轮日历窗口', required: false },
+    { name: 'end', type: 'string', description: '结束时间 ISO 字符串；省略时使用本轮日历窗口', required: false },
   ]
   assert.deepEqual(zodObjectToParamList(CALENDAR_SCHEMAS.calendar_list_window), expected)
 })
@@ -59,7 +59,7 @@ test('derives the complete structured calendar_create_event parameter contract',
 
 test('derives the complete structured calendar_update_event parameter contract', () => {
   const expected: SkillParamDefinition[] = [
-    { name: 'id', type: 'string', description: '事件 ID', required: true },
+    { name: 'id', type: 'string', description: '事件 ID；省略时使用本轮唯一日程目标或列表回执', required: false },
     { name: 'title', type: 'string', description: '可选，更新后的标题', required: false },
     { name: 'startTime', type: 'string', description: '可选，新的开始时间 ISO 字符串', required: false },
     { name: 'endTime', type: 'string', description: '可选，新的结束时间 ISO 字符串', required: false },
@@ -80,7 +80,7 @@ test('derives the complete structured calendar_update_event parameter contract',
 
 test('derives calendar_delete_event params identical to legacy hand-rolled list', () => {
   const expected: SkillParamDefinition[] = [
-    { name: 'id', type: 'string', description: '事件 ID', required: true },
+    { name: 'id', type: 'string', description: '事件 ID；省略时使用本轮唯一日程目标或列表回执', required: false },
   ]
   assert.deepEqual(zodObjectToParamList(CALENDAR_SCHEMAS.calendar_delete_event), expected)
 })

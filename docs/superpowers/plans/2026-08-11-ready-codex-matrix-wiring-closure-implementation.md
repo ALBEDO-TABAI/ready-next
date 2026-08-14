@@ -68,4 +68,6 @@ enforce: true
 
 当前状态仍为 `in-progress`：接线修复已进入最终门禁与对抗审查；只有审查 P0/P1/P2 清零、最终 manifest 与安装包校验完成后才能收口，本文不声称已出包或已手工复测。
 
+域 12 已闭合的是文档/浏览/日历 **身份与资源信封**。RSS/日程写回、Widget 目标、Tag Forge 排他面和通用产品动作桥见已落地的 `docs/superpowers/plans/2026-08-13-codex-workbench-surface-rewire-implementation.md`。专项人格/预路由不在本文恢复，后继见 `docs/superpowers/plans/2026-08-13-codex-domain-skill-and-library-implementation.md`。
+
 任何一层仍需靠重启、切会话、清数据库或手工改状态才能恢复，都视为未完成。

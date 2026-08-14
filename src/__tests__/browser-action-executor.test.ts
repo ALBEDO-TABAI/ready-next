@@ -11,6 +11,10 @@ import { browserMutationController } from '../main/modules/tools/browser-mutatio
 import { sendKeyStroke } from '../main/modules/tools/browser-input-actions'
 import type { BrowserController } from '../main/modules/browser-engine/ipc-handler'
 import type { BrowserActionOutcome } from '../shared/browser-action-outcome'
+import {
+  browserWorkflowStableDigest,
+  parseBrowserWorkflowActionJournal,
+} from '../main/modules/browser-engine/browser-workflow-evidence'
 
 const DOCUMENT_IDENTITY = {
   documentState: 'document' as const,
@@ -34,12 +38,22 @@ function outputData(value: unknown): Record<string, unknown> {
 
 function journal(events: string[] = []): BrowserWorkflowJournalPort & {
   outcomes: BrowserActionOutcome[]
-  observations: Array<{ operationId: string; resultDigest: string }>
+  observations: Array<{
+    operationId: string
+    resultDigest: string
+    resourceContent: string
+    frameDocumentToken: string | null
+  }>
 } {
   let sequence = 0
   let searchActionId: string | null = null
   const outcomes: BrowserActionOutcome[] = []
-  const observations: Array<{ operationId: string; resultDigest: string }> = []
+  const observations: Array<{
+    operationId: string
+    resultDigest: string
+    resourceContent: string
+    frameDocumentToken: string | null
+  }> = []
   return {
     taskId: 'browser-workflow-1',
     ownerRunId: 'run-1',
@@ -62,7 +76,12 @@ function journal(events: string[] = []): BrowserWorkflowJournalPort & {
       return { receiptId: `receipt-${actionId}`, outcome }
     },
     recordObservation(input) {
-      observations.push({ operationId: input.operationId, resultDigest: input.resultDigest })
+      observations.push({
+        operationId: input.operationId,
+        resultDigest: input.resultDigest,
+        resourceContent: input.resourceContent,
+        frameDocumentToken: input.identity.frameDocumentToken,
+      })
       return {
         receiptId: 'observation-1',
         observationSeq: 1,
@@ -80,6 +99,117 @@ function journal(events: string[] = []): BrowserWorkflowJournalPort & {
     },
   }
 }
+
+test('stale observe results are not recorded as page observations', async () => {
+  const port = journal()
+  const result = await new BrowserActionExecutor().execute({
+    toolName: 'browser_read',
+    args: { tab_id: 'tab-1' },
+    journal: port,
+    trustedPageRef: {
+      tabId: 'tab-1',
+      physicalTargetToken: 'physical-1',
+      mainFrameDocumentToken: 'document-v1',
+    },
+    resolveTargetIdentity: (_phase) => ({
+      documentState: 'document',
+      tabId: 'tab-1',
+      physicalTargetToken: 'physical-1',
+      frameId: '0',
+      frameDocumentToken: _phase === 'predecessor' ? 'document-v1' : 'document-v2',
+      targetRef: null,
+    }),
+    dispatch: async () => JSON.stringify({
+      ok: true,
+      observationFresh: true,
+      content: 'v2 document body',
+    }),
+  })
+  assert.equal(outputData(result).errorKind, 'browser_reference_stale')
+  assert.equal(port.observations.length, 0)
+  assert.doesNotMatch(JSON.stringify(port.observations), /v2 document body|document-v2/)
+})
+
+test('tool environmentSummary is persisted onto the settled action outcome', async () => {
+  const port = journal()
+  const result = await new BrowserActionExecutor().execute({
+    toolName: 'browser_hover',
+    args: { x: 10, y: 20 },
+    journal: port,
+    resolveTargetIdentity: resolveDocumentIdentity,
+    dispatch: async (_invocation, _signal, boundary) => {
+      boundary.invokeTransport(() => undefined)
+      boundary.recordMechanicalFact({ delivery: 'delivered' })
+      return JSON.stringify({
+        ok: true,
+        environmentSummary: {
+          targetTabId: 'tab-1',
+          sampledAt: '2026-08-14T00:00:00.000Z',
+          url: 'https://example.test/page',
+          title: 'Example',
+          dialogState: 'closed',
+          fileChooserState: 'closed',
+        },
+      })
+    },
+  })
+  const outcome = outputData(result).browserActionOutcome as BrowserActionOutcome
+  assert.equal(outcome.environmentSummary?.targetTabId, 'tab-1')
+  assert.equal(outcome.environmentSummary?.url, 'https://example.test/page')
+  assert.equal(outcome.environmentSummary?.title, 'Example')
+  assert.equal(outcome.environmentSummary?.dialogState, 'closed')
+  assert.equal(port.outcomes[0]?.environmentSummary?.url, 'https://example.test/page')
+  const persisted = port.outcomes[0]!
+  const receiptId = `browser-receipt-${browserWorkflowStableDigest({
+    taskId: persisted.taskId,
+    actionId: persisted.actionId,
+    normalizedOutcome: persisted,
+  }).slice(0, 32)}`
+  const parsedJournal = parseBrowserWorkflowActionJournal({
+    browserWorkflowActionJournal: {
+      nextActionSeq: 2,
+      nextObservationSeq: 1,
+      activeAction: null,
+      settledOutcomes: [{
+        receiptId,
+        actionId: persisted.actionId,
+        actionSeq: persisted.actionSeq,
+        outcome: persisted,
+        settledAt: '2026-08-14T00:00:00.000Z',
+      }],
+      observationReceipts: [],
+    },
+  }, persisted.taskId)
+  assert.equal(parsedJournal.settledOutcomes[0]?.outcome.environmentSummary?.url, 'https://example.test/page')
+  assert.equal(parsedJournal.settledOutcomes[0]?.outcome.environmentSummary?.title, 'Example')
+  assert.equal(parsedJournal.settledOutcomes[0]?.outcome.environmentSummary?.sampledAt, '2026-08-14T00:00:00.000Z')
+})
+
+test('environmentSummary from another tab is dropped at settlement', async () => {
+  const port = journal()
+  const result = await new BrowserActionExecutor().execute({
+    toolName: 'browser_hover',
+    args: { x: 10, y: 20 },
+    journal: port,
+    resolveTargetIdentity: resolveDocumentIdentity,
+    dispatch: async (_invocation, _signal, boundary) => {
+      boundary.invokeTransport(() => undefined)
+      boundary.recordMechanicalFact({ delivery: 'delivered' })
+      return JSON.stringify({
+        ok: true,
+        environmentSummary: {
+          targetTabId: 'tab-other',
+          sampledAt: '2026-08-14T00:00:00.000Z',
+          url: 'https://other.test/page',
+          title: 'Other',
+        },
+      })
+    },
+  })
+  const outcome = outputData(result).browserActionOutcome as BrowserActionOutcome
+  assert.equal(outcome.environmentSummary, undefined)
+  assert.equal(port.outcomes[0]?.environmentSummary, undefined)
+})
 
 test('unknown browser tools are rejected before dispatch', async () => {
   let dispatched = false

@@ -396,6 +396,7 @@ export class BrowserTargetClaimService {
   private readonly transitionListeners = new Set<(transition: BrowserTargetClaimTransition) => void>()
   private readonly activeActions = new Map<string, Set<string>>()
   private readonly locallyFencedClaimIds = new Set<string>()
+  private readonly acknowledgedReleaseKeys = new Set<string>()
 
   constructor(
     private readonly store: BrowserTargetClaimStore,
@@ -908,6 +909,53 @@ export class BrowserTargetClaimService {
       this.emit(transition.previous, transition.next, canSuspend ? 'suspend' : 'release')
     }
     return transitions.map((transition) => transition.next)
+  }
+
+  /**
+   * Durable closeout may release claims via the canonical SQLite writer.
+   * That path cannot emit in-process side effects. After the transaction
+   * commits, sync leftover action state and notify listeners so pointer,
+   * file-chooser, and navigation-echo cleanup still run.
+   */
+  acknowledgeExternalRelease(ownerRunId: string): void {
+    const liveStates: ReadonlySet<BrowserTargetClaimState> = new Set([
+      'held',
+      'user_owned',
+      'suspended',
+    ])
+    const claims = this.store.list()
+    const liveClaimIds = new Set(
+      claims.filter((claim) => liveStates.has(claim.state)).map((claim) => claim.claimId),
+    )
+    let purgedActions = false
+    for (const claimId of [...this.activeActions.keys()]) {
+      if (liveClaimIds.has(claimId)) continue
+      this.activeActions.delete(claimId)
+      purgedActions = true
+    }
+    for (const claimId of [...this.locallyFencedClaimIds]) {
+      if (!liveClaimIds.has(claimId)) this.locallyFencedClaimIds.delete(claimId)
+    }
+    const newlyAcknowledged = claims.filter((claim) => {
+      if (claim.ownerRunId !== ownerRunId || claim.state !== 'released') return false
+      const key = `${ownerRunId}:${claim.claimId}:${claim.generation}`
+      if (this.acknowledgedReleaseKeys.has(key)) return false
+      this.acknowledgedReleaseKeys.add(key)
+      return true
+    })
+    if (newlyAcknowledged.length === 0 && !purgedActions) return
+    const claim = newlyAcknowledged[0]
+      ?? claims.find((item) => item.ownerRunId === ownerRunId && item.state === 'released')
+      ?? null
+    if (!claim) return
+    this.emit({
+      ...claim,
+      state: 'held',
+      claimId: `ack-release:${claim.claimId}`,
+    }, {
+      ...claim,
+      state: 'released',
+    }, 'release')
   }
 
 }

@@ -118,12 +118,6 @@ export async function executeCalendarTool(
   const tool = CALENDAR_TOOLS.find((item) => item.name === toolName)
   if (!tool) return `Unknown calendar tool: ${toolName}`
 
-  if (toolName === 'calendar_list_window') {
-    const start = String(args.start || '').trim()
-    const end = String(args.end || '').trim()
-    if (!start || !end) return 'Error: start and end are required'
-  }
-
   if (toolName === 'calendar_create_event') {
     const title = String(args.title || '').trim()
     const startTime = String(args.startTime || '').trim()
@@ -131,14 +125,15 @@ export async function executeCalendarTool(
     if (!title || !startTime || !endTime) return 'Error: title, startTime and endTime are required'
   }
 
-  if (toolName === 'calendar_update_event' || toolName === 'calendar_delete_event') {
-    const id = String(args.id || '').trim()
-    if (!id) return 'Error: id is required'
-  }
-
   if (context?.requestModuleToolAction) {
     try {
       const payload = await context.requestModuleToolAction(tool.action, args)
+      if (payload.ok === false) {
+        return toStructuredResult(tool, typeof payload.summary === 'string' ? payload.summary : `${tool.action} 失败`, {
+          ...payload,
+          ok: false,
+        })
+      }
       const summary = typeof payload.summary === 'string' && payload.summary.trim()
         ? payload.summary.trim()
         : `${tool.action} 已完成。`
@@ -152,8 +147,9 @@ export async function executeCalendarTool(
     }
   }
 
-  context?.emitToolAction?.(tool.action, args)
-  return toStructuredResult(tool, `${tool.action} 已排队执行。`, {
+  return toStructuredResult(tool, `${tool.action} 缺少产品动作桥。`, {
+    ok: false,
+    errorKind: 'product_action_bridge_missing',
     ownerResourceId: typeof args.id === 'string' ? args.id : null,
   })
 }

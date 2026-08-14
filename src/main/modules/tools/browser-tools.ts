@@ -301,6 +301,11 @@ export async function executeBrowserTool(
     inputSource?: BrowserToolInputSource
     browserTurnLease?: BrowserTurnLease | null
     messageVisibilityEpoch?: number
+    trustedPageRef?: {
+      tabId: string
+      physicalTargetToken: string
+      mainFrameDocumentToken: string
+    } | null
   },
 ): Promise<string | ToolExecutionOutput> {
   log(`executeBrowserTool ${JSON.stringify(sanitizeBrowserToolLogArgs(toolName, args))}`)
@@ -465,6 +470,7 @@ export async function executeBrowserTool(
       writeAdmission: workflowWriteTarget
         ? () => controller.isBrowserWorkflowWriteAdmitted(workflowWriteTarget!)
         : undefined,
+      trustedPageRef: taskExecutionContext?.trustedPageRef || null,
       origin,
       interactionBudgetKey: browserInteractionBudgetKey(args, controller, sessionId, origin),
       beginInteractionObservation: () => beginAuthoritativeInteractionObservation(toolName, args, controller, origin),
@@ -601,6 +607,7 @@ export async function executeBrowserTool(
               agentOwnedWorkTab: browserTaskId ? { browserTaskId } : null,
               requestPowerConfirmation: taskExecutionContext?.requestPowerConfirmation,
               attachBrowserToolOutput: attach,
+              trustedPageRef: taskExecutionContext?.trustedPageRef || null,
             })
           case 'observe':
             return executeBrowserObserveTool(invocation.operation, invocation.args, {

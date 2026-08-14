@@ -79,8 +79,8 @@ export const useCalendarSession = create<CalendarSessionState>((set) => ({
     visibleRangeEnd: end,
   }),
   setSelectedEvent: (payload) => set((state) => ({
-    selectedEventId: payload.id ?? state.selectedEventId,
-    selectedEventTitle: payload.title ?? state.selectedEventTitle,
+    selectedEventId: 'id' in payload ? payload.id ?? null : state.selectedEventId,
+    selectedEventTitle: 'title' in payload ? payload.title ?? null : state.selectedEventTitle,
   })),
   setConflictState: (payload) => set((state) => ({
     conflictState: {

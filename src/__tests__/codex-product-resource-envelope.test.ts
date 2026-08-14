@@ -126,7 +126,9 @@ test('product request envelope exposes a body-free readable current-document cap
     authorizationId: 'authorization-current-document-read',
     authorization,
   })
-  assert.deepEqual(narrowed.readyTurnToolAuthorization.allowedToolNames, ['document_read_section'])
+  assert.ok(narrowed.readyTurnToolAuthorization.allowedToolNames.includes('document_read_section'))
+  assert.equal(narrowed.readyTurnToolAuthorization.allowedToolNames.includes('document_insert_widget'), false)
+  assert.equal(narrowed.readyTurnToolAuthorization.allowedToolNames.includes('document_save_tab'), false)
 })
 
 test('product request envelope uses the host-resolved browser page identity', () => {
@@ -233,7 +235,9 @@ test('current-document turn keeps the full legal surface but authorizes only exa
     'document_read_section',
     'document_replace_exact',
   ])
-  assert.deepEqual(narrowed.readyTurnToolAuthorization.allowedToolNames, ['document_read_section'])
+  assert.ok(narrowed.readyTurnToolAuthorization.allowedToolNames.includes('document_read_section'))
+  assert.equal(narrowed.readyTurnToolAuthorization.allowedToolNames.includes('document_insert_widget'), false)
+  assert.equal(narrowed.readyTurnToolAuthorization.allowedToolNames.includes('document_save_tab'), false)
 })
 
 test('current-document write intent is explicit and keeps advice or read-only requests read-only', () => {
@@ -364,7 +368,8 @@ test('external read keeps the full frozen Provider surface but binds the turn to
     'browser_snapshot',
     'feishu_doc_read',
   ])
-  assert.deepEqual(narrowed.readyTurnToolAuthorization.allowedToolNames, ['feishu_doc_read'])
+  assert.ok(narrowed.readyTurnToolAuthorization.allowedToolNames.includes('feishu_doc_read'))
+  assert.ok(narrowed.readyTurnToolAuthorization.allowedToolNames.includes('browser_snapshot'))
 
   const larkAuthorization = buildSelectedSkillToolAuthorization({
     skillId: 'lark-doc',

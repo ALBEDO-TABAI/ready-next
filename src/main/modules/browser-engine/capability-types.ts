@@ -66,6 +66,7 @@ export interface BrowserScrollCollectOptions extends BrowserExtractStructuredOpt
   maxScrolls?: number
   scrollDelayMs?: number
   stableRounds?: number
+  beforeScroll?: () => Promise<void>
 }
 
 export interface BrowserScrollCollectResult extends BrowserExtractStructuredResult {

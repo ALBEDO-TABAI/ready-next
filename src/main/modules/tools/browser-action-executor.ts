@@ -10,7 +10,12 @@ import {
   type BrowserToolInvocation,
 } from './browser-tool-invocation'
 import { createToolExecutionOutput, type ToolExecutionOutput } from '../agent-control/tools-runtime/tool-result-types'
-import type { BrowserActionOutcome, BrowserActionTargetIdentity } from '../../../shared/browser-action-outcome'
+import type {
+  BrowserActionOutcome,
+  BrowserActionTargetIdentity,
+  BrowserEnvironmentSummary,
+} from '../../../shared/browser-action-outcome'
+import { buildBrowserEnvironmentSummary } from '../browser-engine/browser-action-receipt'
 import {
   browserOriginInteractionBudget,
   type OriginInteractionBudget,
@@ -133,6 +138,11 @@ export interface BrowserActionExecutorInput {
   /** Synchronous durable ownership read at the exact journal/transport stack.
    * A false result fences before the in-flight row and physical write. */
   writeAdmission?: () => boolean
+  trustedPageRef?: {
+    tabId: string
+    physicalTargetToken: string
+    mainFrameDocumentToken: string
+  } | null
   onEvent?: (event: BrowserActionExecutorEvent) => void
   dispatch: (
     invocation: Extract<BrowserToolInvocation, { ok: true }>,
@@ -145,6 +155,51 @@ function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? value as Record<string, unknown>
     : null
+}
+
+function environmentSummaryAllowedTabIds(
+  predecessor: BrowserActionTargetIdentity,
+  successor: BrowserActionTargetIdentity,
+  postActionTabId: string | null,
+): Set<string> {
+  const allowed = new Set<string>()
+  if (predecessor.documentState === 'document') allowed.add(predecessor.tabId)
+  if (successor.documentState === 'document') allowed.add(successor.tabId)
+  if (postActionTabId) allowed.add(postActionTabId)
+  return allowed
+}
+
+function environmentSummaryFromResult(
+  data: Record<string, unknown>,
+  predecessor: BrowserActionTargetIdentity,
+  successor: BrowserActionTargetIdentity,
+  postActionTabId: string | null,
+): BrowserEnvironmentSummary | null {
+  const raw = data.environmentSummary
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
+  const record = raw as Record<string, unknown>
+  const requestedTabId = typeof record.targetTabId === 'string' ? record.targetTabId.trim() : ''
+  const allowedTabIds = environmentSummaryAllowedTabIds(predecessor, successor, postActionTabId)
+  if (requestedTabId && allowedTabIds.size > 0 && !allowedTabIds.has(requestedTabId)) return null
+  const boundTabId = requestedTabId
+    || (successor.documentState === 'document' ? successor.tabId : '')
+    || postActionTabId
+    || (predecessor.documentState === 'document' ? predecessor.tabId : '')
+  return buildBrowserEnvironmentSummary({
+    targetTabId: boundTabId || null,
+    url: typeof record.url === 'string' ? record.url : null,
+    title: typeof record.title === 'string' ? record.title : null,
+    dialogState: record.dialogState === 'open' || record.dialogState === 'closed'
+      ? record.dialogState
+      : undefined,
+    fileChooserState: record.fileChooserState === 'open' || record.fileChooserState === 'closed'
+      ? record.fileChooserState
+      : undefined,
+    downloadState: record.downloadState === 'in_flight' || record.downloadState === 'settled'
+      ? record.downloadState
+      : undefined,
+    sampledAt: typeof record.sampledAt === 'string' ? record.sampledAt : null,
+  })
 }
 
 function resultData(result: string | ToolExecutionOutput): Record<string, unknown> {
@@ -454,6 +509,12 @@ export class BrowserActionExecutor {
         )
       const effectObserved = identityChanged || action.mechanicalFacts.some((fact) => Boolean(fact.effect))
       const submitted = action.phase === 'submit' && delivery === 'delivered'
+      const environmentSummary = environmentSummaryFromResult(
+        data,
+        predecessor,
+        successor.identity,
+        postActionTabId,
+      )
       const outcome: BrowserActionOutcome = {
         actionId: action.actionId,
         actionSeq: action.actionSeq,
@@ -470,6 +531,9 @@ export class BrowserActionExecutor {
         identity: predecessor,
         successorIdentity: successor.identity,
         ...(postActionTabId ? { postActionTabId } : {}),
+        ...(environmentSummary
+          ? { environmentSummary }
+          : {}),
       }
       if (invocation.operation === 'search') {
         outcome.search = {
@@ -732,6 +796,23 @@ export class BrowserActionExecutor {
       if (timedOut) return deadlineResult(settlement, true, false)
       if (capability.requiresDocument && input.journal && data.observationFresh === true) {
         const observedIdentity = await successorIdentity(noDocumentIdentity(), true, null)
+        const pinned = input.trustedPageRef
+        const observationLeavesPinnedPage = Boolean(
+          pinned
+          && observedIdentity.identity.documentState === 'document'
+          && (
+            observedIdentity.identity.tabId !== pinned.tabId
+            || observedIdentity.identity.physicalTargetToken !== pinned.physicalTargetToken
+            || observedIdentity.identity.frameDocumentToken !== pinned.mainFrameDocumentToken
+          ),
+        )
+        if (observationLeavesPinnedPage && pinned) {
+          return attachBrowserMetadata(createBrowserStructuredOutput({
+            ok: false,
+            errorKind: 'browser_reference_stale',
+            tabId: pinned.tabId,
+          }), settlement)
+        }
         const observationIsFresh = observedIdentity.fresh
           && identityIsComplete(observedIdentity.identity)
           && data.cached !== true

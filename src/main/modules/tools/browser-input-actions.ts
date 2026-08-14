@@ -18,10 +18,168 @@ import {
   probeCoordinateTargetOrThrow,
   throwIfLiveTargetGuardBlocked,
 } from './browser-probe'
+import type { ToolExecutionOutput } from '../agent-control/tools-runtime/tool-result-types'
+import { createBrowserStructuredOutput } from './browser-failure-output'
 import {
+  browserInputEnvironmentReadiness,
   requireBrowserInputReadiness,
   type BrowserInputDocumentState,
 } from '../browser-engine/browser-input-readiness'
+import { browserSnapshotService } from '../browser-engine/browser-snapshot-service'
+
+export async function requireTrustedPointerDelivery(
+  controller: BrowserController,
+  tabId: string | null,
+): Promise<ToolExecutionOutput | null> {
+  try {
+    await requireBrowserInputReadiness(controller, tabId, 'trusted_pointer')
+    return null
+  } catch (error) {
+    const readiness = error && typeof error === 'object' && 'readiness' in error
+      ? (error as { readiness?: { reason?: string } }).readiness
+      : null
+    return createBrowserStructuredOutput({
+      ok: false,
+      errorKind: readiness?.reason === 'foreground_required' ? 'foreground_required' : 'browser_surface_required',
+      dispatch: 'rejected',
+      delivery: 'not_delivered',
+      effect: 'not_applicable',
+      mayHaveCommitted: false,
+      needsObservation: false,
+    })
+  }
+}
+
+export type TrustedPointerExpectedIdentity = {
+  physicalTargetToken?: string | null
+  mainFrameDocumentToken?: string | null
+}
+
+let boundTrustedPointerExpected: TrustedPointerExpectedIdentity | null = null
+
+export function bindTrustedPointerExpected(
+  expected: TrustedPointerExpectedIdentity | null,
+): () => void {
+  const previous = boundTrustedPointerExpected
+  boundTrustedPointerExpected = expected
+  return () => {
+    boundTrustedPointerExpected = previous
+  }
+}
+
+function pointerDeliveryDenied(reason?: string): ToolExecutionOutput {
+  return createBrowserStructuredOutput({
+    ok: false,
+    errorKind: reason === 'foreground_required' ? 'foreground_required' : 'browser_surface_required',
+    dispatch: 'rejected',
+    delivery: 'not_delivered',
+    effect: 'not_applicable',
+    mayHaveCommitted: false,
+    needsObservation: false,
+  })
+}
+
+export async function trustedInputPageDenied(
+  controller: BrowserController,
+  tabId: string | null,
+  expected?: TrustedPointerExpectedIdentity | null,
+): Promise<ToolExecutionOutput | null> {
+  const resolvedExpected = expected || boundTrustedPointerExpected
+  const expectedPhysical = resolvedExpected?.physicalTargetToken || null
+  const expectedDocument = resolvedExpected?.mainFrameDocumentToken || null
+  if (!expectedDocument && !expectedPhysical) return null
+  const identity = await browserSnapshotService.documentIdentity(controller, tabId)
+  if (
+    (expectedDocument && identity.frameDocumentToken !== expectedDocument)
+    || (expectedPhysical && identity.physicalTargetToken !== expectedPhysical)
+  ) {
+    return createBrowserStructuredOutput({
+      ok: false,
+      errorKind: 'browser_reference_stale',
+      tabId,
+      dispatch: 'rejected',
+      delivery: 'not_delivered',
+      effect: 'not_applicable',
+      mayHaveCommitted: false,
+      needsObservation: false,
+    })
+  }
+  return null
+}
+
+export async function dispatchTrustedPointer(
+  controller: BrowserController,
+  tabId: string | null,
+  event: Parameters<BrowserController['dispatchMouse']>[1],
+  expected?: TrustedPointerExpectedIdentity | null,
+): Promise<ToolExecutionOutput | null> {
+  const resolvedExpected = expected || boundTrustedPointerExpected
+  const expectedPhysical = resolvedExpected?.physicalTargetToken || null
+  const before = browserInputEnvironmentReadiness(controller, tabId, 'trusted_pointer')
+  if (!before.ready) return pointerDeliveryDenied(before.reason)
+  if (expectedPhysical && before.physicalTargetToken !== expectedPhysical) {
+    return pointerDeliveryDenied('physical_target_unavailable')
+  }
+  const blocked = await requireTrustedPointerDelivery(controller, tabId)
+  if (blocked) return blocked
+  const stale = await trustedInputPageDenied(controller, tabId, resolvedExpected)
+  if (stale) return stale
+  const after = browserInputEnvironmentReadiness(controller, tabId, 'trusted_pointer')
+  if (!after.ready) return pointerDeliveryDenied(after.reason)
+  if (
+    (expectedPhysical && after.physicalTargetToken !== expectedPhysical)
+    || (
+      after.physicalTargetToken
+      && before.physicalTargetToken
+      && after.physicalTargetToken !== before.physicalTargetToken
+    )
+  ) {
+    return pointerDeliveryDenied('physical_target_unavailable')
+  }
+  await controller.dispatchMouse(tabId, event)
+  return null
+}
+
+export async function dispatchTrustedKey(
+  controller: BrowserController,
+  tabId: string | null,
+  event: Parameters<BrowserController['dispatchKey']>[1],
+  expected?: TrustedPointerExpectedIdentity | null,
+): Promise<void> {
+  const stale = await trustedInputPageDenied(controller, tabId, expected)
+  if (stale) throw new TrustedPointerBlockedError(stale)
+  await controller.dispatchKey(tabId, event)
+}
+
+export async function dispatchTrustedText(
+  controller: BrowserController,
+  tabId: string | null,
+  text: string,
+  options?: { useShiftEnterForNewline?: boolean },
+  expected?: TrustedPointerExpectedIdentity | null,
+): Promise<void> {
+  const stale = await trustedInputPageDenied(controller, tabId, expected)
+  if (stale) throw new TrustedPointerBlockedError(stale)
+  await controller.typeTextDirectly(tabId, text, options)
+}
+
+export class TrustedPointerBlockedError extends Error {
+  readonly output: ToolExecutionOutput
+
+  constructor(output: ToolExecutionOutput) {
+    super('trusted_pointer_blocked')
+    this.name = 'TrustedPointerBlockedError'
+    this.output = output
+  }
+}
+
+export async function assertTrustedPointerDelivery(
+  controller: BrowserController,
+  tabId: string | null,
+): Promise<void> {
+  const blocked = await requireTrustedPointerDelivery(controller, tabId)
+  if (blocked) throw new TrustedPointerBlockedError(blocked)
+}
 
 export const BROWSER_V2_STOP_LOADING_TIMEOUT_MS = 15_000
 const BROWSER_V3_ACTION_SETTLE_MS = 220
@@ -264,7 +422,6 @@ export async function dispatchClickAt(
   height: number
   deliveryObserved: 'delivered' | 'not_delivered' | 'unknown'
 }> {
-  await requireBrowserInputReadiness(controller, tabId, 'trusted_pointer')
   const point = await resolveCssPoint(controller, tabId, x, y)
   const deliveryToken = String(await controller.executeJS(tabId, `(() => {
     const __READY_AGENT_INPUT_DELIVERY_PROBE__ = true;
@@ -278,9 +435,50 @@ export async function dispatchClickAt(
     globalThis.__readyClickDeliveryProbe = state;
     return token;
   })()`).catch(() => '') || '')
-  await controller.dispatchMouse(tabId, { type: 'mouseMoved', x: point.cssX, y: point.cssY, button: 'none', buttons: 0 })
-  await controller.dispatchMouse(tabId, { type: 'mousePressed', x: point.cssX, y: point.cssY, button: 'left', buttons: 1, clickCount: 1 })
-  await controller.dispatchMouse(tabId, { type: 'mouseReleased', x: point.cssX, y: point.cssY, button: 'left', buttons: 0, clickCount: 1 })
+  const moved = await dispatchTrustedPointer(controller, tabId, {
+    type: 'mouseMoved',
+    x: point.cssX,
+    y: point.cssY,
+    button: 'none',
+    buttons: 0,
+  })
+  if (moved) {
+    throw Object.assign(new Error('browser_input_not_ready:pointer'), {
+      code: 'INPUT_NOT_READY',
+      readiness: moved.data,
+      blockedOutput: moved,
+    })
+  }
+  const pressed = await dispatchTrustedPointer(controller, tabId, {
+    type: 'mousePressed',
+    x: point.cssX,
+    y: point.cssY,
+    button: 'left',
+    buttons: 1,
+    clickCount: 1,
+  })
+  if (pressed) {
+    throw Object.assign(new Error('browser_input_not_ready:pointer'), {
+      code: 'INPUT_NOT_READY',
+      readiness: pressed.data,
+      blockedOutput: pressed,
+    })
+  }
+  const released = await dispatchTrustedPointer(controller, tabId, {
+    type: 'mouseReleased',
+    x: point.cssX,
+    y: point.cssY,
+    button: 'left',
+    buttons: 0,
+    clickCount: 1,
+  })
+  if (released) {
+    throw Object.assign(new Error('browser_input_not_ready:pointer'), {
+      code: 'INPUT_NOT_READY',
+      readiness: released.data,
+      blockedOutput: released,
+    })
+  }
   const deliveryCount = deliveryToken
     ? await controller.executeJS(tabId, `(() => {
         const state = globalThis.__readyClickDeliveryProbe;
@@ -636,7 +834,7 @@ async function runGuardedPostFocusType(
       }
     }
   }
-  await controller.typeTextDirectly(tabId, text, { useShiftEnterForNewline: opts.useShiftEnter })
+  await dispatchTrustedText(controller, tabId, text, { useShiftEnterForNewline: opts.useShiftEnter })
   let submitError: string | null = null
   if (opts.pressEnter) {
     try {
@@ -645,6 +843,10 @@ async function runGuardedPostFocusType(
       await sendKeyStroke(controller, tabId, 'Enter')
     } catch (error) {
       if (isBrowserAbortError(error)) throw error
+      if (
+        error instanceof TrustedPointerBlockedError
+        && error.output.data?.mayHaveCommitted === true
+      ) throw error
       const readinessReason = (error as { readiness?: { reason?: unknown } } | null)?.readiness?.reason
       submitError = typeof readinessReason === 'string' && readinessReason
         ? readinessReason
@@ -827,6 +1029,8 @@ export async function sendKeyStroke(
 
   const releaseInputSequence = await retainTrustedInputSequence(controller, tabId)
   try {
+  const staleBefore = await trustedInputPageDenied(controller, tabId)
+  if (staleBefore) throw new TrustedPointerBlockedError(staleBefore)
 
   const modifierTriples: Array<{ key: string; code: string; vk: number; bit: number }> = [
     { key: 'Alt', code: 'AltLeft', vk: 18, bit: 1 },
@@ -835,9 +1039,18 @@ export async function sendKeyStroke(
     { key: 'Shift', code: 'ShiftLeft', vk: 16, bit: 8 },
   ]
 
+  let dispatchedKeys = 0
+  const send = async (
+    event: Parameters<BrowserController['dispatchKey']>[1],
+  ): Promise<void> => {
+    await dispatchTrustedKey(controller, tabId, event)
+    dispatchedKeys += 1
+  }
+
+  try {
   for (const modifier of modifierTriples) {
     if ((mask & modifier.bit) !== modifier.bit) continue
-    await controller.dispatchKey(tabId, {
+    await send({
       type: 'keyDown',
       key: modifier.key,
       code: modifier.code,
@@ -848,7 +1061,7 @@ export async function sendKeyStroke(
     })
   }
 
-  await controller.dispatchKey(tabId, {
+  await send({
     type: 'keyDown',
     key: keyLabel,
     code,
@@ -860,7 +1073,7 @@ export async function sendKeyStroke(
     unmodifiedText: text,
     emulateFocus,
   })
-  await controller.dispatchKey(tabId, {
+  await send({
     type: 'keyUp',
     key: keyLabel,
     code,
@@ -874,7 +1087,7 @@ export async function sendKeyStroke(
   for (let i = modifierTriples.length - 1; i >= 0; i -= 1) {
     const modifier = modifierTriples[i]
     if ((mask & modifier.bit) !== modifier.bit) continue
-    await controller.dispatchKey(tabId, {
+    await send({
       type: 'keyUp',
       key: modifier.key,
       code: modifier.code,
@@ -883,6 +1096,25 @@ export async function sendKeyStroke(
       isKeypad: false,
       emulateFocus,
     })
+  }
+  } catch (error) {
+    if (error instanceof TrustedPointerBlockedError && dispatchedKeys > 0) {
+      const data = error.output.data && typeof error.output.data === 'object'
+        ? error.output.data as Record<string, unknown>
+        : {}
+      throw new TrustedPointerBlockedError(createBrowserStructuredOutput({
+        ...data,
+        ok: false,
+        errorKind: String(data.errorKind || 'browser_reference_stale'),
+        dispatchedKeys,
+        dispatch: 'accepted',
+        delivery: 'unknown',
+        effect: 'unknown',
+        mayHaveCommitted: true,
+        needsObservation: true,
+      }))
+    }
+    throw error
   }
   const deliveryCount = deliveryToken
     ? await controller.executeJS(tabId, `(() => {
@@ -904,7 +1136,7 @@ export async function clearFocusedInput(controller: BrowserController, tabId: st
   const releaseInputSequence = await retainTrustedInputSequence(controller, tabId)
   try {
   const selectAllMask = process.platform === 'darwin' ? 4 : 2
-  await controller.dispatchKey(tabId, {
+  await dispatchTrustedKey(controller, tabId, {
     type: 'rawKeyDown',
     key: 'a',
     code: 'KeyA',
@@ -914,7 +1146,7 @@ export async function clearFocusedInput(controller: BrowserController, tabId: st
     isKeypad: false,
     commands: process.platform === 'darwin' ? ['selectAll'] : undefined,
   })
-  await controller.dispatchKey(tabId, {
+  await dispatchTrustedKey(controller, tabId, {
     type: 'keyUp',
     key: 'a',
     code: 'KeyA',
@@ -923,7 +1155,7 @@ export async function clearFocusedInput(controller: BrowserController, tabId: st
     modifiers: selectAllMask,
     isKeypad: false,
   })
-  await controller.dispatchKey(tabId, {
+  await dispatchTrustedKey(controller, tabId, {
     type: 'rawKeyDown',
     key: 'Backspace',
     code: 'Backspace',
@@ -933,7 +1165,7 @@ export async function clearFocusedInput(controller: BrowserController, tabId: st
     isKeypad: false,
     commands: process.platform === 'darwin' ? ['deleteBackward'] : undefined,
   })
-  await controller.dispatchKey(tabId, {
+  await dispatchTrustedKey(controller, tabId, {
     type: 'keyUp',
     key: 'Backspace',
     code: 'Backspace',

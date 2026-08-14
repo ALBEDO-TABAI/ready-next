@@ -76,6 +76,8 @@ export interface ChatAttachment {
     | 'document-quote'
     | 'document-widget-target'
     | 'calendar-event'
+    | 'rss-item'
+    | 'rss-source'
     | 'channel'
     | 'generated-image'
   browserTabId?: string
@@ -95,6 +97,8 @@ export interface ChatAttachment {
   excerpt?: string
   capturedAt?: number
   eventId?: string
+  rssItemId?: string
+  rssSourceId?: string
   startTime?: string
   endTime?: string
   calendarId?: string

@@ -29,6 +29,9 @@ export type RequestEnvelopeResourceKind =
   | 'document_quote'
   | 'browser_reference'
   | 'calendar_event'
+  | 'calendar_window'
+  | 'rss_item'
+  | 'rss_source'
   | 'folder_reference'
   | 'widget_target'
   // P1-1 — 显式 @[技能] 引用：未被解析成任何既有资源的 @[token]。envelope 不校验技能存在性（授权层校验）。
@@ -41,6 +44,7 @@ export type RequestEnvelopeResourceSource =
   | 'document_quote'
   | 'browser_context'
   | 'calendar_context'
+  | 'rss_context'
   | 'folder_reference'
   | 'widget_target'
 

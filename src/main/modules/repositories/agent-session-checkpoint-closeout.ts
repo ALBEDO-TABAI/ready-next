@@ -128,7 +128,7 @@ function releaseHeldBrowserTargetClaims(
     SELECT partition, tab_id, physical_target_token, boot_incarnation_id,
            claim_id, generation, parent_task_id, browser_task_id
       FROM browser_target_claims
-     WHERE owner_run_id = ? AND state = 'held'
+     WHERE owner_run_id = ? AND state IN ('held', 'user_owned', 'suspended')
      ORDER BY browser_task_id, partition, tab_id
   `).all<{
     partition: string
@@ -149,7 +149,7 @@ function releaseHeldBrowserTargetClaims(
          SET state = 'released', physical_target_token = NULL, boot_incarnation_id = NULL,
              claim_id = ?, generation = ?, suspension_checkpoint_id = NULL,
              suspension_reason = NULL, heartbeat_at = ?, expires_at = ?, updated_at = ?
-       WHERE partition = ? AND tab_id = ? AND owner_run_id = ? AND state = 'held'
+       WHERE partition = ? AND tab_id = ? AND owner_run_id = ? AND state IN ('held', 'user_owned', 'suspended')
          AND claim_id = ? AND generation = ?
     `).run(
       nextClaimId,

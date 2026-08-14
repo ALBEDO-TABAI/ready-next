@@ -53,6 +53,16 @@ export function browserDocumentIdentityCompatible(left: unknown, right: unknown)
   return !left.targetRef || !right.targetRef || left.targetRef === right.targetRef
 }
 
+export type BrowserEnvironmentSummary = {
+  targetTabId?: string
+  sampledAt: string
+  url?: string
+  title?: string
+  dialogState?: 'open' | 'closed'
+  fileChooserState?: 'open' | 'closed'
+  downloadState?: 'in_flight' | 'settled'
+}
+
 export interface BrowserActionOutcome {
   actionId: string
   actionSeq: number
@@ -71,6 +81,7 @@ export interface BrowserActionOutcome {
   successorIdentity: BrowserActionTargetIdentity
   /** Exact tab created or followed by the transport before document identity was available. */
   postActionTabId?: string
+  environmentSummary?: BrowserEnvironmentSummary
   search?: {
     searchActionId: string
     queryDigest: string

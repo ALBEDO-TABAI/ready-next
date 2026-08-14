@@ -20,3 +20,9 @@ export function getBrowserTargetClaimService(): BrowserTargetClaimService {
 export function __resetBrowserTargetClaimServiceForTests(): void {
   instance = null
 }
+
+export function __setBrowserTargetClaimServiceForTests(
+  service: BrowserTargetClaimService | null,
+): void {
+  instance = service
+}

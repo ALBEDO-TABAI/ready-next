@@ -6,6 +6,7 @@ import {
   acquireTarget,
   createTargetClaimService,
   identityOf,
+  releaseTargetWithoutServiceForTest,
   setTargetUserOwnedForTest,
   TARGET_A,
 } from './utils/browser-target-claim-fixture'
@@ -168,6 +169,30 @@ describe('Browser target claims', () => {
     assert.equal(expired.length, 1)
     assert.equal(service.read(oldClaim.logicalKey)?.state, 'expired')
     assert.equal(service.read(oldClaim.logicalKey)?.physicalTargetToken, null)
+  })
+
+  it('durable SQL release still needs acknowledge to clear in-flight page control', () => {
+    const service = createTargetClaimService()
+    const claim = acquireTarget(service)
+    const identity = identityOf(claim)
+    const actionId = service.beginAgentAction(identity)
+    if (typeof actionId !== 'string') throw new Error(actionId.message)
+    assert.equal(service.hasActiveAgentAction(identity), true)
+
+    releaseTargetWithoutServiceForTest(service, claim)
+    assert.equal(service.closeoutRun({ ownerRunId: 'run-a', resumable: false }).length, 0)
+    assert.equal(service.hasActiveAgentAction(identity), true)
+
+    const transitions: Array<{ previousState: string | null; state: string }> = []
+    service.onTransition((transition) => {
+      transitions.push({ previousState: transition.previousState, state: transition.state })
+    })
+    service.acknowledgeExternalRelease('run-a')
+    assert.equal(service.hasActiveAgentAction(identity), false)
+    assert.ok(transitions.some((item) => item.previousState === 'held' && item.state === 'released'))
+    const afterFirst = transitions.length
+    service.acknowledgeExternalRelease('run-a')
+    assert.equal(transitions.length, afterFirst)
   })
 
   it('closeout releases every target for the old run even when a historical checkpoint exists', () => {

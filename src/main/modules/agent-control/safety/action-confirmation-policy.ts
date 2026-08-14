@@ -85,6 +85,7 @@ const SENSITIVE_CONTENT_PATTERN =
   /密码|口令|私钥|身份证|银行卡|信用卡|passwords?|passwd|api[_-]?key|(?:app|client)[_-]?secret|private[_-]?key|(?:access|refresh|api)[_-]?token|credential|authorization\s*:\s*bearer\s+\S+|\btoken\s*[:=]\s*[A-Za-z0-9._-]{8,}|credit\s*card|cvv|passport|BEGIN\s+(?:OPENSSH\s+|RSA\s+|EC\s+)?PRIVATE\s+KEY|\bsk-[A-Za-z0-9_-]{8,}|\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{6,}/i
 const KNOWN_WRITE_TOOLS_REQUIRING_CONFIRMATION = new Set([
   'calendar_create_event', 'calendar_update_event',
+  'rss_add_source',
   'feishu_calendar_create_event', 'feishu_calendar_update_event',
   'feishu_doc_create', 'feishu_doc_update',
 ])

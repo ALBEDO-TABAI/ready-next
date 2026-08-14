@@ -6,6 +6,7 @@ import {
   browserInputEnvironmentReadiness,
   browserInputReadiness,
 } from '../main/modules/browser-engine/browser-input-readiness'
+import { requireTrustedPointerDelivery } from '../main/modules/tools/browser-input-actions'
 import type { BrowserHostPresentationState } from '../main/modules/browser-engine/host-layout-service'
 import {
   resolveTrustedBrowserEnvironment,
@@ -201,4 +202,426 @@ test('explicit Browser reference reads the named tab and rejects a page identity
     },
   } as unknown as BrowserController
   assert.equal(await resolveTrustedBrowserReference(drifting, 'tab-background'), null)
+})
+
+test('hidden pointer preflight rejects without dispatching', async () => {
+  const result = await requireTrustedPointerDelivery(
+    controllerFor('hidden', { foreground: false, active: false }),
+    'tab-a',
+  )
+  assert.ok(result)
+  assert.equal(result.data?.ok, false)
+  assert.equal(result.data?.dispatch, 'rejected')
+  assert.equal(result.data?.delivery, 'not_delivered')
+  assert.equal(result.data?.errorKind, 'browser_surface_required')
+})
+
+test('pointer delivery rejects when the readiness probe itself waits across a hide', async () => {
+  const { dispatchTrustedPointer } = await import('../main/modules/tools/browser-input-actions')
+  let presentation: 'visible' | 'hidden' = 'visible'
+  let dispatched = 0
+  const controller = {
+    getBrowserInputEnvironment: () => ({
+      mainWindowForeground: presentation === 'visible',
+      hostPresentation: presentation,
+      tabActive: presentation === 'visible',
+    }),
+    getPhysicalTargetToken: () => 'physical-tab-a',
+    executeJS: async () => {
+      await new Promise((resolve) => setTimeout(resolve, 15))
+      presentation = 'hidden'
+      return { ready: true, focused: true, activeElementEditable: false }
+    },
+    dispatchMouse: async () => {
+      dispatched += 1
+    },
+  } as unknown as BrowserController
+  const blocked = await dispatchTrustedPointer(controller, 'tab-a', {
+    type: 'mouseMoved',
+    x: 1,
+    y: 1,
+    button: 'none',
+    buttons: 0,
+  })
+  assert.ok(blocked)
+  assert.equal(blocked.data?.ok, false)
+  assert.equal(dispatched, 0)
+})
+
+function flippingDocumentController(): {
+  controller: BrowserController
+  dispatched: () => number
+} {
+  let frameToken = 'document-v1'
+  let dispatched = 0
+  return {
+    dispatched: () => dispatched,
+    controller: {
+      getBrowserInputEnvironment: () => ({
+        mainWindowForeground: true,
+        hostPresentation: 'visible',
+        tabActive: true,
+      }),
+      getPhysicalTargetToken: () => 'physical-tab-a',
+      executeJS: async () => {
+        const token = frameToken
+        frameToken = 'document-v2'
+        return {
+          ready: true,
+          focused: true,
+          activeElementEditable: false,
+          url: 'https://example.test',
+          title: 'Example',
+          timeOrigin: 1,
+          mutationRevision: 0,
+          frameDocumentToken: token,
+        }
+      },
+      normalizedToCss: async () => ({ x: 12, y: 18, width: 120, height: 80 }),
+      dispatchMouse: async () => {
+        dispatched += 1
+      },
+      getTabList: () => [{ id: 'tab-a', url: 'https://example.test', title: 'Example', active: true }],
+    } as unknown as BrowserController,
+  }
+}
+
+const pinnedPageRef = {
+  tabId: 'tab-a',
+  physicalTargetToken: 'physical-tab-a',
+  mainFrameDocumentToken: 'document-v1',
+}
+
+function actToolContext(controller: BrowserController) {
+  return {
+    controller,
+    mutationBoundary: {
+      invokeTransport: <T>(transport: () => T) => transport(),
+      recordMechanicalFact: () => undefined,
+      runSearchStep: async (_phase: string, run: () => Promise<unknown>) => run(),
+    },
+    attachBrowserToolOutput: <T>(value: T) => value,
+    trustedPageRef: pinnedPageRef,
+  }
+}
+
+test('click does not dispatch after the document generation changes during coordinate resolve', async () => {
+  const { executeBrowserActTool } = await import('../main/modules/tools/browser-act-tools')
+  const fixture = flippingDocumentController()
+  const result = await executeBrowserActTool(
+    'click_coordinate',
+    { tab_id: 'tab-a', x: 500, y: 500 },
+    actToolContext(fixture.controller),
+  )
+  const data = result && typeof result === 'object' ? result.data : null
+  assert.equal(fixture.dispatched(), 0)
+  assert.equal(data?.errorKind, 'browser_reference_stale')
+})
+
+test('click-then-type does not dispatch after the document generation changes during coordinate resolve', async () => {
+  const { executeBrowserActTool } = await import('../main/modules/tools/browser-act-tools')
+  const fixture = flippingDocumentController()
+  const result = await executeBrowserActTool(
+    'type_coordinate',
+    { tab_id: 'tab-a', x: 500, y: 500, text: 'hello' },
+    actToolContext(fixture.controller),
+  )
+  const data = result && typeof result === 'object' ? result.data : null
+  assert.equal(fixture.dispatched(), 0)
+  assert.equal(data?.errorKind, 'browser_reference_stale')
+})
+
+test('pointer delivery rejects when the document generation changes on the same tab', async () => {
+  const { executeBrowserActTool } = await import('../main/modules/tools/browser-act-tools')
+  const fixture = flippingDocumentController()
+  const result = await executeBrowserActTool(
+    'hover',
+    { tab_id: 'tab-a', x: 500, y: 500 },
+    actToolContext(fixture.controller),
+  )
+  const data = result && typeof result === 'object' ? result.data : null
+  assert.equal(fixture.dispatched(), 0)
+  assert.equal(data?.errorKind, 'browser_reference_stale')
+})
+
+test('collect_scroll does not dispatch after the pinned document generation changes', async () => {
+  const { executeBrowserCollectionTool } = await import('../main/modules/tools/browser-collection-tools')
+  const fixture = flippingDocumentController()
+  let wheels = 0
+  Object.assign(fixture.controller, {
+    scrollCollect: async (
+      _tabId: string | null,
+      options: { beforeScroll?: () => Promise<void> },
+    ) => {
+      await options.beforeScroll?.()
+      wheels += 1
+      await fixture.controller.dispatchMouse('tab-a', { type: 'mouseWheel', x: 1, y: 1, deltaX: 0, deltaY: 1 })
+      return { template: 'card_list', items: [], scrolls: wheels, reachedEnd: true }
+    },
+  })
+  const result = await executeBrowserCollectionTool('collect_scroll', { tab_id: 'tab-a' }, {
+    controller: fixture.controller,
+    mutationBoundary: actToolContext(fixture.controller).mutationBoundary,
+    taskExecutionContext: { trustedPageRef: pinnedPageRef },
+  })
+  const data = result && typeof result === 'object' ? result.data : null
+  assert.equal(wheels, 0)
+  assert.equal(fixture.dispatched(), 0)
+  assert.equal(data?.errorKind, 'browser_reference_stale')
+  assert.equal(data?.dispatch, 'rejected')
+  assert.equal(data?.delivery, 'not_delivered')
+  assert.equal(data?.mayHaveCommitted, false)
+  assert.equal(data?.effect, 'not_applicable')
+})
+
+test('collect_scroll reports already sent wheels when later admission is withdrawn', async () => {
+  const { executeBrowserCollectionTool } = await import('../main/modules/tools/browser-collection-tools')
+  let writable = true
+  let wheels = 0
+  const controller = {
+    getBrowserInputEnvironment: () => ({
+      mainWindowForeground: true,
+      hostPresentation: 'visible',
+      tabActive: true,
+    }),
+    getPhysicalTargetToken: () => 'physical-tab-a',
+    executeJS: async () => ({ ready: true, focused: true, activeElementEditable: false }),
+    scrollCollect: async (
+      _tabId: string | null,
+      options: { beforeScroll?: () => Promise<void> },
+    ) => {
+      await options.beforeScroll?.()
+      wheels += 1
+      writable = false
+      try {
+        await options.beforeScroll?.()
+      } catch (error) {
+        if (error && typeof error === 'object') {
+          (error as { dispatchedScrolls?: number }).dispatchedScrolls = wheels
+        }
+        throw error
+      }
+      return { template: 'card_list', items: [], scrolls: wheels, reachedEnd: true }
+    },
+  } as unknown as BrowserController
+  const result = await executeBrowserCollectionTool('collect_scroll', { tab_id: 'tab-a' }, {
+    controller,
+    mutationBoundary: {
+      invokeTransport: (transport) => {
+        if (!writable) {
+          throw Object.assign(new Error('browser_workflow_write_fenced'), {
+            name: 'BrowserMutationFenceError',
+          })
+        }
+        return transport()
+      },
+      recordMechanicalFact: () => undefined,
+      runSearchStep: async (_phase, run) => run(),
+    },
+  })
+  const data = result && typeof result === 'object' ? result.data : null
+  assert.equal(wheels, 1)
+  assert.equal(data?.errorKind, 'browser_workflow_write_fenced')
+  assert.equal(data?.dispatch, 'accepted')
+  assert.equal(data?.delivery, 'unknown')
+  assert.equal(data?.mayHaveCommitted, true)
+  assert.equal(data?.needsObservation, true)
+  assert.equal(data?.dispatchedScrolls, 1)
+  assert.equal(data?.effect, 'unknown')
+  assert.notEqual(data?.effect, 'not_applicable')
+})
+
+test('press_key does not dispatch after the pinned document generation changes', async () => {
+  const { executeBrowserActTool } = await import('../main/modules/tools/browser-act-tools')
+  const fixture = flippingDocumentController()
+  let keys = 0
+  Object.assign(fixture.controller, {
+    dispatchKey: async () => {
+      keys += 1
+    },
+  })
+  const result = await executeBrowserActTool(
+    'press_key',
+    { tab_id: 'tab-a', key: 'Enter' },
+    actToolContext(fixture.controller),
+  )
+  const data = result && typeof result === 'object' ? result.data : null
+  assert.equal(keys, 0)
+  assert.equal(data?.errorKind, 'browser_reference_stale')
+  assert.notEqual(data?.mayHaveCommitted, true)
+})
+
+test('press_key Enter that navigates on keydown is not settled as zero execution', async () => {
+  const { executeBrowserActTool } = await import('../main/modules/tools/browser-act-tools')
+  let frameToken = 'document-v1'
+  let keys = 0
+  const controller = {
+    getBrowserInputEnvironment: () => ({
+      mainWindowForeground: true,
+      hostPresentation: 'visible',
+      tabActive: true,
+    }),
+    getPhysicalTargetToken: () => 'physical-tab-a',
+    executeJS: async () => ({
+      ready: true,
+      focused: true,
+      activeElementEditable: true,
+      url: frameToken === 'document-v1' ? 'https://example.test/form' : 'https://example.test/done',
+      title: frameToken === 'document-v1' ? 'Form' : 'Done',
+      timeOrigin: frameToken === 'document-v1' ? 1 : 2,
+      mutationRevision: frameToken === 'document-v1' ? 0 : 1,
+      frameDocumentToken: frameToken,
+    }),
+    dispatchKey: async () => {
+      keys += 1
+      frameToken = 'document-v2'
+    },
+    getTabList: () => [{ id: 'tab-a', url: 'https://example.test/form', title: 'Form', active: true }],
+  } as unknown as BrowserController
+  const result = await executeBrowserActTool(
+    'press_key',
+    { tab_id: 'tab-a', key: 'Enter' },
+    actToolContext(controller),
+  )
+  const data = result && typeof result === 'object' ? result.data : null
+  assert.equal(keys, 1)
+  assert.equal(data?.ok, false)
+  assert.equal(data?.errorKind, 'browser_reference_stale')
+  assert.equal(data?.dispatch, 'accepted')
+  assert.equal(data?.delivery, 'unknown')
+  assert.equal(data?.effect, 'unknown')
+  assert.equal(data?.mayHaveCommitted, true)
+  assert.equal(data?.needsObservation, true)
+  assert.equal(data?.dispatchedKeys, 1)
+  assert.notEqual(data?.effect, 'not_applicable')
+})
+
+test('text and key sends refuse a successor document after a completed click', async () => {
+  const {
+    bindTrustedPointerExpected,
+    dispatchTrustedText,
+    sendKeyStroke,
+    TrustedPointerBlockedError,
+  } = await import('../main/modules/tools/browser-input-actions')
+  let typed = 0
+  let keys = 0
+  const controller = {
+    getBrowserInputEnvironment: () => ({
+      mainWindowForeground: true,
+      hostPresentation: 'visible',
+      tabActive: true,
+    }),
+    getPhysicalTargetToken: () => 'physical-tab-a',
+    executeJS: async () => ({
+      ready: true,
+      focused: true,
+      activeElementEditable: true,
+      url: 'https://example.test/v2',
+      title: 'Successor',
+      timeOrigin: 2,
+      mutationRevision: 1,
+      frameDocumentToken: 'document-v2',
+    }),
+    typeTextDirectly: async () => {
+      typed += 1
+    },
+    dispatchKey: async () => {
+      keys += 1
+    },
+  } as unknown as BrowserController
+  const release = bindTrustedPointerExpected({
+    physicalTargetToken: 'physical-tab-a',
+    mainFrameDocumentToken: 'document-v1',
+  })
+  try {
+    await assert.rejects(
+      () => dispatchTrustedText(controller, 'tab-a', 'hello'),
+      (error: unknown) => error instanceof TrustedPointerBlockedError
+        && error.output.data?.errorKind === 'browser_reference_stale',
+    )
+    await assert.rejects(
+      () => sendKeyStroke(controller, 'tab-a', 'Enter'),
+      (error: unknown) => error instanceof TrustedPointerBlockedError
+        && error.output.data?.errorKind === 'browser_reference_stale',
+    )
+    assert.equal(typed, 0)
+    assert.equal(keys, 0)
+  } finally {
+    release()
+  }
+})
+
+test('hover re-reads visibility after coordinate resolve and does not dispatch', async () => {
+  const { executeBrowserActTool } = await import('../main/modules/tools/browser-act-tools')
+  let presentation: 'visible' | 'hidden' = 'visible'
+  let dispatched = 0
+  const controller = {
+    getBrowserInputEnvironment: () => ({
+      mainWindowForeground: presentation === 'visible',
+      hostPresentation: presentation,
+      tabActive: presentation === 'visible',
+    }),
+    getPhysicalTargetToken: () => 'physical-tab-a',
+    executeJS: async () => ({ ready: true, focused: true, activeElementEditable: false }),
+    normalizedToCss: async () => {
+      presentation = 'hidden'
+      return { x: 12, y: 18, width: 120, height: 80 }
+    },
+    dispatchMouse: async () => {
+      dispatched += 1
+    },
+    getTabList: () => [{ id: 'tab-a', url: 'https://example.test', title: 'Example', active: true }],
+  } as unknown as BrowserController
+  const result = await executeBrowserActTool('hover', { tab_id: 'tab-a', x: 500, y: 500 }, {
+    controller,
+    mutationBoundary: {
+      invokeTransport: (transport) => transport(),
+      recordMechanicalFact: () => undefined,
+      runSearchStep: async (_phase, run) => run(),
+    },
+    attachBrowserToolOutput: (value) => value,
+  })
+  const data = result && typeof result === 'object' ? result.data : null
+  assert.equal(dispatched, 0)
+  assert.equal(data?.ok, false)
+  assert.equal(data?.dispatch, 'rejected')
+  assert.equal(data?.delivery, 'not_delivered')
+})
+
+test('collect_scroll re-reads visibility before later scrolls', async () => {
+  const { executeBrowserCollectionTool } = await import('../main/modules/tools/browser-collection-tools')
+  let presentation: 'visible' | 'hidden' = 'visible'
+  let beforeScrolls = 0
+  const controller = {
+    getBrowserInputEnvironment: () => ({
+      mainWindowForeground: presentation === 'visible',
+      hostPresentation: presentation,
+      tabActive: presentation === 'visible',
+    }),
+    getPhysicalTargetToken: () => 'physical-tab-a',
+    executeJS: async () => ({ ready: true, focused: true, activeElementEditable: false }),
+    scrollCollect: async (
+      _tabId: string | null,
+      options: { beforeScroll?: () => Promise<void> },
+    ) => {
+      await options.beforeScroll?.()
+      beforeScrolls += 1
+      presentation = 'hidden'
+      await options.beforeScroll?.()
+      beforeScrolls += 1
+      return { template: 'card_list', items: [], scrolls: 1, reachedEnd: true }
+    },
+  } as unknown as BrowserController
+  const result = await executeBrowserCollectionTool('collect_scroll', { tab_id: 'tab-a' }, {
+    controller,
+    mutationBoundary: {
+      invokeTransport: (transport) => transport(),
+      recordMechanicalFact: () => undefined,
+      runSearchStep: async (_phase, run) => run(),
+    },
+  })
+  const data = result && typeof result === 'object' ? result.data : null
+  assert.equal(beforeScrolls, 1)
+  assert.equal(data?.ok, false)
+  assert.equal(data?.dispatch, 'rejected')
 })
