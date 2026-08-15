@@ -4,6 +4,8 @@ import { LiquidLens } from '../ui/liquid-glass/LiquidLens'
 interface DraggableModeSwitchProps {
   mode: 'edit' | 'preview'
   onChange: (mode: 'edit' | 'preview') => void
+  /** 用户明确选择某一段时触发；返回 true 可吞掉同段的二次动作。 */
+  onModeIntent?: (mode: 'edit' | 'preview') => boolean | void
   /** 预览下沉态（预览内编辑）：再次点击预览时滑块下沉，内容可在预览中直接编辑。 */
   previewEditActive?: boolean
   onTogglePreviewEdit?: () => void
@@ -23,6 +25,7 @@ const THUMB_CLICK_SLOP_PX = 4
 export default function DraggableModeSwitch({
   mode,
   onChange,
+  onModeIntent,
   previewEditActive = false,
   onTogglePreviewEdit,
 }: DraggableModeSwitchProps) {
@@ -165,8 +168,8 @@ export default function DraggableModeSwitch({
     startSpringAnimation()
   }, [mode, startSpringAnimation])
 
-  const finishDrag = useCallback(() => {
-    if (!isDraggingRef.current) return
+  const finishDrag = useCallback((): boolean => {
+    if (!isDraggingRef.current) return false
 
     isDraggingRef.current = false
     activePointerIdRef.current = null
@@ -176,12 +179,14 @@ export default function DraggableModeSwitch({
     targetRef.current = snapToPreview ? 0 : 1
 
     const newMode = snapToPreview ? 'preview' : 'edit'
+    const intentConsumed = onModeIntent?.(newMode) === true
     if (newMode !== mode) {
       onChange(newMode)
     }
 
     startSpringAnimation()
-  }, [mode, onChange, startSpringAnimation])
+    return intentConsumed
+  }, [mode, onChange, onModeIntent, startSpringAnimation])
 
   // Pointer down handler
   const handlePointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
@@ -228,8 +233,8 @@ export default function DraggableModeSwitch({
     // A press on the thumb without real movement is a click: in preview mode
     // it toggles the sunken preview-edit state (滑块下沉，预览内可编辑).
     const wasClick = !dragMovedRef.current
-    finishDrag()
-    if (wasClick && mode === 'preview') {
+    const intentConsumed = finishDrag()
+    if (wasClick && mode === 'preview' && !intentConsumed) {
       onTogglePreviewEdit?.()
     }
     if (e.currentTarget.hasPointerCapture(e.pointerId)) {
@@ -254,14 +259,15 @@ export default function DraggableModeSwitch({
   const handleLabelClick = useCallback((targetMode: 'edit' | 'preview', e: React.MouseEvent) => {
     e.stopPropagation()
     if (isDraggingRef.current) return
+    const intentConsumed = onModeIntent?.(targetMode) === true
     if (targetMode === mode) {
       // Re-clicking 预览 while already previewing sinks the thumb into
       // preview-edit (and lifts it back out on the next click).
-      if (targetMode === 'preview') onTogglePreviewEdit?.()
+      if (targetMode === 'preview' && !intentConsumed) onTogglePreviewEdit?.()
       return
     }
     onChange(targetMode)
-  }, [mode, onChange, onTogglePreviewEdit])
+  }, [mode, onChange, onModeIntent, onTogglePreviewEdit])
 
   const sinkScale = 1 - sinkProgress * PREVIEW_EDIT_SINK_SCALE
 

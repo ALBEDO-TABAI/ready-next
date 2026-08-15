@@ -13,6 +13,13 @@ import FilePreview from '../../components/document/FilePreview'
 import DraggableModeSwitch from '../../components/document/DraggableModeSwitch'
 import DocumentFloatingPanels, { DocumentPanelToggleButtons } from '../../components/document/DocumentFloatingPanels'
 import DocumentExportButton from '../../components/document/DocumentExportButton'
+import DocumentBookReadingButton from '../../components/document/book/DocumentBookReadingButton'
+import DocumentBookReadingView from '../../components/document/book/DocumentBookReadingView'
+import {
+  isBookReadablePath,
+  isBookReadingSessionVisible,
+  shouldFinalizeBookReadingSession,
+} from '../../modules/document/book/bookTabEligibility'
 import { READY_DOCUMENT_REVEAL_EVENT } from '../../modules/agent/document-quote-navigation'
 import {
   addReadyContextReferenceToAgentInput,
@@ -229,6 +236,9 @@ export default function DocumentMode({
   // 预览下沉态（预览内编辑）：仅在 preview 模式下有效，切模式/切标签即复位。
   const [previewEditActive, setPreviewEditActive] = useState(false)
   const [previewFocusWidgetTitle, setPreviewFocusWidgetTitle] = useState<string | null>(null)
+  // 阅读模式是当前文档上的只读展示态；原编辑面继续保活。
+  const [bookReadingActive, setBookReadingActive] = useState(false)
+  const [bookReadingTabId, setBookReadingTabId] = useState<string | null>(null)
   const [outlinePanelOpen, setOutlinePanelOpen] = useState(() => readDocumentPanelOpenState('ready-document-outline-panel-open'))
   const [marksPanelOpen, setMarksPanelOpen] = useState(() => readDocumentPanelOpenState('ready-document-marks-panel-open'))
   const [visibleLineByTabId, setVisibleLineByTabId] = useState<Record<string, number | null>>({})
@@ -329,6 +339,7 @@ export default function DocumentMode({
 
   useEffect(() => {
     const handler = () => {
+      setBookReadingActive(false)
       setEditorMode('edit')
     }
     window.addEventListener(READY_DOCUMENT_REVEAL_EVENT, handler as EventListener)
@@ -368,6 +379,25 @@ export default function DocumentMode({
     return visibleTabs.find((tab) => tab.id === focusedPaneTabId) || activeTab || splitTab || null
   }, [activeTab, focusedPaneTabId, splitTab])
   const panelTargetLine = panelTargetTab ? visibleLineByTabId[panelTargetTab.id] ?? null : null
+  const bookReadingEligible = panelTargetTab ? isBookReadablePath(panelTargetTab.path) : false
+  const bookReadingVisible = isBookReadingSessionVisible(
+    bookReadingActive,
+    bookReadingTabId,
+    panelTargetTab?.id ?? null,
+    bookReadingEligible,
+    isSceneVisible,
+  )
+  useEffect(() => {
+    if (shouldFinalizeBookReadingSession(
+      bookReadingActive,
+      bookReadingTabId,
+      panelTargetTab?.id ?? null,
+      isSceneVisible,
+    )) {
+      setBookReadingActive(false)
+      setBookReadingTabId(null)
+    }
+  }, [bookReadingActive, bookReadingTabId, isSceneVisible, panelTargetTab?.id])
   const tabScrollStructureSignature = tabs.map((tab) => `${tab.id}\u0000${tab.path || ''}`).join('\u0001')
   const tabIdByScrollKey = useMemo(() => {
     const next = new Map<string, string>()
@@ -613,6 +643,14 @@ export default function DocumentMode({
     setPreviewEditActive(false)
     setEditorMode(nextMode)
   }, [captureVisibleDocumentScrollPositions, editorMode])
+
+  const handleEditorModeIntent = useCallback((): boolean => {
+    if (!bookReadingVisible) return false
+    setBookReadingActive(false)
+    setBookReadingTabId(null)
+    setPreviewEditActive(false)
+    return true
+  }, [bookReadingVisible])
 
   const handleTogglePreviewEdit = useCallback(() => {
     setPreviewEditActive((value) => !value)
@@ -885,9 +923,22 @@ export default function DocumentMode({
                 rail
               />
               <DocumentExportButton tab={panelTargetTab} />
+              <DocumentBookReadingButton
+                active={bookReadingVisible}
+                disabled={!bookReadingEligible}
+                onToggle={() => {
+                  if (bookReadingVisible) {
+                    setBookReadingActive(false)
+                  } else if (panelTargetTab && bookReadingEligible) {
+                    setBookReadingTabId(panelTargetTab.id)
+                    setBookReadingActive(true)
+                  }
+                }}
+              />
               <DraggableModeSwitch
                 mode={editorMode}
                 onChange={handleEditorModeChange}
+                onModeIntent={handleEditorModeIntent}
                 previewEditActive={previewEditActive}
                 onTogglePreviewEdit={handleTogglePreviewEdit}
               />
@@ -924,6 +975,12 @@ export default function DocumentMode({
               background: 'var(--workbench-module-surface-bg)',
             }}
           >
+            <div
+              className={bookReadingVisible ? 'h-full min-h-0' : 'contents'}
+              style={bookReadingVisible ? { visibility: 'hidden' } : undefined}
+              inert={bookReadingVisible || undefined}
+              aria-hidden={bookReadingVisible || undefined}
+            >
             {renderedSplitTab && renderedActiveTab ? (
               <div className="h-full flex min-w-0 overflow-hidden" ref={splitContainerRef} style={{ gap: 0 }}>
                 <div
@@ -1002,6 +1059,16 @@ export default function DocumentMode({
                   <p className="text-[13px]">点击左侧文件打开文档</p>
                 </div>
               </div>
+            )}
+            </div>
+
+            {bookReadingVisible && panelTargetTab && (
+              <DocumentBookReadingView
+                key={panelTargetTab.id}
+                tab={panelTargetTab}
+                isSceneVisible={isSceneVisible}
+                onExit={() => setBookReadingActive(false)}
+              />
             )}
 
             {isSceneVisible && panelTargetTab && (
