@@ -148,3 +148,168 @@ test('browser ownership prioritizes frozen takeover state', () => {
   assert.equal(status.label, '已接管')
   assert.equal(status.tone, 'warning')
 })
+
+test('browser ownership shows the current tab takeover even when an older record is listed first', () => {
+  const status = resolveBrowserOwnershipStatus({
+    activeTab: { id: 'tab-current', owner: 'manual' },
+    agentTabId: null,
+    activeAgentTaskCount: 0,
+    controlState: 'frozen',
+    surfaces: {
+      'user-view': {
+        surface: 'user-view',
+        state: 'takeover',
+        heldBy: 'task-old',
+        runId: 'run-old',
+        tabId: 'tab-old',
+        leaseId: 'lease-old',
+      },
+      'agent-view': {
+        surface: 'agent-view',
+        state: 'idle',
+        heldBy: null,
+        runId: null,
+        tabId: null,
+        leaseId: null,
+      },
+    },
+    claims: [
+      { tabId: 'tab-old', state: 'user_owned' },
+      { tabId: 'tab-current', state: 'user_owned' },
+    ],
+  })
+  assert.equal(status.kind, 'frozen')
+  assert.equal(status.label, '已接管')
+})
+
+test('global freeze from another tab does not paint 已接管 on an idle current page', () => {
+  const status = resolveBrowserOwnershipStatus({
+    activeTab: { id: 'tab-current', owner: 'manual' },
+    agentTabId: null,
+    activeAgentTaskCount: 0,
+    controlState: 'frozen',
+    surfaces: {
+      'user-view': {
+        surface: 'user-view',
+        state: 'idle',
+        heldBy: null,
+        runId: null,
+        tabId: null,
+        leaseId: null,
+      },
+      'agent-view': {
+        surface: 'agent-view',
+        state: 'idle',
+        heldBy: null,
+        runId: null,
+        tabId: null,
+        leaseId: null,
+      },
+    },
+    claims: [
+      { tabId: 'tab-old', state: 'user_owned' },
+    ],
+  })
+  assert.equal(status.kind, 'user-view')
+  assert.equal(status.label, '用户浏览')
+  assert.doesNotMatch(status.label, /已接管|用户接管/)
+})
+
+test('browser ownership keeps same-surface occupancy from claims when the current tab is taken over', () => {
+  const status = resolveBrowserOwnershipStatus({
+    activeTab: { id: 'tab-other', owner: 'manual' },
+    agentTabId: null,
+    activeAgentTaskCount: 0,
+    controlState: 'active',
+    activeWriteSurface: null,
+    surfaces: {
+      'user-view': {
+        surface: 'user-view',
+        state: 'takeover',
+        heldBy: 'task-current',
+        runId: 'run-current',
+        tabId: 'tab-current',
+        leaseId: 'lease-current',
+      },
+      'agent-view': {
+        surface: 'agent-view',
+        state: 'idle',
+        heldBy: null,
+        runId: null,
+        tabId: null,
+        leaseId: null,
+      },
+    },
+    claims: [
+      { tabId: 'tab-current', state: 'user_owned', surface: 'user-view' },
+      { tabId: 'tab-other', state: 'held', surface: 'user-view' },
+    ],
+  })
+  assert.equal(status.kind, 'agent-current')
+  assert.equal(status.label, 'Agent 协作当前页')
+  assert.doesNotMatch(status.label, /已接管|用户接管/)
+})
+
+test('another tab occupancy does not paint Agent 协作当前页 on an idle current tab', () => {
+  const status = resolveBrowserOwnershipStatus({
+    activeTab: { id: 'tab-idle', owner: 'manual' },
+    agentTabId: null,
+    activeAgentTaskCount: 0,
+    controlState: 'active',
+    activeWriteSurface: 'user-view',
+    surfaces: {
+      'user-view': {
+        surface: 'user-view',
+        state: 'held',
+        heldBy: 'task-other',
+        runId: 'run-other',
+        tabId: 'tab-other',
+        leaseId: 'lease-other',
+      },
+      'agent-view': {
+        surface: 'agent-view',
+        state: 'idle',
+        heldBy: null,
+        runId: null,
+        tabId: null,
+        leaseId: null,
+      },
+    },
+    claims: [
+      { tabId: 'tab-other', state: 'held', surface: 'user-view' },
+    ],
+  })
+  assert.equal(status.kind, 'agent-background')
+  assert.equal(status.label, 'Agent 后台页')
+  assert.doesNotMatch(status.label, /协作当前页/)
+})
+
+test('browser ownership does not mark the current page taken over for another tab leftover', () => {
+  const status = resolveBrowserOwnershipStatus({
+    activeTab: { id: 'tab-current', owner: 'manual' },
+    agentTabId: null,
+    activeAgentTaskCount: 0,
+    controlState: 'frozen',
+    surfaces: {
+      'user-view': {
+        surface: 'user-view',
+        state: 'takeover',
+        heldBy: 'task-old',
+        runId: 'run-old',
+        tabId: 'tab-old',
+        leaseId: 'lease-old',
+      },
+      'agent-view': {
+        surface: 'agent-view',
+        state: 'idle',
+        heldBy: null,
+        runId: null,
+        tabId: null,
+        leaseId: null,
+      },
+    },
+  })
+  assert.equal(status.kind, 'user-view')
+  assert.equal(status.label, '用户浏览')
+  assert.doesNotMatch(status.label, /已接管|用户接管/)
+})

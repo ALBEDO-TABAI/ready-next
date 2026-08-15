@@ -66,7 +66,7 @@ const expectedSendScopedIdentifiers = new Map([
   ['src/main/modules/claude-bridge/ipc/agent-lifecycle-group.ts', 6],
   ['src/preload/index.ts', 2],
   ['src/renderer/modules/agent/agent-panel-test-harness-diagnostics.ts', 1],
-  ['src/renderer/stores/useAgent.ts', 2],
+  ['src/renderer/stores/agent-send-orchestration.ts', 2],
   ['src/renderer/types/electron.d.ts', 1],
 ])
 
@@ -200,7 +200,7 @@ function check(root = ROOT) {
   const expectedSendScopedCallsites = [
     'src/main/modules/claude-bridge/ipc-handler.ts',
     'src/main/modules/claude-bridge/ipc/agent-lifecycle-group.ts',
-    'src/renderer/stores/useAgent.ts',
+    'src/renderer/stores/agent-send-orchestration.ts',
   ]
   if (sendScopedCallsites.sort().join('|') !== expectedSendScopedCallsites.sort().join('|')) {
     errors.push(`sendScoped production callsites changed: ${sendScopedCallsites.sort().join(', ')}`)

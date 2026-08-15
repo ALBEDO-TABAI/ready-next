@@ -1202,6 +1202,16 @@ export class CodexBindingRepository {
     return new Set(this.readActiveUpstreamProfileUsages().map((usage) => usage.profileId))
   }
 
+  readLatestAliasGeneration(aliasId: string): number | null {
+    nonEmpty(aliasId, 'alias_identity_invalid')
+    const row = this.db.prepare(`
+      SELECT MAX(alias_generation) AS alias_generation
+        FROM codex_thread_bindings
+       WHERE ready_conversation_alias = ?
+    `).get<{ alias_generation: number | null }>(aliasId)
+    return typeof row?.alias_generation === 'number' ? row.alias_generation : null
+  }
+
   readActiveAliasBinding(aliasId: string): CodexActiveAliasBindingRead | null {
     nonEmpty(aliasId, 'alias_identity_invalid')
     const row = this.readActiveThreadByAlias(aliasId)
@@ -1240,6 +1250,7 @@ export class CodexBindingRepository {
     runtimeManifestDigest: string
     protocolSchemaDigest: string
     createdAt: string
+    currentToolSurfaceDigest?: string
   }): CodexActiveAliasBindingRead | null {
     for (const value of [
       input.aliasId,
@@ -1247,11 +1258,19 @@ export class CodexBindingRepository {
       input.protocolSchemaDigest,
       input.createdAt,
     ]) nonEmpty(value, 'alias_restore_identity_invalid')
+    if (input.currentToolSurfaceDigest !== undefined) {
+      nonEmpty(input.currentToolSurfaceDigest, 'alias_restore_identity_invalid')
+    }
     const current = this.readActiveThreadByAlias(input.aliasId)
     if (
       current
       && current.runtime_manifest_digest === input.runtimeManifestDigest
       && current.protocol_schema_digest === input.protocolSchemaDigest
+      && (
+        input.currentToolSurfaceDigest === undefined
+        || current.tool_surface_digest === null
+        || current.tool_surface_digest === input.currentToolSurfaceDigest
+      )
     ) return this.readActiveAliasBinding(input.aliasId)
     const available = this.immediate(() => {
       const active = this.readActiveThreadByAlias(input.aliasId)
@@ -1259,6 +1278,11 @@ export class CodexBindingRepository {
         if (
           active.runtime_manifest_digest === input.runtimeManifestDigest
           && active.protocol_schema_digest === input.protocolSchemaDigest
+          && (
+            input.currentToolSurfaceDigest === undefined
+            || active.tool_surface_digest === null
+            || active.tool_surface_digest === input.currentToolSurfaceDigest
+          )
         ) return true
         const turn = this.db.prepare(`
           SELECT ready_run_id FROM codex_turn_bindings
@@ -1268,55 +1292,99 @@ export class CodexBindingRepository {
           SELECT thread_binding_id FROM codex_thread_dispatch_fences
            WHERE thread_binding_id = ? LIMIT 1
         `).get<{ thread_binding_id: string }>(active.thread_binding_id)
-        if (
-          active.revision !== 1
-          || active.thread_start_reservation_set_id !== null
-          || active.codex_thread_id !== null
-          || active.codex_session_id !== null
-          || active.thread_start_dispatch_intent_at !== null
-          || active.thread_start_reconciled_at !== null
-          || active.retired_at !== null
-          || active.continuation_blocked_at !== null
-          || turn
-          || fence
-        ) return true
-        const replacementEvidenceDigest = digest({
-          kind: 'empty_alias_runtime_contract_superseded',
-          aliasId: active.ready_conversation_alias,
-          aliasGeneration: active.alias_generation,
-          threadBindingId: active.thread_binding_id,
-          previousRuntimeManifestDigest: active.runtime_manifest_digest,
-          previousProtocolSchemaDigest: active.protocol_schema_digest,
-          runtimeManifestDigest: input.runtimeManifestDigest,
-          protocolSchemaDigest: input.protocolSchemaDigest,
-        })
-        const retired = this.db.prepare(`
-          UPDATE codex_thread_bindings
-             SET retired_at = ?, retired_reason = 'cleanup',
-                 retirement_evidence_digest = ?, revision = revision + 1, updated_at = ?
-           WHERE thread_binding_id = ? AND revision = 1 AND retired_at IS NULL
-        `).run(
-          input.createdAt,
-          replacementEvidenceDigest,
-          input.createdAt,
-          active.thread_binding_id,
+        const unresolvedTurn = this.db.prepare(`
+          SELECT ready_run_id FROM codex_turn_bindings
+           WHERE thread_binding_id = ?
+             AND (
+               turn_start_reservation_released_at IS NULL
+               OR (product_terminal_digest IS NULL
+                 AND host_failure_product_terminal_digest IS NULL)
+             )
+           LIMIT 1
+        `).get<{ ready_run_id: string }>(active.thread_binding_id)
+        const isPristineEmpty = (
+          active.revision === 1
+          && active.thread_start_reservation_set_id === null
+          && active.codex_thread_id === null
+          && active.codex_session_id === null
+          && active.thread_start_dispatch_intent_at === null
+          && active.thread_start_reconciled_at === null
+          && active.retired_at === null
+          && active.continuation_blocked_at === null
+          && !turn
+          && !fence
         )
-        if (changes(retired) !== 1) {
-          throw new CodexBindingRepositoryError('empty_alias_contract_retire_cas_failed')
-        }
-        const aliasGeneration = active.alias_generation + 1
-        this.insertEmptyAliasGenerationInOpenTransaction({
-          threadBindingId: this.nextThreadBindingId(
-            active.ready_conversation_alias,
-            aliasGeneration,
+        if (isPristineEmpty) {
+          const replacementEvidenceDigest = digest({
+            kind: 'empty_alias_runtime_contract_superseded',
+            aliasId: active.ready_conversation_alias,
+            aliasGeneration: active.alias_generation,
+            threadBindingId: active.thread_binding_id,
+            previousRuntimeManifestDigest: active.runtime_manifest_digest,
+            previousProtocolSchemaDigest: active.protocol_schema_digest,
+            runtimeManifestDigest: input.runtimeManifestDigest,
+            protocolSchemaDigest: input.protocolSchemaDigest,
+          })
+          const retired = this.db.prepare(`
+            UPDATE codex_thread_bindings
+               SET retired_at = ?, retired_reason = 'cleanup',
+                   retirement_evidence_digest = ?, revision = revision + 1, updated_at = ?
+             WHERE thread_binding_id = ? AND revision = 1 AND retired_at IS NULL
+          `).run(
+            input.createdAt,
             replacementEvidenceDigest,
-          ),
-          aliasId: active.ready_conversation_alias,
-          aliasGeneration,
-          readyScopeId: active.ready_scope_id,
+            input.createdAt,
+            active.thread_binding_id,
+          )
+          if (changes(retired) !== 1) {
+            throw new CodexBindingRepositoryError('empty_alias_contract_retire_cas_failed')
+          }
+          const aliasGeneration = active.alias_generation + 1
+          this.insertEmptyAliasGenerationInOpenTransaction({
+            threadBindingId: this.nextThreadBindingId(
+              active.ready_conversation_alias,
+              aliasGeneration,
+              replacementEvidenceDigest,
+            ),
+            aliasId: active.ready_conversation_alias,
+            aliasGeneration,
+            readyScopeId: active.ready_scope_id,
+            runtimeManifestDigest: input.runtimeManifestDigest,
+            protocolSchemaDigest: input.protocolSchemaDigest,
+            createdAt: input.createdAt,
+          })
+          return true
+        }
+        if (
+          fence
+          || unresolvedTurn
+          || active.continuation_blocked_at !== null
+        ) return true
+        const lastClosed = this.db.prepare(`
+          SELECT ready_run_id FROM codex_turn_bindings
+           WHERE thread_binding_id = ?
+             AND (product_terminal_digest IS NOT NULL
+               OR host_failure_product_terminal_digest IS NOT NULL)
+             AND turn_start_reservation_released_at IS NOT NULL
+           ORDER BY COALESCE(product_closeout_at, host_failure_closeout_at, updated_at) DESC,
+                    created_at DESC, ready_run_id DESC
+           LIMIT 1
+        `).get<{ ready_run_id: string }>(active.thread_binding_id)
+        if (
+          !active.codex_thread_id
+          || !active.codex_session_id
+          || !active.isolated_thread_cwd
+          || !active.thread_start_reservation_released_at
+          || !lastClosed
+        ) return true
+        this.supersedeIdleStartedAliasForRootContractChangeInOpenTransaction({
+          thread: active,
+          readyRunId: lastClosed.ready_run_id,
+          createdAt: input.createdAt,
           runtimeManifestDigest: input.runtimeManifestDigest,
           protocolSchemaDigest: input.protocolSchemaDigest,
-          createdAt: input.createdAt,
+          previousToolSurfaceDigest: active.tool_surface_digest,
+          currentToolSurfaceDigest: input.currentToolSurfaceDigest ?? null,
         })
         return true
       }
@@ -7100,6 +7168,79 @@ export class CodexBindingRepository {
       input.protocolSchemaDigest,
       input.createdAt,
     ]) nonEmpty(value, 'empty_alias_identity_invalid')
+  }
+
+  private supersedeIdleStartedAliasForRootContractChangeInOpenTransaction(input: {
+    thread: ThreadBindingRow
+    readyRunId: string
+    createdAt: string
+    runtimeManifestDigest: string
+    protocolSchemaDigest: string
+    previousToolSurfaceDigest: string | null
+    currentToolSurfaceDigest: string | null
+  }): void {
+    if (this.db.inTransaction !== true) {
+      throw new CodexBindingRepositoryError('alias_create_transaction_missing')
+    }
+    const replacementEvidenceDigest = digest({
+      kind: 'idle_started_alias_root_contract_superseded',
+      aliasId: input.thread.ready_conversation_alias,
+      aliasGeneration: input.thread.alias_generation,
+      threadBindingId: input.thread.thread_binding_id,
+      previousRuntimeManifestDigest: input.thread.runtime_manifest_digest,
+      previousProtocolSchemaDigest: input.thread.protocol_schema_digest,
+      previousToolSurfaceDigest: input.previousToolSurfaceDigest,
+      runtimeManifestDigest: input.runtimeManifestDigest,
+      protocolSchemaDigest: input.protocolSchemaDigest,
+      currentToolSurfaceDigest: input.currentToolSurfaceDigest,
+    })
+    const retired = this.db.prepare(`
+      UPDATE codex_thread_bindings
+         SET retired_at = ?, retired_reason = 'cleanup',
+             retirement_evidence_digest = ?, revision = revision + 1, updated_at = ?
+       WHERE thread_binding_id = ? AND revision = ? AND retired_at IS NULL
+         AND continuation_blocked_at IS NULL
+    `).run(
+      input.createdAt,
+      replacementEvidenceDigest,
+      input.createdAt,
+      input.thread.thread_binding_id,
+      input.thread.revision,
+    )
+    if (changes(retired) !== 1) {
+      throw new CodexBindingRepositoryError('idle_started_alias_contract_retire_cas_failed')
+    }
+    const retiredThread = this.requireThread(input.thread.thread_binding_id)
+    this.assertThreadArchiveEligible(retiredThread.codex_thread_id as string)
+    const transactionDigest = digest({
+      aliasId: input.thread.ready_conversation_alias,
+      retiredGeneration: input.thread.alias_generation,
+      readyRunId: input.readyRunId,
+      retirementEvidenceDigest: replacementEvidenceDigest,
+    })
+    this.recordThreadArchiveIntentInOpenTransaction({
+      thread: retiredThread,
+      sourceKind: 'retired_backfill',
+      retiredReason: 'cleanup',
+      readyRunId: null,
+      retirementEvidenceDigest: replacementEvidenceDigest,
+      retirementTransactionDigest: transactionDigest,
+      retiredAt: input.createdAt,
+    })
+    const aliasGeneration = input.thread.alias_generation + 1
+    this.insertEmptyAliasGenerationInOpenTransaction({
+      threadBindingId: this.nextThreadBindingId(
+        input.thread.ready_conversation_alias,
+        aliasGeneration,
+        replacementEvidenceDigest,
+      ),
+      aliasId: input.thread.ready_conversation_alias,
+      aliasGeneration,
+      readyScopeId: input.thread.ready_scope_id,
+      runtimeManifestDigest: input.runtimeManifestDigest,
+      protocolSchemaDigest: input.protocolSchemaDigest,
+      createdAt: input.createdAt,
+    })
   }
 
   private insertEmptyAliasGenerationInOpenTransaction(

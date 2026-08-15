@@ -50,6 +50,11 @@ import { executeBrowserTool } from './browser-tools'
 import type { BrowserTurnLease } from '../browser-engine/agent-browser-turn-lease'
 import { resolveBrowserToolSurfaceBinding } from '../browser-engine/browser-surface-binding'
 import { browserSnapshotService } from '../browser-engine/browser-snapshot-service'
+import {
+  parseBrowserWorkflowActionJournal,
+  resolveTrustedBrowserPageRefFromControlledNavigation,
+} from '../browser-engine/browser-workflow-evidence'
+import type { BrowserActionOutcome } from '../../../shared/browser-action-outcome'
 import { executeCalendarTool } from './calendar-tools'
 import { executeDocumentTool } from './document-tools'
 import { executeGeneralResearchTool } from './general-research-tools'
@@ -216,6 +221,41 @@ type TrustedBrowserPageRef = {
   tabId: string
   physicalTargetToken: string
   mainFrameDocumentToken: string
+}
+
+function readSettledBrowserWorkflowOutcomes(
+  controller: NonNullable<ToolContext['browserController']>,
+  taskId: string,
+): BrowserActionOutcome[] {
+  const reader = controller as typeof controller & {
+    readBrowserWorkflowSettledOutcomes?: (id: string) => BrowserActionOutcome[]
+  }
+  if (typeof reader.readBrowserWorkflowSettledOutcomes === 'function') {
+    const outcomes = reader.readBrowserWorkflowSettledOutcomes(taskId)
+    return Array.isArray(outcomes) ? outcomes : []
+  }
+  if (typeof controller.getTaskPayload !== 'function') return []
+  const payload = controller.getTaskPayload(taskId)
+  if (!payload) return []
+  try {
+    return parseBrowserWorkflowActionJournal(payload, taskId)
+      .settledOutcomes
+      .map((item) => item.outcome)
+  } catch {
+    return []
+  }
+}
+
+function resolveLiveTrustedBrowserPageRef(
+  controller: NonNullable<ToolContext['browserController']> | null | undefined,
+  taskId: string | null | undefined,
+  admissionPin: TrustedBrowserPageRef | null,
+): TrustedBrowserPageRef | null {
+  if (!admissionPin || !controller || !taskId) return admissionPin
+  return resolveTrustedBrowserPageRefFromControlledNavigation(
+    admissionPin,
+    readSettledBrowserWorkflowOutcomes(controller, taskId),
+  )
 }
 
 async function assertTrustedBrowserPageIdentity(
@@ -512,8 +552,15 @@ async function executeToolCallInner(
     args = outcome.data
   }
 
-  const trustedBrowserPageRef = definition.domain === 'browser'
+  const admittedBrowserPageRef = definition.domain === 'browser'
     ? requestEnvelopeBrowserPageRef(context.requestEnvelope)
+    : null
+  let trustedBrowserPageRef = definition.domain === 'browser'
+    ? resolveLiveTrustedBrowserPageRef(
+      context.browserController,
+      context.browserWorkflowRoute?.browserTaskId ?? null,
+      admittedBrowserPageRef,
+    )
     : null
   if (invoker !== 'host' && toolName === 'browser_tabs' && browserTabsAction(args) === 'open') {
     return browserFailureOutput({
@@ -581,8 +628,13 @@ async function executeToolCallInner(
 
   if (invoker !== 'host' && !releaseGrant) {
     if (toolName === 'skill_run_shell'
-      && context.authorization.mode === 'selected'
-      && context.authorization.skillId === 'lark-cli'
+      && (
+        (context.authorization.mode === 'selected' && context.authorization.skillId === 'lark-cli')
+        || (
+          context.authorization.mode === 'none'
+          && context.authorization.candidateSkillPrimitives?.skillId === 'lark-cli'
+        )
+      )
       && !context.larkCliExecutableAuthority) {
       const requiredMethodAuthority = context.runShellRequiredMethod?.executableAuthority
       if (requiredMethodAuthority) {
@@ -714,13 +766,6 @@ async function executeToolCallInner(
           if (!context.browserController) {
             return 'Browser controller is not available'
           }
-          if (trustedBrowserPageRef && browserToolTargetsReferencedPage(toolName, args)) {
-            const stale = await assertTrustedBrowserPageIdentity(
-              context.browserController,
-              trustedBrowserPageRef,
-            )
-            if (stale) return stale
-          }
           const browserCapability = resolveBrowserCapability(toolName, args)
           if (!browserCapability) {
             return browserFailureOutput({
@@ -739,6 +784,18 @@ async function executeToolCallInner(
               })
             }
             context.browserWorkflowRoute = await context.ensureBrowserWorkflowRoute()
+          }
+          trustedBrowserPageRef = resolveLiveTrustedBrowserPageRef(
+            context.browserController,
+            context.browserWorkflowRoute?.browserTaskId ?? null,
+            admittedBrowserPageRef,
+          )
+          if (trustedBrowserPageRef && browserToolTargetsReferencedPage(toolName, args)) {
+            const stale = await assertTrustedBrowserPageIdentity(
+              context.browserController,
+              trustedBrowserPageRef,
+            )
+            if (stale) return stale
           }
           if (invoker !== 'host' && browserToolTargetsReferencedPage(toolName, args) && !trustedBrowserPageRef) {
             return browserFailureOutput({

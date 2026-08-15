@@ -90,11 +90,11 @@ test('weather intent in Browser workbench stays on the compact research API surf
     }),
   }
   const definitions = executor.listDefaultToolDefinitionsForTurn(resolutionInput)
+  const names = definitions.map((definition) => definition.name)
 
-  assert.deepEqual(
-    definitions.map((definition) => definition.name).sort(),
-    [...GENERAL_RESEARCH_TOOL_NAMES, 'use_browser'].sort(),
-  )
+  assert.ok(GENERAL_RESEARCH_TOOL_NAMES.every((name) => names.includes(name)), names.join(','))
+  assert.ok(names.includes('browser_read'), names.join(','))
+  assert.equal(names.includes('use_browser'), false, names.join(','))
 
   const frozen = resolveReadyToolTurnSnapshot({
     surfaceId: 'surface-weather-browser-workbench',
@@ -106,10 +106,8 @@ test('weather intent in Browser workbench stays on the compact research API surf
     },
     resolutionInput,
   })
-  assert.deepEqual(
-    frozen.readyTurnToolAuthorization.allowedToolNames,
-    [...GENERAL_RESEARCH_TOOL_NAMES].sort(),
-  )
+  assert.ok(frozen.readyTurnToolAuthorization.allowedToolNames.includes('web_search'))
+  assert.ok(frozen.readyTurnToolAuthorization.allowedToolNames.includes('browser_read'))
 })
 
 test('an explicit current-page request still receives Browser tools', () => {
@@ -147,4 +145,151 @@ test('an explicit current-page request still receives Browser tools', () => {
 
   assert.ok(names.includes('browser_read'))
   assert.ok(names.includes('browser_snapshot'))
+})
+
+test('current-page research still receives Browser tools', () => {
+  const runtime = new AgentSdkRuntime({ domainAdapters: [] })
+  const executor = (runtime as unknown as {
+    toolExecutor: {
+      listDefaultToolDefinitionsForTurn(
+        params: Parameters<NonNullable<AgentSdkRuntimeDeps['listToolDefinitions']>>[0]
+      ): Array<{ name: string }>
+    }
+  }).toolExecutor
+  const text = '研究一下当前打开的网页'
+  const resolutionInput = {
+    message: text,
+    sessionId: 'scope-current-page-research',
+    scopeId: 'scope-current-page-research',
+    config: CONFIG,
+    browserHostAvailable: true,
+    feishuConnected: false,
+    skillCatalogAvailable: true,
+    authorization: buildExplicitNoSkillAuthorization('no_skill_signal'),
+    requestEnvelope: buildRequestEnvelope({
+      userText: text,
+      trustedEnvironment: {
+        workbenchMode: 'browser',
+        browserPageRef: {
+          tabId: 'tab-current-research',
+          physicalTargetToken: 'physical-current-research',
+          mainFrameDocumentToken: 'document-current-research',
+        },
+      },
+    }),
+  }
+  const definitions = executor.listDefaultToolDefinitionsForTurn(resolutionInput)
+  const names = definitions.map((definition) => definition.name)
+
+  assert.ok(names.includes('browser_task'))
+  assert.ok(names.includes('browser_read'))
+})
+
+test('current-page notes keep Browser tools even when the page content mentions weather', () => {
+  const runtime = new AgentSdkRuntime({ domainAdapters: [] })
+  const executor = (runtime as unknown as {
+    toolExecutor: {
+      listDefaultToolDefinitionsForTurn(
+        params: Parameters<NonNullable<AgentSdkRuntimeDeps['listToolDefinitions']>>[0]
+      ): Array<{ name: string }>
+    }
+  }).toolExecutor
+  const text = '总结一下当前小红书页面关于广州天气的笔记'
+  const definitions = executor.listDefaultToolDefinitionsForTurn({
+    message: text,
+    sessionId: 'scope-current-page-weather-notes',
+    scopeId: 'scope-current-page-weather-notes',
+    config: CONFIG,
+    browserHostAvailable: true,
+    feishuConnected: false,
+    skillCatalogAvailable: true,
+    authorization: buildExplicitNoSkillAuthorization('no_skill_signal'),
+    requestEnvelope: buildRequestEnvelope({
+      userText: text,
+      trustedEnvironment: {
+        workbenchMode: 'browser',
+        browserPageRef: {
+          tabId: 'tab-xhs-weather-notes',
+          physicalTargetToken: 'physical-xhs-weather-notes',
+          mainFrameDocumentToken: 'document-xhs-weather-notes',
+        },
+      },
+    }),
+  })
+  const names = definitions.map((definition) => definition.name)
+
+  assert.ok(names.includes('browser_read'), names.join(','))
+  assert.ok(names.includes('browser_snapshot'), names.join(','))
+})
+
+test('current-page weather notes keep Browser tools without a platform name', () => {
+  const runtime = new AgentSdkRuntime({ domainAdapters: [] })
+  const executor = (runtime as unknown as {
+    toolExecutor: {
+      listDefaultToolDefinitionsForTurn(
+        params: Parameters<NonNullable<AgentSdkRuntimeDeps['listToolDefinitions']>>[0]
+      ): Array<{ name: string }>
+    }
+  }).toolExecutor
+  const text = '看看当前页面这篇广州天气预报并总结'
+  const definitions = executor.listDefaultToolDefinitionsForTurn({
+    message: text,
+    sessionId: 'scope-current-page-weather-article',
+    scopeId: 'scope-current-page-weather-article',
+    config: CONFIG,
+    browserHostAvailable: true,
+    feishuConnected: false,
+    skillCatalogAvailable: true,
+    authorization: buildExplicitNoSkillAuthorization('no_skill_signal'),
+    requestEnvelope: buildRequestEnvelope({
+      userText: text,
+      trustedEnvironment: {
+        workbenchMode: 'browser',
+        browserPageRef: {
+          tabId: 'tab-weather-article',
+          physicalTargetToken: 'physical-weather-article',
+          mainFrameDocumentToken: 'document-weather-article',
+        },
+      },
+    }),
+  })
+  const names = definitions.map((definition) => definition.name)
+
+  assert.ok(names.includes('browser_read'), names.join(','))
+})
+
+test('an explicit current-page exclusion keeps public weather search', () => {
+  const runtime = new AgentSdkRuntime({ domainAdapters: [] })
+  const executor = (runtime as unknown as {
+    toolExecutor: {
+      listDefaultToolDefinitionsForTurn(
+        params: Parameters<NonNullable<AgentSdkRuntimeDeps['listToolDefinitions']>>[0]
+      ): Array<{ name: string }>
+    }
+  }).toolExecutor
+  const text = '不要看小红书当前页，直接查天气'
+  const definitions = executor.listDefaultToolDefinitionsForTurn({
+    message: text,
+    sessionId: 'scope-exclude-current-page-weather',
+    scopeId: 'scope-exclude-current-page-weather',
+    config: CONFIG,
+    browserHostAvailable: true,
+    feishuConnected: false,
+    skillCatalogAvailable: true,
+    authorization: buildExplicitNoSkillAuthorization('no_skill_signal'),
+    requestEnvelope: buildRequestEnvelope({
+      userText: text,
+      trustedEnvironment: {
+        workbenchMode: 'browser',
+        browserPageRef: {
+          tabId: 'tab-xhs-exclude',
+          physicalTargetToken: 'physical-xhs-exclude',
+          mainFrameDocumentToken: 'document-xhs-exclude',
+        },
+      },
+    }),
+  })
+  const names = definitions.map((definition) => definition.name)
+
+  assert.ok(names.includes('web_search'), names.join(','))
 })

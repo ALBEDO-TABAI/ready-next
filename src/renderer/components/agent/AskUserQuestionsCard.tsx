@@ -51,7 +51,7 @@ function cancelHeadlineFromReason(reason?: string): string {
   switch (reason) {
     case 'user_typed_instead': return '已用新消息替代（跳过）'
     case 'user_cancelled': return '已取消'
-    case 'app_restart': return '已取消（应用已重启）'
+    case 'app_restart': return '已取消（连接中断，请重新发送）'
     case 'session_reset': return '已取消（会话已重置）'
     case 'card_resolver_missed': return '已取消（系统状态不一致，答案未送达模型）'
     case 'cancel_persist_failed': return '已取消（服务端记录失败，重启后会自动清理）'

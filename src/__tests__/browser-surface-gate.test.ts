@@ -300,6 +300,87 @@ test('successful navigate is not rewritten as a stale reference after the page c
   assert.doesNotMatch(textOf(output), /browser_reference_stale/)
 })
 
+test('a controlled same-tab navigate can be read immediately on the successor page', async () => {
+  let frameToken = 'document-token-ref'
+  let readCalls = 0
+  const settledOutcomes: Array<{ successorIdentity?: { frameDocumentToken?: string } }> = []
+  const c = controller()
+  Object.assign(c, {
+    getActiveTab: () => ({ id: 'tab-ref', title: 'Referenced', url: 'https://referenced.test/v2', active: true }),
+    getTabList: () => [{ id: 'tab-ref', title: 'Referenced', url: 'https://referenced.test/v2', active: true }],
+    getPhysicalTargetToken: () => 'physical-ref',
+    executeJS: async () => ({
+      url: 'https://referenced.test/v2',
+      title: 'Referenced v2',
+      timeOrigin: 2,
+      mutationRevision: 1,
+      frameDocumentToken: frameToken,
+    }),
+    navigate: (tabId: string | null, url: string) => {
+      frameToken = 'document-token-v2'
+      return { success: true, tabId, url }
+    },
+    getPageContent: async () => {
+      readCalls += 1
+      return 'successor page text'
+    },
+    beginBrowserWorkflowAction: (input: { identity: unknown }) => ({
+      actionId: `action-${settledOutcomes.length + 1}`,
+      actionSeq: settledOutcomes.length + 1,
+      identity: input.identity,
+    }),
+    settleBrowserWorkflowAction: (
+      _taskId: string,
+      actionId: string,
+      outcome: { successorIdentity?: { frameDocumentToken?: string } },
+    ) => {
+      settledOutcomes.push(outcome)
+      return { receiptId: `receipt-${actionId}`, outcome }
+    },
+    recordBrowserWorkflowObservation: (input: Record<string, unknown>) => input,
+    readBrowserWorkflowSettledOutcomes: () => settledOutcomes,
+    bindBrowserWorkflowPhysicalTarget: () => () => undefined,
+    isBrowserWorkflowWriteAdmitted: () => true,
+    consumeBrowserSiteNotices: () => [],
+  })
+  await browserSnapshotService.capture(c, 'tab-ref', 1024, async () => ({ targets: [] }))
+  const context = ctx(c)
+  context.requestEnvelope = referencedPageEnvelope()
+  context.browserWorkflowRoute = {
+    browserTaskId: 'browser-task-ref',
+    requestAnchorSnapshotDigest: 'anchor-ref',
+  }
+  context.browserLease = {
+    ensureGateForTarget: () => ({
+      service: {
+        checkWrite: () => null,
+        beginAgentAction: () => 'lease-action-1',
+        endAgentAction: () => undefined,
+      },
+      identity: {
+        partition: 'persist:browser',
+        tabId: 'tab-ref',
+        physicalTargetToken: 'physical-ref',
+        bootIncarnationId: 'boot-current',
+        claimId: 'claim-ref',
+        generation: 1,
+        ownerRunId: 'surface-gate-run',
+      },
+      surface: 'user-view',
+    }),
+  } as ToolContext['browserLease']
+  const navigated = await executeToolCall(
+    'browser_navigate',
+    { action: 'open', url: 'https://referenced.test/v2' },
+    context,
+  )
+  assert.doesNotMatch(textOf(navigated), /browser_reference_stale/)
+  const read = await executeToolCall('browser_read', {}, context)
+  assert.equal(readCalls, 1, textOf(read))
+  assert.match(textOf(read), /successor page text/)
+  assert.notEqual(read.data?.errorKind, 'browser_reference_stale')
+})
+
 test('browser_read fails closed when the same tab navigates during the read', async () => {
   let frameToken = 'document-token-ref'
   const c = controller()

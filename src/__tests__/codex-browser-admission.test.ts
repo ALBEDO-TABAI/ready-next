@@ -114,6 +114,20 @@ test('current browser page plus document anchor keeps browser work set', () => {
   assert.ok(names.includes('browser_click'))
   assert.equal(names.includes('browser_tabs'), false)
   assert.equal(names.includes('browser_download'), false)
+  assert.equal(names.includes('browser_research'), false)
+})
+
+test('a bound page keeps current-page tools and public research together', () => {
+  const composed = snapshotWith(buildBrowserAdmissionAuthoritySnapshot({
+    authorityId: 'weather-on-page',
+    activeWorkbenchMode: 'browser',
+    currentBrowserPageRef: pageRef,
+  }))
+  const names = composed.readyTurnToolAuthorization.allowedToolNames
+  assert.ok(names.includes('web_search'))
+  assert.ok(names.includes('browser_read'))
+  assert.ok(names.includes('browser_click'))
+  assert.equal(names.includes('browser_research'), false)
 })
 
 test('tag forge exclusive removes every browser tool', () => {

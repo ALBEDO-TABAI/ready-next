@@ -171,6 +171,22 @@ describe('Browser target claims', () => {
     assert.equal(service.read(oldClaim.logicalKey)?.physicalTargetToken, null)
   })
 
+  it('expires leftover user_owned claims that lost their boot identity', () => {
+    const service = createTargetClaimService()
+    const claim = acquireTarget(service)
+    const owned = setTargetUserOwnedForTest(service, claim)
+    service.replacePhysicalTarget({
+      partition: owned.logicalKey.partition,
+      tabId: owned.logicalKey.tabId,
+      physicalTargetToken: 'boot-test:tab-a:replaced',
+      bootIncarnationId: 'boot-test',
+    })
+    assert.equal(service.read(owned.logicalKey)?.bootIncarnationId, null)
+    const expired = service.expirePreviousBoot('boot-test')
+    assert.equal(expired.length, 1)
+    assert.equal(service.read(owned.logicalKey)?.state, 'expired')
+  })
+
   it('durable SQL release still needs acknowledge to clear in-flight page control', () => {
     const service = createTargetClaimService()
     const claim = acquireTarget(service)

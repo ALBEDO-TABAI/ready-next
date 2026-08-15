@@ -25,7 +25,7 @@ interface CalendarToolContext {
 const CALENDAR_TOOLS: CalendarToolDef[] = [
   {
     name: 'calendar_list_window',
-    description: '读取某个时间窗口内的日程事件。',
+    description: '读取 Ready 应用内本地日历某个时间窗口的日程。这不是飞书日历。',
     action: 'calendar.listWindow',
     intent: 'list_calendar_window',
     executionKind: 'deterministic',
@@ -33,7 +33,7 @@ const CALENDAR_TOOLS: CalendarToolDef[] = [
   },
   {
     name: 'calendar_create_event',
-    description: '创建一个新的日程事件。',
+    description: '在 Ready 应用内的本地日历创建一个新日程。这不是飞书日历。',
     action: 'calendar.createEvent',
     intent: 'create_calendar_event',
     executionKind: 'deterministic',
@@ -41,7 +41,7 @@ const CALENDAR_TOOLS: CalendarToolDef[] = [
   },
   {
     name: 'calendar_update_event',
-    description: '更新一个现有日程事件。',
+    description: '更新 Ready 应用内本地日历中的现有日程。这不是飞书日历。',
     action: 'calendar.updateEvent',
     intent: 'update_calendar_event',
     executionKind: 'deterministic',
@@ -49,7 +49,7 @@ const CALENDAR_TOOLS: CalendarToolDef[] = [
   },
   {
     name: 'calendar_delete_event',
-    description: '删除一个日程事件。',
+    description: '删除 Ready 应用内本地日历中的日程。这不是飞书日历。',
     action: 'calendar.deleteEvent',
     intent: 'delete_calendar_event',
     executionKind: 'deterministic',
@@ -57,7 +57,7 @@ const CALENDAR_TOOLS: CalendarToolDef[] = [
   },
   {
     name: 'calendar_capture_session',
-    description: '读取当前日程模块会话快照、时间窗口和选中事件。',
+    description: '读取 Ready 应用内本地日历工作面的会话快照、时间窗口和选中事件。这不是飞书日历。',
     action: 'calendar.captureSession',
     intent: 'capture_calendar_session',
     executionKind: 'deterministic',

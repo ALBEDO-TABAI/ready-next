@@ -1,4 +1,5 @@
 import { getSkillsRuntimeManager } from '../../skills-runtime/runtime-manager'
+import { resolveLarkCliCandidatePrimitives } from '../codex-runtime/codex-lark-cli-candidate'
 import {
   getSkillShellConsent,
   isEmbeddedSkill,
@@ -48,8 +49,10 @@ export function resolveSemanticSkillAuthorizationForTurn(input: {
     || hasLocalSendImIntentForTurn(input.message, input.requestEnvelope)
   const orchestrator = input.orchestrator
   if (!orchestrator) {
-    return localSendImIntent
-      ? buildLocalSendImSkillAuthorization('local_send_im_intent')
+    if (localSendImIntent) return buildLocalSendImSkillAuthorization('local_send_im_intent')
+    const candidate = resolveLarkCliCandidatePrimitives()
+    return candidate
+      ? buildExplicitNoSkillAuthorization('no_skill_signal', { candidateSkillPrimitives: candidate })
       : buildExplicitNoSkillAuthorization('no_skill_signal')
   }
   const userTextCandidates = skillAuthorizationTextCandidates(
@@ -104,7 +107,10 @@ export function resolveSemanticSkillAuthorizationForTurn(input: {
     }
   }
   if (userTextCandidates.length === 0) {
-    return buildExplicitNoSkillAuthorization('no_skill_signal')
+    const candidate = resolveLarkCliCandidatePrimitives()
+    return candidate
+      ? buildExplicitNoSkillAuthorization('no_skill_signal', { candidateSkillPrimitives: candidate })
+      : buildExplicitNoSkillAuthorization('no_skill_signal')
   }
   const explicitSkillMatches: Array<{
     text: string
@@ -143,7 +149,10 @@ export function resolveSemanticSkillAuthorizationForTurn(input: {
     }
   }
   if (!localSendImIntent && !explicitSkillId && !input.skillHintRelevantForTurn) {
-    return buildExplicitNoSkillAuthorization('no_skill_signal')
+    const candidate = resolveLarkCliCandidatePrimitives()
+    return candidate
+      ? buildExplicitNoSkillAuthorization('no_skill_signal', { candidateSkillPrimitives: candidate })
+      : buildExplicitNoSkillAuthorization('no_skill_signal')
   }
 
   const referenceHint = orchestrator.getCurrentReferenceSkillHint?.(input.sessionId) || null
@@ -158,7 +167,12 @@ export function resolveSemanticSkillAuthorizationForTurn(input: {
   const typedActions = Array.from(typedActionNames)
   const skillId = explicitSkillId
     || (input.skillHintRelevantForTurn ? referenceHint?.id || null : null)
-  if (!skillId) return buildExplicitNoSkillAuthorization('no_skill_signal')
+  if (!skillId) {
+    const candidate = resolveLarkCliCandidatePrimitives()
+    return candidate
+      ? buildExplicitNoSkillAuthorization('no_skill_signal', { candidateSkillPrimitives: candidate })
+      : buildExplicitNoSkillAuthorization('no_skill_signal')
+  }
   const selectedSkillCandidate = explicitSkill
     ?? (orchestrator.findExplicitlyRequestedSkills?.(`@[${skillId}]`) || [])
       .find((candidate) => (candidate.id || candidate.skillId) === skillId)

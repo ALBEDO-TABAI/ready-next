@@ -168,7 +168,7 @@ export type CodexCurrentDocumentAnchor = {
 export type SendScopedRequest = {
   scopeId: string
   requestId: string
-  expectedAliasGeneration: number
+  expectedAliasGeneration?: number
   expectedMessageVisibilityEpoch: number
   message: string | AgentIngressMessageBlock[]
   userMessage: SendScopedUserMessage
@@ -496,7 +496,7 @@ export const codexCurrentDocumentAnchorSchema: z.ZodType<CodexCurrentDocumentAnc
 export const sendScopedRequestSchema: z.ZodType<SendScopedRequest> = z.object({
   scopeId: nonEmptyString,
   requestId: nonEmptyString,
-  expectedAliasGeneration: z.number().int().positive(),
+  expectedAliasGeneration: z.number().int().positive().optional(),
   expectedMessageVisibilityEpoch: z.number().int().nonnegative(),
   message: z.union([z.string(), z.array(agentIngressMessageBlockSchema).min(1)]),
   userMessage: z.object({

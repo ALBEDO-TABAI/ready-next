@@ -10,9 +10,6 @@ import { emitSkillReferenceInlined } from './skill-reference-inlined-bridge'
 import { isRetryOnlyTurn } from './skill-detection-inputs'
 import { TOOL_ERROR_METRICS } from '../tools-runtime/tool-error-metrics'
 import { redactModelVisibleToolText } from '../tools-runtime/model-visible-tool-output'
-import {
-  hasExplicitLocalFeishuCliSkillIntent,
-} from '../local-feishu-cli-intent'
 import { hasExplicitSetupCommandIntent } from '../setup-command-intent'
 
 /**
@@ -106,10 +103,8 @@ export class SkillContextOrchestrator {
     const sendImSkill = skills.find((skill) => skill.id === 'send-im')
     if (sendImSkill && hasLocalSendImFileIntent(primary)) return [sendImSkill]
     if (hasExplicitSetupCommandIntent(primary)) return []
-    const localFeishuCliSkillIntent = hasExplicitLocalFeishuCliSkillIntent(primary)
 
     skills.forEach((skill, index) => {
-      if (skill.id === 'lark-cli' && !localFeishuCliSkillIntent) return
       const candidates = [skill.id, skill.name]
         .map((item) => this.normalizeLooseToken(item))
         .filter((item) => item.length >= 6)
@@ -130,11 +125,6 @@ export class SkillContextOrchestrator {
         return
       }
     })
-
-    if (exactMatches.length === 0 && aliasMatches.length === 0 && localFeishuCliSkillIntent) {
-      const larkCli = skills.find((skill) => skill.id === 'lark-cli')
-      if (larkCli) return [larkCli]
-    }
 
     const strongestMatches = exactMatches.length > 0
       ? exactMatches.filter((match) => {

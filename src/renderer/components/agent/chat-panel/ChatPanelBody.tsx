@@ -100,6 +100,9 @@ interface ChatPanelBodyProps extends Omit<TaskToolSnapshotProps, 'children' | 'c
   onReferenceSelect: (attachment: ChatAttachment) => void
   setActiveAttachmentPreview: (preview: AttachmentPreviewState | null) => void
   setAttachmentPreviewLoading: (loading: boolean) => void
+  admissionReady?: boolean
+  composerNotice?: { message: string; errorKind: string } | null
+  onDismissComposerNotice?: () => void
 }
 
 const CHAT_COMPOSER_FALLBACK_BOTTOM_INSET = 156
@@ -167,6 +170,9 @@ export function ChatPanelBody(props: ChatPanelBodyProps): React.ReactElement {
     onActionAuthorizationModeChange,
     onSkillReference,
     onReferenceSelect,
+    admissionReady = true,
+    composerNotice = null,
+    onDismissComposerNotice,
     setActiveAttachmentPreview,
     setAttachmentPreviewLoading,
   } = props
@@ -332,11 +338,26 @@ export function ChatPanelBody(props: ChatPanelBodyProps): React.ReactElement {
             {(() => {
               const scopedRun = currentScopeId ? scopeRunStates[currentScopeId] : null
               const softError = scopedRun?.softError || null
-              if (!softError || !currentScopeId) return null
+              if (softError && currentScopeId) {
+                return (
+                  <SoftFailureCapsule
+                    softError={softError}
+                    onDismiss={() => dismissSoftError(currentScopeId)}
+                  />
+                )
+              }
+              if (!composerNotice) return null
               return (
                 <SoftFailureCapsule
-                  softError={softError}
-                  onDismiss={() => dismissSoftError(currentScopeId)}
+                  softError={{
+                    message: composerNotice.message,
+                    errorKind: composerNotice.errorKind,
+                    toolName: null,
+                    friendlyMessage: composerNotice.message,
+                    technicalDetails: null,
+                    receivedAt: new Date().toISOString(),
+                  }}
+                  onDismiss={() => onDismissComposerNotice?.()}
                 />
               )
             })()}
@@ -557,6 +578,7 @@ export function ChatPanelBody(props: ChatPanelBodyProps): React.ReactElement {
                 <AttachmentIcon attachment={attachment} size={size} />
               )}
               ModelSelector={ModelSelector}
+              admissionReady={admissionReady}
             />
           </div>
         </div>

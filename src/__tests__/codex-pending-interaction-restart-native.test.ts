@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import test from 'node:test'
 
 import type { AgentInputItem } from '@openai/agents'
@@ -46,6 +48,18 @@ import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
 
 const admittedAt = '2026-08-11T02:00:00.000Z'
 const restartAt = '2026-08-11T02:05:00.000Z'
+
+test('sidecar restart closeout publishes the recovered terminal to Renderer', () => {
+  const source = readFileSync(
+    resolve(process.cwd(), 'src/main/modules/agent-control/codex-runtime/codex-runtime-production-composition.ts'),
+    'utf8',
+  )
+  assert.match(
+    source,
+    /const recovered = await closeRunLocalRecoveryFailure\(\s*plan\.readyRunId,\s*'codex_pending_interaction_cancelled_app_restart',\s*plan,\s*\)\s*collector\.deliverRecoveredCandidate\(\s*buildCodexPendingInteractionRestartCandidate\(plan\),\s*\)\s*deliverRecoveredCloseout\(plan\.readyRunId, recovered\)/s,
+  )
+  assert.match(source, /const alreadyCommitted = readAlreadyCommittedCloseout\(product, candidate\)/)
+})
 
 type SeededRun = {
   scopeId: string

@@ -1971,6 +1971,27 @@ test('create and identity read failures return exact typed lifecycle failures', 
   }
 })
 
+test('stop after a retired generation is an idempotent no-active operation', async () => {
+  const { adapter, lifecycleStore } = createHarness()
+  lifecycleStore.readLifecycleOperation = async () => {
+    throw new Error('active_alias_generation_mismatch')
+  }
+  const result = await adapter.stopSession({
+    aliasId: 'alias-1',
+    aliasGeneration: 3,
+    readyRunId: 'req-closed-run',
+  })
+  assert.deepEqual(result, {
+    ok: false,
+    action: 'stop',
+    code: 'no_active_operation',
+    preserveUi: true,
+    aliasId: 'alias-1',
+    aliasGeneration: 3,
+    evidenceDigest: 'evidence:stop:invariant_violation',
+  })
+})
+
 test('stale alias generation fails closed after one consistent lifecycle read and no native operation', async () => {
   const { adapter, nativeRuntime, lifecycleStore } = createHarness()
   const result = await adapter.closeSession({

@@ -19,8 +19,10 @@ import {
   buildReadyToolSurface,
   buildReadyTurnToolAuthorization,
   CodexToolSurfaceError,
+  digestCodexRootToolSurface,
   normalizeCodexDynamicToolSchema,
   resolveReadyToolTurnSnapshot,
+  selectCodexRootToolDefinitions,
   type ReadyLiveToolResolutionInput,
 } from '../main/modules/agent-control/codex-runtime/codex-tool-surface'
 
@@ -46,6 +48,26 @@ function definition(name: string): ToolDefinition {
     resultShape: 'json',
   }
 }
+
+test('root Codex surface digest ignores control tools and stays deterministic', () => {
+  const root = [
+    definition('tool_a'),
+    { ...definition('use_browser'), groupId: 'skill_activation' as const, domain: 'skill_activation' as const },
+    {
+      ...definition('browser_download'),
+      groupId: 'browser_interaction' as const,
+      domain: 'browser' as const,
+    },
+  ]
+  assert.deepEqual(selectCodexRootToolDefinitions(root).map((entry) => entry.name), ['tool_a'])
+  assert.equal(
+    digestCodexRootToolSurface(root),
+    buildReadyToolSurface({
+      surfaceId: 'codex-root-surface',
+      toolDefinitions: [definition('tool_a')],
+    }).toolSurfaceDigest,
+  )
+})
 
 test('Ready tool surface emits exact deterministic 0/1/2 dynamic-tool fixtures', () => {
   for (const names of [[], ['tool_b'], ['tool_b', 'tool_a']]) {
@@ -401,6 +423,10 @@ test('Codex skill admission never executes mutable skill directories', (t) => {
     executionMode: 'advisory',
   }
 
+  assert.equal(isCodexSafeHostSkillPrimitiveDefinition(
+    'skill_read_artifact',
+    { id: 'incomplete-fixture' } as SkillState,
+  ), false)
   assert.equal(isCodexSafeHostSkillPrimitiveDefinition('skill_read_artifact', skill), true)
   assert.equal(isCodexSafeHostSkillPrimitiveDefinition('skill_run_shell', skill), false)
 

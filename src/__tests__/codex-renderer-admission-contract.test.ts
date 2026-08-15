@@ -26,7 +26,16 @@ const scope: ConversationScope = {
   lastMessageAt: null,
 }
 
-function seedStore(inputValue: string, aliasGeneration: number | null = 1) {
+function seedStore(
+  inputValue: string,
+  aliasGeneration: number | null = 1,
+  latestAliasGeneration?: number | null,
+) {
+  const scoped = {
+    ...scope,
+    aliasGeneration,
+    latestAliasGeneration: latestAliasGeneration ?? aliasGeneration,
+  }
   const slice = {
     ...makeEmptySessionSlice(scope.id),
     inputValue,
@@ -36,9 +45,9 @@ function seedStore(inputValue: string, aliasGeneration: number | null = 1) {
     messages: [],
     currentAgent: 'butler',
     inputValue,
-    currentScopeId: scope.id,
-    currentScope: scope,
-    scopes: [scope],
+    currentScopeId: scoped.id,
+    currentScope: scoped,
+    scopes: [scoped],
     conversations: [],
     attachments: [],
     filePool: [],
@@ -929,6 +938,76 @@ test('pending ask-user card stays pending while Main admission returns thread_bu
     assert.equal(calls, 1)
     assert.equal(useAgent.getState().messages[0]?.askUserQuestions?.status, 'pending')
     assert.equal(useAgent.getState().inputValue, '新的普通输入')
+  } finally {
+    electron.restore()
+  }
+})
+
+test('publication-diverged follow-up send omits retired generation and lets Main resolve the thread', async () => {
+  seedStore('看看能不能看到我现在在看的小红书笔记，帮我总结概述一下', null, 2)
+  let capturedPayload: any = null
+  const electron = installElectronApi(async (payload) => {
+    capturedPayload = payload
+    return {
+      success: false,
+      disposition: 'rejected_before_persistence',
+      shouldClearInput: false,
+      preserveInput: true,
+      retryableByUser: false,
+      persistence: {
+        scope: 'none',
+        message: 'none',
+        attachments: 'none',
+        inputAttachments: 'none',
+      },
+      error: 'should_not_block_before_ipc',
+      errorKind: 'host_unavailable',
+      admissionEvidenceDigest: 'publication-diverged-follow-up',
+    }
+  })
+  try {
+    const result = await useAgent.getState().sendMessage(
+      '看看能不能看到我现在在看的小红书笔记，帮我总结概述一下',
+    )
+    assert.equal('expectedAliasGeneration' in capturedPayload, false)
+    assert.equal(capturedPayload?.scopeId, scope.id)
+    assert.equal(result.disposition, 'rejected_before_persistence')
+    assert.equal(result.errorKind, 'host_unavailable')
+  } finally {
+    electron.restore()
+  }
+})
+
+test('a conversation without an active generation still reaches Main', async () => {
+  seedStore('从未绑定的对话', null, null)
+  let calls = 0
+  let capturedPayload: any = null
+  const electron = installElectronApi(async (payload) => {
+    calls += 1
+    capturedPayload = payload
+    return {
+      success: false,
+      disposition: 'rejected_before_persistence',
+      shouldClearInput: false,
+      preserveInput: true,
+      retryableByUser: false,
+      persistence: {
+        scope: 'none',
+        message: 'none',
+        attachments: 'none',
+        inputAttachments: 'none',
+      },
+      error: 'codex_alias_binding_missing',
+      errorKind: 'conversation_reset_required',
+      admissionEvidenceDigest: 'never-bound-follow-up',
+    }
+  })
+  try {
+    const result = await useAgent.getState().sendMessage('从未绑定的对话')
+    assert.equal(calls, 1)
+    assert.equal('expectedAliasGeneration' in capturedPayload, false)
+    assert.equal(result.disposition, 'rejected_before_persistence')
+    assert.equal(result.errorKind, 'conversation_reset_required')
   } finally {
     electron.restore()
   }

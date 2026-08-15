@@ -113,7 +113,8 @@ import {
   getSkillOpenAITools,
   getSkillToolDefsForRegistry,
 } from '../../tools/skills-tools'
-import { isCodexSafeHostSkillPrimitive } from '../../tools/skill-tool-execution-authority'
+import { isCodexSafeHostSkillPrimitiveDefinition } from '../../tools/skill-tool-execution-authority'
+import { getSkillsRuntimeManager } from '../../skills-runtime/runtime-manager'
 import { getToolInputSchemas } from '../../tools/schemas'
 import { getSystemAnthropicTools, getSystemOpenAITools } from '../../tools/system-tools'
 import { getLastReferenceSkill } from '../skills/skill-reference-hints'
@@ -443,6 +444,7 @@ function resolveToolKind(toolName: string, domain: ToolDomain): ToolKind {
 function resolveToolTimeoutProfile(toolName: string, domain: ToolDomain, kind: ToolKind): ToolTimeoutProfile {
   if (domain === 'browser') return 'browser_interactive'
   if (domain === 'document' && kind === 'write') return 'document_write'
+  if (toolName === 'ask_user_questions' || toolName === 'skill_ask_user') return 'user_interaction'
   if (toolName === 'skill_run_shell') return 'skill_long'
   if (domain === 'skill') return 'skill'
   if (domain === 'feishu') return 'feishu'
@@ -1277,10 +1279,17 @@ export class ToolRegistry implements ToolRegistryReader {
       authorization,
       scopeId,
     ).definitions
-    if (groupId !== 'skills' || authorization.mode !== 'selected') return definitions
+    if (groupId !== 'skills') return definitions
+    let liveSkills: import('../../skills-runtime/runtime-manager-types').SkillState[] = []
+    try {
+      liveSkills = getSkillsRuntimeManager().listSkills()
+    } catch {
+      liveSkills = []
+    }
     return definitions.map((definition) => ({
       ...definition,
-      codexExecutionSafe: isCodexSafeHostSkillPrimitive(definition.name, authorization.skillId),
+      codexExecutionSafe: liveSkills.some((skill) =>
+        isCodexSafeHostSkillPrimitiveDefinition(definition.name, skill)),
     }))
   }
 

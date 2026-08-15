@@ -798,17 +798,18 @@ function asString(value: unknown): string {
 /**
  * Stage 10 — primitive skillId resolution: identity-driven authorization
  * is the single source of truth. `mode:'selected'` yields the bound
- * skillId; `mode:'none'` (any reason) yields null. The legacy hint /
- * active context / task run cascade has been retired — admission will
- * have already rejected a model-issued primitive when authorization is
- * `mode:'none'`, so reaching this branch from a host / child_runner
- * bypass returns null and the handler surfaces
- * `primitive_no_skill_context`.
+ * skillId; `mode:'none'` yields the optional candidate skillId, otherwise
+ * null. Candidate primitives are additive methods, not an exclusive
+ * selected skill. The legacy hint / active context / task run cascade
+ * has been retired.
  */
 function resolvePrimitiveSkillId(_sessionId?: string, runtimeContext?: SkillToolRuntimeContext): string | null {
   if (!runtimeContext?.authorization) return null
   const auth = runtimeContext.authorization
   if (auth.mode === 'selected') return auth.skillId
+  if (auth.mode === 'none' && auth.candidateSkillPrimitives?.skillId) {
+    return auth.candidateSkillPrimitives.skillId
+  }
   return null
 }
 

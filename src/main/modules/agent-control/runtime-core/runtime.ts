@@ -399,6 +399,8 @@ export class AgentControlRuntime extends EventEmitter {
       resolveConversationAgentId(requestedAgentId, this.agentRegistry).effectiveAgentId,
     readAliasGeneration: (aliasId) =>
       this.codexRuntime.aliasBindingPort.readAliasGeneration(aliasId),
+    readLatestAliasGeneration: (aliasId) =>
+      this.codexRuntime.aliasBindingPort.readLatestAliasGeneration(aliasId),
   })
   // B8-D R5 — the remote-channel / inbound-IM cluster lives in a delegated
   // sub-service; same one-line-delegate pattern as R1–R4. Declared AFTER

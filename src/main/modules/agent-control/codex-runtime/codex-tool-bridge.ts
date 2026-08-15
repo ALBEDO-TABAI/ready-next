@@ -260,6 +260,7 @@ function resolveExecutionTimeoutMs(
   if (!Number.isSafeInteger(frozenTimeoutMs) || frozenTimeoutMs <= 0) {
     throw new CodexToolBridgeError('tool_execution_timeout_contract_invalid')
   }
+  if (entry.effectProfile.timeoutProfile === 'user_interaction') return frozenTimeoutMs
   return Math.min(frozenTimeoutMs, hostHardTimeoutMs)
 }
 
@@ -586,6 +587,7 @@ export class CodexReadyToolBridge implements CodexBoundServerRequestExecutor {
       if (effectStarted) throw new CodexToolBridgeError('tool_effect_phase_reentered')
       assertCurrentEffectAuthority()
       effectStarted = true
+      if (input.frozenEntry.effectProfile.timeoutProfile === 'user_interaction') return
       timer = setTimeout(() => {
         timedOut = true
         const error = new CodexToolBridgeError('tool_execution_timeout')

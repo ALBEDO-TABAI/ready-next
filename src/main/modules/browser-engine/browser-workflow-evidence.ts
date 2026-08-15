@@ -691,6 +691,45 @@ function sameBrowserActionTargetIdentity(
   return sameBrowserDocumentIdentity(left, right) && left.targetRef === right.targetRef
 }
 
+export type TrustedBrowserPageRefPin = {
+  tabId: string
+  physicalTargetToken: string
+  mainFrameDocumentToken: string
+}
+
+function pinMatchesPredecessor(
+  pin: TrustedBrowserPageRefPin,
+  identity: BrowserActionTargetIdentity,
+): boolean {
+  return identity.documentState === 'document'
+    && identity.tabId === pin.tabId
+    && identity.physicalTargetToken === pin.physicalTargetToken
+    && identity.frameId === '0'
+    && identity.frameDocumentToken === pin.mainFrameDocumentToken
+}
+
+export function resolveTrustedBrowserPageRefFromControlledNavigation(
+  admissionPin: TrustedBrowserPageRefPin,
+  outcomes: readonly BrowserActionOutcome[],
+): TrustedBrowserPageRefPin {
+  let current = admissionPin
+  for (const outcome of [...outcomes].sort((left, right) => left.actionSeq - right.actionSeq)) {
+    if (outcome.dispatch === 'rejected' || outcome.delivery === 'not_delivered') continue
+    if (!hasCompleteBrowserDocumentIdentity(outcome.successorIdentity)) continue
+    if (outcome.successorIdentity.tabId !== current.tabId) continue
+    if (outcome.successorIdentity.physicalTargetToken !== current.physicalTargetToken) continue
+    if (outcome.successorIdentity.frameId !== '0') continue
+    if (!pinMatchesPredecessor(current, outcome.identity)) continue
+    if (outcome.successorIdentity.frameDocumentToken === current.mainFrameDocumentToken) continue
+    current = {
+      tabId: current.tabId,
+      physicalTargetToken: current.physicalTargetToken,
+      mainFrameDocumentToken: outcome.successorIdentity.frameDocumentToken,
+    }
+  }
+  return current
+}
+
 export function resolveBrowserObservationSuccessorIdentity(
   outcome: BrowserActionOutcome,
   observedIdentity: BrowserActionTargetIdentity,

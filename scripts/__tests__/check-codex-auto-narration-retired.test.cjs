@@ -45,7 +45,7 @@ function fixture() {
       ? 'runtime.sendScoped(payload)\n'
       : rel.endsWith('agent-lifecycle-group.ts')
         ? 'deps.sendScoped(payload)\n'
-        : rel.endsWith('useAgent.ts')
+        : rel.endsWith('agent-send-orchestration.ts')
           ? 'window.electronAPI.agent.sendScoped(payload)\n'
           : ''
     const remaining = count - (call ? 1 : 0)

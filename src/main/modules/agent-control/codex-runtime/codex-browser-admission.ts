@@ -140,16 +140,29 @@ export function composeBrowserAdmissionToolNames(
   if (snapshot.tagForgeExclusive) return []
   const names = new Set<string>()
   if (snapshot.currentBrowserRoot) {
-    for (const name of BROWSER_CURRENT_PAGE_TOOL_NAMES) names.add(name)
+    for (const name of BROWSER_CURRENT_PAGE_TOOL_NAMES) {
+      if (name !== 'browser_research') names.add(name)
+    }
     if (snapshot.hasExplicitAttachment) names.add('browser_upload')
     if (snapshot.hasWritableRoot) names.add('browser_archive')
-  } else if (snapshot.explicitBrowserReadRefs.length > 0) {
-    for (const name of BROWSER_EXPLICIT_READ_TOOL_NAMES) names.add(name)
-  }
-  if (snapshot.currentBrowserRoot) {
     for (const name of snapshot.selectedSkillBrowserToolNames) {
       if (BROWSER_SKILL_ONLY_TOOL_NAMES.has(name as BrowserPublicToolName)) names.add(name)
     }
+  } else if (snapshot.explicitBrowserReadRefs.length > 0) {
+    for (const name of BROWSER_EXPLICIT_READ_TOOL_NAMES) names.add(name)
+  }
+  return [...names].sort()
+}
+
+export function composeBrowserAdmissionExtraToolNames(
+  snapshot: BrowserAdmissionAuthoritySnapshot,
+): string[] {
+  if (snapshot.tagForgeExclusive || !snapshot.currentBrowserRoot) return []
+  const names = new Set<string>()
+  if (snapshot.hasExplicitAttachment) names.add('browser_upload')
+  if (snapshot.hasWritableRoot) names.add('browser_archive')
+  for (const name of snapshot.selectedSkillBrowserToolNames) {
+    if (BROWSER_SKILL_ONLY_TOOL_NAMES.has(name as BrowserPublicToolName)) names.add(name)
   }
   return [...names].sort()
 }

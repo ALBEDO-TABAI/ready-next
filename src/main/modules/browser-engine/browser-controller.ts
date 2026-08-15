@@ -259,6 +259,10 @@ export class BrowserController extends BrowserControllerCaptureRuntime {
     return this.taskPersistenceService.getTaskPayload(taskId)
   }
 
+  readBrowserWorkflowSettledOutcomes(taskId: string) {
+    return this.taskPersistenceService.readSettledOutcomes(taskId)
+  }
+
   upsertBrowserResearchWorkItems(
     taskId: string,
     ownerRunId: string,

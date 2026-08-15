@@ -6,6 +6,10 @@ import type {
 import { digestCanonicalJson } from './codex-model-gateway-contract'
 import { getAskUserQuestionsStore } from '../../tools/builtins/ask-user-questions-store'
 import { getFrozenCallStore } from '../safety/frozen-call-bridge'
+import {
+  createHostFailureCandidate,
+  type CoreTurnCandidate,
+} from './codex-turn-collector'
 
 const FROZEN_CALL_QUESTION_ID = 'frozen_call_confirm'
 
@@ -374,6 +378,37 @@ export function scanCodexPendingInteractionsForRestart(input: {
     closeoutPlans.push(buildPlan(identity, exact, input.cancelledAt))
   }
   return { closeoutPlans, cancelOnly }
+}
+
+export function buildCodexPendingInteractionRestartCandidate(
+  plan: Pick<
+    CodexPendingInteractionRestartPlan,
+    'readyRunId' | 'readyTaskId' | 'readyScopeId' | 'codexThreadId' | 'codexTurnId'
+  >,
+): Extract<CoreTurnCandidate, { kind: 'host_failure' }> {
+  return createHostFailureCandidate({
+    readyTaskId: plan.readyTaskId,
+    readyRunId: plan.readyRunId,
+    scopeId: plan.readyScopeId,
+    actionReceiptRefs: [],
+    interactionState: null,
+    waitingFor: null,
+    abortInitiator: null,
+    budgetState: {},
+    contextState: {},
+    providerDiagnostics: {},
+    recoveryCheckpointRef: null,
+    browserContinuationRef: null,
+    browserProofRefs: [],
+    otherProofRefs: [],
+    projectionPatchRefs: [],
+    codexThreadId: plan.codexThreadId,
+  }, {
+    stage: 'collection',
+    code: 'codex_pending_interaction_cancelled_app_restart',
+    error: new Error('codex_pending_interaction_cancelled_app_restart'),
+    codexTurnId: plan.codexTurnId,
+  })
 }
 
 export function assertCodexPendingInteractionRestartSweepComplete(input: {

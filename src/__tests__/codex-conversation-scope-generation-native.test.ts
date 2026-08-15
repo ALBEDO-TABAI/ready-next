@@ -52,6 +52,7 @@ function createStore(repository: CodexBindingRepository): ConversationScopeStore
     readAliasGeneration: (aliasId) => (
       repository.readActiveAliasBinding(aliasId)?.aliasGeneration ?? null
     ),
+    readLatestAliasGeneration: (aliasId) => repository.readLatestAliasGeneration(aliasId),
   })
 }
 
@@ -71,6 +72,7 @@ function createRealStore(
     readAliasGeneration: (aliasId) => (
       repository.readActiveAliasBinding(aliasId)?.aliasGeneration ?? null
     ),
+    readLatestAliasGeneration: (aliasId) => repository.readLatestAliasGeneration(aliasId),
   })
 }
 
@@ -119,6 +121,7 @@ test('create to first send maps generation from the durable Main binding', async
 
     assert.equal(scope?.id, scopeRow.id)
     assert.equal(scope?.aliasGeneration, 1)
+    assert.equal(scope?.latestAliasGeneration, 1)
   })
 })
 
@@ -147,7 +150,31 @@ test('reset then reload exposes only the new durable generation', async (t) => {
 
     assert.equal(scopes.length, 1)
     assert.equal(scopes[0].aliasGeneration, 2)
+    assert.equal(scopes[0].latestAliasGeneration, 2)
   })
+})
+
+test('list keeps latestAliasGeneration when the active binding is gone', async () => {
+  const db = {
+    listConversationScopes: () => [scopeRow],
+    getConversationScope: (scopeId: string) => scopeId === scopeRow.id ? scopeRow : null,
+    getChatMessages: () => [],
+  } as unknown as DatabaseManager
+  const store = new ConversationScopeStore({
+    db,
+    emitConversationEvent() {},
+    mapChannelRow() { throw new Error('unexpected_channel_mapping') },
+    getScopedRemoteThreadKey() { throw new Error('unexpected_remote_scope') },
+    getRemoteChannelSessionSettingKey() { throw new Error('unexpected_remote_scope') },
+    restoreReferenceHintFromScope() {},
+    persistReferenceHintToScope() {},
+    resolveConversationAgentId: (agentId) => agentId,
+    readAliasGeneration: () => null,
+    readLatestAliasGeneration: () => 2,
+  })
+  const scope = store.getConversationScope(scopeRow.id)
+  assert.equal(scope?.aliasGeneration, null)
+  assert.equal(scope?.latestAliasGeneration, 2)
 })
 
 test('reset advances the durable message epoch while preserving old rows only for audit', async (t) => {

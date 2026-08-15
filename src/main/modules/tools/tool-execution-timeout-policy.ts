@@ -11,6 +11,7 @@ export const FEISHU_TOOL_TIMEOUT_MS = 30_000
 export const IMAGE_GENERATION_TOOL_TIMEOUT_MS = IMAGE_GENERATION_REQUEST_TIMEOUT_MS + 5_000
 export const MAP_TOOL_TIMEOUT_MS = 60_000
 export const COMMAND_EXEC_TOOL_TIMEOUT_MS = 600_000
+export const USER_INTERACTION_TOOL_TIMEOUT_MS = 24 * 60 * 60 * 1000
 
 export function resolveToolExecutionTimeoutMsForProfile(profile: ToolTimeoutProfile): number {
   switch (profile) {
@@ -30,6 +31,8 @@ export function resolveToolExecutionTimeoutMsForProfile(profile: ToolTimeoutProf
       return MAP_TOOL_TIMEOUT_MS
     case 'command_exec':
       return COMMAND_EXEC_TOOL_TIMEOUT_MS
+    case 'user_interaction':
+      return USER_INTERACTION_TOOL_TIMEOUT_MS
     default:
       return DEFAULT_TOOL_EXECUTION_TIMEOUT_MS
   }
@@ -61,6 +64,9 @@ export function resolveToolExecutionTimeoutMs(toolName: string): number {
   }
   if (tag.domain === 'command_exec') {
     return resolveToolExecutionTimeoutMsForProfile('command_exec')
+  }
+  if (toolName === 'ask_user_questions' || toolName === 'skill_ask_user') {
+    return resolveToolExecutionTimeoutMsForProfile('user_interaction')
   }
   return resolveToolExecutionTimeoutMsForProfile('default')
 }

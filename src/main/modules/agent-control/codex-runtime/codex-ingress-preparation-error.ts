@@ -77,6 +77,9 @@ export function classifyCodexIngressPreparationError(
   if (
     internalCode === 'codex_alias_generation_mismatch'
     || internalCode === 'codex_alias_binding_missing'
+    || internalCode === 'codex_conversation_reset_required'
+    || /_requires_new_thread$/.test(internalCode)
+    || /_requires_new_generation$/.test(internalCode)
   ) {
     return { code: 'conversation_reset_required', retryableByUser: false, error: internalCode }
   }

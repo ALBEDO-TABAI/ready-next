@@ -13,19 +13,29 @@ import {
 import { CodexProductActionError } from '../main/modules/agent-control/codex-runtime/codex-product-action-requester'
 import { workbenchTestSnapshot } from './codex-workbench-surface-test-tools'
 
-test('calendar workbench without keywords adds capture and list, not writes', () => {
+test('calendar host available exposes read floor and write tools in the degraded catalog path', () => {
   const composed = composeCodexTurnToolSnapshot({
     resolved: workbenchTestSnapshot(
-      ['file_search', 'calendar_capture_session', 'calendar_list_window', 'calendar_create_event'],
+      [
+        'file_search',
+        'calendar_capture_session',
+        'calendar_list_window',
+        'calendar_create_event',
+        'calendar_update_event',
+        'calendar_delete_event',
+      ],
       ['file_search'],
     ),
     authorizationId: 'cal-auth',
     authorization: buildExplicitNoSkillAuthorization('no_skill_signal'),
     workbenchMode: 'calendar',
   })
-  assert.ok(composed.readyTurnToolAuthorization.allowedToolNames.includes('calendar_capture_session'))
-  assert.ok(composed.readyTurnToolAuthorization.allowedToolNames.includes('calendar_list_window'))
-  assert.equal(composed.readyTurnToolAuthorization.allowedToolNames.includes('calendar_create_event'), false)
+  const names = composed.readyTurnToolAuthorization.allowedToolNames
+  assert.ok(names.includes('calendar_capture_session'))
+  assert.ok(names.includes('calendar_list_window'))
+  assert.ok(names.includes('calendar_create_event'))
+  assert.ok(names.includes('calendar_update_event'))
+  assert.ok(names.includes('calendar_delete_event'))
 })
 
 test('invalid or oversized calendar windows are rejected', () => {

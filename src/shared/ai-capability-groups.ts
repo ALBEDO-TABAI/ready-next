@@ -104,7 +104,7 @@ export const CAPABILITY_GROUPS: CapabilityGroupDefinition[] = [
   {
     id: 'calendar',
     label: '日程',
-    description: '日历事件查询、创建、更新和删除。',
+    description: 'Ready 应用内本地日历的查询、创建、更新和删除。这不是飞书日历。',
     exposure: 'model_visible',
     availability: 'active',
     defaultMode: 'auto',

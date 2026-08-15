@@ -214,9 +214,27 @@ export function installRuntimeDriverScopeEvents(deps: {
         )
         store.setState((state: any) => {
           if (!scopeRunEventMatchesCurrentIdentity(state, event)) return state
+          const foldedMessages = (state.messages as AgentMessage[]).map((message) => {
+            if (
+              message.type !== 'ask_user_questions'
+              || message.askUserQuestions?.status !== 'pending'
+            ) return message
+            return {
+              ...message,
+              askUserQuestions: {
+                ...message.askUserQuestions,
+                status: 'cancelled' as const,
+                cancelReason: 'app_restart',
+                cancelledAt: Date.now(),
+              },
+            }
+          })
           return {
             ...withSessionSliceAndActiveRuntimeMirror(
-              state,
+              {
+                ...state,
+                ...withActiveSessionMessagesMirror(state, foldedMessages),
+              },
               sessionKeyForScopeId(state, event.scopeId),
               {
                 ...(reconcileUnknownStop

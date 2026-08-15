@@ -16,7 +16,7 @@ export function mapBackendErrorToFriendly(input: {
 
   if (errorKind === 'scope_missing' || /Conversation scope not found:/i.test(error)) {
     return {
-      friendlyMessage: '会话信息异常，正在尝试恢复',
+      friendlyMessage: '对话环境还在准备，请稍后再发送',
       technicalDetails: error || undefined,
       recoverable: true,
       retryStrategy: 'auto',
@@ -93,6 +93,27 @@ export function mapBackendErrorToFriendly(input: {
   if (/gateway_reasoning_(capability_unsupported|policy_unsupported|effort_mismatch)/i.test(source)) {
     return {
       friendlyMessage: '当前模型的推理设置不匹配，请重新选择模型或推理强度',
+      technicalDetails: error || undefined,
+      recoverable: true,
+      retryStrategy: 'user_action',
+    }
+  }
+
+  if (/requires_new_(thread|generation)/i.test(source)) {
+    return {
+      friendlyMessage: '当前对话的能力规则已更新，这一轮无法继续；请新建对话后再试',
+      technicalDetails: error || undefined,
+      recoverable: true,
+      retryStrategy: 'user_action',
+    }
+  }
+
+  if (
+    errorKind === 'conversation_reset_required'
+    || /codex_conversation_reset_required|codex_alias_generation_mismatch/i.test(source)
+  ) {
+    return {
+      friendlyMessage: '当前对话无法在这一轮继续，请新建对话后再试',
       technicalDetails: error || undefined,
       recoverable: true,
       retryStrategy: 'user_action',

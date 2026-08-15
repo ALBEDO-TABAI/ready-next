@@ -262,6 +262,32 @@ test('browser_tabs reports popup lineage from tabs and ownership from the lease 
   assert.equal((other.workflowBindings as Array<Record<string, unknown>>)[0]?.taskId, 'task-other')
 })
 
+test('browser_tabs keeps occupancy for every held tab instead of one surface summary', async () => {
+  const controller = {
+    getTabList: () => [
+      { id: 'tab-a', title: 'A', url: 'https://a.test/', active: true, openerTabId: null },
+      { id: 'tab-b', title: 'B', url: 'https://b.test/', active: false, openerTabId: null },
+    ],
+    getBrowserLeaseSnapshot: () => ({
+      surfaces: {
+        'user-view': { state: 'held', heldBy: 'task-a', runId: 'run-a', tabId: 'tab-a', leaseId: 'lease-a' },
+        'agent-view': { state: 'idle', heldBy: null, runId: null, tabId: null, leaseId: null },
+      },
+      claims: [
+        { tabId: 'tab-a', surface: 'user-view', state: 'held', parentTaskId: 'task-a', ownerRunId: 'run-a', claimId: 'lease-a' },
+        { tabId: 'tab-b', surface: 'user-view', state: 'held', parentTaskId: 'task-b', ownerRunId: 'run-b', claimId: 'lease-b' },
+      ],
+    }),
+  } as unknown as BrowserController
+
+  const result = await executeBrowserObserveTool('tabs_list', {}, observeContext(controller)) as ToolExecutionOutput
+  const tabs = result.data?.tabs as Array<Record<string, unknown>>
+  const first = tabs.find((tab) => tab.id === 'tab-a')!
+  const second = tabs.find((tab) => tab.id === 'tab-b')!
+  assert.equal((first.workflowBindings as Array<Record<string, unknown>>)[0]?.taskId, 'task-a')
+  assert.equal((second.workflowBindings as Array<Record<string, unknown>>)[0]?.taskId, 'task-b')
+})
+
 test('agent pointer follows page zoom while remaining Retina-DIP invariant', () => {
   const bounds = { left: 50, top: 80, width: 1000, height: 800 }
   for (const [zoom, expectedX, expectedY] of [

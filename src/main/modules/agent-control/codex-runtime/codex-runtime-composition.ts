@@ -197,6 +197,7 @@ export interface CodexIngressPort {
 
 export interface CodexAliasBindingPort {
   readAliasGeneration(aliasId: string): number | null
+  readLatestAliasGeneration(aliasId: string): number | null
   readActiveProductRunVisibilityIdentity(readyRunId: string): {
     readyRunId: string
     readyScopeId: string
@@ -359,6 +360,7 @@ export function createE2UnavailableCodexRuntimeComposition(): CodexRuntimeCompos
     },
     aliasBindingPort: {
       readAliasGeneration() { return null },
+      readLatestAliasGeneration() { return null },
       readActiveProductRunVisibilityIdentity() { return null },
       readCommittedProductRunVisibilityIdentity() { return null },
       readLifecycleSnapshot() { throw new Error('codex_lifecycle_repository_unavailable') },

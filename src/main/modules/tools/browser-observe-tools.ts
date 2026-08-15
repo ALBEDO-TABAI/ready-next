@@ -675,6 +675,14 @@ export async function executeBrowserObserveTool(
         }
         const leaseSnapshot = (controller as unknown as {
           getBrowserLeaseSnapshot?: () => {
+            claims?: Array<{
+              tabId?: string
+              surface?: string
+              state?: string
+              parentTaskId?: string | null
+              ownerRunId?: string | null
+              claimId?: string | null
+            }>
             surfaces?: Record<string, {
               state?: string
               heldBy?: string | null
@@ -688,18 +696,33 @@ export async function executeBrowserObserveTool(
           ok: true,
           activeTabId: tabs.find((tab) => tab.active)?.id || null,
           tabs: tabs.map((tab) => {
-            const bindings: Record<string, unknown>[] = []
-            for (const [surface, lease] of Object.entries(leaseSnapshot?.surfaces || {})) {
-              if (lease.tabId !== tab.id || lease.state === 'idle') continue
-              bindings.push({
+            const claimBindings = (leaseSnapshot?.claims || [])
+              .filter((claim) => (
+                claim.tabId === tab.id
+                && claim.state
+                && claim.state !== 'idle'
+                && claim.state !== 'released'
+              ))
+              .map((claim) => ({
                 kind: 'write_lease',
-                surface,
-                state: lease.state,
-                taskId: lease.heldBy || null,
-                runId: lease.runId || null,
-                leaseId: lease.leaseId || null,
-              })
-            }
+                surface: claim.surface || null,
+                state: claim.state === 'user_owned' ? 'takeover' : claim.state,
+                taskId: claim.parentTaskId || null,
+                runId: claim.ownerRunId || null,
+                leaseId: claim.claimId || null,
+              }))
+            const bindings: Record<string, unknown>[] = claimBindings.length > 0
+              ? claimBindings
+              : Object.entries(leaseSnapshot?.surfaces || {})
+                .filter(([, lease]) => lease.tabId === tab.id && lease.state !== 'idle')
+                .map(([surface, lease]) => ({
+                  kind: 'write_lease',
+                  surface,
+                  state: lease.state,
+                  taskId: lease.heldBy || null,
+                  runId: lease.runId || null,
+                  leaseId: lease.leaseId || null,
+                }))
             return {
               ...tab,
               openerTabId: tab.openerTabId || null,

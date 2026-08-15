@@ -788,9 +788,11 @@ export class BrowserTargetClaimService {
 
   expirePreviousBoot(currentBootIncarnationId: string): BrowserTargetClaim[] {
     const stale = this.store.list().filter((claim) => (
-      claim.bootIncarnationId
-      && claim.bootIncarnationId !== currentBootIncarnationId
-      && (claim.state === 'held' || claim.state === 'user_owned' || claim.state === 'suspended')
+      (claim.state === 'held' || claim.state === 'user_owned' || claim.state === 'suspended')
+      && (
+        !claim.bootIncarnationId
+        || claim.bootIncarnationId !== currentBootIncarnationId
+      )
     ))
     return stale.map((claim) => this.transition(claim, {
       state: 'expired',

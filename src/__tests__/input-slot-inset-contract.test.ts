@@ -59,6 +59,8 @@ test('chat composer delegates its material to the liquid lens instead of the ins
   assert.match(chatInput, /blurBeforeRefraction/)
   assert.match(chatInput, /contrast=\{0\.84\}/)
   assert.match(chatInput, /aberration=\{0\}/)
+  assert.match(chatInput, /opacity: sendUnavailable \? 0\.38 : 1/)
+  assert.doesNotMatch(chatInput, /opacity:\s*sendDisabled\s*\?/)
 })
 
 test('dark liquid composer dims only the material while preserving semantic controls', () => {
@@ -81,6 +83,10 @@ test('dark liquid composer dims only the material while preserving semantic cont
   assert.match(
     styles,
     /html\[data-theme='dark'\]\[data-skin='liquid-glass'\] \.ready-liquid-composer \[data-ready-agent-send='true'\] \{[\s\S]*?background:\s*rgba\(255, 255, 255, 0\.96\) !important;/,
+  )
+  assert.match(
+    styles,
+    /\.ready-liquid-composer \[data-ready-agent-send='true'\]:disabled \{[\s\S]*?opacity:\s*1;/,
   )
   assert.doesNotMatch(darkComposerBlock[1], /--color-blue:/)
   assert.doesNotMatch(darkComposerBlock[1], /--color-green:/)

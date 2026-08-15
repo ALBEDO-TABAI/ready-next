@@ -3020,6 +3020,121 @@ test('user ingress preserves a started alias and its existing fence when runtime
   })
 })
 
+test('user ingress retires an idle started thread when the root tool surface changes', async (t) => {
+  await withRepository(t, (db, repository) => {
+    const first = prepared()
+    prepareReadyParents(db, repository, first)
+    repository.admitProductBindings(admission(first, lazyReservation()))
+    startAndCloseInitialProductTurn(db, repository)
+    const frozen = db.prepare(`
+      SELECT alias_generation, tool_surface_digest, retired_at
+        FROM codex_thread_bindings WHERE thread_binding_id = 'thread-binding-1'
+    `).get<{
+      alias_generation: number
+      tool_surface_digest: string
+      retired_at: string | null
+    }>()
+    assert.equal(frozen?.alias_generation, 1)
+    assert.equal(frozen?.retired_at, null)
+    const messagesBefore = db.prepare(`
+      SELECT COUNT(*) AS count FROM chat_messages WHERE conversation_id = 'scope-1'
+    `).get<{ count: number }>()?.count
+
+    const resolved = repository.resolveUserIngressAliasBinding({
+      aliasId: 'scope-1',
+      runtimeManifestDigest: 'runtime-manifest-digest',
+      protocolSchemaDigest: 'protocol-schema-digest',
+      createdAt: '2026-08-07T00:02:00.000Z',
+      currentToolSurfaceDigest: digestCanonicalJson([{ name: 'calendar_update_event' }]),
+    })
+    assert.equal(resolved?.aliasGeneration, 2)
+    assert.equal(resolved?.codexThreadId, null)
+    assert.equal(resolved?.hasActiveFence, false)
+    assert.deepEqual(db.prepare(`
+      SELECT alias_generation, retired_reason, continuation_blocked_reason
+        FROM codex_thread_bindings
+       WHERE ready_conversation_alias = 'scope-1'
+       ORDER BY alias_generation
+    `).all(), [
+      {
+        alias_generation: 1,
+        retired_reason: 'cleanup',
+        continuation_blocked_reason: null,
+      },
+      {
+        alias_generation: 2,
+        retired_reason: null,
+        continuation_blocked_reason: null,
+      },
+    ])
+    assert.equal(db.prepare(`
+      SELECT COUNT(*) AS count FROM chat_messages WHERE conversation_id = 'scope-1'
+    `).get<{ count: number }>()?.count, messagesBefore)
+    assert.deepEqual(db.prepare(`
+      SELECT source_kind, retired_reason FROM codex_thread_archive_intents
+       WHERE thread_binding_id = 'thread-binding-1'
+    `).get(), {
+      source_kind: 'retired_backfill',
+      retired_reason: 'cleanup',
+    })
+
+    const sameSurface = repository.resolveUserIngressAliasBinding({
+      aliasId: 'scope-1',
+      runtimeManifestDigest: 'runtime-manifest-digest',
+      protocolSchemaDigest: 'protocol-schema-digest',
+      createdAt: '2026-08-07T00:03:00.000Z',
+      currentToolSurfaceDigest: digestCanonicalJson([{ name: 'calendar_update_event' }]),
+    })
+    assert.equal(sameSurface?.threadBindingId, resolved?.threadBindingId)
+
+    const next = {
+      ...prepared('run-surface-successor'),
+      conversationAlias: { aliasId: 'scope-1', aliasGeneration: 2 },
+    }
+    prepareReadyParentRowsOnly(db, next)
+    assert.deepEqual(repository.admitProductBindings(admission(
+      next,
+      lazyReservation(next.runId),
+      {
+        threadBindingId: resolved!.threadBindingId,
+        isolatedThreadCwd: '/tmp/ready-codex/thread-binding-successor',
+      },
+    )), {
+      threadBindingId: resolved!.threadBindingId,
+      readyRunId: next.runId,
+      threadState: 'unstarted',
+    })
+  })
+})
+
+test('user ingress keeps a matching idle started thread on the same generation', async (t) => {
+  await withRepository(t, (db, repository) => {
+    const first = prepared()
+    prepareReadyParents(db, repository, first)
+    repository.admitProductBindings(admission(first, lazyReservation()))
+    startAndCloseInitialProductTurn(db, repository)
+    const digest = db.prepare(`
+      SELECT tool_surface_digest FROM codex_thread_bindings
+       WHERE thread_binding_id = 'thread-binding-1'
+    `).get<{ tool_surface_digest: string }>()?.tool_surface_digest
+    assert.ok(digest)
+
+    const resolved = repository.resolveUserIngressAliasBinding({
+      aliasId: 'scope-1',
+      runtimeManifestDigest: 'runtime-manifest-digest',
+      protocolSchemaDigest: 'protocol-schema-digest',
+      createdAt: '2026-08-07T00:02:00.000Z',
+      currentToolSurfaceDigest: digest,
+    })
+    assert.equal(resolved?.aliasGeneration, 1)
+    assert.equal(resolved?.codexThreadId, 'thread-native-1')
+    assert.equal(db.prepare(`
+      SELECT COUNT(*) AS count FROM codex_thread_bindings
+       WHERE ready_conversation_alias = 'scope-1'
+    `).get<{ count: number }>()?.count, 1)
+  })
+})
+
 test('new Main claims a product fence only from exact dead-owner and tree-zero evidence', async (t) => {
   await withRepository(t, (db, repository) => {
     const run = prepared()

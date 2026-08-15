@@ -47,6 +47,7 @@ interface ChatInputProps {
   onReferenceSelect: (attachment: ChatAttachment) => void
   renderAttachmentIcon: (attachment: ChatAttachment, size?: number) => React.ReactNode
   ModelSelector: React.ComponentType
+  admissionReady?: boolean
 }
 
 interface ComposerMenuFrame {
@@ -96,6 +97,7 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
   onReferenceSelect,
   renderAttachmentIcon,
   ModelSelector,
+  admissionReady = true,
 }: ChatInputProps, ref) {
   const [showAgentSelect, setShowAgentSelect] = useState(false)
   const [showAuthorizationModeSelect, setShowAuthorizationModeSelect] = useState(false)
@@ -118,6 +120,14 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
   const composingRef = useRef(false)
   const composerLocked = isStreaming || lifecycleInputBlocked
   const composerSendLocked = composerLocked || authorizationModeUpdating
+  const hasSendableContent = Boolean(inputValue.trim() || attachmentsCount > 0)
+  const sendBlockedReason = !admissionReady
+    ? '还没有可用的对话，请稍候或新建对话'
+    : authorizationModeUpdating
+      ? '正在更新授权方式'
+      : ''
+  const sendUnavailable = Boolean(sendBlockedReason)
+  const sendDisabled = composerSendLocked || sendUnavailable || !hasSendableContent
 
   const syncComposerMenuFrame = useCallback(() => {
     const textarea = textareaRef.current
@@ -483,7 +493,7 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
     }
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
-      if (!composerSendLocked && (inputValue.trim() || attachmentsCount > 0)) {
+      if (!sendDisabled) {
         onSend()
       }
     }
@@ -962,7 +972,10 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
                 <button
                   onClick={onSend}
                   data-ready-agent-send="true"
-                  disabled={composerSendLocked || (!inputValue.trim() && attachmentsCount === 0)}
+                  data-ready-agent-send-blocked={sendUnavailable ? sendBlockedReason : undefined}
+                  disabled={sendDisabled}
+                  title={sendBlockedReason || undefined}
+                  aria-label={sendBlockedReason || '发送'}
                   className="flex items-center justify-center hover:brightness-95 active:scale-[0.98] disabled:cursor-not-allowed transition-[opacity,filter,transform] duration-200 ease-out"
                   style={{
                     width: 30,
@@ -972,6 +985,7 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
                     background: '#0f0f0f',
                     color: '#fff',
                     boxShadow: 'none',
+                    opacity: sendUnavailable ? 0.38 : 1,
                   }}
                 >
                   <ArrowUp style={{ width: 16, height: 16 }} strokeWidth={2.2} fill="none" />

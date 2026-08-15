@@ -59,6 +59,7 @@ export interface ConversationScopeStoreDeps {
   persistReferenceHintToScope: (scopeId: string, expectedMessageVisibilityEpoch: number) => void
   resolveConversationAgentId: (requestedAgentId: string) => string
   readAliasGeneration: (aliasId: string) => number | null
+  readLatestAliasGeneration?: (aliasId: string) => number | null
 }
 
 export class ConversationScopeStore {
@@ -148,6 +149,8 @@ export class ConversationScopeStore {
     return {
       id: row.id,
       aliasGeneration: this.deps.readAliasGeneration(row.id),
+      latestAliasGeneration: this.deps.readLatestAliasGeneration?.(row.id)
+        ?? this.deps.readAliasGeneration(row.id),
       messageVisibilityEpoch: row.message_visibility_epoch ?? 0,
       agent: row.agent,
       activeAgentId: row.active_agent_id || row.agent,

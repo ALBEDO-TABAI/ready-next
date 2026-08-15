@@ -9,7 +9,7 @@ test('maps scope missing without exposing the internal id', () => {
     errorKind: 'scope_missing',
   })
 
-  assert.equal(result.friendlyMessage, '会话信息异常，正在尝试恢复')
+  assert.equal(result.friendlyMessage, '对话环境还在准备，请稍后再发送')
   assert.equal(result.recoverable, true)
   assert.equal(result.retryStrategy, 'auto')
   assert.doesNotMatch(result.friendlyMessage, /conv-local/)
@@ -33,6 +33,39 @@ test('maps host and circuit failures to a retryable service message', () => {
     assert.equal(result.recoverable, true)
     assert.equal(result.retryStrategy, 'auto')
   }
+})
+
+test('does not disguise a required new thread as a temporary host outage', () => {
+  for (const input of [
+    {
+      error: 'tool_surface_change_requires_new_thread',
+      errorKind: 'conversation_reset_required',
+    },
+    {
+      error: 'tool_surface_change_requires_new_thread',
+      errorKind: 'host_unavailable',
+    },
+    {
+      error: 'native_thread_config_change_requires_new_generation',
+      errorKind: 'host_unavailable',
+    },
+  ]) {
+    const result = mapBackendErrorToFriendly(input)
+    assert.equal(
+      result.friendlyMessage,
+      '当前对话的能力规则已更新，这一轮无法继续；请新建对话后再试',
+    )
+    assert.equal(result.recoverable, true)
+    assert.equal(result.retryStrategy, 'user_action')
+    assert.doesNotMatch(result.friendlyMessage, /暂时不可用|稍后重试/)
+  }
+
+  const genericReset = mapBackendErrorToFriendly({
+    errorKind: 'conversation_reset_required',
+  })
+  assert.equal(genericReset.friendlyMessage, '当前对话无法在这一轮继续，请新建对话后再试')
+  assert.equal(genericReset.retryStrategy, 'user_action')
+  assert.doesNotMatch(genericReset.friendlyMessage, /能力规则|暂时不可用|稍后重试/)
 })
 
 test('maps message persistence failures without raw sqlite text', () => {

@@ -6,6 +6,9 @@ import {
 } from '../../../../shared/ai-providers'
 import { hasLocalSendImFileIntent } from '../../../../shared/remote-im-file-intent'
 import { PRIMITIVE_TOOL_DEFS } from '../../tools/skill-primitives/tool-defs'
+import { isCodexSafeHostSkillPrimitiveDefinition } from '../../tools/skill-tool-execution-authority'
+import { getSkillsRuntimeManager } from '../../skills-runtime/runtime-manager'
+import type { SkillState } from '../../skills-runtime/runtime-manager-types'
 import { appendToolCapabilityLog } from '../../tools/tool-event-log'
 import type {
   BudgetWarningLevel,
@@ -156,10 +159,14 @@ export function filterSelectedSkillToolSurface(
 }
 
 export function authorizedPrimitiveToolNames(authorization: SkillToolAuthorization): string[] {
-  if (authorization.mode !== 'selected') return []
-  return PRIMITIVE_TOOL_DEFS.map((definition) => definition.name).filter((name) =>
-    authorization.allowedPrimitives.has(name)
-  )
+  if (authorization.mode === 'selected') {
+    return PRIMITIVE_TOOL_DEFS.map((definition) => definition.name).filter((name) =>
+      authorization.allowedPrimitives.has(name)
+    )
+  }
+  return authorization.candidateSkillPrimitives
+    ? [...authorization.candidateSkillPrimitives.primitives]
+    : []
 }
 
 /** P0-3(D3) — 技能选中轮的文档读取地板：本轮携带本地文档资源时这些工具不得被技能收窄丢弃。 */
@@ -235,11 +242,23 @@ export function supplementAuthorizedSkillPrimitiveDefinitions(
   if (primitiveNames.length === 0) return definitions
   const seen = new Set(definitions.map((definition) => definition.name))
   const next = [...definitions]
+  let liveSkills: readonly SkillState[] = []
+  try {
+    liveSkills = getSkillsRuntimeManager().listSkills()
+  } catch {
+    liveSkills = []
+  }
+  const liveDefinitions = defaultToolRegistry.listToolDefinitions()
   for (const name of primitiveNames) {
     if (seen.has(name)) continue
-    const definition = defaultToolRegistry.getToolDefinitionForExecution(name)
+    const definition = liveDefinitions.find((entry) => entry.name === name)
+      || defaultToolRegistry.getToolDefinitionForExecution(name)
     if (!definition) continue
-    next.push(definition)
+    next.push({
+      ...definition,
+      codexExecutionSafe: liveSkills.some((skill) =>
+        isCodexSafeHostSkillPrimitiveDefinition(name, skill)),
+    })
     seen.add(name)
   }
   return next

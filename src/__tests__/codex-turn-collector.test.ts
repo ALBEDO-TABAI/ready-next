@@ -10,6 +10,7 @@ import {
   type CodexTurn,
 } from '../main/modules/agent-control/codex-runtime/codex-native-runtime'
 import { CodexTurnCollector } from '../main/modules/agent-control/codex-runtime/codex-turn-collector'
+import { buildCodexPendingInteractionRestartCandidate } from '../main/modules/agent-control/codex-runtime/codex-pending-interaction-restart'
 import { digestCanonicalJson } from '../main/modules/agent-control/codex-runtime/codex-model-gateway-contract'
 
 class FakeNativeRuntime implements CodexNativeRuntime {
@@ -786,4 +787,29 @@ test('boot readback wakes a collector whose original turn start never resolves',
   assert.equal(collector.deliverRecoveredCandidate(recovered), true)
   collector.releaseRun('run-1')
   assert.equal(collector.deliverRecoveredCandidate(recovered), false)
+})
+
+test('pending-interaction restart candidate wakes a live collector before terminal timeout', async () => {
+  const runtime = new FakeNativeRuntime()
+  const collector = new CodexTurnCollector(runtime)
+  const collection = collector.collect(context(runtime, async () => ({ turn: turn('inProgress') }), {
+    terminalTimeoutMs: 60_000,
+  }))
+  await new Promise<void>((resolve) => setImmediate(resolve))
+  const recovered = buildCodexPendingInteractionRestartCandidate({
+    readyRunId: 'run-1',
+    readyTaskId: 'task-1',
+    readyScopeId: 'scope-1',
+    codexThreadId: 'thread-1',
+    codexTurnId: 'turn-1',
+  })
+  assert.equal(collector.deliverRecoveredCandidate(recovered), true)
+  const result = await collection
+  assert.equal(result.kind, 'host_failure')
+  if (result.kind === 'host_failure') {
+    assert.equal(result.hostFailure.code, 'codex_pending_interaction_cancelled_app_restart')
+    assert.equal(result.hostFailure.stage, 'collection')
+    assert.equal(result.codexTurnId, 'turn-1')
+  }
+  collector.releaseRun('run-1')
 })

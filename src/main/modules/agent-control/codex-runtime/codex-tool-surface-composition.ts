@@ -12,10 +12,18 @@ import {
   type ReadyToolTurnSnapshot,
 } from './codex-tool-surface'
 import {
-  composeBrowserAdmissionToolNames,
+  composeBrowserAdmissionExtraToolNames,
   stripBrowserPublicToolNames,
   type BrowserAdmissionAuthoritySnapshot,
 } from './codex-browser-admission'
+import {
+  isReadyCapabilityCatalogTool,
+  readyCapabilityToolsForGroup,
+} from './codex-capability-catalog'
+import {
+  resolveReadyCapabilityTurnAvailability,
+  type ReadyCapabilityTurnAvailability,
+} from './codex-capability-turn-availability'
 
 const DOCUMENT_WRITE_TOOLS = new Set<string>([
   'document_new_tab',
@@ -46,6 +54,7 @@ export function composeCodexTurnToolSnapshot(input: {
   workbenchMode?: 'browser' | 'document' | 'rss' | 'calendar' | null
   exclusiveAllowSet?: readonly string[] | null
   browserAdmission?: BrowserAdmissionAuthoritySnapshot | null
+  capabilityAvailability?: ReadyCapabilityTurnAvailability | null
 }): ReadyToolTurnSnapshot {
   let allowed = [...input.resolved.readyTurnToolAuthorization.allowedToolNames]
 
@@ -81,12 +90,6 @@ export function composeCodexTurnToolSnapshot(input: {
   ) {
     allowed.push('rss_capture_session')
   }
-  if (input.workbenchMode === 'calendar') {
-    for (const name of ['calendar_capture_session', 'calendar_list_window'] as const) {
-      if (surfaceNames.has(name) && !allowed.includes(name)) allowed.push(name)
-    }
-  }
-
   if (
     allowed.includes('map_plan_route')
     && surfaceNames.has('ask_user_questions')
@@ -95,10 +98,58 @@ export function composeCodexTurnToolSnapshot(input: {
     allowed.push('ask_user_questions')
   }
 
+  const applyCapabilityCatalog = input.capabilityAvailability != null
+    || input.browserAdmission != null
+    || input.workbenchMode === 'calendar'
+
   if (input.browserAdmission) {
     allowed = stripBrowserPublicToolNames(allowed)
-    for (const name of composeBrowserAdmissionToolNames(input.browserAdmission)) {
+  }
+
+  if (applyCapabilityCatalog) {
+    allowed = allowed.filter((name) => !isReadyCapabilityCatalogTool(name) && name !== 'browser_research')
+    const availability = input.capabilityAvailability ?? resolveReadyCapabilityTurnAvailability({
+      publicResearchProviderAvailable: surfaceNames.has('web_search') || surfaceNames.has('web_fetch'),
+      calendarHostAvailable: surfaceNames.has('calendar_list_window')
+        || surfaceNames.has('calendar_capture_session')
+        || surfaceNames.has('calendar_create_event'),
+      calendarProductMapped: surfaceNames.has('calendar_create_event'),
+      workbenchMode: input.workbenchMode,
+      currentBrowserPageRef: input.browserAdmission?.currentBrowserRoot || null,
+      explicitBrowserReadRefs: input.browserAdmission?.explicitBrowserReadRefs || [],
+      tagForgeExclusive: input.exclusiveAllowSet != null
+        || input.browserAdmission?.tagForgeExclusive === true,
+    })
+    if (input.exclusiveAllowSet == null) {
+      for (const groupId of availability.availableGroupIds) {
+        for (const name of readyCapabilityToolsForGroup(groupId)) {
+          if (surfaceNames.has(name) && !allowed.includes(name)) allowed.push(name)
+        }
+      }
+      if (input.browserAdmission) {
+        for (const name of composeBrowserAdmissionExtraToolNames(input.browserAdmission)) {
+          if (surfaceNames.has(name) && !allowed.includes(name)) allowed.push(name)
+        }
+      }
+    }
+  }
+
+  const candidatePrimitives = input.authorization.mode === 'none'
+    ? input.authorization.candidateSkillPrimitives
+    : null
+  if (input.exclusiveAllowSet == null && candidatePrimitives) {
+    for (const name of candidatePrimitives.primitives) {
       if (surfaceNames.has(name) && !allowed.includes(name)) allowed.push(name)
+    }
+    if (
+      surfaceNames.has('ask_user_questions')
+      && !allowed.includes('ask_user_questions')
+      && (
+        allowed.includes('calendar_list_window')
+        || surfaceNames.has('calendar_list_window')
+      )
+    ) {
+      allowed.push('ask_user_questions')
     }
   }
 

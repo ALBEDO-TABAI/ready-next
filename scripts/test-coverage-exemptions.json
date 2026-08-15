@@ -70,6 +70,84 @@
   ],
   "c4Exempt": [
     {
+      "path": "src/__tests__/agent-sdk-post-run-abort.test.ts",
+      "reason": "The capability-selection import graph now reaches database.ts statically, but this test passed under host Node while better-sqlite3 remained on the incompatible Electron ABI; its provider and runtime collaborators are injected fakes and no SQLite path runs.",
+      "since": "2026-08-16",
+      "owner": "codex-capability-selection"
+    },
+    {
+      "path": "src/__tests__/agent-sdk-turn-closeout-checkpoint-preservation.test.ts",
+      "reason": "The capability-selection import graph now reaches database.ts statically, but this test passed under host Node while better-sqlite3 remained on the incompatible Electron ABI; its lifecycle collaborators are in-memory fakes and no SQLite path runs.",
+      "since": "2026-08-16",
+      "owner": "codex-capability-selection"
+    },
+    {
+      "path": "src/__tests__/agent-session-cursor-selfheal.test.ts",
+      "reason": "The capability-selection import graph now reaches database.ts statically, but this test passed under host Node while better-sqlite3 remained on the incompatible Electron ABI; it exercises in-memory session state and never opens SQLite.",
+      "since": "2026-08-16",
+      "owner": "codex-capability-selection"
+    },
+    {
+      "path": "src/__tests__/browser-input-readiness.test.ts",
+      "reason": "The capability-selection import graph now reaches database.ts statically, but this test passed under host Node while better-sqlite3 remained on the incompatible Electron ABI; it uses injected BrowserController fakes and never opens SQLite.",
+      "since": "2026-08-16",
+      "owner": "codex-capability-selection"
+    },
+    {
+      "path": "src/__tests__/browser-surface-hardening.test.ts",
+      "reason": "The capability-selection import graph now reaches database.ts statically, but this test passed under host Node while better-sqlite3 remained on the incompatible Electron ABI; its browser effects and receipts are all in-memory fakes.",
+      "since": "2026-08-16",
+      "owner": "codex-capability-selection"
+    },
+    {
+      "path": "src/__tests__/codex-browser-admission.test.ts",
+      "reason": "The capability-selection import graph now reaches database.ts statically, but this test passed under host Node while better-sqlite3 remained on the incompatible Electron ABI; it only composes immutable admission and tool-surface fixtures.",
+      "since": "2026-08-16",
+      "owner": "codex-capability-selection"
+    },
+    {
+      "path": "src/__tests__/codex-calendar-surface.test.ts",
+      "reason": "The capability-selection import graph now reaches database.ts statically, but this test passed under host Node while better-sqlite3 remained on the incompatible Electron ABI; it uses synthetic calendar surfaces and never opens the repository.",
+      "since": "2026-08-16",
+      "owner": "codex-capability-selection"
+    },
+    {
+      "path": "src/__tests__/codex-file-emergence-no-tool.test.ts",
+      "reason": "The capability-selection import graph now reaches database.ts statically, but this test passed under host Node while better-sqlite3 remained on the incompatible Electron ABI; it only inspects the composed tool registry.",
+      "since": "2026-08-16",
+      "owner": "codex-capability-selection"
+    },
+    {
+      "path": "src/__tests__/codex-product-action-bridge.test.ts",
+      "reason": "The capability-selection import graph now reaches database.ts statically, but this test passed under host Node while better-sqlite3 remained on the incompatible Electron ABI; every action, journal, and persistence collaborator is injected.",
+      "since": "2026-08-16",
+      "owner": "codex-capability-selection"
+    },
+    {
+      "path": "src/__tests__/codex-product-action-handlers.test.ts",
+      "reason": "The capability-selection import graph now reaches database.ts statically, but this test passed under host Node while better-sqlite3 remained on the incompatible Electron ABI; calendar and RSS handlers use in-memory stores and no SQLite connection.",
+      "since": "2026-08-16",
+      "owner": "codex-capability-selection"
+    },
+    {
+      "path": "src/__tests__/codex-tag-forge-union.test.ts",
+      "reason": "The capability-selection import graph now reaches database.ts statically, but this test passed under host Node while better-sqlite3 remained on the incompatible Electron ABI; it only composes authorization and tool-name fixtures.",
+      "since": "2026-08-16",
+      "owner": "codex-capability-selection"
+    },
+    {
+      "path": "src/__tests__/pure-user-text-classification.test.ts",
+      "reason": "The capability-selection import graph now reaches database.ts statically, but this test passed under host Node while better-sqlite3 remained on the incompatible Electron ABI; it executes only pure text selection helpers.",
+      "since": "2026-08-16",
+      "owner": "codex-capability-selection"
+    },
+    {
+      "path": "src/__tests__/skill-hint-relevance-fresh-action.test.ts",
+      "reason": "The capability-selection import graph now reaches database.ts statically, but this test passed under host Node while better-sqlite3 remained on the incompatible Electron ABI; it uses synthetic hint and projection facts only.",
+      "since": "2026-08-16",
+      "owner": "codex-capability-selection"
+    },
+    {
       "path": "src/__tests__/agent-browser-turn-lease.test.ts",
       "reason": "Target-claim turn coverage uses MemoryBrowserTargetClaimRepository through the shared fixture and never constructs a SQLite repository; only the production claim module import graph reaches database.ts.",
       "since": "2026-07-22",
@@ -106,12 +184,6 @@
       "owner": "browser-grounded-orchestration"
     },
     {
-      "path": "src/__tests__/browser-language-agnostic-targets.test.ts",
-      "reason": "Language-agnostic targeting coverage uses JSDOM plus an injected BrowserController whose workflow journal methods are in-memory fakes. It never opens getDatabase or better-sqlite3; only browser-tools transitive imports trigger C4.",
-      "since": "2026-07-19",
-      "owner": "browser-grounded-orchestration"
-    },
-    {
       "path": "src/__tests__/browser-trusted-input.test.ts",
       "reason": "Trusted-input coverage invokes pure input helpers against a fully injected BrowserController and records mouse, key, and script calls in arrays. It never opens getDatabase or a repository; only browser helper imports trigger C4.",
       "since": "2026-07-19",
@@ -136,44 +208,14 @@
       "owner": "browser-performance-dynamic-load"
     },
     {
-      "path": "src/__tests__/browser-dialog-service.test.ts",
-      "reason": "Browser dialog coverage injects fake CDP sessions and a fake BrowserController, including the semantic dispatch path. It never creates the production database or reads a repository; only browser-tools transitive imports trigger C4, so host-Node coverage must remain active.",
-      "since": "2026-07-17",
-      "owner": "browser-performance-dynamic-load"
-    },
-    {
       "path": "src/__tests__/browser-download-hardening.test.ts",
       "reason": "Browser download hardening coverage uses temporary files, stubbed fetch responses, synthetic DownloadItems, and injected controller callbacks. It never opens getDatabase or better-sqlite3; only transitive browser controller types and helpers trigger C4.",
       "since": "2026-07-17",
       "owner": "browser-performance-dynamic-load"
     },
     {
-      "path": "src/__tests__/browser-high-control-guard.test.ts",
-      "reason": "High-control browser coverage dispatches against an injected fake BrowserController and in-memory power-policy state. No path opens getDatabase or a repository; only the semantic browser-tools import graph reaches database.ts, so host-Node coverage must remain active.",
-      "since": "2026-07-17",
-      "owner": "browser-performance-dynamic-load"
-    },
-    {
-      "path": "src/__tests__/browser-power-tools.test.ts",
-      "reason": "Browser Power coverage injects fake controllers, an in-memory grant policy, explicit audit callbacks, and a deliberately failing persistent preflight. It never falls through to the production database; only browser-tools transitive imports trigger C4, so host-Node coverage must remain active.",
-      "since": "2026-07-17",
-      "owner": "browser-performance-dynamic-load"
-    },
-    {
-      "path": "src/__tests__/browser-script-m1-net.test.ts",
-      "reason": "Browser script and CDP policy coverage uses a fake BrowserController plus in-memory grant state to verify effect inference. No test path opens getDatabase or better-sqlite3; only semantic browser-tools transitive imports trigger C4.",
-      "since": "2026-07-17",
-      "owner": "browser-performance-dynamic-load"
-    },
-    {
       "path": "src/__tests__/browser-semantic-tool-behavior.test.ts",
       "reason": "Semantic browser behavior coverage uses fake controllers and direct pure helpers for forms, observation, screenshots, tabs, pointer geometry, and origin budgets. It never opens the production database; only the browser-tools import graph triggers C4, so host-Node coverage must remain active.",
-      "since": "2026-07-17",
-      "owner": "browser-performance-dynamic-load"
-    },
-    {
-      "path": "src/__tests__/browser-system-tools.test.ts",
-      "reason": "Browser system-tool coverage injects fake sessions, controllers, permissions, task roots, and temporary files. No test path opens getDatabase or better-sqlite3; only semantic browser-tools transitive imports trigger C4, so host-Node coverage must remain active.",
       "since": "2026-07-17",
       "owner": "browser-performance-dynamic-load"
     },
@@ -248,18 +290,6 @@
       "reason": "P2-6: MemoryLifecycleManager runs against an injected fake MemoryRepository (queryMemories/archiveMemory stubs); no test path opens better-sqlite3 or reads the real DB. Host-Node coverage must stay active for the belief-category archive-exclusion assertion.",
       "since": "2026-07-03",
       "owner": "p2-6-belief-archive-exclusion"
-    },
-    {
-      "path": "src/__tests__/browser-power-failure.test.ts",
-      "reason": "P1-A1: exercises browser_power_eval/cdp/network_trace/resource_forensics structured-failure catch branches with injected fake BrowserControllers whose executeJS/sendCdpCommand throw; no test path opens better-sqlite3 or reads the real DB. Transitive imports reach sqlite-capable browser-tools only. Host-Node coverage must stay active for the failure-classifier + target-identity assertions.",
-      "since": "2026-07-03",
-      "owner": "p1-a1-power-failure"
-    },
-    {
-      "path": "src/__tests__/browser-action-receipt.test.ts",
-      "reason": "P1-E5: exercises the post-action change-receipt shaper + browser_type integration with an injected fake BrowserController (executeJS returns canned probe/typed results); no test path opens better-sqlite3 or reads the real DB. Transitive imports reach sqlite-capable browser-tools only. Host-Node coverage must stay active for the receipt shaping assertions.",
-      "since": "2026-07-03",
-      "owner": "p1-e5-action-receipt"
     },
     {
       "path": "src/__tests__/run-finalizer-task-facts.test.ts",
@@ -386,18 +416,6 @@
       "reason": "transitive value-import reaches a nativeBackedModule via wrapper modules but never triggers native sqlite load in any test path (all sqlite-touching call sites use fakes/stubs); verified passing on host-Node test runs as of 2026-05-06",
       "since": "2026-05-06",
       "owner": "stage5-bulk-import"
-    },
-    {
-      "path": "src/__tests__/browser-tools.test.ts",
-      "reason": "transitive value-import reaches a nativeBackedModule via wrapper modules but never triggers native sqlite load in any test path (all sqlite-touching call sites use fakes/stubs); verified passing on host-Node test runs as of 2026-05-06",
-      "since": "2026-05-06",
-      "owner": "stage5-bulk-import"
-    },
-    {
-      "path": "src/__tests__/browser-download-recent-artifacts.test.ts",
-      "reason": "tests execute browser_download_urls with a fake browser controller and mocked fetch only; transitive browser-tools imports reach sqlite-capable modules but no test path opens better-sqlite3 or reads a repository. Verified passing on host-Node.",
-      "since": "2026-06-18",
-      "owner": "send-im-l1"
     },
     {
       "path": "src/__tests__/capability-gate-arbitration.test.ts",

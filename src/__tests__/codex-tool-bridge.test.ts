@@ -61,7 +61,11 @@ before(() => {
 })
 after(() => __setScopeContextEpochDatabaseForTests(null))
 
-function definition(name: string, executionTimeoutMs?: number): ToolDefinition {
+function definition(
+  name: string,
+  executionTimeoutMs?: number,
+  timeoutProfile: ToolDefinition['timeoutProfile'] = 'default',
+): ToolDefinition {
   return {
     name,
     groupId: 'agent_interaction',
@@ -69,7 +73,7 @@ function definition(name: string, executionTimeoutMs?: number): ToolDefinition {
     kind: 'read',
     concurrency: 'parallel_read_safe',
     interruptBehavior: 'abort_signal',
-    timeoutProfile: 'default',
+    timeoutProfile,
     supportsTextBridge: true,
     projectionHint: null,
     description: `Read with ${name}`,
@@ -1238,6 +1242,24 @@ test('proven-absent, indeterminate, and timeout branches are typed and do not re
     assert.equal(f.executions(), 0)
     assert.equal(f.receipts.pending.size, 0)
     assert.equal(f.receipts.absent.size, 1)
+  })
+  await t.test('user_interaction wait is not killed by the host effect deadline', async () => {
+    const f = fixture({
+      timeoutMs: 5,
+      executionBinding: binding(
+        ['ask_user_questions'],
+        5,
+        definition('ask_user_questions', 5, 'user_interaction'),
+      ),
+      execute: async () => new Promise((resolve) => {
+        setTimeout(() => resolve(createToolExecutionOutput('answered')), 20)
+      }),
+    })
+    const response = await f.bridge.execute(request({ tool: 'ask_user_questions' }))
+    assert.equal(response.success, true)
+    assert.match(JSON.stringify(response), /answered/)
+    assert.equal(f.receipts.records.size, 1)
+    assert.equal(f.persistence.deliveryCount, 1)
   })
   await t.test('timeout abort', async () => {
     const f = fixture({

@@ -102,6 +102,7 @@ export interface AgentRuntimeStatus {
 export interface ConversationScope {
   id: string
   aliasGeneration: number | null
+  latestAliasGeneration?: number | null
   messageVisibilityEpoch: number
   agent: string
   activeAgentId: string

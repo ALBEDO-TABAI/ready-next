@@ -198,14 +198,23 @@ export abstract class BrowserHumanTakeoverRuntime extends BrowserControllerHostR
   }
 
   getAgentControlState(): 'active' | 'frozen' {
+    const liveTabIds = new Set(this.tabs.keys())
     return this.pendingPhysicalTakeovers.size > 0
-      || getBrowserTargetClaimService().list().some((claim) => claim.state === 'user_owned')
+      || getBrowserTargetClaimService().list().some((claim) => (
+        claim.state === 'user_owned'
+        && Boolean(claim.physicalTargetToken)
+        && Boolean(claim.bootIncarnationId)
+        && liveTabIds.has(claim.logicalKey.tabId)
+      ))
       ? 'frozen'
       : 'active'
   }
 
   getBrowserLeaseSnapshot(): BrowserLeaseSupervisionSnapshot {
-    return buildBrowserLeaseSupervisionSnapshot(getBrowserTargetClaimService())
+    return buildBrowserLeaseSupervisionSnapshot(
+      getBrowserTargetClaimService(),
+      this.activeTabId,
+    )
   }
 
 }

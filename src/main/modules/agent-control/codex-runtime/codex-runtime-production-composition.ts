@@ -32,6 +32,7 @@ import {
   buildBrowserAdmissionAuthoritySnapshot,
   resolveBrowserExecutionPageRef,
 } from './codex-browser-admission'
+import { resolveReadyCapabilityTurnAvailability } from './codex-capability-turn-availability'
 import { isCodexFolderTagForgeAlias } from './codex-folder-tag-forge-alias'
 import {
   buildSelectedSkillToolAuthorization,
@@ -91,8 +92,10 @@ import {
 import { type CodexStartIdentityRegistry } from './codex-start-identity-registry'
 import { CodexLiveStartRejectionResolver } from './codex-live-start-rejection-resolver'
 import { classifyCodexIngressPreparationError } from './codex-ingress-preparation-error'
+import { listLiveCodexThreadToolDefinitions } from '../runtime-core/agent-sdk-tool-executor'
 import {
   assertCodexPendingInteractionRestartSweepComplete,
+  buildCodexPendingInteractionRestartCandidate,
   cancelCodexPendingInteractionsWithoutRunCloseout,
   completeCodexPendingInteractionRestartInOpenTransaction,
   scanCodexPendingInteractionsForRestart,
@@ -112,6 +115,7 @@ import { recoverCodexTerminalAfterInterrupt } from './codex-terminal-readback-re
 import { createCodexReadyToolBridge, CodexToolBridgeError } from './codex-tool-bridge'
 import {
   buildReadyTurnToolAuthorization,
+  digestCodexRootToolSurface,
   type ReadyToolTurnSnapshot,
 } from './codex-tool-surface'
 import { CodexTurnCollector, type CoreTurnCandidate } from './codex-turn-collector'
@@ -754,6 +758,45 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
     }
   }
 
+  const readAlreadyCommittedCloseout = (
+    product: CodexProductTurnRuntimeRead,
+    candidate: CoreTurnCandidate,
+  ): ReadyClosedCodexProductRun | null => {
+    const committedCloseout = repository.readProductCloseout(product.readyRunId)
+    if (!committedCloseout) return null
+    const boundHost = host
+    if (!boundHost) throw new Error('codex_runtime_host_unbound')
+    const scope = boundHost.getScope(product.readyScopeId)
+    if (!scope) throw new Error('codex_scope_missing_during_closeout')
+    const execution: ExecutionHostResult = {
+      success: false,
+      finalText: '',
+      cancelled: true,
+      usedTools: candidate.kind === 'native_terminal'
+        ? candidate.usedToolCalls.map((call) => call.tool)
+        : [],
+      error: 'codex_product_closeout_already_committed',
+      taskId: product.readyTaskId,
+      taskProjectionId: product.readyTaskId,
+      taskType: 'direct_answer',
+      interactionState: 'running',
+      terminalReason: 'cancelled_runtime',
+    }
+    preparedDetails.delete(product.readyRunId)
+    detailPrepared.delete(product.readyRunId)
+    return {
+      execution,
+      productOutcomeDigest: committedCloseout.productTerminalDigest,
+      candidateBodyDigest: candidate.kind === 'native_terminal' ? candidate.candidateDigest : null,
+      committedTerminalEvent: terminalEvent({
+        scope,
+        product,
+        execution,
+        terminalAt: committedCloseout.productCloseoutAt,
+      }),
+    }
+  }
+
   const closeCandidateOwned = async (candidate: CoreTurnCandidate): Promise<ReadyClosedCodexProductRun> => {
     let publicationReceiptRefs: string[] = []
     let publicationDiverged = false
@@ -765,6 +808,11 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
       || (candidate.codexThreadId && candidate.codexThreadId !== product.codexThreadId)
       || (candidate.codexTurnId && candidate.codexTurnId !== product.codexTurnId)) {
       throw new Error('codex_candidate_durable_identity_mismatch')
+    }
+    const alreadyCommitted = readAlreadyCommittedCloseout(product, candidate)
+    if (alreadyCommitted) {
+      releaseBrowserTurnLease(product.readyRunId)
+      return alreadyCommitted
     }
     releaseBrowserTurnLease(product.readyRunId)
     if (candidate.kind === 'native_terminal') {
@@ -1950,6 +1998,9 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
     readAliasGeneration(aliasId) {
       return repository.readActiveAliasBinding(aliasId)?.aliasGeneration ?? null
     },
+    readLatestAliasGeneration(aliasId) {
+      return repository.readLatestAliasGeneration(aliasId)
+    },
     readActiveProductRunVisibilityIdentity(readyRunId) {
       return repository.readActiveProductRunVisibilityIdentity(readyRunId)
     },
@@ -1980,6 +2031,9 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
         runtimeManifestDigest: verified.manifestDigest,
         protocolSchemaDigest: verified.manifest.stableV2SchemaSha256,
         createdAt: isoNow(),
+        currentToolSurfaceDigest: digestCodexRootToolSurface(
+          listLiveCodexThreadToolDefinitions(),
+        ),
       })
       if (!binding || binding.retiredAt) throw new Error('codex_alias_binding_missing')
       if (binding.continuationBlockedAt) throw new PrePersistenceAdmissionError(
@@ -2049,10 +2103,16 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
         if (!binding || binding.aliasGeneration !== scope.aliasGeneration) {
           throw new Error('codex_alias_generation_mismatch')
         }
-        if (request.expectedAliasGeneration > binding.aliasGeneration) {
+        if (
+          typeof request.expectedAliasGeneration === 'number'
+          && request.expectedAliasGeneration > binding.aliasGeneration
+        ) {
           throw new Error('codex_alias_generation_mismatch')
         }
-        if (request.expectedAliasGeneration < binding.aliasGeneration) {
+        if (
+          typeof request.expectedAliasGeneration === 'number'
+          && request.expectedAliasGeneration < binding.aliasGeneration
+        ) {
           const predecessor = rawDb.prepare(`
             SELECT retired_reason
               FROM codex_thread_bindings
@@ -2189,6 +2249,21 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
           )),
           tagForgeExclusive: exclusiveAllowSet !== null,
         })
+        const surfaceNames = new Set(resolvedToolSnapshot.readyToolSurface.toolNames)
+        const capabilityAvailability = resolveReadyCapabilityTurnAvailability({
+          publicResearchProviderAvailable: surfaceNames.has('web_search') || surfaceNames.has('web_fetch'),
+          calendarHostAvailable: surfaceNames.has('calendar_list_window')
+            || surfaceNames.has('calendar_capture_session')
+            || surfaceNames.has('calendar_create_event'),
+          calendarProductMapped: surfaceNames.has('calendar_create_event'),
+          workbenchMode: trustedEnvironment.workbenchMode,
+          currentBrowserPageRef: browserAdmission.currentBrowserRoot,
+          explicitBrowserReadRefs: browserAdmission.explicitBrowserReadRefs,
+          hasCalendarResource: explicitResources.requestResources.some((resource) => (
+            resource.kind === 'calendar_window' || resource.kind === 'calendar_event'
+          )),
+          tagForgeExclusive: exclusiveAllowSet !== null,
+        })
         const toolSnapshot = composeCodexTurnToolSnapshot({
           resolved: resolvedToolSnapshot,
           authorizationId: `codex-auth:${request.requestId}`,
@@ -2201,6 +2276,7 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
           workbenchMode: trustedEnvironment.workbenchMode,
           exclusiveAllowSet,
           browserAdmission,
+          capabilityAvailability,
         })
         const selectedSkill = toolSnapshot.readyTurnToolAuthorization.skillAuthorization
         const selectedNativeSkill = selectedSkill.mode === 'selected'
@@ -2348,7 +2424,10 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
         }
         const messageVisibilityEpoch = scopeEpoch.message_visibility_epoch
         if (request.expectedMessageVisibilityEpoch !== messageVisibilityEpoch
-          || request.expectedAliasGeneration > prepared.conversationAlias.aliasGeneration) {
+          || (
+            typeof request.expectedAliasGeneration === 'number'
+            && request.expectedAliasGeneration > prepared.conversationAlias.aliasGeneration
+          )) {
           throw new Error('codex_ingress_expected_identity_mismatch')
         }
         const admissionWithoutDigest = {
@@ -2947,11 +3026,15 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
       })
       for (const plan of pendingInteractions.closeoutPlans) {
         try {
-          await closeRunLocalRecoveryFailure(
+          const recovered = await closeRunLocalRecoveryFailure(
             plan.readyRunId,
             'codex_pending_interaction_cancelled_app_restart',
             plan,
           )
+          collector.deliverRecoveredCandidate(
+            buildCodexPendingInteractionRestartCandidate(plan),
+          )
+          deliverRecoveredCloseout(plan.readyRunId, recovered)
           logAgentMetric('codex_pending_interaction_restart_closed', {
             readyRunId: plan.readyRunId,
             interactionCount: plan.interactions.length,

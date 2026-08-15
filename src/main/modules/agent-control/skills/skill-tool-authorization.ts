@@ -36,6 +36,15 @@ export type SkillToolAuthorization =
        * after identity concluded no recoverable task exists).
        */
       readonly reason: 'no_skill_signal' | 'turn_not_skill_resume' | 'config_repair_no_recoverable_task'
+      /**
+       * Optional additive candidate primitives. These are available methods,
+       * not a selected exclusive skill. Dispatch still binds them to the
+       * named skill's allowlist and existing confirmation rules.
+       */
+      readonly candidateSkillPrimitives?: Readonly<{
+        skillId: string
+        primitives: readonly string[]
+      }>
     }
   | {
       readonly mode: 'selected'
@@ -119,10 +128,24 @@ export function buildSelectedSkillToolAuthorization(params: {
  */
 export function buildExplicitNoSkillAuthorization(
   reason: Extract<SkillToolAuthorization, { mode: 'none' }>['reason'],
+  extras?: {
+    candidateSkillPrimitives?: {
+      skillId: string
+      primitives: readonly string[]
+    }
+  },
 ): SkillToolAuthorization {
   return Object.freeze({
     mode: 'none',
     reason,
+    ...(extras?.candidateSkillPrimitives
+      ? {
+          candidateSkillPrimitives: Object.freeze({
+            skillId: extras.candidateSkillPrimitives.skillId,
+            primitives: Object.freeze([...extras.candidateSkillPrimitives.primitives]),
+          }),
+        }
+      : {}),
   }) as SkillToolAuthorization
 }
 
@@ -204,9 +227,11 @@ export function filterToolsByAuthorization<T>(
   getName: (tool: T) => string | null,
 ): T[] {
   if (authorization.mode === 'none') {
+    const candidate = authorization.candidateSkillPrimitives
     return tools.filter((tool) => {
       const name = getName(tool)
-      return !name || !name.startsWith('skill_')
+      if (!name || !name.startsWith('skill_')) return true
+      return Boolean(candidate && candidate.primitives.includes(name))
     })
   }
   // mode === 'selected'
@@ -230,6 +255,13 @@ export function checkSkillToolAuthorization(
   isPrimitive: boolean,
 ): { allowed: true } | { allowed: false; reason: string } {
   if (authorization.mode === 'none') {
+    if (
+      isPrimitive
+      && authorization.candidateSkillPrimitives
+      && authorization.candidateSkillPrimitives.primitives.includes(toolName)
+    ) {
+      return { allowed: true }
+    }
     return { allowed: false, reason: authorization.reason }
   }
   // mode === 'selected'

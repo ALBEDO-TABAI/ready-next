@@ -21,11 +21,36 @@ import {
   buildExplicitNoSkillAuthorization,
   buildSelectedSkillToolAuthorization,
   checkSkillToolAuthorization,
+  filterToolsByAuthorization,
 } from '../main/modules/agent-control/skills/skill-tool-authorization'
 
 // ---------------------------------------------------------------------------
 // Explicit mode:'none' → denies
 // ---------------------------------------------------------------------------
+
+test('mode:none candidate primitives allow only the named skill methods', () => {
+  const auth = buildExplicitNoSkillAuthorization('no_skill_signal', {
+    candidateSkillPrimitives: {
+      skillId: 'lark-cli',
+      primitives: ['skill_run_shell', 'skill_read_artifact', 'skill_ask_user'],
+    },
+  })
+  assert.equal(checkSkillToolAuthorization('skill_run_shell', auth, true).allowed, true)
+  assert.equal(checkSkillToolAuthorization('skill_read_artifact', auth, true).allowed, true)
+  assert.equal(checkSkillToolAuthorization('skill_write_artifact', auth, true).allowed, false)
+  assert.equal(checkSkillToolAuthorization('skill_video_expert_pipeline', auth, false).allowed, false)
+  const kept = filterToolsByAuthorization(
+    [
+      { name: 'calendar_list_window' },
+      { name: 'ask_user_questions' },
+      { name: 'skill_run_shell' },
+      { name: 'skill_write_artifact' },
+    ],
+    auth,
+    (tool) => tool.name,
+  ).map((tool) => tool.name)
+  assert.deepEqual(kept, ['calendar_list_window', 'ask_user_questions', 'skill_run_shell'])
+})
 
 test('checkSkillToolAuthorization with mode:none reason:no_skill_signal → denies', () => {
   const auth = buildExplicitNoSkillAuthorization('no_skill_signal')

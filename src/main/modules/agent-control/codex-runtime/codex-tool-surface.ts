@@ -48,6 +48,10 @@ export type SerializedSkillToolAuthorization =
   | Readonly<{
       mode: 'none'
       reason: Extract<SkillToolAuthorization, { mode: 'none' }>['reason']
+      candidateSkillPrimitives?: Readonly<{
+        skillId: string
+        primitives: readonly string[]
+      }>
     }>
   | Readonly<{
       mode: 'selected'
@@ -100,6 +104,27 @@ export class CodexToolSurfaceError extends Error {
     super(code)
     this.name = 'CodexToolSurfaceError'
   }
+}
+
+const CODEX_ROOT_EXCLUDED_CONTROL_TOOLS = new Set(['use_browser', 'use_skill', 'browser_download'])
+
+export function selectCodexRootToolDefinitions(
+  definitions: readonly ToolDefinition[],
+): ToolDefinition[] {
+  return definitions.filter((definition) => (
+    !CODEX_ROOT_EXCLUDED_CONTROL_TOOLS.has(definition.name)
+    && !isToolStatePatchEmittingToolName(definition.name)
+    && (definition.domain !== 'skill' || definition.codexExecutionSafe === true)
+  ))
+}
+
+export function digestCodexRootToolSurface(
+  definitions: readonly ToolDefinition[],
+): string {
+  return buildReadyToolSurface({
+    surfaceId: 'codex-root-surface',
+    toolDefinitions: selectCodexRootToolDefinitions(definitions),
+  }).toolSurfaceDigest
 }
 
 function nonEmpty(value: string, code: string): string {
@@ -255,7 +280,16 @@ function uniqueSorted(values: Iterable<string>, code: string): string[] {
 
 function serializeAuthorization(authorization: SkillToolAuthorization): SerializedSkillToolAuthorization {
   if (authorization.mode === 'none') {
-    return { mode: 'none', reason: authorization.reason }
+    return authorization.candidateSkillPrimitives
+      ? {
+          mode: 'none',
+          reason: authorization.reason,
+          candidateSkillPrimitives: {
+            skillId: authorization.candidateSkillPrimitives.skillId,
+            primitives: [...authorization.candidateSkillPrimitives.primitives].sort(),
+          },
+        }
+      : { mode: 'none', reason: authorization.reason }
   }
   return {
     mode: 'selected',
@@ -420,10 +454,9 @@ export function resolveReadyToolTurnSnapshot(input: {
   resolutionInput: ReadyLiveToolResolutionInput
   frozenToolSurface?: ReadyToolSurface
 }): ReadyToolTurnSnapshot {
-  const excludedControlTools = new Set(['use_browser', 'use_skill', 'browser_download'])
   const toolDefinitions = input.source
     .listDefaultToolDefinitionsForTurn(input.resolutionInput)
-    .filter((definition) => !excludedControlTools.has(definition.name))
+    .filter((definition) => !CODEX_ROOT_EXCLUDED_CONTROL_TOOLS.has(definition.name))
   if (toolDefinitions.some((definition) => isToolStatePatchEmittingToolName(definition.name))) {
     throw new CodexToolSurfaceError('tool_surface_result_state_unsupported')
   }
@@ -436,16 +469,11 @@ export function resolveReadyToolTurnSnapshot(input: {
     surfaceId: input.frozenToolSurface?.surfaceId || input.surfaceId,
     toolDefinitions,
   })
-  const rootToolDefinitions = input.frozenToolSurface
-    ? null
-    : (input.source.listCodexThreadToolDefinitions?.() || toolDefinitions).filter((definition) => (
-        !excludedControlTools.has(definition.name)
-        && !isToolStatePatchEmittingToolName(definition.name)
-        && (definition.domain !== 'skill' || definition.codexExecutionSafe === true)
-      ))
   const frozen = input.frozenToolSurface || buildReadyToolSurface({
     surfaceId: input.surfaceId,
-    toolDefinitions: rootToolDefinitions || [],
+    toolDefinitions: selectCodexRootToolDefinitions(
+      input.source.listCodexThreadToolDefinitions?.() || toolDefinitions,
+    ),
   })
   assertReadyToolSurface(frozen)
   for (const currentEntry of resolved.entries) {
@@ -479,13 +507,25 @@ export function assertReadyTurnToolAuthorization(value: ReadyTurnToolAuthorizati
   ) throw new CodexToolSurfaceError('tool_authorization_shape_invalid')
   const skillAuthorization = value.skillAuthorization
   if (skillAuthorization.mode === 'none') {
+    const noneKeys = skillAuthorization.candidateSkillPrimitives
+      ? ['mode', 'reason', 'candidateSkillPrimitives']
+      : ['mode', 'reason']
     if (
-      !hasExactKeys(skillAuthorization, ['mode', 'reason'])
+      !hasExactKeys(skillAuthorization, noneKeys)
       || ![
         'no_skill_signal',
         'turn_not_skill_resume',
         'config_repair_no_recoverable_task',
       ].includes(String(skillAuthorization.reason))
+      || (
+        skillAuthorization.candidateSkillPrimitives
+        && (
+          !isRecord(skillAuthorization.candidateSkillPrimitives)
+          || typeof skillAuthorization.candidateSkillPrimitives.skillId !== 'string'
+          || !skillAuthorization.candidateSkillPrimitives.skillId.trim()
+          || !Array.isArray(skillAuthorization.candidateSkillPrimitives.primitives)
+        )
+      )
     ) throw new CodexToolSurfaceError('tool_authorization_skill_shape_invalid')
   } else if (skillAuthorization.mode === 'selected') {
     if (

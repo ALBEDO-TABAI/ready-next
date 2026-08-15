@@ -23,6 +23,7 @@ export function isCodexSafeHostSkillPrimitiveDefinition(
   toolName: string,
   skill: SkillState,
 ): boolean {
+  if (!skill || !Array.isArray(skill.actions)) return false
   const action = skill.actions.find((candidate) => buildToolName(skill.id, candidate.name) === toolName) || null
   if (action || !PRIMITIVE_TOOL_DEFS.some((candidate) => candidate.name === toolName)) return false
   const root = skill.managedPath || skill.sourcePath

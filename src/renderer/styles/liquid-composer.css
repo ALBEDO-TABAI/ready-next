@@ -161,6 +161,7 @@ html[data-theme='dark'][data-skin='liquid-glass'] .ready-liquid-composer [data-r
   color: rgba(10, 10, 10, 0.94) !important;
 }
 
+.ready-liquid-composer [data-ready-agent-send='true']:disabled,
 html[data-theme='dark'] .ready-liquid-composer [data-ready-agent-send='true']:disabled,
 html[data-theme='dark'][data-skin='liquid-glass'] .ready-liquid-composer [data-ready-agent-send='true']:disabled {
   opacity: 1;

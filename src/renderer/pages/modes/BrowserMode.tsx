@@ -215,8 +215,9 @@ export default function BrowserMode({
     activeAgentTaskCount: activeAgentTasks.length,
     controlState: agentSupervision.controlState,
     surfaces: agentSupervision.surfaces,
+    claims: agentSupervision.claims,
     activeWriteSurface: agentSupervision.activeWriteSurface,
-  }), [activeAgentTasks.length, activeTab, agentSupervision.activeWriteSurface, agentSupervision.agentTabId, agentSupervision.controlState, agentSupervision.surfaces])
+  }), [activeAgentTasks.length, activeTab, agentSupervision.activeWriteSurface, agentSupervision.agentTabId, agentSupervision.claims, agentSupervision.controlState, agentSupervision.surfaces])
   const visibleAgentTask = activeAgentTasks[0] || null
   const agentRuntimeTab = agentSupervision.agentTabId
     ? tabs.find(t => t.id === agentSupervision.agentTabId) || null

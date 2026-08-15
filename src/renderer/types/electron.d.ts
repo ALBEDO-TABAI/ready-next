@@ -231,6 +231,7 @@ type ConversationSourceKind = 'local' | 'channel'
 interface ConversationScopeData {
   id: string
   aliasGeneration: number | null
+  latestAliasGeneration?: number | null
   messageVisibilityEpoch: number
   agent: string
   activeAgentId: string

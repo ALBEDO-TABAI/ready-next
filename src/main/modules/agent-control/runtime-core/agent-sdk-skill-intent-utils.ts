@@ -406,7 +406,6 @@ export function resolveSdkDefaultIntentSurface(params: {
         enabled === true)
       .map(([groupId]) => groupId as CapabilityGroupId),
   ]))
-
   return {
     primaryIntentDomain: intentClassification.primaryDomain,
     intentGroupModes,

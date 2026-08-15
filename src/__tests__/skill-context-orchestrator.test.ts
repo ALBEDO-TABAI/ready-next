@@ -214,7 +214,7 @@ test('SkillContextOrchestrator also recognizes 用 xxx style explicit skill requ
   assert.equal(matched[0]?.id, 'video-copy-analyzer')
 })
 
-test('SkillContextOrchestrator treats explicit Feishu CLI wording as the embedded lark-cli alias only', () => {
+test('SkillContextOrchestrator treats only exact lark-cli / Lark CLI names as code selection', () => {
   const larkCli = {
     id: 'lark-cli',
     name: 'lark-cli',
@@ -246,11 +246,11 @@ test('SkillContextOrchestrator treats explicit Feishu CLI wording as the embedde
 
   assert.deepEqual(
     orchestrator.findExplicitlyRequestedSkills(request).map((skill) => skill.id),
-    ['lark-cli'],
+    [],
   )
   assert.deepEqual(
     orchestrator.findExplicitlyRequestedSkills('Use Feishu CLI to read and edit the document.').map((skill) => skill.id),
-    ['lark-cli'],
+    [],
   )
   assert.deepEqual(
     orchestrator.findExplicitlyRequestedSkills('Use Lark CLI to read and edit the document.').map((skill) => skill.id),
@@ -262,7 +262,7 @@ test('SkillContextOrchestrator treats explicit Feishu CLI wording as the embedde
   )
   assert.deepEqual(
     orchestrator.findExplicitlyRequestedSkills("Use 'Feishu CLI' to update the spreadsheet.").map((skill) => skill.id),
-    ['lark-cli'],
+    [],
   )
   assert.deepEqual(
     orchestrator.findExplicitlyRequestedSkills('请用“Lark CLI”读取并更新飞书文档').map((skill) => skill.id),
@@ -273,59 +273,104 @@ test('SkillContextOrchestrator treats explicit Feishu CLI wording as the embedde
     ['lark-cli'],
   )
   assert.deepEqual(orchestrator.findExplicitlyRequestedSkills('帮我读一下飞书文档'), [])
-  assert.deepEqual(
-    orchestrator.findExplicitlyRequestedSkills('用飞书 CLI 更新文档').map((skill) => skill.id),
-    ['lark-cli'],
-  )
-  assert.deepEqual(
-    orchestrator.findExplicitlyRequestedSkills('请帮我查看飞书 CLI 有没有登录').map((skill) => skill.id),
-    ['lark-cli'],
-  )
-  assert.deepEqual(
-    orchestrator.findExplicitlyRequestedSkills('用飞书 cli 查一下我这周还有哪些安排').map((skill) => skill.id),
-    ['lark-cli'],
-  )
-  assert.deepEqual(
-    orchestrator.findExplicitlyRequestedSkills('用飞书 CLI 创建一个日程').map((skill) => skill.id),
-    ['lark-cli'],
-  )
+  assert.deepEqual(orchestrator.findExplicitlyRequestedSkills('用飞书 CLI 更新文档'), [])
+  assert.deepEqual(orchestrator.findExplicitlyRequestedSkills('请帮我查看飞书 CLI 有没有登录'), [])
+  assert.deepEqual(orchestrator.findExplicitlyRequestedSkills('用飞书 cli 查一下我这周还有哪些安排'), [])
+  assert.deepEqual(orchestrator.findExplicitlyRequestedSkills('用飞书 CLI 创建一个日程'), [])
   assert.deepEqual(orchestrator.findExplicitlyRequestedSkills('用飞书 CLI 上传本地文件到云盘'), [])
   assert.deepEqual(
     orchestrator.findExplicitlyRequestedSkills('Use lark-cli to create a calendar event.').map((skill) => skill.id),
     ['lark-cli'],
   )
-  assert.deepEqual(orchestrator.findExplicitlyRequestedSkills('Use lark-cli to upload a local file to Drive.'), [])
+  assert.deepEqual(
+    orchestrator.findExplicitlyRequestedSkills('Use lark-cli to upload a local file to Drive.').map((skill) => skill.id),
+    ['lark-cli'],
+  )
   assert.deepEqual(orchestrator.findExplicitlyRequestedSkills('用飞书 CLI 更新本地文件'), [])
-  assert.deepEqual(orchestrator.findExplicitlyRequestedSkills('Use lark-cli to read this local file'), [])
+  assert.deepEqual(
+    orchestrator.findExplicitlyRequestedSkills('Use lark-cli to read this local file').map((skill) => skill.id),
+    ['lark-cli'],
+  )
   assert.deepEqual(
     orchestrator.findExplicitlyRequestedSkills('用 Lark CLI 创建一个日程').map((skill) => skill.id),
     ['lark-cli'],
   )
-  assert.deepEqual(orchestrator.findExplicitlyRequestedSkills('用 Lark CLI 上传本地文件到云盘'), [])
+  assert.deepEqual(
+    orchestrator.findExplicitlyRequestedSkills('用 Lark CLI 上传本地文件到云盘').map((skill) => skill.id),
+    ['lark-cli'],
+  )
   assert.deepEqual(orchestrator.findExplicitlyRequestedSkills('不要用飞书 CLI，直接读取这份飞书文档'), [])
   assert.deepEqual(orchestrator.findExplicitlyRequestedSkills('我明确要求不要在这次任务中使用任何本地飞书 CLI，直接读取飞书文档'), [])
   assert.deepEqual(orchestrator.findExplicitlyRequestedSkills('Feishu CLI 在这个任务里无论如何都不要用；直接读取文档'), [])
-  assert.deepEqual(orchestrator.findExplicitlyRequestedSkills('Do not use lark-cli; read the Feishu document directly.'), [])
-  assert.deepEqual(orchestrator.findExplicitlyRequestedSkills("I don't want to use lark-cli; read the Feishu document directly."), [])
-  assert.deepEqual(orchestrator.findExplicitlyRequestedSkills('Never use Lark CLI; read the Feishu document directly.'), [])
+  assert.deepEqual(
+    orchestrator.findExplicitlyRequestedSkills('Do not use lark-cli; read the Feishu document directly.').map((skill) => skill.id),
+    ['lark-cli'],
+  )
+  assert.deepEqual(
+    orchestrator.findExplicitlyRequestedSkills("I don't want to use lark-cli; read the Feishu document directly.").map((skill) => skill.id),
+    ['lark-cli'],
+  )
+  assert.deepEqual(
+    orchestrator.findExplicitlyRequestedSkills('Never use Lark CLI; read the Feishu document directly.').map((skill) => skill.id),
+    ['lark-cli'],
+  )
   assert.deepEqual(orchestrator.findExplicitlyRequestedSkills('我不想用飞书 CLI，直接读取飞书文档'), [])
-  assert.deepEqual(orchestrator.findExplicitlyRequestedSkills('not using lark-cli to update the document'), [])
+  assert.deepEqual(
+    orchestrator.findExplicitlyRequestedSkills('not using lark-cli to update the document').map((skill) => skill.id),
+    ['lark-cli'],
+  )
   assert.deepEqual(orchestrator.findExplicitlyRequestedSkills('不是用飞书 CLI 更新文档'), [])
-  assert.deepEqual(orchestrator.findExplicitlyRequestedSkills("don't run lark-cli to update the document"), [])
+  assert.deepEqual(
+    orchestrator.findExplicitlyRequestedSkills("don't run lark-cli to update the document").map((skill) => skill.id),
+    ['lark-cli'],
+  )
   assert.deepEqual(orchestrator.findExplicitlyRequestedSkills('do not execute feishu-cli to update the document'), [])
-  assert.deepEqual(orchestrator.findExplicitlyRequestedSkills("I don't want lark-cli to update the document"), [])
+  assert.deepEqual(
+    orchestrator.findExplicitlyRequestedSkills("I don't want lark-cli to update the document").map((skill) => skill.id),
+    ['lark-cli'],
+  )
   assert.deepEqual(orchestrator.findExplicitlyRequestedSkills('我不是要用飞书 CLI 更新文档'), [])
-  assert.deepEqual(orchestrator.findExplicitlyRequestedSkills('Read the document mentioning lark-cli.'), [])
-  assert.deepEqual(orchestrator.findExplicitlyRequestedSkills("Summarize the Feishu document titled 'lark-cli installation guide'."), [])
-  assert.deepEqual(orchestrator.findExplicitlyRequestedSkills('总结飞书文档《lark-cli 安装指南》'), [])
+  assert.deepEqual(
+    orchestrator.findExplicitlyRequestedSkills('Read the document mentioning lark-cli.').map((skill) => skill.id),
+    ['lark-cli'],
+  )
+  assert.deepEqual(
+    orchestrator.findExplicitlyRequestedSkills("Summarize the Feishu document titled 'lark-cli installation guide'.").map((skill) => skill.id),
+    ['lark-cli'],
+  )
+  assert.deepEqual(
+    orchestrator.findExplicitlyRequestedSkills('总结飞书文档《lark-cli 安装指南》').map((skill) => skill.id),
+    ['lark-cli'],
+  )
   assert.deepEqual(orchestrator.findExplicitlyRequestedSkills('总结《飞书 CLI 更新说明》文档'), [])
-  assert.deepEqual(orchestrator.findExplicitlyRequestedSkills('读取《Lark CLI 更新指南》这份飞书文档'), [])
-  assert.deepEqual(orchestrator.findExplicitlyRequestedSkills('Read the Feishu document with lark-cli examples.'), [])
-  assert.deepEqual(orchestrator.findExplicitlyRequestedSkills('总结飞书文档《lark-cli 登录状态说明》'), [])
-  assert.deepEqual(orchestrator.findExplicitlyRequestedSkills("Summarize the Feishu document titled 'lark-cli login status guide'."), [])
-  assert.deepEqual(orchestrator.findExplicitlyRequestedSkills('Summarize the Feishu document about lark-cli login status.'), [])
-  assert.deepEqual(orchestrator.findExplicitlyRequestedSkills('总结关于 lark-cli 登录状态的飞书文档'), [])
-  assert.deepEqual(orchestrator.findExplicitlyRequestedSkills('阅读标题为“lark-cli 更新文档”的表格'), [])
+  assert.deepEqual(
+    orchestrator.findExplicitlyRequestedSkills('读取《Lark CLI 更新指南》这份飞书文档').map((skill) => skill.id),
+    ['lark-cli'],
+  )
+  assert.deepEqual(
+    orchestrator.findExplicitlyRequestedSkills('Read the Feishu document with lark-cli examples.').map((skill) => skill.id),
+    ['lark-cli'],
+  )
+  assert.deepEqual(
+    orchestrator.findExplicitlyRequestedSkills('总结飞书文档《lark-cli 登录状态说明》').map((skill) => skill.id),
+    ['lark-cli'],
+  )
+  assert.deepEqual(
+    orchestrator.findExplicitlyRequestedSkills("Summarize the Feishu document titled 'lark-cli login status guide'.").map((skill) => skill.id),
+    ['lark-cli'],
+  )
+  assert.deepEqual(
+    orchestrator.findExplicitlyRequestedSkills('Summarize the Feishu document about lark-cli login status.').map((skill) => skill.id),
+    ['lark-cli'],
+  )
+  assert.deepEqual(
+    orchestrator.findExplicitlyRequestedSkills('总结关于 lark-cli 登录状态的飞书文档').map((skill) => skill.id),
+    ['lark-cli'],
+  )
+  assert.deepEqual(
+    orchestrator.findExplicitlyRequestedSkills('阅读标题为“lark-cli 更新文档”的表格').map((skill) => skill.id),
+    ['lark-cli'],
+  )
   assert.deepEqual(orchestrator.findExplicitlyRequestedSkills('总结名为“飞书 CLI 登录状态说明”的文档'), [])
   assert.deepEqual(
     orchestrator.findExplicitlyRequestedSkills('用 `lark-cli` 看登录状态').map((skill) => skill.id),
@@ -339,36 +384,40 @@ test('SkillContextOrchestrator treats explicit Feishu CLI wording as the embedde
     orchestrator.findExplicitlyRequestedSkills('lark-cli login status').map((skill) => skill.id),
     ['lark-cli'],
   )
-  assert.deepEqual(
-    orchestrator.findExplicitlyRequestedSkills('用飞书 CLI 读取配置文档').map((skill) => skill.id),
-    ['lark-cli'],
-  )
-  assert.deepEqual(
-    orchestrator.findExplicitlyRequestedSkills('用飞书 CLI 总结《安装配置指南》文档').map((skill) => skill.id),
-    ['lark-cli'],
-  )
-  assert.deepEqual(
-    orchestrator.findExplicitlyRequestedSkills('不要安装飞书 CLI，直接用现有的飞书 CLI 读取文档').map((skill) => skill.id),
-    ['lark-cli'],
-  )
-  assert.deepEqual(
-    orchestrator.findExplicitlyRequestedSkills('别更新 CLI，直接用飞书 CLI 读取文档').map((skill) => skill.id),
-    ['lark-cli'],
-  )
-  assert.deepEqual(
-    orchestrator.findExplicitlyRequestedSkills('不要配置命令行，直接用现有的飞书 CLI 读取文档').map((skill) => skill.id),
-    ['lark-cli'],
-  )
-  assert.deepEqual(
-    orchestrator.findExplicitlyRequestedSkills('不安装飞书 CLI，直接用现有的飞书 CLI 读取文档').map((skill) => skill.id),
-    ['lark-cli'],
-  )
+  assert.deepEqual(orchestrator.findExplicitlyRequestedSkills('用飞书 CLI 读取配置文档'), [])
+  assert.deepEqual(orchestrator.findExplicitlyRequestedSkills('用飞书 CLI 总结《安装配置指南》文档'), [])
+  assert.deepEqual(orchestrator.findExplicitlyRequestedSkills('不要安装飞书 CLI，直接用现有的飞书 CLI 读取文档'), [])
+  assert.deepEqual(orchestrator.findExplicitlyRequestedSkills('别更新 CLI，直接用飞书 CLI 读取文档'), [])
+  assert.deepEqual(orchestrator.findExplicitlyRequestedSkills('不要配置命令行，直接用现有的飞书 CLI 读取文档'), [])
+  assert.deepEqual(orchestrator.findExplicitlyRequestedSkills('不安装飞书 CLI，直接用现有的飞书 CLI 读取文档'), [])
   assert.deepEqual(orchestrator.findExplicitlyRequestedSkills('帮我安装并配置飞书 CLI'), [])
   assert.deepEqual(orchestrator.findExplicitlyRequestedSkills('帮我安装 lark-cli'), [])
   assert.deepEqual(orchestrator.findExplicitlyRequestedSkills('给飞书 CLI 配置文档权限'), [])
   assert.deepEqual(orchestrator.findExplicitlyRequestedSkills('帮我安装飞书 CLI，然后读取文档'), [])
   assert.deepEqual(orchestrator.findExplicitlyRequestedSkills('帮我更新飞书 CLI，再编辑文档'), [])
   assert.deepEqual(orchestrator.findExplicitlyRequestedSkills('帮我安装最新版且适合当前 Apple Silicon Mac 的飞书 CLI，然后读取文档'), [])
+})
+
+test('SkillContextOrchestrator still selects a SKILL.md-only skill by exact name', () => {
+  const orchestrator = new SkillContextOrchestrator({
+    extractPrimaryUserInstruction: (raw) => raw,
+    listSkills: () => [
+      {
+        id: 'notes-helper',
+        name: 'Notes Helper',
+        description: '整理笔记',
+        defaultAction: 'read_skill',
+        executionMode: 'advisory',
+        actions: [{ name: 'read_skill', visibility: 'internal', runtime: 'reference', params: [] }],
+      } as any,
+    ],
+    resolveSkillToolByAction: (_skillId, action) => ({ name: `skill_${action}`, action }) as any,
+  })
+  assert.deepEqual(
+    orchestrator.findExplicitlyRequestedSkills('用 Notes Helper 整理这篇笔记').map((skill) => skill.id),
+    ['notes-helper'],
+  )
+  assert.deepEqual(orchestrator.findExplicitlyRequestedSkills('帮我整理这篇笔记'), [])
 })
 
 test('SkillContextOrchestrator recognizes 按 xxx 写 without explicit connector word', () => {

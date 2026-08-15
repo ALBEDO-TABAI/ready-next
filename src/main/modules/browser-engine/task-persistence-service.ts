@@ -11,6 +11,7 @@ import type {
 } from './capability-types'
 import { taskEventBridge, toBridgeStatus } from './task-event-bridge'
 import type { TaskExecutionBinding } from '../../../shared/agent-execution-profile'
+import type { BrowserActionOutcome } from '../../../shared/browser-action-outcome'
 import { buildBrowserTaskEventExtra } from './browser-task-event-presentation'
 import {
   assessBrowserResearch,
@@ -314,6 +315,20 @@ export class BrowserTaskPersistenceService {
     const record = this.repository.getTask(taskId)
     if (!record) return null
     return parsePersistedTaskPayload(record)
+  }
+
+  readSettledOutcomes(taskId: string): BrowserActionOutcome[] {
+    const payload = this.getTaskPayload(taskId)
+    if (!payload) return []
+    try {
+      return parseBrowserWorkflowActionJournal(payload, taskId)
+        .settledOutcomes
+        .slice()
+        .sort((left, right) => left.actionSeq - right.actionSeq)
+        .map((item) => item.outcome)
+    } catch {
+      return []
+    }
   }
 
   assessResearch(taskId: string): BrowserResearchAssessment {

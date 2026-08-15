@@ -85,6 +85,8 @@ const sendRequest = {
 
 test('sendScoped request is exact and rejects retired workflow fields', () => {
   assert.equal(parseSendScopedRequest(sendRequest).requestId, 'request-1')
+  const { expectedAliasGeneration: _ignored, ...unboundFollowUp } = sendRequest
+  assert.equal(parseSendScopedRequest(unboundFollowUp).expectedAliasGeneration, undefined)
   for (const forbidden of [
     'agent',
     'deliveryMode',

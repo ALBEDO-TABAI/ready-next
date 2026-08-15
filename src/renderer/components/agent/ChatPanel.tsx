@@ -22,6 +22,7 @@ import { createDebouncedFetch } from '../../modules/agent/debouncedFetch'
 import { filterUserVisibleToolTraceEvents } from '../../modules/agent/toolTraceVisibility'
 import { deletedAgentDisplayName } from '../../../shared/agent-identity'
 import { parseActionAuthorizationMode } from '../../../shared/action-authorization-mode'
+import { mapBackendErrorToFriendly } from '../../modules/agent/error-message-mapping'
 import type {
   ActiveChildRunSummaryData
 } from '../../types/electron'
@@ -687,7 +688,22 @@ export default function ChatPanel({
   }, [])
 
   useEffect(() => {
-    void hydrateAgentScopesAfterRuntimeReady().catch(() => undefined)
+    void hydrateAgentScopesAfterRuntimeReady()
+      .then(() => {
+        const state = useAgent.getState()
+        if (!state.currentScopeId || !state.currentScope) {
+          setComposerNotice({
+            message: '对话还没有准备好。请点左上角新建对话后再发送。',
+            errorKind: 'scope_missing',
+          })
+        }
+      })
+      .catch(() => {
+        setComposerNotice({
+          message: '对话环境启动失败，请新建对话或重启应用后再试。',
+          errorKind: 'host_unavailable',
+        })
+      })
   }, [currentAgent, loadScopes])
 
   useEffect(() => {
@@ -771,13 +787,31 @@ export default function ChatPanel({
   }, [])
 
   const sendingRef = useRef(false)
+  const [composerNotice, setComposerNotice] = useState<{ message: string; errorKind: string } | null>(null)
   const handleSend = useCallback(async () => {
-    if (sendingRef.current) return
+    if (sendingRef.current) {
+      const current = useAgent.getState()
+      const sessionId = current.activeSessionId
+      const slice = sessionId ? current.sessions[sessionId] : null
+      if (slice?.isStreaming || slice?.composerLocked || slice?.foregroundBusy) return
+      sendingRef.current = false
+    }
     const content = inputValue.trim()
     if (!content && attachments.length === 0) return
     sendingRef.current = true
+    setComposerNotice(null)
     try {
-      await sendMessage(content)
+      const result = await sendMessage(content)
+      if (result && result.success === false && result.disposition === 'rejected_before_persistence') {
+        const friendly = mapBackendErrorToFriendly({
+          errorKind: result.errorKind,
+          error: result.errorKind,
+        })
+        setComposerNotice({
+          message: friendly.friendlyMessage,
+          errorKind: result.errorKind,
+        })
+      }
     } finally {
       sendingRef.current = false
     }
@@ -1162,6 +1196,9 @@ export default function ChatPanel({
       onReferenceSelect={handleReferenceSelect}
       setActiveAttachmentPreview={setActiveAttachmentPreview}
       setAttachmentPreviewLoading={setAttachmentPreviewLoading}
+      admissionReady={Boolean(currentScopeId && currentScope)}
+      composerNotice={composerNotice}
+      onDismissComposerNotice={() => setComposerNotice(null)}
     />
   )
 

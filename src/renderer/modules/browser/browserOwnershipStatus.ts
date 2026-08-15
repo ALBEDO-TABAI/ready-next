@@ -31,15 +31,85 @@ export interface BrowserOwnershipStatus {
   tone: 'neutral' | 'agent' | 'warning'
 }
 
+function surfaceMatchesTab(
+  surface: BrowserOwnershipSurfaceSnapshot | null | undefined,
+  currentTabId: string | null,
+): boolean {
+  return Boolean(surface && (!surface.tabId || !currentTabId || surface.tabId === currentTabId))
+}
+
 export function resolveBrowserOwnershipStatus(input: {
   activeTab: BrowserOwnershipTabLike | null
   agentTabId: string | null
   activeAgentTaskCount: number
   controlState: BrowserOwnershipControlState
   surfaces?: Record<BrowserOwnershipSurface, BrowserOwnershipSurfaceSnapshot> | null
+  claims?: ReadonlyArray<{ tabId: string; state: string; surface?: BrowserOwnershipSurface }> | null
   activeWriteSurface?: BrowserOwnershipSurface | null
 }): BrowserOwnershipStatus {
-  if (input.controlState === 'frozen') {
+  const currentTabId = input.activeTab?.id || null
+  const claims = input.claims ?? []
+  const currentHeld = currentTabId
+    ? claims.find((claim) => claim.tabId === currentTabId && claim.state === 'held')
+    : null
+  const claimTakeover = currentTabId
+    ? claims.find((claim) => claim.tabId === currentTabId && claim.state === 'user_owned')
+    : null
+  const takeoverSurface = claimTakeover
+    ? {
+        surface: 'user-view' as const,
+        state: 'takeover' as const,
+        heldBy: null,
+        runId: null,
+        tabId: claimTakeover.tabId,
+        leaseId: null,
+      }
+    : input.surfaces?.['user-view']?.state === 'takeover'
+      ? input.surfaces['user-view']
+      : input.surfaces?.['agent-view']?.state === 'takeover'
+        ? input.surfaces['agent-view']
+        : null
+  const takeoverOnCurrentPage = Boolean(
+    takeoverSurface
+    && (
+      !takeoverSurface.tabId
+      || !currentTabId
+      || takeoverSurface.tabId === currentTabId
+    ),
+  )
+  const otherTabTakeover = Boolean(
+    claims.some((claim) => (
+      claim.state === 'user_owned'
+      && Boolean(claim.tabId)
+      && claim.tabId !== currentTabId
+    ))
+    || (
+      takeoverSurface?.tabId
+      && currentTabId
+      && takeoverSurface.tabId !== currentTabId
+    ),
+  )
+  const otherTabHeld = claims.some((claim) => (
+    claim.state === 'held'
+    && Boolean(claim.tabId)
+    && claim.tabId !== currentTabId
+  ))
+  const userViewHeldOnCurrent = Boolean(
+    currentHeld?.surface === 'user-view'
+    || (
+      !currentHeld
+      && input.surfaces?.['user-view']?.state === 'held'
+      && surfaceMatchesTab(input.surfaces['user-view'], currentTabId)
+    ),
+  )
+  const currentTabOccupied = Boolean(currentHeld || userViewHeldOnCurrent)
+  const backgroundOccupied = Boolean(
+    otherTabHeld
+    || input.surfaces?.['agent-view']?.state === 'held'
+    || input.activeWriteSurface === 'agent-view'
+    || input.activeAgentTaskCount > 0,
+  )
+  if (input.controlState === 'frozen' && (takeoverOnCurrentPage || !otherTabTakeover)) {
     return {
       kind: 'frozen',
       label: '已接管',
@@ -47,7 +117,7 @@ export function resolveBrowserOwnershipStatus(input: {
       tone: 'warning',
     }
   }
-  if (input.surfaces?.['user-view']?.state === 'takeover' || input.surfaces?.['agent-view']?.state === 'takeover') {
+  if (takeoverOnCurrentPage && takeoverSurface) {
     return {
       kind: 'takeover',
       label: '用户接管',
@@ -55,21 +125,14 @@ export function resolveBrowserOwnershipStatus(input: {
       tone: 'warning',
     }
   }
-  if (input.activeWriteSurface === 'user-view') {
-    const heldBy = input.surfaces?.['user-view']?.heldBy
+  if (currentTabOccupied) {
+    const heldBy = currentHeld?.surface === 'agent-view'
+      ? input.surfaces?.['agent-view']?.heldBy
+      : input.surfaces?.['user-view']?.heldBy
     return {
       kind: 'agent-current',
       label: 'Agent 协作当前页',
       detail: heldBy ? `当前可见页写锁：${heldBy}` : 'Agent 正在协作当前可见页',
-      tone: 'agent',
-    }
-  }
-  if (input.activeWriteSurface === 'agent-view') {
-    const heldBy = input.surfaces?.['agent-view']?.heldBy
-    return {
-      kind: 'agent-background',
-      label: 'Agent 后台页',
-      detail: heldBy ? `后台 Agent 页写锁：${heldBy}` : 'Agent 正在后台 Agent 页工作',
       tone: 'agent',
     }
   }
@@ -82,11 +145,16 @@ export function resolveBrowserOwnershipStatus(input: {
       tone: 'agent',
     }
   }
-  if (input.activeAgentTaskCount > 0) {
+  if (backgroundOccupied) {
+    const heldBy = input.surfaces?.['agent-view']?.heldBy
     return {
       kind: 'agent-background',
       label: 'Agent 后台页',
-      detail: `${input.activeAgentTaskCount} 个后台 Agent 浏览任务`,
+      detail: heldBy
+        ? `后台 Agent 页写锁：${heldBy}`
+        : input.activeAgentTaskCount > 0
+          ? `${input.activeAgentTaskCount} 个后台 Agent 浏览任务`
+          : 'Agent 正在其他标签页工作',
       tone: 'agent',
     }
   }

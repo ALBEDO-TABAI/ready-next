@@ -1,6 +1,6 @@
 # 代码行数健康度台账
 
-> 更新时间：2026-08-14
+> 更新时间：2026-08-16
 
 这份台账记录“任务给代码文件增加行数后，文件总行数已超过 1000 行”的健康度评估。它不是按行数自动要求拆分，而是把真正影响维护、验证和协作的风险持续留下来。
 
@@ -21,6 +21,36 @@
 
 | 评估日期 | 任务 | 文件 | 总行数 | 本次新增 | 结论 | 判断与后续动作 | 状态 |
 | --- | --- | --- | ---: | ---: | --- | --- | --- |
+| 2026-08-16 | 工作区收口与稳定门同步 | `src/main/modules/tools/skills-tools.ts` | 3186 | 净 +1 | 危险 | 只把候选技能身份传入既有 primitive 调用，没有继续扩大执行分支；技能工具注册、授权和执行仍集中。 | 待独立拆分合同；交付时提醒 |
+| 2026-08-16 | 浏览器后台占用状态 | `src/renderer/pages/modes/BrowserMode.tsx` | 1450 | 净 +1 | 一般 | 只把完整 claim 列表交给现有状态投影。2026-09-16 复查浏览器监督状态是否继续下沉。 | 已排期：2026-09-16 |
+| 2026-08-16 | 发送准入与 generation 恢复 | `src/__tests__/codex-renderer-admission-contract.test.ts` | 1014 | 净 +79 | 一般 | 套件仍只覆盖发送前后状态与 generation 收口；本轮补未建 generation、发布分歧和拒绝回执。2026-09-16 复查是否按准入前后拆套件。 | 已排期：2026-09-16 |
+| 2026-08-16 | 找回文档书本阅读模式 | `src/renderer/pages/modes/DocumentMode.tsx` | 1094 | 净 +67 | 一般 | 这里只接入入口、只读覆盖层和会话收口；分页、翻页、排版与位置持久化都留在独立叶子模块。2026-09-16 复查会话接线是否还应继续迁出。 | 已排期：2026-09-16 |
+| 2026-08-16 | 反问等待被 15s 超时误杀后无法再发 | `src/main/modules/agent-control/codex-runtime/codex-runtime-production-composition.ts` | 3307 | 净 +48 | 危险 | 只补已提交 closeout 幂等读回，并叫醒 live collector。 | 后续拆分；交付时提醒 |
+| 2026-08-16 | 反问等待被 15s 超时误杀后无法再发 | `src/__tests__/codex-tool-bridge.test.ts` | 1693 | 净 +26 | 一般 | 只补 user_interaction 等待不被 host deadline 杀掉。2026-09-16 复查。 | 已排期：2026-09-16 |
+| 2026-08-16 | 反问等待被 15s 超时误杀后无法再发 | `src/renderer/components/agent/ChatPanel.tsx` | 1260 | 净 +6 | 一般 | 只在 UI 已空闲时释放悬挂的发送锁。2026-09-16 复查。 | 已排期：2026-09-16 |
+| 2026-08-16 | 反问等待被 15s 超时误杀后无法再发 | `src/main/modules/agent-control/tools-runtime/tool-registry.ts` | 1557 | 净 +1 | 一般 | 只把反问工具标成 user_interaction。2026-09-14 复查日期不变。 | 已排期：2026-09-14 |
+| 2026-08-15 | publication_diverged 后发送被前端拦截 | `src/main/modules/agent-control/codex-runtime/codex-binding-repository.ts` | 7465 | 净 +10 | 危险 | 只补 latest generation 只读查询，公开 facade 未分叉。 | 后续拆分；交付时提醒 |
+| 2026-08-15 | sidecar 断连后反问卡与停止失真 | `src/main/modules/agent-control/codex-runtime/codex-runtime-production-composition.ts` | 3259 | 净 +1 | 危险 | 只把 pending-interaction 收口投给既有 recovered closeout 发布。 | 后续拆分；交付时提醒 |
+| 2026-08-15 | sidecar 断连后反问卡与停止失真 | `src/main/modules/agent-control/codex-runtime/ready-codex-lifecycle-adapter.ts` | 1572 | 净 +8 | 一般 | 只让已退役 generation 的 stop 走既有 no-active 幂等。2026-09-15 复查。 | 已排期：2026-09-15 |
+| 2026-08-15 | sidecar 断连后反问卡与停止失真 | `src/__tests__/ready-codex-lifecycle-adapter.test.ts` | 2148 | 净 +21 | 一般 | 只补退役 generation 的 stop 幂等。2026-09-15 复查。 | 已排期：2026-09-15 |
+| 2026-08-15 | publication_diverged 后发送被前端拦截 | `src/main/modules/agent-control/codex-runtime/codex-runtime-production-composition.ts` | 3258 | 净 +12 | 危险 | 只把 latest generation 接到既有 port，并让缺省 expected generation 走 conversation 投影。 | 后续拆分；交付时提醒 |
+| 2026-08-15 | publication_diverged 后发送被前端拦截 | `src/main/modules/agent-control/runtime-core/runtime.ts` | 2006 | 净 +2 | 危险 | 只把 latest generation 传给既有 scope store。 | 待独立拆分合同；交付时提醒 |
+| 2026-08-15 | publication_diverged 后发送被前端拦截 | `src/renderer/types/electron.d.ts` | 3833 | 净 +1 | 健康 | 只机械补 latestAliasGeneration 声明。 | 无需处理 |
+| 2026-08-15 | 新装包发送键无反馈 | `src/renderer/components/agent/ChatPanel.tsx` | 1244 | 净 +22 | 一般 | 只把发送拒绝和准入未就绪接到既有组合宿主。2026-09-14 复查。 | 已排期：2026-09-14 |
+| 2026-08-15 | 新装包发送键无反馈 | `src/renderer/components/agent/ChatInput.tsx` | 1006 | 净 +14 | 一般 | 只补发送禁用可见状态与未就绪提示。2026-09-14 复查。 | 已排期：2026-09-14 |
+| 2026-08-15 | 日历来源候选与语义选择 | `src/main/modules/agent-control/runtime-core/agent-sdk-tool-executor.ts` | 1181 | 净 +15 | 一般 | 候选原语通过既有闸门，并保留加性日历与反问工具；已移除对普通网页搜索的过宽保留。2026-09-14 复查。 | 已排期：2026-09-14 |
+| 2026-08-15 | 日历来源候选与语义选择 | `src/main/modules/agent-control/tools-runtime/tool-registry.ts` | 1556 | 净 +8 | 一般 | 技能组定义改用与冻结根表面相同的 Codex-safe 标记，避免候选原语触发换 thread。2026-09-14 复查跨域注册密度。 | 已排期：2026-09-14 |
+| 2026-08-15 | 日历来源候选与语义选择 | `src/__tests__/sdk-turnengine-capability-parity.test.ts` | 1466 | 净 +约30 | 一般 | 只把飞书 CLI 从强制选技改成候选方法断言。2026-09-14 复查是否按能力面拆分。 | 已排期：2026-09-14 |
+| 2026-08-15 | 语义能力选择层 | `src/main/modules/agent-control/codex-runtime/codex-runtime-production-composition.ts` | 3246 | 净 +约6 | 危险 | 只把结构 availability 传入既有 compose，factory 仍是单一闭包装配根。 | 后续拆分；交付时提醒 |
+| 2026-08-15 | 语义能力选择层 | `src/main/modules/agent-control/runtime-core/agent-sdk-tool-executor.ts` | 1171 | 净 -12 | 一般 | 删除 Browser↔research 互斥过滤，不再消费当前页正则。2026-09-14 复查。 | 已排期：2026-09-14 |
+| 2026-08-15 | 当前页目标/排除贯穿工具面 | `src/main/modules/agent-control/runtime-core/agent-sdk-tool-executor.ts` | 1183 | 净 +1 | 一般 | 只消费资源层当前页目标事实，不再用平台词特判。2026-09-14 复查。 | 已排期：2026-09-14 |
+| 2026-08-15 | 当前页目标/排除贯穿工具面 | `src/main/modules/tools/browser-observe-tools.ts` | 1241 | 净 +约23 | 一般 | 只让 tabs_list 按标签读全部 claim。2026-09-14 复查。 | 已排期：2026-09-14 |
+| 2026-08-15 | 当前页目标/排除贯穿工具面 | `src/main/modules/agent-control/codex-runtime/codex-runtime-production-composition.ts` | 3240 | 净 +约11 | 危险 | 只把当前页准入事实传入既有 admission 快照。 | 后续拆分；交付时提醒 |
+| 2026-08-15 | 浏览器受控换页后继可信页 | `src/main/modules/tools/tool-executor.ts` | 1422 | 净 +57 | 危险 | 只在既有 browser 分派点把 journal 后继主文档提升为当前可信页。 | 后续拆分；交付时提醒 |
+| 2026-08-14 | 旧会话工具面漂移收口 | `src/main/modules/agent-control/codex-runtime/codex-binding-repository.ts` | 7455 | 净 +约131 | 危险 | 只在用户 ingress 解析处增加空闲已启动 thread 的 cleanup successor，公开 facade 未分叉。 | 后续拆分；交付时提醒 |
+| 2026-08-14 | 旧会话工具面漂移收口 | `src/main/modules/agent-control/codex-runtime/codex-runtime-production-composition.ts` | 3229 | 净 +18 | 危险 | 只把当前 root tool surface digest 传入既有 alias 解析。 | 后续拆分；交付时提醒 |
+| 2026-08-14 | 旧会话工具面漂移收口 | `src/main/modules/agent-control/runtime-core/agent-sdk-tool-executor.ts` | 1170 | 净 +4 | 一般 | 只抽出 live root 工具定义列表供 ingress 复用。2026-09-14 复查。 | 已排期：2026-09-14 |
+| 2026-08-14 | 旧会话工具面漂移收口 | `src/__tests__/codex-binding-repository-native.test.ts` | 6434 | 净 +约120 | 危险 | 套件继续覆盖绑定、收口与 successor；本轮只补空闲 thread 的表面漂移行为。 | 后续拆分；交付时提醒 |
 | 2026-08-14 | Codex 工作面硬化与拆分 | `src/main/modules/tools/browser-act-tools.ts` | 79 | 净 -约2513 | 健康 | 已按动作族拆到 navigation/form/target/pointer/upload/shared；本文件只留 facade 路由与 re-export。 | 无需处理 |
 | 2026-08-14 | Codex 工作面硬化与拆分 | `src/main/modules/tools/browser-act-form.ts` | 840 | 新文件 | 一般 | 表单与嵌套 type/press 仍集中。2026-09-14 复查是否继续下沉 search。 | 已排期：2026-09-14 |
 | 2026-08-14 | Codex 工作面硬化与拆分 | `src/main/modules/tools/browser-act-pointer.ts` | 682 | 新文件 | 一般 | 指针动作与 click-by-text 回退。2026-09-14 复查。 | 已排期：2026-09-14 |

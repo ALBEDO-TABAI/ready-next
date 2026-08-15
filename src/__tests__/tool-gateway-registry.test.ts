@@ -12,7 +12,10 @@ import {
   buildExplicitNoSkillAuthorization,
   buildSelectedSkillToolAuthorization,
 } from '../main/modules/agent-control/skills/skill-tool-authorization'
-import { COMMAND_EXEC_TOOL_TIMEOUT_MS } from '../main/modules/tools/tool-execution-timeout-policy'
+import {
+  COMMAND_EXEC_TOOL_TIMEOUT_MS,
+  USER_INTERACTION_TOOL_TIMEOUT_MS,
+} from '../main/modules/tools/tool-execution-timeout-policy'
 import { __setScopeContextEpochDatabaseForTests } from '../main/modules/agent-control/session/scope-context-epoch'
 
 test.before(() => {
@@ -69,6 +72,7 @@ test('tool gateway exposes formal capability groups and resolves grouped tools',
   const documentListWidgets = gateway.getToolDefinition('document_list_widgets')
   const skillPipeline = gateway.getToolDefinition('skill_video_expert_pipeline')
   const setupCommand = gateway.getToolDefinition('run_setup_command')
+  const askUserQuestions = gateway.getToolDefinition('ask_user_questions')
 
   assert.ok(browserInteractionTools.includes('browser_navigate'))
   assert.ok(browserInteractionTools.includes('browser_click'))
@@ -117,6 +121,8 @@ test('tool gateway exposes formal capability groups and resolves grouped tools',
   assert.equal(skillPipeline, null)
   assert.equal(setupCommand?.timeoutProfile, 'command_exec')
   assert.equal(setupCommand?.executionTimeoutMs, COMMAND_EXEC_TOOL_TIMEOUT_MS)
+  assert.equal(askUserQuestions?.timeoutProfile, 'user_interaction')
+  assert.equal(askUserQuestions?.executionTimeoutMs, USER_INTERACTION_TOOL_TIMEOUT_MS)
   assert.equal(setupCommand?.interruptBehavior, 'host_managed')
   assert.ok(gateway.listToolDefinitions().some((tool) => tool.name === 'session_search' && tool.domain === 'session'))
 })

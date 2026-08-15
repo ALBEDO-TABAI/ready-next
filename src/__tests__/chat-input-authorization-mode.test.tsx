@@ -59,16 +59,20 @@ test('chat input exposes and switches the three conversation authorization modes
     lifecycleInputBlocked = false,
     stopPending = false,
     stopError = null,
+    admissionReady = true,
+    inputValue = '发送测试',
   }: {
     isChannelScope?: boolean
     isStreaming?: boolean
     lifecycleInputBlocked?: boolean
     stopPending?: boolean
     stopError?: string | null
+    admissionReady?: boolean
+    inputValue?: string
   }) {
     const [mode, setMode] = useState<ActionAuthorizationMode>('ask')
     return createElement(ChatInput, {
-      inputValue: '发送测试',
+      inputValue,
       isStreaming,
       lifecycleInputBlocked,
       stopPending,
@@ -100,6 +104,7 @@ test('chat input exposes and switches the three conversation authorization modes
       onReferenceSelect() {},
       renderAttachmentIcon: () => null,
       ModelSelector: () => null,
+      admissionReady,
     })
   }
 
@@ -215,6 +220,26 @@ test('chat input exposes and switches the three conversation authorization modes
     )
     act(() => stopButton?.click())
     assert.equal(stops, 1, 'pending stop must not dispatch a duplicate click')
+
+    await act(async () => root.render(createElement(Harness, { admissionReady: false })))
+    const blockedSend = dom.window.document.querySelector<HTMLButtonElement>('[data-ready-agent-send="true"]')
+    assert.equal(blockedSend?.disabled, true)
+    assert.equal(blockedSend?.getAttribute('data-ready-agent-send-blocked'), '还没有可用的对话，请稍候或新建对话')
+    assert.equal(blockedSend?.style.opacity, '0.38')
+    act(() => blockedSend?.click())
+    assert.equal(sends, 3, 'unready composer must not send')
+
+    await act(async () => root.render(createElement(Harness)))
+    const idleSend = dom.window.document.querySelector<HTMLButtonElement>('[data-ready-agent-send="true"]')
+    assert.equal(idleSend?.disabled, false)
+    assert.equal(idleSend?.getAttribute('data-ready-agent-send-blocked'), null)
+    assert.equal(idleSend?.style.opacity, '1')
+
+    await act(async () => root.render(createElement(Harness, { inputValue: '' })))
+    const emptySend = dom.window.document.querySelector<HTMLButtonElement>('[data-ready-agent-send="true"]')
+    assert.equal(emptySend?.disabled, true)
+    assert.equal(emptySend?.getAttribute('data-ready-agent-send-blocked'), null)
+    assert.equal(emptySend?.style.opacity, '1', 'empty composer must stay solid; only unready/unavailable fades')
   } finally {
     await act(async () => root.unmount())
     Object.defineProperty(globalThis, 'window', { value: previousWindow, configurable: true })

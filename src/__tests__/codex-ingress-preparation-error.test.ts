@@ -51,6 +51,21 @@ test('Codex ingress preparation distinguishes configuration, resources, external
     classifyCodexIngressPreparationError(new Error('codex_runtime_host_unbound')).code,
     'host_unavailable',
   )
+  for (const code of [
+    'tool_surface_change_requires_new_thread',
+    'model_change_requires_new_thread',
+    'thread_contract_change_requires_new_thread',
+    'native_thread_config_change_requires_new_generation',
+  ]) {
+    assert.deepEqual(
+      classifyCodexIngressPreparationError(new Error(code)),
+      {
+        code: 'conversation_reset_required',
+        retryableByUser: false,
+        error: code,
+      },
+    )
+  }
 })
 
 test('Codex ingress preparation never exposes free-form or secret-bearing errors', () => {

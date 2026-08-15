@@ -34,7 +34,7 @@ export const PRIMITIVE_TOOL_DEFS: SkillToolDef[] = [
   {
     name: 'skill_run_shell',
     description:
-      '在技能沙箱内执行一次本地程序或 shell 命令。cwd=技能 managedPath；env 注入 CLAUDE_SKILL_DIR（managedPath）与 CLAUDE_SKILL_OUTPUT_DIR（per-skill output 目录）。基础白名单为 python/python3/node/bash/sh/curl/cat/ls/head/tail/grep/find/which/mkdir/pwd/echo/awk/sed；当前技能通过 metadata.requires.bins 或 host_requirements 声明的程序仅在该技能已激活且获执行同意时临时加入。禁止 rm/cp/mv。脚本优先通过 bash scripts/x.sh 或 python scripts/x.py 调用。stdout/stderr 超过 8K 字符会被截断并落到 artifact 文件。',
+      '在技能沙箱内执行一次本地程序或 shell 命令。Ready 的飞书 CLI 通道用它执行本机全局 lark-cli，以查询飞书日历、文档、表格和云空间；这不是 Ready 应用内的本地日历。cwd=技能 managedPath；env 注入 CLAUDE_SKILL_DIR（managedPath）与 CLAUDE_SKILL_OUTPUT_DIR（per-skill output 目录）。基础白名单为 python/python3/node/bash/sh/curl/cat/ls/head/tail/grep/find/which/mkdir/pwd/echo/awk/sed；当前技能通过 metadata.requires.bins 或 host_requirements 声明的程序仅在该技能已激活且获执行同意时临时加入。禁止 rm/cp/mv。脚本优先通过 bash scripts/x.sh 或 python scripts/x.py 调用。stdout/stderr 超过 8K 字符会被截断并落到 artifact 文件。',
     kind: 'primitive',
     params: zodObjectToParamList(SKILL_PRIMITIVE_SCHEMAS.skill_run_shell),
   },

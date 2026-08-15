@@ -1032,7 +1032,14 @@ export class ReadyCodexLifecycleAdapter<TExecutionResult> {
     }
     try {
       read = await this.deps.lifecycleStore.readLifecycleOperation(request)
-    } catch {
+    } catch (error) {
+      const code = error instanceof Error ? error.message : ''
+      if (action === 'stop' && code === 'active_alias_generation_mismatch') {
+        return {
+          ok: false,
+          result: this.failure(request, action, 'no_active_operation', 'invariant_violation'),
+        }
+      }
       return {
         ok: false,
         result: this.failure(request, action, 'persistence_failed', 'invariant_violation'),

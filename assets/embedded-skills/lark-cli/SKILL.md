@@ -1,7 +1,7 @@
 ---
 name: lark-cli
 version: 1.0.0
-description: "通过本机全局 lark-cli 读写飞书中的在线文档、电子表格和云空间，查询日历日程，并在 Ready Agent 对话中完成用户授权。"
+description: "通过本机全局 lark-cli 读写飞书中的在线文档、电子表格和云空间，查询飞书日历，并在 Ready Agent 对话中完成用户授权。这不是 Ready 应用内的本地日历。"
 metadata:
   requires:
     bins: ["lark-cli"]

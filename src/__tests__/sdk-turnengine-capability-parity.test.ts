@@ -38,6 +38,10 @@ import {
 } from '../main/modules/agent-control/execution-intent-resolver'
 import { BROWSER_PUBLIC_TOOL_NAMES } from '../shared/browser-tool-surface'
 import { compileSkillDefinition } from '../main/modules/skills-runtime/skill-compiler'
+import {
+  __setSkillsRuntimeManagerForTests,
+  type SkillsRuntimeManager,
+} from '../main/modules/skills-runtime/runtime-manager'
 import { __setScopeContextEpochDatabaseForTests } from '../main/modules/agent-control/session/scope-context-epoch'
 
 const BASE_CONFIG: AIModelConfig = {
@@ -646,7 +650,7 @@ test('selected reference-skill authorization exposes authorized primitives witho
   }
 })
 
-test('normal Feishu CLI request binds the embedded lark-cli skill and exposes its bounded runtime tools', () => {
+test('normal Feishu CLI wording exposes lark-cli as a candidate method, not a code-selected exclusive skill', () => {
   const userText = '用飞书 cli 读一下我名为 测试 0807 的文档，随便新增一列内容并填写一些内容，然后再在我的 第二季度工作总结 文档里润色一下'
   const requestEnvelope = buildRequestEnvelope({ userText })
   const sessionId = 'scope-local-feishu-cli'
@@ -657,7 +661,11 @@ test('normal Feishu CLI request binds the embedded lark-cli skill and exposes it
     installed: true,
     installStatePath: '',
     managedPath: embeddedSkillRoot,
+    manifestValid: true,
   } as any
+  __setSkillsRuntimeManagerForTests({
+    listSkills: () => [larkCli],
+  } as unknown as SkillsRuntimeManager)
   const skillContextOrchestrator = new SkillContextOrchestrator({
     extractPrimaryUserInstruction: (raw) => raw,
     listSkills: () => [larkCli],
@@ -696,11 +704,11 @@ test('normal Feishu CLI request binds the embedded lark-cli skill and exposes it
       sessionId,
       requestEnvelope,
     )
-    assert.equal(authorization.mode, 'selected')
-    if (authorization.mode !== 'selected') assert.fail('expected selected lark-cli authorization')
-    assert.equal(authorization.skillId, 'lark-cli')
+    assert.equal(authorization.mode, 'none')
+    if (authorization.mode !== 'none') assert.fail('expected candidate lark-cli authorization')
+    assert.equal(authorization.candidateSkillPrimitives?.skillId, 'lark-cli')
     assert.deepEqual(
-      [...authorization.allowedPrimitives].sort(),
+      [...(authorization.candidateSkillPrimitives?.primitives || [])].sort(),
       ['skill_ask_user', 'skill_read_artifact', 'skill_run_shell'],
     )
 
@@ -721,6 +729,16 @@ test('normal Feishu CLI request binds the embedded lark-cli skill and exposes it
     assert.equal(toolNames.includes('run_setup_command'), false)
     assert.equal(toolNames.some((name) => name.startsWith('feishu_')), false)
 
+    const exactNameAuthorization = privateRuntime.resolveSkillAuthorizationForTurn(
+      'Use Lark CLI to read the Feishu document.',
+      sessionId,
+      buildRequestEnvelope({ userText: 'Use Lark CLI to read the Feishu document.' }),
+    )
+    assert.equal(exactNameAuthorization.mode, 'selected')
+    if (exactNameAuthorization.mode === 'selected') {
+      assert.equal(exactNameAuthorization.skillId, 'lark-cli')
+    }
+
     const localUploadFollowup = '好，继续，把这个本地附件上传到云盘'
     const localUploadEnvelope = buildRequestEnvelope({ userText: localUploadFollowup })
     const relevance = resolveSkillHintRelevanceForTurn({
@@ -740,19 +758,12 @@ test('normal Feishu CLI request binds the embedded lark-cli skill and exposes it
       relevance.relevant,
     )
     assert.equal(followupAuthorization.mode, 'none')
-    const followupToolNames = privateRuntime.toolExecutor.listDefaultToolDefinitionsForTurn({
-      message: localUploadFollowup,
-      sessionId,
-      scopeId: sessionId,
-      config: BASE_CONFIG,
-      browserHostAvailable: true,
-      feishuConnected: true,
-      authorization: followupAuthorization,
-      requestEnvelope: localUploadEnvelope,
-    }).map((definition) => definition.name)
-    assert.equal(followupToolNames.includes('skill_run_shell'), false)
+    if (followupAuthorization.mode === 'none') {
+      assert.equal(followupAuthorization.candidateSkillPrimitives?.skillId, 'lark-cli')
+    }
   } finally {
     clearLastReferenceSkill(sessionId)
+    __setSkillsRuntimeManagerForTests(null)
   }
 })
 

@@ -142,9 +142,6 @@ export async function sendAgentMessage(input: {
     || originComposerAuthority.scopeId !== currentScopeId
     || originComposerAuthority.sessionConversationId !== currentScopeId
   ) return rejectedMessageResult('conversation_reset_required')
-  if (originSlice.aliasGeneration === null) {
-    return rejectedMessageResult('conversation_reset_required')
-  }
   if (originSlice.lifecyclePendingAction) return rejectedMessageResult('thread_busy')
   if (hasUnresolvedLifecycleUncertainty(originSlice)) {
     return rejectedMessageResult('conversation_reset_required')
@@ -244,7 +241,9 @@ export async function sendAgentMessage(input: {
       scopeId: activeScopeId,
       message: composedInput.message,
       requestId,
-      expectedAliasGeneration: originSlice.aliasGeneration as number,
+      ...(typeof originSlice.aliasGeneration === 'number'
+        ? { expectedAliasGeneration: originSlice.aliasGeneration }
+        : {}),
       expectedMessageVisibilityEpoch: originSlice.messageVisibilityEpoch,
       resources: composedResources.length > 0 ? composedResources : undefined,
       currentDocumentAnchor,

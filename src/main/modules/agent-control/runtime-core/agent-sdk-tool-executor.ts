@@ -88,17 +88,29 @@ const BROWSER_INTERACTION_TOOL_NAME_SET = new Set<string>(BROWSER_INTERACTION_TO
 const BROWSER_CONTENT_TASK_TOOL_NAME_SET = new Set<string>(BROWSER_CONTENT_TASK_TOOL_NAMES)
 const GENERAL_RESEARCH_TOOL_NAME_SET = new Set<string>(GENERAL_RESEARCH_TOOL_NAMES)
 
+export function listLiveCodexThreadToolDefinitions(): ToolDefinition[] {
+  const skills = getSkillsRuntimeManager().listSkills()
+  return defaultToolRegistry.listToolDefinitions().map((definition) => {
+    if (definition.domain !== 'skill') return definition
+    return {
+      ...definition,
+      codexExecutionSafe: skills.some((skill) =>
+        isCodexSafeHostSkillPrimitiveDefinition(definition.name, skill)),
+    }
+  })
+}
+
 export function isToolEnabledForCurrentAuthorization(
   toolName: string,
   authorization: SkillToolAuthorization,
 ): boolean {
   if (toolName === 'use_skill') return authorization.mode === 'none'
   if (!toolName.startsWith('skill_')) return true
-  return authorization.mode === 'selected'
-    && (
-      authorization.allowedTypedActions.has(toolName)
+  if (authorization.mode === 'selected') {
+    return authorization.allowedTypedActions.has(toolName)
       || authorization.allowedPrimitives.has(toolName)
-    )
+  }
+  return Boolean(authorization.candidateSkillPrimitives?.primitives.includes(toolName))
 }
 
 export interface ToolExecutorHost {
@@ -206,15 +218,7 @@ export class AgentSdkToolExecutor {
   }
 
   listCodexThreadToolDefinitions(): ToolDefinition[] {
-    const skills = getSkillsRuntimeManager().listSkills()
-    return defaultToolRegistry.listToolDefinitions().map((definition) => {
-      if (definition.domain !== 'skill') return definition
-      return {
-        ...definition,
-        codexExecutionSafe: skills.some((skill) =>
-          isCodexSafeHostSkillPrimitiveDefinition(definition.name, skill)),
-      }
-    })
+    return listLiveCodexThreadToolDefinitions()
   }
 
   listDefaultToolDefinitionsForTurn(params: {
@@ -267,7 +271,6 @@ export class AgentSdkToolExecutor {
       && composition === 'additive'
       && environmentHints?.workbenchMode === 'browser'
       && hasTrustedBrowserPageRef
-      && sdkIntentSurface.primaryIntentDomain !== 'research'
     const preResolvedBrowserSurface = params.browserHostAvailable
       && composition === 'additive'
       && (
@@ -370,7 +373,10 @@ export class AgentSdkToolExecutor {
           && !BROWSER_CONTENT_TASK_TOOL_NAME_SET.has(definition.name))
         || defaultBrowserNames.has(definition.name))
     }
-    if (capabilityResolution.visibleCapabilityGroupIds.includes('skills')) {
+    if (
+      capabilityResolution.visibleCapabilityGroupIds.includes('skills')
+      || params.authorization.mode === 'none'
+    ) {
       definitions = supplementAuthorizedSkillPrimitiveDefinitions(definitions, params.authorization)
     }
     const fallbackSkillAllowedTools =
@@ -397,8 +403,9 @@ export class AgentSdkToolExecutor {
         ? (name: string) => defaultBrowserNames.has(name)
         : undefined
       const preserveVisibleResearchTool =
-        !readOnlyResearchSkill &&
-        capabilityResolution.visibleCapabilityGroupIds.includes('general_research')
+        !directBrowserSurface
+        && !readOnlyResearchSkill
+        && capabilityResolution.visibleCapabilityGroupIds.includes('general_research')
           ? (name: string) => GENERAL_RESEARCH_TOOL_NAME_SET.has(name)
           : undefined
       definitions = filterSelectedSkillToolSurface(definitions, activeSkillAllowedTools, {
@@ -406,6 +413,13 @@ export class AgentSdkToolExecutor {
           preserveVisibleBrowserTool?.(name) === true
           || preserveVisibleResearchTool?.(name) === true
           || capabilityFloors.toolNames.has(name)
+          || (
+            composition === 'additive'
+            && (
+              name.startsWith('calendar_')
+              || name === 'ask_user_questions'
+            )
+          )
       })
     }
     if (readOnlyResearchSkill) {
@@ -416,6 +430,7 @@ export class AgentSdkToolExecutor {
     if (
       params.authorization.mode === 'none'
       && sdkIntentSurface.primaryIntentDomain === 'research'
+      && !directBrowserSurface
     ) {
       definitions = definitions.filter((definition) => (
         GENERAL_RESEARCH_TOOL_NAME_SET.has(definition.name)

@@ -4,10 +4,10 @@
  *
  * Three input shapes feed `resolvePrimitiveSkillId(sessionId?, runtimeContext?)`:
  *   - mode:'selected' authorization → primitive uses auth.skillId.
- *   - mode:'none' authorization → primitive returns
- *     `errorKind: 'primitive_no_skill_context'` (admission would normally
- *     have already rejected a model-issued primitive; this branch is the
- *     defense-in-depth surface for host/child invokers).
+ *   - mode:'none' authorization without candidates → primitive returns
+ *     `errorKind: 'primitive_no_skill_context'`.
+ *   - mode:'none' with candidateSkillPrimitives → primitive uses the
+ *     candidate skillId (additive method, not an exclusive selected skill).
  *   - No runtimeContext at all → with no session reference hint and no
  *     active context, also returns `errorKind: 'primitive_no_skill_context'`.
  */
@@ -64,6 +64,39 @@ test('mode:selected authorization routes the primitive to auth.skillId (does NOT
       data?.errorKind,
       'primitive_no_skill_context',
       'mode:selected must NOT collapse to primitive_no_skill_context — auth.skillId is the single source of truth',
+    )
+  }
+})
+
+test('mode:none candidate primitives route the primitive to the candidate skillId', async () => {
+  let structuredResult: unknown = null
+  let downstreamThrew = false
+  try {
+    structuredResult = await executeSkillTool(
+      'skill_read_artifact',
+      { relativePath: 'whatever.json' },
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      {
+        authorization: buildExplicitNoSkillAuthorization('no_skill_signal', {
+          candidateSkillPrimitives: {
+            skillId: 'unregistered-candidate-skill',
+            primitives: ['skill_read_artifact'],
+          },
+        }),
+      },
+    )
+  } catch {
+    downstreamThrew = true
+  }
+  if (!downstreamThrew) {
+    const data = outputData(structuredResult)
+    assert.notEqual(
+      data?.errorKind,
+      'primitive_no_skill_context',
+      'candidate primitives must bind a skillId for dispatch',
     )
   }
 })
