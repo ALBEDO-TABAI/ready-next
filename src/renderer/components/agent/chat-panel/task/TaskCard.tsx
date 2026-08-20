@@ -14,7 +14,7 @@ import { filterUserVisibleToolTraceEvents } from '../../../../modules/agent/tool
 import type { ToolTraceEvent } from '../../../../modules/agent/types'
 import { CapsuleChevron, ToolTimeline, ToolTimelineRow } from './ToolTimeline'
 import { emitRendererAgentMetric } from '../../../../modules/agent/rendererMetrics'
-import { progressPercent, memoryCaptureSourceLabel } from '../helpers/projection'
+import { progressPercent } from '../helpers/projection'
 import {
   taskTypeBadgeLabel,
   interactionStateBadgeLabel,
@@ -141,9 +141,6 @@ export function TaskCard({
   onToggleExpanded,
   onOpenScope,
   onOpenArtifact,
-  onDismissMemoryCapture,
-  onUndoMemoryCapture,
-  onSupplementMemoryCapture,
   onCancelDetachedTask,
   onCancelChildRun,
   dismissible = false,
@@ -170,9 +167,6 @@ export function TaskCard({
   onToggleExpanded?: () => void
   onOpenScope?: (scopeId: string) => void
   onOpenArtifact?: (path: string) => void
-  onDismissMemoryCapture?: (scopeId: string) => void
-  onUndoMemoryCapture?: (scopeId: string) => void
-  onSupplementMemoryCapture?: (scopeId: string) => void
   onCancelDetachedTask?: (scopeId: string, taskId?: string | null) => void
   onCancelChildRun?: (scopeId: string, childRunId: string) => void
   /** Presentation-only removal. It never stops the underlying task. */
@@ -216,8 +210,6 @@ export function TaskCard({
   const progressValue = progressPercent(run.progress)
   const progressLabelAlreadyHasPercent = Boolean(progressLabel && /\d+%/.test(progressLabel))
   const progressLastError = run.progress?.lastError ? formatTaskUserFacingText(run.progress.lastError) : null
-  const visibleMemoryCapture =
-    run.memoryCapture && run.memoryCapture.status === 'ready' ? run.memoryCapture : null
   const summaryPreview = formatSingleLinePreview(vm.summary)
   const hasTerminalTaskStatus = (
     run.phase === 'done'
@@ -654,56 +646,6 @@ export function TaskCard({
           )}
 
           <TaskCardFooter taskId={run.taskId} taskKindBadge={taskKindBadge} terminal={hasTerminalTaskStatus} detached={isDetachedTask} />
-        </div>
-      )}
-
-      {visibleMemoryCapture && (
-        <div style={{ padding: '0 10px 10px' }}>
-          <div
-            style={{
-              borderRadius: 8,
-              background: 'var(--ready-task-card-accent-bg, color-mix(in srgb, var(--color-blue-light) 70%, transparent))',
-              padding: '8px 9px',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 6
-            }}
-          >
-            <div className="t-ui" data-typography-role="ui" style={{ color: 'var(--text-body)' }}>
-              已记录的常驻偏好 / 当前上下文
-            </div>
-            <div className="flex flex-col" style={{ gap: 4 }}>
-              {visibleMemoryCapture.items.map((item) => (
-                <div key={item.memoryId} className="t-meta" data-typography-role="meta" style={{ color: 'var(--text-body)' }}>
-                  {memoryCaptureSourceLabel(item.sourceType)} · {item.title}
-                  {item.summary ? `：${item.summary}` : ''}
-                </div>
-              ))}
-            </div>
-            <div className="flex flex-wrap gap-1.5">
-              <button
-                type="button"
-                onClick={() => onDismissMemoryCapture?.(run.scopeId)}
-                style={{ ...TASK_ACTION_BUTTON_STYLE }}
-              >
-                确认
-              </button>
-              <button
-                type="button"
-                onClick={() => onUndoMemoryCapture?.(run.scopeId)}
-                style={{ ...TASK_ACTION_BUTTON_STYLE }}
-              >
-                撤销
-              </button>
-              <button
-                type="button"
-                onClick={() => onSupplementMemoryCapture?.(run.scopeId)}
-                style={{ ...TASK_ACTION_BUTTON_STYLE }}
-              >
-                补充
-              </button>
-            </div>
-          </div>
         </div>
       )}
 

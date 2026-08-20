@@ -151,3 +151,10 @@ export function resolveEffectiveTaskFacts(
 export function isBrowserTransactionTask(facts?: EffectiveTaskFacts | null): boolean {
   return facts?.taskType === 'browser_transaction'
 }
+
+export function isStrictEvidenceTask(facts?: EffectiveTaskFacts | null): boolean {
+  return facts?.taskType === 'artifact_task'
+    || facts?.taskType === 'transaction_task'
+    || facts?.taskType === 'research_artifact_task'
+    || (facts?.taskType === 'research' && facts.module === 'skill')
+}

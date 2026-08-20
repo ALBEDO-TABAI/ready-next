@@ -88,7 +88,6 @@ export interface AgentSdkPreparedTurnContext {
   session: AgentSdkSession
   isCurrentRun: () => boolean
   isCurrentVisibilityContext: () => boolean
-  toolArgsByName: Map<string, Record<string, unknown>[]>
   transcriptEvents: TurnTranscriptEvent[]
   usedTools: string[]
   projectionPatches: Record<string, unknown>[]

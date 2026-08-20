@@ -7,13 +7,34 @@ import { basename, dirname, isAbsolute, join, relative, resolve as resolvePath }
 import type { SearchEngine } from '../search-engine/indexer'
 import { validateWorkspaceRoot } from '../../../shared/workspace-validation'
 
+export type FrozenDirectoryAlias = {
+  logicalResourceId: string
+  name: string
+  path: string
+}
+
+export type FrozenFileAlias = FrozenDirectoryAlias & {
+  currentDigest: string
+}
+
+export type FrozenResourceRef =
+  | { kind: 'directory'; alias: FrozenDirectoryAlias }
+  | { kind: 'file'; alias: FrozenFileAlias }
+  | { kind: 'ambiguous' }
+
+export type FrozenDirectoryRef =
+  | { kind: 'resolved'; path: string }
+  | { kind: 'unmatched'; path: string }
+  | { kind: 'ambiguous' }
+
 export interface FileManagementToolContext {
   searchEngine?: SearchEngine | null
   abortSignal?: AbortSignal
   organizeStoreDir?: string | null
   workspaceRoots?: string[] | null
+  directoryAliases?: FrozenDirectoryAlias[] | null
   explicitReadablePaths?: string[] | null
-  explicitReadableResources?: Array<{ path: string; currentDigest: string }> | null
+  explicitReadableResources?: FrozenFileAlias[] | null
   runId?: string | null
   sessionId?: string | null
   scopeId?: string | null
@@ -32,6 +53,89 @@ export type FileInventoryItem = {
   mtimeMs: number | null
   depth: number
   errorKind?: string
+}
+
+export function resolveFrozenDirectoryRef(
+  rawPath: string,
+  aliases: readonly FrozenDirectoryAlias[] | null | undefined,
+): FrozenDirectoryRef {
+  const raw = String(rawPath || '').trim()
+  if (!raw || !aliases?.length) return { kind: 'unmatched', path: raw }
+  if (isAbsolute(raw) && existsSync(raw)) return { kind: 'resolved', path: raw }
+  const normalized = raw.replace(/^\/+/, '')
+  const mention = normalized.match(/^@\[([^\]]+)\](?:\/(.*))?$/)
+    || normalized.match(/^@([^/]+)(?:\/(.*))?$/)
+  const logicalMatches = aliases.filter((alias) => {
+    const logicalId = alias.logicalResourceId.trim()
+    const root = alias.path.trim()
+    return Boolean(logicalId && root && (normalized === logicalId || normalized.startsWith(`${logicalId}/`)))
+  })
+  if (logicalMatches.length === 1) {
+    const alias = logicalMatches[0]
+    const suffix = normalized.slice(alias.logicalResourceId.trim().length).replace(/^\//, '')
+    return { kind: 'resolved', path: suffix ? join(alias.path, suffix) : alias.path }
+  }
+  if (logicalMatches.length > 1) return { kind: 'ambiguous' }
+  const namedMatches = aliases.filter((alias) => {
+    const logicalId = alias.logicalResourceId.trim()
+    const name = alias.name.trim()
+    const root = alias.path.trim()
+    if (!logicalId || !name || !root) return false
+    if (mention) return mention[1] === name || mention[1] === logicalId
+    return normalized === name || normalized.startsWith(`${name}/`)
+  })
+  if (namedMatches.length > 1) return { kind: 'ambiguous' }
+  if (namedMatches.length === 0) return { kind: 'unmatched', path: raw }
+  const alias = namedMatches[0]
+  const suffix = mention
+    ? mention[2]
+    : normalized.slice(alias.name.trim().length).replace(/^\//, '')
+  return { kind: 'resolved', path: suffix ? join(alias.path, suffix) : alias.path }
+}
+
+export function resolveFrozenResourceRef(
+  rawPath: string,
+  directoryAliases: readonly FrozenDirectoryAlias[] | null | undefined,
+  fileAliases: readonly FrozenFileAlias[] | null | undefined,
+): FrozenResourceRef | null {
+  const raw = String(rawPath || '').trim()
+  if (!raw) return null
+  const normalized = raw.replace(/^\/+/, '')
+  let canonicalRaw: string | null = null
+  if (isAbsolute(raw) && existsSync(raw)) {
+    try {
+      canonicalRaw = realpathSync(raw)
+    } catch {
+      canonicalRaw = null
+    }
+  }
+  const resources: Array<{ kind: 'directory'; alias: FrozenDirectoryAlias } | { kind: 'file'; alias: FrozenFileAlias }> = [
+    ...(directoryAliases ?? []).map((alias) => ({ kind: 'directory' as const, alias })),
+    ...(fileAliases ?? []).map((alias) => ({ kind: 'file' as const, alias })),
+  ]
+  const exactMatches = resources.filter(({ alias }) => {
+    const logicalId = alias.logicalResourceId.trim()
+    const path = alias.path.trim()
+    return Boolean(logicalId && path && (
+      raw === path || canonicalRaw === path || raw === logicalId || normalized === logicalId
+    ))
+  })
+  if (exactMatches.length === 1) return exactMatches[0]
+  if (exactMatches.length > 1) return { kind: 'ambiguous' }
+  const mention = normalized.match(/^@\[([^\]]+)\]$/) || normalized.match(/^@(.+)$/)
+  const name = mention?.[1] ?? normalized
+  const namedMatches = resources.filter(({ alias }) => alias.name.trim() === name)
+  if (namedMatches.length === 1) return namedMatches[0]
+  if (namedMatches.length > 1) return { kind: 'ambiguous' }
+  return null
+}
+
+export function resolveFrozenFileRef(
+  rawPath: string,
+  aliases: readonly FrozenFileAlias[] | null | undefined,
+): FrozenFileAlias | null {
+  const resolved = resolveFrozenResourceRef(rawPath, null, aliases)
+  return resolved?.kind === 'file' ? resolved.alias : null
 }
 
 export function normalizeExplicitWorkspaceRoots(roots: string[] | null | undefined): string[] | null {
@@ -96,11 +200,16 @@ export async function authorizeRoot(
   rawRootPath: string,
   engine: SearchEngine,
   explicitRoots?: string[] | null,
+  directoryAliases?: readonly FrozenDirectoryAlias[] | null,
 ): Promise<AuthorizedRoot> {
-  const raw = String(rawRootPath || '').trim()
+  const directoryRef = resolveFrozenDirectoryRef(String(rawRootPath || '').trim(), directoryAliases)
+  if (directoryRef.kind === 'ambiguous') {
+    return { ok: false, output: { ok: false, errorKind: 'selected_resource_ambiguous' } }
+  }
+  const raw = directoryRef.path
   if (!raw) return { ok: false, output: { ok: false, error: 'rootPath is required' } }
+  if (!isAbsolute(raw)) return { ok: false, output: { ok: false, error: 'rootPath must be absolute' } }
   const rootPath = resolvePath(raw)
-  if (!isAbsolute(rootPath)) return { ok: false, output: { ok: false, error: 'rootPath must be absolute' } }
   try {
     const rootStat = await stat(rootPath)
     if (!rootStat.isDirectory()) return { ok: false, output: { ok: false, error: 'rootPath must be a directory', rootPath } }

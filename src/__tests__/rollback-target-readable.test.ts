@@ -49,7 +49,6 @@ function makeRun(overrides: Partial<TaskCardRunLike> = {}): TaskCardRunLike {
     resumableActions: [],
     steps: [],
     recentArtifacts: [],
-    memoryCapture: null,
     progress: null,
     updatedAt: '2026-05-09T10:00:00.000Z',
     ...overrides,

@@ -1,16 +1,25 @@
-import { app } from 'electron'
+import { app, shell } from 'electron'
 import { EventEmitter } from 'events'
 import { join } from 'path'
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync } from 'node:fs'
 import {
   getDefaultConfig,
   normalizeAIConfig,
   type AIModelConfig
 } from '../../../../shared/ai-providers'
+import type {
+  ReadyMemoryAddRequest,
+  ReadyMemoryConversationPolicyRequest,
+  ReadyMemoryDeleteRequest,
+  ReadyMemoryGlobalPolicyRequest,
+  ReadyMemoryPinRequest,
+  ReadyMemoryReadRequest,
+  ReadyMemoryResetRequest,
+  ReadyMemoryUpdateRequest,
+} from '../../../../shared/ready-memory'
 import type { BrowserController } from '../../browser-engine/ipc-handler'
 import { getBrowserTargetClaimService } from '../../browser-engine/browser-target-claim-singleton'
 import {
-  commitCodexFailureCoreCloseoutAndReconcileClaims,
   reconcileReleasedBrowserClaims,
 } from '../../browser-engine/browser-claim-closeout'
 import type { AskUserQuestionsCardEvent } from '../../tools/builtins/ask-user-questions'
@@ -28,19 +37,13 @@ import {
   type RunMetaRepositoryLike,
 } from './run-finalizer'
 import { finalizeStaleWithoutHandleProjections } from './stale-projection-finalizer'
-import { PromptAssemblyService } from '../prompt-assembly'
-import { selectScopeTaskIndexEntries } from '../session/daily-task-index-builder'
 import { BeliefCardStore } from '../knowledge/belief-card-store'
-import type { MirrorDb } from '../knowledge/belief-card-mirror'
-import { bumpBeliefCardAccess, readBeliefCardAccessStats } from '../knowledge/belief-card-mirror'
-import { runBeliefDecayRound, collectBeliefDecaySignals, createBeliefDecayEffectors } from '../memory/belief-decay'
 import {
-  getSpecialistContentEditProposalStore,
-} from '../agents/specialist-content-edit-runtime'
-import type { SpecialistContentEditProposalStore } from '../agents/specialist-content-edit-proposals'
+  BELIEF_CARD_STORAGE_DIRNAME,
+  migrateLegacyBeliefCardStorage,
+} from '../knowledge/belief-card-storage-migration'
 import { RunCoordinator } from '../task-projection/run-coordinator'
 import { AgentExecutionProfileResolver, resolveConversationAgentId } from '../agents/agent-execution-profile'
-import { getSpecialistBlueprintStore } from '../agents/specialist-blueprint-runtime'
 import type { DomainAdapter } from '../domain-adapters/domain-adapter'
 import { getSkillsRuntimeManager } from '../../skills-runtime/runtime-manager'
 import { SkillTaskRunRepository } from '../../repositories/skill-task-run-repository'
@@ -96,7 +99,6 @@ import { deriveTaskProjectionCanResume } from '../task-projection/task-projectio
 import { assertSkillTaskRunInvariantConsistency } from '../skills/skill-task-tracker'
 import type { ProjectionTruthSnapshot, TaskProjectionRecord } from '../contracts/run-contracts'
 import { TaskEventProofSubscription } from './task-event-proof-subscription'
-import { runStartupBeliefSync, KnowledgeWatcher } from '../knowledge/knowledge-truth-source'
 import { logAgentMetric } from '../metrics'
 import {
   createRejectedBeforePersistence,
@@ -114,21 +116,12 @@ import { clearSkillTaskProjection } from '../skills/skill-task-tracker'
 import { getEphemeralExecutionStore } from '../../tools/skill-primitives/ephemeral-execution-store'
 import { getAskUserQuestionsStore } from '../../tools/builtins/ask-user-questions-store'
 import { SidecarManager } from '../sidecar-manager'
-import { MemoryRepository } from '../../repositories/memory-repository'
-import { MemoryLifecycleManager } from '../memory/memory-lifecycle'
-import { CrystallizeScheduler, createCrystallizeEffectors, runCrystallizeRound, type CrystallizeSignals } from '../maintenance/crystallize-gate'
-import { ReflectionService } from '../reflection-service'
-import { runUserPictureCasMerge } from '../maintenance/cas-merge'
-import { UserProfileRepository } from '../../repositories/user-profile-repository'
-import { AgentPersonalityRepository } from '../../repositories/agent-personality-repository'
 import { AppSettingsRepository } from '../../repositories/app-settings-repository'
 import type { CapabilityRuntimeSnapshot } from '../../../../shared/ai-capability-runtime'
-import { ExternalMemoryProviderSlot } from '../memory/external-memory-provider-slot'
 import { ToolGateway } from '../tools-runtime/tool-gateway'
 import { buildCapabilityRuntimeSnapshot } from '../domain-adapters/capability-runtime-snapshot'
 import { TaskProjectionRepository } from '../../repositories/task-projection-repository'
 import { AgentRegistryRepository } from '../../repositories/agent-registry-repository'
-import { reconcileAgentIdentityAssets, seedBuiltinAgentAssets } from '../agents/agent-identity-assets'
 import { RunMetaRepository } from '../task-projection/run-meta-repository'
 import { wrapRunMetaRepositoryWithCloseoutSnapshot } from '../task-projection/run-meta-snapshot'
 import type { DetachedSkillTaskRecord } from '../detached-skill-task-tracker'
@@ -140,7 +133,6 @@ import type {
   ConversationScope,
   ConversationScopeMessage,
   HeartbeatSnapshot,
-  ScopeRunMemoryCapture,
   ScopeRunEventPayload,
   ScopeRunSummary
 } from '../contracts/types'
@@ -180,134 +172,17 @@ export class AgentControlRuntime extends EventEmitter {
   private readonly db = getDatabase()
   private readonly agentSessionCheckpoints: AgentSessionCheckpointRepository
   private readonly browserController: BrowserController | null
-  // EP3-A3: declared BEFORE promptAssembly so the roster closure can never
-  // observe an uninitialized field (empty/dead table degrades to []).
   private readonly agentRegistry = new AgentRegistryRepository(this.db)
   private readonly settingsRepository = new AppSettingsRepository()
   private readonly sidecar = new SidecarManager()
   private readonly codexRuntime: CodexRuntimeComposition
   private readonly orchestrator: CodexHostOrchestrator
   private readonly toolGateway = new ToolGateway()
-  private readonly memoryRepository = new MemoryRepository()
-  private readonly memoryLifecycle = new MemoryLifecycleManager(this.memoryRepository)
   private readonly taskEventProofSubscription = new TaskEventProofSubscription()
-  // P2-1 (2026-07-03) — the deterministic crystallize round (backlink rewrite /
-  // staged-expiry / duplicate marking / index rebuild) existed but was never
-  // instantiated. Wire it to the same 6h rhythm as memory lifecycle. The gate
-  // (decideCrystallizeRun) still decides run/skip each tick and always leaves a
-  // maintenance_audit metric, so skips are observable.
-  private lastCrystallizeRunAt: Date | null = null
-  private readonly crystallizeScheduler = new CrystallizeScheduler(() => this.runCrystallizeRoundOnce(false))
-  private readonly userProfileRepository = new UserProfileRepository()
-  private readonly agentPersonalityRepository = new AgentPersonalityRepository()
   private readonly executionProfileResolver = new AgentExecutionProfileResolver({
     registry: this.agentRegistry,
-    personality: this.agentPersonalityRepository,
-    getKnowledgeStore: () => this.getBeliefCardStore(),
-    readAsset: (relPath) => {
-      const path = join(app.getPath('userData'), 'agent-memory', relPath)
-      return existsSync(path) ? readFileSync(path, 'utf8') : ''
-    },
-    listBlueprints: () => getSpecialistBlueprintStore().list(['confirmed']),
   })
-  private readonly externalMemoryProviderSlot = new ExternalMemoryProviderSlot()
   private readonly sessionRecallService = new SessionRecallService(this.db)
-  private readonly reflectionService = new ReflectionService({
-    memoryRepository: this.memoryRepository,
-    userProfileRepository: this.userProfileRepository,
-    knowledgeRepository: {
-      set: async (key: string, value: string) => {
-        const rawDb = this.db.getRawDb()
-        if (!rawDb) throw new Error('Database not available')
-        rawDb
-          .prepare(
-            `
-          INSERT INTO agent_knowledge (id, agent_name, key, value, created_at, updated_at)
-          VALUES (?, ?, ?, ?, ?, ?)
-          ON CONFLICT(agent_name, key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
-        `
-          )
-          .run(
-            `knowledge-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
-            'system',
-            key,
-            value,
-            new Date().toISOString(),
-            new Date().toISOString()
-          )
-      },
-      get: async (key: string) => {
-        const rawDb = this.db.getRawDb()
-        if (!rawDb) return null
-        const row = rawDb
-          .prepare(
-            `
-          SELECT value FROM agent_knowledge WHERE agent_name = 'system' AND key = ?
-        `
-          )
-          .get(key) as { value: string } | undefined
-        return row?.value || null
-      }
-    },
-    pictureCasMerge: ({ userId, observations }) => {
-      const rawDb = this.db.getRawDb()
-      if (!rawDb) {
-        return {
-          decision: 'error',
-          reason: 'db_unavailable',
-          accepted: observations.length,
-          rejected: 0,
-          addedCount: 0,
-          droppedCount: 0,
-          mirrorSynced: false,
-        }
-      }
-      return runUserPictureCasMerge({
-        db: rawDb as never,
-        userId,
-        observations,
-        now: new Date(),
-      })
-    }
-  })
-  private readonly promptAssembly = new PromptAssemblyService({
-    getMemoryRoot: () => join(app.getPath('userData'), 'agent-memory'),
-    memoryRepository: this.memoryRepository,
-    userProfileRepository: this.userProfileRepository,
-    agentPersonalityRepository: this.agentPersonalityRepository,
-    getScopeSessionRecallCapsules: (scope) =>
-      this.sessionRecallService.listAttachedSessionRecallContexts(scope.id),
-    getAutoSessionRecallCapsules: ({ scope, userText }) =>
-      this.sessionRecallService.getAutomaticRecallCapsules({
-        query: userText,
-        currentScopeId: scope.id,
-        channelKey: this.toChannelKey(scope),
-        sourceKind: scope.sourceKind,
-        userId: scope.userId,
-        agent: scope.agent,
-        limit: 2
-      }),
-    // EP1-X1a: lazy — taskProjectionStore is declared after this field, so we
-    // resolve `this.taskProjectionStore` only when invoked at turn time.
-    getScopeTaskIndexEntries: (scopeId) =>
-      selectScopeTaskIndexEntries(this.taskProjectionStore, scopeId),
-    // EP2-K3: lazy for the same declaration-order reason.
-    getBeliefCardStore: () => this.getBeliefCardStore(),
-    // P2-4: bump mirror access_count for the cards that got injected this turn.
-    recordBeliefInjection: (relPaths) => {
-      const db = this.getBeliefCardMirrorDb()
-      if (!db) return
-      try { bumpBeliefCardAccess(db, relPaths) } catch { /* silent-catch: metrics never break assembly */ }
-    },
-    // EP3-A3: agents-table roster for the main-session charter/routing
-    // index (registry declared above; empty/dead table degrades to []).
-    getAgentRoster: () => this.agentRegistry.list(),
-    getAgentReadiness: (agentId) => this.executionProfileResolver.resolveReadiness(agentId),
-    // P1 (2026-07-03, 7/01 reliability contract D) — active browser tab URL
-    // so site cards match the current domain mid-run, not only user text.
-    getActiveBrowserUrl: () => this.orchestrator.getActiveBrowserUrl(),
-    enableDatabaseMemory: true
-  })
   private readonly agentManager: AgentManager
   private readonly runCoordinator: RunCoordinator
   private readonly runProjection: RunProjection
@@ -333,7 +208,6 @@ export class AgentControlRuntime extends EventEmitter {
         capsules,
       ),
   })
-  private knowledgeWatcher: KnowledgeWatcher | null = null
   private beliefCardStore: BeliefCardStore | null = null
   private readonly skillTaskRunRepository = new SkillTaskRunRepository(this.db)
   private readonly detachedSkills: DetachedSkillService
@@ -645,9 +519,10 @@ export class AgentControlRuntime extends EventEmitter {
         skillId,
         skills: getSkillsRuntimeManager().listSkills(),
       }),
-      resolveNativeSkillInput: ({ skillId, path }) => resolveCodexNativeSkillInput({
+      resolveNativeSkillInput: ({ skillId, path, authorizedToolNames }) => resolveCodexNativeSkillInput({
         skillId,
         path,
+        authorizedToolNames,
         skills: getSkillsRuntimeManager().listSkills(),
       }),
       resolveToolTurnSnapshot: (input) => {
@@ -729,9 +604,7 @@ export class AgentControlRuntime extends EventEmitter {
         })
       },
       commitCanonicalCoreCloseout: (input) => this.commitCanonicalCoreCloseout(input),
-      commitCodexFailureCoreCloseout: (input) => (
-        commitCodexFailureCoreCloseoutAndReconcileClaims(this.agentSessionCheckpoints, input)
-      ),
+      commitCodexProductTurnCloseout: (input) => this.commitCodexProductTurnCloseout(input),
       getActiveRunAbortSignal: (input) => this.orchestrator.getActiveRunAbortSignal(input),
       abortActiveProductRun: (input) => this.orchestrator.abortActiveProductRun(input),
       restoreActiveProductRun: (input) => {
@@ -789,14 +662,6 @@ export class AgentControlRuntime extends EventEmitter {
     return this.orchestrator
   }
 
-  getMemoryRepository(): MemoryRepository {
-    return this.memoryRepository
-  }
-
-  getMemoryLifecycleManager(): MemoryLifecycleManager {
-    return this.memoryLifecycle
-  }
-
   /** EP2-Q4a — projection store handle for the finalize-channel shadow
    *  adjudication (get/update only; lifecycle fields stay untouched there). */
   getTaskProjectionStoreForFinalize(): {
@@ -843,6 +708,31 @@ export class AgentControlRuntime extends EventEmitter {
     }
   }
 
+  async commitCodexProductTurnCloseout(
+    input: Omit<CanonicalCoreCloseoutInput, 'repairDerivedState'>,
+  ) {
+    const committed = await this.agentSessionCheckpoints.commitCanonicalCoreCloseout({
+      ...input,
+      repairDerivedState: async ({ canonicalMessage, canonicalMessageDigest }) => {
+        this.db.repairChatMessageDerivedIndexes(canonicalMessage, canonicalMessageDigest)
+      },
+    })
+    if (committed.derivedRepairError) {
+      logAgentMetric('codex_product_turn_closeout_derived_repair_failed', {
+        taskId: input.parentTaskId,
+        runId: input.ownerRunId,
+        reason: committed.derivedRepairError.message,
+      })
+    }
+    reconcileReleasedBrowserClaims(input.ownerRunId)
+    return {
+      productTerminalDigest: committed.value.canonicalMessageDigest,
+      closeoutAt: committed.value.canonicalMessage.timestamp,
+      canonicalMessage: committed.value.canonicalMessage,
+      canonicalMessageDigest: committed.value.canonicalMessageDigest,
+    }
+  }
+
   registerSessionAbortController(
     scopeId: string | null,
     sessionId: string | null,
@@ -857,10 +747,6 @@ export class AgentControlRuntime extends EventEmitter {
     controller?: AbortController,
   ): void {
     this.skillTaskRunRepository.unregisterSessionAbortController(scopeId, sessionId, controller)
-  }
-
-  getPromptAssembly(): PromptAssemblyService {
-    return this.promptAssembly
   }
 
   resolveAgentExecutionProfile(agentId: string) {
@@ -894,67 +780,14 @@ export class AgentControlRuntime extends EventEmitter {
     })
   }
 
-  /** EP1-K1: belief card store rooted at the same agent memory root. */
+  /** File-emergence knowledge cards are stored outside the retired memory root. */
   getBeliefCardStore(): BeliefCardStore {
     if (!this.beliefCardStore) {
       this.beliefCardStore = new BeliefCardStore({
-        memoryRoot: join(app.getPath('userData'), 'agent-memory'),
+        memoryRoot: join(app.getPath('userData'), BELIEF_CARD_STORAGE_DIRNAME),
       })
     }
     return this.beliefCardStore
-  }
-
-  getBeliefCardMirrorDb(): MirrorDb | null {
-    return this.db.getRawDb?.() as MirrorDb | null
-  }
-
-  /**
-   * P2-1 — run one deterministic crystallize round. The gate decides run/skip;
-   * we only advance `lastCrystallizeRunAt` when it actually ran, so the 6h
-   * interval math stays honest. Requires a live belief store. Never throws
-   * into the scheduler (round logs its own
-   * maintenance_audit; unexpected errors are swallowed by the scheduler).
-   */
-  async runCrystallizeRoundOnce(forced: boolean): Promise<void> {
-    const store = this.getBeliefCardStore()
-    if (!store) return
-    const now = new Date()
-    const signals: CrystallizeSignals = {
-      lastRunAt: this.lastCrystallizeRunAt ? this.lastCrystallizeRunAt.toISOString() : null,
-      newCheckInsWithLearning: 0,
-      newConversationTurns: 0,
-      cardWritesSinceLast: 0,
-      memoryFileMtimeChanged: false,
-      forced,
-    }
-    const result = await runCrystallizeRound({
-      signals,
-      now,
-      store,
-      effectors: createCrystallizeEffectors(store),
-    })
-    if (result.decision === 'run') {
-      this.lastCrystallizeRunAt = now
-      // P5d fired ledger (positive gate signal): crystallize actually ran live.
-      logAgentMetric('crystallize_round_fired', { report: result.report ?? null })
-      // P5d — belief-decay piggybacks the same deterministic tick (decoupled
-      // from the dormant LLM round). Closes the "belief rows excluded from L2
-      // archival but never decayed" leak (audit §2.1). Conservative decisions
-      // (demote-before-delete, two-phase L, duplicates never deleted); must
-      // never break the crystallize tick.
-      try {
-        const mirrorDb = this.getBeliefCardMirrorDb()
-        const readMirror = (relPath: string) => (mirrorDb ? readBeliefCardAccessStats(mirrorDb, relPath) : null)
-        const decayReport = runBeliefDecayRound(
-          collectBeliefDecaySignals(store, readMirror, now),
-          createBeliefDecayEffectors(store),
-          now,
-        )
-        logAgentMetric('belief_decay_round_fired', { report: decayReport })
-      } catch (error) {
-        logAgentMetric('belief_decay_round_failed', { reason: error instanceof Error ? error.message : String(error) })
-      }
-    }
   }
 
   private getDomainAdapters(): ReadonlyArray<DomainAdapter> {
@@ -969,11 +802,21 @@ export class AgentControlRuntime extends EventEmitter {
     this.taskEventProofSubscription.stop()
   }
 
-  getExternalMemoryProviderSlot(): ExternalMemoryProviderSlot {
-    return this.externalMemoryProviderSlot
-  }
-
   async start(): Promise<void> {
+    const retiredFiles = migrateLegacyBeliefCardStorage(app.getPath('userData'))
+    if (existsSync(retiredFiles.legacyRoot)) {
+      try {
+        await shell.trashItem(retiredFiles.legacyRoot)
+        logAgentMetric('legacy_memory_assets_retired', {
+          result: 'trashed',
+          migratedCardCount: retiredFiles.migrated.length,
+          archivedConflictCount: retiredFiles.archivedConflicts.length,
+        })
+      } catch (error) {
+        console.error('[runtime] legacy memory asset retirement failed:', error)
+      }
+    }
+
     try {
       await this.codexRuntime.start()
     } catch (error) {
@@ -987,44 +830,10 @@ export class AgentControlRuntime extends EventEmitter {
     this.cleanupLegacyCopawSettings()
     this.detachedSkills.publishRestoredDetachedSkillTasks()
 
-    // Start memory lifecycle manager
-    this.memoryLifecycle.start()
-    // P2-1 — deterministic crystallize round on the same 6h rhythm + a startup
-    // pass (deferred 90s so it trails first-run belief sync / seeding above the
-    // memory lifecycle's own 60s initial tick).
-    this.crystallizeScheduler.start({ startupDelayMs: 90_000 })
-
     // EP2-Q3 — additive bridge listener: terminal task events become
     // task_event proofs on the owning projection (bridge itself untouched).
     this.registerTaskEventProofSink()
     this.projectionSync.scheduleTerminalProjectionSyncRetryDrain('startup')
-    // Local archive mirror: startup full sync + hand-edit watcher. Files are
-    // never written here — file → DB only.
-    try {
-      const rawDb = this.db.getRawDb?.()
-      if (rawDb) {
-        // Identity asset reconciliation (064 reserved-slug reassign → move agents/<old> to
-        // agents/<new>) must run regardless of the knowledge toggle: the DB id already
-        // changed in the migration, so the on-disk asset dir has to follow.
-        // Idempotent via agent_identity_migration.asset_reconciled_at.
-        reconcileAgentIdentityAssets(rawDb as never, this.getBeliefCardStore())
-        // 内置专项 agent（文案/美术/智识）预设资产 seed。独立 try/catch：seed 失败不得
-        // 拖垮后续知识同步与 watcher 启动。幂等（缺失才写 + soul 守卫更新）。
-        try {
-          const seeded = seedBuiltinAgentAssets(rawDb as never, this.getBeliefCardStore())
-          if (seeded.souls || seeded.files || seeded.cards) {
-            console.log(`[runtime] seeded builtin agent presets: souls=${seeded.souls} files=${seeded.files} cards=${seeded.cards}`)
-          }
-        } catch (seedError) {
-          console.error('[runtime] builtin agent preset seeding failed:', seedError)
-        }
-        runStartupBeliefSync(rawDb as never, this.getBeliefCardStore())
-        this.knowledgeWatcher = new KnowledgeWatcher({ db: rawDb as never, store: this.getBeliefCardStore() })
-        this.knowledgeWatcher.start()
-      }
-    } catch (error) {
-      console.error('[runtime] knowledge truth-source wiring failed:', error)
-    }
 
     const sidecarEnabled = this.getSettingBool('remote_channels_enabled', true)
     const autostart = this.getSettingBool('sidecar_autostart', true)
@@ -1047,12 +856,6 @@ export class AgentControlRuntime extends EventEmitter {
     await this.codexRuntime.stop()
 
     this.sidecarPoll.stopPollLoop()
-
-    // Stop memory lifecycle manager
-    this.memoryLifecycle.stop()
-    this.crystallizeScheduler.stop()
-    this.knowledgeWatcher?.stop()
-    await this.externalMemoryProviderSlot.shutdown()
 
     await this.sidecar.stop()
   }
@@ -1180,12 +983,52 @@ export class AgentControlRuntime extends EventEmitter {
     return this.channelConfig.isChannelTypeAvailable(type)
   }
 
-  listConversationScopes(agent?: string): ConversationScope[] {
-    return this.conversationScopes.listConversationScopes(agent)
+  listConversationScopes(): ConversationScope[] {
+    return this.conversationScopes.listConversationScopes()
   }
 
   readCodexLifecycleSnapshot(request: LifecycleRequest): LifecycleOperationProjection {
     return this.codexRuntime.aliasBindingPort.readLifecycleSnapshot(request)
+  }
+
+  readProductTurnPresentation(readyRunId: string) {
+    return this.codexRuntime.readProductTurnPresentation(readyRunId)
+  }
+
+  readProductTurnPresentations(readyRunIds: readonly string[]) {
+    return this.codexRuntime.readProductTurnPresentations(readyRunIds)
+  }
+
+  readReadyMemory(request: ReadyMemoryReadRequest) {
+    return this.codexRuntime.memoryRuntime.read(request)
+  }
+
+  setReadyMemoryGlobalPolicy(request: ReadyMemoryGlobalPolicyRequest) {
+    return this.codexRuntime.memoryRuntime.setGlobalPolicy(request)
+  }
+
+  setReadyMemoryConversationPolicy(request: ReadyMemoryConversationPolicyRequest) {
+    return this.codexRuntime.memoryRuntime.setConversationPolicy(request)
+  }
+
+  addReadyMemory(request: ReadyMemoryAddRequest) {
+    return this.codexRuntime.memoryRuntime.add(request)
+  }
+
+  updateReadyMemory(request: ReadyMemoryUpdateRequest) {
+    return this.codexRuntime.memoryRuntime.update(request)
+  }
+
+  pinReadyMemory(request: ReadyMemoryPinRequest) {
+    return this.codexRuntime.memoryRuntime.pin(request)
+  }
+
+  deleteReadyMemory(request: ReadyMemoryDeleteRequest) {
+    return this.codexRuntime.memoryRuntime.delete(request)
+  }
+
+  resetReadyMemory(request: ReadyMemoryResetRequest) {
+    return this.codexRuntime.memoryRuntime.reset(request)
   }
 
   listScopeRuns(payload?: {
@@ -1247,15 +1090,6 @@ export class AgentControlRuntime extends EventEmitter {
     } catch {
       return null
     }
-  }
-
-  /** EP3-A4 — agents-table registry for the handoff proposal flow. */
-  getAgentRegistry(): AgentRegistryRepository {
-    return this.agentRegistry
-  }
-
-  getSpecialistContentEditProposalStore(): SpecialistContentEditProposalStore {
-    return getSpecialistContentEditProposalStore()
   }
 
   /**
@@ -1667,6 +1501,7 @@ export class AgentControlRuntime extends EventEmitter {
             responseText: result.responseText,
             canonicalMessage: result.canonicalMessage,
             canonicalMessageDigest: result.canonicalMessageDigest,
+            productTurnReceipt: result.productTurnReceipt,
           }
         }
         const errorKind = TERMINAL_ERROR_KINDS.includes(result.errorKind as never)
@@ -1683,6 +1518,10 @@ export class AgentControlRuntime extends EventEmitter {
           error: result.error || 'codex_closeout_contract_invalid',
           errorKind,
           productOutcomeDigest: result.productOutcomeDigest,
+          responseText: result.canonicalMessage?.content || '',
+          canonicalMessage: result.canonicalMessage as NonNullable<typeof result.canonicalMessage>,
+          canonicalMessageDigest: result.canonicalMessageDigest as string,
+          productTurnReceipt: result.productTurnReceipt,
         }
       },
     })
@@ -1959,45 +1798,6 @@ export class AgentControlRuntime extends EventEmitter {
     }
   }
 
-  /**
-   * Reflect on a completed conversation and extract learnings
-   */
-  private async reflectOnConversation(
-    scope: ConversationScope,
-    usedTools: string[]
-  ): Promise<ScopeRunMemoryCapture | null> {
-    try {
-      // Get conversation messages
-      const messages = this.db.getChatMessages(scope.id).map((msg) => ({
-        role: msg.role,
-        content: msg.content
-      }))
-
-      // Run reflection
-      const result = await this.reflectionService.reflectOnConversation({
-        scope,
-        messages,
-        usedTools,
-        success: true
-      })
-      return result.memoryCapture || null
-    } catch (error) {
-      console.error('[Runtime] Failed to reflect on conversation:', error)
-      logAgentMetric('reflection_outcome', {
-        scopeId: scope.id,
-        agent: scope.agent,
-        decision: 'error',
-        reason: error instanceof Error ? error.message : String(error),
-        preferences: 0,
-        accepted: null,
-        rejected: null,
-        addedCount: null,
-        droppedCount: null,
-        summaryKept: false,
-      })
-      return null
-    }
-  }
 
   private toChannelKey(scope: ConversationScope): string {
     const sourceId = scope.sourceKind === 'local' ? 'app' : scope.sourceId

@@ -13,13 +13,13 @@ import {
   CalendarCaptureSessionSchema,
 } from '../main/modules/tools/schemas/calendar-schemas'
 
-test('CalendarListWindowSchema requires start + end', () => {
+test('CalendarListWindowSchema uses the frozen turn window when bounds are omitted', () => {
   assert.equal(
     CalendarListWindowSchema.safeParse({ start: '2026-04-22', end: '2026-04-23' }).success,
     true,
   )
-  assert.equal(CalendarListWindowSchema.safeParse({ start: '2026-04-22' }).success, false)
-  assert.equal(CalendarListWindowSchema.safeParse({}).success, false)
+  assert.equal(CalendarListWindowSchema.safeParse({ start: '2026-04-22' }).success, true)
+  assert.equal(CalendarListWindowSchema.safeParse({}).success, true)
 })
 
 test('CalendarCreateEventSchema requires title + startTime + endTime, others optional', () => {
@@ -44,18 +44,18 @@ test('CalendarCreateEventSchema requires title + startTime + endTime, others opt
   assert.equal(CalendarCreateEventSchema.safeParse({ title: 't' }).success, false)
 })
 
-test('CalendarUpdateEventSchema requires id; all other fields optional', () => {
+test('CalendarUpdateEventSchema can use the frozen event target when id is omitted', () => {
   assert.equal(CalendarUpdateEventSchema.safeParse({ id: 'e-1' }).success, true)
-  assert.equal(CalendarUpdateEventSchema.safeParse({}).success, false)
+  assert.equal(CalendarUpdateEventSchema.safeParse({}).success, true)
   assert.equal(
     CalendarUpdateEventSchema.safeParse({ id: 'e-1', title: '新' }).success,
     true,
   )
 })
 
-test('CalendarDeleteEventSchema requires id', () => {
+test('CalendarDeleteEventSchema can use the frozen event target when id is omitted', () => {
   assert.equal(CalendarDeleteEventSchema.safeParse({ id: 'e-1' }).success, true)
-  assert.equal(CalendarDeleteEventSchema.safeParse({}).success, false)
+  assert.equal(CalendarDeleteEventSchema.safeParse({}).success, true)
 })
 
 test('CalendarCaptureSessionSchema accepts empty object', () => {

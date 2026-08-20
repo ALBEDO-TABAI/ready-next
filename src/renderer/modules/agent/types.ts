@@ -56,7 +56,6 @@ export interface Agent {
   displayName: string
   avatar: string
   status: 'idle' | 'working' | 'done' | 'error' | 'cancelled'
-  selected: boolean
 }
 
 export interface ChatAttachment {
@@ -158,6 +157,8 @@ export interface ToolTraceEvent {
   timestamp: Date
   /** 工具名（SDK executor 事件携带；orchestrator 输出流事件缺省）。 */
   toolName?: string
+  /** 仅供活动分类，不在展开详情中直接显示内部工具名。 */
+  hideToolName?: boolean
   /** L3 详情：call = 入参 JSON 预览，result = 输出全文（main 侧已脱敏截断）。 */
   detail?: string
 }
@@ -175,52 +176,6 @@ export type AgentModuleKind =
   | 'map'
   | 'system'
 export type ModuleExecutionKind = 'deterministic' | 'interactive' | 'job' | 'pipeline'
-export type AgentMemoryLayer = 'l0' | 'l1' | 'l2' | 'recall'
-export type AgentMemorySourceType =
-  | 'resident_agent'
-  | 'resident_user'
-  | 'scope_memory'
-  | 'trigger_rule'
-  | 'session_recall'
-
-export interface AgentMemoryRef {
-  id: string
-  layer: AgentMemoryLayer
-  sourceType: AgentMemorySourceType
-  title: string
-  summary?: string | null
-  path?: string | null
-  triggerId?: string | null
-  sensitive?: boolean
-  loadedAt: string
-}
-
-export interface AgentTriggerHit {
-  id: string
-  label: string
-  module?: AgentModuleKind | null
-  blocking: boolean
-  refs: string[]
-}
-
-export interface AgentContextBudget {
-  totalChars: number
-  l0Chars: number
-  l1Chars: number
-  l2Chars: number
-  rulesChars?: number
-  knowledgeIndexChars?: number
-  agentRoutingChars?: number
-  recallChars?: number
-  autoRecallChars?: number
-  sectionChars?: Record<string, number>
-  totalBytes?: number
-  sectionBytes?: Record<string, number>
-  truncations?: string[]
-  truncationReasons?: Record<string, 'section_budget'>
-  droppedRefs: string[]
-}
-
 export interface AgentArtifact {
   id: string
   module: AgentModuleKind
@@ -311,21 +266,6 @@ export interface ScopeRunSkillHandoff {
   taskPath: string | null
   outputPath: string | null
   updatedAt: string | null
-}
-
-export interface ScopeRunMemoryCaptureItem {
-  memoryId: string
-  category: 'user_preference' | 'summary'
-  sourceType: Exclude<AgentMemorySourceType, 'session_recall'>
-  title: string
-  summary?: string | null
-}
-
-export interface ScopeRunMemoryCapture {
-  status: 'ready' | 'dismissed' | 'reverted'
-  createdAt: string
-  note?: string | null
-  items: ScopeRunMemoryCaptureItem[]
 }
 
 export interface ScopeRunExecutionDiagnostics {
@@ -465,6 +405,9 @@ export interface ScopeRunState {
     | 'cancelled'
   terminalReason?: ScopeRunTerminalReason | null
   toolTrace: ToolTraceEvent[]
+  productTurnReceiptRevision?: number
+  productTurnPresentationDigest?: string
+  productTurnCanonicalMessageId?: string
   activityNarration?: ScopeRunActivityNarration | null
   startedAt: string | null
   updatedAt: string | null
@@ -474,9 +417,6 @@ export interface ScopeRunState {
   executionKind?: ModuleExecutionKind | null
   jobId?: string | null
   artifactRefs?: AgentArtifact[]
-  memoryRefs?: AgentMemoryRef[]
-  triggerHits?: AgentTriggerHit[]
-  contextBudget?: AgentContextBudget | null
   contextUsage?: ContextUsageSnapshot | null
   ownerResourceId?: string | null
   lastEvidenceAt?: string | null
@@ -515,7 +455,6 @@ export interface ScopeRunState {
   recentArtifacts?: AgentArtifact[]
   taskContinuation?: ScopeRunTaskContinuation | null
   progress?: ScopeRunSkillProgress | null
-  memoryCapture?: ScopeRunMemoryCapture | null
   executionDiagnostics?: ScopeRunExecutionDiagnostics | null
 }
 

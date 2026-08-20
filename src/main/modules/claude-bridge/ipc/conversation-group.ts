@@ -3,7 +3,7 @@
 // Bundles the read/write/cache channels that expose conversation-scope state + attachment
 // surface to the renderer:
 //
-//   agent:listConversationScopes        (list scopes, optionally filtered by agent)
+//   agent:listConversationScopes        (list scopes)
 //   agent:listScopeRuns                 (list active/completed scope-runs)
 //   agent:readCodexLifecycleSnapshot    (durable Codex operation projection)
 //   agent:getConversationScopeMessages  (full chat_messages stream for a scope)
@@ -32,7 +32,11 @@
 // reserved for true singletons; mixed/bound surfaces stay on the per-group
 // interface where they belong.
 import type { IpcMain } from 'electron'
-import { parseLifecycleRequest, type LifecycleRequest } from '../../../../shared/ipc-contracts/agent-runtime'
+import {
+  parseLifecycleRequest,
+  type LifecycleRequest,
+  type ProductTurnReceipt,
+} from '../../../../shared/ipc-contracts/agent-runtime'
 import type { LifecycleOperationProjection } from '../../../../shared/ipc-contracts/agent-lifecycle-snapshot'
 import {
   parseActionAuthorizationMode,
@@ -109,7 +113,7 @@ export interface ConversationGroupDeps {
    * Bound `runtime.listConversationScopes` — sync, returns the scope rows
    * optionally filtered by agent.
    */
-  listConversationScopes(agent?: string): ConversationScope[]
+  listConversationScopes(): ConversationScope[]
   /**
    * Bound `runtime.listScopeRuns` — sync, returns the scope-run summary
    * window. Status narrowing happens INSIDE the handler before this is
@@ -121,6 +125,8 @@ export interface ConversationGroupDeps {
     limit?: number
   }): ScopeRunSummary[]
   readCodexLifecycleSnapshot(request: LifecycleRequest): LifecycleOperationProjection
+  readProductTurnPresentation(readyRunId: string): ProductTurnReceipt
+  readProductTurnPresentations(readyRunIds: readonly string[]): ProductTurnReceipt[]
   /**
    * Bound `runtime.getConversationScopeMessages` — sync, returns the full
    * chat_messages stream for the scope.
@@ -164,6 +170,8 @@ const CHANNELS = [
   'agent:listConversationScopes',
   'agent:listScopeRuns',
   'agent:readCodexLifecycleSnapshot',
+  'agent:readProductTurnPresentation',
+  'agent:readProductTurnPresentations',
   'agent:getConversationScopeMessages',
   'agent:setActionAuthorizationMode',
   'agent:listScopeAttachments',
@@ -183,13 +191,13 @@ export const conversationGroup: IpcChannelGroup<ConversationGroupDeps> = {
       try { ipcMain.removeHandler(channel) } catch { /* ignore — handler may not exist */ }
     }
 
-    ipcMain.handle('agent:listConversationScopes', (_, payload?: { agent?: string }): IPCResponse => {
+    ipcMain.handle('agent:listConversationScopes', (): IPCResponse => {
       try {
-        const scopes = deps.listConversationScopes(payload?.agent)
-        deps.log(`[ipc] agent:listConversationScopes agent=${payload?.agent || 'all'} count=${scopes.length}`)
+        const scopes = deps.listConversationScopes()
+        deps.log(`[ipc] agent:listConversationScopes count=${scopes.length}`)
         return { success: true, data: scopes }
       } catch (error) {
-        deps.log(`[ipc] agent:listConversationScopes failed agent=${payload?.agent || 'all'} error=${error instanceof Error ? error.message : String(error)}`)
+        deps.log(`[ipc] agent:listConversationScopes failed error=${error instanceof Error ? error.message : String(error)}`)
         return { success: false, error: error instanceof Error ? error.message : String(error) }
       }
     })
@@ -221,6 +229,32 @@ export const conversationGroup: IpcChannelGroup<ConversationGroupDeps> = {
           success: true,
           data: deps.readCodexLifecycleSnapshot(parseLifecycleRequest(payload)),
         }
+      } catch (error) {
+        return { success: false, error: error instanceof Error ? error.message : String(error) }
+      }
+    })
+
+    ipcMain.handle('agent:readProductTurnPresentation', (_, payload: unknown): IPCResponse => {
+      try {
+        const readyRunId = typeof payload === 'object' && payload
+          ? String((payload as { readyRunId?: unknown }).readyRunId || '').trim()
+          : ''
+        if (!readyRunId) throw new Error('product_turn_run_id_invalid')
+        return { success: true, data: deps.readProductTurnPresentation(readyRunId) }
+      } catch (error) {
+        return { success: false, error: error instanceof Error ? error.message : String(error) }
+      }
+    })
+
+    ipcMain.handle('agent:readProductTurnPresentations', (_, payload: unknown): IPCResponse => {
+      try {
+        const readyRunIds = typeof payload === 'object' && payload
+          && Array.isArray((payload as { readyRunIds?: unknown }).readyRunIds)
+          ? (payload as { readyRunIds: unknown[] }).readyRunIds
+            .map((value) => String(value || '').trim())
+            .filter(Boolean)
+          : []
+        return { success: true, data: deps.readProductTurnPresentations(readyRunIds) }
       } catch (error) {
         return { success: false, error: error instanceof Error ? error.message : String(error) }
       }

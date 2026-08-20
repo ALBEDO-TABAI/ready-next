@@ -10,6 +10,7 @@ import {
   withSessionSliceAndActiveRuntimeMirror,
   type AgentStoreLike,
 } from './runtime-driver-session-state'
+import { applyProductTurnReceipt } from './productTurnReceipt'
 
 function scopeRunEventMatchesCurrentIdentity(
   state: any,
@@ -93,7 +94,7 @@ export function installRuntimeDriverScopeEvents(deps: {
           : toolTrace
         const patch = deriveScopeRunStatePatch(event, previousForRun)
 
-        return {
+        const nextRun: ScopeRunState = {
           scopeId: event.scopeId,
           agent: previousForRun?.agent || event.agent,
           ownerAgentId: event.ownerAgentId ?? previousForRun?.ownerAgentId ?? null,
@@ -112,9 +113,6 @@ export function installRuntimeDriverScopeEvents(deps: {
           executionKind: patch.executionKind ?? event.executionKind ?? previousForRun?.executionKind ?? null,
           jobId: patch.jobId ?? event.jobId ?? previousForRun?.jobId ?? null,
           artifactRefs: mergeArtifacts(previousForRun?.artifactRefs, patch.artifactRefs ?? event.artifactRefs),
-          memoryRefs: patch.memoryRefs ?? event.memoryRefs ?? previousForRun?.memoryRefs ?? [],
-          triggerHits: patch.triggerHits ?? event.triggerHits ?? previousForRun?.triggerHits ?? [],
-          contextBudget: patch.contextBudget ?? event.contextBudget ?? previousForRun?.contextBudget ?? null,
           contextUsage: patch.contextUsage ?? event.contextUsage ?? previousForRun?.contextUsage ?? null,
           ownerResourceId: patch.ownerResourceId ?? event.ownerResourceId ?? previousForRun?.ownerResourceId ?? null,
           lastEvidenceAt: patch.lastEvidenceAt ?? event.lastEvidenceAt ?? previousForRun?.lastEvidenceAt ?? null,
@@ -143,9 +141,11 @@ export function installRuntimeDriverScopeEvents(deps: {
           resumableActions: patch.resumableActions ?? previousForRun?.resumableActions ?? [],
           recentArtifacts: patch.recentArtifacts ?? previousForRun?.recentArtifacts ?? [],
           taskContinuation: patch.taskContinuation ?? previousForRun?.taskContinuation ?? null,
-          memoryCapture: patch.memoryCapture ?? previousForRun?.memoryCapture ?? null,
           error: patch.error ?? event.error ?? previousForRun?.error ?? null,
         }
+        return event.productTurnReceipt
+          ? applyProductTurnReceipt(nextRun, event.productTurnReceipt)
+          : nextRun
       })
 
       if (!scopeRunEventMatchesCurrentIdentity(store.getState(), event)) return

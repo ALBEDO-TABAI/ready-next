@@ -496,7 +496,8 @@ export async function streamChatAsResponses(input: {
   abort: () => void
   maxBytes?: number
   maxEvents?: number
-  streamDeadlineMs?: number
+  maxItemBytes?: number
+  eventIdleMs?: number
   postTerminalDrainMs?: number
   admitToolResponse?: (calls: readonly Readonly<{
     codexCallId: string
@@ -524,12 +525,13 @@ export async function streamChatAsResponses(input: {
   let choiceFinished = false
   let sawDone = false
   let bytes = 0
-  let events = 0
+  let structuralEvents = 0
   const maxBytes = input.maxBytes || 8 * 1024 * 1024
   const maxEvents = input.maxEvents || 4_096
-  const streamDeadlineMs = input.streamDeadlineMs || 120_000
+  const maxItemBytes = input.maxItemBytes || 2 * 1024 * 1024
+  const eventIdleMs = input.eventIdleMs || 120_000
   const postTerminalDrainMs = input.postTerminalDrainMs || 1_000
-  const startedAt = Date.now()
+  let lastProgressAt = Date.now()
   let terminalAt: number | null = null
   let sawExpectedModel = false
   const preSemanticState = createCodexChatPreSemanticState()
@@ -549,12 +551,12 @@ export async function streamChatAsResponses(input: {
 
   const readNext = async (): Promise<ReadableStreamReadResult<Uint8Array>> => {
     const deadline = terminalAt === null
-      ? startedAt + streamDeadlineMs
-      : Math.min(startedAt + streamDeadlineMs, terminalAt + postTerminalDrainMs)
+      ? lastProgressAt + eventIdleMs
+      : terminalAt + postTerminalDrainMs
     const remaining = deadline - Date.now()
     if (remaining <= 0) {
       throw new CodexModelGatewayChatError(
-        terminalAt === null ? 'gateway_chat_stream_deadline' : 'gateway_chat_post_terminal_timeout',
+        terminalAt === null ? 'gateway_chat_event_idle_timeout' : 'gateway_chat_post_terminal_timeout',
       )
     }
     let timeout: ReturnType<typeof setTimeout> | null = null
@@ -563,7 +565,7 @@ export async function streamChatAsResponses(input: {
         reader.read(),
         new Promise<never>((_resolve, reject) => {
           timeout = setTimeout(() => reject(new CodexModelGatewayChatError(
-            terminalAt === null ? 'gateway_chat_stream_deadline' : 'gateway_chat_post_terminal_timeout',
+            terminalAt === null ? 'gateway_chat_event_idle_timeout' : 'gateway_chat_post_terminal_timeout',
           )), remaining)
         }),
       ])
@@ -584,6 +586,9 @@ export async function streamChatAsResponses(input: {
       }))
     }
     text += delta
+    if (Buffer.byteLength(text, 'utf8') > maxItemBytes) {
+      throw new CodexModelGatewayChatError('gateway_chat_item_too_large')
+    }
     input.write(event('response.output_text.delta', {
       output_index: messageOutputIndex, content_index: 0, item_id: messageId, delta,
     }))
@@ -601,6 +606,9 @@ export async function streamChatAsResponses(input: {
       }))
     }
     reasoning += delta
+    if (Buffer.byteLength(reasoning, 'utf8') > maxItemBytes) {
+      throw new CodexModelGatewayChatError('gateway_chat_item_too_large')
+    }
     input.write(event('response.reasoning_summary_text.delta', {
       output_index: reasoningOutputIndex,
       item_id: reasoningId,
@@ -624,10 +632,12 @@ export async function streamChatAsResponses(input: {
       for (const block of parsed.blocks) {
         const raw = dataFromBlock(block)
         if (!raw) continue
-        events += 1
-        if (events > maxEvents) throw new CodexModelGatewayChatError('gateway_chat_event_limit_exceeded')
         if (raw === '[DONE]') {
           if (sawDone) return void fail('gateway_chat_done_duplicate')
+          structuralEvents += 1
+          if (structuralEvents > maxEvents) {
+            throw new CodexModelGatewayChatError('gateway_chat_event_limit_exceeded')
+          }
           sawDone = true
           terminalAt = Date.now()
           continue
@@ -652,6 +662,7 @@ export async function streamChatAsResponses(input: {
         }
         const payload = inspection.payload
         sawExpectedModel = true
+        lastProgressAt = Date.now()
         if (payload.usage !== undefined && payload.usage !== null) {
           if (usageSeen) return void fail('gateway_chat_usage_duplicate')
           if (!isRecord(payload.usage)) return void fail('gateway_chat_usage_invalid')
@@ -663,6 +674,22 @@ export async function streamChatAsResponses(input: {
           usageSeen = true
         }
         if (!Array.isArray(payload.choices)) return void fail('gateway_chat_choices_invalid')
+        const hasStructuralContent = payload.usage !== undefined
+          || payload.choices.some((choice) => isRecord(choice) && (
+            choice.finish_reason !== undefined
+            || (isRecord(choice.delta) && (
+              choice.delta.role !== undefined
+              || (Array.isArray(choice.delta.tool_calls) && choice.delta.tool_calls.some(
+                (call) => isRecord(call) && (call.id !== undefined || call.type !== undefined),
+              ))
+            ))
+          ))
+        if (hasStructuralContent) {
+          structuralEvents += 1
+          if (structuralEvents > maxEvents) {
+            throw new CodexModelGatewayChatError('gateway_chat_event_limit_exceeded')
+          }
+        }
         if (payload.choices.length > 1) return void fail('gateway_chat_choices_invalid')
         if (choiceFinished && payload.choices.length > 0) {
           return void fail('gateway_chat_choice_after_finish')
@@ -808,7 +835,12 @@ export async function streamChatAsResponses(input: {
               current.name += fn.name
               if (input.allowedToolNames.has(current.name)) current.matchedAuthorizedName = true
             }
-            if (typeof fn.arguments === 'string') current.arguments += fn.arguments
+            if (typeof fn.arguments === 'string') {
+              current.arguments += fn.arguments
+              if (Buffer.byteLength(current.arguments, 'utf8') > maxItemBytes) {
+                throw new CodexModelGatewayChatError('gateway_chat_item_too_large')
+              }
+            }
             tools.set(index, current)
           }
           if (choice.finish_reason !== undefined && choice.finish_reason !== null) choiceFinished = true

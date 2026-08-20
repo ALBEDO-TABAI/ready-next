@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { join } from 'node:path'
 import test from 'node:test'
+import { disabledReadyMemorySnapshot } from './utils/ready-memory-fixture'
 
 import type { DatabaseConnection } from '../main/modules/database'
 import { __runMigrationForTests, type MigrationDatabase } from '../main/modules/migrations'
@@ -482,6 +483,7 @@ function rootThread(turns: CodexTurn[]): CodexThread {
 function product(): CodexProductTurnRuntimeRead {
   const prepared = {
     preparationContract: 'codex_product_run_e1' as const,
+    readyMemorySnapshot: disabledReadyMemorySnapshot(),
     taskId: 'task-1', runId: 'run-1',
     conversationAlias: { aliasId: 'scope-1', aliasGeneration: 1 },
     ingressBinding: {
@@ -518,7 +520,16 @@ function product(): CodexProductTurnRuntimeRead {
       resourceOwnerId: 'owner-1',
     },
     neutralProjectionSeed: { taskTitle: 'Working', taskSummary: 'Working' },
-    productBudgetSeed: { maxIterations: 8, maxToolCalls: 4, maxParallelToolGroups: 1 },
+    productBudgetSeed: {
+      maxIterations: 8,
+      maxToolCalls: 4,
+      maxParallelToolGroups: 1,
+      lanes: {
+        ordinary: { maxIterations: 7, maxToolCalls: 4, maxParallelToolGroups: 1 },
+        delivery: { maxIterations: 0, maxToolCalls: 0, maxParallelToolGroups: 0 },
+        final: { maxIterations: 1 },
+      },
+    },
   }
   return {
     readyRunId: 'run-1', readyTaskId: 'task-1', readyScopeId: 'scope-1',

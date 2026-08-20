@@ -12,6 +12,7 @@ export interface ToolTraceRowInput {
   text: string
   timestamp: Date
   toolName?: string
+  hideToolName?: boolean
   detail?: string
 }
 
@@ -63,6 +64,8 @@ export interface ToolTimelineItem {
   durationLabel?: string
   /** 工具名（富事件携带；L3 详情标题）。 */
   toolName?: string
+  /** 工具名仅供分类，展开详情不直接显示。 */
+  hideToolName?: boolean
   /** L3 入参 JSON 预览（call 事件 detail）。 */
   callDetail?: string
   /** L3 输出全文（result 事件 detail）。 */
@@ -83,6 +86,7 @@ export function deriveToolTimelineItems(events: ReadonlyArray<ToolTraceRowInput>
         resultText: null,
         status: 'running',
         ...(event.toolName ? { toolName: event.toolName } : {}),
+        ...(event.hideToolName ? { hideToolName: true } : {}),
         ...(event.detail ? { callDetail: event.detail } : {}),
       })
       continue
@@ -95,6 +99,7 @@ export function deriveToolTimelineItems(events: ReadonlyArray<ToolTraceRowInput>
         resultText: event.text,
         status: TOOL_RESULT_ERROR_PATTERN.test(event.text) ? 'error' : 'done',
         ...(event.toolName ? { toolName: event.toolName } : {}),
+        ...(event.hideToolName ? { hideToolName: true } : {}),
         ...(event.detail ? { resultDetail: event.detail } : {}),
       })
       continue
@@ -103,6 +108,7 @@ export function deriveToolTimelineItems(events: ReadonlyArray<ToolTraceRowInput>
     item.resultText = event.text
     item.status = TOOL_RESULT_ERROR_PATTERN.test(event.text) ? 'error' : 'done'
     if (!item.toolName && event.toolName) item.toolName = event.toolName
+    if (event.hideToolName) item.hideToolName = true
     if (event.detail) item.resultDetail = event.detail
     const durationLabel = formatToolTraceDuration(event.timestamp.getTime() - open.timestamp.getTime())
     if (durationLabel) item.durationLabel = durationLabel

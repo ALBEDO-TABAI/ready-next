@@ -57,7 +57,6 @@ export interface PersistedScopeRunSummary {
   recentArtifacts?: ScopeRunState['recentArtifacts']
   taskContinuation?: ScopeRunState['taskContinuation']
   progress?: ScopeRunState['progress']
-  memoryCapture?: ScopeRunState['memoryCapture']
   blockedReason?: string | null
   error?: string | null
   updatedAt: string
@@ -276,23 +275,6 @@ export function activeChildRunDebugRow(row: ActiveChildRunSummaryData, fallbackS
     updatedAt,
     toolTrace: [],
   }, row)
-}
-
-export function memoryCaptureSourceLabel(
-  sourceType: 'resident_agent' | 'resident_user' | 'scope_memory' | 'trigger_rule' | undefined
-): string {
-  switch (sourceType) {
-    case 'resident_agent':
-      return '常驻记忆'
-    case 'resident_user':
-      return '用户偏好'
-    case 'scope_memory':
-      return '当前任务摘要'
-    case 'trigger_rule':
-      return '规则沉淀'
-    default:
-      return '记忆'
-  }
 }
 
 export function mapScopeToConversation(scope: ConversationScope) {

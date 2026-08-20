@@ -80,8 +80,6 @@ type SendAndCollectExecutionResult = SendAndCollectResult & {
   contextUsage?: ExecutionHostResult['contextUsage']
 }
 
-type PersonaSystemPromptResolver = (agent: string, scopeId: string | undefined) => Promise<string | undefined>
-
 export interface StopActiveGenerationResult {
   runId: string | null
 }
@@ -148,7 +146,6 @@ export class ReadyAgentOrchestrator extends EventEmitter {
   private readonly nowMs: () => number
   private readonly scheduleNoProgressCheck: (callback: () => void, delayMs: number) => unknown
   private readonly clearNoProgressCheck: (handle: unknown) => void
-  private personaResolver: PersonaSystemPromptResolver | null = null
   private childLivenessProvider: ChildLivenessProvider | null = null
 
   constructor(options?: ReadyAgentOrchestratorOptions) {
@@ -536,10 +533,6 @@ export class ReadyAgentOrchestrator extends EventEmitter {
     this.sdkEngine.setCancelPendingToolActions(canceller)
   }
 
-  setPersonaResolver(resolver: PersonaSystemPromptResolver | null): void {
-    this.personaResolver = resolver
-  }
-
   async send(
     agent: string,
     message: string | MultimodalBlock[],
@@ -598,21 +591,8 @@ export class ReadyAgentOrchestrator extends EventEmitter {
     this.sessions.setState(taskKey, 'queued')
     this.registerActiveRun(agent, effectiveSessionId, effectiveRequestId, noProgressTimeoutMs)
     try {
-      let resolvedSystemPrompt = systemPrompt
-      if (systemPrompt === undefined && this.personaResolver) {
-        try {
-          resolvedSystemPrompt = await this.personaResolver(agent, sessionId)
-        } catch (error) {
-          this.sessions.setState(
-            taskKey,
-            'failed',
-            error instanceof Error ? error.message : String(error),
-          )
-          throw error
-        }
-      }
-      if (resolvedSystemPrompt) {
-        this.sdkEngine.setSystemPrompt(internalKey, resolvedSystemPrompt)
+      if (systemPrompt) {
+        this.sdkEngine.setSystemPrompt(internalKey, systemPrompt)
       }
       const result = await this.sdkEngine.sendMessage(internalKey, message, effectiveRequestId, {
         taskId,

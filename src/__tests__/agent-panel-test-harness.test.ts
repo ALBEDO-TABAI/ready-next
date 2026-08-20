@@ -46,9 +46,6 @@ function run(input: Partial<ScopeRunState> = {}): ScopeRunState {
     executionKind: 'interactive',
     jobId: null,
     artifactRefs: [],
-    memoryRefs: [],
-    triggerHits: [],
-    contextBudget: null,
     ownerResourceId: null,
     lastEvidenceAt: null,
     blockedReason: null,
@@ -74,7 +71,6 @@ function run(input: Partial<ScopeRunState> = {}): ScopeRunState {
     recentArtifacts: [],
     taskContinuation: null,
     progress: null,
-    memoryCapture: null,
     error: null,
     softError: null,
     ...input,
@@ -83,7 +79,7 @@ function run(input: Partial<ScopeRunState> = {}): ScopeRunState {
 
 function baseState(input: Partial<HarnessState> = {}): HarnessState {
   return {
-    agents: [{ name: 'butler', displayName: '管家', status: 'idle', selected: true }],
+    agents: [{ name: 'butler', displayName: '管家', status: 'idle' }],
     messages: [],
     currentAgent: 'butler',
     inputValue: '',

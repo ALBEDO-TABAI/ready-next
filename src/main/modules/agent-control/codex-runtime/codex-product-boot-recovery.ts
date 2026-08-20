@@ -320,6 +320,7 @@ export class CodexProductBootRecovery {
             toolSurfaceDigest: product.toolSurfaceDigest,
             turnContractDigest: product.turnContractDigest,
             upstreamProfileSnapshotDigest: product.upstreamProfileSnapshotDigest,
+            readyMemorySnapshot: product.prepared.readyMemorySnapshot,
           })
           if (!turnInput.ok) {
             throw runLocalRecoveryError(`codex_recovered_turn_input_${turnInput.code}`)

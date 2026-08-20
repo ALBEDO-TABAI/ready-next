@@ -1,8 +1,5 @@
 import { useCallback } from 'react'
-import type { Dispatch, SetStateAction } from 'react'
 import { useAgent, type ScopeRunState } from '../../../../stores/useAgent'
-import type { TaskCardRun } from '../../task-card-from-projection'
-import type { PersistedScopeRunSummary } from '../helpers/projection'
 
 // Stage V V1.9c — Task interaction handlers extracted from ChatPanel.tsx
 // (original L1188-1457 region after V1.7-V1.9b extractions). All 15
@@ -11,10 +8,6 @@ import type { PersistedScopeRunSummary } from '../helpers/projection'
 // the hook keeps zero React tree assumptions.
 
 export interface UseTaskInteractionHandlersParams {
-  mergedTaskRuns: TaskCardRun[]
-  setInputValue: ReturnType<typeof useAgent.getState>['setInputValue']
-  setPersistedScopeRuns: Dispatch<SetStateAction<PersistedScopeRunSummary[]>>
-  focusInputWithResize: () => void
   refreshPersistedScopeRuns: () => Promise<void>
   refreshPersistedTaskProjections: () => Promise<void>
   refreshActiveChildRuns: () => Promise<void>
@@ -28,19 +21,12 @@ export interface TaskInteractionHandlers {
   handleCancelDetachedTask: (scopeId: string, taskId?: string | null) => Promise<void>
   handleCancelChildRun: (scopeId: string, childRunId: string) => Promise<void>
   handleOpenTaskArtifact: (path: string) => Promise<void>
-  handleDismissMemoryCapture: (scopeId: string) => void
-  handleUndoMemoryCapture: (scopeId: string) => Promise<void>
-  handleSupplementMemoryCapture: (scopeId: string) => void
 }
 
 export function useTaskInteractionHandlers(
   params: UseTaskInteractionHandlersParams,
 ): TaskInteractionHandlers {
   const {
-    mergedTaskRuns,
-    setInputValue,
-    setPersistedScopeRuns,
-    focusInputWithResize,
     refreshPersistedScopeRuns,
     refreshPersistedTaskProjections,
     refreshActiveChildRuns,
@@ -85,87 +71,10 @@ export function useTaskInteractionHandlers(
     await window.electronAPI.document.openPath(path).catch(() => undefined)
   }, [])
 
-  const handleDismissMemoryCapture = useCallback(
-    (scopeId: string) => {
-      patchScopeRun(scopeId, (previous) =>
-        previous
-          ? {
-              ...previous,
-              memoryCapture: previous.memoryCapture
-                ? { ...previous.memoryCapture, status: 'dismissed' }
-                : null
-            }
-          : null
-      )
-      setPersistedScopeRuns((current) =>
-        current.map((item) =>
-          item.scopeId === scopeId && item.memoryCapture
-            ? { ...item, memoryCapture: { ...item.memoryCapture, status: 'dismissed' } }
-            : item
-        )
-      )
-    },
-    [patchScopeRun, setPersistedScopeRuns]
-  )
-
-  const handleUndoMemoryCapture = useCallback(
-    async (scopeId: string) => {
-      const capture =
-        useAgent.getState().scopeRunStates[scopeId]?.memoryCapture ||
-        mergedTaskRuns.find((item) => item.scopeId === scopeId)?.memoryCapture
-      if (!capture) return
-      await Promise.all(
-        capture.items.map((item) =>
-          window.electronAPI.memory.delete(item.memoryId).catch(() => undefined)
-        )
-      )
-      patchScopeRun(scopeId, (previous) =>
-        previous
-          ? {
-              ...previous,
-              memoryCapture: previous.memoryCapture
-                ? { ...previous.memoryCapture, status: 'reverted' }
-                : null
-            }
-          : null
-      )
-      setPersistedScopeRuns((current) =>
-        current.map((item) =>
-          item.scopeId === scopeId && item.memoryCapture
-            ? { ...item, memoryCapture: { ...item.memoryCapture, status: 'reverted' } }
-            : item
-        )
-      )
-    },
-    [mergedTaskRuns, patchScopeRun, setPersistedScopeRuns]
-  )
-
-  const handleSupplementMemoryCapture = useCallback(
-    (scopeId: string) => {
-      const capture =
-        useAgent.getState().scopeRunStates[scopeId]?.memoryCapture ||
-        mergedTaskRuns.find((item) => item.scopeId === scopeId)?.memoryCapture
-      const draft = [
-        '请记住以下长期偏好或经验：',
-        ...(capture?.items.map(
-          (item) => `- ${item.title}${item.summary ? `：${item.summary}` : ''}`
-        ) || []),
-        '',
-        '我还想补充：'
-      ].join('\n')
-      setInputValue(draft)
-      focusInputWithResize()
-    },
-    [focusInputWithResize, mergedTaskRuns, setInputValue]
-  )
-
   return {
     patchScopeRun,
     handleCancelDetachedTask,
     handleCancelChildRun,
     handleOpenTaskArtifact,
-    handleDismissMemoryCapture,
-    handleUndoMemoryCapture,
-    handleSupplementMemoryCapture,
   }
 }

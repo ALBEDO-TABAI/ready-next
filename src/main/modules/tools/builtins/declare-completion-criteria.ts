@@ -5,8 +5,9 @@ import { logAgentMetric } from '../../agent-control/metrics'
  * D4 — 模型声明验收标准的结构化通道（合同：2026-07-05-p3-backlog-closeout §1）。
  *
  * 声明只落 task projection 行的 `modelCriteria` 字段（整组替换、幂等），
- * finalizer 终态经 `appendModelCriteria` 并入裁决（m1/m2 命名空间，模板
- * 不可覆盖）。校验全部在代码侧：条数/长度/空串；漂移账本
+ * finalizer 终态经 `appendModelCriteria` 保留 m1/m2 命名空间，但自由文本
+ * 没有代码可核验的证明合同，不会用“登记成功”冒充已完成。具体文件目标
+ * 仍由 expectedOutputs 逐一核对。声明校验在代码侧：条数/长度/空串；漂移账本
  * `model_criteria_declared` 每次声明必发。
  */
 
@@ -23,6 +24,10 @@ export interface DeclareCompletionCriteriaDeps {
   taskId: string | null
   sessionId?: string | null
   updateTaskCompletionDeclaration: (taskId: string, patch: CompletionDeclarationPatch) => void | Promise<void>
+  outputContract?: {
+    destinationResourceId: string
+    maxExpectedOutputs: number
+  } | null
 }
 
 function normalizeExpectedOutputs(value: unknown): { ok: true; value: string[] } | { ok: false; message: string } {
@@ -96,6 +101,46 @@ export async function executeDeclareCompletionCriteria(
       data: { errorKind: 'input_validation', toolName: 'declare_completion_criteria' },
     })
   }
+  const intent = args.folder_output_intent
+  let folderOutputIntent: 'create' | 'save' | 'export' | 'no_write' | null = null
+  let destinationResourceId: string | null = null
+  if (deps.outputContract) {
+    if (!['create', 'save', 'export', 'no_write'].includes(String(intent))) {
+      return createToolExecutionOutput('未登记：当前回合有目标文件夹，必须明确 folder_output_intent。', {
+        shape: 'json',
+        data: { errorKind: 'input_validation', toolName: 'declare_completion_criteria' },
+      })
+    }
+    folderOutputIntent = intent as typeof folderOutputIntent
+    destinationResourceId = deps.outputContract.destinationResourceId
+    if (folderOutputIntent === 'no_write' && expectedOutputsResult.value.length > 0) {
+      return createToolExecutionOutput('未登记：no_write 不能同时声明 expected_outputs。', {
+        shape: 'json',
+        data: { errorKind: 'input_validation', toolName: 'declare_completion_criteria' },
+      })
+    }
+    if (folderOutputIntent !== 'no_write' && expectedOutputsResult.value.length === 0) {
+      return createToolExecutionOutput('未登记：写入目标文件夹时必须声明至少一个 expected_outputs。', {
+        shape: 'json',
+        data: { errorKind: 'input_validation', toolName: 'declare_completion_criteria' },
+      })
+    }
+    if (expectedOutputsResult.value.length > deps.outputContract.maxExpectedOutputs
+      || expectedOutputsResult.value.some((target) => (
+        target.startsWith('/') || /^[A-Za-z]:[\\/]/.test(target)
+        || target.split(/[\\/]/).some((part) => part === '..')
+      ))) {
+      return createToolExecutionOutput('未登记：目标文件必须是冻结目标文件夹内的相对路径。', {
+        shape: 'json',
+        data: { errorKind: 'input_validation', toolName: 'declare_completion_criteria' },
+      })
+    }
+  } else if (intent !== undefined) {
+    return createToolExecutionOutput('未登记：当前回合没有冻结的目标文件夹。', {
+      shape: 'json',
+      data: { errorKind: 'input_validation', toolName: 'declare_completion_criteria' },
+    })
+  }
 
   await deps.updateTaskCompletionDeclaration(deps.taskId, {
     modelCriteria: criteria,
@@ -112,10 +157,16 @@ export async function executeDeclareCompletionCriteria(
     count: expectedOutputsResult.value.length,
   })
   return createToolExecutionOutput(
-    `已登记 ${criteria.length} 条补充验收标准（整组替换）。终态裁决时会与系统模板标准合并核对；模板标准不可被覆盖。`,
+    `已登记 ${criteria.length} 条补充验收标准（整组替换）。具体文件目标会由系统逐一核对；登记动作本身不会冒充完成证明。`,
     {
       shape: 'json',
-      data: { ok: true, count: criteria.length, criteria, expectedOutputs: expectedOutputsResult.value },
+      data: {
+        ok: true,
+        count: criteria.length,
+        criteria,
+        expectedOutputs: expectedOutputsResult.value,
+        ...(folderOutputIntent ? { folderOutputIntent, destinationResourceId } : {}),
+      },
     },
   )
 }

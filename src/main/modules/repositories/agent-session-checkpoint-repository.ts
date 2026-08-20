@@ -25,10 +25,6 @@ export type {
 } from './browser-workflow-row-mapping'
 export type * from './agent-session-checkpoint-types'
 export type { CanonicalCoreCloseoutTransactionParticipant } from './agent-session-checkpoint-closeout'
-export type {
-  CodexFailureCoreCloseoutInput,
-  CodexFailureCoreCloseoutResult,
-} from './agent-session-checkpoint-closeout'
 
 export class AgentSessionCheckpointRepository {
   readonly unitOfWork: BrowserWorkflowUnitOfWork
@@ -83,12 +79,6 @@ export class AgentSessionCheckpointRepository {
     ...args: Parameters<AgentSessionCheckpointRepository['closeout']['commitCanonicalCoreCloseout']>
   ): ReturnType<AgentSessionCheckpointRepository['closeout']['commitCanonicalCoreCloseout']> {
     return this.closeout.commitCanonicalCoreCloseout(...args)
-  }
-
-  commitCodexFailureCoreCloseout(
-    ...args: Parameters<AgentSessionCheckpointRepository['closeout']['commitCodexFailureCoreCloseout']>
-  ): ReturnType<AgentSessionCheckpointRepository['closeout']['commitCodexFailureCoreCloseout']> {
-    return this.closeout.commitCodexFailureCoreCloseout(...args)
   }
 
   persistCanonicalMessageAndSteer(

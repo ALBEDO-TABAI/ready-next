@@ -6,6 +6,12 @@
   "version": "0.1.0",
   "runtime": "reference",
   "execution": { "mode": "advisory" },
+  "allowed_tools": [
+    "skill_ask_user",
+    "skill_write_artifact",
+    "skill_read_artifact",
+    "skill_export_artifact"
+  ],
   "actions": {
     "read_skill": {
       "runtime": "reference",

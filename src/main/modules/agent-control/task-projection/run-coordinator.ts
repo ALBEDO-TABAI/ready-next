@@ -3,7 +3,6 @@ import { createHash } from 'node:crypto'
 import type { ConversationScope, ScopeRunEventPayload } from '../contracts/types'
 import type {
   ExecutionHostResult,
-  ReflectionResultHook,
   RunCompletionHooks,
 } from '../contracts/run-contracts'
 import type { PreparedCodexProductRun } from '../codex-runtime/codex-product-run-preparer'
@@ -104,22 +103,9 @@ function matchesCloseoutBodyReadback(
     || !isScopeRunAuthority(execution.scopeRunAuthority)
   ) return false
 
-  if (!execution.success) {
-    return typeof execution.error === 'string'
-      && execution.error.trim().length > 0
-      && execution.canonicalMessage == null
-      && execution.canonicalMessageDigest == null
-      && (
-        candidateBodyDigest === null
-        || (typeof candidateBodyDigest === 'string' && /^[a-f0-9]{64}$/.test(candidateBodyDigest))
-      )
-  }
-
   const canonical = execution.canonicalMessage
   if (
-    execution.error !== undefined
-    || execution.scopeRunAuthority !== undefined
-    || !isRecord(canonical)
+    !isRecord(canonical)
     || !hasExactKeys(canonical, ['id', 'conversationId', 'role', 'content', 'timestamp', 'meta'])
     || typeof canonical.id !== 'string'
     || canonical.id.trim().length === 0
@@ -132,6 +118,18 @@ function matchesCloseoutBodyReadback(
     || !isRecord(canonical.meta)
     || typeof execution.canonicalMessageDigest !== 'string'
     || execution.canonicalMessageDigest !== digestJson(canonical)
+  ) return false
+  if (!execution.success) {
+    return typeof execution.error === 'string'
+      && execution.error.trim().length > 0
+      && (
+        candidateBodyDigest === null
+        || (typeof candidateBodyDigest === 'string' && /^[a-f0-9]{64}$/.test(candidateBodyDigest))
+      )
+  }
+  if (
+    execution.error !== undefined
+    || execution.scopeRunAuthority !== undefined
     || typeof candidateBodyDigest !== 'string'
     || candidateBodyDigest !== digestText(execution.finalText)
   ) return false
@@ -213,6 +211,7 @@ export type CodexRunCoordinatorResult =
       canonicalMessage: NonNullable<ExecutionHostResult['canonicalMessage']>
       canonicalMessageDigest: string
       productOutcomeDigest: string
+      productTurnReceipt: NonNullable<ExecutionHostResult['productTurnReceipt']>
     }
   | {
       success: false
@@ -222,6 +221,7 @@ export type CodexRunCoordinatorResult =
       scopeRunAuthority?: ExecutionHostResult['scopeRunAuthority']
       canonicalMessage?: ExecutionHostResult['canonicalMessage']
       canonicalMessageDigest?: ExecutionHostResult['canonicalMessageDigest']
+      productTurnReceipt?: ExecutionHostResult['productTurnReceipt']
     }
 
 export type ReadyCodexCloseoutReadback = {
@@ -309,7 +309,7 @@ export class RunCoordinator {
 
   async runScoped(
     request: CodexRunCoordinatorRequest,
-    hooks?: RunCompletionHooks & ReflectionResultHook,
+    hooks?: RunCompletionHooks,
   ): Promise<CodexRunCoordinatorResult> {
     const prepared = request.preparedCodexRun
     const activeRun = {
@@ -389,6 +389,7 @@ export class RunCoordinator {
           scopeRunAuthority: result.scopeRunAuthority,
           canonicalMessage: result.canonicalMessage,
           canonicalMessageDigest: result.canonicalMessageDigest,
+          productTurnReceipt: result.productTurnReceipt,
           productOutcomeDigest,
         }
       }
@@ -402,6 +403,7 @@ export class RunCoordinator {
         responseText: result.finalText,
         canonicalMessage: canonicalMessage as NonNullable<typeof canonicalMessage>,
         canonicalMessageDigest: canonicalMessageDigest as string,
+        productTurnReceipt: result.productTurnReceipt as NonNullable<typeof result.productTurnReceipt>,
         productOutcomeDigest,
       }
     } finally {

@@ -8,6 +8,7 @@ import {
 } from '../main/modules/agent-control/codex-runtime/codex-user-input'
 import { normalizeCodexNativeNotification } from '../main/modules/agent-control/codex-runtime/codex-native-runtime'
 import { CodexTurnInputBuilder } from '../main/modules/agent-control/codex-runtime/codex-turn-input-builder'
+import { disabledReadyMemorySnapshot } from './utils/ready-memory-fixture'
 
 const allInputs: CodexUserInput[] = [
   { type: 'text', text: 'hello', text_elements: [] },
@@ -74,6 +75,7 @@ test('turn builder forwards native resource inputs without translating them into
     toolSurfaceDigest: 'surface-1',
     turnContractDigest: 'turn-contract-1',
     upstreamProfileSnapshotDigest: 'profile-1',
+    readyMemorySnapshot: disabledReadyMemorySnapshot(),
   })
   assert.equal(result.ok, true)
   if (!result.ok) return

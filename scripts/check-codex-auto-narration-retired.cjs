@@ -95,10 +95,6 @@ const forbiddenByFile = {
   'src/main/modules/settings-engine/ipc-handler.ts': ['AgentAutoNarrationContinuation'],
   'src/preload/index.ts': ['AgentAutoNarrationContinuation'],
   'src/renderer/types/electron.d.ts': ['AgentAutoNarrationContinuation'],
-  'src/renderer/components/agent-system/AgentSettingsHub.tsx': [
-    'autoNarration',
-    '后台任务自动播报',
-  ],
 }
 
 function check(root = ROOT) {

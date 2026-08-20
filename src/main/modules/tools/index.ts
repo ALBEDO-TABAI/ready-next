@@ -20,7 +20,6 @@ import {
 import {
   executeFeishuTool,
 } from './feishu-tools'
-import { executeMemoryTool } from './memory-tools'
 import { executePetTool } from './pet-tools'
 import {
   executeSessionRecallTool,
@@ -52,7 +51,7 @@ export function getOpenAITools(
   )
 }
 
-export { executeBrowserTool, executeSkillTool, executeFeishuTool, executeMemoryTool, executePetTool, executeSessionRecallTool }
+export { executeBrowserTool, executeSkillTool, executeFeishuTool, executePetTool, executeSessionRecallTool }
 export { executeDocumentTool }
 export { executeRSSTool }
 export { executeCalendarTool }

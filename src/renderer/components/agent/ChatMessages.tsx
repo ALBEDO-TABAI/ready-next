@@ -8,7 +8,7 @@ const CHAT_BOTTOM_SAFETY_MARGIN_PX = 12
 // overflows the viewport), composer-resize-driven re-renders must NOT yank the
 // view back down. 96px ≈ one short message of slack so小幅 overshoot still counts.
 const CHAT_STICK_TO_BOTTOM_THRESHOLD_PX = 96
-import { Copy, Check } from 'lucide-react'
+import { Copy, Check, RotateCcw } from 'lucide-react'
 import type { AgentMessage, AgentArtifact, ChatAttachment, ToolTraceEvent } from '../../stores/useAgent'
 import { filterUserVisibleToolTraceEvents } from '../../modules/agent/toolTraceVisibility'
 import { ToolTraceCard } from './chat-panel/task/TaskCard'
@@ -22,6 +22,7 @@ import {
 import { submitAskUserQuestionsAnswers, cancelAskUserQuestionsCard } from '../../stores/useAgent'
 import { isImageGenerationReferencePath } from '../../../shared/image-generation'
 import WelcomePanel from './WelcomePanel'
+import { renderInline } from './chat-panel/markdown'
 import SkillAskUserPrompt from '../skill/SkillAskUserPrompt'
 
 // The session-tab strip + chat header overflow ~24px into the top of this
@@ -48,6 +49,7 @@ interface ChatMessagesProps {
   onSetInputSuggestion: (value: string) => void
   onToggleToolTrace: () => void
   onCopyMessage: (id: string, content: string) => void | Promise<void>
+  onRetryProductTurn?: (readyRunId: string) => void | Promise<void>
   onAgentSelectionContextMenu?: (event: React.MouseEvent, selectedText: string) => void
   onAttachmentPreview: (attachment: ChatAttachment) => void | Promise<void>
   onReferenceSelect: (attachment: ChatAttachment) => void
@@ -78,6 +80,7 @@ export default function ChatMessages({
   onSetInputSuggestion,
   onToggleToolTrace,
   onCopyMessage,
+  onRetryProductTurn,
   onAgentSelectionContextMenu,
   onAttachmentPreview,
   onReferenceSelect,
@@ -188,6 +191,12 @@ export default function ChatMessages({
           ...(messageGeneratedImageArtifacts[msg.id] || []),
         ])
         const isStreamingMessage = isStreaming && msg.id === streamingMessageId
+        const retryRunId = msg.type === 'agent'
+          && typeof msg.meta?.runId === 'string'
+          && typeof msg.meta?.terminalReason === 'string'
+          && msg.meta.terminalReason !== 'done'
+          ? msg.meta.runId
+          : null
 
         return (
           <div key={msg.id} className="flex flex-col" style={{ gap: 10 }}>
@@ -311,7 +320,14 @@ export default function ChatMessages({
                   )}
                   {msg.content && (
                     <div className="ready-chat-user-message-content" style={{ whiteSpace: 'pre-wrap' }}>
-                      {msg.content}
+                      {renderInline(
+                        msg.content,
+                        Object.fromEntries(
+                          (msg.attachments || [])
+                            .filter((item) => item.name && item.path)
+                            .map((item) => [item.name, { path: item.path, kind: item.source || item.type }]),
+                        ),
+                      )}
                     </div>
                   )}
                 </div>
@@ -351,11 +367,9 @@ export default function ChatMessages({
                       onReferenceSelect={onReferenceSelect}
                     />
                   ) : null}
-                  {!!msg.content?.trim() && (
-                    <button
-                      type="button"
-                      onClick={() => { void onCopyMessage(msg.id, msg.content) }}
-                      className={`absolute transition-[opacity,transform] duration-160 ease-out ${
+                  {(!!msg.content?.trim() || retryRunId) && (
+                    <div
+                      className={`absolute flex items-center gap-1 transition-[opacity,transform] duration-160 ease-out ${
                         copiedMessageId === msg.id
                           ? 'opacity-100 pointer-events-auto'
                           : 'opacity-0 pointer-events-none group-hover/agentmsg:opacity-100 group-hover/agentmsg:pointer-events-auto'
@@ -363,26 +377,47 @@ export default function ChatMessages({
                       style={{
                         right: 0,
                         bottom: -2,
-                        width: 18,
-                        height: 18,
-                        borderRadius: 8,
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        border: '1px solid var(--border-default)',
-                        color: copiedMessageId === msg.id ? 'var(--color-green)' : 'var(--text-light)',
-                        background: copiedMessageId === msg.id
-                          ? 'color-mix(in srgb, var(--color-green) 10%, transparent)'
-                          : 'var(--surface-card-bg)',
                       }}
-                      title={copiedMessageId === msg.id ? '已复制' : '复制回复'}
                     >
-                      {copiedMessageId === msg.id ? (
-                        <Check style={{ width: 12, height: 12 }} strokeWidth={2} />
-                      ) : (
-                        <Copy style={{ width: 12, height: 12 }} strokeWidth={2} />
-                      )}
-                    </button>
+                      {retryRunId && onRetryProductTurn ? (
+                        <button
+                          type="button"
+                          onClick={() => { void onRetryProductTurn(retryRunId) }}
+                          className="flex items-center justify-center"
+                          style={{
+                            width: 18, height: 18, borderRadius: 8,
+                            border: '1px solid var(--border-default)',
+                            color: 'var(--text-light)', background: 'var(--surface-card-bg)',
+                          }}
+                          title="从已保留的结果继续重试"
+                          aria-label="再试一次"
+                        >
+                          <RotateCcw style={{ width: 12, height: 12 }} strokeWidth={2} />
+                        </button>
+                      ) : null}
+                      {msg.content?.trim() ? (
+                        <button
+                          type="button"
+                          onClick={() => { void onCopyMessage(msg.id, msg.content) }}
+                          className="flex items-center justify-center"
+                          style={{
+                            width: 18, height: 18, borderRadius: 8,
+                            border: '1px solid var(--border-default)',
+                            color: copiedMessageId === msg.id ? 'var(--color-green)' : 'var(--text-light)',
+                            background: copiedMessageId === msg.id
+                              ? 'color-mix(in srgb, var(--color-green) 10%, transparent)'
+                              : 'var(--surface-card-bg)',
+                          }}
+                          title={copiedMessageId === msg.id ? '已复制' : '复制回复'}
+                        >
+                          {copiedMessageId === msg.id ? (
+                            <Check style={{ width: 12, height: 12 }} strokeWidth={2} />
+                          ) : (
+                            <Copy style={{ width: 12, height: 12 }} strokeWidth={2} />
+                          )}
+                        </button>
+                      ) : null}
+                    </div>
                   )}
                 </div>
               )}

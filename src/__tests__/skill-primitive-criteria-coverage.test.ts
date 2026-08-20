@@ -241,24 +241,25 @@ test('R-CRIT monotonic: skill + planned steps + NO declared targets keeps c1 act
   assert.notEqual(result.verdict, 'accept', 'no-target skill-primitive run must not silently accept an unverifiable delivery')
 })
 
-test('R-CRIT wiring: a skill run carrying a run_state handle keeps c1 as steps_complete (not weakened)', () => {
+test('R-CRIT wiring: a child skill keeps declared output coverage and still owes run_state', () => {
   const resolved = resolveCriteria('multi_step_task', 'skill', {
     skillHasRunStateHandle: true,
     hasPlannedSteps: true,
     coverageTargets: [TARGET_DIR],
   })
   const c1 = resolved.items.find((i) => i.id === 'c1')
-  assert.equal(c1?.kind, 'steps_complete')
+  assert.equal(c1?.kind, 'delivery_coverage')
   assert.ok(!c1?.notApplicable)
+  assert.ok(!resolved.items.find((i) => i.id === 's1')?.notApplicable)
 })
 
-test('R-CRIT wiring: a skill run with real step-completion proof keeps c1 as steps_complete', () => {
+test('R-CRIT wiring: step-completion proof does not erase declared output coverage', () => {
   const resolved = resolveCriteria('multi_step_task', 'skill', {
     hasPlannedSteps: true,
     hasStepCompletionProof: true,
     coverageTargets: [TARGET_DIR],
   })
-  assert.equal(resolved.items.find((i) => i.id === 'c1')?.kind, 'steps_complete')
+  assert.equal(resolved.items.find((i) => i.id === 'c1')?.kind, 'delivery_coverage')
 })
 
 // ── zero-perturbation — non-skill / non-planned paths untouched ──────────────

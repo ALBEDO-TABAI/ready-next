@@ -90,7 +90,7 @@ test('lifecycle handlers await the exact adapter result and pass immutable alias
   })
 })
 
-test('create handler requires and forwards the exact agent identity', async () => {
+test('create handler accepts only an empty request and lets Main own the Ready identity', async () => {
   const { ipc, handleCalls } = createMockIpc()
   const deps = createMockDeps()
   const calls: unknown[] = []
@@ -107,10 +107,10 @@ test('create handler requires and forwards the exact agent identity', async () =
   agentLifecycleGroup.register(ipc, deps)
   const handler = handleCalls.find((entry) => entry.channel === 'agent:createSession')?.handler
   assert.ok(handler)
-  assert.equal((await handler({} as IpcMainInvokeEvent, { agentId: 'butler' }) as { ok: boolean }).ok, true)
-  assert.deepEqual(calls, [{ agentId: 'butler' }])
+  assert.equal((await handler({} as IpcMainInvokeEvent, {}) as { ok: boolean }).ok, true)
+  assert.deepEqual(calls, [{}])
   await assert.rejects(
-    () => handler({} as IpcMainInvokeEvent, { agentId: 'butler', aliasId: 'forged' }),
+    () => handler({} as IpcMainInvokeEvent, { agentId: 'butler' }),
   )
 })
 

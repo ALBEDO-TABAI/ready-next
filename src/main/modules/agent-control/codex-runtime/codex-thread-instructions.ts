@@ -2,6 +2,11 @@ import { realpathSync } from 'node:fs'
 
 import type { SkillState } from '../../skills-runtime/runtime-manager-types'
 import { readReferenceSkillDocCapped } from '../../skills-runtime/reference-skill-doc'
+import { skillHasExecutableSurface } from '../../skills-runtime/skill-executable-surface'
+import {
+  resolveCodexSkillCompletionProfile,
+  type CodexSkillCompletionProfile,
+} from './codex-skill-completion-profile'
 
 export const CODEX_HOST_OVERLAY = 'Ready provides the dynamic product tools declared for this thread. Treat successful tool responses as the authority for external effects. Never claim an external effect without a successful tool response.'
 
@@ -18,11 +23,28 @@ export type CodexNativeSkillInput = {
   skillId: string
   name: string
   path: string
+  completionProfile: CodexSkillCompletionProfile
 }
 
 function isReferenceLikeSkill(skill: SkillState): boolean {
   return skill.executionMode === 'advisory'
     || skill.actions.some((action) => action.runtime === 'reference')
+}
+
+function skillCompletionProfile(
+  skill: SkillState,
+  authorizedToolNames?: readonly string[],
+): CodexNativeSkillInput['completionProfile'] {
+  const hasPublicExecutableAction = skill.actions.some((action) => (
+    action.visibility !== 'internal' && action.runtime !== 'reference'
+  ))
+  return resolveCodexSkillCompletionProfile({
+    requiredByExecutionSurface: skill.executionMode !== 'advisory'
+      || hasPublicExecutableAction
+      || skillHasExecutableSurface(skill),
+    declaredToolNames: skill.allowedTools,
+    authorizedToolNames,
+  })
 }
 
 export function resolveCodexSelectedSkillMethodology(input: {
@@ -49,6 +71,7 @@ export function resolveCodexSelectedSkillMethodology(input: {
 export function resolveCodexNativeSkillInput(input: {
   skillId?: string
   path?: string
+  authorizedToolNames?: readonly string[]
   skills: readonly SkillState[]
 }): CodexNativeSkillInput | null {
   const requestedPath = String(input.path || '').trim()
@@ -79,6 +102,7 @@ export function resolveCodexNativeSkillInput(input: {
     skillId: skill.id,
     name: skill.name,
     path: realpathSync(skillPath),
+    completionProfile: skillCompletionProfile(skill, input.authorizedToolNames),
   }
 }
 

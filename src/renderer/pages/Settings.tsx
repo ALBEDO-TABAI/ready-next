@@ -2,8 +2,8 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import {
   ChevronLeft, User, Bell, Shield, Database,
   Palette, Keyboard, Globe, Info, Moon, Sun, Bot, Monitor, Droplets,
-  ChevronRight, ExternalLink, HardDrive, Trash2, MessageSquare, Brain, Users, Sparkles, Cat,
-  Plug2, Boxes, Cookie, Tags
+  ChevronRight, ExternalLink, HardDrive, Trash2, MessageSquare, Cat,
+  Plug2, Boxes, Cookie, Tags, Brain
 } from 'lucide-react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useTheme, type ThemeAccent, type ThemeSkin } from '../stores/useTheme'
@@ -24,8 +24,6 @@ import {
   SETTINGS_SECONDARY_BUTTON_STYLE,
   settingsListItemStyle,
 } from '../components/settings/settings-theme'
-import AgentSettingsHub from '../components/agent-system/AgentSettingsHub'
-import UserProfileEditor from '../components/profile/UserProfileEditor'
 import { SETTINGS_ROW_CONTROL_MIN_WIDTH, SettingsSwitch, type SettingItem, type SettingSection } from './settings/settings-shared'
 import { AISettingsPanel } from './settings/AISettingsPanel'
 import { RSSDraftStoreSettingsPanel } from './settings/RSSDraftStoreSettingsPanel'
@@ -33,8 +31,8 @@ import { StorageSettingsPanel } from './settings/StorageSettingsPanel'
 import { BrowserPrivacySettingsPanel } from './settings/BrowserPrivacySettingsPanel'
 import { ExternalServicesSettingsPanel } from './settings/ExternalServicesSettingsPanel'
 import { McpSettingsPanel } from './settings/McpSettingsPanel'
-import { MemorySettingsSection } from './settings/MemorySettingsSection'
 import { TagForgeSettingsPanel } from './settings/TagForgeSettingsPanel'
+import { ReadyMemorySettingsPanel } from './settings/ReadyMemorySettingsPanel'
 import { READY_SHORTCUT_GUIDE } from '../../shared/app-shortcuts'
 
 // 面板拆分后的导出保口（2026-07-05）：行为测试从 pages/Settings 导入这两个面板，import 面保持零变化。
@@ -62,11 +60,11 @@ const settingsData: SettingSection[] = [
     settings: [] // Rendered dynamically via AISettingsPanel
   },
   {
-    id: 'agent',
-    title: 'Agent 历史资料',
-    icon: Sparkles,
-    description: '查阅和整理本机保存的人格档案，不改变当前 Codex',
-    settings: []
+    id: 'memory',
+    title: '长期记忆',
+    icon: Brain,
+    description: '管理 Ready 记住的内容与整理方式',
+    settings: [],
   },
   {
     id: 'remote-im',
@@ -89,21 +87,7 @@ const settingsData: SettingSection[] = [
     description: '接入外部 MCP server（stdio），扩展 Agent 可调用的工具',
     settings: [] // Rendered dynamically via McpSettingsPanel — Y0.7 §11.0b labeling branch
   },
-  {
-    id: 'memory',
-    title: '记忆系统',
-    icon: Brain,
-    description: '查看 Agent 已沉淀的记忆，高级工具按需展开',
-    settings: [] // Rendered dynamically via Memory components
-  },
   { id:'tag-forge',title:'文档标签',icon:Tags,description:'管理 Tag Forge 自动打标与待审核词条',settings:[] },
-  {
-    id: 'user-profiles',
-    title: '我的偏好',
-    icon: Users,
-    description: '保存本机默认用户的语言、风格和长期偏好',
-    settings: [] // Rendered dynamically via UserProfileEditor
-  },
   {
     id: 'pet',
     title: '宠物',
@@ -450,7 +434,7 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
   }
 
   const isDynamicSection = currentSection
-    ? ['ai', 'remote-im', 'external-services', 'mcp', 'memory', 'tag-forge', 'agent', 'user-profiles', 'pet', 'rss-storage', MODELS_RUNTIME_SETTINGS_SECTION, 'storage', 'browser-privacy'].includes(currentSection.id)
+    ? ['ai', 'memory', 'remote-im', 'external-services', 'mcp', 'tag-forge', 'pet', 'rss-storage', MODELS_RUNTIME_SETTINGS_SECTION, 'storage', 'browser-privacy'].includes(currentSection.id)
     : false
 
   return (
@@ -585,6 +569,7 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
 
                 {/* AI Settings Panel — dynamic, wired to backend */}
                 {currentSection.id === 'ai' && <AISettingsPanel />}
+                {currentSection.id === 'memory' && <ReadyMemorySettingsPanel />}
                 {currentSection.id === 'rss-storage' && <RSSDraftStoreSettingsPanel />}
                 {currentSection.id === MODELS_RUNTIME_SETTINGS_SECTION && <ModelsRuntimeSettingsPanel />}
                 {currentSection.id === 'storage' && <StorageSettingsPanel />}
@@ -593,22 +578,7 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
                 {currentSection.id === 'external-services' && <ExternalServicesSettingsPanel />}
                 {currentSection.id === 'mcp' && <McpSettingsPanel />}
                 {currentSection.id === 'pet' && <PetSettingsPanel />}
-                {currentSection.id === 'memory' && (
-                  <MemorySettingsSection />
-                )}
                 {currentSection.id === 'tag-forge' && <TagForgeSettingsPanel />}
-
-                {/* Historical personality records only; not a Codex control surface. */}
-                {currentSection.id === 'agent' && (
-                  <AgentSettingsHub />
-                )}
-
-                {/* User Profiles — custom layout */}
-                {currentSection.id === 'user-profiles' && (
-                  <div>
-                    <UserProfileEditor />
-                  </div>
-                )}
 
                 {/* Theme Switcher — only in Appearance section */}
                 {currentSection.id === 'appearance' && (

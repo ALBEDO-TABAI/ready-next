@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 
 import { classifyLifecycleOperation } from '../../../../shared/ipc-contracts/agent-lifecycle-snapshot'
+import { MAIN_AGENT_ID } from '../../../../shared/agent-identity'
 import type { ConversationScope } from '../contracts/types'
 import type { ExecutionHostResult } from '../contracts/run-contracts'
 import {
@@ -38,6 +39,10 @@ export async function retireCodexAliasForClose(input: {
   snapshot: IdleCloseSnapshot
   retiredAt: string
   scheduleThreadArchiveCleanup: () => void
+  sealClosedConversationInOpenTransaction: (input: {
+    conversationId: string
+    closedAt: string
+  }) => void
 }): Promise<CloseRetirementEvidence> {
   const current = input.repository.readActiveAliasBinding(input.identity.aliasId)
   if (!current || current.aliasGeneration !== input.identity.aliasGeneration) {
@@ -92,6 +97,7 @@ export async function retireCodexAliasForClose(input: {
       retirementEvidenceDigest,
       retiredAt: input.retiredAt,
       idleThreadReadDigest,
+      onClosedInOpenTransaction: input.sealClosedConversationInOpenTransaction,
     })
   } catch (error) {
     if (error instanceof CodexBindingRepositoryError) {
@@ -150,6 +156,10 @@ export function createLifecycleStore(input: {
     aliasGeneration: number
   }) => Promise<void>
   scheduleThreadArchiveCleanup: () => void
+  sealClosedConversationInOpenTransaction: (input: {
+    conversationId: string
+    closedAt: string
+  }) => void
   settleEngineTerminalUserStop: (identity: {
     aliasId: string
     aliasGeneration: number
@@ -177,11 +187,9 @@ export function createLifecycleStore(input: {
     async createAlias(request) {
       const boundHost = input.getHost()
       if (!boundHost) throw new Error('codex_runtime_host_unbound')
-      const agentId = request.agentId.trim()
-      if (!agentId) throw new Error('codex_create_agent_invalid')
       const aliasId = `conv-${randomUUID()}`
       const persistedAt = isoNow()
-      input.createAliasAtomic({ aliasId, agentId, persistedAt })
+      input.createAliasAtomic({ aliasId, agentId: MAIN_AGENT_ID, persistedAt })
       return { ok: true, action: 'create', aliasId, aliasGeneration: 1, persistedAt }
     },
     async readAliasIdentity(aliasId) {
@@ -421,6 +429,7 @@ export function createLifecycleStore(input: {
         snapshot,
         retiredAt: isoNow(),
         scheduleThreadArchiveCleanup: input.scheduleThreadArchiveCleanup,
+        sealClosedConversationInOpenTransaction: input.sealClosedConversationInOpenTransaction,
       })
     },
     beginManualCompaction(identity) {
@@ -464,6 +473,7 @@ export function terminalEvent(input: {
     taskId: input.product.readyTaskId,
     phase: input.execution.success ? 'done' : input.execution.cancelled ? 'cancelled' : 'error',
     terminalReason: reason,
+    productTurnReceipt: input.execution.productTurnReceipt,
     latestText: input.execution.finalText,
     module: 'system',
     taskProjectionId: input.product.readyTaskId,

@@ -14,7 +14,6 @@ import {
 } from '../main/modules/agent-control/runtime-core/run-finalizer'
 import { RunMetaRepository } from '../main/modules/agent-control/task-projection/run-meta-repository'
 import { syncTaskProjection } from '../main/modules/agent-control/task-projection/task-projection-sync'
-import { ReflectionService } from '../main/modules/agent-control/reflection-service'
 import type { ScopeRunEventPayload, ScopeRunSummary } from '../main/modules/agent-control/contracts/types'
 import type { TaskProjectionRecord, TaskProjectionStore } from '../main/modules/agent-control/contracts/run-contracts'
 import { createTaskBudgetRuntime } from '../main/modules/agent-control/task-projection/run-budget-policy'
@@ -832,40 +831,4 @@ describe('run finalizer all paths', () => {
     )
   })
 
-  test('zero-tool non-conversation success does not write completed-task memory', async () => {
-    const created: Array<Record<string, unknown>> = []
-    const service = new ReflectionService({
-      memoryRepository: {
-        createMemory: async (entry: Record<string, unknown>) => {
-          created.push(entry)
-          return { id: `mem-${created.length}`, ...entry }
-        },
-        queryMemories: async () => [],
-      } as never,
-    })
-
-    const result = await service.reflectOnConversation({
-      scope: {
-        id: 'scope-memory',
-        agent: 'butler',
-        userId: 'default-user',
-        title: '新对话',
-        sourceKind: 'local',
-        sourceId: 'app',
-        threadKey: 'thread-memory',
-        meta: {},
-        createdAt: '2026-06-10T10:00:00.000Z',
-        updatedAt: '2026-06-10T10:00:00.000Z',
-      },
-      messages: [
-        { role: 'user', content: '执行这个任务' },
-        { role: 'assistant', content: '完成了' },
-      ],
-      usedTools: [],
-      success: true,
-    })
-
-    assert.equal(result.sessionSummary, undefined)
-    assert.equal(created.some((entry) => String(entry.summary || '').includes('Completed task')), false)
-  })
 })

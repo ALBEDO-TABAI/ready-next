@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { Dispatch, SetStateAction } from 'react'
 import { useAgent, type ConversationScope } from '../../../../stores/useAgent'
-import type { Agent } from '../../../../modules/agent/types'
 import type { SessionRecallCapsule, SessionRecallHit } from '../../../../../shared/session-recall'
 import { mapScopeToConversation } from '../helpers/projection'
 import {
@@ -51,8 +50,6 @@ export interface ConversationChannelOption {
 }
 
 export interface UseChannelSessionRecallParams {
-  agents: Agent[]
-  currentAgent: string
   scopes: ConversationScope[]
   currentScope: ConversationScope | null
   currentScopeId: string | null
@@ -82,7 +79,6 @@ export interface ChannelEffectsHandle {
 export interface UseChannelSessionRecallReturn {
   selectedChannelKey: string
   filteredScopes: ConversationScope[]
-  currentAgentData: Agent | undefined
   currentChannel: ConversationChannelOption
   channelOptions: ConversationChannelOption[]
   sessionsByChannelKey: Record<string, SessionRecallHit[]>
@@ -95,8 +91,6 @@ export function useChannelSessionRecall(
   params: UseChannelSessionRecallParams,
 ): UseChannelSessionRecallReturn {
   const {
-    agents,
-    currentAgent,
     scopes,
     currentScope,
     currentScopeId,
@@ -113,8 +107,6 @@ export function useChannelSessionRecall(
   const [sessionRecallError, setSessionRecallError] = useState<string | null>(null)
   const attachedRecallRequestRevision = useRef(0)
   const recallSearchRequestRevision = useRef(0)
-
-  const currentAgentData = agents.find((a) => a.name === currentAgent)
 
   const getScopeChannelKey = useCallback((scope: ConversationScope) => {
     const sourceId = scope.sourceKind === 'local' ? 'app' : scope.sourceId
@@ -403,7 +395,6 @@ export function useChannelSessionRecall(
   return {
     selectedChannelKey,
     filteredScopes,
-    currentAgentData,
     currentChannel,
     channelOptions,
     sessionsByChannelKey,

@@ -81,23 +81,53 @@ import { buildToolCallDetail, buildToolResultDetail } from './tool-trace-detail'
 import { log } from './agent-sdk-provider'
 import { AgentSdkSessionManager } from './agent-sdk-session'
 import { getRemainingToolCallBudget } from '../task-projection/run-budget-policy'
-import { getSkillsRuntimeManager } from '../../skills-runtime/runtime-manager'
-import { isCodexSafeHostSkillPrimitiveDefinition } from '../../tools/skill-tool-execution-authority'
+import { getSkillsRuntimeManager, type SkillState } from '../../skills-runtime/runtime-manager'
+import {
+  isCodexSafeHostSkillPrimitiveDefinition,
+  isHostFolderExportPrimitive,
+} from '../../tools/skill-tool-execution-authority'
 
 const BROWSER_INTERACTION_TOOL_NAME_SET = new Set<string>(BROWSER_INTERACTION_TOOL_NAMES)
 const BROWSER_CONTENT_TASK_TOOL_NAME_SET = new Set<string>(BROWSER_CONTENT_TASK_TOOL_NAMES)
 const GENERAL_RESEARCH_TOOL_NAME_SET = new Set<string>(GENERAL_RESEARCH_TOOL_NAMES)
 
-export function listLiveCodexThreadToolDefinitions(): ToolDefinition[] {
-  const skills = getSkillsRuntimeManager().listSkills()
-  return defaultToolRegistry.listToolDefinitions().map((definition) => {
-    if (definition.domain !== 'skill') return definition
-    return {
-      ...definition,
-      codexExecutionSafe: skills.some((skill) =>
+export function stampLiveCodexSkillDefinition(
+  definition: ToolDefinition,
+  skills: readonly SkillState[],
+): ToolDefinition {
+  if (definition.domain !== 'skill') return definition
+  return {
+    ...definition,
+    codexExecutionSafe: isHostFolderExportPrimitive(definition.name)
+      || skills.some((skill) =>
         isCodexSafeHostSkillPrimitiveDefinition(definition.name, skill)),
-    }
-  })
+  }
+}
+
+export function listLiveCodexThreadToolDefinitions(): ToolDefinition[] {
+  let skills: readonly SkillState[] = []
+  try {
+    skills = getSkillsRuntimeManager().listSkills()
+  } catch {
+    skills = []
+  }
+  return defaultToolRegistry.listToolDefinitions().map((definition) => (
+    stampLiveCodexSkillDefinition(definition, skills)
+  ))
+}
+
+function resolveFloorToolDefinitionFromLiveRoot(name: string): ToolDefinition | null {
+  const fromRoot = listLiveCodexThreadToolDefinitions().find((definition) => definition.name === name)
+  if (fromRoot) return fromRoot
+  const recovered = defaultToolRegistry.getToolDefinitionForExecution(name)
+  if (!recovered) return null
+  let skills: readonly SkillState[] = []
+  try {
+    skills = getSkillsRuntimeManager().listSkills()
+  } catch {
+    skills = []
+  }
+  return stampLiveCodexSkillDefinition(recovered, skills)
 }
 
 export function isToolEnabledForCurrentAuthorization(
@@ -396,7 +426,7 @@ export class AgentSdkToolExecutor {
     const capabilityFloors = computeCapabilityFloors({
       authorization: params.authorization,
       hasLocalDocumentResource: hasLocalDocumentResource(params.message, params.requestEnvelope),
-      hasCurrentDocumentContext: hasCurrentDocumentContextResource(params.requestEnvelope)
+      hasCurrentDocumentContext: hasCurrentDocumentContextResource(params.requestEnvelope),
     })
     if (activeSkillAllowedTools) {
       const preserveVisibleBrowserTool = preResolvedBrowserSurface
@@ -415,10 +445,7 @@ export class AgentSdkToolExecutor {
           || capabilityFloors.toolNames.has(name)
           || (
             composition === 'additive'
-            && (
-              name.startsWith('calendar_')
-              || name === 'ask_user_questions'
-            )
+            && name.startsWith('calendar_')
           )
       })
     }
@@ -442,7 +469,7 @@ export class AgentSdkToolExecutor {
     const floorRecovery = recoverAbsentFloorsFromRegistry(
       definitions,
       capabilityFloors,
-      (name) => defaultToolRegistry.getToolDefinitionForExecution(name) ?? null
+      resolveFloorToolDefinitionFromLiveRoot,
     )
     for (const unavailableName of floorRecovery.unavailable) {
       appendToolCapabilityLog(
@@ -696,7 +723,6 @@ export class AgentSdkToolExecutor {
         ),
         currentUserText: runtimeContext.currentUserText,
         sourceMessageId: runtimeContext.sourceMessageId ?? null,
-        sourceMessageUnavailableReason: runtimeContext.sourceMessageUnavailableReason ?? null,
         requestEnvelope: runtimeContext.requestEnvelope,
         runId: runtimeContext.runId,
         taskId: runtimeContext.taskId,

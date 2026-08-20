@@ -29,9 +29,9 @@ export type CriteriaKind =
   | 'scope_compliance'
   | 'transaction_confirmed'
   // R-CRIT (方案 b) — count how many declared delivery targets are backed by a
-  // delivered artifact proof (one-to-one). Replaces c1(steps_complete) ONLY for
-  // skill-primitive multi_step/continuation runs that declared expected outputs,
-  // so complete delivery is no longer a proof-kind false-negative AND
+  // delivered artifact proof (one-to-one). Replaces the generic c1 tool/step
+  // criterion for skill runs that declared expected outputs, so complete
+  // delivery is no longer a proof-kind false-negative AND
   // under-delivery still fails (a single artifact can't satisfy two targets).
   | 'delivery_coverage'
 
@@ -93,6 +93,17 @@ const BASE_TEMPLATES: Record<TaskType, CriteriaItem[]> = {
   short_task: [
     item('c1', 'tool_call', '至少一次工具调用，或结构化声明"无需工具"（C1.2 守卫的数据化）'),
   ],
+  artifact_task: [
+    item('c1', 'artifact', '任务要求的文件产物已经生成或交付'),
+  ],
+  transaction_task: [
+    item('t1', 'transaction_confirmed', '任务写入已由代码侧回读确认'),
+  ],
+  research_artifact_task: [
+    item('c1', 'response_digest', '向用户交付非空的研究结果或报告'),
+    item('c2', 'report_sources', '结果含可核查的来源 ref'),
+    item('c3', 'artifact', '研究产物已经生成或交付'),
+  ],
   multi_step_task: [
     item('c1', 'steps_complete', '计划内每步有完成标记或显式跳过说明（对接 C4.2a steps_json）'),
     item('c2', 'artifact', '至少一个产物或状态变更 proof'),
@@ -148,9 +159,8 @@ export function resolveCriteria(
     hasDocumentDeliveryProof?: boolean
     /** Browser observation/analysis does not owe persistent collection files. */
     browserCollectionRequired?: boolean
-    /** R-CRIT (方案 b) — flattened delivery targets declared by the run's
-     *  planned steps (steps_json expectedOutputs). Non-empty → c1 becomes a
-     *  delivery_coverage criterion for skill-primitive runs. */
+    /** R-CRIT (方案 b) — flattened delivery targets declared by the run.
+     *  Non-empty → c1 becomes a delivery_coverage criterion for skill runs. */
     coverageTargets?: string[]
   },
 ): ResolvedCriteria {
@@ -188,34 +198,17 @@ export function resolveCriteria(
         : 'primitive skill 执行无 child run_state 句柄，artifact/tool_result 即终态证据')
       : entry)
     : items
-  // R-CRIT (方案 b) — a skill-primitive multi_step/continuation run that DECLARED
-  // planned steps never mints run_state/task_event, so c1(steps_complete) is a
-  // structural false-negative (rejects even a complete delivery). Do NOT loosen
-  // to a proof-kind any artifact can satisfy — that would re-mask under-delivery
-  // (a single artifact would satisfy it while a second doc is missing).
-  //
-  // MONOTONIC boundary (P1 adversarial-review fix): only convert c1 when the run
-  // DECLARED expected outputs — then c1 becomes a COUNTING delivery_coverage
-  // criterion (one-to-one target↔artifact; under-coverage still fails, complete
-  // delivery accepts). When NO targets are declared we DELIBERATELY leave c1
-  // unchanged (its pre-existing steps_complete verdict), NOT NA: marking it NA
-  // would drop it from the applicable set and let a single c2 artifact ACCEPT an
-  // unverifiable delivery — a fail-open regression that would silently accept the
-  // exact under-delivery incident this fix exists to catch. So P1 only ever
-  // IMPROVES (adds discrimination when targets exist) and never regresses the
-  // no-target default. Live activation awaits the deferred producer that
-  // populates steps_json expectedOutputs (cross-phase per the plan).
-  // Runs carrying a real run_state/task_event proof keep c1 as-is (not weakened).
-  const skillPrimitiveStepsCoverable =
-    module === 'skill' && !skillHasChildRunState
-    && (taskType === 'multi_step_task' || taskType === 'continuation')
-    && options?.hasPlannedSteps === true
-    && options?.hasStepCompletionProof !== true
+  // A declared skill delivery is a concrete obligation regardless of whether
+  // admission classified the run as short or multi-step. Replace the generic c1
+  // tool/step criterion with one-to-one target coverage; child runs still owe s1.
+  // With no declared targets the original template remains unchanged.
   const coverageTargets = Array.isArray(options?.coverageTargets)
     ? options!.coverageTargets.map(normalizeDeliveryTarget).filter(Boolean)
     : []
-  const skillCoverageItems = skillPrimitiveStepsCoverable && coverageTargets.length > 0
-    ? skillResolvedItems.map((entry) => (entry.id === 'c1' && entry.kind === 'steps_complete')
+  const skillDeliveryCoverable = module === 'skill' && coverageTargets.length > 0
+  const skillCoverageItems = skillDeliveryCoverable
+    ? skillResolvedItems.map((entry) => ((entry.id === 'c1' || entry.id === 'c3')
+      && (entry.kind === 'tool_call' || entry.kind === 'steps_complete' || entry.kind === 'artifact'))
       ? {
         ...entry,
         kind: 'delivery_coverage' as CriteriaKind,
@@ -261,7 +254,13 @@ export function appendModelCriteria(
   for (const addition of additions) {
     const text = String(addition.text || '').trim()
     if (!text) continue
-    out.push({ id: `m${counter}`, kind: 'artifact', text, source: 'model' })
+    out.push({
+      id: `m${counter}`,
+      kind: 'result_parseable',
+      text,
+      source: 'model',
+      notApplicable: { reason: '自由文本标准没有代码可核验的证明合同，仅供执行与独立复核' },
+    })
     counter += 1
   }
   return out

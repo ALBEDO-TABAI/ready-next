@@ -14,7 +14,6 @@ import type {
   MultimodalBlock,
   RunMessage,
   TaskBudgetRuntime,
-  TaskProjectionRecord,
   TurnTranscriptEvent
 } from '../contracts/run-contracts'
 import {
@@ -22,13 +21,12 @@ import {
   enforceCapabilityFloors
 } from '../domain-adapters/capability-floors'
 import { buildPreparedSkillTurnTruth, preparedSkillDigest } from '../skills/prepared-skill-turn'
-import type { CheckInRecord } from '../quality/task-adjudicator'
 import { createTaskBudgetRuntime } from '../task-projection/run-budget-policy'
 import { createEmptyActiveFrameContext } from '../tools-runtime/tool-runtime'
 import { mergeProjectionPatches } from './agent-sdk-document-utils'
 import {
   hasCurrentDocumentContextResource,
-  hasLocalDocumentResource
+  hasLocalDocumentResource,
 } from './agent-sdk-execution-utils'
 import {
   SDK_CHILD_RESUME_AWAIT_TIMEOUT_MS,
@@ -122,7 +120,6 @@ export class AgentSdkTurnOrchestrator {
       this.host.sessionManager.extractSessionIdFromInternalName(name)
     const transcriptEvents: TurnTranscriptEvent[] = []
     const usedTools: string[] = []
-    const toolArgsByName = new Map<string, Record<string, unknown>[]>()
     const projectionPatches: Record<string, unknown>[] = []
     const messageVisibilityEpoch = executionOptions?.messageVisibilityEpoch
     const scopeSession = prepareAgentSdkScopeSession({
@@ -441,11 +438,6 @@ export class AgentSdkTurnOrchestrator {
       const deps = {
         runMetaRepository: this.host.getRunMetaRepositoryForFinalize(),
         taskProjectionStore: this.host.runtime?.getTaskProjectionStoreForFinalize?.() ?? null,
-        learnFromCheckIn: (input: {
-          checkIn: CheckInRecord
-          projection: TaskProjectionRecord
-          now: Date
-        }) => this.host.learnSiteCardsFromCheckIn(input),
         commitCanonicalCoreCloseout: this.host.runtime
           ? (input: Parameters<NonNullable<RunFinalizerDeps['commitCanonicalCoreCloseout']>>[0]) =>
               this.host.runtime!.commitCanonicalCoreCloseout(input)
@@ -749,7 +741,7 @@ export class AgentSdkTurnOrchestrator {
         ),
         hasCurrentDocumentContext: hasCurrentDocumentContextResource(
           effectiveExecutionOptions?.requestEnvelope
-        )
+        ),
       })
       const floorEnforcement = enforceCapabilityFloors(
         toolDefinitions,
@@ -831,7 +823,6 @@ export class AgentSdkTurnOrchestrator {
         session,
         isCurrentRun,
         isCurrentVisibilityContext,
-        toolArgsByName,
         transcriptEvents,
         usedTools,
         projectionPatches,

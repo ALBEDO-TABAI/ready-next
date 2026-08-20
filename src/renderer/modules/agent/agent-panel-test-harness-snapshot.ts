@@ -4,7 +4,6 @@ import type { TaskProjectionRecordData } from '../../types/electron'
 import type {
   AgentArtifact,
   AgentMessage,
-  ScopeRunMemoryCapture,
   ScopeRunSkillProgress,
   ScopeRunState,
   ScopeRunTaskContinuation,
@@ -146,7 +145,6 @@ function taskCardFromRun(run: ScopeRunState): AgentPanelTaskCardSnapshot {
     recentArtifacts: run.recentArtifacts || run.artifactRefs || [],
     taskContinuation: run.taskContinuation || null,
     progress: run.progress || null,
-    memoryCapture: run.memoryCapture || null,
     executionDiagnostics: run.executionDiagnostics || null,
     blockedReason: run.blockedReason || null,
     error: run.error || null,
@@ -284,16 +282,6 @@ function collectInfoCards(state: StoreState, activeRun: ScopeRunState | null): A
       detail: activeRun.softError.technicalDetails || activeRun.softError.errorKind,
       scopeId: activeRun.scopeId,
       severity: 'warning',
-    })
-  }
-  const memoryCapture: ScopeRunMemoryCapture | null = activeRun?.memoryCapture || null
-  if (memoryCapture) {
-    cards.push({
-      kind: 'memory_capture',
-      title: `记忆捕获：${memoryCapture.status}`,
-      detail: memoryCapture.items.map((item) => item.title).join('、') || null,
-      scopeId: activeRun?.scopeId || state.currentScopeId,
-      severity: 'info',
     })
   }
   for (const artifact of activeRun?.recentArtifacts || []) {

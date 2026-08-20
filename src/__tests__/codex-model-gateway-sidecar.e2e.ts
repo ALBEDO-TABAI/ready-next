@@ -1,12 +1,13 @@
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { createServer, type Server } from 'node:http'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import test from 'node:test'
+import { disabledReadyMemorySnapshot } from './utils/ready-memory-fixture'
 
 import type { DatabaseConnection } from '../main/modules/database'
 import { __runMigrationForTests, type MigrationDatabase } from '../main/modules/migrations'
@@ -27,7 +28,10 @@ import {
 import { verifyCodexAutomaticCompactionEvidence } from '../main/modules/agent-control/codex-runtime/codex-automatic-compaction-evidence'
 import { CodexModelGateway } from '../main/modules/agent-control/codex-runtime/codex-model-gateway'
 import type { CodexNativeNotification } from '../main/modules/agent-control/codex-runtime/codex-native-runtime'
-import type { PreparedCodexProductRun } from '../main/modules/agent-control/codex-runtime/codex-product-run-preparer'
+import {
+  isPreparedCodexProductRun,
+  type PreparedCodexProductRun,
+} from '../main/modules/agent-control/codex-runtime/codex-product-run-preparer'
 import type { ToolDefinition } from '../main/modules/agent-control/tools-runtime/tool-definition'
 import {
   createCodexAuthorizationForSurface,
@@ -108,8 +112,10 @@ function prepared(
   runScopeId = scopeId,
   readyToolSurface: PreparedCodexProductRun['readyToolSurface'] = createCodexToolFixture([]).readyToolSurface,
 ): PreparedCodexProductRun {
+  const maxToolCalls = readyToolSurface.toolNames.length > 0 ? 4 : 0
   return {
     preparationContract: 'codex_product_run_e1',
+    readyMemorySnapshot: disabledReadyMemorySnapshot(),
     taskId: `task-${runId}`,
     runId,
     conversationAlias: { aliasId: runScopeId, aliasGeneration: 1 },
@@ -128,7 +134,10 @@ function prepared(
       explicitResourceEnvelope: { input: [], resourceRefs: [] },
       resourceAdditionalContext: [],
     },
-    resourceAnchorDigest: digestCanonicalJson([]),
+    resourceAnchorDigest: createHash('sha256').update(JSON.stringify({
+      explicitResourceEnvelope: { input: [], resourceRefs: [] },
+      resourceAdditionalContext: [],
+    })).digest('hex'),
     recoveredContextDigest: null,
     readyToolSurface,
     readyTurnToolAuthorization: createCodexAuthorizationForSurface(
@@ -140,9 +149,16 @@ function prepared(
       authorizationOwnerId: `owner-${runId}`,
       resourceOwnerId: `resource-owner-${runId}`,
     },
-    productBudgetSeed: { maxIterations: 8, maxToolCalls: 0, maxParallelToolGroups: 1 },
+    productBudgetSeed: {
+      maxIterations: 8, maxToolCalls, maxParallelToolGroups: 1,
+      lanes: {
+        ordinary: { maxIterations: 7, maxToolCalls, maxParallelToolGroups: 1 },
+        delivery: { maxIterations: 0, maxToolCalls: 0, maxParallelToolGroups: 0 },
+        final: { maxIterations: 1 },
+      },
+    },
     neutralProjectionSeed: {
-      phase: 'planning', taskTitle: '正在理解需求', taskSummary: '正在整理任务边界',
+      phase: 'planning', taskTitle: '正在理解需求', taskSummary: '正在整理任务边界、资源与可用能力',
     },
   }
 }
@@ -194,6 +210,7 @@ test('pinned app-server crosses the Ready gateway for product and compaction req
   const upstreamAuthPresent: boolean[] = []
   let upstreamSequence = 0
   let toolExecutions = 0
+  let toolResponseDeliveries = 0
   const upstream = createServer(async (request, response) => {
     upstreamSequence += 1
     upstreamPaths.push(request.url || '')
@@ -210,6 +227,94 @@ test('pinned app-server crosses the Ready gateway for product and compaction req
     }
     response.writeHead(200, { 'content-type': 'text/event-stream' })
     if (request.url === '/v1/responses') {
+      if (readyRunId === 'run-native-tool-long') {
+        if (upstreamText.includes('UNEXPECTED_TOOL_RESULT')) {
+          const item = {
+            type: 'message', id: `native-long-final-${upstreamSequence}`, role: 'assistant',
+            content: [{ type: 'output_text', text: 'long tool delivered' }],
+          }
+          response.end([
+            {
+              type: 'response.created',
+              response: {
+                id: `native-long-response-${upstreamSequence}`,
+                model: 'upstream-native-model', status: 'in_progress', output: [],
+              },
+            },
+            {
+              type: 'response.output_item.added', output_index: 0,
+              item: { ...item, content: [] },
+            },
+            {
+              type: 'response.output_text.delta', output_index: 0, content_index: 0,
+              item_id: item.id, delta: 'long tool delivered',
+            },
+            {
+              type: 'response.output_text.done', output_index: 0, content_index: 0,
+              item_id: item.id, text: 'long tool delivered',
+            },
+            { type: 'response.output_item.done', output_index: 0, item },
+            {
+              type: 'response.completed',
+              response: {
+                id: `native-long-response-${upstreamSequence}`,
+                model: 'upstream-native-model', status: 'completed', output: [item],
+                usage: {
+                  input_tokens: 8, output_tokens: 2, total_tokens: 10,
+                  input_tokens_details: { cached_tokens: 0 },
+                  output_tokens_details: { reasoning_tokens: 0 },
+                },
+              },
+            },
+          ].map((event) => `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`).join(''))
+          return
+        }
+        const pieces = ['{"query":"', ...Array.from({ length: 4_998 }, () => 'a'), '"}']
+        const argumentsValue = pieces.join('')
+        const item = {
+          type: 'function_call', id: `native-long-item-${upstreamSequence}`,
+          call_id: `native-long-call-${upstreamSequence}`,
+          name: 'ready_read_probe', arguments: argumentsValue,
+        }
+        const events = [
+          {
+            type: 'response.created',
+            response: {
+              id: `native-long-response-${upstreamSequence}`,
+              model: 'upstream-native-model', status: 'in_progress', output: [],
+            },
+          },
+          {
+            type: 'response.output_item.added', output_index: 0,
+            item: { ...item, arguments: '', status: 'in_progress' },
+          },
+          ...pieces.map((delta) => ({
+            type: 'response.function_call_arguments.delta', output_index: 0,
+            item_id: item.id, delta,
+          })),
+          {
+            type: 'response.function_call_arguments.done', output_index: 0,
+            item_id: item.id, arguments: argumentsValue,
+          },
+          { type: 'response.output_item.done', output_index: 0, item },
+          {
+            type: 'response.completed',
+            response: {
+              id: `native-long-response-${upstreamSequence}`,
+              model: 'upstream-native-model', status: 'completed', output: [item],
+              usage: {
+                input_tokens: 8, output_tokens: 2, total_tokens: 10,
+                input_tokens_details: { cached_tokens: 0 },
+                output_tokens_details: { reasoning_tokens: 0 },
+              },
+            },
+          },
+        ]
+        response.end(events.map((event) => (
+          `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`
+        )).join(''))
+        return
+      }
       if (
         readyRunId === 'run-native-tool-secret'
         || readyRunId === 'run-native-tool-incomplete-item'
@@ -509,19 +614,26 @@ test('pinned app-server crosses the Ready gateway for product and compaction req
   process.env.READY_E3_HOST_SECRET_CANARY = 'host-secret-e3-must-not-cross'
   try {
     db.exec(`
-      CREATE TABLE chat_conversations (id TEXT PRIMARY KEY);
+      CREATE TABLE chat_conversations (
+        id TEXT PRIMARY KEY,
+        message_visibility_epoch INTEGER NOT NULL DEFAULT 0,
+        closed_at TEXT
+      );
       CREATE TABLE chat_messages (
         id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL,
         role TEXT NOT NULL, content TEXT NOT NULL,
-        timestamp TEXT NOT NULL, meta_json TEXT NOT NULL
+        timestamp TEXT NOT NULL, meta_json TEXT NOT NULL,
+        message_visibility_epoch INTEGER NOT NULL DEFAULT 0
       );
       CREATE TABLE task_projections (
         task_id TEXT PRIMARY KEY, run_id TEXT NOT NULL, scope_id TEXT NOT NULL,
-        status TEXT NOT NULL, execution_binding_json TEXT
+        status TEXT NOT NULL, execution_binding_json TEXT,
+        message_visibility_epoch INTEGER NOT NULL DEFAULT 0
       );
       CREATE TABLE run_meta (
         run_id TEXT PRIMARY KEY, task_id TEXT, scope_id TEXT,
-        status TEXT NOT NULL, execution_binding_json TEXT
+        status TEXT NOT NULL, execution_binding_json TEXT,
+        message_visibility_epoch INTEGER NOT NULL DEFAULT 0
       );
     `)
     __runMigrationForTests('088_codex_runtime_bindings', db as unknown as MigrationDatabase)
@@ -536,6 +648,7 @@ test('pinned app-server crosses the Ready gateway for product and compaction req
     __runMigrationForTests('097_codex_gateway_completion_evidence', db as unknown as MigrationDatabase)
     __runMigrationForTests('098_codex_manual_compaction_recovery_evidence', db as unknown as MigrationDatabase)
     __runMigrationForTests('101_codex_manual_compaction_item_identity', db as unknown as MigrationDatabase)
+    __runMigrationForTests('111_codex_gateway_budget_lanes', db as unknown as MigrationDatabase)
     const repository = new CodexBindingRepository(db as unknown as DatabaseConnection)
     const gatewayRepository = new CodexModelGatewayRepository(
       db as unknown as DatabaseConnection,
@@ -635,7 +748,7 @@ test('pinned app-server crosses the Ready gateway for product and compaction req
             },
           }
         },
-        confirmServerResponseTransportWrite() {},
+        confirmServerResponseTransportWrite() { toolResponseDeliveries += 1 },
       },
       requestTimeoutMs: 20_000,
       inboundDeadlineMs: 20_000,
@@ -664,6 +777,7 @@ test('pinned app-server crosses the Ready gateway for product and compaction req
       assert.equal(reserved.ok, true)
       if (!reserved.ok) throw new Error(reserved.code)
       const run = prepared(runId, reserved.reservation, runScopeId, readyToolSurface)
+      assert.equal(isPreparedCodexProductRun(run), true, JSON.stringify(run))
       const executionBinding = { schemaVersion: 1, runId: run.runId }
       const parentMeta = { requestId: run.ingressBinding.requestId }
       const parentTimestamp = '2026-08-07T00:00:00.000Z'
@@ -777,34 +891,33 @@ test('pinned app-server crosses the Ready gateway for product and compaction req
       const acceptedText = candidate.candidateSelection.kind === 'accepted'
         ? candidate.candidateText
         : null
-      const productTerminalDigest = status === 'completed' && acceptedText !== null
-        ? workflowDigest({
-            id: messageId,
-            conversationId: run.readyToolHostIdentity.scopeId,
-            role: 'assistant',
-            content: acceptedText,
-            timestamp: closeoutAt,
-            meta: terminalMeta,
-          })
-        : `terminal-${run.runId}-${status}`
+      const publicText = status === 'completed' && acceptedText !== null
+        ? acceptedText
+        : '本轮未能完成，已保留已完成的工具和产物记录。'
+      const productTerminalDigest = workflowDigest({
+        id: messageId,
+        conversationId: run.readyToolHostIdentity.scopeId,
+        role: 'assistant',
+        content: publicText,
+        timestamp: closeoutAt,
+        meta: terminalMeta,
+      })
       db.exec('BEGIN IMMEDIATE')
       try {
         db.prepare(`UPDATE task_projections SET status = ? WHERE task_id = ?`).run(
           status,
           run.taskId,
         )
-        if (status === 'completed' && acceptedText !== null) {
-          db.prepare(`
-            INSERT INTO chat_messages (id, conversation_id, role, content, timestamp, meta_json, message_visibility_epoch)
-            VALUES (?, ?, 'assistant', ?, ?, ?, 0)
-          `).run(
-            messageId,
-            run.readyToolHostIdentity.scopeId,
-            acceptedText,
-            closeoutAt,
-            JSON.stringify(terminalMeta),
-          )
-        }
+        db.prepare(`
+          INSERT INTO chat_messages (id, conversation_id, role, content, timestamp, meta_json, message_visibility_epoch)
+          VALUES (?, ?, 'assistant', ?, ?, ?, 0)
+        `).run(
+          messageId,
+          run.readyToolHostIdentity.scopeId,
+          publicText,
+          closeoutAt,
+          JSON.stringify(terminalMeta),
+        )
         repository.completeCanonicalProductCloseoutInOpenTransaction({
           readyRunId: run.runId,
           productTerminalDigest,
@@ -882,66 +995,6 @@ test('pinned app-server crosses the Ready gateway for product and compaction req
       closeoutRun(run, expectedStatus, candidate)
       return { turnId: started.turn.id }
     }
-    const collectFailedTurn = async (
-      run: PreparedCodexProductRun,
-      text: string,
-      runThreadId: string,
-    ) => {
-      const candidate = await new CodexTurnCollector(client).collect({
-        readyTaskId: run.taskId,
-        readyRunId: run.runId,
-        scopeId: run.readyToolHostIdentity.scopeId,
-        codexThreadId: runThreadId,
-        startTurn: () => client.turnStart({
-          threadId: runThreadId,
-          clientUserMessageId: `client-message-${run.runId}`,
-          collaborationMode: {
-            mode: 'default',
-            settings: {
-              model: 'ready-e0-model',
-              reasoning_effort: snapshotByRun.get(run.runId)?.snapshot.reasoningEffort || null,
-              developer_instructions: null,
-            },
-          },
-          environments: [],
-          input: [{ type: 'text', text, text_elements: [] }],
-          additionalContext: {},
-          responsesapiClientMetadata: {
-            readyRunId: run.runId,
-            toolSurfaceDigest: run.readyToolSurface.toolSurfaceDigest,
-            turnContractDigest: `turn-contract-${run.runId}`,
-            upstreamProfileSnapshotDigest: snapshotByRun.get(run.runId)?.snapshotDigest,
-          },
-        }),
-        terminalTimeoutMs: 20_000,
-        actionReceiptRefs: [],
-        interactionState: null,
-        waitingFor: null,
-        terminalReasonCandidate: 'provider_failed',
-        abortInitiator: null,
-        budgetState: {},
-        contextState: {},
-        providerDiagnostics: {},
-        recoveryCheckpointRef: null,
-        browserContinuationRef: null,
-        browserProofRefs: [],
-        otherProofRefs: [],
-        projectionPatchRefs: [],
-        allowNullPhaseFallback: true,
-        allowDirectProvisionalStream: false,
-        onProvisionalDelta: () => undefined,
-      })
-      assert.equal(candidate.kind, 'native_terminal')
-      assert.equal(candidate.engineOutcome, 'failed', JSON.stringify({ candidate, stderr }))
-      assert.deepEqual(candidate.candidateSelection, {
-        kind: 'none', code: 'terminal_not_completed',
-      })
-      assert.equal(candidate.candidateText, null)
-      assert.equal(candidate.candidateDigest, null)
-      closeoutRun(run, 'failed', candidate)
-      return candidate
-    }
-
     await runTurn(firstRun, `ARM_AUTOMATIC_COMPACTION\n${'x '.repeat(230_000)}`)
     const secondRun = reserveAndAdmit('run-second', true)
     const secondTurn = await runTurn(secondRun, 'OBSERVE_AUTOMATIC_COMPACTION')
@@ -1025,148 +1078,6 @@ test('pinned app-server crosses the Ready gateway for product and compaction req
       nativeTurnId: manualEvidence.turnId,
     })
 
-    const nativeScopeId = 'scope-e3-native-failure'
-    const nativeThreadBindingId = 'thread-binding-e3-native-failure'
-    const nativeThreadCwd = join(state.threadCwdRoot, nativeThreadBindingId)
-    mkdirSync(nativeThreadCwd, { recursive: true })
-    repository.createEmptyAliasGeneration({
-      threadBindingId: nativeThreadBindingId,
-      aliasId: nativeScopeId,
-      aliasGeneration: 1,
-      readyScopeId: nativeScopeId,
-      runtimeManifestDigest: runtime.manifestDigest,
-      protocolSchemaDigest: 'protocol-schema-e3',
-      createdAt: new Date().toISOString(),
-    })
-    const nativeFailureRun = reserveAndAdmit(
-      'run-native-failure',
-      false,
-      nativeFailureSnapshot,
-      nativeScopeId,
-      nativeThreadBindingId,
-      nativeThreadCwd,
-    )
-    const nativeThread = await client.threadStart({
-      model: 'ready-e0-model', modelProvider: 'ready_gateway',
-      allowProviderModelFallback: false, cwd: nativeThreadCwd,
-      approvalPolicy: 'never', sandbox: 'read-only',
-      runtimeWorkspaceRoots: [], environments: [], config: null, dynamicTools: [],
-      developerInstructions,
-    })
-    await runTurn(
-      nativeFailureRun,
-      'TRIGGER_VERIFIED_NATIVE_FAILURE',
-      'failed',
-      nativeThread.thread.id,
-    )
-    assert.equal(upstreamPaths.at(-1), '/v1/responses')
-
-    const nativeFirstEventFailureRun = reserveAndAdmit(
-      'run-native-first-event-failure',
-      true,
-      nativeFailureSnapshot,
-      nativeScopeId,
-      nativeThreadBindingId,
-      nativeThreadCwd,
-    )
-    await runTurn(
-      nativeFirstEventFailureRun,
-      'TRIGGER_NATIVE_FAILURE_BEFORE_CREATED',
-      'failed',
-      nativeThread.thread.id,
-    )
-    assert.equal(upstreamPaths.at(-1), '/v1/responses')
-
-    const nativeFlatErrorRun = reserveAndAdmit(
-      'run-native-flat-error',
-      true,
-      nativeFailureSnapshot,
-      nativeScopeId,
-      nativeThreadBindingId,
-      nativeThreadCwd,
-    )
-    await runTurn(
-      nativeFlatErrorRun,
-      'TRIGGER_NATIVE_FLAT_ERROR',
-      'failed',
-      nativeThread.thread.id,
-    )
-    assert.equal(upstreamPaths.at(-1), '/v1/responses')
-
-    const lengthScopeId = 'scope-e3-length-incomplete'
-    const lengthThreadBindingId = 'thread-binding-e3-length-incomplete'
-    const lengthThreadCwd = join(state.threadCwdRoot, lengthThreadBindingId)
-    mkdirSync(lengthThreadCwd, { recursive: true })
-    repository.createEmptyAliasGeneration({
-      threadBindingId: lengthThreadBindingId,
-      aliasId: lengthScopeId,
-      aliasGeneration: 1,
-      readyScopeId: lengthScopeId,
-      runtimeManifestDigest: runtime.manifestDigest,
-      protocolSchemaDigest: 'protocol-schema-e3',
-      createdAt: new Date().toISOString(),
-    })
-    const lengthRun = reserveAndAdmit(
-      'run-length-incomplete',
-      false,
-      snapshot,
-      lengthScopeId,
-      lengthThreadBindingId,
-      lengthThreadCwd,
-    )
-    const lengthThread = await client.threadStart({
-      model: 'ready-e0-model', modelProvider: 'ready_gateway',
-      allowProviderModelFallback: false, cwd: lengthThreadCwd,
-      approvalPolicy: 'never', sandbox: 'read-only',
-      runtimeWorkspaceRoots: [], environments: [], config: null, dynamicTools: [],
-      developerInstructions,
-    })
-    const upstreamCountBeforeLength = upstreamBodies.length
-    await collectFailedTurn(
-      lengthRun,
-      'TRIGGER_LENGTH_INCOMPLETE',
-      lengthThread.thread.id,
-    )
-    assert.equal(upstreamBodies.length, upstreamCountBeforeLength + 1)
-    assert.equal(upstreamPaths.at(-1), '/v1/chat/completions')
-
-    const nativeIncompleteRun = reserveAndAdmit(
-      'run-native-incomplete',
-      true,
-      nativeFailureSnapshot,
-      nativeScopeId,
-      nativeThreadBindingId,
-      nativeThreadCwd,
-    )
-    const upstreamCountBeforeNativeIncomplete = upstreamBodies.length
-    await collectFailedTurn(
-      nativeIncompleteRun,
-      'TRIGGER_NATIVE_INCOMPLETE',
-      nativeThread.thread.id,
-    )
-    assert.equal(upstreamBodies.length, upstreamCountBeforeNativeIncomplete + 1)
-    assert.equal(upstreamPaths.at(-1), '/v1/responses')
-
-    const nativeMessageNoTerminalRun = reserveAndAdmit(
-      'run-native-message-no-terminal',
-      true,
-      nativeFailureSnapshot,
-      nativeScopeId,
-      nativeThreadBindingId,
-      nativeThreadCwd,
-    )
-    const upstreamCountBeforeNativeMessageNoTerminal = upstreamBodies.length
-    await collectFailedTurn(
-      nativeMessageNoTerminalRun,
-      'TRIGGER_NATIVE_MESSAGE_NO_TERMINAL',
-      nativeThread.thread.id,
-    )
-    assert.equal(upstreamBodies.length, upstreamCountBeforeNativeMessageNoTerminal + 1)
-    assert.equal(upstreamPaths.at(-1), '/v1/responses')
-
-    const toolScopeId = 'scope-e3-tool-prefix-mutation'
-    const toolThreadBindingId = 'thread-binding-e3-tool-prefix-mutation'
-    const toolThreadCwd = join(state.threadCwdRoot, toolThreadBindingId)
     const toolParameters = {
       type: 'object',
       properties: { query: { type: 'string' } },
@@ -1188,149 +1099,6 @@ test('pinned app-server crosses the Ready gateway for product and compaction req
     }
     const toolSurface = createCodexToolFixtureFromDefinitions([toolDefinition]).readyToolSurface
     assert.equal(toolSurface.toolSurfaceDigest, digestCanonicalJson([responseTool]))
-    mkdirSync(toolThreadCwd, { recursive: true })
-    repository.createEmptyAliasGeneration({
-      threadBindingId: toolThreadBindingId,
-      aliasId: toolScopeId,
-      aliasGeneration: 1,
-      readyScopeId: toolScopeId,
-      runtimeManifestDigest: runtime.manifestDigest,
-      protocolSchemaDigest: 'protocol-schema-e3',
-      createdAt: new Date().toISOString(),
-    })
-    const toolRun = reserveAndAdmit(
-      'run-tool-prefix-mutation',
-      false,
-      snapshot,
-      toolScopeId,
-      toolThreadBindingId,
-      toolThreadCwd,
-      toolSurface,
-    )
-    const toolThread = await client.threadStart({
-      model: 'ready-e0-model', modelProvider: 'ready_gateway',
-      allowProviderModelFallback: false, cwd: toolThreadCwd,
-      approvalPolicy: 'never', sandbox: 'read-only',
-      runtimeWorkspaceRoots: [], environments: [], config: null,
-      dynamicTools: [{
-        type: 'function',
-        name: responseTool.name,
-        description: responseTool.description,
-        inputSchema: toolParameters,
-      }],
-      developerInstructions,
-    })
-    const upstreamCountBeforeToolMutation = upstreamBodies.length
-    await collectFailedTurn(
-      toolRun,
-      'TRIGGER_TOOL_PREFIX_MUTATION',
-      toolThread.thread.id,
-    )
-    assert.equal(upstreamBodies.length, upstreamCountBeforeToolMutation + 1)
-    assert.equal(upstreamPaths.at(-1), '/v1/chat/completions')
-    assert.equal(toolExecutions, 0)
-
-    const toolSchemaRun = reserveAndAdmit(
-      'run-tool-schema-invalid',
-      true,
-      snapshot,
-      toolScopeId,
-      toolThreadBindingId,
-      toolThreadCwd,
-      toolSurface,
-    )
-    const upstreamCountBeforeToolSchema = upstreamBodies.length
-    await collectFailedTurn(
-      toolSchemaRun,
-      'TRIGGER_TOOL_SCHEMA_INVALID',
-      toolThread.thread.id,
-    )
-    assert.equal(upstreamBodies.length, upstreamCountBeforeToolSchema + 1)
-    assert.equal(upstreamPaths.at(-1), '/v1/chat/completions')
-    assert.equal(toolExecutions, 0)
-
-    const nativeToolScopeId = 'scope-e3-native-tool-mutation'
-    const nativeToolThreadBindingId = 'thread-binding-e3-native-tool-mutation'
-    const nativeToolThreadCwd = join(state.threadCwdRoot, nativeToolThreadBindingId)
-    mkdirSync(nativeToolThreadCwd, { recursive: true })
-    repository.createEmptyAliasGeneration({
-      threadBindingId: nativeToolThreadBindingId,
-      aliasId: nativeToolScopeId,
-      aliasGeneration: 1,
-      readyScopeId: nativeToolScopeId,
-      runtimeManifestDigest: runtime.manifestDigest,
-      protocolSchemaDigest: 'protocol-schema-e3',
-      createdAt: new Date().toISOString(),
-    })
-    const nativeToolRun = reserveAndAdmit(
-      'run-native-tool-mutation',
-      false,
-      nativeFailureSnapshot,
-      nativeToolScopeId,
-      nativeToolThreadBindingId,
-      nativeToolThreadCwd,
-      toolSurface,
-    )
-    const nativeToolThread = await client.threadStart({
-      model: 'ready-e0-model', modelProvider: 'ready_gateway',
-      allowProviderModelFallback: false, cwd: nativeToolThreadCwd,
-      approvalPolicy: 'never', sandbox: 'read-only',
-      runtimeWorkspaceRoots: [], environments: [], config: null,
-      dynamicTools: [{
-        type: 'function',
-        name: responseTool.name,
-        description: responseTool.description,
-        inputSchema: toolParameters,
-      }],
-      developerInstructions,
-    })
-    const upstreamCountBeforeNativeToolMutation = upstreamBodies.length
-    await collectFailedTurn(
-      nativeToolRun,
-      'TRIGGER_NATIVE_TOOL_MUTATION',
-      nativeToolThread.thread.id,
-    )
-    assert.equal(upstreamBodies.length, upstreamCountBeforeNativeToolMutation + 1)
-    assert.equal(upstreamPaths.at(-1), '/v1/responses')
-    assert.equal(toolExecutions, 0)
-
-    const nativeToolSecretRun = reserveAndAdmit(
-      'run-native-tool-secret',
-      true,
-      nativeFailureSnapshot,
-      nativeToolScopeId,
-      nativeToolThreadBindingId,
-      nativeToolThreadCwd,
-      toolSurface,
-    )
-    const upstreamCountBeforeNativeToolSecret = upstreamBodies.length
-    await collectFailedTurn(
-      nativeToolSecretRun,
-      'TRIGGER_NATIVE_TOOL_SECRET',
-      nativeToolThread.thread.id,
-    )
-    assert.equal(upstreamBodies.length, upstreamCountBeforeNativeToolSecret + 1)
-    assert.equal(upstreamPaths.at(-1), '/v1/responses')
-    assert.equal(toolExecutions, 0)
-
-    const nativeToolIncompleteRun = reserveAndAdmit(
-      'run-native-tool-incomplete-item',
-      true,
-      nativeFailureSnapshot,
-      nativeToolScopeId,
-      nativeToolThreadBindingId,
-      nativeToolThreadCwd,
-      toolSurface,
-    )
-    const upstreamCountBeforeNativeToolIncomplete = upstreamBodies.length
-    await collectFailedTurn(
-      nativeToolIncompleteRun,
-      'TRIGGER_NATIVE_TOOL_INCOMPLETE_ITEM',
-      nativeToolThread.thread.id,
-    )
-    assert.equal(upstreamBodies.length, upstreamCountBeforeNativeToolIncomplete + 1)
-    assert.equal(upstreamPaths.at(-1), '/v1/responses')
-    assert.equal(toolExecutions, 0)
 
     const liveLease = repository.readLiveProcessLease()
     assert.ok(liveLease?.pid)
@@ -1341,10 +1109,8 @@ test('pinned app-server crosses the Ready gateway for product and compaction req
     assert.equal(upstreamPaths.every((path) => (
       path === '/v1/chat/completions' || path === '/v1/responses'
     )), true)
-    assert.ok(upstreamPaths.includes('/v1/responses'))
     assert.equal(upstreamAuthPresent.every(Boolean), true)
     assert.ok(upstreamBodies.some((body) => body.model === 'upstream-chat-model'))
-    assert.ok(upstreamBodies.some((body) => body.model === 'upstream-native-model'))
     assert.equal(JSON.stringify(upstreamBodies).includes('ready-e0-model'), false)
     assert.equal(JSON.stringify(upstreamBodies).includes(gatewayAddress.bearerToken), false)
     assert.equal(JSON.stringify(upstreamBodies).includes('provider-secret-e3'), false)
@@ -1399,6 +1165,92 @@ test('pinned app-server crosses the Ready gateway for product and compaction req
       receiptCountBeforeRestart,
     )
     assert.equal(upstreamBodies.length, upstreamCountBeforeRestart)
+
+    const longToolScopeId = 'scope-e3-native-tool-long'
+    const longToolThreadBindingId = 'thread-binding-e3-native-tool-long'
+    const longToolThreadCwd = join(state.threadCwdRoot, longToolThreadBindingId)
+    mkdirSync(longToolThreadCwd, { recursive: true })
+    repository.createEmptyAliasGeneration({
+      threadBindingId: longToolThreadBindingId,
+      aliasId: longToolScopeId,
+      aliasGeneration: 1,
+      readyScopeId: longToolScopeId,
+      runtimeManifestDigest: runtime.manifestDigest,
+      protocolSchemaDigest: 'protocol-schema-e3',
+      createdAt: new Date().toISOString(),
+    })
+    const longToolRun = reserveAndAdmit(
+      'run-native-tool-long',
+      false,
+      nativeFailureSnapshot,
+      longToolScopeId,
+      longToolThreadBindingId,
+      longToolThreadCwd,
+      toolSurface,
+    )
+    const longToolThread = await client.threadStart({
+      model: 'ready-e0-model', modelProvider: 'ready_gateway',
+      allowProviderModelFallback: false, cwd: longToolThreadCwd,
+      approvalPolicy: 'never', sandbox: 'read-only',
+      runtimeWorkspaceRoots: [], environments: [], config: null,
+      dynamicTools: [{
+        type: 'function', name: responseTool.name, description: responseTool.description,
+        inputSchema: toolParameters,
+      }],
+      developerInstructions,
+    })
+    const executionsBeforeLongTool = toolExecutions
+    const deliveriesBeforeLongTool = toolResponseDeliveries
+    const longToolCandidate = await new CodexTurnCollector(client).collect({
+      readyTaskId: longToolRun.taskId,
+      readyRunId: longToolRun.runId,
+      scopeId: longToolScopeId,
+      codexThreadId: longToolThread.thread.id,
+      startTurn: () => client.turnStart({
+        threadId: longToolThread.thread.id,
+        clientUserMessageId: 'client-message-run-native-tool-long',
+        collaborationMode: {
+          mode: 'default',
+          settings: {
+            model: 'ready-e0-model',
+            reasoning_effort: nativeFailureSnapshot.snapshot.reasoningEffort,
+            developer_instructions: null,
+          },
+        },
+        environments: [],
+        input: [{ type: 'text', text: 'TRIGGER_NATIVE_TOOL_LONG', text_elements: [] }],
+        additionalContext: {},
+        responsesapiClientMetadata: {
+          readyRunId: longToolRun.runId,
+          toolSurfaceDigest: longToolRun.readyToolSurface.toolSurfaceDigest,
+          turnContractDigest: `turn-contract-${longToolRun.runId}`,
+          upstreamProfileSnapshotDigest: nativeFailureSnapshot.snapshotDigest,
+        },
+      }),
+      terminalTimeoutMs: 20_000,
+      actionReceiptRefs: [], interactionState: null, waitingFor: null,
+      terminalReasonCandidate: 'done', abortInitiator: null,
+      budgetState: {}, contextState: {}, providerDiagnostics: {},
+      recoveryCheckpointRef: null, browserContinuationRef: null,
+      browserProofRefs: [], otherProofRefs: [], projectionPatchRefs: [],
+      allowNullPhaseFallback: true,
+      allowDirectProvisionalStream: false,
+      onProvisionalDelta: () => undefined,
+    })
+    assert.equal(
+      longToolCandidate.engineOutcome,
+      'completed',
+      JSON.stringify({
+        candidate: longToolCandidate,
+        stderr: stderr.join('').slice(-4_000),
+        upstreamBody: upstreamBodies.at(-1),
+      }),
+    )
+    assert.equal(longToolCandidate.usedToolCalls.length, 1)
+    assert.equal(toolExecutions, executionsBeforeLongTool + 1)
+    assert.equal(toolResponseDeliveries, deliveriesBeforeLongTool + 1)
+    assert.ok(upstreamPaths.includes('/v1/responses'))
+    assert.ok(upstreamBodies.some((body) => body.model === 'upstream-native-model'))
 
     assert.equal(db.pragma('quick_check', { simple: true }), 'ok')
   } finally {

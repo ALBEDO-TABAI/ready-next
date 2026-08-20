@@ -25,7 +25,7 @@
   "hostFailureCloseoutContractDigest": "ea5cdc9dbf5285d8652dc790ccb7801fda464c63a54bb4de2a29810554bd3e69",
   "processLeaseContractDigest": "537bfdd312fdca0a6795ef4009bb1695cd457b1caa42792a93b16eb704ca0f97",
   "childEnvAllowlistDigest": "9c4cd5a2d6e5d211a52a233bcf6b1f8f1cc1148ed0564fe07c54995df962486a",
-  "nativeIsolationConfigContractDigest": "6478f3c3d2b2ab54f29e504b502d774326e9f2ee8c6c57abcec981ba663d3513",
+  "nativeIsolationConfigContractDigest": "03ca95cca68a7ebfc6cfd0b1c3e1e4a205ace3aa61a4c7bdc3355846ddda4541",
   "resourceAdditionalContextContractDigest": "c89ef5f94ff23f51fb5f57cf32763c2d4e2bbc9b42b0245a7f95fcb75648c365",
   "modelGatewayContractDigest": "a9db768f3746a46da5b9fd9f8aa71e6583f2776bd910cec631a085a4720a0d32",
   "toolBridgeContractDigest": "77db879f5c613687b4a0c488fc233ea28504b0c13699df28bf2c28b3ad830228",

@@ -454,16 +454,21 @@ export function resolveReadyToolTurnSnapshot(input: {
   resolutionInput: ReadyLiveToolResolutionInput
   frozenToolSurface?: ReadyToolSurface
 }): ReadyToolTurnSnapshot {
-  const toolDefinitions = input.source
-    .listDefaultToolDefinitionsForTurn(input.resolutionInput)
-    .filter((definition) => !CODEX_ROOT_EXCLUDED_CONTROL_TOOLS.has(definition.name))
-  if (toolDefinitions.some((definition) => isToolStatePatchEmittingToolName(definition.name))) {
-    throw new CodexToolSurfaceError('tool_surface_result_state_unsupported')
-  }
-  if (toolDefinitions.some((definition) => (
-    definition.domain === 'skill' && definition.codexExecutionSafe !== true
-  ))) {
-    throw new CodexToolSurfaceError('tool_surface_skill_execution_unsupported')
+  const listed = input.source.listDefaultToolDefinitionsForTurn(input.resolutionInput)
+  const toolDefinitions = listed.filter((definition) => (
+    !CODEX_ROOT_EXCLUDED_CONTROL_TOOLS.has(definition.name)
+    && !isToolStatePatchEmittingToolName(definition.name)
+    && (definition.domain !== 'skill' || definition.codexExecutionSafe === true)
+  ))
+  if (toolDefinitions.length === 0) {
+    if (listed.some((definition) => isToolStatePatchEmittingToolName(definition.name))) {
+      throw new CodexToolSurfaceError('tool_surface_result_state_unsupported')
+    }
+    if (listed.some((definition) => (
+      definition.domain === 'skill' && definition.codexExecutionSafe !== true
+    ))) {
+      throw new CodexToolSurfaceError('tool_surface_skill_execution_unsupported')
+    }
   }
   const resolved = buildReadyToolSurface({
     surfaceId: input.frozenToolSurface?.surfaceId || input.surfaceId,

@@ -82,6 +82,7 @@ test('prepared resource authority reconstructs a narrow tool envelope after pers
   const envelope = readCodexPreparedActionAuthorizationEnvelope({
     prepared: {
       actionAuthorizationMode: 'full',
+      ingress: { attemptKind: 'user_ingress' },
       resourceAuthorities: [
         {
           kind: 'local_file', logicalResourceId: 'local-file:trusted', name: 'notes.txt',

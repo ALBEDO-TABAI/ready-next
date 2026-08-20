@@ -118,11 +118,6 @@
       "snippetHash": "4ee76e8213a7854d"
     },
     {
-      "file": "src/main/modules/agent-control/knowledge/site-card-learning.ts",
-      "line": 131,
-      "snippetHash": "7fa34d6c8a4e3b62"
-    },
-    {
       "file": "src/main/modules/agent-control/memory/secret-storage.ts",
       "line": 53,
       "snippetHash": "ccc3e3fb98f59aa4"
@@ -136,26 +131,6 @@
       "file": "src/main/modules/agent-control/metrics.ts",
       "line": 39,
       "snippetHash": "58661bbcbb31454a"
-    },
-    {
-      "file": "src/main/modules/agent-control/prompt-assembly.ts",
-      "line": 514,
-      "snippetHash": "60a186ba96e1c394"
-    },
-    {
-      "file": "src/main/modules/agent-control/prompt-assembly.ts",
-      "line": 826,
-      "snippetHash": "7fa34d6c8a4e3b62"
-    },
-    {
-      "file": "src/main/modules/agent-control/prompt-assembly.ts",
-      "line": 840,
-      "snippetHash": "7fa34d6c8a4e3b62"
-    },
-    {
-      "file": "src/main/modules/agent-control/prompt-assembly.ts",
-      "line": 1402,
-      "snippetHash": "440a2c9215e6735b"
     },
     {
       "file": "src/main/modules/agent-control/prompt-assets/roots.ts",

@@ -174,7 +174,7 @@ export function getToolResourceTag(toolName: string): ToolResourceTag {
       accessMode: READ_ONLY_FEISHU_TOOL_NAMES.has(normalized) ? 'read' : 'write',
     }
   }
-  if (normalized.startsWith('memory_')) {
+  if (normalized.startsWith('memory_') || normalized.startsWith('ready_memory_')) {
     return { domain: 'memory', accessMode: 'read' }
   }
   if (normalized.startsWith('session_')) {

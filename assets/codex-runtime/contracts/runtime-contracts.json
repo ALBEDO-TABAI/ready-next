@@ -403,7 +403,10 @@
       "features.goals",
       "features.apps",
       "features.plugins",
-      "features.skill_search"
+      "features.skill_search",
+      "features.memories",
+      "memories.generate_memories",
+      "memories.use_memories"
     ],
     "provider": {
       "id": "ready_gateway",

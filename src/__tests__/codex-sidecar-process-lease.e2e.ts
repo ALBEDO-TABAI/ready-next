@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import test from 'node:test'
+import { disabledReadyMemorySnapshot } from './utils/ready-memory-fixture'
 
 import { DatabaseManager, type DatabaseConnection } from '../main/modules/database'
 import {
@@ -194,6 +195,7 @@ function prepared(
 ): PreparedCodexProductRun {
   return {
     preparationContract: 'codex_product_run_e1',
+    readyMemorySnapshot: disabledReadyMemorySnapshot(),
     taskId: `task-${runId}`,
     runId,
     conversationAlias: { aliasId: targetAliasId, aliasGeneration: 1 },
@@ -222,7 +224,16 @@ function prepared(
       authorizationOwnerId: `owner-${runId}`,
       resourceOwnerId: `resource-owner-${runId}`,
     },
-    productBudgetSeed: { maxIterations: 8, maxToolCalls: 4, maxParallelToolGroups: 1 },
+    productBudgetSeed: {
+      maxIterations: 8,
+      maxToolCalls: 4,
+      maxParallelToolGroups: 1,
+      lanes: {
+        ordinary: { maxIterations: 7, maxToolCalls: 4, maxParallelToolGroups: 1 },
+        delivery: { maxIterations: 0, maxToolCalls: 0, maxParallelToolGroups: 0 },
+        final: { maxIterations: 1 },
+      },
+    },
     neutralProjectionSeed: {
       phase: 'planning', taskTitle: '正在理解需求', taskSummary: '正在整理任务边界',
     },
@@ -691,32 +702,30 @@ test('real app-server uses durable bindings, exact tools, compaction, and proces
         terminalReason: projectionStatus === 'completed' ? 'done' : 'cancelled',
       }
       const messageId = `assistant:${run.taskId}:${run.runId}:terminal`
-      const productTerminalDigest = projectionStatus === 'completed' && candidateText !== null
-        ? workflowDigest({
-            id: messageId,
-            conversationId: run.readyToolHostIdentity.scopeId,
-            role: 'assistant',
-            content: candidateText,
-            timestamp: closeoutAt,
-            meta: terminalMeta,
-          })
-        : `terminal-${run.runId}`
+      const terminalContent = candidateText
+        ?? '已停止本轮任务，已完成的记录仍保留。'
+      const productTerminalDigest = workflowDigest({
+        id: messageId,
+        conversationId: run.readyToolHostIdentity.scopeId,
+        role: 'assistant',
+        content: terminalContent,
+        timestamp: closeoutAt,
+        meta: terminalMeta,
+      })
       db.exec('BEGIN IMMEDIATE')
       try {
         db.prepare(`UPDATE task_projections SET status = ? WHERE task_id = ?`)
           .run(projectionStatus, run.taskId)
-        if (projectionStatus === 'completed' && candidateText !== null) {
-          db.prepare(`
-            INSERT INTO chat_messages (id, conversation_id, role, content, timestamp, meta_json, message_visibility_epoch)
-            VALUES (?, ?, 'assistant', ?, ?, ?, 0)
-          `).run(
-            messageId,
-            run.readyToolHostIdentity.scopeId,
-            candidateText,
-            closeoutAt,
-            JSON.stringify(terminalMeta),
-          )
-        }
+        db.prepare(`
+          INSERT INTO chat_messages (id, conversation_id, role, content, timestamp, meta_json, message_visibility_epoch)
+          VALUES (?, ?, 'assistant', ?, ?, ?, 0)
+        `).run(
+          messageId,
+          run.readyToolHostIdentity.scopeId,
+          terminalContent,
+          closeoutAt,
+          JSON.stringify(terminalMeta),
+        )
         repository.completeCanonicalProductCloseoutInOpenTransaction({
           readyRunId: run.runId,
           productTerminalDigest,

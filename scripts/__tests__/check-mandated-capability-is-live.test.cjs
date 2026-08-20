@@ -34,15 +34,7 @@ function write(root, rel, text) {
   fs.writeFileSync(abs, text)
 }
 
-const WIRED_RUNTIME = `
-import { runBeliefDecayRound } from '../memory/belief-decay'
-import { CrystallizeScheduler } from '../maintenance/crystallize-gate'
-const crystallizeScheduler = new CrystallizeScheduler(() => {})
-crystallizeScheduler.start({ startupDelayMs: 90_000 })
-logAgentMetric('crystallize_round_fired', {})
-runBeliefDecayRound([], effectors, now)
-logAgentMetric('belief_decay_round_fired', {})
-`
+const RETIRED_MEMORY_RUNTIME = 'export const runtimeReady = true\n'
 
 function writeBaseline(root) {
   write(root, LIFECYCLE_REL, `
@@ -50,7 +42,7 @@ for (const row of rows) {
   if (row.category === 'belief') continue
 }
 `)
-  write(root, RUNTIME_REL, WIRED_RUNTIME)
+  write(root, RUNTIME_REL, RETIRED_MEMORY_RUNTIME)
   write(root, DECAY_REL, 'export function runBeliefDecayRound() {}\n')
   write(root, CRYSTALLIZE_REL, 'export class CrystallizeScheduler {}\n')
   write(root, CRITERIA_REL, 'export function appendModelCriteria(\n) {}\n')
@@ -123,7 +115,7 @@ test('retired remote-specific coordinator alias cannot return', (t) => {
 test('an unowned crystallize startup timer cannot return', (t) => {
   const root = makeRoot(t)
   writeBaseline(root)
-  write(root, RUNTIME_REL, `${WIRED_RUNTIME}\nsetTimeout(() => { void runCrystallizeRoundOnce(false) }, 90_000)\n`)
+  write(root, RUNTIME_REL, `${RETIRED_MEMORY_RUNTIME}\nnew CrystallizeScheduler(() => {})\n`)
   const result = check({ root })
   assert.equal(result.ok, false)
   assert.ok(result.errors.some((error) => error.includes('[unowned-crystallize-startup-timer]')))
@@ -173,49 +165,29 @@ test('retired specialist mutation tools cannot return to the Codex surface', (t)
   assert.ok(result.errors.some((error) => error.includes('[specialist-agent-live-mutation-tools]')))
 })
 
-test('排除即托付：exclusion present but belief-decay unwired fails', (t) => {
+test('retired belief-decay round cannot return to the production runtime', (t) => {
+  const root = makeRoot(t)
+  writeBaseline(root)
+  write(root, RUNTIME_REL, `
+import { runBeliefDecayRound } from '../memory/belief-decay'
+runBeliefDecayRound([], effectors, now)
+`)
+  const result = check({ root })
+  assert.equal(result.ok, false)
+  assert.ok(result.errors.some((e) => e.includes('[belief-decay]') && e.includes('retired path returned')))
+})
+
+test('retired crystallize scheduler cannot return to the production runtime', (t) => {
   const root = makeRoot(t)
   writeBaseline(root)
   write(root, RUNTIME_REL, `
 import { CrystallizeScheduler } from '../maintenance/crystallize-gate'
 const crystallizeScheduler = new CrystallizeScheduler(() => {})
 crystallizeScheduler.start({ startupDelayMs: 90_000 })
-logAgentMetric('crystallize_round_fired', {})
 `)
   const result = check({ root })
   assert.equal(result.ok, false)
-  assert.ok(result.errors.some((e) => e.includes('[belief-decay]') && e.includes('排除即托付')))
-})
-
-test('live-required wired without fired ledger fails', (t) => {
-  const root = makeRoot(t)
-  writeBaseline(root)
-  write(root, RUNTIME_REL, WIRED_RUNTIME.replace("logAgentMetric('belief_decay_round_fired', {})", ''))
-  const result = check({ root })
-  assert.equal(result.ok, false)
-  assert.ok(result.errors.some((e) => e.includes('[belief-decay]') && e.includes('belief_decay_round_fired')))
-})
-
-test('live file carrying a stale unwired marker fails', (t) => {
-  const root = makeRoot(t)
-  writeBaseline(root)
-  write(root, DECAY_REL, '// P5d/C26 unwired — not in production driver path\nexport function runBeliefDecayRound() {}\n')
-  const result = check({ root })
-  assert.equal(result.ok, false)
-  assert.ok(result.errors.some((e) => e.includes('[belief-decay]') && e.includes('unwired 标记')))
-})
-
-test('live-required capability without delegation missing wiring fails (crystallize)', (t) => {
-  const root = makeRoot(t)
-  writeBaseline(root)
-  write(root, RUNTIME_REL, `
-import { runBeliefDecayRound } from '../memory/belief-decay'
-runBeliefDecayRound([], effectors, now)
-logAgentMetric('belief_decay_round_fired', {})
-`)
-  const result = check({ root })
-  assert.equal(result.ok, false)
-  assert.ok(result.errors.some((e) => e.includes('[crystallize-round]') && e.includes('缺失接线证据')))
+  assert.ok(result.errors.some((e) => e.includes('[crystallize-round]') && e.includes('retired path returned')))
 })
 
 // appendModelCriteria 已 gate-flip 为 live-required（D4）；dark-defect 机制

@@ -10,7 +10,10 @@ import {
 } from '../main/modules/agent-control/skills/skill-tool-authorization'
 import type { ToolDefinition } from '../main/modules/agent-control/tools-runtime/tool-definition'
 import type { SkillState } from '../main/modules/skills-runtime/runtime-manager'
-import { isCodexSafeHostSkillPrimitiveDefinition } from '../main/modules/tools/skill-tool-execution-authority'
+import {
+  isCodexSafeHostSkillPrimitiveDefinition,
+  isHostFolderExportPrimitive,
+} from '../main/modules/tools/skill-tool-execution-authority'
 import { digestCanonicalJson } from '../main/modules/agent-control/codex-runtime/codex-model-gateway-contract'
 import {
   assertReadyToolSurface,
@@ -358,6 +361,52 @@ test('Codex turn admission rejects skill tools whose results require frame-state
   )
 })
 
+test('Codex turn keeps research and folder tools when a selected skill also authorizes frame-state primitives', () => {
+  const inspectRunState = {
+    ...definition('skill_inspect_run_state'),
+    groupId: 'skills' as const,
+    domain: 'skill' as const,
+    codexExecutionSafe: true,
+  }
+  const writeArtifact = {
+    ...definition('skill_write_artifact'),
+    groupId: 'skills' as const,
+    domain: 'skill' as const,
+    codexExecutionSafe: true,
+  }
+  const resolved = resolveReadyToolTurnSnapshot({
+    surfaceId: 'surface-reference-skill-folder',
+    authorizationId: 'authorization-reference-skill-folder',
+    authorization: buildSelectedSkillToolAuthorization({
+      skillId: 'surf-pro',
+      allowedTypedActions: [],
+      allowedPrimitives: ['skill_inspect_run_state', 'skill_write_artifact'],
+      source: 'explicit',
+      reason: 'typed_ref:explicit_user_mention',
+    }),
+    source: {
+      listDefaultToolDefinitionsForTurn: () => [
+        definition('web_search'),
+        definition('file_write'),
+        inspectRunState,
+        writeArtifact,
+      ],
+    },
+    resolutionInput: {} as ReadyLiveToolResolutionInput,
+  })
+
+  assert.deepEqual(resolved.readyToolSurface.toolNames, [
+    'file_write',
+    'skill_write_artifact',
+    'web_search',
+  ])
+  assert.deepEqual(resolved.readyTurnToolAuthorization.allowedToolNames, [
+    'file_write',
+    'skill_write_artifact',
+    'web_search',
+  ])
+})
+
 test('Codex turn keeps supported browser tools while omitting browser_download state patches', () => {
   const resolved = resolveReadyToolTurnSnapshot({
     surfaceId: 'surface-browser-compatible',
@@ -426,13 +475,22 @@ test('Codex skill admission never executes mutable skill directories', (t) => {
   assert.equal(isCodexSafeHostSkillPrimitiveDefinition(
     'skill_read_artifact',
     { id: 'incomplete-fixture' } as SkillState,
-  ), false)
+  ), true)
+  assert.equal(isHostFolderExportPrimitive('skill_write_artifact'), true)
+  assert.equal(isHostFolderExportPrimitive('skill_read_artifact'), true)
+  assert.equal(isHostFolderExportPrimitive('skill_export_artifact'), true)
+  assert.equal(isCodexSafeHostSkillPrimitiveDefinition(
+    'skill_write_artifact',
+    { id: 'incomplete-fixture' } as SkillState,
+  ), true)
   assert.equal(isCodexSafeHostSkillPrimitiveDefinition('skill_read_artifact', skill), true)
   assert.equal(isCodexSafeHostSkillPrimitiveDefinition('skill_run_shell', skill), false)
 
   mkdirSync(join(root, 'real-scripts'))
   symlinkSync(join(root, 'real-scripts'), join(root, 'scripts'))
-  assert.equal(isCodexSafeHostSkillPrimitiveDefinition('skill_read_artifact', skill), false)
+  assert.equal(isCodexSafeHostSkillPrimitiveDefinition('skill_read_artifact', skill), true)
+  assert.equal(isCodexSafeHostSkillPrimitiveDefinition('skill_write_artifact', skill), true)
+  assert.equal(isCodexSafeHostSkillPrimitiveDefinition('skill_export_artifact', skill), true)
 
   rmSync(join(root, 'scripts'))
   const typedSkill = {

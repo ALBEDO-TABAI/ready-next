@@ -419,13 +419,10 @@ test('session recall NULL agent rows do not match agent-filtered requests', () =
   assert.deepEqual(filtered.map((hit) => hit.conversationId), ['conv-alpha'])
 })
 
-test('runtime automatic recall passes scope.agent into SessionRecallService', () => {
+test('runtime keeps session recall user-invoked and does not inject it automatically', () => {
   // eslint-disable-next-line ready/no-source-grep-test -- hard runtime wiring contract: full AgentControlRuntime construction requires Electron and app DB wiring.
   const runtime = readFileSync(resolve(process.cwd(), 'src/main/modules/agent-control/runtime-core/runtime.ts'), 'utf8')
-  const autoRecallCall = runtime.match(/getAutoSessionRecallCapsules:\s*\(\{ scope, userText \}\) =>[\s\S]*?this\.sessionRecallService\.getAutomaticRecallCapsules\(\{[\s\S]*?\}\)/)
-
-  assert.ok(autoRecallCall, 'automatic recall runtime call should be found')
-  assert.match(autoRecallCall[0], /agent:\s*scope\.agent/)
+  assert.doesNotMatch(runtime, /getAutoSessionRecallCapsules|getAutomaticRecallCapsules/)
 })
 
 test('DatabaseManager recall metadata write persists conversation.agent', () => {

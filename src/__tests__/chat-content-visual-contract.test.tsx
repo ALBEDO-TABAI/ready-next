@@ -13,6 +13,7 @@ import {
   ToolTimeline,
 } from '../renderer/components/agent/chat-panel/task/ToolTimeline'
 import { taskProjectionToTaskCardRun } from '../renderer/components/agent/task-card-from-projection'
+import { SoftFailureCapsule } from '../renderer/components/agent/SoftFailureCapsule'
 import {
   isTaskVisible,
 } from '../renderer/components/agent/chat-panel/helpers/badges'
@@ -21,6 +22,24 @@ import {
   shouldRenderPendingTaskCard,
   terminalGeneratedImageArtifacts,
 } from '../renderer/components/agent/chat-panel/task-snapshot/TaskToolSnapshot'
+
+test('recoverable failures show plain guidance without internal error or tool names', () => {
+  const html = renderToStaticMarkup(createElement(SoftFailureCapsule, {
+    softError: {
+      message: 'codex_runtime_host_unbound',
+      errorKind: 'host_unavailable',
+      toolName: 'tag_forge_prepare_batch',
+      friendlyMessage: '服务暂时不可用，稍后重试',
+      technicalDetails: 'codex_runtime_host_unbound',
+      receivedAt: '2026-08-19T00:00:00.000Z',
+    },
+    onDismiss: () => undefined,
+  }))
+
+  assert.match(html, /任务暂时失败/)
+  assert.match(html, /服务暂时不可用，稍后重试/)
+  assert.doesNotMatch(html, /host_unavailable|codex_runtime_host_unbound|tag_forge_prepare_batch/i)
+})
 
 test('thinking indicator is a compact live status without an assistant avatar', () => {
   const html = renderToStaticMarkup(createElement(ThinkingIndicator))
@@ -34,11 +53,14 @@ test('thinking indicator is a compact live status without an assistant avatar', 
 
 test('thinking indicator can replace its fallback with a safe live narration', () => {
   const html = renderToStaticMarkup(createElement(ThinkingIndicator, {
-    message: '正在核对天气来源',
+    message: '正在核对 **天气来源** 与 `更新时间`',
   }))
 
   assert.match(html, /data-ready-thinking-summary="true"/)
-  assert.match(html, />正在核对天气来源</)
+  assert.match(html, />正在核对 <strong>天气来源<\/strong> 与 <code/)
+  assert.match(html, />更新时间<\/code>/)
+  const visibleLabel = html.match(/<span class="ready-thinking-state-label">[\s\S]*<\/span><\/div>$/)?.[0] || ''
+  assert.doesNotMatch(visibleLabel, /\*\*|`更新时间`/)
   assert.doesNotMatch(html, />思考中</)
 })
 
@@ -87,6 +109,16 @@ test('real diff blocks and numbered links receive their adapted presentation', (
   assert.match(html, /data-ready-code-kind="diff"/)
   assert.match(html, /data-ready-diff-line="remove"/)
   assert.match(html, /data-ready-diff-line="add"/)
+})
+
+test('absolute file citations and @ mentions render as encapsulated chips', () => {
+  const html = renderToStaticMarkup(createElement(MarkdownContent, {
+    content: '问题根因： /Users/user/实验田/idea-1/call_outcome.py (line 1) 与 @[工作内容]',
+    mentions: { '工作内容': { path: '/Users/user/实验田/测试/lib-a/工作内容' } },
+  }))
+  assert.match(html, /data-ready-local-ref="file"/)
+  assert.match(html, /call_outcome\.py \(line 1\)/)
+  assert.match(html, /工作内容/)
 })
 
 test('tool activity presentation uses typed, truthful labels from existing trace data', () => {
@@ -204,7 +236,6 @@ test('real task cards keep their useful title instead of becoming a generic dura
     recentArtifacts: [],
     taskContinuation: null,
     progress: null,
-    memoryCapture: null,
     taskType: 'multi_step_task',
     interactionState: 'suspended',
     canResume: false,
@@ -246,6 +277,9 @@ test('task activity and multiline user messages share stable text columns', () =
   assert.match(chatUtilities, /\.ready-task-content-line\s*\{\s*padding-left: 20px;/)
   assert.match(chatUtilities, /\.ready-thinking-reasoning\s*\{[\s\S]*?padding-left: 20px;/)
   assert.match(chatUtilities, /\.ready-thinking-reasoning::before\s*\{[\s\S]*?left: 5px;/)
+  assert.match(chatUtilities, /\.ready-thinking-state\s*\{[\s\S]*?max-width: 72ch;/)
+  assert.match(chatUtilities, /\.ready-thinking-state-label\s*\{[\s\S]*?overflow-wrap: anywhere;[\s\S]*?white-space: normal;/)
+  assert.doesNotMatch(chatUtilities, /\.ready-thinking-state-label\s*\{[\s\S]*?max-width: min\(68vw, 560px\);/)
   assert.match(chatMessagesSource, /className="ready-chat-user-message max-w-\[85%\] t-body"/)
   assert.match(chatMessagesSource, /className="ready-chat-user-message-content"/)
   assert.match(chatUtilities, /\.ready-chat-user-message-content\s*\{[\s\S]*?width: 100%;[\s\S]*?text-align: left;/)
@@ -306,6 +340,23 @@ test('Ready tool names map to their actual product activity instead of reference
   }
 })
 
+test('history can classify an internal tool name without displaying it in expanded details', () => {
+  const html = renderToStaticMarkup(createElement(ToolTimeline, {
+    items: [{
+      id: 'history-shell',
+      callText: '运行本地命令',
+      resultText: '本地命令完成',
+      status: 'done',
+      toolName: 'skill_run_shell',
+      hideToolName: true,
+    }],
+  }))
+
+  assert.match(html, /data-ready-tool-activity-kind="command"/)
+  assert.match(html, /本地命令完成/)
+  assert.doesNotMatch(html, /skill_run_shell/)
+})
+
 test('task steps expose distinct semantic states without relying on colored bullets alone', () => {
   const run = taskProjectionToTaskCardRun({
     scopeId: 'scope-visual',
@@ -323,7 +374,6 @@ test('task steps expose distinct semantic states without relying on colored bull
     recentArtifacts: [],
     taskContinuation: null,
     progress: null,
-    memoryCapture: null,
     taskType: 'multi_step_task',
     interactionState: 'running',
     canResume: false,

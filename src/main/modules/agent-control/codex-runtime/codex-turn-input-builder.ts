@@ -10,10 +10,17 @@ import type {
   CodexAdditionalContextEntry,
   CodexTurnStartParams,
 } from './codex-native-runtime'
+import type { CodexRetryArtifactSource } from './codex-product-run-preparer'
 import {
   codexUserInputSchema,
   type CodexUserInput,
 } from './codex-user-input'
+import {
+  READY_MEMORY_ADDITIONAL_CONTEXT_KEY,
+  canonicalReadyMemoryJson,
+  readyMemoryPromptPayload,
+  type ReadyMemorySnapshot,
+} from '../ready-memory'
 
 export type ResourceVersionReference = {
   logicalResourceId: string
@@ -35,17 +42,22 @@ export type ExplicitResourceEnvelope = {
 
 export type UserIngress = {
   kind: 'user_ingress'
-  attemptKind: 'user_ingress'
+  attemptKind: 'user_ingress' | 'explicit_retry'
   originUserMessageId: string
   canonicalCurrentInputRef: CanonicalCurrentInputRef
   explicitResourceEnvelope: ExplicitResourceEnvelope
   resourceAdditionalContext: ResourceVersionReference[]
   currentDocumentAnchor?: CodexCurrentDocumentAnchor | null
+  predecessorRunId?: string
+  historyParityEvidenceDigest?: string
+  currentThreadReadEvidenceDigest?: string
+  continuationContractDigest?: string
+  artifactSources?: CodexRetryArtifactSource[]
 }
 
 export type NonUserSuccessorIngress = {
   kind: 'non_user_successor'
-  attemptKind: 'recovery_successor' | 'checkpoint_successor' | 'explicit_retry'
+  attemptKind: 'recovery_successor' | 'checkpoint_successor'
   originUserMessageId: string
   predecessorRunId: string
   turnStartInput: []
@@ -65,6 +77,7 @@ export type CodexTurnBuildContext = {
   toolSurfaceDigest: string
   turnContractDigest: string
   upstreamProfileSnapshotDigest: string
+  readyMemorySnapshot: ReadyMemorySnapshot
 }
 
 export type CodexTurnInputBuildResult =
@@ -104,9 +117,25 @@ const userIngressSchema = z.object({
   currentDocumentAnchor: codexCurrentDocumentAnchorSchema.nullable().optional(),
 }).strict()
 
+const explicitRetryIngressSchema = userIngressSchema.extend({
+  attemptKind: z.literal('explicit_retry'),
+  predecessorRunId: nonEmptyString,
+  historyParityEvidenceDigest: nonEmptyString,
+  currentThreadReadEvidenceDigest: nonEmptyString,
+  continuationContractDigest: nonEmptyString,
+  artifactSources: z.array(z.object({
+    sourceReadyRunId: nonEmptyString,
+    relativePath: nonEmptyString,
+    logicalArtifactRef: nonEmptyString,
+    version: z.string().regex(/^sha256:[a-f0-9]{64}$/),
+    sha256: z.string().regex(/^[a-f0-9]{64}$/),
+    state: z.enum(['staged', 'exported', 'verified', 'indeterminate']),
+  }).strict()).max(8),
+}).strict()
+
 const nonUserSuccessorIngressSchema = z.object({
   kind: z.literal('non_user_successor'),
-  attemptKind: z.enum(['recovery_successor', 'checkpoint_successor', 'explicit_retry']),
+  attemptKind: z.enum(['recovery_successor', 'checkpoint_successor']),
   originUserMessageId: nonEmptyString,
   predecessorRunId: nonEmptyString,
   turnStartInput: z.tuple([]),
@@ -116,8 +145,9 @@ const nonUserSuccessorIngressSchema = z.object({
   continuationContractDigest: nonEmptyString,
 }).strict()
 
-const codexTurnIngressSchema = z.discriminatedUnion('kind', [
+const codexTurnIngressSchema = z.union([
   userIngressSchema,
+  explicitRetryIngressSchema,
   nonUserSuccessorIngressSchema,
 ])
 
@@ -163,6 +193,24 @@ function buildResourceContext(
   ]))
 }
 
+export function buildCodexExplicitRetryContext(input: UserIngress) {
+  if (
+    input.attemptKind !== 'explicit_retry'
+    || !input.predecessorRunId
+    || !input.historyParityEvidenceDigest
+    || !input.currentThreadReadEvidenceDigest
+    || !input.continuationContractDigest
+    || !input.artifactSources
+  ) throw new Error('codex_explicit_retry_context_invalid')
+  return {
+    predecessorRunId: input.predecessorRunId,
+    historyParityEvidenceDigest: input.historyParityEvidenceDigest,
+    currentThreadReadEvidenceDigest: input.currentThreadReadEvidenceDigest,
+    continuationContractDigest: input.continuationContractDigest,
+    artifactSources: input.artifactSources,
+  }
+}
+
 export class CodexTurnInputBuilder {
   build(rawIngress: unknown, context: CodexTurnBuildContext): CodexTurnInputBuildResult {
     const parsed = codexTurnIngressSchema.safeParse(rawIngress)
@@ -183,6 +231,7 @@ export class CodexTurnInputBuilder {
       return { ok: false, code: 'resource_reference_mismatch' }
     }
 
+    const readyMemoryPayload = readyMemoryPromptPayload(context.readyMemorySnapshot)
     return {
       ok: true,
       params: {
@@ -201,7 +250,25 @@ export class CodexTurnInputBuilder {
           ...ingress.canonicalCurrentInputRef.input,
           ...ingress.explicitResourceEnvelope.input,
         ],
-        additionalContext: buildResourceContext(ingress.resourceAdditionalContext),
+        additionalContext: {
+          ...buildResourceContext(ingress.resourceAdditionalContext),
+          ...(ingress.attemptKind === 'explicit_retry'
+            ? {
+                'ready-explicit-retry': {
+                  kind: 'application' as const,
+                  value: JSON.stringify(buildCodexExplicitRetryContext(ingress)),
+                },
+              }
+            : {}),
+          ...(readyMemoryPayload
+            ? {
+                [READY_MEMORY_ADDITIONAL_CONTEXT_KEY]: {
+                  kind: 'application' as const,
+                  value: canonicalReadyMemoryJson(readyMemoryPayload),
+                },
+              }
+            : {}),
+        },
         responsesapiClientMetadata: {
           readyRunId: context.readyRunId,
           toolSurfaceDigest: context.toolSurfaceDigest,

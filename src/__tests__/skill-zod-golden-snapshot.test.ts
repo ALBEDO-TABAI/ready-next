@@ -106,7 +106,8 @@ test('skill_write_artifact advertises relativePath + content as required + reser
   }
   assert.ok(anthropic.input_schema.required.includes('relativePath'))
   assert.ok(anthropic.input_schema.required.includes('content'))
-  assert.match(anthropic.description, /保留文件名/)
+  assert.match(anthropic.description, /相对文件路径/)
+  assert.match(anthropic.description, /expectedVersion=empty/)
 })
 
 test('skill_ask_user advertises question as required + suspend-semantics in description', () => {

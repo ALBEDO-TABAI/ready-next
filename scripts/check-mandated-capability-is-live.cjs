@@ -3,8 +3,7 @@
  * 通用三态能力注册 + 正向存活 gate（梯队二，2026-07-03）。
  *
  * 负向 gate（check-unwired-capability-markers / check-dormant-compaction）只防
- * "误接"，防不了"该活的能力悄悄没接/断线"。本 gate 是 check-belief-decay-live
- * 的泛化（该 gate 已退役并被本表 belief-decay 条目原语义吸收），维护一张
+ * "误接"，防不了"该活的能力悄悄没接/断线"。本 gate 维护一张
  * 能力状态注册表，按状态断言：
  *
  *   - live-required：接线证据（import/调用）+ `*_fired` 可观测账本 + 文件上
@@ -42,6 +41,7 @@ const REGISTRY = Object.freeze([
     absentFiles: [
       'src/main/modules/agent-control/maintenance/maintenance-llm-driver.ts',
       'src/main/modules/agent-control/maintenance/maintenance-llm-round.ts',
+      'src/main/modules/claude-bridge/ipc/belief-card-group.ts',
     ],
     forbidden: [
       {
@@ -82,8 +82,8 @@ const REGISTRY = Object.freeze([
     status: 'retired',
     forbidden: [{
       file: RUNTIME_REL,
-      pattern: /setTimeout\s*\(\s*\(\)\s*=>[\s\S]{0,120}runCrystallizeRoundOnce/,
-      meaning: 'startup maintenance must be owned and cancelled by CrystallizeScheduler',
+      pattern: /runCrystallizeRoundOnce|crystallizeScheduler\.start|new CrystallizeScheduler/,
+      meaning: 'the retired legacy memory-card maintenance scheduler must not start',
     }],
   },
   {
@@ -95,6 +95,9 @@ const REGISTRY = Object.freeze([
       'src/main/modules/agent-control/runtime-core/session-preroute-service.ts',
       'src/main/modules/claude-bridge/ipc/session-preroute-group.ts',
       'src/main/modules/settings-engine/agent-session-preroute-setting.ts',
+      'src/main/modules/repositories/agent-personality-repository.ts',
+      'src/renderer/components/agent-system/AgentSettingsHub.tsx',
+      'src/renderer/components/agent-system/studio/AgentSystemStudioView.tsx',
     ],
     forbidden: [
       {
@@ -122,11 +125,6 @@ const REGISTRY = Object.freeze([
         pattern: /agentPersonality|mapPersonalitiesToAgents/,
         meaning: 'historical personalities must not populate the live Agent selector',
       },
-      {
-        file: 'src/main/modules/repositories/agent-personality-repository.ts',
-        pattern: /AgentRegistryRepository|INSERT\s+(?:OR\s+IGNORE\s+)?INTO\s+agents|UPDATE\s+agents|DELETE\s+FROM\s+agents/i,
-        meaning: 'historical personality CRUD must not mutate live Agent registry rows',
-      },
     ],
   },
   {
@@ -137,6 +135,8 @@ const REGISTRY = Object.freeze([
       'src/main/modules/tools/builtins/confirm-specialist-blueprint.ts',
       'src/main/modules/tools/builtins/rename-specialist-agent.ts',
       'src/main/modules/claude-bridge/ipc/agent-derivation-group.ts',
+      'src/main/modules/claude-bridge/ipc/agent-specialist-blueprint-group.ts',
+      'src/main/modules/claude-bridge/ipc/agent-registry-group.ts',
       'src/renderer/components/personality/AgentDerivationPanel.tsx',
       'src/renderer/components/personality/AgentRegistryPanel.tsx',
     ],
@@ -175,47 +175,21 @@ const REGISTRY = Object.freeze([
   },
   {
     capability: 'belief-decay',
-    status: 'live-required',
-    delegation: {
-      file: 'src/main/modules/agent-control/memory/memory-lifecycle.ts',
-      pattern: /===\s*'belief'\s*\)\s*continue/,
-      meaning:
-        'memory-lifecycle 将 belief 行排除出通用 L2 归档，淘汰职责让渡给 belief-decay；'
-        + '若 belief-decay 不活，信念卡永不淘汰（排除即托付被违反）',
-    },
-    wiring: [
-      { name: 'runtime imports belief-decay', file: RUNTIME_REL, pattern: /from '\.\.\/memory\/belief-decay'/ },
-      { name: 'runtime calls runBeliefDecayRound', file: RUNTIME_REL, pattern: /runBeliefDecayRound\s*\(/ },
-    ],
-    firedLedger: { file: RUNTIME_REL, event: 'belief_decay_round_fired' },
-    noStaleMarker: {
-      file: 'src/main/modules/agent-control/memory/belief-decay.ts',
-      pattern: /P5d\/C26 unwired|not in production driver path/i,
-    },
+    status: 'retired',
+    forbidden: [{
+      file: RUNTIME_REL,
+      pattern: /memory\/belief-decay|runBeliefDecayRound|belief_decay_round_(?:fired|failed)/,
+      meaning: 'the retired belief maintenance round must not run in the production host',
+    }],
   },
   {
     capability: 'crystallize-round',
-    status: 'live-required',
-    wiring: [
-      { name: 'runtime imports crystallize-gate', file: RUNTIME_REL, pattern: /from '\.\.\/maintenance\/crystallize-gate'/ },
-      { name: 'runtime constructs CrystallizeScheduler', file: RUNTIME_REL, pattern: /new CrystallizeScheduler\s*\(/ },
-      {
-        name: 'runtime delegates the startup one-shot to CrystallizeScheduler',
-        file: RUNTIME_REL,
-        pattern: /crystallizeScheduler\.start\(\{\s*startupDelayMs:\s*90_000\s*\}\)/,
-      },
-    ],
-    firedLedger: { file: RUNTIME_REL, event: 'crystallize_round_fired' },
-    noStaleMarker: {
-      file: 'src/main/modules/agent-control/maintenance/crystallize-gate.ts',
-      pattern: /P5d\/C26 unwired|not in production driver path/i,
-    },
-  },
-  {
-    capability: 'candidate-maintenance',
-    status: 'deferred-by-design',
-    files: ['src/main/modules/agent-control/emergence/candidate-maintenance.ts'],
-    unwiredList: 'UNWIRED_MAINTENANCE_FILES',
+    status: 'retired',
+    forbidden: [{
+      file: RUNTIME_REL,
+      pattern: /maintenance\/crystallize-gate|CrystallizeScheduler|runCrystallizeRound|crystallize_round_fired/,
+      meaning: 'legacy memory-card crystallization must not run in the production host',
+    }],
   },
   {
     capability: 'emergence-cards',

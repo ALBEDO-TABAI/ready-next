@@ -9,7 +9,9 @@ import {
   canonicalJson,
   classifyCodexModelGatewayRequest,
   digestCanonicalJson,
+  digestReadyAdditionalContext,
   instructionTranscriptDigest,
+  currentTurnReadyAdditionalContext,
   latestReadyResourceReferences,
   responsesToolArgumentValidators,
   responsesToolNames,
@@ -31,6 +33,12 @@ import {
   waitForControlledGatewayRetry,
 } from './codex-model-gateway-retry'
 import type { CodexModelGatewayRequestKind } from './codex-model-gateway-contract'
+import {
+  CODEX_PROVIDER_RESPONSE_EVENT_TYPES,
+  CodexProviderStreamPolicy,
+  CodexProviderStreamPolicyError,
+} from './codex-provider-stream-policy'
+import { redactPriorReadyMemoryHistory } from './codex-memory-history-redaction'
 
 type JsonObject = Record<string, unknown>
 
@@ -66,13 +74,17 @@ export type CodexModelGatewayToolResponseCall = Readonly<{
   argsDigest: string
 }>
 
+export type CodexModelGatewayPreparedRequestReceipt = Readonly<{
+  requestDigest: string
+  requestEvidence: CodexModelGatewayRequestEvidence
+}>
+
 export interface CodexModelGatewayAuthority {
   resolve(input: {
     metadata: CodexModelGatewayMetadata
-    requestDigest: string
-    requestEvidence: CodexModelGatewayRequestEvidence
     receivedAt: string
     validate(binding: CodexModelGatewayBinding): ReadonlySet<string>
+    prepareRequestReceipt(): CodexModelGatewayPreparedRequestReceipt
   }): Promise<CodexModelGatewayBinding>
   admitToolResponse?(input: {
     metadata: CodexModelGatewayMetadata
@@ -111,9 +123,14 @@ export type CodexModelGatewayValidatedRequestCapture = {
   threadId: string
   turnId: string
   requestDigest: string
+  sidecarRequestDigest: string
   bodyBytes: number
   instructionDigest: string
   inputDigest: string
+  sidecarInputDigest: string
+  providerInputDigest: string
+  memoryHistoryRedactionDigest: string
+  memoryHistoryRedactedItemCount: number
   toolsDigest: string
   toolNames: string[]
   toolCount: number
@@ -135,6 +152,15 @@ export type CodexModelGatewayValidatedRequestCapture = {
     digest: string
   }>
 }
+
+type CodexModelGatewayOriginalRequestCapture = Omit<
+  CodexModelGatewayValidatedRequestCapture,
+  | 'sidecarRequestDigest'
+  | 'sidecarInputDigest'
+  | 'providerInputDigest'
+  | 'memoryHistoryRedactionDigest'
+  | 'memoryHistoryRedactedItemCount'
+>
 
 type ActiveGatewayCapability = {
   bearerToken: string
@@ -190,28 +216,7 @@ const EXACT_REQUEST_KEYS = [
   'tools',
 ]
 
-const ALLOWED_NATIVE_EVENTS = new Set([
-  'response.created',
-  'response.in_progress',
-  'response.output_item.added',
-  'response.output_item.done',
-  'response.content_part.added',
-  'response.content_part.done',
-  'response.output_text.delta',
-  'response.output_text.done',
-  'response.refusal.delta',
-  'response.refusal.done',
-  'response.function_call_arguments.delta',
-  'response.function_call_arguments.done',
-  'response.reasoning_summary_part.added',
-  'response.reasoning_summary_part.done',
-  'response.reasoning_summary_text.delta',
-  'response.reasoning_summary_text.done',
-  'response.completed',
-  'response.incomplete',
-  'response.failed',
-  'error',
-])
+const ALLOWED_NATIVE_EVENTS = new Set(CODEX_PROVIDER_RESPONSE_EVENT_TYPES)
 
 const ALLOWED_ITEM_TYPES = new Set(['message', 'function_call', 'reasoning'])
 const ALLOWED_MESSAGE_CONTENT_TYPES = new Set(['output_text', 'refusal'])
@@ -294,8 +299,11 @@ type NativeResponseState = {
 
 const DEFAULT_NATIVE_MAX_BYTES = 8 * 1024 * 1024
 const DEFAULT_NATIVE_MAX_EVENTS = 4_096
+const DEFAULT_NATIVE_MAX_ITEM_BYTES = 4 * 1024 * 1024
 const DEFAULT_BODY_DEADLINE_MS = 10_000
-const DEFAULT_STREAM_DEADLINE_MS = 120_000
+const DEFAULT_HEADERS_DEADLINE_MS = 120_000
+const DEFAULT_FIRST_BYTE_DEADLINE_MS = 120_000
+const DEFAULT_EVENT_IDLE_MS = 120_000
 const DEFAULT_POST_TERMINAL_DRAIN_MS = 1_000
 
 function isRecord(value: unknown): value is JsonObject {
@@ -571,7 +579,7 @@ function validateBinding(input: {
     ) throw new CodexModelGatewayError('gateway_product_metadata_mismatch', 409)
     if (
       binding.additionalContextDigest === null
-      || digestCanonicalJson(latestReadyResourceReferences(body.input)) !== binding.additionalContextDigest
+      || digestReadyAdditionalContext(currentTurnReadyAdditionalContext(body.input)) !== binding.additionalContextDigest
     ) throw new CodexModelGatewayError('gateway_additional_context_mismatch', 409)
   } else if (
     tools.length !== 0
@@ -633,7 +641,7 @@ function buildValidatedRequestCapture(input: {
   requestDigest: string
   proofSentinel?: string
   proofSentinels?: readonly string[]
-}): CodexModelGatewayValidatedRequestCapture {
+}): CodexModelGatewayOriginalRequestCapture {
   const requestKind = expectedKind(input.metadata)
   const proofSentinels = Array.from(new Set([
     ...(input.proofSentinels || []),
@@ -680,7 +688,8 @@ function buildValidatedRequestCapture(input: {
 }
 
 function durableRequestEvidence(
-  capture: CodexModelGatewayValidatedRequestCapture,
+  capture: CodexModelGatewayOriginalRequestCapture,
+  redaction: ReturnType<typeof redactPriorReadyMemoryHistory>['evidence'],
 ): CodexModelGatewayRequestEvidence {
   const lengths = capture.inputItems.flatMap((item) => (
     item.stringCount > 0 ? [item.totalStringCharacters, item.maxStringCharacters] : []
@@ -701,6 +710,8 @@ function durableRequestEvidence(
     toolsDigest: capture.toolsDigest,
     toolCount: capture.toolCount,
     bodyBytes: capture.bodyBytes,
+    memoryHistoryRedactionDigest: redaction.redactionDigest,
+    memoryHistoryRedactedItemCount: redaction.redactedItemCount,
   }
 }
 
@@ -1768,7 +1779,8 @@ async function streamNativeResponses(input: {
   abort: () => void
   maxBytes: number
   maxEvents: number
-  streamDeadlineMs: number
+  maxItemBytes: number
+  eventIdleMs: number
   postTerminalDrainMs: number
   admitToolResponse: (calls: readonly CodexModelGatewayToolResponseCall[]) => Promise<void>
   recordCompleted: (evidence: CodexModelGatewayResponseEvidence) => Promise<void>
@@ -1782,10 +1794,13 @@ async function streamNativeResponses(input: {
     base: JsonObject
   }>()
   let buffer = ''
-  let bytes = 0
-  let events = 0
-  const startedAt = Date.now()
-  let terminalAt: number | null = null
+  const policy = new CodexProviderStreamPolicy({
+    maxWireBytes: input.maxBytes,
+    maxStructuralEvents: input.maxEvents,
+    maxItemHeldBytes: input.maxItemBytes,
+    eventIdleMs: input.eventIdleMs,
+    terminalDrainMs: input.postTerminalDrainMs,
+  })
   const state: NativeResponseState = {
     responseId: null,
     inProgressSeen: false,
@@ -1798,11 +1813,28 @@ async function streamNativeResponses(input: {
   let terminalPayload: JsonObject | null = null
   let terminalSucceeded = false
   let holdFromFunctionCall = false
-  const heldFunctionTail: string[] = []
+  const heldFunctionTail: JsonObject[] = []
+  const encodeSafePayload = (payload: JsonObject): string => (
+    `event: ${payload.type}\ndata: ${JSON.stringify(payload)}\n\n`
+  )
+  const appendHeldFunctionPayload = (payload: JsonObject): void => {
+    const previous = heldFunctionTail.at(-1)
+    if (
+      payload.type === 'response.function_call_arguments.delta'
+      && previous?.type === payload.type
+      && previous.item_id === payload.item_id
+      && previous.output_index === payload.output_index
+      && typeof previous.delta === 'string'
+      && typeof payload.delta === 'string'
+    ) {
+      previous.delta += payload.delta
+      return
+    }
+    heldFunctionTail.push({ ...payload })
+  }
   const writeSafePayload = (payload: JsonObject): void => {
-    const safeEvent = `event: ${payload.type}\ndata: ${JSON.stringify(payload)}\n\n`
-    if (holdFromFunctionCall) heldFunctionTail.push(safeEvent)
-    else input.response.write(safeEvent)
+    if (holdFromFunctionCall) appendHeldFunctionPayload(payload)
+    else input.response.write(encodeSafePayload(payload))
   }
   const deltaFamily = (eventType: string): string | null => {
     if (eventType === 'response.function_call_arguments.delta') return 'arguments'
@@ -1826,16 +1858,9 @@ async function streamNativeResponses(input: {
     }
   }
   const readNext = async (): Promise<ReadableStreamReadResult<Uint8Array>> => {
-    const now = Date.now()
-    const deadline = terminalAt === null
-      ? startedAt + input.streamDeadlineMs
-      : Math.min(startedAt + input.streamDeadlineMs, terminalAt + input.postTerminalDrainMs)
-    const remaining = deadline - now
+    const remaining = policy.remainingWaitMs()
     if (remaining <= 0) {
-      throw new CodexModelGatewayError(
-        terminalAt === null ? 'gateway_native_stream_deadline' : 'gateway_native_post_terminal_timeout',
-        502,
-      )
+      throw new CodexModelGatewayError(policy.timeoutCode(), 502)
     }
     let timeout: ReturnType<typeof setTimeout> | null = null
     try {
@@ -1843,7 +1868,7 @@ async function streamNativeResponses(input: {
         reader.read(),
         new Promise<never>((_resolve, reject) => {
           timeout = setTimeout(() => reject(new CodexModelGatewayError(
-            terminalAt === null ? 'gateway_native_stream_deadline' : 'gateway_native_post_terminal_timeout',
+            policy.timeoutCode(),
             502,
           )), remaining)
         }),
@@ -1856,8 +1881,14 @@ async function streamNativeResponses(input: {
     while (true) {
       const next = await readNext()
       if (next.done) break
-      bytes += next.value.byteLength
-      if (bytes > input.maxBytes) throw new CodexModelGatewayError('gateway_native_stream_too_large', 502)
+      try {
+        policy.recordWireBytes(next.value.byteLength)
+      } catch (error) {
+        if (error instanceof CodexProviderStreamPolicyError) {
+          throw new CodexModelGatewayError(error.code, 502)
+        }
+        throw error
+      }
       try {
         buffer += decoder.decode(next.value, { stream: true })
       } catch {
@@ -1874,10 +1905,7 @@ async function streamNativeResponses(input: {
               [...state.items.values()].flatMap((item) => item.doneItem ? [item.doneItem] : []),
             )
           : parsedEvent.payload
-        events += 1
-        if (events > input.maxEvents) {
-          throw new CodexModelGatewayError('gateway_native_event_limit_exceeded', 502)
-        }
+        const eventType = String(parsedEvent.payload.type)
         assertNativeProviderIdentitySafe(providerPayload, input.credential)
         validateNativeEvent(
           providerPayload,
@@ -1887,7 +1915,14 @@ async function streamNativeResponses(input: {
           input.expectedModel,
           input.credential,
         )
-        const eventType = String(parsedEvent.payload.type)
+        try {
+          policy.acceptValidatedEvent(providerPayload)
+        } catch (error) {
+          if (error instanceof CodexProviderStreamPolicyError) {
+            throw new CodexModelGatewayError(error.code, 502)
+          }
+          throw error
+        }
         if (
           eventType === 'response.output_item.added'
           && isRecord(providerPayload.item)
@@ -1950,7 +1985,6 @@ async function streamNativeResponses(input: {
             delta: sanitizeProviderText(entry.filter.push(providerPayload.delta), input.credential),
           }
         }
-        const safeEvent = `event: ${safePayload.type}\ndata: ${JSON.stringify(safePayload)}\n\n`
         if (state.terminal) {
           terminalSucceeded = safePayload.type === 'response.completed'
           const completedPayload = terminalSucceeded || !isRecord(safePayload.response)
@@ -1961,7 +1995,6 @@ async function streamNativeResponses(input: {
               }
           terminalEvent = `event: ${completedPayload.type}\ndata: ${JSON.stringify(completedPayload)}\n\n`
           terminalPayload = completedPayload
-          terminalAt = Date.now()
           if (safePayload.type !== 'response.completed' && holdFromFunctionCall) {
             heldFunctionTail.length = 0
             holdFromFunctionCall = false
@@ -2016,7 +2049,7 @@ async function streamNativeResponses(input: {
       }))),
       usageDigest: digestCanonicalJson(terminalPayload.response.usage),
     })
-    for (const safeEvent of heldFunctionTail) input.response.write(safeEvent)
+    for (const safePayload of heldFunctionTail) input.response.write(encodeSafePayload(safePayload))
     heldFunctionTail.length = 0
     holdFromFunctionCall = false
     input.response.write(terminalEvent)
@@ -2029,12 +2062,13 @@ async function streamNativeResponses(input: {
     const responseId = state.responseId || `resp_ready_${randomBytes(16).toString('hex')}`
     input.response.write(`event: response.failed\ndata: ${JSON.stringify({
       type: 'response.failed',
+      sequence_number: 0,
       response: {
         id: responseId,
         model: input.expectedModel,
         status: 'failed',
         output: [],
-        error: { code, message: code, type: 'gateway_error' },
+        error: { code, message: code, type: 'gateway_error', param: null },
       },
     })}\n\n`)
   } finally {
@@ -2066,7 +2100,10 @@ export class CodexModelGateway {
   private readonly bodyDeadlineMs: number
   private readonly nativeMaxBytes: number
   private readonly nativeMaxEvents: number
-  private readonly streamDeadlineMs: number
+  private readonly nativeMaxItemBytes: number
+  private readonly headersDeadlineMs: number
+  private readonly firstByteDeadlineMs: number
+  private readonly eventIdleMs: number
   private readonly postTerminalDrainMs: number
   private activeCapability: ActiveGatewayCapability | null
   private server: Server | null = null
@@ -2084,7 +2121,10 @@ export class CodexModelGateway {
     bodyDeadlineMs?: number
     nativeMaxBytes?: number
     nativeMaxEvents?: number
-    streamDeadlineMs?: number
+    nativeMaxItemBytes?: number
+    headersDeadlineMs?: number
+    firstByteDeadlineMs?: number
+    eventIdleMs?: number
     postTerminalDrainMs?: number
     onUpstreamAttempt?: (attempt: number) => void
     proofSentinel?: string
@@ -2102,7 +2142,10 @@ export class CodexModelGateway {
     this.bodyDeadlineMs = deps.bodyDeadlineMs || DEFAULT_BODY_DEADLINE_MS
     this.nativeMaxBytes = deps.nativeMaxBytes || DEFAULT_NATIVE_MAX_BYTES
     this.nativeMaxEvents = deps.nativeMaxEvents || DEFAULT_NATIVE_MAX_EVENTS
-    this.streamDeadlineMs = deps.streamDeadlineMs || DEFAULT_STREAM_DEADLINE_MS
+    this.nativeMaxItemBytes = deps.nativeMaxItemBytes || DEFAULT_NATIVE_MAX_ITEM_BYTES
+    this.headersDeadlineMs = deps.headersDeadlineMs || DEFAULT_HEADERS_DEADLINE_MS
+    this.firstByteDeadlineMs = deps.firstByteDeadlineMs || DEFAULT_FIRST_BYTE_DEADLINE_MS
+    this.eventIdleMs = deps.eventIdleMs || DEFAULT_EVENT_IDLE_MS
     this.postTerminalDrainMs = deps.postTerminalDrainMs || DEFAULT_POST_TERMINAL_DRAIN_MS
     if (
       !this.bootstrapBearerToken
@@ -2111,7 +2154,10 @@ export class CodexModelGateway {
       || this.bodyDeadlineMs <= 0
       || this.nativeMaxBytes <= 0
       || this.nativeMaxEvents <= 0
-      || this.streamDeadlineMs <= 0
+      || this.nativeMaxItemBytes <= 0
+      || this.headersDeadlineMs <= 0
+      || this.firstByteDeadlineMs <= 0
+      || this.eventIdleMs <= 0
       || this.postTerminalDrainMs <= 0
     ) {
       throw new CodexModelGatewayError('gateway_configuration_invalid')
@@ -2268,12 +2314,12 @@ export class CodexModelGateway {
       assertActiveCapability()
       const toolArgumentValidators = validateRequestShape(body)
       const metadata = parseMetadata(body)
-      const requestDigest = digestCanonicalJson(body)
+      const sidecarRequestDigest = digestCanonicalJson(body)
       const receivedAt = new Date().toISOString()
-      const requestCapture = buildValidatedRequestCapture({
+      const sidecarRequestCapture = buildValidatedRequestCapture({
         body,
         metadata,
-        requestDigest,
+        requestDigest: sidecarRequestDigest,
         proofSentinel: this.deps.proofSentinel,
         proofSentinels: this.deps.proofSentinels,
       })
@@ -2281,10 +2327,40 @@ export class CodexModelGateway {
         binding: CodexModelGatewayBinding | null
         allowedTools: ReadonlySet<string> | null
       } = { binding: null, allowedTools: null }
+      type PreparedRequest = {
+        body: JsonObject
+        capture: CodexModelGatewayOriginalRequestCapture
+        redaction: ReturnType<typeof redactPriorReadyMemoryHistory>
+        receipt: CodexModelGatewayPreparedRequestReceipt
+      }
+      let preparedRequest: PreparedRequest | null = null
+      const prepareRequestReceipt = (): CodexModelGatewayPreparedRequestReceipt => {
+        if (preparedRequest) return preparedRequest.receipt
+        if (!validation.binding || !validation.allowedTools) {
+          throw new CodexModelGatewayError('gateway_request_prepared_before_validation', 409)
+        }
+        const redaction = redactPriorReadyMemoryHistory({
+          requestKind: expectedKind(metadata),
+          input: body.input as unknown[],
+        })
+        const redactedBody = { ...body, input: redaction.input }
+        const requestDigest = digestCanonicalJson(redactedBody)
+        const capture = buildValidatedRequestCapture({
+          body: redactedBody,
+          metadata,
+          requestDigest,
+          proofSentinel: this.deps.proofSentinel,
+          proofSentinels: this.deps.proofSentinels,
+        })
+        const receipt = {
+          requestDigest,
+          requestEvidence: durableRequestEvidence(capture, redaction.evidence),
+        }
+        preparedRequest = { body: redactedBody, capture, redaction, receipt }
+        return receipt
+      }
       const binding = await this.deps.authority.resolve({
         metadata,
-        requestDigest,
-        requestEvidence: durableRequestEvidence(requestCapture),
         receivedAt,
         validate: (candidate) => {
           if (validation.binding) throw new CodexModelGatewayError('gateway_binding_validated_twice', 409)
@@ -2292,6 +2368,7 @@ export class CodexModelGateway {
           validation.allowedTools = validateBinding({ body, metadata, binding: candidate })
           return validation.allowedTools
         },
+        prepareRequestReceipt,
       })
       if (
         this.lifecycle !== 'running'
@@ -2303,6 +2380,10 @@ export class CodexModelGateway {
       if (validation.binding !== binding || !validation.allowedTools) {
         throw new CodexModelGatewayError('gateway_binding_not_validated', 409)
       }
+      const preparedReceipt = prepareRequestReceipt()
+      const sealedRequest = preparedRequest as PreparedRequest | null
+      if (!sealedRequest) throw new CodexModelGatewayError('gateway_request_not_prepared', 409)
+      const requestDigest = preparedReceipt.requestDigest
       const allowedTools = binding.forceToolFreeFinalization
         ? new Set<string>()
         : validation.allowedTools
@@ -2312,13 +2393,20 @@ export class CodexModelGateway {
             typeof tool.name === 'string' && allowedTools.has(tool.name)
           ))
       const providerRequestBody = {
-        ...body,
+        ...sealedRequest.body,
         tools: authorizedProviderTools,
         ...(authorizedProviderTools.length === 0
           ? { tool_choice: 'none', parallel_tool_calls: false }
           : {}),
       }
-      await this.deps.onValidatedRequest?.(requestCapture)
+      await this.deps.onValidatedRequest?.({
+        ...sealedRequest.capture,
+        sidecarRequestDigest,
+        sidecarInputDigest: sidecarRequestCapture.inputDigest,
+        providerInputDigest: sealedRequest.redaction.evidence.providerInputDigest,
+        memoryHistoryRedactionDigest: sealedRequest.redaction.evidence.redactionDigest,
+        memoryHistoryRedactedItemCount: sealedRequest.redaction.evidence.redactedItemCount,
+      })
       const parallelToolCallsAllowed = providerRequestBody.parallel_tool_calls === true
       const admitToolResponse = async (
         calls: readonly CodexModelGatewayToolResponseCall[],
@@ -2398,7 +2486,7 @@ export class CodexModelGateway {
             maxRetries: binding.snapshot.retryPolicy.maxRetries - retriesUsed,
             attemptOffset: retriesUsed,
             signal: abortController.signal,
-            headersDeadlineMs: this.streamDeadlineMs,
+            headersDeadlineMs: this.headersDeadlineMs,
             onAttempt: this.deps.onUpstreamAttempt,
           })
         } catch (error) {
@@ -2421,7 +2509,7 @@ export class CodexModelGateway {
             snapshot: binding.snapshot,
             credential,
             signal: abortController.signal,
-            deadlineMs: this.streamDeadlineMs,
+            deadlineMs: this.firstByteDeadlineMs,
           })
           break
         } catch (error) {
@@ -2466,7 +2554,7 @@ export class CodexModelGateway {
           await readBoundedResponseText({
             response: upstreamResponse,
             signal: abortController.signal,
-            deadlineMs: this.streamDeadlineMs,
+            deadlineMs: this.firstByteDeadlineMs,
           }),
           credential,
         )
@@ -2507,7 +2595,8 @@ export class CodexModelGateway {
           abort: () => abortController.abort(),
           maxBytes: this.nativeMaxBytes,
           maxEvents: this.nativeMaxEvents,
-          streamDeadlineMs: this.streamDeadlineMs,
+          maxItemBytes: this.nativeMaxItemBytes,
+          eventIdleMs: this.eventIdleMs,
           postTerminalDrainMs: this.postTerminalDrainMs,
           admitToolResponse,
           recordCompleted,
@@ -2524,7 +2613,8 @@ export class CodexModelGateway {
           abort: () => abortController.abort(),
           maxBytes: this.nativeMaxBytes,
           maxEvents: this.nativeMaxEvents,
-          streamDeadlineMs: this.streamDeadlineMs,
+          maxItemBytes: this.nativeMaxItemBytes,
+          eventIdleMs: this.eventIdleMs,
           postTerminalDrainMs: this.postTerminalDrainMs,
           admitToolResponse,
           recordCompleted,

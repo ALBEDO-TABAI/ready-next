@@ -9,7 +9,6 @@ import type { DomainAdapter } from '../domain-adapters/domain-adapter'
 import type {
   ExecutionTurnResult, RunMessage, TaskProjectionRecord
 } from '../contracts/run-contracts'
-import type { CheckInRecord } from '../quality/task-adjudicator'
 import type { AbortInitiator } from '../contracts/run-contracts-internal'
 import {
   resumeSkillChildRun as defaultResumeSkillChildRun,
@@ -33,7 +32,6 @@ import { resolveCurrentLegalAuthorizationForSavedSkill } from '../skills/prepare
 import { getSkillActionOwnersForTrustedResume } from '../../tools/skills-tools'
 import { type FollowupTaskRef } from '../../../../shared/agent-followup-intent'
 import { wrapRunMetaRepositoryWithCloseoutSnapshot } from '../task-projection/run-meta-snapshot'
-import { stageSpecialistTaskEvolutionProposal } from '../agents/specialist-task-evolution-proposals'
 import { resolveSkillShellAllowed, isEmbeddedSkill, getSkillShellConsent } from '../../skills-runtime/skill-shell-consent'
 import { executeToolCall as executeReadyToolCall } from '../../tools'
 import {
@@ -41,11 +39,6 @@ import {
   type ToolExecutionOutput
 } from '../tools-runtime/tool-result-types'
 import { createRotatingLogger } from '../../../utils/rotating-logger'
-import {
-  learnSiteCardFromFailure,
-  siteCardLearningSignalFromToolFailure,
-  siteCardLearningSignalsFromCheckIn,
-} from '../knowledge/site-card-learning'
 import {
   clearScopeSessionSnapshot,
 } from '../session/scope-session-snapshot'
@@ -376,9 +369,6 @@ export class AgentSdkRuntime extends EventEmitter {
       readVerifiedBrowserWorkflowEvidence: (browserTaskId) =>
         self.browserController?.readVerifiedBrowserWorkflowEvidence(browserTaskId) ?? null,
       hasPendingTaskProjection: (scopeId) => self.hasPendingTaskProjection(scopeId),
-      learnSiteCardFromToolFailure: (toolName, args, output) =>
-        self.learnSiteCardFromToolFailure(toolName, args, output),
-      learnSiteCardsFromCheckIn: (input) => self.learnSiteCardsFromCheckIn(input),
       newSession: (name, systemPrompt) => self.newSession(name, systemPrompt),
       resolveMapPlaceAmbiguityIfNeeded: (params) => self.resolveMapPlaceAmbiguityIfNeeded(params),
       resolveSkillAuthorizationForTurn: (message, sessionId, messageVisibilityEpoch, requestEnvelope, forceLocalSendImIntent, skillHintRelevantForTurn) =>
@@ -451,155 +441,6 @@ export class AgentSdkRuntime extends EventEmitter {
     } catch {
       return null
     }
-  }
-
-  private writeSiteCardLearningSignal(
-    signal: Parameters<typeof learnSiteCardFromFailure>[1],
-    source: 'checkin' | 'tool_error',
-  ): void {
-    try {
-      const store = this.runtime?.getBeliefCardStore?.()
-      if (!store) return
-      const result = learnSiteCardFromFailure(store, signal)
-      if (result.status === 'written') {
-        logAgentMetric('site_card_learning_written', {
-          source,
-          domain: signal.domain,
-          failureKind: signal.failureKind,
-          relPath: result.relPath,
-          mode: result.mode,
-        })
-      }
-    } catch (error) {
-      logAgentMetric('site_card_learning_failed', {
-        source,
-        domain: signal.domain,
-        failureKind: signal.failureKind,
-        error: error instanceof Error ? error.message : String(error),
-      })
-    }
-  }
-
-  private learnSiteCardsFromCheckIn(input: {
-    checkIn: CheckInRecord
-    projection: TaskProjectionRecord
-    now: Date
-    terminalStatus?: string | null
-    terminalReason?: string | null
-  }): void {
-    this.stageSpecialistTaskEvolutionFromCheckIn(input)
-    if (input.checkIn.blockers.length === 0) return
-    const continuationRef = input.projection.continuationRef && typeof input.projection.continuationRef === 'object'
-      ? input.projection.continuationRef
-      : null
-    const signals = siteCardLearningSignalsFromCheckIn({
-      url: continuationRef?.targetUrl ?? null,
-      blockers: input.checkIn.blockers,
-      now: input.now,
-    })
-    for (const signal of signals) this.writeSiteCardLearningSignal(signal, 'checkin')
-  }
-
-  private stageSpecialistTaskEvolutionFromCheckIn(input: {
-    checkIn: CheckInRecord
-    projection: TaskProjectionRecord
-    now: Date
-    terminalStatus?: string | null
-    terminalReason?: string | null
-  }): void {
-    try {
-      const store = this.runtime?.getBeliefCardStore?.()
-      const registry = this.runtime?.getAgentRegistry?.()
-      const proposalStore = this.runtime?.getSpecialistContentEditProposalStore?.()
-      if (!store || !registry || !proposalStore) return
-      const result = stageSpecialistTaskEvolutionProposal({
-        registry,
-        store,
-        proposalStore,
-        getRunExecutionBinding: (runId) => runId === input.projection.runId
-          ? input.projection.executionBinding ?? null
-          : null,
-        now: input.now,
-      }, {
-        projection: input.projection,
-        checkIn: input.checkIn,
-        terminalStatus: input.terminalStatus ?? null,
-        terminalReason: input.terminalReason ?? null,
-      })
-      logAgentMetric('specialist_task_evolution_proposal', {
-        taskId: input.projection.taskId,
-        ownerAgentId: input.projection.ownerAgentId ?? null,
-        status: result.status,
-        reason: result.status === 'skipped' ? result.reason : null,
-        proposalId: result.proposal?.proposalId ?? null,
-      })
-      for (const contribution of input.projection.deliveryState?.packages ?? []) {
-        if (contribution.adoptedByOwner !== true || contribution.binding.kind !== 'registered_agent') continue
-        const contributionProjection: TaskProjectionRecord = {
-          ...input.projection,
-          taskId: contribution.childTaskId,
-          runId: contribution.binding.runId,
-          ownerAgentId: contribution.binding.effectiveAgentId,
-          executionBinding: contribution.binding,
-          proofRefs: contribution.evidenceHandleIds.map((ref) => ({ kind: 'artifact', ref })),
-          learningRefs: contribution.evidenceHandleIds.map((ref) => ({ kind: 'artifact', ref })),
-        }
-        const contributionResult = stageSpecialistTaskEvolutionProposal({
-          registry,
-          store,
-          proposalStore,
-          getRunExecutionBinding: (runId) => runId === contribution.binding.runId
-            ? contribution.binding
-            : null,
-          now: input.now,
-        }, {
-          projection: contributionProjection,
-          checkIn: input.checkIn,
-          terminalStatus: input.terminalStatus ?? null,
-          terminalReason: input.terminalReason ?? null,
-          allowWorkflowContribution: true,
-        })
-        logAgentMetric('dynamic_delivery_contribution_learning', {
-          taskId: input.projection.taskId,
-          childTaskId: contribution.childTaskId,
-          agentId: contribution.binding.effectiveAgentId,
-          status: contributionResult.status,
-          reason: contributionResult.status === 'skipped' ? contributionResult.reason : null,
-          proposalId: contributionResult.proposal?.proposalId ?? null,
-        })
-      }
-    } catch (error) {
-      logAgentMetric('specialist_task_evolution_proposal_failed', {
-        taskId: input.projection.taskId,
-        ownerAgentId: input.projection.ownerAgentId ?? null,
-        error: error instanceof Error ? error.message : String(error),
-      })
-    }
-  }
-
-  private learnSiteCardFromToolFailure(
-    toolName: string,
-    args: Record<string, unknown> | undefined,
-    output: ToolExecutionOutput,
-  ): void {
-    const normalized = normalizeToolExecutionOutput(output)
-    const data = readStructuredResultRecord(normalized)
-    const errorKind = typeof data.errorKind === 'string' && data.errorKind
-      ? data.errorKind
-      : typeof data.errorCode === 'string' && data.errorCode ? data.errorCode : null
-    if (!errorKind && data.ok !== false) return
-    // G1 — resolve the page URL so a collection tool failure that carries no URL
-    // in args/data still yields a domain (see resolveToolFailurePageUrl).
-    const pageUrl = resolveToolFailurePageUrl(this.browserController, args)
-    const signal = siteCardLearningSignalFromToolFailure({
-      toolName,
-      errorKind,
-      args,
-      data,
-      text: normalized.text,
-      pageUrl,
-    })
-    if (signal) this.writeSiteCardLearningSignal(signal, 'tool_error')
   }
 
   private hasPendingTaskProjection(scopeId?: string): boolean {

@@ -20,7 +20,6 @@ import {
 } from '../agent-control/contracts/error-kinds'
 import type { ConversationScope } from '../agent-control/contracts/types'
 import type { AgentSpawnContext } from '../../../shared/skill-host-contract'
-import type { SpecialistBlueprintSourceMessageUnavailableReason } from '../../../shared/agent-specialist-blueprint'
 import type { ToolRuntimeActiveFrameContext } from '../agent-control/tools-runtime/tool-runtime'
 import type { TurnFeatureFlags } from '../agent-control/runtime-core/turn-feature-flags'
 import {
@@ -80,9 +79,9 @@ import { executeFeishuTool } from './feishu-tools'
 import type { FeishuReadAuthority } from './feishu-tools'
 import type { RunShellHandlerDeps } from './skill-primitives/run-shell'
 import type { ReadArtifactExactResource } from './skill-primitives/read-artifact'
-import { executeMemoryTool } from './memory-tools'
 import { executePetTool } from './pet-tools'
 import { executeSessionRecallTool } from './session-recall-tools'
+import { executeReadyMemoryTool } from './ready-memory-tools'
 import { getSkillsRuntimeManager } from '../skills-runtime/runtime-manager'
 import {
   resolveGlobalLarkCliExecutableAuthority,
@@ -133,6 +132,15 @@ export interface ToolContext {
   readArtifactRequiredResources?: readonly ReadArtifactExactResource[] | null
   onExactResourceRead?: ((logicalPath: string) => void) | null
   codexHostPrimitiveOnly?: boolean
+  artifactMaterializer?: import('./artifact-materializer').ArtifactMaterializer | null
+  readArtifactWriteHead?: ((relativePath: string) => {
+    version: string
+    logicalSha256: string
+  } | null) | null
+  codexExecutionIdentity?: {
+    readyActionId: string
+    actionIdentityDigest: string
+  } | null
   abortSignal?: AbortSignal
   onToolEffectStart?: () => void
   onToolEffectEnd?: () => void
@@ -142,8 +150,8 @@ export interface ToolContext {
   scopeId?: string
   messageVisibilityEpoch?: number
   currentUserText?: string
+  readyMemorySnapshot?: import('../agent-control/ready-memory').ReadyMemorySnapshot | null
   sourceMessageId?: string | null
-  sourceMessageUnavailableReason?: SpecialistBlueprintSourceMessageUnavailableReason | null
   requestEnvelope?: unknown
   runId?: string
   taskId?: string
@@ -900,6 +908,7 @@ async function executeToolCallInner(
           {
             const {
               executeFileManagementTool,
+              resolveFileToolDirectoryAliases,
               resolveFileToolExplicitReadableResources,
               resolveFileToolExplicitReadablePaths,
               resolveFileToolWorkspaceRoots,
@@ -907,6 +916,7 @@ async function executeToolCallInner(
             const fileContext = {
               abortSignal: context.abortSignal,
               workspaceRoots: resolveFileToolWorkspaceRoots(toolName, context.requestEnvelope),
+              directoryAliases: resolveFileToolDirectoryAliases(context.requestEnvelope),
               explicitReadablePaths: resolveFileToolExplicitReadablePaths(context.requestEnvelope),
               explicitReadableResources: resolveFileToolExplicitReadableResources(context.requestEnvelope),
               runId: context.runId ?? null,
@@ -970,6 +980,9 @@ async function executeToolCallInner(
             readArtifactRequiredResources: context.readArtifactRequiredResources ?? null,
             onExactResourceRead: context.onExactResourceRead ?? null,
             codexHostPrimitiveOnly: context.codexHostPrimitiveOnly === true,
+            artifactMaterializer: context.artifactMaterializer ?? null,
+            readArtifactWriteHead: context.readArtifactWriteHead ?? null,
+            codexExecutionIdentity: context.codexExecutionIdentity ?? null,
           })
 
         case 'system':
@@ -981,11 +994,11 @@ async function executeToolCallInner(
             feishuReadAuthority: context.feishuReadAuthority ?? null,
           })
 
-        case 'memory':
-          return executeMemoryTool(toolName, args, context)
-
         case 'session':
           return executeSessionRecallTool(toolName, args, context)
+
+        case 'memory':
+          return executeReadyMemoryTool(toolName, args, context.readyMemorySnapshot ?? null)
 
         case 'pet':
           return executePetTool(toolName, args)
@@ -1131,6 +1144,19 @@ async function executeToolCallInner(
             return executeDeclareCompletionCriteria(args, {
               taskId: context.taskId ?? null,
               sessionId: context.sessionId ?? null,
+              outputContract: (() => {
+                const envelope = context.requestEnvelope
+                if (!envelope || typeof envelope !== 'object' || Array.isArray(envelope)) return null
+                const contract = (envelope as { outputContract?: unknown }).outputContract
+                if (!contract || typeof contract !== 'object' || Array.isArray(contract)) return null
+                const destination = (contract as { destination?: unknown }).destination
+                if (!destination || typeof destination !== 'object' || Array.isArray(destination)) return null
+                const destinationResourceId = (destination as { logicalResourceId?: unknown }).logicalResourceId
+                const maxExpectedOutputs = (contract as { maxExpectedOutputs?: unknown }).maxExpectedOutputs
+                return typeof destinationResourceId === 'string' && Number.isSafeInteger(maxExpectedOutputs)
+                  ? { destinationResourceId, maxExpectedOutputs: Number(maxExpectedOutputs) }
+                  : null
+              })(),
               updateTaskCompletionDeclaration: async (taskId, patch) => {
                 const browserTaskId = context.browserWorkflowRoute?.browserTaskId
                 const ownerRunId = context.runId
@@ -1248,7 +1274,7 @@ async function executeToolCallInner(
   }
 }
 
-function toStructuredToolResult(toolName: string, rawResult: string | ToolExecutionOutput): ToolExecutionOutput {
+export function toStructuredToolResult(toolName: string, rawResult: string | ToolExecutionOutput): ToolExecutionOutput {
   let normalized = normalizeToolExecutionOutput(rawResult)
   if ((toolName === 'tag_forge_prepare_batch' || toolName === 'tag_forge_apply_batch' || toolName === 'tag_forge_review_batch') && !normalized.data) {
     try {
@@ -1268,6 +1294,30 @@ function toStructuredToolResult(toolName: string, rawResult: string | ToolExecut
             : `Tag Forge 批次已处理 ${count} 份，剩余 ${remaining} 份。`,
         shape: 'json',
         data,
+        ...(toolName === 'tag_forge_prepare_batch'
+          && data.ok !== false
+          && Array.isArray(data.documents)
+          && data.documents.length > 0
+          ? {
+              content: [{
+                type: 'text' as const,
+                text: [
+                  'Tag Forge prepared these exact apply handles. Reuse each itemId and expectedRevision exactly; do not derive or guess either value.',
+                  JSON.stringify({
+                    batchId: data.batchId,
+                    items: data.documents.map((document) => {
+                      const item = document as Record<string, unknown>
+                      return {
+                        itemId: item.itemId,
+                        expectedRevision: item.expectedRevision,
+                        file: item.file,
+                      }
+                    }),
+                  }),
+                ].join('\n'),
+              }],
+            }
+          : {}),
         interactionHint: data.reviewRequired === true ? 'awaiting_clarification' : null,
       }
     } catch {

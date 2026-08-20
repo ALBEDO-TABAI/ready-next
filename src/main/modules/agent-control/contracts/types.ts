@@ -1,6 +1,7 @@
 import type { TurnTerminalReason } from '../runtime-core/turn-frame'
 import type { TaskType } from '../../../../shared/task-types'
 import type { ContextUsageSnapshot } from '../../../../shared/context-usage-types'
+import type { ProductTurnReceipt } from '../../../../shared/ipc-contracts/agent-runtime'
 
 export type ChannelAdapterType =
   | 'local-debug'
@@ -175,62 +176,6 @@ export interface ScopeRunActivityNarration {
   status: 'streaming' | 'completed'
 }
 
-export type ScopeRunMemorySourceType =
-  | 'resident_agent'
-  | 'resident_user'
-  | 'scope_memory'
-  | 'trigger_rule'
-  | 'session_recall'
-
-export interface ScopeRunMemoryRef {
-  id: string
-  layer: 'l0' | 'l1' | 'l2' | 'recall'
-  sourceType: ScopeRunMemorySourceType
-  title: string
-  summary?: string | null
-  path?: string | null
-  triggerId?: string | null
-  sensitive?: boolean
-  loadedAt: string
-}
-
-export interface ScopeRunTriggerHit {
-  id: string
-  label: string
-  module?:
-    | 'browser'
-    | 'document'
-    | 'design'
-    | 'skill'
-    | 'video'
-    | 'rss'
-    | 'calendar'
-    | 'feishu'
-    | 'research'
-    | 'map'
-    | 'system'
-  blocking: boolean
-  refs: string[]
-}
-
-export interface ScopeRunContextBudget {
-  totalChars: number
-  l0Chars: number
-  l1Chars: number
-  l2Chars: number
-  rulesChars?: number
-  knowledgeIndexChars?: number
-  agentRoutingChars?: number
-  recallChars?: number
-  autoRecallChars?: number
-  sectionChars?: Record<string, number>
-  totalBytes?: number
-  sectionBytes?: Record<string, number>
-  truncations?: string[]
-  truncationReasons?: Record<string, 'section_budget'>
-  droppedRefs: string[]
-}
-
 export type ScopeRunTaskStepStatus = 'pending' | 'running' | 'blocked' | 'done' | 'error'
 export type ScopeRunWaitingFor =
   | 'input'
@@ -305,21 +250,6 @@ export interface ScopeRunSkillHandoff {
   taskPath: string | null
   outputPath: string | null
   updatedAt: string | null
-}
-
-export interface ScopeRunMemoryCaptureItem {
-  memoryId: string
-  category: 'user_preference' | 'summary'
-  sourceType: Exclude<ScopeRunMemorySourceType, 'session_recall'>
-  title: string
-  summary?: string | null
-}
-
-export interface ScopeRunMemoryCapture {
-  status: 'ready' | 'dismissed' | 'reverted'
-  createdAt: string
-  note?: string | null
-  items: ScopeRunMemoryCaptureItem[]
 }
 
 export interface ScopeRunExecutionDiagnostics {
@@ -417,7 +347,6 @@ export interface ScopeRunSummary {
   recentArtifacts?: ScopeRunEventPayload['artifactRefs']
   taskContinuation?: ScopeRunTaskContinuation | null
   progress?: ScopeRunSkillProgress | null
-  memoryCapture?: ScopeRunMemoryCapture | null
   executionDiagnostics?: ScopeRunExecutionDiagnostics | null
   contextUsage?: ContextUsageSnapshot | null
   budgetUsagePercent?: number | null
@@ -464,6 +393,7 @@ export interface ScopeRunEventPayload {
     | 'error'
     | 'cancelled'
   terminalReason?: TurnTerminalReason | null
+  productTurnReceipt?: ProductTurnReceipt
   latestText?: string
   module?:
     | 'browser'
@@ -492,9 +422,6 @@ export interface ScopeRunEventPayload {
     createdAt: string
     meta?: Record<string, unknown>
   }>
-  memoryRefs?: ScopeRunMemoryRef[]
-  triggerHits?: ScopeRunTriggerHit[]
-  contextBudget?: ScopeRunContextBudget | null
   contextUsage?: ContextUsageSnapshot | null
   ownerResourceId?: string
   lastEvidenceAt?: string
@@ -546,7 +473,6 @@ export interface ScopeRunEventPayload {
   }>
   taskContinuation?: ScopeRunTaskContinuation | null
   progress?: ScopeRunSkillProgress | null
-  memoryCapture?: ScopeRunMemoryCapture | null
   executionDiagnostics?: ScopeRunExecutionDiagnostics | null
   stepMetrics?: {
     toolCalls: number

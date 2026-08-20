@@ -2,7 +2,7 @@
  * Stage R W1.6 落点 15 — TaskType single source.
  *
  * Asserts:
- *   1. shared/task-types.ts TASK_TYPES is a 6-element readonly tuple
+ *   1. shared/task-types.ts TASK_TYPES is a complete readonly tuple
  *   2. isTaskType type guard accepts 'research' and rejects unknown literals
  *   3. renderer toAgentModule('research') normalizes correctly
  */
@@ -12,12 +12,11 @@ import assert from 'node:assert/strict'
 import { TASK_TYPES, isTaskType } from '../shared/task-types'
 import { toAgentModule } from '../renderer/modules/agent/scopeRunState'
 
-test('TASK_TYPES is a 7-element list', () => {
-  assert.equal(TASK_TYPES.length, 7)
-  // Order doesn't matter for membership but matters for the contract:
-  // direct_answer / short_task / multi_step_task / media_task / browser_transaction / continuation / research
+test('TASK_TYPES is a 10-element list', () => {
+  assert.equal(TASK_TYPES.length, 10)
+  // Order doesn't matter for membership but matters for the shared contract.
   const set = new Set(TASK_TYPES as readonly string[])
-  for (const t of ['direct_answer', 'short_task', 'multi_step_task', 'media_task', 'browser_transaction', 'continuation', 'research']) {
+  for (const t of ['direct_answer', 'short_task', 'artifact_task', 'transaction_task', 'research_artifact_task', 'multi_step_task', 'media_task', 'browser_transaction', 'continuation', 'research']) {
     assert.ok(set.has(t), `TASK_TYPES must include ${t}`)
   }
 })

@@ -142,7 +142,7 @@ test('create shows no tab before persistence and creates no welcome transcript',
     })
     const result = await promise
     assert.equal(result.ok, true)
-    assert.deepEqual(requests, [{ agentId: 'butler' }])
+    assert.deepEqual(requests, [{}])
     assert.equal(useAgent.getState().sessionOrder.length, beforeOrder.length + 1)
     assert.deepEqual(useAgent.getState().messages, [])
     assert.deepEqual(useAgent.getState().attachments, [])

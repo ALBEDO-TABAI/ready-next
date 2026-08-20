@@ -6,6 +6,14 @@
   "version": "0.1.0",
   "runtime": "reference",
   "execution": { "mode": "advisory" },
+  "allowed_tools": [
+    "web_search_domains",
+    "web_search",
+    "web_fetch",
+    "skill_write_artifact",
+    "skill_read_artifact",
+    "skill_export_artifact"
+  ],
   "actions": {
     "read_skill": {
       "runtime": "reference",

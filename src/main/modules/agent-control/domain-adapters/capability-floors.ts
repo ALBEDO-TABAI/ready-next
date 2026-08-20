@@ -34,6 +34,14 @@ export const CURRENT_DOCUMENT_WRITE_FLOOR_TOOL_NAMES: ReadonlyArray<string> = [
   'document_save_tab',
 ]
 
+/** Typed folder keeps a frozen dormant delivery surface; receipts activate it later. */
+export const FOLDER_EXPORT_FLOOR_TOOL_NAMES: ReadonlyArray<string> = [
+  'declare_completion_criteria',
+  'skill_write_artifact',
+  'skill_read_artifact',
+  'skill_export_artifact',
+]
+
 export function computeCapabilityFloors(params: {
   authorization: SkillToolAuthorization
   hasLocalDocumentResource: boolean
@@ -59,7 +67,6 @@ export function computeCapabilityFloors(params: {
       reasons.push('current_document_write_intent')
     }
   }
-
   return { toolNames, reasons }
 }
 

@@ -160,9 +160,6 @@ export async function executeModuleToolAction(
       executionKind: patch?.executionKind ?? previous?.executionKind ?? null,
       jobId: patch?.jobId ?? previous?.jobId ?? null,
       artifactRefs: mergeArtifacts(previous?.artifactRefs, patch?.artifactRefs),
-      memoryRefs: patch?.memoryRefs ?? previous?.memoryRefs ?? [],
-      triggerHits: patch?.triggerHits ?? previous?.triggerHits ?? [],
-      contextBudget: patch?.contextBudget ?? previous?.contextBudget ?? null,
       ownerResourceId: patch?.ownerResourceId ?? previous?.ownerResourceId ?? null,
       lastEvidenceAt: patch?.lastEvidenceAt ?? previous?.lastEvidenceAt ?? null,
       blockedReason: patch?.blockedReason ?? previous?.blockedReason ?? null,
@@ -194,7 +191,6 @@ export async function executeModuleToolAction(
       resumableActions: patch?.resumableActions ?? previous?.resumableActions ?? [],
       recentArtifacts: mergeArtifacts(previous?.recentArtifacts, patch?.recentArtifacts),
       taskContinuation: patch?.taskContinuation ?? previous?.taskContinuation ?? null,
-      memoryCapture: patch?.memoryCapture ?? previous?.memoryCapture ?? null,
       error: previous?.error || null,
       ...patch,
     }))

@@ -40,6 +40,7 @@ import type {
   CodexToolResponseDeliveryAttemptRead,
 } from './codex-tool-response-delivery'
 import { buildReadyToolSurface, type ReadyToolSurfaceEntry } from './codex-tool-surface'
+import { isHostFolderExportPrimitive } from '../../tools/skill-tool-execution-authority'
 
 export { mapReadyToolOutput } from './codex-tool-output-mapper'
 export type {
@@ -181,7 +182,22 @@ function requestIdText(value: number | string): string {
 
 function authorizationOf(binding: CodexToolBridgeExecutionBinding): SkillToolAuthorization {
   const serialized = binding.authorization.skillAuthorization
-  if (serialized.mode === 'none') return buildExplicitNoSkillAuthorization(serialized.reason)
+  if (serialized.mode === 'none') {
+    const hostPrimitives = binding.authorization.allowedToolNames.filter(isHostFolderExportPrimitive)
+    const candidate = serialized.candidateSkillPrimitives
+    const primitives = [...new Set([
+      ...(candidate?.primitives || []),
+      ...hostPrimitives,
+    ])]
+    return buildExplicitNoSkillAuthorization(serialized.reason, primitives.length > 0
+      ? {
+          candidateSkillPrimitives: {
+            skillId: candidate?.skillId || 'ready-host-artifact-delivery',
+            primitives,
+          },
+        }
+      : undefined)
+  }
   return buildSelectedSkillToolAuthorization({
     skillId: serialized.skillId,
     allowedTypedActions: serialized.allowedTypedActions,
@@ -201,7 +217,7 @@ export function validateCodexFrozenToolExecution(
   registry: Pick<
     ToolRegistryReader,
     'getToolDefinitionForExecution' | 'getToolDefinitionsForGroup'
-  > = defaultToolRegistry,
+  > & Partial<Pick<ToolRegistryReader, 'getToolDefinition'>> = defaultToolRegistry,
   resolveInputSchema: typeof resolveToolInputSchemaForExecution = resolveToolInputSchemaForExecution,
 ): void {
   if (isToolStatePatchEmittingToolName(input.toolName)) {
@@ -209,12 +225,17 @@ export function validateCodexFrozenToolExecution(
   }
   const registeredDefinition = registry.getToolDefinitionForExecution(input.toolName)
   if (!registeredDefinition) throw new CodexToolBridgeError('tool_not_registered')
-  const currentDefinition = registry.getToolDefinitionsForGroup(
-    input.frozenEntry.effectProfile.groupId,
-    input.binding.readyAliasId,
-    authorizationOf(input.binding),
-    input.binding.readyScopeId,
-  ).find((definition) => definition.name === input.toolName)
+  const currentDefinition = isHostFolderExportPrimitive(input.toolName)
+    ? (() => {
+        const definition = registry.getToolDefinition?.(input.toolName)
+        return definition ? { ...definition, codexExecutionSafe: true } : null
+      })()
+    : registry.getToolDefinitionsForGroup(
+        input.frozenEntry.effectProfile.groupId,
+        input.binding.readyAliasId,
+        authorizationOf(input.binding),
+        input.binding.readyScopeId,
+      ).find((definition) => definition.name === input.toolName)
   if (!currentDefinition) throw new CodexToolBridgeError('tool_execution_surface_drift')
   if (currentDefinition.domain === 'skill' && currentDefinition.codexExecutionSafe !== true) {
     throw new CodexToolBridgeError('tool_execution_authority_unsupported')
@@ -552,6 +573,7 @@ export class CodexReadyToolBridge implements CodexBoundServerRequestExecutor {
     let externallyAborted = false
     let connectionAborted = false
     let effectStarted = false
+    let effectDeadlineActive = false
     let settledReadTimeout = false
     let timer: ReturnType<typeof setTimeout> | null = null
     let rejectCancellation!: (reason: Error) => void
@@ -584,9 +606,10 @@ export class CodexReadyToolBridge implements CodexBoundServerRequestExecutor {
       }
     }
     const startEffectDeadline = () => {
-      if (effectStarted) throw new CodexToolBridgeError('tool_effect_phase_reentered')
+      if (effectDeadlineActive) throw new CodexToolBridgeError('tool_effect_phase_reentered')
       assertCurrentEffectAuthority()
       effectStarted = true
+      effectDeadlineActive = true
       if (input.frozenEntry.effectProfile.timeoutProfile === 'user_interaction') return
       timer = setTimeout(() => {
         timedOut = true
@@ -598,6 +621,7 @@ export class CodexReadyToolBridge implements CodexBoundServerRequestExecutor {
     const endEffectDeadline = () => {
       if (timer) clearTimeout(timer)
       timer = null
+      effectDeadlineActive = false
     }
     const onExternalAbort = () => {
       externallyAborted = true

@@ -7,7 +7,8 @@ import {
   BrowserTargetClaimRepository,
   BrowserTargetClaimService,
 } from '../main/modules/browser-engine/browser-target-claims'
-import { commitCodexFailureCoreCloseoutAndReconcileClaims } from '../main/modules/browser-engine/browser-claim-closeout'
+import { reconcileReleasedBrowserClaims } from '../main/modules/browser-engine/browser-claim-closeout'
+import { commitCanonicalCodexFailure } from './helpers/codex-product-closeout'
 import {
   __resetBrowserTargetClaimServiceForTests,
   __setBrowserTargetClaimServiceForTests,
@@ -404,7 +405,8 @@ test('production failure closeout releases live claims and an in-flight action o
       error: 'cancelled_user',
       now: closeoutAt,
     }
-    const committed = await commitCodexFailureCoreCloseoutAndReconcileClaims(repository, closeoutInput)
+    const committed = (await commitCanonicalCodexFailure(repository, closeoutInput)).value
+    reconcileReleasedBrowserClaims(ownerRunId)
     assert.ok(committed.productTerminalDigest)
     assert.equal(service.read(held.logicalKey)?.state, 'released')
     assert.equal(service.read(userOwned.logicalKey)?.state, 'released')
@@ -423,7 +425,8 @@ test('production failure closeout releases live claims and an in-flight action o
     service.onTransition((transition) => {
       transitions.push({ previousState: transition.previousState, state: transition.state })
     })
-    await commitCodexFailureCoreCloseoutAndReconcileClaims(repository, closeoutInput)
+    await commitCanonicalCodexFailure(repository, closeoutInput)
+    reconcileReleasedBrowserClaims(ownerRunId)
     assert.equal(transitions.length, 0)
     assert.equal(service.hasActiveAgentAction(heldIdentity), false)
     assert.equal(

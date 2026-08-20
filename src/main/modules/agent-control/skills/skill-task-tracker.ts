@@ -257,10 +257,6 @@ function projectionOnlyStepIdForEvent(event: SkillTaskEvent): string | null {
   return `reference:${event.toolName}`
 }
 
-function isMemoryOnlyEvent(event: SkillTaskEvent): boolean {
-  return event.toolName === 'memory_capture'
-}
-
 function getTaskRunRepository(): SkillTaskRunRepository | null {
   if (injectedTaskRunRepository !== undefined) return injectedTaskRunRepository
   if (defaultTaskRunRepository !== undefined) return defaultTaskRunRepository
@@ -867,14 +863,6 @@ function recordLifecycleTaskRunEvent(
 }
 
 export function recordSkillTaskEvent(event: SkillTaskEvent): { stepId: string } {
-  if (isMemoryOnlyEvent(event)) {
-    const projection = readSkillTaskProjection({
-      sessionId: event.sessionId,
-      skillId: event.skillId,
-    })
-    return { stepId: projection?.currentStepId || event.stepId || 'memory_capture' }
-  }
-
   const projection = getOrCreateProjection(event)
   const updatedAt = new Date().toISOString()
   const stepId = event.stepId || projectionOnlyStepIdForEvent(event) || nextStepId(projection.steps, event.toolName)

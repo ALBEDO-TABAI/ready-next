@@ -2,10 +2,66 @@ import { z } from 'zod'
 
 import type { CanonicalAssistantMessage } from './canonical-message'
 
+export type ProductTurnToolReceipt = {
+  callId: string
+  toolName: string
+  state: 'pending' | 'confirmed' | 'proven_absent' | 'indeterminate' | 'degraded'
+  actionReceiptId: string | null
+  actionRevision: number | null
+  resultDigest: string | null
+  deliveryAttemptId: string | null
+  deliveryConfirmed: boolean
+  summary: string
+}
+
+export type ProductTurnArtifactReceipt = {
+  relativePath: string
+  state: 'required' | 'staged' | 'exported' | 'verified' | 'failed' | 'indeterminate'
+  logicalArtifactRef: string | null
+  version: string | null
+  bytes: number | null
+  sha256: string | null
+  destinationResourceId: string | null
+  evidenceRefs: string[]
+}
+
+export type ProductTurnMemoryReceipt = {
+  snapshotDigest: string
+  stateRevision: number
+  revocationRevision: number
+  summaryEntryIds: string[]
+  readEntryIds: string[]
+  readReceiptDigest: string | null
+}
+
+export type ProductTurnReceipt = {
+  contract: 'ready_product_turn_receipt_v1'
+  readyRunId: string
+  readyTaskId: string
+  readyScopeId: string
+  messageVisibilityEpoch: number
+  revision: number
+  terminal: 'done' | 'error' | 'cancelled' | 'interrupted'
+  canonicalMessage: CanonicalAssistantMessage
+  canonicalMessageDigest: string
+  tools: ProductTurnToolReceipt[]
+  artifacts: ProductTurnArtifactReceipt[]
+  memory: ProductTurnMemoryReceipt | null
+  failure: null | {
+    kind: 'transport' | 'protocol' | 'provider' | 'tool_effect_unknown' | 'artifact_delivery' | 'cancelled' | 'persistence'
+    effectState: 'none' | 'confirmed' | 'indeterminate'
+    retryPolicy: 'not_needed' | 'reconcile_then_retry' | 'readback_first' | 'user_action_required'
+    evidenceRefs: string[]
+  }
+  publicationSealDigest: string | null
+  presentationDigest: string
+}
+
 export const PRE_PERSISTENCE_ERROR_KINDS = [
   'scope_missing',
   'attachment_unavailable',
   'configuration_unavailable',
+  'capability_unavailable',
   'external_service_unavailable',
   'host_unavailable',
   'thread_busy',
@@ -174,6 +230,10 @@ export type SendScopedRequest = {
   userMessage: SendScopedUserMessage
   resources?: SendScopedResourceSelection[]
   currentDocumentAnchor?: CodexCurrentDocumentAnchor
+  explicitRetry?: {
+    predecessorRunId: string
+    predecessorPresentationDigest: string
+  }
 }
 
 export type PersistedIngress = {
@@ -210,6 +270,7 @@ export type SendScopedResponse =
       responseText: string
       canonicalMessage: CanonicalAssistantMessage
       canonicalMessageDigest: string
+      productTurnReceipt?: ProductTurnReceipt
       error?: never
       errorKind?: never
       admissionEvidenceDigest?: never
@@ -265,9 +326,10 @@ export type SendScopedResponse =
       error: string
       errorKind: TerminalErrorKind
       productOutcomeDigest: string
-      responseText?: never
-      canonicalMessage?: never
-      canonicalMessageDigest?: never
+      responseText: string
+      canonicalMessage: CanonicalAssistantMessage
+      canonicalMessageDigest: string
+      productTurnReceipt?: ProductTurnReceipt
       admissionEvidenceDigest?: never
       evidenceDigest?: never
       acceptedAsSteering?: never
@@ -331,9 +393,7 @@ export type CreateSessionResult =
       evidenceDigest: string
     }
 
-export type CreateSessionRequest = {
-  agentId: string
-}
+export type CreateSessionRequest = Record<string, never>
 
 export type LifecycleRequest = {
   aliasId: string
@@ -590,6 +650,10 @@ export const sendScopedRequestSchema: z.ZodType<SendScopedRequest> = z.object({
     }).strict(),
   ])).max(32).optional(),
   currentDocumentAnchor: codexCurrentDocumentAnchorSchema.optional(),
+  explicitRetry: z.object({
+    predecessorRunId: nonEmptyString,
+    predecessorPresentationDigest: sha256Digest,
+  }).strict().optional(),
 }).strict()
 
 export const ingressAdmittedEventSchema: z.ZodType<IngressAdmittedEvent> = z.object({
@@ -625,6 +689,61 @@ const failedIngressSchema = z.object({
   inputAttachments: z.literal('none'),
 }).strict()
 
+const productTurnToolReceiptSchema = z.object({
+  callId: nonEmptyString,
+  toolName: nonEmptyString,
+  state: z.enum(['pending', 'confirmed', 'proven_absent', 'indeterminate', 'degraded']),
+  actionReceiptId: nonEmptyString.nullable(),
+  actionRevision: z.number().int().positive().nullable(),
+  resultDigest: digestString.nullable(),
+  deliveryAttemptId: nonEmptyString.nullable(),
+  deliveryConfirmed: z.boolean(),
+  summary: z.string(),
+}).strict()
+
+const productTurnArtifactReceiptSchema = z.object({
+  relativePath: nonEmptyString,
+  state: z.enum(['required', 'staged', 'exported', 'verified', 'failed', 'indeterminate']),
+  logicalArtifactRef: nonEmptyString.nullable(),
+  version: nonEmptyString.nullable(),
+  bytes: z.number().int().nonnegative().nullable(),
+  sha256: digestString.nullable(),
+  destinationResourceId: nonEmptyString.nullable(),
+  evidenceRefs: z.array(nonEmptyString),
+}).strict()
+
+const productTurnMemoryReceiptSchema = z.object({
+  snapshotDigest: digestString,
+  stateRevision: z.number().int().positive(),
+  revocationRevision: z.number().int().nonnegative(),
+  summaryEntryIds: z.array(nonEmptyString).max(64),
+  readEntryIds: z.array(nonEmptyString).max(64),
+  readReceiptDigest: digestString.nullable(),
+}).strict()
+
+const productTurnReceiptSchema: z.ZodType<ProductTurnReceipt> = z.object({
+  contract: z.literal('ready_product_turn_receipt_v1'),
+  readyRunId: nonEmptyString,
+  readyTaskId: nonEmptyString,
+  readyScopeId: nonEmptyString,
+  messageVisibilityEpoch: z.number().int().nonnegative(),
+  revision: z.number().int().positive(),
+  terminal: z.enum(['done', 'error', 'cancelled', 'interrupted']),
+  canonicalMessage: canonicalAssistantMessageSchema,
+  canonicalMessageDigest: digestString,
+  tools: z.array(productTurnToolReceiptSchema).max(100),
+  artifacts: z.array(productTurnArtifactReceiptSchema),
+  memory: productTurnMemoryReceiptSchema.nullable(),
+  failure: z.object({
+    kind: z.enum(['transport', 'protocol', 'provider', 'tool_effect_unknown', 'artifact_delivery', 'cancelled', 'persistence']),
+    effectState: z.enum(['none', 'confirmed', 'indeterminate']),
+    retryPolicy: z.enum(['not_needed', 'reconcile_then_retry', 'readback_first', 'user_action_required']),
+    evidenceRefs: z.array(nonEmptyString),
+  }).strict().nullable(),
+  publicationSealDigest: digestString.nullable(),
+  presentationDigest: digestString,
+}).strict()
+
 export const sendScopedResponseSchema: z.ZodType<SendScopedResponse> = z.union([
   z.object({
     success: z.literal(true),
@@ -638,6 +757,7 @@ export const sendScopedResponseSchema: z.ZodType<SendScopedResponse> = z.union([
     responseText: z.string(),
     canonicalMessage: canonicalAssistantMessageSchema,
     canonicalMessageDigest: digestString,
+    productTurnReceipt: productTurnReceiptSchema.optional(),
   }).strict(),
   z.object({
     success: z.literal(false),
@@ -673,6 +793,10 @@ export const sendScopedResponseSchema: z.ZodType<SendScopedResponse> = z.union([
     error: nonEmptyString,
     errorKind: z.enum(TERMINAL_ERROR_KINDS),
     productOutcomeDigest: digestString,
+    responseText: z.string(),
+    canonicalMessage: canonicalAssistantMessageSchema,
+    canonicalMessageDigest: digestString,
+    productTurnReceipt: productTurnReceiptSchema.optional(),
   }).strict(),
 ])
 
@@ -705,9 +829,7 @@ export const createSessionResultSchema: z.ZodType<CreateSessionResult> = z.union
   }).strict(),
 ])
 
-export const createSessionRequestSchema: z.ZodType<CreateSessionRequest> = z.object({
-  agentId: nonEmptyString,
-}).strict()
+export const createSessionRequestSchema: z.ZodType<CreateSessionRequest> = z.object({}).strict()
 
 export const lifecycleRequestSchema: z.ZodType<LifecycleRequest> = z.object({
   aliasId: nonEmptyString,

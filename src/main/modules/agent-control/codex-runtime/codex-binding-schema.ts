@@ -929,6 +929,8 @@ export function applyCodexGatewayCompletionEvidenceMigration(db: {
       tools_digest TEXT,
       tool_count INTEGER,
       body_bytes INTEGER,
+      memory_history_redaction_digest TEXT,
+      memory_history_redacted_item_count INTEGER,
       response_id TEXT,
       terminal_digest TEXT,
       output_digest TEXT,
@@ -951,6 +953,10 @@ export function applyCodexGatewayCompletionEvidenceMigration(db: {
           AND tools_digest IS NOT NULL
           AND tool_count >= 0
           AND body_bytes > 0
+          AND memory_history_redaction_digest IS NOT NULL
+          AND length(memory_history_redaction_digest) = 64
+          AND memory_history_redaction_digest NOT GLOB '*[^0-9a-f]*'
+          AND memory_history_redacted_item_count >= 0
           AND response_id IS NULL AND terminal_digest IS NULL
           AND output_digest IS NULL AND usage_digest IS NULL)
         OR
@@ -960,6 +966,8 @@ export function applyCodexGatewayCompletionEvidenceMigration(db: {
           AND input_total_string_characters IS NULL
           AND input_max_string_characters IS NULL
           AND tools_digest IS NULL AND tool_count IS NULL AND body_bytes IS NULL
+          AND memory_history_redaction_digest IS NULL
+          AND memory_history_redacted_item_count IS NULL
           AND response_id IS NOT NULL AND terminal_digest IS NOT NULL
           AND output_digest IS NOT NULL AND usage_digest IS NOT NULL)
       )
@@ -1381,6 +1389,35 @@ export const CODEX_BINDING_SCHEMA_SQL = `
     effective_upstream_snapshot_ref TEXT NOT NULL,
     effective_upstream_snapshot_digest TEXT NOT NULL,
     additional_context_digest TEXT NOT NULL,
+    ready_memory_snapshot_json TEXT CHECK (
+      ready_memory_snapshot_json IS NULL OR (
+        json_valid(ready_memory_snapshot_json) AND json_type(ready_memory_snapshot_json) = 'object'
+      )
+    ),
+    ready_memory_snapshot_digest TEXT CHECK (
+      ready_memory_snapshot_digest IS NULL OR (
+        length(ready_memory_snapshot_digest) = 64
+        AND ready_memory_snapshot_digest NOT GLOB '*[^0-9a-f]*'
+      )
+    ),
+    ready_memory_state_revision INTEGER CHECK (
+      ready_memory_state_revision IS NULL OR ready_memory_state_revision >= 1
+    ),
+    ready_memory_revocation_revision INTEGER CHECK (
+      ready_memory_revocation_revision IS NULL OR ready_memory_revocation_revision >= 0
+    ),
+    ready_memory_read_receipt_json TEXT CHECK (
+      ready_memory_read_receipt_json IS NULL OR (
+        json_valid(ready_memory_read_receipt_json)
+        AND json_type(ready_memory_read_receipt_json) = 'object'
+      )
+    ),
+    ready_memory_read_receipt_digest TEXT CHECK (
+      ready_memory_read_receipt_digest IS NULL OR (
+        length(ready_memory_read_receipt_digest) = 64
+        AND ready_memory_read_receipt_digest NOT GLOB '*[^0-9a-f]*'
+      )
+    ),
     turn_contract_digest TEXT NOT NULL,
     ingress_json TEXT NOT NULL,
     interrupt_requested_at TEXT,

@@ -8,7 +8,6 @@
  */
 import { syncActiveScopeRunAliases } from '../modules/agent/runtimeDriver'
 import { extractAttachmentsFromMeta as extractPersistedAttachments } from '../modules/agent/messageComposer'
-import { defaultAgentEmoji } from '../../shared/agent-identity'
 import type {
   Agent,
   AgentMessage,
@@ -26,49 +25,13 @@ import type {
 } from './agent-store-types'
 
 const FALLBACK_AGENTS: readonly Agent[] = [
-  { name: 'butler', displayName: '管家', avatar: '🤖', status: 'idle', selected: true },
-  { name: 'copywriter', displayName: '文案', avatar: '✍️', status: 'idle', selected: false },
-  { name: 'video-editor', displayName: '剪辑', avatar: '🎬', status: 'idle', selected: false },
-  { name: 'analyst', displayName: '分析', avatar: '📊', status: 'idle', selected: false },
-  { name: 'operator', displayName: '运营', avatar: '📈', status: 'idle', selected: false },
+  { name: 'butler', displayName: 'Ready', avatar: '🤖', status: 'idle' },
 ]
-
-export interface AgentRegistryListItem {
-  id: string
-  name: string
-  status: 'active' | 'disabled' | 'retired' | 'merged'
-}
 
 export function cloneFallbackAgents(): Agent[] {
   return FALLBACK_AGENTS.map((agent) => ({ ...agent }))
 }
 
-export function mapRegistryToAgents(
-  registryAgents: AgentRegistryListItem[],
-  previousAgents: Agent[],
-  currentAgent: string,
-): { agents: Agent[]; currentAgent: string } {
-  const active = registryAgents.filter((agent) => agent.status === 'active')
-  const source = active.length > 0 ? active : cloneFallbackAgents().map((agent) => ({
-    id: agent.name,
-    name: agent.displayName,
-    status: 'active' as const,
-  }))
-  const nextCurrentAgent = source.some((item) => item.id === currentAgent)
-    ? currentAgent
-    : source[0].id
-  const agents = source.map((item) => {
-    const previous = previousAgents.find((agent) => agent.name === item.id)
-    return {
-      name: item.id,
-      displayName: item.name || item.id,
-      avatar: previous?.avatar || defaultAgentEmoji(item.id),
-      status: 'idle' as const,
-      selected: previous?.selected ?? item.id === nextCurrentAgent,
-    }
-  })
-  return { agents, currentAgent: nextCurrentAgent }
-}
 
 const CLOSED_SESSION_STATES: ReadonlySet<SessionSliceState> = new Set(['closed'])
 

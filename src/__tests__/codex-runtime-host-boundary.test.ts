@@ -125,6 +125,7 @@ test('Codex-owned table mutations stay inside the declared storage owners', () =
     join(mainRoot, 'modules/agent-control/codex-runtime/codex-thread-archive-cleanup.ts'),
     join(mainRoot, 'modules/agent-control/codex-runtime/codex-thread-archive-schema.ts'),
     join(mainRoot, 'modules/agent-control/codex-runtime/codex-thread-retirement-cleanup-migration.ts'),
+    join(mainRoot, 'modules/agent-control/ready-memory/ready-memory-repository.ts'),
   ])
   const schemaSource = readFileSync(
     join(mainRoot, 'modules/agent-control/codex-runtime/codex-binding-schema.ts'),
@@ -306,6 +307,8 @@ test('isolated state and child environment contain only the canonical allowlist'
     assert.match(config, /apps = false/)
     assert.match(config, /plugins = false/)
     assert.match(config, /skill_search = false/)
+    assert.match(config, /\[features\][\s\S]*memories = false/)
+    assert.match(config, /\[memories\]\ngenerate_memories = false\nuse_memories = false/)
     assert.doesNotMatch(config, new RegExp(process.env.HOME || 'impossible-home'))
   } finally {
     if (previousCanary === undefined) delete process.env.READY_E2_HOST_SECRET_CANARY

@@ -9,16 +9,12 @@ function readWorkspaceFile(path: string): string {
 
 test('user chat entries stay right-anchored while message text reads left-aligned', () => {
   const chatMessages = readWorkspaceFile('src/renderer/components/agent/ChatMessages.tsx')
+  const chatStyles = readWorkspaceFile('src/renderer/styles/chat-utilities.css')
 
   assert.match(chatMessages, /alignItems:\s*'flex-end'/)
-  assert.match(
-    chatMessages,
-    /msg\.content && <div style=\{\{\s*whiteSpace:\s*'pre-wrap',\s*textAlign:\s*'left'\s*\}\}>\{msg\.content\}<\/div>/
-  )
-  assert.doesNotMatch(
-    chatMessages,
-    /msg\.content && <div style=\{\{\s*whiteSpace:\s*'pre-wrap',\s*textAlign:\s*'right'/
-  )
+  assert.match(chatMessages, /className="ready-chat-user-message-content"/)
+  assert.match(chatStyles, /\.ready-chat-user-message-content\s*\{[\s\S]*?text-align:\s*left;/)
+  assert.doesNotMatch(chatStyles, /\.ready-chat-user-message-content\s*\{[\s\S]*?text-align:\s*right;/)
 })
 
 test('chat messages render a subtle divider between user and agent entries', () => {

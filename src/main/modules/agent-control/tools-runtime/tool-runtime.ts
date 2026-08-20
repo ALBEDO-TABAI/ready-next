@@ -3,7 +3,6 @@ import type { AgentControlRuntime } from '../runtime-core/runtime'
 import type { ConversationScope } from '../contracts/types'
 import type { BrowserController } from '../../browser-engine/ipc-handler'
 import type { AgentSpawnContext } from '../../../../shared/skill-host-contract'
-import type { SpecialistBlueprintSourceMessageUnavailableReason } from '../../../../shared/agent-specialist-blueprint'
 import type { TurnFeatureFlags } from '../runtime-core/turn-feature-flags'
 import type { SkillToolAuthorization } from '../skills/skill-tool-authorization'
 import type { SkillRunContract } from '../contracts/run-contracts'
@@ -65,7 +64,6 @@ export interface ToolRuntimeContext {
   messageVisibilityEpoch?: number
   currentUserText?: string
   sourceMessageId?: string | null
-  sourceMessageUnavailableReason?: SpecialistBlueprintSourceMessageUnavailableReason | null
   requestEnvelope?: unknown
   runId?: string
   taskId?: string

@@ -64,9 +64,8 @@ test('tool output proofs include successful tool results and saved artifact path
   assert.equal(saved[1].ref, '/tmp/report.md')
 
   const artifactPatch = collectToolOutputProofs('present_file', createToolExecutionOutput('已呈现文件', {
-    projectionPatch: {
-      recentArtifacts: [{ path: '/tmp/presented.md', label: 'presented' }],
-    },
+    shape: 'json',
+    data: { status: 'presented', path: '/tmp/presented.md' },
   }), NOW)
   assert.equal(artifactPatch.some((row) => row.kind === 'artifact' && row.ref === '/tmp/presented.md'), true)
 
@@ -99,6 +98,14 @@ test('plain text tool failures never count as successful progress', () => {
     shape: 'json',
     data: { ok: true, content: '正文' },
   })), true)
+})
+
+test('declaring completion criteria never proves the criteria it just declared', () => {
+  const output = createToolExecutionOutput('已登记验收标准', {
+    shape: 'json',
+    data: { ok: true, criteria: ['交付最终结果'] },
+  })
+  assert.deepEqual(collectToolOutputProofs('declare_completion_criteria', output, NOW), [])
 })
 
 test('completed structured output is not failed merely because its counters include failed: 0', () => {
@@ -210,16 +217,80 @@ test('P0-1 regression: skill_write_artifact (data.absolutePath) yields both a to
   )
 })
 
+test('read and inspect tools never turn returned input paths into artifact delivery proof', () => {
+  const read = collectToolOutputProofs('skill_read_artifact', createToolExecutionOutput('已读取已有文件', {
+    shape: 'json',
+    data: { ok: true, absolutePath: '/tmp/already-existing-input.md', content: '旧内容' },
+  }), NOW)
+  const excerpt = collectToolOutputProofs('file_read_excerpt', createToolExecutionOutput('读取片段：`/tmp/source.md`', {
+    shape: 'json',
+    data: { ok: true, path: '/tmp/source.md', content: '输入片段' },
+  }), NOW)
+  const wrappedRead = collectToolOutputProofs('skill_read_artifact', createToolExecutionOutput('已读取已有文件', {
+    shape: 'projection_patch',
+    data: { ok: true, absolutePath: '/tmp/already-existing-input.md', content: '旧内容' },
+    projectionPatch: {
+      recentArtifacts: [
+        { path: '/tmp/older-output.md', kind: 'artifact', meta: { toolName: 'skill_write_artifact' } },
+        { path: '/tmp/already-existing-input.md', kind: 'read_artifact', meta: { toolName: 'skill_read_artifact' } },
+      ],
+    },
+  }), NOW)
+
+  assert.deepEqual(read.map((row) => row.kind), ['tool_result'])
+  assert.deepEqual(excerpt.map((row) => row.kind), ['tool_result'])
+  assert.deepEqual(wrappedRead.map((row) => row.kind), ['tool_result'])
+})
+
+test('explicit clip and presentation contracts still mint artifact delivery proof', () => {
+  const clipped = collectToolOutputProofs('web_clip_url', createToolExecutionOutput('网页已剪藏', {
+    shape: 'json',
+    data: { savedPath: '/tmp/clipped.md', title: 'Clipped' },
+  }), NOW)
+  const presented = collectToolOutputProofs('present_file', createToolExecutionOutput('已呈现', {
+    shape: 'json',
+    data: { status: 'presented', path: '/tmp/presented.md' },
+  }), NOW)
+
+  assert.equal(clipped.some((row) => row.kind === 'artifact' && row.ref === '/tmp/clipped.md'), true)
+  assert.equal(presented.some((row) => row.kind === 'artifact' && row.ref === '/tmp/presented.md'), true)
+})
+
+test('direct projection producers still mint their current generated or downloaded artifact', () => {
+  const generated = collectToolOutputProofs('generate_image', createToolExecutionOutput('已生成文件', {
+    shape: 'projection_patch',
+    data: { ok: true },
+    projectionPatch: { recentArtifacts: [{ path: '/tmp/generated.png', kind: 'artifact' }] },
+  }), NOW)
+  assert.equal(generated.some((row) => row.kind === 'artifact' && row.ref === '/tmp/generated.png'), true)
+
+  const downloaded = createToolExecutionOutput(JSON.stringify({
+    directory: '/tmp', total: 2, success: 1, failed: 1, bytesWritten: 1024,
+  }), {
+    shape: 'json',
+    data: { directory: '/tmp', total: 2, success: 1, failed: 1, bytesWritten: 1024 },
+    projectionPatch: { recentArtifacts: [{ path: '/tmp/downloaded.mp4', kind: 'video' }] },
+  })
+  assert.equal(isSuccessfulToolOutput(downloaded, 'browser_download'), true)
+  const downloadProofs = collectToolOutputProofs('browser_download', downloaded, NOW)
+  assert.equal(downloadProofs.some((row) => row.kind === 'artifact' && row.ref === '/tmp/downloaded.mp4'), true)
+
+  const allFailed = createToolExecutionOutput(JSON.stringify({
+    directory: '/tmp', total: 1, success: 0, failed: 1, bytesWritten: 0,
+  }))
+  assert.equal(isSuccessfulToolOutput(allFailed, 'browser_download'), false)
+  assert.deepEqual(collectToolOutputProofs('browser_download', allFailed, NOW), [])
+})
+
 test('A1: a bare runStatePath is NOT a run_state COMPLETION proof at tool-output level (skill emits it at START)', () => {
   const proofs = collectToolOutputProofs('skill_video_expert_pipeline', createToolExecutionOutput('技能已启动', {
     shape: 'json',
     data: { runStatePath: '/tmp/out/run_state.json' },
   }), NOW)
   const kinds = proofs.map((row) => row.kind)
-  // the path is a file artifact, but NOT a run_state-kind completion proof —
-  // that is minted only in run-finalizer after validating terminal done + delivery.
+  // A start handle is neither a delivery nor a run-state completion proof.
   assert.ok(!kinds.includes('run_state'), 'no run_state proof from a bare path')
-  assert.ok(proofs.some((row) => row.kind === 'artifact' && row.ref === '/tmp/out/run_state.json'))
+  assert.deepEqual(kinds, ['tool_result'])
 })
 
 test('appendProofRefs: malformed additions rejected loudly; overflow rolls oldest into the archive', () => {

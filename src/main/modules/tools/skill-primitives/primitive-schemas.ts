@@ -55,6 +55,7 @@ export const SKILL_PRIMITIVE_SCHEMAS = {
       .enum(['overwrite', 'append'])
       .optional()
       .describe('默认 overwrite 覆盖写入；长文档需要补齐尾部章节时用 append 追加到同一路径'),
+    expectedVersion: z.string().trim().min(1).optional().describe('Ready 目标文件夹交付时必填：首次写 empty，后续传上一条写入返回的 version。'),
   }),
   skill_read_artifact: z.object({
     relativePath: TRIMMED_STRING.describe('相对 artifact 根目录、当前任务读根或 skill 托管资源目录的路径；也接受这些根目录内、由工具结果返回的绝对路径'),
@@ -65,10 +66,15 @@ export const SKILL_PRIMITIVE_SCHEMAS = {
       .max(1_048_576)
       .optional()
       .describe('最多读取字节数，默认 32768（32K），最大 1048576（1M）'),
+    version: z.string().trim().min(1).optional().describe('Ready 目标文件夹交付时读取的不可变版本。'),
   }),
   skill_export_artifact: z.object({
     relativePath: TRIMMED_STRING.describe('相对 artifact 根目录的源文件路径，必须指向已有 skill 产物'),
-    targetPath: TRIMMED_STRING.describe('要导出到的用户目标文件绝对路径'),
+    targetPath: TRIMMED_STRING.optional().describe('非 Codex skill 的兼容导出目标绝对路径；Ready 目标文件夹交付时禁止使用。'),
+    destinationResourceId: TRIMMED_STRING.optional().describe('Ready 目标文件夹交付时必填：declare_completion_criteria 返回的冻结资源 ID。'),
+    targetRelativePath: TRIMMED_STRING.optional().describe('Ready 目标文件夹内的相对目标文件路径。'),
+    expectedVersion: TRIMMED_STRING.optional().describe('要导出的不可变 staged version。'),
+    expectedSha256: z.string().regex(/^[a-f0-9]{64}$/).optional().describe('要导出的整份 staged 文件 SHA-256。'),
     overwrite: z.boolean().optional().describe('目标已存在时是否覆盖，默认 false'),
   }),
   skill_patch_config: z.object({

@@ -74,6 +74,25 @@ import type {
   FastCardTranslateRequest,
 } from '../shared/fastcard'
 import { createAgentRuntimeInvokeGate } from './agent-runtime-invoke-gate'
+import {
+  readyMemoryAddRequestSchema,
+  readyMemoryConversationPolicyRequestSchema,
+  readyMemoryDeleteRequestSchema,
+  readyMemoryGlobalPolicyRequestSchema,
+  readyMemoryPinRequestSchema,
+  readyMemoryReadRequestSchema,
+  readyMemoryResetRequestSchema,
+  readyMemoryUpdateRequestSchema,
+  readyMemoryViewSchema,
+  type ReadyMemoryAddRequest,
+  type ReadyMemoryConversationPolicyRequest,
+  type ReadyMemoryDeleteRequest,
+  type ReadyMemoryGlobalPolicyRequest,
+  type ReadyMemoryPinRequest,
+  type ReadyMemoryReadRequest,
+  type ReadyMemoryResetRequest,
+  type ReadyMemoryUpdateRequest,
+} from '../shared/ready-memory'
 
 const readAgentRuntimeReady = async (): Promise<AgentRuntimeReadinessSnapshot> => (
   parseAgentRuntimeReadinessSnapshot(await ipcRenderer.invoke('agent:readRuntimeReady'))
@@ -98,6 +117,17 @@ const invokeAgentRuntime = <T = unknown>(channel: string, ...args: unknown[]): P
   agentRuntimeInvokeGate.invoke(() => ipcRenderer.invoke(channel, ...args) as Promise<T>)
 )
 
+const invokeReadyMemory = async (channel: string, payload: unknown) => {
+  const result = await invokeAgentRuntime<{
+    success: boolean
+    data?: unknown
+    error?: string
+  }>(channel, payload)
+  return result.success && result.data
+    ? { ...result, data: readyMemoryViewSchema.parse(result.data) }
+    : result
+}
+
 // Agent API
 const agentAPI = {
   createSession: async (request: CreateSessionRequest) => parseCreateSessionResult(
@@ -121,21 +151,15 @@ const agentAPI = {
   getRuntimeStatus: () => invokeAgentRuntime('agent:getRuntimeStatus'),
   getCapabilityRuntimeSnapshot: (config?: unknown) => invokeAgentRuntime('agent:getCapabilityRuntimeSnapshot', config),
   listChannels: () => invokeAgentRuntime('agent:listChannels'),
-  listRegistry: () => invokeAgentRuntime('agent:registry:list'),
-  listRegistryKnowledge: (id: string) => invokeAgentRuntime('agent:registry:listKnowledge', { id }),
-  getSystemStudioSnapshot: () => invokeAgentRuntime('agent:systemStudio:getSnapshot'),
-  stageSystemStudioContentEdit: (payload: unknown) =>
-    invokeAgentRuntime('agent:systemStudio:stageContentEdit', payload),
-  confirmSystemStudioContentEdit: (proposalId: string) =>
-    invokeAgentRuntime('agent:systemStudio:confirmContentEdit', { proposalId }),
-  rejectSystemStudioContentEdit: (proposalId: string) =>
-    invokeAgentRuntime('agent:systemStudio:rejectContentEdit', { proposalId }),
-  listSpecialistBlueprints: () => invokeAgentRuntime('agent:specialistBlueprint:list'),
-  listConversationScopes: (agent?: string) => invokeAgentRuntime('agent:listConversationScopes', { agent }),
+  listConversationScopes: () => invokeAgentRuntime('agent:listConversationScopes', {}),
   readRuntimeReady: readAgentRuntimeReady,
   onRuntimeReady: subscribeAgentRuntimeReady,
   listScopeRuns: (payload?: { channelKey?: string; statuses?: string[]; limit?: number }) =>
     invokeAgentRuntime('agent:listScopeRuns', payload || {}),
+  readProductTurnPresentation: (readyRunId: string) =>
+    invokeAgentRuntime('agent:readProductTurnPresentation', { readyRunId }),
+  readProductTurnPresentations: (readyRunIds: string[]) =>
+    invokeAgentRuntime('agent:readProductTurnPresentations', { readyRunIds }),
   readCodexLifecycleSnapshot: async (request: LifecycleRequest) => {
     const result = await invokeAgentRuntime('agent:readCodexLifecycleSnapshot', parseLifecycleRequest(request)) as {
       success: boolean
@@ -146,6 +170,30 @@ const agentAPI = {
       ? { ...result, data: parseLifecycleOperationProjection(result.data) as LifecycleOperationProjection }
       : result
   },
+  readReadyMemory: (request: ReadyMemoryReadRequest) => invokeReadyMemory(
+    'agent:readReadyMemory', readyMemoryReadRequestSchema.parse(request),
+  ),
+  setReadyMemoryGlobalPolicy: (request: ReadyMemoryGlobalPolicyRequest) => invokeReadyMemory(
+    'agent:setReadyMemoryGlobalPolicy', readyMemoryGlobalPolicyRequestSchema.parse(request),
+  ),
+  setReadyMemoryConversationPolicy: (request: ReadyMemoryConversationPolicyRequest) => invokeReadyMemory(
+    'agent:setReadyMemoryConversationPolicy', readyMemoryConversationPolicyRequestSchema.parse(request),
+  ),
+  addReadyMemory: (request: ReadyMemoryAddRequest) => invokeReadyMemory(
+    'agent:addReadyMemory', readyMemoryAddRequestSchema.parse(request),
+  ),
+  updateReadyMemory: (request: ReadyMemoryUpdateRequest) => invokeReadyMemory(
+    'agent:updateReadyMemory', readyMemoryUpdateRequestSchema.parse(request),
+  ),
+  pinReadyMemory: (request: ReadyMemoryPinRequest) => invokeReadyMemory(
+    'agent:pinReadyMemory', readyMemoryPinRequestSchema.parse(request),
+  ),
+  deleteReadyMemory: (request: ReadyMemoryDeleteRequest) => invokeReadyMemory(
+    'agent:deleteReadyMemory', readyMemoryDeleteRequestSchema.parse(request),
+  ),
+  resetReadyMemory: (request: ReadyMemoryResetRequest) => invokeReadyMemory(
+    'agent:resetReadyMemory', readyMemoryResetRequestSchema.parse(request),
+  ),
   listTaskProjections: (scopeId: string) =>
     invokeAgentRuntime('agent:listTaskProjections', { scopeId }),
   getTaskProjection: (taskId: string) =>
@@ -372,22 +420,6 @@ const agentAPI = {
   },
 }
 
-// Memory API
-const memoryAPI = {
-  query: (filters: unknown) => invokeAgentRuntime('agent:memory:query', filters),
-  create: (entry: unknown) => invokeAgentRuntime('agent:memory:create', entry),
-  update: (id: string, updates: unknown) => invokeAgentRuntime('agent:memory:update', { id, updates }),
-  delete: (id: string) => invokeAgentRuntime('agent:memory:delete', id),
-  stats: () => invokeAgentRuntime('agent:memory:stats'),
-  createFromConversation: (payload: unknown) => invokeAgentRuntime('agent:memory:createFromConversation', payload),
-}
-
-const memoryCardsAPI = {
-  list: () => invokeAgentRuntime('agent:beliefCards:list'),
-  transition: (payload: { relPath: string; action: 'approve' | 'reject' }) =>
-    invokeAgentRuntime('agent:beliefCards:transition', payload),
-}
-
 // P0-4 (2026-07-02 P0 visibility batch) — read-only run quality stats.
 const runQualityAPI = {
   stats: () => invokeAgentRuntime('agent:runQuality:stats'),
@@ -402,20 +434,6 @@ const runFeedbackAPI = {
 // 梯队三 (2026-07-03) — emergence feed（拉取式组装，四类卡）。
 const emergenceAPI = {
   feed: () => invokeAgentRuntime('agent:emergence:feed'),
-}
-
-// Trigger API
-const triggerAPI = {
-  list: (filters?: unknown) => invokeAgentRuntime('agent:trigger:list', filters),
-  create: (trigger: unknown) => invokeAgentRuntime('agent:trigger:create', trigger),
-  update: (id: string, updates: unknown) => invokeAgentRuntime('agent:trigger:update', { id, updates }),
-  createWithMemories: (payload: unknown) => invokeAgentRuntime('agent:trigger:createWithMemories', payload),
-}
-
-// Memory Lifecycle API
-const memoryLifecycleAPI = {
-  status: () => invokeAgentRuntime('agent:memory:lifecycle:status'),
-  runMaintenance: () => invokeAgentRuntime('agent:memory:lifecycle:runMaintenance'),
 }
 
 // Browser API
@@ -1330,48 +1348,6 @@ const chatAPI = {
   readFileForAI: (filePath: string) => ipcRenderer.invoke('chat:readFileForAI', filePath),
 }
 
-// User Profile API
-const userProfileAPI = {
-  get: (userId: string) => ipcRenderer.invoke('userProfile:get', userId),
-  list: () => ipcRenderer.invoke('userProfile:list'),
-  create: (profile: {
-    id?: string
-    name?: string
-    avatarUrl?: string
-    preferredLanguage?: string
-    communicationStyle?: string
-    preferencesJson?: Record<string, unknown>
-  }) => ipcRenderer.invoke('userProfile:create', profile),
-  update: (userId: string, updates: {
-    name?: string
-    avatarUrl?: string
-    preferredLanguage?: string
-    communicationStyle?: string
-    preferencesJson?: Record<string, unknown>
-  }) => ipcRenderer.invoke('userProfile:update', userId, updates),
-  delete: (userId: string) => ipcRenderer.invoke('userProfile:delete', userId),
-}
-
-// Agent Personality API
-const agentPersonalityAPI = {
-  get: (agentName: string) => ipcRenderer.invoke('agentPersonality:get', agentName),
-  list: () => ipcRenderer.invoke('agentPersonality:list'),
-  create: (personality: {
-    agentName: string
-    displayName?: string
-    personalityText: string
-    tone?: string
-    metaJson?: Record<string, unknown>
-  }) => ipcRenderer.invoke('agentPersonality:create', personality),
-  update: (agentName: string, updates: {
-    displayName?: string
-    personalityText?: string
-    tone?: string
-    metaJson?: Record<string, unknown>
-  }) => ipcRenderer.invoke('agentPersonality:update', agentName, updates),
-  delete: (agentName: string) => ipcRenderer.invoke('agentPersonality:delete', agentName),
-}
-
 const toolsAPI = {
   logToolEvent: (payload: {
     type: 'dispatch' | 'ack' | 'watchdog' | 'cancel' | 'self-rescue' | 'duplicate'
@@ -1440,13 +1416,9 @@ const mcpAPI = {
 
 contextBridge.exposeInMainWorld('electronAPI', {
   agent: agentAPI,
-  memory: memoryAPI,
-  memoryCards: memoryCardsAPI,
   runQuality: runQualityAPI,
   runFeedback: runFeedbackAPI,
   emergence: emergenceAPI,
-  trigger: triggerAPI,
-  memoryLifecycle: memoryLifecycleAPI,
   browser: browserAPI,
   document: documentAPI,
   board: boardAPI,
@@ -1462,8 +1434,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   tagForge: tagForgeAPI,
   pet: petAPI,
   chat: chatAPI,
-  userProfile: userProfileAPI,
-  agentPersonality: agentPersonalityAPI,
   tools: toolsAPI,
   ui: uiAPI,
   agentInteraction: agentInteractionAPI,
@@ -1480,11 +1450,7 @@ declare global {
     electronAPI: {
       agent: typeof agentAPI
       mcp: typeof mcpAPI
-      memory: typeof memoryAPI
-      memoryCards: typeof memoryCardsAPI
       runQuality: typeof runQualityAPI
-      trigger: typeof triggerAPI
-      memoryLifecycle: typeof memoryLifecycleAPI
       browser: typeof browserAPI
       document: typeof documentAPI
       board: typeof boardAPI
@@ -1500,8 +1466,6 @@ declare global {
       tagForge: typeof tagForgeAPI
       pet: typeof petAPI
       chat: typeof chatAPI
-      userProfile: typeof userProfileAPI
-      agentPersonality: typeof agentPersonalityAPI
       tools: typeof toolsAPI
       ui: typeof uiAPI
       agentInteraction: typeof agentInteractionAPI

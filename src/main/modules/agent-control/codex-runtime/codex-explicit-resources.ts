@@ -44,6 +44,12 @@ export type PreparedCodexResourceAuthority = {
   currentVersion: string
   currentDigest: string
   policyEpoch: number
+  directoryIdentity?: {
+    device: string
+    inode: string
+    mode: number
+    mtimeMs: number
+  }
   allowedToolNames: Array<'file_extract_text' | 'file_read_excerpt' | 'file_inventory'>
 }
 
@@ -55,6 +61,12 @@ export const preparedCodexResourceAuthoritySchema = z.object({
   currentVersion: z.string().min(1),
   currentDigest: z.string().regex(/^[a-f0-9]{64}$/),
   policyEpoch: z.number().int().positive(),
+  directoryIdentity: z.object({
+    device: z.string().min(1),
+    inode: z.string().min(1),
+    mode: z.number().int().nonnegative(),
+    mtimeMs: z.number().nonnegative(),
+  }).strict().optional(),
   allowedToolNames: z.array(z.enum([
     'file_extract_text', 'file_read_excerpt', 'file_inventory',
   ])),
@@ -67,8 +79,85 @@ export type ResolvedCodexExplicitResources = {
   authorities: PreparedCodexResourceAuthority[]
 }
 
+export type CodexRetryLocalResourceSelection = {
+  selection: Extract<SendScopedResourceSelection, { kind: 'local_file' | 'local_directory' }>
+  logicalResourceId: string
+  directoryIdentity?: PreparedCodexResourceAuthority['directoryIdentity']
+}
+
+export function recoverCodexRetrySkillSelection(
+  authorization:
+    | { mode: 'none' }
+    | {
+        mode: 'selected'
+        skillId: string
+        allowedTypedActions?: readonly string[]
+        allowedPrimitives?: readonly string[]
+      },
+): {
+  selection: Extract<SendScopedResourceSelection, { kind: 'skill' }>
+  applicableToolNames: string[]
+} | null {
+  if (authorization.mode !== 'selected') return null
+  return {
+    selection: {
+      kind: 'skill',
+      id: `retry-skill:${authorization.skillId}`,
+      name: authorization.skillId,
+      path: '',
+      skillId: authorization.skillId,
+    },
+    applicableToolNames: [...new Set([
+      ...(authorization.allowedTypedActions ?? []),
+      ...(authorization.allowedPrimitives ?? []),
+    ])],
+  }
+}
+
 function sha256(value: string): string {
   return createHash('sha256').update(value).digest('hex')
+}
+
+function localLogicalResourceId(kind: 'local_file' | 'local_directory', canonicalPath: string): string {
+  return `${kind === 'local_directory' ? 'local-directory' : 'local-file'}:${sha256(canonicalPath).slice(0, 32)}`
+}
+
+export function recoverCodexRetryLocalResourceSelections(input: {
+  explicitInput: readonly CodexUserInput[]
+  authorities: readonly PreparedCodexResourceAuthority[]
+}): CodexRetryLocalResourceSelection[] {
+  const authoritiesByPath = new Map(input.authorities.map((authority) => [authority.path, authority]))
+  const recovered: CodexRetryLocalResourceSelection[] = []
+  const seen = new Set<string>()
+
+  for (const entry of input.explicitInput) {
+    if (entry.type !== 'mention' && entry.type !== 'localImage' && entry.type !== 'localAudio') continue
+    const path = entry.path
+    const authority = authoritiesByPath.get(path)
+    if (entry.type === 'mention' && !authority) continue
+    const kind = authority?.kind ?? 'local_file'
+    const logicalResourceId = authority?.logicalResourceId ?? localLogicalResourceId(kind, path)
+    if (seen.has(logicalResourceId)) continue
+    seen.add(logicalResourceId)
+    const name = entry.type === 'mention' ? entry.name : basename(path)
+    recovered.push({
+      logicalResourceId,
+      ...(authority?.directoryIdentity ? { directoryIdentity: authority.directoryIdentity } : {}),
+      selection: kind === 'local_directory'
+        ? { kind, id: logicalResourceId, name, path }
+        : {
+            kind,
+            id: logicalResourceId,
+            name,
+            path,
+            size: 0,
+            ext: extname(path),
+            rendererType: 'other',
+          },
+    })
+  }
+
+  return recovered
 }
 
 async function sha256File(path: string): Promise<string> {
@@ -380,7 +469,7 @@ export async function resolveCodexExplicitResources(input: {
       : await sha256File(canonicalPath).catch(() => {
           throw new Error('codex_explicit_resource_unavailable')
         })
-    const logicalResourceId = `${expectedDirectory ? 'local-directory' : 'local-file'}:${sha256(canonicalPath).slice(0, 32)}`
+    const logicalResourceId = localLogicalResourceId(selection.kind, canonicalPath)
     const reference = versionReference(logicalResourceId, digest)
     resourceRefs.push(reference)
 
@@ -403,6 +492,12 @@ export async function resolveCodexExplicitResources(input: {
         currentVersion: reference.currentVersion,
         currentDigest: reference.currentDigest,
         policyEpoch: reference.policyEpoch,
+        directoryIdentity: {
+          device: String(metadata.dev),
+          inode: String(metadata.ino),
+          mode: metadata.mode,
+          mtimeMs: metadata.mtimeMs,
+        },
         allowedToolNames: ['file_inventory'],
       })
       continue

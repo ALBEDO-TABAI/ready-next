@@ -5,8 +5,15 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
 
-import { resolveCodexExplicitResources } from '../main/modules/agent-control/codex-runtime/codex-explicit-resources'
-import { executeFileManagementTool } from '../main/modules/tools/file-management-tools'
+import {
+  recoverCodexRetryLocalResourceSelections,
+  recoverCodexRetrySkillSelection,
+  resolveCodexExplicitResources,
+} from '../main/modules/agent-control/codex-runtime/codex-explicit-resources'
+import {
+  executeFileManagementTool,
+  resolveFileToolExplicitReadableResources,
+} from '../main/modules/tools/file-management-tools'
 import type { SearchEngine } from '../main/modules/search-engine/indexer'
 
 test('Main revalidates selected files and emits body-free native/resource contracts', async () => {
@@ -54,6 +61,86 @@ test('Main revalidates selected files and emits body-free native/resource contra
   } finally {
     await rm(root, { recursive: true, force: true })
   }
+})
+
+test('explicit retry recovers the predecessor local targets and revalidates their current bytes', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'ready-codex-retry-resources-'))
+  try {
+    const markdownPath = join(root, 'target.md')
+    const imagePath = join(root, 'reference.png')
+    const directoryPath = join(root, '输出')
+    await writeFile(markdownPath, '# before')
+    await writeFile(imagePath, Buffer.from('image-before'))
+    await mkdir(directoryPath)
+    const predecessor = await resolveCodexExplicitResources({
+      selections: [
+        {
+          kind: 'local_file', id: 'markdown', name: 'target.md', path: markdownPath,
+          size: 8, ext: '.md', rendererType: 'text',
+        },
+        {
+          kind: 'local_file', id: 'image', name: 'reference.png', path: imagePath,
+          size: 12, ext: '.png', rendererType: 'image',
+        },
+        { kind: 'local_directory', id: 'folder', name: '输出', path: directoryPath },
+      ],
+      resolveSkill: () => null,
+    })
+    const recovered = recoverCodexRetryLocalResourceSelections({
+      explicitInput: predecessor.input,
+      authorities: predecessor.authorities,
+    })
+    assert.deepEqual(recovered.map((entry) => entry.selection.kind), [
+      'local_file', 'local_file', 'local_directory',
+    ])
+    assert.deepEqual(recovered.map((entry) => entry.logicalResourceId), predecessor.resourceRefs.map(
+      (reference) => reference.logicalResourceId,
+    ))
+
+    await writeFile(markdownPath, '# current')
+    const retry = await resolveCodexExplicitResources({
+      selections: recovered.map((entry) => entry.selection),
+      resolveSkill: () => null,
+    })
+    assert.deepEqual(retry.resourceRefs.map((reference) => reference.logicalResourceId), recovered.map(
+      (entry) => entry.logicalResourceId,
+    ))
+    assert.notEqual(retry.resourceRefs[0]?.currentDigest, predecessor.resourceRefs[0]?.currentDigest)
+    assert.equal(retry.input.some((entry) => entry.type === 'mention' && entry.name === 'target.md'), true)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('explicit retry recovers skill identity and applicability candidates for current manifest validation', async () => {
+  const selected = recoverCodexRetrySkillSelection({
+    mode: 'selected',
+    skillId: 'tag-forge',
+    allowedTypedActions: ['tag_forge_prepare_batch'],
+    allowedPrimitives: ['tag_forge_apply_batch'],
+  })
+  assert.deepEqual(selected, {
+    selection: {
+      kind: 'skill',
+      id: 'retry-skill:tag-forge',
+      name: 'tag-forge',
+      path: '',
+      skillId: 'tag-forge',
+    },
+    applicableToolNames: ['tag_forge_prepare_batch', 'tag_forge_apply_batch'],
+  })
+  assert.equal(recoverCodexRetrySkillSelection({ mode: 'none' }), null)
+
+  const skillPath = join(process.cwd(), 'assets', 'embedded-skills', 'tag-forge')
+  const resolved = await resolveCodexExplicitResources({
+    selections: [selected!.selection],
+    resolveSkill: (selection) => (
+      selection.skillId === 'tag-forge' ? { name: 'tag-forge', path: skillPath } : null
+    ),
+  })
+  assert.equal(resolved.input[0]?.type, 'skill')
+  assert.equal(resolved.requestResources[0]?.kind, 'skill_reference')
+  assert.equal(resolved.requestResources[0]?.name, 'tag-forge')
 })
 
 test('explicit and selected skill inputs are Main-validated and deduplicated by canonical path', async () => {
@@ -172,15 +259,19 @@ test('file tools read the exact selected file and fail closed for an unselected 
     const context = {
       searchEngine: {} as SearchEngine,
       explicitReadableResources: [{
+        logicalResourceId: 'local-file:selected',
+        name: 'selected.txt',
         path: canonicalSelectedPath,
         currentDigest: createHash('sha256').update('selected body').digest('hex'),
       }],
     }
-    const selected = JSON.parse(await executeFileManagementTool(
-      'file_read_excerpt', { path: selectedPath }, context,
-    )) as { ok: boolean; content?: string }
-    assert.equal(selected.ok, true)
-    assert.equal(selected.content, 'selected body')
+    for (const pathRef of [selectedPath, 'selected.txt', '@[selected.txt]', 'local-file:selected']) {
+      const selected = JSON.parse(await executeFileManagementTool(
+        'file_read_excerpt', { path: pathRef }, context,
+      )) as { ok: boolean; content?: string }
+      assert.equal(selected.ok, true, pathRef)
+      assert.equal(selected.content, 'selected body')
+    }
     const sibling = JSON.parse(await executeFileManagementTool(
       'file_read_excerpt', { path: siblingPath }, context,
     )) as { ok: boolean; error?: string }
@@ -192,6 +283,42 @@ test('file tools read the exact selected file and fail closed for an unselected 
     )) as { ok: boolean; error?: string }
     assert.equal(stale.ok, false)
     assert.match(String(stale.error), /changed after authorization/)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('file tool aliases are derived only from trusted frozen attachment resources', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'ready-codex-file-aliases-'))
+  try {
+    const path = join(root, 'selected.md')
+    await writeFile(path, '# selected')
+    const canonicalPath = await realpath(path)
+    const digest = createHash('sha256').update('# selected').digest('hex')
+    const resolved = resolveFileToolExplicitReadableResources({ resources: [{
+      id: 'local-file:trusted',
+      kind: 'attachment',
+      source: 'user_attachment',
+      name: 'selected.md',
+      path: canonicalPath,
+      canRead: true,
+      currentDigest: digest,
+    }] })
+    assert.deepEqual(resolved, [{
+      logicalResourceId: 'local-file:trusted',
+      name: 'selected.md',
+      path: canonicalPath,
+      currentDigest: digest,
+    }])
+    assert.equal(resolveFileToolExplicitReadableResources({ resources: [{
+      id: 'local-file:forged',
+      kind: 'attachment',
+      source: 'explicit_reference',
+      name: 'selected.md',
+      path: canonicalPath,
+      canRead: true,
+      currentDigest: digest,
+    }] }), null)
   } finally {
     await rm(root, { recursive: true, force: true })
   }

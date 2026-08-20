@@ -93,18 +93,22 @@ test('Codex production ingress freezes six controlled retries into the upstream 
   assert.equal(snapshot.snapshot.retryPolicy.maxRetries, 6)
 })
 
-test('Codex reserves a final model iteration after the bounded tool budget', () => {
+test('Codex keeps the ordinary iteration budget bounded before the frozen final lane', () => {
+  const executableSkill = {
+    mode: 'selected' as const,
+    completionProfile: 'tool_result' as const,
+  }
   assert.deepEqual(createCodexProductBudgetSeed({
-    skillAuthorization: { mode: 'selected' },
+    skillAuthorization: executableSkill,
   }), {
-    maxIterations: 41,
+    maxIterations: 40,
     maxToolCalls: 40,
     maxParallelToolGroups: 1,
   })
   assert.deepEqual(createCodexProductBudgetSeed({
     skillAuthorization: { mode: 'none' },
   }), {
-    maxIterations: 9,
+    maxIterations: 8,
     maxToolCalls: 8,
     maxParallelToolGroups: 1,
   })
@@ -112,7 +116,7 @@ test('Codex reserves a final model iteration after the bounded tool budget', () 
     skillAuthorization: { mode: 'none' },
     intentClassification: { primaryDomain: 'browser' },
   }), {
-    maxIterations: 49,
+    maxIterations: 48,
     maxToolCalls: 48,
     maxParallelToolGroups: 1,
   })
@@ -120,23 +124,38 @@ test('Codex reserves a final model iteration after the bounded tool budget', () 
     skillAuthorization: { mode: 'none' },
     intentClassification: { primaryDomain: 'research' },
   }), {
-    maxIterations: 49,
-    maxToolCalls: 48,
+    maxIterations: 220,
+    maxToolCalls: 220,
     maxParallelToolGroups: 1,
   })
   assert.deepEqual(createCodexProductBudgetSeed({
-    skillAuthorization: { mode: 'selected' },
+    skillAuthorization: executableSkill,
     intentClassification: { primaryDomain: 'browser' },
   }), {
-    maxIterations: 41,
+    maxIterations: 40,
     maxToolCalls: 40,
     maxParallelToolGroups: 1,
   })
   assert.deepEqual(createCodexProductBudgetSeed({
-    skillAuthorization: { mode: 'selected' },
+    skillAuthorization: executableSkill,
     intentClassification: { primaryDomain: 'research' },
   }), {
-    maxIterations: 41,
+    maxIterations: 40,
+    maxToolCalls: 40,
+    maxParallelToolGroups: 1,
+  })
+  assert.deepEqual(createCodexProductBudgetSeed({
+    skillAuthorization: executableSkill,
+  }), {
+    maxIterations: 40,
+    maxToolCalls: 40,
+    maxParallelToolGroups: 1,
+  })
+  assert.deepEqual(createCodexProductBudgetSeed({
+    skillAuthorization: { mode: 'none' },
+    hasFolderExportDestination: true,
+  }), {
+    maxIterations: 40,
     maxToolCalls: 40,
     maxParallelToolGroups: 1,
   })
@@ -165,7 +184,12 @@ test('Codex keeps thread instructions stable and sends the selected Lark CLI as 
       installStatePath: '',
       managedPath: SKILL_ROOT,
     }],
-  }), { skillId: 'lark-cli', name: 'Lark CLI', path: SKILL_ROOT })
+  }), {
+    skillId: 'lark-cli',
+    name: 'Lark CLI',
+    path: SKILL_ROOT,
+    completionProfile: 'tool_result',
+  })
 
   const assetRoot = join(process.cwd(), 'assets', 'codex-runtime')
   const fixture = JSON.parse(readFileSync(

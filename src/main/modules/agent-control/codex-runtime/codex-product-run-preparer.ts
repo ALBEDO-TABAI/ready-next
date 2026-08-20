@@ -36,10 +36,55 @@ import {
   type PreparedCodexResourceAuthority,
 } from './codex-explicit-resources'
 import type { TrustedRequestEnvironment } from '../contracts/request-envelope'
+import {
+  assertReadyMemorySnapshot,
+  type ReadyMemorySnapshot,
+} from '../ready-memory'
 
 export type ReadyToolSurfaceRef = ReadyToolSurface
 
 export type ReadyTurnToolAuthorizationRef = ReadyTurnToolAuthorization
+
+export type CodexOutputContract = Readonly<{
+  contract: 'codex_output_contract_v1'
+  destination: Readonly<{
+    logicalResourceId: string
+    path: string
+    currentVersion: string
+    currentDigest: string
+    policyEpoch: number
+    directoryIdentity: Readonly<{
+      device: string
+      inode: string
+      mode: number
+      mtimeMs: number
+    }>
+  }>
+  activation: 'pending_confirmation'
+  activationPredicateDigest: string
+  maxExpectedOutputs: 8
+  targetPolicy: 'create_only'
+}>
+
+export type CodexProductBudgetSeed = Readonly<{
+  maxIterations: number
+  maxToolCalls: number
+  maxParallelToolGroups: number
+  lanes: Readonly<{
+    ordinary: Readonly<{ maxIterations: number; maxToolCalls: number; maxParallelToolGroups: number }>
+    delivery: Readonly<{ maxIterations: number; maxToolCalls: number; maxParallelToolGroups: number }>
+    final: Readonly<{ maxIterations: 1 }>
+  }>
+}>
+
+export type CodexRetryArtifactSource = Readonly<{
+  sourceReadyRunId: string
+  relativePath: string
+  logicalArtifactRef: string
+  version: string
+  sha256: string
+  state: 'staged' | 'exported' | 'verified' | 'indeterminate'
+}>
 
 export type ReadyToolHostIdentity = {
   scopeId: string
@@ -65,11 +110,13 @@ export type PreparedCodexProductRun = {
   resourceAnchorDigest: string
   recoveredContextDigest: null
   actionAuthorizationMode?: ActionAuthorizationMode
+  readyMemorySnapshot: ReadyMemorySnapshot
   readyToolSurface: ReadyToolSurfaceRef
   readyTurnToolAuthorization: ReadyTurnToolAuthorizationRef
   readyToolHostIdentity: ReadyToolHostIdentity
   externalReadSlice?: PreparedCodexExternalReadSlice
   resourceAuthorities?: PreparedCodexResourceAuthority[]
+  outputContract?: CodexOutputContract
   browserPageRef?: NonNullable<TrustedRequestEnvironment['browserPageRef']>
   productSurfaceTargets?: {
     rssItemId?: string | null
@@ -78,11 +125,7 @@ export type PreparedCodexProductRun = {
     calendarWindow?: { start: string; end: string; calendarId?: string } | null
     widgetId?: string | null
   }
-  productBudgetSeed: {
-    maxIterations: number
-    maxToolCalls: number
-    maxParallelToolGroups: number
-  }
+  productBudgetSeed: CodexProductBudgetSeed
   neutralProjectionSeed: {
     phase: 'planning'
     taskTitle: '正在理解需求'
@@ -107,6 +150,7 @@ export type CodexProductRunPreparationInput = {
   resourceAdditionalContext: ResourceVersionReference[]
   currentDocumentAnchor?: CodexCurrentDocumentAnchor | null
   actionAuthorizationMode?: ActionAuthorizationMode
+  readyMemorySnapshot: ReadyMemorySnapshot
   readyToolSurface: ReadyToolSurfaceRef
   readyTurnToolAuthorization: ReadyTurnToolAuthorizationRef
   authorizationOwnerId: string
@@ -119,6 +163,13 @@ export type CodexProductRunPreparationInput = {
     maxIterations: number
     maxToolCalls: number
     maxParallelToolGroups: number
+  }
+  explicitRetry?: {
+    predecessorRunId: string
+    historyParityEvidenceDigest: string
+    currentThreadReadEvidenceDigest: string
+    continuationContractDigest: string
+    artifactSources: CodexRetryArtifactSource[]
   }
 }
 
@@ -139,6 +190,45 @@ const budgetSeedSchema = z.object({
   maxToolCalls: z.number().int().nonnegative(),
   maxParallelToolGroups: z.number().int().nonnegative(),
 }).strict()
+const productBudgetSeedSchema = budgetSeedSchema.extend({
+  lanes: z.object({
+    ordinary: budgetSeedSchema,
+    delivery: z.object({
+      maxIterations: z.number().int().nonnegative(),
+      maxToolCalls: z.number().int().nonnegative(),
+      maxParallelToolGroups: z.number().int().nonnegative(),
+    }).strict(),
+    final: z.object({ maxIterations: z.literal(1) }).strict(),
+  }).strict(),
+}).strict()
+const outputContractSchema = z.object({
+  contract: z.literal('codex_output_contract_v1'),
+  destination: z.object({
+    logicalResourceId: nonEmptyString,
+    path: nonEmptyString,
+    currentVersion: nonEmptyString,
+    currentDigest: nonEmptyString,
+    policyEpoch: z.number().int().positive(),
+    directoryIdentity: z.object({
+      device: nonEmptyString,
+      inode: nonEmptyString,
+      mode: z.number().int().nonnegative(),
+      mtimeMs: z.number().nonnegative(),
+    }).strict(),
+  }).strict(),
+  activation: z.literal('pending_confirmation'),
+  activationPredicateDigest: nonEmptyString,
+  maxExpectedOutputs: z.literal(8),
+  targetPolicy: z.literal('create_only'),
+}).strict()
+const retryArtifactSourceSchema = z.object({
+  sourceReadyRunId: nonEmptyString,
+  relativePath: nonEmptyString,
+  logicalArtifactRef: nonEmptyString,
+  version: z.string().regex(/^sha256:[a-f0-9]{64}$/),
+  sha256: z.string().regex(/^[a-f0-9]{64}$/),
+  state: z.enum(['staged', 'exported', 'verified', 'indeterminate']),
+}).strict()
 const readyToolSurfaceSchema = z.custom<ReadyToolSurface>((value) => {
   try {
     assertReadyToolSurface(value as ReadyToolSurface)
@@ -150,6 +240,14 @@ const readyToolSurfaceSchema = z.custom<ReadyToolSurface>((value) => {
 const readyTurnToolAuthorizationSchema = z.custom<ReadyTurnToolAuthorization>((value) => {
   try {
     assertReadyTurnToolAuthorization(value as ReadyTurnToolAuthorization)
+    return true
+  } catch {
+    return false
+  }
+})
+const readyMemorySnapshotSchema = z.custom<ReadyMemorySnapshot>((value) => {
+  try {
+    assertReadyMemorySnapshot(value)
     return true
   } catch {
     return false
@@ -172,7 +270,7 @@ const browserPageRefSchema = z.object({
 }).strict()
 const userIngressPreparationSchema = z.object({
   kind: z.literal('user_ingress'),
-  attemptKind: z.literal('user_ingress'),
+  attemptKind: z.enum(['user_ingress', 'explicit_retry']),
   originUserMessageId: nonEmptyString,
   canonicalCurrentInputRef: z.object({
     messageId: nonEmptyString,
@@ -184,6 +282,11 @@ const userIngressPreparationSchema = z.object({
   }).strict(),
   resourceAdditionalContext: z.array(resourceRefSchema),
   currentDocumentAnchor: codexCurrentDocumentAnchorSchema.nullable().optional(),
+  predecessorRunId: nonEmptyString.optional(),
+  historyParityEvidenceDigest: nonEmptyString.optional(),
+  currentThreadReadEvidenceDigest: nonEmptyString.optional(),
+  continuationContractDigest: nonEmptyString.optional(),
+  artifactSources: z.array(retryArtifactSourceSchema).max(8).optional(),
 }).strict()
 const preparationInputSchema = z.object({
   taskId: nonEmptyString,
@@ -205,6 +308,7 @@ const preparationInputSchema = z.object({
   resourceAdditionalContext: z.array(resourceRefSchema),
   currentDocumentAnchor: codexCurrentDocumentAnchorSchema.nullable().optional(),
   actionAuthorizationMode: z.enum(['ask', 'auto', 'full']).optional(),
+  readyMemorySnapshot: readyMemorySnapshotSchema,
   readyToolSurface: readyToolSurfaceSchema,
   readyTurnToolAuthorization: readyTurnToolAuthorizationSchema,
   authorizationOwnerId: nonEmptyString,
@@ -224,6 +328,13 @@ const preparationInputSchema = z.object({
     widgetId: z.string().nullable().optional(),
   }).strict().optional(),
   productBudgetSeed: budgetSeedSchema,
+  explicitRetry: z.object({
+    predecessorRunId: nonEmptyString,
+    historyParityEvidenceDigest: nonEmptyString,
+    currentThreadReadEvidenceDigest: nonEmptyString,
+    continuationContractDigest: nonEmptyString,
+    artifactSources: z.array(retryArtifactSourceSchema).max(8),
+  }).strict().optional(),
 }).strict()
 const preparedRunSchema = z.object({
   preparationContract: z.literal('codex_product_run_e1'),
@@ -242,6 +353,7 @@ const preparedRunSchema = z.object({
   resourceAnchorDigest: nonEmptyString,
   recoveredContextDigest: z.null(),
   actionAuthorizationMode: z.enum(['ask', 'auto', 'full']).optional(),
+  readyMemorySnapshot: readyMemorySnapshotSchema,
   readyToolSurface: readyToolSurfaceSchema,
   readyTurnToolAuthorization: readyTurnToolAuthorizationSchema,
   readyToolHostIdentity: z.object({
@@ -252,6 +364,7 @@ const preparedRunSchema = z.object({
   }).strict(),
   externalReadSlice: preparedExternalReadSliceSchema.optional(),
   resourceAuthorities: z.array(preparedCodexResourceAuthoritySchema).optional(),
+  outputContract: outputContractSchema.optional(),
   browserPageRef: browserPageRefSchema.optional(),
   productSurfaceTargets: z.object({
     rssItemId: z.string().nullable().optional(),
@@ -264,7 +377,7 @@ const preparedRunSchema = z.object({
     }).strict().nullable().optional(),
     widgetId: z.string().nullable().optional(),
   }).strict().optional(),
-  productBudgetSeed: budgetSeedSchema,
+  productBudgetSeed: productBudgetSeedSchema,
   neutralProjectionSeed: z.object({
     phase: z.literal('planning'),
     taskTitle: z.literal('正在理解需求'),
@@ -276,15 +389,83 @@ function digest(value: unknown): string {
   return createHash('sha256').update(JSON.stringify(value)).digest('hex')
 }
 
+function createOutputContract(
+  authorities: readonly PreparedCodexResourceAuthority[],
+): CodexOutputContract | null {
+  const directories = authorities.filter((authority) => authority.kind === 'local_directory')
+  if (directories.length !== 1) return null
+  const destination = directories[0]
+  if (!destination.directoryIdentity) return null
+  const frozenDestination = {
+    logicalResourceId: destination.logicalResourceId,
+    path: destination.path,
+    currentVersion: destination.currentVersion,
+    currentDigest: destination.currentDigest,
+    policyEpoch: destination.policyEpoch,
+    directoryIdentity: { ...destination.directoryIdentity },
+  }
+  return Object.freeze({
+    contract: 'codex_output_contract_v1',
+    destination: Object.freeze({
+      ...frozenDestination,
+      directoryIdentity: Object.freeze(frozenDestination.directoryIdentity),
+    }),
+    activation: 'pending_confirmation',
+    activationPredicateDigest: digest({
+      contract: 'codex_folder_output_activation_v1',
+      destination: frozenDestination,
+      declarationTool: 'declare_completion_criteria',
+      requiredPriorResultDelivery: true,
+    }),
+    maxExpectedOutputs: 8,
+    targetPolicy: 'create_only',
+  })
+}
+
+function createProductBudgetSeed(
+  ordinary: CodexProductRunPreparationInput['productBudgetSeed'],
+  hasOutputContract: boolean,
+): CodexProductBudgetSeed {
+  const delivery = hasOutputContract
+    ? { maxIterations: 18, maxToolCalls: 25, maxParallelToolGroups: 0 }
+    : { maxIterations: 0, maxToolCalls: 0, maxParallelToolGroups: 0 }
+  return Object.freeze({
+    maxIterations: ordinary.maxIterations + delivery.maxIterations + 1,
+    maxToolCalls: ordinary.maxToolCalls + delivery.maxToolCalls,
+    maxParallelToolGroups: ordinary.maxParallelToolGroups,
+    lanes: Object.freeze({
+      ordinary: Object.freeze({ ...ordinary }),
+      delivery: Object.freeze(delivery),
+      final: Object.freeze({ maxIterations: 1 as const }),
+    }),
+  })
+}
+
 export function isPreparedCodexProductRun(value: unknown): value is PreparedCodexProductRun {
   const parsed = preparedRunSchema.safeParse(value)
   if (!parsed.success) return false
   const prepared = parsed.data
+  const directoryAuthorities = (prepared.resourceAuthorities ?? [])
+    .filter((authority) => authority.kind === 'local_directory')
+  const expectedOutputContract = createOutputContract(prepared.resourceAuthorities ?? [])
   return prepared.conversationAlias.aliasId === prepared.readyToolHostIdentity.aliasId
     && prepared.readyTurnToolAuthorization.allowedToolNames.every(
       (toolName) => prepared.readyToolSurface.toolNames.includes(toolName),
     )
     && prepared.ingress.originUserMessageId === prepared.ingress.canonicalCurrentInputRef.messageId
+    && (prepared.ingress.attemptKind === 'explicit_retry'
+      ? Boolean(
+          prepared.ingress.predecessorRunId
+          && prepared.ingress.historyParityEvidenceDigest
+          && prepared.ingress.currentThreadReadEvidenceDigest
+          && prepared.ingress.continuationContractDigest
+          && Array.isArray(prepared.ingress.artifactSources),
+        )
+      : prepared.ingress.predecessorRunId === undefined
+        && prepared.ingress.historyParityEvidenceDigest === undefined
+        && prepared.ingress.currentThreadReadEvidenceDigest === undefined
+        && prepared.ingress.continuationContractDigest === undefined
+        && prepared.ingress.artifactSources === undefined)
     && resourceReferenceSetsMatch(
       prepared.ingress.explicitResourceEnvelope.resourceRefs,
       prepared.ingress.resourceAdditionalContext,
@@ -303,6 +484,15 @@ export function isPreparedCodexProductRun(value: unknown): value is PreparedCode
             : {}),
           ...(prepared.browserPageRef ? { browserPageRef: prepared.browserPageRef } : {}),
         })
+    && directoryAuthorities.every((authority) => authority.directoryIdentity != null)
+    && JSON.stringify(prepared.outputContract ?? null) === JSON.stringify(expectedOutputContract)
+    && prepared.productBudgetSeed.maxIterations
+      === prepared.productBudgetSeed.lanes.ordinary.maxIterations
+        + prepared.productBudgetSeed.lanes.delivery.maxIterations
+        + prepared.productBudgetSeed.lanes.final.maxIterations
+    && prepared.productBudgetSeed.maxToolCalls
+      === prepared.productBudgetSeed.lanes.ordinary.maxToolCalls
+        + prepared.productBudgetSeed.lanes.delivery.maxToolCalls
 }
 
 export function preparedCodexProductRunMatchesIngress(
@@ -340,6 +530,9 @@ export class CodexProductRunPreparer {
     if (!input.originUserMessageId) {
       return { ok: false, code: 'invalid_product_ingress' }
     }
+    if (input.explicitRetry && input.explicitRetry.predecessorRunId === input.runId) {
+      return { ok: false, code: 'invalid_product_ingress' }
+    }
     if (!resourceReferenceSetsMatch(
       input.explicitResourceEnvelope.resourceRefs,
       input.resourceAdditionalContext,
@@ -354,6 +547,12 @@ export class CodexProductRunPreparer {
     const currentDocumentAnchor = input.currentDocumentAnchor ?? null
     const externalReadSlice = input.externalReadSlice ?? null
     const resourceAuthorities = input.resourceAuthorities ?? []
+    const outputContract = createOutputContract(resourceAuthorities)
+    if (resourceAuthorities.some((authority) => (
+      authority.kind === 'local_directory' && !authority.directoryIdentity
+    ))) {
+      return { ok: false, code: 'invalid_product_ingress' }
+    }
     if (currentDocumentAnchor) {
       const matchingReference = input.resourceAdditionalContext.find(
         (reference) => reference.logicalResourceId === currentDocumentAnchor.logicalResourceId,
@@ -385,20 +584,27 @@ export class CodexProductRunPreparer {
       const matchingReference = input.resourceAdditionalContext.find(
         (reference) => reference.logicalResourceId === authority.logicalResourceId,
       )
+      const hasAuthorizedConsumer = authority.allowedToolNames.some(
+        (toolName) => input.readyTurnToolAuthorization.allowedToolNames.includes(toolName),
+      ) || (
+        input.readyTurnToolAuthorization.allowedToolNames.includes('tag_forge_prepare_batch')
+        && (
+          authority.kind === 'local_directory'
+          || (authority.kind === 'local_file' && authority.path.toLowerCase().endsWith('.md'))
+        )
+      )
       if (!matchingReference
         || matchingReference.currentVersion !== authority.currentVersion
         || matchingReference.currentDigest !== authority.currentDigest
         || matchingReference.policyEpoch !== authority.policyEpoch
-        || authority.allowedToolNames.some(
-          (toolName) => !input.readyTurnToolAuthorization.allowedToolNames.includes(toolName),
-        )) {
+        || !hasAuthorizedConsumer) {
         return { ok: false, code: 'invalid_product_ingress' }
       }
     }
 
     const ingress: CodexTurnIngress = {
           kind: 'user_ingress',
-          attemptKind: 'user_ingress',
+          attemptKind: input.explicitRetry ? 'explicit_retry' : 'user_ingress',
           originUserMessageId: input.originUserMessageId as string,
           canonicalCurrentInputRef: {
             messageId: input.originUserMessageId as string,
@@ -407,6 +613,7 @@ export class CodexProductRunPreparer {
           explicitResourceEnvelope: input.explicitResourceEnvelope,
           resourceAdditionalContext: input.resourceAdditionalContext,
           ...(currentDocumentAnchor ? { currentDocumentAnchor } : {}),
+          ...(input.explicitRetry ? input.explicitRetry : {}),
         }
 
     return {
@@ -437,6 +644,7 @@ export class CodexProductRunPreparer {
             }),
         recoveredContextDigest: null,
         actionAuthorizationMode: parseActionAuthorizationMode(input.actionAuthorizationMode),
+        readyMemorySnapshot: input.readyMemorySnapshot,
         readyToolSurface: input.readyToolSurface,
         readyTurnToolAuthorization: input.readyTurnToolAuthorization,
         readyToolHostIdentity: {
@@ -447,9 +655,10 @@ export class CodexProductRunPreparer {
         },
         ...(externalReadSlice ? { externalReadSlice } : {}),
         ...(resourceAuthorities.length > 0 ? { resourceAuthorities } : {}),
+        ...(outputContract ? { outputContract } : {}),
         ...(input.browserPageRef ? { browserPageRef: input.browserPageRef } : {}),
         ...(input.productSurfaceTargets ? { productSurfaceTargets: input.productSurfaceTargets } : {}),
-        productBudgetSeed: input.productBudgetSeed,
+        productBudgetSeed: createProductBudgetSeed(input.productBudgetSeed, outputContract !== null),
         neutralProjectionSeed: {
           phase: 'planning',
           taskTitle: '正在理解需求',

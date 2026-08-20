@@ -115,8 +115,8 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
     })
 
     const cleanupStatus = window.electronAPI.agent.onStatusChange((data) => {
-      const { agents, setAgents } = store.getState()
-      setAgents(agents.map((agent: Agent) => agent.name === data.agent ? { ...agent, status: data.status as Agent['status'] } : agent))
+      if (data.agent !== 'butler') return
+      store.getState().setReadyStatus(data.status as Agent['status'])
     })
 
     const cleanupError = window.electronAPI.agent.onError((data) => {
@@ -167,9 +167,6 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
           executionKind: previous?.executionKind || null,
           jobId: previous?.jobId || null,
           artifactRefs: previous?.artifactRefs || [],
-          memoryRefs: previous?.memoryRefs || [],
-          triggerHits: previous?.triggerHits || [],
-          contextBudget: previous?.contextBudget || null,
           ownerResourceId: previous?.ownerResourceId || null,
           lastEvidenceAt: previous?.lastEvidenceAt || null,
           blockedReason: previous?.blockedReason || null,
@@ -192,7 +189,6 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
           resumableActions: previous?.resumableActions || [],
           recentArtifacts: previous?.recentArtifacts || [],
           taskContinuation: previous?.taskContinuation || null,
-          memoryCapture: previous?.memoryCapture || null,
           error: previous?.error || null,
           softError: {
             message: data.error,
@@ -258,9 +254,6 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
         executionKind: previous?.executionKind || null,
         jobId: previous?.jobId || null,
         artifactRefs: previous?.artifactRefs || [],
-        memoryRefs: previous?.memoryRefs || [],
-        triggerHits: previous?.triggerHits || [],
-        contextBudget: previous?.contextBudget || null,
         ownerResourceId: previous?.ownerResourceId || null,
         lastEvidenceAt: previous?.lastEvidenceAt || null,
         blockedReason: friendly.friendlyMessage,
@@ -283,7 +276,6 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
         resumableActions: previous?.resumableActions || [],
         recentArtifacts: previous?.recentArtifacts || [],
         taskContinuation: previous?.taskContinuation || null,
-        memoryCapture: previous?.memoryCapture || null,
         error: friendly.friendlyMessage,
         softError: null,
       }))
@@ -344,9 +336,6 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
             executionKind: previous?.executionKind || null,
             jobId: previous?.jobId || null,
             artifactRefs: previous?.artifactRefs || [],
-            memoryRefs: previous?.memoryRefs || [],
-            triggerHits: previous?.triggerHits || [],
-            contextBudget: previous?.contextBudget || null,
             ownerResourceId: previous?.ownerResourceId || null,
             lastEvidenceAt: previous?.lastEvidenceAt || null,
             blockedReason: error instanceof Error ? error.message : String(error),
@@ -369,7 +358,6 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
             resumableActions: previous?.resumableActions || [],
             recentArtifacts: previous?.recentArtifacts || [],
             taskContinuation: previous?.taskContinuation || null,
-            memoryCapture: previous?.memoryCapture || null,
             error: error instanceof Error ? error.message : String(error),
           }))
         })
@@ -666,9 +654,6 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
                 executionKind: previous?.executionKind || null,
                 jobId: previous?.jobId || null,
                 artifactRefs: previous?.artifactRefs || [],
-                memoryRefs: previous?.memoryRefs || [],
-                triggerHits: previous?.triggerHits || [],
-                contextBudget: previous?.contextBudget || null,
                 ownerResourceId: previous?.ownerResourceId || null,
                 lastEvidenceAt: previous?.lastEvidenceAt || null,
                 blockedReason: error instanceof Error ? error.message : String(error),
@@ -691,7 +676,6 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
                 resumableActions: previous?.resumableActions || [],
                 recentArtifacts: previous?.recentArtifacts || [],
                 taskContinuation: previous?.taskContinuation || null,
-                memoryCapture: previous?.memoryCapture || null,
                 error: error instanceof Error ? error.message : String(error),
               }))
             }

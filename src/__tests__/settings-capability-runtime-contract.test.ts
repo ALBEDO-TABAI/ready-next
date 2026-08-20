@@ -33,7 +33,7 @@ test('settings capability status is sourced from a main-process runtime snapshot
     /await refreshRuntimeSummary\(\)\s*await refreshCapabilityRuntimeSnapshot\(\)/,
   )
 
-  assert.match(preload, /getCapabilityRuntimeSnapshot:\s*\(config\?: unknown\) => ipcRenderer\.invoke\('agent:getCapabilityRuntimeSnapshot', config\)/)
+  assert.match(preload, /getCapabilityRuntimeSnapshot:\s*\(config\?: unknown\) => invokeAgentRuntime\('agent:getCapabilityRuntimeSnapshot', config\)/)
   assert.match(rendererTypes, /getCapabilityRuntimeSnapshot: \(config\?: unknown\) => Promise<IPCResponse<CapabilityRuntimeSnapshotData>>/)
   assert.match(agentIPC, /ipcMain\.handle\('agent:getCapabilityRuntimeSnapshot'/)
   assert.match(runtime, /async getCapabilityRuntimeSnapshot\(configOverride\?: AIModelConfig\)/)

@@ -246,6 +246,48 @@
       "owner": "Specialist live-control retirement contract",
       "expiresAt": "2027-12-31",
       "addedBy": "2026-08-12 P012 retirement closure"
+    },
+    {
+      "path": "src/main/modules/claude-bridge/ipc/belief-card-group.ts",
+      "reason": "Intentional negative-existence fixture in the old memory-control retirement gate; the deleted belief-card IPC surface must stay absent.",
+      "owner": "Single Ready and old memory retirement contract",
+      "expiresAt": "2027-12-31",
+      "addedBy": "2026-08-20 single Ready identity cleanup"
+    },
+    {
+      "path": "src/renderer/components/agent-system/AgentSettingsHub.tsx",
+      "reason": "Intentional negative-existence fixture in the single Ready retirement gates; the deleted Agent settings hub must not return.",
+      "owner": "Single Ready and specialist retirement contract",
+      "expiresAt": "2027-12-31",
+      "addedBy": "2026-08-20 single Ready identity cleanup"
+    },
+    {
+      "path": "src/renderer/components/agent-system/studio/AgentSystemStudioView.tsx",
+      "reason": "Intentional negative-existence fixture in the single Ready retirement gates; the deleted specialist studio must not return.",
+      "owner": "Single Ready and specialist retirement contract",
+      "expiresAt": "2027-12-31",
+      "addedBy": "2026-08-20 single Ready identity cleanup"
+    },
+    {
+      "path": "src/main/modules/claude-bridge/ipc/agent-specialist-blueprint-group.ts",
+      "reason": "Intentional negative-existence fixture in the specialist retirement gate; the deleted blueprint IPC surface must stay absent.",
+      "owner": "Single Ready and specialist retirement contract",
+      "expiresAt": "2027-12-31",
+      "addedBy": "2026-08-20 single Ready identity cleanup"
+    },
+    {
+      "path": "src/main/modules/claude-bridge/ipc/agent-registry-group.ts",
+      "reason": "Intentional negative-existence fixture in the specialist retirement gate; the deleted Agent registry IPC surface must stay absent.",
+      "owner": "Single Ready and specialist retirement contract",
+      "expiresAt": "2027-12-31",
+      "addedBy": "2026-08-20 single Ready identity cleanup"
+    },
+    {
+      "path": "src/main/modules/repositories/agent-personality-repository.ts",
+      "reason": "Intentional negative-existence fixture in the old persona retirement gate; the deleted personality truth reader must stay absent.",
+      "owner": "Single Ready and old memory retirement contract",
+      "expiresAt": "2027-12-31",
+      "addedBy": "2026-08-20 legacy memory retirement"
     }
   ]
 }

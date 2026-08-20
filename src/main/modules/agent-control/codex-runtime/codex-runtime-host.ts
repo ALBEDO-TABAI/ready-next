@@ -508,6 +508,9 @@ const supportedNativeIsolationConfigContract: CodexRuntimeContracts['nativeIsola
     'features.apps',
     'features.plugins',
     'features.skill_search',
+    'features.memories',
+    'memories.generate_memories',
+    'memories.use_memories',
   ],
   provider: {
     id: 'ready_gateway',
@@ -586,6 +589,11 @@ function renderIsolationConfig(input: {
     'apps = false',
     'plugins = false',
     'skill_search = false',
+    'memories = false',
+    '',
+    '[memories]',
+    'generate_memories = false',
+    'use_memories = false',
     '',
   ].join('\n')
 }

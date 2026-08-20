@@ -13,6 +13,7 @@ import {
 } from '../modules/agent/composer-authority'
 import {
   type IngressAdmittedEvent,
+  type ProductTurnReceipt,
 } from '../../shared/ipc-contracts/agent-runtime'
 import type { LifecycleOperationProjection } from '../../shared/ipc-contracts/agent-lifecycle-snapshot'
 import type { AgentRuntimeReadinessSnapshot } from '../../shared/ipc-contracts/agent-runtime-readiness'
@@ -29,7 +30,6 @@ import {
   pendingIngressOriginMatches,
   sendAgentMessage,
 } from './agent-send-orchestration'
-import type { AgentRegistryListItem } from './agent-store-helpers'
 import {
   activeSessionKey,
   cloneFallbackAgents,
@@ -40,7 +40,6 @@ import {
   isSameAttachmentPoolEntry,
   lookupSessionByConversation,
   makeEmptySessionSlice,
-  mapRegistryToAgents,
   mapScopeToConversation,
   mirrorFromSessionSlice,
   normalizeSessionSlice,
@@ -60,6 +59,10 @@ import {
   parseActionAuthorizationMode,
   type ActionAuthorizationMode,
 } from '../../shared/action-authorization-mode'
+import {
+  applyProductTurnReceipt,
+  toolTraceFromProductReceipt,
+} from '../modules/agent/productTurnReceipt'
 
 export type {
   Agent,
@@ -516,26 +519,19 @@ export const useAgent = create<AgentState>((set, get) => ({
   sessionOrder: [],
   taskDisclosureState: {},
 
-  setAgents: (agents) => set({ agents }),
+  setReadyStatus: (status) => set({
+    agents: cloneFallbackAgents().map((agent) => ({ ...agent, status })),
+  }),
 
   reloadAgents: async () => {
-    let registryAgents: AgentRegistryListItem[] = []
-    try {
-      const api = typeof window !== 'undefined' ? window.electronAPI?.agent : undefined
-      const result = await api?.listRegistry?.()
-      if (result?.success && Array.isArray(result.data)) {
-        registryAgents = result.data
-      }
-    } catch {
-      // silent-catch: registry IPC failure degrades to an empty list until the next registry-changed reload
-      registryAgents = []
-    }
-
     set((current) => {
-      const resolved = mapRegistryToAgents(registryAgents, current.agents, current.currentAgent)
-      if (resolved.currentAgent === current.currentAgent) return resolved
+      const agents = cloneFallbackAgents()
+      if (current.currentAgent === 'butler'
+        && current.agents.length === 1
+        && current.agents[0]?.name === 'butler') return { agents }
       return {
-        ...resolved,
+        agents,
+        currentAgent: 'butler',
         attachments: [],
         filePool: [],
         activeAttachmentPreview: null,
@@ -545,25 +541,6 @@ export const useAgent = create<AgentState>((set, get) => ({
       }
     })
   },
-
-  selectAgent: (name) => set((state) => {
-    if (state.currentAgent === name) return state
-    return {
-      currentAgent: name,
-      attachments: [],
-      filePool: [],
-      activeAttachmentPreview: null,
-      pendingContinuationIntent: null,
-      pendingContinuationDraftAnchor: null,
-      composerAuthorityRevision: state.composerAuthorityRevision + 1,
-    }
-  }),
-
-  toggleAgentSelection: (name) => set((state) => ({
-    agents: state.agents.map(a =>
-      a.name === name ? { ...a, selected: !a.selected } : a
-    )
-  })),
 
   addMessage: (message) => set((state) => (
     withActiveSessionMessagesMirror(state, [...state.messages, message])
@@ -707,26 +684,27 @@ export const useAgent = create<AgentState>((set, get) => ({
 
   // Session tab actions commit only after the matching Main lifecycle promise.
 
-  setActiveSessionId: (id) => set((state) => {
-    // Defensive: a tab strip click should only ever target a session that
-    // currently exists in sessionOrder. If the id is unknown (e.g. it was
-    // closed concurrently), do nothing — the SessionTabs renderer will
-    // re-render with the up-to-date list on the next frame.
-    if (!state.sessionOrder.includes(id)) return state
-    if (state.activeSessionId === id) return state
-    const slice = normalizeSessionSlice(state.sessions[id])
-    return {
-      activeSessionId: id,
-      ...mirrorFromSessionSlice(state, slice),
-      attachments: [],
-      filePool: [],
-      activeAttachmentPreview: null,
-      pendingContinuationIntent: null,
-      pendingContinuationDraftAnchor: null,
-      scopeAuthorityRevision: state.scopeAuthorityRevision + 1,
-      composerAuthorityRevision: state.composerAuthorityRevision + 1,
-    }
-  }),
+  setActiveSessionId: (id) => {
+    let scopeIdToLoad: string | null = null
+    set((state) => {
+      if (!state.sessionOrder.includes(id)) return state
+      if (state.activeSessionId === id) return state
+      const slice = normalizeSessionSlice(state.sessions[id])
+      scopeIdToLoad = slice.conversationId
+      return {
+        activeSessionId: id,
+        ...mirrorFromSessionSlice(state, slice),
+        attachments: [],
+        filePool: [],
+        activeAttachmentPreview: null,
+        pendingContinuationIntent: null,
+        pendingContinuationDraftAnchor: null,
+        scopeAuthorityRevision: state.scopeAuthorityRevision + 1,
+        composerAuthorityRevision: state.composerAuthorityRevision + 1,
+      }
+    })
+    if (scopeIdToLoad) void get().loadScope(scopeIdToLoad)
+  },
 
   createNewSession: async () => {
     const api = typeof window !== 'undefined' ? window.electronAPI?.agent : null
@@ -734,10 +712,9 @@ export const useAgent = create<AgentState>((set, get) => ({
     const finishCreation = beginSessionCreation()
     try {
       const state = get()
-      const requestedAgent = state.currentAgent
       const composerAuthority = captureComposerAuthority(state)
       const requestRevision = ++createSessionRequestRevision
-      const result = await api.createSession({ agentId: requestedAgent })
+      const result = await api.createSession({})
       if (!result.ok) return result
 
       const id = generateSessionId()
@@ -745,8 +722,8 @@ export const useAgent = create<AgentState>((set, get) => ({
         id: result.aliasId,
         aliasGeneration: result.aliasGeneration,
         messageVisibilityEpoch: 0,
-        agent: requestedAgent,
-        activeAgentId: requestedAgent,
+        agent: 'butler',
+        activeAgentId: 'butler',
         handoffGeneration: 0,
         title: '新对话',
         sourceKind: 'local',
@@ -1250,8 +1227,7 @@ export const useAgent = create<AgentState>((set, get) => ({
       const requestRevision = get().scopeListRequestRevision + 1
       const authorityRevision = get().scopeAuthorityRevision
       set({ scopeListRequestRevision: requestRevision })
-      const { currentAgent } = get()
-      const result = await window.electronAPI.agent.listConversationScopes(currentAgent)
+      const result = await window.electronAPI.agent.listConversationScopes()
       if (!result.success || !Array.isArray(result.data)) return false
       const currentAuthority = get()
       if (currentAuthority.scopeListRequestRevision !== requestRevision
@@ -1390,7 +1366,7 @@ export const useAgent = create<AgentState>((set, get) => ({
           ...mirrorFromSessionSlice(stateWithScopes, nextSlice),
           scopes: reconciledScopes,
           conversations: reconciledScopes.map(mapScopeToConversation),
-          currentAgent: currentScope?.agent || state.currentAgent,
+          currentAgent: 'butler',
           scopeLiveMessages,
           scopeAuthorityRevision: state.scopeAuthorityRevision + 1,
           ...(composerInvalidated ? {
@@ -1442,7 +1418,7 @@ export const useAgent = create<AgentState>((set, get) => ({
       const scopes = get().scopes
       const scope = scopes.find((item) => item.id === scopeId) || null
       const activeRunState = getScopeRunStateForScope(get(), scopeId)
-      const messages: AgentMessage[] = result.data.map((m: { id: string; role: string; content: string; timestamp: string; meta?: Record<string, unknown> }) =>
+      let messages: AgentMessage[] = result.data.map((m: { id: string; role: string; content: string; timestamp: string; meta?: Record<string, unknown> }) =>
         rebuildAgentMessageFromRow(m, scope?.agent || get().currentAgent),
       )
       const targetSessionKey = sessionKeyForScopeId(get(), scopeId)
@@ -1481,6 +1457,47 @@ export const useAgent = create<AgentState>((set, get) => ({
           meta: { transient: true },
         })
       }
+      const terminalRunIds = messages.flatMap((message) => (
+        message.type === 'agent' && typeof message.meta?.runId === 'string'
+          ? [message.meta.runId]
+          : []
+      ))
+      let productReceipts: ProductTurnReceipt[] = []
+      if (terminalRunIds.length > 0
+        && typeof window.electronAPI.agent.readProductTurnPresentations === 'function') {
+        const receiptResult = await window.electronAPI.agent.readProductTurnPresentations(terminalRunIds)
+        if (receiptResult.success && Array.isArray(receiptResult.data)) {
+          productReceipts = receiptResult.data.filter((receipt) => receipt.readyScopeId === scopeId)
+        }
+      }
+      const receiptByRunId = new Map(productReceipts.map((receipt) => [receipt.readyRunId, receipt]))
+      messages = messages.map((message) => {
+        const runId = typeof message.meta?.runId === 'string' ? message.meta.runId : null
+        const receipt = runId ? receiptByRunId.get(runId) : null
+        return receipt
+          ? {
+              ...message,
+              meta: { ...message.meta, toolTraceSnapshot: toolTraceFromProductReceipt(receipt) },
+            }
+          : message
+      })
+      const hydratedProductReceipt = [...messages].reverse().flatMap((message) => {
+        const runId = typeof message.meta?.runId === 'string' ? message.meta.runId : null
+        const receipt = runId ? receiptByRunId.get(runId) : null
+        return receipt ? [receipt] : []
+      })[0] || null
+      const hydratedRunState = hydratedProductReceipt
+        ? applyProductTurnReceipt(
+            activeRunState || createEmptyScopeRunState({
+              scopeId,
+              agent: scope?.agent || get().currentAgent,
+              requestId: hydratedProductReceipt.readyRunId,
+            }),
+            hydratedProductReceipt,
+          )
+        : activeRunState
+      if (get().scopeAuthorityRevision !== authorityRevision
+        || get().retiredScopeIds[scopeId]) return
       set((state) => {
         const sessionKey = sessionKeyForScopeId(state, scopeId)
         const slice = normalizeSessionSlice(state.sessions[sessionKey])
@@ -1492,8 +1509,8 @@ export const useAgent = create<AgentState>((set, get) => ({
           : loadedAliasGeneration === null
             ? slice.aliasGeneration
             : Math.max(slice.aliasGeneration, loadedAliasGeneration)
-        const nextScopeRunStates = activeRunState
-          ? { ...slice.scopeRunStates, [scopeId]: activeRunState }
+        const nextScopeRunStates = hydratedRunState
+          ? { ...slice.scopeRunStates, [scopeId]: hydratedRunState }
           : slice.scopeRunStates
         const nextSlice: SessionSlice = {
           ...slice,
@@ -1502,11 +1519,13 @@ export const useAgent = create<AgentState>((set, get) => ({
           aliasGeneration,
           messageVisibilityEpoch: scope?.messageVisibilityEpoch ?? slice.messageVisibilityEpoch,
           scopeRunStates: nextScopeRunStates,
-          isStreaming: isStreamingScopeRunState(activeRunState),
-          foregroundBusy: isForegroundBusyScopeRunState(activeRunState),
-          composerLocked: isForegroundBusyScopeRunState(activeRunState),
+          isStreaming: isStreamingScopeRunState(hydratedRunState),
+          foregroundBusy: isForegroundBusyScopeRunState(hydratedRunState),
+          composerLocked: isForegroundBusyScopeRunState(hydratedRunState),
           streamingMessageId: null,
-          streamingRequestId: activeRunState?.requestId || null,
+          streamingRequestId: isStreamingScopeRunState(hydratedRunState)
+            ? hydratedRunState?.requestId || null
+            : null,
         }
         const nextScope = scope
           ? { ...scope, aliasGeneration }
@@ -1526,7 +1545,7 @@ export const useAgent = create<AgentState>((set, get) => ({
           scopes,
           conversations: scopes.map(mapScopeToConversation),
           currentScope: nextScope,
-          currentAgent: nextScope?.agent || state.currentAgent,
+          currentAgent: 'butler',
           ...(composerInvalidated ? {
             attachments: [],
             filePool: [],
@@ -1644,6 +1663,7 @@ export const useAgent = create<AgentState>((set, get) => ({
 
   sendMessage: async (content: string, options?: {
     codexExternalReadSlice?: Record<string, unknown>
+    explicitRetry?: import('../../shared/ipc-contracts/agent-runtime').SendScopedRequest['explicitRetry']
   }) => sendAgentMessage({
     get,
     set,
@@ -1863,13 +1883,6 @@ export function initAgentInteractionListeners(): () => void {
 }
 
 export function initAgentListeners(): () => void {
-  void useAgent.getState().reloadAgents()
-  const onAgentRegistryChanged = () => void useAgent.getState().reloadAgents()
-  try {
-    window.addEventListener('ready:agent-registry-changed', onAgentRegistryChanged)
-  } catch {
-    // silent-catch: ignore — tests may install a minimal global window.
-  }
   const offRuntime = agentRuntimeDriver.initAgentListeners()
   const offAgentInteraction = initAgentInteractionListeners()
   const offIngressAdmitted = window.electronAPI?.agent?.onIngressAdmitted?.((event) => {
@@ -1886,13 +1899,11 @@ export function initAgentListeners(): () => void {
         read: readRuntimeReady,
         subscribe: onRuntimeReady,
         hydrate: async () => {
-          await useAgent.getState().reloadAgents()
           await hydrateAgentScopesAfterRuntimeReady()
         },
       })
     : () => {}
   return () => {
-    try { window.removeEventListener('ready:agent-registry-changed', onAgentRegistryChanged) } catch { /* ignore */ }
     try { offRuntime() } catch { /* ignore */ }
     try { offAgentInteraction() } catch { /* ignore */ }
     try { offIngressAdmitted() } catch { /* ignore */ }

@@ -593,7 +593,6 @@ export async function finalizeAgentSdkPreparedTurnResult(
         {
           runMetaRepository: host.getRunMetaRepositoryForFinalize(),
           taskProjectionStore: host.runtime?.getTaskProjectionStoreForFinalize?.() ?? null,
-          learnFromCheckIn: (input) => host.learnSiteCardsFromCheckIn(input),
           commitCanonicalCoreCloseout: host.runtime
             ? (input) => host.runtime!.commitCanonicalCoreCloseout(input)
             : undefined,

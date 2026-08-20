@@ -1,11 +1,7 @@
 import type {
   AgentArtifact,
-  AgentContextBudget,
-  AgentMemoryRef,
   AgentModuleKind,
-  AgentTriggerHit,
   ModuleExecutionKind,
-  ScopeRunMemoryCapture,
   ScopeRunExecutionDiagnostics,
   ScopeRunResumableAction,
   ScopeRunSkillProgress,
@@ -225,38 +221,6 @@ export function createAgentArtifact(
         ? (input.meta as Record<string, unknown>)
         : undefined
   }
-}
-
-function mergeMemoryRefs(
-  previous: AgentMemoryRef[] | undefined,
-  nextRefs: AgentMemoryRef[] | undefined
-): AgentMemoryRef[] {
-  const merged = [...(previous || [])]
-  for (const ref of nextRefs || []) {
-    const duplicate = merged.find(
-      (item) =>
-        item.id === ref.id ||
-        (item.path &&
-          ref.path &&
-          item.path === ref.path &&
-          item.layer === ref.layer &&
-          item.sourceType === ref.sourceType)
-    )
-    if (!duplicate) merged.push(ref)
-  }
-  return merged
-}
-
-function mergeTriggerHits(
-  previous: AgentTriggerHit[] | undefined,
-  nextHits: AgentTriggerHit[] | undefined
-): AgentTriggerHit[] {
-  const merged = [...(previous || [])]
-  for (const hit of nextHits || []) {
-    const duplicate = merged.find((item) => item.id === hit.id)
-    if (!duplicate) merged.push(hit)
-  }
-  return merged
 }
 
 function parseContextUsage(input: unknown): ContextUsageSnapshot | null {
@@ -499,37 +463,6 @@ function buildRecentArtifacts(artifacts: AgentArtifact[] | undefined): AgentArti
   return (artifacts || []).slice(-4)
 }
 
-function parseMemoryCapture(input: unknown): ScopeRunMemoryCapture | null {
-  if (!input || typeof input !== 'object') return null
-  const record = input as Record<string, unknown>
-  const items = Array.isArray(record.items)
-    ? (record.items
-        .map((item) => {
-          if (!item || typeof item !== 'object') return null
-          const value = item as Record<string, unknown>
-          const memoryId = String(value.memoryId || '').trim()
-          const category = String(value.category || '').trim()
-          const title = String(value.title || '').trim()
-          if (!memoryId || !title || (category !== 'user_preference' && category !== 'summary'))
-            return null
-          return {
-            memoryId,
-            category,
-            title,
-            summary: typeof value.summary === 'string' ? value.summary : null
-          }
-        })
-        .filter(Boolean) as ScopeRunMemoryCapture['items'])
-    : []
-  if (items.length === 0) return null
-  return {
-    status: record.status === 'dismissed' || record.status === 'reverted' ? record.status : 'ready',
-    createdAt: typeof record.createdAt === 'string' ? record.createdAt : new Date().toISOString(),
-    note: typeof record.note === 'string' ? record.note : null,
-    items
-  }
-}
-
 function parseTaskContinuation(input: unknown): ScopeRunTaskContinuation | null {
   if (!input || typeof input !== 'object') return null
   const record = input as Record<string, unknown>
@@ -725,9 +658,6 @@ export function createEmptyScopeRunState(params: {
     executionKind: null,
     jobId: null,
     artifactRefs: [],
-    memoryRefs: [],
-    triggerHits: [],
-    contextBudget: null,
     contextUsage: null,
     ownerResourceId: null,
     lastEvidenceAt: null,
@@ -760,7 +690,6 @@ export function createEmptyScopeRunState(params: {
     resumableActions: [],
     recentArtifacts: [],
     taskContinuation: null,
-    memoryCapture: null,
     executionDiagnostics: null
   }
 }
@@ -785,12 +714,8 @@ export function deriveScopeRunStatePatch(
     resumableActions?: ScopeRunResumableAction[]
     recentArtifacts?: Array<Record<string, unknown>>
     taskContinuation?: ScopeRunTaskContinuation | Record<string, unknown> | null
-    memoryCapture?: ScopeRunMemoryCapture | Record<string, unknown> | null
     executionDiagnostics?: ScopeRunExecutionDiagnostics | Record<string, unknown> | null
     progress?: ScopeRunSkillProgress | Record<string, unknown> | null
-    memoryRefs?: AgentMemoryRef[]
-    triggerHits?: AgentTriggerHit[]
-    contextBudget?: AgentContextBudget | null
     contextUsage?: ContextUsageSnapshot | Record<string, unknown> | null
     toolEvent?: { kind: ToolTraceEvent['kind']; text: string; timestamp: string }
     activityNarration?: {
@@ -849,7 +774,6 @@ export function deriveScopeRunStatePatch(
   const hasTaskContinuationPatch = Object.prototype.hasOwnProperty.call(event, 'taskContinuation')
   const hasProgressPatch = Object.prototype.hasOwnProperty.call(event, 'progress')
   const structuredContinuation = parseTaskContinuation(event.taskContinuation)
-  const structuredMemoryCapture = parseMemoryCapture(event.memoryCapture)
   const structuredExecutionDiagnostics = parseExecutionDiagnostics(event.executionDiagnostics)
   const structuredContextUsage =
     parseContextUsage(event.contextUsage) || structuredExecutionDiagnostics?.contextUsage || null
@@ -865,7 +789,7 @@ export function deriveScopeRunStatePatch(
   // currentStepId on either a new-run boundary OR a same-run terminal tail
   // (a follow-up event arriving after previous.phase ∈ {done, error,
   // cancelled} on the same runId). Background child resume, structured
-  // event-level overrides, taskContinuation, memoryCapture, and
+  // event-level overrides, taskContinuation, and
   // executionDiagnostics are NOT affected — those legitimately survive.
   const isPreviousTerminal =
     previous?.phase === 'done'
@@ -894,9 +818,6 @@ export function deriveScopeRunStatePatch(
     executionKind: toModuleExecutionKind(event.executionKind) || previous?.executionKind || null,
     jobId: typeof event.jobId === 'string' ? event.jobId : previous?.jobId || null,
     artifactRefs: mergeArtifacts(previous?.artifactRefs, structuredArtifacts),
-    memoryRefs: mergeMemoryRefs(previous?.memoryRefs, event.memoryRefs),
-    triggerHits: mergeTriggerHits(previous?.triggerHits, event.triggerHits),
-    contextBudget: event.contextBudget || previous?.contextBudget || null,
     contextUsage: structuredContextUsage || previous?.contextUsage || null,
     ownerResourceId:
       typeof event.ownerResourceId === 'string'
@@ -979,7 +900,6 @@ export function deriveScopeRunStatePatch(
       : shouldClearStaleProgress
         ? null
         : previous?.progress || null,
-    memoryCapture: structuredMemoryCapture || previous?.memoryCapture || null,
     executionDiagnostics: structuredExecutionDiagnostics || previous?.executionDiagnostics || null
   }
 

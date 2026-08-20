@@ -22,6 +22,18 @@ export interface SkillRootSet {
 
 export type LookupSkillRoots = (skillId: string) => SkillRootSet | null
 
+export const READY_FOLDER_EXPORT_SKILL_ID = 'ready-folder-export'
+
+export function lookupHostFolderExportRoots(runId?: string | null): SkillRootSet | null {
+  const manager = getSkillsRuntimeManager()
+  const info = manager.getRuntimeInfo()
+  const safeRun = String(runId || 'session').replace(/[^a-zA-Z0-9._-]+/g, '_').slice(0, 80) || 'session'
+  const assetRoot = join(info.outputsRoot, READY_FOLDER_EXPORT_SKILL_ID)
+  const artifactRoot = join(assetRoot, safeRun)
+  mkdirSync(artifactRoot, { recursive: true })
+  return { skillId: READY_FOLDER_EXPORT_SKILL_ID, assetRoot, artifactRoot }
+}
+
 /**
  * Production resolver — reads from the live SkillsRuntimeManager. Creates
  * the artifactRoot on demand so the first write doesn't ENOENT.
@@ -29,6 +41,7 @@ export type LookupSkillRoots = (skillId: string) => SkillRootSet | null
 export const defaultLookupSkillRoots: LookupSkillRoots = (skillId) => {
   const id = typeof skillId === 'string' ? skillId.trim() : ''
   if (!id) return null
+  if (id === READY_FOLDER_EXPORT_SKILL_ID) return lookupHostFolderExportRoots()
   const manager = getSkillsRuntimeManager()
   const info = manager.getRuntimeInfo()
   const skill = manager.listSkills().find((entry) => entry.id === id)

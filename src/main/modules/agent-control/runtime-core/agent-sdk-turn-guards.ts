@@ -210,7 +210,6 @@ export function createAgentSdkTurnGuards(ctx: AgentSdkTurnGuardContext): {
       {
         runMetaRepository: host.getRunMetaRepositoryForFinalize(),
         taskProjectionStore: host.runtime?.getTaskProjectionStoreForFinalize?.() ?? null,
-        learnFromCheckIn: (input) => host.learnSiteCardsFromCheckIn(input),
         writeProjectionTerminalPatch: (projectionPatch, terminalReason, status) => {
           emitOutputForRun('', 'done', projectionPatch)
           emitStatusForRun(status, terminalReason as TurnTerminalReason)
@@ -310,7 +309,6 @@ export function createAgentSdkTurnGuards(ctx: AgentSdkTurnGuardContext): {
       {
         runMetaRepository: host.getRunMetaRepositoryForFinalize(),
         taskProjectionStore: host.runtime?.getTaskProjectionStoreForFinalize?.() ?? null,
-        learnFromCheckIn: (input) => host.learnSiteCardsFromCheckIn(input),
         writeProjectionTerminalPatch: (projectionPatch, terminalReason, status) => {
           emitOutputForRun('', 'done', projectionPatch)
           emitStatusForRun(status, terminalReason as TurnTerminalReason)

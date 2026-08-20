@@ -15,7 +15,6 @@ import {
   type TurnFeatureFlags,
 } from '../runtime-core/turn-feature-flags'
 import type { SkillToolAuthorization } from '../skills/skill-tool-authorization'
-import type { SpecialistBlueprintSourceMessageUnavailableReason } from '../../../../shared/agent-specialist-blueprint'
 
 /**
  * Phase 3 (Team T7) — derive the initial `ToolRuntimeActiveFrameContext`
@@ -66,7 +65,6 @@ export function buildToolRuntimeContext(params: {
   messageVisibilityEpoch?: number
   currentUserText?: string
   sourceMessageId?: string | null
-  sourceMessageUnavailableReason?: SpecialistBlueprintSourceMessageUnavailableReason | null
   requestEnvelope?: unknown
   runId?: string
   taskId?: string
@@ -110,7 +108,6 @@ export function buildToolRuntimeContext(params: {
     messageVisibilityEpoch: params.messageVisibilityEpoch,
     currentUserText: params.currentUserText,
     sourceMessageId: params.sourceMessageId ?? null,
-    sourceMessageUnavailableReason: params.sourceMessageUnavailableReason ?? null,
     requestEnvelope: params.requestEnvelope,
     runId: params.runId,
     taskId: params.taskId,
@@ -145,7 +142,6 @@ export function toToolExecutorContext(context: ToolRuntimeContext): ToolContext 
     messageVisibilityEpoch: context.messageVisibilityEpoch,
     currentUserText: context.currentUserText,
     sourceMessageId: context.sourceMessageId ?? null,
-    sourceMessageUnavailableReason: context.sourceMessageUnavailableReason ?? null,
     requestEnvelope: context.requestEnvelope,
     runId: context.runId,
     taskId: context.taskId,

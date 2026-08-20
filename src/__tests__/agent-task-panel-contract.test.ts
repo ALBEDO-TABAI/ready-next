@@ -30,7 +30,7 @@ test('chat panel feeds message-level task snapshots into chat messages instead o
   assert.match(viewModel, /title:\s*'计划与步骤'/)
   assert.match(viewModel, /title:\s*'执行细节'/)
   assert.match(viewModel, /title:\s*'产物'/)
-  assert.match(viewModel, /title:\s*'记忆'/)
+  assert.doesNotMatch(viewModel, /title:\s*'记忆'/)
   assert.match(store, /taskDisclosureState:/)
   assert.match(store, /setTaskSectionExpanded:/)
   assert.match(store, /toggleTaskSection:/)

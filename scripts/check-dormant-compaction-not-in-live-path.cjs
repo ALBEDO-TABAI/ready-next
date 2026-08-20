@@ -6,16 +6,13 @@ const path = require('node:path')
 
 const ROOT = process.cwd()
 const SDK_RUNTIME_REL = 'src/main/modules/agent-control/runtime-core/agent-sdk-runtime.ts'
-const PROMPT_ASSEMBLY_REL = 'src/main/modules/agent-control/prompt-assembly.ts'
 const MAIN_ROOT_REL = 'src/main'
 
 const SDK_FORBIDDEN_IMPORTS = [
   'context-compression',
 ]
 
-const CONTEXT_COMPRESSION_ALLOWED = new Set([
-  'src/main/modules/agent-control/prompt-assembly.ts',
-])
+const CONTEXT_COMPRESSION_ALLOWED = new Set()
 
 const DORMANT_COMPRESS_CONTEXT_CHANNEL_RELS = [
   'src/main/modules/agent-control/contracts/run-contracts.ts',
@@ -80,23 +77,10 @@ function check({ root = ROOT } = {}) {
   } else {
     const sdkSource = fs.readFileSync(sdkPath, 'utf8')
     const sdkImports = importedSpecifiers(sdkSource)
-    if (!sdkImports.some((spec) => spec.includes('compaction/compact-agent-input'))) {
-      errors.push('sdk_runtime_missing_compact_agent_input_import')
-    }
     for (const forbidden of SDK_FORBIDDEN_IMPORTS) {
       if (sdkImports.some((spec) => spec.includes(forbidden))) {
         errors.push(`sdk_runtime_imports_dormant_compaction:${forbidden}`)
       }
-    }
-  }
-
-  const promptPath = path.join(root, PROMPT_ASSEMBLY_REL)
-  if (!fs.existsSync(promptPath)) {
-    errors.push(`missing_prompt_assembly:${PROMPT_ASSEMBLY_REL}`)
-  } else {
-    const promptImports = importedSpecifiers(fs.readFileSync(promptPath, 'utf8'))
-    if (!promptImports.some((spec) => spec.includes('compaction/context-compression'))) {
-      errors.push('prompt_assembly_missing_context_compression_summary_import')
     }
   }
 

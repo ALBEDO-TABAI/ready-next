@@ -8,6 +8,10 @@ import { TOOL_ERROR_METRICS } from '../../agent-control/tools-runtime/tool-error
 import { ToolDomainError } from '../tool-errors'
 import { PathSandboxError, resolveWithinRoot } from './path-sandbox'
 import { defaultLookupSkillRoots, type LookupSkillRoots } from './root-resolver'
+import {
+  resolveFrozenDirectoryRef,
+  type FrozenDirectoryAlias,
+} from '../file-management-runtime'
 
 export interface ExportArtifactArgs {
   relativePath: string
@@ -19,6 +23,7 @@ export interface ExportArtifactHandlerDeps {
   skillId: string
   lookupSkillRoots?: LookupSkillRoots
   allowedExportRoots?: string[] | null
+  directoryAliases?: readonly FrozenDirectoryAlias[] | null
 }
 
 function isPathInsideRoot(targetPath: string, rootPath: string): boolean {
@@ -36,10 +41,11 @@ function assertWritableTargetPath(value: unknown, allowedRoots: string[] | null 
   if (typeof value !== 'string' || !value.trim()) {
     throw new ToolDomainError('invalid_target_path', 'targetPath must be a non-empty absolute path.')
   }
-  const targetPath = resolve(value.trim())
-  if (!isAbsolute(targetPath)) {
+  const rawTargetPath = value.trim()
+  if (!isAbsolute(rawTargetPath)) {
     throw new ToolDomainError('invalid_target_path', 'targetPath must be absolute.', { targetPath: value })
   }
+  const targetPath = resolve(rawTargetPath)
   const roots = authorizedRoots(allowedRoots)
   if (roots.length === 0 || !roots.some((root) => isPathInsideRoot(targetPath, root))) {
     throw new ToolDomainError('target_outside_workspace', 'targetPath must be inside an authorized workspace root.', { targetPath })
@@ -113,7 +119,14 @@ export async function executeExportArtifact(
   let targetPath: string
   try {
     sourcePath = resolveWithinRoot(roots.artifactRoot, args.relativePath)
-    targetPath = assertWritableTargetPath(args.targetPath, deps.allowedExportRoots)
+    const directoryRef = resolveFrozenDirectoryRef(args.targetPath, deps.directoryAliases)
+    if (directoryRef.kind === 'ambiguous') {
+      throw new ToolDomainError('selected_resource_ambiguous', 'targetPath matches more than one selected folder.')
+    }
+    targetPath = assertWritableTargetPath(
+      directoryRef.path,
+      deps.allowedExportRoots,
+    )
   } catch (error) {
     if (error instanceof PathSandboxError) {
       logAgentMetric(TOOL_ERROR_METRICS.skillPrimitiveRejected, {

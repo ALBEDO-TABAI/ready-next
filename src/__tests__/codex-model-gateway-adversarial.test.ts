@@ -5,7 +5,11 @@ import test from 'node:test'
 import {
   classifyCodexModelGatewayRequest,
   createCodexUpstreamProfileSnapshot,
+  currentTurnReadyAdditionalContext,
   digestCanonicalJson,
+  currentTurnReadyResourceReferences,
+  digestReadyAdditionalContext,
+  digestReadyResourceReferences,
   instructionTranscriptDigest,
   latestReadyResourceReferences,
   responsesToolArgumentValidators,
@@ -288,6 +292,292 @@ test('native ready-resource history is excluded from instructions and resolves o
       text: `<ready-resource:${v1.logicalResourceId}>${JSON.stringify({ ...v1, body: 'SECRET' })}</ready-resource:${v1.logicalResourceId}>`,
     }],
   }]), /gateway_resource_reference_invalid/)
+})
+
+test('native application additionalContext uses ready_resources developer tags', () => {
+  const reference = {
+    logicalResourceId: 'local-directory:folder-1',
+    currentVersion: 'v1',
+    currentDigest: 'digest-folder-1',
+    supersedesVersion: null,
+    policyEpoch: 1,
+  }
+  const input = [{
+    type: 'message',
+    role: 'developer',
+    content: [{
+      type: 'input_text',
+      text: `<ready_resources>${JSON.stringify(reference)}</ready_resources>`,
+    }],
+  }, {
+    type: 'message',
+    role: 'user',
+    content: [{ type: 'input_text', text: 'write into the folder' }],
+  }]
+  assert.deepEqual(latestReadyResourceReferences(input), [reference])
+  assert.equal(
+    digestCanonicalJson(latestReadyResourceReferences(input)),
+    digestCanonicalJson([reference]),
+  )
+  assert.equal(
+    instructionTranscriptDigest('native base', input),
+    instructionTranscriptDigest('native base', [input[1]]),
+  )
+})
+
+test('additionalContext digest ignores admission vs native emit order for multiple thin refs', () => {
+  const skill = {
+    logicalResourceId: 'skill:412ed9b2aa91fc0bddd9a842b87e6e74',
+    currentVersion: 'sha256:48024336f41b8bc9930eb747e652e0697ceda60e1e16ef4101e0d6de9959ea21',
+    currentDigest: '48024336f41b8bc9930eb747e652e0697ceda60e1e16ef4101e0d6de9959ea21',
+    supersedesVersion: null,
+    policyEpoch: 1,
+  }
+  const folder = {
+    logicalResourceId: 'local-directory:0990e072e69d96c50d49a94eafbc8105',
+    currentVersion: 'sha256:7ef187e21e7d1b001629d2893bda1afd6a9174e85543394574d1f9abb59a4533',
+    currentDigest: '7ef187e21e7d1b001629d2893bda1afd6a9174e85543394574d1f9abb59a4533',
+    supersedesVersion: null,
+    policyEpoch: 1,
+  }
+  const tagged = (value: typeof skill) => ({
+    type: 'message',
+    role: 'developer',
+    content: [{
+      type: 'input_text',
+      text: `<ready-resource:${value.logicalResourceId}>${JSON.stringify(value)}</ready-resource:${value.logicalResourceId}>`,
+    }],
+  })
+  const admissionOrder = [skill, folder]
+  const nativeEmitInput = [tagged(folder), tagged(skill), {
+    type: 'message',
+    role: 'user',
+    content: [{ type: 'input_text', text: 'use the skill on this folder' }],
+  }]
+  assert.equal(
+    digestCanonicalJson(admissionOrder),
+    '8200ac121e9ab70894c3a40396c7bf15566312f6acd6afeee5f46ea1d9d054c6',
+  )
+  assert.notEqual(
+    digestCanonicalJson(admissionOrder),
+    digestCanonicalJson(latestReadyResourceReferences(nativeEmitInput)),
+  )
+  assert.equal(
+    digestReadyResourceReferences(admissionOrder),
+    digestReadyResourceReferences(latestReadyResourceReferences(nativeEmitInput)),
+  )
+  assert.equal(
+    digestReadyResourceReferences(admissionOrder),
+    digestReadyResourceReferences([folder, skill]),
+  )
+  assert.equal(digestReadyResourceReferences([]), digestCanonicalJson([]))
+})
+
+test('multi-resource application tags pass the additionalContext gate regardless of emit order', async () => {
+  let upstreamCalls = 0
+  const upstream = createServer((_request, response) => {
+    upstreamCalls += 1
+    response.writeHead(500).end()
+  })
+  const port = await listen(upstream)
+  const created = createCodexUpstreamProfileSnapshot({
+    profileId: 'profile-resource-order',
+    config: {
+      provider: 'openai-compatible', baseUrl: `http://127.0.0.1:${port}/v1`, apiKey: 'secret',
+      model: 'native-model', agentProtocol: 'openai', wireApi: 'responses', toolUseMode: 'on',
+    },
+    maxRetries: 0,
+  })
+  const skill = {
+    logicalResourceId: 'skill:412ed9b2aa91fc0bddd9a842b87e6e74',
+    currentVersion: 'sha256:48024336f41b8bc9930eb747e652e0697ceda60e1e16ef4101e0d6de9959ea21',
+    currentDigest: '48024336f41b8bc9930eb747e652e0697ceda60e1e16ef4101e0d6de9959ea21',
+    supersedesVersion: null,
+    policyEpoch: 1,
+  }
+  const folder = {
+    logicalResourceId: 'local-directory:0990e072e69d96c50d49a94eafbc8105',
+    currentVersion: 'sha256:7ef187e21e7d1b001629d2893bda1afd6a9174e85543394574d1f9abb59a4533',
+    currentDigest: '7ef187e21e7d1b001629d2893bda1afd6a9174e85543394574d1f9abb59a4533',
+    supersedesVersion: null,
+    policyEpoch: 1,
+  }
+  const tagged = (value: typeof skill) => ({
+    type: 'message',
+    role: 'developer',
+    content: [{
+      type: 'input_text',
+      text: `<ready-resource:${value.logicalResourceId}>${JSON.stringify(value)}</ready-resource:${value.logicalResourceId}>`,
+    }],
+  })
+  const request = requestBody()
+  request.input = [
+    tagged(folder),
+    tagged(skill),
+    { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'use the skill on this folder' }] },
+  ]
+  const binding = bindRequest(request, created.snapshot)
+  binding.additionalContextDigest = digestCanonicalJson([skill, folder])
+  const gateway = new CodexModelGateway({
+    bearerToken: 'local-token',
+    authority: { async resolve(input) { input.validate(binding); return binding } },
+    credentials: { resolve() { return 'secret' } },
+  })
+  const address = await gateway.start()
+  try {
+    const mismatched = await fetch(`${address.url}/v1/responses`, {
+      method: 'POST',
+      headers: { authorization: 'Bearer local-token', 'content-type': 'application/json' },
+      body: JSON.stringify(request),
+    })
+    assert.equal(mismatched.status, 409)
+    assert.match(await mismatched.text(), /gateway_additional_context_mismatch/)
+    assert.equal(upstreamCalls, 0)
+
+    binding.additionalContextDigest = digestReadyResourceReferences([skill, folder])
+    const accepted = await fetch(`${address.url}/v1/responses`, {
+      method: 'POST',
+      headers: { authorization: 'Bearer local-token', 'content-type': 'application/json' },
+      body: JSON.stringify(request),
+    })
+    assert.notEqual(accepted.status, 409)
+    assert.equal(upstreamCalls, 1)
+  } finally {
+    await gateway.stop()
+    await close(upstream)
+  }
+})
+
+test('follow-up turn additionalContext digest ignores leftover historical resource tags', () => {
+  const folder = {
+    logicalResourceId: 'local-directory:0990e072e69d96c50d49a94eafbc8105',
+    currentVersion: 'sha256:7ef187e21e7d1b001629d2893bda1afd6a9174e85543394574d1f9abb59a4533',
+    currentDigest: '7ef187e21e7d1b001629d2893bda1afd6a9174e85543394574d1f9abb59a4533',
+    supersedesVersion: null,
+    policyEpoch: 1,
+  }
+  const tagged = {
+    type: 'message',
+    role: 'developer',
+    content: [{
+      type: 'input_text',
+      text: `<ready-resource:${folder.logicalResourceId}>${JSON.stringify(folder)}</ready-resource:${folder.logicalResourceId}>`,
+    }],
+  }
+  const input = [
+    tagged,
+    { type: 'message', role: 'user', content: [{ type: 'input_text', text: '输出到这里' }] },
+    { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'done' }] },
+    { type: 'message', role: 'user', content: [{ type: 'input_text', text: '再试一次' }] },
+  ]
+  assert.deepEqual(latestReadyResourceReferences(input), [folder])
+  assert.deepEqual(currentTurnReadyResourceReferences(input), [])
+  assert.equal(
+    digestReadyResourceReferences(currentTurnReadyResourceReferences(input)),
+    digestCanonicalJson([]),
+  )
+})
+
+test('explicit retry metadata is bound application context rather than developer instruction', () => {
+  const retry = {
+    predecessorRunId: 'run-0',
+    historyParityEvidenceDigest: 'parity-digest',
+    currentThreadReadEvidenceDigest: 'readback-digest',
+    continuationContractDigest: 'continuation-digest',
+    artifactSources: [],
+  }
+  const overlay = {
+    type: 'message',
+    role: 'developer',
+    content: [{ type: 'input_text', text: 'Ready host overlay' }],
+  }
+  const retryItem = {
+    type: 'message',
+    role: 'developer',
+    content: [{
+      type: 'input_text',
+      text: `<ready-explicit-retry>${JSON.stringify(retry)}</ready-explicit-retry>`,
+    }],
+  }
+  const user = {
+    type: 'message',
+    role: 'user',
+    content: [{ type: 'input_text', text: '再试一次' }],
+  }
+  assert.equal(
+    instructionTranscriptDigest('fixed instructions', [overlay, retryItem, user]),
+    instructionTranscriptDigest('fixed instructions', [overlay]),
+  )
+  assert.deepEqual(currentTurnReadyAdditionalContext([overlay, retryItem, user]), {
+    resourceReferences: [],
+    explicitRetry: retry,
+    readyMemory: null,
+  })
+  assert.notEqual(
+    digestReadyAdditionalContext({ resourceReferences: [], explicitRetry: retry }),
+    digestReadyAdditionalContext({
+      resourceReferences: [],
+      explicitRetry: { ...retry, predecessorRunId: 'forged-run' },
+    }),
+  )
+})
+
+test('empty follow-up after a folder turn does not 409 on leftover native resource tags', async () => {
+  let upstreamCalls = 0
+  const upstream = createServer((_request, response) => {
+    upstreamCalls += 1
+    response.writeHead(500).end()
+  })
+  const port = await listen(upstream)
+  const created = createCodexUpstreamProfileSnapshot({
+    profileId: 'profile-followup-empty',
+    config: {
+      provider: 'openai-compatible', baseUrl: `http://127.0.0.1:${port}/v1`, apiKey: 'secret',
+      model: 'native-model', agentProtocol: 'openai', wireApi: 'responses', toolUseMode: 'on',
+    },
+    maxRetries: 0,
+  })
+  const folder = {
+    logicalResourceId: 'local-directory:0990e072e69d96c50d49a94eafbc8105',
+    currentVersion: 'sha256:7ef187e21e7d1b001629d2893bda1afd6a9174e85543394574d1f9abb59a4533',
+    currentDigest: '7ef187e21e7d1b001629d2893bda1afd6a9174e85543394574d1f9abb59a4533',
+    supersedesVersion: null,
+    policyEpoch: 1,
+  }
+  const request = requestBody()
+  request.input = [
+    {
+      type: 'message',
+      role: 'developer',
+      content: [{
+        type: 'input_text',
+        text: `<ready-resource:${folder.logicalResourceId}>${JSON.stringify(folder)}</ready-resource:${folder.logicalResourceId}>`,
+      }],
+    },
+    { type: 'message', role: 'user', content: [{ type: 'input_text', text: '输出到这里' }] },
+    { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'write tools missing' }] },
+    { type: 'message', role: 'user', content: [{ type: 'input_text', text: '再试一次' }] },
+  ]
+  const binding = bindRequest(request, created.snapshot)
+  binding.additionalContextDigest = digestCanonicalJson([])
+  const gateway = new CodexModelGateway({
+    bearerToken: 'local-token',
+    authority: { async resolve(input) { input.validate(binding); return binding } },
+    credentials: { resolve() { return 'secret' } },
+  })
+  const address = await gateway.start()
+  try {
+    const accepted = await fetch(`${address.url}/v1/responses`, {
+      method: 'POST',
+      headers: { authorization: 'Bearer local-token', 'content-type': 'application/json' },
+      body: JSON.stringify(request),
+    })
+    assert.notEqual(accepted.status, 409)
+    assert.equal(upstreamCalls, 1)
+  } finally {
+    await gateway.stop()
+    await close(upstream)
+  }
 })
 
 test('credential lookup permits key rotation only while the nonsecret route snapshot is unchanged', () => {
@@ -2390,6 +2680,14 @@ test('native and Chat streams enforce byte, event, deadline and post-terminal EO
       },
     }
     response.write(`event: response.created\ndata: ${JSON.stringify(created)}\n\n`)
+    if (mode === 'event') {
+      response.write(`event: response.in_progress\ndata: ${JSON.stringify({
+        type: 'response.in_progress',
+        response: {
+          id: 'bounded-1', model: 'native-model', status: 'in_progress', output: [],
+        },
+      })}\n\n`)
+    }
     if (mode === 'bytes') {
       response.write(`event: response.in_progress\ndata: ${JSON.stringify({
         type: 'response.in_progress',
@@ -2416,7 +2714,7 @@ test('native and Chat streams enforce byte, event, deadline and post-terminal EO
   const call = async (options: {
     nativeMaxBytes?: number
     nativeMaxEvents?: number
-    streamDeadlineMs?: number
+    eventIdleMs?: number
     postTerminalDrainMs?: number
   }) => {
     const gateway = new CodexModelGateway({
@@ -2442,7 +2740,7 @@ test('native and Chat streams enforce byte, event, deadline and post-terminal EO
     mode = 'bytes'
     assert.match(await call({ nativeMaxBytes: 256 }), /gateway_native_stream_too_large/)
     mode = 'post_terminal'
-    const postTerminal = await call({ streamDeadlineMs: 1_000, postTerminalDrainMs: 20 })
+    const postTerminal = await call({ eventIdleMs: 1_000, postTerminalDrainMs: 20 })
     assert.match(postTerminal, /gateway_native_post_terminal_timeout/)
     assert.doesNotMatch(postTerminal, /event: response\.completed/)
 
@@ -2471,7 +2769,7 @@ test('native and Chat streams enforce byte, event, deadline and post-terminal EO
       snapshot: chatSnapshot,
       credential: 'secret',
       abort() {},
-      streamDeadlineMs: 1_000,
+      eventIdleMs: 1_000,
       postTerminalDrainMs: 20,
     })
     assert.match(chatOutput, /gateway_chat_post_terminal_timeout/)
@@ -2507,11 +2805,179 @@ test('native and Chat streams enforce byte, event, deadline and post-terminal EO
       snapshot: chatSnapshot,
       credential: 'secret',
       abort() {},
-      streamDeadlineMs: 20,
+      eventIdleMs: 20,
       postTerminalDrainMs: 20,
     })
-    assert.match(deadlineOutput, /gateway_chat_stream_deadline/)
+    assert.match(deadlineOutput, /gateway_chat_event_idle_timeout/)
   } finally {
+    await close(upstream)
+  }
+})
+
+test('long native text deltas do not trip the structural event cap', async () => {
+  const text = '字'.repeat(5_000)
+  const upstream = createServer((_request, response) => {
+    response.writeHead(200, { 'content-type': 'text/event-stream' })
+    const created = {
+      type: 'response.created',
+      response: { id: 'long-1', model: 'native-model', status: 'in_progress', output: [] },
+    }
+    const events: JsonObject[] = [
+      created,
+      {
+        type: 'response.output_item.added', output_index: 0,
+        item: { type: 'message', id: 'long-message', role: 'assistant', content: [] },
+      },
+    ]
+    for (let index = 0; index < 5_000; index += 1) {
+      events.push({
+        type: 'response.output_text.delta', output_index: 0, content_index: 0,
+        item_id: 'long-message', delta: '字',
+      })
+    }
+    events.push(
+      {
+        type: 'response.output_text.done', output_index: 0, content_index: 0,
+        item_id: 'long-message', text,
+      },
+      {
+        type: 'response.output_item.done', output_index: 0,
+        item: {
+          type: 'message', id: 'long-message', role: 'assistant',
+          content: [{ type: 'output_text', text }],
+        },
+      },
+      {
+        type: 'response.completed',
+        response: {
+          id: 'long-1', model: 'native-model', status: 'completed',
+          output: [{
+            type: 'message', id: 'long-message', role: 'assistant',
+            content: [{ type: 'output_text', text }],
+          }],
+          usage: nativeUsage(),
+        },
+      },
+    )
+    response.end(events.map((item) => `event: ${item.type}\ndata: ${JSON.stringify(item)}\n\n`).join(''))
+  })
+  const port = await listen(upstream)
+  const created = createCodexUpstreamProfileSnapshot({
+    profileId: 'profile-long-delta',
+    config: {
+      provider: 'openai-compatible', baseUrl: `http://127.0.0.1:${port}/v1`, apiKey: 'secret',
+      model: 'native-model', agentProtocol: 'openai', wireApi: 'responses', toolUseMode: 'on',
+    },
+    maxRetries: 0,
+  })
+  const request = requestBody()
+  const binding = bindRequest(request, created.snapshot)
+  const gateway = new CodexModelGateway({
+    bearerToken: 'local-token',
+    nativeMaxEvents: 16,
+    authority: { async resolve(input) { input.validate(binding); return binding } },
+    credentials: { resolve() { return 'secret' } },
+  })
+  const address = await gateway.start()
+  try {
+    const response = await fetch(`${address.url}/v1/responses`, {
+      method: 'POST',
+      headers: { authorization: 'Bearer local-token', 'content-type': 'application/json' },
+      body: JSON.stringify(request),
+    })
+    const body = await response.text()
+    assert.doesNotMatch(body, /gateway_native_event_limit_exceeded/)
+    assert.match(body, /event: response\.completed/)
+  } finally {
+    await gateway.stop()
+    await close(upstream)
+  }
+})
+
+test('validated native function argument deltas are coalesced before downstream delivery', async () => {
+  const argumentsText = JSON.stringify({ query: 'a'.repeat(4_988) })
+  assert.equal(argumentsText.length, 5_000)
+  const upstream = createServer((_request, response) => {
+    response.writeHead(200, { 'content-type': 'text/event-stream' })
+    const item = {
+      type: 'function_call', id: 'long-tool', call_id: 'long-call',
+      name: 'ready_read_probe', arguments: argumentsText,
+    }
+    const events: JsonObject[] = [
+      {
+        type: 'response.created',
+        response: { id: 'long-tool-response', model: 'native-model', status: 'in_progress' },
+      },
+      {
+        type: 'response.output_item.added', output_index: 0,
+        item: { ...item, arguments: '' },
+      },
+      ...[...argumentsText].map((delta) => ({
+        type: 'response.function_call_arguments.delta', output_index: 0,
+        item_id: 'long-tool', delta,
+      })),
+      {
+        type: 'response.function_call_arguments.done', output_index: 0,
+        item_id: 'long-tool', arguments: argumentsText,
+      },
+      { type: 'response.output_item.done', output_index: 0, item },
+      {
+        type: 'response.completed',
+        response: {
+          id: 'long-tool-response', model: 'native-model', status: 'completed',
+          output: [item], usage: nativeUsage(),
+        },
+      },
+    ]
+    response.end(events.map((event) => (
+      `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`
+    )).join(''))
+  })
+  const port = await listen(upstream)
+  const created = createCodexUpstreamProfileSnapshot({
+    profileId: 'profile-long-tool-delta',
+    config: {
+      provider: 'openai-compatible', baseUrl: `http://127.0.0.1:${port}/v1`, apiKey: 'secret',
+      model: 'native-model', agentProtocol: 'openai', wireApi: 'responses', toolUseMode: 'on',
+    },
+    maxRetries: 0,
+  })
+  const request = requestBody(['ready_read_probe'])
+  const binding = bindRequest(request, created.snapshot)
+  let admittedCalls: readonly CodexModelGatewayToolResponseCall[] = []
+  const gateway = new CodexModelGateway({
+    bearerToken: 'local-token',
+    nativeMaxEvents: 16,
+    authority: {
+      async resolve(input) { input.validate(binding); return binding },
+      async admitToolResponse(input) { admittedCalls = input.calls },
+    },
+    credentials: { resolve() { return 'secret' } },
+  })
+  const address = await gateway.start()
+  try {
+    const response = await fetch(`${address.url}/v1/responses`, {
+      method: 'POST',
+      headers: { authorization: 'Bearer local-token', 'content-type': 'application/json' },
+      body: JSON.stringify(request),
+    })
+    const body = await response.text()
+    const events = body.split('\n')
+      .filter((line) => line.startsWith('data: '))
+      .map((line) => JSON.parse(line.slice(6)) as JsonObject)
+    const deltas = events.filter((event) => (
+      event.type === 'response.function_call_arguments.delta'
+    ))
+    assert.equal(deltas.length, 1)
+    assert.equal(deltas[0]?.delta, argumentsText)
+    assert.deepEqual(admittedCalls, [{
+      codexCallId: 'long-call',
+      toolName: 'ready_read_probe',
+      argsDigest: digestCanonicalJson({ query: 'a'.repeat(4_988) }),
+    }])
+    assert.equal(events.filter((event) => event.type === 'response.completed').length, 1)
+  } finally {
+    await gateway.stop()
     await close(upstream)
   }
 })
@@ -2725,7 +3191,7 @@ test('upstream headers and error bodies have hard deadlines and do not retry', a
     const request = requestBody()
     const binding = bindRequest(request, created.snapshot)
     const gateway = new CodexModelGateway({
-      bearerToken: 'local-token', streamDeadlineMs: 20,
+      bearerToken: 'local-token', headersDeadlineMs: 20, firstByteDeadlineMs: 20,
       authority: { async resolve(input) { input.validate(binding); return binding } },
       credentials: { resolve() { return 'secret' } },
     })

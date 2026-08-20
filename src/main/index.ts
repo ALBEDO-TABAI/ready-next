@@ -58,7 +58,6 @@ import { createLocalFileResponse } from './modules/app-control/local-file-respon
 import { reconcileStartupRunsOnStartup } from './modules/app-control/startup-run-reconciler'
 import { setupBoardIPC } from './modules/board-engine/ipc-handler'
 import { setupSkillsIPC } from './modules/skills-runtime/ipc-handler'
-import { setupMemoryManagementIPC } from './modules/memory-management/ipc-handler'
 import { setupImageGenerationIPC } from './modules/image-generation/ipc-handler'
 import { rsshubManager } from './modules/rss-engine/rsshub-process'
 import { reapOrphans } from './modules/process-cleanup/boot-reaper'
@@ -762,7 +761,6 @@ function setupGlobalIPC(): void {
   setupAppCacheIPC()
   setupNativeContextMenuIPC(() => mainWindow)
   setupSkillsIPC()
-  setupMemoryManagementIPC()
 
   // Window state IPC — uses the module-level mainWindow variable
   ipcMain.handle('window:minimize', () => {

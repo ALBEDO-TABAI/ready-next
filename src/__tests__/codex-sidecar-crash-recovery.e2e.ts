@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import test from 'node:test'
+import { disabledReadyMemorySnapshot } from './utils/ready-memory-fixture'
 
 import { DatabaseManager, type DatabaseConnection } from '../main/modules/database'
 import {
@@ -164,6 +165,7 @@ function prepared(
 ): PreparedCodexProductRun {
   return {
     preparationContract: 'codex_product_run_e1',
+    readyMemorySnapshot: disabledReadyMemorySnapshot(),
     taskId: `task-${runId}`,
     runId,
     conversationAlias: { aliasId, aliasGeneration: 1 },
@@ -189,7 +191,16 @@ function prepared(
       scopeId, aliasId, authorizationOwnerId: `owner-${runId}`,
       resourceOwnerId: `resource-owner-${runId}`,
     },
-    productBudgetSeed: { maxIterations: 8, maxToolCalls: 4, maxParallelToolGroups: 1 },
+    productBudgetSeed: {
+      maxIterations: 8,
+      maxToolCalls: 4,
+      maxParallelToolGroups: 1,
+      lanes: {
+        ordinary: { maxIterations: 7, maxToolCalls: 4, maxParallelToolGroups: 1 },
+        delivery: { maxIterations: 0, maxToolCalls: 0, maxParallelToolGroups: 0 },
+        final: { maxIterations: 1 },
+      },
+    },
     neutralProjectionSeed: {
       phase: 'planning', taskTitle: '正在理解需求', taskSummary: '正在整理任务边界',
     },

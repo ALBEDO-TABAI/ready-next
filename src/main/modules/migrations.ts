@@ -43,8 +43,15 @@ import {
   CODEX_BINDING_EVIDENCE_GUARDS_SQL,
   CODEX_BINDING_SCHEMA_SQL,
 } from './agent-control/codex-runtime/codex-binding-schema'
-import { applyCodexThreadRetirementCleanupMigration } from './agent-control/codex-runtime/codex-thread-retirement-cleanup-migration'
+import {
+  applyCodexConversationClosedDeleteGuards,
+  applyCodexThreadRetirementCleanupMigration,
+  dropCodexConversationClosedDeleteGuards,
+  enqueueEligibleRetiredCodexThreadArchiveIntents,
+  retireAllCodexThreadBindingsForConversationReset,
+} from './agent-control/codex-runtime/codex-thread-retirement-cleanup-migration'
 import { applyBrowserTargetClaimUserTakeoverMigration } from './browser-engine/browser-target-claim-user-takeover-migration'
+import { applyReadyMemoryMigration } from './agent-control/ready-memory/ready-memory-migration'
 
 const BROWSER_CHECKPOINT_WAKE_KIND_SQL = BROWSER_CHECKPOINT_WAKE_KINDS
   .map((kind) => `'${kind}'`)
@@ -4159,6 +4166,78 @@ const migrations: Migration[] = [
     name: '110_codex_tool_request_rpc_binding',
     up: (db) => {
       applyCodexToolRequestRpcBindingMigration(db)
+    },
+  },
+  {
+    name: '111_codex_gateway_budget_lanes',
+    up: (db) => {
+      db.exec(`
+        ALTER TABLE ready_model_gateway_request_receipts
+          ADD COLUMN budget_lane TEXT
+          CHECK (budget_lane IS NULL OR budget_lane IN ('ordinary', 'delivery', 'final'));
+      `)
+    },
+  },
+  {
+    name: '112_single_ready_identity_cleanup',
+    up: (db) => {
+      const retiredAt = new Date().toISOString()
+      const retirementEvidenceDigest = '147e8851fb553ff667f00e73843b54e4e49488214a76c7704b64d6a0bf6f1c59'
+
+      retireAllCodexThreadBindingsForConversationReset(db, {
+        retiredAt,
+        retirementEvidenceDigest,
+      })
+      enqueueEligibleRetiredCodexThreadArchiveIntents(db)
+
+      dropCodexConversationClosedDeleteGuards(db)
+      db.exec(`
+        UPDATE agent_channel_threads
+        SET conversation_id = NULL;
+
+        DELETE FROM chat_messages_fts;
+        DELETE FROM session_recall_attachment_index;
+        DELETE FROM session_recall_vectors;
+        DELETE FROM session_recall_metadata;
+        DELETE FROM chat_messages;
+        DELETE FROM chat_conversations;
+
+        DELETE FROM specialist_blueprint_confirmations;
+        DELETE FROM specialist_blueprints;
+        DELETE FROM specialist_content_edit_proposals;
+        DELETE FROM agent_personalities WHERE agent_name <> 'butler';
+        DELETE FROM agent_knowledge WHERE agent_name NOT IN ('butler', 'system');
+        DELETE FROM agents WHERE id <> 'butler';
+
+        UPDATE agents
+        SET name = 'Ready',
+            status = 'active',
+            parent_agent_id = NULL,
+            derivation_reason = NULL,
+            merged_into_agent_id = NULL
+        WHERE id = 'butler';
+      `)
+      applyCodexConversationClosedDeleteGuards(db)
+    },
+  },
+  {
+    name: '113_ready_memory_truth',
+    up: (db) => {
+      applyReadyMemoryMigration(db)
+    },
+  },
+  {
+    name: '114_drop_retired_memory_truth',
+    up: (db) => {
+      db.exec(`
+        DROP TABLE IF EXISTS agent_trigger_refs;
+        DROP TABLE IF EXISTS agent_memory_access_log;
+        DROP TABLE IF EXISTS agent_triggers;
+        DROP TABLE IF EXISTS agent_memory_metadata;
+        DROP TABLE IF EXISTS agent_knowledge;
+        DROP TABLE IF EXISTS user_profiles;
+        DROP TABLE IF EXISTS agent_personalities;
+      `)
     },
   },
 ]

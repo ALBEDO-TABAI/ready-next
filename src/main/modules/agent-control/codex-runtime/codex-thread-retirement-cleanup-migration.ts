@@ -19,6 +19,49 @@ type RetiredBindingRow = {
   retirement_evidence_digest: string
 }
 
+export function dropCodexConversationClosedDeleteGuards(
+  db: Pick<DatabaseConnection, 'exec'>,
+): void {
+  db.exec(`
+    DROP TRIGGER IF EXISTS chat_message_closed_scope_delete_guard;
+    DROP TRIGGER IF EXISTS chat_conversation_closed_delete_guard;
+  `)
+}
+
+export function applyCodexConversationClosedDeleteGuards(
+  db: Pick<DatabaseConnection, 'exec'>,
+): void {
+  db.exec(`
+    CREATE TRIGGER IF NOT EXISTS chat_conversation_closed_delete_guard
+    BEFORE DELETE ON chat_conversations
+    WHEN OLD.closed_at IS NOT NULL
+    BEGIN SELECT RAISE(ABORT, 'chat_conversation_closed_delete'); END;
+
+    CREATE TRIGGER IF NOT EXISTS chat_message_closed_scope_delete_guard
+    BEFORE DELETE ON chat_messages
+    WHEN EXISTS (
+      SELECT 1 FROM chat_conversations scope
+       WHERE scope.id = OLD.conversation_id AND scope.closed_at IS NOT NULL
+    )
+    BEGIN SELECT RAISE(ABORT, 'chat_message_closed_scope'); END;
+  `)
+}
+
+export function retireAllCodexThreadBindingsForConversationReset(
+  db: Pick<DatabaseConnection, 'prepare'>,
+  input: { retiredAt: string; retirementEvidenceDigest: string },
+): void {
+  db.prepare(`
+    UPDATE codex_thread_bindings
+    SET retired_at = ?,
+        retired_reason = 'cleanup',
+        retirement_evidence_digest = ?,
+        revision = revision + 1,
+        updated_at = ?
+    WHERE retired_at IS NULL
+  `).run(input.retiredAt, input.retirementEvidenceDigest, input.retiredAt)
+}
+
 export function applyBrowserTargetClaimVisibilityEpochMigration(
   db: Pick<DatabaseConnection, 'exec' | 'prepare'>,
 ): void {
@@ -200,11 +243,6 @@ export function applyCodexThreadRetirementCleanupMigration(
     WHEN OLD.closed_at IS NOT NULL
     BEGIN SELECT RAISE(ABORT, 'chat_conversation_close_immutable'); END;
 
-    CREATE TRIGGER IF NOT EXISTS chat_conversation_closed_delete_guard
-    BEFORE DELETE ON chat_conversations
-    WHEN OLD.closed_at IS NOT NULL
-    BEGIN SELECT RAISE(ABORT, 'chat_conversation_closed_delete'); END;
-
     CREATE TRIGGER IF NOT EXISTS chat_conversation_visibility_epoch_update_guard
     BEFORE UPDATE OF message_visibility_epoch ON chat_conversations
     WHEN NEW.message_visibility_epoch IS NOT OLD.message_visibility_epoch
@@ -225,14 +263,6 @@ export function applyCodexThreadRetirementCleanupMigration(
       SELECT 1 FROM chat_conversations scope
        WHERE scope.id IN (OLD.conversation_id, NEW.conversation_id)
          AND scope.closed_at IS NOT NULL
-    )
-    BEGIN SELECT RAISE(ABORT, 'chat_message_closed_scope'); END;
-
-    CREATE TRIGGER IF NOT EXISTS chat_message_closed_scope_delete_guard
-    BEFORE DELETE ON chat_messages
-    WHEN EXISTS (
-      SELECT 1 FROM chat_conversations scope
-       WHERE scope.id = OLD.conversation_id AND scope.closed_at IS NOT NULL
     )
     BEGIN SELECT RAISE(ABORT, 'chat_message_closed_scope'); END;
 
@@ -281,6 +311,7 @@ export function applyCodexThreadRetirementCleanupMigration(
     BEGIN SELECT RAISE(ABORT, 'task_projection_visibility_epoch_stale'); END;
 
   `)
+  applyCodexConversationClosedDeleteGuards(db)
 
   if (runMetaColumns.size > 0) {
     db.exec(`
@@ -367,6 +398,15 @@ export function applyCodexThreadRetirementCleanupMigration(
     `)
   }
 
+  enqueueEligibleRetiredCodexThreadArchiveIntents(db)
+}
+
+export function enqueueEligibleRetiredCodexThreadArchiveIntents(
+  db: Pick<DatabaseConnection, 'prepare'> & { readonly inTransaction?: boolean },
+): void {
+  // A whole-history cleanup retires the Ready owner first. Stale Ready fences or
+  // unfinished rows must not orphan its native thread; the archive owner still
+  // requires exact identity plus an idle native readback before dispatch.
   const retired = db.prepare(`
     SELECT thread.thread_binding_id, thread.codex_thread_id, thread.codex_session_id,
            thread.isolated_thread_cwd, thread.ready_conversation_alias,
@@ -382,11 +422,11 @@ export function applyCodexThreadRetirementCleanupMigration(
          'closed', 'user_reset', 'publication_diverged',
          'manual_compaction_quarantine', 'cleanup'
        )
-       AND NOT EXISTS (
+       AND (thread.retired_reason = 'cleanup' OR NOT EXISTS (
          SELECT 1 FROM codex_thread_dispatch_fences fence
           WHERE fence.thread_binding_id = thread.thread_binding_id
-       )
-       AND NOT EXISTS (
+       ))
+       AND (thread.retired_reason = 'cleanup' OR NOT EXISTS (
          SELECT 1 FROM codex_turn_bindings turn
           WHERE turn.thread_binding_id = thread.thread_binding_id
             AND (
@@ -394,7 +434,7 @@ export function applyCodexThreadRetirementCleanupMigration(
               OR (turn.product_terminal_digest IS NULL
                 AND turn.host_failure_product_terminal_digest IS NULL)
             )
-       )
+       ))
        AND NOT EXISTS (
          SELECT 1 FROM codex_thread_archive_intents intent
           WHERE intent.thread_binding_id = thread.thread_binding_id

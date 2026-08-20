@@ -46,7 +46,6 @@ function createRun(overrides: Partial<TaskCardRunLike> = {}): TaskCardRunLike {
         createdAt: '2026-03-30T10:00:00.000Z'
       }
     ],
-    memoryCapture: overrides.memoryCapture || null,
     progress: overrides.progress || null,
     taskContinuation: overrides.taskContinuation || null,
     taskType: overrides.taskType,
@@ -86,31 +85,7 @@ describe('task card view model', () => {
     assert.strictEqual(vm.sections.plan.expanded, false)
     assert.strictEqual(vm.sections.details.expanded, false)
     assert.strictEqual(vm.sections.artifacts.expanded, false)
-    assert.strictEqual(vm.sections.memory.expanded, false)
     assert.strictEqual(vm.currentStep?.title, '抓取内容')
-  })
-
-  it('auto-opens memory section when memory capture is ready', () => {
-    const run = createRun({
-      phase: 'done',
-      memoryCapture: {
-        status: 'ready',
-        createdAt: '2026-03-30T10:10:00.000Z',
-        items: [
-          {
-            memoryId: 'mem-1',
-            category: 'summary',
-            sourceType: 'scope_memory',
-            title: '本次摘要',
-            summary: '完成 RSS 摘要整理'
-          }
-        ]
-      }
-    })
-    const vm = buildTaskCardViewModel(run, createDefaultTaskDisclosureState(run))
-
-    assert.strictEqual(vm.sections.memory.expanded, true)
-    assert.strictEqual(vm.sections.memory.count, 1)
   })
 
   it('supports disclosure overrides for a specific section', () => {

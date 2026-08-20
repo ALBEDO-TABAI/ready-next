@@ -1,12 +1,9 @@
 /**
  * Reserved belief/site card `source` prefixes — single source of truth.
  *
- * These prefixes carry special lifecycle semantics and are produced ONLY by
- * Ready's own learning paths:
- *  - `possible-update-of:`      site-card-learning, suggested update of an existing card
- *  - `possible-risk-update-of:` site-card-learning, risk-suggestion variant
- *  - `possible-duplicate-of`    crystallize-gate, dedup marker (note: space, not colon)
- *  - `failure-learning:`        site-card-learning, new card from a failure signal
+ * These prefixes carry historical lifecycle semantics. Ready no longer
+ * produces them, but the read-only emergence feed still recognizes staged
+ * cards that were written by older versions.
  *
  * A model-authored card MUST NOT be able to forge any of them: forging
  * `possible-(risk-)update-of:` lets the model drive a confused-deputy merge into
@@ -38,13 +35,13 @@ export function isReservedCardSourceValue(source: string | null | undefined): bo
   return RESERVED_CARD_SOURCE_PREFIXES.some((prefix) => normalized.startsWith(prefix))
 }
 
-/** True when `source` is the dedup marker produced by crystallize-gate.
+/** True when `source` is a legacy dedup marker.
  * Type guard: a match implies `source` is a (non-null) string. */
 export function isPossibleDuplicateOfSource(source: string | null | undefined): source is string {
   return normalize(source)?.startsWith(POSSIBLE_DUPLICATE_OF_PREFIX) ?? false
 }
 
-/** True when `source` is the risk-suggestion update marker from site-card-learning.
+/** True when `source` is a legacy risk-suggestion update marker.
  * Type guard: a match implies `source` is a (non-null) string. */
 export function isPossibleRiskUpdateOfSource(source: string | null | undefined): source is string {
   return normalize(source)?.startsWith(POSSIBLE_RISK_UPDATE_OF_PREFIX) ?? false

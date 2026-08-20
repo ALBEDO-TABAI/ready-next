@@ -574,10 +574,7 @@ describe('useAgent Store', () => {
         ;(globalThis as any).window.electronAPI = undefined
         useAgent.setState({
             agents: [
-                { name: 'butler', displayName: '管家', avatar: '', status: 'idle', selected: true },
-                { name: 'copywriter', displayName: '文案', avatar: '', status: 'idle', selected: false },
-                { name: 'video-editor', displayName: '剪辑', avatar: '', status: 'idle', selected: false },
-                { name: 'analyst', displayName: '分析', avatar: '', status: 'idle', selected: false },
+                { name: 'butler', displayName: 'Ready', avatar: '', status: 'idle' },
             ],
             messages: [],
             currentAgent: 'butler',
@@ -601,30 +598,10 @@ describe('useAgent Store', () => {
 
     it('should have correct default agents', () => {
         const state = useAgent.getState()
-        assert.strictEqual(state.agents.length, 4)
+        assert.strictEqual(state.agents.length, 1)
         assert.strictEqual(state.agents[0].name, 'butler')
-        assert.strictEqual(state.agents[0].selected, true)
+        assert.strictEqual(state.agents[0].displayName, 'Ready')
         assert.strictEqual(state.currentAgent, 'butler')
-    })
-
-    it('should select a different agent', () => {
-        useAgent.getState().selectAgent('copywriter')
-        assert.strictEqual(useAgent.getState().currentAgent, 'copywriter')
-    })
-
-    it('should toggle agent selection', () => {
-        // butler starts selected
-        assert.strictEqual(useAgent.getState().agents[0].selected, true)
-        useAgent.getState().toggleAgentSelection('butler')
-        assert.strictEqual(useAgent.getState().agents[0].selected, false)
-        useAgent.getState().toggleAgentSelection('butler')
-        assert.strictEqual(useAgent.getState().agents[0].selected, true)
-    })
-
-    it('should toggle selection for non-selected agent', () => {
-        assert.strictEqual(useAgent.getState().agents[1].selected, false)
-        useAgent.getState().toggleAgentSelection('copywriter')
-        assert.strictEqual(useAgent.getState().agents[1].selected, true)
     })
 
     it('should add a message', () => {
@@ -729,14 +706,12 @@ describe('useAgent Store', () => {
         assert.strictEqual(useAgent.getState().isStreaming, false)
     })
 
-    it('should replace all agents with setAgents', () => {
-        const newAgents = [
-            { name: 'custom', displayName: 'Custom', avatar: '', status: 'idle' as const, selected: true },
-        ]
-        useAgent.getState().setAgents(newAgents)
+    it('should update the Ready status without replacing its identity', () => {
+        useAgent.getState().setReadyStatus('working')
         const state = useAgent.getState()
         assert.strictEqual(state.agents.length, 1)
-        assert.strictEqual(state.agents[0].name, 'custom')
+        assert.strictEqual(state.agents[0].name, 'butler')
+        assert.strictEqual(state.agents[0].status, 'working')
     })
 
     it('should handle appendToMessage with non-existent id gracefully', () => {

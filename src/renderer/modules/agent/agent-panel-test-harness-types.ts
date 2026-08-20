@@ -117,7 +117,6 @@ export interface AgentPanelTaskCardSnapshot {
 export interface AgentPanelInfoCardSnapshot {
   kind:
     | 'soft_error'
-    | 'memory_capture'
     | 'recent_artifact'
     | 'attachment'
     | 'message_task_snapshot'

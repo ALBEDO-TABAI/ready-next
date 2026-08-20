@@ -142,16 +142,17 @@ test('renderer and IPC send surfaces contain no retired Boost or workflow fields
   const preload = source('src/preload/index.ts')
   const rendererTypes = source('src/renderer/types/electron.d.ts')
   const lifecycleGroup = source('src/main/modules/claude-bridge/ipc/agent-lifecycle-group.ts')
-  const settingsHub = source('src/renderer/components/agent-system/AgentSettingsHub.tsx')
+  const settings = source('src/renderer/pages/Settings.tsx')
   const packageJson = JSON.parse(source('package.json')) as { scripts?: Record<string, string> }
 
   for (const value of [chatInput, chatPanel, store]) {
     assert.doesNotMatch(value, /thoroughOverride|data-ready-delivery-thorough|DELIVERY_MODE_SETTING_KEY/)
   }
   assert.doesNotMatch(
-    settingsHub,
+    settings,
     /Dynamic Delivery|agent\.dynamicDeliveryMode|data-ready-delivery-mode|data-ready-delivery-thorough/,
   )
+  assert.doesNotMatch(settings, /AgentSettingsHub|MemorySettingsSection|UserProfileEditor/)
   assert.equal(packageJson.scripts?.['verify:dynamic-delivery'], undefined)
   assert.doesNotMatch(
     JSON.stringify(packageJson.scripts ?? {}),

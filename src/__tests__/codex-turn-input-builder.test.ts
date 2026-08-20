@@ -5,6 +5,7 @@ import {
   CodexTurnInputBuilder,
   textUserInput,
 } from '../main/modules/agent-control/codex-runtime/codex-turn-input-builder'
+import { disabledReadyMemorySnapshot } from './utils/ready-memory-fixture'
 
 const builder = new CodexTurnInputBuilder()
 const context = {
@@ -15,6 +16,7 @@ const context = {
   toolSurfaceDigest: 'surface-digest',
   turnContractDigest: 'turn-digest',
   upstreamProfileSnapshotDigest: 'profile-digest',
+  readyMemorySnapshot: disabledReadyMemorySnapshot(),
 }
 const resource = {
   logicalResourceId: 'document-1',
@@ -184,11 +186,10 @@ test('resource identity includes supersedesVersion and a positive numeric policy
   }
 })
 
-test('all three non-user successor variants are well-shaped but fail closed before native dispatch', () => {
+test('non-user successor variants are well-shaped but fail closed before native dispatch', () => {
   for (const attemptKind of [
     'recovery_successor',
     'checkpoint_successor',
-    'explicit_retry',
   ] as const) {
     assert.deepEqual(builder.build({
       kind: 'non_user_successor',
@@ -202,6 +203,42 @@ test('all three non-user successor variants are well-shaped but fail closed befo
       continuationContractDigest: 'continuation-digest',
     }, context), { ok: false, code: 'non_user_successor_unsupported' })
   }
+})
+
+test('explicit retry remains a real user ingress and exposes only frozen predecessor evidence', () => {
+  const artifactSources = [{
+    sourceReadyRunId: 'run-0',
+    relativePath: 'report.md',
+    logicalArtifactRef: 'artifact:source',
+    version: `sha256:${'a'.repeat(64)}`,
+    sha256: 'b'.repeat(64),
+    state: 'staged',
+  }] as const
+  const result = builder.build({
+    kind: 'user_ingress',
+    attemptKind: 'explicit_retry',
+    originUserMessageId: 'message-retry',
+    canonicalCurrentInputRef: {
+      messageId: 'message-retry',
+      input: [textUserInput('再试一次')],
+    },
+    explicitResourceEnvelope: { input: [], resourceRefs: [resource] },
+    resourceAdditionalContext: [resource],
+    predecessorRunId: 'run-0',
+    historyParityEvidenceDigest: 'parity-digest',
+    currentThreadReadEvidenceDigest: 'readback-digest',
+    continuationContractDigest: 'continuation-digest',
+    artifactSources,
+  }, context)
+  assert.equal(result.ok, true)
+  if (!result.ok) return
+  assert.deepEqual(JSON.parse(result.params.additionalContext['ready-explicit-retry'].value), {
+    predecessorRunId: 'run-0',
+    historyParityEvidenceDigest: 'parity-digest',
+    currentThreadReadEvidenceDigest: 'readback-digest',
+    continuationContractDigest: 'continuation-digest',
+    artifactSources,
+  })
 })
 
 test('retired system background input cannot enter a native Codex turn', () => {

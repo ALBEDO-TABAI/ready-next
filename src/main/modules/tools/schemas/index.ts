@@ -20,7 +20,6 @@ import type { ZodObject, ZodRawShape } from 'zod'
 
 // Phase 4: SKILL_CONTROL_SCHEMAS retired along with the skill_executions
 // state machine. Skill primitives keep their own schemas below.
-import { MEMORY_SCHEMAS } from './memory-schemas'
 import { RSS_SCHEMAS } from './rss-schemas'
 import { CALENDAR_SCHEMAS } from './calendar-schemas'
 import { SESSION_SCHEMAS } from './session-schemas'
@@ -39,7 +38,6 @@ import { MAP_SCHEMAS } from './map-schemas'
 
 const STATIC_TOOL_INPUT_SCHEMAS: Record<string, ZodObject<ZodRawShape>> = {
   ...SKILL_PRIMITIVE_SCHEMAS,
-  ...MEMORY_SCHEMAS,
   ...RSS_SCHEMAS,
   ...CALENDAR_SCHEMAS,
   ...SESSION_SCHEMAS,

@@ -10,19 +10,9 @@ const REPO_ROOT = path.resolve(__dirname, '..')
 // dedicated negative gate.
 const UNWIRED_PACKET_FILES = Object.freeze([])
 
-// P5d cluster — deterministic-parts migration (2026-07-03): crystallize-gate.ts
-// was migrated to live (runtime.ts CrystallizeScheduler + belief-decay round);
-// emergence-cards.ts was migrated to live on the same day (梯队三：
-// emergence-feed-group 组装 + fired 账本 + TaskPanel feed 面；见
-// check-mandated-capability-is-live 的 live-required 条目)。
-// candidate-maintenance stays deferred; automatic model maintenance is retired.
-const UNWIRED_MAINTENANCE_FILES = Object.freeze([
-  'src/main/modules/agent-control/emergence/candidate-maintenance.ts',
-])
+const UNWIRED_MAINTENANCE_FILES = Object.freeze([])
 
 const LIVE_PACKET_FIELDS_REL = 'src/main/modules/agent-control/quality/packet-fields.ts'
-const LIVE_CAS_MERGE_REL = 'src/main/modules/agent-control/maintenance/cas-merge.ts'
-const RUNTIME_REL = 'src/main/modules/agent-control/runtime-core/runtime.ts'
 const P5C_DOC_REL = 'docs/superpowers/plans/2026-06-20-p5c-packet-trio-disabled-implementation.md'
 const P5D_DOC_REL = 'docs/superpowers/plans/2026-06-20-p5d-maintenance-emergence-status-implementation.md'
 const DOC_REL = P5C_DOC_REL
@@ -107,9 +97,6 @@ function check({ root = REPO_ROOT } = {}) {
   if (unwiredSet.has(LIVE_PACKET_FIELDS_REL)) {
     errors.push(`${LIVE_PACKET_FIELDS_REL} must not be in an unwired capability list.`)
   }
-  if (unwiredSet.has(LIVE_CAS_MERGE_REL)) {
-    errors.push(`${LIVE_CAS_MERGE_REL} is live CAS merge code and must not be in an unwired list.`)
-  }
 
   for (const rel of UNWIRED_PACKET_FILES) {
     const abs = path.join(root, rel)
@@ -143,14 +130,6 @@ function check({ root = REPO_ROOT } = {}) {
     }
   }
 
-  const casMergeAbs = path.join(root, LIVE_CAS_MERGE_REL)
-  if (fs.existsSync(casMergeAbs)) {
-    const casMerge = fs.readFileSync(casMergeAbs, 'utf8')
-    if (/unwired/i.test(casMerge) && /not in production (?:driver )?path/i.test(casMerge)) {
-      errors.push(`${LIVE_CAS_MERGE_REL} is live CAS merge code and must not carry unwired/not-in-production markers.`)
-    }
-  }
-
   const docRules = [
     { rel: P5D_DOC_REL, label: 'P5d', phrase: '自动模型维护回合已退役' },
   ]
@@ -164,11 +143,6 @@ function check({ root = REPO_ROOT } = {}) {
     if (!doc.includes(rule.phrase)) {
       errors.push(`${rule.rel} must explicitly state "${rule.phrase}".`)
     }
-  }
-
-  const runtimeAbs = path.join(root, RUNTIME_REL)
-  if (fs.existsSync(runtimeAbs) && !read(root, RUNTIME_REL).includes('runUserPictureCasMerge')) {
-    errors.push(`${RUNTIME_REL} must keep the live runUserPictureCasMerge CAS wiring visible.`)
   }
 
   const srcMain = path.join(root, 'src/main')
@@ -204,7 +178,6 @@ module.exports = {
   UNWIRED_PACKET_FILES,
   UNWIRED_MAINTENANCE_FILES,
   LIVE_PACKET_FIELDS_REL,
-  LIVE_CAS_MERGE_REL,
   INTRA_CLUSTER_ALLOW,
   DOC_REL,
   P5C_DOC_REL,

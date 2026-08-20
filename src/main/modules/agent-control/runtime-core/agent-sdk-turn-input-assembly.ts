@@ -18,7 +18,6 @@ import { buildBrowserDisciplineBundle } from '../domain-adapters/browser-discipl
 import { logAgentMetric } from '../metrics'
 import type { SkillToolAuthorization } from '../skills/skill-tool-authorization'
 import { buildCurrentDateReminderText } from '../system-reminders/current-date-reminder'
-import { moveResponseStyleReminderToEnd } from '../user-profile-prompt'
 import { registerSkillCatalogReminder } from '../system-reminders/skill-catalog-reminder'
 import { registerSkillShellConsentReminder } from '../system-reminders/skill-shell-consent-reminder'
 import { createSystemReminderRegistry } from '../system-reminders/system-reminder-registry'
@@ -179,12 +178,8 @@ export function assembleAgentSdkTurnInput(
       ].filter(Boolean).join('\n')
     : ''
 
-  const {
-    systemPrompt: systemPromptWithoutResponseStyleReminder,
-    responseStyleReminder,
-  } = moveResponseStyleReminderToEnd(session.systemPrompt)
   const instructions = [
-    systemPromptWithoutResponseStyleReminder,
+    session.systemPrompt,
     toolDefinitions.length > 0
       ? '本轮可用工具已经按 Ready 的策略过滤。不要声称使用不存在的工具。'
       : '本轮没有开放工具；直接回答或说明缺口。',
@@ -207,15 +202,10 @@ export function assembleAgentSdkTurnInput(
       ? buildTextToolBridgePrompt(toOpenAIToolSchemas(toolDefinitions))
       : '',
     buildCurrentDateReminderText(),
-    responseStyleReminder,
   ].join('\n')
 
-  // B6 (N-CTX-01 budget) — the prompt-assembly context budget is computed
-  // before these instructions are appended, so it is not what is actually
-  // sent. Emit the runtime preamble bill once per run so the delta is
-  // observable by joining stage=runtime_preamble with the context bill on
-  // scopeId/runId. Dynamic per-turn reminders are part of `instructions`, so
-  // their actual bytes are included without persisting them into session input.
+  // Emit the runtime preamble bill once per run so the instructions actually
+  // sent to the provider remain observable without persisting per-turn text.
   emitContextBill(buildRuntimePreambleBill(sessionId || '', { instructions }), {
     stage: RUNTIME_PREAMBLE_STAGE,
     runId

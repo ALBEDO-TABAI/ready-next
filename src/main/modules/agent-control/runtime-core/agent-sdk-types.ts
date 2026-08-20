@@ -29,7 +29,6 @@ import type {
 import type { toToolExecutorContext } from '../tools-runtime/tool-runtime-context-builder'
 import type { ContinuationIntent, ContinuationState } from '../contracts/continuation-state'
 import type { FollowupTaskRef } from '../../../../shared/agent-followup-intent'
-import type { SpecialistBlueprintSourceMessageUnavailableReason } from '../../../../shared/agent-specialist-blueprint'
 import type { CompactResult } from '../compaction/compact-agent-input'
 import type { AgentInputItem, ModelProvider } from '@openai/agents'
 import { type Tool as AgentSdkTool } from '@openai/agents'
@@ -147,7 +146,6 @@ export interface ToolBridgeRuntimeContext {
   executionProfile?: import('../../../../shared/agent-execution-profile').AgentExecutionProfile | null
   currentUserText?: string
   sourceMessageId?: string | null
-  sourceMessageUnavailableReason?: SpecialistBlueprintSourceMessageUnavailableReason | null
   requestEnvelope?: unknown
   signal: AbortSignal
   canPublishScopeRunEvent: () => boolean
@@ -347,10 +345,16 @@ export interface SkillContextOrchestratorLike {
     requiredBins?: readonly string[]
   }>
   buildPreferredSkillToolNames?: (userText: string, sessionId?: string) => string[] | null
-  peekCurrentReferenceSkillHint?: (sessionId?: string) => { id: string; name: string } | null
-  getCurrentReferenceSkillHint?: (sessionId?: string) => { id: string; name: string } | null
+  peekCurrentReferenceSkillHint?: (sessionId?: string) => { id: string; name: string; applicableToolNames?: string[] } | null
+  getCurrentReferenceSkillHint?: (sessionId?: string) => { id: string; name: string; applicableToolNames?: string[] } | null
   rememberExplicitReferenceSkillHint?: (
     userText: string,
+    sessionId?: string,
+    messageVisibilityEpoch?: number,
+  ) => boolean
+  rememberReferenceSkillToolApplicability?: (
+    skillId: string,
+    toolNames: readonly string[],
     sessionId?: string,
     messageVisibilityEpoch?: number,
   ) => boolean

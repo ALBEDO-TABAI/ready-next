@@ -11,7 +11,7 @@ import type { RunMetaTerminalStatus } from '../../../../shared/run-meta-terminal
 import type { TaskBudget, TaskBudgetRuntime, TaskProjectionRecord } from '../contracts/run-contracts'
 import type { DeliveryStateV1 } from '../../../../shared/dynamic-delivery'
 import type { RunFinalizerDeps, RunOutcome, TerminalAdjudicationDecision } from './run-finalizer-contracts'
-import { deriveCoverageTargets, deriveLearningRefs, hasDocumentDeliveryProof, hasPlannedStepsRequiringProof, hasProofKind, isBrowserTransactionTask, type EffectiveTaskFacts } from './run-finalizer-task-facts'
+import { deriveCoverageTargets, deriveLearningRefs, hasDocumentDeliveryProof, hasPlannedStepsRequiringProof, hasProofKind, isBrowserTransactionTask, isStrictEvidenceTask, type EffectiveTaskFacts } from './run-finalizer-task-facts'
 
 const DELIVERY_REPORT_FILE = 'delivery_report.json'
 
@@ -90,6 +90,7 @@ export function canKeepProofBearingDegradedVisible(
   facts?: EffectiveTaskFacts | null
 ): boolean {
   if (isBrowserTransactionTask(facts)) return false
+  if (isStrictEvidenceTask(facts)) return false
   if (projectionPatch?.browserResearchEssentialOutputSatisfied === false) return false
   if (adjudication.verdict !== 'degraded') return false
   if (adjudication.proofCount <= 0) return false
@@ -421,26 +422,5 @@ export function runTerminalAdjudicationDerivedEffects(input: {
         reason: error instanceof Error ? error.message : String(error),
       })
     }
-  }
-  if (
-    terminalStatus !== 'done'
-    || adjudication.verdict !== 'accept'
-    || !adjudication.derived.checkIn.learningDecision?.learned
-    || !deps.learnFromCheckIn
-  ) return
-  try {
-    deps.learnFromCheckIn({
-      checkIn: adjudication.derived.checkIn,
-      projection: adjudication.derived.projection,
-      now: adjudication.derived.now,
-      terminalStatus,
-      terminalReason,
-    })
-  } catch (error) {
-    logAgentMetric('site_card_learning_checkin_failed', {
-      runId: outcome.runId,
-      taskId,
-      reason: error instanceof Error ? error.message : String(error),
-    })
   }
 }

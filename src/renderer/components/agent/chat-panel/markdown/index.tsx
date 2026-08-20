@@ -1,5 +1,10 @@
 import { useMemo } from 'react'
 import { MessageCodeBlock } from './MessageCodeBlock'
+import { LocalFileChip, LocalMentionChip } from './LocalReferenceChip'
+import {
+  parseLocalReferences,
+  type MentionResolution,
+} from './local-reference'
 
 // ---------------------------------------------------------------------------
 // Lightweight Markdown renderer (no external deps)
@@ -258,19 +263,48 @@ export function extractInlineCitationSources(content: string): InlineCitationSou
   return [...sources.values()]
 }
 
+function renderLocalReferenceParts(
+  text: string,
+  mentions: Readonly<Record<string, MentionResolution>> | null | undefined,
+  keyPrefix: string,
+): React.ReactNode[] {
+  return parseLocalReferences(text).map((part, index) => {
+    if (typeof part === 'string') return part
+    if (part.kind === 'mention') {
+      return (
+        <LocalMentionChip
+          key={`${keyPrefix}-m-${index}`}
+          name={part.name}
+          resolution={mentions?.[part.name] ?? null}
+        />
+      )
+    }
+    return (
+      <LocalFileChip
+        key={`${keyPrefix}-f-${index}`}
+        path={part.path}
+        line={part.line}
+      />
+    )
+  })
+}
+
 /** Parse inline formatting: **bold**, *italic*, `code`, and safe http(s) links. */
-export function renderInline(text: string): React.ReactNode[] {
+export function renderInline(
+  text: string,
+  mentions?: Readonly<Record<string, MentionResolution>> | null,
+): React.ReactNode[] {
   const parts: React.ReactNode[] = []
   // Ordering is significant: code consumes URLs before the bare-URL branch;
   // labelled links consume their URL before that same branch.
-  const regex = /(`([^`]+)`)|(\[([^\]]+)\]\((https?:\/\/[^\s)]+)\))|(\*\*(.+?)\*\*)|(\*(.+?)\*)|(https?:\/\/[^\s<>"'`]+)/g
+  const regex = /(`([^`]+)`)|(\[([^\]]+)\]\(((?:https?:\/\/|file:\/\/)[^\s)]+)\))|(\*\*(.+?)\*\*)|(\*(.+?)\*)|(https?:\/\/[^\s<>"'`]+)/g
   let lastIndex = 0
   let match: RegExpExecArray | null
   let key = 0
 
   while ((match = regex.exec(text)) !== null) {
     if (match.index > lastIndex) {
-      parts.push(text.slice(lastIndex, match.index))
+      parts.push(...renderLocalReferenceParts(text.slice(lastIndex, match.index), mentions, `pre-${key}`))
     }
     if (match[1]) {
       // inline code
@@ -289,8 +323,18 @@ export function renderInline(text: string): React.ReactNode[] {
         </code>
       )
     } else if (match[3]) {
-      // labelled Markdown link; regex only admits http(s)
-      parts.push(externalLink(match[5], match[4], `a-${key++}`))
+      const href = match[5]
+      if (href.startsWith('file://')) {
+        let path = href.slice('file://'.length)
+        try {
+          path = decodeURI(path)
+        } catch {
+          // Keep the raw file URL path if it is not valid URI encoding.
+        }
+        parts.push(<LocalFileChip key={`a-${key++}`} path={path} />)
+      } else {
+        parts.push(externalLink(href, match[4], `a-${key++}`))
+      }
     } else if (match[6]) {
       // bold
       parts.push(<strong key={`b-${key++}`}>{match[7]}</strong>)
@@ -306,7 +350,7 @@ export function renderInline(text: string): React.ReactNode[] {
   }
 
   if (lastIndex < text.length) {
-    parts.push(text.slice(lastIndex))
+    parts.push(...renderLocalReferenceParts(text.slice(lastIndex), mentions, `tail-${key}`))
   }
 
   return parts.length > 0 ? parts : [text]
@@ -317,7 +361,15 @@ function StreamCaret({ visible }: { visible: boolean }) {
   return <span className="ready-stream-caret" data-ready-stream-caret="true" aria-hidden="true" />
 }
 
-export function MarkdownContent({ content, streaming = false }: { content: string; streaming?: boolean }) {
+export function MarkdownContent({
+  content,
+  streaming = false,
+  mentions,
+}: {
+  content: string
+  streaming?: boolean
+  mentions?: Readonly<Record<string, MentionResolution>> | null
+}) {
   const nodes = useMemo(() => parseMarkdown(content), [content])
   const citationSources = useMemo(() => extractInlineCitationSources(content), [content])
   const lastContentIndex = useMemo(() => {
@@ -364,7 +416,7 @@ export function MarkdownContent({ content, streaming = false }: { content: strin
             const fontSize = node.level === 1 ? 16 : node.level === 2 ? 14.5 : 13.5
             return (
               <div key={idx} style={{ fontSize, fontWeight: 700, marginTop: 6, marginBottom: 2 }}>
-                {renderInline(node.content)}
+                {renderInline(node.content, mentions)}
                 <StreamCaret visible={showCaret} />
               </div>
             )
@@ -383,7 +435,7 @@ export function MarkdownContent({ content, streaming = false }: { content: strin
               <div key={idx} style={{ display: 'flex', gap: 6, paddingLeft: 4 }}>
                 <span style={{ flexShrink: 0, color: 'var(--text-gray)' }}>&bull;</span>
                 <span>
-                  {renderInline(node.content)}
+                  {renderInline(node.content, mentions)}
                   <StreamCaret visible={showCaret} />
                 </span>
               </div>
@@ -402,7 +454,7 @@ export function MarkdownContent({ content, streaming = false }: { content: strin
                   {numberedOrdinals[idx]}.
                 </span>
                 <span>
-                  {renderInline(node.content)}
+                  {renderInline(node.content, mentions)}
                   <StreamCaret visible={showCaret} />
                 </span>
               </div>
@@ -421,7 +473,7 @@ export function MarkdownContent({ content, streaming = false }: { content: strin
                           key={`h-${columnIndex}`}
                           style={{ textAlign: aligns[columnIndex] || undefined }}
                         >
-                          {renderInline(header)}
+                          {renderInline(header, mentions)}
                         </th>
                       ))}
                     </tr>
@@ -434,7 +486,7 @@ export function MarkdownContent({ content, streaming = false }: { content: strin
                             key={`c-${rowIndex}-${columnIndex}`}
                             style={{ textAlign: aligns[columnIndex] || undefined }}
                           >
-                            {renderInline(row[columnIndex] || '')}
+                            {renderInline(row[columnIndex] || '', mentions)}
                           </td>
                         ))}
                       </tr>
@@ -449,7 +501,7 @@ export function MarkdownContent({ content, streaming = false }: { content: strin
           default:
             return (
               <div key={idx}>
-                {renderInline(node.content)}
+                {renderInline(node.content, mentions)}
                 <StreamCaret visible={showCaret} />
               </div>
             )

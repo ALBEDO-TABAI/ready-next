@@ -22,8 +22,11 @@ import {
   authorizeRoot,
   collectFileInventory,
   normalizeExplicitWorkspaceRoots,
+  resolveFrozenFileRef,
   toJsonString,
   type FileManagementToolContext,
+  type FrozenDirectoryAlias,
+  type FrozenFileAlias,
 } from './file-management-runtime'
 
 export {
@@ -51,6 +54,40 @@ const FILE_MUTATION_TOOLS = new Set([
   'file_organize_apply',
   'file_organize_undo',
 ])
+
+export function resolveFileToolDirectoryAliases(envelope: unknown): FrozenDirectoryAlias[] | null {
+  if (!envelope || typeof envelope !== 'object' || Array.isArray(envelope)) return null
+  const resources = (envelope as { resources?: unknown }).resources
+  if (!Array.isArray(resources)) return null
+  const aliases: FrozenDirectoryAlias[] = []
+  for (const resource of resources) {
+    if (!resource || typeof resource !== 'object' || Array.isArray(resource)) continue
+    const candidate = resource as {
+      id?: unknown
+      kind?: unknown
+      source?: unknown
+      name?: unknown
+      path?: unknown
+      canRead?: unknown
+    }
+    if (candidate.kind !== 'folder_reference' || candidate.source !== 'folder_reference' || candidate.canRead !== true) {
+      continue
+    }
+    const logicalResourceId = typeof candidate.id === 'string' ? candidate.id.trim() : ''
+    const name = typeof candidate.name === 'string' ? candidate.name.trim() : ''
+    const path = typeof candidate.path === 'string' ? candidate.path.trim() : ''
+    if (!logicalResourceId || !name || !path) continue
+    try {
+      const canonical = realpathSync(path)
+      if (!canonical || !statSync(canonical).isDirectory() || !validateWorkspaceRoot(canonical).ok) continue
+    } catch {
+      continue
+    }
+    if (aliases.some((alias) => alias.logicalResourceId === logicalResourceId)) continue
+    aliases.push({ logicalResourceId, name, path })
+  }
+  return aliases.length > 0 ? aliases : null
+}
 
 export function resolveFileToolWorkspaceRoots(
   toolName: string,
@@ -90,21 +127,25 @@ export function resolveFileToolExplicitReadablePaths(envelope: unknown): string[
 
 export function resolveFileToolExplicitReadableResources(
   envelope: unknown,
-): Array<{ path: string; currentDigest: string }> | null {
+): FrozenFileAlias[] | null {
   if (!envelope || typeof envelope !== 'object' || Array.isArray(envelope)) return null
   const resources = (envelope as { resources?: unknown }).resources
   if (!Array.isArray(resources)) return null
-  const resourcesByPath = new Map<string, { path: string; currentDigest: string }>()
+  const resourcesByPath = new Map<string, FrozenFileAlias>()
   for (const resource of resources) {
     if (!resource || typeof resource !== 'object' || Array.isArray(resource)) continue
     const candidate = resource as {
       kind?: unknown
       source?: unknown
+      id?: unknown
+      name?: unknown
       path?: unknown
       canRead?: unknown
       currentDigest?: unknown
     }
     if (candidate.kind !== 'attachment' || candidate.source !== 'user_attachment' || candidate.canRead !== true) continue
+    const logicalResourceId = typeof candidate.id === 'string' ? candidate.id.trim() : ''
+    const name = typeof candidate.name === 'string' ? candidate.name.trim() : ''
     const path = typeof candidate.path === 'string' ? candidate.path.trim() : ''
     try {
       const canonical = path ? realpathSync(path) : ''
@@ -112,8 +153,8 @@ export function resolveFileToolExplicitReadableResources(
         && /^[a-f0-9]{64}$/.test(candidate.currentDigest)
         ? candidate.currentDigest
         : ''
-      if (canonical && currentDigest && statSync(canonical).isFile()) {
-        resourcesByPath.set(canonical, { path: canonical, currentDigest })
+      if (logicalResourceId && name && canonical && currentDigest && statSync(canonical).isFile()) {
+        resourcesByPath.set(canonical, { logicalResourceId, name, path: canonical, currentDigest })
       }
     } catch {
       // Missing or changed paths do not retain authority.
@@ -403,11 +444,14 @@ async function resolveReadableDocumentPath(
   const explicitReadableResources = context?.explicitReadableResources ?? []
   const explicitReadablePaths = context?.explicitReadablePaths ?? []
   if (explicitReadableResources.length || explicitReadablePaths.length) {
+    const frozenFile = resolveFrozenFileRef(path, explicitReadableResources)
     const allowed = new Map<string, string | null>([
       ...explicitReadablePaths.map((candidate) => [candidate, null] as const),
       ...explicitReadableResources.map((resource) => [resource.path, resource.currentDigest] as const),
     ])
-    for (const candidate of buildFileLocatePathCandidates(path)) {
+    const candidates = buildFileLocatePathCandidates(path)
+    if (frozenFile && !candidates.includes(frozenFile.path)) candidates.unshift(frozenFile.path)
+    for (const candidate of candidates) {
       if (!isAbsolute(candidate)) continue
       try {
         const canonical = await realpath(candidate)
@@ -868,7 +912,13 @@ async function runFileInventory(
   engine: SearchEngine,
   context?: FileManagementToolContext,
 ): Promise<string> {
-  const auth = await authorizeRoot(typeof args.rootPath === 'string' ? args.rootPath : '', engine, context?.workspaceRoots)
+  const requestedRoot = typeof args.rootPath === 'string' ? args.rootPath : ''
+  const auth = await authorizeRoot(
+    requestedRoot,
+    engine,
+    context?.workspaceRoots,
+    context?.directoryAliases,
+  )
   if (!auth.ok) return toJsonString(auth.output)
   const limit = typeof args.limit === 'number'
     ? Math.max(1, Math.min(MAX_INVENTORY_LIMIT, Math.floor(args.limit)))

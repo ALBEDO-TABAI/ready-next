@@ -149,13 +149,6 @@ export interface RunFinalizerDeps {
     ): void
   } | null
   now?: () => Date
-  learnFromCheckIn?: (input: {
-    checkIn: CheckInRecord
-    projection: TaskProjectionRecord
-    now: Date
-    terminalStatus?: string | null
-    terminalReason?: string | null
-  }) => void
   verifyRunStateTerminal?: (runStatePath: string) => boolean
   verifyArtifactExists?: (path: string) => boolean
 }

@@ -10,7 +10,10 @@ import {
   SquareTerminal,
   Wrench,
 } from 'lucide-react'
-import { formatSingleLinePreview } from '../../../../modules/agent/toolTracePreview'
+import {
+  resolveToolActivityPresentation,
+  type ToolActivityKind,
+} from '../../../../modules/agent/toolActivityPresentation'
 import type {
   ToolTimelineItem,
   ToolTimelineStatus,
@@ -50,91 +53,7 @@ function timelineVisualState(status: ToolTimelineStatus): TaskCardVisualState {
   return 'done'
 }
 
-export type ToolActivityKind =
-  | 'research'
-  | 'browser'
-  | 'image'
-  | 'document'
-  | 'file'
-  | 'skill'
-  | 'command'
-  | 'generic'
-
-export interface ToolActivityPresentation {
-  kind: ToolActivityKind
-  title: string
-}
-
-function toolTimelineItemTitle(item: ToolTimelineItem): string {
-  return formatSingleLinePreview(item.status === 'running' ? item.callText : (item.resultText || item.callText))
-}
-
-function toolNameFromItem(item: ToolTimelineItem): string {
-  if (item.toolName) return item.toolName.toLowerCase()
-  return item.callText?.match(/^([a-zA-Z_][\w:.-]*)\s*\(/)?.[1]?.toLowerCase() || ''
-}
-
-function toolDescriptor(item: ToolTimelineItem): string {
-  if (!item.callDetail) return ''
-  let detail: Record<string, unknown>
-  try {
-    const parsed = JSON.parse(item.callDetail) as unknown
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return ''
-    detail = parsed as Record<string, unknown>
-  } catch {
-    return ''
-  }
-  for (const key of ['query', 'url', 'prompt', 'title', 'name', 'relativePath', 'path', 'command']) {
-    const value = detail[key]
-    if (typeof value !== 'string' || !value.trim()) continue
-    const compact = formatSingleLinePreview(value.trim())
-    return [...compact].length > 64 ? `${[...compact].slice(0, 63).join('')}…` : compact
-  }
-  return ''
-}
-
-function activityTitle(
-  item: ToolTimelineItem,
-  labels: { running: string; done: string; error: string },
-): string {
-  const label = labels[item.status]
-  const descriptor = toolDescriptor(item)
-  return descriptor ? `${label} · ${descriptor}` : label
-}
-
-type ToolActivityRule = {
-  kind: ToolActivityKind
-  matches: (name: string) => boolean
-  labels: { running: string; done: string; error: string }
-}
-
-const TOOL_ACTIVITY_RULES: ToolActivityRule[] = [
-  { kind: 'research', matches: (name) => name === 'web_search_domains', labels: { running: '查询搜索范围', done: '搜索范围已确认', error: '搜索范围查询失败' } },
-  { kind: 'research', matches: (name) => name === 'web_search', labels: { running: '搜索网页', done: '网页检索完成', error: '网页检索失败' } },
-  { kind: 'research', matches: (name) => name === 'web_fetch', labels: { running: '读取网页', done: '网页已读取', error: '网页读取失败' } },
-  { kind: 'research', matches: (name) => name === 'web_clip_url', labels: { running: '保存网页资料', done: '网页资料已保存', error: '网页资料保存失败' } },
-  { kind: 'file', matches: (name) => name === 'present_file', labels: { running: '整理文件', done: '文件已整理', error: '文件整理失败' } },
-  { kind: 'image', matches: (name) => name === 'generate_image', labels: { running: '生成图片', done: '图片已生成', error: '图片生成失败' } },
-  { kind: 'browser', matches: (name) => name.startsWith('browser_') || name === 'use_browser', labels: { running: '操作网页', done: '网页操作完成', error: '网页操作失败' } },
-  { kind: 'document', matches: (name) => name.startsWith('document_') || name.startsWith('widget_'), labels: { running: '处理文档', done: '文档处理完成', error: '文档处理失败' } },
-  { kind: 'file', matches: (name) => name.startsWith('file_') || name.startsWith('tag_forge_') || name === 'apply_patch' || /^skill_(?:read|write|export)_artifact$/.test(name), labels: { running: '处理文件', done: '文件处理完成', error: '文件处理失败' } },
-  { kind: 'command', matches: (name) => /command|shell|exec|stdin/.test(name), labels: { running: '运行本地命令', done: '本地命令完成', error: '本地命令失败' } },
-  { kind: 'skill', matches: (name) => name === 'use_skill' || name.startsWith('skill_'), labels: { running: '运行技能', done: '技能运行完成', error: '技能运行失败' } },
-]
-
-export function resolveToolActivityPresentation(item: ToolTimelineItem): ToolActivityPresentation {
-  const rule = TOOL_ACTIVITY_RULES.find((candidate) => candidate.matches(toolNameFromItem(item)))
-  if (!rule) {
-    return {
-      kind: 'generic',
-      title: toolTimelineItemTitle(item),
-    }
-  }
-  return {
-    kind: rule.kind,
-    title: activityTitle(item, rule.labels),
-  }
-}
+export { resolveToolActivityPresentation }
 
 function ToolActivityIcon({ kind }: { kind: ToolActivityKind }) {
   const Icon = {
@@ -275,7 +194,7 @@ export function ToolTimelineRow({
               gap: 5,
             }}
           >
-            {item.toolName ? (
+            {item.toolName && !item.hideToolName ? (
               <div
                 className="t-data"
                 data-typography-role="data"

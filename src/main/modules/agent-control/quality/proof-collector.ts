@@ -77,6 +77,22 @@ const RESEARCH_SOURCE_TOOL_NAMES = new Set([
 ])
 const SOURCE_RECEIPT_MATERIAL_CAP = 64 * 1024
 
+// Only tools whose successful contract writes, exports, clips, or presents a
+// file may turn their returned path fields into delivery proof. Read/inspect
+// tools commonly return paths too, but those paths describe inputs, not work
+// produced by the current turn.
+export const ARTIFACT_DELIVERY_TOOL_NAMES = new Set([
+  'skill_write_artifact',
+  'skill_export_artifact',
+  'present_file',
+  'web_clip_url',
+])
+
+const PROJECTION_ARTIFACT_DELIVERY_TOOL_NAMES = new Set([
+  'browser_download',
+  'generate_image',
+])
+
 function extractHttpUrls(text: string): string[] {
   const urls = new Set<string>()
   for (const match of String(text || '').matchAll(/https?:\/\/[^\s<>"'`\])}]+/gi)) {
@@ -190,8 +206,28 @@ function parseJsonRecord(text: string): Record<string, unknown> | null {
   }
 }
 
-function isFailedToolOutput(output: ToolExecutionOutput): boolean {
+function browserDownloadSucceeded(
+  toolName: string | undefined,
+  output: ToolExecutionOutput,
+  data: Record<string, unknown> | null,
+): boolean | null {
+  if (toolName !== 'browser_download') return null
+  const successCount = Number(data?.success)
+  if (!Number.isFinite(successCount)) return null
+  if (successCount <= 0) return false
+  const projection = recordValue(output.projectionPatch)
+  const artifacts = Array.isArray(projection?.recentArtifacts)
+    ? projection.recentArtifacts
+    : Array.isArray(projection?.artifactRefs)
+      ? projection.artifactRefs
+      : []
+  return artifacts.length > 0
+}
+
+function isFailedToolOutput(output: ToolExecutionOutput, toolName?: string): boolean {
   const data = recordValue(output.data) || parseJsonRecord(output.text)
+  const browserDownloadSuccess = browserDownloadSucceeded(toolName, output, data)
+  if (browserDownloadSuccess !== null) return !browserDownloadSuccess
   const status = typeof data?.status === 'string' ? data.status.trim().toLowerCase() : ''
   const mutationReason = typeof data?.mutationReason === 'string' ? data.mutationReason.trim() : ''
   if (
@@ -244,9 +280,9 @@ export function isNonterminalToolOutput(output: ToolExecutionOutput): boolean {
     || status === 'recoverable_paused'
 }
 
-export function isSuccessfulToolOutput(output: ToolExecutionOutput): boolean {
+export function isSuccessfulToolOutput(output: ToolExecutionOutput, toolName?: string): boolean {
   const normalized = normalizeToolExecutionOutput(output)
-  return !isFailedToolOutput(normalized) && !isNonterminalToolOutput(normalized)
+  return !isFailedToolOutput(normalized, toolName) && !isNonterminalToolOutput(normalized)
 }
 
 function cleanArtifactPathCandidate(value: unknown): string | null {
@@ -268,15 +304,6 @@ function collectPathCandidatesFromRecord(record: Record<string, unknown> | null,
     const path = cleanArtifactPathCandidate(record[key])
     if (path) paths.add(path)
   }
-  const artifacts = Array.isArray(record.recentArtifacts)
-    ? record.recentArtifacts
-    : Array.isArray(record.artifactRefs)
-      ? record.artifactRefs
-      : []
-  for (const artifact of artifacts) {
-    const path = cleanArtifactPathCandidate(recordValue(artifact)?.path)
-    if (path) paths.add(path)
-  }
   const autoExport = recordValue(record.autoExport)
   const autoExportPath = cleanArtifactPathCandidate(autoExport?.absolutePath)
   const autoExportTarget = cleanArtifactPathCandidate(autoExport?.targetPath)
@@ -292,6 +319,19 @@ function collectPathCandidatesFromRecord(record: Record<string, unknown> | null,
   }
 }
 
+function collectPublishedArtifactPaths(record: Record<string, unknown> | null, paths: Set<string>): void {
+  if (!record) return
+  const artifacts = Array.isArray(record.recentArtifacts)
+    ? record.recentArtifacts
+    : Array.isArray(record.artifactRefs)
+      ? record.artifactRefs
+      : []
+  for (const artifact of artifacts) {
+    const path = cleanArtifactPathCandidate(recordValue(artifact)?.path)
+    if (path) paths.add(path)
+  }
+}
+
 function collectVerifiedDocumentSavePaths(toolName: string, record: Record<string, unknown> | null, paths: Set<string>): void {
   if (toolName !== 'document_save_tab' || !record || record.documentSaved !== true) return
   const nestedDocument = recordValue(record.document)
@@ -301,17 +341,6 @@ function collectVerifiedDocumentSavePaths(toolName: string, record: Record<strin
   }
   if (nestedDocument) {
     const path = cleanArtifactPathCandidate(nestedDocument.path)
-    if (path) paths.add(path)
-  }
-}
-
-function collectPathCandidatesFromText(text: string, paths: Set<string>): void {
-  for (const match of text.matchAll(/`([^`]+)`/g)) {
-    const path = cleanArtifactPathCandidate(match[1])
-    if (path) paths.add(path)
-  }
-  for (const match of text.matchAll(/(?:已保存文档|已另存文档|保存路径|saved path|saved file|path)\s*[:：]\s*([^\n\r]+)/gi)) {
-    const path = cleanArtifactPathCandidate(match[1])
     if (path) paths.add(path)
   }
 }
@@ -358,8 +387,9 @@ export function collectToolOutputProofs(
   now: Date,
   context: { runId?: string } = {},
 ): ProofRef[] {
+  if (toolName === 'declare_completion_criteria') return []
   const normalized = normalizeToolExecutionOutput(output)
-  if (isFailedToolOutput(normalized) || isNonterminalToolOutput(normalized)) return []
+  if (isFailedToolOutput(normalized, toolName) || isNonterminalToolOutput(normalized)) return []
 
   const summary = normalized.text || JSON.stringify(normalized.data || normalized.projectionPatch || {})
   const proofs: ProofRef[] = []
@@ -373,10 +403,11 @@ export function collectToolOutputProofs(
     || transactionConfirmationFromRecord(recordValue(normalized.projectionPatch))
   if (toolName === 'document_save_tab') {
     collectVerifiedDocumentSavePaths(toolName, dataRecord, paths)
-  } else {
+  } else if (ARTIFACT_DELIVERY_TOOL_NAMES.has(toolName)) {
     collectPathCandidatesFromRecord(dataRecord, paths)
-    collectPathCandidatesFromRecord(recordValue(normalized.projectionPatch), paths)
-    collectPathCandidatesFromText(normalized.text, paths)
+  }
+  if (PROJECTION_ARTIFACT_DELIVERY_TOOL_NAMES.has(toolName)) {
+    collectPublishedArtifactPaths(recordValue(normalized.projectionPatch), paths)
   }
   const documentSavePath = toolName === 'document_save_tab' ? [...paths][0] : null
   proofs.push(documentSavePath

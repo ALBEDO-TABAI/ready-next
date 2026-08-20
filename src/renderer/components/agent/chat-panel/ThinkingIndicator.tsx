@@ -1,4 +1,5 @@
 import { AgentStatusDot } from '../../ui/dot-matrix/AgentStatusDot'
+import { renderInline } from './markdown'
 
 export function ThinkingIndicator({ message }: { message?: string | null } = {}) {
   const summary = message?.trim() || null
@@ -13,7 +14,7 @@ export function ThinkingIndicator({ message }: { message?: string | null } = {})
       aria-label={label}
     >
       <AgentStatusDot state="running" size={12} />
-      <span className="ready-thinking-state-label">{label}</span>
+      <span className="ready-thinking-state-label">{renderInline(label)}</span>
       {!summary ? <span className="ready-thinking-state-trail" aria-hidden="true">···</span> : null}
     </div>
   )

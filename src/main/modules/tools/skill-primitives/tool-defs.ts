@@ -41,21 +41,21 @@ export const PRIMITIVE_TOOL_DEFS: SkillToolDef[] = [
   {
     name: 'skill_write_artifact',
     description:
-      '把字符串写入技能 artifact 目录（<outputsRoot>/<skillId>/）下的路径；优先传相对路径，也接受 artifact 根内的绝对路径。禁止根外绝对路径 / ~/ / .. / symlink 穿越 / 保留文件名（SKILL.md、ready-skill.json、skill.workflow.json）。同名文件默认覆盖；长文档需要补齐尾部章节时可用 mode=append 追加。用户要求输出/保存到指定文件夹时，先用本工具写相对路径，随后用 skill_export_artifact 导出到目标绝对路径。',
+      '把字符串写入技能产物。Ready 已冻结目标文件夹时，只接受 declare_completion_criteria 声明过的相对文件路径，首次 expectedVersion=empty，后续必须使用上一条返回的 version；返回逻辑引用和哈希，不返回暂存绝对路径。普通 skill 仍写入自己的 artifact 目录。',
     kind: 'primitive',
     params: zodObjectToParamList(SKILL_PRIMITIVE_SCHEMAS.skill_write_artifact),
   },
   {
     name: 'skill_read_artifact',
     description:
-      '从技能 artifact 目录（<outputsRoot>/<skillId>/）、当前任务读根或 skill 托管资源目录读取文件。优先传相对路径；如果上一条工具返回了允许根内的绝对日志路径，也可以直接传入。默认最多读取 32K 字符，超出部分会被截断并标注 truncated=true。',
+      '读取技能产物。Ready 已冻结目标文件夹时，使用相对文件路径和明确 version 读取不可变逻辑版本；普通 skill 仍从自己的 artifact 或任务读根读取。',
     kind: 'primitive',
     params: zodObjectToParamList(SKILL_PRIMITIVE_SCHEMAS.skill_read_artifact),
   },
   {
     name: 'skill_export_artifact',
     description:
-      '把技能 artifact 目录内的一个既有产物导出到用户指定的绝对文件路径。只读取当前 skill artifact 根内的 relativePath；默认不覆盖目标文件。用户要求输出/保存到某个文件夹、@[文件夹] 或指定文件名时，必须在最终回复前完成导出。',
+      '把已暂存产物交付到用户冻结的目标文件夹。Ready 交付必须传 destinationResourceId、targetRelativePath、expectedVersion 和 expectedSha256；目标不同内容时绝不覆盖或改名，成功只认写后回读。普通 skill 可继续使用 targetPath。',
     kind: 'primitive',
     params: zodObjectToParamList(SKILL_PRIMITIVE_SCHEMAS.skill_export_artifact),
   },

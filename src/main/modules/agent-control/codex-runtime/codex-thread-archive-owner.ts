@@ -1,3 +1,5 @@
+import { statSync } from 'node:fs'
+
 import type { CodexThread } from './codex-native-runtime'
 import { digestCanonicalJson } from './codex-model-gateway-contract'
 import {
@@ -32,10 +34,25 @@ type ListReadback = {
   threads: CodexThread[]
 }
 
+function sameThreadDirectory(left: string, right: string): boolean {
+  if (left === right) return true
+  if (process.platform !== 'darwin') return false
+  try {
+    const leftStat = statSync(left)
+    const rightStat = statSync(right)
+    return leftStat.isDirectory()
+      && rightStat.isDirectory()
+      && leftStat.dev === rightStat.dev
+      && leftStat.ino === rightStat.ino
+  } catch {
+    return false
+  }
+}
+
 function exactArchivedThread(intent: CodexThreadArchiveIntentRead, thread: CodexThread): boolean {
   return thread.id === intent.codexThreadId
     && thread.sessionId === intent.codexSessionId
-    && thread.cwd === intent.isolatedThreadCwd
+    && sameThreadDirectory(thread.cwd, intent.isolatedThreadCwd)
     && thread.parentThreadId === null
     && thread.forkedFromId === null
     && thread.source === 'vscode'

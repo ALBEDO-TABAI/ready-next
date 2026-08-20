@@ -7,6 +7,7 @@ import { TaskProjectionRepository } from '../main/modules/repositories/task-proj
 import { RunMetaRepository } from '../main/modules/agent-control/task-projection/run-meta-repository'
 import { reconcileStartupRunsOnStartup } from '../main/modules/app-control/startup-run-reconciler'
 import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
+import { commitCanonicalCodexFailure } from './helpers/codex-product-closeout'
 import { BrowserTargetClaimRepository, BrowserTargetClaimService } from '../main/modules/browser-engine/browser-target-claims'
 import { isAgentBrowserError } from '../main/modules/browser-engine/agent-browser-errors'
 import {
@@ -458,7 +459,7 @@ test('Codex failure closeout retries preserve the first durable terminal identit
       status: 'running',
     }, Date.parse(startedAt))
 
-    const first = await repository.commitCodexFailureCoreCloseout({
+    const first = await commitCanonicalCodexFailure(repository, {
       parentTaskId,
       ownerRunId,
       conversationId: scopeId,
@@ -471,7 +472,7 @@ test('Codex failure closeout retries preserve the first durable terminal identit
       error: 'upstream_unavailable',
       now: '2026-08-07T01:00:02.000Z',
     })
-    const retry = await repository.commitCodexFailureCoreCloseout({
+    const retry = await commitCanonicalCodexFailure(repository, {
       parentTaskId,
       ownerRunId,
       conversationId: scopeId,
@@ -510,10 +511,10 @@ test('Codex failure closeout retries preserve the first durable terminal identit
     assert.equal(
       db.prepare(`SELECT COUNT(*) AS count FROM chat_messages WHERE conversation_id = ? AND role = 'assistant'`)
         .get<{ count: number }>(scopeId)?.count,
-      0,
+      1,
     )
     await assert.rejects(
-      repository.commitCodexFailureCoreCloseout({
+      commitCanonicalCodexFailure(repository, {
         parentTaskId,
         ownerRunId,
         conversationId: scopeId,
@@ -526,7 +527,7 @@ test('Codex failure closeout retries preserve the first durable terminal identit
         error: 'upstream_unavailable',
         now: '2026-08-07T01:06:00.000Z',
       }),
-      /codex_failure_closeout_terminal_retry_conflict/,
+      /core_closeout_terminal_retry_conflict/,
     )
   } finally {
     db.close()
@@ -549,22 +550,22 @@ test('Codex failure closeout rolls back when the running owner record is missing
     const cases = [
       {
         suffix: 'run-missing',
-        expectedError: /codex_failure_closeout_run_missing/,
+        expectedError: /conversation_message_visibility_run_missing/,
         runState: null,
       },
       {
         suffix: 'scope-mismatch',
-        expectedError: /codex_failure_closeout_run_mismatch/,
+        expectedError: /conversation_message_visibility_run_scope_mismatch/,
         runState: 'foreign_scope',
       },
       {
         suffix: 'binding-mismatch',
-        expectedError: /codex_failure_closeout_run_mismatch/,
+        expectedError: /core_closeout_run_binding_mismatch/,
         runState: 'foreign_binding',
       },
       {
         suffix: 'status-mismatch',
-        expectedError: /codex_failure_closeout_run_mismatch/,
+        expectedError: /core_closeout_run_not_running/,
         runState: 'terminal_status',
       },
     ] as const
@@ -625,7 +626,7 @@ test('Codex failure closeout rolls back when the running owner record is missing
       const callsBefore = participantCalls
 
       await assert.rejects(
-        repository.commitCodexFailureCoreCloseout({
+        commitCanonicalCodexFailure(repository, {
           parentTaskId,
           ownerRunId,
           conversationId: scopeId,

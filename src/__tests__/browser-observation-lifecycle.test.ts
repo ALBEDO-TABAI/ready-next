@@ -279,6 +279,7 @@ test('executor resolves mixed browser tool arguments before enforcing the observ
     taskId: 'parent-observation-lifecycle',
     parentTaskId: 'parent-observation-lifecycle',
     agent: 'butler',
+    invoker: 'host',
   } as never)
   const normalized = normalizeToolExecutionOutput(output)
   assert.equal(normalized.data.errorKind, 'browser_observation_required')
@@ -312,6 +313,7 @@ test('the observation response stays observe-only after its first read clears th
     taskId: 'parent-observation-lifecycle',
     parentTaskId: 'parent-observation-lifecycle',
     agent: 'butler',
+    invoker: 'host',
   } as never)
   const normalized = normalizeToolExecutionOutput(output)
   assert.equal(normalized.data.errorKind, 'browser_observation_required')

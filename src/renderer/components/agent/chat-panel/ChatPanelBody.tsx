@@ -3,7 +3,6 @@ import type { CSSProperties, ReactNode, RefObject } from 'react'
 import { X, Puzzle, Copy, StickyNote } from 'lucide-react'
 import type {
   AttachmentPreviewState,
-  Agent,
   AgentMessage,
   ChatAttachment,
   ScopeRunState,
@@ -61,6 +60,7 @@ interface ChatPanelBodyProps extends Omit<TaskToolSnapshotProps, 'children' | 'c
   onSetInputSuggestion: (value: string) => void
   onToggleToolTrace: () => void
   onCopyMessage: (id: string, content: string) => void | Promise<void>
+  onRetryProductTurn: (readyRunId: string) => void | Promise<void>
   agentSelectionMenu: AgentSelectionMenuState | null
   onCloseAgentSelectionMenu: () => void
   copyTextToClipboard: (content: string) => boolean | Promise<boolean>
@@ -81,10 +81,6 @@ interface ChatPanelBodyProps extends Omit<TaskToolSnapshotProps, 'children' | 'c
   attachments: ChatAttachment[]
   removeAttachment: (id: string) => void
   inputValue: string
-  agents: Agent[]
-  currentAgent: string
-  currentAgentAvatar: string
-  currentAgentDisplayName: string
   isChannelScope: boolean
   actionAuthorizationMode: ActionAuthorizationMode
   isDragOver: boolean
@@ -94,7 +90,6 @@ interface ChatPanelBodyProps extends Omit<TaskToolSnapshotProps, 'children' | 'c
   onSend: () => void
   onStop: () => void
   onPickFiles: () => void | Promise<void>
-  onAgentSelect: (agentName: string) => void
   onActionAuthorizationModeChange: (mode: ActionAuthorizationMode) => void | Promise<void>
   onSkillReference: (skill: ReadySkillReference) => void
   onReferenceSelect: (attachment: ChatAttachment) => void
@@ -125,9 +120,6 @@ export function ChatPanelBody(props: ChatPanelBodyProps): React.ReactElement {
     parseSerializedToolTraceSnapshot,
     setTaskSectionExpanded,
     onOpenTaskArtifact,
-    onDismissMemoryCapture,
-    onUndoMemoryCapture,
-    onSupplementMemoryCapture,
     onOpenScope,
     onCancelDetachedTask,
     onCancelChildRun,
@@ -140,6 +132,7 @@ export function ChatPanelBody(props: ChatPanelBodyProps): React.ReactElement {
     onSetInputSuggestion,
     onToggleToolTrace,
     onCopyMessage,
+    onRetryProductTurn,
     agentSelectionMenu,
     onCloseAgentSelectionMenu,
     copyTextToClipboard,
@@ -153,10 +146,6 @@ export function ChatPanelBody(props: ChatPanelBodyProps): React.ReactElement {
     attachments,
     removeAttachment,
     inputValue,
-    agents,
-    currentAgent,
-    currentAgentAvatar,
-    currentAgentDisplayName,
     isChannelScope,
     actionAuthorizationMode,
     isDragOver,
@@ -166,7 +155,6 @@ export function ChatPanelBody(props: ChatPanelBodyProps): React.ReactElement {
     onSend,
     onStop,
     onPickFiles,
-    onAgentSelect,
     onActionAuthorizationModeChange,
     onSkillReference,
     onReferenceSelect,
@@ -229,9 +217,6 @@ export function ChatPanelBody(props: ChatPanelBodyProps): React.ReactElement {
       parseSerializedToolTraceSnapshot={parseSerializedToolTraceSnapshot}
       setTaskSectionExpanded={setTaskSectionExpanded}
       onOpenTaskArtifact={onOpenTaskArtifact}
-      onDismissMemoryCapture={onDismissMemoryCapture}
-      onUndoMemoryCapture={onUndoMemoryCapture}
-      onSupplementMemoryCapture={onSupplementMemoryCapture}
       onOpenScope={onOpenScope}
       onCancelDetachedTask={onCancelDetachedTask}
       onCancelChildRun={onCancelChildRun}
@@ -273,6 +258,7 @@ export function ChatPanelBody(props: ChatPanelBodyProps): React.ReactElement {
             onSetInputSuggestion={onSetInputSuggestion}
             onToggleToolTrace={onToggleToolTrace}
             onCopyMessage={onCopyMessage}
+            onRetryProductTurn={onRetryProductTurn}
             onAgentSelectionContextMenu={onAgentSelectionContextMenu}
             onAttachmentPreview={handleAttachmentPreview}
             onReferenceSelect={onReferenceSelect}
@@ -560,17 +546,12 @@ export function ChatPanelBody(props: ChatPanelBodyProps): React.ReactElement {
               composerShellStyle={composerShellStyle}
               filePool={filePool}
               filePoolCount={filePool.length}
-              currentAgent={currentAgent}
-              currentAgentAvatar={currentAgentAvatar}
-              currentAgentDisplayName={currentAgentDisplayName}
-              agents={agents}
               isChannelScope={isChannelScope}
               actionAuthorizationMode={actionAuthorizationMode}
               onInputChange={onInputChange}
               onSend={onSend}
               onStop={onStop}
               onPickFiles={onPickFiles}
-              onAgentSelect={onAgentSelect}
               onActionAuthorizationModeChange={onActionAuthorizationModeChange}
               onSkillReference={onSkillReference}
               onReferenceSelect={onReferenceSelect}

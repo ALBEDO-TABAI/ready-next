@@ -5,10 +5,8 @@ import type { AIConfigLoad } from '../../claude-bridge/direct-chat-ai-config'
 import { normalizeSessionSnapshotForSeed } from '../compaction/compact-agent-input'
 import type {
   RunMessage,
-  TaskProjectionRecord,
   TurnTranscriptEvent,
 } from '../contracts/run-contracts'
-import type { CheckInRecord } from '../quality/task-adjudicator'
 import { loadScopeSessionSnapshot } from '../session/scope-session-snapshot'
 import { isSafeMessageVisibilityEpoch, readScopeContextEpoch } from '../session/scope-context-epoch'
 import type {
@@ -20,7 +18,6 @@ import type { SkillTurnIdentity } from '../skills/skill-turn-identity'
 import type { PreparedSkillTurnTruth } from '../contracts/browser-workflow-control'
 import type { ToolDefinition } from '../tools-runtime/tool-definition'
 import { sanitizeAssistantText } from '../tools-runtime/tool-call-text-guard'
-import type { ToolExecutionOutput } from '../tools-runtime/tool-result-types'
 import { errorMessage } from './agent-sdk-execution-utils'
 import type { AgentSdkIntentTracker } from './agent-sdk-intent-tracker'
 import type { AgentSdkRunLifecycle } from './agent-sdk-run-lifecycle'
@@ -72,18 +69,6 @@ export interface TurnOrchestratorHost {
   hasBrowserController(): boolean
   readVerifiedBrowserWorkflowEvidence(browserTaskId: string): VerifiedBrowserWorkflowEvidence | null
   hasPendingTaskProjection(scopeId?: string): boolean
-  learnSiteCardFromToolFailure(
-    toolName: string,
-    args: Record<string, unknown> | undefined,
-    output: ToolExecutionOutput
-  ): void
-  learnSiteCardsFromCheckIn(input: {
-    checkIn: CheckInRecord
-    projection: TaskProjectionRecord
-    now: Date
-    terminalStatus?: string | null
-    terminalReason?: string | null
-  }): void
   newSession(name: string, systemPrompt?: string): void
   resolveMapPlaceAmbiguityIfNeeded(params: {
     bridgeResults: ToolBridgeResultItem[]

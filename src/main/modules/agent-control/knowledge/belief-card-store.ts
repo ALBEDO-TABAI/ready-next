@@ -2,11 +2,19 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFile
 import { join, resolve, sep, dirname } from 'path'
 import { randomUUID } from 'crypto'
 import { logAgentMetric } from '../metrics'
-import type {
-  AgentSystemStudioAgentStatus,
-  AgentSystemStudioRoutingCard,
-  AgentSystemStudioRoutingDisabledReason,
-} from '../../../../shared/agent-system-studio'
+
+type AgentLifecycleStatus = 'active' | 'disabled' | 'retired' | 'merged'
+type RoutingDisabledReason = 'card_staged' | 'missing_triggers' | 'target_inactive' | 'invalid_card'
+interface RoutingCardInventoryItem {
+  relPath: string
+  title: string
+  description: string
+  status: string
+  targetAgentId: string
+  targetStatus: AgentLifecycleStatus | 'missing'
+  triggers: string[] | null
+  disabledReason: RoutingDisabledReason | null
+}
 
 /**
  * Belief card store (EP1-K1). File-is-truth knowledge cards under the agent
@@ -377,15 +385,15 @@ export class BeliefCardStore {
       }))
   }
 
-  listRoutingCardInventory(agents: ReadonlyArray<{ id: string; status: AgentSystemStudioAgentStatus }> = []): AgentSystemStudioRoutingCard[] {
+  listRoutingCardInventory(agents: ReadonlyArray<{ id: string; status: AgentLifecycleStatus }> = []): RoutingCardInventoryItem[] {
     const statusByAgent = new Map(agents.map((agent) => [agent.id, agent.status]))
     return this.listAllCardFiles('knowledge')
       .filter((file) => /(^|\/)knowledge\/routing-[a-z0-9._-]+\.md$/.test(file.relPath))
       .map((file) => {
         const targetAgentId = file.relPath.replace(/^.*routing-/, '').replace(/\.md$/, '')
-        const targetStatus: AgentSystemStudioAgentStatus | 'missing' = statusByAgent.get(targetAgentId) ?? 'missing'
+        const targetStatus: AgentLifecycleStatus | 'missing' = statusByAgent.get(targetAgentId) ?? 'missing'
         if (!file.card) {
-          const invalid: AgentSystemStudioRoutingCard = {
+          const invalid: RoutingCardInventoryItem = {
             relPath: file.relPath,
             title: 'Invalid routing card',
             description: 'Card frontmatter is invalid or unreadable.',
@@ -399,7 +407,7 @@ export class BeliefCardStore {
         }
         const status = file.card.frontmatter.status
         const triggers = file.card.frontmatter.triggers ?? null
-        const disabledReason: AgentSystemStudioRoutingDisabledReason | null =
+        const disabledReason: RoutingDisabledReason | null =
           status !== 'active'
             ? (status === 'staged' ? 'card_staged' : 'invalid_card')
             : !triggers || triggers.length === 0

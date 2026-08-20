@@ -106,7 +106,6 @@ function build(raw) {
     recentArtifacts: projection?.recentArtifacts ?? [],
     taskContinuation: projection?.taskContinuation,
     progress: projection?.progress,
-    memoryCapture: projection.memoryCapture,
     blockedReason: projection?.blockedReason,
     error: projection.error,
     updatedAt: projection.updatedAt,

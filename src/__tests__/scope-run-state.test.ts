@@ -591,9 +591,6 @@ describe('scope run state helpers', () => {
         executionKind: 'interactive',
         jobId: null,
         artifactRefs: [],
-        memoryRefs: [],
-        triggerHits: [],
-        contextBudget: null,
         ownerResourceId: null,
         lastEvidenceAt: null,
         blockedReason: null,
@@ -646,7 +643,6 @@ describe('scope run state helpers', () => {
         waitingFor: 'none',
         resumableActions: ['cancel'],
         recentArtifacts: [],
-        memoryCapture: null
       }
     )
 
@@ -946,45 +942,6 @@ describe('scope run state helpers', () => {
     assert.strictEqual(patch.blockedReason, '后台仍在运行')
     assert.strictEqual(patch.waitingFor, 'background')
     assert.strictEqual(patch.taskContinuation?.detachedTaskId, 'dst-skill')
-  })
-
-  it('accepts typed memory refs and keeps session recall separate from resident memory', () => {
-    const patch = deriveScopeRunStatePatch(
-      {
-        phase: 'tool_running',
-        timestamp: '2026-04-13T10:00:00.000Z',
-        memoryRefs: [
-          {
-            id: 'resident-1',
-            layer: 'l0',
-            sourceType: 'resident_agent',
-            title: '项目约定',
-            loadedAt: '2026-04-13T10:00:00.000Z'
-          },
-          {
-            id: 'recall-1',
-            layer: 'recall',
-            sourceType: 'session_recall',
-            title: '旧会话品牌复盘',
-            loadedAt: '2026-04-13T10:00:00.000Z'
-          }
-        ],
-        latestText: '继续执行'
-      },
-      null
-    )
-
-    assert.deepStrictEqual(
-      patch.memoryRefs?.map((item) => ({
-        id: item.id,
-        layer: item.layer,
-        sourceType: item.sourceType
-      })),
-      [
-        { id: 'resident-1', layer: 'l0', sourceType: 'resident_agent' },
-        { id: 'recall-1', layer: 'recall', sourceType: 'session_recall' }
-      ]
-    )
   })
 
   /**

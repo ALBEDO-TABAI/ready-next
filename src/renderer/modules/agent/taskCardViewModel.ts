@@ -1,6 +1,5 @@
 import type {
   AgentArtifact,
-  ScopeRunMemoryCapture,
   ScopeRunState,
   ToolTraceEvent,
 } from './types'
@@ -14,7 +13,7 @@ import type { TaskCardVisualState } from './task-status-vocabulary'
 import { filterUserVisibleToolTraceEvents, sanitizeInternalAgentDisplayText } from './toolTraceVisibility'
 import { isAwaitingUserInteractionState } from '../../../shared/task-interaction-state'
 
-export type TaskSectionKey = 'overview' | 'plan' | 'details' | 'artifacts' | 'memory'
+export type TaskSectionKey = 'overview' | 'plan' | 'details' | 'artifacts'
 
 export type TaskDisclosureState = Partial<Record<TaskSectionKey, boolean>>
 
@@ -45,7 +44,6 @@ export interface TaskCardRunLike {
   recentArtifacts?: AgentArtifact[]
   taskContinuation?: ScopeRunState['taskContinuation']
   progress?: ScopeRunState['progress']
-  memoryCapture?: ScopeRunMemoryCapture | null
   executionDiagnostics?: ScopeRunState['executionDiagnostics']
   taskType?: TaskProjectionRecordData['taskType']
   module?: TaskProjectionRecordData['module'] | null
@@ -612,7 +610,6 @@ export function createDefaultTaskDisclosureState(run: TaskCardRunLike): TaskDisc
     plan: false,
     details: false,
     artifacts: false,
-    memory: Boolean(run.memoryCapture && run.memoryCapture.status === 'ready'),
   }
 }
 
@@ -642,7 +639,6 @@ export function buildTaskCardViewModel(
     : null
   const detailGroups = buildDetailGroups(run.toolTrace || [])
   const recentArtifacts = run.recentArtifacts || []
-  const memoryItems = run.memoryCapture?.items || []
   const structuredHandoffMessage = run.progress?.handoff?.userMessage
   const completedTerminal = isCompletedTerminalRun(run)
   const rawHandoffSource = completedTerminal
@@ -697,13 +693,6 @@ export function buildTaskCardViewModel(
         expanded: Boolean(effectiveDisclosure.artifacts),
         count: recentArtifacts.length,
         summary: recentArtifacts[0]?.label || null,
-      },
-      memory: {
-        key: 'memory',
-        title: '记忆',
-        expanded: Boolean(effectiveDisclosure.memory),
-        count: memoryItems.length,
-        summary: memoryItems[0]?.title || null,
       },
     },
     detailGroups,

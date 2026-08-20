@@ -25,6 +25,12 @@ export function taskTypeBadgeLabel(taskType: TaskCardRun['taskType'] | undefined
       return '直答'
     case 'short_task':
       return '短任务'
+    case 'artifact_task':
+      return '文件任务'
+    case 'transaction_task':
+      return '执行任务'
+    case 'research_artifact_task':
+      return '研究交付'
     case 'multi_step_task':
       return '多步任务'
     case 'media_task':
@@ -85,8 +91,7 @@ export function isTaskVisible(run: Omit<TaskCardRun, '__brand'> | null | undefin
     run.taskTitle ||
     run.taskSummary ||
     run.progress ||
-    (run.steps && run.steps.length > 0) ||
-    (run.memoryCapture && run.memoryCapture.status !== 'dismissed')
+    (run.steps && run.steps.length > 0)
   )
 }
 

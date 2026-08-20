@@ -15,8 +15,7 @@ import {
   type RequestEnvelope,
   type RequestEnvelopeResource,
 } from '../contracts/request-envelope'
-import { classifyIntent, type IntentClassification } from '../intent-classifier'
-import { TAG_FORGE_EXCLUSIVE_TOOL_NAMES } from './codex-product-action-map'
+import type { IntentClassification } from '../intent-classifier'
 import { composeCodexTurnToolSnapshot } from './codex-tool-surface-composition'
 import { isCodexFolderTagForgeAlias } from './codex-folder-tag-forge-alias'
 import {
@@ -27,10 +26,7 @@ import { digestCanonicalJson, instructionTranscriptDigest } from './codex-model-
 import { createCodexProfileRouteSnapshot } from './codex-profile-admission'
 import { sha256 } from './codex-product-surface-ingress'
 import { CodexToolBridgeError } from './codex-tool-bridge'
-import {
-  buildReadyTurnToolAuthorization,
-  type ReadyToolTurnSnapshot,
-} from './codex-tool-surface'
+import type { ReadyToolTurnSnapshot } from './codex-tool-surface'
 import {
   type PreparedCodexExternalReadSlice,
 } from './codex-external-read-slice'
@@ -46,7 +42,6 @@ import {
   buildCodexThreadDeveloperInstructions,
   CODEX_HOST_OVERLAY,
 } from './codex-thread-instructions'
-import { createRunBudgetSeed } from '../task-projection/run-budget-policy'
 
 export function buildCodexProductRequestEnvelope(
   request: SendScopedRequest,
@@ -176,6 +171,8 @@ export function readCodexPreparedActionAuthorizationEnvelope(
     workbenchMode?: import('../contracts/request-envelope').TrustedRequestEnvironment['workbenchMode']
     browserPageRef?: NonNullable<import('../contracts/request-envelope').TrustedRequestEnvironment['browserPageRef']>
   }
+  outputContract?: PreparedCodexProductRun['outputContract']
+  retryArtifactSources?: import('./codex-product-run-preparer').CodexRetryArtifactSource[]
 } {
   const authorities = product.prepared.resourceAuthorities ?? []
   const browserPageRef = product.prepared.browserPageRef
@@ -183,6 +180,12 @@ export function readCodexPreparedActionAuthorizationEnvelope(
     actionAuthorizationMode: parseActionAuthorizationMode(
       product.prepared.actionAuthorizationMode,
     ),
+    ...(product.prepared.outputContract
+      ? { outputContract: product.prepared.outputContract }
+      : {}),
+    ...(product.prepared.ingress.attemptKind === 'explicit_retry'
+      ? { retryArtifactSources: product.prepared.ingress.artifactSources ?? [] }
+      : {}),
     ...(authorities.length > 0 || browserPageRef
       ? {
           ...(authorities.length > 0 ? {
@@ -218,26 +221,6 @@ export function createCodexProductUpstreamProfileSnapshot(input: {
   config: AIModelConfig
 }): ReturnType<typeof createCodexProfileRouteSnapshot> {
   return createCodexProfileRouteSnapshot(input)
-}
-
-export function createCodexProductBudgetSeed(input: {
-  skillAuthorization: { mode: 'none' | 'selected' }
-  intentClassification?: Pick<IntentClassification, 'primaryDomain'>
-}): { maxIterations: number; maxToolCalls: number; maxParallelToolGroups: 1 } {
-  const taskType = input.skillAuthorization.mode === 'selected'
-    ? 'multi_step_task'
-    : (
-        input.intentClassification?.primaryDomain === 'research'
-        || input.intentClassification?.primaryDomain === 'browser'
-      )
-      ? 'browser_transaction'
-      : 'direct_answer'
-  const preset = createRunBudgetSeed(taskType)
-  return {
-    maxIterations: Math.max(preset.maxIterations, preset.maxToolCalls + 1),
-    maxToolCalls: preset.maxToolCalls,
-    maxParallelToolGroups: 1,
-  }
 }
 
 export function resourceReferenceForAnchor(anchor: CodexCurrentDocumentAnchor) {

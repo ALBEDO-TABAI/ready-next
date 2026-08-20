@@ -114,13 +114,16 @@ import type {
   ReadyBoardState,
 } from '../../shared/ready-board'
 import type {
-  AgentSystemStudioConfirmContentEditInput,
-  AgentSystemStudioContentEditProposal,
-  AgentSystemStudioRejectContentEditInput,
-  AgentSystemStudioSnapshot,
-  AgentSystemStudioStageContentEditInput,
-} from '../../shared/agent-system-studio'
-import type { SpecialistAgentBlueprint } from '../../shared/agent-specialist-blueprint'
+  ReadyMemoryAddRequest,
+  ReadyMemoryConversationPolicyRequest,
+  ReadyMemoryDeleteRequest,
+  ReadyMemoryGlobalPolicyRequest,
+  ReadyMemoryPinRequest,
+  ReadyMemoryReadRequest,
+  ReadyMemoryResetRequest,
+  ReadyMemoryUpdateRequest,
+  ReadyMemoryView,
+} from '../../shared/ready-memory'
 
 // Type declarations for window.electronAPI exposed by preload
 
@@ -159,25 +162,6 @@ interface AgentChannelConfigData {
   updatedAt: string
   lastError?: string | null
   lastSeenAt?: string | null
-}
-
-interface AgentRegistryRecordData {
-  id: string
-  name: string
-  charter: string | null
-  personaRef: string | null
-  status: 'active' | 'disabled' | 'retired' | 'merged'
-  parentAgentId: string | null
-  derivationReason: string | null
-  mergedIntoAgentId: string | null
-  createdAt: string
-}
-
-interface AgentRegistryKnowledgeCardData {
-  relPath: string
-  title: string
-  description: string
-  status: string
 }
 
 interface AgentHeartbeatSnapshot {
@@ -314,59 +298,6 @@ interface ScopeRunActivityNarrationData {
   status: 'streaming' | 'completed'
 }
 
-interface ScopeRunMemoryRefData {
-  id: string
-  layer: 'l0' | 'l1' | 'l2' | 'recall'
-  sourceType:
-    | 'resident_agent'
-    | 'resident_user'
-    | 'scope_memory'
-    | 'trigger_rule'
-    | 'session_recall'
-  title: string
-  summary?: string | null
-  path?: string | null
-  triggerId?: string | null
-  sensitive?: boolean
-  loadedAt: string
-}
-
-interface ScopeRunTriggerHitData {
-  id: string
-  label: string
-  module?:
-    | 'browser'
-    | 'document'
-    | 'design'
-    | 'skill'
-    | 'video'
-    | 'rss'
-    | 'calendar'
-    | 'feishu'
-    | 'research'
-    | 'system'
-  blocking: boolean
-  refs: string[]
-}
-
-interface ScopeRunContextBudgetData {
-  totalChars: number
-  l0Chars: number
-  l1Chars: number
-  l2Chars: number
-  rulesChars?: number
-  knowledgeIndexChars?: number
-  agentRoutingChars?: number
-  recallChars?: number
-  autoRecallChars?: number
-  sectionChars?: Record<string, number>
-  totalBytes?: number
-  sectionBytes?: Record<string, number>
-  truncations?: string[]
-  truncationReasons?: Record<string, 'section_budget'>
-  droppedRefs: string[]
-}
-
 type ScopeRunTaskStepStatusData = 'pending' | 'running' | 'blocked' | 'done' | 'error'
 type ScopeRunWaitingForData = 'input' | 'confirmation' | 'agent_result' | 'background' | 'verification' | 'none'
 type ActionAuthorizationModeData = 'ask' | 'auto' | 'full'
@@ -433,21 +364,6 @@ interface ScopeRunSkillHandoffData {
   taskPath: string | null
   outputPath: string | null
   updatedAt: string | null
-}
-
-interface ScopeRunMemoryCaptureItemData {
-  memoryId: string
-  category: 'user_preference' | 'summary'
-  sourceType: 'resident_agent' | 'resident_user' | 'scope_memory' | 'trigger_rule'
-  title: string
-  summary?: string | null
-}
-
-interface ScopeRunMemoryCaptureData {
-  status: 'ready' | 'dismissed' | 'reverted'
-  createdAt: string
-  note?: string | null
-  items: ScopeRunMemoryCaptureItemData[]
 }
 
 interface ScopeRunExecutionDiagnosticsData {
@@ -602,7 +518,6 @@ interface ScopeRunSummaryData {
   resumableActions?: ScopeRunResumableActionData[]
   recentArtifacts?: ScopeRunEventData['artifactRefs']
   taskContinuation?: ScopeRunTaskContinuationData | null
-  memoryCapture?: ScopeRunMemoryCaptureData | null
   executionDiagnostics?: ScopeRunExecutionDiagnosticsData | null
   contextUsage?: ContextUsageSnapshot | null
   blockedReason?: string | null
@@ -791,9 +706,6 @@ interface ScopeRunEventData {
     createdAt: string
     meta?: Record<string, unknown>
   }>
-  memoryRefs?: ScopeRunMemoryRefData[]
-  triggerHits?: ScopeRunTriggerHitData[]
-  contextBudget?: ScopeRunContextBudgetData | null
   contextUsage?: ContextUsageSnapshot | null
   ownerResourceId?: string
   lastEvidenceAt?: string
@@ -812,7 +724,6 @@ interface ScopeRunEventData {
   resumableActions?: ScopeRunResumableActionData[]
   recentArtifacts?: ScopeRunEventData['artifactRefs']
   taskContinuation?: ScopeRunTaskContinuationData | null
-  memoryCapture?: ScopeRunMemoryCaptureData | null
   executionDiagnostics?: ScopeRunExecutionDiagnosticsData | null
   stepMetrics?: {
     toolCalls: number
@@ -839,19 +750,26 @@ interface ElectronAgentAPI {
   getRuntimeStatus: () => Promise<IPCResponse<AgentRuntimeStatusData>>
   getCapabilityRuntimeSnapshot: (config?: unknown) => Promise<IPCResponse<CapabilityRuntimeSnapshotData>>
   listChannels: () => Promise<IPCResponse<AgentChannelConfigData[]>>
-  listRegistry: () => Promise<IPCResponse<AgentRegistryRecordData[]>>
-  listRegistryKnowledge: (id: string) => Promise<IPCResponse<AgentRegistryKnowledgeCardData[]>>
-  getSystemStudioSnapshot: () => Promise<IPCResponse<AgentSystemStudioSnapshot>>
-  stageSystemStudioContentEdit: (payload: AgentSystemStudioStageContentEditInput) => Promise<IPCResponse<AgentSystemStudioContentEditProposal>>
-  confirmSystemStudioContentEdit: (proposalId: AgentSystemStudioConfirmContentEditInput['proposalId']) => Promise<IPCResponse<AgentSystemStudioContentEditProposal>>
-  rejectSystemStudioContentEdit: (proposalId: AgentSystemStudioRejectContentEditInput['proposalId']) => Promise<IPCResponse<AgentSystemStudioContentEditProposal>>
-  listSpecialistBlueprints: () => Promise<IPCResponse<SpecialistAgentBlueprint[]>>
-  listConversationScopes: (agent?: string) => Promise<IPCResponse<ConversationScopeData[]>>
+  listConversationScopes: () => Promise<IPCResponse<ConversationScopeData[]>>
   listScopeRuns: (payload?: {
     channelKey?: string
     statuses?: string[]
     limit?: number
   }) => Promise<IPCResponse<ScopeRunSummaryData[]>>
+  readProductTurnPresentation: (
+    readyRunId: string,
+  ) => Promise<IPCResponse<import('../../shared/ipc-contracts/agent-runtime').ProductTurnReceipt>>
+  readProductTurnPresentations: (
+    readyRunIds: string[],
+  ) => Promise<IPCResponse<import('../../shared/ipc-contracts/agent-runtime').ProductTurnReceipt[]>>
+  readReadyMemory: (request: ReadyMemoryReadRequest) => Promise<IPCResponse<ReadyMemoryView>>
+  setReadyMemoryGlobalPolicy: (request: ReadyMemoryGlobalPolicyRequest) => Promise<IPCResponse<ReadyMemoryView>>
+  setReadyMemoryConversationPolicy: (request: ReadyMemoryConversationPolicyRequest) => Promise<IPCResponse<ReadyMemoryView>>
+  addReadyMemory: (request: ReadyMemoryAddRequest) => Promise<IPCResponse<ReadyMemoryView>>
+  updateReadyMemory: (request: ReadyMemoryUpdateRequest) => Promise<IPCResponse<ReadyMemoryView>>
+  pinReadyMemory: (request: ReadyMemoryPinRequest) => Promise<IPCResponse<ReadyMemoryView>>
+  deleteReadyMemory: (request: ReadyMemoryDeleteRequest) => Promise<IPCResponse<ReadyMemoryView>>
+  resetReadyMemory: (request: ReadyMemoryResetRequest) => Promise<IPCResponse<ReadyMemoryView>>
   readCodexLifecycleSnapshot: (
     request: LifecycleRequest,
   ) => Promise<IPCResponse<LifecycleOperationProjection>>
@@ -3310,240 +3228,6 @@ interface ElectronChatAPI {
   ) => Promise<{ success: boolean; data?: ChatFileForAI; error?: string }>
 }
 
-// =============================================================================
-// User Profile API Types
-// =============================================================================
-
-interface UserProfileData {
-  id: string
-  name?: string
-  avatarUrl?: string
-  preferredLanguage: string
-  communicationStyle?: string
-  preferencesJson?: Record<string, unknown>
-  createdAt: number
-  updatedAt: number
-}
-
-interface ElectronUserProfileAPI {
-  get: (userId: string) => Promise<{ success: boolean; data?: UserProfileData; error?: string }>
-  list: () => Promise<{ success: boolean; data?: UserProfileData[]; error?: string }>
-  create: (profile: {
-    id?: string
-    name?: string
-    avatarUrl?: string
-    preferredLanguage?: string
-    communicationStyle?: string
-    preferencesJson?: Record<string, unknown>
-  }) => Promise<{ success: boolean; data?: UserProfileData; error?: string }>
-  update: (
-    userId: string,
-    updates: {
-      name?: string
-      avatarUrl?: string
-      preferredLanguage?: string
-      communicationStyle?: string
-      preferencesJson?: Record<string, unknown>
-    }
-  ) => Promise<{ success: boolean; error?: string }>
-  delete: (userId: string) => Promise<{ success: boolean; error?: string }>
-}
-
-// =============================================================================
-// Agent Personality API Types
-// =============================================================================
-
-interface AgentPersonalityData {
-  id: string
-  agentName: string
-  displayName?: string
-  personalityText: string
-  tone?: string
-  metaJson?: Record<string, unknown>
-  createdAt: number
-  updatedAt: number
-}
-
-interface ElectronAgentPersonalityAPI {
-  get: (
-    agentName: string
-  ) => Promise<{ success: boolean; data?: AgentPersonalityData; error?: string }>
-  list: () => Promise<{ success: boolean; data?: AgentPersonalityData[]; error?: string }>
-  create: (personality: {
-    agentName: string
-    displayName?: string
-    personalityText: string
-    tone?: string
-    metaJson?: Record<string, unknown>
-  }) => Promise<{ success: boolean; data?: AgentPersonalityData; error?: string }>
-  update: (
-    agentName: string,
-    updates: {
-      displayName?: string
-      personalityText?: string
-      tone?: string
-      metaJson?: Record<string, unknown>
-    }
-  ) => Promise<{ success: boolean; error?: string }>
-  delete: (agentName: string) => Promise<{ success: boolean; error?: string }>
-}
-
-// =============================================================================
-// Memory API Types
-// =============================================================================
-
-type MemoryLayer = 'l0' | 'l1' | 'l2'
-type MemoryCategory =
-  | 'summary'
-  | 'learning'
-  | 'trigger'
-  | 'rule'
-  | 'user_preference'
-  | 'global_fact'
-  | 'personality_trait'
-type MemorySourceType = 'resident_agent' | 'resident_user' | 'scope_memory' | 'trigger_rule'
-
-interface MemoryEntry {
-  id: string
-  layer: MemoryLayer
-  scopeId: string | null
-  userId?: string | null
-  sourceType: MemorySourceType
-  category: MemoryCategory
-  title: string
-  summary: string | null
-  contentKey: string
-  priority: number
-  accessCount: number
-  lastAccessedAt: number | null
-  createdAt: number
-  updatedAt: number
-  expiresAt: number | null
-  archivedAt: number | null
-  tags: string[] | null
-  meta: Record<string, unknown>
-}
-
-interface TriggerDefinition {
-  id: string
-  label: string
-  module: string | null
-  pattern: string
-  patternFlags: string
-  blocking: boolean
-  priority: number
-  enabled: boolean
-  hitCount: number
-  lastHitAt: number | null
-  createdAt: number
-  updatedAt: number
-  meta: Record<string, unknown>
-}
-
-interface MemoryQueryFilters {
-  layer?: MemoryLayer
-  scopeId?: string | null
-  userId?: string
-  sourceType?: MemorySourceType
-  category?: MemoryCategory
-  includeArchived?: boolean
-  limit?: number
-  offset?: number
-}
-
-interface TriggerFilters {
-  enabled?: boolean
-  module?: string
-  limit?: number
-}
-
-interface MemoryStats {
-  totalMemories: number
-  byLayer: Record<MemoryLayer, number>
-  byCategory: Record<MemoryCategory, number>
-  bySourceType: Record<MemorySourceType, number>
-  archivedCount: number
-  avgAccessCount: number
-}
-
-interface MemoryLifecycleStatus {
-  running: boolean
-  lastMaintenanceAt: string | null
-}
-
-interface MemoryMaintenanceResult {
-  archivedL1Count: number
-  archivedL2Count: number
-  prunedCount: number
-  optimizedTriggers: number
-  timestamp: string
-}
-
-type BeliefCardStatusData = 'staged' | 'active' | 'rejected' | 'invalid'
-type BeliefCardRiskLevelData = 'low' | 'medium' | 'high'
-
-interface BeliefCardSettingsItemData {
-  relPath: string
-  scopeId: string
-  title: string
-  description: string
-  confidence: string | null
-  tag: string | null
-  status: BeliefCardStatusData
-  created: string | null
-  source: string | null
-  stage: string | null
-  site: string | null
-  siteRiskLevel: BeliefCardRiskLevelData | null
-  siteRiskAuthority: 'code' | null
-  isSiteCard: boolean
-  isRiskSuggestion: boolean
-  bodyPreview: string
-}
-
-interface BeliefCardSettingsSummaryData {
-  total: number
-  staged: number
-  active: number
-  rejected: number
-  invalid: number
-  agentScoped: number
-  siteCards: number
-  highRiskSiteCards: number
-  riskSuggestions: number
-}
-
-interface BeliefCardSettingsSnapshotData {
-  cards: BeliefCardSettingsItemData[]
-  summary: BeliefCardSettingsSummaryData
-  maintenance: {
-    lifecycleRunning: boolean
-    lastLifecycleMaintenanceAt: string | null
-  }
-}
-
-interface ElectronMemoryAPI {
-  query: (filters: MemoryQueryFilters) => Promise<IPCResponse<MemoryEntry[]>>
-  create: (entry: Partial<MemoryEntry>) => Promise<IPCResponse<MemoryEntry>>
-  update: (id: string, updates: Partial<MemoryEntry>) => Promise<IPCResponse<void>>
-  delete: (id: string) => Promise<IPCResponse<void>>
-  stats: () => Promise<IPCResponse<MemoryStats>>
-  createFromConversation: (payload: {
-    scopeId: string
-    category: 'summary' | 'learning'
-    title: string
-    content: string
-    tags?: string[]
-    priority?: number
-  }) => Promise<IPCResponse<{ memoryId: string }>>
-}
-
-interface ElectronMemoryCardsAPI {
-  list: () => Promise<IPCResponse<BeliefCardSettingsSnapshotData>>
-  transition: (payload: { relPath: string; action: 'approve' | 'reject' }) =>
-    Promise<IPCResponse<BeliefCardSettingsSnapshotData>>
-}
-
 // P0-4 (2026-07-02 P0 visibility batch) — run quality dashboard payload.
 interface RunQualityDayData {
   date: string
@@ -3626,26 +3310,6 @@ interface EmergenceFeedEntryData {
 
 interface ElectronEmergenceAPI {
   feed: () => Promise<IPCResponse<EmergenceFeedEntryData[]>>
-}
-
-interface ElectronTriggerAPI {
-  list: (filters?: TriggerFilters) => Promise<IPCResponse<TriggerDefinition[]>>
-  create: (trigger: Partial<TriggerDefinition>) => Promise<IPCResponse<TriggerDefinition>>
-  update: (id: string, updates: Partial<TriggerDefinition>) => Promise<IPCResponse<void>>
-  createWithMemories: (payload: {
-    label: string
-    pattern: string
-    patternFlags?: string
-    memoryIds: string[]
-    module?: string
-    blocking?: boolean
-    priority?: number
-  }) => Promise<IPCResponse<{ triggerId: string }>>
-}
-
-interface ElectronMemoryLifecycleAPI {
-  status: () => Promise<IPCResponse<MemoryLifecycleStatus>>
-  runMaintenance: () => Promise<IPCResponse<MemoryMaintenanceResult>>
 }
 
 // =============================================================================
@@ -3736,13 +3400,9 @@ interface ElectronTagForgeAPI {
 
 interface ElectronAPI {
   agent: ElectronAgentAPI
-  memory: ElectronMemoryAPI
-  memoryCards: ElectronMemoryCardsAPI
   runQuality: ElectronRunQualityAPI
   runFeedback: ElectronRunFeedbackAPI
   emergence: ElectronEmergenceAPI
-  trigger: ElectronTriggerAPI
-  memoryLifecycle: ElectronMemoryLifecycleAPI
   browser: ElectronBrowserAPI
   document: ElectronDocumentAPI
   board: ElectronBoardAPI
@@ -3758,8 +3418,6 @@ interface ElectronAPI {
   tagForge: ElectronTagForgeAPI
   pet: ElectronPetAPI
   chat: ElectronChatAPI
-  userProfile: ElectronUserProfileAPI
-  agentPersonality: ElectronAgentPersonalityAPI
   tools?: ElectronToolsAPI
   ui?: ElectronUIAPI
   agentInteraction?: ElectronAgentInteractionAPI
@@ -3808,23 +3466,11 @@ declare global {
 }
 
 export type {
-  MemoryLayer,
-  MemoryCategory,
-  MemoryEntry,
-  TriggerDefinition,
-  MemoryQueryFilters,
-  TriggerFilters,
-  MemoryStats,
-  MemoryLifecycleStatus,
-  MemoryMaintenanceResult,
-  BeliefCardSettingsItemData,
-  BeliefCardSettingsSnapshotData,
   RunQualityDayData,
   RunQualityStatsData,
   RunFeedbackRecordData,
   EmergenceCardData,
   EmergenceFeedEntryData,
-  AgentRegistryKnowledgeCardData,
   TaskProjectionRecordData,
   RecoveryRecordData,
   ReferenceSkillHintData,

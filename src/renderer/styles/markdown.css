@@ -651,6 +651,58 @@
   font-family: var(--font-numeric);
 }
 
+.ready-local-ref-chip {
+  display: inline-flex;
+  max-width: 100%;
+  align-items: baseline;
+  margin: 0 1px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--text-muted) 10%, var(--surface-card-bg, transparent));
+  color: var(--text-light);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.86em;
+  line-height: 1.5;
+  vertical-align: 0.05em;
+}
+
+.ready-local-ref-chip-dir {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ready-local-ref-chip-file {
+  flex-shrink: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-body);
+  cursor: pointer;
+  font: inherit;
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, currentColor 36%, transparent);
+  text-underline-offset: 2px;
+}
+
+.ready-local-ref-chip-file:hover {
+  color: var(--text-title);
+  text-decoration-color: currentColor;
+}
+
+.ready-local-ref-chip-mention {
+  gap: 0;
+  color: var(--text-body);
+}
+
+.ready-local-ref-chip-at {
+  color: var(--text-light);
+}
+
+.ready-local-ref-chip-name {
+  font-family: var(--font-ui);
+}
+
 .ready-stream-caret {
   display: inline-block;
   width: 1.5px;

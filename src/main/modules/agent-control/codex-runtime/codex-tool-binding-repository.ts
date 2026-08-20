@@ -13,6 +13,15 @@ import {
   type ReadyBoundTurnToolAuthorization,
   type ReadyToolSurface,
 } from './codex-tool-surface'
+import {
+  effectiveCodexFolderOutputToolNames,
+  readCodexFolderOutputActivation,
+} from './codex-folder-output-activation'
+import {
+  assertReadyMemorySnapshot,
+  canonicalReadyMemoryJson,
+  type ReadyMemorySnapshot,
+} from '../ready-memory'
 
 export type CodexToolBridgeExecutionBinding = Readonly<{
   bindingId: string
@@ -28,7 +37,13 @@ export type CodexToolBridgeExecutionBinding = Readonly<{
     maxIterations: number
     maxToolCalls: number
     maxParallelToolGroups: number
+    lanes: Readonly<{
+      ordinary: Readonly<{ maxIterations: number; maxToolCalls: number; maxParallelToolGroups: number }>
+      delivery: Readonly<{ maxIterations: number; maxToolCalls: number; maxParallelToolGroups: number }>
+      final: Readonly<{ maxIterations: 1 }>
+    }>
   }>
+  readyMemorySnapshot: ReadyMemorySnapshot
   toolSurface: ReadyToolSurface
   authorization: ReadyBoundTurnToolAuthorization
 }>
@@ -51,6 +66,12 @@ export type CodexToolResponseCallAdmission = Readonly<{
 }>
 
 type RunResult = { changes?: number }
+const DELIVERY_TOOL_NAMES = new Set([
+  'declare_completion_criteria',
+  'skill_write_artifact',
+  'skill_read_artifact',
+  'skill_export_artifact',
+])
 
 function changes(result: unknown): number {
   return Number((result as RunResult | null)?.changes || 0)
@@ -72,18 +93,48 @@ function parseProductBudgetSeed(value: string): CodexToolBridgeExecutionBinding[
   }
   const budget = parsed as Record<string, unknown>
   if (
-    Object.keys(budget).length !== 3
+    Object.keys(budget).length !== 4
     || !Number.isSafeInteger(budget.maxIterations)
     || Number(budget.maxIterations) <= 0
     || !Number.isSafeInteger(budget.maxToolCalls)
     || Number(budget.maxToolCalls) < 0
     || !Number.isSafeInteger(budget.maxParallelToolGroups)
     || Number(budget.maxParallelToolGroups) < 0
+    || !budget.lanes || typeof budget.lanes !== 'object' || Array.isArray(budget.lanes)
   ) throw new CodexBindingRepositoryError('tool_bridge_budget_snapshot_invalid')
+  const lanes = budget.lanes as Record<string, unknown>
+  const parseLane = (value: unknown, allowZeroIterations: boolean) => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      throw new CodexBindingRepositoryError('tool_bridge_budget_snapshot_invalid')
+    }
+    const lane = value as Record<string, unknown>
+    if (Object.keys(lane).length !== 3
+      || !Number.isSafeInteger(lane.maxIterations)
+      || Number(lane.maxIterations) < (allowZeroIterations ? 0 : 1)
+      || !Number.isSafeInteger(lane.maxToolCalls) || Number(lane.maxToolCalls) < 0
+      || !Number.isSafeInteger(lane.maxParallelToolGroups)
+      || Number(lane.maxParallelToolGroups) < 0) {
+      throw new CodexBindingRepositoryError('tool_bridge_budget_snapshot_invalid')
+    }
+    return {
+      maxIterations: Number(lane.maxIterations),
+      maxToolCalls: Number(lane.maxToolCalls),
+      maxParallelToolGroups: Number(lane.maxParallelToolGroups),
+    }
+  }
+  const ordinary = parseLane(lanes.ordinary, false)
+  const delivery = parseLane(lanes.delivery, true)
+  const final = lanes.final as Record<string, unknown> | null
+  if (!final || Object.keys(final).length !== 1 || final.maxIterations !== 1
+    || Number(budget.maxIterations) !== ordinary.maxIterations + delivery.maxIterations + 1
+    || Number(budget.maxToolCalls) !== ordinary.maxToolCalls + delivery.maxToolCalls) {
+    throw new CodexBindingRepositoryError('tool_bridge_budget_snapshot_invalid')
+  }
   return {
     maxIterations: Number(budget.maxIterations),
     maxToolCalls: Number(budget.maxToolCalls),
     maxParallelToolGroups: Number(budget.maxParallelToolGroups),
+    lanes: { ordinary, delivery, final: { maxIterations: 1 } },
   }
 }
 
@@ -135,6 +186,11 @@ export class CodexToolBindingRepository {
         || receipt.codex_turn_id !== input.codexTurnId
       ) throw new CodexBindingRepositoryError('tool_group_gateway_receipt_mismatch')
       const binding = this.readToolBridgeExecutionBinding(input.readyRunId)
+      const folderActivation = readCodexFolderOutputActivation(this.db, input.readyRunId)
+      const effectiveAllowedToolNames = effectiveCodexFolderOutputToolNames(
+        binding.authorization.allowedToolNames,
+        folderActivation,
+      )
       if (
         binding.codexThreadId !== input.codexThreadId
         || binding.codexTurnId !== input.codexTurnId
@@ -147,17 +203,44 @@ export class CodexToolBindingRepository {
       const admittedCalls = Number(admitted?.calls || 0)
       const admittedParallelGroups = Number(admitted?.parallel_groups || 0)
       const parallelGroupCharged = input.calls.length >= 2 ? 1 : 0
-      if (admittedCalls + input.calls.length > binding.productBudgetSeed.maxToolCalls) {
-        throw new CodexBindingRepositoryError('tool_call_budget_exhausted')
+      const laneKinds = new Set(input.calls.map((call) => (
+        folderActivation.kind !== 'no_contract' && DELIVERY_TOOL_NAMES.has(call.toolName)
+          ? 'delivery'
+          : 'ordinary'
+      )))
+      if (laneKinds.size !== 1) throw new CodexBindingRepositoryError('tool_group_lane_mixed')
+      const laneKind = laneKinds.values().next().value as 'ordinary' | 'delivery'
+      const lane = binding.productBudgetSeed.lanes[laneKind]
+      const admittedByLane = folderActivation.kind === 'no_contract'
+        ? this.db.prepare(`
+            SELECT COUNT(*) AS calls FROM codex_tool_call_admissions WHERE ready_run_id = ?
+          `).get<{ calls: number }>(input.readyRunId)
+        : this.db.prepare(`
+            SELECT COUNT(*) AS calls
+              FROM codex_tool_call_admissions
+             WHERE ready_run_id = ?
+               AND (tool_name IN (
+                 'declare_completion_criteria', 'skill_write_artifact',
+                 'skill_read_artifact', 'skill_export_artifact'
+               )) = ?
+          `).get<{ calls: number }>(input.readyRunId, laneKind === 'delivery' ? 1 : 0)
+      const laneCalls = Number(admittedByLane?.calls || 0)
+      if (laneCalls + input.calls.length > lane.maxToolCalls) {
+        throw new CodexBindingRepositoryError(`${laneKind}_tool_call_budget_exhausted`)
       }
-      if (
-        parallelGroupCharged
-        && admittedParallelGroups + parallelGroupCharged
-          > binding.productBudgetSeed.maxParallelToolGroups
-      ) throw new CodexBindingRepositoryError('parallel_tool_group_budget_exhausted')
+      if (parallelGroupCharged
+        && admittedParallelGroups + parallelGroupCharged > lane.maxParallelToolGroups) {
+        throw new CodexBindingRepositoryError(`${laneKind}_parallel_tool_group_budget_exhausted`)
+      }
+      if (admittedCalls + input.calls.length > binding.productBudgetSeed.maxToolCalls
+        || (parallelGroupCharged
+          && admittedParallelGroups + parallelGroupCharged
+            > binding.productBudgetSeed.maxParallelToolGroups)) {
+        throw new CodexBindingRepositoryError('tool_call_budget_snapshot_inconsistent')
+      }
       for (const call of input.calls) {
         if (
-          !binding.authorization.allowedToolNames.includes(call.toolName)
+          !effectiveAllowedToolNames.includes(call.toolName)
           || !binding.toolSurface.entries.some((entry) => entry.name === call.toolName)
         ) throw new CodexBindingRepositoryError('tool_group_frozen_contract_mismatch')
       }
@@ -258,6 +341,10 @@ export class CodexToolBindingRepository {
         throw new CodexBindingRepositoryError('tool_call_owner_inactive')
       }
       const bridgeBinding = this.readToolBridgeExecutionBinding(input.readyRunId)
+      const effectiveAllowedToolNames = effectiveCodexFolderOutputToolNames(
+        bridgeBinding.authorization.allowedToolNames,
+        readCodexFolderOutputActivation(this.db, input.readyRunId),
+      )
       const surfaceEntry = bridgeBinding.toolSurface.entries.find(
         (entry) => entry.name === input.toolName,
       )
@@ -272,7 +359,7 @@ export class CodexToolBindingRepository {
           !== input.authorizationSnapshotDigest
         || !surfaceEntry
         || surfaceEntry.schemaDigest !== input.toolSchemaDigest
-        || !bridgeBinding.authorization.allowedToolNames.includes(input.toolName)
+        || !effectiveAllowedToolNames.includes(input.toolName)
       ) throw new CodexBindingRepositoryError('tool_call_frozen_contract_mismatch')
       const admission = this.db.prepare(`
         SELECT c.ready_run_id, c.tool_name, c.args_digest,
@@ -352,11 +439,24 @@ export class CodexToolBindingRepository {
         this.claimToolRequestRpc(input)
         return { duplicate: true }
       }
-      const admittedToolCalls = this.db.prepare(`
-        SELECT COUNT(*) AS count FROM codex_tool_call_bindings WHERE ready_run_id = ?
-      `).get<{ count: number }>(input.readyRunId)?.count || 0
-      if (admittedToolCalls >= bridgeBinding.productBudgetSeed.maxToolCalls) {
-        throw new CodexBindingRepositoryError('tool_call_budget_exhausted')
+      const folderActivation = readCodexFolderOutputActivation(this.db, input.readyRunId)
+      const laneKind = folderActivation.kind !== 'no_contract' && DELIVERY_TOOL_NAMES.has(input.toolName)
+        ? 'delivery'
+        : 'ordinary'
+      const admittedToolCalls = (folderActivation.kind === 'no_contract'
+        ? this.db.prepare(`
+            SELECT COUNT(*) AS count FROM codex_tool_call_bindings WHERE ready_run_id = ?
+          `).get<{ count: number }>(input.readyRunId)
+        : this.db.prepare(`
+            SELECT COUNT(*) AS count FROM codex_tool_call_bindings
+             WHERE ready_run_id = ?
+               AND (tool_name IN (
+                 'declare_completion_criteria', 'skill_write_artifact',
+                 'skill_read_artifact', 'skill_export_artifact'
+               )) = ?
+          `).get<{ count: number }>(input.readyRunId, laneKind === 'delivery' ? 1 : 0))?.count || 0
+      if (admittedToolCalls >= bridgeBinding.productBudgetSeed.lanes[laneKind].maxToolCalls) {
+        throw new CodexBindingRepositoryError(`${laneKind}_tool_call_budget_exhausted`)
       }
       const inserted = this.db.prepare(`
         INSERT INTO codex_tool_call_bindings (
@@ -437,6 +537,8 @@ export class CodexToolBindingRepository {
              t.gateway_claimed_codex_turn_id,
              t.turn_contract_digest, t.authorization_snapshot_digest,
              t.authorization_snapshot_json, t.product_budget_seed_json, t.product_closeout_at,
+             t.ready_memory_snapshot_json, t.ready_memory_snapshot_digest,
+             t.ready_memory_state_revision, t.ready_memory_revocation_revision,
              t.interrupt_requested_at,
              th.ready_conversation_alias, th.ready_scope_id, th.codex_session_id,
              th.tool_surface_digest, th.tool_surface_snapshot_digest, th.tool_surface_json,
@@ -457,6 +559,10 @@ export class CodexToolBindingRepository {
       authorization_snapshot_digest: string
       authorization_snapshot_json: string | null
       product_budget_seed_json: string | null
+      ready_memory_snapshot_json: string | null
+      ready_memory_snapshot_digest: string | null
+      ready_memory_state_revision: number | null
+      ready_memory_revocation_revision: number | null
       product_closeout_at: string | null
       interrupt_requested_at: string | null
       ready_conversation_alias: string
@@ -481,6 +587,10 @@ export class CodexToolBindingRepository {
       || !row.tool_surface_json
       || !row.authorization_snapshot_json
       || !row.product_budget_seed_json
+      || !row.ready_memory_snapshot_json
+      || !row.ready_memory_snapshot_digest
+      || row.ready_memory_state_revision === null
+      || row.ready_memory_revocation_revision === null
     ) throw new CodexBindingRepositoryError('tool_bridge_binding_incomplete')
     if (
       row.product_closeout_at
@@ -492,11 +602,14 @@ export class CodexToolBindingRepository {
     ) throw new CodexBindingRepositoryError('tool_bridge_binding_inactive')
     let toolSurface: ReadyToolSurface
     let authorization: ReadyBoundTurnToolAuthorization
+    let readyMemorySnapshot: ReadyMemorySnapshot
     try {
       toolSurface = JSON.parse(row.tool_surface_json) as ReadyToolSurface
       authorization = JSON.parse(row.authorization_snapshot_json) as ReadyBoundTurnToolAuthorization
+      readyMemorySnapshot = JSON.parse(row.ready_memory_snapshot_json) as ReadyMemorySnapshot
       assertReadyToolSurface(toolSurface)
       assertReadyBoundTurnToolAuthorization(authorization)
+      assertReadyMemorySnapshot(readyMemorySnapshot)
     } catch {
       throw new CodexBindingRepositoryError('tool_bridge_snapshot_invalid')
     }
@@ -511,6 +624,10 @@ export class CodexToolBindingRepository {
       || authorization.toolSurfaceDigest !== row.tool_surface_digest
       || authorization.turnContractDigest !== row.turn_contract_digest
       || !authorization.allowedToolNames.every((name) => toolSurface.toolNames.includes(name))
+      || canonicalReadyMemoryJson(readyMemorySnapshot) !== row.ready_memory_snapshot_json
+      || readyMemorySnapshot.snapshotDigest !== row.ready_memory_snapshot_digest
+      || readyMemorySnapshot.stateRevision !== row.ready_memory_state_revision
+      || readyMemorySnapshot.revocationRevision !== row.ready_memory_revocation_revision
     ) throw new CodexBindingRepositoryError('tool_bridge_snapshot_mismatch')
     return {
       bindingId,
@@ -523,6 +640,7 @@ export class CodexToolBindingRepository {
       codexTurnId: effectiveCodexTurnId,
       turnContractDigest: row.turn_contract_digest,
       productBudgetSeed: parseProductBudgetSeed(row.product_budget_seed_json),
+      readyMemorySnapshot,
       toolSurface,
       authorization,
     }

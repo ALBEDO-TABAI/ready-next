@@ -62,8 +62,6 @@ const RENDERER_TYPES_FILE = 'src/renderer/types/electron.d.ts'
 const SOURCE_EXTS = new Set(['.ts', '.tsx'])
 const ALLOWLIST_PATH = 'scripts/ipc-contract-allowlist.json'
 
-const PUSH_METHOD_NAMES = new Set(['send', 'sendToRenderer'])
-
 main()
 
 function main() {
@@ -603,6 +601,7 @@ function scanPreload(repoRoot) {
     return { invokeUsed, sendUsed, pushListened, methodsExposed }
   }
   const sf = readSourceFile(file)
+  const invokeForwarders = collectIpcRendererInvokeForwarders(sf)
 
   function visit(node) {
     if (ts.isCallExpression(node)) {
@@ -620,6 +619,9 @@ function scanPreload(repoRoot) {
           const ch = stringLiteralArg(node, 0)
           if (ch !== null) pushListened.add(ch)
         }
+      } else if (ts.isIdentifier(node.expression) && invokeForwarders.has(node.expression.text)) {
+        const ch = stringLiteralArg(node, 0)
+        if (ch !== null) invokeUsed.add(ch)
       }
       // contextBridge.exposeInMainWorld('electronAPI', { ... })
       if (
@@ -644,6 +646,65 @@ function scanPreload(repoRoot) {
   }
   visit(sf)
   return { invokeUsed, sendUsed, pushListened, methodsExposed }
+}
+
+function collectIpcRendererInvokeForwarders(sourceFile) {
+  const names = new Set()
+
+  function forwardsInvoke(node, parameterName) {
+    let found = false
+    function visit(candidate) {
+      if (found) return
+      if (ts.isCallExpression(candidate)) {
+        const calleePath = propertyPath(candidate.expression)
+        const lastSegment = calleePath[calleePath.length - 1]
+        const prevSegment = calleePath[calleePath.length - 2]
+        const firstArg = candidate.arguments[0]
+        if (
+          prevSegment === 'ipcRenderer'
+          && lastSegment === 'invoke'
+          && firstArg
+          && ts.isIdentifier(firstArg)
+          && firstArg.text === parameterName
+        ) {
+          found = true
+          return
+        }
+      }
+      ts.forEachChild(candidate, visit)
+    }
+    visit(node)
+    return found
+  }
+
+  for (const statement of sourceFile.statements) {
+    if (
+      ts.isFunctionDeclaration(statement)
+      && statement.name
+      && statement.body
+      && statement.parameters[0]
+      && ts.isIdentifier(statement.parameters[0].name)
+      && forwardsInvoke(statement.body, statement.parameters[0].name.text)
+    ) {
+      names.add(statement.name.text)
+      continue
+    }
+    if (!ts.isVariableStatement(statement)) continue
+    for (const declaration of statement.declarationList.declarations) {
+      if (!ts.isIdentifier(declaration.name) || !declaration.initializer) continue
+      const initializer = declaration.initializer
+      if (!ts.isArrowFunction(initializer) && !ts.isFunctionExpression(initializer)) continue
+      const firstParameter = initializer.parameters[0]
+      if (
+        firstParameter
+        && ts.isIdentifier(firstParameter.name)
+        && forwardsInvoke(initializer.body, firstParameter.name.text)
+      ) {
+        names.add(declaration.name.text)
+      }
+    }
+  }
+  return names
 }
 
 function collectObjectKeys(objectLiteral, out) {

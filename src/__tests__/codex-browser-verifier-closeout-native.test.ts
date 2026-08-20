@@ -26,6 +26,8 @@ import {
 } from './provider-checkpoint-test-fixtures'
 import { createCodexToolFixture } from './utils/codex-tool-fixture'
 import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
+import { commitCanonicalCodexFailure } from './helpers/codex-product-closeout'
+import { disabledReadyMemorySnapshot } from './utils/ready-memory-fixture'
 
 const startedAt = '2026-08-11T05:00:00.000Z'
 const verifiedAt = '2026-08-11T05:01:00.000Z'
@@ -39,6 +41,7 @@ function prepared(runId: string, taskId: string, scopeId: string, messageId: str
   const tools = createCodexToolFixture([])
   return {
     preparationContract: 'codex_product_run_e1',
+    readyMemorySnapshot: disabledReadyMemorySnapshot(),
     taskId,
     runId,
     conversationAlias: { aliasId: scopeId, aliasGeneration: 1 },
@@ -70,7 +73,16 @@ function prepared(runId: string, taskId: string, scopeId: string, messageId: str
       authorizationOwnerId: `authorization-${runId}`,
       resourceOwnerId: `resource-${runId}`,
     },
-    productBudgetSeed: { maxIterations: 8, maxToolCalls: 4, maxParallelToolGroups: 1 },
+    productBudgetSeed: {
+      maxIterations: 8,
+      maxToolCalls: 4,
+      maxParallelToolGroups: 1,
+      lanes: {
+        ordinary: { maxIterations: 7, maxToolCalls: 4, maxParallelToolGroups: 1 },
+        delivery: { maxIterations: 0, maxToolCalls: 0, maxParallelToolGroups: 0 },
+        final: { maxIterations: 1 },
+      },
+    },
     neutralProjectionSeed: {
       phase: 'planning',
       taskTitle: '正在理解需求',
@@ -613,7 +625,7 @@ test('nonaccept publishes no candidate, retires hidden native history, and next 
         value.repository.completeVerifierRejectedCloseoutInOpenTransaction(input)
       },
     })
-    const committed = await closeout.commitCodexFailureCoreCloseout({
+    const committed = await commitCanonicalCodexFailure(closeout, {
       parentTaskId: value.taskId,
       ownerRunId: value.runId,
       conversationId: value.scopeId,
@@ -629,7 +641,7 @@ test('nonaccept publishes no candidate, retires hidden native history, and next 
     })
     assert.ok(committed.value.productTerminalDigest)
     assert.equal(value.db.prepare(`SELECT COUNT(*) AS count FROM chat_messages WHERE role = 'assistant'`)
-      .get<{ count: number }>()?.count, 0)
+      .get<{ count: number }>()?.count, 1)
     assert.deepEqual(value.db.prepare(`
       SELECT status, continuation_ref_json, resumable_actions_json
         FROM task_projections WHERE task_id = ?
@@ -703,7 +715,7 @@ test('engine-terminal lifecycle actions abort a deferred verifier and close exac
           value.repository.completeLifecycleActionCloseoutInOpenTransaction({ ...input, action })
         },
       })
-      const committed = await closeout.commitCodexFailureCoreCloseout({
+      const committed = await commitCanonicalCodexFailure(closeout, {
         parentTaskId: value.taskId,
         ownerRunId: value.runId,
         conversationId: value.scopeId,
@@ -723,7 +735,7 @@ test('engine-terminal lifecycle actions abort a deferred verifier and close exac
       assert.equal(lifecycle.retiredGeneration, 1)
       assert.equal(lifecycle.newGeneration, action === 'reset' ? 2 : null)
       assert.equal(value.db.prepare(`SELECT COUNT(*) AS count FROM chat_messages WHERE role = 'assistant'`)
-        .get<{ count: number }>()?.count, 0)
+        .get<{ count: number }>()?.count, 1)
       assert.equal(value.db.prepare(`SELECT COUNT(*) AS count FROM codex_thread_dispatch_fences`)
         .get<{ count: number }>()?.count, 0)
       assert.deepEqual(value.db.prepare(`SELECT status FROM browser_tasks WHERE id = ?`)
@@ -787,7 +799,7 @@ test('lifecycle participant rollback preserves only the durable action for boot 
         throw new Error('forced_participant_failure')
       },
     })
-    await assert.rejects(() => rejected.commitCodexFailureCoreCloseout({
+    await assert.rejects(() => commitCanonicalCodexFailure(rejected, {
       parentTaskId: value.taskId,
       ownerRunId: value.runId,
       conversationId: value.scopeId,
@@ -817,7 +829,7 @@ test('lifecycle participant rollback preserves only the durable action for boot 
         })
       },
     })
-    await retry.commitCodexFailureCoreCloseout({
+    await commitCanonicalCodexFailure(retry, {
       parentTaskId: value.taskId,
       ownerRunId: value.runId,
       conversationId: value.scopeId,

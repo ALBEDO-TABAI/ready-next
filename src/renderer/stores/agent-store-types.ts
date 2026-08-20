@@ -19,6 +19,7 @@ import type {
   CreateSessionResult,
   LifecycleResult,
   SendMessageResult as SharedSendMessageResult,
+  SendScopedRequest,
   SendScopedResponse,
 } from '../../shared/ipc-contracts/agent-runtime'
 import type { ActionAuthorizationMode } from '../../shared/action-authorization-mode'
@@ -148,10 +149,8 @@ export interface AgentState {
   sessionOrder: string[]
   taskDisclosureState: Record<string, TaskDisclosureState>
 
-  setAgents: (agents: Agent[]) => void
+  setReadyStatus: (status: Agent['status']) => void
   reloadAgents: () => Promise<void>
-  selectAgent: (name: string) => void
-  toggleAgentSelection: (name: string) => void
   addMessage: (message: AgentMessage) => void
   appendToMessage: (id: string, chunk: string) => void
   setInputValue: (value: string, options?: { preserveContinuationIntent?: boolean }) => void
@@ -161,6 +160,7 @@ export interface AgentState {
   setIsStreaming: (streaming: boolean) => void
   sendMessage: (content: string, options?: {
     codexExternalReadSlice?: Record<string, unknown>
+    explicitRetry?: SendScopedRequest['explicitRetry']
   }) => Promise<SendMessageResult>
   stopStreaming: () => Promise<LifecycleResult>
   resetCurrentConversation: () => Promise<LifecycleResult>

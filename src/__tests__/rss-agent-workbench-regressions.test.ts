@@ -53,7 +53,9 @@ test('chat composer keeps a visible shell and a primary send button after liquid
   assert.match(chatPanelBody, /border: isDragOver \? '2px solid var\(--color-blue\)' : '1px solid transparent'/)
   assert.match(chatPanelBody, /boxShadow:\s*'none'/)
   assert.match(chatInput, /<LiquidLens/)
-  assert.match(chatInput, /background: 'var\(--color-blue\)'/)
+  assert.match(chatInput, /data-ready-agent-send="true"/)
+  assert.match(chatInput, /aria-label=\{sendBlockedReason \|\| '发送'\}/)
+  assert.match(chatInput, /background: '#0f0f0f'/)
   assert.doesNotMatch(chatPanelBody, /id="chat-input-shell"/)
 })
 

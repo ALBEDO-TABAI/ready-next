@@ -89,7 +89,6 @@ export function mergeTaskRuns(params: UseTaskRunMergeParams): TaskCardRun[] {
       terminalReason: run.terminalReason,
       title: run.title,
       toolTrace: [],
-      memoryCapture: run.memoryCapture,
       error: run.error,
       updatedAt: run.updatedAt,
       // O1 blacklist fields — projection-only
@@ -145,7 +144,6 @@ export function mergeTaskRuns(params: UseTaskRunMergeParams): TaskCardRun[] {
       responseSegmentToolTraceStart: run.responseSegmentToolTraceStart,
       error: run.error,
       updatedAt: run.updatedAt,
-      memoryCapture: run.memoryCapture,
       // O1 blacklist fields — projection-only
       status: projection?.status,
       taskTitle: projection?.taskTitle ?? null,
@@ -236,7 +234,6 @@ export function mergeTaskRuns(params: UseTaskRunMergeParams): TaskCardRun[] {
         terminalReason: undefined,
         title: scope.title,
         toolTrace: [],
-        memoryCapture: undefined,
         error: undefined,
         updatedAt: projection.updatedAt,
         // O1 blacklist — projection-only

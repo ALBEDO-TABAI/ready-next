@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
+import { mkdtempSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import test from 'node:test'
+import { disabledReadyMemorySnapshot } from './utils/ready-memory-fixture'
 
 import type { DatabaseConnection } from '../main/modules/database'
 import { __runMigrationForTests, type MigrationDatabase } from '../main/modules/migrations'
@@ -71,10 +75,56 @@ import { workflowDigest } from '../main/modules/repositories/browser-workflow-co
 import { ActiveAIProfileMutationGuard } from '../main/modules/settings-engine/active-ai-profile-mutation-guard'
 import { closeCodexConversationScopeInOpenTransaction } from '../main/modules/agent-control/codex-runtime/codex-conversation-scope-closure'
 import { __setScopeContextEpochDatabaseForTests } from '../main/modules/agent-control/session/scope-context-epoch'
+import {
+  CodexAppServerClient,
+  type CodexJsonLineTransport,
+} from '../main/modules/agent-control/codex-runtime/codex-app-server-client'
+import { CodexThreadArchiveCleanupOwner } from '../main/modules/agent-control/codex-runtime/codex-thread-archive-owner'
+import {
+  CodexDurableThreadArchiveDispatchPort,
+  CodexThreadArchiveIntentStore,
+} from '../main/modules/agent-control/codex-runtime/codex-thread-archive-cleanup'
+import {
+  enqueueEligibleRetiredCodexThreadArchiveIntents,
+  retireAllCodexThreadBindingsForConversationReset,
+} from '../main/modules/agent-control/codex-runtime/codex-thread-retirement-cleanup-migration'
 
 type NativeDb = import('better-sqlite3').Database
 
 const admittedAt = '2026-08-07T01:00:00.000Z'
+
+class CleanupArchiveTransport implements CodexJsonLineTransport {
+  readonly writes: Array<{ id?: number; method: string }> = []
+  private lineListener: ((line: string) => void) | null = null
+  private closeListener: ((error: Error | null) => void) | null = null
+
+  write(line: string, callback: (error: Error | null) => void): void {
+    const frame = JSON.parse(line) as { id?: number; method: string }
+    this.writes.push(frame)
+    queueMicrotask(() => {
+      callback(null)
+      if (frame.id === undefined) return
+      setTimeout(() => {
+        const result = frame.method === 'initialize'
+          ? { userAgent: 'ready-cleanup-test/1' }
+          : frame.method === 'thread/read' ? { thread: rootThread() } : {}
+        this.lineListener?.(JSON.stringify({ id: frame.id, result }))
+      }, 0)
+    })
+  }
+
+  onLine(listener: (line: string) => void): () => void {
+    this.lineListener = listener
+    return () => { if (this.lineListener === listener) this.lineListener = null }
+  }
+
+  onClose(listener: (error: Error | null) => void): () => void {
+    this.closeListener = listener
+    return () => { if (this.closeListener === listener) this.closeListener = null }
+  }
+
+  close(): void { this.closeListener?.(null) }
+}
 
 function prepared(runId = 'run-1'): PreparedCodexProductRun {
   const readyToolSurface = buildReadyToolSurface({
@@ -83,6 +133,7 @@ function prepared(runId = 'run-1'): PreparedCodexProductRun {
   })
   return {
     preparationContract: 'codex_product_run_e1',
+    readyMemorySnapshot: disabledReadyMemorySnapshot(),
     taskId: `task-${runId}`,
     runId,
     conversationAlias: { aliasId: 'scope-1', aliasGeneration: 1 },
@@ -116,7 +167,16 @@ function prepared(runId = 'run-1'): PreparedCodexProductRun {
       authorizationOwnerId: 'owner-1',
       resourceOwnerId: 'resource-owner-1',
     },
-    productBudgetSeed: { maxIterations: 8, maxToolCalls: 4, maxParallelToolGroups: 1 },
+    productBudgetSeed: {
+      maxIterations: 8,
+      maxToolCalls: 4,
+      maxParallelToolGroups: 1,
+      lanes: {
+        ordinary: { maxIterations: 7, maxToolCalls: 4, maxParallelToolGroups: 1 },
+        delivery: { maxIterations: 0, maxToolCalls: 0, maxParallelToolGroups: 0 },
+        final: { maxIterations: 1 },
+      },
+    },
     neutralProjectionSeed: {
       phase: 'planning',
       taskTitle: '正在理解需求',
@@ -332,12 +392,51 @@ function nativeFailureCandidate(
   }
 }
 
+function insertFailureTerminalMessage(
+  db: NativeDb,
+  run: PreparedCodexProductRun,
+  content: string,
+  terminalReason: string,
+): string {
+  const messageId = `assistant:${run.taskId}:${run.runId}:terminal`
+  const meta = { taskId: run.taskId, runId: run.runId, terminalReason }
+  db.prepare(`
+    INSERT OR IGNORE INTO chat_messages (
+      id, conversation_id, role, content, timestamp, meta_json, message_visibility_epoch
+    ) VALUES (?, ?, 'assistant', ?, ?, ?, 0)
+  `).run(
+    messageId,
+    run.readyToolHostIdentity.scopeId,
+    content,
+    admittedAt,
+    JSON.stringify(meta),
+  )
+  return failureTerminalMessageDigest(run, content, terminalReason)
+}
+
+function failureTerminalMessageDigest(
+  run: PreparedCodexProductRun,
+  content: string,
+  terminalReason: string,
+): string {
+  return workflowDigest({
+    id: `assistant:${run.taskId}:${run.runId}:terminal`,
+    conversationId: run.readyToolHostIdentity.scopeId,
+    role: 'assistant',
+    content,
+    timestamp: admittedAt,
+    meta: { taskId: run.taskId, runId: run.runId, terminalReason },
+  })
+}
+
 function preparePublicationRecoveryFixture(
   db: NativeDb,
   repository: CodexBindingRepository,
   input: {
     runId: string
     admittedCalls?: Array<{ codexCallId: string; toolName: string; argsDigest: string }>
+    pendingOutputContract?: boolean
+    currentDocumentReadAuthorized?: boolean
     currentDocumentAnchor?: NonNullable<Extract<
       PreparedCodexProductRun['ingress'],
       { kind: 'user_ingress' }
@@ -347,6 +446,25 @@ function preparePublicationRecoveryFixture(
   const run = prepared(input.runId)
   const admittedCalls = input.admittedCalls || []
   if (run.ingress.kind !== 'user_ingress') throw new Error('expected_user_ingress')
+  if (input.pendingOutputContract) {
+    run.outputContract = {
+      contract: 'codex_output_contract_v1',
+      destination: {
+        logicalResourceId: 'local-directory:fixture',
+        path: '/tmp/ready-codex/output',
+        currentVersion: 'sha256:fixture',
+        currentDigest: 'fixture',
+        policyEpoch: 1,
+        directoryIdentity: {
+          device: '1', inode: '2', mode: 0o40755, mtimeMs: 1,
+        },
+      },
+      activation: 'pending_confirmation',
+      activationPredicateDigest: 'activation-fixture',
+      maxExpectedOutputs: 8,
+      targetPolicy: 'create_only',
+    }
+  }
   if (input.currentDocumentAnchor) {
     const anchor = input.currentDocumentAnchor
     const reference = {
@@ -367,17 +485,28 @@ function preparePublicationRecoveryFixture(
   }
   run.readyToolSurface = buildReadyToolSurface({
     surfaceId: `surface-${input.runId}`,
-    toolDefinitions: [{
-      name: 'ready_read', groupId: 'agent_interaction', domain: 'document', kind: 'read',
-      concurrency: 'parallel_read_safe', interruptBehavior: 'abort_signal', timeoutProfile: 'default',
-      supportsTextBridge: true, projectionHint: null, description: 'Read fixture',
-      schema: { type: 'object' }, executionVisibility: 'model', resultShape: 'json',
-    }],
+    toolDefinitions: [
+      {
+        name: 'ready_read', groupId: 'agent_interaction', domain: 'document', kind: 'read',
+        concurrency: 'parallel_read_safe', interruptBehavior: 'abort_signal', timeoutProfile: 'default',
+        supportsTextBridge: true, projectionHint: null, description: 'Read fixture',
+        schema: { type: 'object' }, executionVisibility: 'model', resultShape: 'json',
+      },
+      ...(input.currentDocumentAnchor ? [{
+        name: 'document_read_section', groupId: 'agent_interaction', domain: 'document', kind: 'read',
+        concurrency: 'parallel_read_safe', interruptBehavior: 'abort_signal', timeoutProfile: 'default',
+        supportsTextBridge: true, projectionHint: null, description: 'Read current document',
+        schema: { type: 'object' }, executionVisibility: 'model', resultShape: 'json',
+      } as const] : []),
+    ],
   })
   run.readyTurnToolAuthorization = buildReadyTurnToolAuthorization({
     authorizationId: `authorization-${input.runId}`,
     authorization: buildExplicitNoSkillAuthorization('no_skill_signal'),
     toolSurface: run.readyToolSurface,
+    ...(input.currentDocumentAnchor && input.currentDocumentReadAuthorized === false
+      ? { allowedToolNames: ['ready_read'] }
+      : {}),
   })
   prepareReadyParents(db, repository, run)
   repository.admitProductBindings(admission(run, lazyReservation(run.runId)))
@@ -649,6 +778,593 @@ function createThreadTransitionProfile(input: {
     maxRetries: 0,
   })
 }
+
+test('whole-history cleanup archives through the real repository and client after stale Ready state', async (t) => {
+  await withRepository(t, async (db, repository) => {
+    const run = prepared()
+    prepareReadyParents(db, repository, run)
+    repository.admitProductBindings(admission(run, lazyReservation()))
+    repository.activateStartDispatch({
+      connectionEpoch: 'cleanup-epoch', rpcId: 1, method: 'thread/start',
+      bindingLookupKey: '/tmp/ready-codex/thread-binding-1',
+      requestDigest: 'cleanup-thread-request', dispatchedAt: admittedAt,
+    })
+    repository.reconcileStartAccepted({
+      connectionEpoch: 'cleanup-epoch', rpcId: 1, method: 'thread/start',
+      bindingId: 'thread-binding-1', nativeId: 'thread-native-1',
+      nativeResult: { thread: rootThread(), instructionSources: [] },
+      responseDigest: 'cleanup-thread-response', responsePending: false,
+      reconciledAt: admittedAt,
+    })
+
+    db.exec('BEGIN IMMEDIATE')
+    retireAllCodexThreadBindingsForConversationReset(db as unknown as DatabaseConnection, {
+      retiredAt: admittedAt,
+      retirementEvidenceDigest: 'e'.repeat(64),
+    })
+    enqueueEligibleRetiredCodexThreadArchiveIntents(db as unknown as DatabaseConnection)
+    db.exec('COMMIT')
+    assert.equal(db.prepare(`SELECT COUNT(*) AS count FROM codex_thread_dispatch_fences`)
+      .get<{ count: number }>()?.count, 1)
+    assert.equal(db.prepare(`
+      SELECT COUNT(*) AS count FROM codex_turn_bindings
+       WHERE product_terminal_digest IS NULL AND host_failure_product_terminal_digest IS NULL
+    `).get<{ count: number }>()?.count, 1)
+
+    const store = new CodexThreadArchiveIntentStore(db as unknown as DatabaseConnection)
+    const dispatchPort = new CodexDurableThreadArchiveDispatchPort({
+      store,
+      now: () => admittedAt,
+    })
+    const transport = new CleanupArchiveTransport()
+    const client = new CodexAppServerClient({
+      transport,
+      connectionEpoch: 'cleanup-archive-epoch',
+      requestTimeoutMs: 1_000,
+      startDispatchPort: {} as never,
+      manualCompactionDispatchPort: {} as never,
+      threadArchiveDispatchPort: dispatchPort,
+      inboundFramePort: {} as never,
+      threadArchiveAuthorizationPort: {
+        assertEligible: (threadId) => repository.assertThreadArchiveEligible(threadId),
+      },
+    })
+    await client.initialize()
+    const owner = new CodexThreadArchiveCleanupOwner({
+      store,
+      runtime: {
+        threadRead: (input) => client.threadRead(input),
+        threadArchive: (input) => client.threadArchive(input),
+        threadList: (input) => client.threadList(input),
+      },
+      getConnectionEpoch: () => 'cleanup-archive-epoch',
+      now: () => admittedAt,
+    })
+    assert.deepEqual(await owner.drain(), { processed: 1, acknowledged: 1, pending: 0 })
+    assert.equal(store.readByThreadId('thread-native-1')?.state, 'acknowledged')
+    assert.deepEqual(transport.writes.map((frame) => frame.method), [
+      'initialize', 'initialized', 'thread/read', 'thread/archive',
+    ])
+  })
+})
+
+test('artifact storage retention protects an open product turn from collection', async (t) => {
+  await withRepository(t, (db, repository) => {
+    const run = prepared('run-artifact-open')
+    prepareReadyParents(db, repository, run)
+    repository.admitProductBindings(admission(run, lazyReservation(run.runId)))
+    assert.deepEqual(repository.readArtifactStorageRetention(), {
+      protectedRunIds: ['run-artifact-open'],
+      collectibleRunIds: [],
+    })
+  })
+})
+
+test('a retry publishes a predecessor artifact with its own export receipt', async (t) => {
+  const outputRoot = realpathSync(mkdtempSync(join(tmpdir(), 'ready-retry-publication-')))
+  t.after(() => rmSync(outputRoot, { recursive: true, force: true }))
+  await withRepository(t, async (db, repository) => {
+    const toolNames = [
+      'declare_completion_criteria',
+      'skill_write_artifact',
+      'skill_export_artifact',
+    ]
+    const toolDefinitions = toolNames.map((name) => {
+      const definition = defaultToolRegistry.getToolDefinition(name)
+      assert.ok(definition, `missing ${name}`)
+      return definition
+    })
+    const configureSurface = (run: PreparedCodexProductRun) => {
+      run.readyToolSurface = buildReadyToolSurface({
+        surfaceId: 'surface-retry-publication',
+        toolDefinitions,
+      })
+      run.readyTurnToolAuthorization = buildReadyTurnToolAuthorization({
+        authorizationId: 'authorization-retry-publication',
+        authorization: buildExplicitNoSkillAuthorization('no_skill_signal'),
+        toolSurface: run.readyToolSurface,
+      })
+      run.productBudgetSeed = {
+        maxIterations: 12,
+        maxToolCalls: 8,
+        maxParallelToolGroups: 2,
+        lanes: {
+          ordinary: { maxIterations: 7, maxToolCalls: 4, maxParallelToolGroups: 1 },
+          delivery: { maxIterations: 4, maxToolCalls: 4, maxParallelToolGroups: 1 },
+          final: { maxIterations: 1 },
+        },
+      }
+    }
+    const admitCalls = (
+      run: PreparedCodexProductRun,
+      turnId: string,
+      calls: Array<{ codexCallId: string; toolName: string; argsDigest: string }>,
+    ) => {
+      const gatewayReceiptId = `gateway-${run.runId}-${calls[0]?.codexCallId}`
+      db.prepare(`
+        INSERT INTO ready_model_gateway_request_receipts (
+          receipt_id, request_kind, codex_thread_id, codex_turn_id, ready_run_id,
+          manual_compaction_id, upstream_profile_snapshot_ref,
+          upstream_profile_snapshot_digest, request_digest, accepted_at
+        ) VALUES (?, 'product', 'thread-native-1', ?, ?, NULL, ?, ?, ?, ?)
+      `).run(
+        gatewayReceiptId, turnId, run.runId, 'snapshot-ref', 'snapshot-digest',
+        `request-digest-${run.runId}-${calls[0]?.codexCallId}`, admittedAt,
+      )
+      repository.admitToolResponseGroup({
+        gatewayRequestReceiptId: gatewayReceiptId,
+        readyRunId: run.runId,
+        codexThreadId: 'thread-native-1',
+        codexTurnId: turnId,
+        calls,
+        admittedAt,
+      })
+    }
+    const publishCall = async (input: {
+      run: PreparedCodexProductRun
+      turnId: string
+      codexCallId: string
+      toolName: string
+      argsDigest: string
+      output: ReturnType<typeof createToolExecutionOutput>
+      requestRpcId: string
+    }) => {
+      const binding = repository.readToolBridgeExecutionBinding(input.run.runId)
+      const surfaceEntry = binding.toolSurface.entries.find((entry) => entry.name === input.toolName)
+      assert.ok(surfaceEntry)
+      const callWithoutActionId = {
+        codexThreadId: 'thread-native-1', codexTurnId: input.turnId,
+        codexCallId: input.codexCallId, readyRunId: input.run.runId,
+        readyAliasId: input.run.conversationAlias.aliasId, codexSessionId: 'thread-native-1',
+        readyTaskId: input.run.taskId, toolName: input.toolName,
+        argsDigest: input.argsDigest, turnContractDigest: `turn-contract-${input.run.runId}`,
+        surfaceSnapshotDigest: binding.toolSurface.surfaceSnapshotDigest,
+        toolSurfaceDigest: binding.toolSurface.toolSurfaceDigest,
+        authorizationSnapshotDigest: binding.authorization.authorizationSnapshotDigest,
+        toolSchemaDigest: surfaceEntry.schemaDigest,
+        requestConnectionEpoch: 'epoch-retry-publication',
+        requestRpcId: input.requestRpcId,
+        at: admittedAt,
+      }
+      const identity = buildCodexToolActionIdentity(callWithoutActionId)
+      const call = { ...callWithoutActionId, readyActionId: identity.readyActionId }
+      repository.bindToolCall(call)
+      const journal = new CodexToolActionJournal(db as unknown as DatabaseConnection)
+      await journal.begin({
+        readyActionId: call.readyActionId,
+        actionIdentityDigest: identity.actionIdentityDigest,
+        at: admittedAt,
+      })
+      const resultDigest = digestCanonicalJson(input.output)
+      const receipt = await journal.commit({
+        readyActionId: call.readyActionId,
+        actionIdentityDigest: identity.actionIdentityDigest,
+        resultDigest,
+        output: input.output,
+        at: admittedAt,
+      })
+      repository.completeToolCall({
+        codexThreadId: call.codexThreadId,
+        codexTurnId: call.codexTurnId,
+        codexCallId: call.codexCallId,
+        receiptId: receipt.receiptId,
+        resultDigest,
+        at: admittedAt,
+      })
+      const toolResponse = mapReadyToolOutput(input.output)
+      const toolResponseDigest = digestCanonicalJson(toolResponse)
+      const delivery = repository.beginToolCallDeliveryAttempt({
+        codexThreadId: call.codexThreadId,
+        codexTurnId: call.codexTurnId,
+        codexCallId: call.codexCallId,
+        connectionEpoch: call.requestConnectionEpoch,
+        requestRpcId: call.requestRpcId,
+        toolResponse,
+        toolResponseDigest,
+        at: admittedAt,
+      })
+      repository.confirmToolCallDeliveryTransportWrite({ ...delivery.attempt, at: admittedAt })
+      return {
+        receiptId: receipt.receiptId,
+        usedToolCall: {
+          itemId: call.codexCallId,
+          tool: call.toolName,
+          status: 'completed',
+          success: true,
+          responseDigest: toolResponseDigest,
+        },
+      }
+    }
+
+    const source = prepared('run-artifact-source')
+    configureSurface(source)
+    source.resourceAnchorDigest = createHash('sha256').update(JSON.stringify({
+      explicitResourceEnvelope: source.ingress.explicitResourceEnvelope,
+      resourceAdditionalContext: source.ingress.resourceAdditionalContext,
+    })).digest('hex')
+    prepareReadyParents(db, repository, source)
+    repository.admitProductBindings(admission(source, lazyReservation(source.runId)))
+    repository.activateStartDispatch({
+      connectionEpoch: 'epoch-retry-publication', rpcId: 1, method: 'thread/start',
+      bindingLookupKey: '/tmp/ready-codex/thread-binding-1',
+      requestDigest: 'thread-request-retry-publication', dispatchedAt: admittedAt,
+    })
+    repository.reconcileStartAccepted({
+      connectionEpoch: 'epoch-retry-publication', rpcId: 1, method: 'thread/start',
+      bindingId: 'thread-binding-1', nativeId: 'thread-native-1',
+      nativeResult: { thread: rootThread(), instructionSources: [] },
+      responseDigest: 'thread-response-retry-publication', responsePending: false,
+      reconciledAt: admittedAt,
+    })
+    repository.activateStartDispatch({
+      connectionEpoch: 'epoch-retry-publication', rpcId: 2, method: 'turn/start',
+      bindingLookupKey: source.runId, requestDigest: 'source-turn-request',
+      dispatchedAt: admittedAt,
+    })
+    repository.reconcileStartAccepted({
+      connectionEpoch: 'epoch-retry-publication', rpcId: 2, method: 'turn/start',
+      bindingId: source.runId, nativeId: 'turn-native-1',
+      nativeResult: { turn: activeTurn() }, responseDigest: 'source-turn-response',
+      responsePending: false, reconciledAt: admittedAt,
+    })
+    const logicalSha256 = createHash('sha256').update('preserved artifact').digest('hex')
+    const version = `sha256:${createHash('sha256').update('source manifest').digest('hex')}`
+    const logicalArtifactRef = 'ready-artifact:run-artifact-source/report.md'
+    const sourceCall = {
+      codexCallId: 'call-source-write',
+      toolName: 'skill_write_artifact',
+      argsDigest: 'args-source-write',
+    }
+    admitCalls(source, 'turn-native-1', [sourceCall])
+    const sourceBinding = repository.readToolBridgeExecutionBinding(source.runId)
+    const sourceEntry = sourceBinding.toolSurface.entries.find(
+      (entry) => entry.name === sourceCall.toolName,
+    )
+    assert.ok(sourceEntry)
+    const sourceIdentity = buildCodexToolActionIdentity({
+      codexThreadId: 'thread-native-1', codexTurnId: 'turn-native-1',
+      codexCallId: sourceCall.codexCallId, readyRunId: source.runId,
+      readyAliasId: source.conversationAlias.aliasId, codexSessionId: 'thread-native-1',
+      readyTaskId: source.taskId, toolName: sourceCall.toolName,
+      argsDigest: sourceCall.argsDigest, turnContractDigest: `turn-contract-${source.runId}`,
+      surfaceSnapshotDigest: sourceBinding.toolSurface.surfaceSnapshotDigest,
+      toolSurfaceDigest: sourceBinding.toolSurface.toolSurfaceDigest,
+      authorizationSnapshotDigest: sourceBinding.authorization.authorizationSnapshotDigest,
+      toolSchemaDigest: sourceEntry.schemaDigest,
+      requestConnectionEpoch: 'epoch-retry-publication', requestRpcId: '3', at: admittedAt,
+    })
+    const sourceWrite = await publishCall({
+      run: source,
+      turnId: 'turn-native-1',
+      ...sourceCall,
+      requestRpcId: '3',
+      output: createToolExecutionOutput('staged', {
+        shape: 'json',
+        data: {
+          actionId: sourceIdentity.readyActionId,
+          logicalArtifactRef,
+          expectedVersion: null,
+          mode: 'replace',
+          version,
+          logicalSha256,
+          relativePath: 'report.md',
+        },
+      }),
+    })
+    repository.recordEngineTerminalCandidate({
+      readyRunId: source.runId,
+      codexThreadId: 'thread-native-1',
+      codexTurnId: 'turn-native-1',
+      engineOutcome: 'failed',
+      candidate: nativeFailureCandidate(source, 'failed', [sourceWrite.usedToolCall]),
+      recordedAt: admittedAt,
+    })
+    repository.recordToolPublicationReceipt({ readyRunId: source.runId, recordedAt: admittedAt })
+    db.prepare(`UPDATE task_projections SET status = 'failed' WHERE task_id = ?`).run(source.taskId)
+    db.prepare(`UPDATE run_meta SET status = 'error' WHERE run_id = ?`).run(source.runId)
+    const sourceTerminalDigest = insertFailureTerminalMessage(
+      db, source, '暂存后失败', 'blocked_external',
+    )
+    repository.completeProductTurnCloseout({
+      readyRunId: source.runId,
+      productTerminalDigest: sourceTerminalDigest,
+      closeoutAt: admittedAt,
+    })
+
+    const destinationStat = statSync(outputRoot)
+    const destinationDigest = createHash('sha256').update(outputRoot).digest('hex')
+    const retry = prepared('run-artifact-retry')
+    configureSurface(retry)
+    retry.ingress = {
+      kind: 'user_ingress',
+      attemptKind: 'explicit_retry',
+      originUserMessageId: 'message-run-artifact-retry',
+      canonicalCurrentInputRef: {
+        messageId: 'message-run-artifact-retry',
+        input: [{ type: 'text', text: 'hello', text_elements: [] }],
+      },
+      explicitResourceEnvelope: { input: [], resourceRefs: [] },
+      resourceAdditionalContext: [],
+      predecessorRunId: source.runId,
+      historyParityEvidenceDigest: 'history-parity-retry-publication',
+      currentThreadReadEvidenceDigest: 'thread-read-retry-publication',
+      continuationContractDigest: 'continuation-retry-publication',
+      artifactSources: [{
+        sourceReadyRunId: source.runId,
+        relativePath: 'report.md',
+        logicalArtifactRef,
+        version,
+        sha256: logicalSha256,
+        state: 'staged',
+      }],
+    }
+    const directoryAuthority = {
+      kind: 'local_directory' as const,
+      logicalResourceId: 'local-directory:retry-publication',
+      name: 'retry-publication',
+      path: outputRoot,
+      currentVersion: `sha256:${destinationDigest}`,
+      currentDigest: destinationDigest,
+      policyEpoch: 1,
+      directoryIdentity: {
+        device: String(destinationStat.dev),
+        inode: String(destinationStat.ino),
+        mode: destinationStat.mode,
+        mtimeMs: destinationStat.mtimeMs,
+      },
+      allowedToolNames: ['file_inventory' as const],
+    }
+    retry.resourceAuthorities = [directoryAuthority]
+    retry.resourceAnchorDigest = createHash('sha256').update(JSON.stringify({
+      explicitResourceEnvelope: retry.ingress.explicitResourceEnvelope,
+      resourceAdditionalContext: retry.ingress.resourceAdditionalContext,
+      resourceAuthorities: retry.resourceAuthorities,
+    })).digest('hex')
+    const frozenDestination = {
+      logicalResourceId: directoryAuthority.logicalResourceId,
+      path: directoryAuthority.path,
+      currentVersion: directoryAuthority.currentVersion,
+      currentDigest: directoryAuthority.currentDigest,
+      policyEpoch: directoryAuthority.policyEpoch,
+      directoryIdentity: { ...directoryAuthority.directoryIdentity },
+    }
+    retry.outputContract = {
+      contract: 'codex_output_contract_v1',
+      destination: frozenDestination,
+      activation: 'pending_confirmation',
+      activationPredicateDigest: createHash('sha256').update(JSON.stringify({
+        contract: 'codex_folder_output_activation_v1',
+        destination: frozenDestination,
+        declarationTool: 'declare_completion_criteria',
+        requiredPriorResultDelivery: true,
+      })).digest('hex'),
+      maxExpectedOutputs: 8,
+      targetPolicy: 'create_only',
+    }
+    prepareReadyParentRowsOnly(db, retry)
+    repository.admitProductBindings(admission(retry, existingReservation(retry.runId)))
+    repository.activateStartDispatch({
+      connectionEpoch: 'epoch-retry-publication', rpcId: 4, method: 'turn/start',
+      bindingLookupKey: retry.runId, requestDigest: 'retry-turn-request',
+      dispatchedAt: admittedAt,
+    })
+    repository.reconcileStartAccepted({
+      connectionEpoch: 'epoch-retry-publication', rpcId: 4, method: 'turn/start',
+      bindingId: retry.runId, nativeId: 'turn-native-retry-publication',
+      nativeResult: { turn: { ...activeTurn(), id: 'turn-native-retry-publication' } },
+      responseDigest: 'retry-turn-response', responsePending: false,
+      reconciledAt: admittedAt,
+    })
+    const criteriaCall = {
+      codexCallId: 'call-retry-criteria',
+      toolName: 'declare_completion_criteria',
+      argsDigest: 'args-retry-criteria',
+    }
+    const exportCall = {
+      codexCallId: 'call-retry-export',
+      toolName: 'skill_export_artifact',
+      argsDigest: 'args-retry-export',
+    }
+    admitCalls(retry, 'turn-native-retry-publication', [criteriaCall])
+    const criteria = await publishCall({
+      run: retry,
+      turnId: 'turn-native-retry-publication',
+      ...criteriaCall,
+      requestRpcId: '5',
+      output: createToolExecutionOutput('declared', {
+        shape: 'json',
+        data: {
+          destinationResourceId: 'local-directory:retry-publication',
+          folderOutputIntent: 'export',
+          expectedOutputs: ['report.md'],
+        },
+      }),
+    })
+    admitCalls(retry, 'turn-native-retry-publication', [exportCall])
+    const targetPath = join(outputRoot, 'report.md')
+    writeFileSync(targetPath, 'preserved artifact')
+    const targetStat = statSync(targetPath)
+    const exported = await publishCall({
+      run: retry,
+      turnId: 'turn-native-retry-publication',
+      ...exportCall,
+      requestRpcId: '6',
+      output: createToolExecutionOutput('exported', {
+        shape: 'json',
+        data: {
+          logicalArtifactRef,
+          version,
+          destinationResourceId: 'local-directory:retry-publication',
+          targetRelativePath: 'report.md',
+          bytes: targetStat.size,
+          sha256: logicalSha256,
+          targetDevice: String(targetStat.dev),
+          targetInode: String(targetStat.ino),
+          result: 'created',
+          readbackVerified: true,
+        },
+      }),
+    })
+    const usedToolCalls = [criteria.usedToolCall, exported.usedToolCall]
+    repository.recordEngineTerminalCandidate({
+      readyRunId: retry.runId,
+      codexThreadId: 'thread-native-1',
+      codexTurnId: 'turn-native-retry-publication',
+      engineOutcome: 'completed',
+      candidate: {
+        ...nativeFailureCandidate(retry, 'completed', usedToolCalls),
+        codexTurnId: 'turn-native-retry-publication',
+      },
+      recordedAt: admittedAt,
+    })
+    const barrier = repository.readToolPublicationBarrier({
+      readyRunId: retry.runId,
+      codexThreadId: 'thread-native-1',
+      codexTurnId: 'turn-native-retry-publication',
+      candidateCalls: usedToolCalls,
+    })
+    assert.equal(barrier.kind, 'accepted', JSON.stringify(barrier))
+    const publication = repository.recordToolPublicationReceipt({
+      readyRunId: retry.runId,
+      recordedAt: admittedAt,
+    })
+    assert.ok(publication)
+    assert.equal(publication.verifiedReceiptRefs.includes(sourceWrite.receiptId), true)
+    assert.equal(publication.verifiedReceiptRefs.includes(exported.receiptId), true)
+  })
+})
+
+test('product turn successor lookup follows the unique persisted retry child', async (t) => {
+  await withRepository(t, (db, repository) => {
+    const root = prepared()
+    prepareReadyParents(db, repository, root)
+    repository.admitProductBindings(admission(root, lazyReservation(root.runId)))
+    startAndCloseInitialProductTurn(db, repository)
+
+    const retry = prepared('run-explicit-retry')
+    retry.ingress = {
+      kind: 'user_ingress',
+      attemptKind: 'explicit_retry',
+      originUserMessageId: 'message-run-explicit-retry',
+      canonicalCurrentInputRef: {
+        messageId: 'message-run-explicit-retry',
+        input: [{ type: 'text', text: 'hello', text_elements: [] }],
+      },
+      explicitResourceEnvelope: { input: [], resourceRefs: [] },
+      resourceAdditionalContext: [],
+      predecessorRunId: root.runId,
+      historyParityEvidenceDigest: 'history-parity-retry',
+      currentThreadReadEvidenceDigest: 'thread-read-retry',
+      continuationContractDigest: 'continuation-retry',
+      artifactSources: [],
+    }
+    prepareReadyParentRowsOnly(db, retry)
+    repository.admitProductBindings(admission(
+      retry,
+      existingReservation(retry.runId),
+    ))
+
+    assert.equal(repository.readProductTurnSuccessorId(root.runId), retry.runId)
+    assert.equal(repository.readProductTurnSuccessorId(retry.runId), null)
+
+    repository.activateStartDispatch({
+      connectionEpoch: 'epoch-retry-lineage', rpcId: 3, method: 'turn/start',
+      bindingLookupKey: retry.runId, requestDigest: 'turn-request-retry',
+      dispatchedAt: admittedAt,
+    })
+    repository.reconcileStartAccepted({
+      connectionEpoch: 'epoch-retry-lineage', rpcId: 3, method: 'turn/start',
+      bindingId: retry.runId, nativeId: 'turn-native-retry',
+      nativeResult: { turn: { ...activeTurn(), id: 'turn-native-retry' } },
+      responseDigest: 'turn-response-retry', responsePending: false,
+      reconciledAt: admittedAt,
+    })
+    const retryTerminalDigest = recordCompletedTerminal(
+      db,
+      repository,
+      retry.runId,
+      'turn-native-retry',
+    )
+    db.prepare(`UPDATE task_projections SET status = 'completed' WHERE task_id = ?`)
+      .run(retry.taskId)
+    repository.completeProductTurnCloseout({
+      readyRunId: retry.runId,
+      productTerminalDigest: retryTerminalDigest,
+      closeoutAt: admittedAt,
+    })
+    db.prepare(`UPDATE run_meta SET status = 'error' WHERE run_id IN (?, ?)`).run(
+      root.runId,
+      retry.runId,
+    )
+
+    const finalRetry = prepared('run-final-retry')
+    finalRetry.ingress = {
+      ...retry.ingress,
+      originUserMessageId: 'message-run-final-retry',
+      canonicalCurrentInputRef: {
+        messageId: 'message-run-final-retry',
+        input: [{ type: 'text', text: 'hello', text_elements: [] }],
+      },
+      predecessorRunId: retry.runId,
+    }
+    prepareReadyParentRowsOnly(db, finalRetry)
+    repository.admitProductBindings(admission(
+      finalRetry,
+      existingReservation(finalRetry.runId),
+    ))
+    repository.activateStartDispatch({
+      connectionEpoch: 'epoch-retry-lineage', rpcId: 4, method: 'turn/start',
+      bindingLookupKey: finalRetry.runId, requestDigest: 'turn-request-final-retry',
+      dispatchedAt: admittedAt,
+    })
+    repository.reconcileStartAccepted({
+      connectionEpoch: 'epoch-retry-lineage', rpcId: 4, method: 'turn/start',
+      bindingId: finalRetry.runId, nativeId: 'turn-native-final-retry',
+      nativeResult: { turn: { ...activeTurn(), id: 'turn-native-final-retry' } },
+      responseDigest: 'turn-response-final-retry', responsePending: false,
+      reconciledAt: admittedAt,
+    })
+    const finalTerminalDigest = recordCompletedTerminal(
+      db,
+      repository,
+      finalRetry.runId,
+      'turn-native-final-retry',
+    )
+    db.prepare(`UPDATE task_projections SET status = 'completed' WHERE task_id = ?`)
+      .run(finalRetry.taskId)
+    repository.completeProductTurnCloseout({
+      readyRunId: finalRetry.runId,
+      productTerminalDigest: finalTerminalDigest,
+      closeoutAt: admittedAt,
+    })
+    db.prepare(`UPDATE run_meta SET status = 'done' WHERE run_id = ?`).run(finalRetry.runId)
+
+    assert.deepEqual(repository.readArtifactStorageRetention(), {
+      protectedRunIds: [],
+      collectibleRunIds: [root.runId, retry.runId, finalRetry.runId],
+    })
+  })
+})
 
 function startAndCloseInitialProductTurn(
   db: NativeDb,
@@ -1846,6 +2562,7 @@ test('production close retires every supported idle state without creating a suc
       snapshot: 'idle_never_started',
       retiredAt: admittedAt,
       scheduleThreadArchiveCleanup: () => undefined,
+      sealClosedConversationInOpenTransaction: () => undefined,
     })
     assert.equal(neverStarted.archiveDisposition, 'not_required')
     assert.equal(neverStarted.lastCommittedReadyTerminalTransactionDigest, null)
@@ -1898,6 +2615,7 @@ test('production close retires every supported idle state without creating a suc
       snapshot: 'idle_ready_terminal_no_native',
       retiredAt: admittedAt,
       scheduleThreadArchiveCleanup: () => undefined,
+      sealClosedConversationInOpenTransaction: () => undefined,
     })
     assert.equal(readyTerminal.archiveDisposition, 'not_required')
     assert.equal(
@@ -1953,6 +2671,7 @@ test('production close retires every supported idle state without creating a suc
       snapshot: 'idle_native_thread',
       retiredAt: admittedAt,
       scheduleThreadArchiveCleanup: () => { cleanupSchedules += 1 },
+      sealClosedConversationInOpenTransaction: () => undefined,
     })
     assert.equal(nativeIdle.archiveDisposition, 'durable_cleanup_pending')
     assert.match(nativeIdle.archiveIntentDigest || '', /^[0-9a-f]{64}$/)
@@ -2004,6 +2723,7 @@ test('production close retires every supported idle state without creating a suc
       snapshot: 'idle_native_thread',
       retiredAt: admittedAt,
       scheduleThreadArchiveCleanup: () => { cleanupSchedules += 1 },
+      sealClosedConversationInOpenTransaction: () => undefined,
     }), /persistence_failed/)
     db.exec('DROP TRIGGER force_idle_scope_close_failure')
 
@@ -2035,6 +2755,7 @@ test('production close preserves the alias on pending work, native activity, or 
       snapshot: 'idle_never_started',
       retiredAt: admittedAt,
       scheduleThreadArchiveCleanup: () => undefined,
+      sealClosedConversationInOpenTransaction: () => undefined,
     }), /thread_busy/)
     assert.equal(repository.readActiveAliasBinding('scope-1')?.aliasGeneration, 1)
     assert.equal(db.prepare(`SELECT COUNT(*) AS count FROM codex_thread_dispatch_fences`)
@@ -2066,6 +2787,7 @@ test('production close preserves the alias on pending work, native activity, or 
       snapshot: 'idle_never_started',
       retiredAt: admittedAt,
       scheduleThreadArchiveCleanup: () => undefined,
+      sealClosedConversationInOpenTransaction: () => undefined,
     }), /binding_conflict/)
     assert.equal(repository.readActiveAliasBinding('scope-close-drift')?.aliasGeneration, 2)
   })
@@ -2093,6 +2815,7 @@ test('production close preserves the alias on pending work, native activity, or 
       snapshot: 'idle_native_thread',
       retiredAt: admittedAt,
       scheduleThreadArchiveCleanup: () => undefined,
+      sealClosedConversationInOpenTransaction: () => undefined,
     }), /thread_busy/)
     assert.equal(archiveCalls, 0)
     assert.equal(repository.readActiveAliasBinding('scope-1')?.aliasGeneration, 1)
@@ -2757,7 +3480,7 @@ test('a run-local boot recovery rejection atomically ends only that run and admi
   })
 })
 
-test('publication divergence retires the native thread and closes without a canonical answer', async (t) => {
+test('publication divergence retires the native thread and preserves a canonical failure message', async (t) => {
   await withRepository(t, (db, repository) => {
     const run = prepared()
     prepareReadyParents(db, repository, run)
@@ -2823,9 +3546,15 @@ test('publication divergence retires the native thread and closes without a cano
     })
     db.exec('BEGIN IMMEDIATE')
     db.prepare(`UPDATE task_projections SET status = 'failed' WHERE task_id = ?`).run(run.taskId)
+    const productTerminalDigest = insertFailureTerminalMessage(
+      db,
+      run,
+      '本次回答未通过发布核验，已保留本轮记录。',
+      'publication_diverged',
+    )
     assert.deepEqual(repository.completePublicationDivergenceCloseoutInOpenTransaction({
       readyRunId: run.runId,
-      productTerminalDigest: 'ready-failure-terminal-diverged',
+      productTerminalDigest,
       closeoutAt: admittedAt,
     }), { handled: true, reservationSetId: `set-${run.runId}` })
     db.exec('COMMIT')
@@ -2842,7 +3571,7 @@ test('publication divergence retires the native thread and closes without a cano
       continuation_blocked_evidence_digest: receipt.candidateDigest,
     })
     assert.equal(db.prepare(`SELECT COUNT(*) AS count FROM chat_messages WHERE role = 'assistant'`)
-      .get<{ count: number }>()?.count, 0)
+      .get<{ count: number }>()?.count, 1)
     assert.equal(db.prepare(`SELECT COUNT(*) AS count FROM codex_thread_dispatch_fences`)
       .get<{ count: number }>()?.count, 0)
     assert.equal(repository.readActiveAliasBinding('scope-1'), null)
@@ -2851,7 +3580,7 @@ test('publication divergence retires the native thread and closes without a cano
     }), {
       aliasId: 'scope-1', aliasGeneration: 1,
       codexThreadId: 'thread-native-1', codexTurnId: 'turn-native-1',
-      terminal: 'failed', closeoutDigest: 'ready-failure-terminal-diverged',
+      terminal: 'failed', closeoutDigest: productTerminalDigest,
       fenceReleaseRevision: 2,
     })
     const restored = repository.resolveUserIngressAliasBinding({
@@ -2874,7 +3603,7 @@ test('publication divergence retires the native thread and closes without a cano
     db.exec('BEGIN IMMEDIATE')
     assert.deepEqual(repository.completePublicationDivergenceCloseoutInOpenTransaction({
       readyRunId: run.runId,
-      productTerminalDigest: 'ready-failure-terminal-diverged',
+      productTerminalDigest,
       closeoutAt: admittedAt,
     }), { handled: true, reservationSetId: `set-${run.runId}` })
     db.exec('COMMIT')
@@ -3429,6 +4158,55 @@ test('publication recovery only abandons calls that never reached the Ready host
     toolName: 'ready_read',
     argsDigest: 'args-abandoned',
   }
+
+  await withRepository(t, (db, repository) => {
+    const { run } = preparePublicationRecoveryFixture(db, repository, {
+      runId: 'run-failed-before-output-declaration',
+      pendingOutputContract: true,
+    })
+    const candidate = nativeFailureCandidate(run, 'failed')
+    repository.recordEngineTerminalCandidate({
+      readyRunId: run.runId,
+      codexThreadId: 'thread-native-1',
+      codexTurnId: 'turn-native-1',
+      engineOutcome: 'failed',
+      candidate,
+      recordedAt: admittedAt,
+    })
+    assert.deepEqual(repository.readToolPublicationBarrier({
+      readyRunId: run.runId,
+      codexThreadId: 'thread-native-1',
+      codexTurnId: 'turn-native-1',
+      candidateCalls: [],
+    }), {
+      kind: 'accepted', verifiedReceiptRefs: [], code: null, callId: null,
+    })
+  })
+
+  await withRepository(t, (db, repository) => {
+    const { run } = preparePublicationRecoveryFixture(db, repository, {
+      runId: 'run-completed-before-output-declaration',
+      pendingOutputContract: true,
+    })
+    const candidate = nativeFailureCandidate(run, 'completed')
+    repository.recordEngineTerminalCandidate({
+      readyRunId: run.runId,
+      codexThreadId: 'thread-native-1',
+      codexTurnId: 'turn-native-1',
+      engineOutcome: 'completed',
+      candidate,
+      recordedAt: admittedAt,
+    })
+    assert.deepEqual(repository.readToolPublicationBarrier({
+      readyRunId: run.runId,
+      codexThreadId: 'thread-native-1',
+      codexTurnId: 'turn-native-1',
+      candidateCalls: [],
+    }), {
+      kind: 'incomplete', verifiedReceiptRefs: [],
+      code: 'folder_output_intent_receipt_missing', callId: null,
+    })
+  })
 
   await withRepository(t, (db, repository) => {
     const { run } = preparePublicationRecoveryFixture(db, repository, {
@@ -4020,6 +4798,31 @@ test('publication recovery only abandons calls that never reached the Ready host
       effectSettlementOnly: true,
     }).kind, 'accepted')
   })
+
+  await withRepository(t, (db, repository) => {
+    const { run } = preparePublicationRecoveryFixture(db, repository, {
+      runId: 'run-completed-tag-forge-with-ambient-document',
+      currentDocumentAnchor,
+      currentDocumentReadAuthorized: false,
+    })
+    const candidate = nativeFailureCandidate(run, 'completed')
+    repository.recordEngineTerminalCandidate({
+      readyRunId: run.runId,
+      codexThreadId: 'thread-native-1',
+      codexTurnId: 'turn-native-1',
+      engineOutcome: 'completed',
+      candidate,
+      recordedAt: admittedAt,
+    })
+    assert.deepEqual(repository.readToolPublicationBarrier({
+      readyRunId: run.runId,
+      codexThreadId: 'thread-native-1',
+      codexTurnId: 'turn-native-1',
+      candidateCalls: [],
+    }), {
+      kind: 'accepted', verifiedReceiptRefs: [], code: null, callId: null,
+    })
+  })
 })
 
 test('publication treats a delivered failed tool result as terminal evidence', async (t) => {
@@ -4156,10 +4959,16 @@ test('lifecycle action closeout holds unsettled effects and releases the fence o
                initiator = 'user_close', continuation_ref_json = NULL, updated_at = ?
          WHERE run_id = ? AND task_id = ?
       `).run(Date.parse(admittedAt), run.runId, run.taskId)
+      const productTerminalDigest = insertFailureTerminalMessage(
+        db,
+        run,
+        '已停止本轮任务，已完成的记录仍保留。',
+        'cancelled_user',
+      )
       const result = repository.completeLifecycleActionCloseoutInOpenTransaction({
         action: 'close',
         readyRunId: run.runId,
-        productTerminalDigest: `lifecycle-closeout-${run.runId}`,
+        productTerminalDigest,
         closeoutAt: admittedAt,
       })
       db.exec('COMMIT')
@@ -4336,11 +5145,16 @@ test('lifecycle action closeout holds unsettled effects and releases the fence o
     const revision = db.prepare(`
       SELECT revision FROM codex_thread_bindings WHERE thread_binding_id = 'thread-binding-1'
     `).get<{ revision: number }>()?.revision
+    const productTerminalDigest = failureTerminalMessageDigest(
+      run,
+      '已停止本轮任务，已完成的记录仍保留。',
+      'cancelled_user',
+    )
     db.exec('BEGIN IMMEDIATE')
     repository.completeLifecycleActionCloseoutInOpenTransaction({
       action: 'close',
       readyRunId: run.runId,
-      productTerminalDigest: `lifecycle-closeout-${run.runId}`,
+      productTerminalDigest,
       closeoutAt: admittedAt,
     })
     db.exec('COMMIT')
@@ -4502,10 +5316,16 @@ test('stop and reset retire their native generation without closing the conversa
                  initiator = ?, continuation_ref_json = NULL, updated_at = ?
            WHERE run_id = ? AND task_id = ?
         `).run(`user_${action}`, Date.parse(admittedAt), run.runId, run.taskId)
+        const productTerminalDigest = insertFailureTerminalMessage(
+          db,
+          run,
+          '已停止本轮任务，已完成的记录仍保留。',
+          'cancelled_user',
+        )
         repository.completeLifecycleActionCloseoutInOpenTransaction({
           action,
           readyRunId: run.runId,
-          productTerminalDigest: digestCanonicalJson({ action, readyRunId: run.runId }),
+          productTerminalDigest,
           closeoutAt: admittedAt,
         })
         db.exec('COMMIT')
@@ -4906,6 +5726,7 @@ test('tool-call binding is exact-once and process leases require stable tree-zer
       effectSettlementOnly: true,
     }).kind, 'accepted')
     assert.equal(repository.readToolCallBinding(call)?.resultDigest, resultDigest)
+    assert.deepEqual(repository.readPublishedToolOutputs(call.readyRunId), [])
     assert.throws(
       () => repository.markToolCallDeliveryIntent({
         codexThreadId: call.codexThreadId,
@@ -4975,6 +5796,12 @@ test('tool-call binding is exact-once and process leases require stable tree-zer
     assert.equal(deliveryAttempts[0].transportWriteConfirmedAt, null)
     assert.equal(deliveryAttempts[1].transportWriteConfirmedAt, '2026-08-07T01:00:02.000Z')
     assert.deepEqual(deliveryAttempts[1].toolResponse, toolResponse)
+    assert.deepEqual(repository.readPublishedToolOutputs(call.readyRunId), [{
+      itemId: call.codexCallId,
+      toolName: call.toolName,
+      output,
+      completedAt: admittedAt,
+    }])
     assert.deepEqual(repository.beginToolCallDeliveryAttempt({
       codexThreadId: call.codexThreadId,
       codexTurnId: call.codexTurnId,
@@ -5073,7 +5900,14 @@ test('tool-call binding is exact-once and process leases require stable tree-zer
       authorization: buildExplicitNoSkillAuthorization('no_skill_signal'),
       toolSurface: successor.readyToolSurface,
     })
-    successor.productBudgetSeed = { maxIterations: 8, maxToolCalls: 1, maxParallelToolGroups: 1 }
+    successor.productBudgetSeed = {
+      maxIterations: 8, maxToolCalls: 1, maxParallelToolGroups: 1,
+      lanes: {
+        ordinary: { maxIterations: 7, maxToolCalls: 1, maxParallelToolGroups: 1 },
+        delivery: { maxIterations: 0, maxToolCalls: 0, maxParallelToolGroups: 0 },
+        final: { maxIterations: 1 },
+      },
+    }
     prepareReadyParentRowsOnly(db, successor)
     repository.admitProductBindings(admission(successor, existingReservation(successor.runId)))
     repository.activateStartDispatch({
@@ -5424,7 +6258,14 @@ test('native bridge joins a failed Ready result to exact native readback and pub
       authorization: buildExplicitNoSkillAuthorization('no_skill_signal'),
       toolSurface: run.readyToolSurface,
     })
-    run.productBudgetSeed = { maxIterations: 8, maxToolCalls: 1, maxParallelToolGroups: 1 }
+    run.productBudgetSeed = {
+      maxIterations: 8, maxToolCalls: 1, maxParallelToolGroups: 1,
+      lanes: {
+        ordinary: { maxIterations: 7, maxToolCalls: 1, maxParallelToolGroups: 1 },
+        delivery: { maxIterations: 0, maxToolCalls: 0, maxParallelToolGroups: 0 },
+        final: { maxIterations: 1 },
+      },
+    }
     prepareReadyParents(db, repository, run)
     repository.admitProductBindings(admission(run, lazyReservation()))
     repository.activateStartDispatch({
@@ -5734,6 +6575,7 @@ test('persisted conversation authorization mode survives restart and controls th
       currentInput: [{ type: 'text', text: 'hello', text_elements: [] }],
       explicitResourceEnvelope: { input: [], resourceRefs: [] },
       resourceAdditionalContext: [],
+      readyMemorySnapshot: disabledReadyMemorySnapshot(),
       actionAuthorizationMode: readActionAuthorizationModeFromEnvelope(
         resolvedIngress.requestEnvelope,
       ),
@@ -5741,7 +6583,9 @@ test('persisted conversation authorization mode survives restart and controls th
       readyTurnToolAuthorization,
       authorizationOwnerId: 'owner-1',
       resourceOwnerId: 'resource-owner-1',
-      productBudgetSeed: { maxIterations: 8, maxToolCalls: 1, maxParallelToolGroups: 1 },
+      productBudgetSeed: {
+        maxIterations: 8, maxToolCalls: 1, maxParallelToolGroups: 1,
+      },
     })
     assert.equal(preparedResult.ok, true)
     if (!preparedResult.ok) return

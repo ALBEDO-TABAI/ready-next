@@ -20,7 +20,6 @@ import {
 } from '../../modules/agent/taskCardViewModel'
 import { createDebouncedFetch } from '../../modules/agent/debouncedFetch'
 import { filterUserVisibleToolTraceEvents } from '../../modules/agent/toolTraceVisibility'
-import { deletedAgentDisplayName } from '../../../shared/agent-identity'
 import { parseActionAuthorizationMode } from '../../../shared/action-authorization-mode'
 import { mapBackendErrorToFriendly } from '../../modules/agent/error-message-mapping'
 import type {
@@ -72,7 +71,7 @@ import { useTaskRunMerge } from './chat-panel/task-merge/use-task-run-merge'
 import { ChatPanelBody } from './chat-panel/ChatPanelBody'
 import { formatTime } from './chat-panel/format-time'
 // Stage V V1.9c — 15 task interaction useCallbacks (continue / submit /
-// suspend / resume / cancel / retry / open artifact / memory capture) +
+// suspend / resume / cancel / retry / open artifact) +
 // the two internal helpers (`patchScopeRun`, `buildRunContinuationIntent`)
 // extracted to `./chat-panel/task-interaction/use-task-interaction-handlers`.
 // All deps that previously closed over ChatPanel-local state are now
@@ -80,7 +79,7 @@ import { formatTime } from './chat-panel/format-time'
 import { useTaskInteractionHandlers } from './chat-panel/task-interaction/use-task-interaction-handlers'
 // Stage V V1.9a — channel + session-recall state, derivations, effects and
 // callbacks (selectedChannelKey / channelOptions / currentChannel /
-// filteredScopes / currentAgentData / sessionRecall query+results+capsules
+// filteredScopes / sessionRecall query+results+capsules
 // + attach/detach IPC handlers + scope-change side effects) extracted to
 // `./chat-panel/recall-state/use-channel-session-recall`. The
 // `ConversationChannelOption` interface moved with it; ChatPanel
@@ -114,7 +113,6 @@ interface SerializedTaskSnapshot {
   recentArtifacts?: ScopeRunState['recentArtifacts']
   taskContinuation?: ScopeRunState['taskContinuation']
   progress?: ScopeRunState['progress']
-  memoryCapture?: ScopeRunState['memoryCapture']
   blockedReason?: string | null
   error?: string | null
   updatedAt: string
@@ -125,6 +123,7 @@ interface SerializedTaskSnapshot {
     text: string
     timestamp: string
     toolName?: string
+    hideToolName?: boolean
     detail?: string
   }>
 }
@@ -135,6 +134,7 @@ interface SerializedToolTraceSnapshotItem {
   text: string
   timestamp: string
   toolName?: string
+  hideToolName?: boolean
   detail?: string
 }
 
@@ -175,16 +175,13 @@ export default function ChatPanel({
   onTogglePanel,
 }: ChatPanelProps) {
   const {
-    agents,
     messages,
-    currentAgent,
     currentScopeId,
     currentScope,
     scopeRunStates,
     inputValue,
     isStreaming,
     streamingMessageId,
-    selectAgent,
     setInputValue,
     sendMessage,
     stopStreaming,
@@ -259,7 +256,6 @@ export default function ChatPanel({
   const {
     selectedChannelKey,
     filteredScopes,
-    currentAgentData,
     currentChannel,
     channelOptions,
     sessionsByChannelKey,
@@ -267,15 +263,11 @@ export default function ChatPanel({
     detachCallback: handleDetachSessionRecall,
     channelEffects,
   } = useChannelSessionRecall({
-    agents,
-    currentAgent,
     scopes,
     currentScope,
     currentScopeId,
     composerAuthorityRevision,
   })
-  const currentAgentDisplayName = currentAgentData?.displayName
-    || (currentAgent && currentAgent !== 'butler' ? deletedAgentDisplayName(currentAgent) : '管家')
   const { setSelectedChannelKey, getScopeChannelKey } = channelEffects
   const {
     capsules: attachedSessionRecallCapsules,
@@ -407,7 +399,7 @@ export default function ChatPanel({
   const inMemoryTaskRuns = useMemo<TaskCardRun[]>(() => {
     // Stage O §1.2 — `inMemoryTaskRuns` returns ONLY whitelist fields
     // (phase / terminalReason / title / toolTrace / responseMessageId /
-    // responseSegmentToolTraceStart / error / updatedAt / memoryCapture /
+    // responseSegmentToolTraceStart / error / updatedAt /
     // scopeId / taskId). Every blacklist field is null/empty so the
     // gate at `scripts/check-task-card-projection-only.cjs` never sees
     // a `run.X` reference, and `mergedTaskRuns` will populate the real
@@ -445,7 +437,6 @@ export default function ChatPanel({
           responseSegmentToolTraceStart: run.responseSegmentToolTraceStart ?? 0,
           error: run.error,
           updatedAt: run.updatedAt || scope.updatedAt,
-          memoryCapture: run.memoryCapture,
           // O1 blacklist — null/empty until projection populates them
           taskTitle: null,
           taskSummary: null,
@@ -575,7 +566,6 @@ export default function ChatPanel({
       recentArtifacts: projection.recentArtifacts,
       taskContinuation: projection.taskContinuation,
       progress: projection.progress,
-      memoryCapture: projection.memoryCapture,
       blockedReason: projection.blockedReason,
       error: projection.error,
       updatedAt: projection.updatedAt,
@@ -585,6 +575,7 @@ export default function ChatPanel({
         text: event.text,
         timestamp: new Date(event.timestamp),
         ...(event.toolName ? { toolName: event.toolName } : {}),
+        ...(event.hideToolName ? { hideToolName: true } : {}),
         ...(event.detail ? { detail: event.detail } : {}),
       })),
       responseMessageId: projection.responseMessageId || null,
@@ -604,6 +595,7 @@ export default function ChatPanel({
           text: event.text,
           timestamp: new Date(event.timestamp),
           ...(event.toolName ? { toolName: event.toolName } : {}),
+          ...(event.hideToolName ? { hideToolName: true } : {}),
           ...(event.detail ? { detail: event.detail } : {}),
         }
       })
@@ -704,7 +696,7 @@ export default function ChatPanel({
           errorKind: 'host_unavailable',
         })
       })
-  }, [currentAgent, loadScopes])
+  }, [loadScopes])
 
   useEffect(() => {
     setAttachmentPreviewLoading(false)
@@ -788,6 +780,11 @@ export default function ChatPanel({
 
   const sendingRef = useRef(false)
   const [composerNotice, setComposerNotice] = useState<{ message: string; errorKind: string } | null>(null)
+  useEffect(() => {
+    if (!currentScopeId || !currentScope) return
+    setComposerNotice((current) => current?.errorKind === 'scope_missing' ? null : current)
+  }, [currentScope?.id, currentScopeId])
+
   const handleSend = useCallback(async () => {
     if (sendingRef.current) {
       const current = useAgent.getState()
@@ -816,6 +813,39 @@ export default function ChatPanel({
       sendingRef.current = false
     }
   }, [attachments.length, inputValue, sendMessage])
+
+  const handleRetryProductTurn = useCallback(async (predecessorRunId: string) => {
+    if (sendingRef.current) return
+    setComposerNotice(null)
+    const api = window.electronAPI?.agent
+    if (!api?.readProductTurnPresentation) {
+      setComposerNotice({ message: '暂时无法读取上一次结果，请稍后再试。', errorKind: 'host_unavailable' })
+      return
+    }
+    const receipt = await api.readProductTurnPresentation(predecessorRunId)
+    if (!receipt.success || !receipt.data?.failure) {
+      setComposerNotice({ message: '这条记录已无法安全重试，请重新说明需求。', errorKind: 'conversation_reset_required' })
+      return
+    }
+    sendingRef.current = true
+    try {
+      const result = await sendMessage('再试一次', {
+        explicitRetry: {
+          predecessorRunId,
+          predecessorPresentationDigest: receipt.data.presentationDigest,
+        },
+      })
+      if (result.success === false && result.disposition === 'rejected_before_persistence') {
+        const friendly = mapBackendErrorToFriendly({
+          errorKind: result.errorKind,
+          error: result.errorKind,
+        })
+        setComposerNotice({ message: friendly.friendlyMessage, errorKind: result.errorKind })
+      }
+    } finally {
+      sendingRef.current = false
+    }
+  }, [sendMessage])
 
   const handleStop = useCallback(async () => {
     setStopRequestError(null)
@@ -856,15 +886,6 @@ export default function ChatPanel({
     setStopRequestError(null)
     stopRequestTargetRef.current = null
   }, [currentScopeId])
-
-  const handleAgentSelect = useCallback(
-    (name: string) => {
-      if (currentScope?.sourceKind === 'channel') return
-      selectAgent(name)
-      void loadScopes()
-    },
-    [currentScope?.sourceKind, loadScopes, selectAgent]
-  )
 
   const handleSkillReference = useCallback((skill: ReadySkillReference) => {
     addAttachments([createSkillReferenceAttachment(skill)])
@@ -975,14 +996,7 @@ export default function ChatPanel({
     handleCancelDetachedTask,
     handleCancelChildRun,
     handleOpenTaskArtifact,
-    handleDismissMemoryCapture,
-    handleUndoMemoryCapture,
-    handleSupplementMemoryCapture,
   } = useTaskInteractionHandlers({
-    mergedTaskRuns,
-    setInputValue,
-    setPersistedScopeRuns,
-    focusInputWithResize,
     refreshPersistedScopeRuns,
     refreshPersistedTaskProjections,
     refreshActiveChildRuns,
@@ -1120,11 +1134,7 @@ export default function ChatPanel({
         void runSessionRecallSearch(sessionRecallQuery)
       }}
       sessionTitle={sessionTitle}
-      formatAgentName={(agentId) => (
-        agentId === 'butler'
-          ? 'Ready'
-          : agents.find((agent) => agent.name === agentId)?.displayName || deletedAgentDisplayName(agentId)
-      )}
+      formatAgentName={() => 'Ready'}
       formatTime={formatTime}
     />
   )
@@ -1147,9 +1157,6 @@ export default function ChatPanel({
       parseSerializedToolTraceSnapshot={parseSerializedToolTraceSnapshot}
       setTaskSectionExpanded={setTaskSectionExpanded}
       onOpenTaskArtifact={handleOpenTaskArtifact}
-      onDismissMemoryCapture={handleDismissMemoryCapture}
-      onUndoMemoryCapture={handleUndoMemoryCapture}
-      onSupplementMemoryCapture={handleSupplementMemoryCapture}
       onOpenScope={handleLoadConversation}
       onCancelDetachedTask={handleCancelDetachedTask}
       onCancelChildRun={handleCancelChildRun}
@@ -1162,6 +1169,7 @@ export default function ChatPanel({
       onSetInputSuggestion={setInputValue}
       onToggleToolTrace={() => setToolTraceExpanded((value) => !value)}
       onCopyMessage={handleCopyAgentMessage}
+      onRetryProductTurn={handleRetryProductTurn}
       agentSelectionMenu={agentSelectionMenu}
       onCloseAgentSelectionMenu={() => setAgentSelectionMenu(null)}
       copyTextToClipboard={copyTextToClipboard}
@@ -1175,10 +1183,6 @@ export default function ChatPanel({
       attachments={attachments}
       removeAttachment={removeAttachment}
       inputValue={inputValue}
-      agents={agents}
-      currentAgent={currentAgent}
-      currentAgentAvatar={currentAgentData?.avatar || '🤖'}
-      currentAgentDisplayName={currentAgentDisplayName}
       isChannelScope={currentScope?.sourceKind === 'channel'}
       actionAuthorizationMode={actionAuthorizationMode}
       isDragOver={isDragOver}
@@ -1190,7 +1194,6 @@ export default function ChatPanel({
       }}
       onStop={() => { void handleStop() }}
       onPickFiles={pickFiles}
-      onAgentSelect={handleAgentSelect}
       onActionAuthorizationModeChange={(mode) => setActionAuthorizationMode(mode)}
       onSkillReference={handleSkillReference}
       onReferenceSelect={handleReferenceSelect}

@@ -54,6 +54,6 @@ test('chat panel wires session recall search and attach APIs into the inline cha
 
   assert.match(ipcHandler, /searchSessionRecall:\s*\(payload/)
   assert.match(ipcHandler, /listRecentSessions:\s*\(payload/)
-  assert.match(ipcHandler, /getMemoryRepository:\s*\(\)/)
-  assert.match(ipcHandler, /getPromptAssembly:\s*\(\)/)
+  assert.doesNotMatch(ipcHandler, /getMemoryRepository:\s*\(\)/)
+  assert.doesNotMatch(ipcHandler, /getPromptAssembly:\s*\(\)/)
 })

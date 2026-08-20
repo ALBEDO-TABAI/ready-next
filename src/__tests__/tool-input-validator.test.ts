@@ -104,7 +104,7 @@ test('R-WRITE: output_path / outputPath do NOT alias for skill_export_artifact (
   if (!outcome.ok) {
     const fields = new Set((outcome.output.data?.issues as Array<{ path: string[] }>).map((issue) => issue.path[0]))
     assert.ok(fields.has('relativePath'), 'relativePath still named (outputPath not absorbed for export)')
-    assert.ok(fields.has('targetPath'))
+    assert.equal(fields.has('targetPath'), false, 'Ready managed export does not require a legacy targetPath')
   }
 })
 

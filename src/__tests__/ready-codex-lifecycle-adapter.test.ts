@@ -13,6 +13,7 @@ import type {
 import type { PreparedCodexProductRun } from '../main/modules/agent-control/codex-runtime/codex-product-run-preparer'
 import { CodexTurnInputBuilder, textUserInput } from '../main/modules/agent-control/codex-runtime/codex-turn-input-builder'
 import { createCodexToolFixture } from './utils/codex-tool-fixture'
+import { disabledReadyMemorySnapshot } from './utils/ready-memory-fixture'
 import {
   CodexThreadResumeAuthority,
   type CodexThreadResumeSession,
@@ -474,6 +475,7 @@ class FakeLifecycleStore implements ReadyCodexLifecycleStore {
 
 const prepared: PreparedCodexProductRun = {
   preparationContract: 'codex_product_run_e1',
+  readyMemorySnapshot: disabledReadyMemorySnapshot(),
   taskId: 'task-1',
   runId: 'run-1',
   conversationAlias: { aliasId: 'alias-1', aliasGeneration: 1 },
@@ -499,7 +501,16 @@ const prepared: PreparedCodexProductRun = {
     authorizationOwnerId: 'owner-1',
     resourceOwnerId: 'resource-owner-1',
   },
-  productBudgetSeed: { maxIterations: 8, maxToolCalls: 4, maxParallelToolGroups: 1 },
+    productBudgetSeed: {
+      maxIterations: 8,
+      maxToolCalls: 4,
+      maxParallelToolGroups: 1,
+      lanes: {
+        ordinary: { maxIterations: 7, maxToolCalls: 4, maxParallelToolGroups: 1 },
+        delivery: { maxIterations: 0, maxToolCalls: 0, maxParallelToolGroups: 0 },
+        final: { maxIterations: 1 },
+      },
+    },
   neutralProjectionSeed: {
     phase: 'planning',
     taskTitle: '正在理解需求',
@@ -592,6 +603,7 @@ function executeNativeTerminal(adapter: ReadyCodexLifecycleAdapter<{
         toolSurfaceDigest: 'surface-digest',
         turnContractDigest: 'turn-digest',
         upstreamProfileSnapshotDigest: 'profile-digest',
+        readyMemorySnapshot: prepared.readyMemorySnapshot,
       },
       collection: {
         terminalTimeoutMs: 1_000,
@@ -629,6 +641,7 @@ test('canonical runtime contract root source is accepted, bound, and reaches Rea
         toolSurfaceDigest: 'surface-digest',
         turnContractDigest: 'turn-digest',
         upstreamProfileSnapshotDigest: 'profile-digest',
+        readyMemorySnapshot: prepared.readyMemorySnapshot,
       },
       collection: {
         terminalTimeoutMs: 1_000,
@@ -687,6 +700,7 @@ test('existing root thread is read and durably marked before resume can start a 
         toolSurfaceDigest: 'surface-digest',
         turnContractDigest: 'turn-digest',
         upstreamProfileSnapshotDigest: 'profile-digest',
+        readyMemorySnapshot: prepared.readyMemorySnapshot,
       },
       collection: {
         terminalTimeoutMs: 1_000,
@@ -756,6 +770,7 @@ test('connection replacement after thread read cannot resume on a new client or 
         toolSurfaceDigest: 'surface-digest',
         turnContractDigest: 'turn-digest',
         upstreamProfileSnapshotDigest: 'profile-digest',
+        readyMemorySnapshot: prepared.readyMemorySnapshot,
       },
       collection: {
         terminalTimeoutMs: 1_000,
@@ -792,7 +807,7 @@ test('connection replacement after resume but before evidence marking cannot loa
   let lifecycleStore: FakeLifecycleStore
   const { adapter, nativeRuntime, lifecycleStore: store, candidates } = createHarness({
     threadResumePort: {
-      async readThenResume({ threadId, validateRead }) {
+      async readThenResume({ threadId: _threadId, validateRead }) {
         const read = { thread: rootThread }
         validateRead(read.thread)
         lifecycleStore.activeConnectionEpoch = 'epoch-replacement'
@@ -818,6 +833,7 @@ test('connection replacement after resume but before evidence marking cannot loa
         toolSurfaceDigest: 'surface-digest',
         turnContractDigest: 'turn-digest',
         upstreamProfileSnapshotDigest: 'profile-digest',
+        readyMemorySnapshot: prepared.readyMemorySnapshot,
       },
       collection: {
         terminalTimeoutMs: 1_000,
@@ -910,6 +926,7 @@ test('non-pinned native root source metadata is rejected before binding or turn 
           toolSurfaceDigest: 'surface-digest',
           turnContractDigest: 'turn-digest',
           upstreamProfileSnapshotDigest: 'profile-digest',
+          readyMemorySnapshot: prepared.readyMemorySnapshot,
         },
         collection: {
           terminalTimeoutMs: 1_000,
@@ -1252,6 +1269,7 @@ test('turn start transport failure still reaches Ready closeout exactly once', a
         toolSurfaceDigest: 'surface-digest',
         turnContractDigest: 'turn-digest',
         upstreamProfileSnapshotDigest: 'profile-digest',
+        readyMemorySnapshot: prepared.readyMemorySnapshot,
       },
       collection: {
         terminalTimeoutMs: 20,
@@ -1308,6 +1326,7 @@ test('unresolved native start remains pending without creating a Ready failure o
           toolSurfaceDigest: 'surface-digest',
           turnContractDigest: 'turn-digest',
           upstreamProfileSnapshotDigest: 'profile-digest',
+          readyMemorySnapshot: prepared.readyMemorySnapshot,
         },
         collection: {
           terminalTimeoutMs: 20,
@@ -1356,6 +1375,7 @@ test('native terminal timeout still reaches Ready closeout exactly once', async 
         toolSurfaceDigest: 'surface-digest',
         turnContractDigest: 'turn-digest',
         upstreamProfileSnapshotDigest: 'profile-digest',
+        readyMemorySnapshot: prepared.readyMemorySnapshot,
       },
       collection: {
         terminalTimeoutMs: 10,
@@ -1937,7 +1957,7 @@ test('create and identity read failures return exact typed lifecycle failures', 
   {
     const { adapter, lifecycleStore } = createHarness()
     lifecycleStore.failAt.set('createAlias', 'persistence_failed')
-    const result = await adapter.createSession({ agentId: 'butler' })
+    const result = await adapter.createSession({})
     assert.equal(result.ok, false)
     if (result.ok) return
     assert.equal(result.action, 'create')

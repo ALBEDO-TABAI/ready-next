@@ -24,9 +24,6 @@ function writeBaseline(root) {
   write(root, 'src/main/modules/agent-control/runtime-core/agent-sdk-runtime.ts', `
 import { compactAgentInputItems } from '../compaction/compact-agent-input'
 `)
-  write(root, 'src/main/modules/agent-control/prompt-assembly.ts', `
-import { compressHistoryForPrompt } from './compaction/context-compression'
-`)
   write(root, 'src/main/modules/agent-control/turn-engine.ts', `
 export class TurnEngine {}
 `)

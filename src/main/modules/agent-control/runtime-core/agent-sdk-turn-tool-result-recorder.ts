@@ -44,10 +44,8 @@ export function createAgentSdkToolResultRecorder(input: {
   setLiveTaskBudgetRuntime: (runtime: TaskBudgetRuntime) => void
   usedTools: string[]
   projectionPatches: Record<string, unknown>[]
-  toolArgsByName: Map<string, Record<string, unknown>[]>
   taskProofSink: ReturnType<typeof createTaskProofSink> | null
-  host: Pick<TurnOrchestratorHost,
-    'learnSiteCardFromToolFailure' | 'readVerifiedBrowserWorkflowEvidence'>
+  host: Pick<TurnOrchestratorHost, 'readVerifiedBrowserWorkflowEvidence'>
   runId: string
   taskId: string
   noteProgress: () => void
@@ -94,8 +92,6 @@ export function createAgentSdkToolResultRecorder(input: {
         }
       }
 
-      const argsQueue = input.toolArgsByName.get(toolName)
-      input.host.learnSiteCardFromToolFailure(toolName, argsQueue?.shift(), normalized)
       const structuredData = readStructuredResultRecord(normalized)
       recordBrowserWorkflowToolResult(runtimeContext, toolName, structuredData)
       const route = runtimeContext.browserWorkflowRoute
@@ -137,7 +133,7 @@ export function createAgentSdkToolResultRecorder(input: {
         : ''
       const toolReportedNonterminal = isNonterminalToolOutput(normalized)
       const toolReportedFailure = !toolReportedNonterminal && (
-        !isSuccessfulToolOutput(normalized)
+        !isSuccessfulToolOutput(normalized, toolName)
         || documentToolFailed
         || structuredData.ok === false
         || typeof structuredData.errorKind === 'string'

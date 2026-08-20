@@ -32,6 +32,8 @@ import type { CodexRuntimeHostPort } from '../main/modules/agent-control/codex-r
 import type { CoreTurnCandidate } from '../main/modules/agent-control/codex-runtime/codex-turn-collector'
 import type { ConversationScope } from '../main/modules/agent-control/contracts/types'
 import type { StartIdentityReservationSet } from '../main/modules/agent-control/send-scoped-confirmation'
+import { commitCanonicalCodexFailure } from './helpers/codex-product-closeout'
+import { disabledReadyMemorySnapshot } from './utils/ready-memory-fixture'
 import {
   openProviderCheckpointTestDb as openDb,
   providerCheckpointExecutionBinding as executionBinding,
@@ -136,7 +138,7 @@ test('Codex failed closeouts atomically end their bound Browser child and recove
     })
     if (isAgentBrowserError(heldClaim)) throw new Error(heldClaim.message)
 
-    const closeout = await repository.commitCodexFailureCoreCloseout({
+    const closeout = await commitCanonicalCodexFailure(repository, {
       parentTaskId,
       ownerRunId,
       conversationId: scopeId,
@@ -170,7 +172,8 @@ test('Codex failed closeouts atomically end their bound Browser child and recove
     assert.equal(child?.status, 'cancelled')
     assert.deepEqual(JSON.parse(child?.result_json || '{}'), {
       terminalReason: 'cancelled_user',
-      error: 'cancelled_user',
+      canonicalMessageId: `assistant:${parentTaskId}:${ownerRunId}:terminal`,
+      canonicalMessageDigest: closeout.value.productTerminalDigest,
     })
     assert.equal(child?.error, null)
     assert.equal(child?.finished_at, closeoutAt)
@@ -184,7 +187,7 @@ test('Codex failed closeouts atomically end their bound Browser child and recove
       db.prepare(`SELECT COUNT(*) AS count FROM chat_messages
                    WHERE conversation_id = ? AND role = 'assistant'`)
         .get<{ count: number }>(scopeId)?.count,
-      0,
+      1,
     )
     assert.equal(participantInput?.readyRunId, ownerRunId)
     assert.equal(participantInput?.productTerminalDigest, closeout.value.productTerminalDigest)
@@ -263,34 +266,7 @@ test('Codex failed closeouts atomically end their bound Browser child and recove
     })
     assert.equal(repository.inspectWorkflowCloseout(failedTaskId).state, 'observation_required')
 
-    await assert.rejects(
-      repository.commitCodexFailureCoreCloseout({
-        parentTaskId: failedTaskId,
-        ownerRunId: failedRunId,
-        conversationId: scopeId,
-        status: 'error',
-        terminalReason: 'blocked_external',
-        initiator: 'codex_recovery',
-        durationMs: 60_000,
-        taskType: 'direct_answer',
-        module: 'system',
-        error: 'codex_browser_workflow_research_incomplete',
-        now: closeoutAt,
-      }),
-      /codex_failure_closeout_browser_state_conflict/,
-    )
-    assert.equal(
-      db.prepare('SELECT status FROM run_meta WHERE run_id = ?')
-        .get<{ status: string }>(failedRunId)?.status,
-      'running',
-    )
-    assert.equal(
-      db.prepare('SELECT status FROM browser_tasks WHERE id = ?')
-        .get<{ status: string }>(failedRoute.browserTaskId)?.status,
-      'running',
-    )
-
-    await repository.commitCodexFailureCoreCloseout({
+    await commitCanonicalCodexFailure(repository, {
       parentTaskId: failedTaskId,
       ownerRunId: failedRunId,
       conversationId: scopeId,
@@ -300,7 +276,7 @@ test('Codex failed closeouts atomically end their bound Browser child and recove
       durationMs: 60_000,
       taskType: 'direct_answer',
       module: 'system',
-      error: 'codex_browser_workflow_observation_required',
+      error: 'codex_browser_workflow_research_incomplete',
       now: closeoutAt,
     })
     assert.deepEqual(
@@ -315,7 +291,7 @@ test('Codex failed closeouts atomically end their bound Browser child and recove
     assert.equal(
       db.prepare('SELECT status FROM browser_tasks WHERE id = ?')
         .get<{ status: string }>(failedRoute.browserTaskId)?.status,
-      'cancelled',
+      'failed',
     )
   } finally {
     db.close()
@@ -359,6 +335,7 @@ test('production live closeout retires an observation-required Browser workflow 
     const toolFixture = createCodexToolFixture([])
     const prepared: PreparedCodexProductRun = {
       preparationContract: 'codex_product_run_e1',
+      readyMemorySnapshot: disabledReadyMemorySnapshot(),
       taskId: parentTaskId,
       runId: ownerRunId,
       conversationAlias: { aliasId: scopeId, aliasGeneration: 1 },
@@ -390,7 +367,14 @@ test('production live closeout retires an observation-required Browser workflow 
         authorizationOwnerId: 'authorization-owner-live-closeout',
         resourceOwnerId: 'resource-owner-live-closeout',
       },
-      productBudgetSeed: { maxIterations: 9, maxToolCalls: 8, maxParallelToolGroups: 1 },
+      productBudgetSeed: {
+        maxIterations: 9, maxToolCalls: 8, maxParallelToolGroups: 1,
+        lanes: {
+          ordinary: { maxIterations: 8, maxToolCalls: 8, maxParallelToolGroups: 1 },
+          delivery: { maxIterations: 0, maxToolCalls: 0, maxParallelToolGroups: 0 },
+          final: { maxIterations: 1 },
+        },
+      },
       neutralProjectionSeed: {
         phase: 'planning',
         taskTitle: '正在理解需求',
@@ -650,10 +634,17 @@ test('production live closeout retires an observation-required Browser workflow 
       async commitCanonicalCoreCloseout() {
         throw new Error('canonical_closeout_must_not_run_before_browser_observation')
       },
-      async commitCodexFailureCoreCloseout(input) {
+      async commitCodexProductTurnCloseout(input) {
         recoveryCloseoutCalls += 1
-        const committed = await checkpoints.commitCodexFailureCoreCloseout(input)
-        return committed.value
+        const committed = await checkpoints.commitCanonicalCoreCloseout(input)
+        const product = codexRepository.readProductCloseout(input.ownerRunId)
+        if (!product) throw new Error('test_product_closeout_missing')
+        return {
+          productTerminalDigest: product.productTerminalDigest,
+          closeoutAt: product.productCloseoutAt,
+          canonicalMessage: committed.value.canonicalMessage,
+          canonicalMessageDigest: committed.value.canonicalMessageDigest,
+        }
       },
     } as unknown as CodexRuntimeHostPort)
 
@@ -749,10 +740,11 @@ test('production live closeout retires an observation-required Browser workflow 
     const browserChild = db.prepare(`
       SELECT status, result_json FROM browser_tasks WHERE id = ?
     `).get<{ status: string; result_json: string }>(route.browserTaskId)
-    assert.equal(browserChild?.status, 'cancelled')
+    assert.equal(browserChild?.status, 'failed')
     assert.deepEqual(JSON.parse(browserChild?.result_json || '{}'), {
       terminalReason: 'blocked_external',
-      error: 'codex_browser_workflow_observation_required',
+      canonicalMessageId: `assistant:${parentTaskId}:${ownerRunId}:terminal`,
+      canonicalMessageDigest: readback.productOutcomeDigest,
     })
     assert.equal(
       db.prepare('SELECT COUNT(*) AS count FROM agent_session_checkpoints WHERE parent_task_id = ?')

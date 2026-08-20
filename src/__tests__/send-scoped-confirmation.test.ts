@@ -8,6 +8,7 @@ import {
 } from '../main/modules/agent-control/codex-runtime/codex-product-run-preparer'
 import { textUserInput } from '../main/modules/agent-control/codex-runtime/codex-turn-input-builder'
 import { createCodexToolFixture } from './utils/codex-tool-fixture'
+import { disabledReadyMemorySnapshot } from './utils/ready-memory-fixture'
 import {
   IngressPersistenceError,
   PrePersistenceAdmissionError,
@@ -374,6 +375,7 @@ test('a well-shaped prepared run for another scope is rejected before persistenc
     currentInput: [textUserInput('hello')],
     explicitResourceEnvelope: { input: [], resourceRefs: [] },
     resourceAdditionalContext: [],
+    readyMemorySnapshot: disabledReadyMemorySnapshot(),
     ...createCodexToolFixture(),
     authorizationOwnerId: 'authorization-owner-1',
     resourceOwnerId: 'resource-owner-1',

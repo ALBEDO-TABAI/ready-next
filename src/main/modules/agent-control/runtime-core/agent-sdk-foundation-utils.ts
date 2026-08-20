@@ -6,7 +6,10 @@ import {
 } from '../../../../shared/ai-providers'
 import { hasLocalSendImFileIntent } from '../../../../shared/remote-im-file-intent'
 import { PRIMITIVE_TOOL_DEFS } from '../../tools/skill-primitives/tool-defs'
-import { isCodexSafeHostSkillPrimitiveDefinition } from '../../tools/skill-tool-execution-authority'
+import {
+  isCodexSafeHostSkillPrimitiveDefinition,
+  isHostFolderExportPrimitive,
+} from '../../tools/skill-tool-execution-authority'
 import { getSkillsRuntimeManager } from '../../skills-runtime/runtime-manager'
 import type { SkillState } from '../../skills-runtime/runtime-manager-types'
 import { appendToolCapabilityLog } from '../../tools/tool-event-log'
@@ -40,8 +43,7 @@ import { asRecord } from './agent-sdk-model-message-utils'
 import type {
   AgentSdkBudgetCheckpointRestore,
   AgentSdkExecutionOptions,
-  AgentSdkProviderDiagnostics,
-  ToolBridgeRuntimeContext
+  AgentSdkProviderDiagnostics
 } from './agent-sdk-types'
 
 export const SDK_CHILD_RESUME_AWAIT_TIMEOUT_MS = 1_500
@@ -256,8 +258,9 @@ export function supplementAuthorizedSkillPrimitiveDefinitions(
     if (!definition) continue
     next.push({
       ...definition,
-      codexExecutionSafe: liveSkills.some((skill) =>
-        isCodexSafeHostSkillPrimitiveDefinition(name, skill)),
+      codexExecutionSafe: isHostFolderExportPrimitive(name)
+        || liveSkills.some((skill) =>
+          isCodexSafeHostSkillPrimitiveDefinition(name, skill)),
     })
     seen.add(name)
   }
@@ -268,35 +271,6 @@ export function supplementAuthorizedSkillPrimitiveDefinitions(
 
 export function defaultSystemPrompt(): string {
   return loadReadySystemPrompt()
-}
-
-export function resolveSourceMessageProvenance(params: {
-  sourceMessageId?: string | null
-  requestEnvelope?: unknown
-}): {
-  sourceMessageId: string | null
-  sourceMessageUnavailableReason:
-    | import('../../../../shared/agent-specialist-blueprint').SpecialistBlueprintSourceMessageUnavailableReason
-    | null
-} {
-  const sourceMessageId =
-    typeof params.sourceMessageId === 'string' && params.sourceMessageId.trim()
-      ? params.sourceMessageId.trim()
-      : null
-  if (sourceMessageId) {
-    return { sourceMessageId, sourceMessageUnavailableReason: null }
-  }
-  if (
-    params.requestEnvelope &&
-    typeof params.requestEnvelope === 'object' &&
-    !Array.isArray(params.requestEnvelope)
-  ) {
-    return {
-      sourceMessageId: null,
-      sourceMessageUnavailableReason: 'request_envelope_missing_message_id'
-    }
-  }
-  return { sourceMessageId: null, sourceMessageUnavailableReason: 'message_id_unavailable' }
 }
 
 function messageHasMediaAttachment(message: RunMessage): boolean {

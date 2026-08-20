@@ -70,6 +70,18 @@
   ],
   "c4Exempt": [
     {
+      "path": "src/__tests__/frozen-directory-ref.test.ts",
+      "reason": "Frozen directory reference coverage exercises temporary filesystem paths, injected search roots, and filesystem-only artifact export. No test path opens getDatabase or better-sqlite3; only transitive file-tool imports trigger C4, so host-Node coverage must remain active.",
+      "since": "2026-08-18",
+      "owner": "codex-artifact-delivery"
+    },
+    {
+      "path": "src/__tests__/artifact-materializer.test.ts",
+      "reason": "Artifact materializer coverage uses temporary files and an injected Codex delivery context for write, read, copy-on-write, export, retention, and retry-source behavior. No test path opens getDatabase or better-sqlite3; only the transitive skill-tool import graph triggers C4, so host-Node coverage must remain active.",
+      "since": "2026-08-19",
+      "owner": "codex-artifact-delivery"
+    },
+    {
       "path": "src/__tests__/agent-sdk-post-run-abort.test.ts",
       "reason": "The capability-selection import graph now reaches database.ts statically, but this test passed under host Node while better-sqlite3 remained on the incompatible Electron ABI; its provider and runtime collaborators are injected fakes and no SQLite path runs.",
       "since": "2026-08-16",
@@ -263,33 +275,15 @@
     },
     {
       "path": "src/__tests__/agent-execution-readiness.test.ts",
-      "reason": "Agent Foundation: exercises the deterministic readiness evaluator with synthetic agent records and blueprint fixtures; no path opens better-sqlite3 or reads the real database. Host-Node coverage must remain active for exact-foundation and lifecycle assertions.",
+      "reason": "Single Ready identity: exercises the deterministic readiness evaluator with synthetic records; no path opens better-sqlite3 or reads the real database. Host-Node coverage must remain active for the fail-closed identity boundary.",
       "since": "2026-07-11",
       "owner": "agent-foundation-remediation"
     },
     {
       "path": "src/__tests__/agent-knowledge-toggle-boundary.test.ts",
-      "reason": "Agent Foundation: exercises profile material selection with in-memory fake stores and temporary RULES files; no path opens better-sqlite3 or reads the real database. Host-Node coverage must remain active for the knowledge-card versus rules boundary.",
+      "reason": "Retired memory boundary: inspects the static production registry and proves the memory group has no definitions or schemas. It does not open better-sqlite3 or read the real database.",
       "since": "2026-07-11",
       "owner": "agent-foundation-remediation"
-    },
-    {
-      "path": "src/__tests__/agent-sdk-runtime-specialist-blueprint-clarification.test.ts",
-      "reason": "Specialist live-tool retirement: inspects only the static tool registry and schema resolver to prove retired names are absent. It never constructs the runtime, opens a repository, or loads better-sqlite3; the registry import graph alone triggers C4.",
-      "since": "2026-08-12",
-      "owner": "specialist-control-retirement"
-    },
-    {
-      "path": "src/__tests__/belief-injection-usage-count.test.ts",
-      "reason": "P2-4: bumpBeliefCardAccess runs against an in-memory fake MirrorDb (pattern-matches the UPDATE SQL); renderKnowledgeIndex uses a file-only BeliefCardStore under a tmpdir. No test path opens better-sqlite3 or reads the real DB. Host-Node coverage must stay active for the usage-count + renderedRelPaths assertions.",
-      "since": "2026-07-03",
-      "owner": "p2-4-belief-usage-count"
-    },
-    {
-      "path": "src/__tests__/memory-lifecycle-belief-archive-exclusion.test.ts",
-      "reason": "P2-6: MemoryLifecycleManager runs against an injected fake MemoryRepository (queryMemories/archiveMemory stubs); no test path opens better-sqlite3 or reads the real DB. Host-Node coverage must stay active for the belief-category archive-exclusion assertion.",
-      "since": "2026-07-03",
-      "owner": "p2-6-belief-archive-exclusion"
     },
     {
       "path": "src/__tests__/run-finalizer-task-facts.test.ts",
@@ -338,12 +332,6 @@
       "reason": "P4-D/C27: tests migration 063 with a fake MigrationDatabase and never opens better-sqlite3 or the app DB. Transitive migration imports reach sqlite-capable modules only through the registry surface.",
       "since": "2026-06-20",
       "owner": "p4d-session-recall-agent-scope"
-    },
-    {
-      "path": "src/__tests__/prompt-context-budget-coverage.test.ts",
-      "reason": "P6b/C28: tests PromptAssemblyService context-budget accounting with filesystem fixtures and fake stores. Transitive imports reach sqlite-capable runtime modules, but no test path opens better-sqlite3 or reads the real DB.",
-      "since": "2026-06-20",
-      "owner": "p6b-context-budget-coverage"
     },
     {
       "path": "src/__tests__/sdk-turnengine-capability-parity.test.ts",
@@ -485,18 +473,6 @@
     },
     {
       "path": "src/__tests__/pet-sticky-tool-contract.test.ts",
-      "reason": "transitive value-import reaches a nativeBackedModule via wrapper modules but never triggers native sqlite load in any test path (all sqlite-touching call sites use fakes/stubs); verified passing on host-Node test runs as of 2026-05-06",
-      "since": "2026-05-06",
-      "owner": "stage5-bulk-import"
-    },
-    {
-      "path": "src/__tests__/prompt-assembly-recall-capsule-inline.test.ts",
-      "reason": "transitive value-import reaches a nativeBackedModule via wrapper modules but never triggers native sqlite load in any test path (all sqlite-touching call sites use fakes/stubs); verified passing on host-Node test runs as of 2026-05-06",
-      "since": "2026-05-06",
-      "owner": "stage5-bulk-import"
-    },
-    {
-      "path": "src/__tests__/prompt-assembly.test.ts",
       "reason": "transitive value-import reaches a nativeBackedModule via wrapper modules but never triggers native sqlite load in any test path (all sqlite-touching call sites use fakes/stubs); verified passing on host-Node test runs as of 2026-05-06",
       "since": "2026-05-06",
       "owner": "stage5-bulk-import"
@@ -866,12 +842,6 @@
       "reason": "P1b-C16 schedule outcome tests construct SkillsRuntimeManager with startBackgroundTasks:false and replace getRawDatabase with an in-memory fake DB. They exercise createSchedule and runScheduledTask outcome branching only; no path opens better-sqlite3 under host Node. Native coverage remains enforced by npm run verify:native.",
       "since": "2026-06-20",
       "owner": "agent-audit-p1b-c16"
-    },
-    {
-      "path": "src/__tests__/builtin-agent-presets.test.ts",
-      "reason": "baseline: tests builtin agent preset resolution as a pure function; transitive imports reach sqlite-capable modules but no test path opens better-sqlite3 (verified passing host-Node, 0 skip).",
-      "since": "2026-06-24",
-      "owner": "stability-baseline-restore"
     },
     {
       "path": "src/__tests__/stale-projection-finalizer.test.ts",

@@ -1,6 +1,7 @@
 import type { SkillToolAuthorization } from '../skills/skill-tool-authorization'
 import {
   CURRENT_DOCUMENT_CONTEXT_FLOOR_TOOL_NAMES,
+  FOLDER_EXPORT_FLOOR_TOOL_NAMES,
 } from '../domain-adapters/capability-floors'
 import {
   DOCUMENT_WRITE_FLOOR_TOOL_NAMES,
@@ -24,6 +25,7 @@ import {
   resolveReadyCapabilityTurnAvailability,
   type ReadyCapabilityTurnAvailability,
 } from './codex-capability-turn-availability'
+import { READY_MEMORY_SEARCH_TOOL_NAME } from '../ready-memory'
 
 const DOCUMENT_WRITE_TOOLS = new Set<string>([
   'document_new_tab',
@@ -49,14 +51,18 @@ export function composeCodexTurnToolSnapshot(input: {
   authorizationId: string
   authorization: SkillToolAuthorization
   currentDocument?: { present: boolean; allowWrite: boolean }
+  folderExport?: { present: boolean; allowWrite: boolean }
   externalReadAllowedToolNames?: readonly string[]
   explicitResourceAllowedToolNames?: readonly string[]
   workbenchMode?: 'browser' | 'document' | 'rss' | 'calendar' | null
   exclusiveAllowSet?: readonly string[] | null
   browserAdmission?: BrowserAdmissionAuthoritySnapshot | null
   capabilityAvailability?: ReadyCapabilityTurnAvailability | null
+  readyMemory?: { enabled: boolean; hasEntries: boolean }
 }): ReadyToolTurnSnapshot {
-  let allowed = [...input.resolved.readyTurnToolAuthorization.allowedToolNames]
+  let allowed = input.resolved.readyTurnToolAuthorization.allowedToolNames.filter(
+    (name) => name !== READY_MEMORY_SEARCH_TOOL_NAME,
+  )
 
   if (input.currentDocument?.present) {
     allowed = allowed.filter((name) => !DOCUMENT_WRITE_TOOLS.has(name))
@@ -83,6 +89,19 @@ export function composeCodexTurnToolSnapshot(input: {
   }
 
   const surfaceNames = new Set(input.resolved.readyToolSurface.toolNames)
+  if (
+    input.readyMemory?.enabled === true
+    && input.readyMemory.hasEntries
+    && surfaceNames.has(READY_MEMORY_SEARCH_TOOL_NAME)
+    && input.exclusiveAllowSet == null
+  ) {
+    allowed.push(READY_MEMORY_SEARCH_TOOL_NAME)
+  }
+  if (input.folderExport?.present && input.folderExport.allowWrite && input.exclusiveAllowSet == null) {
+    for (const name of FOLDER_EXPORT_FLOOR_TOOL_NAMES) {
+      if (surfaceNames.has(name) && !allowed.includes(name)) allowed.push(name)
+    }
+  }
   if (
     input.workbenchMode === 'rss'
     && surfaceNames.has('rss_capture_session')

@@ -81,9 +81,6 @@ export interface TaskToolSnapshotProps {
   // useCallback identities through without coercion. ---
   setTaskSectionExpanded: (taskKey: string, sectionKey: TaskSectionKey, expanded: boolean) => void
   onOpenTaskArtifact: (path: string) => void
-  onDismissMemoryCapture: (scopeId: string) => void
-  onUndoMemoryCapture: (scopeId: string) => void
-  onSupplementMemoryCapture: (scopeId: string) => void
   onOpenScope: (scopeId: string) => void
   onCancelDetachedTask: (scopeId: string, taskId?: string | null) => void
   onCancelChildRun: (scopeId: string, childRunId: string) => void
@@ -192,8 +189,7 @@ function hasLongTaskEvidence(run: Omit<TaskCardRun, '__brand'>): boolean {
     || hasOpenWait
     || planStepCount >= 2
     || progressTotal >= 2
-    || (run.recentArtifacts?.length ?? 0) > 0
-    || (run.memoryCapture && run.memoryCapture.status !== 'dismissed'),
+    || (run.recentArtifacts?.length ?? 0) > 0,
   )
 }
 
@@ -258,9 +254,6 @@ export function TaskToolSnapshot(props: TaskToolSnapshotProps): React.ReactEleme
     parseSerializedToolTraceSnapshot,
     setTaskSectionExpanded,
     onOpenTaskArtifact,
-    onDismissMemoryCapture,
-    onUndoMemoryCapture,
-    onSupplementMemoryCapture,
     onOpenScope,
     onCancelDetachedTask,
     onCancelChildRun,
@@ -304,9 +297,6 @@ export function TaskToolSnapshot(props: TaskToolSnapshotProps): React.ReactEleme
           }}
           onToggleExpanded={() => setTaskSectionExpanded(key, 'overview', !expanded)}
           onOpenArtifact={onOpenTaskArtifact}
-          onDismissMemoryCapture={onDismissMemoryCapture}
-          onUndoMemoryCapture={onUndoMemoryCapture}
-          onSupplementMemoryCapture={onSupplementMemoryCapture}
           onOpenScope={onOpenScope}
           onCancelDetachedTask={onCancelDetachedTask}
           onCancelChildRun={onCancelChildRun}
@@ -327,10 +317,7 @@ export function TaskToolSnapshot(props: TaskToolSnapshotProps): React.ReactEleme
       onOpenScope,
       onCancelDetachedTask,
       onCancelChildRun,
-      onDismissMemoryCapture,
       onOpenTaskArtifact,
-      onSupplementMemoryCapture,
-      onUndoMemoryCapture,
       setTaskSectionExpanded,
       dismissedBottomTaskKeys,
       taskDisclosureState,

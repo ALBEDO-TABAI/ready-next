@@ -14,6 +14,11 @@ import type { MultiTurnThinkingPolicy } from '../../../../shared/ai-providers/ty
 import { resolveModelContextWindow } from '../../../../shared/context-budget-types'
 import { resolveProviderPatchProfile } from '../../../../shared/ai-providers/index'
 import { READY_GATEWAY_MAX_CONTROLLED_RETRIES } from './codex-model-gateway-retry'
+import {
+  parseReadyMemoryPromptText,
+  readyMemoryPromptText,
+  type ReadyMemoryPromptPayload,
+} from '../ready-memory'
 
 type JsonObject = Record<string, unknown>
 
@@ -32,6 +37,8 @@ export type CodexModelGatewayRequestEvidence = Readonly<{
   toolsDigest: string
   toolCount: number
   bodyBytes: number
+  memoryHistoryRedactionDigest: string
+  memoryHistoryRedactedItemCount: number
 }>
 
 export type CodexModelGatewayResponseEvidence = Readonly<{
@@ -181,16 +188,27 @@ function parseReadyResourceReference(value: string, expectedId?: string): JsonOb
   return parsed
 }
 
+function parseReadyResourcePayload(payload: string): JsonObject[] {
+  const lines = payload.trim().split('\n').map((line) => line.trim()).filter(Boolean)
+  return lines.map((line) => parseReadyResourceReference(line))
+}
+
 function readyResourceReferencesFromText(text: string): {
   recognized: boolean
   references: JsonObject[]
 } {
-  const batch = text.match(/^<external_ready_resources>([\s\S]*)<\/external_ready_resources>$/)
-  if (batch) {
-    const lines = batch[1].trim().split('\n').map((line) => line.trim()).filter(Boolean)
+  const application = text.match(/^<ready_resources>([\s\S]*)<\/ready_resources>$/)
+  if (application) {
     return {
       recognized: true,
-      references: lines.map((line) => parseReadyResourceReference(line)),
+      references: parseReadyResourcePayload(application[1]),
+    }
+  }
+  const batch = text.match(/^<external_ready_resources>([\s\S]*)<\/external_ready_resources>$/)
+  if (batch) {
+    return {
+      recognized: true,
+      references: parseReadyResourcePayload(batch[1]),
     }
   }
   const single = text.match(/^<ready-resource:([^>\s]+)>([\s\S]*)<\/ready-resource:\1>$/)
@@ -201,6 +219,36 @@ function readyResourceReferencesFromText(text: string): {
     }
   }
   return { recognized: false, references: [] }
+}
+
+function readyExplicitRetryContextFromText(text: string): {
+  recognized: boolean
+  context: JsonObject | null
+} {
+  const match = text.match(/^<ready-explicit-retry>([\s\S]*)<\/ready-explicit-retry>$/)
+  if (!match) return { recognized: false, context: null }
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(match[1])
+  } catch {
+    throw new CodexModelGatewayContractError('gateway_explicit_retry_context_invalid')
+  }
+  if (!isRecord(parsed)) {
+    throw new CodexModelGatewayContractError('gateway_explicit_retry_context_invalid')
+  }
+  return { recognized: true, context: parsed }
+}
+
+function readyMemoryContextFromText(text: string): {
+  recognized: boolean
+  context: ReadyMemoryPromptPayload | null
+} {
+  try {
+    const context = parseReadyMemoryPromptText(text)
+    return context ? { recognized: true, context } : { recognized: false, context: null }
+  } catch {
+    throw new CodexModelGatewayContractError('gateway_memory_context_invalid')
+  }
 }
 
 export function instructionTranscriptDigest(instructions: unknown, input: unknown): string {
@@ -231,6 +279,8 @@ export function instructionTranscriptDigest(instructions: unknown, input: unknow
     if (
       developerText === '<ready_continuation>EMPTY_SUCCESSOR_CONTEXT</ready_continuation>'
       || readyResourceReferencesFromText(developerText).recognized
+      || readyExplicitRetryContextFromText(developerText).recognized
+      || readyMemoryContextFromText(developerText).recognized
     ) return
     developerMessages.push({ type: 'message', role: 'developer', content: item.content })
   })
@@ -387,22 +437,165 @@ function textFromContent(content: unknown): string[] {
   ))
 }
 
+function sortReadyResourceReferences(references: JsonObject[]): JsonObject[] {
+  return [...references].sort((left, right) => (
+    String(left.logicalResourceId || '').localeCompare(String(right.logicalResourceId || ''))
+  ))
+}
+
+function collectReadyResourceReferencesFromItem(
+  item: unknown,
+  latest: Map<string, JsonObject>,
+): 'resource' | 'mixed' | 'other' {
+  if (!isRecord(item) || (item.role !== 'user' && item.role !== 'developer')) return 'other'
+  const texts = textFromContent(item.content)
+  if (texts.length === 0) return 'other'
+  let sawResource = false
+  let sawOther = false
+  for (const text of texts) {
+    const parsed = readyResourceReferencesFromText(text)
+    if (!parsed.recognized) {
+      sawOther = true
+      continue
+    }
+    sawResource = true
+    for (const reference of parsed.references) {
+      latest.set(String(reference.logicalResourceId), reference)
+    }
+  }
+  if (sawResource && !sawOther) return 'resource'
+  if (sawResource) return 'mixed'
+  return 'other'
+}
+
 export function latestReadyResourceReferences(input: unknown): unknown[] {
   if (!Array.isArray(input)) throw new CodexModelGatewayContractError('gateway_input_invalid')
   const latest = new Map<string, JsonObject>()
-  for (const item of input) {
-    if (!isRecord(item) || (item.role !== 'user' && item.role !== 'developer')) continue
-    for (const text of textFromContent(item.content)) {
-      const parsed = readyResourceReferencesFromText(text)
-      if (!parsed.recognized) continue
-      for (const reference of parsed.references) {
-        latest.set(String(reference.logicalResourceId), reference)
-      }
+  for (const item of input) collectReadyResourceReferencesFromItem(item, latest)
+  return sortReadyResourceReferences([...latest.values()])
+}
+
+export function currentTurnReadyResourceReferences(input: unknown): unknown[] {
+  if (!Array.isArray(input)) throw new CodexModelGatewayContractError('gateway_input_invalid')
+  let lastUser = -1
+  for (let index = input.length - 1; index >= 0; index -= 1) {
+    if (isRecord(input[index]) && input[index].role === 'user') {
+      lastUser = index
+      break
     }
   }
-  return [...latest.values()].sort((left, right) => (
-    String(left.logicalResourceId || '').localeCompare(String(right.logicalResourceId || ''))
-  ))
+  if (lastUser < 0) return []
+  const latest = new Map<string, JsonObject>()
+  collectReadyResourceReferencesFromItem(input[lastUser], latest)
+  for (let index = lastUser - 1; index >= 0; index -= 1) {
+    const older = new Map<string, JsonObject>()
+    if (collectReadyResourceReferencesFromItem(input[index], older) !== 'resource') break
+    for (const [logicalResourceId, reference] of older) {
+      if (!latest.has(logicalResourceId)) latest.set(logicalResourceId, reference)
+    }
+  }
+  return sortReadyResourceReferences([...latest.values()])
+}
+
+export function currentTurnReadyAdditionalContext(input: unknown): {
+  resourceReferences: unknown[]
+  explicitRetry: JsonObject | null
+  readyMemory: ReadyMemoryPromptPayload | null
+} {
+  if (!Array.isArray(input)) throw new CodexModelGatewayContractError('gateway_input_invalid')
+  let lastUser = -1
+  for (let index = input.length - 1; index >= 0; index -= 1) {
+    if (isRecord(input[index]) && input[index].role === 'user') {
+      lastUser = index
+      break
+    }
+  }
+  if (lastUser < 0) return { resourceReferences: [], explicitRetry: null, readyMemory: null }
+  const latest = new Map<string, JsonObject>()
+  collectReadyResourceReferencesFromItem(input[lastUser], latest)
+  let explicitRetry: JsonObject | null = null
+  let readyMemory: ReadyMemoryPromptPayload | null = null
+  for (let index = lastUser - 1; index >= 0; index -= 1) {
+    const item = input[index]
+    if (!isRecord(item) || (item.role !== 'user' && item.role !== 'developer')) break
+    const texts = textFromContent(item.content)
+    if (texts.length === 0) break
+    let recognized = true
+    for (const text of texts) {
+      const resources = readyResourceReferencesFromText(text)
+      if (resources.recognized) {
+        for (const reference of resources.references) {
+          if (!latest.has(String(reference.logicalResourceId))) {
+            latest.set(String(reference.logicalResourceId), reference)
+          }
+        }
+        continue
+      }
+      const retry = readyExplicitRetryContextFromText(text)
+      if (retry.recognized && retry.context && explicitRetry === null) {
+        explicitRetry = retry.context
+        continue
+      }
+      const memory = readyMemoryContextFromText(text)
+      if (memory.recognized && memory.context && readyMemory === null) {
+        readyMemory = memory.context
+        continue
+      }
+      recognized = false
+      break
+    }
+    if (!recognized) break
+  }
+  return {
+    resourceReferences: sortReadyResourceReferences([...latest.values()]),
+    explicitRetry,
+    readyMemory,
+  }
+}
+
+function canonicalReadyResourceReferences(references: readonly unknown[]): JsonObject[] {
+  if (!Array.isArray(references)) {
+    throw new CodexModelGatewayContractError('gateway_resource_reference_invalid')
+  }
+  const latest = new Map<string, JsonObject>()
+  for (const reference of references) {
+    if (!isRecord(reference) || typeof reference.logicalResourceId !== 'string' || !reference.logicalResourceId) {
+      throw new CodexModelGatewayContractError('gateway_resource_reference_invalid')
+    }
+    latest.set(reference.logicalResourceId, reference)
+  }
+  return sortReadyResourceReferences([...latest.values()])
+}
+
+export function digestReadyResourceReferences(references: readonly unknown[]): string {
+  return digestCanonicalJson(canonicalReadyResourceReferences(references))
+}
+
+export function digestReadyAdditionalContext(input: {
+  resourceReferences: readonly unknown[]
+  explicitRetry: unknown | null
+  readyMemory?: unknown | null
+}): string {
+  if (input.explicitRetry !== null && !isRecord(input.explicitRetry)) {
+    throw new CodexModelGatewayContractError('gateway_explicit_retry_context_invalid')
+  }
+  const references = canonicalReadyResourceReferences(input.resourceReferences)
+  let memory: ReadyMemoryPromptPayload | null = null
+  if (input.readyMemory != null) {
+    try {
+      memory = parseReadyMemoryPromptText(readyMemoryPromptText(
+        input.readyMemory as ReadyMemoryPromptPayload,
+      ))
+    } catch {
+      throw new CodexModelGatewayContractError('gateway_memory_context_invalid')
+    }
+    if (!memory) throw new CodexModelGatewayContractError('gateway_memory_context_invalid')
+  }
+  return digestCanonicalJson([
+    ...references,
+    ...(input.explicitRetry === null ? [] : [{ kind: 'explicit_retry', value: input.explicitRetry }]),
+    ...(memory === null ? [] : [{ kind: 'ready_memory', value: memory }]),
+  ])
 }
 
 export function upstreamEndpoint(snapshot: CodexUpstreamProfileSnapshot): string {

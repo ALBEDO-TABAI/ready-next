@@ -48,11 +48,8 @@ import { toolEventGroup } from './ipc/tool-event-group'
 import { agentLifecycleGroup } from './ipc/agent-lifecycle-group'
 import { createCodexRuntimeComposition } from '../agent-control/codex-runtime/codex-runtime-composition'
 import { agentRuntimeGroup } from './ipc/agent-runtime-group'
+import { readyMemoryGroup } from './ipc/ready-memory-group'
 import { mcpGroup, runMcpBoot } from './ipc/mcp-group'
-import { agentRegistryGroup } from './ipc/agent-registry-group'
-import { agentSystemStudioGroup } from './ipc/agent-system-studio-group'
-import { agentSpecialistBlueprintGroup } from './ipc/agent-specialist-blueprint-group'
-import { beliefCardGroup } from './ipc/belief-card-group'
 import { runQualityGroup } from './ipc/run-quality-group'
 import { runFeedbackGroup } from './ipc/run-feedback-group'
 import { RunFeedbackRepository } from '../agent-control/task-projection/run-feedback-repository'
@@ -67,11 +64,7 @@ import { runControlGroup } from './ipc/run-control-group'
 import { telemetryGroup } from './ipc/telemetry-group'
 import { channelManagementGroup } from './ipc/channel-management-group'
 import { chatPersistenceGroup } from './ipc/chat-persistence-group'
-import { memoryGroup } from './ipc/memory-group'
-import { triggerGroup } from './ipc/trigger-group'
 import type { IpcDisposeHandle } from './ipc/types'
-import { getSpecialistBlueprintStore } from '../agent-control/agents/specialist-blueprint-runtime'
-import { getSpecialistContentEditProposalStore } from '../agent-control/agents/specialist-content-edit-runtime'
 import { logAgentMetric } from '../agent-control/metrics'
 import { isRendererAgentMetricName } from '../../../shared/renderer-agent-metrics'
 // Stage V V2.1c — `SendScopedUserMessage` import retired: the only call
@@ -198,18 +191,9 @@ let agentLifecycleGroupDispose: IpcDisposeHandle | null = null
  * dispose on dev-reload re-entry, dispose on `cleanupAgentRuntime` shutdown.
  */
 let agentRuntimeGroupDispose: IpcDisposeHandle | null = null
+let readyMemoryGroupDispose: IpcDisposeHandle | null = null
 
 /** EP4-A7 — dispose handle for agent registry lifecycle channels. */
-let agentRegistryGroupDispose: IpcDisposeHandle | null = null
-
-/** P8a/P8b — dispose handle for read-only Agent System Studio snapshot. */
-let agentSystemStudioGroupDispose: IpcDisposeHandle | null = null
-
-/** P8c/P8f — dispose handle for specialist blueprint draft/admission channels. */
-let agentSpecialistBlueprintGroupDispose: IpcDisposeHandle | null = null
-
-/** EP4 settings surface — belief-card truth-source review/confirmation. */
-let beliefCardGroupDispose: IpcDisposeHandle | null = null
 let runQualityGroupDispose: IpcDisposeHandle | null = null
 /** D5 后端切片 — per-run 用户反馈通道（renderer 评分控件属 D5 待做）。 */
 let runFeedbackGroupDispose: IpcDisposeHandle | null = null
@@ -299,29 +283,6 @@ let channelManagementGroupDispose: IpcDisposeHandle | null = null
  */
 let chatPersistenceGroupDispose: IpcDisposeHandle | null = null
 
-/**
- * Stage V V2.1n — dispose handle returned by `memoryGroup.register`. Owns
- * the 8 agent-memory channels (`agent:memory:query`, `agent:memory:create`,
- * `agent:memory:update`, `agent:memory:delete`, `agent:memory:stats`,
- * `agent:memory:lifecycle:status`, `agent:memory:lifecycle:runMaintenance`,
- * `agent:memory:createFromConversation`). Same lifecycle pattern as the
- * other group dispose slots: register on `setupAgentIPC`, dispose on
- * dev-reload re-entry, dispose on `cleanupAgentRuntime` shutdown.
- */
-let memoryGroupDispose: IpcDisposeHandle | null = null
-
-/**
- * Stage V V2.1o — dispose handle returned by `triggerGroup.register`. Owns
- * the 4 agent-trigger channels (`agent:trigger:list`, `agent:trigger:create`,
- * `agent:trigger:update`, `agent:trigger:createWithMemories`). Same lifecycle
- * pattern as the other group dispose slots: register on `setupAgentIPC`,
- * dispose on dev-reload re-entry, dispose on `cleanupAgentRuntime` shutdown.
- * This is the final claude-bridge channel group — `ipc-handler.ts` no longer
- * registers any inline `ipcMain.handle` calls of its own (every surface lives
- * in an extracted group).
- */
-let triggerGroupDispose: IpcDisposeHandle | null = null
-
 function cleanupSkillSessionState(sessionId?: string, reason = 'Skill session state cleared'): void {
   if (sessionId) {
     clearLastReferenceSkill(sessionId)
@@ -386,21 +347,9 @@ export async function cleanupAgentRuntime(): Promise<void> {
     try { agentRuntimeGroupDispose.dispose() } catch { /* ignore */ }
     agentRuntimeGroupDispose = null
   }
-  if (agentRegistryGroupDispose) {
-    try { agentRegistryGroupDispose.dispose() } catch { /* ignore */ }
-    agentRegistryGroupDispose = null
-  }
-  if (agentSystemStudioGroupDispose) {
-    try { agentSystemStudioGroupDispose.dispose() } catch { /* ignore */ }
-    agentSystemStudioGroupDispose = null
-  }
-  if (agentSpecialistBlueprintGroupDispose) {
-    try { agentSpecialistBlueprintGroupDispose.dispose() } catch { /* ignore */ }
-    agentSpecialistBlueprintGroupDispose = null
-  }
-  if (beliefCardGroupDispose) {
-    try { beliefCardGroupDispose.dispose() } catch { /* ignore */ }
-    beliefCardGroupDispose = null
+  if (readyMemoryGroupDispose) {
+    try { readyMemoryGroupDispose.dispose() } catch { /* ignore */ }
+    readyMemoryGroupDispose = null
   }
   if (runQualityGroupDispose) {
     try { runQualityGroupDispose.dispose() } catch { /* ignore */ }
@@ -471,21 +420,6 @@ export async function cleanupAgentRuntime(): Promise<void> {
   if (chatPersistenceGroupDispose) {
     try { chatPersistenceGroupDispose.dispose() } catch { /* ignore */ }
     chatPersistenceGroupDispose = null
-  }
-  // Stage V V2.1n — symmetric release of the 8 agent-memory channel
-  // handlers (memory:query / create / update / delete / stats +
-  // memory:lifecycle:status / runMaintenance + memory:createFromConversation).
-  if (memoryGroupDispose) {
-    try { memoryGroupDispose.dispose() } catch { /* ignore */ }
-    memoryGroupDispose = null
-  }
-  // Stage V V2.1o — symmetric release of the 4 agent-trigger channel
-  // handlers (trigger:list / create / update / createWithMemories). Final
-  // claude-bridge group — `ipc-handler.ts` no longer owns any inline
-  // handlers of its own.
-  if (triggerGroupDispose) {
-    try { triggerGroupDispose.dispose() } catch { /* ignore */ }
-    triggerGroupDispose = null
   }
   const startup = startingRuntime
   if (startup) {
@@ -764,42 +698,19 @@ export async function setupAgentIPC(
     listChannels: () => runtime!.listChannels(),
   })
 
-  if (agentRegistryGroupDispose) {
-    try { agentRegistryGroupDispose.dispose() } catch { /* ignore — handlers may already be gone */ }
-    agentRegistryGroupDispose = null
+  if (readyMemoryGroupDispose) {
+    try { readyMemoryGroupDispose.dispose() } catch { /* ignore — handlers may already be gone */ }
+    readyMemoryGroupDispose = null
   }
-  agentRegistryGroupDispose = agentRegistryGroup.register(ipcMain, {
-    listAgents: () => runtime!.getAgentRegistry().list(),
-    getBeliefCardStore: () => runtime?.getBeliefCardStore() ?? null,
-  })
-  if (agentSpecialistBlueprintGroupDispose) {
-    try { agentSpecialistBlueprintGroupDispose.dispose() } catch { /* ignore — handlers may already be gone */ }
-    agentSpecialistBlueprintGroupDispose = null
-  }
-  agentSpecialistBlueprintGroupDispose = agentSpecialistBlueprintGroup.register(ipcMain, {
-    getBlueprintStore: getSpecialistBlueprintStore,
-  })
-  if (agentSystemStudioGroupDispose) {
-    try { agentSystemStudioGroupDispose.dispose() } catch { /* ignore — handlers may already be gone */ }
-    agentSystemStudioGroupDispose = null
-  }
-  agentSystemStudioGroupDispose = agentSystemStudioGroup.register(ipcMain, {
-    listAgents: () => runtime!.getAgentRegistry().list(),
-    getAgentRegistry: () => runtime!.getAgentRegistry(),
-    getBeliefCardStore: () => runtime?.getBeliefCardStore() ?? null,
-    getContentEditProposalStore: getSpecialistContentEditProposalStore,
-  })
-
-  if (beliefCardGroupDispose) {
-    try { beliefCardGroupDispose.dispose() } catch { /* ignore — handlers may already be gone */ }
-    beliefCardGroupDispose = null
-  }
-  beliefCardGroupDispose = beliefCardGroup.register(ipcMain, {
-    getBeliefCardStore: () => runtime?.getBeliefCardStore() ?? null,
-    getLifecycleStatus: () => {
-      const manager = runtime!.getMemoryLifecycleManager()
-      return { running: manager.isRunning(), lastMaintenanceAt: manager.getLastMaintenanceAt() }
-    },
+  readyMemoryGroupDispose = readyMemoryGroup.register(ipcMain, {
+    read: (request) => runtime!.readReadyMemory(request),
+    setGlobalPolicy: (request) => runtime!.setReadyMemoryGlobalPolicy(request),
+    setConversationPolicy: (request) => runtime!.setReadyMemoryConversationPolicy(request),
+    add: (request) => runtime!.addReadyMemory(request),
+    update: (request) => runtime!.updateReadyMemory(request),
+    pin: (request) => runtime!.pinReadyMemory(request),
+    delete: (request) => runtime!.deleteReadyMemory(request),
+    reset: (request) => runtime!.resetReadyMemory(request),
   })
 
   // P0-4 (2026-07-02 P0 visibility batch) — read-only run quality stats.
@@ -862,9 +773,11 @@ export async function setupAgentIPC(
     conversationGroupDispose = null
   }
   conversationGroupDispose = conversationGroup.register(ipcMain, {
-    listConversationScopes: (agent) => runtime!.listConversationScopes(agent),
+    listConversationScopes: () => runtime!.listConversationScopes(),
     listScopeRuns: (payload) => runtime!.listScopeRuns(payload),
     readCodexLifecycleSnapshot: (request) => runtime!.readCodexLifecycleSnapshot(request),
+    readProductTurnPresentation: (readyRunId) => runtime!.readProductTurnPresentation(readyRunId),
+    readProductTurnPresentations: (readyRunIds) => runtime!.readProductTurnPresentations(readyRunIds),
     getConversationScopeMessages: (scopeId) => runtime!.getConversationScopeMessages(scopeId),
     setActionAuthorizationMode: (scopeId, mode, expectedMessageVisibilityEpoch) => (
       runtime!.setActionAuthorizationMode(scopeId, mode, expectedMessageVisibilityEpoch)
@@ -1371,59 +1284,5 @@ export async function setupAgentIPC(
   // docs/superpowers/audits/2026-05-20-ready-deep-review-and-refactor-plan.md
   // section 1.1 for the audit entry.
 
-  // ===================== Memory System IPC =====================
-
-  // Stage V V2.1n — the 8 agent-memory channels (agent:memory:query,
-  // agent:memory:create, agent:memory:update, agent:memory:delete,
-  // agent:memory:stats, agent:memory:lifecycle:status,
-  // agent:memory:lifecycle:runMaintenance, agent:memory:createFromConversation)
-  // moved into `memoryGroup`. The group pre-clears internally; we hold the
-  // dispose handle so `cleanupAgentRuntime` can drop the handlers on
-  // shutdown. Re-binding on dev reload first calls `dispose()` on the prior
-  // handle so listener slots stay clean.
-  //
-  // Per-handler closures are passed in as bound dep methods (lazy accessors
-  // returning `null` while the runtime is not yet up — matches the
-  // pre-extraction `runtime?.getMemoryRepository()` null-path). The
-  // `agent:trigger:*` channels stay inline here: they live on the same
-  // `memoryRepository` instance but are a separate Settings tab and a
-  // future V2.1 sub-step (see `memory-group.ts` header for the boundary
-  // rationale).
-  if (memoryGroupDispose) {
-    try { memoryGroupDispose.dispose() } catch { /* ignore — handlers may already be gone */ }
-    memoryGroupDispose = null
-  }
-  memoryGroupDispose = memoryGroup.register(ipcMain, {
-    getMemoryRepository: () => runtime?.getMemoryRepository() ?? null,
-    getMemoryLifecycleManager: () => runtime?.getMemoryLifecycleManager() ?? null,
-    getPromptAssembly: () => runtime?.getPromptAssembly() ?? null,
-    listConversationScopes: () => runtime?.listConversationScopes() ?? null,
-  })
-
-  // Stage V V2.1o — the 4 `agent:trigger:*` channels (list / create / update
-  // / createWithMemories) moved into `triggerGroup`. The group pre-clears
-  // internally; we hold the dispose handle so `cleanupAgentRuntime` can drop
-  // the handlers on shutdown. Re-binding on dev reload first calls
-  // `dispose()` on the prior handle so listener slots stay clean.
-  //
-  // Per-handler closures are passed in as bound dep methods (lazy accessors
-  // returning `null` while the runtime is not yet up — matches the
-  // pre-extraction `runtime?.getMemoryRepository()` / `getPromptAssembly()`
-  // null-path).
-  //
-  // This is the FINAL claude-bridge channel group. With V2.1o landed,
-  // `ipc-handler.ts` no longer registers any inline `ipcMain.handle` calls
-  // of its own — every surface lives in an extracted group (15 total:
-  // askUser / toolEvent / agentLifecycle / agentRuntime / conversation /
-  // taskProjection / recall / detachedTask / runControl / telemetry /
-  // channelManagement / schedule / chatPersistence / memory / trigger).
-  if (triggerGroupDispose) {
-    try { triggerGroupDispose.dispose() } catch { /* ignore — handlers may already be gone */ }
-    triggerGroupDispose = null
-  }
-  triggerGroupDispose = triggerGroup.register(ipcMain, {
-    getMemoryRepository: () => runtime?.getMemoryRepository() ?? null,
-    getPromptAssembly: () => runtime?.getPromptAssembly() ?? null,
-  })
   publishAgentRuntimeReady(mainWindow.webContents)
 }

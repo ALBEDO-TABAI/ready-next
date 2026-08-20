@@ -93,11 +93,15 @@ import {
   getFileManagementOpenAITools,
 } from '../../tools/file-management-tool-defs'
 import { getFeishuAnthropicTools, getFeishuOpenAITools } from '../../tools/feishu-tools'
-import { getMemoryAnthropicTools, getMemoryOpenAITools } from '../../tools/memory-tools'
 import { MAP_TOOL_NAMES, getMapAnthropicTools, getMapOpenAITools } from '../../tools/map-tools'
 import { getPetAnthropicTools, getPetOpenAITools } from '../../tools/pet-tools'
 import { getRSSAnthropicTools, getRSSOpenAITools } from '../../tools/rss-tools'
 import { getSessionRecallAnthropicTools, getSessionRecallOpenAITools } from '../../tools/session-recall-tools'
+import {
+  READY_MEMORY_TOOL_NAMES,
+  getReadyMemoryAnthropicTools,
+  getReadyMemoryOpenAITools,
+} from '../../tools/ready-memory-tools'
 import {
   STATIC_SKILL_ACTIONS_BY_TOOL_NAME,
   STATIC_SKILL_TOOL_NAMES_BOOT_SAFE,
@@ -113,7 +117,10 @@ import {
   getSkillOpenAITools,
   getSkillToolDefsForRegistry,
 } from '../../tools/skills-tools'
-import { isCodexSafeHostSkillPrimitiveDefinition } from '../../tools/skill-tool-execution-authority'
+import {
+  isCodexSafeHostSkillPrimitiveDefinition,
+  isHostFolderExportPrimitive,
+} from '../../tools/skill-tool-execution-authority'
 import { getSkillsRuntimeManager } from '../../skills-runtime/runtime-manager'
 import { getToolInputSchemas } from '../../tools/schemas'
 import { getSystemAnthropicTools, getSystemOpenAITools } from '../../tools/system-tools'
@@ -253,13 +260,6 @@ const FEISHU_TOOL_NAMES = [
   'feishu_chat_get_info',
   'feishu_file_upload',
   'feishu_file_download',
-]
-
-const MEMORY_TOOL_NAMES = [
-  'memory_create',
-  'memory_search',
-  'memory_update',
-  'memory_list_recent',
 ]
 
 const SESSION_RECALL_TOOL_NAMES = ['session_search']
@@ -775,10 +775,10 @@ const GROUP_TOOL_PROVIDERS: Record<CapabilityGroupId, ToolRegistryProvider> = {
     getOpenAIToolsDetailed: (sessionId?: string) => resolveSkillToolSchemas('openai', sessionId),
   },
   memory: {
-    staticToolNames: MEMORY_TOOL_NAMES,
-    getToolDefinitions: () => buildToolDefinitions('memory', MEMORY_TOOL_NAMES),
-    getAnthropicTools: () => getMemoryAnthropicTools(),
-    getOpenAITools: () => getMemoryOpenAITools(),
+    staticToolNames: READY_MEMORY_TOOL_NAMES,
+    getToolDefinitions: () => buildToolDefinitions('memory', READY_MEMORY_TOOL_NAMES),
+    getAnthropicTools: () => getReadyMemoryAnthropicTools(),
+    getOpenAITools: () => getReadyMemoryOpenAITools(),
   },
   session_recall: {
     staticToolNames: SESSION_RECALL_TOOL_NAMES,
@@ -1288,8 +1288,9 @@ export class ToolRegistry implements ToolRegistryReader {
     }
     return definitions.map((definition) => ({
       ...definition,
-      codexExecutionSafe: liveSkills.some((skill) =>
-        isCodexSafeHostSkillPrimitiveDefinition(definition.name, skill)),
+      codexExecutionSafe: isHostFolderExportPrimitive(definition.name)
+        || liveSkills.some((skill) =>
+          isCodexSafeHostSkillPrimitiveDefinition(definition.name, skill)),
     }))
   }
 

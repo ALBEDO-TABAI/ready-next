@@ -416,32 +416,4 @@ describe('skill-resume end-to-end (F1)', () => {
       'no leakage from other tests/sessions')
   })
 
-  it('regression: memory capture event does not overwrite the latest skill summary', () => {
-    clearSkillTaskProjection('conv-memory-capture')
-
-    const firstStep = recordSkillTaskEvent({
-      sessionId: 'conv-memory-capture',
-      skillId: 'video-expert-analyzer',
-      skillName: 'Video Expert Analyzer',
-      toolName: 'skill_video_expert_pipeline',
-      status: 'running',
-      message: 'VEA 正在评分第 3 批镜头',
-    })
-    recordSkillTaskEvent({
-      sessionId: 'conv-memory-capture',
-      skillId: 'video-expert-analyzer',
-      skillName: 'Video Expert Analyzer',
-      toolName: 'memory_capture',
-      status: 'done',
-      message: '已保存阶段性记忆',
-    })
-
-    const projection = readSkillTaskProjection({
-      sessionId: 'conv-memory-capture',
-      skillId: 'video-expert-analyzer',
-    })
-
-    assert.equal(projection?.taskSummary, 'VEA 正在评分第 3 批镜头')
-    assert.equal(projection?.currentStepId, firstStep.stepId)
-  })
 })

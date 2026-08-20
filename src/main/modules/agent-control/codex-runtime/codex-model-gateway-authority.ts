@@ -17,12 +17,20 @@ import type {
   CodexModelGatewayBinding,
   CodexModelGatewayCredentialStore,
   CodexModelGatewayMetadata,
+  CodexModelGatewayPreparedRequestReceipt,
   CodexModelGatewayRequestKind,
   CodexModelGatewayToolResponseCall,
 } from './codex-model-gateway'
 import { CodexModelGatewayError } from './codex-model-gateway'
 
 type RunResult = { changes?: number }
+
+const DELIVERY_LANE_TOOL_NAMES = new Set([
+  'declare_completion_criteria',
+  'skill_write_artifact',
+  'skill_read_artifact',
+  'skill_export_artifact',
+])
 
 export class CodexModelGatewayAuthorityError extends CodexModelGatewayError {
   constructor(code: string, status = 409) {
@@ -162,6 +170,8 @@ export class CodexModelGatewayRepository {
     toolsDigest: string
     toolCount: number
     bodyBytes: number
+    memoryHistoryRedactionDigest: string | null
+    memoryHistoryRedactedItemCount: number | null
     requestEvidenceDigest: string
     responseId: string | null
     responseTerminalDigest: string | null
@@ -187,6 +197,8 @@ export class CodexModelGatewayRepository {
              request_event.tools_digest AS toolsDigest,
              request_event.tool_count AS toolCount,
              request_event.body_bytes AS bodyBytes,
+             request_event.memory_history_redaction_digest AS memoryHistoryRedactionDigest,
+             request_event.memory_history_redacted_item_count AS memoryHistoryRedactedItemCount,
              request_event.evidence_digest AS requestEvidenceDigest,
              response_event.response_id AS responseId,
              response_event.terminal_digest AS responseTerminalDigest,
@@ -225,6 +237,8 @@ export class CodexModelGatewayRepository {
       toolsDigest: string | null
       toolCount: number | null
       bodyBytes: number | null
+      memoryHistoryRedactionDigest: string | null
+      memoryHistoryRedactedItemCount: number | null
       requestEvidenceDigest: string | null
       responseId: string | null
       responseTerminalDigest: string | null
@@ -272,6 +286,8 @@ export class CodexModelGatewayRepository {
         toolsDigest: row.toolsDigest,
         toolCount: row.toolCount,
         bodyBytes: row.bodyBytes,
+        memoryHistoryRedactionDigest: row.memoryHistoryRedactionDigest,
+        memoryHistoryRedactedItemCount: row.memoryHistoryRedactedItemCount,
         requestEvidenceDigest: row.requestEvidenceDigest,
         inputItems: inputItems as Array<{
           digest: string
@@ -291,6 +307,8 @@ export class CodexModelGatewayRepository {
     upstreamProfileSnapshotDigest: string
     toolsDigest: string
     toolCount: number
+    memoryHistoryRedactionDigest: string | null
+    memoryHistoryRedactedItemCount: number | null
     requestEvidenceDigest: string
     responseEvidenceDigest: string
   } {
@@ -299,6 +317,8 @@ export class CodexModelGatewayRepository {
              receipt.upstream_profile_snapshot_digest AS upstreamProfileSnapshotDigest,
              request_event.tools_digest AS toolsDigest,
              request_event.tool_count AS toolCount,
+             request_event.memory_history_redaction_digest AS memoryHistoryRedactionDigest,
+             request_event.memory_history_redacted_item_count AS memoryHistoryRedactedItemCount,
              request_event.evidence_digest AS requestEvidenceDigest,
              response_event.evidence_digest AS responseEvidenceDigest
         FROM ready_model_gateway_request_receipts receipt
@@ -319,6 +339,8 @@ export class CodexModelGatewayRepository {
       upstreamProfileSnapshotDigest: string
       toolsDigest: string
       toolCount: number
+      memoryHistoryRedactionDigest: string | null
+      memoryHistoryRedactedItemCount: number | null
       requestEvidenceDigest: string
       responseEvidenceDigest: string
     }>(input.manualCompactionId, input.codexThreadId, input.codexTurnId)
@@ -479,11 +501,34 @@ export class CodexModelGatewayRepository {
     )
     const admittedIterations = kind === 'product'
       ? this.db.prepare(`
-          SELECT COUNT(*) AS count
+          SELECT
+            COALESCE(SUM(CASE WHEN COALESCE(budget_lane, 'ordinary') = 'ordinary' THEN 1 ELSE 0 END), 0)
+              AS ordinary,
+            COALESCE(SUM(CASE WHEN budget_lane = 'delivery' THEN 1 ELSE 0 END), 0)
+              AS delivery,
+            COALESCE(SUM(CASE WHEN budget_lane = 'final' THEN 1 ELSE 0 END), 0)
+              AS final
             FROM ready_model_gateway_request_receipts
            WHERE request_kind = 'product' AND ready_run_id = ?
-        `).get<{ count: number }>(row.ownerId)?.count || 0
+        `).get<{ ordinary: number; delivery: number; final: number }>(row.ownerId)
       : null
+    let budgetLane: 'ordinary' | 'delivery' | 'final' | null = null
+    if (kind === 'product') {
+      if (!row.maxIterations || !row.iterationLanes || !admittedIterations) {
+        throw new CodexModelGatewayAuthorityError('gateway_iteration_budget_invalid')
+      }
+      const names = row.allowedToolNames ?? []
+      const hasOrdinary = names.some((name) => !DELIVERY_LANE_TOOL_NAMES.has(name))
+      const hasDelivery = names.some((name) => DELIVERY_LANE_TOOL_NAMES.has(name))
+      budgetLane = hasOrdinary && admittedIterations.ordinary < row.iterationLanes.ordinary
+        ? 'ordinary'
+        : hasDelivery && admittedIterations.delivery < row.iterationLanes.delivery
+          ? 'delivery'
+          : admittedIterations.final < row.iterationLanes.final
+            ? 'final'
+            : null
+      if (!budgetLane) throw new CodexModelGatewayAuthorityError('gateway_iteration_budget_exhausted')
+    }
     const binding: CodexModelGatewayBinding = {
       kind,
       codexModel: row.codexModel,
@@ -493,20 +538,10 @@ export class CodexModelGatewayRepository {
       turnContractDigest: row.turnContractDigest,
       instructionContractDigest: row.instructionContractDigest,
       additionalContextDigest: row.additionalContextDigest,
-      forceToolFreeFinalization: kind === 'product'
-        && (row.toolCallsExhausted
-          || admittedIterations === Number(row.maxIterations) - 1),
+      forceToolFreeFinalization: budgetLane === 'final',
       allowedToolNames: kind === 'product' ? row.allowedToolNames : null,
     }
     input.validate(binding)
-    if (kind === 'product') {
-      if (!row.maxIterations) {
-        throw new CodexModelGatewayAuthorityError('gateway_iteration_budget_invalid')
-      }
-      if (Number(admittedIterations) >= row.maxIterations) {
-        throw new CodexModelGatewayAuthorityError('gateway_iteration_budget_exhausted')
-      }
-    }
     this.writeReceipt({
       kind,
       codexThreadId: input.metadata.threadId,
@@ -518,6 +553,7 @@ export class CodexModelGatewayRepository {
       requestDigest: input.requestDigest,
       requestEvidence: input.requestEvidence,
       acceptedAt: input.receivedAt,
+      budgetLane,
     })
     return binding
   }
@@ -579,6 +615,7 @@ export class CodexModelGatewayRepository {
       requestDigest: input.requestDigest,
       requestEvidence: input.requestEvidence,
       acceptedAt: input.receivedAt,
+      budgetLane: null,
     })
     return resolved
   }
@@ -601,6 +638,7 @@ export class CodexModelGatewayRepository {
     requestDigest: string
     requestEvidence: CodexModelGatewayRequestEvidence
     acceptedAt: string
+    budgetLane: 'ordinary' | 'delivery' | 'final' | null
   }): string {
     const receiptId = this.receiptId(input)
     const existing = this.db.prepare(`
@@ -611,8 +649,8 @@ export class CodexModelGatewayRepository {
       INSERT INTO ready_model_gateway_request_receipts (
         receipt_id, request_kind, codex_thread_id, codex_turn_id,
         ready_run_id, manual_compaction_id, upstream_profile_snapshot_ref,
-        upstream_profile_snapshot_digest, request_digest, accepted_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        upstream_profile_snapshot_digest, request_digest, accepted_at, budget_lane
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       receiptId,
       input.kind,
@@ -624,6 +662,7 @@ export class CodexModelGatewayRepository {
       input.snapshotDigest,
       input.requestDigest,
       input.acceptedAt,
+      input.budgetLane,
     )
     if (changes(inserted) !== 1) {
       throw new CodexModelGatewayAuthorityError('gateway_request_receipt_insert_failed')
@@ -647,6 +686,7 @@ export class CodexModelGatewayRepository {
       evidence.instructionDigest,
       evidence.inputDigest,
       evidence.toolsDigest,
+      evidence.memoryHistoryRedactionDigest,
       ...evidence.inputItems.map((item) => item.digest),
     ]
     if (digests.some((digest) => !/^[a-f0-9]{64}$/.test(digest))) {
@@ -657,6 +697,7 @@ export class CodexModelGatewayRepository {
       || !Number.isSafeInteger(evidence.inputMaxStringCharacters)
       || !Number.isSafeInteger(evidence.toolCount)
       || !Number.isSafeInteger(evidence.bodyBytes)
+      || !Number.isSafeInteger(evidence.memoryHistoryRedactedItemCount)
       || evidence.inputItems.some((item) => (
         !Number.isSafeInteger(item.totalStringCharacters)
         || !Number.isSafeInteger(item.maxStringCharacters)
@@ -667,6 +708,7 @@ export class CodexModelGatewayRepository {
       || evidence.inputMaxStringCharacters < 0
       || evidence.toolCount < 0
       || evidence.bodyBytes <= 0
+      || evidence.memoryHistoryRedactedItemCount < 0
     ) throw new CodexModelGatewayAuthorityError('gateway_request_transcript_metrics_invalid')
     const inputItemsJson = JSON.stringify(evidence.inputItems)
     const evidenceDigest = digestCanonicalJson({
@@ -679,8 +721,9 @@ export class CodexModelGatewayRepository {
         gateway_request_receipt_id, event_kind, instruction_digest, input_digest,
         input_items_json, input_total_string_characters,
         input_max_string_characters, tools_digest, tool_count,
-        body_bytes, evidence_digest, recorded_at
-      ) VALUES (?, 'request_admitted', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        body_bytes, memory_history_redaction_digest,
+        memory_history_redacted_item_count, evidence_digest, recorded_at
+      ) VALUES (?, 'request_admitted', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       receiptId,
       evidence.instructionDigest,
@@ -691,6 +734,8 @@ export class CodexModelGatewayRepository {
       evidence.toolsDigest,
       evidence.toolCount,
       evidence.bodyBytes,
+      evidence.memoryHistoryRedactionDigest,
+      evidence.memoryHistoryRedactedItemCount,
       evidenceDigest,
       recordedAt,
     )
@@ -763,12 +808,28 @@ export class CodexDatabaseModelGatewayAuthority implements CodexModelGatewayAuth
 
   async resolve(input: {
     metadata: CodexModelGatewayMetadata
-    requestDigest: string
-    requestEvidence: CodexModelGatewayRequestEvidence
     receivedAt: string
     validate(binding: CodexModelGatewayBinding): ReadonlySet<string>
+    prepareRequestReceipt(): CodexModelGatewayPreparedRequestReceipt
   }): Promise<CodexModelGatewayBinding> {
-    return this.repository.resolveBinding(input)
+    let prepared: CodexModelGatewayPreparedRequestReceipt | null = null
+    return this.repository.resolveBinding({
+      metadata: input.metadata,
+      receivedAt: input.receivedAt,
+      get requestDigest() {
+        if (!prepared) throw new CodexModelGatewayAuthorityError('gateway_request_receipt_unprepared')
+        return prepared.requestDigest
+      },
+      get requestEvidence() {
+        if (!prepared) throw new CodexModelGatewayAuthorityError('gateway_request_receipt_unprepared')
+        return prepared.requestEvidence
+      },
+      validate(binding) {
+        const allowedTools = input.validate(binding)
+        prepared = input.prepareRequestReceipt()
+        return allowedTools
+      },
+    })
   }
 
   async admitToolResponse(input: {

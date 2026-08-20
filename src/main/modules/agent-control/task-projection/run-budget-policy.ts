@@ -22,6 +22,18 @@ const TASK_TYPE_BUDGET_PRESETS: Record<TaskType, Pick<RunBudgetSeed, 'maxIterati
     maxIterations: 24,
     maxToolCalls: 24,
   },
+  artifact_task: {
+    maxIterations: 40,
+    maxToolCalls: 40,
+  },
+  transaction_task: {
+    maxIterations: 40,
+    maxToolCalls: 40,
+  },
+  research_artifact_task: {
+    maxIterations: 220,
+    maxToolCalls: 220,
+  },
   multi_step_task: {
     // This preset remains the ordinary non-Browser estimate. Long-running
     // execution paths widen capacity from structural runtime facts instead of
@@ -82,6 +94,9 @@ export function createContinuationRunBudgetSeed(
 ): RunBudgetSeed {
   if (
     inheritedFromTaskType === 'multi_step_task'
+    || inheritedFromTaskType === 'artifact_task'
+    || inheritedFromTaskType === 'transaction_task'
+    || inheritedFromTaskType === 'research_artifact_task'
     || inheritedFromTaskType === 'media_task'
     || inheritedFromTaskType === 'browser_transaction'
     || inheritedFromTaskType === 'research'

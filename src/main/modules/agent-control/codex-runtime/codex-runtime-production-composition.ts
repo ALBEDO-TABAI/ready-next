@@ -1,29 +1,16 @@
 import { randomUUID } from 'node:crypto'
-import { appendFileSync, mkdirSync, readFileSync } from 'node:fs'
+import { appendFileSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 
 import type { AIModelConfig } from '../../../../shared/ai-providers'
-import { isBrowserPublicToolName } from '../../../../shared/browser-capability-registry'
 import {
-  DEFAULT_ACTION_AUTHORIZATION_MODE,
-  parseActionAuthorizationMode,
   readActionAuthorizationModeFromEnvelope,
-  type ActionAuthorizationMode,
 } from '../../../../shared/action-authorization-mode'
 import { persistableCalendarEventId } from '../../../../shared/calendar-event-identity'
-import type {
-  CodexCurrentDocumentAnchor,
-  SendScopedRequest,
-} from '../../../../shared/ipc-contracts/agent-runtime'
+import type { ProductTurnReceipt, SendScopedRequest } from '../../../../shared/ipc-contracts/agent-runtime'
 import { classifyLifecycleOperation } from '../../../../shared/ipc-contracts/agent-lifecycle-snapshot'
-import type { ConversationScope } from '../contracts/types'
-import type { ExecutionHostResult, RunMessage, TaskProjectionRecord } from '../contracts/run-contracts'
-import {
-  buildRequestEnvelope,
-  type RequestEnvelope,
-  type RequestEnvelopeResource,
-} from '../contracts/request-envelope'
-import { classifyIntent, type IntentClassification } from '../intent-classifier'
+import type { ExecutionHostResult, TaskProjectionRecord } from '../contracts/run-contracts'
+import { classifyIntent } from '../intent-classifier'
 import { TAG_FORGE_EXCLUSIVE_TOOL_NAMES } from './codex-product-action-map'
 import { createCodexProductActionRequester } from './codex-product-action-requester'
 import { createProductionProductActionHandlers } from './codex-product-action-handlers'
@@ -33,21 +20,16 @@ import {
   resolveBrowserExecutionPageRef,
 } from './codex-browser-admission'
 import { resolveReadyCapabilityTurnAvailability } from './codex-capability-turn-availability'
-import { isCodexFolderTagForgeAlias } from './codex-folder-tag-forge-alias'
-import {
-  buildSelectedSkillToolAuthorization,
-  type SkillToolAuthorization
-} from '../skills/skill-tool-authorization'
 import { IngressPersistenceError, PrePersistenceAdmissionError, resolveAttachmentConfirmation } from '../send-scoped-confirmation'
 import type { DatabaseManager } from '../../database'
 import type { AppSettingsRepository } from '../../repositories/app-settings-repository'
 import type {
   BrowserWorkflowVerifierBundle,
-  BrowserWorkflowVerifierInspection,
 } from '../../repositories/agent-session-checkpoint-types'
 import { logAgentMetric } from '../metrics'
 import { readExistingTerminalQualityPatch } from '../runtime-core/run-finalizer-adjudication'
-import { createRunBudgetSeed } from '../task-projection/run-budget-policy'
+import { collectToolOutputProofs } from '../quality/proof-collector'
+import { normalizeToolExecutionOutput } from '../tools-runtime/tool-result-types'
 import {
   buildCodexIngressAdmittedDigest,
   CodexBindingRepository,
@@ -62,13 +44,13 @@ import {
   verifyCodexAutomaticCompactionEvidence
 } from './codex-automatic-compaction-evidence'
 import { CodexModelGatewayRepository, CodexDatabaseModelGatewayAuthority, ReadySettingsModelGatewayCredentialStore } from './codex-model-gateway-authority'
-import { digestCanonicalJson, instructionTranscriptDigest, resolveCodexNativeModelSettings } from './codex-model-gateway-contract'
+import { digestCanonicalJson, digestReadyAdditionalContext, resolveCodexNativeModelSettings } from './codex-model-gateway-contract'
 import { CodexModelGateway, type CodexModelGatewayAddress } from './codex-model-gateway'
 import {
   assertCodexProfileRouteCurrent,
   createCodexProfileRouteSnapshot,
 } from './codex-profile-admission'
-import type { CodexNativeRuntime, CodexTurn, CodexUserInput } from './codex-native-runtime'
+import type { CodexTurn } from './codex-native-runtime'
 import { StableNativeRuntime } from './codex-stable-native-runtime'
 import { CodexProductRunPreparer, type PreparedCodexProductRun } from './codex-product-run-preparer'
 import {
@@ -78,7 +60,7 @@ import {
   proveCodexStableStartAbsence,
   routeCodexBootRecoveryFailure,
 } from './codex-product-boot-recovery'
-import { CodexRuntimeBootReconciler, type CodexRuntimeIngressGate } from './codex-runtime-boot-reconciler'
+import { CodexRuntimeBootReconciler } from './codex-runtime-boot-reconciler'
 import type { CodexAliasBindingPort, CodexIngressPort, CodexPreparedRunContextPort, CodexRuntimeComposition, CodexRuntimeHostPort, CodexStartIdentityPort, ReadyClosedCodexProductRun } from './codex-runtime-composition'
 import { activateCodexGatewaySpawnConfig, buildCodexChildEnvironment, loadVerifiedCodexRuntime, prepareCodexRuntimeState, resolveCodexRuntimePaths, type PreparedCodexRuntimeState } from './codex-runtime-host'
 import { CodexSidecarSession } from './codex-sidecar-session'
@@ -114,18 +96,16 @@ import { CodexThreadResumeAuthority } from './codex-thread-resume-authority'
 import { recoverCodexTerminalAfterInterrupt } from './codex-terminal-readback-recovery'
 import { createCodexReadyToolBridge, CodexToolBridgeError } from './codex-tool-bridge'
 import {
-  buildReadyTurnToolAuthorization,
   digestCodexRootToolSurface,
-  type ReadyToolTurnSnapshot,
 } from './codex-tool-surface'
 import { CodexTurnCollector, type CoreTurnCandidate } from './codex-turn-collector'
 import { createCodexTaskActivityProjector } from './codex-task-activity-projector'
-import { CodexTurnInputBuilder } from './codex-turn-input-builder'
+import { codexTerminalPublicMessage } from './codex-product-turn-presentation'
+import { buildCodexExplicitRetryContext, CodexTurnInputBuilder } from './codex-turn-input-builder'
 import {
   externalReadResourceReference,
   parseCodexExternalReadSliceRequest,
   readLarkCliAuthReadback,
-  type PreparedCodexExternalReadSlice,
 } from './codex-external-read-slice'
 import {
   ReadyCodexLifecycleAdapter,
@@ -135,13 +115,14 @@ import {
 import { workflowDigest } from '../../repositories/browser-workflow-codec'
 import {
   buildCodexThreadDeveloperInstructions,
-  CODEX_HOST_OVERLAY,
 } from './codex-thread-instructions'
 import { createBrowserTurnLease, type BrowserTurnLease } from '../../browser-engine/agent-browser-turn-lease'
 import {
+  recoverCodexRetryLocalResourceSelections,
+  recoverCodexRetrySkillSelection,
   resolveCodexExplicitResources,
-  type CodexResolvedInlineResource,
 } from './codex-explicit-resources'
+import { resolveCodexExplicitRetryLineage } from './codex-explicit-retry-lineage'
 import { resolveTrustedBrowserReference } from '../runtime-core/trusted-browser-environment'
 import {
   codexBrowserVerifierFailureCode,
@@ -164,21 +145,15 @@ import {
   CodexCloseCandidateInFlightOwner,
   CodexProductCloseoutExpectationGuard,
   requestCodexEngineTerminalLifecycleActionBeforeCloseout,
-  requestCodexEngineTerminalUserStopBeforeCloseout,
+  finalizeCodexProductCloseout,
   runCodexEngineTerminalFinalization,
   type CodexProductCloseoutMode,
 } from './codex-product-closeout-support'
 import {
-  buildCodexProductRequestEnvelope,
-  buildCurrentDocumentReadToolSnapshot,
-  buildExplicitResourceReadToolSnapshot,
-  buildExternalReadToolSnapshot,
   codexAllowsDirectProvisionalStream,
-  createCodexProductBudgetSeed,
   createCodexProductUpstreamProfileSnapshot,
   createCurrentDocumentReadRequester,
   hasExplicitCurrentDocumentWriteIntent,
-  readCodexInstructionContractDigest,
   readCodexPreparedActionAuthorizationEnvelope,
   resolveCodexBrowserWorkflowVerifierBundle,
   resolveCodexProductTurnAuthorization,
@@ -187,12 +162,31 @@ import {
   RuntimeGate,
   toCodexInput,
   toRunMessage,
-  validateCurrentDocumentReadPayload,
 } from './codex-product-turn-authorization'
+import {
+  createCodexProductBudgetSeed,
+  resolveCodexBrowserWorkflowTaskFacts,
+  resolveCodexProductCloseoutTaskFacts,
+  resolveCodexProductTaskFacts,
+} from './codex-product-task-facts'
 import {
   createLifecycleStore,
   terminalEvent,
 } from './codex-product-lifecycle-store'
+import { ArtifactMaterializer } from '../../tools/artifact-materializer'
+import { readCodexFolderOutputActivation } from './codex-folder-output-activation'
+import {
+  ReadyMemoryGenerationCoordinator,
+  ReadyMemoryGenerationStore,
+  ReadyMemoryIdleWorker,
+  isReadyMemoryProductionIdle,
+  ReadyMemoryProductionProvider,
+  ReadyMemoryRepository,
+  ReadyMemoryRuntimeService,
+  ReadyMemorySqliteEvidenceLoader,
+  READY_MEMORY_SEARCH_TOOL_NAME,
+  readyMemoryPromptPayload,
+} from '../ready-memory'
 
 export type { CodexRendererToolActionRequester } from './codex-product-surface-ingress'
 export type { CodexProductCloseoutMode } from './codex-product-closeout-support'
@@ -210,7 +204,6 @@ export {
   buildExplicitResourceReadToolSnapshot,
   buildExternalReadToolSnapshot,
   codexAllowsDirectProvisionalStream,
-  createCodexProductBudgetSeed,
   createCodexProductUpstreamProfileSnapshot,
   createCurrentDocumentReadRequester,
   hasExplicitCurrentDocumentWriteIntent,
@@ -225,11 +218,31 @@ export {
   toRunMessage,
   validateCurrentDocumentReadPayload,
 } from './codex-product-turn-authorization'
-export { buildCodexThreadDeveloperInstructions }
+export { buildCodexThreadDeveloperInstructions, createCodexProductBudgetSeed }
 export { retireCodexAliasForClose } from './codex-product-lifecycle-store'
 
 function isoNow(): string {
   return new Date().toISOString()
+}
+
+function codexFailureDiagnostics(input: {
+  error: string
+  module: string
+  verifierReceiptDigest?: string
+}): Record<string, unknown> {
+  return {
+    provider: 'ready_gateway',
+    agentProtocol: 'openai',
+    wireApi: 'responses',
+    codexFailure: {
+      contract: 'codex_failure_evidence_v1',
+      error: input.error,
+      module: input.module,
+      ...(input.verifierReceiptDigest
+        ? { verifierReceiptDigest: input.verifierReceiptDigest }
+        : {}),
+    },
+  }
 }
 
 type FactoryInput = {
@@ -253,6 +266,7 @@ type PreparedDetail = {
   developerInstructions: string
   instructionContractDigest: string
   turnContractDigest: string
+  productTaskFacts: ReturnType<typeof resolveCodexProductTaskFacts>
 }
 
 function stableErrorCode(error: unknown, fallback: string): string {
@@ -362,6 +376,7 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
   const paths = resolveCodexRuntimePaths(input)
   const verified = loadVerifiedCodexRuntime(paths)
   const repository = new CodexBindingRepository(rawDb)
+  const readyMemoryRepository = new ReadyMemoryRepository(rawDb)
   const gatewayRepository = new CodexModelGatewayRepository(rawDb, repository)
   const credentialStore = new ReadySettingsModelGatewayCredentialStore(input.settings)
   const proofCaptureEnabled = /^[a-f0-9]{40,}$/i.test(
@@ -388,6 +403,9 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
   const detailPrepared = new Map<string, PreparedCodexProductRun>()
   const browserTurnLeases = new Map<string, BrowserTurnLease>()
   const currentDocumentExactReadRuns = new Set<string>()
+  const artifactMaterializer = new ArtifactMaterializer(join(input.userDataPath, 'codex-artifacts'), {
+    readStorageRetention: () => repository.readArtifactStorageRetention(),
+  })
   const calendarListedEventIdsByRun = new Map<string, string[]>()
   const calendarNotifyReady = import('../../calendar-engine/ipc-handler')
     .then((module) => module.notifyCalendarEventChanged)
@@ -445,6 +463,46 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
   let bootOnceImplementation: (() => Promise<boolean>) | null = null
   let lifecycle: 'new' | 'starting' | 'running' | 'recovering' | 'stopping' | 'stopped' | 'failed' = 'new'
   let bootGeneration = 0
+  const memoryGenerationStore = new ReadyMemoryGenerationStore(rawDb)
+  const memoryProvider = new ReadyMemoryProductionProvider({
+    profiles: gatewayRepository,
+    credentials: credentialStore,
+  })
+  const memoryCoordinator = new ReadyMemoryGenerationCoordinator({
+    repository: readyMemoryRepository,
+    store: memoryGenerationStore,
+    provider: memoryProvider,
+    evidenceLoader: new ReadyMemorySqliteEvidenceLoader(rawDb),
+    workerId: `ready-memory-${ownerMainBootId}`,
+    resolveProfile(now) {
+      const profile = activeProfile(input.settings)
+      const frozen = createCodexProductUpstreamProfileSnapshot(profile)
+      gatewayRepository.storeSnapshot({ ...frozen, createdAt: now })
+      return {
+        model: frozen.snapshot.model,
+        upstreamProfileSnapshotRef: frozen.snapshotRef,
+        upstreamProfileSnapshotDigest: frozen.snapshotDigest,
+      }
+    },
+    isIdle() {
+      if (lifecycle !== 'running') return false
+      return isReadyMemoryProductionIdle(rawDb)
+    },
+  })
+  let memoryWorker: ReadyMemoryIdleWorker
+  const memoryRuntime = new ReadyMemoryRuntimeService({
+    db: rawDb,
+    repository: readyMemoryRepository,
+    coordinator: memoryCoordinator,
+    automaticGenerationAvailable: memoryProvider.automaticGenerationAvailable,
+    wakeWorker: () => memoryWorker.wake(),
+  })
+  memoryWorker = new ReadyMemoryIdleWorker({
+    coordinator: memoryCoordinator,
+    onError(error) {
+      logAgentMetric('ready_memory_worker_failed', { error: stableErrorCode(error, 'unknown') })
+    },
+  })
   let settleLifecycleHostFailureCloseout: ((identity: {
     aliasId: string
     aliasGeneration: number
@@ -519,6 +577,9 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
     getHost: () => host,
     getRegistry: () => registry,
     scheduleThreadArchiveCleanup,
+    sealClosedConversationInOpenTransaction(value) {
+      memoryRuntime.sealClosedConversationInOpenTransaction(value)
+    },
     getDeveloperInstructions(prepared) {
       const detail = preparedDetails.get(prepared.runId)
       if (!detail || detailPrepared.get(prepared.runId) !== prepared) {
@@ -572,6 +633,11 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
         if (scope.mode !== 'inserted' || scope.row.id !== value.aliasId) {
           throw new Error('codex_created_scope_identity_mismatch')
         }
+        readyMemoryRepository.setConversationContribution({
+          conversationId: scope.row.id,
+          contributeToMemories: true,
+          updatedAt: value.persistedAt,
+        })
         const created = repository.createEmptyAliasGenerationInOpenTransaction({
           threadBindingId: `codex-thread-${sha256(`${value.aliasId}\u00001`).slice(0, 32)}`,
           aliasId: value.aliasId,
@@ -603,6 +669,30 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
 
   const participant = {
     complete(closeout: { readyRunId: string; productTerminalDigest: string; closeoutAt: string }) {
+      const product = repository.readProductTurnRuntime(closeout.readyRunId)
+      const snapshot = product.prepared.readyMemorySnapshot
+      const readEntryIds = repository.readPublishedToolOutputs(closeout.readyRunId)
+        .filter((output) => output.toolName === READY_MEMORY_SEARCH_TOOL_NAME)
+        .flatMap((output) => {
+          const data = output.output.data
+          if (!data || data.snapshotDigest !== snapshot.snapshotDigest
+            || !Array.isArray(data.readEntryIds)
+            || data.readEntryIds.some((entryId) => typeof entryId !== 'string' || !entryId)) {
+            throw new Error('ready_memory_published_read_invalid')
+          }
+          return data.readEntryIds as string[]
+        })
+      const readReceipt = readyMemoryRepository.createReadReceipt(
+        snapshot,
+        readEntryIds,
+        closeout.closeoutAt,
+      )
+      readyMemoryRepository.recordReadReceiptForTurn(
+        closeout.readyRunId,
+        snapshot,
+        readReceipt,
+        closeout.closeoutAt,
+      )
       scheduleThreadArchiveCleanup()
       const expected = expectedCodexCloseouts.readMode(closeout.readyRunId)
       if (!expected) {
@@ -638,6 +728,12 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
           action,
         })
         if (!result.handled) throw new Error('codex_lifecycle_action_closeout_binding_missing')
+        if (action === 'close') {
+          memoryRuntime.sealClosedConversationInOpenTransaction({
+            conversationId: product.prepared.readyToolHostIdentity.scopeId,
+            closedAt: closeout.closeoutAt,
+          })
+        }
         return
       }
       if (expected === 'verifier_rejected') {
@@ -678,6 +774,26 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
     })
   }
 
+  const readProductTaskFacts = (
+    boundHost: CodexRuntimeHostPort,
+    product: CodexProductTurnRuntimeRead,
+  ): Pick<TaskProjectionRecord, 'taskType' | 'module'> => {
+    const projection = boundHost.getTaskProjectionStore().get(product.readyTaskId)
+    if (!projection || projection.runId !== product.readyRunId) {
+      throw new Error('codex_product_task_projection_missing')
+    }
+    const facts = { taskType: projection.taskType, module: projection.module }
+    if (
+      facts.taskType !== 'direct_answer'
+      || facts.module !== 'system'
+      || !product.prepared.outputContract
+    ) return facts
+    return resolveCodexProductCloseoutTaskFacts(
+      { taskType: facts.taskType, module: 'system' },
+      readCodexFolderOutputActivation(rawDb, product.readyRunId),
+    )
+  }
+
   const closePersistedHostFailure = async (
     failure: CodexHostFailureRecovery,
   ): Promise<HostFailureSettlement> => {
@@ -697,7 +813,9 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
     const boundHost = host
     const scope = boundHost?.getScope(product.readyScopeId)
     if (!boundHost || !scope) throw new Error('codex_host_failure_scope_missing')
-    const committed = await boundHost.commitCodexFailureCoreCloseout({
+    const taskFacts = readProductTaskFacts(boundHost, product)
+    const failureError = 'codex_start_delivery_failed'
+    const committed = await boundHost.commitCodexProductTurnCloseout({
       parentTaskId: product.readyTaskId,
       ownerRunId: product.readyRunId,
       conversationId: product.readyScopeId,
@@ -705,9 +823,9 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
       terminalReason: 'persistence_failed',
       initiator: 'codex_host_failure_recovery',
       durationMs: 0,
-      taskType: 'direct_answer',
-      module: 'system',
-      error: 'codex_start_delivery_failed',
+      ...taskFacts,
+      finalText: codexTerminalPublicMessage('error'),
+      providerDiagnostics: codexFailureDiagnostics({ error: failureError, module: taskFacts.module }),
       now: isoNow(),
     })
     const completed = repository.completeHostFailureCloseout({
@@ -727,15 +845,18 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
     }
     const execution: ExecutionHostResult = {
       success: false,
-      finalText: '',
+      finalText: committed.canonicalMessage.content,
       cancelled: false,
       usedTools: [],
       error: 'codex_start_delivery_failed',
       taskId: product.readyTaskId,
       taskProjectionId: product.readyTaskId,
-      taskType: 'direct_answer',
-      interactionState: 'running',
+      taskType: taskFacts.taskType,
+      interactionState: 'suspended',
       terminalReason: 'persistence_failed',
+      canonicalMessage: committed.canonicalMessage,
+      canonicalMessageDigest: committed.canonicalMessageDigest,
+      productTurnReceipt: repository.readProductTurnPresentation(product.readyRunId),
     }
     preparedDetails.delete(product.readyRunId)
     detailPrepared.delete(product.readyRunId)
@@ -768,19 +889,24 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
     if (!boundHost) throw new Error('codex_runtime_host_unbound')
     const scope = boundHost.getScope(product.readyScopeId)
     if (!scope) throw new Error('codex_scope_missing_during_closeout')
+    const taskFacts = readProductTaskFacts(boundHost, product)
+    const receipt = repository.readProductTurnPresentation(product.readyRunId)
+    const successful = receipt.terminal === 'done'
+    const cancelled = receipt.terminal === 'cancelled' || receipt.terminal === 'interrupted'
     const execution: ExecutionHostResult = {
-      success: false,
-      finalText: '',
-      cancelled: true,
-      usedTools: candidate.kind === 'native_terminal'
-        ? candidate.usedToolCalls.map((call) => call.tool)
-        : [],
-      error: 'codex_product_closeout_already_committed',
+      success: successful,
+      finalText: receipt.canonicalMessage.content,
+      cancelled,
+      usedTools: receipt.tools.map((tool) => tool.toolName),
+      ...(successful ? {} : { error: receipt.failure?.kind || 'unknown' }),
       taskId: product.readyTaskId,
       taskProjectionId: product.readyTaskId,
-      taskType: 'direct_answer',
-      interactionState: 'running',
-      terminalReason: 'cancelled_runtime',
+      taskType: taskFacts.taskType,
+      interactionState: successful ? 'running' : 'suspended',
+      terminalReason: successful ? 'done' : cancelled ? 'cancelled_user' : 'persistence_failed',
+      canonicalMessage: receipt.canonicalMessage,
+      canonicalMessageDigest: receipt.canonicalMessageDigest,
+      productTurnReceipt: receipt,
     }
     preparedDetails.delete(product.readyRunId)
     detailPrepared.delete(product.readyRunId)
@@ -880,6 +1006,7 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
     const scope = boundHost.getScope(product.readyScopeId)
     if (!scope) throw new Error('codex_scope_missing_during_closeout')
     const durationMs = Math.max(1, Date.now() - Date.parse(product.admittedAt))
+    const taskFacts = readProductTaskFacts(boundHost, product)
     if (lifecycleAction) {
       if (candidate.kind !== 'native_terminal') {
         throw new Error('codex_lifecycle_action_engine_terminal_missing')
@@ -891,7 +1018,7 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
       const committed = await commitExpectedCodexCloseout(
         product.readyRunId,
         `lifecycle_${action}`,
-        () => boundHost.commitCodexFailureCoreCloseout({
+        () => boundHost.commitCodexProductTurnCloseout({
           parentTaskId: product.readyTaskId,
           ownerRunId: product.readyRunId,
           conversationId: scope.id,
@@ -899,9 +1026,9 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
           terminalReason: 'cancelled_user',
           initiator: `user_${action}`,
           durationMs,
-          taskType: 'direct_answer',
-          module: 'system',
-          error: 'cancelled_user',
+          ...taskFacts,
+          finalText: codexTerminalPublicMessage('interrupted'),
+          providerDiagnostics: codexFailureDiagnostics({ error: 'cancelled_user', module: taskFacts.module }),
           now: isoNow(),
         }),
       )
@@ -921,15 +1048,18 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
       }
       const execution: ExecutionHostResult = {
         success: false,
-        finalText: '',
+        finalText: committed.canonicalMessage.content,
         cancelled: true,
         usedTools: candidate.usedToolCalls.map((call) => call.tool),
         error: 'cancelled_user',
         taskId: product.readyTaskId,
         taskProjectionId: product.readyTaskId,
-        taskType: 'direct_answer',
-        interactionState: 'running',
+        taskType: taskFacts.taskType,
+        interactionState: 'suspended',
         terminalReason: 'cancelled_user',
+        canonicalMessage: committed.canonicalMessage,
+        canonicalMessageDigest: committed.canonicalMessageDigest,
+        productTurnReceipt: repository.readProductTurnPresentation(product.readyRunId),
       }
       preparedDetails.delete(product.readyRunId)
       detailPrepared.delete(product.readyRunId)
@@ -958,6 +1088,10 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
         .getAgentSessionCheckpointRepository()
         .readWorkflowVerifierBundle(product.readyTaskId)
       const workflowBundle = resolveCodexBrowserWorkflowVerifierBundle(workflowInspection)
+      const closeoutTaskFacts = resolveCodexBrowserWorkflowTaskFacts(
+        taskFacts,
+        Boolean(workflowBundle),
+      )
       const projection = workflowBundle
         ? boundHost.getTaskProjectionStore().get(product.readyTaskId)
         : null
@@ -1146,7 +1280,7 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
           const committedFailure = await commitExpectedCodexCloseout(
             product.readyRunId,
             'verifier_rejected',
-            () => boundHost.commitCodexFailureCoreCloseout({
+            () => boundHost.commitCodexProductTurnCloseout({
               parentTaskId: product.readyTaskId,
               ownerRunId: product.readyRunId,
               conversationId: scope.id,
@@ -1154,10 +1288,13 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
               terminalReason: verifierTerminalReason,
               initiator: 'codex_browser_verifier',
               durationMs,
-              taskType: 'direct_answer',
-              module: 'system',
-              error: errorCode,
-              verifierReceiptDigest,
+              ...closeoutTaskFacts,
+              finalText: publicMessage,
+              providerDiagnostics: codexFailureDiagnostics({
+                error: errorCode,
+                module: closeoutTaskFacts.module,
+                verifierReceiptDigest,
+              }),
               now: isoNow(),
             }),
           )
@@ -1183,9 +1320,12 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
             error: errorCode,
             taskId: product.readyTaskId,
             taskProjectionId: product.readyTaskId,
-            taskType: 'direct_answer',
+            taskType: closeoutTaskFacts.taskType,
             interactionState: 'suspended',
             terminalReason: verifierTerminalReason,
+            canonicalMessage: committedFailure.canonicalMessage,
+            canonicalMessageDigest: committedFailure.canonicalMessageDigest,
+            productTurnReceipt: repository.readProductTurnPresentation(product.readyRunId),
           }
           preparedDetails.delete(product.readyRunId)
           detailPrepared.delete(product.readyRunId)
@@ -1234,53 +1374,80 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
       if (repository.readProductCloseout(product.readyRunId)) {
         throw new Error('codex_product_closeout_already_committed')
       }
+      const publishedToolEvidence = repository.readPublishedToolOutputs(product.readyRunId)
+        .map((tool) => ({
+          itemId: tool.itemId,
+          tool: tool.toolName,
+          proofs: collectToolOutputProofs(
+            tool.toolName,
+            normalizeToolExecutionOutput(tool.output),
+            new Date(tool.completedAt),
+            { runId: product.readyRunId },
+          ),
+        }))
+      const requestedCloseout = {
+        parentTaskId: product.readyTaskId,
+        ownerRunId: product.readyRunId,
+        status: 'done' as const,
+        terminalReason: 'done',
+        initiator: 'done',
+        durationMs,
+        finalText: acceptedCandidateText,
+        conversationId: scope.id,
+        ...closeoutTaskFacts,
+        providerDiagnostics: {
+          provider: 'ready_gateway',
+          agentProtocol: 'openai',
+          wireApi: 'responses',
+          actionReceiptRefs: publicationReceiptRefs,
+        },
+        workflowCloseoutSeal: workflowBundle?.seal ?? null,
+        terminalQualityPatch,
+        completionVerifierReceipt,
+      }
       const committed = await commitExpectedCodexCloseout(
         product.readyRunId,
         workflowBundle ? 'verifier_accepted' : 'product',
-        () => (
-        boundHost.commitCanonicalCoreCloseout({
-          parentTaskId: product.readyTaskId,
-          ownerRunId: product.readyRunId,
-          status: 'done',
-          terminalReason: 'done',
-          initiator: 'done',
-          durationMs,
-          finalText: acceptedCandidateText,
-          conversationId: scope.id,
-          taskType: 'direct_answer',
-          module: 'system',
-          providerDiagnostics: {
-            provider: 'ready_gateway',
-            agentProtocol: 'openai',
-            wireApi: 'responses',
-            actionReceiptRefs: publicationReceiptRefs,
-          },
-          workflowCloseoutSeal: workflowBundle?.seal ?? null,
-          terminalQualityPatch,
-          completionVerifierReceipt,
-        })
-      ))
+        async () => workflowBundle
+          ? {
+              ...await boundHost.commitCodexProductTurnCloseout(requestedCloseout),
+              status: 'done',
+              terminalReason: 'done',
+            }
+          : finalizeCodexProductCloseout({
+              closeout: requestedCloseout,
+              toolCalls: candidate.usedToolCalls,
+              publishedToolEvidence,
+              taskProjectionStore: boundHost.getTaskProjectionStore(),
+              commitCanonicalCoreCloseout: (closeout) => (
+                boundHost.commitCodexProductTurnCloseout(closeout)
+              ),
+            }),
+      )
       const productCloseout = repository.readProductCloseout(product.readyRunId)
       if (!productCloseout) throw new Error('codex_product_closeout_readback_missing')
+      const successful = committed.status === 'done'
       const execution: ExecutionHostResult = {
-        success: true,
-        finalText: candidate.candidateText,
+        success: successful,
+        finalText: committed.canonicalMessage.content,
         cancelled: false,
         usedTools: candidate.usedToolCalls.map((call) => call.tool),
+        ...(successful ? {} : { error: committed.terminalReason }),
         taskId: product.readyTaskId,
         taskProjectionId: product.readyTaskId,
-        taskType: 'direct_answer',
-        interactionState: 'running',
-        terminalReason: 'done',
+        taskType: closeoutTaskFacts.taskType,
+        interactionState: successful ? 'running' : 'suspended',
+        terminalReason: committed.terminalReason as ExecutionHostResult['terminalReason'],
         canonicalMessage: committed.canonicalMessage,
         canonicalMessageDigest: committed.canonicalMessageDigest,
+        productTurnReceipt: repository.readProductTurnPresentation(product.readyRunId),
       }
       preparedDetails.delete(product.readyRunId)
       detailPrepared.delete(product.readyRunId)
       return {
         execution,
         productOutcomeDigest: productCloseout.productTerminalDigest,
-        candidateBodyDigest: candidate.candidateDigest,
+        candidateBodyDigest: successful ? candidate.candidateDigest : null,
         committedTerminalEvent: terminalEvent({
           scope, product, execution, terminalAt: productCloseout.productCloseoutAt,
         }),
@@ -1369,7 +1536,7 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
       throw new Error('codex_product_closeout_already_committed')
     }
     const committed = await commitExpectedCodexCloseout(product.readyRunId, closeoutMode, () => (
-      boundHost.commitCodexFailureCoreCloseout({
+      boundHost.commitCodexProductTurnCloseout({
         parentTaskId: product.readyTaskId,
         ownerRunId: product.readyRunId,
         conversationId: scope.id,
@@ -1377,9 +1544,9 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
         terminalReason,
         initiator: 'codex_native',
         durationMs,
-        taskType: 'direct_answer',
-        module: 'system',
-        error: errorCode,
+        ...taskFacts,
+        finalText: codexTerminalPublicMessage(status),
+        providerDiagnostics: codexFailureDiagnostics({ error: errorCode, module: taskFacts.module }),
         now: isoNow(),
       })
     ))
@@ -1392,15 +1559,18 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
     }
     const execution: ExecutionHostResult = {
       success: false,
-      finalText: '',
+      finalText: committed.canonicalMessage.content,
       cancelled: status === 'interrupted',
       usedTools: candidate.usedToolCalls.map((call) => call.tool),
       error: errorCode,
       taskId: product.readyTaskId,
       taskProjectionId: product.readyTaskId,
-      taskType: 'direct_answer',
-      interactionState: 'running',
+      taskType: taskFacts.taskType,
+      interactionState: 'suspended',
       terminalReason,
+      canonicalMessage: committed.canonicalMessage,
+      canonicalMessageDigest: committed.canonicalMessageDigest,
+      productTurnReceipt: repository.readProductTurnPresentation(product.readyRunId),
     }
     preparedDetails.delete(product.readyRunId)
     detailPrepared.delete(product.readyRunId)
@@ -1452,6 +1622,7 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
     const boundHost = host
     const scope = boundHost?.getScope(product.readyScopeId)
     if (!boundHost || !scope) throw new Error('codex_recovery_failure_scope_missing')
+    const taskFacts = readProductTaskFacts(boundHost, product)
     const evidenceDigest = pendingInteractionRestart?.evidenceDigest || digestCanonicalJson({
       contract: 'codex_product_recovery_failure_v1',
       readyRunId: product.readyRunId,
@@ -1465,7 +1636,7 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
     const committed = await commitExpectedCodexRecoveryFailure(
       product.readyRunId,
       { code: errorCode, evidenceDigest, pendingInteractionRestart },
-      () => boundHost.commitCodexFailureCoreCloseout({
+      () => boundHost.commitCodexProductTurnCloseout({
         parentTaskId: product.readyTaskId,
         ownerRunId: product.readyRunId,
         conversationId: product.readyScopeId,
@@ -1473,9 +1644,11 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
         terminalReason: pendingInteractionRestart ? 'cancelled_runtime' : 'persistence_failed',
         initiator: 'codex_recovery',
         durationMs: Math.max(1, Date.now() - Date.parse(product.admittedAt)),
-        taskType: 'direct_answer',
-        module: 'system',
-        error: errorCode,
+        ...taskFacts,
+        finalText: codexTerminalPublicMessage(
+          pendingInteractionRestart ? 'interrupted' : 'error',
+        ),
+        providerDiagnostics: codexFailureDiagnostics({ error: errorCode, module: taskFacts.module }),
         now: pendingInteractionRestart?.cancelledAt || isoNow(),
       }),
     )
@@ -1501,15 +1674,18 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
     }
     const execution: ExecutionHostResult = {
       success: false,
-      finalText: '',
+      finalText: committed.canonicalMessage.content,
       cancelled: Boolean(pendingInteractionRestart),
       usedTools: [],
       error: errorCode,
       taskId: product.readyTaskId,
       taskProjectionId: product.readyTaskId,
-      taskType: 'direct_answer',
-      interactionState: 'running',
+      taskType: taskFacts.taskType,
+      interactionState: 'suspended',
       terminalReason: pendingInteractionRestart ? 'cancelled_runtime' : 'persistence_failed',
+      canonicalMessage: committed.canonicalMessage,
+      canonicalMessageDigest: committed.canonicalMessageDigest,
+      productTurnReceipt: repository.readProductTurnPresentation(product.readyRunId),
     }
     return {
       execution,
@@ -1612,6 +1788,11 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
                     initiator: 'codex_recovery',
                     error: browserWorkflowCode,
                   })
+                  if (!stopped) {
+                    const recovered = readAlreadyCommittedCloseout(product, candidate)
+                    if (!recovered) throw new Error('codex_recovered_closeout_readback_missing')
+                    callback(recovered)
+                  }
                 } else {
                   const recovered = await closeRunLocalRecoveryFailure(
                     candidate.readyRunId,
@@ -1793,6 +1974,7 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
     const boundHost = host
     const scope = boundHost?.getScope(product.readyScopeId)
     if (!boundHost || !scope) throw new ReadyCodexLifecyclePortError('persistence_failed')
+    const taskFacts = readProductTaskFacts(boundHost, product)
     if (repository.readProductCloseout(product.readyRunId)) {
       return readLifecycleCloseout({ ...input.identity, readyRunId: input.readyRunId })
     }
@@ -1810,7 +1992,7 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
       input.lifecycleAction
         ? `lifecycle_${input.lifecycleAction}` as CodexProductCloseoutMode
         : 'publication_diverged',
-      () => boundHost.commitCodexFailureCoreCloseout({
+      () => boundHost.commitCodexProductTurnCloseout({
         parentTaskId: product.readyTaskId,
         ownerRunId: product.readyRunId,
         conversationId: product.readyScopeId,
@@ -1818,23 +2000,26 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
         terminalReason: input.terminalReason,
         initiator: input.initiator,
         durationMs: Math.max(1, Date.now() - Date.parse(product.admittedAt)),
-        taskType: 'direct_answer',
-        module: 'system',
-        error: input.error,
+        ...taskFacts,
+        finalText: codexTerminalPublicMessage(input.status),
+        providerDiagnostics: codexFailureDiagnostics({ error: input.error, module: taskFacts.module }),
         now: isoNow(),
       }),
     )
     const execution: ExecutionHostResult = {
       success: false,
-      finalText: '',
+      finalText: committed.canonicalMessage.content,
       cancelled: input.status === 'interrupted',
       usedTools: candidate.usedToolCalls.map((call) => call.tool),
       error: input.error,
       taskId: product.readyTaskId,
       taskProjectionId: product.readyTaskId,
-      taskType: 'direct_answer',
-      interactionState: 'running',
+      taskType: taskFacts.taskType,
+      interactionState: 'suspended',
       terminalReason: input.terminalReason,
+      canonicalMessage: committed.canonicalMessage,
+      canonicalMessageDigest: committed.canonicalMessageDigest,
+      productTurnReceipt: repository.readProductTurnPresentation(product.readyRunId),
     }
     const recovered: ReadyClosedCodexProductRun = {
       execution,
@@ -2174,8 +2359,42 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
           ...(executionPageRef ? { browserPageRef: executionPageRef } : {}),
         }
         const resolvedBrowserInput = trustedBrowserReferenceInput(browserReference)
+        let retryPredecessor: ReturnType<CodexBindingRepository['readProductTurnRuntime']> | null = null
+        let retryPredecessorReceipt: ProductTurnReceipt | null = null
+        let retryTaskContext: ReturnType<CodexBindingRepository['readProductTurnRuntime']> | null = null
+        let retryArtifactSources: import('./codex-product-run-preparer').CodexRetryArtifactSource[] = []
+        if (request.explicitRetry) {
+          const lineage = resolveCodexExplicitRetryLineage({
+            repository,
+            requestedRunId: request.explicitRetry.predecessorRunId,
+            requestedPresentationDigest: request.explicitRetry.predecessorPresentationDigest,
+            readyScopeId: scope.id,
+          })
+          retryTaskContext = lineage.taskContext
+          retryPredecessor = lineage.predecessor
+          retryPredecessorReceipt = lineage.predecessorReceipt
+          retryArtifactSources = lineage.artifactSources
+        }
+        const retryLocalResources = retryTaskContext
+          ? recoverCodexRetryLocalResourceSelections({
+              explicitInput: retryTaskContext.prepared.ingress.explicitResourceEnvelope.input,
+              authorities: retryTaskContext.prepared.resourceAuthorities ?? [],
+            })
+          : []
+        const retrySkillSelection = retryTaskContext
+          ? recoverCodexRetrySkillSelection(
+              retryTaskContext.prepared.readyTurnToolAuthorization.skillAuthorization,
+            )
+          : null
+        const currentResourceSelections = retrySkillSelection
+          ? (request.resources ?? []).filter((selection) => selection.kind !== 'skill')
+          : request.resources ?? []
         const explicitResources = await resolveCodexExplicitResources({
-          selections: request.resources ?? [],
+          selections: [
+            ...currentResourceSelections,
+            ...retryLocalResources.map((resource) => resource.selection),
+            ...(retrySkillSelection ? [retrySkillSelection.selection] : []),
+          ],
           resolveSkill: (selection) => {
             const resolved = boundHost.resolveNativeSkillInput?.({
               skillId: selection.skillId,
@@ -2200,20 +2419,72 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
             return source ? trustedRssSourceInput(source) : null
           },
         })
+        const turnResources = retrySkillSelection
+          ? {
+              ...explicitResources,
+              requestResources: explicitResources.requestResources.map((resource) => (
+                resource.kind === 'skill_reference'
+                  && resource.name === retrySkillSelection.selection.skillId
+                  ? {
+                      ...resource,
+                      applicableToolNames: retrySkillSelection.applicableToolNames,
+                    }
+                  : resource
+              )),
+            }
+          : explicitResources
+        if (request.explicitRetry) {
+          for (const retryResource of retryLocalResources) {
+            const currentReference = explicitResources.resourceRefs.find(
+              (reference) => reference.logicalResourceId === retryResource.logicalResourceId,
+            )
+            const currentAuthority = explicitResources.authorities.find(
+              (authority) => authority.logicalResourceId === retryResource.logicalResourceId,
+            )
+            if (!currentReference || (retryResource.directoryIdentity && (
+              !currentAuthority?.directoryIdentity
+              || currentAuthority.directoryIdentity.device !== retryResource.directoryIdentity.device
+              || currentAuthority.directoryIdentity.inode !== retryResource.directoryIdentity.inode
+              || currentAuthority.directoryIdentity.mode !== retryResource.directoryIdentity.mode
+            ))) {
+              throw new Error('codex_explicit_retry_resource_identity_drift')
+            }
+          }
+          const predecessorDestination = retryTaskContext!.prepared.outputContract?.destination
+          const currentDirectories = turnResources.authorities.filter(
+            (authority) => authority.kind === 'local_directory',
+          )
+          if (predecessorDestination && currentDirectories.length === 1) {
+            const current = currentDirectories[0]
+            if (!current.directoryIdentity
+              || current.logicalResourceId !== predecessorDestination.logicalResourceId
+              || current.directoryIdentity.device !== predecessorDestination.directoryIdentity.device
+              || current.directoryIdentity.inode !== predecessorDestination.directoryIdentity.inode
+              || current.directoryIdentity.mode !== predecessorDestination.directoryIdentity.mode) {
+              throw new Error('codex_explicit_retry_destination_identity_drift')
+            }
+          } else if (predecessorDestination) {
+            throw new Error('codex_explicit_retry_destination_identity_drift')
+          }
+        }
         const currentDocumentAnchor = request.currentDocumentAnchor ?? null
         assertWidgetTargetsMatchAnchor(request.resources ?? [], currentDocumentAnchor)
         const currentDocumentWriteIntent = Boolean(currentDocumentAnchor)
           && hasExplicitCurrentDocumentWriteIntent(request.userMessage.content)
+        const hasFolderExportDestination = turnResources.requestResources.some((resource) => (
+          resource.kind === 'folder_reference'
+        ))
         const { requestEnvelope, authorization } = resolveCodexProductTurnAuthorization({
           host: boundHost,
           request,
           scopeId: scope.id,
           externalReadSlice,
           trustedEnvironment,
-          trustedResources: explicitResources.requestResources,
+          trustedResources: turnResources.requestResources,
           currentDocumentCanWrite: currentDocumentWriteIntent,
         })
         const intentClassification = classifyIntent(requestEnvelope)
+        const readyMemorySnapshot = readyMemoryRepository.buildSnapshot(isoNow())
         const resolvedToolSnapshot = boundHost.resolveToolTurnSnapshot({
           surfaceId: `codex-surface:${scope.id}:${request.requestId}`,
           authorizationId: `codex-auth:${request.requestId}`,
@@ -2226,7 +2497,7 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
           frozenToolSurface: binding.toolSurface || undefined,
         })
         const explicitAllowedToolNames = [...new Set(
-          explicitResources.authorities.flatMap((authority) => authority.allowedToolNames),
+          turnResources.authorities.flatMap((authority) => authority.allowedToolNames),
         )]
         const exclusiveAllowSet = authorization.mode === 'selected' && authorization.skillId === 'tag-forge'
           ? TAG_FORGE_EXCLUSIVE_TOOL_NAMES
@@ -2243,8 +2514,8 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
           selectedSkillToolNames: authorization.mode === 'selected'
             ? [...authorization.allowedTypedActions, ...authorization.allowedPrimitives]
             : [],
-          hasExplicitAttachment: explicitResources.requestResources.some((resource) => resource.kind === 'attachment'),
-          hasWritableRoot: explicitResources.requestResources.some((resource) => (
+          hasExplicitAttachment: turnResources.requestResources.some((resource) => resource.kind === 'attachment'),
+          hasWritableRoot: turnResources.requestResources.some((resource) => (
             resource.kind === 'folder_reference' && resource.canWrite
           )),
           tagForgeExclusive: exclusiveAllowSet !== null,
@@ -2259,7 +2530,7 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
           workbenchMode: trustedEnvironment.workbenchMode,
           currentBrowserPageRef: browserAdmission.currentBrowserRoot,
           explicitBrowserReadRefs: browserAdmission.explicitBrowserReadRefs,
-          hasCalendarResource: explicitResources.requestResources.some((resource) => (
+          hasCalendarResource: turnResources.requestResources.some((resource) => (
             resource.kind === 'calendar_window' || resource.kind === 'calendar_event'
           )),
           tagForgeExclusive: exclusiveAllowSet !== null,
@@ -2271,20 +2542,45 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
           currentDocument: currentDocumentAnchor
             ? { present: true, allowWrite: currentDocumentWriteIntent }
             : undefined,
+          folderExport: {
+            present: hasFolderExportDestination,
+            allowWrite: hasFolderExportDestination,
+          },
           externalReadAllowedToolNames: externalReadSlice?.allowedToolNames,
           explicitResourceAllowedToolNames: explicitAllowedToolNames,
           workbenchMode: trustedEnvironment.workbenchMode,
           exclusiveAllowSet,
           browserAdmission,
           capabilityAvailability,
+          readyMemory: {
+            enabled: readyMemorySnapshot.enabled,
+            hasEntries: readyMemorySnapshot.entries.length > 0,
+          },
         })
         const selectedSkill = toolSnapshot.readyTurnToolAuthorization.skillAuthorization
         const selectedNativeSkill = selectedSkill.mode === 'selected'
-          ? boundHost.resolveNativeSkillInput?.({ skillId: selectedSkill.skillId }) ?? null
+          ? boundHost.resolveNativeSkillInput?.({
+              skillId: selectedSkill.skillId,
+              authorizedToolNames: [
+                ...selectedSkill.allowedTypedActions,
+                ...selectedSkill.allowedPrimitives,
+              ],
+            }) ?? null
           : null
         if (selectedSkill.mode === 'selected' && !selectedNativeSkill) {
           throw new Error('codex_selected_skill_unavailable')
         }
+        const productTaskInput = {
+          skillAuthorization: selectedSkill.mode === 'selected'
+            ? {
+                mode: 'selected' as const,
+                completionProfile: selectedNativeSkill!.completionProfile,
+              }
+            : { mode: 'none' as const },
+          intentClassification,
+          hasFolderExportDestination,
+        }
+        const productTaskFacts = resolveCodexProductTaskFacts(productTaskInput)
         const selectedSkillResources = selectedNativeSkill
           ? await resolveCodexExplicitResources({
               selections: [],
@@ -2303,17 +2599,67 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
         const resourceReferences = [
           ...(currentDocumentAnchor ? [resourceReferenceForAnchor(currentDocumentAnchor)] : []),
           ...(externalReadSlice ? [externalReadResourceReference(externalReadSlice)] : []),
-          ...explicitResources.resourceRefs,
+          ...turnResources.resourceRefs,
           ...(selectedSkillResources?.resourceRefs ?? []),
         ].filter((reference, index, all) => all.findIndex(
           (candidate) => candidate.logicalResourceId === reference.logicalResourceId,
         ) === index)
         const explicitResourceInput = [
-          ...explicitResources.input,
+          ...turnResources.input,
           ...(selectedSkillResources?.input ?? []),
         ].filter((entry, index, all) => all.findIndex((candidate) => (
           digestCanonicalJson(candidate) === digestCanonicalJson(entry)
         )) === index)
+        let explicitRetry: {
+          predecessorRunId: string
+          historyParityEvidenceDigest: string
+          currentThreadReadEvidenceDigest: string
+          continuationContractDigest: string
+          artifactSources: import('./codex-product-run-preparer').CodexRetryArtifactSource[]
+        } | undefined
+        if (request.explicitRetry) {
+          const predecessorReceipt = retryPredecessorReceipt as ProductTurnReceipt
+          const predecessor = retryPredecessor as ReturnType<CodexBindingRepository['readProductTurnRuntime']>
+          const threadRead = binding.codexThreadId
+            ? await nativeRuntime.threadRead({ threadId: binding.codexThreadId, includeTurns: true })
+            : null
+          const currentThreadReadEvidenceDigest = digestCanonicalJson({
+            contract: 'codex_explicit_retry_thread_read_v1',
+            aliasId: scope.id,
+            aliasGeneration: binding.aliasGeneration,
+            codexThreadId: binding.codexThreadId,
+            threadRead,
+          })
+          const predecessorTurnPresent = !binding.codexThreadId
+            || predecessor.codexThreadId !== binding.codexThreadId
+            || !predecessor.codexTurnId
+            || Boolean(threadRead?.thread.turns.some((turn) => turn.id === predecessor.codexTurnId))
+          if (!predecessorTurnPresent) throw new Error('codex_explicit_retry_history_parity_failed')
+          const historyParityEvidenceDigest = digestCanonicalJson({
+            contract: 'codex_explicit_retry_history_parity_v1',
+            predecessorPresentationDigest: predecessorReceipt.presentationDigest,
+            predecessorProductTerminalDigest: repository.readProductCloseout(
+              predecessor.readyRunId,
+            )?.productTerminalDigest,
+            predecessorTurnPresent,
+          })
+          const artifactSources = retryArtifactSources
+          explicitRetry = {
+            predecessorRunId: predecessor.readyRunId,
+            historyParityEvidenceDigest,
+            currentThreadReadEvidenceDigest,
+            artifactSources,
+            continuationContractDigest: digestCanonicalJson({
+              contract: 'codex_explicit_retry_continuation_v1',
+              predecessorRunId: predecessor.readyRunId,
+              predecessorPresentationDigest: predecessorReceipt.presentationDigest,
+              currentUserMessageId: request.userMessage.id,
+              currentInputDigest: digestCanonicalJson(currentInput),
+              resourceReferences,
+              artifactSources,
+            }),
+          }
+        }
         const preparedResult = preparer.prepare({
           taskId: `codex-task-${sha256(request.requestId).slice(0, 24)}`,
           runId: request.requestId,
@@ -2331,22 +2677,19 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
           resourceAdditionalContext: resourceReferences,
           currentDocumentAnchor,
           externalReadSlice,
-          resourceAuthorities: explicitResources.authorities,
+          resourceAuthorities: turnResources.authorities,
           ...(executionPageRef
             ? { browserPageRef: executionPageRef }
             : {}),
           productSurfaceTargets: extractProductSurfaceTargets(request.resources ?? []),
           actionAuthorizationMode: readActionAuthorizationModeFromEnvelope(requestEnvelope),
+          readyMemorySnapshot,
           readyToolSurface: toolSnapshot.readyToolSurface,
           readyTurnToolAuthorization: toolSnapshot.readyTurnToolAuthorization,
           authorizationOwnerId: scope.activeAgentId || scope.agent,
           resourceOwnerId: scope.activeAgentId || scope.agent,
-          productBudgetSeed: createCodexProductBudgetSeed(
-            {
-              skillAuthorization: toolSnapshot.readyTurnToolAuthorization.skillAuthorization,
-              intentClassification,
-            },
-          ),
+          productBudgetSeed: createCodexProductBudgetSeed(productTaskInput),
+          ...(explicitRetry ? { explicitRetry } : {}),
         })
         if (!preparedResult.ok) throw new Error(preparedResult.code)
         const upstream = createCodexProductUpstreamProfileSnapshot({
@@ -2363,6 +2706,10 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
           toolSurfaceDigest: toolSnapshot.readyToolSurface.toolSurfaceDigest,
           authorizationDigest: toolSnapshot.readyTurnToolAuthorization.authorizationDigest,
           resourceAnchorDigest: preparedResult.prepared.resourceAnchorDigest,
+          readyMemorySnapshotDigest: readyMemorySnapshot.snapshotDigest,
+          ...(preparedResult.prepared.outputContract
+            ? { outputContract: preparedResult.prepared.outputContract }
+            : {}),
           ...(externalReadSlice ? {
             methodConstraintDigest: externalReadSlice.methodConstraintDigest,
             dependencySnapshotDigest: externalReadSlice.dependencySnapshotDigest,
@@ -2381,6 +2728,7 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
           developerInstructions: instructionContract.developerInstructions,
           instructionContractDigest: instructionContract.instructionContractDigest,
           turnContractDigest,
+          productTaskFacts,
         })
         detailPrepared.set(preparedResult.prepared.runId, preparedResult.prepared)
         return { ok: true, dispatchContext: preparedResult.prepared }
@@ -2445,11 +2793,16 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
           codexModel: 'ready-e0-model',
           upstreamProfileSnapshotRef: detail.upstream.snapshotRef,
           upstreamProfileSnapshotDigest: detail.upstream.snapshotDigest,
-          additionalContextDigest: digestCanonicalJson(
-            prepared.ingress.kind === 'user_ingress'
+          additionalContextDigest: digestReadyAdditionalContext({
+            resourceReferences: prepared.ingress.kind === 'user_ingress'
               ? prepared.ingress.resourceAdditionalContext
               : [],
-          ),
+            explicitRetry: prepared.ingress.kind === 'user_ingress'
+              && prepared.ingress.attemptKind === 'explicit_retry'
+              ? buildCodexExplicitRetryContext(prepared.ingress)
+              : null,
+            readyMemory: readyMemoryPromptPayload(prepared.readyMemorySnapshot),
+          }),
           turnContractDigest: detail.turnContractDigest,
           messageVisibilityEpoch,
           readyParentReceipt: {
@@ -2477,8 +2830,7 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
           scopeId: scope.id,
           messageVisibilityEpoch,
           runId: prepared.runId,
-          taskType: 'direct_answer',
-          module: 'system',
+          ...detail.productTaskFacts,
           taskTitle: prepared.neutralProjectionSeed.taskTitle,
           taskSummary: prepared.neutralProjectionSeed.taskSummary,
           status: 'running',
@@ -2498,7 +2850,7 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
           messageVisibilityEpoch,
           agentId: scope.activeAgentId || scope.agent,
           executionBinding: detail.executionBinding,
-          taskType: 'direct_answer',
+          taskType: detail.productTaskFacts.taskType,
         })
         gatewayRepository.storeSnapshot({ ...detail.upstream, createdAt: admittedAt })
         repository.admitProductBindingsInOpenTransaction({
@@ -2569,6 +2921,7 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
           toolSurfaceDigest: prepared.readyToolSurface.toolSurfaceDigest,
           turnContractDigest: detail.turnContractDigest,
           upstreamProfileSnapshotDigest: detail.upstream.snapshotDigest,
+          readyMemorySnapshot: prepared.readyMemorySnapshot,
         },
         collection: {
           terminalTimeoutMs: 300_000,
@@ -2698,6 +3051,7 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
           runId: binding.readyRunId,
           taskId: binding.readyTaskId,
           sourceMessageId: product.ingress.originUserMessageId,
+          readyMemorySnapshot: binding.readyMemorySnapshot,
           executionBinding,
           browserLease: browserTurnLease,
           ensureBrowserWorkflowRoute: executionBinding
@@ -2709,7 +3063,18 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
                 resourceAnchors: [],
               })
             : undefined,
-          requestEnvelope: readCodexPreparedActionAuthorizationEnvelope(product),
+          requestEnvelope: {
+            ...readCodexPreparedActionAuthorizationEnvelope(product),
+            folderOutputActivation: readCodexFolderOutputActivation(rawDb, binding.readyRunId),
+          },
+          artifactMaterializer,
+          readArtifactWriteHead: (relativePath: string) => (
+            repository.readArtifactWriteHead(binding.readyRunId, relativePath)
+          ),
+          codexExecutionIdentity: {
+            readyActionId: executionIdentity.readyActionId,
+            actionIdentityDigest: executionIdentity.actionIdentityDigest,
+          },
           requestModuleToolAction: createCodexProductActionRequester({
             executingToolName: executionIdentity.executingToolName,
             allowedToolNames: binding.authorization.allowedToolNames,
@@ -3234,7 +3599,10 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
       logAgentMetric('codex_sidecar_recovery_state', snapshot)
       if (lifecycle === 'stopping' || lifecycle === 'stopped') return
       if (snapshot.state === 'recovering') lifecycle = 'recovering'
-      if (snapshot.state === 'ready') lifecycle = 'running'
+      if (snapshot.state === 'ready') {
+        lifecycle = 'running'
+        memoryWorker.start()
+      }
       if (snapshot.state === 'exhausted') {
         lifecycle = 'failed'
         gate.close('sidecar_recovery_exhausted')
@@ -3250,7 +3618,14 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
     ingressPort,
     aliasBindingPort,
     preparedRunContextPort,
+    memoryRuntime,
     canonicalCloseoutTransactionParticipant: participant,
+    readProductTurnPresentation(readyRunId) {
+      return repository.readProductTurnPresentation(readyRunId)
+    },
+    readProductTurnPresentations(readyRunIds) {
+      return repository.readProductTurnPresentations(readyRunIds)
+    },
     bindHost(boundHost) {
       if (host && host !== boundHost) throw new Error('codex_runtime_host_already_bound')
       if (lifecycle !== 'new') throw new Error('codex_runtime_host_bind_too_late')
@@ -3275,7 +3650,10 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
       gate.close('runtime_starting')
       try {
         const committed = await sidecarRecoveryOwner.recover({ trigger: 'initial_start' })
-        if (committed && lifecycle === 'starting') lifecycle = 'running'
+        if (committed && lifecycle === 'starting') {
+          lifecycle = 'running'
+          memoryWorker.start()
+        }
       } catch (error) {
         if (sidecarRecoveryOwner.readSnapshot().state !== 'blocked') {
           gate.close('sidecar_recovery_exhausted')
@@ -3291,6 +3669,7 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
       bootGeneration += 1
       sidecarRecoveryOwner.stop()
       const stopErrors: unknown[] = []
+      try { await memoryWorker.stop() } catch (error) { stopErrors.push(error) }
       try { await productRecovery?.stop() } catch (error) { stopErrors.push(error) }
       try { await manualCompactionController.stop() } catch (error) { stopErrors.push(error) }
       try { await sidecarSession?.stop() } catch (error) { stopErrors.push(error) }

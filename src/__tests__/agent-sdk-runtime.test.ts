@@ -6624,7 +6624,7 @@ test('agent sdk runtime keeps default model-visible surface intent-scoped', asyn
   assert.equal(result.success, true)
   assert.ok(seenToolNames.includes('document_set_content'))
   assert.ok(seenToolNames.includes('file_search'))
-  assert.ok(seenToolNames.includes('memory_search'))
+  assert.equal(seenToolNames.some((name) => name.startsWith('memory_')), false)
   assert.ok(seenToolNames.includes('session_search'))
   assert.equal(seenToolNames.includes('rss_fetch_updates'), false)
   assert.equal(seenToolNames.includes('calendar_list_window'), false)

@@ -2,7 +2,7 @@
 /**
  * Stage R W1.6 gate (R8-D1).
  *
- * The string-literal `module` union appears in 8 independent places across
+ * The string-literal `module` union appears in 4 independent places across
  * main, renderer, types, and renderer IPC mirrors. Each one must include
  * `'research'`. Without this gate, typecheck cannot catch the omission
  * because:
@@ -11,14 +11,10 @@
  *     silently returns null instead of producing a typecheck error
  *
  * Locations checked:
- *   1. src/main/modules/agent-control/contracts/types.ts        ScopeRunTriggerHit.module
- *   2. src/main/modules/agent-control/contracts/types.ts        ScopeRunEventPayload.module
- *   3. src/main/modules/agent-control/prompt-assembly.ts  PromptTriggerHit.module
- *   4. src/renderer/types/electron.d.ts               ScopeRunTriggerHitData.module
- *   5. src/renderer/types/electron.d.ts               ScopeRunEventData.module
- *   6. src/renderer/types/electron.d.ts               ScopeRunEventData.artifactRefs[].module
- *   7. src/renderer/modules/agent/types.ts            AgentModuleKind
- *   8. src/renderer/modules/agent/scopeRunState.ts    toAgentModule() switch
+ *   1. src/main/modules/agent-control/contracts/types.ts      ScopeRunEventPayload.module
+ *   2. src/renderer/types/electron.d.ts                       ScopeRunEventData.module/artifacts
+ *   3. src/renderer/modules/agent/types.ts                    AgentModuleKind
+ *   4. src/renderer/modules/agent/scopeRunState.ts            toAgentModule() switch
  */
 'use strict'
 
@@ -57,14 +53,8 @@ function verifyContainsResearch(label, body, startMarker, endMarker) {
   }
 }
 
-// 1 + 2: main types.ts (two unions)
+// 1: main types.ts
 const mainTypes = readFile('src/main/modules/agent-control/contracts/types.ts')
-verifyContainsResearch(
-  'main/types.ts ScopeRunTriggerHit.module',
-  mainTypes,
-  'export interface ScopeRunTriggerHit',
-  'export interface',
-)
 verifyContainsResearch(
   'main/types.ts ScopeRunEventPayload.module',
   mainTypes,
@@ -72,23 +62,8 @@ verifyContainsResearch(
   'export interface',
 )
 
-// 3: prompt-assembly.ts trigger module union
-const promptAssembly = readFile('src/main/modules/agent-control/prompt-assembly.ts')
-verifyContainsResearch(
-  'prompt-assembly.ts PromptTriggerHit.module',
-  promptAssembly,
-  'export interface PromptTriggerHit',
-  '\n}',
-)
-
-// 4 + 5 + 6: renderer electron.d.ts (three unions)
+// 2: renderer electron.d.ts
 const electronDts = readFile('src/renderer/types/electron.d.ts')
-verifyContainsResearch(
-  'electron.d.ts ScopeRunTriggerHitData.module',
-  electronDts,
-  'interface ScopeRunTriggerHitData',
-  '\n}',
-)
 verifyContainsResearch(
   'electron.d.ts ScopeRunEventData.module',
   electronDts,
@@ -114,7 +89,7 @@ verifyContainsResearch(
   }
 }
 
-// 7: AgentModuleKind union
+// 3: AgentModuleKind union
 const rendererTypes = readFile('src/renderer/modules/agent/types.ts')
 verifyContainsResearch(
   'renderer types.ts AgentModuleKind',
@@ -123,7 +98,7 @@ verifyContainsResearch(
   '\nexport',
 )
 
-// 8: toAgentModule() function body
+// 4: toAgentModule() function body
 const scopeRunState = readFile('src/renderer/modules/agent/scopeRunState.ts')
 verifyContainsResearch(
   'scopeRunState.ts toAgentModule()',

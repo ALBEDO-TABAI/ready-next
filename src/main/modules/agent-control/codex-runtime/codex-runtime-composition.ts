@@ -36,7 +36,7 @@ import {
 import type {
   CanonicalCoreCloseoutTransactionParticipant,
   CanonicalCoreCloseoutInput,
-  CodexFailureCoreCloseoutInput,
+  CodexProductTurnCloseoutInput,
 } from '../../repositories/agent-session-checkpoint-repository'
 import type { TaskExecutionBinding } from '../../../../shared/agent-execution-profile'
 import type { AIModelConfig } from '../../../../shared/ai-providers'
@@ -58,6 +58,18 @@ import type {
   CodexSelectedSkillMethodology,
 } from './codex-thread-instructions'
 import type { LifecycleOperationProjection } from '../../../../shared/ipc-contracts/agent-lifecycle-snapshot'
+import type { ProductTurnReceipt } from '../../../../shared/ipc-contracts/agent-runtime'
+import type {
+  ReadyMemoryAddRequest,
+  ReadyMemoryConversationPolicyRequest,
+  ReadyMemoryDeleteRequest,
+  ReadyMemoryGlobalPolicyRequest,
+  ReadyMemoryPinRequest,
+  ReadyMemoryReadRequest,
+  ReadyMemoryResetRequest,
+  ReadyMemoryUpdateRequest,
+  ReadyMemoryView,
+} from '../../../../shared/ready-memory'
 
 export interface CodexRuntimeHostPort {
   runtime: AgentControlRuntime
@@ -81,7 +93,7 @@ export interface CodexRuntimeHostPort {
     messageVisibilityEpoch: number
     agentId: string
     executionBinding: TaskExecutionBinding
-    taskType: 'direct_answer'
+    taskType: TaskProjectionRecord['taskType']
   }): void
   createInitialExecutionBinding(input: {
     runId: string
@@ -105,7 +117,11 @@ export interface CodexRuntimeHostPort {
     requestEnvelope?: unknown
   }): SkillToolAuthorization
   resolveSelectedSkillMethodology(skillId: string): CodexSelectedSkillMethodology | null
-  resolveNativeSkillInput?(input: { skillId?: string; path?: string }): CodexNativeSkillInput | null
+  resolveNativeSkillInput?(input: {
+    skillId?: string
+    path?: string
+    authorizedToolNames?: readonly string[]
+  }): CodexNativeSkillInput | null
   resolveExternalReadSlice(
     request: CodexExternalReadSliceRequest,
   ): Promise<PreparedCodexExternalReadSlice>
@@ -115,9 +131,14 @@ export interface CodexRuntimeHostPort {
     canonicalMessage: NonNullable<ExecutionHostResult['canonicalMessage']>
     canonicalMessageDigest: string
   }>
-  commitCodexFailureCoreCloseout(
-    input: CodexFailureCoreCloseoutInput,
-  ): Promise<{ productTerminalDigest: string; closeoutAt: string }>
+  commitCodexProductTurnCloseout(
+    input: CodexProductTurnCloseoutInput,
+  ): Promise<{
+    productTerminalDigest: string
+    closeoutAt: string
+    canonicalMessage: NonNullable<ExecutionHostResult['canonicalMessage']>
+    canonicalMessageDigest: string
+  }>
   getActiveRunAbortSignal(input: {
     readyRunId: string
     readyScopeId: string
@@ -232,6 +253,17 @@ export interface CodexPreparedRunContextPort {
   }): Promise<CodexPreparedRunContext>
 }
 
+export interface ReadyMemoryRuntimePort {
+  read(request: ReadyMemoryReadRequest): ReadyMemoryView
+  setGlobalPolicy(request: ReadyMemoryGlobalPolicyRequest): ReadyMemoryView
+  setConversationPolicy(request: ReadyMemoryConversationPolicyRequest): ReadyMemoryView
+  add(request: ReadyMemoryAddRequest): ReadyMemoryView
+  update(request: ReadyMemoryUpdateRequest): ReadyMemoryView
+  pin(request: ReadyMemoryPinRequest): ReadyMemoryView
+  delete(request: ReadyMemoryDeleteRequest): ReadyMemoryView
+  reset(request: ReadyMemoryResetRequest): ReadyMemoryView
+}
+
 export interface CodexRuntimeComposition {
   nativeRuntime: CodexNativeRuntime
   collector: CodexTurnCollector
@@ -240,7 +272,10 @@ export interface CodexRuntimeComposition {
   ingressPort: CodexIngressPort
   aliasBindingPort: CodexAliasBindingPort
   preparedRunContextPort: CodexPreparedRunContextPort
+  memoryRuntime: ReadyMemoryRuntimePort
   canonicalCloseoutTransactionParticipant: CanonicalCoreCloseoutTransactionParticipant
+  readProductTurnPresentation(readyRunId: string): ProductTurnReceipt
+  readProductTurnPresentations(readyRunIds: readonly string[]): ProductTurnReceipt[]
   bindHost(host: CodexRuntimeHostPort): void
   sealIngress(reason: string): void
   ensureReadyForUserIngress(): Promise<void>
@@ -370,9 +405,23 @@ export function createE2UnavailableCodexRuntimeComposition(): CodexRuntimeCompos
         throw new Error('codex_prepared_run_context_unavailable')
       },
     },
+    memoryRuntime: {
+      read() { throw new Error('ready_memory_unavailable') },
+      setGlobalPolicy() { throw new Error('ready_memory_unavailable') },
+      setConversationPolicy() { throw new Error('ready_memory_unavailable') },
+      add() { throw new Error('ready_memory_unavailable') },
+      update() { throw new Error('ready_memory_unavailable') },
+      pin() { throw new Error('ready_memory_unavailable') },
+      delete() { throw new Error('ready_memory_unavailable') },
+      reset() { throw new Error('ready_memory_unavailable') },
+    },
     canonicalCloseoutTransactionParticipant: {
       complete() {},
     },
+    readProductTurnPresentation() {
+      throw new Error('codex_product_turn_presentation_unavailable')
+    },
+    readProductTurnPresentations() { return [] },
     bindHost() {},
     sealIngress() {},
     async ensureReadyForUserIngress() {},

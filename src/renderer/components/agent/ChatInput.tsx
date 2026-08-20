@@ -6,7 +6,6 @@ import { LiquidBackdropProjection } from '../ui/liquid-glass/LiquidBackdropProje
 import { LiquidFloatingPanel } from '../ui/liquid-glass/LiquidFloatingPanel'
 import type { ChatAttachment } from '../../stores/useAgent'
 import type { ReadySkillReference } from '../../modules/agent/chat-input-bridge'
-import type { NativeContextMenuItem } from '../../../shared/native-context-menu'
 import type { ContextUsageSnapshot } from '../../../shared/context-usage-types'
 import { chatMenuItemStyle, chatMenuSurfaceStyle } from './chatMenuStyles'
 import { ContextUsageMeter } from './chat-panel/ContextUsageMeter'
@@ -31,17 +30,12 @@ interface ChatInputProps {
   composerShellStyle: React.CSSProperties
   filePool: ChatAttachment[]
   filePoolCount: number
-  currentAgent: string
-  currentAgentAvatar: string
-  currentAgentDisplayName: string
-  agents: Array<{ name: string; avatar: string; displayName: string; status: string }>
   isChannelScope: boolean
   actionAuthorizationMode: ActionAuthorizationMode
   onInputChange: (value: string) => void
   onSend: () => void
   onStop: () => void
   onPickFiles: () => void
-  onAgentSelect: (agentName: string) => void
   onActionAuthorizationModeChange: (mode: ActionAuthorizationMode) => void | Promise<void>
   onSkillReference: (skill: ReadySkillReference) => void
   onReferenceSelect: (attachment: ChatAttachment) => void
@@ -81,17 +75,12 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
   composerShellStyle,
   filePool,
   filePoolCount,
-  currentAgent,
-  currentAgentAvatar,
-  currentAgentDisplayName,
-  agents,
   isChannelScope,
   actionAuthorizationMode,
   onInputChange,
   onSend,
   onStop,
   onPickFiles,
-  onAgentSelect,
   onActionAuthorizationModeChange,
   onSkillReference,
   onReferenceSelect,
@@ -99,10 +88,8 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
   ModelSelector,
   admissionReady = true,
 }: ChatInputProps, ref) {
-  const [showAgentSelect, setShowAgentSelect] = useState(false)
   const [showAuthorizationModeSelect, setShowAuthorizationModeSelect] = useState(false)
   const [authorizationModeUpdating, setAuthorizationModeUpdating] = useState(false)
-  const [agentNativeMenuOpen, setAgentNativeMenuOpen] = useState(false)
   const [showAtMenu, setShowAtMenu] = useState(false)
   const [atFilter, setAtFilter] = useState('')
   const [showSlashMenu, setShowSlashMenu] = useState(false)
@@ -112,7 +99,6 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
   const [composerMenuFrame, setComposerMenuFrame] = useState<ComposerMenuFrame | null>(null)
   const [authorizationMenuFrame, setAuthorizationMenuFrame] = useState<AuthorizationMenuFrame | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
-  const dropdownRef = useRef<HTMLDivElement>(null)
   const authorizationModeRef = useRef<HTMLDivElement>(null)
   const authorizationMenuRef = useRef<HTMLDivElement>(null)
   const atMenuRef = useRef<HTMLDivElement>(null)
@@ -250,9 +236,6 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
   // Close dropdowns when clicking outside
   useEffect(() => {
     const handler = (e: MouseEvent) => {
-      if (showAgentSelect && dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
-        setShowAgentSelect(false)
-      }
       if (
         showAuthorizationModeSelect
         && !authorizationModeRef.current?.contains(e.target as Node)
@@ -271,7 +254,7 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
     }
     document.addEventListener('mousedown', handler)
     return () => document.removeEventListener('mousedown', handler)
-  }, [showAgentSelect, showAtMenu, showAuthorizationModeSelect, showSlashMenu])
+  }, [showAtMenu, showAuthorizationModeSelect, showSlashMenu])
 
   const authorizationModeOptions: Array<{
     mode: ActionAuthorizationMode
@@ -378,52 +361,6 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
     setShowSlashMenu(false)
     setSlashFilter('')
   }, [inputValue, onInputChange])
-
-  const showNativeAgentMenu = useCallback(async (button: HTMLButtonElement) => {
-    if (isChannelScope) return
-    const api = typeof window !== 'undefined' ? window.electronAPI?.ui : null
-    if (!api?.showNativeContextMenu) {
-      setShowAgentSelect((value) => !value)
-      return
-    }
-
-    const items: NativeContextMenuItem[] = agents.map((agent) => {
-      const label = (agent.displayName || agent.name).trim()
-      return {
-        id: agent.name,
-        label: agent.status === 'working' ? `${label}    工作中` : label,
-        iconText: agent.avatar,
-        checked: agent.name === currentAgent,
-      }
-    })
-    if (items.length === 0) return
-
-    const rect = button.getBoundingClientRect()
-    const estimatedHeight = Math.min(items.length, 8) * 28 + 10
-    setShowAgentSelect(false)
-    setShowAtMenu(false)
-    setAtFilter('')
-    setShowSlashMenu(false)
-    setSlashFilter('')
-    setAgentNativeMenuOpen(true)
-
-    let selectedId = ''
-    try {
-      const result = await api.showNativeContextMenu({
-        x: Math.max(8, Math.round(rect.left)),
-        y: Math.max(8, Math.round(rect.top - estimatedHeight - 6)),
-        items,
-      }).catch(() => null)
-      selectedId = typeof result?.selectedId === 'string' ? result.selectedId : ''
-    } finally {
-      setAgentNativeMenuOpen(false)
-    }
-
-    if (selectedId && agents.some((agent) => agent.name === selectedId)) {
-      onAgentSelect(selectedId)
-    }
-    setTimeout(() => textareaRef.current?.focus(), 0)
-  }, [agents, currentAgent, isChannelScope, onAgentSelect])
 
   const handleInputChange = (value: string, cursorPos: number) => {
     onInputChange(value)
@@ -830,76 +767,6 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
               >
                 <Plus style={{ width: 14, height: 14 }} className="text-[var(--text-gray)]" strokeWidth={2} />
               </button>
-
-              <div className="relative" ref={dropdownRef} style={{ flexShrink: 0 }}>
-                <button
-                  disabled={isChannelScope}
-                  onClick={(event) => {
-                    void showNativeAgentMenu(event.currentTarget)
-                  }}
-                  className="flex items-center active:scale-[0.98] transition-[opacity,transform] duration-200 ease-out"
-                  style={{
-                    padding: '3px 8px',
-                    borderRadius: 8,
-                    border: '1px solid transparent',
-                    background: 'transparent',
-                    gap: 4,
-                    opacity: isChannelScope ? 0.7 : 1,
-                    cursor: isChannelScope ? 'default' : 'pointer',
-                  }}
-                >
-                  <span style={{ fontSize: 11, color: 'var(--text-gray)' }}>{currentAgentAvatar}</span>
-                  <span style={{ fontSize: 11, color: 'var(--text-gray)' }}>{currentAgentDisplayName || '管家'}</span>
-                  <ChevronDown
-                    style={{
-                      width: 10,
-                      height: 10,
-                      transform: (showAgentSelect || agentNativeMenuOpen) ? 'rotate(180deg)' : 'rotate(0deg)',
-                      transition: 'transform 200ms ease',
-                    }}
-                    className="text-[var(--text-light)]"
-                  />
-                </button>
-
-                {showAgentSelect && !agentNativeMenuOpen && !isChannelScope && (
-                  <div
-                    style={{
-                      ...chatMenuSurfaceStyle,
-                      position: 'absolute',
-                      bottom: '100%',
-                      left: 0,
-                      marginBottom: 4,
-                      minWidth: 160,
-                      zIndex: 100,
-                    }}
-                  >
-                    {agents.map((agent) => (
-                      <button
-                        key={agent.name}
-                        onClick={() => {
-                          onAgentSelect(agent.name)
-                          setShowAgentSelect(false)
-                        }}
-                        className={`ready-floating-menu-item w-full flex items-center gap-2 active:scale-[0.98] transition-[background-color,transform] duration-150 ${agent.name === currentAgent ? 'is-selected' : ''}`}
-                        style={{
-                          ...chatMenuItemStyle,
-                        }}
-                      >
-                        <span style={{ fontSize: 14 }}>{agent.avatar}</span>
-                        <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-body)', flex: 1, textAlign: 'left' }}>
-                          {agent.displayName}
-                        </span>
-                        {agent.name === currentAgent && (
-                          <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--color-blue)' }} />
-                        )}
-                        {agent.status === 'working' && (
-                          <span style={{ fontSize: 10, color: 'var(--color-blue)' }}>工作中</span>
-                        )}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
 
               <div style={{ minWidth: 0 }}>
                 <ModelSelector />

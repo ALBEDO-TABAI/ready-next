@@ -166,9 +166,6 @@ export function installRuntimeDriverStreamEvents(deps: {
       executionKind: previous?.executionKind || null,
       jobId: previous?.jobId || null,
       artifactRefs: previous?.artifactRefs || [],
-      memoryRefs: previous?.memoryRefs || [],
-      triggerHits: previous?.triggerHits || [],
-      contextBudget: previous?.contextBudget || null,
       ownerResourceId: previous?.ownerResourceId || null,
       lastEvidenceAt: previous?.lastEvidenceAt || null,
       blockedReason: previous?.blockedReason || null,
@@ -195,7 +192,6 @@ export function installRuntimeDriverStreamEvents(deps: {
       resumableActions: previous?.resumableActions || [],
       recentArtifacts: previous?.recentArtifacts || [],
       taskContinuation: previous?.taskContinuation || null,
-      memoryCapture: previous?.memoryCapture || null,
       error: previous?.error || null,
     }))
   })

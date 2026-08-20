@@ -210,6 +210,9 @@ test('sendScoped runtime schema accepts exactly four dispositions', () => {
       error: 'proof gap',
       errorKind: 'proof_gap',
       productOutcomeDigest: 'digest-outcome',
+      responseText: canonicalMessage.content,
+      canonicalMessage,
+      canonicalMessageDigest: 'digest-canonical',
     },
   ]
 
@@ -297,15 +300,18 @@ test('renderer mapping preserves input only before durable admission', () => {
     error: 'provider failed',
     errorKind: 'blocked_external',
     productOutcomeDigest: 'digest',
+    responseText: canonicalMessage.content,
+    canonicalMessage,
+    canonicalMessageDigest: 'digest-canonical',
   })
   assert.equal(mapSendScopedResponseToMessageResult(pre).preserveInput, true)
   assert.equal(mapSendScopedResponseToMessageResult(post).preserveInput, false)
 })
 
 test('create and lifecycle results reject weak objects and free-form errors', () => {
-  assert.deepEqual(parseCreateSessionRequest({ agentId: 'butler' }), { agentId: 'butler' })
-  assert.throws(() => parseCreateSessionRequest({}))
-  assert.throws(() => parseCreateSessionRequest({ agentId: 'butler', aliasId: 'forged' }))
+  assert.deepEqual(parseCreateSessionRequest({}), {})
+  assert.throws(() => parseCreateSessionRequest({ agentId: 'butler' }))
+  assert.throws(() => parseCreateSessionRequest({ aliasId: 'forged' }))
   assert.equal(parseCreateSessionResult({
     ok: true,
     action: 'create',

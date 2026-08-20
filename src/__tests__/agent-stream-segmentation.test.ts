@@ -111,7 +111,7 @@ describe('agent stream segmentation', () => {
     ;(globalThis as any).window.electronAPI = undefined
     useAgent.setState({
       agents: [
-        { name: 'butler', displayName: '管家', avatar: '', status: 'idle', selected: true },
+        { name: 'butler', displayName: '管家', avatar: '', status: 'idle' },
       ],
       messages: [],
       currentAgent: 'butler',
@@ -406,7 +406,6 @@ describe('agent stream segmentation', () => {
           resumableActions: [],
           recentArtifacts: [],
           taskContinuation: null,
-          memoryCapture: null,
           error: null,
         },
       },
@@ -577,7 +576,6 @@ describe('agent stream segmentation', () => {
           resumableActions: [],
           recentArtifacts: [],
           taskContinuation: null,
-          memoryCapture: null,
           error: null,
         },
       },

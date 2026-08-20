@@ -29,6 +29,7 @@ import {
 } from '../main/modules/agent-control/task-projection/run-coordinator'
 import { parseSendScopedResponse } from '../shared/ipc-contracts/agent-runtime'
 import { createCodexToolFixture } from './utils/codex-tool-fixture'
+import { disabledReadyMemorySnapshot } from './utils/ready-memory-fixture'
 
 const scope: ConversationScope = {
   id: 'alias-1',
@@ -60,6 +61,7 @@ const preparationInput = {
   currentInput: [textUserInput('hello')],
   explicitResourceEnvelope: { input: [], resourceRefs: [] },
   resourceAdditionalContext: [],
+  readyMemorySnapshot: disabledReadyMemorySnapshot(),
   ...createCodexToolFixture(),
   authorizationOwnerId: 'authorization-owner-1',
   resourceOwnerId: 'resource-owner-1',
@@ -129,15 +131,25 @@ function successCloseoutReadback(): ReadyCodexCloseoutReadback {
 }
 
 function failureCloseoutReadback(productOutcomeDigest = 'product-outcome-digest'): ReadyCodexCloseoutReadback {
+  const canonicalMessage = {
+    id: 'assistant-failure-1',
+    conversationId: scope.id,
+    role: 'assistant' as const,
+    content: '本轮未能完成，已有结果已保留。',
+    timestamp: '2026-08-07T00:00:01.000Z',
+    meta: {},
+  }
   return {
     execution: {
       success: false,
-      finalText: '',
+      finalText: canonicalMessage.content,
       cancelled: false,
       usedTools: [],
       error: 'prepared context unavailable',
       taskId: preparedRun.taskId,
       terminalReason: 'persistence_failed',
+      canonicalMessage,
+      canonicalMessageDigest: digestJson(canonicalMessage),
     },
     productOutcomeDigest,
     candidateBodyDigest: null,
@@ -183,13 +195,9 @@ function createHostFailureAdapter(candidates: CoreTurnCandidate[]) {
         assert.equal(candidate.kind, 'host_failure')
         return {
           execution: {
-            success: false,
-            finalText: '',
-            cancelled: false,
-            usedTools: [],
+            ...failureCloseoutReadback(candidate.hostFailure.evidenceDigest).execution,
             error: candidate.hostFailure.message,
             taskId: candidate.readyTaskId,
-            terminalReason: 'persistence_failed',
           },
           productOutcomeDigest: candidate.hostFailure.evidenceDigest,
           candidateBodyDigest: null,
@@ -200,13 +208,9 @@ function createHostFailureAdapter(candidates: CoreTurnCandidate[]) {
         const message = error instanceof Error ? error.message : String(error)
         return {
           execution: {
-            success: false,
-            finalText: '',
-            cancelled: false,
-            usedTools: [],
+            ...failureCloseoutReadback(`recovery:${candidate.readyRunId}`).execution,
             error: message,
             taskId: candidate.readyTaskId,
-            terminalReason: 'persistence_failed',
           },
           productOutcomeDigest: `recovery:${candidate.readyRunId}`,
           candidateBodyDigest: null,
@@ -623,12 +627,14 @@ test('pending closeout keeps one active operation until durable readback is obse
   observer?.({
     execution: {
       success: false,
-      finalText: '',
+      finalText: failureCloseoutReadback().execution.finalText,
       cancelled: false,
       usedTools: [],
       error: 'prepared context unavailable',
       taskId: preparedRun.taskId,
       terminalReason: 'persistence_failed',
+      canonicalMessage: failureCloseoutReadback().execution.canonicalMessage,
+      canonicalMessageDigest: failureCloseoutReadback().execution.canonicalMessageDigest,
     },
     productOutcomeDigest: 'product-outcome-digest',
     candidateBodyDigest: null,
@@ -764,6 +770,9 @@ test('an empty product digest cannot escape as a terminal failure wire', async (
     error: result.error,
     errorKind: result.errorKind,
     productOutcomeDigest: result.productOutcomeDigest,
+    responseText: result.canonicalMessage?.content || '',
+    canonicalMessage: result.canonicalMessage!,
+    canonicalMessageDigest: result.canonicalMessageDigest!,
   })
   assert.equal(parsedWire.productOutcomeDigest, 'durable-product-outcome-digest')
   assert.equal(publications, 1)

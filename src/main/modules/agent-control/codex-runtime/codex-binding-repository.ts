@@ -1,4 +1,6 @@
 import { createHash } from 'node:crypto'
+import { closeSync, lstatSync, openSync, readSync, realpathSync, statSync } from 'node:fs'
+import { dirname, isAbsolute, relative, resolve, sep } from 'node:path'
 
 import type { DatabaseConnection } from '../../database'
 import { parseObjectStrict, workflowDigest } from '../../repositories/browser-workflow-codec'
@@ -39,6 +41,10 @@ import {
   type ReadyBoundTurnToolAuthorization,
   type ReadyToolSurface,
 } from './codex-tool-surface'
+import {
+  effectiveCodexFolderOutputToolNames,
+  readCodexFolderOutputActivation,
+} from './codex-folder-output-activation'
 import { CodexToolBindingRepository } from './codex-tool-binding-repository'
 import { buildCodexToolActionIdentity } from './codex-tool-action-identity'
 import { buildReadyToolActionAbsenceEvidenceDigest } from './codex-tool-action-journal'
@@ -56,6 +62,13 @@ import {
   type CodexThreadArchiveSourceKind,
   type CodexThreadRetirementReason,
 } from './codex-thread-archive-cleanup'
+import {
+  codexTerminalPublicMessage,
+  readProductTurnPresentation,
+  readProductTurnPresentations,
+} from './codex-product-turn-presentation'
+import type { ProductTurnReceipt } from '../../../../shared/ipc-contracts/agent-runtime'
+import type { ToolExecutionOutput } from '../tools-runtime/tool-result-types'
 export { CodexBindingRepositoryError } from './codex-binding-error'
 export type {
   CodexToolBridgeExecutionBinding,
@@ -119,6 +132,79 @@ function readyToolResultSuccess(value: unknown): boolean | null {
   if (isRecord(value.envelope)) return value.envelope.ok === true
   return true
 }
+
+type FrozenOutputDestination = {
+  logicalResourceId: string
+  path: string
+  policyEpoch: number
+  directoryIdentity: { device: string; inode: string; mode: number }
+}
+
+function frozenOutputDestination(ingressJson: string | null): FrozenOutputDestination | null {
+  try {
+    const ingress = JSON.parse(ingressJson || '') as unknown
+    const prepared = isRecord(ingress) && isRecord(ingress.prepared) ? ingress.prepared : null
+    const contract = prepared && isRecord(prepared.outputContract) ? prepared.outputContract : null
+    const destination = contract && isRecord(contract.destination) ? contract.destination : null
+    const identity = destination && isRecord(destination.directoryIdentity)
+      ? destination.directoryIdentity
+      : null
+    if (!destination || !identity
+      || typeof destination.logicalResourceId !== 'string'
+      || typeof destination.path !== 'string'
+      || !Number.isSafeInteger(destination.policyEpoch)
+      || typeof identity.device !== 'string'
+      || typeof identity.inode !== 'string'
+      || !Number.isSafeInteger(identity.mode)) return null
+    return {
+      logicalResourceId: destination.logicalResourceId,
+      path: destination.path,
+      policyEpoch: Number(destination.policyEpoch),
+      directoryIdentity: {
+        device: identity.device,
+        inode: identity.inode,
+        mode: Number(identity.mode),
+      },
+    }
+  } catch {
+    return null
+  }
+}
+
+function hashPath(path: string): { bytes: number; sha256: string } {
+  const fd = openSync(path, 'r')
+  const hash = createHash('sha256')
+  const buffer = Buffer.allocUnsafe(64 * 1024)
+  let bytes = 0
+  try {
+    while (true) {
+      const count = readSync(fd, buffer, 0, buffer.length, null)
+      if (count === 0) break
+      hash.update(buffer.subarray(0, count))
+      bytes += count
+    }
+  } finally {
+    closeSync(fd)
+  }
+  return { bytes, sha256: hash.digest('hex') }
+}
+
+function safeTargetPath(root: string, relativePath: string): string | null {
+  const normalized = relativePath.replace(/\\/g, '/').trim()
+  if (!normalized || isAbsolute(normalized)
+    || normalized.split('/').some((part) => !part || part === '.' || part === '..')) return null
+  const target = resolve(root, normalized)
+  const rel = relative(resolve(root), target)
+  if (!rel || rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel)) return null
+  return target
+}
+
+const CODEX_DELIVERY_LANE_TOOL_NAMES = new Set([
+  'declare_completion_criteria',
+  'skill_write_artifact',
+  'skill_read_artifact',
+  'skill_export_artifact',
+])
 
 export function currentDocumentReadReceiptMatches(
   receipt: unknown,
@@ -440,6 +526,13 @@ export type CodexProductCloseoutRead = {
   productCloseoutAt: string
 }
 
+export type CodexPublishedToolOutputRead = {
+  itemId: string
+  toolName: string
+  output: ToolExecutionOutput
+  completedAt: string
+}
+
 export type CodexBrowserVerifierVerdict = {
   version: 1
   verdict: 'accept' | 'repair' | 'block'
@@ -583,6 +676,11 @@ export type CodexModelGatewayBindingRead = {
   additionalContextDigest: string | null
   providerSnapshotJson: string | null
   maxIterations: number | null
+  iterationLanes: {
+    ordinary: number
+    delivery: number
+    final: 1
+  } | null
   toolCallsExhausted: boolean
   allowedToolNames: readonly string[] | null
 }
@@ -805,6 +903,11 @@ function parseArrayOrEmptyStrict(
 function parseProductBudgetLimits(value: string): {
   maxIterations: number
   maxToolCalls: number
+  lanes: {
+    ordinary: { maxIterations: number; maxToolCalls: number; maxParallelToolGroups: number }
+    delivery: { maxIterations: number; maxToolCalls: number; maxParallelToolGroups: number }
+    final: { maxIterations: 1 }
+  }
 } {
   let parsed: unknown
   try {
@@ -818,10 +921,36 @@ function parseProductBudgetLimits(value: string): {
     || Number(parsed.maxIterations) <= 0
     || !Number.isSafeInteger(parsed.maxToolCalls)
     || Number(parsed.maxToolCalls) < 0
+    || !isRecord(parsed.lanes)
+    || !isRecord(parsed.lanes.ordinary)
+    || !isRecord(parsed.lanes.delivery)
+    || !isRecord(parsed.lanes.final)
   ) throw new CodexBindingRepositoryError('gateway_product_budget_snapshot_invalid')
+  const parseLane = (lane: Record<string, unknown>, allowZero: boolean) => {
+    if (!Number.isSafeInteger(lane.maxIterations)
+      || Number(lane.maxIterations) < (allowZero ? 0 : 1)
+      || !Number.isSafeInteger(lane.maxToolCalls) || Number(lane.maxToolCalls) < 0
+      || !Number.isSafeInteger(lane.maxParallelToolGroups)
+      || Number(lane.maxParallelToolGroups) < 0) {
+      throw new CodexBindingRepositoryError('gateway_product_budget_snapshot_invalid')
+    }
+    return {
+      maxIterations: Number(lane.maxIterations),
+      maxToolCalls: Number(lane.maxToolCalls),
+      maxParallelToolGroups: Number(lane.maxParallelToolGroups),
+    }
+  }
+  const ordinary = parseLane(parsed.lanes.ordinary, false)
+  const delivery = parseLane(parsed.lanes.delivery, true)
+  if (parsed.lanes.final.maxIterations !== 1
+    || Number(parsed.maxIterations) !== ordinary.maxIterations + delivery.maxIterations + 1
+    || Number(parsed.maxToolCalls) !== ordinary.maxToolCalls + delivery.maxToolCalls) {
+    throw new CodexBindingRepositoryError('gateway_product_budget_snapshot_invalid')
+  }
   return {
     maxIterations: Number(parsed.maxIterations),
     maxToolCalls: Number(parsed.maxToolCalls),
+    lanes: { ordinary, delivery, final: { maxIterations: 1 } },
   }
 }
 
@@ -1009,6 +1138,252 @@ export class CodexBindingRepository {
     this.toolBindings = new CodexToolBindingRepository(db)
   }
 
+  private readArtifactPublicationBarrier(input: {
+    readyRunId: string
+    ingressJson: string | null
+  }): CodexToolPublicationBarrierRead {
+    const destination = frozenOutputDestination(input.ingressJson)
+    if (!destination) {
+      return { kind: 'accepted', verifiedReceiptRefs: [], code: null, callId: null }
+    }
+    const activation = readCodexFolderOutputActivation(this.db, input.readyRunId)
+    if (activation.kind === 'pending'
+      || activation.kind === 'no_contract'
+      || activation.kind === 'selection_required') {
+      return {
+        kind: 'incomplete', verifiedReceiptRefs: [],
+        code: 'folder_output_intent_receipt_missing', callId: null,
+      }
+    }
+    if (!('destinationResourceId' in activation)) {
+      return {
+        kind: 'incomplete', verifiedReceiptRefs: [],
+        code: 'folder_output_intent_receipt_missing', callId: null,
+      }
+    }
+    if (activation.destinationResourceId !== destination.logicalResourceId) {
+      return {
+        kind: 'fabricated', verifiedReceiptRefs: [],
+        code: 'folder_output_destination_mismatch', callId: null,
+      }
+    }
+    const declarationRefs = [
+      activation.declarationReceiptId,
+      activation.deliveryAttemptId,
+    ]
+    if (activation.kind === 'no_write') {
+      return {
+        kind: 'accepted', verifiedReceiptRefs: declarationRefs.sort(), code: null, callId: null,
+      }
+    }
+    let retrySources: readonly import('./codex-product-run-preparer').CodexRetryArtifactSource[] = []
+    try {
+      const prepared = this.readProductTurnRuntime(input.readyRunId).prepared
+      if (prepared.ingress.attemptKind === 'explicit_retry') {
+        retrySources = prepared.ingress.artifactSources ?? []
+      }
+    } catch {
+      return {
+        kind: 'fabricated', verifiedReceiptRefs: [],
+        code: 'tool_publication_ingress_invalid', callId: null,
+      }
+    }
+    const rows = this.db.prepare(`
+      SELECT binding.codex_call_id, binding.tool_name, action.receipt_id,
+             action.result_digest, action.result_json, delivery.attempt_id
+        FROM codex_tool_call_bindings binding
+        JOIN ready_tool_action_receipts action
+          ON action.ready_action_id = binding.ready_action_id
+         AND action.state = 'confirmed'
+        JOIN codex_tool_response_delivery_attempts delivery
+          ON delivery.ready_action_id = binding.ready_action_id
+         AND delivery.codex_thread_id = binding.codex_thread_id
+         AND delivery.codex_turn_id = binding.codex_turn_id
+         AND delivery.codex_call_id = binding.codex_call_id
+         AND delivery.transport_write_confirmed_at IS NOT NULL
+       WHERE binding.ready_run_id = ?
+         AND binding.tool_name IN ('skill_write_artifact', 'skill_export_artifact')
+       ORDER BY binding.created_at, binding.codex_call_id, delivery.created_at
+    `).all<{
+      codex_call_id: string
+      tool_name: string
+      receipt_id: string
+      result_digest: string
+      result_json: string
+      attempt_id: string
+    }>(input.readyRunId)
+    const staged = new Map<string, {
+      logicalArtifactRef: string
+      version: string
+      sha256: string
+      receiptId: string
+      attemptId: string
+    }>()
+    const exported = new Map<string, {
+      logicalArtifactRef: string
+      version: string
+      sha256: string
+      bytes: number
+      targetDevice: string
+      targetInode: string
+      receiptId: string
+      attemptId: string
+    }>()
+    for (const row of rows) {
+      let result: unknown
+      try {
+        result = JSON.parse(row.result_json)
+      } catch {
+        return {
+          kind: 'fabricated', verifiedReceiptRefs: [],
+          code: 'artifact_action_result_invalid', callId: row.codex_call_id,
+        }
+      }
+      if (digestCanonicalJson(result) !== row.result_digest || !isRecord(result) || !isRecord(result.data)) {
+        return {
+          kind: 'fabricated', verifiedReceiptRefs: [],
+          code: 'artifact_action_result_digest_mismatch', callId: row.codex_call_id,
+        }
+      }
+      const data = result.data
+      if (row.tool_name === 'skill_write_artifact') {
+        if (typeof data.relativePath !== 'string'
+          || typeof data.logicalArtifactRef !== 'string'
+          || typeof data.version !== 'string'
+          || typeof data.logicalSha256 !== 'string') continue
+        staged.set(data.relativePath, {
+          logicalArtifactRef: data.logicalArtifactRef,
+          version: data.version,
+          sha256: data.logicalSha256,
+          receiptId: row.receipt_id,
+          attemptId: row.attempt_id,
+        })
+      } else {
+        if (typeof data.targetRelativePath !== 'string'
+          || typeof data.logicalArtifactRef !== 'string'
+          || typeof data.version !== 'string'
+          || typeof data.sha256 !== 'string'
+          || !Number.isSafeInteger(data.bytes)
+          || typeof data.targetDevice !== 'string'
+          || typeof data.targetInode !== 'string'
+          || data.destinationResourceId !== destination.logicalResourceId
+          || data.readbackVerified !== true) continue
+        exported.set(data.targetRelativePath, {
+          logicalArtifactRef: data.logicalArtifactRef,
+          version: data.version,
+          sha256: data.sha256,
+          bytes: Number(data.bytes),
+          targetDevice: data.targetDevice,
+          targetInode: data.targetInode,
+          receiptId: row.receipt_id,
+          attemptId: row.attempt_id,
+        })
+      }
+    }
+    let rootStat: ReturnType<typeof statSync>
+    try {
+      if (realpathSync(destination.path) !== destination.path) throw new Error('root_realpath_drift')
+      rootStat = statSync(destination.path)
+    } catch {
+      return {
+        kind: 'indeterminate', verifiedReceiptRefs: [],
+        code: 'artifact_destination_readback_failed', callId: null,
+      }
+    }
+    if (!rootStat.isDirectory()
+      || String(rootStat.dev) !== destination.directoryIdentity.device
+      || String(rootStat.ino) !== destination.directoryIdentity.inode
+      || rootStat.mode !== destination.directoryIdentity.mode) {
+      return {
+        kind: 'indeterminate', verifiedReceiptRefs: [],
+        code: 'artifact_destination_identity_drift', callId: null,
+      }
+    }
+    const refs = [...declarationRefs]
+    for (const expected of activation.expectedOutputs) {
+      const write = staged.get(expected)
+      const retrySource = write ? null : retrySources.find((source) => (
+        source.relativePath === expected && source.sourceReadyRunId !== input.readyRunId
+      )) ?? null
+      const output = exported.get(expected)
+      const source = write ?? retrySource
+      if (!source || !output) {
+        return {
+          kind: 'incomplete', verifiedReceiptRefs: [],
+          code: !source ? 'artifact_staged_receipt_missing' : 'artifact_export_receipt_missing',
+          callId: null,
+        }
+      }
+      if (source.logicalArtifactRef !== output.logicalArtifactRef
+        || source.version !== output.version || source.sha256 !== output.sha256) {
+        return {
+          kind: 'fabricated', verifiedReceiptRefs: [],
+          code: 'artifact_staged_exported_version_mismatch', callId: null,
+        }
+      }
+      let durableHead: ReturnType<CodexBindingRepository['readArtifactWriteHead']>
+      try {
+        durableHead = this.readArtifactWriteHead(
+          write ? input.readyRunId : retrySource!.sourceReadyRunId,
+          expected,
+        )
+      } catch {
+        return {
+          kind: 'fabricated', verifiedReceiptRefs: [],
+          code: 'artifact_write_receipt_chain_invalid', callId: null,
+        }
+      }
+      if (!durableHead
+        || durableHead.logicalArtifactRef !== source.logicalArtifactRef
+        || durableHead.version !== source.version
+        || durableHead.logicalSha256 !== source.sha256) {
+        return {
+          kind: 'fabricated', verifiedReceiptRefs: [],
+          code: 'artifact_write_head_mismatch', callId: null,
+        }
+      }
+      const target = safeTargetPath(destination.path, expected)
+      if (!target) {
+        return {
+          kind: 'fabricated', verifiedReceiptRefs: [],
+          code: 'artifact_target_path_invalid', callId: null,
+        }
+      }
+      try {
+        const parentRealpath = realpathSync(dirname(target))
+        const parentRelative = relative(destination.path, parentRealpath)
+        if (parentRelative === '..' || parentRelative.startsWith(`..${sep}`) || isAbsolute(parentRelative)) {
+          throw new Error('parent_escape')
+        }
+        const targetStat = lstatSync(target)
+        if (!targetStat.isFile() || targetStat.isSymbolicLink()
+          || String(targetStat.dev) !== output.targetDevice
+          || String(targetStat.ino) !== output.targetInode) throw new Error('target_identity_drift')
+        const fresh = hashPath(target)
+        if (fresh.bytes !== output.bytes || fresh.sha256 !== output.sha256) {
+          throw new Error('target_hash_drift')
+        }
+      } catch {
+        return {
+          kind: 'indeterminate', verifiedReceiptRefs: [],
+          code: 'artifact_target_readback_mismatch', callId: null,
+        }
+      }
+      refs.push(
+        ...durableHead.receiptRefs,
+        ...(write ? [write.receiptId, write.attemptId] : []),
+        output.receiptId,
+        output.attemptId,
+      )
+    }
+    return {
+      kind: 'accepted',
+      verifiedReceiptRefs: Array.from(new Set(refs)).sort(),
+      code: null,
+      callId: null,
+    }
+  }
+
   readOpenProductRunIds(): ReadonlySet<string> {
     const rows = this.db.prepare(`
       SELECT ready_run_id
@@ -1017,6 +1392,52 @@ export class CodexBindingRepository {
          AND host_failure_product_terminal_digest IS NULL
     `).all<Array<{ ready_run_id: string }>[number]>()
     return new Set(rows.map((row) => row.ready_run_id))
+  }
+
+  readArtifactStorageRetention(): {
+    protectedRunIds: string[]
+    collectibleRunIds: string[]
+  } {
+    const rows = this.db.prepare(`
+      SELECT turn.ready_run_id, turn.predecessor_run_id,
+             turn.product_terminal_digest, turn.publication_receipt_digest,
+             run.status
+        FROM codex_turn_bindings turn
+        LEFT JOIN run_meta run ON run.run_id = turn.ready_run_id
+       ORDER BY turn.created_at, turn.ready_run_id
+    `).all<{
+      ready_run_id: string
+      predecessor_run_id: string | null
+      product_terminal_digest: string | null
+      publication_receipt_digest: string | null
+      status: string | null
+    }>()
+    const succeeded = new Set(rows.filter((row) => (
+      row.status === 'done'
+      && row.product_terminal_digest !== null
+      && row.publication_receipt_digest !== null
+    )).map((row) => row.ready_run_id))
+    const successors = new Map<string, string>()
+    for (const row of rows) {
+      if (!row.predecessor_run_id) continue
+      successors.set(row.predecessor_run_id, row.ready_run_id)
+    }
+    const protectedRunIds: string[] = []
+    const collectibleRunIds: string[] = []
+    for (const row of rows) {
+      let tailRunId = row.ready_run_id
+      for (let depth = 0; depth <= rows.length; depth += 1) {
+        const successorRunId = successors.get(tailRunId)
+        if (!successorRunId) break
+        if (depth === rows.length) {
+          throw new CodexBindingRepositoryError('artifact_retention_lineage_invalid')
+        }
+        tailRunId = successorRunId
+      }
+      if (succeeded.has(tailRunId)) collectibleRunIds.push(row.ready_run_id)
+      else protectedRunIds.push(row.ready_run_id)
+    }
+    return { protectedRunIds, collectibleRunIds }
   }
 
   hasProductTurnBinding(readyRunId: string): boolean {
@@ -1668,6 +2089,8 @@ export class CodexBindingRepository {
              t.tool_surface_digest, t.turn_contract_digest,
              t.message_visibility_epoch,
              t.effective_upstream_snapshot_ref, t.effective_upstream_snapshot_digest,
+             t.ready_memory_snapshot_json, t.ready_memory_snapshot_digest,
+             t.ready_memory_state_revision, t.ready_memory_revocation_revision,
              t.ingress_json, t.ingress_admitted_digest, t.ingress_admitted_at,
              b.thread_binding_id, b.ready_scope_id, b.ready_conversation_alias,
              b.alias_generation, b.isolated_thread_cwd, b.codex_model,
@@ -1688,6 +2111,10 @@ export class CodexBindingRepository {
       message_visibility_epoch: number
       effective_upstream_snapshot_ref: string
       effective_upstream_snapshot_digest: string
+      ready_memory_snapshot_json: string | null
+      ready_memory_snapshot_digest: string | null
+      ready_memory_state_revision: number | null
+      ready_memory_revocation_revision: number | null
       ingress_json: string | null
       ingress_admitted_digest: string
       ingress_admitted_at: string
@@ -1716,6 +2143,10 @@ export class CodexBindingRepository {
       || receipt.prepared.conversationAlias.aliasId !== row.ready_conversation_alias
       || receipt.prepared.conversationAlias.aliasGeneration !== row.alias_generation
       || receipt.messageVisibilityEpoch !== row.message_visibility_epoch
+      || row.ready_memory_snapshot_json !== canonicalJson(receipt.prepared.readyMemorySnapshot)
+      || row.ready_memory_snapshot_digest !== receipt.prepared.readyMemorySnapshot.snapshotDigest
+      || row.ready_memory_state_revision !== receipt.prepared.readyMemorySnapshot.stateRevision
+      || row.ready_memory_revocation_revision !== receipt.prepared.readyMemorySnapshot.revocationRevision
       || !row.isolated_thread_cwd
       || !row.codex_model
       || digestCanonicalJson(receipt) !== row.ingress_admitted_digest) {
@@ -1746,6 +2177,69 @@ export class CodexBindingRepository {
       admittedAt: row.ingress_admitted_at,
       messageVisibilityEpoch: row.message_visibility_epoch,
     }
+  }
+
+  readProductTurnSuccessorId(readyRunId: string): string | null {
+    nonEmpty(readyRunId, 'ready_run_id_invalid')
+    const rows = this.db.prepare(`
+      SELECT ready_run_id
+        FROM codex_turn_bindings
+       WHERE predecessor_run_id = ?
+         AND attempt_kind IN ('recovery_successor', 'checkpoint_successor', 'explicit_retry')
+       ORDER BY created_at, ready_run_id
+       LIMIT 2
+    `).all<Array<{ ready_run_id: string }>[number]>(readyRunId)
+    if (rows.length > 1) throw new CodexBindingRepositoryError('product_turn_successor_ambiguous')
+    return rows[0]?.ready_run_id ?? null
+  }
+
+  readPublishedToolOutputs(readyRunId: string): CodexPublishedToolOutputRead[] {
+    nonEmpty(readyRunId, 'ready_run_id_invalid')
+    return this.db.prepare(`
+      SELECT admission.codex_call_id, admission.tool_name,
+             action.result_json, action.result_digest, action.updated_at
+        FROM codex_tool_call_admissions admission
+        JOIN codex_tool_call_bindings binding
+          ON binding.codex_thread_id = admission.codex_thread_id
+         AND binding.codex_turn_id = admission.codex_turn_id
+         AND binding.codex_call_id = admission.codex_call_id
+        JOIN ready_tool_action_receipts action
+          ON action.ready_action_id = binding.ready_action_id
+       WHERE admission.ready_run_id = ?
+         AND action.state = 'confirmed'
+         AND EXISTS (
+           SELECT 1
+             FROM codex_tool_response_delivery_attempts delivery
+            WHERE delivery.codex_thread_id = binding.codex_thread_id
+              AND delivery.codex_turn_id = binding.codex_turn_id
+              AND delivery.codex_call_id = binding.codex_call_id
+              AND delivery.ready_action_id = binding.ready_action_id
+              AND delivery.transport_write_confirmed_at IS NOT NULL
+         )
+       ORDER BY admission.admitted_at, admission.codex_call_id
+    `).all<{
+      codex_call_id: string
+      tool_name: string
+      result_json: string
+      result_digest: string
+      updated_at: string
+    }>(readyRunId).map((row) => {
+      let output: unknown
+      try {
+        output = JSON.parse(row.result_json)
+      } catch {
+        throw new CodexBindingRepositoryError('published_tool_output_invalid')
+      }
+      if (!isRecord(output) || digestCanonicalJson(output) !== row.result_digest) {
+        throw new CodexBindingRepositoryError('published_tool_output_digest_mismatch')
+      }
+      return {
+        itemId: row.codex_call_id,
+        toolName: row.tool_name,
+        output: output as unknown as ToolExecutionOutput,
+        completedAt: row.updated_at,
+      }
+    })
   }
 
   recordEngineTerminalCandidate(input: {
@@ -1959,7 +2453,7 @@ export class CodexBindingRepository {
     const owner = this.db.prepare(`
       SELECT turn.codex_thread_id, turn.codex_turn_id, turn.ingress_json,
              turn.ready_task_id, turn.turn_contract_digest,
-             turn.authorization_snapshot_digest,
+             turn.authorization_snapshot_digest, turn.authorization_snapshot_json,
              thread.ready_conversation_alias, thread.codex_session_id,
              thread.tool_surface_digest, thread.tool_surface_snapshot_digest,
              thread.tool_surface_json
@@ -1973,6 +2467,7 @@ export class CodexBindingRepository {
       ready_task_id: string
       turn_contract_digest: string
       authorization_snapshot_digest: string
+      authorization_snapshot_json: string
       ready_conversation_alias: string
       codex_session_id: string | null
       tool_surface_digest: string | null
@@ -1988,11 +2483,16 @@ export class CodexBindingRepository {
       }
     }
     let frozenToolSurface: ReadyToolSurface
+    let frozenAuthorization: ReadyBoundTurnToolAuthorization
     try {
       frozenToolSurface = JSON.parse(owner.tool_surface_json || '') as ReadyToolSurface
       assertReadyToolSurface(frozenToolSurface)
+      frozenAuthorization = JSON.parse(owner.authorization_snapshot_json) as ReadyBoundTurnToolAuthorization
+      assertReadyBoundTurnToolAuthorization(frozenAuthorization)
       if (frozenToolSurface.toolSurfaceDigest !== owner.tool_surface_digest
-        || frozenToolSurface.surfaceSnapshotDigest !== owner.tool_surface_snapshot_digest) {
+        || frozenToolSurface.surfaceSnapshotDigest !== owner.tool_surface_snapshot_digest
+        || frozenAuthorization.authorizationSnapshotDigest !== owner.authorization_snapshot_digest
+        || frozenAuthorization.toolSurfaceDigest !== owner.tool_surface_digest) {
         throw new Error('frozen_tool_surface_digest_mismatch')
       }
     } catch {
@@ -2001,6 +2501,9 @@ export class CodexBindingRepository {
         code: 'tool_publication_frozen_snapshot_invalid', callId: null,
       }
     }
+    const currentDocumentReadRequired = frozenAuthorization.allowedToolNames.includes(
+      'document_read_section',
+    )
     const effectSettlementOnly = input.effectSettlementOnly === true
     let publicationDivergedCallId: string | null = null
     const recordedTerminal = this.readEngineTerminalCandidate(input.readyRunId)
@@ -2457,6 +2960,7 @@ export class CodexBindingRepository {
       }
       if (!effectSettlementOnly
         && currentDocumentAnchor
+        && currentDocumentReadRequired
         && row.tool_name === 'document_read_section'
         && authoritativeSuccess) {
         const resultData = isRecord(authoritativeResult) && isRecord(authoritativeResult.data)
@@ -2504,6 +3008,7 @@ export class CodexBindingRepository {
     }
     if (!effectSettlementOnly
       && currentDocumentAnchor
+      && currentDocumentReadRequired
       && !exactCurrentDocumentReadCallId
       && (!recordedTerminal || recordedTerminal.engineOutcome === 'completed')) {
       return {
@@ -2518,9 +3023,18 @@ export class CodexBindingRepository {
         callId: publicationDivergedCallId,
       }
     }
+    if (!effectSettlementOnly
+      && (!recordedTerminal || recordedTerminal.engineOutcome === 'completed')) {
+      const artifactPublication = this.readArtifactPublicationBarrier({
+        readyRunId: input.readyRunId,
+        ingressJson: owner.ingress_json,
+      })
+      if (artifactPublication.kind !== 'accepted') return artifactPublication
+      receipts.push(...artifactPublication.verifiedReceiptRefs)
+    }
     return {
       kind: 'accepted',
-      verifiedReceiptRefs: receipts.sort(),
+      verifiedReceiptRefs: Array.from(new Set(receipts)).sort(),
       code: null,
       callId: null,
     }
@@ -2551,6 +3065,211 @@ export class CodexBindingRepository {
       productTerminalDigest,
       productCloseoutAt,
     }
+  }
+
+  readProductTurnPresentation(readyRunId: string): ProductTurnReceipt {
+    return readProductTurnPresentation(this.db, readyRunId)
+  }
+
+  readProductTurnPresentations(readyRunIds: readonly string[]): ProductTurnReceipt[] {
+    return readProductTurnPresentations(this.db, readyRunIds)
+  }
+
+  readArtifactWriteHead(readyRunId: string, relativePath: string): {
+    logicalArtifactRef: string
+    version: string
+    logicalSha256: string
+    receiptRefs: string[]
+  } | null {
+    nonEmpty(readyRunId, 'ready_run_id_invalid')
+    nonEmpty(relativePath, 'artifact_relative_path_invalid')
+    const prepared = this.readProductTurnRuntime(readyRunId).prepared
+    const frozenRetrySources = prepared.ingress.attemptKind === 'explicit_retry'
+      ? prepared.ingress.artifactSources ?? []
+      : []
+    const rows = this.db.prepare(`
+      SELECT binding.ready_action_id, action.receipt_id, action.result_json
+        FROM codex_tool_call_bindings binding
+        JOIN ready_tool_action_receipts action
+          ON action.ready_action_id = binding.ready_action_id
+         AND action.state = 'confirmed'
+       WHERE binding.ready_run_id = ?
+         AND binding.tool_name = 'skill_write_artifact'
+         AND EXISTS (
+           SELECT 1 FROM codex_tool_response_delivery_attempts delivery
+            WHERE delivery.ready_action_id = binding.ready_action_id
+              AND delivery.transport_write_confirmed_at IS NOT NULL
+         )
+       ORDER BY binding.created_at, binding.ready_action_id
+    `).all<{
+      ready_action_id: string
+      receipt_id: string
+      result_json: string
+    }>(readyRunId)
+    let head: {
+      logicalArtifactRef: string
+      version: string
+      logicalSha256: string
+    } | null = null
+    const receiptRefs: string[] = []
+    for (const row of rows) {
+      let result: unknown
+      try { result = JSON.parse(row.result_json) } catch {
+        throw new CodexBindingRepositoryError('artifact_write_receipt_invalid')
+      }
+      const outer = isRecord(result) ? result : null
+      const envelope = outer && isRecord(outer.envelope) ? outer.envelope : null
+      const data = outer && isRecord(outer.data)
+        ? outer.data
+        : envelope && isRecord(envelope.data) ? envelope.data : null
+      if (!data || data.relativePath !== relativePath) continue
+      const expectedVersion = data.expectedVersion === null || data.expectedVersion === 'empty'
+        ? null
+        : typeof data.expectedVersion === 'string' ? data.expectedVersion : undefined
+      let expectedHeadVersion = head?.version ?? null
+      let retryReceiptRefs: string[] = []
+      if (!head && isRecord(data.retrySeed)
+        && isRecord(data.retrySeed.source)
+        && isRecord(data.retrySeed.copyReceipt)) {
+        const source = data.retrySeed.source
+        const copy = data.retrySeed.copyReceipt
+        const frozen = frozenRetrySources.find((candidate) => (
+          candidate.sourceReadyRunId === source.sourceReadyRunId
+          && candidate.relativePath === relativePath
+        ))
+        if (!frozen
+          || source.sourceReadyRunId === readyRunId
+          || source.version !== frozen.version
+          || source.sha256 !== frozen.sha256
+          || source.logicalArtifactRef !== frozen.logicalArtifactRef
+          || copy.actionId !== `${row.ready_action_id}:cow`
+          || copy.expectedVersion !== null
+          || copy.mode !== 'replace'
+          || typeof copy.version !== 'string'
+          || copy.logicalSha256 !== frozen.sha256) {
+          throw new CodexBindingRepositoryError('artifact_retry_seed_invalid')
+        }
+        const sourceHead = this.readArtifactWriteHead(frozen.sourceReadyRunId, relativePath)
+        if (!sourceHead
+          || sourceHead.logicalArtifactRef !== frozen.logicalArtifactRef
+          || sourceHead.version !== frozen.version
+          || sourceHead.logicalSha256 !== frozen.sha256) {
+          throw new CodexBindingRepositoryError('artifact_retry_source_readback_mismatch')
+        }
+        expectedHeadVersion = copy.version
+        retryReceiptRefs = sourceHead.receiptRefs
+      }
+      if (expectedVersion === undefined
+        || expectedVersion !== expectedHeadVersion
+        || data.actionId !== row.ready_action_id
+        || !['replace', 'append'].includes(String(data.mode))
+        || typeof data.logicalArtifactRef !== 'string'
+        || typeof data.version !== 'string' || !/^sha256:[a-f0-9]{64}$/.test(data.version)
+        || typeof data.logicalSha256 !== 'string' || !/^[a-f0-9]{64}$/.test(data.logicalSha256)) {
+        throw new CodexBindingRepositoryError('artifact_write_receipt_chain_invalid')
+      }
+      head = {
+        logicalArtifactRef: data.logicalArtifactRef,
+        version: data.version,
+        logicalSha256: data.logicalSha256,
+      }
+      receiptRefs.push(...retryReceiptRefs, row.receipt_id)
+    }
+    return head ? { ...head, receiptRefs } : null
+  }
+
+  repairLegacyFailureOnlyCloseouts(repairedAt: string): string[] {
+    nonEmpty(repairedAt, 'legacy_failure_repair_time_invalid')
+    const repaired: string[] = []
+    this.immediate(() => {
+      const rows = this.db.prepare(`
+        SELECT turn.ready_run_id, turn.ready_task_id, turn.message_visibility_epoch,
+               turn.product_terminal_digest, turn.engine_terminal_candidate_digest,
+               thread.ready_scope_id, run.status, run.terminal_reason,
+               (SELECT COUNT(*) FROM codex_tool_call_admissions admission
+                 WHERE admission.ready_run_id = turn.ready_run_id) AS admitted_count,
+               (SELECT COUNT(*) FROM codex_tool_call_admissions admission
+                 JOIN codex_tool_call_bindings binding
+                   ON binding.ready_run_id = admission.ready_run_id
+                  AND binding.codex_thread_id = admission.codex_thread_id
+                  AND binding.codex_turn_id = admission.codex_turn_id
+                  AND binding.codex_call_id = admission.codex_call_id
+                 JOIN ready_tool_action_receipts action
+                   ON action.ready_action_id = binding.ready_action_id
+                  AND action.state IN ('confirmed', 'proven_absent', 'indeterminate')
+                WHERE admission.ready_run_id = turn.ready_run_id) AS settled_count,
+               (SELECT COUNT(*) FROM codex_tool_call_bindings binding
+                 WHERE binding.ready_run_id = turn.ready_run_id
+                   AND binding.tool_name = 'skill_write_artifact'
+                   AND binding.receipt_id IS NOT NULL) AS write_count,
+               (SELECT COUNT(*) FROM codex_tool_call_bindings binding
+                 WHERE binding.ready_run_id = turn.ready_run_id
+                   AND binding.tool_name = 'skill_export_artifact'
+                   AND binding.receipt_id IS NOT NULL) AS export_count
+          FROM codex_turn_bindings turn
+          JOIN codex_thread_bindings thread ON thread.thread_binding_id = turn.thread_binding_id
+          JOIN run_meta run ON run.run_id = turn.ready_run_id
+          JOIN task_projections task
+            ON task.task_id = turn.ready_task_id AND task.run_id = turn.ready_run_id
+         WHERE turn.product_terminal_digest IS NOT NULL
+           AND turn.engine_terminal_candidate_digest IS NOT NULL
+           AND run.status IN ('error', 'cancelled', 'interrupted')
+           AND task.status IN ('failed', 'killed')
+           AND NOT EXISTS (
+             SELECT 1 FROM chat_messages message
+              WHERE message.id = 'assistant:' || turn.ready_task_id || ':' || turn.ready_run_id || ':terminal'
+           )
+         ORDER BY turn.product_closeout_at, turn.ready_run_id
+      `).all<{
+        ready_run_id: string
+        ready_task_id: string
+        message_visibility_epoch: number
+        product_terminal_digest: string
+        engine_terminal_candidate_digest: string
+        ready_scope_id: string
+        status: 'error' | 'cancelled' | 'interrupted'
+        terminal_reason: string | null
+        admitted_count: number
+        settled_count: number
+        write_count: number
+        export_count: number
+      }>()
+      for (const row of rows) {
+        if (row.admitted_count !== row.settled_count) continue
+        const messageId = `assistant:${row.ready_task_id}:${row.ready_run_id}:terminal`
+        const content = codexTerminalPublicMessage(row.status)
+        const meta = {
+          taskId: row.ready_task_id,
+          runId: row.ready_run_id,
+          terminalReason: row.terminal_reason,
+          legacyFailureRecovered: true,
+          recoveryEvidenceDigest: digestCanonicalJson({
+            readyRunId: row.ready_run_id,
+            productTerminalDigest: row.product_terminal_digest,
+            engineTerminalCandidateDigest: row.engine_terminal_candidate_digest,
+            admittedCount: row.admitted_count,
+            settledCount: row.settled_count,
+            writeCount: row.write_count,
+            exportCount: row.export_count,
+          }),
+        }
+        this.db.prepare(`
+          INSERT INTO chat_messages (
+            id, conversation_id, role, content, timestamp, meta_json, message_visibility_epoch
+          ) VALUES (?, ?, 'assistant', ?, ?, ?, ?)
+          ON CONFLICT(id) DO NOTHING
+        `).run(
+          messageId,
+          row.ready_scope_id,
+          content,
+          repairedAt,
+          canonicalJson(meta),
+          row.message_visibility_epoch,
+        )
+        repaired.push(row.ready_run_id)
+      }
+    })
+    return repaired
   }
 
   beginBrowserVerifierAttempt(input: {
@@ -3271,6 +3990,7 @@ export class CodexBindingRepository {
     retirementEvidenceDigest: string
     retiredAt: string
     idleThreadReadDigest: string | null
+    onClosedInOpenTransaction: (input: { conversationId: string; closedAt: string }) => void
   }): {
     aliasId: string
     retiredGeneration: number
@@ -3381,6 +4101,10 @@ export class CodexBindingRepository {
         scopeId: thread.ready_scope_id,
         closedAt: input.retiredAt,
         closeEvidenceDigest: transactionDigest,
+      })
+      input.onClosedInOpenTransaction({
+        conversationId: thread.ready_scope_id,
+        closedAt: input.retiredAt,
       })
 
       return {
@@ -3568,6 +4292,10 @@ export class CodexBindingRepository {
           ingress_admitted_digest,
           ingress_admitted_at,
           attempt_kind,
+          predecessor_run_id,
+          history_parity_evidence_digest,
+          current_thread_read_evidence_digest,
+          continuation_contract_digest,
           tool_surface_digest,
           authorization_snapshot_digest,
           authorization_snapshot_json,
@@ -3576,12 +4304,16 @@ export class CodexBindingRepository {
           effective_upstream_snapshot_ref,
           effective_upstream_snapshot_digest,
           additional_context_digest,
+          ready_memory_snapshot_json,
+          ready_memory_snapshot_digest,
+          ready_memory_state_revision,
+          ready_memory_revocation_revision,
           turn_contract_digest,
           ingress_json,
           revision,
           created_at,
           updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
       `).run(
         input.prepared.runId,
         input.prepared.taskId,
@@ -3600,6 +4332,10 @@ export class CodexBindingRepository {
         input.ingressAdmittedDigest,
         input.admittedAt,
         input.prepared.ingress.attemptKind,
+        input.prepared.ingress.predecessorRunId || null,
+        input.prepared.ingress.historyParityEvidenceDigest || null,
+        input.prepared.ingress.currentThreadReadEvidenceDigest || null,
+        input.prepared.ingress.continuationContractDigest || null,
         input.prepared.readyToolSurface.toolSurfaceDigest,
         boundAuthorization.authorizationSnapshotDigest,
         canonicalJson(boundAuthorization),
@@ -3608,6 +4344,10 @@ export class CodexBindingRepository {
         input.upstreamProfileSnapshotRef,
         input.upstreamProfileSnapshotDigest,
         input.additionalContextDigest,
+        canonicalJson(input.prepared.readyMemorySnapshot),
+        input.prepared.readyMemorySnapshot.snapshotDigest,
+        input.prepared.readyMemorySnapshot.stateRevision,
+        input.prepared.readyMemorySnapshot.revocationRevision,
         input.turnContractDigest,
         canonicalJson(buildCodexIngressAdmissionReceipt(digestInput)),
         input.admittedAt,
@@ -4328,21 +5068,37 @@ export class CodexBindingRepository {
   assertThreadArchiveEligible(threadId: string): void {
     nonEmpty(threadId, 'archive_thread_identity_invalid')
     const thread = this.db.prepare(`
-      SELECT thread_binding_id, retired_at, thread_start_reservation_released_at
+      SELECT thread_binding_id, retired_at, retired_reason, retirement_evidence_digest,
+             thread_start_reservation_released_at
         FROM codex_thread_bindings WHERE codex_thread_id = ? LIMIT 1
     `).get<{
       thread_binding_id: string
       retired_at: string | null
+      retired_reason: string | null
+      retirement_evidence_digest: string | null
       thread_start_reservation_released_at: string | null
     }>(threadId)
-    if (!thread || !thread.retired_at || !thread.thread_start_reservation_released_at) {
+    if (!thread || !thread.retired_at) {
+      throw new CodexBindingRepositoryError('thread_archive_not_retired')
+    }
+    const cleanupIntent = thread.retired_reason === 'cleanup'
+      && thread.retirement_evidence_digest !== null
+      && Boolean(this.db.prepare(`
+        SELECT 1 FROM codex_thread_archive_intents
+         WHERE thread_binding_id = ? AND codex_thread_id = ?
+           AND source_kind = 'retired_backfill' AND retired_reason = 'cleanup'
+           AND ready_run_id IS NULL AND state = 'pending'
+           AND retirement_evidence_digest = ?
+         LIMIT 1
+      `).get(thread.thread_binding_id, threadId, thread.retirement_evidence_digest))
+    if (!thread.thread_start_reservation_released_at && !cleanupIntent) {
       throw new CodexBindingRepositoryError('thread_archive_not_retired')
     }
     const fence = this.db.prepare(`
       SELECT thread_binding_id FROM codex_thread_dispatch_fences
        WHERE thread_binding_id = ? LIMIT 1
     `).get(thread.thread_binding_id)
-    if (fence) throw new CodexBindingRepositoryError('thread_archive_fence_active')
+    if (fence && !cleanupIntent) throw new CodexBindingRepositoryError('thread_archive_fence_active')
     const unresolved = this.db.prepare(`
       SELECT ready_run_id FROM codex_turn_bindings
        WHERE thread_binding_id = ?
@@ -4352,7 +5108,7 @@ export class CodexBindingRepository {
          )
        LIMIT 1
     `).get(thread.thread_binding_id)
-    if (unresolved) throw new CodexBindingRepositoryError('thread_archive_turn_unresolved')
+    if (unresolved && !cleanupIntent) throw new CodexBindingRepositoryError('thread_archive_turn_unresolved')
     const unresolvedCall = this.db.prepare(`
       SELECT call_row.codex_call_id
         FROM codex_tool_call_bindings call_row
@@ -4361,7 +5117,7 @@ export class CodexBindingRepository {
          AND (call_row.receipt_id IS NULL OR call_row.result_digest IS NULL)
        LIMIT 1
     `).get(thread.thread_binding_id)
-    if (unresolvedCall) throw new CodexBindingRepositoryError('thread_archive_call_unresolved')
+    if (unresolvedCall && !cleanupIntent) throw new CodexBindingRepositoryError('thread_archive_call_unresolved')
     const descendant = this.db.prepare(`
       SELECT thread_binding_id FROM codex_thread_bindings
        WHERE codex_parent_thread_id = ? OR codex_forked_from_id = ? LIMIT 1
@@ -4681,12 +5437,12 @@ export class CodexBindingRepository {
     const terminalMessage = this.db.prepare(`
       SELECT id FROM chat_messages WHERE id = ? LIMIT 1
     `).get<{ id: string }>(`assistant:${turn.ready_task_id}:${input.readyRunId}:terminal`)
-    if (terminalMessage) throw new CodexBindingRepositoryError('browser_verifier_candidate_published')
+    if (!terminalMessage) throw new CodexBindingRepositoryError('browser_verifier_terminal_message_missing')
     const child = this.db.prepare(`
       SELECT status FROM browser_tasks
        WHERE parent_task_id = ? AND kind = 'browser_workflow' LIMIT 1
     `).get<{ status: string }>(turn.ready_task_id)
-    if (child && child.status !== 'cancelled') {
+    if (child && !['completed', 'failed', 'cancelled'].includes(child.status)) {
       throw new CodexBindingRepositoryError('browser_verifier_browser_child_not_terminal')
     }
     if (thread.continuation_blocked_at || thread.retired_at) {
@@ -4861,7 +5617,7 @@ export class CodexBindingRepository {
     const terminalMessage = this.db.prepare(`
       SELECT id FROM chat_messages WHERE id = ? LIMIT 1
     `).get<{ id: string }>(`assistant:${turn.ready_task_id}:${turn.ready_run_id}:terminal`)
-    if (terminalMessage) throw new CodexBindingRepositoryError('lifecycle_action_candidate_published')
+    if (!terminalMessage) throw new CodexBindingRepositoryError('lifecycle_action_terminal_message_missing')
     const child = this.db.prepare(`
       SELECT status FROM browser_tasks
        WHERE parent_task_id = ? AND kind = 'browser_workflow' LIMIT 1
@@ -5357,6 +6113,28 @@ export class CodexBindingRepository {
       if (admittedToolCalls > budget.maxToolCalls) {
         throw new CodexBindingRepositoryError('gateway_product_budget_snapshot_invalid')
       }
+      const folderActivation = readCodexFolderOutputActivation(this.db, row.ready_run_id)
+      const admittedLaneCalls = folderActivation.kind === 'no_contract'
+        ? {
+            ordinary_calls: admittedToolCalls,
+            delivery_calls: 0,
+          }
+        : this.db.prepare(`
+        SELECT
+          COALESCE(SUM(CASE WHEN tool_name IN (
+            'declare_completion_criteria', 'skill_write_artifact',
+            'skill_read_artifact', 'skill_export_artifact'
+          ) THEN 0 ELSE 1 END), 0) AS ordinary_calls,
+          COALESCE(SUM(CASE WHEN tool_name IN (
+            'declare_completion_criteria', 'skill_write_artifact',
+            'skill_read_artifact', 'skill_export_artifact'
+          ) THEN 1 ELSE 0 END), 0) AS delivery_calls
+          FROM codex_tool_call_admissions WHERE ready_run_id = ?
+      `).get<{ ordinary_calls: number; delivery_calls: number }>(row.ready_run_id)
+      const ordinaryExhausted = Number(admittedLaneCalls?.ordinary_calls || 0)
+        >= budget.lanes.ordinary.maxToolCalls
+      const deliveryExhausted = Number(admittedLaneCalls?.delivery_calls || 0)
+        >= budget.lanes.delivery.maxToolCalls
       let authorization: ReadyBoundTurnToolAuthorization
       try {
         authorization = JSON.parse(row.authorization_snapshot_json) as ReadyBoundTurnToolAuthorization
@@ -5371,6 +6149,16 @@ export class CodexBindingRepository {
         || authorization.toolSurfaceDigest !== row.tool_surface_digest
         || authorization.turnContractDigest !== row.turn_contract_digest
       ) throw new CodexBindingRepositoryError('gateway_tool_authorization_mismatch')
+      const effectiveNames = input.kind === 'product'
+        ? effectiveCodexFolderOutputToolNames(
+            authorization.allowedToolNames,
+            folderActivation,
+          ).filter((name) => (
+            folderActivation.kind !== 'no_contract' && CODEX_DELIVERY_LANE_TOOL_NAMES.has(name)
+              ? !deliveryExhausted
+              : !ordinaryExhausted
+          ))
+        : null
       return {
         kind: input.kind,
         ownerId: row.ready_run_id,
@@ -5383,11 +6171,15 @@ export class CodexBindingRepository {
         additionalContextDigest: row.additional_context_digest,
         providerSnapshotJson: null,
         maxIterations: budget.maxIterations,
-        toolCallsExhausted: input.kind === 'product'
-          && admittedToolCalls === budget.maxToolCalls,
-        allowedToolNames: input.kind === 'product'
-          ? [...authorization.allowedToolNames]
+        iterationLanes: input.kind === 'product'
+          ? {
+              ordinary: budget.lanes.ordinary.maxIterations,
+              delivery: budget.lanes.delivery.maxIterations,
+              final: 1,
+            }
           : null,
+        toolCallsExhausted: input.kind === 'product' && effectiveNames?.length === 0,
+        allowedToolNames: effectiveNames,
       }
     }
 
@@ -5470,6 +6262,7 @@ export class CodexBindingRepository {
       additionalContextDigest: null,
       providerSnapshotJson: row.provider_snapshot_json,
       maxIterations: null,
+      iterationLanes: null,
       toolCallsExhausted: false,
       allowedToolNames: null,
     }
@@ -6656,27 +7449,36 @@ export class CodexBindingRepository {
       timestamp: string
       meta_json: string
     }>(messageId)
+    let canonicalDigest = ''
+    try {
+      canonicalDigest = message ? workflowDigest({
+        id: messageId,
+        conversationId: message.conversation_id,
+        role: 'assistant',
+        content: message.content,
+        timestamp: message.timestamp,
+        meta: JSON.parse(message.meta_json),
+      }) : ''
+    } catch {
+      canonicalDigest = ''
+    }
+    const canonicalFailureMessageMatches = Boolean(
+      message
+      && message.conversation_id === thread.ready_scope_id
+      && message.role === 'assistant'
+      && message.timestamp === closeoutAt
+      && canonicalDigest === productTerminalDigest,
+    )
     if (thread.continuation_blocked_reason === 'publication_diverged') {
-      if (!projection || !['failed', 'killed'].includes(projection.status) || message) {
+      if (!projection
+        || !['failed', 'killed'].includes(projection.status)
+        || !canonicalFailureMessageMatches) {
         throw new CodexBindingRepositoryError('engine_terminal_publication_mismatch')
       }
       return
     }
     if (!publication) throw new CodexBindingRepositoryError('publication_receipt_missing')
     if (candidate.candidateSelection.kind === 'accepted') {
-      let canonicalDigest = ''
-      try {
-        canonicalDigest = message ? workflowDigest({
-          id: messageId,
-          conversationId: message.conversation_id,
-          role: 'assistant',
-          content: message.content,
-          timestamp: message.timestamp,
-          meta: JSON.parse(message.meta_json),
-        }) : ''
-      } catch {
-        canonicalDigest = ''
-      }
       if (candidate.engineOutcome !== 'completed'
         || projection?.status !== 'completed'
         || !message
@@ -6689,7 +7491,9 @@ export class CodexBindingRepository {
       }
       return
     }
-    if (!projection || !['failed', 'killed'].includes(projection.status) || message) {
+    if (!projection
+      || !['failed', 'killed'].includes(projection.status)
+      || !canonicalFailureMessageMatches) {
       throw new CodexBindingRepositoryError('engine_terminal_publication_mismatch')
     }
   }

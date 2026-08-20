@@ -3,7 +3,6 @@ import type {
   BrowserWorkflowCloseoutSeal,
   BrowserWorkflowCompletionVerifierReceipt,
   DurableRequestAnchor,
-  ParentSteeringReceipt,
   SteeringMessageContentInput,
 } from '../../../shared/browser-workflow-control'
 import type { TaskExecutionBinding } from '../../../shared/agent-execution-profile'
@@ -136,6 +135,13 @@ export interface CanonicalCoreCloseoutInput {
 export interface CanonicalCoreCloseoutResult extends CanonicalAssistantMessageReceipt {
   parent: BrowserWorkflowParentRecord
   browserTaskId: string | null
+}
+
+export type CodexProductTurnCloseoutInput = CanonicalCoreCloseoutInput
+
+export interface CodexProductTurnCloseoutResult extends CanonicalAssistantMessageReceipt {
+  productTerminalDigest: string
+  closeoutAt: string
 }
 
 export interface BrowserWorkflowVerifierBundle {

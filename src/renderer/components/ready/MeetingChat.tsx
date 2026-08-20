@@ -6,7 +6,7 @@ interface MeetingChatProps {
 }
 
 /**
- * MeetingChat (420px) — Multi-agent group chat panel.
+ * MeetingChat (420px) — Ready conversation panel.
  * - User messages: right-aligned, blue background
  * - Agent replies: left-aligned, white background with avatar
  * - System notifications: centered, gray
@@ -16,7 +16,7 @@ interface MeetingChatProps {
  * - Detects file paths in agent messages and highlights them
  */
 export default function MeetingChat({ onFileDrop }: MeetingChatProps) {
-  const { agents, messages, isStreaming, addMessage } = useAgent()
+  const { messages, isStreaming, addMessage } = useAgent()
   const scrollRef = useRef<HTMLDivElement>(null)
   const [isDragOver, setIsDragOver] = useState(false)
 
@@ -56,8 +56,6 @@ export default function MeetingChat({ onFileDrop }: MeetingChatProps) {
       )
     }
   }, [messages])
-
-  const getAgent = (name: string) => agents.find(a => a.name === name)
 
   // File drop handlers
   const handleDragOver = useCallback((e: React.DragEvent) => {
@@ -136,10 +134,7 @@ export default function MeetingChat({ onFileDrop }: MeetingChatProps) {
         }}
       >
         <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-title)' }}>
-          会议聊天
-        </span>
-        <span style={{ fontSize: 11, color: 'var(--text-light)' }}>
-          {agents.filter(a => a.selected).length} 位 Agent 参与
+          Ready 对话
         </span>
       </div>
 
@@ -152,12 +147,12 @@ export default function MeetingChat({ onFileDrop }: MeetingChatProps) {
         {/* Welcome */}
         <div className="text-center" style={{ padding: '32px 16px' }}>
           <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-title)', marginBottom: 8 }}>
-            FlowAI — Agent 正在互动
+            Ready 已准备就绪
           </div>
           <div style={{ fontSize: 12, color: '#8A8A8A', lineHeight: '1.6' }}>
-            你的多位 Agent 正在准备各自的运营方案。
+            任务进展与产物会显示在这里。
             <br />
-            你可以在此查看他们的实时讨论进度。
+            你也可以拖入文件作为当前任务的附件。
           </div>
         </div>
 
@@ -214,7 +209,6 @@ export default function MeetingChat({ onFileDrop }: MeetingChatProps) {
           }
 
           // Agent replies — left-aligned, white with avatar
-          const agent = getAgent(msg.agent)
           return (
             <div key={msg.id} className="flex" style={{ gap: 8 }}>
               <div
@@ -227,13 +221,13 @@ export default function MeetingChat({ onFileDrop }: MeetingChatProps) {
                 }}
               >
                 <span style={{ fontSize: 12 }}>
-                  {agent?.avatar || '\u{1F916}'}
+                  {'\u{1F916}'}
                 </span>
               </div>
               <div className="flex-1 min-w-0" style={{ maxWidth: '75%' }}>
                 <div className="flex items-center" style={{ gap: 8, marginBottom: 4 }}>
                   <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-title)' }}>
-                    {agent?.displayName || msg.agent}
+                    Ready
                   </span>
                   <span style={{ fontSize: 10, color: '#999999' }}>
                     {msg.timestamp.toLocaleTimeString()}

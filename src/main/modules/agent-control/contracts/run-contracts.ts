@@ -36,7 +36,6 @@
 import type {
   ConversationScope,
   ScopeRunEventPayload,
-  ScopeRunMemoryCapture,
   ScopeRunResumableAction,
   ScopeRunSkillProgress,
   ScopeRunTaskContinuation,
@@ -44,7 +43,6 @@ import type {
   ScopeRunWaitingFor,
 } from './types'
 import type { IntentClassification } from '../intent-classifier'
-import type { PromptAssemblyResult } from '../prompt-assembly'
 import type { RecentSkillRunForResume } from '../skills/skill-turn-identity-snapshot'
 import type { RequestEnvelope, TrustedFolderReference, TrustedRequestEnvironment } from './request-envelope'
 import type { ContinuationIntent, ContinuationState } from './continuation-state'
@@ -57,6 +55,7 @@ import type { TurnTerminalReason } from '../runtime-core/turn-frame'
 import type { CapabilityGroupId } from '../../../../shared/ai-capability-groups'
 import type { SkillChildRunStatus as SharedSkillChildRunStatus } from '../../../../shared/skill-child-run-status'
 import type { ContextUsageSnapshot } from '../../../../shared/context-usage-types'
+import type { ProductTurnReceipt } from '../../../../shared/ipc-contracts/agent-runtime'
 import type { TaskCreationOrigin, TaskExecutionBinding } from '../../../../shared/agent-execution-profile'
 import type { CanonicalAssistantMessage } from '../../../../shared/ipc-contracts/canonical-message'
 import type {
@@ -637,6 +636,7 @@ export interface ExecutionHostResult {
   executionAgentDisplayName?: string | null
   canonicalMessage?: CanonicalAssistantMessage
   canonicalMessageDigest?: string
+  productTurnReceipt?: ProductTurnReceipt
 }
 
 export interface ExecutionTurnResult {
@@ -994,15 +994,9 @@ export interface RunProjectionPatch {
   recentArtifacts?: ScopeRunEventPayload['artifactRefs']
 }
 
-export type PreparedRunPayload = PromptAssemblyResult
-
 export interface RunCompletionHooks {
   onSuccess?: (result: ExecutionHostResult) => Promise<void> | void
   onFailure?: (error: string, result: ExecutionHostResult) => Promise<void> | void
-}
-
-export interface ReflectionResultHook {
-  onMemoryCapture?: (memoryCapture: ScopeRunMemoryCapture) => Promise<void> | void
 }
 
 export type { LoadSkillRunContractParams } from './skill-run-contract-loader'

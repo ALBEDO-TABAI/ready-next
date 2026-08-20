@@ -6,6 +6,7 @@
   "version": "0.1.0",
   "runtime": "reference",
   "execution": { "mode": "advisory" },
+  "allowed_tools": ["skill_compact_context"],
   "actions": {
     "read_skill": {
       "runtime": "reference",

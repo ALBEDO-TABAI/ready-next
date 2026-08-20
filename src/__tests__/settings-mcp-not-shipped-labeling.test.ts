@@ -26,9 +26,9 @@ test('settings mcp section is a live management panel (not-shipped placeholder r
   assert.match(settingsPage, /接入外部 MCP server（stdio）/)
 
   // McpSettingsPanel exists and stays wired into the render switch
-  assert.match(settingsPage, /function McpSettingsPanel\(\)/)
+  assert.match(settingsPage, /export function McpSettingsPanel\(\)/)
   assert.match(settingsPage, /currentSection\.id === 'mcp' && <McpSettingsPanel \/>/)
-  assert.match(settingsPage, /\['ai', 'remote-im', 'external-services', 'mcp',/)
+  assert.match(settingsPage, /\['ai', 'memory', 'remote-im', 'external-services', 'mcp',/)
 
   // The not-shipped framing is fully gone (both CN and EN variants)
   assert.doesNotMatch(settingsPage, /MCP 暂未发布/)

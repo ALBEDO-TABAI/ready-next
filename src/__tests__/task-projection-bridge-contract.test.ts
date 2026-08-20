@@ -18,8 +18,8 @@ test('agent task projections are exposed through main IPC, preload, and renderer
   assert.match(ipcHandler, /deps\.listTaskProjections\(scopeId\)/)
   assert.match(ipcHandler, /deps\.getTaskProjection\(taskId\)/)
 
-  assert.match(preload, /listTaskProjections:\s*\(scopeId: string\)\s*=>\s*ipcRenderer\.invoke\('agent:listTaskProjections', \{ scopeId \}\)/)
-  assert.match(preload, /getTaskProjection:\s*\(taskId: string\)\s*=>\s*ipcRenderer\.invoke\('agent:getTaskProjection', \{ taskId \}\)/)
+  assert.match(preload, /listTaskProjections:\s*\(scopeId: string\)\s*=>\s*invokeAgentRuntime\('agent:listTaskProjections', \{ scopeId \}\)/)
+  assert.match(preload, /getTaskProjection:\s*\(taskId: string\)\s*=>\s*invokeAgentRuntime\('agent:getTaskProjection', \{ taskId \}\)/)
 
   assert.match(rendererTypes, /type TaskProjectionRecordData\s*=/)
   assert.match(rendererTypes, /interface ScopeRunSummaryData \{[\s\S]*taskId\?: string \| null/)

@@ -28,8 +28,6 @@ import {
   scopeRowMatchesReadAuthority,
 } from '../../modules/agent/scope-read-authority'
 import { useNavigate } from 'react-router-dom'
-import AgentSelector from './AgentSelector'
-import AgentTagRow from './AgentTagRow'
 import { EmergenceFeedSection } from './EmergenceFeedSection'
 import {
   buildBrowserConfirmationCard,
@@ -133,31 +131,6 @@ function moduleLabel(module: ScopeRunState['module'] | string | undefined): stri
       return '系统'
     default:
       return '通用'
-  }
-}
-
-function memorySourceLabel(
-  sourceType:
-    | 'resident_agent'
-    | 'resident_user'
-    | 'scope_memory'
-    | 'trigger_rule'
-    | 'session_recall'
-    | undefined
-): string {
-  switch (sourceType) {
-    case 'resident_agent':
-      return '常驻记忆'
-    case 'resident_user':
-      return '用户偏好'
-    case 'scope_memory':
-      return '当前任务'
-    case 'trigger_rule':
-      return '触发规则'
-    case 'session_recall':
-      return '旧会话引用'
-    default:
-      return '上下文'
   }
 }
 
@@ -333,8 +306,6 @@ export default function TaskPanel() {
     }
     return activeRun?.artifactRefs?.slice(-6) || []
   }, [activeProjection, activeRun])
-  const memoryRefs = useMemo(() => activeRun?.memoryRefs?.slice(-6) || [], [activeRun])
-  const triggerHits = useMemo(() => activeRun?.triggerHits?.slice(-4) || [], [activeRun])
   const documentPipelineDiagnostics = activeRun?.executionDiagnostics?.pipeline?.document || null
   const projectionSteps = useMemo(() => activeProjection?.steps || [], [activeProjection])
   const currentProjectionStep = useMemo(() => {
@@ -486,17 +457,6 @@ export default function TaskPanel() {
         borderRight: '1px solid var(--border-default)'
       }}
     >
-      <div
-        className="flex items-center justify-between"
-        style={{ padding: '12px 14px', borderBottom: '1px solid var(--border-default)' }}
-      >
-        <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-title)' }}>Agent</span>
-      </div>
-
-      <div style={{ padding: '8px 6px', borderBottom: '1px solid var(--border-default)' }}>
-        <AgentSelector />
-      </div>
-
       {/* 梯队三 — emergence feed（空 feed 自动隐藏；出口=打开 scope / 跳设置确认面）。 */}
       <EmergenceFeedSection
         onOpenScope={(scopeId) => { void setCurrentScope(scopeId) }}
@@ -731,89 +691,22 @@ export default function TaskPanel() {
                 </div>
               </div>
             )}
-            {(memoryRefs.length > 0 || triggerHits.length > 0 || activeRun?.contextBudget) && (
-              <div className="flex flex-col" style={{ gap: 6 }}>
-                {triggerHits.length > 0 && (
-                  <div className="flex flex-col" style={{ gap: 4 }}>
-                    <div
-                      className="text-[10px] font-semibold"
-                      style={{ color: 'var(--text-light)' }}
-                    >
-                      触发规则
-                    </div>
-                    {triggerHits.map((trigger) => (
-                      <div
-                        key={trigger.id}
-                        className="rounded-[8px] border px-2.5 py-2"
-                        style={{
-                          borderColor: 'var(--border-default)',
-                          background: 'var(--surface-card-bg)'
-                        }}
-                      >
-                        <div
-                          className="text-[11px] font-medium"
-                          style={{ color: 'var(--text-body)' }}
-                        >
-                          {trigger.label}
-                        </div>
-                        <div className="text-[10px]" style={{ color: 'var(--text-light)' }}>
-                          {trigger.blocking ? 'blocking' : 'advisory'} · refs {trigger.refs.length}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-                {memoryRefs.length > 0 && (
-                  <div className="flex flex-col" style={{ gap: 4 }}>
-                    <div
-                      className="text-[10px] font-semibold"
-                      style={{ color: 'var(--text-light)' }}
-                    >
-                      上下文来源
-                    </div>
-                    {memoryRefs.map((ref) => (
-                      <div
-                        key={ref.id}
-                        className="text-[10px]"
-                        style={{ color: 'var(--text-light)' }}
-                      >
-                        {memorySourceLabel(ref.sourceType)} · {ref.title}
-                      </div>
-                    ))}
-                  </div>
-                )}
-                {activeRun?.contextBudget && (
-                  <div
-                    className="text-[10px]"
-                    style={{ color: 'var(--text-light)', lineHeight: 1.5 }}
-                  >
-                    Budget：{activeRun.contextBudget.totalChars} chars
-                    {' · '}L0 {activeRun.contextBudget.l0Chars}
-                    {' · '}L1 {activeRun.contextBudget.l1Chars}
-                    {' · '}L2 {activeRun.contextBudget.l2Chars}
-                    {activeRun.contextBudget.droppedRefs.length > 0
-                      ? ` · dropped ${activeRun.contextBudget.droppedRefs.length}`
-                      : ''}
-                  </div>
-                )}
-                {documentPipelineDiagnostics && (
-                  <div
-                    className="text-[10px]"
-                    style={{ color: 'var(--text-light)', lineHeight: 1.5 }}
-                  >
-                    文档深读
-                    {documentPipelineDiagnostics.phase ? ` · ${documentPipelineDiagnostics.phase}` : ''}
-                    {typeof documentPipelineDiagnostics.chunkCount === 'number'
-                      ? ` · 共 ${documentPipelineDiagnostics.chunkCount} 段`
-                      : ''}
-                    {typeof documentPipelineDiagnostics.selectedChunkCount === 'number'
-                      ? ` · 用 ${documentPipelineDiagnostics.selectedChunkCount} 段`
-                      : ''}
-                    {documentPipelineDiagnostics.cacheHit ? ' · 缓存命中' : ''}
-                    {documentPipelineDiagnostics.usedSectionAnchors === true ? ' · 章节切分' : ''}
-                    {documentPipelineDiagnostics.usedSectionAnchors === false ? ' · 段落切分' : ''}
-                  </div>
-                )}
+            {documentPipelineDiagnostics && (
+              <div
+                className="text-[10px]"
+                style={{ color: 'var(--text-light)', lineHeight: 1.5 }}
+              >
+                文档深读
+                {documentPipelineDiagnostics.phase ? ` · ${documentPipelineDiagnostics.phase}` : ''}
+                {typeof documentPipelineDiagnostics.chunkCount === 'number'
+                  ? ` · 共 ${documentPipelineDiagnostics.chunkCount} 段`
+                  : ''}
+                {typeof documentPipelineDiagnostics.selectedChunkCount === 'number'
+                  ? ` · 用 ${documentPipelineDiagnostics.selectedChunkCount} 段`
+                  : ''}
+                {documentPipelineDiagnostics.cacheHit ? ' · 缓存命中' : ''}
+                {documentPipelineDiagnostics.usedSectionAnchors === true ? ' · 章节切分' : ''}
+                {documentPipelineDiagnostics.usedSectionAnchors === false ? ' · 段落切分' : ''}
               </div>
             )}
             {activeRun?.latestText && !activeRun?.blockedReason && (
@@ -987,8 +880,6 @@ export default function TaskPanel() {
           gap: 6
         }}
       >
-        <AgentTagRow />
-
         <div className="flex items-center" style={{ gap: 6 }}>
           <div
             className="ready-input-shell flex-1 flex items-center"

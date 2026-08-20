@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
-import { resolve } from 'node:path'
 import test from 'node:test'
+import { disabledReadyMemorySnapshot } from './utils/ready-memory-fixture'
 
 import type { AgentInputItem } from '@openai/agents'
 
@@ -28,6 +27,7 @@ import type { PreparedCodexProductRun } from '../main/modules/agent-control/code
 import type { StartIdentityReservationSet } from '../main/modules/agent-control/send-scoped-confirmation'
 import { RunMetaRepository } from '../main/modules/agent-control/task-projection/run-meta-repository'
 import { AgentSessionCheckpointRepository } from '../main/modules/repositories/agent-session-checkpoint-repository'
+import { commitCanonicalCodexFailure } from './helpers/codex-product-closeout'
 import { workflowDigest } from '../main/modules/repositories/browser-workflow-codec'
 import { TaskProjectionRepository } from '../main/modules/repositories/task-projection-repository'
 import {
@@ -49,18 +49,6 @@ import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
 const admittedAt = '2026-08-11T02:00:00.000Z'
 const restartAt = '2026-08-11T02:05:00.000Z'
 
-test('sidecar restart closeout publishes the recovered terminal to Renderer', () => {
-  const source = readFileSync(
-    resolve(process.cwd(), 'src/main/modules/agent-control/codex-runtime/codex-runtime-production-composition.ts'),
-    'utf8',
-  )
-  assert.match(
-    source,
-    /const recovered = await closeRunLocalRecoveryFailure\(\s*plan\.readyRunId,\s*'codex_pending_interaction_cancelled_app_restart',\s*plan,\s*\)\s*collector\.deliverRecoveredCandidate\(\s*buildCodexPendingInteractionRestartCandidate\(plan\),\s*\)\s*deliverRecoveredCloseout\(plan\.readyRunId, recovered\)/s,
-  )
-  assert.match(source, /const alreadyCommitted = readAlreadyCommittedCloseout\(product, candidate\)/)
-})
-
 type SeededRun = {
   scopeId: string
   runId: string
@@ -79,6 +67,7 @@ function prepared(input: {
 }): PreparedCodexProductRun {
   return {
     preparationContract: 'codex_product_run_e1',
+    readyMemorySnapshot: disabledReadyMemorySnapshot(),
     taskId: input.taskId,
     runId: input.runId,
     conversationAlias: { aliasId: input.scopeId, aliasGeneration: 1 },
@@ -110,7 +99,14 @@ function prepared(input: {
       authorizationOwnerId: `authorization-${input.runId}`,
       resourceOwnerId: `resource-${input.runId}`,
     },
-    productBudgetSeed: { maxIterations: 9, maxToolCalls: 8, maxParallelToolGroups: 1 },
+    productBudgetSeed: {
+      maxIterations: 9, maxToolCalls: 8, maxParallelToolGroups: 1,
+      lanes: {
+        ordinary: { maxIterations: 8, maxToolCalls: 8, maxParallelToolGroups: 1 },
+        delivery: { maxIterations: 0, maxToolCalls: 0, maxParallelToolGroups: 0 },
+        final: { maxIterations: 1 },
+      },
+    },
     neutralProjectionSeed: {
       phase: 'planning',
       taskTitle: '正在理解需求',
@@ -520,7 +516,7 @@ test('cold restart atomically cancels action/ask-user cards and only their exact
       })
       const product = bindings.readProductTurnRuntime(plan.readyRunId)
       try {
-        await checkpoints.commitCodexFailureCoreCloseout({
+        await commitCanonicalCodexFailure(checkpoints, {
           parentTaskId: product.readyTaskId,
           ownerRunId: product.readyRunId,
           conversationId: product.readyScopeId,
@@ -574,6 +570,11 @@ test('cold restart atomically cancels action/ask-user cards and only their exact
       assert.equal(codex?.recovery_failure_code, 'codex_pending_interaction_cancelled_app_restart')
       assert.ok(codex?.product_terminal_digest)
       assert.equal(codex?.fence_release_revision, 2)
+      const presentation = bindings.readProductTurnPresentation(run.runId)
+      assert.equal(presentation.terminal, 'interrupted')
+      assert.equal(presentation.canonicalMessage.role, 'assistant')
+      assert.ok(presentation.canonicalMessage.content.length > 0)
+      assert.match(presentation.presentationDigest, /^[a-f0-9]{64}$/)
     }
     assert.equal(
       db.prepare(`SELECT COUNT(*) AS count FROM codex_thread_dispatch_fences
@@ -725,7 +726,7 @@ test('restart closeout rollback leaves no half state before card-only fail-close
     })
     try {
       await assert.rejects(
-        checkpoints.commitCodexFailureCoreCloseout({
+        commitCanonicalCodexFailure(checkpoints, {
           parentTaskId: run.taskId,
           ownerRunId: run.runId,
           conversationId: run.scopeId,

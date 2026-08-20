@@ -9,7 +9,7 @@ import { createTaskProofSink } from '../quality/proof-collector'
 import { resolveSkillSurfaceComposition } from '../skills/skill-surface-composition'
 import { buildPreparedSkillTurnTruth } from '../skills/prepared-skill-turn'
 import { prependSystemReminderInput } from '../system-reminders/system-reminder-input'
-import { resolveAgentSdkTaskBudgetRuntime, resolveSourceMessageProvenance } from './agent-sdk-foundation-utils'
+import { resolveAgentSdkTaskBudgetRuntime } from './agent-sdk-foundation-utils'
 import { messageToText, parseEnvelopeResourceReferences } from './agent-sdk-input-context-utils'
 import {
   skillContextMessagesToInstruction
@@ -63,7 +63,6 @@ export async function executeAgentSdkPreparedTurn(
     session,
     isCurrentRun,
     isCurrentVisibilityContext,
-    toolArgsByName,
     transcriptEvents,
     usedTools,
     projectionPatches,
@@ -255,10 +254,9 @@ export async function executeAgentSdkPreparedTurn(
     }
     const turnTaskType = liveTaskBudgetRuntime?.taskType ?? explicitSkillTaskType ?? 'short_task'
     runMetaBudgetRuntime = liveTaskBudgetRuntime
-    const sourceMessageProvenance = resolveSourceMessageProvenance({
-      sourceMessageId: effectiveExecutionOptions?.sourceMessageId,
-      requestEnvelope: effectiveExecutionOptions?.requestEnvelope
-    })
+    const sourceMessageId = typeof effectiveExecutionOptions?.sourceMessageId === 'string'
+      ? effectiveExecutionOptions.sourceMessageId.trim() || null
+      : null
     const browserTurnState = await prepareBrowserWorkflowTurnState({
       runtime: host.runtime,
       capturedSession: runHandle.capturedSession,
@@ -315,8 +313,7 @@ export async function executeAgentSdkPreparedTurn(
       executionBinding: effectiveExecutionOptions?.executionBinding ?? null,
       executionProfile: effectiveExecutionOptions?.executionProfile ?? null,
       currentUserText: pureUserTurnText,
-      sourceMessageId: sourceMessageProvenance.sourceMessageId,
-      sourceMessageUnavailableReason: sourceMessageProvenance.sourceMessageUnavailableReason,
+      sourceMessageId,
       requestEnvelope: effectiveExecutionOptions?.requestEnvelope,
       signal: abortController.signal,
       canPublishScopeRunEvent: () => isCurrentRun() && isCurrentVisibilityContext(),
@@ -334,9 +331,6 @@ export async function executeAgentSdkPreparedTurn(
       emitOutput,
       emitToolAction: (toolName, args) => {
         if (!isCurrentRun()) return
-        const queue = toolArgsByName.get(toolName) ?? []
-        queue.push(args)
-        toolArgsByName.set(toolName, queue)
         transcriptEvents.push({ kind: 'tool_action', tool: toolName, args })
         host.emit('toolAction', { agent: name, sessionId, runId, tool: toolName, args })
       },
@@ -348,7 +342,6 @@ export async function executeAgentSdkPreparedTurn(
         setLiveTaskBudgetRuntime: (runtime) => { liveTaskBudgetRuntime = runtime },
         usedTools,
         projectionPatches,
-        toolArgsByName,
         taskProofSink,
         host,
         runId,

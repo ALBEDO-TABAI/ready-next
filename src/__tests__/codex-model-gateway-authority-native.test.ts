@@ -52,7 +52,35 @@ function requestEvidence(seed: string, toolSurface: unknown[] = tools) {
     toolsDigest: digestCanonicalJson(toolSurface),
     toolCount: toolSurface.length,
     bodyBytes: 100,
+    memoryHistoryRedactionDigest: digestCanonicalJson({ seed, redactedItems: [] }),
+    memoryHistoryRedactedItemCount: 0,
   }
+}
+
+function preparedRequestReceipt(
+  requestDigest: string,
+  evidence: ReturnType<typeof requestEvidence>,
+) {
+  return { prepareRequestReceipt: () => ({ requestDigest, requestEvidence: evidence }) }
+}
+
+function disabledReadyMemorySnapshot() {
+  const core = {
+    contract: 'ready-memory:v1' as const,
+    enabled: false,
+    stateRevision: 1,
+    revocationRevision: 0,
+    lastRevocationReason: null,
+    frozenAt: at,
+    summaryBudgetChars: 2_000 as const,
+    summaryChars: 0,
+    summary: '',
+    summaryEntryIds: [],
+    entries: [],
+    sourceRefs: [],
+    truncated: false,
+  }
+  return { ...core, snapshotDigest: digestCanonicalJson(core) }
 }
 
 function prepared(toolSurfaceDigest: string, maxIterations = 8, maxToolCalls = 4): PreparedCodexProductRun {
@@ -81,6 +109,7 @@ function prepared(toolSurfaceDigest: string, maxIterations = 8, maxToolCalls = 4
     },
     resourceAnchorDigest: digestCanonicalJson([]),
     recoveredContextDigest: null,
+    readyMemorySnapshot: disabledReadyMemorySnapshot(),
     ...toolFixture,
     readyToolHostIdentity: {
       scopeId: 'scope-1',
@@ -88,7 +117,14 @@ function prepared(toolSurfaceDigest: string, maxIterations = 8, maxToolCalls = 4
       authorizationOwnerId: 'owner-1',
       resourceOwnerId: 'resource-owner-1',
     },
-    productBudgetSeed: { maxIterations, maxToolCalls, maxParallelToolGroups: 1 },
+    productBudgetSeed: {
+      maxIterations, maxToolCalls, maxParallelToolGroups: 1,
+      lanes: {
+        ordinary: { maxIterations: maxIterations - 1, maxToolCalls, maxParallelToolGroups: 1 },
+        delivery: { maxIterations: 0, maxToolCalls: 0, maxParallelToolGroups: 0 },
+        final: { maxIterations: 1 },
+      },
+    },
     neutralProjectionSeed: {
       phase: 'planning', taskTitle: '正在理解需求', taskSummary: '正在整理任务边界',
     },
@@ -169,6 +205,7 @@ async function withDatabase(
     __runMigrationForTests('098_codex_manual_compaction_recovery_evidence', db as unknown as MigrationDatabase)
     __runMigrationForTests('101_codex_manual_compaction_item_identity', db as unknown as MigrationDatabase)
     __runMigrationForTests('108_codex_thread_retirement_cleanup', db as unknown as MigrationDatabase)
+    __runMigrationForTests('111_codex_gateway_budget_lanes', db as unknown as MigrationDatabase)
     await work(db)
     assert.equal(db.pragma('quick_check', { simple: true }), 'ok')
   } finally {
@@ -298,8 +335,8 @@ test('durable gateway authority resolves only the active product binding before 
     const authority = new CodexDatabaseModelGatewayAuthority(gatewayRepository)
     await assert.rejects(
       authority.resolve({
-        metadata, requestDigest: 'request-digest-invalid',
-        requestEvidence: requestEvidence('invalid'), receivedAt: at,
+        metadata, receivedAt: at,
+        ...preparedRequestReceipt('request-digest-invalid', requestEvidence('invalid')),
         validate: () => { throw new Error('gateway_request_contract_invalid') },
       }),
       /gateway_request_contract_invalid/,
@@ -308,15 +345,47 @@ test('durable gateway authority resolves only the active product binding before 
       db.prepare(`SELECT COUNT(*) AS count FROM ready_model_gateway_request_receipts`).get<{ count: number }>()?.count,
       0,
     )
+    let originalAdmissionValidated = false
     const resolved = await authority.resolve({
-      metadata, requestDigest: 'request-digest-1',
-      requestEvidence: requestEvidence('request-1'), receivedAt: at,
-      validate: () => new Set(['ready_read_probe']),
+      metadata, receivedAt: at,
+      validate: () => {
+        originalAdmissionValidated = true
+        return new Set(['ready_read_probe'])
+      },
+      prepareRequestReceipt: () => {
+        assert.equal(originalAdmissionValidated, true)
+        return {
+          requestDigest: 'request-digest-1',
+          requestEvidence: requestEvidence('request-1'),
+        }
+      },
     })
     assert.equal(resolved.kind, 'product')
     assert.equal(resolved.snapshot.model, 'upstream-model')
     assert.deepEqual(resolved.allowedToolNames, ['ready_read_probe'])
     assert.equal(JSON.stringify(resolved.snapshot).includes('never-persist-this'), false)
+    const persistedRequest = db.prepare(`
+      SELECT receipt.request_digest AS requestDigest,
+             event.input_digest AS inputDigest,
+             event.memory_history_redaction_digest AS redactionDigest,
+             event.memory_history_redacted_item_count AS redactedItemCount
+        FROM ready_model_gateway_request_receipts receipt
+        JOIN ready_model_gateway_exchange_events event
+          ON event.gateway_request_receipt_id = receipt.receipt_id
+         AND event.event_kind = 'request_admitted'
+       WHERE receipt.codex_turn_id = 'turn-native-early'
+    `).get<{
+      requestDigest: string
+      inputDigest: string
+      redactionDigest: string
+      redactedItemCount: number
+    }>()
+    assert.deepEqual(persistedRequest, {
+      requestDigest: 'request-digest-1',
+      inputDigest: requestEvidence('request-1').inputDigest,
+      redactionDigest: requestEvidence('request-1').memoryHistoryRedactionDigest,
+      redactedItemCount: 0,
+    })
     const responseEvidence = {
       responseId: 'response-request-1',
       terminalDigest: digestCanonicalJson({ terminal: 'request-1' }),
@@ -385,16 +454,16 @@ test('durable gateway authority resolves only the active product binding before 
     }
     const automatic = await authority.resolve({
       metadata: automaticMetadata,
-      requestDigest: 'automatic-request-digest', receivedAt: at,
-      requestEvidence: requestEvidence('automatic-1', []),
+      receivedAt: at,
+      ...preparedRequestReceipt('automatic-request-digest', requestEvidence('automatic-1', [])),
       validate: () => new Set<string>(),
     })
     assert.equal(automatic.kind, 'automatic_compaction')
     assert.equal(automatic.allowedToolNames, null)
     await assert.rejects(authority.resolve({
       metadata: { ...automaticMetadata, turnId: 'automatic-turn-forged' },
-      requestDigest: 'automatic-request-forged', receivedAt: at,
-      requestEvidence: requestEvidence('automatic-forged', []),
+      receivedAt: at,
+      ...preparedRequestReceipt('automatic-request-forged', requestEvidence('automatic-forged', [])),
       validate: () => new Set<string>(),
     }), /gateway_product_binding_mismatch/)
 
@@ -402,14 +471,14 @@ test('durable gateway authority resolves only the active product binding before 
       new CodexModelGatewayRepository(db as unknown as DatabaseConnection, bindingRepository),
     )
     await assert.rejects(restarted.resolve({
-      metadata, requestDigest: 'request-digest-1',
-      requestEvidence: requestEvidence('request-1'), receivedAt: '2026-08-07T04:00:01.000Z',
+      metadata, receivedAt: '2026-08-07T04:00:01.000Z',
+      ...preparedRequestReceipt('request-digest-1', requestEvidence('request-1')),
       validate: () => new Set(['ready_read_probe']),
     }), /gateway_request_replayed/)
     assert.equal(db.prepare(`SELECT COUNT(*) AS count FROM ready_model_gateway_request_receipts`).get<{ count: number }>()?.count, 2)
     await restarted.resolve({
-      metadata, requestDigest: 'request-digest-2',
-      requestEvidence: requestEvidence('request-2'), receivedAt: '2026-08-07T04:00:02.000Z',
+      metadata, receivedAt: '2026-08-07T04:00:02.000Z',
+      ...preparedRequestReceipt('request-digest-2', requestEvidence('request-2')),
       validate: () => new Set(['ready_read_probe']),
     })
     await assert.rejects(restarted.admitToolResponse({
@@ -443,7 +512,8 @@ test('durable gateway authority resolves only the active product binding before 
     await assert.rejects(
       restarted.resolve({
         metadata: { ...metadata, turnId: 'turn-native-forged' },
-        requestDigest: 'request-digest-forged-turn', receivedAt: at,
+        receivedAt: at,
+        ...preparedRequestReceipt('request-digest-forged-turn', requestEvidence('forged-turn')),
         validate: () => new Set(['ready_read_probe']),
       }),
       /gateway_product_binding_mismatch/,
@@ -463,7 +533,8 @@ test('durable gateway authority resolves only the active product binding before 
     await assert.rejects(
       restarted.resolve({
         metadata: { ...metadata, turnContractDigest: 'forged-turn-contract' },
-        requestDigest: 'request-digest-forged', receivedAt: at,
+        receivedAt: at,
+        ...preparedRequestReceipt('request-digest-forged', requestEvidence('forged-contract')),
         validate: () => new Set(['ready_read_probe']),
       }),
       /gateway_product_binding_mismatch/,
@@ -494,7 +565,8 @@ test('product iteration budget is durable while automatic compaction is not char
       snapshotDigest: created.snapshotDigest,
       toolSurfaceDigest: digestCanonicalJson(tools),
       instructionDigest: digestText('fixed instructions'),
-      maxIterations: 1,
+      maxIterations: 2,
+      maxToolCalls: 0,
     })
     const gatewayRepository = new CodexModelGatewayRepository(
       db as unknown as DatabaseConnection,
@@ -514,8 +586,8 @@ test('product iteration budget is durable while automatic compaction is not char
       raw: { request_kind: 'turn' },
     }
     const finalOnly = await authority.resolve({
-      metadata, requestDigest: 'budget-product-1',
-      requestEvidence: requestEvidence('budget-product-1'), receivedAt: at,
+      metadata, receivedAt: at,
+      ...preparedRequestReceipt('budget-product-1', requestEvidence('budget-product-1')),
       validate: () => new Set(['ready_read_probe']),
     })
     assert.equal(finalOnly.forceToolFreeFinalization, true)
@@ -531,14 +603,14 @@ test('product iteration budget is durable while automatic compaction is not char
           },
         },
       },
-      requestDigest: 'budget-auto-1', receivedAt: at,
-      requestEvidence: requestEvidence('budget-auto-1', []),
+      receivedAt: at,
+      ...preparedRequestReceipt('budget-auto-1', requestEvidence('budget-auto-1', [])),
       validate: () => new Set<string>(),
     })
     assert.equal(automaticCompaction.forceToolFreeFinalization, false)
     await assert.rejects(authority.resolve({
-      metadata, requestDigest: 'budget-product-2',
-      requestEvidence: requestEvidence('budget-product-2'), receivedAt: at,
+      metadata, receivedAt: at,
+      ...preparedRequestReceipt('budget-product-2', requestEvidence('budget-product-2')),
       validate: () => new Set(['ready_read_probe']),
     }), /gateway_iteration_budget_exhausted/)
     assert.deepEqual(db.prepare(`
@@ -588,8 +660,8 @@ test('product budget keeps one final model request after the last admitted tool 
       raw: { request_kind: 'turn' },
     }
     const toolBinding = await authority.resolve({
-      metadata, requestDigest: 'tool-request',
-      requestEvidence: requestEvidence('tool-request'), receivedAt: at,
+      metadata, receivedAt: at,
+      ...preparedRequestReceipt('tool-request', requestEvidence('tool-request')),
       validate: () => new Set(['ready_read_probe']),
     })
     assert.equal(toolBinding.forceToolFreeFinalization, false)
@@ -607,8 +679,8 @@ test('product budget keeps one final model request after the last admitted tool 
       new CodexModelGatewayRepository(db as unknown as DatabaseConnection, bindingRepository),
     )
     const finalBinding = await restartedAuthority.resolve({
-      metadata, requestDigest: 'final-response-request',
-      requestEvidence: requestEvidence('final-response-request'),
+      metadata,
+      ...preparedRequestReceipt('final-response-request', requestEvidence('final-response-request')),
       receivedAt: '2026-08-07T04:00:01.000Z',
       validate: () => new Set(['ready_read_probe']),
     })
@@ -624,8 +696,8 @@ test('product budget keeps one final model request after the last admitted tool 
       admittedAt: '2026-08-07T04:00:01.000Z',
     }), /tool_call_budget_exhausted/)
     await assert.rejects(authority.resolve({
-      metadata, requestDigest: 'over-budget-request',
-      requestEvidence: requestEvidence('over-budget-request'),
+      metadata,
+      ...preparedRequestReceipt('over-budget-request', requestEvidence('over-budget-request')),
       receivedAt: '2026-08-07T04:00:02.000Z',
       validate: () => new Set(['ready_read_probe']),
     }), /gateway_iteration_budget_exhausted/)
@@ -761,8 +833,8 @@ test('manual compaction resolves only the reserved thread and empty tool surface
           },
         },
       },
-      requestDigest: 'manual-request-digest', receivedAt: at,
-      requestEvidence: requestEvidence('manual-request', []),
+      receivedAt: at,
+      ...preparedRequestReceipt('manual-request-digest', requestEvidence('manual-request', [])),
       validate: () => new Set<string>(),
     })
     assert.equal(resolved.kind, 'manual_compaction')
@@ -788,8 +860,8 @@ test('manual compaction resolves only the reserved thread and empty tool surface
           },
         },
       },
-      requestDigest: 'manual-request-forged', receivedAt: at,
-      requestEvidence: requestEvidence('manual-forged', []),
+      receivedAt: at,
+      ...preparedRequestReceipt('manual-request-forged', requestEvidence('manual-forged', [])),
       validate: () => new Set<string>(),
     }), /gateway_manual_binding_mismatch/)
     assert.throws(() => repository.consumeManualCompaction({
