@@ -75,15 +75,15 @@ import type {
 } from '../shared/fastcard'
 import { createAgentRuntimeInvokeGate } from './agent-runtime-invoke-gate'
 import {
-  readyMemoryAddRequestSchema,
-  readyMemoryConversationPolicyRequestSchema,
-  readyMemoryDeleteRequestSchema,
-  readyMemoryGlobalPolicyRequestSchema,
-  readyMemoryPinRequestSchema,
-  readyMemoryReadRequestSchema,
-  readyMemoryResetRequestSchema,
-  readyMemoryUpdateRequestSchema,
-  readyMemoryViewSchema,
+  parseReadyMemoryAddRequest,
+  parseReadyMemoryConversationPolicyRequest,
+  parseReadyMemoryDeleteRequest,
+  parseReadyMemoryGlobalPolicyRequest,
+  parseReadyMemoryPinRequest,
+  parseReadyMemoryReadRequest,
+  parseReadyMemoryResetRequest,
+  parseReadyMemoryUpdateRequest,
+  parseReadyMemoryView,
   type ReadyMemoryAddRequest,
   type ReadyMemoryConversationPolicyRequest,
   type ReadyMemoryDeleteRequest,
@@ -124,7 +124,7 @@ const invokeReadyMemory = async (channel: string, payload: unknown) => {
     error?: string
   }>(channel, payload)
   return result.success && result.data
-    ? { ...result, data: readyMemoryViewSchema.parse(result.data) }
+    ? { ...result, data: parseReadyMemoryView(result.data) }
     : result
 }
 
@@ -171,28 +171,28 @@ const agentAPI = {
       : result
   },
   readReadyMemory: (request: ReadyMemoryReadRequest) => invokeReadyMemory(
-    'agent:readReadyMemory', readyMemoryReadRequestSchema.parse(request),
+    'agent:readReadyMemory', parseReadyMemoryReadRequest(request),
   ),
   setReadyMemoryGlobalPolicy: (request: ReadyMemoryGlobalPolicyRequest) => invokeReadyMemory(
-    'agent:setReadyMemoryGlobalPolicy', readyMemoryGlobalPolicyRequestSchema.parse(request),
+    'agent:setReadyMemoryGlobalPolicy', parseReadyMemoryGlobalPolicyRequest(request),
   ),
   setReadyMemoryConversationPolicy: (request: ReadyMemoryConversationPolicyRequest) => invokeReadyMemory(
-    'agent:setReadyMemoryConversationPolicy', readyMemoryConversationPolicyRequestSchema.parse(request),
+    'agent:setReadyMemoryConversationPolicy', parseReadyMemoryConversationPolicyRequest(request),
   ),
   addReadyMemory: (request: ReadyMemoryAddRequest) => invokeReadyMemory(
-    'agent:addReadyMemory', readyMemoryAddRequestSchema.parse(request),
+    'agent:addReadyMemory', parseReadyMemoryAddRequest(request),
   ),
   updateReadyMemory: (request: ReadyMemoryUpdateRequest) => invokeReadyMemory(
-    'agent:updateReadyMemory', readyMemoryUpdateRequestSchema.parse(request),
+    'agent:updateReadyMemory', parseReadyMemoryUpdateRequest(request),
   ),
   pinReadyMemory: (request: ReadyMemoryPinRequest) => invokeReadyMemory(
-    'agent:pinReadyMemory', readyMemoryPinRequestSchema.parse(request),
+    'agent:pinReadyMemory', parseReadyMemoryPinRequest(request),
   ),
   deleteReadyMemory: (request: ReadyMemoryDeleteRequest) => invokeReadyMemory(
-    'agent:deleteReadyMemory', readyMemoryDeleteRequestSchema.parse(request),
+    'agent:deleteReadyMemory', parseReadyMemoryDeleteRequest(request),
   ),
   resetReadyMemory: (request: ReadyMemoryResetRequest) => invokeReadyMemory(
-    'agent:resetReadyMemory', readyMemoryResetRequestSchema.parse(request),
+    'agent:resetReadyMemory', parseReadyMemoryResetRequest(request),
   ),
   listTaskProjections: (scopeId: string) =>
     invokeAgentRuntime('agent:listTaskProjections', { scopeId }),

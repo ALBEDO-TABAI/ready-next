@@ -1,13 +1,17 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import type { IpcMain, IpcMainInvokeEvent } from 'electron'
+import { z } from 'zod'
 
 import {
   _readyMemoryGroupChannelsForTest,
   readyMemoryGroup,
   type ReadyMemoryGroupDeps,
 } from '../main/modules/claude-bridge/ipc/ready-memory-group'
-import type { ReadyMemoryView } from '../shared/ready-memory'
+import {
+  parseReadyMemoryReadRequest,
+  type ReadyMemoryView,
+} from '../shared/ready-memory'
 
 type Handler = (event: IpcMainInvokeEvent, payload: unknown) => unknown
 
@@ -49,6 +53,38 @@ test('Ready memory group owns one exact user-management IPC surface', () => {
   assert.deepEqual([...handlers.keys()].sort(), [..._readyMemoryGroupChannelsForTest].sort())
   assert.equal(handlers.has('agent:createMemory'), false)
   assert.equal(handlers.has('agent:searchMemory'), false)
+})
+
+test('Ready memory boundary parsing works when the preload context forbids generated code', () => {
+  const unsafeSchema = z.object({ value: z.string() })
+  const originalFunction = globalThis.Function
+  const originalAllowsEval = Object.getOwnPropertyDescriptor(z.core.util.allowsEval, 'value')!
+  Object.defineProperty(z.core.util.allowsEval, 'value', {
+    configurable: true,
+    writable: true,
+    value: true,
+  })
+  Object.defineProperty(globalThis, 'Function', {
+    configurable: true,
+    writable: true,
+    value: function blockedFunction(): never {
+      throw new EvalError('generated code blocked by preload context')
+    },
+  })
+  try {
+    assert.throws(
+      () => unsafeSchema.parse({ value: 'unsafe' }),
+      /generated code blocked by preload context/,
+    )
+    assert.deepEqual(parseReadyMemoryReadRequest({}), {})
+  } finally {
+    Object.defineProperty(globalThis, 'Function', {
+      configurable: true,
+      writable: true,
+      value: originalFunction,
+    })
+    Object.defineProperty(z.core.util.allowsEval, 'value', originalAllowsEval)
+  }
 })
 
 test('automatic memory generation cannot be enabled without explicit cost consent', async () => {

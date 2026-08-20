@@ -1,15 +1,15 @@
 import type { IpcMain } from 'electron'
 
 import {
-  readyMemoryAddRequestSchema,
-  readyMemoryConversationPolicyRequestSchema,
-  readyMemoryDeleteRequestSchema,
-  readyMemoryGlobalPolicyRequestSchema,
-  readyMemoryPinRequestSchema,
-  readyMemoryReadRequestSchema,
-  readyMemoryResetRequestSchema,
-  readyMemoryUpdateRequestSchema,
-  readyMemoryViewSchema,
+  parseReadyMemoryAddRequest,
+  parseReadyMemoryConversationPolicyRequest,
+  parseReadyMemoryDeleteRequest,
+  parseReadyMemoryGlobalPolicyRequest,
+  parseReadyMemoryPinRequest,
+  parseReadyMemoryReadRequest,
+  parseReadyMemoryResetRequest,
+  parseReadyMemoryUpdateRequest,
+  parseReadyMemoryView,
   type ReadyMemoryAddRequest,
   type ReadyMemoryConversationPolicyRequest,
   type ReadyMemoryDeleteRequest,
@@ -50,7 +50,7 @@ const CHANNELS = [
 
 function response(operation: () => ReadyMemoryView): ReadyMemoryResponse {
   try {
-    return { success: true, data: readyMemoryViewSchema.parse(operation()) }
+    return { success: true, data: parseReadyMemoryView(operation()) }
   } catch (error) {
     return { success: false, error: error instanceof Error ? error.message : 'ready_memory_failed' }
   }
@@ -64,28 +64,28 @@ export const readyMemoryGroup: IpcChannelGroup<ReadyMemoryGroupDeps> = {
       try { ipcMain.removeHandler(channel) } catch { /* handler may not exist */ }
     }
     ipcMain.handle('agent:readReadyMemory', (_, raw: unknown) => response(
-      () => deps.read(readyMemoryReadRequestSchema.parse(raw)),
+      () => deps.read(parseReadyMemoryReadRequest(raw)),
     ))
     ipcMain.handle('agent:setReadyMemoryGlobalPolicy', (_, raw: unknown) => response(
-      () => deps.setGlobalPolicy(readyMemoryGlobalPolicyRequestSchema.parse(raw)),
+      () => deps.setGlobalPolicy(parseReadyMemoryGlobalPolicyRequest(raw)),
     ))
     ipcMain.handle('agent:setReadyMemoryConversationPolicy', (_, raw: unknown) => response(
-      () => deps.setConversationPolicy(readyMemoryConversationPolicyRequestSchema.parse(raw)),
+      () => deps.setConversationPolicy(parseReadyMemoryConversationPolicyRequest(raw)),
     ))
     ipcMain.handle('agent:addReadyMemory', (_, raw: unknown) => response(
-      () => deps.add(readyMemoryAddRequestSchema.parse(raw)),
+      () => deps.add(parseReadyMemoryAddRequest(raw)),
     ))
     ipcMain.handle('agent:updateReadyMemory', (_, raw: unknown) => response(
-      () => deps.update(readyMemoryUpdateRequestSchema.parse(raw)),
+      () => deps.update(parseReadyMemoryUpdateRequest(raw)),
     ))
     ipcMain.handle('agent:pinReadyMemory', (_, raw: unknown) => response(
-      () => deps.pin(readyMemoryPinRequestSchema.parse(raw)),
+      () => deps.pin(parseReadyMemoryPinRequest(raw)),
     ))
     ipcMain.handle('agent:deleteReadyMemory', (_, raw: unknown) => response(
-      () => deps.delete(readyMemoryDeleteRequestSchema.parse(raw)),
+      () => deps.delete(parseReadyMemoryDeleteRequest(raw)),
     ))
     ipcMain.handle('agent:resetReadyMemory', (_, raw: unknown) => response(
-      () => deps.reset(readyMemoryResetRequestSchema.parse(raw)),
+      () => deps.reset(parseReadyMemoryResetRequest(raw)),
     ))
     return {
       dispose(): void {

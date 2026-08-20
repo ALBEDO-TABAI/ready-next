@@ -91,3 +91,41 @@ export type ReadyMemoryUpdateRequest = z.infer<typeof readyMemoryUpdateRequestSc
 export type ReadyMemoryPinRequest = z.infer<typeof readyMemoryPinRequestSchema>
 export type ReadyMemoryDeleteRequest = z.infer<typeof readyMemoryDeleteRequestSchema>
 export type ReadyMemoryResetRequest = z.infer<typeof readyMemoryResetRequestSchema>
+
+const JITLESS_PARSE = { jitless: true } as const
+
+export function parseReadyMemoryView(value: unknown): ReadyMemoryView {
+  return readyMemoryViewSchema.parse(value, JITLESS_PARSE)
+}
+
+export function parseReadyMemoryReadRequest(value: unknown): ReadyMemoryReadRequest {
+  return readyMemoryReadRequestSchema.parse(value, JITLESS_PARSE)
+}
+
+export function parseReadyMemoryGlobalPolicyRequest(value: unknown): ReadyMemoryGlobalPolicyRequest {
+  return readyMemoryGlobalPolicyRequestSchema.parse(value, JITLESS_PARSE)
+}
+
+export function parseReadyMemoryConversationPolicyRequest(value: unknown): ReadyMemoryConversationPolicyRequest {
+  return readyMemoryConversationPolicyRequestSchema.parse(value, JITLESS_PARSE)
+}
+
+export function parseReadyMemoryAddRequest(value: unknown): ReadyMemoryAddRequest {
+  return readyMemoryAddRequestSchema.parse(value, JITLESS_PARSE)
+}
+
+export function parseReadyMemoryUpdateRequest(value: unknown): ReadyMemoryUpdateRequest {
+  return readyMemoryUpdateRequestSchema.parse(value, JITLESS_PARSE)
+}
+
+export function parseReadyMemoryPinRequest(value: unknown): ReadyMemoryPinRequest {
+  return readyMemoryPinRequestSchema.parse(value, JITLESS_PARSE)
+}
+
+export function parseReadyMemoryDeleteRequest(value: unknown): ReadyMemoryDeleteRequest {
+  return readyMemoryDeleteRequestSchema.parse(value, JITLESS_PARSE)
+}
+
+export function parseReadyMemoryResetRequest(value: unknown): ReadyMemoryResetRequest {
+  return readyMemoryResetRequestSchema.parse(value, JITLESS_PARSE)
+}
