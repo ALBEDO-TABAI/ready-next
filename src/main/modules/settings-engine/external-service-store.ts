@@ -1,7 +1,12 @@
 import { AppSettingsRepository } from '../repositories/app-settings-repository'
-import { decryptSecretConfig, encryptSecretConfig } from '../agent-control/memory/secret-storage'
 import { logAgentMetric } from '../agent-control/metrics'
 import { getDatabase } from '../database'
+import {
+  createCredentialHandle,
+  getCredentialVault,
+  isCredentialHandle,
+  type CredentialVaultPort,
+} from './credential-vault'
 import type { AgentSpawnContext } from '../../../shared/skill-host-contract'
 import {
   generateImageBytes,
@@ -22,26 +27,7 @@ import {
 
 export const EXTERNAL_SERVICE_SETTINGS_KEY = 'external_service_profiles_v1'
 
-/**
- * U8.3 — legacy Tavily / Jina secret keys (written by the pre-U workspace
- * settings shape) live under these database keys. They are NEVER read by
- * runtime code paths anymore; `migrateLegacyKeysOnce()` is the only call
- * site allowed to touch them, and the CI gate
- * `scripts/check-settings-no-legacy-key-read.cjs` enforces that.
- *
- * Emergency restore: if the legacy keys have to be re-read to recover a
- * broken upgrade, set `READY_SETTINGS_RESTORE_LEGACY_KEYS=1` in the host
- * environment. This is a one-shot escape hatch and intentionally not exposed
- * through any UI — production builds must leave it unset.
- */
-const LEGACY_TAVILY_KEY_SETTING = 'web_search_tavily_key'
-const LEGACY_JINA_KEY_SETTING = 'web_fetch_jina_key'
-const LEGACY_KEY_MIGRATION_DONE_SETTING = 'external_service_legacy_key_migration_done_v1'
-const EMERGENCY_RESTORE_ENV = 'READY_SETTINGS_RESTORE_LEGACY_KEYS'
-
-function emergencyRestoreActive(): boolean {
-  return process.env[EMERGENCY_RESTORE_ENV] === '1'
-}
+const CREDENTIAL_MIGRATION_SETTING = 'external_service_credential_migration_v1'
 
 function nowIso(): string {
   return new Date().toISOString()
@@ -56,18 +42,29 @@ function safeJsonParse(value: string | undefined): unknown {
   }
 }
 
-function decryptProfile(profile: ExternalServiceProfile): ExternalServiceProfile {
-  return {
-    ...profile,
-    secrets: decryptSecretConfig(profile.secrets || {}) as Record<string, string>,
-  }
+type ExternalSecretState = PublicExternalServiceProfile['secretStatus'][string]['state']
+
+interface ResolvedExternalServiceProfile {
+  profile: ExternalServiceProfile
+  secretStates: Record<string, ExternalSecretState>
 }
 
-function encryptProfile(profile: ExternalServiceProfile): ExternalServiceProfile {
-  return {
-    ...profile,
-    secrets: encryptSecretConfig(profile.secrets || {}) as Record<string, string>,
-  }
+function externalCredentialOwner(profileId: string): string {
+  return `external-service:${profileId}`
+}
+
+function isStoredLegacySecret(value: string): boolean {
+  return value.startsWith('__enc__')
+    || value.startsWith('__plain__')
+    || value.startsWith('__ready_credential_v1__')
+}
+
+let externalServiceMutationTail: Promise<void> = Promise.resolve()
+
+function serializeExternalServiceMutation<T>(operation: () => Promise<T>): Promise<T> {
+  const result = externalServiceMutationTail.then(operation)
+  externalServiceMutationTail = result.then(() => undefined, () => undefined)
+  return result
 }
 
 function trimBaseUrl(value: string | undefined): string | undefined {
@@ -116,30 +113,122 @@ export interface AmapServiceRuntimeConfig {
   enabled: boolean
   baseUrl: string
   apiKey: string
+  secretState: ExternalSecretState
+}
+
+export function shouldReserveAmapRouteTool(config: AmapServiceRuntimeConfig | null): boolean {
+  return config?.enabled === true && config.secretState !== 'missing'
 }
 
 export class ExternalServiceStore {
-  constructor(private readonly repository = new AppSettingsRepository()) {}
+  constructor(
+    private readonly repository = new AppSettingsRepository(),
+    private readonly vault: CredentialVaultPort = getCredentialVault(),
+  ) {}
 
-  private readProfiles(): ExternalServiceProfile[] {
+  private readStoredProfiles(): ExternalServiceProfile[] {
     const raw = safeJsonParse(this.repository.getSetting(EXTERNAL_SERVICE_SETTINGS_KEY))
-    return normalizeExternalServiceProfiles(raw).map(decryptProfile)
+    return normalizeExternalServiceProfiles(raw)
   }
 
-  private writeProfiles(profiles: ExternalServiceProfile[]): void {
-    this.repository.setSetting(
-      EXTERNAL_SERVICE_SETTINGS_KEY,
-      JSON.stringify(profiles.map(encryptProfile)),
-    )
+  private resolveStoredProfile(stored: ExternalServiceProfile): ResolvedExternalServiceProfile {
+    const secrets: Record<string, string> = {}
+    const secretStates: Record<string, ExternalSecretState> = {}
+    const owner = externalCredentialOwner(stored.id)
+    for (const [key, raw] of Object.entries(stored.secrets || {})) {
+      if (!raw) {
+        secrets[key] = ''
+        secretStates[key] = 'missing'
+        continue
+      }
+      if (!isCredentialHandle(raw, owner, key)) {
+        secrets[key] = ''
+        secretStates[key] = 'recovery_required'
+        continue
+      }
+      const result = this.vault.read(raw)
+      if (result.state === 'ready') {
+        secrets[key] = result.value
+        secretStates[key] = 'ready'
+      } else {
+        secrets[key] = ''
+        secretStates[key] = result.state === 'vault_unavailable'
+          ? 'vault_unavailable'
+          : 'recovery_required'
+      }
+    }
+    return {
+      profile: { ...stored, secrets },
+      secretStates,
+    }
+  }
+
+  private readResolvedProfiles(): ResolvedExternalServiceProfile[] {
+    return this.readStoredProfiles().map((profile) => this.resolveStoredProfile(profile))
+  }
+
+  private readProfiles(): ExternalServiceProfile[] {
+    return this.readResolvedProfiles().map((item) => item.profile)
+  }
+
+  private async writeProfiles(profiles: ExternalServiceProfile[]): Promise<void> {
+    const currentProfiles = this.readStoredProfiles()
+    const changes: Record<string, string | null> = {}
+    const stagedHandles: string[] = []
+    const replacedHandles = new Set<string>()
+    const storedProfiles = profiles.map((profile) => {
+      const owner = externalCredentialOwner(profile.id)
+      const current = currentProfiles.find((item) => item.id === profile.id)
+      const secrets: Record<string, string> = {}
+      for (const [key, raw] of Object.entries(profile.secrets || {})) {
+        const previousRaw = String(current?.secrets?.[key] || '')
+        if (!raw) {
+          if (isCredentialHandle(previousRaw, owner, key)) changes[previousRaw] = null
+          secrets[key] = ''
+        } else if (isCredentialHandle(raw, owner, key) || isStoredLegacySecret(raw)) {
+          secrets[key] = raw
+        } else {
+          const handle = createCredentialHandle(owner, key)
+          changes[handle] = raw
+          stagedHandles.push(handle)
+          secrets[key] = handle
+          if (isCredentialHandle(previousRaw, owner, key)) replacedHandles.add(previousRaw)
+        }
+      }
+      return { ...profile, secrets }
+    })
+    if (Object.keys(changes).length > 0) await this.vault.update(changes)
+    try {
+      this.repository.setSetting(
+        EXTERNAL_SERVICE_SETTINGS_KEY,
+        JSON.stringify(storedProfiles),
+      )
+    } catch (error) {
+      if (stagedHandles.length > 0) {
+        await this.vault.update(Object.fromEntries(stagedHandles.map((handle) => [handle, null])))
+          .catch(() => undefined)
+      }
+      throw error
+    }
+    if (replacedHandles.size > 0) {
+      await this.vault.update(Object.fromEntries(Array.from(replacedHandles, (handle) => [handle, null])))
+        .catch((error) => {
+          logAgentMetric('settings.credential_retired_handle_cleanup_failed', {
+            errorKind: error instanceof Error ? error.name : typeof error,
+          })
+        })
+    }
   }
 
   listPublicProfiles(): PublicExternalServiceProfile[] {
-    return this.readProfiles().map(toPublicExternalServiceProfile)
+    return this.readResolvedProfiles().map((item) => (
+      toPublicExternalServiceProfile(item.profile, item.secretStates)
+    ))
   }
 
   getPublicProfile(id: string): PublicExternalServiceProfile | null {
-    const profile = this.readProfiles().find((item) => item.id === id)
-    return profile ? toPublicExternalServiceProfile(profile) : null
+    const resolved = this.readResolvedProfiles().find((item) => item.profile.id === id)
+    return resolved ? toPublicExternalServiceProfile(resolved.profile, resolved.secretStates) : null
   }
 
   getRuntimeService(id: string): RuntimeExternalServiceConfig | null {
@@ -157,11 +246,17 @@ export class ExternalServiceStore {
     return profile ? toRuntimeExternalServiceConfig(profile) : null
   }
 
-  private resolveProfileDraft(input: ExternalServiceUpdateInput, touchUpdatedAt: boolean): ExternalServiceProfile {
+  private resolveProfileDraft(
+    input: ExternalServiceUpdateInput,
+    touchUpdatedAt: boolean,
+    preserveStoredSecrets: boolean,
+  ): ExternalServiceProfile {
     if (!input?.id) throw new Error('Missing service id')
-    const profiles = this.readProfiles()
-    const fallback = profiles.find((item) => item.id === input.id)
-      || DEFAULT_EXTERNAL_SERVICE_PROFILES.find((item) => item.id === input.id)
+    const storedProfiles = this.readStoredProfiles()
+    const storedFallback = storedProfiles.find((item) => item.id === input.id)
+    const fallback = storedFallback
+      ? this.resolveStoredProfile(storedFallback).profile
+      : DEFAULT_EXTERNAL_SERVICE_PROFILES.find((item) => item.id === input.id)
     if (!fallback && !input.kind) throw new Error(`Unknown service: ${input.id}`)
 
     const next: ExternalServiceProfile = {
@@ -183,7 +278,9 @@ export class ExternalServiceStore {
     if ('baseUrl' in input) next.baseUrl = input.baseUrl
     if (input.options) next.options = { ...(next.options || {}), ...input.options }
 
-    const secrets = { ...(next.secrets || {}) }
+    const secrets = preserveStoredSecrets
+      ? { ...(storedFallback?.secrets || next.secrets || {}) }
+      : { ...(next.secrets || {}) }
     for (const key of input.clearSecrets || []) {
       delete secrets[key]
     }
@@ -195,26 +292,38 @@ export class ExternalServiceStore {
     return next
   }
 
-  upsertProfile(input: ExternalServiceUpdateInput): PublicExternalServiceProfile {
-    const profiles = this.readProfiles()
-    const next = this.resolveProfileDraft(input, true)
+  async upsertProfile(input: ExternalServiceUpdateInput): Promise<PublicExternalServiceProfile> {
+    return serializeExternalServiceMutation(() => this.upsertProfileNow(input))
+  }
+
+  private async upsertProfileNow(input: ExternalServiceUpdateInput): Promise<PublicExternalServiceProfile> {
+    const profiles = this.readStoredProfiles()
+    const next = this.resolveProfileDraft(input, true, true)
     const merged = profiles.some((item) => item.id === input.id)
       ? profiles.map((item) => item.id === input.id ? next : item)
       : [...profiles, next]
-    this.writeProfiles(normalizeExternalServiceProfiles(merged))
-    return toPublicExternalServiceProfile(next)
+    await this.writeProfiles(normalizeExternalServiceProfiles(merged))
+    const saved = this.getPublicProfile(input.id)
+    if (!saved) throw new Error(`External service save failed: ${input.id}`)
+    return saved
   }
 
-  resetProfile(id: string): PublicExternalServiceProfile {
+  async resetProfile(id: string): Promise<PublicExternalServiceProfile> {
+    return serializeExternalServiceMutation(() => this.resetProfileNow(id))
+  }
+
+  private async resetProfileNow(id: string): Promise<PublicExternalServiceProfile> {
     const fallback = DEFAULT_EXTERNAL_SERVICE_PROFILES.find((item) => item.id === id)
     if (!fallback) throw new Error(`Unknown default service: ${id}`)
-    const profiles = this.readProfiles()
+    const profiles = this.readStoredProfiles()
     const next = { ...fallback, updatedAt: nowIso() }
     const merged = profiles.some((item) => item.id === id)
       ? profiles.map((item) => item.id === id ? next : item)
       : [...profiles, next]
-    this.writeProfiles(normalizeExternalServiceProfiles(merged))
-    return toPublicExternalServiceProfile(next)
+    await this.writeProfiles(normalizeExternalServiceProfiles(merged))
+    const saved = this.getPublicProfile(id)
+    if (!saved) throw new Error(`External service reset failed: ${id}`)
+    return saved
   }
 
   getGeneralResearchConfig(): GeneralResearchServiceRuntimeConfig {
@@ -223,23 +332,13 @@ export class ExternalServiceStore {
     const jina = this.getFirstRuntimeService('jina')
     const ddg = this.getFirstRuntimeService('duckduckgo')
 
-    // U8.3 — emergency-only legacy fallback. Default path uses new profile shape.
-    // `READY_SETTINGS_RESTORE_LEGACY_KEYS=1` enables a one-shot recovery
-    // for broken upgrades; default builds never set it.
-    const emergencyLegacyTavilyKey = emergencyRestoreActive()
-      ? this.repository.getSetting(LEGACY_TAVILY_KEY_SETTING) || undefined
-      : undefined
-    const emergencyLegacyJinaKey = emergencyRestoreActive()
-      ? this.repository.getSetting(LEGACY_JINA_KEY_SETTING) || undefined
-      : undefined
-
     return {
       anysearchEnabled: anysearch?.enabled === true,
       anysearchKey: anysearch?.enabled ? anysearch.secrets.apiKey || undefined : undefined,
       anysearchBaseUrl: anysearch?.enabled ? trimBaseUrl(anysearch.baseUrl) : undefined,
-      tavilyKey: tavily?.enabled ? (tavily.secrets.apiKey || emergencyLegacyTavilyKey) : emergencyLegacyTavilyKey,
+      tavilyKey: tavily?.enabled ? tavily.secrets.apiKey || undefined : undefined,
       tavilyBaseUrl: tavily?.enabled ? trimBaseUrl(tavily.baseUrl) : undefined,
-      jinaKey: jina?.enabled ? (jina.secrets.apiKey || emergencyLegacyJinaKey) : emergencyLegacyJinaKey,
+      jinaKey: jina?.enabled ? jina.secrets.apiKey || undefined : undefined,
       jinaBaseUrl: jina?.enabled ? trimBaseUrl(jina.baseUrl) : undefined,
       ddgEnabled: ddg ? ddg.enabled : true,
       ddgBaseUrl: ddg?.enabled ? trimBaseUrl(ddg.baseUrl) : undefined,
@@ -247,54 +346,45 @@ export class ExternalServiceStore {
   }
 
   getAmapConfig(): AmapServiceRuntimeConfig | null {
-    const amap = this.getFirstRuntimeService('amap')
-    if (!amap) return null
+    const resolved = this.readResolvedProfiles().find((item) => item.profile.kind === 'amap')
+    if (!resolved) return null
+    const amap = resolved.profile
     return {
       enabled: amap.enabled,
       baseUrl: trimBaseUrl(amap.baseUrl) || 'https://restapi.amap.com',
-      apiKey: String(amap.secrets.apiKey || '').trim(),
+      apiKey: String(amap.secrets?.apiKey || '').trim(),
+      secretState: resolved.secretStates.apiKey || 'missing',
     }
   }
 
-  /**
-   * U8.3 — One-shot migration of legacy Tavily/Jina secrets into the
-   * external-service profile shape. Idempotent: tracks completion via
-   * `LEGACY_KEY_MIGRATION_DONE_SETTING`. After migration the legacy DB rows
-   * are cleared so the only path back to them is the emergency env flag.
-   */
-  migrateLegacyKeysOnce(): { migrated: number; alreadyDone: boolean } {
-    const done = this.repository.getSetting(LEGACY_KEY_MIGRATION_DONE_SETTING)
-    if (done === 'true') return { migrated: 0, alreadyDone: true }
-
-    const legacyTavily = (this.repository.getSetting(LEGACY_TAVILY_KEY_SETTING) || '').trim()
-    const legacyJina = (this.repository.getSetting(LEGACY_JINA_KEY_SETTING) || '').trim()
-
-    let migrated = 0
-    if (legacyTavily || legacyJina) {
-      const profiles = this.readProfiles()
-      const tavily = profiles.find((p) => p.kind === 'tavily')
-      const jina = profiles.find((p) => p.kind === 'jina')
-      if (legacyTavily && tavily && !(tavily.secrets?.apiKey)) {
-        tavily.secrets = { ...(tavily.secrets || {}), apiKey: legacyTavily }
-        tavily.enabled = true
-        tavily.updatedAt = nowIso()
-        migrated += 1
-      }
-      if (legacyJina && jina && !(jina.secrets?.apiKey)) {
-        jina.secrets = { ...(jina.secrets || {}), apiKey: legacyJina }
-        jina.enabled = true
-        jina.updatedAt = nowIso()
-        migrated += 1
-      }
-      if (migrated > 0) this.writeProfiles(normalizeExternalServiceProfiles(profiles))
+  async migrateStoredCredentialsOnce(): Promise<{
+    migrated: number
+    unresolved: number
+    alreadyDone: boolean
+  }> {
+    if (this.repository.getSetting(CREDENTIAL_MIGRATION_SETTING)) {
+      return { migrated: 0, unresolved: 0, alreadyDone: true }
     }
-
-    this.repository.setSetting(LEGACY_TAVILY_KEY_SETTING, '')
-    this.repository.setSetting(LEGACY_JINA_KEY_SETTING, '')
-    this.repository.setSetting(LEGACY_KEY_MIGRATION_DONE_SETTING, 'true')
-    logAgentMetric('settings.legacy_key_migration_completed', { migrated })
-
-    return { migrated, alreadyDone: false }
+    return serializeExternalServiceMutation(async () => {
+      if (this.repository.getSetting(CREDENTIAL_MIGRATION_SETTING)) {
+        return { migrated: 0, unresolved: 0, alreadyDone: true }
+      }
+      const profiles = this.readStoredProfiles()
+      let unresolved = 0
+      for (const profile of profiles) {
+        const owner = externalCredentialOwner(profile.id)
+        for (const [key, raw] of Object.entries(profile.secrets || {})) {
+          if (raw && !isCredentialHandle(raw, owner, key)) unresolved += 1
+        }
+      }
+      this.repository.setSetting(CREDENTIAL_MIGRATION_SETTING, JSON.stringify({
+        attemptedAt: nowIso(),
+        migrated: 0,
+        unresolved,
+      }))
+      logAgentMetric('settings.credential_migration_completed', { migrated: 0, unresolved })
+      return { migrated: 0, unresolved, alreadyDone: false }
+    })
   }
 
   buildVisionAgentContext(serviceId = 'vision-model-default'): AgentSpawnContext | null {
@@ -334,19 +424,44 @@ export class ExternalServiceStore {
         if (cookieFile) env.BILIBILI_COOKIE_FILE = cookieFile
       }
     }
-    const github = this.getFirstRuntimeService('github')
-    if (github?.enabled && github.secrets.token) env.GITHUB_TOKEN = github.secrets.token
     return env
   }
 
   async testProfile(id: string): Promise<ExternalServiceTestResult> {
-    const profile = this.readProfiles().find((item) => item.id === id)
-    if (!profile) throw new Error(`Unknown service: ${id}`)
-    return this.testResolvedProfile(profile)
+    const resolved = this.readResolvedProfiles().find((item) => item.profile.id === id)
+    if (!resolved) throw new Error(`Unknown service: ${id}`)
+    const blockedState = Object.values(resolved.secretStates).find(
+      (state) => state === 'recovery_required' || state === 'vault_unavailable',
+    )
+    if (blockedState) {
+      return {
+        ok: false,
+        serviceId: id,
+        message: blockedState === 'vault_unavailable'
+          ? '本地凭据库暂不可用，请修复后重试'
+          : '升级后无法读取原密钥，请重新填写并保存',
+      }
+    }
+    return this.testResolvedProfile(resolved.profile)
   }
 
   async testProfileDraft(input: ExternalServiceUpdateInput): Promise<ExternalServiceTestResult> {
-    return this.testResolvedProfile(this.resolveProfileDraft(input, false))
+    const current = this.readResolvedProfiles().find((item) => item.profile.id === input.id)
+    const blockedState = current && Object.entries(current.secretStates).find(([key, state]) => (
+      (state === 'recovery_required' || state === 'vault_unavailable')
+      && !String(input.secrets?.[key] || '').trim()
+      && !(input.clearSecrets || []).includes(key)
+    ))?.[1]
+    if (blockedState) {
+      return {
+        ok: false,
+        serviceId: input.id,
+        message: blockedState === 'vault_unavailable'
+          ? '本地凭据库暂不可用，请修复后重试'
+          : '升级后无法读取原密钥，请重新填写并保存',
+      }
+    }
+    return this.testResolvedProfile(this.resolveProfileDraft(input, false, false))
   }
 
   private async testResolvedProfile(profile: ExternalServiceProfile): Promise<ExternalServiceTestResult> {
@@ -475,4 +590,20 @@ export class ExternalServiceStore {
     }
     return { ok: true, serviceId: profile.id, message: '配置已就绪', latencyMs: Date.now() - start }
   }
+}
+
+let bootCredentialMigration: Promise<void> | null = null
+
+export function migrateExternalServiceCredentialsAfterWindowReady(): Promise<void> {
+  if (!bootCredentialMigration) {
+    bootCredentialMigration = new ExternalServiceStore()
+      .migrateStoredCredentialsOnce()
+      .then(() => undefined)
+      .catch((error) => {
+        logAgentMetric('settings.credential_migration_failed', {
+          errorKind: error instanceof Error ? error.name : typeof error,
+        })
+      })
+  }
+  return bootCredentialMigration
 }

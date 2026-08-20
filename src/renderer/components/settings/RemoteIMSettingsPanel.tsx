@@ -24,6 +24,11 @@ interface ChannelData {
   name: string
   enabled: boolean
   config: Record<string, unknown>
+  credentialState: 'ready' | 'missing' | 'recovery_required' | 'vault_unavailable'
+  secretStatus: Record<string, {
+    configured: boolean
+    state: 'ready' | 'missing' | 'recovery_required' | 'vault_unavailable'
+  }>
   lastError?: string | null
   lastSeenAt?: string | null
 }
@@ -55,12 +60,6 @@ interface RemoteAttachmentCacheStatsData {
     files: number
     bytes: number
   }>
-}
-
-function maskSecret(value: string): string {
-  if (!value) return ''
-  if (value.length <= 8) return '•'.repeat(value.length)
-  return `${value.slice(0, 4)}${'•'.repeat(Math.max(4, value.length - 8))}${value.slice(-4)}`
 }
 
 const panelCardStyle = {
@@ -127,22 +126,13 @@ export default function RemoteIMSettingsPanel() {
 
   const applyChannelList = useCallback((list: ChannelData[]) => {
     setChannels(list)
-    const tg = list.find((item) => item.type === 'telegram-bot')
     const fs = list.find((item) => item.type === 'feishu-app')
-    if (tg) {
-      const token = String(tg.config?.token || tg.config?.botToken || '')
-      if (token) setTelegramToken(token)
-    }
     if (fs) {
       const appId = String(fs.config?.appId || '')
-      const appSecret = String(fs.config?.appSecret || '')
-      const verificationToken = String(fs.config?.verificationToken || '')
-      const encryptKey = String(fs.config?.encryptKey || '')
       if (appId) setFeishuAppId(appId)
-      if (appSecret) setFeishuAppSecret(appSecret)
-      if (verificationToken) setFeishuVerificationToken(verificationToken)
-      if (encryptKey) setFeishuEncryptKey(encryptKey)
-      if (verificationToken || encryptKey) setShowFeishuAdvanced(true)
+      if (fs.secretStatus.verificationToken || fs.secretStatus.encryptKey) {
+        setShowFeishuAdvanced(true)
+      }
     }
     const wx = list.find((item) => item.type === 'wechat-openclaw')
     if (wx) {
@@ -198,11 +188,15 @@ export default function RemoteIMSettingsPanel() {
     () => channels.find((item) => item.type === 'wechat-openclaw'),
     [channels],
   )
+  const telegramSecretState = telegramChannel?.secretStatus.token?.state
+    || telegramChannel?.secretStatus.botToken?.state
+    || 'missing'
+  const feishuAppSecretState = feishuChannel?.secretStatus.appSecret?.state || 'missing'
 
   const connectTelegram = async () => {
     if (!window.electronAPI?.agent) return
     const token = telegramToken.trim()
-    if (!token) {
+    if (!token && telegramSecretState !== 'ready') {
       setStatusText('请先填写 Telegram Bot Token')
       return
     }
@@ -213,9 +207,7 @@ export default function RemoteIMSettingsPanel() {
         type: 'telegram-bot' as const,
         name: 'Telegram',
         enabled: true,
-        config: {
-          token,
-        },
+        config: token ? { token } : {},
       }
       const test = await window.electronAPI.agent.testChannel(payload)
       if (!test.success) {
@@ -227,6 +219,7 @@ export default function RemoteIMSettingsPanel() {
         setStatusText(`保存失败：${save.error || '未知错误'}`)
         return
       }
+      setTelegramToken('')
       setStatusText('Telegram 已连接')
       await refresh()
     })
@@ -236,7 +229,7 @@ export default function RemoteIMSettingsPanel() {
     if (!window.electronAPI?.agent) return
     const appId = feishuAppId.trim()
     const appSecret = feishuAppSecret.trim()
-    if (!appId || !appSecret) {
+    if (!appId || (!appSecret && feishuAppSecretState !== 'ready')) {
       setStatusText('请先填写飞书 App ID 和 App Secret')
       return
     }
@@ -244,10 +237,10 @@ export default function RemoteIMSettingsPanel() {
     await runWithBusy('feishu-connect', async () => {
       const config: Record<string, string> = {
         appId,
-        appSecret,
         mode: 'long-connection',
         triggerPrefix: '@ready',
       }
+      if (appSecret) config.appSecret = appSecret
       const verificationToken = feishuVerificationToken.trim()
       const encryptKey = feishuEncryptKey.trim()
       if (verificationToken) config.verificationToken = verificationToken
@@ -269,6 +262,9 @@ export default function RemoteIMSettingsPanel() {
         setStatusText(`保存失败：${save.error || '未知错误'}`)
         return
       }
+      setFeishuAppSecret('')
+      setFeishuVerificationToken('')
+      setFeishuEncryptKey('')
       setStatusText('飞书已连接')
       await refresh()
     })
@@ -384,7 +380,11 @@ export default function RemoteIMSettingsPanel() {
   const disconnectChannel = async (id: string) => {
     if (!window.electronAPI?.agent) return
     await runWithBusy(`disconnect:${id}`, async () => {
-      await window.electronAPI.agent.setChannelEnabled(id, false)
+      const result = await window.electronAPI.agent.setChannelEnabled(id, false)
+      if (!result.success) {
+        setStatusText(`断开失败：${result.error || '未知错误'}`)
+        return
+      }
       await refresh()
       setStatusText('已断开连接')
     })
@@ -393,7 +393,11 @@ export default function RemoteIMSettingsPanel() {
   const deleteChannel = async (id: string) => {
     if (!window.electronAPI?.agent) return
     await runWithBusy(`delete:${id}`, async () => {
-      await window.electronAPI.agent.deleteChannel(id)
+      const result = await window.electronAPI.agent.deleteChannel(id)
+      if (!result.success) {
+        setStatusText(`删除失败：${result.error || '稍后重试'}`)
+        return
+      }
       await refresh()
       setStatusText('已删除通道')
     })
@@ -474,7 +478,11 @@ export default function RemoteIMSettingsPanel() {
             <input
               value={telegramToken}
               onChange={(e) => setTelegramToken(e.target.value)}
-              placeholder="Bot Token"
+              placeholder={telegramSecretState === 'ready'
+                ? '已安全保存（留空沿用）'
+                : telegramSecretState === 'recovery_required'
+                  ? '升级后需重新填写 Bot Token'
+                  : 'Bot Token'}
               type={showTelegramToken ? 'text' : 'password'}
               className="w-full border text-[13px] focus:outline-none"
               style={{ ...fieldStyle, paddingRight: 56 }}
@@ -488,6 +496,11 @@ export default function RemoteIMSettingsPanel() {
               {showTelegramToken ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
             </button>
           </div>
+          {telegramSecretState === 'recovery_required' && (
+            <div className="text-[12px]" style={{ color: 'var(--color-red)' }}>
+              升级后无法读取原密钥，请重新填写并连接。
+            </div>
+          )}
           <div className="flex items-center flex-wrap" style={{ gap: 12 }}>
             <button
               disabled={isBusy('telegram-connect')}
@@ -550,7 +563,11 @@ export default function RemoteIMSettingsPanel() {
               <input
                 value={feishuAppSecret}
                 onChange={(e) => setFeishuAppSecret(e.target.value)}
-                placeholder="App Secret"
+                placeholder={feishuAppSecretState === 'ready'
+                  ? '已安全保存（留空沿用）'
+                  : feishuAppSecretState === 'recovery_required'
+                    ? '升级后需重新填写 App Secret'
+                    : 'App Secret'}
                 type={showFeishuSecret ? 'text' : 'password'}
                 className="w-full border text-[13px] focus:outline-none"
                 style={{ ...fieldStyle, paddingRight: 56 }}
@@ -594,9 +611,9 @@ export default function RemoteIMSettingsPanel() {
               </div>
             )}
           </div>
-          {!showFeishuSecret && feishuAppSecret && (
-            <div className="text-[11px]" style={{ color: 'var(--text-muted)', padding: '2px 4px' }}>
-              当前密钥：{maskSecret(feishuAppSecret)}
+          {feishuAppSecretState === 'recovery_required' && (
+            <div className="text-[12px]" style={{ color: 'var(--color-red)', padding: '2px 4px' }}>
+              升级后无法读取原密钥，请重新填写并连接。
             </div>
           )}
           <div className="flex items-center flex-wrap" style={{ gap: 12 }}>

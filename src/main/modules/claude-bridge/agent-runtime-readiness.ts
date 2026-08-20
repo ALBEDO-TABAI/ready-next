@@ -5,6 +5,10 @@ const READ_CHANNEL = 'agent:readRuntimeReady'
 
 let bootGeneration = 0
 let ready = false
+const waiters = new Set<{
+  resolve: () => void
+  reject: (error: Error) => void
+}>()
 
 export function registerAgentRuntimeReadinessIPC(ipcMain: IpcMain): void {
   ipcMain.removeHandler(READ_CHANNEL)
@@ -19,10 +23,21 @@ export function publishAgentRuntimeReady(webContents: WebContents): AgentRuntime
   bootGeneration += 1
   ready = true
   const snapshot = { ready, bootGeneration }
+  for (const waiter of waiters) waiter.resolve()
+  waiters.clear()
   if (!webContents.isDestroyed()) webContents.send('agent:runtimeReady', snapshot)
   return snapshot
 }
 
 export function markAgentRuntimeUnavailable(): void {
   ready = false
+  for (const waiter of waiters) waiter.reject(new Error('agent_runtime_unavailable'))
+  waiters.clear()
+}
+
+export function waitForAgentRuntimeReady(): Promise<void> {
+  if (ready) return Promise.resolve()
+  return new Promise<void>((resolve, reject) => {
+    waiters.add({ resolve, reject })
+  })
 }

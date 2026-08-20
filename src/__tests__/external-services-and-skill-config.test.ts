@@ -134,7 +134,7 @@ test('AnySearch draft test uses the unsaved key and runtime config keeps it encr
     assert.equal(authorization, 'Bearer draft-anysearch-key')
     assert.equal(store.getRuntimeService('anysearch-default')?.enabled, false, 'draft test must not persist')
 
-    store.upsertProfile({
+    await store.upsertProfile({
       id: 'anysearch-default',
       kind: 'anysearch',
       enabled: true,
@@ -149,6 +149,20 @@ test('AnySearch draft test uses the unsaved key and runtime config keeps it encr
   } finally {
     globalThis.fetch = originalFetch
   }
+})
+
+test('skill env never receives an unrelated configured credential', async () => {
+  const repo = new InMemorySettingsRepository()
+  const store = new ExternalServiceStore(repo as unknown as ConstructorParameters<typeof ExternalServiceStore>[0])
+  await store.upsertProfile({
+    id: 'github-default',
+    kind: 'github',
+    enabled: true,
+    secrets: { token: 'github-secret-that-must-stay-scoped' },
+  })
+
+  assert.deepEqual(store.getSkillExternalEnv('unrelated-custom-skill'), {})
+  assert.deepEqual(store.getSkillExternalEnv('video-expert-analyzer'), {})
 })
 
 test('skill configuration normalizer keeps service bindings and defaults', () => {

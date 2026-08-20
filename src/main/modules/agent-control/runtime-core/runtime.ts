@@ -117,7 +117,10 @@ import { getEphemeralExecutionStore } from '../../tools/skill-primitives/ephemer
 import { getAskUserQuestionsStore } from '../../tools/builtins/ask-user-questions-store'
 import { SidecarManager } from '../sidecar-manager'
 import { AppSettingsRepository } from '../../repositories/app-settings-repository'
-import { ExternalServiceStore } from '../../settings-engine/external-service-store'
+import {
+  ExternalServiceStore,
+  shouldReserveAmapRouteTool,
+} from '../../settings-engine/external-service-store'
 import type { CapabilityRuntimeSnapshot } from '../../../../shared/ai-capability-runtime'
 import { ToolGateway } from '../tools-runtime/tool-gateway'
 import { buildCapabilityRuntimeSnapshot } from '../domain-adapters/capability-runtime-snapshot'
@@ -253,7 +256,7 @@ export class AgentControlRuntime extends EventEmitter {
     channelStateCache: this.channelStateCache,
     startSidecar: () => this.startSidecar(),
     getSettingBool: (key, fallback) => this.getSettingBool(key, fallback),
-    listChannels: () => this.listChannels(),
+    listChannels: () => this.channelConfig.listRuntimeChannels(),
     handleInboundChannel: (payload) => this.handleInboundChannel(payload),
   })
   private readonly conversationScopes = new ConversationScopeStore({
@@ -552,9 +555,7 @@ export class AgentControlRuntime extends EventEmitter {
             scopeId: input.scopeId,
             config: input.config,
             browserHostAvailable: Boolean(this.browserController),
-            feishuConnected: this.sidecar.isRunning() && this.listChannels().some(
-              (channel) => channel.enabled && channel.type === 'feishu-app',
-            ),
+            feishuConnected: this.isChannelTypeAvailable('feishu-app'),
             channelScopeBound: this.isScopeChannelBound(input.scopeId),
             authorization: input.authorization,
             skillSurfaceComposition: resolveSkillSurfaceComposition(input.authorization, input.scopeId).composition,
@@ -934,7 +935,7 @@ export class AgentControlRuntime extends EventEmitter {
     const enabledChannelTypes = Array.from(
       new Set(
         this.listChannels()
-          .filter((channel) => channel.enabled)
+          .filter((channel) => channel.enabled && channel.credentialState === 'ready')
           .map((channel) => channel.type)
       )
     )
@@ -943,7 +944,10 @@ export class AgentControlRuntime extends EventEmitter {
         this.heartbeat.adapters
           .filter(
             (adapter) =>
-              adapter.healthy && adapter.status !== 'error' && adapter.status !== 'stopped'
+              adapter.healthy
+              && adapter.status !== 'error'
+              && adapter.status !== 'stopped'
+              && this.isChannelTypeAvailable(adapter.type)
           )
           .map((adapter) => adapter.type)
       )
@@ -968,8 +972,7 @@ export class AgentControlRuntime extends EventEmitter {
 
   isMapRouteServiceAvailable(): boolean {
     try {
-      const config = this.externalServices.getAmapConfig()
-      return config?.enabled === true && Boolean(config.apiKey)
+      return shouldReserveAmapRouteTool(this.externalServices.getAmapConfig())
     } catch {
       return false
     }
@@ -977,6 +980,18 @@ export class AgentControlRuntime extends EventEmitter {
 
   listChannels(): AgentChannelConfig[] {
     return this.channelConfig.listChannels()
+  }
+
+  async migrateStoredChannelCredentialsOnce(): Promise<{
+    migrated: number
+    unresolved: number
+    alreadyDone: boolean
+  }> {
+    const result = await this.channelConfig.migrateStoredCredentialsOnce()
+    if (result.migrated > 0 && this.sidecar.isRunning()) {
+      await this.syncDatabaseToSidecar()
+    }
+    return result
   }
 
   /** Phase I —— channel_outbound 可见性判据：scope 是否绑定远程渠道线程。 */
@@ -1664,6 +1679,7 @@ export class AgentControlRuntime extends EventEmitter {
   }
 
   async syncDatabaseToSidecar(): Promise<void> {
+    await this.channelConfig.reconcilePendingDeletes()
     return this.sidecarPoll.syncDatabaseToSidecar()
   }
 

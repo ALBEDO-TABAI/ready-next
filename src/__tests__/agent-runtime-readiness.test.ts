@@ -6,8 +6,10 @@ import {
 } from '../shared/ipc-contracts/agent-runtime-readiness'
 import {
   beginAgentRuntimeRegistration,
+  markAgentRuntimeUnavailable,
   publishAgentRuntimeReady,
   registerAgentRuntimeReadinessIPC,
+  waitForAgentRuntimeReady,
 } from '../main/modules/claude-bridge/agent-runtime-readiness'
 import { installAgentRuntimeReadyHydration } from '../renderer/modules/agent/agent-runtime-ready'
 
@@ -28,6 +30,23 @@ test('main readiness pull is registered before runtime and push advances one boo
   assert.deepEqual(first, { ready: true, bootGeneration: 1 })
   assert.deepEqual(read?.(), first)
   assert.deepEqual(sent, [{ channel: 'agent:runtimeReady', payload: first }])
+})
+
+test('window-ready work waits for runtime promotion instead of being skipped', async () => {
+  beginAgentRuntimeRegistration()
+  let settled = false
+  const waiting = waitForAgentRuntimeReady().then(() => { settled = true })
+  await new Promise<void>((resolve) => setImmediate(resolve))
+  assert.equal(settled, false)
+
+  publishAgentRuntimeReady({ isDestroyed: () => true, send() {} } as never)
+  await waiting
+  assert.equal(settled, true)
+
+  beginAgentRuntimeRegistration()
+  const unavailable = waitForAgentRuntimeReady()
+  markAgentRuntimeUnavailable()
+  await assert.rejects(unavailable, /agent_runtime_unavailable/)
 })
 
 test('renderer consumes a lost push through pull and de-duplicates the same generation', async () => {

@@ -71,6 +71,21 @@ test('map tool reports configuration and validation failures as structured outpu
   assert.equal(disabled.data?.ok, false)
   assert.equal(disabled.data?.errorKind, 'amap_not_configured')
   assert.match(String(disabled.data?.message || ''), /已保存，但服务还没启用/)
+
+  const recoveryRequired = normalizeToolExecutionOutput(await executeMapTool('map_plan_route', {
+    origin: 'A',
+    destination: 'B',
+  }, {
+    amapConfig: {
+      enabled: true,
+      baseUrl: 'https://restapi.amap.com',
+      apiKey: '',
+      secretState: 'recovery_required',
+    },
+  }))
+  assert.equal(recoveryRequired.data?.ok, false)
+  assert.equal(recoveryRequired.data?.errorKind, 'amap_credential_recovery_required')
+  assert.match(String(recoveryRequired.data?.message || ''), /重新填写/)
 })
 
 test('map tool uses serialized write resource policy and does not add TaskType', () => {

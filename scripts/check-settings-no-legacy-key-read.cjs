@@ -1,24 +1,10 @@
 #!/usr/bin/env node
 /**
- * Stage U PR U8.3 — Settings legacy key retirement gate (N-8).
+ * Settings legacy key retirement gate.
  *
- * The legacy DB keys `web_search_tavily_key` and `web_fetch_jina_key`
- * are retired. After Stage U8.3 lands, the only allowed reader is the
- * one-shot `migrateLegacyKeysOnce()` helper inside
- * `src/main/modules/settings-engine/external-service-store.ts`. Every
- * other read path must use the new external-service profile shape.
- *
- * Forbidden anywhere in `src/main/modules/settings-engine/` or
- * `src/main/modules/repositories/`:
- *   - Identifiers `legacyTavilyKey`, `legacyJinaKey`
- *   - String literals `'web_search_tavily_key'`, `'web_fetch_jina_key'`,
- *     `LEGACY_TAVILY_KEY_SETTING`, `LEGACY_JINA_KEY_SETTING`
- *
- * Allowed (whitelisted) callsites:
- *   - The gate file itself
- *   - The U8.3 test files
- *   - `external-service-store.ts` (the only place that holds the
- *     migration helper + emergency restore path)
+ * Tavily and Jina credentials have one production truth: the external-service
+ * profile backed by the Ready credential vault. Old database keys, migration
+ * helpers and environment escape hatches must never return to production code.
  */
 
 'use strict'
@@ -28,31 +14,26 @@ const path = require('node:path')
 
 const REPO = path.resolve(__dirname, '..')
 const SCAN_ROOTS = [
-  'src/main/modules/settings-engine',
-  'src/main/modules/repositories',
+  'src/main',
+  'src/preload',
+  'src/renderer',
+  'src/shared',
 ]
 const SCAN_EXT = new Set(['.ts', '.tsx', '.cts', '.mts', '.js', '.cjs', '.mjs'])
-
-const FILE_ALLOWLIST = [
-  /^scripts\/check-settings-no-legacy-key-read\.cjs$/,
-  /^src\/__tests__\/settings-legacy-key-/,
-  /^src\/__tests__\/settings-no-legacy-key-/,
-  /^src\/__tests__\/settings-emergency-/,
-  /^src\/main\/modules\/settings-engine\/external-service-store\.ts$/,
-]
 
 const FORBIDDEN = [
   /\blegacyTavilyKey\b/,
   /\blegacyJinaKey\b/,
   /['"]web_search_tavily_key['"]/,
   /['"]web_fetch_jina_key['"]/,
+  /['"]external_service_legacy_key_migration_done_v1['"]/,
+  /['"]READY_SETTINGS_RESTORE_LEGACY_KEYS['"]/,
   /\bLEGACY_TAVILY_KEY_SETTING\b/,
   /\bLEGACY_JINA_KEY_SETTING\b/,
+  /\bLEGACY_KEY_MIGRATION_DONE_SETTING\b/,
+  /\bmigrateLegacyKeysOnce\b/,
+  /\bmigrateLegacyKeysNow\b/,
 ]
-
-function isAllowed(rel) {
-  return FILE_ALLOWLIST.some((rx) => rx.test(rel))
-}
 
 function* walk(dir) {
   const entries = fs.readdirSync(dir, { withFileTypes: true })
@@ -74,7 +55,6 @@ function checkSettingsNoLegacyKeyRead() {
     if (!fs.existsSync(abs)) continue
     for (const full of walk(abs)) {
       const rel = path.relative(REPO, full)
-      if (isAllowed(rel)) continue
       const source = fs.readFileSync(full, 'utf8')
       const lines = source.split('\n')
       for (let i = 0; i < lines.length; i += 1) {
@@ -97,7 +77,7 @@ function checkSettingsNoLegacyKeyRead() {
 function main() {
   const { ok, violations } = checkSettingsNoLegacyKeyRead()
   if (ok) { console.log('[check-settings-no-legacy-key-read] OK'); return 0 }
-  console.error('[check-settings-no-legacy-key-read] FAIL — legacy Tavily/Jina key access is retired (Stage U8.3 / N-8).')
+  console.error('[check-settings-no-legacy-key-read] FAIL — retired Tavily/Jina credential paths returned to production code.')
   for (const v of violations) {
     console.error(`  ${v.file}:${v.line} — ${v.pattern}`)
     console.error(`    code: ${v.code}`)

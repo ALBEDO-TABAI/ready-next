@@ -50,7 +50,6 @@ export class ExternalEnvResolver {
     return definition.id === 'lets-go-rss'
       || definition.id === 'video-copy-analyzer'
       || definition.id === 'video-expert-analyzer'
-      || Boolean(definition.configuration?.serviceBindings?.length)
   }
 
   async resolveExternalEnv(definition: SkillDefinition): Promise<Record<string, string>> {

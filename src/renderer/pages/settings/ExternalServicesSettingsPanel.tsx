@@ -182,6 +182,12 @@ function externalServiceDraftSummary(
   if (hasDraftSecret) return '有未保存密钥 · 测试会使用当前输入 · 保存后生效'
   const secretKeys = serviceSecretKeys(profile)
   if (secretKeys.length === 0) return profile.enabled ? '服务已启用' : '服务未启用'
+  if (secretKeys.some((key) => profile.secretStatus[key]?.state === 'vault_unavailable')) {
+    return '本地凭据库暂不可用'
+  }
+  if (secretKeys.some((key) => profile.secretStatus[key]?.state === 'recovery_required')) {
+    return '升级后无法读取原密钥，请重新填写'
+  }
   const configured = secretKeys.filter((key) => profile.secretStatus[key]?.configured).length
   if (configured === secretKeys.length) return `已保存 ${configured} 项密钥`
   if (configured > 0) return `已保存 ${configured}/${secretKeys.length} 项密钥`
@@ -719,7 +725,15 @@ export function ExternalServicesSettingsPanel() {
                         value={secretDrafts[selectedProfile.id]?.[key] || ''}
                         onChange={(event) => updateSecretDraft(selectedProfile.id, key, event.target.value)}
                         style={{ ...externalServiceInputStyle(), flex: 1 }}
-                        placeholder={markedForClear ? '保存后清除；输入新值可替换' : status?.configured ? `已配置 ${status.masked || ''}，留空则保留` : '未配置'}
+                        placeholder={markedForClear
+                          ? '保存后清除；输入新值可替换'
+                          : status?.state === 'recovery_required'
+                            ? '升级后无法读取，请重新填写'
+                            : status?.state === 'vault_unavailable'
+                              ? '本地凭据库暂不可用'
+                              : status?.configured
+                                ? `已配置 ${status.masked || ''}，留空则保留`
+                                : '未配置'}
                       />
                       {status?.configured ? (
                         <button

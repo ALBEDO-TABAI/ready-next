@@ -8,7 +8,11 @@ import { tmpdir } from 'os'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 
 // Import modules
-import { setupAgentIPC, cleanupAgentRuntime } from './modules/claude-bridge/ipc-handler'
+import {
+  setupAgentIPC,
+  cleanupAgentRuntime,
+  migrateAgentChannelCredentialsAfterWindowReady,
+} from './modules/claude-bridge/ipc-handler'
 import { AgentManager } from './modules/claude-bridge/agent-manager'
 import { startRendererBeforeRuntimeReady } from './modules/claude-bridge/runtime-startup-slot'
 import { registerAgentRuntimeReadinessIPC } from './modules/claude-bridge/agent-runtime-readiness'
@@ -43,6 +47,9 @@ import {
   type SyncScheduler,
 } from './modules/calendar-engine/sync-scheduler'
 import { setupSettingsIPC } from './modules/settings-engine/ipc-handler'
+import { initializeCredentialVault } from './modules/settings-engine/credential-vault'
+import { pruneUnreferencedCredentialsAtStartup } from './modules/settings-engine/credential-vault-reconciliation'
+import { migrateExternalServiceCredentialsAfterWindowReady } from './modules/settings-engine/external-service-store'
 import type { ChatGptOAuthService } from './modules/settings-engine/chatgpt-oauth-service'
 import {
   RSS_AUTO_REFRESH_INTERVAL_KEY,
@@ -407,11 +414,24 @@ async function showMainWindow(): Promise<void> {
     mainWindow.show()
   }
   mainWindow.focus()
+  runCredentialMigrationsAfterWindowReady()
 }
 
 const MAIN_WINDOW_RENDERER_RETRY_DELAY_MS = 500
 const TRANSPARENT_SURFACE_REFRESH_DELAY_MS = 50
 let transparentSurfaceRefreshInFlight = false
+let credentialMigrationsStarted = false
+
+function runCredentialMigrationsAfterWindowReady(): void {
+  if (credentialMigrationsStarted) return
+  credentialMigrationsStarted = true
+  void Promise.all([
+    migrateExternalServiceCredentialsAfterWindowReady(),
+    migrateAgentChannelCredentialsAfterWindowReady(),
+  ]).catch((error) => {
+    console.warn('[credential-migration] failed:', error instanceof Error ? error.message : String(error))
+  })
+}
 
 async function refreshMainWindowTransparentSurface(): Promise<void> {
   const window = mainWindow
@@ -467,6 +487,7 @@ function showMainWindowAfterStartup(): void {
     window.show()
   }
   window.focus()
+  runCredentialMigrationsAfterWindowReady()
   setTimeout(() => {
     void refreshMainWindowTransparentSurface()
   }, TRANSPARENT_SURFACE_REFRESH_DELAY_MS)
@@ -1013,6 +1034,16 @@ app.whenReady().then(async () => {
   } catch (error) {
     stopBootForDatabaseFailure(error)
     return
+  }
+  try {
+    await initializeCredentialVault()
+    try {
+      await pruneUnreferencedCredentialsAtStartup()
+    } catch (error) {
+      console.warn('[credential-vault] orphan cleanup skipped:', error instanceof Error ? error.message : String(error))
+    }
+  } catch (error) {
+    console.warn('[credential-vault] unavailable:', error instanceof Error ? error.message : String(error))
   }
   try {
     await reconcileStartupRunsOnStartup()

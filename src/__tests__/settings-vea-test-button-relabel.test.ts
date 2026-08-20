@@ -127,7 +127,7 @@ function makeVisionProfile(overrides: Partial<PublicExternalServiceProfile> = {}
     baseUrl: '',
     options: { model: '', provider: '', apiKind: 'openai-completions', inputModes: ['text', 'image'] },
     // No apiKey configured — required field missing.
-    secretStatus: { apiKey: { configured: false } },
+    secretStatus: { apiKey: { configured: false, state: 'missing' } },
     ...overrides,
   }
 }
@@ -140,7 +140,7 @@ function makeAmapProfile(overrides: Partial<PublicExternalServiceProfile> = {}):
     enabled: true,
     baseUrl: 'https://restapi.amap.com',
     options: {},
-    secretStatus: { apiKey: { configured: true, masked: '****1234' } },
+    secretStatus: { apiKey: { configured: true, state: 'ready', masked: '****1234' } },
     ...overrides,
   }
 }
@@ -153,7 +153,7 @@ function makeAnySearchProfile(overrides: Partial<PublicExternalServiceProfile> =
     enabled: true,
     baseUrl: 'https://api.anysearch.com/mcp',
     options: {},
-    secretStatus: { apiKey: { configured: true, masked: '•••1234' } },
+    secretStatus: { apiKey: { configured: true, state: 'ready', masked: '•••1234' } },
     ...overrides,
   }
 }
@@ -166,7 +166,7 @@ function makeImageProfile(overrides: Partial<PublicExternalServiceProfile> = {})
     enabled: true,
     baseUrl: 'https://images.example.test',
     options: { protocol: 'openai-images', model: 'gpt-image-2', size: '1024x1024' },
-    secretStatus: { apiKey: { configured: true, masked: '•••1234' } },
+    secretStatus: { apiKey: { configured: true, state: 'ready', masked: '•••1234' } },
     ...overrides,
   }
 }
@@ -321,6 +321,37 @@ test('Y1.1 — non-vision-model profile (amap) keeps the original "测试" label
     // No vision-only help text leaks into non-vision profiles.
     const helpEl = handle.dom.window.document.querySelector('[data-vea-test-help]')
     assert.equal(helpEl, null, 'inline vision help text must NOT render for non-vision-model profile')
+  } finally {
+    root.unmount()
+    await new Promise((resolve) => setTimeout(resolve, 25))
+    handle.restore()
+  }
+})
+
+test('external-service settings show upgrade recovery instead of claiming a legacy ciphertext is configured', async () => {
+  const handle = installDomGlobals()
+  const bag: StubBag = {
+    profiles: [makeAmapProfile({
+      secretStatus: {
+        apiKey: { configured: false, state: 'recovery_required' },
+      },
+    })],
+    testCalls: [],
+  }
+  installElectronAPIStub(handle.dom, bag)
+
+  const { ExternalServicesSettingsPanel } = await import('../renderer/pages/Settings')
+  const root = createRoot(handle.dom.window.document.getElementById('root') as HTMLElement)
+  try {
+    flushSync(() => { root.render(createElement(ExternalServicesSettingsPanel)) })
+    await flushAsync()
+    flushSync(() => { /* drain */ })
+
+    assert.match(handle.dom.window.document.body.textContent || '', /升级后无法读取原密钥，请重新填写/)
+    const secretInput = handle.dom.window.document.querySelector('input[type="password"]') as HTMLInputElement | null
+    assert.equal(secretInput?.placeholder, '升级后无法读取，请重新填写')
+    const probeButton = handle.dom.window.document.querySelector('[data-vea-test-button="probe"]') as HTMLButtonElement | null
+    assert.equal(probeButton?.disabled, false, 'Main owns the recovery refusal and returns the explicit message')
   } finally {
     root.unmount()
     await new Promise((resolve) => setTimeout(resolve, 25))

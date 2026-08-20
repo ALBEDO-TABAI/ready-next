@@ -299,19 +299,19 @@ export function setupSettingsIPC(options?: {
     }
   })
 
-  ipcMain.handle('settings:updateExternalService', (_, input: ExternalServiceUpdateInput): SettingsIPCResponse<PublicExternalServiceProfile> => {
+  ipcMain.handle('settings:updateExternalService', async (_, input: ExternalServiceUpdateInput): Promise<SettingsIPCResponse<PublicExternalServiceProfile>> => {
     try {
-      return { success: true, data: externalServices.upsertProfile(input) }
+      return { success: true, data: await externalServices.upsertProfile(input) }
     } catch (error) {
       return { success: false, error: error instanceof Error ? error.message : String(error) }
     }
   })
 
-  ipcMain.handle('settings:resetExternalService', (_, payload: { id: string }): SettingsIPCResponse<PublicExternalServiceProfile> => {
+  ipcMain.handle('settings:resetExternalService', async (_, payload: { id: string }): Promise<SettingsIPCResponse<PublicExternalServiceProfile>> => {
     try {
       const id = payload?.id
       if (!id) return { success: false, error: 'Missing service id' }
-      return { success: true, data: externalServices.resetProfile(id) }
+      return { success: true, data: await externalServices.resetProfile(id) }
     } catch (error) {
       return { success: false, error: error instanceof Error ? error.message : String(error) }
     }

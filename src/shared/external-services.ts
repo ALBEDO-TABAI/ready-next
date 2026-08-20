@@ -14,6 +14,7 @@ export type ExternalServiceOptionValue = string | number | boolean | string[] | 
 
 export interface ExternalServiceSecretStatus {
   configured: boolean
+  state: 'ready' | 'missing' | 'recovery_required' | 'vault_unavailable'
   masked?: string
 }
 
@@ -273,12 +274,17 @@ export function maskExternalSecret(value: string): string {
   return `••••${value.slice(-4)}`
 }
 
-export function toPublicExternalServiceProfile(profile: ExternalServiceProfile): PublicExternalServiceProfile {
+export function toPublicExternalServiceProfile(
+  profile: ExternalServiceProfile,
+  states: Record<string, ExternalServiceSecretStatus['state']> = {},
+): PublicExternalServiceProfile {
   const secretStatus: Record<string, ExternalServiceSecretStatus> = {}
   for (const [key, value] of Object.entries(profile.secrets || {})) {
+    const state = states[key] || (value ? 'ready' : 'missing')
     secretStatus[key] = {
-      configured: Boolean(value),
-      masked: value ? maskExternalSecret(value) : undefined,
+      configured: state === 'ready',
+      state,
+      masked: state === 'ready' && value ? maskExternalSecret(value) : undefined,
     }
   }
   return {

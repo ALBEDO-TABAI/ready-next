@@ -13,8 +13,8 @@
  *   - No caching: users may switch model mid-session; controller must always
  *     observe the current value.
  *   - Returns a fresh object on each call (no shared refs into Ready settings).
- *   - api_key is plaintext in the settings table today (safeStorage is only
- *     wired for `agent_channels`). Do NOT log it.
+ *   - The primary-model api_key still comes from the AI settings record; the
+ *     external-service/channel credential vault does not own it. Do NOT log it.
  *   - `fallback_chain` is empty `[]` for now: Ready does not track a
  *     multi-model fallback for the primary agent. Skills that want a fallback
  *     must declare one in `host_requirements` (manifest), or rely on the

@@ -1,22 +1,17 @@
-import { createRequire } from 'module'
-
+import {
+  createCredentialHandle,
+  getCredentialVault,
+  isCredentialHandle,
+} from '../../settings-engine/credential-vault'
 import { logAgentMetric } from '../metrics'
 import { TOOL_ERROR_METRICS } from '../tools-runtime/tool-error-metrics'
-
-const electronModule = (() => {
-  try { return createRequire(import.meta.url)('electron') as typeof import('electron') }
-  catch {
-    // silent-catch: tolerate non-electron host (test runtime); secrets fall back to xor obfuscation; no user-facing impact
-    return {} as typeof import('electron')
-  }
-})()
-const { app } = electronModule
-let safeStorage = electronModule.safeStorage
 
 const SECRET_KEYS = new Set([
   'token',
   'botToken',
   'appSecret',
+  'verificationToken',
+  'encryptKey',
   'apiKey',
   'api_key',
   'sessdata',
@@ -27,99 +22,160 @@ const SECRET_KEYS = new Set([
   'secret',
 ])
 
-const ENC_PREFIX = '__enc__'
-const PLAIN_PREFIX = '__plain__'
+const LEGACY_ENCRYPTED_PREFIX = '__enc__'
+const LEGACY_PLAIN_PREFIX = '__plain__'
 
-function fallbackSecretKey(): Buffer {
-  const seed = `${app?.getPath?.('userData') || process.cwd()}::ready-agent-channel-config`
-  return Buffer.from(seed, 'utf8')
+export type ChannelSecretState =
+  | 'ready'
+  | 'missing'
+  | 'recovery_required'
+  | 'vault_unavailable'
+
+export interface ChannelSecretStatus {
+  configured: boolean
+  state: ChannelSecretState
 }
 
-function xorCipher(input: Buffer, key: Buffer): Buffer {
-  const out = Buffer.alloc(input.length)
-  for (let i = 0; i < input.length; i += 1) {
-    out[i] = input[i] ^ key[i % key.length]
-  }
-  return out
+function emitUnavailable(key: string, kind: string): void {
+  logAgentMetric(TOOL_ERROR_METRICS.secretDecryptFailed, {
+    key: key || 'unknown',
+    errorKind: kind,
+  })
 }
 
-function encryptValue(raw: string): string {
-  if (!raw) return raw
-  try {
-    if (safeStorage?.isEncryptionAvailable?.()) {
-      const encrypted = safeStorage.encryptString(raw)
-      return `${ENC_PREFIX}${encrypted.toString('base64')}`
-    }
-  } catch {
-    // fallback below
-  }
-  const xored = xorCipher(Buffer.from(raw, 'utf8'), fallbackSecretKey())
-  return `${PLAIN_PREFIX}${xored.toString('base64')}`
-}
-
-function errorKind(error: unknown): string {
-  if (error && typeof error === 'object' && 'code' in error && typeof (error as { code?: unknown }).code === 'string') {
-    return (error as { code: string }).code
-  }
-  return error instanceof Error ? error.name : typeof error
-}
-
-function decryptValue(raw: string, key?: string): string {
-  if (!raw) return raw
-  try {
-    if (raw.startsWith(ENC_PREFIX)) {
-      const b64 = raw.slice(ENC_PREFIX.length)
-      if (!safeStorage?.decryptString) {
-        logAgentMetric(TOOL_ERROR_METRICS.secretDecryptFailed, {
-          key: key || 'unknown',
-          errorKind: 'decrypt_unavailable',
-        })
-        return raw
-      }
-      const decrypted = safeStorage.decryptString(Buffer.from(b64, 'base64'))
-      return decrypted
-    }
-    if (raw.startsWith(PLAIN_PREFIX)) {
-      const b64 = raw.slice(PLAIN_PREFIX.length)
-      const decoded = xorCipher(Buffer.from(b64, 'base64'), fallbackSecretKey())
-      return decoded.toString('utf8')
-    }
-    return raw
-  } catch (error) {
-    logAgentMetric(TOOL_ERROR_METRICS.secretDecryptFailed, {
-      key: key || 'unknown',
-      errorKind: errorKind(error),
-    })
-    return raw
-  }
-}
-
-function mapSecretFields(
-  value: Record<string, unknown>,
-  mapper: (raw: string, key: string) => string,
+export function decryptChannelConfig(
+  config: Record<string, unknown>,
+  owner: string,
 ): Record<string, unknown> {
   const next: Record<string, unknown> = {}
-  for (const [key, val] of Object.entries(value)) {
-    if (typeof val === 'string' && SECRET_KEYS.has(key)) {
-      next[key] = mapper(val, key)
-    } else {
-      next[key] = val
+  const vault = getCredentialVault()
+  for (const [key, value] of Object.entries(config)) {
+    if (typeof value !== 'string' || !SECRET_KEYS.has(key) || !value) {
+      next[key] = value
+      continue
     }
+    if (!isCredentialHandle(value, owner, key)) {
+      emitUnavailable(key, 'legacy_secret_unavailable')
+      next[key] = ''
+      continue
+    }
+    const resolved = vault.read(value)
+    if (resolved.state !== 'ready') {
+      emitUnavailable(key, resolved.state)
+      next[key] = ''
+      continue
+    }
+    next[key] = resolved.value
   }
   return next
 }
 
-export function encryptChannelConfig(config: Record<string, unknown>): Record<string, unknown> {
-  return mapSecretFields(config, encryptValue)
+function readChannelSecretState(
+  raw: string,
+  owner: string,
+  key: string,
+): ChannelSecretState {
+  if (!raw) return 'missing'
+  if (!isCredentialHandle(raw, owner, key)) return 'recovery_required'
+  const resolved = getCredentialVault().read(raw)
+  return resolved.state === 'vault_unavailable'
+    ? 'vault_unavailable'
+    : resolved.state === 'ready'
+      ? 'ready'
+      : 'recovery_required'
 }
 
-export function decryptChannelConfig(config: Record<string, unknown>): Record<string, unknown> {
-  return mapSecretFields(config, decryptValue)
+export function toPublicChannelConfig(
+  config: Record<string, unknown>,
+  owner: string,
+): {
+  config: Record<string, unknown>
+  secretStatus: Record<string, ChannelSecretStatus>
+} {
+  const publicConfig: Record<string, unknown> = {}
+  const secretStatus: Record<string, ChannelSecretStatus> = {}
+  for (const [key, value] of Object.entries(config)) {
+    if (typeof value !== 'string' || !SECRET_KEYS.has(key)) {
+      publicConfig[key] = value
+      continue
+    }
+    const state = readChannelSecretState(value, owner, key)
+    secretStatus[key] = { configured: state === 'ready', state }
+  }
+  return { config: publicConfig, secretStatus }
 }
 
-export const encryptSecretConfig = encryptChannelConfig
-export const decryptSecretConfig = decryptChannelConfig
+export interface PreparedChannelConfigUpdate {
+  config: Record<string, unknown>
+  commit(): Promise<void>
+  rollback(): Promise<void>
+}
 
-export function __setSafeStorageForTests(nextSafeStorage: typeof safeStorage | null): void {
-  safeStorage = nextSafeStorage || electronModule.safeStorage
+export async function prepareChannelConfigUpdate(
+  config: Record<string, unknown>,
+  owner: string,
+  previousConfig: Record<string, unknown> = {},
+): Promise<PreparedChannelConfigUpdate> {
+  const next: Record<string, unknown> = {}
+  const changes: Record<string, string | null> = {}
+  const stagedHandles: string[] = []
+  const replacedHandles = new Set<string>()
+  for (const [key, value] of Object.entries(config)) {
+    if (typeof value !== 'string' || !SECRET_KEYS.has(key)) {
+      next[key] = value
+      continue
+    }
+    const previousRaw = typeof previousConfig[key] === 'string' ? previousConfig[key] : ''
+    if (!value) {
+      if (isCredentialHandle(previousRaw, owner, key)) changes[previousRaw] = null
+      next[key] = ''
+      continue
+    }
+    if (
+      value.startsWith(LEGACY_ENCRYPTED_PREFIX)
+      || value.startsWith(LEGACY_PLAIN_PREFIX)
+      || value.startsWith('__ready_credential_v1__')
+    ) {
+      throw new Error('legacy_secret_requires_reentry')
+    }
+    const handle = createCredentialHandle(owner, key)
+    changes[handle] = value
+    stagedHandles.push(handle)
+    next[key] = handle
+    if (isCredentialHandle(previousRaw, owner, key)) replacedHandles.add(previousRaw)
+  }
+  for (const [key, value] of Object.entries(previousConfig)) {
+    if (typeof value === 'string' && value && SECRET_KEYS.has(key) && !(key in config)) {
+      next[key] = value
+    }
+  }
+  if (Object.keys(changes).length > 0) await getCredentialVault().update(changes)
+  return {
+    config: next,
+    async commit(): Promise<void> {
+      if (replacedHandles.size === 0) return
+      await getCredentialVault().update(
+        Object.fromEntries(Array.from(replacedHandles, (handle) => [handle, null])),
+      )
+    },
+    async rollback(): Promise<void> {
+      if (stagedHandles.length === 0) return
+      await getCredentialVault().update(
+        Object.fromEntries(stagedHandles.map((handle) => [handle, null])),
+      )
+    },
+  }
+}
+
+export async function clearChannelCredentials(
+  config: Record<string, unknown>,
+  owner: string,
+): Promise<void> {
+  const changes: Record<string, null> = {}
+  for (const [key, value] of Object.entries(config)) {
+    if (typeof value === 'string' && value && SECRET_KEYS.has(key)) {
+      if (isCredentialHandle(value, owner, key)) changes[value] = null
+    }
+  }
+  if (Object.keys(changes).length > 0) await getCredentialVault().update(changes)
 }

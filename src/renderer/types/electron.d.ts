@@ -158,6 +158,11 @@ interface AgentChannelConfigData {
   name: string
   enabled: boolean
   config: Record<string, unknown>
+  credentialState: 'ready' | 'missing' | 'recovery_required' | 'vault_unavailable'
+  secretStatus: Record<string, {
+    configured: boolean
+    state: 'ready' | 'missing' | 'recovery_required' | 'vault_unavailable'
+  }>
   createdAt: string
   updatedAt: string
   lastError?: string | null
@@ -3078,7 +3083,11 @@ interface PublicExternalServiceProfileData {
   enabled: boolean
   baseUrl?: string
   options: Record<string, ExternalServiceOptionValueData>
-  secretStatus: Record<string, { configured: boolean; masked?: string }>
+  secretStatus: Record<string, {
+    configured: boolean
+    state: 'ready' | 'missing' | 'recovery_required' | 'vault_unavailable'
+    masked?: string
+  }>
   updatedAt?: string
 }
 

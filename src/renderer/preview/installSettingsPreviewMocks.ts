@@ -219,9 +219,11 @@ let channelData = [
     enabled: true,
     config: {
       appId: 'cli_preview_123',
-      appSecret: 'secret_preview_feishu',
-      verificationToken: 'verify_preview',
-      encryptKey: '',
+    },
+    credentialState: 'ready' as const,
+    secretStatus: {
+      appSecret: { configured: true, state: 'ready' as const },
+      verificationToken: { configured: true, state: 'ready' as const },
     },
     lastSeenAt: new Date(now - 1000 * 60 * 5).toISOString(),
   },
@@ -230,9 +232,9 @@ let channelData = [
     type: 'telegram-bot',
     name: 'Telegram Bot',
     enabled: true,
-    config: {
-      token: '123456:preview_telegram_token',
-    },
+    config: {},
+    credentialState: 'ready' as const,
+    secretStatus: { token: { configured: true, state: 'ready' as const } },
     lastSeenAt: new Date(now - 1000 * 60 * 12).toISOString(),
   },
 ]

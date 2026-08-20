@@ -53,6 +53,10 @@ export class SidecarPollService {
     if (!this.deps.sidecar.isRunning()) return
     const channels = this.deps.listChannels()
     for (const channel of channels) {
+      if (channel.credentialState !== 'ready') {
+        await this.deps.sidecar.stopChannel(channel.id).catch(() => undefined)
+        continue
+      }
       await this.deps.sidecar.upsertChannel({
         id: channel.id,
         type: channel.type,

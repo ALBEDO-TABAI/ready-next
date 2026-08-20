@@ -140,6 +140,7 @@ export interface MapToolContext {
     enabled: boolean
     baseUrl: string
     apiKey: string
+    secretState?: 'ready' | 'missing' | 'recovery_required' | 'vault_unavailable'
   } | null
   outputsRoot?: string
   requestModuleToolAction?: (
@@ -198,6 +199,18 @@ export async function executeMapTool(
   const amapConfig = Object.prototype.hasOwnProperty.call(context, 'amapConfig')
     ? context.amapConfig
     : new ExternalServiceStore().getAmapConfig()
+  if (amapConfig?.enabled && amapConfig.secretState === 'recovery_required') {
+    return createMapFailure(
+      'amap_credential_recovery_required',
+      '升级后无法读取原高德地图密钥。请在 Ready 设置页的“外部服务”中重新填写并保存。',
+    )
+  }
+  if (amapConfig?.enabled && amapConfig.secretState === 'vault_unavailable') {
+    return createMapFailure(
+      'amap_credential_vault_unavailable',
+      'Ready 本地凭据库暂不可用，已停止地图请求以避免使用错误密钥。',
+    )
+  }
   if (!amapConfig?.enabled || !amapConfig.apiKey) {
     const message = amapConfig?.apiKey && !amapConfig.enabled
       ? '高德地图 API Key 已保存，但服务还没启用。请在 Ready 设置页的外部服务中打开“高德地图”的启用开关并保存。'

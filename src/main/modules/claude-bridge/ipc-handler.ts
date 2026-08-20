@@ -79,6 +79,7 @@ import {
   beginAgentRuntimeRegistration,
   markAgentRuntimeUnavailable,
   publishAgentRuntimeReady,
+  waitForAgentRuntimeReady,
 } from './agent-runtime-readiness'
 import { RendererToolActionBridge } from './ipc/renderer-tool-action-bridge'
 import type { ChatGptOAuthService } from '../settings-engine/chatgpt-oauth-service'
@@ -139,6 +140,12 @@ const rendererToolActionBridge = new RendererToolActionBridge()
  */
 let currentTaskProjectionsChangeOff: (() => void) | null = null
 let currentAskUserClearedOff: (() => void) | null = null
+
+export async function migrateAgentChannelCredentialsAfterWindowReady(): Promise<void> {
+  if (!runtime) await waitForAgentRuntimeReady()
+  if (!runtime) throw new Error('agent_runtime_unavailable')
+  await runtime.migrateStoredChannelCredentialsOnce()
+}
 
 /**
  * Stage U (PR 1, B.4b) — module-scoped guard so the ask_user_questions DB

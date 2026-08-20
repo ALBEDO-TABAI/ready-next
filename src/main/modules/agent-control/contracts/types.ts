@@ -53,6 +53,11 @@ export interface AgentChannelConfig {
   name: string
   enabled: boolean
   config: Record<string, unknown>
+  credentialState: 'ready' | 'missing' | 'recovery_required' | 'vault_unavailable'
+  secretStatus: Record<string, {
+    configured: boolean
+    state: 'ready' | 'missing' | 'recovery_required' | 'vault_unavailable'
+  }>
   lastError?: string | null
   lastSeenAt?: string | null
   createdAt: string
