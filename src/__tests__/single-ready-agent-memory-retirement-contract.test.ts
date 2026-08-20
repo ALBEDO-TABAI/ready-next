@@ -37,6 +37,8 @@ test('specialist and retired memory capabilities are absent while Ready memory i
   const capabilityGroups = read('shared/ai-capability-groups.ts')
   const toolRegistry = read('main/modules/agent-control/tools-runtime/tool-registry.ts')
   const runtime = read('main/modules/agent-control/runtime-core/runtime.ts')
+  const bootReconciler = read('main/modules/agent-control/codex-runtime/codex-runtime-boot-reconciler.ts')
+  const bindingRepository = read('main/modules/agent-control/codex-runtime/codex-binding-repository.ts')
   const migrations = read('main/modules/migrations.ts')
 
   assert.doesNotMatch(preload, /listRegistry|systemStudio|specialistBlueprint|agentPersonality|userProfile/)
@@ -51,6 +53,8 @@ test('specialist and retired memory capabilities are absent while Ready memory i
   assert.match(capabilityGroups, /id:\s*'memory'[\s\S]*?settingsVisible:\s*false/)
   assert.match(toolRegistry, /memory:\s*\{\s*staticToolNames:\s*READY_MEMORY_TOOL_NAMES/)
   assert.doesNotMatch(runtime, /memoryLifecycle\.start|CrystallizeScheduler|runCrystallizeRound|runBeliefDecayRound/)
+  assert.doesNotMatch(bootReconciler, /repairLegacyFailureOnlyCloseouts/)
+  assert.doesNotMatch(bindingRepository, /repairLegacyFailureOnlyCloseouts|legacyFailureRecovered/)
   assert.match(runtime, /migrateLegacyBeliefCardStorage\(app\.getPath\('userData'\)\)/)
   assert.match(runtime, /BELIEF_CARD_STORAGE_DIRNAME/)
   assert.ok(

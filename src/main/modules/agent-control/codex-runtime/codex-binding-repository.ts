@@ -63,7 +63,6 @@ import {
   type CodexThreadRetirementReason,
 } from './codex-thread-archive-cleanup'
 import {
-  codexTerminalPublicMessage,
   readProductTurnPresentation,
   readProductTurnPresentations,
 } from './codex-product-turn-presentation'
@@ -3176,100 +3175,6 @@ export class CodexBindingRepository {
       receiptRefs.push(...retryReceiptRefs, row.receipt_id)
     }
     return head ? { ...head, receiptRefs } : null
-  }
-
-  repairLegacyFailureOnlyCloseouts(repairedAt: string): string[] {
-    nonEmpty(repairedAt, 'legacy_failure_repair_time_invalid')
-    const repaired: string[] = []
-    this.immediate(() => {
-      const rows = this.db.prepare(`
-        SELECT turn.ready_run_id, turn.ready_task_id, turn.message_visibility_epoch,
-               turn.product_terminal_digest, turn.engine_terminal_candidate_digest,
-               thread.ready_scope_id, run.status, run.terminal_reason,
-               (SELECT COUNT(*) FROM codex_tool_call_admissions admission
-                 WHERE admission.ready_run_id = turn.ready_run_id) AS admitted_count,
-               (SELECT COUNT(*) FROM codex_tool_call_admissions admission
-                 JOIN codex_tool_call_bindings binding
-                   ON binding.ready_run_id = admission.ready_run_id
-                  AND binding.codex_thread_id = admission.codex_thread_id
-                  AND binding.codex_turn_id = admission.codex_turn_id
-                  AND binding.codex_call_id = admission.codex_call_id
-                 JOIN ready_tool_action_receipts action
-                   ON action.ready_action_id = binding.ready_action_id
-                  AND action.state IN ('confirmed', 'proven_absent', 'indeterminate')
-                WHERE admission.ready_run_id = turn.ready_run_id) AS settled_count,
-               (SELECT COUNT(*) FROM codex_tool_call_bindings binding
-                 WHERE binding.ready_run_id = turn.ready_run_id
-                   AND binding.tool_name = 'skill_write_artifact'
-                   AND binding.receipt_id IS NOT NULL) AS write_count,
-               (SELECT COUNT(*) FROM codex_tool_call_bindings binding
-                 WHERE binding.ready_run_id = turn.ready_run_id
-                   AND binding.tool_name = 'skill_export_artifact'
-                   AND binding.receipt_id IS NOT NULL) AS export_count
-          FROM codex_turn_bindings turn
-          JOIN codex_thread_bindings thread ON thread.thread_binding_id = turn.thread_binding_id
-          JOIN run_meta run ON run.run_id = turn.ready_run_id
-          JOIN task_projections task
-            ON task.task_id = turn.ready_task_id AND task.run_id = turn.ready_run_id
-         WHERE turn.product_terminal_digest IS NOT NULL
-           AND turn.engine_terminal_candidate_digest IS NOT NULL
-           AND run.status IN ('error', 'cancelled', 'interrupted')
-           AND task.status IN ('failed', 'killed')
-           AND NOT EXISTS (
-             SELECT 1 FROM chat_messages message
-              WHERE message.id = 'assistant:' || turn.ready_task_id || ':' || turn.ready_run_id || ':terminal'
-           )
-         ORDER BY turn.product_closeout_at, turn.ready_run_id
-      `).all<{
-        ready_run_id: string
-        ready_task_id: string
-        message_visibility_epoch: number
-        product_terminal_digest: string
-        engine_terminal_candidate_digest: string
-        ready_scope_id: string
-        status: 'error' | 'cancelled' | 'interrupted'
-        terminal_reason: string | null
-        admitted_count: number
-        settled_count: number
-        write_count: number
-        export_count: number
-      }>()
-      for (const row of rows) {
-        if (row.admitted_count !== row.settled_count) continue
-        const messageId = `assistant:${row.ready_task_id}:${row.ready_run_id}:terminal`
-        const content = codexTerminalPublicMessage(row.status)
-        const meta = {
-          taskId: row.ready_task_id,
-          runId: row.ready_run_id,
-          terminalReason: row.terminal_reason,
-          legacyFailureRecovered: true,
-          recoveryEvidenceDigest: digestCanonicalJson({
-            readyRunId: row.ready_run_id,
-            productTerminalDigest: row.product_terminal_digest,
-            engineTerminalCandidateDigest: row.engine_terminal_candidate_digest,
-            admittedCount: row.admitted_count,
-            settledCount: row.settled_count,
-            writeCount: row.write_count,
-            exportCount: row.export_count,
-          }),
-        }
-        this.db.prepare(`
-          INSERT INTO chat_messages (
-            id, conversation_id, role, content, timestamp, meta_json, message_visibility_epoch
-          ) VALUES (?, ?, 'assistant', ?, ?, ?, ?)
-          ON CONFLICT(id) DO NOTHING
-        `).run(
-          messageId,
-          row.ready_scope_id,
-          content,
-          repairedAt,
-          canonicalJson(meta),
-          row.message_visibility_epoch,
-        )
-        repaired.push(row.ready_run_id)
-      }
-    })
-    return repaired
   }
 
   beginBrowserVerifierAttempt(input: {
