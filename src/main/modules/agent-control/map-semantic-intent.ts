@@ -31,6 +31,7 @@ const ENGLISH_UNSUPPORTED_TRANSIT_PATTERNS = [
   new RegExp(`\\b${ENGLISH_UNSUPPORTED_TRANSIT_MODE_PATTERN}\\s+(?:from|to)\\b`),
 ]
 const ENGLISH_NON_ROUTE_BEST_WAY_TO_PATTERN = /\b(?:best|fastest|quickest|shortest)\s+way\s+to\s+(?:translate|migrate|convert|configure|install|build|create|copy|move|map)\b/
+const CHINESE_UNSUPPORTED_TRANSIT_PATTERN = /(公交|公共交通|地铁|轻轨|高铁|动车|火车|铁路|大巴|巴士|客运|轮渡|飞机|航班)/
 
 function cacheKey(prompt: string): string {
   return prompt.trim().slice(0, 2000)
@@ -78,10 +79,19 @@ function extractJsonObject(text: string): unknown {
 
 function strongKeywordFallback(prompt: string): MapSemanticIntent | null {
   const text = prompt.replace(/\s+/g, '')
+  if (CHINESE_UNSUPPORTED_TRANSIT_PATTERN.test(text)) return null
   const routePattern = /从.+到.+(怎么走|路线|导航|顺路|途经|途径|最省时间|最短|最优|去)/
+  const departureRoutePattern = /从.+出发(?:去|前往|到).+(?:怎么走|路线|导航|距离|多久|多长时间|几小时|耗时)/
+  const travelTimingPattern = /从.+(?:去|前往).+(?:要|需|大概|大约|预计)?(?:多久|多长时间|几小时|耗时)/
   const strongPattern = /(怎么走|导航|路线规划|顺路|途经|途径|最省时间|最短路线|最优行程|多点.*顺序)/
   const contextualTimingPattern = /路线.+(多久|耗时|时间)|逛完.+(多久|耗时|时间)/
-  if (!routePattern.test(text) && !strongPattern.test(text) && !contextualTimingPattern.test(text)) return null
+  if (
+    !routePattern.test(text)
+    && !departureRoutePattern.test(text)
+    && !travelTimingPattern.test(text)
+    && !strongPattern.test(text)
+    && !contextualTimingPattern.test(text)
+  ) return null
   return {
     isMapIntent: true,
     primaryTask: /多点|顺序|最省时间|最优行程/.test(text) ? 'multi_point_order' : /顺路|途经|途径/.test(text) ? 'along_route_search' : 'route',
@@ -130,7 +140,10 @@ function hasPotentialMapSignal(prompt: string): boolean {
       || /\b(walk|walking|bike|biking|bicycle|bicycling|cycling)\s+(to|from)\b/.test(compactEnglish)
       || englishDriveVerbSignal
     )
-  return /(地图|导航|路线|怎么走|从.+到|附近|途经|途径|顺路|绕路|最省时间|最短|最优行程|多点|地点|路上|开车|步行|公交|地铁|打车|耗时|多久)/.test(text)
+  return (
+    !CHINESE_UNSUPPORTED_TRANSIT_PATTERN.test(text)
+    && /(地图|导航|路线|怎么走|从.+到|从.+出发(?:去|前往|到)|附近|途经|途径|顺路|绕路|最省时间|最短|最优行程|多点|地点|路上|开车|步行|打车|耗时|多久)/.test(text)
+  )
     || englishRouteSignal
 }
 

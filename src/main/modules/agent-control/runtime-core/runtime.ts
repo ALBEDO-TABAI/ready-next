@@ -117,6 +117,7 @@ import { getEphemeralExecutionStore } from '../../tools/skill-primitives/ephemer
 import { getAskUserQuestionsStore } from '../../tools/builtins/ask-user-questions-store'
 import { SidecarManager } from '../sidecar-manager'
 import { AppSettingsRepository } from '../../repositories/app-settings-repository'
+import { ExternalServiceStore } from '../../settings-engine/external-service-store'
 import type { CapabilityRuntimeSnapshot } from '../../../../shared/ai-capability-runtime'
 import { ToolGateway } from '../tools-runtime/tool-gateway'
 import { buildCapabilityRuntimeSnapshot } from '../domain-adapters/capability-runtime-snapshot'
@@ -174,6 +175,7 @@ export class AgentControlRuntime extends EventEmitter {
   private readonly browserController: BrowserController | null
   private readonly agentRegistry = new AgentRegistryRepository(this.db)
   private readonly settingsRepository = new AppSettingsRepository()
+  private readonly externalServices = new ExternalServiceStore(this.settingsRepository)
   private readonly sidecar = new SidecarManager()
   private readonly codexRuntime: CodexRuntimeComposition
   private readonly orchestrator: CodexHostOrchestrator
@@ -558,6 +560,7 @@ export class AgentControlRuntime extends EventEmitter {
             skillSurfaceComposition: resolveSkillSurfaceComposition(input.authorization, input.scopeId).composition,
             requestEnvelope: input.requestEnvelope,
             skillCatalogAvailable: getSkillsRuntimeManager().listSkills().length > 0,
+            mapRouteServiceAvailable: this.isMapRouteServiceAvailable(),
           },
         })
       },
@@ -961,6 +964,15 @@ export class AgentControlRuntime extends EventEmitter {
       enabledChannelTypes,
       connectedChannelTypes
     })
+  }
+
+  isMapRouteServiceAvailable(): boolean {
+    try {
+      const config = this.externalServices.getAmapConfig()
+      return config?.enabled === true && Boolean(config.apiKey)
+    } catch {
+      return false
+    }
   }
 
   listChannels(): AgentChannelConfig[] {

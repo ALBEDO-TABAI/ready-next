@@ -11,6 +11,10 @@ import type { ProductTurnReceipt, SendScopedRequest } from '../../../../shared/i
 import { classifyLifecycleOperation } from '../../../../shared/ipc-contracts/agent-lifecycle-snapshot'
 import type { ExecutionHostResult, TaskProjectionRecord } from '../contracts/run-contracts'
 import { classifyIntent } from '../intent-classifier'
+import {
+  classifyMapSemanticIntentFallback,
+  isMapSemanticIntentActive,
+} from '../map-semantic-intent'
 import { TAG_FORGE_EXCLUSIVE_TOOL_NAMES } from './codex-product-action-map'
 import { createCodexProductActionRequester } from './codex-product-action-requester'
 import { createProductionProductActionHandlers } from './codex-product-action-handlers'
@@ -2484,6 +2488,9 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
           currentDocumentCanWrite: currentDocumentWriteIntent,
         })
         const intentClassification = classifyIntent(requestEnvelope)
+        const hasMapRouteIntent = isMapSemanticIntentActive(
+          classifyMapSemanticIntentFallback(requestEnvelope.primaryInstruction),
+        )
         const readyMemorySnapshot = readyMemoryRepository.buildSnapshot(isoNow())
         const resolvedToolSnapshot = boundHost.resolveToolTurnSnapshot({
           surfaceId: `codex-surface:${scope.id}:${request.requestId}`,
@@ -2501,6 +2508,11 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
         )]
         const exclusiveAllowSet = authorization.mode === 'selected' && authorization.skillId === 'tag-forge'
           ? TAG_FORGE_EXCLUSIVE_TOOL_NAMES
+          : null
+        const mapRouteMode = hasMapRouteIntent
+          ? resolvedToolSnapshot.readyTurnToolAuthorization.allowedToolNames.includes('map_plan_route')
+            ? 'configured_primary' as const
+            : 'public_web_fallback' as const
           : null
         const browserAdmission = buildBrowserAdmissionAuthoritySnapshot({
           authorityId: `browser-auth:${request.requestId}`,
@@ -2552,6 +2564,7 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
           exclusiveAllowSet,
           browserAdmission,
           capabilityAvailability,
+          mapRouteMode,
           readyMemory: {
             enabled: readyMemorySnapshot.enabled,
             hasEntries: readyMemorySnapshot.entries.length > 0,

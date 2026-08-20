@@ -42,7 +42,7 @@ export const GENERAL_RESEARCH_TOOLS: GeneralResearchToolDef[] = [
   {
     name: 'web_search',
     description:
-      '在公开互联网上检索资料，返回标题/链接/摘要列表。天气、新闻、股价、汇率、比分、航班、路况、空气质量和官网公告等公开实时信息优先用此工具，不需要打开可见浏览器。可使用 AnySearch、Tavily 或 DuckDuckGo；需要垂直领域时先调用 web_search_domains。引用结果时请标明 source。',
+      '在公开互联网上检索资料，返回标题/链接/摘要列表。天气、新闻、股价、汇率、比分、航班、路况、空气质量和官网公告等公开实时信息优先用此工具，不需要打开可见浏览器。可使用 AnySearch、Tavily 或 DuckDuckGo；需要垂直领域时先调用 web_search_domains。路线或通勤查询只有在 map_plan_route 本轮不可用时才能用本工具兜底；此时必须明确标注为公开网页估算，不能声称是地图导航结果，并提示用户可在“设置 > 外部服务”配置并启用高德地图。引用结果时请标明 source。',
     params: zodObjectToParamList(GENERAL_RESEARCH_SCHEMAS.web_search!) as ToolParam[],
   },
   {

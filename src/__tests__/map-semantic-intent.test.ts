@@ -4,6 +4,7 @@ import test from 'node:test'
 import {
   _resetMapSemanticIntentCacheForTests,
   classifyMapSemanticIntent,
+  classifyMapSemanticIntentFallback,
   isMapSemanticIntentActive,
 } from '../main/modules/agent-control/map-semantic-intent'
 
@@ -176,6 +177,27 @@ test('classifyMapSemanticIntent recognizes conversational route timing prompts a
   assert.equal(result?.isMapIntent, true)
   assert.equal(result?.primaryTask, 'route')
   assert.equal(result?.reason, 'llm_failed_keyword_fallback')
+})
+
+test('deterministic production fallback recognizes natural departure-to-destination timing', () => {
+  const result = classifyMapSemanticIntentFallback(
+    '查一下从广州海珠区晓港雅筑出发去韶关罗坑大草原要多久',
+  )
+
+  assert.equal(result?.isMapIntent, true)
+  assert.equal(result?.primaryTask, 'route')
+  assert.equal(isMapSemanticIntentActive(result), true)
+})
+
+test('deterministic production fallback does not send unsupported public transit to driving routes', () => {
+  assert.equal(
+    classifyMapSemanticIntentFallback('从广州南站出发坐高铁去韶关要多久'),
+    null,
+  )
+  assert.equal(
+    classifyMapSemanticIntentFallback('从公司坐地铁到机场怎么走'),
+    null,
+  )
 })
 
 test('classifyMapSemanticIntent recognizes multi-point route prompts after LLM failure', async () => {

@@ -59,7 +59,9 @@ export function composeCodexTurnToolSnapshot(input: {
   browserAdmission?: BrowserAdmissionAuthoritySnapshot | null
   capabilityAvailability?: ReadyCapabilityTurnAvailability | null
   readyMemory?: { enabled: boolean; hasEntries: boolean }
+  mapRouteMode?: 'configured_primary' | 'public_web_fallback' | null
 }): ReadyToolTurnSnapshot {
+  const intentAllowed = new Set(input.resolved.readyTurnToolAuthorization.allowedToolNames)
   let allowed = input.resolved.readyTurnToolAuthorization.allowedToolNames.filter(
     (name) => name !== READY_MEMORY_SEARCH_TOOL_NAME,
   )
@@ -170,6 +172,12 @@ export function composeCodexTurnToolSnapshot(input: {
     ) {
       allowed.push('ask_user_questions')
     }
+  }
+
+  if (input.mapRouteMode) {
+    allowed = allowed.filter((name) => (
+      !isReadyCapabilityCatalogTool(name) || intentAllowed.has(name)
+    ))
   }
 
   if (input.exclusiveAllowSet && input.exclusiveAllowSet.length > 0) {

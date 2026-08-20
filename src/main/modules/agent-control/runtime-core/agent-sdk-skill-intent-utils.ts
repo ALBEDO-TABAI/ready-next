@@ -12,7 +12,8 @@ import { resolveIntentCapabilityGroupModes } from '../execution-intent-resolver'
 import { classifyIntent, type IntentDomain } from '../intent-classifier'
 import {
   applyMapSemanticIntentToIntentClassification,
-  classifyMapSemanticIntentFallback
+  classifyMapSemanticIntentFallback,
+  isMapSemanticIntentActive
 } from '../map-semantic-intent'
 import { shouldDisplayReferenceSkillHintForLatestUserText } from '../reference-skill-hint-display'
 import { peekLastReferenceSkill } from '../skills/skill-reference-hints'
@@ -335,6 +336,8 @@ function resolveAuthorizationPreferredToolNames(
 
 interface SdkDefaultIntentSurface {
   primaryIntentDomain: IntentDomain
+  mapRouteIntent: boolean
+  mapRouteFallback: boolean
   intentGroupModes: Partial<Record<CapabilityGroupId, boolean>>
   requestedIntentGroupIds: CapabilityGroupId[]
   forceDocumentTool: boolean
@@ -348,6 +351,7 @@ export function resolveSdkDefaultIntentSurface(params: {
   requestEnvelope?: unknown
   authorization: SkillToolAuthorization
   requiredCapabilityGroupIds?: readonly CapabilityGroupId[]
+  mapRouteServiceAvailable?: boolean
 }): SdkDefaultIntentSurface {
   const envelopeRefs = parseEnvelopeResourceReferences(params.requestEnvelope)
   const userInstructionText =
@@ -378,6 +382,8 @@ export function resolveSdkDefaultIntentSurface(params: {
   const preferredSkillToolNames = resolveAuthorizationPreferredToolNames(params.authorization)
   const requestEnvelope = buildRequestEnvelope({ userText: rawUserText || userInstructionText })
   const mapSemanticIntent = classifyMapSemanticIntentFallback(userInstructionText)
+  const mapRouteIntent = isMapSemanticIntentActive(mapSemanticIntent)
+  const mapRouteFallback = mapRouteIntent && params.mapRouteServiceAvailable !== true
   const intentClassification = applyMapSemanticIntentToIntentClassification(
     classifyIntent(requestEnvelope),
     mapSemanticIntent
@@ -399,7 +405,17 @@ export function resolveSdkDefaultIntentSurface(params: {
     requiredCapabilityGroupIds: params.requiredCapabilityGroupIds,
     mapSemanticIntent
   })
-  const intentGroupModes = intentModes.intentGroupModes
+  const intentGroupModes = {
+    ...intentModes.intentGroupModes,
+    ...(mapRouteFallback
+      ? {
+          map_planning: false,
+          general_research: true,
+          browser_interaction: false,
+          browser_content_tasks: false,
+        }
+      : {}),
+  }
   const requestedIntentGroupIds = Array.from(new Set([
     ...Object.entries(intentGroupModes)
       .filter(([groupId, enabled]) =>
@@ -408,6 +424,8 @@ export function resolveSdkDefaultIntentSurface(params: {
   ]))
   return {
     primaryIntentDomain: intentClassification.primaryDomain,
+    mapRouteIntent,
+    mapRouteFallback,
     intentGroupModes,
     requestedIntentGroupIds,
     forceDocumentTool: intentModes.forceDocumentTool,

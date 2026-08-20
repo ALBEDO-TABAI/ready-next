@@ -335,6 +335,7 @@ export function prepareAgentSdkTurn(
     requestEnvelope: effectiveExecutionOptions?.requestEnvelope,
     // P2-2 — gate use_skill exposure on the exact per-turn catalog snapshot later shown to the model.
     skillCatalogAvailable: skillCatalogSnapshot.length > 0,
+    mapRouteServiceAvailable: host.runtime?.isMapRouteServiceAvailable?.() ?? false,
     onCapabilityResolution: (resolution) => { capabilityResolutionCapture.current = resolution }
   })
   const requestedCapabilityConflicts =
@@ -503,6 +504,7 @@ export function prepareAgentSdkTurn(
       skillSurfaceComposition: skillSurface.composition,
       requestEnvelope: effectiveExecutionOptions?.requestEnvelope,
       skillCatalogAvailable: skillCatalogSnapshot.length > 0,
+      mapRouteServiceAvailable: host.runtime?.isMapRouteServiceAvailable?.() ?? false,
     })
     if (durableBrowserWorkflow && skillSurface.composition === 'additive') {
       const byName = new Map(toolDefinitions.map((definition) => [definition.name, definition]))

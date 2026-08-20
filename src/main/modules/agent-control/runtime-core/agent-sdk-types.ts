@@ -400,6 +400,8 @@ export interface AgentSdkRuntimeDeps {
     requestEnvelope?: unknown
     /** P2-2 — the L1 skill catalog is non-empty this turn (gates use_skill exposure). */
     skillCatalogAvailable?: boolean
+    /** Frozen boolean only; the API key remains owned by ExternalServiceStore. */
+    mapRouteServiceAvailable?: boolean
     onCapabilityResolution?: (resolution: CapabilityResolution) => void
   }) => ToolDefinition[]
   executeToolCall?: (

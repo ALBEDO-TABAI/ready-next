@@ -552,7 +552,7 @@ test('agent sdk runtime demotes widget edits before exposing browser tools', asy
   )
 })
 
-test('agent sdk runtime exposes map tools for deterministic route intent', async () => {
+test('agent sdk runtime exposes configured map tools for deterministic route intent', async () => {
   let toolNames: string[] = []
   const runtime = createRuntime({
     runAgent: async ({ tools }) => {
@@ -560,6 +560,10 @@ test('agent sdk runtime exposes map tools for deterministic route intent', async
       return { finalText: 'map tools captured' }
     }
   })
+  runtime.setRuntime({
+    ...canonicalCoreCloseoutTestPort(),
+    isMapRouteServiceAvailable: () => true,
+  } as never)
   runtime.newSession('butler::scope-map-tool-surface', 'system prompt')
 
   const result = await runtime.sendMessage(

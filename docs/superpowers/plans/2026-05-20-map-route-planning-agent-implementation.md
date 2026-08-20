@@ -6,6 +6,8 @@ enforce: true
 
 # Ready Ask Map / 高德行程规划 Agent 实施计划
 
+> 2026-08-20 现行修订：外部服务选择与未配置降级已由 `2026-08-20-map-service-selection-and-fallback-implementation.md` 取代本文件“未配置时仍暴露地图工具”的旧合同；其余地图执行合同继续有效。
+
 ## 背景
 
 目标是让 Ready agent 通过一个受控高层工具完成路线规划、顺路地点推荐、多点顺序优化、耗时计算，并生成聊天解释、Markdown 文档草稿、地图静态图和 JSON/Markdown/PNG artifact 兜底。
@@ -27,7 +29,7 @@ enforce: true
 
 v1 支持 driving、walking、bicycling；不支持公交、不支持 schedule。least_detour 必须与 alongRouteSearch 同时出现。waypoints 最多 16 个。place_ambiguous 只返回 candidates，不返回 clarificationOptions；主 agent 仍走 ask_user_questions。
 
-未配置高德时 map_plan_route 保持可见，但调用返回 amap_not_configured，方便 agent 向用户解释需要去设置页启用“高德地图”并填写新 key。
+未配置高德时不再暴露 map_plan_route；只开放明确标注为公开网页估算的紧凑兜底，并提示用户去设置页启用“高德地图”并填写 key。已配置但执行失败时不得静默改走网页。
 
 ## 核心模块
 

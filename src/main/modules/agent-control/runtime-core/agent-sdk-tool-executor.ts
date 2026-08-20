@@ -90,6 +90,8 @@ import {
 const BROWSER_INTERACTION_TOOL_NAME_SET = new Set<string>(BROWSER_INTERACTION_TOOL_NAMES)
 const BROWSER_CONTENT_TASK_TOOL_NAME_SET = new Set<string>(BROWSER_CONTENT_TASK_TOOL_NAMES)
 const GENERAL_RESEARCH_TOOL_NAME_SET = new Set<string>(GENERAL_RESEARCH_TOOL_NAMES)
+const MAP_ROUTE_PRIMARY_TOOL_NAME_SET = new Set(['map_plan_route', 'ask_user_questions'])
+const MAP_WEB_FALLBACK_TOOL_NAME_SET = new Set(['web_search', 'web_fetch', 'ask_user_questions'])
 
 export function stampLiveCodexSkillDefinition(
   definition: ToolDefinition,
@@ -269,6 +271,8 @@ export class AgentSdkToolExecutor {
     requestEnvelope?: unknown
     /** P2-2 — the L1 skill catalog is non-empty this turn (gates use_skill exposure). */
     skillCatalogAvailable?: boolean
+    /** Frozen per-turn availability fact. No secret leaves the settings owner. */
+    mapRouteServiceAvailable?: boolean
     onCapabilityResolution?: (resolution: CapabilityResolution) => void
   }): ToolDefinition[] {
     const environmentHints = (
@@ -295,12 +299,14 @@ export class AgentSdkToolExecutor {
       message: params.message,
       requestEnvelope: params.requestEnvelope,
       authorization: params.authorization,
-      requiredCapabilityGroupIds
+      requiredCapabilityGroupIds,
+      mapRouteServiceAvailable: params.mapRouteServiceAvailable === true,
     })
     const directBrowserSurface = params.browserHostAvailable
       && composition === 'additive'
       && environmentHints?.workbenchMode === 'browser'
       && hasTrustedBrowserPageRef
+      && !sdkIntentSurface.mapRouteIntent
     const preResolvedBrowserSurface = params.browserHostAvailable
       && composition === 'additive'
       && (
@@ -453,6 +459,37 @@ export class AgentSdkToolExecutor {
       definitions = definitions.filter(
         (definition) => definition.name !== 'declare_completion_criteria',
       )
+    }
+    if (params.authorization.mode === 'none' && sdkIntentSurface.mapRouteIntent) {
+      if (sdkIntentSurface.mapRouteFallback) {
+        definitions = definitions.filter((definition) => (
+          MAP_WEB_FALLBACK_TOOL_NAME_SET.has(definition.name)
+          || capabilityFloors.toolNames.has(definition.name)
+        ))
+      } else {
+        definitions = definitions.filter((definition) => (
+          MAP_ROUTE_PRIMARY_TOOL_NAME_SET.has(definition.name)
+          || capabilityFloors.toolNames.has(definition.name)
+          || (
+            sdkIntentSurface.intentGroupModes.document === true
+            && definition.domain === 'document'
+          )
+          || (
+            sdkIntentSurface.intentGroupModes.general_research === true
+            && GENERAL_RESEARCH_TOOL_NAME_SET.has(definition.name)
+          )
+          || (
+            (
+              sdkIntentSurface.intentGroupModes.browser_interaction === true
+              || sdkIntentSurface.intentGroupModes.browser_content_tasks === true
+            )
+            && (
+              BROWSER_INTERACTION_TOOL_NAME_SET.has(definition.name)
+              || BROWSER_CONTENT_TASK_TOOL_NAME_SET.has(definition.name)
+            )
+          )
+        ))
+      }
     }
     if (
       params.authorization.mode === 'none'
