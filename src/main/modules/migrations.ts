@@ -4240,6 +4240,20 @@ const migrations: Migration[] = [
       `)
     },
   },
+  {
+    name: '115_interrupt_retired_execution_scopes',
+    up: (db) => {
+      const hasLegacyExecutionScopes = Boolean(db.prepare(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'execution_call_scopes'",
+      ).get())
+      if (!hasLegacyExecutionScopes) return
+      db.prepare(`
+        UPDATE execution_call_scopes
+           SET status = 'interrupted', updated_at = ?
+         WHERE status IN ('prepared', 'running', 'checkpointed')
+      `).run(Date.now())
+    },
+  },
 ]
 
 /**

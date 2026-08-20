@@ -98,6 +98,41 @@ test('fresh database ends with Ready memory and recall truth but no retired memo
   ]) assert.equal(names.has(tableName), true, `missing ${tableName}`)
 })
 
+test('migration 115 interrupts unfinished scopes from the retired execution loop', (t) => {
+  if (skipIfSqliteUnavailable(t, 'legacy execution scope retirement upgrade')) return
+  const Sqlite = loadSqliteAfterGuardForTest()
+  const db = new Sqlite(':memory:')
+  t.after(() => db.close())
+  db.exec(`
+    CREATE TABLE execution_call_scopes (
+      call_scope_id TEXT PRIMARY KEY,
+      status TEXT NOT NULL CHECK (
+        status IN ('prepared', 'running', 'checkpointed', 'settled', 'interrupted', 'cancelled')
+      ),
+      updated_at INTEGER NOT NULL
+    );
+    INSERT INTO execution_call_scopes VALUES
+      ('prepared', 'prepared', 1),
+      ('running', 'running', 1),
+      ('checkpointed', 'checkpointed', 1),
+      ('settled', 'settled', 1),
+      ('cancelled', 'cancelled', 1);
+  `)
+
+  __runMigrationForTests('115_interrupt_retired_execution_scopes', db as unknown as MigrationDatabase)
+  __runMigrationForTests('115_interrupt_retired_execution_scopes', db as unknown as MigrationDatabase)
+
+  assert.deepEqual(db.prepare(`
+    SELECT call_scope_id, status FROM execution_call_scopes ORDER BY call_scope_id
+  `).all(), [
+    { call_scope_id: 'cancelled', status: 'cancelled' },
+    { call_scope_id: 'checkpointed', status: 'interrupted' },
+    { call_scope_id: 'prepared', status: 'interrupted' },
+    { call_scope_id: 'running', status: 'interrupted' },
+    { call_scope_id: 'settled', status: 'settled' },
+  ])
+})
+
 test('legacy belief cards move to independent storage idempotently and conflicts are archived', () => {
   const root = mkdtempSync(join(tmpdir(), 'ready-belief-storage-'))
   try {

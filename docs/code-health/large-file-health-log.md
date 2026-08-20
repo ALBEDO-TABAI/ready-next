@@ -22,7 +22,7 @@
 | 评估日期 | 任务 | 文件 | 总行数 | 本次新增 | 结论 | 判断与后续动作 | 状态 |
 | --- | --- | --- | ---: | ---: | --- | --- | --- |
 | 2026-08-20 | 单一 Ready 身份、旧会话清理与记忆方案 | `src/main/modules/agent-control/codex-runtime/codex-binding-repository.ts` | 8269 | 在 8 月 19 日交付切片后净 +39 | 危险 | 只补记忆快照、读取回执和 cleanup 归档授权，仓库事务职责仍然过密；沿用既有拆分方向，优先下沉 presentation 与只读回执查询。 | 后续拆分；交付时提醒 |
-| 2026-08-20 | 单一 Ready 身份、旧会话清理与记忆方案 | `src/__tests__/codex-binding-repository-native.test.ts` | 7278 | 在 8 月 19 日交付切片后净 +125 | 一般 | 仍是绑定仓库的原生数据库总套件，本轮增加记忆快照、读取回执和 cleanup 全链回归。2026-09-20 复查是否按 memory / cleanup 独立拆套件。 | 已排期：2026-09-20 |
+| 2026-08-20 | 单一 Ready 身份、旧会话清理与记忆方案 | `src/__tests__/codex-binding-repository-native.test.ts` | 7280 | 在 8 月 19 日交付切片后净 +127 | 一般 | 仍是绑定仓库的原生数据库总套件，本轮增加记忆快照、读取回执和 cleanup 全链回归，并覆盖原生已卸载线程的真实归档授权。2026-09-20 复查是否按 memory / cleanup 独立拆套件。 | 已排期：2026-09-20 |
 | 2026-08-20 | 单一 Ready 身份、旧会话清理与记忆方案 | `src/main/modules/agent-control/codex-runtime/codex-runtime-production-composition.ts` | 3686 | 在 8 月 19 日交付切片后净 +113 | 危险 | 本轮只接记忆快照、成功会话封印和空闲 worker；生产装配仍过密，后续把 Ready memory composition 下沉为独立装配单元。 | 后续拆分；交付时提醒 |
 | 2026-08-20 | 单一 Ready 身份、旧会话清理与记忆方案 | `src/__tests__/codex-model-gateway-adversarial.test.ts` | 3356 | 在 8 月 19 日交付切片后净 +46 | 一般 | 增加记忆历史清除与真实请求回执边界，仍属于同一网关对抗套件。2026-09-20 复查是否把 memory history 独立成完整套件。 | 已排期：2026-09-20 |
 | 2026-08-20 | 单一 Ready 身份、旧会话清理与记忆方案 | `src/main/modules/agent-control/codex-runtime/codex-model-gateway.ts` | 2631 | 在 8 月 19 日交付切片后净 +64 | 危险 | 只接请求前记忆清除与密封回执；网关仍混合协议、身份和上游调度，继续沿用既有 transport 拆分方向。 | 后续拆分；交付时提醒 |
@@ -34,7 +34,7 @@
 | 2026-08-20 | 单一 Ready 身份、旧会话清理与记忆方案 | `src/main/modules/agent-control/codex-runtime/codex-tool-binding-repository.ts` | 1026 | 在 8 月 18 日交付切片后净 +24 | 一般 | 只补记忆读取回执的精确工具调用身份。2026-09-20 复查是否迁入独立 memory receipt helper。 | 已排期：2026-09-20 |
 | 2026-08-20 | 单一 Ready 身份、旧会话清理与记忆方案 | `src/shared/ipc-contracts/agent-runtime.ts` | 1014 | 净 +122 | 健康 | 机械聚合的跨进程合同，本轮删除专项入口并新增窄记忆管理与 ProductTurn 读取合同，没有运行职责。 | 无需处理 |
 | 2026-08-20 | 单一 Ready 身份、旧会话清理与记忆方案 | `src/renderer/components/agent/ChatPanel.tsx` | 1266 | 本切片净 +5 | 一般 | 文件仍是聊天面板组合宿主；本轮只在首条 Ready 对话建立后清除启动期误提示。2026-09-20 复查会话 hydration 提示能否随 store hydration 一并下沉。 | 已排期：2026-09-20 |
-| 2026-08-20 | 单一 Ready 身份、旧会话清理与记忆方案 | `src/main/modules/migrations.ts` | 4324 | 工作树净 +80 | 健康 | 仍是单一有序迁移目录；112 号迁移只负责一次性清理，原生线程退役写入已下沉到现有迁移辅助模块，并有真实数据库副本与原生测试覆盖。 | 无需处理 |
+| 2026-08-20 | 单一 Ready 身份、旧会话清理与记忆方案 | `src/main/modules/migrations.ts` | 4338 | 工作树净 +94 | 健康 | 仍是单一有序迁移目录；112 号迁移只负责一次性清理，115 号迁移只结清退役执行链遗留的非终态账目，原生线程退役写入已下沉到现有迁移辅助模块，并有真实数据库副本与原生测试覆盖。 | 无需处理 |
 | 2026-08-20 | 单一 Ready 身份、旧会话清理与记忆方案 | `src/renderer/stores/useAgent.ts` | 2010 | 工作树净 +11；本切片净删选择逻辑 | 危险 | 本轮删除可选 Agent 状态和替换身份入口，没有新增职责；但 store 仍集中会话 hydration、生命周期和 UI 状态，沿用既有结论，后续先下沉会话 hydration。 | 后续拆分；交付时提醒 |
 | 2026-08-19 | Tag Forge 单文档准入与整批终态修复 | `src/__tests__/tag-forge-batch.test.ts` | 1381 | 净 +323 | 一般 | 仍是 Tag Forge 受控写回的单一原生数据库套件，本轮增加精确单文件授权、冲突恢复、审核重启权限、整批回读与文件漂移自恢复场景。2026-09-19 复查是否把资源授权与批次终态场景拆到独立套件。 | 已排期：2026-09-19 |
 | 2026-08-19 | Codex 产物交付与失败历史闭环 | `src/main/modules/agent-control/codex-runtime/codex-binding-repository.ts` | 8230 | 净 +765 | 危险 | 本轮在既有聚合根补统一收口、批量展示读取、旧失败修复、交付回执折叠、精确工具调用身份、重试链上的产物所有权与回收，并使当前文档读取屏障与最终冻结授权一致；事务与查询职责仍过密，后续应先继续下沉只读 presentation SQL 与物化回执 fold。 | 后续拆分；交付时提醒 |

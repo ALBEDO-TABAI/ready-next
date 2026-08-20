@@ -107,7 +107,9 @@ class CleanupArchiveTransport implements CodexJsonLineTransport {
       setTimeout(() => {
         const result = frame.method === 'initialize'
           ? { userAgent: 'ready-cleanup-test/1' }
-          : frame.method === 'thread/read' ? { thread: rootThread() } : {}
+          : frame.method === 'thread/read'
+            ? { thread: { ...rootThread(), status: { type: 'notLoaded' } } }
+            : {}
         this.lineListener?.(JSON.stringify({ id: frame.id, result }))
       }, 0)
     })

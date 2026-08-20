@@ -61,7 +61,7 @@ function exactArchivedThread(intent: CodexThreadArchiveIntentRead, thread: Codex
 }
 
 function archivableThread(thread: CodexThread): boolean {
-  return thread.status.type === 'idle'
+  return (thread.status.type === 'idle' || thread.status.type === 'notLoaded')
     && !thread.turns.some((turn) => turn.status === 'inProgress')
 }
 

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
@@ -256,6 +256,69 @@ test('close COMMIT survives a process crash and the next owner archives exactly 
   }
 })
 
+test('darwin cwd case aliases still identify the exact retired native thread', async (t) => {
+  if (skipIfSqliteUnavailable(t, 'Codex durable thread archive cwd case alias')) return
+  if (process.platform !== 'darwin') {
+    t.skip('darwin filesystem identity only')
+    return
+  }
+  const Database = (await import('better-sqlite3')).default
+  const dir = mkdtempSync(join(tmpdir(), 'ready-codex-archive-case-'))
+  const intentCwd = join(dir, 'Ready', 'codex-threads', 'binding-case')
+  const nativeCwd = join(dir, 'ready', 'codex-threads', 'binding-case')
+  mkdirSync(intentCwd, { recursive: true })
+  if (!existsSync(nativeCwd)) {
+    rmSync(dir, { recursive: true, force: true })
+    t.skip('case-sensitive macOS test volume')
+    return
+  }
+  const db = new Database(':memory:')
+  try {
+    installBaseSchema(db)
+    insertRetiredBinding(db, {
+      threadBindingId: 'binding-case',
+      threadId: 'native-case',
+      aliasId: 'alias-case',
+      cwd: intentCwd,
+    })
+    let archived = false
+    let archiveCalls = 0
+    const store = new CodexThreadArchiveIntentStore(db as unknown as DatabaseConnection)
+    const connectionEpoch = 'connection-case'
+    const dispatchPort = new CodexDurableThreadArchiveDispatchPort({
+      store,
+      now: () => '2026-08-12T01:00:02.000Z',
+    })
+    const thread = {
+      ...rootThread(),
+      id: 'native-case',
+      sessionId: 'native-case',
+      cwd: nativeCwd,
+    }
+    const owner = new CodexThreadArchiveCleanupOwner({
+      store,
+      runtime: runtimeFixture({
+        archived: () => archived,
+        thread,
+        dispatchPort,
+        connectionEpoch: () => connectionEpoch,
+        async onArchive() {
+          archiveCalls += 1
+          archived = true
+        },
+      }),
+      getConnectionEpoch: () => connectionEpoch,
+      now: () => '2026-08-12T01:00:02.000Z',
+    })
+    assert.deepEqual(await owner.drain(), { processed: 1, acknowledged: 1, pending: 0 })
+    assert.equal(archiveCalls, 1)
+    assert.equal(store.readByThreadId('native-case')?.acknowledgementKind, 'rpc_success')
+  } finally {
+    db.close()
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
 test('every irreversible native-thread retirement reason enters the same durable archive authority', async (t) => {
   if (skipIfSqliteUnavailable(t, 'Codex durable retired thread archive coverage')) return
   const Database = (await import('better-sqlite3')).default
@@ -490,7 +553,7 @@ test('the same connection can settle result_unknown only from its exact archived
   }
 })
 
-test('archive dispatch waits for an exact idle readback and never writes an active native thread', async (t) => {
+test('archive dispatch accepts an exact unloaded terminal thread and never writes an active native thread', async (t) => {
   if (skipIfSqliteUnavailable(t, 'Codex durable thread archive active preflight')) return
   const Database = (await import('better-sqlite3')).default
   const db = new Database(':memory:')
@@ -529,7 +592,6 @@ test('archive dispatch waits for an exact idle readback and never writes an acti
 
     for (const blocked of [
       currentThread,
-      { ...rootThread(), status: { type: 'notLoaded' as const } },
       { ...rootThread(), status: { type: 'systemError' as const } },
       { ...rootThread(), id: 'drifted-thread', sessionId: 'drifted-thread' },
       { ...rootThread(), turns: [{ ...rootThread().turns[0], status: 'inProgress' as const }] },
@@ -547,7 +609,7 @@ test('archive dispatch waits for an exact idle readback and never writes an acti
     assert.equal(archiveCalls, 0)
 
     readFailure = false
-    currentThread = rootThread()
+    currentThread = { ...rootThread(), status: { type: 'notLoaded' } }
     assert.deepEqual(await owner.drain(), { processed: 1, acknowledged: 1, pending: 0 })
     assert.equal(archiveCalls, 1)
     assert.equal(events.filter((event) => event === 'archive:native-thread-1').length, 1)
