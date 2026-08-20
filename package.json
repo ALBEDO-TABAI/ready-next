@@ -1,6 +1,6 @@
 {
   "name": "ready",
-  "version": "0.7.9-a",
+  "version": "0.8.0",
   "packageManager": "npm@11.12.1",
   "description": "Ready 是由@上班摸鱼 开发的，面向知识工作者和创作者的通用桌面工作台",
   "main": "./out/main/index.js",
