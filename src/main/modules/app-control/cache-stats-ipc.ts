@@ -16,6 +16,7 @@ import {
 } from './cache-stats-core'
 import { createDiagnosticPack, type DiagnosticPackResult, type DiagnosticRawDb } from './diagnostic-pack-core'
 import { getDatabase } from '../database'
+import type { CodexRuntimeDiagnosticSnapshot } from '../agent-control/codex-runtime/codex-runtime-composition'
 
 interface IPCResponse<T> {
   success: boolean
@@ -27,7 +28,9 @@ interface ClearCachePayload {
   includePuppeteer?: boolean
 }
 
-export function setupAppCacheIPC(): void {
+export function setupAppCacheIPC(options: {
+  readCodexRuntimeDiagnostics: () => Promise<CodexRuntimeDiagnosticSnapshot> | null
+}): void {
   ipcMain.handle('app:getCacheStats', async (): Promise<IPCResponse<CacheStats>> => {
     try {
       const userData = app.getPath('userData')
@@ -65,6 +68,12 @@ export function setupAppCacheIPC(): void {
       } catch {
         rawDb = null
       }
+      let codexRuntime: CodexRuntimeDiagnosticSnapshot | null = null
+      try {
+        codexRuntime = await options.readCodexRuntimeDiagnostics()
+      } catch {
+        codexRuntime = null
+      }
       const result = await createDiagnosticPack({
         outputDir: app.getPath('downloads'),
         logDir: tmpdir(),
@@ -80,6 +89,7 @@ export function setupAppCacheIPC(): void {
           versions: process.versions,
         },
         rawDb,
+        codexRuntime,
       })
       shell.showItemInFolder(result.path)
       return { success: true, data: result }

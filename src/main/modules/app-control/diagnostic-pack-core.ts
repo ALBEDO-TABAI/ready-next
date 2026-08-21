@@ -1,6 +1,7 @@
 import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import JSZip from 'jszip'
+import type { CodexRuntimeDiagnosticSnapshot } from '../agent-control/codex-runtime/codex-runtime-composition'
 
 const MAX_LOG_BYTES = 2 * 1024 * 1024
 const MAX_PREVIEW_CHARS = 280
@@ -72,6 +73,7 @@ export interface CreateDiagnosticPackOptions {
   logDir: string
   appInfo: DiagnosticPackAppInfo
   rawDb?: DiagnosticRawDb | null
+  codexRuntime?: CodexRuntimeDiagnosticSnapshot | null
   now?: Date
 }
 
@@ -338,6 +340,14 @@ export async function createDiagnosticPack(options: CreateDiagnosticPackOptions)
 
   zip.file('manifest.json', JSON.stringify(buildManifest(options.appInfo, createdAt), null, 2))
   zip.file('state/database-summary.json', JSON.stringify(collectDatabaseSummary(options.rawDb), null, 2))
+  zip.file('state/codex-runtime.json', JSON.stringify(options.codexRuntime ?? {
+    status: 'unavailable',
+    runtimeVersion: null,
+    binarySha256: null,
+    connectionEpoch: null,
+    process: null,
+    gauges: [],
+  } satisfies CodexRuntimeDiagnosticSnapshot, null, 2))
   zip.file('README.txt', [
     'Ready diagnostic package',
     '',

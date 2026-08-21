@@ -11,6 +11,7 @@ import {
   type CodexDynamicToolSpec,
   type CodexNativeNotification,
   type CodexNativeRuntime,
+  type CodexServerDiagnostics,
   type CodexThread,
   type CodexThreadListParams,
   type CodexThreadStartParams,
@@ -28,6 +29,7 @@ type JsonObject = Record<string, unknown>
 type StartMethod = 'thread/start' | 'turn/start'
 type ClientMethod =
   | 'initialize'
+  | 'server/diagnostics'
   | 'thread/start'
   | 'thread/list'
   | 'thread/read'
@@ -417,6 +419,51 @@ function normalizeInitializeResult(value: unknown): { userAgent: string } {
   return { userAgent: value.userAgent }
 }
 
+function normalizeServerDiagnosticsResult(value: unknown): CodexServerDiagnostics {
+  if (!isRecord(value) || !hasExactKeys(value, ['process', 'gauges'])) {
+    throw new CodexAppServerClientError('rpc_result_invalid')
+  }
+  const process = value.process
+  if (!isRecord(process)) throw new CodexAppServerClientError('rpc_result_invalid')
+  const processKeys = Object.keys(process)
+  if (
+    !processKeys.includes('id')
+    || processKeys.some((key) => ![
+      'id', 'residentMemoryBytes', 'physicalFootprintBytes',
+    ].includes(key))
+    || !Number.isSafeInteger(process.id)
+    || Number(process.id) < 0
+    || Number(process.id) > 0xffff_ffff
+  ) throw new CodexAppServerClientError('rpc_result_invalid')
+
+  const normalizeBytes = (bytes: unknown): number | null => {
+    if (bytes === undefined || bytes === null) return null
+    if (!Number.isSafeInteger(bytes) || Number(bytes) < 0) {
+      throw new CodexAppServerClientError('rpc_result_invalid')
+    }
+    return Number(bytes)
+  }
+  if (!Array.isArray(value.gauges)) throw new CodexAppServerClientError('rpc_result_invalid')
+  const gauges = value.gauges.map((gauge) => {
+    if (
+      !isRecord(gauge)
+      || !hasExactKeys(gauge, ['name', 'value'])
+      || typeof gauge.name !== 'string'
+      || !Number.isSafeInteger(gauge.value)
+      || Number(gauge.value) < 0
+    ) throw new CodexAppServerClientError('rpc_result_invalid')
+    return { name: gauge.name, value: Number(gauge.value) }
+  })
+  return {
+    process: {
+      id: Number(process.id),
+      residentMemoryBytes: normalizeBytes(process.residentMemoryBytes),
+      physicalFootprintBytes: normalizeBytes(process.physicalFootprintBytes),
+    },
+    gauges,
+  }
+}
+
 function normalizeThreadListResult(value: unknown): {
   data: CodexThread[]
   nextCursor: string | null
@@ -529,6 +576,14 @@ export class CodexAppServerClient implements CodexNativeRuntime {
       this.closeForProtocolFailure(error)
       throw error
     }
+  }
+
+  async serverDiagnostics(): Promise<CodexServerDiagnostics> {
+    return this.request(
+      'server/diagnostics',
+      {},
+      normalizeServerDiagnosticsResult,
+    ) as Promise<CodexServerDiagnostics>
   }
 
   async threadStart(params: CodexThreadStartParams): Promise<{

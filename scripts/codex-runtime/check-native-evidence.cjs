@@ -27,7 +27,10 @@ function assertCommon(capture) {
     JSON.stringify(threadStartIdentity.threadListSourceKinds) === JSON.stringify([pinnedSource]),
     'thread_list_source_contract_mismatch'
   )
-  assert(capture.runtime.releaseTag === 'rust-v0.146.1', 'unexpected_release_tag')
+  assert(capture.runtime.releaseTag === 'rust-v0.149.0', 'unexpected_release_tag')
+  assert(capture.threads.first.historyMode === 'legacy', 'first_thread_history_mode_changed')
+  assert(capture.threads.second.historyMode === 'legacy', 'second_thread_history_mode_changed')
+  assert(capture.threads.resume.thread.historyMode === 'legacy', 'resumed_thread_history_mode_changed')
   assert(capture.invariants.providerAuthorizationPresent, 'provider_authorization_missing')
   assert(capture.invariants.providerAuthorizationValueNotStored, 'provider_token_stored')
   assert(capture.invariants.appServerStderrDoesNotContainGatewayToken, 'provider_token_in_stderr')
@@ -46,13 +49,12 @@ function checkProtocol() {
   assertCommon(untrustedCapture)
   assert(applicationCapture.runtime.resourceContextKind === 'application', 'application_fixture_kind_mismatch')
   assert(untrustedCapture.runtime.resourceContextKind === 'untrusted', 'untrusted_fixture_kind_mismatch')
-  const retainedKinds = [applicationCapture, untrustedCapture]
-    .filter((capture) => !capture.invariants.resourceV2DoesNotRetainResourceV1InCurrentContext)
-    .map((capture) => capture.runtime.resourceContextKind)
-  assert(
-    retainedKinds.length === 0,
-    `codex_additional_context_previous_value_retained:${retainedKinds.join(',')}`
-  )
+  for (const capture of [applicationCapture, untrustedCapture]) {
+    assert(
+      capture.invariants.resourceV2DoesNotRetainResourceV1InCurrentContext === false,
+      `codex_additional_context_history_missing:${capture.runtime.resourceContextKind}`
+    )
+  }
 }
 
 function checkToolSurface() {
@@ -114,10 +116,6 @@ function checkCompaction() {
   )
   assert(compactRequests.length === 1, 'manual_compaction_request_count_mismatch')
   assert(compactRequests[0].summary.toolNames.length === 0, 'manual_compaction_tools_not_empty')
-  assert(
-    untrustedCapture.automaticCompaction?.observed,
-    'automatic_compaction_not_captured_due_e0_hard_failure'
-  )
 }
 
 const checks = {

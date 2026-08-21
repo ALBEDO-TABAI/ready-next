@@ -3639,6 +3639,33 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
     readProductTurnPresentations(readyRunIds) {
       return repository.readProductTurnPresentations(readyRunIds)
     },
+    async readRuntimeDiagnostics() {
+      const unavailable = {
+        status: 'unavailable' as const,
+        runtimeVersion: verified.manifest.codexVersion,
+        binarySha256: verified.manifest.binarySha256,
+        connectionEpoch: null,
+        process: null,
+        gauges: [],
+      }
+      const session = sidecarSession
+      if (lifecycle !== 'running' || !session) return unavailable
+      try {
+        const connectionEpoch = session.getActiveConnectionEpoch()
+        const diagnostics = await nativeRuntime.serverDiagnostics()
+        if (!session.isConnectionLive(connectionEpoch)) return unavailable
+        return {
+          status: 'available' as const,
+          runtimeVersion: verified.manifest.codexVersion,
+          binarySha256: verified.manifest.binarySha256,
+          connectionEpoch,
+          process: diagnostics.process,
+          gauges: diagnostics.gauges,
+        }
+      } catch {
+        return unavailable
+      }
+    },
     bindHost(boundHost) {
       if (host && host !== boundHost) throw new Error('codex_runtime_host_already_bound')
       if (lifecycle !== 'new') throw new Error('codex_runtime_host_bind_too_late')

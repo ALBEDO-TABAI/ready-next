@@ -1,10 +1,9 @@
-const crypto = require('node:crypto')
 const fs = require('node:fs')
 const http = require('node:http')
 const os = require('node:os')
 const path = require('node:path')
 const readline = require('node:readline')
-const { spawn } = require('node:child_process')
+const { execFileSync, spawn } = require('node:child_process')
 const {
   assert,
   assetRoot,
@@ -32,6 +31,17 @@ function listen(server) {
 
 function closeServer(server) {
   return new Promise((resolve) => server.close(resolve))
+}
+
+function readProcessEnvironment(pid) {
+  const command = execFileSync('/bin/ps', [
+    'eww', '-p', String(pid), '-o', 'command='
+  ], { encoding: 'utf8', maxBuffer: 2 * 1024 * 1024 })
+  return Object.fromEntries(command.trim().split(' ').flatMap((token) => {
+    const separator = token.indexOf('=')
+    if (separator < 1 || !/^[A-Z][A-Z0-9_]*$/.test(token.slice(0, separator))) return []
+    return [[token.slice(0, separator), token.slice(separator + 1)]]
+  }))
 }
 
 function readBody(request) {
@@ -430,6 +440,11 @@ async function run() {
     env: childEnv,
     stdio: ['pipe', 'pipe', 'pipe']
   })
+  const observedProcessEnvironment = readProcessEnvironment(child.pid)
+  assert(
+    digestJson(observedProcessEnvironment) === digestJson(childEnv),
+    'codex_child_environment_process_readback_mismatch'
+  )
   const client = new JsonLineClient(child)
   try {
     const initialize = await client.request('initialize', {
@@ -488,7 +503,7 @@ async function run() {
       },
       responsesapiClientMetadata: metadata('ready-run-first')
     })
-    const readAfterFirst = await client.request('thread/read', {
+    await client.request('thread/read', {
       threadId: threadA.thread.id,
       includeTurns: true
     })
@@ -502,7 +517,7 @@ async function run() {
       },
       responsesapiClientMetadata: metadata('ready-run-second')
     })
-    const readAfterSecond = await client.request('thread/read', {
+    await client.request('thread/read', {
       threadId: threadA.thread.id,
       includeTurns: true
     })
@@ -606,6 +621,7 @@ async function run() {
       childEnvironment: {
         keys: Object.keys(childEnv),
         hostCanaryPresent: false,
+        observedProcessEnvironmentDigest: digestJson(observedProcessEnvironment),
         ownershipMarkers: {
           processLeaseId: childEnv.READY_CODEX_PROCESS_LEASE_ID,
           spawnInstanceId: childEnv.READY_CODEX_SIDECAR_SPAWN_INSTANCE_ID,

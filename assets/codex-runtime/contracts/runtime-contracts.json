@@ -1,6 +1,6 @@
 {
   "contractVersion": 1,
-  "pinnedCodexVersion": "0.146.1",
+  "pinnedCodexVersion": "0.149.0",
   "startIdentityRegistryCapacity": 64,
   "agentMessageFinalSelectionContract": {
     "phaseEnum": [

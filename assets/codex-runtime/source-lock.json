@@ -1,21 +1,21 @@
 {
   "schemaVersion": 1,
   "sourceRepo": "https://github.com/openai/codex",
-  "releaseUrl": "https://github.com/openai/codex/releases/tag/rust-v0.146.1",
-  "releaseTag": "rust-v0.146.1",
-  "annotatedTagObject": "abb1de9be901ab658fec7bbbc4a1fa2e85512be3",
-  "gitCommit": "79b4f03d35962b005b007a015113b38930711665",
-  "codexVersion": "0.146.1",
+  "releaseUrl": "https://github.com/openai/codex/releases/tag/rust-v0.149.0",
+  "releaseTag": "rust-v0.149.0",
+  "annotatedTagObject": "a4e15bf371341b067c8278d3b70b1a8c7b3d793e",
+  "gitCommit": "758ef40f50c1a458425c7cfbf1eb12cbc07af0b0",
+  "codexVersion": "0.149.0",
   "platform": "darwin",
   "architecture": "arm64",
   "targetTriple": "aarch64-apple-darwin",
   "releaseAsset": {
     "name": "codex-aarch64-apple-darwin.tar.gz",
-    "url": "https://github.com/openai/codex/releases/download/rust-v0.146.1/codex-aarch64-apple-darwin.tar.gz",
-    "archiveSha256": "337c5eb270d24bd556c46ad7814db62c2464b1eb0a253106bc98678dbd781821",
+    "url": "https://github.com/openai/codex/releases/download/rust-v0.149.0/codex-aarch64-apple-darwin.tar.gz",
+    "archiveSha256": "0cef4f9629af7b6bcc4b4de2adb63337d1e77a00a811e66281da5356e3e74fc6",
     "binaryNameInArchive": "codex-aarch64-apple-darwin",
-    "binarySha256": "35d248101b211d6248ad4e6b8c1d441fe81236da87afb9f3e9ea51a049e9f179",
-    "binarySizeBytes": 270973936,
+    "binarySha256": "f4a74117b8142cda581c95ff753abf4508b5636d89682c1ed77e4a9249af8963",
+    "binarySizeBytes": 220538240,
     "buildRecipe": "official-release-asset"
   },
   "signingEvidence": {
@@ -44,21 +44,21 @@
     ],
     "stableBundle": {
       "path": "schemas/stable/codex_app_server_protocol.schemas.json",
-      "sha256": "75bb1353d7f6aa5a2577a761d09307bcb93014700ead5aaf07fa9d453b98eed3"
+      "sha256": "02a4c63a638fdae4a5f6c3ad32a41a377b642c66f3abc84f6fc47c7f3d6074df"
     },
     "stableV2Bundle": {
       "path": "schemas/stable/codex_app_server_protocol.v2.schemas.json",
-      "checkedInSha256": "e73b948f24079b1c531a64d5763f4820928b795613b72acf69d5764ba7f5c7e9",
-      "semanticSha256": "0dbb75599e372f1d46acb5fb31703909acd5794de39f6c027a70dea3dc38d366"
+      "checkedInSha256": "9b3de71a5a2ffc980b792a18aa8f8dec3f85f48829560222a0264fe494b679a9",
+      "semanticSha256": "38483e82eb7170aaa49861a9690734f1201249ae8207d84e3300c7a1c06412e1"
     },
     "experimentalBundle": {
       "path": "schemas/experimental/codex_app_server_protocol.schemas.json",
-      "sha256": "422e5b0e742f1b63ad33122e07856a03e8867256468c5f7226ea7413ea8e45bb"
+      "sha256": "4f4a8d8f53f971b97f818639f58c8d26bb68bfcdfa2d2f20572cb97e6761ab91"
     },
     "experimentalV2Bundle": {
       "path": "schemas/experimental/codex_app_server_protocol.v2.schemas.json",
-      "checkedInSha256": "1f872d3d77b573680242181a80e2d15858716c57edc4df834cfe8418adeb15ad",
-      "semanticSha256": "39fd83adf1f335dfaf8b68dddbe7c177824af4122fb695c912cb6e2d252d49e1"
+      "checkedInSha256": "6f76cce25156d405f1da54f205751e38f7b9eb42246ac0742b9958dd60275350",
+      "semanticSha256": "d31c85f8979f456fddf2459c047123a58a6ecd4527b761886b946092261a932c"
     }
   }
 }

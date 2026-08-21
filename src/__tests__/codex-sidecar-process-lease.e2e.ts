@@ -849,6 +849,7 @@ test('real app-server uses durable bindings, exact tools, compaction, and proces
     const postInterruptTurn = await runProductTurn(postInterruptRun, 'POST_INTERRUPT_TOKEN')
     assert.equal(postInterruptTurn.status, 'completed')
 
+    const autoCompactRequestStart = providerRequests.length
     const autoCompactArmRun = reserveAndAdmit('run-auto-compact-arm', true)
     await runProductTurn(autoCompactArmRun, 'AUTO_COMPACT_ARM_TOKEN')
     const autoCompactObserveRun = reserveAndAdmit('run-auto-compact-observe', true)
@@ -908,6 +909,10 @@ test('real app-server uses durable bindings, exact tools, compaction, and proces
       }),
     )
     assert.equal(collectedAfterCompaction.engineOutcome, 'completed')
+    assert.deepEqual(
+      providerRequests.slice(autoCompactRequestStart).map(providerToolNames),
+      [['ready_read_probe'], [], ['ready_read_probe']],
+    )
     assert.equal(db.prepare(`
       SELECT COUNT(*) AS count FROM codex_manual_compaction_bindings
     `).get<{ count: number }>()?.count, 0)

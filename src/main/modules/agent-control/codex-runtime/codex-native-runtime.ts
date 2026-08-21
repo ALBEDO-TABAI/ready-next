@@ -64,6 +64,18 @@ export type CodexTurnStartParams = {
   }
 }
 
+export type CodexServerDiagnostics = {
+  process: {
+    id: number
+    residentMemoryBytes: number | null
+    physicalFootprintBytes: number | null
+  }
+  gauges: Array<{
+    name: string
+    value: number
+  }>
+}
+
 export type CodexSubAgentSource =
   | 'review'
   | 'compact'
@@ -309,10 +321,16 @@ export const CODEX_OPT_OUT_NOTIFICATION_METHODS = [
   'windows/worldWritableWarning',
   'windowsSandbox/setupCompleted',
   'account/login/completed',
+  'autoApprovalReview/strictReviewRequired',
+  'project/changed',
+  'thread/project/updated',
+  'thread/queue/changed',
+  'thread/reverted',
 ] as const
 
 export interface CodexNativeRuntime {
   initialize(): Promise<{ userAgent: string }>
+  serverDiagnostics(): Promise<CodexServerDiagnostics>
   threadStart(params: CodexThreadStartParams): Promise<{
     thread: CodexThread
     instructionSources: string[]

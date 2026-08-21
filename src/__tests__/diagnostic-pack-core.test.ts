@@ -155,6 +155,18 @@ test('diagnostic pack exports logs and redacted state summaries', async () => {
       outputDir,
       logDir,
       rawDb: makeRawDb(),
+      codexRuntime: {
+        status: 'available',
+        runtimeVersion: '0.149.0',
+        binarySha256: 'f4a74117b8142cda581c95ff753abf4508b5636d89682c1ed77e4a9249af8963',
+        connectionEpoch: 'epoch-1',
+        process: {
+          id: 321,
+          residentMemoryBytes: 1024,
+          physicalFootprintBytes: 2048,
+        },
+        gauges: [{ name: 'loaded_threads', value: 2 }],
+      },
       now: new Date('2026-06-08T03:04:05.000Z'),
       appInfo: {
         appName: 'Ready',
@@ -172,6 +184,7 @@ test('diagnostic pack exports logs and redacted state summaries', async () => {
     const archive = await JSZip.loadAsync(await readFile(result.path))
     assert.ok(archive.file('manifest.json'))
     assert.ok(archive.file('state/database-summary.json'))
+    assert.ok(archive.file('state/codex-runtime.json'))
     assert.ok(archive.file('state/package-result.json'))
     assert.ok(archive.file('logs/ready-agent-sdk.log'))
     assert.equal(archive.file('logs/not-ready.log'), null)
@@ -194,6 +207,53 @@ test('diagnostic pack exports logs and redacted state summaries', async () => {
     assert.equal(summary.recentRunMeta[0].budget_json.toolCallsUsed, 60)
     assert.equal(summary.recentRunMeta[0].continuation_ref_json.runStatePath, '/tmp/out/run_state.json')
     assert.deepEqual(result.skippedLogs, [])
+    const codexRuntime = JSON.parse(await archive.file('state/codex-runtime.json')!.async('string'))
+    assert.deepEqual(codexRuntime, {
+      status: 'available',
+      runtimeVersion: '0.149.0',
+      binarySha256: 'f4a74117b8142cda581c95ff753abf4508b5636d89682c1ed77e4a9249af8963',
+      connectionEpoch: 'epoch-1',
+      process: {
+        id: 321,
+        residentMemoryBytes: 1024,
+        physicalFootprintBytes: 2048,
+      },
+      gauges: [{ name: 'loaded_threads', value: 2 }],
+    })
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('diagnostic pack stays exportable when the Codex runtime is unavailable', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'ready-diagnostic-pack-unavailable-'))
+  try {
+    const result = await createDiagnosticPack({
+      outputDir: join(root, 'out'),
+      logDir: join(root, 'missing-logs'),
+      now: new Date('2026-08-21T03:04:05.000Z'),
+      appInfo: {
+        appName: 'Ready',
+        appVersion: '0.8.0',
+        isPackaged: false,
+        appPath: '/tmp/Ready.app',
+        userDataPath: '/tmp/Ready',
+        logsPath: '/tmp',
+        platform: 'darwin',
+        arch: 'arm64',
+        versions: { node: '26.0.0' } as NodeJS.ProcessVersions,
+      },
+    })
+    const archive = await JSZip.loadAsync(await readFile(result.path))
+    const codexRuntime = JSON.parse(await archive.file('state/codex-runtime.json')!.async('string'))
+    assert.deepEqual(codexRuntime, {
+      status: 'unavailable',
+      runtimeVersion: null,
+      binarySha256: null,
+      connectionEpoch: null,
+      process: null,
+      gauges: [],
+    })
   } finally {
     await rm(root, { recursive: true, force: true })
   }

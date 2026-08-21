@@ -1026,6 +1026,10 @@ export class AgentControlRuntime extends EventEmitter {
     return this.codexRuntime.readProductTurnPresentations(readyRunIds)
   }
 
+  readCodexRuntimeDiagnostics() {
+    return this.codexRuntime.readRuntimeDiagnostics()
+  }
+
   readReadyMemory(request: ReadyMemoryReadRequest) {
     return this.codexRuntime.memoryRuntime.read(request)
   }

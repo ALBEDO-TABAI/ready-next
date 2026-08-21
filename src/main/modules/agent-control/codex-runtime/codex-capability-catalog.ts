@@ -46,7 +46,7 @@ export const BROWSER_CURRENT_ACT_TOOL_NAMES = BROWSER_CURRENT_PAGE_TOOL_NAMES.fi
 )
 
 /**
- * P0 result for pinned rust-v0.146.1. This is a source-time constant, not a
+ * P0 result for pinned rust-v0.149.0. This is a source-time constant, not a
  * runtime switch. Flip only after the real app-server experiment records a
  * pass; do not keep an eager/deferred product fork.
  */

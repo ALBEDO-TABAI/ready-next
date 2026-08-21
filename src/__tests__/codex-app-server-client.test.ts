@@ -481,7 +481,66 @@ test('initialize and typed methods serialize only their exact public protocol su
   assert.equal((await reading).thread.id, 'thread-1')
 })
 
-test('pinned 0.146.1 notifications close exactly as 9 projected, 10 passive, 1 reroute, and 50 opted out', () => {
+test('server diagnostics distinguishes available, unsupported, and malformed responses', async () => {
+  const available = makeClient()
+  await initializeClient(available)
+  const reading = available.client.serverDiagnostics()
+  await waitFor(() => available.transport.writes.length === 1)
+  const frame = JSON.parse(available.transport.writes[0]) as {
+    id: number
+    method: string
+    params: unknown
+  }
+  assert.deepEqual(frame, {
+    id: frame.id,
+    method: 'server/diagnostics',
+    params: {},
+  })
+  available.transport.emit({
+    id: frame.id,
+    result: {
+      process: { id: 123, residentMemoryBytes: 456, physicalFootprintBytes: null },
+      gauges: [{ name: 'threads', value: 2 }],
+    },
+  })
+  assert.deepEqual(await reading, {
+    process: { id: 123, residentMemoryBytes: 456, physicalFootprintBytes: null },
+    gauges: [{ name: 'threads', value: 2 }],
+  })
+
+  const unsupported = makeClient()
+  await initializeClient(unsupported)
+  const unsupportedRead = unsupported.client.serverDiagnostics()
+  await waitFor(() => unsupported.transport.writes.length === 1)
+  const unsupportedFrame = JSON.parse(unsupported.transport.writes[0]) as { id: number }
+  unsupported.transport.emit({
+    id: unsupportedFrame.id,
+    error: { code: -32601, message: 'Method not found' },
+  })
+  await assert.rejects(unsupportedRead, (error: unknown) => (
+    error instanceof CodexAppServerClientError
+    && error.code === 'rpc_rejected'
+    && (error.details as { message?: string }).message === 'Method not found'
+  ))
+
+  const malformed = makeClient()
+  await initializeClient(malformed)
+  const malformedRead = malformed.client.serverDiagnostics()
+  await waitFor(() => malformed.transport.writes.length === 1)
+  const malformedFrame = JSON.parse(malformed.transport.writes[0]) as { id: number }
+  malformed.transport.emit({
+    id: malformedFrame.id,
+    result: {
+      process: { id: 123 },
+      gauges: [{ name: 'threads', value: -1 }],
+    },
+  })
+  await assert.rejects(malformedRead, (error: unknown) => (
+    error instanceof CodexAppServerClientError && error.code === 'rpc_result_invalid'
+  ))
+})
+
+test('pinned 0.149.0 notifications close exactly as 9 projected, 10 passive, 1 reroute, and 55 opted out', () => {
   const schema = JSON.parse(readFileSync(resolve(
     'assets/codex-runtime/schemas/stable/codex_app_server_protocol.v2.schemas.json',
   ), 'utf8')) as {
@@ -503,10 +562,10 @@ test('pinned 0.146.1 notifications close exactly as 9 projected, 10 passive, 1 r
 
   assert.equal(CODEX_PROJECTED_NOTIFICATION_METHODS.length, 9)
   assert.equal(CODEX_PASSIVE_NOTIFICATION_METHODS.length, 10)
-  assert.equal(CODEX_OPT_OUT_NOTIFICATION_METHODS.length, 50)
-  assert.equal(pinnedMethods.length, 70)
-  assert.equal(new Set(pinnedMethods).size, 70)
-  assert.equal(new Set(classifiedMethods).size, 70)
+  assert.equal(CODEX_OPT_OUT_NOTIFICATION_METHODS.length, 55)
+  assert.equal(pinnedMethods.length, 75)
+  assert.equal(new Set(pinnedMethods).size, 75)
+  assert.equal(new Set(classifiedMethods).size, 75)
   assert.deepEqual([...classifiedMethods].sort(), [...pinnedMethods].sort())
 })
 

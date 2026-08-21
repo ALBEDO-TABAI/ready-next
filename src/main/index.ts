@@ -12,6 +12,7 @@ import {
   setupAgentIPC,
   cleanupAgentRuntime,
   migrateAgentChannelCredentialsAfterWindowReady,
+  readAgentCodexRuntimeDiagnostics,
 } from './modules/claude-bridge/ipc-handler'
 import { AgentManager } from './modules/claude-bridge/agent-manager'
 import { startRendererBeforeRuntimeReady } from './modules/claude-bridge/runtime-startup-slot'
@@ -779,7 +780,9 @@ function setupGlobalIPC(): void {
       resourcesPath: process.resourcesPath,
       ensureDockApp: ensureDockIconVisible,
     })
-  setupAppCacheIPC()
+  setupAppCacheIPC({
+    readCodexRuntimeDiagnostics: () => readAgentCodexRuntimeDiagnostics(),
+  })
   setupNativeContextMenuIPC(() => mainWindow)
   setupSkillsIPC()
 

@@ -36,6 +36,7 @@ export class StableNativeRuntime implements CodexNativeRuntime {
   }
 
   async initialize(): Promise<{ userAgent: string }> { throw new Error('codex_initialize_owned_by_boot') }
+  serverDiagnostics() { return this.current().serverDiagnostics() }
   threadStart(params: CodexThreadStartParams) { return this.current().threadStart(params) }
   threadRead(params: { threadId: string; includeTurns: true }) { return this.current().threadRead(params) }
   threadList(params: CodexThreadListParams) { return this.current().threadList(params) }

@@ -79,10 +79,14 @@ function requestBody(toolNames: string[] = []): JsonObject {
       'x-codex-window-id': 'thread-1:0',
       turn_id: 'turn-1',
       thread_id: 'thread-1',
+      root_turn_id: 'turn-1',
       'x-codex-turn-metadata': JSON.stringify({
         installation_id: 'installation-adversarial', session_id: 'thread-1',
         thread_id: 'thread-1', turn_id: 'turn-1', window_id: 'thread-1:0',
-        request_kind: 'turn', sandbox: 'seatbelt', turn_started_at_unix_ms: 1,
+        root_turn_id: 'turn-1', agent_name: '/root', request_kind: 'turn',
+        sandbox: 'seatbelt', sandbox_mode: 'read-only', auto_review_enabled: false,
+        node_repl_auto_review_required: false, node_repl_disabled: false,
+        turn_started_at_unix_ms: 1,
         readyRunId: 'run-1',
         toolSurfaceDigest: digestCanonicalJson(tools), turnContractDigest: 'turn-contract-1',
         upstreamProfileSnapshotDigest: 'pending',
@@ -859,6 +863,10 @@ test('malformed signed Chat tool controls fail before upstream contact', async (
       ;(request.client_metadata as JsonObject).turn_id = 'forged-turn'
     })
     assert.match(turnMismatch.body, /gateway_metadata_identity_mismatch/)
+    const rootTurnMismatch = await call((request) => {
+      ;(request.client_metadata as JsonObject).root_turn_id = 'forged-root-turn'
+    })
+    assert.match(rootTurnMismatch.body, /gateway_root_turn_identity_mismatch/)
     const cacheMismatch = await call((request) => { request.prompt_cache_key = 'forged-thread' })
     assert.match(cacheMismatch.body, /gateway_root_prompt_cache_thread_mismatch/)
     const sessionMismatch = await call((request) => {

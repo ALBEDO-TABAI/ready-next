@@ -24,6 +24,7 @@ import { CodexTurnInputBuilder } from './codex-turn-input-builder'
 import type {
   CodexNativeNotification,
   CodexNativeRuntime,
+  CodexServerDiagnostics,
   CodexThreadListParams,
   CodexThreadStartParams,
   CodexTurnStartParams,
@@ -264,6 +265,15 @@ export interface ReadyMemoryRuntimePort {
   reset(request: ReadyMemoryResetRequest): ReadyMemoryView
 }
 
+export type CodexRuntimeDiagnosticSnapshot = {
+  status: 'available' | 'unavailable'
+  runtimeVersion: string | null
+  binarySha256: string | null
+  connectionEpoch: string | null
+  process: CodexServerDiagnostics['process'] | null
+  gauges: CodexServerDiagnostics['gauges']
+}
+
 export interface CodexRuntimeComposition {
   nativeRuntime: CodexNativeRuntime
   collector: CodexTurnCollector
@@ -276,6 +286,7 @@ export interface CodexRuntimeComposition {
   canonicalCloseoutTransactionParticipant: CanonicalCoreCloseoutTransactionParticipant
   readProductTurnPresentation(readyRunId: string): ProductTurnReceipt
   readProductTurnPresentations(readyRunIds: readonly string[]): ProductTurnReceipt[]
+  readRuntimeDiagnostics(): Promise<CodexRuntimeDiagnosticSnapshot>
   bindHost(host: CodexRuntimeHostPort): void
   sealIngress(reason: string): void
   ensureReadyForUserIngress(): Promise<void>
@@ -289,6 +300,7 @@ class UnavailableCodexNativeRuntime implements CodexNativeRuntime {
   }
 
   async initialize(): Promise<never> { return this.unavailable() }
+  async serverDiagnostics(): Promise<never> { return this.unavailable() }
   async threadStart(_params: CodexThreadStartParams): Promise<never> { return this.unavailable() }
   async threadRead(_params: { threadId: string; includeTurns: true }): Promise<never> { return this.unavailable() }
   async threadList(_params: CodexThreadListParams): Promise<never> { return this.unavailable() }
@@ -422,6 +434,16 @@ export function createE2UnavailableCodexRuntimeComposition(): CodexRuntimeCompos
       throw new Error('codex_product_turn_presentation_unavailable')
     },
     readProductTurnPresentations() { return [] },
+    async readRuntimeDiagnostics() {
+      return {
+        status: 'unavailable',
+        runtimeVersion: null,
+        binarySha256: null,
+        connectionEpoch: null,
+        process: null,
+        gauges: [],
+      }
+    },
     bindHost() {},
     sealIngress() {},
     async ensureReadyForUserIngress() {},

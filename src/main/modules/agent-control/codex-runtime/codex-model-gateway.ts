@@ -340,9 +340,11 @@ function parseMetadata(body: JsonObject): CodexModelGatewayMetadata {
     'thread_id',
     'x-codex-turn-metadata',
   ]
+  const actualOuterKeys = Object.keys(body.client_metadata).sort()
+  const hasRootTurnId = actualOuterKeys.includes('root_turn_id')
   if (
-    JSON.stringify(Object.keys(body.client_metadata).sort())
-    !== JSON.stringify([...outerKeys].sort())
+    JSON.stringify(actualOuterKeys)
+    !== JSON.stringify([...outerKeys, ...(hasRootTurnId ? ['root_turn_id'] : [])].sort())
   ) throw new CodexModelGatewayError('gateway_client_metadata_shape_invalid')
   const rawMetadata = body.client_metadata['x-codex-turn-metadata']
   if (typeof rawMetadata !== 'string') throw new CodexModelGatewayError('gateway_turn_metadata_missing')
@@ -360,7 +362,12 @@ function parseMetadata(body: JsonObject): CodexModelGatewayMetadata {
     'turn_id',
     'window_id',
     'request_kind',
+    'agent_name',
+    'auto_review_enabled',
+    'node_repl_auto_review_required',
+    'node_repl_disabled',
     'sandbox',
+    'sandbox_mode',
     'turn_started_at_unix_ms',
   ]
   let metadataKind: CodexModelGatewayRequestKind
@@ -378,10 +385,11 @@ function parseMetadata(body: JsonObject): CodexModelGatewayMetadata {
   const expectedInnerKeys = metadataKind === 'product'
     ? [
         ...baseInnerKeys,
+        ...(hasRootTurnId ? ['root_turn_id'] : []),
         ...readyKeys,
       ]
     : metadataKind === 'automatic_compaction'
-      ? [...baseInnerKeys, 'compaction', ...readyKeys]
+      ? [...baseInnerKeys, 'root_turn_id', 'compaction', ...readyKeys]
       : [...baseInnerKeys, 'compaction']
   if (
     JSON.stringify(Object.keys(parsed).sort()) !== JSON.stringify(expectedInnerKeys.sort())
@@ -399,6 +407,11 @@ function parseMetadata(body: JsonObject): CodexModelGatewayMetadata {
     || nonEmptyString(outer['x-codex-window-id'], 'gateway_window_id_missing')
       !== nonEmptyString(parsed.window_id, 'gateway_window_id_missing')
   ) throw new CodexModelGatewayError('gateway_metadata_identity_mismatch')
+  if (hasRootTurnId && (
+    nonEmptyString(outer.root_turn_id, 'gateway_root_turn_id_missing')
+      !== nonEmptyString(parsed.root_turn_id, 'gateway_root_turn_id_missing')
+    || parsed.root_turn_id !== parsed.turn_id
+  )) throw new CodexModelGatewayError('gateway_root_turn_identity_mismatch')
   if (parsed.session_id !== parsed.thread_id) {
     throw new CodexModelGatewayError('gateway_root_session_thread_mismatch')
   }
@@ -413,6 +426,11 @@ function parseMetadata(body: JsonObject): CodexModelGatewayMetadata {
   }
   if (
     parsed.sandbox !== 'seatbelt'
+    || parsed.sandbox_mode !== 'read-only'
+    || parsed.agent_name !== '/root'
+    || parsed.auto_review_enabled !== false
+    || parsed.node_repl_auto_review_required !== false
+    || parsed.node_repl_disabled !== false
     || !Number.isSafeInteger(parsed.turn_started_at_unix_ms)
     || Number(parsed.turn_started_at_unix_ms) < 0
   ) throw new CodexModelGatewayError('gateway_turn_metadata_value_invalid')

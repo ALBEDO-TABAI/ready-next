@@ -280,14 +280,6 @@
       "area": "ui-history"
     },
     {
-      "file": "src/__tests__/codex-runtime-host-boundary.test.ts",
-      "rule": "ready/no-source-grep-test",
-      "snippetHash": "e7d6eec85ecec77e",
-      "line": 129,
-      "snippet": "const schemaSource = readFileSync(",
-      "area": "ui-history"
-    },
-    {
       "file": "src/__tests__/database.test.ts",
       "rule": "ready/no-source-grep-test",
       "snippetHash": "c97336fe7b7eedc7",

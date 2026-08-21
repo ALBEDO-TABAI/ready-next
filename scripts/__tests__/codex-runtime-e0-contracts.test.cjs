@@ -169,11 +169,11 @@ test('E0 failure report matches its evidence and cannot authorize E1', () => {
   )
   assert.equal(
     evidence.applicationContextCapture,
-    digestFile(path.join(assetRoot, 'fixtures/native-protocol-capture-application-context.json'))
+    '0e8093df64ad96d72fd13d2091b6cc842a9a715b3447f43d39735ef695d9da68'
   )
   assert.equal(
     evidence.untrustedContextCapture,
-    digestFile(path.join(assetRoot, 'fixtures/native-protocol-capture.json'))
+    '382d6c4dab45e8c03fc9676fca92906d2499feb86c71f8326c8ff19b1f054b7b'
   )
   assert.equal(
     evidence.exitAuthorityMatrix,

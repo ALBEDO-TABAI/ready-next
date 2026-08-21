@@ -147,6 +147,10 @@ export async function migrateAgentChannelCredentialsAfterWindowReady(): Promise<
   await runtime.migrateStoredChannelCredentialsOnce()
 }
 
+export function readAgentCodexRuntimeDiagnostics() {
+  return runtime?.readCodexRuntimeDiagnostics() ?? null
+}
+
 /**
  * Stage U (PR 1, B.4b) — module-scoped guard so the ask_user_questions DB
  * sweep runs at most once per main-process lifetime. `setupAgentIPC` is

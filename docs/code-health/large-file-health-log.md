@@ -21,6 +21,13 @@
 
 | 评估日期 | 任务 | 文件 | 总行数 | 本次新增 | 结论 | 判断与后续动作 | 状态 |
 | --- | --- | --- | ---: | ---: | --- | --- | --- |
+| 2026-08-21 | Codex runtime 0.149.0 采用 | `src/main/modules/agent-control/codex-runtime/codex-model-gateway.ts` | 2649 | 本切片净 +18 | 危险 | 只收紧 0.149 的请求身份形状；网关仍混合协议、身份与上游调度，沿用既有 transport 拆分方向。 | 后续拆分；交付时提醒 |
+| 2026-08-21 | Codex runtime 0.149.0 采用 | `src/main/modules/agent-control/runtime-core/runtime.ts` | 1838 | 本切片 +4 | 危险 | 只透传现有诊断包的按需读取；运行服务仍是多产品组合根。 | 后续拆分；交付时提醒 |
+| 2026-08-21 | Codex runtime 0.149.0 采用 | `src/main/modules/agent-control/codex-runtime/codex-app-server-client.ts` | 1427 | 本切片净 +55 | 一般 | 只增加官方诊断请求的精确解析与新通知分类。2026-09-21 复查请求与通知解析是否需要分离。 | 已排期：2026-09-21 |
+| 2026-08-21 | Codex runtime 0.149.0 采用 | `src/__tests__/codex-model-gateway-adversarial.test.ts` | 3364 | 本切片净 +8 | 一般 | 只补 0.149 root turn 伪造反例。2026-09-21 复查是否随网关拆分同步分套件。 | 已排期：2026-09-21 |
+| 2026-08-21 | Codex runtime 0.149.0 采用 | `src/__tests__/codex-app-server-client.test.ts` | 1563 | 本切片净 +59 | 一般 | 只补诊断响应与 0.149 通知分类。2026-09-21 复查是否按请求、通知分套件。 | 已排期：2026-09-21 |
+| 2026-08-21 | Codex runtime 0.149.0 采用 | `src/__tests__/codex-sidecar-process-lease.e2e.ts` | 1250 | 本切片 +5 | 一般 | 只把自动压缩的精确工具面纳入真进程验证。2026-09-21 复查。 | 已排期：2026-09-21 |
+| 2026-08-21 | Codex runtime 0.149.0 采用 | `src/__tests__/codex-model-gateway-contract.test.ts` | 1262 | 本切片 +7 | 一般 | 只同步 0.149 的精确请求身份形状。2026-09-21 复查。 | 已排期：2026-09-21 |
 | 2026-08-20 | 单一 Ready 身份、旧会话清理与记忆方案 | `src/main/modules/agent-control/codex-runtime/codex-binding-repository.ts` | 8269 | 在 8 月 19 日交付切片后净 +39 | 危险 | 只补记忆快照、读取回执和 cleanup 归档授权，仓库事务职责仍然过密；沿用既有拆分方向，优先下沉 presentation 与只读回执查询。 | 后续拆分；交付时提醒 |
 | 2026-08-20 | 单一 Ready 身份、旧会话清理与记忆方案 | `src/__tests__/codex-binding-repository-native.test.ts` | 7280 | 在 8 月 19 日交付切片后净 +127 | 一般 | 仍是绑定仓库的原生数据库总套件，本轮增加记忆快照、读取回执和 cleanup 全链回归，并覆盖原生已卸载线程的真实归档授权。2026-09-20 复查是否按 memory / cleanup 独立拆套件。 | 已排期：2026-09-20 |
 | 2026-08-20 | 单一 Ready 身份、旧会话清理与记忆方案 | `src/main/modules/agent-control/codex-runtime/codex-runtime-production-composition.ts` | 3686 | 在 8 月 19 日交付切片后净 +113 | 危险 | 本轮只接记忆快照、成功会话封印和空闲 worker；生产装配仍过密，后续把 Ready memory composition 下沉为独立装配单元。 | 后续拆分；交付时提醒 |

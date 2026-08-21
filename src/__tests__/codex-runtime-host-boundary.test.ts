@@ -56,7 +56,7 @@ function makeRuntimeFixture(): {
   const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as Record<string, unknown>
   const binaryPath = join(root, 'build/codex/aarch64-apple-darwin/codex')
   mkdirSync(dirname(binaryPath), { recursive: true })
-  writeFileSync(binaryPath, '#!/bin/sh\nprintf "codex-cli 0.146.1\\n"\n', { mode: 0o755 })
+  writeFileSync(binaryPath, '#!/bin/sh\nprintf "codex-cli 0.149.0\\n"\n', { mode: 0o755 })
   manifest.binarySha256 = sha256File(binaryPath)
   manifest.binarySizeBytes = statSync(binaryPath).size
   writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`)
@@ -127,6 +127,7 @@ test('Codex-owned table mutations stay inside the declared storage owners', () =
     join(mainRoot, 'modules/agent-control/codex-runtime/codex-thread-retirement-cleanup-migration.ts'),
     join(mainRoot, 'modules/agent-control/ready-memory/ready-memory-repository.ts'),
   ])
+  // allow-source-grep: table writer ownership is a static architecture boundary with no runtime observer
   const schemaSource = readFileSync(
     join(mainRoot, 'modules/agent-control/codex-runtime/codex-binding-schema.ts'),
     'utf8',
@@ -159,8 +160,8 @@ test('runtime verification joins the manifest, machine contracts, binary digest,
       assetRoot: fixture.assetRoot,
       binaryPath: fixture.binaryPath,
     })
-    assert.equal(verified.manifest.releaseTag, 'rust-v0.146.1')
-    assert.equal(verified.binaryVersion, 'codex-cli 0.146.1')
+    assert.equal(verified.manifest.releaseTag, 'rust-v0.149.0')
+    assert.equal(verified.binaryVersion, 'codex-cli 0.149.0')
     assert.equal(verified.binarySha256, sha256File(fixture.binaryPath))
     assert.equal(verified.contracts.startIdentityRegistryCapacity, 64)
     assert.equal(
