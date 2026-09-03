@@ -30,4 +30,3 @@ test('retry never gains a currently available tool absent from its source author
   assert.equal(result.ok, true)
   if (result.ok) assert.deepEqual(result.snapshot.readyTurnToolAuthorization.allowedToolNames, [])
 })
-

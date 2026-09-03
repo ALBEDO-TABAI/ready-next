@@ -41,4 +41,3 @@ test('skill ask-user terminal fence rejects late answers only after durable comm
   assert.equal(store.resolve('eau-race0001', 'late'), false)
   assert.equal(store.size(), 0)
 })
-

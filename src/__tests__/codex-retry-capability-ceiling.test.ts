@@ -68,4 +68,3 @@ test('retry refuses source skill, current skill, and definition drift', () => {
     currentSkillAuthorization: value.none,
   }), { ok: false, code: 'tool_surface_requires_restatement' })
 })
-

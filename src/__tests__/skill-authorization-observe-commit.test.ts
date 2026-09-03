@@ -73,4 +73,3 @@ test('commit keeps the ordinary mutation path explicit', () => {
   assert.ok(calls.includes('get'))
   assert.ok(calls.includes('remember-tools'))
 })
-

@@ -21,4 +21,3 @@ test('Electron runtime preserves the same terminal-before-answer fence semantics
   ), 1)
   assert.deepEqual(outcomes, ['waiting_task_gone'])
 })
-

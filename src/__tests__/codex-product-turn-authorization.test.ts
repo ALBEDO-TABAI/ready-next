@@ -55,4 +55,3 @@ test('product authorization forwards observe versus commit to the only resolver'
   }
   assert.deepEqual(modes, ['observe', 'commit'])
 })
-

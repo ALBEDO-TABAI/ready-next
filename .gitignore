@@ -60,18 +60,12 @@ build/runtime-seeds/
 .claude/worktrees/
 .impeccable/
 .lark-cli/
-outputs/agent-audit/live/
-outputs/codex-runtime-e5/
-outputs/send-im-live-*/
+/outputs/
 index-*.css
 index-*.js
 index-*.html
 
 # Live-proof runtime artifacts (Chromium profiles, tmp session state, per-run
-# reports). Evidence stays on disk; report digests are recorded in the plan
-# docs — same policy as outputs/agent-audit/live/.
-outputs/provider-transfer-live-proof/
-outputs/provider-confirmation-live-proof/
-outputs/xhs-18-keyword-live-proof/
+# reports). Evidence stays on disk; final summaries and digests belong in
+# docs/superpowers/audits/. Existing tracked evidence remains tracked.
 build/browser-live-proof/
-outputs/browser-live-grounded/
