@@ -38,6 +38,7 @@ export type ToolTimeoutProfile =
   | 'image_generation'
   | 'map'
   | 'command_exec'
+  | 'job_wait'
   | 'user_interaction'
 
 export interface ToolProjectionHint {

@@ -82,6 +82,36 @@
       "owner": "codex-artifact-delivery"
     },
     {
+      "path": "src/__tests__/codex-product-turn-authorization.test.ts",
+      "reason": "Product turn authorization coverage calls pure request and authorization reducers with injected scope collaborators. No test path constructs a repository or opens SQLite; only the production authorization import graph triggers C4.",
+      "since": "2026-09-02",
+      "owner": "codex-native-continuity"
+    },
+    {
+      "path": "src/__tests__/codex-retry-capability-ceiling.test.ts",
+      "reason": "Retry capability ceiling coverage compares immutable tool and skill authorization fixtures. No test path constructs a repository or opens SQLite; only the production authorization import graph triggers C4.",
+      "since": "2026-09-02",
+      "owner": "codex-native-continuity"
+    },
+    {
+      "path": "src/__tests__/codex-retry-execution-authorization.test.ts",
+      "reason": "Retry execution authorization coverage exercises the pure no-expansion reducer with in-memory tool fixtures. No test path constructs a repository or opens SQLite; only the production authorization import graph triggers C4.",
+      "since": "2026-09-02",
+      "owner": "codex-native-continuity"
+    },
+    {
+      "path": "src/__tests__/codex-semantic-ingress-consumers.test.ts",
+      "reason": "Semantic ingress consumer coverage transforms one typed request entirely in memory. No test path constructs a repository or opens SQLite; only the production authorization import graph triggers C4.",
+      "since": "2026-09-02",
+      "owner": "codex-native-continuity"
+    },
+    {
+      "path": "src/__tests__/skill-authorization-observe-commit.test.ts",
+      "reason": "Skill observe and commit coverage uses a fully injected in-memory orchestrator and calls only the authorization resolver. No test path constructs a repository or opens SQLite; only the runtime import graph triggers C4.",
+      "since": "2026-09-02",
+      "owner": "codex-native-continuity"
+    },
+    {
       "path": "src/__tests__/agent-sdk-post-run-abort.test.ts",
       "reason": "The capability-selection import graph now reaches database.ts statically, but this test passed under host Node while better-sqlite3 remained on the incompatible Electron ABI; its provider and runtime collaborators are injected fakes and no SQLite path runs.",
       "since": "2026-08-16",
@@ -268,16 +298,22 @@
       "owner": "document-widget-ready"
     },
     {
-      "path": "src/__tests__/agent-execution-profile-contract.test.ts",
-      "reason": "Agent Foundation: exercises the execution-profile resolver with in-memory fake repositories and temporary filesystem fixtures; no path opens better-sqlite3 or reads the real database. Transitive runtime imports alone trigger the C4 scanner, while host-Node coverage must remain active for frozen-profile and readiness assertions.",
-      "since": "2026-07-11",
-      "owner": "agent-foundation-remediation"
+      "path": "src/__tests__/codex-map-provider-routing.test.ts",
+      "reason": "Map routing coverage constructs AgentSdkRuntime only to read its deterministic tool definitions and supplies literal capability inputs. The host-Node suite passes while the native module has the Electron ABI; no test path opens SQLite.",
+      "since": "2026-08-21",
+      "owner": "codex-runtime-0.149-adoption"
     },
     {
-      "path": "src/__tests__/agent-execution-readiness.test.ts",
-      "reason": "Single Ready identity: exercises the deterministic readiness evaluator with synthetic records; no path opens better-sqlite3 or reads the real database. Host-Node coverage must remain active for the fail-closed identity boundary.",
-      "since": "2026-07-11",
-      "owner": "agent-foundation-remediation"
+      "path": "src/__tests__/credential-vault.test.ts",
+      "reason": "Credential vault coverage uses temporary files and literal channel data. The host-Node suite passes while the native module has the Electron ABI; no test path opens SQLite.",
+      "since": "2026-08-21",
+      "owner": "codex-runtime-0.149-adoption"
+    },
+    {
+      "path": "src/__tests__/external-service-credential-vault.test.ts",
+      "reason": "External-service credential coverage injects an in-memory settings repository and a temporary file vault. The host-Node suite passes while the native module has the Electron ABI; no test path opens SQLite.",
+      "since": "2026-08-21",
+      "owner": "codex-runtime-0.149-adoption"
     },
     {
       "path": "src/__tests__/agent-knowledge-toggle-boundary.test.ts",

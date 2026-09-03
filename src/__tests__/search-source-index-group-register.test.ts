@@ -8,10 +8,10 @@
 // two pieces of the group contract that the V5 IPC contract gate cannot
 // prove on its own:
 //
-//   1. `register` registers EXACTLY the 5 channel names the group owns
+//   1. `register` registers EXACTLY the 4 channel names the group owns
 //      (no extras, no missing ones)
 //   2. The returned dispose handle calls `removeHandler` for each of those
-//      same 5 channels — so dev-reload re-registration does not leak
+//      same 4 channels — so dev-reload re-registration does not leak
 //      listeners.
 //
 // We don't exercise the handler bodies here (those are covered by
@@ -72,7 +72,7 @@ function createMockDeps(): SourceIndexGroupDeps {
   }
 }
 
-test('sourceIndexGroup.register wires the 5 documented channels exactly once each', () => {
+test('sourceIndexGroup.register wires the 4 documented channels exactly once each', () => {
   const { ipc, handleCalls } = createMockIpc()
   sourceIndexGroup.register(ipc, createMockDeps())
 
@@ -81,9 +81,9 @@ test('sourceIndexGroup.register wires the 5 documented channels exactly once eac
   assert.deepEqual(
     registered,
     expected,
-    'register must subscribe to exactly the 5 source-index channels',
+    'register must subscribe to exactly the 4 source-index channels',
   )
-  assert.equal(handleCalls.length, 5, 'each channel must be registered exactly once')
+  assert.equal(handleCalls.length, 4, 'each channel must be registered exactly once')
 
   // Spot-check the exact channel names per the plan (V2.4a, §3 V2.4) so
   // accidental renames trip this test even if the channel count happens
@@ -94,7 +94,6 @@ test('sourceIndexGroup.register wires the 5 documented channels exactly once eac
     'document:indexDocument',
     'document:reindexAllSources',
     'document:reindexWorkspace',
-    'document:cancelReindex',
   ]) {
     assert.ok(
       registered.includes(required),
@@ -110,7 +109,7 @@ test('sourceIndexGroup namespace is the documented label so dispose ordering can
   assert.equal(sourceIndexGroup.namespace, 'document:sourceIndex')
 })
 
-test('IpcDisposeHandle.dispose removes the same 5 channels that register added', () => {
+test('IpcDisposeHandle.dispose removes the same 4 channels that register added', () => {
   const { ipc, removeHandlerCalls } = createMockIpc()
   const handle = sourceIndexGroup.register(ipc, createMockDeps())
 

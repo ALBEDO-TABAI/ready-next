@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { z } from 'zod'
 
 const nonEmptyString = z.string().min(1)
@@ -75,4 +76,13 @@ export function normalizeCodexUserInput(value: unknown): CodexUserInput | null {
 
 export function isCodexUserInput(value: unknown): value is CodexUserInput {
   return codexUserInputSchema.safeParse(value).success
+}
+
+export function digestCodexUserInput(input: readonly CodexUserInput[]): string {
+  const normalized = input.map((item) => {
+    const value = normalizeCodexUserInput(item)
+    if (!value) throw new Error('codex_user_input_invalid')
+    return value
+  })
+  return createHash('sha256').update(JSON.stringify(normalized)).digest('hex')
 }

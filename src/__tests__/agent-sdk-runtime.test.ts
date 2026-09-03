@@ -18,12 +18,7 @@ import { createToolExecutionOutput } from '../main/modules/agent-control/tools-r
 import type { TaskProjectionRecord } from '../main/modules/agent-control/contracts/run-contracts'
 import type { CheckInRecord } from '../main/modules/agent-control/quality/task-adjudicator'
 import { createTaskBudgetRuntime } from '../main/modules/agent-control/task-projection/run-budget-policy'
-import {
-  authorizeMcpToolForScope,
-  registerMcpServer,
-  __resetMcpRegistryForTests
-} from '../main/modules/mcp/registry'
-import { setCachedMcpOAuthToken, __resetMcpOAuthForTests } from '../main/modules/mcp/oauth'
+import { registerMcpServer, __resetMcpRegistryForTests } from '../main/modules/mcp/registry'
 import type { BrowserTurnLease } from '../main/modules/browser-engine/agent-browser-turn-lease'
 import {
   clearLastReferenceSkill,
@@ -6879,20 +6874,13 @@ test('agent sdk runtime records tool and artifact proofs before final adjudicati
   assert.equal(checkins[0].verdict, 'accept')
 })
 
-test('agent sdk runtime keeps MCP tools scoped to explicit OAuth authorization', async () => {
+test('agent sdk runtime exposes connected local MCP tools across scopes', async () => {
   __resetMcpRegistryForTests()
-  __resetMcpOAuthForTests()
   registerMcpServer({
     serverId: 'sdk-scope',
     toolNames: ['mcp_sdk_scope_action'],
-    requiresAuthorization: true
+    approvalMode: 'writes'
   })
-  setCachedMcpOAuthToken('sdk-scope', {
-    accessToken: 'tok-sdk',
-    expiresAt: Date.now() + 60_000,
-    scopes: ['read']
-  })
-  authorizeMcpToolForScope('sdk-scope', 'mcp_sdk_scope_action', 'scope-allowed', 'scope-allowed')
 
   const seenByScope = new Map<string, string[]>()
   const runtime = createRuntime({
@@ -6930,10 +6918,9 @@ test('agent sdk runtime keeps MCP tools scoped to explicit OAuth authorization',
   assert.equal(allowed.success, true)
   assert.equal(denied.success, true)
   assert.equal(seenByScope.get('scope-allowed')?.includes('mcp_sdk_scope_action'), true)
-  assert.equal(seenByScope.get('scope-denied')?.includes('mcp_sdk_scope_action'), false)
+  assert.equal(seenByScope.get('scope-denied')?.includes('mcp_sdk_scope_action'), true)
 
   __resetMcpRegistryForTests()
-  __resetMcpOAuthForTests()
 })
 
 test('agent sdk runtime gates vision tools with resolved provider capability', async () => {
@@ -6941,7 +6928,7 @@ test('agent sdk runtime gates vision tools with resolved provider capability', a
   registerMcpServer({
     serverId: 'sdk-vision',
     toolNames: ['view_image', 'mcp_plain_text_action'],
-    requiresAuthorization: false
+    approvalMode: 'writes'
   })
 
   const seenToolNames: string[] = []

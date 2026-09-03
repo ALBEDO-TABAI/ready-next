@@ -44,7 +44,7 @@ const SKILL_ARTIFACT_FIELD_GUIDANCE: Record<string, string> = {
   content: '要写入的完整字符串正文（缺省或非字符串即判失败；二进制请先 base64 再设 encoding）',
   encoding: 'utf-8 或 base64 二选一',
   mode: 'overwrite 或 append 二选一',
-  targetPath: '要导出到的用户目标文件绝对路径',
+  targetPath: '要导出到的用户目标文件：绝对路径，或 @[文件夹名]/文件名，或本轮冻结的 logicalResourceId/文件名',
 }
 
 export interface ValidationIssueShape {

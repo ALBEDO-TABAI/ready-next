@@ -70,10 +70,8 @@ test('durable browser research promotes a browser bootstrap budget in the same r
     setLiveTaskBudgetRuntime: (runtime) => { liveBudget = runtime },
     usedTools: [],
     projectionPatches,
-    toolArgsByName: new Map(),
     taskProofSink: null,
     host: {
-      learnSiteCardFromToolFailure: () => undefined,
       readVerifiedBrowserWorkflowEvidence: () => ({
         journal: {
           nextActionSeq: 1,

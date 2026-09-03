@@ -104,7 +104,7 @@ function seedTwoSessions(opts: {
   }
   const active = sessions[opts.activeId]
   useAgent.setState({
-    agents: [{ name: 'butler', displayName: '管家', avatar: '', status: 'idle', selected: true }],
+    agents: [{ name: 'butler', displayName: '管家', avatar: '', status: 'idle' }],
     messages: active.messages,
     currentAgent: 'butler',
     inputValue: active.inputValue,

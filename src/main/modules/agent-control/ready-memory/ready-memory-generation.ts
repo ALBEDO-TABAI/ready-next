@@ -47,6 +47,8 @@ import {
   type ReadyMemorySubmissionReceipt,
   type ReadyMemoryWorkerResult,
 } from './ready-memory-generation-types'
+import type { ReadyMemoryStateChange } from '../../../../shared/ready-memory'
+import { publishReadyMemoryStateChangeIfAdvanced } from './ready-memory-state-events'
 
 const RESULT_RECEIPT_CONTRACT = 'ready-memory-provider-result:v1'
 const SOURCE_CONTRACT = 'ready-memory-source:v1'
@@ -388,6 +390,8 @@ export class ReadyMemoryGenerationCoordinator {
     resolveProfile: (now: string) => ReadyMemoryFrozenProfile
     isIdle?: () => boolean | Promise<boolean>
     makeId?: (prefix: string) => string
+    onStateChanged?: (event: ReadyMemoryStateChange) => void
+    onStateChangePublishError?: (error: unknown) => void
   }) {}
 
   enqueueSuccessfulSource(input: {
@@ -449,6 +453,21 @@ export class ReadyMemoryGenerationCoordinator {
   }
 
   async runOnce(now: string): Promise<ReadyMemoryWorkerResult> {
+    const before = this.dependencies.repository.getGlobalPolicy()
+    try {
+      return await this.runOnceWithFrozenState(now)
+    } finally {
+      publishReadyMemoryStateChangeIfAdvanced({
+        before,
+        after: this.dependencies.repository.getGlobalPolicy(),
+        reason: 'generation',
+        publish: this.dependencies.onStateChanged,
+        onError: this.dependencies.onStateChangePublishError,
+      })
+    }
+  }
+
+  private async runOnceWithFrozenState(now: string): Promise<ReadyMemoryWorkerResult> {
     assertTimestamp(now)
     this.dependencies.repository.expireMemories(now)
     if (!(await (this.dependencies.isIdle?.() ?? true))) return { kind: 'busy' }

@@ -6,7 +6,7 @@ import {
   matchesResumeIntent,
   RESUME_KEYWORDS,
   _LEXICON_INTERNALS_FOR_TESTS,
-} from '../main/modules/agent-control/contracts/resume-lexicon'
+} from '../shared/resume-lexicon'
 
 // Phase 2.1 — single-source-of-truth tests for the resume lexicon.
 //

@@ -8,6 +8,8 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { join } from 'node:path'
+import { mkdtempSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 
 import { McpClient, canonicalMcpToolName, __resetMcpClientsForTests, registerMcpClient } from '../main/modules/mcp/client'
 import {
@@ -19,12 +21,14 @@ import {
   __resetMcpRegistryForTests,
   getMcpToolAnnotations,
   getMcpToolCatalogEntry,
-  isAuthorized,
+  isMcpToolReady,
   listMcpToolNames,
+  registerMcpServer,
 } from '../main/modules/mcp/registry'
 import { parseMcpServersConfig, bootstrapMcpServersFromSettings, MCP_SERVERS_SETTING_KEY } from '../main/modules/mcp/bootstrap'
 import { resolveConfirmationGate } from '../main/modules/agent-control/safety/action-confirmation-policy'
 import { executeMcpTool } from '../main/modules/tools/mcp-tools'
+import { normalizeCodexNativeNotification } from '../main/modules/agent-control/codex-runtime/codex-native-runtime'
 
 import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
 
@@ -34,13 +38,24 @@ test('mcp-stdio-transport declares transitive sqlite ABI guard', (t) => {
 
 const FIXTURE_PATH = join(process.cwd(), 'scripts/test-fixtures/mcp-stdio-fixture-server.cjs')
 
-function makeFixtureClient(serverId = 'fixture'): McpClient {
+function makeFixtureClient(
+  serverId = 'fixture',
+  env: Record<string, string> = {},
+): McpClient {
+  const root = mkdtempSync(join(tmpdir(), 'ready-mcp-test-'))
   return new McpClient({
     serverId,
     transport: 'stdio',
     endpoint: process.execPath,
     args: [FIXTURE_PATH],
-    requiresAuthorization: false,
+    cwd: root,
+    dataDir: root,
+    env: {
+      MCP_FIXTURE_EXPLICIT: 'visible',
+      MCP_FIXTURE_NOISY: '1',
+      ELECTRON_RUN_AS_NODE: '1',
+      ...env,
+    },
   })
 }
 
@@ -49,18 +64,78 @@ test('canonical tool name sanitizes server id and remote name', () => {
   assert.equal(canonicalMcpToolName('fixture', 'echo_read'), 'mcp_fixture_echo_read')
 })
 
+test('stdio catalog pagination reads every tool, resource, and resource template page', async () => {
+  const client = makeFixtureClient('paged', { MCP_FIXTURE_PAGINATE: '1' })
+  try {
+    assert.equal((await client.listTools()).length, 3)
+    assert.deepEqual((await client.listResources()).map((resource) => resource.uri), [
+      'fixture://readme',
+      'fixture://second',
+    ])
+    assert.deepEqual((await client.listResourceTemplates()).map((template) => template.uriTemplate), [
+      'fixture://item/{id}',
+      'fixture://page/{id}',
+    ])
+  } finally {
+    await client.close()
+  }
+})
+
+test('MCP canonical collisions fail before publishing an ambiguous tool', async () => {
+  const client = makeFixtureClient('fixture', { MCP_FIXTURE_COLLISION: '1' })
+  try {
+    await assert.rejects(client.listTools(), /canonical tool collision/)
+  } finally {
+    await client.close()
+  }
+
+  __resetMcpRegistryForTests()
+  registerMcpServer({
+    serverId: 'first',
+    toolNames: ['mcp_shared_read'],
+    approvalMode: 'writes',
+  })
+  assert.throws(() => registerMcpServer({
+    serverId: 'second',
+    toolNames: ['mcp_shared_read'],
+    approvalMode: 'writes',
+  }), /mcp_cross_server_tool_collision/)
+  assert.throws(() => registerMcpServer({
+    serverId: 'duplicate',
+    toolNames: ['mcp_duplicate_read', 'mcp_duplicate_read'],
+    approvalMode: 'writes',
+  }), /mcp_duplicate_canonical_tool/)
+  __resetMcpRegistryForTests()
+})
+
+test('native Matrix MCP notifications are rejected so Ready remains the only MCP channel', () => {
+  assert.deepEqual(normalizeCodexNativeNotification({
+    method: 'item/mcpToolCall/progress',
+    params: { threadId: 'thread-1', turnId: 'turn-1' },
+  }), { kind: 'invalid', code: 'opted_out_method' })
+})
+
 test('stdio e2e: handshake → tools/list → tools/call round-trip → close kills the child', async () => {
   const client = makeFixtureClient()
   try {
     const tools = await client.listTools()
     assert.deepEqual(tools.map((tool) => tool.name).sort(), [
       'mcp_fixture_echo_read',
+      'mcp_fixture_read_env',
       'mcp_fixture_write_note',
     ])
     const echo = tools.find((tool) => tool.name === 'mcp_fixture_echo_read')
     assert.equal(echo?.remoteName, 'echo_read')
     assert.equal(echo?.annotations?.readOnlyHint, true)
     assert.equal((echo?.inputSchema as { required?: string[] })?.required?.[0], 'text')
+
+    const metadata = await client.getMetadata()
+    assert.equal(metadata.serverInfo?.name, 'ready-mcp-fixture')
+    assert.match(metadata.instructions || '', /untrusted/)
+    assert.deepEqual((await client.listResources()).map((resource) => resource.uri), ['fixture://readme'])
+    assert.deepEqual((await client.listResourceTemplates()).map((template) => template.uriTemplate), ['fixture://item/{id}'])
+    assert.equal((await client.readResource('fixture://readme')).contents instanceof Array, true)
+    assert.match(client.getDiagnostics().stderrTail, /fixture-noise/)
 
     const call = await client.callTool({
       toolName: 'mcp_fixture_echo_read',
@@ -75,6 +150,14 @@ test('stdio e2e: handshake → tools/list → tools/call round-trip → close ki
     })
     assert.equal(structured.ok, true)
     assert.deepEqual(structured.output, { written: true, note: 'hello' })
+
+    const env = await client.callTool({
+      toolName: 'mcp_fixture_read_env',
+      arguments: { keys: ['MCP_FIXTURE_EXPLICIT', 'OPENAI_API_KEY'] },
+    })
+    assert.deepEqual(env.output, {
+      values: { MCP_FIXTURE_EXPLICIT: 'visible', OPENAI_API_KEY: null },
+    })
 
     const unknown = await client.callTool({
       toolName: 'mcp_fixture_missing_tool',
@@ -94,12 +177,12 @@ test('discovery + registry: catalog carries annotations, no-auth server authoriz
   try {
     const discovery = await discoverToolsFromServer(client)
     assert.equal(discovery.error, undefined)
-    assert.equal(discovery.tools.length, 2)
-    applyDiscoveryResult(discovery, { requiresAuthorization: false })
+    assert.equal(discovery.tools.length, 3)
+    applyDiscoveryResult(discovery, { approvalMode: 'writes' })
     registerMcpClient(client)
 
     assert.ok(listMcpToolNames().includes('mcp_fixture_echo_read'))
-    assert.equal(isAuthorized('mcp_fixture_echo_read', 'sess-1', 'scope-1'), true, 'no-auth stdio server authorizes directly')
+    assert.equal(isMcpToolReady('mcp_fixture_echo_read'), true)
     assert.equal(getMcpToolAnnotations('mcp_fixture_echo_read')?.readOnlyHint, true)
     assert.equal(getMcpToolCatalogEntry('mcp_fixture_write_note')?.remoteName, 'write_note')
 
@@ -128,7 +211,7 @@ test('confirmation gate: declared read-only mcp tool allows; non-read-only requi
       { name: 'mcp_fixture_write_note', remoteName: 'write_note' },
       { name: 'mcp_fixture_drop_table', remoteName: 'drop_table', annotations: { destructiveHint: true } },
     ],
-  }, { requiresAuthorization: false })
+  }, { approvalMode: 'writes' })
 
   const readOnly = resolveConfirmationGate('mcp_fixture_echo_read', {})
   assert.equal(readOnly.action, 'allow')
@@ -149,6 +232,18 @@ test('confirmation gate: declared read-only mcp tool allows; non-read-only requi
 
   const builtin = resolveConfirmationGate('some_builtin_tool', {})
   assert.equal(builtin.ruleId, 'default-unlisted')
+
+  applyDiscoveryResult({
+    serverId: 'always',
+    tools: [{ name: 'mcp_always_read', remoteName: 'read', annotations: { readOnlyHint: true } }],
+  }, { approvalMode: 'always' })
+  assert.equal(resolveConfirmationGate('mcp_always_read', {}).action, 'confirm')
+
+  applyDiscoveryResult({
+    serverId: 'never',
+    tools: [{ name: 'mcp_never_write', remoteName: 'write' }],
+  }, { approvalMode: 'never' })
+  assert.equal(resolveConfirmationGate('mcp_never_write', {}).action, 'allow')
   __resetMcpRegistryForTests()
 })
 
@@ -163,6 +258,9 @@ test('per-server tool cap drops beyond MAX_TOOLS_PER_SERVER and reports the drop
       name: canonicalMcpToolName('big', tool.remoteName),
       remoteName: tool.remoteName,
     })),
+    listResources: async () => [],
+    listResourceTemplates: async () => [],
+    getMetadata: async () => ({ protocolVersion: '2024-11-05', serverInfo: null, capabilities: {}, instructions: null }),
   } as unknown as McpClient
   const discovery = await discoverToolsFromServer(fakeClient)
   assert.equal(discovery.tools.length, MAX_TOOLS_PER_SERVER)
@@ -180,7 +278,7 @@ test('bootstrap config parsing skips invalid entries with reasons and normalizes
   ]))
   assert.equal(parsed.configs.length, 2)
   assert.equal(parsed.configs[0].id, 'filesystem')
-  assert.equal(parsed.configs[0].requiresAuthorization, false, 'stdio defaults to no-OAuth')
+  assert.equal(parsed.configs[0].approvalMode, 'writes')
   assert.equal(parsed.configs[1].enabled, false)
   assert.deepEqual(parsed.skipped.map((s) => s.reason.split(':')[0]), [
     'unsupported_transport_phase_m',

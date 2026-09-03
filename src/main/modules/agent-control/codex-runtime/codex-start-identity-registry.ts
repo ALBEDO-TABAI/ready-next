@@ -6,7 +6,7 @@ import type {
 } from '../send-scoped-confirmation'
 import type { VerifiedCodexRuntime } from './codex-runtime-host'
 
-type StartMethod = 'thread/start' | 'turn/start'
+type StartMethod = 'thread/start' | 'thread/fork' | 'turn/start'
 type CapacityState = 'held' | 'pending' | 'recovery_held'
 
 type RegistryMember = {
@@ -140,6 +140,42 @@ export class CodexStartIdentityRegistry {
     return { ok: true, reservation }
   }
 
+  reserveFork(input: { scopeId: string }): {
+    reservationSetId: string
+    reservationId: string
+    reservationEvidenceDigest: string
+  } {
+    requireIdentity(input.scopeId, 'reservation_scope_invalid')
+    if (this.members.size + 1 > this.options.capacity) {
+      throw new CodexStartIdentityRegistryError('start_identity_capacity_exhausted')
+    }
+    const reservationSetId = randomUUID()
+    const reservationId = randomUUID()
+    const member: RegistryMember = {
+      reservationSetId,
+      reservationId,
+      scopeId: input.scopeId,
+      method: 'thread/fork',
+      requiredMemberCount: 1,
+      state: 'held',
+      bindingId: null,
+      connectionEpoch: null,
+      rpcId: null,
+    }
+    this.members.set(reservationId, member)
+    this.reservationSets.set(reservationSetId, [reservationId])
+    return {
+      reservationSetId,
+      reservationId,
+      reservationEvidenceDigest: sha256(JSON.stringify({
+        reservationSetId,
+        scopeId: input.scopeId,
+        methods: ['thread/fork'],
+        reservationIds: [reservationId],
+      })),
+    }
+  }
+
   restore(snapshot: CodexStartIdentityRegistryRestoreSnapshot): void {
     if (this.members.size || this.reservationSets.size || this.activeRpcMembers.size || this.guards.size) {
       throw new CodexStartIdentityRegistryError('registry_restore_requires_empty')
@@ -164,7 +200,9 @@ export class CodexStartIdentityRegistry {
       if (
         (member.requiredMemberCount !== 1 && member.requiredMemberCount !== 2)
         || (member.state !== 'held' && member.state !== 'pending' && member.state !== 'recovery_held')
-        || (member.method !== 'thread/start' && member.method !== 'turn/start')
+        || (member.method !== 'thread/start'
+          && member.method !== 'thread/fork'
+          && member.method !== 'turn/start')
         || this.members.has(member.reservationId)
       ) throw new CodexStartIdentityRegistryError('registry_restore_member_invalid')
       if (member.state === 'held') {
@@ -196,7 +234,8 @@ export class CodexStartIdentityRegistry {
       const valid = requiredCounts.size === 1
         && scopes.size === 1
         && (
-          (requiredCount === 1 && group.length === 1 && methods[0] === 'turn/start')
+          (requiredCount === 1 && group.length === 1
+            && (methods[0] === 'turn/start' || methods[0] === 'thread/fork'))
           || (
             requiredCount === 2
             && (
@@ -327,7 +366,19 @@ export class CodexStartIdentityRegistry {
     productTerminalDigest: string
   }): void {
     requireIdentity(input.productTerminalDigest, 'host_failure_terminal_digest_invalid')
-    const memberIds = this.reservationSets.get(input.reservationSetId)
+    this.releaseDispatchedSet(input.reservationSetId)
+  }
+
+  releaseAfterProvenAbsence(input: {
+    reservationSetId: string
+    evidenceDigest: string
+  }): void {
+    requireIdentity(input.evidenceDigest, 'absence_evidence_digest_invalid')
+    this.releaseDispatchedSet(input.reservationSetId)
+  }
+
+  private releaseDispatchedSet(reservationSetId: string): void {
+    const memberIds = this.reservationSets.get(reservationSetId)
     if (!memberIds) throw new CodexStartIdentityRegistryError('reservation_set_not_found')
     for (const memberId of memberIds) {
       const member = this.members.get(memberId)
@@ -337,7 +388,7 @@ export class CodexStartIdentityRegistry {
       }
       this.members.delete(memberId)
     }
-    this.reservationSets.delete(input.reservationSetId)
+    this.reservationSets.delete(reservationSetId)
   }
 
   closeLateResponseGuard(input: LateResponseGuard & {

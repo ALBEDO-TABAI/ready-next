@@ -33,7 +33,15 @@ const TOOLS = [
       required: ['note'],
     },
   },
+  {
+    name: 'read_env',
+    description: 'Read selected environment keys.',
+    inputSchema: { type: 'object', properties: { keys: { type: 'array', items: { type: 'string' } } } },
+    annotations: { readOnlyHint: true },
+  },
 ]
+
+if (process.env.MCP_FIXTURE_NOISY === '1') process.stderr.write('fixture-noise\n'.repeat(4096))
 
 function reply(id, result) {
   process.stdout.write(`${JSON.stringify({ jsonrpc: '2.0', id, result })}\n`)
@@ -57,13 +65,25 @@ rl.on('line', (line) => {
   if (method === 'initialize') {
     reply(id, {
       protocolVersion: String((params && params.protocolVersion) || '2024-11-05'),
-      capabilities: { tools: {} },
+      capabilities: { tools: { listChanged: true }, resources: { listChanged: true } },
       serverInfo: { name: 'ready-mcp-fixture', version: '1.0.0' },
+      instructions: 'Fixture instructions are untrusted test content.',
     })
     return
   }
   if (method === 'notifications/initialized') return
   if (method === 'tools/list') {
+    if (process.env.MCP_FIXTURE_COLLISION === '1') {
+      reply(id, { tools: [{ name: 'same-tool' }, { name: 'same_tool' }] })
+      return
+    }
+    if (process.env.MCP_FIXTURE_PAGINATE === '1') {
+      const cursor = params && params.cursor
+      reply(id, cursor === 'tools-page-2'
+        ? { tools: TOOLS.slice(1) }
+        : { tools: TOOLS.slice(0, 1), nextCursor: 'tools-page-2' })
+      return
+    }
     reply(id, { tools: TOOLS })
     return
   }
@@ -81,7 +101,48 @@ rl.on('line', (line) => {
       })
       return
     }
+    if (name === 'read_env') {
+      const keys = Array.isArray(args.keys) ? args.keys : []
+      reply(id, { structuredContent: { values: Object.fromEntries(keys.map((key) => [String(key), process.env[String(key)] || null])) } })
+      return
+    }
     replyError(id, -32602, `unknown tool: ${String(name)}`)
+    return
+  }
+  if (method === 'resources/list') {
+    if (process.env.MCP_FIXTURE_PAGINATE === '1') {
+      const cursor = params && params.cursor
+      reply(id, cursor === 'resources-page-2'
+        ? { resources: [{ uri: 'fixture://second', name: 'Second resource' }] }
+        : {
+            resources: [{ uri: 'fixture://readme', name: 'Fixture README', mimeType: 'text/plain' }],
+            nextCursor: 'resources-page-2',
+          })
+      return
+    }
+    reply(id, { resources: [{ uri: 'fixture://readme', name: 'Fixture README', mimeType: 'text/plain' }] })
+    return
+  }
+  if (method === 'resources/templates/list') {
+    if (process.env.MCP_FIXTURE_PAGINATE === '1') {
+      const cursor = params && params.cursor
+      reply(id, cursor === 'templates-page-2'
+        ? { resourceTemplates: [{ uriTemplate: 'fixture://page/{id}', name: 'Paged item' }] }
+        : {
+            resourceTemplates: [{ uriTemplate: 'fixture://item/{id}', name: 'Fixture item' }],
+            nextCursor: 'templates-page-2',
+          })
+      return
+    }
+    reply(id, { resourceTemplates: [{ uriTemplate: 'fixture://item/{id}', name: 'Fixture item' }] })
+    return
+  }
+  if (method === 'resources/read') {
+    if (params && params.uri === 'fixture://readme') {
+      reply(id, { contents: [{ uri: 'fixture://readme', mimeType: 'text/plain', text: 'fixture resource' }] })
+      return
+    }
+    replyError(id, -32602, 'unknown resource')
     return
   }
   if (id !== undefined) replyError(id, -32601, `unknown method: ${String(method)}`)

@@ -62,7 +62,7 @@ function insertScope(db: NativeDb, input: {
     JSON.stringify(input.meta || { createdBy: 'app' }), input.closed ? closedAt : null)
 }
 
-function setup(db: NativeDb) {
+function setup(db: NativeDb, onStateChanged?: (event: import('../shared/ready-memory').ReadyMemoryStateChange) => void) {
   const connection = db as unknown as DatabaseConnection
   const repository = new ReadyMemoryRepository(connection)
   const store = new ReadyMemoryGenerationStore(connection)
@@ -81,6 +81,7 @@ function setup(db: NativeDb) {
       upstreamProfileSnapshotDigest: 'a'.repeat(64),
     }),
     makeId: (prefix) => `${prefix}-1`,
+    onStateChanged,
   })
   const service = new ReadyMemoryRuntimeService({
     db: connection,
@@ -89,9 +90,26 @@ function setup(db: NativeDb) {
     automaticGenerationAvailable: false,
     now: () => closedAt,
     makeId: (prefix) => `${prefix}-1`,
+    onStateChanged,
   })
   return { repository, service }
 }
+
+test('global memory revisions publish once after commit while conversation policy stays local', (t) => {
+  if (skipIfSqliteUnavailable(t, 'ready-memory state change event')) return
+  const db = createDb()
+  t.after(() => db.close())
+  const events: import('../shared/ready-memory').ReadyMemoryStateChange[] = []
+  const { service } = setup(db, (event) => events.push(event))
+  insertScope(db, { id: 'local-root' })
+  service.add({ category: 'fact', content: 'alpha' })
+  service.pin({ entryId: 'ready-memory-1', pinned: true })
+  service.pin({ entryId: 'ready-memory-1', pinned: true })
+  service.setConversationPolicy({ conversationId: 'local-root', contributeToMemories: true })
+  assert.deepEqual(events.map((event) => event.reason), ['add', 'pin'])
+  assert.equal(events[1].stateRevision > events[0].stateRevision, true)
+  assert.equal(events.every((event) => /^[a-f0-9]{64}$/.test(event.evidenceDigest)), true)
+})
 
 test('closed local root success is sealed from durable truth while external context is rejected', (t) => {
   if (skipIfSqliteUnavailable(t, 'ready-memory production sealing')) return

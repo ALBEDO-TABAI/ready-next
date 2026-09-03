@@ -1,8 +1,9 @@
-import { randomUUID } from 'node:crypto'
-import { appendFileSync, mkdirSync } from 'node:fs'
+import { createHash, randomUUID } from 'node:crypto'
+import { appendFileSync, mkdirSync, readFileSync, realpathSync } from 'node:fs'
 import { join } from 'node:path'
 
 import type { AIModelConfig } from '../../../../shared/ai-providers'
+import { isBrowserPublicToolName } from '../../../../shared/browser-capability-registry'
 import {
   readActionAuthorizationModeFromEnvelope,
 } from '../../../../shared/action-authorization-mode'
@@ -16,7 +17,8 @@ import {
   isMapSemanticIntentActive,
 } from '../map-semantic-intent'
 import { TAG_FORGE_EXCLUSIVE_TOOL_NAMES } from './codex-product-action-map'
-import { createCodexProductActionRequester } from './codex-product-action-requester'
+import { resolveReadyActionObligationSet } from './codex-action-obligation'
+import { CodexProductActionError, createCodexProductActionRequester } from './codex-product-action-requester'
 import { createProductionProductActionHandlers } from './codex-product-action-handlers'
 import { composeCodexTurnToolSnapshot } from './codex-tool-surface-composition'
 import {
@@ -34,6 +36,7 @@ import { logAgentMetric } from '../metrics'
 import { readExistingTerminalQualityPatch } from '../runtime-core/run-finalizer-adjudication'
 import { collectToolOutputProofs } from '../quality/proof-collector'
 import { normalizeToolExecutionOutput } from '../tools-runtime/tool-result-types'
+import { getEphemeralExecutionStore } from '../../tools/skill-primitives/ephemeral-execution-store'
 import {
   buildCodexIngressAdmittedDigest,
   CodexBindingRepository,
@@ -106,6 +109,7 @@ import { CodexTurnCollector, type CoreTurnCandidate } from './codex-turn-collect
 import { createCodexTaskActivityProjector } from './codex-task-activity-projector'
 import { codexTerminalPublicMessage } from './codex-product-turn-presentation'
 import { buildCodexExplicitRetryContext, CodexTurnInputBuilder } from './codex-turn-input-builder'
+import { digestCodexUserInput, type CodexUserInput } from './codex-user-input'
 import {
   externalReadResourceReference,
   parseCodexExternalReadSliceRequest,
@@ -122,17 +126,18 @@ import {
 } from './codex-thread-instructions'
 import { createBrowserTurnLease, type BrowserTurnLease } from '../../browser-engine/agent-browser-turn-lease'
 import {
-  recoverCodexRetryLocalResourceSelections,
-  recoverCodexRetrySkillSelection,
   resolveCodexExplicitResources,
 } from './codex-explicit-resources'
 import { resolveCodexExplicitRetryLineage } from './codex-explicit-retry-lineage'
+import { exactRetrySourceFacts, resolveExactRetryEligibility } from './codex-exact-retry-eligibility'
+import { resolveExplicitRetryTailPlan } from './codex-history-continuity-policy'
 import { resolveTrustedBrowserReference } from '../runtime-core/trusted-browser-environment'
 import {
   codexBrowserVerifierFailureCode,
   codexBrowserVerifierFrozenIdentityDigest,
   verifyCodexBrowserWorkflowCandidate,
 } from './codex-browser-workflow-verifier'
+import type { ReadyMemoryStateChange } from '../../../../shared/ready-memory'
 
 import {
   assertWidgetTargetsMatchAnchor,
@@ -150,17 +155,36 @@ import {
   CodexProductCloseoutExpectationGuard,
   requestCodexEngineTerminalLifecycleActionBeforeCloseout,
   finalizeCodexProductCloseout,
+  resolveCodexUnownedNativeTerminalCloseout,
   runCodexEngineTerminalFinalization,
   type CodexProductCloseoutMode,
 } from './codex-product-closeout-support'
 import {
+  buildTerminalNativeReadbackReceipt,
+  resolveCodexHistoryObservation,
+  resolveCodexProductFailureKind,
+  resolveCodexTerminalFacts,
+  terminalEvidenceRef,
+  terminalGatewayEvidenceRef,
+  terminalIndeterminateEffectEvidenceRef,
+  terminalNativeReadbackEvidenceRef,
+  type CodexHistoryObservation,
+  type CodexTerminalNativeReadbackReceipt,
+} from './codex-terminal-facts'
+import { projectCodexHeadActionProjection } from './codex-action-surface'
+import { projectCodexLifecycleOperationV2 } from './codex-lifecycle-action-surface'
+import {
   codexAllowsDirectProvisionalStream,
   createCodexProductUpstreamProfileSnapshot,
   createCurrentDocumentReadRequester,
+  hasExplicitCurrentDocumentAccessExclusion,
+  hasExplicitCurrentDocumentAccessIntent,
   hasExplicitCurrentDocumentWriteIntent,
   readCodexPreparedActionAuthorizationEnvelope,
   resolveCodexBrowserWorkflowVerifierBundle,
   resolveCodexProductTurnAuthorization,
+  buildCodexRetryAuthorizationRequest,
+  resolveCodexRetryAuthorizationCeiling,
   resolveCodexThreadInstructionContract,
   resourceReferenceForAnchor,
   RuntimeGate,
@@ -178,6 +202,9 @@ import {
   terminalEvent,
 } from './codex-product-lifecycle-store'
 import { ArtifactMaterializer } from '../../tools/artifact-materializer'
+import { getActivePetWindowManager } from '../../pet/active-pet-window-manager'
+import { getMcpCatalogSnapshot, getMcpServerRegistration } from '../../mcp/registry'
+import { getMcpClient } from '../../mcp/client'
 import { readCodexFolderOutputActivation } from './codex-folder-output-activation'
 import {
   ReadyMemoryGenerationCoordinator,
@@ -210,6 +237,8 @@ export {
   codexAllowsDirectProvisionalStream,
   createCodexProductUpstreamProfileSnapshot,
   createCurrentDocumentReadRequester,
+  hasExplicitCurrentDocumentAccessExclusion,
+  hasExplicitCurrentDocumentAccessIntent,
   hasExplicitCurrentDocumentWriteIntent,
   readCodexInstructionContractDigest,
   readCodexPreparedActionAuthorizationEnvelope,
@@ -258,6 +287,10 @@ type FactoryInput = {
   settings: AppSettingsRepository
   requestRendererToolAction: CodexRendererToolActionRequester
   providerReadiness: CodexProviderReadinessPort
+  onReadyMemoryStateChanged?: (event: ReadyMemoryStateChange) => void
+  onCodexActionSurfaceInvalidated?: (
+    event: import('../../../../shared/ipc-contracts/agent-runtime').CodexActionSurfaceInvalidation,
+  ) => void
 }
 
 type PreparedDetail = {
@@ -379,7 +412,11 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
 
   const paths = resolveCodexRuntimePaths(input)
   const verified = loadVerifiedCodexRuntime(paths)
-  const repository = new CodexBindingRepository(rawDb)
+  const repository = new CodexBindingRepository(rawDb, {
+    runtimeManifestDigest: verified.manifestDigest,
+    protocolSchemaDigest: verified.manifest.stableV2SchemaSha256,
+  })
+  const actionJournal = new CodexToolActionJournal(rawDb)
   const readyMemoryRepository = new ReadyMemoryRepository(rawDb)
   const gatewayRepository = new CodexModelGatewayRepository(rawDb, repository)
   const credentialStore = new ReadySettingsModelGatewayCredentialStore(input.settings)
@@ -425,12 +462,21 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
   }
   const pendingEngineTerminalFinalizations = new Map<string, PendingEngineTerminalFinalization>()
   const expectedCodexCloseouts = new CodexProductCloseoutExpectationGuard()
+  const pendingNativeForkSeeds = new Map<string, {
+    targetCwd: string
+    reservationSetId: string
+    reservationId: string
+    reservationEvidenceDigest: string
+  }>()
+  const materializedForkTargets = new Map<string, string>()
   const commitExpectedCodexCloseout = async <T>(
     readyRunId: string,
     mode: CodexProductCloseoutMode,
     commit: () => Promise<T>,
+    terminalEvidence?: import('./codex-binding-repository').CodexTerminalCloseoutEvidence,
   ): Promise<T> => {
     const token = expectedCodexCloseouts.acquire(readyRunId, mode)
+    if (terminalEvidence) expectedCodexCloseouts.setTerminalEvidence(readyRunId, terminalEvidence)
     try {
       return await commit()
     } finally {
@@ -492,6 +538,12 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
       if (lifecycle !== 'running') return false
       return isReadyMemoryProductionIdle(rawDb)
     },
+    onStateChanged: input.onReadyMemoryStateChanged,
+    onStateChangePublishError(error) {
+      logAgentMetric('ready_memory_state_change_publish_failed', {
+        error: stableErrorCode(error, 'unknown'),
+      })
+    },
   })
   let memoryWorker: ReadyMemoryIdleWorker
   const memoryRuntime = new ReadyMemoryRuntimeService({
@@ -500,6 +552,12 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
     coordinator: memoryCoordinator,
     automaticGenerationAvailable: memoryProvider.automaticGenerationAvailable,
     wakeWorker: () => memoryWorker.wake(),
+    onStateChanged: input.onReadyMemoryStateChanged,
+    onStateChangePublishError(error) {
+      logAgentMetric('ready_memory_state_change_publish_failed', {
+        error: stableErrorCode(error, 'unknown'),
+      })
+    },
   })
   memoryWorker = new ReadyMemoryIdleWorker({
     coordinator: memoryCoordinator,
@@ -556,6 +614,51 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
       })
     })
   }
+  const publishCodexActionSurfaceInvalidation = (aliasId: string,
+    committedFacts?: NonNullable<ReturnType<CodexBindingRepository['readActionSurfaceInvalidation']>>,
+  ): void => {
+    if (!input.onCodexActionSurfaceInvalidated) return
+    try {
+      const facts = committedFacts ?? repository.readActionSurfaceInvalidation(aliasId)
+      if (!facts) return
+      input.onCodexActionSurfaceInvalidated({
+        contract: 'codex_action_surface_invalidation_v1',
+        scopeId: facts.scopeId,
+        scopeEpoch: facts.scopeEpoch,
+        aliasGeneration: facts.aliasGeneration,
+        actionProjectionSequence: facts.actionProjectionSequence,
+      })
+    } catch (error) {
+      logAgentMetric('codex_action_surface_invalidation_failed', {
+        aliasId,
+        reason: stableErrorCode(error, 'unknown'),
+      })
+    }
+  }
+  const materializeNativeFork = async (targetThreadBindingId: string): Promise<void> => {
+    const seed = repository.readNativeForkMaterialization(targetThreadBindingId)
+    if (!seed || seed.materializationState !== 'pending') {
+      throw new Error('codex_native_fork_not_pending')
+    }
+    mkdirSync(seed.targetCwd, { recursive: true })
+    const materialized = await nativeRuntime.threadFork({
+      threadId: seed.sourceCodexThreadId,
+      lastTurnId: seed.acceptedThroughCodexTurnId,
+      cwd: seed.targetCwd,
+      model: seed.model,
+      modelProvider: 'ready_gateway',
+      approvalPolicy: 'never',
+      sandbox: 'read-only',
+    }, targetThreadBindingId)
+    const readback = repository.readNativeForkMaterialization(targetThreadBindingId)
+    if (!readback || readback.materializationState !== 'confirmed'
+      || materialized.thread.id === seed.sourceCodexThreadId) {
+      throw new Error('codex_native_fork_materialization_readback_missing')
+    }
+    loadedThreads.add(materialized.thread.id)
+    publishCodexActionSurfaceInvalidation(seed.aliasId)
+    scheduleThreadArchiveCleanup()
+  }
   const collector = new CodexTurnCollector(nativeRuntime)
   const manualCompactionController = new CodexManualCompactionController({
     repository,
@@ -580,6 +683,8 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
     nativeRuntime,
     getHost: () => host,
     getRegistry: () => registry,
+    currentRuntimeManifestDigest: verified.manifestDigest,
+    currentProtocolSchemaDigest: verified.manifest.stableV2SchemaSha256,
     scheduleThreadArchiveCleanup,
     sealClosedConversationInOpenTransaction(value) {
       memoryRuntime.sealClosedConversationInOpenTransaction(value)
@@ -672,6 +777,29 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
   })
 
   const participant = {
+    prepare(closeout: { readyRunId: string }) {
+      const product = repository.readProductTurnRuntime(closeout.readyRunId)
+      getEphemeralExecutionStore().prepareRunTerminalFence(
+        product.readyScopeId,
+        closeout.readyRunId,
+      )
+    },
+    afterCommit(closeout: { readyRunId: string }) {
+      const product = repository.readProductTurnRuntime(closeout.readyRunId)
+      getEphemeralExecutionStore().commitRunTerminalFence(
+        product.readyScopeId,
+        closeout.readyRunId,
+        new Error('waiting_task_gone'),
+      )
+      publishCodexActionSurfaceInvalidation(product.readyAliasId)
+    },
+    afterRollback(closeout: { readyRunId: string }) {
+      const product = repository.readProductTurnRuntime(closeout.readyRunId)
+      getEphemeralExecutionStore().rollbackRunTerminalFence(
+        product.readyScopeId,
+        closeout.readyRunId,
+      )
+    },
     complete(closeout: { readyRunId: string; productTerminalDigest: string; closeoutAt: string }) {
       const product = repository.readProductTurnRuntime(closeout.readyRunId)
       const snapshot = product.prepared.readyMemorySnapshot
@@ -727,11 +855,20 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
         || expected === 'lifecycle_close'
         || expected === 'lifecycle_reset') {
         const action = expected.slice('lifecycle_'.length) as CodexLifecycleAction
+        const terminalEvidence = expectedCodexCloseouts.readTerminalEvidence(closeout.readyRunId)
+        if (!terminalEvidence) throw new Error('codex_lifecycle_terminal_evidence_missing')
         const result = repository.completeLifecycleActionCloseoutInOpenTransaction({
           ...closeout,
           action,
+          terminalEvidence,
+          ...(pendingNativeForkSeeds.get(closeout.readyRunId)
+            ? { forkSeed: pendingNativeForkSeeds.get(closeout.readyRunId) }
+            : {}),
         })
         if (!result.handled) throw new Error('codex_lifecycle_action_closeout_binding_missing')
+        if (typeof result.forkTargetThreadBindingId === 'string') {
+          materializedForkTargets.set(closeout.readyRunId, result.forkTargetThreadBindingId)
+        }
         if (action === 'close') {
           memoryRuntime.sealClosedConversationInOpenTransaction({
             conversationId: product.prepared.readyToolHostIdentity.scopeId,
@@ -741,19 +878,56 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
         return
       }
       if (expected === 'verifier_rejected') {
-        const result = repository.completeVerifierRejectedCloseoutInOpenTransaction(closeout)
+        const terminalEvidence = expectedCodexCloseouts.readTerminalEvidence(closeout.readyRunId)
+        if (!terminalEvidence) throw new Error('codex_verifier_terminal_evidence_missing')
+        const result = repository.completeVerifierRejectedCloseoutInOpenTransaction({
+          ...closeout,
+          terminalEvidence,
+          ...(pendingNativeForkSeeds.get(closeout.readyRunId)
+            ? { forkSeed: pendingNativeForkSeeds.get(closeout.readyRunId) }
+            : {}),
+        })
         if (!result.handled) throw new Error('codex_verifier_rejected_closeout_binding_missing')
+        if (result.forkTargetThreadBindingId) {
+          materializedForkTargets.set(closeout.readyRunId, result.forkTargetThreadBindingId)
+        }
         return
       }
       if (expected === 'verifier_accepted') {
-        const result = repository.completeVerifierAcceptedCloseoutInOpenTransaction(closeout)
+        const terminalEvidence = expectedCodexCloseouts.readTerminalEvidence(closeout.readyRunId)
+        if (!terminalEvidence) throw new Error('codex_verifier_terminal_evidence_missing')
+        const result = repository.completeVerifierAcceptedCloseoutInOpenTransaction({
+          ...closeout,
+          terminalEvidence,
+        })
         if (!result.handled) throw new Error('codex_verifier_accepted_closeout_binding_missing')
         return
       }
+      const terminalEvidence = expectedCodexCloseouts.readTerminalEvidence(closeout.readyRunId)
       const result = expected === 'publication_diverged'
-        ? repository.completePublicationDivergenceCloseoutInOpenTransaction(closeout)
-        : repository.completeCanonicalProductCloseoutInOpenTransaction(closeout)
+        ? repository.completePublicationDivergenceCloseoutInOpenTransaction({
+            ...closeout,
+            ...(terminalEvidence ? { terminalEvidence } : {}),
+            ...(pendingNativeForkSeeds.get(closeout.readyRunId)
+              ? { forkSeed: pendingNativeForkSeeds.get(closeout.readyRunId) }
+              : {}),
+          })
+        : expected === 'history_reset_required'
+          ? repository.completeHistoryResetRequiredCloseoutInOpenTransaction({
+              ...closeout,
+              terminalEvidence: terminalEvidence || (() => {
+                throw new Error('codex_history_reset_terminal_evidence_missing')
+              })(),
+            })
+        : repository.completeCanonicalProductCloseoutInOpenTransaction({
+            ...closeout,
+            ...(terminalEvidence ? { terminalEvidence } : {}),
+          })
       if (!result.handled) throw new Error('codex_canonical_closeout_binding_missing')
+      if ('forkTargetThreadBindingId' in result
+        && typeof result.forkTargetThreadBindingId === 'string') {
+        materializedForkTargets.set(closeout.readyRunId, result.forkTargetThreadBindingId)
+      }
     },
   }
 
@@ -895,6 +1069,11 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
     if (!scope) throw new Error('codex_scope_missing_during_closeout')
     const taskFacts = readProductTaskFacts(boundHost, product)
     const receipt = repository.readProductTurnPresentation(product.readyRunId)
+    const terminalReason = repository.readTerminalCloseoutEvidence(product.readyRunId)
+      ?.terminalFacts.product.terminalReason ?? receipt.canonicalMessage.meta.terminalReason
+    if (typeof terminalReason !== 'string' || !terminalReason) {
+      throw new Error('codex_persisted_terminal_reason_missing')
+    }
     const successful = receipt.terminal === 'done'
     const cancelled = receipt.terminal === 'cancelled' || receipt.terminal === 'interrupted'
     const execution: ExecutionHostResult = {
@@ -907,9 +1086,10 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
       taskProjectionId: product.readyTaskId,
       taskType: taskFacts.taskType,
       interactionState: successful ? 'running' : 'suspended',
-      terminalReason: successful ? 'done' : cancelled ? 'cancelled_user' : 'persistence_failed',
+      terminalReason: terminalReason as ExecutionHostResult['terminalReason'],
       canonicalMessage: receipt.canonicalMessage,
       canonicalMessageDigest: receipt.canonicalMessageDigest,
+      contextUsage: receipt.contextUsage,
       productTurnReceipt: receipt,
     }
     preparedDetails.delete(product.readyRunId)
@@ -927,11 +1107,31 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
     }
   }
 
+  const observeTerminalHistory = (
+    input: Parameters<typeof resolveCodexHistoryObservation>[0],
+    nativeReadback: CodexTerminalNativeReadbackReceipt,
+  ): CodexHistoryObservation => {
+    const observation = resolveCodexHistoryObservation(input)
+    if (observation.kind === 'diverged') {
+      const prefix = repository.readAcceptedNativePrefixResolution({
+        readyRunId: input.candidate.readyRunId, nativeReadback,
+      })
+      if (prefix.kind === 'unknown') {
+        return { kind: 'unknown_reset_required', reason: prefix.reason ?? 'formal_input_mapping_unknown' }
+      }
+    }
+    return observation
+  }
+
   const closeCandidateOwned = async (candidate: CoreTurnCandidate): Promise<ReadyClosedCodexProductRun> => {
     let publicationReceiptRefs: string[] = []
     let publicationDiverged = false
-    let publicationDivergenceKind: 'diverged' | null = null
+    let terminalReadbackReceipt: CodexTerminalNativeReadbackReceipt | null = null
+    let historyObservation: CodexHistoryObservation | null = null
+    let terminalReadbackThread: import('./codex-native-runtime').CodexThread | null = null
+    let gatewayEvidence: ReturnType<CodexModelGatewayRepository['readTurnGatewayEvidence']> = []
     let lifecycleAction: ReturnType<CodexBindingRepository['readProductLifecycleAction']> = null
+    let settledProductEffects: ReturnType<CodexToolActionJournal['readSettledProductEffects']> = []
     const product = repository.readProductTurnRuntime(candidate.readyRunId)
     if (candidate.readyTaskId !== product.readyTaskId
       || candidate.scopeId !== product.readyScopeId
@@ -947,30 +1147,42 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
     releaseBrowserTurnLease(product.readyRunId)
     if (candidate.kind === 'native_terminal') {
       lifecycleAction = repository.readProductLifecycleAction(product.readyRunId)
-      if (!lifecycleAction && candidate.engineOutcome === 'completed') {
+      if (!lifecycleAction) {
         try {
           const readback = await nativeRuntime.threadRead({
             threadId: candidate.codexThreadId,
             includeTurns: true,
           })
-          const automaticCompactionEvidence = verifyCodexAutomaticCompactionEvidence({
-            gatewayRepository,
-            readyRunId: product.readyRunId,
-            codexThreadId: candidate.codexThreadId,
-            codexTurnId: candidate.codexTurnId,
-            upstreamProfileSnapshotDigest: product.upstreamProfileSnapshotDigest,
-            productToolSurfaceDigest: product.toolSurfaceDigest,
+          terminalReadbackThread = readback.thread
+          terminalReadbackReceipt = buildTerminalNativeReadbackReceipt({
+            candidate,
+            prepared: product.prepared,
+            aliasGeneration: product.aliasGeneration,
+            messageVisibilityEpoch: product.messageVisibilityEpoch,
+            connectionEpoch: product.turnStartConnectionEpoch,
+            turnRevision: product.turnRevision,
             thread: readback.thread,
           })
-          candidate.contextState = {
-            ...candidate.contextState,
-            automaticCompactionExchanges: automaticCompactionEvidence
-              ? [automaticCompactionEvidence]
-              : [],
+          if (candidate.engineOutcome === 'completed') {
+            const automaticCompactionEvidence = verifyCodexAutomaticCompactionEvidence({
+              gatewayRepository,
+              readyRunId: product.readyRunId,
+              codexThreadId: candidate.codexThreadId,
+              codexTurnId: candidate.codexTurnId,
+              upstreamProfileSnapshotDigest: product.upstreamProfileSnapshotDigest,
+              productToolSurfaceDigest: product.toolSurfaceDigest,
+              thread: readback.thread,
+            })
+            candidate.contextState = {
+              ...candidate.contextState,
+              automaticCompactionExchanges: automaticCompactionEvidence
+                ? [automaticCompactionEvidence]
+                : [],
+            }
           }
         } catch (error) {
           lifecycleAction = repository.readProductLifecycleAction(product.readyRunId)
-          if (!lifecycleAction) throw error
+          if (!lifecycleAction && candidate.engineOutcome === 'completed') throw error
         }
       }
       repository.recordEngineTerminalCandidate({
@@ -981,6 +1193,22 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
         candidate,
         recordedAt: isoNow(),
       })
+      settledProductEffects = actionJournal.settleProductEffectsForCloseout({
+        readyRunId: candidate.readyRunId,
+        closeoutAt: isoNow(),
+      })
+      if (terminalReadbackThread) {
+        const refreshedProduct = repository.readProductTurnRuntime(candidate.readyRunId)
+        terminalReadbackReceipt = buildTerminalNativeReadbackReceipt({
+          candidate,
+          prepared: refreshedProduct.prepared,
+          aliasGeneration: refreshedProduct.aliasGeneration,
+          messageVisibilityEpoch: refreshedProduct.messageVisibilityEpoch,
+          connectionEpoch: refreshedProduct.turnStartConnectionEpoch,
+          turnRevision: refreshedProduct.turnRevision,
+          thread: terminalReadbackThread,
+        })
+      }
       lifecycleAction = repository.readProductLifecycleAction(product.readyRunId)
       const publication = repository.readToolPublicationBarrier({
         readyRunId: candidate.readyRunId,
@@ -998,10 +1226,27 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
         }
       } else if (publication.kind === 'diverged') {
         publicationDiverged = true
-        publicationDivergenceKind = publication.kind
       } else {
         throw new Error(`codex_tool_publication_${publication.kind}:${publication.code}`)
       }
+      gatewayEvidence = gatewayRepository.readTurnGatewayEvidence({
+        readyRunId: product.readyRunId,
+        codexThreadId: candidate.codexThreadId,
+        codexTurnId: candidate.codexTurnId,
+      })
+      historyObservation = terminalReadbackThread && terminalReadbackReceipt
+        ? observeTerminalHistory({
+            candidate,
+            prepared: product.prepared,
+            expectedClientUserMessageId: product.turnRequestId,
+            thread: terminalReadbackThread,
+            publicationDiverged,
+            gatewayEvidence,
+          }, terminalReadbackReceipt)
+        : {
+            kind: 'unknown_reset_required',
+            reason: 'native_readback_identity_unknown',
+          }
     } else {
       lifecycleAction = repository.readProductLifecycleAction(product.readyRunId)
     }
@@ -1019,28 +1264,68 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
         throw new Error('codex_product_closeout_already_committed')
       }
       const action = lifecycleAction.lifecycleAction
-      const committed = await commitExpectedCodexCloseout(
-        product.readyRunId,
-        `lifecycle_${action}`,
-        () => boundHost.commitCodexProductTurnCloseout({
-          parentTaskId: product.readyTaskId,
-          ownerRunId: product.readyRunId,
-          conversationId: scope.id,
-          status: 'interrupted',
-          terminalReason: 'cancelled_user',
-          initiator: `user_${action}`,
-          durationMs,
-          ...taskFacts,
-          finalText: codexTerminalPublicMessage('interrupted'),
-          providerDiagnostics: codexFailureDiagnostics({ error: 'cancelled_user', module: taskFacts.module }),
-          now: isoNow(),
-        }),
-      )
+      const lifecycleTerminalEvidence = await buildNativeTerminalEvidence({
+        product,
+        candidate,
+        status: 'interrupted',
+        terminalReason: 'cancelled_user',
+        lifecycleAction: action,
+        forcePublicationDiverged: action === 'stop' && candidate.engineOutcome === 'completed',
+      })
+      const forkReservationSetId = lifecycleTerminalEvidence.history.kind === 'diverged'
+        ? reserveNativeForkForDivergence(product, lifecycleTerminalEvidence.evidence.nativeReadback)
+        : null
+      let committed: Awaited<ReturnType<typeof boundHost.commitCodexProductTurnCloseout>>
+      try {
+        committed = await commitExpectedCodexCloseout(
+          product.readyRunId,
+          `lifecycle_${action}`,
+          () => boundHost.commitCodexProductTurnCloseout({
+            parentTaskId: product.readyTaskId,
+            ownerRunId: product.readyRunId,
+            conversationId: scope.id,
+            status: 'interrupted',
+            terminalReason: 'cancelled_user',
+            initiator: `user_${action}`,
+            durationMs,
+            ...taskFacts,
+            finalText: codexTerminalPublicMessage('interrupted'),
+            contextUsage: candidate.contextUsage,
+            providerDiagnostics: codexFailureDiagnostics({ error: 'cancelled_user', module: taskFacts.module }),
+            now: isoNow(),
+          }),
+          lifecycleTerminalEvidence.evidence,
+        )
+      } catch (error) {
+        releaseUndispatchedForkReservation(
+          product.readyRunId,
+          forkReservationSetId,
+          'lifecycle_closeout_rolled_back',
+        )
+        throw error
+      }
+      const forkTargetThreadBindingId = materializedForkTargets.get(product.readyRunId) || null
+      pendingNativeForkSeeds.delete(product.readyRunId)
+      materializedForkTargets.delete(product.readyRunId)
+      if (forkTargetThreadBindingId && repository.readNativeForkMaterialization(forkTargetThreadBindingId)) {
+        await materializeNativeFork(forkTargetThreadBindingId).catch((error: unknown) => {
+          logAgentMetric('codex_native_fork_materialization_pending', {
+            readyRunId: product.readyRunId,
+            reason: stableErrorCode(error, 'fork_materialization_unknown'),
+          })
+        })
+      } else if (forkReservationSetId && registry?.snapshot().members.some(
+        (member) => member.reservationSetId === forkReservationSetId && member.state === 'held',
+      )) {
+        throw new Error('codex_native_fork_target_missing')
+      }
       const closeout = repository.readLifecycleActionCloseout(product.readyRunId)
       if (closeout.closeoutDigest !== committed.productTerminalDigest) {
         throw new Error('codex_lifecycle_action_closeout_readback_mismatch')
       }
-      if (product.codexThreadId) loadedThreads.delete(product.codexThreadId)
+      if (product.codexThreadId && lifecycleTerminalEvidence.history.kind !== 'continuation_safe') {
+        loadedThreads.delete(product.codexThreadId)
+      }
       const reservationSnapshot = registry?.snapshot()
       if (reservationSnapshot?.members.some(
         (member) => member.reservationSetId === product.reservationSetId,
@@ -1063,6 +1348,7 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
         terminalReason: 'cancelled_user',
         canonicalMessage: committed.canonicalMessage,
         canonicalMessageDigest: committed.canonicalMessageDigest,
+        contextUsage: candidate.contextUsage,
         productTurnReceipt: repository.readProductTurnPresentation(product.readyRunId),
       }
       preparedDetails.delete(product.readyRunId)
@@ -1082,12 +1368,15 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
     if (
       candidate.kind === 'native_terminal'
       && !publicationDiverged
+      && historyObservation?.kind === 'continuation_safe'
+      && terminalReadbackThread !== null
       && candidate.engineOutcome === 'completed'
       && candidate.candidateSelection.kind === 'accepted'
       && candidate.candidateText !== null
       && candidate.candidateDigest !== null
     ) {
       const acceptedCandidateText = candidate.candidateText
+      const completedThreadReadback = terminalReadbackThread
       const workflowInspection = boundHost.runtime
         .getAgentSessionCheckpointRepository()
         .readWorkflowVerifierBundle(product.readyTaskId)
@@ -1265,14 +1554,14 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
                   ? 'codex_browser_verifier_invalid_output'
                   : 'codex_browser_verifier_rejected'
           const publicMessage = resultUnknown
-            ? '上一次独立复核的结果无法确认，本轮没有交付候选结果。你可以发送新消息，在新的上下文中重新开始。'
+            ? '上一次独立复核的结果无法确认，本轮没有交付候选结果。'
             : unavailable
-              ? '独立复核服务暂时不可用，本轮没有交付候选结果。你可以发送新消息，在新的上下文中重新开始。'
+              ? '独立复核服务暂时不可用，本轮没有交付候选结果。'
               : identityDrift
-                ? '独立复核期间任务依据已变化，本轮没有交付候选结果。你可以发送新消息，在新的上下文中重新开始。'
+                ? '独立复核期间任务依据已变化，本轮没有交付候选结果。'
                 : invalid
-                  ? '独立复核未能得出可信结论，本轮没有交付候选结果。你可以发送新消息，在新的上下文中重新开始。'
-                  : '独立复核未通过，本轮没有交付候选结果。你可以发送新消息，在新的上下文中重新开始。'
+                  ? '独立复核未能得出可信结论，本轮没有交付候选结果。'
+                  : '独立复核未通过，本轮没有交付候选结果。'
           const verifierTerminalReason = identityDrift
             ? 'persistence_failed' as const
             : unavailable || resultUnknown || invalid
@@ -1281,27 +1570,69 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
           if (repository.readProductCloseout(product.readyRunId)) {
             throw new Error('codex_product_closeout_already_committed')
           }
-          const committedFailure = await commitExpectedCodexCloseout(
-            product.readyRunId,
-            'verifier_rejected',
-            () => boundHost.commitCodexProductTurnCloseout({
-              parentTaskId: product.readyTaskId,
-              ownerRunId: product.readyRunId,
-              conversationId: scope.id,
-              status: 'error',
-              terminalReason: verifierTerminalReason,
-              initiator: 'codex_browser_verifier',
-              durationMs,
-              ...closeoutTaskFacts,
-              finalText: publicMessage,
-              providerDiagnostics: codexFailureDiagnostics({
-                error: errorCode,
-                module: closeoutTaskFacts.module,
-                verifierReceiptDigest,
+          const verifierTerminalEvidence = await buildNativeTerminalEvidence({
+            product,
+            candidate,
+            thread: completedThreadReadback,
+            status: 'error',
+            terminalReason: verifierTerminalReason,
+            verifierReceipt: {
+              attemptId: verifierAttempt.attemptId,
+              digest: verifierReceiptDigest,
+            },
+            forcePublicationDiverged: true,
+          })
+          const forkReservationSetId = verifierTerminalEvidence.history.kind === 'diverged'
+            ? reserveNativeForkForDivergence(product, verifierTerminalEvidence.evidence.nativeReadback)
+            : null
+          let committedFailure: Awaited<ReturnType<typeof boundHost.commitCodexProductTurnCloseout>>
+          try {
+            committedFailure = await commitExpectedCodexCloseout(
+              product.readyRunId,
+              'verifier_rejected',
+              () => boundHost.commitCodexProductTurnCloseout({
+                parentTaskId: product.readyTaskId,
+                ownerRunId: product.readyRunId,
+                conversationId: scope.id,
+                status: 'error',
+                terminalReason: verifierTerminalReason,
+                initiator: 'codex_browser_verifier',
+                durationMs,
+                ...closeoutTaskFacts,
+                finalText: publicMessage,
+                contextUsage: candidate.contextUsage,
+                providerDiagnostics: codexFailureDiagnostics({
+                  error: errorCode,
+                  module: closeoutTaskFacts.module,
+                  verifierReceiptDigest,
+                }),
+                now: isoNow(),
               }),
-              now: isoNow(),
-            }),
-          )
+              verifierTerminalEvidence.evidence,
+            )
+          } catch (error) {
+            releaseUndispatchedForkReservation(
+              product.readyRunId,
+              forkReservationSetId,
+              'verifier_closeout_rolled_back',
+            )
+            throw error
+          }
+          const forkTargetThreadBindingId = materializedForkTargets.get(product.readyRunId) || null
+          pendingNativeForkSeeds.delete(product.readyRunId)
+          materializedForkTargets.delete(product.readyRunId)
+          if (forkTargetThreadBindingId && repository.readNativeForkMaterialization(forkTargetThreadBindingId)) {
+            await materializeNativeFork(forkTargetThreadBindingId).catch((error: unknown) => {
+              logAgentMetric('codex_native_fork_materialization_pending', {
+                readyRunId: product.readyRunId,
+                reason: stableErrorCode(error, 'fork_materialization_unknown'),
+              })
+            })
+          } else if (forkReservationSetId && registry?.snapshot().members.some(
+            (member) => member.reservationSetId === forkReservationSetId && member.state === 'held',
+          )) {
+            throw new Error('codex_native_fork_target_missing')
+          }
           const reservationSnapshot = registry?.snapshot()
           if (reservationSnapshot?.members.some(
             (member) => member.reservationSetId === product.reservationSetId,
@@ -1329,6 +1660,7 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
             terminalReason: verifierTerminalReason,
             canonicalMessage: committedFailure.canonicalMessage,
             canonicalMessageDigest: committedFailure.canonicalMessageDigest,
+            contextUsage: candidate.contextUsage,
             productTurnReceipt: repository.readProductTurnPresentation(product.readyRunId),
           }
           preparedDetails.delete(product.readyRunId)
@@ -1397,6 +1729,7 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
         initiator: 'done',
         durationMs,
         finalText: acceptedCandidateText,
+        contextUsage: candidate.contextUsage,
         conversationId: scope.id,
         ...closeoutTaskFacts,
         providerDiagnostics: {
@@ -1409,25 +1742,81 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
         terminalQualityPatch,
         completionVerifierReceipt,
       }
-      const committed = await commitExpectedCodexCloseout(
-        product.readyRunId,
-        workflowBundle ? 'verifier_accepted' : 'product',
-        async () => workflowBundle
-          ? {
-              ...await boundHost.commitCodexProductTurnCloseout(requestedCloseout),
-              status: 'done',
-              terminalReason: 'done',
-            }
-          : finalizeCodexProductCloseout({
-              closeout: requestedCloseout,
-              toolCalls: candidate.usedToolCalls,
-              publishedToolEvidence,
-              taskProjectionStore: boundHost.getTaskProjectionStore(),
-              commitCanonicalCoreCloseout: (closeout) => (
-                boundHost.commitCodexProductTurnCloseout(closeout)
-              ),
-            }),
-      )
+      const commitAdjudicatedCloseout = async (
+        closeout: Parameters<typeof boundHost.commitCodexProductTurnCloseout>[0],
+      ) => {
+        const terminalEvidence = await buildNativeTerminalEvidence({
+          product,
+          candidate,
+          status: closeout.status,
+          terminalReason: closeout.terminalReason,
+          forcePublicationDiverged: closeout.status !== 'done',
+          thread: completedThreadReadback,
+          verifierReceipt: verifierAttempt?.receiptDigest
+            ? { attemptId: verifierAttempt.attemptId, digest: verifierAttempt.receiptDigest }
+            : undefined,
+        })
+        const forkReservationSetId = terminalEvidence.history.kind === 'diverged'
+          ? reserveNativeForkForDivergence(product, terminalEvidence.evidence.nativeReadback)
+          : null
+        const mode: CodexProductCloseoutMode = terminalEvidence.history.kind === 'unknown_reset_required'
+          ? 'history_reset_required'
+          : closeout.status === 'done'
+            ? workflowBundle ? 'verifier_accepted' : 'product'
+            : terminalEvidence.history.kind === 'diverged'
+              ? 'publication_diverged'
+              : 'history_reset_required'
+        let committed: Awaited<ReturnType<typeof boundHost.commitCodexProductTurnCloseout>>
+        try {
+          committed = await commitExpectedCodexCloseout(
+            product.readyRunId,
+            mode,
+            () => boundHost.commitCodexProductTurnCloseout(closeout),
+            terminalEvidence.evidence,
+          )
+        } catch (error) {
+          releaseUndispatchedForkReservation(
+            product.readyRunId, forkReservationSetId, 'adjudicated_closeout_rolled_back',
+          )
+          throw error
+        }
+        const forkTargetThreadBindingId = materializedForkTargets.get(product.readyRunId) || null
+        pendingNativeForkSeeds.delete(product.readyRunId)
+        materializedForkTargets.delete(product.readyRunId)
+        if (forkTargetThreadBindingId && repository.readNativeForkMaterialization(forkTargetThreadBindingId)) {
+          await materializeNativeFork(forkTargetThreadBindingId).catch((error: unknown) => {
+            logAgentMetric('codex_native_fork_materialization_pending', {
+              readyRunId: product.readyRunId,
+              reason: stableErrorCode(error, 'fork_materialization_unknown'),
+            })
+          })
+        } else if (forkReservationSetId && registry?.snapshot().members.some(
+          (member) => member.reservationSetId === forkReservationSetId && member.state === 'held',
+        )) {
+          throw new Error('codex_native_fork_target_missing')
+        }
+        if (closeout.status !== 'done') {
+          loadedThreads.delete(candidate.codexThreadId)
+          if (registry?.snapshot().members.some(
+            (member) => member.reservationSetId === product.reservationSetId,
+          )) {
+            registry.releaseAfterHostFailure({
+              reservationSetId: product.reservationSetId,
+              productTerminalDigest: committed.productTerminalDigest,
+            })
+          }
+        }
+        return { ...committed, status: closeout.status, terminalReason: closeout.terminalReason }
+      }
+      const committed = workflowBundle
+        ? await commitAdjudicatedCloseout(requestedCloseout)
+        : await finalizeCodexProductCloseout({
+            closeout: requestedCloseout,
+            toolCalls: candidate.usedToolCalls,
+            publishedToolEvidence,
+            taskProjectionStore: boundHost.getTaskProjectionStore(),
+            commitCanonicalCoreCloseout: commitAdjudicatedCloseout,
+          })
       const productCloseout = repository.readProductCloseout(product.readyRunId)
       if (!productCloseout) throw new Error('codex_product_closeout_readback_missing')
       const successful = committed.status === 'done'
@@ -1444,6 +1833,7 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
         terminalReason: committed.terminalReason as ExecutionHostResult['terminalReason'],
         canonicalMessage: committed.canonicalMessage,
         canonicalMessageDigest: committed.canonicalMessageDigest,
+        contextUsage: candidate.contextUsage,
         productTurnReceipt: repository.readProductTurnPresentation(product.readyRunId),
       }
       preparedDetails.delete(product.readyRunId)
@@ -1521,26 +1911,140 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
         return settlement.result
       }
     }
-    const status = candidate.engineOutcome === 'interrupted' ? 'interrupted' : 'error'
-    const terminalReason = status === 'interrupted'
-      ? 'cancelled_runtime'
-      : candidate.kind === 'native_terminal' && candidate.engineOutcome === 'failed'
-        ? 'blocked_external'
-        : 'persistence_failed'
+    const nativeFailure = candidate.kind === 'native_terminal'
+      ? resolveCodexUnownedNativeTerminalCloseout({
+          engineOutcome: candidate.engineOutcome,
+          publicationDiverged,
+        })
+      : null
+    const status = nativeFailure?.status || 'error'
+    const terminalReason = nativeFailure?.terminalReason || 'persistence_failed'
     const errorCode = candidate.kind === 'host_failure'
       ? `codex_${candidate.hostFailure.stage}_failed`
-      : publicationDivergenceKind === 'diverged'
-        ? 'codex_tool_publication_diverged'
-      : 'codex_native_terminal_rejected'
-    const closeoutMode = candidate.kind === 'native_terminal'
-      && (publicationDiverged || candidate.engineOutcome !== 'interrupted')
-      ? 'publication_diverged' as const
-      : 'product' as const
+      : nativeFailure!.errorCode
+    let closeoutMode: CodexProductCloseoutMode = historyObservation?.kind === 'unknown_reset_required'
+      ? 'history_reset_required'
+      : historyObservation?.kind === 'diverged'
+        ? 'publication_diverged'
+        : nativeFailure?.closeoutMode || 'product'
+    const forkReservationSetId = closeoutMode === 'publication_diverged'
+      ? reserveNativeForkForDivergence(product, terminalReadbackReceipt!)
+      : null
+    const terminalEvidence = candidate.kind === 'native_terminal'
+      && nativeFailure
+      && historyObservation
+      && terminalReadbackReceipt
+      ? (() => {
+          const engineReceipt = repository.readEngineTerminalCandidate(product.readyRunId)
+          if (!engineReceipt) throw new Error('codex_engine_terminal_receipt_missing')
+          const nativeTurnRef = terminalEvidenceRef({
+            kind: 'native_turn',
+            readyRunId: product.readyRunId,
+            readyScopeId: product.readyScopeId,
+            messageVisibilityEpoch: product.messageVisibilityEpoch,
+            aliasGeneration: product.aliasGeneration,
+            codexThreadId: candidate.codexThreadId,
+            codexTurnId: candidate.codexTurnId,
+            receiptId: `engine-terminal:${product.readyRunId}`,
+            digest: engineReceipt.candidateDigest,
+            ownerIdentity: {
+              nativeTurnId: candidate.codexTurnId,
+              terminalStatus: candidate.engineOutcome,
+            },
+          })
+          const nativeReadbackRef = terminalNativeReadbackEvidenceRef({
+            readyRunId: product.readyRunId,
+            readyScopeId: product.readyScopeId,
+            messageVisibilityEpoch: product.messageVisibilityEpoch,
+            aliasGeneration: product.aliasGeneration,
+            codexThreadId: candidate.codexThreadId,
+            codexTurnId: candidate.codexTurnId,
+            revision: terminalReadbackReceipt.turnRevision,
+            receiptId: terminalReadbackReceipt.receiptId,
+            digest: terminalReadbackReceipt.digest,
+            ownerIdentity: {
+              connectionEpoch: terminalReadbackReceipt.connectionEpoch,
+              readRevision: terminalReadbackReceipt.turnRevision,
+              verifiedThreadId: terminalReadbackReceipt.codexThreadId,
+              verifiedTurnId: terminalReadbackReceipt.codexTurnId,
+            },
+          })
+          const gatewayFailures = gatewayEvidence.filter((row) => row.failure !== null)
+          const gatewayRefs = gatewayEvidence.map((row) => terminalGatewayEvidenceRef({
+            readyRunId: product.readyRunId,
+            readyScopeId: product.readyScopeId,
+            messageVisibilityEpoch: product.messageVisibilityEpoch,
+            aliasGeneration: product.aliasGeneration,
+            codexThreadId: candidate.codexThreadId,
+            codexTurnId: candidate.codexTurnId,
+            revision: row.responseSequence ?? row.requestSequence,
+            receiptId: row.receiptId,
+            digest: row.responseEvidenceDigest ?? row.requestEvidenceDigest,
+            ownerIdentity: {
+              gatewayRequestReceiptId: row.receiptId,
+              eventSequence: row.responseSequence ?? row.requestSequence,
+            },
+          }))
+          const effectRefs = settledProductEffects.map((effect) => {
+            return terminalIndeterminateEffectEvidenceRef({
+            readyRunId: product.readyRunId,
+            readyScopeId: product.readyScopeId,
+            messageVisibilityEpoch: product.messageVisibilityEpoch,
+            aliasGeneration: product.aliasGeneration,
+            codexThreadId: candidate.codexThreadId,
+            codexTurnId: candidate.codexTurnId,
+              revision: effect.revision,
+              digest: effect.evidenceDigest,
+              effectEvidence: effect.state === 'confirmed'
+                ? {
+                    state: 'confirmed',
+                    readyActionId: effect.readyActionId,
+                    actionIdentityDigest: effect.actionIdentityDigest,
+                    receiptId: effect.receiptId as string,
+                  }
+                : {
+                    state: 'indeterminate',
+                    readyActionId: effect.readyActionId,
+                    actionIdentityDigest: effect.actionIdentityDigest,
+                    sourceRevision: effect.revision,
+                    resolutionEvidenceDigest: effect.evidenceDigest,
+                  },
+            })
+          })
+          const effectState = effectRefs.length === 0
+            ? 'none' as const
+            : settledProductEffects.some((effect) => effect.state === 'indeterminate')
+              ? 'indeterminate' as const
+              : 'confirmed' as const
+          const latestGatewayFailure = gatewayFailures.at(-1)?.failure || null
+          const failureKind = resolveCodexProductFailureKind({
+            terminal: status,
+            terminalReason,
+            gatewayFailureClass: latestGatewayFailure?.failureClass,
+          })
+          const facts = resolveCodexTerminalFacts({
+            product: {
+              terminal: status,
+              terminalReason,
+              failureKind,
+              evidence: [nativeTurnRef, nativeReadbackRef, ...gatewayRefs],
+            },
+            history: historyObservation,
+            historyEvidence: [nativeTurnRef, nativeReadbackRef, ...gatewayRefs],
+            effect: effectState === 'none'
+              ? { state: 'none', evidence: [] }
+              : { state: effectState, evidence: effectRefs },
+          })
+          return { nativeReadback: terminalReadbackReceipt, terminalFacts: facts }
+        })()
+      : undefined
     if (repository.readProductCloseout(product.readyRunId)) {
       throw new Error('codex_product_closeout_already_committed')
     }
-    const committed = await commitExpectedCodexCloseout(product.readyRunId, closeoutMode, () => (
-      boundHost.commitCodexProductTurnCloseout({
+    let committed: Awaited<ReturnType<typeof boundHost.commitCodexProductTurnCloseout>>
+    try {
+      committed = await commitExpectedCodexCloseout(product.readyRunId, closeoutMode, () => (
+        boundHost.commitCodexProductTurnCloseout({
         parentTaskId: product.readyTaskId,
         ownerRunId: product.readyRunId,
         conversationId: scope.id,
@@ -1550,10 +2054,31 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
         durationMs,
         ...taskFacts,
         finalText: codexTerminalPublicMessage(status),
+        contextUsage: candidate.contextUsage,
         providerDiagnostics: codexFailureDiagnostics({ error: errorCode, module: taskFacts.module }),
         now: isoNow(),
+        })
+      ), terminalEvidence)
+    } catch (error) {
+      releaseUndispatchedForkReservation(
+        product.readyRunId,
+        forkReservationSetId,
+        'canonical_closeout_rolled_back',
+      )
+      throw error
+    }
+    const forkTargetThreadBindingId = materializedForkTargets.get(product.readyRunId) || null
+    pendingNativeForkSeeds.delete(product.readyRunId)
+    materializedForkTargets.delete(product.readyRunId)
+    if (forkTargetThreadBindingId) {
+      const forkMaterialization = repository.readNativeForkMaterialization(forkTargetThreadBindingId)
+      if (forkMaterialization) await materializeNativeFork(forkTargetThreadBindingId).catch((error: unknown) => {
+        logAgentMetric('codex_native_fork_materialization_pending', {
+          readyRunId: product.readyRunId,
+          reason: stableErrorCode(error, 'fork_materialization_unknown'),
+        })
       })
-    ))
+    }
     const reservationSnapshot = registry?.snapshot()
     if (reservationSnapshot?.members.some((member) => member.reservationSetId === product.reservationSetId)) {
       registry?.releaseAfterHostFailure({
@@ -1564,7 +2089,7 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
     const execution: ExecutionHostResult = {
       success: false,
       finalText: committed.canonicalMessage.content,
-      cancelled: status === 'interrupted',
+      cancelled: false,
       usedTools: candidate.usedToolCalls.map((call) => call.tool),
       error: errorCode,
       taskId: product.readyTaskId,
@@ -1574,6 +2099,7 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
       terminalReason,
       canonicalMessage: committed.canonicalMessage,
       canonicalMessageDigest: committed.canonicalMessageDigest,
+      contextUsage: candidate.contextUsage,
       productTurnReceipt: repository.readProductTurnPresentation(product.readyRunId),
     }
     preparedDetails.delete(product.readyRunId)
@@ -1790,6 +2316,7 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
                     status: 'error',
                     terminalReason: 'blocked_external',
                     initiator: 'codex_recovery',
+                    forcePublicationDiverged: true,
                     error: browserWorkflowCode,
                   })
                   if (!stopped) {
@@ -1911,9 +2438,12 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
         fenceReleaseRevision: lifecycle.fenceReleaseRevision,
         lifecycleAction: lifecycle.action,
         lifecycleActionEvidenceDigest: lifecycle.lifecycleActionEvidenceDigest,
-        retiredGeneration: lifecycle.retiredGeneration,
-        retirementTransactionDigest: lifecycle.retirementTransactionDigest,
-        archiveIntentDigest: lifecycle.archiveIntentDigest,
+        ...(lifecycle.retiredGeneration === null
+          ? {} : { retiredGeneration: lifecycle.retiredGeneration }),
+        ...(lifecycle.retirementTransactionDigest === null
+          ? {} : { retirementTransactionDigest: lifecycle.retirementTransactionDigest }),
+        ...(lifecycle.archiveIntentDigest === null
+          ? {} : { archiveIntentDigest: lifecycle.archiveIntentDigest }),
         scopeClosureEvidenceDigest: lifecycle.scopeClosureEvidenceDigest,
         newGeneration: lifecycle.newGeneration,
         newThreadBindingId: lifecycle.newThreadBindingId,
@@ -1940,10 +2470,17 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
       || productCloseout.productTerminalDigest !== finalization.productTerminalDigest
       || productCloseout.productCloseoutAt !== finalization.closeoutAt
     ) throw new ReadyCodexLifecyclePortError('persistence_failed')
-    const readback = readLifecycleCloseout({
-      ...finalization.identity,
-      readyRunId: finalization.product.readyRunId,
-    })
+    const action = repository.readProductLifecycleAction(finalization.product.readyRunId)
+    const readback = action
+      ? readLifecycleCloseout({
+          ...finalization.identity,
+          readyRunId: finalization.product.readyRunId,
+        })
+      : repository.readLatestLifecycleCloseout({
+          aliasId: finalization.product.readyAliasId,
+          aliasGeneration: finalization.product.aliasGeneration,
+          readyRunId: finalization.product.readyRunId,
+        })
     if (
       readback.terminal !== finalization.terminal
       || readback.codexThreadId !== finalization.product.codexThreadId
@@ -1953,6 +2490,255 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
     return readback
   }
 
+  const reserveNativeForkForDivergence = (
+    product: CodexProductTurnRuntimeRead,
+    nativeReadback: CodexTerminalNativeReadbackReceipt,
+  ): string | null => {
+    const prefix = repository.readAcceptedNativePrefixResolution({
+      readyRunId: product.readyRunId,
+      nativeReadback,
+    })
+    if (prefix.kind !== 'accepted') return null
+    if (!registry) throw new Error('codex_registry_unavailable')
+    const requestedCwd = join(
+      input.userDataPath,
+      'codex-workspaces',
+      `fork-${sha256(`${product.readyAliasId}\u0000${product.aliasGeneration + 1}`).slice(0, 24)}`,
+    )
+    mkdirSync(requestedCwd, { recursive: true, mode: 0o700 })
+    const targetCwd = realpathSync(requestedCwd)
+    const reservation = registry.reserveFork({ scopeId: product.readyScopeId })
+    pendingNativeForkSeeds.set(product.readyRunId, {
+      targetCwd,
+      ...reservation,
+    })
+    return reservation.reservationSetId
+  }
+
+  const releaseUndispatchedForkReservation = (
+    readyRunId: string,
+    reservationSetId: string | null,
+    reason: string,
+  ): void => {
+    if (reservationSetId && registry?.snapshot().members.some(
+      (member) => member.reservationSetId === reservationSetId && member.state === 'held',
+    )) {
+      registry.releaseBeforeDispatch({
+        reservationSetId,
+        evidenceDigest: digestCanonicalJson({ readyRunId, reason }),
+      })
+    }
+    pendingNativeForkSeeds.delete(readyRunId)
+    materializedForkTargets.delete(readyRunId)
+  }
+
+  const buildNativeTerminalEvidence = async (input: {
+    product: CodexProductTurnRuntimeRead
+    candidate: Extract<CoreTurnCandidate, { kind: 'native_terminal' }>
+    thread?: import('./codex-native-runtime').CodexThread
+    status: 'done' | 'error' | 'cancelled' | 'interrupted'
+    terminalReason: string
+    lifecycleAction?: CodexLifecycleAction
+    verifierReceipt?: { attemptId: string; digest: string }
+    forcePublicationDiverged: boolean
+  }): Promise<{
+    evidence: import('./codex-binding-repository').CodexTerminalCloseoutEvidence
+    history: CodexHistoryObservation | { kind: 'reset' | 'closed' }
+  }> => {
+    const thread = input.thread ?? (await nativeRuntime.threadRead({
+      threadId: input.candidate.codexThreadId,
+      includeTurns: true,
+    })).thread
+    const effects = actionJournal.settleProductEffectsForCloseout({
+      readyRunId: input.product.readyRunId,
+      closeoutAt: isoNow(),
+    })
+    const publication = repository.readToolPublicationBarrier({
+      readyRunId: input.product.readyRunId,
+      codexThreadId: input.candidate.codexThreadId,
+      codexTurnId: input.candidate.codexTurnId,
+      candidateCalls: input.candidate.usedToolCalls,
+      effectSettlementOnly: Boolean(input.lifecycleAction),
+    })
+    if (publication.kind !== 'accepted' && publication.kind !== 'diverged') {
+      throw new Error(`codex_tool_publication_${publication.kind}:${publication.code}`)
+    }
+    const product = repository.readProductTurnRuntime(input.product.readyRunId)
+    const nativeReadback = buildTerminalNativeReadbackReceipt({
+      candidate: input.candidate,
+      prepared: product.prepared,
+      aliasGeneration: product.aliasGeneration,
+      messageVisibilityEpoch: product.messageVisibilityEpoch,
+      connectionEpoch: product.turnStartConnectionEpoch,
+      turnRevision: product.turnRevision,
+      thread,
+    })
+    const gatewayEvidence = gatewayRepository.readTurnGatewayEvidence({
+      readyRunId: product.readyRunId,
+      codexThreadId: input.candidate.codexThreadId,
+      codexTurnId: input.candidate.codexTurnId,
+    })
+    let observation = observeTerminalHistory({
+      candidate: input.candidate,
+      prepared: product.prepared,
+      expectedClientUserMessageId: product.turnRequestId,
+      thread,
+      publicationDiverged: input.forcePublicationDiverged || publication.kind === 'diverged',
+      gatewayEvidence,
+    }, nativeReadback)
+    if (input.status === 'done' && observation.kind === 'continuation_safe'
+      && repository.readNativeFormalInputCoverage({
+        threadBindingId: product.threadBindingId, orderedNativeTurnIds: nativeReadback.orderedTurnIds,
+      }).kind === 'unknown') {
+      observation = { kind: 'unknown_reset_required', reason: 'formal_input_mapping_unknown' }
+    }
+    const lifecycle = input.lifecycleAction
+      ? repository.readProductLifecycleAction(product.readyRunId)
+      : null
+    if (input.lifecycleAction && (!lifecycle || lifecycle.lifecycleAction !== input.lifecycleAction)) {
+      throw new Error('codex_lifecycle_action_evidence_missing')
+    }
+    const engine = repository.readEngineTerminalCandidate(product.readyRunId)
+    if (!engine) throw new Error('codex_engine_terminal_receipt_missing')
+    const nativeTurnRef = terminalEvidenceRef({
+      kind: 'native_turn',
+      readyRunId: product.readyRunId,
+      readyScopeId: product.readyScopeId,
+      messageVisibilityEpoch: product.messageVisibilityEpoch,
+      aliasGeneration: product.aliasGeneration,
+      codexThreadId: input.candidate.codexThreadId,
+      codexTurnId: input.candidate.codexTurnId,
+      receiptId: `engine-terminal:${product.readyRunId}`,
+      digest: engine.candidateDigest,
+      ownerIdentity: {
+        nativeTurnId: input.candidate.codexTurnId,
+        terminalStatus: input.candidate.engineOutcome,
+      },
+    })
+    const nativeReadbackRef = terminalNativeReadbackEvidenceRef({
+      readyRunId: product.readyRunId,
+      readyScopeId: product.readyScopeId,
+      messageVisibilityEpoch: product.messageVisibilityEpoch,
+      aliasGeneration: product.aliasGeneration,
+      codexThreadId: input.candidate.codexThreadId,
+      codexTurnId: input.candidate.codexTurnId,
+      revision: nativeReadback.turnRevision,
+      receiptId: nativeReadback.receiptId,
+      digest: nativeReadback.digest,
+      ownerIdentity: {
+        connectionEpoch: nativeReadback.connectionEpoch,
+        readRevision: nativeReadback.turnRevision,
+        verifiedThreadId: nativeReadback.codexThreadId,
+        verifiedTurnId: nativeReadback.codexTurnId,
+      },
+    })
+    const lifecycleRef = lifecycle ? {
+      kind: 'lifecycle' as const,
+      evidenceRefId: `lifecycle:${product.readyRunId}:${lifecycle.lifecycleAction}`,
+      readyRunId: product.readyRunId,
+      readyScopeId: product.readyScopeId,
+      messageVisibilityEpoch: product.messageVisibilityEpoch,
+      aliasGeneration: product.aliasGeneration,
+      codexThreadId: input.candidate.codexThreadId,
+      codexTurnId: input.candidate.codexTurnId,
+      revision: 1,
+      receiptId: `lifecycle:${product.readyRunId}:${lifecycle.lifecycleAction}`,
+      digest: lifecycle.lifecycleActionEvidenceDigest,
+      ownerIdentity: { lifecycleActionId: `${product.readyRunId}:${lifecycle.lifecycleAction}` },
+    } : null
+    const verifierRef = input.verifierReceipt ? {
+      kind: 'verifier' as const,
+      evidenceRefId: `verifier:${input.verifierReceipt.attemptId}`,
+      readyRunId: product.readyRunId,
+      readyScopeId: product.readyScopeId,
+      messageVisibilityEpoch: product.messageVisibilityEpoch,
+      aliasGeneration: product.aliasGeneration,
+      codexThreadId: input.candidate.codexThreadId,
+      codexTurnId: input.candidate.codexTurnId,
+      revision: 1,
+      receiptId: input.verifierReceipt.attemptId,
+      digest: input.verifierReceipt.digest,
+      ownerIdentity: { verifierAttemptId: input.verifierReceipt.attemptId },
+    } : null
+    const gatewayFailures = gatewayEvidence.filter((row) => row.failure !== null)
+    const gatewayRefs = gatewayEvidence.map((row) => (
+      terminalGatewayEvidenceRef({
+        readyRunId: product.readyRunId,
+        readyScopeId: product.readyScopeId,
+        messageVisibilityEpoch: product.messageVisibilityEpoch,
+        aliasGeneration: product.aliasGeneration,
+        codexThreadId: input.candidate.codexThreadId,
+        codexTurnId: input.candidate.codexTurnId,
+        revision: row.responseSequence ?? row.requestSequence,
+        receiptId: row.receiptId,
+        digest: row.responseEvidenceDigest ?? row.requestEvidenceDigest,
+        ownerIdentity: {
+          gatewayRequestReceiptId: row.receiptId,
+          eventSequence: row.responseSequence ?? row.requestSequence,
+        },
+      })
+    ))
+    const effectRefs = effects.map((effect) => terminalIndeterminateEffectEvidenceRef({
+      readyRunId: product.readyRunId,
+      readyScopeId: product.readyScopeId,
+      messageVisibilityEpoch: product.messageVisibilityEpoch,
+      aliasGeneration: product.aliasGeneration,
+      codexThreadId: input.candidate.codexThreadId,
+      codexTurnId: input.candidate.codexTurnId,
+      revision: effect.revision,
+      digest: effect.evidenceDigest,
+      effectEvidence: effect.state === 'confirmed'
+        ? {
+            state: 'confirmed',
+            readyActionId: effect.readyActionId,
+            actionIdentityDigest: effect.actionIdentityDigest,
+            receiptId: effect.receiptId as string,
+          }
+        : {
+            state: 'indeterminate',
+            readyActionId: effect.readyActionId,
+            actionIdentityDigest: effect.actionIdentityDigest,
+            sourceRevision: effect.revision,
+            resolutionEvidenceDigest: effect.evidenceDigest,
+          },
+    }))
+    const history = input.lifecycleAction === 'reset'
+      ? { kind: 'reset' as const }
+      : input.lifecycleAction === 'close'
+        ? { kind: 'closed' as const }
+        : observation
+    const facts = resolveCodexTerminalFacts({
+      product: {
+        terminal: input.status,
+        terminalReason: input.terminalReason,
+        failureKind: resolveCodexProductFailureKind({
+          terminal: input.status,
+          terminalReason: input.terminalReason,
+          gatewayFailureClass: gatewayFailures.at(-1)?.failure?.failureClass,
+        }),
+        evidence: [
+          nativeTurnRef,
+          nativeReadbackRef,
+          ...gatewayRefs,
+          ...(lifecycleRef ? [lifecycleRef] : []),
+          ...(verifierRef ? [verifierRef] : []),
+        ],
+      },
+      history,
+      historyEvidence: history.kind === 'reset' || history.kind === 'closed'
+        ? [lifecycleRef as NonNullable<typeof lifecycleRef>]
+        : [nativeTurnRef, nativeReadbackRef, ...gatewayRefs, ...(verifierRef ? [verifierRef] : [])],
+      effect: effectRefs.length === 0
+        ? { state: 'none', evidence: [] }
+        : {
+            state: effects.some((effect) => effect.state === 'indeterminate')
+              ? 'indeterminate' : 'confirmed',
+            evidence: effectRefs,
+          },
+    })
+    return { evidence: { nativeReadback, terminalFacts: facts }, history }
+  }
+
   const settleEngineTerminalFailure = async (input: {
     identity: { aliasId: string; aliasGeneration: number }
     readyRunId: string
@@ -1960,6 +2746,7 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
     terminalReason: 'blocked_external' | 'cancelled_user'
     initiator: 'codex_recovery' | 'user_stop' | 'user_close' | 'user_reset'
     lifecycleAction?: CodexLifecycleAction
+    forcePublicationDiverged?: boolean
     error: string
   }): Promise<ProductTurnCloseoutEvidence> => {
     const product = repository.readProductTurnRuntime(input.readyRunId)
@@ -1991,25 +2778,71 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
         requestedAt: isoNow(),
       })
     }
-    const committed = await commitExpectedCodexCloseout(
-      product.readyRunId,
-      input.lifecycleAction
-        ? `lifecycle_${input.lifecycleAction}` as CodexProductCloseoutMode
-        : 'publication_diverged',
-      () => boundHost.commitCodexProductTurnCloseout({
-        parentTaskId: product.readyTaskId,
-        ownerRunId: product.readyRunId,
-        conversationId: product.readyScopeId,
-        status: input.status,
-        terminalReason: input.terminalReason,
-        initiator: input.initiator,
-        durationMs: Math.max(1, Date.now() - Date.parse(product.admittedAt)),
-        ...taskFacts,
-        finalText: codexTerminalPublicMessage(input.status),
-        providerDiagnostics: codexFailureDiagnostics({ error: input.error, module: taskFacts.module }),
-        now: isoNow(),
-      }),
-    )
+    const terminalEvidence = await buildNativeTerminalEvidence({
+      product,
+      candidate,
+      status: input.status,
+      terminalReason: input.terminalReason,
+      ...(input.lifecycleAction ? { lifecycleAction: input.lifecycleAction } : {}),
+      forcePublicationDiverged: input.forcePublicationDiverged === true,
+    })
+    const forkReservationSetId = terminalEvidence.history.kind === 'diverged'
+      ? reserveNativeForkForDivergence(product, terminalEvidence.evidence.nativeReadback)
+      : null
+    const closeoutMode: CodexProductCloseoutMode = input.lifecycleAction
+      ? `lifecycle_${input.lifecycleAction}` as CodexProductCloseoutMode
+      : terminalEvidence.history.kind === 'continuation_safe'
+        ? 'product'
+        : terminalEvidence.history.kind === 'diverged'
+          ? 'publication_diverged'
+          : 'history_reset_required'
+    let committed: Awaited<ReturnType<typeof boundHost.commitCodexProductTurnCloseout>>
+    try {
+      committed = await commitExpectedCodexCloseout(
+        product.readyRunId,
+        closeoutMode,
+        () => boundHost.commitCodexProductTurnCloseout({
+          parentTaskId: product.readyTaskId,
+          ownerRunId: product.readyRunId,
+          conversationId: product.readyScopeId,
+          status: input.status,
+          terminalReason: input.terminalReason,
+          initiator: input.initiator,
+          durationMs: Math.max(1, Date.now() - Date.parse(product.admittedAt)),
+          ...taskFacts,
+          finalText: codexTerminalPublicMessage(input.status),
+          contextUsage: candidate.contextUsage,
+          providerDiagnostics: codexFailureDiagnostics({ error: input.error, module: taskFacts.module }),
+          now: isoNow(),
+        }),
+        terminalEvidence.evidence,
+      )
+    } catch (error) {
+      if (forkReservationSetId && registry?.snapshot().members.some(
+        (member) => member.reservationSetId === forkReservationSetId && member.state === 'held',
+      )) {
+        registry.releaseBeforeDispatch({
+          reservationSetId: forkReservationSetId,
+          evidenceDigest: digestCanonicalJson({
+            readyRunId: product.readyRunId,
+            reason: 'canonical_closeout_rolled_back',
+          }),
+        })
+      }
+      pendingNativeForkSeeds.delete(product.readyRunId)
+      throw error
+    }
+    const forkTargetThreadBindingId = materializedForkTargets.get(product.readyRunId) || null
+    pendingNativeForkSeeds.delete(product.readyRunId)
+    materializedForkTargets.delete(product.readyRunId)
+    if (forkTargetThreadBindingId && repository.readNativeForkMaterialization(forkTargetThreadBindingId)) {
+      await materializeNativeFork(forkTargetThreadBindingId).catch((error: unknown) => {
+        logAgentMetric('codex_native_fork_materialization_pending', {
+          readyRunId: product.readyRunId,
+          reason: stableErrorCode(error, 'fork_materialization_unknown'),
+        })
+      })
+    }
     const execution: ExecutionHostResult = {
       success: false,
       finalText: committed.canonicalMessage.content,
@@ -2023,6 +2856,7 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
       terminalReason: input.terminalReason,
       canonicalMessage: committed.canonicalMessage,
       canonicalMessageDigest: committed.canonicalMessageDigest,
+      contextUsage: candidate.contextUsage,
       productTurnReceipt: repository.readProductTurnPresentation(product.readyRunId),
     }
     const recovered: ReadyClosedCodexProductRun = {
@@ -2145,15 +2979,25 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
     ) {
       throw new ReadyCodexLifecyclePortError('persistence_failed')
     }
-    return settleEngineTerminalFailure({
-      identity,
-      readyRunId: identity.readyRunId,
-      status: 'interrupted',
-      terminalReason: 'cancelled_user',
-      initiator: `user_${requestedAction}`,
-      lifecycleAction: requestedAction,
-      error: 'cancelled_user',
-    })
+    try {
+      return await settleEngineTerminalFailure({
+        identity,
+        readyRunId: identity.readyRunId,
+        status: 'interrupted',
+        terminalReason: 'cancelled_user',
+        initiator: `user_${requestedAction}`,
+        lifecycleAction: requestedAction,
+        error: 'cancelled_user',
+      })
+    } catch (error) {
+      try {
+        const committed = readLifecycleCloseout({ ...identity, readyRunId: identity.readyRunId })
+        if (committed.lifecycleAction === requestedAction) return committed
+      } catch {
+        // silent-catch: no matching durable winner; rethrow the original settlement failure below.
+      }
+      throw error
+    }
   }
 
   retryLifecycleEngineTerminalUserStopFinalization = async (identity) => {
@@ -2183,6 +3027,51 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
     deliverRecoveredCloseout(settlement.readyRunId, settlement.result)
   }
 
+  const readActionSurface = (identity: { aliasId: string; aliasGeneration: number }) => {
+    const refreshed = repository.refreshPristineFreshStartHeadAtomic({
+      aliasId: identity.aliasId,
+      runtimeManifestDigest: verified.manifestDigest,
+      protocolSchemaDigest: verified.manifest.stableV2SchemaSha256,
+      createdAt: isoNow(),
+    })
+    if (refreshed.kind === 'refreshed') {
+      publishCodexActionSurfaceInvalidation(identity.aliasId, refreshed.invalidation)
+      identity = { aliasId: refreshed.binding.aliasId, aliasGeneration: refreshed.binding.aliasGeneration }
+    }
+    const read = repository.readLifecycleOperation(identity)
+    const snapshot = classifyLifecycleOperation(read.facts)
+    const base = {
+      identity: read.identity,
+      activeReadyRunId: read.activeReadyRunId,
+      latestReadyRunId: read.latestReadyRunId,
+      snapshot,
+      interruptRequested: read.interruptRequested,
+      interruptAcknowledged: read.interruptAcknowledged,
+      requestedAction: read.requestedAction,
+      evidenceDigest: digestCanonicalJson({ ...read, snapshot }),
+    }
+    const headFacts = repository.readHeadActionFacts({
+      ...identity,
+      currentRuntimeManifestDigest: verified.manifestDigest,
+      currentProtocolSchemaDigest: verified.manifest.stableV2SchemaSha256,
+    })
+    const head = projectCodexHeadActionProjection(headFacts)
+    const lifecycleProjection = projectCodexLifecycleOperationV2({
+      base,
+      head,
+      scopeEpoch: headFacts.scopeEpoch,
+      threadBindingId: headFacts.threadBindingId,
+      headRevision: headFacts.headRevision,
+      materializationIntentRef: headFacts.materializationIntentRef ?? null,
+    })
+    return {
+      scopeId: head.scopeId,
+      scopeEpoch: headFacts.scopeEpoch,
+      head,
+      lifecycle: lifecycleProjection,
+    }
+  }
+
   const aliasBindingPort: CodexAliasBindingPort = {
     readAliasGeneration(aliasId) {
       return repository.readActiveAliasBinding(aliasId)?.aliasGeneration ?? null
@@ -2197,25 +3086,20 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
       return repository.readCommittedProductRunVisibilityIdentity(readyRunId)
     },
     readLifecycleSnapshot(identity) {
-      const read = repository.readLifecycleOperation(identity)
-      const snapshot = classifyLifecycleOperation(read.facts)
-      return {
-        identity: read.identity,
-        activeReadyRunId: read.activeReadyRunId,
-        latestReadyRunId: read.latestReadyRunId,
-        snapshot,
-        interruptRequested: read.interruptRequested,
-        interruptAcknowledged: read.interruptAcknowledged,
-        requestedAction: read.requestedAction,
-        evidenceDigest: digestCanonicalJson({ ...read, snapshot }),
-      }
+      return readActionSurface(identity).lifecycle
+    },
+    readHeadActionProjection(identity) {
+      return readActionSurface(identity).head
+    },
+    readActionSurface(identity) {
+      return readActionSurface(identity)
     },
   }
 
   const startIdentityPort: CodexStartIdentityPort = {
     resolveMethods(scopeId) {
       gate.assertOpen()
-      const binding = repository.resolveUserIngressAliasBinding({
+      const refreshed = repository.refreshPristineFreshStartHeadAtomic({
         aliasId: scopeId,
         runtimeManifestDigest: verified.manifestDigest,
         protocolSchemaDigest: verified.manifest.stableV2SchemaSha256,
@@ -2224,7 +3108,42 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
           listLiveCodexThreadToolDefinitions(),
         ),
       })
+      if (refreshed.kind === 'refreshed') {
+        publishCodexActionSurfaceInvalidation(scopeId, refreshed.invalidation)
+      }
+      if (refreshed.kind === 'reset_required') throw new Error('codex_conversation_reset_required')
+      const binding = 'binding' in refreshed ? refreshed.binding : null
+      if (binding) {
+        const head = projectCodexHeadActionProjection(repository.readHeadActionFacts({
+          aliasId: binding.aliasId,
+          aliasGeneration: binding.aliasGeneration,
+          currentRuntimeManifestDigest: verified.manifestDigest,
+          currentProtocolSchemaDigest: verified.manifest.stableV2SchemaSha256,
+        }))
+        if (head.actions.send_new_message.availability !== 'ready') {
+          const blocker = head.actions.send_new_message.blockers[0]
+          if (blocker === 'history_materializing') throw new Error('codex_conversation_materializing')
+          if (blocker === 'thread_busy') throw new Error('codex_thread_busy')
+          throw new Error('codex_conversation_reset_required')
+        }
+      }
       if (!binding || binding.retiredAt) throw new Error('codex_alias_binding_missing')
+      if (binding.materializationKind === 'native_fork'
+        && binding.materializationState === 'pending') {
+        throw new PrePersistenceAdmissionError(
+          'conversation_materializing', true,
+          digestCanonicalJson({ scopeId, state: binding.materializationState }),
+          'codex_conversation_materializing',
+        )
+      }
+      if (binding.materializationKind === 'native_fork'
+        && binding.materializationState !== 'confirmed') {
+        throw new PrePersistenceAdmissionError(
+          'conversation_reset_required', false,
+          digestCanonicalJson({ scopeId, state: binding.materializationState }),
+          'codex_conversation_reset_required',
+        )
+      }
       if (binding.continuationBlockedAt) throw new PrePersistenceAdmissionError(
         'conversation_reset_required', false,
         digestCanonicalJson({ scopeId, reason: binding.continuationBlockedReason }),
@@ -2289,7 +3208,7 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
         const profile = activeProfile(input.settings)
         await input.providerReadiness.ensureReady(profile)
         const binding = repository.readActiveAliasBinding(scope.id)
-        if (!binding || binding.aliasGeneration !== scope.aliasGeneration) {
+        if (!binding) {
           throw new Error('codex_alias_generation_mismatch')
         }
         if (
@@ -2308,9 +3227,49 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
              WHERE ready_conversation_alias = ? AND alias_generation = ?
              LIMIT 1
           `).get<{ retired_reason: string | null }>(scope.id, request.expectedAliasGeneration)
-          if (!predecessor || !['publication_diverged', 'cleanup'].includes(predecessor.retired_reason || '')) {
+          if (!predecessor || !['publication_diverged', 'pristine_contract_refresh'].includes(predecessor.retired_reason || '')) {
             throw new Error('codex_alias_generation_mismatch')
           }
+        }
+        const currentHeadProjection = projectCodexHeadActionProjection(
+          repository.readHeadActionFacts({
+            aliasId: binding.aliasId,
+            aliasGeneration: binding.aliasGeneration,
+            currentRuntimeManifestDigest: verified.manifestDigest,
+            currentProtocolSchemaDigest: verified.manifest.stableV2SchemaSha256,
+          }),
+        )
+        if (currentHeadProjection.actions.send_new_message.availability !== 'ready') {
+          throw new PrePersistenceAdmissionError(
+            currentHeadProjection.actions.send_new_message.blockers[0] === 'history_materializing'
+              ? 'conversation_materializing'
+              : currentHeadProjection.actions.send_new_message.blockers[0] === 'thread_busy'
+                ? 'thread_busy'
+                : 'conversation_reset_required',
+            false,
+            currentHeadProjection.evidenceDigest,
+            'codex_head_action_not_ready',
+          )
+        }
+        if (!request.explicitRetry) {
+          const expectedAdmissionRef = currentHeadProjection.actionHeadIdentity && {
+            headProjectionDigest: currentHeadProjection.evidenceDigest,
+            actionProjectionVersion: currentHeadProjection.actionProjectionVersion,
+            actionHeadIdentity: currentHeadProjection.actionHeadIdentity,
+          }
+          if (!request.actionAdmissionRef || !expectedAdmissionRef
+            || digestCanonicalJson(request.actionAdmissionRef)
+              !== digestCanonicalJson(expectedAdmissionRef)) {
+            throw new PrePersistenceAdmissionError(
+              'conversation_reset_required',
+              false,
+              currentHeadProjection.evidenceDigest,
+              'codex_action_admission_ref_stale',
+            )
+          }
+        }
+        if (binding.aliasGeneration !== scope.aliasGeneration) {
+          throw new Error('codex_alias_generation_mismatch')
         }
         const externalReadRequest = parseCodexExternalReadSliceRequest(request.userMessage.meta)
         if (request.currentDocumentAnchor && externalReadRequest) {
@@ -2348,6 +3307,7 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
           || requestedWorkbenchMode === 'calendar'
           ? requestedWorkbenchMode
           : hostEnvironment.workbenchMode
+        if (!activeWorkbenchMode) throw new Error('codex_trusted_workbench_mode_missing')
         const executionPageRef = resolveBrowserExecutionPageRef(buildBrowserAdmissionAuthoritySnapshot({
           authorityId: `browser-exec:${request.requestId}`,
           activeWorkbenchMode,
@@ -2366,7 +3326,7 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
         let retryPredecessor: ReturnType<CodexBindingRepository['readProductTurnRuntime']> | null = null
         let retryPredecessorReceipt: ProductTurnReceipt | null = null
         let retryTaskContext: ReturnType<CodexBindingRepository['readProductTurnRuntime']> | null = null
-        let retryArtifactSources: import('./codex-product-run-preparer').CodexRetryArtifactSource[] = []
+        let retryCapabilityCeilingValid = false
         if (request.explicitRetry) {
           const lineage = resolveCodexExplicitRetryLineage({
             repository,
@@ -2377,28 +3337,40 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
           retryTaskContext = lineage.taskContext
           retryPredecessor = lineage.predecessor
           retryPredecessorReceipt = lineage.predecessorReceipt
-          retryArtifactSources = lineage.artifactSources
-        }
-        const retryLocalResources = retryTaskContext
-          ? recoverCodexRetryLocalResourceSelections({
-              explicitInput: retryTaskContext.prepared.ingress.explicitResourceEnvelope.input,
-              authorities: retryTaskContext.prepared.resourceAuthorities ?? [],
-            })
-          : []
-        const retrySkillSelection = retryTaskContext
-          ? recoverCodexRetrySkillSelection(
-              retryTaskContext.prepared.readyTurnToolAuthorization.skillAuthorization,
+          const lineageProjection = lineage.predecessorReceipt.actionProjection
+          if (lineageProjection.retryEvidenceKind !== 'complete'
+            || lineageProjection.headProjectionRef.digest !== currentHeadProjection.evidenceDigest
+            || digestCanonicalJson(lineageProjection.headProjectionRef.version)
+              !== digestCanonicalJson(currentHeadProjection.actionProjectionVersion)) {
+            throw new PrePersistenceAdmissionError(
+              'conversation_reset_required',
+              false,
+              currentHeadProjection.evidenceDigest,
+              'codex_explicit_retry_head_projection_stale',
             )
-          : null
-        const currentResourceSelections = retrySkillSelection
-          ? (request.resources ?? []).filter((selection) => selection.kind !== 'skill')
-          : request.resources ?? []
+          }
+          const sourceMode = lineage.taskContext.prepared.sourceTrustedEnvironmentRef.workbenchMode
+          if (sourceMode !== activeWorkbenchMode
+            || (sourceMode !== 'browser' && sourceMode !== 'document')
+            || executionPageRef !== null
+            || browserReference !== null
+            || externalReadSlice !== null
+            || request.currentDocumentAnchor !== undefined) {
+            throw new PrePersistenceAdmissionError(
+              'explicit_retry_control_invalid', false,
+              digestCanonicalJson({
+                readyRunId: lineage.predecessor.readyRunId,
+                sourceMode,
+                activeWorkbenchMode,
+                currentEnvironmentEmpty: false,
+              }),
+              'codex_explicit_retry_current_environment_requires_restatement',
+            )
+          }
+        }
+        const currentResourceSelections = request.resources ?? []
         const explicitResources = await resolveCodexExplicitResources({
-          selections: [
-            ...currentResourceSelections,
-            ...retryLocalResources.map((resource) => resource.selection),
-            ...(retrySkillSelection ? [retrySkillSelection.selection] : []),
-          ],
+          selections: currentResourceSelections,
           resolveSkill: (selection) => {
             const resolved = boundHost.resolveNativeSkillInput?.({
               skillId: selection.skillId,
@@ -2422,71 +3394,88 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
             const source = input.database.getRSSSources().find((candidate) => candidate.id === selection.sourceId)
             return source ? trustedRssSourceInput(source) : null
           },
+          resolveMcpResource: async (selection) => {
+            const registration = getMcpServerRegistration(selection.serverId)
+            if (!registration
+              || registration.catalogGeneration !== selection.catalogGeneration
+              || registration.catalogDigest !== selection.catalogDigest
+              || !registration.resources?.some((resource) => resource.uri === selection.uri)) return null
+            const client = getMcpClient(selection.serverId)
+            if (!client) return null
+            const content = await client.readResource(selection.uri)
+            const serialized = JSON.stringify(content)
+            const digest = createHash('sha256').update(serialized).digest('hex')
+            if (digest !== selection.contentDigest) return null
+            const resource = registration.resources.find((candidate) => candidate.uri === selection.uri)
+            return {
+              name: resource?.name || selection.name,
+              path: selection.uri,
+              text: [
+                `用户明确选中的 MCP 只读资源（server: ${selection.serverId}，uri: ${selection.uri}）：`,
+                serialized.slice(0, 30_000),
+              ].join('\n\n'),
+              digest,
+            }
+          },
         })
-        const turnResources = retrySkillSelection
-          ? {
-              ...explicitResources,
-              requestResources: explicitResources.requestResources.map((resource) => (
-                resource.kind === 'skill_reference'
-                  && resource.name === retrySkillSelection.selection.skillId
-                  ? {
-                      ...resource,
-                      applicableToolNames: retrySkillSelection.applicableToolNames,
-                    }
-                  : resource
-              )),
-            }
-          : explicitResources
-        if (request.explicitRetry) {
-          for (const retryResource of retryLocalResources) {
-            const currentReference = explicitResources.resourceRefs.find(
-              (reference) => reference.logicalResourceId === retryResource.logicalResourceId,
-            )
-            const currentAuthority = explicitResources.authorities.find(
-              (authority) => authority.logicalResourceId === retryResource.logicalResourceId,
-            )
-            if (!currentReference || (retryResource.directoryIdentity && (
-              !currentAuthority?.directoryIdentity
-              || currentAuthority.directoryIdentity.device !== retryResource.directoryIdentity.device
-              || currentAuthority.directoryIdentity.inode !== retryResource.directoryIdentity.inode
-              || currentAuthority.directoryIdentity.mode !== retryResource.directoryIdentity.mode
-            ))) {
-              throw new Error('codex_explicit_retry_resource_identity_drift')
-            }
-          }
-          const predecessorDestination = retryTaskContext!.prepared.outputContract?.destination
-          const currentDirectories = turnResources.authorities.filter(
-            (authority) => authority.kind === 'local_directory',
-          )
-          if (predecessorDestination && currentDirectories.length === 1) {
-            const current = currentDirectories[0]
-            if (!current.directoryIdentity
-              || current.logicalResourceId !== predecessorDestination.logicalResourceId
-              || current.directoryIdentity.device !== predecessorDestination.directoryIdentity.device
-              || current.directoryIdentity.inode !== predecessorDestination.directoryIdentity.inode
-              || current.directoryIdentity.mode !== predecessorDestination.directoryIdentity.mode) {
-              throw new Error('codex_explicit_retry_destination_identity_drift')
-            }
-          } else if (predecessorDestination) {
-            throw new Error('codex_explicit_retry_destination_identity_drift')
-          }
-        }
-        const currentDocumentAnchor = request.currentDocumentAnchor ?? null
-        assertWidgetTargetsMatchAnchor(request.resources ?? [], currentDocumentAnchor)
+        const turnResources = explicitResources
+        const capturedCurrentDocumentAnchor = request.currentDocumentAnchor ?? null
+        assertWidgetTargetsMatchAnchor(request.resources ?? [], capturedCurrentDocumentAnchor)
+        const currentDocumentIntentText = request.explicitRetry && retryTaskContext
+          ? retryTaskContext.prepared.ingress.canonicalCurrentInputRef.input
+              .filter((item): item is Extract<CodexUserInput, { type: 'text' }> => item.type === 'text')
+              .map((item) => item.text)
+              .join('\n')
+          : request.userMessage.content
+        const hasCurrentDocumentTarget = (request.resources ?? []).some((resource) => (
+          resource.kind === 'widget_target'
+        ))
+        const currentDocumentAnchor = capturedCurrentDocumentAnchor
+          && !hasExplicitCurrentDocumentAccessExclusion(currentDocumentIntentText)
+          && (hasCurrentDocumentTarget || hasExplicitCurrentDocumentAccessIntent(currentDocumentIntentText))
+          ? capturedCurrentDocumentAnchor
+          : null
         const currentDocumentWriteIntent = Boolean(currentDocumentAnchor)
-          && hasExplicitCurrentDocumentWriteIntent(request.userMessage.content)
+          && hasExplicitCurrentDocumentWriteIntent(currentDocumentIntentText)
         const hasFolderExportDestination = turnResources.requestResources.some((resource) => (
           resource.kind === 'folder_reference'
         ))
+        let authorizationRequest = request
+        if (request.explicitRetry && retryTaskContext) {
+          try {
+            authorizationRequest = buildCodexRetryAuthorizationRequest(
+              request,
+              retryTaskContext.prepared.ingress.canonicalCurrentInputRef.input,
+            )
+          } catch {
+            throw new PrePersistenceAdmissionError(
+              'explicit_retry_control_invalid', false,
+              digestCanonicalJson({ readyRunId: retryTaskContext.readyRunId, reason: 'nontext_task_root' }),
+              'codex_explicit_retry_task_root_requires_restatement',
+            )
+          }
+        }
         const { requestEnvelope, authorization } = resolveCodexProductTurnAuthorization({
+          mode: request.explicitRetry ? 'observe' : 'commit',
           host: boundHost,
-          request,
+          request: authorizationRequest,
           scopeId: scope.id,
           externalReadSlice,
           trustedEnvironment,
           trustedResources: turnResources.requestResources,
           currentDocumentCanWrite: currentDocumentWriteIntent,
+          currentDocumentCanRead: Boolean(currentDocumentAnchor),
         })
+        if (request.explicitRetry && authorization.mode === 'selected') {
+          throw new PrePersistenceAdmissionError(
+            'explicit_retry_control_invalid', false,
+            digestCanonicalJson({
+              readyRunId: retryTaskContext?.readyRunId,
+              skillId: authorization.skillId,
+            }),
+            'codex_explicit_retry_current_skill_requires_restatement',
+          )
+        }
         const intentClassification = classifyIntent(requestEnvelope)
         const hasMapRouteIntent = isMapSemanticIntentActive(
           classifyMapSemanticIntentFallback(requestEnvelope.primaryInstruction),
@@ -2547,7 +3536,7 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
           )),
           tagForgeExclusive: exclusiveAllowSet !== null,
         })
-        const toolSnapshot = composeCodexTurnToolSnapshot({
+        let toolSnapshot = composeCodexTurnToolSnapshot({
           resolved: resolvedToolSnapshot,
           authorizationId: `codex-auth:${request.requestId}`,
           authorization,
@@ -2570,6 +3559,24 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
             hasEntries: readyMemorySnapshot.entries.length > 0,
           },
         })
+        if (request.explicitRetry && retryTaskContext) {
+          const ceiling = resolveCodexRetryAuthorizationCeiling({
+            source: retryTaskContext.prepared,
+            current: toolSnapshot,
+            currentSkillAuthorization: authorization,
+          })
+          if (!ceiling.ok) {
+            throw new PrePersistenceAdmissionError(
+              ceiling.code === 'tool_surface_requires_restatement'
+                ? 'conversation_reset_required' : 'explicit_retry_control_invalid',
+              false,
+              digestCanonicalJson({ readyRunId: retryTaskContext.readyRunId, code: ceiling.code }),
+              `codex_explicit_retry_${ceiling.code}`,
+            )
+          }
+          toolSnapshot = ceiling.snapshot
+          retryCapabilityCeilingValid = true
+        }
         const selectedSkill = toolSnapshot.readyTurnToolAuthorization.skillAuthorization
         const selectedNativeSkill = selectedSkill.mode === 'selected'
           ? boundHost.resolveNativeSkillInput?.({
@@ -2583,6 +3590,14 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
         if (selectedSkill.mode === 'selected' && !selectedNativeSkill) {
           throw new Error('codex_selected_skill_unavailable')
         }
+        const productSurfaceTargets = extractProductSurfaceTargets(request.resources ?? [])
+        const actionObligations = resolveReadyActionObligationSet({
+          intent: intentClassification,
+          allowedToolNames: toolSnapshot.readyTurnToolAuthorization.allowedToolNames,
+          productSurfaceTargets,
+          primaryInstruction: requestEnvelope.primaryInstruction,
+        })
+        const mcpCatalog = getMcpCatalogSnapshot()
         const productTaskInput = {
           skillAuthorization: selectedSkill.mode === 'selected'
             ? {
@@ -2592,6 +3607,13 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
             : { mode: 'none' as const },
           intentClassification,
           hasFolderExportDestination,
+          hasActionObligations: actionObligations.requirements.length > 0,
+          hasBrowserToolSurface: Boolean(
+            executionPageRef
+            && toolSnapshot.readyTurnToolAuthorization.allowedToolNames.some(
+              isBrowserPublicToolName,
+            ),
+          ),
         }
         const productTaskFacts = resolveCodexProductTaskFacts(productTaskInput)
         const selectedSkillResources = selectedNativeSkill
@@ -2623,12 +3645,46 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
         ].filter((entry, index, all) => all.findIndex((candidate) => (
           digestCanonicalJson(candidate) === digestCanonicalJson(entry)
         )) === index)
+        const uncommittedUserTail = repository.readLiveUncommittedUserTail(
+          binding.threadBindingId,
+        )
         let explicitRetry: {
           predecessorRunId: string
+          predecessorPresentationRef: {
+            readyRunId: string
+            presentationDigest: string
+          }
+          controlAuditMessageRef: {
+            messageId: string
+            inputDigest: string
+          }
+          modelVisibleRootOriginRef: {
+            sourceReadyRunId: string
+            sourceIngressContractDigest: string
+            originUserMessageId: string
+            inputDigest: string
+          }
+          selectedHistorySeedItemRef: {
+            threadBindingId: string
+            historySeedDigest: string
+            originUserMessageId: string
+            inputDigest: string
+          }
+          currentTrustedEnvironmentRef: {
+            requestedWorkbenchMode: 'browser' | 'document' | 'rss' | 'calendar'
+            trustedWorkbenchMode: 'browser' | 'document' | 'rss' | 'calendar'
+            modeDigest: string
+          }
+          sourceTrustedEnvironmentRef: {
+            workbenchMode: 'browser' | 'document' | 'rss' | 'calendar'
+            environmentDigest: string
+          }
           historyParityEvidenceDigest: string
           currentThreadReadEvidenceDigest: string
           continuationContractDigest: string
-          artifactSources: import('./codex-product-run-preparer').CodexRetryArtifactSource[]
+          taskRootInput: CodexUserInput[]
+          taskRootInputDigest: string
+          artifactSources: []
         } | undefined
         if (request.explicitRetry) {
           const predecessorReceipt = retryPredecessorReceipt as ProductTurnReceipt
@@ -2656,21 +3712,136 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
             )?.productTerminalDigest,
             predecessorTurnPresent,
           })
-          const artifactSources = retryArtifactSources
+          const taskRootInput = retryTaskContext!.prepared.ingress.canonicalCurrentInputRef.input
+          const taskRootInputDigest = digestCodexUserInput(taskRootInput)
+          const tailPlan = resolveExplicitRetryTailPlan(uncommittedUserTail, {
+            originUserMessageId: retryTaskContext!.prepared.ingress.canonicalCurrentInputRef.messageId,
+            inputDigest: taskRootInputDigest,
+          })
+          if (tailPlan.kind !== 'eligible' || !binding.historySeedDigest) {
+            throw new Error('codex_explicit_retry_selected_seed_missing')
+          }
+          const selectedSeed = tailPlan.selected
+          const predecessorPresentationRef = {
+            readyRunId: predecessor.readyRunId,
+            presentationDigest: predecessorReceipt.presentationDigest,
+          }
+          const controlAuditMessageRef = {
+            messageId: request.userMessage.id,
+            inputDigest: digestCodexUserInput(currentInput),
+          }
+          const modelVisibleRootOriginRef = {
+            sourceReadyRunId: retryTaskContext!.readyRunId,
+            sourceIngressContractDigest: digestCanonicalJson(retryTaskContext!.prepared),
+            originUserMessageId: retryTaskContext!.prepared.ingress.canonicalCurrentInputRef.messageId,
+            inputDigest: taskRootInputDigest,
+          }
+          const selectedHistorySeedItemRef = {
+            threadBindingId: binding.threadBindingId,
+            historySeedDigest: binding.historySeedDigest,
+            originUserMessageId: selectedSeed.originUserMessageId,
+            inputDigest: selectedSeed.inputDigest,
+          }
+          const currentTrustedEnvironmentRef = {
+            requestedWorkbenchMode: activeWorkbenchMode,
+            trustedWorkbenchMode: trustedEnvironment.workbenchMode || activeWorkbenchMode,
+            modeDigest: digestCanonicalJson({
+              requestedWorkbenchMode: activeWorkbenchMode,
+              trustedWorkbenchMode: trustedEnvironment.workbenchMode || activeWorkbenchMode,
+            }),
+          }
           explicitRetry = {
             predecessorRunId: predecessor.readyRunId,
+            predecessorPresentationRef,
+            controlAuditMessageRef,
+            modelVisibleRootOriginRef,
+            selectedHistorySeedItemRef,
+            currentTrustedEnvironmentRef,
+            sourceTrustedEnvironmentRef: retryTaskContext!.prepared.sourceTrustedEnvironmentRef,
             historyParityEvidenceDigest,
             currentThreadReadEvidenceDigest,
-            artifactSources,
+            taskRootInput,
+            taskRootInputDigest,
+            artifactSources: [],
             continuationContractDigest: digestCanonicalJson({
               contract: 'codex_explicit_retry_continuation_v1',
               predecessorRunId: predecessor.readyRunId,
               predecessorPresentationDigest: predecessorReceipt.presentationDigest,
               currentUserMessageId: request.userMessage.id,
               currentInputDigest: digestCanonicalJson(currentInput),
+              taskRootInputDigest,
               resourceReferences,
-              artifactSources,
+              predecessorPresentationRef,
+              controlAuditMessageRef,
+              modelVisibleRootOriginRef,
+              selectedHistorySeedItemRef,
+              currentTrustedEnvironmentRef,
             }),
+          }
+        }
+        const retryTailPlan = explicitRetry
+          ? resolveExplicitRetryTailPlan(uncommittedUserTail, explicitRetry.selectedHistorySeedItemRef)
+          : null
+        if (retryTailPlan?.kind === 'ineligible') throw new Error('codex_explicit_retry_selected_seed_missing')
+        const uncommittedTailAssignments = retryTailPlan?.kind === 'eligible'
+          ? retryTailPlan.assignments
+          : uncommittedUserTail.map((item) => ({
+          originUserMessageId: item.originUserMessageId,
+          inputDigest: item.inputDigest,
+          plan: item.policy === 'untrusted_text_history'
+              ? 'deliver_untrusted_history' as const
+              : 'omit_from_current_run' as const,
+        }))
+        const supersededUncommittedItems = request.explicitRetry
+          ? []
+          : uncommittedUserTail.flatMap((item) => item.policy === 'untrusted_text_history'
+              ? []
+              : [{
+                  originUserMessageId: item.originUserMessageId,
+                  inputDigest: item.inputDigest,
+                  policy: item.policy,
+                }])
+        if (request.explicitRetry) {
+          const terminal = repository.readTerminalCloseoutEvidence(
+            retryPredecessor!.readyRunId,
+          )
+          if (!terminal) throw new Error('codex_explicit_retry_terminal_facts_missing')
+          const source = retryTaskContext!.prepared
+          const currentResourceEmpty = explicitResourceInput.length === 0
+            && resourceReferences.length === 0
+            && !currentDocumentAnchor
+            && !executionPageRef
+            && !externalReadSlice
+            && turnResources.authorities.length === 0
+            && !productSurfaceTargets
+            && actionObligations.requirements.length === 0
+          const eligibility = resolveExactRetryEligibility({
+            historyKind: terminal.terminalFacts.history.kind,
+            effectState: terminal.terminalFacts.effect.state,
+            toolCount: retryPredecessorReceipt!.tools.length,
+            interactionCount: 0,
+            ...exactRetrySourceFacts(source),
+            currentMode: activeWorkbenchMode,
+            trustedCurrentMode: trustedEnvironment.workbenchMode || activeWorkbenchMode,
+            historyMaterialized: binding.materializationState === 'confirmed'
+              && (binding.materializationKind === 'native_fork'
+                || binding.materializationKind === 'fresh_root_with_tail')
+              && Boolean(binding.historySeedDigest),
+            currentSourceEligible: retryPredecessorReceipt!.actionProjection.retry_failed_task.availability === 'ready',
+            currentFacts: {
+              resourceEmpty: currentResourceEmpty,
+              skillAndExecutionCeilingValid: retryCapabilityCeilingValid,
+              memoryPayloadEmpty: !readyMemorySnapshot.enabled || readyMemorySnapshot.entries.length === 0,
+              selectedSeedCount: uncommittedTailAssignments.filter((item) => item.plan === 'replace_with_explicit_retry').length,
+            },
+          })
+          if (eligibility.availability !== 'ready') {
+            throw new PrePersistenceAdmissionError(
+              'explicit_retry_control_invalid',
+              false,
+              digestCanonicalJson(eligibility),
+              `codex_explicit_retry_${eligibility.blockers[0] || 'not_available'}`,
+            )
           }
         }
         const preparedResult = preparer.prepare({
@@ -2688,13 +3859,20 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
           currentInput,
           explicitResourceEnvelope: { input: explicitResourceInput, resourceRefs: resourceReferences },
           resourceAdditionalContext: resourceReferences,
+          trustedWorkbenchMode: activeWorkbenchMode,
           currentDocumentAnchor,
+          ...(uncommittedUserTail.length > 0 ? { uncommittedUserTail } : {}),
+          ...(!request.explicitRetry ? { actionAdmissionRef: request.actionAdmissionRef } : {}),
+          uncommittedTailAssignments,
+          supersededUncommittedItems,
           externalReadSlice,
           resourceAuthorities: turnResources.authorities,
           ...(executionPageRef
             ? { browserPageRef: executionPageRef }
             : {}),
-          productSurfaceTargets: extractProductSurfaceTargets(request.resources ?? []),
+          productSurfaceTargets,
+          actionObligations,
+          mcpCatalog,
           actionAuthorizationMode: readActionAuthorizationModeFromEnvelope(requestEnvelope),
           readyMemorySnapshot,
           readyToolSurface: toolSnapshot.readyToolSurface,
@@ -2711,8 +3889,9 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
         })
         const threadBindingId = binding.threadBindingId
         if (!state) throw new Error('codex_runtime_state_unavailable')
-        const isolatedThreadCwd = binding.isolatedThreadCwd || join(state.threadCwdRoot, threadBindingId)
-        mkdirSync(isolatedThreadCwd, { recursive: true, mode: 0o700 })
+        const requestedThreadCwd = binding.isolatedThreadCwd || join(state.threadCwdRoot, threadBindingId)
+        mkdirSync(requestedThreadCwd, { recursive: true, mode: 0o700 })
+        const isolatedThreadCwd = binding.isolatedThreadCwd || realpathSync(requestedThreadCwd)
         const turnContractDigest = digestCanonicalJson({
           runId: preparedResult.prepared.runId,
           requestId: request.requestId,
@@ -2720,6 +3899,8 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
           authorizationDigest: toolSnapshot.readyTurnToolAuthorization.authorizationDigest,
           resourceAnchorDigest: preparedResult.prepared.resourceAnchorDigest,
           readyMemorySnapshotDigest: readyMemorySnapshot.snapshotDigest,
+          actionObligationDigest: actionObligations.digest,
+          mcpCatalogDigest: mcpCatalog.digest,
           ...(preparedResult.prepared.outputContract
             ? { outputContract: preparedResult.prepared.outputContract }
             : {}),
@@ -2937,7 +4118,7 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
           readyMemorySnapshot: prepared.readyMemorySnapshot,
         },
         collection: {
-          terminalTimeoutMs: 300_000,
+          terminalTimeoutMs: null,
           actionReceiptRefs: [],
           interactionState: null,
           waitingFor: null,
@@ -3018,11 +4199,10 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
       ownerMainPid: process.pid,
       ownerMainProcessStartIdentity: mainProcess.processStartIdentity,
     })
-    const journal = new CodexToolActionJournal(rawDb)
     const larkRequiredResourceReads = new Map<string, Set<string>>()
     const toolBridge = createCodexReadyToolBridge({
       persistence: repository,
-      receipts: journal,
+      receipts: actionJournal,
       buildToolContext(binding, abortSignal, executionIdentity) {
         const scope = host?.getScope(binding.readyScopeId) || null
         const product = repository.readProductTurnRuntime(binding.readyRunId)
@@ -3100,7 +4280,7 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
             readyActionId: executionIdentity.readyActionId,
             actionIdentityDigest: executionIdentity.actionIdentityDigest,
             abortSignal,
-            journal,
+            journal: actionJournal,
             assertEffectAuthority: () => {
               if (abortSignal.aborted) throw new CodexToolBridgeError('tool_execution_aborted')
               const currentScope = host?.getScope(binding.readyScopeId)
@@ -3149,6 +4329,103 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
                     errorKind: failed ? 'rss_analyze_failed' : undefined,
                   }
                 },
+                async getAnalysisResult(payload) {
+                  const { getRSSItemAnalysisManager } = await import('../../rss-engine/item-analysis-manager')
+                  const manager = getRSSItemAnalysisManager()
+                  const initial = payload.jobId
+                    ? manager.getJob(payload.jobId)
+                    : manager.listJobs(payload.itemId, 50).find((job) => (
+                        !payload.analysisType || job.action === payload.analysisType
+                      )) || null
+                  if (!initial
+                    || (payload.itemId && initial.item_id !== payload.itemId)
+                    || (payload.analysisType && initial.action !== payload.analysisType)) {
+                    return { ok: false, errorKind: 'rss_analysis_job_missing', summary: '未找到匹配的 RSS 分析任务。' }
+                  }
+                  const job = await manager.waitForTerminal(initial.id, abortSignal)
+                  if (['queued', 'paused', 'running_script', 'running_subagent'].includes(job.status)) {
+                    return {
+                      ok: false,
+                      errorKind: job.status === 'paused'
+                        ? 'rss_analysis_paused'
+                        : 'rss_analysis_still_running',
+                      summary: job.status === 'paused'
+                        ? 'RSS 条目分析已暂停，尚未生成最终报告。'
+                        : 'RSS 条目分析仍在运行，尚未生成最终报告。',
+                      jobId: job.id,
+                      itemId: job.item_id,
+                      status: job.status,
+                    }
+                  }
+                  if (job.status !== 'success' || !job.report_path) {
+                    return {
+                      ok: false,
+                      errorKind: 'rss_analyze_failed',
+                      summary: job.error || 'RSS 条目分析失败。',
+                      jobId: job.id,
+                      itemId: job.item_id,
+                      status: job.status,
+                    }
+                  }
+                  const reportDigest = createHash('sha256').update(readFileSync(job.report_path)).digest('hex')
+                  return {
+                    ok: true,
+                    summary: 'RSS 条目分析报告已生成。',
+                    jobId: job.id,
+                    itemId: job.item_id,
+                    status: job.status,
+                    reportPath: job.report_path,
+                    reportDigest,
+                    outputDir: job.output_dir,
+                  }
+                },
+              },
+              pet: {
+                async showStickyNote(payload) {
+                  const manager = getActivePetWindowManager()
+                  if (!manager) throw new CodexProductActionError('product_action_pet_window_unavailable')
+                  const result = await manager.showStickyNoteAndWait(payload as {
+                    id?: string
+                    title?: string
+                    body: string
+                    tone?: import('../../../../shared/pet').PetStickyNoteTone
+                    enablePet?: boolean
+                  }).catch((error) => {
+                    if (error instanceof Error && error.name === 'PetWindowLoadError') {
+                      throw new CodexProductActionError('product_action_pet_window_unavailable')
+                    }
+                    throw error
+                  })
+                  return {
+                    ok: true,
+                    summary: '已贴到宠物便利贴。',
+                    noteId: result.note.id,
+                    applied: result.applied,
+                    snapshotRevision: result.snapshotRevision,
+                    contentDigest: result.contentDigest,
+                  }
+                },
+                async dismissStickyNote(id) {
+                  const manager = getActivePetWindowManager()
+                  if (!manager) throw new CodexProductActionError('product_action_pet_window_unavailable')
+                  const result = await manager.dismissStickyNoteAndWait(id)
+                  return {
+                    ok: result.dismissed,
+                    summary: result.dismissed ? '便利贴已移除。' : '未找到要移除的便利贴。',
+                    noteId: id,
+                    ...result,
+                  }
+                },
+                async clearStickyNotes() {
+                  const manager = getActivePetWindowManager()
+                  if (!manager) throw new CodexProductActionError('product_action_pet_window_unavailable')
+                  const result = await manager.clearStickyNotesAndWait()
+                  return {
+                    ok: result.clearedCount > 0,
+                    summary: result.clearedCount > 0 ? `已清空 ${result.clearedCount} 条便利贴。` : '当前没有便利贴。',
+                    ...result,
+                  }
+                },
               },
               requestRendererToolAction: input.requestRendererToolAction,
               documentRequester: anchor
@@ -3178,6 +4455,9 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
                   })
                 : undefined,
               targets: product.prepared.productSurfaceTargets,
+              waitForRssAnalysisResult: product.prepared.actionObligations?.requirements.some((requirement) => (
+                requirement.domain === 'rss' && requirement.outcome === 'job_terminal_artifact'
+              )),
               recordListedCalendarEventIds: (eventIds) => {
                 calendarListedEventIdsByRun.set(binding.readyRunId, [...eventIds])
               },
@@ -3325,6 +4605,7 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
                 status: 'error',
                 terminalReason: 'blocked_external',
                 initiator: 'codex_recovery',
+                forcePublicationDiverged: true,
                 error: browserWorkflowCode,
               })
             } else {
@@ -3397,6 +4678,20 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
       if (!await productRecovery?.beginBootGeneration()) return false
       if (!await manualCompactionController.beginBootGeneration()) return false
       const restartSweepAt = isoNow()
+      for (const aliasId of repository.readDriftedFreshStartAliases({
+        runtimeManifestDigest: verified.manifestDigest,
+        protocolSchemaDigest: verified.manifest.stableV2SchemaSha256,
+      })) {
+        const refreshed = repository.refreshPristineFreshStartHeadAtomic({
+          aliasId,
+          runtimeManifestDigest: verified.manifestDigest,
+          protocolSchemaDigest: verified.manifest.stableV2SchemaSha256,
+          createdAt: restartSweepAt,
+        })
+        if (refreshed.kind === 'refreshed') {
+          publishCodexActionSurfaceInvalidation(aliasId, refreshed.invalidation)
+        }
+      }
       const pendingInteractions = scanCodexPendingInteractionsForRestart({
         db: rawDb,
         repository,
@@ -3474,8 +4769,6 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
       const rejectionResolver = new CodexLiveStartRejectionResolver({
         runtime: nativeRuntime,
         repository,
-        pinnedThreadSource: verified.contracts.turnClientIdentityExtractionContract
-          .thread_start.pinnedAppServerSource,
         threadListLimit: 100,
         stableZeroReadCount: 2,
         waitBetweenZeroReads: () => new Promise((resolve) => setTimeout(resolve, 25)),
@@ -3633,11 +4926,11 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
     preparedRunContextPort,
     memoryRuntime,
     canonicalCloseoutTransactionParticipant: participant,
-    readProductTurnPresentation(readyRunId) {
-      return repository.readProductTurnPresentation(readyRunId)
+    readProductTurnPresentation(readyRunId, currentEnvironment) {
+      return repository.readProductTurnPresentation(readyRunId, currentEnvironment)
     },
-    readProductTurnPresentations(readyRunIds) {
-      return repository.readProductTurnPresentations(readyRunIds)
+    readProductTurnPresentations(readyRunIds, currentEnvironment) {
+      return repository.readProductTurnPresentations(readyRunIds, currentEnvironment)
     },
     async readRuntimeDiagnostics() {
       const unavailable = {

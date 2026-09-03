@@ -32,6 +32,7 @@ export type RequestEnvelopeResourceKind =
   | 'calendar_window'
   | 'rss_item'
   | 'rss_source'
+  | 'mcp_resource'
   | 'folder_reference'
   | 'widget_target'
   // P1-1 — 显式 @[技能] 引用：未被解析成任何既有资源的 @[token]。envelope 不校验技能存在性（授权层校验）。
@@ -45,6 +46,7 @@ export type RequestEnvelopeResourceSource =
   | 'browser_context'
   | 'calendar_context'
   | 'rss_context'
+  | 'mcp_context'
   | 'folder_reference'
   | 'widget_target'
 
@@ -62,6 +64,8 @@ export interface RequestEnvelopeResource {
   order: number
   canRead: boolean
   canWrite: boolean
+  /** Trusted retry-only applicability carried by a Main-resolved skill reference. */
+  applicableToolNames?: string[]
   // Optional fingerprint of the widget's componentSpec / widgetCode. When `text` is synthesized
   //   empty (e.g., lease-driven fallback target), cache-key builders fall back to this so different
   //   widget states don't collide on the same hash key.
@@ -109,8 +113,7 @@ export interface RequestEnvelope {
   }
   /**
    * Stage T PR-T5 — conversation scope id. Plumbed end-to-end into
-   * `ToolPolicy.scopeId` so `tool-gateway` / `tool-registry` can pass
-   * it to `mcp.registry.isAuthorized(toolName, sessionId, scopeId)`.
+   * `ToolPolicy.scopeId` as the per-turn product scope identity.
    * Optional — omitted in unit-test contexts that don't have a scope.
    *
    * Round-1 (Codex) fix — populated by `buildRequestEnvelope` from its
@@ -511,14 +514,17 @@ export function envelopeHasCurrentDocumentContext(envelope: RequestEnvelope): bo
     resource.kind === 'document_context' || resource.source === 'current_document')
 }
 
+export function envelopeHasFolderExportDestination(envelope: RequestEnvelope): boolean {
+  return envelope.resources.some((resource) =>
+    resource.kind === 'folder_reference' || resource.source === 'folder_reference')
+}
+
 export function buildRequestEnvelope(params: {
   userText: string
   /**
    * Round-1 (Codex) — optional `sessionId` / `scopeId` so the envelope
    * carries scope identity end-to-end. `turn-engine.ts` reads
-   * `requestEnvelope.scopeId` to build `ToolPolicy.scopeId` which
-   * `tool-gateway` / `tool-registry` thread into
-   * `mcp.registry.isAuthorized(toolName, sessionId, scopeId)`.
+   * `requestEnvelope.scopeId` to build `ToolPolicy.scopeId`.
    * Optional — unit-test contexts that don't have a scope can omit.
    */
   sessionId?: string

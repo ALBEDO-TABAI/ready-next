@@ -17,8 +17,8 @@ export interface RunDurationMeterModel {
   duration: string
   glyph: DotGlyphName
   tone: DotGlyphTone
-  pulse: boolean
   live: boolean
+  pulse: boolean
 }
 
 function timestampMs(value: string | null | undefined): number | null {
@@ -41,7 +41,7 @@ export function formatRunDuration(ms: number): string {
 
 function runDurationLabel(run: ScopeRunState): Pick<RunDurationMeterModel, 'label' | 'glyph' | 'tone'> {
   if (LIVE_PHASES.has(run.phase)) {
-    return { label: '本轮进行中', glyph: 'running', tone: 'neutral' }
+    return { label: '本轮用时', glyph: 'running', tone: 'neutral' }
   }
   if (run.phase === 'cancelled') {
     return { label: '本轮已停止', glyph: 'idle', tone: 'neutral' }
@@ -78,8 +78,8 @@ export function buildRunDurationMeterModel(
   return {
     ...label,
     duration: formatRunDuration(endedAt - startedAt),
-    pulse: live,
     live,
+    pulse: live,
   }
 }
 

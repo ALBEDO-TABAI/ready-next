@@ -31,7 +31,7 @@
 import { consumeAuthorizationFact, type AuthActionCategory } from './authorization-fact-store'
 // Phase M（2026-07-05）—— 外部 MCP 工具的动态确认映射读口（静态表枚举不了
 // 外部工具名；mcp/registry 无反向依赖，导入方向安全）。
-import { getMcpToolAnnotations } from '../../mcp/registry'
+import { getMcpApprovalModeForTool, getMcpToolAnnotations } from '../../mcp/registry'
 import {
   classifyLarkCliCommand,
   isAnyLarkCliAuthCommand,
@@ -478,13 +478,17 @@ export function resolveConfirmationGate(
   // 同样 M2（防御纵深——执行层会再拒 unregistered，但闸门不赌执行层）。
   if (toolName.startsWith('mcp_')) {
     const annotations = getMcpToolAnnotations(toolName)
-    if (annotations?.readOnlyHint === true) {
+    const approvalMode = getMcpApprovalModeForTool(toolName)
+    if (approvalMode === 'never'
+      || (approvalMode === 'writes' && annotations?.readOnlyHint === true)) {
       return {
         mode: 'M4',
         action: 'allow',
-        ruleId: 'mcp-readonly-declared',
-        designRef: 'Phase M §块4 — 外部工具 readOnlyHint 声明只读',
-        reason: '外部 MCP 工具声明只读（readOnlyHint），按 M4 放行',
+        ruleId: approvalMode === 'never' ? 'mcp-approval-never' : 'mcp-readonly-declared',
+        designRef: '2026-08-20 MCP local stdio approval policy',
+        reason: approvalMode === 'never'
+          ? '用户已将该 MCP server 设为始终允许'
+          : '外部 MCP 工具声明只读，按写入时确认策略放行',
       }
     }
     return {

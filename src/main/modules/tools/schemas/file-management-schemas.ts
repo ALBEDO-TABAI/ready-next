@@ -31,7 +31,7 @@ export const FileLocateSchema = z.object({
 })
 
 export const FileReadExcerptSchema = z.object({
-  path: z.string().describe('文件绝对路径或索引内 path'),
+  path: z.string().describe('文件绝对路径、索引 path，或本轮冻结的 logicalResourceId / @[文件名] / 唯一文件名'),
   anchor: z.string().optional().describe('可选：章节标题或关键词；命中标题时读取该章节'),
   lineStart: z.number().optional().describe('可选：起始行号（从 1 开始）'),
   lineEnd: z.number().optional().describe('可选：结束行号（包含该行）'),
@@ -68,7 +68,7 @@ export const TagForgeProposalSchema = z.object({
 })
 
 export const TagForgePrepareBatchSchema = z.object({
-  rootPath: z.string().optional().describe('新建批次时必需：要批量打标的授权文件夹绝对路径'),
+  rootPath: z.string().optional().describe('新建批次时必需：授权 Markdown 或文件夹的绝对路径、logicalResourceId、@[名称] 或唯一名称'),
   batchId: z.string().optional().describe('继续既有批次时传入上一轮 batchId'),
   limit: z.number().optional().describe('本批返回的待处理文档数（默认 4，上限 4，并受正文总量限制）'),
 })
@@ -114,7 +114,7 @@ const OrganizeOperationSchema = z.object({
 })
 
 export const FileInventorySchema = z.object({
-  rootPath: z.string().describe('要盘点的授权文件夹绝对路径'),
+  rootPath: z.string().describe('要盘点的授权文件夹：绝对路径，或本轮冻结的 logicalResourceId / @[文件夹名]'),
   cursor: z.string().optional().describe('可选：上一页返回的 nextCursor'),
   limit: z.number().optional().describe('可选：返回上限（默认 100，上限 500）'),
   recursive: z.boolean().optional().describe('可选：是否递归扫描（默认 false）'),

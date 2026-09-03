@@ -20,6 +20,7 @@ import {
   resolveCodexThreadInstructionContract,
 } from '../main/modules/agent-control/codex-runtime/codex-runtime-production-composition'
 import { instructionTranscriptDigest } from '../main/modules/agent-control/codex-runtime/codex-model-gateway-contract'
+import { CODEX_RUNTIME_MANAGED_COUNTER_SENTINEL } from '../main/modules/agent-control/codex-runtime/codex-product-task-facts'
 import {
   CODEX_HOST_OVERLAY,
   resolveCodexNativeSkillInput,
@@ -93,7 +94,7 @@ test('Codex production ingress freezes six controlled retries into the upstream 
   assert.equal(snapshot.snapshot.retryPolicy.maxRetries, 6)
 })
 
-test('Codex keeps the ordinary iteration budget bounded before the frozen final lane', () => {
+test('Codex leaves ordinary task duration to Runtime instead of task-shape quotas', () => {
   const executableSkill = {
     mode: 'selected' as const,
     completionProfile: 'tool_result' as const,
@@ -101,62 +102,62 @@ test('Codex keeps the ordinary iteration budget bounded before the frozen final 
   assert.deepEqual(createCodexProductBudgetSeed({
     skillAuthorization: executableSkill,
   }), {
-    maxIterations: 40,
-    maxToolCalls: 40,
+    maxIterations: CODEX_RUNTIME_MANAGED_COUNTER_SENTINEL,
+    maxToolCalls: CODEX_RUNTIME_MANAGED_COUNTER_SENTINEL,
     maxParallelToolGroups: 1,
   })
   assert.deepEqual(createCodexProductBudgetSeed({
     skillAuthorization: { mode: 'none' },
   }), {
-    maxIterations: 8,
-    maxToolCalls: 8,
+    maxIterations: CODEX_RUNTIME_MANAGED_COUNTER_SENTINEL,
+    maxToolCalls: CODEX_RUNTIME_MANAGED_COUNTER_SENTINEL,
     maxParallelToolGroups: 1,
   })
   assert.deepEqual(createCodexProductBudgetSeed({
     skillAuthorization: { mode: 'none' },
     intentClassification: { primaryDomain: 'browser' },
   }), {
-    maxIterations: 48,
-    maxToolCalls: 48,
+    maxIterations: CODEX_RUNTIME_MANAGED_COUNTER_SENTINEL + 1,
+    maxToolCalls: CODEX_RUNTIME_MANAGED_COUNTER_SENTINEL + 1,
     maxParallelToolGroups: 1,
   })
   assert.deepEqual(createCodexProductBudgetSeed({
     skillAuthorization: { mode: 'none' },
     intentClassification: { primaryDomain: 'research' },
   }), {
-    maxIterations: 220,
-    maxToolCalls: 220,
+    maxIterations: CODEX_RUNTIME_MANAGED_COUNTER_SENTINEL,
+    maxToolCalls: CODEX_RUNTIME_MANAGED_COUNTER_SENTINEL,
     maxParallelToolGroups: 1,
   })
   assert.deepEqual(createCodexProductBudgetSeed({
     skillAuthorization: executableSkill,
     intentClassification: { primaryDomain: 'browser' },
   }), {
-    maxIterations: 40,
-    maxToolCalls: 40,
+    maxIterations: CODEX_RUNTIME_MANAGED_COUNTER_SENTINEL + 1,
+    maxToolCalls: CODEX_RUNTIME_MANAGED_COUNTER_SENTINEL + 1,
     maxParallelToolGroups: 1,
   })
   assert.deepEqual(createCodexProductBudgetSeed({
     skillAuthorization: executableSkill,
     intentClassification: { primaryDomain: 'research' },
   }), {
-    maxIterations: 40,
-    maxToolCalls: 40,
+    maxIterations: CODEX_RUNTIME_MANAGED_COUNTER_SENTINEL,
+    maxToolCalls: CODEX_RUNTIME_MANAGED_COUNTER_SENTINEL,
     maxParallelToolGroups: 1,
   })
   assert.deepEqual(createCodexProductBudgetSeed({
     skillAuthorization: executableSkill,
   }), {
-    maxIterations: 40,
-    maxToolCalls: 40,
+    maxIterations: CODEX_RUNTIME_MANAGED_COUNTER_SENTINEL,
+    maxToolCalls: CODEX_RUNTIME_MANAGED_COUNTER_SENTINEL,
     maxParallelToolGroups: 1,
   })
   assert.deepEqual(createCodexProductBudgetSeed({
     skillAuthorization: { mode: 'none' },
     hasFolderExportDestination: true,
   }), {
-    maxIterations: 40,
-    maxToolCalls: 40,
+    maxIterations: CODEX_RUNTIME_MANAGED_COUNTER_SENTINEL,
+    maxToolCalls: CODEX_RUNTIME_MANAGED_COUNTER_SENTINEL,
     maxParallelToolGroups: 1,
   })
 })
@@ -282,6 +283,7 @@ test('Codex production ingress keeps Feishu wording as a candidate method, not a
       ) => host.resolveSkillAuthorizationForTurn(input),
     }
     const { authorization, requestEnvelope } = resolveCodexProductTurnAuthorization({
+      mode: 'commit',
       host: productHost,
       request,
       scopeId: request.scopeId,
@@ -300,6 +302,7 @@ test('Codex production ingress keeps Feishu wording as a candidate method, not a
       hasWidgetTargetContext: false,
     })
     const remoteEnvelope = resolveCodexProductTurnAuthorization({
+      mode: 'commit',
       host: {
         ...productHost,
         getScope: () => ({
@@ -346,6 +349,7 @@ test('Codex production ingress keeps Feishu wording as a candidate method, not a
       },
     }
     const followup = resolveCodexProductTurnAuthorization({
+      mode: 'commit',
       host: productHost,
       request: followupRequest,
       scopeId: request.scopeId,
@@ -453,6 +457,7 @@ test('Codex production ingress keeps Feishu wording as a candidate method, not a
       },
     }
     const localUpload = resolveCodexProductTurnAuthorization({
+      mode: 'commit',
       host: productHost,
       request: localUploadRequest,
       scopeId: request.scopeId,
@@ -515,6 +520,7 @@ test('Codex keeps Ready local calendar and Feishu CLI primitives together for a 
       ) => host.resolveSkillAuthorizationForTurn(input),
     }
     const resolved = resolveCodexProductTurnAuthorization({
+      mode: 'commit',
       host: productHost,
       request,
       scopeId: request.scopeId,
@@ -649,6 +655,7 @@ test('exact Lark CLI name still selects the skill and keeps Ready local calendar
       ) => host.resolveSkillAuthorizationForTurn(input),
     }
     const resolved = resolveCodexProductTurnAuthorization({
+      mode: 'commit',
       host: productHost,
       request,
       scopeId: request.scopeId,

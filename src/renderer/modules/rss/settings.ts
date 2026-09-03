@@ -51,7 +51,8 @@ export function formatRSSRefreshInterval(value: number): string {
 }
 
 export function getRSSAutoRefreshWarning(snapshot: RSSAutoRefreshSnapshot): string | null {
-  if (snapshot.intervalMs <= 0 || snapshot.running || !snapshot.completedAt || snapshot.success !== false) return null
+  if (snapshot.intervalMs <= 0 || snapshot.running || !snapshot.completedAt) return null
+  if (snapshot.status !== 'completed_with_warnings' && snapshot.success !== false) return null
   if (snapshot.errors.length > 0) {
     return `RSS 自动刷新完成，但存在错误：${snapshot.errors[0]}`
   }

@@ -503,6 +503,55 @@ test('send success keeps the composer locked until the canonical assistant messa
   }
 })
 
+test('failure scope event arriving before send return still reveals the canonical failure message', async () => {
+  seedTwoSessions({
+    activeSessionId: 'session-A',
+    lockedSessionId: 'session-A',
+    lockedScopeId: 'scope-A',
+    otherScopeId: 'scope-B',
+    requestId: 'req-A',
+  })
+
+  const canonical = {
+    id: 'assistant:task-A:req-A:terminal',
+    conversationId: 'scope-A',
+    role: 'assistant' as const,
+    content: '本轮未能完成，已保留调查和文件状态。',
+    timestamp: '2026-08-18T10:00:01.000Z',
+    meta: { runId: 'req-A', terminalReason: 'blocked_external' },
+  }
+  fixtureState.conversationScopeMessages = [canonical]
+
+  fireOnScopeRunEvent({
+    type: 'failed',
+    scopeId: 'scope-A',
+    sessionId: 'session-A',
+    agent: 'butler',
+    runId: 'req-A',
+    phase: 'error',
+    terminalReason: 'blocked_external',
+    latestText: '本轮未能完成',
+    timestamp: '2026-08-18T10:00:00.000Z',
+  })
+
+  const afterEvent = getSessionSlice(useAgent.getState(), 'session-A')
+  assert.equal(afterEvent.streamingRequestId, null, 'terminal event hides Stop before send returns')
+  assert.equal(afterEvent.scopeRunStates['scope-A']?.requestId, 'req-A')
+
+  await driverApi.completeScopeRunAfterSendSuccess('scope-A', 'req-A', {
+    canonicalMessage: canonical,
+    canonicalMessageDigest: 'digest-failure-A',
+  })
+
+  const afterReturn = getSessionSlice(useAgent.getState(), 'session-A')
+  assert.equal(afterReturn.messages.some((message) => (
+    message.id === canonical.id && message.content === canonical.content
+  )), true)
+  assert.equal(afterReturn.streamingMessageId, null)
+  assert.equal(afterReturn.composerLocked, false)
+  fixtureState.conversationScopeMessages = []
+})
+
 test('successful scope event cannot unlock before delayed stream-done reconciliation', async () => {
   seedTwoSessions({
     activeSessionId: 'session-A',

@@ -45,6 +45,8 @@ type ProvisionalOwner = {
 type ProvisionalThreadOwner = ProvisionalOwner & {
   expectedCwd: string
   expectedSource: string
+  expectedParentThreadId: string | null
+  expectedForkedFromId: string | null
   observedNativeThreadId: string | null
 }
 
@@ -86,7 +88,7 @@ export interface CodexBoundServerRequestExecutor {
 
 export interface CodexStartInboundQuarantinePort {
   quarantine(input: {
-    method: 'thread/start' | 'turn/start'
+    method: 'thread/start' | 'thread/fork' | 'turn/start'
     bindingId: string
     reason: string
   }): void
@@ -175,7 +177,7 @@ function isActionBearing(
 ): boolean {
   if (!identity) return false
   if (identity.item?.type === 'userMessage' || identity.item?.type === 'contextCompaction') return false
-  if (notification.method === 'turn/started') return false
+  if (notification.method === 'turn/started' || notification.method === 'thread/tokenUsage/updated') return false
   return true
 }
 
@@ -202,7 +204,7 @@ export class CodexProvisionalInboundBuffer implements CodexInboundFramePort {
     unknownReason: string
   }>()
   private readonly pendingQuarantines = new Map<string, {
-    method: 'thread/start' | 'turn/start'
+    method: 'thread/start' | 'thread/fork' | 'turn/start'
     kind: 'thread' | 'turn'
     bindingId: string
     connectionEpoch: string
@@ -253,6 +255,8 @@ export class CodexProvisionalInboundBuffer implements CodexInboundFramePort {
     connectionEpoch: string
     expectedCwd: string
     expectedSource: string
+    expectedParentThreadId?: string | null
+    expectedForkedFromId?: string | null
     deadlineAtMs: number
   }): void {
     this.assertRegistration(input)
@@ -265,10 +269,14 @@ export class CodexProvisionalInboundBuffer implements CodexInboundFramePort {
         && owner.connectionEpoch === input.connectionEpoch
         && owner.expectedCwd === input.expectedCwd
         && owner.expectedSource === input.expectedSource
+        && owner.expectedParentThreadId === (input.expectedParentThreadId ?? null)
+        && owner.expectedForkedFromId === (input.expectedForkedFromId ?? null)
       ))
     ) throw new CodexProvisionalInboundBufferError('provisional_thread_identity_conflict')
     const owner: ProvisionalThreadOwner = {
       ...input,
+      expectedParentThreadId: input.expectedParentThreadId ?? null,
+      expectedForkedFromId: input.expectedForkedFromId ?? null,
       state: 'provisional',
       unknownReason: null,
       frames: [],
@@ -453,6 +461,22 @@ export class CodexProvisionalInboundBuffer implements CodexInboundFramePort {
       return 'broadcast'
     }
     const pending = this.provisionalTurnsForThread(input.connectionEpoch, identity.threadId)
+    if (input.notification.method === 'thread/tokenUsage/updated') {
+      if (pending.length !== 1) return 'buffered'
+      const owner = pending[0]
+      if (this.expire(owner) || owner.state === 'unknown') return 'buffered'
+      const knownTurnId = owner.observedNativeTurnId
+        || owner.pendingReconciliation?.nativeTurnId
+        || null
+      if (knownTurnId !== identity.turnId) return 'buffered'
+      if (!this.buffer(owner, {
+        kind: 'notification',
+        sequence: this.nextSequence(),
+        bytes: frameBytes(input.frame),
+        notification: input.notification,
+      })) return this.failProtocol('provisional_buffer_overflow')
+      return 'buffered'
+    }
     if (pending.length !== 1) {
       for (const owner of pending) this.markUnknown(owner, 'turn_owner_ambiguous')
       throw new CodexProvisionalInboundBufferError('turn_owner_not_unique')
@@ -739,6 +763,10 @@ export class CodexProvisionalInboundBuffer implements CodexInboundFramePort {
       && owner.connectionEpoch === connectionEpoch
       && owner.expectedCwd === notification.params.thread.cwd
       && owner.expectedSource === source
+      && (owner.expectedParentThreadId === null
+        || owner.expectedParentThreadId === notification.params.thread.parentThreadId)
+      && (owner.expectedForkedFromId === null
+        || owner.expectedForkedFromId === notification.params.thread.forkedFromId)
     ))
     if (matches.length !== 1) {
       for (const owner of matches) this.markUnknown(owner, 'thread_owner_ambiguous')
@@ -751,8 +779,8 @@ export class CodexProvisionalInboundBuffer implements CodexInboundFramePort {
     const thread = notification.params.thread
     if (
       thread.sessionId !== thread.id
-      || thread.parentThreadId !== null
-      || thread.forkedFromId !== null
+      || thread.parentThreadId !== owner.expectedParentThreadId
+      || thread.forkedFromId !== owner.expectedForkedFromId
       || (owner.observedNativeThreadId && owner.observedNativeThreadId !== thread.id)
     ) {
       this.markUnknown(owner, 'thread_metadata_conflict')
@@ -996,7 +1024,7 @@ export class CodexProvisionalInboundBuffer implements CodexInboundFramePort {
   }
 
   private commitPendingQuarantine(quarantine: {
-    method: 'thread/start' | 'turn/start'
+    method: 'thread/start' | 'thread/fork' | 'turn/start'
     kind: 'thread' | 'turn'
     bindingId: string
     connectionEpoch: string
@@ -1032,7 +1060,6 @@ export class CodexProvisionalInboundBuffer implements CodexInboundFramePort {
 
   private isTerminalTurnNotification(notification: CodexNativeNotification): boolean {
     return notification.method === 'turn/completed'
-      || (notification.method === 'error' && notification.params.willRetry === false)
   }
 
   private nextSequence(): number {

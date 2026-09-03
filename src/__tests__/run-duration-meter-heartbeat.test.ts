@@ -1,4 +1,4 @@
-/** Live duration stays factual instead of echoing transient provider narration. */
+/** Live turns retain elapsed time but do not add a second running-state label. */
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
@@ -16,21 +16,17 @@ function runState(overrides: Record<string, unknown>): never {
 
 const NOW = 1_780_000_006_000
 
-test('RunDurationMeter: planning heartbeat text does not become a second status line', () => {
-  const model = buildRunDurationMeterModel(runState({ latestText: '正在调用模型…' }), NOW)
-  assert.equal(model?.label, '本轮进行中')
-  assert.equal(model?.live, true)
+test('RunDurationMeter: every live phase keeps one elapsed-time model', () => {
+  for (const phase of ['queued', 'planning', 'tool_running', 'takeover', 'resuming', 'responding']) {
+    const model = buildRunDurationMeterModel(runState({ phase, latestText: '正在调用模型…' }), NOW)
+    assert.equal(model?.label, '本轮用时', phase)
+    assert.equal(model?.duration, '00:06', phase)
+    assert.equal(model?.live, true, phase)
+  }
 })
 
-test('RunDurationMeter: raw status echo and long text keep the generic label', () => {
-  assert.equal(buildRunDurationMeterModel(runState({ latestText: '状态：working' }), NOW)?.label, '本轮进行中')
-  assert.equal(
-    buildRunDurationMeterModel(runState({ latestText: '这是一段非常非常非常非常非常非常非常非常长的心跳文案不该上标签' }), NOW)?.label,
-    '本轮进行中',
-  )
-})
-
-test('RunDurationMeter: non-planning live phases keep the generic label', () => {
-  const model = buildRunDurationMeterModel(runState({ phase: 'tool_running', latestText: '正在调用模型…' }), NOW)
-  assert.equal(model?.label, '本轮进行中')
+test('RunDurationMeter: terminal duration remains available after the turn settles', () => {
+  const model = buildRunDurationMeterModel(runState({ phase: 'done' }), NOW)
+  assert.equal(model?.label, '本轮用时')
+  assert.equal(model?.duration, '00:05')
 })

@@ -13,6 +13,7 @@ test('CodexNativeRuntime exposes only pinned native lifecycle methods', () => {
     'threadStart',
     'threadRead',
     'threadResume',
+    'threadFork',
     'threadArchive',
     'turnStart',
     'turnInterrupt',
@@ -254,11 +255,67 @@ test('native notification normalization accepts only the pinned error frame shap
   }
 })
 
-test('native notification normalization ignores passive telemetry but rejects unknown active methods', () => {
+test('native notification normalization projects exact context usage, ignores passive telemetry, and rejects unknown active methods', () => {
+  const usage = normalizeCodexNativeNotification({
+    method: 'thread/tokenUsage/updated',
+    params: {
+      threadId: 'thread-1',
+      turnId: 'turn-1',
+      tokenUsage: {
+        total: {
+          totalTokens: 36,
+          inputTokens: 30,
+          cachedInputTokens: 4,
+          cacheWriteInputTokens: 0,
+          outputTokens: 6,
+          reasoningOutputTokens: 2,
+        },
+        last: {
+          totalTokens: 12,
+          inputTokens: 10,
+          cachedInputTokens: 2,
+          cacheWriteInputTokens: 0,
+          outputTokens: 2,
+          reasoningOutputTokens: 1,
+        },
+        modelContextWindow: 258_400,
+      },
+    },
+  })
+  assert.equal(usage.kind, 'accepted')
+  if (usage.kind === 'accepted') {
+    assert.equal(usage.notification.method, 'thread/tokenUsage/updated')
+    if (usage.notification.method === 'thread/tokenUsage/updated') {
+      assert.equal(usage.notification.params.tokenUsage.last.inputTokens, 10)
+      assert.equal(usage.notification.params.tokenUsage.modelContextWindow, 258_400)
+    }
+  }
   assert.deepEqual(normalizeCodexNativeNotification({
     method: 'thread/tokenUsage/updated',
-    params: {},
-  }), { kind: 'ignored', method: 'thread/tokenUsage/updated' })
+    params: {
+      threadId: 'thread-1',
+      turnId: 'turn-1',
+      tokenUsage: {
+        total: {
+          totalTokens: 2,
+          inputTokens: 1,
+          cachedInputTokens: 2,
+          cacheWriteInputTokens: 0,
+          outputTokens: 0,
+          reasoningOutputTokens: 0,
+        },
+        last: {
+          totalTokens: 1,
+          inputTokens: 1,
+          cachedInputTokens: 0,
+          cacheWriteInputTokens: 0,
+          outputTokens: 0,
+          reasoningOutputTokens: 0,
+        },
+        modelContextWindow: 258_400,
+      },
+    },
+  }), { kind: 'invalid', code: 'invalid_params' })
   assert.deepEqual(normalizeCodexNativeNotification({
     method: 'thread/settings/updated',
     params: {},

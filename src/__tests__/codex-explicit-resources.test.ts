@@ -6,8 +6,6 @@ import { join } from 'node:path'
 import test from 'node:test'
 
 import {
-  recoverCodexRetryLocalResourceSelections,
-  recoverCodexRetrySkillSelection,
   resolveCodexExplicitResources,
 } from '../main/modules/agent-control/codex-runtime/codex-explicit-resources'
 import {
@@ -63,85 +61,6 @@ test('Main revalidates selected files and emits body-free native/resource contra
   }
 })
 
-test('explicit retry recovers the predecessor local targets and revalidates their current bytes', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'ready-codex-retry-resources-'))
-  try {
-    const markdownPath = join(root, 'target.md')
-    const imagePath = join(root, 'reference.png')
-    const directoryPath = join(root, '输出')
-    await writeFile(markdownPath, '# before')
-    await writeFile(imagePath, Buffer.from('image-before'))
-    await mkdir(directoryPath)
-    const predecessor = await resolveCodexExplicitResources({
-      selections: [
-        {
-          kind: 'local_file', id: 'markdown', name: 'target.md', path: markdownPath,
-          size: 8, ext: '.md', rendererType: 'text',
-        },
-        {
-          kind: 'local_file', id: 'image', name: 'reference.png', path: imagePath,
-          size: 12, ext: '.png', rendererType: 'image',
-        },
-        { kind: 'local_directory', id: 'folder', name: '输出', path: directoryPath },
-      ],
-      resolveSkill: () => null,
-    })
-    const recovered = recoverCodexRetryLocalResourceSelections({
-      explicitInput: predecessor.input,
-      authorities: predecessor.authorities,
-    })
-    assert.deepEqual(recovered.map((entry) => entry.selection.kind), [
-      'local_file', 'local_file', 'local_directory',
-    ])
-    assert.deepEqual(recovered.map((entry) => entry.logicalResourceId), predecessor.resourceRefs.map(
-      (reference) => reference.logicalResourceId,
-    ))
-
-    await writeFile(markdownPath, '# current')
-    const retry = await resolveCodexExplicitResources({
-      selections: recovered.map((entry) => entry.selection),
-      resolveSkill: () => null,
-    })
-    assert.deepEqual(retry.resourceRefs.map((reference) => reference.logicalResourceId), recovered.map(
-      (entry) => entry.logicalResourceId,
-    ))
-    assert.notEqual(retry.resourceRefs[0]?.currentDigest, predecessor.resourceRefs[0]?.currentDigest)
-    assert.equal(retry.input.some((entry) => entry.type === 'mention' && entry.name === 'target.md'), true)
-  } finally {
-    await rm(root, { recursive: true, force: true })
-  }
-})
-
-test('explicit retry recovers skill identity and applicability candidates for current manifest validation', async () => {
-  const selected = recoverCodexRetrySkillSelection({
-    mode: 'selected',
-    skillId: 'tag-forge',
-    allowedTypedActions: ['tag_forge_prepare_batch'],
-    allowedPrimitives: ['tag_forge_apply_batch'],
-  })
-  assert.deepEqual(selected, {
-    selection: {
-      kind: 'skill',
-      id: 'retry-skill:tag-forge',
-      name: 'tag-forge',
-      path: '',
-      skillId: 'tag-forge',
-    },
-    applicableToolNames: ['tag_forge_prepare_batch', 'tag_forge_apply_batch'],
-  })
-  assert.equal(recoverCodexRetrySkillSelection({ mode: 'none' }), null)
-
-  const skillPath = join(process.cwd(), 'assets', 'embedded-skills', 'tag-forge')
-  const resolved = await resolveCodexExplicitResources({
-    selections: [selected!.selection],
-    resolveSkill: (selection) => (
-      selection.skillId === 'tag-forge' ? { name: 'tag-forge', path: skillPath } : null
-    ),
-  })
-  assert.equal(resolved.input[0]?.type, 'skill')
-  assert.equal(resolved.requestResources[0]?.kind, 'skill_reference')
-  assert.equal(resolved.requestResources[0]?.name, 'tag-forge')
-})
 
 test('explicit and selected skill inputs are Main-validated and deduplicated by canonical path', async () => {
   const root = await mkdtemp(join(tmpdir(), 'ready-codex-skill-'))
@@ -246,6 +165,42 @@ test('legacy DOC/RTF/ODT selections remain explicitly unsupported', async () => 
   } finally {
     await rm(root, { recursive: true, force: true })
   }
+})
+
+test('MCP resources freeze exact server, URI, catalog generation and content digest', async () => {
+  const digest = createHash('sha256').update('resource body').digest('hex')
+  const selection = {
+    kind: 'mcp_resource' as const,
+    id: 'mcp-resource-1',
+    name: 'Fixture resource',
+    serverId: 'fixture',
+    uri: 'fixture://resource/1',
+    catalogGeneration: 4,
+    catalogDigest: 'b'.repeat(64),
+    contentDigest: digest,
+  }
+  const result = await resolveCodexExplicitResources({
+    selections: [selection],
+    resolveSkill: () => null,
+    resolveMcpResource: async () => ({
+      name: 'Fixture resource',
+      path: selection.uri,
+      text: 'resource body',
+      digest,
+    }),
+  })
+
+  assert.equal(result.input[0]?.type, 'text')
+  assert.equal(result.requestResources[0]?.kind, 'mcp_resource')
+  assert.equal(result.requestResources[0]?.source, 'mcp_context')
+  assert.equal(result.resourceRefs[0]?.currentDigest, digest)
+  await assert.rejects(resolveCodexExplicitResources({
+    selections: [{ ...selection, contentDigest: 'c'.repeat(64) }],
+    resolveSkill: () => null,
+    resolveMcpResource: async () => ({
+      name: 'Fixture resource', path: selection.uri, text: 'resource body', digest,
+    }),
+  }), /codex_explicit_mcp_resource_unavailable/)
 })
 
 test('file tools read the exact selected file and fail closed for an unselected sibling', async () => {

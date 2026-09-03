@@ -47,6 +47,8 @@ export interface RSSItemAnalysisProgress {
   updatedAt: string
 }
 
+export const RSS_ANALYSIS_TERMINAL_WAIT_MS = 90_000
+
 function sanitizeName(input: string): string {
   const cleaned = input
     .replace(/[\\/:*?"<>|]+/g, '')
@@ -503,6 +505,31 @@ export class RSSItemAnalysisManager {
   listJobs(itemId?: string, limit = 50): RSSAnalysisJob[] {
     this.ensureInitialized()
     return this.repository.listRSSAnalysisJobs(itemId, limit)
+  }
+
+  getJob(jobId: string): RSSAnalysisJob | null {
+    this.ensureInitialized()
+    return this.repository.getRSSAnalysisJob(jobId)
+  }
+
+  async waitForTerminal(
+    jobId: string,
+    abortSignal?: AbortSignal,
+    timeoutMs = RSS_ANALYSIS_TERMINAL_WAIT_MS,
+  ): Promise<RSSAnalysisJob> {
+    const terminal = new Set<RSSAnalysisJobStatus>(['success', 'failed', 'skipped'])
+    const deadlineAt = Date.now() + Math.max(0, timeoutMs)
+    while (true) {
+      if (abortSignal?.aborted) throw new Error('rss_analysis_wait_aborted')
+      const job = this.getJob(jobId)
+      if (!job) throw new Error('rss_analysis_job_missing')
+      if (terminal.has(job.status)) return job
+      if (job.status === 'paused' || Date.now() >= deadlineAt) return job
+      await new Promise<void>((resolveWait) => setTimeout(
+        resolveWait,
+        Math.min(250, Math.max(1, deadlineAt - Date.now())),
+      ))
+    }
   }
 
   pauseJob(jobId: string): RSSAnalysisJob {

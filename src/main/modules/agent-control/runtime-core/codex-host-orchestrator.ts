@@ -70,6 +70,7 @@ export class CodexHostOrchestrator extends EventEmitter {
   }
 
   resolveSkillAuthorizationForTurn(input: {
+    mode: 'observe' | 'commit'
     message: RunMessage
     sessionId?: string
     messageVisibilityEpoch?: number
@@ -77,15 +78,20 @@ export class CodexHostOrchestrator extends EventEmitter {
   }): SkillToolAuthorization {
     const orchestrator = this.domainAdapterHost.getSkillContextOrchestrator()
     const localSendImIntent = hasLocalSendImIntentForTurn(input.message, input.requestEnvelope)
+    const observedReferenceHint = input.mode === 'observe'
+      ? orchestrator?.observeCurrentReferenceSkillHint?.(input.sessionId) || null
+      : undefined
     const skillHintRelevance = resolveSkillHintRelevanceForTurn({
       ...input,
       orchestrator,
       localSendImIntent,
+      observedReferenceHint,
     })
     return resolveSemanticSkillAuthorizationForTurn({
       ...input,
       forceLocalSendImIntent: localSendImIntent,
       skillHintRelevantForTurn: skillHintRelevance.relevant,
+      observedReferenceHint,
       orchestrator,
     })
   }

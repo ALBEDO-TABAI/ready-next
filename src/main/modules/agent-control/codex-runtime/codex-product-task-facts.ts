@@ -1,7 +1,11 @@
 import type { TaskType } from '../../../../shared/task-types'
 import type { IntentClassification } from '../intent-classifier'
-import { createRunBudgetSeed } from '../task-projection/run-budget-policy'
 import type { CodexSkillCompletionProfile } from './codex-skill-completion-profile'
+
+// The serialized product contract currently requires finite safe integers.
+// This sentinel means ordinary work is Runtime-managed: it leaves headroom for
+// the small delivery/final lanes while removing task-shape quotas in practice.
+export const CODEX_RUNTIME_MANAGED_COUNTER_SENTINEL = Number.MAX_SAFE_INTEGER - 1_024
 
 type CodexProductTaskInput = {
   skillAuthorization:
@@ -12,6 +16,8 @@ type CodexProductTaskInput = {
       }
   intentClassification?: Pick<IntentClassification, 'primaryDomain'>
   hasFolderExportDestination?: boolean
+  hasActionObligations?: boolean
+  hasBrowserToolSurface?: boolean
 }
 
 type FolderOutputActivation = {
@@ -47,8 +53,11 @@ export function resolveCodexProductTaskFacts(
   if (input.intentClassification?.primaryDomain === 'research') {
     return { taskType: 'research', module: 'browser' }
   }
-  if (input.intentClassification?.primaryDomain === 'browser') {
+  if (input.intentClassification?.primaryDomain === 'browser' || input.hasBrowserToolSurface) {
     return { taskType: 'direct_answer', module: 'browser' }
+  }
+  if (input.hasActionObligations) {
+    return { taskType: 'short_task', module: 'system' }
   }
   return { taskType: 'direct_answer', module: 'system' }
 }
@@ -79,22 +88,13 @@ export function resolveCodexProductCloseoutTaskFacts(
 export function createCodexProductBudgetSeed(
   input: CodexProductTaskInput,
 ): { maxIterations: number; maxToolCalls: number; maxParallelToolGroups: 1 } {
-  const selectedProfile = input.skillAuthorization.mode === 'selected'
-    ? input.skillAuthorization.completionProfile
-    : null
-  const researchProfile = selectedProfile === 'research_sources'
-    || selectedProfile === 'research_artifact_delivery'
-  const taskType = researchProfile
-    ? resolveCodexProductTaskFacts(input).taskType
-    : input.hasFolderExportDestination || (selectedProfile !== null && selectedProfile !== 'advisory')
-    ? 'multi_step_task'
-    : input.intentClassification?.primaryDomain === 'browser'
-      ? 'browser_transaction'
-      : resolveCodexProductTaskFacts(input).taskType
-  const preset = createRunBudgetSeed(taskType)
+  const browserObservationClosureCapacity = input.intentClassification?.primaryDomain === 'browser'
+    || input.hasBrowserToolSurface
+    ? 1
+    : 0
   return {
-    maxIterations: preset.maxIterations,
-    maxToolCalls: preset.maxToolCalls,
+    maxIterations: CODEX_RUNTIME_MANAGED_COUNTER_SENTINEL + browserObservationClosureCapacity,
+    maxToolCalls: CODEX_RUNTIME_MANAGED_COUNTER_SENTINEL + browserObservationClosureCapacity,
     maxParallelToolGroups: 1,
   }
 }

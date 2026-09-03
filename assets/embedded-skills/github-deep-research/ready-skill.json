@@ -6,6 +6,7 @@
   "version": "0.1.0",
   "runtime": "reference",
   "execution": { "mode": "advisory" },
+  "allowed_tools": ["web_search", "web_fetch"],
   "actions": {
     "read_skill": {
       "runtime": "reference",

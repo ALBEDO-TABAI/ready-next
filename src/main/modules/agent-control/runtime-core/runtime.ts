@@ -104,6 +104,7 @@ import {
   createRejectedBeforePersistence,
   runConfirmedSendScoped
 } from '../send-scoped-confirmation'
+import { preflightExplicitRetryControl } from '../codex-runtime/codex-explicit-retry-control'
 import { SessionRecallService } from '../session/session-recall-service'
 import { clearActiveSkillContext } from '../session/active-skill-context'
 import { clearScopeSessionSnapshot } from '../session/scope-session-snapshot'
@@ -162,7 +163,7 @@ import type {
   SendScopedRequest,
   SendScopedResponse,
 } from '../../../../shared/ipc-contracts/agent-runtime'
-import type { LifecycleOperationProjection } from '../../../../shared/ipc-contracts/agent-lifecycle-snapshot'
+import type { LifecycleOperationProjectionV2 } from '../../../../shared/ipc-contracts/agent-lifecycle-snapshot'
 import {
   settleScopeContextCloseLifecycleResult,
   settleScopeContextResetLifecycleResult,
@@ -1014,16 +1015,40 @@ export class AgentControlRuntime extends EventEmitter {
     return this.conversationScopes.listConversationScopes()
   }
 
-  readCodexLifecycleSnapshot(request: LifecycleRequest): LifecycleOperationProjection {
+  readCodexLifecycleSnapshot(request: LifecycleRequest): LifecycleOperationProjectionV2 {
     return this.codexRuntime.aliasBindingPort.readLifecycleSnapshot(request)
   }
 
-  readProductTurnPresentation(readyRunId: string) {
-    return this.codexRuntime.readProductTurnPresentation(readyRunId)
+  readCodexHeadActionProjection(request: LifecycleRequest) {
+    return this.codexRuntime.aliasBindingPort.readHeadActionProjection(request)
   }
 
-  readProductTurnPresentations(readyRunIds: readonly string[]) {
-    return this.codexRuntime.readProductTurnPresentations(readyRunIds)
+  readCodexActionSurface(request: LifecycleRequest) {
+    return this.codexRuntime.aliasBindingPort.readActionSurface(request)
+  }
+
+  async readProductTurnPresentation(
+    readyRunId: string,
+    requestedWorkbenchMode: 'browser' | 'document' | 'rss' | 'calendar',
+  ) {
+    const trusted = await this.resolveTrustedRequestEnvironment({ workbenchMode: requestedWorkbenchMode })
+    const trustedWorkbenchMode = trusted.workbenchMode || requestedWorkbenchMode
+    return this.codexRuntime.readProductTurnPresentation(readyRunId, {
+      requestedWorkbenchMode,
+      trustedWorkbenchMode,
+    })
+  }
+
+  async readProductTurnPresentations(
+    readyRunIds: readonly string[],
+    requestedWorkbenchMode: 'browser' | 'document' | 'rss' | 'calendar',
+  ) {
+    const trusted = await this.resolveTrustedRequestEnvironment({ workbenchMode: requestedWorkbenchMode })
+    const trustedWorkbenchMode = trusted.workbenchMode || requestedWorkbenchMode
+    return this.codexRuntime.readProductTurnPresentations(readyRunIds, {
+      requestedWorkbenchMode,
+      trustedWorkbenchMode,
+    })
   }
 
   readCodexRuntimeDiagnostics() {
@@ -1454,6 +1479,11 @@ export class AgentControlRuntime extends EventEmitter {
   }
 
   async sendScoped(payload: SendScopedRequest): Promise<SendScopedResponse> {
+    const explicitRetryRejection = preflightExplicitRetryControl({
+      request: payload,
+      scope: payload.explicitRetry ? this.db.getConversationScope(payload.scopeId) : null,
+    })
+    if (explicitRetryRejection) return explicitRetryRejection
     const canonicalUserMessage = payload.userMessage
     try {
       await this.codexRuntime.ensureReadyForUserIngress()

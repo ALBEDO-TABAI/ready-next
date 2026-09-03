@@ -85,11 +85,11 @@ describe('looksLikeMissingNativeToolsReply', () => {
       true,
     )
     assert.strictEqual(
-      looksLikeMissingNativeToolsReply('显式可用工具清单里只有 memory_create、memory_search、memory_update、memory_list_recent 和 session_search。'),
+      looksLikeMissingNativeToolsReply('显式可用工具清单里只有 memory_search 和 session_search。'),
       true,
     )
     assert.strictEqual(
-      looksLikeMissingNativeToolsReply('The available tools in this session only include memory_create, memory_search, memory_update, memory_list_recent, and session_search.'),
+      looksLikeMissingNativeToolsReply('The available tools in this session only include memory_search and session_search.'),
       true,
     )
     assert.strictEqual(looksLikeMissingNativeToolsReply("I don’t have a ping tool available in this session."), true)

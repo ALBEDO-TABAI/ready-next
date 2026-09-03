@@ -120,13 +120,13 @@ export function trustedRssSourceInput(source: NonNullable<ReturnType<DatabaseMan
 
 export function extractProductSurfaceTargets(
   resources: NonNullable<SendScopedRequest['resources']>,
-): NonNullable<PreparedCodexProductRun['productSurfaceTargets']> {
+): PreparedCodexProductRun['productSurfaceTargets'] {
   const rssItem = resources.find((resource) => resource.kind === 'rss_item')
   const rssSource = resources.find((resource) => resource.kind === 'rss_source')
   const calendarEvent = resources.find((resource) => resource.kind === 'calendar_event')
   const calendarWindow = resources.find((resource) => resource.kind === 'calendar_window')
   const widget = resources.find((resource) => resource.kind === 'widget_target')
-  return {
+  const targets = {
     rssItemId: rssItem && rssItem.kind === 'rss_item' ? rssItem.itemId : null,
     rssSourceId: rssSource && rssSource.kind === 'rss_source' ? rssSource.sourceId : null,
     calendarEventId: calendarEvent && calendarEvent.kind === 'calendar_event'
@@ -141,6 +141,7 @@ export function extractProductSurfaceTargets(
       : null,
     widgetId: widget && widget.kind === 'widget_target' ? widget.widgetId : null,
   }
+  return Object.values(targets).some((value) => value !== null) ? targets : undefined
 }
 
 export function assertWidgetTargetsMatchAnchor(

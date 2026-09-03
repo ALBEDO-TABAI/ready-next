@@ -21,6 +21,7 @@ import { extractDocumentTagLabels } from './tag-forge-content-tags'
 
 export interface TagForgeToolContext {
   workspaceRoots?: string[] | null
+  explicitReadablePaths?: string[] | null
   runId?: string | null
   scopeId?: string | null
   batchId?: string | null
@@ -40,7 +41,14 @@ export async function executeTagForgeApply(
     return json({ ok: false, errorKind: 'invalid_tag_forge_input' })
   }
 
-  const root = workspaceRootFor(path, engine, context?.workspaceRoots)
+  const selectedPath = context?.explicitReadablePaths?.find((candidate) => {
+    try {
+      return realpathSync(candidate) === realpathSync(path)
+    } catch {
+      return false
+    }
+  })
+  const root = selectedPath ? resolve(selectedPath, '..') : workspaceRootFor(path, engine, context?.workspaceRoots)
   if (!root) return json({ ok: false, errorKind: 'workspace_boundary_rejected', error: 'path is outside any known workspace' })
   const db = engine.getRepository().getConnection()
   const identities = new FileProjectIdentityRepository(db)

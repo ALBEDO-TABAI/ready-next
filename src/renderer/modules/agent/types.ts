@@ -77,6 +77,7 @@ export interface ChatAttachment {
     | 'calendar-event'
     | 'rss-item'
     | 'rss-source'
+    | 'mcp-resource'
     | 'channel'
     | 'generated-image'
   browserTabId?: string
@@ -98,6 +99,11 @@ export interface ChatAttachment {
   eventId?: string
   rssItemId?: string
   rssSourceId?: string
+  mcpServerId?: string
+  mcpResourceUri?: string
+  mcpCatalogGeneration?: number
+  mcpCatalogDigest?: string
+  mcpContentDigest?: string
   startTime?: string
   endTime?: string
   calendarId?: string

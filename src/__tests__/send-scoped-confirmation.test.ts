@@ -375,6 +375,23 @@ test('a well-shaped prepared run for another scope is rejected before persistenc
     currentInput: [textUserInput('hello')],
     explicitResourceEnvelope: { input: [], resourceRefs: [] },
     resourceAdditionalContext: [],
+    actionAdmissionRef: {
+      headProjectionDigest: 'a'.repeat(64),
+      actionProjectionVersion: {
+        scopeEpoch: 0,
+        headGeneration: 1,
+        actionProjectionSequence: 0,
+      },
+      actionHeadIdentity: {
+        aliasId: 'scope-other',
+        aliasGeneration: 1,
+        threadBindingId: 'thread-binding-other',
+        headRevision: 1,
+      },
+    },
+    uncommittedTailAssignments: [],
+    supersededUncommittedItems: [],
+    trustedWorkbenchMode: 'browser',
     readyMemorySnapshot: disabledReadyMemorySnapshot(),
     ...createCodexToolFixture(),
     authorizationOwnerId: 'authorization-owner-1',

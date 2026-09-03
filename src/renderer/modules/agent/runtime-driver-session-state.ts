@@ -46,6 +46,7 @@ export function makeEmptySessionSlice(conversationId: string | null = null): Rec
     streamingMessageId: null,
     streamingRequestId: null,
     scopeRunStates: {},
+    productTurnActionProjectionByRunId: {},
     taskDisclosureState: {},
     lifecyclePendingAction: null,
     lifecycleError: null,
@@ -64,6 +65,7 @@ export function normalizeSessionSlice(slice: any): Record<string, any> {
     ...(slice || {}),
     messages: slice?.messages ?? [],
     scopeRunStates: slice?.scopeRunStates ?? {},
+    productTurnActionProjectionByRunId: slice?.productTurnActionProjectionByRunId ?? {},
     taskDisclosureState: slice?.taskDisclosureState ?? {},
   }
 }

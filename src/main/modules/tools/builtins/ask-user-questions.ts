@@ -207,6 +207,10 @@ export interface PersistCardPendingArgs {
   agent?: string | null
   requestId?: string | null
   lifecycleType?: InteractionLifecycleIdentity['type']
+  actionConfirmationOwnerRef?: {
+    frozenCallId: string
+    pendingConfirmationSourceDigest: string
+  }
   responsePolicy?: AskUserQuestionsResponsePolicy
   questions: AskUserQuestionSpec[]
   askedAt: number
@@ -226,6 +230,10 @@ export interface AskUserQuestionsHandlerDeps {
   agent?: string | null
   requestId?: string | null
   lifecycleType?: InteractionLifecycleIdentity['type']
+  actionConfirmationOwnerRef?: {
+    frozenCallId: string
+    pendingConfirmationSourceDigest: string
+  }
   /** Restricts who may answer host-owned, setting-level confirmations. */
   responsePolicy?: AskUserQuestionsResponsePolicy
   signal?: AbortSignal
@@ -617,6 +625,7 @@ export async function executeAskUserQuestions(
       agent,
       requestId,
       lifecycleType: deps.lifecycleType,
+      actionConfirmationOwnerRef: deps.actionConfirmationOwnerRef,
       responsePolicy,
       questions,
       askedAt,
@@ -628,6 +637,12 @@ export async function executeAskUserQuestions(
       sessionId,
       message: message.slice(0, 200),
     })
+    if (message === 'overlapping_card') {
+      throw new ToolDomainError(
+        'overlapping_card',
+        '已有一个未回答的交互卡片，请等待用户处理后再发起。',
+      )
+    }
     throw new ToolDomainError('persistence_failed', `Failed to persist card: ${message}`)
   }
 
@@ -668,6 +683,7 @@ export async function executeAskUserQuestions(
         messageVisibilityEpoch: codexRunIdentity?.messageVisibilityEpoch ?? null,
         responsePolicy,
         lifecycleType: deps.lifecycleType,
+        actionConfirmationOwnerRef: deps.actionConfirmationOwnerRef,
         questions,
         askedAt,
       resolve: resolvePromise,

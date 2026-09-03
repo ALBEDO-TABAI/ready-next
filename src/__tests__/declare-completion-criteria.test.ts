@@ -112,6 +112,8 @@ test('appendModelCriteria 合流：m 命名空间追加、模板项不可覆盖'
   assert.equal(merged[1].id, 'm1')
   assert.equal(merged[1].source, 'model')
   assert.equal(merged[1].text, '模型补充标准')
+  assert.equal(merged[1].kind, 'result_parseable')
+  assert.match(merged[1].notApplicable?.reason || '', /没有代码可核验的证明合同/)
 })
 
 test('declare_completion_criteria 在 agent_interaction 双协议曝光面注册', () => {

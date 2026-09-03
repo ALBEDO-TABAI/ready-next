@@ -13,6 +13,7 @@ import { revealDocumentQuoteAttachment } from '../../../modules/agent/document-q
 import { WORKBENCH_CANVAS_OUTER_PADDING_BOTTOM } from '../../../modules/workbench/chrome'
 import type { ReferenceSkillHintData } from '../../../types/electron'
 import type { ActionAuthorizationMode } from '../../../../shared/action-authorization-mode'
+import type { CodexProductTurnActionProjection } from '../../../../shared/ipc-contracts/agent-runtime'
 import { toLocalFileUrl } from '../../../utils/dragDrop'
 import ChatMessages from '../ChatMessages'
 import ChatInput, { type ChatInputHandle } from '../ChatInput'
@@ -55,6 +56,7 @@ interface ChatPanelBodyProps extends Omit<TaskToolSnapshotProps, 'children' | 'c
   toolTraceStatus: string | null
   toolTraceExpanded: boolean
   copiedMessageId: string | null
+  productTurnActionProjectionByRunId: Record<string, CodexProductTurnActionProjection>
   showToolTraceCapsule: boolean
   shouldRenderGlobalToolTraceCapsule: boolean
   onSetInputSuggestion: (value: string) => void
@@ -127,6 +129,7 @@ export function ChatPanelBody(props: ChatPanelBodyProps): React.ReactElement {
     toolTraceStatus,
     toolTraceExpanded,
     copiedMessageId,
+    productTurnActionProjectionByRunId,
     showToolTraceCapsule,
     shouldRenderGlobalToolTraceCapsule,
     onSetInputSuggestion,
@@ -253,6 +256,7 @@ export function ChatPanelBody(props: ChatPanelBodyProps): React.ReactElement {
             toolTraceStatus={toolTraceStatus}
             toolTraceExpanded={toolTraceExpanded}
             copiedMessageId={copiedMessageId}
+            productTurnActionProjectionByRunId={productTurnActionProjectionByRunId}
             showToolTraceCapsule={showToolTraceCapsule && shouldRenderGlobalToolTraceCapsule}
             bottomOverlayInset={composerBottomInset}
             onSetInputSuggestion={onSetInputSuggestion}

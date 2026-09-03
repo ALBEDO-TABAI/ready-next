@@ -39,6 +39,19 @@ const turnMember: CodexBindingRecoveryMember = {
   crashSeam: 6,
 }
 
+const forkMember: CodexBindingRecoveryMember = {
+  reservationSetId: 'set-fork',
+  reservationId: 'member-fork',
+  scopeId: 'scope-thread',
+  method: 'thread/fork',
+  requiredMemberCount: 1,
+  state: 'recovery_held',
+  bindingId: 'binding-fork',
+  connectionEpoch: 'old-epoch',
+  rpcId: 3,
+  crashSeam: 3,
+}
+
 function turn(id: string, clientId: string): CodexTurn {
   return {
     id,
@@ -72,6 +85,7 @@ function thread(overrides: Partial<CodexThread> = {}): CodexThread {
 function actions(input: {
   threadList?: Pick<CodexNativeRuntime, 'threadList'>['threadList']
   threadRead?: Pick<CodexNativeRuntime, 'threadRead'>['threadRead']
+  threadResume?: Pick<CodexNativeRuntime, 'threadResume'>['threadResume']
   prove?: (stableReadbackEvidenceDigest: string) => Promise<
     { proven: false } | { proven: true; evidenceDigest: string }
   >
@@ -80,6 +94,18 @@ function actions(input: {
   const runtime = {
     threadList: input.threadList || (async () => ({ data: [], nextCursor: null })),
     threadRead: input.threadRead || (async ({ threadId }) => ({ thread: thread({ id: threadId }) })),
+    threadResume: input.threadResume || (async ({ threadId }) => ({
+      thread: thread({ id: threadId }),
+      cwd: '/tmp/isolated-thread',
+      model: 'ready-e0-model',
+      modelProvider: 'ready_gateway',
+      approvalPolicy: 'never',
+      approvalsReviewer: 'user',
+      sandbox: { type: 'readOnly' },
+      reasoningEffort: null,
+      serviceTier: null,
+      instructionSources: [],
+    })),
   }
   return {
     held,
@@ -87,8 +113,15 @@ function actions(input: {
       runtime,
       repository: {
         readStartInboundIdentity(method) {
-          return method === 'thread/start'
-            ? { method, expectedCwd: '/tmp/isolated-thread' }
+          return method === 'thread/start' || method === 'thread/fork'
+            ? {
+                method,
+                expectedCwd: '/tmp/isolated-thread',
+                expectedParentThreadId: null,
+                expectedForkedFromId: method === 'thread/fork' ? 'thread-source' : null,
+                expectedPrefixTurnIds: method === 'thread/fork' ? ['turn-accepted'] : [],
+                materializationRequestDigest: method === 'thread/fork' ? 'a'.repeat(64) : null,
+              }
             : { method, threadId: 'thread-native', clientUserMessageId: 'client-turn' }
         },
       },
@@ -144,6 +177,87 @@ test('boot recovery uniquely resolves thread and turn starts by pinned native id
   assert.equal(turnResult.nativeId, 'turn-native')
   assert.deepEqual(turnResult.nativeResult, { turn: root.turns[0] })
   assert.match(turnResult.evidenceDigest, /^[a-f0-9]{64}$/)
+})
+
+test('boot recovery resumes and binds the one exact native-fork child', async () => {
+  const child = thread({
+    id: 'thread-child',
+    sessionId: 'thread-child',
+    parentThreadId: null,
+    forkedFromId: 'thread-source',
+    turns: [turn('turn-accepted', 'accepted-user')],
+  })
+  let resumeCalls = 0
+  const fixture = actions({
+    async threadList() { return { data: [{ ...child, turns: [] }], nextCursor: null } },
+    async threadRead() { return { thread: child } },
+    async threadResume() {
+      resumeCalls += 1
+      return {
+        thread: child,
+        cwd: child.cwd,
+        model: 'ready-e0-model',
+        modelProvider: 'ready_gateway',
+        approvalPolicy: 'never',
+        approvalsReviewer: 'user',
+        sandbox: { type: 'readOnly', networkAccess: false },
+        reasoningEffort: null,
+        serviceTier: null,
+        instructionSources: [],
+      }
+    },
+  })
+  const result = await fixture.value.resolveIntentStart({
+    member: forkMember,
+    registry: {} as never,
+    recoveryConnectionEpoch: 'recovery-epoch',
+  })
+  assert.equal(result.resolution, 'accepted')
+  if (result.resolution !== 'accepted') throw new Error('fork child was not accepted')
+  assert.equal(result.nativeId, child.id)
+  assert.equal(resumeCalls, 1)
+  assert.equal((result.nativeResult as { thread: CodexThread }).thread.id, child.id)
+  assert.equal(result.forkRecoveryEvidence?.connectionEpoch, 'recovery-epoch')
+  assert.match(result.forkRecoveryEvidence?.preResumeThreadReadDigest || '', /^[a-f0-9]{64}$/)
+  assert.match(result.forkRecoveryEvidence?.resumedThreadDigest || '', /^[a-f0-9]{64}$/)
+})
+
+test('a listed child with mismatched metadata is unknown, never proof of absence', async () => {
+  let absenceProofs = 0
+  const fixture = actions({
+    async threadList() {
+      return { data: [thread({ id: 'child', sessionId: 'child', forkedFromId: 'foreign-source' })], nextCursor: null }
+    },
+    async prove() {
+      absenceProofs += 1
+      return { proven: true, evidenceDigest: 'must-not-be-used' }
+    },
+  })
+  const result = await fixture.value.resolveIntentStart({
+    member: forkMember,
+    registry: {} as never,
+    recoveryConnectionEpoch: 'recovery-epoch',
+  })
+  assert.equal(result.resolution, 'unknown')
+  assert.equal(absenceProofs, 0)
+})
+
+test('fork recovery rejects the source thread even when all prefix metadata matches', async () => {
+  const selfFork = thread({
+    id: 'thread-source', sessionId: 'thread-source', forkedFromId: 'thread-source',
+    turns: [turn('turn-accepted', 'accepted-user')],
+  })
+  let resumeCalls = 0
+  const fixture = actions({
+    async threadList() { return { data: [{ ...selfFork, turns: [] }], nextCursor: null } },
+    async threadRead() { return { thread: selfFork } },
+    async threadResume() { resumeCalls += 1; throw new Error('must_not_resume_source') },
+  })
+  const result = await fixture.value.resolveIntentStart({
+    member: forkMember, registry: {} as never, recoveryConnectionEpoch: 'recovery-epoch',
+  })
+  assert.equal(result.resolution, 'unknown')
+  assert.equal(resumeCalls, 0)
 })
 
 test('stable zero remains unknown without old-process proof and becomes absent only with proof', async () => {

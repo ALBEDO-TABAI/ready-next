@@ -35,6 +35,24 @@ test('maps host and circuit failures to a retryable service message', () => {
   }
 })
 
+test('does not disguise an unsupported skill surface as a temporary host outage', () => {
+  for (const input of [
+    {
+      error: 'tool_surface_result_state_unsupported',
+      errorKind: 'capability_unavailable' as const,
+    },
+    {
+      error: 'tool_surface_result_state_unsupported',
+      errorKind: 'host_unavailable' as const,
+    },
+  ]) {
+    const result = mapBackendErrorToFriendly(input)
+    assert.match(result.friendlyMessage, /技能/)
+    assert.equal(result.retryStrategy, 'user_action')
+    assert.doesNotMatch(result.friendlyMessage, /暂时不可用|稍后重试/)
+  }
+})
+
 test('does not disguise a required new thread as a temporary host outage', () => {
   for (const input of [
     {

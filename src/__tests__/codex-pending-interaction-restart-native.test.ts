@@ -10,7 +10,8 @@ import {
   CodexBindingRepository,
   type CodexAdmittedBindingInput,
 } from '../main/modules/agent-control/codex-runtime/codex-binding-repository'
-import { digestCanonicalJson } from '../main/modules/agent-control/codex-runtime/codex-model-gateway-contract'
+import { createCodexUpstreamProfileSnapshot, digestCanonicalJson } from '../main/modules/agent-control/codex-runtime/codex-model-gateway-contract'
+import { CodexModelGatewayRepository } from '../main/modules/agent-control/codex-runtime/codex-model-gateway-authority'
 import {
   assertCodexPendingInteractionRestartSweepComplete,
   cancelCodexPendingInteractionsWithoutRunCloseout,
@@ -45,6 +46,7 @@ import {
 } from './provider-checkpoint-test-fixtures'
 import { createCodexToolFixture } from './utils/codex-tool-fixture'
 import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
+import { projectCodexHeadActionProjection } from '../main/modules/agent-control/codex-runtime/codex-action-surface'
 
 const admittedAt = '2026-08-11T02:00:00.000Z'
 const restartAt = '2026-08-11T02:05:00.000Z'
@@ -66,7 +68,11 @@ function prepared(input: {
   sourceMessageId: string
 }): PreparedCodexProductRun {
   return {
-    preparationContract: 'codex_product_run_e1',
+    preparationContract: 'codex_product_run_e2',
+    sourceTrustedEnvironmentRef: {
+      workbenchMode: 'browser',
+      environmentDigest: 'e'.repeat(64),
+    },
     readyMemorySnapshot: disabledReadyMemorySnapshot(),
     taskId: input.taskId,
     runId: input.runId,
@@ -91,7 +97,6 @@ function prepared(input: {
       explicitResourceEnvelope: { input: [], resourceRefs: [] },
       resourceAdditionalContext: [],
     }),
-    recoveredContextDigest: null,
     ...createCodexToolFixture([]),
     readyToolHostIdentity: {
       scopeId: input.scopeId,
@@ -193,6 +198,25 @@ async function seedRun(input: {
     protocolSchemaDigest: `protocol-${input.runId}`,
     createdAt: admittedAt,
   })
+  const head = projectCodexHeadActionProjection(input.bindings.readHeadActionFacts({
+    aliasId: input.scopeId, aliasGeneration: 1,
+    currentRuntimeManifestDigest: `runtime-${input.runId}`,
+    currentProtocolSchemaDigest: `protocol-${input.runId}`,
+  }))
+  run.ingress.actionAdmissionRef = {
+    headProjectionDigest: head.evidenceDigest,
+    actionProjectionVersion: head.actionProjectionVersion,
+    actionHeadIdentity: head.actionHeadIdentity!,
+  }
+  run.ingress.uncommittedTailAssignments = []
+  run.ingress.supersededUncommittedItems = []
+  const upstream = createCodexUpstreamProfileSnapshot({
+    profileId: `profile-${input.runId}`,
+    config: { provider: 'openai-compatible', baseUrl: 'https://provider.example/v1',
+      apiKey: 'test-only', model: 'fixture-model', agentProtocol: 'openai', wireApi: 'chat/completions', toolUseMode: 'on' },
+    maxRetries: 0,
+  })
+  new CodexModelGatewayRepository(db, input.bindings).storeSnapshot({ ...upstream, createdAt: admittedAt })
   const admissionBase = {
     prepared: run,
     reservation,
@@ -206,8 +230,8 @@ async function seedRun(input: {
     protocolSchemaDigest: `protocol-${input.runId}`,
     instructionContractDigest: `instructions-${input.runId}`,
     codexModel: 'ready-e0-model',
-    upstreamProfileSnapshotRef: `profile-ref-${input.runId}`,
-    upstreamProfileSnapshotDigest: `profile-digest-${input.runId}`,
+    upstreamProfileSnapshotRef: upstream.snapshotRef,
+    upstreamProfileSnapshotDigest: upstream.snapshotDigest,
     additionalContextDigest: digestCanonicalJson([]),
     turnContractDigest: `turn-contract-${input.runId}`,
     messageVisibilityEpoch: 0,

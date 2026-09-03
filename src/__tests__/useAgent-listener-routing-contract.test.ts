@@ -58,7 +58,7 @@ function seedSessions() {
   // active = A. Used by all routing cases below; resetting before each test
   // is unnecessary because each test reseeds explicitly.
   useAgent.setState({
-    agents: [{ name: 'butler', displayName: '管家', avatar: '', status: 'idle', selected: true }],
+    agents: [{ name: 'butler', displayName: '管家', avatar: '', status: 'idle' }],
     messages: [],
     currentAgent: 'butler',
     inputValue: '',

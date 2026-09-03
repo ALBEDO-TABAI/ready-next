@@ -7,6 +7,7 @@ import type {
 } from '../contracts/run-contracts'
 import type { DeliveryStateV1 } from '../../../../shared/dynamic-delivery'
 import type { CanonicalAssistantMessageReceipt } from '../../../../shared/ipc-contracts/canonical-message'
+import type { ContextUsageSnapshot } from '../../../../shared/context-usage-types'
 import type {
   BrowserWorkflowCloseoutSeal,
   BrowserWorkflowCompletionVerifierReceipt,
@@ -55,6 +56,7 @@ interface RunOutcomeTaskFacts {
   taskBudgetRuntime?: TaskBudgetRuntime | null
   providerDiagnostics?: RunOutcomeProviderDiagnostics | null
   usage?: RunOutcomeUsage | null
+  contextUsage?: ContextUsageSnapshot | null
   workflowCloseoutSeal?: BrowserWorkflowCloseoutSeal | null
   workflowVerifierAcceptance?: Omit<
     BrowserWorkflowCompletionVerifierReceipt,
@@ -134,6 +136,7 @@ export interface RunFinalizerDeps {
     budgetWarningLevel?: BudgetWarningLevel | null
     providerDiagnostics?: Record<string, unknown> | null
     usage?: RunOutcomeUsage | null
+    contextUsage?: ContextUsageSnapshot | null
     deliveryState?: DeliveryStateV1 | null
     workflowCloseoutSeal?: BrowserWorkflowCloseoutSeal | null
     terminalQualityPatch?: TerminalAdjudicationDecision['terminalQualityPatch'] | null

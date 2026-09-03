@@ -8,11 +8,35 @@ import type { CodexRuntimeHostPort } from './codex-runtime-composition'
 import { ReadyCodexLifecyclePortError } from './ready-codex-lifecycle-adapter'
 import type { CanonicalCoreCloseoutInput } from '../../repositories/agent-session-checkpoint-types'
 import type { TaskProjectionRecord } from '../contracts/run-contracts'
-import { finalizeRunOutcome, writeRunCloseMetric } from '../runtime-core/run-finalizer'
+import { finalizePreparedRunOutcome, writeRunCloseMetric, type RunOutcome, type RunFinalizerDeps } from '../runtime-core/run-finalizer'
+import { prepareTerminalOutcome } from '../runtime-core/run-finalizer-persistence'
 import { appendProofRefs, type ProofRef } from '../quality/proof-collector'
-import { userFacingTerminalErrorText } from '../task-projection/run-collector'
+import type { CodexTerminalCloseoutEvidence } from './codex-binding-repository'
 
-export type CodexProductCloseoutMode = 'product' | 'verifier_accepted' | 'verifier_rejected' | 'publication_diverged' | 'recovery_failure' | 'lifecycle_stop' | 'lifecycle_close' | 'lifecycle_reset'
+export type CodexProductCloseoutMode = 'product' | 'verifier_accepted' | 'verifier_rejected' | 'publication_diverged' | 'history_reset_required' | 'recovery_failure' | 'lifecycle_stop' | 'lifecycle_close' | 'lifecycle_reset'
+
+export function resolveCodexUnownedNativeTerminalCloseout(input: {
+  engineOutcome: 'completed' | 'interrupted' | 'failed'
+  publicationDiverged: boolean
+}): {
+  status: 'error'
+  terminalReason: 'blocked_external' | 'persistence_failed'
+  errorCode: string
+  closeoutMode: 'product' | 'publication_diverged'
+} {
+  return {
+    status: 'error',
+    terminalReason: input.engineOutcome === 'completed'
+      ? 'persistence_failed'
+      : 'blocked_external',
+    errorCode: input.publicationDiverged
+      ? 'codex_tool_publication_diverged'
+      : input.engineOutcome === 'interrupted'
+        ? 'codex_unowned_runtime_interrupt'
+        : 'codex_native_terminal_rejected',
+    closeoutMode: input.publicationDiverged ? 'publication_diverged' : 'product',
+  }
+}
 
 export class CodexProductCloseoutExpectationGuard {
   private readonly expected = new Map<string, {
@@ -23,6 +47,7 @@ export class CodexProductCloseoutExpectationGuard {
       evidenceDigest: string
       pendingInteractionRestart: CodexPendingInteractionRestartPlan | null
     }
+    terminalEvidence: CodexTerminalCloseoutEvidence | null
   }>()
 
   acquire(readyRunId: string, mode: CodexProductCloseoutMode): symbol {
@@ -30,7 +55,12 @@ export class CodexProductCloseoutExpectationGuard {
       throw new Error('codex_product_closeout_in_flight')
     }
     const token = Symbol(readyRunId)
-    this.expected.set(readyRunId, { mode, token, recoveryFailure: null })
+    this.expected.set(readyRunId, {
+      mode,
+      token,
+      recoveryFailure: null,
+      terminalEvidence: null,
+    })
     return token
   }
 
@@ -67,6 +97,20 @@ export class CodexProductCloseoutExpectationGuard {
   } | null {
     const expected = this.expected.get(readyRunId)
     return expected?.mode === 'recovery_failure' ? expected.recoveryFailure : null
+  }
+
+  setTerminalEvidence(
+    readyRunId: string,
+    evidence: CodexTerminalCloseoutEvidence,
+  ): void {
+    const expected = this.expected.get(readyRunId)
+    if (!expected) throw new Error('codex_product_closeout_expectation_missing')
+    if (expected.terminalEvidence) throw new Error('codex_terminal_evidence_already_set')
+    expected.terminalEvidence = evidence
+  }
+
+  readTerminalEvidence(readyRunId: string): CodexTerminalCloseoutEvidence | null {
+    return this.expected.get(readyRunId)?.terminalEvidence || null
   }
 }
 
@@ -142,21 +186,11 @@ export async function finalizeCodexProductCloseout(input: {
   const durableProofs = input.publishedToolEvidence
     ? input.publishedToolEvidence.flatMap((entry) => entry.proofs)
     : input.durableProofs ?? []
-  const skillToolFailure = input.closeout.module === 'skill'
-    && hasUnresolvedCodexSkillToolFailure(
-      input.toolCalls,
-      input.publishedToolEvidence ?? [],
-    )
-  const requested = skillToolFailure
-    ? {
-        ...input.closeout,
-        status: 'error' as const,
-        terminalReason: 'blocked_tool_error',
-        initiator: 'tool_failure',
-        finalText: userFacingTerminalErrorText('blocked_tool_error')
-          || '关键步骤没有完成，可以让我重试。',
-      }
-    : input.closeout
+  const requested = adjudicateCodexProductCloseout({
+    closeout: input.closeout,
+    toolCalls: input.toolCalls,
+    publishedToolEvidence: input.publishedToolEvidence ?? [],
+  })
   if (durableProofs.length) {
     const projection = input.taskProjectionStore.get(requested.parentTaskId)
     if (!projection || projection.runId !== requested.ownerRunId) {
@@ -176,7 +210,7 @@ export async function finalizeCodexProductCloseout(input: {
       }, { silent: true, reasonHint: 'codex_terminal_tool_proof' })
     }
   }
-  const finalized = await finalizeRunOutcome({
+  let outcome: RunOutcome = {
     kind: requested.status,
     runId: requested.ownerRunId,
     taskId: requested.parentTaskId,
@@ -193,14 +227,33 @@ export async function finalizeCodexProductCloseout(input: {
     },
     providerDiagnostics: requested.providerDiagnostics || null,
     usage: requested.usage || null,
-  }, {
+    contextUsage: requested.contextUsage || null,
+  }
+  const deps: RunFinalizerDeps = {
     taskProjectionStore: input.taskProjectionStore,
     commitCanonicalCoreCloseout: (closeout) => input.commitCanonicalCoreCloseout({
       ...closeout,
       ...(requested.now ? { now: requested.now } : {}),
     }),
     writeRunCloseMetric,
-  })
+  }
+  const prepared = prepareTerminalOutcome(outcome, deps, requested.status, requested.terminalReason)
+  // A partially satisfied QC verdict is not an accepted Codex history boundary.
+  if (requested.status === 'done' && (prepared.effectiveStatus !== 'done'
+    || prepared.adjudication?.verdict !== 'accept')) {
+    prepared.effectiveStatus = 'error'
+    if (prepared.effectiveTerminalReason === 'done'
+      || prepared.effectiveTerminalReason === 'adjudication_degraded') {
+      prepared.effectiveTerminalReason = 'proof_gap'
+    }
+    outcome = {
+      ...outcome,
+      kind: 'error',
+      terminalReason: prepared.effectiveTerminalReason,
+      finalText: '本轮还没有满足全部完成要求，未将候选回复作为完成结果交付。已完成的操作和文件状态均已保留。',
+    }
+  }
+  const finalized = await finalizePreparedRunOutcome(outcome, deps, prepared)
   if (!finalized.canonicalMessage || !finalized.canonicalMessageDigest) {
     throw new Error('codex_product_finalizer_canonical_receipt_missing')
   }
@@ -211,6 +264,33 @@ export async function finalizeCodexProductCloseout(input: {
     canonicalMessage: finalized.canonicalMessage,
     canonicalMessageDigest: finalized.canonicalMessageDigest,
   }
+}
+
+function adjudicateCodexProductCloseout(input: {
+  closeout: Omit<CanonicalCoreCloseoutInput, 'repairDerivedState'>
+  toolCalls: ReadonlyArray<{
+    itemId: string
+    tool: string
+    status: string
+    success: boolean | null
+  }>
+  publishedToolEvidence: ReadonlyArray<{
+    itemId: string
+    tool: string
+    proofs: readonly ProofRef[]
+  }>
+}): Omit<CanonicalCoreCloseoutInput, 'repairDerivedState'> {
+  const skillToolFailure = input.closeout.module === 'skill'
+    && hasUnresolvedCodexSkillToolFailure(input.toolCalls, input.publishedToolEvidence)
+  return skillToolFailure
+    ? {
+        ...input.closeout,
+        status: 'error',
+        terminalReason: 'blocked_tool_error',
+        initiator: 'tool_failure',
+        finalText: '有关键工具在本轮被拦截或不可用，目标没有完成，已按未完成收口。',
+      }
+    : input.closeout
 }
 
 function hasUnresolvedCodexSkillToolFailure(

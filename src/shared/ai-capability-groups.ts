@@ -125,14 +125,14 @@ export const CAPABILITY_GROUPS: CapabilityGroupDefinition[] = [
   },
   {
     id: 'memory',
-    label: '记忆',
-    description: '长期记忆读写与维护。',
+    label: '长期记忆',
+    description: '读取本轮开始前已冻结的 Ready 长期记忆。',
     exposure: 'model_visible',
     availability: 'active',
     defaultMode: 'auto',
-    defaultProfiles: ['local_chat', 'remote_channel', 'scheduled_run'],
+    defaultProfiles: ['local_chat'],
     executionKinds: ['deterministic'],
-    settingsVisible: true,
+    settingsVisible: false,
   },
   {
     id: 'session_recall',

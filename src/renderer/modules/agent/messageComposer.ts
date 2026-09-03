@@ -145,6 +145,7 @@ function normalizeAttachmentSource(value: unknown): ChatAttachment['source'] {
   if (normalized === 'document-widget-target') return 'document-widget-target'
   if (normalized === 'calendar-event') return 'calendar-event'
   if (normalized === 'generated-image') return 'generated-image'
+  if (normalized === 'mcp-resource') return 'mcp-resource'
   if (normalized === 'file') return 'file'
   return 'channel'
 }
@@ -196,6 +197,11 @@ export function extractAttachmentsFromMeta(meta?: Record<string, unknown>): Chat
             ? record.platform
             : undefined,
         publishStatus: typeof record.publishStatus === 'string' ? record.publishStatus : undefined,
+        mcpServerId: typeof record.mcpServerId === 'string' ? record.mcpServerId : undefined,
+        mcpResourceUri: typeof record.mcpResourceUri === 'string' ? record.mcpResourceUri : undefined,
+        mcpCatalogGeneration: typeof record.mcpCatalogGeneration === 'number' ? record.mcpCatalogGeneration : undefined,
+        mcpCatalogDigest: typeof record.mcpCatalogDigest === 'string' ? record.mcpCatalogDigest : undefined,
+        mcpContentDigest: typeof record.mcpContentDigest === 'string' ? record.mcpContentDigest : undefined,
         dirty: typeof record.dirty === 'boolean' ? record.dirty : undefined,
         saveStatus: typeof record.saveStatus === 'string' ? record.saveStatus : undefined,
         snapshotHash: typeof record.snapshotHash === 'string' ? record.snapshotHash : undefined,
@@ -426,6 +432,11 @@ export function serializePersistedAttachments(attachments: ChatAttachment[]): Ar
       contentType: attachment.contentType,
       platform: attachment.platform,
       publishStatus: attachment.publishStatus,
+      mcpServerId: attachment.mcpServerId,
+      mcpResourceUri: attachment.mcpResourceUri,
+      mcpCatalogGeneration: attachment.mcpCatalogGeneration,
+      mcpCatalogDigest: attachment.mcpCatalogDigest,
+      mcpContentDigest: attachment.mcpContentDigest,
     }))
 }
 
@@ -504,6 +515,25 @@ export async function buildCodexIngressInputWithDiagnostics(params: {
         id: attachment.id,
         name: attachment.name,
         sourceId: attachment.rssSourceId,
+      })
+      diagnostics.inputIncludedCount += 1
+      continue
+    }
+    if (attachment.source === 'mcp-resource'
+      && attachment.mcpServerId
+      && attachment.mcpResourceUri
+      && attachment.mcpCatalogGeneration
+      && attachment.mcpCatalogDigest
+      && attachment.mcpContentDigest) {
+      resources.push({
+        kind: 'mcp_resource',
+        id: attachment.id,
+        name: attachment.name,
+        serverId: attachment.mcpServerId,
+        uri: attachment.mcpResourceUri,
+        catalogGeneration: attachment.mcpCatalogGeneration,
+        catalogDigest: attachment.mcpCatalogDigest,
+        contentDigest: attachment.mcpContentDigest,
       })
       diagnostics.inputIncludedCount += 1
       continue

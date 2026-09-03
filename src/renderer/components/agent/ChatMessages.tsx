@@ -10,6 +10,9 @@ const CHAT_BOTTOM_SAFETY_MARGIN_PX = 12
 const CHAT_STICK_TO_BOTTOM_THRESHOLD_PX = 96
 import { Copy, Check, RotateCcw } from 'lucide-react'
 import type { AgentMessage, AgentArtifact, ChatAttachment, ToolTraceEvent } from '../../stores/useAgent'
+import { useAgent } from '../../stores/useAgent'
+import { useMode } from '../../stores/useMode'
+import { productTurnActionProjectionMatchesContext } from '../../modules/agent/productTurnReceipt'
 import { filterUserVisibleToolTraceEvents } from '../../modules/agent/toolTraceVisibility'
 import { ToolTraceCard } from './chat-panel/task/TaskCard'
 import { AskUserQuestionsCard } from './AskUserQuestionsCard'
@@ -24,6 +27,7 @@ import { isImageGenerationReferencePath } from '../../../shared/image-generation
 import WelcomePanel from './WelcomePanel'
 import { renderInline } from './chat-panel/markdown'
 import SkillAskUserPrompt from '../skill/SkillAskUserPrompt'
+import type { CodexProductTurnActionProjection } from '../../../shared/ipc-contracts/agent-runtime'
 
 // The session-tab strip + chat header overflow ~24px into the top of this
 // scroll region (MotionLayer's header row is a fixed 44px). The top padding
@@ -44,6 +48,7 @@ interface ChatMessagesProps {
   toolTraceStatus: string | null
   toolTraceExpanded: boolean
   copiedMessageId: string | null
+  productTurnActionProjectionByRunId: Record<string, CodexProductTurnActionProjection>
   showToolTraceCapsule: boolean
   bottomOverlayInset: number
   onSetInputSuggestion: (value: string) => void
@@ -75,6 +80,7 @@ export default function ChatMessages({
   toolTraceStatus,
   toolTraceExpanded,
   copiedMessageId,
+  productTurnActionProjectionByRunId,
   showToolTraceCapsule,
   bottomOverlayInset,
   onSetInputSuggestion,
@@ -91,6 +97,9 @@ export default function ChatMessages({
   renderAttachmentIcon,
   renderMarkdown,
 }: ChatMessagesProps) {
+  const head = useAgent((state) => state.activeSessionId
+    ? state.sessions[state.activeSessionId]?.scopeHeadActionProjection ?? null : null)
+  const workbenchMode = useMode((state) => state.workbenchMode)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const scrollRootRef = useRef<HTMLDivElement>(null)
   // Whether the user is currently parked near the bottom of the scroll region.
@@ -191,11 +200,15 @@ export default function ChatMessages({
           ...(messageGeneratedImageArtifacts[msg.id] || []),
         ])
         const isStreamingMessage = isStreaming && msg.id === streamingMessageId
-        const retryRunId = msg.type === 'agent'
-          && typeof msg.meta?.runId === 'string'
-          && typeof msg.meta?.terminalReason === 'string'
-          && msg.meta.terminalReason !== 'done'
+        const messageRunId = msg.type === 'agent' && typeof msg.meta?.runId === 'string'
           ? msg.meta.runId
+          : null
+        const retryRunId = messageRunId
+          && productTurnActionProjectionByRunId[messageRunId]?.retry_failed_task.availability === 'ready'
+          && productTurnActionProjectionMatchesContext(
+            productTurnActionProjectionByRunId[messageRunId], head, workbenchMode,
+          )
+          ? messageRunId
           : null
 
         return (

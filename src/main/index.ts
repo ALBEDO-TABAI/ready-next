@@ -779,6 +779,12 @@ function setupGlobalIPC(): void {
       packaged: app.isPackaged,
       resourcesPath: process.resourcesPath,
       ensureDockApp: ensureDockIconVisible,
+      openActivity: (activity) => {
+        if (!mainWindow || mainWindow.isDestroyed()) throw new Error('main_window_unavailable')
+        mainWindow.show()
+        mainWindow.focus()
+        mainWindow.webContents.send('pet:openActivity', activity)
+      },
     })
   setupAppCacheIPC({
     readCodexRuntimeDiagnostics: () => readAgentCodexRuntimeDiagnostics(),

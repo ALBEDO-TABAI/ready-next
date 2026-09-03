@@ -101,7 +101,7 @@ test('pet sticky follow-up keeps pet tools visible and suppresses document tools
   assert.equal(state.visibilityPlan.visibleCapabilityGroupIds.includes('document'), false)
 })
 
-test('pet sticky tool execution path uses the pet window manager, not document or browser tools', () => {
+test('pet sticky tool execution path uses the product action bridge', () => {
   const toolExecutor = readWorkspaceFile('src/main/modules/tools/tool-executor.ts')
   const petTools = readWorkspaceFile('src/main/modules/tools/pet-tools.ts')
   const schemas = readWorkspaceFile('src/main/modules/tools/schemas/index.ts')
@@ -109,6 +109,7 @@ test('pet sticky tool execution path uses the pet window manager, not document o
   assert.match(toolExecutor, /case 'pet':/)
   assert.match(petTools, /executePetTool/)
   assert.match(petTools, /pet_show_sticky_note/)
-  assert.match(petTools, /getActivePetWindowManager/)
+  assert.match(petTools, /requestModuleToolAction/)
+  assert.doesNotMatch(petTools, /getActivePetWindowManager/)
   assert.match(schemas, /PET_SCHEMAS/)
 })

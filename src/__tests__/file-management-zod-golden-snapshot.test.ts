@@ -56,11 +56,11 @@ const EXPECTED_ANTHROPIC = [
   {
     name: 'file_read_excerpt',
     description:
-      '读取 workspace 内文档正文片段。可传 anchor 读取章节，或传 lineStart / lineEnd 读取行号范围；用于基于原文的总结、分析、改写和关系梳理。',
+      '读取 workspace 或本轮明确选择的文档正文片段。已选附件可直接传 @[文件名]、唯一文件名或 logicalResourceId，无需索要被隐藏的主机路径；可传 anchor 或行号范围。',
     input_schema: {
       type: 'object',
       properties: {
-        path: { type: 'string', description: '文件绝对路径或索引内 path' },
+        path: { type: 'string', description: '文件绝对路径、索引 path，或本轮冻结的 logicalResourceId / @[文件名] / 唯一文件名' },
         anchor: {
           type: 'string',
           description: '可选：章节标题或关键词；命中标题时读取该章节',
@@ -126,11 +126,11 @@ const EXPECTED_ANTHROPIC = [
   },
   {
     name: 'tag_forge_prepare_batch',
-    description: 'Tag Forge 文件夹批量打标的唯一准备入口。首次传 rootPath 会读取文件夹内全部 Markdown，续跑只传 batchId；返回正文、不透明 itemId、版本凭证、当前受控词表和进度。',
+    description: 'Tag Forge 文档打标的唯一准备入口。首次传 rootPath：已选附件直接使用 @[名称]、唯一名称或 logicalResourceId，无需索要被隐藏的主机路径；文件夹同样接受本轮冻结引用。续跑只传 batchId。',
     input_schema: {
       type: 'object',
       properties: {
-        rootPath: { type: 'string', description: '新建批次时必需：要批量打标的授权文件夹绝对路径' },
+        rootPath: { type: 'string', description: '新建批次时必需：授权 Markdown 或文件夹的绝对路径、logicalResourceId、@[名称] 或唯一名称' },
         batchId: { type: 'string', description: '继续既有批次时传入上一轮 batchId' },
         limit: { type: 'number', description: '本批返回的待处理文档数（默认 4，上限 4，并受正文总量限制）' },
       },
@@ -139,7 +139,7 @@ const EXPECTED_ANTHROPIC = [
   },
   {
     name: 'tag_forge_apply_batch',
-    description: '按 prepare 返回的 itemId 和版本凭证写回多份 Markdown 内容标签。可靠标签立即写入；原文可核对的高置信新词自动采用；扫描完整个文件夹后，真正存疑的新词由宿主在 Agent 对话中集中确认一次。',
+    description: '按 prepare 返回的 itemId 和版本凭证写回 Markdown 内容标签。可靠标签立即写入；原文可核对的高置信新词自动采用；全部文档扫描完成后，真正存疑的新词由宿主在 Agent 对话中集中确认一次。',
     input_schema: {
       type: 'object',
       properties: {
@@ -257,11 +257,11 @@ const EXPECTED_ANTHROPIC = [
   {
     name: 'file_inventory',
     description:
-      '盘点授权文件夹内的文件和子文件夹。支持分页、浅层递归和可选短摘要；用于批量整理前先了解目录内容。',
+      '盘点授权文件夹内的文件和子文件夹。rootPath 可以是绝对路径，也可以是本轮冻结的 logicalResourceId 或 @[文件夹名]。支持分页、浅层递归和可选短摘要。',
     input_schema: {
       type: 'object',
       properties: {
-        rootPath: { type: 'string', description: '要盘点的授权文件夹绝对路径' },
+        rootPath: { type: 'string', description: '要盘点的授权文件夹：绝对路径，或本轮冻结的 logicalResourceId / @[文件夹名]' },
         cursor: { type: 'string', description: '可选：上一页返回的 nextCursor' },
         limit: { type: 'number', description: '可选：返回上限（默认 100，上限 500）' },
         recursive: { type: 'boolean', description: '可选：是否递归扫描（默认 false）' },

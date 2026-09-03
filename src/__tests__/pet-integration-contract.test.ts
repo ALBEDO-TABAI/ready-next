@@ -27,11 +27,21 @@ test('desktop pet IPC is wired through main, preload, renderer types, and settin
   assert.match(mainIndex, /setupPetIPC\(/)
   assert.match(preload, /pet:\s*petAPI/)
   assert.match(preload, /getSettings:\s*\(\)\s*=>\s*ipcRenderer\.invoke\('pet:getSettings'\)/)
-  assert.match(preload, /updateActivity:\s*\(snapshot: PetActivitySnapshot\)\s*=>\s*ipcRenderer\.invoke\('pet:updateActivity', snapshot\)/)
+  assert.match(preload, /openActivity:\s*\(activity: PetActivityOpenIdentity\)/)
+  assert.match(preload, /scopeViewed:\s*\(scopeId: string\)\s*=>\s*ipcRenderer\.send\('pet:scopeViewed', scopeId\)/)
   assert.match(electronTypes, /interface ElectronPetAPI/)
+  assert.match(app, /pet\.onOpenActivity/)
+  assert.match(app, /pet\.activityOpened/)
   assert.match(app, /path="\/pet-window"/)
   assert.match(settings, /id:\s*'pet'/)
   assert.match(settings, /<PetSettingsPanel \/>/)
+})
+
+test('desktop pet receives live narration and refreshes canonical state on ingress and terminal events', () => {
+  const ipcHandler = readWorkspaceFile('src/main/modules/claude-bridge/ipc-handler.ts')
+
+  assert.match(ipcHandler, /runtime\.on\('ingressAdmitted',[\s\S]*?petActivity\?\.refresh\(\)/)
+  assert.match(ipcHandler, /runtime\.on\('scopeRunEvent',[\s\S]*?petActivity\?\.observeScopeRunEvent\(data\)/)
 })
 
 test('desktop pet window avoids macOS chrome and sprite blank frames', () => {

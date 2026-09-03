@@ -109,7 +109,11 @@ describe('skill-resume A1 persistence helpers', () => {
 
   describe('end-to-end persistence round-trip', () => {
     it('arm → snapshot → simulate restart (clear) → restore → hint reappears', () => {
-      rememberLastReferenceSkill('sess-7', { id: 'video-expert-analyzer', name: 'Video Expert' })
+      rememberLastReferenceSkill('sess-7', {
+        id: 'video-expert-analyzer',
+        name: 'Video Expert',
+        applicableToolNames: ['web_clip_url'],
+      })
       const snap = snapshotLastReferenceSkill('sess-7')
       assert.ok(snap)
 
@@ -124,6 +128,7 @@ describe('skill-resume A1 persistence helpers', () => {
       assert.ok(restoredBeforeRead)
       assert.equal(restoredBeforeRead!.id, snap!.id)
       assert.equal(restoredBeforeRead!.at, snap!.at)
+      assert.deepEqual(restoredBeforeRead!.applicableToolNames, ['web_clip_url'])
       const restoredAfterRead = getLastReferenceSkill('sess-7')
       assert.ok(restoredAfterRead)
       assert.equal(restoredAfterRead!.id, snap!.id)

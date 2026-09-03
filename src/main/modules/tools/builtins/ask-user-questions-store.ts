@@ -70,6 +70,10 @@ export interface AskUserQuestionsCardRecord {
   messageVisibilityEpoch?: number | null
   responsePolicy?: AskUserQuestionsResponsePolicy
   lifecycleType?: InteractionLifecycleIdentity['type']
+  actionConfirmationOwnerRef?: {
+    frozenCallId: string
+    pendingConfirmationSourceDigest: string
+  }
   questions: AskUserQuestionSpec[]
   askedAt: number
   resolve: (answerSet: AskUserQuestionsAnswerSet) => void
@@ -89,6 +93,10 @@ export interface PendingAskUserQuestionsCardView {
   messageVisibilityEpoch?: number | null
   responsePolicy?: AskUserQuestionsResponsePolicy
   lifecycleType?: InteractionLifecycleIdentity['type']
+  actionConfirmationOwnerRef?: {
+    frozenCallId: string
+    pendingConfirmationSourceDigest: string
+  }
   questions: AskUserQuestionSpec[]
   askedAt: number
 }
@@ -137,6 +145,13 @@ export class AskUserQuestionsStore {
     if (!sessionId) return null
     for (const record of this.records.values()) {
       if (record.sessionId === sessionId) return record
+    }
+    return null
+  }
+
+  findPendingForFrozenCall(frozenCallId: string): AskUserQuestionsCardRecord | null {
+    for (const record of this.records.values()) {
+      if (record.actionConfirmationOwnerRef?.frozenCallId === frozenCallId) return record
     }
     return null
   }
@@ -279,6 +294,7 @@ export class AskUserQuestionsStore {
         messageVisibilityEpoch: record.messageVisibilityEpoch ?? null,
         responsePolicy: record.responsePolicy,
         lifecycleType: record.lifecycleType,
+        actionConfirmationOwnerRef: record.actionConfirmationOwnerRef,
         questions: record.questions,
         askedAt: record.askedAt,
       })

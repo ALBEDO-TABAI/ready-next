@@ -44,6 +44,9 @@ export function makeEmptySessionSlice(conversationId: string | null = null): Ses
     streamingMessageId: null,
     streamingRequestId: null,
     scopeRunStates: {},
+    productTurnActionProjectionByRunId: {},
+    scopeHeadActionProjection: null,
+    lifecycleOperationProjection: null,
     taskDisclosureState: {},
     lifecyclePendingAction: null,
     lifecycleError: null,
@@ -162,6 +165,12 @@ export function normalizeSessionSlice(slice: Partial<SessionSlice> | null | unde
     ...slice,
     messages: slice?.messages ?? fallback.messages,
     scopeRunStates: slice?.scopeRunStates ?? fallback.scopeRunStates,
+    productTurnActionProjectionByRunId: slice?.productTurnActionProjectionByRunId
+      ?? fallback.productTurnActionProjectionByRunId,
+    scopeHeadActionProjection: slice?.scopeHeadActionProjection
+      ?? fallback.scopeHeadActionProjection,
+    lifecycleOperationProjection: slice?.lifecycleOperationProjection
+      ?? fallback.lifecycleOperationProjection,
     taskDisclosureState: slice?.taskDisclosureState ?? fallback.taskDisclosureState,
   }
 }

@@ -13,10 +13,10 @@ import { ErrorBoundary } from './components/ErrorBoundary'
 import RitualOverlay from './components/overlay/RitualOverlay'
 import SkillInlinedToast from './components/skill/SkillInlinedToast'
 import AgentRuntimeListenerRoot from './modules/agent/AgentRuntimeListenerRoot'
-import { usePetActivityBridge } from './modules/pet/usePetActivityBridge'
 import { fetchRSSWarmSnapshot } from './modules/rss/rssWarmLoader'
 import { primeRSSWarmCache } from './modules/rss/rssWarmCache'
 import { handleWorkspaceWatcherFailure } from './stores/useWorkspace'
+import { useAgent } from './stores/useAgent'
 
 const LiquidTest = lazy(() => import('./LiquidTest'))
 const StartupPreview = lazy(() => import('./pages/StartupPreview'))
@@ -26,7 +26,19 @@ void primeRSSWarmCache(fetchRSSWarmSnapshot).catch(() => undefined)
 
 function MainAppShell() {
   const { captureFeedback } = useKeyboardShortcuts()
-  usePetActivityBridge()
+
+  useEffect(() => window.electronAPI.pet.onOpenActivity((activity) => {
+    void useAgent.getState().setCurrentScope(activity.scopeId).then(() => {
+      window.electronAPI.pet.activityOpened({
+        revision: activity.revision,
+        taskId: activity.taskId,
+        scopeId: activity.scopeId,
+        runId: activity.runId,
+        messageId: activity.messageId,
+        updatedAt: activity.updatedAt,
+      })
+    })
+  }), [])
 
   // `data-theme` 与 `data-skin` / `data-glass-backdrop` 都由 useTheme 单点拥有
   // （useTheme.applySkin 在模块初始化时设置，setSkin/toggleSkin 时更新）。

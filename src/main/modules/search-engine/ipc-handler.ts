@@ -41,7 +41,7 @@ export function getFileWatcherRegistry(): FileWatcherRegistry {
  * Stage V V2.4a — dispose handle returned by `sourceIndexGroup.register`.
  * The 5 source-index channels (`document:listSources`, `document:indexDocument`,
  * `document:reindexAllSources`, `document:reindexWorkspace`,
- * `document:cancelReindex`) live in `ipc/source-index-group.ts`; the host
+ * source-index lifecycle channels live in `ipc/source-index-group.ts`; the host
  * keeps the dispose handle so a re-entrant `setupSearchIPC` (dev-reload)
  * can drop the prior registration before the next one binds.
  */
@@ -99,7 +99,7 @@ export function setupSearchIPC(): void {
 
   // Stage V V2.4a — 5 source-index channels (`document:listSources`,
   // `document:indexDocument`, `document:reindexAllSources`,
-  // `document:reindexWorkspace`, `document:cancelReindex`) moved into
+  // `document:reindexWorkspace`) moved into
   // `sourceIndexGroup`. The group handles dev-reload removeHandler
   // pre-clear internally; we hold the dispose handle so a future cleanup
   // hook (or the next setupSearchIPC entry) can drop them on shutdown.

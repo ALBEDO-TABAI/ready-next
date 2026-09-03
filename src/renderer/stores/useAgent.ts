@@ -14,8 +14,9 @@ import {
 import {
   type IngressAdmittedEvent,
   type ProductTurnReceipt,
+  type CodexActionSurfaceInvalidation,
 } from '../../shared/ipc-contracts/agent-runtime'
-import type { LifecycleOperationProjection } from '../../shared/ipc-contracts/agent-lifecycle-snapshot'
+import type { LifecycleOperationProjectionV2 } from '../../shared/ipc-contracts/agent-lifecycle-snapshot'
 import type { AgentRuntimeReadinessSnapshot } from '../../shared/ipc-contracts/agent-runtime-readiness'
 
 import type {
@@ -61,8 +62,11 @@ import {
 } from '../../shared/action-authorization-mode'
 import {
   applyProductTurnReceipt,
+  mergeProductTurnActionProjections,
   toolTraceFromProductReceipt,
 } from '../modules/agent/productTurnReceipt'
+import { shouldHydrateCodexActionSurface } from '../modules/agent/codex-action-surface-invalidation'
+import { useMode } from './useMode'
 
 export type {
   Agent,
@@ -128,12 +132,12 @@ function canResetUnknownCompaction(slice: SessionSlice, aliasId: string): boolea
 type LifecycleHydrationFingerprint = {
   sessionKey: string
   aliasGeneration: number
+  scopeEpoch: number
   streamingRequestId: string | null
   lifecyclePendingAction: SessionSlice['lifecyclePendingAction']
   lifecycleErrorEvidence: string | null
   runRequestId: string | null
   runPhase: ScopeRunState['phase'] | null
-  runUpdatedAt: string | null
 }
 
 function lifecycleHydrationFingerprint(
@@ -142,17 +146,18 @@ function lifecycleHydrationFingerprint(
 ): LifecycleHydrationFingerprint | null {
   const sessionKey = sessionKeyForScopeId(state, aliasId)
   const slice = normalizeSessionSlice(state.sessions[sessionKey]) as SessionSlice
-  if (slice.conversationId !== aliasId || slice.aliasGeneration === null) return null
+  if (slice.conversationId !== aliasId || slice.aliasGeneration === null
+    || slice.lifecyclePendingAction === 'resetting') return null
   const run = slice.scopeRunStates[aliasId] || null
   return {
     sessionKey,
     aliasGeneration: slice.aliasGeneration,
+    scopeEpoch: slice.messageVisibilityEpoch,
     streamingRequestId: slice.streamingRequestId,
     lifecyclePendingAction: slice.lifecyclePendingAction,
     lifecycleErrorEvidence: slice.lifecycleError?.evidenceDigest || null,
     runRequestId: run?.requestId || null,
     runPhase: run?.phase || null,
-    runUpdatedAt: run?.updatedAt || null,
   }
 }
 
@@ -165,45 +170,203 @@ function lifecycleHydrationStillCurrent(
   return Boolean(current
     && current.sessionKey === baseline.sessionKey
     && current.aliasGeneration === baseline.aliasGeneration
+    && current.scopeEpoch === baseline.scopeEpoch
     && current.streamingRequestId === baseline.streamingRequestId
     && current.lifecyclePendingAction === baseline.lifecyclePendingAction
     && current.lifecycleErrorEvidence === baseline.lifecycleErrorEvidence
     && current.runRequestId === baseline.runRequestId
-    && current.runPhase === baseline.runPhase
-    && current.runUpdatedAt === baseline.runUpdatedAt)
+    && current.runPhase === baseline.runPhase)
 }
 
-async function hydrateCodexLifecycleScope(scope: ConversationScope): Promise<void> {
-  const api = typeof window !== 'undefined'
-    ? window.electronAPI?.agent?.readCodexLifecycleSnapshot
-    : null
-  if (!api || typeof scope.aliasGeneration !== 'number') return
-  const baseline = lifecycleHydrationFingerprint(useAgent.getState(), scope.id)
-  if (!baseline || baseline.aliasGeneration !== scope.aliasGeneration) return
-  let result: Awaited<ReturnType<typeof api>>
+async function readReadyLifecycleActionRef(
+  aliasId: string,
+  aliasGeneration: number,
+  action: keyof LifecycleOperationProjectionV2['actions'],
+) {
+  const agent = window.electronAPI?.agent
+  if (!agent?.readCodexActionSurface) throw new Error('lifecycle_snapshot_unavailable')
+  const surface = await agent.readCodexActionSurface({ aliasId, aliasGeneration })
+  if (!surface.success || !surface.data) throw new Error('lifecycle_snapshot_unavailable')
+  const projection = surface.data.lifecycle
+  const gate = projection.actions[action]
+  if (projection.scopeId !== aliasId
+    || projection.identity.aliasGeneration !== aliasGeneration
+    || projection.scopeEpoch !== projection.headProjectionRef.version.scopeEpoch
+    || gate.availability !== 'ready'
+    || !gate.requestRef
+    || gate.requestRef.action !== action) {
+    throw new Error(`lifecycle_action_${gate.blockers[0] || 'unavailable'}`)
+  }
+  return gate.requestRef
+}
+
+const lifecycleHydrationsInFlight = new Map<string, {
+  aliasGeneration: number
+  scopeEpoch: number
+  actionProjectionSequence: number
+}>()
+
+async function hydrateCodexLifecycleScope(
+  scope: ConversationScope,
+  target?: Pick<CodexActionSurfaceInvalidation, 'aliasGeneration' | 'scopeEpoch' | 'actionProjectionSequence'>,
+): Promise<void> {
+  const agent = typeof window !== 'undefined' ? window.electronAPI?.agent : null
+  const aliasGeneration = target?.aliasGeneration ?? scope.aliasGeneration
+  const scopeEpoch = target?.scopeEpoch ?? scope.messageVisibilityEpoch ?? 0
+  if (!agent || typeof aliasGeneration !== 'number') return
+  const initialState = useAgent.getState()
+  const workbenchMode = useMode.getState().workbenchMode
+  const baseline = lifecycleHydrationFingerprint(initialState, scope.id)
+  if (!baseline || aliasGeneration < baseline.aliasGeneration || scopeEpoch < baseline.scopeEpoch) return
+  const currentVersion = initialState.sessions[baseline.sessionKey]
+    ?.scopeHeadActionProjection?.actionProjectionVersion
+  const actionProjectionSequence = target?.actionProjectionSequence
+    ?? (currentVersion?.headGeneration === aliasGeneration && currentVersion.scopeEpoch === scopeEpoch
+      ? currentVersion.actionProjectionSequence
+      : 0)
+  const pending = lifecycleHydrationsInFlight.get(baseline.sessionKey)
+  if (pending && (scopeEpoch < pending.scopeEpoch
+    || (scopeEpoch === pending.scopeEpoch && (aliasGeneration < pending.aliasGeneration
+      || (aliasGeneration === pending.aliasGeneration
+        && actionProjectionSequence < pending.actionProjectionSequence))))) return
+  const request = { aliasGeneration, scopeEpoch, actionProjectionSequence }
+  lifecycleHydrationsInFlight.set(baseline.sessionKey, request)
+  const stillCurrent = (state: AgentState): boolean => (
+    lifecycleHydrationsInFlight.get(baseline.sessionKey) === request
+    && useMode.getState().workbenchMode === workbenchMode
+    && lifecycleHydrationStillCurrent(state, scope.id, baseline)
+  )
+  const finish = (): void => {
+    if (lifecycleHydrationsInFlight.get(baseline.sessionKey) === request) {
+      lifecycleHydrationsInFlight.delete(baseline.sessionKey)
+    }
+  }
+  const clearAtomicSurface = (): void => {
+    useAgent.setState((state) => {
+      if (!stillCurrent(state)) return state
+      const sessionKey = baseline.sessionKey
+      return withSessionSliceAndActiveMirror(state, sessionKey, {
+        lifecycleOperationProjection: null,
+        scopeHeadActionProjection: null,
+      })
+    })
+    finish()
+  }
+  let surface: Awaited<ReturnType<NonNullable<typeof agent.readCodexActionSurface>>>
   try {
-    result = await api({ aliasId: scope.id, aliasGeneration: scope.aliasGeneration })
+    if (!agent.readCodexActionSurface) throw new Error('codex_action_surface_unavailable')
+    surface = await agent.readCodexActionSurface({
+      aliasId: scope.id,
+      aliasGeneration,
+    })
   } catch {
+    // silent-catch: failed authority reads revoke both cached action halves and preserve the draft.
+    clearAtomicSurface()
     return
   }
-  if (!result.success || !result.data) return
-  const projection = result.data as LifecycleOperationProjection
+  if (!surface.success || !surface.data) {
+    clearAtomicSurface()
+    return
+  }
+  const surfaceHead = surface.data.head
+  const projection = surface.data.lifecycle as LifecycleOperationProjectionV2
+  const acceptedScopeEpoch = surface.data.scopeEpoch
   if (
     projection.identity.aliasId !== scope.id
-    || projection.identity.aliasGeneration !== scope.aliasGeneration
+    || projection.identity.aliasGeneration !== aliasGeneration
+    || acceptedScopeEpoch !== scopeEpoch
+    || surfaceHead.actionProjectionVersion.headGeneration !== aliasGeneration
+    || surfaceHead.actionProjectionVersion.actionProjectionSequence < actionProjectionSequence
     || projection.snapshot === 'invariant_violation'
-  ) return
+  ) {
+    clearAtomicSurface()
+    return
+  }
   const snapshotRunId = projection.activeReadyRunId || projection.latestReadyRunId
   if (
     baseline.streamingRequestId
+    && aliasGeneration === baseline.aliasGeneration
     && projection.snapshot !== 'idle_never_started'
     && snapshotRunId !== baseline.streamingRequestId
-  ) return
+  ) {
+    finish()
+    return
+  }
 
+  if (!stillCurrent(useAgent.getState())) {
+    finish()
+    return
+  }
+  const loadedSlice = normalizeSessionSlice(useAgent.getState().sessions[baseline.sessionKey])
+  const loadedRunIds = new Set([
+    ...Object.keys(loadedSlice.productTurnActionProjectionByRunId),
+    ...loadedSlice.messages.flatMap((message) => (
+      message.type === 'agent' && typeof message.meta?.runId === 'string' ? [message.meta.runId] : []
+    )),
+  ])
+  let productReceipts: ProductTurnReceipt[] = []
+  if (loadedRunIds.size > 0 && agent.readProductTurnPresentations) {
+    try {
+      const receipts = await agent.readProductTurnPresentations(
+        [...loadedRunIds],
+        workbenchMode,
+      )
+      if (receipts.success && Array.isArray(receipts.data)) {
+        productReceipts = receipts.data.filter((receipt) => (
+          receipt.readyScopeId === scope.id && loadedRunIds.has(receipt.readyRunId)
+        ))
+      }
+    } catch {
+      // silent-catch: unavailable run receipts grant no new actions; the head-reference merge removes stale ones.
+    }
+  }
+  const receiptByRunId = new Map(productReceipts.map((receipt) => [receipt.readyRunId, receipt]))
   useAgent.setState((state) => {
-    if (!lifecycleHydrationStillCurrent(state, scope.id, baseline)) return state
+    if (!stillCurrent(state)) return state
     const sessionKey = baseline.sessionKey
     const slice = normalizeSessionSlice(state.sessions[sessionKey]) as SessionSlice
+    const messages = slice.messages.map((message) => {
+      const runId = typeof message.meta?.runId === 'string' ? message.meta.runId : null
+      const receipt = runId ? receiptByRunId.get(runId) : null
+      return receipt
+        ? { ...message, meta: { ...message.meta, toolTraceSnapshot: toolTraceFromProductReceipt(receipt) } }
+        : message
+    })
+    const latestReceipt = [...messages].reverse().flatMap((message) => {
+      const runId = typeof message.meta?.runId === 'string' ? message.meta.runId : null
+      const receipt = runId ? receiptByRunId.get(runId) : null
+      return receipt ? [receipt] : []
+    })[0] || null
+    const previousScopeRun = slice.scopeRunStates[scope.id] || null
+    const hydratedRunState = latestReceipt
+      ? applyProductTurnReceipt(previousScopeRun || createEmptyScopeRunState({
+          scopeId: scope.id, agent: scope.agent, requestId: latestReceipt.readyRunId,
+        }), latestReceipt)
+      : previousScopeRun
+    const scopes = state.scopes.map((candidate) => candidate.id === scope.id
+      ? { ...candidate, aliasGeneration: projection.identity.aliasGeneration, messageVisibilityEpoch: acceptedScopeEpoch }
+      : candidate)
+    const commitSurface = (patch: Partial<SessionSlice>) => ({
+      scopes,
+      conversations: scopes.map(mapScopeToConversation),
+      currentScope: state.currentScopeId === scope.id
+        ? scopes.find((candidate) => candidate.id === scope.id) || state.currentScope
+        : state.currentScope,
+      ...withSessionSliceAndActiveMirror({ ...state, scopes }, sessionKey, {
+        aliasGeneration: projection.identity.aliasGeneration,
+        messageVisibilityEpoch: acceptedScopeEpoch,
+        messages,
+        lifecycleOperationProjection: projection,
+        scopeHeadActionProjection: surfaceHead,
+        productTurnActionProjectionByRunId: mergeProductTurnActionProjections({
+          existing: slice.productTurnActionProjectionByRunId,
+          incoming: productReceipts.map((receipt) => receipt.actionProjection),
+          head: surfaceHead,
+          workbenchMode,
+        }),
+        ...patch,
+      }),
+    })
     const activeProduct = projection.activeReadyRunId && (
       projection.snapshot === 'thread_start_pending'
       || projection.snapshot === 'turn_start_pending'
@@ -214,15 +377,18 @@ async function hydrateCodexLifecycleScope(scope: ConversationScope): Promise<voi
     )
 
     if (activeProduct) {
-      const previousRun = slice.scopeRunStates[scope.id]
+      const previousRun = hydratedRunState
       const restoredRun = previousRun?.requestId === projection.activeReadyRunId
         ? previousRun
-        : createEmptyScopeRunState({
-            scopeId: scope.id,
-            agent: scope.agent,
-            requestId: projection.activeReadyRunId,
-            phase: 'responding',
-          })
+        : {
+            ...createEmptyScopeRunState({
+              scopeId: scope.id,
+              agent: scope.agent,
+              requestId: projection.activeReadyRunId,
+              phase: 'responding',
+            }),
+            contextUsage: previousRun?.contextUsage ?? null,
+          }
       const run = isForegroundBusyScopeRunState(restoredRun)
         ? restoredRun
         : { ...restoredRun, phase: 'responding' as const, terminalReason: null, error: null }
@@ -238,7 +404,7 @@ async function hydrateCodexLifecycleScope(scope: ConversationScope): Promise<voi
             evidenceDigest: projection.evidenceDigest,
           }
         : null
-      return withSessionSliceAndActiveMirror(state, sessionKey, {
+      return commitSurface({
         scopeRunStates: { ...slice.scopeRunStates, [scope.id]: run },
         isStreaming: true,
         foregroundBusy: true,
@@ -262,7 +428,7 @@ async function hydrateCodexLifecycleScope(scope: ConversationScope): Promise<voi
       projection.snapshot === 'manual_compaction_pending'
       || projection.snapshot === 'manual_compaction_unknown'
     ) {
-      return withSessionSliceAndActiveMirror(state, sessionKey, {
+      return commitSurface({
         isStreaming: false,
         foregroundBusy: true,
         composerLocked: true,
@@ -291,8 +457,21 @@ async function hydrateCodexLifecycleScope(scope: ConversationScope): Promise<voi
       || projection.snapshot === 'idle_native_thread'
     ) {
       const scopeRunStates = { ...slice.scopeRunStates }
-      delete scopeRunStates[scope.id]
-      return withSessionSliceAndActiveMirror(state, sessionKey, {
+      if (hydratedRunState) scopeRunStates[scope.id] = hydratedRunState
+      const previousRun = scopeRunStates[scope.id]
+      const previousRunIsTerminal = previousRun?.phase === 'done'
+        || previousRun?.phase === 'error'
+        || previousRun?.phase === 'cancelled'
+      const preservesLatestTerminal = Boolean(
+        previousRun?.requestId
+        && acceptedScopeEpoch === slice.messageVisibilityEpoch
+        && (projection.latestReadyRunId === null
+          || previousRun.requestId === projection.latestReadyRunId)
+        && (previousRun.terminalReason || previousRunIsTerminal)
+        && !isForegroundBusyScopeRunState(previousRun),
+      )
+      if (!preservesLatestTerminal) delete scopeRunStates[scope.id]
+      return commitSurface({
         scopeRunStates,
         isStreaming: false,
         foregroundBusy: false,
@@ -303,8 +482,9 @@ async function hydrateCodexLifecycleScope(scope: ConversationScope): Promise<voi
         lifecycleError: null,
       })
     }
-    return state
+    return commitSurface({})
   })
+  finish()
 }
 
 function commitPersistedIngressSnapshot(input: Pick<
@@ -361,6 +541,7 @@ function commitPersistedIngressSnapshot(input: Pick<
       responseMessage,
     ]
     const shouldClearComposer = slice.inputValue.trim() === pending.content.trim()
+    const previousContextUsage = slice.scopeRunStates[pending.scopeId]?.contextUsage ?? null
     const next = withSessionSliceAndActiveMirror(state, sessionKey, {
       messages,
       inputValue: shouldClearComposer ? '' : slice.inputValue,
@@ -381,6 +562,7 @@ function commitPersistedIngressSnapshot(input: Pick<
             phase: 'planning',
             responseMessageId: pending.responseMessageId,
           }),
+          contextUsage: previousContextUsage,
           startedAt: input.admittedAt,
           updatedAt: input.admittedAt,
         },
@@ -800,6 +982,7 @@ export const useAgent = create<AgentState>((set, get) => ({
           composerAuthorityRevision: current.composerAuthorityRevision + 1,
         }
       })
+      await hydrateCodexLifecycleScope(scope)
       return result
     } finally {
       finishCreation()
@@ -823,12 +1006,8 @@ export const useAgent = create<AgentState>((set, get) => ({
       && slice.lifecycleError.aliasId === aliasId
       && slice.lifecycleError.aliasGeneration === slice.aliasGeneration
     const priorLifecycleError = exactInterruptRetry ? slice.lifecycleError : null
-    if (hasUnresolvedLifecycleUncertainty(slice) && !exactInterruptRetry) {
-      throw new Error('lifecycle_reconciliation_required')
-    }
     set((current) => withSessionSliceAndActiveMirror(current, id, {
       lifecyclePendingAction: 'closing',
-      lifecycleError: null,
     }))
     const setCloseTargetIfCurrent = (patch: Partial<SessionSlice>): boolean => {
       let applied = false
@@ -845,12 +1024,33 @@ export const useAgent = create<AgentState>((set, get) => ({
       })
       return applied
     }
+    let actionRequestRef: Awaited<ReturnType<typeof readReadyLifecycleActionRef>>
+    try {
+      actionRequestRef = await readReadyLifecycleActionRef(
+        aliasId,
+        slice.aliasGeneration,
+        'close',
+      )
+    } catch (error) {
+      setCloseTargetIfCurrent({ lifecyclePendingAction: null })
+      throw error
+    }
+    if ((actionRequestRef.ownerKind === 'run_owner'
+      ? actionRequestRef.targetReadyRunId
+      : null) !== capturedReadyRunId) {
+      setCloseTargetIfCurrent({ lifecyclePendingAction: null })
+      throw new Error('lifecycle_action_owner_changed')
+    }
+    setCloseTargetIfCurrent({ lifecycleError: null })
     let result: Awaited<ReturnType<typeof window.electronAPI.agent.closeSession>>
     try {
       result = await window.electronAPI.agent.closeSession({
         aliasId,
         aliasGeneration: slice.aliasGeneration,
-        readyRunId: capturedReadyRunId,
+        readyRunId: actionRequestRef.ownerKind === 'run_owner'
+          ? actionRequestRef.targetReadyRunId
+          : null,
+        actionRequestRef,
       })
     } catch (error) {
       setCloseTargetIfCurrent({
@@ -967,12 +1167,8 @@ export const useAgent = create<AgentState>((set, get) => ({
       && slice.lifecycleError.aliasId === aliasId
       && slice.lifecycleError.aliasGeneration === slice.aliasGeneration
     const priorLifecycleError = exactInterruptRetry ? slice.lifecycleError : null
-    if (hasUnresolvedLifecycleUncertainty(slice) && !exactInterruptRetry) {
-      throw new Error('lifecycle_reconciliation_required')
-    }
     set((current) => withSessionSliceAndActiveMirror(current, sessionKey, {
       lifecyclePendingAction: 'stopping',
-      lifecycleError: null,
     }))
     const setStopTargetIfCurrent = (patch: Partial<SessionSlice>): boolean => {
       let applied = false
@@ -988,12 +1184,30 @@ export const useAgent = create<AgentState>((set, get) => ({
       })
       return applied
     }
+    let actionRequestRef: Awaited<ReturnType<typeof readReadyLifecycleActionRef>>
+    try {
+      actionRequestRef = await readReadyLifecycleActionRef(
+        aliasId,
+        slice.aliasGeneration,
+        'stop',
+      )
+    } catch (error) {
+      setStopTargetIfCurrent({ lifecyclePendingAction: null })
+      throw error
+    }
+    if (actionRequestRef.ownerKind !== 'run_owner'
+      || actionRequestRef.targetReadyRunId !== stoppedRequestId) {
+      setStopTargetIfCurrent({ lifecyclePendingAction: null })
+      throw new Error('lifecycle_action_owner_changed')
+    }
+    setStopTargetIfCurrent({ lifecycleError: null })
     let result: Awaited<ReturnType<typeof window.electronAPI.agent.kill>>
     try {
       result = await window.electronAPI.agent.kill({
         aliasId,
         aliasGeneration: slice.aliasGeneration,
         readyRunId: stoppedRequestId,
+        actionRequestRef,
       })
     } catch (error) {
       setStopTargetIfCurrent({
@@ -1055,17 +1269,11 @@ export const useAgent = create<AgentState>((set, get) => ({
       && slice.lifecycleError.code === 'interrupt_state_unknown'
       && slice.lifecycleError.aliasId === aliasId
       && slice.lifecycleError.aliasGeneration === slice.aliasGeneration
-    if (
-      hasUnresolvedLifecycleUncertainty(slice)
-      && !exactInterruptRetry
-      && !canResetUnknownCompaction(slice, aliasId)
-    ) throw new Error('lifecycle_reconciliation_required')
     const priorLifecycleError = exactInterruptRetry || canResetUnknownCompaction(slice, aliasId)
       ? slice.lifecycleError
       : null
     set((current) => withSessionSliceAndActiveMirror(current, sessionKey, {
       lifecyclePendingAction: 'resetting',
-      lifecycleError: null,
     }))
     const setResetTargetIfCurrent = (patch: Partial<SessionSlice>): boolean => {
       let applied = false
@@ -1082,12 +1290,33 @@ export const useAgent = create<AgentState>((set, get) => ({
       })
       return applied
     }
+    let actionRequestRef: Awaited<ReturnType<typeof readReadyLifecycleActionRef>>
+    try {
+      actionRequestRef = await readReadyLifecycleActionRef(
+        aliasId,
+        slice.aliasGeneration,
+        'reset',
+      )
+    } catch (error) {
+      setResetTargetIfCurrent({ lifecyclePendingAction: null })
+      throw error
+    }
+    if ((actionRequestRef.ownerKind === 'run_owner'
+      ? actionRequestRef.targetReadyRunId
+      : null) !== capturedReadyRunId) {
+      setResetTargetIfCurrent({ lifecyclePendingAction: null })
+      throw new Error('lifecycle_action_owner_changed')
+    }
+    setResetTargetIfCurrent({ lifecycleError: null })
     let result: Awaited<ReturnType<typeof window.electronAPI.agent.resetSession>>
     try {
       result = await window.electronAPI.agent.resetSession({
         aliasId,
         aliasGeneration: slice.aliasGeneration,
-        readyRunId: capturedReadyRunId,
+        readyRunId: actionRequestRef.ownerKind === 'run_owner'
+          ? actionRequestRef.targetReadyRunId
+          : null,
+        actionRequestRef,
       })
     } catch (error) {
       setResetTargetIfCurrent({
@@ -1179,6 +1408,8 @@ export const useAgent = create<AgentState>((set, get) => ({
         agentRuntimeDriver.clearInfrastructureWatchdog(aliasId, requestId)
       }
       agentRuntimeDriver.clearInfrastructureWatchdog(aliasId, capturedReadyRunId)
+      const resetScope = get().scopes.find((candidate) => candidate.id === aliasId)
+      if (resetScope) await hydrateCodexLifecycleScope(resetScope)
     }
     return result
   },
@@ -1191,16 +1422,36 @@ export const useAgent = create<AgentState>((set, get) => ({
     const slice = normalizeSessionSlice(state.sessions[sessionKey])
     if (slice.aliasGeneration === null) throw new Error('alias_not_bound')
     if (slice.lifecyclePendingAction) throw new Error('lifecycle_action_pending')
-    if (hasUnresolvedLifecycleUncertainty(slice)) throw new Error('lifecycle_reconciliation_required')
     set((current) => withSessionSliceAndActiveMirror(current, sessionKey, {
       lifecyclePendingAction: 'compacting',
       lifecycleError: null,
     }))
+    let actionRequestRef: Awaited<ReturnType<typeof readReadyLifecycleActionRef>>
+    try {
+      actionRequestRef = await readReadyLifecycleActionRef(
+        aliasId,
+        slice.aliasGeneration,
+        'manual_compact',
+      )
+    } catch (error) {
+      set((current) => {
+        const currentSlice = normalizeSessionSlice(current.sessions[sessionKey])
+        if (currentSlice.conversationId !== aliasId
+          || currentSlice.aliasGeneration !== slice.aliasGeneration
+          || currentSlice.streamingRequestId !== slice.streamingRequestId
+          || currentSlice.lifecyclePendingAction !== 'compacting') return current
+        return withSessionSliceAndActiveMirror(current, sessionKey, {
+          lifecyclePendingAction: null,
+        })
+      })
+      throw error
+    }
     let result: Awaited<ReturnType<typeof window.electronAPI.agent.compactSession>>
     try {
       result = await window.electronAPI.agent.compactSession({
         aliasId,
         aliasGeneration: slice.aliasGeneration,
+        actionRequestRef,
       })
     } catch (error) {
       set((current) => withSessionSliceAndActiveMirror(current, sessionKey, {
@@ -1226,6 +1477,17 @@ export const useAgent = create<AgentState>((set, get) => ({
     try {
       const requestRevision = get().scopeListRequestRevision + 1
       const authorityRevision = get().scopeAuthorityRevision
+      const previouslyLoadedScopeIds = new Set(Object.values(get().sessions).flatMap((input) => {
+        const slice = normalizeSessionSlice(input)
+        if (!slice.conversationId) return []
+        const hasLoadedState = Boolean(
+          slice.scopeHeadActionProjection
+          || slice.lifecycleOperationProjection
+          || Object.keys(slice.scopeRunStates).length > 0
+          || slice.messages.some((message) => !/^welcome(?:-|$)/.test(message.id)),
+        )
+        return hasLoadedState ? [slice.conversationId] : []
+      }))
       set({ scopeListRequestRevision: requestRevision })
       const result = await window.electronAPI.agent.listConversationScopes()
       if (!result.success || !Array.isArray(result.data)) return false
@@ -1382,18 +1644,22 @@ export const useAgent = create<AgentState>((set, get) => ({
       // ChatPanel registers runtime listeners before calling loadScopes. Read
       // the durable owner only after the alias slices exist, then apply it by
       // exact generation/run CAS so a concurrent ingress or terminal event wins.
-      const reconciledScopes = get().scopes.filter((candidate) => (
-        scopes.some((loaded) => loaded.id === candidate.id)
-      ))
-      await Promise.all(reconciledScopes.map((candidate) => hydrateCodexLifecycleScope(candidate)))
-      const currentScope = get().currentScope
+      const currentAfterReconcile = get().currentScope
+      if (currentAfterReconcile?.id) previouslyLoadedScopeIds.add(currentAfterReconcile.id)
       const hasOnlyWelcomeMessages = get().messages.every((message) => /^welcome(?:-|$)/.test(message.id))
-      if (
-        currentScope?.id &&
-        currentScope.lastMessageAt &&
-        (previousScopeId !== currentScope.id || hasOnlyWelcomeMessages) &&
-        typeof window.electronAPI.agent.getConversationScopeMessages === 'function'
-      ) {
+      const shouldLoadCurrent = Boolean(
+        currentAfterReconcile?.id
+        && currentAfterReconcile.lastMessageAt
+        && (previousScopeId !== currentAfterReconcile.id || hasOnlyWelcomeMessages)
+        && typeof window.electronAPI.agent.getConversationScopeMessages === 'function',
+      )
+      const scopesToHydrate = get().scopes.filter((candidate) => (
+        previouslyLoadedScopeIds.has(candidate.id)
+        && (!shouldLoadCurrent || candidate.id !== currentAfterReconcile?.id)
+      ))
+      await Promise.all(scopesToHydrate.map((candidate) => hydrateCodexLifecycleScope(candidate)))
+      const currentScope = get().currentScope
+      if (shouldLoadCurrent && currentScope?.id) {
         await get().loadScope(currentScope.id)
       }
       await hydratePendingAskUserQuestionsCards()
@@ -1418,7 +1684,7 @@ export const useAgent = create<AgentState>((set, get) => ({
       const scopes = get().scopes
       const scope = scopes.find((item) => item.id === scopeId) || null
       const activeRunState = getScopeRunStateForScope(get(), scopeId)
-      let messages: AgentMessage[] = result.data.map((m: { id: string; role: string; content: string; timestamp: string; meta?: Record<string, unknown> }) =>
+      const messages: AgentMessage[] = result.data.map((m: { id: string; role: string; content: string; timestamp: string; meta?: Record<string, unknown> }) =>
         rebuildAgentMessageFromRow(m, scope?.agent || get().currentAgent),
       )
       const targetSessionKey = sessionKeyForScopeId(get(), scopeId)
@@ -1457,78 +1723,40 @@ export const useAgent = create<AgentState>((set, get) => ({
           meta: { transient: true },
         })
       }
-      const terminalRunIds = messages.flatMap((message) => (
-        message.type === 'agent' && typeof message.meta?.runId === 'string'
-          ? [message.meta.runId]
-          : []
-      ))
-      let productReceipts: ProductTurnReceipt[] = []
-      if (terminalRunIds.length > 0
-        && typeof window.electronAPI.agent.readProductTurnPresentations === 'function') {
-        const receiptResult = await window.electronAPI.agent.readProductTurnPresentations(terminalRunIds)
-        if (receiptResult.success && Array.isArray(receiptResult.data)) {
-          productReceipts = receiptResult.data.filter((receipt) => receipt.readyScopeId === scopeId)
-        }
-      }
-      const receiptByRunId = new Map(productReceipts.map((receipt) => [receipt.readyRunId, receipt]))
-      messages = messages.map((message) => {
-        const runId = typeof message.meta?.runId === 'string' ? message.meta.runId : null
-        const receipt = runId ? receiptByRunId.get(runId) : null
-        return receipt
-          ? {
-              ...message,
-              meta: { ...message.meta, toolTraceSnapshot: toolTraceFromProductReceipt(receipt) },
-            }
-          : message
-      })
-      const hydratedProductReceipt = [...messages].reverse().flatMap((message) => {
-        const runId = typeof message.meta?.runId === 'string' ? message.meta.runId : null
-        const receipt = runId ? receiptByRunId.get(runId) : null
-        return receipt ? [receipt] : []
-      })[0] || null
-      const hydratedRunState = hydratedProductReceipt
-        ? applyProductTurnReceipt(
-            activeRunState || createEmptyScopeRunState({
-              scopeId,
-              agent: scope?.agent || get().currentAgent,
-              requestId: hydratedProductReceipt.readyRunId,
-            }),
-            hydratedProductReceipt,
-          )
-        : activeRunState
       if (get().scopeAuthorityRevision !== authorityRevision
         || get().retiredScopeIds[scopeId]) return
       set((state) => {
         const sessionKey = sessionKeyForScopeId(state, scopeId)
         const slice = normalizeSessionSlice(state.sessions[sessionKey])
-        const loadedAliasGeneration = typeof scope?.aliasGeneration === 'number'
-          ? scope.aliasGeneration
+        const currentScope = state.scopes.find((candidate) => candidate.id === scopeId) || scope
+        const loadedAliasGeneration = typeof currentScope?.aliasGeneration === 'number'
+          ? currentScope.aliasGeneration
           : null
         const aliasGeneration = slice.aliasGeneration === null
           ? loadedAliasGeneration
           : loadedAliasGeneration === null
             ? slice.aliasGeneration
             : Math.max(slice.aliasGeneration, loadedAliasGeneration)
-        const nextScopeRunStates = hydratedRunState
-          ? { ...slice.scopeRunStates, [scopeId]: hydratedRunState }
+        const nextScopeRunStates = activeRunState
+          ? { ...slice.scopeRunStates, [scopeId]: activeRunState }
           : slice.scopeRunStates
         const nextSlice: SessionSlice = {
           ...slice,
           messages,
           conversationId: scopeId,
           aliasGeneration,
-          messageVisibilityEpoch: scope?.messageVisibilityEpoch ?? slice.messageVisibilityEpoch,
+          messageVisibilityEpoch: currentScope?.messageVisibilityEpoch ?? slice.messageVisibilityEpoch,
           scopeRunStates: nextScopeRunStates,
-          isStreaming: isStreamingScopeRunState(hydratedRunState),
-          foregroundBusy: isForegroundBusyScopeRunState(hydratedRunState),
-          composerLocked: isForegroundBusyScopeRunState(hydratedRunState),
+          isStreaming: isStreamingScopeRunState(activeRunState),
+          foregroundBusy: isForegroundBusyScopeRunState(activeRunState),
+          composerLocked: isForegroundBusyScopeRunState(activeRunState),
           streamingMessageId: null,
-          streamingRequestId: isStreamingScopeRunState(hydratedRunState)
-            ? hydratedRunState?.requestId || null
+          streamingRequestId: isStreamingScopeRunState(activeRunState)
+            ? activeRunState?.requestId || null
             : null,
         }
-        const nextScope = scope
-          ? { ...scope, aliasGeneration }
+        const nextScope = currentScope
+          ? { ...currentScope, aliasGeneration }
           : null
         const scopes = state.scopes.map((candidate) => (
           candidate.id === scopeId && nextScope ? nextScope : candidate
@@ -1556,7 +1784,12 @@ export const useAgent = create<AgentState>((set, get) => ({
           } : {}),
         }
       })
-    } catch { /* ignore */ }
+      const currentScope = get().scopes.find((candidate) => candidate.id === scopeId)
+      if (currentScope) await hydrateCodexLifecycleScope(currentScope)
+      window.electronAPI.pet?.scopeViewed?.(scopeId)
+    } catch {
+      // silent-catch: history reload failure preserves the transcript/draft; only the atomic reader replaces actions.
+    }
   },
 
   setCurrentScope: async (scopeId: string) => {
@@ -1670,9 +1903,16 @@ export const useAgent = create<AgentState>((set, get) => ({
     content,
     options,
     commitPersistedIngressSnapshot,
-    completeScopeRunAfterSendSuccess: (scopeId, requestId, payload) => (
-      agentRuntimeDriver.completeScopeRunAfterSendSuccess(scopeId, requestId, payload)
-    ),
+    completeScopeRunAfterSendSuccess: async (scopeId, requestId, payload) => {
+      await agentRuntimeDriver.completeScopeRunAfterSendSuccess(scopeId, requestId, payload)
+      const authoritativeScope = get().scopes.find((candidate) => candidate.id === scopeId)
+      const headVersion = payload.productTurnReceipt?.actionProjection.headProjectionRef?.version
+      if (authoritativeScope) await hydrateCodexLifecycleScope(authoritativeScope, headVersion ? {
+        aliasGeneration: headVersion.headGeneration,
+        scopeEpoch: headVersion.scopeEpoch,
+        actionProjectionSequence: headVersion.actionProjectionSequence,
+      } : undefined)
+    },
     clearInfrastructureWatchdog: (scopeId, requestId) => {
       agentRuntimeDriver.clearInfrastructureWatchdog(scopeId, requestId)
     },
@@ -1885,9 +2125,38 @@ export function initAgentInteractionListeners(): () => void {
 export function initAgentListeners(): () => void {
   const offRuntime = agentRuntimeDriver.initAgentListeners()
   const offAgentInteraction = initAgentInteractionListeners()
+  const offWorkbenchMode = useMode.subscribe((current, previous) => {
+    if (current.workbenchMode === previous.workbenchMode) return
+    const state = useAgent.getState()
+    const scope = state.scopes.find((candidate) => candidate.id === state.currentScopeId)
+    if (scope) {
+      const pendingTarget = lifecycleHydrationsInFlight.get(sessionKeyForScopeId(state, scope.id))
+      void hydrateCodexLifecycleScope(scope, pendingTarget)
+    }
+  })
   const offIngressAdmitted = window.electronAPI?.agent?.onIngressAdmitted?.((event) => {
     applyIngressAdmitted(event)
   }) || (() => {})
+  const offReadyMemoryStateChanged = window.electronAPI?.agent?.onReadyMemoryStateChanged?.(() => {
+    const scopeId = useAgent.getState().currentScopeId
+    if (scopeId) void useAgent.getState().loadScope(scopeId)
+  }) || (() => {})
+  const offCodexActionSurfaceInvalidated = window.electronAPI?.agent
+    ?.onCodexActionSurfaceInvalidated?.((event) => {
+      const state = useAgent.getState()
+      if (event.contract !== 'codex_action_surface_invalidation_v1'
+        || event.scopeId !== state.currentScopeId) return
+      const sessionKey = sessionKeyForScopeId(state, event.scopeId)
+      const slice = normalizeSessionSlice(state.sessions[sessionKey])
+      const current = slice.scopeHeadActionProjection?.actionProjectionVersion
+      if (!shouldHydrateCodexActionSurface({
+        event,
+        currentScopeId: state.currentScopeId,
+        currentVersion: current || null,
+      })) return
+      const scope = state.scopes.find((candidate) => candidate.id === event.scopeId)
+      if (scope) void hydrateCodexLifecycleScope(scope, event)
+    }) || (() => {})
   const runtimeReadyApi = window.electronAPI?.agent as {
     readRuntimeReady?: () => Promise<AgentRuntimeReadinessSnapshot>
     onRuntimeReady?: (listener: (snapshot: AgentRuntimeReadinessSnapshot) => void) => () => void
@@ -1906,7 +2175,10 @@ export function initAgentListeners(): () => void {
   return () => {
     try { offRuntime() } catch { /* ignore */ }
     try { offAgentInteraction() } catch { /* ignore */ }
+    offWorkbenchMode()
     try { offIngressAdmitted() } catch { /* ignore */ }
+    try { offReadyMemoryStateChanged() } catch { /* ignore */ }
+    try { offCodexActionSurfaceInvalidated() } catch { /* ignore */ }
     try { offRuntimeReady() } catch { /* ignore */ }
   }
 }

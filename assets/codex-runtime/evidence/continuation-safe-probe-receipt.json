@@ -1,0 +1,23 @@
+{
+  "contract": "codex_0_149_failed_user_only_continuity_probe_v1",
+  "runtimeVersion": "0.149.0",
+  "binarySha256": "f4a74117b8142cda581c95ff753abf4508b5636d89682c1ed77e4a9249af8963",
+  "runtimeManifestDigest": "cda6bd5ff08247c0fd502accba2c0c0d342d5d59945d06dfb53a666bb64b636d",
+  "stableV2SchemaDigest": "38483e82eb7170aaa49861a9690734f1201249ae8207d84e3300c7a1c06412e1",
+  "seam": "one_user_item_no_assistant_tool_or_compaction_suffix",
+  "failedUserRetention": "prior_user_exact_once",
+  "retainedPriorUserCount": 1,
+  "unsafeSuffixObserved": false,
+  "probeTransport": "isolated_local_responses_fixture",
+  "wire": {
+    "failureClass": "provider",
+    "failureStage": "headers",
+    "causeCode": "gateway_upstream_http_400",
+    "responseIdentitySeen": false,
+    "partialAssistantItemSeen": false,
+    "toolCallItemSeen": false,
+    "eventCount": 0,
+    "wireByteCount": 0
+  },
+  "receiptDigest": "e931b0953f611a9ad598f65474301fc74db41c0f93a75cb6753a3dea36fe8ac3"
+}

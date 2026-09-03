@@ -1,5 +1,5 @@
 /**
- * Zod schemas for the 5 RSS domain tools (Phase 2.5 PR 3).
+ * Zod schemas for the RSS domain tools.
  *
  * SSOT for dispatch-time validation + LLM-facing SkillParamDefinition[] via
  * zod-param-derivation. Descriptions mirror the legacy hand-rolled params in
@@ -32,6 +32,12 @@ export const RssAnalyzeItemSchema = z.object({
   analysisType: z.string().describe('copy 或 visual'),
 })
 
+export const RssGetAnalysisResultSchema = z.object({
+  jobId: z.string().optional().describe('可选，分析任务 ID'),
+  itemId: z.string().optional().describe('可选，RSS 条目 ID'),
+  analysisType: z.string().optional().describe('可选，copy 或 visual'),
+})
+
 export const RssCaptureSessionSchema = z.object({})
 
 export type RssToolName =
@@ -39,6 +45,7 @@ export type RssToolName =
   | 'rss_fetch_updates'
   | 'rss_select_item'
   | 'rss_analyze_item'
+  | 'rss_get_analysis_result'
   | 'rss_capture_session'
 
 export const RSS_SCHEMAS: Record<RssToolName, z.ZodObject<z.ZodRawShape>> = {
@@ -46,5 +53,6 @@ export const RSS_SCHEMAS: Record<RssToolName, z.ZodObject<z.ZodRawShape>> = {
   rss_fetch_updates: RssFetchUpdatesSchema,
   rss_select_item: RssSelectItemSchema,
   rss_analyze_item: RssAnalyzeItemSchema,
+  rss_get_analysis_result: RssGetAnalysisResultSchema,
   rss_capture_session: RssCaptureSessionSchema,
 }

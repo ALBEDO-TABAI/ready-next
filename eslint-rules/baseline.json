@@ -680,14 +680,6 @@
       "area": "ui-history"
     },
     {
-      "file": "src/__tests__/legacy-design-video-removal-contract.test.ts",
-      "rule": "ready/no-source-grep-test",
-      "snippetHash": "6d74885040dcc189",
-      "line": 7,
-      "snippet": "return readFileSync(resolve(process.cwd(), path), 'utf8')",
-      "area": "ui-history"
-    },
-    {
       "file": "src/__tests__/migration-pending-confirmations.test.ts",
       "rule": "ready/no-source-grep-test",
       "snippetHash": "5c75b5477900a2ec",
@@ -1062,14 +1054,6 @@
       "line": 7,
       "snippet": "return readFileSync(resolve(process.cwd(), path), 'utf8')",
       "area": "ui-history"
-    },
-    {
-      "file": "src/main/modules/agent-control/agents/agent-identity-assets.ts",
-      "rule": "ready/no-legacy-backdoor",
-      "snippetHash": "d911a9a7f1f5cbf9",
-      "line": 101,
-      "snippet": "if (legacy) {",
-      "area": "other-a0"
     }
   ]
 }

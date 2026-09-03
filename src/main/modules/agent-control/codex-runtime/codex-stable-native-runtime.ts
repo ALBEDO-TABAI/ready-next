@@ -1,6 +1,7 @@
 import type {
   CodexNativeNotification,
   CodexNativeRuntime,
+  CodexThreadForkParams,
   CodexThreadListParams,
   CodexThreadStartParams,
   CodexTurnStartParams,
@@ -39,6 +40,9 @@ export class StableNativeRuntime implements CodexNativeRuntime {
   serverDiagnostics() { return this.current().serverDiagnostics() }
   threadStart(params: CodexThreadStartParams) { return this.current().threadStart(params) }
   threadRead(params: { threadId: string; includeTurns: true }) { return this.current().threadRead(params) }
+  threadFork(params: CodexThreadForkParams, bindingId: string) {
+    return this.current().threadFork(params, bindingId)
+  }
   threadList(params: CodexThreadListParams) { return this.current().threadList(params) }
   threadResume(params: { threadId: string }) { return this.current().threadResume(params) }
   threadArchive(params: { threadId: string }) { return this.current().threadArchive(params) }

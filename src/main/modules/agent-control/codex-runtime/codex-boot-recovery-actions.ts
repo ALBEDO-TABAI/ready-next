@@ -14,10 +14,29 @@ import type {
 } from './codex-runtime-boot-reconciler'
 import type { CodexStartIdentityRegistry } from './codex-start-identity-registry'
 
-type ReadbackRuntime = Pick<CodexNativeRuntime, 'threadList' | 'threadRead'>
+type ReadbackRuntime = Pick<CodexNativeRuntime, 'threadList' | 'threadRead' | 'threadResume'>
+
+type ThreadStartIdentity = {
+  method: 'thread/start' | 'thread/fork'
+  expectedCwd: string
+  expectedParentThreadId: string | null
+  expectedForkedFromId: string | null
+  expectedPrefixTurnIds: string[]
+  materializationRequestDigest: string | null
+}
 
 type ReadbackResult =
-  | { kind: 'accepted'; nativeId: string; nativeResult: unknown; evidenceDigest: string }
+  | {
+      kind: 'accepted'
+      nativeId: string
+      nativeResult: unknown
+      evidenceDigest: string
+      forkRecoveryEvidence?: {
+        connectionEpoch: string
+        preResumeThreadReadDigest: string
+        resumedThreadDigest: string
+      }
+    }
   | { kind: 'zero'; evidenceDigest: string }
   | { kind: 'ambiguous'; evidenceDigest: string }
 
@@ -55,14 +74,25 @@ function evidence(value: unknown): string {
   return createHash('sha256').update(JSON.stringify(value)).digest('hex')
 }
 
-function exactRootThread(thread: CodexThread, cwd: string, source: string): boolean {
-  return thread.cwd === cwd
+function exactThreadMetadata(thread: CodexThread, identity: ThreadStartIdentity, source: string): boolean {
+  return thread.cwd === identity.expectedCwd
     && thread.source === source
     && thread.sessionId === thread.id
-    && thread.parentThreadId === null
-    && thread.forkedFromId === null
+    && thread.parentThreadId === identity.expectedParentThreadId
+    && thread.forkedFromId === identity.expectedForkedFromId
     && thread.threadSource === null
     && thread.modelProvider === 'ready_gateway'
+}
+
+function exactThread(thread: CodexThread, identity: ThreadStartIdentity, source: string): boolean {
+  return exactThreadMetadata(thread, identity, source)
+    && (identity.method !== 'thread/fork' || (
+      thread.id !== identity.expectedForkedFromId
+      && identity.materializationRequestDigest !== null
+      && JSON.stringify(thread.turns.map((turn) => turn.id))
+        === JSON.stringify(identity.expectedPrefixTurnIds)
+      && thread.turns.every((turn) => turn.status !== 'inProgress')
+    ))
 }
 
 function turnsWithClientIdentity(thread: CodexThread, clientUserMessageId: string): CodexTurn[] {
@@ -103,12 +133,13 @@ export class CodexDefaultBootRecoveryActions implements CodexBootRecoveryActions
   async resolveIntentStart(input: {
     member: CodexBindingRecoveryMember
     registry: CodexStartIdentityRegistry
+    recoveryConnectionEpoch: string
   }): Promise<CodexRecoveredStartResolution> {
     const zeroDigests: string[] = []
     for (let readIndex = 0; readIndex < this.deps.stableZeroReadCount; readIndex += 1) {
       let readback: ReadbackResult
       try {
-        readback = await this.readStart(input.member)
+        readback = await this.readStart(input.member, input.recoveryConnectionEpoch)
       } catch (error) {
         return {
           resolution: 'unknown',
@@ -126,6 +157,7 @@ export class CodexDefaultBootRecoveryActions implements CodexBootRecoveryActions
           nativeId: readback.nativeId,
           nativeResult: readback.nativeResult,
           evidenceDigest: readback.evidenceDigest,
+          forkRecoveryEvidence: readback.forkRecoveryEvidence,
         }
       }
       if (readback.kind === 'ambiguous') {
@@ -170,39 +202,62 @@ export class CodexDefaultBootRecoveryActions implements CodexBootRecoveryActions
     return this.deps.productFence.reconcile(input)
   }
 
-  private async readStart(member: CodexBindingRecoveryMember): Promise<ReadbackResult> {
+  private async readStart(
+    member: CodexBindingRecoveryMember,
+    recoveryConnectionEpoch: string,
+  ): Promise<ReadbackResult> {
     const identity = this.deps.repository.readStartInboundIdentity(member.method, member.bindingId)
-    if (identity.method === 'thread/start') return this.readThread(identity.expectedCwd)
+    if (identity.method !== 'turn/start') return this.readThread(identity, recoveryConnectionEpoch)
     return this.readTurn(identity.threadId, identity.clientUserMessageId)
   }
 
-  private async readThread(expectedCwd: string): Promise<ReadbackResult> {
+  private async readThread(
+    identity: ThreadStartIdentity,
+    recoveryConnectionEpoch: string,
+  ): Promise<ReadbackResult> {
     const listed = await this.deps.runtime.threadList({
       limit: this.deps.threadListLimit,
-      cwd: expectedCwd,
+      cwd: identity.expectedCwd,
       sourceKinds: ['vscode'],
     })
     if (listed.nextCursor !== null) {
-      return { kind: 'ambiguous', evidenceDigest: evidence({ expectedCwd, listed }) }
+      return { kind: 'ambiguous', evidenceDigest: evidence({ identity, listed }) }
     }
     const candidates = listed.data.filter((thread) => (
-      exactRootThread(thread, expectedCwd, this.deps.pinnedThreadSource)
+      exactThreadMetadata(thread, identity, this.deps.pinnedThreadSource)
     ))
     if (candidates.length === 0) {
-      return { kind: 'zero', evidenceDigest: evidence({ expectedCwd, listed }) }
+      return {
+        kind: listed.data.length === 0 ? 'zero' : 'ambiguous',
+        evidenceDigest: evidence({ identity, listed }),
+      }
     }
     if (candidates.length !== 1) {
-      return { kind: 'ambiguous', evidenceDigest: evidence({ expectedCwd, candidates }) }
+      return { kind: 'ambiguous', evidenceDigest: evidence({ identity, candidates }) }
     }
     const read = await this.deps.runtime.threadRead({ threadId: candidates[0].id, includeTurns: true })
-    if (!exactRootThread(read.thread, expectedCwd, this.deps.pinnedThreadSource)) {
-      return { kind: 'ambiguous', evidenceDigest: evidence({ expectedCwd, read }) }
+    if (!exactThread(read.thread, identity, this.deps.pinnedThreadSource)) {
+      return { kind: 'ambiguous', evidenceDigest: evidence({ identity, read }) }
+    }
+    const preResumeThreadReadDigest = evidence(read)
+    const nativeResult = identity.method === 'thread/fork'
+      ? await this.deps.runtime.threadResume({ threadId: read.thread.id })
+      : { thread: read.thread, instructionSources: [] }
+    if (!exactThread(nativeResult.thread, identity, this.deps.pinnedThreadSource)) {
+      return { kind: 'ambiguous', evidenceDigest: evidence({ identity, read, nativeResult }) }
     }
     return {
       kind: 'accepted',
       nativeId: read.thread.id,
-      nativeResult: { thread: read.thread, instructionSources: [] },
-      evidenceDigest: evidence({ expectedCwd, thread: read.thread }),
+      nativeResult,
+      evidenceDigest: evidence({ identity, read, nativeResult }),
+      ...(identity.method === 'thread/fork' ? {
+        forkRecoveryEvidence: {
+          connectionEpoch: recoveryConnectionEpoch,
+          preResumeThreadReadDigest,
+          resumedThreadDigest: evidence(nativeResult),
+        },
+      } : {}),
     }
   }
 

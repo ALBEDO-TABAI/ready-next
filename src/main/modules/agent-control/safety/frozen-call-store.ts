@@ -124,10 +124,13 @@ export function redactParamsForAudit(
 
 export interface FrozenCallDbStatement {
   run(...params: unknown[]): unknown
+  get?<T = unknown>(...params: unknown[]): T | undefined
 }
 
 export interface FrozenCallDb {
   prepare(sql: string): FrozenCallDbStatement
+  exec?(sql: string): void
+  readonly inTransaction?: boolean
 }
 
 export interface FrozenCallRecordView {
@@ -141,11 +144,25 @@ export interface FrozenCallRecordView {
   createdAt: number
   expiresAt: number
   status: FrozenCallStatus
+  pendingConfirmationSourceDigest: string
 }
 
 interface FrozenCallRecord extends FrozenCallRecordView {
   token: string
   releasedAt: number | null
+}
+
+export function buildFrozenCallPendingSourceDigest(input: {
+  id: string
+  runId: string | null
+  taskId: string | null
+  scopeId: string | null
+  toolName: string
+  paramsJson: string
+  createdAt: string
+  expiresAt: string
+}): string {
+  return digestCanonicalJson(input)
 }
 
 function toRecordView(record: FrozenCallRecord): FrozenCallRecordView {
@@ -160,6 +177,7 @@ function toRecordView(record: FrozenCallRecord): FrozenCallRecordView {
     createdAt: record.createdAt,
     expiresAt: record.expiresAt,
     status: record.status,
+    pendingConfirmationSourceDigest: record.pendingConfirmationSourceDigest,
   }
 }
 
@@ -189,6 +207,7 @@ export type FreezeResult =
       paramsSha256: string
       /** Clipped redacted summary — the only param representation allowed outside memory. */
       auditSummary: string
+      pendingConfirmationSourceDigest: string
     }
   | { ok: false; reason: 'pending_exists' | 'store_unavailable' }
 
@@ -204,6 +223,10 @@ export type ExpireResult =
   | { ok: true }
   | { ok: false; reason: 'not_pending' | 'store_unavailable' }
 
+export type CanonicalDecisionReadResult =
+  | { ok: true; status: Exclude<FrozenCallStatus, 'pending'> }
+  | { ok: false; reason: 'pending' | 'not_found' | 'source_mismatch' | 'store_unavailable' }
+
 type TerminalAuditResult = 'committed' | 'not_pending' | 'store_unavailable'
 
 export const DEFAULT_FROZEN_CALL_TTL_MS = 10 * 60 * 1000
@@ -218,22 +241,6 @@ export class FrozenCallStore {
   constructor(db: FrozenCallDb | null, opts?: { now?: () => number }) {
     this.db = db
     this.now = opts?.now ?? Date.now
-    // Restart orphans: the production Codex boot participant has already
-    // persisted app_restart evidence and closed any exactly bound product run.
-    // This constructor sweep is the standalone/non-Codex fallback: a remaining
-    // row has no live in-memory token or waiter, so it can only expire. The
-    // store is constructed once per main-process lifetime and therefore cannot
-    // expire a waiter created by this process.
-    if (this.db) {
-      try {
-        this.db
-          .prepare("UPDATE pending_confirmations SET status = 'expired' WHERE status = 'pending'")
-          .run()
-      } catch {
-        // silent-catch: Sweep failure is non-fatal — rows stay pending in DB only; the
-        // in-memory authority starts empty either way.
-      }
-    }
   }
 
   freeze(args: FreezeArgs): FreezeResult {
@@ -244,7 +251,9 @@ export class FrozenCallStore {
     }
     const createdAt = this.now()
     const ttlMs = typeof args.ttlMs === 'number' && args.ttlMs > 0 ? args.ttlMs : DEFAULT_FROZEN_CALL_TTL_MS
-    const record: FrozenCallRecord = {
+    const createdAtIso = new Date(createdAt).toISOString()
+    const expiresAtIso = new Date(createdAt + ttlMs).toISOString()
+    const recordBase = {
       id: `fc-${randomUUID().replace(/-/g, '').slice(0, 12)}`,
       runId: args.runId ?? null,
       taskId: args.taskId ?? null,
@@ -255,9 +264,31 @@ export class FrozenCallStore {
       paramsJson: JSON.stringify(args.params),
       createdAt,
       expiresAt: createdAt + ttlMs,
-      status: 'pending',
+      status: 'pending' as const,
       token: randomUUID(),
       releasedAt: null,
+    }
+    const paramsJson = JSON.stringify(args.params)
+    const auditJson = JSON.stringify({
+      __audit: 'redacted',
+      canonicalSha256: digestCanonicalJson(args.params),
+      sha256: createHash('sha256').update(paramsJson).digest('hex'),
+      shape: buildAuditShape(args.params),
+    })
+    const pendingConfirmationSourceDigest = buildFrozenCallPendingSourceDigest({
+      id: recordBase.id,
+      runId: recordBase.runId,
+      taskId: recordBase.taskId,
+      scopeId: recordBase.scopeId,
+      toolName: recordBase.toolName,
+      paramsJson: auditJson,
+      createdAt: createdAtIso,
+      expiresAt: expiresAtIso,
+    })
+    const record: FrozenCallRecord = {
+      ...recordBase,
+      paramsJson,
+      pendingConfirmationSourceDigest,
     }
     const paramsSha256 = createHash('sha256').update(record.paramsJson).digest('hex')
     const auditSummary = buildAuditSummary(args.params, { redactAllStrings: args.sensitiveParams })
@@ -267,12 +298,25 @@ export class FrozenCallStore {
         // the frozen bytes — never any parameter value. Release reads the
         // in-memory record, so audit redaction cannot affect the
         // byte-identical contract.
-        const auditJson = JSON.stringify({
-          __audit: 'redacted',
-          canonicalSha256: digestCanonicalJson(args.params),
-          sha256: paramsSha256,
-          shape: buildAuditShape(args.params),
-        })
+        const ownsTransaction = Boolean(this.db.exec) && this.db.inTransaction !== true
+        if (ownsTransaction) this.db.exec?.('BEGIN IMMEDIATE')
+        const sessionKey = record.scopeId || record.sessionId
+        const pendingCard = sessionKey ? this.db.prepare(`
+          SELECT 1 AS present FROM chat_messages
+           WHERE conversation_id = ? AND role = 'agent_card'
+             AND json_extract(meta_json, '$.askUserQuestions.status') = 'pending'
+           LIMIT 1
+        `).get?.(sessionKey) : undefined
+        const pendingConfirmation = sessionKey
+          ? this.db.prepare(`
+              SELECT 1 AS present FROM pending_confirmations
+               WHERE status = 'pending' AND (scope_id = ? OR run_id = ?) LIMIT 1
+            `).get?.(sessionKey, record.runId)
+          : undefined
+        if (pendingCard || pendingConfirmation) {
+          if (ownsTransaction) this.db.exec?.('ROLLBACK')
+          return { ok: false, reason: 'pending_exists' }
+        }
         this.db
           .prepare(
             'INSERT INTO pending_confirmations (id, run_id, task_id, scope_id, tool_name, params_json, created_at, expires_at, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
@@ -284,11 +328,15 @@ export class FrozenCallStore {
             record.scopeId,
             record.toolName,
             auditJson,
-            new Date(record.createdAt).toISOString(),
-            new Date(record.expiresAt).toISOString(),
+            createdAtIso,
+            expiresAtIso,
             'pending',
           )
+        if (ownsTransaction) this.db.exec?.('COMMIT')
       } catch {
+        if (this.db.exec && this.db.inTransaction === true) {
+          try { this.db.exec('ROLLBACK') } catch { /* silent-catch: the outer failure still denies execution with store_unavailable. */ }
+        }
         // silent-catch: insert failure returns the structured store_unavailable result
         return { ok: false, reason: 'store_unavailable' }
       }
@@ -301,6 +349,7 @@ export class FrozenCallStore {
       expiresAt: record.expiresAt,
       paramsSha256,
       auditSummary,
+      pendingConfirmationSourceDigest,
     }
   }
 
@@ -308,6 +357,11 @@ export class FrozenCallStore {
     const record = this.records.get(id)
     if (!record) return null
     return toRecordView(record)
+  }
+
+  isPastDue(id: string): boolean {
+    const record = this.records.get(id)
+    return Boolean(record && this.now() > record.expiresAt)
   }
 
   findPendingForSession(sessionKey: string | null): FrozenCallRecordView | null {
@@ -351,6 +405,82 @@ export class FrozenCallStore {
       params: JSON.parse(record.paramsJson) as Record<string, unknown>,
       paramsJson: record.paramsJson,
     }
+  }
+
+  releaseAfterCanonicalDecision(id: string, token: string): ReleaseResult {
+    const record = this.records.get(id)
+    if (!record) return { ok: false, reason: 'not_found' }
+    if (record.status !== 'pending') return { ok: false, reason: 'not_pending' }
+    if (record.token !== token) return { ok: false, reason: 'invalid_token' }
+    record.status = 'released'
+    record.releasedAt = this.now()
+    const result = {
+      ok: true as const,
+      toolName: record.toolName,
+      params: JSON.parse(record.paramsJson) as Record<string, unknown>,
+      paramsJson: record.paramsJson,
+    }
+    this.retireInMemory(record)
+    return result
+  }
+
+  /**
+   * Read back the durable half of the card + confirmation transaction before
+   * the in-memory execution token can be released. The expected digest binds
+   * the read to the exact pending row that the card was created from, so an
+   * old terminal row with the same logical owner cannot authorize this call.
+   */
+  readCanonicalDecision(
+    id: string,
+    expectedSourceDigest: string,
+  ): CanonicalDecisionReadResult {
+    if (!this.db?.prepare) return { ok: false, reason: 'store_unavailable' }
+    try {
+      const row = this.db.prepare(`
+        SELECT id, run_id, task_id, scope_id, tool_name, params_json,
+               created_at, expires_at, status
+          FROM pending_confirmations WHERE id = ? LIMIT 1
+      `).get?.<{
+        id: string
+        run_id: string | null
+        task_id: string | null
+        scope_id: string | null
+        tool_name: string
+        params_json: string
+        created_at: string
+        expires_at: string
+        status: FrozenCallStatus
+      }>(id)
+      if (!row) return { ok: false, reason: 'not_found' }
+      const sourceDigest = buildFrozenCallPendingSourceDigest({
+        id: row.id,
+        runId: row.run_id,
+        taskId: row.task_id,
+        scopeId: row.scope_id,
+        toolName: row.tool_name,
+        paramsJson: row.params_json,
+        createdAt: row.created_at,
+        expiresAt: row.expires_at,
+      })
+      if (sourceDigest !== expectedSourceDigest) {
+        return { ok: false, reason: 'source_mismatch' }
+      }
+      return row.status === 'pending'
+        ? { ok: false, reason: 'pending' }
+        : { ok: true, status: row.status }
+    } catch {
+      // silent-catch: the confirmation consumer revokes permission when this formal read is unavailable.
+      return { ok: false, reason: 'store_unavailable' }
+    }
+  }
+
+  retireAfterCanonicalDecision(id: string, status: 'denied' | 'expired'): boolean {
+    const record = this.records.get(id)
+    if (!record || record.status !== 'pending') return false
+    record.status = status
+    record.releasedAt = null
+    this.retireInMemory(record)
+    return true
   }
 
   /** User rejected the action — terminal, unless TTL or durable state won the race. */

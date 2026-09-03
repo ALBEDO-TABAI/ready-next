@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import test from 'node:test'
 
 function read(relativePath: string): string {
+  // allow-source-grep: retired public surfaces must remain absent from the shipped architecture
   return readFileSync(new URL(`../${relativePath}`, import.meta.url), 'utf8')
 }
 

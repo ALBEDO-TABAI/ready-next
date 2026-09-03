@@ -213,7 +213,9 @@ class FakeLifecycleStore implements ReadyCodexLifecycleStore {
   activeReadyRunIdAfterFirstRead: string | null | undefined
   activeManualCompactionId: string | null = null
   requestedAction: 'stop' | 'close' | 'reset' | null = null
+  hasLegacyPreparedRun = false
   threadState: 'unstarted' | 'loaded' | 'resume_required' = 'unstarted'
+  expectedForkedFromId: string | null = null
   activeConnectionEpoch = 'epoch-1'
   failEvidenceDigest = false
   consumedManualCompaction: Parameters<ReadyCodexLifecycleStore['consumeManualCompaction']>[0] | null = null
@@ -244,7 +246,12 @@ class FakeLifecycleStore implements ReadyCodexLifecycleStore {
   async resolveThreadBinding() {
     if (this.threadState === 'loaded') return { state: 'loaded' as const, threadId: 'thread-1' }
     if (this.threadState === 'resume_required') {
-      return { state: 'resume_required' as const, threadId: 'thread-1' }
+      return {
+        state: 'resume_required' as const,
+        threadId: 'thread-1',
+        expectedCwd: rootThread.cwd,
+        expectedForkedFromId: this.expectedForkedFromId,
+      }
     }
     return {
       state: 'unstarted' as const,
@@ -294,6 +301,7 @@ class FakeLifecycleStore implements ReadyCodexLifecycleStore {
       : null
     return {
       identity: { aliasId: request.aliasId, aliasGeneration: 1 },
+      hasLegacyPreparedRun: this.hasLegacyPreparedRun,
       activeReadyRunId,
       activeManualCompactionId: this.activeManualCompactionId,
       requestedAction: this.requestedAction,
@@ -330,6 +338,30 @@ class FakeLifecycleStore implements ReadyCodexLifecycleStore {
       retiredGeneration: 1,
       newGeneration: 2,
       transactionDigest: 'reset-digest',
+    }
+  }
+  async resetLegacyPreparedAlias() {
+    this.calls.push('resetLegacyPreparedAlias')
+    return {
+      ok: true as const,
+      action: 'reset' as const,
+      aliasId: 'alias-1',
+      retiredGeneration: 1,
+      newGeneration: 2,
+      transactionDigest: 'legacy-reset-digest',
+    }
+  }
+  async closeLegacyPreparedAlias() {
+    this.calls.push('closeLegacyPreparedAlias')
+    return {
+      ok: true as const,
+      action: 'close' as const,
+      closeoutDisposition: 'legacy_prepared_contract' as const,
+      aliasId: 'alias-1',
+      retiredGeneration: 1,
+      retirementTransactionDigest: 'legacy-close-digest',
+      archiveDisposition: 'not_required' as const,
+      scopeClosureEvidenceDigest: 'legacy-scope-close-digest',
     }
   }
   async quarantineUnknownManualCompaction() {
@@ -474,7 +506,7 @@ class FakeLifecycleStore implements ReadyCodexLifecycleStore {
 }
 
 const prepared: PreparedCodexProductRun = {
-  preparationContract: 'codex_product_run_e1',
+  preparationContract: 'codex_product_run_e2',
   readyMemorySnapshot: disabledReadyMemorySnapshot(),
   taskId: 'task-1',
   runId: 'run-1',
@@ -491,9 +523,28 @@ const prepared: PreparedCodexProductRun = {
     canonicalCurrentInputRef: { messageId: 'message-1', input: [textUserInput('hello')] },
     explicitResourceEnvelope: { input: [], resourceRefs: [] },
     resourceAdditionalContext: [],
+    actionAdmissionRef: {
+      headProjectionDigest: 'a'.repeat(64),
+      actionProjectionVersion: {
+        scopeEpoch: 0,
+        headGeneration: 1,
+        actionProjectionSequence: 0,
+      },
+      actionHeadIdentity: {
+        aliasId: 'alias-1',
+        aliasGeneration: 1,
+        threadBindingId: 'thread-binding-1',
+        headRevision: 1,
+      },
+    },
+    uncommittedTailAssignments: [],
+    supersededUncommittedItems: [],
   },
   resourceAnchorDigest: 'resource-digest',
-  recoveredContextDigest: null,
+  sourceTrustedEnvironmentRef: {
+    workbenchMode: 'browser',
+    environmentDigest: 'b'.repeat(64),
+  },
   ...createCodexToolFixture([]),
   readyToolHostIdentity: {
     scopeId: 'scope-1',
@@ -686,9 +737,20 @@ test('canonical runtime contract root source is accepted, bound, and reaches Rea
   assert.equal(candidates[0]?.candidateText, 'native answer')
 })
 
-test('existing root thread is read and durably marked before resume can start a turn', async () => {
+for (const forkedFromId of [null, 'thread-source']) {
+for (const corruptAfterResume of [false, true]) {
+test(`existing ${forkedFromId ? 'fork' : 'root'} resume ${corruptAfterResume ? 'rejects changed lineage before loading' : 'is durably marked before turn start'}`, async () => {
   const { adapter, nativeRuntime, lifecycleStore } = createHarness()
   lifecycleStore.threadState = 'resume_required'
+  lifecycleStore.expectedForkedFromId = forkedFromId
+  nativeRuntime.thread = { ...rootThread, forkedFromId }
+  if (corruptAfterResume) {
+    const resume = nativeRuntime.threadResume.bind(nativeRuntime)
+    nativeRuntime.threadResume = async () => {
+      const result = await resume()
+      return { ...result, thread: { ...result.thread, forkedFromId: 'foreign-source' } }
+    }
+  }
   const result = await adapter.executePreparedRun({
     prepared,
     expectedScopeId: prepared.readyToolHostIdentity.scopeId,
@@ -724,9 +786,12 @@ test('existing root thread is read and durably marked before resume can start a 
     }),
   })
   assert.equal(result.state, 'closed')
-  assert.deepEqual(nativeRuntime.calls, ['threadRead', 'threadResume', 'turnStart'])
-  assert.deepEqual(lifecycleStore.calls, ['markThreadResumed'])
+  assert.deepEqual(nativeRuntime.calls, corruptAfterResume
+    ? ['threadRead', 'threadResume'] : ['threadRead', 'threadResume', 'turnStart'])
+  assert.deepEqual(lifecycleStore.calls, corruptAfterResume ? [] : ['markThreadResumed'])
 })
+}
+}
 
 test('connection replacement after thread read cannot resume on a new client or start a turn', async () => {
   const firstClient = new FakeNativeRuntime()
@@ -871,6 +936,16 @@ test('non-pinned native root source metadata is rejected before binding or turn 
     thread: CodexThread
     expectedNativeCall: 'threadStart' | 'threadRead'
   }> = [
+    {
+      threadState: 'resume_required',
+      thread: { ...rootThread, forkedFromId: 'unbound-source' },
+      expectedNativeCall: 'threadRead',
+    },
+    {
+      threadState: 'resume_required',
+      thread: { ...rootThread, parentThreadId: 'unexpected-parent' },
+      expectedNativeCall: 'threadRead',
+    },
     {
       threadState: 'unstarted',
       thread: { ...rootThread, source: { custom: 'ready-e1' } },
@@ -2122,6 +2197,45 @@ test('close and reset share the same exact-terminal interrupt reconciliation', a
     assert.equal(lifecycleStore.calls.includes('acknowledgeProductInterrupt'), false)
     assert.equal(lifecycleStore.calls.includes('markProductInterruptUnknown'), false)
     assert.equal(lifecycleStore.calls.includes('awaitProductCloseout'), true)
+  }
+})
+
+test('legacy prepared heads expose only explicit reset or close retirement', async () => {
+  const actionRequestRef = (action: 'reset' | 'close') => ({
+    ownerKind: 'head_owner' as const,
+    action,
+    aliasId: 'alias-1',
+    scopeId: 'alias-1',
+    scopeEpoch: 0,
+    aliasGeneration: 1,
+    threadBindingId: 'legacy-binding',
+    headRevision: 1,
+    materializationIntentRef: null,
+    lifecycleEvidenceDigest: 'legacy-lifecycle',
+    headProjectionDigest: 'legacy-head',
+    digest: `legacy-${action}`,
+  })
+  for (const action of ['reset', 'close'] as const) {
+    const { adapter, nativeRuntime, lifecycleStore } = createHarness()
+    lifecycleStore.hasLegacyPreparedRun = true
+    lifecycleStore.activeReadyRunId = null
+    lifecycleStore.facts = {
+      ...idleNever,
+      readyRunCreated: true,
+      productRunNonterminal: true,
+    }
+    const request = {
+      ...idleLifecycleIdentity,
+      actionRequestRef: actionRequestRef(action),
+    }
+    const result = action === 'reset'
+      ? await adapter.resetSession(request)
+      : await adapter.closeSession(request)
+    assert.equal(result.ok, true)
+    assert.equal(lifecycleStore.calls.includes(
+      action === 'reset' ? 'resetLegacyPreparedAlias' : 'closeLegacyPreparedAlias',
+    ), true)
+    assert.deepEqual(nativeRuntime.calls, [])
   }
 })
 

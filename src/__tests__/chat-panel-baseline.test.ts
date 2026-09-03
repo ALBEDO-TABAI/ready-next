@@ -35,6 +35,8 @@ import { createElement } from 'react'
 import { flushSync } from 'react-dom'
 import { createRoot } from 'react-dom/client'
 import { JSDOM } from 'jsdom'
+import { projectCodexHeadActionProjection } from '../main/modules/agent-control/codex-runtime/codex-action-surface'
+import { projectCodexLifecycleOperationV2 } from '../main/modules/agent-control/codex-runtime/codex-lifecycle-action-surface'
 
 // --- jsdom + global stubs must be installed BEFORE importing renderer code ---
 
@@ -375,7 +377,7 @@ function resetStores() {
 function seedEmptyAgent() {
   useAgent.setState({
     agents: [
-      { name: 'butler', displayName: '管家', avatar: '', status: 'idle', selected: true },
+      { name: 'butler', displayName: '管家', avatar: '', status: 'idle' },
     ],
     messages: [],
     currentAgent: 'butler',
@@ -511,7 +513,7 @@ test('V1.0 fixture / case 2 — streaming-text: assistant mid-stream keeps singl
   const streamingMessageId = 'msg-streaming-1'
   useAgent.setState({
     agents: [
-      { name: 'butler', displayName: '管家', avatar: '', status: 'idle', selected: true },
+      { name: 'butler', displayName: '管家', avatar: '', status: 'idle' },
     ],
     messages: [
       {
@@ -666,7 +668,7 @@ test('late stop terminal clears the matching error, while a stale terminal leave
     lastMessageAt: null,
   }
   useAgent.setState({
-    agents: [{ name: 'butler', displayName: '管家', avatar: '', status: 'idle', selected: true }],
+    agents: [{ name: 'butler', displayName: '管家', avatar: '', status: 'idle' }],
     currentAgent: 'butler',
     currentScopeId: scopeId,
     currentScope: stopScope,
@@ -698,7 +700,34 @@ test('late stop terminal clears the matching error, while a stale terminal leave
   const agentApi = electronAPIStub.agent as Record<string, unknown>
   const previousKill = agentApi.kill
   const previousListConversationScopes = agentApi.listConversationScopes
+  const previousReadCodexActionSurface = agentApi.readCodexActionSurface
   agentApi.listConversationScopes = async () => ({ success: true, data: [stopScope] })
+  agentApi.readCodexActionSurface = async () => {
+    const targetReadyRunId = useAgent.getState().sessions[sessionId]?.streamingRequestId || null
+    const head = projectCodexHeadActionProjection({
+      scopeId, scopeEpoch: 0, aliasId: scopeId, aliasGeneration: 1,
+      threadBindingId: 'stop-binding', headRevision: 1, actionProjectionSequence: 1,
+      materializationKind: 'fresh_start', materializationState: 'confirmed', codexThreadId: 'native-stop',
+      continuationBlocked: false, activeProductFence: Boolean(targetReadyRunId),
+      manualCompactionState: 'none', hasLegacyPreparedRun: false,
+      headRuntimeManifestDigest: 'runtime', headProtocolSchemaDigest: 'protocol',
+      currentRuntimeManifestDigest: 'runtime', currentProtocolSchemaDigest: 'protocol',
+    })
+    return { success: true, data: {
+      scopeId, scopeEpoch: 0, head,
+      lifecycle: projectCodexLifecycleOperationV2({
+        base: {
+          identity: { aliasId: scopeId, aliasGeneration: 1 },
+          activeReadyRunId: targetReadyRunId, latestReadyRunId: targetReadyRunId,
+          snapshot: targetReadyRunId ? 'product_turn_interruptible' : 'idle_native_thread',
+          interruptRequested: false, interruptAcknowledged: false,
+          requestedAction: null, evidenceDigest: 'lifecycle-stop-ready',
+        },
+        head, scopeEpoch: 0, threadBindingId: 'stop-binding', headRevision: 1,
+        materializationIntentRef: null,
+      }),
+    } }
+  }
   agentApi.kill = async () => ({
     ok: false,
     action: 'stop',
@@ -881,6 +910,7 @@ test('late stop terminal clears the matching error, while a stale terminal leave
   } finally {
     agentApi.kill = previousKill
     agentApi.listConversationScopes = previousListConversationScopes
+    agentApi.readCodexActionSurface = previousReadCodexActionSurface
     unmount()
   }
 })
@@ -899,7 +929,7 @@ test('V1.0 fixture / case 3 — tool-running task in flight: shell renders witho
   const scopeId = 'scope-task'
   useAgent.setState({
     agents: [
-      { name: 'butler', displayName: '管家', avatar: '', status: 'idle', selected: true },
+      { name: 'butler', displayName: '管家', avatar: '', status: 'idle' },
     ],
     messages: [
       {
@@ -1039,7 +1069,7 @@ test('V1.0 fixture / case 4 — completed task-card: terminal projection renders
   const scopeId = 'scope-task-done'
   useAgent.setState({
     agents: [
-      { name: 'butler', displayName: '管家', avatar: '', status: 'idle', selected: true },
+      { name: 'butler', displayName: '管家', avatar: '', status: 'idle' },
     ],
     messages: [
       {

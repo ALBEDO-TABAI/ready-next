@@ -36,6 +36,7 @@ describe('RSS settings helpers', () => {
   it('keeps partial auto-refresh failures visible instead of treating them as success', () => {
     const warning = getRSSAutoRefreshWarning({
       running: false,
+      status: 'completed_with_warnings',
       intervalMs: 60_000,
       nextRunAt: '2026-07-13T04:01:00.000Z',
       completedAt: '2026-07-13T04:00:00.000Z',
@@ -51,6 +52,7 @@ describe('RSS settings helpers', () => {
   it('does not restore stale automatic failure warnings after switching to manual mode', () => {
     const warning = getRSSAutoRefreshWarning({
       running: false,
+      status: 'failed',
       intervalMs: 0,
       nextRunAt: null,
       completedAt: '2026-07-13T04:00:00.000Z',

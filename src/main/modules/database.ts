@@ -16,6 +16,7 @@ import {
 } from './calendar-engine/rrule-engine'
 import type { ImportedEvent } from './calendar-engine/ics-importer'
 import type { Reminder } from '../../shared/calendar-types'
+import { CodexInteractionTransitionRepository } from './agent-control/codex-runtime/codex-interaction-transition-repository'
 
 // Use CommonJS `require('electron')` rather than `import { app } from 'electron'`.
 // Electron's Node entry (node_modules/electron/index.js) exports a string path
@@ -2665,36 +2666,11 @@ export class DatabaseManager {
     options?: { content?: string },
   ): boolean {
     if (!this.db) return false
-    const metaJson = JSON.stringify(meta || {})
-    const nextContent = typeof options?.content === 'string' ? options.content : null
-    if (nextContent !== null) {
-      const info = this.db.prepare(
-        `UPDATE chat_messages SET meta_json = ?, content = ? WHERE id = ?
-           AND EXISTS (
-             SELECT 1 FROM chat_conversations active
-              WHERE active.id = chat_messages.conversation_id AND active.closed_at IS NULL
-                AND chat_messages.message_visibility_epoch = active.message_visibility_epoch
-           )`
-      ).run(metaJson, nextContent, messageId)
-      if ((info as { changes?: number }).changes === 0) return false
-      const conversationId = (this.db.prepare(
-        'SELECT conversation_id FROM chat_messages WHERE id = ?'
-      ).get(messageId) as { conversation_id?: string } | undefined)?.conversation_id || ''
-      this.db.prepare('DELETE FROM chat_messages_fts WHERE message_id = ?').run(messageId)
-      this.db.prepare(
-        'INSERT INTO chat_messages_fts (message_id, conversation_id, content) VALUES (?, ?, ?)'
-      ).run(messageId, conversationId, nextContent)
-      return true
-    }
-    const info = this.db.prepare(
-      `UPDATE chat_messages SET meta_json = ? WHERE id = ?
-         AND EXISTS (
-           SELECT 1 FROM chat_conversations active
-            WHERE active.id = chat_messages.conversation_id AND active.closed_at IS NULL
-              AND chat_messages.message_visibility_epoch = active.message_visibility_epoch
-         )`
-    ).run(metaJson, messageId)
-    return (info as { changes?: number }).changes !== 0
+    return new CodexInteractionTransitionRepository(this.db).transitionAskCard({
+      messageId,
+      meta,
+      ...(typeof options?.content === 'string' ? { content: options.content } : {}),
+    })
   }
 
   getChatMessageById(messageId: string): ChatMessageRecord | null {
@@ -2784,15 +2760,33 @@ export class DatabaseManager {
     // on host Node without the better-sqlite3 native gate. This method only
     // injects the DB read + write closures.
     return performBootSweep({
-      pending: this.listPendingAskUserQuestionsCards().map((entry) => ({
+      pending: this.listPendingAskUserQuestionsCards()
+        .filter((entry) => !this.isCodexShapedPendingAsk(entry.meta))
+        .map((entry) => ({
         messageId: entry.messageId,
         conversationId: entry.conversationId,
         meta: entry.meta,
-      })),
+        })),
       liveCardIds: options.liveCardIds,
       now: options.now ?? new Date().toISOString(),
       updateMeta: (messageId, nextMeta) => this.updateChatMessageMeta(messageId, nextMeta),
     })
+  }
+
+  private isCodexShapedPendingAsk(meta: Record<string, unknown>): boolean {
+    const ask = meta.askUserQuestions && typeof meta.askUserQuestions === 'object'
+      ? meta.askUserQuestions as Record<string, unknown>
+      : null
+    if (!ask) return false
+    if (ask.codexRunIdentity && typeof ask.codexRunIdentity === 'object') return true
+    if (ask.actionConfirmationOwnerRef && typeof ask.actionConfirmationOwnerRef === 'object') {
+      return true
+    }
+    const requestId = typeof ask.requestId === 'string' ? ask.requestId.trim() : ''
+    if (!requestId || !this.db) return false
+    return Boolean(this.db.prepare(`
+      SELECT 1 AS present FROM codex_turn_bindings WHERE ready_run_id = ? LIMIT 1
+    `).get<{ present: number }>(requestId))
   }
 
   /**
@@ -2813,11 +2807,13 @@ export class DatabaseManager {
     if (!this.db) return 0
     if (!sessionId) return 0
     return performSessionSweep({
-      pending: this.listPendingAskUserQuestionsCards().map((entry) => ({
+      pending: this.listPendingAskUserQuestionsCards()
+        .filter((entry) => !this.isCodexShapedPendingAsk(entry.meta))
+        .map((entry) => ({
         messageId: entry.messageId,
         conversationId: entry.conversationId,
         meta: entry.meta,
-      })),
+        })),
       sessionId,
       cancelReason,
       now,

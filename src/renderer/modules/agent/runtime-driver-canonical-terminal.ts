@@ -1,8 +1,10 @@
 import type { CanonicalAssistantMessage } from '../../../shared/ipc-contracts/canonical-message'
+import type { ProductTurnReceipt } from '../../../shared/ipc-contracts/agent-runtime'
 import type { AgentMessage, ConversationScope, ScopeRunState } from './types'
 import { useMode } from '../../stores/useMode'
 import { rebuildAgentMessageFromRow } from '../../stores/agent-store-helpers'
 import { emitRendererAgentMetric } from './rendererMetrics'
+import { createEmptyScopeRunState } from './scopeRunState'
 import {
   normalizeSessionSlice,
   sessionKeyForScopeId,
@@ -10,6 +12,7 @@ import {
   type AgentStoreLike,
   type RunPayloadLike,
 } from './runtime-driver-session-state'
+import { applyProductTurnReceipt, mergeProductTurnActionProjections } from './productTurnReceipt'
 
 export function createRuntimeDriverCanonicalTerminal(deps: {
   store: AgentStoreLike
@@ -25,6 +28,7 @@ export function createRuntimeDriverCanonicalTerminal(deps: {
     options: {
       canonicalMessage: CanonicalAssistantMessage
       canonicalMessageDigest: string
+      productTurnReceipt?: ProductTurnReceipt
     },
   ): Promise<void> {
     clearInfrastructureWatchdog(scopeId, requestId)
@@ -35,6 +39,8 @@ export function createRuntimeDriverCanonicalTerminal(deps: {
       if (!state.sessions?.[sessionId] || currentSlice.conversationId !== scopeId) return {}
       const previous = currentSlice.scopeRunStates[scopeId] || getScopeRunStateFromState(state, scopeId)
       if (previous?.requestId && previous.requestId !== requestId) return {}
+      const receiptOwnsRun = options.productTurnReceipt?.readyRunId === requestId
+        && options.productTurnReceipt.readyScopeId === scopeId
 
       const activeRequestId = currentSlice.streamingRequestId || state.streamingRequestId || null
       const ownsScope = (
@@ -43,15 +49,30 @@ export function createRuntimeDriverCanonicalTerminal(deps: {
         activeRequestId === requestId
       )
       if (!ownsScope) return {}
-      if (!previous && activeRequestId !== requestId) return {}
+      if (!previous && activeRequestId !== requestId && !receiptOwnsRun) return {}
 
-      const nextRun = previous
+      const nextRunBase = previous
         ? previous.terminalReason
           ? { ...previous, scopeId, updatedAt: new Date().toISOString() }
           : finalizeDoneRunState(previous, scopeId)
-        : null
+        : receiptOwnsRun
+          ? createEmptyScopeRunState({
+              scopeId,
+              agent: currentSlice.currentAgent || state.currentAgent || 'butler',
+              requestId,
+            })
+          : null
+      const nextRun = nextRunBase && options.productTurnReceipt
+        ? applyProductTurnReceipt(nextRunBase, options.productTurnReceipt)
+        : nextRunBase
       persistedRunState = nextRun
       return withSessionSliceAndActiveRuntimeMirror(state, sessionId, {
+        productTurnActionProjectionByRunId: mergeProductTurnActionProjections({
+          existing: currentSlice.productTurnActionProjectionByRunId,
+          incoming: receiptOwnsRun && options.productTurnReceipt ? [options.productTurnReceipt.actionProjection] : [],
+          head: currentSlice.scopeHeadActionProjection,
+          workbenchMode: useMode.getState().workbenchMode,
+        }),
         scopeRunStates: nextRun
           ? {
             ...currentSlice.scopeRunStates,
@@ -73,7 +94,7 @@ export function createRuntimeDriverCanonicalTerminal(deps: {
         const currentSlice = normalizeSessionSlice(nextState.sessions?.[sessionId])
         if (!nextState.sessions?.[sessionId] || currentSlice.conversationId !== scopeId) return {}
         const previous = currentSlice.scopeRunStates[scopeId] || getScopeRunStateFromState(nextState, scopeId)
-        if (currentSlice.streamingRequestId !== requestId || previous?.requestId !== requestId) return {}
+        if (previous?.requestId !== requestId) return {}
         return withSessionSliceAndActiveRuntimeMirror(nextState, sessionId, {
           scopeRunStates: previous
             ? {
@@ -128,7 +149,7 @@ export function createRuntimeDriverCanonicalTerminal(deps: {
       const currentSlice = normalizeSessionSlice(state.sessions?.[sessionId])
       if (!state.sessions?.[sessionId] || currentSlice.conversationId !== scopeId) return {}
       const previous = currentSlice.scopeRunStates[scopeId] || null
-      if (currentSlice.streamingRequestId !== requestId || previous?.requestId !== requestId) return {}
+      if (previous?.requestId !== requestId) return {}
 
       return withSessionSliceAndActiveRuntimeMirror(state, sessionId, {
         scopeRunStates: {
@@ -235,7 +256,7 @@ export function createRuntimeDriverCanonicalTerminal(deps: {
       const currentSlice = normalizeSessionSlice(state.sessions?.[sessionId])
       if (!state.sessions?.[sessionId] || currentSlice.conversationId !== scopeId) return {}
       const previous = currentSlice.scopeRunStates[scopeId] || null
-      if (currentSlice.streamingRequestId !== requestId || previous?.requestId !== requestId) return {}
+      if (previous?.requestId !== requestId) return {}
       const transientResponseId = previous.responseMessageId || null
       const ownerRunId = previous.requestId
       const scope = state.scopes.find((item: ConversationScope) => item.id === scopeId) || state.currentScope || null

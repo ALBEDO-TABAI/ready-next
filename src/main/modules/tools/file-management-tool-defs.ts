@@ -47,7 +47,7 @@ export const FILE_MANAGEMENT_TOOLS: FileManagementToolDef[] = [
   {
     name: 'file_read_excerpt',
     description:
-      '读取 workspace 内文档正文片段。可传 anchor 读取章节，或传 lineStart / lineEnd 读取行号范围；用于基于原文的总结、分析、改写和关系梳理。',
+      '读取 workspace 或本轮明确选择的文档正文片段。已选附件可直接传 @[文件名]、唯一文件名或 logicalResourceId，无需索要被隐藏的主机路径；可传 anchor 或行号范围。',
     params: zodObjectToParamList(FILE_MANAGEMENT_SCHEMAS.file_read_excerpt) as ToolParam[],
   },
   {
@@ -69,12 +69,12 @@ export const FILE_MANAGEMENT_TOOLS: FileManagementToolDef[] = [
   },
   {
     name: 'tag_forge_prepare_batch',
-    description: 'Tag Forge 文件夹批量打标的唯一准备入口。首次传 rootPath 会读取文件夹内全部 Markdown，续跑只传 batchId；返回正文、不透明 itemId、版本凭证、当前受控词表和进度。',
+    description: 'Tag Forge 文档打标的唯一准备入口。首次传 rootPath：已选附件直接使用 @[名称]、唯一名称或 logicalResourceId，无需索要被隐藏的主机路径；文件夹同样接受本轮冻结引用。续跑只传 batchId。',
     params: zodObjectToParamList(FILE_MANAGEMENT_SCHEMAS.tag_forge_prepare_batch) as ToolParam[],
   },
   {
     name: 'tag_forge_apply_batch',
-    description: '按 prepare 返回的 itemId 和版本凭证写回多份 Markdown 内容标签。可靠标签立即写入；原文可核对的高置信新词自动采用；扫描完整个文件夹后，真正存疑的新词由宿主在 Agent 对话中集中确认一次。',
+    description: '按 prepare 返回的 itemId 和版本凭证写回 Markdown 内容标签。可靠标签立即写入；原文可核对的高置信新词自动采用；全部文档扫描完成后，真正存疑的新词由宿主在 Agent 对话中集中确认一次。',
     params: zodObjectToParamList(FILE_MANAGEMENT_SCHEMAS.tag_forge_apply_batch) as ToolParam[],
   },
   {
@@ -98,7 +98,7 @@ export const FILE_MANAGEMENT_TOOLS: FileManagementToolDef[] = [
   {
     name: 'file_inventory',
     description:
-      '盘点授权文件夹内的文件和子文件夹。支持分页、浅层递归和可选短摘要；用于批量整理前先了解目录内容。',
+      '盘点授权文件夹内的文件和子文件夹。rootPath 可以是绝对路径，也可以是本轮冻结的 logicalResourceId 或 @[文件夹名]。支持分页、浅层递归和可选短摘要。',
     params: zodObjectToParamList(FILE_MANAGEMENT_SCHEMAS.file_inventory) as ToolParam[],
   },
   {

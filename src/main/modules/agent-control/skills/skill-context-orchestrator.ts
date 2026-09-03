@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import type { SkillState } from '../../skills-runtime/runtime-manager'
 import { hasLocalSendImFileIntent } from '../../../../shared/remote-im-file-intent'
 import type { ToolExecutionOutput } from '../tools-runtime/tool-result-types'
-import { rememberLastReferenceSkill, getLastReferenceSkill, peekLastReferenceSkill } from './skill-reference-hints'
+import { rememberLastReferenceSkill, rememberLastReferenceSkillApplicableTools, getLastReferenceSkill, observeLastReferenceSkill, peekLastReferenceSkill } from './skill-reference-hints'
 import { logAgentMetric } from '../metrics'
 import { emitSkillReferenceInlined } from './skill-reference-inlined-bridge'
 import { isRetryOnlyTurn } from './skill-detection-inputs'
@@ -45,9 +45,6 @@ const REFERENCE_SKILL_PRIMITIVE_TOOL_NAMES = [
   // so reference-skill turns didn't surface it as a recommended next step.
   'skill_inspect_run_state',
 ]
-const CONTEXT_COMPACT_SKILL_ID = 'context-compact'
-const CONTEXT_COMPACT_PRIMITIVE_TOOL_NAME = 'skill_compact_context'
-
 function errorKind(error: unknown): string {
   if (error && typeof error === 'object' && 'code' in error && typeof (error as { code?: unknown }).code === 'string') {
     return (error as { code: string }).code
@@ -179,7 +176,11 @@ export class SkillContextOrchestrator {
     return false
   }
 
-  buildPreferredSkillToolNames(userText: string, sessionId?: string): string[] {
+  buildPreferredSkillToolNames(
+    userText: string,
+    sessionId?: string,
+    observedHint?: { id: string; name: string; applicableToolNames?: string[] } | null,
+  ): string[] {
     const toolNames = new Set<string>(REFERENCE_SKILL_PRIMITIVE_TOOL_NAMES)
 
     // skill-resume G6 — when a reference-skill hint is armed for THIS session,
@@ -190,7 +191,9 @@ export class SkillContextOrchestrator {
     // allowedToolNames — even though B2's exposure filter would have admitted
     // them. This is what made `skill_video_expert_pipeline` invisible after
     // G3 synthesized a context text on retry intent.
-    const armedHint = sessionId ? getLastReferenceSkill(sessionId) : null
+    const armedHint = observedHint === undefined
+      ? sessionId ? getLastReferenceSkill(sessionId) : null
+      : observedHint
 
     const skillCandidates = this.findExplicitlyRequestedSkills(userText)
     if (armedHint && skillCandidates.length === 0 && isRetryOnlyTurn(userText)) {
@@ -198,13 +201,6 @@ export class SkillContextOrchestrator {
       if (armedSkill && !skillCandidates.some((skill) => skill.id === armedSkill.id)) {
         skillCandidates.push(armedSkill)
       }
-    }
-
-    if (
-      skillCandidates.some((skill) => skill.id === CONTEXT_COMPACT_SKILL_ID)
-      || armedHint?.id === CONTEXT_COMPACT_SKILL_ID
-    ) {
-      toolNames.add(CONTEXT_COMPACT_PRIMITIVE_TOOL_NAME)
     }
 
     for (const skill of skillCandidates) {
@@ -227,14 +223,45 @@ export class SkillContextOrchestrator {
     return Array.from(toolNames)
   }
 
-  getCurrentReferenceSkillHint(sessionId?: string): { id: string; name: string } | null {
+  getCurrentReferenceSkillHint(sessionId?: string): { id: string; name: string; applicableToolNames?: string[] } | null {
     const hint = getLastReferenceSkill(sessionId)
-    return hint ? { id: hint.id, name: hint.name } : null
+    return hint ? {
+      id: hint.id,
+      name: hint.name,
+      ...(hint.applicableToolNames === undefined ? {} : { applicableToolNames: [...hint.applicableToolNames] }),
+    } : null
   }
 
-  peekCurrentReferenceSkillHint(sessionId?: string): { id: string; name: string } | null {
+  peekCurrentReferenceSkillHint(sessionId?: string): { id: string; name: string; applicableToolNames?: string[] } | null {
     const hint = peekLastReferenceSkill(sessionId)
-    return hint ? { id: hint.id, name: hint.name } : null
+    return hint ? {
+      id: hint.id,
+      name: hint.name,
+      ...(hint.applicableToolNames === undefined ? {} : { applicableToolNames: [...hint.applicableToolNames] }),
+    } : null
+  }
+
+  observeCurrentReferenceSkillHint(sessionId?: string): { id: string; name: string; applicableToolNames?: string[] } | null {
+    const hint = observeLastReferenceSkill(sessionId)
+    return hint ? {
+      id: hint.id,
+      name: hint.name,
+      ...(hint.applicableToolNames === undefined ? {} : { applicableToolNames: [...hint.applicableToolNames] }),
+    } : null
+  }
+
+  rememberReferenceSkillToolApplicability(
+    skillId: string,
+    toolNames: readonly string[],
+    sessionId?: string,
+    messageVisibilityEpoch?: number,
+  ): boolean {
+    return rememberLastReferenceSkillApplicableTools(
+      sessionId,
+      skillId,
+      toolNames,
+      messageVisibilityEpoch,
+    )
   }
 
   rememberReferenceSkillFromRunStateResource(

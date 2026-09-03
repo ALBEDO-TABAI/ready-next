@@ -63,25 +63,46 @@ function publicToolTraceText(text: string): string {
   return formatSkillToolTraceText(raw) || raw
 }
 
-export function filterUserVisibleToolTraceEvents<T extends Pick<ToolTraceEvent, 'text'>>(events: T[]): T[] {
+export function filterUserVisibleToolTraceEvents<
+  T extends Pick<ToolTraceEvent, 'id' | 'kind' | 'text'>,
+>(events: T[]): T[] {
   const visible: T[] = []
-  const keptIndexByKey = new Map<string, number>()
+  const keptIndexById = new Map<string, number>()
+  const unmatchedRichByText = new Map<string, number[]>()
+  const unmatchedThinByText = new Map<string, number[]>()
+  const mergeFields = (keptIndex: number, event: T) => {
+    const kept = visible[keptIndex] as T & Pick<ToolTraceEvent, 'toolName' | 'hideToolName' | 'detail'>
+    const duplicate = event as T & Pick<ToolTraceEvent, 'toolName' | 'hideToolName' | 'detail'>
+    if (!kept.toolName && duplicate.toolName) kept.toolName = duplicate.toolName
+    if (duplicate.hideToolName) kept.hideToolName = true
+    if (!kept.detail && duplicate.detail) kept.detail = duplicate.detail
+  }
   for (const event of events) {
     if (isInternalToolTraceText(event.text)) continue
     const text = publicToolTraceText(event.text)
-    const key = `${'kind' in event ? String((event as { kind?: unknown }).kind) : ''}:${text}`
-    const keptIndex = keptIndexByKey.get(key)
-    if (keptIndex != null) {
-      // 同一工具事件有两个生产者（SDK executor 带 toolName/detail 的富事件、
-      // orchestrator 输出流的瘦事件），按 kind:text 去重时把富字段回填到已
-      // 保留的条目上，避免「先到的瘦事件吃掉后到的富事件」。
-      const kept = visible[keptIndex] as T & Pick<ToolTraceEvent, 'toolName' | 'detail'>
-      const duplicate = event as T & Pick<ToolTraceEvent, 'toolName' | 'detail'>
-      if (!kept.toolName && duplicate.toolName) kept.toolName = duplicate.toolName
-      if (!kept.detail && duplicate.detail) kept.detail = duplicate.detail
+    const identityKey = `${event.kind}:${event.id}`
+    const sameIdentityIndex = keptIndexById.get(identityKey)
+    if (sameIdentityIndex != null) {
+      mergeFields(sameIdentityIndex, event)
       continue
     }
-    keptIndexByKey.set(key, visible.length)
+    const duplicateKey = `${event.kind}:${text}`
+    const rich = Boolean(
+      (event as T & Pick<ToolTraceEvent, 'toolName' | 'detail'>).toolName
+      || (event as T & Pick<ToolTraceEvent, 'toolName' | 'detail'>).detail,
+    )
+    const opposite = rich ? unmatchedThinByText : unmatchedRichByText
+    const oppositeIndexes = opposite.get(duplicateKey)
+    const pairedIndex = oppositeIndexes?.shift()
+    if (pairedIndex != null) {
+      mergeFields(pairedIndex, event)
+      keptIndexById.set(identityKey, pairedIndex)
+      continue
+    }
+    const visibleIndex = visible.length
+    keptIndexById.set(identityKey, visibleIndex)
+    const own = rich ? unmatchedRichByText : unmatchedThinByText
+    own.set(duplicateKey, [...(own.get(duplicateKey) || []), visibleIndex])
     visible.push({ ...event, text })
   }
   return visible

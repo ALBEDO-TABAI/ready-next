@@ -7,7 +7,7 @@ import AddSourceModal from '../../components/rss/AddSourceModal'
 import RSSSettingsPanel from '../../components/rss/RSSSettingsPanel'
 import Modal from '../../components/ui/Modal'
 import { useModal } from '../../components/ui/useModal'
-import { useRSSAgentAdapter } from '../../modules/rss/useRSSAgentAdapter'
+import { useRSSSelectionCommandBridge } from '../../modules/rss/useRSSSelectionCommandBridge'
 import { fetchRSSWarmSnapshot } from '../../modules/rss/rssWarmLoader'
 import { getRSSWarmCache, primeRSSWarmCache, setRSSWarmCache } from '../../modules/rss/rssWarmCache'
 import {
@@ -388,6 +388,10 @@ export default function RSSMode({
 
     const applySnapshot = (snapshot: Parameters<typeof getRSSAutoRefreshWarning>[0]) => {
       setAutoRefreshWarning(getRSSAutoRefreshWarning(snapshot))
+      if (snapshot.completedAt) {
+        const completedAt = Date.parse(snapshot.completedAt)
+        if (Number.isFinite(completedAt)) setFeedSnapshot({ lastFetchAt: completedAt })
+      }
     }
     const unsubscribe = rss.onAutoRefreshCompleted((snapshot) => {
       if (suspendedRef.current) {
@@ -403,7 +407,7 @@ export default function RSSMode({
       else applySnapshot(result.data)
     })
     return unsubscribe
-  }, [loadRSSData])
+  }, [loadRSSData, setFeedSnapshot])
 
   useEffect(() => {
     if (isSuspended) return
@@ -567,6 +571,7 @@ export default function RSSMode({
 
         if (selectedSourceEntry) {
           const result = await window.electronAPI.rss.refreshSource(selectedSourceEntry.id)
+          if (result.success && !result.data?.running) setFeedSnapshot({ lastFetchAt: Date.now() })
           if (!result.success) {
             setStatusMessage(result.error || '刷新失败')
             setStatusAction(result.data?.browserAction || null)
@@ -586,6 +591,7 @@ export default function RSSMode({
         } else {
           attemptedFullRefresh = true
           const result = await window.electronAPI.rss.fetchAll()
+          if (result.success && !result.data?.running) setFeedSnapshot({ lastFetchAt: Date.now() })
           setAutoRefreshWarning(getRSSFetchAllResultWarning(result))
           if (!result.success) {
             setStatusMessage(result.error || '刷新失败')
@@ -608,7 +614,7 @@ export default function RSSMode({
     } finally {
       setRefreshing(false)
     }
-  }, [loadRSSData, refreshing])
+  }, [loadRSSData, refreshing, setFeedSnapshot])
 
   const handleStatusAction = useCallback(async () => {
     if (!statusAction?.url) return
@@ -624,17 +630,13 @@ export default function RSSMode({
     if (intervalMs <= 0) setAutoRefreshWarning(null)
   }, [])
 
-  useRSSAgentAdapter({
+  useRSSSelectionCommandBridge({
     items,
     selectedSource,
     selectedItem,
-    loadRSSData,
-    handleRefresh,
     handleItemClick,
     setFeedSnapshot,
     setSelection,
-    setLastAnalysis,
-    setAnalysisProgressMap,
   })
 
   const handleMarkItemRead = useCallback(

@@ -187,7 +187,7 @@ test('stop waits for an in-flight fetch and suppresses late scheduling and publi
   assert.equal(scheduler.getSnapshot().nextRunAt, null)
 })
 
-test('partial fetch errors are published instead of being reported as success', async () => {
+test('partial fetch errors are published as completed with warnings', async () => {
   const harness = createHarness({
     intervalMs: 200,
     fetchResult: {
@@ -205,7 +205,8 @@ test('partial fetch errors are published instead of being reported as success', 
 
   assert.equal(harness.fetchCalls, 1)
   assert.equal(harness.published.length, 1)
-  assert.equal(harness.published[0].success, false)
+  assert.equal(harness.published[0].success, true)
+  assert.equal(harness.published[0].status, 'completed_with_warnings')
   assert.deepEqual(harness.published[0].errors, ['[Source A] HTTP 429'])
   assert.equal(harness.scheduled[1].delayMs, 200)
 })
@@ -259,6 +260,7 @@ test('the renderer status IPC returns the scheduler snapshot', async () => {
   } as unknown as IpcMain
   const expected = {
     running: false,
+    status: 'completed_with_warnings' as const,
     intervalMs: 60_000,
     nextRunAt: null,
     completedAt: '2026-07-13T04:00:00.000Z',

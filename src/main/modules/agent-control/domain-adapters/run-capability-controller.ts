@@ -12,7 +12,10 @@ import { buildExecutionToolState, type ExecutionIntentContext } from '../executi
 import { computeCapabilityFloors } from './capability-floors'
 import { defaultToolRegistry } from '../tools-runtime/tool-registry'
 import { getSkillsRuntimeManager } from '../../skills-runtime/runtime-manager'
-import { envelopeHasCurrentDocumentContext, envelopeHasLocalDocumentResource } from '../contracts/request-envelope'
+import {
+  envelopeHasCurrentDocumentContext,
+  envelopeHasLocalDocumentResource,
+} from '../contracts/request-envelope'
 import { logAgentMetric } from '../metrics'
 import {
   MAX_ARBITRATION_RECURSION,
@@ -50,9 +53,7 @@ interface RunCapabilityBaseParams {
   /**
    * Stage T PR-T5 — conversation scope id, sourced from
    * `RequestEnvelope.scopeId`. Plumbed onto `toolPolicy.scopeId` so the
-   * gateway / registry pass it into
-   * `mcp.registry.isAuthorized(toolName, sessionId, scopeId)` for the
-   * model-visible MCP tool list.
+   * tool policy keeps it as the per-turn product scope identity.
    */
   scopeId?: string
   /**
@@ -329,9 +330,7 @@ function resolveRunCapabilities(
   // post-cutover policy applied later in turn-engine.
   toolPolicy.authorization = baseParams.authorization
 
-  // Stage T PR-T5 — thread scopeId from RequestEnvelope onto the policy
-  // so the bundle path (gateway → registry → mcp.registry.isAuthorized)
-  // sees a consistent (sessionId, scopeId) tuple per turn.
+  // Keep the request scope on the per-turn tool policy.
   toolPolicy.scopeId = baseParams.scopeId
 
   // Stage S round 2 (Issue 3) — vision capability filter.
@@ -360,10 +359,11 @@ function resolveRunCapabilities(
 
   // P1-4 — 唯一裁决点计算能力地板并挂到 toolPolicy；SDK executor 消费同一 computeCapabilityFloors。
   //   bundle 侧把地板并入 activeSkillAllowedTools 过滤集，保证技能收窄不移除地板项（parity）。
+  const requestEnvelope = baseParams.executionIntentContext.requestEnvelope
   toolPolicy.capabilityFloors = computeCapabilityFloors({
     authorization: baseParams.authorization,
-    hasLocalDocumentResource: envelopeHasLocalDocumentResource(baseParams.executionIntentContext.requestEnvelope),
-    hasCurrentDocumentContext: envelopeHasCurrentDocumentContext(baseParams.executionIntentContext.requestEnvelope),
+    hasLocalDocumentResource: envelopeHasLocalDocumentResource(requestEnvelope),
+    hasCurrentDocumentContext: envelopeHasCurrentDocumentContext(requestEnvelope),
   })
 
   const visionCapable = capabilityResolution.supportsVision === true

@@ -57,6 +57,7 @@ test('selected tag-forge plus folder yields the exclusive five-tool surface', ()
 
 test('folder tagging alias becomes a selected tag-forge authorization, not a second regex grant', () => {
   const resolved = resolveCodexProductTurnAuthorization({
+    mode: 'commit',
     host: {
       getScope: () => ({
         id: 'scope-tf',

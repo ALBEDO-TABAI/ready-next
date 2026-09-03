@@ -655,6 +655,7 @@ export class AgentSdkRuntime extends EventEmitter {
     skillHintRelevantForTurn = false,
   ): SkillToolAuthorization {
     return resolveSemanticSkillAuthorizationForTurn({
+      mode: 'commit',
       message,
       sessionId,
       messageVisibilityEpoch,

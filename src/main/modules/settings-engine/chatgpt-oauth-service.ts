@@ -28,10 +28,8 @@ export interface ChatGptOAuthServiceDeps {
 type ChatGptOAuthConnectHooks = {
   beforeRestart?: () => void | {
     existingProxyApiKey?: string
-    savedModels?: string[]
   } | Promise<void | {
     existingProxyApiKey?: string
-    savedModels?: string[]
   }>
   afterReady?: (status: ChatGptOAuthStatus) => void | Promise<void>
 }
@@ -105,7 +103,6 @@ export class ChatGptOAuthService {
 
   async connect(
     existingProxyApiKey?: string,
-    savedModels: string[] = [],
     hooks: ChatGptOAuthConnectHooks = {},
   ): Promise<ChatGptOAuthStatus> {
     return this.runLifecycle(async () => {
@@ -114,12 +111,11 @@ export class ChatGptOAuthService {
       try {
         const prepared = await hooks.beforeRestart?.()
         const preparedProxyApiKey = prepared?.existingProxyApiKey ?? existingProxyApiKey
-        const preparedModels = prepared?.savedModels ?? savedModels
         authorizationStarted = true
         await this.stopServerUnlocked()
         await this.deps.login()
         const proxyApiKey = normalizeProxyApiKey(preparedProxyApiKey) || randomBytes(32).toString('base64url')
-        const status = await this.ensureReadyUnlocked(preparedModels, proxyApiKey)
+        const status = await this.ensureReadyUnlocked([], proxyApiKey)
         await hooks.afterReady?.(status)
         return status
       } catch (error) {
@@ -297,7 +293,7 @@ export function createChatGptOAuthService(authFilePath: string): ChatGptOAuthSer
       })
       await chmod(authFilePath, 0o600)
     },
-    startServer: async (_models, proxyApiKey) => {
+    startServer: async (models, proxyApiKey) => {
       await secureAuthStorage(authFilePath)
       const oauthHandler = createOpenAIOAuthFetchHandler({
         authFilePath,
@@ -315,7 +311,10 @@ export function createChatGptOAuthService(authFilePath: string): ChatGptOAuthSer
         return oauthHandler(request)
       })
       try {
-        const resolvedModels = await loadOAuthModels(proxyApiKey)
+        const resolvedModels = await resolveOAuthServerModels(
+          models,
+          () => loadOAuthModels(proxyApiKey),
+        )
         return {
           models: resolvedModels,
           close: () => closeServer(server),
@@ -331,6 +330,21 @@ export function createChatGptOAuthService(authFilePath: string): ChatGptOAuthSer
       })
     },
   })
+}
+
+export async function resolveOAuthServerModels(
+  savedModels: string[] | undefined,
+  loadModels: () => Promise<string[]>,
+): Promise<string[]> {
+  const cached = [...new Set(
+    (savedModels || []).map((model) => String(model || '').trim()).filter(Boolean),
+  )]
+  if (cached.length > 0) return cached
+  const loaded = [...new Set(
+    (await loadModels()).map((model) => String(model || '').trim()).filter(Boolean),
+  )]
+  if (loaded.length === 0) throw new Error('ChatGPT 账号没有返回可用模型。')
+  return loaded
 }
 
 function normalizeProxyApiKey(value: string | undefined): string {

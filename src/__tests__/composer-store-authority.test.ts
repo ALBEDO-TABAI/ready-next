@@ -5,6 +5,8 @@ import { resolveReferencedFilePoolAttachments } from '../renderer/modules/agent/
 import type { ChatAttachment, ConversationScope } from '../renderer/modules/agent/types'
 import { makeEmptySessionSlice } from '../renderer/stores/agent-store-helpers'
 import { useAgent } from '../renderer/stores/useAgent'
+import { projectCodexHeadActionProjection } from '../main/modules/agent-control/codex-runtime/codex-action-surface'
+import { projectCodexLifecycleOperationV2 } from '../main/modules/agent-control/codex-runtime/codex-lifecycle-action-surface'
 
 function deferred<T>() {
   let resolve!: (value: T) => void
@@ -127,6 +129,36 @@ function modeReceipt(mode: 'ask' | 'auto' | 'full', epoch = 0) {
   }
 }
 
+async function actionSurface(request: { aliasId: string; aliasGeneration: number }) {
+  const slice = Object.values(useAgent.getState().sessions)
+    .find((candidate) => candidate.conversationId === request.aliasId)
+  const scopeEpoch = slice?.messageVisibilityEpoch ?? 0
+  const threadBindingId = `binding-${request.aliasId}-${request.aliasGeneration}`
+  const head = projectCodexHeadActionProjection({
+    scopeId: request.aliasId, scopeEpoch, ...request, threadBindingId,
+    headRevision: 1, actionProjectionSequence: 1,
+    materializationKind: 'fresh_start', materializationState: 'confirmed',
+    codexThreadId: 'native-composer', continuationBlocked: false, activeProductFence: false,
+    manualCompactionState: 'none', hasLegacyPreparedRun: false,
+    headRuntimeManifestDigest: 'runtime', headProtocolSchemaDigest: 'protocol',
+    currentRuntimeManifestDigest: 'runtime', currentProtocolSchemaDigest: 'protocol',
+  })
+  return {
+    success: true,
+    data: {
+      scopeId: request.aliasId, scopeEpoch, head,
+      lifecycle: projectCodexLifecycleOperationV2({
+        base: {
+          identity: request, activeReadyRunId: null, latestReadyRunId: null,
+          snapshot: 'idle_native_thread', interruptRequested: false,
+          interruptAcknowledged: false, requestedAction: null, evidenceDigest: 'composer-evidence',
+        },
+        head, scopeEpoch, threadBindingId, headRevision: 1, materializationIntentRef: null,
+      }),
+    },
+  }
+}
+
 test('late file picker result is rejected after A to B to A round-trip', async () => {
   seedStore('a', 10)
   const picked = deferred<{ success: boolean; data: typeof pickedFile[] }>()
@@ -197,6 +229,7 @@ test('reset invalidates a pending file picker without reopening old resources', 
   const restore = installWindow({
     chat: { pickFiles: () => picked.promise },
     agent: {
+      readCodexActionSurface: actionSurface,
       resetSession: async () => ({
         ok: true,
         action: 'reset',
@@ -257,6 +290,7 @@ test('closing a background session preserves the active composer authority and r
   useAgent.getState().addAttachments([attachment])
   const restore = installWindow({
     agent: {
+      readCodexActionSurface: actionSurface,
       closeSession: async () => ({
         ok: true,
         action: 'close',

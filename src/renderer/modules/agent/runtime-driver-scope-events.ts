@@ -10,7 +10,8 @@ import {
   withSessionSliceAndActiveRuntimeMirror,
   type AgentStoreLike,
 } from './runtime-driver-session-state'
-import { applyProductTurnReceipt } from './productTurnReceipt'
+import { applyProductTurnReceipt, mergeProductTurnActionProjections } from './productTurnReceipt'
+import { useMode } from '../../stores/useMode'
 
 function scopeRunEventMatchesCurrentIdentity(
   state: any,
@@ -147,6 +148,23 @@ export function installRuntimeDriverScopeEvents(deps: {
           ? applyProductTurnReceipt(nextRun, event.productTurnReceipt)
           : nextRun
       })
+
+      if (event.productTurnReceipt) {
+        store.setState((state: any) => {
+          if (!scopeRunEventMatchesCurrentIdentity(state, event)) return state
+          const sessionId = sessionKeyForScopeId(state, event.scopeId)
+          const slice = normalizeSessionSlice(state.sessions?.[sessionId])
+          if (event.productTurnReceipt.readyScopeId !== event.scopeId) return state
+          return withSessionSliceAndActiveRuntimeMirror(state, sessionId, {
+            productTurnActionProjectionByRunId: mergeProductTurnActionProjections({
+              existing: slice.productTurnActionProjectionByRunId,
+              incoming: [event.productTurnReceipt.actionProjection],
+              head: slice.scopeHeadActionProjection,
+              workbenchMode: useMode.getState().workbenchMode,
+            }),
+          })
+        })
+      }
 
       if (!scopeRunEventMatchesCurrentIdentity(store.getState(), event)) return
       const detachedJobEvent = event.module === 'skill' && event.executionKind === 'job' && String(event.taskId || '').startsWith('detached:')

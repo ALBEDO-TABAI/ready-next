@@ -21,8 +21,15 @@ import {
   isPreparedCodexProductRun,
   type PreparedCodexProductRun,
 } from './codex-product-run-preparer'
+import {
+  actionObligationEvidenceMatches,
+  isReadyActionObligationSet,
+  type ReadyActionObligationSetV1,
+} from './codex-action-obligation'
 import type { CoreTurnCandidate } from './codex-turn-collector'
 import { CodexBindingRepositoryError } from './codex-binding-error'
+import { CODEX_PRISTINE_FRESH_START_PREDICATE_SQL } from './codex-binding-schema'
+import { assertCodexTerminalEvidenceOwners } from './codex-terminal-evidence-validation'
 import {
   normalizeCodexThread,
   normalizeCodexTurn,
@@ -53,6 +60,10 @@ import {
   type CodexBrowserVerifierIdentityProjection,
 } from './codex-browser-verifier-identity'
 import {
+  browserToolSurfaceNeedsObservationReserve,
+  isCodexBrowserObservationClosureToolName,
+} from './codex-browser-admission'
+import {
   advanceCodexConversationMessageVisibilityInOpenTransaction,
   closeCodexConversationScopeInOpenTransaction,
   readCodexClosedConversationScope,
@@ -65,16 +76,36 @@ import {
 import {
   readProductTurnPresentation,
   readProductTurnPresentations,
+  type ProductTurnActionContext,
 } from './codex-product-turn-presentation'
 import type { ProductTurnReceipt } from '../../../../shared/ipc-contracts/agent-runtime'
+import { normalizeContextUsageSnapshot } from '../../../../shared/context-usage-types'
 import type { ToolExecutionOutput } from '../tools-runtime/tool-result-types'
+import { projectCodexHeadActionProjection, type CodexHeadActionFacts } from './codex-action-surface'
+import { digestCodexUserInput, isCodexUserInput, type CodexUserInput } from './codex-user-input'
+import {
+  assertCodexTerminalFacts,
+  type CodexTerminalFacts,
+  type CodexTerminalNativeReadbackReceipt,
+} from './codex-terminal-facts'
+import {
+  assertNewCoverageItems,
+  classifyUncommittedOriginPolicy,
+  formalModelInputOrigins,
+  nativeInheritedContractDigest,
+  resolveAcceptedNativePrefixHead,
+  resolveLiveUncommittedUserTail,
+  resolveFormalNativeInputCoverage,
+  resolveExplicitRetryTailPlan,
+  type AcceptedNativePrefixResolution,
+} from './codex-history-continuity-policy'
 export { CodexBindingRepositoryError } from './codex-binding-error'
 export type {
   CodexToolBridgeExecutionBinding,
   CodexToolCallBindingRead,
 } from './codex-tool-binding-repository'
 
-type StartMethod = 'thread/start' | 'turn/start'
+type StartMethod = 'thread/start' | 'thread/fork' | 'turn/start'
 type StartState = 'held' | 'pending' | 'recovery_held'
 type RunResult = { changes?: number }
 type JsonObject = Record<string, unknown>
@@ -103,7 +134,8 @@ function assertNativeTerminalCandidate(value: unknown): asserts value is NativeT
     || !Array.isArray(value.browserProofRefs)
     || !Array.isArray(value.otherProofRefs)
     || !Array.isArray(value.projectionPatchRefs)
-    || !isRecord(value.runtimeDiagnostics)) {
+    || !isRecord(value.runtimeDiagnostics)
+    || (value.contextUsage !== null && !normalizeContextUsageSnapshot(value.contextUsage))) {
     throw new CodexBindingRepositoryError('engine_terminal_candidate_invalid')
   }
   if (value.candidateSelection.kind === 'accepted') {
@@ -444,6 +476,37 @@ export type CodexEmptyAliasGenerationInput = {
   createdAt: string
 }
 
+export type CodexNativeForkSeedInput = {
+  targetCwd: string
+  reservationSetId: string
+  reservationId: string
+  reservationEvidenceDigest: string
+}
+
+export type CodexUncommittedUserTailItem = {
+  originUserMessageId: string
+  input: CodexUserInput[]
+  inputDigest: string
+  policy: 'untrusted_text_history' | 'resource_restatement_required' | 'task_restatement_required'
+}
+
+export type CodexNativeCoverageItem = {
+  messageId: string
+  digest: string
+}
+
+export type CodexNativeCoverageReceiptRef = {
+  receiptId: string
+  digest: string
+}
+
+export type CodexAcceptedNativePrefixHead = {
+  acceptedNativeHeadKind: 'turn' | 'compaction'
+  acceptedNativeHeadId: string
+  acceptedProductReadyRunId: string | null
+  coverageReceiptRef: CodexNativeCoverageReceiptRef
+}
+
 export type CodexActiveAliasBindingRead = {
   threadBindingId: string
   aliasId: string
@@ -453,6 +516,9 @@ export type CodexActiveAliasBindingRead = {
   codexSessionId: string | null
   isolatedThreadCwd: string | null
   toolSurface: ReadyToolSurface | null
+  materializationKind: 'legacy' | 'fresh_start' | 'native_fork' | 'fresh_root_with_tail'
+  materializationState: 'pending' | 'confirmed' | 'unknown' | 'proven_absent' | 'abandoned'
+  historySeedDigest: string | null
   hasActiveFence: boolean
   continuationBlockedAt: string | null
   continuationBlockedReason: string | null
@@ -492,6 +558,13 @@ export type CodexProductTurnRuntimeRead = {
   ingress: PreparedCodexProductRun['ingress']
   admittedAt: string
   messageVisibilityEpoch: number
+  turnStartConnectionEpoch: string
+  turnRevision: number
+}
+
+export type CodexTerminalCloseoutEvidence = {
+  nativeReadback: CodexTerminalNativeReadbackReceipt
+  terminalFacts: CodexTerminalFacts
 }
 
 export type CodexEngineTerminalReceiptRead = {
@@ -502,6 +575,7 @@ export type CodexEngineTerminalReceiptRead = {
   candidate: unknown
   candidateDigest: string
   recordedAt: string
+  revision: number
 }
 
 export type CodexToolPublicationReceiptRead = {
@@ -622,6 +696,7 @@ export type CodexProductStartStateRead = {
 export type CodexLifecycleOperationRead = {
   identity: { aliasId: string; aliasGeneration: number }
   facts: LifecycleOperationFacts
+  hasLegacyPreparedRun: boolean
   activeReadyRunId: string | null
   activeManualCompactionId: string | null
   latestReadyRunId: string | null
@@ -644,9 +719,9 @@ export type CodexLifecycleActionCloseoutRead = CodexLifecycleCloseoutRead & {
   action: CodexLifecycleAction
   readyRunId: string
   lifecycleActionEvidenceDigest: string
-  retiredGeneration: number
-  retirementTransactionDigest: string
-  archiveIntentDigest: string
+  retiredGeneration: number | null
+  retirementTransactionDigest: string | null
+  archiveIntentDigest: string | null
   scopeClosureEvidenceDigest: string | null
   newGeneration: number | null
   newThreadBindingId: string | null
@@ -655,6 +730,7 @@ export type CodexLifecycleActionCloseoutRead = CodexLifecycleCloseoutRead & {
 export type CodexModelGatewayBindingReadInput = {
   kind: 'product' | 'automatic_compaction' | 'manual_compaction'
   codexThreadId: string
+  codexForkedFromId: string | null
   codexTurnId: string
   readyRunId: string | null
   toolSurfaceDigest: string | null
@@ -698,6 +774,7 @@ type ThreadBindingRow = {
   thread_start_request_id: string | null
   thread_start_rpc_connection_epoch: string | null
   thread_start_rpc_id: number | null
+  thread_start_request_digest: string | null
   thread_start_dispatch_intent_at: string | null
   thread_start_child_write_confirmed_at: string | null
   thread_start_child_write_digest: string | null
@@ -719,6 +796,25 @@ type ThreadBindingRow = {
   codex_model: string | null
   upstream_profile_snapshot_ref: string | null
   upstream_profile_snapshot_digest: string | null
+  thread_materialization_kind: 'legacy' | 'fresh_start' | 'native_fork' | 'fresh_root_with_tail'
+  history_source_thread_binding_id: string | null
+  history_source_terminal_facts_digest: string | null
+  fork_accepted_through_codex_turn_id: string | null
+  fork_expected_prefix_turn_ids_json: string | null
+  fork_expected_prefix_turn_ids_digest: string | null
+  materialization_request_digest: string | null
+  accepted_product_boundary_ready_run_id: string | null
+  native_inherited_contract_digest: string | null
+  source_accepted_native_coverage_receipt_id: string | null
+  source_accepted_native_coverage_receipt_digest: string | null
+  materialization_state: 'pending' | 'confirmed' | 'unknown' | 'proven_absent' | 'abandoned'
+  materialization_effective_receipt_json: string | null
+  materialization_effective_receipt_digest: string | null
+  materialization_evidence_digest: string | null
+  history_seed_digest: string | null
+  uncommitted_user_tail_json: string | null
+  uncommitted_user_tail_digest: string | null
+  action_projection_sequence: number
   retired_at: string | null
   retired_reason: string | null
   retirement_evidence_digest: string | null
@@ -742,6 +838,7 @@ type TurnBindingRow = {
   turn_request_id: string
   turn_start_rpc_connection_epoch: string | null
   turn_start_rpc_id: number | null
+  turn_start_request_digest: string | null
   turn_start_dispatch_intent_at: string | null
   turn_start_child_write_confirmed_at: string | null
   turn_start_child_write_digest: string | null
@@ -766,6 +863,8 @@ type TurnBindingRow = {
   lifecycle_action_requested_at: string | null
   lifecycle_action_evidence_digest: string | null
   ingress_json: string | null
+  additional_context_digest: string
+  turn_contract_digest: string
   attempt_kind: 'user_ingress'
     | 'recovery_successor' | 'checkpoint_successor' | 'explicit_retry'
   ingress_admitted_digest: string
@@ -773,6 +872,13 @@ type TurnBindingRow = {
   engine_terminal_candidate_json: string | null
   engine_terminal_candidate_digest: string | null
   engine_terminal_recorded_at: string | null
+  terminal_native_readback_receipt_json: string | null
+  terminal_native_readback_receipt_digest: string | null
+  terminal_native_readback_revision: number | null
+  terminal_facts_json: string | null
+  terminal_facts_digest: string | null
+  accepted_native_coverage_receipt_id: string | null
+  accepted_native_coverage_receipt_digest: string | null
   publication_receipt_refs_json: string | null
   publication_receipt_digest: string | null
   publication_recorded_at: string | null
@@ -854,6 +960,13 @@ function safePositive(value: number, code: string): void {
 
 function isRecord(value: unknown): value is JsonObject {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+}
+
+function isPinnedReadOnlySandbox(value: unknown): boolean {
+  if (!isRecord(value) || value.type !== 'readOnly') return false
+  const keys = Object.keys(value)
+  return keys.every((key) => key === 'type' || key === 'networkAccess')
+    && (value.networkAccess === undefined || value.networkAccess === false)
 }
 
 function parseStringArray(value: string, code: string): string[] {
@@ -1133,7 +1246,13 @@ function processLeaseFromRow(row: ProcessLeaseDbRow): CodexProcessLeaseRow {
 export class CodexBindingRepository {
   private readonly toolBindings: CodexToolBindingRepository
 
-  constructor(private readonly db: DatabaseConnection) {
+  constructor(
+    private readonly db: DatabaseConnection,
+    private readonly currentContract?: {
+      runtimeManifestDigest: string
+      protocolSchemaDigest: string
+    },
+  ) {
     this.toolBindings = new CodexToolBindingRepository(db)
   }
 
@@ -1175,12 +1294,8 @@ export class CodexBindingRepository {
         kind: 'accepted', verifiedReceiptRefs: declarationRefs.sort(), code: null, callId: null,
       }
     }
-    let retrySources: readonly import('./codex-product-run-preparer').CodexRetryArtifactSource[] = []
     try {
-      const prepared = this.readProductTurnRuntime(input.readyRunId).prepared
-      if (prepared.ingress.attemptKind === 'explicit_retry') {
-        retrySources = prepared.ingress.artifactSources ?? []
-      }
+      this.readProductTurnRuntime(input.readyRunId)
     } catch {
       return {
         kind: 'fabricated', verifiedReceiptRefs: [],
@@ -1301,11 +1416,8 @@ export class CodexBindingRepository {
     const refs = [...declarationRefs]
     for (const expected of activation.expectedOutputs) {
       const write = staged.get(expected)
-      const retrySource = write ? null : retrySources.find((source) => (
-        source.relativePath === expected && source.sourceReadyRunId !== input.readyRunId
-      )) ?? null
       const output = exported.get(expected)
-      const source = write ?? retrySource
+      const source = write
       if (!source || !output) {
         return {
           kind: 'incomplete', verifiedReceiptRefs: [],
@@ -1322,10 +1434,7 @@ export class CodexBindingRepository {
       }
       let durableHead: ReturnType<CodexBindingRepository['readArtifactWriteHead']>
       try {
-        durableHead = this.readArtifactWriteHead(
-          write ? input.readyRunId : retrySource!.sourceReadyRunId,
-          expected,
-        )
+        durableHead = this.readArtifactWriteHead(input.readyRunId, expected)
       } catch {
         return {
           kind: 'fabricated', verifiedReceiptRefs: [],
@@ -1632,6 +1741,706 @@ export class CodexBindingRepository {
     return typeof row?.alias_generation === 'number' ? row.alias_generation : null
   }
 
+  appendAcceptedNativeCoverageReceipt(input: {
+    threadBindingId: string
+    producerKind: 'product_closeout' | 'automatic_compaction' | 'manual_compaction'
+    producerOwnerId: string
+    codexThreadId: string
+    acceptedNativeHeadKind: 'turn' | 'compaction'
+    acceptedNativeHeadId: string
+    acceptedProductReadyRunId: string | null
+    newlyCovered: CodexNativeCoverageItem[]
+    createdAt: string
+  }): CodexNativeCoverageReceiptRef {
+    return this.immediate(() => this.appendAcceptedNativeCoverageReceiptInOpenTransaction(input))
+  }
+
+  readAcceptedNativePrefixHead(threadBindingId: string): CodexAcceptedNativePrefixHead | null {
+    nonEmpty(threadBindingId, 'coverage_thread_binding_invalid')
+    const thread = this.requireThread(threadBindingId)
+    const row = this.db.prepare(`
+      SELECT receipt_id, receipt_digest, accepted_native_head_kind,
+             accepted_native_head_id, accepted_product_ready_run_id
+        FROM codex_native_coverage_receipts
+       WHERE thread_binding_id = ?
+          OR (receipt_id = ? AND receipt_digest = ?)
+       ORDER BY rowid DESC LIMIT 1
+    `).get<{
+      receipt_id: string
+      receipt_digest: string
+      accepted_native_head_kind: 'turn' | 'compaction'
+      accepted_native_head_id: string
+      accepted_product_ready_run_id: string | null
+    }>(threadBindingId,
+      thread.thread_materialization_kind === 'native_fork'
+        ? thread.source_accepted_native_coverage_receipt_id : null,
+      thread.thread_materialization_kind === 'native_fork'
+        ? thread.source_accepted_native_coverage_receipt_digest : null)
+    if (row) this.readEffectiveCoverageItems(row.receipt_id)
+    else if (thread.thread_materialization_kind === 'native_fork') {
+      throw new CodexBindingRepositoryError('coverage_fork_parent_missing')
+    }
+    return row ? {
+      acceptedNativeHeadKind: row.accepted_native_head_kind,
+      acceptedNativeHeadId: row.accepted_native_head_id,
+      acceptedProductReadyRunId: row.accepted_product_ready_run_id,
+      coverageReceiptRef: { receiptId: row.receipt_id, digest: row.receipt_digest },
+    } : null
+  }
+
+  private appendAcceptedNativeCoverageReceiptInOpenTransaction(input: {
+    threadBindingId: string
+    producerKind: 'product_closeout' | 'automatic_compaction' | 'manual_compaction'
+    producerOwnerId: string
+    codexThreadId: string
+    acceptedNativeHeadKind: 'turn' | 'compaction'
+    acceptedNativeHeadId: string
+    acceptedProductReadyRunId: string | null
+    newlyCovered: CodexNativeCoverageItem[]
+    createdAt: string
+  }): CodexNativeCoverageReceiptRef {
+    if (this.db.inTransaction !== true) {
+      throw new CodexBindingRepositoryError('coverage_transaction_missing')
+    }
+    for (const value of [
+      input.threadBindingId,
+      input.producerOwnerId,
+      input.codexThreadId,
+      input.acceptedNativeHeadId,
+      input.createdAt,
+    ]) nonEmpty(value, 'coverage_identity_invalid')
+    const thread = this.requireThread(input.threadBindingId)
+    if (thread.thread_materialization_kind === 'legacy'
+      || thread.codex_thread_id !== input.codexThreadId
+      || thread.retired_at) {
+      throw new CodexBindingRepositoryError('coverage_thread_not_authoritative')
+    }
+    const latest = this.db.prepare(`
+      SELECT receipt_id, receipt_digest
+        FROM codex_native_coverage_receipts
+       WHERE thread_binding_id = ? ORDER BY rowid DESC LIMIT 1
+    `).get<{ receipt_id: string; receipt_digest: string }>(input.threadBindingId)
+    let parentReceiptId = latest?.receipt_id ?? null
+    if (!parentReceiptId && thread.thread_materialization_kind === 'native_fork') {
+      if (!thread.source_accepted_native_coverage_receipt_id
+        || !thread.source_accepted_native_coverage_receipt_digest) {
+        throw new CodexBindingRepositoryError('coverage_fork_parent_missing')
+      }
+      const sourceParent = this.db.prepare(`
+        SELECT receipt_id, receipt_digest, thread_binding_id
+          FROM codex_native_coverage_receipts WHERE receipt_id = ? LIMIT 1
+      `).get<{ receipt_id: string; receipt_digest: string; thread_binding_id: string }>(
+        thread.source_accepted_native_coverage_receipt_id,
+      )
+      if (!sourceParent
+        || sourceParent.receipt_digest !== thread.source_accepted_native_coverage_receipt_digest
+        || this.readAcceptedNativePrefixHead(thread.history_source_thread_binding_id!)
+          ?.coverageReceiptRef.receiptId !== sourceParent.receipt_id) {
+        throw new CodexBindingRepositoryError('coverage_fork_parent_mismatch')
+      }
+      parentReceiptId = sourceParent.receipt_id
+    }
+    const coveredItems = parentReceiptId
+      ? this.readEffectiveCoverageItems(parentReceiptId)
+      : new Map<string, string>()
+    try { assertNewCoverageItems(new Set(coveredItems.keys()), input.newlyCovered) }
+    catch (error) {
+      throw new CodexBindingRepositoryError(error instanceof Error ? error.message : 'coverage_item_invalid')
+    }
+    if (input.producerKind === 'manual_compaction') {
+      const owner = this.db.prepare(`
+        SELECT thread_binding_id, codex_thread_id, consumed_at
+          FROM codex_manual_compaction_bindings WHERE manual_compaction_id = ? LIMIT 1
+      `).get<{ thread_binding_id: string; codex_thread_id: string; consumed_at: string | null }>(
+        input.producerOwnerId,
+      )
+      if (!owner || owner.thread_binding_id !== input.threadBindingId
+        || owner.codex_thread_id !== input.codexThreadId || !owner.consumed_at
+        || input.acceptedNativeHeadKind !== 'compaction') {
+        throw new CodexBindingRepositoryError('coverage_manual_owner_mismatch')
+      }
+    } else {
+      const owner = this.db.prepare(`
+        SELECT thread_binding_id, codex_thread_id, codex_turn_id,
+               product_terminal_digest, terminal_facts_json, terminal_native_readback_receipt_json
+          FROM codex_turn_bindings WHERE ready_run_id = ? LIMIT 1
+      `).get<{
+        thread_binding_id: string
+        codex_thread_id: string | null
+        codex_turn_id: string | null
+        product_terminal_digest: string | null
+        terminal_facts_json: string | null
+        terminal_native_readback_receipt_json: string | null
+      }>(input.producerOwnerId)
+      const automatic = owner?.terminal_native_readback_receipt_json
+        ? (JSON.parse(owner.terminal_native_readback_receipt_json) as CodexTerminalNativeReadbackReceipt)
+          .contextCompactionItemIds.length > 0
+        : false
+      if (!owner || owner.thread_binding_id !== input.threadBindingId
+        || owner.codex_thread_id !== input.codexThreadId
+        || owner.codex_turn_id !== input.acceptedNativeHeadId
+        || !owner.product_terminal_digest
+        || !owner.terminal_facts_json
+        || JSON.parse(owner.terminal_facts_json).product?.terminal !== 'done'
+        || input.acceptedProductReadyRunId !== input.producerOwnerId
+        || input.producerKind !== (automatic ? 'automatic_compaction' : 'product_closeout')
+        || input.acceptedNativeHeadKind !== (automatic ? 'compaction' : 'turn')) {
+        throw new CodexBindingRepositoryError('coverage_product_owner_mismatch')
+      }
+    }
+    const newlyCoveredJson = canonicalJson(input.newlyCovered)
+    const newlyCoveredDigest = digestCanonicalJson(input.newlyCovered)
+    const unsigned = {
+      contract: 'codex_native_coverage_receipt_v1',
+      threadBindingId: input.threadBindingId,
+      parentReceiptId,
+      producerKind: input.producerKind,
+      producerOwnerId: input.producerOwnerId,
+      codexThreadId: input.codexThreadId,
+      acceptedNativeHeadKind: input.acceptedNativeHeadKind,
+      acceptedNativeHeadId: input.acceptedNativeHeadId,
+      acceptedProductReadyRunId: input.acceptedProductReadyRunId,
+      newlyCoveredDigest,
+      createdAt: input.createdAt,
+    }
+    const receiptDigest = digestCanonicalJson(unsigned)
+    const receiptId = `coverage-${receiptDigest.slice(0, 32)}`
+    const existing = this.db.prepare(`
+      SELECT receipt_digest FROM codex_native_coverage_receipts
+       WHERE producer_owner_id = ? AND producer_kind = ? LIMIT 1
+    `).get<{ receipt_digest: string }>(input.producerOwnerId, input.producerKind)
+    if (existing) {
+      if (existing.receipt_digest !== receiptDigest) {
+        throw new CodexBindingRepositoryError('coverage_owner_immutable')
+      }
+      return { receiptId, digest: receiptDigest }
+    }
+    this.db.prepare(`
+      INSERT INTO codex_native_coverage_receipts (
+        receipt_id, thread_binding_id, parent_receipt_id, producer_kind,
+        producer_owner_id, codex_thread_id, accepted_native_head_kind,
+        accepted_native_head_id, accepted_product_ready_run_id,
+        newly_covered_json, newly_covered_digest, receipt_digest, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      receiptId,
+      input.threadBindingId,
+      parentReceiptId,
+      input.producerKind,
+      input.producerOwnerId,
+      input.codexThreadId,
+      input.acceptedNativeHeadKind,
+      input.acceptedNativeHeadId,
+      input.acceptedProductReadyRunId,
+      newlyCoveredJson,
+      newlyCoveredDigest,
+      receiptDigest,
+      input.createdAt,
+    )
+    const ownerUpdate = input.producerKind === 'manual_compaction'
+      ? this.db.prepare(`
+          UPDATE codex_manual_compaction_bindings
+             SET accepted_native_coverage_receipt_id = ?,
+                 accepted_native_coverage_receipt_digest = ?
+           WHERE manual_compaction_id = ?
+             AND accepted_native_coverage_receipt_id IS NULL
+        `).run(receiptId, receiptDigest, input.producerOwnerId)
+      : this.db.prepare(`
+          UPDATE codex_turn_bindings
+             SET accepted_native_coverage_receipt_id = ?,
+                 accepted_native_coverage_receipt_digest = ?
+           WHERE ready_run_id = ? AND accepted_native_coverage_receipt_id IS NULL
+        `).run(receiptId, receiptDigest, input.producerOwnerId)
+    if (changes(ownerUpdate) !== 1) {
+      throw new CodexBindingRepositoryError('coverage_owner_ref_cas_failed')
+    }
+    return { receiptId, digest: receiptDigest }
+  }
+
+  readLatestAcceptedForkBoundary(input: {
+    threadBindingId: string
+    beforeReadyRunId: string
+  }): {
+    readyRunId: string | null
+    codexTurnId: string
+    terminalFactsDigest: string
+    coverageReceiptRef: CodexNativeCoverageReceiptRef
+  } | null {
+    const head = this.readAcceptedNativePrefixHead(input.threadBindingId)
+    if (!head || head.acceptedProductReadyRunId === input.beforeReadyRunId) return null
+    const terminalFactsDigest = (head.acceptedProductReadyRunId
+      ? this.requireTurn(head.acceptedProductReadyRunId).terminal_facts_digest : null)
+      || digestCanonicalJson({
+        contract: 'codex_compaction_only_accepted_head_v1',
+        coverageReceiptId: head.coverageReceiptRef.receiptId,
+        coverageReceiptDigest: head.coverageReceiptRef.digest,
+      })
+    return {
+      readyRunId: head.acceptedProductReadyRunId,
+      codexTurnId: head.acceptedNativeHeadId,
+      terminalFactsDigest,
+      coverageReceiptRef: head.coverageReceiptRef,
+    }
+  }
+
+  readAcceptedNativePrefixResolution(input: {
+    readyRunId: string
+    nativeReadback: CodexTerminalNativeReadbackReceipt
+  }): AcceptedNativePrefixResolution {
+    const turn = this.requireTurn(input.readyRunId)
+    const thread = this.requireThread(turn.thread_binding_id)
+    const products = this.db.prepare(`
+      SELECT ready_run_id FROM codex_turn_bindings WHERE thread_binding_id = ? ORDER BY rowid ASC
+    `).all<{ ready_run_id: string }>(thread.thread_binding_id)
+    const compactions = this.db.prepare(`
+      SELECT COUNT(*) AS count FROM codex_manual_compaction_bindings WHERE thread_binding_id = ?
+    `).get<{ count: number }>(thread.thread_binding_id)
+    const readback = input.nativeReadback
+    const { digest, ...unsigned } = readback
+    const identityMatches = digest === digestCanonicalJson(unsigned)
+      && readback.readyRunId === turn.ready_run_id && readback.codexThreadId === turn.codex_thread_id
+      && readback.codexTurnId === turn.codex_turn_id
+      && readback.aliasGeneration === thread.alias_generation
+    return resolveAcceptedNativePrefixHead({
+      legacy: thread.thread_materialization_kind === 'legacy',
+      acceptedHead: this.readAcceptedNativePrefixHead(thread.thread_binding_id),
+      currentRunId: turn.ready_run_id,
+      currentNativeTurnId: turn.codex_turn_id,
+      productRunIds: products.map((product) => product.ready_run_id),
+      manualCompactionCount: compactions!.count,
+      orderedNativeTurnIds: identityMatches ? readback.orderedTurnIds : null,
+      nativeCompactionItemCount: readback.contextCompactionItemIds.length,
+      uncommittedOriginCount: this.readUncommittedOriginTails(thread.thread_binding_id, turn.ready_run_id).handoffTail.length,
+    })
+  }
+
+  readNativeForkMaterialization(threadBindingId: string): null | {
+    targetThreadBindingId: string
+    aliasId: string
+    sourceThreadBindingId: string
+    sourceCodexThreadId: string
+    acceptedThroughCodexTurnId: string
+    targetCwd: string
+    model: string
+    materializationState: ThreadBindingRow['materialization_state']
+    materializationEvidenceDigest: string | null
+    expectedPrefixTurnIds: string[]
+    materializationRequestDigest: string
+  } {
+    const target = this.requireThread(threadBindingId)
+    if (target.thread_materialization_kind !== 'native_fork') return null
+    const source = target.history_source_thread_binding_id
+      ? this.requireThread(target.history_source_thread_binding_id)
+      : null
+    if (!source?.codex_thread_id || !target.fork_accepted_through_codex_turn_id
+      || !target.isolated_thread_cwd || !target.codex_model
+      || !target.fork_expected_prefix_turn_ids_json
+      || !target.fork_expected_prefix_turn_ids_digest
+      || !target.materialization_request_digest) {
+      throw new CodexBindingRepositoryError('fork_materialization_seed_incomplete')
+    }
+    const expectedPrefixTurnIds = JSON.parse(target.fork_expected_prefix_turn_ids_json) as unknown
+    if (!Array.isArray(expectedPrefixTurnIds)
+      || expectedPrefixTurnIds.length < 1
+      || expectedPrefixTurnIds.some((turnId) => typeof turnId !== 'string' || !turnId.trim())
+      || new Set(expectedPrefixTurnIds).size !== expectedPrefixTurnIds.length
+      || expectedPrefixTurnIds.at(-1) !== target.fork_accepted_through_codex_turn_id
+      || digestCanonicalJson(expectedPrefixTurnIds) !== target.fork_expected_prefix_turn_ids_digest) {
+      throw new CodexBindingRepositoryError('fork_expected_prefix_invalid')
+    }
+    const expectedInheritedContractDigest = this.readNativeInheritedContractDigest(source)
+    const expectedMaterializationRequestDigest = digestCanonicalJson({
+      contract: 'codex_native_fork_materialization_request_v1',
+      sourceCodexThreadId: source.codex_thread_id,
+      acceptedThroughCodexTurnId: target.fork_accepted_through_codex_turn_id,
+      expectedPrefixTurnIdsDigest: target.fork_expected_prefix_turn_ids_digest,
+      targetCwd: target.isolated_thread_cwd,
+      model: target.codex_model,
+      modelProvider: 'ready_gateway',
+      approvalPolicy: 'never',
+      sandbox: 'read-only',
+    })
+    if (target.native_inherited_contract_digest !== expectedInheritedContractDigest
+      || target.materialization_request_digest !== expectedMaterializationRequestDigest
+      || target.runtime_manifest_digest !== source.runtime_manifest_digest
+      || target.protocol_schema_digest !== source.protocol_schema_digest
+      || target.tool_surface_digest !== source.tool_surface_digest
+      || target.tool_surface_snapshot_digest !== source.tool_surface_snapshot_digest
+      || target.instruction_contract_digest !== source.instruction_contract_digest
+      || target.codex_model_provider_id !== source.codex_model_provider_id
+      || target.codex_model !== source.codex_model) {
+      throw new CodexBindingRepositoryError('fork_inherited_contract_mismatch')
+    }
+    if (target.materialization_state === 'confirmed') {
+      let receipt: Record<string, unknown>
+      try {
+        receipt = JSON.parse(target.materialization_effective_receipt_json || '') as Record<string, unknown>
+      } catch {
+        throw new CodexBindingRepositoryError('fork_materialization_receipt_invalid')
+      }
+      if (!isRecord(receipt)
+        || !target.materialization_effective_receipt_digest
+        || digestCanonicalJson(receipt) !== target.materialization_effective_receipt_digest
+        || receipt.contract !== 'codex_native_fork_materialization_v1'
+        || receipt.targetThreadBindingId !== target.thread_binding_id
+        || receipt.sourceThreadBindingId !== source.thread_binding_id
+        || receipt.acceptedThroughCodexTurnId !== target.fork_accepted_through_codex_turn_id
+        || receipt.expectedPrefixTurnIdsDigest !== target.fork_expected_prefix_turn_ids_digest
+        || receipt.nativeInheritedContractDigest !== target.native_inherited_contract_digest
+        || receipt.materializationRequestDigest !== target.materialization_request_digest
+        || receipt.dispatchedRequestDigest !== target.thread_start_request_digest
+        || receipt.codexThreadId !== target.codex_thread_id
+        || receipt.codexSessionId !== target.codex_session_id
+        || receipt.cwd !== target.isolated_thread_cwd
+        || receipt.model !== target.codex_model
+        || receipt.modelProvider !== target.codex_model_provider_id
+        || receipt.approvalPolicy !== 'never'
+        || receipt.approvalsReviewer !== 'user'
+        || !isPinnedReadOnlySandbox(receipt.sandbox)
+        || receipt.reasoningEffort !== null
+        || receipt.serviceTier !== null
+        || !Array.isArray(receipt.instructionSources)
+        || receipt.instructionSources.length !== 0
+        || typeof receipt.responseDigest !== 'string'
+        || typeof receipt.reconciledAt !== 'string') {
+        throw new CodexBindingRepositoryError('fork_materialization_receipt_invalid')
+      }
+      const resumeRef = receipt.resumeEvidenceRef
+      if (target.thread_start_response_at === null) {
+        if (!isRecord(resumeRef)
+          || typeof resumeRef.resumeEvidenceId !== 'string'
+          || typeof resumeRef.evidenceDigest !== 'string') {
+          throw new CodexBindingRepositoryError('fork_materialization_resume_ref_missing')
+        }
+        const resume = this.db.prepare(`
+          SELECT resume_evidence_id, evidence_digest, codex_thread_id
+            FROM codex_thread_resume_evidence
+           WHERE thread_binding_id = ? AND resume_evidence_id = ?
+           LIMIT 1
+        `).get<{
+          resume_evidence_id: string
+          evidence_digest: string
+          codex_thread_id: string
+        }>(target.thread_binding_id, resumeRef.resumeEvidenceId)
+        if (resume?.evidence_digest !== resumeRef.evidenceDigest
+          || resume.codex_thread_id !== target.codex_thread_id) {
+          throw new CodexBindingRepositoryError('fork_materialization_resume_ref_invalid')
+        }
+      } else if (resumeRef !== null) {
+        throw new CodexBindingRepositoryError('fork_materialization_resume_ref_unexpected')
+      }
+    } else if (target.materialization_effective_receipt_json !== null
+      || target.materialization_effective_receipt_digest !== null) {
+      throw new CodexBindingRepositoryError('fork_materialization_receipt_premature')
+    }
+    this.readUncommittedUserTail(target.thread_binding_id)
+    return {
+      targetThreadBindingId: target.thread_binding_id,
+      aliasId: target.ready_conversation_alias,
+      sourceThreadBindingId: source.thread_binding_id,
+      sourceCodexThreadId: source.codex_thread_id,
+      acceptedThroughCodexTurnId: target.fork_accepted_through_codex_turn_id,
+      targetCwd: target.isolated_thread_cwd,
+      model: target.codex_model,
+      materializationState: target.materialization_state,
+      materializationEvidenceDigest: target.materialization_evidence_digest,
+      expectedPrefixTurnIds,
+      materializationRequestDigest: target.materialization_request_digest,
+    }
+  }
+
+  readUncommittedUserTail(threadBindingId: string): CodexUncommittedUserTailItem[] {
+    const thread = this.requireThread(threadBindingId)
+    if (thread.thread_materialization_kind !== 'fresh_root_with_tail'
+      && thread.thread_materialization_kind !== 'native_fork') return []
+    if (!thread.uncommitted_user_tail_json || !thread.uncommitted_user_tail_digest) {
+      throw new CodexBindingRepositoryError('uncommitted_user_tail_missing')
+    }
+    let parsed: unknown
+    try { parsed = JSON.parse(thread.uncommitted_user_tail_json) }
+    catch { throw new CodexBindingRepositoryError('uncommitted_user_tail_invalid') }
+    if (!Array.isArray(parsed) || parsed.length < 1 || parsed.length > 8
+      || parsed.some((entry) => !isRecord(entry)
+        || typeof entry.originUserMessageId !== 'string'
+        || !entry.originUserMessageId.trim()
+        || !['untrusted_text_history', 'resource_restatement_required', 'task_restatement_required']
+          .includes(String(entry.policy))
+        || !Array.isArray(entry.input)
+        || entry.input.length < 1
+        || entry.input.some((item) => !isCodexUserInput(item))
+        || (entry.policy === 'untrusted_text_history'
+          && entry.input.some((item) => item.type !== 'text'))
+        || entry.inputDigest !== digestCodexUserInput(entry.input as CodexUserInput[]))) {
+      throw new CodexBindingRepositoryError('uncommitted_user_tail_invalid')
+    }
+    if (digestCanonicalJson(parsed) !== thread.uncommitted_user_tail_digest) {
+      throw new CodexBindingRepositoryError('uncommitted_user_tail_digest_mismatch')
+    }
+    const sourceTurn = this.db.prepare(`
+      SELECT ready_run_id, ingress_admitted_digest
+        FROM codex_turn_bindings
+       WHERE thread_binding_id = ? AND terminal_facts_digest = ?
+       LIMIT 1
+    `).get<{ ready_run_id: string; ingress_admitted_digest: string }>(
+      thread.history_source_thread_binding_id,
+      thread.history_source_terminal_facts_digest,
+    )
+    if (!sourceTurn || !thread.history_seed_digest) {
+      throw new CodexBindingRepositoryError('history_seed_source_missing')
+    }
+    const expectedHistorySeedDigest = thread.thread_materialization_kind === 'fresh_root_with_tail'
+      ? digestCanonicalJson({
+          contract: 'codex_fresh_root_with_tail_seed_v1',
+          sourceThreadBindingId: thread.history_source_thread_binding_id,
+          sourceTerminalFactsDigest: thread.history_source_terminal_facts_digest,
+          tailDigest: thread.uncommitted_user_tail_digest,
+        })
+      : digestCanonicalJson({
+          sourceThreadBindingId: thread.history_source_thread_binding_id,
+          sourceTerminalFactsDigest: thread.history_source_terminal_facts_digest,
+          acceptedProductBoundaryReadyRunId: thread.accepted_product_boundary_ready_run_id,
+          acceptedNativeCoverageReceiptRef: {
+            receiptId: thread.source_accepted_native_coverage_receipt_id,
+            digest: thread.source_accepted_native_coverage_receipt_digest,
+          },
+          forkAcceptedThroughCodexTurnId: thread.fork_accepted_through_codex_turn_id,
+          divergentIngressDigest: sourceTurn.ingress_admitted_digest,
+          uncommittedUserTailDigest: thread.uncommitted_user_tail_digest,
+        })
+    if (thread.history_seed_digest !== expectedHistorySeedDigest) {
+      throw new CodexBindingRepositoryError('history_seed_digest_mismatch')
+    }
+    return parsed as CodexUncommittedUserTailItem[]
+  }
+
+  readLiveUncommittedUserTail(threadBindingId: string): CodexUncommittedUserTailItem[] {
+    return this.readUncommittedOriginTails(threadBindingId).currentDeliveryTail
+  }
+
+  readHandoffUncommittedUserTail(threadBindingId: string): CodexUncommittedUserTailItem[] {
+    const tail = this.readUncommittedOriginTails(threadBindingId).handoffTail
+    if (tail.length > 8) throw new CodexBindingRepositoryError('uncommitted_user_tail_budget_exceeded')
+    return tail
+  }
+
+  private readUncommittedOriginTails(threadBindingId: string, closingReadyRunId?: string): ReturnType<typeof resolveLiveUncommittedUserTail> {
+    const lineage = this.readHistoryBindingLineage(threadBindingId)
+    if (lineage[0].thread_materialization_kind === 'legacy') {
+      if (lineage.length > 1) throw new CodexBindingRepositoryError('history_binding_lineage_invalid')
+      return { handoffTail: [], currentDeliveryTail: [] }
+    }
+    const head = this.readAcceptedNativePrefixHead(threadBindingId)
+    const covered = head
+      ? this.readEffectiveCoverageItems(head.coverageReceiptRef.receiptId)
+      : new Map<string, string>()
+    const origins: CodexUncommittedUserTailItem[] = []
+    const retainedInCurrentNative = new Map<string, string>()
+    const superseded: Array<{ originUserMessageId: string; inputDigest: string; policy: string }> = []
+    for (const binding of lineage) {
+      const turns = this.db.prepare(`
+        SELECT turn.*,
+          (SELECT COUNT(*) FROM codex_tool_call_admissions tool WHERE tool.ready_run_id = turn.ready_run_id) AS origin_tool_count,
+          (SELECT COUNT(*) FROM pending_confirmations confirmation WHERE confirmation.run_id = turn.ready_run_id)
+            + (SELECT COUNT(*) FROM chat_messages interaction
+               WHERE interaction.conversation_id = ? AND interaction.role = 'agent_card'
+                 AND (json_extract(interaction.meta_json, '$.askUserQuestions.requestId') = turn.ready_run_id
+                   OR json_extract(interaction.meta_json, '$.askUserQuestions.codexRunIdentity.readyRunId') = turn.ready_run_id)) AS origin_interaction_count
+        FROM codex_turn_bindings turn WHERE turn.thread_binding_id = ? ORDER BY turn.rowid ASC
+      `).all<TurnBindingRow & { origin_tool_count: number; origin_interaction_count: number }>(binding.ready_scope_id, binding.thread_binding_id)
+      for (const turn of turns) {
+        const parsed = parseObjectStrict<{ prepared?: unknown }>(
+          turn.ingress_json, 'uncommitted_user_tail_ingress_json',
+        )
+        if (!isPreparedCodexProductRun(parsed.prepared)) {
+          throw new CodexBindingRepositoryError('uncommitted_user_tail_ingress_invalid')
+        }
+        const prepared = parsed.prepared
+        if (prepared.ingress.attemptKind === 'user_ingress') {
+          const items = prepared.ingress.supersededUncommittedItems!
+          const admission = prepared.ingress.actionAdmissionRef
+          if (items.length > 0 && (!admission
+            || admission.actionHeadIdentity.threadBindingId !== binding.thread_binding_id
+            || admission.actionHeadIdentity.aliasGeneration !== binding.alias_generation
+            || admission.actionProjectionVersion.actionProjectionSequence > binding.action_projection_sequence)) {
+            throw new CodexBindingRepositoryError('uncommitted_user_tail_supersession_owner_invalid')
+          }
+          superseded.push(...items)
+        }
+        // An admitted, still-running input is not an uncommitted predecessor. Its
+        // ordinary supersession is nevertheless already an authoritative admission.
+        if (!turn.product_closeout_at && !turn.host_failure_product_terminal_digest
+          && turn.ready_run_id !== closingReadyRunId) continue
+        const facts = turn.terminal_facts_json ? JSON.parse(turn.terminal_facts_json) as CodexTerminalFacts : null
+        if (facts) assertCodexTerminalFacts(facts)
+        if (binding.thread_binding_id === threadBindingId && facts?.history.kind === 'continuation_safe') {
+          for (const origin of formalModelInputOrigins(prepared)) {
+            retainedInCurrentNative.set(origin.messageId, origin.digest)
+          }
+        }
+        const current = prepared.ingress.canonicalCurrentInputRef
+        const currentDigest = digestCodexUserInput(current.input)
+        if (covered.get(current.messageId) === currentDigest) continue
+        const candidate = turn.engine_terminal_candidate_json
+          ? JSON.parse(turn.engine_terminal_candidate_json) as NativeTerminalCandidate : null
+        if (candidate) assertNativeTerminalCandidate(candidate)
+        origins.push({
+          originUserMessageId: current.messageId,
+          input: current.input,
+          inputDigest: currentDigest,
+          policy: classifyUncommittedOriginPolicy({
+            prepared,
+            executionEvidenceComplete: Boolean(candidate && facts),
+            toolCount: Math.max(candidate?.usedToolCalls.length || 0, turn.origin_tool_count),
+            actionCount: candidate?.actionReceiptRefs.length || 0,
+            interactionCount: Math.max(candidate?.interactionState ? 1 : 0, turn.origin_interaction_count),
+            effectState: facts?.effect.state || 'indeterminate',
+          }),
+        })
+      }
+    }
+    return resolveLiveUncommittedUserTail({ origins, covered, retainedInCurrentNative, superseded })
+  }
+
+  private readHistoryBindingLineage(threadBindingId: string): ThreadBindingRow[] {
+    const lineage: ThreadBindingRow[] = []
+    let binding = this.requireThread(threadBindingId)
+    while (true) {
+      if (lineage.some((prior) => prior.thread_binding_id === binding.thread_binding_id)) {
+        throw new CodexBindingRepositoryError('history_binding_lineage_cycle')
+      }
+      lineage.unshift(binding)
+      if (binding.thread_materialization_kind === 'legacy'
+        || binding.thread_materialization_kind === 'fresh_start') break
+      this.readUncommittedUserTail(binding.thread_binding_id)
+      const source = this.requireThread(binding.history_source_thread_binding_id as string)
+      if (source.ready_conversation_alias !== binding.ready_conversation_alias
+        || source.ready_scope_id !== binding.ready_scope_id
+        || source.alias_generation + 1 !== binding.alias_generation
+        || source.retired_reason !== 'publication_diverged') {
+        throw new CodexBindingRepositoryError('history_binding_lineage_invalid')
+      }
+      binding = source
+    }
+    return lineage
+  }
+
+  readUncommittedTailDeliveryAudit(readyRunId: string): {
+    readyRunId: string
+    state: 'accepted' | 'unknown'
+    turnContractDigest: string
+    additionalContextDigest: string
+    items: Array<{
+      originUserMessageId: string
+      inputDigest: string
+      assignment: 'deliver_untrusted_history' | 'replace_with_explicit_retry' | 'omit_from_current_run'
+      disposition: 'additional_context' | 'current_input' | 'superseded' | 'unknown'
+    }>
+    auditDigest: string
+  } {
+    const turn = this.requireTurn(readyRunId)
+    let prepared: PreparedCodexProductRun
+    try {
+      const receipt = JSON.parse(turn.ingress_json || '') as unknown
+      if (!isRecord(receipt) || !isPreparedCodexProductRun(receipt.prepared)) {
+        throw new Error('invalid')
+      }
+      prepared = receipt.prepared
+    } catch {
+      throw new CodexBindingRepositoryError('delivery_audit_ingress_invalid')
+    }
+    const assignments = prepared.ingress.uncommittedTailAssignments || []
+    const accepted = turn.turn_start_child_write_confirmed_at !== null
+      && turn.turn_start_child_write_digest !== null
+      && turn.turn_start_child_write_digest === turn.turn_start_request_digest
+      && turn.turn_start_reconciled_at !== null
+      && turn.turn_start_reconciliation_evidence_digest !== null
+      && turn.codex_turn_id !== null
+    const items = assignments.map((assignment) => {
+      let disposition: 'additional_context' | 'current_input' | 'superseded' | 'unknown' = 'unknown'
+      if (assignment.plan === 'omit_from_current_run') {
+        const superseded = (prepared.ingress.supersededUncommittedItems || []).some((item) => (
+          item.originUserMessageId === assignment.originUserMessageId
+          && item.inputDigest === assignment.inputDigest
+        ))
+        disposition = superseded ? 'superseded' : 'unknown'
+      } else if (accepted) {
+        disposition = assignment.plan === 'replace_with_explicit_retry'
+          ? 'current_input'
+          : 'additional_context'
+      }
+      return {
+        originUserMessageId: assignment.originUserMessageId,
+        inputDigest: assignment.inputDigest,
+        assignment: assignment.plan,
+        disposition,
+      }
+    })
+    const base = {
+      readyRunId,
+      state: accepted || (items.length > 0
+        && items.every((item) => item.disposition === 'superseded'))
+        ? 'accepted' as const
+        : 'unknown' as const,
+      turnContractDigest: turn.turn_contract_digest,
+      additionalContextDigest: turn.additional_context_digest,
+      items,
+    }
+    return { ...base, auditDigest: digestCanonicalJson(base) }
+  }
+
+  private recordSettledForkSourceArchiveIntentInOpenTransaction(input: {
+    targetThreadBindingId: string
+  }): string {
+    if (this.db.inTransaction !== true) {
+      throw new CodexBindingRepositoryError('fork_archive_transaction_missing')
+    }
+      if (!this.readNativeForkMaterialization(input.targetThreadBindingId)) {
+        throw new CodexBindingRepositoryError('fork_materialization_seed_missing')
+      }
+      const target = this.requireThread(input.targetThreadBindingId)
+      if (target.thread_materialization_kind !== 'native_fork'
+        || target.materialization_state !== 'confirmed'
+        || !target.history_source_thread_binding_id
+        || !target.materialization_effective_receipt_digest) {
+        throw new CodexBindingRepositoryError('fork_materialization_not_confirmed')
+      }
+      const source = this.requireThread(target.history_source_thread_binding_id)
+      if (!source.codex_thread_id || source.retired_reason !== 'publication_diverged'
+        || !source.retired_at || !source.retirement_evidence_digest) {
+        throw new CodexBindingRepositoryError('fork_archive_source_invalid')
+      }
+      const sourceTurn = this.db.prepare(`
+        SELECT ready_run_id, product_terminal_digest
+          FROM codex_turn_bindings
+         WHERE thread_binding_id = ? AND terminal_facts_digest = ?
+           AND product_terminal_digest IS NOT NULL
+         LIMIT 1
+      `).get<{ ready_run_id: string; product_terminal_digest: string }>(
+        source.thread_binding_id,
+        target.history_source_terminal_facts_digest,
+      )
+      if (!sourceTurn) throw new CodexBindingRepositoryError('fork_archive_source_turn_missing')
+      this.assertThreadArchiveEligible(source.codex_thread_id)
+      const retirementTransactionDigest = digestCanonicalJson({
+        contract: 'codex_native_fork_source_retirement_v1',
+        sourceThreadBindingId: source.thread_binding_id,
+        targetThreadBindingId: target.thread_binding_id,
+        materializationReceiptDigest: target.materialization_effective_receipt_digest,
+        productTerminalDigest: sourceTurn.product_terminal_digest,
+      })
+      const intentDigest = this.recordThreadArchiveIntentInOpenTransaction({
+        thread: source,
+        sourceKind: 'publication_divergence',
+        retiredReason: 'publication_diverged',
+        readyRunId: sourceTurn.ready_run_id,
+        retirementEvidenceDigest: source.retirement_evidence_digest,
+        retirementTransactionDigest,
+        retiredAt: source.retired_at,
+      })
+      if (!intentDigest) throw new CodexBindingRepositoryError('fork_archive_intent_missing')
+      return intentDigest
+  }
+
   readActiveAliasBinding(aliasId: string): CodexActiveAliasBindingRead | null {
     nonEmpty(aliasId, 'alias_identity_invalid')
     const row = this.readActiveThreadByAlias(aliasId)
@@ -1658,6 +2467,9 @@ export class CodexBindingRepository {
       codexSessionId: row.codex_session_id,
       isolatedThreadCwd: row.isolated_thread_cwd,
       toolSurface,
+      materializationKind: row.thread_materialization_kind,
+      materializationState: row.materialization_state,
+      historySeedDigest: row.history_seed_digest,
       hasActiveFence: fence?.present === 1,
       continuationBlockedAt: row.continuation_blocked_at,
       continuationBlockedReason: row.continuation_blocked_reason,
@@ -1665,215 +2477,120 @@ export class CodexBindingRepository {
     }
   }
 
-  resolveUserIngressAliasBinding(input: {
+  readActionSurfaceInvalidation(aliasId: string): {
+    scopeId: string
+    scopeEpoch: number
+    aliasGeneration: number
+    actionProjectionSequence: number
+  } | null {
+    nonEmpty(aliasId, 'alias_identity_invalid')
+    const row = this.db.prepare(`
+      SELECT thread.ready_scope_id, thread.alias_generation,
+             thread.action_projection_sequence, scope.message_visibility_epoch
+        FROM codex_thread_bindings thread
+        JOIN chat_conversations scope ON scope.id = thread.ready_scope_id
+       WHERE thread.ready_conversation_alias = ?
+       ORDER BY thread.alias_generation DESC LIMIT 1
+    `).get<{
+      ready_scope_id: string
+      alias_generation: number
+      action_projection_sequence: number
+      message_visibility_epoch: number
+    }>(aliasId)
+    return row ? {
+      scopeId: row.ready_scope_id,
+      scopeEpoch: row.message_visibility_epoch,
+      aliasGeneration: row.alias_generation,
+      actionProjectionSequence: row.action_projection_sequence,
+    } : null
+  }
+
+  readDriftedFreshStartAliases(input: {
+    runtimeManifestDigest: string
+    protocolSchemaDigest: string
+  }): string[] {
+    return this.db.prepare(`
+      SELECT ready_conversation_alias FROM codex_thread_bindings
+       WHERE retired_at IS NULL AND thread_materialization_kind = 'fresh_start'
+         AND (runtime_manifest_digest != ? OR protocol_schema_digest != ?)
+       ORDER BY ready_conversation_alias
+    `).all<{ ready_conversation_alias: string }>(
+      input.runtimeManifestDigest, input.protocolSchemaDigest,
+    ).map((row) => row.ready_conversation_alias)
+  }
+
+  refreshPristineFreshStartHeadAtomic(input: {
     aliasId: string
     runtimeManifestDigest: string
     protocolSchemaDigest: string
     createdAt: string
     currentToolSurfaceDigest?: string
-  }): CodexActiveAliasBindingRead | null {
-    for (const value of [
-      input.aliasId,
-      input.runtimeManifestDigest,
-      input.protocolSchemaDigest,
-      input.createdAt,
-    ]) nonEmpty(value, 'alias_restore_identity_invalid')
+  }):
+    | { kind: 'current'; binding: CodexActiveAliasBindingRead }
+    | { kind: 'refreshed'; binding: CodexActiveAliasBindingRead
+        invalidation: NonNullable<ReturnType<CodexBindingRepository['readActionSurfaceInvalidation']>> }
+    | { kind: 'reset_required' | 'missing' } {
+    for (const value of [input.aliasId, input.runtimeManifestDigest,
+      input.protocolSchemaDigest, input.createdAt]) nonEmpty(value, 'alias_restore_identity_invalid')
     if (input.currentToolSurfaceDigest !== undefined) {
       nonEmpty(input.currentToolSurfaceDigest, 'alias_restore_identity_invalid')
     }
-    const current = this.readActiveThreadByAlias(input.aliasId)
-    if (
-      current
-      && current.runtime_manifest_digest === input.runtimeManifestDigest
-      && current.protocol_schema_digest === input.protocolSchemaDigest
-      && (
-        input.currentToolSurfaceDigest === undefined
-        || current.tool_surface_digest === null
-        || current.tool_surface_digest === input.currentToolSurfaceDigest
-      )
-    ) return this.readActiveAliasBinding(input.aliasId)
-    const available = this.immediate(() => {
+    return this.immediate(() => {
       const active = this.readActiveThreadByAlias(input.aliasId)
-      if (active) {
-        if (
-          active.runtime_manifest_digest === input.runtimeManifestDigest
-          && active.protocol_schema_digest === input.protocolSchemaDigest
-          && (
-            input.currentToolSurfaceDigest === undefined
-            || active.tool_surface_digest === null
-            || active.tool_surface_digest === input.currentToolSurfaceDigest
-          )
-        ) return true
-        const turn = this.db.prepare(`
-          SELECT ready_run_id FROM codex_turn_bindings
-           WHERE thread_binding_id = ? LIMIT 1
-        `).get<{ ready_run_id: string }>(active.thread_binding_id)
-        const fence = this.db.prepare(`
-          SELECT thread_binding_id FROM codex_thread_dispatch_fences
-           WHERE thread_binding_id = ? LIMIT 1
-        `).get<{ thread_binding_id: string }>(active.thread_binding_id)
-        const unresolvedTurn = this.db.prepare(`
-          SELECT ready_run_id FROM codex_turn_bindings
-           WHERE thread_binding_id = ?
-             AND (
-               turn_start_reservation_released_at IS NULL
-               OR (product_terminal_digest IS NULL
-                 AND host_failure_product_terminal_digest IS NULL)
-             )
-           LIMIT 1
-        `).get<{ ready_run_id: string }>(active.thread_binding_id)
-        const isPristineEmpty = (
-          active.revision === 1
-          && active.thread_start_reservation_set_id === null
-          && active.codex_thread_id === null
-          && active.codex_session_id === null
-          && active.thread_start_dispatch_intent_at === null
-          && active.thread_start_reconciled_at === null
-          && active.retired_at === null
-          && active.continuation_blocked_at === null
-          && !turn
-          && !fence
-        )
-        if (isPristineEmpty) {
-          const replacementEvidenceDigest = digest({
-            kind: 'empty_alias_runtime_contract_superseded',
-            aliasId: active.ready_conversation_alias,
-            aliasGeneration: active.alias_generation,
-            threadBindingId: active.thread_binding_id,
-            previousRuntimeManifestDigest: active.runtime_manifest_digest,
-            previousProtocolSchemaDigest: active.protocol_schema_digest,
-            runtimeManifestDigest: input.runtimeManifestDigest,
-            protocolSchemaDigest: input.protocolSchemaDigest,
-          })
-          const retired = this.db.prepare(`
-            UPDATE codex_thread_bindings
-               SET retired_at = ?, retired_reason = 'cleanup',
-                   retirement_evidence_digest = ?, revision = revision + 1, updated_at = ?
-             WHERE thread_binding_id = ? AND revision = 1 AND retired_at IS NULL
-          `).run(
-            input.createdAt,
-            replacementEvidenceDigest,
-            input.createdAt,
-            active.thread_binding_id,
-          )
-          if (changes(retired) !== 1) {
-            throw new CodexBindingRepositoryError('empty_alias_contract_retire_cas_failed')
-          }
-          const aliasGeneration = active.alias_generation + 1
-          this.insertEmptyAliasGenerationInOpenTransaction({
-            threadBindingId: this.nextThreadBindingId(
-              active.ready_conversation_alias,
-              aliasGeneration,
-              replacementEvidenceDigest,
-            ),
-            aliasId: active.ready_conversation_alias,
-            aliasGeneration,
-            readyScopeId: active.ready_scope_id,
-            runtimeManifestDigest: input.runtimeManifestDigest,
-            protocolSchemaDigest: input.protocolSchemaDigest,
-            createdAt: input.createdAt,
-          })
-          return true
-        }
-        if (
-          fence
-          || unresolvedTurn
-          || active.continuation_blocked_at !== null
-        ) return true
-        const lastClosed = this.db.prepare(`
-          SELECT ready_run_id FROM codex_turn_bindings
-           WHERE thread_binding_id = ?
-             AND (product_terminal_digest IS NOT NULL
-               OR host_failure_product_terminal_digest IS NOT NULL)
-             AND turn_start_reservation_released_at IS NOT NULL
-           ORDER BY COALESCE(product_closeout_at, host_failure_closeout_at, updated_at) DESC,
-                    created_at DESC, ready_run_id DESC
-           LIMIT 1
-        `).get<{ ready_run_id: string }>(active.thread_binding_id)
-        if (
-          !active.codex_thread_id
-          || !active.codex_session_id
-          || !active.isolated_thread_cwd
-          || !active.thread_start_reservation_released_at
-          || !lastClosed
-        ) return true
-        this.supersedeIdleStartedAliasForRootContractChangeInOpenTransaction({
-          thread: active,
-          readyRunId: lastClosed.ready_run_id,
-          createdAt: input.createdAt,
-          runtimeManifestDigest: input.runtimeManifestDigest,
-          protocolSchemaDigest: input.protocolSchemaDigest,
-          previousToolSurfaceDigest: active.tool_surface_digest,
-          currentToolSurfaceDigest: input.currentToolSurfaceDigest ?? null,
-        })
-        return true
+      if (!active) return { kind: 'missing' }
+      if (active.runtime_manifest_digest === input.runtimeManifestDigest
+        && active.protocol_schema_digest === input.protocolSchemaDigest
+        && (input.currentToolSurfaceDigest === undefined || active.tool_surface_digest === null
+          || active.tool_surface_digest === input.currentToolSurfaceDigest)) {
+        return { kind: 'current', binding: this.readActiveAliasBinding(input.aliasId)! }
       }
-      const retired = this.db.prepare(`
-        SELECT * FROM codex_thread_bindings
-         WHERE ready_conversation_alias = ?
-         ORDER BY alias_generation DESC LIMIT 1
-      `).get<ThreadBindingRow>(input.aliasId)
-      if (
-        !retired
-        || retired.retired_reason !== 'publication_diverged'
-        || retired.continuation_blocked_reason !== 'publication_diverged'
-        || !retired.retirement_evidence_digest
-        || retired.retirement_evidence_digest !== retired.continuation_blocked_evidence_digest
-      ) return false
-      const unresolvedTurn = this.db.prepare(`
-        SELECT ready_run_id FROM codex_turn_bindings
-         WHERE thread_binding_id = ?
-           AND (product_terminal_digest IS NULL OR product_closeout_at IS NULL)
-         LIMIT 1
-      `).get<{ ready_run_id: string }>(retired.thread_binding_id)
-      const exactCloseout = this.db.prepare(`
-        SELECT ready_run_id FROM codex_turn_bindings
-         WHERE thread_binding_id = ?
-           AND (
-             engine_terminal_candidate_digest = ?
-             OR recovery_failure_evidence_digest = ?
-             OR (lifecycle_action = 'stop' AND lifecycle_action_evidence_digest = ?)
-             OR EXISTS (
-               SELECT 1 FROM codex_browser_verifier_attempts verifier
-                WHERE verifier.ready_run_id = codex_turn_bindings.ready_run_id
-                  AND verifier.status = 'settled'
-                  AND verifier.outcome <> 'accept'
-                  AND verifier.receipt_digest = ?
-             )
-           )
-           AND product_terminal_digest IS NOT NULL
-           AND product_closeout_at IS NOT NULL
-           AND fence_release_revision IS NOT NULL
-         LIMIT 1
-      `).get<{ ready_run_id: string }>(
-        retired.thread_binding_id,
-        retired.retirement_evidence_digest,
-        retired.retirement_evidence_digest,
-        retired.retirement_evidence_digest,
-        retired.retirement_evidence_digest,
-      )
-      const fence = this.db.prepare(`
-        SELECT thread_binding_id FROM codex_thread_dispatch_fences
-         WHERE thread_binding_id = ? LIMIT 1
-      `).get<{ thread_binding_id: string }>(retired.thread_binding_id)
-      if (unresolvedTurn || !exactCloseout || fence) return false
-      const aliasGeneration = retired.alias_generation + 1
-      this.insertEmptyAliasGenerationInOpenTransaction({
-        threadBindingId: this.nextThreadBindingId(
-          retired.ready_conversation_alias,
-          aliasGeneration,
-          retired.retirement_evidence_digest,
-        ),
-        aliasId: retired.ready_conversation_alias,
-        aliasGeneration,
-        readyScopeId: retired.ready_scope_id,
+      const pristine = this.db.prepare(`
+        SELECT head.thread_binding_id, scope.message_visibility_epoch
+          FROM codex_thread_bindings head
+          JOIN chat_conversations scope ON scope.id = head.ready_scope_id
+         WHERE head.thread_binding_id = ? AND (${CODEX_PRISTINE_FRESH_START_PREDICATE_SQL})
+      `).get<{ thread_binding_id: string; message_visibility_epoch: number }>(active.thread_binding_id)
+      if (!pristine) return { kind: 'reset_required' }
+      const replacementEvidenceDigest = digest({
+        kind: 'pristine_contract_refresh',
+        aliasId: active.ready_conversation_alias,
+        aliasGeneration: active.alias_generation,
+        threadBindingId: active.thread_binding_id,
+        scopeEpoch: pristine.message_visibility_epoch,
+        previousRuntimeManifestDigest: active.runtime_manifest_digest,
+        previousProtocolSchemaDigest: active.protocol_schema_digest,
         runtimeManifestDigest: input.runtimeManifestDigest,
         protocolSchemaDigest: input.protocolSchemaDigest,
-        createdAt: input.createdAt,
       })
-      return true
+      const retired = this.db.prepare(`
+        UPDATE codex_thread_bindings
+           SET retired_at = ?, retired_reason = 'pristine_contract_refresh',
+               retirement_evidence_digest = ?, action_projection_sequence = action_projection_sequence + 1,
+               revision = revision + 1, updated_at = ?
+         WHERE thread_binding_id = ? AND revision = ? AND retired_at IS NULL
+      `).run(input.createdAt, replacementEvidenceDigest, input.createdAt,
+        active.thread_binding_id, active.revision)
+      if (changes(retired) !== 1) throw new CodexBindingRepositoryError('pristine_contract_refresh_cas_failed')
+      const aliasGeneration = active.alias_generation + 1
+      const replacement = this.insertEmptyAliasGenerationInOpenTransaction({
+        threadBindingId: this.nextThreadBindingId(input.aliasId, aliasGeneration, replacementEvidenceDigest),
+        aliasId: input.aliasId, aliasGeneration, readyScopeId: active.ready_scope_id,
+        runtimeManifestDigest: input.runtimeManifestDigest,
+        protocolSchemaDigest: input.protocolSchemaDigest, createdAt: input.createdAt,
+      })
+      this.db.prepare(`
+        UPDATE codex_thread_bindings SET action_projection_sequence = 1
+         WHERE thread_binding_id = ? AND action_projection_sequence = 0
+      `).run(replacement.threadBindingId)
+      const binding = this.readActiveAliasBinding(input.aliasId)
+      const invalidation = this.readActionSurfaceInvalidation(input.aliasId)
+      if (!binding || !invalidation || invalidation.aliasGeneration !== aliasGeneration
+        || invalidation.scopeEpoch !== pristine.message_visibility_epoch
+        || invalidation.actionProjectionSequence !== 1) {
+        throw new CodexBindingRepositoryError('pristine_contract_refresh_readback_mismatch')
+      }
+      return { kind: 'refreshed', binding, invalidation }
     })
-    return available ? this.readActiveAliasBinding(input.aliasId) : null
   }
 
   readManualCompactionRoute(input: {
@@ -1959,8 +2676,21 @@ export class CodexBindingRepository {
       turn.turn_start_reservation_released_at !== null
       && Boolean(turn.product_terminal_digest || turn.host_failure_product_terminal_digest)
     ))
+    const legacyPrepared = this.db.prepare(`
+      SELECT 1 AS present FROM codex_turn_bindings
+       WHERE thread_binding_id = ?
+         AND product_terminal_digest IS NULL
+         AND host_failure_product_terminal_digest IS NULL
+         AND (
+           json_valid(ingress_json) = 0
+           OR COALESCE(json_extract(ingress_json, '$.prepared.preparationContract'), '')
+                != 'codex_product_run_e2'
+         )
+       LIMIT 1
+    `).get<{ present: number }>(thread.thread_binding_id)
     return {
       identity: { aliasId: thread.ready_conversation_alias, aliasGeneration: thread.alias_generation },
+      hasLegacyPreparedRun: legacyPrepared?.present === 1,
       activeReadyRunId: owner?.ready_run_id || null,
       activeManualCompactionId: fence?.operation_kind === 'manual_compaction'
         ? fence.owner_manual_compaction_id
@@ -2000,6 +2730,74 @@ export class CodexBindingRepository {
         hostFailureProductTerminalCommitted: Boolean(owner?.host_failure_product_terminal_digest),
         manualCompactionState,
       },
+    }
+  }
+
+  readHeadActionFacts(input: {
+    aliasId: string
+    aliasGeneration: number
+    currentRuntimeManifestDigest: string
+    currentProtocolSchemaDigest: string
+  }): CodexHeadActionFacts {
+    const thread = this.readActiveThreadByAlias(input.aliasId)
+    if (!thread || thread.alias_generation !== input.aliasGeneration || thread.retired_at) {
+      throw new CodexBindingRepositoryError('active_alias_generation_mismatch')
+    }
+    const lifecycle = this.readLifecycleOperation(input)
+    const scope = this.db.prepare(`
+      SELECT message_visibility_epoch FROM chat_conversations WHERE id = ? LIMIT 1
+    `).get<{ message_visibility_epoch: number }>(thread.ready_scope_id)
+    if (!scope || !Number.isSafeInteger(scope.message_visibility_epoch)
+      || scope.message_visibility_epoch < 0) {
+      throw new CodexBindingRepositoryError('scope_epoch_missing')
+    }
+    if (thread.thread_materialization_kind === 'native_fork') {
+      this.readNativeForkMaterialization(thread.thread_binding_id)
+    }
+    const legacyPrepared = this.db.prepare(`
+      SELECT 1 AS present FROM codex_turn_bindings
+       WHERE thread_binding_id = ?
+         AND product_terminal_digest IS NULL
+         AND host_failure_product_terminal_digest IS NULL
+         AND (
+           json_valid(ingress_json) = 0
+           OR COALESCE(json_extract(ingress_json, '$.prepared.preparationContract'), '')
+                != 'codex_product_run_e2'
+         )
+       LIMIT 1
+    `).get<{ present: number }>(thread.thread_binding_id)
+    const structuredTail = this.readLiveUncommittedUserTail(thread.thread_binding_id)
+      .filter((item): item is CodexUncommittedUserTailItem & {
+        policy: 'resource_restatement_required' | 'task_restatement_required'
+      } => item.policy !== 'untrusted_text_history')
+      .map((item) => ({
+        messageId: item.originUserMessageId,
+        digest: item.inputDigest,
+        policy: item.policy,
+      }))
+    return {
+      scopeId: thread.ready_scope_id,
+      scopeEpoch: scope.message_visibility_epoch,
+      aliasId: thread.ready_conversation_alias,
+      aliasGeneration: thread.alias_generation,
+      threadBindingId: thread.thread_binding_id,
+      headRevision: thread.revision,
+      actionProjectionSequence: thread.action_projection_sequence,
+      materializationKind: thread.thread_materialization_kind,
+      materializationState: thread.materialization_state,
+      codexThreadId: thread.codex_thread_id,
+      continuationBlocked: thread.continuation_blocked_at !== null,
+      activeProductFence: lifecycle.facts.activeFence === 'product_turn',
+      manualCompactionState: lifecycle.facts.manualCompactionState,
+      hasLegacyPreparedRun: legacyPrepared?.present === 1,
+      headRuntimeManifestDigest: thread.runtime_manifest_digest,
+      headProtocolSchemaDigest: thread.protocol_schema_digest,
+      currentRuntimeManifestDigest: input.currentRuntimeManifestDigest,
+      currentProtocolSchemaDigest: input.currentProtocolSchemaDigest,
+      materializationIntentRef: thread.thread_start_request_id && thread.history_seed_digest
+        ? { id: thread.thread_start_request_id, digest: thread.history_seed_digest }
+        : null,
+      uncommittedStructuredTail: structuredTail,
     }
   }
 
@@ -2084,7 +2882,8 @@ export class CodexBindingRepository {
     const row = this.db.prepare(`
       SELECT t.ready_run_id, t.ready_task_id, t.codex_thread_id, t.codex_turn_id,
              t.gateway_claimed_codex_turn_id, t.turn_request_id,
-             t.start_reservation_set_id,
+             t.start_reservation_set_id, t.turn_start_rpc_connection_epoch,
+             t.revision AS turn_revision,
              t.tool_surface_digest, t.turn_contract_digest,
              t.message_visibility_epoch,
              t.effective_upstream_snapshot_ref, t.effective_upstream_snapshot_digest,
@@ -2124,6 +2923,8 @@ export class CodexBindingRepository {
       isolated_thread_cwd: string | null
       codex_model: string | null
       instruction_contract_digest: string
+      turn_start_rpc_connection_epoch: string | null
+      turn_revision: number
     }>(readyRunId)
     if (!row) throw new CodexBindingRepositoryError('product_turn_binding_missing')
     if (!row.ingress_json) throw new CodexBindingRepositoryError('product_turn_ingress_missing')
@@ -2148,6 +2949,7 @@ export class CodexBindingRepository {
       || row.ready_memory_revocation_revision !== receipt.prepared.readyMemorySnapshot.revocationRevision
       || !row.isolated_thread_cwd
       || !row.codex_model
+      || !row.turn_start_rpc_connection_epoch
       || digestCanonicalJson(receipt) !== row.ingress_admitted_digest) {
       throw new CodexBindingRepositoryError('product_turn_ingress_invalid')
     }
@@ -2175,6 +2977,8 @@ export class CodexBindingRepository {
       ingress,
       admittedAt: row.ingress_admitted_at,
       messageVisibilityEpoch: row.message_visibility_epoch,
+      turnStartConnectionEpoch: row.turn_start_rpc_connection_epoch,
+      turnRevision: row.turn_revision,
     }
   }
 
@@ -2336,7 +3140,47 @@ export class CodexBindingRepository {
       candidate,
       candidateDigest: row.engine_terminal_candidate_digest,
       recordedAt: row.engine_terminal_recorded_at,
+      revision: row.revision,
     }
+  }
+
+  readTerminalCloseoutEvidence(readyRunId: string): CodexTerminalCloseoutEvidence | null {
+    nonEmpty(readyRunId, 'ready_run_id_invalid')
+    const turn = this.requireTurn(readyRunId)
+    const values = [
+      turn.terminal_native_readback_receipt_json,
+      turn.terminal_native_readback_receipt_digest,
+      turn.terminal_native_readback_revision,
+      turn.terminal_facts_json,
+      turn.terminal_facts_digest,
+    ]
+    if (values.every((value) => value === null)) return null
+    if (values.some((value) => value === null)) {
+      throw new CodexBindingRepositoryError('terminal_facts_incomplete')
+    }
+    let nativeReadback: CodexTerminalNativeReadbackReceipt
+    let terminalFacts: CodexTerminalFacts
+    try {
+      nativeReadback = JSON.parse(
+        turn.terminal_native_readback_receipt_json as string,
+      ) as CodexTerminalNativeReadbackReceipt
+      terminalFacts = JSON.parse(turn.terminal_facts_json as string) as CodexTerminalFacts
+      assertCodexTerminalFacts(terminalFacts)
+    } catch {
+      throw new CodexBindingRepositoryError('terminal_facts_invalid')
+    }
+    const { digest: nativeDigest, ...unsignedNativeReadback } = nativeReadback
+    if (nativeDigest !== turn.terminal_native_readback_receipt_digest
+      || nativeDigest !== digestCanonicalJson(unsignedNativeReadback)
+      || nativeReadback.turnRevision !== turn.terminal_native_readback_revision
+      || nativeReadback.readyRunId !== turn.ready_run_id
+      || nativeReadback.codexThreadId !== turn.codex_thread_id
+      || nativeReadback.codexTurnId !== turn.codex_turn_id
+      || digestCanonicalJson(terminalFacts) !== turn.terminal_facts_digest) {
+      throw new CodexBindingRepositoryError('terminal_facts_digest_mismatch')
+    }
+    assertCodexTerminalEvidenceOwners(this.db, this, { nativeReadback, terminalFacts })
+    return { nativeReadback, terminalFacts }
   }
 
   recordToolPublicationReceipt(input: {
@@ -2521,9 +3365,13 @@ export class CodexBindingRepository {
     const terminalAllowsPreHostAbandonment = recordedTerminal !== null
       && recordedTerminal.engineOutcome !== 'completed'
     let currentDocumentAnchor: CodexCurrentDocumentAnchor | null = null
+    let actionObligations: ReadyActionObligationSetV1 | null = null
     try {
       const ingressReceipt = JSON.parse(owner.ingress_json || '') as {
-        prepared?: { ingress?: { currentDocumentAnchor?: unknown } }
+        prepared?: {
+          ingress?: { currentDocumentAnchor?: unknown }
+          actionObligations?: unknown
+        }
       }
       const rawAnchor = ingressReceipt.prepared?.ingress?.currentDocumentAnchor
       if (rawAnchor !== undefined && rawAnchor !== null) {
@@ -2535,6 +3383,16 @@ export class CodexBindingRepository {
           }
         }
         currentDocumentAnchor = parsedAnchor.data
+      }
+      const rawObligations = ingressReceipt.prepared?.actionObligations
+      if (rawObligations !== undefined) {
+        if (!isReadyActionObligationSet(rawObligations)) {
+          return {
+            kind: 'fabricated', verifiedReceiptRefs: [],
+            code: 'action_obligation_contract_invalid', callId: null,
+          }
+        }
+        actionObligations = rawObligations
       }
     } catch {
       return {
@@ -2650,6 +3508,11 @@ export class CodexBindingRepository {
       }
     }
     const receipts: string[] = []
+    const obligationEvidence: Array<{
+      callId: string
+      toolName: string
+      result: unknown
+    }> = []
     let exactCurrentDocumentReadCallId: string | null = null
     for (const row of rows) {
       if (row.bound_call_id && row.bound_tool_name !== row.tool_name) {
@@ -3003,6 +3866,11 @@ export class CodexBindingRepository {
         exactCurrentDocumentReadCallId = row.codex_call_id
       }
       receipts.push(row.binding_receipt_id)
+      obligationEvidence.push({
+        callId: row.codex_call_id,
+        toolName: row.tool_name,
+        result: authoritativeResult,
+      })
       if (!candidate) publicationDivergedCallId ||= row.codex_call_id
     }
     if (!effectSettlementOnly
@@ -3020,6 +3888,31 @@ export class CodexBindingRepository {
         kind: 'diverged', verifiedReceiptRefs: [],
         code: 'settled_tool_call_missing_from_failed_terminal',
         callId: publicationDivergedCallId,
+      }
+    }
+    if (!effectSettlementOnly
+      && actionObligations
+      && (!recordedTerminal || recordedTerminal.engineOutcome === 'completed')) {
+      for (const obligation of actionObligations.requirements) {
+        const matchingToolCalls = obligationEvidence.filter((evidence) => (
+          obligation.allowedToolNames.includes(evidence.toolName)
+        ))
+        if (matchingToolCalls.length === 0) {
+          return {
+            kind: 'incomplete', verifiedReceiptRefs: [],
+            code: 'action_obligation_missing', callId: null,
+          }
+        }
+        const matchingEvidence = matchingToolCalls.find((evidence) => (
+          actionObligationEvidenceMatches(obligation, evidence.toolName, evidence.result)
+        ))
+        if (!matchingEvidence) {
+          return {
+            kind: 'fabricated', verifiedReceiptRefs: [],
+            code: 'action_obligation_evidence_mismatch',
+            callId: matchingToolCalls[0]?.callId || null,
+          }
+        }
       }
     }
     if (!effectSettlementOnly
@@ -3066,12 +3959,69 @@ export class CodexBindingRepository {
     }
   }
 
-  readProductTurnPresentation(readyRunId: string): ProductTurnReceipt {
-    return readProductTurnPresentation(this.db, readyRunId)
+  readProductTurnPresentation(
+    readyRunId: string,
+    currentEnvironment?: {
+      requestedWorkbenchMode: 'browser' | 'document' | 'rss' | 'calendar'
+      trustedWorkbenchMode: 'browser' | 'document' | 'rss' | 'calendar'
+    },
+  ): ProductTurnReceipt {
+    return readProductTurnPresentation(this.db, readyRunId, currentEnvironment,
+      (runId) => this.readProductTurnActionContext(runId))
   }
 
-  readProductTurnPresentations(readyRunIds: readonly string[]): ProductTurnReceipt[] {
-    return readProductTurnPresentations(this.db, readyRunIds)
+  readProductTurnPresentations(
+    readyRunIds: readonly string[],
+    currentEnvironment?: {
+      requestedWorkbenchMode: 'browser' | 'document' | 'rss' | 'calendar'
+      trustedWorkbenchMode: 'browser' | 'document' | 'rss' | 'calendar'
+    },
+  ): ProductTurnReceipt[] {
+    return readProductTurnPresentations(
+      this.db,
+      readyRunIds,
+      currentEnvironment,
+      (runId) => this.readProductTurnActionContext(runId),
+    )
+  }
+
+  private readProductTurnActionContext(readyRunId: string): ProductTurnActionContext | null {
+    const owner = this.requireTurn(readyRunId)
+    const ownerThread = this.requireThread(owner.thread_binding_id)
+    const head = this.readActiveThreadByAlias(ownerThread.ready_conversation_alias)
+    if (!head || head.thread_materialization_kind === 'legacy') return null
+    const prepared = this.readProductTurnRuntime(readyRunId).prepared
+    const rootRef = prepared.ingress.modelVisibleRootOriginRef
+    const source = prepared.ingress.attemptKind === 'explicit_retry'
+      ? this.readProductTurnRuntime(rootRef!.sourceReadyRunId).prepared : prepared
+    if (rootRef && (source.ingress.attemptKind !== 'user_ingress'
+      || source.readyToolHostIdentity.scopeId !== ownerThread.ready_scope_id
+      || digestCanonicalJson(source) !== rootRef.sourceIngressContractDigest
+      || source.ingress.canonicalCurrentInputRef.messageId !== rootRef.originUserMessageId
+      || digestCodexUserInput(source.ingress.canonicalCurrentInputRef.input) !== rootRef.inputDigest)) {
+      throw new CodexBindingRepositoryError('retry_root_origin_invalid')
+    }
+    const liveTail = this.readLiveUncommittedUserTail(head.thread_binding_id)
+    const hasHeadProduct = this.db.prepare(`SELECT 1 AS present FROM codex_turn_bindings
+      WHERE thread_binding_id = ? LIMIT 1`).get<{ present: number }>(head.thread_binding_id)
+    const root = source.ingress.canonicalCurrentInputRef
+    const tailPlan = resolveExplicitRetryTailPlan(liveTail, {
+      originUserMessageId: root.messageId, inputDigest: digestCodexUserInput(root.input),
+    })
+    return {
+      headFacts: this.readHeadActionFacts({
+        aliasId: head.ready_conversation_alias,
+        aliasGeneration: head.alias_generation,
+        currentRuntimeManifestDigest: this.currentContract?.runtimeManifestDigest || head.runtime_manifest_digest,
+        currentProtocolSchemaDigest: this.currentContract?.protocolSchemaDigest || head.protocol_schema_digest,
+      }),
+      sourcePrepared: source,
+      exactLiveRootOnDirectSuccessor: head.history_source_thread_binding_id === owner.thread_binding_id
+        && head.history_source_terminal_facts_digest === owner.terminal_facts_digest
+        && head.alias_generation === ownerThread.alias_generation + 1 && !hasHeadProduct
+        && !this.readProductTurnSuccessorId(readyRunId)
+        && tailPlan.kind === 'eligible',
+    }
   }
 
   readArtifactWriteHead(readyRunId: string, relativePath: string): {
@@ -3885,6 +4835,163 @@ export class CodexBindingRepository {
     })
   }
 
+  retireLegacyPreparedAlias(input: {
+    aliasId: string
+    expectedGeneration: number
+    action: 'reset' | 'close'
+    retirementEvidenceDigest: string
+    retiredAt: string
+    currentRuntimeManifestDigest?: string
+    currentProtocolSchemaDigest?: string
+    onClosedInOpenTransaction?: (input: { conversationId: string; closedAt: string }) => void
+  }): {
+    aliasId: string
+    retiredGeneration: number
+    newGeneration: number | null
+    newThreadBindingId: string | null
+    transactionDigest: string
+    scopeClosureEvidenceDigest: string | null
+  } {
+    for (const value of [input.aliasId, input.retirementEvidenceDigest, input.retiredAt]) {
+      nonEmpty(value, 'legacy_alias_retirement_identity_invalid')
+    }
+    safePositive(input.expectedGeneration, 'alias_generation_invalid')
+    return this.immediate(() => {
+      const thread = this.readActiveThreadByAlias(input.aliasId)
+      if (!thread || thread.alias_generation !== input.expectedGeneration) {
+        throw new CodexBindingRepositoryError('active_alias_generation_mismatch')
+      }
+      const openTurns = this.db.prepare(`
+        SELECT ready_run_id,
+               CASE WHEN json_valid(ingress_json) = 1
+                 THEN COALESCE(json_extract(ingress_json, '$.prepared.preparationContract'), '')
+                 ELSE '' END AS preparation_contract
+          FROM codex_turn_bindings
+         WHERE thread_binding_id = ?
+           AND product_terminal_digest IS NULL
+           AND host_failure_product_terminal_digest IS NULL
+         ORDER BY created_at ASC, ready_run_id ASC
+      `).all<{ ready_run_id: string; preparation_contract: string }>(thread.thread_binding_id)
+      if (openTurns.length === 0
+        || openTurns.some((turn) => turn.preparation_contract === 'codex_product_run_e2')) {
+        throw new CodexBindingRepositoryError('legacy_prepared_contract_missing')
+      }
+      const fence = this.db.prepare(`
+        SELECT operation_kind, owner_ready_run_id
+          FROM codex_thread_dispatch_fences WHERE thread_binding_id = ? LIMIT 1
+      `).get<{ operation_kind: string; owner_ready_run_id: string | null }>(thread.thread_binding_id)
+      if (fence && (fence.operation_kind !== 'product_turn'
+        || !openTurns.some((turn) => turn.ready_run_id === fence.owner_ready_run_id))) {
+        throw new CodexBindingRepositoryError('legacy_prepared_fence_mismatch')
+      }
+      this.db.prepare(`
+        UPDATE codex_turn_bindings
+           SET turn_start_reservation_released_at = COALESCE(
+                 turn_start_reservation_released_at, ?
+               ),
+               turn_start_reservation_release_reason = COALESCE(
+                 turn_start_reservation_release_reason, ?
+               ),
+               effect_authority_closed_at = COALESCE(effect_authority_closed_at, ?),
+               revision = revision + 1,
+               updated_at = ?
+         WHERE thread_binding_id = ?
+           AND product_terminal_digest IS NULL
+           AND host_failure_product_terminal_digest IS NULL
+           AND (json_valid(ingress_json) = 0
+             OR COALESCE(json_extract(ingress_json, '$.prepared.preparationContract'), '')
+                  != 'codex_product_run_e2')
+      `).run(
+        input.retiredAt,
+        `legacy_prepared_contract_${input.action}`,
+        input.retiredAt,
+        input.retiredAt,
+        thread.thread_binding_id,
+      )
+      this.db.prepare(`
+        DELETE FROM codex_thread_dispatch_fences
+         WHERE thread_binding_id = ? AND operation_kind = 'product_turn'
+      `).run(thread.thread_binding_id)
+      const retired = this.db.prepare(`
+        UPDATE codex_thread_bindings
+           SET retired_at = ?, retired_reason = ?, retirement_evidence_digest = ?,
+               action_projection_sequence = action_projection_sequence + 1,
+               revision = revision + 1, updated_at = ?
+         WHERE thread_binding_id = ? AND revision = ? AND retired_at IS NULL
+      `).run(
+        input.retiredAt,
+        input.action === 'reset' ? 'user_reset' : 'closed',
+        input.retirementEvidenceDigest,
+        input.retiredAt,
+        thread.thread_binding_id,
+        thread.revision,
+      )
+      if (changes(retired) !== 1) {
+        throw new CodexBindingRepositoryError('legacy_alias_retirement_cas_failed')
+      }
+      let newGeneration: number | null = null
+      let newThreadBindingId: string | null = null
+      let scopeClosureEvidenceDigest: string | null = null
+      if (input.action === 'reset') {
+        if (!input.currentRuntimeManifestDigest || !input.currentProtocolSchemaDigest) {
+          throw new CodexBindingRepositoryError('legacy_reset_current_contract_missing')
+        }
+        newGeneration = thread.alias_generation + 1
+        newThreadBindingId = this.nextThreadBindingId(
+          thread.ready_conversation_alias,
+          newGeneration,
+          input.retirementEvidenceDigest,
+        )
+        this.insertEmptyAliasGenerationInOpenTransaction({
+          threadBindingId: newThreadBindingId,
+          aliasId: thread.ready_conversation_alias,
+          aliasGeneration: newGeneration,
+          readyScopeId: thread.ready_scope_id,
+          runtimeManifestDigest: input.currentRuntimeManifestDigest,
+          protocolSchemaDigest: input.currentProtocolSchemaDigest,
+          createdAt: input.retiredAt,
+        })
+        advanceCodexConversationMessageVisibilityInOpenTransaction(this.db, {
+          scopeId: thread.ready_scope_id,
+          resetAt: input.retiredAt,
+        })
+      } else {
+        const transactionSeed = digest({
+          aliasId: thread.ready_conversation_alias,
+          retiredGeneration: thread.alias_generation,
+          action: input.action,
+          retirementEvidenceDigest: input.retirementEvidenceDigest,
+        })
+        scopeClosureEvidenceDigest = closeCodexConversationScopeInOpenTransaction(this.db, {
+          scopeId: thread.ready_scope_id,
+          closedAt: input.retiredAt,
+          closeEvidenceDigest: transactionSeed,
+        }).closeEvidenceDigest
+        input.onClosedInOpenTransaction?.({
+          conversationId: thread.ready_scope_id,
+          closedAt: input.retiredAt,
+        })
+      }
+      const transactionDigest = digest({
+        aliasId: thread.ready_conversation_alias,
+        retiredGeneration: thread.alias_generation,
+        action: input.action,
+        newGeneration,
+        newThreadBindingId,
+        retirementEvidenceDigest: input.retirementEvidenceDigest,
+        scopeClosureEvidenceDigest,
+      })
+      return {
+        aliasId: thread.ready_conversation_alias,
+        retiredGeneration: thread.alias_generation,
+        newGeneration,
+        newThreadBindingId,
+        transactionDigest,
+        scopeClosureEvidenceDigest,
+      }
+    })
+  }
+
   retireIdleAliasForClose(input: {
     aliasId: string
     expectedGeneration: number
@@ -4047,6 +5154,91 @@ export class CodexBindingRepository {
     this.assertReadyParents(input)
     const { ingressAdmittedDigest: _, ...digestInput } = input
       const existing = this.readActiveThreadByAlias(input.prepared.conversationAlias.aliasId)
+      if (existing?.thread_start_reservation_set_id && existing.thread_materialization_kind !== 'legacy') {
+        this.readNativeInheritedContractDigest(existing)
+      }
+      if (input.prepared.ingress.attemptKind === 'user_ingress') {
+        const admissionRef = input.prepared.ingress.actionAdmissionRef
+        if (!admissionRef) throw new CodexBindingRepositoryError('action_admission_ref_missing')
+        const currentProjection = projectCodexHeadActionProjection(this.readHeadActionFacts({
+          aliasId: input.prepared.conversationAlias.aliasId,
+          aliasGeneration: input.prepared.conversationAlias.aliasGeneration,
+          currentRuntimeManifestDigest: input.runtimeManifestDigest,
+          currentProtocolSchemaDigest: input.protocolSchemaDigest,
+        }))
+        const expectedRef = currentProjection.actionHeadIdentity && {
+          headProjectionDigest: currentProjection.evidenceDigest,
+          actionProjectionVersion: currentProjection.actionProjectionVersion,
+          actionHeadIdentity: currentProjection.actionHeadIdentity,
+        }
+        if (!expectedRef
+          || digestCanonicalJson(admissionRef) !== digestCanonicalJson(expectedRef)
+          || currentProjection.actions.send_new_message.availability !== 'ready') {
+          throw new CodexBindingRepositoryError('action_admission_ref_stale')
+        }
+        if (digestCanonicalJson(input.prepared.ingress.uncommittedUserTail || [])
+          !== digestCanonicalJson(this.readLiveUncommittedUserTail(input.threadBindingId))) {
+          throw new CodexBindingRepositoryError('ordinary_uncommitted_tail_stale')
+        }
+      } else {
+        const ingress = input.prepared.ingress
+        if (ingress.actionAdmissionRef !== undefined) {
+          throw new CodexBindingRepositoryError('retry_action_admission_ref_forbidden')
+        }
+        if (!existing || !existing.history_seed_digest
+          || ingress.selectedHistorySeedItemRef?.threadBindingId !== existing.thread_binding_id
+          || ingress.selectedHistorySeedItemRef.historySeedDigest !== existing.history_seed_digest
+          || ingress.modelVisibleRootOriginRef?.originUserMessageId
+            !== ingress.canonicalCurrentInputRef.messageId
+          || ingress.modelVisibleRootOriginRef.inputDigest
+            !== digestCodexUserInput(ingress.canonicalCurrentInputRef.input)
+          || ingress.controlAuditMessageRef?.messageId !== ingress.originUserMessageId
+          || ingress.predecessorPresentationRef?.readyRunId !== ingress.predecessorRunId) {
+          throw new CodexBindingRepositoryError('retry_identity_ref_invalid')
+        }
+        const liveTail = this.readLiveUncommittedUserTail(existing.thread_binding_id)
+        const tailPlan = resolveExplicitRetryTailPlan(liveTail, ingress.selectedHistorySeedItemRef)
+        if (tailPlan.kind !== 'eligible'
+          || digestCanonicalJson(ingress.uncommittedUserTail) !== digestCanonicalJson(liveTail)
+          || digestCanonicalJson(ingress.uncommittedTailAssignments) !== digestCanonicalJson(tailPlan.assignments)) {
+          throw new CodexBindingRepositoryError('retry_selected_seed_stale')
+        }
+        const root = this.readProductTurnRuntime(ingress.modelVisibleRootOriginRef.sourceReadyRunId)
+        if (root.readyScopeId !== input.prepared.readyToolHostIdentity.scopeId
+          || root.prepared.ingress.attemptKind !== 'user_ingress'
+          || digestCanonicalJson(root.prepared)
+            !== ingress.modelVisibleRootOriginRef.sourceIngressContractDigest
+          || digestCanonicalJson(root.prepared.sourceTrustedEnvironmentRef)
+            !== digestCanonicalJson(input.prepared.sourceTrustedEnvironmentRef)
+          || ingress.currentTrustedEnvironmentRef?.trustedWorkbenchMode
+            !== input.prepared.sourceTrustedEnvironmentRef.workbenchMode
+          || root.prepared.ingress.canonicalCurrentInputRef.messageId
+            !== ingress.modelVisibleRootOriginRef.originUserMessageId
+          || digestCodexUserInput(root.prepared.ingress.canonicalCurrentInputRef.input)
+            !== ingress.modelVisibleRootOriginRef.inputDigest) {
+          throw new CodexBindingRepositoryError('retry_root_ref_invalid')
+        }
+        if (existing.thread_materialization_kind === 'fresh_root_with_tail'
+          && this.admissionNativeInheritedContractDigest(input)
+            !== this.readNativeInheritedContractDigest(this.requireThread(root.threadBindingId))) {
+          throw new CodexBindingRepositoryError('retry_native_inherited_contract_mismatch')
+        }
+        const predecessorPresentation = this.readProductTurnPresentation(
+          ingress.predecessorRunId as string,
+          {
+            requestedWorkbenchMode: input.prepared.sourceTrustedEnvironmentRef.workbenchMode,
+            trustedWorkbenchMode: input.prepared.sourceTrustedEnvironmentRef.workbenchMode,
+          },
+        )
+        if (predecessorPresentation.presentationDigest
+          !== ingress.predecessorPresentationRef?.presentationDigest
+          || predecessorPresentation.actionProjection.retry_failed_task.availability !== 'ready') {
+          throw new CodexBindingRepositoryError('retry_predecessor_presentation_stale')
+        }
+        if (this.readProductTurnSuccessorId(ingress.predecessorRunId as string)) {
+          throw new CodexBindingRepositoryError('retry_predecessor_stale')
+        }
+      }
       let thread: ThreadBindingRow
       if (input.reservation.existingThread) {
         if (
@@ -4144,6 +5336,7 @@ export class CodexBindingRepository {
                  tool_surface_json = ?, instruction_contract_digest = ?,
                  codex_model_provider_id = 'ready_gateway', codex_model = ?,
                  upstream_profile_snapshot_ref = ?, upstream_profile_snapshot_digest = ?,
+                 native_inherited_contract_digest = ?,
                  revision = revision + 1, updated_at = ?
            WHERE thread_binding_id = ? AND revision = ?
              AND thread_start_reservation_set_id IS NULL AND retired_at IS NULL
@@ -4160,6 +5353,7 @@ export class CodexBindingRepository {
           input.codexModel,
           input.upstreamProfileSnapshotRef,
           input.upstreamProfileSnapshotDigest,
+          this.admissionNativeInheritedContractDigest(input),
           input.admittedAt,
           existing.thread_binding_id,
           existing.revision,
@@ -4297,7 +5491,14 @@ export class CodexBindingRepository {
     reservationSetId: string
     reservationId: string
     inboundIdentity:
-      | { method: 'thread/start'; expectedCwd: string }
+      | {
+          method: 'thread/start' | 'thread/fork'
+          expectedCwd: string
+          expectedParentThreadId: string | null
+          expectedForkedFromId: string | null
+          expectedPrefixTurnIds: string[]
+          materializationRequestDigest: string | null
+        }
       | { method: 'turn/start'; threadId: string; clientUserMessageId: string }
   } {
     nonEmpty(input.connectionEpoch, 'connection_epoch_invalid')
@@ -4305,9 +5506,10 @@ export class CodexBindingRepository {
     nonEmpty(input.requestDigest, 'request_digest_invalid')
     safePositive(input.rpcId, 'rpc_identity_invalid')
     return this.immediate(() => {
-      if (input.method === 'thread/start') {
+      if (input.method !== 'turn/start') {
         const row = this.db.prepare(`
-          SELECT * FROM codex_thread_bindings WHERE isolated_thread_cwd = ?
+          SELECT * FROM codex_thread_bindings
+           WHERE ${input.method === 'thread/start' ? 'isolated_thread_cwd' : 'thread_binding_id'} = ?
         `).get<ThreadBindingRow>(input.bindingLookupKey)
         if (
           !row
@@ -4316,12 +5518,20 @@ export class CodexBindingRepository {
           || !row.isolated_thread_cwd
           || row.thread_start_reservation_released_at
           || row.thread_start_dispatch_intent_at
+          || (input.method === 'thread/fork'
+            && (row.thread_materialization_kind !== 'native_fork'
+              || row.materialization_state !== 'pending'
+              || !row.history_source_thread_binding_id))
+          || (input.method === 'thread/start'
+            && row.thread_materialization_kind !== 'fresh_start'
+            && row.thread_materialization_kind !== 'fresh_root_with_tail')
         ) {
           throw new CodexBindingRepositoryError('thread_start_not_dispatchable')
         }
         const updated = this.db.prepare(`
           UPDATE codex_thread_bindings
              SET thread_start_rpc_connection_epoch = ?, thread_start_rpc_id = ?,
+                 thread_start_request_digest = ?,
                  thread_start_dispatch_intent_at = ?, revision = revision + 1, updated_at = ?
            WHERE thread_binding_id = ? AND revision = ?
              AND thread_start_dispatch_intent_at IS NULL
@@ -4329,6 +5539,7 @@ export class CodexBindingRepository {
         `).run(
           input.connectionEpoch,
           input.rpcId,
+          input.requestDigest,
           input.dispatchedAt,
           input.dispatchedAt,
           row.thread_binding_id,
@@ -4339,14 +5550,25 @@ export class CodexBindingRepository {
         if (
           readback.thread_start_rpc_connection_epoch !== input.connectionEpoch
           || readback.thread_start_rpc_id !== input.rpcId
+          || readback.thread_start_request_digest !== input.requestDigest
         ) throw new CodexBindingRepositoryError('start_dispatch_readback_mismatch')
         return {
           bindingId: row.thread_binding_id,
           reservationSetId: row.thread_start_reservation_set_id,
           reservationId: row.thread_start_reservation_member_id,
           inboundIdentity: {
-            method: 'thread/start',
+            method: input.method,
             expectedCwd: row.isolated_thread_cwd,
+            expectedParentThreadId: null,
+            expectedForkedFromId: input.method === 'thread/fork'
+              ? this.requireThread(row.history_source_thread_binding_id as string).codex_thread_id
+              : null,
+            expectedPrefixTurnIds: input.method === 'thread/fork'
+              ? this.readNativeForkMaterialization(row.thread_binding_id)?.expectedPrefixTurnIds || []
+              : [],
+            materializationRequestDigest: input.method === 'thread/fork'
+              ? row.materialization_request_digest
+              : null,
           },
         }
       }
@@ -4362,6 +5584,7 @@ export class CodexBindingRepository {
       const updated = this.db.prepare(`
         UPDATE codex_turn_bindings
            SET turn_start_rpc_connection_epoch = ?, turn_start_rpc_id = ?,
+               turn_start_request_digest = ?,
                turn_start_dispatch_intent_at = ?, revision = revision + 1, updated_at = ?
          WHERE ready_run_id = ? AND revision = ?
            AND turn_start_dispatch_intent_at IS NULL
@@ -4369,6 +5592,7 @@ export class CodexBindingRepository {
       `).run(
         input.connectionEpoch,
         input.rpcId,
+        input.requestDigest,
         input.dispatchedAt,
         input.dispatchedAt,
         row.ready_run_id,
@@ -4379,6 +5603,7 @@ export class CodexBindingRepository {
       if (
         readback.turn_start_rpc_connection_epoch !== input.connectionEpoch
         || readback.turn_start_rpc_id !== input.rpcId
+        || readback.turn_start_request_digest !== input.requestDigest
       ) throw new CodexBindingRepositoryError('start_dispatch_readback_mismatch')
       return {
         bindingId: row.ready_run_id,
@@ -4448,6 +5673,42 @@ export class CodexBindingRepository {
     }
   }
 
+  markForkMaterializationProvenAbsent(input: {
+    threadBindingId: string
+    evidenceDigest: string
+    recordedAt: string
+  }): void {
+    nonEmpty(input.threadBindingId, 'fork_binding_identity_invalid')
+    nonEmpty(input.evidenceDigest, 'fork_evidence_digest_invalid')
+    nonEmpty(input.recordedAt, 'fork_evidence_time_invalid')
+    this.immediate(() => {
+      const row = this.requireThread(input.threadBindingId)
+      if (row.thread_materialization_kind !== 'native_fork'
+        || row.materialization_state !== 'pending') {
+        throw new CodexBindingRepositoryError('fork_materialization_not_pending')
+      }
+      const updated = this.db.prepare(`
+        UPDATE codex_thread_bindings
+           SET materialization_state = 'proven_absent', materialization_evidence_digest = ?,
+               thread_start_reservation_released_at = ?,
+               thread_start_reservation_release_reason = 'fork_materialization_proven_absent',
+               action_projection_sequence = action_projection_sequence + 1,
+               revision = revision + 1, updated_at = ?
+         WHERE thread_binding_id = ? AND revision = ? AND materialization_state = 'pending'
+           AND thread_start_reservation_released_at IS NULL
+      `).run(
+        input.evidenceDigest,
+        input.recordedAt,
+        input.recordedAt,
+        row.thread_binding_id,
+        row.revision,
+      )
+      if (changes(updated) !== 1) {
+        throw new CodexBindingRepositoryError('fork_materialization_absent_cas_failed')
+      }
+    })
+  }
+
   reconcileStartAccepted(input: {
     connectionEpoch: string
     rpcId: number
@@ -4458,12 +5719,21 @@ export class CodexBindingRepository {
     responseDigest: string
     responsePending: boolean
     reconciledAt: string
+    forkRecoveryEvidence?: {
+      connectionEpoch: string
+      preResumeThreadReadDigest: string
+      resumedThreadDigest: string
+    }
   }): void {
     nonEmpty(input.nativeId, 'native_identity_invalid')
     nonEmpty(input.responseDigest, 'response_digest_invalid')
+    const method = input.method
     this.immediate(() => {
-      if (input.method === 'thread/start') this.reconcileThreadAccepted(input)
-      else this.reconcileTurnAccepted(input)
+      if (method !== 'turn/start') {
+        this.reconcileThreadAccepted({ ...input, method })
+      } else {
+        this.reconcileTurnAccepted(input)
+      }
     })
   }
 
@@ -4536,6 +5806,10 @@ export class CodexBindingRepository {
     const turns = this.db.prepare(`SELECT * FROM codex_turn_bindings`).all<TurnBindingRow>()
     for (const row of threads) {
       if (row.thread_start_reservation_set_id === null) continue
+      const method: 'thread/start' | 'thread/fork' = row.thread_materialization_kind === 'native_fork'
+        ? 'thread/fork'
+        : 'thread/start'
+      const requiredMemberCount: 1 | 2 = method === 'thread/fork' ? 1 : 2
       if (row.thread_start_reservation_released_at === null) {
         if (row.thread_start_reconciled_at || row.codex_thread_id) {
           throw new CodexBindingRepositoryError('released_member_invariant_broken')
@@ -4544,8 +5818,8 @@ export class CodexBindingRepository {
           reservationSetId: row.thread_start_reservation_set_id,
           reservationId: row.thread_start_reservation_member_id as string,
           scopeId: row.ready_scope_id,
-          method: 'thread/start',
-          requiredMemberCount: 2,
+          method,
+          requiredMemberCount,
           state: row.thread_start_dispatch_intent_at === null
             ? 'held'
             : row.thread_start_rpc_connection_epoch
@@ -4567,7 +5841,7 @@ export class CodexBindingRepository {
         guards.push({
           connectionEpoch: row.thread_start_rpc_connection_epoch as string,
           rpcId: row.thread_start_rpc_id as number,
-          method: 'thread/start',
+          method,
           bindingId: row.thread_binding_id,
           nativeId: row.codex_thread_id as string,
         })
@@ -4898,14 +6172,35 @@ export class CodexBindingRepository {
     method: StartMethod,
     bindingId: string,
   ):
-    | { method: 'thread/start'; expectedCwd: string }
+    | {
+        method: 'thread/start' | 'thread/fork'
+        expectedCwd: string
+        expectedParentThreadId: string | null
+        expectedForkedFromId: string | null
+        expectedPrefixTurnIds: string[]
+        materializationRequestDigest: string | null
+      }
     | { method: 'turn/start'; threadId: string; clientUserMessageId: string } {
-    if (method === 'thread/start') {
+    if (method === 'thread/start' || method === 'thread/fork') {
       const row = this.requireThread(bindingId)
       if (!row.isolated_thread_cwd || !row.thread_start_reservation_set_id) {
         throw new CodexBindingRepositoryError('thread_start_not_admitted')
       }
-      return { method, expectedCwd: row.isolated_thread_cwd }
+      const sourceThreadId = method === 'thread/fork' && row.history_source_thread_binding_id
+        ? this.requireThread(row.history_source_thread_binding_id).codex_thread_id
+        : null
+      return {
+        method,
+        expectedCwd: row.isolated_thread_cwd,
+        expectedParentThreadId: null,
+        expectedForkedFromId: sourceThreadId,
+        expectedPrefixTurnIds: method === 'thread/fork'
+          ? this.readNativeForkMaterialization(row.thread_binding_id)?.expectedPrefixTurnIds || []
+          : [],
+        materializationRequestDigest: method === 'thread/fork'
+          ? row.materialization_request_digest
+          : null,
+      }
     }
     const row = this.requireTurn(bindingId)
     if (!row.codex_thread_id) throw new CodexBindingRepositoryError('turn_thread_identity_missing')
@@ -4926,6 +6221,30 @@ export class CodexBindingRepository {
     nonEmpty(input.reason, 'start_inbound_unknown_reason_invalid')
     nonEmpty(input.quarantinedAt, 'start_inbound_unknown_time_invalid')
     this.immediate(() => {
+      if (input.method === 'thread/fork') {
+        const row = this.requireThread(input.bindingId)
+        if (row.thread_materialization_kind !== 'native_fork'
+          || (row.materialization_state !== 'pending' && row.materialization_state !== 'unknown')) {
+          throw new CodexBindingRepositoryError('fork_materialization_not_pending')
+        }
+        const evidenceDigest = digestCanonicalJson({
+          threadBindingId: input.bindingId,
+          reason: input.reason,
+          quarantinedAt: input.quarantinedAt,
+        })
+        const updated = this.db.prepare(`
+          UPDATE codex_thread_bindings
+             SET materialization_state = 'unknown', materialization_evidence_digest = ?,
+                 action_projection_sequence = action_projection_sequence + 1,
+                 revision = revision + 1, updated_at = ?
+           WHERE thread_binding_id = ? AND revision = ?
+             AND materialization_state = 'pending'
+        `).run(evidenceDigest, input.quarantinedAt, input.bindingId, row.revision)
+        if (changes(updated) !== 1 && row.materialization_state !== 'unknown') {
+          throw new CodexBindingRepositoryError('fork_materialization_unknown_cas_failed')
+        }
+        return
+      }
       const readyRunId = input.method === 'turn/start'
         ? input.bindingId
         : this.readProductRunForThreadBinding(input.bindingId)
@@ -5025,8 +6344,14 @@ export class CodexBindingRepository {
     if (unresolvedCall && !cleanupIntent) throw new CodexBindingRepositoryError('thread_archive_call_unresolved')
     const descendant = this.db.prepare(`
       SELECT thread_binding_id FROM codex_thread_bindings
-       WHERE codex_parent_thread_id = ? OR codex_forked_from_id = ? LIMIT 1
-    `).get(threadId, threadId)
+       WHERE (codex_parent_thread_id = ? OR codex_forked_from_id = ?)
+         AND NOT (
+           thread_materialization_kind = 'native_fork'
+           AND materialization_state = 'confirmed'
+           AND history_source_thread_binding_id = ?
+         )
+       LIMIT 1
+    `).get(threadId, threadId, thread.thread_binding_id)
     if (descendant) throw new CodexBindingRepositoryError('thread_archive_descendant_exists')
   }
 
@@ -5101,6 +6426,7 @@ export class CodexBindingRepository {
     readyRunId: string
     productTerminalDigest: string
     closeoutAt: string
+    terminalEvidence?: CodexTerminalCloseoutEvidence
   }): { handled: boolean; reservationSetId: string | null } {
     nonEmpty(input.readyRunId, 'ready_run_id_invalid')
     nonEmpty(input.productTerminalDigest, 'product_terminal_digest_invalid')
@@ -5127,6 +6453,7 @@ export class CodexBindingRepository {
     readyRunId: string
     productTerminalDigest: string
     closeoutAt: string
+    terminalEvidence: CodexTerminalCloseoutEvidence
   }): { handled: boolean; reservationSetId: string | null } {
     nonEmpty(input.readyRunId, 'ready_run_id_invalid')
     nonEmpty(input.productTerminalDigest, 'product_terminal_digest_invalid')
@@ -5241,7 +6568,13 @@ export class CodexBindingRepository {
     readyRunId: string
     productTerminalDigest: string
     closeoutAt: string
-  }): { handled: boolean; reservationSetId: string | null } {
+    terminalEvidence: CodexTerminalCloseoutEvidence
+    forkSeed?: CodexNativeForkSeedInput
+  }): {
+    handled: boolean
+    reservationSetId: string | null
+    forkTargetThreadBindingId: string | null
+  } {
     nonEmpty(input.readyRunId, 'ready_run_id_invalid')
     nonEmpty(input.productTerminalDigest, 'product_terminal_digest_invalid')
     nonEmpty(input.closeoutAt, 'product_closeout_at_invalid')
@@ -5251,7 +6584,11 @@ export class CodexBindingRepository {
     const turn = this.db.prepare(`
       SELECT * FROM codex_turn_bindings WHERE ready_run_id = ? LIMIT 1
     `).get<TurnBindingRow>(input.readyRunId)
-    if (!turn) return { handled: false, reservationSetId: null }
+    if (!turn) return {
+      handled: false,
+      reservationSetId: null,
+      forkTargetThreadBindingId: null,
+    }
     if (turn.host_failure_kind || turn.host_failure_product_terminal_digest
       || turn.recovery_failure_code) {
       throw new CodexBindingRepositoryError('product_closeout_kind_conflict')
@@ -5350,87 +6687,13 @@ export class CodexBindingRepository {
     if (child && !['completed', 'failed', 'cancelled'].includes(child.status)) {
       throw new CodexBindingRepositoryError('browser_verifier_browser_child_not_terminal')
     }
-    if (thread.continuation_blocked_at || thread.retired_at) {
-      if (
-        thread.continuation_blocked_at !== input.closeoutAt
-        || thread.continuation_blocked_reason !== 'publication_diverged'
-        || thread.continuation_blocked_evidence_digest !== attempt.receiptDigest
-        || thread.retired_at !== input.closeoutAt
-        || thread.retired_reason !== 'publication_diverged'
-        || thread.retirement_evidence_digest !== attempt.receiptDigest
-      ) throw new CodexBindingRepositoryError('browser_verifier_thread_retirement_mismatch')
-    } else {
-      const retired = this.db.prepare(`
-        UPDATE codex_thread_bindings
-           SET continuation_blocked_at = ?,
-               continuation_blocked_reason = 'publication_diverged',
-               continuation_blocked_evidence_digest = ?,
-               retired_at = ?, retired_reason = 'publication_diverged',
-               retirement_evidence_digest = ?, revision = revision + 1, updated_at = ?
-         WHERE thread_binding_id = ? AND revision = ?
-           AND continuation_blocked_at IS NULL AND retired_at IS NULL
-      `).run(
-        input.closeoutAt,
-        attempt.receiptDigest,
-        input.closeoutAt,
-        attempt.receiptDigest,
-        input.closeoutAt,
-        thread.thread_binding_id,
-        thread.revision,
-      )
-      if (changes(retired) !== 1) {
-        throw new CodexBindingRepositoryError('browser_verifier_thread_retirement_cas_failed')
-      }
+    if (input.terminalEvidence.terminalFacts.history.kind === 'unknown_reset_required') {
+      return { ...this.completeHistoryResetRequiredCloseoutInOpenTransaction(input), forkTargetThreadBindingId: null }
     }
-    if (turn.product_terminal_digest) {
-      if (
-        turn.product_terminal_digest !== input.productTerminalDigest
-        || turn.product_closeout_at !== input.closeoutAt
-        || turn.fence_release_revision === null
-      ) throw new CodexBindingRepositoryError('product_terminal_immutable')
-      this.assertProductFenceReleased(turn.thread_binding_id, input.readyRunId)
-      return { handled: true, reservationSetId: turn.start_reservation_set_id }
+    if (input.terminalEvidence.terminalFacts.history.kind !== 'diverged') {
+      throw new CodexBindingRepositoryError('browser_verifier_terminal_facts_mismatch')
     }
-    const fence = this.requireProductFenceForRelease(turn.thread_binding_id, input.readyRunId)
-    const fenceReleaseRevision = fence.revision + 1
-    const turnUpdate = this.db.prepare(`
-      UPDATE codex_turn_bindings
-         SET product_terminal_digest = ?, product_closeout_at = ?,
-             fence_release_revision = ?, revision = revision + 1, updated_at = ?
-       WHERE ready_run_id = ? AND revision = ? AND product_terminal_digest IS NULL
-    `).run(
-      input.productTerminalDigest,
-      input.closeoutAt,
-      fenceReleaseRevision,
-      input.closeoutAt,
-      input.readyRunId,
-      turn.revision,
-    )
-    if (changes(turnUpdate) !== 1) throw new CodexBindingRepositoryError('product_terminal_cas_failed')
-    const fenceDelete = this.db.prepare(`
-      DELETE FROM codex_thread_dispatch_fences
-       WHERE thread_binding_id = ? AND owner_ready_run_id = ? AND revision = ?
-    `).run(turn.thread_binding_id, input.readyRunId, fence.revision)
-    if (changes(fenceDelete) !== 1) throw new CodexBindingRepositoryError('product_fence_release_failed')
-    this.assertThreadArchiveEligible(turn.codex_thread_id as string)
-    const retirementTransactionDigest = digest({
-      contract: 'codex_browser_verifier_retirement_v1',
-      readyRunId: input.readyRunId,
-      threadBindingId: thread.thread_binding_id,
-      verifierReceiptDigest: attempt.receiptDigest,
-      productTerminalDigest: input.productTerminalDigest,
-      closeoutAt: input.closeoutAt,
-    })
-    this.recordThreadArchiveIntentInOpenTransaction({
-      thread,
-      sourceKind: 'browser_verifier_nonaccept',
-      retiredReason: 'publication_diverged',
-      readyRunId: input.readyRunId,
-      retirementEvidenceDigest: attempt.receiptDigest,
-      retirementTransactionDigest,
-      retiredAt: input.closeoutAt,
-    })
-    return { handled: true, reservationSetId: turn.start_reservation_set_id }
+    return this.completePublicationDivergenceCloseoutInOpenTransaction(input)
   }
 
   completeLifecycleActionCloseoutInOpenTransaction(input: {
@@ -5438,7 +6701,13 @@ export class CodexBindingRepository {
     readyRunId: string
     productTerminalDigest: string
     closeoutAt: string
-  }): { handled: boolean; reservationSetId: string | null } {
+    terminalEvidence: CodexTerminalCloseoutEvidence
+    forkSeed?: CodexNativeForkSeedInput
+  }): {
+    handled: boolean
+    reservationSetId: string | null
+    forkTargetThreadBindingId?: string | null
+  } {
     nonEmpty(input.readyRunId, 'ready_run_id_invalid')
     nonEmpty(input.productTerminalDigest, 'product_terminal_digest_invalid')
     nonEmpty(input.closeoutAt, 'product_closeout_at_invalid')
@@ -5449,7 +6718,7 @@ export class CodexBindingRepository {
       SELECT * FROM codex_turn_bindings WHERE ready_run_id = ? LIMIT 1
     `).get<TurnBindingRow>(input.readyRunId)
     if (!turn) return { handled: false, reservationSetId: null }
-    const thread = this.requireThread(turn.thread_binding_id)
+    let thread = this.requireThread(turn.thread_binding_id)
     const lifecycle = this.readProductLifecycleAction(input.readyRunId)
     if (!lifecycle || lifecycle.lifecycleAction !== input.action
       || lifecycle.readyTaskId !== turn.ready_task_id
@@ -5565,45 +6834,45 @@ export class CodexBindingRepository {
       this.assertProductFenceReleased(turn.thread_binding_id, input.readyRunId)
       return { handled: true, reservationSetId: turn.start_reservation_set_id }
     }
+    const historyKind = input.terminalEvidence.terminalFacts.history.kind
+    if (input.action === 'stop') {
+      if (historyKind === 'continuation_safe') {
+        this.completeProductTurnCloseoutInOpenTransaction(input, turn)
+        return { handled: true, reservationSetId: turn.start_reservation_set_id }
+      }
+      if (historyKind === 'diverged') {
+        return this.completePublicationDivergenceCloseoutInOpenTransaction(input)
+      }
+      if (historyKind === 'unknown_reset_required') {
+        const result = this.completeHistoryResetRequiredCloseoutInOpenTransaction(input)
+        return { ...result, forkTargetThreadBindingId: null }
+      }
+      throw new CodexBindingRepositoryError('lifecycle_stop_history_invalid')
+    }
+    if ((input.action === 'reset' && historyKind !== 'reset')
+      || (input.action === 'close' && historyKind !== 'closed')) {
+      throw new CodexBindingRepositoryError('lifecycle_action_terminal_facts_mismatch')
+    }
     if (thread.retired_at || thread.retirement_evidence_digest) {
       throw new CodexBindingRepositoryError('lifecycle_action_thread_already_retired')
     }
-    const fence = this.requireProductFenceForRelease(turn.thread_binding_id, input.readyRunId)
-    const retiredReason = input.action === 'reset'
-      ? 'user_reset'
-      : input.action === 'close' ? 'closed' : 'publication_diverged'
-    const threadUpdate = input.action === 'stop'
-      ? this.db.prepare(`
-          UPDATE codex_thread_bindings
-             SET continuation_blocked_at = ?, continuation_blocked_reason = 'publication_diverged',
-                 continuation_blocked_evidence_digest = ?, retired_at = ?, retired_reason = ?,
-                 retirement_evidence_digest = ?, revision = revision + 1, updated_at = ?
-           WHERE thread_binding_id = ? AND revision = ?
-             AND continuation_blocked_at IS NULL AND retired_at IS NULL
-        `).run(
-          input.closeoutAt,
-          lifecycle.lifecycleActionEvidenceDigest,
-          input.closeoutAt,
-          retiredReason,
-          lifecycle.lifecycleActionEvidenceDigest,
-          input.closeoutAt,
-          thread.thread_binding_id,
-          thread.revision,
-        )
-      : this.db.prepare(`
-          UPDATE codex_thread_bindings
-             SET retired_at = ?, retired_reason = ?, retirement_evidence_digest = ?,
-                 revision = revision + 1, updated_at = ?
-           WHERE thread_binding_id = ? AND revision = ? AND retired_at IS NULL
-             AND continuation_blocked_at IS NULL
-        `).run(
-          input.closeoutAt,
-          retiredReason,
-          lifecycle.lifecycleActionEvidenceDigest,
-          input.closeoutAt,
-          thread.thread_binding_id,
-          thread.revision,
-        )
+    this.completeProductTurnCloseoutInOpenTransaction(input, turn)
+    thread = this.requireThread(turn.thread_binding_id)
+    const retiredReason = input.action === 'reset' ? 'user_reset' : 'closed'
+    const threadUpdate = this.db.prepare(`
+      UPDATE codex_thread_bindings
+         SET retired_at = ?, retired_reason = ?, retirement_evidence_digest = ?,
+             revision = revision + 1, updated_at = ?
+       WHERE thread_binding_id = ? AND revision = ? AND retired_at IS NULL
+         AND continuation_blocked_at IS NULL
+    `).run(
+      input.closeoutAt,
+      retiredReason,
+      lifecycle.lifecycleActionEvidenceDigest,
+      input.closeoutAt,
+      thread.thread_binding_id,
+      thread.revision,
+    )
     if (changes(threadUpdate) !== 1) {
       throw new CodexBindingRepositoryError('lifecycle_action_thread_retirement_cas_failed')
     }
@@ -5629,30 +6898,6 @@ export class CodexBindingRepository {
         scopeId: thread.ready_scope_id,
         resetAt: input.closeoutAt,
       })
-    }
-    const fenceReleaseRevision = fence.revision + 1
-    const turnUpdate = this.db.prepare(`
-      UPDATE codex_turn_bindings
-         SET product_terminal_digest = ?, product_closeout_at = ?,
-             fence_release_revision = ?, revision = revision + 1, updated_at = ?
-       WHERE ready_run_id = ? AND revision = ? AND product_terminal_digest IS NULL
-    `).run(
-      input.productTerminalDigest,
-      input.closeoutAt,
-      fenceReleaseRevision,
-      input.closeoutAt,
-      input.readyRunId,
-      turn.revision,
-    )
-    if (changes(turnUpdate) !== 1) {
-      throw new CodexBindingRepositoryError('lifecycle_action_terminal_cas_failed')
-    }
-    const fenceDelete = this.db.prepare(`
-      DELETE FROM codex_thread_dispatch_fences
-       WHERE thread_binding_id = ? AND owner_ready_run_id = ? AND revision = ?
-    `).run(turn.thread_binding_id, input.readyRunId, fence.revision)
-    if (changes(fenceDelete) !== 1) {
-      throw new CodexBindingRepositoryError('product_fence_release_failed')
     }
     this.assertThreadArchiveEligible(turn.codex_thread_id)
     const retirementTransactionDigest = codexLifecycleActionRetirementDigest({
@@ -5695,23 +6940,38 @@ export class CodexBindingRepository {
     const lifecycle = this.readProductLifecycleAction(readyRunId)
     if (!lifecycle || !turn.codex_thread_id || !turn.codex_turn_id
       || !turn.engine_terminal_status || !turn.product_terminal_digest
-      || !turn.product_closeout_at || turn.fence_release_revision === null
-      || thread.retired_at !== turn.product_closeout_at
-      || thread.retirement_evidence_digest !== lifecycle.lifecycleActionEvidenceDigest) {
+      || !turn.product_closeout_at || turn.fence_release_revision === null) {
       throw new CodexBindingRepositoryError('lifecycle_action_closeout_readback_missing')
     }
+    const facts = turn.terminal_facts_json
+      ? JSON.parse(turn.terminal_facts_json) as CodexTerminalFacts
+      : null
     if (lifecycle.lifecycleAction === 'stop') {
-      if (thread.retired_reason !== 'publication_diverged'
-        || thread.continuation_blocked_at !== turn.product_closeout_at
-        || thread.continuation_blocked_reason !== 'publication_diverged'
-        || thread.continuation_blocked_evidence_digest !== lifecycle.lifecycleActionEvidenceDigest) {
+      if (!facts || !['continuation_safe', 'diverged', 'unknown_reset_required']
+        .includes(facts.history.kind)) {
         throw new CodexBindingRepositoryError('lifecycle_action_closeout_readback_mismatch')
       }
-    } else if (thread.continuation_blocked_at !== null
+      if (facts.history.kind === 'continuation_safe'
+        && (thread.retired_at !== null || thread.continuation_blocked_at !== null)) {
+        throw new CodexBindingRepositoryError('lifecycle_action_closeout_readback_mismatch')
+      }
+      if (facts.history.kind === 'diverged'
+        && (thread.retired_at !== turn.product_closeout_at
+          || thread.retired_reason !== 'publication_diverged')) {
+        throw new CodexBindingRepositoryError('lifecycle_action_closeout_readback_mismatch')
+      }
+      if (facts.history.kind === 'unknown_reset_required'
+        && (thread.retired_at !== null || thread.continuation_blocked_at !== turn.product_closeout_at)) {
+        throw new CodexBindingRepositoryError('lifecycle_action_closeout_readback_mismatch')
+      }
+    } else if (thread.retired_at !== turn.product_closeout_at
+      || thread.retirement_evidence_digest !== lifecycle.lifecycleActionEvidenceDigest
+      || thread.continuation_blocked_at !== null
       || thread.retired_reason !== (lifecycle.lifecycleAction === 'reset' ? 'user_reset' : 'closed')) {
       throw new CodexBindingRepositoryError('lifecycle_action_closeout_readback_mismatch')
     }
     const successor = lifecycle.lifecycleAction === 'reset'
+      || (lifecycle.lifecycleAction === 'stop' && facts?.history.kind === 'diverged')
       ? this.db.prepare(`
           SELECT thread_binding_id, alias_generation FROM codex_thread_bindings
            WHERE ready_conversation_alias = ? AND alias_generation = ? LIMIT 1
@@ -5720,32 +6980,36 @@ export class CodexBindingRepository {
           thread.alias_generation + 1,
         )
       : null
-    if (lifecycle.lifecycleAction === 'reset' && !successor) {
+    if ((lifecycle.lifecycleAction === 'reset'
+      || (lifecycle.lifecycleAction === 'stop' && facts?.history.kind === 'diverged'))
+      && !successor) {
       throw new CodexBindingRepositoryError('lifecycle_action_reset_successor_missing')
     }
     const newGeneration = successor?.alias_generation ?? null
     const newThreadBindingId = successor?.thread_binding_id ?? null
-    const retirementTransactionDigest = codexLifecycleActionRetirementDigest({
-      action: lifecycle.lifecycleAction,
-      readyRunId,
-      aliasId: thread.ready_conversation_alias,
-      retiredGeneration: thread.alias_generation,
-      threadBindingId: thread.thread_binding_id,
-      lifecycleActionEvidenceDigest: lifecycle.lifecycleActionEvidenceDigest,
-      productTerminalDigest: turn.product_terminal_digest,
-      closeoutAt: turn.product_closeout_at,
-      newGeneration,
-      newThreadBindingId,
-    })
-    const archiveSource: CodexThreadArchiveSourceKind = lifecycle.lifecycleAction === 'close'
-      ? 'engine_terminal_close'
-      : lifecycle.lifecycleAction === 'reset' ? 'engine_terminal_reset' : 'engine_terminal_stop'
-    const archiveIntent = this.requireThreadArchiveIntent({
-      threadBindingId: thread.thread_binding_id,
-      sourceKind: archiveSource,
-      readyRunId,
-      retirementTransactionDigest,
-    })
+    const retirementTransactionDigest = lifecycle.lifecycleAction === 'stop'
+      ? null
+      : codexLifecycleActionRetirementDigest({
+          action: lifecycle.lifecycleAction,
+          readyRunId,
+          aliasId: thread.ready_conversation_alias,
+          retiredGeneration: thread.alias_generation,
+          threadBindingId: thread.thread_binding_id,
+          lifecycleActionEvidenceDigest: lifecycle.lifecycleActionEvidenceDigest,
+          productTerminalDigest: turn.product_terminal_digest,
+          closeoutAt: turn.product_closeout_at,
+          newGeneration,
+          newThreadBindingId,
+        })
+    const archiveIntent = lifecycle.lifecycleAction === 'stop'
+      ? null
+      : this.requireThreadArchiveIntent({
+          threadBindingId: thread.thread_binding_id,
+          sourceKind: lifecycle.lifecycleAction === 'close'
+            ? 'engine_terminal_close' : 'engine_terminal_reset',
+          readyRunId,
+          retirementTransactionDigest: retirementTransactionDigest as string,
+        })
     const scopeClosure = lifecycle.lifecycleAction === 'close'
       ? readCodexClosedConversationScope(this.db, thread.ready_scope_id)
       : null
@@ -5765,9 +7029,9 @@ export class CodexBindingRepository {
       closeoutDigest: turn.product_terminal_digest,
       fenceReleaseRevision: turn.fence_release_revision,
       lifecycleActionEvidenceDigest: lifecycle.lifecycleActionEvidenceDigest,
-      retiredGeneration: thread.alias_generation,
+      retiredGeneration: thread.retired_at === null ? null : thread.alias_generation,
       retirementTransactionDigest,
-      archiveIntentDigest: archiveIntent.intentDigest,
+      archiveIntentDigest: archiveIntent?.intentDigest ?? null,
       scopeClosureEvidenceDigest: scopeClosure?.closeEvidenceDigest ?? null,
       newGeneration,
       newThreadBindingId,
@@ -5778,17 +7042,33 @@ export class CodexBindingRepository {
     readyRunId: string
     productTerminalDigest: string
     closeoutAt: string
-  }): { handled: boolean; reservationSetId: string | null } {
+    terminalEvidence?: CodexTerminalCloseoutEvidence
+    forkSeed?: CodexNativeForkSeedInput
+  }): {
+    handled: boolean
+    reservationSetId: string | null
+    forkTargetThreadBindingId: string | null
+  } {
     if (this.db.inTransaction !== true) {
       throw new CodexBindingRepositoryError('canonical_closeout_transaction_missing')
     }
     const turn = this.db.prepare(`
       SELECT * FROM codex_turn_bindings WHERE ready_run_id = ?
     `).get<TurnBindingRow>(input.readyRunId)
-    if (!turn) return { handled: false, reservationSetId: null }
+    if (!turn) return {
+      handled: false,
+      reservationSetId: null,
+      forkTargetThreadBindingId: null,
+    }
     if (turn.host_failure_kind || !turn.engine_terminal_recorded_at
       || !turn.engine_terminal_candidate_digest) {
       throw new CodexBindingRepositoryError('publication_divergence_evidence_missing')
+    }
+    if (!input.terminalEvidence || this.readAcceptedNativePrefixResolution({
+      readyRunId: input.readyRunId,
+      nativeReadback: input.terminalEvidence.nativeReadback,
+    }).kind === 'unknown') {
+      throw new CodexBindingRepositoryError('publication_divergence_prefix_unknown')
     }
     const thread = this.requireThread(turn.thread_binding_id)
     if (thread.continuation_blocked_at) {
@@ -5825,27 +7105,279 @@ export class CodexBindingRepository {
       }
     }
     this.completeProductTurnCloseoutInOpenTransaction(input, turn)
+    const closedTurn = this.requireTurn(input.readyRunId)
+    if (!closedTurn.terminal_facts_digest) {
+      throw new CodexBindingRepositoryError('publication_divergence_terminal_facts_missing')
+    }
     if (!turn.codex_thread_id) {
       throw new CodexBindingRepositoryError('publication_divergence_thread_identity_missing')
     }
-    this.assertThreadArchiveEligible(turn.codex_thread_id)
-    const retirementTransactionDigest = digest({
-      contract: 'codex_publication_divergence_retirement_v1',
-      readyRunId: input.readyRunId,
+    const tail = this.readHandoffUncommittedUserTail(thread.thread_binding_id)
+    if (tail.length === 0) throw new CodexBindingRepositoryError('uncommitted_user_tail_input_missing')
+    const tailDigest = digestCanonicalJson(tail)
+    const existingTarget = this.db.prepare(`
+      SELECT * FROM codex_thread_bindings
+       WHERE history_source_thread_binding_id = ?
+         AND history_source_terminal_facts_digest = ?
+       LIMIT 2
+    `).all<ThreadBindingRow>(thread.thread_binding_id, closedTurn.terminal_facts_digest)
+    if (existingTarget.length > 0) {
+      if (existingTarget.length !== 1
+        || existingTarget[0].ready_conversation_alias !== thread.ready_conversation_alias
+        || existingTarget[0].alias_generation !== thread.alias_generation + 1
+        || (existingTarget[0].thread_materialization_kind === 'native_fork' && (
+          !input.forkSeed
+          || existingTarget[0].isolated_thread_cwd !== input.forkSeed.targetCwd
+          || existingTarget[0].thread_start_reservation_set_id !== input.forkSeed.reservationSetId
+          || existingTarget[0].thread_start_reservation_member_id !== input.forkSeed.reservationId
+          || existingTarget[0].source_accepted_native_coverage_receipt_id
+            !== this.readAcceptedNativePrefixHead(thread.thread_binding_id)?.coverageReceiptRef.receiptId
+          || existingTarget[0].uncommitted_user_tail_digest !== tailDigest))) {
+        throw new CodexBindingRepositoryError('fork_seed_immutable')
+      }
+      return {
+        handled: true,
+        reservationSetId: turn.start_reservation_set_id,
+        forkTargetThreadBindingId: existingTarget[0].thread_binding_id,
+      }
+    }
+    const boundary = this.readLatestAcceptedForkBoundary({
       threadBindingId: thread.thread_binding_id,
-      retirementEvidenceDigest: turn.engine_terminal_candidate_digest,
-      productTerminalDigest: input.productTerminalDigest,
-      closeoutAt: input.closeoutAt,
+      beforeReadyRunId: input.readyRunId,
     })
-    this.recordThreadArchiveIntentInOpenTransaction({
-      thread,
-      sourceKind: 'publication_divergence',
-      retiredReason: 'publication_diverged',
-      readyRunId: input.readyRunId,
-      retirementEvidenceDigest: turn.engine_terminal_candidate_digest,
-      retirementTransactionDigest,
-      retiredAt: input.closeoutAt,
+    if (!boundary) {
+      const historySeedDigest = digestCanonicalJson({
+        contract: 'codex_fresh_root_with_tail_seed_v1',
+        sourceThreadBindingId: thread.thread_binding_id,
+        sourceTerminalFactsDigest: closedTurn.terminal_facts_digest,
+        tailDigest,
+      })
+      const targetGeneration = thread.alias_generation + 1
+      const targetThreadBindingId = this.nextThreadBindingId(
+        thread.ready_conversation_alias,
+        targetGeneration,
+        historySeedDigest,
+      )
+      this.db.prepare(`
+        INSERT INTO codex_thread_bindings (
+          thread_binding_id, ready_conversation_alias, alias_generation, ready_scope_id,
+          runtime_manifest_digest, protocol_schema_digest,
+          thread_materialization_kind, materialization_state,
+          history_source_thread_binding_id, history_source_terminal_facts_digest,
+          history_seed_digest, uncommitted_user_tail_json, uncommitted_user_tail_digest,
+          action_projection_sequence, revision, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, 'fresh_root_with_tail', 'confirmed',
+          ?, ?, ?, ?, ?, 1, 1, ?, ?)
+      `).run(
+        targetThreadBindingId,
+        thread.ready_conversation_alias,
+        targetGeneration,
+        thread.ready_scope_id,
+        thread.runtime_manifest_digest,
+        thread.protocol_schema_digest,
+        thread.thread_binding_id,
+        closedTurn.terminal_facts_digest,
+        historySeedDigest,
+        canonicalJson(tail),
+        tailDigest,
+        input.closeoutAt,
+        input.closeoutAt,
+      )
+      const retirementTransactionDigest = digestCanonicalJson({
+        contract: 'codex_fresh_root_with_tail_retirement_v1',
+        sourceThreadBindingId: thread.thread_binding_id,
+        targetThreadBindingId,
+        productTerminalDigest: input.productTerminalDigest,
+        sourceTerminalFactsDigest: closedTurn.terminal_facts_digest,
+      })
+      this.recordThreadArchiveIntentInOpenTransaction({
+        thread: this.requireThread(thread.thread_binding_id),
+        sourceKind: 'publication_divergence',
+        retiredReason: 'publication_diverged',
+        readyRunId: input.readyRunId,
+        retirementEvidenceDigest: turn.engine_terminal_candidate_digest,
+        retirementTransactionDigest,
+        retiredAt: input.closeoutAt,
+      })
+      return {
+        handled: true,
+        reservationSetId: turn.start_reservation_set_id,
+        forkTargetThreadBindingId: targetThreadBindingId,
+      }
+    }
+    if (!input.forkSeed) throw new CodexBindingRepositoryError('fork_seed_missing')
+    for (const value of [
+      input.forkSeed.targetCwd,
+      input.forkSeed.reservationSetId,
+      input.forkSeed.reservationId,
+      input.forkSeed.reservationEvidenceDigest,
+      thread.isolated_thread_cwd || '',
+      thread.tool_surface_digest || '',
+      thread.tool_surface_snapshot_digest || '',
+      thread.tool_surface_json || '',
+      thread.instruction_contract_digest || '',
+      thread.codex_model || '',
+      thread.upstream_profile_snapshot_ref || '',
+      thread.upstream_profile_snapshot_digest || '',
+    ]) nonEmpty(value, 'fork_seed_contract_incomplete')
+    const orderedTurnIds = input.terminalEvidence?.nativeReadback.orderedTurnIds || []
+    const cutoffIndexes = orderedTurnIds.flatMap((turnId, index) => (
+      turnId === boundary.codexTurnId ? [index] : []
+    ))
+    if (cutoffIndexes.length !== 1) {
+      throw new CodexBindingRepositoryError('fork_expected_prefix_unavailable')
+    }
+    const expectedPrefixTurnIds = orderedTurnIds.slice(0, cutoffIndexes[0] + 1)
+    const expectedPrefixTurnIdsDigest = digestCanonicalJson(expectedPrefixTurnIds)
+    const targetGeneration = thread.alias_generation + 1
+    const inheritedContractDigest = this.readNativeInheritedContractDigest(thread)
+    const materializationRequestDigest = digestCanonicalJson({
+      contract: 'codex_native_fork_materialization_request_v1',
+      sourceCodexThreadId: thread.codex_thread_id,
+      acceptedThroughCodexTurnId: boundary.codexTurnId,
+      expectedPrefixTurnIdsDigest,
+      targetCwd: input.forkSeed.targetCwd,
+      model: thread.codex_model,
+      modelProvider: 'ready_gateway',
+      approvalPolicy: 'never',
+      sandbox: 'read-only',
     })
+    const historySeedDigest = digestCanonicalJson({
+      sourceThreadBindingId: thread.thread_binding_id,
+      sourceTerminalFactsDigest: closedTurn.terminal_facts_digest,
+      acceptedProductBoundaryReadyRunId: boundary.readyRunId,
+      acceptedNativeCoverageReceiptRef: boundary.coverageReceiptRef,
+      forkAcceptedThroughCodexTurnId: boundary.codexTurnId,
+      divergentIngressDigest: closedTurn.ingress_admitted_digest,
+      uncommittedUserTailDigest: tailDigest,
+    })
+    const targetThreadBindingId = this.nextThreadBindingId(
+      thread.ready_conversation_alias,
+      targetGeneration,
+      historySeedDigest,
+    )
+    const forkRequestId = `codex-fork-${digestCanonicalJson({
+      targetThreadBindingId,
+      sourceThreadId: thread.codex_thread_id,
+      acceptedThrough: boundary.codexTurnId,
+    }).slice(0, 32)}`
+    this.db.prepare(`
+      INSERT INTO codex_thread_bindings (
+        thread_binding_id,
+        thread_start_reservation_set_id, thread_start_reservation_member_id,
+        thread_start_reservation_admitted_at, thread_start_request_id,
+        isolated_thread_cwd,
+        ready_conversation_alias, alias_generation, ready_scope_id,
+        runtime_manifest_digest, protocol_schema_digest,
+        tool_surface_digest, tool_surface_snapshot_digest, tool_surface_json,
+        instruction_contract_digest, codex_model_provider_id, codex_model,
+        upstream_profile_snapshot_ref, upstream_profile_snapshot_digest,
+        thread_materialization_kind, history_source_thread_binding_id,
+        history_source_terminal_facts_digest, fork_accepted_through_codex_turn_id,
+        fork_expected_prefix_turn_ids_json, fork_expected_prefix_turn_ids_digest,
+        materialization_request_digest,
+        accepted_product_boundary_ready_run_id, native_inherited_contract_digest,
+        source_accepted_native_coverage_receipt_id,
+        source_accepted_native_coverage_receipt_digest,
+        materialization_state, history_seed_digest,
+        uncommitted_user_tail_json, uncommitted_user_tail_digest,
+        action_projection_sequence,
+        revision, created_at, updated_at
+      ) VALUES (
+        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+        'native_fork', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, 1, 1, ?, ?
+      )
+    `).run(
+      targetThreadBindingId,
+      input.forkSeed.reservationSetId,
+      input.forkSeed.reservationId,
+      input.closeoutAt,
+      forkRequestId,
+      input.forkSeed.targetCwd,
+      thread.ready_conversation_alias,
+      targetGeneration,
+      thread.ready_scope_id,
+      thread.runtime_manifest_digest,
+      thread.protocol_schema_digest,
+      thread.tool_surface_digest,
+      thread.tool_surface_snapshot_digest,
+      thread.tool_surface_json,
+      thread.instruction_contract_digest,
+      thread.codex_model_provider_id,
+      thread.codex_model,
+      thread.upstream_profile_snapshot_ref,
+      thread.upstream_profile_snapshot_digest,
+      thread.thread_binding_id,
+      closedTurn.terminal_facts_digest,
+      boundary.codexTurnId,
+      canonicalJson(expectedPrefixTurnIds),
+      expectedPrefixTurnIdsDigest,
+      materializationRequestDigest,
+      boundary.readyRunId,
+      inheritedContractDigest,
+      boundary.coverageReceiptRef.receiptId,
+      boundary.coverageReceiptRef.digest,
+      historySeedDigest,
+      canonicalJson(tail),
+      tailDigest,
+      input.closeoutAt,
+      input.closeoutAt,
+    )
+    const target = this.requireThread(targetThreadBindingId)
+    if (target.materialization_state !== 'pending'
+      || target.history_source_thread_binding_id !== thread.thread_binding_id
+      || target.retired_at !== null) {
+      throw new CodexBindingRepositoryError('fork_seed_readback_mismatch')
+    }
+    return {
+      handled: true,
+      reservationSetId: turn.start_reservation_set_id,
+      forkTargetThreadBindingId: targetThreadBindingId,
+    }
+  }
+
+  completeHistoryResetRequiredCloseoutInOpenTransaction(input: {
+    readyRunId: string
+    productTerminalDigest: string
+    closeoutAt: string
+    terminalEvidence: CodexTerminalCloseoutEvidence
+  }): { handled: boolean; reservationSetId: string | null } {
+    if (this.db.inTransaction !== true) {
+      throw new CodexBindingRepositoryError('canonical_closeout_transaction_missing')
+    }
+    const turn = this.db.prepare(`
+      SELECT * FROM codex_turn_bindings WHERE ready_run_id = ?
+    `).get<TurnBindingRow>(input.readyRunId)
+    if (!turn) return { handled: false, reservationSetId: null }
+    if (input.terminalEvidence.terminalFacts.product.terminal === 'done'
+      && this.readBrowserVerifierAttempt(input.readyRunId)) {
+      this.completeVerifierAcceptedCloseoutInOpenTransaction(input)
+    } else {
+      this.completeProductTurnCloseoutInOpenTransaction(input, turn)
+    }
+    const closedTurn = this.requireTurn(input.readyRunId)
+    if (!closedTurn.terminal_facts_digest) {
+      throw new CodexBindingRepositoryError('history_reset_terminal_facts_missing')
+    }
+    const updatedThread = this.requireThread(turn.thread_binding_id)
+    const blocked = this.db.prepare(`
+      UPDATE codex_thread_bindings
+         SET continuation_blocked_at = ?,
+             continuation_blocked_reason = 'publication_diverged',
+             continuation_blocked_evidence_digest = ?,
+             revision = revision + 1, updated_at = ?
+       WHERE thread_binding_id = ? AND revision = ?
+         AND retired_at IS NULL AND continuation_blocked_at IS NULL
+    `).run(
+      input.closeoutAt,
+      closedTurn.terminal_facts_digest,
+      input.closeoutAt,
+      updatedThread.thread_binding_id,
+      updatedThread.revision,
+    )
+    if (changes(blocked) !== 1) {
+      throw new CodexBindingRepositoryError('history_reset_block_cas_failed')
+    }
     return { handled: true, reservationSetId: turn.start_reservation_set_id }
   }
 
@@ -5942,6 +7474,7 @@ export class CodexBindingRepository {
                t.authorization_snapshot_digest, t.authorization_snapshot_json,
                t.attempt_kind, t.ingress_json, t.ingress_admitted_digest,
                th.instruction_contract_digest,
+               th.codex_forked_from_id,
                th.codex_thread_id AS thread_codex_thread_id,
                f.owner_ready_run_id AS fence_owner_ready_run_id,
                f.quarantined_at AS fence_quarantined_at
@@ -5972,6 +7505,7 @@ export class CodexBindingRepository {
         ingress_json: string | null
         ingress_admitted_digest: string
         instruction_contract_digest: string | null
+        codex_forked_from_id: string | null
         thread_codex_thread_id: string | null
         fence_owner_ready_run_id: string | null
         fence_quarantined_at: string | null
@@ -5983,6 +7517,7 @@ export class CodexBindingRepository {
         || row.fence_owner_ready_run_id !== row.ready_run_id
         || row.fence_quarantined_at
         || row.thread_codex_thread_id !== input.codexThreadId
+        || row.codex_forked_from_id !== input.codexForkedFromId
         || (row.codex_thread_id && row.codex_thread_id !== input.codexThreadId)
         || (row.codex_turn_id && row.codex_turn_id !== input.codexTurnId)
         || (row.gateway_claimed_codex_turn_id
@@ -6054,15 +7589,24 @@ export class CodexBindingRepository {
         || authorization.toolSurfaceDigest !== row.tool_surface_digest
         || authorization.turnContractDigest !== row.turn_contract_digest
       ) throw new CodexBindingRepositoryError('gateway_tool_authorization_mismatch')
-      const effectiveNames = input.kind === 'product'
+      const effectiveAuthorizedNames = input.kind === 'product'
         ? effectiveCodexFolderOutputToolNames(
             authorization.allowedToolNames,
             folderActivation,
-          ).filter((name) => (
-            folderActivation.kind !== 'no_contract' && CODEX_DELIVERY_LANE_TOOL_NAMES.has(name)
-              ? !deliveryExhausted
-              : !ordinaryExhausted
-          ))
+          )
+        : []
+      const ordinaryCalls = Number(admittedLaneCalls?.ordinary_calls || 0)
+      const reserveBrowserObservation = input.kind === 'product'
+        && browserToolSurfaceNeedsObservationReserve(effectiveAuthorizedNames)
+        && budget.lanes.ordinary.maxToolCalls - ordinaryCalls === 1
+      const effectiveNames = input.kind === 'product'
+        ? effectiveAuthorizedNames.filter((name) => {
+            if (folderActivation.kind !== 'no_contract' && CODEX_DELIVERY_LANE_TOOL_NAMES.has(name)) {
+              return !deliveryExhausted
+            }
+            return !ordinaryExhausted
+              && (!reserveBrowserObservation || isCodexBrowserObservationClosureToolName(name))
+          })
         : null
       return {
         kind: input.kind,
@@ -6096,6 +7640,7 @@ export class CodexBindingRepository {
              m.pre_dispatch_turn_ids_json,
              m.consumed_at, m.abandoned_at,
              th.instruction_contract_digest,
+             th.codex_forked_from_id,
              f.owner_manual_compaction_id AS fence_owner_manual_compaction_id,
              f.quarantined_at AS fence_quarantined_at
         FROM codex_manual_compaction_bindings m
@@ -6119,6 +7664,7 @@ export class CodexBindingRepository {
       consumed_at: string | null
       abandoned_at: string | null
       instruction_contract_digest: string | null
+      codex_forked_from_id: string | null
       fence_owner_manual_compaction_id: string | null
       fence_quarantined_at: string | null
     }>(input.codexThreadId)
@@ -6129,6 +7675,7 @@ export class CodexBindingRepository {
       : []
     if (
       row.codex_thread_id !== input.codexThreadId
+      || row.codex_forked_from_id !== input.codexForkedFromId
       || (row.codex_compaction_turn_id && row.codex_compaction_turn_id !== input.codexTurnId)
       || row.fence_owner_manual_compaction_id !== row.manual_compaction_id
       || row.fence_quarantined_at
@@ -6528,12 +8075,13 @@ export class CodexBindingRepository {
     this.immediate(() => {
       const row = this.db.prepare(`
         SELECT manual_compaction_id, thread_binding_id, codex_thread_id,
-               consumed_at, abandoned_at, unknown_at, revision
+               pre_dispatch_turn_ids_json, consumed_at, abandoned_at, unknown_at, revision
           FROM codex_manual_compaction_bindings WHERE manual_compaction_id = ?
       `).get<{
         manual_compaction_id: string
         thread_binding_id: string
         codex_thread_id: string
+        pre_dispatch_turn_ids_json: string
         consumed_at: string | null
         abandoned_at: string | null
         unknown_at: string | null
@@ -6589,6 +8137,40 @@ export class CodexBindingRepository {
         row.revision,
       )
       if (changes(update) !== 1) throw new CodexBindingRepositoryError('manual_compaction_consume_cas_failed')
+      const priorHead = this.readAcceptedNativePrefixHead(row.thread_binding_id)
+      const preDispatchTurnIds = JSON.parse(row.pre_dispatch_turn_ids_json) as unknown
+      if (!Array.isArray(preDispatchTurnIds)
+        || preDispatchTurnIds.some((turnId) => typeof turnId !== 'string' || !turnId.trim())
+        || new Set(preDispatchTurnIds).size !== preDispatchTurnIds.length) {
+        throw new CodexBindingRepositoryError('manual_compaction_pre_dispatch_turns_invalid')
+      }
+      const manualCandidates = this.readFormalCoverageItemsForNativeTurns(
+        row.thread_binding_id,
+        preDispatchTurnIds,
+      )
+      this.appendAcceptedNativeCoverageReceiptInOpenTransaction({
+        threadBindingId: row.thread_binding_id,
+        producerKind: 'manual_compaction',
+        producerOwnerId: input.manualCompactionId,
+        codexThreadId: row.codex_thread_id,
+        acceptedNativeHeadKind: 'compaction',
+        acceptedNativeHeadId: input.codexCompactionTurnId,
+        acceptedProductReadyRunId: priorHead?.acceptedProductReadyRunId ?? null,
+        newlyCovered: this.excludeAlreadyCoveredItems(
+          priorHead?.coverageReceiptRef.receiptId ?? null,
+          manualCandidates,
+        ),
+        createdAt: input.consumedAt,
+      })
+      const headAdvanced = this.db.prepare(`
+        UPDATE codex_thread_bindings
+           SET action_projection_sequence = action_projection_sequence + 1,
+               revision = revision + 1, updated_at = ?
+         WHERE thread_binding_id = ?
+      `).run(input.consumedAt, row.thread_binding_id)
+      if (changes(headAdvanced) !== 1) {
+        throw new CodexBindingRepositoryError('manual_compaction_head_advance_failed')
+      }
       const fence = this.db.prepare(`
         DELETE FROM codex_thread_dispatch_fences
          WHERE thread_binding_id = ? AND owner_manual_compaction_id = ?
@@ -7046,7 +8628,12 @@ export class CodexBindingRepository {
   }
 
   private completeProductTurnCloseoutInOpenTransaction(
-    input: { readyRunId: string; productTerminalDigest: string; closeoutAt: string },
+    input: {
+      readyRunId: string
+      productTerminalDigest: string
+      closeoutAt: string
+      terminalEvidence?: CodexTerminalCloseoutEvidence
+    },
     turn = this.requireTurn(input.readyRunId),
   ): void {
     if (turn.host_failure_kind || turn.host_failure_product_terminal_digest
@@ -7059,6 +8646,13 @@ export class CodexBindingRepository {
         || turn.product_closeout_at !== input.closeoutAt
         || turn.fence_release_revision === null
       ) throw new CodexBindingRepositoryError('product_terminal_immutable')
+      if (input.terminalEvidence) {
+        const factsDigest = digestCanonicalJson(input.terminalEvidence.terminalFacts)
+        if (turn.terminal_native_readback_receipt_digest !== input.terminalEvidence.nativeReadback.digest
+          || turn.terminal_facts_digest !== factsDigest) {
+          throw new CodexBindingRepositoryError('terminal_facts_immutable')
+        }
+      }
       this.assertProductFenceReleased(turn.thread_binding_id, input.readyRunId)
       return
     }
@@ -7070,33 +8664,259 @@ export class CodexBindingRepository {
       || !turn.engine_terminal_status
       || !turn.engine_terminal_candidate_digest
     ) throw new CodexBindingRepositoryError('product_turn_not_reconciled')
-    this.assertEngineTerminalPublicationMatchesReady(
-      turn,
-      input.closeoutAt,
-      input.productTerminalDigest,
-    )
+    const terminalEvidence = input.terminalEvidence || null
+    let nativeReadbackJson: string | null = null
+    let nativeReadbackDigest: string | null = null
+    let nativeReadbackRevision: number | null = null
+    let terminalFactsJson: string | null = null
+    let terminalFactsDigest: string | null = null
+    if (terminalEvidence) {
+      const receipt = terminalEvidence.nativeReadback
+      const { digest: receiptDigest, ...unsignedReceipt } = receipt
+      assertCodexTerminalFacts(terminalEvidence.terminalFacts)
+      assertCodexTerminalEvidenceOwners(this.db, this, terminalEvidence)
+      const thread = this.requireThread(turn.thread_binding_id)
+      const scope = this.db.prepare(`
+        SELECT message_visibility_epoch FROM chat_conversations WHERE id = ? LIMIT 1
+      `).get<{ message_visibility_epoch: number }>(thread.ready_scope_id)
+      const run = this.db.prepare(`
+        SELECT status, terminal_reason FROM run_meta
+         WHERE run_id = ? AND task_id = ? LIMIT 1
+      `).get<{ status: string; terminal_reason: string | null }>(
+        turn.ready_run_id,
+        turn.ready_task_id,
+      )
+      const expectedProductTerminal = run?.status === 'done' || run?.status === 'completed'
+        ? 'done'
+        : run?.status === 'error' || run?.status === 'failed'
+          ? 'error'
+          : run?.status === 'cancelled'
+            ? 'cancelled'
+            : run?.status === 'interrupted' || run?.status === 'preempted' || run?.status === 'killed'
+              ? 'interrupted'
+              : null
+      const facts = terminalEvidence.terminalFacts
+      const allEvidence = [
+        ...facts.product.evidence,
+        ...facts.history.evidence,
+        ...facts.effect.evidence,
+      ]
+      if (receiptDigest !== digestCanonicalJson(unsignedReceipt)
+        || receipt.readyRunId !== turn.ready_run_id
+        || receipt.readyScopeId !== thread.ready_scope_id
+        || receipt.messageVisibilityEpoch !== scope?.message_visibility_epoch
+        || receipt.aliasGeneration !== thread.alias_generation
+        || receipt.codexThreadId !== turn.codex_thread_id
+        || receipt.codexTurnId !== turn.codex_turn_id
+        || receipt.turnStatus !== turn.engine_terminal_status
+        || expectedProductTerminal !== facts.product.terminal
+        || run?.terminal_reason !== facts.product.terminalReason
+        || allEvidence.some((reference) => (
+          reference.readyRunId !== turn.ready_run_id
+          || reference.readyScopeId !== thread.ready_scope_id
+          || reference.messageVisibilityEpoch !== scope?.message_visibility_epoch
+          || reference.aliasGeneration !== thread.alias_generation
+          || reference.codexThreadId !== turn.codex_thread_id
+          || reference.codexTurnId !== turn.codex_turn_id
+        ))) {
+        throw new CodexBindingRepositoryError('terminal_facts_identity_mismatch')
+      }
+      nativeReadbackJson = canonicalJson(receipt)
+      nativeReadbackDigest = receiptDigest
+      nativeReadbackRevision = receipt.turnRevision
+      terminalFactsJson = canonicalJson(terminalEvidence.terminalFacts)
+      terminalFactsDigest = digestCanonicalJson(terminalEvidence.terminalFacts)
+    }
+    if (!turn.lifecycle_action) {
+      this.assertEngineTerminalPublicationMatchesReady(
+        turn,
+        input.closeoutAt,
+        input.productTerminalDigest,
+        terminalEvidence?.terminalFacts || null,
+      )
+    }
     const fence = this.requireProductFenceForRelease(turn.thread_binding_id, input.readyRunId)
     const fenceReleaseRevision = fence.revision + 1
     const turnUpdate = this.db.prepare(`
       UPDATE codex_turn_bindings
          SET product_terminal_digest = ?, product_closeout_at = ?,
+             terminal_native_readback_receipt_json = ?,
+             terminal_native_readback_receipt_digest = ?,
+             terminal_native_readback_revision = ?,
+             terminal_facts_json = ?, terminal_facts_digest = ?,
              fence_release_revision = ?,
              revision = revision + 1, updated_at = ?
        WHERE ready_run_id = ? AND revision = ? AND product_terminal_digest IS NULL
     `).run(
       input.productTerminalDigest,
       input.closeoutAt,
+      nativeReadbackJson,
+      nativeReadbackDigest,
+      nativeReadbackRevision,
+      terminalFactsJson,
+      terminalFactsDigest,
       fenceReleaseRevision,
       input.closeoutAt,
       input.readyRunId,
       turn.revision,
     )
     if (changes(turnUpdate) !== 1) throw new CodexBindingRepositoryError('product_terminal_cas_failed')
+    const closedTurn = this.requireTurn(input.readyRunId)
+    const closeoutThread = this.requireThread(closedTurn.thread_binding_id)
+    if (closedTurn.terminal_facts_json
+      && closeoutThread.thread_materialization_kind !== 'legacy') {
+      const facts = JSON.parse(closedTurn.terminal_facts_json) as CodexTerminalFacts
+      if (facts.product.terminal === 'done' && facts.history.kind === 'continuation_safe') {
+        const automatic = Boolean(input.terminalEvidence?.nativeReadback.contextCompactionItemIds.length)
+        const coverageCandidates = this.readFormalCoverageItemsForNativeTurns(
+          closedTurn.thread_binding_id,
+          input.terminalEvidence?.nativeReadback.orderedTurnIds || [closedTurn.codex_turn_id as string],
+        )
+        const priorHead = this.readAcceptedNativePrefixHead(closedTurn.thread_binding_id)
+        this.appendAcceptedNativeCoverageReceiptInOpenTransaction({
+          threadBindingId: closedTurn.thread_binding_id,
+          producerKind: automatic ? 'automatic_compaction' : 'product_closeout',
+          producerOwnerId: closedTurn.ready_run_id,
+          codexThreadId: closedTurn.codex_thread_id as string,
+          acceptedNativeHeadKind: automatic ? 'compaction' : 'turn',
+          acceptedNativeHeadId: closedTurn.codex_turn_id as string,
+          acceptedProductReadyRunId: closedTurn.ready_run_id,
+          newlyCovered: this.excludeAlreadyCoveredItems(
+            priorHead?.coverageReceiptRef.receiptId ?? null,
+            coverageCandidates,
+          ),
+          createdAt: input.closeoutAt,
+        })
+      }
+    }
+    const headAdvanced = this.db.prepare(`
+      UPDATE codex_thread_bindings
+         SET action_projection_sequence = action_projection_sequence + 1,
+             revision = revision + 1, updated_at = ?
+       WHERE thread_binding_id = ?
+    `).run(input.closeoutAt, turn.thread_binding_id)
+    if (changes(headAdvanced) !== 1) {
+      throw new CodexBindingRepositoryError('action_projection_sequence_advance_failed')
+    }
     const fenceDelete = this.db.prepare(`
       DELETE FROM codex_thread_dispatch_fences
        WHERE thread_binding_id = ? AND owner_ready_run_id = ? AND revision = ?
     `).run(turn.thread_binding_id, input.readyRunId, fence.revision)
     if (changes(fenceDelete) !== 1) throw new CodexBindingRepositoryError('product_fence_release_failed')
+  }
+
+  private readFormalCoverageItems(readyRunId: string): CodexNativeCoverageItem[] {
+    return formalModelInputOrigins(this.readProductTurnRuntime(readyRunId).prepared)
+  }
+
+  private readFormalCoverageItemsForNativeTurns(
+    threadBindingId: string,
+    orderedCodexTurnIds: readonly string[],
+  ): CodexNativeCoverageItem[] {
+    const result = this.readNativeFormalInputCoverage({ threadBindingId, orderedNativeTurnIds: orderedCodexTurnIds })
+    if (result.kind !== 'complete') throw new CodexBindingRepositoryError('native_formal_origin_mapping_unknown')
+    return result.items
+  }
+
+  readNativeFormalInputCoverage(input: {
+    threadBindingId: string
+    orderedNativeTurnIds: readonly string[]
+  }): ReturnType<typeof resolveFormalNativeInputCoverage> | { kind: 'legacy_boundary' } {
+    const thread = this.requireThread(input.threadBindingId)
+    if (thread.thread_materialization_kind === 'legacy') return { kind: 'legacy_boundary' }
+    const fork = this.readNativeForkMaterialization(input.threadBindingId)
+    const provenPrefixTurnIds = new Set(fork?.expectedPrefixTurnIds || [])
+    const manuals = this.db.prepare(`SELECT codex_compaction_turn_id FROM codex_manual_compaction_bindings
+      WHERE thread_binding_id = ? AND consumed_at IS NOT NULL AND accepted_native_coverage_receipt_id IS NOT NULL`)
+      .all<{ codex_compaction_turn_id: string }>(input.threadBindingId)
+    for (const manual of manuals) provenPrefixTurnIds.add(manual.codex_compaction_turn_id)
+    const turns = input.orderedNativeTurnIds.map((codexTurnId) => {
+      const row = this.db.prepare(`
+        SELECT ready_run_id FROM codex_turn_bindings
+         WHERE thread_binding_id = ? AND codex_turn_id = ? LIMIT 1
+      `).get<{ ready_run_id: string }>(input.threadBindingId, codexTurnId)
+      return { nativeTurnId: codexTurnId, origins: row ? this.readFormalCoverageItems(row.ready_run_id) : null }
+    })
+    return resolveFormalNativeInputCoverage({ turns, provenPrefixTurnIds })
+  }
+
+  private excludeAlreadyCoveredItems(
+    parentReceiptId: string | null,
+    candidates: readonly CodexNativeCoverageItem[],
+  ): CodexNativeCoverageItem[] {
+    const covered = parentReceiptId
+      ? this.readEffectiveCoverageItems(parentReceiptId)
+      : new Map<string, string>()
+    return candidates.filter((item) => {
+      const priorDigest = covered.get(item.messageId)
+      if (!priorDigest) return true
+      if (priorDigest !== item.digest) {
+        throw new CodexBindingRepositoryError('coverage_message_digest_conflict')
+      }
+      return false
+    })
+  }
+
+  private readEffectiveCoverageItems(receiptId: string): Map<string, string> {
+    const covered = new Map<string, string>()
+    const visited = new Set<string>()
+    let cursor: string | null = receiptId
+    while (cursor) {
+      if (visited.has(cursor)) throw new CodexBindingRepositoryError('coverage_lineage_cycle')
+      visited.add(cursor)
+      const row = this.db.prepare(`
+        SELECT receipt_id, thread_binding_id, parent_receipt_id, producer_kind,
+               producer_owner_id, codex_thread_id, accepted_native_head_kind,
+               accepted_native_head_id, accepted_product_ready_run_id,
+               newly_covered_json, newly_covered_digest, receipt_digest, created_at
+          FROM codex_native_coverage_receipts WHERE receipt_id = ? LIMIT 1
+      `).get<{
+        receipt_id: string
+        thread_binding_id: string
+        parent_receipt_id: string | null
+        producer_kind: 'product_closeout' | 'automatic_compaction' | 'manual_compaction'
+        producer_owner_id: string
+        codex_thread_id: string
+        accepted_native_head_kind: 'turn' | 'compaction'
+        accepted_native_head_id: string
+        accepted_product_ready_run_id: string | null
+        newly_covered_json: string
+        newly_covered_digest: string
+        receipt_digest: string
+        created_at: string
+      }>(cursor)
+      if (!row) throw new CodexBindingRepositoryError('coverage_lineage_broken')
+      let items: CodexNativeCoverageItem[]
+      try { items = JSON.parse(row.newly_covered_json) as CodexNativeCoverageItem[] }
+      catch { throw new CodexBindingRepositoryError('coverage_lineage_invalid') }
+      const unsigned = {
+        contract: 'codex_native_coverage_receipt_v1',
+        threadBindingId: row.thread_binding_id,
+        parentReceiptId: row.parent_receipt_id,
+        producerKind: row.producer_kind,
+        producerOwnerId: row.producer_owner_id,
+        codexThreadId: row.codex_thread_id,
+        acceptedNativeHeadKind: row.accepted_native_head_kind,
+        acceptedNativeHeadId: row.accepted_native_head_id,
+        acceptedProductReadyRunId: row.accepted_product_ready_run_id,
+        newlyCoveredDigest: row.newly_covered_digest,
+        createdAt: row.created_at,
+      }
+      if (digestCanonicalJson(items) !== row.newly_covered_digest
+        || digestCanonicalJson(unsigned) !== row.receipt_digest
+        || row.receipt_id !== `coverage-${row.receipt_digest.slice(0, 32)}`) {
+        throw new CodexBindingRepositoryError('coverage_lineage_invalid')
+      }
+      for (const item of items) {
+        const previous = covered.get(item.messageId)
+        if (previous && previous !== item.digest) {
+          throw new CodexBindingRepositoryError('coverage_message_digest_conflict')
+        }
+        covered.set(item.messageId, item.digest)
+      }
+      cursor = row.parent_receipt_id
+    }
+    return covered
   }
 
   private completeRecoveryFailureCloseout(input: {
@@ -7120,9 +8940,7 @@ export class CodexBindingRepository {
         thread.continuation_blocked_at !== input.closeoutAt
         || thread.continuation_blocked_reason !== 'publication_diverged'
         || thread.continuation_blocked_evidence_digest !== input.recoveryFailureEvidenceDigest
-        || thread.retired_at !== input.closeoutAt
-        || thread.retired_reason !== 'publication_diverged'
-        || thread.retirement_evidence_digest !== input.recoveryFailureEvidenceDigest
+        || thread.retired_at !== null
       ) throw new CodexBindingRepositoryError('recovery_failure_closeout_incomplete')
       this.assertProductFenceReleased(turn.thread_binding_id, input.readyRunId)
       return
@@ -7170,15 +8988,13 @@ export class CodexBindingRepository {
                thread_start_reservation_release_reason, 'product_recovery_failure'
              ),
              continuation_blocked_at = ?, continuation_blocked_reason = 'publication_diverged',
-             continuation_blocked_evidence_digest = ?, retired_at = ?,
-             retired_reason = 'publication_diverged', retirement_evidence_digest = ?,
+             continuation_blocked_evidence_digest = ?,
+             action_projection_sequence = action_projection_sequence + 1,
              revision = revision + 1, updated_at = ?
        WHERE thread_binding_id = ? AND revision = ?
          AND continuation_blocked_at IS NULL AND retired_at IS NULL
     `).run(
       input.closeoutAt,
-      input.closeoutAt,
-      input.recoveryFailureEvidenceDigest,
       input.closeoutAt,
       input.recoveryFailureEvidenceDigest,
       input.closeoutAt,
@@ -7195,28 +9011,6 @@ export class CodexBindingRepository {
     if (changes(fenceDelete) !== 1) {
       throw new CodexBindingRepositoryError('product_fence_release_failed')
     }
-    if (!turn.codex_thread_id) {
-      throw new CodexBindingRepositoryError('recovery_failure_thread_identity_missing')
-    }
-    this.assertThreadArchiveEligible(turn.codex_thread_id)
-    const retirementTransactionDigest = digest({
-      contract: 'codex_recovery_failure_retirement_v1',
-      readyRunId: input.readyRunId,
-      threadBindingId: thread.thread_binding_id,
-      recoveryFailureCode: input.recoveryFailureCode,
-      retirementEvidenceDigest: input.recoveryFailureEvidenceDigest,
-      productTerminalDigest: input.productTerminalDigest,
-      closeoutAt: input.closeoutAt,
-    })
-    this.recordThreadArchiveIntentInOpenTransaction({
-      thread,
-      sourceKind: 'publication_divergence',
-      retiredReason: 'publication_diverged',
-      readyRunId: input.readyRunId,
-      retirementEvidenceDigest: input.recoveryFailureEvidenceDigest,
-      retirementTransactionDigest,
-      retiredAt: input.closeoutAt,
-    })
   }
 
   private completeHostFailureCloseoutInOpenTransaction(input: {
@@ -7333,6 +9127,7 @@ export class CodexBindingRepository {
     turn: TurnBindingRow,
     closeoutAt: string,
     productTerminalDigest: string,
+    terminalFacts: CodexTerminalFacts | null,
   ): void {
     const receipt = this.readEngineTerminalCandidate(turn.ready_run_id)
     if (!receipt) throw new CodexBindingRepositoryError('engine_terminal_receipt_missing')
@@ -7374,7 +9169,9 @@ export class CodexBindingRepository {
       && message.timestamp === closeoutAt
       && canonicalDigest === productTerminalDigest,
     )
-    if (thread.continuation_blocked_reason === 'publication_diverged') {
+    if (terminalFacts
+      ? terminalFacts.product.terminal !== 'done'
+      : thread.continuation_blocked_reason === 'publication_diverged') {
       if (!projection
         || !['failed', 'killed'].includes(projection.status)
         || !canonicalFailureMessageMatches) {
@@ -7614,6 +9411,17 @@ export class CodexBindingRepository {
       .filter((item) => item.type === 'text')
       .map((item) => item.text)
       .join('')
+    const controlAuditMessageRef = input.prepared.ingress.controlAuditMessageRef
+    const auditMessageMatches = input.prepared.ingress.attemptKind === 'explicit_retry'
+      ? controlAuditMessageRef
+        ? controlAuditMessageRef.messageId === message?.id
+          && controlAuditMessageRef.inputDigest === digestCodexUserInput([{
+            type: 'text',
+            text: message?.content || '',
+            text_elements: [],
+          }])
+        : false
+      : message?.content === canonicalText
     const task = this.db.prepare(`
       SELECT task_id, run_id, scope_id, status, execution_binding_json
         FROM task_projections WHERE task_id = ?
@@ -7652,7 +9460,7 @@ export class CodexBindingRepository {
       || scope.message_visibility_epoch !== input.messageVisibilityEpoch
       || message.conversation_id !== input.prepared.readyToolHostIdentity.scopeId
       || message.role !== 'user'
-      || message.content !== canonicalText
+      || !auditMessageMatches
       || message.timestamp !== input.readyParentReceipt.messageTimestamp
       || message.message_visibility_epoch !== input.messageVisibilityEpoch
       || messageMetaDigest !== input.readyParentReceipt.messageMetaDigest
@@ -7670,6 +9478,7 @@ export class CodexBindingRepository {
   }
 
   private reconcileThreadAccepted(input: {
+    method: 'thread/start' | 'thread/fork'
     connectionEpoch: string
     rpcId: number
     bindingId: string
@@ -7678,32 +9487,120 @@ export class CodexBindingRepository {
     responseDigest: string
     responsePending: boolean
     reconciledAt: string
+    forkRecoveryEvidence?: {
+      connectionEpoch: string
+      preResumeThreadReadDigest: string
+      resumedThreadDigest: string
+    }
   }): void {
     if (!isRecord(input.nativeResult)) throw new CodexBindingRepositoryError('thread_result_invalid')
     const thread = normalizeCodexThread(input.nativeResult.thread)
     const instructionSources = input.nativeResult.instructionSources ?? []
     const row = this.requireThread(input.bindingId)
-    this.assertStartRpc(row, this.startDescriptor('thread/start'), input)
-    this.assertStartFenceNotQuarantined(
-      row.thread_binding_id,
-      this.readProductRunForThreadBinding(row.thread_binding_id),
+    this.assertStartRpc(row, this.startDescriptor(input.method), input)
+    const isFork = input.method === 'thread/fork'
+    if (isFork !== (row.thread_materialization_kind === 'native_fork')) {
+      throw new CodexBindingRepositoryError('thread_materialization_method_mismatch')
+    }
+    if (!isFork) {
+      this.assertStartFenceNotQuarantined(
+        row.thread_binding_id,
+        this.readProductRunForThreadBinding(row.thread_binding_id),
+      )
+    }
+    const source = isFork && row.history_source_thread_binding_id
+      ? this.requireThread(row.history_source_thread_binding_id)
+      : null
+    const forkSeed = isFork ? this.readNativeForkMaterialization(row.thread_binding_id) : null
+    const effective = isRecord(input.nativeResult) ? input.nativeResult : null
+    const recovery = input.forkRecoveryEvidence
+    if (recovery && (!isFork || !input.responsePending)) {
+      throw new CodexBindingRepositoryError('fork_recovery_evidence_unexpected')
+    }
+    const resumeEvidence = recovery ? (() => {
+      for (const value of [
+        recovery.connectionEpoch,
+        recovery.preResumeThreadReadDigest,
+        recovery.resumedThreadDigest,
+      ]) nonEmpty(value, 'fork_recovery_evidence_invalid')
+      const lease = this.db.prepare(`
+        SELECT 1 AS present FROM codex_sidecar_process_leases
+         WHERE connection_epoch = ? AND connection_opened_at IS NOT NULL
+           AND closed_at IS NULL AND tree_zero_at IS NULL
+         LIMIT 1
+      `).get<{ present: number }>(recovery.connectionEpoch)
+      if (lease?.present !== 1) {
+        throw new CodexBindingRepositoryError('fork_recovery_connection_not_live')
+      }
+      const value = {
+        contract: 'codex_thread_read_before_resume_v1' as const,
+        threadBindingId: row.thread_binding_id,
+        codexThreadId: thread?.id,
+        connectionEpoch: recovery.connectionEpoch,
+        preResumeThreadReadDigest: recovery.preResumeThreadReadDigest,
+        resumedThreadDigest: recovery.resumedThreadDigest,
+      }
+      const evidenceDigest = digest(value)
+      return {
+        ...value,
+        resumeEvidenceId: `resume-${evidenceDigest}`,
+        evidenceDigest,
+      }
+    })() : null
+    const forkPrefixExact = !isFork || (
+      source?.codex_thread_id
+      && thread?.id !== source.codex_thread_id
+      && thread?.parentThreadId === null
+      && thread.forkedFromId === source.codex_thread_id
+      && forkSeed
+      && digestCanonicalJson(thread.turns.map((turn) => turn.id))
+        === digestCanonicalJson(forkSeed.expectedPrefixTurnIds)
+      && thread.turns.every((turn) => turn.status !== 'inProgress')
+      && thread.turns.at(-1)?.id === row.fork_accepted_through_codex_turn_id
     )
     if (
       !thread
       || thread.id !== input.nativeId
+      || !thread.sessionId
       || thread.sessionId !== thread.id
-      || thread.parentThreadId !== null
-      || thread.forkedFromId !== null
+      || (!isFork && thread.parentThreadId !== null)
+      || (!isFork && thread.forkedFromId !== null)
+      || !forkPrefixExact
       || thread.cwd !== row.isolated_thread_cwd
       || thread.source !== 'vscode'
       || thread.threadSource !== null
       || thread.modelProvider !== 'ready_gateway'
       || !Array.isArray(instructionSources)
       || instructionSources.length !== 0
+      || (isFork && (
+        effective?.cwd !== row.isolated_thread_cwd
+        || effective.model !== row.codex_model
+        || effective.modelProvider !== row.codex_model_provider_id
+        || effective.approvalPolicy !== 'never'
+        || effective.approvalsReviewer !== 'user'
+        || !isPinnedReadOnlySandbox(effective.sandbox)
+        || effective.reasoningEffort !== null
+        || effective.serviceTier !== null
+      ))
     ) throw new CodexBindingRepositoryError('thread_reconciliation_metadata_mismatch')
     if (row.thread_start_reconciled_at) {
       if (row.codex_thread_id !== thread.id) {
         throw new CodexBindingRepositoryError('thread_reconciliation_identity_conflict')
+      }
+      if (resumeEvidence) {
+        const persisted = this.db.prepare(`
+          SELECT resume_evidence_id, evidence_digest
+            FROM codex_thread_resume_evidence
+           WHERE thread_binding_id = ? AND connection_epoch = ?
+           LIMIT 1
+        `).get<{ resume_evidence_id: string; evidence_digest: string }>(
+          row.thread_binding_id,
+          resumeEvidence.connectionEpoch,
+        )
+        if (persisted?.resume_evidence_id !== resumeEvidence.resumeEvidenceId
+          || persisted.evidence_digest !== resumeEvidence.evidenceDigest) {
+          throw new CodexBindingRepositoryError('fork_recovery_evidence_conflict')
+        }
       }
       return
     }
@@ -7712,6 +9609,36 @@ export class CodexBindingRepository {
       thread,
       instructionSources,
     })
+    const materializationReceipt = isFork ? {
+      contract: 'codex_native_fork_materialization_v1',
+      targetThreadBindingId: row.thread_binding_id,
+      sourceThreadBindingId: row.history_source_thread_binding_id,
+      acceptedThroughCodexTurnId: row.fork_accepted_through_codex_turn_id,
+      expectedPrefixTurnIdsDigest: row.fork_expected_prefix_turn_ids_digest,
+      nativeInheritedContractDigest: row.native_inherited_contract_digest,
+      materializationRequestDigest: row.materialization_request_digest,
+      dispatchedRequestDigest: row.thread_start_request_digest,
+      codexThreadId: thread.id,
+      codexSessionId: thread.sessionId,
+      cwd: effective?.cwd,
+      model: effective?.model,
+      modelProvider: effective?.modelProvider,
+      approvalPolicy: effective?.approvalPolicy,
+      approvalsReviewer: effective?.approvalsReviewer,
+      sandbox: effective?.sandbox,
+      reasoningEffort: effective?.reasoningEffort,
+      serviceTier: effective?.serviceTier,
+      instructionSources,
+      resumeEvidenceRef: resumeEvidence ? {
+        resumeEvidenceId: resumeEvidence.resumeEvidenceId,
+        evidenceDigest: resumeEvidence.evidenceDigest,
+      } : null,
+      responseDigest: input.responseDigest,
+      reconciledAt: input.reconciledAt,
+    } : null
+    const materializationReceiptDigest = materializationReceipt
+      ? digestCanonicalJson(materializationReceipt)
+      : null
     const update = this.db.prepare(`
       UPDATE codex_thread_bindings
          SET codex_thread_id = ?, codex_session_id = ?, codex_parent_thread_id = ?,
@@ -7720,7 +9647,13 @@ export class CodexBindingRepository {
              thread_start_reconciliation_evidence_digest = ?,
              thread_start_reservation_released_at = ?,
              thread_start_reservation_release_reason = 'native_identity_reconciled',
-             thread_started_at = ?, revision = revision + 1, updated_at = ?
+             thread_started_at = ?,
+             materialization_state = CASE WHEN ? THEN 'confirmed' ELSE materialization_state END,
+             materialization_effective_receipt_json = CASE WHEN ? THEN ? ELSE materialization_effective_receipt_json END,
+             materialization_effective_receipt_digest = CASE WHEN ? THEN ? ELSE materialization_effective_receipt_digest END,
+             materialization_evidence_digest = CASE WHEN ? THEN ? ELSE materialization_evidence_digest END,
+             action_projection_sequence = action_projection_sequence + CASE WHEN ? THEN 1 ELSE 0 END,
+             revision = revision + 1, updated_at = ?
        WHERE thread_binding_id = ? AND revision = ?
          AND thread_start_reconciled_at IS NULL
          AND thread_start_reservation_released_at IS NULL
@@ -7736,11 +9669,36 @@ export class CodexBindingRepository {
       evidenceDigest,
       input.reconciledAt,
       input.reconciledAt,
+      isFork ? 1 : 0,
+      isFork ? 1 : 0,
+      materializationReceipt ? JSON.stringify(materializationReceipt) : null,
+      isFork ? 1 : 0,
+      materializationReceiptDigest,
+      isFork ? 1 : 0,
+      evidenceDigest,
+      isFork ? 1 : 0,
       input.reconciledAt,
       row.thread_binding_id,
       row.revision,
     )
     if (changes(update) !== 1) throw new CodexBindingRepositoryError('thread_reconciliation_cas_failed')
+    if (resumeEvidence) {
+      this.db.prepare(`
+        INSERT INTO codex_thread_resume_evidence (
+          resume_evidence_id, thread_binding_id, codex_thread_id, connection_epoch,
+          pre_resume_thread_read_digest, resumed_thread_digest, evidence_digest, recorded_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        resumeEvidence.resumeEvidenceId,
+        resumeEvidence.threadBindingId,
+        resumeEvidence.codexThreadId,
+        resumeEvidence.connectionEpoch,
+        resumeEvidence.preResumeThreadReadDigest,
+        resumeEvidence.resumedThreadDigest,
+        resumeEvidence.evidenceDigest,
+        input.reconciledAt,
+      )
+    }
     this.db.prepare(`
       UPDATE codex_turn_bindings
          SET codex_thread_id = ?, revision = revision + 1, updated_at = ?
@@ -7751,6 +9709,7 @@ export class CodexBindingRepository {
       readback.codex_thread_id !== thread.id
       || readback.thread_start_reservation_released_at !== input.reconciledAt
     ) throw new CodexBindingRepositoryError('thread_reconciliation_readback_mismatch')
+    if (isFork) this.recordSettledForkSourceArchiveIntentInOpenTransaction({ targetThreadBindingId: row.thread_binding_id })
   }
 
   private reconcileTurnAccepted(input: {
@@ -7805,6 +9764,40 @@ export class CodexBindingRepository {
       row.revision,
     )
     if (changes(update) !== 1) throw new CodexBindingRepositoryError('turn_reconciliation_cas_failed')
+  }
+
+  private admissionNativeInheritedContractDigest(input: CodexAdmittedBindingInput): string {
+    return nativeInheritedContractDigest({
+      runtimeManifestDigest: input.runtimeManifestDigest,
+      protocolSchemaDigest: input.protocolSchemaDigest,
+      toolSurfaceSnapshotDigest: input.prepared.readyToolSurface.surfaceSnapshotDigest,
+      instructionContractDigest: input.instructionContractDigest,
+      model: input.codexModel,
+      threadConfig: resolveCodexNativeModelSettings(this.readUpstreamProfileSnapshot(
+        input.upstreamProfileSnapshotRef, input.upstreamProfileSnapshotDigest,
+      )).threadConfig,
+    })
+  }
+
+  private readNativeInheritedContractDigest(thread: ThreadBindingRow): string {
+    if (!thread.native_inherited_contract_digest || !thread.tool_surface_snapshot_digest
+      || !thread.instruction_contract_digest || !thread.codex_model) {
+      throw new CodexBindingRepositoryError('native_inherited_contract_missing')
+    }
+    const digest = nativeInheritedContractDigest({
+      runtimeManifestDigest: thread.runtime_manifest_digest,
+      protocolSchemaDigest: thread.protocol_schema_digest,
+      toolSurfaceSnapshotDigest: thread.tool_surface_snapshot_digest,
+      instructionContractDigest: thread.instruction_contract_digest,
+      model: thread.codex_model,
+      threadConfig: resolveCodexNativeModelSettings(this.readUpstreamProfileSnapshot(
+        thread.upstream_profile_snapshot_ref, thread.upstream_profile_snapshot_digest,
+      )).threadConfig,
+    })
+    if (digest !== thread.native_inherited_contract_digest) {
+      throw new CodexBindingRepositoryError('native_inherited_contract_mismatch')
+    }
+    return digest
   }
 
   private readUpstreamProfileSnapshot(
@@ -7879,79 +9872,6 @@ export class CodexBindingRepository {
     ]) nonEmpty(value, 'empty_alias_identity_invalid')
   }
 
-  private supersedeIdleStartedAliasForRootContractChangeInOpenTransaction(input: {
-    thread: ThreadBindingRow
-    readyRunId: string
-    createdAt: string
-    runtimeManifestDigest: string
-    protocolSchemaDigest: string
-    previousToolSurfaceDigest: string | null
-    currentToolSurfaceDigest: string | null
-  }): void {
-    if (this.db.inTransaction !== true) {
-      throw new CodexBindingRepositoryError('alias_create_transaction_missing')
-    }
-    const replacementEvidenceDigest = digest({
-      kind: 'idle_started_alias_root_contract_superseded',
-      aliasId: input.thread.ready_conversation_alias,
-      aliasGeneration: input.thread.alias_generation,
-      threadBindingId: input.thread.thread_binding_id,
-      previousRuntimeManifestDigest: input.thread.runtime_manifest_digest,
-      previousProtocolSchemaDigest: input.thread.protocol_schema_digest,
-      previousToolSurfaceDigest: input.previousToolSurfaceDigest,
-      runtimeManifestDigest: input.runtimeManifestDigest,
-      protocolSchemaDigest: input.protocolSchemaDigest,
-      currentToolSurfaceDigest: input.currentToolSurfaceDigest,
-    })
-    const retired = this.db.prepare(`
-      UPDATE codex_thread_bindings
-         SET retired_at = ?, retired_reason = 'cleanup',
-             retirement_evidence_digest = ?, revision = revision + 1, updated_at = ?
-       WHERE thread_binding_id = ? AND revision = ? AND retired_at IS NULL
-         AND continuation_blocked_at IS NULL
-    `).run(
-      input.createdAt,
-      replacementEvidenceDigest,
-      input.createdAt,
-      input.thread.thread_binding_id,
-      input.thread.revision,
-    )
-    if (changes(retired) !== 1) {
-      throw new CodexBindingRepositoryError('idle_started_alias_contract_retire_cas_failed')
-    }
-    const retiredThread = this.requireThread(input.thread.thread_binding_id)
-    this.assertThreadArchiveEligible(retiredThread.codex_thread_id as string)
-    const transactionDigest = digest({
-      aliasId: input.thread.ready_conversation_alias,
-      retiredGeneration: input.thread.alias_generation,
-      readyRunId: input.readyRunId,
-      retirementEvidenceDigest: replacementEvidenceDigest,
-    })
-    this.recordThreadArchiveIntentInOpenTransaction({
-      thread: retiredThread,
-      sourceKind: 'retired_backfill',
-      retiredReason: 'cleanup',
-      readyRunId: null,
-      retirementEvidenceDigest: replacementEvidenceDigest,
-      retirementTransactionDigest: transactionDigest,
-      retiredAt: input.createdAt,
-    })
-    const aliasGeneration = input.thread.alias_generation + 1
-    this.insertEmptyAliasGenerationInOpenTransaction({
-      threadBindingId: this.nextThreadBindingId(
-        input.thread.ready_conversation_alias,
-        aliasGeneration,
-        replacementEvidenceDigest,
-      ),
-      aliasId: input.thread.ready_conversation_alias,
-      aliasGeneration,
-      readyScopeId: input.thread.ready_scope_id,
-      runtimeManifestDigest: input.runtimeManifestDigest,
-      protocolSchemaDigest: input.protocolSchemaDigest,
-      createdAt: input.createdAt,
-    })
-  }
-
   private insertEmptyAliasGenerationInOpenTransaction(
     input: CodexEmptyAliasGenerationInput,
   ): {
@@ -7963,8 +9883,10 @@ export class CodexBindingRepository {
     this.db.prepare(`
       INSERT INTO codex_thread_bindings (
         thread_binding_id, ready_conversation_alias, alias_generation, ready_scope_id,
-        runtime_manifest_digest, protocol_schema_digest, revision, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)
+        runtime_manifest_digest, protocol_schema_digest,
+        thread_materialization_kind, materialization_state,
+        revision, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, 'fresh_start', 'confirmed', 1, ?, ?)
     `).run(
       input.threadBindingId,
       input.aliasId,
@@ -8022,7 +9944,7 @@ export class CodexBindingRepository {
   }
 
   private startDescriptor(method: StartMethod) {
-    return method === 'thread/start'
+    return method !== 'turn/start'
       ? {
           table: 'codex_thread_bindings', key: 'thread_binding_id',
           epoch: 'thread_start_rpc_connection_epoch', rpcId: 'thread_start_rpc_id',

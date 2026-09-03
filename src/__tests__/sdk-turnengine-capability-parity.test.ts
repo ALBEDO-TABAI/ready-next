@@ -20,6 +20,7 @@ import {
 import { resolveCapabilityResolution } from '../main/modules/agent-control/domain-adapters/capability-resolver'
 import { AgentSdkRuntime } from '../main/modules/agent-control/runtime-core/agent-sdk-runtime'
 import { resolveSkillHintRelevanceForTurn } from '../main/modules/agent-control/runtime-core/agent-sdk-skill-intent-utils'
+import { resolveSemanticSkillAuthorizationForTurn } from '../main/modules/agent-control/runtime-core/skill-turn-authorization-resolver'
 import { SkillContextOrchestrator } from '../main/modules/agent-control/skills/skill-context-orchestrator'
 import {
   buildExplicitNoSkillAuthorization,
@@ -763,6 +764,176 @@ test('normal Feishu CLI wording exposes lark-cli as a candidate method, not a co
     }
   } finally {
     clearLastReferenceSkill(sessionId)
+    __setSkillsRuntimeManagerForTests(null)
+  }
+})
+
+test('required reference skills derive their exact model tools from manifest authorization', () => {
+  const skillRoot = join(process.cwd(), 'assets', 'embedded-skills')
+  const resolveAuthorization = (skillId: string, userText: string) => {
+    const managedPath = join(skillRoot, skillId)
+    const compiled = compileSkillDefinition({ folderPath: managedPath, source: 'embedded' })
+    const skill = { ...compiled, installed: true, installStatePath: '', managedPath }
+    __setSkillsRuntimeManagerForTests({
+      listSkills: () => [skill],
+    } as unknown as SkillsRuntimeManager)
+    return resolveSemanticSkillAuthorizationForTurn({
+      mode: 'commit',
+      message: userText,
+      requestEnvelope: buildRequestEnvelope({ userText }),
+      orchestrator: {
+        findExplicitlyRequestedSkills: () => [skill],
+        buildPreferredSkillToolNames: () => [],
+      },
+    })
+  }
+
+  try {
+    const compact = resolveAuthorization('context-compact', '使用 context-compact 压缩当前上下文')
+    assert.equal(compact.mode, 'selected')
+    if (compact.mode === 'selected') {
+      assert.deepEqual([...compact.allowedPrimitives], ['skill_compact_context'])
+    }
+    const clip = resolveAuthorization(
+      'obsidian-web-clip',
+      '使用 obsidian-web-clip 保存 https://example.com/article',
+    )
+    assert.equal(clip.mode, 'selected')
+    if (clip.mode === 'selected') {
+      assert.deepEqual([...clip.allowedTypedActions], ['web_clip_url'])
+    }
+    const explanationOnly = resolveAuthorization(
+      'obsidian-web-clip',
+      '不要保存，只解释为什么不能剪藏 https://example.com/private',
+    )
+    assert.equal(explanationOnly.mode, 'selected')
+    if (explanationOnly.mode === 'selected') {
+      assert.deepEqual([...explanationOnly.allowedTypedActions], [])
+    }
+    const currentPage = resolveAuthorization(
+      'obsidian-web-clip',
+      '使用 obsidian-web-clip 剪藏当前登录页面',
+    )
+    assert.equal(currentPage.mode, 'selected')
+    if (currentPage.mode === 'selected') {
+      assert.deepEqual([...currentPage.allowedTypedActions], [])
+      assert.deepEqual([...currentPage.allowedPrimitives], [])
+    }
+  } finally {
+    __setSkillsRuntimeManagerForTests(null)
+  }
+})
+
+test('Obsidian public URL applicability survives only a real continuation of that path', () => {
+  const skillId = 'obsidian-web-clip'
+  const managedPath = join(process.cwd(), 'assets', 'embedded-skills', skillId)
+  const compiled = compileSkillDefinition({ folderPath: managedPath, source: 'embedded' })
+  const skill = { ...compiled, installed: true, installStatePath: '', managedPath }
+  const sessionId = 'scope-obsidian-web-clip-applicability'
+  clearLastReferenceSkill(sessionId)
+  __setSkillsRuntimeManagerForTests({
+    listSkills: () => [skill],
+  } as unknown as SkillsRuntimeManager)
+  const orchestrator = new SkillContextOrchestrator({
+    extractPrimaryUserInstruction: (text) => text,
+    listSkills: () => [skill],
+    resolveSkillToolByAction: () => null,
+  })
+  const authorize = (userText: string, skillHintRelevantForTurn = false) =>
+    resolveSemanticSkillAuthorizationForTurn({
+      mode: 'commit',
+      message: userText,
+      requestEnvelope: buildRequestEnvelope({ userText }),
+      sessionId,
+      skillHintRelevantForTurn,
+      orchestrator,
+    })
+
+  try {
+    const publicUrl = authorize(`使用 ${skillId} 保存 https://example.com/article`)
+    assert.equal(publicUrl.mode, 'selected')
+    if (publicUrl.mode === 'selected') {
+      assert.deepEqual([...publicUrl.allowedTypedActions], ['web_clip_url'])
+    }
+    const retry = authorize('继续上次的公共网页剪藏', true)
+    assert.equal(retry.mode, 'selected')
+    if (retry.mode === 'selected') {
+      assert.deepEqual([...retry.allowedTypedActions], ['web_clip_url'])
+    }
+
+    const currentPage = authorize(`使用 ${skillId} 剪藏当前登录页面`)
+    assert.equal(currentPage.mode, 'selected')
+    if (currentPage.mode === 'selected') {
+      assert.deepEqual([...currentPage.allowedTypedActions], [])
+    }
+    const currentPageRetry = authorize('继续', true)
+    assert.equal(currentPageRetry.mode, 'selected')
+    if (currentPageRetry.mode === 'selected') {
+      assert.deepEqual([...currentPageRetry.allowedTypedActions], [])
+    }
+  } finally {
+    clearLastReferenceSkill(sessionId)
+    __setSkillsRuntimeManagerForTests(null)
+  }
+})
+
+test('Obsidian explicit retry restores only predecessor applicability that still exists in the current manifest', () => {
+  const skillId = 'obsidian-web-clip'
+  const managedPath = join(process.cwd(), 'assets', 'embedded-skills', skillId)
+  const compiled = compileSkillDefinition({ folderPath: managedPath, source: 'embedded' })
+  const skill = { ...compiled, installed: true, installStatePath: '', managedPath }
+  const orchestrator = {
+    findExplicitlyRequestedSkills: () => [skill],
+    buildPreferredSkillToolNames: () => [],
+  }
+  const authorize = (applicableToolNames: string[]) => {
+    const requestEnvelope = buildRequestEnvelope({ userText: '再试一次' })
+    requestEnvelope.resources.push({
+      id: `retry-skill:${skillId}`,
+      kind: 'skill_reference',
+      source: 'explicit_reference',
+      name: skillId,
+      path: managedPath,
+      text: '',
+      summary: null,
+      order: 0,
+      canRead: false,
+      canWrite: false,
+      applicableToolNames,
+    })
+    return resolveSemanticSkillAuthorizationForTurn({
+      mode: 'commit',
+      message: '再试一次',
+      requestEnvelope,
+      orchestrator,
+    })
+  }
+
+  try {
+    __setSkillsRuntimeManagerForTests({
+      listSkills: () => [skill],
+    } as unknown as SkillsRuntimeManager)
+    const publicUrlRetry = authorize(['web_clip_url'])
+    assert.equal(publicUrlRetry.mode, 'selected')
+    if (publicUrlRetry.mode === 'selected') {
+      assert.deepEqual([...publicUrlRetry.allowedTypedActions], ['web_clip_url'])
+    }
+
+    const currentPageRetry = authorize([])
+    assert.equal(currentPageRetry.mode, 'selected')
+    if (currentPageRetry.mode === 'selected') {
+      assert.deepEqual([...currentPageRetry.allowedTypedActions], [])
+    }
+
+    __setSkillsRuntimeManagerForTests({
+      listSkills: () => [{ ...skill, allowedTools: ['replacement_action'] }],
+    } as unknown as SkillsRuntimeManager)
+    const removedByCurrentManifest = authorize(['web_clip_url'])
+    assert.equal(removedByCurrentManifest.mode, 'selected')
+    if (removedByCurrentManifest.mode === 'selected') {
+      assert.equal(removedByCurrentManifest.allowedTypedActions.has('web_clip_url'), false)
+    }
+  } finally {
     __setSkillsRuntimeManagerForTests(null)
   }
 })

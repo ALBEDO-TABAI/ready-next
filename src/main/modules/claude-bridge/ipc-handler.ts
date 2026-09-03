@@ -8,7 +8,7 @@ import { AgentManager } from './agent-manager'
 // `agentRuntimeGroup`.
 import { BrowserController } from '../browser-engine/ipc-handler'
 import { readFileSync, statSync } from 'fs'
-import { basename, extname } from 'path'
+import { basename, extname, join } from 'path'
 import { AgentControlRuntime } from '../agent-control/runtime-core/runtime'
 import { normalizeTurnTerminalReason } from '../agent-control/runtime-core/turn-frame'
 import { ChatRepository } from '../repositories/chat-repository'
@@ -85,6 +85,8 @@ import { RendererToolActionBridge } from './ipc/renderer-tool-action-bridge'
 import type { ChatGptOAuthService } from '../settings-engine/chatgpt-oauth-service'
 import { createCodexProviderReadinessPort } from '../agent-control/codex-runtime/codex-provider-readiness'
 import { persistAskUserQuestionsCardPending } from './ask-user-questions-card-persistence'
+import { getActivePetWindowManager } from '../pet/active-pet-window-manager'
+import { PetActivityProjectionService } from '../pet/pet-activity-projection-service'
 
 const directChatLogger = createRotatingLogger('ready-directchat.log', { buffered: true })
 function log(msg: string) {
@@ -478,6 +480,16 @@ export async function setupAgentIPC(
         settings: new AppSettingsRepository(),
         requestRendererToolAction: (payload) => rendererToolActionBridge.request(payload),
         providerReadiness: createCodexProviderReadinessPort(chatGptOAuthService),
+        onReadyMemoryStateChanged: (event) => {
+          if (!mainWindow.isDestroyed() && !mainWindow.webContents.isDestroyed()) {
+            mainWindow.webContents.send('agent:readyMemoryStateChanged', event)
+          }
+        },
+        onCodexActionSurfaceInvalidated: (event) => {
+          if (!mainWindow.isDestroyed() && !mainWindow.webContents.isDestroyed()) {
+            mainWindow.webContents.send('agent:codexActionSurfaceInvalidated', event)
+          }
+        },
       }),
     )
     const startup = new RuntimeStartupSlot(candidate)
@@ -565,12 +577,14 @@ export async function setupAgentIPC(
   mcpGroupDispose = mcpGroup.register(ipcMain, {
     getDatabase: () => getDatabase(),
     log: (line) => log(line),
+    dataRoot: join(app.getPath('userData'), 'mcp-servers'),
   })
   if (!mcpBootstrapRanForBoot) {
     mcpBootstrapRanForBoot = true
     void runMcpBoot({
       getDatabase: () => getDatabase(),
       log: (line) => log(line),
+      dataRoot: join(app.getPath('userData'), 'mcp-servers'),
     }).catch((bootstrapErr) => {
       log(`mcp bootstrap failed: ${bootstrapErr instanceof Error ? bootstrapErr.message : String(bootstrapErr)}`)
     })
@@ -616,7 +630,14 @@ export async function setupAgentIPC(
     currentTaskProjectionsChangeOff = null
   }
   const projectionStore = runtime.getTaskProjectionStore()
+  const petManager = getActivePetWindowManager()
+  const petActivityDb = getDatabase().getRawDb()
+  const petActivity = petManager && petActivityDb
+    ? new PetActivityProjectionService(projectionStore, petActivityDb, petManager)
+    : null
+  petActivity?.refresh()
   const onProjectionChange = (event: TaskProjectionChangeEvent): void => {
+    petActivity?.refresh()
     if (mainWindow.isDestroyed()) return
     // Stage V V3.2 — mirror scopeId to sessionId so multi-session renderer
     // listeners can route without coupling to the scopeId alias.
@@ -685,6 +706,7 @@ export async function setupAgentIPC(
     stopSession: (request) => runtime!.stopCodexSession(request),
     closeSession: (request) => runtime!.closeCodexSession(request),
     compactSession: (request) => runtime!.compactCodexSession(request),
+    readLifecycleSnapshot: (request) => runtime!.readCodexLifecycleSnapshot(request),
     log,
   })
 
@@ -787,8 +809,14 @@ export async function setupAgentIPC(
     listConversationScopes: () => runtime!.listConversationScopes(),
     listScopeRuns: (payload) => runtime!.listScopeRuns(payload),
     readCodexLifecycleSnapshot: (request) => runtime!.readCodexLifecycleSnapshot(request),
-    readProductTurnPresentation: (readyRunId) => runtime!.readProductTurnPresentation(readyRunId),
-    readProductTurnPresentations: (readyRunIds) => runtime!.readProductTurnPresentations(readyRunIds),
+    readCodexHeadActionProjection: (request) => runtime!.readCodexHeadActionProjection(request),
+    readCodexActionSurface: (request) => runtime!.readCodexActionSurface(request),
+    readProductTurnPresentation: (readyRunId, requestedWorkbenchMode) => (
+      runtime!.readProductTurnPresentation(readyRunId, requestedWorkbenchMode)
+    ),
+    readProductTurnPresentations: (readyRunIds, requestedWorkbenchMode) => (
+      runtime!.readProductTurnPresentations(readyRunIds, requestedWorkbenchMode)
+    ),
     getConversationScopeMessages: (scopeId) => runtime!.getConversationScopeMessages(scopeId),
     setActionAuthorizationMode: (scopeId, mode, expectedMessageVisibilityEpoch) => (
       runtime!.setActionAuthorizationMode(scopeId, mode, expectedMessageVisibilityEpoch)
@@ -1243,12 +1271,14 @@ export async function setupAgentIPC(
   })
 
   runtime.on('ingressAdmitted', (data: IngressAdmittedEvent) => {
+    petActivity?.refresh()
     if (!mainWindow.isDestroyed()) {
       mainWindow.webContents.send('agent:ingressAdmitted', data)
     }
   })
 
   runtime.on('scopeRunEvent', (data) => {
+    petActivity?.observeScopeRunEvent(data)
     if (!mainWindow.isDestroyed()) {
       // Stage V V3.2 — mirror scopeId to sessionId on the wire payload.
       const sessionId = data && typeof data === 'object' && typeof data.scopeId === 'string'

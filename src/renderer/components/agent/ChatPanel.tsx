@@ -786,6 +786,20 @@ export default function ChatPanel({
   }, [currentScope?.id, currentScopeId])
 
   const handleSend = useCallback(async () => {
+    const stateAtClick = useAgent.getState()
+    const activeSlice = stateAtClick.activeSessionId
+      ? stateAtClick.sessions[stateAtClick.activeSessionId]
+      : null
+    const sendGate = activeSlice?.scopeHeadActionProjection?.actions.send_new_message
+    if (!sendGate || sendGate.availability !== 'ready') {
+      setComposerNotice({
+        message: '当前会话状态已变化，请稍候再发送。',
+        errorKind: sendGate?.blockers[0] === 'history_materializing'
+          ? 'conversation_materializing'
+          : 'conversation_reset_required',
+      })
+      return
+    }
     if (sendingRef.current) {
       const current = useAgent.getState()
       const sessionId = current.activeSessionId
@@ -817,14 +831,40 @@ export default function ChatPanel({
   const handleRetryProductTurn = useCallback(async (predecessorRunId: string) => {
     if (sendingRef.current) return
     setComposerNotice(null)
+    if (inputValue.trim() || attachments.length > 0) {
+      setComposerNotice({
+        message: '当前输入或引用不会被清空。请把目标完整写清楚后作为普通消息发送。',
+        errorKind: 'explicit_retry_control_invalid',
+      })
+      return
+    }
     const api = window.electronAPI?.agent
     if (!api?.readProductTurnPresentation) {
       setComposerNotice({ message: '暂时无法读取上一次结果，请稍后再试。', errorKind: 'host_unavailable' })
       return
     }
-    const receipt = await api.readProductTurnPresentation(predecessorRunId)
-    if (!receipt.success || !receipt.data?.failure) {
+    const receipt = await api.readProductTurnPresentation(
+      predecessorRunId,
+      workbenchMode || 'browser',
+    )
+    if (
+      !receipt.success
+      || !receipt.data?.failure
+      || receipt.data.actionProjection.retry_failed_task.availability !== 'ready'
+    ) {
       setComposerNotice({ message: '这条记录已无法安全重试，请重新说明需求。', errorKind: 'conversation_reset_required' })
+      return
+    }
+    const current = useAgent.getState()
+    const currentSlice = current.activeSessionId ? current.sessions[current.activeSessionId] : null
+    const head = currentSlice?.scopeHeadActionProjection
+    const projection = receipt.data.actionProjection
+    if (projection.retryEvidenceKind !== 'complete'
+      || !head
+      || projection.headProjectionRef.digest !== head.evidenceDigest
+      || JSON.stringify(projection.headProjectionRef.version)
+        !== JSON.stringify(head.actionProjectionVersion)) {
+      setComposerNotice({ message: '当前会话已变化，请重新说明需求。', errorKind: 'conversation_reset_required' })
       return
     }
     sendingRef.current = true
@@ -845,7 +885,7 @@ export default function ChatPanel({
     } finally {
       sendingRef.current = false
     }
-  }, [sendMessage])
+  }, [attachments.length, inputValue, sendMessage, workbenchMode])
 
   const handleStop = useCallback(async () => {
     setStopRequestError(null)
@@ -1037,6 +1077,15 @@ export default function ChatPanel({
   const sessionTitle = resolveChatSessionTitle(currentScope?.title)
   const activeLifecycleSlice = activeSessionId ? sessions[activeSessionId] : null
   const activeLifecycleError = activeLifecycleSlice?.lifecycleError ?? null
+  const lifecycleProjection = activeLifecycleSlice?.lifecycleOperationProjection ?? null
+  const headProjection = activeLifecycleSlice?.scopeHeadActionProjection ?? null
+  const lifecycleActions = lifecycleProjection && headProjection
+    && lifecycleProjection.scopeEpoch === headProjection.actionProjectionVersion.scopeEpoch
+    && lifecycleProjection.headProjectionRef.digest === headProjection.evidenceDigest
+    && JSON.stringify(lifecycleProjection.headProjectionRef.version)
+      === JSON.stringify(headProjection.actionProjectionVersion)
+    ? lifecycleProjection.actions
+    : null
   const activeScopeRun = currentScopeId
     ? activeLifecycleSlice?.scopeRunStates[currentScopeId] ?? null
     : null
@@ -1111,6 +1160,7 @@ export default function ChatPanel({
       currentConversationAvailable={Boolean(currentScopeId)}
       lifecyclePendingAction={activeLifecycleSlice?.lifecyclePendingAction ?? null}
       lifecycleUncertainty={lifecycleUncertainty}
+      lifecycleActions={lifecycleActions}
       onLoadConversation={handleLoadConversation}
       onDeleteConversation={handleDeleteConversation}
       onRenameConversation={handleRenameConversation}
@@ -1164,6 +1214,7 @@ export default function ChatPanel({
       toolTraceStatus={toolTraceStatus}
       toolTraceExpanded={toolTraceExpanded}
       copiedMessageId={copiedMessageId}
+      productTurnActionProjectionByRunId={activeLifecycleSlice?.productTurnActionProjectionByRunId ?? {}}
       showToolTraceCapsule={showToolTraceCapsule}
       shouldRenderGlobalToolTraceCapsule={shouldRenderGlobalToolTraceCapsule}
       onSetInputSuggestion={setInputValue}

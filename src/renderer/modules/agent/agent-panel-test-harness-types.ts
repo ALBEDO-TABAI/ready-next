@@ -35,6 +35,7 @@ export type StoreState = {
     messages?: AgentMessage[]
     conversationId?: string | null
     state?: string
+    scopeRunStates?: Record<string, ScopeRunState>
   }>
   isStreaming: boolean
   foregroundBusy: boolean
@@ -84,6 +85,8 @@ export interface AgentPanelMessageSnapshot {
   timestamp: string
   attachmentNames: string[]
   metaKeys: string[]
+  runId: string | null
+  terminalReason: string | null
   askUserQuestionsStatus: string | null
 }
 
@@ -180,6 +183,7 @@ export interface AgentPanelRunSnapshot {
     lastToolAt: string | null
   }
   progress: ScopeRunSkillProgress | null
+  contextUsage: ScopeRunState['contextUsage'] | null
   softError: ScopeRunState['softError'] | null
   error: string | null
   blockedReason: string | null

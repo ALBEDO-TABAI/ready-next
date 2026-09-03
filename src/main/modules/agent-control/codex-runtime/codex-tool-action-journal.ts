@@ -19,6 +19,7 @@ export interface ReadyToolActionReceiptPort {
     actionIdentityDigest: string
     at: string
   }): Promise<{ fresh: boolean }>
+  beginBoundProductEffect(input: CodexBoundProductEffectInput): Promise<{ fresh: boolean }>
   read(readyActionId: string): Promise<ReadyToolActionReceiptRead>
   commit(input: {
     readyActionId: string
@@ -41,6 +42,32 @@ export interface ReadyToolActionReceiptPort {
     evidenceDigest: string
     at: string
   }): void
+}
+
+export type CodexBoundProductEffectInput = {
+  effectActionId: string
+  actionIdentityDigest: string
+  readyRunId: string
+  readyScopeId: string
+  messageVisibilityEpoch: number
+  codexThreadId: string
+  codexTurnId: string
+  codexCallId: string
+  parentReadyActionId: string
+  toolName: string
+  productAction: string
+  actionOrdinal: number
+  argsDigest: string
+  at: string
+}
+
+export type CodexSettledProductEffect = {
+  readyActionId: string
+  actionIdentityDigest: string
+  state: 'confirmed' | 'indeterminate'
+  revision: number
+  receiptId: string | null
+  evidenceDigest: string
 }
 
 export function buildReadyToolActionAbsenceEvidenceDigest(input: {
@@ -73,6 +100,7 @@ type ReceiptRow = {
   result_json: string | null
   resolution_reason: string | null
   resolution_evidence_digest: string | null
+  revision: number
 }
 
 function nonEmpty(value: string, code: string): string {
@@ -117,6 +145,187 @@ export class CodexToolActionJournal implements ReadyToolActionReceiptPort {
       throw new CodexToolActionJournalError('tool_action_begin_cas_failed')
     }
     return { fresh: false }
+  }
+
+  async beginBoundProductEffect(input: CodexBoundProductEffectInput): Promise<{ fresh: boolean }> {
+    const ownsTransaction = this.db.inTransaction !== true
+    if (ownsTransaction) this.db.exec('BEGIN IMMEDIATE')
+    try {
+      const existing = this.readRow(nonEmpty(input.effectActionId, 'tool_action_id_invalid'))
+      if (existing) {
+        const binding = this.db.prepare(`
+          SELECT action_identity_digest FROM codex_product_effect_bindings
+           WHERE effect_action_id = ? LIMIT 1
+        `).get<{ action_identity_digest: string }>(input.effectActionId)
+        if (!binding || binding.action_identity_digest !== input.actionIdentityDigest
+          || existing.action_identity_digest !== input.actionIdentityDigest) {
+          throw new CodexToolActionJournalError('product_effect_identity_conflict')
+        }
+        if (ownsTransaction) this.db.exec('COMMIT')
+        return { fresh: false }
+      }
+      this.db.prepare(`
+        INSERT INTO ready_tool_action_receipts (
+          ready_action_id, action_identity_digest, state, revision, created_at, updated_at
+        ) VALUES (?, ?, 'pending', 1, ?, ?)
+      `).run(input.effectActionId, input.actionIdentityDigest, input.at, input.at)
+      this.db.prepare(`
+        INSERT INTO codex_product_effect_bindings (
+          effect_action_id, action_identity_digest, ready_run_id, ready_scope_id,
+          message_visibility_epoch, codex_thread_id, codex_turn_id, codex_call_id,
+          parent_ready_action_id, tool_name, product_action, action_ordinal,
+          args_digest, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        input.effectActionId,
+        input.actionIdentityDigest,
+        input.readyRunId,
+        input.readyScopeId,
+        input.messageVisibilityEpoch,
+        input.codexThreadId,
+        input.codexTurnId,
+        input.codexCallId,
+        input.parentReadyActionId,
+        input.toolName,
+        input.productAction,
+        input.actionOrdinal,
+        input.argsDigest,
+        input.at,
+      )
+      if (ownsTransaction) this.db.exec('COMMIT')
+      return { fresh: true }
+    } catch (error) {
+      if (ownsTransaction) this.db.exec('ROLLBACK')
+      throw error
+    }
+  }
+
+  settleProductEffectsForCloseout(input: {
+    readyRunId: string
+    closeoutAt: string
+  }): CodexSettledProductEffect[] {
+    const ownsTransaction = this.db.inTransaction !== true
+    if (ownsTransaction) this.db.exec('BEGIN IMMEDIATE')
+    try {
+      const turn = this.db.prepare(`
+        SELECT effect_authority_closed_at, product_terminal_digest,
+               host_failure_product_terminal_digest
+          FROM codex_turn_bindings WHERE ready_run_id = ? LIMIT 1
+      `).get<{
+        effect_authority_closed_at: string | null
+        product_terminal_digest: string | null
+        host_failure_product_terminal_digest: string | null
+      }>(input.readyRunId)
+      if (!turn || turn.product_terminal_digest || turn.host_failure_product_terminal_digest) {
+        throw new CodexToolActionJournalError('product_effect_owner_terminal')
+      }
+      if (turn.effect_authority_closed_at) {
+        const result = this.readSettledProductEffects(input.readyRunId)
+        if (ownsTransaction) this.db.exec('COMMIT')
+        return result
+      }
+      const closed = this.db.prepare(`
+        UPDATE codex_turn_bindings
+           SET effect_authority_closed_at = ?, revision = revision + 1, updated_at = ?
+         WHERE ready_run_id = ? AND effect_authority_closed_at IS NULL
+           AND product_terminal_digest IS NULL
+           AND host_failure_product_terminal_digest IS NULL
+      `).run(input.closeoutAt, input.closeoutAt, input.readyRunId)
+      if (changes(closed) !== 1) {
+        throw new CodexToolActionJournalError('product_effect_authority_close_cas_failed')
+      }
+      const pending = this.db.prepare(`
+        SELECT receipt.ready_action_id, receipt.action_identity_digest
+          FROM ready_tool_action_receipts receipt
+         WHERE receipt.state = 'pending' AND receipt.ready_action_id IN (
+           SELECT call.ready_action_id FROM codex_tool_call_bindings call
+            WHERE call.ready_run_id = ?
+           UNION
+           SELECT effect.effect_action_id FROM codex_product_effect_bindings effect
+            WHERE effect.ready_run_id = ?
+         )
+         ORDER BY receipt.ready_action_id
+      `).all<{ ready_action_id: string; action_identity_digest: string }>(
+        input.readyRunId,
+        input.readyRunId,
+      )
+      for (const row of pending) {
+        const evidenceDigest = digestCanonicalJson({
+          contract: 'codex_product_effect_closeout_indeterminate_v1',
+          readyRunId: input.readyRunId,
+          readyActionId: row.ready_action_id,
+          actionIdentityDigest: row.action_identity_digest,
+          closeoutAt: input.closeoutAt,
+        })
+        const settled = this.db.prepare(`
+          UPDATE ready_tool_action_receipts
+             SET state = 'indeterminate', resolution_reason = 'owner_closeout_before_result',
+                 resolution_evidence_digest = ?, revision = revision + 1, updated_at = ?
+           WHERE ready_action_id = ? AND action_identity_digest = ? AND state = 'pending'
+        `).run(
+          evidenceDigest,
+          input.closeoutAt,
+          row.ready_action_id,
+          row.action_identity_digest,
+        )
+        if (changes(settled) !== 1) {
+          throw new CodexToolActionJournalError('product_effect_closeout_settle_cas_failed')
+        }
+      }
+      const result = this.readSettledProductEffects(input.readyRunId)
+      if (ownsTransaction) this.db.exec('COMMIT')
+      return result
+    } catch (error) {
+      if (ownsTransaction) this.db.exec('ROLLBACK')
+      throw error
+    }
+  }
+
+  readSettledProductEffects(readyRunId: string): CodexSettledProductEffect[] {
+    const rows = this.db.prepare(`
+      SELECT DISTINCT receipt.ready_action_id, receipt.action_identity_digest, receipt.state,
+             receipt.receipt_id, receipt.result_digest, receipt.resolution_evidence_digest,
+             receipt.revision
+        FROM ready_tool_action_receipts receipt
+       WHERE receipt.ready_action_id IN (
+         SELECT call.ready_action_id FROM codex_tool_call_bindings call
+          WHERE call.ready_run_id = ?
+         UNION
+         SELECT effect.effect_action_id FROM codex_product_effect_bindings effect
+          WHERE effect.ready_run_id = ?
+       )
+       ORDER BY receipt.ready_action_id
+    `).all<ReceiptRow>(readyRunId, readyRunId)
+    if (rows.some((row) => row.state === 'pending')) {
+      throw new CodexToolActionJournalError('product_effect_settlement_incomplete')
+    }
+    return rows.flatMap((row): CodexSettledProductEffect[] => {
+      if (row.state === 'proven_absent') return []
+      if (row.state === 'confirmed') {
+        if (!row.receipt_id || !row.result_digest) {
+          throw new CodexToolActionJournalError('tool_action_receipt_incomplete')
+        }
+        return [{
+          readyActionId: row.ready_action_id,
+          actionIdentityDigest: row.action_identity_digest,
+          state: 'confirmed',
+          revision: row.revision,
+          receiptId: row.receipt_id,
+          evidenceDigest: row.result_digest,
+        }]
+      }
+      if (!row.resolution_evidence_digest) {
+        throw new CodexToolActionJournalError('tool_action_resolution_incomplete')
+      }
+      return [{
+        readyActionId: row.ready_action_id,
+        actionIdentityDigest: row.action_identity_digest,
+        state: 'indeterminate',
+        revision: row.revision,
+        receiptId: null,
+        evidenceDigest: row.resolution_evidence_digest,
+      }]
+    })
   }
 
   async read(readyActionId: string): Promise<ReadyToolActionReceiptRead> {
@@ -251,7 +460,7 @@ export class CodexToolActionJournal implements ReadyToolActionReceiptPort {
   private readRow(readyActionId: string): ReceiptRow | null {
     return this.db.prepare(`
       SELECT ready_action_id, action_identity_digest, state, receipt_id,
-             result_digest, result_json, resolution_reason, resolution_evidence_digest
+             result_digest, result_json, resolution_reason, resolution_evidence_digest, revision
         FROM ready_tool_action_receipts WHERE ready_action_id = ? LIMIT 1
     `).get<ReceiptRow>(readyActionId) || null
   }

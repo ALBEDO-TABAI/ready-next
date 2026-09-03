@@ -49,6 +49,24 @@ function createHarness() {
   }
 }
 
+test('production default has no elapsed-time cancellation for a live user run', () => {
+  const timers: FakeTimer[] = []
+  const orchestrator = new ReadyAgentOrchestrator({
+    nowMs: () => 0,
+    scheduleNoProgressCheck: (callback, delayMs) => {
+      const timer: FakeTimer = { callback, delayMs, cleared: false }
+      timers.push(timer)
+      return timer
+    },
+    clearNoProgressCheck: () => undefined,
+  })
+
+  ;(orchestrator as any).registerActiveRun('butler', 'scope-long', 'req-long')
+
+  assert.equal(timers.length, 0)
+  assert.equal((orchestrator as any).activeRunIds.get('butler::scope-long'), 'req-long')
+})
+
 function registerPendingSkillAsk(params: {
   agent: string
   sessionId: string

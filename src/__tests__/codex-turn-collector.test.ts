@@ -15,6 +15,7 @@ import { digestCanonicalJson } from '../main/modules/agent-control/codex-runtime
 
 class FakeNativeRuntime implements CodexNativeRuntime {
   private readonly listeners = new Set<(notification: CodexNativeNotification) => void>()
+  private readonly connectionClosedListeners = new Set<(error: Error) => void>()
 
   emit(notification: CodexNativeNotification): void {
     for (const listener of this.listeners) listener(notification)
@@ -23,6 +24,15 @@ class FakeNativeRuntime implements CodexNativeRuntime {
   subscribe(listener: (notification: CodexNativeNotification) => void): () => void {
     this.listeners.add(listener)
     return () => this.listeners.delete(listener)
+  }
+
+  subscribeConnectionClosed(listener: (error: Error) => void): () => void {
+    this.connectionClosedListeners.add(listener)
+    return () => this.connectionClosedListeners.delete(listener)
+  }
+
+  closeConnection(error = new Error('runtime connection closed')): void {
+    for (const listener of this.connectionClosedListeners) listener(error)
   }
 
   initialize(): Promise<{ userAgent: string }> { throw new Error('unused') }
@@ -38,6 +48,17 @@ class FakeNativeRuntime implements CodexNativeRuntime {
 
 function turn(status: CodexTurn['status'], id = 'turn-1'): CodexTurn {
   return { id, status, items: [], error: status === 'failed' ? { message: 'provider failed' } : null }
+}
+
+function tokenBreakdown(inputTokens: number, outputTokens: number) {
+  return {
+    totalTokens: inputTokens + outputTokens,
+    inputTokens,
+    cachedInputTokens: 0,
+    cacheWriteInputTokens: 0,
+    outputTokens,
+    reasoningOutputTokens: 0,
+  }
 }
 
 function emitRaw(runtime: FakeNativeRuntime, value: unknown): void {
@@ -124,6 +145,70 @@ test('collector buffers accepted-before-response notifications and selects only 
   assert.deepEqual(result.candidateSelection, { kind: 'accepted', itemId: 'final-1' })
   assert.equal(result.candidateText, 'done')
   assert.equal(result.runtimeDiagnostics.commentaryItemIds[0], 'commentary-1')
+})
+
+test('collector projects live context usage and seals the latest attributable snapshot', async () => {
+  const runtime = new FakeNativeRuntime()
+  const projected: number[] = []
+  const collector = new CodexTurnCollector(runtime)
+  const result = await collector.collect(context(runtime, async () => {
+    runtime.emit({
+      method: 'thread/tokenUsage/updated',
+      params: {
+        threadId: 'thread-1',
+        turnId: 'turn-1',
+        tokenUsage: {
+          total: tokenBreakdown(1_000, 120),
+          last: tokenBreakdown(100, 20),
+          modelContextWindow: 258_400,
+        },
+      },
+    })
+    runtime.emit({
+      method: 'thread/tokenUsage/updated',
+      params: {
+        threadId: 'thread-1',
+        turnId: 'turn-1',
+        tokenUsage: {
+          total: tokenBreakdown(1_080, 135),
+          last: tokenBreakdown(80, 15),
+          modelContextWindow: 258_400,
+        },
+      },
+    })
+    runtime.emit({
+      method: 'thread/tokenUsage/updated',
+      params: {
+        threadId: 'thread-1',
+        turnId: 'turn-1',
+        tokenUsage: {
+          total: tokenBreakdown(1_080, 135),
+          last: tokenBreakdown(0, 0),
+          modelContextWindow: null,
+        },
+      },
+    })
+    runtime.emit({
+      method: 'item/completed',
+      params: {
+        threadId: 'thread-1',
+        turnId: 'turn-1',
+        completedAtMs: 1,
+        item: { type: 'agentMessage', id: 'final-1', text: 'done', phase: 'final_answer' },
+      },
+    })
+    runtime.emit({ method: 'turn/completed', params: { threadId: 'thread-1', turn: turn('completed') } })
+    return { turn: turn('inProgress') }
+  }, {
+    onActivity: (event) => {
+      if (event.kind === 'context_usage') projected.push(event.contextUsage.usedInputTokens)
+    },
+  }))
+
+  assert.deepEqual(projected, [100, 80])
+  assert.equal(result.contextUsage?.usedInputTokens, 80)
+  assert.equal(result.contextUsage?.windowTokens, 258_400)
+  assert.equal(result.contextUsage?.source, 'last_model_request')
 })
 
 test('collector publishes Matrix-style commentary and tool item activity without making it answer truth', async () => {
@@ -231,20 +316,23 @@ test('collector publishes Matrix-style commentary and tool item activity without
     runtime.emit({ method: 'turn/completed', params: { threadId: 'thread-1', turn: turn('completed') } })
     return { turn: turn('inProgress') }
   }, {
-    onActivity: (event) => activities.push(event.kind === 'narration'
-      ? {
+    onActivity: (event) => {
+      if (event.kind === 'context_usage') return
+      activities.push(event.kind === 'narration'
+        ? {
           kind: event.kind,
           stage: event.stage,
           itemId: event.itemId,
           source: event.source,
           text: event.text,
-        }
-      : {
+          }
+        : {
           kind: event.kind,
           stage: event.stage,
           itemId: event.item.id,
           type: event.item.type,
-        }),
+          })
+    },
   }))
 
   assert.deepEqual(activities, [
@@ -743,6 +831,46 @@ test('collector terminal timeout measures inactivity instead of total multi-tool
   const result = await collection
   assert.equal(result.engineOutcome, 'completed')
   assert.equal(result.candidateText, 'done')
+})
+
+test('collector allows an unbounded production turn and only closes when Runtime reports terminal', async () => {
+  const runtime = new FakeNativeRuntime()
+  const collector = new CodexTurnCollector(runtime)
+  const collection = collector.collect(context(runtime, async () => ({ turn: turn('inProgress') }), {
+    terminalTimeoutMs: null,
+  }))
+  await new Promise<void>((resolve) => setTimeout(resolve, 20))
+  runtime.emit({
+    method: 'item/completed',
+    params: {
+      threadId: 'thread-1',
+      turnId: 'turn-1',
+      completedAtMs: 1,
+      item: { type: 'agentMessage', id: 'final-unbounded', text: 'done', phase: 'final_answer' },
+    },
+  })
+  runtime.emit({ method: 'turn/completed', params: { threadId: 'thread-1', turn: turn('completed') } })
+
+  const result = await collection
+  assert.equal(result.engineOutcome, 'completed')
+  assert.equal(result.candidateText, 'done')
+})
+
+test('collector fails an unbounded turn when the Runtime connection actually closes', async () => {
+  const runtime = new FakeNativeRuntime()
+  const collector = new CodexTurnCollector(runtime)
+  const collection = collector.collect(context(runtime, async () => ({ turn: turn('inProgress') }), {
+    terminalTimeoutMs: null,
+  }))
+  await new Promise<void>((resolve) => setImmediate(resolve))
+  runtime.closeConnection(new Error('sidecar exited'))
+
+  const result = await collection
+  assert.equal(result.kind, 'host_failure')
+  if (result.kind === 'host_failure') {
+    assert.equal(result.hostFailure.stage, 'collection')
+    assert.equal(result.hostFailure.code, 'codex_connection_closed_before_terminal')
+  }
 })
 
 test('collector closes a non-retry native error only when its required terminal never arrives', async () => {

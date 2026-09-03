@@ -2,6 +2,11 @@ import { describe, it, beforeEach } from 'node:test'
 import assert from 'node:assert/strict'
 
 import { makeEmptySessionSlice } from '../renderer/stores/agent-store-helpers'
+import type { ProductTurnReceipt } from '../shared/ipc-contracts/agent-runtime'
+import { withReceiptV3Fields } from './product-turn-action-projection-fixture'
+import { projectCodexHeadActionProjection } from '../main/modules/agent-control/codex-runtime/codex-action-surface'
+import { projectCodexLifecycleOperationV2 } from '../main/modules/agent-control/codex-runtime/codex-lifecycle-action-surface'
+import { digestCanonicalJson } from '../main/modules/agent-control/codex-runtime/codex-model-gateway-contract'
 
 if (typeof (globalThis as any).window === 'undefined') {
   ;(globalThis as any).window = globalThis
@@ -45,10 +50,66 @@ function installElectronApiMock(params: {
   createSession?: () => Promise<unknown>
   closeSession?: () => Promise<unknown>
   resetSession?: () => Promise<unknown>
-  readCodexLifecycleSnapshot?: () => Promise<unknown>
+  lifecycleBase?: Parameters<typeof projectCodexLifecycleOperationV2>[0]['base']
+  readCodexActionSurface?: (request: { aliasId: string; aliasGeneration: number }) => Promise<unknown>
+  readProductTurnPresentations?: (readyRunIds: string[]) => Promise<unknown>
   listPendingAskUserQuestions?: () => Promise<unknown>
 }): { legacyCalls: () => number } {
   let legacyCallCount = 0
+  const readCodexActionSurface = async (request: { aliasId: string; aliasGeneration: number }) => {
+    const state = useAgent.getState()
+    const slice = Object.values(state.sessions).find((candidate) => (
+      candidate.conversationId === request.aliasId
+    ))
+    const scopeEpoch = slice?.messageVisibilityEpoch || 0
+    const threadBindingId = `binding-${request.aliasId}-${request.aliasGeneration}`
+    const base = params.lifecycleBase || {
+      identity: request,
+      activeReadyRunId: null,
+      latestReadyRunId: null,
+      snapshot: 'idle_native_thread' as const,
+      interruptRequested: false,
+      interruptAcknowledged: false,
+      requestedAction: null,
+      evidenceDigest: digestCanonicalJson({ request, scopeEpoch, snapshot: 'idle_native_thread' }),
+    }
+    const head = projectCodexHeadActionProjection({
+      scopeId: request.aliasId,
+      scopeEpoch,
+      aliasId: request.aliasId,
+      aliasGeneration: request.aliasGeneration,
+      threadBindingId,
+      headRevision: 1,
+      actionProjectionSequence: 1,
+      materializationKind: 'fresh_start',
+      materializationState: 'confirmed',
+      codexThreadId: null,
+      continuationBlocked: false,
+      activeProductFence: Boolean(base.activeReadyRunId),
+      manualCompactionState: 'none',
+      hasLegacyPreparedRun: false,
+      headRuntimeManifestDigest: 'runtime',
+      headProtocolSchemaDigest: 'protocol',
+      currentRuntimeManifestDigest: 'runtime',
+      currentProtocolSchemaDigest: 'protocol',
+    })
+    return {
+      success: true,
+      data: {
+        scopeId: request.aliasId,
+        scopeEpoch,
+        head,
+        lifecycle: projectCodexLifecycleOperationV2({
+          base,
+          head,
+          scopeEpoch,
+          threadBindingId,
+          headRevision: 1,
+          materializationIntentRef: null,
+        }),
+      },
+    }
+  }
   ;(globalThis as any).window.electronAPI = {
     agent: {
       listConversationScopes: params.listConversationScopes,
@@ -56,7 +117,8 @@ function installElectronApiMock(params: {
       createSession: params.createSession,
       closeSession: params.closeSession,
       resetSession: params.resetSession,
-      readCodexLifecycleSnapshot: params.readCodexLifecycleSnapshot,
+      readCodexActionSurface: params.readCodexActionSurface || readCodexActionSurface,
+      readProductTurnPresentations: params.readProductTurnPresentations,
       emitRendererMetric: async () => ({ success: true }),
     },
     agentInteraction: {
@@ -801,6 +863,208 @@ describe('useAgent scope list contract', () => {
     assert.equal(state.messages[1].content, '昨天的测试回复')
   })
 
+  it('hydrates a parked scope when its session tab is selected after cold start', async () => {
+    const loadedScopeIds: string[] = []
+    const scopes = ['scope-first', 'scope-failed'].map((id, index) => ({
+      id,
+      agent: 'butler',
+      title: id,
+      sourceKind: 'local',
+      sourceId: 'app',
+      threadKey: id,
+      meta: { sourceLabel: '应用内' },
+      createdAt: `2026-08-18T10:0${index}:00.000Z`,
+      updatedAt: `2026-08-18T10:0${index}:01.000Z`,
+      lastMessageAt: `2026-08-18T10:0${index}:01.000Z`,
+    }))
+    installElectronApiMock({
+      listConversationScopes: async () => ({ success: true, data: scopes }),
+      getConversationScopeMessages: async (scopeId: string) => {
+        loadedScopeIds.push(scopeId)
+        return {
+          success: true,
+          data: [{
+            id: `message-${scopeId}`,
+            role: 'assistant',
+            content: scopeId === 'scope-failed' ? '本轮未能完成。' : '已完成。',
+            timestamp: '2026-08-18T10:02:00.000Z',
+            meta: {},
+          }],
+        }
+      },
+    })
+
+    await useAgent.getState().loadScopes()
+    assert.deepEqual(loadedScopeIds, ['scope-first'])
+
+    useAgent.getState().setActiveSessionId('scope-failed')
+    await new Promise<void>((resolve) => setImmediate(resolve))
+
+    const state = useAgent.getState()
+    assert.deepEqual(loadedScopeIds, ['scope-first', 'scope-failed'])
+    assert.equal(state.currentScopeId, 'scope-failed')
+    assert.deepEqual(state.messages.map((message) => message.content), ['本轮未能完成。'])
+  })
+
+  it('restores tool history for every terminal message instead of only the latest run', async () => {
+    const scopeId = 'scope-history'
+    const runIds = ['run-failed', 'run-later']
+    const receipts = runIds.map((readyRunId, index): ProductTurnReceipt => ({
+      ...withReceiptV3Fields({ readyRunId, ownerTurnRevision: 1 }),
+      readyRunId,
+      readyTaskId: `task-${index}`,
+      readyScopeId: scopeId,
+      messageVisibilityEpoch: 0,
+      revision: 1,
+      terminal: index === 0 ? 'error' : 'done',
+      canonicalMessage: {
+        id: `assistant:task-${index}:${readyRunId}:terminal`,
+        conversationId: scopeId,
+        role: 'assistant',
+        content: index === 0 ? '本轮未能完成。' : '后来一轮已完成。',
+        timestamp: `2026-08-18T10:0${index}:00.000Z`,
+        meta: { runId: readyRunId },
+      },
+      canonicalMessageDigest: String(index + 1).repeat(64),
+      tools: [{
+        callId: `call-${index}`,
+        toolName: index === 0 ? 'file_inventory' : 'web_search',
+        state: 'confirmed',
+        actionReceiptId: `receipt-${index}`,
+        actionRevision: 1,
+        resultDigest: String(index + 3).repeat(64),
+        deliveryAttemptId: `delivery-${index}`,
+        deliveryConfirmed: true,
+        summary: 'internal summary',
+      }],
+      artifacts: [],
+      contextUsage: index === 1 ? {
+        usedInputTokens: 6_400,
+        windowTokens: 128_000,
+        ratio: 0.05,
+        windowSource: 'model',
+        source: 'last_model_request',
+        timestamp: '2026-08-18T10:01:30.000Z',
+      } : null,
+      failure: index === 0 ? {
+        kind: 'provider', effectState: 'confirmed', evidenceRefs: [],
+      } : null,
+      publicationSealDigest: null,
+      presentationDigest: String(index + 5).repeat(64),
+    }))
+    installElectronApiMock({
+      listConversationScopes: async () => ({
+        success: true,
+        data: [{
+          id: scopeId, agent: 'butler', title: 'History', sourceKind: 'local', sourceId: 'app',
+          aliasGeneration: 1, messageVisibilityEpoch: 0,
+          threadKey: scopeId, meta: {}, createdAt: '2026-08-18T10:00:00.000Z',
+          updatedAt: '2026-08-18T10:02:00.000Z', lastMessageAt: '2026-08-18T10:02:00.000Z',
+        }],
+      }),
+      lifecycleBase: {
+        identity: { aliasId: scopeId, aliasGeneration: 1 },
+        activeReadyRunId: null, latestReadyRunId: 'run-later', snapshot: 'idle_native_thread',
+        interruptRequested: false, interruptAcknowledged: false, requestedAction: null,
+        evidenceDigest: 'history-latest-terminal',
+      },
+      getConversationScopeMessages: async () => ({
+        success: true,
+        data: receipts.map((receipt) => ({
+          id: receipt.canonicalMessage.id,
+          role: 'assistant',
+          content: receipt.canonicalMessage.content,
+          timestamp: receipt.canonicalMessage.timestamp,
+          meta: { runId: receipt.readyRunId },
+        })),
+      }),
+      readProductTurnPresentations: async (readyRunIds) => {
+        assert.deepEqual(readyRunIds, runIds)
+        return { success: true, data: receipts }
+      },
+    })
+
+    await useAgent.getState().loadScopes()
+
+    const state = useAgent.getState()
+    assert.equal(state.messages.length, 2)
+    assert.equal((state.messages[0].meta?.toolTraceSnapshot as unknown[]).length, 2)
+    assert.equal((state.messages[1].meta?.toolTraceSnapshot as unknown[]).length, 2)
+    assert.equal(state.scopeRunStates[scopeId]?.requestId, 'run-later')
+    assert.equal(state.scopeRunStates[scopeId]?.contextUsage?.usedInputTokens, 6_400)
+  })
+
+  it('keeps the latest terminal context meter when idle lifecycle hydration races the send response', async () => {
+    const scope = {
+      id: 'scope-terminal-context', aliasGeneration: 2, agent: 'butler', activeAgentId: 'butler',
+      handoffGeneration: 0, title: 'Terminal context', sourceKind: 'local' as const, sourceId: 'app',
+      threadKey: 'scope-terminal-context', meta: {}, createdAt: '2026-08-18T10:00:00.000Z',
+      updatedAt: '2026-08-18T10:02:00.000Z', lastMessageAt: '2026-08-18T10:02:00.000Z',
+    }
+    const terminalRun = {
+      scopeId: scope.id,
+      agent: 'butler',
+      requestId: 'run-terminal-context',
+      phase: 'done' as const,
+      terminalReason: null,
+      toolTrace: [],
+      startedAt: '2026-08-18T10:01:00.000Z',
+      updatedAt: '2026-08-18T10:02:00.000Z',
+      contextUsage: {
+        usedInputTokens: 6_400,
+        windowTokens: 128_000,
+        ratio: 0.05,
+        windowSource: 'model' as const,
+        source: 'last_model_request' as const,
+        timestamp: '2026-08-18T10:01:30.000Z',
+      },
+    }
+    installElectronApiMock({
+      listConversationScopes: async () => ({ success: true, data: [scope] }),
+      lifecycleBase: {
+        identity: { aliasId: scope.id, aliasGeneration: 2 },
+        activeReadyRunId: null,
+        latestReadyRunId: terminalRun.requestId,
+        snapshot: 'idle_native_thread',
+        interruptRequested: false,
+        interruptAcknowledged: false,
+        requestedAction: null,
+        evidenceDigest: 'terminal-context-evidence',
+      },
+    })
+    const slice = {
+      ...makeEmptySessionSlice(scope.id),
+      aliasGeneration: 2,
+      messages: [{
+        id: 'assistant:task-terminal:run-terminal-context:terminal',
+        agent: 'butler', content: '已完成。', type: 'agent' as const,
+        timestamp: new Date('2026-08-18T10:02:00.000Z'),
+        meta: { runId: terminalRun.requestId },
+      }],
+      scopeRunStates: { [scope.id]: terminalRun },
+    }
+    useAgent.setState({
+      currentScopeId: scope.id,
+      currentScope: scope,
+      scopes: [scope],
+      conversations: [],
+      sessions: { [scope.id]: slice },
+      sessionOrder: [scope.id],
+      activeSessionId: scope.id,
+      sessionId: scope.id,
+      messages: slice.messages,
+      scopeRunStates: slice.scopeRunStates,
+    })
+
+    await useAgent.getState().loadScopes()
+
+    const state = useAgent.getState()
+    assert.equal(state.scopeRunStates[scope.id]?.requestId, terminalRun.requestId)
+    assert.equal(state.scopeRunStates[scope.id]?.contextUsage?.usedInputTokens, 6_400)
+    assert.equal(state.isStreaming, false)
+    assert.equal(state.composerLocked, false)
+  })
+
   it('runtime-ready retry creates exactly one initial scope after the pre-registration pull failed', async () => {
     let listCalls = 0
     let createCalls = 0
@@ -850,19 +1114,16 @@ describe('useAgent scope list contract', () => {
     }
     installElectronApiMock({
       listConversationScopes: async () => ({ success: true, data: [scope] }),
-      readCodexLifecycleSnapshot: async () => ({
-        success: true,
-        data: {
-          identity: { aliasId: scope.id, aliasGeneration: 2 },
-          activeReadyRunId: 'run-recovered',
-          latestReadyRunId: 'run-recovered',
-          snapshot: 'product_turn_interruptible',
-          interruptRequested: false,
-          interruptAcknowledged: false,
-          requestedAction: null,
-          evidenceDigest: 'recovered-evidence',
-        },
-      }),
+      lifecycleBase: {
+        identity: { aliasId: scope.id, aliasGeneration: 2 },
+        activeReadyRunId: 'run-recovered',
+        latestReadyRunId: 'run-recovered',
+        snapshot: 'product_turn_interruptible',
+        interruptRequested: false,
+        interruptAcknowledged: false,
+        requestedAction: null,
+        evidenceDigest: 'recovered-evidence',
+      },
       listPendingAskUserQuestions: async () => ({
         success: true,
         data: [{

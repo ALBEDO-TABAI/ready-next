@@ -32,11 +32,18 @@ interface ChatMessageRow {
 }
 
 export interface CanonicalCoreCloseoutTransactionParticipant {
+  prepare?(input: { readyRunId: string }): void
   complete(input: {
     readyRunId: string
     productTerminalDigest: string
     closeoutAt: string
   }): void
+  afterCommit?(input: {
+    readyRunId: string
+    productTerminalDigest: string
+    closeoutAt: string
+  }): void
+  afterRollback?(input: { readyRunId: string }): void
 }
 
 const readParent = readWorkflowParent
@@ -130,7 +137,9 @@ export class AgentSessionCheckpointCloseoutRepository {
   async commitCanonicalCoreCloseout(
     input: CanonicalCoreCloseoutInput,
   ): Promise<DurableWriteResult<CanonicalCoreCloseoutResult>> {
-    return this.unitOfWork.commitCoreCloseout({
+    this.transactionParticipant?.prepare?.({ readyRunId: input.ownerRunId })
+    try {
+      const result = await this.unitOfWork.commitCoreCloseout({
       writeCore: (db) => {
         const parent = readParent(db, input.parentTaskId)
         if (parent.runId !== input.ownerRunId) throw new Error('core_closeout_owner_mismatch')
@@ -506,6 +515,7 @@ export class AgentSessionCheckpointCloseoutRepository {
           `UPDATE run_meta
               SET status = ?, initiator = ?, duration_ms = ?,
                   task_type = COALESCE(?, task_type), terminal_reason = ?,
+                  context_window = COALESCE(?, context_window),
                   provider_diagnostics_json = COALESCE(?, provider_diagnostics_json),
                   budget_json = COALESCE(?, budget_json), continuation_ref_json = NULL,
                   input_tokens = ?, output_tokens = ?, total_tokens = ?,
@@ -518,6 +528,7 @@ export class AgentSessionCheckpointCloseoutRepository {
           Math.max(0, Math.floor(input.durationMs)),
           input.taskType || null,
           input.terminalReason,
+          input.contextUsage?.windowTokens ?? null,
           input.providerDiagnostics
             ? serializeWorkflowJson(input.providerDiagnostics, 'run_meta_provider_diagnostics_json')
             : null,
@@ -694,6 +705,24 @@ export class AgentSessionCheckpointCloseoutRepository {
         }
       },
       repairDerived: input.repairDerivedState,
-    })
+      })
+      try {
+        this.transactionParticipant?.afterCommit?.({
+          readyRunId: input.ownerRunId,
+          productTerminalDigest: result.value.canonicalMessageDigest,
+          closeoutAt: result.value.canonicalMessage.timestamp,
+        })
+      } catch {
+        // Durable closeout already committed; in-memory waiter cleanup cannot reverse it.
+      }
+      return result
+    } catch (error) {
+      try {
+        this.transactionParticipant?.afterRollback?.({ readyRunId: input.ownerRunId })
+      } catch {
+        // Preserve the transaction failure.
+      }
+      throw error
+    }
   }
 }

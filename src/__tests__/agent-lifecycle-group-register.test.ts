@@ -207,6 +207,92 @@ test('lifecycle request runtime schema rejects missing, stale-shaped, and extend
   ])
 })
 
+test('lifecycle validation compares parsed action refs by value and preserves stop refs', async () => {
+  const runRef = {
+    ownerKind: 'run_owner' as const,
+    action: 'reset' as const,
+    aliasId: 'alias-1',
+    scopeId: 'alias-1',
+    scopeEpoch: 0,
+    aliasGeneration: 1,
+    lifecycleEvidenceDigest: 'lifecycle-digest',
+    headProjectionDigest: 'head-digest',
+    targetReadyRunId: 'run-1',
+    digest: 'request-digest',
+  }
+  const { ipc, handleCalls } = createMockIpc()
+  const deps = createMockDeps()
+  const received: unknown[] = []
+  deps.readLifecycleSnapshot = () => ({
+    identity: { aliasId: 'alias-1', aliasGeneration: 1 },
+    activeReadyRunId: 'run-1',
+    latestReadyRunId: 'run-1',
+    snapshot: 'product_turn_interruptible',
+    interruptRequested: false,
+    interruptAcknowledged: false,
+    requestedAction: null,
+    contractVersion: 'ready_lifecycle_operation_projection_v2',
+    scopeId: 'alias-1',
+    scopeEpoch: 0,
+    headProjectionRef: {
+      version: { scopeEpoch: 0, headGeneration: 1, actionProjectionSequence: 0 },
+      digest: 'head-digest',
+    },
+    actions: {
+      stop: { availability: 'ready', blockers: [], requestRef: { ...runRef, action: 'stop' } },
+      reset: { availability: 'ready', blockers: [], requestRef: runRef },
+      close: { availability: 'ready', blockers: [], requestRef: { ...runRef, action: 'close' } },
+      manual_compact: {
+        availability: 'blocked', blockers: ['thread_busy'], requestRef: null,
+      },
+    },
+    evidenceDigest: 'projection-digest',
+  })
+  deps.resetSession = async (request) => {
+    received.push(request)
+    return {
+      ok: false,
+      action: 'reset',
+      code: 'thread_busy',
+      preserveUi: true,
+      aliasId: request.aliasId,
+      aliasGeneration: request.aliasGeneration,
+      evidenceDigest: 'adapter-evidence',
+    }
+  }
+  deps.stopSession = async (request) => {
+    received.push(request)
+    return {
+      ok: false,
+      action: 'stop',
+      code: 'thread_busy',
+      preserveUi: true,
+      aliasId: request.aliasId,
+      aliasGeneration: request.aliasGeneration,
+      evidenceDigest: 'adapter-evidence',
+    }
+  }
+  agentLifecycleGroup.register(ipc, deps)
+
+  const resetHandler = handleCalls.find((entry) => entry.channel === 'agent:resetSession')?.handler
+  const stopHandler = handleCalls.find((entry) => entry.channel === 'agent:kill')?.handler
+  assert.ok(resetHandler)
+  assert.ok(stopHandler)
+  await resetHandler({} as IpcMainInvokeEvent, {
+    aliasId: 'alias-1', aliasGeneration: 1, readyRunId: 'run-1', actionRequestRef: runRef,
+  })
+  await stopHandler({} as IpcMainInvokeEvent, {
+    aliasId: 'alias-1', aliasGeneration: 1, readyRunId: 'run-1',
+    actionRequestRef: { ...runRef, action: 'stop' },
+  })
+  assert.equal(received.length, 2)
+  assert.deepEqual((received[0] as { actionRequestRef: unknown }).actionRequestRef, runRef)
+  assert.deepEqual(
+    (received[1] as { actionRequestRef: unknown }).actionRequestRef,
+    { ...runRef, action: 'stop' },
+  )
+})
+
 test('send handler accepts only the shared exact request and rejects retired workflow fields before dispatch', async () => {
   const { ipc, handleCalls } = createMockIpc()
   const deps = createMockDeps()

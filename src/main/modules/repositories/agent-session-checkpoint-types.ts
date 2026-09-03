@@ -8,6 +8,7 @@ import type {
 import type { TaskExecutionBinding } from '../../../shared/agent-execution-profile'
 import type { DeliveryStateV1 } from '../../../shared/dynamic-delivery'
 import type { CanonicalAssistantMessageReceipt } from '../../../shared/ipc-contracts/canonical-message'
+import type { ContextUsageSnapshot } from '../../../shared/context-usage-types'
 import type {
   BudgetWarningLevel,
   TaskBudget,
@@ -119,6 +120,7 @@ export interface CanonicalCoreCloseoutInput {
   budgetWarningLevel?: BudgetWarningLevel | null
   providerDiagnostics?: Record<string, unknown> | null
   usage?: { inputTokens?: number; outputTokens?: number; totalTokens?: number } | null
+  contextUsage?: ContextUsageSnapshot | null
   deliveryState?: DeliveryStateV1 | null
   workflowCloseoutSeal?: BrowserWorkflowCloseoutSeal | null
   terminalQualityPatch?: {

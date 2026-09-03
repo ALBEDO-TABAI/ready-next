@@ -1,8 +1,13 @@
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import test from 'node:test'
+import { fileURLToPath } from 'node:url'
 
-import type { DatabaseConnection } from '../main/modules/database'
+import type { DatabaseConnection, DatabaseManager } from '../main/modules/database'
+import { AppSettingsRepository } from '../main/modules/repositories/app-settings-repository'
 import { AgentSessionCheckpointRepository } from '../main/modules/repositories/agent-session-checkpoint-repository'
 import { RunMetaRepository } from '../main/modules/agent-control/task-projection/run-meta-repository'
 import { TaskProjectionRepository } from '../main/modules/repositories/task-projection-repository'
@@ -11,12 +16,18 @@ import {
   CodexBindingRepository,
   type CodexAdmittedBindingInput,
   type CodexBrowserVerifierAttemptOutcome,
+  type CodexLifecycleAction,
+  type CodexTerminalCloseoutEvidence,
 } from '../main/modules/agent-control/codex-runtime/codex-binding-repository'
 import { codexBrowserVerifierFrozenIdentityDigest } from '../main/modules/agent-control/codex-runtime/codex-browser-verifier-identity'
-import { digestCanonicalJson } from '../main/modules/agent-control/codex-runtime/codex-model-gateway-contract'
+import { createCodexUpstreamProfileSnapshot, digestCanonicalJson } from '../main/modules/agent-control/codex-runtime/codex-model-gateway-contract'
 import type { CodexThread } from '../main/modules/agent-control/codex-runtime/codex-native-runtime'
 import type { PreparedCodexProductRun } from '../main/modules/agent-control/codex-runtime/codex-product-run-preparer'
-import { requestCodexEngineTerminalLifecycleActionBeforeCloseout } from '../main/modules/agent-control/codex-runtime/codex-runtime-production-composition'
+import { createCodexRuntimeComposition, requestCodexEngineTerminalLifecycleActionBeforeCloseout } from '../main/modules/agent-control/codex-runtime/codex-runtime-production-composition'
+import type { CodexRuntimeHostPort, ReadyClosedCodexProductRun } from '../main/modules/agent-control/codex-runtime/codex-runtime-composition'
+import type { CoreTurnCandidate } from '../main/modules/agent-control/codex-runtime/codex-turn-collector'
+import type { ConversationScope } from '../main/modules/agent-control/contracts/types'
+import { collectArtifactProof, collectToolResultProof } from '../main/modules/agent-control/quality/proof-collector'
 import { CodexHostOrchestrator } from '../main/modules/agent-control/runtime-core/codex-host-orchestrator'
 import type { StartIdentityReservationSet } from '../main/modules/agent-control/send-scoped-confirmation'
 import { workflowDigest } from '../main/modules/repositories/browser-workflow-codec'
@@ -28,6 +39,20 @@ import { createCodexToolFixture } from './utils/codex-tool-fixture'
 import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
 import { commitCanonicalCodexFailure } from './helpers/codex-product-closeout'
 import { disabledReadyMemorySnapshot } from './utils/ready-memory-fixture'
+import {
+  buildTerminalNativeReadbackReceipt,
+  resolveCodexHistoryObservation,
+  resolveCodexProductFailureKind,
+  resolveCodexTerminalFacts,
+  terminalEvidenceRef,
+  terminalGatewayEvidenceRef,
+  terminalNativeReadbackEvidenceRef,
+} from '../main/modules/agent-control/codex-runtime/codex-terminal-facts'
+import { projectCodexHeadActionProjection } from '../main/modules/agent-control/codex-runtime/codex-action-surface'
+import { projectCodexLifecycleOperationV2 } from '../main/modules/agent-control/codex-runtime/codex-lifecycle-action-surface'
+import { classifyLifecycleOperation } from '../shared/ipc-contracts/agent-lifecycle-snapshot'
+import { verifyCodexAutomaticCompactionEvidence } from '../main/modules/agent-control/codex-runtime/codex-automatic-compaction-evidence'
+import { CodexModelGatewayRepository } from '../main/modules/agent-control/codex-runtime/codex-model-gateway-authority'
 
 const startedAt = '2026-08-11T05:00:00.000Z'
 const verifiedAt = '2026-08-11T05:01:00.000Z'
@@ -37,10 +62,129 @@ function sha256(value: string): string {
   return createHash('sha256').update(value).digest('hex')
 }
 
+function lifecycleTerminalEvidence(
+  repository: CodexBindingRepository,
+  readyRunId: string,
+  input: {
+    action?: CodexLifecycleAction
+    terminal: 'done' | 'error' | 'interrupted'
+    terminalReason: string
+    failureKind: CodexTerminalCloseoutEvidence['terminalFacts']['product']['failureKind']
+    nativeThread?: CodexThread
+  },
+): CodexTerminalCloseoutEvidence {
+  const product = repository.readProductTurnRuntime(readyRunId)
+  const engine = repository.readEngineTerminalCandidate(readyRunId)
+  const lifecycle = input.action ? repository.readProductLifecycleAction(readyRunId) : null
+  if (!engine || (input.action && !lifecycle) || !product.codexThreadId || !product.codexTurnId) {
+    throw new Error('lifecycle_terminal_fixture_missing')
+  }
+  const unsigned = {
+    contract: 'codex_terminal_native_readback_v1' as const,
+    receiptId: `native-readback:${readyRunId}:${product.turnRevision}`,
+    readyRunId,
+    readyScopeId: product.readyScopeId,
+    messageVisibilityEpoch: product.messageVisibilityEpoch,
+    aliasGeneration: product.aliasGeneration,
+    connectionEpoch: product.turnStartConnectionEpoch,
+    codexThreadId: product.codexThreadId,
+    codexTurnId: product.codexTurnId,
+    turnStatus: engine.engineOutcome,
+    turnRevision: product.turnRevision,
+    threadStatus: { type: 'idle' as const },
+    orderedTurnIds: [product.codexTurnId],
+    terminalTurnItemDigests: [],
+    contextCompactionItemIds: [],
+  }
+  const nativeReadback = input.nativeThread
+    ? buildTerminalNativeReadbackReceipt({
+        candidate: engine.candidate as Extract<CoreTurnCandidate, { kind: 'native_terminal' }>,
+        prepared: product.prepared, aliasGeneration: product.aliasGeneration,
+        messageVisibilityEpoch: product.messageVisibilityEpoch,
+        connectionEpoch: product.turnStartConnectionEpoch, turnRevision: product.turnRevision,
+        thread: input.nativeThread,
+      })
+    : { ...unsigned, digest: digestCanonicalJson(unsigned) }
+  const nativeTurnRef = terminalEvidenceRef({
+    kind: 'native_turn', readyRunId, readyScopeId: product.readyScopeId,
+    messageVisibilityEpoch: product.messageVisibilityEpoch,
+    aliasGeneration: product.aliasGeneration, codexThreadId: product.codexThreadId,
+    codexTurnId: product.codexTurnId,
+    receiptId: `engine-terminal:${readyRunId}`, digest: engine.candidateDigest,
+    ownerIdentity: { nativeTurnId: product.codexTurnId, terminalStatus: engine.engineOutcome },
+  })
+  const readbackRef = terminalNativeReadbackEvidenceRef({
+    readyRunId, readyScopeId: product.readyScopeId,
+    messageVisibilityEpoch: product.messageVisibilityEpoch,
+    aliasGeneration: product.aliasGeneration, codexThreadId: product.codexThreadId,
+    codexTurnId: product.codexTurnId, revision: nativeReadback.turnRevision,
+    receiptId: nativeReadback.receiptId, digest: nativeReadback.digest,
+    ownerIdentity: {
+      connectionEpoch: product.turnStartConnectionEpoch,
+      readRevision: product.turnRevision,
+      verifiedThreadId: product.codexThreadId,
+      verifiedTurnId: product.codexTurnId,
+    },
+  })
+  const lifecycleRef = lifecycle && input.action ? {
+    kind: 'lifecycle' as const,
+    evidenceRefId: `lifecycle:${readyRunId}:${input.action}`,
+    readyRunId, readyScopeId: product.readyScopeId,
+    messageVisibilityEpoch: product.messageVisibilityEpoch,
+    aliasGeneration: product.aliasGeneration, codexThreadId: product.codexThreadId,
+    codexTurnId: product.codexTurnId, revision: 1,
+    receiptId: `lifecycle:${readyRunId}:${input.action}`,
+    digest: lifecycle.lifecycleActionEvidenceDigest,
+    ownerIdentity: { lifecycleActionId: `${readyRunId}:${input.action}` },
+  } : null
+  const history = input.action === 'reset'
+    ? { kind: 'reset' as const }
+    : input.action === 'close'
+      ? { kind: 'closed' as const }
+      : input.nativeThread
+        ? resolveCodexHistoryObservation({
+            gatewayEvidence: [],
+            candidate: engine.candidate as Extract<CoreTurnCandidate, { kind: 'native_terminal' }>,
+            prepared: product.prepared, expectedClientUserMessageId: product.turnRequestId,
+            thread: input.nativeThread, publicationDiverged: input.terminal !== 'done',
+          })
+      : input.terminal === 'done'
+        ? {
+            kind: 'continuation_safe' as const,
+            seamId: 'completed_product_accepted_v1' as const,
+            retainedFormalInputMappingDigest: digestCanonicalJson({
+              originUserMessageId: product.prepared.ingress.originUserMessageId,
+              inputDigest: digestCanonicalJson(
+                product.prepared.ingress.canonicalCurrentInputRef.input,
+              ),
+            }),
+          }
+        : { kind: 'diverged' as const, reason: 'protocol_or_publication_rejected' as const }
+  return {
+    nativeReadback,
+    terminalFacts: resolveCodexTerminalFacts({
+      product: {
+        terminal: input.terminal, terminalReason: input.terminalReason,
+        failureKind: input.failureKind,
+        evidence: [nativeTurnRef, readbackRef, ...(lifecycleRef ? [lifecycleRef] : [])],
+      },
+      history,
+      historyEvidence: history.kind === 'reset' || history.kind === 'closed'
+        ? [lifecycleRef as NonNullable<typeof lifecycleRef>]
+        : [nativeTurnRef, readbackRef],
+      effect: { state: 'none', evidence: [] },
+    }),
+  }
+}
+
 function prepared(runId: string, taskId: string, scopeId: string, messageId: string): PreparedCodexProductRun {
   const tools = createCodexToolFixture([])
   return {
-    preparationContract: 'codex_product_run_e1',
+    preparationContract: 'codex_product_run_e2',
+    sourceTrustedEnvironmentRef: {
+      workbenchMode: 'browser',
+      environmentDigest: 'e'.repeat(64),
+    },
     readyMemorySnapshot: disabledReadyMemorySnapshot(),
     taskId,
     runId,
@@ -60,12 +204,13 @@ function prepared(runId: string, taskId: string, scopeId: string, messageId: str
       },
       explicitResourceEnvelope: { input: [], resourceRefs: [] },
       resourceAdditionalContext: [],
+      uncommittedTailAssignments: [],
+      supersededUncommittedItems: [],
     },
     resourceAnchorDigest: sha256(JSON.stringify({
       explicitResourceEnvelope: { input: [], resourceRefs: [] },
       resourceAdditionalContext: [],
     })),
-    recoveredContextDigest: null,
     ...tools,
     readyToolHostIdentity: {
       scopeId,
@@ -91,18 +236,9 @@ function prepared(runId: string, taskId: string, scopeId: string, messageId: str
   }
 }
 
-async function fixture(
+async function nativeTerminalFixture(
   t: Parameters<typeof skipIfSqliteUnavailable>[0],
   suffix: string,
-  beforeVerifierDispatch?: (value: {
-    db: ReturnType<typeof openProviderCheckpointTestDb>
-    repository: CodexBindingRepository
-    runId: string
-    scopeId: string
-    threadBindingId: string
-    codexThreadId: string
-    codexTurnId: string
-  }) => void,
 ) {
   if (skipIfSqliteUnavailable(t, `codex-browser-verifier-${suffix}`)) return null
   const db = openProviderCheckpointTestDb()
@@ -119,6 +255,18 @@ async function fixture(
   const codexTurnId = `turn-${suffix}`
   const run = prepared(runId, taskId, scopeId, messageId)
   const executionBinding = providerCheckpointExecutionBinding(runId)
+  const upstream = createCodexUpstreamProfileSnapshot({
+    profileId: `profile-${suffix}`,
+    config: {
+      provider: 'openai', baseUrl: 'http://127.0.0.1:10532/v1', apiKey: 'isolated-test-key',
+      model: 'frozen-browser-model', agentProtocol: 'openai', wireApi: 'responses',
+      toolUseMode: 'on', nativeVideoMode: 'off',
+    },
+    maxRetries: 0,
+  })
+  new CodexModelGatewayRepository(db).storeSnapshot({
+    ...upstream, snapshotRef: `snapshot-ref-${suffix}`, createdAt: startedAt,
+  })
   db.prepare(`
     INSERT INTO chat_conversations (
       id, agent, active_agent_id, handoff_generation, title, source_kind, source_id,
@@ -172,6 +320,24 @@ async function fixture(
     protocolSchemaDigest: `protocol-${suffix}`,
     createdAt: startedAt,
   })
+   const actionHead = projectCodexHeadActionProjection(repository.readHeadActionFacts({
+    aliasId: scopeId,
+    aliasGeneration: 1,
+    currentRuntimeManifestDigest: `runtime-${suffix}`,
+    currentProtocolSchemaDigest: `protocol-${suffix}`,
+  }))
+  if (!actionHead.actionHeadIdentity) throw new Error('fixture_action_head_missing')
+  const admittedRun: PreparedCodexProductRun = {
+    ...run,
+    ingress: {
+      ...run.ingress,
+      actionAdmissionRef: {
+        headProjectionDigest: actionHead.evidenceDigest,
+        actionProjectionVersion: actionHead.actionProjectionVersion,
+        actionHeadIdentity: actionHead.actionHeadIdentity,
+      },
+    },
+  }
   const reservation: StartIdentityReservationSet = {
     reservationSetId: run.ingressBinding.reservationSetId,
     scopeId,
@@ -183,7 +349,7 @@ async function fixture(
     reservationEvidenceDigest: run.ingressBinding.reservationEvidenceDigest,
   }
   const admissionInput = {
-    prepared: run,
+    prepared: admittedRun,
     reservation,
     ownerMainBootId: `boot-${suffix}`,
     admittedAt: startedAt,
@@ -197,7 +363,7 @@ async function fixture(
     instructionContractDigest: `instruction-${suffix}`,
     codexModel: 'frozen-browser-model',
     upstreamProfileSnapshotRef: `snapshot-ref-${suffix}`,
-    upstreamProfileSnapshotDigest: 'a'.repeat(64),
+    upstreamProfileSnapshotDigest: upstream.snapshotDigest,
     additionalContextDigest: digestCanonicalJson([]),
     turnContractDigest: `turn-contract-${suffix}`,
     readyParentReceipt: {
@@ -268,21 +434,9 @@ async function fixture(
     reconciledAt: startedAt,
   })
   const checkpoints = new AgentSessionCheckpointRepository(accessor)
-  const route = await checkpoints.bindBrowserWorkflowRoute({
-    parentTaskId: taskId,
-    ownerRunId: runId,
-    sourceMessageId: messageId,
-    executionBinding,
-    now: startedAt,
-  })
   const finalText = `hidden-candidate-${suffix}`
   const candidateDigest = sha256(finalText)
-  repository.recordEngineTerminalCandidate({
-    readyRunId: runId,
-    codexThreadId,
-    codexTurnId,
-    engineOutcome: 'completed',
-    candidate: {
+  const candidate: Extract<CoreTurnCandidate, { kind: 'native_terminal' }> = {
       kind: 'native_terminal',
       readyTaskId: taskId,
       readyRunId: runId,
@@ -302,6 +456,7 @@ async function fixture(
       budgetState: {},
       contextState: {},
       providerDiagnostics: {},
+      contextUsage: null,
       recoveryCheckpointRef: null,
       browserContinuationRef: null,
       browserProofRefs: [],
@@ -310,8 +465,44 @@ async function fixture(
       runtimeDiagnostics: {
         finalDeltaItemIds: [], commentaryItemIds: [], nativeTurnError: null,
       },
-    },
-    recordedAt: startedAt,
+  }
+  return {
+    db, accessor, repository, projections, checkpoints, run: admittedRun,
+    scopeId, taskId, runId, messageId, threadBindingId, codexThreadId, codexTurnId,
+    finalText, candidateDigest, candidate, nativeThread, admissionInput,
+  }
+}
+
+async function fixture(
+  t: Parameters<typeof skipIfSqliteUnavailable>[0],
+  suffix: string,
+  beforeVerifierDispatch?: (value: {
+    db: ReturnType<typeof openProviderCheckpointTestDb>
+    repository: CodexBindingRepository
+    runId: string
+    scopeId: string
+    threadBindingId: string
+    codexThreadId: string
+    codexTurnId: string
+  }) => void,
+) {
+  const base = await nativeTerminalFixture(t, suffix)
+  if (!base) return null
+  const {
+    db, repository, projections, checkpoints,
+    scopeId, taskId, runId, messageId, threadBindingId, codexThreadId, codexTurnId,
+    candidateDigest, admissionInput,
+  } = base
+  const route = await checkpoints.bindBrowserWorkflowRoute({
+    parentTaskId: taskId,
+    ownerRunId: runId,
+    sourceMessageId: messageId,
+    executionBinding: providerCheckpointExecutionBinding(runId),
+    now: startedAt,
+  })
+  repository.recordEngineTerminalCandidate({
+    readyRunId: runId, codexThreadId, codexTurnId,
+    engineOutcome: 'completed', candidate: base.candidate, recordedAt: startedAt,
   })
   const bundleInspection = checkpoints.readWorkflowVerifierBundle(taskId)
   assert.ok(bundleInspection.bundle)
@@ -374,24 +565,419 @@ async function fixture(
     dispatchedAt: startedAt,
   })
   return {
-    db,
-    accessor,
-    repository,
-    projections,
-    checkpoints,
-    run,
-    scopeId,
-    taskId,
-    runId,
-    threadBindingId,
-    finalText,
-    candidateDigest,
+    ...base,
     bundle: bundleInspection.bundle!,
     projection: projection!,
     route,
     begun,
   }
 }
+
+function completedNativeThread(
+  value: NonNullable<Awaited<ReturnType<typeof nativeTerminalFixture>>>,
+  compacted = false,
+): CodexThread {
+  return {
+    ...value.nativeThread,
+    turns: [{
+      id: value.codexTurnId, status: 'completed', error: null,
+      items: [{
+        type: 'userMessage', id: 'item-1', clientId: value.admissionInput.turnRequestId,
+        content: value.run.ingress.canonicalCurrentInputRef.input,
+      }, ...(compacted ? [{ type: 'contextCompaction' as const, id: 'compact-item' }] : []), {
+        type: 'agentMessage', id: 'item-2', text: value.finalText, phase: 'final_answer',
+      }],
+    }],
+  }
+}
+
+async function productionCloseout(
+  value: NonNullable<Awaited<ReturnType<typeof nativeTerminalFixture>>>,
+  compacted = false,
+  nativeThread = completedNativeThread(value, compacted),
+) {
+  const appPath = fileURLToPath(new URL('../..', import.meta.url))
+  const userDataPath = mkdtempSync(join(tmpdir(), 'ready-codex-qc-closeout-'))
+  const composition = createCodexRuntimeComposition({
+    appPath, resourcesPath: appPath, userDataPath, isPackaged: false,
+    database: value.accessor as unknown as DatabaseManager,
+    settings: new AppSettingsRepository(() => ({
+      ...value.accessor,
+      getSetting: () => undefined,
+      setSetting() { throw new Error('unexpected_settings_write') },
+    })),
+    async requestRendererToolAction() { throw new Error('unexpected_renderer_action') },
+    providerReadiness: { async ensureReady() { throw new Error('unexpected_provider_call') } },
+  })
+  const checkpoints = new AgentSessionCheckpointRepository(
+    value.accessor, composition.canonicalCloseoutTransactionParticipant,
+  )
+  let terminalNativeReads = 0
+  let canonicalCommits = 0
+  composition.nativeRuntime.threadRead = async ({ threadId }) => {
+    assert.equal(threadId, value.codexThreadId)
+    // The retired source's archive owner may read it again after the commit.
+    if (canonicalCommits === 0) {
+      terminalNativeReads += 1
+      assert.equal(terminalNativeReads, 1, 'QC consumes the one frozen native terminal snapshot')
+    }
+    return { thread: nativeThread }
+  }
+  composition.nativeRuntime.threadFork = async () => { throw new Error('unexpected_native_fork') }
+  const scope: ConversationScope = {
+    id: value.scopeId, agent: 'butler', activeAgentId: 'butler', handoffGeneration: 0,
+    aliasGeneration: 1, messageVisibilityEpoch: 0, title: 'QC closeout',
+    sourceKind: 'local', sourceId: 'app', threadKey: value.scopeId, meta: {},
+    createdAt: startedAt, updatedAt: startedAt, lastMessageAt: startedAt,
+  }
+  composition.bindHost({
+    runtime: { getAgentSessionCheckpointRepository: () => checkpoints },
+    getScope: (scopeId: string) => scopeId === value.scopeId ? scope : null,
+    getTaskProjectionStore: () => value.projections,
+    async commitCodexProductTurnCloseout(input) {
+      canonicalCommits += 1
+      const committed = await checkpoints.commitCanonicalCoreCloseout(input)
+      const closeout = value.repository.readProductCloseout(value.runId)
+      assert.ok(closeout)
+      return {
+        productTerminalDigest: closeout.productTerminalDigest,
+        closeoutAt: closeout.productCloseoutAt,
+        ...committed.value,
+      }
+    },
+  } as unknown as CodexRuntimeHostPort)
+  let unsubscribe = () => {}
+  let timeout: ReturnType<typeof setTimeout> | undefined
+  try {
+    const result = await new Promise<ReadyClosedCodexProductRun>((resolve, reject) => {
+      timeout = setTimeout(() => reject(new Error('production_qc_closeout_timeout')), 5_000)
+      unsubscribe = composition.lifecycleAdapter.observeRunCloseout({
+        prepared: value.run,
+        expectedScopeId: value.scopeId,
+        pending: {
+          state: 'ready_closeout_pending',
+          pendingKind: 'product_turn_engine_terminal_closeout_pending',
+          candidate: value.candidate,
+          recoveryEvidenceDigest: digestCanonicalJson(value.candidate),
+          error: 'test_native_candidate_ready',
+        },
+      }, resolve)
+    })
+    return { result, terminalNativeReads, canonicalCommits }
+  } finally {
+    clearTimeout(timeout)
+    unsubscribe()
+    await composition.stop()
+    rmSync(userDataPath, { recursive: true, force: true })
+  }
+}
+
+test('canonical transaction rejects forged same-run native owner references', async (t) => {
+  for (const kind of ['native_turn', 'native_readback'] as const) {
+    const value = await nativeTerminalFixture(t, `forged-${kind}`)
+    if (!value) return
+    try {
+      value.repository.recordEngineTerminalCandidate({
+        readyRunId: value.runId, codexThreadId: value.codexThreadId, codexTurnId: value.codexTurnId,
+        engineOutcome: 'completed', candidate: value.candidate, recordedAt: verifiedAt,
+      })
+      const evidence = lifecycleTerminalEvidence(value.repository, value.runId, {
+        terminal: 'done', terminalReason: 'done', failureKind: null,
+      })
+      for (const refs of [evidence.terminalFacts.product.evidence, evidence.terminalFacts.history.evidence]) {
+        const ref = refs.find((ref) => ref.kind === kind)!
+        Object.assign(ref, {
+          receiptId: 'forged-not-an-owner', evidenceRefId: `${kind}:forged-not-an-owner`,
+          revision: 999999, digest: 'f'.repeat(64),
+        })
+      }
+      value.db.exec('BEGIN IMMEDIATE')
+      try {
+        assert.throws(() => value.repository.completeCanonicalProductCloseoutInOpenTransaction({
+          readyRunId: value.runId, productTerminalDigest: 'test-uncommitted',
+          closeoutAt, terminalEvidence: evidence,
+        }), new RegExp(`terminal_evidence_owner_mismatch:${kind}`))
+      } finally { value.db.exec('ROLLBACK') }
+      assert.equal(value.repository.readTerminalCloseoutEvidence(value.runId), null)
+      assert.equal(value.repository.readProductCloseout(value.runId), null)
+    } finally { value.db.close() }
+  }
+})
+
+test('production history fold consumes durable wire evidence despite lossy native readback', async (t) => {
+  for (const seam of ['safe', 'partial', 'pending'] as const) {
+    const partial = seam === 'partial'
+    const value = await nativeTerminalFixture(t, `wire-${seam}`)
+    if (!value) return
+    try {
+      value.candidate = {
+        ...value.candidate, engineOutcome: 'failed',
+        candidateSelection: { kind: 'none', code: 'terminal_not_completed' },
+        candidateText: null, candidateDigest: null, terminalReasonCandidate: 'blocked_external',
+        runtimeDiagnostics: {
+          finalDeltaItemIds: partial ? ['partial-output-item'] : [],
+          commentaryItemIds: [], nativeTurnError: 'fixture failure',
+        },
+      }
+      const gateway = new CodexModelGatewayRepository(value.db)
+      const requestDigest = 'd'.repeat(64)
+      // Only request transcript content is synthetic; both event writers and
+      // their immutable DB readback are the production implementation.
+      const writer = gateway as unknown as { writeReceipt(input: unknown): string }
+      writer.writeReceipt({
+        kind: 'product', codexThreadId: value.codexThreadId, codexTurnId: value.codexTurnId,
+        readyRunId: value.runId, manualCompactionId: null,
+        snapshotRef: value.admissionInput.upstreamProfileSnapshotRef,
+        snapshotDigest: value.admissionInput.upstreamProfileSnapshotDigest, requestDigest,
+        requestEvidence: {
+          instructionDigest: requestDigest, inputDigest: requestDigest, inputItems: [],
+          inputTotalStringCharacters: 0, inputMaxStringCharacters: 0,
+          toolsDigest: requestDigest, toolCount: 0, bodyBytes: 100,
+          memoryHistoryRedactionDigest: requestDigest, memoryHistoryRedactedItemCount: 0,
+        },
+        acceptedAt: startedAt, budgetLane: 'ordinary',
+      })
+      const metadata = {
+          threadId: value.codexThreadId, turnId: value.codexTurnId, readyRunId: value.runId,
+          raw: { request_kind: 'turn' },
+      } as Parameters<CodexModelGatewayRepository['recordResponseFailureEvidence']>[0]['metadata']
+      const failureInput = {
+        metadata,
+        requestDigest,
+        failureEvidence: {
+          failureClass: partial ? 'transport' as const : 'provider' as const,
+          failureStage: partial ? 'stream-after-item' as const : 'headers' as const,
+          responseIdentitySeen: partial, partialAssistantItemSeen: partial, toolCallItemSeen: false,
+          elapsedMs: 10, eventCount: partial ? 3 : 0, wireByteCount: partial ? 300 : 0,
+          causeCode: partial ? 'gateway_native_stream_failed' : 'gateway_upstream_http_400',
+        },
+        failedAt: verifiedAt,
+      }
+      if (seam !== 'pending') gateway.recordResponseFailureEvidence(failureInput)
+      const nativeThread = completedNativeThread(value)
+      nativeThread.turns[0] = {
+        ...nativeThread.turns[0], status: 'failed', error: { message: 'fixture failure' },
+        items: [nativeThread.turns[0].items[0]],
+      }
+      value.repository.recordEngineTerminalCandidate({
+        readyRunId: value.runId, codexThreadId: value.codexThreadId, codexTurnId: value.codexTurnId,
+        engineOutcome: 'failed', candidate: value.candidate, recordedAt: verifiedAt,
+      })
+      const forged = lifecycleTerminalEvidence(value.repository, value.runId, {
+        terminal: 'error', terminalReason: 'blocked_external', failureKind: 'provider', nativeThread,
+      })
+      const row = gateway.readTurnGatewayEvidence({ readyRunId: value.runId,
+        codexThreadId: value.codexThreadId, codexTurnId: value.codexTurnId })[0]
+      const forgedGateway = terminalGatewayEvidenceRef({
+        readyRunId: value.runId, readyScopeId: value.scopeId, messageVisibilityEpoch: 0, aliasGeneration: 1,
+        codexThreadId: value.codexThreadId, codexTurnId: value.codexTurnId,
+        receiptId: row.receiptId, revision: 999999, digest: 'f'.repeat(64),
+        ownerIdentity: { gatewayRequestReceiptId: row.receiptId, eventSequence: 999999 },
+      })
+      forged.terminalFacts.product.evidence.push(forgedGateway)
+      forged.terminalFacts.history.evidence.push(forgedGateway)
+      value.db.exec('BEGIN IMMEDIATE')
+      try {
+        assert.throws(() => value.repository.completeCanonicalProductCloseoutInOpenTransaction({
+          readyRunId: value.runId, productTerminalDigest: 'test-uncommitted', closeoutAt, terminalEvidence: forged,
+        }), /terminal_evidence_owner_mismatch:gateway/)
+      } finally { value.db.exec('ROLLBACK') }
+      await productionCloseout(value, false, nativeThread)
+      const evidence = value.repository.readTerminalCloseoutEvidence(value.runId)
+      assert.equal(evidence?.terminalFacts.history.kind, seam === 'safe' ? 'continuation_safe' : 'diverged')
+      assert.equal(evidence?.terminalFacts.history.evidence.filter((ref) => ref.kind === 'gateway').length, 1)
+      assert.equal(value.repository.readActiveAliasBinding(value.scopeId)?.aliasGeneration, seam === 'safe' ? 1 : 2)
+      const frozen = digestCanonicalJson(evidence)
+      if (seam === 'pending') {
+        assert.throws(() => gateway.recordResponseFailureEvidence(failureInput), /gateway_response_owner_closed/)
+        assert.throws(() => gateway.recordResponseEvidence({
+          metadata, requestDigest, completedAt: verifiedAt,
+          responseEvidence: {
+            responseId: 'late-response', terminalDigest: requestDigest,
+            outputDigest: requestDigest, usageDigest: requestDigest,
+          },
+        }), /gateway_response_owner_closed/)
+        assert.equal(gateway.readTurnGatewayEvidence({ readyRunId: value.runId,
+          codexThreadId: value.codexThreadId, codexTurnId: value.codexTurnId })[0].responseSequence, null)
+      } else {
+        gateway.recordResponseFailureEvidence(failureInput) // Exact replay remains a zero-write operation.
+      }
+      assert.equal(digestCanonicalJson(value.repository.readTerminalCloseoutEvidence(value.runId)), frozen)
+    } finally {
+      value.db.close()
+    }
+  }
+})
+
+test('production QC rejection commits one coherent failure and replay retains its reason', async (t) => {
+  for (const partialDelivery of [false, true]) {
+    const value = await nativeTerminalFixture(t, `qc-${partialDelivery ? 'partial' : 'claim-only'}`)
+    if (!value) return
+    try {
+      const proofRefs = partialDelivery ? [
+        collectToolResultProof('skill_write_artifact', 'written a', new Date(verifiedAt)),
+        collectArtifactProof('/tmp/qc-a.md', new Date(verifiedAt), value.runId),
+      ] : []
+      value.projections.update(value.taskId, {
+        taskType: partialDelivery ? 'multi_step_task' : 'short_task', module: 'skill', proofRefs,
+        expectedOutputs: ['/tmp/qc-a.md', '/tmp/qc-b.md'],
+      })
+      const first = await productionCloseout(value)
+      const evidence = value.repository.readTerminalCloseoutEvidence(value.runId)
+      assert.ok(evidence)
+      assert.deepEqual(value.db.prepare(`
+        SELECT status, terminal_reason FROM run_meta WHERE run_id = ?
+      `).get(value.runId), { status: 'error', terminal_reason: 'proof_gap' })
+      assert.equal(evidence.terminalFacts.product.terminal, 'error')
+      assert.equal(evidence.terminalFacts.product.terminalReason, 'proof_gap')
+      assert.equal(evidence.terminalFacts.history.kind, 'diverged')
+      assert.equal(first.result.execution.terminalReason, 'proof_gap')
+      assert.equal(first.result.committedTerminalEvent.terminalReason, 'proof_gap')
+      assert.equal(first.result.execution.canonicalMessage?.content, first.result.execution.finalText)
+      assert.notEqual(first.result.execution.finalText, value.finalText)
+      assert.match(first.result.execution.finalText, /还没有满足全部完成要求/)
+      assert.equal(first.canonicalCommits, 1)
+      assert.equal(first.terminalNativeReads, 1)
+      assert.equal(value.db.prepare(`SELECT COUNT(*) AS count FROM codex_native_coverage_receipts`)
+        .get<{ count: number }>()?.count, 0)
+      assert.equal(value.db.prepare(`SELECT COUNT(*) AS count FROM codex_thread_dispatch_fences`)
+        .get<{ count: number }>()?.count, 0)
+      const head = value.repository.readActiveAliasBinding(value.scopeId)
+      assert.ok(head)
+      assert.equal(head.aliasGeneration, 2)
+      assert.equal(head.materializationKind, 'fresh_root_with_tail')
+      const projection = value.projections.get(value.taskId)
+      assert.equal(projection?.status, 'failed')
+      assert.equal(projection?.checkins?.length, 1)
+      if (partialDelivery) {
+        assert.ok((projection?.criteria?.satisfiedCount ?? 0) > 0)
+        assert.equal(projection?.checkins?.[0].verdict, 'degraded')
+        assert.ok((projection?.proofRefs ?? []).some((proof) => proof.digest === proofRefs[1].digest))
+      }
+      const firstFactsDigest = digestCanonicalJson(evidence.terminalFacts)
+      const replay = await productionCloseout(value)
+      assert.equal(replay.canonicalCommits, 0)
+      assert.equal(replay.terminalNativeReads, 0)
+      assert.equal(replay.result.execution.terminalReason, first.result.execution.terminalReason)
+      assert.equal(replay.result.committedTerminalEvent.terminalReason, first.result.committedTerminalEvent.terminalReason)
+      assert.deepEqual(replay.result.execution.canonicalMessage, first.result.execution.canonicalMessage)
+      assert.equal(replay.result.execution.canonicalMessageDigest, first.result.execution.canonicalMessageDigest)
+      assert.equal(digestCanonicalJson(value.repository.readTerminalCloseoutEvidence(value.runId)?.terminalFacts), firstFactsDigest)
+      assert.equal(value.db.prepare(`SELECT COUNT(*) AS count FROM chat_messages WHERE role = 'assistant'`)
+        .get<{ count: number }>()?.count, 1)
+    } finally {
+      value.db.close()
+    }
+  }
+})
+
+test('QC cannot infer a fresh root from missing coverage when native history has an earlier unmapped turn', async (t) => {
+  const value = await nativeTerminalFixture(t, 'unmapped-prefix')
+  if (!value) return
+  try {
+    value.projections.update(value.taskId, {
+      taskType: 'short_task', module: 'skill',
+      expectedOutputs: ['required.txt'],
+    })
+    const nativeThread = completedNativeThread(value)
+    nativeThread.turns.unshift({ id: 'earlier-unmapped-turn', status: 'completed', error: null, items: [] })
+    const closed = await productionCloseout(value, false, nativeThread)
+    assert.equal(closed.result.execution.success, false)
+    assert.deepEqual(value.repository.readTerminalCloseoutEvidence(value.runId)?.terminalFacts.history.kind,
+      'unknown_reset_required')
+    assert.equal(value.repository.readActiveAliasBinding(value.scopeId)?.aliasGeneration, 1)
+    assert.equal(value.db.prepare('SELECT COUNT(*) AS count FROM codex_thread_bindings')
+      .get<{ count: number }>()?.count, 1)
+  } finally { value.db.close() }
+})
+
+test('accepted current reply with unmapped earlier history publishes without inventing coverage', async (t) => {
+  const value = await nativeTerminalFixture(t, 'accepted-unmapped-prefix')
+  if (!value) return
+  try {
+    const nativeThread = completedNativeThread(value)
+    nativeThread.turns.unshift({ id: 'earlier-unmapped-turn', status: 'completed', error: null, items: [] })
+    const closed = await productionCloseout(value, false, nativeThread)
+    assert.equal(closed.result.execution.success, true)
+    assert.equal(closed.result.execution.finalText, value.finalText)
+    assert.equal(value.repository.readTerminalCloseoutEvidence(value.runId)?.terminalFacts.history.kind,
+      'unknown_reset_required')
+    assert.equal(value.repository.readActiveAliasBinding(value.scopeId)?.aliasGeneration, 1)
+    assert.equal(value.db.prepare('SELECT COUNT(*) AS count FROM codex_native_coverage_receipts')
+      .get<{ count: number }>()?.count, 0)
+  } finally { value.db.close() }
+})
+
+test('production accepted automatic compaction commits one compaction coverage head', async (t) => {
+  const value = await nativeTerminalFixture(t, 'automatic-accepted')
+  if (!value) return
+  try {
+    const product = value.repository.readProductTurnRuntime(value.runId)
+    // Only the immutable Gateway wire evidence is substituted; QC and all writes are real.
+    const rows = ([1, 3] as const).map((sequence) => {
+      const automatic = sequence === 1
+      const chars = automatic ? 1_000 : 100
+      return {
+        requestSequence: sequence, responseSequence: sequence + 1,
+        receiptId: `gateway-${sequence}`,
+        requestKind: automatic ? 'automatic_compaction' as const : 'product' as const,
+        readyRunId: value.runId, codexThreadId: value.codexThreadId, codexTurnId: value.codexTurnId,
+        upstreamProfileSnapshotDigest: product.upstreamProfileSnapshotDigest,
+        requestDigest: sha256(`request-${sequence}`), instructionDigest: sha256('instructions'),
+        inputDigest: sha256(`input-${sequence}`),
+        inputItems: [{ digest: sha256(`item-${sequence}`), totalStringCharacters: chars, maxStringCharacters: chars }],
+        inputTotalStringCharacters: chars, inputMaxStringCharacters: chars,
+        toolsDigest: automatic ? digestCanonicalJson([]) : product.toolSurfaceDigest,
+        toolCount: 0, bodyBytes: chars + 100,
+        requestEvidenceDigest: sha256(`request-evidence-${sequence}`),
+        responseId: `response-${sequence + 1}`,
+        responseTerminalDigest: sha256(`terminal-${sequence + 1}`),
+        responseOutputDigest: sha256(`output-${sequence + 1}`),
+        responseUsageDigest: sha256(`usage-${sequence + 1}`),
+        responseEvidenceDigest: sha256(`response-evidence-${sequence + 1}`),
+        failure: null,
+      }
+    })
+    t.mock.method(CodexModelGatewayRepository.prototype, 'readTurnGatewayEvidence', (identity: {
+      readyRunId: string; codexThreadId: string; codexTurnId: string
+    }) => {
+      assert.deepEqual(identity, {
+        readyRunId: value.runId, codexThreadId: value.codexThreadId, codexTurnId: value.codexTurnId,
+      })
+      return rows
+    })
+    const verified = verifyCodexAutomaticCompactionEvidence({
+      gatewayRepository: { readTurnGatewayEvidence: () => rows },
+      readyRunId: value.runId, codexThreadId: value.codexThreadId, codexTurnId: value.codexTurnId,
+      upstreamProfileSnapshotDigest: product.upstreamProfileSnapshotDigest,
+      productToolSurfaceDigest: product.toolSurfaceDigest, thread: completedNativeThread(value, true),
+    })
+    assert.ok(verified)
+    const closed = await productionCloseout(value, true)
+    assert.equal(closed.canonicalCommits, 1)
+    assert.equal(closed.result.execution.success, true)
+    assert.equal(closed.result.execution.terminalReason, 'done')
+    const terminal = value.repository.readTerminalCloseoutEvidence(value.runId)
+    assert.equal(terminal?.terminalFacts.product.terminal, 'done')
+    assert.equal(terminal?.terminalFacts.history.kind, 'continuation_safe')
+    assert.deepEqual(terminal?.nativeReadback.contextCompactionItemIds, ['compact-item'])
+    assert.deepEqual(value.db.prepare(`
+      SELECT producer_kind, accepted_native_head_kind, accepted_native_head_id,
+             accepted_product_ready_run_id FROM codex_native_coverage_receipts
+    `).all(), [{
+      producer_kind: 'automatic_compaction', accepted_native_head_kind: 'compaction',
+      accepted_native_head_id: value.codexTurnId, accepted_product_ready_run_id: value.runId,
+    }])
+    assert.equal(value.repository.readAcceptedNativePrefixHead(value.threadBindingId)?.acceptedNativeHeadKind, 'compaction')
+    assert.equal(value.repository.readActiveAliasBinding(value.scopeId)?.aliasGeneration, 1)
+    const projection = value.projections.get(value.taskId)
+    assert.equal(projection?.status, 'completed')
+    assert.equal(projection?.checkins?.length, 1)
+    assert.equal(projection?.checkins?.[0].verdict, 'accept')
+  } finally {
+    value.db.close()
+  }
+})
 
 function settle(
   value: NonNullable<Awaited<ReturnType<typeof fixture>>>,
@@ -455,7 +1041,14 @@ function acceptedCloseoutRepository(
 ): AgentSessionCheckpointRepository {
   return new AgentSessionCheckpointRepository(value.accessor, {
     complete(input) {
-      value.repository.completeVerifierAcceptedCloseoutInOpenTransaction(input)
+      value.repository.completeVerifierAcceptedCloseoutInOpenTransaction({
+        ...input,
+        terminalEvidence: lifecycleTerminalEvidence(value.repository, value.runId, {
+          terminal: 'done',
+          terminalReason: 'done',
+          failureKind: null,
+        }),
+      })
     },
   })
 }
@@ -489,7 +1082,14 @@ test('durable accept is required inside the canonical transaction and retries ne
     }
     const participant = {
       complete: (input: { readyRunId: string; productTerminalDigest: string; closeoutAt: string }) => {
-        value.repository.completeVerifierAcceptedCloseoutInOpenTransaction(input)
+        value.repository.completeVerifierAcceptedCloseoutInOpenTransaction({
+          ...input,
+          terminalEvidence: lifecycleTerminalEvidence(value.repository, value.runId, {
+            terminal: 'done',
+            terminalReason: 'done',
+            failureKind: null,
+          }),
+        })
       },
     }
     const closeout = new AgentSessionCheckpointRepository(value.accessor, participant)
@@ -547,6 +1147,13 @@ test('durable accept is required inside the canonical transaction and retries ne
     assert.equal(committed.value.canonicalMessage.content, value.finalText)
     assert.equal(value.repository.readProductCloseout(value.runId)?.productTerminalDigest,
       committed.value.canonicalMessageDigest)
+    const terminalEvidence = value.repository.readTerminalCloseoutEvidence(value.runId)
+    assert.equal(terminalEvidence?.terminalFacts.product.terminal, 'done')
+    assert.equal(terminalEvidence?.terminalFacts.history.kind, 'continuation_safe')
+    const acceptedHead = value.repository.readAcceptedNativePrefixHead(value.threadBindingId)
+    assert.equal(acceptedHead?.acceptedProductReadyRunId, value.runId)
+    assert.equal(acceptedHead?.acceptedNativeHeadId, value.begun.attempt.codexTurnId)
+    assert.match(acceptedHead?.coverageReceiptRef.digest || '', /^[a-f0-9]{64}$/)
     assert.equal(value.db.prepare(`SELECT COUNT(*) AS count FROM codex_thread_dispatch_fences`)
       .get<{ count: number }>()?.count, 0)
   } finally {
@@ -622,7 +1229,12 @@ test('nonaccept publishes no candidate, retires hidden native history, and next 
     const attempt = settle(value, 'block')
     const closeout = new AgentSessionCheckpointRepository(value.accessor, {
       complete(input) {
-        value.repository.completeVerifierRejectedCloseoutInOpenTransaction(input)
+        value.repository.completeVerifierRejectedCloseoutInOpenTransaction({
+          ...input,
+          terminalEvidence: lifecycleTerminalEvidence(value.repository, value.runId, {
+            terminal: 'error', terminalReason: 'proof_gap', failureKind: 'protocol',
+          }),
+        })
       },
     })
     const committed = await commitCanonicalCodexFailure(closeout, {
@@ -654,23 +1266,110 @@ test('nonaccept publishes no candidate, retires hidden native history, and next 
         FROM codex_thread_bindings WHERE thread_binding_id = ?
     `).get(value.threadBindingId), {
       retired_reason: 'publication_diverged',
-      retirement_evidence_digest: attempt.receiptDigest,
+      retirement_evidence_digest: value.repository.readEngineTerminalCandidate(value.runId)?.candidateDigest,
       continuation_blocked_reason: 'publication_diverged',
-      continuation_blocked_evidence_digest: attempt.receiptDigest,
+      continuation_blocked_evidence_digest: value.repository.readEngineTerminalCandidate(value.runId)?.candidateDigest,
     })
-    const successor = value.repository.resolveUserIngressAliasBinding({
-      aliasId: value.scopeId,
-      runtimeManifestDigest: 'runtime-successor',
-      protocolSchemaDigest: 'protocol-successor',
-      createdAt: '2026-08-11T05:03:00.000Z',
-    })
+    const successor = value.repository.readActiveAliasBinding(value.scopeId)
     assert.equal(successor?.aliasGeneration, 2)
+    assert.equal(successor?.materializationKind, 'fresh_root_with_tail')
     assert.equal(successor?.codexThreadId, null)
     assert.notEqual(successor?.threadBindingId, value.threadBindingId)
     assert.equal(value.db.prepare(`SELECT COUNT(*) AS count FROM chat_messages WHERE content = ?`)
       .get<{ count: number }>(value.finalText)?.count, 0)
   } finally {
     value.db.close()
+  }
+})
+
+test('compacted verifier failures atomically block history without forking and allow reset', async (t) => {
+  for (const outcome of ['block', 'provider_unavailable', 'result_unknown', 'identity_drift'] as const) {
+    const value = await fixture(t, `compacted-${outcome}`)
+    if (!value) return
+    try {
+      value.repository.recordToolPublicationReceipt({ readyRunId: value.runId, recordedAt: verifiedAt })
+      const attempt = settle(value, outcome)
+      const terminalReason = outcome === 'identity_drift' ? 'persistence_failed'
+        : outcome === 'block' ? 'proof_gap' : 'blocked_external'
+      const terminalEvidence = lifecycleTerminalEvidence(value.repository, value.runId, {
+        terminal: 'error', terminalReason,
+        failureKind: resolveCodexProductFailureKind({ terminal: 'error', terminalReason }),
+        nativeThread: completedNativeThread(value, true),
+      })
+      assert.equal(terminalEvidence.terminalFacts.history.kind, 'unknown_reset_required')
+      assert.deepEqual(terminalEvidence.nativeReadback.contextCompactionItemIds, ['compact-item'])
+      let rollbackAfterHistoryWrite = true
+      const closeout = new AgentSessionCheckpointRepository(value.accessor, {
+        complete(input) {
+          assert.equal(value.db.inTransaction, true)
+          const result = value.repository.completeVerifierRejectedCloseoutInOpenTransaction({
+            ...input, terminalEvidence,
+          })
+          assert.equal(result.forkTargetThreadBindingId, null)
+          if (rollbackAfterHistoryWrite) throw new Error('test_after_history_write')
+        },
+      })
+      const close = (verifierReceiptDigest = attempt.receiptDigest!) => commitCanonicalCodexFailure(closeout, {
+        parentTaskId: value.taskId, ownerRunId: value.runId, conversationId: value.scopeId,
+        status: 'error', terminalReason, initiator: 'codex_browser_verifier', durationMs: 1,
+        taskType: 'direct_answer', module: 'system', error: `codex_browser_verifier_${outcome}`,
+        verifierReceiptDigest, now: closeoutAt,
+      })
+      const priorHead = value.repository.readHeadActionFacts({
+        aliasId: value.scopeId, aliasGeneration: 1,
+        currentRuntimeManifestDigest: `runtime-compacted-${outcome}`,
+        currentProtocolSchemaDigest: `protocol-compacted-${outcome}`,
+      })
+      await assert.rejects(() => close('f'.repeat(64)), /browser_verifier_failure_closeout_mismatch/)
+      await assert.rejects(close, /test_after_history_write/)
+      assert.equal(value.repository.readProductCloseout(value.runId), null)
+      assert.equal(value.repository.readTerminalCloseoutEvidence(value.runId), null)
+      assert.deepEqual(value.db.prepare(`SELECT status FROM run_meta WHERE run_id = ?`).get(value.runId), { status: 'running' })
+      assert.equal(value.db.prepare(`SELECT COUNT(*) AS count FROM chat_messages WHERE role = 'assistant'`)
+        .get<{ count: number }>()?.count, 0)
+      assert.equal(value.db.prepare(`SELECT COUNT(*) AS count FROM codex_thread_dispatch_fences`)
+        .get<{ count: number }>()?.count, 1)
+      rollbackAfterHistoryWrite = false
+      await close()
+      const facts = value.repository.readTerminalCloseoutEvidence(value.runId)?.terminalFacts
+      assert.equal(facts?.product.terminal, 'error')
+      assert.equal(facts?.product.terminalReason, terminalReason)
+      assert.equal(facts?.history.kind, 'unknown_reset_required')
+      assert.deepEqual(value.db.prepare(`SELECT status, terminal_reason FROM run_meta WHERE run_id = ?`)
+        .get(value.runId), { status: 'error', terminal_reason: terminalReason })
+      assert.equal(value.db.prepare(`SELECT COUNT(*) AS count FROM codex_thread_bindings`)
+        .get<{ count: number }>()?.count, 1)
+      assert.equal(value.db.prepare(`SELECT COUNT(*) AS count FROM codex_native_coverage_receipts`)
+        .get<{ count: number }>()?.count, 0)
+      assert.equal(value.db.prepare(`SELECT COUNT(*) AS count FROM codex_thread_dispatch_fences`)
+        .get<{ count: number }>()?.count, 0)
+      const headFacts = value.repository.readHeadActionFacts({
+        aliasId: value.scopeId, aliasGeneration: 1,
+        currentRuntimeManifestDigest: priorHead.currentRuntimeManifestDigest,
+        currentProtocolSchemaDigest: priorHead.currentProtocolSchemaDigest,
+      })
+      assert.equal(headFacts.actionProjectionSequence, priorHead.actionProjectionSequence + 1)
+      const head = projectCodexHeadActionProjection(headFacts)
+      assert.equal(head.historyState, 'terminal_unknown')
+      assert.deepEqual(head.actions.send_new_message.blockers, ['terminal_history_unknown'])
+      const read = value.repository.readLifecycleOperation({ aliasId: value.scopeId, aliasGeneration: 1 })
+      const lifecycle = projectCodexLifecycleOperationV2({
+        base: {
+          identity: read.identity, activeReadyRunId: read.activeReadyRunId,
+          latestReadyRunId: read.latestReadyRunId, snapshot: classifyLifecycleOperation(read.facts),
+          interruptRequested: read.interruptRequested, interruptAcknowledged: read.interruptAcknowledged,
+          requestedAction: read.requestedAction, evidenceDigest: digestCanonicalJson(read),
+        },
+        head, scopeEpoch: headFacts.scopeEpoch, threadBindingId: headFacts.threadBindingId,
+        headRevision: headFacts.headRevision, materializationIntentRef: headFacts.materializationIntentRef ?? null,
+      })
+      assert.equal(lifecycle.actions.reset.availability, 'ready')
+      assert.equal(lifecycle.actions.reset.requestRef?.ownerKind, 'head_owner')
+      assert.equal(value.db.prepare(`SELECT COUNT(*) AS count FROM chat_messages WHERE content = ?`)
+        .get<{ count: number }>(value.finalText)?.count, 0)
+    } finally {
+      value.db.close()
+    }
   }
 })
 
@@ -712,7 +1411,14 @@ test('engine-terminal lifecycle actions abort a deferred verifier and close exac
       const closeout = new AgentSessionCheckpointRepository(value.accessor, {
         complete(input) {
           participantCalls += 1
-          value.repository.completeLifecycleActionCloseoutInOpenTransaction({ ...input, action })
+          value.repository.completeLifecycleActionCloseoutInOpenTransaction({
+            ...input,
+            action,
+            terminalEvidence: lifecycleTerminalEvidence(value.repository, value.runId, {
+              action, terminal: 'interrupted', terminalReason: 'cancelled_user',
+              failureKind: 'cancelled',
+            }),
+          })
         },
       })
       const committed = await commitCanonicalCodexFailure(closeout, {
@@ -733,7 +1439,7 @@ test('engine-terminal lifecycle actions abort a deferred verifier and close exac
       assert.equal(lifecycle.action, action)
       assert.equal(lifecycle.closeoutDigest, committed.value.productTerminalDigest)
       assert.equal(lifecycle.retiredGeneration, 1)
-      assert.equal(lifecycle.newGeneration, action === 'reset' ? 2 : null)
+      assert.equal(lifecycle.newGeneration, action === 'close' ? null : 2)
       assert.equal(value.db.prepare(`SELECT COUNT(*) AS count FROM chat_messages WHERE role = 'assistant'`)
         .get<{ count: number }>()?.count, 1)
       assert.equal(value.db.prepare(`SELECT COUNT(*) AS count FROM codex_thread_dispatch_fences`)
@@ -744,18 +1450,20 @@ test('engine-terminal lifecycle actions abort a deferred verifier and close exac
         SELECT COUNT(*) AS count FROM codex_thread_bindings
          WHERE ready_conversation_alias = ?
       `).get<{ count: number }>(value.scopeId)?.count
-      assert.equal(beforeIngress, action === 'reset' ? 2 : 1, action)
-      const successor = value.repository.resolveUserIngressAliasBinding({
+      assert.equal(beforeIngress, action === 'close' ? 1 : 2, action)
+      const successor = value.repository.refreshPristineFreshStartHeadAtomic({
         aliasId: value.scopeId,
-        runtimeManifestDigest: action === 'reset' ? `runtime-lifecycle-${action}` : 'runtime-successor',
-        protocolSchemaDigest: action === 'reset' ? `protocol-lifecycle-${action}` : 'protocol-successor',
+        runtimeManifestDigest: `runtime-lifecycle-${action}`,
+        protocolSchemaDigest: `protocol-lifecycle-${action}`,
         createdAt: '2026-08-11T05:03:00.000Z',
       })
       if (action === 'close') {
-        assert.equal(successor, null)
+        assert.equal(successor.kind, 'missing')
       } else {
-        assert.equal(successor?.aliasGeneration, 2)
-        assert.equal(successor?.codexThreadId, null)
+        assert.equal(successor.kind, 'current')
+        assert.ok('binding' in successor)
+        assert.equal(successor.binding.aliasGeneration, 2)
+        assert.equal(successor.binding.codexThreadId, null)
       }
       host.beginActiveProductRun({
         agent: 'butler', scopeId: value.scopeId, aliasId: value.scopeId,
@@ -795,6 +1503,10 @@ test('lifecycle participant rollback preserves only the durable action for boot 
         value.repository.completeLifecycleActionCloseoutInOpenTransaction({
           ...input,
           action: 'reset',
+          terminalEvidence: lifecycleTerminalEvidence(value.repository, value.runId, {
+            action: 'reset', terminal: 'interrupted', terminalReason: 'cancelled_user',
+            failureKind: 'cancelled',
+          }),
         })
         throw new Error('forced_participant_failure')
       },
@@ -826,6 +1538,10 @@ test('lifecycle participant rollback preserves only the durable action for boot 
         value.repository.completeLifecycleActionCloseoutInOpenTransaction({
           ...input,
           action: 'reset',
+          terminalEvidence: lifecycleTerminalEvidence(value.repository, value.runId, {
+            action: 'reset', terminal: 'interrupted', terminalReason: 'cancelled_user',
+            failureKind: 'cancelled',
+          }),
         })
       },
     })

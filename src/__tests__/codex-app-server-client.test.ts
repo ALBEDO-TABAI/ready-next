@@ -217,6 +217,7 @@ class FakeInboundPort implements CodexInboundFramePort {
   confirmBarrier: Promise<void> | null = null
   notificationBarrier: Promise<void> | null = null
   serverBarrier: Promise<void> | null = null
+  serverError: Error | null = null
   attemptCallIdOverride: string | null = null
   releasePort: CodexInboundFrameReleasePort | null = null
 
@@ -245,6 +246,7 @@ class FakeInboundPort implements CodexInboundFramePort {
   > {
     this.serverRequests.push(input)
     if (this.serverBarrier) await this.serverBarrier
+    if (this.serverError) throw this.serverError
     if (this.serverDisposition === 'buffered') return { disposition: 'buffered' }
     const request = input as {
       connectionEpoch: string
@@ -432,6 +434,16 @@ test('exact method validators reject unknown parameters before any child byte', 
     () => client.threadList({ limit: 100, cwd: '/tmp/ready-thread', sourceKinds: ['vscode'], cursor: null } as never),
     () => client.threadRead({ threadId: 'thread-1', includeTurns: true, cwd: '/tmp/override' } as never),
     () => client.threadResume({ threadId: 'thread-1', history: [] } as never),
+    () => client.threadFork({
+      threadId: 'thread-1',
+      lastTurnId: 'turn-accepted',
+      cwd: '/tmp/ready-thread-child',
+      model: 'ready-e0-model',
+      modelProvider: 'ready_gateway',
+      approvalPolicy: 'never',
+      sandbox: 'read-only',
+      developerInstructions: 'forbidden',
+    } as never),
     () => client.threadArchive({ threadId: 'thread-1', force: true } as never),
     () => client.threadCompactStart({ threadId: 'thread-1', baseInstructions: 'override' } as never),
     () => client.turnInterrupt({ threadId: 'thread-1', turnId: 'turn-1', reason: 'override' } as never),
@@ -479,6 +491,59 @@ test('initialize and typed methods serialize only their exact public protocol su
   })
   transport.emit({ id: readFrame.id, result: { thread: makeThread() } })
   assert.equal((await reading).thread.id, 'thread-1')
+})
+
+test('thread fork exposes only the inherited-safe allowlist and validates effective settings', async () => {
+  const input = makeClient()
+  await initializeClient(input)
+  const params = {
+    threadId: 'thread-1',
+    lastTurnId: 'turn-accepted',
+    cwd: '/tmp/ready-thread-child',
+    model: 'ready-e0-model',
+    modelProvider: 'ready_gateway' as const,
+    approvalPolicy: 'never' as const,
+    sandbox: 'read-only' as const,
+  }
+  const forking = input.client.threadFork(params, 'fork-binding-1')
+  await waitFor(() => input.transport.writes.length === 1)
+  const frame = JSON.parse(input.transport.writes[0]) as {
+    id: number
+    method: string
+    params: unknown
+  }
+  assert.equal(frame.method, 'thread/fork')
+  assert.deepEqual(frame.params, params)
+  input.transport.emit({
+    id: frame.id,
+    result: {
+      thread: {
+        ...makeThread('thread-child', params.cwd),
+        sessionId: 'session-child',
+        parentThreadId: 'thread-1',
+        forkedFromId: 'thread-1',
+        turns: [{ id: 'turn-accepted', items: [], status: 'completed', error: null }],
+      },
+      cwd: params.cwd,
+      model: params.model,
+      modelProvider: params.modelProvider,
+      approvalPolicy: params.approvalPolicy,
+      approvalsReviewer: 'user',
+      sandbox: { type: 'readOnly' },
+      reasoningEffort: 'xhigh',
+      serviceTier: null,
+      instructionSources: [],
+      runtimeWorkspaceRoots: [],
+      activePermissionProfile: null,
+      multiAgentMode: 'explicitRequestOnly',
+    },
+  })
+  const result = await forking
+  assert.equal(result.thread.id, 'thread-child')
+  assert.equal(result.thread.forkedFromId, 'thread-1')
+  assert.equal(result.cwd, params.cwd)
+  assert.equal(result.model, params.model)
+  assert.equal('runtimeWorkspaceRoots' in result, false)
 })
 
 test('server diagnostics distinguishes available, unsupported, and malformed responses', async () => {
@@ -540,7 +605,7 @@ test('server diagnostics distinguishes available, unsupported, and malformed res
   ))
 })
 
-test('pinned 0.149.0 notifications close exactly as 9 projected, 10 passive, 1 reroute, and 55 opted out', () => {
+test('pinned 0.149.0 notifications close exactly as 10 projected, 9 passive, 1 reroute, and 55 opted out', () => {
   const schema = JSON.parse(readFileSync(resolve(
     'assets/codex-runtime/schemas/stable/codex_app_server_protocol.v2.schemas.json',
   ), 'utf8')) as {
@@ -560,8 +625,8 @@ test('pinned 0.149.0 notifications close exactly as 9 projected, 10 passive, 1 r
     ...CODEX_OPT_OUT_NOTIFICATION_METHODS,
   ]
 
-  assert.equal(CODEX_PROJECTED_NOTIFICATION_METHODS.length, 9)
-  assert.equal(CODEX_PASSIVE_NOTIFICATION_METHODS.length, 10)
+  assert.equal(CODEX_PROJECTED_NOTIFICATION_METHODS.length, 10)
+  assert.equal(CODEX_PASSIVE_NOTIFICATION_METHODS.length, 9)
   assert.equal(CODEX_OPT_OUT_NOTIFICATION_METHODS.length, 55)
   assert.equal(pinnedMethods.length, 75)
   assert.equal(new Set(pinnedMethods).size, 75)
@@ -1073,6 +1138,24 @@ test('tool response transport failure leaves its durable delivery attempt unackn
   assert.equal(inboundPort.confirmedAttempts.length, 0)
 })
 
+test('controlled tool bridge failures preserve their exact protocol reason', async () => {
+  const inboundPort = new FakeInboundPort()
+  inboundPort.serverError = Object.assign(new Error('surface drift'), {
+    code: 'tool_execution_surface_drift',
+  })
+  const input = makeClient({ inboundPort })
+  await initializeClient(input)
+
+  input.transport.emit({
+    id: 911,
+    method: 'item/tool/call',
+    params: { threadId: 'thread-1', turnId: 'turn-1', callId: 'call-1' },
+  })
+
+  await waitFor(() => input.transport.closedReason !== null)
+  assert.equal(input.transport.closedReason, 'tool_execution_surface_drift')
+})
+
 test('tool response from a different call identity is rejected before transport write', async () => {
   const inboundPort = new FakeInboundPort()
   inboundPort.serverDisposition = 'respond'
@@ -1294,6 +1377,18 @@ test('connection close drains a received start reconciliation before rejecting t
   assert.equal(startPort.unresolved.length, 0)
   releaseAccepted()
   await assert.rejects(starting, /child exited after response/)
+})
+
+test('connection close notifies active turn collectors with the real transport error', async () => {
+  const input = makeClient({ timeoutMs: 500 })
+  await initializeClient(input)
+  const closed: string[] = []
+  input.client.subscribeConnectionClosed((error) => closed.push(error.message))
+
+  input.transport.disconnect(new Error('sidecar exited during turn'))
+  await waitFor(() => closed.length === 1)
+
+  assert.deepEqual(closed, ['sidecar exited during turn'])
 })
 
 test('observer failure is isolated for both live and provisionally replayed notifications', async () => {

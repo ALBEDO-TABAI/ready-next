@@ -23,7 +23,7 @@ for (const banned of ['runGuardedCoordinateClick', 'setFileInputFiles', 'runGuar
 
 for (const leaf of LEAVES) {
   const source = fs.readFileSync(path.join(TOOLS, leaf), 'utf8')
-  if (/from\s+['\"]\.\/browser-act-tools['\"]/.test(source) || /from\s+['\"][^'\"]*browser-act-tools['\"]/.test(source)) {
+  if (/from\s+['"]\.\/browser-act-tools['"]/.test(source) || /from\s+['"][^'"]*browser-act-tools['"]/.test(source)) {
     fail(`${leaf} imports the act facade`)
   }
 }
@@ -48,9 +48,9 @@ for (const start of productionRoots) {
     const rel = path.relative(ROOT, file)
     if (rel.startsWith('src/main/modules/tools/browser-act-')) continue
     const source = fs.readFileSync(file, 'utf8')
-    const imports = source.match(/from\s+['\"][^'\"]*browser-act-[^'\"]+['\"]/g) || []
+    const imports = source.match(/from\s+['"][^'"]*browser-act-[^'"]+['"]/g) || []
     for (const item of imports) {
-      if (!/browser-act-tools['\"]$/.test(item)) {
+      if (!/browser-act-tools['"]$/.test(item)) {
         fail(`${rel} imports act leaf directly: ${item}`)
       }
     }

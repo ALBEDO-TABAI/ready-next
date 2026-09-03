@@ -30,21 +30,21 @@ const TRUSTED_NPM_CLI = Object.freeze({
 })
 const TRUSTED_SQLITE3 = Object.freeze({
   path: '/usr/bin/sqlite3',
-  sha256: 'e0c9a6b0667ed0fa7f9e845c3878fc7403582ce71cd40db468610852254ed1ed',
+  sha256: 'a88c4bbabc67571b2fb9ceb58dc7bcc3220295802d5a2f278f87a21fbbae8446',
 })
 const TRUSTED_BUILD_SHELL = Object.freeze({
   path: '/bin/sh',
-  sha256: 'a71bf0a05902efe755c8db43badd1a550b63c7beb0a31b6ca1d77dc69438b4c6',
+  sha256: 'ff0b291f8142f71b46ba01ace6c9713fc8049a5518e8bd21869ccf2ef1fed05a',
 })
 const TRUSTED_PACKAGE_LOCK = Object.freeze({
   path: 'package-lock.json',
-  sha256: '5321dc54ad0f7cf9bc25986780da381f6dbe914bf52e8c65ed1f6e076d7edfa6',
+  sha256: 'dfc84f52dbd561063aa6d6a2d444498a401bb8a277adc6c5f53a8d3067fc0b49',
 })
 const TRUSTED_NODE_MODULES = Object.freeze({
   path: 'node_modules',
-  digest: '000f860dd3b426bb42d9c11a4a78f69ecb48b8af1149e5c7b9a403af8bcffc02',
+  digest: '3ef28c876de8ca2ba099df2034534e0f264a08e949d8dbef6c794df826828388',
   entryCount: 143809,
-  fileBytes: 1824325245,
+  fileBytes: 1824325243,
 })
 const NON_DEPENDENCY_NODE_MODULE_PATHS = Object.freeze([
   '.cache',

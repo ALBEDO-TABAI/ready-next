@@ -1,15 +1,15 @@
 /**
- * Stage T PR-T5 — MCP server registry + per-(session, scope) authorization.
- *
- * Plan v18 §6.2 + §6.5 — tools advertised by MCP servers are gated by
- * `isAuthorized(toolName, sessionId, scopeId)`. The model-visible tool
- * list resolver in `tool-registry.ts` calls this gate before exposing
- * any `mcp_*` tool to the model. The 3-arity (toolName + sessionId +
- * scopeId) is the contract enforced by
- * `check-mcp-tools-go-through-authorization.cjs`.
+ * Ready-owned catalog for connected local stdio MCP servers.
  */
 
-import { getCachedMcpOAuthToken } from './oauth'
+import { createHash } from 'node:crypto'
+import type {
+  McpListedResource,
+  McpListedResourceTemplate,
+  McpServerMetadata,
+} from './client'
+
+export type McpApprovalMode = 'always' | 'writes' | 'never'
 
 /**
  * Phase M（2026-07-05）—— MCP 工具的治理提示（来自 server 的 tools/list
@@ -37,24 +37,51 @@ export interface McpServerRegistration {
   serverId: string
   /** Tools advertised by this server (canonical `mcp_<server>_<action>` names). */
   toolNames: string[]
-  /** When true, every advertised tool requires OAuth before being exposed. */
-  requiresAuthorization: boolean
-  /**
-   * Optional explicit per-(session, scope) allow list. When omitted,
-   * the registry falls back to "OAuth token cached for serverId" as
-   * the authorization signal.
-   */
-  scopedAllowlist?: Map<string, Set<string>>
+  approvalMode: McpApprovalMode
   /** Phase M —— discovery 带回的完整目录（schema/annotations），按 canonical 名索引。 */
   toolCatalog?: Map<string, McpToolCatalogEntry>
+  resources?: McpListedResource[]
+  resourceTemplates?: McpListedResourceTemplate[]
+  metadata?: McpServerMetadata
+  catalogGeneration?: number
+  catalogDigest?: string
 }
 
 const serverByTool = new Map<string, string>()
 const servers = new Map<string, McpServerRegistration>()
+let catalogGeneration = 0
+
+function digestRegistration(registration: McpServerRegistration): string {
+  return createHash('sha256').update(JSON.stringify({
+    serverId: registration.serverId,
+    approvalMode: registration.approvalMode,
+    tools: [...(registration.toolCatalog?.values() || [])],
+    resources: registration.resources || [],
+    resourceTemplates: registration.resourceTemplates || [],
+    metadata: registration.metadata || null,
+  })).digest('hex')
+}
 
 export function registerMcpServer(registration: McpServerRegistration): void {
-  servers.set(registration.serverId, registration)
+  if (new Set(registration.toolNames).size !== registration.toolNames.length) {
+    throw new Error(`mcp_duplicate_canonical_tool:${registration.serverId}`)
+  }
   for (const toolName of registration.toolNames) {
+    const owner = serverByTool.get(toolName)
+    if (owner && owner !== registration.serverId) {
+      throw new Error(`mcp_cross_server_tool_collision:${toolName}`)
+    }
+  }
+  const previous = servers.get(registration.serverId)
+  for (const toolName of previous?.toolNames || []) serverByTool.delete(toolName)
+  catalogGeneration += 1
+  const next = {
+    ...registration,
+    catalogGeneration,
+    catalogDigest: digestRegistration(registration),
+  }
+  servers.set(registration.serverId, next)
+  for (const toolName of next.toolNames) {
     serverByTool.set(toolName, registration.serverId)
   }
 }
@@ -72,8 +99,29 @@ export function getMcpToolAnnotations(toolName: string): McpToolAnnotations | nu
   return getMcpToolCatalogEntry(toolName)?.annotations ?? null
 }
 
+export function getMcpApprovalModeForTool(toolName: string): McpApprovalMode | null {
+  const serverId = serverByTool.get(toolName)
+  return serverId ? servers.get(serverId)?.approvalMode || null : null
+}
+
+export function getMcpCatalogSnapshot(): { generation: number; digest: string } {
+  const entries = [...servers.values()].map((server) => ({
+    serverId: server.serverId,
+    generation: server.catalogGeneration,
+    digest: server.catalogDigest,
+  })).sort((left, right) => left.serverId.localeCompare(right.serverId))
+  return {
+    generation: catalogGeneration,
+    digest: createHash('sha256').update(JSON.stringify({ generation: catalogGeneration, entries })).digest('hex'),
+  }
+}
+
 export function listMcpServerRegistrations(): McpServerRegistration[] {
   return Array.from(servers.values())
+}
+
+export function getMcpServerRegistration(serverId: string): McpServerRegistration | null {
+  return servers.get(serverId) || null
 }
 
 export function listMcpToolNames(): string[] {
@@ -84,73 +132,10 @@ export function getMcpServerForTool(toolName: string): string | null {
   return serverByTool.get(toolName) || null
 }
 
-function scopeKey(sessionId: string | undefined, scopeId: string | undefined): string {
-  return `${sessionId || ''}::${scopeId || ''}`
-}
-
-/**
- * Gate enforced by `tool-registry.ts` model-visible list resolver +
- * tool-executor admission. Returns `true` only when:
- *   1. The tool is registered against an MCP server, AND
- *   2. (a) the server doesn't require auth, OR
- *      (b) the (session, scope) tuple has an allowed entry AND a
- *          non-expired OAuth token is cached for the server.
- *
- * The 3-arity signature is mandatory — `check-mcp-tools-go-through-
- * authorization.cjs` (D) requires `(toolName, sessionId, scopeId)`.
- *
- * Round-1 (Codex) fix — a cached OAuth token alone is NOT sufficient
- * authorization. A token is a per-server credential; without an explicit
- * `(sessionId, scopeId, toolName)` consent entry, the same token would
- * leak the tool into every conversation scope on the device. The gate
- * now requires both signals: the user has consented for THIS scope AND
- * the underlying OAuth token is still valid.
- */
-export function isAuthorized(
-  toolName: string,
-  sessionId: string | undefined,
-  scopeId: string | undefined,
-): boolean {
+export function isMcpToolReady(toolName: string): boolean {
   const serverId = serverByTool.get(toolName)
   if (!serverId) return false
-  const server = servers.get(serverId)
-  if (!server) return false
-  if (!server.requiresAuthorization) return true
-
-  // Per-(session, scope, tool) consent must be recorded explicitly via
-  // `authorizeMcpToolForScope`. No allowlist or no entry → deny, even
-  // if the server has a cached OAuth token from a different scope.
-  const allowlist = server.scopedAllowlist
-  if (!allowlist) return false
-  const key = scopeKey(sessionId, scopeId)
-  const entry = allowlist.get(key)
-  if (!entry || !entry.has(toolName)) return false
-
-  // Consent is recorded — the OAuth token must still be valid.
-  const token = getCachedMcpOAuthToken(serverId)
-  if (token && token.expiresAt > Date.now()) return true
-  return false
-}
-
-/**
- * Authorize a specific (session, scope, tool) tuple. Used by the UI
- * when the user explicitly allows an MCP server / tool for a
- * conversation scope.
- */
-export function authorizeMcpToolForScope(
-  serverId: string,
-  toolName: string,
-  sessionId: string | undefined,
-  scopeId: string | undefined,
-): void {
-  const server = servers.get(serverId)
-  if (!server) return
-  const allowlist = server.scopedAllowlist || new Map<string, Set<string>>()
-  const key = scopeKey(sessionId, scopeId)
-  const entry = allowlist.get(key) || new Set<string>()
-  entry.add(toolName)
-  allowlist.set(key, entry)
-  server.scopedAllowlist = allowlist
+  return servers.has(serverId)
 }
 
 export const __breaksInvariants = [
@@ -162,6 +147,7 @@ export const __breaksInvariants = [
  * 用户在设置页显式触发的重载路径专用（见 bootstrap.reloadMcpServersFromSettings）。
  */
 export function resetMcpServerRegistryForReload(): void {
+  catalogGeneration += 1
   servers.clear()
   serverByTool.clear()
 }

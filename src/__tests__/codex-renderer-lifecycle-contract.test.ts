@@ -9,6 +9,9 @@ import type { AgentMessage, ConversationScope } from '../renderer/modules/agent/
 import { createEmptyScopeRunState } from '../renderer/modules/agent/scopeRunState'
 import { makeEmptySessionSlice } from '../renderer/stores/agent-store-helpers'
 import { useAgent } from '../renderer/stores/useAgent'
+import { projectCodexHeadActionProjection } from '../main/modules/agent-control/codex-runtime/codex-action-surface'
+import { projectCodexLifecycleOperationV2 } from '../main/modules/agent-control/codex-runtime/codex-lifecycle-action-surface'
+import { digestCanonicalJson } from '../main/modules/agent-control/codex-runtime/codex-model-gateway-contract'
 
 const aliasId = 'alias-renderer-lifecycle'
 const sessionId = 'session-renderer-lifecycle'
@@ -93,8 +96,122 @@ function deferred<T>() {
 
 function installAgentApi(api: Record<string, unknown>) {
   const previousWindow = globalThis.window
+  const buildHead = (request: { aliasId: string; aliasGeneration: number }, input?: {
+    snapshot?: string
+    readyRunId?: string | null
+  }) => {
+    const state = useAgent.getState()
+    const activeId = state.currentScopeId === request.aliasId ? state.activeSessionId : null
+    const slice = activeId ? state.sessions[activeId] : null
+    return projectCodexHeadActionProjection({
+      scopeId: request.aliasId,
+      scopeEpoch: slice?.messageVisibilityEpoch || 0,
+      aliasId: request.aliasId,
+      aliasGeneration: request.aliasGeneration,
+      threadBindingId: `binding-${request.aliasGeneration}`,
+      headRevision: 1,
+      actionProjectionSequence: 1,
+      materializationKind: 'fresh_start',
+      materializationState: 'confirmed',
+      codexThreadId: 'thread-test',
+      continuationBlocked: false,
+      activeProductFence: Boolean(input?.readyRunId),
+      manualCompactionState: input?.snapshot === 'manual_compaction_unknown' ? 'unknown' : 'none',
+      hasLegacyPreparedRun: false,
+      headRuntimeManifestDigest: 'runtime',
+      headProtocolSchemaDigest: 'protocol',
+      currentRuntimeManifestDigest: 'runtime',
+      currentProtocolSchemaDigest: 'protocol',
+    })
+  }
+  const readCodexLifecycleSnapshot = async (request: {
+    aliasId: string
+    aliasGeneration: number
+  }) => {
+    const state = useAgent.getState()
+    const activeId = state.currentScopeId === request.aliasId ? state.activeSessionId : null
+    const slice = activeId ? state.sessions[activeId] : null
+    const lifecycleError = slice?.lifecycleError || null
+    const exactLifecycleError = lifecycleError?.aliasGeneration === request.aliasGeneration
+      ? lifecycleError
+      : null
+    const snapshot = exactLifecycleError?.code === 'compaction_state_unknown'
+      ? 'manual_compaction_unknown' as const
+      : exactLifecycleError?.code === 'interrupt_state_unknown'
+        ? 'product_turn_interrupt_unknown' as const
+        : slice?.streamingRequestId
+          ? 'product_turn_interruptible' as const
+          : 'idle_native_thread' as const
+    const readyRunId = snapshot === 'manual_compaction_unknown'
+      ? null
+      : slice?.streamingRequestId || null
+    const head = buildHead(request, { snapshot, readyRunId })
+    const read = {
+      identity: request,
+      activeReadyRunId: readyRunId,
+      latestReadyRunId: readyRunId,
+      snapshot,
+      interruptRequested: snapshot === 'product_turn_interrupt_unknown',
+      interruptAcknowledged: false,
+      requestedAction: exactLifecycleError?.action === 'manual_compact'
+        ? null
+        : exactLifecycleError?.action || null,
+      evidenceDigest: digestCanonicalJson({ request, snapshot, readyRunId }),
+    }
+    return {
+      success: true,
+      data: projectCodexLifecycleOperationV2({
+        base: read,
+        head,
+        scopeEpoch: slice?.messageVisibilityEpoch || 0,
+        threadBindingId: `binding-${request.aliasGeneration}`,
+        headRevision: 1,
+        materializationIntentRef: null,
+      }),
+    }
+  }
+  const effectiveLifecycleReader = (api.readCodexLifecycleSnapshot
+    || readCodexLifecycleSnapshot) as typeof readCodexLifecycleSnapshot
+  const readCodexActionSurface = async (request: {
+    aliasId: string
+    aliasGeneration: number
+  }) => {
+    const result = await effectiveLifecycleReader(request)
+    if (!result.success || !result.data) return { success: false as const }
+    const lifecycle = result.data
+    const head = buildHead(request, {
+      snapshot: lifecycle.snapshot,
+      readyRunId: lifecycle.activeReadyRunId,
+    })
+    return {
+      success: true as const,
+      data: {
+        scopeId: request.aliasId,
+        scopeEpoch: head.actionProjectionVersion.scopeEpoch,
+        head,
+        lifecycle: 'headProjectionRef' in lifecycle
+          ? lifecycle
+          : projectCodexLifecycleOperationV2({
+              base: lifecycle,
+              head,
+              scopeEpoch: head.actionProjectionVersion.scopeEpoch,
+              threadBindingId: head.actionHeadIdentity!.threadBindingId,
+              headRevision: head.actionHeadIdentity!.headRevision,
+              materializationIntentRef: null,
+            }),
+      },
+    }
+  }
   Object.defineProperty(globalThis, 'window', {
-    value: { electronAPI: { agent: api } },
+    value: {
+      electronAPI: {
+        agent: {
+          ...api,
+          readCodexLifecycleSnapshot: effectiveLifecycleReader,
+          readCodexActionSurface: api.readCodexActionSurface || readCodexActionSurface,
+        },
+      },
+    },
     configurable: true,
   })
   return () => {
@@ -103,6 +220,19 @@ function installAgentApi(api: Record<string, unknown>) {
     } else {
       delete (globalThis as typeof globalThis & { window?: Window }).window
     }
+  }
+}
+
+function lifecycleRequestIdentity(request: unknown) {
+  assert.ok(request && typeof request === 'object')
+  const value = request as Record<string, unknown>
+  const ref = value.actionRequestRef as Record<string, unknown> | undefined
+  assert.ok(ref && typeof ref.digest === 'string' && ref.digest.length === 64,
+    'lifecycle request must carry the frozen Main action reference')
+  return {
+    aliasId: value.aliasId,
+    aliasGeneration: value.aliasGeneration,
+    readyRunId: value.readyRunId,
   }
 }
 
@@ -127,6 +257,53 @@ test('create shows no tab before persistence and creates no welcome transcript',
   const requests: unknown[] = []
   const restore = installAgentApi({
     createSession: (request: unknown) => { requests.push(request); return pending.promise },
+    readCodexActionSurface: async (request: { aliasId: string; aliasGeneration: number }) => {
+      const head = projectCodexHeadActionProjection({
+        scopeId: request.aliasId,
+        scopeEpoch: 0,
+        aliasId: request.aliasId,
+        aliasGeneration: request.aliasGeneration,
+        threadBindingId: 'binding-created',
+        headRevision: 1,
+        actionProjectionSequence: 0,
+        materializationKind: 'fresh_start',
+        materializationState: 'pending',
+        codexThreadId: null,
+        continuationBlocked: false,
+        activeProductFence: false,
+        manualCompactionState: 'none',
+        hasLegacyPreparedRun: false,
+        headRuntimeManifestDigest: 'runtime',
+        headProtocolSchemaDigest: 'protocol',
+        currentRuntimeManifestDigest: 'runtime',
+        currentProtocolSchemaDigest: 'protocol',
+      })
+      return {
+        success: true,
+        data: {
+          scopeId: request.aliasId,
+          scopeEpoch: 0,
+          head,
+          lifecycle: projectCodexLifecycleOperationV2({
+            base: {
+              identity: request,
+              activeReadyRunId: null,
+              latestReadyRunId: null,
+              snapshot: 'idle_never_started',
+              interruptRequested: false,
+              interruptAcknowledged: false,
+              requestedAction: null,
+              evidenceDigest: digestCanonicalJson({ request, snapshot: 'idle_never_started' }),
+            },
+            head,
+            scopeEpoch: 0,
+            threadBindingId: 'binding-created',
+            headRevision: 1,
+            materializationIntentRef: null,
+          }),
+        },
+      }
+    },
   })
   try {
     const beforeOrder = [...useAgent.getState().sessionOrder]
@@ -149,6 +326,11 @@ test('create shows no tab before persistence and creates no welcome transcript',
     assert.equal(useAgent.getState().pendingContinuationIntent, null)
     assert.deepEqual(useAgent.getState().toolTrace, [])
     assert.equal(useAgent.getState().toolTraceStatus, 'idle')
+    assert.equal(
+      useAgent.getState().sessions[useAgent.getState().activeSessionId || '']
+        ?.scopeHeadActionProjection?.actions.send_new_message.availability,
+      'ready',
+    )
   } finally {
     restore()
   }
@@ -211,7 +393,11 @@ test('reload restores the immutable alias generation before lifecycle actions', 
     await useAgent.getState().loadScopes()
     assert.equal(useAgent.getState().sessions[sessionId]?.aliasGeneration, 7)
     assert.deepEqual(await useAgent.getState().closeSession(sessionId), closeFailure)
-    assert.deepEqual(closeRequest, { aliasId, aliasGeneration: 7, readyRunId: null })
+    assert.deepEqual(lifecycleRequestIdentity(closeRequest), {
+      aliasId,
+      aliasGeneration: 7,
+      readyRunId: null,
+    })
   } finally {
     restore()
   }
@@ -234,12 +420,22 @@ test('cold reload hydrates the exact durable running operation instead of the em
       data: [{ ...scope, aliasGeneration: 4 }],
     }),
     getConversationScopeMessages: async () => ({ success: true, data: [] }),
-    readCodexLifecycleSnapshot: async (request: unknown) => {
+    readCodexActionSurface: async (request: { aliasId: string; aliasGeneration: number }) => {
       requests.push(request)
-      return {
-        success: true,
-        data: {
-          identity: { aliasId, aliasGeneration: 4 },
+      const head = projectCodexHeadActionProjection({
+        scopeId: request.aliasId, scopeEpoch: 0, aliasId: request.aliasId,
+        aliasGeneration: request.aliasGeneration, threadBindingId: 'binding-4',
+        headRevision: 1, actionProjectionSequence: 1,
+        materializationKind: 'fresh_start', materializationState: 'confirmed',
+        codexThreadId: 'thread-test', continuationBlocked: false,
+        activeProductFence: true, manualCompactionState: 'none',
+        hasLegacyPreparedRun: false, headRuntimeManifestDigest: 'runtime',
+        headProtocolSchemaDigest: 'protocol', currentRuntimeManifestDigest: 'runtime',
+        currentProtocolSchemaDigest: 'protocol',
+      })
+      const lifecycle = projectCodexLifecycleOperationV2({
+        base: {
+          identity: request,
           activeReadyRunId: 'run-recovered',
           latestReadyRunId: 'run-recovered',
           snapshot: 'product_turn_interruptible',
@@ -247,6 +443,20 @@ test('cold reload hydrates the exact durable running operation instead of the em
           interruptAcknowledged: false,
           requestedAction: null,
           evidenceDigest: 'lifecycle-readback-digest',
+        },
+        head,
+        scopeEpoch: 0,
+        threadBindingId: 'binding-4',
+        headRevision: 1,
+        materializationIntentRef: null,
+      })
+      return {
+        success: true,
+        data: {
+          scopeId: request.aliasId,
+          scopeEpoch: 0,
+          head,
+          lifecycle,
         },
       }
     },
@@ -262,6 +472,52 @@ test('cold reload hydrates the exact durable running operation instead of the em
     assert.equal(slice?.composerLocked, true)
     assert.equal(slice?.lifecyclePendingAction, null)
     assert.equal(slice?.scopeRunStates[aliasId]?.requestId, 'run-recovered')
+  } finally {
+    restore()
+  }
+})
+
+test('an atomic action-surface read failure clears both cached halves', async () => {
+  seedStore()
+  const activeId = useAgent.getState().activeSessionId as string
+  useAgent.setState((state) => ({
+    sessions: {
+      ...state.sessions,
+      [activeId]: {
+        ...state.sessions[activeId],
+        scopeHeadActionProjection: { stale: 'head' } as never,
+        lifecycleOperationProjection: { stale: 'lifecycle' } as never,
+      },
+    },
+  }))
+  const restore = installAgentApi({
+    listConversationScopes: async () => ({ success: true, data: [scope] }),
+    readCodexActionSurface: async () => ({ success: false }),
+  })
+  try {
+    await useAgent.getState().loadScopes()
+    const slice = useAgent.getState().sessions[activeId]
+    assert.equal(slice.scopeHeadActionProjection, null)
+    assert.equal(slice.lifecycleOperationProjection, null)
+  } finally {
+    restore()
+  }
+})
+
+test('scope-list hydration never scans an unopened conversation', async () => {
+  seedStore()
+  const unopened = { ...scope, id: 'scope-unopened', title: 'Unopened' }
+  const requests: string[] = []
+  const restore = installAgentApi({
+    listConversationScopes: async () => ({ success: true, data: [scope, unopened] }),
+    readCodexActionSurface: async (request: { aliasId: string }) => {
+      requests.push(request.aliasId)
+      return { success: false }
+    },
+  })
+  try {
+    await useAgent.getState().loadScopes()
+    assert.deepEqual(requests, [scope.id])
   } finally {
     restore()
   }
@@ -603,6 +859,7 @@ test('reset success after a tab switch clears only the origin session', async ()
   }
   try {
     const promise = useAgent.getState().resetCurrentConversation()
+    await new Promise<void>((resolve) => setImmediate(resolve))
     const nextSessionId = 'session-after-reset-switch'
     const nextAliasId = 'alias-after-reset-switch'
     const current = useAgent.getState()
@@ -667,6 +924,26 @@ for (const entry of [
 ]) {
   test(`${entry.action} failure retains the current tab and transcript`, async () => {
     seedStore()
+    if (entry.action === 'manual_compact') {
+      useAgent.setState((state) => ({
+        sessions: {
+          ...state.sessions,
+          [sessionId]: {
+            ...state.sessions[sessionId],
+            isStreaming: false,
+            foregroundBusy: false,
+            composerLocked: false,
+            streamingMessageId: null,
+            streamingRequestId: null,
+          },
+        },
+        isStreaming: false,
+        foregroundBusy: false,
+        composerLocked: false,
+        streamingMessageId: null,
+        streamingRequestId: null,
+      }))
+    }
     const restore = installAgentApi({
       [entry.apiName]: async () => failure(entry.action),
     })
@@ -691,7 +968,7 @@ test('stop reconciles a stale locked composer when Main proves no operation is a
   })
   try {
     assert.deepEqual(await useAgent.getState().stopStreaming(), noActive)
-    assert.deepEqual(requests, [{
+    assert.deepEqual(requests.map(lifecycleRequestIdentity), [{
       aliasId,
       aliasGeneration: 1,
       readyRunId: 'request-pending',
@@ -743,16 +1020,16 @@ test('interrupt uncertainty allows the exact stop to retry while send, reset, an
     assert.equal(second.ok, false)
     await assert.rejects(
       useAgent.getState().resetCurrentConversation(),
-      /lifecycle_reconciliation_required/,
+      /lifecycle_action_interrupt_state_unknown/,
     )
     await assert.rejects(
       useAgent.getState().closeSession(sessionId),
-      /lifecycle_reconciliation_required/,
+      /lifecycle_action_interrupt_state_unknown/,
     )
     const sendResult = await useAgent.getState().sendMessage('不能在状态未知时继续')
     assert.equal(sendResult.disposition, 'rejected_before_persistence')
     assert.equal(sendResult.errorKind, 'conversation_reset_required')
-    assert.deepEqual(stopRequests, [
+    assert.deepEqual(stopRequests.map(lifecycleRequestIdentity), [
       { aliasId, aliasGeneration: 1, readyRunId: 'request-pending' },
       { aliasId, aliasGeneration: 1, readyRunId: 'request-pending' },
     ])
@@ -835,7 +1112,7 @@ test('exact close and reset uncertainty survives transport failure and retries t
       assert.deepEqual(useAgent.getState().sessions[sessionId]?.lifecycleError, priorError)
       assert.equal(useAgent.getState().sessions[sessionId]?.lifecyclePendingAction, null)
       assert.deepEqual(await invoke(), priorError)
-      assert.deepEqual(requests, [
+      assert.deepEqual(requests.map(lifecycleRequestIdentity), [
         { aliasId, aliasGeneration: 1, readyRunId: 'request-pending' },
         { aliasId, aliasGeneration: 1, readyRunId: 'request-pending' },
       ])
@@ -869,17 +1146,29 @@ test('an exact manual-compaction uncertainty can reset into the returned generat
         [sessionId]: {
           ...current.sessions[sessionId],
           composerLocked: true,
+          isStreaming: false,
+          foregroundBusy: false,
+          streamingMessageId: null,
+          streamingRequestId: null,
           lifecycleError: failure('manual_compact', 'compaction_state_unknown'),
         },
       },
       composerLocked: true,
+      isStreaming: false,
+      foregroundBusy: false,
+      streamingMessageId: null,
+      streamingRequestId: null,
       lifecycleError: failure('manual_compact', 'compaction_state_unknown'),
     })
 
     const result = await useAgent.getState().resetCurrentConversation()
 
     assert.equal(result.ok, true)
-    assert.deepEqual(requests, [{ aliasId, aliasGeneration: 1, readyRunId: 'request-pending' }])
+    assert.deepEqual(requests.map(lifecycleRequestIdentity), [{
+      aliasId,
+      aliasGeneration: 1,
+      readyRunId: null,
+    }])
     const next = useAgent.getState().sessions[sessionId]
     assert.equal(next.aliasGeneration, 2)
     assert.equal(next.lifecycleError, null)
@@ -924,9 +1213,17 @@ test('an exact manual-compaction uncertainty survives an action mismatch and rem
         ...state.sessions,
         [sessionId]: {
           ...state.sessions[sessionId],
+          isStreaming: false,
+          foregroundBusy: false,
+          streamingMessageId: null,
+          streamingRequestId: null,
           lifecycleError: priorError,
         },
       },
+      isStreaming: false,
+      foregroundBusy: false,
+      streamingMessageId: null,
+      streamingRequestId: null,
       lifecycleError: priorError,
     }))
 
@@ -947,7 +1244,7 @@ test('an exact manual-compaction uncertainty survives an action mismatch and rem
   }
 })
 
-test('a stale manual-compaction uncertainty cannot reset a different alias generation', async () => {
+test('a stale renderer compaction error does not override the current Main action surface', async () => {
   seedStore()
   let resetCalls = 0
   const restore = installAgentApi({
@@ -971,11 +1268,9 @@ test('a stale manual-compaction uncertainty cannot reset a different alias gener
       lifecycleError: failure('manual_compact', 'compaction_state_unknown'),
     })
 
-    await assert.rejects(
-      useAgent.getState().resetCurrentConversation(),
-      /lifecycle_reconciliation_required/,
-    )
-    assert.equal(resetCalls, 0)
+    const result = await useAgent.getState().resetCurrentConversation()
+    assert.equal(result.ok, false)
+    assert.equal(resetCalls, 1)
   } finally {
     restore()
   }
@@ -988,6 +1283,7 @@ test('late interrupt_state_unknown cannot restore lifecycle uncertainty after th
   try {
     const stop = useAgent.getState().stopStreaming()
     assert.equal(useAgent.getState().sessions[sessionId]?.lifecyclePendingAction, 'stopping')
+    await new Promise<void>((resolve) => setImmediate(resolve))
     useAgent.setState((state) => ({
       sessions: {
         ...state.sessions,
@@ -1044,6 +1340,7 @@ test('late stop success or failure cannot clear or poison a new run after termin
     const restore = installAgentApi({ kill: () => pending.promise })
     try {
       const stop = useAgent.getState().stopStreaming()
+      await new Promise<void>((resolve) => setImmediate(resolve))
       useAgent.setState((state) => ({
         sessions: {
           ...state.sessions,
@@ -1108,14 +1405,27 @@ test('late transport failures cannot restore uncertainty after run or generation
           ...state.sessions,
           [sessionId]: {
             ...state.sessions[sessionId],
+            ...(action === 'reset' ? {
+              isStreaming: false,
+              foregroundBusy: false,
+              streamingMessageId: null,
+              streamingRequestId: null,
+            } : {}),
             lifecycleError: priorError,
           },
         },
+        ...(action === 'reset' ? {
+          isStreaming: false,
+          foregroundBusy: false,
+          streamingMessageId: null,
+          streamingRequestId: null,
+        } : {}),
         lifecycleError: priorError,
       }))
       const request = action === 'stop'
         ? useAgent.getState().stopStreaming()
         : useAgent.getState().resetCurrentConversation()
+      await new Promise<void>((resolve) => setImmediate(resolve))
 
       useAgent.setState((state) => ({
         sessions: {
@@ -1158,12 +1468,21 @@ test('a late reset success cannot roll back a newer alias generation', async () 
         ...state.sessions,
         [sessionId]: {
           ...state.sessions[sessionId],
+          isStreaming: false,
+          foregroundBusy: false,
+          streamingMessageId: null,
+          streamingRequestId: null,
           lifecycleError: priorError,
         },
       },
+      isStreaming: false,
+      foregroundBusy: false,
+      streamingMessageId: null,
+      streamingRequestId: null,
       lifecycleError: priorError,
     }))
     const reset = useAgent.getState().resetCurrentConversation()
+    await new Promise<void>((resolve) => setImmediate(resolve))
 
     useAgent.setState((state) => ({
       sessions: {
@@ -1211,6 +1530,7 @@ test('durable close success wins over a renderer-only run that appeared while cl
   })
   try {
     const operation = useAgent.getState().closeSession(sessionId)
+    await new Promise<void>((resolve) => setImmediate(resolve))
     useAgent.setState((state) => ({
       sessions: {
         ...state.sessions,
@@ -1249,7 +1569,7 @@ test('durable close success wins over a renderer-only run that appeared while cl
       scopeClosureEvidenceDigest: 'd'.repeat(64),
     })
     assert.equal((await operation).ok, true)
-    assert.deepEqual(requests, [{
+    assert.deepEqual(requests.map(lifecycleRequestIdentity), [{
       aliasId,
       aliasGeneration: 1,
       readyRunId: 'request-pending',
@@ -1278,6 +1598,7 @@ test('late reset success cannot overwrite a new run in the same generation', asy
   })
   try {
     const operation = useAgent.getState().resetCurrentConversation()
+    await new Promise<void>((resolve) => setImmediate(resolve))
     useAgent.setState((state) => ({
       sessions: {
         ...state.sessions,
@@ -1309,7 +1630,7 @@ test('late reset success cannot overwrite a new run in the same generation', asy
       transactionDigest: 'stale-reset-success-same-generation',
     })
     assert.equal((await operation).ok, true)
-    assert.deepEqual(requests, [{
+    assert.deepEqual(requests.map(lifecycleRequestIdentity), [{
       aliasId,
       aliasGeneration: 1,
       readyRunId: 'request-pending',

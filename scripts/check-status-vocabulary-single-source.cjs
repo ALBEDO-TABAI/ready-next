@@ -36,18 +36,7 @@ const TYPE_TRIGGERS = [
   'TaskCardRun',
 ]
 
-/**
- * Files exempt from the L5 gate. These render task-related data on a
- * non-agent surface (e.g. desktop pet) with intentionally different wording;
- * the canonical vocabulary helpers don't fit. Each entry must be a relative
- * POSIX path and must include a comment explaining why.
- */
-const FILE_ALLOWLIST = new Set([
-  // The pet activity surface uses a different label register
-  // (`'正在思考'` vs `'进行中'`); only `'已停止'` happens to collide with the
-  // canonical set. Keeping pet wording independent is intentional UX.
-  'src/renderer/modules/pet/petActivitySnapshot.ts',
-])
+const FILE_ALLOWLIST = new Set()
 
 function listFiles(dirAbs) {
   const out = []

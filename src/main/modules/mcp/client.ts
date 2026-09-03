@@ -1,36 +1,24 @@
 /**
- * Stage T PR-T5 骨架 → Phase M（2026-07-05）stdio 实装。
- *
- * Plan v18 §6.2 — supports two transports:
- *   - `stdio`: local subprocess MCP server, newline-delimited JSON-RPC 2.0
- *     over stdin/stdout（MCP 规范 stdio 帧）——本阶段真实装。
- *   - `websocket`: remote MCP server over WS——仍未实装，callTool 返回诚实的
- *     `transport_not_implemented` 失败（不再返回 stub ok 假成功）。
- *
- * OAuth fence 合同不变：requiresAuthorization !== false 的 server 每次
- * tool call 先过 `ensureAuthorized`（check-mcp-oauth-authorization-flow.cjs）。
+ * Ready-owned local stdio MCP client. Remote transports and OAuth are not
+ * part of this runtime.
  */
 
 import { spawn, type ChildProcessWithoutNullStreams } from 'child_process'
 import { APP_VERSION } from '../../../shared/app-version'
-import { ensureAuthorized, type McpOAuthToken } from './oauth'
 import { getMcpToolCatalogEntry, type McpToolAnnotations } from './registry'
 
-export type McpTransport = 'stdio' | 'websocket'
+export type McpTransport = 'stdio'
 
 export interface McpClientConfig {
   serverId: string
   transport: McpTransport
-  /** stdio: command (spawned, args via `args`). websocket: ws:// or wss:// URL. */
+  /** Local executable. Arguments are always passed as an array with shell disabled. */
   endpoint: string
-  /** stdio 附加参数（Phase M）。 */
   args?: string[]
-  /** stdio 子进程附加环境变量（Phase M；与 process.env 合并）。 */
   env?: Record<string, string>
-  /** Required scopes for OAuth (`ensureAuthorized` will request these). */
-  scopes?: string[]
-  /** Whether this server requires OAuth before any tool call. */
-  requiresAuthorization?: boolean
+  cwd: string
+  dataDir: string
+  onCatalogChanged?: () => void
 }
 
 export interface McpToolCallRequest {
@@ -56,6 +44,43 @@ export interface McpListedTool {
   description?: string
   inputSchema?: Record<string, unknown>
   annotations?: McpToolAnnotations
+}
+
+export interface McpListedResource {
+  uri: string
+  name?: string
+  description?: string
+  mimeType?: string
+}
+
+export interface McpListedResourceTemplate {
+  uriTemplate: string
+  name?: string
+  description?: string
+  mimeType?: string
+}
+
+export interface McpServerMetadata {
+  protocolVersion: string
+  serverInfo: Record<string, unknown> | null
+  capabilities: Record<string, unknown>
+  instructions: string | null
+}
+
+export function buildMcpChildEnvironment(
+  dataDir: string,
+  explicit: Record<string, string> = {},
+): NodeJS.ProcessEnv {
+  const inheritedKeys = process.platform === 'win32'
+    ? ['PATH', 'SystemRoot', 'COMSPEC', 'PATHEXT', 'TEMP', 'TMP']
+    : ['PATH', 'TMPDIR', 'LANG', 'LC_ALL']
+  const env: NodeJS.ProcessEnv = {}
+  for (const key of inheritedKeys) {
+    if (process.env[key]) env[key] = process.env[key]
+  }
+  env.HOME = dataDir
+  if (process.platform === 'win32') env.USERPROFILE = dataDir
+  return { ...env, ...explicit }
 }
 
 /** canonical `mcp_<server>_<action>`：serverId 与工具名统一小写下划线化。 */
@@ -86,6 +111,9 @@ class McpStdioConnection {
   private readonly pending = new Map<number, JsonRpcPending>()
   private stdoutBuffer = ''
   private initialized: Promise<void> | null = null
+  private metadata: McpServerMetadata | null = null
+  private stderrTail = ''
+  private lastProgress: Record<string, unknown> | null = null
 
   constructor(private readonly config: McpClientConfig) {}
 
@@ -93,10 +121,16 @@ class McpStdioConnection {
     if (this.child && this.child.exitCode === null && !this.child.killed) return this.child
     const child = spawn(this.config.endpoint, this.config.args ?? [], {
       stdio: ['pipe', 'pipe', 'pipe'],
-      env: { ...process.env, ...(this.config.env ?? {}) },
+      shell: false,
+      cwd: this.config.cwd,
+      env: buildMcpChildEnvironment(this.config.dataDir, this.config.env),
     })
     child.stdout.setEncoding('utf8')
     child.stdout.on('data', (chunk: string) => this.onStdout(chunk))
+    child.stderr.setEncoding('utf8')
+    child.stderr.on('data', (chunk: string) => {
+      this.stderrTail = `${this.stderrTail}${chunk}`.slice(-16_384)
+    })
     child.on('exit', () => this.rejectAllPending(new Error(`MCP stdio server ${this.config.serverId} exited`)))
     child.on('error', (error) => this.rejectAllPending(error instanceof Error ? error : new Error(String(error))))
     this.child = child
@@ -124,7 +158,23 @@ class McpStdioConnection {
       return
     }
     const id = Number(message.id)
-    if (!Number.isFinite(id)) return // notification from server — none consumed yet
+    const method = typeof message.method === 'string' ? message.method : ''
+    if (!Number.isFinite(id)) {
+      if (method === 'notifications/tools/list_changed'
+        || method === 'notifications/resources/list_changed') this.config.onCatalogChanged?.()
+      if (method === 'notifications/progress' && message.params && typeof message.params === 'object') {
+        this.lastProgress = message.params as Record<string, unknown>
+      }
+      return
+    }
+    if (method) {
+      this.child?.stdin.write(`${JSON.stringify({
+        jsonrpc: '2.0',
+        id,
+        error: { code: -32601, message: `Server request ${method} is not supported` },
+      })}\n`)
+      return
+    }
     const waiter = this.pending.get(id)
     if (!waiter) return
     this.pending.delete(id)
@@ -199,15 +249,51 @@ class McpStdioConnection {
     child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', method, params })}\n`)
   }
 
+  private async listPaginated(
+    method: 'tools/list' | 'resources/list' | 'resources/templates/list',
+    field: 'tools' | 'resources' | 'resourceTemplates',
+  ): Promise<Array<Record<string, unknown>>> {
+    const items: Array<Record<string, unknown>> = []
+    const seenCursors = new Set<string>()
+    let cursor: string | null = null
+    for (let page = 0; page < 100; page += 1) {
+      const result = await this.sendRequest(
+        method,
+        cursor ? { cursor } : {},
+        HANDSHAKE_TIMEOUT_MS,
+      )
+      const pageItems = result[field]
+      if (Array.isArray(pageItems)) items.push(...pageItems as Array<Record<string, unknown>>)
+      const nextCursor = typeof result.nextCursor === 'string' ? result.nextCursor.trim() : ''
+      if (!nextCursor) return items
+      if (seenCursors.has(nextCursor)) throw new Error(`MCP ${method} repeated cursor ${nextCursor}`)
+      seenCursors.add(nextCursor)
+      cursor = nextCursor
+    }
+    throw new Error(`MCP ${method} exceeded 100 pages`)
+  }
+
   private async ensureInitialized(): Promise<void> {
     this.ensureChild()
     if (!this.initialized) {
       this.initialized = (async () => {
-        await this.sendRequest('initialize', {
+        const initialized = await this.sendRequest('initialize', {
           protocolVersion: MCP_PROTOCOL_VERSION,
           capabilities: {},
           clientInfo: { name: 'ready-cowork', version: APP_VERSION },
         }, HANDSHAKE_TIMEOUT_MS)
+        this.metadata = {
+          protocolVersion: typeof initialized.protocolVersion === 'string'
+            ? initialized.protocolVersion
+            : MCP_PROTOCOL_VERSION,
+          serverInfo: initialized.serverInfo && typeof initialized.serverInfo === 'object'
+            ? initialized.serverInfo as Record<string, unknown>
+            : null,
+          capabilities: initialized.capabilities && typeof initialized.capabilities === 'object'
+            ? initialized.capabilities as Record<string, unknown>
+            : {},
+          instructions: typeof initialized.instructions === 'string' ? initialized.instructions : null,
+        }
         this.sendNotification('notifications/initialized', {})
       })().catch((error) => {
         this.initialized = null
@@ -219,9 +305,36 @@ class McpStdioConnection {
 
   async listTools(): Promise<Array<Record<string, unknown>>> {
     await this.ensureInitialized()
-    const result = await this.sendRequest('tools/list', {}, HANDSHAKE_TIMEOUT_MS)
-    const tools = (result as { tools?: unknown }).tools
-    return Array.isArray(tools) ? tools as Array<Record<string, unknown>> : []
+    return this.listPaginated('tools/list', 'tools')
+  }
+
+  async getMetadata(): Promise<McpServerMetadata> {
+    await this.ensureInitialized()
+    return this.metadata || {
+      protocolVersion: MCP_PROTOCOL_VERSION,
+      serverInfo: null,
+      capabilities: {},
+      instructions: null,
+    }
+  }
+
+  async listResources(): Promise<Array<Record<string, unknown>>> {
+    await this.ensureInitialized()
+    return this.listPaginated('resources/list', 'resources')
+  }
+
+  async listResourceTemplates(): Promise<Array<Record<string, unknown>>> {
+    await this.ensureInitialized()
+    return this.listPaginated('resources/templates/list', 'resourceTemplates')
+  }
+
+  async readResource(uri: string, signal?: AbortSignal): Promise<Record<string, unknown>> {
+    await this.ensureInitialized()
+    return this.sendRequest('resources/read', { uri }, TOOL_CALL_TIMEOUT_MS, signal)
+  }
+
+  getDiagnostics(): { stderrTail: string; lastProgress: Record<string, unknown> | null } {
+    return { stderrTail: this.stderrTail, lastProgress: this.lastProgress }
   }
 
   async callTool(
@@ -256,7 +369,6 @@ class McpStdioConnection {
 
 export class McpClient {
   private readonly config: McpClientConfig
-  private cachedToken: McpOAuthToken | null = null
   private stdioConnection: McpStdioConnection | null = null
   /** canonical 名 → server 原始名（tools/call 必须用原始名）。 */
   private readonly remoteNameByCanonical = new Map<string, string>()
@@ -281,16 +393,18 @@ export class McpClient {
    * schema/annotations；同时在客户端内建立 canonical→remote 映射供 callTool 用。
    */
   async listTools(): Promise<McpListedTool[]> {
-    if (this.config.transport !== 'stdio') {
-      throw new Error(`MCP transport ${this.config.transport} not implemented (stdio only in Phase M)`)
-    }
     const rawTools = await this.ensureStdioConnection().listTools()
     const listed: McpListedTool[] = []
+    const remoteNames = new Map<string, string>()
     for (const raw of rawTools) {
       const remoteName = String((raw as { name?: unknown }).name || '').trim()
       if (!remoteName) continue
       const canonical = canonicalMcpToolName(this.config.serverId, remoteName)
-      this.remoteNameByCanonical.set(canonical, remoteName)
+      const previousRemoteName = remoteNames.get(canonical)
+      if (previousRemoteName && previousRemoteName !== remoteName) {
+        throw new Error(`MCP canonical tool collision: ${previousRemoteName} and ${remoteName}`)
+      }
+      remoteNames.set(canonical, remoteName)
       const rawAnnotations = (raw as { annotations?: Record<string, unknown> }).annotations
       listed.push({
         name: canonical,
@@ -311,44 +425,56 @@ export class McpClient {
           : {}),
       })
     }
+    this.remoteNameByCanonical.clear()
+    for (const [canonical, remoteName] of remoteNames) {
+      this.remoteNameByCanonical.set(canonical, remoteName)
+    }
     return listed
   }
 
+  async getMetadata(): Promise<McpServerMetadata> {
+    return this.ensureStdioConnection().getMetadata()
+  }
+
+  async listResources(): Promise<McpListedResource[]> {
+    const resources = await this.ensureStdioConnection().listResources()
+    return resources.flatMap((resource) => {
+      const uri = typeof resource.uri === 'string' ? resource.uri.trim() : ''
+      return uri ? [{
+        uri,
+        ...(typeof resource.name === 'string' ? { name: resource.name } : {}),
+        ...(typeof resource.description === 'string' ? { description: resource.description } : {}),
+        ...(typeof resource.mimeType === 'string' ? { mimeType: resource.mimeType } : {}),
+      }] : []
+    })
+  }
+
+  async listResourceTemplates(): Promise<McpListedResourceTemplate[]> {
+    const templates = await this.ensureStdioConnection().listResourceTemplates()
+    return templates.flatMap((template) => {
+      const uriTemplate = typeof template.uriTemplate === 'string' ? template.uriTemplate.trim() : ''
+      return uriTemplate ? [{
+        uriTemplate,
+        ...(typeof template.name === 'string' ? { name: template.name } : {}),
+        ...(typeof template.description === 'string' ? { description: template.description } : {}),
+        ...(typeof template.mimeType === 'string' ? { mimeType: template.mimeType } : {}),
+      }] : []
+    })
+  }
+
+  async readResource(uri: string, signal?: AbortSignal): Promise<Record<string, unknown>> {
+    return this.ensureStdioConnection().readResource(uri, signal)
+  }
+
+  getDiagnostics(): { stderrTail: string; lastProgress: Record<string, unknown> | null } {
+    return this.stdioConnection?.getDiagnostics() || { stderrTail: '', lastProgress: null }
+  }
+
   /**
-   * Send a tool call. Routes through `ensureAuthorized` first so the
-   * MCP client never bypasses OAuth — this is the contract enforced
-   * by `check-mcp-oauth-authorization-flow.cjs`.
+   * Send one exact tool call. Ready action confirmation occurs before this
+   * dispatcher is reached.
    */
   async callTool(request: McpToolCallRequest): Promise<McpToolCallResult> {
-    if (this.config.requiresAuthorization !== false) {
-      try {
-        // Authorization fence: every MCP tool call passes through
-        // `ensureAuthorized`. The token is held on the client for the
-        // duration of the connection; ensureAuthorized handles refresh.
-        this.cachedToken = await ensureAuthorized(
-          this.config.serverId,
-          this.config.scopes,
-        )
-      } catch (error) {
-        return {
-          ok: false,
-          error: {
-            kind: 'authorization_failed',
-            message: error instanceof Error ? error.message : String(error),
-          },
-        }
-      }
-    }
-    if (this.config.transport !== 'stdio') {
-      // Phase M —— 诚实失败：websocket 帧未实装，不再返回 stub ok 假成功。
-      return {
-        ok: false,
-        error: {
-          kind: 'transport_not_implemented',
-          message: `MCP transport ${this.config.transport} is not implemented yet (stdio only)`,
-        },
-      }
-    }
     try {
       // canonical → server 原始名：优先本连接 listTools 建的映射，其次
       // registry 目录（进程重启后 bootstrap 会重建，两者一般一致），最后
@@ -401,7 +527,6 @@ export class McpClient {
    * Tear down the underlying transport (stdio subprocess or WS conn).
    */
   async close(): Promise<void> {
-    this.cachedToken = null
     const connection = this.stdioConnection
     this.stdioConnection = null
     if (connection) await connection.close()

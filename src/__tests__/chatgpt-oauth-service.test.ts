@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
   ChatGptOAuthService,
+  resolveOAuthServerModels,
   type ChatGptOAuthServiceDeps,
 } from '../main/modules/settings-engine/chatgpt-oauth-service'
 
@@ -74,14 +75,14 @@ test('concurrent ready requests join one server start', async () => {
 
 test('connect logs in before starting and disconnect closes and removes only its credential', async () => {
   const harness = createHarness()
-  const connecting = harness.service.connect(PROXY_API_KEY, ['gpt-5.6-terra'])
+  const connecting = harness.service.connect(PROXY_API_KEY)
   harness.resolveStart()
   const connected = await connecting
 
   assert.equal(connected.connected, true)
   assert.equal(harness.service.getProxyApiKey(), PROXY_API_KEY)
   assert.deepEqual(harness.startedKeys, [PROXY_API_KEY])
-  assert.deepEqual(harness.startedModels, [['gpt-5.6-terra']])
+  assert.deepEqual(harness.startedModels, [undefined])
   assert.deepEqual(harness.counts(), {
     startCount: 1,
     closeCount: 0,
@@ -165,6 +166,29 @@ test('an existing credential resumes with cached models without browser login', 
   })
 })
 
+test('cached models start the local OAuth service without a fresh catalog request', async () => {
+  let catalogRequests = 0
+  const models = await resolveOAuthServerModels(
+    [' gpt-5.6-sol ', 'gpt-5.6-sol', 'gpt-5.6-terra'],
+    async () => {
+      catalogRequests += 1
+      throw new Error('network unavailable')
+    },
+  )
+  assert.deepEqual(models, ['gpt-5.6-sol', 'gpt-5.6-terra'])
+  assert.equal(catalogRequests, 0)
+})
+
+test('first-time OAuth startup still requires a non-empty live model catalog', async () => {
+  let catalogRequests = 0
+  const models = await resolveOAuthServerModels(undefined, async () => {
+    catalogRequests += 1
+    return ['gpt-5.6-terra']
+  })
+  assert.deepEqual(models, ['gpt-5.6-terra'])
+  assert.equal(catalogRequests, 1)
+})
+
 test('a failed explicit reauthorization retires the old proxy and credential', async () => {
   const harness = createHarness()
   harness.setCredential(true)
@@ -173,7 +197,7 @@ test('a failed explicit reauthorization retires the old proxy and credential', a
   harness.setLoginError(new Error('browser login timed out'))
 
   await assert.rejects(
-    harness.service.connect(PROXY_API_KEY, ['gpt-5.6-terra']),
+    harness.service.connect(PROXY_API_KEY),
     /browser login timed out/,
   )
 
@@ -196,7 +220,7 @@ test('reauthorization guard runs before login and preserves the active proxy on 
   let guardCalls = 0
 
   await assert.rejects(
-    harness.service.connect(PROXY_API_KEY, ['gpt-5.6-terra'], {
+    harness.service.connect(PROXY_API_KEY, {
       beforeRestart: () => {
         guardCalls += 1
         throw new Error('ai_profile_in_use_by_active_turn')
@@ -215,13 +239,12 @@ test('reauthorization guard runs before login and preserves the active proxy on 
   })
 })
 
-test('reauthorization preparation supplies the latest proxy key and models inside the lifecycle lane', async () => {
+test('reauthorization keeps the latest proxy key but refreshes models inside the lifecycle lane', async () => {
   const harness = createHarness()
   const latestKey = 'ready-oauth-proxy-key-latest-12345678901234567890'
-  const connecting = harness.service.connect(undefined, [], {
+  const connecting = harness.service.connect(undefined, {
     beforeRestart: () => ({
       existingProxyApiKey: latestKey,
-      savedModels: ['gpt-5.6-sol'],
     }),
   })
 
@@ -229,13 +252,13 @@ test('reauthorization preparation supplies the latest proxy key and models insid
   await connecting
 
   assert.deepEqual(harness.startedKeys, [latestKey])
-  assert.deepEqual(harness.startedModels, [['gpt-5.6-sol']])
+  assert.deepEqual(harness.startedModels, [undefined])
 })
 
 test('connect persistence and disconnect cleanup share one lifecycle lane', async () => {
   const harness = createHarness()
   const events: string[] = []
-  const connecting = harness.service.connect(PROXY_API_KEY, ['gpt-5.6-terra'], {
+  const connecting = harness.service.connect(PROXY_API_KEY, {
     beforeRestart: () => { events.push('connect-before') },
     afterReady: () => { events.push('connect-after') },
   })

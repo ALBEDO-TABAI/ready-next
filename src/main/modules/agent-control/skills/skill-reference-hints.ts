@@ -26,6 +26,7 @@ export interface ReferenceSkillHint {
   name: string
   at: number
   messageVisibilityEpoch?: number
+  applicableToolNames?: string[]
 }
 
 /**
@@ -39,6 +40,7 @@ export interface PersistedReferenceSkillHint {
   name: string
   at: number
   messageVisibilityEpoch?: number
+  applicableToolNames?: string[]
 }
 
 /**
@@ -90,7 +92,12 @@ function isExpired(hint: ReferenceSkillHint, at: number): boolean {
 
 export function rememberLastReferenceSkill(
   sessionId: string | undefined,
-  info: { id: string; name: string; messageVisibilityEpoch?: number },
+  info: {
+    id: string
+    name: string
+    messageVisibilityEpoch?: number
+    applicableToolNames?: readonly string[]
+  },
 ): void {
   if (!sessionId) return
   const id = typeof info.id === 'string' ? info.id.trim() : ''
@@ -107,14 +114,39 @@ export function rememberLastReferenceSkill(
     : isSafeMessageVisibilityEpoch(info.messageVisibilityEpoch)
       ? info.messageVisibilityEpoch
       : undefined
+  const previous = lastReferenceSkillBySession.get(sessionId)
+  const applicableToolNames = info.applicableToolNames !== undefined
+    ? [...new Set(info.applicableToolNames.map((name) => String(name || '').trim()).filter(Boolean))]
+    : previous?.id === id && previous.messageVisibilityEpoch === messageVisibilityEpoch
+      ? previous.applicableToolNames
+      : undefined
   lastReferenceSkillBySession.set(sessionId, {
     id,
     name: name || id,
     at: now(),
     ...(messageVisibilityEpoch === undefined ? {} : { messageVisibilityEpoch }),
+    ...(applicableToolNames === undefined ? {} : { applicableToolNames }),
   })
   // Phase 5.3 — notify renderer the badge state may have changed.
   emitHintChange(sessionId, 'armed')
+}
+
+export function rememberLastReferenceSkillApplicableTools(
+  sessionId: string | undefined,
+  skillId: string,
+  toolNames: readonly string[],
+  messageVisibilityEpoch?: number,
+): boolean {
+  if (!sessionId) return false
+  const hint = peekLastReferenceSkill(sessionId)
+  if (!hint || hint.id !== skillId) return false
+  rememberLastReferenceSkill(sessionId, {
+    id: hint.id,
+    name: hint.name,
+    messageVisibilityEpoch,
+    applicableToolNames: toolNames,
+  })
+  return true
 }
 
 export function getLastReferenceSkill(
@@ -163,6 +195,23 @@ export function peekLastReferenceSkill(
     return null
   }
   return { ...hint }
+}
+
+export function observeLastReferenceSkill(
+  sessionId: string | undefined,
+): ReferenceSkillHint | null {
+  if (!sessionId) return null
+  const hint = lastReferenceSkillBySession.get(sessionId)
+  if (!hint) return null
+  const durable = readScopeContextEpoch(sessionId)
+  if (durable.kind === 'closed' || durable.kind === 'unavailable'
+    || (durable.kind === 'open' && hint.messageVisibilityEpoch !== durable.messageVisibilityEpoch)
+    || isExpired(hint, now())) return null
+  return {
+    ...hint,
+    ...(hint.applicableToolNames === undefined
+      ? {} : { applicableToolNames: [...hint.applicableToolNames] }),
+  }
 }
 
 export function clearLastReferenceSkill(sessionId: string | undefined): void {
@@ -234,6 +283,9 @@ export function snapshotLastReferenceSkill(
     ...(hint.messageVisibilityEpoch === undefined
       ? {}
       : { messageVisibilityEpoch: hint.messageVisibilityEpoch }),
+    ...(hint.applicableToolNames === undefined
+      ? {}
+      : { applicableToolNames: [...hint.applicableToolNames] }),
   }
 }
 
@@ -272,6 +324,15 @@ export function restoreLastReferenceSkill(
     name: name || id,
     at,
     ...(messageVisibilityEpoch === undefined ? {} : { messageVisibilityEpoch }),
+    ...(Array.isArray(hint.applicableToolNames)
+      ? {
+          applicableToolNames: [...new Set(
+            hint.applicableToolNames
+              .map((name) => String(name || '').trim())
+              .filter(Boolean),
+          )],
+        }
+      : {}),
   })
   // Phase 5.3 — restore is functionally an arming, notify renderer.
   emitHintChange(sessionId, 'armed')

@@ -21,7 +21,9 @@ import {
   CodexBindingRepository,
   type CodexAdmittedBindingInput,
 } from '../main/modules/agent-control/codex-runtime/codex-binding-repository'
-import { digestCanonicalJson } from '../main/modules/agent-control/codex-runtime/codex-model-gateway-contract'
+import { createCodexUpstreamProfileSnapshot, digestCanonicalJson } from '../main/modules/agent-control/codex-runtime/codex-model-gateway-contract'
+import { CodexModelGatewayRepository } from '../main/modules/agent-control/codex-runtime/codex-model-gateway-authority'
+import { projectCodexHeadActionProjection } from '../main/modules/agent-control/codex-runtime/codex-action-surface'
 import type { CodexThread } from '../main/modules/agent-control/codex-runtime/codex-native-runtime'
 import type { PreparedCodexProductRun } from '../main/modules/agent-control/codex-runtime/codex-product-run-preparer'
 import {
@@ -334,7 +336,11 @@ test('production live closeout retires an observation-required Browser workflow 
     const ownerBinding = executionBinding(ownerRunId)
     const toolFixture = createCodexToolFixture([])
     const prepared: PreparedCodexProductRun = {
-      preparationContract: 'codex_product_run_e1',
+      preparationContract: 'codex_product_run_e2',
+      sourceTrustedEnvironmentRef: {
+        workbenchMode: 'browser',
+        environmentDigest: 'e'.repeat(64),
+      },
       readyMemorySnapshot: disabledReadyMemorySnapshot(),
       taskId: parentTaskId,
       runId: ownerRunId,
@@ -359,7 +365,6 @@ test('production live closeout retires an observation-required Browser workflow 
         explicitResourceEnvelope: { input: [], resourceRefs: [] },
         resourceAdditionalContext: [],
       })).digest('hex'),
-      recoveredContextDigest: null,
       ...toolFixture,
       readyToolHostIdentity: {
         scopeId,
@@ -444,6 +449,17 @@ test('production live closeout retires an observation-required Browser workflow 
     }, Date.parse(startedAt))
 
     const codexRepository = new CodexBindingRepository(db)
+    const upstream = createCodexUpstreamProfileSnapshot({
+      profileId: 'profile-live-closeout',
+      config: {
+        provider: 'openai', baseUrl: 'http://127.0.0.1:10532/v1', apiKey: 'isolated-test-key',
+        model: 'ready-e0-model', agentProtocol: 'openai', wireApi: 'responses',
+        toolUseMode: 'on', nativeVideoMode: 'off',
+      },
+      maxRetries: 0,
+    })
+    const gateway = new CodexModelGatewayRepository(db)
+    gateway.storeSnapshot({ ...upstream, snapshotRef: 'profile-ref-live-closeout', createdAt: startedAt })
     codexRepository.createEmptyAliasGeneration({
       threadBindingId,
       aliasId: scopeId,
@@ -453,6 +469,19 @@ test('production live closeout retires an observation-required Browser workflow 
       protocolSchemaDigest: 'protocol-schema-live-closeout',
       createdAt: startedAt,
     })
+    const headProjection = projectCodexHeadActionProjection(codexRepository.readHeadActionFacts({
+      aliasId: scopeId,
+      aliasGeneration: 1,
+      currentRuntimeManifestDigest: 'runtime-manifest-live-closeout',
+      currentProtocolSchemaDigest: 'protocol-schema-live-closeout',
+    }))
+    prepared.ingress.actionAdmissionRef = {
+      headProjectionDigest: headProjection.evidenceDigest,
+      actionProjectionVersion: headProjection.actionProjectionVersion,
+      actionHeadIdentity: headProjection.actionHeadIdentity!,
+    }
+    prepared.ingress.uncommittedTailAssignments = []
+    prepared.ingress.supersededUncommittedItems = []
     const admissionInput = {
       prepared,
       reservation,
@@ -467,7 +496,7 @@ test('production live closeout retires an observation-required Browser workflow 
       instructionContractDigest: 'instruction-contract-live-closeout',
       codexModel: 'ready-e0-model',
       upstreamProfileSnapshotRef: 'profile-ref-live-closeout',
-      upstreamProfileSnapshotDigest: 'profile-digest-live-closeout',
+      upstreamProfileSnapshotDigest: upstream.snapshotDigest,
       additionalContextDigest: digestCanonicalJson([]),
       turnContractDigest: 'turn-contract-live-closeout',
       messageVisibilityEpoch: 0,
@@ -615,7 +644,17 @@ test('production live closeout retires an observation-required Browser workflow 
           ...nativeThread,
           turns: [{
             id: codexTurnId,
-            items: [],
+            items: [{
+              type: 'userMessage',
+              id: 'item-user-live-closeout',
+              clientId: admission.turnRequestId,
+              content: prepared.ingress.canonicalCurrentInputRef.input,
+            }, {
+              type: 'agentMessage',
+              id: 'item-agent-live-closeout',
+              text: '广州实时天气回复',
+              phase: 'final_answer',
+            }],
             status: 'completed',
             error: null,
           }],
@@ -669,6 +708,7 @@ test('production live closeout retires an observation-required Browser workflow 
       budgetState: {},
       contextState: {},
       providerDiagnostics: {},
+      contextUsage: null,
       recoveryCheckpointRef: null,
       browserContinuationRef: null,
       browserProofRefs: [],
@@ -684,7 +724,7 @@ test('production live closeout retires an observation-required Browser workflow 
     const readbackPromise = new Promise<ReadyClosedCodexProductRun>((resolve, reject) => {
       waiterTimeout = setTimeout(
         () => reject(new Error(
-          `live_browser_closeout_waiter_timeout:thread_reads=${threadReadCalls}:recovery_closeouts=${recoveryCloseoutCalls}`,
+          `live_browser_closeout_waiter_timeout:thread_reads=${threadReadCalls}:recovery_closeouts=${recoveryCloseoutCalls}:metrics=${JSON.stringify(metricEvents.slice(-5))}`,
         )),
         4_000,
       )
@@ -711,8 +751,8 @@ test('production live closeout retires an observation-required Browser workflow 
     assert.equal(readback.execution.terminalReason, 'blocked_external')
     assert.equal(readback.committedTerminalEvent.phase, 'error')
     assert.equal(waiterCallbacks, 1)
-    assert.equal(threadReadCalls, 2)
-    assert.deepEqual(archiveIntentCountsAtThreadRead, [0, 1])
+    assert.equal(threadReadCalls, 3)
+    assert.deepEqual(archiveIntentCountsAtThreadRead, [0, 0, 1])
     assert.equal(recoveryCloseoutCalls, 1)
     assert.deepEqual(
       db.prepare(`
@@ -771,8 +811,8 @@ test('production live closeout retires an observation-required Browser workflow 
 
     await delay(1_100)
     assert.equal(waiterCallbacks, 1)
-    assert.equal(threadReadCalls, 2)
-    assert.deepEqual(archiveIntentCountsAtThreadRead, [0, 1])
+    assert.equal(threadReadCalls, 3)
+    assert.deepEqual(archiveIntentCountsAtThreadRead, [0, 0, 1])
     assert.equal(recoveryCloseoutCalls, 1)
     assert.equal(
       composition.lifecycleAdapter.deliverRecoveredCloseout(ownerRunId, readback),
@@ -783,13 +823,19 @@ test('production live closeout retires an observation-required Browser workflow 
     const rejectedRunId = 'run-codex-live-deterministic-rejection'
     const rejectedTaskId = 'task-codex-live-deterministic-rejection'
     const rejectedMessageId = 'message-codex-live-deterministic-rejection'
-    const rejectedAlias = codexRepository.resolveUserIngressAliasBinding({
-      aliasId: scopeId,
-      runtimeManifestDigest: 'runtime-manifest-live-rejection',
-      protocolSchemaDigest: 'protocol-schema-live-rejection',
-      createdAt: '2026-08-11T04:02:00.000Z',
-    })
+    const rejectedAlias = codexRepository.readActiveAliasBinding(scopeId)
     assert.equal(rejectedAlias?.aliasGeneration, 2)
+    const rejectedTail = codexRepository.readLiveUncommittedUserTail(
+      rejectedAlias!.threadBindingId,
+    )
+    const rejectedHeadProjection = projectCodexHeadActionProjection(
+      codexRepository.readHeadActionFacts({
+        aliasId: scopeId,
+        aliasGeneration: 2,
+        currentRuntimeManifestDigest: 'runtime-manifest-live-closeout',
+        currentProtocolSchemaDigest: 'protocol-schema-live-closeout',
+      }),
+    )
     const rejectedPrepared: PreparedCodexProductRun = {
       ...prepared,
       taskId: rejectedTaskId,
@@ -802,6 +848,26 @@ test('production live closeout retires an observation-required Browser workflow 
       },
       ingress: {
         ...prepared.ingress,
+        uncommittedUserTail: rejectedTail,
+        actionAdmissionRef: {
+          headProjectionDigest: rejectedHeadProjection.evidenceDigest,
+          actionProjectionVersion: rejectedHeadProjection.actionProjectionVersion,
+          actionHeadIdentity: rejectedHeadProjection.actionHeadIdentity!,
+        },
+        uncommittedTailAssignments: rejectedTail.map((item) => ({
+          originUserMessageId: item.originUserMessageId,
+          inputDigest: item.inputDigest,
+          plan: item.policy === 'untrusted_text_history'
+            ? 'deliver_untrusted_history' as const
+            : 'omit_from_current_run' as const,
+        })),
+        supersededUncommittedItems: rejectedTail.flatMap((item) => (
+          item.policy === 'untrusted_text_history' ? [] : [{
+            originUserMessageId: item.originUserMessageId,
+            inputDigest: item.inputDigest,
+            policy: item.policy,
+          }]
+        )),
         originUserMessageId: rejectedMessageId,
         canonicalCurrentInputRef: {
           messageId: rejectedMessageId,
@@ -857,11 +923,11 @@ test('production live closeout retires an observation-required Browser workflow 
       threadBindingId: rejectedAlias!.threadBindingId,
       isolatedThreadCwd: `/tmp/ready-codex/${rejectedAlias!.threadBindingId}`,
       turnRequestId: 'turn-request-live-rejection',
-      runtimeManifestDigest: 'runtime-manifest-live-rejection',
-      protocolSchemaDigest: 'protocol-schema-live-rejection',
+      runtimeManifestDigest: 'runtime-manifest-live-closeout',
+      protocolSchemaDigest: 'protocol-schema-live-closeout',
       instructionContractDigest: 'instruction-contract-live-rejection',
-      upstreamProfileSnapshotRef: 'profile-ref-live-rejection',
-      upstreamProfileSnapshotDigest: 'profile-digest-live-rejection',
+      upstreamProfileSnapshotRef: 'profile-ref-live-closeout',
+      upstreamProfileSnapshotDigest: upstream.snapshotDigest,
       readyParentReceipt: {
         messageRole: 'user' as const,
         messageContent: '继续查询天气',

@@ -24,6 +24,9 @@ import type { TaskType } from '../../../../shared/task-types'
 import type { SystemReminderRegistry } from './system-reminder-registry'
 
 const INJECTABLE_TASK_TYPES: ReadonlySet<TaskType> = new Set([
+  'artifact_task',
+  'transaction_task',
+  'research_artifact_task',
   'multi_step_task',
   'research',
   'media_task',

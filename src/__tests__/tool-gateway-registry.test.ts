@@ -122,6 +122,8 @@ test('tool gateway exposes formal capability groups and resolves grouped tools',
   assert.equal(setupCommand?.timeoutProfile, 'command_exec')
   assert.equal(setupCommand?.executionTimeoutMs, COMMAND_EXEC_TOOL_TIMEOUT_MS)
   assert.equal(askUserQuestions?.timeoutProfile, 'user_interaction')
+  assert.equal(gateway.getToolDefinition('rss_analyze_item')?.timeoutProfile, 'job_wait')
+  assert.equal(gateway.getToolDefinition('rss_get_analysis_result')?.timeoutProfile, 'job_wait')
   assert.equal(askUserQuestions?.executionTimeoutMs, USER_INTERACTION_TOOL_TIMEOUT_MS)
   assert.equal(setupCommand?.interruptBehavior, 'host_managed')
   assert.ok(gateway.listToolDefinitions().some((tool) => tool.name === 'session_search' && tool.domain === 'session'))

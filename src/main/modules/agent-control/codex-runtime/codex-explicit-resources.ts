@@ -79,40 +79,6 @@ export type ResolvedCodexExplicitResources = {
   authorities: PreparedCodexResourceAuthority[]
 }
 
-export type CodexRetryLocalResourceSelection = {
-  selection: Extract<SendScopedResourceSelection, { kind: 'local_file' | 'local_directory' }>
-  logicalResourceId: string
-  directoryIdentity?: PreparedCodexResourceAuthority['directoryIdentity']
-}
-
-export function recoverCodexRetrySkillSelection(
-  authorization:
-    | { mode: 'none' }
-    | {
-        mode: 'selected'
-        skillId: string
-        allowedTypedActions?: readonly string[]
-        allowedPrimitives?: readonly string[]
-      },
-): {
-  selection: Extract<SendScopedResourceSelection, { kind: 'skill' }>
-  applicableToolNames: string[]
-} | null {
-  if (authorization.mode !== 'selected') return null
-  return {
-    selection: {
-      kind: 'skill',
-      id: `retry-skill:${authorization.skillId}`,
-      name: authorization.skillId,
-      path: '',
-      skillId: authorization.skillId,
-    },
-    applicableToolNames: [...new Set([
-      ...(authorization.allowedTypedActions ?? []),
-      ...(authorization.allowedPrimitives ?? []),
-    ])],
-  }
-}
 
 function sha256(value: string): string {
   return createHash('sha256').update(value).digest('hex')
@@ -122,43 +88,6 @@ function localLogicalResourceId(kind: 'local_file' | 'local_directory', canonica
   return `${kind === 'local_directory' ? 'local-directory' : 'local-file'}:${sha256(canonicalPath).slice(0, 32)}`
 }
 
-export function recoverCodexRetryLocalResourceSelections(input: {
-  explicitInput: readonly CodexUserInput[]
-  authorities: readonly PreparedCodexResourceAuthority[]
-}): CodexRetryLocalResourceSelection[] {
-  const authoritiesByPath = new Map(input.authorities.map((authority) => [authority.path, authority]))
-  const recovered: CodexRetryLocalResourceSelection[] = []
-  const seen = new Set<string>()
-
-  for (const entry of input.explicitInput) {
-    if (entry.type !== 'mention' && entry.type !== 'localImage' && entry.type !== 'localAudio') continue
-    const path = entry.path
-    const authority = authoritiesByPath.get(path)
-    if (entry.type === 'mention' && !authority) continue
-    const kind = authority?.kind ?? 'local_file'
-    const logicalResourceId = authority?.logicalResourceId ?? localLogicalResourceId(kind, path)
-    if (seen.has(logicalResourceId)) continue
-    seen.add(logicalResourceId)
-    const name = entry.type === 'mention' ? entry.name : basename(path)
-    recovered.push({
-      logicalResourceId,
-      ...(authority?.directoryIdentity ? { directoryIdentity: authority.directoryIdentity } : {}),
-      selection: kind === 'local_directory'
-        ? { kind, id: logicalResourceId, name, path }
-        : {
-            kind,
-            id: logicalResourceId,
-            name,
-            path,
-            size: 0,
-            ext: extname(path),
-            rendererType: 'other',
-          },
-    })
-  }
-
-  return recovered
-}
 
 async function sha256File(path: string): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -249,6 +178,9 @@ export async function resolveCodexExplicitResources(input: {
   resolveRssSource?: (
     selection: Extract<SendScopedResourceSelection, { kind: 'rss_source' }>,
   ) => CodexResolvedInlineResource | null
+  resolveMcpResource?: (
+    selection: Extract<SendScopedResourceSelection, { kind: 'mcp_resource' }>,
+  ) => Promise<CodexResolvedInlineResource | null>
   selectedSkill?: CodexResolvedSkillInput | null
 }): Promise<ResolvedCodexExplicitResources> {
   const nativeInput: CodexUserInput[] = []
@@ -352,6 +284,30 @@ export async function resolveCodexExplicitResources(input: {
         logicalResourceId,
         kind: selection.kind,
         source: 'rss_context',
+        name: resolved.name,
+        path: resolved.path,
+        order: requestResources.length,
+        canRead: true,
+      }))
+      continue
+    }
+
+    if (selection.kind === 'mcp_resource') {
+      const resolved = await input.resolveMcpResource?.(selection) ?? null
+      if (!resolved || resolved.digest !== selection.contentDigest) {
+        throw new Error('codex_explicit_mcp_resource_unavailable')
+      }
+      const identity = `${selection.serverId}\u0000${selection.uri}\u0000${selection.catalogGeneration}`
+      const logicalResourceId = `mcp-resource:${sha256(identity).slice(0, 32)}`
+      const key = `mcp_resource\u0000${logicalResourceId}`
+      if (seen.has(key)) continue
+      seen.add(key)
+      nativeInput.push({ type: 'text', text: resolved.text, text_elements: [] })
+      resourceRefs.push(versionReference(logicalResourceId, resolved.digest))
+      requestResources.push(bodyFreeRequestResource({
+        logicalResourceId,
+        kind: 'mcp_resource',
+        source: 'mcp_context',
         name: resolved.name,
         path: resolved.path,
         order: requestResources.length,

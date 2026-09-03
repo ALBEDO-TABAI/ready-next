@@ -479,7 +479,8 @@ test('embedded Lark CLI auth flow binds missing scope, redaction, confirmation, 
   assert.equal(decision.mode, 'M2')
   assert.equal(decision.action, 'confirm')
   const askUserStore = new AskUserQuestionsStore()
-  const frozenStore = new FrozenCallStore(createFrozenCallAuditDb())
+  const frozenAuditDb = createFrozenCallAuditDb()
+  const frozenStore = new FrozenCallStore(frozenAuditDb)
   const confirmation = runFrozenCallConfirmation('skill_run_shell', completionArgs, decision, {
     store: frozenStore,
     sessionId,
@@ -493,6 +494,7 @@ test('embedded Lark CLI auth flow binds missing scope, redaction, confirmation, 
     card = askUserStore.findPendingForSession(sessionId)
   }
   assert.ok(card)
+  frozenAuditDb.settleLatest('released')
   askUserStore.resolve(card!.cardId, {
     answers: [{ id: FROZEN_CALL_QUESTION_ID, answer: FROZEN_CALL_CONFIRM_OPTION }],
     answeredAt: Date.now(),

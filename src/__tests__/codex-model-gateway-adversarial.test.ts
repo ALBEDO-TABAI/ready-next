@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import { createServer, type Server } from 'node:http'
 import test from 'node:test'
 
@@ -118,6 +119,75 @@ function bindRequest(request: JsonObject, snapshot: CodexUpstreamProfileSnapshot
       : [],
   }
 }
+
+test('fork metadata preserves the exact direct parent for product and both compaction shapes', async (t) => {
+  const contract = JSON.parse(readFileSync('assets/codex-runtime/contracts/runtime-contracts.json', 'utf8'))
+    .modelGatewayContract.request
+  assert.deepEqual(contract.metadataOptionalNativeLineageKeys, ['forked_from_thread_id'])
+  for (const kind of ['product', 'automatic_compaction', 'manual_compaction'] as const) {
+    await t.test(kind, async () => {
+      const seen: JsonObject[] = []
+      const gateway = new CodexModelGateway({
+        bearerToken: 'fork-metadata-token',
+        authority: { async resolve(input) {
+          seen.push(input.metadata.raw)
+          throw new CodexModelGatewayError('fork_metadata_reached_authority', 409)
+        } },
+        credentials: { resolve() { throw new Error('metadata_probe_must_not_request_credentials') } },
+      })
+      const address = await gateway.start()
+      try {
+        const body = requestBody()
+        const outer = body.client_metadata as JsonObject
+        const raw = JSON.parse(String(outer['x-codex-turn-metadata'])) as JsonObject
+        assert.deepEqual(Object.keys(raw).filter((key) => (
+          !contract.productMetadataKeys.includes(key) && key !== 'root_turn_id'
+        )).sort(), [...contract.metadataBaseInnerExactKeys].sort())
+        raw.forked_from_thread_id = 'direct-parent-not-root'
+        if (kind !== 'product') {
+          raw.request_kind = 'compaction'
+          raw.compaction = {
+            trigger: kind === 'manual_compaction' ? 'manual' : 'auto',
+            reason: kind === 'manual_compaction' ? 'user_requested' : 'context_limit',
+            implementation: 'responses',
+            phase: kind === 'manual_compaction' ? 'standalone_turn' : 'pre_turn',
+            strategy: 'memento',
+          }
+        }
+        if (kind === 'manual_compaction') {
+          delete outer.root_turn_id
+          for (const key of ['root_turn_id', 'readyRunId', 'toolSurfaceDigest', 'turnContractDigest', 'upstreamProfileSnapshotDigest']) {
+            delete raw[key]
+          }
+        }
+        const send = async (metadata: JsonObject) => {
+          outer['x-codex-turn-metadata'] = JSON.stringify(metadata)
+          const response = await fetch(`${address.url}/v1/responses`, {
+            method: 'POST', headers: { authorization: 'Bearer fork-metadata-token', 'content-type': 'application/json' },
+            body: JSON.stringify(body),
+          })
+          return { status: response.status, text: await response.text() }
+        }
+        const accepted = await send(raw)
+        assert.equal(accepted.status, 409)
+        assert.match(accepted.text, /fork_metadata_reached_authority/)
+        assert.equal(seen[0].forked_from_thread_id, 'direct-parent-not-root')
+        for (const invalid of [null, '', '   ', 5, {}]) {
+          const rejected = await send({ ...raw, forked_from_thread_id: invalid })
+          assert.equal(rejected.status, 400)
+        }
+        assert.equal((await send({ ...raw, unknown_lineage: 'forged' })).status, 400)
+        if (kind === 'automatic_compaction') {
+          delete outer.root_turn_id
+          assert.equal((await send(raw)).status, 400, 'automatic compaction requires the captured outer root turn identity')
+        }
+        assert.equal(seen.length, 1, 'invalid or unknown fields must not reach authority')
+      } finally {
+        await gateway.stop()
+      }
+    })
+  }
+})
 
 function chatStream(blocks: JsonObject[], model: string): ReadableStream<Uint8Array> {
   const encoder = new TextEncoder()
@@ -2672,8 +2742,8 @@ test('a short credential collision in a native identity fails without rewriting 
   }
 })
 
-test('native and Chat streams enforce byte, event, deadline and post-terminal EOF bounds', async () => {
-  let mode: 'event' | 'bytes' | 'post_terminal' = 'event'
+test('native and Chat streams enforce pre-terminal bounds without waiting for EOF after terminal', async () => {
+  let mode: 'event' | 'bytes' | 'open_after_terminal' = 'event'
   const upstream = createServer((_request, response) => {
     response.writeHead(200, { 'content-type': 'text/event-stream' })
     const created = {
@@ -2706,7 +2776,7 @@ test('native and Chat streams enforce byte, event, deadline and post-terminal EO
       })}\n\n`)
     }
     response.write(`event: response.completed\ndata: ${JSON.stringify(completed)}\n\n`)
-    if (mode !== 'post_terminal') response.end()
+    if (mode !== 'open_after_terminal') response.end()
   })
   const port = await listen(upstream)
   const created = createCodexUpstreamProfileSnapshot({
@@ -2723,7 +2793,6 @@ test('native and Chat streams enforce byte, event, deadline and post-terminal EO
     nativeMaxBytes?: number
     nativeMaxEvents?: number
     eventIdleMs?: number
-    postTerminalDrainMs?: number
   }) => {
     const gateway = new CodexModelGateway({
       bearerToken: 'local-token',
@@ -2747,16 +2816,19 @@ test('native and Chat streams enforce byte, event, deadline and post-terminal EO
     assert.match(await call({ nativeMaxEvents: 1 }), /gateway_native_event_limit_exceeded/)
     mode = 'bytes'
     assert.match(await call({ nativeMaxBytes: 256 }), /gateway_native_stream_too_large/)
-    mode = 'post_terminal'
-    const postTerminal = await call({ eventIdleMs: 1_000, postTerminalDrainMs: 20 })
-    assert.match(postTerminal, /gateway_native_post_terminal_timeout/)
-    assert.doesNotMatch(postTerminal, /event: response\.completed/)
+    mode = 'open_after_terminal'
+    const postTerminal = await call({ eventIdleMs: 1_000 })
+    assert.match(postTerminal, /event: response\.completed/)
+    assert.doesNotMatch(postTerminal, /gateway_native_post_terminal_timeout/)
 
     const encoder = new TextEncoder()
     const hangingChat = new ReadableStream<Uint8Array>({
       start(controller) {
         controller.enqueue(encoder.encode(`data: ${JSON.stringify({
           model: 'qwen-model', choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
+        })}\n\ndata: ${JSON.stringify({
+          model: 'qwen-model', choices: [],
+          usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
         })}\n\ndata: [DONE]\n\n`))
       },
     })
@@ -2778,18 +2850,14 @@ test('native and Chat streams enforce byte, event, deadline and post-terminal EO
       credential: 'secret',
       abort() {},
       eventIdleMs: 1_000,
-      postTerminalDrainMs: 20,
     })
-    assert.match(chatOutput, /gateway_chat_post_terminal_timeout/)
-    assert.doesNotMatch(chatOutput, /event: response\.completed/)
+    assert.match(chatOutput, /event: response\.completed/)
+    assert.doesNotMatch(chatOutput, /gateway_chat_post_terminal_timeout/)
 
     let truncatedChatOutput = ''
     await streamChatAsResponses({
       body: new ReadableStream<Uint8Array>({
         start(controller) {
-          controller.enqueue(encoder.encode(`data: ${JSON.stringify({
-            model: 'qwen-model', choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
-          })}\n\ndata: [DONE]\n\n`))
           controller.enqueue(Uint8Array.of(0xe2))
           controller.close()
         },
@@ -2814,7 +2882,6 @@ test('native and Chat streams enforce byte, event, deadline and post-terminal EO
       credential: 'secret',
       abort() {},
       eventIdleMs: 20,
-      postTerminalDrainMs: 20,
     })
     assert.match(deadlineOutput, /gateway_chat_event_idle_timeout/)
   } finally {

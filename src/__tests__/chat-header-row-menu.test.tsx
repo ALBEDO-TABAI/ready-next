@@ -215,6 +215,16 @@ test('compaction uncertainty keeps reset available while disabling another compa
     currentConversationAvailable: true,
     lifecyclePendingAction: null,
     lifecycleUncertainty: 'compaction',
+    lifecycleActions: {
+      stop: { availability: 'not_applicable', blockers: ['no_active_operation'], requestRef: null },
+      reset: { availability: 'ready', blockers: [], requestRef: null },
+      close: { availability: 'ready', blockers: [], requestRef: null },
+      manual_compact: {
+        availability: 'blocked',
+        blockers: ['manual_compaction_unknown'],
+        requestRef: null,
+      },
+    },
     onResetCurrentConversation: () => { resetCalls += 1 },
     onCompactCurrentSession: () => { compactCalls += 1 },
   })

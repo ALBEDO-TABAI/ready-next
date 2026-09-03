@@ -1001,7 +1001,9 @@ async function executeToolCallInner(
           return executeReadyMemoryTool(toolName, args, context.readyMemorySnapshot ?? null)
 
         case 'pet':
-          return executePetTool(toolName, args)
+          return executePetTool(toolName, args, {
+            requestModuleToolAction: context.requestModuleToolAction,
+          })
 
         case 'general_research': {
           // Stage R W1.1/W1.2/W6.4 — `outputsRoot` is the single sandbox
@@ -1121,7 +1123,7 @@ async function executeToolCallInner(
 
         case 'mcp':
           // Stage T PR-T5 — MCP dispatch. The model-visible list resolver
-          // already gated this name through `mcp/registry.isAuthorized`;
+          // already gated this name through `mcp/registry.isMcpToolReady`;
           // here we only forward to the per-server `McpClient`.
           return executeMcpTool(toolName, args as Record<string, unknown>, {
             abortSignal: context.abortSignal,

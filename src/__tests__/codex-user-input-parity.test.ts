@@ -67,6 +67,13 @@ test('turn builder forwards native resource inputs without translating them into
     },
     explicitResourceEnvelope: { input: allInputs.slice(2), resourceRefs: [] },
     resourceAdditionalContext: [],
+    actionAdmissionRef: {
+      headProjectionDigest: 'f'.repeat(64),
+      actionProjectionVersion: { scopeEpoch: 0, headGeneration: 1, actionProjectionSequence: 0 },
+      actionHeadIdentity: { aliasId: 'scope-1', aliasGeneration: 1, threadBindingId: 'binding-1', headRevision: 1 },
+    },
+    uncommittedTailAssignments: [],
+    supersededUncommittedItems: [],
   }, {
     threadId: 'thread-1',
     turnRequestId: 'turn-request-1',

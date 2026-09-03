@@ -30,6 +30,7 @@ export class RSSAutoRefreshScheduler {
   private started = false
   private snapshot: RSSAutoRefreshSnapshot = {
     running: false,
+    status: 'idle',
     intervalMs: 0,
     nextRunAt: null,
     completedAt: null,
@@ -50,7 +51,7 @@ export class RSSAutoRefreshScheduler {
   stop(): Promise<void> {
     this.started = false
     this.clearTimer()
-    this.snapshot = { ...this.snapshot, running: false, nextRunAt: null }
+    this.snapshot = { ...this.snapshot, running: false, status: 'paused', nextRunAt: null }
     return this.inFlight ?? Promise.resolve()
   }
 
@@ -67,6 +68,7 @@ export class RSSAutoRefreshScheduler {
     this.snapshot = {
       ...this.snapshot,
       running: false,
+      status: outcome.status,
       completedAt: new Date(baseAt).toISOString(),
       success: outcome.success,
       fetched: outcome.fetched,
@@ -92,7 +94,7 @@ export class RSSAutoRefreshScheduler {
     this.snapshot = { ...this.snapshot, intervalMs }
 
     if (!this.started || intervalMs <= 0) {
-      this.snapshot = { ...this.snapshot, nextRunAt: null }
+      this.snapshot = { ...this.snapshot, status: 'paused', nextRunAt: null }
       return
     }
 
@@ -121,11 +123,12 @@ export class RSSAutoRefreshScheduler {
     this.timer = null
     if (!this.started || this.snapshot.running) return
 
-    this.snapshot = { ...this.snapshot, running: true, nextRunAt: null }
+    this.snapshot = { ...this.snapshot, running: true, status: 'running', nextRunAt: null }
     let fetched = 0
     let message: string | null = null
     let errors: string[] = []
     let success = false
+    let status: RSSAutoRefreshSnapshot['status'] = 'failed'
     let skippedBecauseRunning = false
 
     try {
@@ -135,6 +138,7 @@ export class RSSAutoRefreshScheduler {
       errors = outcome.errors
       skippedBecauseRunning = outcome.skippedBecauseRunning
       success = outcome.success
+      status = outcome.status
     } catch (error) {
       message = error instanceof Error ? error.message : String(error)
       errors = [message]
@@ -142,7 +146,7 @@ export class RSSAutoRefreshScheduler {
 
     const completedAtMs = this.deps.now()
     if (!this.started) {
-      this.snapshot = { ...this.snapshot, running: false, nextRunAt: null }
+      this.snapshot = { ...this.snapshot, running: false, status: 'paused', nextRunAt: null }
       return
     }
     this.snapshot = {
@@ -150,6 +154,7 @@ export class RSSAutoRefreshScheduler {
       running: false,
       completedAt: skippedBecauseRunning ? this.snapshot.completedAt : new Date(completedAtMs).toISOString(),
       success: skippedBecauseRunning ? this.snapshot.success : success,
+      status: skippedBecauseRunning ? this.snapshot.status : status,
       fetched,
       message,
       errors,
@@ -167,6 +172,7 @@ function normalizeFetchResult(result: RSSAutoRefreshFetchResult): {
   errors: string[]
   skippedBecauseRunning: boolean
   success: boolean
+  status: RSSAutoRefreshSnapshot['status']
 } {
   const fetched = Number(result.data?.fetched) || 0
   const message = result.data?.message || result.error || null
@@ -179,7 +185,12 @@ function normalizeFetchResult(result: RSSAutoRefreshFetchResult): {
     message,
     errors,
     skippedBecauseRunning,
-    success: result.success && errors.length === 0 && !skippedBecauseRunning,
+    success: result.success && !skippedBecauseRunning,
+    status: !result.success
+      ? 'failed'
+      : errors.length > 0
+        ? 'completed_with_warnings'
+        : 'completed',
   }
 }
 

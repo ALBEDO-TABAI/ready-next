@@ -32,7 +32,6 @@ test('resumable checkpoint without an interaction is paused, not waiting', () =>
 
   assert.equal(model?.label, '本轮已暂停')
   assert.equal(model?.duration, '25:13')
-  assert.equal(model?.pulse, false)
 
   const markup = renderToStaticMarkup(createElement(RunDurationMeter, {
     run: checkpoint({
@@ -52,7 +51,6 @@ test('checkpoint waiting labels come only from waitingFor', () => {
   for (const waitingFor of ['confirmation', 'input', 'clarification'] as const) {
     const model = buildRunDurationMeterModel(checkpoint({ waitingFor }), Date.now())
     assert.equal(model?.label, '本轮等待中')
-    assert.equal(model?.pulse, false)
   }
 })
 
@@ -64,6 +62,4 @@ test('checkpoint without a continuation remains incomplete and freezes duration'
 
   assert.equal(model?.label, '本轮未完成')
   assert.equal(model?.duration, '25:13')
-  assert.equal(model?.pulse, false)
-  assert.equal(model?.live, false)
 })

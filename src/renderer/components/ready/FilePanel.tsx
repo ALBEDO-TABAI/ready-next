@@ -53,7 +53,7 @@ export default function FilePanel({ onFileDrop, onFileOpen }: FilePanelProps) {
     return () => window.removeEventListener('ready:highlight-file', handler as EventListener)
   }, [])
 
-  // Detect new file creation (Task 8) — dispatch event for MeetingChat
+  // Detect new file creation (Task 8) — dispatch event for the Ready conversation
   useEffect(() => {
     if (files.length > prevFilesCountRef.current) {
       const newFiles = files.slice(prevFilesCountRef.current)

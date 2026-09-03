@@ -1,6 +1,12 @@
 import { z } from 'zod'
 
 import type { CanonicalAssistantMessage } from './canonical-message'
+import type { ContextUsageSnapshot } from '../context-usage-types'
+import {
+  lifecycleActionRequestRefSchema,
+  type LifecycleActionRequestRef,
+  type LifecycleOperationProjectionV2,
+} from './agent-lifecycle-snapshot'
 
 export type ProductTurnToolReceipt = {
   callId: string
@@ -34,12 +40,145 @@ export type ProductTurnMemoryReceipt = {
   readReceiptDigest: string | null
 }
 
+export type CodexActionProjectionVersion = {
+  scopeEpoch: number
+  headGeneration: number
+  actionProjectionSequence: number
+}
+
+export type CodexActionGate = {
+  availability: 'ready' | 'blocked' | 'not_applicable'
+  blockers: string[]
+  consequence: null | {
+    kind: 'supersedes_uncommitted_structured_tail'
+    omittedItemCount: number
+    resourceReattachItemCount: number
+    itemsDigest: string
+  }
+}
+
+export type CodexHeadActionProjection = {
+  kind: 'scope_head'
+  scopeId: string
+  ownerRunId: null
+  historyState:
+    | 'same_thread_ready'
+    | 'ready'
+    | 'fresh_root_ready_for_ingress'
+    | 'materializing'
+    | 'materialization_unknown'
+    | 'terminal_unknown'
+    | 'legacy_context_boundary'
+    | 'closed'
+  actionHeadIdentity: null | {
+    aliasId: string
+    aliasGeneration: number
+    threadBindingId: string
+    headRevision: number
+  }
+  closedByLifecycleRef: null | {
+    scopeId: string
+    scopeEpoch: number
+    closedAt: string
+    closeEvidenceDigest: string
+  }
+  actions: { send_new_message: CodexActionGate }
+  actionProjectionVersion: CodexActionProjectionVersion
+  evidenceDigest: string
+}
+
+export type CodexActionSurfaceEnvelope = {
+  scopeId: string
+  scopeEpoch: number
+  head: CodexHeadActionProjection
+  lifecycle: LifecycleOperationProjectionV2
+}
+
+export type CodexActionSurfaceInvalidation = {
+  contract: 'codex_action_surface_invalidation_v1'
+  scopeId: string
+  scopeEpoch: number
+  aliasGeneration: number
+  actionProjectionSequence: number
+}
+
+const codexActionSurfaceInvalidationSchema: z.ZodType<CodexActionSurfaceInvalidation> = z.object({
+  contract: z.literal('codex_action_surface_invalidation_v1'),
+  scopeId: z.string().min(1),
+  scopeEpoch: z.number().int().nonnegative(),
+  aliasGeneration: z.number().int().positive().safe(),
+  actionProjectionSequence: z.number().int().nonnegative().safe(),
+}).strict()
+
+export function parseCodexActionSurfaceInvalidation(
+  value: unknown,
+): CodexActionSurfaceInvalidation {
+  return codexActionSurfaceInvalidationSchema.parse(value)
+}
+
+export type CodexProductTurnActionProjection =
+  | {
+      kind: 'product_turn'
+      retryEvidenceKind: 'complete'
+      ownerRunId: string
+      ownerAliasGeneration: number
+      ownerTurnRevision: number
+      headProjectionRef: {
+        version: CodexActionProjectionVersion
+        digest: string
+      }
+      currentReadyMemoryRef: {
+        scopeEpoch: number
+        stateRevision: number
+        revocationRevision: number
+        semanticIngressDigest: string
+        modelVisiblePayloadEmpty: boolean
+        eligibilityDigest: string
+      }
+      currentTrustedEnvironmentRef: {
+        requestedWorkbenchMode: 'browser' | 'document' | 'rss' | 'calendar'
+        trustedWorkbenchMode: 'browser' | 'document' | 'rss' | 'calendar'
+        modeDigest: string
+      }
+      productTurnActionProjectionVersion: {
+        ownerTurnRevision: number
+        headProjectionVersion: CodexActionProjectionVersion
+        readyMemoryStateRevision: number
+        readyMemoryRevocationRevision: number
+        trustedModeDigest: string
+        evidenceDigest: string
+      }
+      retry_failed_task: CodexActionGate
+      evidenceDigest: string
+    }
+  | {
+      kind: 'product_turn'
+      retryEvidenceKind: 'unavailable_legacy'
+      ownerRunId: string
+      ownerAliasGeneration: number
+      ownerTurnRevision: number
+      headProjectionRef: null
+      currentReadyMemoryRef: null
+      currentTrustedEnvironmentRef: null
+      productTurnActionProjectionVersion: {
+        ownerTurnRevision: number
+        auditDigest: string
+      }
+      retry_failed_task: CodexActionGate & {
+        availability: 'not_applicable'
+        blockers: ['legacy_or_evidence_incomplete']
+        consequence: null
+      }
+      evidenceDigest: string
+    }
+
 export type ProductTurnReceipt = {
-  contract: 'ready_product_turn_receipt_v1'
+  contract: 'ready_product_turn_receipt_v3'
   readyRunId: string
   readyTaskId: string
   readyScopeId: string
   messageVisibilityEpoch: number
+  ownerAliasGeneration: number
   revision: number
   terminal: 'done' | 'error' | 'cancelled' | 'interrupted'
   canonicalMessage: CanonicalAssistantMessage
@@ -47,12 +186,13 @@ export type ProductTurnReceipt = {
   tools: ProductTurnToolReceipt[]
   artifacts: ProductTurnArtifactReceipt[]
   memory: ProductTurnMemoryReceipt | null
+  contextUsage: ContextUsageSnapshot | null
   failure: null | {
     kind: 'transport' | 'protocol' | 'provider' | 'tool_effect_unknown' | 'artifact_delivery' | 'cancelled' | 'persistence'
     effectState: 'none' | 'confirmed' | 'indeterminate'
-    retryPolicy: 'not_needed' | 'reconcile_then_retry' | 'readback_first' | 'user_action_required'
     evidenceRefs: string[]
   }
+  actionProjection: CodexProductTurnActionProjection
   publicationSealDigest: string | null
   presentationDigest: string
 }
@@ -67,6 +207,8 @@ export const PRE_PERSISTENCE_ERROR_KINDS = [
   'thread_busy',
   'start_identity_capacity_exhausted',
   'conversation_reset_required',
+  'conversation_materializing',
+  'explicit_retry_control_invalid',
 ] as const
 
 export const TERMINAL_ERROR_KINDS = [
@@ -168,6 +310,16 @@ export type SendScopedResourceSelection =
       sourceId: string
     }
   | {
+      kind: 'mcp_resource'
+      id: string
+      name: string
+      serverId: string
+      uri: string
+      catalogGeneration: number
+      catalogDigest: string
+      contentDigest: string
+    }
+  | {
       kind: 'calendar_window'
       id: string
       name: string
@@ -230,6 +382,11 @@ export type SendScopedRequest = {
   userMessage: SendScopedUserMessage
   resources?: SendScopedResourceSelection[]
   currentDocumentAnchor?: CodexCurrentDocumentAnchor
+  actionAdmissionRef?: {
+    headProjectionDigest: string
+    actionProjectionVersion: CodexActionProjectionVersion
+    actionHeadIdentity: NonNullable<CodexHeadActionProjection['actionHeadIdentity']>
+  }
   explicitRetry?: {
     predecessorRunId: string
     predecessorPresentationDigest: string
@@ -398,14 +555,17 @@ export type CreateSessionRequest = Record<string, never>
 export type LifecycleRequest = {
   aliasId: string
   aliasGeneration: number
+  actionRequestRef?: LifecycleActionRequestRef
 }
 
 export type StopLifecycleRequest = LifecycleRequest & {
   readyRunId: string
+  actionRequestRef?: LifecycleActionRequestRef
 }
 
 export type ProductLifecycleRequest = LifecycleRequest & {
   readyRunId: string | null
+  actionRequestRef?: LifecycleActionRequestRef
 }
 
 export type LifecycleFailureCode =
@@ -441,6 +601,16 @@ export type LifecycleResult =
       ok: true
       action: 'close'
       closeoutDisposition: 'never_started'
+      aliasId: string
+      retiredGeneration: number
+      retirementTransactionDigest: string
+      archiveDisposition: 'not_required'
+      scopeClosureEvidenceDigest: string
+    }
+  | {
+      ok: true
+      action: 'close'
+      closeoutDisposition: 'legacy_prepared_contract'
       aliasId: string
       retiredGeneration: number
       retirementTransactionDigest: string
@@ -629,6 +799,16 @@ export const sendScopedRequestSchema: z.ZodType<SendScopedRequest> = z.object({
       sourceId: nonEmptyString,
     }).strict(),
     z.object({
+      kind: z.literal('mcp_resource'),
+      id: nonEmptyString,
+      name: nonEmptyString,
+      serverId: nonEmptyString,
+      uri: nonEmptyString,
+      catalogGeneration: z.number().int().positive().safe(),
+      catalogDigest: z.string().regex(/^[a-f0-9]{64}$/),
+      contentDigest: z.string().regex(/^[a-f0-9]{64}$/),
+    }).strict(),
+    z.object({
       kind: z.literal('calendar_window'),
       id: nonEmptyString,
       name: nonEmptyString,
@@ -650,6 +830,20 @@ export const sendScopedRequestSchema: z.ZodType<SendScopedRequest> = z.object({
     }).strict(),
   ])).max(32).optional(),
   currentDocumentAnchor: codexCurrentDocumentAnchorSchema.optional(),
+  actionAdmissionRef: z.object({
+    headProjectionDigest: sha256Digest,
+    actionProjectionVersion: z.object({
+      scopeEpoch: z.number().int().nonnegative().safe(),
+      headGeneration: z.number().int().positive().safe(),
+      actionProjectionSequence: z.number().int().nonnegative().safe(),
+    }).strict(),
+    actionHeadIdentity: z.object({
+      aliasId: nonEmptyString,
+      aliasGeneration: z.number().int().positive().safe(),
+      threadBindingId: nonEmptyString,
+      headRevision: z.number().int().positive().safe(),
+    }).strict(),
+  }).strict().optional(),
   explicitRetry: z.object({
     predecessorRunId: nonEmptyString,
     predecessorPresentationDigest: sha256Digest,
@@ -721,12 +915,87 @@ const productTurnMemoryReceiptSchema = z.object({
   readReceiptDigest: digestString.nullable(),
 }).strict()
 
+const codexActionProjectionVersionSchema = z.object({
+  scopeEpoch: z.number().int().nonnegative().safe(),
+  headGeneration: z.number().int().positive().safe(),
+  actionProjectionSequence: z.number().int().nonnegative().safe(),
+}).strict()
+
+const codexActionGateSchema = z.object({
+  availability: z.enum(['ready', 'blocked', 'not_applicable']),
+  blockers: z.array(nonEmptyString),
+  consequence: z.object({
+    kind: z.literal('supersedes_uncommitted_structured_tail'),
+    omittedItemCount: z.number().int().nonnegative().safe(),
+    resourceReattachItemCount: z.number().int().nonnegative().safe(),
+    itemsDigest: sha256Digest,
+  }).strict().nullable(),
+}).strict()
+
+const completeProductTurnActionProjectionSchema = z.object({
+  kind: z.literal('product_turn'),
+  retryEvidenceKind: z.literal('complete'),
+  ownerRunId: nonEmptyString,
+  ownerAliasGeneration: z.number().int().positive().safe(),
+  ownerTurnRevision: z.number().int().positive().safe(),
+  headProjectionRef: z.object({
+    version: codexActionProjectionVersionSchema,
+    digest: sha256Digest,
+  }).strict(),
+  currentReadyMemoryRef: z.object({
+    scopeEpoch: z.number().int().nonnegative().safe(),
+    stateRevision: z.number().int().positive().safe(),
+    revocationRevision: z.number().int().nonnegative().safe(),
+    semanticIngressDigest: sha256Digest,
+    modelVisiblePayloadEmpty: z.boolean(),
+    eligibilityDigest: sha256Digest,
+  }).strict(),
+  currentTrustedEnvironmentRef: z.object({
+    requestedWorkbenchMode: z.enum(['browser', 'document', 'rss', 'calendar']),
+    trustedWorkbenchMode: z.enum(['browser', 'document', 'rss', 'calendar']),
+    modeDigest: sha256Digest,
+  }).strict(),
+  productTurnActionProjectionVersion: z.object({
+    ownerTurnRevision: z.number().int().positive().safe(),
+    headProjectionVersion: codexActionProjectionVersionSchema,
+    readyMemoryStateRevision: z.number().int().positive().safe(),
+    readyMemoryRevocationRevision: z.number().int().nonnegative().safe(),
+    trustedModeDigest: sha256Digest,
+    evidenceDigest: sha256Digest,
+  }).strict(),
+  retry_failed_task: codexActionGateSchema,
+  evidenceDigest: sha256Digest,
+}).strict()
+
+const unavailableProductTurnActionProjectionSchema = z.object({
+  kind: z.literal('product_turn'),
+  retryEvidenceKind: z.literal('unavailable_legacy'),
+  ownerRunId: nonEmptyString,
+  ownerAliasGeneration: z.number().int().positive().safe(),
+  ownerTurnRevision: z.number().int().positive().safe(),
+  headProjectionRef: z.null(),
+  currentReadyMemoryRef: z.null(),
+  currentTrustedEnvironmentRef: z.null(),
+  productTurnActionProjectionVersion: z.object({
+    ownerTurnRevision: z.number().int().positive().safe(),
+    auditDigest: sha256Digest,
+  }).strict(),
+  retry_failed_task: z.object({
+    availability: z.literal('not_applicable'),
+    blockers: z.tuple([z.literal('legacy_or_evidence_incomplete')]),
+    consequence: z.null(),
+  }).strict(),
+  evidenceDigest: sha256Digest,
+}).strict()
+
 const productTurnReceiptSchema: z.ZodType<ProductTurnReceipt> = z.object({
-  contract: z.literal('ready_product_turn_receipt_v1'),
+  contract: z.literal('ready_product_turn_receipt_v3'),
   readyRunId: nonEmptyString,
+  actionRequestRef: lifecycleActionRequestRefSchema.optional(),
   readyTaskId: nonEmptyString,
   readyScopeId: nonEmptyString,
   messageVisibilityEpoch: z.number().int().nonnegative(),
+  ownerAliasGeneration: z.number().int().positive().safe(),
   revision: z.number().int().positive(),
   terminal: z.enum(['done', 'error', 'cancelled', 'interrupted']),
   canonicalMessage: canonicalAssistantMessageSchema,
@@ -734,12 +1003,23 @@ const productTurnReceiptSchema: z.ZodType<ProductTurnReceipt> = z.object({
   tools: z.array(productTurnToolReceiptSchema).max(100),
   artifacts: z.array(productTurnArtifactReceiptSchema),
   memory: productTurnMemoryReceiptSchema.nullable(),
+  contextUsage: z.object({
+    usedInputTokens: z.number().int().positive(),
+    windowTokens: z.number().int().positive().nullable(),
+    ratio: z.number().nonnegative().nullable(),
+    windowSource: z.enum(['explicit', 'model', 'fallback']).nullable(),
+    source: z.literal('last_model_request'),
+    timestamp: nonEmptyString,
+  }).strict().nullable(),
   failure: z.object({
     kind: z.enum(['transport', 'protocol', 'provider', 'tool_effect_unknown', 'artifact_delivery', 'cancelled', 'persistence']),
     effectState: z.enum(['none', 'confirmed', 'indeterminate']),
-    retryPolicy: z.enum(['not_needed', 'reconcile_then_retry', 'readback_first', 'user_action_required']),
     evidenceRefs: z.array(nonEmptyString),
   }).strict().nullable(),
+  actionProjection: z.union([
+    completeProductTurnActionProjectionSchema,
+    unavailableProductTurnActionProjectionSchema,
+  ]),
   publicationSealDigest: digestString.nullable(),
   presentationDigest: digestString,
 }).strict()
@@ -834,18 +1114,21 @@ export const createSessionRequestSchema: z.ZodType<CreateSessionRequest> = z.obj
 export const lifecycleRequestSchema: z.ZodType<LifecycleRequest> = z.object({
   aliasId: nonEmptyString,
   aliasGeneration: z.number().int().positive(),
+  actionRequestRef: lifecycleActionRequestRefSchema.optional(),
 }).strict()
 
 export const stopLifecycleRequestSchema: z.ZodType<StopLifecycleRequest> = z.object({
   aliasId: nonEmptyString,
   aliasGeneration: z.number().int().positive(),
   readyRunId: nonEmptyString,
+  actionRequestRef: lifecycleActionRequestRefSchema.optional(),
 }).strict()
 
 export const productLifecycleRequestSchema: z.ZodType<ProductLifecycleRequest> = z.object({
   aliasId: nonEmptyString,
   aliasGeneration: z.number().int().positive(),
   readyRunId: nonEmptyString.nullable(),
+  actionRequestRef: lifecycleActionRequestRefSchema.optional(),
 }).strict()
 
 const lifecycleFailureSchema = z.object({
@@ -890,6 +1173,16 @@ export const lifecycleResultSchema: z.ZodType<LifecycleResult> = z.union([
     ok: z.literal(true),
     action: z.literal('close'),
     closeoutDisposition: z.literal('never_started'),
+    aliasId: nonEmptyString,
+    retiredGeneration: z.number().int().positive(),
+    retirementTransactionDigest: digestString,
+    archiveDisposition: z.literal('not_required'),
+    scopeClosureEvidenceDigest: digestString,
+  }).strict(),
+  z.object({
+    ok: z.literal(true),
+    action: z.literal('close'),
+    closeoutDisposition: z.literal('legacy_prepared_contract'),
     aliasId: nonEmptyString,
     retiredGeneration: z.number().int().positive(),
     retirementTransactionDigest: digestString,

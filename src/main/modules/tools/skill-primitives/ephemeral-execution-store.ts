@@ -77,6 +77,28 @@ export function isEphemeralAskUserId(executionId: string): boolean {
 export class EphemeralExecutionStore {
   private readonly records = new Map<string, EphemeralAskUserRecord>()
   private readonly clearListeners = new Set<(event: EphemeralAskUserClearedEvent) => void>()
+  private readonly terminalFences = new Set<string>()
+
+  private runKey(scopeId: string, requestId: string): string {
+    return `${scopeId}\u0000${requestId}`
+  }
+
+  prepareRunTerminalFence(scopeId: string, requestId: string): void {
+    if (!scopeId || !requestId) throw new Error('ephemeral_run_terminal_identity_invalid')
+    const key = this.runKey(scopeId, requestId)
+    if (this.terminalFences.has(key)) throw new Error('ephemeral_run_terminal_fence_conflict')
+    this.terminalFences.add(key)
+  }
+
+  rollbackRunTerminalFence(scopeId: string, requestId: string): void {
+    this.terminalFences.delete(this.runKey(scopeId, requestId))
+  }
+
+  commitRunTerminalFence(scopeId: string, requestId: string, error: Error): number {
+    const key = this.runKey(scopeId, requestId)
+    if (!this.terminalFences.delete(key)) throw new Error('ephemeral_run_terminal_fence_missing')
+    return this.rejectByRun(scopeId, requestId, error)
+  }
 
   has(executionId: string): boolean {
     return this.records.has(executionId)
@@ -128,6 +150,10 @@ export class EphemeralExecutionStore {
   resolve(executionId: string, value: string): boolean {
     const record = this.records.get(executionId)
     if (!record) return false
+    const scopeId = record.scopeId || record.sessionId || ''
+    if (record.requestId && this.terminalFences.has(this.runKey(scopeId, record.requestId))) {
+      return false
+    }
     clearTimeout(record.timeoutHandle)
     this.records.delete(executionId)
     getInteractionLifecycleRegistry().settle({
@@ -182,6 +208,7 @@ export class EphemeralExecutionStore {
       }
     }
     this.records.clear()
+    this.terminalFences.clear()
   }
 
   /**
@@ -209,6 +236,15 @@ export class EphemeralExecutionStore {
         }
         rejected += 1
       }
+    }
+    return rejected
+  }
+
+  rejectByRun(scopeId: string, requestId: string, error: Error): number {
+    let rejected = 0
+    for (const [executionId, record] of this.records) {
+      if ((record.scopeId || record.sessionId) !== scopeId || record.requestId !== requestId) continue
+      if (this.reject(executionId, error)) rejected += 1
     }
     return rejected
   }

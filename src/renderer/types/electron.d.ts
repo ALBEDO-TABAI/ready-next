@@ -27,7 +27,7 @@ import type {
   SendScopedRequest,
   SendScopedResponse,
 } from '../../shared/ipc-contracts/agent-runtime'
-import type { LifecycleOperationProjection } from '../../shared/ipc-contracts/agent-lifecycle-snapshot'
+import type { LifecycleOperationProjectionV2 } from '../../shared/ipc-contracts/agent-lifecycle-snapshot'
 import type { AgentRuntimeReadinessSnapshot } from '../../shared/ipc-contracts/agent-runtime-readiness'
 import type { RendererStateFlushOutcome } from '../../shared/renderer-state-flush'
 import type { ContextUsageSnapshot } from '../../shared/context-usage-types'
@@ -42,8 +42,8 @@ import type {
   BrowserTargetClaimSnapshot,
 } from '../modules/browser/useAgentBrowserSupervision'
 import type {
-  PetActivitySnapshot,
   PetDefinition,
+  PetActivityOpenIdentity,
   PetSettings,
   PetStickyNote,
   PetStickyNoteInput,
@@ -123,6 +123,7 @@ import type {
   ReadyMemoryResetRequest,
   ReadyMemoryUpdateRequest,
   ReadyMemoryView,
+  ReadyMemoryStateChange,
 } from '../../shared/ready-memory'
 
 // Type declarations for window.electronAPI exposed by preload
@@ -763,9 +764,11 @@ interface ElectronAgentAPI {
   }) => Promise<IPCResponse<ScopeRunSummaryData[]>>
   readProductTurnPresentation: (
     readyRunId: string,
+    requestedWorkbenchMode: 'browser' | 'document' | 'rss' | 'calendar',
   ) => Promise<IPCResponse<import('../../shared/ipc-contracts/agent-runtime').ProductTurnReceipt>>
   readProductTurnPresentations: (
     readyRunIds: string[],
+    requestedWorkbenchMode: 'browser' | 'document' | 'rss' | 'calendar',
   ) => Promise<IPCResponse<import('../../shared/ipc-contracts/agent-runtime').ProductTurnReceipt[]>>
   readReadyMemory: (request: ReadyMemoryReadRequest) => Promise<IPCResponse<ReadyMemoryView>>
   setReadyMemoryGlobalPolicy: (request: ReadyMemoryGlobalPolicyRequest) => Promise<IPCResponse<ReadyMemoryView>>
@@ -775,9 +778,19 @@ interface ElectronAgentAPI {
   pinReadyMemory: (request: ReadyMemoryPinRequest) => Promise<IPCResponse<ReadyMemoryView>>
   deleteReadyMemory: (request: ReadyMemoryDeleteRequest) => Promise<IPCResponse<ReadyMemoryView>>
   resetReadyMemory: (request: ReadyMemoryResetRequest) => Promise<IPCResponse<ReadyMemoryView>>
+  onReadyMemoryStateChanged: (callback: (event: ReadyMemoryStateChange) => void) => () => void
+  onCodexActionSurfaceInvalidated: (
+    callback: (event: import('../../shared/ipc-contracts/agent-runtime').CodexActionSurfaceInvalidation) => void,
+  ) => () => void
   readCodexLifecycleSnapshot: (
     request: LifecycleRequest,
-  ) => Promise<IPCResponse<LifecycleOperationProjection>>
+  ) => Promise<IPCResponse<LifecycleOperationProjectionV2>>
+  readCodexHeadActionProjection: (
+    request: LifecycleRequest,
+  ) => Promise<IPCResponse<import('../../shared/ipc-contracts/agent-runtime').CodexHeadActionProjection>>
+  readCodexActionSurface: (
+    request: LifecycleRequest,
+  ) => Promise<IPCResponse<import('../../shared/ipc-contracts/agent-runtime').CodexActionSurfaceEnvelope>>
   listTaskProjections: (scopeId: string) => Promise<IPCResponse<TaskProjectionRecordData[]>>
   getTaskProjection: (taskId: string) => Promise<IPCResponse<TaskProjectionRecordData>>
   searchSessionRecall: (payload?: {
@@ -3175,12 +3188,16 @@ interface ElectronPetAPI {
   show: () => Promise<IPCResponse<PetWindowSnapshot>>
   hide: () => Promise<IPCResponse<boolean>>
   setPet: (petId: string) => Promise<IPCResponse<PetSettings>>
-  updateActivity: (snapshot: PetActivitySnapshot) => Promise<IPCResponse<boolean>>
   resetPosition: () => Promise<IPCResponse<PetSettings>>
   moveBy: (delta: { dx: number; dy: number }) => Promise<IPCResponse<boolean>>
   pushStickyNote: (note: PetStickyNoteInput) => Promise<IPCResponse<PetStickyNote>>
   dismissStickyNote: (id: string) => Promise<IPCResponse<boolean>>
   clearStickyNotes: () => Promise<IPCResponse<boolean>>
+  snapshotApplied: (applied: { revision: number; contentDigest: string }) => void
+  openActivity: (activity: PetActivityOpenIdentity) => Promise<IPCResponse<boolean>>
+  activityOpened: (activity: PetActivityOpenIdentity) => void
+  scopeViewed: (scopeId: string) => void
+  onOpenActivity: (callback: (activity: PetActivityOpenIdentity) => void) => () => void
   onSnapshot: (callback: (snapshot: PetWindowSnapshot) => void) => () => void
 }
 
@@ -3439,23 +3456,44 @@ interface ElectronAPI {
 // Phase M 管理面（2026-07-05）—— MCP 设置页 IPC 面
 export interface ElectronMcpServerStatus {
   serverId: string
+  displayName: string
   toolCount: number
   toolNames: string[]
-  requiresAuthorization: boolean
+  approvalMode: 'always' | 'writes' | 'never'
   clientConnected: boolean
+  resourceCount: number
+  resourceTemplateCount: number
+  catalogGeneration: number
+  catalogDigest: string
+  serverInfo: Record<string, unknown> | null
+  instructions: string | null
+  stderrTail: string
   lastError?: string
 }
 
 export interface ElectronMcpStatus {
   rawConfig: string
+  configs: ElectronMcpServerConfig[]
   configuredCount: number
   skipped: Array<{ reason: string }>
   servers: ElectronMcpServerStatus[]
+  catalogGeneration: number
+  catalogDigest: string
+}
+
+export interface ElectronMcpServerConfig {
+  id: string
+  displayName: string
+  enabled: boolean
+  command: string
+  args: string[]
+  approvalMode: 'always' | 'writes' | 'never'
+  envEntries: Array<{ key: string; value: string; hasStoredValue?: boolean }>
 }
 
 export interface ElectronMcpAPI {
   getStatus: () => Promise<ElectronMcpStatus>
-  saveConfig: (json: string) => Promise<{
+  saveConfig: (servers: ElectronMcpServerConfig[]) => Promise<{
     success: boolean
     error?: string
     configuredCount?: number
@@ -3466,6 +3504,21 @@ export interface ElectronMcpAPI {
     error?: string
     outcomes?: Array<{ serverId: string; ok: boolean; toolCount: number; dropped: string[]; error?: string }>
   }>
+  listResources: (serverId: string) => Promise<IPCResponse<{
+    serverId: string
+    catalogGeneration: number
+    catalogDigest: string
+    resources: Array<{ uri: string; name?: string; description?: string; mimeType?: string }>
+    resourceTemplates: Array<{ uriTemplate: string; name?: string; description?: string; mimeType?: string }>
+  }>>
+  readResource: (payload: { serverId: string; uri: string; catalogGeneration: number }) => Promise<IPCResponse<{
+    serverId: string
+    uri: string
+    catalogGeneration: number
+    catalogDigest: string
+    content: Record<string, unknown>
+    contentDigest: string
+  }>>
 }
 
 declare global {

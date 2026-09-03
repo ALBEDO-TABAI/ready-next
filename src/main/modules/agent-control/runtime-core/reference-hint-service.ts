@@ -158,6 +158,7 @@ export class ReferenceHintService {
         && existing.id === hint.id
         && existing.name === hint.name
         && existing.at === hint.at
+        && JSON.stringify(existing.applicableToolNames || []) === JSON.stringify(hint.applicableToolNames || [])
       ) {
         return
       }

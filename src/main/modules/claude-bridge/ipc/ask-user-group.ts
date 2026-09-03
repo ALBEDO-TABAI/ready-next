@@ -180,9 +180,11 @@ export const askUserGroup: IpcChannelGroup<AskUserGroupDeps> = {
       if (!record || record.status !== 'pending') {
         return { success: false, error: 'No pending frozen call with this id (already decided or expired)' }
       }
-      const sessionKey = record.sessionId || record.scopeId
-      const card = deps.getAskUserQuestionsStore().findPendingForSession(sessionKey)
-      if (!card || card.questions[0]?.id !== FROZEN_CALL_QUESTION_ID) {
+      const card = deps.getAskUserQuestionsStore().findPendingForFrozenCall(frozenCallId)
+      if (!card
+        || card.actionConfirmationOwnerRef?.pendingConfirmationSourceDigest
+          !== record.pendingConfirmationSourceDigest
+        || card.questions[0]?.id !== FROZEN_CALL_QUESTION_ID) {
         return { success: false, error: 'No pending confirmation card for this frozen call' }
       }
 	      const result = submitAskUserQuestionsAnswersCore(

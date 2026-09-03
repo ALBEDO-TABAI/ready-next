@@ -10,6 +10,7 @@ import type {
   ReadyMemoryResetRequest,
   ReadyMemoryUpdateRequest,
   ReadyMemoryView,
+  ReadyMemoryStateChange,
 } from '../../../../shared/ready-memory'
 import type { DatabaseConnection } from '../../database'
 import type { ReadyMemoryGenerationCoordinator } from './ready-memory-generation'
@@ -20,6 +21,7 @@ import type {
   ReadyMemorySourceEnqueueResult,
 } from './ready-memory-generation-types'
 import { ReadyMemoryRepository } from './ready-memory-repository'
+import { publishReadyMemoryStateChangeIfAdvanced } from './ready-memory-state-events'
 
 type SealResult = ReadyMemorySourceEnqueueResult | {
   enqueued: false
@@ -143,6 +145,8 @@ export class ReadyMemoryRuntimeService {
     wakeWorker?: () => void
     now?: () => string
     makeId?: (prefix: string) => string
+    onStateChanged?: (event: ReadyMemoryStateChange) => void
+    onStateChangePublishError?: (error: unknown) => void
   }) {}
 
   read(request: ReadyMemoryReadRequest): ReadyMemoryView {
@@ -177,12 +181,14 @@ export class ReadyMemoryRuntimeService {
     if (request.generateMemories === true && request.acknowledgeModelCost !== true) {
       throw new Error('ready_memory_cost_ack_required')
     }
+    const before = this.dependencies.repository.getGlobalPolicy()
     this.dependencies.repository.setGlobalPolicy({
       useMemories: request.useMemories,
       generateMemories: request.generateMemories,
       updatedAt: this.now(),
     })
     if (request.generateMemories === true) this.dependencies.wakeWorker?.()
+    this.publishStateChange(before, 'policy')
     return this.read({})
   }
 
@@ -198,6 +204,7 @@ export class ReadyMemoryRuntimeService {
   }
 
   add(request: ReadyMemoryAddRequest): ReadyMemoryView {
+    const before = this.dependencies.repository.getGlobalPolicy()
     this.dependencies.repository.addManualMemory({
       entryId: this.makeId('ready-memory'),
       category: request.category,
@@ -205,29 +212,52 @@ export class ReadyMemoryRuntimeService {
       pinned: request.pinned,
       createdAt: this.now(),
     })
+    this.publishStateChange(before, 'add')
     return this.read({})
   }
 
   update(request: ReadyMemoryUpdateRequest): ReadyMemoryView {
+    const before = this.dependencies.repository.getGlobalPolicy()
     this.dependencies.repository.editMemory({ ...request, updatedAt: this.now() })
+    this.publishStateChange(before, 'update')
     return this.read({})
   }
 
   pin(request: ReadyMemoryPinRequest): ReadyMemoryView {
+    const before = this.dependencies.repository.getGlobalPolicy()
     this.dependencies.repository.setMemoryPinned(request.entryId, request.pinned, this.now())
+    this.publishStateChange(before, 'pin')
     return this.read({})
   }
 
   delete(request: ReadyMemoryDeleteRequest): ReadyMemoryView {
+    const before = this.dependencies.repository.getGlobalPolicy()
     this.dependencies.repository.deleteMemory(request.entryId, this.now())
+    this.publishStateChange(before, 'delete')
     return this.read({})
   }
 
   reset(request: ReadyMemoryResetRequest): ReadyMemoryView {
     if (request.confirm !== true) throw new Error('ready_memory_reset_confirmation_required')
+    const before = this.dependencies.repository.getGlobalPolicy()
     this.dependencies.repository.resetMemories(this.now())
     this.dependencies.wakeWorker?.()
+    this.publishStateChange(before, 'reset')
     return this.read({})
+  }
+
+  private publishStateChange(
+    before: { stateRevision: number; revocationRevision: number },
+    reason: ReadyMemoryStateChange['reason'],
+  ): void {
+    const after = this.dependencies.repository.getGlobalPolicy()
+    publishReadyMemoryStateChangeIfAdvanced({
+      before,
+      after,
+      reason,
+      publish: this.dependencies.onStateChanged,
+      onError: this.dependencies.onStateChangePublishError,
+    })
   }
 
   sealClosedConversationInOpenTransaction(input: {

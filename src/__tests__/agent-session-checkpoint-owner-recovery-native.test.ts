@@ -299,6 +299,14 @@ test('non-done core closeout terminates all browser ledgers without requiring a 
       initiator: 'error',
       durationMs: 1,
       finalText: '页面状态未完成观察，本轮已停止。',
+      contextUsage: {
+        usedInputTokens: 80,
+        windowTokens: 258_400,
+        ratio: 80 / 258_400,
+        windowSource: 'model',
+        source: 'last_model_request',
+        timestamp: now,
+      },
       conversationId: scopeId,
       taskType: 'research',
       module: 'browser',
@@ -340,13 +348,19 @@ test('non-done core closeout terminates all browser ledgers without requiring a 
     }
     assert.deepEqual(
       db.prepare(
-        'SELECT status, task_type, budget_json, continuation_ref_json FROM run_meta WHERE run_id = ?',
+        `SELECT status, task_type, budget_json, continuation_ref_json,
+                input_tokens, output_tokens, total_tokens, context_window
+           FROM run_meta WHERE run_id = ?`,
       ).get(ownerRunId),
       {
         status: 'error',
         task_type: 'research',
         budget_json: JSON.stringify(terminalBudget),
         continuation_ref_json: null,
+        input_tokens: 0,
+        output_tokens: 0,
+        total_tokens: 0,
+        context_window: 258_400,
       },
     )
     assert.deepEqual(

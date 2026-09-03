@@ -159,7 +159,7 @@ function seedScope(aliasGeneration = 1, messageVisibilityEpoch = 0, revision = 2
     messageVisibilityEpoch,
   }
   useAgent.setState({
-    agents: [{ name: 'butler', displayName: '管家', avatar: '', status: 'idle', selected: true }],
+    agents: [{ name: 'butler', displayName: '管家', avatar: '', status: 'idle' }],
     currentAgent: 'butler',
     messages,
     currentScopeId: scope.id,
@@ -203,7 +203,7 @@ function seedBackgroundTarget(): void {
   const sessionA = { ...makeEmptySessionSlice(scopeA.id), aliasGeneration: 1, messageVisibilityEpoch: 0 }
   const sessionB = { ...makeEmptySessionSlice(scopeB.id), aliasGeneration: 1, messageVisibilityEpoch: 0 }
   useAgent.setState({
-    agents: [{ name: 'butler', displayName: '管家', avatar: '', status: 'idle', selected: true }],
+    agents: [{ name: 'butler', displayName: '管家', avatar: '', status: 'idle' }],
     currentAgent: 'butler',
     messages: [],
     currentScopeId: scopeB.id,

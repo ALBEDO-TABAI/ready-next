@@ -22,6 +22,10 @@ import {
   canonicalReadyMemoryJson,
   type ReadyMemorySnapshot,
 } from '../ready-memory'
+import {
+  browserToolSurfaceNeedsObservationReserve,
+  isCodexBrowserObservationClosureToolName,
+} from './codex-browser-admission'
 
 export type CodexToolBridgeExecutionBinding = Readonly<{
   bindingId: string
@@ -225,6 +229,14 @@ export class CodexToolBindingRepository {
                )) = ?
           `).get<{ calls: number }>(input.readyRunId, laneKind === 'delivery' ? 1 : 0)
       const laneCalls = Number(admittedByLane?.calls || 0)
+      if (
+        laneKind === 'ordinary'
+        && browserToolSurfaceNeedsObservationReserve(effectiveAllowedToolNames)
+        && laneCalls + input.calls.length >= lane.maxToolCalls
+        && input.calls.some((call) => !isCodexBrowserObservationClosureToolName(call.toolName))
+      ) {
+        throw new CodexBindingRepositoryError('ordinary_tool_call_reserved_for_browser_observation')
+      }
       if (laneCalls + input.calls.length > lane.maxToolCalls) {
         throw new CodexBindingRepositoryError(`${laneKind}_tool_call_budget_exhausted`)
       }

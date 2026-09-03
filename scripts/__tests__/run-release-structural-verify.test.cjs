@@ -90,12 +90,15 @@ test('structural release checks runtime source before tests and packaging', () =
     'verify:stability',
     'verify:streaming',
     'verify:native',
+    'verify:codex-turn-delivery',
     'verify:codex-runtime-e2',
     'test:release-structural',
     'seed-safety',
     'build',
     'package:dist',
   ]) assert(labels.includes(required), `missing ${required}`)
+  assert(labels.indexOf('verify:native') < labels.indexOf('verify:codex-turn-delivery'))
+  assert(labels.indexOf('verify:codex-turn-delivery') < labels.indexOf('build'))
 })
 
 test('release home stages the exact pinned Electron archive for offline install', () => {

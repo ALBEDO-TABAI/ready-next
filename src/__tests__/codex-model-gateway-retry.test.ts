@@ -196,7 +196,7 @@ async function withGateway(input: {
   onAttempt?: (attempt: number) => void
   admitToolResponse?: () => void
   maxRetries?: number
-  streamDeadlineMs?: number
+  headersDeadlineMs?: number
   run: (url: string, body: Record<string, unknown>) => Promise<void>
 }): Promise<void> {
   const port = await listen(input.upstream)
@@ -218,7 +218,7 @@ async function withGateway(input: {
   const gateway = new CodexModelGateway({
     bearerToken: 'local-retry-token',
     onUpstreamAttempt: input.onAttempt,
-    streamDeadlineMs: input.streamDeadlineMs,
+    headersDeadlineMs: input.headersDeadlineMs,
     authority: {
       async resolve(authorityInput) {
         const binding: CodexModelGatewayBinding = {
@@ -470,7 +470,7 @@ test('an upstream headers deadline retries only before output', async () => {
       wireApi: 'responses',
       upstream,
       maxRetries: 1,
-      streamDeadlineMs: 20,
+      headersDeadlineMs: 20,
       async run(url, body) {
         const result = await callGateway(url, body)
         assert.equal(result.status, 200)

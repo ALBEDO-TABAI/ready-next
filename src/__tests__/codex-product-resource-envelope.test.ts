@@ -8,6 +8,8 @@ import {
   buildExternalReadToolSnapshot,
   buildCodexProductRequestEnvelope,
   createCurrentDocumentReadRequester,
+  hasExplicitCurrentDocumentAccessExclusion,
+  hasExplicitCurrentDocumentAccessIntent,
   hasExplicitCurrentDocumentWriteIntent,
   validateCurrentDocumentReadPayload,
 } from '../main/modules/agent-control/codex-runtime/codex-runtime-production-composition'
@@ -38,6 +40,11 @@ import type { AIModelConfig } from '../shared/ai-providers'
 import { classifyIntent } from '../main/modules/agent-control/intent-classifier'
 import { __setSkillsRuntimeManagerForTests } from '../main/modules/skills-runtime/runtime-manager'
 import { executeModuleToolAction } from '../renderer/modules/agent/moduleExecutor'
+import { extractProductSurfaceTargets } from '../main/modules/agent-control/codex-runtime/codex-product-surface-ingress'
+
+test('empty resource selections do not create a structured product target', () => {
+  assert.equal(extractProductSurfaceTargets([]), undefined)
+})
 
 const digest = 'a'.repeat(64)
 const baseConfig: AIModelConfig = {
@@ -246,6 +253,36 @@ test('current-document write intent is explicit and keeps advice or read-only re
   assert.equal(hasExplicitCurrentDocumentWriteIntent('只阅读当前文档并总结'), false)
   assert.equal(hasExplicitCurrentDocumentWriteIntent('建议我如何修改当前文档'), false)
   assert.equal(hasExplicitCurrentDocumentWriteIntent('不要修改，只检查是否有错字'), false)
+})
+
+test('only explicit current-document intent activates an ambient current document', () => {
+  assert.equal(
+    hasExplicitCurrentDocumentAccessExclusion('不使用任何 skill，不查看任何的本地文档，只在线检索并输出到目标文件夹'),
+    true,
+  )
+  assert.equal(hasExplicitCurrentDocumentAccessExclusion('不要读取当前文档，只查公开网页'), true)
+  assert.equal(hasExplicitCurrentDocumentAccessExclusion('只阅读当前文档并总结'), false)
+  assert.equal(hasExplicitCurrentDocumentAccessExclusion('不查看其他文档，只总结当前文档'), false)
+  assert.equal(hasExplicitCurrentDocumentAccessIntent('只阅读当前文档并总结'), true)
+  assert.equal(hasExplicitCurrentDocumentAccessIntent('帮我润色这篇文档'), true)
+  assert.equal(hasExplicitCurrentDocumentAccessIntent('review this document'), true)
+  assert.equal(hasExplicitCurrentDocumentAccessIntent('只盘点所附文件夹，不要写文件'), false)
+  assert.equal(hasExplicitCurrentDocumentAccessIntent('在线查资料，整理为一份文档输出'), false)
+  assert.equal(hasExplicitCurrentDocumentAccessIntent('不要读取当前文档，只查公开网页'), false)
+
+  const envelope = buildCodexProductRequestEnvelope(
+    request,
+    'full',
+    {},
+    [],
+    false,
+    false,
+  )
+  assert.equal(
+    envelope.resources.some((resource) => resource.kind === 'document_context'),
+    false,
+  )
+  assert.equal(envelope.environmentHints.hasDocumentContext, false)
 })
 
 test('current-document write turn requires exact read, pins every mutation to the anchored tab and forbids save-as', async () => {

@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
 import { createRequire } from 'node:module'
 import test from 'node:test'
-import { mkdir, mkdtemp, readFile, symlink, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, realpath, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
@@ -14,6 +15,7 @@ import {
   buildRequestEnvelope,
   trustedFolderReferencesFromMessageMeta,
 } from '../main/modules/agent-control/contracts/request-envelope'
+import { isAllowedProductAction } from '../main/modules/agent-control/codex-runtime/codex-product-action-map'
 import {
   executeFileManagementTool,
   resolveFileToolWorkspaceRoots,
@@ -74,7 +76,8 @@ test('folder batch uses opaque item ids, persists progress, and resumes without 
     await writeFile(join(root, 'a.md'), '# 教程 A\n\nAI 工作流与 Claude。')
     await writeFile(join(root, 'b.md'), '# 教程 B\n\n另一个 AI 工作流。')
     await writeFile(join(root, 'already.md'), '---\ntags: [教程, AI工作流]\n---\n已有完整标签')
-    const context = { searchEngine: new SearchEngine(db, { fts5Available: false }), workspaceRoots: [root], organizeStoreDir: store, runId: 'run-batch' }
+    const searchEngine = new SearchEngine(db, { fts5Available: false })
+    const context = { searchEngine, workspaceRoots: [root], organizeStoreDir: store, runId: 'run-batch' }
     const prepared = JSON.parse(await executeFileManagementTool('tag_forge_prepare_batch', { rootPath: root, limit: 1 }, context))
     assert.equal(prepared.total, 3)
     assert.equal(prepared.documents.length, 1)
@@ -84,6 +87,24 @@ test('folder batch uses opaque item ids, persists progress, and resumes without 
     assert.equal(prepared.lexicon.active.state, undefined)
 
     const first = prepared.documents[0]
+    await searchEngine.indexDocument(root, join(root, first.file))
+    const resourceLessContext = { searchEngine, organizeStoreDir: store, runId: 'run-without-resources' }
+    const unauthorizedResume = await executeFileManagementTool(
+      'tag_forge_prepare_batch', { batchId: prepared.batchId }, resourceLessContext,
+    )
+    assert.match(unauthorizedResume, /outside any known workspace/)
+    assert.doesNotMatch(unauthorizedResume, /AI 工作流与 Claude/)
+    const unauthorizedApply = await executeFileManagementTool('tag_forge_apply_batch', {
+      batchId: prepared.batchId,
+      items: [{
+        itemId: first.itemId,
+        expectedRevision: first.expectedRevision,
+        proposals: [proposal('form', '教程', '教程'), proposal('domain', 'AI工作流', 'AI 工作流')],
+      }],
+    }, resourceLessContext)
+    assert.match(unauthorizedApply, /outside any known workspace/)
+    assert.doesNotMatch(await readFile(join(root, first.file), 'utf8'), /tags:/)
+
     const applied = JSON.parse(await executeFileManagementTool('tag_forge_apply_batch', {
       batchId: prepared.batchId,
       items: [{
@@ -186,6 +207,130 @@ test('a typed folder attachment authorizes only the Tag Forge batch in a fresh w
   }
 })
 
+test('an explicitly selected Markdown runs through the same controlled Tag Forge batch without exposing siblings', async (t) => {
+  if (skipIfSqliteUnavailable(t, 'tag-forge-batch')) return
+  const db = openDb()
+  try {
+    const root = await mkdtemp(join(tmpdir(), 'tag-forge-selected-file-'))
+    const store = await mkdtemp(join(tmpdir(), 'tag-forge-selected-file-state-'))
+    const selectedPath = join(root, 'selected.md')
+    const siblingPath = join(root, 'sibling.md')
+    const selectedContent = '# Claude 教程\n\nAI 工作流与 Claude。'
+    await writeFile(selectedPath, selectedContent)
+    await writeFile(siblingPath, '# 不应读取\n\nPRIVATE_SIBLING_MARKER')
+    const canonicalSelectedPath = await realpath(selectedPath)
+    const searchEngine = new SearchEngine(db, { fts5Available: false })
+    const context = {
+      searchEngine,
+      explicitReadablePaths: [canonicalSelectedPath],
+      explicitReadableResources: [{
+        logicalResourceId: 'local-file:selected',
+        name: 'selected.md',
+        path: canonicalSelectedPath,
+        currentDigest: createHash('sha256').update(selectedContent).digest('hex'),
+      }],
+      organizeStoreDir: store,
+      runId: 'run-selected-file',
+    }
+
+    const sameNameFolder = await mkdtemp(join(tmpdir(), 'tag-forge-same-name-folder-'))
+    await writeFile(join(sameNameFolder, 'folder.md'), '# 文件夹文档\n\nAI 文件夹工作流。')
+    const collidingContext = {
+      ...context,
+      directoryAliases: [{
+        logicalResourceId: 'local-directory:selected',
+        name: 'selected.md',
+        path: sameNameFolder,
+      }],
+    }
+    const ambiguousSelection = JSON.parse(await executeFileManagementTool(
+      'tag_forge_prepare_batch', { rootPath: '@[selected.md]' }, collidingContext,
+    ))
+    assert.equal(ambiguousSelection.ok, false)
+    assert.equal(ambiguousSelection.errorKind, 'selected_resource_ambiguous')
+    const selectedById = JSON.parse(await executeFileManagementTool(
+      'tag_forge_prepare_batch', { rootPath: 'local-file:selected' }, collidingContext,
+    ))
+    assert.equal(selectedById.ok, true, JSON.stringify(selectedById))
+    assert.equal(selectedById.documents[0].file, 'selected.md')
+    const folderById = JSON.parse(await executeFileManagementTool(
+      'tag_forge_prepare_batch', { rootPath: 'local-directory:selected' }, collidingContext,
+    ))
+    assert.equal(folderById.ok, true, JSON.stringify(folderById))
+    assert.equal(folderById.documents[0].file, 'folder.md')
+
+    await searchEngine.indexDocument(root, selectedPath)
+    const indexedParent = await executeFileManagementTool(
+      'tag_forge_prepare_batch', { rootPath: root }, context,
+    )
+    assert.match(indexedParent, /outside any known workspace/)
+    assert.doesNotMatch(indexedParent, /PRIVATE_SIBLING_MARKER/)
+
+    const preparedByRef = []
+    for (const rootPath of [selectedPath, 'selected.md', '@[selected.md]', 'local-file:selected']) {
+      const prepared = JSON.parse(await executeFileManagementTool(
+        'tag_forge_prepare_batch', { rootPath }, context,
+      ))
+      assert.equal(prepared.ok, true, `${rootPath}: ${JSON.stringify(prepared)}`)
+      assert.equal(prepared.total, 1)
+      assert.equal(prepared.documents[0].file, 'selected.md')
+      assert.doesNotMatch(JSON.stringify(prepared), /PRIVATE_SIBLING_MARKER/)
+      preparedByRef.push(prepared)
+    }
+    const prepared = preparedByRef[1]
+
+    const document = prepared.documents[0]
+    const applied = JSON.parse(await executeFileManagementTool('tag_forge_apply_batch', {
+      batchId: prepared.batchId,
+      items: [{
+        itemId: document.itemId,
+        expectedRevision: document.expectedRevision,
+        proposals: [proposal('form', '教程', '教程'), proposal('domain', 'AI工作流', 'AI 工作流')],
+      }],
+    }, context))
+    assert.equal(applied.done, true, JSON.stringify(applied))
+    assert.equal(applied.transactionConfirmed?.confirmed, true)
+    assert.match(await readFile(selectedPath, 'utf8'), /tags:/)
+    assert.doesNotMatch(await readFile(siblingPath, 'utf8'), /tags:/)
+
+    const parentAfterWrite = await executeFileManagementTool(
+      'tag_forge_prepare_batch', { rootPath: root }, context,
+    )
+    assert.match(parentAfterWrite, /outside any known workspace/)
+    assert.doesNotMatch(parentAfterWrite, /PRIVATE_SIBLING_MARKER/)
+
+    const selectedFolder = await mkdtemp(join(tmpdir(), 'tag-forge-mixed-folder-'))
+    await writeFile(join(selectedFolder, 'folder.md'), '# 文件夹文档\n\nAI 文件夹工作流。')
+    const mixedContext = {
+      ...context,
+      directoryAliases: [{
+        logicalResourceId: 'local-directory:chosen',
+        name: 'chosen',
+        path: selectedFolder,
+      }],
+    }
+    for (const folderRef of ['local-directory:chosen', '@[chosen]']) {
+      const folderPrepared = JSON.parse(await executeFileManagementTool(
+        'tag_forge_prepare_batch', { rootPath: folderRef }, mixedContext,
+      ))
+      assert.equal(folderPrepared.ok, true, JSON.stringify(folderPrepared))
+      assert.equal(folderPrepared.total, 1)
+      assert.equal(folderPrepared.documents[0].file, 'folder.md')
+    }
+
+    const resumed = JSON.parse(await executeFileManagementTool(
+      'tag_forge_prepare_batch', { batchId: prepared.batchId }, context,
+    ))
+    assert.equal(resumed.done, true, JSON.stringify(resumed))
+    const unselected = await executeFileManagementTool(
+      'tag_forge_prepare_batch', { rootPath: siblingPath }, context,
+    )
+    assert.match(unselected, /rootPath must be a directory/)
+  } finally {
+    db.close()
+  }
+})
+
 test('folder preparation reports Markdown symlinks without reading outside content', async (t) => {
   if (skipIfSqliteUnavailable(t, 'tag-forge-batch')) return
   const db = openDb()
@@ -235,11 +380,13 @@ test('state-only legacy documents are repaired with content tags and hidden work
       }],
     }
     const applied = JSON.parse(await executeFileManagementTool('tag_forge_apply_batch', applyArgs, context))
-    assert.equal(applied.done, true)
+    assert.equal(applied.done, true, JSON.stringify(applied))
+    assert.equal(applied.transactionConfirmed?.confirmed, true)
     const replayed = JSON.parse(await executeFileManagementTool('tag_forge_apply_batch', applyArgs, context))
     assert.equal(replayed.ok, true)
     assert.equal(replayed.done, true)
     assert.equal(replayed.results[0].replayed, true)
+    assert.equal(replayed.transactionConfirmed, null)
     const graph = (await import('../shared/document-graph-parse')).parseDocumentGraph(await readFile(path, 'utf8'))
     assert.deepEqual(graph.frontmatter?.tags, ['参考资料', 'Claude'])
     assert.equal(graph.frontmatter?.ready_state, '待整理')
@@ -317,7 +464,7 @@ test('an existing manual label never creates a redundant review question', async
         ],
       }],
     }, context))
-    assert.equal(applied.done, true)
+    assert.equal(applied.done, true, JSON.stringify(applied))
     assert.equal(applied.reviewRequired, false)
     assert.match(await readFile(path, 'utf8'), / {2}- 钉钉/)
     assert.equal(new TagForgeRepository(db).listOverlay().some((entry) => entry.label === '钉钉'), false)
@@ -796,7 +943,14 @@ test('ignoring an optional pending label completes with reliable content tags', 
     const path = join(root, 'reading.md')
     await writeFile(path, '# AI 工作流资料\n\nAI 工作流中的俄国文学示例。')
     const context = { searchEngine: new SearchEngine(db, { fts5Available: false }), workspaceRoots: [root], organizeStoreDir: store, runId: 'run-ignore', scopeId: 'scope-ignore' }
-    const prepared = JSON.parse(await executeFileManagementTool('tag_forge_prepare_batch', { rootPath: root }, context))
+    let prepared = JSON.parse(await executeFileManagementTool('tag_forge_prepare_batch', { rootPath: root }, context))
+    await writeFile(path, '# AI 工作流资料\n\nAI 工作流中的俄国文学示例。\n\n用户刚刚补充。')
+    const conflicted = JSON.parse(await executeFileManagementTool('tag_forge_apply_batch', {
+      batchId: prepared.batchId,
+      items: [{ itemId: prepared.documents[0].itemId, expectedRevision: prepared.documents[0].expectedRevision, proposals: [proposal('form', '参考资料', '资料'), proposal('domain', 'AI工作流', 'AI 工作流'), proposal('domain', '俄国文学', '俄国文学', 0.8)] }],
+    }, context))
+    assert.equal(conflicted.results[0].errorKind, 'revision_conflict')
+    prepared = JSON.parse(await executeFileManagementTool('tag_forge_prepare_batch', { batchId: prepared.batchId }, context))
     const waiting = JSON.parse(await executeFileManagementTool('tag_forge_apply_batch', {
       batchId: prepared.batchId,
       items: [{ itemId: prepared.documents[0].itemId, expectedRevision: prepared.documents[0].expectedRevision, proposals: [proposal('form', '参考资料', '资料'), proposal('domain', 'AI工作流', 'AI 工作流'), proposal('domain', '俄国文学', '俄国文学', 0.8)] }],
@@ -804,10 +958,150 @@ test('ignoring an optional pending label completes with reliable content tags', 
     insertSubmittedReviewCard(db, waiting, { cardId: 'auq-ignore-1', runId: context.runId, scopeId: context.scopeId, selected: [] })
     const completed = JSON.parse(await executeFileManagementTool('tag_forge_review_batch', { batchId: prepared.batchId, confirmationCardId: 'auq-ignore-1' }, context))
     assert.equal(completed.done, true)
+    assert.equal(completed.transactionConfirmed?.confirmed, true)
+    assert.equal(completed.transactionConfirmed?.source, 'tag_forge_readback')
     assert.equal(new TagForgeRepository(db).listPending().length, 0)
     const content = await readFile(path, 'utf8')
     assert.match(content, /AI工作流/)
     assert.doesNotMatch(content, /- 俄国文学/)
+  } finally {
+    db.close()
+  }
+})
+
+test('review completion reopens an earlier file edited and reindexed during the batch', async (t) => {
+  if (skipIfSqliteUnavailable(t, 'tag-forge-batch')) return
+  const db = openDb()
+  try {
+    const root = await mkdtemp(join(tmpdir(), 'tag-forge-review-drift-root-'))
+    const store = await mkdtemp(join(tmpdir(), 'tag-forge-review-drift-state-'))
+    const stablePath = join(root, 'earlier.md')
+    const reviewPath = join(root, 'review.md')
+    await writeFile(stablePath, '# AI 工作流资料\n\nAI 工作流示例。')
+    await writeFile(reviewPath, '# AI 工作流资料\n\nAI 工作流中的俄国文学示例。')
+    const searchEngine = new SearchEngine(db, { fts5Available: false })
+    const context = {
+      searchEngine,
+      workspaceRoots: [root],
+      organizeStoreDir: store,
+      runId: 'run-review-drift',
+      scopeId: 'scope-review-drift',
+    }
+    const prepared = JSON.parse(await executeFileManagementTool('tag_forge_prepare_batch', { rootPath: root }, context))
+    const earlier = prepared.documents.find((document: Record<string, unknown>) => document.file === 'earlier.md')
+    const pendingReview = prepared.documents.find((document: Record<string, unknown>) => document.file === 'review.md')
+    const waiting = JSON.parse(await executeFileManagementTool('tag_forge_apply_batch', {
+      batchId: prepared.batchId,
+      items: [{
+        itemId: earlier.itemId,
+        expectedRevision: earlier.expectedRevision,
+        proposals: [
+          proposal('form', '参考资料', '资料'),
+          proposal('domain', 'AI工作流', 'AI 工作流'),
+        ],
+      }, {
+        itemId: pendingReview.itemId,
+        expectedRevision: pendingReview.expectedRevision,
+        proposals: [
+          proposal('form', '参考资料', '资料'),
+          proposal('domain', 'AI工作流', 'AI 工作流'),
+          proposal('domain', '俄国文学', '俄国文学', 0.8),
+        ],
+      }],
+    }, context))
+    assert.equal(waiting.reviewRequired, true)
+
+    const externallyEdited = `${await readFile(stablePath, 'utf8')}\n\n用户在审核期间补充的内容。`
+    await writeFile(stablePath, externallyEdited)
+    await searchEngine.indexDocument(root, stablePath, externallyEdited)
+
+    insertSubmittedReviewCard(db, waiting, {
+      cardId: 'auq-review-drift-1',
+      runId: context.runId,
+      scopeId: context.scopeId,
+      selected: [],
+    })
+    const reviewed = JSON.parse(await executeFileManagementTool('tag_forge_review_batch', {
+      batchId: prepared.batchId,
+      confirmationCardId: 'auq-review-drift-1',
+    }, context))
+    assert.equal(reviewed.done, false)
+    assert.equal(reviewed.transactionConfirmed, null)
+    assert.equal(reviewed.remaining, 1)
+    assert.equal(reviewed.documents[0].file, 'earlier.md')
+    assert.equal(await readFile(stablePath, 'utf8'), externallyEdited)
+
+    const recovered = JSON.parse(await executeFileManagementTool('tag_forge_apply_batch', {
+      batchId: prepared.batchId,
+      items: [{
+        itemId: reviewed.documents[0].itemId,
+        expectedRevision: reviewed.documents[0].expectedRevision,
+        proposals: [
+          proposal('form', '参考资料', '资料'),
+          proposal('domain', 'AI工作流', 'AI 工作流'),
+        ],
+      }],
+    }, context))
+    assert.equal(recovered.done, true, JSON.stringify(recovered))
+    assert.equal(recovered.transactionConfirmed?.confirmed, true)
+  } finally {
+    db.close()
+  }
+})
+
+test('the final batch write reopens any earlier completed file that changed', async (t) => {
+  if (skipIfSqliteUnavailable(t, 'tag-forge-batch')) return
+  const db = openDb()
+  try {
+    const root = await mkdtemp(join(tmpdir(), 'tag-forge-terminal-drift-root-'))
+    const store = await mkdtemp(join(tmpdir(), 'tag-forge-terminal-drift-state-'))
+    for (let index = 0; index < 5; index += 1) {
+      await writeFile(join(root, `${index}.md`), `# AI 工作流资料 ${index}\n\nAI 工作流正文 ${index}。`)
+    }
+    const searchEngine = new SearchEngine(db, { fts5Available: false })
+    const context = { searchEngine, workspaceRoots: [root], organizeStoreDir: store, runId: 'run-terminal-drift' }
+    const prepared = JSON.parse(await executeFileManagementTool('tag_forge_prepare_batch', { rootPath: root, limit: 4 }, context))
+    assert.equal(prepared.documents.length, 4)
+    const firstApply = JSON.parse(await executeFileManagementTool('tag_forge_apply_batch', {
+      batchId: prepared.batchId,
+      items: prepared.documents.map((document: Record<string, unknown>) => ({
+        itemId: document.itemId,
+        expectedRevision: document.expectedRevision,
+        proposals: [
+          proposal('form', '参考资料', '资料'),
+          proposal('domain', 'AI工作流', 'AI 工作流'),
+        ],
+      })),
+    }, context))
+    assert.equal(firstApply.completed, 4)
+    assert.equal(firstApply.remaining, 1)
+
+    const changedPath = join(root, prepared.documents[0].file)
+    const externallyEdited = `${await readFile(changedPath, 'utf8')}\n\n用户后续补充。`
+    await writeFile(changedPath, externallyEdited)
+    await searchEngine.indexDocument(root, changedPath, externallyEdited)
+
+    const finalPrepared = JSON.parse(await executeFileManagementTool('tag_forge_prepare_batch', { batchId: prepared.batchId }, context))
+    assert.equal(finalPrepared.documents.length, 1)
+    const finalApply = JSON.parse(await executeFileManagementTool('tag_forge_apply_batch', {
+      batchId: prepared.batchId,
+      items: [{
+        itemId: finalPrepared.documents[0].itemId,
+        expectedRevision: finalPrepared.documents[0].expectedRevision,
+        proposals: [
+          proposal('form', '参考资料', '资料'),
+          proposal('domain', 'AI工作流', 'AI 工作流'),
+        ],
+      }],
+    }, context))
+    assert.equal(finalApply.done, false)
+    assert.equal(finalApply.remaining, 1)
+    assert.equal(finalApply.transactionConfirmed, null)
+    assert.equal(await readFile(changedPath, 'utf8'), externallyEdited)
+
+    const resumed = JSON.parse(await executeFileManagementTool('tag_forge_prepare_batch', { batchId: prepared.batchId }, context))
+    assert.equal(resumed.documents.length, 1)
+    assert.equal(resumed.documents[0].file, prepared.documents[0].file)
   } finally {
     db.close()
   }
@@ -1017,7 +1311,7 @@ test('review capacity overflow is silently ignored and one card finishes the fol
   }
 })
 
-test('prepare resumes a persisted review decision after database commit without another card', async (t) => {
+test('prepare restores a persisted review decision without writing and explicit apply completes it', async (t) => {
   if (skipIfSqliteUnavailable(t, 'tag-forge-batch')) return
   const db = openDb()
   try {
@@ -1025,7 +1319,14 @@ test('prepare resumes a persisted review decision after database commit without 
     const store = await mkdtemp(join(tmpdir(), 'tag-forge-review-recovery-state-'))
     const path = join(root, 'recovery.md')
     await writeFile(path, '# 恢复资料\n\n恢复领域的正文。')
-    const context = { searchEngine: new SearchEngine(db, { fts5Available: false }), workspaceRoots: [root], organizeStoreDir: store, runId: 'run-review-recovery', scopeId: 'scope-review-recovery' }
+    const baseContext = { searchEngine: new SearchEngine(db, { fts5Available: false }), workspaceRoots: [root], organizeStoreDir: store, runId: 'run-review-recovery', scopeId: 'scope-review-recovery' }
+    const context = {
+      ...baseContext,
+      requestModuleToolAction: async (action: string) => {
+        assert.equal(isAllowedProductAction('tag_forge_apply_batch', action), true)
+        return { ok: true }
+      },
+    }
     const prepared = JSON.parse(await executeFileManagementTool('tag_forge_prepare_batch', { rootPath: root }, context))
     const waiting = JSON.parse(await executeFileManagementTool('tag_forge_apply_batch', {
       batchId: prepared.batchId,
@@ -1046,12 +1347,34 @@ test('prepare resumes a persisted review decision after database commit without 
       decisions: [{ proposalId: pending.proposalId, facet: pending.facet, label: pending.label, decision: 'approve' }],
     }
     await writeFile(statePath, JSON.stringify(state, null, 2))
-    new TagForgeRepository(db).reviewPending(pending.proposalId, 'approve')
 
-    const recovered = JSON.parse(await executeFileManagementTool('tag_forge_prepare_batch', { batchId: prepared.batchId }, context))
-    assert.equal(recovered.done, true)
+    let prepareActionCalls = 0
+    const recovered = JSON.parse(await executeFileManagementTool('tag_forge_prepare_batch', { batchId: prepared.batchId }, {
+      ...baseContext,
+      requestModuleToolAction: async (action: string) => {
+        prepareActionCalls += 1
+        assert.equal(isAllowedProductAction('tag_forge_prepare_batch', action), true)
+        return { ok: true }
+      },
+    }))
+    assert.equal(prepareActionCalls, 0)
+    assert.equal(recovered.done, false)
     assert.equal(recovered.reviewRequired, false)
-    assert.match(await readFile(path, 'utf8'), /恢复领域/)
+    assert.equal(recovered.documents.length, 1)
+    assert.equal(new TagForgeRepository(db).listOverlay().some((entry) => entry.label === '恢复领域'), true)
+
+    const completed = JSON.parse(await executeFileManagementTool('tag_forge_apply_batch', {
+      batchId: prepared.batchId,
+      items: [{
+        itemId: recovered.documents[0].itemId,
+        expectedRevision: recovered.documents[0].expectedRevision,
+        proposals: [proposal('form', '参考资料', '资料'), proposal('domain', '恢复领域', '恢复领域', 0.8)],
+      }],
+    }, context))
+    assert.equal(completed.done, true, JSON.stringify(completed))
+    assert.equal(completed.transactionConfirmed?.confirmed, true)
+    const tags = (await import('../shared/document-graph-parse')).parseDocumentGraph(await readFile(path, 'utf8')).frontmatter?.tags as string[]
+    assert.equal(tags.includes('恢复领域'), true)
   } finally {
     db.close()
   }

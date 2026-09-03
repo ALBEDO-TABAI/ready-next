@@ -214,12 +214,11 @@ test('ordinary workspace persistence rejects a different proxy key while the OAu
 test('explicit OAuth reconnect can rotate the proxy key and commit the matching profile', async () => {
   const harness = createHarness()
   await harness.service.ensureReady(['gpt-5.6-sol'], PROXY_API_KEY)
-  const reconnecting = harness.service.connect(undefined, [], {
+  const reconnecting = harness.service.connect(undefined, {
     beforeRestart: () => {
       harness.repository.setAIWorkspace(removeChatGptOAuthProfile(harness.repository.getAIWorkspace()))
       return {
         existingProxyApiKey: ROTATED_PROXY_API_KEY,
-        savedModels: ['gpt-5.6-terra'],
       }
     },
     afterReady: (status) => {
@@ -451,11 +450,11 @@ test('failed reconnect cleanup and a stale non-OAuth-active save cannot restore 
   }
   harness.failNextLogin()
   harness.blockRemove()
-  const reconnecting = harness.service.connect(undefined, [], {
+  const reconnecting = harness.service.connect(undefined, {
     beforeRestart: () => {
       const latest = harness.repository.getAIWorkspace()
       harness.repository.setAIWorkspace(removeChatGptOAuthProfile(latest))
-      return { existingProxyApiKey: PROXY_API_KEY, savedModels: ['gpt-5.6-sol'] }
+      return { existingProxyApiKey: PROXY_API_KEY }
     },
     afterReady: () => { throw new Error('must_not_commit_failed_connect') },
   })
@@ -478,11 +477,11 @@ test('failed reconnect cleanup and a stale non-OAuth-active save cannot restore 
 test('a paused OAuth reconnect rejects send before persistence and admission reopens after commit', async () => {
   const harness = createHarness()
   await harness.service.ensureReady(['gpt-5.6-sol'], PROXY_API_KEY)
-  const reconnecting = harness.service.connect(undefined, [], {
+  const reconnecting = harness.service.connect(undefined, {
     beforeRestart: () => {
       const latest = harness.repository.getAIWorkspace()
       harness.repository.setAIWorkspace(removeChatGptOAuthProfile(latest))
-      return { existingProxyApiKey: PROXY_API_KEY, savedModels: ['gpt-5.6-sol'] }
+      return { existingProxyApiKey: PROXY_API_KEY }
     },
     afterReady: (status) => {
       harness.repository.setAIWorkspace(upsertChatGptOAuthProfile(

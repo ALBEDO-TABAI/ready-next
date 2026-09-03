@@ -27,6 +27,7 @@ export function parseRSSAutoRefreshInterval(value: string | null | undefined): n
 
 export interface RSSAutoRefreshSnapshot {
   running: boolean
+  status: 'idle' | 'paused' | 'running' | 'completed' | 'completed_with_warnings' | 'failed'
   intervalMs: number
   nextRunAt: string | null
   completedAt: string | null

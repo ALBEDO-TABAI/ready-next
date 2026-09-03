@@ -14,6 +14,7 @@ import {
   buildChatHeaderMenuItemStyle,
 } from './chatHeaderMenuStyles'
 import { subscribeWorkbenchWindowResize } from '../../modules/workbench/windowResize'
+import type { LifecycleOperationProjectionV2 } from '../../../shared/ipc-contracts/agent-lifecycle-snapshot'
 
 interface ConversationChannelOption {
   key: string
@@ -33,6 +34,7 @@ interface ChatHeaderProps {
   currentConversationAvailable: boolean
   lifecyclePendingAction: 'creating' | 'resetting' | 'stopping' | 'closing' | 'compacting' | null
   lifecycleUncertainty: 'stop' | 'close' | 'reset' | 'compaction' | null
+  lifecycleActions?: LifecycleOperationProjectionV2['actions'] | null
   /** Per-channel live sessions (keyed by `${sourceKind}:${sourceId}`), newest
    *  first. Drives the expanded history list so every session — including a
    *  fresh remote `/new` — is individually selectable. */
@@ -72,6 +74,7 @@ export default function ChatHeader({
   currentConversationAvailable,
   lifecyclePendingAction,
   lifecycleUncertainty,
+  lifecycleActions = null,
   sessionsByChannelKey,
   onLoadConversation,
   onDeleteConversation,
@@ -580,8 +583,9 @@ export default function ChatHeader({
             disabled={
               !currentConversationAvailable
               || Boolean(lifecyclePendingAction)
-              || lifecycleUncertainty === 'stop'
-              || lifecycleUncertainty === 'close'
+              || (!lifecycleActions
+                || (lifecycleActions.reset.availability !== 'ready'
+                  && lifecycleActions.manual_compact.availability !== 'ready'))
             }
             title={lifecyclePendingAction
               ? '会话操作进行中'
@@ -627,6 +631,7 @@ export default function ChatHeader({
             }}
             className="chat-header-floating-menu-item ready-floating-menu-item w-full flex items-center gap-2"
             style={buildChatHeaderMenuItemStyle({ selected: false })}
+            disabled={lifecycleActions?.reset.availability !== 'ready'}
           >
             <RotateCcw style={{ width: 14, height: 14 }} strokeWidth={2} />
             <span style={{ fontSize: 12.5, fontWeight: 500 }}>重置当前对话</span>
@@ -639,7 +644,7 @@ export default function ChatHeader({
             }}
             className="chat-header-floating-menu-item ready-floating-menu-item w-full flex items-center gap-2"
             style={buildChatHeaderMenuItemStyle({ selected: false })}
-            disabled={Boolean(lifecycleUncertainty)}
+            disabled={lifecycleActions?.manual_compact.availability !== 'ready'}
           >
             <Minimize2 style={{ width: 14, height: 14 }} strokeWidth={2} />
             <span style={{ fontSize: 12.5, fontWeight: 500 }}>压缩上下文</span>

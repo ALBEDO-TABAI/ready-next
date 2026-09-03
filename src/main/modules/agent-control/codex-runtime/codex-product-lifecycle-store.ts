@@ -7,6 +7,7 @@ import type { ExecutionHostResult } from '../contracts/run-contracts'
 import {
   CodexBindingRepository,
   CodexBindingRepositoryError,
+  type CodexActiveAliasBindingRead,
   type CodexLifecycleAction,
 } from './codex-binding-repository'
 import { digestCanonicalJson, resolveCodexNativeModelSettings } from './codex-model-gateway-contract'
@@ -30,6 +31,19 @@ export type IdleCloseSnapshot =
   | 'idle_never_started'
   | 'idle_ready_terminal_no_native'
   | 'idle_native_thread'
+
+function readExpectedForkedFromId(
+  repository: CodexBindingRepository,
+  binding: CodexActiveAliasBindingRead,
+): string | null {
+  if (binding.materializationKind !== 'native_fork') return null
+  const fork = repository.readNativeForkMaterialization(binding.threadBindingId)
+  if (!fork || fork.materializationState !== 'confirmed'
+    || fork.sourceCodexThreadId === binding.codexThreadId) {
+    throw new ReadyCodexLifecyclePortError('native_protocol_error')
+  }
+  return fork.sourceCodexThreadId
+}
 
 export async function retireCodexAliasForClose(input: {
   repository: CodexBindingRepository
@@ -64,12 +78,13 @@ export async function retireCodexAliasForClose(input: {
       throw new ReadyCodexLifecyclePortError('native_protocol_error')
     }
     const thread = readback.thread
+    const expectedForkedFromId = readExpectedForkedFromId(input.repository, current)
     if (
       thread.id !== current.codexThreadId
       || thread.sessionId !== current.codexSessionId
       || thread.cwd !== current.isolatedThreadCwd
       || thread.parentThreadId !== null
-      || thread.forkedFromId !== null
+      || thread.forkedFromId !== expectedForkedFromId
       || thread.source !== 'vscode'
       || thread.threadSource !== null
     ) throw new ReadyCodexLifecyclePortError('native_protocol_error')
@@ -151,6 +166,8 @@ export function createLifecycleStore(input: {
   }) => void
   loadedThreads: Set<string>
   getActiveConnectionEpoch: () => string
+  currentRuntimeManifestDigest: string
+  currentProtocolSchemaDigest: string
   settleHostFailureCloseout: (identity: {
     aliasId: string
     aliasGeneration: number
@@ -184,7 +201,7 @@ export function createLifecycleStore(input: {
   ) => ReturnType<typeof resolveCodexNativeModelSettings>
 }): ReadyCodexLifecycleStore {
   return {
-    async createAlias(request) {
+    async createAlias(_request) {
       const boundHost = input.getHost()
       if (!boundHost) throw new Error('codex_runtime_host_unbound')
       const aliasId = `conv-${randomUUID()}`
@@ -224,9 +241,15 @@ export function createLifecycleStore(input: {
           },
         }
       }
-      return input.loadedThreads.has(binding.codexThreadId)
-        ? { state: 'loaded' as const, threadId: binding.codexThreadId }
-        : { state: 'resume_required' as const, threadId: binding.codexThreadId }
+      if (input.loadedThreads.has(binding.codexThreadId)) {
+        return { state: 'loaded' as const, threadId: binding.codexThreadId }
+      }
+      return {
+        state: 'resume_required' as const,
+        threadId: binding.codexThreadId,
+        expectedCwd: binding.isolatedThreadCwd,
+        expectedForkedFromId: readExpectedForkedFromId(input.repository, binding),
+      }
     },
     async bindStartedThread(binding) {
       if (
@@ -335,6 +358,61 @@ export function createLifecycleStore(input: {
         transactionDigest: result.transactionDigest,
       }
     },
+    async resetLegacyPreparedAlias({ identity }) {
+      const retiredAt = isoNow()
+      const result = input.repository.retireLegacyPreparedAlias({
+        aliasId: identity.aliasId,
+        expectedGeneration: identity.aliasGeneration,
+        action: 'reset',
+        retirementEvidenceDigest: digestCanonicalJson({
+          identity,
+          reason: 'legacy_prepared_contract',
+          retiredAt,
+        }),
+        retiredAt,
+        currentRuntimeManifestDigest: input.currentRuntimeManifestDigest,
+        currentProtocolSchemaDigest: input.currentProtocolSchemaDigest,
+      })
+      if (!result.newGeneration || !result.newThreadBindingId) {
+        throw new ReadyCodexLifecyclePortError('persistence_failed')
+      }
+      return {
+        ok: true,
+        action: 'reset',
+        aliasId: result.aliasId,
+        retiredGeneration: result.retiredGeneration,
+        newGeneration: result.newGeneration,
+        transactionDigest: result.transactionDigest,
+      }
+    },
+    async closeLegacyPreparedAlias({ identity }) {
+      const retiredAt = isoNow()
+      const result = input.repository.retireLegacyPreparedAlias({
+        aliasId: identity.aliasId,
+        expectedGeneration: identity.aliasGeneration,
+        action: 'close',
+        retirementEvidenceDigest: digestCanonicalJson({
+          identity,
+          reason: 'legacy_prepared_contract',
+          retiredAt,
+        }),
+        retiredAt,
+        onClosedInOpenTransaction: input.sealClosedConversationInOpenTransaction,
+      })
+      if (!result.scopeClosureEvidenceDigest) {
+        throw new ReadyCodexLifecyclePortError('persistence_failed')
+      }
+      return {
+        ok: true,
+        action: 'close',
+        closeoutDisposition: 'legacy_prepared_contract',
+        aliasId: result.aliasId,
+        retiredGeneration: result.retiredGeneration,
+        retirementTransactionDigest: result.transactionDigest,
+        archiveDisposition: 'not_required',
+        scopeClosureEvidenceDigest: result.scopeClosureEvidenceDigest,
+      }
+    },
     async quarantineUnknownManualCompaction({ identity, manualCompactionId }) {
       const current = input.repository.readActiveAliasBinding(identity.aliasId)
       const operation = input.repository.readLifecycleOperation(identity)
@@ -384,9 +462,12 @@ export function createLifecycleStore(input: {
               fenceReleaseRevision: read.fenceReleaseRevision,
               lifecycleAction: read.action,
               lifecycleActionEvidenceDigest: read.lifecycleActionEvidenceDigest,
-              retiredGeneration: read.retiredGeneration,
-              retirementTransactionDigest: read.retirementTransactionDigest,
-              archiveIntentDigest: read.archiveIntentDigest,
+              ...(read.retiredGeneration === null
+                ? {} : { retiredGeneration: read.retiredGeneration }),
+              ...(read.retirementTransactionDigest === null
+                ? {} : { retirementTransactionDigest: read.retirementTransactionDigest }),
+              ...(read.archiveIntentDigest === null
+                ? {} : { archiveIntentDigest: read.archiveIntentDigest }),
               scopeClosureEvidenceDigest: read.scopeClosureEvidenceDigest,
               newGeneration: read.newGeneration,
               newThreadBindingId: read.newThreadBindingId,

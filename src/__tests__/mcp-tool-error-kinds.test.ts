@@ -13,12 +13,7 @@ import {
   type McpToolCallRequest,
   type McpToolCallResult,
 } from '../main/modules/mcp/client'
-import {
-  authorizeMcpToolForScope,
-  registerMcpServer,
-  __resetMcpRegistryForTests,
-} from '../main/modules/mcp/registry'
-import { setCachedMcpOAuthToken, __resetMcpOAuthForTests } from '../main/modules/mcp/oauth'
+import { registerMcpServer, __resetMcpRegistryForTests } from '../main/modules/mcp/registry'
 import { executeMcpTool } from '../main/modules/tools/mcp-tools'
 import { ToolDomainError } from '../main/modules/tools/tool-errors'
 
@@ -33,7 +28,8 @@ class FakeMcpClient extends McpClient {
       serverId,
       transport: 'stdio',
       endpoint: 'test',
-      requiresAuthorization: false,
+      cwd: '/tmp',
+      dataDir: '/tmp',
     })
     this.handler = handler
   }
@@ -46,19 +42,18 @@ class FakeMcpClient extends McpClient {
 function resetMcpState() {
   __resetMcpRegistryForTests()
   __resetMcpClientsForTests()
-  __resetMcpOAuthForTests()
 }
 
 function registerPublicTool(serverId = 'mcp-test-server', toolName = 'mcp_test_action') {
   registerMcpServer({
     serverId,
     toolNames: [toolName],
-    requiresAuthorization: false,
+    approvalMode: 'writes',
   })
   return { serverId, toolName }
 }
 
-function registerAuthorizedTool() {
+function registerConnectedTool() {
   const serverId = 'mcp-authorized-server'
   const toolName = 'mcp_authorized_action'
   const sessionId = 'session-a'
@@ -66,14 +61,8 @@ function registerAuthorizedTool() {
   registerMcpServer({
     serverId,
     toolNames: [toolName],
-    requiresAuthorization: true,
+    approvalMode: 'writes',
   })
-  setCachedMcpOAuthToken(serverId, {
-    accessToken: 'token',
-    expiresAt: Date.now() + 60_000,
-    scopes: ['read'],
-  })
-  authorizeMcpToolForScope(serverId, toolName, sessionId, scopeId)
   return { serverId, toolName, sessionId, scopeId }
 }
 
@@ -104,20 +93,6 @@ test('executeMcpTool reports unregistered tools with the shared MCP code', async
   )
 })
 
-test('executeMcpTool reports scope denial with the shared MCP code', async () => {
-  resetMcpState()
-  registerMcpServer({
-    serverId: 'mcp-denied-server',
-    toolNames: ['mcp_denied_action'],
-    requiresAuthorization: true,
-  })
-
-  await assertMcpDomainError(
-    executeMcpTool('mcp_denied_action', {}, { sessionId: 'session-a', scopeId: 'scope-a' }),
-    MCP_TOOL_ERROR_KINDS.authorizationDenied.code,
-  )
-})
-
 test('executeMcpTool reports missing clients with the shared MCP code', async () => {
   resetMcpState()
   const { toolName } = registerPublicTool()
@@ -130,7 +105,7 @@ test('executeMcpTool reports missing clients with the shared MCP code', async ()
 
 test('executeMcpTool reports thrown client errors with the shared MCP code', async () => {
   resetMcpState()
-  const { serverId, toolName, sessionId, scopeId } = registerAuthorizedTool()
+  const { serverId, toolName, sessionId, scopeId } = registerConnectedTool()
   registerMcpClient(new FakeMcpClient(serverId, () => {
     throw new Error('client boom')
   }))
@@ -143,7 +118,7 @@ test('executeMcpTool reports thrown client errors with the shared MCP code', asy
 
 test('executeMcpTool reports non-ok client results without a kind with the shared MCP code', async () => {
   resetMcpState()
-  const { serverId, toolName, sessionId, scopeId } = registerAuthorizedTool()
+  const { serverId, toolName, sessionId, scopeId } = registerConnectedTool()
   registerMcpClient(new FakeMcpClient(serverId, () => ({
     ok: false,
     error: { message: 'no kind supplied' } as { kind: string; message: string },
@@ -157,7 +132,7 @@ test('executeMcpTool reports non-ok client results without a kind with the share
 
 test('executeMcpTool preserves external MCP error kinds returned by clients', async () => {
   resetMcpState()
-  const { serverId, toolName, sessionId, scopeId } = registerAuthorizedTool()
+  const { serverId, toolName, sessionId, scopeId } = registerConnectedTool()
   registerMcpClient(new FakeMcpClient(serverId, () => ({
     ok: false,
     error: {

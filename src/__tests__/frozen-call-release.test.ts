@@ -63,6 +63,19 @@ function createFakeDb(): FakeDb {
     rows,
     prepare(sql: string) {
       return {
+        get: (...params: unknown[]) => {
+          if (/FROM pending_confirmations WHERE id = \? LIMIT 1/i.test(sql)) {
+            return rows.get(String(params[0]))
+          }
+          if (/FROM pending_confirmations[\s\S]*status = 'pending'/i.test(sql)) {
+            const [scopeId, runId] = params
+            return [...rows.values()].some((row) => row.status === 'pending'
+              && (row.scope_id === scopeId || row.run_id === runId))
+              ? { present: 1 }
+              : undefined
+          }
+          return undefined
+        },
         run: (...params: unknown[]) => {
           if (/INSERT INTO pending_confirmations/i.test(sql)) {
             const [id, runId, taskId, scopeId, toolName, paramsJson, createdAt, expiresAt, status] = params
@@ -119,13 +132,36 @@ async function waitFor<T>(fn: () => T | null | undefined | false, timeoutMs = 30
   }
 }
 
-function answerPendingCard(sessionId: string, answer: string): void {
+function answerPendingCard(sessionId: string, answer: string, db?: FakeDb): void {
   const card = getAskUserQuestionsStore().findPendingForSession(sessionId)
   if (!card) throw new Error('no pending confirmation card to answer')
+  if (db) {
+    const row = [...db.rows.values()].find((candidate) => candidate.status === 'pending')
+    if (!row) throw new Error('no pending durable confirmation to settle')
+    row.status = answer === FROZEN_CALL_CONFIRM_OPTION ? 'released' : 'denied'
+    row.released_at = answer === FROZEN_CALL_CONFIRM_OPTION ? new Date().toISOString() : null
+  }
   getAskUserQuestionsStore().resolve(card.cardId, {
     answers: [{ id: FROZEN_CALL_QUESTION_ID, answer }],
     answeredAt: Date.now(),
   })
+}
+
+function persistResolvedCardToFakeDb(db: FakeDb, meta: Record<string, unknown>): boolean {
+  const ask = meta.askUserQuestions && typeof meta.askUserQuestions === 'object'
+    ? meta.askUserQuestions as Record<string, unknown>
+    : null
+  if (ask?.status !== 'submitted') return false
+  const confirmed = Array.isArray(ask.answers) && ask.answers.some((entry) => {
+    if (!entry || typeof entry !== 'object') return false
+    const answer = (entry as { answer?: unknown }).answer
+    return answer === FROZEN_CALL_CONFIRM_OPTION
+  })
+  const row = [...db.rows.values()].find((candidate) => candidate.status === 'pending')
+  if (!row) return false
+  row.status = confirmed ? 'released' : 'denied'
+  row.released_at = confirmed ? new Date().toISOString() : null
+  return true
 }
 
 // ---------------------------------------------------------------------------
@@ -171,7 +207,7 @@ test('freeze → confirm → release executes the frozen params byte-identical, 
   assert.deepEqual(audit.shape, { id: '<string>' }, 'shape carries key names + types only')
   assert.ok(!String(frozenRow.params_json).includes('evt-42'), 'no parameter value may persist')
 
-  answerPendingCard(sessionId, FROZEN_CALL_CONFIRM_OPTION)
+  answerPendingCard(sessionId, FROZEN_CALL_CONFIRM_OPTION, db)
   const output = await pending
 
   assert.equal(executed.length, 1, 'released call must execute exactly once')
@@ -192,7 +228,8 @@ test('freeze → confirm → release executes the frozen params byte-identical, 
 // ---------------------------------------------------------------------------
 
 test('release re-enters the same dispatch path and is stopped by admission when authorization was lost', async (t) => {
-  const store = new FrozenCallStore(createFakeDb())
+  const db = createFakeDb()
+  const store = new FrozenCallStore(db)
   registerFrozenCallStore(store)
   t.after(() => _resetFrozenCallBridgeForTests())
 
@@ -210,7 +247,7 @@ test('release re-enters the same dispatch path and is stopped by admission when 
 
   await waitFor(() => getAskUserQuestionsStore().findPendingForSession(sessionId))
   allowedToolNames.delete('calendar_delete_event') // 确认后恰好失去授权
-  answerPendingCard(sessionId, FROZEN_CALL_CONFIRM_OPTION)
+  answerPendingCard(sessionId, FROZEN_CALL_CONFIRM_OPTION, db)
   const output = await pending
 
   assert.equal(output.data?.errorKind, 'tool_restricted_this_turn',
@@ -359,7 +396,7 @@ test('store: a denial arriving after TTL records expiry instead of a false user 
   assert.equal(store.get(frozen.id), null)
 })
 
-test('restart sweep: leftover pending rows expire at construction even INSIDE their TTL (token was memory-only)', () => {
+test('construction is read-only and leaves orphan settlement to the explicit boot reconciler', () => {
   const db = createFakeDb()
   // Simulate a row left behind by a crashed/restarted process whose TTL has
   // NOT elapsed yet — without the unconditional sweep it would stay pending
@@ -374,8 +411,8 @@ test('restart sweep: leftover pending rows expire at construction even INSIDE th
     released_at: null,
   })
   void new FrozenCallStore(db)
-  assert.equal(db.rows.get('fc-orphan')?.status, 'expired',
-    'in-TTL orphan must be expired at construction — it can never be released')
+  assert.equal(db.rows.get('fc-orphan')?.status, 'pending',
+    'constructing a store must not mutate durable interaction truth')
 })
 
 test('abort while waiting → frozen call expired, structured timeout-cancel result, no late execution', async (t) => {
@@ -467,7 +504,7 @@ test('user denial feeds a structured confirmation_denied_by_user back to the mod
   }))
 
   await waitFor(() => getAskUserQuestionsStore().findPendingForSession(sessionId))
-  answerPendingCard(sessionId, FROZEN_CALL_DENY_OPTION)
+  answerPendingCard(sessionId, FROZEN_CALL_DENY_OPTION, db)
   const output = await pending
 
   assert.equal(output.data?.errorKind, 'confirmation_denied_by_user')
@@ -663,7 +700,7 @@ test('sensitive outbound send: secret never reaches the DB row or the confirmati
   const frozen = store.findPendingForSession(sessionId)
   assert.equal(frozen!.paramsJson, JSON.stringify(originalArgs))
 
-  answerPendingCard(sessionId, FROZEN_CALL_DENY_OPTION)
+  answerPendingCard(sessionId, FROZEN_CALL_DENY_OPTION, db)
   const output = await pending
   assert.equal(output.data?.errorKind, 'confirmation_denied_by_user')
 })
@@ -743,7 +780,8 @@ test('terminal frozen calls retain only a bounded id tombstone without parameter
 // ---------------------------------------------------------------------------
 
 test('second M2 call while one confirmation is pending → immediate denied_pending_confirmation', async (t) => {
-  registerFrozenCallStore(new FrozenCallStore(createFakeDb()))
+  const db = createFakeDb()
+  registerFrozenCallStore(new FrozenCallStore(db))
   t.after(() => _resetFrozenCallBridgeForTests())
 
   const sessionId = nextSessionId()
@@ -765,7 +803,7 @@ test('second M2 call while one confirmation is pending → immediate denied_pend
   assert.equal(second.data?.errorKind, 'denied_pending_confirmation',
     'second M2 must be denied immediately so the model reroutes')
 
-  answerPendingCard(sessionId, FROZEN_CALL_CONFIRM_OPTION)
+  answerPendingCard(sessionId, FROZEN_CALL_CONFIRM_OPTION, db)
   const firstOutput = await first
   assert.match(firstOutput.text, /ok/)
   assert.deepEqual(executed, ['calendar.deleteEvent'])
@@ -794,7 +832,7 @@ test('dedicated agent:frozenCall:respond IPC confirms a pending frozen call end 
   const deps: AskUserGroupDeps = {
     getDatabase: (() => ({
       getChatMessageById: () => null,
-      updateChatMessageMeta: () => true,
+      updateChatMessageMeta: (_id: string, meta: Record<string, unknown>) => persistResolvedCardToFakeDb(db, meta),
       listPendingAskUserQuestionsCards: () => [],
     })) as unknown as AskUserGroupDeps['getDatabase'],
     getEphemeralExecutionStore: (() => {
@@ -835,7 +873,8 @@ test('dedicated agent:frozenCall:respond IPC confirms a pending frozen call end 
 })
 
 test('dedicated IPC deny path rejects without execution', async (t) => {
-  const store = new FrozenCallStore(createFakeDb())
+  const db = createFakeDb()
+  const store = new FrozenCallStore(db)
   registerFrozenCallStore(store)
   t.after(() => _resetFrozenCallBridgeForTests())
 
@@ -847,7 +886,7 @@ test('dedicated IPC deny path rejects without execution', async (t) => {
   const deps: AskUserGroupDeps = {
     getDatabase: (() => ({
       getChatMessageById: () => null,
-      updateChatMessageMeta: () => true,
+      updateChatMessageMeta: (_id: string, meta: Record<string, unknown>) => persistResolvedCardToFakeDb(db, meta),
       listPendingAskUserQuestionsCards: () => [],
     })) as unknown as AskUserGroupDeps['getDatabase'],
     getEphemeralExecutionStore: (() => {

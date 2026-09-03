@@ -22,6 +22,12 @@ const PET_ROW: Record<PetAnimationState, number> = {
 }
 
 const EMPTY_ACTIVITY: PetActivitySnapshot = {
+  revision: 0,
+  kind: 'idle',
+  taskId: null,
+  scopeId: null,
+  runId: null,
+  messageId: null,
   busy: false,
   state: 'idle',
   title: '空闲',
@@ -91,6 +97,12 @@ export default function PetWindow() {
       setPets(snapshot.pets)
       setActivity(snapshot.activity)
       setStickyNotes(snapshot.stickyNotes || [])
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => window.electronAPI.pet.snapshotApplied({
+          revision: snapshot.revision,
+          contentDigest: snapshot.stickyNotesDigest,
+        }))
+      })
     }
 
     // fire-and-forget: pet snapshot bootstrap fetch; the onSnapshot subscription below will deliver the next pet update so a missed initial fetch self-heals.
@@ -212,7 +224,23 @@ export default function PetWindow() {
               <button
                 type="button"
                 className="pet-bubble-main"
-                onClick={() => setExpanded((current) => !current)}
+                onClick={() => {
+                  if (visibleActivity.taskId
+                    && visibleActivity.scopeId
+                    && visibleActivity.runId
+                    && visibleActivity.updatedAt) {
+                    void window.electronAPI.pet.openActivity({
+                      revision: visibleActivity.revision,
+                      taskId: visibleActivity.taskId,
+                      scopeId: visibleActivity.scopeId,
+                      runId: visibleActivity.runId,
+                      messageId: visibleActivity.messageId,
+                      updatedAt: visibleActivity.updatedAt,
+                    })
+                    return
+                  }
+                  setExpanded((current) => !current)
+                }}
               >
                 <span className={`pet-status-dot pet-status-${visibleActivity.state}`} />
                 <span className="pet-bubble-copy">

@@ -15,7 +15,12 @@ import {
   CodexBindingRepository,
   type CodexAdmittedBindingInput,
 } from '../main/modules/agent-control/codex-runtime/codex-binding-repository'
-import { digestCanonicalJson } from '../main/modules/agent-control/codex-runtime/codex-model-gateway-contract'
+import { createCodexUpstreamProfileSnapshot, digestCanonicalJson, instructionTranscriptDigest } from '../main/modules/agent-control/codex-runtime/codex-model-gateway-contract'
+import { CodexModelGatewayRepository } from '../main/modules/agent-control/codex-runtime/codex-model-gateway-authority'
+import type { CodexModelGatewayMetadata } from '../main/modules/agent-control/codex-runtime/codex-model-gateway'
+import { verifyCodexAutomaticCompactionEvidence } from '../main/modules/agent-control/codex-runtime/codex-automatic-compaction-evidence'
+import { buildTerminalNativeReadbackReceipt, resolveCodexHistoryObservation, resolveCodexTerminalFacts, terminalEvidenceRef, terminalNativeReadbackEvidenceRef, terminalGatewayEvidenceRef } from '../main/modules/agent-control/codex-runtime/codex-terminal-facts'
+import { projectCodexHeadActionProjection } from '../main/modules/agent-control/codex-runtime/codex-action-surface'
 import { CodexDefaultBootRecoveryActions } from '../main/modules/agent-control/codex-runtime/codex-boot-recovery-actions'
 import {
   buildCodexToolResponseDeliveryAttemptId,
@@ -26,8 +31,8 @@ import type {
   CodexTurn,
   CodexTurnStartParams,
 } from '../main/modules/agent-control/codex-runtime/codex-native-runtime'
-import type { PreparedCodexProductRun } from '../main/modules/agent-control/codex-runtime/codex-product-run-preparer'
-import { createCodexToolFixture } from './utils/codex-tool-fixture'
+import { CodexProductRunPreparer, type PreparedCodexProductRun } from '../main/modules/agent-control/codex-runtime/codex-product-run-preparer'
+import { createCodexToolFixtureFromDefinitions } from './utils/codex-tool-fixture'
 import {
   activateCodexGatewaySpawnConfig,
   buildCodexChildEnvironment,
@@ -60,8 +65,23 @@ type NativeDb = DatabaseConnection
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
 const scopeId = 'scope-e2e'
 const threadBindingId = 'thread-binding-e2e'
-const providerSnapshot = { route: 'fixture', credentialReferenceId: 'credential-e2e' }
-const providerSnapshotDigest = digestCanonicalJson(providerSnapshot)
+const upstream = createCodexUpstreamProfileSnapshot({
+  profileId: 'profile-e2e', maxRetries: 0,
+  config: {
+    provider: 'openai', baseUrl: 'http://127.0.0.1:10532/v1', apiKey: 'isolated-test-key',
+    model: 'ready-e0-model', agentProtocol: 'openai', wireApi: 'responses',
+    toolUseMode: 'on', nativeVideoMode: 'off',
+  },
+})
+const providerSnapshot = upstream.snapshot
+const providerSnapshotDigest = upstream.snapshotDigest
+const toolFixture = createCodexToolFixtureFromDefinitions([{
+  name: 'ready_read_probe', groupId: 'agent_interaction', domain: 'document', kind: 'read',
+  concurrency: 'parallel_read_safe', interruptBehavior: 'abort_signal', timeoutProfile: 'default',
+  supportsTextBridge: true, projectionHint: null, description: 'Read one deterministic fixture value.',
+  schema: { type: 'object', properties: { query: { type: 'string' } }, required: ['query'], additionalProperties: false },
+  executionVisibility: 'model', resultShape: 'json',
+}])
 
 function listen(server: Server): Promise<number> {
   return new Promise((resolvePort, reject) => {
@@ -188,65 +208,48 @@ function providerToolNames(body: Record<string, unknown>): string[] {
 
 function prepared(
   runId: string,
+  text: string,
   messageId: string,
   reservation: StartIdentityReservationSet,
+  actionAdmissionRef: PreparedCodexProductRun['ingress']['actionAdmissionRef'],
   targetScopeId = scopeId,
   targetAliasId = targetScopeId,
 ): PreparedCodexProductRun {
-  return {
-    preparationContract: 'codex_product_run_e1',
+  const result = new CodexProductRunPreparer().prepare({
     readyMemorySnapshot: disabledReadyMemorySnapshot(),
     taskId: `task-${runId}`,
     runId,
-    conversationAlias: { aliasId: targetAliasId, aliasGeneration: 1 },
-    ingressBinding: {
-      requestId: `request-${runId}`,
-      reservationSetId: reservation.reservationSetId,
-      reservationEvidenceDigest: reservation.reservationEvidenceDigest,
-    },
-    ingress: {
-      kind: 'user_ingress',
-      attemptKind: 'user_ingress',
-      originUserMessageId: messageId,
-      canonicalCurrentInputRef: {
-        messageId,
-        input: [{ type: 'text', text: `input-${runId}`, text_elements: [] }],
-      },
-      explicitResourceEnvelope: { input: [], resourceRefs: [] },
-      resourceAdditionalContext: [],
-    },
-    resourceAnchorDigest: `resource-${runId}`,
-    recoveredContextDigest: null,
-    ...createCodexToolFixture(['ready_read_probe']),
-    readyToolHostIdentity: {
-      scopeId: targetScopeId,
-      aliasId: targetAliasId,
-      authorizationOwnerId: `owner-${runId}`,
-      resourceOwnerId: `resource-owner-${runId}`,
-    },
+    requestId: `request-${runId}`,
+    scopeId: targetScopeId,
+    aliasId: targetAliasId,
+    aliasGeneration: 1,
+    taskOrigin: 'user_root',
+    runOrigin: 'initial',
+    reservationSetId: reservation.reservationSetId,
+    reservationEvidenceDigest: reservation.reservationEvidenceDigest,
+    originUserMessageId: messageId,
+    currentInput: [{ type: 'text', text, text_elements: [] }],
+    explicitResourceEnvelope: { input: [], resourceRefs: [] },
+    resourceAdditionalContext: [],
+    actionAdmissionRef,
+    uncommittedTailAssignments: [],
+    supersededUncommittedItems: [],
+    trustedWorkbenchMode: 'browser',
+    ...toolFixture,
+    authorizationOwnerId: `owner-${runId}`,
+    resourceOwnerId: `resource-owner-${runId}`,
     productBudgetSeed: {
       maxIterations: 8,
       maxToolCalls: 4,
       maxParallelToolGroups: 1,
-      lanes: {
-        ordinary: { maxIterations: 7, maxToolCalls: 4, maxParallelToolGroups: 1 },
-        delivery: { maxIterations: 0, maxToolCalls: 0, maxParallelToolGroups: 0 },
-        final: { maxIterations: 1 },
-      },
     },
-    neutralProjectionSeed: {
-      phase: 'planning', taskTitle: '正在理解需求', taskSummary: '正在整理任务边界',
-    },
-  }
+  })
+  assert.equal(result.ok, true)
+  if (!result.ok) throw new Error(result.code)
+  return result.prepared
 }
 
-function prepareParentRows(db: NativeDb, run: PreparedCodexProductRun): void {
-  const targetScopeId = run.readyToolHostIdentity.scopeId
-  const messageContent = run.ingress.canonicalCurrentInputRef.input
-    .filter((item) => item.type === 'text')
-    .map((item) => item.text)
-    .join('')
-  const parentMeta = { requestId: run.ingressBinding.requestId }
+function prepareScope(db: NativeDb, targetScopeId: string): void {
   db.prepare(`
     INSERT OR IGNORE INTO chat_conversations (
       id, agent, active_agent_id, handoff_generation, title, source_kind, source_id,
@@ -258,6 +261,13 @@ function prepareParentRows(db: NativeDb, run: PreparedCodexProductRun): void {
       .get(targetScopeId),
     { id: targetScopeId, message_visibility_epoch: 0 },
   )
+}
+
+function prepareParentRows(db: NativeDb, run: PreparedCodexProductRun): void {
+  const targetScopeId = run.readyToolHostIdentity.scopeId
+  const messageContent = run.ingress.canonicalCurrentInputRef.input
+    .filter((item) => item.type === 'text').map((item) => item.text).join('')
+  const parentMeta = { requestId: run.ingressBinding.requestId }
   db.prepare(`
     INSERT INTO chat_messages (id, conversation_id, role, content, timestamp, meta_json, message_visibility_epoch)
     VALUES (?, ?, 'user', ?, '2026-08-07T00:00:00.000Z', ?, 0)
@@ -390,6 +400,8 @@ test('real app-server uses durable bindings, exact tools, compaction, and proces
   const database = new DatabaseManager(true)
   const db = database.getRawDb()
   assert.ok(db)
+  const repository = new CodexBindingRepository(db)
+  const gateway = new CodexModelGatewayRepository(db, repository)
   const tempRoot = mkdtempSync(join(tmpdir(), 'ready-codex-e2-'))
   const gatewayTokens: string[] = []
   const priorCanary = process.env.READY_E2_HOST_SECRET_CANARY
@@ -409,7 +421,49 @@ test('real app-server uses durable bindings, exact tools, compaction, and proces
   let toolExecutions = 0
   let preBindingToolExecutions = 0
   const server = createServer(async (request, response) => {
-    const body = JSON.parse(await readBody(request)) as Record<string, unknown>
+    const rawBody = await readBody(request)
+    const body = JSON.parse(rawBody) as Record<string, unknown>
+    const raw = JSON.parse((body.client_metadata as Record<string, string>)['x-codex-turn-metadata']) as Record<string, unknown>
+    const metadata: CodexModelGatewayMetadata = {
+      requestKind: String(raw.request_kind), threadId: String(raw.thread_id), turnId: String(raw.turn_id),
+      readyRunId: typeof raw.readyRunId === 'string' ? raw.readyRunId : null,
+      toolSurfaceDigest: typeof raw.toolSurfaceDigest === 'string' ? raw.toolSurfaceDigest : null,
+      turnContractDigest: typeof raw.turnContractDigest === 'string' ? raw.turnContractDigest : null,
+      upstreamProfileSnapshotDigest: typeof raw.upstreamProfileSnapshotDigest === 'string' ? raw.upstreamProfileSnapshotDigest : null,
+      raw,
+    }
+    const requestDigest = digestCanonicalJson(body)
+    const inputItems = (body.input as unknown[]).map((item) => {
+      const strings = flattenText(item)
+      return { digest: digestCanonicalJson(item), totalStringCharacters: strings.reduce((total, text) => total + text.length, 0),
+        maxStringCharacters: Math.max(0, ...strings.map((text) => text.length)) }
+    })
+    gateway.resolveBinding({
+      metadata, requestDigest, receivedAt: new Date().toISOString(),
+      requestEvidence: {
+        instructionDigest: instructionTranscriptDigest(body.instructions, body.input),
+        inputDigest: digestCanonicalJson(body.input), inputItems,
+        inputTotalStringCharacters: inputItems.reduce((total, item) => total + item.totalStringCharacters, 0),
+        inputMaxStringCharacters: Math.max(0, ...inputItems.map((item) => item.maxStringCharacters)),
+        toolsDigest: digestCanonicalJson(body.tools), toolCount: (body.tools as unknown[]).length,
+        bodyBytes: Buffer.byteLength(rawBody), memoryHistoryRedactionDigest: digestCanonicalJson([]), memoryHistoryRedactedItemCount: 0,
+      },
+      validate: (binding) => {
+        assert.equal(digestCanonicalJson(body.tools), binding.toolSurfaceDigest)
+        return new Set(providerToolNames(body))
+      },
+    })
+    const sendEvents = (events: unknown[]) => {
+      const eventRecords = events as Array<Record<string, unknown>>
+      const terminal = eventRecords.at(-1)!.response as Record<string, unknown>
+      gateway.recordResponseEvidence({ metadata, requestDigest, completedAt: new Date().toISOString(), responseEvidence: {
+        responseId: String(terminal.id), terminalDigest: digestCanonicalJson(terminal),
+        outputDigest: digestCanonicalJson(eventRecords.filter((event) => event.type === 'response.output_item.done').map((event) => event.item)),
+        usageDigest: digestCanonicalJson(terminal.usage),
+      } })
+      response.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-cache' })
+      response.end(sse(events))
+    }
     providerRequests.push(body)
     providerSequence += 1
     activeProviderResponses += 1
@@ -422,11 +476,7 @@ test('real app-server uses durable bindings, exact tools, compaction, and proces
     }
     if (userText.includes('INTERRUPT_TOKEN') && !interruptFixtureConsumed) {
       interruptFixtureConsumed = true
-      response.writeHead(200, {
-        'content-type': 'text/event-stream; charset=utf-8',
-        'cache-control': 'no-cache',
-      })
-      response.end(sse(functionCallEvents(`resp-${providerSequence}`)))
+      sendEvents(functionCallEvents(`resp-${providerSequence}`))
       return
     }
     const shouldArmAutomaticCompaction = (
@@ -440,18 +490,16 @@ test('real app-server uses durable bindings, exact tools, compaction, and proces
           `answer-${providerSequence}`,
           shouldArmAutomaticCompaction ? 1_000_000 : 12,
         )
-    response.writeHead(200, {
-      'content-type': 'text/event-stream; charset=utf-8',
-      'cache-control': 'no-cache',
-    })
-    response.end(sse(events))
+    sendEvents(events)
   })
   const port = await listen(server)
   const gatewayUrl = `http://127.0.0.1:${port}/v1`
   const stderr: string[] = []
   let session: CodexSidecarSession | null = null
   try {
-    const repository = new CodexBindingRepository(db as unknown as DatabaseConnection)
+    gateway.storeSnapshot({
+      ...upstream, snapshotRef: 'profile-e2e', createdAt: new Date().toISOString(),
+    })
     const archiveDispatchPort = new CodexDurableThreadArchiveDispatchPort({
       store: new CodexThreadArchiveIntentStore(db as unknown as DatabaseConnection),
       now: () => new Date().toISOString(),
@@ -561,6 +609,7 @@ test('real app-server uses durable bindings, exact tools, compaction, and proces
 
     const reserveAndAdmit = (
       runId: string,
+      text: string,
       existingThread: boolean,
       targetScopeId = scopeId,
       targetThreadBindingId = threadBindingId,
@@ -570,13 +619,20 @@ test('real app-server uses durable bindings, exact tools, compaction, and proces
       const reservationResult = registry.reserve({ scopeId: targetScopeId, existingThread })
       assert.equal(reservationResult.ok, true)
       if (!reservationResult.ok) throw new Error(reservationResult.code)
-      const run = prepared(
-        runId,
-        `message-${runId}`,
-        reservationResult.reservation,
-        targetScopeId,
-        targetAliasId,
-      )
+      prepareScope(db, targetScopeId)
+      const head = projectCodexHeadActionProjection(repository.readHeadActionFacts({
+        aliasId: targetAliasId,
+        aliasGeneration: 1,
+        currentRuntimeManifestDigest: runtime.manifestDigest,
+        currentProtocolSchemaDigest: 'protocol-schema-e2e',
+      }))
+      const actionAdmissionRef = {
+        headProjectionDigest: head.evidenceDigest,
+        actionProjectionVersion: head.actionProjectionVersion,
+        actionHeadIdentity: head.actionHeadIdentity!,
+      }
+      const run = prepared(runId, text, `message-${runId}`, reservationResult.reservation,
+        actionAdmissionRef, targetScopeId, targetAliasId)
       prepareParentRows(db, run)
       repository.admitProductBindings(admission(
         run,
@@ -597,7 +653,7 @@ test('real app-server uses durable bindings, exact tools, compaction, and proces
       protocolSchemaDigest: 'protocol-schema-e2e',
       createdAt: new Date().toISOString(),
     })
-    const firstRun = reserveAndAdmit('run-first', false)
+    const firstRun = reserveAndAdmit('run-first', 'CALL_TOOL_TOKEN', false)
     await session.startAndInitialize({
       registry,
       snapshot: repository.readRecoverySnapshot(() => false),
@@ -624,23 +680,13 @@ test('real app-server uses durable bindings, exact tools, compaction, and proces
       runtimeWorkspaceRoots: [],
       environments: [],
       config: null,
-      dynamicTools: [{
-        type: 'function',
-        name: 'ready_read_probe',
-        description: 'Read one deterministic fixture value.',
-        inputSchema: {
-          type: 'object',
-          properties: { query: { type: 'string' } },
-          required: ['query'],
-          additionalProperties: false,
-        },
-      }],
+      dynamicTools: toolFixture.readyToolSurface.dynamicTools,
       developerInstructions: 'Use only the Ready tools declared for this thread.',
     })
     assert.equal(threadStarted.instructionSources.length, 0)
     assert.equal(threadStarted.thread.cwd, threadCwd)
     assert.equal(threadStarted.thread.sessionId, threadStarted.thread.id)
-    const closeRun = (
+    const closeRun = async (
       run: PreparedCodexProductRun,
       turn: CodexTurn,
       projectionStatus: 'completed' | 'killed' = 'completed',
@@ -655,6 +701,10 @@ test('real app-server uses durable bindings, exact tools, compaction, and proces
       assert.ok(projectionStatus !== 'completed' || finalMessage?.type === 'agentMessage')
       const candidateText = finalMessage?.type === 'agentMessage' ? finalMessage.text : null
       const engineOutcome = projectionStatus === 'completed' ? 'completed' as const : 'interrupted' as const
+      const nativeThread = (await client.threadRead({ threadId: start.codexThreadId, includeTurns: true })).thread
+      const automatic = verifyCodexAutomaticCompactionEvidence({ gatewayRepository: gateway, readyRunId: run.runId,
+        codexThreadId: start.codexThreadId, codexTurnId: turn.id, upstreamProfileSnapshotDigest: providerSnapshotDigest,
+        productToolSurfaceDigest: run.readyToolSurface.toolSurfaceDigest, thread: nativeThread })
       repository.recordEngineTerminalCandidate({
         readyRunId: run.runId,
         codexThreadId: start.codexThreadId,
@@ -682,8 +732,9 @@ test('real app-server uses durable bindings, exact tools, compaction, and proces
           terminalReasonCandidate: projectionStatus === 'completed' ? 'done' : 'cancelled',
           abortInitiator: projectionStatus === 'completed' ? null : 'user',
           budgetState: {},
-          contextState: {},
+          contextState: { automaticCompactionExchanges: automatic ? [automatic] : [] },
           providerDiagnostics: {},
+          contextUsage: null,
           recoveryCheckpointRef: null,
           browserContinuationRef: null,
           browserProofRefs: [],
@@ -696,10 +747,40 @@ test('real app-server uses durable bindings, exact tools, compaction, and proces
         recordedAt: closeoutAt,
       })
       repository.recordToolPublicationReceipt({ readyRunId: run.runId, recordedAt: closeoutAt })
+      const engine = repository.readEngineTerminalCandidate(run.runId)!
+      assert.equal(engine.candidate.kind, 'native_terminal')
+      if (engine.candidate.kind !== 'native_terminal') throw new Error('native_candidate_missing')
+      const identity = { readyRunId: run.runId, readyScopeId: run.readyToolHostIdentity.scopeId,
+        messageVisibilityEpoch: 0, aliasGeneration: run.conversationAlias.aliasGeneration,
+        codexThreadId: start.codexThreadId, codexTurnId: turn.id }
+      const nativeReadback = buildTerminalNativeReadbackReceipt({ candidate: engine.candidate, prepared: run,
+        aliasGeneration: identity.aliasGeneration, messageVisibilityEpoch: 0,
+        connectionEpoch: repository.readLiveProcessLease()!.connectionEpoch, turnRevision: engine.revision, thread: nativeThread })
+      const evidence = [terminalEvidenceRef({ ...identity, kind: 'native_turn', revision: 1,
+        receiptId: `engine-terminal:${run.runId}`, digest: engine.candidateDigest,
+        ownerIdentity: { nativeTurnId: turn.id, terminalStatus: engineOutcome } }),
+      terminalNativeReadbackEvidenceRef({ ...identity, revision: nativeReadback.turnRevision,
+        receiptId: nativeReadback.receiptId, digest: nativeReadback.digest,
+        ownerIdentity: { connectionEpoch: nativeReadback.connectionEpoch, readRevision: nativeReadback.turnRevision,
+          verifiedThreadId: start.codexThreadId, verifiedTurnId: turn.id } }),
+      ...gateway.readTurnGatewayEvidence(identity).map((row) => terminalGatewayEvidenceRef({ ...identity,
+        revision: row.responseSequence ?? row.requestSequence, receiptId: row.receiptId,
+        digest: row.responseEvidenceDigest ?? row.requestEvidenceDigest,
+        ownerIdentity: { gatewayRequestReceiptId: row.receiptId, eventSequence: row.responseSequence ?? row.requestSequence } }))]
+      const history = resolveCodexHistoryObservation({ candidate: engine.candidate, prepared: run,
+        expectedClientUserMessageId: `client-message-${run.runId}`, thread: nativeThread, publicationDiverged: false,
+        gatewayEvidence: gateway.readTurnGatewayEvidence(identity) })
+      assert.equal(history.kind, projectionStatus === 'completed' ? 'continuation_safe' : 'diverged', JSON.stringify(history))
+      const terminalFacts = resolveCodexTerminalFacts({
+        product: { terminal: projectionStatus === 'completed' ? 'done' : 'interrupted',
+          terminalReason: projectionStatus === 'completed' ? 'done' : 'cancelled_runtime',
+          failureKind: projectionStatus === 'completed' ? null : 'cancelled', evidence },
+        history, historyEvidence: evidence, effect: { state: 'none', evidence: [] },
+      })
       const terminalMeta = {
         taskId: run.taskId,
         runId: run.runId,
-        terminalReason: projectionStatus === 'completed' ? 'done' : 'cancelled',
+        terminalReason: terminalFacts.product.terminalReason,
       }
       const messageId = `assistant:${run.taskId}:${run.runId}:terminal`
       const terminalContent = candidateText
@@ -716,6 +797,8 @@ test('real app-server uses durable bindings, exact tools, compaction, and proces
       try {
         db.prepare(`UPDATE task_projections SET status = ? WHERE task_id = ?`)
           .run(projectionStatus, run.taskId)
+        db.prepare('UPDATE run_meta SET status = ?, terminal_reason = ? WHERE run_id = ?')
+          .run(terminalFacts.product.terminal, terminalFacts.product.terminalReason, run.runId)
         db.prepare(`
           INSERT INTO chat_messages (id, conversation_id, role, content, timestamp, meta_json, message_visibility_epoch)
           VALUES (?, ?, 'assistant', ?, ?, ?, 0)
@@ -726,11 +809,14 @@ test('real app-server uses durable bindings, exact tools, compaction, and proces
           closeoutAt,
           JSON.stringify(terminalMeta),
         )
-        repository.completeCanonicalProductCloseoutInOpenTransaction({
+        const closeout = {
           readyRunId: run.runId,
           productTerminalDigest,
           closeoutAt,
-        })
+          terminalEvidence: { terminalFacts, nativeReadback },
+        }
+        if (history.kind === 'diverged') repository.completePublicationDivergenceCloseoutInOpenTransaction(closeout)
+        else repository.completeCanonicalProductCloseoutInOpenTransaction(closeout)
         db.exec('COMMIT')
       } catch (error) {
         db.exec('ROLLBACK')
@@ -742,6 +828,7 @@ test('real app-server uses durable bindings, exact tools, compaction, and proces
       text: string,
       targetCodexThreadId = threadStarted.thread.id,
     ) => {
+      assert.deepEqual(run.ingress.canonicalCurrentInputRef.input, [{ type: 'text', text, text_elements: [] }])
       const terminalPromise = waitForNotification(client, (notification) => (
         notification.method === 'turn/completed'
         && notification.params.threadId === targetCodexThreadId
@@ -758,11 +845,11 @@ test('real app-server uses durable bindings, exact tools, compaction, and proces
           },
         },
         environments: [],
-        input: [{ type: 'text', text, text_elements: [] }],
+        input: run.ingress.canonicalCurrentInputRef.input,
         additionalContext: {},
         responsesapiClientMetadata: {
           readyRunId: run.runId,
-          toolSurfaceDigest: 'tool-surface-e2e',
+          toolSurfaceDigest: run.readyToolSurface.toolSurfaceDigest,
           turnContractDigest: `turn-contract-${run.runId}`,
           upstreamProfileSnapshotDigest: providerSnapshotDigest,
         },
@@ -772,7 +859,7 @@ test('real app-server uses durable bindings, exact tools, compaction, and proces
       assert.equal(terminal.method, 'turn/completed')
       if (terminal.method !== 'turn/completed') throw new Error('terminal_missing')
       assert.equal(terminal.params.turn.id, started.turn.id)
-      closeRun(run, terminal.params.turn)
+      await closeRun(run, terminal.params.turn)
       return terminal.params.turn
     }
 
@@ -787,7 +874,7 @@ test('real app-server uses durable bindings, exact tools, compaction, and proces
     assert.equal(bootListed.data.filter((item) => item.id === threadStarted.thread.id).length, 1)
     client.sealBootReconciliation()
 
-    const secondRun = reserveAndAdmit('run-second', true)
+    const secondRun = reserveAndAdmit('run-second', 'SECOND_USER_TOKEN', true)
     await runProductTurn(secondRun, 'SECOND_USER_TOKEN')
     const secondRead = await client.threadRead({ threadId: threadStarted.thread.id, includeTurns: true })
     const clientIds = secondRead.thread.turns.flatMap((turn) => turn.items).flatMap((item) => (
@@ -796,17 +883,31 @@ test('real app-server uses durable bindings, exact tools, compaction, and proces
     assert.ok(clientIds.includes('client-message-run-first'))
     assert.ok(clientIds.includes('client-message-run-second'))
 
-    const interruptRun = reserveAndAdmit('run-interrupt', true)
+    const interruptBindingId = 'thread-binding-e2e-interrupt'
+    const interruptAliasId = 'alias-e2e-interrupt'
+    const interruptCwd = join(state.threadCwdRoot, interruptBindingId)
+    mkdirSync(interruptCwd, { recursive: true })
+    repository.createEmptyAliasGeneration({ threadBindingId: interruptBindingId, aliasId: interruptAliasId,
+      aliasGeneration: 1, readyScopeId: scopeId, runtimeManifestDigest: runtime.manifestDigest,
+      protocolSchemaDigest: 'protocol-schema-e2e', createdAt: new Date().toISOString() })
+    const interruptRun = reserveAndAdmit('run-interrupt', 'INTERRUPT_TOKEN', false,
+      scopeId, interruptBindingId, interruptCwd, interruptAliasId)
+    const interruptThread = await client.threadStart({
+      model: 'ready-e0-model', modelProvider: 'ready_gateway', allowProviderModelFallback: false,
+      cwd: interruptCwd, approvalPolicy: 'never', sandbox: 'read-only', runtimeWorkspaceRoots: [],
+      environments: [], config: null, dynamicTools: toolFixture.readyToolSurface.dynamicTools,
+      developerInstructions: 'Use only the Ready tools declared for this thread.',
+    })
     const interruptObserved = waitForNotification(client, (notification) => (
       notification.method === 'turn/started'
-      && notification.params.threadId === threadStarted.thread.id
+      && notification.params.threadId === interruptThread.thread.id
     ))
     const interruptedTerminal = waitForNotification(client, (notification) => (
       notification.method === 'turn/completed'
-      && notification.params.threadId === threadStarted.thread.id
+      && notification.params.threadId === interruptThread.thread.id
     ))
     const interruptStarted = await client.turnStart({
-      threadId: threadStarted.thread.id,
+      threadId: interruptThread.thread.id,
       clientUserMessageId: 'client-message-run-interrupt',
       collaborationMode: {
         mode: 'default',
@@ -817,11 +918,11 @@ test('real app-server uses durable bindings, exact tools, compaction, and proces
         },
       },
       environments: [],
-      input: [{ type: 'text', text: 'INTERRUPT_TOKEN', text_elements: [] }],
+      input: interruptRun.ingress.canonicalCurrentInputRef.input,
       additionalContext: {},
       responsesapiClientMetadata: {
         readyRunId: interruptRun.runId,
-        toolSurfaceDigest: 'tool-surface-e2e',
+        toolSurfaceDigest: interruptRun.readyToolSurface.toolSurfaceDigest,
         turnContractDigest: 'turn-contract-run-interrupt',
         upstreamProfileSnapshotDigest: providerSnapshotDigest,
       },
@@ -829,7 +930,7 @@ test('real app-server uses durable bindings, exact tools, compaction, and proces
     await interruptObserved
     await interruptToolEntered
     const interruptRequest = client.turnInterrupt({
-      threadId: threadStarted.thread.id,
+      threadId: interruptThread.thread.id,
       turnId: interruptStarted.turn.id,
     })
     await new Promise((resolveDispatch) => setTimeout(resolveDispatch, 100))
@@ -840,19 +941,21 @@ test('real app-server uses durable bindings, exact tools, compaction, and proces
     if (interrupted.method !== 'turn/completed') throw new Error('interrupt_terminal_missing')
     assert.equal(interrupted.params.turn.status, 'interrupted')
     await waitUntilAsync(async () => {
-      const read = await client.threadRead({ threadId: threadStarted.thread.id, includeTurns: true })
+      const read = await client.threadRead({ threadId: interruptThread.thread.id, includeTurns: true })
       return read.thread.status.type === 'idle' ? read : null
     })
-    closeRun(interruptRun, interrupted.params.turn, 'killed')
+    await closeRun(interruptRun, interrupted.params.turn, 'killed')
+    assert.equal(repository.readTerminalCloseoutEvidence(interruptRun.runId)!.terminalFacts.history.kind, 'diverged')
+    assert.notEqual(repository.readActiveAliasBinding(interruptAliasId)?.threadBindingId, interruptBindingId)
 
-    const postInterruptRun = reserveAndAdmit('run-post-interrupt', true)
+    const postInterruptRun = reserveAndAdmit('run-post-interrupt', 'POST_INTERRUPT_TOKEN', true)
     const postInterruptTurn = await runProductTurn(postInterruptRun, 'POST_INTERRUPT_TOKEN')
     assert.equal(postInterruptTurn.status, 'completed')
 
     const autoCompactRequestStart = providerRequests.length
-    const autoCompactArmRun = reserveAndAdmit('run-auto-compact-arm', true)
+    const autoCompactArmRun = reserveAndAdmit('run-auto-compact-arm', 'AUTO_COMPACT_ARM_TOKEN', true)
     await runProductTurn(autoCompactArmRun, 'AUTO_COMPACT_ARM_TOKEN')
-    const autoCompactObserveRun = reserveAndAdmit('run-auto-compact-observe', true)
+    const autoCompactObserveRun = reserveAndAdmit('run-auto-compact-observe', 'AUTO_COMPACT_OBSERVE_TOKEN', true)
     const collectedAfterCompaction = await new CodexTurnCollector(client).collect({
       readyTaskId: autoCompactObserveRun.taskId,
       readyRunId: autoCompactObserveRun.runId,
@@ -870,11 +973,11 @@ test('real app-server uses durable bindings, exact tools, compaction, and proces
           },
         },
         environments: [],
-        input: [{ type: 'text', text: 'AUTO_COMPACT_OBSERVE_TOKEN', text_elements: [] }],
+        input: autoCompactObserveRun.ingress.canonicalCurrentInputRef.input,
         additionalContext: {},
         responsesapiClientMetadata: {
           readyRunId: autoCompactObserveRun.runId,
-          toolSurfaceDigest: 'tool-surface-e2e',
+          toolSurfaceDigest: autoCompactObserveRun.readyToolSurface.toolSurfaceDigest,
           turnContractDigest: 'turn-contract-run-auto-compact-observe',
           upstreamProfileSnapshotDigest: providerSnapshotDigest,
         },
@@ -924,7 +1027,7 @@ test('real app-server uses durable bindings, exact tools, compaction, and proces
       (turn) => turn.id === collectedAfterCompaction.codexTurnId,
     )
     assert.ok(autoCompactTurn)
-    closeRun(autoCompactObserveRun, autoCompactTurn)
+    await closeRun(autoCompactObserveRun, autoCompactTurn)
 
     const secondScopeId = 'scope-e2e-second-root'
     const secondThreadBindingId = 'thread-binding-e2e-second-root'
@@ -941,6 +1044,7 @@ test('real app-server uses durable bindings, exact tools, compaction, and proces
     })
     const secondRootRun = reserveAndAdmit(
       'run-second-root',
+      'CONCURRENT_ROOT_TOKEN_CROSS_SCOPE_SECOND',
       false,
       secondScopeId,
       secondThreadBindingId,
@@ -956,17 +1060,7 @@ test('real app-server uses durable bindings, exact tools, compaction, and proces
       runtimeWorkspaceRoots: [],
       environments: [],
       config: null,
-      dynamicTools: [{
-        type: 'function',
-        name: 'ready_read_probe',
-        description: 'Read one deterministic fixture value.',
-        inputSchema: {
-          type: 'object',
-          properties: { query: { type: 'string' } },
-          required: ['query'],
-          additionalProperties: false,
-        },
-      }],
+      dynamicTools: toolFixture.readyToolSurface.dynamicTools,
       developerInstructions: 'Use only the Ready tools declared for this thread.',
     })
     assert.notEqual(secondThreadStarted.thread.id, threadStarted.thread.id)
@@ -986,6 +1080,7 @@ test('real app-server uses durable bindings, exact tools, compaction, and proces
     })
     const sameScopeRootRun = reserveAndAdmit(
       'run-same-scope-root',
+      'CONCURRENT_ROOT_TOKEN_SAME_SCOPE_SECOND',
       false,
       scopeId,
       sameScopeThreadBindingId,
@@ -1002,23 +1097,13 @@ test('real app-server uses durable bindings, exact tools, compaction, and proces
       runtimeWorkspaceRoots: [],
       environments: [],
       config: null,
-      dynamicTools: [{
-        type: 'function',
-        name: 'ready_read_probe',
-        description: 'Read one deterministic fixture value.',
-        inputSchema: {
-          type: 'object',
-          properties: { query: { type: 'string' } },
-          required: ['query'],
-          additionalProperties: false,
-        },
-      }],
+      dynamicTools: toolFixture.readyToolSurface.dynamicTools,
       developerInstructions: 'Use only the Ready tools declared for this thread.',
     })
     assert.notEqual(sameScopeThreadStarted.thread.id, threadStarted.thread.id)
     assert.equal(activeProviderResponses, 0)
     maxActiveProviderResponses = 0
-    const sameScopePrimaryRun = reserveAndAdmit('run-same-scope-primary-concurrent', true)
+    const sameScopePrimaryRun = reserveAndAdmit('run-same-scope-primary-concurrent', 'CONCURRENT_ROOT_TOKEN_SAME_SCOPE_PRIMARY', true)
     const [sameScopePrimaryTurn, sameScopeConcurrentTurn] = await Promise.all([
       runProductTurn(sameScopePrimaryRun, 'CONCURRENT_ROOT_TOKEN_SAME_SCOPE_PRIMARY'),
       runProductTurn(
@@ -1033,7 +1118,7 @@ test('real app-server uses durable bindings, exact tools, compaction, and proces
 
     assert.equal(activeProviderResponses, 0)
     maxActiveProviderResponses = 0
-    const primaryConcurrentRun = reserveAndAdmit('run-cross-scope-primary-concurrent', true)
+    const primaryConcurrentRun = reserveAndAdmit('run-cross-scope-primary-concurrent', 'CONCURRENT_ROOT_TOKEN_CROSS_SCOPE_PRIMARY', true)
     const [primaryConcurrentTurn, secondConcurrentTurn] = await Promise.all([
       runProductTurn(primaryConcurrentRun, 'CONCURRENT_ROOT_TOKEN_CROSS_SCOPE_PRIMARY'),
       runProductTurn(
@@ -1046,6 +1131,7 @@ test('real app-server uses durable bindings, exact tools, compaction, and proces
     assert.equal(secondConcurrentTurn.status, 'completed')
     assert.ok(maxActiveProviderResponses >= 2)
 
+    const preCompactionRead = await client.threadRead({ threadId: threadStarted.thread.id, includeTurns: true })
     repository.beginManualCompaction({
       manualCompactionId: 'manual-e2e',
       threadBindingId,
@@ -1054,10 +1140,10 @@ test('real app-server uses durable bindings, exact tools, compaction, and proces
       upstreamProfileSnapshotRef: 'profile-e2e',
       upstreamProfileSnapshotDigest: providerSnapshotDigest,
       providerSnapshot,
-      credentialReferenceId: 'credential-e2e',
+      credentialReferenceId: providerSnapshot.credentialReferenceId,
       expectedToolsDigest: digestCanonicalJson([]),
-      preDispatchThreadReadDigest: 'pre-dispatch-thread-read',
-      preDispatchTurnIds: [],
+      preDispatchThreadReadDigest: digestCanonicalJson(preCompactionRead.thread),
+      preDispatchTurnIds: preCompactionRead.thread.turns.map((turn) => turn.id),
       expiresAt: new Date(Date.now() + 20_000).toISOString(),
       createdAt: new Date().toISOString(),
     })
@@ -1069,6 +1155,7 @@ test('real app-server uses durable bindings, exact tools, compaction, and proces
     })
     const compactPeerRun = reserveAndAdmit(
       'run-manual-compact-peer',
+      'MANUAL_COMPACT_PEER_TOKEN',
       true,
       secondScopeId,
       secondThreadBindingId,
@@ -1104,16 +1191,19 @@ test('real app-server uses durable bindings, exact tools, compaction, and proces
     const compactTurn = compactRead.thread.turns.find((turn) => turn.id === manualEvidence.turnId)
     const readbackCompactionItems = compactTurn?.items.filter((item) => item.type === 'contextCompaction') || []
     assert.equal(readbackCompactionItems.length, 1)
+    const manualGateway = gateway.readManualCompactionGatewayEvidence({ manualCompactionId: 'manual-e2e',
+      codexThreadId: threadStarted.thread.id, codexTurnId: manualEvidence.turnId })
+    assert.ok(manualGateway)
     repository.consumeManualCompaction({
       manualCompactionId: 'manual-e2e',
       codexCompactionTurnId: manualEvidence.turnId,
       notificationContextCompactionItemId: manualEvidence.contextCompactionItemId,
       contextCompactionItemId: readbackCompactionItems[0].id,
-      threadReadDigest: JSON.stringify(compactRead.thread),
+      threadReadDigest: digestCanonicalJson(compactRead.thread),
       terminalEvidenceDigest: digestCanonicalJson(compactTurn),
-      gatewayRequestReceiptId: 'gateway-receipt-e2e',
-      gatewayRequestEvidenceDigest: 'gateway-request-evidence-e2e',
-      gatewayResponseEvidenceDigest: 'gateway-response-evidence-e2e',
+      gatewayRequestReceiptId: manualGateway.receiptId,
+      gatewayRequestEvidenceDigest: manualGateway.requestEvidenceDigest,
+      gatewayResponseEvidenceDigest: manualGateway.responseEvidenceDigest,
       consumedAt: new Date().toISOString(),
     })
     await session.getInboundBuffer().reconcileTurn({
@@ -1189,7 +1279,7 @@ test('real app-server uses durable bindings, exact tools, compaction, and proces
     const restartedResume = await client.threadResume({ threadId: threadStarted.thread.id })
     assert.equal(restartedResume.thread.id, threadStarted.thread.id)
     const restartRequestCount = providerRequests.length
-    const restartedRun = reserveAndAdmit('run-after-process-restart', true)
+    const restartedRun = reserveAndAdmit('run-after-process-restart', 'AFTER_PROCESS_RESTART_TOKEN', true)
     const restartedTurn = await runProductTurn(restartedRun, 'AFTER_PROCESS_RESTART_TOKEN')
     assert.equal(restartedTurn.status, 'completed')
     assert.deepEqual(

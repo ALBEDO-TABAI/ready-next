@@ -1,7 +1,7 @@
 import type { CodexBindingRepository } from './codex-binding-repository'
 import type { CodexStartDeliveryEvidenceResolver } from './codex-durable-start-dispatch'
 import { digestCanonicalJson } from './codex-model-gateway-contract'
-import type { CodexNativeRuntime, CodexThread } from './codex-native-runtime'
+import type { CodexNativeRuntime } from './codex-native-runtime'
 
 type ReadbackRuntime = Pick<CodexNativeRuntime, 'threadList' | 'threadRead'>
 
@@ -20,21 +20,10 @@ function isTypedRpcRejection(value: unknown): boolean {
     && value.message.trim().length > 0
 }
 
-function isExactRootThread(thread: CodexThread, cwd: string, source: string): boolean {
-  return thread.cwd === cwd
-    && thread.source === source
-    && thread.sessionId === thread.id
-    && thread.parentThreadId === null
-    && thread.forkedFromId === null
-    && thread.threadSource === null
-    && thread.modelProvider === 'ready_gateway'
-}
-
 export class CodexLiveStartRejectionResolver implements CodexStartDeliveryEvidenceResolver {
   constructor(private readonly deps: {
     runtime: ReadbackRuntime
     repository: Pick<CodexBindingRepository, 'readStartInboundIdentity'>
-    pinnedThreadSource: string
     threadListLimit: number
     stableZeroReadCount: number
     waitBetweenZeroReads: () => Promise<void>
@@ -80,19 +69,16 @@ export class CodexLiveStartRejectionResolver implements CodexStartDeliveryEviden
     }
   }
 
-  private async readStart(method: 'thread/start' | 'turn/start', bindingId: string): Promise<Readback> {
+  private async readStart(method: 'thread/start' | 'thread/fork' | 'turn/start', bindingId: string): Promise<Readback> {
     const identity = this.deps.repository.readStartInboundIdentity(method, bindingId)
-    if (identity.method === 'thread/start') {
+    if (identity.method !== 'turn/start') {
       const listed = await this.deps.runtime.threadList({
         limit: this.deps.threadListLimit,
         cwd: identity.expectedCwd,
         sourceKinds: ['vscode'],
       })
-      const candidates = listed.data.filter((thread) => (
-        isExactRootThread(thread, identity.expectedCwd, this.deps.pinnedThreadSource)
-      ))
       const payload = { method, bindingId, expectedCwd: identity.expectedCwd, listed }
-      return listed.nextCursor === null && candidates.length === 0
+      return listed.nextCursor === null && listed.data.length === 0
         ? { kind: 'zero', evidenceDigest: digestCanonicalJson(payload) }
         : { kind: 'nonzero_or_ambiguous', evidenceDigest: digestCanonicalJson(payload) }
     }

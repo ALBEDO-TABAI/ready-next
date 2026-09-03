@@ -150,7 +150,8 @@ test('write entry 2 reachability: the M3 card session option mints the grant; pl
   const { getAskUserQuestionsStore } = await import('../main/modules/tools/builtins/ask-user-questions-store')
 
   async function confirmVia(option: string, sessionId: string) {
-    const store = new FrozenCallStore(createFrozenCallAuditDb())
+    const auditDb = createFrozenCallAuditDb()
+    const store = new FrozenCallStore(auditDb)
     const pending = runFrozenCallConfirmation('feishu_message_send', { chat_id: 'oc_team' }, {
       mode: 'M3', action: 'confirm', ruleId: 'm3-send-external', designRef: 'x', reason: 'r',
     } as never, {
@@ -172,6 +173,7 @@ test('write entry 2 reachability: the M3 card session option mints the grant; pl
     if (!options.includes(FROZEN_CALL_SESSION_CONFIRM_OPTION)) {
       throw new Error('M3 card must offer the session-effective option')
     }
+    auditDb.settleLatest('released')
     askStore.resolve(card.cardId, { answers: [{ id: FROZEN_CALL_QUESTION_ID, answer: option }], answeredAt: Date.now() })
     return pending
   }

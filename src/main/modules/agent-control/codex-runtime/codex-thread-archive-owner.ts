@@ -49,12 +49,16 @@ function sameThreadDirectory(left: string, right: string): boolean {
   }
 }
 
-function exactArchivedThread(intent: CodexThreadArchiveIntentRead, thread: CodexThread): boolean {
+function exactArchivedThread(
+  intent: CodexThreadArchiveIntentRead,
+  thread: CodexThread,
+  lineage: ReturnType<CodexThreadArchiveIntentStore['readRetiredThreadLineage']>,
+): boolean {
   return thread.id === intent.codexThreadId
     && thread.sessionId === intent.codexSessionId
     && sameThreadDirectory(thread.cwd, intent.isolatedThreadCwd)
-    && thread.parentThreadId === null
-    && thread.forkedFromId === null
+    && thread.parentThreadId === lineage.parentThreadId
+    && thread.forkedFromId === lineage.forkedFromId
     && thread.source === 'vscode'
     && thread.threadSource === null
     && thread.modelProvider === 'ready_gateway'
@@ -171,6 +175,7 @@ export class CodexThreadArchiveCleanupOwner {
     const current = this.deps.store.readByThreadId(initial.codexThreadId)
     if (!current || current.state === 'acknowledged') return
     if (current.state !== 'pending') return
+    const lineage = this.deps.store.readRetiredThreadLineage(current)
     let readback: { thread: CodexThread }
     try {
       readback = await this.deps.runtime.threadRead({
@@ -180,7 +185,7 @@ export class CodexThreadArchiveCleanupOwner {
     } catch {
       return
     }
-    if (!exactArchivedThread(current, readback.thread) || !archivableThread(readback.thread)) {
+    if (!exactArchivedThread(current, readback.thread, lineage) || !archivableThread(readback.thread)) {
       return
     }
     try {
@@ -203,17 +208,18 @@ export class CodexThreadArchiveCleanupOwner {
   ): Promise<'acknowledged' | 'retry' | 'unknown'> {
     const reconciliationConnectionEpoch = this.deps.getConnectionEpoch()
     if (intent.lastAttemptConnectionEpoch === reconciliationConnectionEpoch) return 'unknown'
+    const lineage = this.deps.store.readRetiredThreadLineage(intent)
     const archived = await this.listAll(intent, true)
     const archivedMatches = archived.threads.filter((thread) => thread.id === intent.codexThreadId)
     if (archivedMatches.length > 0) {
-      if (archivedMatches.length !== 1 || !exactArchivedThread(intent, archivedMatches[0])) {
+      if (archivedMatches.length !== 1 || !exactArchivedThread(intent, archivedMatches[0], lineage)) {
         return 'unknown'
       }
       const readback = await this.deps.runtime.threadRead({
         threadId: intent.codexThreadId,
         includeTurns: true,
       })
-      if (!exactArchivedThread(intent, readback.thread) || !archivableThread(readback.thread)) {
+      if (!exactArchivedThread(intent, readback.thread, lineage) || !archivableThread(readback.thread)) {
         return 'unknown'
       }
       this.deps.store.acknowledge({
@@ -237,14 +243,14 @@ export class CodexThreadArchiveCleanupOwner {
     const unarchivedMatches = unarchived.threads.filter(
       (thread) => thread.id === intent.codexThreadId,
     )
-    if (unarchivedMatches.length !== 1 || !exactArchivedThread(intent, unarchivedMatches[0])) {
+    if (unarchivedMatches.length !== 1 || !exactArchivedThread(intent, unarchivedMatches[0], lineage)) {
       return 'unknown'
     }
     const readback = await this.deps.runtime.threadRead({
       threadId: intent.codexThreadId,
       includeTurns: true,
     })
-    if (!exactArchivedThread(intent, readback.thread) || !archivableThread(readback.thread)) {
+    if (!exactArchivedThread(intent, readback.thread, lineage) || !archivableThread(readback.thread)) {
       return 'unknown'
     }
     this.deps.store.recordUnarchivedReadback({

@@ -12,7 +12,11 @@
  */
 
 import { type McpClient } from './client'
-import { registerMcpServer, type McpToolCatalogEntry } from './registry'
+import {
+  registerMcpServer,
+  type McpApprovalMode,
+  type McpToolCatalogEntry,
+} from './registry'
 
 /** 每 server 暴露给模型的工具数硬上限（外部 server 动辄几十工具）。 */
 export const MAX_TOOLS_PER_SERVER = 24
@@ -24,6 +28,9 @@ export interface McpToolDiscoveryResult {
   tools: DiscoveredMcpTool[]
   /** 超出每 server 上限被裁剪的 canonical 名（no silent caps）。 */
   dropped?: string[]
+  resources?: Awaited<ReturnType<McpClient['listResources']>>
+  resourceTemplates?: Awaited<ReturnType<McpClient['listResourceTemplates']>>
+  metadata?: Awaited<ReturnType<McpClient['getMetadata']>>
   error?: { kind: string; message: string }
 }
 
@@ -37,6 +44,10 @@ export async function discoverToolsFromServer(
 ): Promise<McpToolDiscoveryResult> {
   try {
     const listed = await client.listTools()
+    const metadata = await client.getMetadata()
+    const hasResources = Boolean(metadata.capabilities.resources)
+    const resources = hasResources ? await client.listResources() : []
+    const resourceTemplates = hasResources ? await client.listResourceTemplates() : []
     const kept = listed.slice(0, MAX_TOOLS_PER_SERVER)
     const dropped = listed.slice(MAX_TOOLS_PER_SERVER).map((tool) => tool.name)
     return {
@@ -49,6 +60,9 @@ export async function discoverToolsFromServer(
         annotations: tool.annotations,
       })),
       ...(dropped.length > 0 ? { dropped } : {}),
+      resources,
+      resourceTemplates,
+      metadata,
     }
   } catch (error) {
     return {
@@ -64,18 +78,21 @@ export async function discoverToolsFromServer(
 
 /**
  * Helper used by initial bootstrap: take a discovery result, register
- * the server with the registry so `isAuthorized` can resolve future
+ * the server with the registry so `isMcpToolReady` can resolve future
  * tool names.（Phase M：目录 schema/annotations 一并入注册表，确认闸
  * 动态映射与 model-visible schema 都从这里读。）
  */
 export function applyDiscoveryResult(
   result: McpToolDiscoveryResult,
-  options?: { requiresAuthorization?: boolean },
+  options?: { approvalMode?: McpApprovalMode },
 ): void {
   registerMcpServer({
     serverId: result.serverId,
     toolNames: result.tools.map((tool) => tool.name),
-    requiresAuthorization: options?.requiresAuthorization ?? true,
+    approvalMode: options?.approvalMode ?? 'writes',
     toolCatalog: new Map(result.tools.map((tool) => [tool.name, tool])),
+    resources: result.resources || [],
+    resourceTemplates: result.resourceTemplates || [],
+    metadata: result.metadata,
   })
 }

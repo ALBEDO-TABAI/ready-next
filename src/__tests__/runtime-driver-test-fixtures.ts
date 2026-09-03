@@ -310,7 +310,7 @@ export function seedTwoSessions(opts: {
       lastMessageAt: null,
     }))
   useAgent.setState({
-    agents: [{ name: 'butler', displayName: '管家', avatar: '', status: 'idle', selected: true }],
+    agents: [{ name: 'butler', displayName: '管家', avatar: '', status: 'idle' }],
     currentAgent: 'butler',
     messages: activeSlice.messages,
     inputValue: activeSlice.inputValue,

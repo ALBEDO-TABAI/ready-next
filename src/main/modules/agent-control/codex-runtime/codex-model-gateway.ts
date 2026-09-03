@@ -16,6 +16,7 @@ import {
   responsesToolArgumentValidators,
   responsesToolNames,
   type CodexModelGatewayRequestEvidence,
+  type CodexModelGatewayFailureEvidence,
   type CodexModelGatewayResponseEvidence,
   type CodexToolArgumentValidator,
   type CodexUpstreamProfileSnapshot,
@@ -98,6 +99,12 @@ export interface CodexModelGatewayAuthority {
     responseEvidence: CodexModelGatewayResponseEvidence
     completedAt: string
   }): Promise<void>
+  recordResponseFailureEvidence?(input: {
+    metadata: CodexModelGatewayMetadata
+    requestDigest: string
+    failureEvidence: CodexModelGatewayFailureEvidence
+    failedAt: string
+  }): void
 }
 
 export interface CodexModelGatewayCredentialStore {
@@ -304,7 +311,22 @@ const DEFAULT_BODY_DEADLINE_MS = 10_000
 const DEFAULT_HEADERS_DEADLINE_MS = 120_000
 const DEFAULT_FIRST_BYTE_DEADLINE_MS = 120_000
 const DEFAULT_EVENT_IDLE_MS = 120_000
-const DEFAULT_POST_TERMINAL_DRAIN_MS = 1_000
+const CHATGPT_OAUTH_EVENT_IDLE_MS = 300_000
+
+export function resolveCodexGatewayEventIdleMs(input: {
+  snapshot: Pick<CodexUpstreamProfileSnapshot, 'profileId' | 'baseUrl' | 'wireApi'>
+  overrideMs?: number
+}): number {
+  if (input.overrideMs !== undefined) {
+    if (!Number.isSafeInteger(input.overrideMs) || input.overrideMs <= 0) {
+      throw new CodexModelGatewayError('gateway_configuration_invalid')
+    }
+    return input.overrideMs
+  }
+  return isChatGptOAuthResponsesSnapshot(input.snapshot)
+    ? CHATGPT_OAUTH_EVENT_IDLE_MS
+    : DEFAULT_EVENT_IDLE_MS
+}
 
 function isRecord(value: unknown): value is JsonObject {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
@@ -355,6 +377,10 @@ function parseMetadata(body: JsonObject): CodexModelGatewayMetadata {
     throw new CodexModelGatewayError('gateway_turn_metadata_invalid')
   }
   if (!isRecord(parsed)) throw new CodexModelGatewayError('gateway_turn_metadata_invalid')
+  const hasForkedFromThreadId = 'forked_from_thread_id' in parsed
+  if (hasForkedFromThreadId) {
+    nonEmptyString(parsed.forked_from_thread_id, 'gateway_forked_from_thread_id_invalid')
+  }
   const baseInnerKeys = [
     'installation_id',
     'session_id',
@@ -369,11 +395,15 @@ function parseMetadata(body: JsonObject): CodexModelGatewayMetadata {
     'sandbox',
     'sandbox_mode',
     'turn_started_at_unix_ms',
+    ...(hasForkedFromThreadId ? ['forked_from_thread_id'] : []),
   ]
   let metadataKind: CodexModelGatewayRequestKind
   try {
     metadataKind = classifyCodexModelGatewayRequest(parsed)
   } catch {
+    throw new CodexModelGatewayError('gateway_turn_metadata_shape_invalid')
+  }
+  if (metadataKind === 'automatic_compaction' && !hasRootTurnId) {
     throw new CodexModelGatewayError('gateway_turn_metadata_shape_invalid')
   }
   const readyKeys = [
@@ -1786,6 +1816,38 @@ function safeProviderHeader(
   return Number.isFinite(Date.parse(value)) ? value : null
 }
 
+function gatewayFailureClass(code: string): CodexModelGatewayFailureEvidence['failureClass'] {
+  if (/context|token|too_large|limit_exceeded/.test(code)) return 'context'
+  if (/provider|upstream_http|upstream_output|stream_error/.test(code)) return 'provider'
+  if (/invalid|mismatch|duplicate|changed|forbidden|missing|after_terminal/.test(code)) return 'protocol'
+  return 'transport'
+}
+
+function gatewayFailureEvidence(input: {
+  code: string
+  stage: CodexModelGatewayFailureEvidence['failureStage']
+  responseIdentitySeen: boolean
+  partialAssistantItemSeen: boolean
+  toolCallItemSeen: boolean
+  startedAtMs: number
+  eventCount: number
+  wireByteCount: number
+}): CodexModelGatewayFailureEvidence {
+  return {
+    failureClass: gatewayFailureClass(input.code),
+    failureStage: input.stage,
+    responseIdentitySeen: input.responseIdentitySeen,
+    partialAssistantItemSeen: input.partialAssistantItemSeen,
+    toolCallItemSeen: input.toolCallItemSeen,
+    elapsedMs: Math.max(0, Date.now() - input.startedAtMs),
+    eventCount: input.eventCount,
+    wireByteCount: input.wireByteCount,
+    causeCode: /^[a-z][a-z0-9_]{2,95}$/.test(input.code)
+      ? input.code
+      : 'gateway_stream_failed',
+  }
+}
+
 async function streamNativeResponses(input: {
   body: ReadableStream<Uint8Array>
   response: ServerResponse
@@ -1799,10 +1861,11 @@ async function streamNativeResponses(input: {
   maxEvents: number
   maxItemBytes: number
   eventIdleMs: number
-  postTerminalDrainMs: number
   admitToolResponse: (calls: readonly CodexModelGatewayToolResponseCall[]) => Promise<void>
   recordCompleted: (evidence: CodexModelGatewayResponseEvidence) => Promise<void>
+  recordFailed: (evidence: CodexModelGatewayFailureEvidence) => void
 }): Promise<void> {
+  const startedAtMs = Date.now()
   const decoder = new TextDecoder('utf-8', { fatal: true })
   const reader = input.body.getReader()
   const deltaFilters = new Map<string, {
@@ -1817,7 +1880,6 @@ async function streamNativeResponses(input: {
     maxStructuralEvents: input.maxEvents,
     maxItemHeldBytes: input.maxItemBytes,
     eventIdleMs: input.eventIdleMs,
-    terminalDrainMs: input.postTerminalDrainMs,
   })
   const state: NativeResponseState = {
     responseId: null,
@@ -2019,19 +2081,41 @@ async function streamNativeResponses(input: {
           }
         } else writeSafePayload(safePayload)
       }
+      if (state.terminal) {
+        await reader.cancel().catch(() => undefined)
+        break
+      }
     }
-    try {
-      buffer += decoder.decode()
-    } catch {
-      throw new CodexModelGatewayError('gateway_native_sse_utf8_invalid', 502)
+    if (!state.terminal) {
+      try {
+        buffer += decoder.decode()
+      } catch {
+        throw new CodexModelGatewayError('gateway_native_sse_utf8_invalid', 502)
+      }
+      if (buffer.trim()) throw new CodexModelGatewayError('gateway_native_sse_truncated', 502)
     }
-    if (buffer.trim()) throw new CodexModelGatewayError('gateway_native_sse_truncated', 502)
     if (!state.terminal) throw new CodexModelGatewayError('gateway_native_terminal_missing', 502)
     if (!terminalEvent) throw new CodexModelGatewayError('gateway_native_terminal_missing', 502)
     if (!terminalSucceeded) {
       deltaFilters.clear()
       heldFunctionTail.length = 0
       holdFromFunctionCall = false
+      const responseError = isRecord(terminalPayload?.response)
+        && isRecord(terminalPayload.response.error)
+        && typeof terminalPayload.response.error.code === 'string'
+        ? terminalPayload.response.error.code
+        : 'gateway_provider_terminal_failed'
+      const snapshot = policy.snapshot()
+      input.recordFailed(gatewayFailureEvidence({
+        code: responseError,
+        stage: 'post-terminal',
+        responseIdentitySeen: state.responseId !== null,
+        partialAssistantItemSeen: [...state.items.values()].some((item) => item.type === 'message'),
+        toolCallItemSeen: [...state.items.values()].some((item) => item.type === 'function_call'),
+        startedAtMs,
+        eventCount: snapshot.structuralEvents,
+        wireByteCount: snapshot.wireBytes,
+      }))
       input.response.write(terminalEvent)
       return
     }
@@ -2076,7 +2160,21 @@ async function streamNativeResponses(input: {
     await reader.cancel().catch(() => undefined)
     heldFunctionTail.length = 0
     holdFromFunctionCall = false
+    // silent-catch: abort upstream, persist response_failed, and emit the failed terminal; recordFailed errors still propagate.
     const code = error instanceof CodexModelGatewayError ? error.code : 'gateway_native_stream_failed'
+    const snapshot = policy.snapshot()
+    input.recordFailed(gatewayFailureEvidence({
+      code,
+      stage: state.terminal
+        ? 'terminal-validation'
+        : state.items.size > 0 ? 'stream-after-item' : 'stream-before-item',
+      responseIdentitySeen: state.responseId !== null,
+      partialAssistantItemSeen: [...state.items.values()].some((item) => item.type === 'message'),
+      toolCallItemSeen: [...state.items.values()].some((item) => item.type === 'function_call'),
+      startedAtMs,
+      eventCount: snapshot.structuralEvents,
+      wireByteCount: snapshot.wireBytes,
+    }))
     const responseId = state.responseId || `resp_ready_${randomBytes(16).toString('hex')}`
     input.response.write(`event: response.failed\ndata: ${JSON.stringify({
       type: 'response.failed',
@@ -2121,8 +2219,7 @@ export class CodexModelGateway {
   private readonly nativeMaxItemBytes: number
   private readonly headersDeadlineMs: number
   private readonly firstByteDeadlineMs: number
-  private readonly eventIdleMs: number
-  private readonly postTerminalDrainMs: number
+  private readonly eventIdleMsOverride: number | undefined
   private activeCapability: ActiveGatewayCapability | null
   private server: Server | null = null
   private port: number | null = null
@@ -2143,7 +2240,6 @@ export class CodexModelGateway {
     headersDeadlineMs?: number
     firstByteDeadlineMs?: number
     eventIdleMs?: number
-    postTerminalDrainMs?: number
     onUpstreamAttempt?: (attempt: number) => void
     proofSentinel?: string
     proofSentinels?: readonly string[]
@@ -2163,8 +2259,7 @@ export class CodexModelGateway {
     this.nativeMaxItemBytes = deps.nativeMaxItemBytes || DEFAULT_NATIVE_MAX_ITEM_BYTES
     this.headersDeadlineMs = deps.headersDeadlineMs || DEFAULT_HEADERS_DEADLINE_MS
     this.firstByteDeadlineMs = deps.firstByteDeadlineMs || DEFAULT_FIRST_BYTE_DEADLINE_MS
-    this.eventIdleMs = deps.eventIdleMs || DEFAULT_EVENT_IDLE_MS
-    this.postTerminalDrainMs = deps.postTerminalDrainMs || DEFAULT_POST_TERMINAL_DRAIN_MS
+    this.eventIdleMsOverride = deps.eventIdleMs
     if (
       !this.bootstrapBearerToken
       || this.maxBodyBytes <= 0
@@ -2175,8 +2270,8 @@ export class CodexModelGateway {
       || this.nativeMaxItemBytes <= 0
       || this.headersDeadlineMs <= 0
       || this.firstByteDeadlineMs <= 0
-      || this.eventIdleMs <= 0
-      || this.postTerminalDrainMs <= 0
+      || (this.eventIdleMsOverride !== undefined
+        && (!Number.isSafeInteger(this.eventIdleMsOverride) || this.eventIdleMsOverride <= 0))
     ) {
       throw new CodexModelGatewayError('gateway_configuration_invalid')
     }
@@ -2316,6 +2411,13 @@ export class CodexModelGateway {
     }
     const abortController = new AbortController()
     let completed = false
+    const forwardStartedAtMs = Date.now()
+    let admittedFailureContext: {
+      metadata: CodexModelGatewayMetadata
+      requestDigest: string
+    } | null = null
+    let admittedFailureRecorded = false
+    let admittedFailureStage: CodexModelGatewayFailureEvidence['failureStage'] = 'connect'
     const abortForRequest = () => abortController.abort()
     const abortForResponse = () => { if (!completed) abortController.abort() }
     request.once('aborted', abortForRequest)
@@ -2402,6 +2504,7 @@ export class CodexModelGateway {
       const sealedRequest = preparedRequest as PreparedRequest | null
       if (!sealedRequest) throw new CodexModelGatewayError('gateway_request_not_prepared', 409)
       const requestDigest = preparedReceipt.requestDigest
+      admittedFailureContext = { metadata, requestDigest }
       const allowedTools = binding.forceToolFreeFinalization
         ? new Set<string>()
         : validation.allowedTools
@@ -2460,6 +2563,15 @@ export class CodexModelGateway {
           completedAt: new Date().toISOString(),
         })
       }
+      const recordFailed = (failureEvidence: CodexModelGatewayFailureEvidence): void => {
+        this.deps.authority.recordResponseFailureEvidence?.({
+          metadata,
+          requestDigest,
+          failureEvidence,
+          failedAt: new Date().toISOString(),
+        })
+        admittedFailureRecorded = true
+      }
       if (
         this.lifecycle !== 'running'
         || this.activeCapability !== capability
@@ -2514,6 +2626,7 @@ export class CodexModelGateway {
           throw error
         }
         upstreamResponse = fetched.response
+        admittedFailureStage = 'headers'
         retriesUsed += fetched.retriesUsed
         if (!upstreamResponse.ok) break
         if (!isCodexUpstreamEventStream(upstreamResponse, binding.snapshot)) {
@@ -2602,6 +2715,11 @@ export class CodexModelGateway {
         connection: 'keep-alive',
         ...(upstreamRequestId ? { 'x-ready-upstream-request-id': upstreamRequestId } : {}),
       })
+      const eventIdleMs = resolveCodexGatewayEventIdleMs({
+        snapshot: binding.snapshot,
+        overrideMs: this.eventIdleMsOverride,
+      })
+      admittedFailureStage = 'stream-before-item'
       if (binding.snapshot.wireApi === 'chat/completions') {
         await streamChatAsResponses({
           body: upstreamResponseBody,
@@ -2614,10 +2732,20 @@ export class CodexModelGateway {
           maxBytes: this.nativeMaxBytes,
           maxEvents: this.nativeMaxEvents,
           maxItemBytes: this.nativeMaxItemBytes,
-          eventIdleMs: this.eventIdleMs,
-          postTerminalDrainMs: this.postTerminalDrainMs,
+          eventIdleMs,
           admitToolResponse,
           recordCompleted,
+          recordFailed: (observation) => recordFailed({
+            failureClass: gatewayFailureClass(observation.code),
+            failureStage: observation.stage,
+            responseIdentitySeen: observation.responseIdentitySeen,
+            partialAssistantItemSeen: observation.partialAssistantItemSeen,
+            toolCallItemSeen: observation.toolCallItemSeen,
+            elapsedMs: observation.elapsedMs,
+            eventCount: observation.eventCount,
+            wireByteCount: observation.wireByteCount,
+            causeCode: observation.code,
+          }),
         })
       } else {
         await streamNativeResponses({
@@ -2632,14 +2760,35 @@ export class CodexModelGateway {
           maxBytes: this.nativeMaxBytes,
           maxEvents: this.nativeMaxEvents,
           maxItemBytes: this.nativeMaxItemBytes,
-          eventIdleMs: this.eventIdleMs,
-          postTerminalDrainMs: this.postTerminalDrainMs,
+          eventIdleMs,
           admitToolResponse,
           recordCompleted,
+          recordFailed,
         })
       }
       completed = true
       response.end()
+    } catch (error) {
+      if (admittedFailureContext && !admittedFailureRecorded) {
+        const code = error instanceof CodexModelGatewayError
+          ? error.code
+          : 'gateway_request_forward_failed'
+        this.deps.authority.recordResponseFailureEvidence?.({
+          ...admittedFailureContext,
+          failureEvidence: gatewayFailureEvidence({
+            code,
+            stage: admittedFailureStage,
+            responseIdentitySeen: false,
+            partialAssistantItemSeen: false,
+            toolCallItemSeen: false,
+            startedAtMs: forwardStartedAtMs,
+            eventCount: 0,
+            wireByteCount: 0,
+          }),
+          failedAt: new Date().toISOString(),
+        })
+      }
+      throw error
     } finally {
       this.activeAbortControllers.delete(abortController)
       request.off('aborted', abortForRequest)

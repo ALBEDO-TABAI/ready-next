@@ -344,7 +344,12 @@ export interface SkillContextOrchestratorLike {
     managedPath?: string
     requiredBins?: readonly string[]
   }>
-  buildPreferredSkillToolNames?: (userText: string, sessionId?: string) => string[] | null
+  buildPreferredSkillToolNames?: (
+    userText: string,
+    sessionId?: string,
+    observedHint?: { id: string; name: string; applicableToolNames?: string[] } | null,
+  ) => string[] | null
+  observeCurrentReferenceSkillHint?: (sessionId?: string) => { id: string; name: string; applicableToolNames?: string[] } | null
   peekCurrentReferenceSkillHint?: (sessionId?: string) => { id: string; name: string; applicableToolNames?: string[] } | null
   getCurrentReferenceSkillHint?: (sessionId?: string) => { id: string; name: string; applicableToolNames?: string[] } | null
   rememberExplicitReferenceSkillHint?: (

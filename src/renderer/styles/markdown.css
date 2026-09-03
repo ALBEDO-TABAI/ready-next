@@ -569,6 +569,27 @@
   text-wrap: pretty;
 }
 
+.ready-agent-prose ol[data-ready-ordered-list='true'] {
+  display: block;
+  margin: 0;
+  padding-left: 1.65rem;
+  list-style-position: outside;
+  list-style-type: decimal;
+}
+
+.ready-agent-prose ol[data-ready-ordered-list='true'] > li {
+  display: list-item;
+  padding-left: 0.15rem;
+}
+
+.ready-agent-prose ol[data-ready-ordered-list='true'] ol[data-ready-ordered-list='true'] {
+  margin-top: 2px;
+}
+
+.ready-agent-prose [data-ready-list-continuation='true'] {
+  margin-top: 2px;
+}
+
 .ready-agent-link {
   color: inherit;
   text-decoration-color: color-mix(in srgb, currentColor 42%, transparent);

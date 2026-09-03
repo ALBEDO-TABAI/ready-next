@@ -14,15 +14,7 @@ import {
   rememberLastReferenceSkill,
 } from '../main/modules/agent-control/skills/skill-reference-hints'
 import type { AIModelConfig } from '../shared/ai-providers'
-import {
-  authorizeMcpToolForScope,
-  registerMcpServer,
-  __resetMcpRegistryForTests,
-} from '../main/modules/mcp/registry'
-import {
-  setCachedMcpOAuthToken,
-  __resetMcpOAuthForTests,
-} from '../main/modules/mcp/oauth'
+import { registerMcpServer, __resetMcpRegistryForTests } from '../main/modules/mcp/registry'
 import { __setSkillActionToolDefsForTests } from '../main/modules/tools/skills-tools'
 import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
 import { enabledSdkToolNames } from './utils/sdk-tool-visibility'
@@ -624,25 +616,6 @@ test('acceptance 11: SDK pet and file domains keep their product tool chains ava
   assert.deepEqual(result.usedTools, ['file_search', 'file_locate', 'pet_show_sticky_note'])
 })
 
-test('acceptance 12: SDK memory capture and search remain in the tool loop', async () => {
-  const run = createAcceptanceRun({
-    sessionId: 'accept-memory',
-    tools: createToolSet([
-      { name: 'memory_create', groupId: 'memory', domain: 'memory', kind: 'write' },
-      { name: 'memory_search', groupId: 'memory', domain: 'memory', kind: 'read' },
-    ]),
-    plan: [
-      { name: 'memory_create', input: { text: '用户偏好：验收要完整通过' } },
-      { name: 'memory_search', input: { query: '验收' } },
-    ],
-  })
-
-  const result = await run.send('记住这个偏好并查一下')
-
-  assert.equal(result.success, true)
-  assert.deepEqual(result.usedTools, ['memory_create', 'memory_search'])
-})
-
 test('acceptance 13: SDK session recall can search prior scoped context', async () => {
   const run = createAcceptanceRun({
     sessionId: 'accept-session-recall',
@@ -927,7 +900,7 @@ test('acceptance 21: SDK vision-disabled profiles remove image-dependent tools b
   registerMcpServer({
     serverId: 'accept-vision',
     toolNames: ['view_image', 'mcp_plain_text_action'],
-    requiresAuthorization: false,
+    approvalMode: 'writes',
   })
   const run = createAcceptanceRun({
     sessionId: 'accept-vision',
@@ -950,20 +923,13 @@ test('acceptance 21: SDK vision-disabled profiles remove image-dependent tools b
   }
 })
 
-test('acceptance 22: SDK MCP tools require both OAuth and per-scope authorization', async () => {
+test('acceptance 22: connected local MCP tools are available to the active turn', async () => {
   __resetMcpRegistryForTests()
-  __resetMcpOAuthForTests()
   registerMcpServer({
     serverId: 'accept-mcp',
     toolNames: ['mcp_acceptance_action'],
-    requiresAuthorization: true,
+    approvalMode: 'writes',
   })
-  setCachedMcpOAuthToken('accept-mcp', {
-    accessToken: 'token',
-    expiresAt: Date.now() + 60_000,
-    scopes: ['read'],
-  })
-  authorizeMcpToolForScope('accept-mcp', 'mcp_acceptance_action', 'accept-mcp-allowed', 'accept-mcp-allowed')
 
   const allowed = createAcceptanceRun({
     sessionId: 'accept-mcp-allowed',
@@ -981,10 +947,9 @@ test('acceptance 22: SDK MCP tools require both OAuth and per-scope authorizatio
     assert.equal(allowedResult.success, true)
     assert.equal(deniedResult.success, true)
     assert.equal(allowed.seenToolNames.includes('mcp_acceptance_action'), true)
-    assert.equal(denied.seenToolNames.includes('mcp_acceptance_action'), false)
+    assert.equal(denied.seenToolNames.includes('mcp_acceptance_action'), true)
   } finally {
     __resetMcpRegistryForTests()
-    __resetMcpOAuthForTests()
   }
 })
 

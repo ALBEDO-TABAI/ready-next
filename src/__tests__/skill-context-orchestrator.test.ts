@@ -138,7 +138,7 @@ test('SkillContextOrchestrator routes referenced local file sends to send-im', (
   )
 })
 
-test('SkillContextOrchestrator only prefers compact primitive for context-compact skill turns', () => {
+test('SkillContextOrchestrator leaves compact authorization to the selected skill manifest', () => {
   const contextCompactSkill: SkillState = {
     id: 'context-compact',
     name: 'Context Compact',
@@ -167,7 +167,7 @@ test('SkillContextOrchestrator only prefers compact primitive for context-compac
 
   const toolNames = orchestrator.buildPreferredSkillToolNames('使用 context compact 压缩当前上下文', 'scope-compact')
 
-  assert.ok(toolNames.includes('skill_compact_context'))
+  assert.equal(toolNames.includes('skill_compact_context'), false)
   assert.equal(toolNames.includes('skill_context_compact_read_skill'), false)
 })
 

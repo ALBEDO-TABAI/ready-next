@@ -32,7 +32,19 @@ test('product presentation reads one terminal snapshot and degrades an oversized
   db.exec(`
     CREATE TABLE codex_thread_bindings (
       thread_binding_id TEXT PRIMARY KEY,
-      ready_scope_id TEXT NOT NULL
+      ready_scope_id TEXT NOT NULL,
+      ready_conversation_alias TEXT NOT NULL,
+      alias_generation INTEGER NOT NULL,
+      revision INTEGER NOT NULL,
+      action_projection_sequence INTEGER NOT NULL,
+      thread_materialization_kind TEXT NOT NULL,
+      materialization_state TEXT NOT NULL,
+      history_seed_digest TEXT,
+      codex_thread_id TEXT,
+      continuation_blocked_at TEXT,
+      runtime_manifest_digest TEXT NOT NULL,
+      protocol_schema_digest TEXT NOT NULL,
+      retired_at TEXT
     );
     CREATE TABLE codex_turn_bindings (
       ready_run_id TEXT PRIMARY KEY,
@@ -47,6 +59,9 @@ test('product presentation reads one terminal snapshot and degrades an oversized
       ready_memory_snapshot_digest TEXT,
       ready_memory_read_receipt_json TEXT,
       ready_memory_read_receipt_digest TEXT,
+      engine_terminal_candidate_json TEXT,
+      terminal_facts_json TEXT,
+      terminal_facts_digest TEXT,
       ingress_json TEXT NOT NULL
     );
     CREATE TABLE run_meta (
@@ -62,6 +77,10 @@ test('product presentation reads one terminal snapshot and degrades an oversized
       content TEXT NOT NULL,
       timestamp TEXT NOT NULL,
       meta_json TEXT
+    );
+    CREATE TABLE chat_conversations (
+      id TEXT PRIMARY KEY,
+      message_visibility_epoch INTEGER NOT NULL
     );
     CREATE TABLE codex_tool_call_admissions (
       ready_run_id TEXT NOT NULL,
@@ -97,17 +116,63 @@ test('product presentation reads one terminal snapshot and degrades an oversized
       tool_response_digest TEXT,
       created_at TEXT NOT NULL
     );
+    CREATE TABLE pending_confirmations (
+      id TEXT PRIMARY KEY, run_id TEXT, status TEXT
+    );
+    CREATE TABLE codex_thread_dispatch_fences (
+      thread_binding_id TEXT NOT NULL,
+      operation_kind TEXT NOT NULL
+    );
+    CREATE TABLE codex_manual_compaction_bindings (
+      manual_compaction_id TEXT PRIMARY KEY,
+      thread_binding_id TEXT NOT NULL,
+      consumed_at TEXT,
+      abandoned_at TEXT,
+      abandoned_reconciled_at TEXT,
+      unknown_at TEXT,
+      created_at TEXT NOT NULL
+    );
   `)
   const now = '2026-08-18T00:00:00.000Z'
-  db.prepare('INSERT INTO codex_thread_bindings VALUES (?, ?)').run('thread-binding-1', 'scope-1')
+  db.prepare(`
+    INSERT INTO codex_thread_bindings (
+      thread_binding_id, ready_scope_id, ready_conversation_alias,
+      alias_generation, revision, action_projection_sequence,
+      thread_materialization_kind, materialization_state, history_seed_digest,
+      codex_thread_id, continuation_blocked_at,
+      runtime_manifest_digest, protocol_schema_digest, retired_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, NULL, ?, ?, NULL)
+  `).run(
+    'thread-binding-1', 'scope-1', 'scope-1', 1, 1, 0,
+    'legacy', 'confirmed', 'thread-1', 'runtime', 'protocol',
+  )
+  db.prepare('INSERT INTO chat_conversations VALUES (?, ?)').run('scope-1', 3)
   db.prepare(`
     INSERT INTO codex_turn_bindings (
       ready_run_id, ready_task_id, thread_binding_id, message_visibility_epoch, revision,
       product_terminal_digest, host_failure_product_terminal_digest,
-      publication_receipt_digest, ingress_json
-    ) VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, ?)
+      publication_receipt_digest, engine_terminal_candidate_json, ingress_json
+    ) VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?)
   `)
-    .run('run-1', 'task-1', 'thread-binding-1', 3, 7, 'a'.repeat(64), '{}')
+    .run(
+      'run-1',
+      'task-1',
+      'thread-binding-1',
+      3,
+      7,
+      'a'.repeat(64),
+      JSON.stringify({
+        contextUsage: {
+          usedInputTokens: 6_400,
+          windowTokens: 128_000,
+          ratio: 0.05,
+          windowSource: 'model',
+          source: 'last_model_request',
+          timestamp: now,
+        },
+      }),
+      '{}',
+    )
   db.prepare('INSERT INTO run_meta VALUES (?, ?, ?, ?)').run(
     'run-1',
     'error',
@@ -136,11 +201,20 @@ test('product presentation reads one terminal snapshot and degrades an oversized
   )
 
   const receipt = readProductTurnPresentation(db as unknown as DatabaseConnection, 'run-1')
+  assert.equal(receipt.contract, 'ready_product_turn_receipt_v3')
   assert.equal(receipt.terminal, 'error')
   assert.equal(receipt.tools[0]?.state, 'degraded')
-  assert.equal(receipt.failure?.kind, 'protocol')
-  assert.equal(receipt.failure?.effectState, 'confirmed')
+  assert.equal(receipt.failure, null)
+  assert.equal(receipt.actionProjection.retryEvidenceKind, 'unavailable_legacy')
   assert.equal(receipt.memory, null)
+  assert.deepEqual(receipt.contextUsage, {
+    usedInputTokens: 6_400,
+    windowTokens: 128_000,
+    ratio: 0.05,
+    windowSource: 'model',
+    source: 'last_model_request',
+    timestamp: now,
+  })
   assert.match(receipt.presentationDigest, /^[a-f0-9]{64}$/)
 
   const memoryContent = '回答保持简洁。'

@@ -215,7 +215,6 @@ export function setupSettingsIPC(options?: {
       logSettings('[oauth] authorize start')
       const status = await chatGptOAuth.connect(
         undefined,
-        [],
         {
           beforeRestart: () => {
             const latest = repository.getAIWorkspace()
@@ -226,7 +225,6 @@ export function setupSettingsIPC(options?: {
             repository.setAIWorkspace(removeChatGptOAuthProfile(latest))
             return {
               existingProxyApiKey: existingConfig?.apiKey,
-              savedModels: existingConfig?.modelIds || (existingConfig?.model ? [existingConfig.model] : []),
             }
           },
           afterReady: (readyStatus) => repository.setAIWorkspace(upsertChatGptOAuthProfile(

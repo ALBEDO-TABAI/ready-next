@@ -101,6 +101,46 @@ test('mode:none candidate primitives route the primitive to the candidate skillI
   }
 })
 
+test('folder export destination binds write/export to a host artifact root, not the candidate skill', async () => {
+  let structuredResult: unknown = null
+  let downstreamThrew = false
+  try {
+    structuredResult = await executeSkillTool(
+      'skill_write_artifact',
+      { relativePath: 'note.md', content: 'hello' },
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      {
+        authorization: buildExplicitNoSkillAuthorization('no_skill_signal', {
+          candidateSkillPrimitives: {
+            skillId: 'lark-cli',
+            primitives: ['skill_read_artifact', 'skill_run_shell'],
+          },
+        }),
+        requestEnvelope: {
+          resources: [{
+            kind: 'folder_reference',
+            source: 'folder_reference',
+            name: '工作内容',
+            path: '/tmp/ready-folder-export-test',
+            canRead: true,
+          }],
+        },
+        runId: 'req-folder-export-test',
+      },
+    )
+  } catch {
+    downstreamThrew = true
+  }
+  if (!downstreamThrew) {
+    const data = outputData(structuredResult)
+    assert.notEqual(data?.errorKind, 'primitive_no_skill_context')
+    assert.notEqual(data?.skillId, 'lark-cli')
+  }
+})
+
 test('mode:none (no_skill_signal) authorization returns primitive_no_skill_context', async () => {
   const result = await executeSkillTool(
     'skill_read_artifact',

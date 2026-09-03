@@ -39,7 +39,7 @@ describe('agent message preservation', () => {
     storage.clear()
     ;(globalThis as any).window.electronAPI = undefined
     useAgent.setState({
-      agents: [{ name: 'butler', displayName: '管家', avatar: '', status: 'idle', selected: true }],
+      agents: [{ name: 'butler', displayName: '管家', avatar: '', status: 'idle' }],
       messages: [],
       currentAgent: 'butler',
       currentScopeId: null,

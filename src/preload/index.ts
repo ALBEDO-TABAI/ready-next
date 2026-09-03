@@ -15,6 +15,7 @@ import type { RendererAgentMetricName } from '../shared/renderer-agent-metrics'
 import type { CanonicalAssistantMessage } from '../shared/ipc-contracts/canonical-message'
 import {
   parseIngressAdmittedEvent,
+  parseCodexActionSurfaceInvalidation,
   parseCreateSessionRequest,
   parseCreateSessionResult,
   parseLifecycleRequest,
@@ -35,13 +36,18 @@ import {
   type AgentRuntimeReadinessSnapshot,
 } from '../shared/ipc-contracts/agent-runtime-readiness'
 import {
-  parseLifecycleOperationProjection,
-  type LifecycleOperationProjection,
+  parseLifecycleOperationProjectionV2,
+  type LifecycleOperationProjectionV2,
 } from '../shared/ipc-contracts/agent-lifecycle-snapshot'
 import type { ModelPackDownloadUpdate, ModelPackId, ModelSource } from '../shared/model-pack-types'
 import type { RendererStateFlushOutcome } from '../shared/renderer-state-flush'
 import type { RuntimeStatus, RuntimeProvisionTaskSnapshot } from '../shared/runtime-provision-types'
-import type { PetActivitySnapshot, PetSettings, PetStickyNoteInput, PetWindowSnapshot } from '../shared/pet'
+import type {
+  PetActivityOpenIdentity,
+  PetSettings,
+  PetStickyNoteInput,
+  PetWindowSnapshot,
+} from '../shared/pet'
 import type {
   FileEmergenceGetSnapshotPayload,
   FileEmergenceRecordActivityPayload,
@@ -82,6 +88,7 @@ import {
   parseReadyMemoryPinRequest,
   parseReadyMemoryReadRequest,
   parseReadyMemoryResetRequest,
+  parseReadyMemoryStateChange,
   parseReadyMemoryUpdateRequest,
   parseReadyMemoryView,
   type ReadyMemoryAddRequest,
@@ -92,6 +99,7 @@ import {
   type ReadyMemoryReadRequest,
   type ReadyMemoryResetRequest,
   type ReadyMemoryUpdateRequest,
+  type ReadyMemoryStateChange,
 } from '../shared/ready-memory'
 
 const readAgentRuntimeReady = async (): Promise<AgentRuntimeReadinessSnapshot> => (
@@ -117,12 +125,11 @@ const invokeAgentRuntime = <T = unknown>(channel: string, ...args: unknown[]): P
   agentRuntimeInvokeGate.invoke(() => ipcRenderer.invoke(channel, ...args) as Promise<T>)
 )
 
-const invokeReadyMemory = async (channel: string, payload: unknown) => {
-  const result = await invokeAgentRuntime<{
-    success: boolean
-    data?: unknown
-    error?: string
-  }>(channel, payload)
+const parseReadyMemoryResponse = (result: {
+  success: boolean
+  data?: unknown
+  error?: string
+}) => {
   return result.success && result.data
     ? { ...result, data: parseReadyMemoryView(result.data) }
     : result
@@ -156,10 +163,20 @@ const agentAPI = {
   onRuntimeReady: subscribeAgentRuntimeReady,
   listScopeRuns: (payload?: { channelKey?: string; statuses?: string[]; limit?: number }) =>
     invokeAgentRuntime('agent:listScopeRuns', payload || {}),
-  readProductTurnPresentation: (readyRunId: string) =>
-    invokeAgentRuntime('agent:readProductTurnPresentation', { readyRunId }),
-  readProductTurnPresentations: (readyRunIds: string[]) =>
-    invokeAgentRuntime('agent:readProductTurnPresentations', { readyRunIds }),
+  readProductTurnPresentation: (
+    readyRunId: string,
+    requestedWorkbenchMode: 'browser' | 'document' | 'rss' | 'calendar',
+  ) => invokeAgentRuntime('agent:readProductTurnPresentation', {
+    readyRunId,
+    requestedWorkbenchMode,
+  }),
+  readProductTurnPresentations: (
+    readyRunIds: string[],
+    requestedWorkbenchMode: 'browser' | 'document' | 'rss' | 'calendar',
+  ) => invokeAgentRuntime('agent:readProductTurnPresentations', {
+    readyRunIds,
+    requestedWorkbenchMode,
+  }),
   readCodexLifecycleSnapshot: async (request: LifecycleRequest) => {
     const result = await invokeAgentRuntime('agent:readCodexLifecycleSnapshot', parseLifecycleRequest(request)) as {
       success: boolean
@@ -167,33 +184,51 @@ const agentAPI = {
       error?: string
     }
     return result.success && result.data
-      ? { ...result, data: parseLifecycleOperationProjection(result.data) as LifecycleOperationProjection }
+      ? { ...result, data: parseLifecycleOperationProjectionV2(result.data) as LifecycleOperationProjectionV2 }
       : result
   },
-  readReadyMemory: (request: ReadyMemoryReadRequest) => invokeReadyMemory(
-    'agent:readReadyMemory', parseReadyMemoryReadRequest(request),
+  readCodexHeadActionProjection: (request: LifecycleRequest) =>
+    invokeAgentRuntime('agent:readCodexHeadActionProjection', parseLifecycleRequest(request)),
+  readCodexActionSurface: (request: LifecycleRequest) =>
+    invokeAgentRuntime('agent:readCodexActionSurface', parseLifecycleRequest(request)),
+  readReadyMemory: async (request: ReadyMemoryReadRequest) => parseReadyMemoryResponse(
+    await invokeAgentRuntime('agent:readReadyMemory', parseReadyMemoryReadRequest(request)),
   ),
-  setReadyMemoryGlobalPolicy: (request: ReadyMemoryGlobalPolicyRequest) => invokeReadyMemory(
-    'agent:setReadyMemoryGlobalPolicy', parseReadyMemoryGlobalPolicyRequest(request),
+  setReadyMemoryGlobalPolicy: async (request: ReadyMemoryGlobalPolicyRequest) => parseReadyMemoryResponse(
+    await invokeAgentRuntime('agent:setReadyMemoryGlobalPolicy', parseReadyMemoryGlobalPolicyRequest(request)),
   ),
-  setReadyMemoryConversationPolicy: (request: ReadyMemoryConversationPolicyRequest) => invokeReadyMemory(
-    'agent:setReadyMemoryConversationPolicy', parseReadyMemoryConversationPolicyRequest(request),
+  setReadyMemoryConversationPolicy: async (request: ReadyMemoryConversationPolicyRequest) => parseReadyMemoryResponse(
+    await invokeAgentRuntime('agent:setReadyMemoryConversationPolicy', parseReadyMemoryConversationPolicyRequest(request)),
   ),
-  addReadyMemory: (request: ReadyMemoryAddRequest) => invokeReadyMemory(
-    'agent:addReadyMemory', parseReadyMemoryAddRequest(request),
+  addReadyMemory: async (request: ReadyMemoryAddRequest) => parseReadyMemoryResponse(
+    await invokeAgentRuntime('agent:addReadyMemory', parseReadyMemoryAddRequest(request)),
   ),
-  updateReadyMemory: (request: ReadyMemoryUpdateRequest) => invokeReadyMemory(
-    'agent:updateReadyMemory', parseReadyMemoryUpdateRequest(request),
+  updateReadyMemory: async (request: ReadyMemoryUpdateRequest) => parseReadyMemoryResponse(
+    await invokeAgentRuntime('agent:updateReadyMemory', parseReadyMemoryUpdateRequest(request)),
   ),
-  pinReadyMemory: (request: ReadyMemoryPinRequest) => invokeReadyMemory(
-    'agent:pinReadyMemory', parseReadyMemoryPinRequest(request),
+  pinReadyMemory: async (request: ReadyMemoryPinRequest) => parseReadyMemoryResponse(
+    await invokeAgentRuntime('agent:pinReadyMemory', parseReadyMemoryPinRequest(request)),
   ),
-  deleteReadyMemory: (request: ReadyMemoryDeleteRequest) => invokeReadyMemory(
-    'agent:deleteReadyMemory', parseReadyMemoryDeleteRequest(request),
+  deleteReadyMemory: async (request: ReadyMemoryDeleteRequest) => parseReadyMemoryResponse(
+    await invokeAgentRuntime('agent:deleteReadyMemory', parseReadyMemoryDeleteRequest(request)),
   ),
-  resetReadyMemory: (request: ReadyMemoryResetRequest) => invokeReadyMemory(
-    'agent:resetReadyMemory', parseReadyMemoryResetRequest(request),
+  resetReadyMemory: async (request: ReadyMemoryResetRequest) => parseReadyMemoryResponse(
+    await invokeAgentRuntime('agent:resetReadyMemory', parseReadyMemoryResetRequest(request)),
   ),
+  onReadyMemoryStateChanged: (callback: (event: ReadyMemoryStateChange) => void) => {
+    const handler = (_event: unknown, raw: unknown) => callback(parseReadyMemoryStateChange(raw))
+    ipcRenderer.on('agent:readyMemoryStateChanged', handler)
+    return () => { ipcRenderer.removeListener('agent:readyMemoryStateChanged', handler) }
+  },
+  onCodexActionSurfaceInvalidated: (
+    callback: (event: import('../shared/ipc-contracts/agent-runtime').CodexActionSurfaceInvalidation) => void,
+  ) => {
+    const handler = (_event: unknown, value: unknown) => callback(
+      parseCodexActionSurfaceInvalidation(value),
+    )
+    ipcRenderer.on('agent:codexActionSurfaceInvalidated', handler)
+    return () => { ipcRenderer.removeListener('agent:codexActionSurfaceInvalidated', handler) }
+  },
   listTaskProjections: (scopeId: string) =>
     invokeAgentRuntime('agent:listTaskProjections', { scopeId }),
   getTaskProjection: (taskId: string) =>
@@ -1325,12 +1360,24 @@ const petAPI = {
   show: () => ipcRenderer.invoke('pet:show'),
   hide: () => ipcRenderer.invoke('pet:hide'),
   setPet: (petId: string) => ipcRenderer.invoke('pet:setPet', petId),
-  updateActivity: (snapshot: PetActivitySnapshot) => ipcRenderer.invoke('pet:updateActivity', snapshot),
   resetPosition: () => ipcRenderer.invoke('pet:resetPosition'),
   moveBy: (delta: { dx: number; dy: number }) => ipcRenderer.invoke('pet:moveBy', delta),
   pushStickyNote: (note: PetStickyNoteInput) => ipcRenderer.invoke('pet:pushStickyNote', note),
   dismissStickyNote: (id: string) => ipcRenderer.invoke('pet:dismissStickyNote', id),
   clearStickyNotes: () => ipcRenderer.invoke('pet:clearStickyNotes'),
+  snapshotApplied: (applied: { revision: number; contentDigest: string }) => ipcRenderer.send('pet:snapshotApplied', applied),
+  openActivity: (activity: PetActivityOpenIdentity) => (
+    ipcRenderer.invoke('pet:openActivity', activity)
+  ),
+  activityOpened: (activity: PetActivityOpenIdentity) => (
+    ipcRenderer.send('pet:activityOpened', activity)
+  ),
+  scopeViewed: (scopeId: string) => ipcRenderer.send('pet:scopeViewed', scopeId),
+  onOpenActivity: (callback: (activity: PetActivityOpenIdentity) => void) => {
+    const handler = (_: unknown, activity: PetActivityOpenIdentity) => callback(activity)
+    ipcRenderer.on('pet:openActivity', handler)
+    return () => { ipcRenderer.removeListener('pet:openActivity', handler) }
+  },
   onSnapshot: (callback: (snapshot: PetWindowSnapshot) => void) => {
     const handler = (_: unknown, snapshot: PetWindowSnapshot) => callback(snapshot)
     ipcRenderer.on('pet:snapshot', handler)
@@ -1410,8 +1457,12 @@ const agentInteractionAPI = {
 // Phase M 管理面（2026-07-05）—— MCP 设置页：状态 / 保存配置 / 重连
 const mcpAPI = {
   getStatus: () => ipcRenderer.invoke('mcp:status'),
-  saveConfig: (json: string) => ipcRenderer.invoke('mcp:saveConfig', { json }),
+  saveConfig: (servers: unknown[]) => ipcRenderer.invoke('mcp:saveConfig', { servers }),
   reload: () => ipcRenderer.invoke('mcp:reload'),
+  listResources: (serverId: string) => ipcRenderer.invoke('mcp:listResources', { serverId }),
+  readResource: (payload: { serverId: string; uri: string; catalogGeneration: number }) => (
+    ipcRenderer.invoke('mcp:readResource', payload)
+  ),
 }
 
 contextBridge.exposeInMainWorld('electronAPI', {

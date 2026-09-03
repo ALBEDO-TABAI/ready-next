@@ -1,7 +1,7 @@
 /**
  * Stage T PR-T5 — MCP tool dispatcher.
  *
- * The model-visible MCP tool list is gated by `mcp/registry.isAuthorized`
+ * The model-visible MCP tool list is gated by `mcp/registry.isMcpToolReady`
  * (see `tool-registry.ts`). Once a `mcp_*` tool name is exposed AND the
  * model invokes it, dispatch routes here. We look up the owning server,
  * forward to the matching `McpClient.callTool`, and translate the
@@ -13,7 +13,7 @@ import { ToolDomainError } from './tool-errors'
 import { MCP_TOOL_ERROR_KINDS } from '../agent-control/contracts/error-kinds'
 import { createToolExecutionOutput, type ToolExecutionOutput } from '../agent-control/tools-runtime/tool-result-types'
 import { getMcpClient } from '../mcp/client'
-import { getMcpServerForTool, isAuthorized } from '../mcp/registry'
+import { getMcpServerForTool, isMcpToolReady } from '../mcp/registry'
 
 export interface McpToolContext {
   abortSignal?: AbortSignal
@@ -33,15 +33,12 @@ export async function executeMcpTool(
       `MCP tool ${toolName} is not registered against any server`,
     )
   }
-  // Stage T R5 fix: re-check isAuthorized at execution time. The model-
-  // visible filter (tool-registry list resolver) gates discovery, but
-  // tool-executor's allowlist may pass-through (empty allowlist case at
-  // tool-executor.ts:226), so MCP tools can be invoked without consent
-  // unless we re-verify here. scopeId is the canonical authorization key.
-  if (!isAuthorized(toolName, ctx.sessionId, ctx.scopeId)) {
+  // Recheck the connected catalog at execution time so a stale prepared
+  // surface cannot call a server that has since been removed.
+  if (!isMcpToolReady(toolName)) {
     throw new ToolDomainError(
-      MCP_TOOL_ERROR_KINDS.authorizationDenied.code,
-      `MCP tool ${toolName} not authorized for current scope`,
+      MCP_TOOL_ERROR_KINDS.toolUnregistered.code,
+      `MCP tool ${toolName} is no longer registered`,
       { serverId, toolName, sessionId: ctx.sessionId, scopeId: ctx.scopeId },
     )
   }

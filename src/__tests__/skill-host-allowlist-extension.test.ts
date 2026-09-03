@@ -51,6 +51,7 @@ test('detached lifecycle primitives stay outside the SDK safe primitive surface'
     'skill_start_detached',
     'skill_inspect_detached',
     'skill_cancel_detached',
+    'skill_inspect_run_state',
   ]) {
     assert.equal(visible.has(toolName), false, `${toolName} must remain host-owned`)
   }

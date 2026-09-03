@@ -27,6 +27,18 @@ class MemoryJournal implements ReadyToolActionReceiptPort {
     return { fresh: true }
   }
 
+  async beginBoundProductEffect(input: {
+    effectActionId: string
+    actionIdentityDigest: string
+    at: string
+  }) {
+    return this.begin({
+      readyActionId: input.effectActionId,
+      actionIdentityDigest: input.actionIdentityDigest,
+      at: input.at,
+    })
+  }
+
   async read(readyActionId: string): Promise<ReadyToolActionReceiptRead> {
     const confirmed = this.records.get(readyActionId)
     if (confirmed) return confirmed

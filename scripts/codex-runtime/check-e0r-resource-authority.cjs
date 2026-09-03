@@ -128,7 +128,6 @@ function evaluateE0rEvidence({ fixture, contract, runtimeManifest, oldReport, pa
     fixture.turnResults.map((result) => [result.caseId, result])
   )
   const dynamicAudit = fixture.authority.dynamicAudit
-  const mcpAudit = fixture.authority.mcpAudit
   const errorCode = contract.authority.staleRead.errorCode
   const rootThreadId = fixture.agents.root.threadId
   const noHistoryThreadId = fixture.agents.noHistoryChild.threadId

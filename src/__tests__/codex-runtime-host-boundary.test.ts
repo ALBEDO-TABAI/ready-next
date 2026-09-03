@@ -122,10 +122,12 @@ test('Codex-owned table mutations stay inside the declared storage owners', () =
     facade,
     internalToolStore,
     join(mainRoot, 'modules/agent-control/codex-runtime/codex-binding-schema.ts'),
+    join(mainRoot, 'modules/agent-control/codex-runtime/codex-tool-action-journal.ts'),
     join(mainRoot, 'modules/agent-control/codex-runtime/codex-thread-archive-cleanup.ts'),
     join(mainRoot, 'modules/agent-control/codex-runtime/codex-thread-archive-schema.ts'),
     join(mainRoot, 'modules/agent-control/codex-runtime/codex-thread-retirement-cleanup-migration.ts'),
     join(mainRoot, 'modules/agent-control/ready-memory/ready-memory-repository.ts'),
+    join(mainRoot, 'modules/migrations.ts'),
   ])
   // allow-source-grep: table writer ownership is a static architecture boundary with no runtime observer
   const schemaSource = readFileSync(

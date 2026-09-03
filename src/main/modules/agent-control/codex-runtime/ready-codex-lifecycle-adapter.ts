@@ -41,13 +41,16 @@ export type ReadyAliasIdentity = {
 }
 
 export type ReadyStopIdentity = ReadyAliasIdentity & Pick<StopLifecycleRequest, 'readyRunId'>
-export type ReadyProductLifecycleIdentity = ReadyAliasIdentity & Pick<ProductLifecycleRequest, 'readyRunId'>
+export type ReadyProductLifecycleIdentity = ReadyAliasIdentity & Pick<
+  ProductLifecycleRequest,
+  'readyRunId' | 'actionRequestRef'
+>
 export type ReadyLifecycleAction = 'stop' | 'close' | 'reset'
 
 export type ReadyThreadBindingResolution =
   | { state: 'unstarted'; params: CodexThreadStartParams }
   | { state: 'loaded'; threadId: string }
-  | { state: 'resume_required'; threadId: string }
+  | { state: 'resume_required'; threadId: string; expectedCwd: string; expectedForkedFromId: string | null }
 
 export type ProductTurnCloseoutEvidence = {
   aliasId: string
@@ -107,6 +110,7 @@ export interface ReadyCodexLifecycleStore {
   }): Promise<void>
   readLifecycleOperation(request: ReadyAliasIdentity): Promise<{
     identity: ReadyAliasIdentity
+    hasLegacyPreparedRun: boolean
     activeReadyRunId: string | null
     activeManualCompactionId: string | null
     requestedAction: ReadyLifecycleAction | null
@@ -140,6 +144,15 @@ export interface ReadyCodexLifecycleStore {
     identity: ReadyAliasIdentity
     snapshot: 'idle_never_started' | 'idle_ready_terminal_no_native' | 'idle_native_thread'
   }): Promise<Extract<LifecycleResult, { ok: true; action: 'reset' }>>
+  resetLegacyPreparedAlias(input: {
+    identity: ReadyAliasIdentity
+  }): Promise<Extract<LifecycleResult, { ok: true; action: 'reset' }>>
+  closeLegacyPreparedAlias(input: {
+    identity: ReadyAliasIdentity
+  }): Promise<Extract<
+    LifecycleResult,
+    { ok: true; action: 'close'; closeoutDisposition: 'legacy_prepared_contract' }
+  >>
   quarantineUnknownManualCompaction(input: {
     identity: ReadyAliasIdentity
     manualCompactionId: string
@@ -248,6 +261,7 @@ export type ExecutePreparedCodexRunInput = {
 type LifecycleOperationRead = {
   snapshot: LifecycleOperationSnapshot
   facts: LifecycleOperationFacts
+  hasLegacyPreparedRun: boolean
   activeReadyRunId: string | null
   activeManualCompactionId: string | null
   requestedAction: ReadyLifecycleAction | null
@@ -572,6 +586,22 @@ export class ReadyCodexLifecycleAdapter<TExecutionResult> {
     if (resolved.operation.activeReadyRunId !== request.readyRunId) {
       return this.failure(resolved.identity, 'reset', 'no_active_operation', resolved.operation.snapshot)
     }
+    if (resolved.operation.snapshot === 'invariant_violation'
+      && resolved.operation.hasLegacyPreparedRun) {
+      try {
+        return await this.deps.lifecycleStore.resetLegacyPreparedAlias({
+          identity: resolved.identity,
+        })
+      } catch (error) {
+        return this.failureFromError(
+          resolved.identity,
+          'reset',
+          error,
+          'persistence_failed',
+          resolved.operation.snapshot,
+        )
+      }
+    }
     return this.resetFromSnapshot(resolved.identity, resolved.operation, false)
   }
 
@@ -772,6 +802,20 @@ export class ReadyCodexLifecycleAdapter<TExecutionResult> {
       return this.failure(resolved.identity, 'close', 'no_active_operation', resolved.operation.snapshot)
     }
     const { identity, operation } = resolved
+    if (operation.snapshot === 'invariant_violation'
+      && operation.hasLegacyPreparedRun) {
+      try {
+        return await this.deps.lifecycleStore.closeLegacyPreparedAlias({ identity })
+      } catch (error) {
+        return this.failureFromError(
+          identity,
+          'close',
+          error,
+          'persistence_failed',
+          operation.snapshot,
+        )
+      }
+    }
     const { facts, snapshot } = operation
     if (snapshot === 'product_turn_interruptible') {
       if (!operation.activeReadyRunId) {
@@ -983,12 +1027,18 @@ export class ReadyCodexLifecycleAdapter<TExecutionResult> {
     const resolution = await this.deps.lifecycleStore.resolveThreadBinding(identity, prepared)
     if (resolution.state === 'loaded') return resolution.threadId
     if (resolution.state === 'resume_required') {
+      const validateThread = (thread: CodexThread, instructionSources: string[]) => {
+        this.assertThreadIdentity(thread, resolution.threadId, instructionSources, resolution.expectedForkedFromId)
+        if (thread.cwd !== resolution.expectedCwd) {
+          throw new CodexIngressRejectedError('native_thread_cwd_mismatch')
+        }
+      }
       const { connectionEpoch, read, resumed } = await this.deps.threadResumePort.readThenResume({
         threadId: resolution.threadId,
-        validateRead: (thread) => this.assertRootThread(thread, resolution.threadId, []),
+        validateRead: (thread) => validateThread(thread, []),
       })
       const preResumeThreadReadDigest = this.deps.lifecycleStore.digestThreadRead(read.thread)
-      this.assertRootThread(resumed.thread, resolution.threadId, resumed.instructionSources)
+      validateThread(resumed.thread, resumed.instructionSources)
       await this.deps.lifecycleStore.markThreadResumed({
         identity,
         threadId: resolution.threadId,
@@ -999,7 +1049,7 @@ export class ReadyCodexLifecycleAdapter<TExecutionResult> {
       return resolution.threadId
     }
     const started = await this.deps.nativeRuntime.threadStart(resolution.params)
-    this.assertRootThread(started.thread, started.thread.id, started.instructionSources)
+    this.assertThreadIdentity(started.thread, started.thread.id, started.instructionSources, null)
     if (started.thread.cwd !== resolution.params.cwd) {
       throw new CodexIngressRejectedError('native_thread_cwd_mismatch')
     }
@@ -1025,6 +1075,7 @@ export class ReadyCodexLifecycleAdapter<TExecutionResult> {
   > {
     let read: {
       identity: ReadyAliasIdentity
+      hasLegacyPreparedRun: boolean
       activeReadyRunId: string | null
       activeManualCompactionId: string | null
       requestedAction: ReadyLifecycleAction | null
@@ -1067,6 +1118,7 @@ export class ReadyCodexLifecycleAdapter<TExecutionResult> {
       identity,
       operation: {
         facts,
+        hasLegacyPreparedRun: read.hasLegacyPreparedRun,
         activeReadyRunId: read.activeReadyRunId,
         activeManualCompactionId: read.activeManualCompactionId,
         requestedAction: read.requestedAction,
@@ -1075,19 +1127,21 @@ export class ReadyCodexLifecycleAdapter<TExecutionResult> {
     }
   }
 
-  private assertRootThread(
+  private assertThreadIdentity(
     thread: Pick<
       CodexThread,
       'id' | 'sessionId' | 'parentThreadId' | 'forkedFromId' | 'source' | 'threadSource'
     >,
     expectedThreadId: string,
     instructionSources: string[],
+    expectedForkedFromId: string | null,
   ): void {
     if (
       thread.id !== expectedThreadId
       || thread.sessionId !== thread.id
       || thread.parentThreadId !== null
-      || thread.forkedFromId !== null
+      || thread.forkedFromId !== expectedForkedFromId
+      || thread.forkedFromId === thread.id
       || thread.source !== 'vscode'
       || thread.threadSource !== null
       || instructionSources.length !== 0

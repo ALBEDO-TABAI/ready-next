@@ -9,6 +9,7 @@ import {
   preparedCodexProductRunMatchesIngress,
 } from '../main/modules/agent-control/codex-runtime/codex-product-run-preparer'
 import { textUserInput } from '../main/modules/agent-control/codex-runtime/codex-turn-input-builder'
+import { digestCodexUserInput } from '../main/modules/agent-control/codex-runtime/codex-user-input'
 import { createCodexToolFixture } from './utils/codex-tool-fixture'
 import { digestCanonicalJson } from '../main/modules/agent-control/codex-runtime/codex-model-gateway-contract'
 import {
@@ -17,6 +18,7 @@ import {
 } from '../main/modules/agent-control/codex-runtime/codex-external-read-slice'
 import { effectiveCodexFolderOutputToolNames } from '../main/modules/agent-control/codex-runtime/codex-folder-output-activation'
 import {
+  CODEX_RUNTIME_MANAGED_COUNTER_SENTINEL,
   createCodexProductBudgetSeed,
   resolveCodexBrowserWorkflowTaskFacts,
   resolveCodexProductCloseoutTaskFacts,
@@ -64,6 +66,23 @@ const base = {
   currentInput: [textUserInput('hello')],
   explicitResourceEnvelope: { input: [], resourceRefs: [] },
   resourceAdditionalContext: [],
+  trustedWorkbenchMode: 'browser',
+  actionAdmissionRef: {
+    headProjectionDigest: 'f'.repeat(64),
+    actionProjectionVersion: {
+      scopeEpoch: 0,
+      headGeneration: 1,
+      actionProjectionSequence: 0,
+    },
+    actionHeadIdentity: {
+      aliasId: 'alias-1',
+      aliasGeneration: 1,
+      threadBindingId: 'binding-1',
+      headRevision: 1,
+    },
+  },
+  uncommittedTailAssignments: [],
+  supersededUncommittedItems: [],
   readyMemorySnapshot: disabledReadyMemorySnapshot(),
   ...createCodexToolFixture(),
   authorizationOwnerId: 'owner-1',
@@ -105,6 +124,17 @@ test('product run preparer produces a neutral user-root payload with no prompt a
     reservationSetId: base.reservationSetId,
     reservationEvidenceDigest: base.reservationEvidenceDigest,
   }), true)
+})
+
+test('legacy e1 prepared rows are audit-only and cannot resume as current ingress', () => {
+  const result = preparer.prepare(base)
+  assert.equal(result.ok, true)
+  if (!result.ok) return
+  assert.equal(isPreparedCodexProductRun({
+    ...result.prepared,
+    preparationContract: 'codex_product_run_e1',
+    recoveredContextDigest: null,
+  }), false)
 })
 
 test('Codex product task facts distinguish real Tag Forge execution from advisory skill guidance', () => {
@@ -170,7 +200,7 @@ test('Codex product task facts distinguish real Tag Forge execution from advisor
   })
   assert.equal(
     createCodexProductBudgetSeed(selectedSkill).maxIterations,
-    40,
+    CODEX_RUNTIME_MANAGED_COUNTER_SENTINEL,
   )
   const advisorySkill = {
     skillAuthorization: {
@@ -182,7 +212,10 @@ test('Codex product task facts distinguish real Tag Forge execution from advisor
     taskType: 'direct_answer',
     module: 'skill',
   })
-  assert.equal(createCodexProductBudgetSeed(advisorySkill).maxIterations, 8)
+  assert.equal(
+    createCodexProductBudgetSeed(advisorySkill).maxIterations,
+    CODEX_RUNTIME_MANAGED_COUNTER_SENTINEL,
+  )
   const hybridExecutableSkill = {
     skillAuthorization: {
       mode: 'selected' as const,
@@ -193,7 +226,10 @@ test('Codex product task facts distinguish real Tag Forge execution from advisor
     taskType: 'short_task',
     module: 'skill',
   })
-  assert.equal(createCodexProductBudgetSeed(hybridExecutableSkill).maxIterations, 40)
+  assert.equal(
+    createCodexProductBudgetSeed(hybridExecutableSkill).maxIterations,
+    CODEX_RUNTIME_MANAGED_COUNTER_SENTINEL,
+  )
   assert.deepEqual(resolveCodexProductTaskFacts({
     skillAuthorization: { mode: 'selected', completionProfile: deepResearch.completionProfile },
   }), { taskType: 'research', module: 'skill' })
@@ -224,6 +260,24 @@ test('Codex product task facts distinguish real Tag Forge execution from advisor
     taskType: 'direct_answer',
     module: 'browser',
   })
+  const structuralBrowserFacts = resolveCodexProductTaskFacts({
+    skillAuthorization: { mode: 'none' },
+    intentClassification: { primaryDomain: 'general' },
+    hasBrowserToolSurface: true,
+  })
+  assert.deepEqual(structuralBrowserFacts, {
+    taskType: 'direct_answer',
+    module: 'browser',
+  })
+  assert.deepEqual(createCodexProductBudgetSeed({
+    skillAuthorization: { mode: 'none' },
+    intentClassification: { primaryDomain: 'general' },
+    hasBrowserToolSurface: true,
+  }), {
+    maxIterations: CODEX_RUNTIME_MANAGED_COUNTER_SENTINEL + 1,
+    maxToolCalls: CODEX_RUNTIME_MANAGED_COUNTER_SENTINEL + 1,
+    maxParallelToolGroups: 1,
+  })
   assert.deepEqual(resolveCodexBrowserWorkflowTaskFacts(browserReadFacts, false), browserReadFacts)
   assert.deepEqual(resolveCodexBrowserWorkflowTaskFacts(browserReadFacts, true), {
     taskType: 'browser_transaction',
@@ -248,7 +302,7 @@ test('Codex product task facts distinguish real Tag Forge execution from advisor
 test('production task facts are derived from the frozen final tool authorization', () => {
   // eslint-disable-next-line ready/no-source-grep-test -- reviewed hard contract: this pins the cross-boundary wiring between final tool admission and task closeout facts
   const source = readFileSync(new URL('../main/modules/agent-control/codex-runtime/codex-runtime-production-composition.ts', import.meta.url), 'utf8')
-  assert.match(source, /const selectedSkill = toolSnapshot\.readyTurnToolAuthorization\.skillAuthorization[\s\S]*?const productTaskInput = \{[\s\S]*?completionProfile: selectedNativeSkill!\.completionProfile,[\s\S]*?const productTaskFacts = resolveCodexProductTaskFacts\(productTaskInput\)/)
+  assert.match(source, /const selectedSkill = toolSnapshot\.readyTurnToolAuthorization\.skillAuthorization[\s\S]*?const productTaskInput = \{[\s\S]*?completionProfile: selectedNativeSkill!\.completionProfile,[\s\S]*?hasBrowserToolSurface:[\s\S]*?const productTaskFacts = resolveCodexProductTaskFacts\(productTaskInput\)/)
   assert.doesNotMatch(source, /const productTaskFacts = resolveCodexProductTaskFacts\(\{\s*skillAuthorization: authorization,/)
 })
 
@@ -601,32 +655,67 @@ test('product run freezes exactly one typed output directory and derives separat
   ], { kind: 'selection_required' }), ['ask_user_questions'])
 })
 
-test('explicit retry freezes predecessor evidence and read-only staged sources on a new user run', () => {
+test('explicit retry freezes control, stable root, current seed, and no prior artifacts', () => {
+  const taskRootInput = JSON.parse('[{"text":"原始任务","text_elements":[],"type":"text"}]')
   const result = preparer.prepare({
     ...base,
     runId: 'run-retry',
     requestId: 'request-retry',
     originUserMessageId: 'message-retry',
     currentInput: [textUserInput('再试一次')],
+    actionAdmissionRef: undefined,
+    uncommittedUserTail: [{
+      originUserMessageId: 'message-root',
+      input: taskRootInput,
+      inputDigest: digestCodexUserInput(taskRootInput),
+      policy: 'untrusted_text_history' as const,
+    }],
+    uncommittedTailAssignments: [{
+      originUserMessageId: 'message-root',
+      inputDigest: digestCodexUserInput(taskRootInput),
+      plan: 'replace_with_explicit_retry' as const,
+    }],
     explicitRetry: {
       predecessorRunId: 'run-previous',
+      predecessorPresentationRef: {
+        readyRunId: 'run-previous', presentationDigest: 'e'.repeat(64),
+      },
+      controlAuditMessageRef: {
+        messageId: 'message-retry',
+        inputDigest: digestCodexUserInput([textUserInput('再试一次')]),
+      },
+      modelVisibleRootOriginRef: {
+        sourceReadyRunId: 'run-root', sourceIngressContractDigest: 'd'.repeat(64),
+        originUserMessageId: 'message-root', inputDigest: digestCodexUserInput(taskRootInput),
+      },
+      selectedHistorySeedItemRef: {
+        threadBindingId: 'binding-child', historySeedDigest: 'c'.repeat(64),
+        originUserMessageId: 'message-root', inputDigest: digestCodexUserInput(taskRootInput),
+      },
+      currentTrustedEnvironmentRef: {
+        requestedWorkbenchMode: 'browser', trustedWorkbenchMode: 'browser',
+        modeDigest: digestCanonicalJson({
+          requestedWorkbenchMode: 'browser', trustedWorkbenchMode: 'browser',
+        }),
+      },
+      sourceTrustedEnvironmentRef: {
+        workbenchMode: 'browser', environmentDigest: '9'.repeat(64),
+      },
       historyParityEvidenceDigest: 'parity',
       currentThreadReadEvidenceDigest: 'thread-read',
       continuationContractDigest: 'continuation',
-      artifactSources: [{
-        sourceReadyRunId: 'run-previous',
-        relativePath: 'report.md',
-        logicalArtifactRef: 'artifact:previous',
-        version: `sha256:${'a'.repeat(64)}`,
-        sha256: 'b'.repeat(64),
-        state: 'staged',
-      }],
+      taskRootInput,
+      taskRootInputDigest: digestCodexUserInput(taskRootInput),
+      artifactSources: [],
     },
   })
   assert.equal(result.ok, true)
   if (!result.ok) return
   assert.equal(result.prepared.ingress.attemptKind, 'explicit_retry')
   assert.equal(result.prepared.ingress.predecessorRunId, 'run-previous')
-  assert.equal(result.prepared.ingress.artifactSources?.[0].sourceReadyRunId, 'run-previous')
+  assert.deepEqual(result.prepared.ingress.taskRootInput, taskRootInput)
+  assert.deepEqual(result.prepared.ingress.artifactSources, [])
+  assert.equal(result.prepared.ingress.canonicalCurrentInputRef.messageId, 'message-root')
+  assert.notEqual(result.prepared.ingress.originUserMessageId, 'message-root')
   assert.equal(isPreparedCodexProductRun(result.prepared), true)
 })

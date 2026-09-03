@@ -19,6 +19,8 @@ import {
   type PrePersistenceErrorKind,
   type SendMessageResult,
   type TerminalErrorKind,
+  type ProductTurnReceipt,
+  type SendScopedRequest,
 } from '../../shared/ipc-contracts/agent-runtime'
 import type { CanonicalAssistantMessage } from '../../shared/ipc-contracts/canonical-message'
 import type { ChatAttachment, ScopeRunState } from '../modules/agent/types'
@@ -33,6 +35,7 @@ import {
 } from './agent-store-helpers'
 import { parseActionAuthorizationMode } from '../../shared/action-authorization-mode'
 import { collectWorkbenchSurfaceResources } from './agent-workbench-resources'
+import { resolveNaturalExplicitRetry } from '../modules/agent/explicit-retry-routing'
 
 type PendingIngressSnapshot = {
   requestId: string
@@ -100,7 +103,10 @@ export async function sendAgentMessage(input: {
   get: () => AgentState
   set: (partial: AgentState | Partial<AgentState> | ((state: AgentState) => AgentState | Partial<AgentState>)) => void
   content: string
-  options?: { codexExternalReadSlice?: Record<string, unknown> }
+  options?: {
+    codexExternalReadSlice?: Record<string, unknown>
+    explicitRetry?: SendScopedRequest['explicitRetry']
+  }
   commitPersistedIngressSnapshot: (event: Pick<
     IngressAdmittedEvent,
     'requestId' | 'scopeId' | 'originUserMessageId' | 'aliasGeneration' | 'messageVisibilityEpoch' | 'admittedAt'
@@ -111,6 +117,7 @@ export async function sendAgentMessage(input: {
     payload: {
       canonicalMessage: CanonicalAssistantMessage
       canonicalMessageDigest: string
+      productTurnReceipt?: ProductTurnReceipt
     },
   ) => Promise<void>
   clearInfrastructureWatchdog: (scopeId: string, requestId: string) => void
@@ -150,20 +157,55 @@ export async function sendAgentMessage(input: {
   const activeScope = currentScope
   const activeScopeId = currentScopeId
 
-  const currentAttachments = filterAttachmentsForComposedAgentInput(content, [...attachments])
   const { filePool } = get()
   const referencedPoolAttachments = resolveReferencedFilePoolAttachments(content, filePool)
-  const messageAttachments = [...currentAttachments]
-  for (const attachment of referencedPoolAttachments) {
-    if (!messageAttachments.some((candidate) => isSameAttachmentPoolEntry(candidate, attachment))) {
-      messageAttachments.push(attachment)
-    }
-  }
   let currentDocumentAnchor
   try {
     currentDocumentAnchor = await buildCodexCurrentDocumentAnchor(activeScopeId)
   } catch {
     return rejectedMessageResult('attachment_unavailable')
+  }
+  const workbenchResources = collectWorkbenchSurfaceResources()
+  let explicitRetry = options?.explicitRetry
+  const retryHasCurrentContext = attachments.length > 0
+    || referencedPoolAttachments.length > 0
+    || Boolean(currentDocumentAnchor)
+    || workbenchResources.length > 0
+    || Boolean(options?.codexExternalReadSlice)
+  if (explicitRetry && retryHasCurrentContext) {
+    return rejectedMessageResult('explicit_retry_control_invalid')
+  }
+  if (!explicitRetry) {
+    const retryRoute = await resolveNaturalExplicitRetry({
+      content,
+      attachmentCount: attachments.length + referencedPoolAttachments.length,
+      currentDocumentAnchorPresent: Boolean(currentDocumentAnchor),
+      workbenchResourceCount: workbenchResources.length,
+      externalReadSlicePresent: Boolean(options?.codexExternalReadSlice),
+      messages: originSlice.messages,
+      scopeId: activeScopeId,
+      messageVisibilityEpoch: originSlice.messageVisibilityEpoch,
+      readProductTurnPresentation: window.electronAPI?.agent?.readProductTurnPresentation
+        ? (readyRunId) => window.electronAPI.agent.readProductTurnPresentation(
+            readyRunId,
+            useMode.getState().workbenchMode,
+          )
+        : null,
+    })
+    if (retryRoute.kind === 'unavailable') {
+      return rejectedMessageResult('conversation_reset_required')
+    }
+    if (retryRoute.kind === 'resolved') {
+      explicitRetry = retryRoute.explicitRetry
+    }
+  }
+
+  const currentAttachments = filterAttachmentsForComposedAgentInput(content, [...attachments])
+  const messageAttachments = [...currentAttachments]
+  for (const attachment of referencedPoolAttachments) {
+    if (!messageAttachments.some((candidate) => isSameAttachmentPoolEntry(candidate, attachment))) {
+      messageAttachments.push(attachment)
+    }
   }
   const composedInput = await buildCodexIngressInputWithDiagnostics({
     content,
@@ -178,7 +220,6 @@ export async function sendAgentMessage(input: {
     })
     return rejectedMessageResult('attachment_unavailable')
   }
-  const workbenchResources = collectWorkbenchSurfaceResources()
   const composedResources = [
     ...(composedInput.resources || []),
     ...workbenchResources.filter((resource) => !(composedInput.resources || []).some((existing) => (
@@ -247,6 +288,15 @@ export async function sendAgentMessage(input: {
       expectedMessageVisibilityEpoch: originSlice.messageVisibilityEpoch,
       resources: composedResources.length > 0 ? composedResources : undefined,
       currentDocumentAnchor,
+      ...(!explicitRetry && originSlice.scopeHeadActionProjection?.actionHeadIdentity
+        ? {
+            actionAdmissionRef: {
+              headProjectionDigest: originSlice.scopeHeadActionProjection.evidenceDigest,
+              actionProjectionVersion: originSlice.scopeHeadActionProjection.actionProjectionVersion,
+              actionHeadIdentity: originSlice.scopeHeadActionProjection.actionHeadIdentity,
+            },
+          }
+        : {}),
       userMessage: {
         id: userMsgId,
         content,
@@ -259,6 +309,7 @@ export async function sendAgentMessage(input: {
           inputFailedCount: composedInput.diagnostics.inputFailedCount,
         },
       },
+      ...(explicitRetry ? { explicitRetry } : {}),
     })
 
     if (
@@ -325,57 +376,17 @@ export async function sendAgentMessage(input: {
         return mapped
       }
       input.clearInfrastructureWatchdog(activeScopeId, requestId)
-      const friendly = mapBackendErrorToFriendly({
-        error: result.error,
-        errorKind: result.errorKind,
-      })
-      set((state) => {
-        const sessionKey = originSessionKey
-        const slice = normalizeSessionSlice(state.sessions[sessionKey])
-        if (!state.sessions[sessionKey]
-          || slice.conversationId !== activeScopeId
-          || slice.messageVisibilityEpoch !== originSlice.messageVisibilityEpoch
-          || slice.streamingRequestId !== requestId
-          || (typeof result.aliasGeneration === 'number'
-            && slice.aliasGeneration !== result.aliasGeneration)) return {}
-        const currentRun = slice.scopeRunStates[activeScopeId]
-        const terminalReason = terminalReasonFromSendError(result.errorKind)
-        return withSessionSliceAndActiveMirror(state, sessionKey, {
-          messages: slice.messages.map((message) => (
-            message.id === responseId
-              ? { ...message, content: friendly.friendlyMessage, type: 'system' as const }
-              : message
-          )),
-          isStreaming: false,
-          foregroundBusy: false,
-          composerLocked: false,
-          streamingMessageId: null,
-          streamingRequestId: null,
-          scopeRunStates: currentRun
-            ? {
-                ...slice.scopeRunStates,
-                [activeScopeId]: {
-                  ...currentRun,
-                  phase: terminalReason === 'checkpoint_budget'
-                    ? 'checkpoint'
-                    : terminalReason === 'cancelled_user'
-                      || terminalReason === 'cancelled_runtime'
-                      || terminalReason === 'main_no_progress_timeout'
-                      ? 'cancelled'
-                      : 'error',
-                  terminalReason,
-                  error: result.error,
-                  updatedAt: new Date().toISOString(),
-                },
-              }
-            : slice.scopeRunStates,
-        })
+      await input.completeScopeRunAfterSendSuccess(activeScopeId, requestId, {
+        canonicalMessage: result.canonicalMessage,
+        canonicalMessageDigest: result.canonicalMessageDigest,
+        productTurnReceipt: result.productTurnReceipt,
       })
       return mapped
     }
     await input.completeScopeRunAfterSendSuccess(activeScopeId, requestId, {
       canonicalMessage: result.canonicalMessage,
       canonicalMessageDigest: result.canonicalMessageDigest,
+      productTurnReceipt: result.productTurnReceipt,
     })
     return mapSendScopedResponseToMessageResult(result)
   } catch (error) {

@@ -24,6 +24,7 @@ import type { StartIdentityReservationSet } from '../main/modules/agent-control/
 import { createCodexToolFixtureFromDefinitions } from './utils/codex-tool-fixture'
 import { loadSqliteAfterGuardForTest, skipIfSqliteUnavailable } from './utils/sqlite-skip'
 import { workflowDigest } from '../main/modules/repositories/browser-workflow-codec'
+import { projectCodexHeadActionProjection } from '../main/modules/agent-control/codex-runtime/codex-action-surface'
 
 type NativeDb = import('better-sqlite3').Database
 
@@ -87,7 +88,7 @@ function prepared(toolSurfaceDigest: string, maxIterations = 8, maxToolCalls = 4
   const toolFixture = createCodexToolFixtureFromDefinitions([gatewayToolDefinition])
   assert.equal(toolFixture.readyToolSurface.toolSurfaceDigest, toolSurfaceDigest)
   return {
-    preparationContract: 'codex_product_run_e1',
+    preparationContract: 'codex_product_run_e2',
     taskId: 'task-run-1',
     runId: 'run-1',
     conversationAlias: { aliasId: 'scope-1', aliasGeneration: 1 },
@@ -107,8 +108,13 @@ function prepared(toolSurfaceDigest: string, maxIterations = 8, maxToolCalls = 4
       explicitResourceEnvelope: { input: [], resourceRefs: [] },
       resourceAdditionalContext: [],
     },
-    resourceAnchorDigest: digestCanonicalJson([]),
-    recoveredContextDigest: null,
+    resourceAnchorDigest: createHash('sha256').update(JSON.stringify({
+      explicitResourceEnvelope: { input: [], resourceRefs: [] },
+      resourceAdditionalContext: [],
+    })).digest('hex'),
+    sourceTrustedEnvironmentRef: {
+      workbenchMode: 'browser', environmentDigest: 'a'.repeat(64),
+    },
     readyMemorySnapshot: disabledReadyMemorySnapshot(),
     ...toolFixture,
     readyToolHostIdentity: {
@@ -192,6 +198,7 @@ async function withDatabase(
         created_at TEXT NOT NULL DEFAULT ''
       );
     `)
+    __runMigrationForTests('053_pending_confirmations', db as unknown as MigrationDatabase)
     __runMigrationForTests('088_codex_runtime_bindings', db as unknown as MigrationDatabase)
     __runMigrationForTests('089_codex_runtime_evidence_guards', db as unknown as MigrationDatabase)
     __runMigrationForTests('090_codex_model_gateway_authority', db as unknown as MigrationDatabase)
@@ -243,6 +250,18 @@ function admitProduct(db: NativeDb, input: {
     readyScopeId: 'scope-1', runtimeManifestDigest: 'runtime-manifest-digest',
     protocolSchemaDigest: 'protocol-schema-digest', createdAt: at,
   })
+  const head = projectCodexHeadActionProjection(repository.readHeadActionFacts({
+    aliasId: 'scope-1', aliasGeneration: 1,
+    currentRuntimeManifestDigest: 'runtime-manifest-digest',
+    currentProtocolSchemaDigest: 'protocol-schema-digest',
+  }))
+  run.ingress.actionAdmissionRef = {
+    headProjectionDigest: head.evidenceDigest,
+    actionProjectionVersion: head.actionProjectionVersion,
+    actionHeadIdentity: head.actionHeadIdentity!,
+  }
+  run.ingress.uncommittedTailAssignments = []
+  run.ingress.supersededUncommittedItems = []
   const admissionInput = {
     prepared: run,
     reservation: reservation(),
@@ -310,6 +329,7 @@ test('durable gateway authority resolves only the active product binding before 
       maxRetries: 0,
     })
     const instructionDigest = digestText('fixed instructions')
+    new CodexModelGatewayRepository(db as unknown as DatabaseConnection).storeSnapshot({ ...created, createdAt: at })
     const bindingRepository = admitProduct(db, {
       snapshotRef: created.snapshotRef,
       snapshotDigest: created.snapshotDigest,
@@ -320,7 +340,6 @@ test('durable gateway authority resolves only the active product binding before 
       db as unknown as DatabaseConnection,
       bindingRepository,
     )
-    gatewayRepository.storeSnapshot({ ...created, createdAt: at })
     bindingRepository.activateStartDispatch({
       connectionEpoch: 'epoch-1', rpcId: 2, method: 'turn/start',
       bindingLookupKey: 'run-1', requestDigest: 'turn-start-request', dispatchedAt: at,
@@ -560,6 +579,7 @@ test('product iteration budget is durable while automatic compaction is not char
       },
       maxRetries: 0,
     })
+    new CodexModelGatewayRepository(db as unknown as DatabaseConnection).storeSnapshot({ ...created, createdAt: at })
     const repository = admitProduct(db, {
       snapshotRef: created.snapshotRef,
       snapshotDigest: created.snapshotDigest,
@@ -572,7 +592,6 @@ test('product iteration budget is durable while automatic compaction is not char
       db as unknown as DatabaseConnection,
       repository,
     )
-    gatewayRepository.storeSnapshot({ ...created, createdAt: at })
     repository.activateStartDispatch({
       connectionEpoch: 'epoch-1', rpcId: 2, method: 'turn/start',
       bindingLookupKey: 'run-1', requestDigest: 'turn-start-request', dispatchedAt: at,
@@ -634,6 +653,7 @@ test('product budget keeps one final model request after the last admitted tool 
       },
       maxRetries: 0,
     })
+    new CodexModelGatewayRepository(db as unknown as DatabaseConnection).storeSnapshot({ ...created, createdAt: at })
     const bindingRepository = admitProduct(db, {
       snapshotRef: created.snapshotRef,
       snapshotDigest: created.snapshotDigest,
@@ -646,7 +666,6 @@ test('product budget keeps one final model request after the last admitted tool 
       db as unknown as DatabaseConnection,
       bindingRepository,
     )
-    gatewayRepository.storeSnapshot({ ...created, createdAt: at })
     bindingRepository.activateStartDispatch({
       connectionEpoch: 'epoch-1', rpcId: 2, method: 'turn/start',
       bindingLookupKey: 'run-1', requestDigest: 'turn-start-request', dispatchedAt: at,
@@ -751,6 +770,7 @@ test('manual compaction resolves only the reserved thread and empty tool surface
       },
       maxRetries: 0,
     })
+    new CodexModelGatewayRepository(db as unknown as DatabaseConnection).storeSnapshot({ ...created, createdAt: at })
     const repository = admitProduct(db, {
       snapshotRef: created.snapshotRef,
       snapshotDigest: created.snapshotDigest,
@@ -761,7 +781,6 @@ test('manual compaction resolves only the reserved thread and empty tool surface
       db as unknown as DatabaseConnection,
       repository,
     )
-    gatewayRepository.storeSnapshot({ ...created, createdAt: at })
     repository.activateStartDispatch({
       connectionEpoch: 'epoch-1', rpcId: 2, method: 'turn/start',
       bindingLookupKey: 'run-1', requestDigest: 'turn-start-request', dispatchedAt: at,
@@ -785,7 +804,8 @@ test('manual compaction resolves only the reserved thread and empty tool surface
         candidateDigest: createHash('sha256').update(candidateText).digest('hex'),
         usedToolCalls: [], actionReceiptRefs: [], interactionState: null, waitingFor: null,
         terminalReasonCandidate: 'done', abortInitiator: null, budgetState: {}, contextState: {},
-        providerDiagnostics: {}, recoveryCheckpointRef: null, browserContinuationRef: null,
+        providerDiagnostics: {}, contextUsage: null,
+        recoveryCheckpointRef: null, browserContinuationRef: null,
         browserProofRefs: [], otherProofRefs: [], projectionPatchRefs: [],
         runtimeDiagnostics: { finalDeltaItemIds: [], commentaryItemIds: [], nativeTurnError: null },
       },

@@ -8,6 +8,7 @@ import {
   classifyCodexModelGatewayRequest,
   createCodexUpstreamProfileSnapshot,
   digestCanonicalJson,
+  type CodexModelGatewayFailureEvidence,
   type CodexModelGatewayRequestEvidence,
   type CodexModelGatewayResponseEvidence,
   type CodexUpstreamProfileSnapshot,
@@ -45,6 +46,26 @@ function changes(result: unknown): number {
 
 function nonEmpty(value: string, code: string): void {
   if (!value.trim()) throw new CodexModelGatewayAuthorityError(code)
+}
+
+function assertFailureEvidence(value: CodexModelGatewayFailureEvidence): void {
+  const keys = Object.keys(value).sort().join(',')
+  if (keys !== [
+    'causeCode', 'elapsedMs', 'eventCount', 'failureClass', 'failureStage',
+    'partialAssistantItemSeen', 'responseIdentitySeen', 'toolCallItemSeen', 'wireByteCount',
+  ].sort().join(',')
+    || !['provider', 'transport', 'protocol', 'context'].includes(value.failureClass)
+    || !['connect', 'headers', 'stream-before-item', 'stream-after-item', 'terminal-validation', 'post-terminal']
+      .includes(value.failureStage)
+    || !/^[a-z][a-z0-9_]{2,95}$/.test(value.causeCode)
+    || !Number.isSafeInteger(value.elapsedMs) || value.elapsedMs < 0
+    || !Number.isSafeInteger(value.eventCount) || value.eventCount < 0
+    || !Number.isSafeInteger(value.wireByteCount) || value.wireByteCount < 0
+    || typeof value.responseIdentitySeen !== 'boolean'
+    || typeof value.partialAssistantItemSeen !== 'boolean'
+    || typeof value.toolCallItemSeen !== 'boolean') {
+    throw new CodexModelGatewayAuthorityError('gateway_failure_evidence_invalid')
+  }
 }
 
 function parseSnapshot(value: string): CodexUpstreamProfileSnapshot {
@@ -178,6 +199,8 @@ export class CodexModelGatewayRepository {
     responseOutputDigest: string | null
     responseUsageDigest: string | null
     responseEvidenceDigest: string | null
+    failure: CodexModelGatewayFailureEvidence | null
+    failureEvidenceDigest: string | null
   }> {
     const rows = this.db.prepare(`
       SELECT request_event.event_sequence AS requestSequence,
@@ -204,14 +227,16 @@ export class CodexModelGatewayRepository {
              response_event.terminal_digest AS responseTerminalDigest,
              response_event.output_digest AS responseOutputDigest,
              response_event.usage_digest AS responseUsageDigest,
-             response_event.evidence_digest AS responseEvidenceDigest
+             response_event.evidence_digest AS responseEvidenceDigest,
+             response_event.failure_json AS failureJson,
+             response_event.failure_digest AS failureEvidenceDigest
         FROM ready_model_gateway_request_receipts receipt
         LEFT JOIN ready_model_gateway_exchange_events request_event
           ON request_event.gateway_request_receipt_id = receipt.receipt_id
          AND request_event.event_kind = 'request_admitted'
         LEFT JOIN ready_model_gateway_exchange_events response_event
           ON response_event.gateway_request_receipt_id = receipt.receipt_id
-         AND response_event.event_kind = 'response_completed'
+         AND response_event.event_kind IN ('response_completed', 'response_failed')
        WHERE receipt.ready_run_id = ?
          AND receipt.codex_thread_id = ?
          AND receipt.codex_turn_id = ?
@@ -245,8 +270,10 @@ export class CodexModelGatewayRepository {
       responseOutputDigest: string | null
       responseUsageDigest: string | null
       responseEvidenceDigest: string | null
+      failureJson: string | null
+      failureEvidenceDigest: string | null
     }>(input.readyRunId, input.codexThreadId, input.codexTurnId)
-    return rows.map(({ inputItemsJson, ...row }) => {
+    return rows.map(({ inputItemsJson, failureJson, ...row }) => {
       if (
         row.requestSequence === null
         || row.requestSequence < 1
@@ -276,6 +303,23 @@ export class CodexModelGatewayRepository {
       ))) {
         throw new CodexModelGatewayAuthorityError('gateway_request_transcript_json_invalid')
       }
+      let failure: CodexModelGatewayFailureEvidence | null = null
+      if (failureJson !== null) {
+        try {
+          failure = JSON.parse(failureJson) as CodexModelGatewayFailureEvidence
+        } catch {
+          throw new CodexModelGatewayAuthorityError('gateway_failure_evidence_json_invalid')
+        }
+        assertFailureEvidence(failure)
+        if (digestCanonicalJson(failure) !== row.failureEvidenceDigest) {
+          throw new CodexModelGatewayAuthorityError('gateway_failure_evidence_digest_mismatch')
+        }
+      } else if (row.failureEvidenceDigest !== null) {
+        throw new CodexModelGatewayAuthorityError('gateway_failure_evidence_pair_invalid')
+      }
+      if (row.responseSequence !== null && (failure !== null) === (row.responseId !== null)) {
+        throw new CodexModelGatewayAuthorityError('gateway_terminal_evidence_kind_invalid')
+      }
       return {
         ...row,
         requestSequence: row.requestSequence,
@@ -289,6 +333,7 @@ export class CodexModelGatewayRepository {
         memoryHistoryRedactionDigest: row.memoryHistoryRedactionDigest,
         memoryHistoryRedactedItemCount: row.memoryHistoryRedactedItemCount,
         requestEvidenceDigest: row.requestEvidenceDigest,
+        failure,
         inputItems: inputItems as Array<{
           digest: string
           totalStringCharacters: number
@@ -443,13 +488,15 @@ export class CodexModelGatewayRepository {
         ...input.responseEvidence,
       })
       const existing = this.db.prepare(`
-        SELECT evidence_digest FROM ready_model_gateway_exchange_events
-         WHERE gateway_request_receipt_id = ? AND event_kind = 'response_completed'
-      `).get<{ evidence_digest: string }>(receiptId)
+        SELECT event_kind, evidence_digest FROM ready_model_gateway_exchange_events
+         WHERE gateway_request_receipt_id = ?
+           AND event_kind IN ('response_completed', 'response_failed')
+      `).get<{ event_kind: string; evidence_digest: string }>(receiptId)
       if (existing) {
-        if (existing.evidence_digest === evidenceDigest) return
+        if (existing.event_kind === 'response_completed' && existing.evidence_digest === evidenceDigest) return
         throw new CodexModelGatewayAuthorityError('gateway_response_receipt_conflict')
       }
+      this.assertResponseOwnerOpen(receiptId)
       const inserted = this.db.prepare(`
         INSERT INTO ready_model_gateway_exchange_events (
           gateway_request_receipt_id, event_kind, response_id,
@@ -470,6 +517,89 @@ export class CodexModelGatewayRepository {
     })
   }
 
+  recordResponseFailureEvidence(input: {
+    metadata: CodexModelGatewayMetadata
+    requestDigest: string
+    failureEvidence: CodexModelGatewayFailureEvidence
+    failedAt: string
+  }): void {
+    this.immediate(() => {
+      assertFailureEvidence(input.failureEvidence)
+      const kind = this.classify(input.metadata)
+      const receiptId = this.receiptId({
+        kind,
+        codexThreadId: input.metadata.threadId,
+        codexTurnId: input.metadata.turnId,
+        readyRunId: input.metadata.readyRunId,
+        manualCompactionId: kind === 'manual_compaction'
+          ? this.db.prepare(`
+              SELECT manual_compaction_id FROM ready_model_gateway_request_receipts
+               WHERE request_kind = 'manual_compaction'
+                 AND codex_thread_id = ? AND codex_turn_id = ? AND request_digest = ?
+            `).get<{ manual_compaction_id: string }>(
+              input.metadata.threadId,
+              input.metadata.turnId,
+              input.requestDigest,
+            )?.manual_compaction_id || null
+          : null,
+        requestDigest: input.requestDigest,
+      })
+      const failureDigest = digestCanonicalJson(input.failureEvidence)
+      const evidenceDigest = digestCanonicalJson({
+        gatewayRequestReceiptId: receiptId,
+        failureDigest,
+        failedAt: input.failedAt,
+      })
+      const existing = this.db.prepare(`
+        SELECT event_kind, failure_digest, evidence_digest
+          FROM ready_model_gateway_exchange_events
+         WHERE gateway_request_receipt_id = ?
+           AND event_kind IN ('response_completed', 'response_failed')
+      `).get<{ event_kind: string; failure_digest: string | null; evidence_digest: string }>(receiptId)
+      if (existing) {
+        if (existing.event_kind === 'response_failed'
+          && existing.failure_digest === failureDigest
+          && existing.evidence_digest === evidenceDigest) return
+        throw new CodexModelGatewayAuthorityError('gateway_response_receipt_conflict')
+      }
+      this.assertResponseOwnerOpen(receiptId)
+      const inserted = this.db.prepare(`
+        INSERT INTO ready_model_gateway_exchange_events (
+          gateway_request_receipt_id, event_kind, failure_json,
+          failure_digest, evidence_digest, recorded_at
+        ) VALUES (?, 'response_failed', ?, ?, ?, ?)
+      `).run(
+        receiptId,
+        JSON.stringify(input.failureEvidence),
+        failureDigest,
+        evidenceDigest,
+        input.failedAt,
+      )
+      if (changes(inserted) !== 1) {
+        throw new CodexModelGatewayAuthorityError('gateway_failure_receipt_insert_failed')
+      }
+    })
+  }
+
+  private assertResponseOwnerOpen(receiptId: string): void {
+    const owner = this.db.prepare(`
+      SELECT request.request_kind, turn.ready_run_id,
+             turn.product_terminal_digest, turn.host_failure_product_terminal_digest
+        FROM ready_model_gateway_request_receipts request
+        LEFT JOIN codex_turn_bindings turn ON turn.ready_run_id = request.ready_run_id
+       WHERE request.receipt_id = ?
+    `).get<{
+      request_kind: CodexModelGatewayRequestKind
+      ready_run_id: string | null
+      product_terminal_digest: string | null
+      host_failure_product_terminal_digest: string | null
+    }>(receiptId)
+    if (!owner || (owner.request_kind !== 'manual_compaction'
+      && (!owner.ready_run_id || owner.product_terminal_digest || owner.host_failure_product_terminal_digest))) {
+      throw new CodexModelGatewayAuthorityError('gateway_response_owner_closed')
+    }
+  }
+
   private classify(metadata: CodexModelGatewayMetadata): CodexModelGatewayRequestKind {
     try {
       return classifyCodexModelGatewayRequest(metadata.raw)
@@ -488,6 +618,7 @@ export class CodexModelGatewayRepository {
     const row = this.readBinding({
       kind,
       codexThreadId: input.metadata.threadId,
+      codexForkedFromId: (input.metadata.raw.forked_from_thread_id as string | undefined) ?? null,
       codexTurnId: input.metadata.turnId,
       readyRunId: input.metadata.readyRunId,
       toolSurfaceDigest: input.metadata.toolSurfaceDigest,
@@ -568,6 +699,7 @@ export class CodexModelGatewayRepository {
     const binding = this.readBinding({
       kind: 'manual_compaction',
       codexThreadId: input.metadata.threadId,
+      codexForkedFromId: (input.metadata.raw.forked_from_thread_id as string | undefined) ?? null,
       codexTurnId: input.metadata.turnId,
       readyRunId: null,
       toolSurfaceDigest: null,
@@ -848,6 +980,15 @@ export class CodexDatabaseModelGatewayAuthority implements CodexModelGatewayAuth
     completedAt: string
   }): Promise<void> {
     this.repository.recordResponseEvidence(input)
+  }
+
+  recordResponseFailureEvidence(input: {
+    metadata: CodexModelGatewayMetadata
+    requestDigest: string
+    failureEvidence: CodexModelGatewayFailureEvidence
+    failedAt: string
+  }): void {
+    this.repository.recordResponseFailureEvidence(input)
   }
 }
 

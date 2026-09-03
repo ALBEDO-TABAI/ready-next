@@ -27,6 +27,7 @@ import {
   skillDirHasScripts,
   skillHasDeclaredBins
 } from '../../skills-runtime/skill-executable-surface'
+import { isRetryOnlyTurn } from '../skills/skill-detection-inputs'
 
 import {
   messageToText,
@@ -120,6 +121,35 @@ export function resolveManifestBoundSkillTools(
   }
 }
 
+export function filterSkillManifestToolsForTurn(
+  tools: { typedActions: string[]; primitives: string[] },
+  textCandidates: readonly string[],
+  previousApplicableToolNames: readonly string[] = [],
+): { typedActions: string[]; primitives: string[] } {
+  const hasAffirmativePublicUrlClipIntent = textCandidates.some((text) => {
+    const value = String(text || '').trim()
+    if (!/https?:\/\/[^\s<>'"`]+/i.test(value)) return false
+    if (/(?:不要|别|无需|不必|禁止|取消).{0,24}(?:保存|剪藏|收录|归档|写入)|(?:只|仅).{0,8}(?:解释|说明|分析)|\b(?:do\s+not|don't|without)\b.{0,24}\b(?:save|clip|archive)\b/i.test(value)) {
+      return false
+    }
+    if (/(?:为什么|怎么|如何|能否|可不可以|是否).{0,24}(?:保存|剪藏|收录|归档)|\b(?:why|how|can|could|should)\b.{0,24}\b(?:save|clip|archive)\b/i.test(value)) {
+      return false
+    }
+    return /(?:保存|剪藏|收录|归档|写入)|\b(?:save|clip|archive)\b/i.test(value)
+      || !/[?？]/.test(value)
+  })
+  const resumesPreviousApplicability = textCandidates.some(isRetryOnlyTurn)
+    && previousApplicableToolNames.includes('web_clip_url')
+  return {
+    typedActions: tools.typedActions.filter((name) => (
+      name !== 'web_clip_url'
+      || hasAffirmativePublicUrlClipIntent
+      || resumesPreviousApplicability
+    )),
+    primitives: tools.primitives,
+  }
+}
+
 export function shouldSuppressSkillAskUserForArtifactDelivery(textCandidates: string[]): boolean {
   const joined = textCandidates.join('\n')
   if (
@@ -202,6 +232,27 @@ export function readSkillReferenceNames(envelope: unknown): string[] {
   return names
 }
 
+export function readSkillReferenceApplicableToolNames(
+  envelope: unknown,
+  skillName: string,
+): string[] {
+  if (!envelope || typeof envelope !== 'object') return []
+  const resources = (envelope as { resources?: unknown }).resources
+  if (!Array.isArray(resources)) return []
+  return [...new Set(resources.flatMap((entry) => {
+    if (!entry || typeof entry !== 'object') return []
+    const resource = entry as {
+      kind?: unknown
+      name?: unknown
+      applicableToolNames?: unknown
+    }
+    if (resource.kind !== 'skill_reference' || resource.name !== skillName) return []
+    return Array.isArray(resource.applicableToolNames)
+      ? resource.applicableToolNames.filter((name): name is string => typeof name === 'string')
+      : []
+  }))]
+}
+
 interface SkillHintRelevanceDecision {
   relevant: boolean
   reason: string
@@ -217,6 +268,7 @@ export function resolveSkillHintRelevanceForTurn(params: {
   continuationState?: import('../contracts/continuation-state').ContinuationState | null
   checkpointRestore?: AgentSdkBudgetCheckpointRestore | null
   taskRefs?: ReadonlyArray<FollowupTaskRef>
+  observedReferenceHint?: { id: string; name: string } | null
 }): SkillHintRelevanceDecision {
   if (params.localSendImIntent) return { relevant: true, reason: 'local_send_im' }
   const userTextCandidates = skillAuthorizationTextCandidates(
@@ -235,7 +287,9 @@ export function resolveSkillHintRelevanceForTurn(params: {
       return { relevant: true, reason: 'explicit_skill' }
     }
   }
-  const referenceHint = resolveReferenceHintSnapshot(params.orchestrator, params.sessionId)
+  const referenceHint = params.observedReferenceHint !== undefined
+    ? params.observedReferenceHint
+    : resolveReferenceHintSnapshot(params.orchestrator, params.sessionId)
   if (!referenceHint) return { relevant: false, reason: 'no_reference_hint' }
   if (
     referenceHint.id === 'lark-cli'

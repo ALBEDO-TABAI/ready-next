@@ -10,7 +10,7 @@ const violations = []
 const defs = read('src/main/modules/tools/agent-interaction-tool-defs.ts')
 const handler = read('src/main/modules/tools/builtins/declare-completion-criteria.ts')
 const repository = read('src/main/modules/repositories/task-projection-repository.ts')
-const finalizer = read('src/main/modules/agent-control/runtime-core/run-finalizer.ts')
+const finalizer = read('src/main/modules/agent-control/runtime-core/run-finalizer-task-facts.ts')
 const coverageTest = read('src/__tests__/completion-declaration-persistence.test.ts')
 
 if (!/expected_outputs:\s*\{/.test(defs)) violations.push('declare_completion_criteria schema lacks expected_outputs')
@@ -26,7 +26,8 @@ const forbidden = [
   /coverageTargets\s*[:=][^\n]*(?:skillCount|envelopeCount|mentionedDomains)/,
 ]
 for (const file of [
-  'src/main/modules/agent-control/runtime-core/run-finalizer.ts',
+  'src/main/modules/agent-control/runtime-core/run-finalizer-task-facts.ts',
+  'src/main/modules/agent-control/runtime-core/run-finalizer-adjudication.ts',
   'src/main/modules/tools/builtins/declare-completion-criteria.ts',
 ]) {
   const source = read(file)

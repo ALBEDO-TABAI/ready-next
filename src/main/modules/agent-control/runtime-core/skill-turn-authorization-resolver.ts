@@ -18,6 +18,8 @@ import {
 } from './agent-sdk-foundation-utils'
 import {
   allowedPrimitiveToolsForSdkSkillTurn,
+  filterSkillManifestToolsForTurn,
+  readSkillReferenceApplicableToolNames,
   readSkillReferenceNames,
   resolveExplicitReferenceSkillExecutableSurface,
   resolveManifestBoundSkillTools,
@@ -36,12 +38,14 @@ function registeredSkillOrFallback(skillId: string, fallback: unknown): unknown 
 }
 
 export function resolveSemanticSkillAuthorizationForTurn(input: {
+  mode: 'observe' | 'commit'
   message: RunMessage
   sessionId?: string
   messageVisibilityEpoch?: number
   requestEnvelope?: unknown
   forceLocalSendImIntent?: boolean
   skillHintRelevantForTurn?: boolean
+  observedReferenceHint?: { id: string; name: string; applicableToolNames?: string[] } | null
   orchestrator: SkillContextOrchestratorLike | null
   log?: (message: string) => void
 }): SkillToolAuthorization {
@@ -55,6 +59,11 @@ export function resolveSemanticSkillAuthorizationForTurn(input: {
       ? buildExplicitNoSkillAuthorization('no_skill_signal', { candidateSkillPrimitives: candidate })
       : buildExplicitNoSkillAuthorization('no_skill_signal')
   }
+  const observedHint = input.mode === 'observe'
+    ? input.observedReferenceHint !== undefined
+      ? input.observedReferenceHint
+      : orchestrator.observeCurrentReferenceSkillHint?.(input.sessionId) || null
+    : undefined
   const userTextCandidates = skillAuthorizationTextCandidates(
     input.message,
     input.requestEnvelope,
@@ -66,19 +75,25 @@ export function resolveSemanticSkillAuthorizationForTurn(input: {
         .find((skill) => skill && (skill.id || skill.skillId))
       const skillId = matchedSkill?.id || matchedSkill?.skillId
       if (!matchedSkill || !skillId) continue
-      try {
-        orchestrator.rememberExplicitReferenceSkillHint?.(
-          syntheticMention,
-          input.sessionId,
-          input.messageVisibilityEpoch,
-        )
-      } catch (error) {
-        input.log?.(`rememberExplicitReferenceSkillHint failed: ${error instanceof Error ? error.message : String(error)}`)
+      if (input.mode === 'commit') {
+        try {
+          orchestrator.rememberExplicitReferenceSkillHint?.(
+            syntheticMention,
+            input.sessionId,
+            input.messageVisibilityEpoch,
+          )
+        } catch (error) {
+          input.log?.(`rememberExplicitReferenceSkillHint failed: ${error instanceof Error ? error.message : String(error)}`)
+        }
       }
       const preferredTexts = [...userTextCandidates, syntheticMention]
       const typedActions = Array.from(new Set(
         preferredTexts
-          .flatMap((text) => orchestrator.buildPreferredSkillToolNames?.(text, input.sessionId) || [])
+          .flatMap((text) => orchestrator.buildPreferredSkillToolNames?.(
+            text,
+            input.sessionId,
+            input.mode === 'observe' ? observedHint : undefined,
+          ) || [])
           .filter((toolName) => toolName.startsWith('skill_') && !PRIMITIVE_TOOL_NAME_SET.has(toolName)),
       ))
       const executableSurface = resolveExplicitReferenceSkillExecutableSurface(
@@ -91,11 +106,29 @@ export function resolveSemanticSkillAuthorizationForTurn(input: {
         hasConsent: getSkillShellConsent(skillId),
       })
       const allowAskUser = !shouldSuppressSkillAskUserForArtifactDelivery(preferredTexts)
-      const manifestTools = resolveManifestBoundSkillTools(
-        registeredSkillOrFallback(skillId, matchedSkill),
-        typedActions,
-        allowedPrimitiveToolsForSdkSkillTurn({ skillId, allowRunShell, allowAskUser }),
+      const manifestTools = filterSkillManifestToolsForTurn(
+        resolveManifestBoundSkillTools(
+          registeredSkillOrFallback(skillId, matchedSkill),
+          typedActions,
+          allowedPrimitiveToolsForSdkSkillTurn({ skillId, allowRunShell, allowAskUser }),
+        ),
+        preferredTexts,
+        [
+          ...readSkillReferenceApplicableToolNames(input.requestEnvelope, skillName),
+          ...((input.mode === 'observe'
+            ? observedHint
+            : orchestrator.peekCurrentReferenceSkillHint?.(input.sessionId))
+            ?.applicableToolNames ?? []),
+        ],
       )
+      if (input.mode === 'commit') {
+        orchestrator.rememberReferenceSkillToolApplicability?.(
+          skillId,
+          [...manifestTools.typedActions, ...manifestTools.primitives],
+          input.sessionId,
+          input.messageVisibilityEpoch,
+        )
+      }
       input.log?.(`[skill_authorization] source=typed_ref skill=${skillId}`)
       return buildSelectedSkillToolAuthorization({
         skillId,
@@ -137,7 +170,7 @@ export function resolveSemanticSkillAuthorizationForTurn(input: {
   const explicitSkill = explicitEntry?.skill || null
   const explicitSkillId = explicitSkill?.id || explicitSkill?.skillId
     || (localSendImIntent ? 'send-im' : null)
-  if (explicitSkillId) {
+  if (explicitSkillId && input.mode === 'commit') {
     try {
       orchestrator.rememberExplicitReferenceSkillHint?.(
         explicitEntry?.text || userTextCandidates[0],
@@ -155,9 +188,15 @@ export function resolveSemanticSkillAuthorizationForTurn(input: {
       : buildExplicitNoSkillAuthorization('no_skill_signal')
   }
 
-  const referenceHint = orchestrator.getCurrentReferenceSkillHint?.(input.sessionId) || null
+  const referenceHint = input.mode === 'observe'
+    ? observedHint || null
+    : orchestrator.getCurrentReferenceSkillHint?.(input.sessionId) || null
   const preferredToolNames = userTextCandidates.flatMap((text) =>
-    orchestrator.buildPreferredSkillToolNames?.(text, input.sessionId) || [],
+    orchestrator.buildPreferredSkillToolNames?.(
+      text,
+      input.sessionId,
+      input.mode === 'observe' ? observedHint : undefined,
+    ) || [],
   )
   const typedActionNames = new Set(
     preferredToolNames.filter((name) =>
@@ -186,11 +225,23 @@ export function resolveSemanticSkillAuthorizationForTurn(input: {
     hasConsent: getSkillShellConsent(skillId),
   })
   const allowAskUser = !shouldSuppressSkillAskUserForArtifactDelivery(userTextCandidates)
-  const manifestTools = resolveManifestBoundSkillTools(
-    registeredSkillOrFallback(skillId, selectedSkillCandidate),
-    typedActions,
-    allowedPrimitiveToolsForSdkSkillTurn({ skillId, allowRunShell, allowAskUser }),
+  const manifestTools = filterSkillManifestToolsForTurn(
+    resolveManifestBoundSkillTools(
+      registeredSkillOrFallback(skillId, selectedSkillCandidate),
+      typedActions,
+      allowedPrimitiveToolsForSdkSkillTurn({ skillId, allowRunShell, allowAskUser }),
+    ),
+    userTextCandidates,
+    referenceHint?.applicableToolNames ?? [],
   )
+  if (input.mode === 'commit') {
+    orchestrator.rememberReferenceSkillToolApplicability?.(
+      skillId,
+      [...manifestTools.typedActions, ...manifestTools.primitives],
+      input.sessionId,
+      input.messageVisibilityEpoch,
+    )
+  }
   input.log?.(`[skill_authorization] source=text_fallback skill=${skillId}`)
   return buildSelectedSkillToolAuthorization({
     skillId,

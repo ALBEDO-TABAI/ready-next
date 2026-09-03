@@ -300,6 +300,13 @@ export class CodexThreadArchiveIntentStore {
     return row ? readIntent(row) : null
   }
 
+  readRetiredThreadLineage(intent: CodexThreadArchiveIntentRead): {
+    parentThreadId: string | null
+    forkedFromId: string | null
+  } {
+    return this.assertRetiredBinding(intent)
+  }
+
   assertDispatchEligible(codexThreadId: string): void {
     const intent = this.readByThreadId(codexThreadId)
     if (!intent || intent.state !== 'result_unknown') {
@@ -747,15 +754,21 @@ export class CodexThreadArchiveIntentStore {
     return readIntent(row)
   }
 
-  private assertRetiredBinding(intent: CodexThreadArchiveIntentRead): void {
+  private assertRetiredBinding(intent: CodexThreadArchiveIntentRead): {
+    parentThreadId: string | null
+    forkedFromId: string | null
+  } {
     const binding = this.db.prepare(`
       SELECT codex_thread_id, codex_session_id, isolated_thread_cwd,
+             codex_parent_thread_id, codex_forked_from_id,
              ready_conversation_alias, alias_generation, retired_at, retired_reason,
              retirement_evidence_digest
         FROM codex_thread_bindings WHERE thread_binding_id = ? LIMIT 1
     `).get<{
       codex_thread_id: string | null
       codex_session_id: string | null
+      codex_parent_thread_id: string | null
+      codex_forked_from_id: string | null
       isolated_thread_cwd: string | null
       ready_conversation_alias: string
       alias_generation: number
@@ -773,6 +786,10 @@ export class CodexThreadArchiveIntentStore {
       || binding.retired_reason !== intent.retiredReason
       || binding.retirement_evidence_digest !== intent.retirementEvidenceDigest) {
       throw new Error('codex_thread_archive_retired_binding_mismatch')
+    }
+    return {
+      parentThreadId: binding.codex_parent_thread_id,
+      forkedFromId: binding.codex_forked_from_id,
     }
   }
 

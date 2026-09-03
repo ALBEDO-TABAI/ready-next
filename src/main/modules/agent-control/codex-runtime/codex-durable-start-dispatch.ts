@@ -7,7 +7,7 @@ import type {
 import type { CodexProvisionalInboundBuffer } from './codex-provisional-inbound-buffer'
 import type { CodexStartIdentityRegistry } from './codex-start-identity-registry'
 
-type StartMethod = 'thread/start' | 'turn/start'
+type StartMethod = 'thread/start' | 'thread/fork' | 'turn/start'
 
 export interface CodexStartDeliveryEvidenceResolver {
   resolveTypedRejection(input: {
@@ -48,12 +48,14 @@ export class CodexDurableStartDispatchPort implements CodexStartDispatchPort {
       dispatchedAt,
     })
     const deadlineAtMs = Date.parse(dispatchedAt) + this.deps.inboundDeadlineMs
-    if (activated.inboundIdentity.method === 'thread/start') {
+    if (activated.inboundIdentity.method !== 'turn/start') {
       this.deps.inboundBuffer.registerProvisionalThread({
         bindingId: activated.bindingId,
         connectionEpoch: input.connectionEpoch,
         expectedCwd: activated.inboundIdentity.expectedCwd,
         expectedSource: this.deps.pinnedThreadSource,
+        expectedParentThreadId: activated.inboundIdentity.expectedParentThreadId,
+        expectedForkedFromId: activated.inboundIdentity.expectedForkedFromId,
         deadlineAtMs,
       })
     } else {
@@ -122,7 +124,7 @@ export class CodexDurableStartDispatchPort implements CodexStartDispatchPort {
       committed = true
     }
     let disposition: 'released' | 'unknown'
-    if (inboundIdentity.method === 'thread/start') {
+    if (inboundIdentity.method !== 'turn/start') {
       disposition = await this.deps.inboundBuffer.reconcileThread({
         bindingId: input.bindingId,
         connectionEpoch: input.connectionEpoch,
@@ -151,6 +153,14 @@ export class CodexDurableStartDispatchPort implements CodexStartDispatchPort {
   }): Promise<'unknown' | 'proven_absent'> {
     const resolution = await this.deps.evidenceResolver.resolveTypedRejection(input)
     if (resolution.resolution === 'unknown') return 'unknown'
+    if (input.method === 'thread/fork') {
+      this.deps.repository.markForkMaterializationProvenAbsent({
+        threadBindingId: input.bindingId,
+        evidenceDigest: resolution.evidenceDigest,
+        recordedAt: this.deps.now(),
+      })
+      return 'proven_absent'
+    }
     this.deps.repository.recordHostFailureEvidence({
       readyRunId: input.method === 'turn/start'
         ? input.bindingId

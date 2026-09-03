@@ -23,7 +23,7 @@ export const AGENT_INTERACTION_TOOL_NAMES: readonly string[] = [
 ] as const
 
 const DECLARE_COMPLETION_CRITERIA_DESCRIPTION = [
-  '在规划或执行早期，把你对「这个任务做到什么程度才算完成」的具体判断登记为补充验收标准（1-8 条，每条 ≤120 字符的可验证陈述）。任务承诺交付文件时，同时用 expected_outputs 声明每个最终文件目标。终态裁决时会逐项核对。',
+  '在规划或执行早期，把你对「这个任务做到什么程度才算完成」的具体判断登记为补充验收标准（1-8 条，每条 ≤120 字符的可验证陈述）。当前回合带目标文件夹时，必须用 folder_output_intent 明确是否写入；正向写入同时用 expected_outputs 声明每个相对文件目标。具体文件目标会逐一核对，登记动作不算完成证明。',
   '',
   '何时使用：结果型任务（多步/研究/媒体/浏览器交易）在开工时就能写出比通用模板更具体的完成判据（如「产物落到 outputs 目录并给出路径」「三个来源交叉验证过再下结论」）。',
   '',
@@ -55,9 +55,14 @@ const DECLARE_COMPLETION_CRITERIA_INPUT_SCHEMA = {
         type: 'string',
         minLength: 1,
         maxLength: 200,
-        description: '一个具体最终文件目标（≤200 字符），如 /Users/user/V/深读.md；不可只给目录。',
+        description: '一个具体最终文件目标（≤200 字符）。有冻结目标文件夹时必须用相对路径，如 深读.md；不可只给目录。',
       },
       description: '本任务承诺交付的最终文件目标，整组替换；未承诺文件时省略。',
+    },
+    folder_output_intent: {
+      type: 'string',
+      enum: ['create', 'save', 'export', 'no_write'],
+      description: '当前回合带目标文件夹时必填。create/save/export 表示确实要写入；no_write 表示只读、讨论或不写入。目标文件夹由宿主冻结，不能在这里填写路径。',
     },
   },
   required: ['criteria'],

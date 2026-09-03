@@ -9,6 +9,8 @@ import { ToolDomainError } from '../tools/tool-errors'
 export interface TagForgeHostReviewContext {
   abortSignal?: AbortSignal
   agent?: string | null
+  onToolEffectEnd?: () => void
+  onToolEffectStart?: () => void
   runId?: string
   scope?: { id: string; agent?: string | null } | null
   scopeId?: string
@@ -28,7 +30,7 @@ export async function completeTagForgeHostReview<TFileContext>(
     executeFileTool: (name: string, args: Record<string, unknown>, fileContext: TFileContext) => Promise<string>
   },
 ): Promise<string> {
-  if (toolName !== 'tag_forge_prepare_batch' && toolName !== 'tag_forge_apply_batch') return result
+  if (toolName !== 'tag_forge_apply_batch') return result
   let batch: Record<string, unknown> | null = null
   try {
     const parsed = JSON.parse(result)
@@ -57,11 +59,14 @@ export async function completeTagForgeHostReview<TFileContext>(
     if (askedReview.batchId !== batchId || askedReview.fingerprint !== fingerprint) {
       return result
     }
+    context.onToolEffectEnd?.()
+    context.onToolEffectStart?.()
     return deps.executeFileTool('tag_forge_review_batch', {
       batchId,
       confirmationCardId: askedReview.cardId,
     }, fileContext)
   }
+  context.onToolEffectEnd?.()
   const answer = await deps.askUserQuestions(
     reviewQuestion as Parameters<typeof executeAskUserQuestions>[0],
     {
@@ -80,6 +85,7 @@ export async function completeTagForgeHostReview<TFileContext>(
     ? answerData.cardId
     : ''
   if (!cardId) throw new ToolDomainError('tag_forge_review_card_missing', 'Tag Forge review card returned no card id')
-  askedReviewRuns.set(context.runId, { batchId, fingerprint, cardId, askedAt: now })
+  askedReviewRuns.set(context.runId, { batchId, fingerprint, cardId, askedAt: Date.now() })
+  context.onToolEffectStart?.()
   return deps.executeFileTool('tag_forge_review_batch', { batchId, confirmationCardId: cardId }, fileContext)
 }

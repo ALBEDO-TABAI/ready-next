@@ -140,7 +140,7 @@ import type { AgentSpawnContext } from '../../../../shared/skill-host-contract'
 import { snapshotTurnFeatureFlags } from '../runtime-core/turn-feature-flags'
 import { fallbackThrottle } from '../skills/skill-tool-fallback-throttle'
 // Stage T PR-T5 — MCP authorization gate. The model-visible mcp tool list
-// resolver below calls `mcpRegistry.isAuthorized(name, sessionId, scopeId)`
+// resolver below calls `mcpRegistry.isMcpToolReady(name)`
 // before exposing any `mcp_*` tool to the model.
 import * as mcpRegistry from '../../mcp/registry'
 
@@ -232,6 +232,7 @@ const RSS_TOOL_NAMES = [
   'rss_fetch_updates',
   'rss_select_item',
   'rss_analyze_item',
+  'rss_get_analysis_result',
   'rss_capture_session',
 ]
 
@@ -445,6 +446,7 @@ function resolveToolTimeoutProfile(toolName: string, domain: ToolDomain, kind: T
   if (domain === 'browser') return 'browser_interactive'
   if (domain === 'document' && kind === 'write') return 'document_write'
   if (toolName === 'ask_user_questions' || toolName === 'skill_ask_user') return 'user_interaction'
+  if (toolName === 'rss_analyze_item' || toolName === 'rss_get_analysis_result') return 'job_wait'
   if (toolName === 'skill_run_shell') return 'skill_long'
   if (domain === 'skill') return 'skill'
   if (domain === 'feishu') return 'feishu'
@@ -856,7 +858,7 @@ const GROUP_TOOL_PROVIDERS: Record<CapabilityGroupId, ToolRegistryProvider> = {
   // Stage T PR-T5 — MCP provider entry. Tool names are dynamic (pulled
   // from `mcpRegistry.listMcpToolNames()`); the model-visible filter in
   // `getToolDefinitionsResolutionForGroup` / `getToolSchemasResolutionForGroup`
-  // gates each name through `mcpRegistry.isAuthorized(name, sessionId, scopeId)`.
+  // gates each name through the connected catalog readiness check.
   mcp: {
     hasDynamicSource: true,
     get staticToolNames(): readonly string[] {
@@ -1122,12 +1124,12 @@ export class ToolRegistry implements ToolRegistryReader {
       (def) => def.name,
     )
     // Stage T PR-T5 — when listing the MCP group, gate every advertised
-    // tool through `mcpRegistry.isAuthorized(name, sessionId, scopeId)`.
+    // tool through the connected catalog readiness check.
     // 3-arity (name + sessionId + scopeId) is the contract enforced by
-    // `check-mcp-tools-go-through-authorization.cjs`.
+    // `check-mcp-tools-ready-gate.cjs`.
     if (groupId === 'mcp') {
       definitions = definitions.filter((def) =>
-        mcpRegistry.isAuthorized(def.name, sessionId, scopeId),
+        mcpRegistry.isMcpToolReady(def.name),
       )
     }
     return {
@@ -1223,11 +1225,11 @@ export class ToolRegistry implements ToolRegistryReader {
     )
     // Stage T PR-T5 — schema list MUST go through the same MCP
     // authorization gate. Required by
-    // `check-mcp-tools-go-through-authorization.cjs` (E).
+    // `check-mcp-tools-ready-gate.cjs`.
     if (groupId === 'mcp') {
       tools = tools.filter((tool) => {
         const name = extractName(tool)
-        return name ? mcpRegistry.isAuthorized(name, sessionId, scopeId) : false
+        return name ? mcpRegistry.isMcpToolReady(name) : false
       })
     }
     return {
@@ -1273,13 +1275,25 @@ export class ToolRegistry implements ToolRegistryReader {
     authorization: SkillToolAuthorization,
     scopeId?: string,
   ): ToolDefinition[] {
-    const definitions = this.getToolDefinitionsResolutionForGroup(
+    let definitions = this.getToolDefinitionsResolutionForGroup(
       groupId,
       sessionId,
       authorization,
       scopeId,
     ).definitions
     if (groupId !== 'skills') return definitions
+    const authorizedPrimitiveNames = authorization.mode === 'selected'
+      ? [...authorization.allowedPrimitives]
+        .filter((name) => PRIMITIVE_TOOL_NAME_SET.has(name))
+      : authorization.candidateSkillPrimitives?.primitives || []
+    const seen = new Set(definitions.map((definition) => definition.name))
+    for (const name of authorizedPrimitiveNames) {
+      if (seen.has(name)) continue
+      const definition = this.getToolDefinitionForExecution(name)
+      if (!definition || definition.groupId !== 'skills') continue
+      definitions = [...definitions, definition]
+      seen.add(name)
+    }
     let liveSkills: import('../../skills-runtime/runtime-manager-types').SkillState[] = []
     try {
       liveSkills = getSkillsRuntimeManager().listSkills()

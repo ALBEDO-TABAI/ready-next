@@ -34,6 +34,7 @@ import {
 } from '../main/modules/agent-control/skills/skill-task-tracker'
 import type { SkillTaskRunRecord, SkillTaskRunRepository } from '../main/modules/repositories/skill-task-run-repository'
 import { buildSelectedSkillToolAuthorization } from '../main/modules/agent-control/skills/skill-tool-authorization'
+import { collectToolOutputProofs } from '../main/modules/agent-control/quality/proof-collector'
 
 const COMPLETE_HFP_SPACE_DESIGN_PROPOSAL = [
   '# hfpTM 空间设计提案：洞穴风',
@@ -441,6 +442,12 @@ test('e2e fence: reference skill primitive still updates visible task projection
     const readProjection = readSkillTaskProjection({ sessionId, skillId })
     assert.equal(readProjection?.taskSummary, '正在根据参考内容整理方案')
     assert.equal(readProjection?.steps.at(-1)?.title, '读取技能参考')
+    const readProofs = collectToolOutputProofs(
+      'skill_read_artifact',
+      readResult,
+      new Date('2026-08-19T00:00:00.000Z'),
+    )
+    assert.deepEqual(readProofs.map((proof) => proof.kind), ['tool_result'])
 
     const targetRoot = join(root, 'target-folder')
     mkdirSync(targetRoot, { recursive: true })

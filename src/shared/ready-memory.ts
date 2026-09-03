@@ -92,6 +92,16 @@ export type ReadyMemoryPinRequest = z.infer<typeof readyMemoryPinRequestSchema>
 export type ReadyMemoryDeleteRequest = z.infer<typeof readyMemoryDeleteRequestSchema>
 export type ReadyMemoryResetRequest = z.infer<typeof readyMemoryResetRequestSchema>
 
+export const readyMemoryStateChangeSchema = z.object({
+  contract: z.literal('ready_memory_state_change_v1'),
+  reason: z.enum(['policy', 'add', 'update', 'pin', 'delete', 'reset', 'generation']),
+  stateRevision: z.number().int().positive(),
+  revocationRevision: z.number().int().nonnegative(),
+  evidenceDigest: z.string().regex(/^[a-f0-9]{64}$/),
+}).strict()
+
+export type ReadyMemoryStateChange = z.infer<typeof readyMemoryStateChangeSchema>
+
 const JITLESS_PARSE = { jitless: true } as const
 
 export function parseReadyMemoryView(value: unknown): ReadyMemoryView {
@@ -128,4 +138,8 @@ export function parseReadyMemoryDeleteRequest(value: unknown): ReadyMemoryDelete
 
 export function parseReadyMemoryResetRequest(value: unknown): ReadyMemoryResetRequest {
   return readyMemoryResetRequestSchema.parse(value, JITLESS_PARSE)
+}
+
+export function parseReadyMemoryStateChange(value: unknown): ReadyMemoryStateChange {
+  return readyMemoryStateChangeSchema.parse(value, JITLESS_PARSE)
 }

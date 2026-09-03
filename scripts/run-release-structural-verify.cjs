@@ -44,6 +44,7 @@ const RELEASE_STRUCTURAL_COMMANDS = [
   npmCommand('verify:stability', ['run', 'verify:stability']),
   npmCommand('verify:streaming', ['run', 'verify:streaming']),
   npmCommand('verify:native', ['run', 'verify:native']),
+  npmCommand('verify:codex-turn-delivery', ['run', 'verify:codex-turn-delivery']),
   npmCommand('verify:codex-runtime-e2', ['run', 'verify:codex-runtime-e2']),
   {
     label: 'test:release-structural',

@@ -5,13 +5,17 @@
  * 配置来源：settings 键 `mcp_servers_json`——JSON 数组：
  *   [{ "id": "filesystem", "transport": "stdio", "command": "npx",
  *      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/path"],
- *      "env": {...}, "enabled": true, "requiresAuthorization": false }]
+ *      "env": {...}, "enabled": true, "approvalMode": "writes" }]
  *
  * 装配链：config → new McpClient → discoverToolsFromServer →
  * applyDiscoveryResult + registerMcpClient。逐 server 容错：单个失败记
  * 结果不炸启动；被预算裁剪的工具名必须落日志（no silent caps）。
- * stdio 之外的 transport 本阶段跳过（websocket/OAuth 属第二阶段）。
+ * 配置仅接受本地 stdio server。
  */
+
+import { mkdirSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 
 import { McpClient } from './client'
 import {
@@ -20,20 +24,22 @@ import {
   resetMcpClientRegistryForReload,
 } from './client'
 import {
+  getMcpCatalogSnapshot,
   listMcpServerRegistrations,
   resetMcpServerRegistryForReload,
 } from './registry'
+import type { McpApprovalMode } from './registry'
 import { applyDiscoveryResult, discoverToolsFromServer } from './tool-discovery'
 
 export interface McpServerConfig {
   id: string
+  displayName: string
   transport: 'stdio'
   command: string
   args: string[]
   env?: Record<string, string>
   enabled: boolean
-  /** stdio 本地 server 默认免 OAuth（server-filesystem 路径）；显式 true 才要求。 */
-  requiresAuthorization: boolean
+  approvalMode: McpApprovalMode
 }
 
 export interface McpConfigParseResult {
@@ -91,14 +97,20 @@ export function parseMcpServersConfig(raw: string | null | undefined): McpConfig
       ? Object.fromEntries(Object.entries(e.env as Record<string, unknown>).map(([k, v]) => [k, String(v)]))
       : undefined
     seenIds.add(id)
+    const approvalMode = String(e.approvalMode || 'writes')
+    if (!['always', 'writes', 'never'].includes(approvalMode)) {
+      skipped.push({ raw: entry, reason: `invalid_approval_mode: ${approvalMode}` })
+      continue
+    }
     configs.push({
       id,
+      displayName: String(e.displayName || id).trim() || id,
       transport: 'stdio',
       command,
       args,
       ...(env ? { env } : {}),
       enabled: e.enabled !== false,
-      requiresAuthorization: e.requiresAuthorization === true,
+      approvalMode: approvalMode as McpApprovalMode,
     })
   }
   return { configs, skipped }
@@ -116,6 +128,7 @@ export interface McpBootstrapDeps {
   /** settings 读口（生产接 DatabaseManager.getSetting）。 */
   getSetting: (key: string) => string | null | undefined
   log?: (line: string) => void
+  dataRoot?: string
   /** 测试注入：替换真实 client 构造（默认 new McpClient + registerMcpClient）。 */
   connectAndDiscover?: (config: McpServerConfig) => Promise<{
     tools: number
@@ -125,21 +138,38 @@ export interface McpBootstrapDeps {
 
 export const MCP_SERVERS_SETTING_KEY = 'mcp_servers_json'
 
-async function defaultConnectAndDiscover(config: McpServerConfig): Promise<{ tools: number; dropped: string[] }> {
-  const client = new McpClient({
+async function defaultConnectAndDiscover(
+  config: McpServerConfig,
+  dataRoot: string,
+): Promise<{ tools: number; dropped: string[] }> {
+  const serverRoot = join(dataRoot, config.id.replace(/[^a-zA-Z0-9._-]+/g, '_'))
+  const cwd = join(serverRoot, 'cwd')
+  const dataDir = join(serverRoot, 'data')
+  mkdirSync(cwd, { recursive: true, mode: 0o700 })
+  mkdirSync(dataDir, { recursive: true, mode: 0o700 })
+  let client!: McpClient
+  let catalogRefresh = Promise.resolve()
+  client = new McpClient({
     serverId: config.id,
     transport: 'stdio',
     endpoint: config.command,
     args: config.args,
     env: config.env,
-    requiresAuthorization: config.requiresAuthorization,
+    cwd,
+    dataDir,
+    onCatalogChanged: () => {
+      catalogRefresh = catalogRefresh.then(async () => {
+        const next = await discoverToolsFromServer(client)
+        if (!next.error) applyDiscoveryResult(next, { approvalMode: config.approvalMode })
+      }).catch(() => undefined)
+    },
   })
   const discovery = await discoverToolsFromServer(client)
   if (discovery.error) {
     await client.close().catch(() => undefined)
     throw new Error(`${discovery.error.kind}: ${discovery.error.message}`)
   }
-  applyDiscoveryResult(discovery, { requiresAuthorization: config.requiresAuthorization })
+  applyDiscoveryResult(discovery, { approvalMode: config.approvalMode })
   registerMcpClient(client)
   return { tools: discovery.tools.length, dropped: discovery.dropped ?? [] }
 }
@@ -171,7 +201,10 @@ export async function bootstrapMcpServersFromSettings(
     log(`mcp bootstrap: skipped config entry (${skip.reason})`)
   }
   const outcomes: McpBootstrapServerOutcome[] = []
-  const connect = deps.connectAndDiscover ?? defaultConnectAndDiscover
+  const dataRoot = deps.dataRoot || join(tmpdir(), 'ready-mcp-servers')
+  const connect = deps.connectAndDiscover
+    ? deps.connectAndDiscover
+    : (config: McpServerConfig) => defaultConnectAndDiscover(config, dataRoot)
   for (const config of configs) {
     if (!config.enabled) {
       log(`mcp bootstrap: server ${config.id} disabled — skipped`)
@@ -216,18 +249,37 @@ export async function reloadMcpServersFromSettings(
 
 export interface McpRuntimeServerStatus {
   serverId: string
+  displayName: string
   toolCount: number
   toolNames: string[]
-  requiresAuthorization: boolean
+  approvalMode: McpApprovalMode
   clientConnected: boolean
+  resourceCount: number
+  resourceTemplateCount: number
+  catalogGeneration: number
+  catalogDigest: string
+  serverInfo: Record<string, unknown> | null
+  instructions: string | null
+  stderrTail: string
   lastError?: string
 }
 
 export interface McpRuntimeStatus {
   rawConfig: string
+  configs: Array<{
+    id: string
+    displayName: string
+    enabled: boolean
+    command: string
+    args: string[]
+    approvalMode: McpApprovalMode
+    envEntries: Array<{ key: string; value: ''; hasStoredValue: true }>
+  }>
   configuredCount: number
   skipped: Array<{ reason: string }>
   servers: McpRuntimeServerStatus[]
+  catalogGeneration: number
+  catalogDigest: string
 }
 
 /** 设置页状态读口：配置 + 注册表 + 最近装配结果三源合一。 */
@@ -248,18 +300,42 @@ export function getMcpRuntimeStatus(getSetting: (key: string) => string | null |
     const outcome = outcomes.get(config.id)
     return {
       serverId: config.id,
+      displayName: config.displayName,
       toolCount: registration?.toolNames.length ?? 0,
       toolNames: (registration?.toolNames ?? []).slice(0, 6),
-      requiresAuthorization: registration?.requiresAuthorization ?? config.requiresAuthorization,
+      approvalMode: registration?.approvalMode ?? config.approvalMode,
       clientConnected: clients.has(config.id),
+      resourceCount: registration?.resources?.length ?? 0,
+      resourceTemplateCount: registration?.resourceTemplates?.length ?? 0,
+      catalogGeneration: registration?.catalogGeneration ?? 0,
+      catalogDigest: registration?.catalogDigest ?? '',
+      serverInfo: registration?.metadata?.serverInfo ?? null,
+      instructions: registration?.metadata?.instructions ?? null,
+      stderrTail: listMcpClients().find((client) => client.serverId === config.id)?.getDiagnostics().stderrTail || '',
       ...(outcome && !outcome.ok && outcome.error ? { lastError: outcome.error } : {}),
       ...(config.enabled ? {} : { lastError: '已禁用（enabled=false）' }),
     }
   })
+  const catalog = getMcpCatalogSnapshot()
   return {
     rawConfig: raw,
+    configs: configs.map((config) => ({
+      id: config.id,
+      displayName: config.displayName,
+      enabled: config.enabled,
+      command: config.command,
+      args: config.args,
+      approvalMode: config.approvalMode,
+      envEntries: Object.keys(config.env || {}).sort().map((key) => ({
+        key,
+        value: '' as const,
+        hasStoredValue: true as const,
+      })),
+    })),
     configuredCount: configs.length,
     skipped: skipped.map((item) => ({ reason: item.reason })),
     servers,
+    catalogGeneration: catalog.generation,
+    catalogDigest: catalog.digest,
   }
 }

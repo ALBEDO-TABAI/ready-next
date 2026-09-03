@@ -85,6 +85,122 @@ export const CODEX_TOOL_REQUEST_RPC_BINDING_SCHEMA_SQL = `
   BEGIN SELECT RAISE(ABORT, 'codex_tool_request_rpc_binding_delete_forbidden'); END;
 `
 
+export const CODEX_PRODUCT_EFFECT_BINDING_SCHEMA_SQL = `
+  CREATE TABLE IF NOT EXISTS codex_product_effect_bindings (
+    effect_action_id TEXT PRIMARY KEY,
+    action_identity_digest TEXT NOT NULL,
+    ready_run_id TEXT NOT NULL,
+    ready_scope_id TEXT NOT NULL,
+    message_visibility_epoch INTEGER NOT NULL CHECK (message_visibility_epoch >= 0),
+    codex_thread_id TEXT NOT NULL,
+    codex_turn_id TEXT NOT NULL,
+    codex_call_id TEXT NOT NULL,
+    parent_ready_action_id TEXT NOT NULL,
+    tool_name TEXT NOT NULL,
+    product_action TEXT NOT NULL,
+    action_ordinal INTEGER NOT NULL CHECK (action_ordinal >= 0),
+    args_digest TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE (codex_thread_id, codex_turn_id, codex_call_id, action_ordinal),
+    FOREIGN KEY (effect_action_id) REFERENCES ready_tool_action_receipts(ready_action_id),
+    FOREIGN KEY (codex_thread_id, codex_turn_id, codex_call_id)
+      REFERENCES codex_tool_call_bindings(codex_thread_id, codex_turn_id, codex_call_id)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_codex_product_effect_run
+    ON codex_product_effect_bindings(ready_run_id, codex_call_id, action_ordinal);
+
+  CREATE TRIGGER IF NOT EXISTS codex_product_effect_parent_insert
+  BEFORE INSERT ON codex_product_effect_bindings
+  WHEN NOT EXISTS (
+    SELECT 1
+      FROM codex_tool_call_bindings call
+      JOIN codex_turn_bindings turn ON turn.ready_run_id = call.ready_run_id
+      JOIN codex_thread_bindings thread ON thread.thread_binding_id = turn.thread_binding_id
+      JOIN ready_tool_action_receipts receipt
+        ON receipt.ready_action_id = NEW.effect_action_id
+       AND receipt.action_identity_digest = NEW.action_identity_digest
+     WHERE call.codex_thread_id = NEW.codex_thread_id
+       AND call.codex_turn_id = NEW.codex_turn_id
+       AND call.codex_call_id = NEW.codex_call_id
+       AND call.ready_action_id = NEW.parent_ready_action_id
+       AND call.ready_run_id = NEW.ready_run_id
+       AND call.tool_name = NEW.tool_name
+       AND turn.ready_run_id = NEW.ready_run_id
+       AND turn.codex_thread_id = NEW.codex_thread_id
+       AND (turn.codex_turn_id = NEW.codex_turn_id
+         OR turn.gateway_claimed_codex_turn_id = NEW.codex_turn_id)
+       AND turn.message_visibility_epoch = NEW.message_visibility_epoch
+       AND turn.product_terminal_digest IS NULL
+       AND turn.host_failure_product_terminal_digest IS NULL
+       AND turn.effect_authority_closed_at IS NULL
+       AND thread.ready_scope_id = NEW.ready_scope_id
+       AND thread.ready_conversation_alias = call.ready_alias_id
+  )
+  BEGIN SELECT RAISE(ABORT, 'codex_product_effect_parent_mismatch'); END;
+
+  CREATE TRIGGER IF NOT EXISTS codex_product_effect_immutable_update
+  BEFORE UPDATE ON codex_product_effect_bindings
+  BEGIN SELECT RAISE(ABORT, 'codex_product_effect_binding_immutable'); END;
+
+  CREATE TRIGGER IF NOT EXISTS codex_product_effect_no_delete
+  BEFORE DELETE ON codex_product_effect_bindings
+  BEGIN SELECT RAISE(ABORT, 'codex_product_effect_binding_delete_forbidden'); END;
+`
+
+export const CODEX_NATIVE_COVERAGE_SCHEMA_SQL = `
+  CREATE TABLE IF NOT EXISTS codex_native_coverage_receipts (
+    receipt_id TEXT PRIMARY KEY,
+    thread_binding_id TEXT NOT NULL,
+    parent_receipt_id TEXT,
+    producer_kind TEXT NOT NULL CHECK (
+      producer_kind IN ('product_closeout', 'automatic_compaction', 'manual_compaction')
+    ),
+    producer_owner_id TEXT NOT NULL,
+    codex_thread_id TEXT NOT NULL,
+    accepted_native_head_kind TEXT NOT NULL CHECK (
+      accepted_native_head_kind IN ('turn', 'compaction')
+    ),
+    accepted_native_head_id TEXT NOT NULL,
+    accepted_product_ready_run_id TEXT,
+    newly_covered_json TEXT NOT NULL CHECK (
+      json_valid(newly_covered_json) AND json_type(newly_covered_json) = 'array'
+    ),
+    newly_covered_digest TEXT NOT NULL,
+    receipt_digest TEXT NOT NULL UNIQUE,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (thread_binding_id) REFERENCES codex_thread_bindings(thread_binding_id),
+    FOREIGN KEY (parent_receipt_id) REFERENCES codex_native_coverage_receipts(receipt_id)
+  );
+
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_codex_native_coverage_head
+    ON codex_native_coverage_receipts(
+      thread_binding_id, accepted_native_head_kind, accepted_native_head_id
+    );
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_codex_native_coverage_product_owner
+    ON codex_native_coverage_receipts(producer_owner_id)
+    WHERE producer_kind IN ('product_closeout', 'automatic_compaction');
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_codex_native_coverage_manual_owner
+    ON codex_native_coverage_receipts(producer_owner_id)
+    WHERE producer_kind = 'manual_compaction';
+
+  CREATE TRIGGER IF NOT EXISTS codex_native_coverage_parent_insert
+  BEFORE INSERT ON codex_native_coverage_receipts
+  WHEN NEW.parent_receipt_id IS NOT NULL AND NOT EXISTS (
+    SELECT 1 FROM codex_native_coverage_receipts parent
+     WHERE parent.receipt_id = NEW.parent_receipt_id
+  )
+  BEGIN SELECT RAISE(ABORT, 'codex_native_coverage_parent_missing'); END;
+
+  CREATE TRIGGER IF NOT EXISTS codex_native_coverage_immutable_update
+  BEFORE UPDATE ON codex_native_coverage_receipts
+  BEGIN SELECT RAISE(ABORT, 'codex_native_coverage_immutable'); END;
+
+  CREATE TRIGGER IF NOT EXISTS codex_native_coverage_no_delete
+  BEFORE DELETE ON codex_native_coverage_receipts
+  BEGIN SELECT RAISE(ABORT, 'codex_native_coverage_delete_forbidden'); END;
+`
+
 export const CODEX_BINDING_EVIDENCE_GUARDS_SQL = `
   CREATE TRIGGER IF NOT EXISTS codex_fence_parent_update
   BEFORE UPDATE ON codex_thread_dispatch_fences
@@ -915,12 +1031,15 @@ export function applyCodexFenceOwnerTransferMigration(db: {
 
 export function applyCodexGatewayCompletionEvidenceMigration(db: {
   exec(sql: string): void
+  prepare(sql: string): { all<T = unknown>(): T[] }
 }): void {
-  db.exec(`
+  const createCurrentTable = (): void => db.exec(`
     CREATE TABLE IF NOT EXISTS ready_model_gateway_exchange_events (
       event_sequence INTEGER PRIMARY KEY AUTOINCREMENT,
       gateway_request_receipt_id TEXT NOT NULL,
-      event_kind TEXT NOT NULL CHECK (event_kind IN ('request_admitted', 'response_completed')),
+      event_kind TEXT NOT NULL CHECK (event_kind IN (
+        'request_admitted', 'response_completed', 'response_failed'
+      )),
       instruction_digest TEXT,
       input_digest TEXT,
       input_items_json TEXT,
@@ -935,6 +1054,8 @@ export function applyCodexGatewayCompletionEvidenceMigration(db: {
       terminal_digest TEXT,
       output_digest TEXT,
       usage_digest TEXT,
+      failure_json TEXT,
+      failure_digest TEXT,
       evidence_digest TEXT NOT NULL UNIQUE,
       recorded_at TEXT NOT NULL,
       FOREIGN KEY (gateway_request_receipt_id)
@@ -958,7 +1079,8 @@ export function applyCodexGatewayCompletionEvidenceMigration(db: {
           AND memory_history_redaction_digest NOT GLOB '*[^0-9a-f]*'
           AND memory_history_redacted_item_count >= 0
           AND response_id IS NULL AND terminal_digest IS NULL
-          AND output_digest IS NULL AND usage_digest IS NULL)
+          AND output_digest IS NULL AND usage_digest IS NULL
+          AND failure_json IS NULL AND failure_digest IS NULL)
         OR
         (event_kind = 'response_completed'
           AND instruction_digest IS NULL AND input_digest IS NULL
@@ -969,9 +1091,29 @@ export function applyCodexGatewayCompletionEvidenceMigration(db: {
           AND memory_history_redaction_digest IS NULL
           AND memory_history_redacted_item_count IS NULL
           AND response_id IS NOT NULL AND terminal_digest IS NOT NULL
-          AND output_digest IS NOT NULL AND usage_digest IS NOT NULL)
+          AND output_digest IS NOT NULL AND usage_digest IS NOT NULL
+          AND failure_json IS NULL AND failure_digest IS NULL)
+        OR
+        (event_kind = 'response_failed'
+          AND instruction_digest IS NULL AND input_digest IS NULL
+          AND input_items_json IS NULL
+          AND input_total_string_characters IS NULL
+          AND input_max_string_characters IS NULL
+          AND tools_digest IS NULL AND tool_count IS NULL AND body_bytes IS NULL
+          AND memory_history_redaction_digest IS NULL
+          AND memory_history_redacted_item_count IS NULL
+          AND response_id IS NULL AND terminal_digest IS NULL
+          AND output_digest IS NULL AND usage_digest IS NULL
+          AND failure_json IS NOT NULL AND json_valid(failure_json)
+          AND json_type(failure_json) = 'object'
+          AND failure_digest IS NOT NULL AND length(failure_digest) = 64
+          AND failure_digest NOT GLOB '*[^0-9a-f]*')
       )
     );
+
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_ready_gateway_exchange_terminal
+      ON ready_model_gateway_exchange_events(gateway_request_receipt_id)
+      WHERE event_kind IN ('response_completed', 'response_failed');
 
     CREATE TRIGGER IF NOT EXISTS ready_model_gateway_exchange_immutable_update
     BEFORE UPDATE ON ready_model_gateway_exchange_events
@@ -980,6 +1122,51 @@ export function applyCodexGatewayCompletionEvidenceMigration(db: {
     CREATE TRIGGER IF NOT EXISTS ready_model_gateway_exchange_immutable_delete
     BEFORE DELETE ON ready_model_gateway_exchange_events
     BEGIN SELECT RAISE(ABORT, 'ready_model_gateway_exchange_immutable'); END;
+  `)
+
+  const table = db.prepare(`
+    SELECT name FROM sqlite_master
+     WHERE type = 'table' AND name = 'ready_model_gateway_exchange_events'
+  `).all<{ name: string }>()
+  if (table.length === 0) {
+    createCurrentTable()
+    return
+  }
+  const columns = new Set(
+    db.prepare('PRAGMA table_info(ready_model_gateway_exchange_events)')
+      .all<{ name: string }>()
+      .map((column) => column.name),
+  )
+  if (columns.has('failure_json') && columns.has('failure_digest')) {
+    createCurrentTable()
+    return
+  }
+  db.exec(`
+    DROP TRIGGER IF EXISTS ready_model_gateway_exchange_immutable_update;
+    DROP TRIGGER IF EXISTS ready_model_gateway_exchange_immutable_delete;
+    ALTER TABLE ready_model_gateway_exchange_events
+      RENAME TO ready_model_gateway_exchange_events_legacy;
+  `)
+  createCurrentTable()
+  db.exec(`
+    INSERT INTO ready_model_gateway_exchange_events (
+      event_sequence, gateway_request_receipt_id, event_kind,
+      instruction_digest, input_digest, input_items_json,
+      input_total_string_characters, input_max_string_characters,
+      tools_digest, tool_count, body_bytes,
+      memory_history_redaction_digest, memory_history_redacted_item_count,
+      response_id, terminal_digest, output_digest, usage_digest,
+      failure_json, failure_digest, evidence_digest, recorded_at
+    )
+    SELECT event_sequence, gateway_request_receipt_id, event_kind,
+           instruction_digest, input_digest, input_items_json,
+           input_total_string_characters, input_max_string_characters,
+           tools_digest, tool_count, body_bytes,
+           memory_history_redaction_digest, memory_history_redacted_item_count,
+           response_id, terminal_digest, output_digest, usage_digest,
+           NULL, NULL, evidence_digest, recorded_at
+      FROM ready_model_gateway_exchange_events_legacy;
+    DROP TABLE ready_model_gateway_exchange_events_legacy;
   `)
 }
 
@@ -1205,7 +1392,325 @@ export function applyCodexManualCompactionItemIdentityMigration(db: {
   `)
 }
 
-export const CODEX_BINDING_SCHEMA_SQL = `
+const CODEX_NATIVE_MATERIALIZATION_ROW = `(
+      (NEW.thread_materialization_kind IN ('legacy', 'fresh_start')
+        AND NEW.history_source_thread_binding_id IS NULL
+        AND NEW.history_source_terminal_facts_digest IS NULL
+        AND NEW.fork_accepted_through_codex_turn_id IS NULL
+        AND NEW.fork_expected_prefix_turn_ids_json IS NULL
+        AND NEW.fork_expected_prefix_turn_ids_digest IS NULL
+        AND NEW.materialization_request_digest IS NULL
+        AND NEW.accepted_product_boundary_ready_run_id IS NULL
+        AND ((NEW.thread_materialization_kind = 'legacy' AND NEW.native_inherited_contract_digest IS NULL)
+          OR (NEW.thread_materialization_kind = 'fresh_start'
+            AND ((NEW.thread_start_reservation_set_id IS NULL AND NEW.native_inherited_contract_digest IS NULL)
+              OR (NEW.thread_start_reservation_set_id IS NOT NULL AND NEW.native_inherited_contract_digest IS NOT NULL))))
+        AND NEW.source_accepted_native_coverage_receipt_id IS NULL
+        AND NEW.source_accepted_native_coverage_receipt_digest IS NULL)
+      OR
+      (NEW.thread_materialization_kind = 'fresh_root_with_tail'
+        AND NEW.history_source_thread_binding_id IS NOT NULL
+        AND NEW.history_source_terminal_facts_digest IS NOT NULL
+        AND NEW.fork_accepted_through_codex_turn_id IS NULL
+        AND NEW.fork_expected_prefix_turn_ids_json IS NULL
+        AND NEW.fork_expected_prefix_turn_ids_digest IS NULL
+        AND NEW.materialization_request_digest IS NULL
+        AND NEW.accepted_product_boundary_ready_run_id IS NULL
+        AND ((NEW.thread_start_reservation_set_id IS NULL AND NEW.native_inherited_contract_digest IS NULL)
+          OR (NEW.thread_start_reservation_set_id IS NOT NULL AND NEW.native_inherited_contract_digest IS NOT NULL))
+        AND NEW.source_accepted_native_coverage_receipt_id IS NULL
+        AND NEW.source_accepted_native_coverage_receipt_digest IS NULL)
+      OR
+      (NEW.thread_materialization_kind = 'native_fork'
+        AND NEW.history_source_thread_binding_id IS NOT NULL
+        AND NEW.history_source_terminal_facts_digest IS NOT NULL
+        AND NEW.fork_accepted_through_codex_turn_id IS NOT NULL
+        AND NEW.fork_expected_prefix_turn_ids_json IS NOT NULL
+        AND NEW.fork_expected_prefix_turn_ids_digest IS NOT NULL
+        AND NEW.materialization_request_digest IS NOT NULL
+        AND NEW.native_inherited_contract_digest IS NOT NULL
+        AND NEW.source_accepted_native_coverage_receipt_id IS NOT NULL
+        AND NEW.source_accepted_native_coverage_receipt_digest IS NOT NULL)
+    ) AND (
+      (NEW.materialization_effective_receipt_json IS NULL
+        AND NEW.materialization_effective_receipt_digest IS NULL)
+      OR
+      (NEW.materialization_effective_receipt_json IS NOT NULL
+        AND json_valid(NEW.materialization_effective_receipt_json)
+        AND NEW.materialization_effective_receipt_digest IS NOT NULL)
+    )`
+
+const CODEX_NATIVE_TERMINAL_ROW = `
+  (NEW.terminal_native_readback_receipt_json IS NULL
+    AND NEW.terminal_native_readback_receipt_digest IS NULL
+    AND NEW.terminal_native_readback_revision IS NULL
+    AND NEW.terminal_facts_json IS NULL AND NEW.terminal_facts_digest IS NULL)
+  OR (NEW.terminal_native_readback_receipt_json IS NOT NULL
+    AND json_valid(NEW.terminal_native_readback_receipt_json)
+    AND json_type(NEW.terminal_native_readback_receipt_json) = 'object'
+    AND length(NEW.terminal_native_readback_receipt_digest) = 64
+    AND NEW.terminal_native_readback_receipt_digest NOT GLOB '*[^0-9a-f]*'
+    AND NEW.terminal_native_readback_revision >= 1
+    AND NEW.terminal_facts_json IS NOT NULL AND json_valid(NEW.terminal_facts_json)
+    AND json_type(NEW.terminal_facts_json) = 'object'
+    AND length(NEW.terminal_facts_digest) = 64
+    AND NEW.terminal_facts_digest NOT GLOB '*[^0-9a-f]*')
+`
+
+// The repository refresh and its SQL guard consume this same absence proof.
+// Prior visibility epochs are audit history, not the current fresh head's content.
+export const CODEX_PRISTINE_FRESH_START_PREDICATE_SQL = `
+  head.thread_materialization_kind = 'fresh_start'
+  AND head.materialization_state = 'confirmed'
+  AND ${[
+    'codex_thread_id', 'codex_session_id', 'codex_parent_thread_id', 'codex_forked_from_id',
+    'codex_source_json', 'codex_thread_source_json', 'thread_started_at',
+    'thread_start_reservation_set_id', 'thread_start_reservation_member_id',
+    'thread_start_reservation_admitted_at', 'thread_start_reservation_released_at',
+    'thread_start_reservation_release_reason', 'thread_start_request_id',
+    'thread_start_rpc_connection_epoch', 'thread_start_rpc_id', 'thread_start_request_digest',
+    'thread_start_dispatch_intent_at', 'thread_start_child_write_confirmed_at',
+    'thread_start_child_write_digest', 'thread_start_response_at', 'thread_start_reconciled_at',
+    'thread_start_reconciliation_evidence_digest', 'thread_start_late_response_guard_closed_at',
+    'thread_start_late_response_guard_close_reason', 'isolated_thread_cwd',
+    'tool_surface_digest', 'tool_surface_snapshot_digest', 'tool_surface_json',
+    'instruction_contract_digest', 'codex_model_provider_id', 'codex_model',
+    'upstream_profile_snapshot_ref', 'upstream_profile_snapshot_digest',
+    'history_source_thread_binding_id', 'history_source_terminal_facts_digest',
+    'fork_accepted_through_codex_turn_id', 'fork_expected_prefix_turn_ids_json',
+    'fork_expected_prefix_turn_ids_digest', 'materialization_request_digest',
+    'accepted_product_boundary_ready_run_id', 'native_inherited_contract_digest',
+    'source_accepted_native_coverage_receipt_id', 'source_accepted_native_coverage_receipt_digest',
+    'materialization_effective_receipt_json', 'materialization_effective_receipt_digest',
+    'materialization_evidence_digest', 'history_seed_digest', 'uncommitted_user_tail_json',
+    'uncommitted_user_tail_digest', 'retired_at', 'retired_reason', 'retirement_evidence_digest',
+    'continuation_blocked_at', 'continuation_blocked_reason', 'continuation_blocked_evidence_digest',
+  ].map((name) => `head.${name} IS NULL`).join('\n  AND ')}
+  AND EXISTS (
+    SELECT 1 FROM chat_conversations scope
+     WHERE scope.id = head.ready_scope_id AND scope.closed_at IS NULL
+       AND NOT EXISTS (SELECT 1 FROM chat_messages message
+         WHERE message.conversation_id = scope.id
+           AND message.message_visibility_epoch = scope.message_visibility_epoch
+           AND message.role IN ('user', 'assistant', 'agent_card'))
+       AND NOT EXISTS (SELECT 1 FROM run_meta run
+         WHERE run.scope_id = scope.id AND run.message_visibility_epoch = scope.message_visibility_epoch)
+       AND NOT EXISTS (SELECT 1 FROM task_projections product
+         WHERE product.scope_id = scope.id
+           AND product.message_visibility_epoch = scope.message_visibility_epoch)
+       AND NOT EXISTS (SELECT 1 FROM codex_turn_bindings turn
+         JOIN codex_thread_bindings owner ON owner.thread_binding_id = turn.thread_binding_id
+         WHERE owner.ready_scope_id = scope.id
+           AND turn.message_visibility_epoch = scope.message_visibility_epoch)
+       AND NOT EXISTS (SELECT 1 FROM codex_product_effect_bindings effect
+         WHERE effect.ready_scope_id = scope.id
+           AND effect.message_visibility_epoch = scope.message_visibility_epoch)
+       AND NOT EXISTS (SELECT 1 FROM pending_confirmations interaction
+         WHERE interaction.scope_id = scope.id
+           AND (interaction.status = 'pending' OR NOT EXISTS (
+             SELECT 1 FROM codex_turn_bindings turn
+             JOIN codex_thread_bindings owner ON owner.thread_binding_id = turn.thread_binding_id
+              WHERE turn.ready_run_id = interaction.run_id AND owner.ready_scope_id = scope.id
+                AND turn.message_visibility_epoch < scope.message_visibility_epoch)))
+  )
+  AND NOT EXISTS (SELECT 1 FROM codex_turn_bindings turn
+    WHERE turn.thread_binding_id = head.thread_binding_id)
+  AND NOT EXISTS (SELECT 1 FROM codex_thread_dispatch_fences fence
+    WHERE fence.thread_binding_id = head.thread_binding_id)
+  AND NOT EXISTS (SELECT 1 FROM codex_manual_compaction_bindings compaction
+    WHERE compaction.thread_binding_id = head.thread_binding_id)
+  AND NOT EXISTS (SELECT 1 FROM codex_native_coverage_receipts coverage
+    WHERE coverage.thread_binding_id = head.thread_binding_id)
+`
+
+export const CODEX_NATIVE_CONTINUITY_GUARDS_SQL = `
+  CREATE TRIGGER IF NOT EXISTS codex_pristine_contract_refresh_insert
+  BEFORE INSERT ON codex_thread_bindings
+  WHEN NEW.retired_reason = 'pristine_contract_refresh'
+  BEGIN SELECT RAISE(ABORT, 'codex_pristine_contract_refresh_requires_active_head'); END;
+
+  CREATE TRIGGER IF NOT EXISTS codex_pristine_contract_refresh_update
+  BEFORE UPDATE OF retired_reason ON codex_thread_bindings
+  WHEN NEW.retired_reason = 'pristine_contract_refresh' AND OLD.retired_reason IS NULL
+    AND (NOT EXISTS (SELECT 1 FROM codex_thread_bindings head
+      WHERE head.thread_binding_id = OLD.thread_binding_id
+        AND (${CODEX_PRISTINE_FRESH_START_PREDICATE_SQL}))
+      OR NEW.action_projection_sequence != OLD.action_projection_sequence + 1)
+  BEGIN SELECT RAISE(ABORT, 'codex_pristine_contract_refresh_not_pristine'); END;
+
+  ${['INSERT', 'UPDATE'].map((operation) => `
+  CREATE TRIGGER IF NOT EXISTS codex_thread_materialization_row_${operation.toLowerCase()}
+  BEFORE ${operation} ON codex_thread_bindings
+  WHEN (${CODEX_NATIVE_MATERIALIZATION_ROW}) IS NOT 1
+  BEGIN SELECT RAISE(ABORT, 'codex_thread_materialization_row_invalid'); END;
+
+  CREATE TRIGGER IF NOT EXISTS codex_turn_terminal_facts_pair_${operation.toLowerCase()}
+  BEFORE ${operation} ON codex_turn_bindings
+  WHEN (${CODEX_NATIVE_TERMINAL_ROW}) IS NOT 1
+  BEGIN SELECT RAISE(ABORT, 'codex_turn_terminal_facts_pair_invalid'); END;
+  `).join('\n')}
+
+  ${['thread', 'turn'].map((owner) => `
+  CREATE TRIGGER IF NOT EXISTS codex_${owner}_start_request_insert
+  BEFORE INSERT ON codex_${owner}_bindings
+  WHEN (NEW.${owner}_start_dispatch_intent_at IS NULL) IS NOT (NEW.${owner}_start_request_digest IS NULL)
+  BEGIN SELECT RAISE(ABORT, 'codex_${owner}_start_request_invalid'); END;
+
+  CREATE TRIGGER IF NOT EXISTS codex_${owner}_start_request_update
+  BEFORE UPDATE ON codex_${owner}_bindings
+  WHEN ((NEW.${owner}_start_dispatch_intent_at IS NOT OLD.${owner}_start_dispatch_intent_at
+      OR NEW.${owner}_start_request_digest IS NOT OLD.${owner}_start_request_digest)
+    AND (NEW.${owner}_start_dispatch_intent_at IS NULL) IS NOT (NEW.${owner}_start_request_digest IS NULL))
+    OR (OLD.${owner}_start_dispatch_intent_at IS NOT NULL
+      AND NEW.${owner}_start_request_digest IS NOT OLD.${owner}_start_request_digest)
+  BEGIN SELECT RAISE(ABORT, 'codex_${owner}_start_request_invalid'); END;
+  `).join('\n')}
+  CREATE TRIGGER IF NOT EXISTS codex_thread_fork_prefix_insert
+  BEFORE INSERT ON codex_thread_bindings
+  WHEN NOT (
+    (NEW.fork_expected_prefix_turn_ids_json IS NULL
+      AND NEW.fork_expected_prefix_turn_ids_digest IS NULL
+      AND NEW.materialization_request_digest IS NULL)
+    OR (NEW.thread_materialization_kind = 'native_fork'
+      AND NEW.fork_expected_prefix_turn_ids_json IS NOT NULL
+      AND json_valid(NEW.fork_expected_prefix_turn_ids_json)
+      AND json_type(NEW.fork_expected_prefix_turn_ids_json) = 'array'
+      AND json_array_length(NEW.fork_expected_prefix_turn_ids_json) > 0
+      AND length(NEW.fork_expected_prefix_turn_ids_digest) = 64
+      AND NEW.fork_expected_prefix_turn_ids_digest NOT GLOB '*[^0-9a-f]*'
+      AND length(NEW.materialization_request_digest) = 64
+      AND NEW.materialization_request_digest NOT GLOB '*[^0-9a-f]*')
+  )
+  BEGIN SELECT RAISE(ABORT, 'codex_thread_fork_prefix_invalid'); END;
+
+  CREATE TRIGGER IF NOT EXISTS codex_thread_fork_prefix_update
+  BEFORE UPDATE ON codex_thread_bindings
+  WHEN NOT (
+    (NEW.fork_expected_prefix_turn_ids_json IS NULL
+      AND NEW.fork_expected_prefix_turn_ids_digest IS NULL
+      AND NEW.materialization_request_digest IS NULL)
+    OR (NEW.thread_materialization_kind = 'native_fork'
+      AND NEW.fork_expected_prefix_turn_ids_json IS NOT NULL
+      AND json_valid(NEW.fork_expected_prefix_turn_ids_json)
+      AND json_type(NEW.fork_expected_prefix_turn_ids_json) = 'array'
+      AND json_array_length(NEW.fork_expected_prefix_turn_ids_json) > 0
+      AND length(NEW.fork_expected_prefix_turn_ids_digest) = 64
+      AND NEW.fork_expected_prefix_turn_ids_digest NOT GLOB '*[^0-9a-f]*'
+      AND length(NEW.materialization_request_digest) = 64
+      AND NEW.materialization_request_digest NOT GLOB '*[^0-9a-f]*')
+  )
+  BEGIN SELECT RAISE(ABORT, 'codex_thread_fork_prefix_invalid'); END;
+
+  CREATE TRIGGER IF NOT EXISTS codex_thread_uncommitted_tail_insert
+  BEFORE INSERT ON codex_thread_bindings
+  WHEN NOT (
+    (NEW.uncommitted_user_tail_json IS NULL AND NEW.uncommitted_user_tail_digest IS NULL)
+    OR (NEW.uncommitted_user_tail_json IS NOT NULL
+      AND json_valid(NEW.uncommitted_user_tail_json)
+      AND json_type(NEW.uncommitted_user_tail_json) = 'array'
+      AND NEW.uncommitted_user_tail_digest IS NOT NULL
+      AND length(NEW.uncommitted_user_tail_digest) = 64
+      AND NEW.uncommitted_user_tail_digest NOT GLOB '*[^0-9a-f]*')
+  )
+  BEGIN SELECT RAISE(ABORT, 'codex_thread_uncommitted_tail_invalid'); END;
+
+  CREATE TRIGGER IF NOT EXISTS codex_thread_uncommitted_tail_update
+  BEFORE UPDATE ON codex_thread_bindings
+  WHEN NOT (
+    (NEW.uncommitted_user_tail_json IS NULL AND NEW.uncommitted_user_tail_digest IS NULL)
+    OR (NEW.uncommitted_user_tail_json IS NOT NULL
+      AND json_valid(NEW.uncommitted_user_tail_json)
+      AND json_type(NEW.uncommitted_user_tail_json) = 'array'
+      AND NEW.uncommitted_user_tail_digest IS NOT NULL
+      AND length(NEW.uncommitted_user_tail_digest) = 64
+      AND NEW.uncommitted_user_tail_digest NOT GLOB '*[^0-9a-f]*')
+  )
+  BEGIN SELECT RAISE(ABORT, 'codex_thread_uncommitted_tail_invalid'); END;
+
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_codex_native_fork_source_terminal
+    ON codex_thread_bindings(
+      history_source_thread_binding_id, history_source_terminal_facts_digest
+    )
+    WHERE thread_materialization_kind = 'native_fork';
+
+  CREATE TRIGGER IF NOT EXISTS codex_thread_materialization_identity_immutable
+  BEFORE UPDATE ON codex_thread_bindings
+  WHEN NEW.thread_materialization_kind IS NOT OLD.thread_materialization_kind
+    OR NEW.history_source_thread_binding_id IS NOT OLD.history_source_thread_binding_id
+    OR NEW.history_source_terminal_facts_digest IS NOT OLD.history_source_terminal_facts_digest
+    OR NEW.fork_accepted_through_codex_turn_id IS NOT OLD.fork_accepted_through_codex_turn_id
+    OR NEW.fork_expected_prefix_turn_ids_json IS NOT OLD.fork_expected_prefix_turn_ids_json
+    OR NEW.fork_expected_prefix_turn_ids_digest IS NOT OLD.fork_expected_prefix_turn_ids_digest
+    OR NEW.materialization_request_digest IS NOT OLD.materialization_request_digest
+    OR NEW.accepted_product_boundary_ready_run_id IS NOT OLD.accepted_product_boundary_ready_run_id
+    OR (NEW.native_inherited_contract_digest IS NOT OLD.native_inherited_contract_digest
+      AND NOT (OLD.native_inherited_contract_digest IS NULL
+        AND OLD.thread_materialization_kind IN ('fresh_start', 'fresh_root_with_tail')
+        AND OLD.thread_start_reservation_set_id IS NULL
+        AND NEW.thread_start_reservation_set_id IS NOT NULL
+        AND NEW.native_inherited_contract_digest IS NOT NULL
+        AND length(NEW.native_inherited_contract_digest) = 64
+        AND NEW.native_inherited_contract_digest NOT GLOB '*[^0-9a-f]*'))
+    OR NEW.source_accepted_native_coverage_receipt_id
+      IS NOT OLD.source_accepted_native_coverage_receipt_id
+    OR NEW.source_accepted_native_coverage_receipt_digest
+      IS NOT OLD.source_accepted_native_coverage_receipt_digest
+    OR NEW.history_seed_digest IS NOT OLD.history_seed_digest
+    OR NEW.uncommitted_user_tail_json IS NOT OLD.uncommitted_user_tail_json
+    OR NEW.uncommitted_user_tail_digest IS NOT OLD.uncommitted_user_tail_digest
+    OR (OLD.materialization_state != 'pending'
+      AND NEW.materialization_state IS NOT OLD.materialization_state)
+    OR (OLD.materialization_effective_receipt_json IS NOT NULL
+      AND NEW.materialization_effective_receipt_json IS NOT OLD.materialization_effective_receipt_json)
+    OR (OLD.materialization_effective_receipt_digest IS NOT NULL
+      AND NEW.materialization_effective_receipt_digest IS NOT OLD.materialization_effective_receipt_digest)
+  BEGIN SELECT RAISE(ABORT, 'codex_thread_materialization_identity_immutable'); END;
+
+
+  CREATE TRIGGER IF NOT EXISTS codex_turn_terminal_facts_immutable_update
+  BEFORE UPDATE ON codex_turn_bindings
+  WHEN (OLD.terminal_native_readback_receipt_json IS NOT NULL
+      AND NEW.terminal_native_readback_receipt_json IS NOT OLD.terminal_native_readback_receipt_json)
+    OR (OLD.terminal_native_readback_receipt_digest IS NOT NULL
+      AND NEW.terminal_native_readback_receipt_digest IS NOT OLD.terminal_native_readback_receipt_digest)
+    OR (OLD.terminal_native_readback_revision IS NOT NULL
+      AND NEW.terminal_native_readback_revision IS NOT OLD.terminal_native_readback_revision)
+    OR (OLD.terminal_facts_json IS NOT NULL
+      AND NEW.terminal_facts_json IS NOT OLD.terminal_facts_json)
+    OR (OLD.terminal_facts_digest IS NOT NULL
+      AND NEW.terminal_facts_digest IS NOT OLD.terminal_facts_digest)
+  BEGIN SELECT RAISE(ABORT, 'codex_turn_terminal_facts_immutable'); END;
+
+  CREATE TRIGGER IF NOT EXISTS codex_turn_coverage_ref_update
+  BEFORE UPDATE ON codex_turn_bindings
+  WHEN NOT (
+      (NEW.accepted_native_coverage_receipt_id IS NULL
+        AND NEW.accepted_native_coverage_receipt_digest IS NULL)
+      OR (NEW.accepted_native_coverage_receipt_id IS NOT NULL
+        AND NEW.accepted_native_coverage_receipt_digest IS NOT NULL)
+    ) OR (OLD.accepted_native_coverage_receipt_id IS NOT NULL AND (
+      NEW.accepted_native_coverage_receipt_id IS NOT OLD.accepted_native_coverage_receipt_id
+      OR NEW.accepted_native_coverage_receipt_digest
+        IS NOT OLD.accepted_native_coverage_receipt_digest
+    ))
+  BEGIN SELECT RAISE(ABORT, 'codex_turn_coverage_ref_invalid'); END;
+
+  CREATE TRIGGER IF NOT EXISTS codex_manual_coverage_ref_update
+  BEFORE UPDATE ON codex_manual_compaction_bindings
+  WHEN NOT (
+      (NEW.accepted_native_coverage_receipt_id IS NULL
+        AND NEW.accepted_native_coverage_receipt_digest IS NULL)
+      OR (NEW.accepted_native_coverage_receipt_id IS NOT NULL
+        AND NEW.accepted_native_coverage_receipt_digest IS NOT NULL)
+    ) OR (OLD.accepted_native_coverage_receipt_id IS NOT NULL AND (
+      NEW.accepted_native_coverage_receipt_id IS NOT OLD.accepted_native_coverage_receipt_id
+      OR NEW.accepted_native_coverage_receipt_digest
+        IS NOT OLD.accepted_native_coverage_receipt_digest
+    ))
+  BEGIN SELECT RAISE(ABORT, 'codex_manual_coverage_ref_invalid'); END;
+`
+
+const CODEX_THREAD_BINDING_TABLE_SQL = `
   CREATE TABLE IF NOT EXISTS codex_thread_bindings (
     thread_binding_id TEXT PRIMARY KEY,
     codex_thread_id TEXT UNIQUE,
@@ -1222,6 +1727,7 @@ export const CODEX_BINDING_SCHEMA_SQL = `
     thread_start_request_id TEXT UNIQUE,
     thread_start_rpc_connection_epoch TEXT,
     thread_start_rpc_id INTEGER,
+    thread_start_request_digest TEXT,
     thread_start_dispatch_intent_at TEXT,
     thread_start_child_write_confirmed_at TEXT,
     thread_start_child_write_digest TEXT,
@@ -1244,13 +1750,37 @@ export const CODEX_BINDING_SCHEMA_SQL = `
     codex_model TEXT,
     upstream_profile_snapshot_ref TEXT,
     upstream_profile_snapshot_digest TEXT,
+    thread_materialization_kind TEXT NOT NULL DEFAULT 'legacy' CHECK (
+      thread_materialization_kind IN ('legacy', 'fresh_start', 'native_fork', 'fresh_root_with_tail')
+    ),
+    history_source_thread_binding_id TEXT,
+    history_source_terminal_facts_digest TEXT,
+    fork_accepted_through_codex_turn_id TEXT,
+    fork_expected_prefix_turn_ids_json TEXT,
+    fork_expected_prefix_turn_ids_digest TEXT,
+    materialization_request_digest TEXT,
+    accepted_product_boundary_ready_run_id TEXT,
+    native_inherited_contract_digest TEXT,
+    source_accepted_native_coverage_receipt_id TEXT,
+    source_accepted_native_coverage_receipt_digest TEXT,
+    materialization_state TEXT NOT NULL DEFAULT 'confirmed' CHECK (
+      materialization_state IN ('pending', 'confirmed', 'unknown', 'proven_absent', 'abandoned')
+    ),
+    materialization_effective_receipt_json TEXT,
+    materialization_effective_receipt_digest TEXT,
+    materialization_evidence_digest TEXT,
+    history_seed_digest TEXT,
+    uncommitted_user_tail_json TEXT,
+    uncommitted_user_tail_digest TEXT,
+    action_projection_sequence INTEGER NOT NULL DEFAULT 0 CHECK (action_projection_sequence >= 0),
     thread_started_at TEXT,
     revision INTEGER NOT NULL CHECK (revision >= 1),
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     retired_at TEXT,
     retired_reason TEXT CHECK (retired_reason IN (
-      'user_reset', 'closed', 'publication_diverged', 'manual_compaction_quarantine', 'cleanup'
+      'user_reset', 'closed', 'publication_diverged', 'manual_compaction_quarantine', 'cleanup',
+      'pristine_contract_refresh'
     )),
     retirement_evidence_digest TEXT,
     continuation_blocked_at TEXT,
@@ -1321,6 +1851,36 @@ export const CODEX_BINDING_SCHEMA_SQL = `
       AND continuation_blocked_evidence_digest IS NOT NULL))
   );
 
+`
+
+export function applyCodexPristineContractRefreshMigration(db: {
+  exec(sql: string): void
+  prepare(sql: string): { all<T = unknown>(): T[] }
+}): void {
+  const table = db.prepare(`SELECT sql FROM sqlite_master
+    WHERE type = 'table' AND name = 'codex_thread_bindings'`).all<{ sql: string }>()[0]
+  if (!table || table.sql.includes("'pristine_contract_refresh'")) return
+  const foreignKeys = db.prepare('PRAGMA foreign_keys').all<{ foreign_keys: number }>()[0]
+  if (foreignKeys?.foreign_keys) throw new Error('codex_pristine_migration_requires_foreign_keys_off')
+  const objects = db.prepare(`SELECT sql FROM sqlite_master
+    WHERE tbl_name = 'codex_thread_bindings' AND type IN ('index', 'trigger')
+      AND sql IS NOT NULL ORDER BY type, name`).all<{ sql: string }>()
+  const columns = db.prepare('PRAGMA table_info(codex_thread_bindings)')
+    .all<{ name: string }>().map((column) => `"${column.name}"`).join(', ')
+  db.exec(`
+    CREATE TEMP TABLE codex_thread_bindings_pristine_migration AS SELECT * FROM codex_thread_bindings;
+    DROP TABLE codex_thread_bindings;
+    ${CODEX_THREAD_BINDING_TABLE_SQL}
+    INSERT INTO codex_thread_bindings (${columns})
+      SELECT ${columns} FROM codex_thread_bindings_pristine_migration;
+    DROP TABLE codex_thread_bindings_pristine_migration;
+  `)
+  for (const object of objects) db.exec(object.sql)
+}
+
+export const CODEX_BINDING_SCHEMA_SQL = `
+  ${CODEX_THREAD_BINDING_TABLE_SQL}
+
   CREATE UNIQUE INDEX IF NOT EXISTS idx_codex_thread_binding_active_alias
     ON codex_thread_bindings(ready_conversation_alias)
     WHERE retired_at IS NULL;
@@ -1336,6 +1896,7 @@ export const CODEX_BINDING_SCHEMA_SQL = `
     thread_binding_id TEXT NOT NULL,
     codex_thread_id TEXT,
     codex_turn_id TEXT,
+    gateway_claimed_codex_turn_id TEXT,
     start_reservation_set_id TEXT NOT NULL UNIQUE,
     start_reservation_required_member_count INTEGER NOT NULL CHECK (
       start_reservation_required_member_count IN (1, 2)
@@ -1347,6 +1908,7 @@ export const CODEX_BINDING_SCHEMA_SQL = `
     turn_request_id TEXT NOT NULL UNIQUE,
     turn_start_rpc_connection_epoch TEXT,
     turn_start_rpc_id INTEGER,
+    turn_start_request_digest TEXT,
     turn_start_dispatch_intent_at TEXT,
     turn_start_child_write_confirmed_at TEXT,
     turn_start_child_write_digest TEXT,
@@ -1430,6 +1992,14 @@ export const CODEX_BINDING_SCHEMA_SQL = `
     engine_terminal_candidate_json TEXT,
     engine_terminal_candidate_digest TEXT,
     engine_terminal_recorded_at TEXT,
+    effect_authority_closed_at TEXT,
+    terminal_native_readback_receipt_json TEXT,
+    terminal_native_readback_receipt_digest TEXT,
+    terminal_native_readback_revision INTEGER,
+    terminal_facts_json TEXT,
+    terminal_facts_digest TEXT,
+    accepted_native_coverage_receipt_id TEXT,
+    accepted_native_coverage_receipt_digest TEXT,
     publication_receipt_refs_json TEXT,
     publication_receipt_digest TEXT,
     publication_recorded_at TEXT,
@@ -1530,6 +2100,9 @@ export const CODEX_BINDING_SCHEMA_SQL = `
   CREATE UNIQUE INDEX IF NOT EXISTS idx_codex_turn_start_rpc
     ON codex_turn_bindings(turn_start_rpc_connection_epoch, turn_start_rpc_id)
     WHERE turn_start_dispatch_intent_at IS NOT NULL;
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_codex_turn_gateway_claim
+    ON codex_turn_bindings(codex_thread_id, gateway_claimed_codex_turn_id)
+    WHERE gateway_claimed_codex_turn_id IS NOT NULL;
 
   CREATE TABLE IF NOT EXISTS codex_tool_call_bindings (
     codex_thread_id TEXT NOT NULL,
@@ -1593,6 +2166,10 @@ export const CODEX_BINDING_SCHEMA_SQL = `
     )
   );
 
+  ${CODEX_PRODUCT_EFFECT_BINDING_SCHEMA_SQL}
+
+  ${CODEX_NATIVE_COVERAGE_SCHEMA_SQL}
+
   ${CODEX_TOOL_RESPONSE_DELIVERY_ATTEMPT_SCHEMA_SQL}
   ${CODEX_TOOL_REQUEST_RPC_BINDING_SCHEMA_SQL}
 
@@ -1611,6 +2188,8 @@ export const CODEX_BINDING_SCHEMA_SQL = `
     expires_at TEXT NOT NULL,
     consumed_at TEXT,
     consume_evidence_digest TEXT,
+    accepted_native_coverage_receipt_id TEXT,
+    accepted_native_coverage_receipt_digest TEXT,
     abandoned_at TEXT,
     abandoned_reason TEXT,
     abandoned_reconciled_at TEXT,
@@ -1995,6 +2574,12 @@ export const CODEX_BINDING_SCHEMA_SQL = `
       AND NEW.publication_recorded_at IS NOT OLD.publication_recorded_at)
   BEGIN SELECT RAISE(ABORT, 'codex_turn_binding_identity_immutable'); END;
 
+  CREATE TRIGGER IF NOT EXISTS codex_turn_gateway_claim_immutable_update
+  BEFORE UPDATE ON codex_turn_bindings
+  WHEN OLD.gateway_claimed_codex_turn_id IS NOT NULL
+    AND NEW.gateway_claimed_codex_turn_id IS NOT OLD.gateway_claimed_codex_turn_id
+  BEGIN SELECT RAISE(ABORT, 'codex_turn_gateway_claim_immutable'); END;
+
   CREATE TRIGGER IF NOT EXISTS codex_turn_terminal_immutable_update
   BEFORE UPDATE ON codex_turn_bindings
   WHEN (OLD.host_failure_product_terminal_digest IS NOT NULL
@@ -2134,6 +2719,7 @@ export const CODEX_BINDING_SCHEMA_SQL = `
   BEGIN SELECT RAISE(ABORT, 'codex_fence_parent_mismatch'); END;
 
   ${CODEX_BINDING_EVIDENCE_GUARDS_SQL}
+  ${CODEX_NATIVE_CONTINUITY_GUARDS_SQL}
 
   CREATE TRIGGER IF NOT EXISTS codex_thread_binding_no_delete
   BEFORE DELETE ON codex_thread_bindings

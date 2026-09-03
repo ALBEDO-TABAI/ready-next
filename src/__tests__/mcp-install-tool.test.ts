@@ -89,7 +89,7 @@ test('phase 2 requires confirmAck + pendingConfig, revalidates, writes config an
   registerMcpServer({
     serverId: 'filesystem',
     toolNames: ['mcp_filesystem_read_file', 'mcp_filesystem_list_dir', 'mcp_filesystem_write_file'],
-    requiresAuthorization: false,
+    approvalMode: 'writes',
   })
   const { deps, settings, reloads } = makeDeps()
   const pendingConfig = {

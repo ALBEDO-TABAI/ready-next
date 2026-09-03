@@ -242,8 +242,11 @@ export class CodexProductBootRecovery {
   dispatchHeldStart(input: {
     member: CodexBindingRecoveryMember
     registry: CodexStartIdentityRegistry
-  }): 'pending' {
+  }): 'pending' | Promise<'accepted' | 'pending' | 'blocked'> {
     if (this.stopping) return 'pending'
+    if (input.member.method === 'thread/fork') {
+      return this.dispatchHeldFork(input)
+    }
     const readyRunId = input.member.method === 'turn/start'
       ? input.member.bindingId
       : this.deps.repository.readProductRunForThreadBinding(input.member.bindingId)
@@ -341,6 +344,44 @@ export class CodexProductBootRecovery {
       }
     })
     return 'pending'
+  }
+
+  private async dispatchHeldFork(input: {
+    member: CodexBindingRecoveryMember
+    registry: CodexStartIdentityRegistry
+  }): Promise<'accepted' | 'pending' | 'blocked'> {
+    const fork = this.deps.repository.readNativeForkMaterialization(input.member.bindingId)
+    if (!fork) return 'blocked'
+    if (fork.materializationState === 'confirmed') {
+      return 'accepted'
+    }
+    if (fork.materializationState !== 'pending') return 'pending'
+    try {
+      await this.awaitActive(this.deps.runtime().threadFork({
+        threadId: fork.sourceCodexThreadId,
+        lastTurnId: fork.acceptedThroughCodexTurnId,
+        cwd: fork.targetCwd,
+        model: fork.model,
+        modelProvider: 'ready_gateway',
+        approvalPolicy: 'never',
+        sandbox: 'read-only',
+      }, fork.targetThreadBindingId))
+      const confirmed = this.deps.repository.readNativeForkMaterialization(input.member.bindingId)
+      if (confirmed?.materializationState !== 'confirmed') return 'pending'
+      return 'accepted'
+    } catch {
+      // silent-catch: reconcile the durable result; unknown stays pending and only proven absence releases the reservation.
+      const settled = this.deps.repository.readNativeForkMaterialization(input.member.bindingId)
+      if (settled?.materializationState === 'proven_absent'
+        && settled.materializationEvidenceDigest) {
+        input.registry.releaseAfterProvenAbsence({
+          reservationSetId: input.member.reservationSetId,
+          evidenceDigest: settled.materializationEvidenceDigest,
+        })
+        return 'accepted'
+      }
+      return 'pending'
+    }
   }
 
   async reconcileProductFence(fence: CodexProductFenceRecovery): Promise<void> {

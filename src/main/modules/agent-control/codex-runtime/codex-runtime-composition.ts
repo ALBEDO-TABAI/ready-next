@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 
 import type {
+  CodexActionSurfaceEnvelope,
   IngressAdmittedEvent,
   PersistedIngress,
   SendScopedRequest,
@@ -25,6 +26,7 @@ import type {
   CodexNativeNotification,
   CodexNativeRuntime,
   CodexServerDiagnostics,
+  CodexThreadForkParams,
   CodexThreadListParams,
   CodexThreadStartParams,
   CodexTurnStartParams,
@@ -58,7 +60,8 @@ import type {
   CodexNativeSkillInput,
   CodexSelectedSkillMethodology,
 } from './codex-thread-instructions'
-import type { LifecycleOperationProjection } from '../../../../shared/ipc-contracts/agent-lifecycle-snapshot'
+import type { LifecycleOperationProjectionV2 } from '../../../../shared/ipc-contracts/agent-lifecycle-snapshot'
+import type { CodexHeadActionProjection } from '../../../../shared/ipc-contracts/agent-runtime'
 import type { ProductTurnReceipt } from '../../../../shared/ipc-contracts/agent-runtime'
 import type {
   ReadyMemoryAddRequest,
@@ -112,6 +115,7 @@ export interface CodexRuntimeHostPort {
     frozenToolSurface?: ReadyToolSurface
   }): ReadyToolTurnSnapshot
   resolveSkillAuthorizationForTurn(input: {
+    mode: 'observe' | 'commit'
     message: RunMessage
     sessionId: string
     messageVisibilityEpoch: number
@@ -237,7 +241,15 @@ export interface CodexAliasBindingPort {
   readLifecycleSnapshot(input: {
     aliasId: string
     aliasGeneration: number
-  }): LifecycleOperationProjection
+  }): LifecycleOperationProjectionV2
+  readHeadActionProjection(input: {
+    aliasId: string
+    aliasGeneration: number
+  }): CodexHeadActionProjection
+  readActionSurface(input: {
+    aliasId: string
+    aliasGeneration: number
+  }): CodexActionSurfaceEnvelope
 }
 
 export type ReadyClosedCodexProductRun = {
@@ -284,8 +296,20 @@ export interface CodexRuntimeComposition {
   preparedRunContextPort: CodexPreparedRunContextPort
   memoryRuntime: ReadyMemoryRuntimePort
   canonicalCloseoutTransactionParticipant: CanonicalCoreCloseoutTransactionParticipant
-  readProductTurnPresentation(readyRunId: string): ProductTurnReceipt
-  readProductTurnPresentations(readyRunIds: readonly string[]): ProductTurnReceipt[]
+  readProductTurnPresentation(
+    readyRunId: string,
+    currentEnvironment?: {
+      requestedWorkbenchMode: 'browser' | 'document' | 'rss' | 'calendar'
+      trustedWorkbenchMode: 'browser' | 'document' | 'rss' | 'calendar'
+    },
+  ): ProductTurnReceipt
+  readProductTurnPresentations(
+    readyRunIds: readonly string[],
+    currentEnvironment?: {
+      requestedWorkbenchMode: 'browser' | 'document' | 'rss' | 'calendar'
+      trustedWorkbenchMode: 'browser' | 'document' | 'rss' | 'calendar'
+    },
+  ): ProductTurnReceipt[]
   readRuntimeDiagnostics(): Promise<CodexRuntimeDiagnosticSnapshot>
   bindHost(host: CodexRuntimeHostPort): void
   sealIngress(reason: string): void
@@ -303,6 +327,7 @@ class UnavailableCodexNativeRuntime implements CodexNativeRuntime {
   async serverDiagnostics(): Promise<never> { return this.unavailable() }
   async threadStart(_params: CodexThreadStartParams): Promise<never> { return this.unavailable() }
   async threadRead(_params: { threadId: string; includeTurns: true }): Promise<never> { return this.unavailable() }
+  async threadFork(_params: CodexThreadForkParams): Promise<never> { return this.unavailable() }
   async threadList(_params: CodexThreadListParams): Promise<never> { return this.unavailable() }
   async threadResume(_params: { threadId: string }): Promise<never> { return this.unavailable() }
   async threadArchive(_params: { threadId: string }): Promise<never> { return this.unavailable() }
@@ -332,6 +357,8 @@ class UnavailableCodexLifecycleStore implements ReadyCodexLifecycleStore {
   async markProductInterruptUnknown(): Promise<never> { return this.unavailable() }
   failureEvidenceDigest(): string { return digest('e1-native-unavailable:lifecycle') }
   async resetIdleAlias(): Promise<never> { return this.unavailable() }
+  async resetLegacyPreparedAlias(): Promise<never> { return this.unavailable() }
+  async closeLegacyPreparedAlias(): Promise<never> { return this.unavailable() }
   async quarantineUnknownManualCompaction(): Promise<never> { return this.unavailable() }
   async awaitProductCloseout(): Promise<never> { return this.unavailable() }
   async settleEngineTerminalUserStop(): Promise<never> { return this.unavailable() }
@@ -411,6 +438,8 @@ export function createE2UnavailableCodexRuntimeComposition(): CodexRuntimeCompos
       readActiveProductRunVisibilityIdentity() { return null },
       readCommittedProductRunVisibilityIdentity() { return null },
       readLifecycleSnapshot() { throw new Error('codex_lifecycle_repository_unavailable') },
+      readHeadActionProjection() { throw new Error('codex_head_action_repository_unavailable') },
+      readActionSurface() { throw new Error('codex_action_surface_repository_unavailable') },
     },
     preparedRunContextPort: {
       async resolve() {

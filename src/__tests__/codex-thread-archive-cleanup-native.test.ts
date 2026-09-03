@@ -60,6 +60,8 @@ function installBaseSchema(db: NativeDb): void {
       thread_binding_id TEXT PRIMARY KEY,
       codex_thread_id TEXT UNIQUE,
       codex_session_id TEXT,
+      codex_parent_thread_id TEXT,
+      codex_forked_from_id TEXT,
       isolated_thread_cwd TEXT UNIQUE,
       ready_conversation_alias TEXT NOT NULL,
       alias_generation INTEGER NOT NULL,
@@ -86,6 +88,7 @@ function insertRetiredBinding(db: NativeDb, input: {
   sourceKind?: CodexThreadArchiveSourceKind
   retiredReason?: CodexThreadRetirementReason
   readyRunId?: string | null
+  forkedFromId?: string
 } = {}): void {
   const threadBindingId = input.threadBindingId || 'binding-1'
   const threadId = input.threadId || 'native-thread-1'
@@ -101,8 +104,8 @@ function insertRetiredBinding(db: NativeDb, input: {
       INSERT INTO codex_thread_bindings (
         thread_binding_id, codex_thread_id, codex_session_id, isolated_thread_cwd,
         ready_conversation_alias, alias_generation, retired_at, retired_reason,
-        retirement_evidence_digest
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        retirement_evidence_digest, codex_forked_from_id
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       threadBindingId,
       threadId,
@@ -113,6 +116,7 @@ function insertRetiredBinding(db: NativeDb, input: {
       closedAt,
       retiredReason,
       retirementEvidenceDigest,
+      input.forkedFromId ?? null,
     )
     if (readyRunId) {
       db.prepare(`
@@ -255,6 +259,58 @@ test('close COMMIT survives a process crash and the next owner archives exactly 
     rmSync(dir, { recursive: true, force: true })
   }
 })
+
+for (const responseLost of [false, true]) {
+test(`retired fork keeps exact durable lineage through archive ${responseLost ? 'unknown-result readback' : 'dispatch'}`, async (t) => {
+  if (skipIfSqliteUnavailable(t, 'Codex fork durable archive lineage')) return
+  const Database = (await import('better-sqlite3')).default
+  const db = new Database(':memory:')
+  try {
+    installBaseSchema(db)
+    insertRetiredBinding(db, { forkedFromId: 'native-source' })
+    const thread = { ...rootThread(), forkedFromId: 'native-source' }
+    let observed = { ...thread, forkedFromId: 'wrong-source' }
+    let archived = false
+    let archiveCalls = 0
+    let connectionEpoch = 'fork-archive-1'
+    const store = new CodexThreadArchiveIntentStore(db as unknown as DatabaseConnection)
+    const dispatchPort = new CodexDurableThreadArchiveDispatchPort({ store, now: () => closedAt })
+    const owner = new CodexThreadArchiveCleanupOwner({
+      store,
+      runtime: runtimeFixture({
+        thread,
+        readThread: () => observed,
+        archived: () => archived,
+        dispatchPort,
+        connectionEpoch: () => connectionEpoch,
+        async onArchive() {
+          archiveCalls += 1
+          archived = true
+          if (responseLost) throw new Error('response_lost_after_archive')
+        },
+      }),
+      getConnectionEpoch: () => connectionEpoch,
+      now: () => closedAt,
+    })
+    assert.deepEqual(await owner.drain(), { processed: 1, acknowledged: 0, pending: 1 })
+    assert.equal(archiveCalls, 0, 'a different fork source must not be archived')
+    observed = thread
+    await owner.drain()
+    assert.equal(archiveCalls, 1)
+    if (responseLost) {
+      assert.equal(store.readByThreadId(thread.id)?.state, 'result_unknown')
+      connectionEpoch = 'fork-archive-2'
+      assert.deepEqual(await owner.reconcileForBoot(), {
+        processed: 1, acknowledged: 1, retryable: 0, unknown: 0,
+      })
+    }
+    assert.equal(store.readByThreadId(thread.id)?.state, 'acknowledged')
+    assert.equal(archiveCalls, 1)
+  } finally {
+    db.close()
+  }
+})
+}
 
 test('darwin cwd case aliases still identify the exact retired native thread', async (t) => {
   if (skipIfSqliteUnavailable(t, 'Codex durable thread archive cwd case alias')) return
@@ -667,6 +723,7 @@ test('a failed cleanup stays pending without blocking another alias or a second 
     const result = await draining
     assert.equal(otherAliasSent, true)
     assert.deepEqual(result, { processed: 2, acknowledged: 1, pending: 1 })
+    assert.equal(archiveCalls, 2)
     assert.equal(store.readByThreadId('native-thread-1')?.state, 'result_unknown')
     assert.equal(store.readByThreadId('native-thread-2')?.state, 'acknowledged')
   } finally {

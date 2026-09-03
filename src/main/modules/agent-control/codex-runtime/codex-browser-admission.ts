@@ -95,6 +95,19 @@ export function assertBrowserExplicitReadOperationsAreObserve(): void {
   }
 }
 
+export function isCodexBrowserObservationClosureToolName(name: string): boolean {
+  return isBrowserPublicToolName(name)
+    && BROWSER_CAPABILITY_REGISTRY[name].operations.every(
+      (operationId) => browserOperationCapability(operationId).mode === 'observe',
+    )
+}
+
+export function browserToolSurfaceNeedsObservationReserve(toolNames: readonly string[]): boolean {
+  return toolNames.some((name) => (
+    isBrowserPublicToolName(name) && !isCodexBrowserObservationClosureToolName(name)
+  ))
+}
+
 export function buildBrowserAdmissionAuthoritySnapshot(input: {
   authorityId: string
   activeWorkbenchMode?: TrustedRequestEnvironment['workbenchMode'] | null

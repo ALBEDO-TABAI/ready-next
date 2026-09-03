@@ -59,7 +59,11 @@ const DOMAIN_ACTION_PATTERNS: Record<PatternIntentDomain, Array<[RegExp, string,
     [/(生成|创建|插入|更新|修改|改写|润色|排版|保存|输出\s*svg)/i, 'document-action', 2],
   ],
   rss: [
-    [/(抓取|拉取|分析|汇总|输出.*报告|生成.*报告)/i, 'rss-action', 2],
+    [/(刷新|抓取|拉取|更新).{0,12}(rss|订阅|订阅源|feed)?/i, 'rss-refresh-action', 2],
+    [/(添加|新增|订阅).{0,12}(订阅源|rss|feed)/i, 'rss-add-source-action', 2],
+    [/(打开|选中|定位).{0,12}(条目|文章|内容)/i, 'rss-select-action', 2],
+    [/(开始|排队|后台).{0,12}(分析|跑)/i, 'rss-analysis-start-action', 3],
+    [/(分析|汇总|输出.*报告|生成.*报告)/i, 'rss-analysis-result-action', 2],
   ],
   calendar: [
     [/(创建|修改|删除|安排|排到|提醒我)/i, 'calendar-action', 2],
@@ -71,7 +75,9 @@ const DOMAIN_ACTION_PATTERNS: Record<PatternIntentDomain, Array<[RegExp, string,
     [/(继续执行|继续跑|恢复执行|处理 blocker|提交结果|确认继续|workflow)/i, 'skill-action', 2],
   ],
   pet: [
-    [/(贴到|贴上|贴|放到|放上|新增|添加|显示|关闭|删除|清空|移除)/i, 'pet-action', 2],
+    [/(清空).{0,12}(宠物|猫猫|便利贴|便签|贴纸)?/i, 'pet-clear-action', 3],
+    [/(关闭|删除|移除).{0,12}(宠物|猫猫|便利贴|便签|贴纸)/i, 'pet-dismiss-action', 3],
+    [/(贴到|贴上|贴起来|放到|放上|新增|添加|显示).{0,16}(宠物|猫猫|气泡|便利贴|便签|贴纸)?/i, 'pet-show-action', 2],
   ],
   research: [
     [/(研究|调研|综述|对比分析|调查|整理研究)/i, 'research-action', 2],

@@ -64,9 +64,20 @@ export function createCodexProductActionRequester(input: {
       argsDigest,
     })
     const at = (input.now || (() => new Date().toISOString()))()
-    const began = await input.journal.begin({
-      readyActionId: effectActionId,
+    const began = await input.journal.beginBoundProductEffect({
+      effectActionId,
       actionIdentityDigest: effectIdentityDigest,
+      readyRunId: input.readyRunId,
+      readyScopeId: input.scopeId,
+      messageVisibilityEpoch: input.messageVisibilityEpoch,
+      codexThreadId: input.codexThreadId,
+      codexTurnId: input.codexTurnId,
+      codexCallId: input.codexCallId,
+      parentReadyActionId: input.readyActionId,
+      toolName: input.executingToolName,
+      productAction: action,
+      actionOrdinal,
+      argsDigest,
       at,
     })
     if (!began.fresh) {

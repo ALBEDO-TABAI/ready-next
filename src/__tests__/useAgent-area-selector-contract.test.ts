@@ -69,7 +69,7 @@ function makeSlice(patch: Partial<SessionSlice> = {}): SessionSlice {
 
 function resetStore() {
   useAgent.setState({
-    agents: [{ name: 'butler', displayName: '管家', avatar: '', status: 'idle', selected: true }],
+    agents: [{ name: 'butler', displayName: '管家', avatar: '', status: 'idle' }],
     messages: [],
     currentAgent: 'butler',
     inputValue: '',

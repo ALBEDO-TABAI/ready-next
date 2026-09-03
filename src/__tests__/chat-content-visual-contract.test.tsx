@@ -78,6 +78,51 @@ test('streaming prose exposes a steady caret while completed prose does not', ()
   assert.doesNotMatch(complete, /data-ready-stream-caret/)
 })
 
+test('agent prose groups repeated authored ordinals into semantic ordered lists', () => {
+  const html = renderToStaticMarkup(createElement(MarkdownContent, {
+    content: [
+      '1. 第一项',
+      '   第一项说明。',
+      '',
+      '1. 第二项',
+      '   第二项说明。',
+      '',
+      '1. 第三项',
+      '   1) 嵌套项',
+      '',
+      '1. 第四项',
+    ].join('\n'),
+  }))
+
+  assert.equal((html.match(/data-ready-ordered-list="true"/g) || []).length, 2)
+  assert.match(html, /<ol start="1" data-ready-ordered-list="true" data-ready-list-delimiter="\."/)
+  assert.match(html, /<li><span>第一项<\/span><div data-ready-list-continuation="true">第一项说明。<\/div><\/li>/)
+  assert.match(html, /<ol start="1" data-ready-ordered-list="true" data-ready-list-delimiter="\)" data-ready-list-indent="3"/)
+  assert.equal((html.match(/<li>/g) || []).length, 5)
+  assert.doesNotMatch(html, /data-ready-numbered-marker/)
+})
+
+test('agent prose keeps the first start value and splits delimiter families', () => {
+  const html = renderToStaticMarkup(createElement(MarkdownContent, {
+    content: ['3. 第三项', '3. 第四项', '2) 新列表'].join('\n'),
+  }))
+
+  assert.match(html, /<ol start="3" data-ready-ordered-list="true" data-ready-list-delimiter="\."/)
+  assert.match(html, /<ol start="2" data-ready-ordered-list="true" data-ready-list-delimiter="\)"/)
+  assert.equal((html.match(/data-ready-ordered-list="true"/g) || []).length, 2)
+})
+
+test('agent prose ends a list at a real paragraph and keeps streaming caret in the final item', () => {
+  const html = renderToStaticMarkup(createElement(MarkdownContent, {
+    content: ['1. 第一项', '', '说明段落', '', '1. 新列表项'].join('\n'),
+    streaming: true,
+  }))
+
+  assert.equal((html.match(/data-ready-ordered-list="true"/g) || []).length, 2)
+  assert.match(html, />说明段落</)
+  assert.equal((html.match(/data-ready-stream-caret="true"/g) || []).length, 1)
+})
+
 test('fenced code renders as an operable code block with language, lines, and copy action', () => {
   const html = renderToStaticMarkup(createElement(MarkdownContent, {
     content: ['```ts', 'const ready = true', 'console.log(ready)', '```'].join('\n'),

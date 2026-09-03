@@ -6,15 +6,15 @@ import type { CanonicalAssistantMessageReceipt } from '../../../../shared/ipc-co
 import type { BrowserWorkflowCompletionVerifierReceipt } from '../../../../shared/browser-workflow-control'
 import { workflowDigest } from '../../repositories/browser-workflow-codec'
 import type { FinalizedRunOutcome, RunCloseMetric, RunFinalizerDeps, RunOutcome, RunOutcomeUsage } from './run-finalizer-contracts'
-import { isBrowserTransactionTask, resolveEffectiveTaskFacts, type EffectiveTaskFacts } from './run-finalizer-task-facts'
+import { isBrowserTransactionTask, isStrictEvidenceTask, resolveEffectiveTaskFacts, type EffectiveTaskFacts } from './run-finalizer-task-facts'
 import { canKeepProofBearingDegradedVisible, continuationFromProjectionPatch, recordTerminalAdjudication, resolveDynamicDeliveryFinalizerBlocker, resolveTerminalFailureReason, runTerminalAdjudicationDerivedEffects, terminalTaskBudgetSnapshot } from './run-finalizer-adjudication'
 
-export async function writeTerminalOutcome(
+export function prepareTerminalOutcome(
   outcome: RunOutcome,
   deps: RunFinalizerDeps,
   status: RunMetaTerminalStatus,
   terminalReason: string
-): Promise<FinalizedRunOutcome> {
+) {
   const facts = resolveEffectiveTaskFacts(outcome, deps)
   const deliveryState = (() => {
     const candidate = outcome.projectionPatch?.deliveryState
@@ -53,6 +53,10 @@ export async function writeTerminalOutcome(
   if (!deliveryBlocker && !handoffSuperseded && status === 'done' && !adjudication && isBrowserTransactionTask(facts)) {
     effectiveStatus = 'error'
     effectiveTerminalReason = 'browser_transaction_unconfirmed'
+  }
+  if (!deliveryBlocker && !handoffSuperseded && status === 'done' && !adjudication && isStrictEvidenceTask(facts)) {
+    effectiveStatus = 'error'
+    effectiveTerminalReason = 'proof_gap'
   }
   if (
     !deliveryBlocker
@@ -105,6 +109,17 @@ export async function writeTerminalOutcome(
   ) {
     effectiveTerminalReason = 'browser_transaction_unconfirmed'
   }
+  return { facts, deliveryState, handoffSuperseded, adjudication, effectiveStatus, effectiveTerminalReason }
+}
+
+export type PreparedTerminalOutcome = ReturnType<typeof prepareTerminalOutcome>
+
+export async function writePreparedTerminalOutcome(
+  outcome: RunOutcome,
+  deps: RunFinalizerDeps,
+  prepared: PreparedTerminalOutcome,
+): Promise<FinalizedRunOutcome> {
+  const { facts, deliveryState, handoffSuperseded, adjudication, effectiveStatus, effectiveTerminalReason } = prepared
   let canonicalReceipt: CanonicalAssistantMessageReceipt | undefined = outcome.canonicalMessageReceipt || undefined
   const checkpointContinuation = continuationFromProjectionPatch(outcome.projectionPatch)
   const checkpointKind = checkpointContinuation
@@ -161,6 +176,7 @@ export async function writeTerminalOutcome(
         ? { ...outcome.providerDiagnostics }
         : null,
       usage: outcome.usage || null,
+      contextUsage: outcome.contextUsage || null,
       deliveryState,
       workflowCloseoutSeal: outcome.workflowCloseoutSeal || null,
       terminalQualityPatch: adjudication?.terminalQualityPatch || null,

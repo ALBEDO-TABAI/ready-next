@@ -11,7 +11,8 @@
  * the latter is NOT achievable by any proof-kind test (a single artifact would
  * satisfy it). This gate pins the mechanism + its wiring so neither can be
  * silently removed, and pins the behavioral regression test that reproduces the
- * incident's "many intermediate artifacts, one delivered" shape.
+ * incident's "many intermediate artifacts, one delivered" shape. A declared
+ * output remains an obligation for short and child-backed skill runs too.
  *
  * Deliberately red on the pre-fix code (none of these symbols existed).
  */
@@ -21,7 +22,8 @@ const { resolve } = require('node:path')
 
 const CRITERIA_FILE = 'src/main/modules/agent-control/quality/criteria-templates.ts'
 const ADJUDICATOR_FILE = 'src/main/modules/agent-control/quality/task-adjudicator.ts'
-const FINALIZER_FILE = 'src/main/modules/agent-control/runtime-core/run-finalizer.ts'
+const FINALIZER_FILE = 'src/main/modules/agent-control/runtime-core/run-finalizer-adjudication.ts'
+const TASK_FACTS_FILE = 'src/main/modules/agent-control/runtime-core/run-finalizer-task-facts.ts'
 const REGRESSION_TEST = 'src/__tests__/skill-primitive-criteria-coverage.test.ts'
 
 function read(rel) {
@@ -43,9 +45,10 @@ function main() {
     if (!/coverageTargets/.test(criteria)) {
       violations.push({ file: CRITERIA_FILE, reason: 'resolveCriteria must accept coverageTargets (steps_json expectedOutputs)' })
     }
-    // Boundary: only skill module without a child run_state handle is coverable.
-    if (!/module\s*===\s*['"]skill['"]\s*&&\s*!skillHasChildRunState/.test(criteria)) {
-      violations.push({ file: CRITERIA_FILE, reason: 'coverage conversion must be gated on skill module && !skillHasChildRunState' })
+    // Boundary: the conversion belongs to skill tasks and does not weaken the
+    // independent child run_state criterion.
+    if (!/skillDeliveryCoverable\s*=\s*module\s*===\s*['"]skill['"]\s*&&\s*coverageTargets\.length\s*>\s*0/.test(criteria)) {
+      violations.push({ file: CRITERIA_FILE, reason: 'coverage conversion must be gated on skill module with declared targets' })
     }
     // Declared targets → convert c1 to a delivery_coverage item carrying expected.
     if (!/kind:\s*['"]delivery_coverage['"][\s\S]*?expected:\s*coverageTargets/.test(criteria)) {
@@ -54,7 +57,7 @@ function main() {
     // MONOTONIC boundary: conversion happens ONLY when targets were declared —
     // the no-target case must NOT flip to NA (that fail-open drop of c1 would let
     // a single c2 artifact accept an unverifiable delivery). Guard the gate.
-    if (!/skillPrimitiveStepsCoverable\s*&&\s*coverageTargets\.length\s*>\s*0/.test(criteria)) {
+    if (!/skillDeliveryCoverable/.test(criteria)) {
       violations.push({ file: CRITERIA_FILE, reason: 'conversion must be gated on coverageTargets.length > 0 (no-target case stays monotonic, must not fail-open to NA)' })
     }
     if (/未声明预期产出/.test(criteria)) {
@@ -93,11 +96,12 @@ function main() {
   }
 
   const finalizer = read(FINALIZER_FILE)
+  const taskFacts = read(TASK_FACTS_FILE)
   if (!finalizer) {
     violations.push({ file: FINALIZER_FILE, reason: 'missing file' })
   } else {
-    if (!/function deriveCoverageTargets/.test(finalizer)) {
-      violations.push({ file: FINALIZER_FILE, reason: 'finalizer must derive coverage targets from steps_json expectedOutputs' })
+    if (!taskFacts || !/function deriveCoverageTargets/.test(taskFacts)) {
+      violations.push({ file: TASK_FACTS_FILE, reason: 'finalizer must derive coverage targets from steps_json expectedOutputs' })
     }
     if (!/coverageTargets:\s*deriveCoverageTargets/.test(finalizer)) {
       violations.push({ file: FINALIZER_FILE, reason: 'finalizer must feed coverageTargets into resolveCriteria' })

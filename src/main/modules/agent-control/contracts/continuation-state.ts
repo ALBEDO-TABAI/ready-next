@@ -10,7 +10,7 @@ import type {
 import { isTaskType } from '../../../../shared/task-types'
 import { buildRequestEnvelope, type RequestEnvelope } from './request-envelope'
 import { logAgentMetric } from '../metrics'
-import { matchesResumeIntent } from './resume-lexicon'
+import { matchesResumeIntent } from '../../../../shared/resume-lexicon'
 import { canResumeShape } from './resume-handle'
 import type { ScopeRunResumableAction, ScopeRunTaskContinuation } from './types'
 

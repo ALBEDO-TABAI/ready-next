@@ -108,6 +108,44 @@ function baseState(input: Partial<HarnessState> = {}): HarnessState {
 }
 
 describe('agent panel test harness', () => {
+  it('observes terminal message identity without exporting arbitrary message metadata', () => {
+    const snapshot = createAgentPanelSnapshot(baseState({ messages: [message({
+      id: 'terminal-C', type: 'agent', content: 'C failed',
+      meta: { runId: 'run-C', terminalReason: 'blocked_external', privateFixture: 'do-not-export' },
+    })] }))
+    assert.equal(snapshot.messages[0].runId, 'run-C')
+    assert.equal(snapshot.messages[0].terminalReason, 'blocked_external')
+    assert.equal(JSON.stringify(snapshot).includes('do-not-export'), false)
+  })
+
+  it('captures context usage from the same visible run mirror as ChatPanel', () => {
+    const visibleRun = run({
+      phase: 'done',
+      terminalReason: 'done',
+      contextUsage: {
+        usedInputTokens: 40,
+        windowTokens: 258_400,
+        ratio: 40 / 258_400,
+        windowSource: 'model',
+        source: 'last_model_request',
+        timestamp: '2026-05-14T09:00:03.000Z',
+      },
+    })
+    const snapshot = createAgentPanelSnapshot(baseState({
+      activeSessionId: 'session-active',
+      sessions: {
+        'session-active': {
+          conversationId: scope.id,
+          scopeRunStates: {},
+        },
+      },
+      scopeRunStates: { [scope.id]: visibleRun },
+    }))
+
+    assert.equal(snapshot.runtime.activeRun?.requestId, visibleRun.requestId)
+    assert.equal(snapshot.runtime.activeRun?.contextUsage?.usedInputTokens, 40)
+  })
+
   it('captures panel-visible task cards, info cards, messages, and tool trace', () => {
     const activeRun = run({
       taskId: 'task-1',

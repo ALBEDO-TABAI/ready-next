@@ -18,7 +18,10 @@ import {
   CodexBindingRepository,
   type CodexAdmittedBindingInput,
 } from '../main/modules/agent-control/codex-runtime/codex-binding-repository'
-import { digestCanonicalJson } from '../main/modules/agent-control/codex-runtime/codex-model-gateway-contract'
+import { createCodexUpstreamProfileSnapshot, digestCanonicalJson } from '../main/modules/agent-control/codex-runtime/codex-model-gateway-contract'
+import { CodexModelGatewayRepository } from '../main/modules/agent-control/codex-runtime/codex-model-gateway-authority'
+import { buildTerminalNativeReadbackReceipt, resolveCodexHistoryObservation, resolveCodexTerminalFacts, terminalEvidenceRef, terminalNativeReadbackEvidenceRef } from '../main/modules/agent-control/codex-runtime/codex-terminal-facts'
+import { projectCodexHeadActionProjection } from '../main/modules/agent-control/codex-runtime/codex-action-surface'
 import { CodexDefaultBootRecoveryActions } from '../main/modules/agent-control/codex-runtime/codex-boot-recovery-actions'
 import { CodexDurableStartDispatchPort } from '../main/modules/agent-control/codex-runtime/codex-durable-start-dispatch'
 import { buildCodexToolResponseDeliveryAttemptId } from '../main/modules/agent-control/codex-runtime/codex-tool-response-delivery'
@@ -28,8 +31,8 @@ import type {
   CodexThreadStartParams,
   CodexTurnStartParams,
 } from '../main/modules/agent-control/codex-runtime/codex-native-runtime'
-import type { PreparedCodexProductRun } from '../main/modules/agent-control/codex-runtime/codex-product-run-preparer'
-import { createCodexToolFixture } from './utils/codex-tool-fixture'
+import { CodexProductRunPreparer, type PreparedCodexProductRun } from '../main/modules/agent-control/codex-runtime/codex-product-run-preparer'
+import { createCodexToolFixtureFromDefinitions } from './utils/codex-tool-fixture'
 import { CodexProvisionalInboundBuffer } from '../main/modules/agent-control/codex-runtime/codex-provisional-inbound-buffer'
 import {
   activateCodexGatewaySpawnConfig,
@@ -61,6 +64,21 @@ import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
 type FaultMode = 'hold_response' | 'fail_write'
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
+const upstream = createCodexUpstreamProfileSnapshot({
+  profileId: 'profile-recovery', maxRetries: 0,
+  config: {
+    provider: 'openai', baseUrl: 'http://127.0.0.1:10532/v1', apiKey: 'isolated-test-key',
+    model: 'ready-e0-model', agentProtocol: 'openai', wireApi: 'responses',
+    contextWindowOverride: 272_000, toolUseMode: 'on', nativeVideoMode: 'off',
+  },
+})
+const toolFixture = createCodexToolFixtureFromDefinitions([{
+  name: 'ready_read_probe', groupId: 'agent_interaction', domain: 'document', kind: 'read',
+  concurrency: 'parallel_read_safe', interruptBehavior: 'abort_signal', timeoutProfile: 'default',
+  supportsTextBridge: true, projectionHint: null, description: 'Read one fixture value.',
+  schema: { type: 'object', properties: { query: { type: 'string' } }, required: ['query'], additionalProperties: false },
+  executionVisibility: 'model', resultShape: 'json',
+}])
 
 function listen(server: Server): Promise<number> {
   return new Promise((resolvePort, reject) => {
@@ -159,52 +177,41 @@ function toolEvents(responseId: string): unknown[] {
 
 function prepared(
   runId: string,
+  text: string,
   scopeId: string,
   aliasId: string,
   reservation: StartIdentityReservationSet,
+  actionAdmissionRef: PreparedCodexProductRun['ingress']['actionAdmissionRef'],
 ): PreparedCodexProductRun {
-  return {
-    preparationContract: 'codex_product_run_e1',
+  const result = new CodexProductRunPreparer().prepare({
     readyMemorySnapshot: disabledReadyMemorySnapshot(),
     taskId: `task-${runId}`,
     runId,
-    conversationAlias: { aliasId, aliasGeneration: 1 },
-    ingressBinding: {
-      requestId: `request-${runId}`,
-      reservationSetId: reservation.reservationSetId,
-      reservationEvidenceDigest: reservation.reservationEvidenceDigest,
-    },
-    ingress: {
-      kind: 'user_ingress', attemptKind: 'user_ingress',
-      originUserMessageId: `message-${runId}`,
-      canonicalCurrentInputRef: {
-        messageId: `message-${runId}`,
-        input: [{ type: 'text', text: `input-${runId}`, text_elements: [] }],
-      },
-      explicitResourceEnvelope: { input: [], resourceRefs: [] },
-      resourceAdditionalContext: [],
-    },
-    resourceAnchorDigest: `resource-${runId}`,
-    recoveredContextDigest: null,
-    ...createCodexToolFixture(['ready_read_probe']),
-    readyToolHostIdentity: {
-      scopeId, aliasId, authorizationOwnerId: `owner-${runId}`,
-      resourceOwnerId: `resource-owner-${runId}`,
-    },
+    requestId: `request-${runId}`,
+    scopeId, aliasId, aliasGeneration: 1,
+    taskOrigin: 'user_root', runOrigin: 'initial',
+    reservationSetId: reservation.reservationSetId,
+    reservationEvidenceDigest: reservation.reservationEvidenceDigest,
+    originUserMessageId: `message-${runId}`,
+    currentInput: [{ type: 'text', text, text_elements: [] }],
+    explicitResourceEnvelope: { input: [], resourceRefs: [] },
+    resourceAdditionalContext: [],
+    actionAdmissionRef,
+    uncommittedTailAssignments: [],
+    supersededUncommittedItems: [],
+    trustedWorkbenchMode: 'browser',
+    ...toolFixture,
+    authorizationOwnerId: `owner-${runId}`,
+    resourceOwnerId: `resource-owner-${runId}`,
     productBudgetSeed: {
       maxIterations: 8,
       maxToolCalls: 4,
       maxParallelToolGroups: 1,
-      lanes: {
-        ordinary: { maxIterations: 7, maxToolCalls: 4, maxParallelToolGroups: 1 },
-        delivery: { maxIterations: 0, maxToolCalls: 0, maxParallelToolGroups: 0 },
-        final: { maxIterations: 1 },
-      },
     },
-    neutralProjectionSeed: {
-      phase: 'planning', taskTitle: '正在理解需求', taskSummary: '正在整理任务边界',
-    },
-  }
+  })
+  assert.equal(result.ok, true)
+  if (!result.ok) throw new Error(result.code)
+  return result.prepared
 }
 
 function admission(
@@ -235,7 +242,7 @@ function admission(
     instructionContractDigest: 'instruction-recovery',
     codexModel: 'ready-e0-model',
     upstreamProfileSnapshotRef: 'profile-recovery',
-    upstreamProfileSnapshotDigest: 'profile-digest-recovery',
+    upstreamProfileSnapshotDigest: upstream.snapshotDigest,
     additionalContextDigest: `additional-context-${run.runId}`,
     turnContractDigest: `turn-contract-${run.runId}`,
     messageVisibilityEpoch: 0,
@@ -251,6 +258,7 @@ function admission(
 }
 
 function turnParams(run: PreparedCodexProductRun, threadId: string, text: string): CodexTurnStartParams {
+  assert.deepEqual(run.ingress.canonicalCurrentInputRef.input, [{ type: 'text', text, text_elements: [] }])
   return {
     threadId,
     clientUserMessageId: `client-message-${run.runId}`,
@@ -263,13 +271,13 @@ function turnParams(run: PreparedCodexProductRun, threadId: string, text: string
       },
     },
     environments: [],
-    input: [{ type: 'text', text, text_elements: [] }],
+    input: run.ingress.canonicalCurrentInputRef.input,
     additionalContext: {},
     responsesapiClientMetadata: {
       readyRunId: run.runId,
-      toolSurfaceDigest: 'tool-surface-recovery',
+      toolSurfaceDigest: run.readyToolSurface.toolSurfaceDigest,
       turnContractDigest: `turn-contract-${run.runId}`,
-      upstreamProfileSnapshotDigest: 'profile-digest-recovery',
+      upstreamProfileSnapshotDigest: upstream.snapshotDigest,
     },
   }
 }
@@ -280,13 +288,7 @@ function threadParams(cwd: string): CodexThreadStartParams {
     cwd, approvalPolicy: 'never', sandbox: 'read-only', runtimeWorkspaceRoots: [],
     environments: [],
     config: { model_context_window: 272_000 },
-    dynamicTools: [{
-      type: 'function', name: 'ready_read_probe', description: 'Read one fixture value.',
-      inputSchema: {
-        type: 'object', properties: { query: { type: 'string' } },
-        required: ['query'], additionalProperties: false,
-      },
-    }],
+    dynamicTools: toolFixture.readyToolSurface.dynamicTools,
     developerInstructions: 'Use only the declared Ready tool.',
   }
 }
@@ -457,6 +459,9 @@ test('real app-server crash recovery covers all six start seams and three-way re
 
   try {
     const repository = new CodexBindingRepository(db as unknown as DatabaseConnection)
+    new CodexModelGatewayRepository(db).storeSnapshot({
+      ...upstream, snapshotRef: 'profile-recovery', createdAt: new Date().toISOString(),
+    })
     const archiveDispatchPort = new CodexDurableThreadArchiveDispatchPort({
       store: new CodexThreadArchiveIntentStore(db as unknown as DatabaseConnection),
       now: () => new Date().toISOString(),
@@ -477,13 +482,7 @@ test('real app-server crash recovery covers all six start seams and three-way re
     const threadStartByBinding = new Map<string, CodexThreadStartParams>()
     const runById = new Map<string, PreparedCodexProductRun>()
 
-    const prepareParentRows = (run: PreparedCodexProductRun) => {
-      const scopeId = run.readyToolHostIdentity.scopeId
-      const messageContent = run.ingress.canonicalCurrentInputRef.input
-        .filter((item) => item.type === 'text')
-        .map((item) => item.text)
-        .join('')
-      const parentMeta = { requestId: run.ingressBinding.requestId }
+    const prepareScope = (scopeId: string) => {
       db.prepare(`
         INSERT OR IGNORE INTO chat_conversations (
           id, agent, active_agent_id, handoff_generation, title, source_kind, source_id,
@@ -495,6 +494,12 @@ test('real app-server crash recovery covers all six start seams and three-way re
           .get(scopeId),
         { id: scopeId, message_visibility_epoch: 0 },
       )
+    }
+    const prepareParentRows = (run: PreparedCodexProductRun) => {
+      const scopeId = run.readyToolHostIdentity.scopeId
+      const messageContent = run.ingress.canonicalCurrentInputRef.input
+        .filter((item) => item.type === 'text').map((item) => item.text).join('')
+      const parentMeta = { requestId: run.ingressBinding.requestId }
       db.prepare(`
         INSERT INTO chat_messages (id, conversation_id, role, content, timestamp, meta_json, message_visibility_epoch)
         VALUES (?, ?, 'user', ?, '2026-08-07T00:00:00.000Z', ?, 0)
@@ -555,7 +560,19 @@ test('real app-server crash recovery covers all six start seams and three-way re
       const result = registry.reserve({ scopeId: input.scopeId, existingThread: input.existingThread })
       assert.equal(result.ok, true)
       if (!result.ok) throw new Error(result.code)
-      const run = prepared(input.runId, input.scopeId, input.aliasId, result.reservation)
+      prepareScope(input.scopeId)
+      const head = projectCodexHeadActionProjection(repository.readHeadActionFacts({
+        aliasId: input.aliasId,
+        aliasGeneration: 1,
+        currentRuntimeManifestDigest: runtime.manifestDigest,
+        currentProtocolSchemaDigest: 'protocol-schema-recovery',
+      }))
+      const actionAdmissionRef = {
+        headProjectionDigest: head.evidenceDigest,
+        actionProjectionVersion: head.actionProjectionVersion,
+        actionHeadIdentity: head.actionHeadIdentity!,
+      }
+      const run = prepared(input.runId, input.text, input.scopeId, input.aliasId, result.reservation, actionAdmissionRef)
       prepareParentRows(run)
       repository.admitProductBindings(admission(
         run,
@@ -570,10 +587,11 @@ test('real app-server crash recovery covers all six start seams and three-way re
       return run
     }
 
-    const closeRun = (
+    const closeRun = async (
       runId: string,
       turn: CodexTurn,
       status: 'completed' | 'failed' = 'completed',
+      reader = activeSession!.getClient(),
     ) => {
       const run = runById.get(runId)
       if (!run) throw new Error(`run_not_found:${runId}`)
@@ -586,6 +604,7 @@ test('real app-server crash recovery covers all six start seams and three-way re
         : null
       assert.ok(status !== 'completed' || finalMessage?.type === 'agentMessage')
       const candidateText = finalMessage?.type === 'agentMessage' ? finalMessage.text : null
+      const nativeThread = (await reader.threadRead({ threadId: start.codexThreadId, includeTurns: true })).thread
       repository.recordEngineTerminalCandidate({
         readyRunId: runId,
         codexThreadId: start.codexThreadId,
@@ -615,6 +634,7 @@ test('real app-server crash recovery covers all six start seams and three-way re
           budgetState: {},
           contextState: {},
           providerDiagnostics: {},
+          contextUsage: null,
           recoveryCheckpointRef: null,
           browserContinuationRef: null,
           browserProofRefs: [],
@@ -627,7 +647,33 @@ test('real app-server crash recovery covers all six start seams and three-way re
         recordedAt: closeoutAt,
       })
       repository.recordToolPublicationReceipt({ readyRunId: runId, recordedAt: closeoutAt })
-      const terminalMeta = { taskId: run.taskId, runId, terminalReason: status === 'completed' ? 'done' : 'failed' }
+      const engine = repository.readEngineTerminalCandidate(runId)!
+      assert.equal(engine.candidate.kind, 'native_terminal')
+      if (engine.candidate.kind !== 'native_terminal') throw new Error('native_candidate_missing')
+      const identity = { readyRunId: runId, readyScopeId: run.readyToolHostIdentity.scopeId,
+        messageVisibilityEpoch: 0, aliasGeneration: run.conversationAlias.aliasGeneration,
+        codexThreadId: start.codexThreadId, codexTurnId: turn.id }
+      const nativeReadback = buildTerminalNativeReadbackReceipt({ candidate: engine.candidate, prepared: run,
+        aliasGeneration: identity.aliasGeneration, messageVisibilityEpoch: 0,
+        connectionEpoch: repository.readLiveProcessLease()!.connectionEpoch, turnRevision: engine.revision, thread: nativeThread })
+      const evidence = [terminalEvidenceRef({ ...identity, kind: 'native_turn', revision: 1,
+        receiptId: `engine-terminal:${runId}`, digest: engine.candidateDigest,
+        ownerIdentity: { nativeTurnId: turn.id, terminalStatus: engine.candidate.engineOutcome } }),
+      terminalNativeReadbackEvidenceRef({ ...identity, revision: nativeReadback.turnRevision,
+        receiptId: nativeReadback.receiptId, digest: nativeReadback.digest,
+        ownerIdentity: { connectionEpoch: nativeReadback.connectionEpoch, readRevision: nativeReadback.turnRevision,
+          verifiedThreadId: start.codexThreadId, verifiedTurnId: turn.id } })]
+      const history = resolveCodexHistoryObservation({ candidate: engine.candidate, prepared: run,
+        expectedClientUserMessageId: `client-message-${runId}`, thread: nativeThread, publicationDiverged: false,
+        gatewayEvidence: new CodexModelGatewayRepository(db).readTurnGatewayEvidence(identity) })
+      assert.equal(history.kind, 'continuation_safe', JSON.stringify(history))
+      const terminalFacts = resolveCodexTerminalFacts({
+        product: { terminal: status === 'completed' ? 'done' : 'error',
+          terminalReason: status === 'completed' ? 'done' : 'blocked_external',
+          failureKind: status === 'completed' ? null : 'provider', evidence },
+        history, historyEvidence: evidence, effect: { state: 'none', evidence: [] },
+      })
+      const terminalMeta = { taskId: run.taskId, runId, terminalReason: terminalFacts.product.terminalReason }
       const messageId = `assistant:${run.taskId}:${runId}:terminal`
       const productTerminalDigest = status === 'completed' && candidateText !== null
         ? workflowDigest({
@@ -642,6 +688,8 @@ test('real app-server crash recovery covers all six start seams and three-way re
       db.exec('BEGIN IMMEDIATE')
       try {
         db.prepare(`UPDATE task_projections SET status = ? WHERE task_id = ?`).run(status, run.taskId)
+        db.prepare('UPDATE run_meta SET status = ?, terminal_reason = ? WHERE run_id = ?')
+          .run(terminalFacts.product.terminal, terminalFacts.product.terminalReason, runId)
         if (status === 'completed' && candidateText !== null) {
           db.prepare(`
             INSERT INTO chat_messages (id, conversation_id, role, content, timestamp, meta_json, message_visibility_epoch)
@@ -658,6 +706,7 @@ test('real app-server crash recovery covers all six start seams and three-way re
           readyRunId: runId,
           productTerminalDigest,
           closeoutAt,
+          terminalEvidence: { terminalFacts, nativeReadback },
         })
         db.exec('COMMIT')
       } catch (error) {
@@ -817,7 +866,7 @@ test('real app-server crash recovery covers all six start seams and three-way re
     )
     await client.turnStart(turnParams(baseRun, baseThread.thread.id, 'BASE_TOKEN'))
     const baseTerminalEvent = await baseTerminal
-    closeRun(baseRun.runId, baseTerminalEvent.params.turn)
+    await closeRun(baseRun.runId, baseTerminalEvent.params.turn)
     const createEstablishedPeer = async (suffix: string) => {
       const peerScope = `scope-recovery-${suffix}`
       const peerBinding = `thread-binding-recovery-${suffix}`
@@ -840,7 +889,7 @@ test('real app-server crash recovery covers all six start seams and three-way re
         peerRun, peerThread.thread.id, `BASE_${suffix.toUpperCase()}_TOKEN`,
       ))
       const terminalEvent = await terminal
-      closeRun(peerRun.runId, terminalEvent.params.turn)
+      await closeRun(peerRun.runId, terminalEvent.params.turn)
       return {
         scopeId: peerScope,
         aliasId: peerScope,
@@ -917,7 +966,7 @@ test('real app-server crash recovery covers all six start seams and three-way re
       })}`)
     }
     assert.ok(earlyTerminalResult.notification)
-    closeRun(earlyRun.runId, earlyTerminalResult.notification.params.turn)
+    await closeRun(earlyRun.runId, earlyTerminalResult.notification.params.turn, 'completed', manual.client)
     assert.equal(toolExecutions, 1)
     assert.equal(registry.snapshot().capacityCharged, 0)
 
@@ -1021,7 +1070,7 @@ test('real app-server crash recovery covers all six start seams and three-way re
               run, identity.threadId, runText.get(run.runId) as string,
             ))
             const terminalEvent = await terminal
-            closeRun(run.runId, terminalEvent.params.turn)
+            await closeRun(run.runId, terminalEvent.params.turn)
             return 'accepted'
           },
         },
@@ -1078,7 +1127,7 @@ test('real app-server crash recovery covers all six start seams and three-way re
             )))
             assert.equal(matching.length, 1)
             assert.notEqual(matching[0].status, 'inProgress')
-            closeRun(fence.readyRunId, matching[0])
+            await closeRun(fence.readyRunId, matching[0])
           },
         },
       })
@@ -1175,7 +1224,7 @@ test('real app-server crash recovery covers all six start seams and three-way re
       'THREAD_LIVE_TIMEOUT_TOKEN',
     ))
     const liveThreadTerminalEvent = await liveThreadTerminal
-    closeRun(liveThreadRun.runId, liveThreadTerminalEvent.params.turn)
+    await closeRun(liveThreadRun.runId, liveThreadTerminalEvent.params.turn, 'completed', manual.client)
     assert.equal(registry.snapshot().capacityCharged, 0)
     manual.client.dispose()
     manual.transport.dispose()
@@ -1307,7 +1356,7 @@ test('real app-server crash recovery covers all six start seams and three-way re
       postUnknown, baseThread.thread.id, 'POST_UNKNOWN_OTHER_ROOT_TOKEN',
     ))
     const postTerminalEvent = await postTerminal
-    closeRun(postUnknown.runId, postTerminalEvent.params.turn)
+    await closeRun(postUnknown.runId, postTerminalEvent.params.turn)
     assert.equal(registry.snapshot().capacityCharged, 2)
     assert.equal(
       providerRequests.some((body) => flattenText(body).join('\n').includes('THREAD_UNKNOWN_MUST_NOT_RUN')),

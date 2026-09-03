@@ -5,26 +5,32 @@ import {
   SETTINGS_SECONDARY_BUTTON_STYLE,
   SETTINGS_SUBTLE_CARD_STYLE,
 } from '../../components/settings/settings-theme'
-import type { ElectronMcpStatus } from '../../types/electron'
+import type { ElectronMcpServerConfig, ElectronMcpStatus } from '../../types/electron'
+import { useAgent } from '../../stores/useAgent'
 
-// Phase M 管理面（2026-07-05）：stdio transport 已实装，本面板从
-// "not shipped" 占位升级为真实管理面 —— server 状态（注册工具数/连接/
-// 错误）+ 配置编辑（mcp_servers_json，主进程同一 parser 校验，坏条目
-// 原因逐条回显）+ 保存并重连。OAuth / per-scope 授权 UI 属第二阶段。
-const CONFIG_PLACEHOLDER = `[
-  {
-    "id": "filesystem",
-    "transport": "stdio",
-    "command": "npx",
-    "args": ["-y", "@modelcontextprotocol/server-filesystem", "/path/to/allowed/dir"]
-  }
-]`
+type McpResourceCatalog = {
+  catalogGeneration: number
+  catalogDigest: string
+  resources: Array<{ uri: string; name?: string; description?: string; mimeType?: string }>
+  resourceTemplates: Array<{ uriTemplate: string; name?: string; description?: string; mimeType?: string }>
+}
+
+const EMPTY_SERVER: ElectronMcpServerConfig = {
+  id: '',
+  displayName: '',
+  enabled: true,
+  command: '',
+  args: [],
+  approvalMode: 'writes',
+  envEntries: [],
+}
 
 export function McpSettingsPanel() {
   const [status, setStatus] = useState<ElectronMcpStatus | null>(null)
-  const [configDraft, setConfigDraft] = useState('')
+  const [configs, setConfigs] = useState<ElectronMcpServerConfig[]>([])
   const [draftTouched, setDraftTouched] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [resourceCatalogs, setResourceCatalogs] = useState<Record<string, McpResourceCatalog>>({})
   const [feedback, setFeedback] = useState<{ tone: 'ok' | 'error'; text: string } | null>(null)
 
   const refreshStatus = useCallback(async () => {
@@ -33,7 +39,7 @@ export function McpSettingsPanel() {
     try {
       const next = await api.getStatus()
       setStatus(next)
-      setConfigDraft((current) => (draftTouched ? current : next.rawConfig))
+      if (!draftTouched) setConfigs(next.configs)
     } catch {
       // silent-catch: 状态读取失败保持上一份显示；保存/重连路径有各自的错误反馈
     }
@@ -49,7 +55,7 @@ export function McpSettingsPanel() {
     setBusy(true)
     setFeedback(null)
     try {
-      const saved = await api.saveConfig(configDraft)
+      const saved = await api.saveConfig(configs)
       if (!saved.success) {
         const reasons = (saved.skipped || []).map((item) => item.reason).join('；')
         setFeedback({ tone: 'error', text: `${saved.error || '保存失败'}${reasons ? `（${reasons}）` : ''}` })
@@ -79,7 +85,55 @@ export function McpSettingsPanel() {
     } finally {
       setBusy(false)
     }
-  }, [busy, configDraft, refreshStatus])
+  }, [busy, configs, refreshStatus])
+
+  const updateServer = useCallback((index: number, patch: Partial<ElectronMcpServerConfig>) => {
+    setDraftTouched(true)
+    setConfigs((current) => current.map((server, serverIndex) => (
+      serverIndex === index ? { ...server, ...patch } : server
+    )))
+  }, [])
+
+  const loadResources = useCallback(async (serverId: string) => {
+    const result = await window.electronAPI.mcp?.listResources(serverId)
+    if (!result?.success || !result.data) {
+      setFeedback({ tone: 'error', text: result?.error || '资源目录读取失败' })
+      return
+    }
+    setResourceCatalogs((current) => ({ ...current, [serverId]: result.data! }))
+  }, [])
+
+  const attachResource = useCallback(async (
+    serverId: string,
+    resource: McpResourceCatalog['resources'][number],
+  ) => {
+    const catalog = resourceCatalogs[serverId]
+    if (!catalog) return
+    const result = await window.electronAPI.mcp?.readResource({
+      serverId,
+      uri: resource.uri,
+      catalogGeneration: catalog.catalogGeneration,
+    })
+    if (!result?.success || !result.data) {
+      setFeedback({ tone: 'error', text: result?.error || '资源读取失败' })
+      return
+    }
+    useAgent.getState().addAttachments([{
+      id: `mcp-resource-${crypto.randomUUID()}`,
+      name: resource.name || resource.uri,
+      path: resource.uri,
+      type: 'text',
+      size: JSON.stringify(result.data.content).length,
+      ext: '',
+      source: 'mcp-resource',
+      mcpServerId: serverId,
+      mcpResourceUri: resource.uri,
+      mcpCatalogGeneration: result.data.catalogGeneration,
+      mcpCatalogDigest: result.data.catalogDigest,
+      mcpContentDigest: result.data.contentDigest,
+    }])
+    setFeedback({ tone: 'ok', text: `已把资源「${resource.name || resource.uri}」加到下一条消息。` })
+  }, [resourceCatalogs])
 
   const servers = status?.servers ?? []
   const hasApi = useMemo(() => Boolean(window.electronAPI?.mcp), [])
@@ -111,7 +165,7 @@ export function McpSettingsPanel() {
                 className="text-[12px] leading-5"
                 style={{ color: 'var(--text-muted)', margin: '4px 0 0', maxWidth: 640 }}
               >
-                外部 MCP server 的工具会以 mcp_ 前缀进入 Agent 工具面；未声明只读的外部工具执行前需确认。远程 transport 与 OAuth 授权在后续版本开放。
+                仅连接本地 stdio server。工具会以 mcp_ 前缀进入 Agent 工具面，是否执行前确认由每个 server 的策略决定。
               </p>
             </div>
           </div>
@@ -130,7 +184,7 @@ export function McpSettingsPanel() {
         <div className="mt-4" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           {servers.length === 0 && (
             <p className="text-[12px] leading-5" style={{ color: 'var(--text-light)', margin: 0 }}>
-              尚未配置 MCP server——在下方粘贴配置并「保存并重连」。
+              尚未配置 MCP server——在下方添加配置并「保存并重连」。
             </p>
           )}
           {servers.map((server) => {
@@ -155,7 +209,7 @@ export function McpSettingsPanel() {
                     {server.serverId}
                   </span>
                   <span className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
-                    {server.toolCount} 个工具{server.requiresAuthorization ? '（需授权）' : ''}
+                    {server.toolCount} 个工具 · {server.resourceCount} 个资源
                   </span>
                 </div>
                 {server.toolNames.length > 0 && (
@@ -163,9 +217,43 @@ export function McpSettingsPanel() {
                     {server.toolNames.join('、')}{server.toolCount > server.toolNames.length ? ' …' : ''}
                   </p>
                 )}
+                {server.clientConnected && server.resourceCount > 0 && (
+                  <button
+                    type="button"
+                    className="ml-4 mt-1 text-[11px]"
+                    onClick={() => { void loadResources(server.serverId) }}
+                  >
+                    查看可选资源
+                  </button>
+                )}
+                {resourceCatalogs[server.serverId]?.resources.map((resource) => (
+                  <div key={resource.uri} className="ml-4 mt-1 flex items-center justify-between gap-3 text-[11px]">
+                    <span style={{ color: 'var(--text-light)' }}>{resource.name || resource.uri}</span>
+                    <button type="button" onClick={() => { void attachResource(server.serverId, resource) }}>
+                      加到下一条消息
+                    </button>
+                  </div>
+                ))}
+                {(resourceCatalogs[server.serverId]?.resourceTemplates.length || 0) > 0 && (
+                  <p className="ml-4 mt-1 text-[11px]" style={{ color: 'var(--text-light)' }}>
+                    资源模板需填齐参数后才能读取。
+                  </p>
+                )}
+                {(server.serverInfo || server.instructions) && (
+                  <details className="ml-4 mt-1 text-[11px]" style={{ color: 'var(--text-light)' }}>
+                    <summary>Server 信息</summary>
+                    {server.serverInfo && <pre className="whitespace-pre-wrap">{JSON.stringify(server.serverInfo, null, 2)}</pre>}
+                    {server.instructions && <p className="whitespace-pre-wrap">{server.instructions}</p>}
+                  </details>
+                )}
                 {server.lastError && (
                   <p className="text-[11px] leading-5" style={{ color: 'var(--status-error, #d4553f)', margin: '4px 0 0 16px' }}>
                     {server.lastError}
+                  </p>
+                )}
+                {server.stderrTail && (
+                  <p className="text-[11px] leading-5" style={{ color: 'var(--text-light)', margin: '4px 0 0 16px', whiteSpace: 'pre-wrap' }}>
+                    {server.stderrTail}
                   </p>
                 )}
               </div>
@@ -184,32 +272,44 @@ export function McpSettingsPanel() {
           className="text-[13px] font-medium"
           style={{ color: 'var(--text-title)', margin: 0 }}
         >
-          配置（mcp_servers_json）
+          Server 配置
         </h4>
         <p className="text-[11px] leading-5" style={{ color: 'var(--text-light)', margin: '4px 0 8px', maxWidth: 640 }}>
-          JSON 数组，每项 id / command / args（stdio）。无效条目保存时会逐条给出原因，不会被静默丢弃。
+          命令和参数分开保存，不经过 shell。环境变量已有的值只显示为已配置。
         </p>
-        <textarea
-          value={configDraft}
-          data-mcp-control="config-editor"
-          onChange={(event) => {
-            setConfigDraft(event.target.value)
-            setDraftTouched(true)
-          }}
-          placeholder={CONFIG_PLACEHOLDER}
-          spellCheck={false}
-          rows={8}
-          className="w-full rounded-xl border text-[12px]"
-          style={{
-            fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
-            padding: '10px 12px',
-            background: 'var(--surface-muted)',
-            color: 'var(--text-title)',
-            borderColor: 'var(--border-light, rgba(0,0,0,0.08))',
-            resize: 'vertical',
-            lineHeight: 1.6,
-          }}
-        />
+        <div className="flex flex-col gap-3">
+          {configs.map((server, index) => (
+            <div key={`${server.id}-${index}`} className="rounded-xl border p-3" style={SETTINGS_SUBTLE_CARD_STYLE}>
+              <div className="grid grid-cols-2 gap-2">
+                <input value={server.id} placeholder="server id" onChange={(event) => updateServer(index, { id: event.target.value })} className="rounded-lg border px-2 py-1.5 text-[12px]" />
+                <input value={server.displayName} placeholder="显示名称" onChange={(event) => updateServer(index, { displayName: event.target.value })} className="rounded-lg border px-2 py-1.5 text-[12px]" />
+              </div>
+              <input value={server.command} placeholder="本地命令路径" onChange={(event) => updateServer(index, { command: event.target.value })} className="mt-2 w-full rounded-lg border px-2 py-1.5 text-[12px]" />
+              <textarea value={server.args.join('\n')} placeholder="每行一个参数" onChange={(event) => updateServer(index, { args: event.target.value.split('\n').filter(Boolean) })} rows={3} className="mt-2 w-full rounded-lg border px-2 py-1.5 text-[12px]" />
+              <div className="mt-2 flex items-center gap-3 text-[12px]">
+                <label><input type="checkbox" checked={server.enabled} onChange={(event) => updateServer(index, { enabled: event.target.checked })} /> 启用</label>
+                <select value={server.approvalMode} onChange={(event) => updateServer(index, { approvalMode: event.target.value as ElectronMcpServerConfig['approvalMode'] })} className="rounded-lg border px-2 py-1.5">
+                  <option value="always">每次确认</option>
+                  <option value="writes">写入时确认</option>
+                  <option value="never">始终允许</option>
+                </select>
+                <button type="button" onClick={() => { setDraftTouched(true); setConfigs((current) => current.filter((_, itemIndex) => itemIndex !== index)) }}>删除</button>
+              </div>
+              {server.envEntries.map((entry, envIndex) => (
+                <div key={`${entry.key}-${envIndex}`} className="mt-2 grid grid-cols-2 gap-2">
+                  <input value={entry.key} placeholder="ENV_KEY" onChange={(event) => updateServer(index, { envEntries: server.envEntries.map((item, itemIndex) => itemIndex === envIndex ? { ...item, key: event.target.value } : item) })} className="rounded-lg border px-2 py-1.5 text-[12px]" />
+                  <input type="password" value={entry.value} placeholder={entry.hasStoredValue ? '已配置（留空保持）' : '值'} onChange={(event) => updateServer(index, { envEntries: server.envEntries.map((item, itemIndex) => itemIndex === envIndex ? { ...item, value: event.target.value } : item) })} className="rounded-lg border px-2 py-1.5 text-[12px]" />
+                </div>
+              ))}
+              <button type="button" className="mt-2 text-[11px]" onClick={() => updateServer(index, { envEntries: [...server.envEntries, { key: '', value: '' }] })}>+环境变量</button>
+            </div>
+          ))}
+          <button type="button" onClick={() => { setDraftTouched(true); setConfigs((current) => [...current, { ...EMPTY_SERVER, envEntries: [] }]) }} className="rounded-xl border px-3 py-2 text-[12px]" style={SETTINGS_SECONDARY_BUTTON_STYLE}>+ 添加 server</button>
+        </div>
+        <details className="mt-3 text-[11px]" style={{ color: 'var(--text-light)' }}>
+          <summary>查看规范化配置</summary>
+          <pre className="mt-2 overflow-auto rounded-lg p-2" style={{ background: 'var(--surface-muted)' }}>{JSON.stringify(configs.map((server) => ({ ...server, envEntries: server.envEntries.map((entry) => ({ key: entry.key, value: entry.value ? '••••••' : entry.hasStoredValue ? '••••••' : '' })) })), null, 2)}</pre>
+        </details>
         <div className="mt-3 flex flex-wrap items-center gap-2">
           <button
             type="button"

@@ -498,14 +498,24 @@ export async function streamChatAsResponses(input: {
   maxEvents?: number
   maxItemBytes?: number
   eventIdleMs?: number
-  postTerminalDrainMs?: number
   admitToolResponse?: (calls: readonly Readonly<{
     codexCallId: string
     toolName: string
     argsDigest: string
   }>[]) => Promise<void>
   recordCompleted?: (evidence: CodexModelGatewayResponseEvidence) => Promise<void>
+  recordFailed?: (observation: {
+    code: string
+    stage: 'stream-before-item' | 'stream-after-item' | 'terminal-validation'
+    responseIdentitySeen: boolean
+    partialAssistantItemSeen: boolean
+    toolCallItemSeen: boolean
+    elapsedMs: number
+    eventCount: number
+    wireByteCount: number
+  }) => void
 }): Promise<void> {
+  const startedAtMs = Date.now()
   const decoder = new TextDecoder('utf-8', { fatal: true })
   const reader = input.body.getReader()
   let buffer = ''
@@ -530,9 +540,7 @@ export async function streamChatAsResponses(input: {
   const maxEvents = input.maxEvents || 4_096
   const maxItemBytes = input.maxItemBytes || 2 * 1024 * 1024
   const eventIdleMs = input.eventIdleMs || 120_000
-  const postTerminalDrainMs = input.postTerminalDrainMs || 1_000
   let lastProgressAt = Date.now()
-  let terminalAt: number | null = null
   let sawExpectedModel = false
   const preSemanticState = createCodexChatPreSemanticState()
   const tools = new Map<number, ToolState>()
@@ -543,21 +551,32 @@ export async function streamChatAsResponses(input: {
     response: { id: responseId, model: input.snapshot.model, status: 'in_progress', output: [] },
   }))
 
+  let failureRecorded = false
   const fail = (code: string, details?: JsonObject): false => {
+    if (!failureRecorded) {
+      failureRecorded = true
+      input.recordFailed?.({
+        code,
+        stage: sawDone
+          ? 'terminal-validation'
+          : messageStarted || tools.size > 0 ? 'stream-after-item' : 'stream-before-item',
+        responseIdentitySeen: true,
+        partialAssistantItemSeen: messageStarted,
+        toolCallItemSeen: tools.size > 0,
+        elapsedMs: Math.max(0, Date.now() - startedAtMs),
+        eventCount: structuralEvents,
+        wireByteCount: bytes,
+      })
+    }
     input.write(responseFailed(responseId, input.snapshot.model, input.credential, code, details))
     input.abort()
     return false
   }
 
   const readNext = async (): Promise<ReadableStreamReadResult<Uint8Array>> => {
-    const deadline = terminalAt === null
-      ? lastProgressAt + eventIdleMs
-      : terminalAt + postTerminalDrainMs
-    const remaining = deadline - Date.now()
+    const remaining = lastProgressAt + eventIdleMs - Date.now()
     if (remaining <= 0) {
-      throw new CodexModelGatewayChatError(
-        terminalAt === null ? 'gateway_chat_event_idle_timeout' : 'gateway_chat_post_terminal_timeout',
-      )
+      throw new CodexModelGatewayChatError('gateway_chat_event_idle_timeout')
     }
     let timeout: ReturnType<typeof setTimeout> | null = null
     try {
@@ -565,7 +584,7 @@ export async function streamChatAsResponses(input: {
         reader.read(),
         new Promise<never>((_resolve, reject) => {
           timeout = setTimeout(() => reject(new CodexModelGatewayChatError(
-            terminalAt === null ? 'gateway_chat_event_idle_timeout' : 'gateway_chat_post_terminal_timeout',
+            'gateway_chat_event_idle_timeout',
           )), remaining)
         }),
       ])
@@ -639,7 +658,6 @@ export async function streamChatAsResponses(input: {
             throw new CodexModelGatewayChatError('gateway_chat_event_limit_exceeded')
           }
           sawDone = true
-          terminalAt = Date.now()
           continue
         }
         if (sawDone) return void fail('gateway_chat_event_after_done')
@@ -845,6 +863,10 @@ export async function streamChatAsResponses(input: {
           }
           if (choice.finish_reason !== undefined && choice.finish_reason !== null) choiceFinished = true
         }
+      }
+      if (sawDone) {
+        await reader.cancel().catch(() => undefined)
+        break
       }
     }
   } catch (error) {

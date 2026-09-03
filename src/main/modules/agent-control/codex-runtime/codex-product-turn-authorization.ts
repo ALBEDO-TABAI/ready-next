@@ -15,7 +15,6 @@ import {
   type RequestEnvelope,
   type RequestEnvelopeResource,
 } from '../contracts/request-envelope'
-import type { IntentClassification } from '../intent-classifier'
 import { composeCodexTurnToolSnapshot } from './codex-tool-surface-composition'
 import { isCodexFolderTagForgeAlias } from './codex-folder-tag-forge-alias'
 import {
@@ -27,6 +26,7 @@ import { createCodexProfileRouteSnapshot } from './codex-profile-admission'
 import { sha256 } from './codex-product-surface-ingress'
 import { CodexToolBridgeError } from './codex-tool-bridge'
 import type { ReadyToolTurnSnapshot } from './codex-tool-surface'
+import { buildReadyTurnToolAuthorization } from './codex-tool-surface'
 import {
   type PreparedCodexExternalReadSlice,
 } from './codex-external-read-slice'
@@ -49,6 +49,7 @@ export function buildCodexProductRequestEnvelope(
   trustedEnvironment: import('../contracts/request-envelope').TrustedRequestEnvironment = {},
   trustedResources: readonly RequestEnvelopeResource[] = [],
   currentDocumentCanWrite = false,
+  currentDocumentCanRead = true,
 ): RequestEnvelope {
   const envelope = buildRequestEnvelope({
     userText: request.userMessage.content,
@@ -67,7 +68,7 @@ export function buildCodexProductRequestEnvelope(
     .filter((resource) => resource.kind === 'folder_reference' && resource.canRead && resource.path)
     .map((resource) => resource.path as string)
   if (workspaceRoots.length > 0) envelope.environmentHints.workspaceRoots = workspaceRoots
-  if (request.currentDocumentAnchor) {
+  if (request.currentDocumentAnchor && currentDocumentCanRead) {
     const anchor = request.currentDocumentAnchor
     envelope.resources.push({
       id: anchor.logicalResourceId,
@@ -87,7 +88,24 @@ export function buildCodexProductRequestEnvelope(
   return envelope
 }
 
+export function buildCodexRetryAuthorizationRequest(
+  request: SendScopedRequest,
+  taskRootInput: readonly CodexUserInput[],
+): SendScopedRequest {
+  if (!taskRootInput.every((item) => item.type === 'text')) {
+    throw new Error('codex_explicit_retry_task_root_requires_restatement')
+  }
+  const content = taskRootInput.map((item) => item.text).join('\n')
+  return {
+    ...request,
+    message: content,
+    userMessage: { ...request.userMessage, content },
+    explicitRetry: undefined,
+  }
+}
+
 export function resolveCodexProductTurnAuthorization(input: {
+  mode: 'observe' | 'commit'
   host: Pick<CodexRuntimeHostPort, 'getScope' | 'resolveSkillAuthorizationForTurn'>
   request: SendScopedRequest
   scopeId: string
@@ -95,6 +113,7 @@ export function resolveCodexProductTurnAuthorization(input: {
   trustedEnvironment?: import('../contracts/request-envelope').TrustedRequestEnvironment
   trustedResources?: readonly RequestEnvelopeResource[]
   currentDocumentCanWrite?: boolean
+  currentDocumentCanRead?: boolean
 }): { requestEnvelope: RequestEnvelope; authorization: SkillToolAuthorization } {
   const persistedScope = input.host.getScope(input.scopeId)
   if (!persistedScope) throw new Error('codex_conversation_scope_not_found')
@@ -107,6 +126,7 @@ export function resolveCodexProductTurnAuthorization(input: {
     input.trustedEnvironment,
     input.trustedResources,
     input.currentDocumentCanWrite,
+    input.currentDocumentCanRead,
   )
   let authorization = input.externalReadSlice?.kind === 'lark_cli_read'
     ? buildSelectedSkillToolAuthorization({
@@ -117,6 +137,7 @@ export function resolveCodexProductTurnAuthorization(input: {
         reason: 'codex_external_read_slice',
       })
     : input.host.resolveSkillAuthorizationForTurn({
+        mode: input.mode,
         message: toRunMessage(input.request),
         sessionId: input.scopeId,
         messageVisibilityEpoch: persistedScope.messageVisibilityEpoch,
@@ -148,6 +169,7 @@ export function resolveCodexProductTurnAuthorization(input: {
       ],
     }
     authorization = input.host.resolveSkillAuthorizationForTurn({
+      mode: input.mode,
       message: toRunMessage(input.request),
       sessionId: input.scopeId,
       messageVisibilityEpoch: persistedScope.messageVisibilityEpoch,
@@ -155,6 +177,42 @@ export function resolveCodexProductTurnAuthorization(input: {
     })
   }
   return { requestEnvelope, authorization }
+}
+
+export function resolveCodexRetryAuthorizationCeiling(input: {
+  source: PreparedCodexProductRun
+  current: ReadyToolTurnSnapshot
+  currentSkillAuthorization: SkillToolAuthorization
+}):
+  | { ok: true; snapshot: ReadyToolTurnSnapshot }
+  | { ok: false; code: 'source_skill_requires_restatement' | 'current_skill_requires_restatement' | 'tool_surface_requires_restatement' } {
+  if (input.source.readyTurnToolAuthorization.skillAuthorization.mode !== 'none') {
+    return { ok: false, code: 'source_skill_requires_restatement' }
+  }
+  if (input.currentSkillAuthorization.mode !== 'none') {
+    return { ok: false, code: 'current_skill_requires_restatement' }
+  }
+  if (input.current.readyToolSurface.surfaceSnapshotDigest
+      !== input.source.readyToolSurface.surfaceSnapshotDigest
+    || input.current.readyToolSurface.toolSurfaceDigest
+      !== input.source.readyToolSurface.toolSurfaceDigest) {
+    return { ok: false, code: 'tool_surface_requires_restatement' }
+  }
+  const sourceAllowed = new Set(input.source.readyTurnToolAuthorization.allowedToolNames)
+  return {
+    ok: true,
+    snapshot: {
+      ...input.current,
+      readyTurnToolAuthorization: buildReadyTurnToolAuthorization({
+        authorizationId: input.current.readyTurnToolAuthorization.authorizationId,
+        authorization: input.currentSkillAuthorization,
+        toolSurface: input.current.readyToolSurface,
+        allowedToolNames: input.current.readyTurnToolAuthorization.allowedToolNames.filter(
+          (toolName) => sourceAllowed.has(toolName),
+        ),
+      }),
+    },
+  }
 }
 
 export function readCodexPreparedActionAuthorizationEnvelope(
@@ -172,7 +230,6 @@ export function readCodexPreparedActionAuthorizationEnvelope(
     browserPageRef?: NonNullable<import('../contracts/request-envelope').TrustedRequestEnvironment['browserPageRef']>
   }
   outputContract?: PreparedCodexProductRun['outputContract']
-  retryArtifactSources?: import('./codex-product-run-preparer').CodexRetryArtifactSource[]
 } {
   const authorities = product.prepared.resourceAuthorities ?? []
   const browserPageRef = product.prepared.browserPageRef
@@ -182,9 +239,6 @@ export function readCodexPreparedActionAuthorizationEnvelope(
     ),
     ...(product.prepared.outputContract
       ? { outputContract: product.prepared.outputContract }
-      : {}),
-    ...(product.prepared.ingress.attemptKind === 'explicit_retry'
-      ? { retryArtifactSources: product.prepared.ingress.artifactSources ?? [] }
       : {}),
     ...(authorities.length > 0 || browserPageRef
       ? {
@@ -257,6 +311,23 @@ export function hasExplicitCurrentDocumentWriteIntent(text: string): boolean {
     return false
   }
   return /(?:修改|编辑|改写|重写|润色|替换|删除|删掉|移除|插入|追加|补充|更新|调整|排版|格式化|保存|写入|写到|做成|制作|生成|修复|修正)/.test(normalized)
+}
+
+export function hasExplicitCurrentDocumentAccessExclusion(text: string): boolean {
+  const normalized = String(text || '').trim()
+  if (!normalized) return false
+  const chinese = /(?:不|不要|无需|不必|禁止|别)(?:再)?(?:查看|读取|阅读|打开|使用|参考|检索|搜索|访问|分析|总结|检查|审阅)(?:任何|所有|全部)?的?(?:本地|当前|已有|现有)的?(?:文档|文件|资料)/
+  const english = /\b(?:do\s+not|don't|never)\s+(?:read|inspect|open|use|reference|search|access|analy[sz]e|summari[sz]e|review)\s+(?:any\s+|the\s+)?(?:local|current|existing)\s+(?:document|file|material)s?\b/i
+  return chinese.test(normalized) || english.test(normalized)
+}
+
+export function hasExplicitCurrentDocumentAccessIntent(text: string): boolean {
+  const normalized = String(text || '').trim()
+  if (!normalized || hasExplicitCurrentDocumentAccessExclusion(normalized)) return false
+  const chineseReference = /(?:当前|现在打开的?|正在(?:查看|阅读|编辑)的?|眼前的?|这(?:个|份|篇)?)(?:文档|文件|资料|笔记)/
+  const chineseAction = /(?:总结|概括|分析|检查|审阅|阅读|读取|查看|修改|编辑|改写|重写|润色|替换|删除|插入|追加|补充|更新|调整|排版|格式化|保存).{0,12}(?:文档|文件|资料|笔记)/
+  const english = /\b(?:(?:current|open|opened|this)\s+(?:document|file|note)|(?:summari[sz]e|analy[sz]e|review|read|inspect|edit|rewrite|revise|format|save)\s+(?:the\s+|this\s+)?(?:document|file|note))\b/i
+  return chineseReference.test(normalized) || chineseAction.test(normalized) || english.test(normalized)
 }
 
 export function buildExternalReadToolSnapshot(input: {

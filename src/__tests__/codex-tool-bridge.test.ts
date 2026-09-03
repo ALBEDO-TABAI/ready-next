@@ -124,7 +124,16 @@ function binding(
     codexThreadId: 'thread-1',
     codexTurnId: 'turn-1',
     turnContractDigest: 'turn-contract-1',
-    productBudgetSeed: { maxIterations: 8, maxToolCalls: 4, maxParallelToolGroups: 1 },
+    productBudgetSeed: {
+      maxIterations: 8,
+      maxToolCalls: 4,
+      maxParallelToolGroups: 1,
+      lanes: {
+        ordinary: { maxIterations: 7, maxToolCalls: 4, maxParallelToolGroups: 1 },
+        delivery: { maxIterations: 0, maxToolCalls: 0, maxParallelToolGroups: 0 },
+        final: { maxIterations: 1 },
+      },
+    },
     toolSurface,
     authorization: buildReadyBoundTurnToolAuthorization({
       authorization,
@@ -658,6 +667,85 @@ test('production bridge resolves the current selected-skill wire schema before b
   }))
   assert.equal(result.success, false)
   assert.ok(persistence.call)
+})
+
+test('frozen host artifact delivery primitives remain executable without selecting a skill', () => {
+  const candidateAuthorization = buildExplicitNoSkillAuthorization('no_skill_signal', {
+    candidateSkillPrimitives: {
+      skillId: 'lark-cli',
+      primitives: ['skill_ask_user', 'skill_read_artifact', 'skill_run_shell'],
+    },
+  })
+  for (const toolName of [
+    'skill_write_artifact',
+    'skill_read_artifact',
+    'skill_export_artifact',
+  ]) {
+    const frozenDefinition = defaultToolRegistry.getToolDefinition(toolName)
+    assert.ok(frozenDefinition)
+    const executionBinding = binding(
+      [toolName],
+      undefined,
+      frozenDefinition,
+      candidateAuthorization,
+    )
+    const frozenEntry = executionBinding.toolSurface.entries[0]
+    assert.ok(frozenEntry)
+    const args = toolName === 'skill_write_artifact'
+      ? { relativePath: 'artifact.md', content: 'artifact' }
+      : { relativePath: 'artifact.md' }
+    assert.doesNotThrow(() => validateCodexFrozenToolExecution(
+      {
+        binding: executionBinding,
+        toolName,
+        args,
+        frozenEntry,
+      },
+      defaultToolRegistry,
+    ))
+  }
+})
+
+test('candidate skill_ask_user remains executable for a follow-up question', () => {
+  const sessionId = 'alias-ask-user'
+  const candidateAuthorization = buildExplicitNoSkillAuthorization('no_skill_signal', {
+    candidateSkillPrimitives: {
+      skillId: 'lark-cli',
+      primitives: ['skill_ask_user', 'skill_read_artifact', 'skill_run_shell'],
+    },
+  })
+  const currentDefinition = defaultToolRegistry.getToolDefinitionsForGroup(
+    'skills',
+    sessionId,
+    candidateAuthorization,
+    'scope-1',
+  ).find((definition) => definition.name === 'skill_ask_user')
+  assert.ok(currentDefinition)
+  const frozenDefinition = { ...currentDefinition, codexExecutionSafe: true }
+  const executionBinding = binding(
+    ['skill_ask_user'],
+    undefined,
+    frozenDefinition,
+    candidateAuthorization,
+  )
+  const frozenEntry = executionBinding.toolSurface.entries[0]
+  assert.ok(frozenEntry)
+
+  assert.doesNotThrow(() => validateCodexFrozenToolExecution(
+    {
+      binding: executionBinding,
+      toolName: 'skill_ask_user',
+      args: {
+        question: '你想查广州花都哪一天或哪个具体时段的降雨概率？',
+        placeholder: '例如：8月22日下午、这周六 8:00–18:00',
+      },
+      frozenEntry,
+    },
+    {
+      getToolDefinitionForExecution: () => frozenDefinition,
+      getToolDefinitionsForGroup: () => [frozenDefinition],
+    },
+  ))
 })
 
 test('current skill schema drift rejects old admitted arguments before bind or effect', async () => {
@@ -1290,6 +1378,33 @@ test('proven-absent, indeterminate, and timeout branches are typed and do not re
     assert.equal(response.success, false)
     assert.match(JSON.stringify(response), /confirmation_expired/)
     assert.equal(f.receipts.records.size, 1)
+  })
+  await t.test('a tool can pause its effect deadline for review and resume for the confirmed write', async () => {
+    const phases: string[] = []
+    const f = fixture({
+      timeoutMs: 8,
+      executeControlsEffectLifecycle: true,
+      executeWithContext: async (context) => {
+        context.onToolEffectStart?.()
+        phases.push('initial-effect')
+        await new Promise((resolve) => setTimeout(resolve, 2))
+        context.onToolEffectEnd?.()
+        phases.push('review-wait')
+        await new Promise((resolve) => setTimeout(resolve, 20))
+        context.onToolEffectStart?.()
+        phases.push('confirmed-effect')
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 2))
+          return createToolExecutionOutput('reviewed write complete')
+        } finally {
+          context.onToolEffectEnd?.()
+        }
+      },
+    })
+    const response = await f.bridge.execute(request())
+    assert.equal(response.success, true)
+    assert.deepEqual(phases, ['initial-effect', 'review-wait', 'confirmed-effect'])
+    assert.match(JSON.stringify(response), /reviewed write complete/)
   })
   await t.test('connection close during confirmation wait aborts before any tool effect', async () => {
     const connection = new AbortController()

@@ -57,8 +57,6 @@ export interface ChildLivenessProvider {
   hasActiveChildRunForScope(scopeId: string): boolean
 }
 
-const DEFAULT_MAIN_RUN_NO_PROGRESS_TIMEOUT_MS = 15 * 60 * 1000
-
 interface ActiveRunLiveness {
   agent: string
   sessionId?: string
@@ -66,12 +64,10 @@ interface ActiveRunLiveness {
   lastProgressAt: number
   timer: unknown | null
   /**
-   * Per-run no-progress timeout (B step 3). Defaults to the global
-   * mainRunNoProgressTimeoutMs (long) — only an EXPLICIT, proven-quick caller
-   * passes a shorter value. We never infer a short timeout from a coarse
-   * task_type, so a long collection is never false-killed.
+   * Only explicit, proven-quick callers set a no-progress timeout. Normal user
+   * runs are Runtime-owned and have no elapsed-time cancellation.
    */
-  noProgressTimeoutMs: number
+  noProgressTimeoutMs: number | null
   defaultNoProgressTimeout: boolean
 }
 
@@ -142,7 +138,7 @@ export class ReadyAgentOrchestrator extends EventEmitter {
   private readonly runCleanupRegistry = new RunCleanupRegistry()
   private readonly activeRunIds = new Map<string, string>()
   private readonly activeRunLiveness = new Map<string, ActiveRunLiveness>()
-  private readonly mainRunNoProgressTimeoutMs: number
+  private readonly mainRunNoProgressTimeoutMs: number | null
   private readonly nowMs: () => number
   private readonly scheduleNoProgressCheck: (callback: () => void, delayMs: number) => unknown
   private readonly clearNoProgressCheck: (handle: unknown) => void
@@ -152,7 +148,7 @@ export class ReadyAgentOrchestrator extends EventEmitter {
     super()
     this.mainRunNoProgressTimeoutMs = typeof options?.mainRunNoProgressTimeoutMs === 'number' && Number.isFinite(options.mainRunNoProgressTimeoutMs) && options.mainRunNoProgressTimeoutMs > 0
       ? options.mainRunNoProgressTimeoutMs
-      : DEFAULT_MAIN_RUN_NO_PROGRESS_TIMEOUT_MS
+      : null
     this.nowMs = options?.nowMs || (() => Date.now())
     this.scheduleNoProgressCheck = options?.scheduleNoProgressCheck || ((callback, delayMs) => setTimeout(callback, delayMs))
     this.clearNoProgressCheck = options?.clearNoProgressCheck || ((handle) => {
@@ -276,12 +272,14 @@ export class ReadyAgentOrchestrator extends EventEmitter {
     const taskKey = this.toTaskKey(agent, sessionId)
     this.clearActiveRunIfMatches(taskKey)
     this.activeRunIds.set(taskKey, requestId)
-    // Default long; an explicit value may only SHORTEN (proven-quick callers).
-    // A finite positive value is clamped to ≤ the global default so a per-run
-    // value can never EXTEND the guard; anything else falls back to the global.
+    // Production has no elapsed-time guard. A finite positive per-run value is
+    // allowed only for a caller that explicitly owns a proven-quick operation;
+    // when a global test/host ceiling exists it may only shorten that ceiling.
     const resolvedTimeoutMs = typeof noProgressTimeoutMs === 'number'
       && Number.isFinite(noProgressTimeoutMs) && noProgressTimeoutMs > 0
-      ? Math.min(noProgressTimeoutMs, this.mainRunNoProgressTimeoutMs)
+      ? this.mainRunNoProgressTimeoutMs === null
+        ? noProgressTimeoutMs
+        : Math.min(noProgressTimeoutMs, this.mainRunNoProgressTimeoutMs)
       : this.mainRunNoProgressTimeoutMs
     this.activeRunLiveness.set(taskKey, {
       agent,
@@ -290,7 +288,8 @@ export class ReadyAgentOrchestrator extends EventEmitter {
       lastProgressAt: this.nowMs(),
       timer: null,
       noProgressTimeoutMs: resolvedTimeoutMs,
-      defaultNoProgressTimeout: resolvedTimeoutMs === this.mainRunNoProgressTimeoutMs,
+      defaultNoProgressTimeout: this.mainRunNoProgressTimeoutMs !== null
+        && resolvedTimeoutMs === this.mainRunNoProgressTimeoutMs,
     })
     this.scheduleRunNoProgressGuard(taskKey, requestId)
   }
@@ -363,6 +362,7 @@ export class ReadyAgentOrchestrator extends EventEmitter {
       this.clearNoProgressCheck(liveness.timer)
       liveness.timer = null
     }
+    if (liveness.noProgressTimeoutMs === null) return
     const elapsedMs = Math.max(0, this.nowMs() - liveness.lastProgressAt)
     const delayMs = Math.max(0, liveness.noProgressTimeoutMs - elapsedMs)
     const timer = this.scheduleNoProgressCheck(() => {
@@ -379,6 +379,7 @@ export class ReadyAgentOrchestrator extends EventEmitter {
     const liveness = this.activeRunLiveness.get(taskKey)
     if (!liveness || liveness.requestId !== requestId) return
     if (this.activeRunIds.get(taskKey) !== requestId) return
+    if (liveness.noProgressTimeoutMs === null) return
     const elapsedMs = Math.max(0, this.nowMs() - liveness.lastProgressAt)
     if (elapsedMs < liveness.noProgressTimeoutMs) {
       this.scheduleRunNoProgressGuard(taskKey, requestId)

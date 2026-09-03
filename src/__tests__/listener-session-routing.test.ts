@@ -75,7 +75,7 @@ interface SeedOptions {
 
 function seedStore(opts: SeedOptions = {}) {
   useAgent.setState({
-    agents: [{ name: 'butler', displayName: '管家', avatar: '', status: 'idle', selected: true }],
+    agents: [{ name: 'butler', displayName: '管家', avatar: '', status: 'idle' }],
     messages: [],
     currentAgent: 'butler',
     inputValue: '',

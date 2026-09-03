@@ -7,6 +7,7 @@ import type {
 } from '../contracts/run-contracts'
 import type { CodexDynamicToolCallItem } from './codex-native-runtime'
 import type { CodexTurnActivityEvent } from './codex-turn-collector'
+import type { ContextUsageSnapshot } from '../../../../shared/context-usage-types'
 
 type CodexTaskActivityStore = {
   get(taskId: string): TaskProjectionRecord | null
@@ -18,6 +19,7 @@ export type CodexTaskActivityPatch = {
   taskSummary?: string
   toolEvent?: ScopeRunTraceItem
   activityNarration?: ScopeRunActivityNarration
+  contextUsage?: ContextUsageSnapshot
   timestamp: string
 }
 
@@ -154,6 +156,15 @@ export function createCodexTaskActivityProjector(input: {
             text: taskSummary,
             status: event.stage,
           },
+          timestamp: now(),
+        })
+        return
+      }
+
+      if (event.kind === 'context_usage') {
+        input.publish({
+          phase: activityPhase,
+          contextUsage: event.contextUsage,
           timestamp: now(),
         })
         return

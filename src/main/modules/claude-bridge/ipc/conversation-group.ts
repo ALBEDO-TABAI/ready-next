@@ -37,7 +37,7 @@ import {
   type LifecycleRequest,
   type ProductTurnReceipt,
 } from '../../../../shared/ipc-contracts/agent-runtime'
-import type { LifecycleOperationProjection } from '../../../../shared/ipc-contracts/agent-lifecycle-snapshot'
+import type { LifecycleOperationProjectionV2 } from '../../../../shared/ipc-contracts/agent-lifecycle-snapshot'
 import {
   parseActionAuthorizationMode,
   type ActionAuthorizationMode,
@@ -124,9 +124,21 @@ export interface ConversationGroupDeps {
     statuses?: Array<ScopeRunEventPayload['phase']>
     limit?: number
   }): ScopeRunSummary[]
-  readCodexLifecycleSnapshot(request: LifecycleRequest): LifecycleOperationProjection
-  readProductTurnPresentation(readyRunId: string): ProductTurnReceipt
-  readProductTurnPresentations(readyRunIds: readonly string[]): ProductTurnReceipt[]
+  readCodexLifecycleSnapshot(request: LifecycleRequest): LifecycleOperationProjectionV2
+  readCodexHeadActionProjection(
+    request: LifecycleRequest,
+  ): import('../../../../shared/ipc-contracts/agent-runtime').CodexHeadActionProjection
+  readCodexActionSurface(
+    request: LifecycleRequest,
+  ): import('../../../../shared/ipc-contracts/agent-runtime').CodexActionSurfaceEnvelope
+  readProductTurnPresentation(
+    readyRunId: string,
+    requestedWorkbenchMode: 'browser' | 'document' | 'rss' | 'calendar',
+  ): Promise<ProductTurnReceipt>
+  readProductTurnPresentations(
+    readyRunIds: readonly string[],
+    requestedWorkbenchMode: 'browser' | 'document' | 'rss' | 'calendar',
+  ): Promise<ProductTurnReceipt[]>
   /**
    * Bound `runtime.getConversationScopeMessages` — sync, returns the full
    * chat_messages stream for the scope.
@@ -170,6 +182,8 @@ const CHANNELS = [
   'agent:listConversationScopes',
   'agent:listScopeRuns',
   'agent:readCodexLifecycleSnapshot',
+  'agent:readCodexHeadActionProjection',
+  'agent:readCodexActionSurface',
   'agent:readProductTurnPresentation',
   'agent:readProductTurnPresentations',
   'agent:getConversationScopeMessages',
@@ -234,19 +248,54 @@ export const conversationGroup: IpcChannelGroup<ConversationGroupDeps> = {
       }
     })
 
-    ipcMain.handle('agent:readProductTurnPresentation', (_, payload: unknown): IPCResponse => {
+    ipcMain.handle('agent:readCodexHeadActionProjection', (_, payload: unknown): IPCResponse => {
       try {
-        const readyRunId = typeof payload === 'object' && payload
-          ? String((payload as { readyRunId?: unknown }).readyRunId || '').trim()
-          : ''
-        if (!readyRunId) throw new Error('product_turn_run_id_invalid')
-        return { success: true, data: deps.readProductTurnPresentation(readyRunId) }
+        return {
+          success: true,
+          data: deps.readCodexHeadActionProjection(parseLifecycleRequest(payload)),
+        }
       } catch (error) {
         return { success: false, error: error instanceof Error ? error.message : String(error) }
       }
     })
 
-    ipcMain.handle('agent:readProductTurnPresentations', (_, payload: unknown): IPCResponse => {
+    ipcMain.handle('agent:readCodexActionSurface', (_, payload: unknown): IPCResponse => {
+      try {
+        return {
+          success: true,
+          data: deps.readCodexActionSurface(parseLifecycleRequest(payload)),
+        }
+      } catch (error) {
+        return { success: false, error: error instanceof Error ? error.message : String(error) }
+      }
+    })
+
+    ipcMain.handle('agent:readProductTurnPresentation', async (_, payload: unknown): Promise<IPCResponse> => {
+      try {
+        const record = typeof payload === 'object' && payload
+          ? payload as { readyRunId?: unknown; requestedWorkbenchMode?: unknown }
+          : null
+        const readyRunId = record
+          ? String(record.readyRunId || '').trim()
+          : ''
+        const requestedWorkbenchMode = String(record?.requestedWorkbenchMode || '')
+        if (!readyRunId) throw new Error('product_turn_run_id_invalid')
+        if (!['browser', 'document', 'rss', 'calendar'].includes(requestedWorkbenchMode)) {
+          throw new Error('product_turn_workbench_mode_invalid')
+        }
+        return {
+          success: true,
+          data: await deps.readProductTurnPresentation(
+            readyRunId,
+            requestedWorkbenchMode as 'browser' | 'document' | 'rss' | 'calendar',
+          ),
+        }
+      } catch (error) {
+        return { success: false, error: error instanceof Error ? error.message : String(error) }
+      }
+    })
+
+    ipcMain.handle('agent:readProductTurnPresentations', async (_, payload: unknown): Promise<IPCResponse> => {
       try {
         const readyRunIds = typeof payload === 'object' && payload
           && Array.isArray((payload as { readyRunIds?: unknown }).readyRunIds)
@@ -254,7 +303,19 @@ export const conversationGroup: IpcChannelGroup<ConversationGroupDeps> = {
             .map((value) => String(value || '').trim())
             .filter(Boolean)
           : []
-        return { success: true, data: deps.readProductTurnPresentations(readyRunIds) }
+        const requestedWorkbenchMode = typeof payload === 'object' && payload
+          ? String((payload as { requestedWorkbenchMode?: unknown }).requestedWorkbenchMode || '')
+          : ''
+        if (!['browser', 'document', 'rss', 'calendar'].includes(requestedWorkbenchMode)) {
+          throw new Error('product_turn_workbench_mode_invalid')
+        }
+        return {
+          success: true,
+          data: await deps.readProductTurnPresentations(
+            readyRunIds,
+            requestedWorkbenchMode as 'browser' | 'document' | 'rss' | 'calendar',
+          ),
+        }
       } catch (error) {
         return { success: false, error: error instanceof Error ? error.message : String(error) }
       }

@@ -3,7 +3,9 @@ import test from 'node:test'
 
 import type { SendScopedResponse } from '../shared/ipc-contracts/agent-runtime'
 import type { ConversationScope } from '../renderer/modules/agent/types'
+import { createEmptyScopeRunState } from '../renderer/modules/agent/scopeRunState'
 import { makeEmptySessionSlice } from '../renderer/stores/agent-store-helpers'
+import { withReceiptV3Fields } from './product-turn-action-projection-fixture'
 import {
   applyIngressAdmitted,
   useAgent,
@@ -116,6 +118,22 @@ async function waitFor<T>(read: () => T | null): Promise<T> {
   throw new Error('condition_not_observed')
 }
 
+function failureCanonical(runId: string, scopeId = scope.id) {
+  const canonicalMessage = {
+    id: `assistant:task:${runId}:terminal`,
+    conversationId: scopeId,
+    role: 'assistant' as const,
+    content: '本轮未能完成，已有结果已保留。',
+    timestamp: '2026-08-07T00:00:02.000Z',
+    meta: { runId },
+  }
+  return {
+    responseText: canonicalMessage.content,
+    canonicalMessage,
+    canonicalMessageDigest: `canonical-${runId}`,
+  }
+}
+
 test('renderer keeps composer and transcript untouched until durable admission', async () => {
   seedStore('请处理这条消息', 1)
   let capturedPayload: any = null
@@ -170,10 +188,100 @@ test('renderer keeps composer and transcript untouched until durable admission',
       error: 'provider_failed',
       errorKind: 'blocked_external',
       productOutcomeDigest: 'product-outcome-digest',
+      ...failureCanonical(payload.requestId, payload.scopeId),
     })
     const result = await sendPromise
     assert.equal(result.disposition, 'terminal_failure_after_persistence')
     assert.equal(useAgent.getState().isStreaming, false)
+    assert.deepEqual(
+      useAgent.getState().messages.filter((message) => message.type === 'agent').map((message) => message.content),
+      ['本轮未能完成，已有结果已保留。'],
+    )
+  } finally {
+    electron.restore()
+  }
+})
+
+test('a newly admitted turn keeps the previous context meter until exact native usage arrives', async () => {
+  seedStore('继续', 1)
+  const contextUsage = {
+    usedInputTokens: 64_000,
+    windowTokens: 128_000,
+    ratio: 0.5,
+    windowSource: 'model' as const,
+    source: 'last_model_request' as const,
+    timestamp: '2026-08-07T00:00:00.000Z',
+  }
+  useAgent.setState((state) => {
+    const session = state.sessions['session-codex-renderer']
+    const scopeRun = {
+      ...createEmptyScopeRunState({
+        scopeId: scope.id,
+        agent: 'butler',
+        requestId: 'run-previous',
+      }),
+      phase: 'done' as const,
+      terminalReason: 'done',
+      startedAt: contextUsage.timestamp,
+      updatedAt: contextUsage.timestamp,
+      latestText: '上一轮',
+      contextUsage,
+    }
+    return {
+      scopeRunStates: { [scope.id]: scopeRun },
+      sessions: {
+        ...state.sessions,
+        'session-codex-renderer': {
+          ...session,
+          scopeRunStates: { [scope.id]: scopeRun },
+        },
+      },
+    }
+  })
+  let capturedPayload: any = null
+  let settle!: (result: SendScopedResponse) => void
+  const terminal = new Promise<SendScopedResponse>((resolve) => { settle = resolve })
+  const electron = installElectronApi(async (payload) => {
+    capturedPayload = payload
+    return terminal
+  })
+
+  try {
+    const sending = useAgent.getState().sendMessage('继续')
+    const payload = await waitFor(() => capturedPayload)
+    assert.equal(applyIngressAdmitted({
+      type: 'ingress_admitted',
+      requestId: payload.requestId,
+      scopeId: payload.scopeId,
+      originUserMessageId: payload.userMessage.id,
+      aliasGeneration: 2,
+      messageVisibilityEpoch: 0,
+      ingressAdmittedRevision: 2,
+      ingressAdmittedDigest: 'context-preservation-admission',
+      admittedAt: '2026-08-07T00:00:01.000Z',
+    }), true)
+
+    assert.deepEqual(useAgent.getState().scopeRunStates[scope.id]?.contextUsage, contextUsage)
+    settle({
+      success: false,
+      disposition: 'terminal_failure_after_persistence',
+      ownerRunId: payload.requestId,
+      aliasGeneration: 2,
+      shouldClearInput: true,
+      preserveInput: false,
+      retryableByUser: false,
+      persistence: {
+        scope: 'pre-existing',
+        message: 'persisted',
+        attachments: 'none',
+        inputAttachments: 'none',
+      },
+      error: 'provider_failed',
+      errorKind: 'blocked_external',
+      productOutcomeDigest: 'product-outcome-digest',
+      ...failureCanonical(payload.requestId, payload.scopeId),
+    })
+    await sending
   } finally {
     electron.restore()
   }
@@ -251,6 +359,7 @@ test('same-history generation rollover admits the pending message without erasin
       error: 'provider_failed',
       errorKind: 'blocked_external',
       productOutcomeDigest: 'same-history-rollover-terminal',
+      ...failureCanonical(payload.requestId, payload.scopeId),
     })
     await sending
   } finally {
@@ -458,6 +567,14 @@ test('terminal response reconciles durable admission when its push event was los
   let capturedPayload: any = null
   const electron = installElectronApi(async (payload) => {
     capturedPayload = payload
+    const canonicalMessage = {
+      id: 'assistant-lost-admission-event',
+      conversationId: scope.id,
+      role: 'assistant' as const,
+      content: '只发布一次',
+      timestamp: new Date(new Date(payload.userMessage.timestamp).getTime() + 1).toISOString(),
+      meta: { ownerRunId: payload.requestId },
+    }
     return {
       success: true,
       disposition: 'terminal_success',
@@ -473,15 +590,33 @@ test('terminal response reconciles durable admission when its push event was los
         inputAttachments: 'none',
       },
       responseText: '只发布一次',
-      canonicalMessage: {
-        id: 'assistant-lost-admission-event',
-        conversationId: scope.id,
-        role: 'assistant',
-        content: '只发布一次',
-        timestamp: new Date(new Date(payload.userMessage.timestamp).getTime() + 1).toISOString(),
-        meta: { ownerRunId: payload.requestId },
-      },
+      canonicalMessage,
       canonicalMessageDigest: 'lost-admission-event-canonical-digest',
+      productTurnReceipt: {
+        ...withReceiptV3Fields({ readyRunId: payload.requestId }),
+        readyRunId: payload.requestId,
+        readyTaskId: 'task-lost-admission-event',
+        readyScopeId: scope.id,
+        messageVisibilityEpoch: 0,
+        revision: 1,
+        terminal: 'done',
+        canonicalMessage,
+        canonicalMessageDigest: 'lost-admission-event-canonical-digest',
+        tools: [],
+        artifacts: [],
+        memory: null,
+        contextUsage: {
+          usedInputTokens: 6_400,
+          windowTokens: 128_000,
+          ratio: 0.05,
+          windowSource: 'model',
+          source: 'last_model_request',
+          timestamp: '2026-08-07T00:00:01.500Z',
+        },
+        failure: null,
+        publicationSealDigest: null,
+        presentationDigest: 'a'.repeat(64),
+      },
     }
   })
 
@@ -501,6 +636,7 @@ test('terminal response reconciles durable admission when its push event was los
     assert.equal(state.sessions['session-codex-renderer']?.aliasGeneration, 6)
     assert.equal(state.currentScope?.aliasGeneration, 6)
     assert.equal(state.scopes.find((candidate) => candidate.id === scope.id)?.aliasGeneration, 6)
+    assert.equal(state.scopeRunStates[scope.id]?.contextUsage?.usedInputTokens, 6_400)
   } finally {
     electron.restore()
   }
@@ -808,6 +944,7 @@ test('admission after a tab switch updates only the originating session', async 
       error: 'provider_failed',
       errorKind: 'blocked_external',
       productOutcomeDigest: 'switched-session-outcome-digest',
+      ...failureCanonical(payload.requestId, payload.scopeId),
     })
     await sendPromise
 

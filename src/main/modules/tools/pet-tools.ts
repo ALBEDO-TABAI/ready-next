@@ -1,5 +1,4 @@
 import type { PetStickyNoteInput } from '../../../shared/pet'
-import { getActivePetWindowManager } from '../pet/active-pet-window-manager'
 
 export {
   PET_TOOLS,
@@ -7,38 +6,31 @@ export {
   getPetOpenAITools,
 } from './pet-tool-defs'
 
-export async function executePetTool(toolName: string, args: Record<string, unknown>): Promise<string> {
-  const manager = getActivePetWindowManager()
-  if (!manager) {
-    return JSON.stringify({ success: false, error: 'Pet window manager is not available' })
-  }
+const PET_ACTIONS: Record<string, string> = {
+  pet_show_sticky_note: 'pet.showStickyNote',
+  pet_dismiss_sticky_note: 'pet.dismissStickyNote',
+  pet_clear_sticky_notes: 'pet.clearStickyNotes',
+}
 
-  switch (toolName) {
-    case 'pet_show_sticky_note': {
-      const noteInput = args as unknown as PetStickyNoteInput & { enablePet?: boolean }
-      if (noteInput.enablePet !== false) {
-        if (!manager.getSettings().enabled) {
-          manager.updateSettings({ enabled: true })
-        } else {
-          await manager.show()
-        }
-      }
-      const note = manager.pushStickyNote(noteInput)
-      return JSON.stringify({
-        success: true,
-        note,
-        message: '已贴到宠物便利贴',
-      })
-    }
-    case 'pet_dismiss_sticky_note': {
-      const dismissed = manager.dismissStickyNote(String(args.id || ''))
-      return JSON.stringify({ success: true, dismissed })
-    }
-    case 'pet_clear_sticky_notes': {
-      manager.clearStickyNotes()
-      return JSON.stringify({ success: true })
-    }
-    default:
-      return JSON.stringify({ success: false, error: `Unknown pet tool: ${toolName}` })
+export async function executePetTool(
+  toolName: string,
+  args: Record<string, unknown>,
+  context?: {
+    requestModuleToolAction?: (
+      action: string,
+      args: Record<string, unknown>,
+    ) => Promise<Record<string, unknown>>
+  },
+): Promise<string> {
+  const action = PET_ACTIONS[toolName]
+  if (!action) return JSON.stringify({ success: false, error: `Unknown pet tool: ${toolName}` })
+  if (!context?.requestModuleToolAction) {
+    return JSON.stringify({
+      success: false,
+      ok: false,
+      errorKind: 'product_action_bridge_missing',
+    })
   }
+  const payload = await context.requestModuleToolAction(action, args as PetStickyNoteInput & Record<string, unknown>)
+  return JSON.stringify({ success: payload.ok !== false, ...payload })
 }

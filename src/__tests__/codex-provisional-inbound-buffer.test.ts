@@ -76,6 +76,27 @@ function dynamicToolNotification(): CodexNativeNotification {
   }
 }
 
+function contextUsageNotification(turnId = 'turn-native-1'): CodexNativeNotification {
+  return {
+    method: 'thread/tokenUsage/updated',
+    params: {
+      threadId: 'thread-native-1',
+      turnId,
+      tokenUsage: {
+        total: {
+          totalTokens: 16, inputTokens: 12, cachedInputTokens: 0,
+          outputTokens: 4, reasoningOutputTokens: 0,
+        },
+        last: {
+          totalTokens: 16, inputTokens: 12, cachedInputTokens: 0,
+          outputTokens: 4, reasoningOutputTokens: 0,
+        },
+        modelContextWindow: 258_400,
+      },
+    },
+  }
+}
+
 function serverRequest() {
   return {
     connectionEpoch: 'epoch-1',
@@ -241,6 +262,47 @@ test('model reroute follows the exact provisional thread and turn binding', asyn
   assert.deepEqual(events, [
     'notification:item/started',
     'notification:model/rerouted',
+  ])
+})
+
+test('late context telemetry from a settled turn cannot claim the next provisional turn', async () => {
+  const { buffer, events } = harness()
+  buffer.registerProvisionalTurn({
+    bindingId: 'run-next', connectionEpoch: 'epoch-1', threadId: 'thread-native-1',
+    clientUserMessageId: 'ready-message-1', deadlineAtMs: 1_000,
+  })
+  const staleUsage = contextUsageNotification('turn-previous')
+  assert.equal(await buffer.routeNotification({
+    connectionEpoch: 'epoch-1', frame: staleUsage, notification: staleUsage,
+  }), 'buffered')
+  const user = userMessageNotification()
+  await buffer.routeNotification({ connectionEpoch: 'epoch-1', frame: user, notification: user })
+  assert.equal(await buffer.reconcileTurn({
+    bindingId: 'run-next', connectionEpoch: 'epoch-1',
+    threadId: 'thread-native-1', nativeTurnId: 'turn-native-1',
+  }), 'released')
+  assert.deepEqual(events, ['notification:item/started'])
+})
+
+test('context telemetry is buffered only after the provisional turn identity is known', async () => {
+  const { buffer, events } = harness()
+  buffer.registerProvisionalTurn({
+    bindingId: 'run-usage', connectionEpoch: 'epoch-1', threadId: 'thread-native-1',
+    clientUserMessageId: 'ready-message-1', deadlineAtMs: 1_000,
+  })
+  const user = userMessageNotification()
+  await buffer.routeNotification({ connectionEpoch: 'epoch-1', frame: user, notification: user })
+  const usage = contextUsageNotification()
+  assert.equal(await buffer.routeNotification({
+    connectionEpoch: 'epoch-1', frame: usage, notification: usage,
+  }), 'buffered')
+  assert.equal(await buffer.reconcileTurn({
+    bindingId: 'run-usage', connectionEpoch: 'epoch-1',
+    threadId: 'thread-native-1', nativeTurnId: 'turn-native-1',
+  }), 'released')
+  assert.deepEqual(events, [
+    'notification:item/started',
+    'notification:thread/tokenUsage/updated',
   ])
 })
 
@@ -682,7 +744,7 @@ test('failed quarantine keeps only a retryable identity until the exact close au
   assert.equal(internal.pendingQuarantines.size, 0)
 })
 
-test('non-retry terminal errors retire bound turns without retaining owner bodies', async () => {
+test('non-retry error keeps the bound turn until the required terminal arrives', async () => {
   const { buffer } = harness({ maxOwners: 4 })
   for (let index = 0; index < 10_000; index += 1) {
     const turnId = `turn-${index}`
@@ -712,6 +774,21 @@ test('non-retry terminal errors retire bound turns without retaining owner bodie
     }
     assert.equal(await buffer.routeNotification({
       connectionEpoch: 'epoch-1', frame: terminalError, notification: terminalError,
+    }), 'broadcast')
+    const terminal: CodexNativeNotification = {
+      method: 'turn/completed',
+      params: {
+        threadId: 'thread-native-1',
+        turn: {
+          id: turnId,
+          items: [],
+          status: 'failed',
+          error: { message: 'terminal host failure', additionalDetails: null },
+        },
+      },
+    }
+    assert.equal(await buffer.routeNotification({
+      connectionEpoch: 'epoch-1', frame: terminal, notification: terminal,
     }), 'broadcast')
   }
   const internals = buffer as unknown as {

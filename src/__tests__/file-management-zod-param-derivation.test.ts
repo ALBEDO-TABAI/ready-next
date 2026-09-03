@@ -56,7 +56,7 @@ test('derives file_locate params correctly', () => {
 
 test('derives file_read_excerpt params correctly', () => {
   const expected: SkillParamDefinition[] = [
-    { name: 'path', type: 'string', description: '文件绝对路径或索引内 path', required: true },
+    { name: 'path', type: 'string', description: '文件绝对路径、索引 path，或本轮冻结的 logicalResourceId / @[文件名] / 唯一文件名', required: true },
     {
       name: 'anchor',
       type: 'string',

@@ -6,8 +6,8 @@ import { CodexLiveStartRejectionResolver } from '../main/modules/agent-control/c
 const rootThread = {
   id: 'thread-1',
   sessionId: 'thread-1',
-  parentThreadId: null,
-  forkedFromId: null,
+  parentThreadId: null as string | null,
+  forkedFromId: null as string | null,
   cwd: '/tmp/thread-1',
   source: 'vscode' as const,
   threadSource: null,
@@ -41,12 +41,11 @@ function createResolver(input: {
     },
     repository: {
       readStartInboundIdentity(method) {
-        return method === 'thread/start'
-          ? { method, expectedCwd: '/tmp/thread-1' }
-          : { method, threadId: 'thread-1', clientUserMessageId: 'message-1' }
+        return method === 'turn/start'
+          ? { method, threadId: 'thread-1', clientUserMessageId: 'message-1' }
+          : { method, expectedCwd: '/tmp/thread-1' }
       },
     },
-    pinnedThreadSource: 'vscode',
     threadListLimit: 100,
     stableZeroReadCount: 2,
     waitBetweenZeroReads: async () => undefined,
@@ -55,16 +54,34 @@ function createResolver(input: {
   return { resolver, reads: () => reads }
 }
 
-test('typed rejection plus two same-connection zero reads proves start absent', async () => {
+for (const method of ['thread/start', 'thread/fork'] as const) {
+test(`typed rejection plus two same-connection zero reads proves ${method} absent`, async () => {
   const { resolver, reads } = createResolver({})
   const result = await resolver.resolveTypedRejection({
-    connectionEpoch: 'epoch-1', rpcId: 1, method: 'thread/start', bindingId: 'binding-1',
+    connectionEpoch: 'epoch-1', rpcId: 1, method, bindingId: 'binding-1',
     rpcError: { code: -32602, message: 'invalid params' }, responseDigest: 'response-digest',
   })
   assert.equal(result.resolution, 'proven_absent')
   assert.equal(reads(), 2)
   if (result.resolution === 'proven_absent') assert.equal(result.evidenceDigest.length, 64)
 })
+
+test(`a nonempty but contradictory thread list never proves ${method} absent`, async () => {
+  for (const patch of [
+    { cwd: '/private/tmp/thread-1' },
+    { parentThreadId: 'unexpected-parent' },
+    { forkedFromId: 'unexpected-source' },
+    { sessionId: 'different-session' },
+  ]) {
+    const { resolver, reads } = createResolver({ listed: [{ ...rootThread, ...patch }] })
+    assert.deepEqual(await resolver.resolveTypedRejection({
+      connectionEpoch: 'epoch-1', rpcId: 1, method, bindingId: 'binding-1',
+      rpcError: { code: -32603, message: 'internal error' }, responseDigest: 'response-digest',
+    }), { resolution: 'unknown' })
+    assert.equal(reads(), 1)
+  }
+})
+}
 
 test('untyped rejection, dead connection, or matching native identity remains unknown', async () => {
   const untyped = createResolver({})

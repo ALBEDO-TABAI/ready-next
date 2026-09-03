@@ -8,6 +8,8 @@ import type {
   CodexTurn,
 } from './codex-native-runtime'
 import { digestCanonicalJson } from './codex-model-gateway-contract'
+import { CodexTurnUsageAccumulator } from './codex-context-usage'
+import type { ContextUsageSnapshot } from '../../../../shared/context-usage-types'
 
 type CoreTurnCandidateBase = {
   readyTaskId: string
@@ -46,6 +48,7 @@ type CoreTurnCandidateBase = {
   budgetState: Record<string, unknown>
   contextState: Record<string, unknown>
   providerDiagnostics: Record<string, unknown>
+  contextUsage: ContextUsageSnapshot | null
   recoveryCheckpointRef: string | null
   browserContinuationRef: string | null
   browserProofRefs: string[]
@@ -99,7 +102,7 @@ export type CodexTurnCollectionContext = {
   scopeId: string
   codexThreadId: string
   startTurn: () => Promise<{ turn: CodexTurn }>
-  terminalTimeoutMs: number
+  terminalTimeoutMs: number | null
   actionReceiptRefs: string[]
   interactionState: string | null
   waitingFor: string | null
@@ -139,6 +142,11 @@ export type CodexTurnActivityEvent =
       atMs: number
       itemId: string
       text: string
+    }
+  | {
+      kind: 'context_usage'
+      atMs: number
+      contextUsage: ContextUsageSnapshot
     }
 
 export type CodexTurnReadbackContext = Pick<
@@ -248,6 +256,7 @@ export function createHostFailureCandidate(
       nativeHostFailureStage: failure.stage,
       nativeHostFailureCode: failure.code,
     },
+    contextUsage: null,
     recoveryCheckpointRef: context.recoveryCheckpointRef,
     browserContinuationRef: context.browserContinuationRef,
     browserProofRefs: [...context.browserProofRefs],
@@ -312,6 +321,7 @@ export class CodexTurnCollector {
     const itemStarts = new Map<string, CodexThreadItem>()
     const deltas = new Map<string, string[]>()
     const reasoningSummaryParts = new Map<string, Map<number, string>>()
+    const usageAccumulator = new CodexTurnUsageAccumulator()
     let expectedTurnId: string | null = null
     let terminal: CodexTurn | null = null
     let modelReroute: Extract<
@@ -325,6 +335,10 @@ export class CodexTurnCollector {
     const recoveredPromise = new Promise<CoreTurnCandidate>((resolve) => {
       resolveRecovered = resolve
     })
+    let resolveConnectionClosed: ((error: Error) => void) | null = null
+    const connectionClosedPromise = new Promise<Error>((resolve) => {
+      resolveConnectionClosed = resolve
+    })
     const recoveryWaiter = {
       readyTaskId: context.readyTaskId,
       scopeId: context.scopeId,
@@ -337,6 +351,7 @@ export class CodexTurnCollector {
     let resolveTimeout: ((value: 'timeout') => void) | null = null
     const timeoutPromise = new Promise<'timeout'>((resolve) => { resolveTimeout = resolve })
     const resetTerminalTimeout = (): void => {
+      if (context.terminalTimeoutMs === null) return
       if (timeoutSettled) return
       if (timeoutHandle) clearTimeout(timeoutHandle)
       timeoutHandle = setTimeout(() => {
@@ -374,18 +389,33 @@ export class CodexTurnCollector {
       if (turnId !== expectedTurnId) return
       resetTerminalTimeout()
 
-      if (notification.method === 'model/rerouted') {
-        modelReroute = { ...notification.params }
-        return
-      }
-      if (modelReroute && notification.method !== 'turn/completed') return
-
       const publishActivity = (event: CodexTurnActivityEvent): void => {
         try {
           context.onActivity?.(event)
         } catch {
           // A projection observer never owns the native turn or its result.
         }
+      }
+
+      if (notification.method === 'model/rerouted') {
+        modelReroute = { ...notification.params }
+        return
+      }
+      if (modelReroute && notification.method !== 'turn/completed') return
+
+      if (notification.method === 'thread/tokenUsage/updated') {
+        const timestamp = new Date().toISOString()
+        usageAccumulator.observe(notification.params.tokenUsage, timestamp)
+        if (notification.params.tokenUsage.last.inputTokens <= 0) return
+        const contextUsage = usageAccumulator.snapshot()
+        if (contextUsage) {
+          publishActivity({
+            kind: 'context_usage',
+            atMs: Date.now(),
+            contextUsage,
+          })
+        }
+        return
       }
 
       if (notification.method === 'item/started') {
@@ -505,6 +535,9 @@ export class CodexTurnCollector {
     }
 
     const unsubscribe = this.nativeRuntime.subscribe(processNotification)
+    const unsubscribeConnectionClosed = this.nativeRuntime.subscribeConnectionClosed?.((error) => {
+      resolveConnectionClosed?.(error)
+    }) || (() => undefined)
     try {
       const startOutcome = await Promise.race([
         context.startTurn().then(
@@ -532,9 +565,18 @@ export class CodexTurnCollector {
           terminalPromise.then(() => 'notification' as const),
           timeoutPromise,
           recoveredPromise.then((candidate) => ({ recovered: candidate } as const)),
+          connectionClosedPromise.then((error) => ({ connectionClosed: error } as const)),
         ])
         if (timeoutHandle) clearTimeout(timeoutHandle)
-        if (typeof settledBy === 'object') return settledBy.recovered
+        if (typeof settledBy === 'object' && 'recovered' in settledBy) return settledBy.recovered
+        if (typeof settledBy === 'object' && 'connectionClosed' in settledBy) {
+          return createHostFailureCandidate(context, {
+            stage: 'collection',
+            code: 'codex_connection_closed_before_terminal',
+            error: settledBy.connectionClosed,
+            codexTurnId: expectedTurnId,
+          })
+        }
         if (settledBy === 'timeout') {
           const settledNativeError = nativeErrorWithoutTerminal as {
             turnId: string
@@ -558,11 +600,12 @@ export class CodexTurnCollector {
       }
 
       const settledTurn = terminal as CodexTurn | null
+      const contextUsage = usageAccumulator.snapshot()
       if (!settledTurn || settledTurn.id !== expectedTurnId) {
         return this.buildCandidate(context, started.turn, items, deltas, {
           kind: 'protocol_failure',
           code: 'turn_identity_mismatch',
-        }, null)
+        }, null, contextUsage)
       }
       const settledModelReroute = modelReroute as Extract<
         CodexNativeNotification,
@@ -587,6 +630,7 @@ export class CodexTurnCollector {
           deltas,
           { kind: 'protocol_failure', code: 'model_rerouted' },
           null,
+          contextUsage,
         )
         rejected.runtimeDiagnostics.nativeTurnError = 'codex_model_rerouted'
         return rejected
@@ -594,7 +638,7 @@ export class CodexTurnCollector {
       const sourceItems = items.length > 0
         ? items
         : settledTurn.items.map((item, order) => ({ item, order }))
-      const selection = this.selectCandidate(settledTurn, sourceItems, deltas, context.allowNullPhaseFallback)
+      const selection = selectCodexTerminalCandidate(settledTurn, sourceItems, deltas, context.allowNullPhaseFallback)
       return this.buildCandidate(
         context,
         settledTurn,
@@ -602,9 +646,11 @@ export class CodexTurnCollector {
         deltas,
         selection.result,
         selection.message,
+        contextUsage,
       )
     } finally {
       if (timeoutHandle) clearTimeout(timeoutHandle)
+      unsubscribeConnectionClosed()
       unsubscribe()
       if (this.recoveryWaiters.get(context.readyRunId) === recoveryWaiter) {
         this.recoveryWaiters.delete(context.readyRunId)
@@ -616,86 +662,9 @@ export class CodexTurnCollector {
     if (turn.status === 'inProgress') throw new Error('codex_turn_readback_not_terminal')
     const items = turn.items.map((item, order) => ({ item, order }))
     const deltas = new Map<string, string[]>()
-    const selection = this.selectCandidate(turn, items, deltas, context.allowNullPhaseFallback)
+    const selection = selectCodexTerminalCandidate(turn, items, deltas, context.allowNullPhaseFallback)
     return this.buildCandidate(context, turn, items, deltas,
       selection.result, selection.message)
-  }
-
-  private selectCandidate(
-    turn: CodexTurn,
-    items: Array<{ item: CodexThreadItem; order: number }>,
-    deltas: Map<string, string[]>,
-    allowNullPhaseFallback: boolean,
-  ): {
-    result: CoreTurnCandidate['candidateSelection']
-    message: CodexAgentMessageItem | null
-  } {
-    if (turn.status !== 'completed') {
-      return { result: { kind: 'none', code: 'terminal_not_completed' }, message: null }
-    }
-
-    let lastToolOrder = -1
-    const messages: AgentMessageRecord[] = []
-    for (const { item, order } of items) {
-      if (item.type === 'dynamicToolCall') {
-        lastToolOrder = order
-        continue
-      }
-      if (item.type !== 'agentMessage') continue
-      if (!['commentary', 'final_answer', null].includes(item.phase)) {
-        return {
-          result: { kind: 'protocol_failure', code: 'unknown_message_phase' },
-          message: null,
-        }
-      }
-      const itemDeltas = deltas.get(item.id) || []
-      if (itemDeltas.length > 0 && itemDeltas.join('') !== item.text) {
-        return {
-          result: { kind: 'protocol_failure', code: 'delta_completed_mismatch' },
-          message: null,
-        }
-      }
-      messages.push({ item, order, deltas: itemDeltas })
-    }
-
-    const explicitFinals = messages.filter(({ item, order }) => (
-      item.phase === 'final_answer' && order > lastToolOrder
-    ))
-    if (explicitFinals.length > 1) {
-      return {
-        result: { kind: 'protocol_failure', code: 'multiple_explicit_finals' },
-        message: null,
-      }
-    }
-    if (explicitFinals.length === 1) {
-      const selected = explicitFinals[0]
-      if (messages.some(({ item, order }) => item.phase === null && order > selected.order)) {
-        return {
-          result: { kind: 'protocol_failure', code: 'null_after_explicit_final' },
-          message: null,
-        }
-      }
-      return {
-        result: { kind: 'accepted', itemId: selected.item.id },
-        message: selected.item,
-      }
-    }
-
-    if (allowNullPhaseFallback) {
-      const fallback = messages
-        .filter(({ item, order }) => item.phase === null && order > lastToolOrder)
-        .at(-1)
-      if (fallback) {
-        return {
-          result: { kind: 'accepted', itemId: fallback.item.id },
-          message: fallback.item,
-        }
-      }
-    }
-    return {
-      result: { kind: 'protocol_failure', code: 'no_legal_candidate' },
-      message: null,
-    }
   }
 
   private buildCandidate(
@@ -705,6 +674,7 @@ export class CodexTurnCollector {
     deltas: Map<string, string[]>,
     selection: CoreTurnCandidate['candidateSelection'],
     selectedMessage: CodexAgentMessageItem | null,
+    contextUsage: ContextUsageSnapshot | null = null,
   ): CoreTurnCandidate {
     return {
       kind: 'native_terminal',
@@ -739,6 +709,7 @@ export class CodexTurnCollector {
       budgetState: { ...context.budgetState },
       contextState: { ...context.contextState },
       providerDiagnostics: { ...context.providerDiagnostics },
+      contextUsage: turn.status === 'failed' && items.length === 0 ? null : contextUsage,
       recoveryCheckpointRef: context.recoveryCheckpointRef,
       browserContinuationRef: context.browserContinuationRef,
       browserProofRefs: [...context.browserProofRefs],
@@ -752,5 +723,82 @@ export class CodexTurnCollector {
         nativeTurnError: turn.error?.message ?? null,
       },
     }
+  }
+}
+
+export function selectCodexTerminalCandidate(
+  turn: CodexTurn,
+  items: Array<{ item: CodexThreadItem; order: number }>,
+  deltas: Map<string, string[]>,
+  allowNullPhaseFallback: boolean,
+): {
+  result: CoreTurnCandidate['candidateSelection']
+  message: CodexAgentMessageItem | null
+} {
+  if (turn.status !== 'completed') {
+    return { result: { kind: 'none', code: 'terminal_not_completed' }, message: null }
+  }
+
+  let lastToolOrder = -1
+  const messages: AgentMessageRecord[] = []
+  for (const { item, order } of items) {
+    if (item.type === 'dynamicToolCall') {
+      lastToolOrder = order
+      continue
+    }
+    if (item.type !== 'agentMessage') continue
+    if (!['commentary', 'final_answer', null].includes(item.phase)) {
+      return {
+        result: { kind: 'protocol_failure', code: 'unknown_message_phase' },
+        message: null,
+      }
+    }
+    const itemDeltas = deltas.get(item.id) || []
+    if (itemDeltas.length > 0 && itemDeltas.join('') !== item.text) {
+      return {
+        result: { kind: 'protocol_failure', code: 'delta_completed_mismatch' },
+        message: null,
+      }
+    }
+    messages.push({ item, order, deltas: itemDeltas })
+  }
+
+  const explicitFinals = messages.filter(({ item, order }) => (
+    item.phase === 'final_answer' && order > lastToolOrder
+  ))
+  if (explicitFinals.length > 1) {
+    return {
+      result: { kind: 'protocol_failure', code: 'multiple_explicit_finals' },
+      message: null,
+    }
+  }
+  if (explicitFinals.length === 1) {
+    const selected = explicitFinals[0]
+    if (messages.some(({ item, order }) => item.phase === null && order > selected.order)) {
+      return {
+        result: { kind: 'protocol_failure', code: 'null_after_explicit_final' },
+        message: null,
+      }
+    }
+    return {
+      result: { kind: 'accepted', itemId: selected.item.id },
+      message: selected.item,
+    }
+  }
+
+  if (allowNullPhaseFallback) {
+    const fallback = messages
+      .filter(({ item, order }) => item.phase === null && order > lastToolOrder)
+      .at(-1)
+    if (fallback) {
+      return {
+        result: { kind: 'accepted', itemId: fallback.item.id },
+        message: fallback.item,
+      }
+    }
+  }
+  return {
+    result: { kind: 'protocol_failure', code: 'no_legal_candidate' },
+    message: null,
   }
 }

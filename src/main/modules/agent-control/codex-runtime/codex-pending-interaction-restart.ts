@@ -62,6 +62,7 @@ export type CodexPendingInteractionSnapshot =
       scopeId: string | null
       conversationId: string
       actionConfirmation: boolean
+      codexShaped: boolean
       codexIdentity: CodexPendingInteractionIdentity | null
       sourceDigest: string
       sourcePayload: string
@@ -195,6 +196,9 @@ function readPendingInteractions(db: WorkflowRawDatabase): CodexPendingInteracti
     const ask = meta && isRecord(meta.askUserQuestions) ? meta.askUserQuestions : null
     if (!ask || ask.status !== 'pending') continue
     const readyRunId = nonEmptyString(ask.requestId)
+      || (isRecord(ask.codexRunIdentity)
+        ? nonEmptyString(ask.codexRunIdentity.readyRunId)
+        : null)
     const questions = Array.isArray(ask.questions) ? ask.questions : []
     const actionConfirmation = ask.lifecycleType === 'action_confirmation'
       || questions.some((question) => isRecord(question) && question.id === FROZEN_CALL_QUESTION_ID)
@@ -205,6 +209,8 @@ function readPendingInteractions(db: WorkflowRawDatabase): CodexPendingInteracti
       scopeId: nonEmptyString(ask.scopeId),
       conversationId: row.conversation_id,
       actionConfirmation,
+      codexShaped: isRecord(ask.codexRunIdentity)
+        || isRecord(ask.actionConfirmationOwnerRef),
       codexIdentity: parseStoredIdentity(ask.codexRunIdentity),
       sourceDigest: askCardSourceDigest(row),
       sourcePayload: row.meta_json || '{}',
@@ -327,13 +333,15 @@ export function scanCodexPendingInteractionsForRestart(input: {
   for (const interaction of all) {
     if (!interaction.readyRunId) {
       if (interaction.kind === 'ask_user_questions'
-        && interaction.codexIdentity
-        && hasCodexTurnBinding(input.repository, interaction.codexIdentity.readyRunId)) {
+        && interaction.codexShaped) {
         cancelOnly.push(interaction)
       }
       continue
     }
     if (!hasCodexTurnBinding(input.repository, interaction.readyRunId)) {
+      if (interaction.kind === 'ask_user_questions' && interaction.codexShaped) {
+        cancelOnly.push(interaction)
+      }
       continue
     }
     const group = byRun.get(interaction.readyRunId) || []

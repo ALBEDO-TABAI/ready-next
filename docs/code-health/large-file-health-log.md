@@ -1,6 +1,6 @@
 # 代码行数健康度台账
 
-> 更新时间：2026-08-20
+> 更新时间：2026-09-03
 
 这份台账记录“任务给代码文件增加行数后，文件总行数已超过 1000 行”的健康度评估。它不是按行数自动要求拆分，而是把真正影响维护、验证和协作的风险持续留下来。
 
@@ -21,13 +21,94 @@
 
 | 评估日期 | 任务 | 文件 | 总行数 | 本次新增 | 结论 | 判断与后续动作 | 状态 |
 | --- | --- | --- | ---: | ---: | --- | --- | --- |
+| 2026-09-03 | Codex 原生连续性、终态单线与回复呈现 | `src/__tests__/codex-model-gateway-adversarial.test.ts` | 3431 | 当前共享工作树净 +67 | 一般 | 只补三类请求的直接父线程核验、未知字段拒绝与原生分叉 wire 形状。2026-10-02 复查 metadata 与流消费反例是否可按现有边界分套件。 | 已排期：2026-10-02 |
+| 2026-09-03 | Codex 原生连续性、终态单线与回复呈现 | `src/__tests__/codex-sidecar-crash-recovery.e2e.ts` | 1374 | 当前共享工作树净 +49 | 一般 | 只补真实进程恢复夹具的 E2 准入字段，未增加恢复路径。2026-10-02 复查崩溃场景与生命周期测试分界。 | 已排期：2026-10-02 |
+| 2026-09-03 | Codex 原生连续性、终态单线与回复呈现 | `src/__tests__/codex-sidecar-process-lease.e2e.ts` | 1340 | 当前共享工作树净 +90 | 一般 | 只同步进程租约端到端夹具的当前准入合同。2026-10-02 与 crash-recovery 套件一并复查重复夹具。 | 已排期：2026-10-02 |
+| 2026-09-03 | Codex 原生连续性、终态单线与回复呈现 | `scripts/run-codex-context-continuity-installed-proof.mjs` | 1729 | 当前共享工作树净 +1729 | 一般 | 同一包的 fresh/upgrade、真实 Gateway/native/DB 和界面证据集中在一个验收入口；不在生产中新增测试状态。2026-10-02 复查按 fixture、迁移与连续性场景拆分测试编排。 | 已排期：2026-10-02 |
+| 2026-09-03 | Codex 原生连续性、终态单线与回复呈现 | `src/main/modules/agent-control/codex-runtime/codex-binding-repository.ts` | 10096 | 当前共享工作树净 +1922 | 危险 | 本轮把 fork 预留、终态事实、accepted prefix、动作投影和迁移读回接入同一事务权威；仓库仍混合多类事务。后续应继续把只读投影与历史交接事务下沉到已经建立的叶子模块。 | 后续拆分；交付时提醒 |
+| 2026-09-03 | Codex 原生连续性、终态单线与回复呈现 | `src/__tests__/codex-binding-repository-native.test.ts` | 8386 | 当前共享工作树净 +1106 | 一般 | 本轮增加失败保留、原生 fork、终态事实、动作单头、旧回执隔离和升级迁移的整链原生数据库回归。2026-10-02 复查能否按 continuity / terminal facts / action surface 拆成独立套件。 | 已排期：2026-10-02 |
+| 2026-09-03 | Codex 原生连续性、终态单线与回复呈现 | `src/main/modules/agent-control/codex-runtime/codex-runtime-production-composition.ts` | 5019 | 当前共享工作树净 +1293 | 危险 | 本轮将历史观察、accepted-prefix handoff、终态事实与动作表面接入现有生产装配，并已把判断下沉到独立投影器；组合根仍过密。后续继续按 history / closeout / action composition 拆分。 | 后续拆分；交付时提醒 |
+| 2026-09-03 | Codex 原生连续性、终态单线与回复呈现 | `src/main/modules/migrations.ts` | 4445 | 当前共享工作树净 +107 | 健康 | 单一有序迁移目录；118 号迁移只承担本次旧数据退役和新事实表建置，并由真实 pre-118 数据库升级验证。 | 无需处理 |
+| 2026-09-03 | Codex 原生连续性、终态单线与回复呈现 | `src/renderer/types/electron.d.ts` | 3541 | 当前共享工作树净 +53 | 健康 | 只机械同步生命周期、动作投影与安装验收入口的跨进程类型，没有复制业务判断。 | 无需处理 |
+| 2026-09-03 | Codex 原生连续性、终态单线与回复呈现 | `src/main/modules/agent-control/codex-runtime/codex-model-gateway.ts` | 2798 | 当前共享工作树净 +149 | 危险 | 本轮只保留有界 wire failure evidence、同轮权限冻结和终态身份；网关仍同时承担准入与流消费。后续按 admission / transport / evidence 边界拆分。 | 后续拆分；交付时提醒 |
+| 2026-09-03 | Codex 原生连续性、终态单线与回复呈现 | `src/main/modules/agent-control/codex-runtime/codex-model-gateway-authority.ts` | 1027 | 当前共享工作树净 +141 | 一般 | 本轮只把当前轮工具、根指令和权限事实与原生 fork / resume 回读做精确一致性校验。2026-10-02 复查是否继续保持纯准入裁决。 | 已排期：2026-10-02 |
+| 2026-09-03 | Codex 原生连续性、终态单线与回复呈现 | `src/main/modules/agent-control/codex-runtime/codex-binding-schema.ts` | 2952 | 当前共享工作树净 +586 | 危险 | 本轮集中声明终态事实、fork materialization、coverage 与动作读模型，避免散落第二真相；文件已成为高密度 schema 汇总。后续随事务叶子模块拆分对应 schema。 | 后续拆分；交付时提醒 |
+| 2026-09-03 | Codex 原生连续性、终态单线与回复呈现 | `src/__tests__/ready-codex-lifecycle-adapter.test.ts` | 2282 | 当前共享工作树净 +114 | 一般 | 只补当前 run 身份、旧终态拒绝与 value-based action ref 校验。2026-10-02 复查按 stop / close / reset 分组。 | 已排期：2026-10-02 |
+| 2026-09-03 | Codex 原生连续性、终态单线与回复呈现 | `src/renderer/stores/useAgent.ts` | 2282 | 当前共享工作树净 +272 | 危险 | 本轮只让发送前预检和终态后刷新消费 Main 当前动作投影，不在 Renderer 重判；store 仍混合会话、输入与生命周期。后续把 scope hydration 和 send orchestration 继续下沉。 | 后续拆分；交付时提醒 |
+| 2026-09-03 | Codex 原生连续性、终态单线与回复呈现 | `src/main/modules/agent-control/runtime-core/runtime.ts` | 1868 | 当前共享工作树净 +30 | 危险 | 本轮只装配一次性 action-surface 失效通知和交互终态 fence；运行服务仍是多产品组合根。 | 后续拆分；交付时提醒 |
+| 2026-09-03 | Codex 原生连续性、终态单线与回复呈现 | `src/__tests__/codex-tool-bridge.test.ts` | 1808 | 当前共享工作树净 +115 | 一般 | 只补工具结果、交互终态和同轮权限冻结的桥接回归。2026-10-02 复查按 tool result / interaction fence 拆套件。 | 已排期：2026-10-02 |
+| 2026-09-03 | Codex 原生连续性、终态单线与回复呈现 | `src/__tests__/codex-product-boot-recovery.test.ts` | 1780 | 当前共享工作树净 +18 | 一般 | 只同步恢复 fixture 的当前终态身份；不新增恢复分支。2026-10-02 与 continuity boot 场景一并复查。 | 已排期：2026-10-02 |
+| 2026-09-03 | Codex 原生连续性、终态单线与回复呈现 | `src/__tests__/codex-app-server-client.test.ts` | 1658 | 当前共享工作树净 +95 | 一般 | 本轮只补原生 fork 参数、无响应对账和 accepted-prefix 读回。2026-10-02 复查请求、通知和 fork 测试拆分。 | 已排期：2026-10-02 |
+| 2026-09-03 | Codex 原生连续性、终态单线与回复呈现 | `src/main/modules/agent-control/codex-runtime/ready-codex-lifecycle-adapter.ts` | 1626 | 当前共享工作树净 +54 | 一般 | 本轮只让 stop / close / reset 消费同一 action ref 与 terminal facts，不新增另一套终态。2026-10-02 复查动作适配器与恢复分支密度。 | 已排期：2026-10-02 |
+| 2026-09-03 | Codex 原生连续性、终态单线与回复呈现 | `src/main/modules/agent-control/tools-runtime/tool-registry.ts` | 1572 | 当前共享工作树净 +14 | 一般 | 只把交互请求纳入当前轮授权与终态 fence；未新增通用注册层。2026-10-02 复查注册密度。 | 已排期：2026-10-02 |
+| 2026-09-03 | Codex 原生连续性、终态单线与回复呈现 | `src/main/modules/agent-control/codex-runtime/codex-app-server-client.ts` | 1543 | 当前共享工作树净 +116 | 一般 | 本轮只实现 pinned runtime 的原生 fork、readback 与错误分类。2026-10-02 复查 fork transport 能否独立成窄客户端。 | 已排期：2026-10-02 |
+| 2026-09-03 | Codex 原生连续性、终态单线与回复呈现 | `src/__tests__/codex-renderer-lifecycle-contract.test.ts` | 1648 | 当前共享工作树净 +321 | 一般 | 本轮只补动作投影刷新、版本有序和旧 run 拒绝的 Renderer 合同。2026-10-02 复查按 hydration / invalidation 分套件。 | 已排期：2026-10-02 |
+| 2026-09-03 | Codex 原生连续性、终态单线与回复呈现 | `src/preload/index.ts` | 1528 | 当前共享工作树净 +51 | 健康 | 只机械暴露动作投影读口与失效事件，没有产品判断。 | 无需处理 |
+| 2026-09-03 | Codex 原生连续性、终态单线与回复呈现 | `src/main/modules/tools/tool-executor.ts` | 1474 | 当前共享工作树净 +2 | 危险 | 本轮只把 terminal fence 绑定到已有交互工具出口；执行器仍混合多域分发。 | 后续拆分；交付时提醒 |
+| 2026-09-03 | Codex 原生连续性、终态单线与回复呈现 | `src/renderer/styles/markdown.css` | 1410 | 当前共享工作树净 +21 | 一般 | 只为语义有序列表设置局部十进制样式，不改全局 reset。2026-10-02 复查列表样式是否仍局限于消息正文。 | 已排期：2026-10-02 |
+| 2026-09-03 | Codex 原生连续性、终态单线与回复呈现 | `src/main/modules/claude-bridge/ipc-handler.ts` | 1329 | 当前共享工作树净 +30 | 一般 | 只组装动作投影失效事件与生命周期读口；判断仍在 Main 权威层。2026-10-02 复查 IPC 组装是否继续保持薄转发。 | 已排期：2026-10-02 |
+| 2026-09-03 | Codex 原生连续性、终态单线与回复呈现 | `src/renderer/components/agent/ChatPanel.tsx` | 1314 | 当前共享工作树净 +51 | 一般 | 只消费当前工作台模式与动作投影，不生成第二终态。2026-10-02 复查面板与状态订阅边界。 | 已排期：2026-10-02 |
+| 2026-09-03 | Codex 原生连续性、终态单线与回复呈现 | `src/shared/ipc-contracts/agent-runtime.ts` | 1307 | 当前共享工作树净 +293 | 健康 | 单一共享 IPC 合同聚合；本轮只增加 value-validated 终态事实、动作引用和连续性响应，由 Main、Preload、Renderer 同形消费。 | 无需处理 |
+| 2026-09-03 | Codex 原生连续性、终态单线与回复呈现 | `src/__tests__/codex-model-gateway-sidecar.e2e.ts` | 1307 | 当前共享工作树净 +42 | 一般 | 只在真实 app-server 链验证失败证据和连续性身份。2026-10-02 与 gateway transport 场景一并复查。 | 已排期：2026-10-02 |
+| 2026-09-03 | Codex 原生连续性、终态单线与回复呈现 | `src/__tests__/chat-panel-baseline.test.ts` | 1210 | 当前共享工作树净 +30 | 一般 | 只补语义列表、自定义起点、分裂列表和单一 live duration 的呈现合同。2026-10-02 复查是否迁移到专门 Markdown 套件。 | 已排期：2026-10-02 |
+| 2026-09-03 | Codex 原生连续性、终态单线与回复呈现 | `src/__tests__/codex-renderer-admission-contract.test.ts` | 1151 | 当前共享工作树净 +137 | 一般 | 本轮只证明发送前先消费 Main 当前动作投影，且阻断态零执行。2026-10-02 复查 admission 与 lifecycle hydration 的分界。 | 已排期：2026-10-02 |
+| 2026-09-03 | Codex 原生连续性、终态单线与回复呈现 | `src/__tests__/use-agent-scope-list-contract.test.ts` | 1145 | 当前共享工作树净 +261 | 一般 | 本轮只覆盖新会话、终态回读、失效事件和多 run 投影的 scope 隔离。2026-10-02 复查按动作表面与列表加载拆套件。 | 已排期：2026-10-02 |
+| 2026-09-03 | Codex 原生连续性、终态单线与回复呈现 | `src/main/modules/agent-control/codex-runtime/codex-model-gateway-chat.ts` | 1132 | 当前共享工作树净 +22 | 一般 | 只把 terminal facts 与 wire failure record 送入唯一 closeout 输入。2026-10-02 复查 chat adapter 是否保持纯转换。 | 已排期：2026-10-02 |
+| 2026-09-03 | Codex 原生连续性、终态单线与回复呈现 | `src/main/modules/agent-control/codex-runtime/codex-provisional-inbound-buffer.ts` | 1073 | 当前共享工作树净 +27 | 一般 | 只隔离旧 generation 的迟到终态、用量和工具回执。2026-10-02 复查通知分类仍保持单一职责。 | 已排期：2026-10-02 |
+| 2026-09-03 | Codex 原生连续性、终态单线与回复呈现 | `src/__tests__/codex-browser-verifier-closeout-native.test.ts` | 1671 | 当前共享工作树净 +716 | 一般 | 只补浏览器观察结果进入同一终态事实与 coverage 的原生回归。2026-10-02 复查是否归入 terminal-facts 专项套件。 | 已排期：2026-10-02 |
+| 2026-09-03 | Codex 原生连续性、终态单线与回复呈现 | `src/main/modules/agent-control/codex-runtime/codex-tool-binding-repository.ts` | 1038 | 当前共享工作树净 +12 | 一般 | 只让工具回执按 exact generation / run 被终态 fold 消费并拒绝旧回执。2026-10-02 复查工具绑定读口密度。 | 已排期：2026-10-02 |
+| 2026-09-03 | Codex 原生连续性、终态单线与回复呈现 | `src/main/modules/agent-control/ready-memory/ready-memory-generation.ts` | 1007 | 当前共享工作树净 +19 | 一般 | 只从当前终态事实生成记忆事件，不把旧 generation 或 Retry 文案写成第二真相。2026-10-02 复查生成器输入是否仍为单一投影。 | 已排期：2026-10-02 |
+| 2026-08-30 | Codex 上下文指示器与流静默修复 | `src/main/modules/agent-control/codex-runtime/codex-model-gateway.ts` | 2667 | 本修复有新增 | 危险 | 本轮只把固定 ChatGPT OAuth 的静默等待合同绑定到冻结的 provider 身份；网关仍混合准入、请求转换与流消费，后续应按 gateway admission / upstream transport 边界拆分。 | 后续拆分；交付时提醒 |
+| 2026-08-30 | Codex 上下文指示器与流静默修复 | `src/main/modules/agent-control/codex-runtime/codex-runtime-production-composition.ts` | 3917 | 本修复有新增 | 危险 | 本轮只透传候选态拥有的上下文快照；生产装配仍过密，沿用 product resource/action composition 下沉方向。 | 后续拆分；交付时提醒 |
+| 2026-08-30 | Codex 上下文指示器与流静默修复 | `src/main/modules/agent-control/codex-runtime/codex-binding-repository.ts` | 8243 | 本修复有新增 | 危险 | 本轮只校验终态候选中的上下文快照；仓库仍混合多类事务，沿用只读发布与准入裁决下沉方向。 | 后续拆分；交付时提醒 |
+| 2026-08-30 | Codex 上下文指示器与流静默修复 | `src/renderer/stores/useAgent.ts` | 2026 | 本修复有新增 | 危险 | 本轮只在新轮准入、精确终态空闲刷新和恢复时保留已确认上下文快照；store 仍混合会话选择、加载与生命周期状态。 | 后续拆分；交付时提醒 |
+| 2026-08-30 | Codex 上下文指示器与流静默修复 | `src/main/modules/agent-control/codex-runtime/codex-app-server-client.ts` | 1478 | 本修复有新增 | 一般 | 本轮只接入 token usage 通知并补无敏感值诊断。2026-09-30 复查请求、通知解析能否分套件下沉。 | 已排期：2026-09-30 |
+| 2026-08-30 | Codex 上下文指示器与流静默修复 | `src/main/modules/agent-control/codex-runtime/codex-provisional-inbound-buffer.ts` | 1061 | 本修复有新增 | 一般 | 仍聚焦 start 回包前的身份缓冲与失败关闭；本轮只补迟到用量通知不得占用下一轮身份。2026-09-30 复查通知分类是否继续保持单一职责。 | 已排期：2026-09-30 |
+| 2026-08-30 | Codex 上下文指示器与流静默修复 | `src/__tests__/codex-app-server-client.test.ts` | 1595 | 本修复有新增 | 一般 | 只增加 token usage 通知的精确解析与拒绝场景。2026-09-30 复查请求和通知测试拆分。 | 已排期：2026-09-30 |
+| 2026-08-30 | Codex 上下文指示器与流静默修复 | `src/__tests__/codex-model-gateway-sidecar.e2e.ts` | 1267 | 本修复有新增 | 一般 | 只在既有真实 app-server 流里读取上下文通知。2026-09-30 复查按 capability 与 telemetry 场景拆分。 | 已排期：2026-09-30 |
+| 2026-08-30 | Codex 上下文指示器与流静默修复 | `src/__tests__/use-agent-scope-list-contract.test.ts` | 1085 | 本修复有新增 | 一般 | 只补新轮保留和 idle lifecycle 竞态不清空精确终态快照的会话级合同。2026-09-30 复查是否与 admission 场景分离。 | 已排期：2026-09-30 |
+| 2026-08-30 | Codex 上下文指示器与流静默修复 | `src/__tests__/codex-renderer-admission-contract.test.ts` | 1123 | 本修复有新增 | 一般 | 只补新轮准入不清空已确认上下文的行为。2026-09-30 复查 admission 场景分组。 | 已排期：2026-09-30 |
+| 2026-08-30 | Codex 上下文指示器与流静默修复 | `src/shared/ipc-contracts/agent-runtime.ts` | 1044 | 本修复有新增 | 健康 | 单一共享 IPC 合同聚合；本轮只把产品回执升级为携带上下文快照，并由主进程和 Renderer 双向测试覆盖。 | 无需处理 |
+| 2026-08-24 | 已完成输出仍显示工作中修复 | `src/main/modules/agent-control/codex-runtime/codex-runtime-production-composition.ts` | 3906 | 本修复净 +29 | 危险 | 本轮只分开环境文档捕获与本轮资源激活，并让停止竞态以持久终态读回为准；生产装配仍过密，沿用 product resource/action composition 下沉方向。 | 后续拆分；交付时提醒 |
+| 2026-08-21 | 失败任务自然重试的原任务恢复 | `src/main/modules/agent-control/codex-runtime/codex-runtime-production-composition.ts` | 3877 | 本修复净 +8 | 危险 | 只从已有重试 lineage 冻结并透传原始任务输入；生产装配仍过密，沿用 product resource/action composition 下沉方向。 | 后续拆分；交付时提醒 |
+| 2026-08-21 | 失败任务自然重试的原任务恢复 | `src/__tests__/codex-binding-repository-native.test.ts` | 7448 | 本修复净 +8 | 一般 | 只补齐显式重试 fixture 的原任务身份；仍是绑定仓库原生总套件。2026-09-21 复查时与 retry lineage 场景一并拆分。 | 已排期：2026-09-21 |
+| 2026-08-21 | Runtime 长任务、Browser 观察与宠物旁白修复 | `src/main/modules/agent-control/codex-runtime/codex-runtime-production-composition.ts` | 3869 | 本切片净 +7 | 危险 | 只把冻结 Browser 工具事实送入现有任务事实并取消生产轮次时间截止；生产装配仍过密，沿用 product resource/action composition 下沉方向。 | 后续拆分；交付时提醒 |
+| 2026-08-21 | Runtime 长任务、Browser 观察与宠物旁白修复 | `src/main/modules/agent-control/codex-runtime/codex-binding-repository.ts` | 8241 | 本切片净 +13 | 危险 | 只在现有 gateway 读口保留 Browser 观察位；仓库仍混合多类事务，沿用只读发布与准入裁决下沉方向。 | 后续拆分；交付时提醒 |
+| 2026-08-21 | Runtime 长任务、Browser 观察与宠物旁白修复 | `src/main/modules/claude-bridge/ipc-handler.ts` | 1312 | 本切片净 +2 | 一般 | 只把 ingress 与 exact scope run 事件转交宠物聚合器。2026-09-21 复查 IPC 组装是否继续保持薄转发。 | 已排期：2026-09-21 |
+| 2026-08-21 | Runtime 长任务、Browser 观察与宠物旁白修复 | `src/main/modules/agent-control/codex-runtime/codex-app-server-client.ts` | 1456 | 本切片净 +13 | 一般 | 只把真实连接关闭广播给当前 turn collector，不增加任务计时。2026-09-21 与请求、通知解析拆分复查合并处理。 | 已排期：2026-09-21 |
+| 2026-08-21 | Runtime 长任务、Browser 观察与宠物旁白修复 | `src/__tests__/codex-app-server-client.test.ts` | 1595 | 本切片净 +12 | 一般 | 只补连接真实关闭的广播回归。2026-09-21 与请求、通知分套件复查合并处理。 | 已排期：2026-09-21 |
+| 2026-08-21 | Runtime 长任务、Browser 观察与宠物旁白修复 | `src/__tests__/codex-binding-repository-native.test.ts` | 7440 | 本切片净 +111 | 一般 | 本轮只补最终 Browser 位双层只读准入；仍是绑定仓库原生总套件。2026-09-21 复查拆出 Browser admission 套件。 | 已排期：2026-09-21 |
+| 2026-08-21 | 宠物任务注意力状态修复 | `src/renderer/stores/useAgent.ts` | 2011 | 本修复净 +1 | 危险 | 只在会话成功呈现后发出宠物已读信号；store 仍混合会话选择、加载与生命周期状态。沿用既有会话选择边界下沉方向。 | 后续拆分；交付时提醒 |
+| 2026-08-21 | 宠物任务注意力状态修复 | `src/main/modules/migrations.ts` | 4359 | 本修复净 +10 | 健康 | 单一有序迁移目录；117 号迁移只建立宠物活动首次接线 cutover，并由完整原生 SQLite 门覆盖。 | 无需处理 |
+| 2026-08-21 | 宠物任务注意力状态修复 | `src/preload/index.ts` | 1497 | 本修复净 +5 | 健康 | 机械补齐 exact 宠物活动身份与 scope 已读信号，无产品判断。 | 无需处理 |
+| 2026-08-21 | 宠物任务注意力状态修复 | `src/renderer/types/electron.d.ts` | 3528 | 本修复净 +2 | 健康 | 机械补齐共享宠物活动身份与 scope 已读声明，由类型检查、IPC 合同和真实 Electron 验收覆盖。 | 无需处理 |
+| 2026-08-21 | Codex 上下文连续性与 harness 接线修复 | `src/main/modules/agent-control/codex-runtime/codex-runtime-production-composition.ts` | 3862 | 本修复切片小幅增长 | 危险 | 只收口终态归因与 RSS 终态等待读回；生产装配仍过密，沿用 product resource/action composition 下沉方向。 | 后续拆分；交付时提醒 |
+| 2026-08-21 | Codex 上下文连续性与 harness 接线修复 | `src/main/modules/agent-control/tools-runtime/tool-registry.ts` | 1572 | 本修复切片净 +14 | 一般 | 只统一候选技能原语的准入/执行面并增加 RSS 等待时限类型。2026-09-21 复查注册密度。 | 已排期：2026-09-21 |
+| 2026-08-21 | Codex 上下文连续性与 harness 接线修复 | `src/main/modules/agent-control/codex-runtime/codex-app-server-client.ts` | 1443 | 本修复切片净 +16 | 一般 | 只保留工具桥可控失败的精确原因。2026-09-21 与既有请求/通知解析拆分复查合并处理。 | 已排期：2026-09-21 |
+| 2026-08-21 | Codex 上下文连续性与 harness 接线修复 | `src/__tests__/codex-app-server-client.test.ts` | 1583 | 本修复切片净 +20 | 一般 | 只补工具桥精确失败原因的连接收口回归。2026-09-21 与请求、通知分套件复查合并处理。 | 已排期：2026-09-21 |
+| 2026-08-21 | Codex 上下文连续性与 harness 接线修复 | `src/main/modules/rss-engine/item-analysis-manager.ts` | 1099 | 本修复切片净 +8 | 一般 | 只把终态等待改为有界且可读回运行/暂停真值。2026-09-21 复查作业调度与查询边界。 | 已排期：2026-09-21 |
+| 2026-08-21 | Codex 上下文连续性与 harness 接线修复 | `src/__tests__/codex-tool-bridge.test.ts` | 1808 | 本修复切片净 +69 | 一般 | 只补候选 `skill_ask_user` 的同轮执行与精确失败边界。2026-09-21 复查是否按准入、结果、连接恢复拆套件。 | 已排期：2026-09-21 |
 | 2026-08-21 | Codex runtime 0.149.0 采用 | `src/main/modules/agent-control/codex-runtime/codex-model-gateway.ts` | 2649 | 本切片净 +18 | 危险 | 只收紧 0.149 的请求身份形状；网关仍混合协议、身份与上游调度，沿用既有 transport 拆分方向。 | 后续拆分；交付时提醒 |
 | 2026-08-21 | Codex runtime 0.149.0 采用 | `src/main/modules/agent-control/runtime-core/runtime.ts` | 1838 | 本切片 +4 | 危险 | 只透传现有诊断包的按需读取；运行服务仍是多产品组合根。 | 后续拆分；交付时提醒 |
 | 2026-08-21 | Codex runtime 0.149.0 采用 | `src/main/modules/agent-control/codex-runtime/codex-app-server-client.ts` | 1427 | 本切片净 +55 | 一般 | 只增加官方诊断请求的精确解析与新通知分类。2026-09-21 复查请求与通知解析是否需要分离。 | 已排期：2026-09-21 |
 | 2026-08-21 | Codex runtime 0.149.0 采用 | `src/__tests__/codex-model-gateway-adversarial.test.ts` | 3364 | 本切片净 +8 | 一般 | 只补 0.149 root turn 伪造反例。2026-09-21 复查是否随网关拆分同步分套件。 | 已排期：2026-09-21 |
 | 2026-08-21 | Codex runtime 0.149.0 采用 | `src/__tests__/codex-app-server-client.test.ts` | 1563 | 本切片净 +59 | 一般 | 只补诊断响应与 0.149 通知分类。2026-09-21 复查是否按请求、通知分套件。 | 已排期：2026-09-21 |
+| 2026-08-21 | Codex runtime 0.149.0 采用 | `src/__tests__/codex-product-boot-recovery.test.ts` | 1764 | 本切片净 +2 | 一般 | 只修正已有恢复证据 fixture 与数据库合同的漂移。2026-09-21 复查。 | 已排期：2026-09-21 |
 | 2026-08-21 | Codex runtime 0.149.0 采用 | `src/__tests__/codex-sidecar-process-lease.e2e.ts` | 1250 | 本切片 +5 | 一般 | 只把自动压缩的精确工具面纳入真进程验证。2026-09-21 复查。 | 已排期：2026-09-21 |
 | 2026-08-21 | Codex runtime 0.149.0 采用 | `src/__tests__/codex-model-gateway-contract.test.ts` | 1262 | 本切片 +7 | 一般 | 只同步 0.149 的精确请求身份形状。2026-09-21 复查。 | 已排期：2026-09-21 |
+| 2026-08-21 | MCP、宠物与 RSS 完全接线 | `src/main/modules/agent-control/codex-runtime/codex-binding-repository.ts` | 8228 | 工作树净 +54 | 危险 | 本轮只在现有发布屏障补动作义务裁决；仓库仍混合多类事务。沿用既有拆分方向，优先下沉只读发布裁决。 | 后续拆分；交付时提醒 |
+| 2026-08-21 | MCP、宠物与 RSS 完全接线 | `src/__tests__/codex-binding-repository-native.test.ts` | 7329 | 工作树净 +49 | 一般 | 仍是绑定仓库原生总套件，本轮只增加零产品动作不得发布的全链回归。2026-09-21 复查是否拆出 publication barrier 套件。 | 已排期：2026-09-21 |
+| 2026-08-21 | MCP、宠物与 RSS 完全接线 | `src/main/modules/migrations.ts` | 4349 | 工作树净 +11 | 健康 | 单一有序迁移目录；116 号迁移只增加宠物活动的会话已读标记，由原生 SQLite 回归覆盖。 | 无需处理 |
+| 2026-08-21 | MCP、宠物与 RSS 完全接线 | `src/main/modules/agent-control/codex-runtime/codex-runtime-production-composition.ts` | 3853 | 工作树净 +154 | 危险 | 本轮只组装三个产品域的冻结义务、MCP 资源和读回端口；生产装配仍过密。后续按 product resource/action composition 下沉叶子组件。 | 后续拆分；交付时提醒 |
+| 2026-08-21 | MCP、宠物与 RSS 完全接线 | `src/renderer/types/electron.d.ts` | 3526 | 工作树净 +38 | 健康 | 机械汇总的跨进程类型声明，本轮只补 MCP 目录、资源与状态读口。 | 无需处理 |
+| 2026-08-21 | MCP、宠物与 RSS 完全接线 | `src/main/modules/agent-control/tools-runtime/tool-registry.ts` | 1559 | 工作树净 +1 | 一般 | 公开工具注册边界未新增产品状态，只切换到 MCP ready 目录门。2026-09-21 复查注册密度。 | 已排期：2026-09-21 |
+| 2026-08-21 | MCP、宠物与 RSS 完全接线 | `src/preload/index.ts` | 1492 | 工作树净 +15 | 健康 | 机械汇总的窄 IPC 暴露面，本轮只补 MCP 状态、资源目录与读取调用。 | 无需处理 |
+| 2026-08-21 | MCP、宠物与 RSS 完全接线 | `src/main/modules/tools/tool-executor.ts` | 1474 | 工作树净 +2 | 危险 | 本轮只把产品动作请求传给现有域工具并保留 MCP 连接目录复核；执行器仍混合多域分发。 | 后续拆分；交付时提醒 |
+| 2026-08-21 | MCP、宠物与 RSS 完全接线 | `src/main/modules/claude-bridge/ipc-handler.ts` | 1310 | 工作树净 +15 | 一般 | 本轮只把 Main 宠物活动投影接到现有任务变更事件。2026-09-21 复查 IPC 组装是否继续保持薄转发。 | 已排期：2026-09-21 |
+| 2026-08-21 | MCP、宠物与 RSS 完全接线 | `src/main/index.ts` | 1231 | 工作树净 +9 | 一般 | 本轮只接宠物精确会话导航，未写任务判断。2026-09-21 复查窗口导航组装。 | 已排期：2026-09-21 |
+| 2026-08-21 | MCP、宠物与 RSS 完全接线 | `src/main/modules/rss-engine/item-analysis-manager.ts` | 1091 | 工作树净 +19 | 一般 | 文件仍聚焦 RSS 分析作业，本轮只补 exact job 查询与有中止信号的终态等待。2026-09-21 复查作业调度与查询边界。 | 已排期：2026-09-21 |
+| 2026-08-21 | MCP、宠物与 RSS 完全接线 | `src/renderer/modules/agent/messageComposer.ts` | 1056 | 工作树净 +30 | 一般 | 本轮只把用户显式选中的 MCP 资源转成结构化选择，未在 Renderer 解析内容。2026-09-21 复查附件与资源组装的拆分收益。 | 已排期：2026-09-21 |
+| 2026-08-21 | MCP、宠物与 RSS 完全接线 | `src/shared/ipc-contracts/agent-runtime.ts` | 1034 | 工作树净 +20 | 健康 | 单一跨进程合同汇总，本轮只增加冻结 MCP 资源身份。 | 无需处理 |
 | 2026-08-20 | 单一 Ready 身份、旧会话清理与记忆方案 | `src/main/modules/agent-control/codex-runtime/codex-binding-repository.ts` | 8269 | 在 8 月 19 日交付切片后净 +39 | 危险 | 只补记忆快照、读取回执和 cleanup 归档授权，仓库事务职责仍然过密；沿用既有拆分方向，优先下沉 presentation 与只读回执查询。 | 后续拆分；交付时提醒 |
 | 2026-08-20 | 单一 Ready 身份、旧会话清理与记忆方案 | `src/__tests__/codex-binding-repository-native.test.ts` | 7280 | 在 8 月 19 日交付切片后净 +127 | 一般 | 仍是绑定仓库的原生数据库总套件，本轮增加记忆快照、读取回执和 cleanup 全链回归，并覆盖原生已卸载线程的真实归档授权。2026-09-20 复查是否按 memory / cleanup 独立拆套件。 | 已排期：2026-09-20 |
 | 2026-08-20 | 单一 Ready 身份、旧会话清理与记忆方案 | `src/main/modules/agent-control/codex-runtime/codex-runtime-production-composition.ts` | 3686 | 在 8 月 19 日交付切片后净 +113 | 危险 | 本轮只接记忆快照、成功会话封印和空闲 worker；生产装配仍过密，后续把 Ready memory composition 下沉为独立装配单元。 | 后续拆分；交付时提醒 |

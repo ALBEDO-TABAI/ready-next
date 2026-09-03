@@ -13,6 +13,8 @@ import {
   type CodexNativeRuntime,
   type CodexServerDiagnostics,
   type CodexThread,
+  type CodexThreadEffectiveSettings,
+  type CodexThreadForkParams,
   type CodexThreadListParams,
   type CodexThreadStartParams,
   type CodexTurn,
@@ -26,13 +28,14 @@ import type {
 } from './codex-tool-response-delivery'
 
 type JsonObject = Record<string, unknown>
-type StartMethod = 'thread/start' | 'turn/start'
+type StartMethod = 'thread/start' | 'thread/fork' | 'turn/start'
 type ClientMethod =
   | 'initialize'
   | 'server/diagnostics'
   | 'thread/start'
   | 'thread/list'
   | 'thread/read'
+  | 'thread/fork'
   | 'thread/resume'
   | 'thread/archive'
   | 'thread/compact/start'
@@ -235,6 +238,12 @@ function nonEmptyString(value: unknown): value is string {
   return typeof value === 'string' && value.trim().length > 0
 }
 
+function controlledProtocolErrorCode(error: unknown): string | null {
+  if (!isRecord(error) || typeof error.code !== 'string') return null
+  const code = error.code.trim()
+  return /^[a-z][a-z0-9_]{1,127}$/.test(code) ? code : null
+}
+
 function sha256(value: string): string {
   return createHash('sha256').update(value).digest('hex')
 }
@@ -376,6 +385,25 @@ function validateThreadListParams(value: unknown): asserts value is CodexThreadL
   ) invalidParams()
 }
 
+function validateThreadForkParams(value: unknown): asserts value is CodexThreadForkParams {
+  const params = requireExactIdentityParams(value, [
+    'threadId',
+    'lastTurnId',
+    'cwd',
+    'model',
+    'modelProvider',
+    'approvalPolicy',
+    'sandbox',
+  ])
+  if (!nonEmptyString(params.threadId)
+    || !nonEmptyString(params.lastTurnId)
+    || !nonEmptyString(params.cwd)
+    || !nonEmptyString(params.model)
+    || params.modelProvider !== 'ready_gateway'
+    || params.approvalPolicy !== 'never'
+    || params.sandbox !== 'read-only') invalidParams()
+}
+
 function normalizeThreadResult(value: unknown): { thread: CodexThread } {
   if (!isRecord(value)) throw new CodexAppServerClientError('rpc_result_invalid')
   const thread = normalizeCodexThread(value.thread)
@@ -396,6 +424,39 @@ function normalizeThreadStartResult(value: unknown): {
     || !instructionSources.every((entry) => typeof entry === 'string')
   ) throw new CodexAppServerClientError('rpc_result_invalid')
   return { thread, instructionSources }
+}
+
+function normalizeThreadEffectiveSettings(value: unknown): CodexThreadEffectiveSettings {
+  if (!isRecord(value)) throw new CodexAppServerClientError('rpc_result_invalid')
+  const thread = normalizeCodexThread(value.thread)
+  const instructionSources = value.instructionSources === undefined ? [] : value.instructionSources
+  const reasoningEffort = value.reasoningEffort === undefined ? null : value.reasoningEffort
+  const serviceTier = value.serviceTier === undefined ? null : value.serviceTier
+  if (!thread
+    || !nonEmptyString(value.cwd)
+    || !nonEmptyString(value.model)
+    || !nonEmptyString(value.modelProvider)
+    || !Object.prototype.hasOwnProperty.call(value, 'approvalPolicy')
+    || !Object.prototype.hasOwnProperty.call(value, 'approvalsReviewer')
+    || !Object.prototype.hasOwnProperty.call(value, 'sandbox')
+    || (reasoningEffort !== null && typeof reasoningEffort !== 'string')
+    || (serviceTier !== null && typeof serviceTier !== 'string')
+    || !Array.isArray(instructionSources)
+    || !instructionSources.every((entry) => typeof entry === 'string')) {
+    throw new CodexAppServerClientError('rpc_result_invalid')
+  }
+  return {
+    thread,
+    cwd: value.cwd,
+    model: value.model,
+    modelProvider: value.modelProvider,
+    approvalPolicy: value.approvalPolicy,
+    approvalsReviewer: value.approvalsReviewer,
+    sandbox: value.sandbox,
+    reasoningEffort,
+    serviceTier,
+    instructionSources,
+  }
 }
 
 function normalizeTurnStartResult(value: unknown): { turn: CodexTurn } {
@@ -480,9 +541,9 @@ function normalizeThreadListResult(value: unknown): {
 }
 
 function startNativeId(method: StartMethod, result: unknown): string {
-  return method === 'thread/start'
-    ? normalizeThreadStartResult(result).thread.id
-    : normalizeTurnStartResult(result).turn.id
+  if (method === 'thread/start') return normalizeThreadStartResult(result).thread.id
+  if (method === 'thread/fork') return normalizeThreadEffectiveSettings(result).thread.id
+  return normalizeTurnStartResult(result).turn.id
 }
 
 const ACTIVE_SERVER_REQUEST_LIMIT = 2_048
@@ -495,6 +556,7 @@ function canonicalServerRequestId(value: number | string): string {
 
 export class CodexAppServerClient implements CodexNativeRuntime {
   private readonly listeners = new Set<(notification: CodexNativeNotification) => void>()
+  private readonly connectionClosedListeners = new Set<(error: Error) => void>()
   private readonly pending = new Map<number, PendingRequest>()
   private readonly serverResponseWrites = new Set<string>()
   private readonly serverRequestIdentities = new Map<string, {
@@ -635,16 +697,24 @@ export class CodexAppServerClient implements CodexNativeRuntime {
     return this.request('thread/read', params, normalizeThreadResult) as Promise<{ thread: CodexThread }>
   }
 
-  async threadResume(params: { threadId: string }): Promise<{
-    thread: CodexThread
-    instructionSources: string[]
-  }> {
+  async threadFork(params: CodexThreadForkParams, bindingId: string): Promise<CodexThreadEffectiveSettings> {
+    validateThreadForkParams(params)
+    return this.request(
+      'thread/fork',
+      params,
+      normalizeThreadEffectiveSettings,
+      bindingId,
+    ) as Promise<CodexThreadEffectiveSettings>
+  }
+
+  async threadResume(params: { threadId: string }): Promise<CodexThreadEffectiveSettings> {
     const exact = requireExactIdentityParams(params, ['threadId'])
     if (!nonEmptyString(exact.threadId)) invalidParams()
-    return this.request('thread/resume', params, normalizeThreadStartResult) as Promise<{
-      thread: CodexThread
-      instructionSources: string[]
-    }>
+    return this.request(
+      'thread/resume',
+      params,
+      normalizeThreadEffectiveSettings,
+    ) as Promise<CodexThreadEffectiveSettings>
   }
 
   async threadArchive(params: { threadId: string }): Promise<Record<string, never>> {
@@ -687,6 +757,11 @@ export class CodexAppServerClient implements CodexNativeRuntime {
     return () => this.listeners.delete(listener)
   }
 
+  subscribeConnectionClosed(listener: (error: Error) => void): () => void {
+    this.connectionClosedListeners.add(listener)
+    return () => this.connectionClosedListeners.delete(listener)
+  }
+
   async shutdown(error: Error = new CodexAppServerClientError('connection_closed')): Promise<void> {
     this.queueConnectionClose(error)
     const settlement = this.closeSettlement
@@ -698,6 +773,7 @@ export class CodexAppServerClient implements CodexNativeRuntime {
     } finally {
       this.dispose()
       this.listeners.clear()
+      this.connectionClosedListeners.clear()
     }
   }
 
@@ -722,7 +798,9 @@ export class CodexAppServerClient implements CodexNativeRuntime {
     const frame = { method, id, params }
     const line = `${JSON.stringify(frame)}\n`
     const requestDigest = sha256(line)
-    const startMethod = method === 'thread/start' || method === 'turn/start' ? method : null
+    const startMethod = method === 'thread/start' || method === 'thread/fork' || method === 'turn/start'
+      ? method
+      : null
     const manualMethod = method === 'thread/compact/start'
     const archiveMethod = method === 'thread/archive'
     if (startMethod) {
@@ -937,7 +1015,7 @@ export class CodexAppServerClient implements CodexNativeRuntime {
   private async handleTimeout(request: PendingRequest): Promise<void> {
     if (this.pending.get(request.id) !== request) return
     request.timer = null
-    if (request.method === 'thread/start' || request.method === 'turn/start') {
+    if (request.method === 'thread/start' || request.method === 'thread/fork' || request.method === 'turn/start') {
       await this.options.startDispatchPort.markUnresolved({
         connectionEpoch: this.options.connectionEpoch,
         rpcId: request.id,
@@ -1019,7 +1097,7 @@ export class CodexAppServerClient implements CodexNativeRuntime {
       && !hasExactKeys(frame, ['id', 'error'])
     ) throw new CodexAppServerClientError('response_shape_invalid')
 
-    if (request.method === 'thread/start' || request.method === 'turn/start') {
+    if (request.method === 'thread/start' || request.method === 'thread/fork' || request.method === 'turn/start') {
       await this.handleStartResponse(request, frame)
       return
     }
@@ -1130,7 +1208,7 @@ export class CodexAppServerClient implements CodexNativeRuntime {
   }
 
   private async consumeLateStartResponse(id: number, frame: JsonObject): Promise<boolean> {
-    const methods: StartMethod[] = ['thread/start', 'turn/start']
+    const methods: StartMethod[] = ['thread/start', 'thread/fork', 'turn/start']
     for (const method of methods) {
       let nativeId: string
       try {
@@ -1213,9 +1291,31 @@ export class CodexAppServerClient implements CodexNativeRuntime {
     const normalized = normalizeCodexNativeNotification(frame)
     if (normalized.kind === 'ignored') return
     if (normalized.kind !== 'accepted') {
+      const usageDiagnostic = frame.method === 'thread/tokenUsage/updated' && isRecord(frame.params)
+        ? {
+            usageParamKeys: Object.keys(frame.params).sort().join(','),
+            usageKeys: isRecord(frame.params.tokenUsage)
+              ? Object.keys(frame.params.tokenUsage).sort().join(',')
+              : null,
+            usageTotal: isRecord(frame.params.tokenUsage)
+              && isRecord(frame.params.tokenUsage.total)
+              ? JSON.stringify(frame.params.tokenUsage.total)
+              : null,
+            usageLast: isRecord(frame.params.tokenUsage)
+              && isRecord(frame.params.tokenUsage.last)
+              ? JSON.stringify(frame.params.tokenUsage.last)
+              : null,
+            usageModelContextWindow: isRecord(frame.params.tokenUsage)
+              ? frame.params.tokenUsage.modelContextWindow ?? null
+              : null,
+          }
+        : null
       throw new CodexAppServerClientError(
         `notification_${normalized.code}`,
-        { method: typeof frame.method === 'string' ? frame.method : null },
+        {
+          method: typeof frame.method === 'string' ? frame.method : null,
+          ...(usageDiagnostic ? { usageDiagnostic } : {}),
+        },
       )
     }
     const disposition = await this.options.inboundFramePort.routeNotification({
@@ -1251,12 +1351,22 @@ export class CodexAppServerClient implements CodexNativeRuntime {
       codexTurnId: frame.params.turnId as string,
       codexCallId: frame.params.callId as string,
     })
-    const routed = await this.options.inboundFramePort.routeServerRequest({
-      connectionEpoch: this.options.connectionEpoch,
-      requestId: frame.id as number | string,
-      method: 'item/tool/call',
-      params: frame.params,
-    })
+    let routed: Awaited<ReturnType<CodexInboundFramePort['routeServerRequest']>>
+    try {
+      routed = await this.options.inboundFramePort.routeServerRequest({
+        connectionEpoch: this.options.connectionEpoch,
+        requestId: frame.id as number | string,
+        method: 'item/tool/call',
+        params: frame.params,
+      })
+    } catch (error) {
+      if (error instanceof CodexAppServerClientError) throw error
+      const code = controlledProtocolErrorCode(error)
+      if (code) {
+        throw new CodexAppServerClientError(code, { method: 'item/tool/call' })
+      }
+      throw error
+    }
     if (this.closed) return
     if (routed.disposition === 'buffered') return
     if (routed.disposition !== 'respond') throw new CodexAppServerClientError('server_request_route_invalid')
@@ -1339,7 +1449,7 @@ export class CodexAppServerClient implements CodexNativeRuntime {
 
   private rejectOrdinaryRequest(id: number, error: Error): void {
     const request = this.pending.get(id)
-    if (!request || request.method === 'thread/start' || request.method === 'turn/start') return
+    if (!request || request.method === 'thread/start' || request.method === 'thread/fork' || request.method === 'turn/start') return
     this.finishPending(request)
     request.reject(error)
   }
@@ -1362,6 +1472,12 @@ export class CodexAppServerClient implements CodexNativeRuntime {
   }
 
   private async handleConnectionClosed(error: Error | null): Promise<void> {
+    const closeError = error || new CodexAppServerClientError('connection_closed')
+    for (const listener of [...this.connectionClosedListeners]) {
+      try {
+        listener(closeError)
+      } catch { /* silent-catch: observer failure cannot stop the durable close audit or pending-request rejection below. */ }
+    }
     this.serverResponseWrites.clear()
     this.serverRequestIdentities.clear()
     await Promise.allSettled([...this.admissions])
@@ -1387,7 +1503,7 @@ export class CodexAppServerClient implements CodexNativeRuntime {
       if (request.timer) clearTimeout(request.timer)
       request.timer = null
       this.pending.delete(request.id)
-      request.reject(error || new CodexAppServerClientError('connection_closed'))
+      request.reject(closeError)
     }
     const failures = results.flatMap((result) => result.status === 'rejected' ? [result.reason] : [])
     if (failures.length > 0) throw new AggregateError(failures, 'connection_close_audit_failed')

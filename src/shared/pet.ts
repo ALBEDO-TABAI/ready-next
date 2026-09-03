@@ -64,12 +64,27 @@ export interface PetActivityEvent {
 }
 
 export interface PetActivitySnapshot {
+  revision: number
+  kind: 'needs_input' | 'blocked' | 'ready' | 'running' | 'idle'
+  taskId: string | null
+  scopeId: string | null
+  runId: string | null
+  messageId: string | null
   busy: boolean
   state: PetAnimationState
   title: string
   summary: string
   events: PetActivityEvent[]
   updatedAt: string | null
+}
+
+export interface PetActivityOpenIdentity {
+  revision: number
+  taskId: string
+  scopeId: string
+  runId: string
+  messageId: string | null
+  updatedAt: string
 }
 
 export type PetStickyNoteTone = 'default' | 'info' | 'success' | 'warning' | 'danger'
@@ -90,10 +105,12 @@ export interface PetStickyNoteInput {
 }
 
 export interface PetWindowSnapshot {
+  revision: number
   settings: PetSettings
   pets: PetDefinition[]
   activity: PetActivitySnapshot
   stickyNotes: PetStickyNote[]
+  stickyNotesDigest: string
 }
 
 export const DEFAULT_SELECTED_PET_ID = 'white-chinchilla-cat'

@@ -10,7 +10,8 @@ import { hasLocalDocumentResource } from '../main/modules/agent-control/runtime-
 import { buildExplicitNoSkillAuthorization } from '../main/modules/agent-control/skills/skill-tool-authorization'
 import { getToolResourceTag } from '../main/modules/agent-control/tools-runtime/tool-parallelism-policy'
 import { defaultToolRegistry } from '../main/modules/agent-control/tools-runtime/tool-registry'
-import { executeToolCall, type ToolContext } from '../main/modules/tools/tool-executor'
+import { executeToolCall, toStructuredToolResult, type ToolContext } from '../main/modules/tools/tool-executor'
+import { mapReadyToolOutput } from '../main/modules/agent-control/codex-runtime/codex-tool-output-mapper'
 import { createToolExecutionOutput } from '../main/modules/agent-control/tools-runtime/tool-result-types'
 import { buildTextToolBridgePrompt, buildTextToolResultMessage } from '../main/modules/claude-bridge/tool-bridge'
 import { completeTagForgeHostReview } from '../main/modules/tag-forge/tag-forge-host-review'
@@ -220,9 +221,42 @@ test('the text bridge returns prepared documents and lexicon to the next model t
   assert.match(message, /AI工作流/)
 })
 
+test('Codex receives exact Tag Forge apply handles before the prepared document body', () => {
+  const longBody = `# 调研\n\n${'正文证据。'.repeat(4_000)}`
+  const structured = toStructuredToolResult('tag_forge_prepare_batch', JSON.stringify({
+    ok: true,
+    batchId: 'tfb-handle-first',
+    remaining: 1,
+    documents: [{
+      itemId: 'tfi-exact-handle',
+      file: '调研.md',
+      expectedRevision: 'revision-exact',
+      content: longBody,
+    }],
+  }))
+  const mapped = mapReadyToolOutput(structured)
+  const first = mapped.contentItems[0] as { type: 'inputText'; text: string }
+  const full = mapped.contentItems[1] as { type: 'inputText'; text: string }
+
+  assert.equal(first.type, 'inputText')
+  assert.match(first.text, /Reuse each itemId and expectedRevision exactly/)
+  assert.match(first.text, /tfi-exact-handle/)
+  assert.match(first.text, /revision-exact/)
+  assert.ok(first.text.length < 600)
+  assert.doesNotMatch(first.text, /正文证据/)
+  assert.match(full.text, /tfi-exact-handle/)
+  assert.match(full.text, /正文证据/)
+})
+
 test('the host owns the complete Tag Forge review round trip', async () => {
   const calls: Array<{ name: string; args: Record<string, unknown> }> = []
+  const effectPhases: string[] = []
   let questions=0
+  const completedResult = {
+    ok: true,
+    done: true,
+    transactionConfirmed: { confirmed: true, source: 'tag_forge_readback', signal: 'tfb-host-review' },
+  }
   const result = JSON.stringify({
     ok: true,
     batchId: 'tfb-host-review',
@@ -244,6 +278,8 @@ test('the host owns the complete Tag Forge review round trip', async () => {
       runId: 'run-host-review',
       sessionId: 'session-host-review',
       scopeId: 'scope-host-review',
+      onToolEffectEnd: () => effectPhases.push('pause-for-review'),
+      onToolEffectStart: () => effectPhases.push('resume-review-write'),
     },
     { marker: 'file-context' },
     {
@@ -253,18 +289,19 @@ test('the host owns the complete Tag Forge review round trip', async () => {
       })},
       executeFileTool: async (name, args) => {
         calls.push({ name, args })
-        return JSON.stringify({ ok: true, done: true })
+        return JSON.stringify(completedResult)
       },
     },
   )
 
-  assert.equal(reviewed, JSON.stringify({ ok: true, done: true }))
+  assert.equal(reviewed, JSON.stringify(completedResult))
   assert.deepEqual(calls, [{
     name: 'tag_forge_review_batch',
     args: { batchId: 'tfb-host-review', confirmationCardId: 'auq-host-review' },
   }])
+  assert.deepEqual(effectPhases, ['pause-for-review', 'resume-review-write'])
   const deferred=await completeTagForgeHostReview('tag_forge_prepare_batch',result,{runId:'run-host-review',sessionId:'session-host-review',scopeId:'scope-host-review'},{marker:'file-context'},{askUserQuestions:async()=>{questions+=1;return createToolExecutionOutput('unexpected')},executeFileTool:async()=>JSON.stringify({ok:true})})
-  assert.equal(deferred,JSON.stringify({ok:true}))
+  assert.equal(deferred,result)
   assert.equal(questions,1)
 })
 
@@ -340,7 +377,7 @@ test('a created review card is reused when its first internal continuation fails
   }
   const failed = await completeTagForgeHostReview('tag_forge_apply_batch', result, context, {}, deps)
   assert.equal(failed, JSON.stringify({ ok: false, errorKind: 'temporary_review_failure' }))
-  const retried = await completeTagForgeHostReview('tag_forge_prepare_batch', result, context, {}, deps)
+  const retried = await completeTagForgeHostReview('tag_forge_apply_batch', result, context, {}, deps)
   assert.equal(retried, JSON.stringify({ ok: true, done: true }))
   assert.equal(questions, 1)
   assert.equal(reviews, 2)

@@ -77,3 +77,19 @@ test('distinct events keep their own fields untouched', () => {
   assert.equal(visible[0].toolName, 'a')
   assert.equal(visible[1].toolName, undefined)
 })
+
+test('same text from separate rich calls is not mistaken for producer duplication', () => {
+  const visible = filterUserVisibleToolTraceEvents(Array.from({ length: 5 }, (_, index) => ({
+    id: `search-${index}`,
+    kind: 'call' as const,
+    text: '搜索网页',
+    timestamp: at(index),
+    toolName: 'web_search',
+    hideToolName: true,
+  })))
+
+  assert.equal(visible.length, 5)
+  assert.deepEqual(visible.map((event) => event.id), [
+    'search-0', 'search-1', 'search-2', 'search-3', 'search-4',
+  ])
+})

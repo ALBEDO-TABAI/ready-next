@@ -452,7 +452,7 @@ function buildHarnessStateFromRun(params: {
     })
   }
   return {
-    agents: [{ name: 'butler', displayName: '管家', status: 'idle', selected: true }],
+    agents: [{ name: 'butler', displayName: '管家', status: 'idle' }],
     messages,
     currentAgent: params.agent,
     inputValue: '',

@@ -99,12 +99,36 @@ export function mapBackendErrorToFriendly(input: {
     }
   }
 
+  if (
+    errorKind === 'capability_unavailable'
+    || /tool_surface_result_state_unsupported|tool_surface_skill_execution_unsupported|tool_surface_empty/i.test(source)
+  ) {
+    return {
+      friendlyMessage: '当前技能的这项执行能力还不能在这一轮使用；技能方法论和普通搜索、文档、文件夹工具仍可用，请去掉不支持的技能动作后再试',
+      technicalDetails: error || undefined,
+      recoverable: true,
+      retryStrategy: 'user_action',
+    }
+  }
+
   if (/requires_new_(thread|generation)/i.test(source)) {
     return {
       friendlyMessage: '当前对话的能力规则已更新，这一轮无法继续；请新建对话后再试',
       technicalDetails: error || undefined,
       recoverable: true,
       retryStrategy: 'user_action',
+    }
+  }
+
+  if (
+    errorKind === 'conversation_materializing'
+    || /codex_conversation_materializing/i.test(source)
+  ) {
+    return {
+      friendlyMessage: '正在衔接上一段对话，完成后可以继续发送。',
+      technicalDetails: error || undefined,
+      recoverable: true,
+      retryStrategy: 'auto',
     }
   }
 

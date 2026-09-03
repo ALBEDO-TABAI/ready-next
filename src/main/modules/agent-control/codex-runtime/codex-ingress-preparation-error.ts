@@ -1,4 +1,5 @@
 import type { PrePersistenceErrorKind } from '../../../../shared/ipc-contracts/agent-runtime'
+import { PrePersistenceAdmissionError } from '../send-scoped-confirmation'
 
 export type CodexIngressPreparationFailure = {
   code: PrePersistenceErrorKind
@@ -43,6 +44,9 @@ const ATTACHMENT_CODES = new Set([
   'codex_explicit_resource_kind_mismatch',
   'codex_explicit_resource_unavailable',
   'codex_explicit_resource_unsupported',
+  'codex_explicit_mcp_resource_unavailable',
+  'codex_explicit_retry_destination_identity_drift',
+  'codex_explicit_retry_resource_identity_drift',
   'codex_explicit_skill_not_directory',
   'codex_explicit_skill_unavailable',
   'codex_external_read_slice_conflicts_with_current_document',
@@ -61,9 +65,23 @@ const EXTERNAL_SERVICE_CODES = new Set([
   'codex_external_read_lark_resources_unavailable',
 ])
 
+const CAPABILITY_CODES = new Set([
+  'tool_surface_result_state_unsupported',
+  'tool_surface_skill_execution_unsupported',
+  'tool_surface_empty',
+  'tool_surface_schema_compaction_unsupported',
+])
+
 export function classifyCodexIngressPreparationError(
   error: unknown,
 ): CodexIngressPreparationFailure {
+  if (error instanceof PrePersistenceAdmissionError) {
+    return {
+      code: error.code,
+      retryableByUser: error.retryableByUser,
+      error: stableCode(error.message),
+    }
+  }
   const internalCode = stableCode(error)
   if (CONFIGURATION_CODES.has(internalCode)) {
     return { code: 'configuration_unavailable', retryableByUser: true, error: internalCode }
@@ -73,6 +91,14 @@ export function classifyCodexIngressPreparationError(
   }
   if (EXTERNAL_SERVICE_CODES.has(internalCode)) {
     return { code: 'external_service_unavailable', retryableByUser: true, error: internalCode }
+  }
+  if (CAPABILITY_CODES.has(internalCode)) {
+    return { code: 'capability_unavailable', retryableByUser: true, error: internalCode }
+  }
+  if (
+    internalCode === 'codex_conversation_materializing'
+  ) {
+    return { code: 'conversation_materializing', retryableByUser: true, error: internalCode }
   }
   if (
     internalCode === 'codex_alias_generation_mismatch'

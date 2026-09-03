@@ -3,6 +3,10 @@ import {
   normalizeCodexUserInput,
   type CodexUserInput,
 } from './codex-user-input'
+import {
+  normalizeCodexThreadTokenUsage,
+  type CodexThreadTokenUsage,
+} from './codex-context-usage'
 
 export type { CodexUserInput } from './codex-user-input'
 
@@ -40,6 +44,29 @@ export type CodexThreadListParams = {
   archived?: boolean
   cursor?: string | null
   useStateDbOnly?: true
+}
+
+export type CodexThreadForkParams = {
+  threadId: string
+  lastTurnId: string
+  cwd: string
+  model: string
+  modelProvider: 'ready_gateway'
+  approvalPolicy: 'never'
+  sandbox: 'read-only'
+}
+
+export type CodexThreadEffectiveSettings = {
+  thread: CodexThread
+  cwd: string
+  model: string
+  modelProvider: string
+  approvalPolicy: unknown
+  approvalsReviewer: unknown
+  sandbox: unknown
+  reasoningEffort: string | null
+  serviceTier: string | null
+  instructionSources: string[]
 }
 
 export type CodexTurnStartParams = {
@@ -226,6 +253,10 @@ export type CodexNativeNotification =
     }
   | { method: 'turn/completed'; params: { threadId: string; turn: CodexTurn } }
   | {
+      method: 'thread/tokenUsage/updated'
+      params: { threadId: string; turnId: string; tokenUsage: CodexThreadTokenUsage }
+    }
+  | {
       method: 'error'
       params: {
         error: CodexTurnError
@@ -255,12 +286,12 @@ export const CODEX_PROJECTED_NOTIFICATION_METHODS = [
   'item/agentMessage/delta',
   'item/reasoning/summaryPartAdded',
   'item/reasoning/summaryTextDelta',
+  'thread/tokenUsage/updated',
 ] as const
 
 export const CODEX_PASSIVE_NOTIFICATION_METHODS = [
   'warning',
   'thread/status/changed',
-  'thread/tokenUsage/updated',
   'thread/settings/updated',
   'item/reasoning/textDelta',
   'account/rateLimits/updated',
@@ -336,19 +367,18 @@ export interface CodexNativeRuntime {
     instructionSources: string[]
   }>
   threadRead(params: { threadId: string; includeTurns: true }): Promise<{ thread: CodexThread }>
+  threadFork(params: CodexThreadForkParams, bindingId: string): Promise<CodexThreadEffectiveSettings>
   threadList(params: CodexThreadListParams): Promise<{
     data: CodexThread[]
     nextCursor: string | null
   }>
-  threadResume(params: { threadId: string }): Promise<{
-    thread: CodexThread
-    instructionSources: string[]
-  }>
+  threadResume(params: { threadId: string }): Promise<CodexThreadEffectiveSettings>
   threadArchive(params: { threadId: string }): Promise<Record<string, never>>
   turnStart(params: CodexTurnStartParams): Promise<{ turn: CodexTurn }>
   turnInterrupt(params: { threadId: string; turnId: string }): Promise<Record<string, never>>
   threadCompactStart(params: { threadId: string }): Promise<Record<string, never>>
   subscribe(listener: (notification: CodexNativeNotification) => void): () => void
+  subscribeConnectionClosed?(listener: (error: Error) => void): () => void
 }
 
 export type CodexNotificationNormalizationResult =
@@ -823,6 +853,21 @@ export function normalizeCodexNativeNotification(
         method,
         params: { threadId, turnId, itemId, summaryIndex: summaryIndex as number, delta },
       },
+    }
+  }
+  if (method === 'thread/tokenUsage/updated') {
+    const threadId = stringField(params, 'threadId')
+    const turnId = stringField(params, 'turnId')
+    const tokenUsage = normalizeCodexThreadTokenUsage(params.tokenUsage)
+    if (
+      !hasExactKeys(params, ['threadId', 'turnId', 'tokenUsage'])
+      || !threadId
+      || !turnId
+      || !tokenUsage
+    ) return { kind: 'invalid', code: 'invalid_params' }
+    return {
+      kind: 'accepted',
+      notification: { method, params: { threadId, turnId, tokenUsage } },
     }
   }
   if (method === 'error') {

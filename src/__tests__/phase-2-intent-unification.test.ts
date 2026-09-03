@@ -303,7 +303,7 @@ test('Phase 2.5 — does not regress: blocked tasks sorted by updatedAt (newer f
 
 test('Phase 2 wiring — skill-detection-inputs.ts imports + uses matchesResumeIntent', () => {
   const source = readSource(SKILL_DETECTION_PATH)
-  assert.match(source, /from\s+'(?:\.\.\/contracts\/resume-lexicon|\.\/resume-lexicon)'/)
+  assert.match(source, /from\s+'\.\.\/\.\.\/\.\.\/\.\.\/shared\/resume-lexicon'/)
   assert.match(source, /matchesResumeIntent\(\s*normalized\s*,\s*'strict'\s*\)/)
   assert.match(source, /matchesResumeIntent\(\s*normalized\s*,\s*'liberal'\s*\)/)
   // Hard cap must be 48 (not 32) so liberal extension has room.
@@ -312,7 +312,7 @@ test('Phase 2 wiring — skill-detection-inputs.ts imports + uses matchesResumeI
 
 test('Phase 2 wiring — continuation-state.ts imports + uses matchesResumeIntent (anywhere)', () => {
   const source = readSource(CONTINUATION_STATE_PATH)
-  assert.match(source, /from\s+'\.\/resume-lexicon'/)
+  assert.match(source, /from\s+'\.\.\/\.\.\/\.\.\/\.\.\/shared\/resume-lexicon'/)
   assert.match(source, /matchesResumeIntent\(sanitizedUserText\s*,\s*'anywhere'\)/)
   // Terminal exclusion helper must exist and be used.
   assert.match(source, /isTerminalProjection/)

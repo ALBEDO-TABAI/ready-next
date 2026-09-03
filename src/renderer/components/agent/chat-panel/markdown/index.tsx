@@ -20,16 +20,137 @@ import {
 // V6 fixture (`chat-panel-baseline.test.ts`) snapshot diff must stay at 0.
 
 export interface MarkdownNode {
-  type: 'text' | 'bold' | 'italic' | 'code' | 'codeblock' | 'header' | 'bullet' | 'numbered' | 'table' | 'br'
+  type: 'text' | 'bold' | 'italic' | 'code' | 'codeblock' | 'header' | 'bullet' | 'ordered-list' | 'table' | 'br'
   content: string
   level?: number // header level 1-3
   lang?: string // code block language
+  indent?: number
+  orderedList?: MarkdownOrderedList
   headers?: string[]
   rows?: string[][]
   aligns?: TableAlignment[]
 }
 
 export type TableAlignment = 'left' | 'center' | 'right' | null
+
+export interface MarkdownOrderedListItem {
+  content: string
+  continuations: string[]
+  nestedLists: MarkdownOrderedList[]
+}
+
+export interface MarkdownOrderedList {
+  start: number
+  delimiter: '.' | ')'
+  indent: number
+  items: MarkdownOrderedListItem[]
+}
+
+function markdownIndentColumns(value: string): number {
+  let columns = 0
+  for (const char of value) columns += char === '\t' ? 4 : 1
+  return columns
+}
+
+type NumberedLine = {
+  indent: number
+  ordinal: number
+  delimiter: '.' | ')'
+  content: string
+}
+
+function parseNumberedLine(line: string): NumberedLine | null {
+  const match = line.match(/^([ \t]*)(\d+)([.)])\s+(.+)$/)
+  if (!match) return null
+  const ordinal = Number(match[2])
+  if (!Number.isSafeInteger(ordinal) || ordinal < 1) return null
+  return {
+    indent: markdownIndentColumns(match[1]),
+    ordinal,
+    delimiter: match[3] as '.' | ')',
+    content: match[4],
+  }
+}
+
+function startsMarkdownBlock(line: string): boolean {
+  return /^#{1,3}\s+/.test(line)
+    || line.trimStart().startsWith('```')
+    || /^\s*[-*]\s+/.test(line)
+}
+
+function parseOrderedListAt(
+  lines: string[],
+  startIndex: number,
+): { list: MarkdownOrderedList; nextIndex: number } | null {
+  const first = parseNumberedLine(lines[startIndex])
+  if (!first) return null
+
+  const list: MarkdownOrderedList = {
+    start: first.ordinal,
+    delimiter: first.delimiter,
+    indent: first.indent,
+    items: [],
+  }
+  let index = startIndex
+
+  while (index < lines.length) {
+    const marker = parseNumberedLine(lines[index])
+    if (!marker || marker.indent !== list.indent || marker.delimiter !== list.delimiter) break
+
+    const item: MarkdownOrderedListItem = {
+      content: marker.content,
+      continuations: [],
+      nestedLists: [],
+    }
+    list.items.push(item)
+    index += 1
+    let blankCount = 0
+
+    while (index < lines.length) {
+      const line = lines[index]
+      if (line.trim() === '') {
+        blankCount += 1
+        index += 1
+        continue
+      }
+
+      const nextMarker = parseNumberedLine(line)
+      if (nextMarker?.indent === list.indent) {
+        if (nextMarker.delimiter === list.delimiter) break
+        index -= blankCount
+        return { list, nextIndex: index }
+      }
+
+      if (nextMarker && nextMarker.indent > list.indent) {
+        const nested = parseOrderedListAt(lines, index)
+        if (!nested) break
+        item.nestedLists.push(nested.list)
+        index = nested.nextIndex
+        blankCount = 0
+        continue
+      }
+
+      const indentMatch = line.match(/^([ \t]+)(.*)$/)
+      if (indentMatch && markdownIndentColumns(indentMatch[1]) > list.indent) {
+        item.continuations.push(indentMatch[2])
+        index += 1
+        blankCount = 0
+        continue
+      }
+
+      if (blankCount === 0 && !startsMarkdownBlock(line)) {
+        item.continuations.push(line)
+        index += 1
+        continue
+      }
+
+      index -= blankCount
+      return { list, nextIndex: index }
+    }
+  }
+
+  return { list, nextIndex: index }
+}
 
 export function parseMarkdown(raw: string): MarkdownNode[] {
   const nodes: MarkdownNode[] = []
@@ -75,18 +196,27 @@ export function parseMarkdown(raw: string): MarkdownNode[] {
     }
 
     // Bullet list (- or *)
-    const bulletMatch = line.match(/^\s*[-*]\s+(.+)$/)
+    const bulletMatch = line.match(/^([ \t]*)[-*]\s+(.+)$/)
     if (bulletMatch) {
-      nodes.push({ type: 'bullet', content: bulletMatch[1] })
+      nodes.push({
+        type: 'bullet',
+        content: bulletMatch[2],
+        indent: markdownIndentColumns(bulletMatch[1]),
+      })
       i++
       continue
     }
 
-    // Numbered list
-    const numMatch = line.match(/^\s*\d+[.)]\s+(.+)$/)
-    if (numMatch) {
-      nodes.push({ type: 'numbered', content: numMatch[1] })
-      i++
+    // Ordered list. One semantic container owns the sequence; authored
+    // ordinals after the first item do not become a second numbering truth.
+    const orderedList = parseOrderedListAt(lines, i)
+    if (orderedList) {
+      nodes.push({
+        type: 'ordered-list',
+        content: '',
+        orderedList: orderedList.list,
+      })
+      i = orderedList.nextIndex
       continue
     }
 
@@ -98,7 +228,10 @@ export function parseMarkdown(raw: string): MarkdownNode[] {
     }
 
     // Regular text line
-    nodes.push({ type: 'text', content: line })
+    const textMatch = line.match(/^([ \t]+)(.*)$/)
+    nodes.push(textMatch
+      ? { type: 'text', content: textMatch[2], indent: markdownIndentColumns(textMatch[1]) }
+      : { type: 'text', content: line })
     i++
   }
 
@@ -361,6 +494,60 @@ function StreamCaret({ visible }: { visible: boolean }) {
   return <span className="ready-stream-caret" data-ready-stream-caret="true" aria-hidden="true" />
 }
 
+function OrderedList({
+  list,
+  mentions,
+  streaming,
+}: {
+  list: MarkdownOrderedList
+  mentions?: Readonly<Record<string, MentionResolution>> | null
+  streaming: boolean
+}): React.ReactElement {
+  return (
+    <ol
+      start={list.start}
+      data-ready-ordered-list="true"
+      data-ready-list-delimiter={list.delimiter}
+      data-ready-list-indent={list.indent || undefined}
+    >
+      {list.items.map((item, itemIndex) => {
+        const lastItem = itemIndex === list.items.length - 1
+        const caretOnContent = streaming
+          && lastItem
+          && item.continuations.length === 0
+          && item.nestedLists.length === 0
+        return (
+          <li key={itemIndex}>
+            <span>
+              {renderInline(item.content, mentions)}
+              <StreamCaret visible={caretOnContent} />
+            </span>
+            {item.continuations.map((continuation, continuationIndex) => (
+              <div key={`continuation-${continuationIndex}`} data-ready-list-continuation="true">
+                {renderInline(continuation, mentions)}
+                <StreamCaret
+                  visible={streaming
+                    && lastItem
+                    && continuationIndex === item.continuations.length - 1
+                    && item.nestedLists.length === 0}
+                />
+              </div>
+            ))}
+            {item.nestedLists.map((nested, nestedIndex) => (
+              <OrderedList
+                key={`nested-${nestedIndex}`}
+                list={nested}
+                mentions={mentions}
+                streaming={streaming && lastItem && nestedIndex === item.nestedLists.length - 1}
+              />
+            ))}
+          </li>
+        )
+      })}
+    </ol>
+  )
+}
+
 export function MarkdownContent({
   content,
   streaming = false,
@@ -377,30 +564,6 @@ export function MarkdownContent({
       if (nodes[index].type !== 'br') return index
     }
     return -1
-  }, [nodes])
-
-  // Bug fix: numbered list ordinals must reflect position *within the list*,
-  // not the node's index in the whole document. The line-based parser emits
-  // each numbered line as its own node and inserts `br` nodes between blank
-  // lines, so `idx + 1` was producing 3, 5, 7, 9 (odd numbers from the array
-  // index plus the leading text/br) for an agent reply that wrote 1, 2, 3, 4.
-  // Walk the node list once to compute a stable ordinal that only counts
-  // `numbered` items and is interrupted by any non-numbered, non-br node.
-  const numberedOrdinals = useMemo(() => {
-    const out = new Array<number>(nodes.length).fill(0)
-    let counter = 0
-    for (let i = 0; i < nodes.length; i += 1) {
-      const node = nodes[i]
-      if (node.type === 'numbered') {
-        counter += 1
-        out[i] = counter
-      } else if (node.type !== 'br') {
-        // Any non-br interruption (paragraph, header, code block, bullet)
-        // ends the current ordered list. The next numbered item starts over.
-        counter = 0
-      }
-    }
-    return out
   }, [nodes])
 
   return (
@@ -432,7 +595,15 @@ export function MarkdownContent({
             )
           case 'bullet':
             return (
-              <div key={idx} style={{ display: 'flex', gap: 6, paddingLeft: 4 }}>
+              <div
+                key={idx}
+                data-ready-list-indent={node.indent || undefined}
+                style={{
+                  paddingLeft: node.indent ? `calc(4px + ${node.indent}ch)` : 4,
+                  display: 'flex',
+                  gap: 6,
+                }}
+              >
                 <span style={{ flexShrink: 0, color: 'var(--text-gray)' }}>&bull;</span>
                 <span>
                   {renderInline(node.content, mentions)}
@@ -440,25 +611,15 @@ export function MarkdownContent({
                 </span>
               </div>
             )
-          case 'numbered':
-            return (
-              <div key={idx} style={{ display: 'flex', gap: 6, paddingLeft: 4 }}>
-                <span
-                  style={{
-                    flexShrink: 0,
-                    color: 'var(--text-gray)',
-                    minWidth: 14,
-                    textAlign: 'right'
-                  }}
-                >
-                  {numberedOrdinals[idx]}.
-                </span>
-                <span>
-                  {renderInline(node.content, mentions)}
-                  <StreamCaret visible={showCaret} />
-                </span>
-              </div>
-            )
+          case 'ordered-list':
+            return node.orderedList ? (
+              <OrderedList
+                key={idx}
+                list={node.orderedList}
+                mentions={mentions}
+                streaming={showCaret}
+              />
+            ) : null
           case 'table': {
             const headers = node.headers || []
             const rows = node.rows || []
@@ -500,7 +661,11 @@ export function MarkdownContent({
             return <div key={idx} style={{ height: 6 }} />
           default:
             return (
-              <div key={idx}>
+              <div
+                key={idx}
+                data-ready-markdown-indent={node.indent || undefined}
+                style={{ paddingLeft: node.indent ? `${node.indent}ch` : undefined }}
+              >
                 {renderInline(node.content, mentions)}
                 <StreamCaret visible={showCaret} />
               </div>

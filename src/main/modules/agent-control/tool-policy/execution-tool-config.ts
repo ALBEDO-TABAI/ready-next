@@ -66,9 +66,7 @@ export interface ToolPolicy {
   /**
    * Stage T PR-T5 — conversation scope id. Threaded from
    * `RequestEnvelope.scopeId` by `run-capability-controller`. The
-   * gateway / registry pass it into
-   * `mcp.registry.isAuthorized(toolName, sessionId, scopeId)` so MCP
-   * tool exposure is gated per (session, scope).
+   * tool policy keeps it as the per-turn product scope identity.
    */
   scopeId?: string
   /**

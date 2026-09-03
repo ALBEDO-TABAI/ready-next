@@ -85,7 +85,6 @@ export class CodexProviderStreamPolicy {
     maxStructuralEvents: number
     maxItemHeldBytes: number
     eventIdleMs: number
-    terminalDrainMs: number
   }>, startedAt = Date.now()) {
     if (Object.values(limits).some((value) => !Number.isSafeInteger(value) || value <= 0)) {
       throw new CodexProviderStreamPolicyError('gateway_configuration_invalid')
@@ -149,16 +148,11 @@ export class CodexProviderStreamPolicy {
   }
 
   remainingWaitMs(at = Date.now()): number {
-    const deadline = this.terminalAt === null
-      ? this.lastProgressAt + this.limits.eventIdleMs
-      : this.terminalAt + this.limits.terminalDrainMs
-    return deadline - at
+    return this.lastProgressAt + this.limits.eventIdleMs - at
   }
 
   timeoutCode(): string {
-    return this.terminalAt === null
-      ? 'gateway_native_event_idle_timeout'
-      : 'gateway_native_post_terminal_timeout'
+    return 'gateway_native_event_idle_timeout'
   }
 
   snapshot(): Readonly<{

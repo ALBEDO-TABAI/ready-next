@@ -19,6 +19,11 @@ export type CodexRecoveredStartResolution =
       nativeId: string
       nativeResult: unknown
       evidenceDigest: string
+      forkRecoveryEvidence?: {
+        connectionEpoch: string
+        preResumeThreadReadDigest: string
+        resumedThreadDigest: string
+      }
     }
   | { resolution: 'proven_absent'; evidenceDigest: string }
   | { resolution: 'unknown'; evidenceDigest: string }
@@ -45,6 +50,7 @@ export interface CodexBootRecoveryActions {
   resolveIntentStart(input: {
     member: CodexBindingRecoveryMember
     registry: CodexStartIdentityRegistry
+    recoveryConnectionEpoch: string
   }): Promise<CodexRecoveredStartResolution>
   commitHostFailureProductTerminal(input: {
     failure: CodexHostFailureRecovery
@@ -84,6 +90,7 @@ export class CodexRuntimeBootReconciler {
       | 'closeLateResponseGuardsForConnection'
       | 'readProductRunForThreadBinding'
       | 'quarantineStartInbound'
+      | 'markForkMaterializationProvenAbsent'
     >
     supervisor: Pick<CodexSidecarSupervisor, 'settleBootLease' | 'settleFenceOwnerLease'>
     sidecarSession: CodexBootSidecarSession
@@ -144,7 +151,7 @@ export class CodexRuntimeBootReconciler {
         if (closedReservationSets.has(member.reservationSetId)) continue
         if (deferredReservationSets.has(member.reservationSetId)) continue
         const quarantined = quarantinedFences.some((fence) => (
-          member.method === 'thread/start'
+          member.method !== 'turn/start'
             ? fence.threadBindingId === member.bindingId
             : fence.readyRunId === member.bindingId
         ))
@@ -152,7 +159,7 @@ export class CodexRuntimeBootReconciler {
           if (!unresolvedStartBindings.includes(member.bindingId)) {
             unresolvedStartBindings.push(member.bindingId)
           }
-          if (member.method === 'thread/start') {
+          if (member.method !== 'turn/start') {
             deferredReservationSets.add(member.reservationSetId)
           }
           continue
@@ -161,16 +168,22 @@ export class CodexRuntimeBootReconciler {
           const disposition = await this.deps.actions.dispatchHeldStart({ member, registry })
           if (disposition !== 'accepted') {
             unresolvedStartBindings.push(member.bindingId)
-            deferredReadyRuns.add(member.method === 'turn/start'
-              ? member.bindingId
-              : this.deps.repository.readProductRunForThreadBinding(member.bindingId))
+            if (member.method !== 'thread/fork') {
+              deferredReadyRuns.add(member.method === 'turn/start'
+                ? member.bindingId
+                : this.deps.repository.readProductRunForThreadBinding(member.bindingId))
+            }
           }
-          if (member.method === 'thread/start' && disposition !== 'accepted') {
+          if (member.method !== 'turn/start' && disposition !== 'accepted') {
             deferredReservationSets.add(member.reservationSetId)
           }
           continue
         }
-        const resolution = await this.deps.actions.resolveIntentStart({ member, registry })
+        const resolution = await this.deps.actions.resolveIntentStart({
+          member,
+          registry,
+          recoveryConnectionEpoch: session.connectionEpoch,
+        })
         if (resolution.resolution === 'accepted') {
           this.deps.repository.reconcileStartAccepted({
             connectionEpoch: member.connectionEpoch as string,
@@ -182,6 +195,7 @@ export class CodexRuntimeBootReconciler {
             responseDigest: resolution.evidenceDigest,
             responsePending: true,
             reconciledAt: this.deps.now(),
+            forkRecoveryEvidence: resolution.forkRecoveryEvidence,
           })
           registry.reconcileAccepted({
             connectionEpoch: member.connectionEpoch as string,
@@ -199,6 +213,19 @@ export class CodexRuntimeBootReconciler {
           continue
         }
         if (resolution.resolution === 'proven_absent') {
+          if (member.method === 'thread/fork') {
+            this.deps.repository.markForkMaterializationProvenAbsent({
+              threadBindingId: member.bindingId,
+              evidenceDigest: resolution.evidenceDigest,
+              recordedAt: this.deps.now(),
+            })
+            registry.releaseAfterProvenAbsence({
+              reservationSetId: member.reservationSetId,
+              evidenceDigest: resolution.evidenceDigest,
+            })
+            closedReservationSets.add(member.reservationSetId)
+            continue
+          }
           const readyRunId = member.method === 'turn/start'
             ? member.bindingId
             : this.deps.repository.readProductRunForThreadBinding(member.bindingId)
@@ -229,11 +256,13 @@ export class CodexRuntimeBootReconciler {
           reason: `start_resolution_unknown:${resolution.evidenceDigest}`,
           quarantinedAt: this.deps.now(),
         })
-        newlyQuarantinedReadyRuns.add(member.method === 'turn/start'
-          ? member.bindingId
-          : this.deps.repository.readProductRunForThreadBinding(member.bindingId))
+        if (member.method !== 'thread/fork') {
+          newlyQuarantinedReadyRuns.add(member.method === 'turn/start'
+            ? member.bindingId
+            : this.deps.repository.readProductRunForThreadBinding(member.bindingId))
+        }
         unresolvedStartBindings.push(member.bindingId)
-        if (member.method === 'thread/start') {
+        if (member.method !== 'turn/start') {
           deferredReservationSets.add(member.reservationSetId)
         }
       }

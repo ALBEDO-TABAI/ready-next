@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { createHash, randomUUID } from 'node:crypto'
+import { randomUUID } from 'node:crypto'
 import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { createServer, type Server } from 'node:http'
 import { tmpdir } from 'node:os'
@@ -26,12 +26,16 @@ import {
   instructionTranscriptDigest,
 } from '../main/modules/agent-control/codex-runtime/codex-model-gateway-contract'
 import { verifyCodexAutomaticCompactionEvidence } from '../main/modules/agent-control/codex-runtime/codex-automatic-compaction-evidence'
+import { projectCodexHeadActionProjection } from '../main/modules/agent-control/codex-runtime/codex-action-surface'
 import { CodexModelGateway } from '../main/modules/agent-control/codex-runtime/codex-model-gateway'
 import type { CodexNativeNotification } from '../main/modules/agent-control/codex-runtime/codex-native-runtime'
 import {
+  CodexProductRunPreparer,
   isPreparedCodexProductRun,
   type PreparedCodexProductRun,
 } from '../main/modules/agent-control/codex-runtime/codex-product-run-preparer'
+import { buildTerminalNativeReadbackReceipt, resolveCodexHistoryObservation, resolveCodexTerminalFacts,
+  terminalEvidenceRef, terminalGatewayEvidenceRef, terminalNativeReadbackEvidenceRef } from '../main/modules/agent-control/codex-runtime/codex-terminal-facts'
 import type { ToolDefinition } from '../main/modules/agent-control/tools-runtime/tool-definition'
 import {
   createCodexAuthorizationForSurface,
@@ -108,59 +112,41 @@ function chatSse(input: {
 
 function prepared(
   runId: string,
+  text: string,
   reservation: StartIdentityReservationSet,
+  actionAdmissionRef: PreparedCodexProductRun['ingress']['actionAdmissionRef'],
   runScopeId = scopeId,
   readyToolSurface: PreparedCodexProductRun['readyToolSurface'] = createCodexToolFixture([]).readyToolSurface,
 ): PreparedCodexProductRun {
   const maxToolCalls = readyToolSurface.toolNames.length > 0 ? 4 : 0
-  return {
-    preparationContract: 'codex_product_run_e1',
+  const result = new CodexProductRunPreparer().prepare({
     readyMemorySnapshot: disabledReadyMemorySnapshot(),
     taskId: `task-${runId}`,
     runId,
-    conversationAlias: { aliasId: runScopeId, aliasGeneration: 1 },
-    ingressBinding: {
-      requestId: `request-${runId}`,
-      reservationSetId: reservation.reservationSetId,
-      reservationEvidenceDigest: reservation.reservationEvidenceDigest,
-    },
-    ingress: {
-      kind: 'user_ingress', attemptKind: 'user_ingress',
-      originUserMessageId: `message-${runId}`,
-      canonicalCurrentInputRef: {
-        messageId: `message-${runId}`,
-        input: [{ type: 'text', text: `input-${runId}`, text_elements: [] }],
-      },
-      explicitResourceEnvelope: { input: [], resourceRefs: [] },
-      resourceAdditionalContext: [],
-    },
-    resourceAnchorDigest: createHash('sha256').update(JSON.stringify({
-      explicitResourceEnvelope: { input: [], resourceRefs: [] },
-      resourceAdditionalContext: [],
-    })).digest('hex'),
-    recoveredContextDigest: null,
+    scopeId: runScopeId, aliasId: runScopeId, aliasGeneration: 1,
+    requestId: `request-${runId}`, taskOrigin: 'user_root', runOrigin: 'initial',
+    reservationSetId: reservation.reservationSetId,
+    reservationEvidenceDigest: reservation.reservationEvidenceDigest,
+    originUserMessageId: `message-${runId}`,
+    currentInput: [{ type: 'text', text, text_elements: [] }],
+    explicitResourceEnvelope: { input: [], resourceRefs: [] },
+    resourceAdditionalContext: [], actionAdmissionRef,
+    uncommittedTailAssignments: [], supersededUncommittedItems: [],
+    trustedWorkbenchMode: 'browser',
     readyToolSurface,
     readyTurnToolAuthorization: createCodexAuthorizationForSurface(
       readyToolSurface,
       `authorization-${runId}`,
     ),
-    readyToolHostIdentity: {
-      scopeId: runScopeId, aliasId: runScopeId,
-      authorizationOwnerId: `owner-${runId}`,
-      resourceOwnerId: `resource-owner-${runId}`,
-    },
+    authorizationOwnerId: `owner-${runId}`,
+    resourceOwnerId: `resource-owner-${runId}`,
     productBudgetSeed: {
       maxIterations: 8, maxToolCalls, maxParallelToolGroups: 1,
-      lanes: {
-        ordinary: { maxIterations: 7, maxToolCalls, maxParallelToolGroups: 1 },
-        delivery: { maxIterations: 0, maxToolCalls: 0, maxParallelToolGroups: 0 },
-        final: { maxIterations: 1 },
-      },
     },
-    neutralProjectionSeed: {
-      phase: 'planning', taskTitle: '正在理解需求', taskSummary: '正在整理任务边界、资源与可用能力',
-    },
-  }
+  })
+  assert.equal(result.ok, true)
+  if (!result.ok) throw new Error(result.code)
+  return result.prepared
 }
 
 function waitForNotification(
@@ -632,10 +618,11 @@ test('pinned app-server crosses the Ready gateway for product and compaction req
       );
       CREATE TABLE run_meta (
         run_id TEXT PRIMARY KEY, task_id TEXT, scope_id TEXT,
-        status TEXT NOT NULL, execution_binding_json TEXT,
+        status TEXT NOT NULL, terminal_reason TEXT, execution_binding_json TEXT,
         message_visibility_epoch INTEGER NOT NULL DEFAULT 0
       );
     `)
+    __runMigrationForTests('053_pending_confirmations', db as unknown as MigrationDatabase)
     __runMigrationForTests('088_codex_runtime_bindings', db as unknown as MigrationDatabase)
     __runMigrationForTests('089_codex_runtime_evidence_guards', db as unknown as MigrationDatabase)
     __runMigrationForTests('090_codex_model_gateway_authority', db as unknown as MigrationDatabase)
@@ -766,6 +753,7 @@ test('pinned app-server crosses the Ready gateway for product and compaction req
     const snapshotByRun = new Map<string, typeof snapshot>()
     const reserveAndAdmit = (
       runId: string,
+      text: string,
       existingThread: boolean,
       upstreamSnapshot = snapshot,
       runScopeId = scopeId,
@@ -776,8 +764,18 @@ test('pinned app-server crosses the Ready gateway for product and compaction req
       const reserved = registry.reserve({ scopeId: runScopeId, existingThread })
       assert.equal(reserved.ok, true)
       if (!reserved.ok) throw new Error(reserved.code)
-      const run = prepared(runId, reserved.reservation, runScopeId, readyToolSurface)
-      assert.equal(isPreparedCodexProductRun(run), true, JSON.stringify(run))
+      db.prepare(`INSERT OR IGNORE INTO chat_conversations (id) VALUES (?)`).run(runScopeId)
+      const head = projectCodexHeadActionProjection(repository.readHeadActionFacts({
+        aliasId: runScopeId, aliasGeneration: 1,
+        currentRuntimeManifestDigest: runtime.manifestDigest,
+        currentProtocolSchemaDigest: 'protocol-schema-e3',
+      }))
+      const actionAdmissionRef = {
+        headProjectionDigest: head.evidenceDigest,
+        actionProjectionVersion: head.actionProjectionVersion,
+        actionHeadIdentity: head.actionHeadIdentity!,
+      }
+      const run = prepared(runId, text, reserved.reservation, actionAdmissionRef, runScopeId, readyToolSurface)
       const executionBinding = { schemaVersion: 1, runId: run.runId }
       const parentMeta = { requestId: run.ingressBinding.requestId }
       const parentTimestamp = '2026-08-07T00:00:00.000Z'
@@ -785,7 +783,6 @@ test('pinned app-server crosses the Ready gateway for product and compaction req
         .filter((item) => item.type === 'text')
         .map((item) => item.text)
         .join('')
-      db.prepare(`INSERT OR IGNORE INTO chat_conversations (id) VALUES (?)`).run(runScopeId)
       db.prepare(`
         INSERT INTO chat_messages (id, conversation_id, role, content, timestamp, meta_json, message_visibility_epoch)
         VALUES (?, ?, 'user', ?, ?, ?, 0)
@@ -816,6 +813,7 @@ test('pinned app-server crosses the Ready gateway for product and compaction req
         runScopeId,
         JSON.stringify(executionBinding),
       )
+      assert.equal(isPreparedCodexProductRun(run), true, JSON.stringify(run))
       const admissionInput = {
         prepared: run,
         reservation: reserved.reservation,
@@ -851,7 +849,8 @@ test('pinned app-server crosses the Ready gateway for product and compaction req
       return run
     }
 
-    const firstRun = reserveAndAdmit('run-first', false)
+    const firstText = `ARM_AUTOMATIC_COMPACTION\n${'x '.repeat(230_000)}`
+    const firstRun = reserveAndAdmit('run-first', firstText, false)
     const startedSession = await session.startAndInitialize({
       registry,
       snapshot: repository.readRecoverySnapshot(() => false),
@@ -865,14 +864,20 @@ test('pinned app-server crosses the Ready gateway for product and compaction req
       config: { model_context_window: 272_000 }, dynamicTools: [],
       developerInstructions,
     })
-    const closeoutRun = (
+    const closeoutRun = async (
       run: PreparedCodexProductRun,
       status: 'completed' | 'failed',
       candidate: CoreTurnCandidate,
-    ): void => {
+    ): Promise<void> => {
       assert.equal(candidate.kind, 'native_terminal')
       if (candidate.kind !== 'native_terminal') throw new Error('native_terminal_missing')
       const closeoutAt = new Date().toISOString()
+      const nativeThread = (await client.threadRead({ threadId: candidate.codexThreadId, includeTurns: true })).thread
+      const automatic = verifyCodexAutomaticCompactionEvidence({ gatewayRepository, readyRunId: run.runId,
+        codexThreadId: candidate.codexThreadId, codexTurnId: candidate.codexTurnId,
+        upstreamProfileSnapshotDigest: snapshotByRun.get(run.runId)!.snapshotDigest,
+        productToolSurfaceDigest: run.readyToolSurface.toolSurfaceDigest, thread: nativeThread })
+      candidate.contextState = { ...candidate.contextState, automaticCompactionExchanges: automatic ? [automatic] : [] }
       repository.recordEngineTerminalCandidate({
         readyRunId: run.runId,
         codexThreadId: candidate.codexThreadId,
@@ -882,10 +887,37 @@ test('pinned app-server crosses the Ready gateway for product and compaction req
         recordedAt: closeoutAt,
       })
       repository.recordToolPublicationReceipt({ readyRunId: run.runId, recordedAt: closeoutAt })
+      const engine = repository.readEngineTerminalCandidate(run.runId)!
+      const identity = { readyRunId: run.runId, readyScopeId: run.readyToolHostIdentity.scopeId,
+        messageVisibilityEpoch: 0, aliasGeneration: run.conversationAlias.aliasGeneration,
+        codexThreadId: candidate.codexThreadId, codexTurnId: candidate.codexTurnId }
+      const nativeReadback = buildTerminalNativeReadbackReceipt({ candidate, prepared: run,
+        aliasGeneration: identity.aliasGeneration, messageVisibilityEpoch: 0,
+        connectionEpoch: repository.readLiveProcessLease()!.connectionEpoch, turnRevision: engine.revision, thread: nativeThread })
+      const gatewayEvidence = gatewayRepository.readTurnGatewayEvidence(identity)
+      const evidence = [terminalEvidenceRef({ ...identity, kind: 'native_turn', revision: 1,
+        receiptId: `engine-terminal:${run.runId}`, digest: engine.candidateDigest,
+        ownerIdentity: { nativeTurnId: candidate.codexTurnId, terminalStatus: candidate.engineOutcome } }),
+      terminalNativeReadbackEvidenceRef({ ...identity, revision: nativeReadback.turnRevision,
+        receiptId: nativeReadback.receiptId, digest: nativeReadback.digest,
+        ownerIdentity: { connectionEpoch: nativeReadback.connectionEpoch, readRevision: nativeReadback.turnRevision,
+          verifiedThreadId: candidate.codexThreadId, verifiedTurnId: candidate.codexTurnId } }),
+      ...gatewayEvidence.map((row) => terminalGatewayEvidenceRef({ ...identity,
+        revision: row.responseSequence ?? row.requestSequence, receiptId: row.receiptId,
+        digest: row.responseEvidenceDigest ?? row.requestEvidenceDigest,
+        ownerIdentity: { gatewayRequestReceiptId: row.receiptId, eventSequence: row.responseSequence ?? row.requestSequence } }))]
+      const history = resolveCodexHistoryObservation({ candidate, prepared: run,
+        expectedClientUserMessageId: `client-message-${run.runId}`, thread: nativeThread, publicationDiverged: false,
+        gatewayEvidence })
+      assert.equal(history.kind, 'continuation_safe', JSON.stringify(history))
+      const terminalFacts = resolveCodexTerminalFacts({ product: {
+        terminal: status === 'completed' ? 'done' : 'error', terminalReason: status === 'completed' ? 'done' : 'blocked_external',
+        failureKind: status === 'completed' ? null : 'provider', evidence,
+      }, history, historyEvidence: evidence, effect: { state: 'none', evidence: [] } })
       const terminalMeta = {
         taskId: run.taskId,
         runId: run.runId,
-        terminalReason: status === 'completed' ? 'done' : 'failed',
+        terminalReason: terminalFacts.product.terminalReason,
       }
       const messageId = `assistant:${run.taskId}:${run.runId}:terminal`
       const acceptedText = candidate.candidateSelection.kind === 'accepted'
@@ -908,6 +940,8 @@ test('pinned app-server crosses the Ready gateway for product and compaction req
           status,
           run.taskId,
         )
+        db.prepare('UPDATE run_meta SET status = ?, terminal_reason = ? WHERE run_id = ?')
+          .run(terminalFacts.product.terminal, terminalFacts.product.terminalReason, run.runId)
         db.prepare(`
           INSERT INTO chat_messages (id, conversation_id, role, content, timestamp, meta_json, message_visibility_epoch)
           VALUES (?, ?, 'assistant', ?, ?, ?, 0)
@@ -922,6 +956,7 @@ test('pinned app-server crosses the Ready gateway for product and compaction req
           readyRunId: run.runId,
           productTerminalDigest,
           closeoutAt,
+          terminalEvidence: { terminalFacts, nativeReadback },
         })
         db.exec('COMMIT')
       } catch (error) {
@@ -935,6 +970,7 @@ test('pinned app-server crosses the Ready gateway for product and compaction req
       expectedStatus: 'completed' | 'failed' = 'completed',
       runThreadId = startedThread.thread.id,
     ) => {
+      assert.deepEqual(run.ingress.canonicalCurrentInputRef.input, [{ type: 'text', text, text_elements: [] }])
       const terminalPromise = waitForNotification(client, (notification) => (
         notification.method === 'turn/completed'
         && notification.params.threadId === runThreadId
@@ -951,7 +987,7 @@ test('pinned app-server crosses the Ready gateway for product and compaction req
           },
         },
         environments: [],
-        input: [{ type: 'text', text, text_elements: [] }],
+        input: run.ingress.canonicalCurrentInputRef.input,
         additionalContext: {},
         responsesapiClientMetadata: {
           readyRunId: run.runId,
@@ -992,11 +1028,11 @@ test('pinned app-server crosses the Ready gateway for product and compaction req
         projectionPatchRefs: [],
         allowNullPhaseFallback: true,
       }, terminal.params.turn)
-      closeoutRun(run, expectedStatus, candidate)
+      await closeoutRun(run, expectedStatus, candidate)
       return { turnId: started.turn.id }
     }
-    await runTurn(firstRun, `ARM_AUTOMATIC_COMPACTION\n${'x '.repeat(230_000)}`)
-    const secondRun = reserveAndAdmit('run-second', true)
+    await runTurn(firstRun, firstText)
+    const secondRun = reserveAndAdmit('run-second', 'OBSERVE_AUTOMATIC_COMPACTION', true)
     const secondTurn = await runTurn(secondRun, 'OBSERVE_AUTOMATIC_COMPACTION')
     const automaticReadback = await client.threadRead({
       threadId: startedThread.thread.id,
@@ -1039,8 +1075,8 @@ test('pinned app-server crosses the Ready gateway for product and compaction req
       providerSnapshot: snapshot.snapshot,
       credentialReferenceId: snapshot.snapshot.credentialReferenceId,
       expectedToolsDigest: digestCanonicalJson([]),
-      preDispatchThreadReadDigest: 'pre-dispatch-thread-read',
-      preDispatchTurnIds: [],
+      preDispatchThreadReadDigest: digestCanonicalJson(automaticReadback.thread),
+      preDispatchTurnIds: automaticReadback.thread.turns.map((turn) => turn.id),
       expiresAt: new Date(Date.now() + 20_000).toISOString(),
       createdAt: new Date().toISOString(),
     })
@@ -1059,6 +1095,9 @@ test('pinned app-server crosses the Ready gateway for product and compaction req
     const compactTurn = compactRead.thread.turns.find((turn) => turn.id === manualEvidence.turnId)
     const readbackCompactionItems = compactTurn?.items.filter((item) => item.type === 'contextCompaction') || []
     assert.equal(readbackCompactionItems.length, 1)
+    const manualGateway = gatewayRepository.readManualCompactionGatewayEvidence({ manualCompactionId: 'manual-e3',
+      codexThreadId: startedThread.thread.id, codexTurnId: manualEvidence.turnId })
+    assert.ok(manualGateway)
     repository.consumeManualCompaction({
       manualCompactionId: 'manual-e3',
       codexCompactionTurnId: manualEvidence.turnId,
@@ -1066,9 +1105,9 @@ test('pinned app-server crosses the Ready gateway for product and compaction req
       contextCompactionItemId: readbackCompactionItems[0].id,
       threadReadDigest: digestCanonicalJson(compactRead.thread),
       terminalEvidenceDigest: digestCanonicalJson(compactTurn),
-      gatewayRequestReceiptId: 'gateway-receipt-e3',
-      gatewayRequestEvidenceDigest: 'gateway-request-evidence-e3',
-      gatewayResponseEvidenceDigest: 'gateway-response-evidence-e3',
+      gatewayRequestReceiptId: manualGateway.receiptId,
+      gatewayRequestEvidenceDigest: manualGateway.requestEvidenceDigest,
+      gatewayResponseEvidenceDigest: manualGateway.responseEvidenceDigest,
       consumedAt: new Date().toISOString(),
     })
     await session.getInboundBuffer().reconcileTurn({
@@ -1181,6 +1220,7 @@ test('pinned app-server crosses the Ready gateway for product and compaction req
     })
     const longToolRun = reserveAndAdmit(
       'run-native-tool-long',
+      'TRIGGER_NATIVE_TOOL_LONG',
       false,
       nativeFailureSnapshot,
       longToolScopeId,
@@ -1218,7 +1258,7 @@ test('pinned app-server crosses the Ready gateway for product and compaction req
           },
         },
         environments: [],
-        input: [{ type: 'text', text: 'TRIGGER_NATIVE_TOOL_LONG', text_elements: [] }],
+        input: longToolRun.ingress.canonicalCurrentInputRef.input,
         additionalContext: {},
         responsesapiClientMetadata: {
           readyRunId: longToolRun.runId,
@@ -1247,6 +1287,8 @@ test('pinned app-server crosses the Ready gateway for product and compaction req
       }),
     )
     assert.equal(longToolCandidate.usedToolCalls.length, 1)
+    assert.ok((longToolCandidate.contextUsage?.usedInputTokens || 0) > 0)
+    assert.equal(longToolCandidate.contextUsage?.source, 'last_model_request')
     assert.equal(toolExecutions, executionsBeforeLongTool + 1)
     assert.equal(toolResponseDeliveries, deliveriesBeforeLongTool + 1)
     assert.ok(upstreamPaths.includes('/v1/responses'))

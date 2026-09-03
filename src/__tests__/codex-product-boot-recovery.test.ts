@@ -482,7 +482,7 @@ function rootThread(turns: CodexTurn[]): CodexThread {
 
 function product(): CodexProductTurnRuntimeRead {
   const prepared = {
-    preparationContract: 'codex_product_run_e1' as const,
+    preparationContract: 'codex_product_run_e2' as const,
     readyMemorySnapshot: disabledReadyMemorySnapshot(),
     taskId: 'task-1', runId: 'run-1',
     conversationAlias: { aliasId: 'scope-1', aliasGeneration: 1 },
@@ -498,8 +498,24 @@ function product(): CodexProductTurnRuntimeRead {
       },
       explicitResourceEnvelope: { input: [], resourceRefs: [] },
       resourceAdditionalContext: [],
+      actionAdmissionRef: {
+        headProjectionDigest: 'a'.repeat(64),
+        actionProjectionVersion: {
+          scopeEpoch: 0, headGeneration: 1, actionProjectionSequence: 0,
+        },
+        actionHeadIdentity: {
+          aliasId: 'scope-1', aliasGeneration: 1,
+          threadBindingId: 'binding-1', headRevision: 1,
+        },
+      },
+      uncommittedTailAssignments: [],
+      supersededUncommittedItems: [],
     },
-    resourceAnchorDigest: 'resource-anchor', recoveredContextDigest: null,
+    resourceAnchorDigest: 'resource-anchor',
+    sourceTrustedEnvironmentRef: {
+      workbenchMode: 'browser' as const,
+      environmentDigest: 'b'.repeat(64),
+    },
     readyToolSurface: {
       contractVersion: 1 as const, surfaceId: 'surface-1', dynamicTools: [],
       toolSurfaceDigest: 'surface-digest',
@@ -630,8 +646,9 @@ function insertGatewayReceipt(input: {
     INSERT INTO ready_model_gateway_exchange_events (
       gateway_request_receipt_id, event_kind, instruction_digest, input_digest,
       input_items_json, input_total_string_characters, input_max_string_characters,
-      tools_digest, tool_count, body_bytes, evidence_digest, recorded_at
-    ) VALUES (?, 'request_admitted', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      tools_digest, tool_count, body_bytes, memory_history_redaction_digest,
+      memory_history_redacted_item_count, evidence_digest, recorded_at
+    ) VALUES (?, 'request_admitted', ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
   `).run(
     input.receiptId,
     digestCanonicalJson(`instruction:${input.receiptId}`),
@@ -646,6 +663,7 @@ function insertGatewayReceipt(input: {
     input.toolsDigest || digestCanonicalJson([]),
     input.toolCount || 0,
     inputCharacters + 100,
+    digestCanonicalJson([]),
     digestCanonicalJson(`request-evidence:${input.receiptId}`),
     input.acceptedAt,
   )

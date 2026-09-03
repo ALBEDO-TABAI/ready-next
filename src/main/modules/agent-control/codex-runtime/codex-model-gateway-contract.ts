@@ -48,6 +48,18 @@ export type CodexModelGatewayResponseEvidence = Readonly<{
   usageDigest: string
 }>
 
+export type CodexModelGatewayFailureEvidence = Readonly<{
+  failureClass: 'provider' | 'transport' | 'protocol' | 'context'
+  failureStage: 'connect' | 'headers' | 'stream-before-item' | 'stream-after-item' | 'terminal-validation' | 'post-terminal'
+  responseIdentitySeen: boolean
+  partialAssistantItemSeen: boolean
+  toolCallItemSeen: boolean
+  elapsedMs: number
+  eventCount: number
+  wireByteCount: number
+  causeCode: string
+}>
+
 export type CodexUpstreamProfileSnapshot = Readonly<{
   profileId: string
   providerId: string

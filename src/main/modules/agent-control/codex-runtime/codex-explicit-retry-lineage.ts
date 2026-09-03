@@ -2,42 +2,9 @@ import type {
   CodexBindingRepository,
   CodexProductTurnRuntimeRead,
 } from './codex-binding-repository'
-import type { CodexRetryArtifactSource } from './codex-product-run-preparer'
 import type { ProductTurnReceipt } from '../../../../shared/ipc-contracts/agent-runtime'
-
-type RetryLineageNode = {
-  runtime: CodexProductTurnRuntimeRead
-  receipt: ProductTurnReceipt
-}
-
-function retryArtifactSources(nodes: readonly RetryLineageNode[]): CodexRetryArtifactSource[] {
-  const sources = new Map<string, CodexRetryArtifactSource>()
-  for (const node of nodes) {
-    if (node.runtime.prepared.ingress.attemptKind === 'explicit_retry') {
-      for (const source of node.runtime.prepared.ingress.artifactSources ?? []) {
-        sources.set(source.relativePath, source)
-      }
-    }
-    for (const artifact of node.receipt.artifacts) {
-      if (!artifact.logicalArtifactRef || !artifact.version || !artifact.sha256
-        || !['staged', 'exported', 'verified', 'indeterminate'].includes(artifact.state)) continue
-      const inherited = sources.get(artifact.relativePath)
-      const sameSource = inherited
-        && inherited.logicalArtifactRef === artifact.logicalArtifactRef
-        && inherited.version === artifact.version
-        && inherited.sha256 === artifact.sha256
-      sources.set(artifact.relativePath, {
-        sourceReadyRunId: sameSource ? inherited.sourceReadyRunId : node.runtime.readyRunId,
-        relativePath: artifact.relativePath,
-        logicalArtifactRef: artifact.logicalArtifactRef,
-        version: artifact.version,
-        sha256: artifact.sha256,
-        state: artifact.state as CodexRetryArtifactSource['state'],
-      })
-    }
-  }
-  return Array.from(sources.values())
-}
+import { digestCodexUserInput } from './codex-user-input'
+import { digestCanonicalJson } from './codex-model-gateway-contract'
 
 export function resolveCodexExplicitRetryLineage(input: {
   repository: Pick<CodexBindingRepository,
@@ -49,21 +16,22 @@ export function resolveCodexExplicitRetryLineage(input: {
   taskContext: CodexProductTurnRuntimeRead
   predecessor: CodexProductTurnRuntimeRead
   predecessorReceipt: ProductTurnReceipt
-  artifactSources: CodexRetryArtifactSource[]
 } {
   const requested = input.repository.readProductTurnRuntime(input.requestedRunId)
   const requestedReceipt = input.repository.readProductTurnPresentation(input.requestedRunId)
   if (requestedReceipt.presentationDigest !== input.requestedPresentationDigest
     || requested.readyScopeId !== input.readyScopeId
     || requestedReceipt.readyScopeId !== input.readyScopeId
-    || !requestedReceipt.failure) {
+    || !requestedReceipt.failure
+    || requestedReceipt.actionProjection.retry_failed_task.availability !== 'ready') {
     throw new Error('codex_explicit_retry_predecessor_invalid')
   }
 
-  const nodes: RetryLineageNode[] = [{ runtime: requested, receipt: requestedReceipt }]
   let taskContext = requested
+  const retryLineage: CodexProductTurnRuntimeRead[] = []
   const ancestorIds = new Set([requested.readyRunId])
   while (taskContext.prepared.ingress.attemptKind !== 'user_ingress') {
+    retryLineage.push(taskContext)
     const predecessorRunId = taskContext.prepared.ingress.predecessorRunId
     if (!predecessorRunId || ancestorIds.has(predecessorRunId)) {
       throw new Error('codex_explicit_retry_lineage_invalid')
@@ -76,31 +44,33 @@ export function resolveCodexExplicitRetryLineage(input: {
       || !receipt.failure) {
       throw new Error('codex_explicit_retry_lineage_invalid')
     }
-    nodes.unshift({ runtime: taskContext, receipt })
   }
 
-  let predecessor = requested
-  let predecessorReceipt = requestedReceipt
-  const successorIds = new Set(ancestorIds)
-  while (true) {
-    const successorRunId = input.repository.readProductTurnSuccessorId(predecessor.readyRunId)
-    if (!successorRunId) break
-    if (successorIds.has(successorRunId)) throw new Error('codex_explicit_retry_lineage_invalid')
-    successorIds.add(successorRunId)
-    predecessor = input.repository.readProductTurnRuntime(successorRunId)
-    predecessorReceipt = input.repository.readProductTurnPresentation(successorRunId)
-    if (predecessor.readyScopeId !== input.readyScopeId
-      || predecessorReceipt.readyScopeId !== input.readyScopeId
-      || !predecessorReceipt.failure) {
-      throw new Error('codex_explicit_retry_predecessor_invalid')
+  if (input.repository.readProductTurnSuccessorId(requested.readyRunId)) {
+    throw new Error('codex_explicit_retry_predecessor_stale')
+  }
+  const root = taskContext.prepared.ingress.canonicalCurrentInputRef
+  const rootDigest = digestCodexUserInput(root.input)
+  const rootIngressContractDigest = digestCanonicalJson(taskContext.prepared)
+  for (const retry of retryLineage) {
+    const ingress = retry.prepared.ingress
+    if (ingress.attemptKind !== 'explicit_retry'
+      || ingress.modelVisibleRootOriginRef?.sourceReadyRunId !== taskContext.readyRunId
+      || ingress.modelVisibleRootOriginRef.originUserMessageId !== root.messageId
+      || ingress.modelVisibleRootOriginRef.inputDigest !== rootDigest
+      || ingress.modelVisibleRootOriginRef.sourceIngressContractDigest !== rootIngressContractDigest
+      || ingress.canonicalCurrentInputRef.messageId !== root.messageId
+      || ingress.controlAuditMessageRef?.messageId !== ingress.originUserMessageId
+      || ingress.currentTrustedEnvironmentRef?.trustedWorkbenchMode
+        !== taskContext.prepared.sourceTrustedEnvironmentRef.workbenchMode
+      || ingress.predecessorPresentationRef?.readyRunId !== ingress.predecessorRunId) {
+      throw new Error('codex_explicit_retry_lineage_invalid')
     }
-    nodes.push({ runtime: predecessor, receipt: predecessorReceipt })
   }
 
   return {
     taskContext,
-    predecessor,
-    predecessorReceipt,
-    artifactSources: retryArtifactSources(nodes),
+    predecessor: requested,
+    predecessorReceipt: requestedReceipt,
   }
 }

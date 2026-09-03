@@ -48,7 +48,9 @@ import {
   requiresCheckpointContinuationHandle,
   toRunCloseMetric,
   writeRunMetaOutcome,
-  writeTerminalOutcome,
+  prepareTerminalOutcome,
+  writePreparedTerminalOutcome,
+  type PreparedTerminalOutcome,
 } from './run-finalizer-persistence'
 export { resolveDynamicDeliveryFinalizerBlocker } from './run-finalizer-adjudication'
 
@@ -71,17 +73,6 @@ export async function finalizeRunOutcome(
     outcome = { ...outcome, taskBudgetRuntime: terminalBudgetRuntime } as RunOutcome
   }
 
-  if (outcome.kind === 'done') {
-    const finalized = await writeTerminalOutcome(outcome, deps, 'done', outcome.terminalReason || 'done')
-    closeoutBrowserClaimsIfOwned(outcome, deps, {
-      ownerRunId: outcome.runId,
-      resumable: false,
-      suspensionCheckpointId: null,
-      suspensionReason: null,
-    })
-    return finalized
-  }
-
   if (outcome.kind === 'checkpoint') {
     if (
       requiresCheckpointContinuationHandle(outcome.terminalReason) &&
@@ -92,22 +83,20 @@ export async function finalizeRunOutcome(
       throw new Error('checkpoint outcome requires a valid continuation handle')
     }
 
-    const finalized = await writeTerminalOutcome(outcome, deps, 'checkpoint', outcome.terminalReason || 'checkpoint')
-    closeoutBrowserClaimsIfOwned(outcome, deps, {
-      ownerRunId: outcome.runId,
-      resumable: false,
-      suspensionCheckpointId: null,
-      suspensionReason: null,
-    })
-    return finalized
   }
+  const status = outcome.kind === 'done' || outcome.kind === 'checkpoint'
+    ? outcome.kind : statusFromOutcomeKind(outcome.kind)
+  return finalizePreparedRunOutcome(outcome, deps, prepareTerminalOutcome(
+    outcome, deps, status, outcome.terminalReason || status,
+  ))
+}
 
-  const finalized = await writeTerminalOutcome(
-    outcome,
-    deps,
-    statusFromOutcomeKind(outcome.kind),
-    outcome.terminalReason
-  )
+export async function finalizePreparedRunOutcome(
+  outcome: RunOutcome,
+  deps: RunFinalizerDeps,
+  prepared: PreparedTerminalOutcome,
+): Promise<FinalizedRunOutcome> {
+  const finalized = await writePreparedTerminalOutcome(outcome, deps, prepared)
   closeoutBrowserClaimsIfOwned(outcome, deps, {
     ownerRunId: outcome.runId,
     resumable: false,

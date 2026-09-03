@@ -56,7 +56,7 @@ function seedStore(opts: {
   inputValue?: string
 }) {
   useAgent.setState({
-    agents: [{ name: 'butler', displayName: '管家', avatar: '', status: 'idle', selected: true }],
+    agents: [{ name: 'butler', displayName: '管家', avatar: '', status: 'idle' }],
     messages: opts.messages ?? getSessionSlice({ ...useAgent.getState(), sessions: opts.sessions, activeSessionId: opts.activeSessionId }, opts.activeSessionId).messages,
     currentAgent: 'butler',
     inputValue: opts.inputValue ?? opts.sessions[opts.activeSessionId]?.inputValue ?? '',

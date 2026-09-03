@@ -49,11 +49,19 @@ const RSS_TOOLS: RSSToolDef[] = [
   },
   {
     name: 'rss_analyze_item',
-    description: '对指定 RSS 条目运行 copy 或 visual 分析流程。',
+    description: '启动指定 RSS 条目的 copy 或 visual 分析任务。',
     action: 'rss.analyzeItem',
     intent: 'analyze_rss_item',
     executionKind: 'pipeline',
     params: zodObjectToParamList(RSS_SCHEMAS.rss_analyze_item) as ToolParam[],
+  },
+  {
+    name: 'rss_get_analysis_result',
+    description: '等待 RSS 分析任务结束并返回报告路径与校验值。',
+    action: 'rss.getAnalysisResult',
+    intent: 'get_rss_analysis_result',
+    executionKind: 'pipeline',
+    params: zodObjectToParamList(RSS_SCHEMAS.rss_get_analysis_result) as ToolParam[],
   },
   {
     name: 'rss_capture_session',

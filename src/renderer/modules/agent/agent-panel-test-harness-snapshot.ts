@@ -73,6 +73,8 @@ function serializeMessage(message: AgentMessage): AgentPanelMessageSnapshot {
     timestamp: toIso(message.timestamp),
     attachmentNames: (message.attachments || []).map((attachment) => attachment.name),
     metaKeys: Object.keys(message.meta || {}).sort(),
+    runId: readText(meta?.runId),
+    terminalReason: readText(meta?.terminalReason),
     askUserQuestionsStatus: message.askUserQuestions?.status || readText(askUserQuestionsMeta?.status),
   }
 }
@@ -115,6 +117,7 @@ function serializeRun(run: ScopeRunState | null): AgentPanelRunSnapshot | null {
       lastToolAt: run.stepMetrics?.lastToolAt || null,
     },
     progress: run.progress || null,
+    contextUsage: run.contextUsage || null,
     softError: run.softError || null,
     error: completed ? null : run.error || null,
     blockedReason: completed ? null : run.blockedReason || null,
@@ -348,8 +351,9 @@ export function createAgentPanelSnapshot(
   state: StoreState,
   projectionCards: AgentPanelTaskCardSnapshot[] = [],
 ): AgentPanelSnapshot {
-  const activeRun = state.currentScopeId ? state.scopeRunStates[state.currentScopeId] || null : null
-  const runCards = Object.values(state.scopeRunStates || {})
+  const visibleScopeRunStates = state.scopeRunStates || {}
+  const activeRun = state.currentScopeId ? visibleScopeRunStates[state.currentScopeId] || null : null
+  const runCards = Object.values(visibleScopeRunStates)
     .filter((run) => run.scopeId === state.currentScopeId || run.taskTitle || run.taskSummary || run.toolTrace.length > 0)
     .map(taskCardFromRun)
   const messageCards = state.messages

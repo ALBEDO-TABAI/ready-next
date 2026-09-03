@@ -312,10 +312,14 @@ test('gateway validates original sidecar input but receipts and forwards redacte
     client_metadata: {
       'x-codex-installation-id': 'installation-memory', session_id: 'thread-memory',
       'x-codex-window-id': 'thread-memory:0', turn_id: 'turn-memory', thread_id: 'thread-memory',
+      root_turn_id: 'turn-memory',
       'x-codex-turn-metadata': JSON.stringify({
         installation_id: 'installation-memory', session_id: 'thread-memory', request_kind: 'turn',
         thread_id: 'thread-memory', turn_id: 'turn-memory', window_id: 'thread-memory:0',
-        sandbox: 'seatbelt', turn_started_at_unix_ms: 1, readyRunId: 'run-memory',
+        root_turn_id: 'turn-memory', agent_name: '/root',
+        sandbox: 'seatbelt', sandbox_mode: 'read-only', auto_review_enabled: false,
+        node_repl_auto_review_required: false, node_repl_disabled: false,
+        turn_started_at_unix_ms: 1, readyRunId: 'run-memory',
         toolSurfaceDigest: digestCanonicalJson(tools), turnContractDigest: 'turn-contract-memory',
         upstreamProfileSnapshotDigest: created.snapshotDigest,
       }),
@@ -383,8 +387,9 @@ test('gateway validates original sidecar input but receipts and forwards redacte
       },
       body: JSON.stringify(body),
     })
-    assert.equal(response.status, 200)
-    assert.match(await response.text(), /response\.completed/)
+    const responseText = await response.text()
+    assert.equal(response.status, 200, responseText)
+    assert.match(responseText, /response\.completed/)
 
     const expectedProviderInput = [
       originalInput[1], originalInput[2], currentMarker.item, originalInput[6],

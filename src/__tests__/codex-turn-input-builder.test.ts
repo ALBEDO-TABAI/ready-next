@@ -5,6 +5,8 @@ import {
   CodexTurnInputBuilder,
   textUserInput,
 } from '../main/modules/agent-control/codex-runtime/codex-turn-input-builder'
+import { digestCodexUserInput } from '../main/modules/agent-control/codex-runtime/codex-user-input'
+import { digestCanonicalJson } from '../main/modules/agent-control/codex-runtime/codex-model-gateway-contract'
 import { disabledReadyMemorySnapshot } from './utils/ready-memory-fixture'
 
 const builder = new CodexTurnInputBuilder()
@@ -25,9 +27,28 @@ const resource = {
   supersedesVersion: 'v1',
   policyEpoch: 2,
 }
+const ordinaryTailContract = {
+  actionAdmissionRef: {
+    headProjectionDigest: 'f'.repeat(64),
+    actionProjectionVersion: {
+      scopeEpoch: 0,
+      headGeneration: 1,
+      actionProjectionSequence: 0,
+    },
+    actionHeadIdentity: {
+      aliasId: 'scope-1',
+      aliasGeneration: 1,
+      threadBindingId: 'binding-1',
+      headRevision: 1,
+    },
+  },
+  uncommittedTailAssignments: [],
+  supersededUncommittedItems: [],
+}
 
 test('user ingress emits current canonical input once and thin resource references only', () => {
   const result = builder.build({
+    ...ordinaryTailContract,
     kind: 'user_ingress',
     attemptKind: 'user_ingress',
     originUserMessageId: 'message-1',
@@ -89,6 +110,7 @@ test('current-document anchor is persisted ingress only and never copied into na
     policyEpoch: anchor.policyEpoch,
   }
   const result = builder.build({
+    ...ordinaryTailContract,
     kind: 'user_ingress',
     attemptKind: 'user_ingress',
     originUserMessageId: 'message-anchor',
@@ -112,6 +134,7 @@ test('current-document anchor is persisted ingress only and never copied into na
 
 test('user ingress rejects every successor cross-field and resource body extension', () => {
   const base = {
+    ...ordinaryTailContract,
     kind: 'user_ingress',
     attemptKind: 'user_ingress',
     originUserMessageId: 'message-1',
@@ -146,6 +169,7 @@ test('user ingress rejects duplicate versions for one logical resource', () => {
     policyEpoch: 3,
   }
   assert.deepEqual(builder.build({
+    ...ordinaryTailContract,
     kind: 'user_ingress',
     attemptKind: 'user_ingress',
     originUserMessageId: 'message-1',
@@ -163,6 +187,7 @@ test('user ingress rejects duplicate versions for one logical resource', () => {
 
 test('resource identity includes supersedesVersion and a positive numeric policy epoch', () => {
   const base = {
+    ...ordinaryTailContract,
     kind: 'user_ingress',
     attemptKind: 'user_ingress',
     originUserMessageId: 'message-1',
@@ -206,38 +231,82 @@ test('non-user successor variants are well-shaped but fail closed before native 
 })
 
 test('explicit retry remains a real user ingress and exposes only frozen predecessor evidence', () => {
-  const artifactSources = [{
-    sourceReadyRunId: 'run-0',
-    relativePath: 'report.md',
-    logicalArtifactRef: 'artifact:source',
-    version: `sha256:${'a'.repeat(64)}`,
-    sha256: 'b'.repeat(64),
-    state: 'staged',
-  }] as const
+  const taskRootInput = JSON.parse(
+    '[{"text":"总结当前小红书内容","text_elements":[],"type":"text"}]',
+  )
+  const taskRootInputDigest = digestCodexUserInput(taskRootInput)
+  const controlInputDigest = digestCodexUserInput([textUserInput('再试一次')])
+  const predecessorPresentationRef = {
+    readyRunId: 'run-0', presentationDigest: 'e'.repeat(64),
+  }
+  const controlAuditMessageRef = {
+    messageId: 'message-retry', inputDigest: controlInputDigest,
+  }
+  const modelVisibleRootOriginRef = {
+    sourceReadyRunId: 'run-root', sourceIngressContractDigest: 'd'.repeat(64),
+    originUserMessageId: 'message-root', inputDigest: taskRootInputDigest,
+  }
+  const selectedHistorySeedItemRef = {
+    threadBindingId: 'binding-child', historySeedDigest: 'c'.repeat(64),
+    originUserMessageId: 'message-root', inputDigest: taskRootInputDigest,
+  }
+  const currentTrustedEnvironmentRef = {
+    requestedWorkbenchMode: 'browser' as const,
+    trustedWorkbenchMode: 'browser' as const,
+    modeDigest: digestCanonicalJson({
+      requestedWorkbenchMode: 'browser', trustedWorkbenchMode: 'browser',
+    }),
+  }
   const result = builder.build({
     kind: 'user_ingress',
     attemptKind: 'explicit_retry',
     originUserMessageId: 'message-retry',
     canonicalCurrentInputRef: {
-      messageId: 'message-retry',
-      input: [textUserInput('再试一次')],
+      messageId: 'message-root',
+      input: taskRootInput,
     },
-    explicitResourceEnvelope: { input: [], resourceRefs: [resource] },
-    resourceAdditionalContext: [resource],
+    explicitResourceEnvelope: { input: [], resourceRefs: [] },
+    resourceAdditionalContext: [],
+    uncommittedUserTail: [{
+      originUserMessageId: 'message-root',
+      input: taskRootInput,
+      inputDigest: taskRootInputDigest,
+      policy: 'untrusted_text_history',
+    }],
+    uncommittedTailAssignments: [{
+      originUserMessageId: 'message-root',
+      inputDigest: taskRootInputDigest,
+      plan: 'replace_with_explicit_retry',
+    }],
+    supersededUncommittedItems: [],
     predecessorRunId: 'run-0',
+    predecessorPresentationRef,
+    controlAuditMessageRef,
+    modelVisibleRootOriginRef,
+    selectedHistorySeedItemRef,
+    currentTrustedEnvironmentRef,
     historyParityEvidenceDigest: 'parity-digest',
     currentThreadReadEvidenceDigest: 'readback-digest',
     continuationContractDigest: 'continuation-digest',
-    artifactSources,
+    taskRootInput,
+    taskRootInputDigest,
+    artifactSources: [],
   }, context)
   assert.equal(result.ok, true)
   if (!result.ok) return
+  assert.deepEqual(result.params.input, taskRootInput)
+  assert.doesNotMatch(JSON.stringify(result.params), /再试一次/)
   assert.deepEqual(JSON.parse(result.params.additionalContext['ready-explicit-retry'].value), {
     predecessorRunId: 'run-0',
+    predecessorPresentationRef,
+    controlAuditMessageRef,
+    modelVisibleRootOriginRef,
+    selectedHistorySeedItemRef,
+    currentTrustedEnvironmentRef,
     historyParityEvidenceDigest: 'parity-digest',
     currentThreadReadEvidenceDigest: 'readback-digest',
     continuationContractDigest: 'continuation-digest',
-    artifactSources,
+    taskRootInputDigest,
   })
 })
 

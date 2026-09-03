@@ -21,8 +21,11 @@ import type {
   SendMessageResult as SharedSendMessageResult,
   SendScopedRequest,
   SendScopedResponse,
+  CodexProductTurnActionProjection,
+  CodexHeadActionProjection,
 } from '../../shared/ipc-contracts/agent-runtime'
 import type { ActionAuthorizationMode } from '../../shared/action-authorization-mode'
+import type { LifecycleOperationProjectionV2 } from '../../shared/ipc-contracts/agent-lifecycle-snapshot'
 
 export interface PendingContinuationIntent {
   taskId: string
@@ -81,6 +84,9 @@ export interface SessionSlice {
   streamingMessageId: string | null
   streamingRequestId: string | null
   scopeRunStates: Record<string, ScopeRunState>
+  productTurnActionProjectionByRunId: Record<string, CodexProductTurnActionProjection>
+  scopeHeadActionProjection: CodexHeadActionProjection | null
+  lifecycleOperationProjection: LifecycleOperationProjectionV2 | null
   taskDisclosureState: Record<string, TaskDisclosureState>
   lifecyclePendingAction: 'creating' | 'resetting' | 'stopping' | 'closing' | 'compacting' | null
   lifecycleError: Extract<LifecycleResult, { ok: false }> | null

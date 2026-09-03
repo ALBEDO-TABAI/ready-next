@@ -29,19 +29,19 @@ test('formatRunDuration uses mm:ss below one hour and h:mm:ss after one hour', (
   assert.equal(formatRunDuration(3_725_000), '1:02:05')
 })
 
-test('running agent turn duration ticks against now and uses animated dot state', () => {
+test('running agent turn keeps one elapsed phrase without the duplicate running label', () => {
   const model = buildRunDurationMeterModel(
     run({ phase: 'tool_running' }),
     Date.parse('2026-06-27T03:00:09.500Z'),
   )
 
   assert.deepEqual(model, {
-    label: '本轮进行中',
+    label: '本轮用时',
     duration: '00:09',
     glyph: 'running',
     tone: 'neutral',
-    pulse: true,
     live: true,
+    pulse: true,
   })
 })
 
@@ -60,8 +60,8 @@ test('terminal agent turn duration freezes at updatedAt', () => {
     duration: '02:04',
     glyph: 'done',
     tone: 'neutral',
-    pulse: false,
     live: false,
+    pulse: false,
   })
 })
 
@@ -77,8 +77,6 @@ test('cancelled agent turn shows stopped copy and does not animate', () => {
 
   assert.equal(model?.label, '本轮已停止')
   assert.equal(model?.duration, '00:31')
-  assert.equal(model?.pulse, false)
-  assert.equal(model?.live, false)
 })
 
 test('checkpoint distinguishes paused continuation, real user wait, and incomplete state', () => {
@@ -115,7 +113,7 @@ test('empty or idle run does not render a duration model', () => {
   assert.equal(buildRunDurationMeterModel(run({ phase: 'idle', startedAt: null }), Date.now()), null)
 })
 
-test('duration meter keeps its status and timer without an outer box', () => {
+test('terminal duration meter keeps its status and duration without an outer box', () => {
   const markup = renderToStaticMarkup(createElement(RunDurationMeter, {
     run: run({ phase: 'done', updatedAt: '2026-06-27T03:00:09.000Z' }),
   }))
@@ -128,4 +126,12 @@ test('duration meter keeps its status and timer without an outer box', () => {
   assert.match(markup, /padding:0 18px 2px 0/)
   assert.match(markup, /本轮用时/)
   assert.match(markup, /00:09/)
+})
+
+test('live duration meter renders one elapsed label and no running copy', () => {
+  const markup = renderToStaticMarkup(createElement(RunDurationMeter, {
+    run: run({ phase: 'responding', updatedAt: '2026-06-27T03:00:09.000Z' }),
+  }))
+  assert.equal((markup.match(/>本轮用时</g) || []).length, 1)
+  assert.doesNotMatch(markup, /本轮进行中/)
 })

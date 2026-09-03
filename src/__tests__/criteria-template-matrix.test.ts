@@ -52,6 +52,27 @@ test('browser_transaction uses transaction confirmation criteria, not browser co
   assert.equal(resolved.items.some((item) => item.kind === 'result_parseable'), false)
 })
 
+test('skill completion task types require their exact durable proof families', () => {
+  assert.deepEqual(
+    resolveCriteria('artifact_task', 'skill').items
+      .filter((item) => !item.notApplicable)
+      .map((item) => item.kind),
+    ['artifact'],
+  )
+  assert.deepEqual(
+    resolveCriteria('transaction_task', 'skill').items
+      .filter((item) => !item.notApplicable)
+      .map((item) => item.kind),
+    ['transaction_confirmed'],
+  )
+  assert.deepEqual(
+    resolveCriteria('research_artifact_task', 'skill').items
+      .filter((item) => !item.notApplicable)
+      .map((item) => item.kind),
+    ['response_digest', 'report_sources', 'artifact'],
+  )
+})
+
 test('browser observation does not inherit collection-file criteria', () => {
   const resolved = resolveCriteria('multi_step_task', 'browser', {
     browserCollectionRequired: false,
@@ -115,4 +136,13 @@ test('skill s1/skill_run_state is exempted for direct AND primitive-only runs, k
 
   // exemption is scoped to the skill module only
   assert.equal(resolveCriteria('short_task', 'system').items.find((i) => i.id === 's1'), undefined, 'no s1 outside skill module')
+})
+
+test('declared skill outputs use one-to-one coverage even when admission classifies the run as short', () => {
+  const resolved = resolveCriteria('short_task', 'skill', {
+    coverageTargets: ['/tmp/a.md', '/tmp/b.md'],
+  })
+  const coverage = resolved.items.find((item) => item.id === 'c1')
+  assert.equal(coverage?.kind, 'delivery_coverage')
+  assert.deepEqual(coverage?.expected, ['/tmp/a.md', '/tmp/b.md'])
 })

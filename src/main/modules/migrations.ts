@@ -32,6 +32,7 @@ import {
   applyCodexManualCompactionRecoveryEvidenceMigration,
   applyCodexManualCompactionItemIdentityMigration,
   applyCodexProductRecoveryFailureMigration,
+  applyCodexPristineContractRefreshMigration,
   applyCodexStartupOwnerHandoffMigration,
   applyCodexThreadResumeEvidenceMigration,
   applyCodexThreadResumeActiveLeaseMigration,
@@ -42,6 +43,9 @@ import {
   applyCodexTurnLifecycleActionMigration,
   CODEX_BINDING_EVIDENCE_GUARDS_SQL,
   CODEX_BINDING_SCHEMA_SQL,
+  CODEX_NATIVE_CONTINUITY_GUARDS_SQL,
+  CODEX_NATIVE_COVERAGE_SCHEMA_SQL,
+  CODEX_PRODUCT_EFFECT_BINDING_SCHEMA_SQL,
 } from './agent-control/codex-runtime/codex-binding-schema'
 import {
   applyCodexConversationClosedDeleteGuards,
@@ -4254,6 +4258,108 @@ const migrations: Migration[] = [
       `).run(Date.now())
     },
   },
+  {
+    name: '116_pet_activity_read_marker',
+    up: (db) => {
+      db.exec(`
+        ALTER TABLE chat_conversations
+          ADD COLUMN pet_last_seen_assistant_message_id TEXT;
+        ALTER TABLE chat_conversations
+          ADD COLUMN pet_last_seen_at TEXT;
+      `)
+    },
+  },
+  {
+    name: '117_pet_activity_attention_cutover',
+    up: (db) => {
+      const cutoverAt = new Date().toISOString()
+      db.prepare(`
+        INSERT OR IGNORE INTO settings (key, value, updated_at)
+        VALUES ('desktop_pet_activity_cutover_at', ?, ?)
+      `).run(cutoverAt, cutoverAt)
+    },
+  },
+  {
+    name: '118_codex_native_continuity_terminal_head_v3',
+    up: (db) => {
+      applyCodexGatewayCompletionEvidenceMigration(db)
+      const addColumn = (table: string, name: string, sql: string): void => {
+        const columns = db.prepare(`PRAGMA table_info(${table})`).all<{ name: string }>()
+        if (!columns.some((column) => column.name === name)) db.exec(sql)
+      }
+      addColumn(
+        'codex_thread_bindings',
+        'action_projection_sequence',
+        'ALTER TABLE codex_thread_bindings ADD COLUMN action_projection_sequence INTEGER NOT NULL DEFAULT 0 CHECK (action_projection_sequence >= 0)',
+      )
+      addColumn(
+        'codex_thread_bindings',
+        'thread_materialization_kind',
+        "ALTER TABLE codex_thread_bindings ADD COLUMN thread_materialization_kind TEXT NOT NULL DEFAULT 'legacy' CHECK (thread_materialization_kind IN ('legacy', 'fresh_start', 'native_fork', 'fresh_root_with_tail'))",
+      )
+      addColumn('codex_thread_bindings', 'history_source_thread_binding_id', 'ALTER TABLE codex_thread_bindings ADD COLUMN history_source_thread_binding_id TEXT')
+      addColumn('codex_thread_bindings', 'history_source_terminal_facts_digest', 'ALTER TABLE codex_thread_bindings ADD COLUMN history_source_terminal_facts_digest TEXT')
+      addColumn('codex_thread_bindings', 'fork_accepted_through_codex_turn_id', 'ALTER TABLE codex_thread_bindings ADD COLUMN fork_accepted_through_codex_turn_id TEXT')
+      addColumn('codex_thread_bindings', 'fork_expected_prefix_turn_ids_json', 'ALTER TABLE codex_thread_bindings ADD COLUMN fork_expected_prefix_turn_ids_json TEXT')
+      addColumn('codex_thread_bindings', 'fork_expected_prefix_turn_ids_digest', 'ALTER TABLE codex_thread_bindings ADD COLUMN fork_expected_prefix_turn_ids_digest TEXT')
+      addColumn('codex_thread_bindings', 'materialization_request_digest', 'ALTER TABLE codex_thread_bindings ADD COLUMN materialization_request_digest TEXT')
+      addColumn('codex_thread_bindings', 'thread_start_request_digest', 'ALTER TABLE codex_thread_bindings ADD COLUMN thread_start_request_digest TEXT')
+      addColumn('codex_thread_bindings', 'accepted_product_boundary_ready_run_id', 'ALTER TABLE codex_thread_bindings ADD COLUMN accepted_product_boundary_ready_run_id TEXT')
+      addColumn('codex_thread_bindings', 'native_inherited_contract_digest', 'ALTER TABLE codex_thread_bindings ADD COLUMN native_inherited_contract_digest TEXT')
+      addColumn('codex_thread_bindings', 'source_accepted_native_coverage_receipt_id', 'ALTER TABLE codex_thread_bindings ADD COLUMN source_accepted_native_coverage_receipt_id TEXT')
+      addColumn('codex_thread_bindings', 'source_accepted_native_coverage_receipt_digest', 'ALTER TABLE codex_thread_bindings ADD COLUMN source_accepted_native_coverage_receipt_digest TEXT')
+      addColumn(
+        'codex_thread_bindings',
+        'materialization_state',
+        "ALTER TABLE codex_thread_bindings ADD COLUMN materialization_state TEXT NOT NULL DEFAULT 'confirmed' CHECK (materialization_state IN ('pending', 'confirmed', 'unknown', 'proven_absent', 'abandoned'))",
+      )
+      addColumn('codex_thread_bindings', 'materialization_effective_receipt_json', 'ALTER TABLE codex_thread_bindings ADD COLUMN materialization_effective_receipt_json TEXT')
+      addColumn('codex_thread_bindings', 'materialization_effective_receipt_digest', 'ALTER TABLE codex_thread_bindings ADD COLUMN materialization_effective_receipt_digest TEXT')
+      addColumn('codex_thread_bindings', 'materialization_evidence_digest', 'ALTER TABLE codex_thread_bindings ADD COLUMN materialization_evidence_digest TEXT')
+      addColumn('codex_thread_bindings', 'history_seed_digest', 'ALTER TABLE codex_thread_bindings ADD COLUMN history_seed_digest TEXT')
+      addColumn('codex_thread_bindings', 'uncommitted_user_tail_json', 'ALTER TABLE codex_thread_bindings ADD COLUMN uncommitted_user_tail_json TEXT')
+      addColumn('codex_thread_bindings', 'uncommitted_user_tail_digest', 'ALTER TABLE codex_thread_bindings ADD COLUMN uncommitted_user_tail_digest TEXT')
+      addColumn(
+        'codex_turn_bindings',
+        'terminal_native_readback_receipt_json',
+        'ALTER TABLE codex_turn_bindings ADD COLUMN terminal_native_readback_receipt_json TEXT',
+      )
+      addColumn('codex_turn_bindings', 'turn_start_request_digest', 'ALTER TABLE codex_turn_bindings ADD COLUMN turn_start_request_digest TEXT')
+      addColumn(
+        'codex_turn_bindings',
+        'terminal_native_readback_receipt_digest',
+        'ALTER TABLE codex_turn_bindings ADD COLUMN terminal_native_readback_receipt_digest TEXT',
+      )
+      addColumn(
+        'codex_turn_bindings',
+        'terminal_native_readback_revision',
+        'ALTER TABLE codex_turn_bindings ADD COLUMN terminal_native_readback_revision INTEGER',
+      )
+      addColumn(
+        'codex_turn_bindings',
+        'terminal_facts_json',
+        'ALTER TABLE codex_turn_bindings ADD COLUMN terminal_facts_json TEXT',
+      )
+      addColumn(
+        'codex_turn_bindings',
+        'terminal_facts_digest',
+        'ALTER TABLE codex_turn_bindings ADD COLUMN terminal_facts_digest TEXT',
+      )
+      addColumn(
+        'codex_turn_bindings',
+        'effect_authority_closed_at',
+        'ALTER TABLE codex_turn_bindings ADD COLUMN effect_authority_closed_at TEXT',
+      )
+      addColumn('codex_turn_bindings', 'accepted_native_coverage_receipt_id', 'ALTER TABLE codex_turn_bindings ADD COLUMN accepted_native_coverage_receipt_id TEXT')
+      addColumn('codex_turn_bindings', 'accepted_native_coverage_receipt_digest', 'ALTER TABLE codex_turn_bindings ADD COLUMN accepted_native_coverage_receipt_digest TEXT')
+      addColumn('codex_manual_compaction_bindings', 'accepted_native_coverage_receipt_id', 'ALTER TABLE codex_manual_compaction_bindings ADD COLUMN accepted_native_coverage_receipt_id TEXT')
+      addColumn('codex_manual_compaction_bindings', 'accepted_native_coverage_receipt_digest', 'ALTER TABLE codex_manual_compaction_bindings ADD COLUMN accepted_native_coverage_receipt_digest TEXT')
+      db.exec(CODEX_PRODUCT_EFFECT_BINDING_SCHEMA_SQL)
+      db.exec(CODEX_NATIVE_COVERAGE_SCHEMA_SQL)
+      applyCodexPristineContractRefreshMigration(db)
+      db.exec(CODEX_NATIVE_CONTINUITY_GUARDS_SQL)
+    },
+  },
 ]
 
 /**
@@ -4300,15 +4406,16 @@ export function runMigrations(db: MigrationDatabase): void {
       continue
     }
 
-    const foreignKeysBefore = migration.name === '109_browser_target_claim_user_takeover'
+    const foreignKeysBefore = ['109_browser_target_claim_user_takeover',
+      '118_codex_native_continuity_terminal_head_v3'].includes(migration.name)
       ? Number(db.prepare('PRAGMA foreign_keys').get<{ foreign_keys: number }>()?.foreign_keys || 0)
       : 0
     if (foreignKeysBefore) db.exec('PRAGMA foreign_keys = OFF')
     let began = false
     try {
       // Wrap each migration in a transaction for atomicity. BEGIN belongs
-      // inside the restoration scope because migration 109 temporarily
-      // disables foreign keys before opening its transaction.
+      // inside the restoration scope because table-rebuild migrations temporarily
+      // disable foreign keys before opening their transaction.
       db.exec('BEGIN')
       began = true
       migration.up(db)

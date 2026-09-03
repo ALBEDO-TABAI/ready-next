@@ -61,6 +61,19 @@ const preparationInput = {
   currentInput: [textUserInput('hello')],
   explicitResourceEnvelope: { input: [], resourceRefs: [] },
   resourceAdditionalContext: [],
+  trustedWorkbenchMode: 'browser' as const,
+  actionAdmissionRef: {
+    headProjectionDigest: 'a'.repeat(64),
+    actionProjectionVersion: {
+      scopeEpoch: 0, headGeneration: 1, actionProjectionSequence: 0,
+    },
+    actionHeadIdentity: {
+      aliasId: scope.id, aliasGeneration: 1,
+      threadBindingId: 'binding-1', headRevision: 1,
+    },
+  },
+  uncommittedTailAssignments: [],
+  supersededUncommittedItems: [],
   readyMemorySnapshot: disabledReadyMemorySnapshot(),
   ...createCodexToolFixture(),
   authorizationOwnerId: 'authorization-owner-1',

@@ -1,4 +1,4 @@
-import { matchesConfigRepairIntent, matchesResumeIntent } from '../contracts/resume-lexicon'
+import { matchesConfigRepairIntent, matchesResumeIntent } from '../../../../shared/resume-lexicon'
 
 function uniqueNonEmpty(values: Array<string | null | undefined>): string[] {
   const seen = new Set<string>()

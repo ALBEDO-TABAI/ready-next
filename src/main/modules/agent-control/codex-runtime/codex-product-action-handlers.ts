@@ -25,6 +25,17 @@ export type CodexProductRssPorts = {
     summary?: string
     source?: string
   }): Promise<Record<string, unknown>>
+  getAnalysisResult(input: {
+    jobId?: string
+    itemId?: string
+    analysisType?: 'copy' | 'visual'
+  }): Promise<Record<string, unknown>>
+}
+
+export type CodexProductPetPort = {
+  showStickyNote(input: Record<string, unknown>): Promise<Record<string, unknown>>
+  dismissStickyNote(id: string): Promise<Record<string, unknown>>
+  clearStickyNotes(): Promise<Record<string, unknown>>
 }
 
 type RendererToolActionRequester = (payload: {
@@ -52,6 +63,7 @@ export type CodexProductSurfaceTargets = {
 export function createProductionProductActionHandlers(input: {
   database: DatabaseManager
   rss: CodexProductRssPorts
+  pet: CodexProductPetPort
   requestRendererToolAction: RendererToolActionRequester
   documentRequester?: (action: string, args: Record<string, unknown>) => Promise<Record<string, unknown>>
   targets?: CodexProductSurfaceTargets
@@ -64,6 +76,7 @@ export function createProductionProductActionHandlers(input: {
   readyActionId: string
   actionIdentityDigest: string
   abortSignal: AbortSignal
+  waitForRssAnalysisResult?: boolean
   recordListedCalendarEventIds?: (eventIds: readonly string[]) => void
   listedCalendarEventIds?: () => readonly string[]
   onCalendarMutated?: (eventId: string) => void
@@ -109,14 +122,30 @@ export function createProductionProductActionHandlers(input: {
           }
         }
         const stats = input.database.getRSSStats()
+        const errors = result.data?.errors || []
         return {
           ok: true,
-          summary: `RSS 已刷新。共 ${stats.totalItems} 条，未读 ${stats.unreadItems} 条。`,
+          summary: errors.length > 0
+            ? `RSS 已刷新，${errors.length} 个订阅源失败。`
+            : `RSS 已刷新。共 ${stats.totalItems} 条，未读 ${stats.unreadItems} 条。`,
+          status: errors.length > 0 ? 'completed_with_warnings' : 'completed',
           fetched: result.data?.fetched ?? 0,
           totalItems: stats.totalItems,
           unreadItems: stats.unreadItems,
-          errors: result.data?.errors || [],
+          errors,
         }
+      }
+
+      if (action === 'pet.showStickyNote') {
+        return input.pet.showStickyNote(args)
+      }
+      if (action === 'pet.dismissStickyNote') {
+        const id = String(args.id || '').trim()
+        if (!id) throw new CodexProductActionError('product_action_pet_note_missing')
+        return input.pet.dismissStickyNote(id)
+      }
+      if (action === 'pet.clearStickyNotes') {
+        return input.pet.clearStickyNotes()
       }
 
       if (action === 'rss.addSource') {
@@ -175,7 +204,7 @@ export function createProductionProductActionHandlers(input: {
             return { ok: false, errorKind: 'rss_analyze_invalid', summary: 'analysisType 必须为 copy 或 visual' }
           }
           const source = input.database.getRSSSources().find((candidate) => candidate.id === item.source_id)
-          return input.rss.analyzeItem({
+          const started = await input.rss.analyzeItem({
             itemId,
             analysisType,
             title: item.title,
@@ -183,6 +212,10 @@ export function createProductionProductActionHandlers(input: {
             summary: item.summary || undefined,
             source: source?.name,
           })
+          if (!input.waitForRssAnalysisResult || started.ok === false) return started
+          const jobId = typeof started.jobId === 'string' ? started.jobId : ''
+          if (!jobId) return { ok: false, errorKind: 'rss_analysis_job_missing', summary: '分析任务未返回 jobId。' }
+          return input.rss.getAnalysisResult({ jobId, itemId })
         }
         return input.requestRendererToolAction({
           agent: input.agent,
@@ -196,6 +229,24 @@ export function createProductionProductActionHandlers(input: {
           tool: action,
           args: { ...args, itemId },
           abortSignal: input.abortSignal,
+        })
+      }
+
+      if (action === 'rss.getAnalysisResult') {
+        const requestedItemId = String(args.itemId || '').trim()
+        if (targets.rssItemId && requestedItemId && requestedItemId !== targets.rssItemId) {
+          throw new CodexProductActionError('product_action_rss_item_conflict')
+        }
+        const requestedAnalysisType = String(args.analysisType || '').trim().toLowerCase()
+        if (requestedAnalysisType && requestedAnalysisType !== 'copy' && requestedAnalysisType !== 'visual') {
+          return { ok: false, errorKind: 'rss_analyze_invalid', summary: 'analysisType 必须为 copy 或 visual' }
+        }
+        return input.rss.getAnalysisResult({
+          jobId: String(args.jobId || '').trim() || undefined,
+          itemId: requestedItemId || targets.rssItemId || undefined,
+          analysisType: requestedAnalysisType
+            ? requestedAnalysisType as 'copy' | 'visual'
+            : undefined,
         })
       }
 
