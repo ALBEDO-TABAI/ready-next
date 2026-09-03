@@ -1,22 +1,14 @@
 import {
-  parseReadyMemoryPromptText,
   READY_MEMORY_ADDITIONAL_CONTEXT_KEY,
   READY_MEMORY_SEARCH_TOOL_NAME,
-  type ReadyMemoryPromptPayload,
 } from '../ready-memory/ready-memory-contract'
 import {
-  currentTurnReadyAdditionalContext,
+  type currentTurnReadyAdditionalContext,
   digestCanonicalJson,
   type CodexModelGatewayRequestKind,
 } from './codex-model-gateway-contract'
 
 type JsonObject = Record<string, unknown>
-
-type ReadyMemoryMarker = Readonly<{
-  candidate: boolean
-  payload: ReadyMemoryPromptPayload | null
-  valid: boolean
-}>
 
 type ReadyMemoryCall = Readonly<{
   candidate: boolean
@@ -54,33 +46,14 @@ function hasOnlyKeys(value: JsonObject, allowed: readonly string[]): boolean {
   return Object.keys(value).every((key) => allowed.includes(key))
 }
 
-function readyMemoryMarker(item: unknown): ReadyMemoryMarker {
-  if (!isRecord(item) || item.type !== 'message' || item.role !== 'developer') {
-    return { candidate: false, payload: null, valid: false }
-  }
+function isReadyMemoryMarker(item: unknown): boolean {
+  if (!isRecord(item) || item.type !== 'message' || item.role !== 'developer') return false
   const content = item.content
-  if (!Array.isArray(content) || content.length !== 1 || !isRecord(content[0])) {
-    return { candidate: false, payload: null, valid: false }
-  }
+  if (!Array.isArray(content) || content.length !== 1 || !isRecord(content[0])) return false
   const part = content[0]
-  if (part.type !== 'input_text' || typeof part.text !== 'string') {
-    return { candidate: false, payload: null, valid: false }
-  }
-  const open = `<${READY_MEMORY_ADDITIONAL_CONTEXT_KEY}>`
-  const close = `</${READY_MEMORY_ADDITIONAL_CONTEXT_KEY}>`
-  const candidate = part.text.startsWith(open) && part.text.endsWith(close)
-  if (!candidate) return { candidate: false, payload: null, valid: false }
-  if (
-    !hasOnlyKeys(item, ['type', 'id', 'role', 'content'])
-    || (item.id !== undefined && typeof item.id !== 'string')
-    || !hasOnlyKeys(part, ['type', 'text'])
-  ) return { candidate: true, payload: null, valid: false }
-  try {
-    const payload = parseReadyMemoryPromptText(part.text)
-    return { candidate: true, payload, valid: payload !== null }
-  } catch {
-    return { candidate: true, payload: null, valid: false }
-  }
+  return part.type === 'input_text' && typeof part.text === 'string'
+    && part.text.startsWith(`<${READY_MEMORY_ADDITIONAL_CONTEXT_KEY}>`)
+    && part.text.endsWith(`</${READY_MEMORY_ADDITIONAL_CONTEXT_KEY}>`)
 }
 
 function readyMemoryCall(item: unknown): ReadyMemoryCall {
@@ -123,72 +96,15 @@ function functionCallOutput(item: unknown): FunctionCallOutput {
   }
 }
 
-function lastUserIndex(input: readonly unknown[]): number | null {
-  for (let index = input.length - 1; index >= 0; index -= 1) {
-    const item = input[index]
-    if (isRecord(item) && item.role === 'user') return index
-  }
-  return null
-}
-
-function recognizedNonMemoryAdditionalContext(item: unknown): boolean {
-  try {
-    const context = currentTurnReadyAdditionalContext([
-      item,
-      { type: 'message', role: 'user', content: [{ type: 'input_text', text: '' }] },
-    ])
-    return context.resourceReferences.length > 0 || context.explicitRetry !== null
-  } catch {
-    return false
-  }
-}
-
-function currentTurnMarker(input: readonly unknown[], userIndex: number): {
-  index: number | null
-  payload: ReadyMemoryPromptPayload | null
-  invalid: boolean
-} {
-  const markers: Array<{ index: number; payload: ReadyMemoryPromptPayload }> = []
-  let invalid = false
-  for (let index = userIndex - 1; index >= 0; index -= 1) {
-    const marker = readyMemoryMarker(input[index])
-    if (marker.candidate) {
-      if (!marker.valid || !marker.payload) {
-        invalid = true
-        break
-      }
-      markers.push({ index, payload: marker.payload })
-      continue
-    }
-    if (recognizedNonMemoryAdditionalContext(input[index])) continue
-    break
-  }
-  if (invalid || markers.length !== 1) {
-    return { index: null, payload: null, invalid: invalid || markers.length > 1 }
-  }
-  try {
-    const contractMarker = currentTurnReadyAdditionalContext(input).readyMemory
-    if (!contractMarker || digestCanonicalJson(contractMarker) !== digestCanonicalJson(markers[0].payload)) {
-      return { index: null, payload: null, invalid: true }
-    }
-  } catch {
-    return { index: null, payload: null, invalid: true }
-  }
-  return { index: markers[0].index, payload: markers[0].payload, invalid: false }
-}
-
 export function redactPriorReadyMemoryHistory(input: {
   requestKind: CodexModelGatewayRequestKind
   input: readonly unknown[]
+  currentTurnContext: ReturnType<typeof currentTurnReadyAdditionalContext> | null
 }): CodexMemoryHistoryRedactionResult {
-  const userIndex = lastUserIndex(input.input)
-  const marker = input.requestKind === 'product' && userIndex !== null
-    ? currentTurnMarker(input.input, userIndex)
-    : { index: null, payload: null, invalid: false }
-  const failClosed = input.requestKind !== 'product'
-    || userIndex === null
-    || marker.invalid
-    || marker.index === null
+  const context = input.requestKind === 'product' ? input.currentTurnContext : null
+  const userIndex = context?.currentUserIndex ?? null
+  const marker = { index: context?.readyMemoryIndex ?? null, payload: context?.readyMemory ?? null }
+  const failClosed = userIndex === null || marker.index === null || marker.payload === null
 
   const calls = input.input.map(readyMemoryCall)
   const outputs = input.input.map(functionCallOutput)
@@ -220,9 +136,8 @@ export function redactPriorReadyMemoryHistory(input: {
   let redactedReadyMemoryFunctionCallCount = 0
   let redactedReadyMemoryFunctionCallOutputCount = 0
   const providerInput = input.input.filter((item, index) => {
-    const itemMarker = readyMemoryMarker(item)
     let kind: string | null = null
-    if (itemMarker.candidate && (failClosed || marker.index !== index)) {
+    if (isReadyMemoryMarker(item) && (failClosed || marker.index !== index)) {
       kind = 'ready_memory_message'
       redactedReadyMemoryMessageCount += 1
     } else if (calls[index].candidate && !(

@@ -1,3 +1,4 @@
+import { CodexBindingRepositoryError } from './codex-binding-error'
 import { createHash, randomUUID } from 'node:crypto'
 import { appendFileSync, mkdirSync, readFileSync, realpathSync } from 'node:fs'
 import { join } from 'node:path'
@@ -442,6 +443,14 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
   const ownerMainBootId = randomUUID()
   const preparedDetails = new Map<string, PreparedDetail>()
   const detailPrepared = new Map<string, PreparedCodexProductRun>()
+  const releasePreparedReservation = (reservationSetId: string, evidenceDigest: string) => {
+    for (const [readyRunId, prepared] of detailPrepared) {
+      if (prepared.ingressBinding.reservationSetId !== reservationSetId) continue
+      preparedDetails.delete(readyRunId)
+      detailPrepared.delete(readyRunId)
+    }
+    registry?.releaseBeforeDispatch({ reservationSetId, evidenceDigest })
+  }
   const browserTurnLeases = new Map<string, BrowserTurnLease>()
   const currentDocumentExactReadRuns = new Set<string>()
   const artifactMaterializer = new ArtifactMaterializer(join(input.userDataPath, 'codex-artifacts'), {
@@ -3172,15 +3181,10 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
       if (present) registry.releaseBeforeDispatch({ reservationSetId: reservation.reservationSetId, evidenceDigest })
     },
     async releaseAfterIngressFailure({ reservation, failure }) {
-      registry?.releaseBeforeDispatch({ reservationSetId: reservation.reservationSetId, evidenceDigest: failure.evidenceDigest })
-      for (const [readyRunId, prepared] of detailPrepared) {
-        if (prepared.ingressBinding.reservationSetId !== reservation.reservationSetId) continue
-        preparedDetails.delete(readyRunId)
-        detailPrepared.delete(readyRunId)
-      }
+      releasePreparedReservation(reservation.reservationSetId, failure.evidenceDigest)
     },
     async releaseAfterPrePersistenceRejection({ reservation, rejection }) {
-      registry?.releaseBeforeDispatch({ reservationSetId: reservation.reservationSetId, evidenceDigest: rejection.admissionEvidenceDigest })
+      releasePreparedReservation(reservation.reservationSetId, rejection.admissionEvidenceDigest)
     },
   }
 
@@ -3261,8 +3265,8 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
             || digestCanonicalJson(request.actionAdmissionRef)
               !== digestCanonicalJson(expectedAdmissionRef)) {
             throw new PrePersistenceAdmissionError(
-              'conversation_reset_required',
-              false,
+              'action_projection_confirmation_required',
+              true,
               currentHeadProjection.evidenceDigest,
               'codex_action_admission_ref_stale',
             )
@@ -3354,8 +3358,7 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
             || (sourceMode !== 'browser' && sourceMode !== 'document')
             || executionPageRef !== null
             || browserReference !== null
-            || externalReadSlice !== null
-            || request.currentDocumentAnchor !== undefined) {
+            || externalReadSlice !== null) {
             throw new PrePersistenceAdmissionError(
               'explicit_retry_control_invalid', false,
               digestCanonicalJson({
@@ -3815,7 +3818,11 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
             && turnResources.authorities.length === 0
             && !productSurfaceTargets
             && actionObligations.requirements.length === 0
+          const retryContext = repository.readProductTurnActionContext(retryPredecessor!.readyRunId)
+          if (!retryContext) throw new Error('codex_explicit_retry_context_missing')
           const eligibility = resolveExactRetryEligibility({
+            phase: 'pre_persistence',
+            sourceRootCompacted: retryContext.sourceRootCompacted,
             historyKind: terminal.terminalFacts.history.kind,
             effectState: terminal.terminalFacts.effect.state,
             toolCount: retryPredecessorReceipt!.tools.length,
@@ -4065,6 +4072,11 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
         }
       } catch (error) {
         if (rawDb.inTransaction) rawDb.exec('ROLLBACK')
+        if (error instanceof CodexBindingRepositoryError
+          && (error.code === 'action_admission_ref_stale' || error.code === 'ordinary_uncommitted_tail_stale')) {
+          throw new PrePersistenceAdmissionError('action_projection_confirmation_required', true,
+            digestCanonicalJson({ runId: prepared.runId, stage: 'atomic_ingress', code: error.code }), error.code)
+        }
         throw new IngressPersistenceError(
           'ingress_transaction_failed',
           digestCanonicalJson({ runId: prepared.runId, stage: 'atomic_ingress' }),

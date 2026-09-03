@@ -83,6 +83,7 @@ const divergenceAnswer = `分叉后的遗漏消息已恰好消费一次。${dive
 const multiTailAcceptedMarker = `READY_MULTI_TAIL_ACCEPTED_${proofId}`
 const multiTailOlderMarker = `READY_MULTI_TAIL_OLDER_${proofId}`
 const multiTailSelectedMarker = `READY_MULTI_TAIL_SELECTED_${proofId}`
+const freshRetryMarker = `READY_FRESH_RETRY_${proofId}`
 const resourceAcceptedMarker = `READY_RESOURCE_ACCEPTED_${proofId}`
 const resourceTailMarker = `READY_RESOURCE_TAIL_${proofId}`
 const resourceFollowupMarker = `READY_RESOURCE_FOLLOWUP_${proofId}`
@@ -383,6 +384,23 @@ try {
       mode: 'store', waitForIdle: true, awaitStoreSend: true,
       timeoutMs: 180000, attachments, requireAssistantMessage: true,
     });
+    const clickRetry = async (predecessorRunId) => {
+      const button = document.querySelector('button[aria-label="再试一次"]');
+      if (!button || button.disabled) throw new Error('visible_retry_button_missing');
+      button.click();
+      for (let attempt = 0; attempt < 720; attempt += 1) {
+        const state = await harness.snapshot();
+        const terminal = [...state.messages].reverse().find((m) => m.type === 'agent'
+          && m.runId && m.runId !== predecessorRunId && m.terminalReason);
+        const idle = !state.runtime.isStreaming && !state.runtime.foregroundBusy;
+        if (terminal && idle) return { state, terminal };
+        if (idle && state.infoCards?.some((card) => card.kind === 'soft_error')) {
+          throw new Error('visible_retry_button_rejected: ' + JSON.stringify(state.infoCards));
+        }
+        await new Promise((resolve) => setTimeout(resolve, 250));
+      }
+      throw new Error('visible_retry_button_terminal_timeout');
+    };
     const succeeded = (result) => result?.ok && result.sendResult?.disposition === 'terminal_success';
     const failed = (result) => result?.sendResult?.disposition === 'terminal_failure_after_persistence';
 
@@ -406,6 +424,41 @@ try {
     if (!succeeded(divergenceFollowup)) {
       return { ok: false, stage: 'divergence-followup', divergenceFollowup };
     }
+
+    const freshCreated = await harness.createVisibleSession();
+    if (!freshCreated.ok) return { ok: false, stage: 'fresh-retry-create' };
+    const freshFailed = await submit(${JSON.stringify(freshRetryMarker)});
+    if (!failed(freshFailed)) return { ok: false, stage: 'fresh-retry-failure', freshFailed };
+    const freshScopeId = freshFailed.after.currentScopeId;
+    const freshRunId = runIdOf(freshFailed);
+    const freshSurface = await waitSurface(freshScopeId, 2);
+    const freshPresentation = await readPresentation(freshRunId);
+    if (!freshSurface || freshPresentation?.data?.actionProjection?.retry_failed_task?.availability !== 'ready') {
+      return { ok: false, stage: 'fresh-retry-gate', freshSurface, freshPresentation };
+    }
+    const scopes = await window.electronAPI.agent.listConversationScopes();
+    const freshScope = scopes.data.find((scope) => scope.id === freshScopeId);
+    const rejectionChecks = [];
+    for (const variant of ['continue', 'resume', 'resource', 'attachment']) {
+      const text = variant === 'continue' || variant === 'resume' ? variant : '再试一次';
+      const requestId = 'proof-reject-' + variant + '-' + ${JSON.stringify(proofId)};
+      const result = await window.electronAPI.agent.sendScoped({
+        scopeId: freshScopeId, requestId, message: text,
+        expectedAliasGeneration: 2, expectedMessageVisibilityEpoch: freshSurface.data.scopeEpoch,
+        explicitRetry: { predecessorRunId: freshRunId, predecessorPresentationDigest: freshPresentation.data.presentationDigest },
+        ...(variant === 'resource' ? { resources: [{ kind: 'quoted_text', id: 'new-resource', name: 'new', text: 'new target' }] } : {}),
+        userMessage: { id: requestId + '-message', content: text, timestamp: new Date().toISOString(),
+          meta: { sourceKind: freshScope.sourceKind, sourceId: freshScope.sourceId, threadKey: freshScope.threadKey,
+            direction: 'local-input', workbenchMode: 'document', actionAuthorizationMode: freshScope.meta?.actionAuthorizationMode || 'ask' },
+          attachmentConfirmation: { selectedCount: variant === 'attachment' ? 1 : 0,
+            metadataCount: 0, inputIncludedCount: 0, inputFailedCount: 0 } },
+      });
+      rejectionChecks.push({ variant, requestId, result });
+      if (result.disposition !== 'rejected_before_persistence' || result.errorKind !== 'explicit_retry_control_invalid'
+        || result.shouldClearInput !== false) return { ok: false, stage: 'fresh-retry-rejection', rejectionChecks };
+    }
+    const freshRetried = await clickRetry(freshRunId);
+    if (freshRetried.terminal.terminalReason !== 'done') return { ok: false, stage: 'fresh-retry-button', freshRetried };
 
     const multiTailCreated = await harness.createVisibleSession();
     if (!multiTailCreated.ok) return { ok: false, stage: 'multi-tail-create' };
@@ -464,6 +517,11 @@ try {
     const resourcePresentation = await readPresentation(resourceRunId);
     if (!resourceSurface || !resourcePresentation?.success) {
       return { ok: false, stage: 'resource-materialization', resourceSurface, resourcePresentation, resourceFailed };
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    const resourceConsequenceText = document.querySelector('[data-ready-send-consequence="true"]')?.textContent || '';
+    if (!resourceConsequenceText.includes('上一项') || !resourceConsequenceText.includes('1项需重新附加资源')) {
+      return { ok: false, stage: 'resource-consequence-visible', resourceConsequenceText };
     }
     const resourceFollowup = await submit(${JSON.stringify(resourceFollowupMarker)});
     if (!succeeded(resourceFollowup)) return { ok: false, stage: 'resource-followup', resourceFollowup };
@@ -532,6 +590,8 @@ try {
         surface: divergenceSurface.data,
         retry: divergencePresentation.data.actionProjection.retry_failed_task,
       },
+      freshRetry: { scopeId: freshScopeId, predecessorRunId: freshRunId,
+        readyRunId: freshRetried.terminal.runId, entry: 'visible_retry_button', rejectionChecks },
       multiTailRetry: {
         scopeId: multiTailScopeId, olderRunId: runIdOf(multiTailOlder),
         selectedRunId: multiTailSelectedRunId, retries: multiTailRetries,
@@ -541,6 +601,7 @@ try {
         followupRunId: runIdOf(resourceFollowup),
         surface: resourceSurface.data,
         retry: resourcePresentation.data.actionProjection.retry_failed_task,
+        displayedConsequence: resourceConsequenceText,
       },
       reset: { scopeId: resetScopeId, action: reset, surface: resetAfter.data },
       effect: {
@@ -949,6 +1010,21 @@ try {
     })}`)
   }
 
+  const freshRetry = continuityScenarios.freshRetry
+  const freshTurns = readScopeTurns(freshRetry.scopeId)
+  const freshThreads = readScopeThreads(freshRetry.scopeId)
+  const freshTurn = freshTurns.find((turn) => turn.ready_run_id === freshRetry.readyRunId)
+  const freshIngress = freshTurn ? preparedIngress(freshTurn) : null
+  if (freshTurns.length !== 2 || freshThreads.length !== 2
+    || freshThreads[1].thread_materialization_kind !== 'fresh_root_with_tail'
+    || freshIngress?.attemptKind !== 'explicit_retry'
+    || freshIngress.predecessorRunId !== freshRetry.predecessorRunId
+    || modelInputMarkerCount(freshRetry.readyRunId, freshRetryMarker) !== 1
+    || JSON.stringify(freshIngress.canonicalCurrentInputRef.input).includes('再试一次')
+    || freshRetry.rejectionChecks.some((check) => fixture.continuityChecks.some((capture) => capture.readyRunId === check.requestId))) {
+    throw new Error('installed fresh-root Retry or zero-effect rejection mismatch')
+  }
+
   const multiTail = continuityScenarios.multiTailRetry
   const multiTailThreads = readScopeThreads(multiTail.scopeId)
   const multiTailTurns = readScopeTurns(multiTail.scopeId)
@@ -1203,6 +1279,7 @@ try {
       fixtureChecks: fixture.retryChecks,
     },
     nativeContinuity: {
+      freshRootRetry: freshRetry,
       multiTailRetry: {
         scopeId: multiTail.scopeId, threads: multiTailThreads,
         retries: multiTailPlans, finalCoverage: multiTailCoverage,
@@ -1218,6 +1295,7 @@ try {
       resourceRestatement: {
         scopeId: continuityScenarios.resource.scopeId,
         consequence: resourceConsequence,
+        displayedConsequence: continuityScenarios.resource.displayedConsequence,
         retryGate: continuityScenarios.resource.retry,
         deliveryPlan: resourceFollowupIngress.uncommittedTailAssignments,
         providerOldResourceOccurrenceCount: 0,
@@ -1434,6 +1512,7 @@ async function startFixtureProvider() {
   const continuityChecks = []
   const effectStages = new Map()
   const multiTailSelectedRuns = new Set()
+  const freshRetryRuns = new Set()
   let retryRootRequestCount = 0
   let requestCount = 0
   const server = createServer(async (request, response) => {
@@ -1451,6 +1530,14 @@ async function startFixtureProvider() {
     requestCount += 1
     continuityChecks.push({ readyRunId, modelInputText, modelInput: body.input || [],
       modelInstructions: body.instructions || null, toolNames, requestOrdinal: requestCount })
+    if (modelInputText.includes(freshRetryMarker)) {
+      freshRetryRuns.add(readyRunId)
+      response.writeHead(200, { 'content-type': 'text/event-stream' })
+      response.end(freshRetryRuns.size === 1
+        ? partialFailureEvents('未发布的首轮片段', 'fresh_retry_failure')
+        : messageEvents('首轮任务已重新完成。', 24))
+      return
+    }
     if (modelInputText.includes(multiTailSelectedMarker)) {
       multiTailSelectedRuns.add(readyRunId)
       response.writeHead(200, { 'content-type': 'text/event-stream' })

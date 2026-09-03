@@ -81,19 +81,11 @@ test('natural retry does not bind after a newer success or when new input is pre
   assert.deepEqual(await resolveNaturalExplicitRetry({
     content: '重试',
     attachmentCount: 0,
-    currentDocumentAnchorPresent: true,
-    messages: [failedMessage],
-    scopeId: 'scope-retry',
-    readProductTurnPresentation,
-  }), { kind: 'not_applicable' })
-  assert.deepEqual(await resolveNaturalExplicitRetry({
-    content: '重试',
-    attachmentCount: 0,
     workbenchResourceCount: 1,
     messages: [failedMessage],
     scopeId: 'scope-retry',
     readProductTurnPresentation,
-  }), { kind: 'not_applicable' })
+  }), { kind: 'resource_restatement_required' })
   assert.deepEqual(await resolveNaturalExplicitRetry({
     content: '重试并总结另一个网页',
     attachmentCount: 0,
@@ -107,7 +99,7 @@ test('natural retry does not bind after a newer success or when new input is pre
     messages: [failedMessage],
     scopeId: 'scope-retry',
     readProductTurnPresentation,
-  }), { kind: 'not_applicable' })
+  }), { kind: 'resource_restatement_required' })
   assert.equal(reads, 0)
 })
 
@@ -122,4 +114,14 @@ test('a retry cue fails closed when the canonical predecessor receipt cannot be 
       data: receipt({ readyScopeId: 'other-scope' }),
     }),
   }), { kind: 'unavailable' })
+})
+
+
+test('continuation words remain ordinary input in the Renderer too', async () => {
+  for (const content of ['继续', '接着做', 'continue', 'resume', '重试并总结另一个网页']) {
+    assert.deepEqual(await resolveNaturalExplicitRetry({
+      content, attachmentCount: 0, messages: [failedMessage], scopeId: 'scope-retry',
+      readProductTurnPresentation: async () => { throw new Error('must_not_read_retry_receipt') },
+    }), { kind: 'not_applicable' }, content)
+  }
 })

@@ -55,7 +55,7 @@ test('chat input exposes and switches the three conversation authorization modes
   let persistMode: (mode: ActionAuthorizationMode) => Promise<void> = async () => undefined
   function Harness({
     isChannelScope = false,
-    isStreaming = false,
+    stopAvailable = false,
     lifecycleInputBlocked = false,
     stopPending = false,
     stopError = null,
@@ -63,7 +63,7 @@ test('chat input exposes and switches the three conversation authorization modes
     inputValue = '发送测试',
   }: {
     isChannelScope?: boolean
-    isStreaming?: boolean
+    stopAvailable?: boolean
     lifecycleInputBlocked?: boolean
     stopPending?: boolean
     stopError?: string | null
@@ -73,7 +73,7 @@ test('chat input exposes and switches the three conversation authorization modes
     const [mode, setMode] = useState<ActionAuthorizationMode>('ask')
     return createElement(ChatInput, {
       inputValue,
-      isStreaming,
+      stopAvailable,
       lifecycleInputBlocked,
       stopPending,
       stopError,
@@ -195,7 +195,7 @@ test('chat input exposes and switches the three conversation authorization modes
     assert.equal(sends, 3, 'failed persistence restores sending under the old mode')
 
     await act(async () => root.render(createElement(Harness, {
-      isStreaming: true,
+      stopAvailable: true,
       lifecycleInputBlocked: true,
     })))
     const retryStopButton = dom.window.document.querySelector<HTMLButtonElement>('[data-ready-agent-stop="true"]')
@@ -204,7 +204,7 @@ test('chat input exposes and switches the three conversation authorization modes
     assert.equal(stops, 1, 'an interrupt-unknown run must keep the stop retry enabled')
 
     await act(async () => root.render(createElement(Harness, {
-      isStreaming: true,
+      stopAvailable: true,
       lifecycleInputBlocked: true,
       stopPending: true,
       stopError: '停止失败，请重试',

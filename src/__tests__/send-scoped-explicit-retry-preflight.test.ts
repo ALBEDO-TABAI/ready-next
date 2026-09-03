@@ -44,3 +44,12 @@ test('only the exact control envelope can pass the preflight', () => {
   assert.equal(validateExplicitRetryControl({ request: candidate, scope }).ok, true)
   assert.equal(preflightExplicitRetryControl({ request: candidate, scope }), null)
 })
+
+
+test('continuation and new instructions are never accepted as exact Retry controls', () => {
+  for (const text of ['继续', '接着做', 'continue', 'resume', '重试并总结另一个网页']) {
+    const rejected = preflightExplicitRetryControl({ request: request(text), scope })
+    assert.equal(rejected?.errorKind, 'explicit_retry_control_invalid', text)
+    assert.equal(rejected?.persistence.message, 'skipped', text)
+  }
+})

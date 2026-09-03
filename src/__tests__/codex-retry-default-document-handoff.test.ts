@@ -1,3 +1,5 @@
+import { parseSendScopedRequest } from '../shared/ipc-contracts/agent-runtime'
+import { validateExplicitRetryControl } from '../main/modules/agent-control/codex-runtime/codex-explicit-retry-control'
 import assert from 'node:assert/strict'
 import test, { type TestContext } from 'node:test'
 
@@ -13,8 +15,7 @@ import { makeProductTurnActionProjection } from './product-turn-action-projectio
 
 // Renderer handoff regression, not Main admission or installed-app proof. The document
 // store is left at its real default; only a completed failed run and Main IPC are seeded.
-// These two tests deliberately remain red until the raw-control/ambient-resource contract
-// is resolved. They do not require Renderer to remove an anchor before Main can inspect it.
+// Raw observations must reach Main, which alone resolves whether the original task activates them.
 export const __breaksInvariants = [
   'renderer.agent-store.singleton-seeded-with-completed-failed-run',
   'renderer.mode-store-selected-document-without-mutating-default-doc-tabs',
@@ -26,7 +27,7 @@ const sessionId = 'session-default-document-retry'
 const runId = 'run-failed-C'
 const timestamp = '2026-09-03T00:00:00.000Z'
 
-function installFailedRun(t: TestContext) {
+function installFailedRun(t: TestContext, mode: 'browser' | 'document' = 'document') {
   const previousAgent = useAgent.getState()
   const previousMode = useMode.getState()
   const previousWindow = globalThis.window
@@ -53,7 +54,7 @@ function installFailedRun(t: TestContext) {
     headProjectionRef: { version: head.actionProjectionVersion, digest: head.evidenceDigest },
     currentTrustedEnvironmentRef: {
       ...action.currentTrustedEnvironmentRef,
-      requestedWorkbenchMode: 'document' as const, trustedWorkbenchMode: 'document' as const,
+      requestedWorkbenchMode: mode, trustedWorkbenchMode: mode,
     },
     productTurnActionProjectionVersion: {
       ...action.productTurnActionProjectionVersion, headProjectionVersion: head.actionProjectionVersion,
@@ -91,8 +92,8 @@ function installFailedRun(t: TestContext) {
     pendingContinuationIntent: null, pendingContinuationDraftAnchor: null, retiredScopeIds: {},
     sessions: { [sessionId]: slice }, activeSessionId: sessionId, sessionId, sessionOrder: [sessionId],
   })
-  useMode.getState().setWorkbenchMode('document')
-  assert.equal(productTurnActionProjectionMatchesContext(actionProjection, head, 'document'), true)
+  useMode.setState({ workbenchMode: mode, splitMode: mode === 'browser' ? 'document' : null })
+  assert.equal(productTurnActionProjectionMatchesContext(actionProjection, head, mode), true)
   assert.equal(head.actions.send_new_message.availability, 'ready')
 
   const sent: SendScopedRequest[] = []
@@ -105,6 +106,11 @@ function installFailedRun(t: TestContext) {
         return { success: true, data: receipt }
       },
       sendScoped: async (payload: SendScopedRequest) => {
+        const transported = parseSendScopedRequest(payload)
+        if (payload.explicitRetry) assert.deepEqual(validateExplicitRetryControl({
+          request: transported,
+          scope: { id: scopeId, source_kind: 'local', source_id: 'app', thread_key: scopeId, meta_json: '{}' },
+        }).ok, true, 'the actual Renderer envelope must pass the Main control validator')
         sent.push(payload)
         // Stop at the IPC boundary: no fabricated admission, persistence or Provider success.
         return { success: false, disposition: 'rejected_before_persistence', errorKind: 'thread_busy' }
@@ -123,6 +129,7 @@ test('natural Retry preserves the exact failed owner with the real default docum
   const { sent, presentationReads, receipt } = installFailedRun(t)
   await useAgent.getState().sendMessage('再试一次')
   assert.equal(sent.length, 1)
+  assert.ok(sent[0].currentDocumentAnchor, 'Main receives the current raw observation')
   assert.deepEqual(sent[0].explicitRetry, {
     predecessorRunId: runId, predecessorPresentationDigest: receipt.presentationDigest,
   }, 'a ready Retry must not silently become ordinary input because the default document exists')
@@ -136,4 +143,35 @@ test('Retry button handoff reaches Main with the real default document open', as
   const result = await useAgent.getState().sendMessage('再试一次', { explicitRetry })
   assert.equal(sent.length, 1, `ready Retry was rejected before Main: ${result.errorKind}`)
   assert.deepEqual(sent[0].explicitRetry, explicitRetry)
+})
+
+
+test('browser mode with a document split preserves the same Retry handoff', async (t) => {
+  const { sent, receipt } = installFailedRun(t, 'browser')
+  await useAgent.getState().sendMessage('再试一次')
+  assert.equal(sent.length, 1)
+  assert.ok(sent[0].currentDocumentAnchor)
+  assert.deepEqual(sent[0].explicitRetry, { predecessorRunId: runId, predecessorPresentationDigest: receipt.presentationDigest })
+})
+
+test('continue in the default document is ordinary input, never the previous task root', async (t) => {
+  const { sent, presentationReads } = installFailedRun(t)
+  await useAgent.getState().sendMessage('继续')
+  assert.equal(sent.length, 1)
+  assert.equal(sent[0].explicitRetry, undefined)
+  assert.equal(sent[0].userMessage.content, '继续')
+  assert.deepEqual(presentationReads, [])
+})
+
+
+test('natural Retry with a newly attached resource refuses before IPC and preserves the draft', async (t) => {
+  const { sent } = installFailedRun(t)
+  const attachments = [{ id: 'new-file', name: 'new.txt', path: '/tmp/new.txt', type: 'text' as const,
+    size: 1, ext: '.txt', source: 'file' as const }]
+  useAgent.setState({ attachments, inputValue: '再试一次' })
+  const result = await useAgent.getState().sendMessage('再试一次')
+  assert.equal(result.errorKind, 'explicit_retry_control_invalid')
+  assert.equal(sent.length, 0)
+  assert.deepEqual(useAgent.getState().attachments, attachments)
+  assert.equal(useAgent.getState().inputValue, '再试一次')
 })

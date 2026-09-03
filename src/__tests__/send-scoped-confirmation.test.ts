@@ -95,6 +95,25 @@ test('typed prepare rejection preserves configuration and external-service seman
   }
 })
 
+test('a rolled-back stale action preserves the draft and releases admission without dispatch', async () => {
+  const harness = createHarness({
+    persistError: new PrePersistenceAdmissionError(
+      'action_projection_confirmation_required', true, 'stale-action-evidence', 'action_admission_ref_stale',
+    ),
+  })
+  const result = await harness.send()
+  assert.equal(result.disposition, 'rejected_before_persistence')
+  assert.equal(result.errorKind, 'action_projection_confirmation_required')
+  assert.equal(result.shouldClearInput, false)
+  assert.equal(result.preserveInput, true)
+  assert.equal(result.persistence.message, 'skipped')
+  assert.deepEqual(harness.emittedEvents, [])
+  assert.deepEqual(harness.calls, [
+    'resolve:turn/start', 'reserve:turn/start', 'prepare-dispatch',
+    'persist-ingress', 'release-pre-persistence-reservation',
+  ])
+})
+
 function createHarness(overrides: Partial<{
   scope: Record<string, unknown> | null
   methods: StartIdentityReservationMethods

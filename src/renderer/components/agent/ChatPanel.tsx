@@ -1,3 +1,5 @@
+import { useMode } from '../../stores/useMode'
+import { codexHeadActionAdmissionRef, productTurnActionProjectionMatchesContext } from '../../modules/agent/productTurnReceipt'
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { AnimatePresence } from 'framer-motion'
 import {
@@ -778,6 +780,8 @@ export default function ChatPanel({
     }
   }, [])
 
+  const activeLifecycleSlice = activeSessionId ? sessions[activeSessionId] : null
+  const headProjection = activeLifecycleSlice?.scopeHeadActionProjection ?? null
   const sendingRef = useRef(false)
   const [composerNotice, setComposerNotice] = useState<{ message: string; errorKind: string } | null>(null)
   useEffect(() => {
@@ -786,17 +790,11 @@ export default function ChatPanel({
   }, [currentScope?.id, currentScopeId])
 
   const handleSend = useCallback(async () => {
-    const stateAtClick = useAgent.getState()
-    const activeSlice = stateAtClick.activeSessionId
-      ? stateAtClick.sessions[stateAtClick.activeSessionId]
-      : null
-    const sendGate = activeSlice?.scopeHeadActionProjection?.actions.send_new_message
+    const sendGate = headProjection?.actions.send_new_message
     if (!sendGate || sendGate.availability !== 'ready') {
       setComposerNotice({
-        message: '当前会话状态已变化，请稍候再发送。',
-        errorKind: sendGate?.blockers[0] === 'history_materializing'
-          ? 'conversation_materializing'
-          : 'conversation_reset_required',
+        message: !sendGate ? '暂时无法读取会话状态，请重新读取后发送。' : '当前会话状态已变化，请稍候再发送。',
+        errorKind: !sendGate ? 'head_unavailable' : sendGate.blockers[0] || 'conversation_reset_required',
       })
       return
     }
@@ -812,7 +810,7 @@ export default function ChatPanel({
     sendingRef.current = true
     setComposerNotice(null)
     try {
-      const result = await sendMessage(content)
+      const result = await sendMessage(content, { actionAdmissionRef: codexHeadActionAdmissionRef(headProjection) })
       if (result && result.success === false && result.disposition === 'rejected_before_persistence') {
         const friendly = mapBackendErrorToFriendly({
           errorKind: result.errorKind,
@@ -826,7 +824,7 @@ export default function ChatPanel({
     } finally {
       sendingRef.current = false
     }
-  }, [attachments.length, inputValue, sendMessage])
+  }, [attachments.length, inputValue, sendMessage, headProjection])
 
   const handleRetryProductTurn = useCallback(async (predecessorRunId: string) => {
     if (sendingRef.current) return
@@ -860,10 +858,7 @@ export default function ChatPanel({
     const head = currentSlice?.scopeHeadActionProjection
     const projection = receipt.data.actionProjection
     if (projection.retryEvidenceKind !== 'complete'
-      || !head
-      || projection.headProjectionRef.digest !== head.evidenceDigest
-      || JSON.stringify(projection.headProjectionRef.version)
-        !== JSON.stringify(head.actionProjectionVersion)) {
+      || !productTurnActionProjectionMatchesContext(projection, head ?? null, useMode.getState().workbenchMode)) {
       setComposerNotice({ message: '当前会话已变化，请重新说明需求。', errorKind: 'conversation_reset_required' })
       return
     }
@@ -1075,10 +1070,8 @@ export default function ChatPanel({
   // Blank until the current scope carries a real (non-placeholder) title —
   // i.e. until the user has actually started a conversation.
   const sessionTitle = resolveChatSessionTitle(currentScope?.title)
-  const activeLifecycleSlice = activeSessionId ? sessions[activeSessionId] : null
   const activeLifecycleError = activeLifecycleSlice?.lifecycleError ?? null
   const lifecycleProjection = activeLifecycleSlice?.lifecycleOperationProjection ?? null
-  const headProjection = activeLifecycleSlice?.scopeHeadActionProjection ?? null
   const lifecycleActions = lifecycleProjection && headProjection
     && lifecycleProjection.scopeEpoch === headProjection.actionProjectionVersion.scopeEpoch
     && lifecycleProjection.headProjectionRef.digest === headProjection.evidenceDigest
@@ -1099,9 +1092,7 @@ export default function ChatPanel({
     : activeLifecycleError?.code === 'compaction_state_unknown'
       ? 'compaction' as const
       : null
-  const lifecycleInputBlocked = Boolean(
-    activeLifecycleSlice?.lifecyclePendingAction || lifecycleUncertainty,
-  )
+  const lifecycleInputBlocked = headProjection?.actions.send_new_message.availability !== 'ready'
   const stopError = stopRequestError || (
     activeLifecycleError?.action === 'stop' && activeLifecycleError.code !== 'no_active_operation'
       ? stopFailureMessage(activeLifecycleError.code)
@@ -1200,6 +1191,7 @@ export default function ChatPanel({
       taskDisclosureState={taskDisclosureState}
       isStreaming={isStreaming}
       lifecycleInputBlocked={lifecycleInputBlocked}
+      stopAvailable={lifecycleActions?.stop.availability === 'ready' || stopPending}
       stopPending={stopPending}
       stopError={stopError}
       streamingMessageId={streamingMessageId}
@@ -1252,6 +1244,11 @@ export default function ChatPanel({
       setAttachmentPreviewLoading={setAttachmentPreviewLoading}
       admissionReady={Boolean(currentScopeId && currentScope)}
       composerNotice={composerNotice}
+      sendConsequence={headProjection?.actions.send_new_message.consequence ?? null}
+      headUnavailable={Boolean(currentScopeId && currentScope && !headProjection)}
+      onRefreshActionSurface={() => {
+        if (currentScopeId) void useAgent.getState().refreshCodexActionSurface(currentScopeId)
+      }}
       onDismissComposerNotice={() => setComposerNotice(null)}
     />
   )

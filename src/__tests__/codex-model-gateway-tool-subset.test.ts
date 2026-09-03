@@ -99,6 +99,7 @@ function bindRequest(
     turnContractDigest: 'turn-contract-1',
     instructionContractDigest: instructionTranscriptDigest(request.instructions, request.input),
     additionalContextDigest: digestCanonicalJson([]),
+    deliveredUserTail: [],
     forceToolFreeFinalization: false,
     allowedToolNames,
   }

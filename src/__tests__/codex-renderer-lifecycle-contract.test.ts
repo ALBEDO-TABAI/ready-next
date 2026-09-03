@@ -1,3 +1,4 @@
+import { makeScopeHeadActionProjection } from './product-turn-action-projection-fixture'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
@@ -43,6 +44,7 @@ function seedStore() {
     messages: [message],
     inputValue: '未发送草稿',
     aliasGeneration: 1,
+    scopeHeadActionProjection: makeScopeHeadActionProjection(aliasId, { activeProductFence: true }),
     isStreaming: true,
     foregroundBusy: true,
     composerLocked: true,
@@ -1028,7 +1030,7 @@ test('interrupt uncertainty allows the exact stop to retry while send, reset, an
     )
     const sendResult = await useAgent.getState().sendMessage('不能在状态未知时继续')
     assert.equal(sendResult.disposition, 'rejected_before_persistence')
-    assert.equal(sendResult.errorKind, 'conversation_reset_required')
+    assert.equal(sendResult.errorKind, 'thread_busy')
     assert.deepEqual(stopRequests.map(lifecycleRequestIdentity), [
       { aliasId, aliasGeneration: 1, readyRunId: 'request-pending' },
       { aliasId, aliasGeneration: 1, readyRunId: 'request-pending' },
@@ -1645,4 +1647,78 @@ test('late reset success cannot overwrite a new run in the same generation', asy
   } finally {
     restore()
   }
+})
+
+
+function idleReadSurface(sequence: number) {
+  const head = makeScopeHeadActionProjection(aliasId, { actionProjectionSequence: sequence })
+  return { success: true as const, data: {
+    scopeId: aliasId, scopeEpoch: 0, head,
+    lifecycle: projectCodexLifecycleOperationV2({
+      base: { identity: { aliasId, aliasGeneration: 1 }, activeReadyRunId: null, latestReadyRunId: null,
+        snapshot: 'idle_native_thread', interruptRequested: false, interruptAcknowledged: false,
+        requestedAction: null, evidenceDigest: 'idle-read' },
+      head, scopeEpoch: 0, threadBindingId: head.actionHeadIdentity!.threadBindingId,
+      headRevision: 1, materializationIntentRef: null,
+    }),
+  } }
+}
+
+function seedIdleReadScope(sequence = 7) {
+  seedStore()
+  const currentScope = { ...scope, aliasGeneration: 1, messageVisibilityEpoch: 0 }
+  const slice = { ...makeEmptySessionSlice(aliasId), aliasGeneration: 1, inputValue: '重读保留草稿',
+    scopeHeadActionProjection: idleReadSurface(sequence).data.head }
+  useAgent.setState({ ...slice, currentScope, scopes: [currentScope], attachments: [],
+    sessions: { [sessionId]: slice }, activeSessionId: sessionId, currentScopeId: aliasId })
+}
+
+test('failed action read can recover without changing scopes or automatically sending the draft', async () => {
+  seedIdleReadScope()
+  let reads = 0
+  let sends = 0
+  const restore = installAgentApi({
+    readCodexActionSurface: async () => { if (++reads === 1) throw new Error('read_failed'); return idleReadSurface(8) },
+    sendScoped: async () => { sends += 1; throw new Error('must_not_send') },
+  })
+  try {
+    await useAgent.getState().refreshCodexActionSurface(aliasId)
+    assert.equal(useAgent.getState().sessions[sessionId].scopeHeadActionProjection, null)
+    assert.equal((await useAgent.getState().sendMessage('重读保留草稿')).errorKind, 'head_unavailable')
+    await useAgent.getState().refreshCodexActionSurface(aliasId)
+    assert.equal(useAgent.getState().sessions[sessionId].scopeHeadActionProjection?.actionProjectionVersion.actionProjectionSequence, 8)
+    assert.equal(useAgent.getState().inputValue, '重读保留草稿')
+    assert.equal(sends, 0)
+  } finally { restore() }
+})
+
+test('failed action reads retain their version floor and reject an older successful response', async () => {
+  seedIdleReadScope(20)
+  let reads = 0
+  const restore = installAgentApi({ readCodexActionSurface: async () => {
+    reads += 1
+    return reads === 1 ? { success: false } : idleReadSurface(reads === 2 ? 19 : 21)
+  } })
+  try {
+    await useAgent.getState().refreshCodexActionSurface(aliasId)
+    await useAgent.getState().refreshCodexActionSurface(aliasId)
+    assert.equal(useAgent.getState().sessions[sessionId].scopeHeadActionProjection, null)
+    await useAgent.getState().refreshCodexActionSurface(aliasId)
+    assert.equal(useAgent.getState().sessions[sessionId].scopeHeadActionProjection?.actionProjectionVersion.actionProjectionSequence, 21)
+    assert.equal(useAgent.getState().inputValue, '重读保留草稿')
+  } finally { restore() }
+})
+
+test('a late action re-read cannot overwrite a newer successful read', async () => {
+  seedIdleReadScope(30)
+  const late = deferred<ReturnType<typeof idleReadSurface>>()
+  let reads = 0
+  const restore = installAgentApi({ readCodexActionSurface: () => ++reads === 1 ? late.promise : Promise.resolve(idleReadSurface(32)) })
+  try {
+    const first = useAgent.getState().refreshCodexActionSurface(aliasId)
+    await useAgent.getState().refreshCodexActionSurface(aliasId)
+    late.resolve(idleReadSurface(31))
+    await first
+    assert.equal(useAgent.getState().sessions[sessionId].scopeHeadActionProjection?.actionProjectionVersion.actionProjectionSequence, 32)
+  } finally { restore() }
 })

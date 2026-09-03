@@ -1,6 +1,6 @@
 import { parseActionAuthorizationMode } from '../../../../shared/action-authorization-mode'
 import type { SendScopedRequest, SendScopedResponse } from '../../../../shared/ipc-contracts/agent-runtime'
-import { matchesResumeIntent } from '../../../../shared/resume-lexicon'
+import { matchesExactRetryIntent } from '../../../../shared/resume-lexicon'
 import { createRejectedBeforePersistence } from '../send-scoped-confirmation'
 import { digestCanonicalJson } from './codex-model-gateway-contract'
 
@@ -24,7 +24,6 @@ const META_KEYS = [
 export type ValidatedExplicitRetryControl = SendScopedRequest & {
   message: string
   resources?: never
-  currentDocumentAnchor?: never
   actionAdmissionRef?: never
   explicitRetry: NonNullable<SendScopedRequest['explicitRetry']>
 }
@@ -55,10 +54,10 @@ export function validateExplicitRetryControl(input: {
   }
   if (typeof request.message !== 'string'
     || request.message !== request.userMessage.content
-    || !matchesResumeIntent(request.message, 'strict')) {
+    || !matchesExactRetryIntent(request.message)) {
     return { ok: false, code: 'explicit_retry_control_text_invalid' }
   }
-  if (request.resources !== undefined || request.currentDocumentAnchor !== undefined
+  if (request.resources !== undefined
     || request.actionAdmissionRef !== undefined) {
     return { ok: false, code: 'explicit_retry_resource_present' }
   }

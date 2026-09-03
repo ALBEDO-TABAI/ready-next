@@ -19,7 +19,7 @@ import {
 
 interface ChatInputProps {
   inputValue: string
-  isStreaming: boolean
+  stopAvailable: boolean
   lifecycleInputBlocked: boolean
   stopPending: boolean
   stopError: string | null
@@ -64,7 +64,7 @@ export interface ChatInputHandle {
 
 const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput({
   inputValue,
-  isStreaming,
+  stopAvailable,
   lifecycleInputBlocked,
   stopPending,
   stopError,
@@ -104,7 +104,7 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
   const atMenuRef = useRef<HTMLDivElement>(null)
   const slashMenuRef = useRef<HTMLDivElement>(null)
   const composingRef = useRef(false)
-  const composerLocked = isStreaming || lifecycleInputBlocked
+  const composerLocked = lifecycleInputBlocked
   const composerSendLocked = composerLocked || authorizationModeUpdating
   const hasSendableContent = Boolean(inputValue.trim() || attachmentsCount > 0)
   const sendBlockedReason = !admissionReady
@@ -813,7 +813,7 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
             <div className="flex items-center" style={{ gap: 6, flexShrink: 0 }}>
               <ContextUsageMeter usage={contextUsage} dimmed={composerLocked} />
 
-              {composerLocked ? (
+              {stopAvailable ? (
                 <button
                   onClick={onStop}
                   data-ready-agent-stop="true"

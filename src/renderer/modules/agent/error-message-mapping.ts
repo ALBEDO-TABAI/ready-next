@@ -120,6 +120,24 @@ export function mapBackendErrorToFriendly(input: {
     }
   }
 
+  if (errorKind === 'action_projection_confirmation_required') {
+    return {
+      friendlyMessage: '会话内容已有变化，请核对当前提示后再次发送。',
+      technicalDetails: error || undefined,
+      recoverable: true,
+      retryStrategy: 'user_action',
+    }
+  }
+
+  if (errorKind === 'head_unavailable') {
+    return {
+      friendlyMessage: '暂时无法读取会话状态，草稿已保留，请点击重新读取。',
+      technicalDetails: error || undefined,
+      recoverable: true,
+      retryStrategy: 'user_action',
+    }
+  }
+
   if (
     errorKind === 'conversation_materializing'
     || /codex_conversation_materializing/i.test(source)

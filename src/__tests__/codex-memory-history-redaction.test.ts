@@ -20,6 +20,16 @@ import {
   type ReadyMemoryPromptPayload,
 } from '../main/modules/agent-control/ready-memory/ready-memory-contract'
 
+// Direct redactor tests supply the same validated scanner result that Gateway owns.
+// Invalid input deliberately supplies no current context, exercising fail-closed removal.
+function redactHistory(input: Omit<Parameters<typeof redactPriorReadyMemoryHistory>[0], 'currentTurnContext'>) {
+  let currentTurnContext: ReturnType<typeof currentTurnReadyAdditionalContext> | null = null
+  if (input.requestKind === 'product') {
+    try { currentTurnContext = currentTurnReadyAdditionalContext(input.input, []) } catch { /* invalid boundary */ }
+  }
+  return redactPriorReadyMemoryHistory({ ...input, currentTurnContext })
+}
+
 function message(role: 'assistant' | 'developer' | 'user', text: string) {
   return { type: 'message', role, content: [{ type: 'input_text', text }] }
 }
@@ -108,7 +118,7 @@ test('product history removes only prior Ready-memory items across two turns', (
     message('assistant', 'current work'),
   ]
 
-  const result = redactPriorReadyMemoryHistory({ requestKind: 'product', input })
+  const result = redactHistory({ requestKind: 'product', input })
 
   assert.deepEqual(result.input, [
     input[1], input[2], unrelatedCall, unrelatedOutput,
@@ -124,7 +134,7 @@ test('product history removes only prior Ready-memory items across two turns', (
   assert.equal(result.evidence.failClosed, false)
   assert.equal(result.evidence.providerInputDigest, digestCanonicalJson(result.input))
   assert.equal(
-    redactPriorReadyMemoryHistory({ requestKind: 'product', input }).evidence.redactionDigest,
+    redactHistory({ requestKind: 'product', input }).evidence.redactionDigest,
     result.evidence.redactionDigest,
   )
 })
@@ -146,7 +156,7 @@ test('current marker remains valid across resource and retry additionalContext a
     toolOutput('memory-current'),
   ]
 
-  const result = redactPriorReadyMemoryHistory({ requestKind: 'product', input })
+  const result = redactHistory({ requestKind: 'product', input })
 
   assert.deepEqual(result.input, input.slice(1))
   assert.equal(result.evidence.currentTurnMemorySnapshotDigest, currentMarker.snapshot.snapshotDigest)
@@ -167,14 +177,14 @@ test('malformed marker contracts and missing user boundaries fail closed without
     toolOutput('memory-current'),
     message('assistant', 'ordinary'),
   ]
-  const malformed = redactPriorReadyMemoryHistory({ requestKind: 'product', input: malformedInput })
+  const malformed = redactHistory({ requestKind: 'product', input: malformedInput })
   assert.deepEqual(malformed.input, [malformedInput[1], malformedInput[4]])
   assert.equal(malformed.evidence.failClosed, true)
   assert.equal(malformed.evidence.currentTurnMemorySnapshotDigest, null)
 
   const marker = memoryMarker('no user')
   const noUserInput = [marker.item, memoryCall('memory-no-user'), toolOutput('memory-no-user')]
-  const noUser = redactPriorReadyMemoryHistory({ requestKind: 'product', input: noUserInput })
+  const noUser = redactHistory({ requestKind: 'product', input: noUserInput })
   assert.deepEqual(noUser.input, [])
   assert.equal(noUser.evidence.failClosed, true)
   assert.equal(noUser.evidence.redactedItemCount, 3)
@@ -190,7 +200,7 @@ test('a malformed current memory roundtrip is removed as a pair', () => {
     message('assistant', 'ordinary'),
   ]
 
-  const result = redactPriorReadyMemoryHistory({ requestKind: 'product', input })
+  const result = redactHistory({ requestKind: 'product', input })
 
   assert.deepEqual(result.input, [marker.item, input[1], input[4]])
   assert.equal(result.evidence.redactedReadyMemoryFunctionCallCount, 1)
@@ -217,7 +227,7 @@ test('unrecognized developer text and malformed unrelated tools remain untouched
     malformedOtherOutput,
   ]
 
-  const result = redactPriorReadyMemoryHistory({ requestKind: 'product', input })
+  const result = redactHistory({ requestKind: 'product', input })
 
   assert.deepEqual(result.input, input)
   assert.equal(result.evidence.failClosed, false)
@@ -241,7 +251,7 @@ test('automatic and manual compaction remove all Ready-memory markers and tool r
   ]
 
   for (const requestKind of ['automatic_compaction', 'manual_compaction'] as const) {
-    const result = redactPriorReadyMemoryHistory({ requestKind, input })
+    const result = redactHistory({ requestKind, input })
     assert.deepEqual(result.input, [input[1], input[5], ordinary])
     assert.equal(result.evidence.failClosed, true)
     assert.equal(result.evidence.redactedReadyMemoryMessageCount, 2)
@@ -292,6 +302,10 @@ test('gateway validates original sidecar input but receipts and forwards redacte
   }]
   const oldMarker = memoryMarker('old')
   const currentMarker = memoryMarker('current')
+  const earlierInput = [{ type: 'text' as const, text: 'older retained B', text_elements: [] }]
+  const tail = { contract: 'ready_uncommitted_user_tail_v1' as const, originUserMessageId: 'older-B',
+    input: earlierInput, inputDigest: digestCanonicalJson(earlierInput) }
+  const tailMessage = message('user', `<external_ready-uncommitted-user-tail:0>${JSON.stringify(tail)}</external_ready-uncommitted-user-tail:0>`)
   const originalInput = [
     oldMarker.item,
     message('user', 'first turn'),
@@ -300,6 +314,7 @@ test('gateway validates original sidecar input but receipts and forwards redacte
     toolOutput('memory-old'),
     currentMarker.item,
     readyResource('current-document'),
+    tailMessage,
     message('user', 'second turn'),
     memoryCall('memory-current'),
     toolOutput('memory-current'),
@@ -330,8 +345,11 @@ test('gateway validates original sidecar input but receipts and forwards redacte
     snapshotDigest: created.snapshotDigest, toolSurfaceDigest: digestCanonicalJson(tools),
     turnContractDigest: 'turn-contract-memory',
     instructionContractDigest: instructionTranscriptDigest(body.instructions, body.input),
+    deliveredUserTail: [tail],
     additionalContextDigest: digestReadyAdditionalContext(
-      currentTurnReadyAdditionalContext(originalInput),
+      { resourceReferences: [{ logicalResourceId: 'current-document', currentVersion: 'v1',
+          currentDigest: 'digest-current-document', supersedesVersion: null, policyEpoch: 1 }],
+        explicitRetry: null, readyMemory: currentMarker.snapshot },
     ),
     forceToolFreeFinalization: false, allowedToolNames: ['ready_memory_search'],
   }
@@ -354,7 +372,9 @@ test('gateway validates original sidecar input but receipts and forwards redacte
         const resolved = input.metadata.raw.request_kind === 'compaction'
           ? {
               ...binding,
-              kind: 'automatic_compaction' as const,
+              kind: ((input.metadata.raw.compaction as Record<string, unknown>).trigger === 'manual'
+                ? 'manual_compaction' : 'automatic_compaction') as 'automatic_compaction' | 'manual_compaction',
+              deliveredUserTail: [],
               toolSurfaceDigest: digestCanonicalJson([]),
               instructionContractDigest: instructionTranscriptDigest(
                 compactionFixtureBody?.instructions,
@@ -393,7 +413,7 @@ test('gateway validates original sidecar input but receipts and forwards redacte
 
     const expectedProviderInput = [
       originalInput[1], originalInput[2], currentMarker.item, originalInput[6],
-      originalInput[7], originalInput[8], originalInput[9],
+      originalInput[7], originalInput[8], originalInput[9], originalInput[10],
     ]
     const redactedSidecarBody = { ...body, input: expectedProviderInput }
     assert.deepEqual(upstreamBodies[0]?.input, expectedProviderInput)
@@ -406,39 +426,64 @@ test('gateway validates original sidecar input but receipts and forwards redacte
     assert.equal(validatedCaptures[0]?.sidecarRequestDigest, digestCanonicalJson(body))
     assert.equal(validatedCaptures[0]?.sidecarInputDigest, digestCanonicalJson(originalInput))
 
-    const compactionBody = structuredClone(body)
-    compactionBody.tools = []
-    const compactionMetadata = JSON.parse(
-      (compactionBody.client_metadata as Record<string, string>)['x-codex-turn-metadata'],
-    ) as Record<string, unknown>
-    compactionMetadata.request_kind = 'compaction'
-    compactionMetadata.compaction = {
-      trigger: 'auto', reason: 'context_limit', implementation: 'responses',
-      phase: 'pre_turn', strategy: 'memento',
+    for (const [compactionIndex, trigger] of ['auto', 'manual'].entries()) {
+      const compactionBody = structuredClone(body)
+      compactionBody.tools = []
+      const compactionMetadata = JSON.parse(
+        (compactionBody.client_metadata as Record<string, string>)['x-codex-turn-metadata'],
+      ) as Record<string, unknown>
+      compactionMetadata.request_kind = 'compaction'
+      compactionMetadata.compaction = {
+        trigger, reason: trigger === 'manual' ? 'user_requested' : 'context_limit', implementation: 'responses',
+        phase: trigger === 'manual' ? 'standalone_turn' : 'pre_turn', strategy: 'memento',
+      }
+      compactionMetadata.toolSurfaceDigest = digestCanonicalJson([])
+      if (trigger === 'manual') {
+        delete (compactionBody.client_metadata as Record<string, unknown>).root_turn_id
+        for (const key of ['root_turn_id', 'readyRunId', 'toolSurfaceDigest', 'turnContractDigest', 'upstreamProfileSnapshotDigest']) {
+          delete compactionMetadata[key]
+        }
+      }
+      ;(compactionBody.client_metadata as Record<string, string>)['x-codex-turn-metadata'] = JSON.stringify(
+        compactionMetadata,
+      )
+      compactionFixtureBody = compactionBody
+      const compactionResponse = await fetch(`${address.url}/v1/responses`, {
+        method: 'POST',
+        headers: {
+          authorization: 'Bearer memory-gateway-token',
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify(compactionBody),
+      })
+      const compactionText = await compactionResponse.text()
+      assert.equal(compactionResponse.status, 200, compactionText)
+      assert.match(compactionText, /response\.completed/)
+      const compactionExpectedInput = [
+        originalInput[1], originalInput[2], originalInput[6], originalInput[7], originalInput[8],
+      ]
+      assert.deepEqual(upstreamBodies[compactionIndex + 1]?.input, compactionExpectedInput)
+      assert.equal(durableRequests[compactionIndex + 1].inputDigest, digestCanonicalJson(compactionExpectedInput))
+      assert.equal(durableRequests[compactionIndex + 1].redactedCount, 6)
     }
-    compactionMetadata.toolSurfaceDigest = digestCanonicalJson([])
-    ;(compactionBody.client_metadata as Record<string, string>)['x-codex-turn-metadata'] = JSON.stringify(
-      compactionMetadata,
-    )
-    compactionFixtureBody = compactionBody
-    const compactionResponse = await fetch(`${address.url}/v1/responses`, {
-      method: 'POST',
-      headers: {
-        authorization: 'Bearer memory-gateway-token',
-        'content-type': 'application/json',
-      },
-      body: JSON.stringify(compactionBody),
-    })
-    assert.equal(compactionResponse.status, 200)
-    assert.match(await compactionResponse.text(), /response\.completed/)
-    const compactionExpectedInput = [
-      originalInput[1], originalInput[2], originalInput[6], originalInput[7],
-    ]
-    assert.deepEqual(upstreamBodies[1]?.input, compactionExpectedInput)
-    assert.equal(durableRequests[1].inputDigest, digestCanonicalJson(compactionExpectedInput))
-    assert.equal(durableRequests[1].redactedCount, 6)
   } finally {
     await gateway.stop()
     await close(upstream)
+  }
+})
+
+
+test('the shared current-context scanner retains strict current memory shape and uniqueness', () => {
+  const marker = memoryMarker('current')
+  const current = message('user', 'current C')
+  for (const markers of [
+    [marker.item, marker.item],
+    [{ ...marker.item, role: 'user' }],
+    [{ ...marker.item, injected: 'extra' }],
+    [{ ...marker.item, content: [{ ...marker.item.content[0], injected: 'extra' }] }],
+    [{ ...marker.item, content: [marker.item.content[0], { type: 'input_image', image_url: 'hidden' }] }],
+  ]) {
+    assert.throws(() => currentTurnReadyAdditionalContext([...markers, current], []), /gateway_memory_context_invalid/)
+    assert.equal(redactHistory({ requestKind: 'product', input: [...markers, current] }).evidence.failClosed, true)
   }
 })

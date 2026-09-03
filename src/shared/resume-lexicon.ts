@@ -93,7 +93,15 @@ export type ResumeMode = 'strict' | 'liberal' | 'anywhere'
  *   - + 重新跑 / 重新执行 / 重新做 / 从头跑 / 从头重新 / 再跑 family
  *   - + optional quantity suffix (一次 / 一下 / 一轮 / 一遍)
  */
-const STRICT_FULL_MATCH = /^(?:(?:你|请你|麻烦你)?(?:再?重试(?:一次|一下|一轮|一遍)?|再试(?:一次|一下|一轮|一遍)?|再来(?:一次|一下|一轮|一遍)?|重新(?:试|来|开始|跑|执行|做)?(?:一次|一下|一轮|一遍)?|重新跑(?:一次|一下|一轮|一遍)?|重新执行(?:一次|一下|一轮|一遍)?|从头(?:跑|来|做|开始|重新)?(?:一次|一下|一轮|一遍)?|从头跑(?:一次|一下|一轮|一遍)?|从头重新(?:跑|来|做|开始)?(?:一次|一下|一轮|一遍)?|再+从头(?:跑|来|做|开始|重新)?(?:一次|一下|一轮|一遍)?|再+从头重新(?:跑|来|做|开始)?(?:一次|一下|一轮|一遍)?|再跑(?:一次|一下|一轮|一遍)?|继续(?:一下|处理|执行|做|跑|完成|刚才|上次|当前|这个|任务)?|续作(?:一下|处理|执行|做|跑|完成|刚才|上次|当前|这个|任务)?|接着(?:来|做|处理|执行|跑|完成)?|恢复(?:上次|刚才|当前)?|重做(?:一次|一下|一遍)?|try again|retry|continue|resume))$/i
+const EXACT_RETRY_FULL_MATCH = /^(?:(?:你|请你|麻烦你)?(?:再?重试(?:一次|一下|一轮|一遍)?|再试(?:一次|一下|一轮|一遍)?|再来(?:一次|一下|一轮|一遍)?|重新(?:试|来|开始|跑|执行|做)?(?:一次|一下|一轮|一遍)?|重新跑(?:一次|一下|一轮|一遍)?|重新执行(?:一次|一下|一轮|一遍)?|从头(?:跑|来|做|开始|重新)?(?:一次|一下|一轮|一遍)?|从头跑(?:一次|一下|一轮|一遍)?|从头重新(?:跑|来|做|开始)?(?:一次|一下|一轮|一遍)?|再+从头(?:跑|来|做|开始|重新)?(?:一次|一下|一轮|一遍)?|再+从头重新(?:跑|来|做|开始)?(?:一次|一下|一轮|一遍)?|再跑(?:一次|一下|一轮|一遍)?|重做(?:一次|一下|一遍)?|try again|retry))$/i
+const STRICT_CONTINUATION_FULL_MATCH = /^(?:你|请你|麻烦你)?(?:继续(?:一下|处理|执行|做|跑|完成|刚才|上次|当前|这个|任务)?|续作(?:一下|处理|执行|做|跑|完成|刚才|上次|当前|这个|任务)?|接着(?:来|做|处理|执行|跑|完成)?|恢复(?:上次|刚才|当前)?|continue|resume)$/i
+const STRICT_FULL_MATCH = new RegExp(`(?:${EXACT_RETRY_FULL_MATCH.source}|${STRICT_CONTINUATION_FULL_MATCH.source})`, 'i')
+
+/** Exact task replay control; continuation and added instructions stay ordinary input. */
+export function matchesExactRetryIntent(text: string): boolean {
+  return EXACT_RETRY_FULL_MATCH.test(text.trim())
+}
+
 
 /**
  * Liberal start prefix: the (trimmed) text begins with a continuation root.

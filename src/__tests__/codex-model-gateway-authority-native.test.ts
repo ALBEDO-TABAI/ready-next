@@ -18,7 +18,7 @@ import {
   digestCanonicalJson,
   digestText,
 } from '../main/modules/agent-control/codex-runtime/codex-model-gateway-contract'
-import type { PreparedCodexProductRun } from '../main/modules/agent-control/codex-runtime/codex-product-run-preparer'
+import { isPreparedCodexProductRun, type PreparedCodexProductRun } from '../main/modules/agent-control/codex-runtime/codex-product-run-preparer'
 import type { ToolDefinition } from '../main/modules/agent-control/tools-runtime/tool-definition'
 import type { StartIdentityReservationSet } from '../main/modules/agent-control/send-scoped-confirmation'
 import { createCodexToolFixtureFromDefinitions } from './utils/codex-tool-fixture'
@@ -132,7 +132,7 @@ function prepared(toolSurfaceDigest: string, maxIterations = 8, maxToolCalls = 4
       },
     },
     neutralProjectionSeed: {
-      phase: 'planning', taskTitle: '正在理解需求', taskSummary: '正在整理任务边界',
+      phase: 'planning', taskTitle: '正在理解需求', taskSummary: '正在整理任务边界、资源与可用能力',
     },
   }
 }
@@ -262,6 +262,7 @@ function admitProduct(db: NativeDb, input: {
   }
   run.ingress.uncommittedTailAssignments = []
   run.ingress.supersededUncommittedItems = []
+  assert.equal(isPreparedCodexProductRun(run), true, 'gateway fixture must carry a production-valid frozen prepared contract')
   const admissionInput = {
     prepared: run,
     reservation: reservation(),
@@ -380,6 +381,7 @@ test('durable gateway authority resolves only the active product binding before 
       },
     })
     assert.equal(resolved.kind, 'product')
+    assert.deepEqual(resolved.deliveredUserTail, [])
     assert.equal(resolved.snapshot.model, 'upstream-model')
     assert.deepEqual(resolved.allowedToolNames, ['ready_read_probe'])
     assert.equal(JSON.stringify(resolved.snapshot).includes('never-persist-this'), false)

@@ -2,6 +2,7 @@ import type {
   CodexHeadActionProjection,
   CodexProductTurnActionProjection,
   ProductTurnReceipt,
+  SendScopedRequest,
 } from '../../../shared/ipc-contracts/agent-runtime'
 import type { ScopeRunState, ToolTraceEvent } from './types'
 import type { WorkbenchMode } from '../../stores/useMode'
@@ -132,4 +133,15 @@ export function mergeProductTurnActionProjections(input: {
     }
   }
   return merged
+}
+
+
+export function codexHeadActionAdmissionRef(
+  head: CodexHeadActionProjection | null,
+): SendScopedRequest['actionAdmissionRef'] {
+  return head?.actionHeadIdentity ? {
+    headProjectionDigest: head.evidenceDigest,
+    actionProjectionVersion: head.actionProjectionVersion,
+    actionHeadIdentity: head.actionHeadIdentity,
+  } : undefined
 }

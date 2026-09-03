@@ -31,6 +31,7 @@ const MAX_VISIBLE_TOOLS = 100
 export type ProductTurnActionContext = {
   headFacts: CodexHeadActionFacts
   sourcePrepared: PreparedCodexProductRun
+  sourceRootCompacted: boolean
   exactLiveRootOnDirectSuccessor: boolean
 }
 type ProductTurnActionContextReader = (readyRunId: string) => ProductTurnActionContext | null
@@ -430,6 +431,9 @@ function productTurnActionProjection(
     modeDigest: digestCanonicalJson({ requestedWorkbenchMode, trustedWorkbenchMode }),
   }
   const retryEligibility = resolveExactRetryEligibility({
+    phase: 'projection',
+    currentMemoryPayloadEmpty: effectiveMemory.modelVisiblePayloadEmpty,
+    sourceRootCompacted: context.sourceRootCompacted,
     historyKind: facts.history.kind,
     effectState: facts.effect.state,
     toolCount,
@@ -442,12 +446,6 @@ function productTurnActionProjection(
       && context.headFacts.materializationState === 'confirmed'
       && headProjection.actions.send_new_message.availability === 'ready',
     currentSourceEligible: context.exactLiveRootOnDirectSuccessor,
-    currentFacts: {
-      resourceEmpty: true,
-      skillAndExecutionCeilingValid: true,
-      memoryPayloadEmpty: effectiveMemory.modelVisiblePayloadEmpty,
-      selectedSeedCount: context.exactLiveRootOnDirectSuccessor ? 1 : 0,
-    },
   })
   const retryFailedTask = {
     ...retryEligibility,

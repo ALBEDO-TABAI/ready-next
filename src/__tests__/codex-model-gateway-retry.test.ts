@@ -230,6 +230,7 @@ async function withGateway(input: {
           turnContractDigest: 'turn-contract-retry-1',
           instructionContractDigest: instructionTranscriptDigest(body.instructions, body.input),
           additionalContextDigest: digestCanonicalJson([]),
+          deliveredUserTail: [],
           forceToolFreeFinalization: false,
           allowedToolNames: [],
         }

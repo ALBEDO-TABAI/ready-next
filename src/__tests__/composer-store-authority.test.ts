@@ -7,6 +7,7 @@ import { makeEmptySessionSlice } from '../renderer/stores/agent-store-helpers'
 import { useAgent } from '../renderer/stores/useAgent'
 import { projectCodexHeadActionProjection } from '../main/modules/agent-control/codex-runtime/codex-action-surface'
 import { projectCodexLifecycleOperationV2 } from '../main/modules/agent-control/codex-runtime/codex-lifecycle-action-surface'
+import { makeScopeHeadActionProjection } from './product-turn-action-projection-fixture'
 
 function deferred<T>() {
   let resolve!: (value: T) => void
@@ -52,11 +53,13 @@ function seedStore(active: 'a' | 'b' = 'a', revision = 1): void {
     ...makeEmptySessionSlice(scopeA.id),
     aliasGeneration: 1,
     messageVisibilityEpoch: 0,
+    scopeHeadActionProjection: makeScopeHeadActionProjection(scopeA.id),
   }
   const sliceB = {
     ...makeEmptySessionSlice(scopeB.id),
     aliasGeneration: 1,
     messageVisibilityEpoch: 0,
+    scopeHeadActionProjection: makeScopeHeadActionProjection(scopeB.id),
   }
   const activeScope = active === 'a' ? scopeA : scopeB
   const activeSlice = active === 'a' ? sliceA : sliceB

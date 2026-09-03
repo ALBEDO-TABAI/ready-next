@@ -3978,8 +3978,7 @@ test('publication divergence creates and materializes one native-fork successor'
   })
 })
 
-test('formal-origin handoff carries safe failed B and divergent C once without resending B on the same native thread', async (t) => {
-  await withRepository(t, (db, repository) => {
+function prepareRetainedFailureFixture(db: Parameters<typeof prepareReadyParents>[0], repository: CodexBindingRepository) {
     const accepted = prepared()
     prepareReadyParents(db, repository, accepted)
     repository.admitProductBindings(admission(accepted, lazyReservation()))
@@ -4010,6 +4009,12 @@ test('formal-origin handoff carries safe failed B and divergent C once without r
     assert.deepEqual(repository.readLiveUncommittedUserTail('thread-binding-1'), [], 'native already retains B')
     assert.deepEqual(repository.readHandoffUncommittedUserTail('thread-binding-1').map((item) => item.originUserMessageId),
       [b.ingress.canonicalCurrentInputRef.messageId])
+  return { b, bStart }
+}
+
+test('formal-origin handoff carries safe failed B and divergent C once without resending B on the same native thread', async (t) => {
+  await withRepository(t, (db, repository) => {
+    const { b, bStart } = prepareRetainedFailureFixture(db, repository)
     const c = prepared('run-diverged-c')
     const cStart = admitStartedExistingTurn(db, repository, c)
     assert.deepEqual(cStart.admitted.prepared.ingress.uncommittedUserTail || [], [])
@@ -4077,6 +4082,32 @@ test('formal-origin handoff carries safe failed B and divergent C once without r
     assert.doesNotMatch(JSON.stringify(built.params), /RETRY CONTROL ONLY/)
     assert.deepEqual(repository.readUncommittedTailDeliveryAudit(retry.runId).items.map((item) => item.disposition),
       ['additional_context', 'current_input'])
+    const gateway = new CodexModelGatewayRepository(db as unknown as DatabaseConnection, repository)
+    const beforeGateway = {
+      claims: db.prepare('SELECT ready_run_id, gateway_claimed_codex_turn_id, revision FROM codex_turn_bindings ORDER BY ready_run_id').all(),
+      receipts: db.prepare('SELECT receipt_id FROM ready_model_gateway_request_receipts ORDER BY receipt_id').all(),
+    }
+    assert.throws(() => gateway.resolveBinding({
+      metadata: { requestKind: 'turn', threadId: child.id, turnId: retryStart.codexTurnId, readyRunId: retry.runId,
+        toolSurfaceDigest: retry.readyToolSurface.toolSurfaceDigest, turnContractDigest: retryStart.admitted.turnContractDigest,
+        upstreamProfileSnapshotDigest: retryStart.admitted.upstreamProfileSnapshotDigest,
+        raw: { request_kind: 'turn', forked_from_thread_id: child.forkedFromId } },
+      requestDigest: 'frozen-tail-consumer-probe', receivedAt: admittedAt,
+      get requestEvidence(): never { throw new Error('tail_probe_must_stop_before_receipt') },
+      validate(binding) {
+        assert.deepEqual(binding.deliveredUserTail, [{ contract: 'ready_uncommitted_user_tail_v1',
+          originUserMessageId: b.ingress.canonicalCurrentInputRef.messageId,
+          input: b.ingress.canonicalCurrentInputRef.input,
+          inputDigest: digestCodexUserInput(b.ingress.canonicalCurrentInputRef.input) }],
+        'real gateway authority must consume frozen older B only; selected C and control R are not additional context')
+        assert.deepEqual(JSON.parse(built.params.additionalContext['ready-uncommitted-user-tail:0'].value), binding.deliveredUserTail[0])
+        throw new Error('frozen_tail_owner_accepted')
+      },
+    }), /frozen_tail_owner_accepted/)
+    assert.deepEqual({
+      claims: db.prepare('SELECT ready_run_id, gateway_claimed_codex_turn_id, revision FROM codex_turn_bindings ORDER BY ready_run_id').all(),
+      receipts: db.prepare('SELECT receipt_id FROM ready_model_gateway_request_receipts ORDER BY receipt_id').all(),
+    }, beforeGateway, 'validator rejection rolls back gateway claim and writes no request receipt')
     const retryCandidate = { ...nativeFailureCandidate(retry, 'failed'), codexThreadId: child.id, codexTurnId: retryStart.codexTurnId }
     const retryEngine = repository.recordEngineTerminalCandidate({ readyRunId: retry.runId,
       codexThreadId: child.id, codexTurnId: retryStart.codexTurnId, engineOutcome: 'failed', candidate: retryCandidate, recordedAt: admittedAt })
@@ -8382,5 +8413,236 @@ test('pending and unknown manual compaction protect their frozen profile until q
       activeProfileId: 'profile-fallback',
       profiles: currentWorkspace.profiles.filter((profile) => profile.id !== 'profile-manual-active'),
     }))
+  })
+})
+
+
+test('a failed input changes restatement reason only after formal manual compaction covers it', async (t) => {
+  await withRepository(t, (db, repository) => {
+    const { b, bStart } = prepareRetainedFailureFixture(db, repository)
+
+    assert.deepEqual(repository.readProductTurnPresentation(b.runId).actionProjection.retry_failed_task.blockers,
+      ['same_thread_failed_turn_restatement_required'])
+    const route = repository.readManualCompactionRoute({ aliasId: 'scope-1', aliasGeneration: 1 })!
+    const providerSnapshot = defaultThreadProfile.snapshot
+    repository.beginManualCompaction({
+      ...route, manualCompactionId: 'manual-safe-b', ownerMainBootId: 'main-boot-1',
+      providerSnapshot, credentialReferenceId: providerSnapshot.credentialReferenceId,
+      expectedToolsDigest: digestCanonicalJson([]), preDispatchThreadReadDigest: 'safe-b-read',
+      preDispatchTurnIds: ['turn-native-1', bStart.codexTurnId],
+      expiresAt: '2026-08-07T03:00:00.000Z', createdAt: admittedAt,
+    })
+    repository.activateManualCompactionDispatch({ connectionEpoch: 'manual-safe-b-epoch', rpcId: 1,
+      codexThreadId: 'thread-native-1', requestDigest: 'manual-safe-b-request', dispatchIntentAt: admittedAt })
+    repository.markManualCompactionWriteAttempted({ connectionEpoch: 'manual-safe-b-epoch', rpcId: 1,
+      manualCompactionId: 'manual-safe-b', attemptedAt: admittedAt })
+    repository.markManualCompactionWriteConfirmed({ connectionEpoch: 'manual-safe-b-epoch', rpcId: 1,
+      manualCompactionId: 'manual-safe-b', childWriteDigest: 'manual-safe-b-request', confirmedAt: admittedAt })
+    repository.consumeManualCompaction({ manualCompactionId: 'manual-safe-b', codexCompactionTurnId: 'compact-safe-b',
+      notificationContextCompactionItemId: 'compact-safe-b-item', contextCompactionItemId: 'compact-safe-b-item',
+      threadReadDigest: 'compacted-safe-b-read', terminalEvidenceDigest: 'compact-terminal',
+      gatewayRequestReceiptId: 'compact-request', gatewayRequestEvidenceDigest: 'compact-request-evidence',
+      gatewayResponseEvidenceDigest: 'compact-response-evidence', consumedAt: admittedAt })
+    const projected = repository.readProductTurnPresentation(b.runId).actionProjection.retry_failed_task
+    assert.equal(projected.availability, 'not_applicable')
+    assert.deepEqual(projected.blockers, ['compacted_failed_turn_restatement_required'])
+    assert.deepEqual(repository.readHandoffUncommittedUserTail('thread-binding-1'), [])
+    assert.equal(repository.readTerminalCloseoutEvidence(b.runId)!.terminalFacts.history.kind, 'continuation_safe')
+  })
+})
+
+test('ordinary accepted coverage does not claim a failure was compacted', async (t) => {
+  await withRepository(t, (db, repository) => {
+    const { b, bStart } = prepareRetainedFailureFixture(db, repository)
+
+    assert.deepEqual(repository.readProductTurnPresentation(b.runId).actionProjection.retry_failed_task.blockers,
+      ['same_thread_failed_turn_restatement_required'])
+
+    const c = prepared('run-accepted-c')
+    const cStart = admitStartedExistingTurn(db, repository, c)
+    const productTerminalDigest = recordCompletedTerminal(db, repository, c.runId, cStart.codexTurnId)
+    db.prepare(`UPDATE task_projections SET status = 'completed' WHERE task_id = ?`).run(c.taskId)
+    repository.completeProductTurnCloseout({
+      readyRunId: c.runId, productTerminalDigest, closeoutAt: admittedAt,
+      terminalEvidence: completedCloseoutEvidence(repository, c.runId, ['turn-native-1', bStart.codexTurnId]),
+    })
+    const projected = repository.readProductTurnPresentation(b.runId).actionProjection.retry_failed_task
+    assert.equal(db.prepare(`SELECT count(*) AS n FROM codex_native_coverage_receipts WHERE producer_kind != 'product_closeout'`).get().n, 0)
+    assert.deepEqual(projected.blockers, ['same_thread_failed_turn_restatement_required'])
+  })
+})
+
+test('compaction then ordinary success preserves compacted reason', async (t) => {
+  await withRepository(t, (db, repository) => {
+    const { b, bStart } = prepareRetainedFailureFixture(db, repository)
+
+    assert.deepEqual(repository.readProductTurnPresentation(b.runId).actionProjection.retry_failed_task.blockers,
+      ['same_thread_failed_turn_restatement_required'])
+    const route = repository.readManualCompactionRoute({ aliasId: 'scope-1', aliasGeneration: 1 })!
+    const providerSnapshot = defaultThreadProfile.snapshot
+    repository.beginManualCompaction({
+      ...route, manualCompactionId: 'manual-safe-b', ownerMainBootId: 'main-boot-1',
+      providerSnapshot, credentialReferenceId: providerSnapshot.credentialReferenceId,
+      expectedToolsDigest: digestCanonicalJson([]), preDispatchThreadReadDigest: 'safe-b-read',
+      preDispatchTurnIds: ['turn-native-1', bStart.codexTurnId],
+      expiresAt: '2026-08-07T03:00:00.000Z', createdAt: admittedAt,
+    })
+    repository.activateManualCompactionDispatch({ connectionEpoch: 'manual-safe-b-epoch', rpcId: 1,
+      codexThreadId: 'thread-native-1', requestDigest: 'manual-safe-b-request', dispatchIntentAt: admittedAt })
+    repository.markManualCompactionWriteAttempted({ connectionEpoch: 'manual-safe-b-epoch', rpcId: 1,
+      manualCompactionId: 'manual-safe-b', attemptedAt: admittedAt })
+    repository.markManualCompactionWriteConfirmed({ connectionEpoch: 'manual-safe-b-epoch', rpcId: 1,
+      manualCompactionId: 'manual-safe-b', childWriteDigest: 'manual-safe-b-request', confirmedAt: admittedAt })
+    repository.consumeManualCompaction({ manualCompactionId: 'manual-safe-b', codexCompactionTurnId: 'compact-safe-b',
+      notificationContextCompactionItemId: 'compact-safe-b-item', contextCompactionItemId: 'compact-safe-b-item',
+      threadReadDigest: 'compacted-safe-b-read', terminalEvidenceDigest: 'compact-terminal',
+      gatewayRequestReceiptId: 'compact-request', gatewayRequestEvidenceDigest: 'compact-request-evidence',
+      gatewayResponseEvidenceDigest: 'compact-response-evidence', consumedAt: admittedAt })
+
+    const c = prepared('run-accepted-c')
+    const cStart = admitStartedExistingTurn(db, repository, c)
+    const productTerminalDigest = recordCompletedTerminal(db, repository, c.runId, cStart.codexTurnId)
+    db.prepare(`UPDATE task_projections SET status = 'completed' WHERE task_id = ?`).run(c.taskId)
+    repository.completeProductTurnCloseout({
+      readyRunId: c.runId, productTerminalDigest, closeoutAt: admittedAt,
+      terminalEvidence: completedCloseoutEvidence(repository, c.runId, ['turn-native-1', bStart.codexTurnId, 'compact-safe-b']),
+    })
+    const projected = repository.readProductTurnPresentation(b.runId).actionProjection.retry_failed_task
+    assert.equal(repository.readAcceptedNativePrefixHead('thread-binding-1')!.acceptedNativeHeadKind, 'turn')
+    assert.equal(projected.availability, 'not_applicable')
+    assert.deepEqual(projected.blockers, ['compacted_failed_turn_restatement_required'])
+    assert.deepEqual(repository.readHandoffUncommittedUserTail('thread-binding-1'), [])
+    assert.equal(repository.readTerminalCloseoutEvidence(b.runId)!.terminalFacts.history.kind, 'continuation_safe')
+  })
+})
+
+
+test('ordinary accepted failure then compaction gains compacted reason', async (t) => {
+  await withRepository(t, (db, repository) => {
+    const { b, bStart } = prepareRetainedFailureFixture(db, repository)
+
+    assert.deepEqual(repository.readProductTurnPresentation(b.runId).actionProjection.retry_failed_task.blockers,
+      ['same_thread_failed_turn_restatement_required'])
+
+    const c = prepared('run-accepted-c')
+    const cStart = admitStartedExistingTurn(db, repository, c)
+    const productTerminalDigest = recordCompletedTerminal(db, repository, c.runId, cStart.codexTurnId)
+    db.prepare(`UPDATE task_projections SET status = 'completed' WHERE task_id = ?`).run(c.taskId)
+    repository.completeProductTurnCloseout({
+      readyRunId: c.runId, productTerminalDigest, closeoutAt: admittedAt,
+      terminalEvidence: completedCloseoutEvidence(repository, c.runId, ['turn-native-1', bStart.codexTurnId]),
+    })
+    assert.deepEqual(repository.readProductTurnPresentation(b.runId).actionProjection.retry_failed_task.blockers,
+      ['same_thread_failed_turn_restatement_required'])
+    const route = repository.readManualCompactionRoute({ aliasId: 'scope-1', aliasGeneration: 1 })!
+    const providerSnapshot = defaultThreadProfile.snapshot
+    repository.beginManualCompaction({
+      ...route, manualCompactionId: 'manual-safe-b', ownerMainBootId: 'main-boot-1',
+      providerSnapshot, credentialReferenceId: providerSnapshot.credentialReferenceId,
+      expectedToolsDigest: digestCanonicalJson([]), preDispatchThreadReadDigest: 'safe-b-read',
+      preDispatchTurnIds: ['turn-native-1', bStart.codexTurnId, cStart.codexTurnId],
+      expiresAt: '2026-08-07T03:00:00.000Z', createdAt: admittedAt,
+    })
+    repository.activateManualCompactionDispatch({ connectionEpoch: 'manual-safe-b-epoch', rpcId: 1,
+      codexThreadId: 'thread-native-1', requestDigest: 'manual-safe-b-request', dispatchIntentAt: admittedAt })
+    repository.markManualCompactionWriteAttempted({ connectionEpoch: 'manual-safe-b-epoch', rpcId: 1,
+      manualCompactionId: 'manual-safe-b', attemptedAt: admittedAt })
+    repository.markManualCompactionWriteConfirmed({ connectionEpoch: 'manual-safe-b-epoch', rpcId: 1,
+      manualCompactionId: 'manual-safe-b', childWriteDigest: 'manual-safe-b-request', confirmedAt: admittedAt })
+    repository.consumeManualCompaction({ manualCompactionId: 'manual-safe-b', codexCompactionTurnId: 'compact-safe-b',
+      notificationContextCompactionItemId: 'compact-safe-b-item', contextCompactionItemId: 'compact-safe-b-item',
+      threadReadDigest: 'compacted-safe-b-read', terminalEvidenceDigest: 'compact-terminal',
+      gatewayRequestReceiptId: 'compact-request', gatewayRequestEvidenceDigest: 'compact-request-evidence',
+      gatewayResponseEvidenceDigest: 'compact-response-evidence', consumedAt: admittedAt })
+    const projected = repository.readProductTurnPresentation(b.runId).actionProjection.retry_failed_task
+    assert.equal(projected.availability, 'not_applicable')
+    assert.deepEqual(projected.blockers, ['compacted_failed_turn_restatement_required'])
+    assert.deepEqual(repository.readHandoffUncommittedUserTail('thread-binding-1'), [])
+    assert.equal(repository.readTerminalCloseoutEvidence(b.runId)!.terminalFacts.history.kind, 'continuation_safe')
+  })
+})
+
+
+test('fork inherits compacted facts before and after bind', async (t) => {
+  await withRepository(t, (db, repository) => {
+    const { b, bStart } = prepareRetainedFailureFixture(db, repository)
+
+    assert.deepEqual(repository.readProductTurnPresentation(b.runId).actionProjection.retry_failed_task.blockers,
+      ['same_thread_failed_turn_restatement_required'])
+    const route = repository.readManualCompactionRoute({ aliasId: 'scope-1', aliasGeneration: 1 })!
+    const providerSnapshot = defaultThreadProfile.snapshot
+    repository.beginManualCompaction({
+      ...route, manualCompactionId: 'manual-safe-b', ownerMainBootId: 'main-boot-1',
+      providerSnapshot, credentialReferenceId: providerSnapshot.credentialReferenceId,
+      expectedToolsDigest: digestCanonicalJson([]), preDispatchThreadReadDigest: 'safe-b-read',
+      preDispatchTurnIds: ['turn-native-1', bStart.codexTurnId],
+      expiresAt: '2026-08-07T03:00:00.000Z', createdAt: admittedAt,
+    })
+    repository.activateManualCompactionDispatch({ connectionEpoch: 'manual-safe-b-epoch', rpcId: 1,
+      codexThreadId: 'thread-native-1', requestDigest: 'manual-safe-b-request', dispatchIntentAt: admittedAt })
+    repository.markManualCompactionWriteAttempted({ connectionEpoch: 'manual-safe-b-epoch', rpcId: 1,
+      manualCompactionId: 'manual-safe-b', attemptedAt: admittedAt })
+    repository.markManualCompactionWriteConfirmed({ connectionEpoch: 'manual-safe-b-epoch', rpcId: 1,
+      manualCompactionId: 'manual-safe-b', childWriteDigest: 'manual-safe-b-request', confirmedAt: admittedAt })
+    repository.consumeManualCompaction({ manualCompactionId: 'manual-safe-b', codexCompactionTurnId: 'compact-safe-b',
+      notificationContextCompactionItemId: 'compact-safe-b-item', contextCompactionItemId: 'compact-safe-b-item',
+      threadReadDigest: 'compacted-safe-b-read', terminalEvidenceDigest: 'compact-terminal',
+      gatewayRequestReceiptId: 'compact-request', gatewayRequestEvidenceDigest: 'compact-request-evidence',
+      gatewayResponseEvidenceDigest: 'compact-response-evidence', consumedAt: admittedAt })
+
+    const c = prepared('run-accepted-c')
+    const cStart = admitStartedExistingTurn(db, repository, c)
+    const productTerminalDigest = recordCompletedTerminal(db, repository, c.runId, cStart.codexTurnId)
+    db.prepare(`UPDATE task_projections SET status = 'completed' WHERE task_id = ?`).run(c.taskId)
+    repository.completeProductTurnCloseout({
+      readyRunId: c.runId, productTerminalDigest, closeoutAt: admittedAt,
+      terminalEvidence: completedCloseoutEvidence(repository, c.runId, ['turn-native-1', bStart.codexTurnId, 'compact-safe-b']),
+    })
+    const projected = repository.readProductTurnPresentation(b.runId).actionProjection.retry_failed_task
+    assert.equal(repository.readAcceptedNativePrefixHead('thread-binding-1')!.acceptedNativeHeadKind, 'turn')
+    assert.equal(projected.availability, 'not_applicable')
+    assert.deepEqual(projected.blockers, ['compacted_failed_turn_restatement_required'])
+    assert.deepEqual(repository.readHandoffUncommittedUserTail('thread-binding-1'), [])
+    assert.equal(repository.readTerminalCloseoutEvidence(b.runId)!.terminalFacts.history.kind, 'continuation_safe')
+
+    const d = prepared('run-diverged-d')
+    const dStart = admitStartedExistingTurn(db, repository, d)
+    const dCandidate = { ...nativeFailureCandidate(d, 'failed'), codexTurnId: dStart.codexTurnId }
+    const dReceipt = repository.recordEngineTerminalCandidate({
+      readyRunId: d.runId, codexThreadId: dCandidate.codexThreadId, codexTurnId: dCandidate.codexTurnId,
+      engineOutcome: 'failed', candidate: dCandidate, recordedAt: admittedAt,
+    })
+    db.exec('BEGIN IMMEDIATE')
+    db.prepare(`UPDATE task_projections SET status = 'failed' WHERE task_id = ?`).run(d.taskId)
+    const result = repository.completePublicationDivergenceCloseoutInOpenTransaction({
+      readyRunId: d.runId, closeoutAt: admittedAt,
+      productTerminalDigest: insertFailureTerminalMessage(db, d, '本轮未能完成。', 'blocked_external'),
+      terminalEvidence: terminalCloseoutEvidence(d, dCandidate, dReceipt, undefined,
+        ['turn-native-1', bStart.codexTurnId, 'compact-safe-b', cStart.codexTurnId]),
+      forkSeed: { targetCwd: '/tmp/ready-codex/review-fork-after-compact', reservationSetId: 'review-fork', reservationId: 'review-fork-member', reservationEvidenceDigest: 'review-fork-evidence' },
+    })
+    db.exec('COMMIT')
+    const targetId = result.forkTargetThreadBindingId!
+    assert.ok(targetId)
+    assert.equal(repository.readProductTurnActionContext(b.runId)!.sourceRootCompacted, true)
+    const beforeBind = repository.readProductTurnPresentation(b.runId).actionProjection.retry_failed_task
+    assert.deepEqual(beforeBind.blockers, ['compacted_failed_turn_restatement_required'])
+    repository.activateStartDispatch({ connectionEpoch: 'review-fork-epoch', rpcId: 1, method: 'thread/fork',
+      bindingLookupKey: targetId, requestDigest: 'review-fork-request', dispatchedAt: admittedAt })
+    repository.markStartChildWriteConfirmed({ connectionEpoch: 'review-fork-epoch', rpcId: 1, method: 'thread/fork',
+      bindingId: targetId, childWriteDigest: 'review-fork-request', confirmedAt: admittedAt })
+    const child = { ...rootThread(), id: 'review-fork-child', sessionId: 'review-fork-child', forkedFromId: 'thread-native-1',
+      cwd: '/tmp/ready-codex/review-fork-after-compact',
+      turns: ['turn-native-1', bStart.codexTurnId, 'compact-safe-b', cStart.codexTurnId]
+        .map((id) => ({ id, status: 'completed', error: null, items: [] })) }
+    repository.reconcileStartAccepted({ connectionEpoch: 'review-fork-epoch', rpcId: 1, method: 'thread/fork',
+      bindingId: targetId, nativeId: child.id, responseDigest: 'review-fork-result', responsePending: false, reconciledAt: admittedAt,
+      nativeResult: { thread: child, cwd: child.cwd, model: 'ready-e0-model', modelProvider: 'ready_gateway',
+        approvalPolicy: 'never', approvalsReviewer: 'user', sandbox: { type: 'readOnly', networkAccess: false },
+        reasoningEffort: null, serviceTier: null, instructionSources: [] } })
+    assert.equal(repository.readProductTurnActionContext(b.runId)!.sourceRootCompacted, true)
+    assert.deepEqual(repository.readProductTurnPresentation(b.runId).actionProjection.retry_failed_task.blockers,
+      ['compacted_failed_turn_restatement_required'])
+    assert.equal(repository.readProductTurnPresentation(d.runId).actionProjection.retry_failed_task.availability, 'ready')
   })
 })

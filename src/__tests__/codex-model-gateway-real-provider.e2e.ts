@@ -228,6 +228,7 @@ test('real configured Provider returns one successful response through the gatew
           turnContractDigest: 'turn-contract-real-e3',
           instructionContractDigest: instructionTranscriptDigest(request.instructions, request.input),
           additionalContextDigest: digestCanonicalJson([]),
+          deliveredUserTail: [],
           forceToolFreeFinalization: false,
           allowedToolNames: [],
         }

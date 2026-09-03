@@ -11,6 +11,9 @@ import {
 } from '../main/modules/agent-control/codex-runtime/codex-history-continuity-policy'
 
 const readyFacts = {
+  phase: 'projection' as const,
+  currentMemoryPayloadEmpty: true,
+  sourceRootCompacted: false,
   historyKind: 'diverged' as const,
   effectState: 'none' as const,
   toolCount: 0,
@@ -31,6 +34,7 @@ test('projection and final Retry admission share one reducer', () => {
   })
   assert.deepEqual(resolveExactRetryEligibility({
     ...readyFacts,
+    phase: 'pre_persistence',
     currentFacts: {
       resourceEmpty: true,
       skillAndExecutionCeilingValid: true,
@@ -43,6 +47,7 @@ test('projection and final Retry admission share one reducer', () => {
 test('final Retry admission cannot inherit a projected ready result after current facts drift', () => {
   assert.deepEqual(resolveExactRetryEligibility({
     ...readyFacts,
+    phase: 'pre_persistence',
     currentFacts: {
       resourceEmpty: false,
       skillAndExecutionCeilingValid: false,
@@ -129,4 +134,24 @@ test('Retry selects one latest origin while earlier pure-text origins are delive
   assert.deepEqual(resolveExplicitRetryTailPlan(tail, { originUserMessageId: 'b', inputDigest: 'b'.repeat(64) }), { kind: 'ineligible' })
   assert.deepEqual(resolveExplicitRetryTailPlan([{ ...tail[0], policy: 'task_restatement_required' }, tail[1]], selected), { kind: 'ineligible' })
   assert.deepEqual(resolveExplicitRetryTailPlan([...tail, tail[1]], selected), { kind: 'ineligible' })
+})
+
+
+test('missing final current facts cannot be inferred from a ready projection', () => {
+  const result = resolveExactRetryEligibility({ ...readyFacts, phase: 'pre_persistence' } as never)
+  assert.notEqual(result.availability, 'ready')
+  assert.ok(result.blockers.includes('current_facts_unavailable'))
+})
+
+test('native retained failure and covered failure have distinct retry explanations', () => {
+  for (const sourceRootCompacted of [false, true]) {
+    assert.deepEqual(resolveExactRetryEligibility({
+      ...readyFacts, historyKind: 'continuation_safe', sourceRootCompacted,
+    }), {
+      availability: 'not_applicable',
+      blockers: [sourceRootCompacted
+        ? 'compacted_failed_turn_restatement_required'
+        : 'same_thread_failed_turn_restatement_required'],
+    })
+  }
 })

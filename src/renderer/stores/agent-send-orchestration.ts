@@ -24,7 +24,7 @@ import {
 } from '../../shared/ipc-contracts/agent-runtime'
 import type { CanonicalAssistantMessage } from '../../shared/ipc-contracts/canonical-message'
 import type { ChatAttachment, ScopeRunState } from '../modules/agent/types'
-import type { AgentSendResult, AgentState, SessionSlice } from './agent-store-types'
+import type { AgentSendResult, AgentState } from './agent-store-types'
 import {
   activeSessionKey,
   generateId,
@@ -35,6 +35,7 @@ import {
 } from './agent-store-helpers'
 import { parseActionAuthorizationMode } from '../../shared/action-authorization-mode'
 import { collectWorkbenchSurfaceResources } from './agent-workbench-resources'
+import { codexHeadActionAdmissionRef } from '../modules/agent/productTurnReceipt'
 import { resolveNaturalExplicitRetry } from '../modules/agent/explicit-retry-routing'
 
 type PendingIngressSnapshot = {
@@ -80,11 +81,6 @@ export function rejectedMessageResult(errorKind: PrePersistenceErrorKind): SendM
   }
 }
 
-export function hasUnresolvedLifecycleUncertainty(slice: SessionSlice): boolean {
-  return slice.lifecycleError?.code === 'interrupt_state_unknown'
-    || slice.lifecycleError?.code === 'compaction_state_unknown'
-}
-
 export function terminalReasonFromSendError(
   errorKind: TerminalErrorKind,
 ): ScopeRunState['terminalReason'] {
@@ -106,6 +102,7 @@ export async function sendAgentMessage(input: {
   options?: {
     codexExternalReadSlice?: Record<string, unknown>
     explicitRetry?: SendScopedRequest['explicitRetry']
+    actionAdmissionRef?: SendScopedRequest['actionAdmissionRef']
   }
   commitPersistedIngressSnapshot: (event: Pick<
     IngressAdmittedEvent,
@@ -149,9 +146,12 @@ export async function sendAgentMessage(input: {
     || originComposerAuthority.scopeId !== currentScopeId
     || originComposerAuthority.sessionConversationId !== currentScopeId
   ) return rejectedMessageResult('conversation_reset_required')
-  if (originSlice.lifecyclePendingAction) return rejectedMessageResult('thread_busy')
-  if (hasUnresolvedLifecycleUncertainty(originSlice)) {
-    return rejectedMessageResult('conversation_reset_required')
+  const sendGate = originSlice.scopeHeadActionProjection?.actions.send_new_message
+  if (!sendGate) return rejectedMessageResult('head_unavailable')
+  if (sendGate.availability !== 'ready') {
+    return rejectedMessageResult(sendGate.blockers[0] === 'thread_busy'
+      ? 'thread_busy' : sendGate.blockers[0] === 'history_materializing'
+        ? 'conversation_materializing' : 'conversation_reset_required')
   }
   const activeAgentName = currentAgent
   const activeScope = currentScope
@@ -169,7 +169,6 @@ export async function sendAgentMessage(input: {
   let explicitRetry = options?.explicitRetry
   const retryHasCurrentContext = attachments.length > 0
     || referencedPoolAttachments.length > 0
-    || Boolean(currentDocumentAnchor)
     || workbenchResources.length > 0
     || Boolean(options?.codexExternalReadSlice)
   if (explicitRetry && retryHasCurrentContext) {
@@ -179,7 +178,6 @@ export async function sendAgentMessage(input: {
     const retryRoute = await resolveNaturalExplicitRetry({
       content,
       attachmentCount: attachments.length + referencedPoolAttachments.length,
-      currentDocumentAnchorPresent: Boolean(currentDocumentAnchor),
       workbenchResourceCount: workbenchResources.length,
       externalReadSlicePresent: Boolean(options?.codexExternalReadSlice),
       messages: originSlice.messages,
@@ -192,6 +190,9 @@ export async function sendAgentMessage(input: {
           )
         : null,
     })
+    if (retryRoute.kind === 'resource_restatement_required') {
+      return rejectedMessageResult('explicit_retry_control_invalid')
+    }
     if (retryRoute.kind === 'unavailable') {
       return rejectedMessageResult('conversation_reset_required')
     }
@@ -251,7 +252,7 @@ export async function sendAgentMessage(input: {
     actionAuthorizationMode: parseActionAuthorizationMode(
       activeScope.meta.actionAuthorizationMode,
     ),
-    attachments: persistedAttachments.length > 0 ? persistedAttachments : undefined,
+    ...(persistedAttachments.length > 0 ? { attachments: persistedAttachments } : {}),
     ...(options?.codexExternalReadSlice
       ? { codexExternalReadSlice: options.codexExternalReadSlice }
       : {}),
@@ -288,15 +289,10 @@ export async function sendAgentMessage(input: {
       expectedMessageVisibilityEpoch: originSlice.messageVisibilityEpoch,
       resources: composedResources.length > 0 ? composedResources : undefined,
       currentDocumentAnchor,
-      ...(!explicitRetry && originSlice.scopeHeadActionProjection?.actionHeadIdentity
-        ? {
-            actionAdmissionRef: {
-              headProjectionDigest: originSlice.scopeHeadActionProjection.evidenceDigest,
-              actionProjectionVersion: originSlice.scopeHeadActionProjection.actionProjectionVersion,
-              actionHeadIdentity: originSlice.scopeHeadActionProjection.actionHeadIdentity,
-            },
-          }
-        : {}),
+      ...(!explicitRetry ? {
+        actionAdmissionRef: options?.actionAdmissionRef
+          ?? codexHeadActionAdmissionRef(originSlice.scopeHeadActionProjection),
+      } : {}),
       userMessage: {
         id: userMsgId,
         content,
@@ -373,6 +369,10 @@ export async function sendAgentMessage(input: {
           agent: activeAgentName,
           errorKind: result.errorKind,
         })
+        if (result.errorKind === 'action_projection_confirmation_required'
+          && pending && pendingIngressOriginMatches(get(), pending)) {
+          await get().refreshCodexActionSurface(activeScopeId)
+        }
         return mapped
       }
       input.clearInfrastructureWatchdog(activeScopeId, requestId)

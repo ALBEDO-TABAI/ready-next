@@ -40,6 +40,7 @@ import {
   CodexProviderStreamPolicyError,
 } from './codex-provider-stream-policy'
 import { redactPriorReadyMemoryHistory } from './codex-memory-history-redaction'
+import type { CodexDeliveredUserTail } from './codex-turn-input-builder'
 
 type JsonObject = Record<string, unknown>
 
@@ -54,6 +55,7 @@ export type CodexModelGatewayBinding = {
   turnContractDigest: string | null
   instructionContractDigest: string
   additionalContextDigest: string | null
+  deliveredUserTail: readonly CodexDeliveredUserTail[]
   forceToolFreeFinalization: boolean
   allowedToolNames: readonly string[] | null
 }
@@ -593,7 +595,10 @@ function validateBinding(input: {
   body: JsonObject
   metadata: CodexModelGatewayMetadata
   binding: CodexModelGatewayBinding
-}): ReadonlySet<string> {
+}): {
+  allowedTools: ReadonlySet<string>
+  currentTurnContext: ReturnType<typeof currentTurnReadyAdditionalContext> | null
+} {
   const { body, metadata, binding } = input
   if (expectedKind(metadata) !== binding.kind) {
     throw new CodexModelGatewayError('gateway_binding_kind_mismatch', 409)
@@ -618,6 +623,7 @@ function validateBinding(input: {
   if (digestCanonicalJson(tools) !== binding.toolSurfaceDigest) {
     throw new CodexModelGatewayError('gateway_tool_surface_mismatch', 409)
   }
+  let currentTurnContext: ReturnType<typeof currentTurnReadyAdditionalContext> | null = null
   if (binding.kind === 'product') {
     if (
       metadata.toolSurfaceDigest !== binding.toolSurfaceDigest
@@ -625,9 +631,14 @@ function validateBinding(input: {
       || metadata.upstreamProfileSnapshotDigest !== binding.snapshotDigest
       || !metadata.readyRunId
     ) throw new CodexModelGatewayError('gateway_product_metadata_mismatch', 409)
+    try {
+      currentTurnContext = currentTurnReadyAdditionalContext(body.input, binding.deliveredUserTail)
+    } catch {
+      throw new CodexModelGatewayError('gateway_additional_context_mismatch', 409)
+    }
     if (
       binding.additionalContextDigest === null
-      || digestReadyAdditionalContext(currentTurnReadyAdditionalContext(body.input)) !== binding.additionalContextDigest
+      || digestReadyAdditionalContext(currentTurnContext) !== binding.additionalContextDigest
     ) throw new CodexModelGatewayError('gateway_additional_context_mismatch', 409)
   } else if (
     tools.length !== 0
@@ -654,7 +665,7 @@ function validateBinding(input: {
     && !allowedTools.has(body.tool_choice.name)
   ) throw new CodexModelGatewayError('gateway_tool_choice_not_authorized', 409)
   validateSnapshotCapabilities(body, binding, allowedTools)
-  return allowedTools
+  return { allowedTools, currentTurnContext }
 }
 
 function countOccurrences(value: string, needle: string): number {
@@ -2446,7 +2457,8 @@ export class CodexModelGateway {
       const validation: {
         binding: CodexModelGatewayBinding | null
         allowedTools: ReadonlySet<string> | null
-      } = { binding: null, allowedTools: null }
+        currentTurnContext: ReturnType<typeof currentTurnReadyAdditionalContext> | null
+      } = { binding: null, allowedTools: null, currentTurnContext: null }
       type PreparedRequest = {
         body: JsonObject
         capture: CodexModelGatewayOriginalRequestCapture
@@ -2462,6 +2474,7 @@ export class CodexModelGateway {
         const redaction = redactPriorReadyMemoryHistory({
           requestKind: expectedKind(metadata),
           input: body.input as unknown[],
+          currentTurnContext: validation.currentTurnContext,
         })
         const redactedBody = { ...body, input: redaction.input }
         const requestDigest = digestCanonicalJson(redactedBody)
@@ -2484,8 +2497,10 @@ export class CodexModelGateway {
         receivedAt,
         validate: (candidate) => {
           if (validation.binding) throw new CodexModelGatewayError('gateway_binding_validated_twice', 409)
+          const result = validateBinding({ body, metadata, binding: candidate })
           validation.binding = candidate
-          validation.allowedTools = validateBinding({ body, metadata, binding: candidate })
+          validation.allowedTools = result.allowedTools
+          validation.currentTurnContext = result.currentTurnContext
           return validation.allowedTools
         },
         prepareRequestReceipt,

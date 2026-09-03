@@ -26,7 +26,6 @@ import type {
 } from '../modules/agent/types'
 import type { AgentState, SessionSlice } from './agent-store-types'
 import {
-  hasUnresolvedLifecycleUncertainty,
   pendingIngressSnapshots,
   pendingIngressOriginMatches,
   sendAgentMessage,
@@ -200,7 +199,7 @@ async function readReadyLifecycleActionRef(
   return gate.requestRef
 }
 
-const lifecycleHydrationsInFlight = new Map<string, {
+const lifecycleHydrationTargets = new Map<string, {
   aliasGeneration: number
   scopeEpoch: number
   actionProjectionSequence: number
@@ -211,34 +210,39 @@ async function hydrateCodexLifecycleScope(
   target?: Pick<CodexActionSurfaceInvalidation, 'aliasGeneration' | 'scopeEpoch' | 'actionProjectionSequence'>,
 ): Promise<void> {
   const agent = typeof window !== 'undefined' ? window.electronAPI?.agent : null
-  const aliasGeneration = target?.aliasGeneration ?? scope.aliasGeneration
-  const scopeEpoch = target?.scopeEpoch ?? scope.messageVisibilityEpoch ?? 0
-  if (!agent || typeof aliasGeneration !== 'number') return
+  if (!agent) return
   const initialState = useAgent.getState()
   const workbenchMode = useMode.getState().workbenchMode
   const baseline = lifecycleHydrationFingerprint(initialState, scope.id)
-  if (!baseline || aliasGeneration < baseline.aliasGeneration || scopeEpoch < baseline.scopeEpoch) return
+  if (!baseline) return
   const currentVersion = initialState.sessions[baseline.sessionKey]
     ?.scopeHeadActionProjection?.actionProjectionVersion
-  const actionProjectionSequence = target?.actionProjectionSequence
-    ?? (currentVersion?.headGeneration === aliasGeneration && currentVersion.scopeEpoch === scopeEpoch
-      ? currentVersion.actionProjectionSequence
-      : 0)
-  const pending = lifecycleHydrationsInFlight.get(baseline.sessionKey)
-  if (pending && (scopeEpoch < pending.scopeEpoch
-    || (scopeEpoch === pending.scopeEpoch && (aliasGeneration < pending.aliasGeneration
-      || (aliasGeneration === pending.aliasGeneration
-        && actionProjectionSequence < pending.actionProjectionSequence))))) return
-  const request = { aliasGeneration, scopeEpoch, actionProjectionSequence }
-  lifecycleHydrationsInFlight.set(baseline.sessionKey, request)
+  const pending = lifecycleHydrationTargets.get(baseline.sessionKey)
+  if (target && pending && (target.scopeEpoch < pending.scopeEpoch
+    || (target.scopeEpoch === pending.scopeEpoch && (target.aliasGeneration < pending.aliasGeneration
+      || (target.aliasGeneration === pending.aliasGeneration
+        && target.actionProjectionSequence < pending.actionProjectionSequence))))) return
+  const targets = [
+    { aliasGeneration: baseline.aliasGeneration, scopeEpoch: baseline.scopeEpoch,
+      actionProjectionSequence: currentVersion?.headGeneration === baseline.aliasGeneration
+        && currentVersion.scopeEpoch === baseline.scopeEpoch ? currentVersion.actionProjectionSequence : 0 },
+    ...(typeof scope.aliasGeneration === 'number' ? [{ aliasGeneration: scope.aliasGeneration,
+      scopeEpoch: scope.messageVisibilityEpoch ?? 0, actionProjectionSequence: 0 }] : []),
+    ...[target, pending].flatMap((value) => value ? [value] : []),
+  ]
+  targets.sort((left, right) => right.scopeEpoch - left.scopeEpoch
+    || right.aliasGeneration - left.aliasGeneration || right.actionProjectionSequence - left.actionProjectionSequence)
+  const request = { ...targets[0] }
+  const { aliasGeneration, scopeEpoch, actionProjectionSequence } = request
+  lifecycleHydrationTargets.set(baseline.sessionKey, request)
   const stillCurrent = (state: AgentState): boolean => (
-    lifecycleHydrationsInFlight.get(baseline.sessionKey) === request
+    lifecycleHydrationTargets.get(baseline.sessionKey) === request
     && useMode.getState().workbenchMode === workbenchMode
     && lifecycleHydrationStillCurrent(state, scope.id, baseline)
   )
   const finish = (): void => {
-    if (lifecycleHydrationsInFlight.get(baseline.sessionKey) === request) {
-      lifecycleHydrationsInFlight.delete(baseline.sessionKey)
+    if (lifecycleHydrationTargets.get(baseline.sessionKey) === request) {
+      lifecycleHydrationTargets.delete(baseline.sessionKey)
     }
   }
   const clearAtomicSurface = (): void => {
@@ -250,7 +254,7 @@ async function hydrateCodexLifecycleScope(
         scopeHeadActionProjection: null,
       })
     })
-    finish()
+    // Keep this read target as the version floor until a successful re-read.
   }
   let surface: Awaited<ReturnType<NonNullable<typeof agent.readCodexActionSurface>>>
   try {
@@ -1472,6 +1476,15 @@ export const useAgent = create<AgentState>((set, get) => ({
     return result
   },
 
+  refreshCodexActionSurface: async (scopeId: string) => {
+    // The generation may have changed while its invalidation was lost. Reuse the
+    // existing metadata reconciliation (including epoch clearing) before hydration.
+    if (await get().loadScopes()) return
+    const state = get()
+    const scope = state.scopes.find((candidate) => candidate.id === scopeId)
+    if (scope && !state.retiredScopeIds[scopeId]) await hydrateCodexLifecycleScope(scope)
+  },
+
   loadScopes: async () => {
     if (typeof window === 'undefined' || !window.electronAPI?.agent) return false
     try {
@@ -1897,6 +1910,7 @@ export const useAgent = create<AgentState>((set, get) => ({
   sendMessage: async (content: string, options?: {
     codexExternalReadSlice?: Record<string, unknown>
     explicitRetry?: import('../../shared/ipc-contracts/agent-runtime').SendScopedRequest['explicitRetry']
+    actionAdmissionRef?: import('../../shared/ipc-contracts/agent-runtime').SendScopedRequest['actionAdmissionRef']
   }) => sendAgentMessage({
     get,
     set,
@@ -2130,7 +2144,7 @@ export function initAgentListeners(): () => void {
     const state = useAgent.getState()
     const scope = state.scopes.find((candidate) => candidate.id === state.currentScopeId)
     if (scope) {
-      const pendingTarget = lifecycleHydrationsInFlight.get(sessionKeyForScopeId(state, scope.id))
+      const pendingTarget = lifecycleHydrationTargets.get(sessionKeyForScopeId(state, scope.id))
       void hydrateCodexLifecycleScope(scope, pendingTarget)
     }
   })

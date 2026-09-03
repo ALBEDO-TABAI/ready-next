@@ -1,3 +1,4 @@
+import { projectCodexHeadActionProjection, type CodexHeadActionFacts } from '../main/modules/agent-control/codex-runtime/codex-action-surface'
 import type {
   CodexProductTurnActionProjection,
   ProductTurnReceipt,
@@ -69,4 +70,20 @@ export function withReceiptV3Fields(input: {
       ownerAliasGeneration,
     }),
   }
+}
+
+
+// Supplies a real Main projection at the IPC boundary, without changing store defaults.
+export function makeScopeHeadActionProjection(
+  scopeId: string,
+  overrides: Partial<CodexHeadActionFacts> = {},
+) {
+  return projectCodexHeadActionProjection({
+    scopeId, scopeEpoch: 0, aliasId: scopeId, aliasGeneration: 1,
+    threadBindingId: `binding-${scopeId}`, headRevision: 1, actionProjectionSequence: 1,
+    materializationKind: 'fresh_start', materializationState: 'confirmed', codexThreadId: 'native-thread',
+    continuationBlocked: false, activeProductFence: false, manualCompactionState: 'none',
+    hasLegacyPreparedRun: false, headRuntimeManifestDigest: 'runtime', headProtocolSchemaDigest: 'protocol',
+    currentRuntimeManifestDigest: 'runtime', currentProtocolSchemaDigest: 'protocol', ...overrides,
+  })
 }

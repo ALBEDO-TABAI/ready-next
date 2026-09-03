@@ -204,6 +204,8 @@ export const PRE_PERSISTENCE_ERROR_KINDS = [
   'capability_unavailable',
   'external_service_unavailable',
   'host_unavailable',
+  'head_unavailable',
+  'action_projection_confirmation_required',
   'thread_busy',
   'start_identity_capacity_exhausted',
   'conversation_reset_required',

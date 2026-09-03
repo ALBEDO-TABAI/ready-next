@@ -669,6 +669,7 @@ export class CodexModelGatewayRepository {
       turnContractDigest: row.turnContractDigest,
       instructionContractDigest: row.instructionContractDigest,
       additionalContextDigest: row.additionalContextDigest,
+      deliveredUserTail: row.deliveredUserTail,
       forceToolFreeFinalization: budgetLane === 'final',
       allowedToolNames: kind === 'product' ? row.allowedToolNames : null,
     }
@@ -732,6 +733,7 @@ export class CodexModelGatewayRepository {
       turnContractDigest: null,
       instructionContractDigest: binding.instructionContractDigest,
       additionalContextDigest: null,
+      deliveredUserTail: [],
       forceToolFreeFinalization: false,
       allowedToolNames: null,
     }

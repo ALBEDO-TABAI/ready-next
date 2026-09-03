@@ -1,3 +1,5 @@
+import { readAcceptedNativePrefixHead, readNativeCoverage, excludeAlreadyCoveredItems } from './codex-native-coverage-reader'
+import { buildCodexDeliveredUserTail, type CodexDeliveredUserTail } from './codex-turn-input-builder'
 import { createHash } from 'node:crypto'
 import { closeSync, lstatSync, openSync, readSync, realpathSync, statSync } from 'node:fs'
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path'
@@ -749,6 +751,7 @@ export type CodexModelGatewayBindingRead = {
   turnContractDigest: string | null
   instructionContractDigest: string
   additionalContextDigest: string | null
+  deliveredUserTail: readonly CodexDeliveredUserTail[]
   providerSnapshotJson: string | null
   maxIterations: number | null
   iterationLanes: {
@@ -1758,34 +1761,7 @@ export class CodexBindingRepository {
   readAcceptedNativePrefixHead(threadBindingId: string): CodexAcceptedNativePrefixHead | null {
     nonEmpty(threadBindingId, 'coverage_thread_binding_invalid')
     const thread = this.requireThread(threadBindingId)
-    const row = this.db.prepare(`
-      SELECT receipt_id, receipt_digest, accepted_native_head_kind,
-             accepted_native_head_id, accepted_product_ready_run_id
-        FROM codex_native_coverage_receipts
-       WHERE thread_binding_id = ?
-          OR (receipt_id = ? AND receipt_digest = ?)
-       ORDER BY rowid DESC LIMIT 1
-    `).get<{
-      receipt_id: string
-      receipt_digest: string
-      accepted_native_head_kind: 'turn' | 'compaction'
-      accepted_native_head_id: string
-      accepted_product_ready_run_id: string | null
-    }>(threadBindingId,
-      thread.thread_materialization_kind === 'native_fork'
-        ? thread.source_accepted_native_coverage_receipt_id : null,
-      thread.thread_materialization_kind === 'native_fork'
-        ? thread.source_accepted_native_coverage_receipt_digest : null)
-    if (row) this.readEffectiveCoverageItems(row.receipt_id)
-    else if (thread.thread_materialization_kind === 'native_fork') {
-      throw new CodexBindingRepositoryError('coverage_fork_parent_missing')
-    }
-    return row ? {
-      acceptedNativeHeadKind: row.accepted_native_head_kind,
-      acceptedNativeHeadId: row.accepted_native_head_id,
-      acceptedProductReadyRunId: row.accepted_product_ready_run_id,
-      coverageReceiptRef: { receiptId: row.receipt_id, digest: row.receipt_digest },
-    } : null
+    return readAcceptedNativePrefixHead(this.db, thread)
   }
 
   private appendAcceptedNativeCoverageReceiptInOpenTransaction(input: {
@@ -1841,7 +1817,7 @@ export class CodexBindingRepository {
       parentReceiptId = sourceParent.receipt_id
     }
     const coveredItems = parentReceiptId
-      ? this.readEffectiveCoverageItems(parentReceiptId)
+      ? readNativeCoverage(this.db, parentReceiptId).covered
       : new Map<string, string>()
     try { assertNewCoverageItems(new Set(coveredItems.keys()), input.newlyCovered) }
     catch (error) {
@@ -2231,7 +2207,7 @@ export class CodexBindingRepository {
     }
     const head = this.readAcceptedNativePrefixHead(threadBindingId)
     const covered = head
-      ? this.readEffectiveCoverageItems(head.coverageReceiptRef.receiptId)
+      ? readNativeCoverage(this.db, head.coverageReceiptRef.receiptId).covered
       : new Map<string, string>()
     const origins: CodexUncommittedUserTailItem[] = []
     const retainedInCurrentNative = new Map<string, string>()
@@ -3985,7 +3961,7 @@ export class CodexBindingRepository {
     )
   }
 
-  private readProductTurnActionContext(readyRunId: string): ProductTurnActionContext | null {
+  readProductTurnActionContext(readyRunId: string): ProductTurnActionContext | null {
     const owner = this.requireTurn(readyRunId)
     const ownerThread = this.requireThread(owner.thread_binding_id)
     const head = this.readActiveThreadByAlias(ownerThread.ready_conversation_alias)
@@ -4005,6 +3981,10 @@ export class CodexBindingRepository {
     const hasHeadProduct = this.db.prepare(`SELECT 1 AS present FROM codex_turn_bindings
       WHERE thread_binding_id = ? LIMIT 1`).get<{ present: number }>(head.thread_binding_id)
     const root = source.ingress.canonicalCurrentInputRef
+    const acceptedHead = this.readAcceptedNativePrefixHead(head.thread_binding_id)
+    const sourceRootCompacted = Boolean(acceptedHead
+      && readNativeCoverage(this.db, acceptedHead.coverageReceiptRef.receiptId).compacted.get(root.messageId)
+        === digestCodexUserInput(root.input))
     const tailPlan = resolveExplicitRetryTailPlan(liveTail, {
       originUserMessageId: root.messageId, inputDigest: digestCodexUserInput(root.input),
     })
@@ -4016,6 +3996,7 @@ export class CodexBindingRepository {
         currentProtocolSchemaDigest: this.currentContract?.protocolSchemaDigest || head.protocol_schema_digest,
       }),
       sourcePrepared: source,
+      sourceRootCompacted,
       exactLiveRootOnDirectSuccessor: head.history_source_thread_binding_id === owner.thread_binding_id
         && head.history_source_terminal_facts_digest === owner.terminal_facts_digest
         && head.alias_generation === ownerThread.alias_generation + 1 && !hasHeadProduct
@@ -7618,6 +7599,9 @@ export class CodexBindingRepository {
         turnContractDigest: row.turn_contract_digest,
         instructionContractDigest: row.instruction_contract_digest,
         additionalContextDigest: row.additional_context_digest,
+        deliveredUserTail: input.kind === 'product'
+          ? buildCodexDeliveredUserTail(this.readProductTurnRuntime(row.ready_run_id).prepared.ingress)
+          : [],
         providerSnapshotJson: null,
         maxIterations: budget.maxIterations,
         iterationLanes: input.kind === 'product'
@@ -7712,6 +7696,7 @@ export class CodexBindingRepository {
       turnContractDigest: null,
       instructionContractDigest: row.instruction_contract_digest,
       additionalContextDigest: null,
+      deliveredUserTail: [],
       providerSnapshotJson: row.provider_snapshot_json,
       maxIterations: null,
       iterationLanes: null,
@@ -8156,7 +8141,7 @@ export class CodexBindingRepository {
         acceptedNativeHeadKind: 'compaction',
         acceptedNativeHeadId: input.codexCompactionTurnId,
         acceptedProductReadyRunId: priorHead?.acceptedProductReadyRunId ?? null,
-        newlyCovered: this.excludeAlreadyCoveredItems(
+        newlyCovered: excludeAlreadyCoveredItems(this.db,
           priorHead?.coverageReceiptRef.receiptId ?? null,
           manualCandidates,
         ),
@@ -8781,7 +8766,7 @@ export class CodexBindingRepository {
           acceptedNativeHeadKind: automatic ? 'compaction' : 'turn',
           acceptedNativeHeadId: closedTurn.codex_turn_id as string,
           acceptedProductReadyRunId: closedTurn.ready_run_id,
-          newlyCovered: this.excludeAlreadyCoveredItems(
+          newlyCovered: excludeAlreadyCoveredItems(this.db,
             priorHead?.coverageReceiptRef.receiptId ?? null,
             coverageCandidates,
           ),
@@ -8838,85 +8823,6 @@ export class CodexBindingRepository {
       return { nativeTurnId: codexTurnId, origins: row ? this.readFormalCoverageItems(row.ready_run_id) : null }
     })
     return resolveFormalNativeInputCoverage({ turns, provenPrefixTurnIds })
-  }
-
-  private excludeAlreadyCoveredItems(
-    parentReceiptId: string | null,
-    candidates: readonly CodexNativeCoverageItem[],
-  ): CodexNativeCoverageItem[] {
-    const covered = parentReceiptId
-      ? this.readEffectiveCoverageItems(parentReceiptId)
-      : new Map<string, string>()
-    return candidates.filter((item) => {
-      const priorDigest = covered.get(item.messageId)
-      if (!priorDigest) return true
-      if (priorDigest !== item.digest) {
-        throw new CodexBindingRepositoryError('coverage_message_digest_conflict')
-      }
-      return false
-    })
-  }
-
-  private readEffectiveCoverageItems(receiptId: string): Map<string, string> {
-    const covered = new Map<string, string>()
-    const visited = new Set<string>()
-    let cursor: string | null = receiptId
-    while (cursor) {
-      if (visited.has(cursor)) throw new CodexBindingRepositoryError('coverage_lineage_cycle')
-      visited.add(cursor)
-      const row = this.db.prepare(`
-        SELECT receipt_id, thread_binding_id, parent_receipt_id, producer_kind,
-               producer_owner_id, codex_thread_id, accepted_native_head_kind,
-               accepted_native_head_id, accepted_product_ready_run_id,
-               newly_covered_json, newly_covered_digest, receipt_digest, created_at
-          FROM codex_native_coverage_receipts WHERE receipt_id = ? LIMIT 1
-      `).get<{
-        receipt_id: string
-        thread_binding_id: string
-        parent_receipt_id: string | null
-        producer_kind: 'product_closeout' | 'automatic_compaction' | 'manual_compaction'
-        producer_owner_id: string
-        codex_thread_id: string
-        accepted_native_head_kind: 'turn' | 'compaction'
-        accepted_native_head_id: string
-        accepted_product_ready_run_id: string | null
-        newly_covered_json: string
-        newly_covered_digest: string
-        receipt_digest: string
-        created_at: string
-      }>(cursor)
-      if (!row) throw new CodexBindingRepositoryError('coverage_lineage_broken')
-      let items: CodexNativeCoverageItem[]
-      try { items = JSON.parse(row.newly_covered_json) as CodexNativeCoverageItem[] }
-      catch { throw new CodexBindingRepositoryError('coverage_lineage_invalid') }
-      const unsigned = {
-        contract: 'codex_native_coverage_receipt_v1',
-        threadBindingId: row.thread_binding_id,
-        parentReceiptId: row.parent_receipt_id,
-        producerKind: row.producer_kind,
-        producerOwnerId: row.producer_owner_id,
-        codexThreadId: row.codex_thread_id,
-        acceptedNativeHeadKind: row.accepted_native_head_kind,
-        acceptedNativeHeadId: row.accepted_native_head_id,
-        acceptedProductReadyRunId: row.accepted_product_ready_run_id,
-        newlyCoveredDigest: row.newly_covered_digest,
-        createdAt: row.created_at,
-      }
-      if (digestCanonicalJson(items) !== row.newly_covered_digest
-        || digestCanonicalJson(unsigned) !== row.receipt_digest
-        || row.receipt_id !== `coverage-${row.receipt_digest.slice(0, 32)}`) {
-        throw new CodexBindingRepositoryError('coverage_lineage_invalid')
-      }
-      for (const item of items) {
-        const previous = covered.get(item.messageId)
-        if (previous && previous !== item.digest) {
-          throw new CodexBindingRepositoryError('coverage_message_digest_conflict')
-        }
-        covered.set(item.messageId, item.digest)
-      }
-      cursor = row.parent_receipt_id
-    }
-    return covered
   }
 
   private completeRecoveryFailureCloseout(input: {

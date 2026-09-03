@@ -14,6 +14,7 @@ import type { MultiTurnThinkingPolicy } from '../../../../shared/ai-providers/ty
 import { resolveModelContextWindow } from '../../../../shared/context-budget-types'
 import { resolveProviderPatchProfile } from '../../../../shared/ai-providers/index'
 import { READY_GATEWAY_MAX_CONTROLLED_RETRIES } from './codex-model-gateway-retry'
+import type { CodexDeliveredUserTail } from './codex-turn-input-builder'
 import {
   parseReadyMemoryPromptText,
   readyMemoryPromptText,
@@ -509,10 +510,15 @@ export function currentTurnReadyResourceReferences(input: unknown): unknown[] {
   return sortReadyResourceReferences([...latest.values()])
 }
 
-export function currentTurnReadyAdditionalContext(input: unknown): {
+export function currentTurnReadyAdditionalContext(
+  input: unknown,
+  expectedDeliveredUserTail: readonly CodexDeliveredUserTail[],
+): {
   resourceReferences: unknown[]
   explicitRetry: JsonObject | null
   readyMemory: ReadyMemoryPromptPayload | null
+  currentUserIndex: number | null
+  readyMemoryIndex: number | null
 } {
   if (!Array.isArray(input)) throw new CodexModelGatewayContractError('gateway_input_invalid')
   let lastUser = -1
@@ -522,16 +528,45 @@ export function currentTurnReadyAdditionalContext(input: unknown): {
       break
     }
   }
-  if (lastUser < 0) return { resourceReferences: [], explicitRetry: null, readyMemory: null }
+  if (lastUser < 0) {
+    if (expectedDeliveredUserTail.length > 0) throw new CodexModelGatewayContractError('gateway_uncommitted_user_tail_mismatch')
+    return { resourceReferences: [], explicitRetry: null, readyMemory: null, currentUserIndex: null, readyMemoryIndex: null }
+  }
+  if (textFromContent(input[lastUser].content).some((text) => text.startsWith('<external_ready-uncommitted-user-tail:'))) {
+    throw new CodexModelGatewayContractError('gateway_uncommitted_user_tail_mismatch')
+  }
   const latest = new Map<string, JsonObject>()
   collectReadyResourceReferencesFromItem(input[lastUser], latest)
   let explicitRetry: JsonObject | null = null
   let readyMemory: ReadyMemoryPromptPayload | null = null
+  let readyMemoryIndex: number | null = null
+  let nextTailIndex = expectedDeliveredUserTail.length - 1
   for (let index = lastUser - 1; index >= 0; index -= 1) {
     const item = input[index]
     if (!isRecord(item) || (item.role !== 'user' && item.role !== 'developer')) break
     const texts = textFromContent(item.content)
     if (texts.length === 0) break
+    if (texts.some((text) => text.startsWith('<external_ready-uncommitted-user-tail:'))) {
+      const match = texts.length === 1
+        ? texts[0].match(/^<external_ready-uncommitted-user-tail:([0-7])>([\s\S]*)<\/external_ready-uncommitted-user-tail:\1>$/)
+        : null
+      let payload: unknown
+      try { payload = match ? JSON.parse(match[2]) : null }
+      catch { throw new CodexModelGatewayContractError('gateway_uncommitted_user_tail_mismatch') }
+      if (!match || item.type !== 'message' || item.role !== 'user'
+        || Object.keys(item).some((key) => !['type', 'id', 'role', 'content'].includes(key))
+        || (item.id !== undefined && typeof item.id !== 'string')
+        || !Array.isArray(item.content) || item.content.length !== 1
+        || !isRecord(item.content[0]) || item.content[0].type !== 'input_text'
+        || Object.keys(item.content[0]).some((key) => key !== 'type' && key !== 'text')
+        || Number(match[1]) !== nextTailIndex || nextTailIndex < 0
+        || digestCanonicalJson(payload) !== digestCanonicalJson(expectedDeliveredUserTail[nextTailIndex])) {
+        throw new CodexModelGatewayContractError('gateway_uncommitted_user_tail_mismatch')
+      }
+      nextTailIndex -= 1
+      continue
+    }
+    if (nextTailIndex !== -1) throw new CodexModelGatewayContractError('gateway_uncommitted_user_tail_mismatch')
     let recognized = true
     for (const text of texts) {
       const resources = readyResourceReferencesFromText(text)
@@ -549,8 +584,17 @@ export function currentTurnReadyAdditionalContext(input: unknown): {
         continue
       }
       const memory = readyMemoryContextFromText(text)
-      if (memory.recognized && memory.context && readyMemory === null) {
+      if (memory.recognized && memory.context) {
+        if (readyMemory !== null || item.type !== 'message' || item.role !== 'developer'
+          || Object.keys(item).some((key) => !['type', 'id', 'role', 'content'].includes(key))
+          || (item.id !== undefined && typeof item.id !== 'string')
+          || !Array.isArray(item.content) || item.content.length !== 1
+          || !isRecord(item.content[0]) || item.content[0].type !== 'input_text'
+          || Object.keys(item.content[0]).some((key) => key !== 'type' && key !== 'text')) {
+          throw new CodexModelGatewayContractError('gateway_memory_context_invalid')
+        }
         readyMemory = memory.context
+        readyMemoryIndex = index
         continue
       }
       recognized = false
@@ -558,10 +602,13 @@ export function currentTurnReadyAdditionalContext(input: unknown): {
     }
     if (!recognized) break
   }
+  if (nextTailIndex !== -1) throw new CodexModelGatewayContractError('gateway_uncommitted_user_tail_mismatch')
   return {
     resourceReferences: sortReadyResourceReferences([...latest.values()]),
     explicitRetry,
     readyMemory,
+    currentUserIndex: lastUser,
+    readyMemoryIndex,
   }
 }
 

@@ -10,7 +10,7 @@ import {
   type SendScopedRequest,
 } from '../shared/ipc-contracts/agent-runtime'
 import { shouldHydrateCodexActionSurface } from '../renderer/modules/agent/codex-action-surface-invalidation'
-import { initAgentListeners, useAgent } from '../renderer/stores/useAgent'
+import { applyIngressAdmitted, initAgentListeners, useAgent } from '../renderer/stores/useAgent'
 import { makeEmptySessionSlice } from '../renderer/stores/agent-store-helpers'
 import type { ConversationScope } from '../renderer/modules/agent/types'
 import { projectCodexHeadActionProjection } from '../main/modules/agent-control/codex-runtime/codex-action-surface'
@@ -21,6 +21,11 @@ import { makeProductTurnActionProjection } from './product-turn-action-projectio
 import { useMode } from '../renderer/stores/useMode'
 import { productTurnActionProjectionMatchesContext } from '../renderer/modules/agent/productTurnReceipt'
 import { createRuntimeDriverCanonicalTerminal } from '../renderer/modules/agent/runtime-driver-canonical-terminal'
+
+export const __breaksInvariants = [
+  'renderer.agent-store.singleton-seeded-at-the-action-surface-boundary',
+  'renderer.electron-api-replaced-with-isolated-main-read-responses',
+] as const
 
 const event = parseCodexActionSurfaceInvalidation({
   contract: 'codex_action_surface_invalidation_v1',
@@ -362,6 +367,14 @@ test('failed gen2 read keeps the draft and does not advance identity from the no
     assert.equal(state.inputValue, draft)
     assert.equal(state.sessions[sessionId].scopeHeadActionProjection, null)
     assert.equal(state.sessions[sessionId].lifecycleOperationProjection, null)
+    // Complete this fixture's retained recovery target before the next test
+    // deliberately resets the same synthetic scope back to generation 1.
+    Object.assign(window.electronAPI.agent, {
+      readCodexActionSurface: async () => ({ success: true, data: surface(2) }),
+    })
+    api.invalidate(2)
+    await flush()
+    assert.equal(useAgent.getState().sessions[sessionId].aliasGeneration, 2)
   } finally { api.restore() }
 })
 
@@ -917,4 +930,141 @@ test('mode roundtrip preserves the known memory revision against a late old term
     api.restore()
     useMode.setState({ workbenchMode: 'browser' })
   }
+})
+
+
+test('an obsolete failed read target cannot suppress recovery after admitted generation advances', async () => {
+  seedSurface()
+  const old = deferred<{ success: false }>()
+  const send = deferred<any>()
+  const reads: number[] = []
+  let payload: SendScopedRequest | null = null
+  const api = installSurfaceApi({
+    readCodexActionSurface: ({ aliasGeneration }: { aliasGeneration: number }) => {
+      reads.push(aliasGeneration)
+      return reads.length === 1 ? old.promise : Promise.resolve({ success: true, data: surface(2) })
+    },
+    sendScoped: (request: SendScopedRequest) => { payload = request; return send.promise },
+  })
+  try {
+    const first = useAgent.getState().refreshCodexActionSurface(scopeId)
+    const sending = useAgent.getState().sendMessage(draft)
+    for (let i = 0; i < 20 && !payload; i += 1) await flush()
+    assert.ok(payload)
+    applyIngressAdmitted({ type: 'ingress_admitted', requestId: payload!.requestId, scopeId,
+      originUserMessageId: payload!.userMessage.id, aliasGeneration: 2, messageVisibilityEpoch: 0,
+      ingressAdmittedRevision: 1, ingressAdmittedDigest: 'generation-two-admitted',
+      admittedAt: '2026-09-03T00:00:01.000Z' })
+    old.resolve({ success: false })
+    await first
+    await useAgent.getState().refreshCodexActionSurface(scopeId)
+    assert.deepEqual(reads, [1, 2])
+    send.resolve({ success: true, disposition: 'terminal_success', ownerRunId: payload!.requestId,
+      aliasGeneration: 2, shouldClearInput: true, preserveInput: false,
+      persistence: { scope: 'pre-existing', message: 'persisted', attachments: 'none', inputAttachments: 'none' },
+      responseText: '完成', productOutcomeDigest: 'completed-generation-two', canonicalMessageDigest: 'canonical-generation-two',
+      canonicalMessage: { id: 'assistant-generation-two', conversationId: scopeId, role: 'assistant', content: '完成',
+        timestamp: '2026-09-03T00:00:02.000Z', meta: { runId: payload!.requestId, terminalReason: 'done' } },
+    })
+    await sending
+  } finally { old.resolve({ success: false }); api.restore() }
+})
+
+test('metadata recovery preserves a future sequence floor through failed and older reads', async () => {
+  seedSurface()
+  const scope = useAgent.getState().currentScope!
+  const old = deferred<{ success: false }>()
+  const reads: number[] = []
+  let metadataReads = 0
+  const api = installSurfaceApi({
+    listConversationScopes: async () => ({ success: true, data: [{
+      ...scope, aliasGeneration: ++metadataReads === 1 ? 2 : 1,
+    }] }),
+    readCodexActionSurface: ({ aliasGeneration }: { aliasGeneration: number }) => {
+      reads.push(aliasGeneration)
+      return reads.length === 1 ? old.promise
+        : Promise.resolve({ success: true, data: surface(2, reads.length === 2 ? 99 : 100) })
+    },
+  })
+  try {
+    api.invalidate(2, 100)
+    await flush()
+    await useAgent.getState().refreshCodexActionSurface(scopeId)
+    assert.equal(useAgent.getState().sessions[sessionId].aliasGeneration, 2)
+    assert.equal(useAgent.getState().sessions[sessionId].scopeHeadActionProjection, null,
+      'sequence 99 cannot satisfy the committed sequence 100 lower bound')
+    old.resolve({ success: false })
+    await flush()
+    await useAgent.getState().refreshCodexActionSurface(scopeId)
+    assert.deepEqual(reads, [2, 2, 2])
+    assert.deepEqual(useAgent.getState().sessions[sessionId].scopeHeadActionProjection, surface(2, 100).head)
+    assert.equal(useAgent.getState().inputValue, draft)
+  } finally { old.resolve({ success: false }); await flush(); api.restore() }
+})
+
+test('a late action read for A cannot replace the active B draft after a scope switch', async () => {
+  seedSurface()
+  const otherScope = { ...useAgent.getState().currentScope!, id: 'scope-action-B', threadKey: 'scope-action-B' }
+  const otherSessionId = 'session-action-B'
+  useAgent.setState((state) => ({
+    scopes: [...state.scopes, otherScope],
+    sessions: { ...state.sessions, [otherSessionId]: {
+      ...makeEmptySessionSlice(otherScope.id), aliasGeneration: 1, inputValue: 'B 的旧草稿',
+    } },
+    sessionOrder: [...state.sessionOrder, otherSessionId],
+  }))
+  const pending = deferred<{ success: true; data: CodexActionSurfaceEnvelope }>()
+  let sends = 0
+  const api = installSurfaceApi({
+    listConversationScopes: async () => ({ success: true, data: useAgent.getState().scopes }),
+    readCodexActionSurface: () => pending.promise,
+    sendScoped: async () => { sends += 1; throw new Error('refresh_must_not_send') },
+  })
+  try {
+    const reading = useAgent.getState().refreshCodexActionSurface(scopeId)
+    await flush()
+    useAgent.getState().setActiveSessionId(otherSessionId)
+    useAgent.getState().setInputValue('切到 B 后写下的新草稿')
+    pending.resolve({ success: true, data: surface(1, 2) })
+    await reading
+    assert.equal(useAgent.getState().activeSessionId, otherSessionId)
+    assert.equal(useAgent.getState().currentScopeId, otherScope.id)
+    assert.equal(useAgent.getState().inputValue, '切到 B 后写下的新草稿')
+    assert.equal(useAgent.getState().sessions[sessionId].inputValue, draft)
+    assert.deepEqual(useAgent.getState().sessions[sessionId].scopeHeadActionProjection, surface(1, 2).head)
+    assert.equal(sends, 0)
+  } finally { pending.resolve({ success: true, data: surface(1, 2) }); await flush(); api.restore() }
+})
+
+test('a stale send recovers a lost generation notification through metadata without resending', async () => {
+  const initial = seedSurface()
+  const scope = useAgent.getState().currentScope!
+  const next = surface(2)
+  const calls: string[] = []
+  const api = installSurfaceApi({
+    listConversationScopes: async () => {
+      calls.push('metadata')
+      return { success: true, data: [{ ...scope, aliasGeneration: 2 }] }
+    },
+    readCodexActionSurface: async ({ aliasGeneration }: { aliasGeneration: number }) => {
+      calls.push(`head:${aliasGeneration}`)
+      assert.equal(aliasGeneration, 2, 'Main only accepts its current active generation')
+      return { success: true, data: next }
+    },
+    sendScoped: async (request: SendScopedRequest) => {
+      calls.push('send')
+      assert.equal(request.actionAdmissionRef?.headProjectionDigest, initial.head.evidenceDigest)
+      return { success: false, disposition: 'rejected_before_persistence',
+        shouldClearInput: false, preserveInput: true,
+        errorKind: 'action_projection_confirmation_required', error: 'codex_action_admission_ref_stale' }
+    },
+  })
+  try {
+    const result = await useAgent.getState().sendMessage(draft)
+    assert.equal(result.errorKind, 'action_projection_confirmation_required')
+    assert.deepEqual(calls, ['send', 'metadata', 'head:2'])
+    assert.equal(useAgent.getState().sessions[sessionId].aliasGeneration, 2)
+    assert.deepEqual(useAgent.getState().sessions[sessionId].scopeHeadActionProjection, next.head)
+    assert.equal(useAgent.getState().inputValue, draft)
+  } finally { api.restore() }
 })

@@ -167,10 +167,12 @@ export interface AgentState {
   sendMessage: (content: string, options?: {
     codexExternalReadSlice?: Record<string, unknown>
     explicitRetry?: SendScopedRequest['explicitRetry']
+    actionAdmissionRef?: SendScopedRequest['actionAdmissionRef']
   }) => Promise<SendMessageResult>
   stopStreaming: () => Promise<LifecycleResult>
   resetCurrentConversation: () => Promise<LifecycleResult>
   compactCurrentSession: () => Promise<LifecycleResult>
+  refreshCodexActionSurface: (scopeId: string) => Promise<void>
   loadScopes: () => Promise<boolean>
   loadScope: (scopeId: string) => Promise<void>
   setCurrentScope: (scopeId: string) => Promise<void>

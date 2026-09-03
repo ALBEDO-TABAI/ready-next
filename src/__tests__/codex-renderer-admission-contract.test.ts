@@ -5,7 +5,7 @@ import type { SendScopedResponse } from '../shared/ipc-contracts/agent-runtime'
 import type { ConversationScope } from '../renderer/modules/agent/types'
 import { createEmptyScopeRunState } from '../renderer/modules/agent/scopeRunState'
 import { makeEmptySessionSlice } from '../renderer/stores/agent-store-helpers'
-import { withReceiptV3Fields } from './product-turn-action-projection-fixture'
+import { makeScopeHeadActionProjection, withReceiptV3Fields } from './product-turn-action-projection-fixture'
 import {
   applyIngressAdmitted,
   useAgent,
@@ -42,6 +42,7 @@ function seedStore(
     ...makeEmptySessionSlice(scope.id),
     inputValue,
     aliasGeneration,
+    scopeHeadActionProjection: aliasGeneration ? makeScopeHeadActionProjection(scope.id, { aliasGeneration }) : null,
   }
   useAgent.setState({
     messages: [],
@@ -1080,7 +1081,7 @@ test('pending ask-user card stays pending while Main admission returns thread_bu
   }
 })
 
-test('publication-diverged follow-up send omits retired generation and lets Main resolve the thread', async () => {
+test('publication-diverged follow-up requires the new head before dispatch', async () => {
   seedStore('看看能不能看到我现在在看的小红书笔记，帮我总结概述一下', null, 2)
   let capturedPayload: any = null
   const electron = installElectronApi(async (payload) => {
@@ -1106,16 +1107,15 @@ test('publication-diverged follow-up send omits retired generation and lets Main
     const result = await useAgent.getState().sendMessage(
       '看看能不能看到我现在在看的小红书笔记，帮我总结概述一下',
     )
-    assert.equal('expectedAliasGeneration' in capturedPayload, false)
-    assert.equal(capturedPayload?.scopeId, scope.id)
+    assert.equal(capturedPayload, null)
     assert.equal(result.disposition, 'rejected_before_persistence')
-    assert.equal(result.errorKind, 'host_unavailable')
+    assert.equal(result.errorKind, 'head_unavailable')
   } finally {
     electron.restore()
   }
 })
 
-test('a conversation without an active generation still reaches Main', async () => {
+test('a conversation without an action head preserves the draft and requests a re-read', async () => {
   seedStore('从未绑定的对话', null, null)
   let calls = 0
   let capturedPayload: any = null
@@ -1141,11 +1141,40 @@ test('a conversation without an active generation still reaches Main', async () 
   })
   try {
     const result = await useAgent.getState().sendMessage('从未绑定的对话')
-    assert.equal(calls, 1)
-    assert.equal('expectedAliasGeneration' in capturedPayload, false)
+    assert.equal(calls, 0)
+    assert.equal(capturedPayload, null)
+    assert.equal(useAgent.getState().inputValue, '从未绑定的对话')
     assert.equal(result.disposition, 'rejected_before_persistence')
-    assert.equal(result.errorKind, 'conversation_reset_required')
+    assert.equal(result.errorKind, 'head_unavailable')
   } finally {
     electron.restore()
   }
+})
+
+
+test('stale displayed consequence refreshes the action surface once and never resends', async () => {
+  seedStore('保留这条草稿')
+  let sends = 0
+  let refreshes = 0
+  const originalRefresh = useAgent.getState().refreshCodexActionSurface
+  useAgent.setState({ refreshCodexActionSurface: async (scopeId) => {
+    assert.equal(scopeId, scope.id)
+    refreshes += 1
+  } })
+  const electron = installElectronApi(async () => {
+    sends += 1
+    return { success: false, disposition: 'rejected_before_persistence', shouldClearInput: false,
+      preserveInput: true, retryableByUser: true,
+      persistence: { scope: 'pre-existing', message: 'skipped', attachments: 'none', inputAttachments: 'none' },
+      error: 'codex_action_admission_ref_stale', errorKind: 'action_projection_confirmation_required',
+      admissionEvidenceDigest: 'stale-displayed-head' }
+  })
+  try {
+    const result = await useAgent.getState().sendMessage('保留这条草稿')
+    assert.equal(result.errorKind, 'action_projection_confirmation_required')
+    assert.equal(sends, 1)
+    assert.equal(refreshes, 1)
+    assert.equal(useAgent.getState().inputValue, '保留这条草稿')
+    assert.deepEqual(useAgent.getState().messages, [])
+  } finally { electron.restore(); useAgent.setState({ refreshCodexActionSurface: originalRefresh }) }
 })

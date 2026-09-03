@@ -1,3 +1,6 @@
+import { makeScopeHeadActionProjection } from './product-turn-action-projection-fixture'
+import { makeEmptySessionSlice } from '../renderer/stores/agent-store-helpers'
+import { codexHeadActionAdmissionRef } from '../renderer/modules/agent/productTurnReceipt'
 /**
  * Stage V — V6 / V1.0 ChatPanel fixture baseline.
  *
@@ -738,6 +741,7 @@ test('late stop terminal clears the matching error, while a stale terminal leave
     evidenceDigest: 'stop-unknown',
   })
 
+  await useAgent.getState().refreshCodexActionSurface(scopeId)
   const { container, unmount } = mountChatPanel('expanded')
   try {
     const stopButton = container.querySelector<HTMLButtonElement>('[data-ready-agent-stop="true"]')
@@ -1206,5 +1210,64 @@ test('V1.0 fixture / case 4 — completed task-card: terminal projection renders
     )
   } finally {
     unmount()
+  }
+})
+
+
+test('composer displays the Main consequence and submits that displayed head reference', async () => {
+  resetStores()
+  seedEmptyAgent()
+  const scopeId = 'scope-consequence-ui'
+  const sessionId = 'session-consequence-ui'
+  const scope = { id: scopeId, aliasGeneration: 1, messageVisibilityEpoch: 0, agent: 'butler',
+    activeAgentId: 'butler', handoffGeneration: 0, title: '省略提示', sourceKind: 'local' as const,
+    sourceId: 'app', threadKey: scopeId, meta: {}, createdAt: '2026-09-03T00:00:00Z',
+    updatedAt: '2026-09-03T00:00:00Z', lastMessageAt: null }
+  const tail = [
+    { messageId: 'a', digest: 'a'.repeat(64), policy: 'resource_restatement_required' as const },
+    { messageId: 'b', digest: 'b'.repeat(64), policy: 'task_restatement_required' as const },
+  ]
+  const head = makeScopeHeadActionProjection(scopeId, { uncommittedStructuredTail: tail })
+  const slice = { ...makeEmptySessionSlice(scopeId), aliasGeneration: 1,
+    inputValue: '本次新任务', scopeHeadActionProjection: head }
+  const agentApi = electronAPIStub.agent as Record<string, unknown>
+  const originalList = agentApi.listConversationScopes
+  agentApi.listConversationScopes = async () => ({ success: false })
+  const originalSend = useAgent.getState().sendMessage
+  const originalRefresh = useAgent.getState().refreshCodexActionSurface
+  let submitted: unknown
+  let refreshes = 0
+  useAgent.setState({ ...slice, currentScopeId: scopeId, currentScope: scope, scopes: [scope],
+    sessions: { [sessionId]: slice }, activeSessionId: sessionId, sessionId, sessionOrder: [sessionId],
+    sendMessage: async (_text, options) => {
+      submitted = options?.actionAdmissionRef
+      return { success: false, disposition: 'rejected_before_persistence', shouldClearInput: false,
+        preserveInput: true, errorKind: 'conversation_reset_required' }
+    },
+    refreshCodexActionSurface: async () => { refreshes += 1 },
+  })
+  const { container, unmount } = mountChatPanel()
+  try {
+    const note = container.querySelector('[data-ready-send-consequence="true"]')
+    assert.match(note?.textContent || '', /前面2项不会作为当前任务带入/)
+    assert.match(note?.textContent || '', /其中1项需重新附加资源/)
+    container.querySelector<HTMLButtonElement>('[data-ready-agent-send="true"]')!.click()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    assert.deepEqual(submitted, codexHeadActionAdmissionRef(head))
+    assert.equal(useAgent.getState().inputValue, '本次新任务')
+    flushSync(() => useAgent.setState((state) => ({ sessions: {
+      ...state.sessions, [sessionId]: { ...state.sessions[sessionId], scopeHeadActionProjection: null },
+    } })))
+    const recovery = container.querySelector('[data-ready-action-state="head_unavailable"]')
+    assert.ok(recovery)
+    assert.equal(container.querySelector('[data-ready-agent-stop="true"]'), null)
+    assert.equal(container.querySelector<HTMLButtonElement>('[data-ready-agent-send="true"]')?.disabled, true)
+    recovery.querySelector<HTMLButtonElement>('button')!.click()
+    assert.equal(refreshes, 1)
+    assert.equal(useAgent.getState().inputValue, '本次新任务')
+  } finally {
+    unmount()
+    agentApi.listConversationScopes = originalList
+    useAgent.setState({ sendMessage: originalSend, refreshCodexActionSurface: originalRefresh })
   }
 })

@@ -81,7 +81,6 @@ function productionBootRefresh(repository: CodexBindingRepository, publish: (ali
 }
 
 function fixture(t: Parameters<typeof skipIfSqliteUnavailable>[0]) {
-  if (skipIfSqliteUnavailable(t, 'pristine head refresh')) return null
   const Sqlite = loadSqliteAfterGuardForTest()
   const db = new Sqlite(':memory:')
   db.exec(historicalSchema)
@@ -98,6 +97,7 @@ function fixture(t: Parameters<typeof skipIfSqliteUnavailable>[0]) {
 }
 
 test('production action-surface hydration refreshes a genuinely pristine drifted head', (t) => {
+  if (skipIfSqliteUnavailable(t, 'pristine head refresh')) return
   const state = fixture(t)
   if (!state) return
   const { db, repository } = state
@@ -123,6 +123,7 @@ test('production action-surface hydration refreshes a genuinely pristine drifted
 })
 
 test('ingress pristine refresh preserves the epoch and advances the named action identity exactly once', (t) => {
+  if (skipIfSqliteUnavailable(t, 'pristine head refresh')) return
   const state = fixture(t)
   if (!state) return
   const { db, repository } = state
@@ -149,6 +150,7 @@ test('ingress pristine refresh preserves the epoch and advances the named action
 
 for (const role of ['user', 'assistant']) {
   test(`current-epoch ${role} content without a Codex turn disqualifies pristine refresh`, (t) => {
+    if (skipIfSqliteUnavailable(t, 'pristine head refresh')) return
     const state = fixture(t)
     if (!state) return
     const { db, repository } = state
@@ -169,6 +171,7 @@ for (const role of ['user', 'assistant']) {
 }
 
 test('production hydration rolls back retirement and emits nothing when successor insertion fails', (t) => {
+  if (skipIfSqliteUnavailable(t, 'pristine head refresh')) return
   const state = fixture(t)
   if (!state) return
   const { db, repository } = state
@@ -186,6 +189,7 @@ test('production hydration rolls back retirement and emits nothing when successo
 
 for (const withContent of [false, true]) {
   test(`production boot refresh loop ${withContent ? 'leaves non-pristine content untouched' : 'refreshes before ingress exactly once'}`, (t) => {
+    if (skipIfSqliteUnavailable(t, 'pristine head refresh')) return
     const state = fixture(t)
     if (!state) return
     const { db, repository } = state
@@ -228,6 +232,7 @@ const occupiedScopeRows = {
 
 for (const [kind, statement] of Object.entries(occupiedScopeRows)) {
   test(`current scope ${kind} without a Codex turn blocks both refresh owner and direct named retirement`, (t) => {
+    if (skipIfSqliteUnavailable(t, 'pristine head refresh')) return
     const state = fixture(t)
     if (!state) return
     const { db, repository } = state

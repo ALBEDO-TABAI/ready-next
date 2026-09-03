@@ -356,6 +356,28 @@ export function buildCodexExplicitRetryContext(input: UserIngress) {
   }
 }
 
+export type CodexDeliveredUserTail = {
+  contract: 'ready_uncommitted_user_tail_v1'
+  originUserMessageId: string
+  input: CodexUserInput[]
+  inputDigest: string
+}
+
+export function buildCodexDeliveredUserTail(ingress: UserIngress): CodexDeliveredUserTail[] {
+  return (ingress.uncommittedUserTail || []).filter((item) => (
+    ingress.uncommittedTailAssignments?.some((assignment) => (
+      assignment.originUserMessageId === item.originUserMessageId
+      && assignment.inputDigest === item.inputDigest
+      && assignment.plan === 'deliver_untrusted_history'
+    ))
+  )).map((item) => ({
+    contract: 'ready_uncommitted_user_tail_v1',
+    originUserMessageId: item.originUserMessageId,
+    input: item.input,
+    inputDigest: item.inputDigest,
+  }))
+}
+
 export class CodexTurnInputBuilder {
   build(rawIngress: unknown, context: CodexTurnBuildContext): CodexTurnInputBuildResult {
     const parsed = codexTurnIngressSchema.safeParse(rawIngress)
@@ -450,22 +472,11 @@ export class CodexTurnInputBuilder {
         ],
         additionalContext: {
           ...buildResourceContext(ingress.resourceAdditionalContext),
-          ...Object.fromEntries((ingress.uncommittedUserTail || []).filter((item) => (
-            ingress.uncommittedTailAssignments.some((assignment) => (
-              assignment.originUserMessageId === item.originUserMessageId
-              && assignment.inputDigest === item.inputDigest
-              && assignment.plan === 'deliver_untrusted_history'
-            ))
-          )).map((item, index) => [
+          ...Object.fromEntries(buildCodexDeliveredUserTail(ingress).map((item, index) => [
             `ready-uncommitted-user-tail:${index}`,
             {
               kind: 'untrusted' as const,
-              value: JSON.stringify({
-                contract: 'ready_uncommitted_user_tail_v1',
-                originUserMessageId: item.originUserMessageId,
-                input: item.input,
-                inputDigest: item.inputDigest,
-              }),
+              value: JSON.stringify(item),
             },
           ])),
           ...(ingress.attemptKind === 'explicit_retry'

@@ -455,6 +455,7 @@ test('each sidecar spawn gets one capability and every prior token is rejected b
     turnContractDigest: 'turn-contract-1',
     instructionContractDigest: instructionTranscriptDigest(body.instructions, body.input),
     additionalContextDigest: digestCanonicalJson([]),
+    deliveredUserTail: [],
     forceToolFreeFinalization: false,
     allowedToolNames: [],
   }
@@ -573,6 +574,7 @@ test('rotating the sidecar capability aborts an admitted old request before cred
     turnContractDigest: 'turn-contract-1',
     instructionContractDigest: instructionTranscriptDigest(body.instructions, body.input),
     additionalContextDigest: digestCanonicalJson([]),
+    deliveredUserTail: [],
     forceToolFreeFinalization: false,
     allowedToolNames: [],
   }
@@ -784,6 +786,7 @@ test('chat conversion streams text and authorized tools while blocking malicious
     turnContractDigest: 'turn-contract-1',
     instructionContractDigest: instructionTranscriptDigest(request.instructions, request.input),
     additionalContextDigest: digestCanonicalJson([v2]),
+    deliveredUserTail: [],
     forceToolFreeFinalization: false,
     allowedToolNames: ['ready_read_probe'],
   }
@@ -1007,6 +1010,7 @@ test('native Responses lane forwards only verified events and rejects action ite
           turnContractDigest: 'turn-contract-1',
           instructionContractDigest: instructionTranscriptDigest(request.instructions, request.input),
           additionalContextDigest: digestCanonicalJson([]),
+          deliveredUserTail: [],
           forceToolFreeFinalization: true,
           allowedToolNames: ['ready_read_probe'],
         }
@@ -1105,6 +1109,7 @@ test('gateway owns retries exactly and never retries semantic 4xx responses', as
           turnContractDigest: 'turn-contract-1',
           instructionContractDigest: instructionTranscriptDigest(request.instructions, request.input),
           additionalContextDigest: digestCanonicalJson([]),
+          deliveredUserTail: [],
           forceToolFreeFinalization: false,
           allowedToolNames: [],
         }
@@ -1183,6 +1188,7 @@ test('gateway rejects excess concurrency before authority work and aborts an in-
     turnContractDigest: 'turn-contract-1',
     instructionContractDigest: instructionTranscriptDigest(request.instructions, request.input),
     additionalContextDigest: digestCanonicalJson([]),
+    deliveredUserTail: [],
     forceToolFreeFinalization: false,
     allowedToolNames: [],
   }

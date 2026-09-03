@@ -13,7 +13,7 @@ import { revealDocumentQuoteAttachment } from '../../../modules/agent/document-q
 import { WORKBENCH_CANVAS_OUTER_PADDING_BOTTOM } from '../../../modules/workbench/chrome'
 import type { ReferenceSkillHintData } from '../../../types/electron'
 import type { ActionAuthorizationMode } from '../../../../shared/action-authorization-mode'
-import type { CodexProductTurnActionProjection } from '../../../../shared/ipc-contracts/agent-runtime'
+import type { CodexActionGate, CodexProductTurnActionProjection } from '../../../../shared/ipc-contracts/agent-runtime'
 import { toLocalFileUrl } from '../../../utils/dragDrop'
 import ChatMessages from '../ChatMessages'
 import ChatInput, { type ChatInputHandle } from '../ChatInput'
@@ -49,6 +49,7 @@ interface AgentSelectionMenuState {
 interface ChatPanelBodyProps extends Omit<TaskToolSnapshotProps, 'children' | 'currentActivityNarration'> {
   messages: AgentMessage[]
   lifecycleInputBlocked: boolean
+  stopAvailable?: boolean
   stopPending: boolean
   stopError: string | null
   scopeRunStates: Record<string, ScopeRunState>
@@ -99,6 +100,9 @@ interface ChatPanelBodyProps extends Omit<TaskToolSnapshotProps, 'children' | 'c
   setAttachmentPreviewLoading: (loading: boolean) => void
   admissionReady?: boolean
   composerNotice?: { message: string; errorKind: string } | null
+  sendConsequence?: CodexActionGate['consequence']
+  headUnavailable?: boolean
+  onRefreshActionSurface?: () => void
   onDismissComposerNotice?: () => void
 }
 
@@ -115,6 +119,7 @@ export function ChatPanelBody(props: ChatPanelBodyProps): React.ReactElement {
     taskDisclosureState,
     isStreaming,
     lifecycleInputBlocked,
+    stopAvailable = false,
     stopPending,
     stopError,
     streamingMessageId,
@@ -163,6 +168,9 @@ export function ChatPanelBody(props: ChatPanelBodyProps): React.ReactElement {
     onReferenceSelect,
     admissionReady = true,
     composerNotice = null,
+    sendConsequence = null,
+    headUnavailable = false,
+    onRefreshActionSurface,
     onDismissComposerNotice,
     setActiveAttachmentPreview,
     setAttachmentPreviewLoading,
@@ -352,6 +360,21 @@ export function ChatPanelBody(props: ChatPanelBodyProps): React.ReactElement {
               )
             })()}
 
+            {headUnavailable && (
+              <div data-ready-action-state="head_unavailable" role="status" style={{ pointerEvents: 'auto' }}>
+                暂时无法读取会话状态，草稿已保留。
+                <button type="button" onClick={onRefreshActionSurface}>重新读取</button>
+              </div>
+            )}
+            {sendConsequence && (
+              <div data-ready-send-consequence="true" role="note">
+                {sendConsequence.omittedItemCount === 1 ? '上一项' : `前面${sendConsequence.omittedItemCount}项`}
+                不会作为当前任务带入；如仍需要，请完整重述。
+                {sendConsequence.resourceReattachItemCount > 0
+                  && `其中${sendConsequence.resourceReattachItemCount}项需重新附加资源。`}
+              </div>
+            )}
+
             {referenceSkillHint && (
               <div
                 className="ready-liquid-card"
@@ -539,7 +562,7 @@ export function ChatPanelBody(props: ChatPanelBodyProps): React.ReactElement {
             <ChatInput
               ref={chatInputRef}
               inputValue={inputValue}
-              isStreaming={isStreaming}
+              stopAvailable={stopAvailable}
               lifecycleInputBlocked={lifecycleInputBlocked}
               stopPending={stopPending}
               stopError={stopError}

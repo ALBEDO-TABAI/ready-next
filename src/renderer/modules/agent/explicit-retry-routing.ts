@@ -1,5 +1,5 @@
 import type { ProductTurnReceipt, SendScopedRequest } from '../../../shared/ipc-contracts/agent-runtime'
-import { matchesResumeIntent } from '../../../shared/resume-lexicon'
+import { matchesExactRetryIntent } from '../../../shared/resume-lexicon'
 
 export type RetryRouteMessage = {
   type: string
@@ -14,6 +14,7 @@ type ReceiptReadResult = {
 export type NaturalExplicitRetryRoute =
   | { kind: 'not_applicable' }
   | { kind: 'unavailable' }
+  | { kind: 'resource_restatement_required' }
   | { kind: 'resolved'; explicitRetry: NonNullable<SendScopedRequest['explicitRetry']> }
 
 function latestTerminalRun(messages: readonly RetryRouteMessage[]): {
@@ -35,7 +36,6 @@ function latestTerminalRun(messages: readonly RetryRouteMessage[]): {
 export async function resolveNaturalExplicitRetry(input: {
   content: string
   attachmentCount: number
-  currentDocumentAnchorPresent?: boolean
   workbenchResourceCount?: number
   externalReadSlicePresent?: boolean
   messages: readonly RetryRouteMessage[]
@@ -43,16 +43,11 @@ export async function resolveNaturalExplicitRetry(input: {
   messageVisibilityEpoch?: number
   readProductTurnPresentation?: ((readyRunId: string) => Promise<ReceiptReadResult>) | null
 }): Promise<NaturalExplicitRetryRoute> {
-  if (
-    input.attachmentCount > 0
-    || input.currentDocumentAnchorPresent === true
-    || (input.workbenchResourceCount || 0) > 0
-    || input.externalReadSlicePresent === true
-    || !matchesResumeIntent(input.content, 'strict')
-  ) return { kind: 'not_applicable' }
-
+  if (!matchesExactRetryIntent(input.content)) return { kind: 'not_applicable' }
   const terminal = latestTerminalRun(input.messages)
   if (!terminal || terminal.terminalReason === 'done') return { kind: 'not_applicable' }
+  if (input.attachmentCount > 0 || (input.workbenchResourceCount || 0) > 0
+    || input.externalReadSlicePresent === true) return { kind: 'resource_restatement_required' }
   if (!input.readProductTurnPresentation) return { kind: 'unavailable' }
 
   const result = await input.readProductTurnPresentation(terminal.runId).catch(() => null)

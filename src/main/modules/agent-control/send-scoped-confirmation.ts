@@ -551,6 +551,19 @@ export async function runConfirmedSendScoped<ScopeRow, DispatchContext>(params: 
       dispatchContext,
     })
   } catch (error) {
+    if (error instanceof PrePersistenceAdmissionError) {
+      // The atomic owner has rolled back; this is a known admission rejection.
+      const rejection = { ok: false as const, code: error.code, retryableByUser: error.retryableByUser,
+        error: error.message, admissionEvidenceDigest: error.admissionEvidenceDigest }
+      try {
+        await params.releaseReservationAfterPrePersistenceRejection({
+          reservation: reservationResult.reservation, rejection,
+        })
+      } catch {
+        // silent-catch: a failed release remains owned by the existing reservation reconciler.
+      }
+      return createRejectedBeforePersistence({ scope: 'pre-existing', ...rejection })
+    }
     const failure = error instanceof IngressPersistenceError
       ? error
       : new IngressPersistenceError(

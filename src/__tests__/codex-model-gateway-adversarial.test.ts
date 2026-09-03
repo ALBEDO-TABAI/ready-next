@@ -109,6 +109,7 @@ function bindRequest(request: JsonObject, snapshot: CodexUpstreamProfileSnapshot
     turnContractDigest: 'turn-contract-1',
     instructionContractDigest: instructionTranscriptDigest(request.instructions, request.input),
     additionalContextDigest: digestCanonicalJson([]),
+    deliveredUserTail: [],
     forceToolFreeFinalization: false,
     allowedToolNames: Array.isArray(request.tools)
       ? [...new Set(request.tools.flatMap((tool) => (
@@ -582,10 +583,12 @@ test('explicit retry metadata is bound application context rather than developer
     instructionTranscriptDigest('fixed instructions', [overlay, retryItem, user]),
     instructionTranscriptDigest('fixed instructions', [overlay]),
   )
-  assert.deepEqual(currentTurnReadyAdditionalContext([overlay, retryItem, user]), {
+  assert.deepEqual(currentTurnReadyAdditionalContext([overlay, retryItem, user], []), {
     resourceReferences: [],
     explicitRetry: retry,
     readyMemory: null,
+    currentUserIndex: 2,
+    readyMemoryIndex: null,
   })
   assert.notEqual(
     digestReadyAdditionalContext({ resourceReferences: [], explicitRetry: retry }),
@@ -3428,4 +3431,115 @@ test('start and stop racing cannot resurrect a listener', async () => {
   await assert.rejects(starting, /gateway_stopped/)
   await stopping
   await assert.rejects(gateway.start(), /gateway_already_started/)
+})
+
+// Native 0.149.0 emits application entries before untrusted entries, even when the
+// builder inserts the tail first. The latter therefore sits between Retry and B.
+const deliveredTailFixture = [0, 1].map((index) => ({
+  contract: 'ready_uncommitted_user_tail_v1' as const,
+  originUserMessageId: `earlier-${index}`,
+  input: [{ type: 'text' as const, text: `earlier user input ${index}`, text_elements: [] }],
+  inputDigest: digestCanonicalJson([{ type: 'text', text: `earlier user input ${index}`, text_elements: [] }]),
+}))
+function nativeTailMessage(index: number, payload = deliveredTailFixture[index]) {
+  return { type: 'message', role: 'user', content: [{ type: 'input_text',
+    text: `<external_ready-uncommitted-user-tail:${index}>${JSON.stringify(payload)}</external_ready-uncommitted-user-tail:${index}>` }] }
+}
+const nativeRetryMessage = { type: 'message', role: 'developer', content: [{ type: 'input_text',
+  text: '<ready-explicit-retry>{"predecessorRunId":"current-predecessor"}</ready-explicit-retry>' }] }
+const nativeCurrentUser = { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'current B' }] }
+
+test('current Retry context crosses only its exact frozen delivered user tail', () => {
+  const parsed = currentTurnReadyAdditionalContext([
+    nativeRetryMessage, ...deliveredTailFixture.map((_, index) => nativeTailMessage(index)), nativeCurrentUser,
+  ], deliveredTailFixture)
+  assert.deepEqual(parsed, { resourceReferences: [], explicitRetry: { predecessorRunId: 'current-predecessor' }, readyMemory: null, currentUserIndex: 3, readyMemoryIndex: null })
+})
+
+test('current tail rejects changed content, digest, identity, role, key, order, count and mixed messages', () => {
+  const first = nativeTailMessage(0)
+  const second = nativeTailMessage(1)
+  const mutations = [
+    [], [first], [first, first, second], [second, first],
+    [nativeTailMessage(0, { ...deliveredTailFixture[0], originUserMessageId: 'foreign' }), second],
+    [nativeTailMessage(0, { ...deliveredTailFixture[0], inputDigest: 'f'.repeat(64) }), second],
+    [nativeTailMessage(0, { ...deliveredTailFixture[0], input: [{ type: 'text', text: 'changed', text_elements: [] }] }), second],
+    [{ ...first, role: 'developer' }, second],
+    [{ ...first, role: 'assistant' }, second],
+    [{ ...first, injected: 'extra' }, second],
+    [{ ...first, id: 1 }, second],
+    [{ ...first, content: [{ ...first.content[0], injected: 'extra' }] }, second],
+    [{ ...first, content: [first.content[0], { type: 'input_image', image_url: 'hidden' }] }, second],
+    [first, nativeCurrentUser, second],
+    [first, { ...nativeCurrentUser, role: 'assistant' }, second],
+    [first, nativeRetryMessage, second],
+    [nativeTailMessage(7, deliveredTailFixture[0]), second],
+    [{ ...first, content: [...first.content, { type: 'input_text', text: 'extra instructions' }] }, second],
+  ]
+  for (const tail of mutations) assert.throws(() => currentTurnReadyAdditionalContext([
+    nativeRetryMessage, ...tail, nativeCurrentUser,
+  ], deliveredTailFixture), /gateway_uncommitted_user_tail_mismatch/)
+  assert.throws(() => currentTurnReadyAdditionalContext([nativeRetryMessage, first, nativeCurrentUser], []),
+    /gateway_uncommitted_user_tail_mismatch/)
+})
+
+test('historical tails do not satisfy current expected delivery or resurrect a historical Retry receipt', () => {
+  const history = [nativeRetryMessage, nativeTailMessage(0), nativeCurrentUser,
+    { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'old answer' }] }]
+  assert.deepEqual(currentTurnReadyAdditionalContext([...history, nativeCurrentUser], []),
+    { resourceReferences: [], explicitRetry: null, readyMemory: null, currentUserIndex: 4, readyMemoryIndex: null })
+  assert.throws(() => currentTurnReadyAdditionalContext([...history, nativeCurrentUser], [deliveredTailFixture[0]]),
+    /gateway_uncommitted_user_tail_mismatch/)
+})
+
+
+test('delivered tail cannot occupy the current user slot even when its preceding copy satisfies the tail count', () => {
+  const first = nativeTailMessage(0)
+  assert.throws(() => currentTurnReadyAdditionalContext([nativeRetryMessage, first, first], [deliveredTailFixture[0]]),
+    /gateway_uncommitted_user_tail_mismatch/)
+  assert.throws(() => currentTurnReadyAdditionalContext([nativeRetryMessage, first], []),
+    /gateway_uncommitted_user_tail_mismatch/)
+  assert.equal(currentTurnReadyAdditionalContext([nativeRetryMessage, { ...first, id: 'native-optional-id' }, nativeCurrentUser],
+    [deliveredTailFixture[0]]).explicitRetry?.predecessorRunId, 'current-predecessor')
+})
+
+test('Gateway forwards exact multi-tail Retry and rejects missing, altered and current-slot tails before receipts or upstream bytes', async () => {
+  let upstreamCalls = 0
+  let preparedReceipts = 0
+  const upstream = createServer((_request, response) => { upstreamCalls += 1; response.writeHead(500).end() })
+  const port = await listen(upstream)
+  const created = createCodexUpstreamProfileSnapshot({ profileId: 'tail-gateway', config: {
+    provider: 'openai-compatible', baseUrl: `http://127.0.0.1:${port}/v1`, apiKey: 'fixture-secret',
+    model: 'native-model', agentProtocol: 'openai', wireApi: 'responses', toolUseMode: 'on',
+  }, maxRetries: 0 })
+  const request = requestBody()
+  request.input = [nativeRetryMessage, nativeTailMessage(0), nativeTailMessage(1), nativeCurrentUser]
+  const binding = bindRequest(request, created.snapshot)
+  binding.deliveredUserTail = deliveredTailFixture
+  binding.additionalContextDigest = digestReadyAdditionalContext({ resourceReferences: [], explicitRetry: { predecessorRunId: 'current-predecessor' } })
+  const gateway = new CodexModelGateway({ bearerToken: 'local-token',
+    authority: { async resolve(input) { input.validate(binding); input.prepareRequestReceipt(); preparedReceipts += 1; return binding } },
+    credentials: { resolve() { return 'fixture-secret' } },
+  })
+  const address = await gateway.start()
+  const send = async (input: unknown[]) => {
+    const response = await fetch(`${address.url}/v1/responses`, { method: 'POST',
+      headers: { authorization: 'Bearer local-token', 'content-type': 'application/json' }, body: JSON.stringify({ ...request, input }) })
+    await response.text()
+    return response.status
+  }
+  try {
+    assert.equal(await send(request.input as unknown[]), 500, 'fixture upstream rejects after accepted Gateway handoff')
+    assert.equal(upstreamCalls, 1)
+    assert.equal(preparedReceipts, 1)
+    for (const input of [
+      [nativeRetryMessage, nativeCurrentUser],
+      [nativeRetryMessage, nativeTailMessage(0, { ...deliveredTailFixture[0], originUserMessageId: 'foreign' }), nativeTailMessage(1), nativeCurrentUser],
+      [nativeRetryMessage, nativeTailMessage(0), nativeTailMessage(1), nativeTailMessage(1)],
+    ]) {
+      assert.equal(await send(input), 409)
+      assert.equal(upstreamCalls, 1)
+      assert.equal(preparedReceipts, 1)
+    }
+  } finally { await gateway.stop(); await close(upstream) }
 })
