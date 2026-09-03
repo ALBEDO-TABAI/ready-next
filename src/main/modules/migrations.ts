@@ -43,6 +43,7 @@ import {
   applyCodexTurnLifecycleActionMigration,
   CODEX_BINDING_EVIDENCE_GUARDS_SQL,
   CODEX_BINDING_SCHEMA_SQL,
+  CODEX_GATEWAY_EXCHANGE_GUARDS_SQL,
   CODEX_NATIVE_CONTINUITY_GUARDS_SQL,
   CODEX_NATIVE_COVERAGE_SCHEMA_SQL,
   CODEX_PRODUCT_EFFECT_BINDING_SCHEMA_SQL,
@@ -4358,6 +4359,12 @@ const migrations: Migration[] = [
       db.exec(CODEX_NATIVE_COVERAGE_SCHEMA_SQL)
       applyCodexPristineContractRefreshMigration(db)
       db.exec(CODEX_NATIVE_CONTINUITY_GUARDS_SQL)
+    },
+  },
+  {
+    name: '119_gateway_exchange_redaction_admission_guard',
+    up: (db) => {
+      db.exec(CODEX_GATEWAY_EXCHANGE_GUARDS_SQL)
     },
   },
 ]

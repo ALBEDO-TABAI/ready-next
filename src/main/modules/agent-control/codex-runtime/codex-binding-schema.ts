@@ -1029,6 +1029,29 @@ export function applyCodexFenceOwnerTransferMigration(db: {
   `)
 }
 
+export const CODEX_GATEWAY_EXCHANGE_GUARDS_SQL = `
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_ready_gateway_exchange_terminal
+    ON ready_model_gateway_exchange_events(gateway_request_receipt_id)
+    WHERE event_kind IN ('response_completed', 'response_failed');
+
+  CREATE TRIGGER IF NOT EXISTS ready_model_gateway_exchange_immutable_update
+  BEFORE UPDATE ON ready_model_gateway_exchange_events
+  BEGIN SELECT RAISE(ABORT, 'ready_model_gateway_exchange_immutable'); END;
+
+  CREATE TRIGGER IF NOT EXISTS ready_model_gateway_exchange_immutable_delete
+  BEFORE DELETE ON ready_model_gateway_exchange_events
+  BEGIN SELECT RAISE(ABORT, 'ready_model_gateway_exchange_immutable'); END;
+
+  CREATE TRIGGER IF NOT EXISTS ready_model_gateway_exchange_redaction_insert
+  BEFORE INSERT ON ready_model_gateway_exchange_events
+  WHEN NEW.event_kind = 'request_admitted' AND (
+    NEW.memory_history_redaction_digest IS NULL
+    OR NEW.memory_history_redacted_item_count IS NULL
+    OR typeof(NEW.memory_history_redacted_item_count) != 'integer'
+  )
+  BEGIN SELECT RAISE(ABORT, 'ready_model_gateway_exchange_redaction_required'); END;
+`
+
 export function applyCodexGatewayCompletionEvidenceMigration(db: {
   exec(sql: string): void
   prepare(sql: string): { all<T = unknown>(): T[] }
@@ -1074,10 +1097,13 @@ export function applyCodexGatewayCompletionEvidenceMigration(db: {
           AND tools_digest IS NOT NULL
           AND tool_count >= 0
           AND body_bytes > 0
-          AND memory_history_redaction_digest IS NOT NULL
-          AND length(memory_history_redaction_digest) = 64
-          AND memory_history_redaction_digest NOT GLOB '*[^0-9a-f]*'
-          AND memory_history_redacted_item_count >= 0
+          AND ((memory_history_redaction_digest IS NULL
+            AND memory_history_redacted_item_count IS NULL)
+            OR (memory_history_redaction_digest IS NOT NULL
+              AND memory_history_redacted_item_count IS NOT NULL
+              AND length(memory_history_redaction_digest) = 64
+              AND memory_history_redaction_digest NOT GLOB '*[^0-9a-f]*'
+              AND memory_history_redacted_item_count >= 0))
           AND response_id IS NULL AND terminal_digest IS NULL
           AND output_digest IS NULL AND usage_digest IS NULL
           AND failure_json IS NULL AND failure_digest IS NULL)
@@ -1110,18 +1136,6 @@ export function applyCodexGatewayCompletionEvidenceMigration(db: {
           AND failure_digest NOT GLOB '*[^0-9a-f]*')
       )
     );
-
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_ready_gateway_exchange_terminal
-      ON ready_model_gateway_exchange_events(gateway_request_receipt_id)
-      WHERE event_kind IN ('response_completed', 'response_failed');
-
-    CREATE TRIGGER IF NOT EXISTS ready_model_gateway_exchange_immutable_update
-    BEFORE UPDATE ON ready_model_gateway_exchange_events
-    BEGIN SELECT RAISE(ABORT, 'ready_model_gateway_exchange_immutable'); END;
-
-    CREATE TRIGGER IF NOT EXISTS ready_model_gateway_exchange_immutable_delete
-    BEFORE DELETE ON ready_model_gateway_exchange_events
-    BEGIN SELECT RAISE(ABORT, 'ready_model_gateway_exchange_immutable'); END;
   `)
 
   const table = db.prepare(`
@@ -1130,6 +1144,7 @@ export function applyCodexGatewayCompletionEvidenceMigration(db: {
   `).all<{ name: string }>()
   if (table.length === 0) {
     createCurrentTable()
+    db.exec(CODEX_GATEWAY_EXCHANGE_GUARDS_SQL)
     return
   }
   const columns = new Set(
@@ -1139,6 +1154,7 @@ export function applyCodexGatewayCompletionEvidenceMigration(db: {
   )
   if (columns.has('failure_json') && columns.has('failure_digest')) {
     createCurrentTable()
+    db.exec(CODEX_GATEWAY_EXCHANGE_GUARDS_SQL)
     return
   }
   db.exec(`
@@ -1168,6 +1184,7 @@ export function applyCodexGatewayCompletionEvidenceMigration(db: {
       FROM ready_model_gateway_exchange_events_legacy;
     DROP TABLE ready_model_gateway_exchange_events_legacy;
   `)
+  db.exec(CODEX_GATEWAY_EXCHANGE_GUARDS_SQL)
 }
 
 export function applyCodexManualCompactionRecoveryEvidenceMigration(db: {

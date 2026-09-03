@@ -11,8 +11,109 @@ import { loadSqliteAfterGuardForTest, skipIfSqliteUnavailable } from './utils/sq
 import { CodexBindingRepository } from '../main/modules/agent-control/codex-runtime/codex-binding-repository'
 import { projectCodexHeadActionProjection } from '../main/modules/agent-control/codex-runtime/codex-action-surface'
 import type { DatabaseConnection } from '../main/modules/database'
+import { applyCodexGatewayCompletionEvidenceMigration } from '../main/modules/agent-control/codex-runtime/codex-binding-schema'
 
 const historicalSchema = readFileSync(new URL('./fixtures/ready-pre118-schema.sql', import.meta.url), 'utf8')
+const upgradedGatewaySchema = readFileSync(new URL('./fixtures/ready-upgraded-pre118-gateway.sql', import.meta.url), 'utf8')
+
+// Only the referenced receipt identity is needed by this table migration.
+// The captured table schema and synthetic events contain no real user content.
+function createPopulatedLegacyGateway(db: GuardDb): void {
+  db.exec(`PRAGMA foreign_keys = ON;
+    CREATE TABLE ready_model_gateway_request_receipts (receipt_id TEXT PRIMARY KEY);
+    INSERT INTO ready_model_gateway_request_receipts VALUES ('old'), ('known'), ('next');
+    ${upgradedGatewaySchema}
+    CREATE UNIQUE INDEX idx_ready_gateway_exchange_terminal
+      ON ready_model_gateway_exchange_events(gateway_request_receipt_id)
+      WHERE event_kind = 'response_completed';
+    INSERT INTO ready_model_gateway_exchange_events (
+      gateway_request_receipt_id, event_kind, instruction_digest, input_digest,
+      input_items_json, input_total_string_characters, input_max_string_characters,
+      tools_digest, tool_count, body_bytes, evidence_digest, recorded_at,
+      memory_history_redaction_digest, memory_history_redacted_item_count
+    ) VALUES
+      ('old', 'request_admitted', 'instructions', 'input', '[]', 0, 0, 'tools', 0, 2, 'old-evidence', 'before-memory', NULL, NULL),
+      ('known', 'request_admitted', 'instructions', 'input', '[]', 0, 0, 'tools', 0, 2, 'known-evidence', 'after-memory', '${'a'.repeat(64)}', 0);
+    INSERT INTO ready_model_gateway_exchange_events (
+      gateway_request_receipt_id, event_kind, response_id, terminal_digest,
+      output_digest, usage_digest, evidence_digest, recorded_at
+    ) VALUES ('known', 'response_completed', 'response', 'terminal', 'output', 'usage', 'completed-evidence', 'completed');
+  `)
+}
+
+test('gateway migration preserves populated historical unknown evidence and requires complete new evidence', (t) => {
+  if (skipIfSqliteUnavailable(t, 'populated gateway upgrade')) return
+  const Sqlite = loadSqliteAfterGuardForTest()
+  const db = new Sqlite(':memory:')
+  t.after(() => db.close())
+  createPopulatedLegacyGateway(db)
+  const columns = db.prepare('PRAGMA table_info(ready_model_gateway_exchange_events)')
+    .all<{ name: string }>().map((row) => row.name).join(', ')
+  const read = () => db.prepare(`SELECT ${columns} FROM ready_model_gateway_exchange_events ORDER BY event_sequence`).all()
+  const before = read()
+  db.transaction(() => applyCodexGatewayCompletionEvidenceMigration(db))()
+  assert.deepEqual(read(), before, 'historical values, identifiers and evidence digests remain exact')
+  db.transaction(() => applyCodexGatewayCompletionEvidenceMigration(db))()
+  assert.deepEqual(read(), before)
+  assert.deepEqual(db.pragma('foreign_key_check'), [])
+  assert.equal(db.pragma('quick_check', { simple: true }), 'ok')
+  const append = db.prepare(`INSERT INTO ready_model_gateway_exchange_events (
+    gateway_request_receipt_id, event_kind, instruction_digest, input_digest,
+    input_items_json, input_total_string_characters, input_max_string_characters,
+    tools_digest, tool_count, body_bytes, evidence_digest, recorded_at,
+    memory_history_redaction_digest, memory_history_redacted_item_count
+  ) VALUES ('next', 'request_admitted', 'instructions', 'input', '[]', 0, 0, 'tools', 0, 2, 'next-evidence', 'now', ?, ?)`)
+  for (const [digest, count] of [[null, null], [null, 0], ['a'.repeat(64), null], ['a'.repeat(64), 0.5]]) {
+    assert.throws(() => append.run(digest, count), /ready_model_gateway_exchange_redaction_required/)
+  }
+  assert.doesNotThrow(() => append.run('a'.repeat(64), 0))
+  assert.throws(() => db.exec(`INSERT INTO ready_model_gateway_exchange_events (
+    gateway_request_receipt_id, event_kind, failure_json, failure_digest, evidence_digest, recorded_at
+  ) VALUES ('known', 'response_failed', '{}', '${'b'.repeat(64)}', 'second-terminal', 'now')`),
+  /UNIQUE constraint failed: ready_model_gateway_exchange_events.gateway_request_receipt_id/)
+  assert.throws(() => db.exec("UPDATE ready_model_gateway_exchange_events SET recorded_at = 'changed'"), /immutable/)
+  assert.throws(() => db.exec('DELETE FROM ready_model_gateway_exchange_events'), /immutable/)
+})
+
+test('gateway migration rolls back populated history when final guard installation fails', (t) => {
+  if (skipIfSqliteUnavailable(t, 'populated gateway rollback')) return
+  const Sqlite = loadSqliteAfterGuardForTest()
+  const db = new Sqlite(':memory:')
+  t.after(() => db.close())
+  createPopulatedLegacyGateway(db)
+  const before = db.prepare('SELECT * FROM ready_model_gateway_exchange_events ORDER BY event_sequence').all()
+  const schema = db.prepare("SELECT name, sql FROM sqlite_master WHERE name LIKE '%gateway%' ORDER BY name").all()
+  assert.throws(() => db.transaction(() => applyCodexGatewayCompletionEvidenceMigration({
+    prepare: db.prepare.bind(db),
+    exec(sql) {
+      if (sql.includes('CREATE TRIGGER IF NOT EXISTS ready_model_gateway_exchange_redaction_insert')) {
+        throw new Error('injected_gateway_guard_failure')
+      }
+      db.exec(sql)
+    },
+  }))(), /injected_gateway_guard_failure/)
+  assert.deepEqual(db.prepare('SELECT * FROM ready_model_gateway_exchange_events ORDER BY event_sequence').all(), before)
+  assert.deepEqual(db.prepare("SELECT name, sql FROM sqlite_master WHERE name LIKE '%gateway%' ORDER BY name").all(), schema)
+})
+
+test('migration 119 installs the same new-write guard for already-upgraded databases', (t) => {
+  if (skipIfSqliteUnavailable(t, 'gateway guard cutover')) return
+  const Sqlite = loadSqliteAfterGuardForTest()
+  const db = new Sqlite(':memory:')
+  t.after(() => db.close())
+  runMigrations(db as unknown as MigrationDatabase)
+  const before = db.prepare("SELECT sql FROM sqlite_master WHERE name = 'ready_model_gateway_exchange_redaction_insert'").get()
+  const beforeIndex = db.prepare("SELECT sql FROM sqlite_master WHERE name = 'idx_ready_gateway_exchange_terminal'").get()
+  assert.ok(before)
+  assert.ok(beforeIndex)
+  db.exec(`DROP TRIGGER ready_model_gateway_exchange_redaction_insert;
+    DROP INDEX idx_ready_gateway_exchange_terminal;
+    DELETE FROM migrations WHERE name = '119_gateway_exchange_redaction_admission_guard';`)
+  runMigrations(db as unknown as MigrationDatabase)
+  assert.deepEqual(db.prepare("SELECT sql FROM sqlite_master WHERE name = 'ready_model_gateway_exchange_redaction_insert'").get(), before)
+  assert.deepEqual(db.prepare("SELECT sql FROM sqlite_master WHERE name = 'idx_ready_gateway_exchange_terminal'").get(), beforeIndex)
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM migrations WHERE name = '119_gateway_exchange_redaction_admission_guard'").get<{ n: number }>()?.n, 1)
+})
 
 test('migration 118 is idempotent and installs continuity owner tables and guards', (t) => {
   if (skipIfSqliteUnavailable(t, 'migration 118 native continuity')) return

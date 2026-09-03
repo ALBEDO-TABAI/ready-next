@@ -18,6 +18,7 @@
 
 ## 2. 会话、资源与工具面
 
+- 网关历史事件保留当时的原值：记忆剥离证据产生前的成对 NULL 不得补造摘要或删除。新请求的完整证据、事件不可变和单请求单终态由同一 `CODEX_GATEWAY_EXCHANGE_GUARDS_SQL` 强制；118 重建在复制并移除旧表后安装约束，119 向已升级库补齐。历史可读不代表当前授权，仍须通过当前 binding、prepared、fence 与终态合同。
 - 会话 scope 按“来源频道 + 线程或本地 conversation + agent”隔离；工具日志只进入运行态或胶囊层，不混入正文消息。
 - 会话 scope id 是稳定产品身份；`aliasGeneration` 只表示 Codex 原生 thread incarnation，`messageVisibilityEpoch` 才表示当前可见上下文。停止、Browser verifier nonaccept 或 publication divergence 可以创建更高 alias generation，但不得仅因 generation 变化推进可见 epoch 或清除历史；下一条真实用户输入是否可用只读当前 head action projection。Renderer 不得把 active `aliasGeneration === null` 当成发送禁令。`expectedAliasGeneration` 只表示客户端最后观察到的 **active** generation；缺省时 Main 按 conversation 定位现有 active head；只有 `refreshPristineFreshStartHeadAtomic` 可在严格空白且合同漂移时创建后继，不再隐式创建或恢复缺失 head，也不得把已退役 generation 填回去冒充 expected。列表可附带 `latestAliasGeneration` 作为只读事实，不参与 CAS。用户重置必须在同一事务内推进两轴，并清除旧消息、任务投影、召回索引、附件派生和上下文提示。每个 scoped run 在 admission 时冻结可见 epoch；所有当前产品写入都必须按该 epoch 做数据库 CAS，当前列表/搜索/UI 只读与 scope 当前 epoch 相同的行，旧行只允许具名的 exact-run 恢复或审计入口读取。远程入站合并在首个事件时冻结 `scope + messageVisibilityEpoch`，冲刷前后均必须重读当前 epoch；重置或关闭还必须同步丢弃该 scope 已合并未消费的入站、关闭它的 Browser target claim，旧合并批次和旧 claim 不得跨入新 epoch。
 - 关闭会话必须在 lifecycle closeout 或 idle retirement 的同一事务内写入 scope tombstone；关闭后的 scope 不得再被列表、消息读取、搜索、准入或迟到 Renderer 事件复活。任一不可逆退役且已无运行中 turn/effect/fence 的 Codex thread 都必须生成持久归档待办；归档 owner 先精确读回 thread 已空闲或已卸载，且没有 `inProgress` turn，再发送 archive。响应未知时同一连接不得盲重试，新 sidecar generation 才可在重新对账后续做。远程同一自然线程之后的新入站创建新 scope incarnation，不复用已关闭历史。
