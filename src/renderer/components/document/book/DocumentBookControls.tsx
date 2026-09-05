@@ -2,7 +2,7 @@
  * DocumentBookControls.tsx — 阅读模式底部胶囊条。
  *
  * 组成：‹ › 翻页钮、页码滑杆（以对开为单位）、页标、字号滑杆、Aa 排版弹层
- * （行高 + 页边距）。磨砂玻璃外观；闲置淡出，悬停钉住。
+ * （背景 + 行高 + 页边距）。昼夜配色；闲置淡出，悬停及键盘焦点钉住。
  */
 
 import { memo } from 'react'
@@ -56,9 +56,11 @@ const DocumentBookControls = memo(function DocumentBookControls({
 
   return (
     <div
-      className={`document-book-controls${visible ? ' is-visible' : ''}`}
+      className={`document-book-controls${visible || typesetOpen ? ' is-visible' : ''}`}
       onPointerEnter={() => onPinChange(true)}
       onPointerLeave={() => onPinChange(false)}
+      onFocus={() => onPinChange(true)}
+      onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) onPinChange(false) }}
     >
       <div className="document-book-controls__pill">
         <button
@@ -123,6 +125,17 @@ const DocumentBookControls = memo(function DocumentBookControls({
 
         {typesetOpen && (
           <div className="document-book-controls__popover">
+            <div className="document-book-controls__popover-row">
+              <span className="document-book-controls__popover-label">背景</span>
+              <label className="document-book-controls__follow-theme">
+                <input type="checkbox" checked={prefs.background === null}
+                  onChange={(event) => onPrefsChange({ ...prefs, background: event.target.checked ? null : '#e7e4dd' })} />
+                跟随应用昼夜
+              </label>
+              <input type="color" className="document-book-controls__color" aria-label="阅读背景颜色"
+                title="自选背景颜色" value={prefs.background ?? '#e7e4dd'}
+                onChange={(event) => onPrefsChange({ ...prefs, background: event.target.value })} />
+            </div>
             <div className="document-book-controls__popover-row">
               <span className="document-book-controls__popover-label">行高</span>
               <input

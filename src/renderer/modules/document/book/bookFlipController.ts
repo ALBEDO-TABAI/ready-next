@@ -75,9 +75,8 @@ export interface BookFlipController {
   dispose: () => void
 }
 
-/** 弹簧参数：保留一次可感知的减速与轻回弹，不做线性收页。 */
-const SPRING_STIFFNESS = 130
-const SPRING_DAMPING = 18
+/** 临界阻尼解析解；帧率变化不改变落页轨迹，也不会穿透落页平面。 */
+const SPRING_FREQUENCY = 15
 /** 松手速度阈值（rad/s）：超过即按甩动方向收束 */
 const FLICK_VELOCITY = 2.4
 const SCRIPTED_FLIP_VELOCITY = 3.5
@@ -100,6 +99,7 @@ export function createBookFlipController(deps: BookFlipControllerDeps): BookFlip
   let settleTimerId: number | null = null
   let lastTickAt = 0
   let grabNy = 0.5
+  let grabSkew = 0
   let pressNx = 0
   let pressTheta = 0
   let samples: Array<{ t: number; theta: number }> = []
@@ -142,6 +142,9 @@ export function createBookFlipController(deps: BookFlipControllerDeps): BookFlip
 
   const finishSettle = () => {
     clearSettleWatchdog()
+    theta = springTarget
+    velocity = 0
+    emit()
     const committed = springTarget > Math.PI / 2
     // 先让视图同步换好落地后的静态对开页，再隐藏活动叶片；否则会短暂露出旧页。
     deps.onSettle({ committed, direction })
@@ -157,9 +160,15 @@ export function createBookFlipController(deps: BookFlipControllerDeps): BookFlip
     const t = deps.now()
     const dt = clamp((t - lastTickAt) / 1000, 0.001, 0.05)
     lastTickAt = t
-    const acceleration = -SPRING_STIFFNESS * (theta - springTarget) - SPRING_DAMPING * velocity
-    velocity += acceleration * dt
-    theta += velocity * dt
+    const displacement = theta - springTarget
+    const decay = Math.exp(-SPRING_FREQUENCY * dt)
+    const impulse = velocity + SPRING_FREQUENCY * displacement
+    theta = springTarget + (displacement + impulse * dt) * decay
+    velocity = (velocity - SPRING_FREQUENCY * impulse * dt) * decay
+    if (theta <= 0 || theta >= BOOK_CURL_MAX_ANGLE) {
+      theta = clamp(theta, 0, BOOK_CURL_MAX_ANGLE)
+      velocity = 0
+    }
     if (convergeIfSettled()) {
       if (phase === 'settling') {
         finishSettle()
@@ -190,6 +199,7 @@ export function createBookFlipController(deps: BookFlipControllerDeps): BookFlip
     if (samples.length < 2) return 0
     const first = samples[0]
     const last = samples[samples.length - 1]
+    if (deps.now() - last.t > VELOCITY_SAMPLE_WINDOW_MS) return 0
     const dt = (last.t - first.t) / 1000
     if (dt <= 1e-3) return 0
     return (last.theta - first.theta) / dt
@@ -198,13 +208,17 @@ export function createBookFlipController(deps: BookFlipControllerDeps): BookFlip
   const press: BookFlipController['press'] = (nextDirection, nx, ny) => {
     if (disposed) return
     if (phase === 'settling' && nextDirection !== direction) return
+    const takingOver = phase === 'settling'
     direction = nextDirection
     grabNy = ny
+    grabSkew = takingOver ? skew : 0
     // 点击也要保留抓取高度：上、中、下部起翻不再共用同一张动画。
-    skew = clamp((ny - 0.5) * 1.4, -0.7, 0.7)
+    if (!takingOver) skew = clamp((ny - 0.5) * 1.4, -0.7, 0.7)
     pressNx = nx
     // 从 settle 接管时 theta 连续；否则从 0 起
-    pressTheta = phase === 'settling' ? theta : 0
+    pressTheta = takingOver ? theta : 0
+    theta = pressTheta
+    velocity = 0
     clearSettleWatchdog()
     samples = []
     phase = 'dragging'
@@ -221,7 +235,7 @@ export function createBookFlipController(deps: BookFlipControllerDeps): BookFlip
     trackSample()
     velocity = sampleVelocity()
     const height = Math.max(1, deps.pageHeight())
-    skew = resolveDragSkew(ny * height, grabNy * height, height)
+    skew = clamp(grabSkew + resolveDragSkew(ny * height, grabNy * height, height), -1, 1)
     emit()
   }
 
@@ -244,9 +258,8 @@ export function createBookFlipController(deps: BookFlipControllerDeps): BookFlip
   const release = () => {
     if (phase !== 'dragging') return
     const v = sampleVelocity()
-    const commit = theta > Math.PI / 2 || v > FLICK_VELOCITY
-    const revertFast = theta <= Math.PI / 2 && v < -FLICK_VELOCITY
-    beginSettle(commit ? Math.PI : 0, revertFast ? v : v * 0.6)
+    const commit = Math.abs(v) > FLICK_VELOCITY ? v > 0 : theta > Math.PI / 2
+    beginSettle(commit ? Math.PI : 0, v * 0.6)
   }
 
   const flipTo: BookFlipController['flipTo'] = (nextDirection) => {

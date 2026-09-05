@@ -32,6 +32,7 @@ const { default: DocumentBookLeaf } = await import('../renderer/components/docum
 const {
   cssPixelsForOnePhysicalPixel,
   resolveBookStagePerspective,
+  resolveBookStacks,
 } = await import('../renderer/modules/document/book/bookGeometry')
 const {
   resolveBookLeafTakeoverPolicy,
@@ -226,33 +227,72 @@ test('按下不换层，越过拖动阈值后才接管纸页，打断时只取�
       .every((slice) => !slice.style.transform.includes('translateY')),
     '切片不得独立纵向位移，否则页顶页底会裂开',
   )
-  assert.ok(Number(leaf.style.getPropertyValue('--book-leaf-gutter-opacity')) > 0.9, '起翻瞬间必须继承静态书脊阴影')
+  assert.ok(Array.from(gutters).every((el) => Number((el as HTMLElement).style.opacity) > 0.9), '起翻瞬间必须继承静态书脊阴影')
   const litFrame = buildCurlFrame(
     { slices: 2, pageWidth: 100, pageHeight: 140 },
     { theta: Math.PI * 0.72, skew: 0.5, velocity: 8 },
   )
   leafRef.current?.apply({ frame: litFrame, theta: Math.PI * 0.72, visible: true })
   const leafSlices = host.querySelectorAll<HTMLElement>('.document-book-leaf__slice')
-  const firstBoundary = Number(leafSlices[0].style.getPropertyValue('--book-leaf-front-shade-end'))
-  const secondBoundary = Number(leafSlices[1].style.getPropertyValue('--book-leaf-front-shade-start'))
-  assert.equal(firstBoundary, secondBoundary, '切片接缝两侧必须使用同一个光照值，不得再画成阶梯色带')
-  assert.equal(
-    Number(leafSlices[0].style.getPropertyValue('--book-leaf-front-shade-start')),
-    Number(litFrame.slices[0].shadeStart.toFixed(3)),
-    '活动叶片必须逐边应用连续光照模型，不能退回整页固定阴影',
-  )
+  assert.equal(host.querySelectorAll('.document-book-leaf__slice .document-book-leaf__slice').length, 0, '逐帧样式不得向后续切片和正文树级联')
+  const expectedShade = (start: number, end: number) => {
+    const el = document.createElement('div')
+    el.style.background = `linear-gradient(to right, rgb(36 28 20 / ${start.toFixed(3)}), rgb(36 28 20 / ${end.toFixed(3)}))`
+    return el.style.background
+  }
+  leafSlices.forEach((slice, i) => {
+    assert.equal((slice.querySelector('.document-book-leaf__shade--front') as HTMLElement).style.background,
+      expectedShade(litFrame.slices[i].shadeStart, litFrame.slices[i].shadeEnd))
+    assert.equal((slice.querySelector('.document-book-leaf__shade--back') as HTMLElement).style.background,
+      expectedShade(litFrame.slices[i].backShadeEnd, litFrame.slices[i].backShadeStart))
+  })
   const settledFrame = buildCurlFrame(
     { slices: 2, pageWidth: 100, pageHeight: 140 },
     { theta: Math.PI, skew: 0.8, velocity: 0 },
   )
   leafRef.current?.apply({ frame: settledFrame, theta: Math.PI, visible: true })
-  assert.match(leaf.style.transform, /translateZ\(0\.000px\)/, '满翻终点必须回到静态页平面')
-  assert.equal(leaf.style.getPropertyValue('--book-leaf-edge-opacity'), '0.000', '纸边在平放终点不得留下悬空边线')
-  assert.equal(leaf.style.getPropertyValue('--book-leaf-gutter-opacity'), '1.000', '满翻交接必须与静态页书脊阴影同强度')
+  leafSlices.forEach((slice) => assert.match(slice.style.transform, /translate3d\([\d.-]+px,0,0\.0000px\)/, '满翻终点必须回到静态页平面'))
+  host.querySelectorAll<HTMLElement>('.document-book-leaf__paper-edge').forEach((el) => assert.equal(Number(el.style.opacity), 0))
+  gutters.forEach((el) => assert.equal(Number((el as HTMLElement).style.opacity), 1))
   stageRef.current?.applyShadows(frame, 'forward', true)
   const revealedGutter = host.querySelector('.document-book-stage__shade-gutter--right') as HTMLElement
   assert.ok(Number(revealedGutter.style.opacity) > 0, '纸页抬起后，被揭开页的书脊接触阴影不得消失')
   assert.ok(Number(revealedGutter.style.opacity) <= 0.12, '动态接触阴影不得叠成固定灰带')
+  flushSync(() => root.unmount())
+})
+
+test('纸堆随阅读进度互补变化；厚书与薄书有别', () => {
+  const first = resolveBookStacks(1000, 0, 18)
+  const middle = resolveBookStacks(1000, 250, 18)
+  const last = resolveBookStacks(1000, 500, 18)
+  assert.equal(first.left, 0)
+  assert.equal(first.right, last.left)
+  assert.equal(last.right, 0)
+  assert.equal(middle.left, middle.right)
+  assert.equal(middle.left + middle.right, first.total)
+  assert.ok(resolveBookStacks(20, 0, 18).total < first.total)
+})
+
+test('纸背透印来自另一面；刚性封面不透印，clear 释放所有正文克隆', () => {
+  const host = document.getElementById('root')!
+  const root = createRoot(host)
+  const ref = createRef<import('../renderer/components/document/book/DocumentBookLeaf').BookLeafHandle>()
+  flushSync(() => root.render(createElement(DocumentBookLeaf, { ref, spec: { slices: 4, pageWidth: 200, pageHeight: 280 }, mirrored: false })))
+  const front = document.createElement('div')
+  front.innerHTML = '<p id="original-front">FRONT_INK</p>'
+  const back = document.createElement('div')
+  back.innerHTML = '<p id="original-back">BACK_INK</p>'
+  ref.current!.arm({ frontSource: front, backSource: back, rigid: false })
+  assert.equal(host.querySelector('.document-book-leaf__face--front [data-book-leaf-bleed]')?.textContent, 'BACK_INK')
+  assert.equal(host.querySelector('.document-book-leaf__face--back [data-book-leaf-bleed]')?.textContent, 'FRONT_INK')
+  assert.equal(host.querySelectorAll('#original-front, #original-back').length, 0)
+  assert.equal(host.querySelectorAll('[data-book-leaf-slot] > *').length, 16)
+  ref.current!.apply({ frame: buildCurlFrame({ slices: 4, pageWidth: 200, pageHeight: 280 }, { theta: 1.4, skew: 0 }), theta: 1.4, visible: true })
+  assert.ok(Number((host.querySelector('.document-book-leaf__transmission') as HTMLElement).style.opacity) > 0)
+  ref.current!.arm({ frontSource: front, backSource: back, rigid: true })
+  assert.equal(host.querySelectorAll('[data-book-leaf-bleed] > *').length, 0)
+  ref.current!.clear()
+  assert.equal(host.querySelectorAll('[data-book-leaf-slot] > *').length, 0)
   flushSync(() => root.unmount())
 })
 

@@ -30,20 +30,29 @@ test('空存储返回默认偏好', () => {
 
 test('存取往返', () => {
   const storage = createStorage()
-  saveBookReadingPreferences({ fontSize: 18, lineHeight: 1.6, margin: 'wide' }, storage)
-  assert.deepEqual(loadBookReadingPreferences(storage), { fontSize: 18, lineHeight: 1.6, margin: 'wide' })
+  saveBookReadingPreferences({ fontSize: 18, lineHeight: 1.6, margin: 'wide', background: '#e7e4dd' }, storage)
+  assert.deepEqual(loadBookReadingPreferences(storage), { fontSize: 18, lineHeight: 1.6, margin: 'wide', background: '#e7e4dd' })
   assert.ok(storage.dump()[BOOK_READING_PREFERENCES_KEY].includes('"fontSize":18'))
 })
 
 test('越界值夹取到合法区间', () => {
   assert.deepEqual(
     clampBookReadingPreferences({ fontSize: 99, lineHeight: 5, margin: 'narrow' }),
-    { fontSize: 22, lineHeight: 1.9, margin: 'narrow' },
+    { fontSize: 22, lineHeight: 1.9, margin: 'narrow', background: null },
   )
   assert.deepEqual(
     clampBookReadingPreferences({ fontSize: 1, lineHeight: 0.5 }),
-    { fontSize: 12, lineHeight: 1.5, margin: 'normal' },
+    { fontSize: 12, lineHeight: 1.5, margin: 'normal', background: null },
   )
+})
+
+test('旧排版偏好默认跟随昼夜；自选色可恢复并拒绝非法样式', () => {
+  const storage = createStorage()
+  storage.setItem(BOOK_READING_PREFERENCES_KEY, '{"fontSize":16,"margin":"wide"}')
+  assert.equal(loadBookReadingPreferences(storage).background, null)
+  assert.equal(loadBookReadingPreferences(storage).fontSize, 16)
+  assert.equal(clampBookReadingPreferences({ background: '#ABCdef' }).background, '#abcdef')
+  assert.equal(clampBookReadingPreferences({ background: 'url(https://example.com)' }).background, null)
 })
 
 test('损坏 JSON 与非法 margin 静默回默认', () => {

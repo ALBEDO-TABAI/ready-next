@@ -32,6 +32,9 @@ export interface CurlFrameInput {
 }
 
 export interface CurlSliceFrame {
+  /** 切片起点；沿纸面弧长积分，切片彼此独立但共享边。 */
+  x: number
+  z: number
   /** 切片中心相对书脊的累计旋转角（rad，0 = 平放） */
   angle: number
   /** 正面左/右边界遮光阴；相邻切片共享同一边界值。 */
@@ -40,6 +43,8 @@ export interface CurlSliceFrame {
   /** 背面左/右边界遮光阴。 */
   backShadeStart: number
   backShadeEnd: number
+  /** 从纸背透出的墨迹强度，平放时为零。 */
+  transmission: number
 }
 
 export interface CurlCastShadow {
@@ -54,6 +59,7 @@ export interface CurlCastShadow {
 }
 
 export interface CurlFrame {
+  progress: number
   slices: CurlSliceFrame[]
   /** 整张活动页的纵向剪切角（度）；书脊边固定，页缘随抓取方向偏移。 */
   shearDeg: number
@@ -92,27 +98,16 @@ export function curlProgress(theta: number): number {
   return clamp(theta / BOOK_CURL_MAX_ANGLE, 0, 1)
 }
 
-/**
- * 角轮廓：θ(s,Θ) = Θ·[a(p) + (1−a(p))·s^q(p)] + Θ·0.5·max(0, s−s_c)^1.6·(1−p)^0.7
- * s 为从书脊(0)到页缘(1)的归一化位置，p = Θ/π。
- * - 书脊点始终固定，但书脊切线从起翻开始按 p² 连续转向；不能把转向压到
- *   最后十几个百分点，否则整张曲面会在落定前突然横向摊宽。
- * - 指数 q(p) = 2.2 − 1.2p：早期凸形（页缘领先），后期趋线性。
- * - 卷曲峰 crest s_c = 0.9 − 0.75p 随进度向书脊移动，且以 (1−p)^0.7 衰减摊平。
- */
+/** 两端切线以零斜率贴平；自由边先起、书脊渐随，弧长始终不变。 */
 export function curlAngleAt(s: number, theta: number, tension = 0): number {
   const safeS = clamp(s, 0, 1)
   const progress = curlProgress(theta)
   const dynamic = clamp(tension, -0.65, 1)
-  const crest = 0.9 - 0.75 * progress - 0.12 * Math.max(0, dynamic)
-  // 根点由 CSS transform-origin 固定；这里控制的是根部切线。p² 让起翻仍由
-  // 自由边主导，同时把摊平分散到整个后半程。切线不受瞬时 velocity 调制，
-  // 否则正速度在终点归零时仍会制造一次几何跳变。
-  const spineShare = 0.012 + 0.988 * progress * progress
-  const exponent = clamp(2.2 - 1.2 * progress + 0.45 * dynamic, 0.75, 2.8)
-  const lift = theta * (spineShare + (1 - spineShare) * Math.pow(safeS, exponent))
-  const roll = theta * (0.5 + 0.3 * dynamic) * Math.pow(Math.max(0, safeS - crest), 1.6) * Math.pow(1 - progress, 0.7)
-  return clamp(lift + roll, 0, BOOK_CURL_ANGLE_CEILING)
+  const eased = progress * progress * (3 - 2 * progress)
+  const root = Math.PI * eased ** 3
+  const edge = Math.PI * (1 - (1 - eased) ** 3)
+  const exponent = 1.25 + 0.35 * dynamic - 0.45 * progress
+  return root + (edge - root) * Math.pow(safeS, exponent)
 }
 
 /** 拖拽点纵向偏移 → 页角偏斜 [-1,1]（1.6 增益让小幅拖动即可感知） */
@@ -128,11 +123,11 @@ export function frontShadeForAngle(angle: number): number {
   return 0.105 * Math.pow(sideOn, 1.25)
 }
 
-/** 背面遮光：保留极轻纸背底色，侧立最暗，落定时连续回到纸面亮度。 */
+/** 背面侧立略深，平放时与静态纸面完全一致。 */
 export function backShadeForAngle(angle: number): number {
   const sideOn = Math.max(0, Math.sin(clamp(angle, 0, Math.PI)))
-  if (sideOn < 1e-6) return 0.025
-  return 0.025 + 0.1 * Math.pow(sideOn, 1.15)
+  if (sideOn < 1e-6) return 0
+  return 0.12 * Math.pow(sideOn, 1.5)
 }
 
 /**
@@ -159,16 +154,26 @@ export function buildCurlFrame(spec: BookCurlSpec, input: CurlFrameInput): CurlF
     angles.push(curlAngleAt((i + 0.5) / slices, theta, tension))
   }
 
+  let x = 0
+  let z = 0
+  const width = spec.pageWidth / slices
+  const lift = Math.sin(theta) ** 2
   const frameSlices: CurlSliceFrame[] = angles.map((angle, i) => {
     const startAngle = boundaryAngles[i]
     const endAngle = boundaryAngles[i + 1]
-    return {
+    const slice = {
+      x,
+      z,
       angle,
       shadeStart: frontShadeForAngle(startAngle),
       shadeEnd: frontShadeForAngle(endAngle),
       backShadeStart: backShadeForAngle(startAngle),
       backShadeEnd: backShadeForAngle(endAngle),
+      transmission: lift * (0.035 + 0.055 * Math.sin(angle) ** 2),
     }
+    x += width * Math.cos(angle)
+    z += width * Math.sin(angle)
+    return slice
   })
 
   const sinTheta = Math.sin(theta)
@@ -176,24 +181,25 @@ export function buildCurlFrame(spec: BookCurlSpec, input: CurlFrameInput): CurlF
   const foldFoot = spec.pageWidth * (0.9 * (1 - progress) + 0.05)
   const revealedShadow: CurlCastShadow = {
     centerX: foldFoot,
-    width: spec.pageWidth * (0.45 * Math.pow(sinTheta, 0.7) + 0.1),
-    opacity: clamp(0.17 * Math.pow(sinTheta, 0.8), 0, 0.2),
+    width: spec.pageWidth * (0.4 * sinTheta + 0.1),
+    opacity: 0.2 * lift,
     gutterShade: clamp(0.1 * sinTheta, 0, 0.12),
   }
   // Θ 过半后页片悬于对侧静置页上方
-  const oppositeLift = clamp(Math.sin(theta - Math.PI / 2), 0, 1)
+  const oppositeLift = lift * progress
   const oppositeShadow: CurlCastShadow = {
     centerX: spec.pageWidth * 0.35,
     width: spec.pageWidth * 0.5,
-    opacity: clamp(0.1 * Math.pow(oppositeLift, 0.8), 0, 0.12),
+    opacity: 0.18 * oppositeLift,
     gutterShade: 0,
   }
 
   return {
+    progress,
     slices: frameSlices,
     // 连续剪切施加在整张活动页上：x=0 的书脊边恒定，所有切片共享边仍然相接。
     // 起翻/落定时剪切回零，保证与静态页交接无缝。镜像后翻只改变 x，不改变手势的 y 方向。
-    shearDeg: clamp(input.skew, -1, 1) * 5 * Math.pow(Math.max(0, sinTheta), 0.7),
+    shearDeg: clamp(input.skew, -1, 1) * 5 * lift,
     revealedShadow,
     oppositeShadow,
   }

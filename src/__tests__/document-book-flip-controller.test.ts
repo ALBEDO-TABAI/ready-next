@@ -156,6 +156,32 @@ test('快速甩动不过半：按速度 commit（flick）', () => {
   controller.dispose()
 })
 
+test('快速拖动后停住再松手，过期速度不能把不足半页错误翻过去', () => {
+  const { controller, advance, settles, runUntil } = createHarness()
+  controller.press('forward', 380, 0.9)
+  advance(12)
+  controller.move(320, 0.7)
+  advance(300)
+  controller.release()
+  runUntil(() => settles.length === 1)
+  assert.equal(settles[0].committed, false)
+  controller.dispose()
+})
+
+test('越过一半后快速往回甩，松手按最后方向收回', () => {
+  const { controller, advance, settles, runUntil } = createHarness()
+  controller.press('forward', 420, 0.8)
+  advance(150)
+  controller.move(0, 0.7)
+  advance(12)
+  controller.move(60, 0.7)
+  assert.ok(controller.getState().theta > Math.PI / 2)
+  controller.release()
+  runUntil(() => settles.length === 1)
+  assert.equal(settles[0].committed, false)
+  controller.dispose()
+})
+
 test('脚本翻页 flipTo：与拖拽同一 settle 路径，提交一次', () => {
   const { controller, frames, settles, runUntil } = createHarness()
   controller.flipTo('forward')
@@ -171,6 +197,36 @@ test('落定交接：先通知静态页换新，再隐藏活动叶片', () => {
   controller.flipTo('forward')
   runUntil(() => settles.length === 1)
   assert.deepEqual(events.slice(-2), ['settle', 'frame:idle'])
+  controller.dispose()
+})
+
+test('各种帧间隔下落页不越过纸面，交接前必须输出精确平放帧', () => {
+  for (const interval of [8, 16, 33, 50]) {
+    const { controller, frames, settles, step } = createHarness()
+    controller.flipTo('forward')
+    for (let i = 0; i < 200 && !settles.length; i += 1) step(interval)
+    assert.equal(settles.length, 1)
+    const moving = frames.filter((frame) => frame.active)
+    assert.ok(moving.every((frame) => frame.theta >= 0 && frame.theta <= Math.PI), '纸页不能穿过桌面后又抬起')
+    assert.equal(moving.at(-1)?.theta, Math.PI, '静态页接管前必须落平')
+    assert.equal(moving.at(-1)?.velocity, 0)
+    for (let i = 1; i < moving.length; i += 1) {
+      assert.ok(moving[i].theta >= moving[i - 1].theta, '自动翻页不可在末段倒退')
+    }
+    controller.dispose()
+  }
+})
+
+test('接管松手中的页片时不会继承上一次按下位置或旧速度', () => {
+  const { controller, step } = createHarness()
+  controller.flipTo('forward')
+  step(80)
+  const before = controller.getState().theta
+  controller.press('forward', 280, 0.8)
+  assert.equal(controller.getState().theta, before)
+  assert.equal(controller.getState().velocity, 0)
+  controller.move(280, 0.8)
+  assert.equal(controller.getState().theta, before)
   controller.dispose()
 })
 

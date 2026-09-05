@@ -42,6 +42,14 @@ export function cssPixelsForOnePhysicalPixel(devicePixelRatio: number): number {
   return 1 / ratio
 }
 
+/** 每张纸约 0.06px 的可见切口；左右厚度守恒，书页位置不随堆厚移动。 */
+export function resolveBookStacks(pageCount: number, spreadIndex: number, maxPx: number) {
+  const total = Math.min(maxPx, Math.max(1, Math.ceil(pageCount / 2) * 0.06))
+  const lastSpread = Math.max(1, Math.ceil((pageCount + 1) / 2) - 1)
+  const progress = Math.min(1, Math.max(0, spreadIndex / lastSpread))
+  return { left: total * progress, right: total * (1 - progress), total }
+}
+
 export function resolveBookGeometry(
   stageWidth: number,
   stageHeight: number,
@@ -73,6 +81,6 @@ export function resolveBookGeometry(
     paddingTop,
     paddingBottom,
     coverOverhang: 7,
-    stackMaxPx: 8,
+    stackMaxPx: Math.min(18, Math.max(8, Math.round(pageWidth * 0.04))),
   }
 }

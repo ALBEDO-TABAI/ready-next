@@ -94,14 +94,31 @@ test('buildCurlFrame：强拖到七成进度时切片角连续递增，不能形
   )
   const rootSlice = frame.slices[0]?.angle ?? Infinity
   const freeEdge = frame.slices.at(-1)?.angle ?? 0
-  assert.ok(rootSlice < Math.PI * 0.4, `七成翻页时根部切线不应领先整页：${rootSlice}`)
-  assert.ok(freeEdge > rootSlice * 2, `弯曲必须从固定书脊向自由边展开：root=${rootSlice} edge=${freeEdge}`)
+  // 后半程书脊必须逐渐跟随，不能一直压平后再于最后几帧突然摊宽。
+  assert.ok(rootSlice > Math.PI * 0.45 && rootSlice < Math.PI * 0.65, `七成进度书脊应已自然转向：${rootSlice}`)
+  assert.ok(freeEdge - rootSlice > 1, `曲面仍应保留柔和弯曲：root=${rootSlice} edge=${freeEdge}`)
   frame.slices.slice(1).forEach((slice, index) => {
     assert.ok(
       slice.angle >= frame.slices[index].angle,
       `切片 ${index}→${index + 1} 角度回退：${frame.slices[index].angle}→${slice.angle}`,
     )
   })
+})
+
+test('独立切片按弧长共享边；落页末段宽度和高度平滑收敛', () => {
+  const spec = { slices: 18, pageWidth: 480, pageHeight: 640 }
+  for (const p of [0, 0.1, 0.35, 0.5, 0.8, 0.98, 1]) {
+    const frame = buildCurlFrame(spec, { theta: Math.PI * p, skew: 0 })
+    for (let i = 1; i < frame.slices.length; i += 1) {
+      const previous = frame.slices[i - 1]
+      assert.ok(Math.abs(frame.slices[i].x - previous.x - spec.pageWidth / spec.slices * Math.cos(previous.angle)) < 1e-8)
+      assert.ok(Math.abs(frame.slices[i].z - previous.z - spec.pageWidth / spec.slices * Math.sin(previous.angle)) < 1e-8)
+    }
+    if (p >= 0.98) {
+      const edge = frame.slices.at(-1)!
+      assert.ok(Math.abs(edge.x + spec.pageWidth / spec.slices * Math.cos(edge.angle) + spec.pageWidth) < 0.02, '落页最后 2% 不得横向伸缩')
+    }
+  }
 })
 
 test('curlProgress：边界与单调', () => {
@@ -175,4 +192,17 @@ test('活动页书脊阴影：两个平放端点与静态页同强度，中段�
     ...samples.slice(1).map((value, index) => Math.abs(value - samples[index])),
   )
   assert.ok(largestStep < 0.003, `书脊阴影单步变化过大：${largestStep}`)
+})
+
+test('平放端点的全部动态光照归零，接管静态页没有明暗突变', () => {
+  for (const theta of [0, Math.PI]) {
+    const frame = buildCurlFrame({ slices: 18, pageWidth: 480, pageHeight: 640 }, { theta, skew: 1, velocity: 8 })
+    assert.ok(frame.revealedShadow.opacity < 1e-8)
+    assert.ok(frame.oppositeShadow.opacity < 1e-8)
+    assert.ok(Math.abs(frame.shearDeg) < 1e-8)
+    for (const slice of frame.slices) {
+      assert.ok(slice.shadeStart < 1e-8 && slice.shadeEnd < 1e-8)
+      assert.ok(slice.backShadeStart < 1e-8 && slice.backShadeEnd < 1e-8)
+    }
+  }
 })

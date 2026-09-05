@@ -9,6 +9,8 @@ export interface BookReadingPreferences {
   fontSize: number
   lineHeight: number
   margin: BookMarginPreset
+  /** null 跟随应用昼夜；否则为六位十六进制背景色。 */
+  background: string | null
 }
 
 export const BOOK_READING_PREFERENCES_KEY = 'ready-document-book-reading-preferences-v1'
@@ -19,6 +21,7 @@ export const DEFAULT_BOOK_READING_PREFERENCES: BookReadingPreferences = {
   fontSize: 15,
   lineHeight: 1.75,
   margin: 'normal',
+  background: null,
 }
 
 type StorageLike = {
@@ -40,6 +43,9 @@ export function clampBookReadingPreferences(value: Partial<BookReadingPreference
       ? clamp(lineHeight, BOOK_LINE_HEIGHT_RANGE.min, BOOK_LINE_HEIGHT_RANGE.max)
       : DEFAULT_BOOK_READING_PREFERENCES.lineHeight,
     margin: margin === 'narrow' || margin === 'wide' ? margin : 'normal',
+    background: typeof value.background === 'string' && /^#[0-9a-f]{6}$/i.test(value.background)
+      ? value.background.toLowerCase()
+      : null,
   }
 }
 

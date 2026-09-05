@@ -75,15 +75,6 @@ export interface DocumentBookReadingViewProps {
 }
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value))
-const requestIdle = (cb: () => void) => {
-  const w = window as unknown as {
-    requestIdleCallback?: (callback: () => void) => number
-    setTimeout: (callback: () => void, ms: number) => number
-  }
-  if (typeof w.requestIdleCallback === 'function') w.requestIdleCallback(cb)
-  else w.setTimeout(cb, 32)
-}
-
 const useBookReducedMotion = () => {
   const [reduced, setReduced] = useState(() => (
     typeof window.matchMedia === 'function'
@@ -118,7 +109,6 @@ export default function DocumentBookReadingView({
   /** 封面叶片真正翻起：封面下预渲染首个对开 */
   const [coverLifting, setCoverLifting] = useState(false)
   const [stageSize, setStageSize] = useState({ width: 0, height: 0 })
-  const [measureGen, setMeasureGen] = useState(0)
   const [measurerActive, setMeasurerActive] = useState(true)
   const [controlsVisible, setControlsVisible] = useState(true)
   const [typesetOpen, setTypesetOpen] = useState(false)
@@ -135,11 +125,11 @@ export default function DocumentBookReadingView({
   const hiddenSideRef = useRef<'left' | 'right' | null>(null)
   const hideCoverRef = useRef(false)
   const coverLiftingRef = useRef(false)
-  const pendingReflowRef = useRef(false)
   const restoredRef = useRef(false)
   const anchorBeforeReflowRef = useRef<{ anchorBlock: number } | null>(null)
   const controlsIdleRef = useRef(0)
   const controlsPinnedRef = useRef(false)
+  const idleArmCancelRef = useRef<(() => void) | null>(null)
 
   const registerPageElement = useCallback((pageIndex: number, element: HTMLElement | null) => {
     if (element) pageElsRef.current.set(pageIndex, element)
@@ -176,11 +166,11 @@ export default function DocumentBookReadingView({
   // 控制器回调读最新运行态，避免闭包过期
   const runtimeRef = useRef({
     model, spreadIndex: safeSpreadIndex, coverClosed, geometry, sliceCount, content,
-    key: positionKey, reducedMotion, blocks,
+    key: positionKey, reducedMotion, blocks, isSceneVisible,
   })
   runtimeRef.current = {
     model, spreadIndex: safeSpreadIndex, coverClosed, geometry, sliceCount, content,
-    key: positionKey, reducedMotion, blocks,
+    key: positionKey, reducedMotion, blocks, isSceneVisible,
   }
 
   const anchorLineForPage = useCallback((pageIndex: number): number | null => {
@@ -211,7 +201,7 @@ export default function DocumentBookReadingView({
 
   const armFor = useCallback((direction: BookFlipDirection): boolean => {
     const rt = runtimeRef.current
-    if (!rt.model || rt.reducedMotion) return false
+    if (!rt.model || rt.reducedMotion || !rt.isSceneVisible) return false
     const leaf = leafRef.current
     if (!leaf) return false
     let identityKey = ''
@@ -257,9 +247,18 @@ export default function DocumentBookReadingView({
   }, [])
 
   const scheduleIdleArm = useCallback(() => {
-    requestIdle(() => {
-      armFor('forward')
-    })
+    idleArmCancelRef.current?.()
+    const run = () => {
+      idleArmCancelRef.current = null
+      if (!controllerRef.current?.isAnimating()) armFor('forward')
+    }
+    if (typeof window.requestIdleCallback === 'function') {
+      const id = window.requestIdleCallback(run)
+      idleArmCancelRef.current = () => window.cancelIdleCallback(id)
+    } else {
+      const id = window.setTimeout(run, 32)
+      idleArmCancelRef.current = () => window.clearTimeout(id)
+    }
   }, [armFor])
 
   const handleControllerFrame = useCallback((state: BookFlipFrameState) => {
@@ -324,10 +323,6 @@ export default function DocumentBookReadingView({
           ))
         }
       }
-      if (pendingReflowRef.current) {
-        pendingReflowRef.current = false
-        setMeasureGen((gen) => gen + 1)
-      }
     })
     scheduleIdleArm()
   }, [scheduleIdleArm])
@@ -376,7 +371,7 @@ export default function DocumentBookReadingView({
   const handlers = useMemo<StagePointerHandlers>(() => ({
     // 悬停页角时只在不可见状态预武装对应方向；不抬页、不露切片，
     // 但首次后翻也不再把 cloneNode/排版成本压到 pointerdown 上。
-    onPrewarm: (direction) => { armFor(direction) },
+    onPrewarm: (direction) => { if (!controllerRef.current?.isAnimating()) armFor(direction) },
     onPress: (direction, nx, ny) => {
       if (runtimeRef.current.reducedMotion) return true
       const state = controllerRef.current?.getState()
@@ -415,6 +410,12 @@ export default function DocumentBookReadingView({
   // 离屏节点参与每一帧的样式与布局计算。
   useLayoutEffect(() => {
     if (!isSceneVisible || stageSize.width === 0) return
+    // 排版/窗口尺寸变化先取消半页；旧曲面不能套用新纸宽或新正文。
+    if (controllerRef.current?.isAnimating()) controllerRef.current.cancel()
+    idleArmCancelRef.current?.()
+    idleArmCancelRef.current = null
+    armedLeafIdentityRef.current = null
+    leafRef.current?.clear()
     setMeasurerActive(true)
   }, [
     blocks,
@@ -423,7 +424,6 @@ export default function DocumentBookReadingView({
     prefs.fontSize,
     prefs.lineHeight,
     isSceneVisible,
-    measureGen,
     positionKey,
     stageSize.width,
   ])
@@ -431,12 +431,6 @@ export default function DocumentBookReadingView({
   // --- 测量与分页 ---
   useLayoutEffect(() => {
     if (!measurerActive || !isSceneVisible || stageSize.width === 0) return undefined
-    const controller = controllerRef.current
-    if (controller?.isAnimating()) {
-      pendingReflowRef.current = true
-      setMeasurerActive(false)
-      return undefined
-    }
     // 重排前捕获当前锚点（首测除外）
     const rt = runtimeRef.current
     if (restoredRef.current && rt.model) {
@@ -483,7 +477,6 @@ export default function DocumentBookReadingView({
     prefs.lineHeight,
     isSceneVisible,
     measurerActive,
-    measureGen,
     positionKey,
     scheduleIdleArm,
     stageSize.width,
@@ -529,8 +522,11 @@ export default function DocumentBookReadingView({
   // --- 场景隐藏：中断翻页 ---
   useEffect(() => {
     if (!isSceneVisible) {
+      idleArmCancelRef.current?.()
+      idleArmCancelRef.current = null
       controllerRef.current?.cancel()
-      pendingReflowRef.current = false
+      leafRef.current?.clear()
+      armedLeafIdentityRef.current = null
     }
   }, [isSceneVisible])
 
@@ -539,6 +535,7 @@ export default function DocumentBookReadingView({
     savePosition()
   }, [coverClosed, savePosition, safeSpreadIndex])
   useEffect(() => () => {
+    idleArmCancelRef.current?.()
     savePosition()
     controllerRef.current?.dispose()
     controllerRef.current = null
@@ -548,7 +545,7 @@ export default function DocumentBookReadingView({
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null
-      if (target?.closest?.('input, textarea, [contenteditable="true"]')) return
+      if (event.key !== 'Escape' && target?.closest?.('input, textarea, [contenteditable="true"]')) return
       const rt = runtimeRef.current
       const action = resolveBookKeyboardAction(event.key, event.shiftKey)
       if (!action) return
@@ -641,6 +638,7 @@ export default function DocumentBookReadingView({
         ['--book-font-size' as string]: `${prefs.fontSize}px`,
         ['--book-line-height' as string]: String(prefs.lineHeight),
         ['--book-content-height' as string]: `${geometry.contentHeight}px`,
+        ['--book-stage-bg' as string]: prefs.background ?? undefined,
       }}
       onPointerMove={pokeControls}
     >

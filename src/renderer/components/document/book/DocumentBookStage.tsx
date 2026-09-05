@@ -20,6 +20,7 @@ import type { PreviewBlock, PreviewEmbed } from '../note-preview-parser'
 import type { DocumentWidgetData } from '../../../../shared/document-widget-parse'
 import {
   resolveBookStagePerspective,
+  resolveBookStacks,
   type BookPageGeometry,
 } from '../../../modules/document/book/bookGeometry'
 import {
@@ -132,11 +133,13 @@ const DocumentBookStage = forwardRef<BookStageHandle, DocumentBookStageProps>(fu
   const gutterLeftRef = useRef<HTMLDivElement>(null)
   const gutterRightRef = useRef<HTMLDivElement>(null)
   const dragRef = useRef<StageDragState | null>(null)
+  const stackLeftRef = useRef<HTMLDivElement>(null)
+  const stackRightRef = useRef<HTMLDivElement>(null)
 
-  const { pageWidth: W, pageHeight: H, coverOverhang } = geometry
-  const progress = spreadCount <= 1 ? 0 : spread.index / (spreadCount - 1)
-  const stackRight = coverClosed ? coverOverhang : 2 + (coverOverhang - 2) * (1 - progress)
-  const stackLeft = coverClosed ? 2 + (coverOverhang - 2) * progress : 0
+  const { pageWidth: W, pageHeight: H, stackMaxPx } = geometry
+  const stacks = resolveBookStacks(model.pageCount, spread.index, stackMaxPx)
+  const stackStateRef = useRef({ pageCount: model.pageCount, spreadIndex: spread.index, stackMaxPx, coverClosed })
+  stackStateRef.current = { pageCount: model.pageCount, spreadIndex: spread.index, stackMaxPx, coverClosed }
 
   // 离屏克隆源：Leaf 的正/背面内容取自静态页 inner 元素。
   // 合起封面时保活扉页；展开时保活「下一对开左页 / 前一对开右页」。
@@ -270,6 +273,11 @@ const DocumentBookStage = forwardRef<BookStageHandle, DocumentBookStageProps>(fu
 
   const shadowHandle = useMemo<BookStageHandle>(() => ({
     applyShadows: (frame, direction, visible) => {
+      const state = stackStateRef.current
+      const movingIndex = state.spreadIndex + (visible && !state.coverClosed ? frame.progress * (direction === 'forward' ? 1 : -1) : 0)
+      const thickness = resolveBookStacks(state.pageCount, movingIndex, state.stackMaxPx)
+      if (stackLeftRef.current) stackLeftRef.current.style.transform = `scaleX(${thickness.left / state.stackMaxPx})`
+      if (stackRightRef.current) stackRightRef.current.style.transform = `scaleX(${thickness.right / state.stackMaxPx})`
       const revealedSide = direction === 'forward' ? 'right' : 'left'
       const revealedBand = revealedSide === 'right' ? bandRightRef.current : bandLeftRef.current
       const oppositeBand = revealedSide === 'right' ? bandLeftRef.current : bandRightRef.current
@@ -282,9 +290,8 @@ const DocumentBookStage = forwardRef<BookStageHandle, DocumentBookStageProps>(fu
       for (const [el, centerX, width, opacity] of bands) {
         if (!el) continue
         el.style.opacity = opacity.toFixed(3)
-        el.style.width = `${Math.max(8, width)}px`
-        if (el === bandLeftRef.current) el.style.right = `${centerX - width / 2}px`
-        else el.style.left = `${centerX - width / 2}px`
+        const offset = centerX - width / 2
+        el.style.transform = `translateX(${el === bandLeftRef.current ? -offset : offset}px) scaleX(${Math.max(8, width) / 100})`
       }
       if (revealedGutter) {
         revealedGutter.style.opacity = (visible ? frame.revealedShadow.gutterShade : 0).toFixed(3)
@@ -357,18 +364,22 @@ const DocumentBookStage = forwardRef<BookStageHandle, DocumentBookStageProps>(fu
           ['--book-pad-outer' as string]: `${geometry.paddingOuter}px`,
           ['--book-pad-top' as string]: `${geometry.paddingTop}px`,
           ['--book-pad-bottom' as string]: `${geometry.paddingBottom}px`,
+          ['--book-stack-left' as string]: `${stacks.left}px`,
+          ['--book-stack-right' as string]: `${stacks.right}px`,
         }}
       >
         <div className="document-book-stage__book-shadow" aria-hidden />
         <div className="document-book-stage__cover-frame" aria-hidden />
         <div
           className="document-book-stage__stack document-book-stage__stack--left"
-          style={{ width: stackLeft }}
+          ref={stackLeftRef}
+          style={{ width: stackMaxPx, transform: `scaleX(${stacks.left / stackMaxPx})` }}
           aria-hidden
         />
         <div
           className="document-book-stage__stack document-book-stage__stack--right"
-          style={{ width: stackRight }}
+          ref={stackRightRef}
+          style={{ width: stackMaxPx, transform: `scaleX(${stacks.right / stackMaxPx})` }}
           aria-hidden
         />
 
