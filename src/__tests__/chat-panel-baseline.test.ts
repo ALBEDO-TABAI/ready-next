@@ -1241,8 +1241,8 @@ test('composer displays the Main consequence and submits that displayed head ref
     sessions: { [sessionId]: slice }, activeSessionId: sessionId, sessionId, sessionOrder: [sessionId],
     sendMessage: async (_text, options) => {
       submitted = options?.actionAdmissionRef
-      return { success: false, disposition: 'rejected_before_persistence', shouldClearInput: false,
-        preserveInput: true, errorKind: 'conversation_reset_required' }
+      return { success: false, disposition: 'rejected_before_persistence',
+        errorKind: 'conversation_reset_required' }
     },
     refreshCodexActionSurface: async () => { refreshes += 1 },
   })

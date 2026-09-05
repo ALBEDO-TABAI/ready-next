@@ -18,6 +18,8 @@ import {
   parseCodexActionSurfaceInvalidation,
   parseCreateSessionRequest,
   parseCreateSessionResult,
+  parseBeginNewContextRequest,
+  parseBeginNewContextResult,
   parseLifecycleRequest,
   parseLifecycleResult,
   parseProductLifecycleRequest,
@@ -25,6 +27,7 @@ import {
   parseSendScopedRequest,
   parseSendScopedResponse,
   type CreateSessionRequest,
+  type BeginNewContextRequest,
   type SendScopedRequest,
   type LifecycleRequest,
   type ProductLifecycleRequest,
@@ -139,6 +142,9 @@ const parseReadyMemoryResponse = (result: {
 const agentAPI = {
   createSession: async (request: CreateSessionRequest) => parseCreateSessionResult(
     await invokeAgentRuntime('agent:createSession', parseCreateSessionRequest(request)),
+  ),
+  beginNewContext: async (request: BeginNewContextRequest) => parseBeginNewContextResult(
+    await invokeAgentRuntime('agent:beginNewContext', parseBeginNewContextRequest(request)),
   ),
   resetSession: async (request: ProductLifecycleRequest) => parseLifecycleResult(
     await invokeAgentRuntime('agent:resetSession', parseProductLifecycleRequest(request)),

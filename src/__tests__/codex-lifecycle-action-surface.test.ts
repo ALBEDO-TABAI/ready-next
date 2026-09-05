@@ -15,6 +15,7 @@ function projection(input: {
   requestedAction?: 'stop' | 'reset' | 'close' | null
   legacy?: boolean
   legacyPrepared?: boolean
+  manualCompactionRuntimeBlocker?: 'runtime_unverified' | 'runtime_unsupported'
 }) {
   const head = projectCodexHeadActionProjection({
     scopeId: 'scope-1', scopeEpoch: 2, aliasId: 'scope-1', aliasGeneration: 3,
@@ -39,6 +40,7 @@ function projection(input: {
   return projectCodexLifecycleOperationV2({
     base, head, scopeEpoch: 2, threadBindingId: 'binding-3', headRevision: 4,
     materializationIntentRef: null,
+    manualCompactionRuntimeBlocker: input.manualCompactionRuntimeBlocker,
   })
 }
 
@@ -86,4 +88,10 @@ test('interrupt uncertainty exposes only the exact requested action and legacy b
   assert.equal(legacyPrepared.actions.reset.requestRef?.ownerKind, 'head_owner')
   assert.equal(legacyPrepared.actions.close.requestRef?.ownerKind, 'head_owner')
   assert.deepEqual(legacyPrepared.actions.manual_compact.blockers, ['legacy_prepared_contract'])
+
+  const unverifiedCompaction = projection({
+    snapshot: 'idle_native_thread', manualCompactionRuntimeBlocker: 'runtime_unverified',
+  })
+  assert.equal(unverifiedCompaction.actions.manual_compact.availability, 'blocked')
+  assert.deepEqual(unverifiedCompaction.actions.manual_compact.blockers, ['runtime_unverified'])
 })

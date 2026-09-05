@@ -48,7 +48,10 @@ interface AgentSelectionMenuState {
 
 interface ChatPanelBodyProps extends Omit<TaskToolSnapshotProps, 'children' | 'currentActivityNarration'> {
   messages: AgentMessage[]
+  contextBoundaries?: import('../../../../shared/ipc-contracts/agent-runtime').CodexConversationContextBoundary[]
   lifecycleInputBlocked: boolean
+  sendBlocker?: import('../../../modules/agent/composer-state').ComposerSendBlocker | null
+  destructiveOperationPending?: boolean
   stopAvailable?: boolean
   stopPending: boolean
   stopError: string | null
@@ -99,7 +102,13 @@ interface ChatPanelBodyProps extends Omit<TaskToolSnapshotProps, 'children' | 'c
   setActiveAttachmentPreview: (preview: AttachmentPreviewState | null) => void
   setAttachmentPreviewLoading: (loading: boolean) => void
   admissionReady?: boolean
-  composerNotice?: { message: string; errorKind: string } | null
+  composerNotice?: {
+    message: string
+    errorKind: string
+    recoveryActionRef?: import('../../../../shared/ipc-contracts/agent-runtime').CodexBeginNewContextActionRef
+  } | null
+  beginNewContextAvailable?: boolean
+  onBeginNewContext?: () => void
   sendConsequence?: CodexActionGate['consequence']
   headUnavailable?: boolean
   onRefreshActionSurface?: () => void
@@ -111,6 +120,7 @@ const CHAT_COMPOSER_FALLBACK_BOTTOM_INSET = 156
 export function ChatPanelBody(props: ChatPanelBodyProps): React.ReactElement {
   const {
     messages,
+    contextBoundaries = [],
     currentTaskRun,
     backgroundTaskRuns,
     liveTaskRuns,
@@ -119,6 +129,8 @@ export function ChatPanelBody(props: ChatPanelBodyProps): React.ReactElement {
     taskDisclosureState,
     isStreaming,
     lifecycleInputBlocked,
+    sendBlocker = null,
+    destructiveOperationPending = false,
     stopAvailable = false,
     stopPending,
     stopError,
@@ -168,6 +180,8 @@ export function ChatPanelBody(props: ChatPanelBodyProps): React.ReactElement {
     onReferenceSelect,
     admissionReady = true,
     composerNotice = null,
+    beginNewContextAvailable = false,
+    onBeginNewContext,
     sendConsequence = null,
     headUnavailable = false,
     onRefreshActionSurface,
@@ -252,6 +266,7 @@ export function ChatPanelBody(props: ChatPanelBodyProps): React.ReactElement {
         >
           <ChatMessages
             messages={messages}
+            contextBoundaries={contextBoundaries}
             messageTaskSnapshots={messageTaskSnapshots}
             messageGeneratedImageArtifacts={messageGeneratedImageArtifacts}
             messageToolTraceSnapshots={messageToolTraceSnapshots}
@@ -364,6 +379,12 @@ export function ChatPanelBody(props: ChatPanelBodyProps): React.ReactElement {
               <div data-ready-action-state="head_unavailable" role="status" style={{ pointerEvents: 'auto' }}>
                 暂时无法读取会话状态，草稿已保留。
                 <button type="button" onClick={onRefreshActionSurface}>重新读取</button>
+              </div>
+            )}
+            {beginNewContextAvailable && (
+              <div data-ready-begin-new-context="true" role="status" style={{ pointerEvents: 'auto' }}>
+                已有消息会保留；下一轮从这里重新开始，不会自动带入此前对话。
+                <button type="button" onClick={onBeginNewContext}>保留记录，开始新上下文</button>
               </div>
             )}
             {sendConsequence && (
@@ -564,6 +585,8 @@ export function ChatPanelBody(props: ChatPanelBodyProps): React.ReactElement {
               inputValue={inputValue}
               stopAvailable={stopAvailable}
               lifecycleInputBlocked={lifecycleInputBlocked}
+              sendBlocker={sendBlocker}
+              destructiveOperationPending={destructiveOperationPending}
               stopPending={stopPending}
               stopError={stopError}
               attachmentsCount={attachments.length}

@@ -1,3 +1,5 @@
+import { CODEX_CONTEXT_BOUNDARY_SCHEMA_SQL, preservedCodexContextRowSql } from './codex-context-boundary'
+
 export const CODEX_TOOL_RESPONSE_DELIVERY_ATTEMPT_SCHEMA_SQL = `
   CREATE TABLE IF NOT EXISTS codex_tool_response_delivery_attempts (
     attempt_id TEXT PRIMARY KEY,
@@ -1477,7 +1479,7 @@ const CODEX_NATIVE_TERMINAL_ROW = `
 // The repository refresh and its SQL guard consume this same absence proof.
 // Prior visibility epochs are audit history, not the current fresh head's content.
 export const CODEX_PRISTINE_FRESH_START_PREDICATE_SQL = `
-  head.thread_materialization_kind = 'fresh_start'
+  head.thread_materialization_kind IN ('legacy', 'fresh_start')
   AND head.materialization_state = 'confirmed'
   AND ${[
     'codex_thread_id', 'codex_session_id', 'codex_parent_thread_id', 'codex_forked_from_id',
@@ -1509,26 +1511,31 @@ export const CODEX_PRISTINE_FRESH_START_PREDICATE_SQL = `
        AND NOT EXISTS (SELECT 1 FROM chat_messages message
          WHERE message.conversation_id = scope.id
            AND message.message_visibility_epoch = scope.message_visibility_epoch
-           AND message.role IN ('user', 'assistant', 'agent_card'))
+           AND message.role IN ('user', 'assistant', 'agent_card')
+           AND NOT (${preservedCodexContextRowSql('messages', 'message.id')}))
        AND NOT EXISTS (SELECT 1 FROM run_meta run
-         WHERE run.scope_id = scope.id AND run.message_visibility_epoch = scope.message_visibility_epoch)
+         WHERE run.scope_id = scope.id AND run.message_visibility_epoch = scope.message_visibility_epoch
+           AND (run.status IN ('running', 'waiting_input', 'paused_budget') OR NOT (${preservedCodexContextRowSql('runs', 'run.run_id')})))
        AND NOT EXISTS (SELECT 1 FROM task_projections product
          WHERE product.scope_id = scope.id
-           AND product.message_visibility_epoch = scope.message_visibility_epoch)
+           AND product.message_visibility_epoch = scope.message_visibility_epoch
+           AND (product.status IN ('pending', 'running', 'paused') OR NOT (${preservedCodexContextRowSql('tasks', 'product.task_id')})))
        AND NOT EXISTS (SELECT 1 FROM codex_turn_bindings turn
          JOIN codex_thread_bindings owner ON owner.thread_binding_id = turn.thread_binding_id
          WHERE owner.ready_scope_id = scope.id
-           AND turn.message_visibility_epoch = scope.message_visibility_epoch)
+           AND turn.message_visibility_epoch = scope.message_visibility_epoch
+           AND NOT (${preservedCodexContextRowSql('turns', 'turn.ready_run_id')}))
        AND NOT EXISTS (SELECT 1 FROM codex_product_effect_bindings effect
          WHERE effect.ready_scope_id = scope.id
-           AND effect.message_visibility_epoch = scope.message_visibility_epoch)
+           AND effect.message_visibility_epoch = scope.message_visibility_epoch
+           AND NOT (${preservedCodexContextRowSql('effects', 'effect.effect_action_id')}))
        AND NOT EXISTS (SELECT 1 FROM pending_confirmations interaction
          WHERE interaction.scope_id = scope.id
-           AND (interaction.status = 'pending' OR NOT EXISTS (
+           AND (interaction.status = 'pending' OR (NOT (${preservedCodexContextRowSql('interactions', 'interaction.id')}) AND NOT EXISTS (
              SELECT 1 FROM codex_turn_bindings turn
              JOIN codex_thread_bindings owner ON owner.thread_binding_id = turn.thread_binding_id
               WHERE turn.ready_run_id = interaction.run_id AND owner.ready_scope_id = scope.id
-                AND turn.message_visibility_epoch < scope.message_visibility_epoch)))
+                AND turn.message_visibility_epoch < scope.message_visibility_epoch))))
   )
   AND NOT EXISTS (SELECT 1 FROM codex_turn_bindings turn
     WHERE turn.thread_binding_id = head.thread_binding_id)
@@ -1540,7 +1547,7 @@ export const CODEX_PRISTINE_FRESH_START_PREDICATE_SQL = `
     WHERE coverage.thread_binding_id = head.thread_binding_id)
 `
 
-export const CODEX_NATIVE_CONTINUITY_GUARDS_SQL = `
+export const CODEX_PRISTINE_CONTRACT_REFRESH_GUARDS_SQL = `
   CREATE TRIGGER IF NOT EXISTS codex_pristine_contract_refresh_insert
   BEFORE INSERT ON codex_thread_bindings
   WHEN NEW.retired_reason = 'pristine_contract_refresh'
@@ -1554,6 +1561,11 @@ export const CODEX_NATIVE_CONTINUITY_GUARDS_SQL = `
         AND (${CODEX_PRISTINE_FRESH_START_PREDICATE_SQL}))
       OR NEW.action_projection_sequence != OLD.action_projection_sequence + 1)
   BEGIN SELECT RAISE(ABORT, 'codex_pristine_contract_refresh_not_pristine'); END;
+
+`
+
+export const CODEX_NATIVE_CONTINUITY_GUARDS_SQL = `
+  ${CODEX_PRISTINE_CONTRACT_REFRESH_GUARDS_SQL}
 
   ${['INSERT', 'UPDATE'].map((operation) => `
   CREATE TRIGGER IF NOT EXISTS codex_thread_materialization_row_${operation.toLowerCase()}
@@ -1897,6 +1909,7 @@ export function applyCodexPristineContractRefreshMigration(db: {
 
 export const CODEX_BINDING_SCHEMA_SQL = `
   ${CODEX_THREAD_BINDING_TABLE_SQL}
+  ${CODEX_CONTEXT_BOUNDARY_SCHEMA_SQL}
 
   CREATE UNIQUE INDEX IF NOT EXISTS idx_codex_thread_binding_active_alias
     ON codex_thread_bindings(ready_conversation_alias)
@@ -2966,4 +2979,10 @@ export function applyCodexTurnLifecycleActionMigration(db: {
         AND NEW.lifecycle_action_evidence_digest IS NOT OLD.lifecycle_action_evidence_digest)
     BEGIN SELECT RAISE(ABORT, 'codex_turn_lifecycle_action_immutable'); END;
   `)
+}
+
+export function applyCodexConversationContextBoundaryMigration(db: {
+  exec(sql: string): void
+}): void {
+  db.exec(CODEX_CONTEXT_BOUNDARY_SCHEMA_SQL)
 }

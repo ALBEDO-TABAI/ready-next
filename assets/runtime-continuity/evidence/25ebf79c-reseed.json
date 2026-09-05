@@ -1,0 +1,20 @@
+{
+  "contract": "ready_runtime_transition_proof_v1",
+  "sourceManifestDigest": "25ebf79c723cc9c797e72eff6be55c0691043fe86036c5e338bdda3ac495c31c",
+  "targetManifestDigest": "cda6bd5ff08247c0fd502accba2c0c0d342d5d59945d06dfb53a666bb64b636d",
+  "operation": "reseed_uncommitted_tail",
+  "result": "compatible",
+  "probe": {
+    "targetBinarySha256": "f4a74117b8142cda581c95ff753abf4508b5636d89682c1ed77e4a9249af8963",
+    "targetRuntimeVersion": "codex-cli 0.149.0",
+    "isolatedCopy": true,
+    "historicalThreadUnarchivedOnlyInCopy": true,
+    "tailProviderCardinality": 1,
+    "currentInputProviderCardinality": 1,
+    "restartPassed": true,
+    "tailAfterRestartCardinality": 1,
+    "firstInputAfterRestartCardinality": 1,
+    "secondInputCardinality": 1,
+    "readyRepositoryBehaviorGate": "first-turn divergence creates a fresh root with one immutable text tail"
+  }
+}

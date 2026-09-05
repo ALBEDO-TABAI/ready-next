@@ -55,6 +55,11 @@ export function makeEmptySessionSlice(conversationId: string | null = null): Ses
     aliasGeneration: null,
     messageVisibilityEpoch: 0,
     inputValue: '',
+    attachments: [],
+    filePool: [],
+    draftRevision: 0,
+    beginNewContextActionRef: null,
+    contextBoundaries: [],
   }
 }
 
@@ -182,6 +187,8 @@ export function mirrorFromSessionSlice(
   AgentState,
   | 'messages'
   | 'inputValue'
+  | 'attachments'
+  | 'filePool'
   | 'isStreaming'
   | 'foregroundBusy'
   | 'composerLocked'
@@ -208,6 +215,8 @@ export function mirrorFromSessionSlice(
   return {
     messages: slice.messages,
     inputValue: slice.inputValue,
+    attachments: slice.attachments,
+    filePool: slice.filePool,
     isStreaming: slice.isStreaming || aliases.isStreaming,
     foregroundBusy: slice.foregroundBusy || aliases.foregroundBusy,
     composerLocked: slice.composerLocked || aliases.composerLocked,

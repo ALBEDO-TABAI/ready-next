@@ -13,6 +13,7 @@ import { CodexTurnInputBuilder } from './codex-turn-input-builder'
 import { digestCanonicalJson } from './codex-model-gateway-contract'
 import type { CodexNativeModelSettings } from './codex-model-gateway-contract'
 import type { CodexAutomaticCompactionEvidence } from './codex-automatic-compaction-evidence'
+import { sameCodexThreadDirectory } from './codex-thread-directory-identity'
 
 const DEFAULT_POLL_INTERVAL_MS = 250
 
@@ -303,7 +304,7 @@ export class CodexProductBootRecovery {
             dynamicTools: product.prepared.readyToolSurface.dynamicTools,
             developerInstructions: this.resolveDeveloperInstructions(product),
           }))
-          if (started.thread.cwd !== product.isolatedThreadCwd) {
+          if (!sameCodexThreadDirectory(started.thread.cwd, product.isolatedThreadCwd)) {
             throw new Error('codex_recovered_thread_cwd_mismatch')
           }
           product = this.deps.repository.readProductTurnRuntime(readyRunId)

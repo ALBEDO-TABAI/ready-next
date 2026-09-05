@@ -577,8 +577,6 @@ test('a paused OAuth reconnect rejects send before persistence and admission reo
           success: true as const,
           disposition: 'terminal_success' as const,
           ownerRunId: requestId,
-          shouldClearInput: true as const,
-          preserveInput: false as const,
           retryableByUser: false as const,
           persistence,
           responseText: 'ok',

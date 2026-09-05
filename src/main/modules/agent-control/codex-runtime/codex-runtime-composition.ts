@@ -1,6 +1,8 @@
 import { createHash } from 'node:crypto'
 
 import type {
+  BeginNewContextRequest,
+  BeginNewContextResult,
   CodexActionSurfaceEnvelope,
   IngressAdmittedEvent,
   PersistedIngress,
@@ -182,7 +184,10 @@ export interface CodexRuntimeHostPort {
 }
 
 export interface CodexStartIdentityPort {
-  resolveMethods(scopeId: string): StartIdentityReservationMethods
+  resolveMethods(
+    scopeId: string,
+    workbenchMode: 'browser' | 'document' | 'rss' | 'calendar',
+  ): StartIdentityReservationMethods
   reserve(input: {
     scopeId: string
     methods: StartIdentityReservationMethods
@@ -241,15 +246,19 @@ export interface CodexAliasBindingPort {
   readLifecycleSnapshot(input: {
     aliasId: string
     aliasGeneration: number
+    workbenchMode?: 'browser' | 'document' | 'rss' | 'calendar'
   }): LifecycleOperationProjectionV2
   readHeadActionProjection(input: {
     aliasId: string
     aliasGeneration: number
+    workbenchMode?: 'browser' | 'document' | 'rss' | 'calendar'
   }): CodexHeadActionProjection
   readActionSurface(input: {
     aliasId: string
     aliasGeneration: number
+    workbenchMode?: 'browser' | 'document' | 'rss' | 'calendar'
   }): CodexActionSurfaceEnvelope
+  beginNewContext(request: BeginNewContextRequest): BeginNewContextResult
 }
 
 export type ReadyClosedCodexProductRun = {
@@ -440,6 +449,7 @@ export function createE2UnavailableCodexRuntimeComposition(): CodexRuntimeCompos
       readLifecycleSnapshot() { throw new Error('codex_lifecycle_repository_unavailable') },
       readHeadActionProjection() { throw new Error('codex_head_action_repository_unavailable') },
       readActionSurface() { throw new Error('codex_action_surface_repository_unavailable') },
+      beginNewContext() { throw new Error('codex_action_surface_repository_unavailable') },
     },
     preparedRunContextPort: {
       async resolve() {

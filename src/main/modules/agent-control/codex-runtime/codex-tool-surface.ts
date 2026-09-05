@@ -99,8 +99,29 @@ export type ReadyToolTurnSnapshot = Readonly<{
   readyTurnToolAuthorization: ReadyTurnToolAuthorization
 }>
 
+export type ReadyToolSurfaceCompatibility = Readonly<{
+  kind:
+    | 'compatible'
+    | 'native_tool_surface_extension_required'
+    | 'native_tool_definition_changed'
+    | 'ready_tool_execution_contract_changed'
+  addedToCurrentSubset: readonly string[]
+  modelContractChangedToolNames: readonly string[]
+  readyContractChangedToolNames: readonly string[]
+  frozenOnlyToolNames: readonly string[]
+  evidenceDigest: string
+}>
+
+export type ReadyToolSurfaceEntryCompatibility =
+  | 'compatible'
+  | 'native_tool_definition_changed'
+  | 'ready_tool_execution_contract_changed'
+
 export class CodexToolSurfaceError extends Error {
-  constructor(readonly code: string) {
+  constructor(
+    readonly code: string,
+    readonly compatibility: ReadyToolSurfaceCompatibility | null = null,
+  ) {
     super(code)
     this.name = 'CodexToolSurfaceError'
   }
@@ -446,6 +467,68 @@ export function assertReadyToolSurface(value: ReadyToolSurface): void {
   ) throw new CodexToolSurfaceError('tool_surface_digest_mismatch')
 }
 
+export function compareReadyToolSurfaceCompatibility(input: {
+  frozen: ReadyToolSurface
+  current: ReadyToolSurface
+}): ReadyToolSurfaceCompatibility {
+  assertReadyToolSurface(input.frozen)
+  assertReadyToolSurface(input.current)
+  const frozenByName = new Map(input.frozen.entries.map((entry) => [entry.name, entry]))
+  const currentByName = new Map(input.current.entries.map((entry) => [entry.name, entry]))
+  const addedToCurrentSubset: string[] = []
+  const modelContractChangedToolNames: string[] = []
+  const readyContractChangedToolNames: string[] = []
+  for (const currentEntry of input.current.entries) {
+    const frozenEntry = frozenByName.get(currentEntry.name)
+    if (!frozenEntry) {
+      addedToCurrentSubset.push(currentEntry.name)
+      continue
+    }
+    const entryCompatibility = compareReadyToolSurfaceEntry(frozenEntry, currentEntry)
+    if (entryCompatibility === 'native_tool_definition_changed') {
+      modelContractChangedToolNames.push(currentEntry.name)
+      continue
+    }
+    if (entryCompatibility === 'ready_tool_execution_contract_changed') {
+      readyContractChangedToolNames.push(currentEntry.name)
+    }
+  }
+  const frozenOnlyToolNames = input.frozen.toolNames.filter((name) => !currentByName.has(name))
+  const kind: ReadyToolSurfaceCompatibility['kind'] = addedToCurrentSubset.length > 0
+    ? 'native_tool_surface_extension_required'
+    : modelContractChangedToolNames.length > 0
+      ? 'native_tool_definition_changed'
+      : readyContractChangedToolNames.length > 0
+        ? 'ready_tool_execution_contract_changed'
+        : 'compatible'
+  const unsigned = {
+    contract: 'ready_tool_surface_compatibility_v1',
+    kind,
+    addedToCurrentSubset: addedToCurrentSubset.sort(),
+    modelContractChangedToolNames: modelContractChangedToolNames.sort(),
+    readyContractChangedToolNames: readyContractChangedToolNames.sort(),
+    frozenOnlyToolNames: frozenOnlyToolNames.sort(),
+  }
+  return { ...unsigned, evidenceDigest: digestCanonicalJson(unsigned) }
+}
+
+export function compareReadyToolSurfaceEntry(
+  frozenEntry: ReadyToolSurfaceEntry,
+  currentEntry: ReadyToolSurfaceEntry,
+): ReadyToolSurfaceEntryCompatibility {
+  if (frozenEntry.name !== currentEntry.name
+    || frozenEntry.description !== currentEntry.description
+    || frozenEntry.schemaDigest !== currentEntry.schemaDigest
+    || canonicalJson(frozenEntry.inputSchema) !== canonicalJson(currentEntry.inputSchema)) {
+    return 'native_tool_definition_changed'
+  }
+  if (frozenEntry.effectProfileDigest !== currentEntry.effectProfileDigest
+    || canonicalJson(frozenEntry.effectProfile) !== canonicalJson(currentEntry.effectProfile)) {
+    return 'ready_tool_execution_contract_changed'
+  }
+  return 'compatible'
+}
+
 export function resolveReadyToolTurnSnapshot(input: {
   surfaceId: string
   authorizationId: string
@@ -481,11 +564,9 @@ export function resolveReadyToolTurnSnapshot(input: {
     ),
   })
   assertReadyToolSurface(frozen)
-  for (const currentEntry of resolved.entries) {
-    const frozenEntry = frozen.entries.find((entry) => entry.name === currentEntry.name)
-    if (!frozenEntry || canonicalJson(frozenEntry) !== canonicalJson(currentEntry)) {
-      throw new CodexToolSurfaceError('tool_surface_change_requires_new_thread')
-    }
+  const compatibility = compareReadyToolSurfaceCompatibility({ frozen, current: resolved })
+  if (compatibility.kind !== 'compatible') {
+    throw new CodexToolSurfaceError(compatibility.kind, compatibility)
   }
   return deepFreeze({
     readyToolSurface: frozen,

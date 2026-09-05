@@ -166,7 +166,7 @@ test('chat input exposes and switches the three conversation authorization modes
     act(() => ask.click())
     const textarea = dom.window.document.querySelector<HTMLTextAreaElement>('[data-ready-agent-input="true"]')
     const sendButton = dom.window.document.querySelector<HTMLButtonElement>('[data-ready-agent-send="true"]')
-    assert.equal(textarea?.disabled, true)
+    assert.equal(textarea?.disabled, false)
     assert.equal(sendButton?.disabled, true)
     act(() => {
       sendButton?.click()
@@ -187,7 +187,7 @@ test('chat input exposes and switches the three conversation authorization modes
     )
     assert.ok(rejectedAuto)
     act(() => rejectedAuto.click())
-    assert.equal(textarea?.disabled, true)
+    assert.equal(textarea?.disabled, false)
     await act(async () => rejectPersist?.(new Error('persist failed')))
     assert.ok(dom.window.document.querySelector('[data-ready-action-authorization-mode="ask"]'))
     assert.equal(textarea?.disabled, false)

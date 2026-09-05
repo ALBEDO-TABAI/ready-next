@@ -184,8 +184,14 @@ async function readReadyLifecycleActionRef(
 ) {
   const agent = window.electronAPI?.agent
   if (!agent?.readCodexActionSurface) throw new Error('lifecycle_snapshot_unavailable')
-  const surface = await agent.readCodexActionSurface({ aliasId, aliasGeneration })
-  if (!surface.success || !surface.data) throw new Error('lifecycle_snapshot_unavailable')
+  const surface = await agent.readCodexActionSurface({
+    aliasId,
+    aliasGeneration,
+    workbenchMode: useMode.getState().workbenchMode,
+  })
+  if (!surface.success || !surface.data || surface.data.state === 'history_only') {
+    throw new Error('lifecycle_snapshot_unavailable')
+  }
   const projection = surface.data.lifecycle
   const gate = projection.actions[action]
   if (projection.scopeId !== aliasId
@@ -199,13 +205,91 @@ async function readReadyLifecycleActionRef(
   return gate.requestRef
 }
 
-const lifecycleHydrationTargets = new Map<string, {
+type LifecycleHydrationTarget = {
   aliasGeneration: number
   scopeEpoch: number
   actionProjectionSequence: number
-}>()
+}
+
+const lifecycleHydrationTargets = new Map<string, LifecycleHydrationTarget>()
+
+// One reader owns a session's action surface at a time. Concurrent triggers
+// (memory invalidation, mode change, scope load) collapse into a single queued
+// follow-up carrying the highest pending target, so a newer read can never race
+// an older one and an older response can never be the last write.
+const lifecycleHydrationOwners = new Map<string, Promise<void>>()
+const lifecycleHydrationQueue = new Map<string, LifecycleHydrationTarget | null>()
+
+function higherLifecycleHydrationTarget(
+  left: LifecycleHydrationTarget | null,
+  right: LifecycleHydrationTarget | null,
+): LifecycleHydrationTarget | null {
+  if (!left) return right
+  if (!right) return left
+  return (right.scopeEpoch - left.scopeEpoch
+    || right.aliasGeneration - left.aliasGeneration
+    || right.actionProjectionSequence - left.actionProjectionSequence) > 0
+    ? right
+    : left
+}
+
+/**
+ * Test support: drops the in-flight hydration owner and its queued follow-up.
+ * Required when a harness tears down `window.electronAPI` while a stubbed read
+ * is still pending; the version floors are intentionally left untouched.
+ */
+export function resetCodexLifecycleHydrationOwnersForTest(): void {
+  lifecycleHydrationOwners.clear()
+  lifecycleHydrationQueue.clear()
+}
 
 async function hydrateCodexLifecycleScope(
+  scope: ConversationScope,
+  target?: Pick<CodexActionSurfaceInvalidation, 'aliasGeneration' | 'scopeEpoch' | 'actionProjectionSequence'>,
+): Promise<void> {
+  const baseline = lifecycleHydrationFingerprint(useAgent.getState(), scope.id)
+  if (!baseline) return
+  const sessionKey = baseline.sessionKey
+  const owner = lifecycleHydrationOwners.get(sessionKey)
+  if (owner) {
+    // With no explicit target, inherit the in-flight owner's target so the
+    // follow-up read keeps the newest known generation/sequence floor.
+    const queuedTarget = target
+      ? { ...target }
+      : lifecycleHydrationTargets.get(sessionKey) ?? null
+    lifecycleHydrationQueue.set(sessionKey, higherLifecycleHydrationTarget(
+      lifecycleHydrationQueue.get(sessionKey) ?? null,
+      queuedTarget,
+    ))
+    // Raise the shared version floor so an in-flight older read can no longer
+    // publish. Identity is preserved when the queued target is not newer, which
+    // keeps a same-or-older invalidation from cancelling the current owner.
+    const raised = higherLifecycleHydrationTarget(
+      lifecycleHydrationTargets.get(sessionKey) ?? null,
+      queuedTarget,
+    )
+    if (raised) lifecycleHydrationTargets.set(sessionKey, raised)
+    // The caller still awaits the surface it asked for: the owner promise below
+    // resolves only after its queued follow-up has been drained.
+    await owner
+    return
+  }
+  const run = (async () => {
+    try {
+      await runCodexLifecycleHydration(scope, target)
+    } finally {
+      lifecycleHydrationOwners.delete(sessionKey)
+    }
+    if (!lifecycleHydrationQueue.has(sessionKey)) return
+    const queued = lifecycleHydrationQueue.get(sessionKey) ?? undefined
+    lifecycleHydrationQueue.delete(sessionKey)
+    await hydrateCodexLifecycleScope(scope, queued)
+  })()
+  lifecycleHydrationOwners.set(sessionKey, run)
+  await run
+}
+
+async function runCodexLifecycleHydration(
   scope: ConversationScope,
   target?: Pick<CodexActionSurfaceInvalidation, 'aliasGeneration' | 'scopeEpoch' | 'actionProjectionSequence'>,
 ): Promise<void> {
@@ -252,6 +336,7 @@ async function hydrateCodexLifecycleScope(
       return withSessionSliceAndActiveMirror(state, sessionKey, {
         lifecycleOperationProjection: null,
         scopeHeadActionProjection: null,
+        beginNewContextActionRef: null,
       })
     })
     // Keep this read target as the version floor until a successful re-read.
@@ -262,6 +347,7 @@ async function hydrateCodexLifecycleScope(
     surface = await agent.readCodexActionSurface({
       aliasId: scope.id,
       aliasGeneration,
+      workbenchMode,
     })
   } catch {
     // silent-catch: failed authority reads revoke both cached action halves and preserve the draft.
@@ -272,9 +358,49 @@ async function hydrateCodexLifecycleScope(
     clearAtomicSurface()
     return
   }
-  const surfaceHead = surface.data.head
-  const projection = surface.data.lifecycle as LifecycleOperationProjectionV2
-  const acceptedScopeEpoch = surface.data.scopeEpoch
+  const surfaceData = surface.data
+  if (surfaceData.state === 'history_only') {
+    if (surfaceData.scopeId !== scope.id
+      || surfaceData.scopeEpoch !== scopeEpoch
+      || surfaceData.sourceAliasGeneration < aliasGeneration
+      || !stillCurrent(useAgent.getState())) {
+      clearAtomicSurface()
+      return
+    }
+    useAgent.setState((state) => {
+      if (!stillCurrent(state)) return state
+      const scopes = state.scopes.map((candidate) => candidate.id === scope.id
+        ? { ...candidate, aliasGeneration: surfaceData.sourceAliasGeneration }
+        : candidate)
+      return {
+        ...withSessionSliceAndActiveMirror({ ...state, scopes }, baseline.sessionKey, {
+          aliasGeneration: surfaceData.sourceAliasGeneration,
+          messageVisibilityEpoch: surfaceData.scopeEpoch,
+          scopeHeadActionProjection: null,
+          lifecycleOperationProjection: null,
+          beginNewContextActionRef: surfaceData.beginNewContext,
+          contextBoundaries: surfaceData.contextBoundaries,
+          isStreaming: false,
+          foregroundBusy: false,
+          composerLocked: false,
+          streamingMessageId: null,
+          streamingRequestId: null,
+          lifecyclePendingAction: null,
+          lifecycleError: null,
+        }),
+        scopes,
+        conversations: scopes.map(mapScopeToConversation),
+        currentScope: state.currentScopeId === scope.id
+          ? scopes.find((candidate) => candidate.id === scope.id) || state.currentScope
+          : state.currentScope,
+      }
+    })
+    finish()
+    return
+  }
+  const surfaceHead = surfaceData.head
+  const projection = surfaceData.lifecycle as LifecycleOperationProjectionV2
+  const acceptedScopeEpoch = surfaceData.scopeEpoch
   if (
     projection.identity.aliasId !== scope.id
     || projection.identity.aliasGeneration !== aliasGeneration
@@ -362,6 +488,8 @@ async function hydrateCodexLifecycleScope(
         messages,
         lifecycleOperationProjection: projection,
         scopeHeadActionProjection: surfaceHead,
+        beginNewContextActionRef: surfaceData.beginNewContext,
+        contextBoundaries: surfaceData.contextBoundaries,
         productTurnActionProjectionByRunId: mergeProductTurnActionProjections({
           existing: slice.productTurnActionProjectionByRunId,
           incoming: productReceipts.map((receipt) => receipt.actionProjection),
@@ -544,11 +672,13 @@ function commitPersistedIngressSnapshot(input: Pick<
       userMessage,
       responseMessage,
     ]
-    const shouldClearComposer = slice.inputValue.trim() === pending.content.trim()
+    const shouldClearComposer = slice.draftRevision === pending.originDraftRevision
     const previousContextUsage = slice.scopeRunStates[pending.scopeId]?.contextUsage ?? null
     const next = withSessionSliceAndActiveMirror(state, sessionKey, {
       messages,
       inputValue: shouldClearComposer ? '' : slice.inputValue,
+      attachments: shouldClearComposer ? [] : slice.attachments,
+      draftRevision: shouldClearComposer ? slice.draftRevision + 1 : slice.draftRevision,
       streamingMessageId: pending.responseMessageId,
       streamingRequestId: pending.requestId,
       isStreaming: true,
@@ -584,15 +714,10 @@ function commitPersistedIngressSnapshot(input: Pick<
       currentScope: state.currentScope?.id === pending.scopeId
         ? { ...state.currentScope, aliasGeneration: admittedGeneration }
         : state.currentScope,
-      ...(originIsActive
-        ? {
-            attachments: state.attachments.filter((attachment) => (
-              !pending.attachments.some((candidate) => candidate.id === attachment.id)
-            )),
-            pendingContinuationIntent: null,
-            pendingContinuationDraftAnchor: null,
-          }
-        : {}),
+      ...(originIsActive ? {
+        pendingContinuationIntent: null,
+        pendingContinuationDraftAnchor: null,
+      } : {}),
     }
   })
   pendingIngressSnapshots.delete(input.requestId)
@@ -629,17 +754,20 @@ export function applyIngressAdmitted(event: IngressAdmittedEvent): boolean {
 function appendComposerAttachments(
   state: AgentState,
   files: ChatAttachment[],
-): Pick<AgentState, 'attachments' | 'filePool'> {
-  return {
-    attachments: [...state.attachments, ...files],
+): ReturnType<typeof withSessionSliceAndActiveMirror> {
+  const sessionKey = activeSessionKey(state)
+  const slice = normalizeSessionSlice(state.sessions[sessionKey])
+  return withSessionSliceAndActiveMirror(state, sessionKey, {
+    attachments: [...slice.attachments, ...files],
     filePool: [
-      ...state.filePool,
+      ...slice.filePool,
       ...files.filter((file) =>
         shouldKeepInFilePool(file)
-        && !state.filePool.some((poolItem) => isSameAttachmentPoolEntry(poolItem, file)),
+        && !slice.filePool.some((poolItem) => isSameAttachmentPoolEntry(poolItem, file)),
       ),
     ],
-  }
+    draftRevision: slice.draftRevision + 1,
+  })
 }
 
 export const useAgent = create<AgentState>((set, get) => ({
@@ -718,8 +846,6 @@ export const useAgent = create<AgentState>((set, get) => ({
       return {
         agents,
         currentAgent: 'butler',
-        attachments: [],
-        filePool: [],
         activeAttachmentPreview: null,
         pendingContinuationIntent: null,
         pendingContinuationDraftAnchor: null,
@@ -749,7 +875,11 @@ export const useAgent = create<AgentState>((set, get) => ({
     // top-level `inputValue` so existing ChatPanel/ChatInput consumers see
     // the same value until their selector migration lands in V3.3b.X.
     const sessionKey = activeSessionKey(state)
-    const slicePatch = withSessionSlice(state, sessionKey, { inputValue: value })
+    const slice = normalizeSessionSlice(state.sessions[sessionKey])
+    const slicePatch = withSessionSlice(state, sessionKey, {
+      inputValue: value,
+      draftRevision: slice.draftRevision + 1,
+    })
     return {
       ...slicePatch,
       inputValue: value,
@@ -815,12 +945,18 @@ export const useAgent = create<AgentState>((set, get) => ({
     })
   },
 
-  setComposerDraft: (value, continuationIntent) => set((state) => ({
-    ...withSessionSlice(state, activeSessionKey(state), { inputValue: value }),
-    inputValue: value,
-    pendingContinuationIntent: continuationIntent || null,
-    pendingContinuationDraftAnchor: continuationIntent ? value : null,
-  })),
+  setComposerDraft: (value, continuationIntent) => set((state) => {
+    const sessionKey = activeSessionKey(state)
+    const slice = normalizeSessionSlice(state.sessions[sessionKey])
+    return {
+      ...withSessionSliceAndActiveMirror(state, sessionKey, {
+        inputValue: value,
+        draftRevision: slice.draftRevision + 1,
+      }),
+      pendingContinuationIntent: continuationIntent || null,
+      pendingContinuationDraftAnchor: continuationIntent ? value : null,
+    }
+  }),
 
   clearPendingContinuationIntent: () => set({
     pendingContinuationIntent: null,
@@ -880,8 +1016,6 @@ export const useAgent = create<AgentState>((set, get) => ({
       return {
         activeSessionId: id,
         ...mirrorFromSessionSlice(state, slice),
-        attachments: [],
-        filePool: [],
         activeAttachmentPreview: null,
         pendingContinuationIntent: null,
         pendingContinuationDraftAnchor: null,
@@ -1051,6 +1185,7 @@ export const useAgent = create<AgentState>((set, get) => ({
       result = await window.electronAPI.agent.closeSession({
         aliasId,
         aliasGeneration: slice.aliasGeneration,
+        workbenchMode: useMode.getState().workbenchMode,
         readyRunId: actionRequestRef.ownerKind === 'run_owner'
           ? actionRequestRef.targetReadyRunId
           : null,
@@ -1113,8 +1248,6 @@ export const useAgent = create<AgentState>((set, get) => ({
           ? mirrorFromSessionSlice(stateForMirror, nextSlice)
           : mirrorFromSessionSlice(stateForMirror, makeEmptySessionSlice())),
         ...(closedActiveSession ? {
-          attachments: [],
-          filePool: [],
           activeAttachmentPreview: null,
           pendingContinuationIntent: null,
           pendingContinuationDraftAnchor: null,
@@ -1210,6 +1343,7 @@ export const useAgent = create<AgentState>((set, get) => ({
       result = await window.electronAPI.agent.kill({
         aliasId,
         aliasGeneration: slice.aliasGeneration,
+        workbenchMode: useMode.getState().workbenchMode,
         readyRunId: stoppedRequestId,
         actionRequestRef,
       })
@@ -1317,6 +1451,7 @@ export const useAgent = create<AgentState>((set, get) => ({
       result = await window.electronAPI.agent.resetSession({
         aliasId,
         aliasGeneration: slice.aliasGeneration,
+        workbenchMode: useMode.getState().workbenchMode,
         readyRunId: actionRequestRef.ownerKind === 'run_owner'
           ? actionRequestRef.targetReadyRunId
           : null,
@@ -1418,6 +1553,37 @@ export const useAgent = create<AgentState>((set, get) => ({
     return result
   },
 
+  beginNewContext: async (providedActionRef) => {
+    const state = get()
+    const sessionKey = activeSessionKey(state)
+    const slice = normalizeSessionSlice(state.sessions[sessionKey])
+    const actionRef = providedActionRef || slice.beginNewContextActionRef
+    const api = typeof window !== 'undefined' ? window.electronAPI?.agent : null
+    if (!actionRef || !api?.beginNewContext || slice.conversationId !== actionRef.scopeId
+      || slice.aliasGeneration !== actionRef.sourceAliasGeneration
+      || slice.messageVisibilityEpoch !== actionRef.scopeEpoch
+      || (actionRef.draftRevision !== null && slice.draftRevision !== actionRef.draftRevision)) {
+      throw new Error('begin_new_context_action_stale')
+    }
+    const result = await api.beginNewContext({ actionRef })
+    // A boundary is a historical receipt, not the current composer authority.
+    // Re-read the same action surface used by all other lifecycle consumers.
+    const scope = get().scopes.find((candidate) => candidate.id === actionRef.scopeId)
+    if (scope) await hydrateCodexLifecycleScope(scope, result.actionSurfaceInvalidation)
+    set((current) => {
+      const currentSlice = normalizeSessionSlice(current.sessions[sessionKey])
+      if (activeSessionKey(current) !== sessionKey
+        || currentSlice.messageVisibilityEpoch !== actionRef.scopeEpoch
+        || currentSlice.draftRevision !== slice.draftRevision
+        || current.pendingContinuationIntent !== state.pendingContinuationIntent
+        || current.pendingContinuationDraftAnchor !== state.pendingContinuationDraftAnchor) return current
+      return {
+        pendingContinuationIntent: null,
+        pendingContinuationDraftAnchor: null,
+      }
+    })
+  },
+
   compactCurrentSession: async () => {
     const state = get()
     const aliasId = state.currentScopeId
@@ -1455,6 +1621,7 @@ export const useAgent = create<AgentState>((set, get) => ({
       result = await window.electronAPI.agent.compactSession({
         aliasId,
         aliasGeneration: slice.aliasGeneration,
+        workbenchMode: useMode.getState().workbenchMode,
         actionRequestRef,
       })
     } catch (error) {
@@ -1563,7 +1730,9 @@ export const useAgent = create<AgentState>((set, get) => ({
           const slice = normalizeSessionSlice(nextSessions[sessionKey])
           const loadedGeneration = typeof scope.aliasGeneration === 'number'
             ? scope.aliasGeneration
-            : null
+            : typeof scope.latestAliasGeneration === 'number'
+              ? scope.latestAliasGeneration
+              : null
           const aliasGeneration = slice.aliasGeneration === null
             ? loadedGeneration
             : loadedGeneration === null
@@ -1647,8 +1816,6 @@ export const useAgent = create<AgentState>((set, get) => ({
           ...(composerInvalidated ? {
             pendingContinuationIntent: null,
             pendingContinuationDraftAnchor: null,
-            attachments: [],
-            filePool: [],
             activeAttachmentPreview: null,
             composerAuthorityRevision: state.composerAuthorityRevision + 1,
           } : {}),
@@ -1788,8 +1955,6 @@ export const useAgent = create<AgentState>((set, get) => ({
           currentScope: nextScope,
           currentAgent: 'butler',
           ...(composerInvalidated ? {
-            attachments: [],
-            filePool: [],
             activeAttachmentPreview: null,
             pendingContinuationIntent: null,
             pendingContinuationDraftAnchor: null,
@@ -1866,21 +2031,33 @@ export const useAgent = create<AgentState>((set, get) => ({
 
   // W3: Add attachments
   addAttachments: (files: ChatAttachment[]) => set((state) => (
-    appendComposerAttachments(state, files)
+    files.length > 0 ? appendComposerAttachments(state, files) : state
   )),
 
   removeAttachment: (id: string) => set((state) => {
-    const removedAttachment = state.attachments.find((attachment) => attachment.id === id)
-    const nextAttachments = state.attachments.filter((attachment) => attachment.id !== id)
-    return {
+    const sessionKey = activeSessionKey(state)
+    const slice = normalizeSessionSlice(state.sessions[sessionKey])
+    const removedAttachment = slice.attachments.find((attachment) => attachment.id === id)
+    if (!removedAttachment) return state
+    const nextAttachments = slice.attachments.filter((attachment) => attachment.id !== id)
+    return withSessionSliceAndActiveMirror(state, sessionKey, {
       attachments: nextAttachments,
       filePool: removedAttachment
-        ? removeFromFilePool(state.filePool, removedAttachment, nextAttachments)
-        : state.filePool,
-    }
+        ? removeFromFilePool(slice.filePool, removedAttachment, nextAttachments)
+        : slice.filePool,
+      draftRevision: slice.draftRevision + 1,
+    })
   }),
 
-  clearAttachments: () => set({ attachments: [] }),
+  clearAttachments: () => set((state) => {
+    const sessionKey = activeSessionKey(state)
+    const slice = normalizeSessionSlice(state.sessions[sessionKey])
+    if (slice.attachments.length === 0) return state
+    return withSessionSliceAndActiveMirror(state, sessionKey, {
+      attachments: [],
+      draftRevision: slice.draftRevision + 1,
+    })
+  }),
 
   // W3: Pick files via system dialog
   pickFiles: async () => {
@@ -2144,8 +2321,7 @@ export function initAgentListeners(): () => void {
     const state = useAgent.getState()
     const scope = state.scopes.find((candidate) => candidate.id === state.currentScopeId)
     if (scope) {
-      const pendingTarget = lifecycleHydrationTargets.get(sessionKeyForScopeId(state, scope.id))
-      void hydrateCodexLifecycleScope(scope, pendingTarget)
+      void hydrateCodexLifecycleScope(scope)
     }
   })
   const offIngressAdmitted = window.electronAPI?.agent?.onIngressAdmitted?.((event) => {

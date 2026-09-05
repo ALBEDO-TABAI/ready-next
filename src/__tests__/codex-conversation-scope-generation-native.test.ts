@@ -6,7 +6,6 @@ import {
   type ChatConversationRecord,
   type DatabaseConnection,
 } from '../main/modules/database'
-import { __runMigrationForTests, type MigrationDatabase } from '../main/modules/migrations'
 import { CodexBindingRepository } from '../main/modules/agent-control/codex-runtime/codex-binding-repository'
 import { ConversationScopeStore } from '../main/modules/agent-control/runtime-core/conversation-scope-store'
 import { SessionRecallService } from '../main/modules/agent-control/session/session-recall-service'
@@ -81,24 +80,12 @@ async function withRepository(
   work: (db: NativeDb, repository: CodexBindingRepository) => void | Promise<void>,
 ): Promise<void> {
   if (skipIfSqliteUnavailable(t, 'Codex conversation scope generation')) return
-  const Database = loadSqliteAfterGuardForTest()
-  const db = new Database(':memory:')
+  loadSqliteAfterGuardForTest()
+  const database = new DatabaseManager(true)
+  const db = database.getRawDb() as NativeDb
   try {
-    db.exec(`
-      CREATE TABLE chat_conversations (
-        id TEXT PRIMARY KEY,
-        meta_json TEXT NOT NULL DEFAULT '{}',
-        closed_at TEXT,
-        message_visibility_epoch INTEGER NOT NULL DEFAULT 0,
-        updated_at TEXT NOT NULL DEFAULT '2026-08-08T00:00:00.000Z'
-      )
-    `)
-    db.prepare(`
-      INSERT INTO chat_conversations (id, meta_json, closed_at, message_visibility_epoch, updated_at)
-      VALUES (?, '{}', NULL, 0, ?)
-    `).run(scopeRow.id, createdAt)
-    __runMigrationForTests('088_codex_runtime_bindings', db as unknown as MigrationDatabase)
     const repository = new CodexBindingRepository(db as unknown as DatabaseConnection)
+    createRealStore(database, repository).createLocalScope('butler', scopeRow.id)
     repository.createEmptyAliasGeneration({
       threadBindingId: 'thread-binding-generation-1',
       aliasId: scopeRow.id,

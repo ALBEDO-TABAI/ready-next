@@ -39,7 +39,11 @@ import type {
   CodexToolResponseDeliveryAttemptIdentity,
   CodexToolResponseDeliveryAttemptRead,
 } from './codex-tool-response-delivery'
-import { buildReadyToolSurface, type ReadyToolSurfaceEntry } from './codex-tool-surface'
+import {
+  buildReadyToolSurface,
+  compareReadyToolSurfaceEntry,
+  type ReadyToolSurfaceEntry,
+} from './codex-tool-surface'
 import { isHostFolderExportPrimitive } from '../../tools/skill-tool-execution-authority'
 
 export { mapReadyToolOutput } from './codex-tool-output-mapper'
@@ -244,7 +248,8 @@ export function validateCodexFrozenToolExecution(
     surfaceId: 'tool-execution-readback',
     toolDefinitions: [currentDefinition],
   }).entries[0]
-  if (!currentEntry || canonicalJson(currentEntry) !== canonicalJson(input.frozenEntry)) {
+  if (!currentEntry
+    || compareReadyToolSurfaceEntry(input.frozenEntry, currentEntry) !== 'compatible') {
     throw new CodexToolBridgeError('tool_execution_surface_drift')
   }
   const schema = resolveInputSchema(input.toolName)

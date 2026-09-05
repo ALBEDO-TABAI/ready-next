@@ -147,6 +147,8 @@ export interface AgentPanelSnapshot {
   composer: {
     inputValue: string
     locked: boolean
+    sendEnabled: boolean
+    blocker: string | null
     attachmentNames: string[]
     filePoolNames: string[]
   }
@@ -229,6 +231,8 @@ export interface AgentPanelTestAttachmentInput {
   ext?: string
   source?: ChatAttachment['source']
   isDirectory?: boolean
+  skillId?: string
+  skillFolderPath?: string
 }
 
 export interface AgentPanelTestWorkspaceResult {
@@ -289,6 +293,10 @@ export interface AgentPanelTestHarness {
     title?: string
     contentLength?: number
     error?: string
+  }>
+  setWorkbenchMode: (mode: 'browser' | 'document' | 'rss' | 'calendar') => Promise<{
+    ok: boolean
+    mode: 'browser' | 'document' | 'rss' | 'calendar'
   }>
   events: () => AgentPanelHarnessEvent[]
   clearEvents: () => void

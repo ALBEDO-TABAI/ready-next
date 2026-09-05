@@ -455,7 +455,7 @@ try {
       });
       rejectionChecks.push({ variant, requestId, result });
       if (result.disposition !== 'rejected_before_persistence' || result.errorKind !== 'explicit_retry_control_invalid'
-        || result.shouldClearInput !== false) return { ok: false, stage: 'fresh-retry-rejection', rejectionChecks };
+        || result.recoveryActionRef) return { ok: false, stage: 'fresh-retry-rejection', rejectionChecks };
     }
     const freshRetried = await clickRetry(freshRunId);
     if (freshRetried.terminal.terminalReason !== 'done') return { ok: false, stage: 'fresh-retry-button', freshRetried };

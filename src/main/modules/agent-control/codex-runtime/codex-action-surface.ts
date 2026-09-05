@@ -7,6 +7,17 @@ import { digestCanonicalJson } from './codex-model-gateway-contract'
 export const CODEX_HEAD_ACTION_BLOCKER_PRECEDENCE = [
   'closed',
   'head_contract_drift',
+  'runtime_unverified',
+  'runtime_unsupported',
+  'model_changed',
+  'thread_config_changed',
+  'cwd_unavailable',
+  'cwd_changed',
+  'instruction_contract_changed',
+  'native_tool_surface_extension_required',
+  'native_tool_definition_changed',
+  'ready_tool_execution_contract_changed',
+  'current_contract_read_failed',
   'legacy_prepared_contract',
   'terminal_history_unknown',
   'history_outcome_unknown',
@@ -37,6 +48,7 @@ export type CodexHeadActionFacts = {
   headProtocolSchemaDigest: string
   currentRuntimeManifestDigest: string
   currentProtocolSchemaDigest: string
+  headContractBlocker?: CodexHeadActionBlocker | null
   materializationIntentRef?: { id: string; digest: string } | null
   uncommittedStructuredTail?: Array<{
     messageId: string
@@ -54,10 +66,10 @@ export function projectCodexHeadActionProjection(
   facts: CodexHeadActionFacts,
 ): CodexHeadActionProjection {
   const blockers: CodexHeadActionBlocker[] = []
-  if (facts.headRuntimeManifestDigest !== facts.currentRuntimeManifestDigest
-    || facts.headProtocolSchemaDigest !== facts.currentProtocolSchemaDigest) {
-    blockers.push('head_contract_drift')
-  }
+  if (facts.headContractBlocker !== undefined) {
+    if (facts.headContractBlocker) blockers.push(facts.headContractBlocker)
+  } else if (facts.headRuntimeManifestDigest !== facts.currentRuntimeManifestDigest
+    || facts.headProtocolSchemaDigest !== facts.currentProtocolSchemaDigest) blockers.push('head_contract_drift')
   if (facts.hasLegacyPreparedRun) blockers.push('legacy_prepared_contract')
   if (facts.continuationBlocked) blockers.push('terminal_history_unknown')
   if (facts.materializationState === 'unknown'

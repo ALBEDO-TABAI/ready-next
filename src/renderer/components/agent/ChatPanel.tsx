@@ -189,6 +189,7 @@ export default function ChatPanel({
     stopStreaming,
     resetCurrentConversation,
     compactCurrentSession,
+    beginNewContext,
     createNewSession,
     // W2
     scopes,
@@ -782,33 +783,52 @@ export default function ChatPanel({
 
   const activeLifecycleSlice = activeSessionId ? sessions[activeSessionId] : null
   const headProjection = activeLifecycleSlice?.scopeHeadActionProjection ?? null
-  const sendingRef = useRef(false)
-  const [composerNotice, setComposerNotice] = useState<{ message: string; errorKind: string } | null>(null)
-  useEffect(() => {
-    if (!currentScopeId || !currentScope) return
-    setComposerNotice((current) => current?.errorKind === 'scope_missing' ? null : current)
-  }, [currentScope?.id, currentScopeId])
+  const sendingSessionsRef = useRef(new Set<string>())
+  type ComposerNotice = {
+    message: string
+    errorKind: string
+    recoveryActionRef?: import('../../../shared/ipc-contracts/agent-runtime').CodexBeginNewContextActionRef
+  }
+  const [composerNotices, setComposerNotices] = useState<Record<string, ComposerNotice>>({})
+  const setComposerNoticeFor = useCallback((
+    sessionId: string | null,
+    notice: ComposerNotice | null,
+  ) => {
+    if (!sessionId) return
+    setComposerNotices((current) => {
+      if (notice) return { ...current, [sessionId]: notice }
+      if (!(sessionId in current)) return current
+      const next = { ...current }
+      delete next[sessionId]
+      return next
+    })
+  }, [])
+  const setComposerNotice = useCallback((notice: ComposerNotice | null) => {
+    setComposerNoticeFor(useAgent.getState().activeSessionId, notice)
+  }, [setComposerNoticeFor])
+  const composerNotice = activeSessionId ? composerNotices[activeSessionId] ?? null : null
 
   const handleSend = useCallback(async () => {
+    const sendSessionId = activeSessionId
+    if (!sendSessionId) return
     const sendGate = headProjection?.actions.send_new_message
     if (!sendGate || sendGate.availability !== 'ready') {
-      setComposerNotice({
-        message: !sendGate ? '暂时无法读取会话状态，请重新读取后发送。' : '当前会话状态已变化，请稍候再发送。',
-        errorKind: !sendGate ? 'head_unavailable' : sendGate.blockers[0] || 'conversation_reset_required',
+      const blocker = !sendGate ? 'head_unavailable' : sendGate.blockers[0] || 'conversation_reset_required'
+      const friendly = mapBackendErrorToFriendly({ errorKind: blocker, error: blocker })
+      setComposerNoticeFor(sendSessionId, {
+        message: friendly.friendlyMessage,
+        errorKind: blocker,
+        ...(activeLifecycleSlice?.beginNewContextActionRef
+          ? { recoveryActionRef: activeLifecycleSlice.beginNewContextActionRef }
+          : {}),
       })
       return
     }
-    if (sendingRef.current) {
-      const current = useAgent.getState()
-      const sessionId = current.activeSessionId
-      const slice = sessionId ? current.sessions[sessionId] : null
-      if (slice?.isStreaming || slice?.composerLocked || slice?.foregroundBusy) return
-      sendingRef.current = false
-    }
+    if (sendingSessionsRef.current.has(sendSessionId)) return
     const content = inputValue.trim()
     if (!content && attachments.length === 0) return
-    sendingRef.current = true
-    setComposerNotice(null)
+    sendingSessionsRef.current.add(sendSessionId)
+    setComposerNoticeFor(sendSessionId, null)
     try {
       const result = await sendMessage(content, { actionAdmissionRef: codexHeadActionAdmissionRef(headProjection) })
       if (result && result.success === false && result.disposition === 'rejected_before_persistence') {
@@ -816,21 +836,24 @@ export default function ChatPanel({
           errorKind: result.errorKind,
           error: result.errorKind,
         })
-        setComposerNotice({
+        setComposerNoticeFor(sendSessionId, {
           message: friendly.friendlyMessage,
           errorKind: result.errorKind,
+          ...(result.recoveryActionRef ? { recoveryActionRef: result.recoveryActionRef } : {}),
         })
       }
     } finally {
-      sendingRef.current = false
+      sendingSessionsRef.current.delete(sendSessionId)
     }
-  }, [attachments.length, inputValue, sendMessage, headProjection])
+  }, [activeLifecycleSlice?.beginNewContextActionRef, activeSessionId, attachments.length,
+    inputValue, sendMessage, headProjection, setComposerNoticeFor])
 
   const handleRetryProductTurn = useCallback(async (predecessorRunId: string) => {
-    if (sendingRef.current) return
-    setComposerNotice(null)
+    const sendSessionId = activeSessionId
+    if (!sendSessionId || sendingSessionsRef.current.has(sendSessionId)) return
+    setComposerNoticeFor(sendSessionId, null)
     if (inputValue.trim() || attachments.length > 0) {
-      setComposerNotice({
+      setComposerNoticeFor(sendSessionId, {
         message: '当前输入或引用不会被清空。请把目标完整写清楚后作为普通消息发送。',
         errorKind: 'explicit_retry_control_invalid',
       })
@@ -838,7 +861,9 @@ export default function ChatPanel({
     }
     const api = window.electronAPI?.agent
     if (!api?.readProductTurnPresentation) {
-      setComposerNotice({ message: '暂时无法读取上一次结果，请稍后再试。', errorKind: 'host_unavailable' })
+      setComposerNoticeFor(sendSessionId, {
+        message: '暂时无法读取上一次结果，请稍后再试。', errorKind: 'host_unavailable',
+      })
       return
     }
     const receipt = await api.readProductTurnPresentation(
@@ -850,7 +875,9 @@ export default function ChatPanel({
       || !receipt.data?.failure
       || receipt.data.actionProjection.retry_failed_task.availability !== 'ready'
     ) {
-      setComposerNotice({ message: '这条记录已无法安全重试，请重新说明需求。', errorKind: 'conversation_reset_required' })
+      setComposerNoticeFor(sendSessionId, {
+        message: '这条记录已无法安全重试，请重新说明需求。', errorKind: 'conversation_reset_required',
+      })
       return
     }
     const current = useAgent.getState()
@@ -859,10 +886,12 @@ export default function ChatPanel({
     const projection = receipt.data.actionProjection
     if (projection.retryEvidenceKind !== 'complete'
       || !productTurnActionProjectionMatchesContext(projection, head ?? null, useMode.getState().workbenchMode)) {
-      setComposerNotice({ message: '当前会话已变化，请重新说明需求。', errorKind: 'conversation_reset_required' })
+      setComposerNoticeFor(sendSessionId, {
+        message: '当前会话已变化，请重新说明需求。', errorKind: 'conversation_reset_required',
+      })
       return
     }
-    sendingRef.current = true
+    sendingSessionsRef.current.add(sendSessionId)
     try {
       const result = await sendMessage('再试一次', {
         explicitRetry: {
@@ -875,12 +904,15 @@ export default function ChatPanel({
           errorKind: result.errorKind,
           error: result.errorKind,
         })
-        setComposerNotice({ message: friendly.friendlyMessage, errorKind: result.errorKind })
+        setComposerNoticeFor(sendSessionId, {
+          message: friendly.friendlyMessage, errorKind: result.errorKind,
+        })
       }
     } finally {
-      sendingRef.current = false
+      sendingSessionsRef.current.delete(sendSessionId)
     }
-  }, [attachments.length, inputValue, sendMessage, workbenchMode])
+  }, [activeSessionId, attachments.length, inputValue, sendMessage,
+    setComposerNoticeFor, workbenchMode])
 
   const handleStop = useCallback(async () => {
     setStopRequestError(null)
@@ -1093,6 +1125,9 @@ export default function ChatPanel({
       ? 'compaction' as const
       : null
   const lifecycleInputBlocked = headProjection?.actions.send_new_message.availability !== 'ready'
+  const sendBlocker = headProjection?.actions.send_new_message.blockers[0] ?? null
+  const destructiveOperationPending = activeLifecycleSlice?.lifecyclePendingAction === 'resetting'
+    || activeLifecycleSlice?.lifecyclePendingAction === 'closing'
   const stopError = stopRequestError || (
     activeLifecycleError?.action === 'stop' && activeLifecycleError.code !== 'no_active_operation'
       ? stopFailureMessage(activeLifecycleError.code)
@@ -1183,6 +1218,7 @@ export default function ChatPanel({
   const expandedPanelBody = (
     <ChatPanelBody
       messages={messages}
+      contextBoundaries={activeLifecycleSlice?.contextBoundaries ?? []}
       currentTaskRun={currentTaskRun}
       backgroundTaskRuns={backgroundTaskRuns}
       liveTaskRuns={currentScopeTaskRuns}
@@ -1191,7 +1227,11 @@ export default function ChatPanel({
       taskDisclosureState={taskDisclosureState}
       isStreaming={isStreaming}
       lifecycleInputBlocked={lifecycleInputBlocked}
-      stopAvailable={lifecycleActions?.stop.availability === 'ready' || stopPending}
+      sendBlocker={sendBlocker}
+      destructiveOperationPending={destructiveOperationPending}
+      stopAvailable={lifecycleActions?.stop.availability === 'ready'
+        || stopPending
+        || Boolean(activeLifecycleSlice?.streamingRequestId)}
       stopPending={stopPending}
       stopError={stopError}
       streamingMessageId={streamingMessageId}
@@ -1244,6 +1284,20 @@ export default function ChatPanel({
       setAttachmentPreviewLoading={setAttachmentPreviewLoading}
       admissionReady={Boolean(currentScopeId && currentScope)}
       composerNotice={composerNotice}
+      beginNewContextAvailable={Boolean(
+        composerNotice?.recoveryActionRef || activeLifecycleSlice?.beginNewContextActionRef,
+      )}
+      onBeginNewContext={() => {
+        const actionRef = composerNotice?.recoveryActionRef
+          || activeLifecycleSlice?.beginNewContextActionRef
+        if (!actionRef) return
+        void beginNewContext(actionRef)
+          .then(() => setComposerNotice(null))
+          .catch(() => setComposerNotice({
+            message: '会话状态已经变化，草稿仍已保留。请重新读取后再试。',
+            errorKind: 'action_projection_confirmation_required',
+          }))
+      }}
       sendConsequence={headProjection?.actions.send_new_message.consequence ?? null}
       headUnavailable={Boolean(currentScopeId && currentScope && !headProjection)}
       onRefreshActionSurface={() => {

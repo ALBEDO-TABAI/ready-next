@@ -9,6 +9,9 @@
 
 import { DEFAULT_AGENT_PERSONAS } from './claude-bridge/default-personas'
 import {
+  applyCodexBeginNewContextArchiveSourceMigration,
+} from './agent-control/codex-runtime/codex-thread-archive-schema'
+import {
   BUILTIN_AGENT_IDS,
   BUILTIN_AGENT_META,
   type BuiltinAgentId,
@@ -41,10 +44,12 @@ import {
   applyCodexToolRequestRpcBindingMigration,
   applyCodexToolResponseEvidenceMigration,
   applyCodexTurnLifecycleActionMigration,
+  applyCodexConversationContextBoundaryMigration,
   CODEX_BINDING_EVIDENCE_GUARDS_SQL,
   CODEX_BINDING_SCHEMA_SQL,
   CODEX_GATEWAY_EXCHANGE_GUARDS_SQL,
   CODEX_NATIVE_CONTINUITY_GUARDS_SQL,
+  CODEX_PRISTINE_CONTRACT_REFRESH_GUARDS_SQL,
   CODEX_NATIVE_COVERAGE_SCHEMA_SQL,
   CODEX_PRODUCT_EFFECT_BINDING_SCHEMA_SQL,
 } from './agent-control/codex-runtime/codex-binding-schema'
@@ -4365,6 +4370,29 @@ const migrations: Migration[] = [
     name: '119_gateway_exchange_redaction_admission_guard',
     up: (db) => {
       db.exec(CODEX_GATEWAY_EXCHANGE_GUARDS_SQL)
+    },
+  },
+  {
+    name: '120_codex_conversation_context_boundaries',
+    up: (db) => {
+      applyCodexConversationContextBoundaryMigration(db)
+    },
+  },
+  {
+    name: '121_codex_begin_new_context_archive_source',
+    up: (db) => {
+      applyCodexBeginNewContextArchiveSourceMigration(db)
+    },
+  },
+  {
+    name: '122_codex_pristine_legacy_root_refresh',
+    up: (db) => {
+      if (!db.prepare('PRAGMA table_info(codex_conversation_context_boundaries)').all<{ name: string }>()
+        .some((column) => column.name === 'preserved_context_json')) {
+        db.exec('ALTER TABLE codex_conversation_context_boundaries ADD COLUMN preserved_context_json TEXT')
+      }
+      db.exec(`DROP TRIGGER IF EXISTS codex_pristine_contract_refresh_update;
+        ${CODEX_PRISTINE_CONTRACT_REFRESH_GUARDS_SQL}`)
     },
   },
 ]

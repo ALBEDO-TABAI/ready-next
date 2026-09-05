@@ -3,12 +3,14 @@
 const { createHash } = require('node:crypto')
 const fs = require('node:fs')
 const path = require('node:path')
-const { sourcePaths } = require('./browser-live-proof-manifest.cjs')
+const { isDeepStrictEqual } = require('node:util')
+const { runGit, sourcePaths } = require('./browser-live-proof-manifest.cjs')
 
 const RECEIPT_DIR_REL = 'exports/release-structural-receipts'
 const RUNTIME_MANIFEST_REL = 'assets/codex-runtime/runtime-manifest.json'
 const RELEASE_EVIDENCE_PREFIX = 'exports/release-evidence/'
 const RELEASE_SOURCE_EXCLUDED_PREFIXES = Object.freeze([])
+const BUILD_IDENTITY_REL = 'build/browser-live-proof/release-build.json'
 
 function sha256(value) {
   return createHash('sha256').update(value).digest('hex')
@@ -163,9 +165,13 @@ function buildReleaseSourceManifest(root = path.resolve(__dirname, '..')) {
   const digest = sha256(files.map((file) => `${JSON.stringify(file)}\n`).join(''))
   const pkg = JSON.parse(fs.readFileSync(path.join(absoluteRoot, 'package.json'), 'utf8'))
   const browserManifest = require('./browser-live-proof-manifest.cjs').buildSourceManifest(absoluteRoot)
+  const sourceView = new Set(sourcePaths(absoluteRoot, { includeDatabases: true, includeMissing: true }))
+  const changedPaths = runGit(absoluteRoot, ['diff', '--name-only', '-z', 'HEAD'])
+    + runGit(absoluteRoot, ['ls-files', '--others', '--exclude-standard', '-z'])
   return {
     version: 2,
     head: browserManifest.head,
+    dirty: changedPaths.split('\0').some((file) => sourceView.has(file)),
     branch: browserManifest.branch,
     appVersion: String(pkg.version || ''),
     digest,
@@ -422,8 +428,98 @@ function loadVerifiedStructuralReceipt(
   }
 }
 
+function releaseSourceIdentity(root) {
+  const manifest = buildReleaseSourceManifest(root)
+  return {
+    contract: 'ready_release_source_manifest_v2',
+    head: manifest.head,
+    dirty: manifest.dirty,
+    branch: manifest.branch,
+    appVersion: manifest.appVersion,
+    digest: manifest.digest,
+    fileCount: manifest.files.length,
+    runtimeManifestDigest: sha256File(path.join(root, RUNTIME_MANIFEST_REL)),
+  }
+}
+
+function readVerifiedReleaseBuildIdentity(root) {
+  let identity
+  try {
+    identity = JSON.parse(fs.readFileSync(path.join(root, BUILD_IDENTITY_REL), 'utf8'))
+  } catch (error) {
+    throw new Error(`release build identity missing or invalid: ${error.message}`)
+  }
+  if (identity?.contract !== 'ready_release_build_v1') throw new Error('invalid release build identity')
+  if (!isDeepStrictEqual(identity.source, releaseSourceIdentity(root))) {
+    throw new Error('release source changed since compilation')
+  }
+  if (identity.outputDigest !== require('./browser-live-proof-manifest.cjs').buildOutputManifest(root).digest) {
+    throw new Error('release compiled output changed since compilation')
+  }
+  return identity
+}
+
+// Only the compilation owner creates source identity. Packaging consumes it;
+// renaming/copying an artifact must never re-identify a later checkout as its source.
+function buildReleasePackageReceipt(artifactPath, options = {}) {
+  const root = path.resolve(options.root || path.resolve(__dirname, '..'))
+  const now = options.now instanceof Date ? options.now : new Date()
+  const buildIdentity = readVerifiedReleaseBuildIdentity(root)
+  return {
+    contract: 'ready_release_package_receipt_v2',
+    artifact: path.basename(artifactPath),
+    dmgSha256: sha256File(artifactPath),
+    builtAt: now.toISOString(),
+    buildIdentity,
+    // Only the clean-package owner supplies its freshly produced manifest.
+    cleanPackageManifest: options.cleanPackageManifestPath
+      ? JSON.parse(fs.readFileSync(options.cleanPackageManifestPath, 'utf8'))
+      : null,
+  }
+}
+
+function writeReleasePackageReceipt(artifactPath, options = {}) {
+  const receiptPath = `${artifactPath}.receipt.json`
+  const receipt = buildReleasePackageReceipt(artifactPath, options)
+  fs.writeFileSync(receiptPath, `${JSON.stringify(receipt, null, 2)}\n`, { mode: 0o600 })
+  return receiptPath
+}
+
+function readVerifiedReleasePackageReceipt(artifactPath) {
+  const receipt = JSON.parse(fs.readFileSync(`${artifactPath}.receipt.json`, 'utf8'))
+  if (receipt?.contract !== 'ready_release_package_receipt_v2'
+    || receipt.buildIdentity?.contract !== 'ready_release_build_v1') {
+    throw new Error('release package receipt has no compilation identity')
+  }
+  if (receipt.dmgSha256 !== sha256File(artifactPath)) throw new Error('release package digest mismatch')
+  return receipt
+}
+
+function assertPackagedReleaseBuildIdentity(receipt, embeddedBuild, runtimeManifestDigest) {
+  if (!isDeepStrictEqual(embeddedBuild, receipt.buildIdentity)
+    || runtimeManifestDigest !== embeddedBuild.source.runtimeManifestDigest) {
+    throw new Error('packaged app build identity mismatch')
+  }
+}
+
+function forwardReleasePackageReceipt(sourcePath, outputPath) {
+  const receipt = readVerifiedReleasePackageReceipt(sourcePath)
+  if (sha256File(outputPath) !== receipt.dmgSha256) throw new Error('release copied package digest mismatch')
+  const receiptPath = `${outputPath}.receipt.json`
+  fs.writeFileSync(receiptPath, `${JSON.stringify({ ...receipt, artifact: path.basename(outputPath) }, null, 2)}\n`, { mode: 0o600 })
+  return receiptPath
+}
+
 module.exports = {
+  BUILD_IDENTITY_REL,
+  releaseSourceIdentity,
+  readVerifiedReleaseBuildIdentity,
+  readVerifiedReleasePackageReceipt,
+  assertPackagedReleaseBuildIdentity,
+  forwardReleasePackageReceipt,
   RECEIPT_DIR_REL,
+  buildReleasePackageReceipt,
+  writeReleasePackageReceipt,
   RELEASE_EVIDENCE_PREFIX,
   RUNTIME_MANIFEST_REL,
   assertPathChain,

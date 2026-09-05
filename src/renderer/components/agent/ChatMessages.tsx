@@ -1,4 +1,4 @@
-import { useRef, useEffect, useMemo, useCallback } from 'react'
+import { Fragment, useRef, useEffect, useMemo, useCallback } from 'react'
 import type { ReactNode } from 'react'
 
 // EP2 dogfood gap 5 — safety margin appended to the measured composer tail.
@@ -27,7 +27,10 @@ import { isImageGenerationReferencePath } from '../../../shared/image-generation
 import WelcomePanel from './WelcomePanel'
 import { renderInline } from './chat-panel/markdown'
 import SkillAskUserPrompt from '../skill/SkillAskUserPrompt'
-import type { CodexProductTurnActionProjection } from '../../../shared/ipc-contracts/agent-runtime'
+import type {
+  CodexConversationContextBoundary,
+  CodexProductTurnActionProjection,
+} from '../../../shared/ipc-contracts/agent-runtime'
 
 // The session-tab strip + chat header overflow ~24px into the top of this
 // scroll region (MotionLayer's header row is a fixed 44px). The top padding
@@ -36,6 +39,7 @@ import type { CodexProductTurnActionProjection } from '../../../shared/ipc-contr
 const CHAT_SCROLL_TOP_FADE = 38
 interface ChatMessagesProps {
   messages: AgentMessage[]
+  contextBoundaries: CodexConversationContextBoundary[]
   messageTaskSnapshots: Record<string, React.ReactNode>
   messageGeneratedImageArtifacts: Record<string, AgentArtifact[]>
   messageToolTraceSnapshots: Record<string, React.ReactNode>
@@ -68,6 +72,7 @@ interface ChatMessagesProps {
 
 export default function ChatMessages({
   messages,
+  contextBoundaries,
   messageTaskSnapshots,
   messageGeneratedImageArtifacts,
   messageToolTraceSnapshots,
@@ -171,25 +176,42 @@ export default function ChatMessages({
           at the bottom and push earlier ones up. */}
       {!onlyWelcomePresent && <div style={{ marginTop: 'auto' }} aria-hidden />}
 
+      {contextBoundaries.filter((boundary) => boundary.previousVisibleMessageAnchor === null).map(
+        (boundary) => (
+          <div key={boundary.operationId} data-ready-context-boundary={boundary.operationId} role="separator">
+            从这里开始新的上下文
+          </div>
+        ),
+      )}
+
       {/* Messages */}
       {visibleMessages.map((msg, index) => {
+        const boundaryMarkers = contextBoundaries.filter(
+          (boundary) => boundary.previousVisibleMessageAnchor === msg.id,
+        ).map((boundary) => (
+          <div key={boundary.operationId} data-ready-context-boundary={boundary.operationId} role="separator">
+            从这里开始新的上下文
+          </div>
+        ))
         // agent_interaction — render the inline question card as a special
         // message. Skip the normal user/agent bubble pipeline entirely; the
         // card handles its own pending/collapsed presentation.
         if (msg.type === 'ask_user_questions' && msg.askUserQuestions) {
           return (
-            <div
-              key={msg.id}
-              data-chat-message-ask-user={msg.id}
-              className="flex flex-col max-w-[90%] w-full"
-              style={{ gap: 10, paddingRight: 18, boxSizing: 'border-box' }}
-            >
-              <AskUserQuestionsCard
-                card={msg.askUserQuestions}
-                onSubmit={submitAskUserQuestionsAnswers}
-                onCancel={cancelAskUserQuestionsCard}
-              />
-            </div>
+            <Fragment key={msg.id}>
+              <div
+                data-chat-message-ask-user={msg.id}
+                className="flex flex-col max-w-[90%] w-full"
+                style={{ gap: 10, paddingRight: 18, boxSizing: 'border-box' }}
+              >
+                <AskUserQuestionsCard
+                  card={msg.askUserQuestions}
+                  onSubmit={submitAskUserQuestionsAnswers}
+                  onCancel={cancelAskUserQuestionsCard}
+                />
+              </div>
+              {boundaryMarkers}
+            </Fragment>
           )
         }
         const showMessageDivider = index < visibleMessages.length - 1 && (msg.type === 'user' || msg.type === 'agent')
@@ -449,6 +471,7 @@ export default function ChatMessages({
                 }}
               />
             ) : null}
+            {boundaryMarkers}
           </div>
         )
       })}

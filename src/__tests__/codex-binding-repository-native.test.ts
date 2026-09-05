@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, rmSync, existsSync, mkdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
@@ -20,6 +20,7 @@ import {
 import {
   createCodexUpstreamProfileSnapshot,
   digestCanonicalJson,
+  resolveCodexNativeModelSettings,
 } from '../main/modules/agent-control/codex-runtime/codex-model-gateway-contract'
 import { CodexModelGatewayRepository } from '../main/modules/agent-control/codex-runtime/codex-model-gateway-authority'
 import {
@@ -111,6 +112,40 @@ import { projectCodexHeadActionProjection } from '../main/modules/agent-control/
 type NativeDb = import('better-sqlite3').Database
 
 const admittedAt = '2026-08-07T01:00:00.000Z'
+import { fileURLToPath } from 'node:url'
+import { createCodexProductionPorts } from './helpers/codex-production-composition-harness'
+import { CodexProductRunPreparer } from '../main/modules/agent-control/codex-runtime/codex-product-run-preparer'
+import { buildExplicitNoSkillAuthorization } from '../main/modules/agent-control/skills/skill-tool-authorization'
+import { buildReadyTurnToolAuthorization } from '../main/modules/agent-control/codex-runtime/codex-tool-surface'
+import { resolveCodexThreadInstructionContract } from '../main/modules/agent-control/codex-runtime/codex-product-turn-authorization'
+
+// Must resolve to the same native thread config the seeded head froze; a real
+// difference is a real `thread_config_changed`, not something the test may relax.
+const productionProfileConfig = {
+  provider: 'openai',
+  baseUrl: 'http://127.0.0.1:10532/v1',
+  apiKey: 'ready-oauth-proxy-key-12345678901234567890',
+  model: 'gpt-5.6-terra',
+  authMode: 'chatgpt-oauth',
+  agentProtocol: 'openai',
+  wireApi: 'responses',
+  reasoningEffort: 'high',
+  contextWindowOverride: 272_000,
+  maxOutputTokensOverride: 8_192,
+  toolUseMode: 'on',
+  nativeVideoMode: 'off',
+}
+
+const testRuntimeManifestDigest = digestCanonicalJson({ fixture: 'codex-binding-runtime-v1' })
+const testRuntimeContract = {
+  runtimeManifestDigest: testRuntimeManifestDigest,
+  protocolSchemaDigest: 'protocol-schema-digest',
+  runtimeContinuityCatalog: {
+    contract: 'ready_runtime_continuity_catalog_v1' as const,
+    targetManifestDigest: testRuntimeManifestDigest,
+    transitions: [],
+  },
+}
 let activeAdmissionRepository: CodexBindingRepository | null = null
 let activeAdmissionDatabase: DatabaseConnection | null = null
 
@@ -247,6 +282,9 @@ function admission(
   const { ingressAdmittedDigest: overrideDigest, ...otherOverrides } = overrides
   const repository = activeAdmissionRepository
   if (!repository) throw new Error('test_admission_repository_missing')
+  const activeBinding = repository.readActiveAliasBinding(run.conversationAlias.aliasId)
+  const needsContinuationCandidate = reservation.existingThread
+    || activeBinding?.materializationKind === 'fresh_root_with_tail'
   const prepared = run.ingress.attemptKind === 'user_ingress'
     ? {
         ...run,
@@ -257,7 +295,7 @@ function admission(
               aliasId: run.conversationAlias.aliasId,
               aliasGeneration: run.conversationAlias.aliasGeneration,
               currentRuntimeManifestDigest: overrides.runtimeManifestDigest
-                || 'runtime-manifest-digest',
+                || testRuntimeManifestDigest,
               currentProtocolSchemaDigest: overrides.protocolSchemaDigest
                 || 'protocol-schema-digest',
             }))
@@ -283,7 +321,7 @@ function admission(
     threadBindingId: 'thread-binding-1',
     isolatedThreadCwd: '/tmp/ready-codex/thread-binding-1',
     turnRequestId: `turn-request-${run.runId}`,
-    runtimeManifestDigest: 'runtime-manifest-digest',
+    runtimeManifestDigest: testRuntimeManifestDigest,
     protocolSchemaDigest: 'protocol-schema-digest',
     instructionContractDigest: 'instruction-contract-digest',
     codexModel: 'ready-e0-model',
@@ -298,6 +336,23 @@ function admission(
       messageMetaDigest: digestCanonicalJson({}),
       executionBindingDigest: digestCanonicalJson({ schemaVersion: 1, runId: run.runId }),
     },
+    continuationCandidate: needsContinuationCandidate
+      ? {
+          model: otherOverrides.codexModel || 'ready-e0-model',
+          threadConfig: resolveCodexNativeModelSettings(
+            new CodexModelGatewayRepository(activeAdmissionDatabase!).readSnapshot(
+              otherOverrides.upstreamProfileSnapshotRef || 'profile-ref-1',
+              otherOverrides.upstreamProfileSnapshotDigest || defaultThreadProfile.snapshotDigest,
+            ),
+          ).threadConfig,
+          isolatedThreadCwd: otherOverrides.isolatedThreadCwd
+            || '/tmp/ready-codex/thread-binding-1',
+          cwdAvailable: true,
+          instructionContractDigest: otherOverrides.instructionContractDigest
+            || 'instruction-contract-digest',
+          currentToolSurface: run.readyToolSurface,
+        }
+      : null,
     ...otherOverrides,
   }
   return {
@@ -343,11 +398,12 @@ function recordCompletedTerminal(
     responseDigest?: string | null
   }> = [],
   codexThreadId = 'thread-native-1',
+  readyTaskId = `task-${readyRunId}`,
 ): string {
   const candidateText = 'done'
-  const messageId = `assistant:task-${readyRunId}:${readyRunId}:terminal`
+  const messageId = `assistant:${readyTaskId}:${readyRunId}:terminal`
   const meta = {
-    taskId: `task-${readyRunId}`,
+    taskId: readyTaskId,
     runId: readyRunId,
     terminalReason: 'done',
   }
@@ -358,7 +414,7 @@ function recordCompletedTerminal(
     engineOutcome: 'completed',
     candidate: {
       kind: 'native_terminal',
-      readyTaskId: `task-${readyRunId}`,
+      readyTaskId,
       readyRunId,
       scopeId: 'scope-1',
       codexThreadId,
@@ -807,6 +863,7 @@ function preparePublicationRecoveryFixture(
       PreparedCodexProductRun['ingress'],
       { kind: 'user_ingress' }
     >['currentDocumentAnchor']>
+    admissionOverrides?: Partial<CodexAdmittedBindingInput>
   },
 ) {
   const run = prepared(input.runId)
@@ -884,7 +941,7 @@ function preparePublicationRecoveryFixture(
       : {}),
   })
   prepareReadyParents(db, repository, run)
-  repository.admitProductBindings(admission(run, lazyReservation(run.runId)))
+  repository.admitProductBindings(admission(run, lazyReservation(run.runId), input.admissionOverrides))
   repository.activateStartDispatch({
     connectionEpoch: 'epoch-recovery', rpcId: 1, method: 'thread/start',
     bindingLookupKey: '/tmp/ready-codex/thread-binding-1',
@@ -1007,7 +1064,7 @@ function prepareReadyParents(
       aliasId: run.conversationAlias.aliasId,
       aliasGeneration: run.conversationAlias.aliasGeneration,
       readyScopeId: run.readyToolHostIdentity.scopeId,
-      runtimeManifestDigest: 'runtime-manifest-digest',
+      runtimeManifestDigest: testRuntimeManifestDigest,
       protocolSchemaDigest: 'protocol-schema-digest',
       createdAt: admittedAt,
     })
@@ -1126,7 +1183,13 @@ async function withRepository(
     __runMigrationForTests('110_codex_tool_request_rpc_binding', db as unknown as MigrationDatabase)
     __runMigrationForTests('111_codex_gateway_budget_lanes', db as unknown as MigrationDatabase)
     __runMigrationForTests('113_ready_memory_truth', db as unknown as MigrationDatabase)
-    const repository = new CodexBindingRepository(db as unknown as DatabaseConnection)
+    __runMigrationForTests('118_codex_native_continuity_terminal_head_v3', db as unknown as MigrationDatabase)
+    __runMigrationForTests('119_gateway_exchange_redaction_admission_guard', db as unknown as MigrationDatabase)
+    __runMigrationForTests('120_codex_conversation_context_boundaries', db as unknown as MigrationDatabase)
+    const repository = new CodexBindingRepository(
+      db as unknown as DatabaseConnection,
+      testRuntimeContract,
+    )
     new CodexModelGatewayRepository(db as unknown as DatabaseConnection, repository).storeSnapshot({
       ...defaultThreadProfile, snapshotRef: 'profile-ref-1', createdAt: admittedAt,
     })
@@ -1717,7 +1780,7 @@ test('product admission can join the Ready ingress transaction and rolls back ev
       aliasId: 'scope-1',
       aliasGeneration: 1,
       readyScopeId: 'scope-1',
-      runtimeManifestDigest: 'runtime-manifest-digest',
+      runtimeManifestDigest: testRuntimeManifestDigest,
       protocolSchemaDigest: 'protocol-schema-digest',
       createdAt: admittedAt,
     })
@@ -1794,7 +1857,7 @@ test('empty alias creation joins the canonical conversation transaction', async 
       aliasId: 'scope-atomic-alias',
       aliasGeneration: 1,
       readyScopeId: 'scope-atomic-alias',
-      runtimeManifestDigest: 'runtime-manifest-digest',
+      runtimeManifestDigest: testRuntimeManifestDigest,
       protocolSchemaDigest: 'protocol-schema-digest',
       createdAt: admittedAt,
     }
@@ -1921,7 +1984,7 @@ test('response-first turn keeps durable capacity held until exact client identit
   })
 })
 
-test('migrations 088-110 create Codex-owned tables and immutable binding evidence', async (t) => {
+test('migrations 088-120 create Codex-owned tables and immutable binding evidence', async (t) => {
   await withRepository(t, (db, repository) => {
     const tables = db.prepare(`
       SELECT name FROM sqlite_master
@@ -1929,6 +1992,7 @@ test('migrations 088-110 create Codex-owned tables and immutable binding evidenc
     `).all() as Array<{ name: string }>
     assert.deepEqual(tables.map((row) => row.name), [
       'codex_browser_verifier_attempts',
+      'codex_conversation_context_boundaries',
       'codex_fence_owner_transfers',
       'codex_manual_compaction_bindings',
       'codex_manual_compaction_dispatch_attempts',
@@ -2398,7 +2462,7 @@ test('thread resume evidence binds a same-connection read before resume and is i
     let lease = repository.createProcessLeaseIntent({
       processLeaseId: 'resume-lease', ownerMainBootId: 'main-boot-1', ownerMainPid: 10,
       ownerMainProcessStartIdentity: 'main-process', sidecarSpawnInstanceId: 'resume-spawn',
-      connectionEpoch: 'resume-epoch', runtimeManifestDigest: 'runtime-manifest-digest',
+      connectionEpoch: 'resume-epoch', runtimeManifestDigest: testRuntimeManifestDigest,
       binarySha256: 'binary-digest', executablePath: '/opt/ready/codex',
       isolatedStateDir: '/tmp/ready-codex', spawnIntentAt: admittedAt,
       spawnVisibilityDeadlineAt: admittedAt,
@@ -2451,7 +2515,7 @@ test('thread resume evidence binds a same-connection read before resume and is i
     let closedLease = repository.createProcessLeaseIntent({
       processLeaseId: 'closed-resume-lease', ownerMainBootId: 'main-boot-1', ownerMainPid: 10,
       ownerMainProcessStartIdentity: 'main-process', sidecarSpawnInstanceId: 'closed-resume-spawn',
-      connectionEpoch: 'closed-resume-epoch', runtimeManifestDigest: 'runtime-manifest-digest',
+      connectionEpoch: 'closed-resume-epoch', runtimeManifestDigest: testRuntimeManifestDigest,
       binarySha256: 'binary-digest', executablePath: '/opt/ready/codex',
       isolatedStateDir: '/tmp/ready-codex', spawnIntentAt: admittedAt,
       spawnVisibilityDeadlineAt: admittedAt,
@@ -2575,7 +2639,7 @@ test('empty alias generations charge no start capacity and idle reset inserts th
       aliasId: 'scope-empty',
       aliasGeneration: 1,
       readyScopeId: 'scope-empty',
-      runtimeManifestDigest: 'runtime-manifest-digest',
+      runtimeManifestDigest: testRuntimeManifestDigest,
       protocolSchemaDigest: 'protocol-schema-digest',
       createdAt: admittedAt,
     })
@@ -2610,7 +2674,7 @@ test('production close retires every supported idle state without creating a suc
       aliasId: 'scope-close-empty',
       aliasGeneration: 1,
       readyScopeId: 'scope-close-empty',
-      runtimeManifestDigest: 'runtime-manifest-digest',
+      runtimeManifestDigest: testRuntimeManifestDigest,
       protocolSchemaDigest: 'protocol-schema-digest',
       createdAt: admittedAt,
     })
@@ -2840,7 +2904,7 @@ test('production close preserves the alias on pending work, native activity, or 
       aliasId: 'scope-close-drift',
       aliasGeneration: 1,
       readyScopeId: 'scope-close-drift',
-      runtimeManifestDigest: 'runtime-manifest-digest',
+      runtimeManifestDigest: testRuntimeManifestDigest,
       protocolSchemaDigest: 'protocol-schema-digest',
       createdAt: admittedAt,
     })
@@ -2928,7 +2992,7 @@ test('product admission rejects missing or divergent Ready run ownership without
       aliasId: 'scope-1',
       aliasGeneration: 1,
       readyScopeId: 'scope-1',
-      runtimeManifestDigest: 'runtime-manifest-digest',
+      runtimeManifestDigest: testRuntimeManifestDigest,
       protocolSchemaDigest: 'protocol-schema-digest',
       createdAt: admittedAt,
     })
@@ -3054,11 +3118,11 @@ test('existing thread rejects route and runtime drift without durable side effec
       overrides: Partial<CodexAdmittedBindingInput>
       code: string
     }> = [
-      { overrides: { codexModel: 'changed-model' }, code: 'model_change_requires_new_thread' },
-      { overrides: { isolatedThreadCwd: '/tmp/changed-cwd' }, code: 'thread_contract_change_requires_new_thread' },
-      { overrides: { instructionContractDigest: 'changed-instructions' }, code: 'thread_contract_change_requires_new_thread' },
-      { overrides: { runtimeManifestDigest: 'changed-runtime' }, code: 'action_admission_ref_stale' },
-      { overrides: { protocolSchemaDigest: 'changed-protocol' }, code: 'action_admission_ref_stale' },
+      { overrides: { codexModel: 'changed-model' }, code: 'model_changed' },
+      { overrides: { isolatedThreadCwd: '/tmp/changed-cwd' }, code: 'cwd_changed' },
+      { overrides: { instructionContractDigest: 'changed-instructions' }, code: 'instruction_contract_changed' },
+      { overrides: { runtimeManifestDigest: 'changed-runtime' }, code: 'current_runtime_contract_mismatch' },
+      { overrides: { protocolSchemaDigest: 'changed-protocol' }, code: 'current_runtime_contract_mismatch' },
     ]
     drifts.forEach(({ overrides, code }, index) => {
       const run = prepared(`run-drift-${index}`)
@@ -3103,7 +3167,7 @@ test('existing thread rejects route and runtime drift without durable side effec
         existingReservation(surfaceRun.runId),
       )),
       (error: unknown) => error instanceof CodexBindingRepositoryError
-        && error.code === 'tool_surface_change_requires_new_thread',
+        && error.code === 'native_tool_surface_extension_required',
     )
     assert.equal(db.prepare(`SELECT COUNT(*) AS count FROM codex_turn_bindings`).get<{ count: number }>()?.count, 1)
   })
@@ -3223,7 +3287,7 @@ test('existing native thread rejects context-window drift with an explicit gener
         },
       )),
       (error: unknown) => error instanceof CodexBindingRepositoryError
-        && error.code === 'native_thread_config_change_requires_new_generation',
+        && error.code === 'thread_config_changed',
     )
     assert.equal(db.prepare(`SELECT COUNT(*) AS count FROM codex_turn_bindings`)
       .get<{ count: number }>()?.count, 1)
@@ -3807,7 +3871,7 @@ test('publication divergence creates and materializes one native-fork successor'
     let forkLease = repository.createProcessLeaseIntent({
       processLeaseId: 'fork-recovery-lease', ownerMainBootId: 'main-boot-fork', ownerMainPid: 20,
       ownerMainProcessStartIdentity: 'main-fork-process', sidecarSpawnInstanceId: 'fork-spawn',
-      connectionEpoch: 'epoch-fork-recovery', runtimeManifestDigest: 'runtime-manifest-digest',
+      connectionEpoch: 'epoch-fork-recovery', runtimeManifestDigest: testRuntimeManifestDigest,
       binarySha256: 'binary-digest', executablePath: '/opt/ready/codex',
       isolatedStateDir: '/tmp/ready-codex', spawnIntentAt: admittedAt,
       spawnVisibilityDeadlineAt: admittedAt,
@@ -3935,7 +3999,10 @@ test('publication divergence creates and materializes one native-fork successor'
     const Database = loadSqliteAfterGuardForTest()
     const manualDb = new Database(db.serialize())
     try {
-      const manualRepository = new CodexBindingRepository(manualDb as unknown as DatabaseConnection)
+      const manualRepository = new CodexBindingRepository(
+        manualDb as unknown as DatabaseConnection,
+        testRuntimeContract,
+      )
       manualRepository.beginManualCompaction({
         manualCompactionId: 'fork-metadata-manual', threadBindingId: targetId, ownerMainBootId: 'main-boot-1',
         codexModel: 'ready-e0-model', upstreamProfileSnapshotRef: 'profile-ref-1',
@@ -4386,7 +4453,7 @@ test('first-turn divergence creates a fresh root with one immutable text tail', 
     assert.throws(() => repository.admitProductBindings(admission(retry, lazyReservation(retry.runId), {
       threadBindingId: head!.threadBindingId, isolatedThreadCwd: '/tmp/ready-codex/fresh-root-retry',
       upstreamProfileSnapshotRef: changedContext.snapshotRef, upstreamProfileSnapshotDigest: changedContext.snapshotDigest,
-    })), /retry_native_inherited_contract_mismatch/)
+    })), /thread_config_changed/)
     assert.equal(db.prepare(`SELECT native_inherited_contract_digest AS digest FROM codex_thread_bindings WHERE thread_binding_id = ?`)
       .get<{ digest: string | null }>(head!.threadBindingId)?.digest, null)
     repository.admitProductBindings(retryAdmission)
@@ -4491,7 +4558,7 @@ test('ordinary admission supersedes a structured tail item without sending it to
     assert.equal(tail[0].policy, 'resource_restatement_required')
     const before = projectCodexHeadActionProjection(repository.readHeadActionFacts({
       aliasId: 'scope-1', aliasGeneration: 2,
-      currentRuntimeManifestDigest: 'runtime-manifest-digest',
+      currentRuntimeManifestDigest: testRuntimeManifestDigest,
       currentProtocolSchemaDigest: 'protocol-schema-digest',
     }))
     assert.deepEqual(before.actions.send_new_message.consequence, {
@@ -4539,7 +4606,7 @@ test('ordinary admission supersedes a structured tail item without sending it to
     assert.deepEqual(repository.readLiveUncommittedUserTail(targetId), [])
     const after = projectCodexHeadActionProjection(repository.readHeadActionFacts({
       aliasId: 'scope-1', aliasGeneration: 2,
-      currentRuntimeManifestDigest: 'runtime-manifest-digest',
+      currentRuntimeManifestDigest: testRuntimeManifestDigest,
       currentProtocolSchemaDigest: 'protocol-schema-digest',
     }))
     assert.equal(after.actions.send_new_message.consequence, null)
@@ -4618,8 +4685,8 @@ test('user ingress replaces a stranded pristine alias from an older runtime cont
 
     const resolved = repository.refreshPristineFreshStartHeadAtomic({
       aliasId: 'scope-1',
-      runtimeManifestDigest: 'runtime-manifest-digest-v2',
-      protocolSchemaDigest: 'protocol-schema-digest-v2',
+      runtimeManifestDigest: testRuntimeManifestDigest,
+      protocolSchemaDigest: 'protocol-schema-digest',
       createdAt: '2026-08-07T00:02:00.000Z',
     })
     assert.equal(resolved.kind, 'refreshed')
@@ -4647,8 +4714,8 @@ test('user ingress replaces a stranded pristine alias from an older runtime cont
       },
       {
         alias_generation: 3,
-        runtime_manifest_digest: 'runtime-manifest-digest-v2',
-        protocol_schema_digest: 'protocol-schema-digest-v2',
+        runtime_manifest_digest: testRuntimeManifestDigest,
+        protocol_schema_digest: 'protocol-schema-digest',
         retired_reason: null,
       },
     ])
@@ -4670,7 +4737,7 @@ test('user ingress replaces a stranded pristine alias from an older runtime cont
         },
       )),
       (error: unknown) => error instanceof CodexBindingRepositoryError
-        && error.code === 'action_admission_ref_stale',
+        && error.code === 'current_runtime_contract_mismatch',
     )
     assert.equal(db.prepare(`
       SELECT COUNT(*) AS count FROM codex_turn_bindings WHERE ready_run_id = ?
@@ -4684,8 +4751,8 @@ test('user ingress replaces a stranded pristine alias from an older runtime cont
       lazyReservation(run.runId),
       {
         threadBindingId: resolved.binding.threadBindingId,
-        runtimeManifestDigest: 'runtime-manifest-digest-v2',
-        protocolSchemaDigest: 'protocol-schema-digest-v2',
+        runtimeManifestDigest: testRuntimeManifestDigest,
+        protocolSchemaDigest: 'protocol-schema-digest',
         messageVisibilityEpoch: 1,
       },
     )), {
@@ -4776,7 +4843,7 @@ test('user ingress blocks an idle used thread when the root tool surface changes
 
     const resolved = repository.refreshPristineFreshStartHeadAtomic({
       aliasId: 'scope-1',
-      runtimeManifestDigest: 'runtime-manifest-digest',
+      runtimeManifestDigest: testRuntimeManifestDigest,
       protocolSchemaDigest: 'protocol-schema-digest',
       createdAt: '2026-08-07T00:02:00.000Z',
       currentToolSurfaceDigest: digestCanonicalJson([{ name: 'calendar_update_event' }]),
@@ -4802,7 +4869,7 @@ test('user ingress blocks an idle used thread when the root tool surface changes
 
     const sameSurface = repository.refreshPristineFreshStartHeadAtomic({
       aliasId: 'scope-1',
-      runtimeManifestDigest: 'runtime-manifest-digest',
+      runtimeManifestDigest: testRuntimeManifestDigest,
       protocolSchemaDigest: 'protocol-schema-digest',
       createdAt: '2026-08-07T00:03:00.000Z',
       currentToolSurfaceDigest: digestCanonicalJson([{ name: 'calendar_update_event' }]),
@@ -4825,7 +4892,7 @@ test('user ingress keeps a matching idle started thread on the same generation',
 
     const resolved = repository.refreshPristineFreshStartHeadAtomic({
       aliasId: 'scope-1',
-      runtimeManifestDigest: 'runtime-manifest-digest',
+      runtimeManifestDigest: testRuntimeManifestDigest,
       protocolSchemaDigest: 'protocol-schema-digest',
       createdAt: '2026-08-07T00:02:00.000Z',
       currentToolSurfaceDigest: digest,
@@ -4867,7 +4934,7 @@ test('new Main claims a product fence only from exact dead-owner and tree-zero e
     let lease = repository.createProcessLeaseIntent({
       processLeaseId: 'old-main-lease', ownerMainBootId: 'main-boot-1', ownerMainPid: 10,
       ownerMainProcessStartIdentity: 'old-main-process', sidecarSpawnInstanceId: 'old-spawn',
-      connectionEpoch: 'old-epoch', runtimeManifestDigest: 'runtime-manifest-digest',
+      connectionEpoch: 'old-epoch', runtimeManifestDigest: testRuntimeManifestDigest,
       binarySha256: 'binary-digest', executablePath: '/opt/ready/codex',
       isolatedStateDir: '/tmp/ready-codex', spawnIntentAt: admittedAt,
       spawnVisibilityDeadlineAt: admittedAt,
@@ -4884,7 +4951,7 @@ test('new Main claims a product fence only from exact dead-owner and tree-zero e
     let newLease = repository.createProcessLeaseIntent({
       processLeaseId: 'new-main-lease', ownerMainBootId: 'main-boot-2', ownerMainPid: 20,
       ownerMainProcessStartIdentity: 'new-main-process', sidecarSpawnInstanceId: 'new-spawn',
-      connectionEpoch: 'new-epoch', runtimeManifestDigest: 'runtime-manifest-digest',
+      connectionEpoch: 'new-epoch', runtimeManifestDigest: testRuntimeManifestDigest,
       binarySha256: 'binary-digest', executablePath: '/opt/ready/codex',
       isolatedStateDir: '/tmp/ready-codex', spawnIntentAt: admittedAt,
       spawnVisibilityDeadlineAt: admittedAt,
@@ -8451,6 +8518,36 @@ test('a failed input changes restatement reason only after formal manual compact
   })
 })
 
+test('product Retry presentation consumes the canonical current head contract decision', async (t) => {
+  await withRepository(t, (db, repository) => {
+    const { b } = prepareRetainedFailureFixture(db, repository)
+    let calls = 0
+    const currentRepository = new CodexBindingRepository(
+      db as unknown as DatabaseConnection,
+      {
+        ...testRuntimeContract,
+        resolveHeadContractBlocker(input) {
+          calls += 1
+          assert.equal(input.aliasId, 'scope-1')
+          assert.equal(input.workbenchMode, 'document')
+          return 'native_tool_definition_changed'
+        },
+      },
+    )
+    const currentEnvironment = {
+      requestedWorkbenchMode: 'document',
+      trustedWorkbenchMode: 'document',
+    } as const
+    const context = currentRepository.readProductTurnActionContext(b.runId, currentEnvironment)
+    assert.equal(context?.headFacts.headContractBlocker, 'native_tool_definition_changed')
+    const presentation = currentRepository.readProductTurnPresentation(b.runId, currentEnvironment)
+    assert.equal(calls, 2)
+    assert.notEqual(presentation.actionProjection.retry_failed_task.availability, 'ready')
+    assert.ok(presentation.actionProjection.retry_failed_task.blockers.length > 0,
+      JSON.stringify(presentation.actionProjection.retry_failed_task.blockers))
+  })
+})
+
 test('ordinary accepted coverage does not claim a failure was compacted', async (t) => {
   await withRepository(t, (db, repository) => {
     const { b, bStart } = prepareRetainedFailureFixture(db, repository)
@@ -8644,5 +8741,361 @@ test('fork inherits compacted facts before and after bind', async (t) => {
     assert.deepEqual(repository.readProductTurnPresentation(b.runId).actionProjection.retry_failed_task.blockers,
       ['compacted_failed_turn_restatement_required'])
     assert.equal(repository.readProductTurnPresentation(d.runId).actionProjection.retry_failed_task.availability, 'ready')
+  })
+})
+
+// P1-3: the one seam the split fixtures never joined — a production `prepareIngress`
+// result admitted by the REAL repository on a REAL fresh_root_with_tail head, then
+// dispatched natively and read back by a reopened repository. No stub repository and
+// no hand-built prepare.
+//
+// Scope this test does NOT claim: there is no real gateway/provider hop. The
+// provider leg stays covered separately by `probe-codex-runtime-continuity.mjs`.
+test('production ingress admits a real fresh-root tail, closes it out and continues after restart', async (t) => {
+  await withRepository(t, async (db, repository) => {
+    const productionAssetRoot = fileURLToPath(new URL('../../assets/codex-runtime', import.meta.url))
+    // The seeded head must be one this build could itself have written: same
+    // instruction contract and a cwd that still exists. Anything else is a real
+    // requires-new-context, not something the fixture may paper over.
+    const productionInstruction = resolveCodexThreadInstructionContract({
+      assetRoot: productionAssetRoot, host: null, skillAuthorization: { mode: 'none' },
+    })
+    // The fixture's dispatch lookup key is its default cwd, so make that path
+    // reachable rather than relocating the binding.
+    const seededCwd = '/tmp/ready-codex/thread-binding-1'
+    const seededCwdExisted = existsSync(seededCwd)
+    if (!seededCwdExisted) mkdirSync(seededCwd, { recursive: true })
+    t.after(() => { if (!seededCwdExisted) rmSync(seededCwd, { recursive: true, force: true }) })
+    const { run } = preparePublicationRecoveryFixture(db, repository, {
+      runId: 'run-production-fresh-root',
+      admissionOverrides: {
+        instructionContractDigest: productionInstruction.instructionContractDigest,
+      },
+    })
+    const candidate = nativeFailureCandidate(run, 'failed')
+    const engineReceipt = repository.recordEngineTerminalCandidate({
+      readyRunId: run.runId,
+      codexThreadId: candidate.codexThreadId,
+      codexTurnId: candidate.codexTurnId,
+      engineOutcome: candidate.engineOutcome,
+      candidate,
+      recordedAt: admittedAt,
+    })
+    db.exec('BEGIN IMMEDIATE')
+    db.prepare(`UPDATE task_projections SET status = 'failed' WHERE task_id = ?`).run(run.taskId)
+    const productTerminalDigest = insertFailureTerminalMessage(db, run, '本轮未能完成。', 'blocked_external')
+    const closeout = repository.completePublicationDivergenceCloseoutInOpenTransaction({
+      readyRunId: run.runId,
+      productTerminalDigest,
+      closeoutAt: admittedAt,
+      terminalEvidence: terminalCloseoutEvidence(run, candidate, engineReceipt),
+    })
+    db.exec('COMMIT')
+
+    const head = repository.readActiveAliasBinding('scope-1')
+    assert.equal(head?.materializationKind, 'fresh_root_with_tail')
+    assert.equal(head?.codexThreadId, null)
+    const tail = repository.readLiveUncommittedUserTail(head!.threadBindingId)
+    assert.equal(tail.length, 1)
+    assert.equal(tail[0].policy, 'untrusted_text_history')
+
+    const output = mkdtempSync(join(tmpdir(), 'ready-production-fresh-root-'))
+    t.after(() => rmSync(output, { recursive: true, force: true }))
+    const writes = { count: 0 }
+    const database = {
+      getRawDb: () => db,
+      addChatMessage(id: string, scopeId: string, role: string, content: string,
+        timestamp: string, meta: object, epoch: number) {
+        writes.count += 1
+        db.prepare(`INSERT INTO chat_messages (id, conversation_id, role, content, timestamp, meta_json, message_visibility_epoch)
+          VALUES (?, ?, ?, ?, ?, ?, ?)`).run(id, scopeId, role, content, timestamp, JSON.stringify(meta), epoch)
+      },
+    }
+    const scope = {
+      id: 'scope-1', aliasGeneration: head!.aliasGeneration, messageVisibilityEpoch: 0,
+      agent: 'butler', activeAgentId: 'butler', sourceKind: 'local', meta: {},
+    }
+    const host = {
+      getScope: () => scope,
+      runtime: { async resolveTrustedRequestEnvironment() { return { workbenchMode: 'browser' } } },
+      resolveSkillAuthorizationForTurn: () => buildExplicitNoSkillAuthorization('no_skill_signal'),
+      resolveToolTurnSnapshot: (value: {
+        authorizationId: string
+        authorization: ReturnType<typeof buildExplicitNoSkillAuthorization>
+      }) => ({
+        readyToolSurface: run.readyToolSurface,
+        readyTurnToolAuthorization: buildReadyTurnToolAuthorization({
+          ...value, toolSurface: run.readyToolSurface,
+        }),
+      }),
+      async createInitialExecutionBinding(value: { runId: string }) {
+        return { schemaVersion: 1 as const, runId: value.runId }
+      },
+      // Real parent rows: the production path and every later readback expect a
+      // projection and run-meta row to exist for the admitted run.
+      getTaskProjectionStore: () => ({
+        create(value: { taskId: string; runId: string; scopeId: string; executionBinding: unknown }) {
+          writes.count += 1
+          db.prepare(`INSERT INTO task_projections (task_id, run_id, scope_id, status, execution_binding_json, message_visibility_epoch)
+            VALUES (?, ?, ?, 'running', ?, 0)`)
+            .run(value.taskId, value.runId, value.scopeId, JSON.stringify(value.executionBinding))
+        },
+      }),
+      createCodexActiveRunMetaInOpenTransaction(value: {
+        runId: string; taskId: string; scopeId: string; executionBinding: unknown
+      }) {
+        writes.count += 1
+        db.prepare(`INSERT INTO run_meta (run_id, task_id, scope_id, status, execution_binding_json, message_visibility_epoch)
+          VALUES (?, ?, ?, 'running', ?, 0)`)
+          .run(value.runId, value.taskId, value.scopeId, JSON.stringify(value.executionBinding))
+      },
+    }
+    const buildPorts = (activeRepository: CodexBindingRepository) => createCodexProductionPorts({
+      input: {
+        database,
+        settings: {
+          getAIWorkspace: () => ({ profiles: [{ id: 'profile-test-default', config: productionProfileConfig }] }),
+          getActiveAIProfileId: () => 'profile-test-default',
+        },
+        providerReadiness: { async ensureReady() {} },
+      },
+      host,
+      repository: activeRepository,
+      rawDb: db,
+      resolveHeadContinuation: () => null,
+      issueBeginNewContextAction: (action: { scopeId: string; scopeEpoch: number
+        candidateEvidenceDigest: string; consequenceDigest: string; draftRevision: number | null }) => {
+        const unsigned = {
+          contract: 'codex_begin_new_context_action_v1' as const,
+          operationId: `begin-context-${action.candidateEvidenceDigest}`,
+          scopeId: action.scopeId, scopeEpoch: action.scopeEpoch,
+          sourceThreadBindingId: head!.threadBindingId, sourceAliasGeneration: head!.aliasGeneration,
+          sourceRevision: 1, sourceEvidenceDigest: '5'.repeat(64),
+          candidateEvidenceDigest: action.candidateEvidenceDigest,
+          consequenceDigest: action.consequenceDigest, draftRevision: action.draftRevision,
+        }
+        return { ...unsigned, digest: digestCanonicalJson(unsigned) }
+      },
+      verified: {
+        manifestDigest: testRuntimeManifestDigest,
+        manifest: { stableV2SchemaSha256: 'protocol-schema-digest' },
+        assetRoot: productionAssetRoot,
+      },
+      gate: { assertOpen() {} },
+      state: { threadCwdRoot: output },
+      preparer: new CodexProductRunPreparer(),
+      preparedDetails: new Map(),
+      detailPrepared: new Map(),
+      registry: new CodexStartIdentityRegistry({ capacity: 8 }),
+      readyMemoryRepository: new ReadyMemoryRepository(db as unknown as DatabaseConnection),
+      gatewayRepository: new CodexModelGatewayRepository(db as unknown as DatabaseConnection, activeRepository),
+      ownerMainBootId: 'fresh-root-boot',
+      nativeRuntime: { async threadRead() { throw new Error('unexpected_native_read') } },
+    })
+
+    const sendOnce = async (
+      ports: Awaited<ReturnType<typeof buildPorts>>,
+      activeRepositoryForSend: CodexBindingRepository,
+      requestId: string,
+      text: string,
+    ) => {
+      const activeHead = projectCodexHeadActionProjection(activeRepositoryForSend.readHeadActionFacts({
+        aliasId: 'scope-1',
+        aliasGeneration: activeRepositoryForSend.readActiveAliasBinding('scope-1')!.aliasGeneration,
+        currentRuntimeManifestDigest: testRuntimeManifestDigest,
+        currentProtocolSchemaDigest: 'protocol-schema-digest',
+      }))
+      assert.equal(activeHead.actions.send_new_message.availability, 'ready',
+        JSON.stringify(activeHead.actions.send_new_message.blockers))
+      const request = {
+        scopeId: 'scope-1', requestId, message: text,
+        expectedMessageVisibilityEpoch: 0,
+        actionAdmissionRef: {
+          headProjectionDigest: activeHead.evidenceDigest,
+          actionProjectionVersion: activeHead.actionProjectionVersion,
+          actionHeadIdentity: activeHead.actionHeadIdentity!,
+        },
+        userMessage: {
+          id: `message-${requestId}`, content: text, timestamp: admittedAt,
+          meta: { sourceKind: 'local', sourceId: 'app', threadKey: 'scope-1', direction: 'local-input', workbenchMode: 'browser' },
+          attachmentConfirmation: { selectedCount: 0, metadataCount: 0, inputIncludedCount: 0, inputFailedCount: 0 },
+        },
+      }
+      const methods = ports.startIdentityPort.resolveMethods('scope-1', 'browser')
+      const reserved = await ports.startIdentityPort.reserve({
+        scopeId: 'scope-1', requestId, methods,
+      } as never)
+      assert.equal(reserved.ok, true, JSON.stringify(reserved))
+      if (!reserved.ok) throw new Error('reservation_failed')
+      const preparedResult = await ports.ingressPort.prepareIngress({
+        scope: scope as never, request: request as never, reservation: reserved.reservation,
+      })
+      assert.equal(preparedResult.ok, true, JSON.stringify(preparedResult).slice(0, 300))
+      if (!preparedResult.ok) throw new Error(preparedResult.error)
+      const persisted = await ports.ingressPort.persistIngressAtomic({
+        scope: scope as never, request: request as never,
+        reservation: reserved.reservation, prepared: preparedResult.dispatchContext,
+      })
+      return { prepared: preparedResult.dispatchContext, persisted }
+    }
+
+    // First ordinary turn on the fresh root: the production prepare carries the tail
+    // assignment, and the REAL repository admission accepts it.
+    const first = await sendOnce(await buildPorts(repository), repository, 'request-fresh-root-1', '继续讲这本书')
+    assert.equal(first.prepared.ingress.attemptKind, 'user_ingress')
+    assert.deepEqual(
+      first.prepared.ingress.uncommittedTailAssignments,
+      [{
+        originUserMessageId: tail[0].originUserMessageId,
+        inputDigest: tail[0].inputDigest,
+        plan: 'deliver_untrusted_history',
+      }],
+      'the failed first-turn text is delivered exactly once as untrusted history',
+    )
+    const builtFirst = new CodexTurnInputBuilder().build(first.prepared.ingress, {
+      threadId: 'thread-production-fresh-root', turnRequestId: 'turn-request-fresh-root-1',
+      reasoningEffort: null, readyRunId: first.prepared.runId,
+      toolSurfaceDigest: first.prepared.readyToolSurface.toolSurfaceDigest,
+      turnContractDigest: 'turn-contract-fresh-root-1',
+      upstreamProfileSnapshotDigest: first.prepared.upstreamProfileSnapshotDigest
+        ?? defaultThreadProfile.snapshotDigest,
+      readyMemorySnapshot: first.prepared.readyMemorySnapshot,
+    })
+    assert.equal(builtFirst.ok, true, builtFirst.ok ? '' : builtFirst.code)
+    if (!builtFirst.ok) throw new Error(builtFirst.code)
+    // The current input appears exactly once, the delivered tail exactly once, and
+    // nothing carries the retired thread's native prefix into the fresh root.
+    assert.deepEqual(builtFirst.params.input, first.prepared.ingress.canonicalCurrentInputRef.input)
+    const wire = JSON.stringify(builtFirst.params)
+    assert.equal(wire.split('ready-uncommitted-user-tail').length - 1, 1)
+    assert.doesNotMatch(wire, /thread-native-1|turn-native-1/)
+
+    // Drive the real native start/turn dispatch for the admitted run so the
+    // fresh root actually acquires its thread identity.
+    const admittedCwd = db.prepare(`SELECT isolated_thread_cwd AS cwd FROM codex_thread_bindings WHERE thread_binding_id = ?`)
+      .get<{ cwd: string | null }>(head!.threadBindingId)!.cwd!
+    repository.activateStartDispatch({
+      connectionEpoch: 'epoch-production-fresh-root', rpcId: 20, method: 'thread/start',
+      bindingLookupKey: admittedCwd, requestDigest: 'fresh-root-production-thread-request',
+      dispatchedAt: admittedAt,
+    })
+    repository.markStartChildWriteConfirmed({
+      connectionEpoch: 'epoch-production-fresh-root', rpcId: 20, method: 'thread/start',
+      bindingId: head!.threadBindingId, childWriteDigest: 'fresh-root-production-thread-request',
+      confirmedAt: admittedAt,
+    })
+    repository.reconcileStartAccepted({
+      connectionEpoch: 'epoch-production-fresh-root', rpcId: 20, method: 'thread/start',
+      bindingId: head!.threadBindingId, nativeId: 'thread-production-fresh-root',
+      nativeResult: {
+        thread: {
+          ...rootThread(), id: 'thread-production-fresh-root',
+          sessionId: 'thread-production-fresh-root', cwd: admittedCwd,
+        },
+        instructionSources: [],
+      },
+      responseDigest: 'fresh-root-production-thread-response', responsePending: false,
+      reconciledAt: admittedAt,
+    })
+    repository.activateStartDispatch({
+      connectionEpoch: 'epoch-production-fresh-root', rpcId: 21, method: 'turn/start',
+      bindingLookupKey: first.prepared.runId, requestDigest: 'fresh-root-production-turn-request',
+      dispatchedAt: admittedAt,
+    })
+    repository.markStartChildWriteConfirmed({
+      connectionEpoch: 'epoch-production-fresh-root', rpcId: 21, method: 'turn/start',
+      bindingId: first.prepared.runId, childWriteDigest: 'fresh-root-production-turn-request',
+      confirmedAt: admittedAt,
+    })
+    repository.reconcileStartAccepted({
+      connectionEpoch: 'epoch-production-fresh-root', rpcId: 21, method: 'turn/start',
+      bindingId: first.prepared.runId, nativeId: 'turn-production-fresh-root',
+      nativeResult: { turn: { ...activeTurn(), id: 'turn-production-fresh-root' } },
+      responseDigest: 'fresh-root-production-turn-response', responsePending: false,
+      reconciledAt: admittedAt,
+    })
+    assert.deepEqual(repository.readUncommittedTailDeliveryAudit(first.prepared.runId).items, [{
+      originUserMessageId: tail[0].originUserMessageId,
+      inputDigest: tail[0].inputDigest,
+      assignment: 'deliver_untrusted_history',
+      disposition: 'additional_context',
+    }], 'the seeded tail reaches the model exactly once, as untrusted history rather than current input')
+
+    // Restart: a new repository instance over the same database must read the
+    // committed run back and accept the next ordinary turn on the same head.
+    const restarted = new CodexBindingRepository(db as unknown as DatabaseConnection, testRuntimeContract)
+    const runtimeAfterRestart = restarted.readProductTurnRuntime(first.prepared.runId)
+    assert.equal(runtimeAfterRestart.readyRunId, first.prepared.runId)
+    assert.equal(restarted.readActiveAliasBinding('scope-1')?.threadBindingId, head!.threadBindingId)
+    // Delivery is not commitment: the item stays in the handoff tail until a
+    // product closeout covers it, so a later fork still carries it. What must not
+    // happen is a second delivery into the same native thread.
+    assert.equal(restarted.readLiveUncommittedUserTail(head!.threadBindingId).length, 1,
+      'an admitted-but-not-closed-out turn does not retire the handoff tail')
+
+    // Before closeout the in-flight run holds the fence, so a reopened head
+    // reports thread_busy rather than admitting a concurrent user run.
+    const busyHead = projectCodexHeadActionProjection(restarted.readHeadActionFacts({
+      aliasId: 'scope-1',
+      aliasGeneration: restarted.readActiveAliasBinding('scope-1')!.aliasGeneration,
+      currentRuntimeManifestDigest: testRuntimeManifestDigest,
+      currentProtocolSchemaDigest: 'protocol-schema-digest',
+    }))
+    assert.deepEqual(busyHead.actions.send_new_message.blockers, ['thread_busy'])
+    assert.equal(restarted.readActiveAliasBinding('scope-1')?.codexThreadId, 'thread-production-fresh-root',
+      'the fresh root kept the native thread it acquired before the restart')
+
+    // Close the first run out as an accepted product turn on the reopened
+    // repository, then run the next ordinary turn: same scope, same native
+    // thread, and the seeded tail is now covered rather than delivered again.
+    const firstTerminalDigest = recordCompletedTerminal(
+      db, restarted, first.prepared.runId, 'turn-production-fresh-root', [],
+      'thread-production-fresh-root', first.prepared.taskId,
+    )
+    db.prepare(`UPDATE task_projections SET status = 'completed' WHERE run_id = ?`)
+      .run(first.prepared.runId)
+    restarted.completeProductTurnCloseout({
+      readyRunId: first.prepared.runId,
+      productTerminalDigest: firstTerminalDigest,
+      closeoutAt: admittedAt,
+      terminalEvidence: completedCloseoutEvidence(restarted, first.prepared.runId),
+    })
+    assert.equal(restarted.readLiveUncommittedUserTail(head!.threadBindingId).length, 0,
+      'an accepted product closeout covers the delivered tail, so it is no longer live')
+
+    // The discriminator split that broke the read paths in production: the head
+    // keeps the `fresh_root_with_tail` kind forever, but the fresh-root
+    // inheritance contract only describes the window before the inherited tail
+    // was delivered. Anything that branches on the kind alone therefore calls
+    // `resolveFreshRootInheritance` outside its window and gets an exception
+    // instead of a continuation verdict — which is what left a settled
+    // fresh-root head's closeout readback without a terminal. The live
+    // predicate is `freshRootRequiresReseed`.
+    assert.equal(restarted.readActiveAliasBinding('scope-1')?.materializationKind,
+      'fresh_root_with_tail', 'the materialization kind is never rewritten')
+    assert.equal(restarted.freshRootRequiresReseed(head!.threadBindingId), false,
+      'the reseed window closes as soon as the delivered tail is covered')
+    assert.throws(() => restarted.resolveFreshRootInheritance({
+      threadBindingId: head!.threadBindingId,
+      candidate: {
+        model: 'ready-e0-model',
+        threadConfig: resolveCodexNativeModelSettings(
+          new CodexModelGatewayRepository(db as never)
+            .readSnapshot('profile-ref-1', defaultThreadProfile.snapshotDigest),
+        ).threadConfig,
+        isolatedThreadCwd: admittedCwd,
+        cwdAvailable: true,
+        instructionContractDigest: productionInstruction.instructionContractDigest,
+        currentToolSurface: run.readyToolSurface,
+      },
+    }), /fresh_root_reseed_not_required/,
+    'calling the inheritance contract outside its window is an error, not a verdict')
+
+    const second = await sendOnce(await buildPorts(restarted), restarted, 'request-fresh-root-2', '再补充一点')
+    assert.deepEqual(second.prepared.ingress.uncommittedTailAssignments, [],
+      'the covered tail is never delivered a second time')
+    assert.notEqual(second.prepared.runId, first.prepared.runId)
+    assert.equal(restarted.readActiveAliasBinding('scope-1')?.codexThreadId, 'thread-production-fresh-root',
+      'the next ordinary turn continues the same native thread after restart')
   })
 })

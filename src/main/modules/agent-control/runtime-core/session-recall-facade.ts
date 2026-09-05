@@ -33,6 +33,7 @@ export interface SessionRecallFacadeDeps {
     messageVisibilityEpoch: number,
     capsules: SessionRecallCapsule[],
   ) => void
+  hasContextBoundary(scopeId: string, messageVisibilityEpoch: number): boolean
 }
 
 export class SessionRecallFacade {
@@ -120,6 +121,7 @@ export class SessionRecallFacade {
     expectedMessageVisibilityEpoch: number,
   ): void {
     try {
+      if (this.deps.hasContextBoundary(scopeId, expectedMessageVisibilityEpoch)) return
       const text = this.deps.extractTextFromMessage(message)
       if (!text || !isRetryOnlyTurn(text)) return
       const result = this.deps.sessionRecallService.autoAttachOnResume({

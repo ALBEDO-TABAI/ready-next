@@ -49,7 +49,7 @@ function fixture() {
           ? 'window.electronAPI.agent.sendScoped(payload)\n'
           : ''
     const remaining = count - (call ? 1 : 0)
-    fs.writeFileSync(abs, `${call}${'// sendScoped\n'.repeat(remaining)}`)
+    fs.writeFileSync(abs, `${call}${'void sendScoped;\n'.repeat(remaining)}`)
   }
   return root
 }
@@ -57,6 +57,17 @@ function fixture() {
 test('retirement gate accepts a graph with no automatic narration entrypoint', () => {
   const root = fixture()
   try {
+    assert.deepEqual(check(root), [])
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('retirement gate does not mistake documentation for a production sender', () => {
+  const root = fixture()
+  try {
+    const file = path.join(root, 'src/main/modules/agent-control/runtime-core/reference-hint-service.ts')
+    fs.writeFileSync(file, '// See AgentControlRuntime.sendScoped(...)\nconst example = "runtime.sendScoped(payload)"\n')
     assert.deepEqual(check(root), [])
   } finally {
     fs.rmSync(root, { recursive: true, force: true })

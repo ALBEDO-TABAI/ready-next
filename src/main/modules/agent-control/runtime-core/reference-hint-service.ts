@@ -45,9 +45,9 @@ export class ReferenceHintService {
     // This IPC is a renderer read for the small "skill context enabled"
     // badge. It must not re-arm persisted hints by itself; otherwise merely
     // opening Ready can light up a stale VEA context before the next user
-    // turn proves it is relevant. Turn execution still restores persisted
-    // hints in `sendScoped(...)`, where intent gating can immediately clear
-    // unrelated turns.
+    // turn proves it is relevant. Turn execution restores persisted hints in
+    // `AgentControlRuntime.sendScoped(...)`, where intent gating can
+    // immediately clear unrelated turns.
     if (!live) return null
     const latestUserText = (() => {
       try {
@@ -78,6 +78,12 @@ export class ReferenceHintService {
 
   restoreReferenceHintFromScope(scope: ConversationScope, scopeId: string): void {
     try {
+      // Replay is for a hint the process lost (restart, fresh session). A live
+      // hint is always at least as new as the persisted one — persistence only
+      // ever snapshots the in-memory map — so replaying over it can only move
+      // the scope backwards, e.g. after a turn armed a new skill but ended
+      // without the assistant append that persists it.
+      if (peekLastReferenceSkill(scopeId)) return
       const meta = this.parseScopeMeta(scope)
       const hint = meta['lastReferenceSkill']
       if (!hint || typeof hint !== 'object') return

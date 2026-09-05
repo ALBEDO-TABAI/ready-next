@@ -22,6 +22,7 @@ import { fileURLToPath } from 'node:url'
 import { basename, delimiter, join, relative, resolve, sep } from 'node:path'
 import YAML from 'yaml'
 import { readPackagingContract } from './server.mjs'
+import releasePackageIdentity from '../scripts/release-package-identity.cjs'
 
 const projectRoot = fileURLToPath(new URL('../', import.meta.url))
 const packerRoot = fileURLToPath(new URL('./', import.meta.url))
@@ -32,6 +33,7 @@ const cleanSeedPath = join(stagingRoot, 'build', 'runtime-seeds', 'ai-settings.s
 const cleanPythonRoot = join(stagingRoot, 'src', 'python')
 const cleanEmbeddedSkillsRoot = join(stagingRoot, 'assets', 'embedded-skills')
 const cleanPackagedRuntimeRoot = join(stagingRoot, 'release-runtime', 'skill-runtime')
+const runtimeContinuityRoot = join(projectRoot, 'assets', 'runtime-continuity')
 const dmgVerifyMountPoint = join(stagingRoot, 'dmg-verify-mount')
 const builderConfigPath = join(projectRoot, 'electron-builder.yml')
 const tempBuilderConfigPath = join(stagingRoot, 'electron-builder.clean.yml')
@@ -326,7 +328,8 @@ function removeOldExports() {
       rmSync(fullPath, { recursive: true, force: true })
       continue
     }
-    if (name === packagingContract.artifactName || name === `${packagingContract.artifactName}.blockmap`) {
+    if (name === packagingContract.artifactName || name === `${packagingContract.artifactName}.blockmap`
+      || name === `${packagingContract.artifactName}.receipt.json`) {
       rmSync(fullPath, { recursive: true, force: true })
     }
   }
@@ -730,12 +733,27 @@ function verifyPackagedResources() {
   const runtime = allowNetworkRuntime
     ? { mode: 'network-runtime-allowed' }
     : verifyPackagedRuntime(join(resourcesDir, 'skill-runtime'))
+  const packagedContinuityRoot = join(resourcesDir, 'runtime-continuity')
+  const sourceContinuityFiles = collectFiles(runtimeContinuityRoot)
+    .map((path) => relative(runtimeContinuityRoot, path)).sort()
+  const packagedContinuityFiles = collectFiles(packagedContinuityRoot)
+    .map((path) => relative(packagedContinuityRoot, path)).sort()
+  if (JSON.stringify(packagedContinuityFiles) !== JSON.stringify(sourceContinuityFiles)) {
+    throw new Error('Packaged runtime continuity inventory differs from verified source')
+  }
+  for (const relativePath of sourceContinuityFiles) {
+    if (!readFileSync(join(runtimeContinuityRoot, relativePath))
+      .equals(readFileSync(join(packagedContinuityRoot, relativePath)))) {
+      throw new Error(`Packaged runtime continuity file differs: ${relativePath}`)
+    }
+  }
 
   return {
     resourcesDir,
     checkedFiles: files.length,
     aiSeedPath: join(resourcesDir, 'ai-settings.seed.json'),
     runtime,
+    runtimeContinuityFileCount: sourceContinuityFiles.length,
   }
 }
 
@@ -866,6 +884,9 @@ function rebuildDmgWithHdiutil() {
 }
 
 function main() {
+  logStep('verify', 'npm run verify:history-continuation')
+  runCommand('npm', ['run', 'verify:history-continuation'])
+
   logStep('prepare', 'clean staging')
   cleanDir(stagingRoot)
   ensureDir(stagingRoot)
@@ -893,7 +914,7 @@ function main() {
   buildCleanBuilderConfig()
 
   logStep('build', 'npm run build')
-  runCommand('npm', ['run', 'build'])
+  runCommand(process.execPath, [join(projectRoot, 'scripts/build-with-source-identity.cjs')])
 
   const electronBuilderBin = getElectronBuilderBin()
   const builderArgs = ['--config', tempBuilderConfigPath, '--publish', 'never']
@@ -912,6 +933,12 @@ function main() {
   const verification = verifyPackagedResources()
   if (dmgVerification) verification.dmg = dmgVerification
   writeManifest(verification, runtime)
+  if (dmgVerification) {
+    releasePackageIdentity.writeReleasePackageReceipt(join(exportsDir, packagingContract.artifactName), {
+      root: projectRoot,
+      cleanPackageManifestPath: manifestPath,
+    })
+  }
 
   if (!keepStaging) {
     logStep('cleanup', 'remove staging')

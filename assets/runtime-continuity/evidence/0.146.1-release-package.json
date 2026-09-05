@@ -1,0 +1,9 @@
+{
+  "contract": "ready_runtime_source_evidence_v1",
+  "sourceManifestDigest": "d47a3b863ed1975f7d18fb337a508127efe7559bfd47ce8e5f9bcb0ed7ee854f",
+  "evidenceKind": "verified_release_dmg",
+  "releaseArtifact": "Ready-0.7.9-a-arm64.dmg",
+  "runtimeVersion": "0.146.1",
+  "binarySha256": "35d248101b211d6248ad4e6b8c1d441fe81236da87afb9f3e9ea51a049e9f179",
+  "activeHeadCountAtCensus": 4
+}

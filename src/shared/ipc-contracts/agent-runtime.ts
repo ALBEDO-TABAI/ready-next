@@ -87,11 +87,67 @@ export type CodexHeadActionProjection = {
   evidenceDigest: string
 }
 
-export type CodexActionSurfaceEnvelope = {
+export type CodexActionSurfaceEnvelope =
+  | {
+      state: 'active_head'
+      scopeId: string
+      scopeEpoch: number
+      sourceAliasGeneration: number
+      head: CodexHeadActionProjection
+      lifecycle: LifecycleOperationProjectionV2
+      beginNewContext: CodexBeginNewContextActionRef | null
+      contextBoundaries: CodexConversationContextBoundary[]
+    }
+  | {
+      state: 'history_only'
+      scopeId: string
+      scopeEpoch: number
+      sourceAliasGeneration: number
+      head: null
+      lifecycle: null
+      beginNewContext: CodexBeginNewContextActionRef
+      contextBoundaries: CodexConversationContextBoundary[]
+    }
+
+export type CodexConversationContextBoundary = {
+  operationId: string
   scopeId: string
   scopeEpoch: number
-  head: CodexHeadActionProjection
-  lifecycle: LifecycleOperationProjectionV2
+  sourceThreadBindingId: string
+  sourceAliasGeneration: number
+  sourceRevision: number
+  targetThreadBindingId: string
+  targetAliasGeneration: number
+  previousVisibleMessageAnchor: string | null
+  preservedContextDigest?: string
+  committedAt: string
+  receiptDigest: string
+}
+
+export type CodexBeginNewContextActionRef = {
+  contract: 'codex_begin_new_context_action_v1'
+  operationId: string
+  scopeId: string
+  scopeEpoch: number
+  sourceThreadBindingId: string
+  sourceAliasGeneration: number
+  sourceRevision: number
+  sourceEvidenceDigest: string
+  candidateEvidenceDigest: string
+  consequenceDigest: string
+  draftRevision: number | null
+  digest: string
+}
+
+export type BeginNewContextRequest = {
+  actionRef: CodexBeginNewContextActionRef
+}
+
+export type BeginNewContextResult = {
+  ok: true
+  boundary: CodexConversationContextBoundary
+  aliasGeneration: number
+  actionSurfaceInvalidation: CodexActionSurfaceInvalidation
 }
 
 export type CodexActionSurfaceInvalidation = {
@@ -211,6 +267,17 @@ export const PRE_PERSISTENCE_ERROR_KINDS = [
   'conversation_reset_required',
   'conversation_materializing',
   'explicit_retry_control_invalid',
+  'runtime_unverified',
+  'runtime_unsupported',
+  'model_changed',
+  'thread_config_changed',
+  'cwd_unavailable',
+  'cwd_changed',
+  'instruction_contract_changed',
+  'native_tool_surface_extension_required',
+  'native_tool_definition_changed',
+  'ready_tool_execution_contract_changed',
+  'current_contract_read_failed',
 ] as const
 
 export const TERMINAL_ERROR_KINDS = [
@@ -380,6 +447,7 @@ export type SendScopedRequest = {
   requestId: string
   expectedAliasGeneration?: number
   expectedMessageVisibilityEpoch: number
+  draftRevision?: number
   message: string | AgentIngressMessageBlock[]
   userMessage: SendScopedUserMessage
   resources?: SendScopedResourceSelection[]
@@ -422,8 +490,6 @@ export type SendScopedResponse =
       disposition: 'terminal_success'
       ownerRunId: string
       aliasGeneration: number
-      shouldClearInput: true
-      preserveInput: false
       retryableByUser: false
       persistence: PersistedIngress
       responseText: string
@@ -440,13 +506,12 @@ export type SendScopedResponse =
   | {
       success: false
       disposition: 'rejected_before_persistence'
-      shouldClearInput: false
-      preserveInput: true
       retryableByUser: boolean
       persistence: SkippedIngress
       error: string
       errorKind: PrePersistenceErrorKind
       admissionEvidenceDigest: string
+      recoveryActionRef?: CodexBeginNewContextActionRef
       ownerRunId?: never
       responseText?: never
       canonicalMessage?: never
@@ -458,8 +523,6 @@ export type SendScopedResponse =
   | {
       success: false
       disposition: 'ingress_persistence_failed'
-      shouldClearInput: false
-      preserveInput: true
       retryableByUser: true
       persistence: FailedIngress
       error: string
@@ -478,8 +541,6 @@ export type SendScopedResponse =
       disposition: 'terminal_failure_after_persistence'
       ownerRunId: string
       aliasGeneration: number
-      shouldClearInput: true
-      preserveInput: false
       retryableByUser: false
       persistence: PersistedIngress
       error: string
@@ -498,29 +559,22 @@ export type SendMessageResult =
   | {
       success: true
       disposition: 'terminal_success'
-      shouldClearInput: true
-      preserveInput: false
       errorKind?: never
     }
   | {
       success: false
       disposition: 'rejected_before_persistence'
-      shouldClearInput: false
-      preserveInput: true
       errorKind: PrePersistenceErrorKind
+      recoveryActionRef?: CodexBeginNewContextActionRef
     }
   | {
       success: false
       disposition: 'ingress_persistence_failed'
-      shouldClearInput: false
-      preserveInput: true
       errorKind: IngressPersistenceErrorKind
     }
   | {
       success: false
       disposition: 'terminal_failure_after_persistence'
-      shouldClearInput: true
-      preserveInput: false
       errorKind: TerminalErrorKind
     }
 
@@ -557,6 +611,7 @@ export type CreateSessionRequest = Record<string, never>
 export type LifecycleRequest = {
   aliasId: string
   aliasGeneration: number
+  workbenchMode?: 'browser' | 'document' | 'rss' | 'calendar'
   actionRequestRef?: LifecycleActionRequestRef
 }
 
@@ -730,6 +785,7 @@ export const sendScopedRequestSchema: z.ZodType<SendScopedRequest> = z.object({
   requestId: nonEmptyString,
   expectedAliasGeneration: z.number().int().positive().optional(),
   expectedMessageVisibilityEpoch: z.number().int().nonnegative(),
+  draftRevision: z.number().int().nonnegative().safe().optional(),
   message: z.union([z.string(), z.array(agentIngressMessageBlockSchema).min(1)]),
   userMessage: z.object({
     id: nonEmptyString,
@@ -885,6 +941,50 @@ const failedIngressSchema = z.object({
   inputAttachments: z.literal('none'),
 }).strict()
 
+const codexBeginNewContextActionRefSchema: z.ZodType<CodexBeginNewContextActionRef> = z.object({
+  contract: z.literal('codex_begin_new_context_action_v1'),
+  operationId: nonEmptyString,
+  scopeId: nonEmptyString,
+  scopeEpoch: z.number().int().nonnegative().safe(),
+  sourceThreadBindingId: nonEmptyString,
+  sourceAliasGeneration: z.number().int().positive().safe(),
+  sourceRevision: z.number().int().positive().safe(),
+  sourceEvidenceDigest: digestString,
+  candidateEvidenceDigest: digestString,
+  consequenceDigest: digestString,
+  draftRevision: z.number().int().nonnegative().safe().nullable(),
+  digest: digestString,
+}).strict()
+
+const codexConversationContextBoundarySchema: z.ZodType<CodexConversationContextBoundary> = z.object({
+  operationId: nonEmptyString,
+  scopeId: nonEmptyString,
+  scopeEpoch: z.number().int().nonnegative().safe(),
+  sourceThreadBindingId: nonEmptyString,
+  sourceAliasGeneration: z.number().int().positive().safe(),
+  sourceRevision: z.number().int().positive().safe(),
+  targetThreadBindingId: nonEmptyString,
+  targetAliasGeneration: z.number().int().positive().safe(),
+  previousVisibleMessageAnchor: nonEmptyString.nullable(),
+  preservedContextDigest: digestString.optional(),
+  committedAt: nonEmptyString,
+  receiptDigest: digestString,
+}).strict()
+
+const beginNewContextRequestSchema: z.ZodType<BeginNewContextRequest> = z.object({
+  actionRef: codexBeginNewContextActionRefSchema,
+}).strict()
+
+const beginNewContextResultSchema: z.ZodType<BeginNewContextResult> = z.object({
+  ok: z.literal(true),
+  boundary: codexConversationContextBoundarySchema,
+  aliasGeneration: z.number().int().positive().safe(),
+  actionSurfaceInvalidation: codexActionSurfaceInvalidationSchema,
+}).strict().refine((result) => result.aliasGeneration === result.actionSurfaceInvalidation.aliasGeneration
+  && result.boundary.scopeId === result.actionSurfaceInvalidation.scopeId
+  && result.boundary.scopeEpoch === result.actionSurfaceInvalidation.scopeEpoch
+  && result.aliasGeneration >= result.boundary.targetAliasGeneration, 'begin_new_context_result_inconsistent')
+
 const productTurnToolReceiptSchema = z.object({
   callId: nonEmptyString,
   toolName: nonEmptyString,
@@ -1032,8 +1132,6 @@ export const sendScopedResponseSchema: z.ZodType<SendScopedResponse> = z.union([
     disposition: z.literal('terminal_success'),
     ownerRunId: nonEmptyString,
     aliasGeneration: z.number().int().positive(),
-    shouldClearInput: z.literal(true),
-    preserveInput: z.literal(false),
     retryableByUser: z.literal(false),
     persistence: persistedIngressSchema,
     responseText: z.string(),
@@ -1044,19 +1142,16 @@ export const sendScopedResponseSchema: z.ZodType<SendScopedResponse> = z.union([
   z.object({
     success: z.literal(false),
     disposition: z.literal('rejected_before_persistence'),
-    shouldClearInput: z.literal(false),
-    preserveInput: z.literal(true),
     retryableByUser: z.boolean(),
     persistence: skippedIngressSchema,
     error: nonEmptyString,
     errorKind: z.enum(PRE_PERSISTENCE_ERROR_KINDS),
     admissionEvidenceDigest: digestString,
+    recoveryActionRef: codexBeginNewContextActionRefSchema.optional(),
   }).strict(),
   z.object({
     success: z.literal(false),
     disposition: z.literal('ingress_persistence_failed'),
-    shouldClearInput: z.literal(false),
-    preserveInput: z.literal(true),
     retryableByUser: z.literal(true),
     persistence: failedIngressSchema,
     error: nonEmptyString,
@@ -1068,8 +1163,6 @@ export const sendScopedResponseSchema: z.ZodType<SendScopedResponse> = z.union([
     disposition: z.literal('terminal_failure_after_persistence'),
     ownerRunId: nonEmptyString,
     aliasGeneration: z.number().int().positive(),
-    shouldClearInput: z.literal(true),
-    preserveInput: z.literal(false),
     retryableByUser: z.literal(false),
     persistence: persistedIngressSchema,
     error: nonEmptyString,
@@ -1116,12 +1209,14 @@ export const createSessionRequestSchema: z.ZodType<CreateSessionRequest> = z.obj
 export const lifecycleRequestSchema: z.ZodType<LifecycleRequest> = z.object({
   aliasId: nonEmptyString,
   aliasGeneration: z.number().int().positive(),
+  workbenchMode: z.enum(['browser', 'document', 'rss', 'calendar']).optional(),
   actionRequestRef: lifecycleActionRequestRefSchema.optional(),
 }).strict()
 
 export const stopLifecycleRequestSchema: z.ZodType<StopLifecycleRequest> = z.object({
   aliasId: nonEmptyString,
   aliasGeneration: z.number().int().positive(),
+  workbenchMode: z.enum(['browser', 'document', 'rss', 'calendar']).optional(),
   readyRunId: nonEmptyString,
   actionRequestRef: lifecycleActionRequestRefSchema.optional(),
 }).strict()
@@ -1129,6 +1224,7 @@ export const stopLifecycleRequestSchema: z.ZodType<StopLifecycleRequest> = z.obj
 export const productLifecycleRequestSchema: z.ZodType<ProductLifecycleRequest> = z.object({
   aliasId: nonEmptyString,
   aliasGeneration: z.number().int().positive(),
+  workbenchMode: z.enum(['browser', 'document', 'rss', 'calendar']).optional(),
   readyRunId: nonEmptyString.nullable(),
   actionRequestRef: lifecycleActionRequestRefSchema.optional(),
 }).strict()
@@ -1262,6 +1358,14 @@ export function parseStopLifecycleRequest(value: unknown): StopLifecycleRequest 
   return stopLifecycleRequestSchema.parse(value, JITLESS_PARSE)
 }
 
+export function parseBeginNewContextRequest(value: unknown): BeginNewContextRequest {
+  return beginNewContextRequestSchema.parse(value, JITLESS_PARSE)
+}
+
+export function parseBeginNewContextResult(value: unknown): BeginNewContextResult {
+  return beginNewContextResultSchema.parse(value, JITLESS_PARSE)
+}
+
 export function parseProductLifecycleRequest(value: unknown): ProductLifecycleRequest {
   return productLifecycleRequestSchema.parse(value, JITLESS_PARSE)
 }
@@ -1276,31 +1380,24 @@ export function mapSendScopedResponseToMessageResult(response: SendScopedRespons
       return {
         success: true,
         disposition: response.disposition,
-        shouldClearInput: true,
-        preserveInput: false,
       }
     case 'rejected_before_persistence':
       return {
         success: false,
         disposition: response.disposition,
-        shouldClearInput: false,
-        preserveInput: true,
         errorKind: response.errorKind,
+        ...(response.recoveryActionRef ? { recoveryActionRef: response.recoveryActionRef } : {}),
       }
     case 'ingress_persistence_failed':
       return {
         success: false,
         disposition: response.disposition,
-        shouldClearInput: false,
-        preserveInput: true,
         errorKind: response.errorKind,
       }
     case 'terminal_failure_after_persistence':
       return {
         success: false,
         disposition: response.disposition,
-        shouldClearInput: true,
-        preserveInput: false,
         errorKind: response.errorKind,
       }
     default:

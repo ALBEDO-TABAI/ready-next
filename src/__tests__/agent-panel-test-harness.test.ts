@@ -99,8 +99,6 @@ function baseState(input: Partial<HarnessState> = {}): HarnessState {
     sendMessage: async () => ({
       success: true,
       disposition: 'terminal_success',
-      shouldClearInput: true,
-      preserveInput: false,
     }),
     setInputValue: () => {},
     ...input,
@@ -373,8 +371,6 @@ describe('agent panel test harness', () => {
         return {
           success: true,
           disposition: 'terminal_success',
-          shouldClearInput: true,
-          preserveInput: false,
         }
       },
     }
@@ -462,8 +458,6 @@ describe('agent panel test harness', () => {
         return {
           success: false,
           disposition: 'terminal_failure_after_persistence',
-          shouldClearInput: true,
-          preserveInput: false,
         }
       },
     }

@@ -170,3 +170,28 @@ export function advanceCodexConversationMessageVisibilityInOpenTransaction(
     messageVisibilityEpoch: nextEpoch,
   }
 }
+
+export function clearCodexImplicitConversationContextInOpenTransaction(
+  db: DatabaseConnection,
+  input: { scopeId: string; updatedAt: string },
+): void {
+  if (db.inTransaction !== true) throw new Error('codex_context_clear_transaction_missing')
+  const scope = db.prepare(`
+    SELECT meta_json FROM chat_conversations
+     WHERE id = ? AND closed_at IS NULL LIMIT 1
+  `).get<{ meta_json: string | null }>(input.scopeId)
+  if (!scope) throw new Error('codex_context_clear_scope_missing')
+  let meta: Record<string, unknown>
+  try {
+    meta = JSON.parse(scope.meta_json || '{}') as Record<string, unknown>
+  } catch {
+    throw new Error('codex_context_clear_scope_meta_invalid')
+  }
+  delete meta.lastReferenceSkill
+  delete meta.sessionRecallContext
+  const updated = db.prepare(`
+    UPDATE chat_conversations SET meta_json = ?, updated_at = ?
+     WHERE id = ? AND closed_at IS NULL AND COALESCE(meta_json, '{}') = COALESCE(?, '{}')
+  `).run(JSON.stringify(meta), input.updatedAt, input.scopeId, scope.meta_json) as { changes?: number }
+  if (updated.changes !== 1) throw new Error('codex_context_clear_scope_cas_failed')
+}

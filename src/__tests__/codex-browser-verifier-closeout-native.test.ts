@@ -243,7 +243,16 @@ async function nativeTerminalFixture(
   if (skipIfSqliteUnavailable(t, `codex-browser-verifier-${suffix}`)) return null
   const db = openProviderCheckpointTestDb()
   const accessor = { getRawDb: () => db }
-  const repository = new CodexBindingRepository(db as unknown as DatabaseConnection)
+  const runtimeManifestDigest = digestCanonicalJson({ fixture: `browser-verifier-${suffix}` })
+  const repository = new CodexBindingRepository(db as unknown as DatabaseConnection, {
+    runtimeManifestDigest,
+    protocolSchemaDigest: `protocol-${suffix}`,
+    runtimeContinuityCatalog: {
+      contract: 'ready_runtime_continuity_catalog_v1',
+      targetManifestDigest: runtimeManifestDigest,
+      transitions: [],
+    },
+  })
   const projections = new TaskProjectionRepository(accessor)
   const runMeta = new RunMetaRepository(db)
   const scopeId = `scope-${suffix}`
@@ -316,14 +325,14 @@ async function nativeTerminalFixture(
     aliasId: scopeId,
     aliasGeneration: 1,
     readyScopeId: scopeId,
-    runtimeManifestDigest: `runtime-${suffix}`,
+    runtimeManifestDigest,
     protocolSchemaDigest: `protocol-${suffix}`,
     createdAt: startedAt,
   })
    const actionHead = projectCodexHeadActionProjection(repository.readHeadActionFacts({
     aliasId: scopeId,
     aliasGeneration: 1,
-    currentRuntimeManifestDigest: `runtime-${suffix}`,
+    currentRuntimeManifestDigest: runtimeManifestDigest,
     currentProtocolSchemaDigest: `protocol-${suffix}`,
   }))
   if (!actionHead.actionHeadIdentity) throw new Error('fixture_action_head_missing')
@@ -358,7 +367,7 @@ async function nativeTerminalFixture(
     threadBindingId,
     isolatedThreadCwd: `/tmp/ready-codex/${threadBindingId}`,
     turnRequestId: `turn-request-${suffix}`,
-    runtimeManifestDigest: `runtime-${suffix}`,
+    runtimeManifestDigest,
     protocolSchemaDigest: `protocol-${suffix}`,
     instructionContractDigest: `instruction-${suffix}`,
     codexModel: 'frozen-browser-model',
@@ -373,6 +382,7 @@ async function nativeTerminalFixture(
       messageMetaDigest: digestCanonicalJson({}),
       executionBindingDigest: digestCanonicalJson(executionBinding),
     },
+    continuationCandidate: null,
   }
   repository.admitProductBindings({
     ...admissionInput,
@@ -470,6 +480,8 @@ async function nativeTerminalFixture(
     db, accessor, repository, projections, checkpoints, run: admittedRun,
     scopeId, taskId, runId, messageId, threadBindingId, codexThreadId, codexTurnId,
     finalText, candidateDigest, candidate, nativeThread, admissionInput,
+    runtimeManifestDigest,
+    protocolSchemaDigest: `protocol-${suffix}`,
   }
 }
 
@@ -1317,8 +1329,8 @@ test('compacted verifier failures atomically block history without forking and a
       })
       const priorHead = value.repository.readHeadActionFacts({
         aliasId: value.scopeId, aliasGeneration: 1,
-        currentRuntimeManifestDigest: `runtime-compacted-${outcome}`,
-        currentProtocolSchemaDigest: `protocol-compacted-${outcome}`,
+        currentRuntimeManifestDigest: value.runtimeManifestDigest,
+        currentProtocolSchemaDigest: value.protocolSchemaDigest,
       })
       await assert.rejects(() => close('f'.repeat(64)), /browser_verifier_failure_closeout_mismatch/)
       await assert.rejects(close, /test_after_history_write/)
@@ -1453,8 +1465,8 @@ test('engine-terminal lifecycle actions abort a deferred verifier and close exac
       assert.equal(beforeIngress, action === 'close' ? 1 : 2, action)
       const successor = value.repository.refreshPristineFreshStartHeadAtomic({
         aliasId: value.scopeId,
-        runtimeManifestDigest: `runtime-lifecycle-${action}`,
-        protocolSchemaDigest: `protocol-lifecycle-${action}`,
+        runtimeManifestDigest: value.runtimeManifestDigest,
+        protocolSchemaDigest: value.protocolSchemaDigest,
         createdAt: '2026-08-11T05:03:00.000Z',
       })
       if (action === 'close') {

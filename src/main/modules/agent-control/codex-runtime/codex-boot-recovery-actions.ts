@@ -13,6 +13,7 @@ import type {
   CodexRecoveredStartResolution,
 } from './codex-runtime-boot-reconciler'
 import type { CodexStartIdentityRegistry } from './codex-start-identity-registry'
+import { sameCodexThreadDirectory } from './codex-thread-directory-identity'
 
 type ReadbackRuntime = Pick<CodexNativeRuntime, 'threadList' | 'threadRead' | 'threadResume'>
 
@@ -75,7 +76,7 @@ function evidence(value: unknown): string {
 }
 
 function exactThreadMetadata(thread: CodexThread, identity: ThreadStartIdentity, source: string): boolean {
-  return thread.cwd === identity.expectedCwd
+  return sameCodexThreadDirectory(thread.cwd, identity.expectedCwd)
     && thread.source === source
     && thread.sessionId === thread.id
     && thread.parentThreadId === identity.expectedParentThreadId

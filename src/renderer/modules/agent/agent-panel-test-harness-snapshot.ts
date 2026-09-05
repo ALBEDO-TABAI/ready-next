@@ -350,6 +350,7 @@ function collectToolTrace(state: StoreState, activeRun: ScopeRunState | null): A
 export function createAgentPanelSnapshot(
   state: StoreState,
   projectionCards: AgentPanelTaskCardSnapshot[] = [],
+  composerAuthority?: { editable: boolean; sendEnabled: boolean; blocker: string | null },
 ): AgentPanelSnapshot {
   const visibleScopeRunStates = state.scopeRunStates || {}
   const activeRun = state.currentScopeId ? visibleScopeRunStates[state.currentScopeId] || null : null
@@ -360,6 +361,7 @@ export function createAgentPanelSnapshot(
     .map(taskCardFromMeta)
     .filter((card): card is AgentPanelTaskCardSnapshot => Boolean(card))
 
+  const fallbackLocked = Boolean(state.composerLocked)
   const snapshot: AgentPanelSnapshot = {
     capturedAt: new Date().toISOString(),
     currentAgent: state.currentAgent,
@@ -367,7 +369,9 @@ export function createAgentPanelSnapshot(
     currentScopeTitle: state.currentScope?.title || null,
     composer: {
       inputValue: state.inputValue,
-      locked: Boolean(state.composerLocked || state.foregroundBusy || state.isStreaming),
+      locked: composerAuthority ? !composerAuthority.editable : fallbackLocked,
+      sendEnabled: composerAuthority?.sendEnabled ?? false,
+      blocker: composerAuthority?.blocker ?? (fallbackLocked ? 'thread_busy' : null),
       attachmentNames: (state.attachments || []).map((attachment) => attachment.name),
       filePoolNames: (state.filePool || []).map((attachment) => attachment.name),
     },

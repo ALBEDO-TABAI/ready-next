@@ -1,0 +1,78 @@
+{
+  "contract": "ready_runtime_continuity_transitions_v1",
+  "targetManifestDigest": "cda6bd5ff08247c0fd502accba2c0c0d342d5d59945d06dfb53a666bb64b636d",
+  "transitions": [
+    {
+      "sourceManifestDigest": "8b2e1f3f4f80fd9ef28657b49e90290e06c63f004eb35fc198c91d59992f3e0b",
+      "targetManifestDigest": "cda6bd5ff08247c0fd502accba2c0c0d342d5d59945d06dfb53a666bb64b636d",
+      "operation": "ordinary_continuation",
+      "result": "compatible",
+      "proofDigest": "0dcf6b4b33e4e13f423cd585b9f5e802dfccba0afedc5d5774780ff0b9074b7e",
+      "evidenceFile": "evidence/8b2e1f3f-ordinary-continuation.json"
+    },
+    {
+      "sourceManifestDigest": "8b2e1f3f4f80fd9ef28657b49e90290e06c63f004eb35fc198c91d59992f3e0b",
+      "targetManifestDigest": "cda6bd5ff08247c0fd502accba2c0c0d342d5d59945d06dfb53a666bb64b636d",
+      "operation": "fork_from_accepted_prefix",
+      "result": "compatible",
+      "proofDigest": "395bf6ce5f0e63a58c47119963b080f7caf852e892b1ea8bff90acf5d1bb3a20",
+      "evidenceFile": "evidence/8b2e1f3f-fork.json"
+    },
+    {
+      "sourceManifestDigest": "8b2e1f3f4f80fd9ef28657b49e90290e06c63f004eb35fc198c91d59992f3e0b",
+      "targetManifestDigest": "cda6bd5ff08247c0fd502accba2c0c0d342d5d59945d06dfb53a666bb64b636d",
+      "operation": "reseed_uncommitted_tail",
+      "result": "compatible",
+      "proofDigest": "16950d8eb7b988f79e8a7045b1150bba5ef42712778f23a43bf2a25bde4733b1",
+      "evidenceFile": "evidence/8b2e1f3f-reseed.json"
+    },
+    {
+      "sourceManifestDigest": "d47a3b863ed1975f7d18fb337a508127efe7559bfd47ce8e5f9bcb0ed7ee854f",
+      "targetManifestDigest": "cda6bd5ff08247c0fd502accba2c0c0d342d5d59945d06dfb53a666bb64b636d",
+      "operation": "ordinary_continuation",
+      "result": "compatible",
+      "proofDigest": "26ec5033d5773f7de8e8b4f10b335446283d6f0b7c2a17a273ab26c049e7447c",
+      "evidenceFile": "evidence/d47a3b86-ordinary-continuation.json"
+    },
+    {
+      "sourceManifestDigest": "d47a3b863ed1975f7d18fb337a508127efe7559bfd47ce8e5f9bcb0ed7ee854f",
+      "targetManifestDigest": "cda6bd5ff08247c0fd502accba2c0c0d342d5d59945d06dfb53a666bb64b636d",
+      "operation": "fork_from_accepted_prefix",
+      "result": "compatible",
+      "proofDigest": "e5903230a305f1ac56e7c713a3438db4d584c35728c21416ac5d1a444ecb9d24",
+      "evidenceFile": "evidence/d47a3b86-fork.json"
+    },
+    {
+      "sourceManifestDigest": "d47a3b863ed1975f7d18fb337a508127efe7559bfd47ce8e5f9bcb0ed7ee854f",
+      "targetManifestDigest": "cda6bd5ff08247c0fd502accba2c0c0d342d5d59945d06dfb53a666bb64b636d",
+      "operation": "reseed_uncommitted_tail",
+      "result": "compatible",
+      "proofDigest": "0cd65e19602b5814801ed864dd262913f7639c1bb932a3b0622247c0f89cd306",
+      "evidenceFile": "evidence/d47a3b86-reseed.json"
+    },
+    {
+      "sourceManifestDigest": "f981c518fe97286868e579afe68ff693089545041e255242335a0485a5df31fa",
+      "targetManifestDigest": "cda6bd5ff08247c0fd502accba2c0c0d342d5d59945d06dfb53a666bb64b636d",
+      "operation": "ordinary_continuation",
+      "result": "compatible",
+      "proofDigest": "48705aac3ec88e37769cf9f52d92e3ed6c89c6a57460422b142371ec6a157383",
+      "evidenceFile": "evidence/f981c518-ordinary-continuation.json"
+    },
+    {
+      "sourceManifestDigest": "f981c518fe97286868e579afe68ff693089545041e255242335a0485a5df31fa",
+      "targetManifestDigest": "cda6bd5ff08247c0fd502accba2c0c0d342d5d59945d06dfb53a666bb64b636d",
+      "operation": "fork_from_accepted_prefix",
+      "result": "compatible",
+      "proofDigest": "d959bcedb9fab8492f7575e84ef5ee0a4f3b6b35dbe1855399dd3f7f94e46f73",
+      "evidenceFile": "evidence/f981c518-fork.json"
+    },
+    {
+      "sourceManifestDigest": "f981c518fe97286868e579afe68ff693089545041e255242335a0485a5df31fa",
+      "targetManifestDigest": "cda6bd5ff08247c0fd502accba2c0c0d342d5d59945d06dfb53a666bb64b636d",
+      "operation": "reseed_uncommitted_tail",
+      "result": "compatible",
+      "proofDigest": "de25e1a7d4c26b5ed9255d04beb13c24b405c594f31edccb851c9ba28b41af70",
+      "evidenceFile": "evidence/f981c518-reseed.json"
+    }
+  ]
+}

@@ -16,6 +16,20 @@ export function createCodexProfileRouteSnapshot(input: {
   })
 }
 
+/**
+ * The current profile route no longer matches the one frozen during prepare.
+ * This is a configuration change observed before any durable write, not a
+ * persistence fault, so admission maps it to a named zero-write rejection that
+ * asks the caller to re-read the action surface.
+ */
+export class CodexProfileRouteChangedError extends Error {
+  readonly code = 'codex_upstream_profile_changed_before_admission'
+  constructor() {
+    super('codex_upstream_profile_changed_before_admission')
+    this.name = 'CodexProfileRouteChangedError'
+  }
+}
+
 export function assertCodexProfileRouteCurrent(input: {
   settings: Pick<AppSettingsRepository, 'getAIWorkspace'>
   expected: ReturnType<typeof createCodexUpstreamProfileSnapshot>
@@ -25,7 +39,7 @@ export function assertCodexProfileRouteCurrent(input: {
   const currentProfile = input.settings.getAIWorkspace().profiles.find(
     (candidate) => candidate.id === profileId,
   )
-  if (!currentProfile) throw new Error('codex_upstream_profile_changed_before_admission')
+  if (!currentProfile) throw new CodexProfileRouteChangedError()
   let current: ReturnType<typeof createCodexUpstreamProfileSnapshot>
   try {
     current = createCodexProfileRouteSnapshot({
@@ -33,10 +47,10 @@ export function assertCodexProfileRouteCurrent(input: {
       config: currentProfile.config,
     })
   } catch {
-    throw new Error('codex_upstream_profile_changed_before_admission')
+    throw new CodexProfileRouteChangedError()
   }
   if (
     current.snapshotRef !== input.expected.snapshotRef
     || current.snapshotDigest !== input.expected.snapshotDigest
-  ) throw new Error('codex_upstream_profile_changed_before_admission')
+  ) throw new CodexProfileRouteChangedError()
 }

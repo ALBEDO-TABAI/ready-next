@@ -18,6 +18,7 @@ import {
   type CodexThreadArchiveCleanupRuntime,
 } from '../main/modules/agent-control/codex-runtime/codex-thread-archive-owner'
 import {
+  applyCodexBeginNewContextArchiveSourceMigration,
   applyCodexThreadArchiveCleanupSchema,
 } from '../main/modules/agent-control/codex-runtime/codex-thread-archive-schema'
 import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
@@ -145,6 +146,37 @@ function insertRetiredBinding(db: NativeDb, input: {
     throw error
   }
 }
+
+test('begin-new-context archive migration preserves old intents and accepts the new source', async (t) => {
+  if (skipIfSqliteUnavailable(t, 'Codex begin-new-context archive migration')) return
+  const Database = (await import('better-sqlite3')).default
+  const db = new Database(':memory:')
+  try {
+    installBaseSchema(db)
+    insertRetiredBinding(db)
+    applyCodexBeginNewContextArchiveSourceMigration(db as unknown as DatabaseConnection)
+    assert.equal(db.prepare(`
+      SELECT source_kind FROM codex_thread_archive_intents
+       WHERE thread_binding_id = 'binding-1'
+    `).get()?.source_kind, 'idle_close')
+    insertRetiredBinding(db, {
+      threadBindingId: 'binding-2',
+      threadId: 'native-thread-2',
+      aliasId: 'alias-2',
+      aliasGeneration: 2,
+      cwd: '/tmp/ready-archive-alias-2',
+      sourceKind: 'begin_new_context',
+      retiredReason: 'publication_diverged',
+    })
+    assert.equal(db.prepare(`
+      SELECT source_kind FROM codex_thread_archive_intents
+       WHERE thread_binding_id = 'binding-2'
+    `).get()?.source_kind, 'begin_new_context')
+    assert.deepEqual(db.prepare('PRAGMA foreign_key_check').all(), [])
+  } finally {
+    db.close()
+  }
+})
 
 function runtimeFixture(input: {
   archived: () => boolean

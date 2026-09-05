@@ -36,6 +36,8 @@ export type LifecycleActionBlockingReason =
   | 'history_outcome_unknown'
   | 'legacy_context_boundary'
   | 'head_contract_drift'
+  | 'runtime_unverified'
+  | 'runtime_unsupported'
   | 'legacy_prepared_contract'
 
 export type LifecycleActionRequestRef =
@@ -169,6 +171,8 @@ const lifecycleActionGateSchema: z.ZodType<LifecycleActionGate> = z.object({
     'history_outcome_unknown',
     'legacy_context_boundary',
     'head_contract_drift',
+    'runtime_unverified',
+    'runtime_unsupported',
     'legacy_prepared_contract',
   ])),
   requestRef: lifecycleActionRequestRefSchema.nullable(),

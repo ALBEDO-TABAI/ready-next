@@ -16,6 +16,8 @@ import {
 } from '../../../../shared/ipc-contracts/agent-lifecycle-snapshot'
 import {
   codexCurrentDocumentAnchorSchema,
+  type CodexBeginNewContextActionRef,
+  type CodexConversationContextBoundary,
   type CodexCurrentDocumentAnchor,
 } from '../../../../shared/ipc-contracts/agent-runtime'
 import type { StartIdentityReservationSet } from '../send-scoped-confirmation'
@@ -31,6 +33,8 @@ import {
 import type { CoreTurnCandidate } from './codex-turn-collector'
 import { CodexBindingRepositoryError } from './codex-binding-error'
 import { CODEX_PRISTINE_FRESH_START_PREDICATE_SQL } from './codex-binding-schema'
+import { captureCodexBoundaryContext, codexBeginNewContextOperationId, readCodexContextBoundaries } from './codex-context-boundary'
+import { sameCodexThreadDirectory } from './codex-thread-directory-identity'
 import { assertCodexTerminalEvidenceOwners } from './codex-terminal-evidence-validation'
 import {
   normalizeCodexThread,
@@ -67,6 +71,7 @@ import {
 } from './codex-browser-admission'
 import {
   advanceCodexConversationMessageVisibilityInOpenTransaction,
+  clearCodexImplicitConversationContextInOpenTransaction,
   closeCodexConversationScopeInOpenTransaction,
   readCodexClosedConversationScope,
 } from './codex-conversation-scope-closure'
@@ -83,8 +88,24 @@ import {
 import type { ProductTurnReceipt } from '../../../../shared/ipc-contracts/agent-runtime'
 import { normalizeContextUsageSnapshot } from '../../../../shared/context-usage-types'
 import type { ToolExecutionOutput } from '../tools-runtime/tool-result-types'
-import { projectCodexHeadActionProjection, type CodexHeadActionFacts } from './codex-action-surface'
+import {
+  projectCodexHeadActionProjection,
+  type CodexHeadActionBlocker,
+  type CodexHeadActionFacts,
+} from './codex-action-surface'
 import { digestCodexUserInput, isCodexUserInput, type CodexUserInput } from './codex-user-input'
+import {
+  resolveRuntimeCompatibilitySet,
+  type RuntimeContinuityCatalog,
+  type RuntimeCompatibilitySet,
+  type RuntimeOperation,
+} from './codex-runtime-compatibility'
+import {
+  resolveSameThreadContinuationContract,
+  type SameThreadContinuation,
+  type SameThreadContinuationCandidate,
+  type StoredThreadContinuationContract,
+} from './codex-same-thread-continuation'
 import {
   assertCodexTerminalFacts,
   type CodexTerminalFacts,
@@ -395,6 +416,12 @@ export type CodexAdmittedBindingInput = {
         messageMetaDigest: string
         executionBindingDigest: string
       }
+  continuationCandidate: SameThreadContinuationCandidate | null
+}
+
+export type CodexStoredContinuationRead = {
+  stored: StoredThreadContinuationContract
+  runtimeSourceManifestDigests: string[]
 }
 
 export function buildCodexIngressAdmissionReceipt(
@@ -427,6 +454,7 @@ export function buildCodexIngressAdmissionReceipt(
     turnContractDigest: input.turnContractDigest,
     messageVisibilityEpoch: input.messageVisibilityEpoch,
     readyParentReceipt: input.readyParentReceipt,
+    continuationCandidate: input.continuationCandidate,
   }
 }
 
@@ -1254,6 +1282,16 @@ export class CodexBindingRepository {
     private readonly currentContract?: {
       runtimeManifestDigest: string
       protocolSchemaDigest: string
+      runtimeContinuityCatalog?: RuntimeContinuityCatalog
+      resolveHeadContractBlocker?: (input: {
+        aliasId: string
+        aliasGeneration: number
+        scopeEpoch: number
+        workbenchMode: 'browser' | 'document' | 'rss' | 'calendar'
+        threadBindingId: string
+        codexThreadId: string | null
+        materializationKind: 'legacy' | 'fresh_start' | 'native_fork' | 'fresh_root_with_tail'
+      }) => CodexHeadActionBlocker | null | undefined
     },
   ) {
     this.toolBindings = new CodexToolBindingRepository(db)
@@ -2453,6 +2491,505 @@ export class CodexBindingRepository {
     }
   }
 
+  readStoredContinuationContract(input: {
+    aliasId: string
+    aliasGeneration: number
+  }): CodexStoredContinuationRead {
+    const thread = this.readActiveThreadByAlias(input.aliasId)
+    if (!thread || thread.alias_generation !== input.aliasGeneration || thread.retired_at) {
+      throw new CodexBindingRepositoryError('active_alias_generation_mismatch')
+    }
+    if (!thread.codex_thread_id) {
+      throw new CodexBindingRepositoryError('continuation_contract_unavailable')
+    }
+    const stored = this.readStoredThreadContract(thread)
+    return {
+      stored,
+      runtimeSourceManifestDigests: this.readRuntimeSourceManifestDigests(
+        thread.thread_binding_id,
+      ),
+    }
+  }
+
+  readFreshRootSourceContinuationContract(threadBindingId: string): CodexStoredContinuationRead {
+    const target = this.requireThread(threadBindingId)
+    if (target.thread_materialization_kind !== 'fresh_root_with_tail'
+      || !target.history_source_thread_binding_id) {
+      throw new CodexBindingRepositoryError('fresh_root_history_source_missing')
+    }
+    const source = this.requireThread(target.history_source_thread_binding_id)
+    return {
+      stored: this.readStoredThreadContract(source),
+      runtimeSourceManifestDigests: this.readRuntimeSourceManifestDigests(source.thread_binding_id),
+    }
+  }
+
+  private readStoredThreadContract(thread: ThreadBindingRow): StoredThreadContinuationContract {
+    if (!thread.codex_model || !thread.isolated_thread_cwd
+      || !thread.instruction_contract_digest || !thread.tool_surface_json) {
+      throw new CodexBindingRepositoryError('continuation_contract_unavailable')
+    }
+    let readyToolSurface: ReadyToolSurface
+    try {
+      readyToolSurface = JSON.parse(thread.tool_surface_json) as ReadyToolSurface
+      assertReadyToolSurface(readyToolSurface)
+    } catch {
+      throw new CodexBindingRepositoryError('tool_surface_snapshot_invalid')
+    }
+    const threadConfig = resolveCodexNativeModelSettings(this.readUpstreamProfileSnapshot(
+      thread.upstream_profile_snapshot_ref,
+      thread.upstream_profile_snapshot_digest,
+    )).threadConfig
+    return {
+      model: thread.codex_model,
+      threadConfig,
+      isolatedThreadCwd: thread.isolated_thread_cwd,
+      instructionContractDigest: thread.instruction_contract_digest,
+      readyToolSurface,
+    }
+  }
+
+  private readRuntimeSourceManifestDigests(threadBindingId: string): string[] {
+    const thread = this.requireThread(threadBindingId)
+    const sourceRows = this.db.prepare(`
+      SELECT runtime_manifest_digest FROM codex_sidecar_process_leases
+       WHERE connection_epoch IN (
+         SELECT thread_start_rpc_connection_epoch FROM codex_thread_bindings
+          WHERE thread_binding_id = ? AND thread_start_rpc_connection_epoch IS NOT NULL
+         UNION
+         SELECT turn_start_rpc_connection_epoch FROM codex_turn_bindings
+          WHERE thread_binding_id = ? AND turn_start_rpc_connection_epoch IS NOT NULL
+         UNION
+         SELECT attempt.connection_epoch
+           FROM codex_manual_compaction_dispatch_attempts attempt
+           JOIN codex_manual_compaction_bindings manual
+             ON manual.manual_compaction_id = attempt.manual_compaction_id
+          WHERE manual.thread_binding_id = ?
+         UNION
+         SELECT connection_epoch FROM codex_thread_resume_evidence
+          WHERE thread_binding_id = ?
+       )
+    `).all<{ runtime_manifest_digest: string }>(
+      threadBindingId,
+      threadBindingId,
+      threadBindingId,
+      threadBindingId,
+    )
+    return [...new Set([
+      thread.runtime_manifest_digest,
+      ...sourceRows.map((row) => row.runtime_manifest_digest),
+    ])].sort()
+  }
+
+  resolveRuntimeOperationForThread(input: {
+    threadBindingId: string
+    operation: RuntimeOperation
+  }): RuntimeCompatibilitySet {
+    const catalog = this.currentContract?.runtimeContinuityCatalog
+    const targetManifestDigest = this.currentContract?.runtimeManifestDigest
+    if (!catalog || !targetManifestDigest) {
+      throw new CodexBindingRepositoryError('runtime_continuity_catalog_unavailable')
+    }
+    return resolveRuntimeCompatibilitySet({
+      catalog,
+      sourceManifestDigests: this.readRuntimeSourceManifestDigests(input.threadBindingId),
+      targetManifestDigest,
+      operation: input.operation,
+    })
+  }
+
+  resolveHeadMaterializationRuntime(threadBindingId: string): RuntimeCompatibilitySet | null {
+    const target = this.requireThread(threadBindingId)
+    if (target.thread_materialization_kind !== 'fresh_root_with_tail') return null
+    if (!this.freshRootRequiresReseed(threadBindingId)) return null
+    if (!target.history_source_thread_binding_id) {
+      throw new CodexBindingRepositoryError('fresh_root_history_source_missing')
+    }
+    return this.resolveRuntimeOperationForThread({
+      threadBindingId: target.history_source_thread_binding_id,
+      operation: 'reseed_uncommitted_tail',
+    })
+  }
+
+  freshRootRequiresReseed(threadBindingId: string): boolean {
+    const target = this.requireThread(threadBindingId)
+    if (target.thread_materialization_kind !== 'fresh_root_with_tail') return false
+    return this.readLiveUncommittedUserTail(threadBindingId)
+      .some((item) => item.policy === 'untrusted_text_history')
+  }
+
+  resolveFreshRootInheritance(input: {
+    threadBindingId: string
+    candidate: SameThreadContinuationCandidate
+  }): SameThreadContinuation {
+    const target = this.requireThread(input.threadBindingId)
+    if (target.thread_materialization_kind !== 'fresh_root_with_tail'
+      || !target.history_source_thread_binding_id) {
+      throw new CodexBindingRepositoryError('fresh_root_history_source_missing')
+    }
+    if (!this.freshRootRequiresReseed(input.threadBindingId)) {
+      throw new CodexBindingRepositoryError('fresh_root_reseed_not_required')
+    }
+    const source = this.requireThread(target.history_source_thread_binding_id)
+    const stored = this.readStoredThreadContract(source)
+    const runtime = this.resolveRuntimeOperationForThread({
+      threadBindingId: source.thread_binding_id,
+      operation: 'reseed_uncommitted_tail',
+    })
+    const decision = resolveSameThreadContinuationContract({
+      stored,
+      candidate: {
+        ...input.candidate,
+        isolatedThreadCwd: stored.isolatedThreadCwd,
+        cwdAvailable: true,
+      },
+      runtime,
+    })
+    if (decision.kind !== 'ready_same_thread'
+      || stored.readyToolSurface.surfaceSnapshotDigest
+        === input.candidate.currentToolSurface.surfaceSnapshotDigest) return decision
+    const unsigned = {
+      contract: 'ready_fresh_root_inheritance_v1',
+      kind: 'requires_new_context' as const,
+      reason: 'native_tool_definition_changed' as const,
+      runtimeEvidenceDigest: runtime.evidenceDigest,
+      sourceToolSurfaceSnapshotDigest: stored.readyToolSurface.surfaceSnapshotDigest,
+      candidateToolSurfaceSnapshotDigest: input.candidate.currentToolSurface.surfaceSnapshotDigest,
+    }
+    return {
+      ...unsigned,
+      evidenceDigest: digestCanonicalJson(unsigned),
+      toolCompatibility: decision.toolCompatibility,
+    }
+  }
+
+  private assertRuntimeOperationForThread(
+    threadBindingId: string,
+    operation: RuntimeOperation,
+  ): RuntimeCompatibilitySet {
+    const compatibility = this.resolveRuntimeOperationForThread({ threadBindingId, operation })
+    if (compatibility.kind !== 'compatible') {
+      throw new CodexBindingRepositoryError(
+        compatibility.kind === 'unsupported' ? 'runtime_unsupported' : 'runtime_unverified',
+      )
+    }
+    return compatibility
+  }
+
+  resolveSameThreadContinuation(input: {
+    aliasId: string
+    aliasGeneration: number
+    candidate: SameThreadContinuationCandidate
+  }): SameThreadContinuation {
+    const catalog = this.currentContract?.runtimeContinuityCatalog
+    const targetManifestDigest = this.currentContract?.runtimeManifestDigest
+    if (!catalog || !targetManifestDigest) {
+      throw new CodexBindingRepositoryError('runtime_continuity_catalog_unavailable')
+    }
+    const source = this.readStoredContinuationContract(input)
+    return resolveSameThreadContinuationContract({
+      stored: source.stored,
+      candidate: input.candidate,
+      runtime: resolveRuntimeCompatibilitySet({
+        catalog,
+        sourceManifestDigests: source.runtimeSourceManifestDigests,
+        targetManifestDigest,
+        operation: 'ordinary_continuation',
+      }),
+    })
+  }
+
+  readContextBoundaries(input: {
+    scopeId: string
+    scopeEpoch: number
+  }): CodexConversationContextBoundary[] {
+    return readCodexContextBoundaries(this.db, input)
+  }
+
+  readHistoryOnlyScope(aliasId: string): {
+    scopeId: string
+    scopeEpoch: number
+    sourceAliasGeneration: number
+    evidenceDigest: string
+  } | null {
+    if (this.readActiveThreadByAlias(aliasId)) return null
+    const row = this.db.prepare(`
+      SELECT thread.ready_scope_id, thread.alias_generation, thread.thread_binding_id,
+             thread.revision, thread.retired_at, thread.retired_reason,
+             thread.retirement_evidence_digest, scope.message_visibility_epoch
+        FROM codex_thread_bindings thread
+        JOIN chat_conversations scope ON scope.id = thread.ready_scope_id
+       WHERE thread.ready_conversation_alias = ? AND scope.closed_at IS NULL
+       ORDER BY thread.alias_generation DESC LIMIT 1
+    `).get<{
+      ready_scope_id: string
+      alias_generation: number
+      thread_binding_id: string
+      revision: number
+      retired_at: string | null
+      retired_reason: string | null
+      retirement_evidence_digest: string | null
+      message_visibility_epoch: number
+    }>(aliasId)
+    if (!row || !row.retired_at || !row.retired_reason || !row.retirement_evidence_digest) return null
+    const unsigned = {
+      contract: 'codex_history_only_scope_v1',
+      scopeId: row.ready_scope_id,
+      scopeEpoch: row.message_visibility_epoch,
+      sourceThreadBindingId: row.thread_binding_id,
+      sourceAliasGeneration: row.alias_generation,
+      sourceRevision: row.revision,
+      retiredAt: row.retired_at,
+      retiredReason: row.retired_reason,
+      retirementEvidenceDigest: row.retirement_evidence_digest,
+    }
+    return {
+      scopeId: row.ready_scope_id,
+      scopeEpoch: row.message_visibility_epoch,
+      sourceAliasGeneration: row.alias_generation,
+      evidenceDigest: digestCanonicalJson(unsigned),
+    }
+  }
+
+  buildBeginNewContextActionRef(input: {
+    scopeId: string
+    scopeEpoch: number
+    candidateEvidenceDigest: string
+    consequenceDigest: string
+    draftRevision: number | null
+  }): CodexBeginNewContextActionRef {
+    const scope = this.db.prepare(`
+      SELECT message_visibility_epoch FROM chat_conversations
+       WHERE id = ? AND closed_at IS NULL LIMIT 1
+    `).get<{ message_visibility_epoch: number }>(input.scopeId)
+    if (!scope || scope.message_visibility_epoch !== input.scopeEpoch) {
+      throw new CodexBindingRepositoryError('begin_new_context_scope_stale')
+    }
+    const source = this.db.prepare(`
+      SELECT * FROM codex_thread_bindings
+       WHERE ready_scope_id = ?
+       ORDER BY (retired_at IS NULL) DESC, alias_generation DESC LIMIT 1
+    `).get<ThreadBindingRow>(input.scopeId)
+    if (!source) throw new CodexBindingRepositoryError('begin_new_context_source_missing')
+    const active = this.readActiveThreadByAlias(source.ready_conversation_alias)
+    if (active && active.thread_binding_id !== source.thread_binding_id) {
+      throw new CodexBindingRepositoryError('begin_new_context_source_stale')
+    }
+    const sourceEvidenceDigest = digestCanonicalJson({
+      contract: 'codex_begin_new_context_source_v1',
+      scopeId: input.scopeId,
+      scopeEpoch: input.scopeEpoch,
+      threadBindingId: source.thread_binding_id,
+      aliasGeneration: source.alias_generation,
+      revision: source.revision,
+      retiredAt: source.retired_at,
+      retiredReason: source.retired_reason,
+      retirementEvidenceDigest: source.retirement_evidence_digest,
+    })
+    const operationId = codexBeginNewContextOperationId({
+      scopeId: input.scopeId,
+      scopeEpoch: input.scopeEpoch,
+      sourceEvidenceDigest,
+      candidateEvidenceDigest: input.candidateEvidenceDigest,
+      consequenceDigest: input.consequenceDigest,
+      draftRevision: input.draftRevision,
+    })
+    const unsigned = {
+      contract: 'codex_begin_new_context_action_v1' as const,
+      operationId,
+      scopeId: input.scopeId,
+      scopeEpoch: input.scopeEpoch,
+      sourceThreadBindingId: source.thread_binding_id,
+      sourceAliasGeneration: source.alias_generation,
+      sourceRevision: source.revision,
+      sourceEvidenceDigest,
+      candidateEvidenceDigest: input.candidateEvidenceDigest,
+      consequenceDigest: input.consequenceDigest,
+      draftRevision: input.draftRevision,
+    }
+    return { ...unsigned, digest: digestCanonicalJson(unsigned) }
+  }
+
+  beginNewContext(input: {
+    actionRef: CodexBeginNewContextActionRef
+    issuedActionRef: CodexBeginNewContextActionRef | null
+    assertRecoveryEligible: () => void
+    runtimeManifestDigest: string
+    protocolSchemaDigest: string
+    committedAt: string
+  }): {
+    boundary: CodexConversationContextBoundary
+    invalidation: NonNullable<ReturnType<CodexBindingRepository['readActionSurfaceInvalidation']>>
+    committed: boolean
+  } {
+    return this.immediate(() => {
+      const { digest: suppliedDigest, ...unsignedRef } = input.actionRef
+      if (digestCanonicalJson(unsignedRef) !== suppliedDigest
+        || codexBeginNewContextOperationId(input.actionRef) !== input.actionRef.operationId) {
+        throw new CodexBindingRepositoryError('begin_new_context_action_ref_invalid')
+      }
+      const existing = this.readContextBoundaries({
+        scopeId: input.actionRef.scopeId,
+        scopeEpoch: input.actionRef.scopeEpoch,
+      }).find((boundary) => boundary.operationId === input.actionRef.operationId)
+      if (existing) {
+        const stored = this.db.prepare(`SELECT boundary.source_evidence_digest, scope.closed_at
+          FROM codex_conversation_context_boundaries boundary
+          JOIN chat_conversations scope ON scope.id = boundary.ready_scope_id
+          WHERE boundary.operation_id = ?`).get<{ source_evidence_digest: string; closed_at: string | null }>(existing.operationId)
+        if (!stored || stored.source_evidence_digest !== input.actionRef.sourceEvidenceDigest
+          || existing.sourceThreadBindingId !== input.actionRef.sourceThreadBindingId
+          || existing.sourceAliasGeneration !== input.actionRef.sourceAliasGeneration
+          || existing.sourceRevision !== input.actionRef.sourceRevision) {
+          throw new CodexBindingRepositoryError('begin_new_context_action_ref_invalid')
+        }
+        const invalidation = this.readActionSurfaceInvalidation(input.actionRef.scopeId)
+        if (!invalidation) throw new CodexBindingRepositoryError('begin_new_context_readback_missing')
+        if (stored.closed_at || invalidation.scopeEpoch !== input.actionRef.scopeEpoch) {
+          throw new CodexBindingRepositoryError('begin_new_context_scope_stale')
+        }
+        return { boundary: existing, invalidation, committed: false }
+      }
+      if (!input.issuedActionRef
+        || digestCanonicalJson(input.actionRef) !== digestCanonicalJson(input.issuedActionRef)) {
+        throw new CodexBindingRepositoryError('begin_new_context_action_ref_unissued')
+      }
+      const expectedRef = this.buildBeginNewContextActionRef({
+        scopeId: input.issuedActionRef.scopeId,
+        scopeEpoch: input.issuedActionRef.scopeEpoch,
+        candidateEvidenceDigest: input.issuedActionRef.candidateEvidenceDigest,
+        consequenceDigest: input.issuedActionRef.consequenceDigest,
+        draftRevision: input.issuedActionRef.draftRevision,
+      })
+      if (digestCanonicalJson(expectedRef) !== digestCanonicalJson(input.issuedActionRef)) {
+        throw new CodexBindingRepositoryError('begin_new_context_action_ref_stale')
+      }
+      input.assertRecoveryEligible()
+      const source = this.requireThread(input.actionRef.sourceThreadBindingId)
+      const active = this.readActiveThreadByAlias(source.ready_conversation_alias)
+      if (active) {
+        const lifecycle = classifyLifecycleOperation(this.readLifecycleOperation({
+          aliasId: active.ready_conversation_alias,
+          aliasGeneration: active.alias_generation,
+        }).facts)
+        if (!['idle_never_started', 'idle_ready_terminal_no_native', 'idle_native_thread']
+          .includes(lifecycle)) {
+          throw new CodexBindingRepositoryError('begin_new_context_source_busy')
+        }
+      }
+      const previousVisibleMessageAnchor = this.db.prepare(`
+        SELECT id FROM chat_messages
+         WHERE conversation_id = ? AND message_visibility_epoch = ?
+         ORDER BY timestamp DESC, id DESC LIMIT 1
+      `).get<{ id: string }>(input.actionRef.scopeId, input.actionRef.scopeEpoch)?.id ?? null
+      const preservedContext = captureCodexBoundaryContext(this.db, input.actionRef.scopeId, input.actionRef.scopeEpoch)
+      const retirementEvidenceDigest = digestCanonicalJson({
+        contract: 'codex_begin_new_context_retirement_v1',
+        actionRef: input.actionRef,
+      })
+      if (active) {
+        const retired = this.db.prepare(`
+          UPDATE codex_thread_bindings
+             SET retired_at = ?, retired_reason = 'publication_diverged',
+                 retirement_evidence_digest = ?,
+                 action_projection_sequence = action_projection_sequence + 1,
+                 revision = revision + 1, updated_at = ?
+           WHERE thread_binding_id = ? AND revision = ? AND retired_at IS NULL
+        `).run(
+          input.committedAt,
+          retirementEvidenceDigest,
+          input.committedAt,
+          active.thread_binding_id,
+          active.revision,
+        )
+        if (changes(retired) !== 1) {
+          throw new CodexBindingRepositoryError('begin_new_context_source_cas_failed')
+        }
+        this.recordThreadArchiveIntentInOpenTransaction({
+          thread: this.requireThread(active.thread_binding_id),
+          sourceKind: 'begin_new_context',
+          retiredReason: 'publication_diverged',
+          readyRunId: null,
+          retirementEvidenceDigest,
+          retirementTransactionDigest: digestCanonicalJson({
+            operationId: input.actionRef.operationId,
+            sourceThreadBindingId: active.thread_binding_id,
+          }),
+          retiredAt: input.committedAt,
+        })
+      }
+      const maxGeneration = this.db.prepare(`
+        SELECT MAX(alias_generation) AS max_generation FROM codex_thread_bindings
+         WHERE ready_conversation_alias = ?
+      `).get<{ max_generation: number | null }>(source.ready_conversation_alias)?.max_generation ?? 0
+      const targetAliasGeneration = maxGeneration + 1
+      const targetThreadBindingId = this.nextThreadBindingId(
+        source.ready_conversation_alias,
+        targetAliasGeneration,
+        input.actionRef.operationId,
+      )
+      this.insertEmptyAliasGenerationInOpenTransaction({
+        threadBindingId: targetThreadBindingId,
+        aliasId: source.ready_conversation_alias,
+        aliasGeneration: targetAliasGeneration,
+        readyScopeId: source.ready_scope_id,
+        runtimeManifestDigest: input.runtimeManifestDigest,
+        protocolSchemaDigest: input.protocolSchemaDigest,
+        createdAt: input.committedAt,
+      })
+      clearCodexImplicitConversationContextInOpenTransaction(this.db, {
+        scopeId: source.ready_scope_id,
+        updatedAt: input.committedAt,
+      })
+      const unsignedBoundary = {
+        operationId: input.actionRef.operationId,
+        scopeId: source.ready_scope_id,
+        scopeEpoch: input.actionRef.scopeEpoch,
+        sourceThreadBindingId: source.thread_binding_id,
+        sourceAliasGeneration: source.alias_generation,
+        sourceRevision: input.actionRef.sourceRevision,
+        targetThreadBindingId,
+        targetAliasGeneration,
+        previousVisibleMessageAnchor,
+        preservedContextDigest: digestCanonicalJson(preservedContext),
+        committedAt: input.committedAt,
+      }
+      const receiptDigest = digestCanonicalJson(unsignedBoundary)
+      this.db.prepare(`
+        INSERT INTO codex_conversation_context_boundaries (
+          operation_id, ready_scope_id, message_visibility_epoch,
+          source_thread_binding_id, source_alias_generation, source_revision,
+          source_evidence_digest, target_thread_binding_id, target_alias_generation,
+          previous_visible_message_anchor, preserved_context_json, committed_at, receipt_digest
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        unsignedBoundary.operationId,
+        unsignedBoundary.scopeId,
+        unsignedBoundary.scopeEpoch,
+        unsignedBoundary.sourceThreadBindingId,
+        unsignedBoundary.sourceAliasGeneration,
+        unsignedBoundary.sourceRevision,
+        input.actionRef.sourceEvidenceDigest,
+        unsignedBoundary.targetThreadBindingId,
+        unsignedBoundary.targetAliasGeneration,
+        unsignedBoundary.previousVisibleMessageAnchor,
+        JSON.stringify(preservedContext),
+        unsignedBoundary.committedAt,
+        receiptDigest,
+      )
+      const boundary = this.readContextBoundaries({
+        scopeId: source.ready_scope_id,
+        scopeEpoch: input.actionRef.scopeEpoch,
+      }).find((candidate) => candidate.operationId === input.actionRef.operationId)
+      const invalidation = this.readActionSurfaceInvalidation(source.ready_conversation_alias)
+      if (!boundary || boundary.receiptDigest !== receiptDigest || !invalidation
+        || invalidation.aliasGeneration !== targetAliasGeneration) {
+        throw new CodexBindingRepositoryError('begin_new_context_readback_missing')
+      }
+      return { boundary, invalidation, committed: true }
+    })
+  }
+
   readActionSurfaceInvalidation(aliasId: string): {
     scopeId: string
     scopeEpoch: number
@@ -2487,7 +3024,7 @@ export class CodexBindingRepository {
   }): string[] {
     return this.db.prepare(`
       SELECT ready_conversation_alias FROM codex_thread_bindings
-       WHERE retired_at IS NULL AND thread_materialization_kind = 'fresh_start'
+       WHERE retired_at IS NULL AND thread_materialization_kind IN ('legacy', 'fresh_start') AND codex_thread_id IS NULL
          AND (runtime_manifest_digest != ? OR protocol_schema_digest != ?)
        ORDER BY ready_conversation_alias
     `).all<{ ready_conversation_alias: string }>(
@@ -2520,6 +3057,9 @@ export class CodexBindingRepository {
           || active.tool_surface_digest === input.currentToolSurfaceDigest)) {
         return { kind: 'current', binding: this.readActiveAliasBinding(input.aliasId)! }
       }
+      const scope = this.db.prepare('SELECT message_visibility_epoch FROM chat_conversations WHERE id = ?')
+        .get<{ message_visibility_epoch: number }>(active.ready_scope_id)
+      if (scope) this.readContextBoundaries({ scopeId: active.ready_scope_id, scopeEpoch: scope.message_visibility_epoch })
       const pristine = this.db.prepare(`
         SELECT head.thread_binding_id, scope.message_visibility_epoch
           FROM codex_thread_bindings head
@@ -2714,6 +3254,7 @@ export class CodexBindingRepository {
     aliasGeneration: number
     currentRuntimeManifestDigest: string
     currentProtocolSchemaDigest: string
+    headContractBlocker?: CodexHeadActionBlocker | null
   }): CodexHeadActionFacts {
     const thread = this.readActiveThreadByAlias(input.aliasId)
     if (!thread || thread.alias_generation !== input.aliasGeneration || thread.retired_at) {
@@ -2770,6 +3311,7 @@ export class CodexBindingRepository {
       headProtocolSchemaDigest: thread.protocol_schema_digest,
       currentRuntimeManifestDigest: input.currentRuntimeManifestDigest,
       currentProtocolSchemaDigest: input.currentProtocolSchemaDigest,
+      headContractBlocker: input.headContractBlocker,
       materializationIntentRef: thread.thread_start_request_id && thread.history_seed_digest
         ? { id: thread.thread_start_request_id, digest: thread.history_seed_digest }
         : null,
@@ -3943,7 +4485,7 @@ export class CodexBindingRepository {
     },
   ): ProductTurnReceipt {
     return readProductTurnPresentation(this.db, readyRunId, currentEnvironment,
-      (runId) => this.readProductTurnActionContext(runId))
+      (runId) => this.readProductTurnActionContext(runId, currentEnvironment))
   }
 
   readProductTurnPresentations(
@@ -3957,11 +4499,17 @@ export class CodexBindingRepository {
       this.db,
       readyRunIds,
       currentEnvironment,
-      (runId) => this.readProductTurnActionContext(runId),
+      (runId) => this.readProductTurnActionContext(runId, currentEnvironment),
     )
   }
 
-  readProductTurnActionContext(readyRunId: string): ProductTurnActionContext | null {
+  readProductTurnActionContext(
+    readyRunId: string,
+    currentEnvironment?: {
+      requestedWorkbenchMode: 'browser' | 'document' | 'rss' | 'calendar'
+      trustedWorkbenchMode: 'browser' | 'document' | 'rss' | 'calendar'
+    },
+  ): ProductTurnActionContext | null {
     const owner = this.requireTurn(readyRunId)
     const ownerThread = this.requireThread(owner.thread_binding_id)
     const head = this.readActiveThreadByAlias(ownerThread.ready_conversation_alias)
@@ -3988,13 +4536,26 @@ export class CodexBindingRepository {
     const tailPlan = resolveExplicitRetryTailPlan(liveTail, {
       originUserMessageId: root.messageId, inputDigest: digestCodexUserInput(root.input),
     })
+    const headFacts = this.readHeadActionFacts({
+      aliasId: head.ready_conversation_alias,
+      aliasGeneration: head.alias_generation,
+      currentRuntimeManifestDigest: this.currentContract?.runtimeManifestDigest || head.runtime_manifest_digest,
+      currentProtocolSchemaDigest: this.currentContract?.protocolSchemaDigest || head.protocol_schema_digest,
+    })
+    const headContractBlocker = this.currentContract?.resolveHeadContractBlocker?.({
+      aliasId: head.ready_conversation_alias,
+      aliasGeneration: head.alias_generation,
+      scopeEpoch: headFacts.scopeEpoch,
+      workbenchMode: currentEnvironment?.trustedWorkbenchMode
+        ?? prepared.sourceTrustedEnvironmentRef.workbenchMode,
+      threadBindingId: head.thread_binding_id,
+      codexThreadId: head.codex_thread_id,
+      materializationKind: head.thread_materialization_kind,
+    })
     return {
-      headFacts: this.readHeadActionFacts({
-        aliasId: head.ready_conversation_alias,
-        aliasGeneration: head.alias_generation,
-        currentRuntimeManifestDigest: this.currentContract?.runtimeManifestDigest || head.runtime_manifest_digest,
-        currentProtocolSchemaDigest: this.currentContract?.protocolSchemaDigest || head.protocol_schema_digest,
-      }),
+      headFacts: headContractBlocker === undefined
+        ? headFacts
+        : { ...headFacts, headContractBlocker },
       sourcePrepared: source,
       sourceRootCompacted,
       exactLiveRootOnDirectSuccessor: head.history_source_thread_binding_id === owner.thread_binding_id
@@ -5132,11 +5693,47 @@ export class CodexBindingRepository {
       throw new CodexBindingRepositoryError('product_admission_transaction_missing')
     }
     this.validateAdmission(input)
+    if (this.currentContract && (
+      input.runtimeManifestDigest !== this.currentContract.runtimeManifestDigest
+      || input.protocolSchemaDigest !== this.currentContract.protocolSchemaDigest
+    )) throw new CodexBindingRepositoryError('current_runtime_contract_mismatch')
     this.assertReadyParents(input)
     const { ingressAdmittedDigest: _, ...digestInput } = input
       const existing = this.readActiveThreadByAlias(input.prepared.conversationAlias.aliasId)
+      if (existing?.codex_thread_id && input.continuationCandidate) {
+        const candidate = input.continuationCandidate
+        const nextThreadConfig = resolveCodexNativeModelSettings(this.readUpstreamProfileSnapshot(
+          input.upstreamProfileSnapshotRef,
+          input.upstreamProfileSnapshotDigest,
+        )).threadConfig
+        if (candidate.model !== input.codexModel
+          || canonicalJson(candidate.threadConfig) !== canonicalJson(nextThreadConfig)
+          || candidate.isolatedThreadCwd !== input.isolatedThreadCwd
+          || candidate.instructionContractDigest !== input.instructionContractDigest
+          || canonicalJson(candidate.currentToolSurface)
+            !== canonicalJson(input.prepared.readyToolSurface)) {
+          throw new CodexBindingRepositoryError('continuation_candidate_mismatch')
+        }
+      }
+      const continuation = existing?.codex_thread_id
+        ? input.continuationCandidate
+          ? this.resolveSameThreadContinuation({
+              aliasId: input.prepared.conversationAlias.aliasId,
+              aliasGeneration: input.prepared.conversationAlias.aliasGeneration,
+              candidate: input.continuationCandidate,
+            })
+          : null
+        : null
+      if (existing?.codex_thread_id && (!continuation || continuation.kind !== 'ready_same_thread')) {
+        throw new CodexBindingRepositoryError(
+          continuation?.reason || 'continuation_contract_unavailable',
+        )
+      }
       if (existing?.thread_start_reservation_set_id && existing.thread_materialization_kind !== 'legacy') {
         this.readNativeInheritedContractDigest(existing)
+      }
+      if (existing?.thread_materialization_kind === 'fresh_root_with_tail') {
+        this.assertFreshRootInheritance(existing, input)
       }
       if (input.prepared.ingress.attemptKind === 'user_ingress') {
         const admissionRef = input.prepared.ingress.actionAdmissionRef
@@ -5146,6 +5743,7 @@ export class CodexBindingRepository {
           aliasGeneration: input.prepared.conversationAlias.aliasGeneration,
           currentRuntimeManifestDigest: input.runtimeManifestDigest,
           currentProtocolSchemaDigest: input.protocolSchemaDigest,
+          headContractBlocker: continuation?.reason ?? null,
         }))
         const expectedRef = currentProjection.actionHeadIdentity && {
           headProjectionDigest: currentProjection.evidenceDigest,
@@ -5200,8 +5798,7 @@ export class CodexBindingRepository {
           throw new CodexBindingRepositoryError('retry_root_ref_invalid')
         }
         if (existing.thread_materialization_kind === 'fresh_root_with_tail'
-          && this.admissionNativeInheritedContractDigest(input)
-            !== this.readNativeInheritedContractDigest(this.requireThread(root.threadBindingId))) {
+          && existing.history_source_thread_binding_id !== root.threadBindingId) {
           throw new CodexBindingRepositoryError('retry_native_inherited_contract_mismatch')
         }
         const predecessorPresentation = this.readProductTurnPresentation(
@@ -5232,37 +5829,6 @@ export class CodexBindingRepository {
           || !existing.codex_thread_id
           || !existing.thread_start_reservation_set_id
         ) throw new CodexBindingRepositoryError('active_thread_binding_mismatch')
-        if (existing.codex_model !== input.codexModel) {
-          throw new CodexBindingRepositoryError('model_change_requires_new_thread')
-        }
-        if (
-          existing.upstream_profile_snapshot_ref !== input.upstreamProfileSnapshotRef
-          || existing.upstream_profile_snapshot_digest !== input.upstreamProfileSnapshotDigest
-        ) {
-          const existingSnapshot = this.readUpstreamProfileSnapshot(
-            existing.upstream_profile_snapshot_ref,
-            existing.upstream_profile_snapshot_digest,
-          )
-          const nextSnapshot = this.readUpstreamProfileSnapshot(
-            input.upstreamProfileSnapshotRef,
-            input.upstreamProfileSnapshotDigest,
-          )
-          if (canonicalJson(resolveCodexNativeModelSettings(existingSnapshot).threadConfig)
-            !== canonicalJson(resolveCodexNativeModelSettings(nextSnapshot).threadConfig)) {
-            throw new CodexBindingRepositoryError(
-              'native_thread_config_change_requires_new_generation',
-            )
-          }
-        }
-        if (
-          existing.isolated_thread_cwd !== input.isolatedThreadCwd
-          || existing.instruction_contract_digest !== input.instructionContractDigest
-          || existing.runtime_manifest_digest !== input.runtimeManifestDigest
-          || existing.protocol_schema_digest !== input.protocolSchemaDigest
-        ) throw new CodexBindingRepositoryError('thread_contract_change_requires_new_thread')
-        if (existing.tool_surface_digest !== input.prepared.readyToolSurface.toolSurfaceDigest) {
-          throw new CodexBindingRepositoryError('tool_surface_change_requires_new_thread')
-        }
         const surfaceJson = canonicalJson(input.prepared.readyToolSurface)
         if (
           existing.tool_surface_snapshot_digest === null
@@ -5300,8 +5866,9 @@ export class CodexBindingRepository {
           || existing.thread_binding_id !== input.threadBindingId
           || existing.alias_generation !== input.prepared.conversationAlias.aliasGeneration
           || existing.ready_scope_id !== input.prepared.readyToolHostIdentity.scopeId
-          || existing.runtime_manifest_digest !== input.runtimeManifestDigest
-          || existing.protocol_schema_digest !== input.protocolSchemaDigest
+          || (existing.thread_materialization_kind !== 'fresh_root_with_tail'
+            && (existing.runtime_manifest_digest !== input.runtimeManifestDigest
+              || existing.protocol_schema_digest !== input.protocolSchemaDigest))
           || existing.thread_start_reservation_set_id !== null
           || existing.codex_thread_id !== null
           || existing.retired_at !== null
@@ -5334,7 +5901,7 @@ export class CodexBindingRepository {
           input.codexModel,
           input.upstreamProfileSnapshotRef,
           input.upstreamProfileSnapshotDigest,
-          this.admissionNativeInheritedContractDigest(input),
+          this.admissionNativeInheritedContractDigest(existing, input),
           input.admittedAt,
           existing.thread_binding_id,
           existing.revision,
@@ -7127,6 +7694,11 @@ export class CodexBindingRepository {
       beforeReadyRunId: input.readyRunId,
     })
     if (!boundary) {
+      const targetRuntimeManifestDigest = this.currentContract?.runtimeManifestDigest
+      const targetProtocolSchemaDigest = this.currentContract?.protocolSchemaDigest
+      if (!targetRuntimeManifestDigest || !targetProtocolSchemaDigest) {
+        throw new CodexBindingRepositoryError('runtime_continuity_catalog_unavailable')
+      }
       const historySeedDigest = digestCanonicalJson({
         contract: 'codex_fresh_root_with_tail_seed_v1',
         sourceThreadBindingId: thread.thread_binding_id,
@@ -7154,8 +7726,8 @@ export class CodexBindingRepository {
         thread.ready_conversation_alias,
         targetGeneration,
         thread.ready_scope_id,
-        thread.runtime_manifest_digest,
-        thread.protocol_schema_digest,
+        targetRuntimeManifestDigest,
+        targetProtocolSchemaDigest,
         thread.thread_binding_id,
         closedTurn.terminal_facts_digest,
         historySeedDigest,
@@ -7186,6 +7758,10 @@ export class CodexBindingRepository {
         forkTargetThreadBindingId: targetThreadBindingId,
       }
     }
+    this.assertRuntimeOperationForThread(
+      thread.thread_binding_id,
+      'fork_from_accepted_prefix',
+    )
     if (!input.forkSeed) throw new CodexBindingRepositoryError('fork_seed_missing')
     for (const value of [
       input.forkSeed.targetCwd,
@@ -7446,7 +8022,8 @@ export class CodexBindingRepository {
     if (input.kind === 'product' || input.kind === 'automatic_compaction') {
       if (!input.readyRunId) throw new CodexBindingRepositoryError('gateway_ready_run_id_missing')
       const row = this.db.prepare(`
-        SELECT t.ready_run_id, t.ready_task_id, t.codex_thread_id, t.codex_turn_id,
+        SELECT t.ready_run_id, t.ready_task_id, t.thread_binding_id,
+               t.codex_thread_id, t.codex_turn_id,
                t.gateway_claimed_codex_turn_id, t.product_closeout_at, t.revision,
                t.turn_start_dispatch_intent_at,
                t.tool_surface_digest, t.effective_codex_model,
@@ -7467,6 +8044,7 @@ export class CodexBindingRepository {
       `).get<{
         ready_run_id: string
         ready_task_id: string
+        thread_binding_id: string
         codex_thread_id: string | null
         codex_turn_id: string | null
         gateway_claimed_codex_turn_id: string | null
@@ -7508,6 +8086,9 @@ export class CodexBindingRepository {
         || input.upstreamProfileSnapshotDigest !== row.effective_upstream_snapshot_digest
         || !row.instruction_contract_digest
       ) throw new CodexBindingRepositoryError('gateway_product_binding_mismatch')
+      if (input.kind === 'automatic_compaction') {
+        this.assertRuntimeOperationForThread(row.thread_binding_id, 'manual_compaction')
+      }
       if (!row.gateway_claimed_codex_turn_id) {
         const claimed = this.db.prepare(`
           UPDATE codex_turn_bindings
@@ -7727,6 +8308,7 @@ export class CodexBindingRepository {
         || thread.retired_at
         || thread.continuation_blocked_at
       ) throw new CodexBindingRepositoryError('manual_compaction_thread_not_eligible')
+      this.assertRuntimeOperationForThread(thread.thread_binding_id, 'manual_compaction')
       const latestTurn = this.readLatestClosedTurnUpstreamRoute(thread.thread_binding_id)
       if (
         !latestTurn
@@ -9472,14 +10054,16 @@ export class CodexBindingRepository {
       || (!isFork && thread.parentThreadId !== null)
       || (!isFork && thread.forkedFromId !== null)
       || !forkPrefixExact
-      || thread.cwd !== row.isolated_thread_cwd
+      || !row.isolated_thread_cwd
+      || !thread.cwd || !sameCodexThreadDirectory(thread.cwd, row.isolated_thread_cwd)
       || thread.source !== 'vscode'
       || thread.threadSource !== null
       || thread.modelProvider !== 'ready_gateway'
       || !Array.isArray(instructionSources)
       || instructionSources.length !== 0
       || (isFork && (
-        effective?.cwd !== row.isolated_thread_cwd
+        typeof effective?.cwd !== 'string'
+        || !sameCodexThreadDirectory(effective.cwd, row.isolated_thread_cwd)
         || effective.model !== row.codex_model
         || effective.modelProvider !== row.codex_model_provider_id
         || effective.approvalPolicy !== 'never'
@@ -9672,10 +10256,13 @@ export class CodexBindingRepository {
     if (changes(update) !== 1) throw new CodexBindingRepositoryError('turn_reconciliation_cas_failed')
   }
 
-  private admissionNativeInheritedContractDigest(input: CodexAdmittedBindingInput): string {
+  private admissionNativeInheritedContractDigest(
+    target: Pick<ThreadBindingRow, 'runtime_manifest_digest' | 'protocol_schema_digest'>,
+    input: CodexAdmittedBindingInput,
+  ): string {
     return nativeInheritedContractDigest({
-      runtimeManifestDigest: input.runtimeManifestDigest,
-      protocolSchemaDigest: input.protocolSchemaDigest,
+      runtimeManifestDigest: target.runtime_manifest_digest,
+      protocolSchemaDigest: target.protocol_schema_digest,
       toolSurfaceSnapshotDigest: input.prepared.readyToolSurface.surfaceSnapshotDigest,
       instructionContractDigest: input.instructionContractDigest,
       model: input.codexModel,
@@ -9683,6 +10270,51 @@ export class CodexBindingRepository {
         input.upstreamProfileSnapshotRef, input.upstreamProfileSnapshotDigest,
       )).threadConfig,
     })
+  }
+
+  private assertFreshRootInheritance(
+    target: ThreadBindingRow,
+    input: CodexAdmittedBindingInput,
+  ): void {
+    if (target.thread_materialization_kind !== 'fresh_root_with_tail') return
+    if (!this.freshRootRequiresReseed(target.thread_binding_id)) return
+    const candidate = input.continuationCandidate
+    if (!candidate) throw new CodexBindingRepositoryError('continuation_contract_unavailable')
+    const expectedThreadConfig = resolveCodexNativeModelSettings(this.readUpstreamProfileSnapshot(
+      input.upstreamProfileSnapshotRef,
+      input.upstreamProfileSnapshotDigest,
+    )).threadConfig
+    if (candidate.model !== input.codexModel
+      || canonicalJson(candidate.threadConfig) !== canonicalJson(expectedThreadConfig)
+      || candidate.isolatedThreadCwd !== input.isolatedThreadCwd
+      || candidate.instructionContractDigest !== input.instructionContractDigest
+      || canonicalJson(candidate.currentToolSurface) !== canonicalJson(input.prepared.readyToolSurface)) {
+      throw new CodexBindingRepositoryError('continuation_candidate_mismatch')
+    }
+    const decision = this.resolveFreshRootInheritance({
+      threadBindingId: target.thread_binding_id,
+      candidate,
+    })
+    if (decision.kind !== 'ready_same_thread') {
+      throw new CodexBindingRepositoryError(decision.reason || 'continuation_contract_unavailable')
+    }
+    const source = this.requireThread(target.history_source_thread_binding_id!)
+    this.readNativeInheritedContractDigest(source)
+    const targetCandidateDigest = this.admissionNativeInheritedContractDigest(target, input)
+    const sourceNonRuntimeDigest = nativeInheritedContractDigest({
+      runtimeManifestDigest: target.runtime_manifest_digest,
+      protocolSchemaDigest: target.protocol_schema_digest,
+      toolSurfaceSnapshotDigest: source.tool_surface_snapshot_digest!,
+      instructionContractDigest: source.instruction_contract_digest!,
+      model: source.codex_model!,
+      threadConfig: resolveCodexNativeModelSettings(this.readUpstreamProfileSnapshot(
+        source.upstream_profile_snapshot_ref,
+        source.upstream_profile_snapshot_digest,
+      )).threadConfig,
+    })
+    if (targetCandidateDigest !== sourceNonRuntimeDigest) {
+      throw new CodexBindingRepositoryError('retry_native_inherited_contract_mismatch')
+    }
   }
 
   private readNativeInheritedContractDigest(thread: ThreadBindingRow): string {

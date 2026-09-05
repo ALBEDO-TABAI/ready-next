@@ -16,11 +16,17 @@ import {
   filterSlashSkills,
   type SkillMenuItem,
 } from '../../modules/agent/slash-skill-selection'
+import {
+  deriveComposerState,
+  type ComposerSendBlocker,
+} from '../../modules/agent/composer-state'
 
 interface ChatInputProps {
   inputValue: string
   stopAvailable: boolean
   lifecycleInputBlocked: boolean
+  sendBlocker?: ComposerSendBlocker | null
+  destructiveOperationPending?: boolean
   stopPending: boolean
   stopError: string | null
   attachmentsCount: number
@@ -66,6 +72,8 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
   inputValue,
   stopAvailable,
   lifecycleInputBlocked,
+  sendBlocker = null,
+  destructiveOperationPending = false,
   stopPending,
   stopError,
   attachmentsCount,
@@ -104,16 +112,25 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
   const atMenuRef = useRef<HTMLDivElement>(null)
   const slashMenuRef = useRef<HTMLDivElement>(null)
   const composingRef = useRef(false)
-  const composerLocked = lifecycleInputBlocked
-  const composerSendLocked = composerLocked || authorizationModeUpdating
   const hasSendableContent = Boolean(inputValue.trim() || attachmentsCount > 0)
+  const composerState = deriveComposerState({
+    hasSendableContent,
+    sendAvailability: admissionReady && !lifecycleInputBlocked ? 'ready' : 'blocked',
+    blocker: !admissionReady ? 'head_unavailable' : sendBlocker,
+    authorizationModeUpdating,
+    destructiveOperationPending,
+    exactStopIntentAvailable: stopAvailable,
+  })
+  const composerLocked = !composerState.editable
   const sendBlockedReason = !admissionReady
     ? '还没有可用的对话，请稍候或新建对话'
     : authorizationModeUpdating
       ? '正在更新授权方式'
+      : lifecycleInputBlocked
+        ? '当前会话暂时不能发送，你仍可继续编辑草稿'
       : ''
   const sendUnavailable = Boolean(sendBlockedReason)
-  const sendDisabled = composerSendLocked || sendUnavailable || !hasSendableContent
+  const sendDisabled = !composerState.sendEnabled
 
   const syncComposerMenuFrame = useCallback(() => {
     const textarea = textareaRef.current
@@ -679,6 +696,9 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
     >
       <div
         data-chat-composer-shell="true"
+        data-ready-composer-editable={composerState.editable ? 'true' : 'false'}
+        data-ready-composer-send-enabled={composerState.sendEnabled ? 'true' : 'false'}
+        data-ready-composer-blocker={composerState.blocker ?? ''}
         data-drag-over={isDragOver ? 'true' : 'false'}
         className="ready-liquid-composer block w-full"
         style={{ ...composerShellStyle, overflow: 'visible' }}
@@ -727,7 +747,7 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
             onCompositionEnd={() => {
               composingRef.current = false
             }}
-            disabled={composerSendLocked}
+            disabled={!composerState.editable}
             placeholder="Hi～今天有什么可以帮到你"
             className="ready-input-slot-inner w-full bg-transparent border-none outline-none resize-none"
             style={{
@@ -738,7 +758,7 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
               width: '100%',
               minHeight: 44,
               maxHeight: 120,
-              opacity: composerSendLocked ? 0.7 : 1,
+              opacity: composerState.editable ? 1 : 0.7,
             }}
             rows={2}
           />

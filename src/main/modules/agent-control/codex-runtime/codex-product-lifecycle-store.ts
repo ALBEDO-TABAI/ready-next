@@ -16,6 +16,7 @@ import type { PreparedCodexProductRun } from './codex-product-run-preparer'
 import type { CodexRuntimeHostPort, ReadyClosedCodexProductRun } from './codex-runtime-composition'
 import type { CodexStartIdentityRegistry } from './codex-start-identity-registry'
 import { CodexManualCompactionController } from './codex-manual-compaction-controller'
+import { sameCodexThreadDirectory } from './codex-thread-directory-identity'
 import {
   ReadyCodexLifecyclePortError,
   type CloseRetirementEvidence,
@@ -82,7 +83,7 @@ export async function retireCodexAliasForClose(input: {
     if (
       thread.id !== current.codexThreadId
       || thread.sessionId !== current.codexSessionId
-      || thread.cwd !== current.isolatedThreadCwd
+      || !sameCodexThreadDirectory(thread.cwd, current.isolatedThreadCwd)
       || thread.parentThreadId !== null
       || thread.forkedFromId !== expectedForkedFromId
       || thread.source !== 'vscode'
@@ -265,7 +266,8 @@ export function createLifecycleStore(input: {
         || current.aliasGeneration !== binding.identity.aliasGeneration
         || current.codexThreadId !== binding.threadId
         || current.codexSessionId !== binding.sessionId
-        || current.isolatedThreadCwd !== binding.cwd
+        || !current.isolatedThreadCwd
+        || !sameCodexThreadDirectory(current.isolatedThreadCwd, binding.cwd)
       ) throw new Error('started_thread_durable_readback_mismatch')
       input.loadedThreads.add(binding.threadId)
     },

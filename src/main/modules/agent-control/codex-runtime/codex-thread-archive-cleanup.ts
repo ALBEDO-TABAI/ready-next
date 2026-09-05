@@ -19,6 +19,7 @@ export type CodexThreadArchiveSourceKind =
   | 'engine_terminal_stop'
   | 'browser_verifier_nonaccept'
   | 'publication_divergence'
+  | 'begin_new_context'
   | 'manual_compaction_quarantine'
   | 'retired_backfill'
 export type CodexThreadArchiveAcknowledgementKind =
@@ -172,12 +173,14 @@ export function recordCodexThreadArchiveIntentInOpenTransaction(
     engine_terminal_stop: 'publication_diverged',
     browser_verifier_nonaccept: 'publication_diverged',
     publication_divergence: 'publication_diverged',
+    begin_new_context: 'publication_diverged',
     manual_compaction_quarantine: 'manual_compaction_quarantine',
     retired_backfill: null,
   }
   if ((input.readyRunId === null) !== [
     'idle_close',
     'idle_reset',
+    'begin_new_context',
     'manual_compaction_quarantine',
     'retired_backfill',
   ].includes(input.sourceKind)) {

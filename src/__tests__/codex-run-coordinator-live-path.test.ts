@@ -771,8 +771,6 @@ test('an empty product digest cannot escape as a terminal failure wire', async (
     disposition: 'terminal_failure_after_persistence',
     ownerRunId: 'request-empty-product-digest',
     aliasGeneration: 1,
-    shouldClearInput: true,
-    preserveInput: false,
     retryableByUser: false,
     persistence: {
       scope: 'pre-existing',

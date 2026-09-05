@@ -228,6 +228,7 @@ function admitProduct(db: NativeDb, input: {
   maxIterations?: number
   maxToolCalls?: number
 }): CodexBindingRepository {
+  const runtimeManifestDigest = 'a'.repeat(64)
   const run = prepared(input.toolSurfaceDigest, input.maxIterations, input.maxToolCalls)
   const executionBinding = { schemaVersion: 1, runId: 'run-1' }
   const parentMeta = { requestId: run.ingressBinding.requestId }
@@ -244,15 +245,23 @@ function admitProduct(db: NativeDb, input: {
     INSERT INTO run_meta (run_id, task_id, scope_id, status, execution_binding_json, message_visibility_epoch)
     VALUES ('run-1', 'task-run-1', 'scope-1', 'running', ?, 0)
   `).run(JSON.stringify(executionBinding))
-  const repository = new CodexBindingRepository(db as unknown as DatabaseConnection)
+  const repository = new CodexBindingRepository(db as unknown as DatabaseConnection, {
+    runtimeManifestDigest,
+    protocolSchemaDigest: 'protocol-schema-digest',
+    runtimeContinuityCatalog: {
+      contract: 'ready_runtime_continuity_catalog_v1',
+      targetManifestDigest: runtimeManifestDigest,
+      transitions: [],
+    },
+  })
   repository.createEmptyAliasGeneration({
     threadBindingId: 'thread-binding-1', aliasId: 'scope-1', aliasGeneration: 1,
-    readyScopeId: 'scope-1', runtimeManifestDigest: 'runtime-manifest-digest',
+    readyScopeId: 'scope-1', runtimeManifestDigest,
     protocolSchemaDigest: 'protocol-schema-digest', createdAt: at,
   })
   const head = projectCodexHeadActionProjection(repository.readHeadActionFacts({
     aliasId: 'scope-1', aliasGeneration: 1,
-    currentRuntimeManifestDigest: 'runtime-manifest-digest',
+    currentRuntimeManifestDigest: runtimeManifestDigest,
     currentProtocolSchemaDigest: 'protocol-schema-digest',
   }))
   run.ingress.actionAdmissionRef = {
@@ -272,7 +281,7 @@ function admitProduct(db: NativeDb, input: {
     threadBindingId: 'thread-binding-1',
     isolatedThreadCwd: '/tmp/ready-codex/thread-binding-1',
     turnRequestId: 'turn-request-1',
-    runtimeManifestDigest: 'runtime-manifest-digest',
+    runtimeManifestDigest,
     protocolSchemaDigest: 'protocol-schema-digest',
     instructionContractDigest: input.instructionDigest,
     codexModel: 'ready-e0-model',
@@ -288,6 +297,7 @@ function admitProduct(db: NativeDb, input: {
       messageMetaDigest: digestCanonicalJson(parentMeta),
       executionBindingDigest: digestCanonicalJson(executionBinding),
     },
+    continuationCandidate: null,
   }
   const admission: CodexAdmittedBindingInput = {
     ...admissionInput,

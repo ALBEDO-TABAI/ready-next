@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { spawn, spawnSync } from 'node:child_process'
-import { randomUUID } from 'node:crypto'
+import { randomUUID, createHash } from 'node:crypto'
 import {
   chmodSync,
   copyFileSync,
@@ -20,9 +20,10 @@ import {
 } from 'node:fs'
 import { createServer } from 'node:http'
 import { homedir, tmpdir } from 'node:os'
-import { delimiter, dirname, extname, join, relative, resolve } from 'node:path'
+import { basename, delimiter, dirname, extname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { isDeepStrictEqual } from 'node:util'
+import { createRequire } from 'node:module'
 import YAML from 'yaml'
 
 export const packerRoot = dirname(fileURLToPath(import.meta.url))
@@ -493,11 +494,21 @@ async function withTemporaryReadyPackSeed(seedFile, runBuild) {
   }
 }
 
+function sha256File(path) {
+  return createHash('sha256').update(readFileSync(path)).digest('hex')
+}
+
+// Forward the build owner's receipt; copying a package is not another build.
+const releasePackageIdentity = createRequire(import.meta.url)(
+  join(repoRoot, 'scripts', 'release-package-identity.cjs'),
+)
+
 export function cleanReadyPackOutputs(contract, targetDir = exportsDir) {
   const artifactStem = contract.artifactName.replace(/\.dmg$/i, '')
   const paths = [
     contract.appOutputDir,
     `${artifactStem}.dmg`,
+    `${artifactStem}.dmg.receipt.json`,
     `${artifactStem}.dmg.blockmap`,
     `${artifactStem}.zip`,
     `${artifactStem}.zip.blockmap`,
@@ -652,6 +663,7 @@ async function runPackerJob(job, request) {
 
     const outputPath = join(outputRoot, safeOutputName(contract, request.packageSuffix))
     const pendingOutputPath = join(outputRoot, `.${safeOutputName(contract, request.packageSuffix)}.${job.id}.tmp.dmg`)
+    releasePackageIdentity.readVerifiedReleasePackageReceipt(producedDmg)
     rmSync(pendingOutputPath, { force: true })
     copyFileSync(producedDmg, pendingOutputPath)
     chmodSync(pendingOutputPath, 0o600)
@@ -662,10 +674,12 @@ async function runPackerJob(job, request) {
     } finally {
       rmSync(pendingOutputPath, { force: true })
     }
+    const receiptPath = releasePackageIdentity.forwardReleasePackageReceipt(producedDmg, outputPath)
     const sizeMB = (statSync(outputPath).size / (1024 * 1024)).toFixed(1)
     emitJob(job, `专属 DMG 已输出：${outputPath}（${sizeMB} MB）`)
+    emitJob(job, `发布回执已输出：${receiptPath}`)
     finalStatus = 'done'
-    finalPayload = { outputPath }
+    finalPayload = { outputPath, receiptPath }
   } catch (error) {
     finalPayload = { error: error && error.message ? error.message : String(error) }
   } finally {

@@ -1,0 +1,17 @@
+{
+  "contract": "ready_runtime_installed_source_evidence_v1",
+  "sourceManifestDigests": [
+    "f981c518fe97286868e579afe68ff693089545041e255242335a0485a5df31fa",
+    "25ebf79c723cc9c797e72eff6be55c0691043fe86036c5e338bdda3ac495c31c",
+    "4e73326d4988d0cc17da0dffd1850d232ace0802b5f1a6afa36656317f0259cd"
+  ],
+  "binarySha256": "35d248101b211d6248ad4e6b8c1d441fe81236da87afb9f3e9ea51a049e9f179",
+  "runtimeVersion": "0.146.1",
+  "installedApplicationObserved": true,
+  "nativeHistoriesObserved": true,
+  "fullManifestAvailable": {
+    "f981c518fe97286868e579afe68ff693089545041e255242335a0485a5df31fa": true,
+    "25ebf79c723cc9c797e72eff6be55c0691043fe86036c5e338bdda3ac495c31c": false,
+    "4e73326d4988d0cc17da0dffd1850d232ace0802b5f1a6afa36656317f0259cd": false
+  }
+}

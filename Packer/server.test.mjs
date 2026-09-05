@@ -35,6 +35,7 @@ test('packer keeps sensitive working directories private and removes every keyed
     mkdirSync(join(output, contract.appOutputDir), { recursive: true })
     for (const name of [
       'Ready-9.9.9-arm64.dmg',
+      'Ready-9.9.9-arm64.dmg.receipt.json',
       'Ready-9.9.9-arm64.dmg.blockmap',
       'Ready-9.9.9-arm64.zip',
       'Ready-9.9.9-arm64.zip.blockmap',

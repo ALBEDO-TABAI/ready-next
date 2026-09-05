@@ -12,7 +12,7 @@ export const CODEX_THREAD_ARCHIVE_CLEANUP_SCHEMA_SQL = `
     source_kind TEXT NOT NULL CHECK (source_kind IN (
       'idle_close', 'engine_terminal_close', 'idle_reset', 'engine_terminal_reset',
       'engine_terminal_stop', 'browser_verifier_nonaccept', 'publication_divergence',
-      'manual_compaction_quarantine', 'retired_backfill'
+      'manual_compaction_quarantine', 'retired_backfill', 'begin_new_context'
     )),
     retired_reason TEXT NOT NULL CHECK (retired_reason IN (
       'closed', 'user_reset', 'publication_diverged', 'manual_compaction_quarantine', 'cleanup'
@@ -40,7 +40,8 @@ export const CODEX_THREAD_ARCHIVE_CLEANUP_SCHEMA_SQL = `
     updated_at TEXT NOT NULL,
     FOREIGN KEY (thread_binding_id) REFERENCES codex_thread_bindings(thread_binding_id),
     CHECK ((source_kind IN (
-        'idle_close', 'idle_reset', 'manual_compaction_quarantine', 'retired_backfill'
+        'idle_close', 'idle_reset', 'manual_compaction_quarantine', 'retired_backfill',
+        'begin_new_context'
       ) AND ready_run_id IS NULL)
       OR (source_kind IN (
         'engine_terminal_close', 'engine_terminal_reset', 'engine_terminal_stop',
@@ -173,4 +174,30 @@ export const CODEX_THREAD_ARCHIVE_CLEANUP_SCHEMA_SQL = `
 
 export function applyCodexThreadArchiveCleanupSchema(db: Pick<DatabaseConnection, 'exec'>): void {
   db.exec(CODEX_THREAD_ARCHIVE_CLEANUP_SCHEMA_SQL)
+}
+
+export function applyCodexBeginNewContextArchiveSourceMigration(
+  db: Pick<DatabaseConnection, 'exec'>,
+): void {
+  db.exec(`
+    ALTER TABLE codex_thread_archive_attempts
+      RENAME TO codex_thread_archive_attempts_legacy_121;
+    ALTER TABLE codex_thread_archive_intents
+      RENAME TO codex_thread_archive_intents_legacy_121;
+
+    DROP INDEX IF EXISTS codex_thread_archive_intents_pending_idx;
+    DROP TRIGGER IF EXISTS codex_thread_archive_attempt_identity_immutable;
+    DROP TRIGGER IF EXISTS codex_thread_archive_intent_identity_immutable;
+    DROP TRIGGER IF EXISTS codex_thread_archive_ack_immutable;
+    DROP TRIGGER IF EXISTS codex_thread_archive_attempt_monotonic;
+  `)
+  applyCodexThreadArchiveCleanupSchema(db)
+  db.exec(`
+    INSERT INTO codex_thread_archive_intents
+      SELECT * FROM codex_thread_archive_intents_legacy_121;
+    INSERT INTO codex_thread_archive_attempts
+      SELECT * FROM codex_thread_archive_attempts_legacy_121;
+    DROP TABLE codex_thread_archive_attempts_legacy_121;
+    DROP TABLE codex_thread_archive_intents_legacy_121;
+  `)
 }

@@ -10,6 +10,8 @@ import { digestCanonicalJson } from './codex-model-gateway-contract'
 
 export const LIFECYCLE_ACTION_BLOCKER_PRECEDENCE = [
   'head_contract_drift',
+  'runtime_unsupported',
+  'runtime_unverified',
   'legacy_prepared_contract',
   'history_outcome_unknown',
   'history_materializing',
@@ -30,6 +32,7 @@ export type CodexLifecycleActionSurfaceFacts = {
   threadBindingId: string
   headRevision: number
   materializationIntentRef: { id: string; digest: string } | null
+  manualCompactionRuntimeBlocker?: 'runtime_unverified' | 'runtime_unsupported' | null
 }
 
 function orderedBlockers(
@@ -139,6 +142,8 @@ export function projectCodexLifecycleOperationV2(
     manualGate = gate(input, 'manual_compact', 'blocked', ['manual_compaction_pending'])
   } else if (snapshot === 'manual_compaction_unknown') {
     manualGate = gate(input, 'manual_compact', 'blocked', ['manual_compaction_unknown'])
+  } else if (input.manualCompactionRuntimeBlocker) {
+    manualGate = gate(input, 'manual_compact', 'blocked', [input.manualCompactionRuntimeBlocker])
   } else if (input.head.historyState === 'legacy_context_boundary') {
     manualGate = gate(input, 'manual_compact', 'not_applicable', ['legacy_context_boundary'])
   } else if (snapshot === 'idle_native_thread' && headBlockers.length === 0) {

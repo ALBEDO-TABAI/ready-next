@@ -9,6 +9,7 @@ import { createCodexToolFixture } from './utils/codex-tool-fixture'
 import { disabledReadyMemorySnapshot } from './utils/ready-memory-fixture'
 import { openProviderCheckpointTestDb, providerCheckpointExecutionBinding } from './provider-checkpoint-test-fixtures'
 import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
+import { createCodexProductionPorts } from './helpers/codex-production-composition-harness'
 import { makeProductTurnActionProjection } from './product-turn-action-projection-fixture'
 import { CodexProductRunPreparer, type PreparedCodexProductRun } from '../main/modules/agent-control/codex-runtime/codex-product-run-preparer'
 import { projectCodexHeadActionProjection } from '../main/modules/agent-control/codex-runtime/codex-action-surface'
@@ -34,49 +35,8 @@ export const __breaksInvariants = [
   'codex.production-startup-replaced-by-exact-ingress-and-release-closures',
   'codex.source-history-port-fixture-with-real-prepared-input-and-head-projector',
 ] as const
-const productionUrl = new URL('../main/modules/agent-control/codex-runtime/codex-runtime-production-composition.ts', import.meta.url)
-let productionFactory: Promise<(dependencies: Record<string, unknown>) => Pick<CodexRuntimeComposition, 'ingressPort' | 'startIdentityPort'>> | undefined
 function production(dependencies: Record<string, unknown>) {
-  productionFactory ??= (async () => {
-    // allow-source-grep: Execute the actual AST closures, with behavioral assertions on returned ingress and SQLite rollback; no source-string assertion substitutes for behavior.
-    const source = readFileSync(productionUrl, 'utf8')
-    const parsed = ts.createSourceFile('production.ts', source, ts.ScriptTarget.Latest, true)
-    const bindings: Record<string, unknown> = {}
-    for (const statement of parsed.statements) {
-      if (!ts.isImportDeclaration(statement) || !statement.importClause || statement.importClause.isTypeOnly) continue
-      const specifier = (statement.moduleSpecifier as ts.StringLiteral).text
-      const resolved = new URL(`${specifier}.ts`, productionUrl)
-      const imported = await import(specifier.startsWith('.')
-        ? (existsSync(resolved) ? resolved : new URL(`${specifier}/index.ts`, productionUrl)).href : specifier)
-      const clause = statement.importClause
-      if (clause.name) bindings[clause.name.text] = imported.default
-      if (clause.namedBindings && ts.isNamedImports(clause.namedBindings)) {
-        for (const element of clause.namedBindings.elements) if (!element.isTypeOnly) {
-          bindings[element.name.text] = imported[element.propertyName?.text || element.name.text]
-        }
-      }
-    }
-    const declarations = new Map<string, string>()
-    const visit = (node: ts.Node): void => {
-      if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer
-        && ['ingressPort', 'startIdentityPort', 'releasePreparedReservation'].includes(node.name.text)) {
-        declarations.set(node.name.text, `const ${node.name.text} = ${node.initializer.getText(parsed)};`)
-      }
-      if (ts.isFunctionDeclaration(node) && node.name
-        && ['activeProfile', 'isoNow', 'stableErrorCode'].includes(node.name.text)) declarations.set(node.name.text, node.getText(parsed))
-      ts.forEachChild(node, visit)
-    }
-    visit(parsed)
-    for (const name of ['ingressPort', 'startIdentityPort', 'releasePreparedReservation']) assert.ok(declarations.has(name))
-    const compiled = ts.transpileModule([...declarations.values(), 'return { ingressPort, startIdentityPort };'].join('\n'), {
-      compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
-    }).outputText
-    return (deps) => {
-      const environment = { ...bindings, ...deps }
-      return Function(...Object.keys(environment), compiled)(...Object.values(environment))
-    }
-  })()
-  return productionFactory.then((factory) => factory(dependencies))
+  return createCodexProductionPorts(dependencies)
 }
 const at = '2026-09-03T00:00:00.000Z'
 const anchor: CodexCurrentDocumentAnchor = {
@@ -85,7 +45,15 @@ const anchor: CodexCurrentDocumentAnchor = {
   currentDigest: 'a'.repeat(64), supersedesVersion: null, policyEpoch: 1,
   readScope: { operation: 'read_section', maxChars: 30_000 },
 }
-type Scenario = { mode: 'document' | 'browser'; text?: string; anchor?: CodexCurrentDocumentAnchor; page?: object; sourceAnchor?: boolean }
+type Scenario = {
+  mode: 'document' | 'browser'
+  text?: string
+  anchor?: CodexCurrentDocumentAnchor
+  page?: object
+  sourceAnchor?: boolean
+  atomicContinuationDrift?: boolean
+  profileRouteDriftAfterPrepare?: boolean
+}
 async function fixture(scenario: Scenario) {
   const db = openProviderCheckpointTestDb()
   const output = mkdtempSync(join(tmpdir(), 'ready-retry-production-handoff-'))
@@ -128,8 +96,27 @@ async function fixture(scenario: Scenario) {
     readLiveUncommittedUserTail: () => tail, readProductCloseout: () => ({ productTerminalDigest: 'terminal-B' }),
     readProductTurnActionContext: () => ({ sourceRootCompacted: false }),
     readTerminalCloseoutEvidence: () => ({ terminalFacts: { history: { kind: 'diverged' }, effect: { state: 'none' } } }),
+    freshRootRequiresReseed: () => Boolean(scenario.atomicContinuationDrift),
+    resolveFreshRootInheritance: () => {
+      continuationReads += 1
+      const blocked = scenario.atomicContinuationDrift && continuationReads > 1
+      const toolCompatibility = {
+        kind: 'compatible' as const,
+        addedToCurrentSubset: [], modelContractChangedToolNames: [],
+        readyContractChangedToolNames: [], frozenOnlyToolNames: [],
+        evidenceDigest: '1'.repeat(64),
+      }
+      return {
+        kind: blocked ? 'requires_new_context' as const : 'ready_same_thread' as const,
+        reason: blocked ? 'native_tool_definition_changed' as const : null,
+        evidenceDigest: (blocked ? '2' : '3').repeat(64),
+        runtimeEvidenceDigest: '4'.repeat(64),
+        toolCompatibility,
+      }
+    },
     admitProductBindingsInOpenTransaction: () => { throw new Error('fixture_admission_not_configured') },
   }
+  let profileRouteDrifted = false
   const config = { provider: 'openai', baseUrl: 'http://127.0.0.1:1/v1', apiKey: 'isolated-fixture', model: 'fixture-model', agentProtocol: 'openai', wireApi: 'responses', toolUseMode: 'on', nativeVideoMode: 'off' }
   const preparedDetails = new Map<string, unknown>()
   const detailPrepared = new Map<string, PreparedCodexProductRun>()
@@ -138,6 +125,7 @@ async function fixture(scenario: Scenario) {
   assert.equal(reserved.ok, true)
   if (!reserved.ok) throw new Error(reserved.error)
   const reservation = reserved.reservation
+  let continuationReads = 0
   const calls = { auth: 0, tools: 0, providerDispatch: 0, writes: 0 }
   const request: SendScopedRequest = { scopeId: 'scope', requestId: 'retry', expectedMessageVisibilityEpoch: 0, expectedAliasGeneration: 2,
     message: '再试一次', userMessage: { id: 'control-R', content: '再试一次', timestamp: at,
@@ -170,8 +158,28 @@ async function fixture(scenario: Scenario) {
     calls.writes += 1
     new RunMetaRepository(db).create({ ...value, status: 'running' }, Date.parse(at))
   } }
-  const ports = await production({ input: { database, settings: { getAIWorkspace: () => ({ profiles: [{ id: 'fixture', config }] }), getActiveAIProfileId: () => 'fixture' },
+  const ports = await production({ input: { database, settings: { getAIWorkspace: () => ({ profiles: [{ id: 'fixture',
+      config: scenario.profileRouteDriftAfterPrepare && profileRouteDrifted
+        ? { ...config, model: 'fixture-model-changed' }
+        : config }] }), getActiveAIProfileId: () => 'fixture' },
     providerReadiness: { async ensureReady() {} } }, host, repository, rawDb: db,
+    resolveHeadContinuation: () => null,
+    issueBeginNewContextAction: (action: {
+      scopeId: string; scopeEpoch: number; candidateEvidenceDigest: string
+      consequenceDigest: string; draftRevision: number | null
+    }) => {
+      const unsigned = {
+        contract: 'codex_begin_new_context_action_v1' as const,
+        operationId: `begin-context-${action.candidateEvidenceDigest}`,
+        scopeId: action.scopeId, scopeEpoch: action.scopeEpoch,
+        sourceThreadBindingId: 'head', sourceAliasGeneration: 2, sourceRevision: 1,
+        sourceEvidenceDigest: '5'.repeat(64),
+        candidateEvidenceDigest: action.candidateEvidenceDigest,
+        consequenceDigest: action.consequenceDigest,
+        draftRevision: action.draftRevision,
+      }
+      return { ...unsigned, digest: digestCanonicalJson(unsigned) }
+    },
     verified: { manifestDigest: 'runtime', manifest: { stableV2SchemaSha256: 'protocol' }, assetRoot: fileURLToPath(new URL('../../assets/codex-runtime', import.meta.url)) },
     gate: { assertOpen() {} }, state: { threadCwdRoot: output }, preparer, preparedDetails, detailPrepared, registry,
     readyMemoryRepository: new ReadyMemoryRepository(db), gatewayRepository: new CodexModelGatewayRepository(db), ownerMainBootId: 'fixture-boot',
@@ -180,7 +188,8 @@ async function fixture(scenario: Scenario) {
   const counts = () => ['chat_messages', 'task_projections', 'run_meta', 'codex_turn_bindings', 'ready_model_gateway_request_receipts', 'ready_model_gateway_exchange_events']
     .map((table) => db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get<{ n: number }>()!.n)
   return { db, scope, request, source, reservation, repository, registry, preparedDetails, detailPrepared, ports, calls, counts,
-    actionAdmissionRef, close() { db.close(); rmSync(output, { recursive: true, force: true }) } }
+    actionAdmissionRef, driftProfileRoute() { profileRouteDrifted = true },
+    close() { db.close(); rmSync(output, { recursive: true, force: true }) } }
 }
 
 for (const scenario of [
@@ -275,8 +284,6 @@ for (const code of ['action_admission_ref_stale', 'ordinary_uncommitted_tail_sta
     assert.equal(result.disposition, code === 'unrelated_failure' || code === 'rollback_failed' ? 'ingress_persistence_failed' : 'rejected_before_persistence')
     assert.equal(releaseKind, code === 'unrelated_failure' || code === 'rollback_failed' ? 'ingress-failure' : 'pre-persistence')
     assert.equal(value.calls.writes, 3, JSON.stringify(result))
-    assert.equal(result.shouldClearInput, false)
-    assert.equal(result.preserveInput, true)
     assert.deepEqual([...value.preparedDetails.keys()], ['other-run'])
     assert.deepEqual([...value.detailPrepared.keys()], ['other-run'])
     assert.equal(value.registry.snapshot().members.length, code === 'release_failed' ? 4 : 2)
@@ -284,6 +291,50 @@ for (const code of ['action_admission_ref_stale', 'ordinary_uncommitted_tail_sta
     assert.equal(dispatched + emitted, 0)
   })
 }
+
+test('production atomic ingress rechecks continuation before every durable write', async (t) => {
+  if (skipIfSqliteUnavailable(t, 'production atomic continuation')) return
+  const value = await fixture({ mode: 'document', atomicContinuationDrift: true })
+  t.after(() => value.close())
+  delete value.request.explicitRetry
+  value.request.actionAdmissionRef = value.actionAdmissionRef
+  value.request.draftRevision = 9
+  const before = value.counts()
+  let dispatched = 0
+  let emitted = 0
+  const result = await runConfirmedSendScoped({
+    scopeId: 'scope', requestId: value.request.requestId, userMessage: value.request.userMessage,
+    getScope: () => value.scope,
+    resolveStartIdentityMethods: () => ['thread/start', 'turn/start'],
+    reserveStartIdentitySet: async () => ({ ok: true, reservation: value.reservation }),
+    reconcileReservationContractFailure: async () => { assert.fail('unexpected_contract_reconciliation') },
+    prepareDispatch: () => value.ports.ingressPort.prepareIngress({
+      scope: value.scope as never,
+      request: value.request,
+      reservation: value.reservation,
+    }),
+    validateDispatchContext: (prepared): prepared is PreparedCodexProductRun => Boolean(prepared),
+    persistIngressAtomic: ({ dispatchContext }) => value.ports.ingressPort.persistIngressAtomic({
+      scope: value.scope as never,
+      request: value.request,
+      reservation: value.reservation,
+      prepared: dispatchContext,
+    }),
+    releaseReservationAfterPrePersistenceRejection: (input) => (
+      value.ports.startIdentityPort.releaseAfterPrePersistenceRejection(input)
+    ),
+    releaseReservationAfterIngressFailure: async () => { assert.fail('unexpected_ingress_failure') },
+    emitIngressAdmitted: () => { emitted += 1 },
+    runConfirmed: async () => { dispatched += 1; throw new Error('unexpected_dispatch') },
+  })
+  assert.equal(result.disposition, 'rejected_before_persistence')
+  assert.equal(result.errorKind, 'native_tool_definition_changed')
+  assert.equal(result.recoveryActionRef?.candidateEvidenceDigest, '2'.repeat(64))
+  assert.equal(result.recoveryActionRef?.draftRevision, 9)
+  assert.equal(value.calls.writes, 0)
+  assert.deepEqual(value.counts(), before)
+  assert.equal(dispatched + emitted, 0)
+})
 
 for (const kind of ['explicit_resource', 'attachment'] as const) test(`production Retry control preserves ${kind}`, async (t) => {
   if (skipIfSqliteUnavailable(t, 'production Retry control')) return
@@ -297,9 +348,53 @@ for (const kind of ['explicit_resource', 'attachment'] as const) test(`productio
     id: 'scope', source_kind: 'local', source_id: 'app', thread_key: 'scope', meta_json: '{}',
   } })
   assert.equal(result?.disposition, 'rejected_before_persistence')
-  assert.equal(result?.preserveInput, true)
   assert.equal(result?.error, kind === 'explicit_resource' ? 'explicit_retry_resource_present' : 'explicit_retry_attachment_count_nonzero')
   assert.equal(digestCanonicalJson(value.request), requestDigest)
   assert.deepEqual(value.counts(), before)
   assert.deepEqual(value.calls, { auth: 0, tools: 0, providerDispatch: 0, writes: 0 })
+})
+
+test('a profile route change between prepare and atomic ingress is a named zero-write rejection', async (t) => {
+  if (skipIfSqliteUnavailable(t, 'production profile route drift')) return
+  const value = await fixture({ mode: 'document', profileRouteDriftAfterPrepare: true })
+  t.after(() => value.close())
+  delete value.request.explicitRetry
+  value.request.actionAdmissionRef = value.actionAdmissionRef
+  const before = value.counts()
+  let dispatched = 0
+  let emitted = 0
+  const result = await runConfirmedSendScoped({
+    scopeId: 'scope', requestId: value.request.requestId, userMessage: value.request.userMessage,
+    getScope: () => value.scope,
+    resolveStartIdentityMethods: () => ['thread/start', 'turn/start'],
+    reserveStartIdentitySet: async () => ({ ok: true, reservation: value.reservation }),
+    reconcileReservationContractFailure: async () => { assert.fail('unexpected_contract_reconciliation') },
+    prepareDispatch: async () => {
+      const prepared = await value.ports.ingressPort.prepareIngress({
+        scope: value.scope as never, request: value.request, reservation: value.reservation,
+      })
+      // The user switches provider configuration after prepare froze the route.
+      value.driftProfileRoute()
+      return prepared
+    },
+    validateDispatchContext: (prepared): prepared is PreparedCodexProductRun => Boolean(prepared),
+    persistIngressAtomic: ({ dispatchContext }) => value.ports.ingressPort.persistIngressAtomic({
+      scope: value.scope as never, request: value.request,
+      reservation: value.reservation, prepared: dispatchContext,
+    }),
+    releaseReservationAfterPrePersistenceRejection: (input) => (
+      value.ports.startIdentityPort.releaseAfterPrePersistenceRejection(input)
+    ),
+    releaseReservationAfterIngressFailure: async () => { assert.fail('unexpected_ingress_failure') },
+    emitIngressAdmitted: () => { emitted += 1 },
+    runConfirmed: async () => { dispatched += 1; throw new Error('unexpected_dispatch') },
+  })
+  assert.equal(result.disposition, 'rejected_before_persistence',
+    'a configuration change is not a persistence fault')
+  assert.equal(result.errorKind, 'action_projection_confirmation_required')
+  assert.equal(result.success, false)
+  if (result.success === false) assert.equal(result.retryableByUser, true)
+  assert.equal(value.calls.writes, 0)
+  assert.deepEqual(value.counts(), before)
+  assert.equal(dispatched + emitted, 0)
 })

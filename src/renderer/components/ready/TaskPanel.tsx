@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Plus, Send } from 'lucide-react'
+import { Plus } from 'lucide-react'
 import {
   useAgent,
   type AgentArtifact,
@@ -19,7 +19,6 @@ import {
   projectionStatusToUserLabel,
   taskStepStatusToUserLabel,
 } from '../../modules/agent/task-status-vocabulary'
-import { isForegroundBusyScopeRunState } from '../../modules/agent/scopeRunState'
 import { createDebouncedFetch } from '../../modules/agent/debouncedFetch'
 import {
   captureScopeEpoch,
@@ -262,22 +261,17 @@ function captureProjectionActionEpoch(
 
 export default function TaskPanel() {
   const {
-    inputValue,
-    isStreaming,
     messages,
     currentScopeId,
     scopeAuthorityRevision,
     scopeRunStates,
-    setCurrentScope,
-    setInputValue,
-    sendMessage
+    setCurrentScope
   } = useAgent()
   const navigate = useNavigate()
 
   const [taskProjections, setTaskProjections] = useState<TaskProjectionRecordData[]>([])
   const taskProjectionsRequestRevisionRef = useRef(0)
   const activeRun = currentScopeId ? scopeRunStates[currentScopeId] || null : null
-  const composerLocked = activeRun ? isForegroundBusyScopeRunState(activeRun) : isStreaming
   const activeProjection = useMemo(() => {
     return resolveActiveProjection(taskProjections, activeRun)
   }, [taskProjections, activeRun])
@@ -396,16 +390,6 @@ export default function TaskPanel() {
       )
     )))
   }, [currentScopeId, scopeAuthorityRevision])
-
-  const handleSend = async () => {
-    if (!inputValue.trim() || composerLocked) return
-    const content = inputValue
-    setInputValue('')
-    const result = await sendMessage(content)
-    if (result.preserveInput) {
-      setInputValue(content)
-    }
-  }
 
   const handleCancelProjection = useCallback(async () => {
     if (!activeProjection?.scopeId) return
@@ -871,50 +855,6 @@ export default function TaskPanel() {
         )}
       </div>
 
-      <div
-        style={{
-          padding: '10px 10px',
-          borderTop: '1px solid var(--border-default)',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 6
-        }}
-      >
-        <div className="flex items-center" style={{ gap: 6 }}>
-          <div
-            className="ready-input-shell flex-1 flex items-center"
-            style={{
-              borderRadius: 8,
-              padding: '6px 10px'
-            }}
-          >
-            <input
-              type="text"
-              value={inputValue}
-              onChange={(e) => setInputValue(e.target.value, { preserveContinuationIntent: true })}
-              onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-              disabled={composerLocked}
-              placeholder="给 Agent 发指令..."
-              className="ready-input-slot-inner flex-1 bg-transparent border-none outline-none"
-              style={{ fontSize: 11, color: 'var(--text-body)', opacity: composerLocked ? 0.7 : 1 }}
-            />
-          </div>
-          <button
-            onClick={handleSend}
-            disabled={!inputValue.trim() || composerLocked}
-            className="flex items-center justify-center text-white hover:brightness-95 disabled:opacity-40 transition-[filter,opacity,background-color] duration-200"
-            style={{
-              width: 26,
-              height: 26,
-              borderRadius: 12,
-              background: 'var(--color-green)',
-              flexShrink: 0
-            }}
-          >
-            <Send style={{ width: 11, height: 11 }} strokeWidth={2} />
-          </button>
-        </div>
-      </div>
     </div>
   )
 }

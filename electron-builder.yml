@@ -11,6 +11,7 @@ publish:
 files:
   - out/**/*
   - build/browser-live-proof/source-manifest.json
+  - build/browser-live-proof/release-build.json
   - package.json
   - node_modules/**/*
   # Renderer-only packages are already bundled into out/renderer assets by Vite.
@@ -57,6 +58,10 @@ extraResources:
     filter:
       - "**/*"
       - "!evidence/**"
+  - from: assets/runtime-continuity
+    to: runtime-continuity
+    filter:
+      - "**/*"
   - from: build/codex/aarch64-apple-darwin/codex
     to: codex-runtime/aarch64-apple-darwin/codex
   - from: node_modules/better-sqlite3/build
@@ -113,6 +118,8 @@ mac:
   gatekeeperAssess: false
   identity: null
 afterPack: scripts/post-build.cjs
+# Binds every produced DMG to the exact source tree it was built from.
+afterAllArtifactBuild: scripts/write-release-receipt.cjs
 dmg:
   contents:
     - x: 130

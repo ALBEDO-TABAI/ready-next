@@ -90,6 +90,24 @@ test('Phase 1.2 — ensureChannelScope restores reference hint from meta_json be
   )
 })
 
+test('local scopes replay the persisted reference hint at turn execution', () => {
+  const runtimeSource = readSource(RUNTIME_PATH)
+
+  // `ensureChannelScope` (remote IM) was the only production caller of
+  // `restoreReferenceHintFromScope`, so `lastReferenceSkill` was write-only
+  // for local scopes: persisted after every assistant message, never replayed
+  // after a restart. The replay belongs in `sendScoped` and nowhere else — a
+  // scope read must not re-arm a hint just because Ready was opened.
+  // Behaviour: local-scope-reference-hint-replay-native.test.ts.
+  const blockMatch = runtimeSource.match(/async sendScoped\([\s\S]*?\n\s{2}\}/)
+  assert.ok(blockMatch, 'sendScoped block exists in AgentControlRuntime')
+  assert.match(
+    blockMatch![0],
+    /this\.referenceHints\.restoreReferenceHintFromScope\(/,
+    'sendScoped replays the persisted hint before the turn is admitted',
+  )
+})
+
 test('Phase 1.4 — parseScopeMeta emits meta_parse_corrupted instead of silently swallowing JSON errors', () => {
   const source = readSource(REFERENCE_HINT_SERVICE_PATH)
   const blockMatch = source.match(/private parseScopeMeta[\s\S]*?\n\s{2}\}/)

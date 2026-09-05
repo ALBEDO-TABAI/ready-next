@@ -261,7 +261,7 @@ test('reset invalidates a pending file picker without reopening old resources', 
   }
 })
 
-test('switching composers clears the old file pool so the same name cannot resolve in B', () => {
+test('switching composers isolates B without clearing A attachments or file pool', () => {
   seedStore('a', 40)
   useAgent.getState().addAttachments([makeAttachment('report-a', 'report.txt')])
   assert.equal(resolveReferencedFilePoolAttachments('@[report.txt]', useAgent.getState().filePool).length, 1)
@@ -272,7 +272,85 @@ test('switching composers clears the old file pool so the same name cannot resol
   assert.deepEqual(state.attachments, [])
   assert.deepEqual(state.filePool, [])
   assert.deepEqual(resolveReferencedFilePoolAttachments('@[report.txt]', state.filePool), [])
+
+  useAgent.getState().setActiveSessionId('session-a')
+  const restored = useAgent.getState()
+  assert.equal(restored.attachments[0]?.id, 'report-a')
+  assert.equal(restored.filePool[0]?.id, 'report-a')
+  assert.equal(resolveReferencedFilePoolAttachments('@[report.txt]', restored.filePool).length, 1)
 })
+
+for (const laterGeneration of [1, 4]) {
+test(`begin new context reads current authority without clearing edits or regressing generation ${laterGeneration}`, async () => {
+  seedStore('a', 45)
+  useAgent.getState().setInputValue('A')
+  const draftRevision = useAgent.getState().sessions['session-a']!.draftRevision
+  const committed = deferred<any>()
+  const surfaceReady = deferred<void>()
+  const surfaceRequested = deferred<{ aliasId: string; aliasGeneration: number }>()
+  const actionRef = {
+    contract: 'codex_begin_new_context_action_v1' as const,
+    operationId: 'begin-context-a', scopeId: 'scope-a', scopeEpoch: 0,
+    sourceThreadBindingId: 'binding-scope-a-1', sourceAliasGeneration: 1,
+    sourceRevision: 1, sourceEvidenceDigest: 'a'.repeat(64),
+    candidateEvidenceDigest: 'b'.repeat(64), consequenceDigest: 'c'.repeat(64),
+    draftRevision, digest: 'd'.repeat(64),
+  }
+  const boundary = {
+    operationId: actionRef.operationId, scopeId: 'scope-a', scopeEpoch: 0,
+    sourceThreadBindingId: actionRef.sourceThreadBindingId, sourceAliasGeneration: 1,
+    sourceRevision: 1, targetThreadBindingId: 'binding-scope-a-2', targetAliasGeneration: 2,
+    previousVisibleMessageAnchor: null, committedAt: '2026-09-04T00:00:00.000Z',
+    receiptDigest: 'e'.repeat(64),
+  }
+  const restore = installWindow({
+    agent: {
+      beginNewContext: () => committed.promise,
+      readCodexActionSurface: async (request: { aliasId: string; aliasGeneration: number }) => {
+        surfaceRequested.resolve(request)
+        await surfaceReady.promise
+        const result = await actionSurface(request)
+        return {
+          ...result,
+          data: {
+            ...result.data,
+            state: 'active_head', sourceAliasGeneration: request.aliasGeneration,
+            beginNewContext: null, contextBoundaries: [boundary],
+          },
+        }
+      },
+    },
+  })
+  try {
+    const changing = useAgent.getState().beginNewContext(actionRef)
+    useAgent.getState().setInputValue('B')
+    if (laterGeneration > 1) useAgent.setState((state) => ({
+      sessions: { ...state.sessions, 'session-a': { ...state.sessions['session-a']!, aliasGeneration: laterGeneration } },
+      scopes: state.scopes.map((scope) => scope.id === 'scope-a' ? { ...scope, aliasGeneration: laterGeneration } : scope),
+      currentScope: { ...state.currentScope!, aliasGeneration: laterGeneration },
+    }))
+    committed.resolve({
+      ok: true, boundary, aliasGeneration: 3,
+      actionSurfaceInvalidation: {
+        contract: 'codex_action_surface_invalidation_v1', scopeId: 'scope-a', scopeEpoch: 0,
+        aliasGeneration: 3, actionProjectionSequence: 0,
+      },
+    })
+    assert.equal((await surfaceRequested.promise).aliasGeneration, Math.max(3, laterGeneration))
+    assert.equal(useAgent.getState().sessions['session-a']?.aliasGeneration, laterGeneration,
+      'the old receipt cannot publish a guessed current state before its authority read returns')
+    surfaceReady.resolve()
+    await changing
+    const state = useAgent.getState()
+    assert.equal(state.inputValue, 'B')
+    assert.equal(state.sessions['session-a']?.inputValue, 'B')
+    assert.equal(state.sessions['session-a']?.aliasGeneration, Math.max(3, laterGeneration))
+    assert.deepEqual(state.sessions['session-a']?.contextBoundaries, [boundary])
+  } finally {
+    restore()
+  }
+})
+}
 
 test('reselecting the active session is a no-op for resources and authority', () => {
   seedStore('a', 50)
@@ -509,8 +587,6 @@ test('background action-mode success updates A only and its next send uses the c
         success: false,
         disposition: 'rejected_before_persistence',
         ownerRunId: null,
-        shouldClearInput: false,
-        preserveInput: true,
         retryableByUser: false,
         persistence: {
           scope: 'none',

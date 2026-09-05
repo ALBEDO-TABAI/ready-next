@@ -39,6 +39,15 @@ const message: AgentMessage = {
 }
 
 function seedStore() {
+  const attachment = {
+    id: 'attachment-before-lifecycle',
+    name: '保留.txt',
+    path: '/tmp/keep.txt',
+    type: 'text' as const,
+    size: 1,
+    ext: '.txt',
+    source: 'file' as const,
+  }
   const slice = {
     ...makeEmptySessionSlice(aliasId),
     messages: [message],
@@ -50,6 +59,7 @@ function seedStore() {
     composerLocked: true,
     streamingMessageId: 'response-pending',
     streamingRequestId: 'request-pending',
+    attachments: [attachment],
   }
   useAgent.setState({
     messages: [message],
@@ -62,15 +72,7 @@ function seedStore() {
     scopeAuthorityRevision: 0,
     scopeListRequestRevision: 0,
     conversations: [],
-    attachments: [{
-      id: 'attachment-before-lifecycle',
-      name: '保留.txt',
-      path: '/tmp/keep.txt',
-      type: 'text',
-      size: 1,
-      ext: '.txt',
-      source: 'file',
-    }],
+    attachments: [attachment],
     filePool: [],
     pendingContinuationIntent: null,
     pendingContinuationDraftAnchor: null,
@@ -465,7 +467,7 @@ test('cold reload hydrates the exact durable running operation instead of the em
   })
   try {
     await useAgent.getState().loadScopes()
-    assert.deepEqual(requests, [{ aliasId, aliasGeneration: 4 }])
+    assert.deepEqual(requests, [{ aliasId, aliasGeneration: 4, workbenchMode: 'browser' }])
     const state = useAgent.getState()
     const slice = state.sessions[state.activeSessionId || '']
     assert.equal(slice?.aliasGeneration, 4)

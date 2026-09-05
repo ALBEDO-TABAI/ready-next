@@ -1,6 +1,7 @@
 import {
   PRE_PERSISTENCE_ERROR_KINDS,
   type IngressAdmittedEvent,
+  type CodexBeginNewContextActionRef,
   type IngressPersistenceErrorKind,
   type PersistedIngress,
   type PrePersistenceErrorKind,
@@ -64,6 +65,7 @@ export class PrePersistenceAdmissionError extends Error {
     readonly retryableByUser: boolean,
     readonly admissionEvidenceDigest: string,
     message: string,
+    readonly recoveryActionRef?: CodexBeginNewContextActionRef,
   ) {
     super(message)
     this.name = 'PrePersistenceAdmissionError'
@@ -89,6 +91,7 @@ export type PrePersistenceDispatchResult<DispatchContext> =
       retryableByUser: boolean
       error: string
       admissionEvidenceDigest: string
+      recoveryActionRef?: CodexBeginNewContextActionRef
     }
 
 function skippedIngress(scope: 'pre-existing' | 'failed') {
@@ -177,13 +180,20 @@ function isPrePersistenceDispatchFailure(
   value: unknown,
 ): value is Extract<PrePersistenceDispatchResult<unknown>, { ok: false }> {
   return isRecord(value)
-    && hasExactKeys(value, [
+    && (hasExactKeys(value, [
       'ok',
       'code',
       'retryableByUser',
       'error',
       'admissionEvidenceDigest',
-    ])
+    ]) || hasExactKeys(value, [
+      'ok',
+      'code',
+      'retryableByUser',
+      'error',
+      'admissionEvidenceDigest',
+      'recoveryActionRef',
+    ]))
     && value.ok === false
     && typeof value.code === 'string'
     && PRE_PERSISTENCE_ERROR_KINDS.includes(value.code as PrePersistenceErrorKind)
@@ -255,17 +265,17 @@ export function createRejectedBeforePersistence(input: {
   retryableByUser: boolean
   error: string
   admissionEvidenceDigest: string
+  recoveryActionRef?: CodexBeginNewContextActionRef
 }): Extract<SendScopedResponse, { disposition: 'rejected_before_persistence' }> {
   return {
     success: false,
     disposition: 'rejected_before_persistence',
-    shouldClearInput: false,
-    preserveInput: true,
     retryableByUser: input.retryableByUser,
     persistence: skippedIngress(input.scope),
     error: input.error,
     errorKind: input.code,
     admissionEvidenceDigest: input.admissionEvidenceDigest,
+    ...(input.recoveryActionRef ? { recoveryActionRef: input.recoveryActionRef } : {}),
   }
 }
 
@@ -483,6 +493,9 @@ export async function runConfirmedSendScoped<ScopeRow, DispatchContext>(params: 
       retryableByUser: preparedDispatch.retryableByUser,
       error: preparedDispatch.error,
       admissionEvidenceDigest: preparedDispatch.admissionEvidenceDigest,
+      ...(preparedDispatch.recoveryActionRef
+        ? { recoveryActionRef: preparedDispatch.recoveryActionRef }
+        : {}),
     })
   }
   let dispatchContextValid = false
@@ -554,7 +567,8 @@ export async function runConfirmedSendScoped<ScopeRow, DispatchContext>(params: 
     if (error instanceof PrePersistenceAdmissionError) {
       // The atomic owner has rolled back; this is a known admission rejection.
       const rejection = { ok: false as const, code: error.code, retryableByUser: error.retryableByUser,
-        error: error.message, admissionEvidenceDigest: error.admissionEvidenceDigest }
+        error: error.message, admissionEvidenceDigest: error.admissionEvidenceDigest,
+        ...(error.recoveryActionRef ? { recoveryActionRef: error.recoveryActionRef } : {}) }
       try {
         await params.releaseReservationAfterPrePersistenceRejection({
           reservation: reservationResult.reservation, rejection,
@@ -582,8 +596,6 @@ export async function runConfirmedSendScoped<ScopeRow, DispatchContext>(params: 
     return {
       success: false,
       disposition: 'ingress_persistence_failed',
-      shouldClearInput: false,
-      preserveInput: true,
       retryableByUser: true,
       persistence: failedIngress(),
       error: failure.message,

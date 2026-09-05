@@ -1,0 +1,8 @@
+{
+  "contract": "ready_runtime_source_evidence_v1",
+  "sourceManifestDigest": "8b2e1f3f4f80fd9ef28657b49e90290e06c63f004eb35fc198c91d59992f3e0b",
+  "evidenceKind": "git_and_private_release_backup",
+  "gitCommit": "f175a25f",
+  "runtimeVersion": "0.149.0",
+  "activeHeadCountAtCensus": 7
+}

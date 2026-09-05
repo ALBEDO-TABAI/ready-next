@@ -35,13 +35,14 @@ function createMockDeps(): AgentLifecycleGroupDeps {
   }
 }
 
-test('lifecycle group registers only the six exact Codex-facing async channels', () => {
+test('lifecycle group registers only the seven exact Codex-facing async channels', () => {
   const { ipc, handleCalls } = createMockIpc()
   agentLifecycleGroup.register(ipc, createMockDeps())
 
   const registered = handleCalls.map((entry) => entry.channel).sort()
   assert.deepEqual(registered, [..._agentLifecycleGroupChannelsForTest].sort())
   assert.deepEqual(registered, [
+    'agent:beginNewContext',
     'agent:closeSession',
     'agent:compactSession',
     'agent:createSession',
@@ -302,8 +303,6 @@ test('send handler accepts only the shared exact request and rejects retired wor
     return {
       success: false,
       disposition: 'rejected_before_persistence',
-      shouldClearInput: false,
-      preserveInput: true,
       retryableByUser: true,
       persistence: {
         scope: 'pre-existing',

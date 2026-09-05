@@ -34,6 +34,7 @@ import {
   type CodexTurnBuildContext,
 } from './codex-turn-input-builder'
 import { isCodexNoActiveTurnInterruptError } from './codex-app-server-client'
+import { sameCodexThreadDirectory } from './codex-thread-directory-identity'
 
 export type ReadyAliasIdentity = {
   aliasId: string
@@ -1029,7 +1030,7 @@ export class ReadyCodexLifecycleAdapter<TExecutionResult> {
     if (resolution.state === 'resume_required') {
       const validateThread = (thread: CodexThread, instructionSources: string[]) => {
         this.assertThreadIdentity(thread, resolution.threadId, instructionSources, resolution.expectedForkedFromId)
-        if (thread.cwd !== resolution.expectedCwd) {
+        if (!sameCodexThreadDirectory(thread.cwd, resolution.expectedCwd)) {
           throw new CodexIngressRejectedError('native_thread_cwd_mismatch')
         }
       }
@@ -1050,7 +1051,7 @@ export class ReadyCodexLifecycleAdapter<TExecutionResult> {
     }
     const started = await this.deps.nativeRuntime.threadStart(resolution.params)
     this.assertThreadIdentity(started.thread, started.thread.id, started.instructionSources, null)
-    if (started.thread.cwd !== resolution.params.cwd) {
+    if (!sameCodexThreadDirectory(started.thread.cwd, resolution.params.cwd)) {
       throw new CodexIngressRejectedError('native_thread_cwd_mismatch')
     }
     await this.deps.lifecycleStore.bindStartedThread({

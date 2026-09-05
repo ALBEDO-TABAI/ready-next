@@ -23,6 +23,8 @@ import type {
   SendScopedResponse,
   CodexProductTurnActionProjection,
   CodexHeadActionProjection,
+  CodexBeginNewContextActionRef,
+  CodexConversationContextBoundary,
 } from '../../shared/ipc-contracts/agent-runtime'
 import type { ActionAuthorizationMode } from '../../shared/action-authorization-mode'
 import type { LifecycleOperationProjectionV2 } from '../../shared/ipc-contracts/agent-lifecycle-snapshot'
@@ -101,6 +103,11 @@ export interface SessionSlice {
    * is a read-through mirror of `sessions[activeSessionId].inputValue`.
    */
   inputValue: string
+  attachments: ChatAttachment[]
+  filePool: ChatAttachment[]
+  draftRevision: number
+  beginNewContextActionRef: CodexBeginNewContextActionRef | null
+  contextBoundaries: CodexConversationContextBoundary[]
 }
 
 export interface AgentState {
@@ -172,6 +179,7 @@ export interface AgentState {
   stopStreaming: () => Promise<LifecycleResult>
   resetCurrentConversation: () => Promise<LifecycleResult>
   compactCurrentSession: () => Promise<LifecycleResult>
+  beginNewContext: (actionRef?: CodexBeginNewContextActionRef) => Promise<void>
   refreshCodexActionSurface: (scopeId: string) => Promise<void>
   loadScopes: () => Promise<boolean>
   loadScope: (scopeId: string) => Promise<void>

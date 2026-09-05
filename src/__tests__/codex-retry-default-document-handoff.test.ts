@@ -168,7 +168,8 @@ test('natural Retry with a newly attached resource refuses before IPC and preser
   const { sent } = installFailedRun(t)
   const attachments = [{ id: 'new-file', name: 'new.txt', path: '/tmp/new.txt', type: 'text' as const,
     size: 1, ext: '.txt', source: 'file' as const }]
-  useAgent.setState({ attachments, inputValue: '再试一次' })
+  useAgent.getState().addAttachments(attachments)
+  useAgent.getState().setInputValue('再试一次')
   const result = await useAgent.getState().sendMessage('再试一次')
   assert.equal(result.errorKind, 'explicit_retry_control_invalid')
   assert.equal(sent.length, 0)

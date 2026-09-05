@@ -34,7 +34,6 @@ test('semantic retry rejection is a typed zero-persistence response', () => {
   const rejected = preflightExplicitRetryControl({ request: request('新任务'), scope })
   assert.ok(rejected)
   assert.equal(rejected?.disposition, 'rejected_before_persistence')
-  assert.equal(rejected?.preserveInput, true)
   assert.equal(rejected?.persistence.message, 'skipped')
   assert.equal(rejected?.errorKind, 'explicit_retry_control_invalid')
 })

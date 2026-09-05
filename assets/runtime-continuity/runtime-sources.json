@@ -1,0 +1,55 @@
+{
+  "contract": "ready_runtime_source_inventory_v1",
+  "sources": [
+    {
+      "manifestDigest": "8b2e1f3f4f80fd9ef28657b49e90290e06c63f004eb35fc198c91d59992f3e0b",
+      "classification": "published_support_source",
+      "manifestFile": "manifests/0.149.0-8b2e1f3f.json",
+      "evidenceFiles": [
+        "evidence/0.149.0-release-package.json"
+      ]
+    },
+    {
+      "manifestDigest": "d47a3b863ed1975f7d18fb337a508127efe7559bfd47ce8e5f9bcb0ed7ee854f",
+      "classification": "published_support_source",
+      "manifestFile": "manifests/0.146.1-d47a3b86.json",
+      "evidenceFiles": [
+        "evidence/0.146.1-release-package.json"
+      ]
+    },
+    {
+      "manifestDigest": "cda6bd5ff08247c0fd502accba2c0c0d342d5d59945d06dfb53a666bb64b636d",
+      "classification": "observed_active_source",
+      "manifestFile": "manifests/0.149.0-cda6bd5f.json",
+      "evidenceFiles": [
+        "evidence/current-target-package.json"
+      ]
+    },
+    {
+      "manifestDigest": "f981c518fe97286868e579afe68ff693089545041e255242335a0485a5df31fa",
+      "classification": "published_support_source",
+      "manifestFile": "manifests/0.146.1-f981c518.json",
+      "evidenceFiles": [
+        "evidence/historical-installed-sources.json"
+      ]
+    },
+    {
+      "manifestDigest": "25ebf79c723cc9c797e72eff6be55c0691043fe86036c5e338bdda3ac495c31c",
+      "classification": "published_source_manifest_unrecoverable",
+      "manifestFile": null,
+      "evidenceFiles": [
+        "evidence/historical-installed-sources.json"
+      ],
+      "reason": "source_manifest_unrecoverable"
+    },
+    {
+      "manifestDigest": "4e73326d4988d0cc17da0dffd1850d232ace0802b5f1a6afa36656317f0259cd",
+      "classification": "published_source_manifest_unrecoverable",
+      "manifestFile": null,
+      "evidenceFiles": [
+        "evidence/historical-installed-sources.json"
+      ],
+      "reason": "source_manifest_unrecoverable"
+    }
+  ]
+}

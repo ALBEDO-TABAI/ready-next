@@ -12,6 +12,7 @@ import type {
   CodexServerRequestResponse,
   CodexToolResponseDeliveryAttemptIdentity,
 } from './codex-tool-response-delivery'
+import { sameCodexThreadDirectory } from './codex-thread-directory-identity'
 
 type BufferedNotification = {
   kind: 'notification'
@@ -761,7 +762,7 @@ export class CodexProvisionalInboundBuffer implements CodexInboundFramePort {
     const matches = [...this.threads.values()].filter((owner) => (
       owner.state === 'provisional'
       && owner.connectionEpoch === connectionEpoch
-      && owner.expectedCwd === notification.params.thread.cwd
+      && sameCodexThreadDirectory(owner.expectedCwd, notification.params.thread.cwd)
       && owner.expectedSource === source
       && (owner.expectedParentThreadId === null
         || owner.expectedParentThreadId === notification.params.thread.parentThreadId)

@@ -1,6 +1,6 @@
 # 代码行数健康度台账
 
-> 更新时间：2026-09-03
+> 更新时间：2026-09-05
 
 这份台账记录“任务给代码文件增加行数后，文件总行数已超过 1000 行”的健康度评估。它不是按行数自动要求拆分，而是把真正影响维护、验证和协作的风险持续留下来。
 
@@ -21,6 +21,18 @@
 
 | 评估日期 | 任务 | 文件 | 总行数 | 本次新增 | 结论 | 判断与后续动作 | 状态 |
 | --- | --- | --- | ---: | ---: | --- | --- | --- |
+| 2026-09-05 | 历史续聊复查与包体来源交接 | `scripts/run-history-continuation-installed-proof.mjs` | 1644 | 从1776行缩减并补全旧头/重放覆盖 | 一般 | fresh-root 独立场景已拆到现有脚本子目录，复用正式发送与同一请求捕获器；入口保留资料隔离、全分母和清理。2026-10-05 复查剩余独立资料准备逻辑。 | 已排期：2026-10-05 |
+| 2026-09-05 | 空白旧头及上下文边界升级 | `src/main/modules/migrations.ts` | 4480 | 本轮增加122号迁移 | 健康 | 单一顺序迁移目录；复用同一边界定义和刷新guard，不回填旧记录，不引入第二套升级真值。 | 无需处理 |
+| 2026-09-05 | 恢复回执与当前动作一致性 | `src/shared/ipc-contracts/agent-runtime.ts` | 1406 | 边界摘要和结果关系校验 | 健康 | 单一跨进程合同聚合；同一解析器拒绝回执与当前动作身份矛盾。 | 无需处理 |
+| 2026-09-04 | 安装态恢复分母、本地技能提示重放与 fresh-root 读路径修复 | `src/main/modules/agent-control/codex-runtime/codex-runtime-production-composition.ts` | 5572 | 本批净 +19 | 危险 | 本批只把两处续聊分支的判别式从"物化种类"换成"重播窗口是否仍开"（`freshRootRequiresReseed`），修掉已结算 fresh-root head 的读路径抛错；组合根仍过密，沿用 history / recovery / admission 拆分方向。 | 后续拆分；交付时提醒 |
+| 2026-09-04 | 安装态恢复分母、本地技能提示重放与 fresh-root 读路径修复 | `src/main/modules/agent-control/runtime-core/runtime.ts` | 1898 | 本批净 +14 | 危险 | 本批只在 `sendScoped` 入口重放本地 scope 的持久化技能提示（此前只有远程 `ensureChannelScope` 消费该字段）；运行服务仍是多产品组合根。 | 后续拆分；交付时提醒 |
+| 2026-09-04 | 安装态恢复分母、本地技能提示重放与 fresh-root 读路径修复 | `src/__tests__/codex-binding-repository-native.test.ts` | 9070 | 本批净 +26 | 一般 | 本批只补 fresh-root 判别式分裂的仓库级断言（种类不变、重播窗口关闭、窗口外调用继承合同即报错）。复查日期沿用 2026-10-04。 | 已排期：2026-10-04 |
+| 2026-09-04 | 历史会话续聊、草稿编辑与恢复闭环 | `src/__tests__/codex-binding-repository-native.test.ts` | 9044 | 本批净 +282 | 一般 | 本批新增"生产 ingress 经真实仓库准入 fresh-root tail 并跨重启"整链回归，并让 recovery fixture 支持 admission 覆盖。2026-10-04 复查按 continuity / recovery / action-surface 拆成独立套件。 | 已排期：2026-10-04 |
+| 2026-09-04 | 历史会话续聊、草稿编辑与恢复闭环 | `src/main/modules/agent-control/codex-runtime/codex-binding-repository.ts` | 10648 | 本批净 +646 | 危险 | 本批接入 boundary 表读校验、同 thread 全合同预检与恢复事务的仓库侧收口；仓库仍混合多类事务。已超既定 10000 行上限，下一次净增前必须先按 continuity / boundary / action-surface 拆出叶子模块。 | 阻断性：下次净增前先拆分；交付时提醒 |
+| 2026-09-04 | 历史会话续聊、草稿编辑与恢复闭环 | `src/main/modules/agent-control/codex-runtime/codex-runtime-production-composition.ts` | 5553 | 本批净 +522 | 危险 | 本批接入唯一 runtime 兼容结论、同 thread 预检、begin-new-context 签发与 profile route 具名拒绝；组合根仍过密。后续继续按 history / recovery / admission composition 拆分。 | 后续拆分；交付时提醒 |
+| 2026-09-04 | 历史会话续聊、草稿编辑与恢复闭环 | `src/main/modules/agent-control/codex-runtime/codex-binding-schema.ts` | 3009 | 本批净 +40 | 危险 | 本批新增 context boundary 表及其不可变约束；高密度 schema 汇总仍待按事务边界拆分。 | 后续拆分；交付时提醒 |
+| 2026-09-04 | 历史会话续聊、草稿编辑与恢复闭环 | `src/renderer/stores/useAgent.ts` | 2494 | 本批净 +198 | 危险 | 本批加入动作面单飞所有者与排队跟进读取、草稿 revision 归属和恢复入口；store 仍聚合会话、生命周期与动作面三类职责。2026-10-04 复查按 hydration / draft / lifecycle 拆分。 | 已排期：2026-10-04 |
+| 2026-09-04 | 历史会话续聊、草稿编辑与恢复闭环 | `src/renderer/components/agent/ChatPanel.tsx` | 1365 | 本批净 +54 | 一般 | 本批只把发送资格与草稿可编辑性分离，并按 session 隔离 sending owner 与 notice。2026-10-04 复查 composer 与任务卡分组。 | 已排期：2026-10-04 |
 | 2026-09-03 | 已有数据覆盖升级修复 | `src/main/modules/migrations.ts` | 4452 | 本批净 +7 | 健康 | 仅新增119，使用同一个网关约束定义补齐已经升级的数据库；顺序迁移目录仍是单一职责。 | 无需处理 |
 | 2026-09-03 | 已有数据覆盖升级修复 | `src/main/modules/agent-control/codex-runtime/codex-binding-schema.ts` | 2969 | 本批净 +17 | 危险 | 保存历史未知证据并统一安装网关索引与新写入约束；未新增运行期兼容路径。高密度schema汇总仍待按事务边界拆分。 | 后续拆分；交付时提醒 |
 | 2026-09-03 | Codex重试入口与动作消费修复 | `src/__tests__/codex-model-gateway-retry.test.ts` | 1277 | 本批净 +1 | 一般 | 补齐当前网关上下文参数的真实空值；未改变原有重试策略。2026-10-02复查请求合同与传输重试测试边界。 | 已排期：2026-10-02 |

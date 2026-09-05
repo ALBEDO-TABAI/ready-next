@@ -120,6 +120,36 @@ export function mapBackendErrorToFriendly(input: {
     }
   }
 
+  const continuationMessages: Record<string, string> = {
+    runtime_unverified: '这个旧会话能否安全接续尚未验证。已有消息和草稿会保留，你可以从这里开始新上下文。',
+    runtime_unsupported: '这个旧会话不能由当前版本直接接续。已有消息和草稿会保留，你可以从这里开始新上下文。',
+    model_changed: '当前模型与这个旧会话不一致，需要从这里开始新上下文。',
+    thread_config_changed: '当前模型设置与这个旧会话不一致，需要从这里开始新上下文。',
+    cwd_unavailable: '这个旧会话原来的工作目录已不可用，需要从这里开始新上下文。',
+    cwd_changed: '这个旧会话的工作目录身份已变化，需要从这里开始新上下文。',
+    instruction_contract_changed: '当前工作规则与这个旧会话不一致，需要从这里开始新上下文。',
+    native_tool_surface_extension_required: '这次请求需要旧会话里没有的工具，需要从这里开始新上下文。',
+    native_tool_definition_changed: '这次请求使用的工具规则已经变化，需要从这里开始新上下文。',
+    ready_tool_execution_contract_changed: 'Ready 已无法按旧会话原来的工具规则安全执行，需要从这里开始新上下文。',
+  }
+  // A live-configuration fault, not a history verdict: the fix is the model
+  // settings, so it must not offer "start a new context".
+  if (errorKind === 'current_contract_read_failed') {
+    return {
+      friendlyMessage: '当前模型配置无法使用，请在设置里检查供应商与模型后重试。历史记录已保留。',
+      recoverable: true,
+      retryStrategy: 'user_action' as const,
+    }
+  }
+  if (continuationMessages[errorKind]) {
+    return {
+      friendlyMessage: continuationMessages[errorKind],
+      technicalDetails: error || undefined,
+      recoverable: true,
+      retryStrategy: 'user_action',
+    }
+  }
+
   if (errorKind === 'action_projection_confirmation_required') {
     return {
       friendlyMessage: '会话内容已有变化，请核对当前提示后再次发送。',

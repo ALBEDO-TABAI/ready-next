@@ -47,6 +47,7 @@ type PendingIngressSnapshot = {
   content: string
   timestamp: Date
   attachments: ChatAttachment[]
+  originDraftRevision: number
   originAliasGeneration: number | null
   originMessageVisibilityEpoch: number
   originSessionKey: string
@@ -75,8 +76,6 @@ export function rejectedMessageResult(errorKind: PrePersistenceErrorKind): SendM
   return {
     success: false,
     disposition: 'rejected_before_persistence',
-    shouldClearInput: false,
-    preserveInput: true,
     errorKind,
   }
 }
@@ -121,13 +120,14 @@ export async function sendAgentMessage(input: {
 }): Promise<SendMessageResult> {
   const { get, set, content, options } = input
   const normalizedContent = content.trim()
-  const { attachments: pendingAttachments } = get()
+  const initialSessionKey = activeSessionKey(get())
+  const initialSlice = normalizeSessionSlice(get().sessions[initialSessionKey])
+  const pendingAttachments = initialSlice.attachments
   if (!normalizedContent && pendingAttachments.length === 0) {
     throw new Error('empty_input')
   }
   const {
     currentAgent,
-    attachments,
     currentScope,
     currentScopeId,
     pendingContinuationIntent,
@@ -140,6 +140,7 @@ export async function sendAgentMessage(input: {
   }
   const originSessionKey = sessionKeyForScopeId(get(), currentScopeId)
   const originSlice = normalizeSessionSlice(get().sessions[originSessionKey])
+  const attachments = originSlice.attachments
   const originComposerAuthority = captureComposerAuthority(get())
   if (
     originComposerAuthority.sessionId !== originSessionKey
@@ -157,7 +158,7 @@ export async function sendAgentMessage(input: {
   const activeScope = currentScope
   const activeScopeId = currentScopeId
 
-  const { filePool } = get()
+  const filePool = originSlice.filePool
   const referencedPoolAttachments = resolveReferencedFilePoolAttachments(content, filePool)
   let currentDocumentAnchor
   try {
@@ -272,6 +273,7 @@ export async function sendAgentMessage(input: {
     originAliasGeneration: originSlice.aliasGeneration,
     originMessageVisibilityEpoch: originSlice.messageVisibilityEpoch,
     originSessionKey,
+    originDraftRevision: originSlice.draftRevision,
   })
 
   try {
@@ -287,6 +289,7 @@ export async function sendAgentMessage(input: {
         ? { expectedAliasGeneration: originSlice.aliasGeneration }
         : {}),
       expectedMessageVisibilityEpoch: originSlice.messageVisibilityEpoch,
+      draftRevision: originSlice.draftRevision,
       resources: composedResources.length > 0 ? composedResources : undefined,
       currentDocumentAnchor,
       ...(!explicitRetry ? {
@@ -434,8 +437,6 @@ export async function sendAgentMessage(input: {
     return {
       success: false,
       disposition: 'terminal_failure_after_persistence',
-      shouldClearInput: true,
-      preserveInput: false,
       errorKind: 'unknown',
     }
   }

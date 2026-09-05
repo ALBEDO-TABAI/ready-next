@@ -19,6 +19,8 @@ import type { CanonicalAssistantMessage } from '../../shared/ipc-contracts/canon
 import type {
   CreateSessionRequest,
   CreateSessionResult,
+  BeginNewContextRequest,
+  BeginNewContextResult,
   IngressAdmittedEvent,
   LifecycleRequest,
   LifecycleResult,
@@ -745,6 +747,7 @@ interface ElectronAgentAPI {
    *  can `window.electronAPI?.agent?.metric?.(...)` without a TS error. */
   metric?: (payload: { name: string; payload?: Record<string, unknown> }) => void
   createSession: (request: CreateSessionRequest) => Promise<CreateSessionResult>
+  beginNewContext: (request: BeginNewContextRequest) => Promise<BeginNewContextResult>
   resetSession: (request: ProductLifecycleRequest) => Promise<LifecycleResult>
   // Stage U PR U1.2 — removed `orchestrate / getStatus / getAll / getDiagnostics`
   // legacy AgentManager wrappers. Use `getRuntimeStatus` / `getCapabilityRuntimeSnapshot`.

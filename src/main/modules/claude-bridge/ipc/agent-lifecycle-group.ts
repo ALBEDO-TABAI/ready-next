@@ -4,6 +4,8 @@ import { isDeepStrictEqual } from 'node:util'
 import {
   parseCreateSessionRequest,
   parseCreateSessionResult,
+  parseBeginNewContextRequest,
+  parseBeginNewContextResult,
   parseLifecycleRequest,
   parseLifecycleResult,
   parseProductLifecycleRequest,
@@ -12,6 +14,8 @@ import {
   parseSendScopedResponse,
   type CreateSessionRequest,
   type CreateSessionResult,
+  type BeginNewContextRequest,
+  type BeginNewContextResult,
   type LifecycleRequest,
   type LifecycleResult,
   type ProductLifecycleRequest,
@@ -25,6 +29,7 @@ import type { LifecycleOperationProjectionV2 } from '../../../../shared/ipc-cont
 export interface AgentLifecycleGroupDeps {
   sendScoped(payload: SendScopedRequest): Promise<SendScopedResponse>
   createSession(request: CreateSessionRequest): Promise<CreateSessionResult>
+  beginNewContext(request: BeginNewContextRequest): BeginNewContextResult
   resetSession(request: ProductLifecycleRequest): Promise<LifecycleResult>
   stopSession(request: StopLifecycleRequest): Promise<LifecycleResult>
   closeSession(request: ProductLifecycleRequest): Promise<LifecycleResult>
@@ -42,6 +47,7 @@ function validateActionRequest(
   const projection = deps.readLifecycleSnapshot({
     aliasId: request.aliasId,
     aliasGeneration: request.aliasGeneration,
+    workbenchMode: request.workbenchMode,
   })
   const gate = projection.actions[action]
   const ref = request.actionRequestRef
@@ -66,6 +72,7 @@ function validateActionRequest(
 const CHANNELS = [
   'agent:sendScoped',
   'agent:createSession',
+  'agent:beginNewContext',
   'agent:resetSession',
   'agent:kill',
   'agent:closeSession',
@@ -97,6 +104,10 @@ export const agentLifecycleGroup: IpcChannelGroup<AgentLifecycleGroupDeps> = {
 
     ipcMain.handle('agent:createSession', async (_, rawPayload: unknown): Promise<CreateSessionResult> => (
       parseCreateSessionResult(await deps.createSession(parseCreateSessionRequest(rawPayload)))
+    ))
+
+    ipcMain.handle('agent:beginNewContext', (_, rawPayload: unknown): BeginNewContextResult => (
+      parseBeginNewContextResult(deps.beginNewContext(parseBeginNewContextRequest(rawPayload)))
     ))
 
     ipcMain.handle('agent:resetSession', async (_, payload: unknown): Promise<LifecycleResult> => {

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 const fs = require('node:fs')
 const path = require('node:path')
+const ts = require('typescript')
 
 const ROOT = path.resolve(__dirname, '..')
 const PRODUCTION_ROOTS = [
@@ -59,13 +60,10 @@ const expectedRegisterProjectionSinkIdentifiers = new Map([
 ])
 
 const expectedSendScopedIdentifiers = new Map([
-  ['src/main/modules/agent-control/runtime-core/reference-hint-service.ts', 1],
   ['src/main/modules/agent-control/runtime-core/runtime.ts', 1],
-  ['src/main/modules/agent-control/skills/skill-reference-hints.ts', 1],
-  ['src/main/modules/claude-bridge/ipc-handler.ts', 5],
-  ['src/main/modules/claude-bridge/ipc/agent-lifecycle-group.ts', 6],
-  ['src/preload/index.ts', 2],
-  ['src/renderer/modules/agent/agent-panel-test-harness-diagnostics.ts', 1],
+  ['src/main/modules/claude-bridge/ipc-handler.ts', 2],
+  ['src/main/modules/claude-bridge/ipc/agent-lifecycle-group.ts', 2],
+  ['src/preload/index.ts', 1],
   ['src/renderer/stores/agent-send-orchestration.ts', 2],
   ['src/renderer/types/electron.d.ts', 1],
 ])
@@ -128,12 +126,30 @@ function check(root = ROOT) {
       if (/from\s+['"][^'"]*codex-thread-retirement-cleanup-migration['"]/.test(source)) {
         retirementMigrationImporters.push(rel)
       }
-      if (/\.registerProjectionSink\s*\(/.test(source)) projectionSinkCallsites.push(rel)
-      if (/\.sendScoped\s*\(/.test(source)) sendScopedCallsites.push(rel)
-      const projectionSinkIdentifierCount = source.match(/\bregisterProjectionSink\b/g)?.length || 0
-      if (projectionSinkIdentifierCount > 0) registerProjectionSinkIdentifiers.set(rel, projectionSinkIdentifierCount)
-      const sendScopedIdentifierCount = source.match(/\bsendScoped\b/g)?.length || 0
-      if (sendScopedIdentifierCount > 0) sendScopedIdentifiers.set(rel, sendScopedIdentifierCount)
+      if (/\b(?:registerProjectionSink|sendScoped)\b/.test(source)) {
+        const parsed = ts.createSourceFile(rel, source, ts.ScriptTarget.Latest, true)
+        const references = new Map()
+        const calls = new Set()
+        const visit = (node) => {
+          if ((ts.isIdentifier(node) || ts.isStringLiteral(node))
+            && ['registerProjectionSink', 'sendScoped'].includes(node.text)) {
+            references.set(node.text, (references.get(node.text) || 0) + 1)
+          }
+          if (ts.isCallExpression(node)) {
+            const access = node.expression
+            const name = ts.isPropertyAccessExpression(access) ? access.name.text
+              : ts.isElementAccessExpression(access) && ts.isStringLiteral(access.argumentExpression)
+                ? access.argumentExpression.text : null
+            if (name) calls.add(name)
+          }
+          ts.forEachChild(node, visit)
+        }
+        visit(parsed)
+        if (calls.has('registerProjectionSink')) projectionSinkCallsites.push(rel)
+        if (calls.has('sendScoped')) sendScopedCallsites.push(rel)
+        if (references.has('registerProjectionSink')) registerProjectionSinkIdentifiers.set(rel, references.get('registerProjectionSink'))
+        if (references.has('sendScoped')) sendScopedIdentifiers.set(rel, references.get('sendScoped'))
+      }
       for (const pattern of forbiddenProductionPatterns) {
         if (pattern.test(source)) errors.push(`${rel} contains retired production contract: ${pattern}`)
       }

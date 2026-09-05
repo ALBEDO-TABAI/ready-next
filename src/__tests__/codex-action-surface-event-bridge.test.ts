@@ -10,7 +10,12 @@ import {
   type SendScopedRequest,
 } from '../shared/ipc-contracts/agent-runtime'
 import { shouldHydrateCodexActionSurface } from '../renderer/modules/agent/codex-action-surface-invalidation'
-import { applyIngressAdmitted, initAgentListeners, useAgent } from '../renderer/stores/useAgent'
+import {
+  applyIngressAdmitted,
+  initAgentListeners,
+  resetCodexLifecycleHydrationOwnersForTest,
+  useAgent,
+} from '../renderer/stores/useAgent'
 import { makeEmptySessionSlice } from '../renderer/stores/agent-store-helpers'
 import type { ConversationScope } from '../renderer/modules/agent/types'
 import { projectCodexHeadActionProjection } from '../main/modules/agent-control/codex-runtime/codex-action-surface'
@@ -57,6 +62,57 @@ test('renderer hydrates only a newer invalidation for the visible scope', () => 
     currentScopeId: 'other',
     currentVersion: null,
   }), false)
+})
+
+test('history-only scope hydrates its recovery action from the latest retired generation', async () => {
+  seedSurface()
+  const historyScope = {
+    ...useAgent.getState().currentScope!,
+    aliasGeneration: null,
+    latestAliasGeneration: 1,
+    lastMessageAt: '2026-09-03T00:00:00.000Z',
+  }
+  useAgent.setState((state) => ({
+    scopes: [historyScope],
+    currentScope: historyScope,
+    sessions: {
+      ...state.sessions,
+      [sessionId]: {
+        ...state.sessions[sessionId],
+        aliasGeneration: null,
+        scopeHeadActionProjection: null,
+        lifecycleOperationProjection: null,
+        beginNewContextActionRef: null,
+      },
+    },
+  }))
+  const actionRef = {
+    contract: 'codex_begin_new_context_action_v1' as const,
+    operationId: 'begin-history-only', scopeId, scopeEpoch: 0,
+    sourceThreadBindingId: 'retired-binding-1', sourceAliasGeneration: 1,
+    sourceRevision: 2, sourceEvidenceDigest: 'a'.repeat(64),
+    candidateEvidenceDigest: 'b'.repeat(64), consequenceDigest: 'c'.repeat(64),
+    draftRevision: null, digest: 'd'.repeat(64),
+  }
+  const api = installSurfaceApi({
+    listConversationScopes: async () => ({ success: true, data: [historyScope] }),
+    readCodexActionSurface: async () => ({
+      success: true,
+      data: {
+        state: 'history_only', scopeId, scopeEpoch: 0, sourceAliasGeneration: 1,
+        head: null, lifecycle: null, beginNewContext: actionRef, contextBoundaries: [],
+      },
+    }),
+  })
+  try {
+    assert.equal(await useAgent.getState().loadScopes(), true)
+    const slice = useAgent.getState().sessions[sessionId]
+    assert.equal(slice.aliasGeneration, 1)
+    assert.deepEqual(slice.beginNewContextActionRef, actionRef)
+    assert.equal(useAgent.getState().inputValue, draft)
+  } finally {
+    api.restore()
+  }
 })
 
 const scopeId = 'scope-fork-surface'
@@ -176,6 +232,9 @@ function installSurfaceApi(api: Record<string, unknown>) {
     },
     restore() {
       off()
+      // A stubbed read may still be pending; drop the hydration owner so the
+      // next test is not queued behind a promise that will never settle.
+      resetCodexLifecycleHydrationOwnersForTest()
       Object.defineProperty(globalThis, 'window', { value: previousWindow, configurable: true })
     },
   }
@@ -200,13 +259,14 @@ test('reset return refreshes the cleared action surface before the next ordinary
         api.invalidate(2, 2, 1)
         await flush()
         resetReturned = true
+        if (eventReadPending) oldRead.resolve({ success: true, data: next })
         return { ok: true, action: 'reset', aliasId: scopeId,
           retiredGeneration: 1, newGeneration: 2, transactionDigest: 'reset-committed' }
       },
       sendScoped: async (request: SendScopedRequest) => {
         sent.push(request)
         return { success: false, disposition: 'rejected_before_persistence',
-          shouldClearInput: false, preserveInput: true, errorKind: 'host_unavailable' }
+          errorKind: 'host_unavailable' }
       },
     })
     try {
@@ -214,7 +274,7 @@ test('reset return refreshes the cleared action surface before the next ordinary
       assert.deepEqual(useAgent.getState().sessions[sessionId].scopeHeadActionProjection, next.head,
         'reset clears old actions, then its return must read the new head again')
       assert.equal(nextReads, 1, 'the reset owner prevents an event read from replacing its pending transition')
-      oldRead.resolve({ success: true, data: next })
+      if (!eventReadPending) oldRead.resolve({ success: true, data: next })
       await flush()
       await useAgent.getState().sendMessage('重置后的完整新问题')
       assert.equal(sent.length, 1)
@@ -293,7 +353,7 @@ test('gen1 → gen2 invalidation reads Main atomically and ordinary C sends that
         releaseReservationAfterPrePersistenceRejection: async () => { assert.fail('admission rejection') },
         runConfirmed: async ({ persistence }) => ({
           success: true, disposition: 'terminal_success', ownerRunId: payload.requestId!,
-          shouldClearInput: true, preserveInput: false, persistence,
+          persistence,
           responseText: 'C completed', productOutcomeDigest: 'outcome-C',
           canonicalMessageDigest: 'canonical-C', canonicalMessage: {
             id: 'assistant-C', conversationId: scopeId, role: 'assistant', content: 'C completed',
@@ -306,7 +366,7 @@ test('gen1 → gen2 invalidation reads Main atomically and ordinary C sends that
   try {
     api.invalidate(2)
     await flush()
-    assert.deepEqual(reads, [{ aliasId: scopeId, aliasGeneration: 2 }])
+    assert.deepEqual(reads, [{ aliasId: scopeId, aliasGeneration: 2, workbenchMode: 'browser' }])
     assert.equal(useAgent.getState().sessions[sessionId].aliasGeneration, 1,
       'the notification is only a read target, not authority to advance the renderer')
     assert.equal(useAgent.getState().inputValue, draft)
@@ -392,10 +452,10 @@ test('a superseded read cannot publish even when it finishes before the newer re
     await flush()
     api.invalidate(2)
     old.resolve({ success: true, data: surface(1, 2) })
-    await loading
+    await flush()
     assert.deepEqual(useAgent.getState().sessions[sessionId].scopeHeadActionProjection, initial.head)
     next.resolve({ success: true, data: surface(2) })
-    await flush()
+    await loading
     assert.equal(useAgent.getState().sessions[sessionId].aliasGeneration, 2)
   } finally { api.restore() }
 })
@@ -592,11 +652,12 @@ test('failed send return and new successor hydration preserve canonical C across
           api.invalidate(2, 2)
           await flush()
           assert.equal(receiptReads, 1)
+          pending.resolve({ success: true, data: [receipt] })
         }
         return {
           success: false, disposition: 'terminal_failure_after_persistence', aliasGeneration: 1,
           ownerRunId: payload.requestId, errorKind: 'unknown', error: 'intentional failure',
-          shouldClearInput: true, preserveInput: false, productTurnReceipt: receipt,
+          productTurnReceipt: receipt,
           canonicalMessage: receipt.canonicalMessage, canonicalMessageDigest: receipt.canonicalMessageDigest,
         }
       },
@@ -731,7 +792,7 @@ test('late gen1 run receipts cannot replace B after the gen2 head and run projec
   } finally { api.restore() }
 })
 
-test('memory invalidation starts a fresh same-head read and a late ready receipt cannot undo the newer blocked receipt', async () => {
+test('memory invalidation queues one fresh same-head read and an old receipt cannot undo it', async () => {
   const oldReceipt = seedFailedB()
   const oldProjection = oldReceipt.actionProjection
   assert.equal(oldProjection.retryEvidenceKind, 'complete')
@@ -773,11 +834,12 @@ test('memory invalidation starts a fresh same-head read and a late ready receipt
     assert.equal(receiptReads, 1)
     api.memoryChanged()
     await flush()
-    assert.equal(receiptReads, 2, 'a memory notification must not reuse a pre-notification receipt read')
-    assert.deepEqual(useAgent.getState().sessions[sessionId]
-      .productTurnActionProjectionByRunId['run-B'], newerReceipt.actionProjection)
+    assert.equal(receiptReads, 1, 'the newer memory read waits behind the single in-flight owner')
     oldRead.resolve({ success: true, data: [oldReceipt] })
     await loading
+    assert.equal(receiptReads, 2, 'the highest pending memory read runs after the old owner settles')
+    assert.deepEqual(useAgent.getState().sessions[sessionId]
+      .productTurnActionProjectionByRunId['run-B'], newerReceipt.actionProjection)
     const state = useAgent.getState()
     assert.deepEqual(state.sessions[sessionId].productTurnActionProjectionByRunId['run-B'], newerReceipt.actionProjection)
     api.terminal(oldReceipt)
@@ -806,10 +868,10 @@ test('mode changes preserve the newest in-flight generation and sequence read ta
       await flush()
       useMode.setState({ workbenchMode: 'document' })
       await flush()
-      assert.deepEqual(targets, [generation, generation])
-      assert.deepEqual(useAgent.getState().sessions[sessionId].scopeHeadActionProjection, next.head)
+      assert.deepEqual(targets, [generation])
       oldRead.resolve({ success: true, data: next })
       await flush()
+      assert.deepEqual(targets, [generation, generation])
       assert.deepEqual(useAgent.getState().sessions[sessionId].scopeHeadActionProjection, next.head)
     } finally {
       api.restore()
@@ -839,9 +901,10 @@ test('mode changes hide old actions immediately and reject a late response from 
       receipt.actionProjection, surface(1).head, useMode.getState().workbenchMode,
     ), false)
     await flush()
-    assert.deepEqual(modes, ['browser', 'document'])
+    assert.deepEqual(modes, ['browser'])
     first.resolve({ success: true, data: [receipt] })
     await loading
+    assert.deepEqual(modes, ['browser', 'document'])
     api.terminal(receipt)
     const cached = useAgent.getState().sessions[sessionId].productTurnActionProjectionByRunId['run-B']
     assert.equal(productTurnActionProjectionMatchesContext(cached, surface(1).head, 'document'), false)
@@ -960,7 +1023,7 @@ test('an obsolete failed read target cannot suppress recovery after admitted gen
     await useAgent.getState().refreshCodexActionSurface(scopeId)
     assert.deepEqual(reads, [1, 2])
     send.resolve({ success: true, disposition: 'terminal_success', ownerRunId: payload!.requestId,
-      aliasGeneration: 2, shouldClearInput: true, preserveInput: false,
+      aliasGeneration: 2,
       persistence: { scope: 'pre-existing', message: 'persisted', attachments: 'none', inputAttachments: 'none' },
       responseText: '完成', productOutcomeDigest: 'completed-generation-two', canonicalMessageDigest: 'canonical-generation-two',
       canonicalMessage: { id: 'assistant-generation-two', conversationId: scopeId, role: 'assistant', content: '完成',
@@ -989,12 +1052,13 @@ test('metadata recovery preserves a future sequence floor through failed and old
   try {
     api.invalidate(2, 100)
     await flush()
-    await useAgent.getState().refreshCodexActionSurface(scopeId)
+    const refreshing = useAgent.getState().refreshCodexActionSurface(scopeId)
+    await flush()
+    old.resolve({ success: false })
+    await refreshing
     assert.equal(useAgent.getState().sessions[sessionId].aliasGeneration, 2)
     assert.equal(useAgent.getState().sessions[sessionId].scopeHeadActionProjection, null,
       'sequence 99 cannot satisfy the committed sequence 100 lower bound')
-    old.resolve({ success: false })
-    await flush()
     await useAgent.getState().refreshCodexActionSurface(scopeId)
     assert.deepEqual(reads, [2, 2, 2])
     assert.deepEqual(useAgent.getState().sessions[sessionId].scopeHeadActionProjection, surface(2, 100).head)
@@ -1055,7 +1119,6 @@ test('a stale send recovers a lost generation notification through metadata with
       calls.push('send')
       assert.equal(request.actionAdmissionRef?.headProjectionDigest, initial.head.evidenceDigest)
       return { success: false, disposition: 'rejected_before_persistence',
-        shouldClearInput: false, preserveInput: true,
         errorKind: 'action_projection_confirmation_required', error: 'codex_action_admission_ref_stale' }
     },
   })

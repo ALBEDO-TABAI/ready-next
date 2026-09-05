@@ -448,7 +448,16 @@ test('production live closeout retires an observation-required Browser workflow 
       status: 'running',
     }, Date.parse(startedAt))
 
-    const codexRepository = new CodexBindingRepository(db)
+    const runtimeManifestDigest = digestCanonicalJson({ fixture: 'live-closeout-runtime' })
+    const codexRepository = new CodexBindingRepository(db, {
+      runtimeManifestDigest,
+      protocolSchemaDigest: 'protocol-schema-live-closeout',
+      runtimeContinuityCatalog: {
+        contract: 'ready_runtime_continuity_catalog_v1',
+        targetManifestDigest: runtimeManifestDigest,
+        transitions: [],
+      },
+    })
     const upstream = createCodexUpstreamProfileSnapshot({
       profileId: 'profile-live-closeout',
       config: {
@@ -465,14 +474,14 @@ test('production live closeout retires an observation-required Browser workflow 
       aliasId: scopeId,
       aliasGeneration: 1,
       readyScopeId: scopeId,
-      runtimeManifestDigest: 'runtime-manifest-live-closeout',
+      runtimeManifestDigest,
       protocolSchemaDigest: 'protocol-schema-live-closeout',
       createdAt: startedAt,
     })
     const headProjection = projectCodexHeadActionProjection(codexRepository.readHeadActionFacts({
       aliasId: scopeId,
       aliasGeneration: 1,
-      currentRuntimeManifestDigest: 'runtime-manifest-live-closeout',
+      currentRuntimeManifestDigest: runtimeManifestDigest,
       currentProtocolSchemaDigest: 'protocol-schema-live-closeout',
     }))
     prepared.ingress.actionAdmissionRef = {
@@ -491,7 +500,7 @@ test('production live closeout retires an observation-required Browser workflow 
       threadBindingId,
       isolatedThreadCwd: `/tmp/ready-codex/${threadBindingId}`,
       turnRequestId: 'turn-request-live-closeout',
-      runtimeManifestDigest: 'runtime-manifest-live-closeout',
+      runtimeManifestDigest,
       protocolSchemaDigest: 'protocol-schema-live-closeout',
       instructionContractDigest: 'instruction-contract-live-closeout',
       codexModel: 'ready-e0-model',
@@ -507,6 +516,7 @@ test('production live closeout retires an observation-required Browser workflow 
         messageMetaDigest: digestCanonicalJson({}),
         executionBindingDigest: digestCanonicalJson(ownerBinding),
       },
+      continuationCandidate: null,
     }
     const admission: CodexAdmittedBindingInput = {
       ...admissionInput,
@@ -832,8 +842,9 @@ test('production live closeout retires an observation-required Browser workflow 
       codexRepository.readHeadActionFacts({
         aliasId: scopeId,
         aliasGeneration: 2,
-        currentRuntimeManifestDigest: 'runtime-manifest-live-closeout',
+        currentRuntimeManifestDigest: runtimeManifestDigest,
         currentProtocolSchemaDigest: 'protocol-schema-live-closeout',
+        headContractBlocker: null,
       }),
     )
     const rejectedPrepared: PreparedCodexProductRun = {
@@ -923,9 +934,9 @@ test('production live closeout retires an observation-required Browser workflow 
       threadBindingId: rejectedAlias!.threadBindingId,
       isolatedThreadCwd: `/tmp/ready-codex/${rejectedAlias!.threadBindingId}`,
       turnRequestId: 'turn-request-live-rejection',
-      runtimeManifestDigest: 'runtime-manifest-live-closeout',
+      runtimeManifestDigest,
       protocolSchemaDigest: 'protocol-schema-live-closeout',
-      instructionContractDigest: 'instruction-contract-live-rejection',
+      instructionContractDigest: 'instruction-contract-live-closeout',
       upstreamProfileSnapshotRef: 'profile-ref-live-closeout',
       upstreamProfileSnapshotDigest: upstream.snapshotDigest,
       readyParentReceipt: {
@@ -934,6 +945,14 @@ test('production live closeout retires an observation-required Browser workflow 
         messageTimestamp: startedAt,
         messageMetaDigest: digestCanonicalJson({}),
         executionBindingDigest: digestCanonicalJson(rejectedBinding),
+      },
+      continuationCandidate: {
+        model: 'ready-e0-model',
+        threadConfig: null,
+        isolatedThreadCwd: `/tmp/ready-codex/${rejectedAlias!.threadBindingId}`,
+        cwdAvailable: true,
+        instructionContractDigest: 'instruction-contract-live-closeout',
+        currentToolSurface: rejectedPrepared.readyToolSurface,
       },
     }
     codexRepository.admitProductBindings({

@@ -702,6 +702,7 @@ export async function setupAgentIPC(
   agentLifecycleGroupDispose = agentLifecycleGroup.register(ipcMain, {
     sendScoped: (payload) => runtime!.sendScoped(payload),
     createSession: (request) => runtime!.createCodexSession(request),
+    beginNewContext: (request) => runtime!.beginCodexNewContext(request),
     resetSession: (request) => runtime!.resetCodexSession(request),
     stopSession: (request) => runtime!.stopCodexSession(request),
     closeSession: (request) => runtime!.closeCodexSession(request),

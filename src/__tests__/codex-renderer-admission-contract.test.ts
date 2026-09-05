@@ -177,8 +177,6 @@ test('renderer keeps composer and transcript untouched until durable admission',
       disposition: 'terminal_failure_after_persistence',
       ownerRunId: payload.requestId,
       aliasGeneration: 6,
-      shouldClearInput: true,
-      preserveInput: false,
       retryableByUser: false,
       persistence: {
         scope: 'pre-existing',
@@ -198,6 +196,46 @@ test('renderer keeps composer and transcript untouched until durable admission',
       useAgent.getState().messages.filter((message) => message.type === 'agent').map((message) => message.content),
       ['本轮未能完成，已有结果已保留。'],
     )
+  } finally {
+    electron.restore()
+  }
+})
+
+test('admission clears only the submitted draft revision after A to B to A edits', async () => {
+  seedStore('A', 1)
+  let capturedPayload: any = null
+  let settle!: (result: SendScopedResponse) => void
+  const terminal = new Promise<SendScopedResponse>((resolve) => { settle = resolve })
+  const electron = installElectronApi(async (payload) => {
+    capturedPayload = payload
+    return terminal
+  })
+  try {
+    const sendPromise = useAgent.getState().sendMessage('A')
+    const payload = await waitFor(() => capturedPayload)
+    useAgent.getState().setInputValue('B')
+    useAgent.getState().setInputValue('A')
+
+    assert.equal(applyIngressAdmitted({
+      type: 'ingress_admitted', requestId: payload.requestId, scopeId: payload.scopeId,
+      originUserMessageId: payload.userMessage.id, aliasGeneration: 1,
+      messageVisibilityEpoch: 0, ingressAdmittedRevision: 1,
+      ingressAdmittedDigest: 'draft-revision-admission',
+      admittedAt: '2026-08-07T00:00:01.000Z',
+    }), true)
+    assert.equal(useAgent.getState().inputValue, 'A')
+    assert.equal(useAgent.getState().sessions['session-codex-renderer']?.inputValue, 'A')
+
+    settle({
+      success: false, disposition: 'terminal_failure_after_persistence',
+      ownerRunId: payload.requestId, aliasGeneration: 1, retryableByUser: false,
+      persistence: { scope: 'pre-existing', message: 'persisted', attachments: 'none', inputAttachments: 'none' },
+      error: 'provider_failed', errorKind: 'blocked_external',
+      productOutcomeDigest: 'draft-revision-outcome',
+      ...failureCanonical(payload.requestId, payload.scopeId),
+    })
+    await sendPromise
+    assert.equal(useAgent.getState().inputValue, 'A')
   } finally {
     electron.restore()
   }
@@ -268,8 +306,6 @@ test('a newly admitted turn keeps the previous context meter until exact native 
       disposition: 'terminal_failure_after_persistence',
       ownerRunId: payload.requestId,
       aliasGeneration: 2,
-      shouldClearInput: true,
-      preserveInput: false,
       retryableByUser: false,
       persistence: {
         scope: 'pre-existing',
@@ -348,8 +384,6 @@ test('same-history generation rollover admits the pending message without erasin
       disposition: 'terminal_failure_after_persistence',
       ownerRunId: payload.requestId,
       aliasGeneration: 2,
-      shouldClearInput: true,
-      preserveInput: false,
       retryableByUser: false,
       persistence: {
         scope: 'pre-existing',
@@ -400,8 +434,6 @@ test('new-history admission rejects a pending message from the previous visibili
       success: false,
       disposition: 'rejected_before_persistence',
       ownerRunId: null,
-      shouldClearInput: false,
-      preserveInput: true,
       retryableByUser: false,
       persistence: {
         scope: 'none',
@@ -467,8 +499,6 @@ test('an admission from the pre-reset generation cannot roll back the current ge
       success: false,
       disposition: 'rejected_before_persistence',
       ownerRunId: null,
-      shouldClearInput: false,
-      preserveInput: true,
       retryableByUser: false,
       persistence: {
         scope: 'none',
@@ -525,8 +555,6 @@ test('terminal success replaces the transient bubble with one canonical assistan
       success: true,
       disposition: 'terminal_success',
       ownerRunId: payload.requestId,
-      shouldClearInput: true,
-      preserveInput: false,
       retryableByUser: false,
       persistence: {
         scope: 'pre-existing',
@@ -581,8 +609,6 @@ test('terminal response reconciles durable admission when its push event was los
       disposition: 'terminal_success',
       ownerRunId: payload.requestId,
       aliasGeneration: 6,
-      shouldClearInput: true,
-      preserveInput: false,
       retryableByUser: false,
       persistence: {
         scope: 'pre-existing',
@@ -678,8 +704,6 @@ test('stale terminal response cannot roll back a newer alias generation', async 
       disposition: 'terminal_success',
       ownerRunId: payload.requestId,
       aliasGeneration: 1,
-      shouldClearInput: true,
-      preserveInput: false,
       retryableByUser: false,
       persistence: {
         scope: 'pre-existing',
@@ -728,8 +752,6 @@ test('unreadable attachment is rejected before admission without changing visibl
     return {
       success: false,
       disposition: 'rejected_before_persistence',
-      shouldClearInput: false,
-      preserveInput: true,
       retryableByUser: true,
       persistence: {
         scope: 'pre-existing',
@@ -818,8 +840,6 @@ test('late admission for a removed origin session cannot bleed into the active s
       success: true,
       disposition: 'terminal_success',
       ownerRunId: payload.requestId,
-      shouldClearInput: true,
-      preserveInput: false,
       retryableByUser: false,
       persistence: {
         scope: 'pre-existing',
@@ -933,8 +953,6 @@ test('admission after a tab switch updates only the originating session', async 
       success: false,
       disposition: 'terminal_failure_after_persistence',
       ownerRunId: payload.requestId,
-      shouldClearInput: true,
-      preserveInput: false,
       retryableByUser: false,
       persistence: {
         scope: 'pre-existing',
@@ -970,8 +988,6 @@ for (const literal of ['/skill summarize', '/doc rewrite']) {
       return {
         success: false,
         disposition: 'rejected_before_persistence',
-        shouldClearInput: false,
-        preserveInput: true,
         retryableByUser: true,
         persistence: {
           scope: 'pre-existing',
@@ -1004,8 +1020,6 @@ test('pre-persistence provider rejection keeps the draft and surfaces a visible 
   const electron = installElectronApi(async () => ({
     success: false,
     disposition: 'rejected_before_persistence',
-    shouldClearInput: false,
-    preserveInput: true,
     retryableByUser: true,
     persistence: {
       scope: 'pre-existing',
@@ -1054,8 +1068,6 @@ test('pending ask-user card stays pending while Main admission returns thread_bu
     return {
       success: false,
       disposition: 'rejected_before_persistence',
-      shouldClearInput: false,
-      preserveInput: true,
       retryableByUser: false,
       persistence: {
         scope: 'pre-existing',
@@ -1089,8 +1101,6 @@ test('publication-diverged follow-up requires the new head before dispatch', asy
     return {
       success: false,
       disposition: 'rejected_before_persistence',
-      shouldClearInput: false,
-      preserveInput: true,
       retryableByUser: false,
       persistence: {
         scope: 'none',
@@ -1125,8 +1135,6 @@ test('a conversation without an action head preserves the draft and requests a r
     return {
       success: false,
       disposition: 'rejected_before_persistence',
-      shouldClearInput: false,
-      preserveInput: true,
       retryableByUser: false,
       persistence: {
         scope: 'none',
@@ -1163,8 +1171,7 @@ test('stale displayed consequence refreshes the action surface once and never re
   } })
   const electron = installElectronApi(async () => {
     sends += 1
-    return { success: false, disposition: 'rejected_before_persistence', shouldClearInput: false,
-      preserveInput: true, retryableByUser: true,
+    return { success: false, disposition: 'rejected_before_persistence', retryableByUser: true,
       persistence: { scope: 'pre-existing', message: 'skipped', attachments: 'none', inputAttachments: 'none' },
       error: 'codex_action_admission_ref_stale', errorKind: 'action_projection_confirmation_required',
       admissionEvidenceDigest: 'stale-displayed-head' }

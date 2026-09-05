@@ -64,6 +64,10 @@ npm --prefix Packer start
 Packer/output/
 ```
 
+最终 DMG 旁保留同名 `.receipt.json`。源码身份在编译前冻结，编译完成和打包完成均检查源码/编译输出未变；Packer 复制时只转交原回执。Clean Packer 在重建最终 DMG 并写出本轮净化清单后刷新包摘要。安装验收同时核对 DMG、包内构建记录和当前审查源码；旧回执、旧净化清单或打包后重新计算的源码摘要不能替代这条交接。
+
+`buildIdentity.source.dirty` 如实标记发布输入中尚未提交的修改、新增和删除（包括已暂存项）；生成目录不计入。Git HEAD 只是基点，实际工作树以同一 source digest 为准。
+
 ### node_modules 符号链接的物化（关键）
 
 本仓库的 `node_modules` 是指向 `ready-cowork/node_modules` 的**符号链接**（共享安装省磁盘）。

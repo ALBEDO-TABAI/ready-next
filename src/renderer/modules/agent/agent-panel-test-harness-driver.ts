@@ -1,3 +1,4 @@
+import { readComposerAuthorityFromDom } from './composer-state'
 import { useWorkspace } from '../../stores/useWorkspace'
 import { useDocTabs } from '../../stores/useDocTabs'
 import { useMode } from '../../stores/useMode'
@@ -43,21 +44,17 @@ export function shouldEnableHarness(): boolean {
     return false
   }
 }
-
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
-
 function basenameFromPath(path: string): string {
   return path.replace(/\\/g, '/').split('/').filter(Boolean).at(-1) || path
 }
-
 function extensionFromPath(path: string): string {
   const name = basenameFromPath(path)
   const index = name.lastIndexOf('.')
   return index >= 0 ? name.slice(index).toLowerCase() : ''
 }
-
 function typeFromExtension(ext: string): ChatAttachment['type'] {
   const normalized = ext.toLowerCase()
   if (['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.bmp', '.heic'].includes(normalized)) return 'image'
@@ -66,7 +63,6 @@ function typeFromExtension(ext: string): ChatAttachment['type'] {
   if (['.xls', '.xlsx', '.tsv'].includes(normalized)) return 'spreadsheet'
   return 'other'
 }
-
 async function hydrateAttachment(input: AgentPanelTestAttachmentInput): Promise<ChatAttachment> {
   const path = String(input.path || '').trim()
   if (!path) throw new Error('attachment path is required')
@@ -82,9 +78,10 @@ async function hydrateAttachment(input: AgentPanelTestAttachmentInput): Promise<
     ext,
     source: input.source || 'file',
     isDirectory: typeof input.isDirectory === 'boolean' ? input.isDirectory : Boolean(data?.isDirectory),
+    ...(input.skillId ? { skillId: input.skillId } : {}),
+    ...(input.skillFolderPath ? { skillFolderPath: input.skillFolderPath } : {}),
   }
 }
-
 function buildTestAttachmentPathContext(attachments: ChatAttachment[]): string {
   const lines = attachments
     .filter((attachment) => typeof attachment.path === 'string' && attachment.path.trim())
@@ -96,7 +93,6 @@ function buildTestAttachmentPathContext(attachments: ChatAttachment[]): string {
     ...lines,
   ].join('\n')
 }
-
 async function setDomTextareaValue(text: string): Promise<boolean> {
   if (typeof document === 'undefined') return false
   let textarea: HTMLTextAreaElement | null = null
@@ -124,7 +120,6 @@ async function setDomTextareaValue(text: string): Promise<boolean> {
   await delay(0)
   return true
 }
-
 async function submitViaDom(text: string): Promise<boolean> {
   const changed = await setDomTextareaValue(text)
   if (!changed || typeof document === 'undefined') return false
@@ -145,7 +140,6 @@ async function submitViaDom(text: string): Promise<boolean> {
   await delay(0)
   return true
 }
-
 function hasSubmittedUserMessage(
   messages: AgentMessage[],
   beforeMessageCount: number,
@@ -158,7 +152,6 @@ function hasSubmittedUserMessage(
     || messages.find((message) => message.type === 'user' && message.content.trim() === normalizedText),
   )
 }
-
 async function waitForDomSubmitEvidence(
   store: StoreLike,
   beforeMessageCount: number,
@@ -183,7 +176,6 @@ async function waitForDomSubmitEvidence(
   }
   return { submitted: false, started: false }
 }
-
 async function loadProjectionCards(
   scopeId: string | null,
   expectedMessageVisibilityEpoch: number | null,
@@ -203,7 +195,6 @@ async function loadProjectionCards(
       && item.messageVisibilityEpoch === expectedMessageVisibilityEpoch)
     .map(taskCardFromProjection)
 }
-
 export function createAgentPanelTestHarness(store: StoreLike): AgentPanelTestHarness {
   let seq = 0
   const events: AgentPanelHarnessEvent[] = []
@@ -218,7 +209,6 @@ export function createAgentPanelTestHarness(store: StoreLike): AgentPanelTestHar
     })
     if (events.length > maxEvents) events.splice(0, events.length - maxEvents)
   }
-
   const unsubscribe = store.subscribe?.((state, previous) => {
     if (state.currentScopeId !== previous.currentScopeId) {
       pushEvent('scope', state, { from: previous.currentScopeId, to: state.currentScopeId })
@@ -252,7 +242,6 @@ export function createAgentPanelTestHarness(store: StoreLike): AgentPanelTestHar
       canonicalMessageDigest: data.canonicalMessageDigest || null,
     })
   })
-
   const snapshot = async (): Promise<AgentPanelSnapshot> => {
     const state = store.getState()
     const scopeId = state.currentScopeId
@@ -266,9 +255,16 @@ export function createAgentPanelTestHarness(store: StoreLike): AgentPanelTestHar
     const authorityStillCurrent = current.currentScopeId === scopeId
       && current.currentScope?.id === scopeId
       && current.currentScope.messageVisibilityEpoch === expectedMessageVisibilityEpoch
-    return createAgentPanelSnapshot(current, authorityStillCurrent ? projectionCards : [])
+    const composerShell = typeof document === 'undefined'
+      ? null
+      : document.querySelector<HTMLElement>('[data-chat-composer-shell="true"]')
+    const composerAuthority = readComposerAuthorityFromDom(composerShell)
+    return createAgentPanelSnapshot(
+      current,
+      authorityStillCurrent ? projectionCards : [],
+      composerAuthority,
+    )
   }
-
   const waitForIdle = async (options: { timeoutMs?: number; pollMs?: number } = {}) => {
     const timeoutMs = Math.max(500, options.timeoutMs || 45_000)
     const pollMs = Math.max(25, options.pollMs || 100)
@@ -296,7 +292,6 @@ export function createAgentPanelTestHarness(store: StoreLike): AgentPanelTestHar
     ]
     return timedOut
   }
-
   const submit = async (
     text: string,
     options: AgentPanelSubmitOptions = {},
@@ -441,7 +436,6 @@ export function createAgentPanelTestHarness(store: StoreLike): AgentPanelTestHar
       diagnostics,
     }
   }
-
   const answerPendingAskUserQuestions: AgentPanelTestHarness['answerPendingAskUserQuestions'] = async (options = {}) => {
     const state = store.getState()
     const message = [...state.messages].reverse().find((item) =>
@@ -507,7 +501,6 @@ export function createAgentPanelTestHarness(store: StoreLike): AgentPanelTestHar
       error: response.error,
     }
   }
-
   const attachFiles = async (files: AgentPanelTestAttachmentInput[]): Promise<ChatAttachment[]> => {
     const state = store.getState()
     if (!state.addAttachments) throw new Error('agent store does not expose addAttachments')
@@ -515,11 +508,9 @@ export function createAgentPanelTestHarness(store: StoreLike): AgentPanelTestHar
     state.addAttachments(attachments)
     return attachments
   }
-
   const clearAttachments = (): void => {
     store.getState().clearAttachments?.()
   }
-
   const createSession = async (): Promise<AgentPanelSnapshot> => {
     const beforeScopeId = store.getState().currentScopeId
     const createNewSession = store.getState().createNewSession
@@ -540,7 +531,6 @@ export function createAgentPanelTestHarness(store: StoreLike): AgentPanelTestHar
     }
     return snapshot()
   }
-
   const prepareWorkspace = async (
     root: string,
     options: { reindex?: boolean } = {},
@@ -670,6 +660,13 @@ export function createAgentPanelTestHarness(store: StoreLike): AgentPanelTestHar
     }
   }
 
+  const setWorkbenchMode: AgentPanelTestHarness['setWorkbenchMode'] = async (mode) => {
+    useMode.getState().setAppMode('workbench')
+    useMode.getState().setWorkbenchMode(mode)
+    await delay(50)
+    return { ok: useMode.getState().workbenchMode === mode, mode }
+  }
+
   return {
     snapshot,
     diagnose: async () => (await snapshot()).diagnostics,
@@ -684,6 +681,7 @@ export function createAgentPanelTestHarness(store: StoreLike): AgentPanelTestHar
     createVisibleSession,
     activateSession,
     setDocumentFixture,
+    setWorkbenchMode,
     events: () => [...events],
     clearEvents: () => {
       events.splice(0, events.length)

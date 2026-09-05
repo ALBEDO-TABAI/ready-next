@@ -1,6 +1,6 @@
 import { CodexBindingRepositoryError } from './codex-binding-error'
 import { createHash, randomUUID } from 'node:crypto'
-import { appendFileSync, mkdirSync, readFileSync, realpathSync } from 'node:fs'
+import { appendFileSync, existsSync, mkdirSync, readFileSync, realpathSync } from 'node:fs'
 import { join } from 'node:path'
 
 import type { AIModelConfig } from '../../../../shared/ai-providers'
@@ -9,7 +9,11 @@ import {
   readActionAuthorizationModeFromEnvelope,
 } from '../../../../shared/action-authorization-mode'
 import { persistableCalendarEventId } from '../../../../shared/calendar-event-identity'
-import type { ProductTurnReceipt, SendScopedRequest } from '../../../../shared/ipc-contracts/agent-runtime'
+import type {
+  CodexBeginNewContextActionRef,
+  ProductTurnReceipt,
+  SendScopedRequest,
+} from '../../../../shared/ipc-contracts/agent-runtime'
 import { classifyLifecycleOperation } from '../../../../shared/ipc-contracts/agent-lifecycle-snapshot'
 import type { ExecutionHostResult, TaskProjectionRecord } from '../contracts/run-contracts'
 import { classifyIntent } from '../intent-classifier'
@@ -52,11 +56,12 @@ import {
   verifyCodexAutomaticCompactionEvidence
 } from './codex-automatic-compaction-evidence'
 import { CodexModelGatewayRepository, CodexDatabaseModelGatewayAuthority, ReadySettingsModelGatewayCredentialStore } from './codex-model-gateway-authority'
-import { digestCanonicalJson, digestReadyAdditionalContext, resolveCodexNativeModelSettings } from './codex-model-gateway-contract'
+import { digestCanonicalJson, digestReadyAdditionalContext, resolveCodexNativeModelSettings, CodexModelGatewayContractError } from './codex-model-gateway-contract'
 import { CodexModelGateway, type CodexModelGatewayAddress } from './codex-model-gateway'
 import {
   assertCodexProfileRouteCurrent,
   createCodexProfileRouteSnapshot,
+  CodexProfileRouteChangedError,
 } from './codex-profile-admission'
 import type { CodexTurn } from './codex-native-runtime'
 import { StableNativeRuntime } from './codex-stable-native-runtime'
@@ -82,7 +87,6 @@ import {
 import { type CodexStartIdentityRegistry } from './codex-start-identity-registry'
 import { CodexLiveStartRejectionResolver } from './codex-live-start-rejection-resolver'
 import { classifyCodexIngressPreparationError } from './codex-ingress-preparation-error'
-import { listLiveCodexThreadToolDefinitions } from '../runtime-core/agent-sdk-tool-executor'
 import {
   assertCodexPendingInteractionRestartSweepComplete,
   buildCodexPendingInteractionRestartCandidate,
@@ -103,9 +107,13 @@ import { CodexToolActionJournal } from './codex-tool-action-journal'
 import { CodexThreadResumeAuthority } from './codex-thread-resume-authority'
 import { recoverCodexTerminalAfterInterrupt } from './codex-terminal-readback-recovery'
 import { createCodexReadyToolBridge, CodexToolBridgeError } from './codex-tool-bridge'
-import {
-  digestCodexRootToolSurface,
-} from './codex-tool-surface'
+import { CodexToolSurfaceError } from './codex-tool-surface'
+import { loadRuntimeContinuityAssets } from './codex-runtime-continuity-assets'
+import { buildContinuationProbeInput } from './codex-continuation-probe'
+import type {
+  SameThreadContinuation,
+  SameThreadContinuationCandidate,
+} from './codex-same-thread-continuation'
 import { CodexTurnCollector, type CoreTurnCandidate } from './codex-turn-collector'
 import { createCodexTaskActivityProjector } from './codex-task-activity-projector'
 import { codexTerminalPublicMessage } from './codex-product-turn-presentation'
@@ -139,6 +147,7 @@ import {
   verifyCodexBrowserWorkflowCandidate,
 } from './codex-browser-workflow-verifier'
 import type { ReadyMemoryStateChange } from '../../../../shared/ready-memory'
+import { clearLastReferenceSkill } from '../skills/skill-reference-hints'
 
 import {
   assertWidgetTargetsMatchAnchor,
@@ -303,6 +312,11 @@ type PreparedDetail = {
   upstream: ReturnType<typeof createCodexProfileRouteSnapshot>
   developerInstructions: string
   instructionContractDigest: string
+  continuationCandidate: SameThreadContinuationCandidate | null
+  resolveCurrentContinuation: () => {
+    candidate: SameThreadContinuationCandidate
+    decision: SameThreadContinuation
+  } | null
   turnContractDigest: string
   productTaskFacts: ReturnType<typeof resolveCodexProductTaskFacts>
 }
@@ -413,9 +427,29 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
 
   const paths = resolveCodexRuntimePaths(input)
   const verified = loadVerifiedCodexRuntime(paths)
+  const runtimeContinuity = loadRuntimeContinuityAssets({
+    assetRoot: join(paths.assetRoot, '..', 'runtime-continuity'),
+    targetManifestDigest: verified.manifestDigest,
+  })
+  let resolveProductHeadContractBlocker: ((input: {
+    aliasId: string
+    aliasGeneration: number
+    scopeEpoch: number
+    workbenchMode: 'browser' | 'document' | 'rss' | 'calendar'
+    threadBindingId: string
+    codexThreadId: string | null
+    materializationKind: 'legacy' | 'fresh_start' | 'native_fork' | 'fresh_root_with_tail'
+  }) => SameThreadContinuation['reason'] | undefined) | null = null
   const repository = new CodexBindingRepository(rawDb, {
     runtimeManifestDigest: verified.manifestDigest,
     protocolSchemaDigest: verified.manifest.stableV2SchemaSha256,
+    runtimeContinuityCatalog: runtimeContinuity.catalog,
+    resolveHeadContractBlocker(request) {
+      if (!resolveProductHeadContractBlocker) {
+        throw new Error('codex_head_continuation_resolver_unbound')
+      }
+      return resolveProductHeadContractBlocker(request)
+    },
   })
   const actionJournal = new CodexToolActionJournal(rawDb)
   const readyMemoryRepository = new ReadyMemoryRepository(rawDb)
@@ -3036,16 +3070,165 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
     deliverRecoveredCloseout(settlement.readyRunId, settlement.result)
   }
 
-  const readActionSurface = (identity: { aliasId: string; aliasGeneration: number }) => {
-    const refreshed = repository.refreshPristineFreshStartHeadAtomic({
-      aliasId: identity.aliasId,
-      runtimeManifestDigest: verified.manifestDigest,
-      protocolSchemaDigest: verified.manifest.stableV2SchemaSha256,
-      createdAt: isoNow(),
+  const resolveDefaultContinuation = (request: {
+    aliasId: string
+    aliasGeneration: number
+    scopeEpoch: number
+    workbenchMode: 'browser' | 'document' | 'rss' | 'calendar'
+    threadBindingId?: string
+    materializationKind?: 'legacy' | 'fresh_start' | 'native_fork' | 'fresh_root_with_tail'
+  }): { decision: SameThreadContinuation; candidate: SameThreadContinuationCandidate } => {
+    const boundHost = host
+    if (!boundHost) throw new Error('codex_runtime_host_unbound')
+    // Materialization kind is immutable; successful closeout covers the tail.
+    // Read the current coverage obligation, not the creation kind, so settled
+    // fresh roots use the ordinary continuation contract on readback/restart.
+    const freshRoot = request.materializationKind === 'fresh_root_with_tail'
+      && request.threadBindingId !== undefined
+      && repository.freshRootRequiresReseed(request.threadBindingId)
+    const stored = freshRoot && request.threadBindingId
+      ? repository.readFreshRootSourceContinuationContract(request.threadBindingId)
+      : repository.readStoredContinuationContract(request)
+    const profile = activeProfile(input.settings)
+    const profileSnapshot = createCodexProductUpstreamProfileSnapshot(profile)
+    const probe = buildContinuationProbeInput(request.workbenchMode)
+    const authorization = boundHost.resolveSkillAuthorizationForTurn({
+      mode: 'observe',
+      message: probe.message,
+      sessionId: request.aliasId,
+      messageVisibilityEpoch: request.scopeEpoch,
+      requestEnvelope: probe.requestEnvelope,
     })
-    if (refreshed.kind === 'refreshed') {
-      publishCodexActionSurfaceInvalidation(identity.aliasId, refreshed.invalidation)
-      identity = { aliasId: refreshed.binding.aliasId, aliasGeneration: refreshed.binding.aliasGeneration }
+    let currentToolSurface = stored.stored.readyToolSurface
+    let toolCompatibility: SameThreadContinuationCandidate['toolCompatibility']
+    try {
+      currentToolSurface = boundHost.resolveToolTurnSnapshot({
+        surfaceId: `continuation-probe:${request.aliasId}`,
+        authorizationId: `continuation-probe:${request.aliasId}:${request.aliasGeneration}`,
+        authorization,
+        message: probe.message,
+        sessionId: request.aliasId,
+        scopeId: request.aliasId,
+        config: profile.config,
+        requestEnvelope: probe.requestEnvelope,
+        frozenToolSurface: stored.stored.readyToolSurface,
+      }).readyToolSurface
+    } catch (error) {
+      if (!(error instanceof CodexToolSurfaceError) || !error.compatibility) throw error
+      toolCompatibility = error.compatibility
+    }
+    const instruction = resolveCodexThreadInstructionContract({
+      assetRoot: verified.assetRoot,
+      host: boundHost,
+      skillAuthorization: authorization,
+    })
+    const candidate: SameThreadContinuationCandidate = {
+      model: 'ready-e0-model',
+      threadConfig: resolveCodexNativeModelSettings(profileSnapshot.snapshot).threadConfig,
+      isolatedThreadCwd: stored.stored.isolatedThreadCwd,
+      cwdAvailable: existsSync(stored.stored.isolatedThreadCwd),
+      instructionContractDigest: instruction.instructionContractDigest,
+      currentToolSurface,
+      ...(toolCompatibility ? { toolCompatibility } : {}),
+    }
+    return {
+      candidate,
+      decision: freshRoot && request.threadBindingId
+        ? repository.resolveFreshRootInheritance({
+            threadBindingId: request.threadBindingId,
+            candidate,
+          })
+        : repository.resolveSameThreadContinuation({ ...request, candidate }),
+    }
+  }
+
+  const resolveHeadContinuation = (request: {
+    aliasId: string
+    aliasGeneration: number
+    scopeEpoch: number
+    workbenchMode: 'browser' | 'document' | 'rss' | 'calendar'
+    threadBindingId: string
+    codexThreadId: string | null
+    materializationKind: 'legacy' | 'fresh_start' | 'native_fork' | 'fresh_root_with_tail'
+  }): Pick<SameThreadContinuation, 'kind' | 'reason' | 'evidenceDigest'> | null => {
+    if (!request.codexThreadId
+      && request.materializationKind !== 'fresh_root_with_tail') return null
+    if (!request.codexThreadId
+      && !repository.freshRootRequiresReseed(request.threadBindingId)) return null
+    return resolveDefaultContinuation(request).decision
+  }
+  resolveProductHeadContractBlocker = (request) => {
+    try {
+      const decision = resolveHeadContinuation(request)
+      return decision ? decision.reason : undefined
+    } catch (error) {
+      // The live provider configuration cannot form a valid route. That blocks
+      // this turn with a named reason, but it is not a history verdict and must
+      // never escape as an exception into the read paths that call this
+      // (action surface, product presentation, closeout readback). Integrity
+      // errors keep propagating.
+      if (error instanceof CodexModelGatewayContractError) return 'current_contract_read_failed'
+      throw error
+    }
+  }
+
+  const issuedBeginNewContextActions = new Map<string, {
+    actionRef: CodexBeginNewContextActionRef
+    resolveCurrentEvidenceDigest: () => string | null
+  }>()
+  // Every exact-request rejection mints a new operation id, so this boot-scoped
+  // issuance map is bounded by insertion order. Recovery only ever replays a
+  // recent issuance; the repository remains the authority for already-committed
+  // operations, so evicting the oldest entries cannot resurrect stale authority.
+  const MAX_ISSUED_BEGIN_NEW_CONTEXT_ACTIONS = 256
+  const issueBeginNewContextAction = (
+    action: Parameters<CodexBindingRepository['buildBeginNewContextActionRef']>[0],
+    resolveCurrentEvidenceDigest: () => string | null,
+  ): CodexBeginNewContextActionRef => {
+    const actionRef = repository.buildBeginNewContextActionRef(action)
+    issuedBeginNewContextActions.delete(actionRef.operationId)
+    issuedBeginNewContextActions.set(actionRef.operationId, {
+      actionRef,
+      resolveCurrentEvidenceDigest,
+    })
+    while (issuedBeginNewContextActions.size > MAX_ISSUED_BEGIN_NEW_CONTEXT_ACTIONS) {
+      const oldest = issuedBeginNewContextActions.keys().next()
+      if (oldest.done) break
+      issuedBeginNewContextActions.delete(oldest.value)
+    }
+    return actionRef
+  }
+
+  const readActionSurface = (identity: {
+    aliasId: string
+    aliasGeneration: number
+    workbenchMode?: 'browser' | 'document' | 'rss' | 'calendar'
+  }) => {
+    const activeBinding = repository.readActiveAliasBinding(identity.aliasId)
+    if (!activeBinding) {
+      const historyOnly = repository.readHistoryOnlyScope(identity.aliasId)
+      if (!historyOnly || identity.aliasGeneration > historyOnly.sourceAliasGeneration) {
+        throw new Error('codex_action_surface_scope_missing')
+      }
+      return {
+        state: 'history_only' as const,
+        scopeId: historyOnly.scopeId,
+        scopeEpoch: historyOnly.scopeEpoch,
+        sourceAliasGeneration: historyOnly.sourceAliasGeneration,
+        head: null,
+        lifecycle: null,
+        beginNewContext: issueBeginNewContextAction({
+          scopeId: historyOnly.scopeId,
+          scopeEpoch: historyOnly.scopeEpoch,
+          candidateEvidenceDigest: historyOnly.evidenceDigest,
+          consequenceDigest: digestCanonicalJson(null),
+          draftRevision: null,
+        }, () => repository.readHistoryOnlyScope(historyOnly.scopeId)?.evidenceDigest ?? null),
+        contextBoundaries: repository.readContextBoundaries({
+          scopeId: historyOnly.scopeId,
+          scopeEpoch: historyOnly.scopeEpoch,
+        }),
+      }
     }
     const read = repository.readLifecycleOperation(identity)
     const snapshot = classifyLifecycleOperation(read.facts)
@@ -3059,12 +3242,31 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
       requestedAction: read.requestedAction,
       evidenceDigest: digestCanonicalJson({ ...read, snapshot }),
     }
-    const headFacts = repository.readHeadActionFacts({
+    const baseHeadFacts = repository.readHeadActionFacts({
       ...identity,
       currentRuntimeManifestDigest: verified.manifestDigest,
       currentProtocolSchemaDigest: verified.manifest.stableV2SchemaSha256,
     })
+    const binding = activeBinding
+    const continuation = resolveHeadContinuation({
+      ...identity,
+      scopeEpoch: baseHeadFacts.scopeEpoch,
+      workbenchMode: identity.workbenchMode || 'browser',
+      threadBindingId: binding.threadBindingId,
+      codexThreadId: binding.codexThreadId,
+      materializationKind: binding.materializationKind,
+    })
+    const headContractBlocker = continuation?.reason
+      ?? (binding.codexThreadId || binding.materializationKind === 'fresh_root_with_tail'
+        ? null : undefined)
+    const headFacts = { ...baseHeadFacts, headContractBlocker }
     const head = projectCodexHeadActionProjection(headFacts)
+    const manualCompactionRuntime = binding.codexThreadId
+      ? repository.resolveRuntimeOperationForThread({
+          threadBindingId: binding.threadBindingId,
+          operation: 'manual_compaction',
+        })
+      : null
     const lifecycleProjection = projectCodexLifecycleOperationV2({
       base,
       head,
@@ -3072,12 +3274,55 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
       threadBindingId: headFacts.threadBindingId,
       headRevision: headFacts.headRevision,
       materializationIntentRef: headFacts.materializationIntentRef ?? null,
+      manualCompactionRuntimeBlocker: manualCompactionRuntime?.kind === 'compatible'
+        ? null
+        : manualCompactionRuntime?.kind === 'unsupported'
+          ? 'runtime_unsupported'
+          : manualCompactionRuntime ? 'runtime_unverified' : null,
     })
+    const settledWithoutNative = ['idle_never_started', 'idle_ready_terminal_no_native'].includes(snapshot)
+      && !binding.codexThreadId && head.actions.send_new_message.availability === 'blocked'
+    const recoveryEvidenceDigest = ['idle_never_started', 'idle_ready_terminal_no_native', 'idle_native_thread'].includes(snapshot)
+      ? continuation?.kind === 'requires_new_context' ? continuation.evidenceDigest
+        : settledWithoutNative ? base.evidenceDigest : null
+      : null
     return {
+      state: 'active_head' as const,
       scopeId: head.scopeId,
       scopeEpoch: headFacts.scopeEpoch,
+      sourceAliasGeneration: head.actionProjectionVersion.headGeneration,
       head,
       lifecycle: lifecycleProjection,
+      beginNewContext: recoveryEvidenceDigest
+        ? issueBeginNewContextAction({
+            scopeId: head.scopeId,
+            scopeEpoch: headFacts.scopeEpoch,
+            candidateEvidenceDigest: recoveryEvidenceDigest,
+            consequenceDigest: digestCanonicalJson(head.actions.send_new_message.consequence),
+            draftRevision: null,
+          }, () => {
+            if (settledWithoutNative && continuation?.kind !== 'requires_new_context') {
+              const current = repository.readLifecycleOperation(identity)
+              const currentSnapshot = classifyLifecycleOperation(current.facts)
+              return ['idle_never_started', 'idle_ready_terminal_no_native'].includes(currentSnapshot)
+                && !current.facts.codexThreadId
+                ? digestCanonicalJson({ ...current, snapshot: currentSnapshot }) : null
+            }
+            const current = resolveHeadContinuation({
+              ...identity,
+              scopeEpoch: headFacts.scopeEpoch,
+              workbenchMode: identity.workbenchMode || 'browser',
+              threadBindingId: binding.threadBindingId,
+              codexThreadId: binding.codexThreadId,
+              materializationKind: binding.materializationKind,
+            })
+            return current?.kind === 'requires_new_context' ? current.evidenceDigest : null
+          })
+        : null,
+      contextBoundaries: repository.readContextBoundaries({
+        scopeId: head.scopeId,
+        scopeEpoch: headFacts.scopeEpoch,
+      }),
     }
   }
 
@@ -3095,42 +3340,76 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
       return repository.readCommittedProductRunVisibilityIdentity(readyRunId)
     },
     readLifecycleSnapshot(identity) {
-      return readActionSurface(identity).lifecycle
+      const surface = readActionSurface(identity)
+      if (surface.state !== 'active_head') throw new Error('codex_active_head_missing')
+      return surface.lifecycle
     },
     readHeadActionProjection(identity) {
-      return readActionSurface(identity).head
+      const surface = readActionSurface(identity)
+      if (surface.state !== 'active_head') throw new Error('codex_active_head_missing')
+      return surface.head
     },
     readActionSurface(identity) {
       return readActionSurface(identity)
     },
+    beginNewContext(request) {
+      gate.assertOpen()
+      const issuance = issuedBeginNewContextActions.get(request.actionRef.operationId)
+      const result = repository.beginNewContext({
+        actionRef: request.actionRef,
+        issuedActionRef: issuance?.actionRef ?? null,
+        assertRecoveryEligible() {
+          if (!issuance || issuance.resolveCurrentEvidenceDigest()
+            !== issuance.actionRef.candidateEvidenceDigest) {
+            throw new CodexBindingRepositoryError('begin_new_context_recovery_no_longer_eligible')
+          }
+        },
+        runtimeManifestDigest: verified.manifestDigest,
+        protocolSchemaDigest: verified.manifest.stableV2SchemaSha256,
+        committedAt: isoNow(),
+      })
+      if (result.committed) {
+        clearLastReferenceSkill(request.actionRef.scopeId)
+        publishCodexActionSurfaceInvalidation(request.actionRef.scopeId, result.invalidation)
+      }
+      return {
+        ok: true,
+        boundary: result.boundary,
+        aliasGeneration: result.invalidation.aliasGeneration,
+        actionSurfaceInvalidation: {
+          contract: 'codex_action_surface_invalidation_v1',
+          ...result.invalidation,
+        },
+      }
+    },
   }
 
   const startIdentityPort: CodexStartIdentityPort = {
-    resolveMethods(scopeId) {
+    resolveMethods(scopeId, workbenchMode) {
       gate.assertOpen()
-      const refreshed = repository.refreshPristineFreshStartHeadAtomic({
-        aliasId: scopeId,
-        runtimeManifestDigest: verified.manifestDigest,
-        protocolSchemaDigest: verified.manifest.stableV2SchemaSha256,
-        createdAt: isoNow(),
-        currentToolSurfaceDigest: digestCodexRootToolSurface(
-          listLiveCodexThreadToolDefinitions(),
-        ),
-      })
-      if (refreshed.kind === 'refreshed') {
-        publishCodexActionSurfaceInvalidation(scopeId, refreshed.invalidation)
+      let binding = repository.readActiveAliasBinding(scopeId)
+      if (binding && ['legacy', 'fresh_start'].includes(binding.materializationKind) && !binding.codexThreadId) {
+        const refreshed = repository.refreshPristineFreshStartHeadAtomic({
+          aliasId: scopeId,
+          runtimeManifestDigest: verified.manifestDigest,
+          protocolSchemaDigest: verified.manifest.stableV2SchemaSha256,
+          createdAt: isoNow(),
+        })
+        if (refreshed.kind === 'refreshed') {
+          publishCodexActionSurfaceInvalidation(scopeId, refreshed.invalidation)
+        }
+        if (refreshed.kind === 'reset_required') throw new Error('codex_conversation_reset_required')
+        binding = 'binding' in refreshed ? refreshed.binding : null
       }
-      if (refreshed.kind === 'reset_required') throw new Error('codex_conversation_reset_required')
-      const binding = 'binding' in refreshed ? refreshed.binding : null
       if (binding) {
-        const head = projectCodexHeadActionProjection(repository.readHeadActionFacts({
+        const surface = readActionSurface({
           aliasId: binding.aliasId,
           aliasGeneration: binding.aliasGeneration,
-          currentRuntimeManifestDigest: verified.manifestDigest,
-          currentProtocolSchemaDigest: verified.manifest.stableV2SchemaSha256,
-        }))
-        if (head.actions.send_new_message.availability !== 'ready') {
-          const blocker = head.actions.send_new_message.blockers[0]
+          workbenchMode,
+        })
+        if (surface.state !== 'active_head') throw new Error('codex_alias_binding_missing')
+        if (surface.head.actions.send_new_message.availability !== 'ready') {
+          const blocker = surface.head.actions.send_new_message.blockers[0]
           if (blocker === 'history_materializing') throw new Error('codex_conversation_materializing')
           if (blocker === 'thread_busy') throw new Error('codex_thread_busy')
           throw new Error('codex_conversation_reset_required')
@@ -3191,6 +3470,7 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
   const preparer = new CodexProductRunPreparer()
   const ingressPort: CodexIngressPort = {
     async prepareIngress({ scope, request, reservation }) {
+      let recoveryEvidenceResolver: (() => string | null) | null = null
       try {
         gate.assertOpen()
         const boundHost = host
@@ -3235,14 +3515,31 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
             throw new Error('codex_alias_generation_mismatch')
           }
         }
-        const currentHeadProjection = projectCodexHeadActionProjection(
-          repository.readHeadActionFacts({
+        const currentHeadFacts = repository.readHeadActionFacts({
+          aliasId: binding.aliasId,
+          aliasGeneration: binding.aliasGeneration,
+          currentRuntimeManifestDigest: verified.manifestDigest,
+          currentProtocolSchemaDigest: verified.manifest.stableV2SchemaSha256,
+        })
+        const requestedProbeMode = request.userMessage.meta.workbenchMode
+        const probeMode = requestedProbeMode === 'browser'
+          || requestedProbeMode === 'document'
+          || requestedProbeMode === 'rss'
+          || requestedProbeMode === 'calendar'
+          ? requestedProbeMode : 'browser'
+        const currentHeadProjection = projectCodexHeadActionProjection({
+          ...currentHeadFacts,
+          headContractBlocker: resolveHeadContinuation({
             aliasId: binding.aliasId,
             aliasGeneration: binding.aliasGeneration,
-            currentRuntimeManifestDigest: verified.manifestDigest,
-            currentProtocolSchemaDigest: verified.manifest.stableV2SchemaSha256,
-          }),
-        )
+            scopeEpoch: currentHeadFacts.scopeEpoch,
+            workbenchMode: probeMode,
+            threadBindingId: binding.threadBindingId,
+            codexThreadId: binding.codexThreadId,
+            materializationKind: binding.materializationKind,
+          })?.reason ?? (binding.codexThreadId
+            || binding.materializationKind === 'fresh_root_with_tail' ? null : undefined),
+        })
         if (currentHeadProjection.actions.send_new_message.availability !== 'ready') {
           throw new PrePersistenceAdmissionError(
             currentHeadProjection.actions.send_new_message.blockers[0] === 'history_materializing'
@@ -3484,27 +3781,37 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
           classifyMapSemanticIntentFallback(requestEnvelope.primaryInstruction),
         )
         const readyMemorySnapshot = readyMemoryRepository.buildSnapshot(isoNow())
-        const resolvedToolSnapshot = boundHost.resolveToolTurnSnapshot({
-          surfaceId: `codex-surface:${scope.id}:${request.requestId}`,
-          authorizationId: `codex-auth:${request.requestId}`,
-          authorization,
-          message: toRunMessage(request),
-          sessionId: scope.id,
-          scopeId: scope.id,
-          config: profile.config,
-          requestEnvelope,
-          frozenToolSurface: binding.toolSurface || undefined,
-        })
+        let resolvedToolSnapshot
+        try {
+          resolvedToolSnapshot = boundHost.resolveToolTurnSnapshot({
+            surfaceId: `codex-surface:${scope.id}:${request.requestId}`,
+            authorizationId: `codex-auth:${request.requestId}`,
+            authorization,
+            message: toRunMessage(request),
+            sessionId: scope.id,
+            scopeId: scope.id,
+            config: profile.config,
+            requestEnvelope,
+            frozenToolSurface: binding.toolSurface || undefined,
+          })
+        } catch (error) {
+          if (error instanceof CodexToolSurfaceError
+            && error.compatibility
+            && error.compatibility.kind !== 'compatible') {
+            throw new PrePersistenceAdmissionError(
+              error.compatibility.kind,
+              false,
+              error.compatibility.evidenceDigest,
+              error.code,
+            )
+          }
+          throw error
+        }
         const explicitAllowedToolNames = [...new Set(
           turnResources.authorities.flatMap((authority) => authority.allowedToolNames),
         )]
         const exclusiveAllowSet = authorization.mode === 'selected' && authorization.skillId === 'tag-forge'
           ? TAG_FORGE_EXCLUSIVE_TOOL_NAMES
-          : null
-        const mapRouteMode = hasMapRouteIntent
-          ? resolvedToolSnapshot.readyTurnToolAuthorization.allowedToolNames.includes('map_plan_route')
-            ? 'configured_primary' as const
-            : 'public_web_fallback' as const
           : null
         const browserAdmission = buildBrowserAdmissionAuthoritySnapshot({
           authorityId: `browser-auth:${request.requestId}`,
@@ -3524,44 +3831,55 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
           )),
           tagForgeExclusive: exclusiveAllowSet !== null,
         })
-        const surfaceNames = new Set(resolvedToolSnapshot.readyToolSurface.toolNames)
-        const capabilityAvailability = resolveReadyCapabilityTurnAvailability({
-          publicResearchProviderAvailable: surfaceNames.has('web_search') || surfaceNames.has('web_fetch'),
-          calendarHostAvailable: surfaceNames.has('calendar_list_window')
-            || surfaceNames.has('calendar_capture_session')
-            || surfaceNames.has('calendar_create_event'),
-          calendarProductMapped: surfaceNames.has('calendar_create_event'),
-          workbenchMode: trustedEnvironment.workbenchMode,
-          currentBrowserPageRef: browserAdmission.currentBrowserRoot,
-          explicitBrowserReadRefs: browserAdmission.explicitBrowserReadRefs,
-          hasCalendarResource: turnResources.requestResources.some((resource) => (
-            resource.kind === 'calendar_window' || resource.kind === 'calendar_event'
-          )),
-          tagForgeExclusive: exclusiveAllowSet !== null,
-        })
-        let toolSnapshot = composeCodexTurnToolSnapshot({
-          resolved: resolvedToolSnapshot,
-          authorizationId: `codex-auth:${request.requestId}`,
-          authorization,
-          currentDocument: currentDocumentAnchor
-            ? { present: true, allowWrite: currentDocumentWriteIntent }
-            : undefined,
-          folderExport: {
-            present: hasFolderExportDestination,
-            allowWrite: hasFolderExportDestination,
-          },
-          externalReadAllowedToolNames: externalReadSlice?.allowedToolNames,
-          explicitResourceAllowedToolNames: explicitAllowedToolNames,
-          workbenchMode: trustedEnvironment.workbenchMode,
-          exclusiveAllowSet,
-          browserAdmission,
-          capabilityAvailability,
-          mapRouteMode,
-          readyMemory: {
-            enabled: readyMemorySnapshot.enabled,
-            hasEntries: readyMemorySnapshot.entries.length > 0,
-          },
-        })
+        const composeCurrentToolSnapshot = (
+          resolved: typeof resolvedToolSnapshot,
+          memory: typeof readyMemorySnapshot,
+        ) => {
+          const surfaceNames = new Set(resolved.readyToolSurface.toolNames)
+          const capabilityAvailability = resolveReadyCapabilityTurnAvailability({
+            publicResearchProviderAvailable: surfaceNames.has('web_search') || surfaceNames.has('web_fetch'),
+            calendarHostAvailable: surfaceNames.has('calendar_list_window')
+              || surfaceNames.has('calendar_capture_session')
+              || surfaceNames.has('calendar_create_event'),
+            calendarProductMapped: surfaceNames.has('calendar_create_event'),
+            workbenchMode: trustedEnvironment.workbenchMode,
+            currentBrowserPageRef: browserAdmission.currentBrowserRoot,
+            explicitBrowserReadRefs: browserAdmission.explicitBrowserReadRefs,
+            hasCalendarResource: turnResources.requestResources.some((resource) => (
+              resource.kind === 'calendar_window' || resource.kind === 'calendar_event'
+            )),
+            tagForgeExclusive: exclusiveAllowSet !== null,
+          })
+          const mapRouteMode = hasMapRouteIntent
+            ? resolved.readyTurnToolAuthorization.allowedToolNames.includes('map_plan_route')
+              ? 'configured_primary' as const
+              : 'public_web_fallback' as const
+            : null
+          return composeCodexTurnToolSnapshot({
+            resolved,
+            authorizationId: `codex-auth:${request.requestId}`,
+            authorization,
+            currentDocument: currentDocumentAnchor
+              ? { present: true, allowWrite: currentDocumentWriteIntent }
+              : undefined,
+            folderExport: {
+              present: hasFolderExportDestination,
+              allowWrite: hasFolderExportDestination,
+            },
+            externalReadAllowedToolNames: externalReadSlice?.allowedToolNames,
+            explicitResourceAllowedToolNames: explicitAllowedToolNames,
+            workbenchMode: trustedEnvironment.workbenchMode,
+            exclusiveAllowSet,
+            browserAdmission,
+            capabilityAvailability,
+            mapRouteMode,
+            readyMemory: {
+              enabled: memory.enabled,
+              hasEntries: memory.entries.length > 0,
+            },
+          })
+        }
+        let toolSnapshot = composeCurrentToolSnapshot(resolvedToolSnapshot, readyMemorySnapshot)
         if (request.explicitRetry && retryTaskContext) {
           const ceiling = resolveCodexRetryAuthorizationCeiling({
             source: retryTaskContext.prepared,
@@ -3899,6 +4217,108 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
         const requestedThreadCwd = binding.isolatedThreadCwd || join(state.threadCwdRoot, threadBindingId)
         mkdirSync(requestedThreadCwd, { recursive: true, mode: 0o700 })
         const isolatedThreadCwd = binding.isolatedThreadCwd || realpathSync(requestedThreadCwd)
+        const continuationRequired = Boolean(binding.codexThreadId
+          || (binding.materializationKind === 'fresh_root_with_tail'
+            && repository.freshRootRequiresReseed(binding.threadBindingId)))
+        const resolveCurrentContinuationCandidate = (): SameThreadContinuationCandidate | null => {
+          if (!continuationRequired) return null
+          const currentProfile = activeProfile(input.settings)
+          const currentUpstream = createCodexProductUpstreamProfileSnapshot(currentProfile)
+          const currentResolved = boundHost.resolveToolTurnSnapshot({
+            surfaceId: `codex-surface:${scope.id}:${request.requestId}`,
+            authorizationId: `codex-auth:${request.requestId}`,
+            authorization,
+            message: toRunMessage(request),
+            sessionId: scope.id,
+            scopeId: scope.id,
+            config: currentProfile.config,
+            requestEnvelope,
+            frozenToolSurface: binding.toolSurface || undefined,
+          })
+          let currentTools = composeCurrentToolSnapshot(
+            currentResolved,
+            readyMemoryRepository.buildSnapshot(isoNow()),
+          )
+          if (request.explicitRetry && retryTaskContext) {
+            const ceiling = resolveCodexRetryAuthorizationCeiling({
+              source: retryTaskContext.prepared,
+              current: currentTools,
+              currentSkillAuthorization: authorization,
+            })
+            if (!ceiling.ok) throw new Error(`codex_explicit_retry_${ceiling.code}`)
+            currentTools = ceiling.snapshot
+          }
+          const currentInstruction = resolveCodexThreadInstructionContract({
+            assetRoot: verified.assetRoot,
+            host: boundHost,
+            skillAuthorization: currentTools.readyTurnToolAuthorization.skillAuthorization,
+          })
+          return {
+            model: 'ready-e0-model',
+            threadConfig: resolveCodexNativeModelSettings(currentUpstream.snapshot).threadConfig,
+            isolatedThreadCwd,
+            cwdAvailable: existsSync(isolatedThreadCwd),
+            instructionContractDigest: currentInstruction.instructionContractDigest,
+            currentToolSurface: currentTools.readyToolSurface,
+          }
+        }
+        const resolveCurrentContinuation = () => {
+          const candidate = resolveCurrentContinuationCandidate()
+          if (!candidate) return null
+          // The ingress snapshot predates native start and tail coverage.
+          // Use the repository's current delivery obligation on every readback.
+          const decision = repository.freshRootRequiresReseed(binding.threadBindingId)
+            ? repository.resolveFreshRootInheritance({
+                threadBindingId: binding.threadBindingId,
+                candidate,
+              })
+            : repository.resolveSameThreadContinuation({
+                aliasId: binding.aliasId,
+                aliasGeneration: binding.aliasGeneration,
+                candidate,
+              })
+          return { candidate, decision }
+        }
+        const resolveRecoveryEvidence = (): string | null => {
+          try {
+            const current = resolveCurrentContinuation()
+            return current?.decision.kind === 'requires_new_context'
+              ? current.decision.evidenceDigest
+              : null
+          } catch (error) {
+            return error instanceof CodexToolSurfaceError
+              && error.compatibility
+              && error.compatibility.kind !== 'compatible'
+              ? error.compatibility.evidenceDigest
+              : null
+          }
+        }
+        let currentContinuation: ReturnType<typeof resolveCurrentContinuation>
+        try {
+          currentContinuation = resolveCurrentContinuation()
+        } catch (error) {
+          if (!(error instanceof CodexToolSurfaceError)
+            || !error.compatibility
+            || error.compatibility.kind === 'compatible') throw error
+          recoveryEvidenceResolver = resolveRecoveryEvidence
+          throw new PrePersistenceAdmissionError(
+            error.compatibility.kind,
+            false,
+            error.compatibility.evidenceDigest,
+            error.code,
+          )
+        }
+        const continuationCandidate = currentContinuation?.candidate ?? null
+        if (currentContinuation?.decision.kind === 'requires_new_context') {
+          const reason = currentContinuation.decision.reason ?? 'host_unavailable'
+          recoveryEvidenceResolver = resolveRecoveryEvidence
+            throw new PrePersistenceAdmissionError(
+              reason,
+              reason === 'host_unavailable',
+              currentContinuation.decision.evidenceDigest,
+              currentContinuation.decision.reason || 'host_unavailable',
+            )
+        }
         const turnContractDigest = digestCanonicalJson({
           runId: preparedResult.prepared.runId,
           requestId: request.requestId,
@@ -3928,6 +4348,8 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
           upstream,
           developerInstructions: instructionContract.developerInstructions,
           instructionContractDigest: instructionContract.instructionContractDigest,
+          continuationCandidate,
+          resolveCurrentContinuation,
           turnContractDigest,
           productTaskFacts,
         })
@@ -3935,12 +4357,41 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
         return { ok: true, dispatchContext: preparedResult.prepared }
       } catch (error) {
         const failure = classifyCodexIngressPreparationError(error)
+        const admissionEvidenceDigest = error instanceof PrePersistenceAdmissionError
+          ? error.admissionEvidenceDigest
+          : digestCanonicalJson({ scopeId: scope.id, requestId: request.requestId, stage: 'prepare' })
+        const recoveryReasons = new Set([
+          'runtime_unverified',
+          'runtime_unsupported',
+          'model_changed',
+          'thread_config_changed',
+          'cwd_unavailable',
+          'cwd_changed',
+          'instruction_contract_changed',
+          'native_tool_surface_extension_required',
+          'native_tool_definition_changed',
+          'ready_tool_execution_contract_changed',
+        ])
+        const recoveryActionRef = recoveryReasons.has(failure.code)
+          && recoveryEvidenceResolver
+          ? issueBeginNewContextAction({
+                scopeId: scope.id,
+                scopeEpoch: scope.messageVisibilityEpoch,
+                candidateEvidenceDigest: admissionEvidenceDigest,
+                consequenceDigest: digestCanonicalJson({
+                  requestId: request.requestId,
+                  actionAdmissionRef: request.actionAdmissionRef ?? null,
+                }),
+                draftRevision: request.draftRevision ?? null,
+              }, recoveryEvidenceResolver)
+          : undefined
         return {
           ok: false,
           code: failure.code,
           retryableByUser: failure.retryableByUser,
           error: failure.error,
-          admissionEvidenceDigest: digestCanonicalJson({ scopeId: scope.id, requestId: request.requestId, stage: 'prepare' }),
+          admissionEvidenceDigest,
+          ...(recoveryActionRef ? { recoveryActionRef } : {}),
         }
       }
     },
@@ -3949,6 +4400,32 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
       if (!detail || detailPrepared.get(prepared.runId) !== prepared || !host) {
         throw new IngressPersistenceError('ingress_transaction_failed', sha256(`missing:${prepared.runId}`), 'codex_prepared_detail_missing')
       }
+      const resolveCurrentRecoveryEvidence = (): string | null => {
+        try {
+          const current = detail.resolveCurrentContinuation()
+          return current?.decision.kind === 'requires_new_context'
+            ? current.decision.evidenceDigest
+            : null
+        } catch (error) {
+          return error instanceof CodexToolSurfaceError
+            && error.compatibility
+            && error.compatibility.kind !== 'compatible'
+            ? error.compatibility.evidenceDigest
+            : null
+        }
+      }
+      const issueAtomicRecovery = (candidateEvidenceDigest: string) => (
+        issueBeginNewContextAction({
+          scopeId: scope.id,
+          scopeEpoch: request.expectedMessageVisibilityEpoch,
+          candidateEvidenceDigest,
+          consequenceDigest: digestCanonicalJson({
+            requestId: request.requestId,
+            actionAdmissionRef: request.actionAdmissionRef ?? null,
+          }),
+          draftRevision: request.draftRevision ?? null,
+        }, resolveCurrentRecoveryEvidence)
+      )
       const admittedAt = isoNow()
       const eventBase = {
         type: 'ingress_admitted' as const,
@@ -3978,6 +4455,43 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
             && request.expectedAliasGeneration > prepared.conversationAlias.aliasGeneration
           )) {
           throw new Error('codex_ingress_expected_identity_mismatch')
+        }
+        let currentContinuationCandidate: SameThreadContinuationCandidate | null = null
+        if (detail.continuationCandidate) {
+          const current = detail.resolveCurrentContinuation()
+          if (!current) {
+            throw new PrePersistenceAdmissionError(
+              'action_projection_confirmation_required',
+              true,
+              digestCanonicalJson({ runId: prepared.runId, stage: 'atomic_continuation_missing' }),
+              'codex_atomic_continuation_missing',
+            )
+          }
+          if (current.decision.kind === 'requires_new_context') {
+            const reason = current.decision.reason ?? 'host_unavailable'
+            throw new PrePersistenceAdmissionError(
+              reason,
+              reason === 'host_unavailable',
+              current.decision.evidenceDigest,
+              current.decision.reason || 'host_unavailable',
+              issueAtomicRecovery(current.decision.evidenceDigest),
+            )
+          }
+          if (digestCanonicalJson(current.candidate)
+            !== digestCanonicalJson(detail.continuationCandidate)) {
+            throw new PrePersistenceAdmissionError(
+              'action_projection_confirmation_required',
+              true,
+              digestCanonicalJson({
+                runId: prepared.runId,
+                stage: 'atomic_continuation_changed',
+                prepared: detail.continuationCandidate,
+                current: current.candidate,
+              }),
+              'codex_atomic_continuation_changed',
+            )
+          }
+          currentContinuationCandidate = current.candidate
         }
         const admissionWithoutDigest = {
           prepared,
@@ -4013,6 +4527,7 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
             messageMetaDigest: digestCanonicalJson(request.userMessage.meta),
             executionBindingDigest: digestCanonicalJson(detail.executionBinding),
           },
+          continuationCandidate: currentContinuationCandidate,
         }
         const ingressAdmittedDigest = buildCodexIngressAdmittedDigest(admissionWithoutDigest)
         const existing = rawDb.prepare('SELECT 1 AS present FROM chat_messages WHERE id = ? LIMIT 1').get(request.userMessage.id)
@@ -4072,6 +4587,26 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
         }
       } catch (error) {
         if (rawDb.inTransaction) rawDb.exec('ROLLBACK')
+        if (error instanceof PrePersistenceAdmissionError) throw error
+        if (error instanceof CodexToolSurfaceError
+          && error.compatibility
+          && error.compatibility.kind !== 'compatible') {
+          throw new PrePersistenceAdmissionError(
+            error.compatibility.kind,
+            false,
+            error.compatibility.evidenceDigest,
+            error.code,
+            issueAtomicRecovery(error.compatibility.evidenceDigest),
+          )
+        }
+        if (error instanceof CodexProfileRouteChangedError) {
+          // Observed before any durable write: report the configuration change
+          // itself and let the caller re-read the action surface, which is the
+          // single owner that classifies model/thread-config recovery.
+          throw new PrePersistenceAdmissionError('action_projection_confirmation_required', true,
+            digestCanonicalJson({ runId: prepared.runId, stage: 'atomic_ingress', code: error.code }),
+            error.code)
+        }
         if (error instanceof CodexBindingRepositoryError
           && (error.code === 'action_admission_ref_stale' || error.code === 'ordinary_uncommitted_tail_stale')) {
           throw new PrePersistenceAdmissionError('action_projection_confirmation_required', true,

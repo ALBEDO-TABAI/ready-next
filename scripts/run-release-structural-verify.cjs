@@ -52,7 +52,7 @@ const RELEASE_STRUCTURAL_COMMANDS = [
     args: ['--test', '--test-concurrency=1', ...RELEASE_STRUCTURAL_TESTS],
   },
   { label: 'seed-safety', cmd: process.execPath, args: ['scripts/check-ai-seed-release-safety.cjs'] },
-  npmCommand('build', ['run', 'build']),
+  { label: 'build', cmd: process.execPath, args: ['scripts/build-with-source-identity.cjs'] },
   {
     label: 'package:dist',
     cmd: process.execPath,
@@ -772,6 +772,7 @@ function main() {
       candidateReceipt,
       identityModule,
     })
+    identityModule.forwardReleasePackageReceipt(isolatedArtifact, path.join(root, contract.artifactRel))
     console.log('\n[release-structural] STRUCTURAL_PACKAGE_PASS')
     console.log('[release-structural] LIVE_ACCEPTANCE_DEFERRED')
     return 0

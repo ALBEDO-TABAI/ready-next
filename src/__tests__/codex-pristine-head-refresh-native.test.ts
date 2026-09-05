@@ -7,11 +7,10 @@ import type { DatabaseConnection } from '../main/modules/database'
 import { runMigrations, type MigrationDatabase } from '../main/modules/migrations'
 import { CodexBindingRepository } from '../main/modules/agent-control/codex-runtime/codex-binding-repository'
 import { projectCodexHeadActionProjection } from '../main/modules/agent-control/codex-runtime/codex-action-surface'
-import { projectCodexLifecycleOperationV2 } from '../main/modules/agent-control/codex-runtime/codex-lifecycle-action-surface'
 import { digestCanonicalJson } from '../main/modules/agent-control/codex-runtime/codex-model-gateway-contract'
-import type { CodexActionSurfaceEnvelope } from '../shared/ipc-contracts/agent-runtime'
-import { classifyLifecycleOperation } from '../shared/ipc-contracts/agent-lifecycle-snapshot'
+import { CODEX_PRISTINE_CONTRACT_REFRESH_GUARDS_SQL } from '../main/modules/agent-control/codex-runtime/codex-binding-schema'
 import { loadSqliteAfterGuardForTest, skipIfSqliteUnavailable } from './utils/sqlite-skip'
+import { createCodexProductionPorts } from './helpers/codex-production-composition-harness'
 
 // The extracted production closure executes against the real repository and projectors.
 // It does not initialize the sidecar or claim installed-app/IPC delivery coverage.
@@ -23,38 +22,6 @@ export const __breaksInvariants = [
 const at = '2026-09-03T00:00:00.000Z'
 const currentContract = { runtimeManifestDigest: 'runtime-v2', protocolSchemaDigest: 'protocol-v2' }
 const historicalSchema = readFileSync(new URL('./fixtures/ready-pre118-schema.sql', import.meta.url), 'utf8')
-
-function productionActionSurface(
-  repository: CodexBindingRepository,
-  publish: (aliasId: string, candidate: unknown) => void,
-) {
-  // allow-source-grep: Execute the actual non-exported production read closure; assertions are on native DB effects and its returned action surface, never source text.
-  const source = readFileSync(new URL('../main/modules/agent-control/codex-runtime/codex-runtime-production-composition.ts', import.meta.url), 'utf8')
-  const parsed = ts.createSourceFile('production.ts', source, ts.ScriptTarget.Latest, true)
-  let initializer: ts.Expression | undefined
-  const visit = (node: ts.Node): void => {
-    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name)
-      && node.name.text === 'readActionSurface') initializer = node.initializer
-    ts.forEachChild(node, visit)
-  }
-  visit(parsed)
-  if (!initializer) throw new Error('production_action_surface_closure_missing')
-  const compiled = ts.transpileModule(`const read = ${initializer.getText(parsed)}; return read;`, {
-    compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
-  }).outputText
-  return Function(
-    'repository', 'verified', 'classifyLifecycleOperation', 'digestCanonicalJson',
-    'projectCodexHeadActionProjection', 'projectCodexLifecycleOperationV2',
-    'isoNow', 'publishCodexActionSurfaceInvalidation', compiled,
-  )(
-    repository,
-    { manifestDigest: currentContract.runtimeManifestDigest,
-      manifest: { stableV2SchemaSha256: currentContract.protocolSchemaDigest } },
-    classifyLifecycleOperation, digestCanonicalJson,
-    projectCodexHeadActionProjection, projectCodexLifecycleOperationV2,
-    () => at, publish,
-  ) as (identity: { aliasId: string; aliasGeneration: number }) => CodexActionSurfaceEnvelope
-}
 
 function productionBootRefresh(repository: CodexBindingRepository, publish: (aliasId: string, candidate: unknown) => void) {
   // allow-source-grep: Execute the exact boot refresh loop with real database owners; no source-string assertions or sidecar replacement behavior is counted as boot coverage.
@@ -80,7 +47,7 @@ function productionBootRefresh(repository: CodexBindingRepository, publish: (ali
   )
 }
 
-function fixture(t: Parameters<typeof skipIfSqliteUnavailable>[0]) {
+function fixture(t: Parameters<typeof skipIfSqliteUnavailable>[0], kind: 'fresh_start' | 'legacy' = 'fresh_start') {
   const Sqlite = loadSqliteAfterGuardForTest()
   const db = new Sqlite(':memory:')
   db.exec(historicalSchema)
@@ -88,7 +55,13 @@ function fixture(t: Parameters<typeof skipIfSqliteUnavailable>[0]) {
   db.prepare(`INSERT INTO chat_conversations (id, agent, created_at, updated_at)
     VALUES ('scope-pristine', 'butler', ?, ?)`).run(at, at)
   const repository = new CodexBindingRepository(db as unknown as DatabaseConnection, currentContract)
-  repository.createEmptyAliasGeneration({
+  if (kind === 'legacy') {
+    db.prepare(`INSERT INTO codex_thread_bindings
+      (thread_binding_id, ready_conversation_alias, alias_generation, ready_scope_id,
+       runtime_manifest_digest, protocol_schema_digest, revision, created_at, updated_at)
+      VALUES ('old-head', 'scope-pristine', 1, 'scope-pristine', 'runtime-v1', 'protocol-v1', 1, ?, ?)`)
+      .run(at, at)
+  } else repository.createEmptyAliasGeneration({
     threadBindingId: 'old-head', aliasId: 'scope-pristine', aliasGeneration: 1,
     readyScopeId: 'scope-pristine', runtimeManifestDigest: 'runtime-v1',
     protocolSchemaDigest: 'protocol-v1', createdAt: at,
@@ -96,30 +69,25 @@ function fixture(t: Parameters<typeof skipIfSqliteUnavailable>[0]) {
   return { db, repository }
 }
 
-test('production action-surface hydration refreshes a genuinely pristine drifted head', (t) => {
+test('action-surface projection is a pure read and leaves pristine refresh to its write owners', (t) => {
   if (skipIfSqliteUnavailable(t, 'pristine head refresh')) return
   const state = fixture(t)
   if (!state) return
   const { db, repository } = state
   t.after(() => db.close())
-  const events: unknown[] = []
-  const read = productionActionSurface(repository, (aliasId, candidate) => {
-    assert.equal(db.inTransaction, false, 'invalidation is emitted only after commit')
-    events.push({ aliasId, candidate })
-  })
-  const surface = read({ aliasId: 'scope-pristine', aliasGeneration: 1 })
-  assert.equal(surface.head.actions.send_new_message.availability, 'ready')
-  assert.equal(surface.head.actionHeadIdentity?.aliasGeneration, 2)
-  assert.equal(surface.scopeEpoch, 0)
-  assert.equal(surface.head.actionProjectionVersion.actionProjectionSequence, 1)
-  assert.equal(db.prepare('SELECT retired_reason FROM codex_thread_bindings WHERE thread_binding_id = ?')
-    .get<{ retired_reason: string }>('old-head')?.retired_reason, 'pristine_contract_refresh')
+  const before = digestCanonicalJson(db.prepare('SELECT * FROM codex_thread_bindings').all())
+  const head = projectCodexHeadActionProjection(repository.readHeadActionFacts({
+    aliasId: 'scope-pristine',
+    aliasGeneration: 1,
+    currentRuntimeManifestDigest: currentContract.runtimeManifestDigest,
+    currentProtocolSchemaDigest: currentContract.protocolSchemaDigest,
+  }))
+  assert.equal(head.actions.send_new_message.availability, 'blocked')
+  assert.deepEqual(head.actions.send_new_message.blockers, ['head_contract_drift'])
+  assert.equal(head.actionHeadIdentity?.aliasGeneration, 1)
+  assert.equal(digestCanonicalJson(db.prepare('SELECT * FROM codex_thread_bindings').all()), before)
   assert.equal(db.prepare('SELECT COUNT(*) AS count FROM codex_turn_bindings').get<{ count: number }>()?.count, 0)
   assert.equal(db.prepare('SELECT COUNT(*) AS count FROM chat_messages').get<{ count: number }>()?.count, 0)
-  read({ aliasId: 'scope-pristine', aliasGeneration: 2 })
-  assert.deepEqual(events, [{ aliasId: 'scope-pristine', candidate: {
-    scopeId: 'scope-pristine', scopeEpoch: 0, aliasGeneration: 2, actionProjectionSequence: 1,
-  } }])
 })
 
 test('ingress pristine refresh preserves the epoch and advances the named action identity exactly once', (t) => {
@@ -170,7 +138,7 @@ for (const role of ['user', 'assistant']) {
   })
 }
 
-test('production hydration rolls back retirement and emits nothing when successor insertion fails', (t) => {
+test('pristine refresh rolls back retirement when successor insertion fails', (t) => {
   if (skipIfSqliteUnavailable(t, 'pristine head refresh')) return
   const state = fixture(t)
   if (!state) return
@@ -179,18 +147,17 @@ test('production hydration rolls back retirement and emits nothing when successo
   db.exec(`CREATE TRIGGER reject_refresh_successor BEFORE INSERT ON codex_thread_bindings
     WHEN NEW.alias_generation = 2 BEGIN SELECT RAISE(ABORT, 'test_successor_insert_failed'); END`)
   const before = digestCanonicalJson(db.prepare('SELECT * FROM codex_thread_bindings').all())
-  const events: unknown[] = []
-  const read = productionActionSurface(repository, (...args) => events.push(args))
-  assert.throws(() => read({ aliasId: 'scope-pristine', aliasGeneration: 1 }), /test_successor_insert_failed/)
+  assert.throws(() => repository.refreshPristineFreshStartHeadAtomic({
+    aliasId: 'scope-pristine', ...currentContract, createdAt: at,
+  }), /test_successor_insert_failed/)
   assert.equal(digestCanonicalJson(db.prepare('SELECT * FROM codex_thread_bindings').all()), before)
-  assert.deepEqual(events, [])
   assert.equal(db.inTransaction, false)
 })
 
-for (const withContent of [false, true]) {
-  test(`production boot refresh loop ${withContent ? 'leaves non-pristine content untouched' : 'refreshes before ingress exactly once'}`, (t) => {
+for (const kind of ['fresh_start', 'legacy'] as const) for (const withContent of [false, true]) {
+  test(`production boot refresh loop ${kind} ${withContent ? 'leaves non-pristine content untouched' : 'refreshes before ingress exactly once'}`, (t) => {
     if (skipIfSqliteUnavailable(t, 'pristine head refresh')) return
-    const state = fixture(t)
+    const state = fixture(t, kind)
     if (!state) return
     const { db, repository } = state
     t.after(() => db.close())
@@ -209,6 +176,65 @@ for (const withContent of [false, true]) {
     assert.equal(events.length, withContent ? 0 : 1)
     if (withContent) assert.equal(digestCanonicalJson(db.prepare('SELECT * FROM codex_thread_bindings').all()), before)
     assert.equal(db.prepare('SELECT COUNT(*) AS count FROM codex_turn_bindings').get<{ count: number }>()?.count, 0)
+  })
+}
+
+test('migration 122 replaces the installed legacy-excluding guard without rewriting old bindings', (t) => {
+  if (skipIfSqliteUnavailable(t, 'legacy pristine guard upgrade')) return
+  const { db, repository } = fixture(t, 'legacy')
+  t.after(() => db.close())
+  db.exec(`DROP TRIGGER codex_pristine_contract_refresh_update;
+    ${CODEX_PRISTINE_CONTRACT_REFRESH_GUARDS_SQL.replace("IN ('legacy', 'fresh_start')", "= 'fresh_start'")}`)
+  db.prepare('DELETE FROM migrations WHERE name = ?').run('122_codex_pristine_legacy_root_refresh')
+  const before = db.prepare('SELECT * FROM codex_thread_bindings').all()
+  assert.throws(() => repository.refreshPristineFreshStartHeadAtomic({
+    aliasId: 'scope-pristine', ...currentContract, createdAt: at,
+  }), /codex_pristine_contract_refresh_not_pristine/)
+  // Model the pre-122 installed boundary table, not only the old guard text.
+  db.exec(`DROP TRIGGER codex_pristine_contract_refresh_update;
+    ALTER TABLE codex_conversation_context_boundaries DROP COLUMN preserved_context_json;`)
+  runMigrations(db as unknown as MigrationDatabase)
+  assert.ok(db.prepare('PRAGMA table_info(codex_conversation_context_boundaries)').all<{ name: string }>()
+    .some((column) => column.name === 'preserved_context_json'))
+  assert.deepEqual(db.prepare('SELECT * FROM codex_thread_bindings').all(), before)
+  assert.equal(repository.refreshPristineFreshStartHeadAtomic({
+    aliasId: 'scope-pristine', ...currentContract, createdAt: at,
+  }).kind, 'refreshed')
+  assert.deepEqual(db.prepare('PRAGMA foreign_key_check').all(), [])
+})
+
+for (const terminalWithoutNative of [false, true]) {
+  test(`production read offers explicit context for a blocked settled root (prior terminal=${terminalWithoutNative})`, async (t) => {
+    if (skipIfSqliteUnavailable(t, 'settled no-native recovery surface')) return
+    const { db, repository } = fixture(t, 'legacy')
+    t.after(() => db.close())
+    const identity = { aliasId: 'scope-pristine', aliasGeneration: 1, workbenchMode: 'browser' as const }
+    const read = repository.readLifecycleOperation(identity)
+    // __breaksInvariants: inject the lifecycle observations only; this tests
+    // production issuance/revalidation, not how a failed native start settles.
+    // The populated installed test exercises that real failed-start history.
+    const facts = { ...read.facts, readyRunCreated: terminalWithoutNative,
+      readyTerminalWithoutNativeThread: terminalWithoutNative, allNativeThreadAttemptsSettled: true }
+    t.mock.method(repository, 'readLifecycleOperation', () => ({ ...read, facts }))
+    let revalidate: (() => string | null) | undefined
+    const ports = await createCodexProductionPorts({
+      repository, resolveHeadContinuation: () => null,
+      verified: { manifestDigest: currentContract.runtimeManifestDigest,
+        manifest: { stableV2SchemaSha256: currentContract.protocolSchemaDigest } },
+      issueBeginNewContextAction: (input: Parameters<typeof repository.buildBeginNewContextActionRef>[0], current: () => string | null) => {
+        revalidate = current
+        return repository.buildBeginNewContextActionRef(input)
+      },
+    })
+    const before = db.prepare('SELECT * FROM codex_thread_bindings').all()
+    const surface = ports.readActionSurface(identity)
+    assert.equal(surface.state, 'active_head')
+    assert.ok(surface.beginNewContext, 'settled roots cannot be omitted just because there is no native continuation contract')
+    assert.equal(revalidate?.(), surface.beginNewContext.candidateEvidenceDigest)
+    assert.deepEqual(db.prepare('SELECT * FROM codex_thread_bindings').all(), before, 'issuance is read-only')
+    facts.threadStartUnreconciled = true
+    facts.allNativeThreadAttemptsSettled = false
+    assert.equal(revalidate?.(), null, 'a new or unknown start invalidates the old recovery action')
   })
 }
 

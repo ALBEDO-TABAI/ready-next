@@ -23,8 +23,6 @@ const mixedSuccessResponse: SendScopedResponse = {
   disposition: 'terminal_success',
   ownerRunId: 'run-mixed',
   aliasGeneration: 2,
-  shouldClearInput: true,
-  preserveInput: false,
   retryableByUser: false,
   persistence: {
     scope: 'pre-existing',
@@ -158,8 +156,6 @@ test('sendScoped runtime schema accepts exactly four dispositions', () => {
       disposition: 'terminal_success',
       ownerRunId: 'run-1',
       aliasGeneration: 2,
-      shouldClearInput: true,
-      preserveInput: false,
       retryableByUser: false,
       persistence: persisted,
       responseText: 'done',
@@ -169,8 +165,6 @@ test('sendScoped runtime schema accepts exactly four dispositions', () => {
     {
       success: false,
       disposition: 'rejected_before_persistence',
-      shouldClearInput: false,
-      preserveInput: true,
       retryableByUser: true,
       persistence: {
         scope: 'pre-existing',
@@ -185,8 +179,6 @@ test('sendScoped runtime schema accepts exactly four dispositions', () => {
     {
       success: false,
       disposition: 'ingress_persistence_failed',
-      shouldClearInput: false,
-      preserveInput: true,
       retryableByUser: true,
       persistence: {
         scope: 'pre-existing',
@@ -203,8 +195,6 @@ test('sendScoped runtime schema accepts exactly four dispositions', () => {
       disposition: 'terminal_failure_after_persistence',
       ownerRunId: 'run-1',
       aliasGeneration: 2,
-      shouldClearInput: true,
-      preserveInput: false,
       retryableByUser: false,
       persistence: persisted,
       error: 'proof gap',
@@ -228,10 +218,9 @@ test('sendScoped runtime schema rejects mixed optional legacy shapes', () => {
   assert.throws(() => parseSendScopedResponse({
     success: false,
     disposition: 'rejected_before_persistence',
+    preserveInput: true,
     ownerRunId: 'forbidden-run',
     acceptedAsSteering: true,
-    shouldClearInput: false,
-    preserveInput: true,
     retryableByUser: true,
     persistence: {
       scope: 'pre-existing',
@@ -248,8 +237,6 @@ test('sendScoped runtime schema rejects mixed optional legacy shapes', () => {
     disposition: 'terminal_success',
     ownerRunId: 'run-1',
     aliasGeneration: 2,
-    shouldClearInput: true,
-    preserveInput: false,
     retryableByUser: false,
     persistence: persisted,
     responseText: 'done',
@@ -271,12 +258,10 @@ test('error kind partitions are closed, disjoint, and retire legacy message_pers
   assert.equal(all.includes('persistence_failed'), true)
 })
 
-test('renderer mapping preserves input only before durable admission', () => {
+test('renderer mapping exposes disposition without a second draft-cleanup verdict', () => {
   const pre = parseSendScopedResponse({
     success: false,
     disposition: 'rejected_before_persistence',
-    shouldClearInput: false,
-    preserveInput: true,
     retryableByUser: true,
     persistence: {
       scope: 'pre-existing',
@@ -293,8 +278,6 @@ test('renderer mapping preserves input only before durable admission', () => {
     disposition: 'terminal_failure_after_persistence',
     ownerRunId: 'run-1',
     aliasGeneration: 2,
-    shouldClearInput: true,
-    preserveInput: false,
     retryableByUser: false,
     persistence: persisted,
     error: 'provider failed',
@@ -304,8 +287,8 @@ test('renderer mapping preserves input only before durable admission', () => {
     canonicalMessage,
     canonicalMessageDigest: 'digest-canonical',
   })
-  assert.equal(mapSendScopedResponseToMessageResult(pre).preserveInput, true)
-  assert.equal(mapSendScopedResponseToMessageResult(post).preserveInput, false)
+  assert.equal(mapSendScopedResponseToMessageResult(pre).disposition, 'rejected_before_persistence')
+  assert.equal(mapSendScopedResponseToMessageResult(post).disposition, 'terminal_failure_after_persistence')
 })
 
 test('create and lifecycle results reject weak objects and free-form errors', () => {

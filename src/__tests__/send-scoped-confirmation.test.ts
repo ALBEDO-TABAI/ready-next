@@ -95,6 +95,41 @@ test('typed prepare rejection preserves configuration and external-service seman
   }
 })
 
+test('typed prepare rejection preserves its exact new-context recovery action', async () => {
+  const recoveryActionRef = {
+    contract: 'codex_begin_new_context_action_v1' as const,
+    operationId: 'begin-context-1',
+    scopeId: 'scope-1',
+    scopeEpoch: 0,
+    sourceThreadBindingId: 'thread-binding-1',
+    sourceAliasGeneration: 6,
+    sourceRevision: 2,
+    sourceEvidenceDigest: 'a'.repeat(64),
+    candidateEvidenceDigest: 'b'.repeat(64),
+    consequenceDigest: 'c'.repeat(64),
+    draftRevision: 4,
+    digest: 'd'.repeat(64),
+  }
+  const harness = createHarness({
+    rawPrepareResult: {
+      ok: false,
+      code: 'native_tool_definition_changed',
+      retryableByUser: false,
+      error: 'codex_native_tool_definition_changed',
+      admissionEvidenceDigest: 'strict-tool-drift',
+      recoveryActionRef,
+    },
+  })
+
+  const result = await harness.send()
+
+  assert.equal(result.disposition, 'rejected_before_persistence')
+  if (result.disposition === 'rejected_before_persistence') {
+    assert.deepEqual(result.recoveryActionRef, recoveryActionRef)
+  }
+  assert.equal(harness.calls.includes('persist-ingress'), false)
+})
+
 test('a rolled-back stale action preserves the draft and releases admission without dispatch', async () => {
   const harness = createHarness({
     persistError: new PrePersistenceAdmissionError(
@@ -104,8 +139,6 @@ test('a rolled-back stale action preserves the draft and releases admission with
   const result = await harness.send()
   assert.equal(result.disposition, 'rejected_before_persistence')
   assert.equal(result.errorKind, 'action_projection_confirmation_required')
-  assert.equal(result.shouldClearInput, false)
-  assert.equal(result.preserveInput, true)
   assert.equal(result.persistence.message, 'skipped')
   assert.deepEqual(harness.emittedEvents, [])
   assert.deepEqual(harness.calls, [
@@ -257,8 +290,6 @@ function createHarness(overrides: Partial<{
           success: true as const,
           disposition: 'terminal_success' as const,
           ownerRunId: 'run-1',
-          shouldClearInput: true as const,
-          preserveInput: false as const,
           retryableByUser: false as const,
           persistence,
           responseText: 'ok',
@@ -533,8 +564,6 @@ test('missing scope is rejected without lazy creation or reservation', async () 
   assert.deepEqual(result, {
     success: false,
     disposition: 'rejected_before_persistence',
-    shouldClearInput: false,
-    preserveInput: true,
     retryableByUser: false,
     persistence: {
       scope: 'failed',
@@ -555,7 +584,6 @@ test('capacity and busy rejection have zero product persistence and zero native 
     const result = await harness.send()
 
     assert.equal(result.disposition, 'rejected_before_persistence')
-    assert.equal(result.shouldClearInput, false)
     assert.deepEqual(harness.calls, [
       'resolve:turn/start',
       'reserve:turn/start',
@@ -593,8 +621,6 @@ test('scope, identity resolution, and reservation throws are exact pre-persisten
     if (result.disposition !== 'rejected_before_persistence') continue
     assert.equal(result.errorKind, 'host_unavailable')
     assert.equal(result.retryableByUser, false)
-    assert.equal(result.shouldClearInput, false)
-    assert.equal(result.preserveInput, true)
     assert.equal(result.persistence.scope, entry.expectedScope)
     assert.equal(result.admissionEvidenceDigest, entry.expectedDigest)
     assert.deepEqual(harness.calls, entry.expectedCalls)
@@ -663,8 +689,6 @@ test('atomic ingress failure releases the full reservation and preserves the com
   assert.deepEqual(result, {
     success: false,
     disposition: 'ingress_persistence_failed',
-    shouldClearInput: false,
-    preserveInput: true,
     retryableByUser: true,
     persistence: {
       scope: 'pre-existing',

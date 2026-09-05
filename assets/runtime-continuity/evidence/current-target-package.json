@@ -1,0 +1,7 @@
+{
+  "contract": "ready_runtime_source_evidence_v1",
+  "sourceManifestDigest": "cda6bd5ff08247c0fd502accba2c0c0d342d5d59945d06dfb53a666bb64b636d",
+  "evidenceKind": "current_verified_runtime",
+  "runtimeVersion": "0.149.0",
+  "binarySha256": "f4a74117b8142cda581c95ff753abf4508b5636d89682c1ed77e4a9249af8963"
+}

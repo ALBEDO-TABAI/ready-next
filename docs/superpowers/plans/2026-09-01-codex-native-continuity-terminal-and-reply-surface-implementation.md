@@ -4,9 +4,12 @@ date: 2026-09-01
 status: proposed
 review_status: passed
 enforce: true
+superseded_in_part_by: 2026-09-03-ready-history-continuation-and-composer-repair-implementation.md
 ---
 
 # Codex 原生连续性、终态单线与回复呈现修复实施计划
+
+> 2026-09-04 修正：本文的终态、fork、coverage、Retry 和回复呈现合同继续有效；但“runtime/protocol 摘要不等即 reset”、“无 active head 只能 reset”、started legacy 的当前操作能否继续，以及 pristine 刷新范围，已由 [2026-09-03 历史接续与 composer 修复计划](./2026-09-03-ready-history-continuation-and-composer-repair-implementation.md) 的精确有向 runtime-operation 证据、同一全合同 reducer、`history_only` 和显式 context boundary 取代。历史验收记录不改写；生产准入不得再执行本文与新计划冲突的旧 reset 分支。
 
 ## 0. 计划结论
 

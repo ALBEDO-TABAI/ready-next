@@ -1,0 +1,15 @@
+{
+  "contract": "ready_runtime_transition_proof_v1",
+  "sourceManifestDigest": "d47a3b863ed1975f7d18fb337a508127efe7559bfd47ce8e5f9bcb0ed7ee854f",
+  "targetManifestDigest": "cda6bd5ff08247c0fd502accba2c0c0d342d5d59945d06dfb53a666bb64b636d",
+  "operation": "fork_from_accepted_prefix",
+  "result": "compatible",
+  "probe": {
+    "targetBinarySha256": "f4a74117b8142cda581c95ff753abf4508b5636d89682c1ed77e4a9249af8963",
+    "targetRuntimeVersion": "codex-cli 0.149.0",
+    "isolatedCopy": true,
+    "newThreadIdentity": true,
+    "sourceIdentityPreserved": true,
+    "acceptedPrefixReadbackExact": true
+  }
+}

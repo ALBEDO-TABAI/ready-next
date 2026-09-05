@@ -213,6 +213,10 @@ export class AgentControlRuntime extends EventEmitter {
         messageVisibilityEpoch,
         capsules,
       ),
+    hasContextBoundary: (scopeId, messageVisibilityEpoch) => Boolean(this.db.getRawDb()?.prepare(`
+      SELECT 1 AS present FROM codex_conversation_context_boundaries
+       WHERE ready_scope_id = ? AND message_visibility_epoch = ? LIMIT 1
+    `).get(scopeId, messageVisibilityEpoch)),
   })
   private beliefCardStore: BeliefCardStore | null = null
   private readonly skillTaskRunRepository = new SkillTaskRunRepository(this.db)
@@ -1027,6 +1031,12 @@ export class AgentControlRuntime extends EventEmitter {
     return this.codexRuntime.aliasBindingPort.readActionSurface(request)
   }
 
+  beginCodexNewContext(
+    request: import('../../../../shared/ipc-contracts/agent-runtime').BeginNewContextRequest,
+  ) {
+    return this.codexRuntime.aliasBindingPort.beginNewContext(request)
+  }
+
   async readProductTurnPresentation(
     readyRunId: string,
     requestedWorkbenchMode: 'browser' | 'document' | 'rss' | 'calendar',
@@ -1484,6 +1494,16 @@ export class AgentControlRuntime extends EventEmitter {
       scope: payload.explicitRetry ? this.db.getConversationScope(payload.scopeId) : null,
     })
     if (explicitRetryRejection) return explicitRetryRejection
+    // Restore only at turn execution; the host still checks current intent
+    // before selecting a skill. A new-context boundary preserves visible
+    // history/epoch but clears both persisted and live hints at commit.
+    const scopeRowForHintReplay = this.db.getConversationScope(payload.scopeId)
+    if (scopeRowForHintReplay) {
+      this.referenceHints.restoreReferenceHintFromScope(
+        this.mapConversationRow(scopeRowForHintReplay),
+        payload.scopeId,
+      )
+    }
     const canonicalUserMessage = payload.userMessage
     try {
       await this.codexRuntime.ensureReadyForUserIngress()
@@ -1501,9 +1521,18 @@ export class AgentControlRuntime extends EventEmitter {
       requestId: payload.requestId,
       userMessage: canonicalUserMessage,
       getScope: (scopeId) => this.db.getConversationScope(scopeId),
-      resolveStartIdentityMethods: (scopeRow) => this.codexRuntime.startIdentityPort.resolveMethods(
-        this.mapConversationRow(scopeRow).id,
-      ),
+      resolveStartIdentityMethods: (scopeRow) => {
+        const requestedMode = payload.userMessage.meta.workbenchMode
+        const workbenchMode = requestedMode === 'document'
+          || requestedMode === 'rss'
+          || requestedMode === 'calendar'
+          ? requestedMode
+          : 'browser'
+        return this.codexRuntime.startIdentityPort.resolveMethods(
+          this.mapConversationRow(scopeRow).id,
+          workbenchMode,
+        )
+      },
       reserveStartIdentitySet: (input) => this.codexRuntime.startIdentityPort.reserve(input),
       reconcileReservationContractFailure: (input) => (
         this.codexRuntime.startIdentityPort.reconcileReservationContractFailure(input)
@@ -1555,8 +1584,6 @@ export class AgentControlRuntime extends EventEmitter {
             success: true,
             disposition: 'terminal_success',
             ownerRunId: payload.requestId,
-            shouldClearInput: true,
-            preserveInput: false,
             retryableByUser: false,
             persistence,
             responseText: result.responseText,
@@ -1572,8 +1599,6 @@ export class AgentControlRuntime extends EventEmitter {
           success: false,
           disposition: 'terminal_failure_after_persistence',
           ownerRunId: payload.requestId,
-          shouldClearInput: true,
-          preserveInput: false,
           retryableByUser: false,
           persistence,
           error: result.error || 'codex_closeout_contract_invalid',
