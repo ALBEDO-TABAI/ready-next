@@ -37,6 +37,7 @@ test('conversation authorization mode persists in scope metadata without replaci
     db.updateConversationScopeMeta('scope-action-mode', { sourceLabel: '应用内', adjacent: 'keep' })
     const events: string[] = []
     const store = new ConversationScopeStore({
+      ensureChannelAlias: () => {},
       db,
       emitConversationEvent: (event) => events.push(event.type),
       mapChannelRow() { throw new Error('unexpected_channel_mapping') },
@@ -54,6 +55,7 @@ test('conversation authorization mode persists in scope metadata without replaci
     assert.deepEqual(events, ['scope_updated'])
 
     const reopened = new ConversationScopeStore({
+      ensureChannelAlias: () => {},
       db,
       emitConversationEvent() {},
       mapChannelRow() { throw new Error('unexpected_channel_mapping') },

@@ -70,7 +70,7 @@ const settingsData: SettingSection[] = [
     id: 'remote-im',
     title: '远程 IM',
     icon: MessageSquare,
-    description: '接收远程消息和附件，并管理明确发送',
+    description: '绑定微信、飞书，远程发送任务并接收回复',
     settings: [] // Rendered dynamically via RemoteIMSettingsPanel
   },
   {

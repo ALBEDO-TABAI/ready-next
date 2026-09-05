@@ -37,6 +37,8 @@ function makeService(options: {
 }): { service: RemoteChannelService; sent: SentRecord[] } {
   const sent: SentRecord[] = []
   const fakeDb = {
+    getAgentChannel: () => ({ enabled: 1, config_json: '{}' }),
+    getConversationScope: () => ({ meta_json: '{}' }),
     getAgentChannelThreadBySession: () => options.threadBySession ?? null,
     getChatMessageById: () => ({ meta_json: JSON.stringify({ askUserQuestions: { status: 'pending' } }) }),
     updateChatMessageMeta: () => true,

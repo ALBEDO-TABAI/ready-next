@@ -81,6 +81,7 @@ export interface StartWechatLoginPayload {
  * concrete class).
  */
 export interface ChannelManagementGroupDeps {
+  startChannelPairing(id: string): { code: string; expiresAt: string }
   /**
    * Bound `runtime.upsertChannel` — async, creates or replaces one channel
    * row and returns the resulting `AgentChannelConfig`.
@@ -132,6 +133,7 @@ export interface ChannelManagementGroupDeps {
 
 const CHANNELS = [
   'agent:upsertChannel',
+  'agent:startChannelPairing',
   'agent:testChannel',
   'agent:startWechatLogin',
   'agent:getWechatLoginStatus',
@@ -151,6 +153,11 @@ export const channelManagementGroup: IpcChannelGroup<ChannelManagementGroupDeps>
     for (const channel of CHANNELS) {
       try { ipcMain.removeHandler(channel) } catch { /* ignore — handler may not exist */ }
     }
+
+    ipcMain.handle('agent:startChannelPairing', async (_, payload: { id: string }): Promise<IPCResponse> => {
+      try { return { success: true, data: deps.startChannelPairing(String(payload?.id || '')) } }
+      catch (error) { return { success: false, error: error instanceof Error ? error.message : String(error) } }
+    })
 
     ipcMain.handle('agent:upsertChannel', async (_, payload: UpsertChannelPayload): Promise<IPCResponse> => {
       try {

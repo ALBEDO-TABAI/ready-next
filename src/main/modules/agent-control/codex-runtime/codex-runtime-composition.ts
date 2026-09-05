@@ -227,6 +227,7 @@ export interface CodexIngressPort {
 }
 
 export interface CodexAliasBindingPort {
+  ensureChannelAlias(scopeId: string): void
   readAliasGeneration(aliasId: string): number | null
   readLatestAliasGeneration(aliasId: string): number | null
   readActiveProductRunVisibilityIdentity(readyRunId: string): {
@@ -442,6 +443,7 @@ export function createE2UnavailableCodexRuntimeComposition(): CodexRuntimeCompos
       },
     },
     aliasBindingPort: {
+      ensureChannelAlias() { throw new Error('codex_alias_repository_unavailable') },
       readAliasGeneration() { return null },
       readLatestAliasGeneration() { return null },
       readActiveProductRunVisibilityIdentity() { return null },

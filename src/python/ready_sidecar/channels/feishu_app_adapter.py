@@ -1,29 +1,51 @@
 from __future__ import annotations
 
+import asyncio
 import json
+import re
+import uuid
 import mimetypes
 import os
 import time
-from threading import Event, Thread
+from threading import Event, Thread, Lock
 from typing import Any, Dict, Optional
 from pathlib import Path
-from urllib.parse import unquote
+from urllib.parse import unquote, quote
 
 import requests
 from lark_oapi.core.model import RawRequest, RawResponse
 
-from .base import ChannelAdapter, now_iso
+from .base import ChannelAdapter, now_iso, write_private_bytes
+
+
+# The pinned SDK schedules work on a module-level loop. All clients share
+# this one owned loop; never run Client.start() on competing worker threads.
+_connection_loop = None
+_connection_loop_lock = Lock()
+
+
+def connection_loop():
+    global _connection_loop
+    with _connection_loop_lock:
+        if _connection_loop is None:
+            import lark_oapi.ws.client as sdk
+            if not sdk.loop.is_running() and not sdk.loop.is_closed():
+                sdk.loop.close()
+            _connection_loop = asyncio.new_event_loop()
+            sdk.loop = _connection_loop
+            Thread(target=_connection_loop.run_forever, daemon=True, name="feishu-connections").start()
+        return _connection_loop
 
 
 class FeishuAppAdapter(ChannelAdapter):
     def __init__(self, channel_id: str, channel_type: str, name: str, config: Dict[str, Any]) -> None:
         super().__init__(channel_id, channel_type, name, config)
         self._stop = Event()
-        self._thread: Optional[Thread] = None
-        self._ws_thread: Optional[Thread] = None
         self._access_token: Optional[str] = None
         self._access_token_exp_at = 0.0
         self._ws_client: Any = None
+        self._listener = None
+        self._bot_open_id = ""
 
     @property
     def app_id(self) -> str:
@@ -64,81 +86,108 @@ class FeishuAppAdapter(ChannelAdapter):
         if not token:
             return False, err or "飞书鉴权失败"
         try:
-            import lark_oapi as lark  # type: ignore
-
-            client = lark.ws.Client(
-                self.app_id,
-                self.app_secret,
-                event_handler=self._build_dispatcher(lark, lambda _data: None, lambda _data: None),
-                log_level=lark.LogLevel.WARNING,
-                domain=self.domain,
-            )
-            client._get_conn_url()
+            self._connection_info()
         except Exception as exc:
             return False, f"飞书长连接握手失败：{exc}"
         return True, None
 
+    def _connection_info(self):
+        response = requests.post(f"{self.domain}/callback/ws/endpoint",
+            json={"AppID": self.app_id, "AppSecret": self.app_secret}, timeout=10)
+        response.raise_for_status()
+        payload = response.json()
+        if payload.get("code") != 0:
+            raise RuntimeError(str(payload.get("msg") or "飞书长连接握手失败"))
+        data = payload.get("data") or {}
+        return data["URL"], max(5, int((data.get("ClientConfig") or {}).get("PingInterval") or 120))
+
+    def _load_bot_identity(self):
+        token, error = self._refresh_access_token(force=False)
+        if not token:
+            raise RuntimeError(error or "飞书鉴权失败")
+        response = requests.get(f"{self.domain}/open-apis/bot/v3/info/",
+            headers={"Authorization": f"Bearer {token}"}, timeout=10)
+        response.raise_for_status()
+        data = response.json()
+        if data.get("code") != 0:
+            self._access_token = None
+            self._access_token_exp_at = 0
+            raise RuntimeError(str(data.get("msg") or "请在飞书应用中启用机器人能力"))
+        self._bot_open_id = str((data.get("bot") or {}).get("open_id") or "")
+
     def start(self) -> tuple[bool, Optional[str]]:
-        ok, err = self.test()
-        if not ok:
-            self.mark_error(err or "飞书连接失败")
-            return False, err
-
-        if self._thread and self._thread.is_alive():
-            self.mark_running()
+        if self._listener and not self._listener.done():
             return True, None
-
+        if not self.app_id or not self.app_secret:
+            self.mark_error("飞书 App ID / App Secret 不能为空")
+            return False, self.state.error
         self._stop.clear()
         self.mark_starting()
-        self._thread = Thread(target=self._long_conn_loop, name=f"feishu-{self.channel_id}", daemon=True)
-        self._thread.start()
+        self._listener = asyncio.run_coroutine_threadsafe(self._listen(), connection_loop())
         return True, None
 
     def stop(self) -> None:
         self._stop.set()
-        try:
-            if self._ws_client and hasattr(self._ws_client, "stop"):
-                self._ws_client.stop()
-        except Exception:
-            pass
-        if self._ws_thread and self._ws_thread.is_alive():
-            self._ws_thread.join(timeout=1.5)
-        if self._thread and self._thread.is_alive():
-            self._thread.join(timeout=1.5)
+        if self._listener:
+            self._listener.cancel()
         self.mark_stopped()
 
     def send(self, thread: Optional[str], text: str, attachments: Optional[list[Dict[str, Any]]] = None) -> tuple[bool, Optional[str]]:
-        _ = attachments
-        receive_id = str(thread or self.config.get("defaultChatId") or "").strip()
-        if not receive_id:
-            return False, "缺少飞书会话 ID（thread/chat_id）"
-
+        target = str(thread or self.config.get("defaultChatId") or "").strip()
+        if not target:
+            return False, "请先在飞书中向已绑定的机器人发一条消息，再发送测试消息。"
         token, err = self._refresh_access_token(force=False)
         if not token:
             return False, err or "飞书鉴权失败"
         try:
-            resp = requests.post(
-                f"{self.domain}/open-apis/im/v1/messages",
-                params={"receive_id_type": "chat_id"},
-                headers={
-                    "Authorization": f"Bearer {token}",
-                    "Content-Type": "application/json; charset=utf-8",
-                },
-                json={
-                    "receive_id": receive_id,
-                    "msg_type": "text",
-                    "content": json.dumps({"text": text}, ensure_ascii=False),
-                },
-                timeout=12,
-            )
-            data = resp.json()
-            code = int(data.get("code", -1))
-            if code != 0:
-                return False, str(data.get("msg") or data.get("message") or "飞书发送失败")
+            headers = {"Authorization": f"Bearer {token}"}
+            route = json.loads(target) if target.startswith("{") else {"chatId": target}
+            if route.get("replyTo"):
+                url = f"{self.domain}/open-apis/im/v1/messages/{quote(str(route['replyTo']), safe='')}/reply"
+                addressing = {"reply_in_thread": True}
+                params = None
+            else:
+                url = f"{self.domain}/open-apis/im/v1/messages"
+                addressing = {"receive_id": route["chatId"]}
+                params = {"receive_id_type": "chat_id"}
+
+            def send_message(kind, content):
+                response = requests.post(url, params=params, headers=headers,
+                    json={**addressing, "uuid": str(uuid.uuid4()), "msg_type": kind,
+                          "content": json.dumps(content, ensure_ascii=False)}, timeout=20)
+                response.raise_for_status()
+                data = response.json()
+                if data.get("code") != 0 or not (data.get("data") or {}).get("message_id"):
+                    raise RuntimeError(str(data.get("msg") or "飞书未确认消息发送成功"))
+
+            if text.strip():
+                send_message("text", {"text": text})
+            for attachment in attachments or []:
+                path = Path(str(attachment.get("path") or ""))
+                if not path.is_file() or path.stat().st_size > 30 * 1024 * 1024:
+                    raise ValueError("飞书文件不存在或超过 30 MB")
+                is_image = str(mimetypes.guess_type(path.name)[0] or "").startswith("image/")
+                if is_image and path.stat().st_size > 10 * 1024 * 1024:
+                    raise ValueError("飞书图片超过 10 MB，请压缩后发送")
+                kind = "image" if is_image else "file"
+                with path.open("rb") as stream:
+                    response = requests.post(f"{self.domain}/open-apis/im/v1/{'images' if is_image else 'files'}", headers=headers,
+                        data={"image_type": "message"} if is_image else {"file_type": "stream", "file_name": path.name},
+                        files={kind: stream}, timeout=90)
+                    response.raise_for_status()
+                    data = response.json()
+                key = (data.get("data") or {}).get(f"{kind}_key")
+                if data.get("code") != 0 or not key:
+                    raise RuntimeError(str(data.get("msg") or "飞书文件上传失败"))
+                send_message(kind, {f"{kind}_key": key})
+            if not text.strip() and not attachments:
+                return False, "消息内容不能为空"
             self.beat()
             return True, None
         except Exception as exc:
-            self.mark_error(str(exc))
+            # Refresh authentication on the next explicit send, never replay an unknown send.
+            self._access_token = None
+            self._access_token_exp_at = 0
             return False, str(exc)
 
     def _refresh_access_token(self, force: bool) -> tuple[Optional[str], Optional[str]]:
@@ -164,94 +213,63 @@ class FeishuAppAdapter(ChannelAdapter):
         except Exception as exc:
             return None, str(exc)
 
-    def _long_conn_loop(self) -> None:
-        try:
-            import lark_oapi as lark  # type: ignore
+    async def _listen(self) -> None:
+        import lark_oapi as lark
+        adapter = self
 
-            def _on_msg(data: Any) -> None:
+        class Client(lark.ws.Client):
+            def _get_conn_url(self):
+                url, self._ping_interval = adapter._connection_info()
+                return url
+
+            async def _receive_message_loop(self):
                 try:
-                    event = self._extract_im_event(data)
-                    if not event:
-                        return
+                    await super()._receive_message_loop()
+                except Exception:
+                    pass  # _listen owns recovery after _conn has been cleared.
+
+        def on_message(data):
+            if self._stop.is_set():
+                return
+            try:
+                event = self._extract_im_event(data)
+                if event:
                     self.emit_inbound(event)
                     self.mark_running()
-                    self.beat()
-                except Exception as inner_exc:
-                    self.mark_error(str(inner_exc))
+            except Exception as exc:
+                self.mark_error(f"飞书消息尚未保存：{exc}")
+                raise
 
-            def _on_session_event(_: Any) -> None:
-                self.mark_running()
-                self.beat()
-
-            retry_delay = 3.0
-            while not self._stop.is_set():
+        while not self._stop.is_set():
+            client = Client(self.app_id, self.app_secret,
+                event_handler=self._build_dispatcher(lark, on_message, lambda _: None),
+                log_level=lark.LogLevel.ERROR, domain=self.domain, auto_reconnect=False)
+            self._ws_client = client
+            ping = None
+            try:
                 self.mark_starting()
-                dispatcher = self._build_dispatcher(lark, _on_msg, _on_session_event)
-                self._ws_client = lark.ws.Client(
-                    self.app_id,
-                    self.app_secret,
-                    event_handler=dispatcher,
-                    log_level=lark.LogLevel.WARNING,
-                    domain=self.domain,
-                )
-
-                def _run_ws() -> None:
-                    try:
-                        self._ws_client.start()
-                    except Exception as ws_exc:
-                        self.mark_error(str(ws_exc))
-
-                self._ws_thread = Thread(target=_run_ws, name=f"feishu-ws-{self.channel_id}", daemon=True)
-                self._ws_thread.start()
-                deadline = time.time() + 10.0
-                connected = False
-                while not self._stop.is_set() and time.time() < deadline:
-                    conn = getattr(self._ws_client, "_conn", None)
-                    if conn is not None:
-                        self.mark_running()
-                        connected = True
-                        break
-                    if self._ws_thread and not self._ws_thread.is_alive():
-                        break
-                    time.sleep(0.2)
-
-                if not connected:
-                    self.mark_error("飞书长连接未建立，请检查事件订阅是否已启用长连接、应用版本是否已发布，以及机器人是否具备消息权限")
-                    try:
-                        if self._ws_client and hasattr(self._ws_client, "stop"):
-                            self._ws_client.stop()
-                    except Exception:
-                        pass
-                    if self._ws_thread and self._ws_thread.is_alive():
-                        self._ws_thread.join(timeout=1.5)
-                    if self._stop.wait(retry_delay):
-                        return
-                    continue
-
-                while not self._stop.is_set():
-                    if self.state.status == "error":
-                        break
-                    conn = getattr(self._ws_client, "_conn", None)
-                    if conn is None or (self._ws_thread and not self._ws_thread.is_alive()):
-                        self.mark_error("飞书长连接已断开，正在重连")
-                        break
-                    time.sleep(2.0)
-
+                await asyncio.to_thread(self._load_bot_identity)
+                await client._connect()
                 if self._stop.is_set():
                     return
-
-                try:
-                    if self._ws_client and hasattr(self._ws_client, "stop"):
-                        self._ws_client.stop()
-                except Exception:
-                    pass
-                if self._ws_thread and self._ws_thread.is_alive():
-                    self._ws_thread.join(timeout=1.5)
-                if self._stop.wait(retry_delay):
-                    return
-        except Exception as exc:
-            self.mark_error(f"飞书长连接初始化失败: {exc}")
-            return
+                self.mark_running()
+                ping = asyncio.create_task(client._ping_loop())
+                while not self._stop.is_set() and client._conn is not None:
+                    await asyncio.sleep(0.25)
+                if not self._stop.is_set():
+                    self.mark_error("飞书连接已断开，正在重连")
+            except asyncio.CancelledError:
+                return
+            except Exception as exc:
+                if not self._stop.is_set():
+                    self.mark_error(f"飞书连接失败：{exc}")
+            finally:
+                if ping:
+                    ping.cancel()
+                    await asyncio.gather(ping, return_exceptions=True)
+                await client._disconnect()
+            if not self._stop.is_set():
+                await asyncio.sleep(3)
 
     def _build_dispatcher(self, lark: Any, on_message: Any, on_session_event: Any) -> Any:
         return (
@@ -301,7 +319,7 @@ class FeishuAppAdapter(ChannelAdapter):
         # Compatible parser for multiple sdk payload shapes
         payload = None
         if isinstance(data, dict):
-            payload = data
+            payload = data.get("event", data)
         elif hasattr(data, "event"):
             payload = getattr(data, "event")
         elif hasattr(data, "to_dict"):
@@ -312,9 +330,14 @@ class FeishuAppAdapter(ChannelAdapter):
 
         msg = self._read_value(payload, "message")
         sender_obj = self._read_value(payload, "sender")
-        if msg is None:
+        if msg is None or self._read_value(sender_obj, "sender_type") == "app":
             return None
 
+        sender_id_obj = self._read_value(sender_obj, "sender_id")
+        early_sender = str(self._read_value(sender_id_obj, "open_id") or self._read_value(sender_id_obj, "user_id") or "")
+        owner = str(self.config.get("allowedSenderId") or "")
+        if owner and early_sender != owner:
+            return None
         content_raw = self._read_value(msg, "content")
         message_id = str(self._read_value(msg, "message_id") or "")
         message_type = str(self._read_value(msg, "message_type") or "text").strip().lower()
@@ -326,7 +349,27 @@ class FeishuAppAdapter(ChannelAdapter):
                 text = str(content_json.get("text") or "").strip()
             except Exception:
                 text = content_raw.strip()
-        attachments = self._extract_attachments(message_type, content_json, message_id)
+        if not message_id:
+            return None
+        if message_type == "post":
+            post = content_json if "content" in content_json else next((v for v in content_json.values() if isinstance(v, dict) and "content" in v), {})
+            content_json = post
+            text = "\n".join("".join(str(item.get("text") or item.get("href") or "") for item in row if isinstance(item, dict))
+                for row in post.get("content", []) if isinstance(row, list)).strip()
+        chat_type = str(self._read_value(msg, "chat_type") or "")
+        if chat_type == "group":
+            prefix = str(self.config.get("triggerPrefix") or "@ready")
+            mentions = self._read_value(msg, "mentions") or []
+            own_mention = next((item for item in mentions if self._bot_open_id and
+                self._read_value(self._read_value(item, "id"), "open_id") == self._bot_open_id), None)
+            mention_key = str(self._read_value(own_mention, "key") or "")
+            if mention_key and mention_key in text:
+                text = text.replace(mention_key, "", 1).strip()
+            elif text.lower().startswith(prefix.lower()):
+                text = text[len(prefix):].strip()
+            else:
+                return None
+        attachments = self._extract_attachments(message_type, content_json, message_id) if owner else []
         if message_type not in {"text", "post"}:
             text = ""
         if not text and not attachments:
@@ -349,17 +392,21 @@ class FeishuAppAdapter(ChannelAdapter):
 
         if not chat_id:
             return None
-        event_id = f"fs:{self.channel_id}:{message_id or int(time.time() * 1000)}"
+        topic = str(self._read_value(msg, "thread_id") or "")
+        root = str(self._read_value(msg, "root_id") or message_id)
+        thread = json.dumps({"chatId": chat_id, "replyTo": root, "topicId": topic}, sort_keys=True) if topic else chat_id
+        event_id = f"fs:{self.channel_id}:{message_id}"
         return {
             "id": event_id,
             "channelId": self.channel_id,
             "source": self.channel_type,
-            "thread": chat_id,
+            "thread": thread,
             "sender": sender_id or "feishu-user",
             "text": text,
             "timestamp": now_iso(),
             "idempotencyKey": event_id,
             "meta": {
+                "bindingId": self.config.get("bindingId"),
                 "messageId": message_id,
                 "threadId": str(self._read_value(msg, "thread_id") or ""),
                 "chatType": str(self._read_value(msg, "chat_type") or ""),
@@ -445,16 +492,12 @@ class FeishuAppAdapter(ChannelAdapter):
                         item["type"] = "video"
                 attachments.append(item)
         elif message_type == "post":
-            title = str(content_json.get("title") or "").strip()
-            if title:
-                attachments.append({
-                    "id": f"fs-post-{int(time.time() * 1000)}",
-                    "name": title,
-                    "path": "feishu://post",
-                    "type": "text",
-                    "ext": ".txt",
-                    "size": 0,
-                })
+            for row in content_json.get("content", []):
+                for item in row if isinstance(row, list) else []:
+                    if isinstance(item, dict) and item.get("tag") == "img" and item.get("image_key"):
+                        image = self._download_message_resource(message_id, str(item["image_key"]), "image", "图片")
+                        if image:
+                            attachments.append({**image, "type": "image", "remoteId": item["image_key"]})
         return attachments
 
     def _download_message_resource(
@@ -468,7 +511,7 @@ class FeishuAppAdapter(ChannelAdapter):
             return None
         token, err = self._refresh_access_token(force=False)
         if not token or err:
-            return None
+            raise RuntimeError(err or "飞书附件鉴权失败")
 
         try:
             response = requests.get(
@@ -478,7 +521,7 @@ class FeishuAppAdapter(ChannelAdapter):
                 timeout=20,
             )
             if response.status_code >= 400:
-                return None
+                raise RuntimeError(f"附件下载失败（HTTP {response.status_code}），请检查消息资源权限")
 
             content_type = str(response.headers.get("Content-Type") or "").split(";")[0].strip()
             filename = self._resolve_download_filename(response.headers.get("Content-Disposition"), fallback_name)
@@ -490,8 +533,10 @@ class FeishuAppAdapter(ChannelAdapter):
 
             self.attachment_root.mkdir(parents=True, exist_ok=True)
             safe_name = "".join(ch if ch.isalnum() or ch in {"-", "_", "."} else "-" for ch in filename).strip("-") or fallback_name
-            target = self.attachment_root / f"{message_id}-{file_key[:12]}-{safe_name}"
-            target.write_bytes(response.content)
+            safe_id = re.sub(r"[^a-zA-Z0-9_-]", "-", message_id)
+            safe_key = re.sub(r"[^a-zA-Z0-9_-]", "-", file_key[:12])
+            target = self.attachment_root / f"{safe_id}-{safe_key}-{safe_name}"
+            write_private_bytes(target, response.content)
             return {
                 "name": safe_name,
                 "path": str(target),
@@ -500,8 +545,8 @@ class FeishuAppAdapter(ChannelAdapter):
                 "size": len(response.content),
                 "downloaded": True,
             }
-        except Exception:
-            return None
+        except Exception as exc:
+            raise RuntimeError(f"飞书附件尚未保存：{exc}") from exc
 
     @staticmethod
     def _resolve_download_filename(content_disposition: Optional[str], fallback_name: str) -> str:

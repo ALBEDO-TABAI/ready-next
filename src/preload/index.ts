@@ -341,6 +341,7 @@ const agentAPI = {
     enabled?: boolean
     config?: Record<string, unknown>
   }) => invokeAgentRuntime('agent:testChannel', payload),
+  startChannelPairing: (id: string) => invokeAgentRuntime('agent:startChannelPairing', { id }),
   startWechatLogin: (payload: {
     id?: string
     force?: boolean

@@ -1,7 +1,4 @@
-// Remote IM is a resource ingress, not an Agent ingress. Ordinary inbound
-// text and attachments are persisted to the channel scope and settled; only
-// explicit slash commands and pending ask-card answers perform additional
-// work. Outbound text/file delivery remains explicit.
+// Remote receipts and explicit owner messages share the current Codex ingress.
 import { createHash, randomUUID } from 'crypto'
 import { statSync } from 'fs'
 import { basename, extname } from 'path'
@@ -12,6 +9,8 @@ import {
 } from '../../../../shared/ai-providers'
 import type { DatabaseManager } from '../../database'
 import { normalizeChannelDeliveryResult } from './channel-delivery-result'
+import { runRemoteCodexTurn } from './remote-codex-turn'
+import type { SendScopedRequest, SendScopedResponse } from '../../../../shared/ipc-contracts/agent-runtime'
 import { logAgentMetric } from '../metrics'
 import type { SidecarManager } from '../sidecar-manager'
 import type { AppSettingsRepository } from '../../repositories/app-settings-repository'
@@ -37,6 +36,10 @@ import {
 
 export interface RemoteChannelServiceDeps {
   db: DatabaseManager
+  stopScoped: (scope: ConversationScope) => Promise<boolean>
+  sendScoped: (request: SendScopedRequest) => Promise<SendScopedResponse>
+  ensureCodexScope: (scope: ConversationScope) => ConversationScope
+  consumeChannelPairing: (payload: Record<string, unknown>) => Promise<boolean>
   sidecar: SidecarManager
   settingsRepository: AppSettingsRepository
   /** Bound to the runtime lifecycle `getRuntimeStatus()` (X-level stay-behind). */
@@ -71,6 +74,9 @@ export interface RemoteChannelServiceDeps {
 }
 
 export class RemoteChannelService {
+  private recovering = false
+  private stopped = false
+  private readonly activeTurns = new Map<string, Promise<void>>()
   private readonly pendingInboundChannels = new Map<
     string,
     PendingInboundChannel
@@ -102,30 +108,69 @@ export class RemoteChannelService {
     return discarded
   }
 
+  stop(): void {
+    this.stopped = true
+    for (const pending of this.pendingInboundChannels.values()) if (pending.timer) clearTimeout(pending.timer)
+    this.pendingInboundChannels.clear()
+  }
+
+  async recoverPendingInbound(): Promise<void> {
+    if (this.recovering) return
+    this.recovering = true
+    this.stopped = false
+    try {
+      for (const event of this.deps.db.listPendingAgentChannelEvents()) {
+        const payload = JSON.parse(event.payload_json || '{}') as Record<string, unknown>
+        if (event.status === 'reply_pending' || event.status === 'failed') {
+          const scopeId = String(payload.scopeId || payload.frozenScopeId || '')
+          const epoch = payload.messageVisibilityEpoch ?? payload.frozenVisibilityEpoch
+          const scope = this.deps.db.getConversationScope(scopeId)
+          const channel = this.deps.db.getAgentChannel(event.channel_id)
+          const config = JSON.parse(channel?.config_json || '{}')
+          if (channel?.enabled && config.bindingId === payload.bindingId && scope?.message_visibility_epoch === epoch) {
+            const reply = event.status === 'failed' ? 'Ready 重启时中断了上次任务。为避免重复操作，没有自动重做；请先在 Ready 查看结果，再发送下一条任务。' : String(payload.reply)
+            const delivery = await this.sendLongTextToChannel(event.channel_id, String(payload.thread), reply,
+              String(payload.deliveryId || event.event_id), config.bindingId)
+            this.markInboundChannelEvents([event.event_id], event.channel_id, delivery.success ? 'done' : 'failed', delivery.error)
+          } else this.markInboundChannelEvents([event.event_id], event.channel_id, 'failed', 'conversation_context_stale')
+        } else await this.handleInboundChannel(payload)
+      }
+    } finally { this.recovering = false }
+  }
+
   async handleInboundChannel(payload: Record<string, unknown>): Promise<void> {
     const eventId = String(payload.id || payload.idempotencyKey || '')
     const channelId = String(payload.channelId || payload.source || '')
-    const thread = String(payload.thread || '')
-    const sender = String(payload.sender || '')
+    const thread = String(payload.thread || '').trim()
+    const sender = String(payload.sender || '').trim()
     const text = String(payload.text || '').trim()
     const attachments = this.parseChannelAttachments(payload.attachments)
+    if (!eventId || !channelId || !thread || (!text && attachments.length === 0)) return
     const existingEvent = this.deps.db.getAgentChannelEvent(eventId)
-    if (existingEvent && existingEvent.status === 'done') return
-    if (!eventId || !channelId || (!text && attachments.length === 0)) return
-    this.enqueueInboundChannelEvent({
-      eventId,
-      channelId,
-      thread: thread || 'default',
-      sender,
-      text,
-      attachments
-    })
-  }
-
-  private getInboundCoalesceWindowMs(): number {
-    const raw = Number(this.deps.db.getSetting('agent_message_coalesce_window_ms') || 1200)
-    if (!Number.isFinite(raw)) return 1200
-    return Math.min(2500, Math.max(600, Math.round(raw)))
+    if (existingEvent && existingEvent.status !== 'queued') return
+    const channel = this.deps.db.getAgentChannel(channelId)
+    if (!channel || !channel.enabled) return
+    if (await this.deps.consumeChannelPairing?.(payload)) return
+    if (channel && ['wechat-openclaw', 'feishu-app'].includes(channel.type)) {
+      const config = JSON.parse(channel.config_json || '{}') as Record<string, unknown>
+      if (!config.allowedSenderId || config.allowedSenderId !== sender) return
+      const meta = payload.meta as Record<string, unknown> | undefined
+      if (!config.bindingId || config.bindingId !== meta?.bindingId) return
+      if (channel.type === 'wechat-openclaw' && config.accountId !== meta?.accountId) return
+    }
+    const frozen = existingEvent?.payload_json ? JSON.parse(existingEvent.payload_json) : payload
+    const binding = this.deps.db.getAgentChannelThread(channelId, thread)
+    const ensured = !binding ? this.deps.ensureChannelScope(channelId, thread, 'butler', sender) : null
+    if (ensured) this.deps.db.upsertAgentChannelThread({ channelId, remoteThread: thread, sessionId: ensured.id, conversationId: ensured.id })
+    const scope = this.deps.db.getConversationScope(binding?.session_id || ensured?.id || '')
+    const durable = { ...payload,
+      bindingId: frozen.bindingId ?? (channel ? JSON.parse(channel.config_json || '{}').bindingId : undefined),
+      frozenScopeId: frozen.frozenScopeId ?? scope?.id ?? null,
+      frozenVisibilityEpoch: frozen.frozenVisibilityEpoch ?? scope?.message_visibility_epoch ?? null,
+    }
+    this.deps.db.upsertAgentChannelEvent({ eventId, channelId, status: 'queued', payloadJson: JSON.stringify(durable) })
+    this.enqueueInboundChannelEvent({ eventId, channelId, thread, sender, text, attachments,
+      frozenScopeId: durable.frozenScopeId, frozenVisibilityEpoch: durable.frozenVisibilityEpoch })
   }
 
   private enqueueInboundChannelEvent(payload: {
@@ -135,60 +180,33 @@ export class RemoteChannelService {
     sender: string
     text: string
     attachments: ChannelAttachment[]
+    frozenScopeId?: string | null
+    frozenVisibilityEpoch?: number | null
   }): void {
-    const key = `${payload.channelId}::${payload.thread}`
-    const frozenThread = this.deps.db.getAgentChannelThread(payload.channelId, payload.thread)
-    const frozenScope = frozenThread
-      ? this.deps.db.getConversationScope(frozenThread.session_id)
-      : null
-    const pending = this.pendingInboundChannels.get(key) || {
+    const key = `${payload.channelId}::${payload.thread}::${payload.eventId}`
+    if (this.pendingInboundChannels.has(key)) return
+    const pending: PendingInboundChannel = {
       channelId: payload.channelId,
       thread: payload.thread,
-      scopeId: frozenThread?.session_id || null,
-      messageVisibilityEpoch: Number.isSafeInteger(frozenScope?.message_visibility_epoch)
-        ? Number(frozenScope?.message_visibility_epoch)
-        : null,
+      scopeId: payload.frozenScopeId ?? null,
+      messageVisibilityEpoch: payload.frozenVisibilityEpoch ?? null,
       sender: payload.sender,
-      eventIds: [],
-      texts: [],
-      attachments: [],
-      timer: null as NodeJS.Timeout | null
+      eventIds: [payload.eventId],
+      texts: payload.text ? [payload.text] : [],
+      attachments: payload.attachments,
+      timer: setTimeout(() => {
+        void this.flushInboundChannel(key).catch(error => {
+          console.warn('[runtime] remote-channel flush rejected:', error)
+        })
+      }, 0),
     }
-
-    if (!pending.eventIds.includes(payload.eventId)) {
-      pending.eventIds.push(payload.eventId)
-      this.deps.db.upsertAgentChannelEvent({
-        eventId: payload.eventId,
-        channelId: payload.channelId,
-        status: 'running'
-      })
-    }
-    if (payload.text) pending.texts.push(payload.text)
-    if (payload.attachments.length > 0) {
-      const seen = new Set(
-        pending.attachments.map((item) => `${item.remoteId || item.path}::${item.name}`)
-      )
-      for (const attachment of payload.attachments) {
-        const dedupeKey = `${attachment.remoteId || attachment.path}::${attachment.name}`
-        if (seen.has(dedupeKey)) continue
-        seen.add(dedupeKey)
-        pending.attachments.push(attachment)
-      }
-    }
-    pending.sender = payload.sender || pending.sender
-    if (pending.timer) clearTimeout(pending.timer)
-    pending.timer = setTimeout(() => {
-      void this.flushInboundChannel(key).catch((error) => {
-        console.warn('[runtime] remote-channel flush rejected:', error)
-      })
-    }, this.getInboundCoalesceWindowMs())
     this.pendingInboundChannels.set(key, pending)
   }
 
   private markInboundChannelEvents(
     eventIds: string[],
     channelId: string,
-    status: 'running' | 'done' | 'failed',
+    status: 'queued' | 'running' | 'done' | 'failed',
     error?: string | null
   ): void {
     for (const eventId of eventIds) {
@@ -206,6 +224,7 @@ export class RemoteChannelService {
     const currentScope = this.deps.db.getConversationScope(pending.scopeId)
     return Boolean(
       currentScope
+      && this.deps.db.getAgentChannelThread(pending.channelId, pending.thread)?.session_id === pending.scopeId
       && pending.messageVisibilityEpoch !== null
       && currentScope.message_visibility_epoch === pending.messageVisibilityEpoch,
     )
@@ -215,13 +234,14 @@ export class RemoteChannelService {
     const currentScope = this.deps.db.getConversationScope(scope.id)
     return Boolean(
       currentScope
+      && (scope.sourceKind !== 'channel' || this.deps.db.getAgentChannelThread(scope.sourceId, String(scope.meta.remoteThread || scope.threadKey))?.session_id === scope.id)
       && currentScope.message_visibility_epoch === scope.messageVisibilityEpoch,
     )
   }
 
   private channelSupportsOutboundAttachments(channelId: string): boolean {
     const channel = this.deps.db.getAgentChannel(channelId)
-    return channel?.type === 'wechat-openclaw'
+    return channel?.type === 'wechat-openclaw' || channel?.type === 'feishu-app'
   }
 
   private channelAttachmentTypeFromPath(path: string, mimeType: string): ChannelAttachment['type'] {
@@ -255,6 +275,13 @@ export class RemoteChannelService {
       }
 
       const agent = 'butler'
+      const currentChannel = this.deps.db.getAgentChannel(pending.channelId)
+      const firstEnvelope = JSON.parse(this.deps.db.getAgentChannelEvent(pending.eventIds[0])?.payload_json || '{}')
+      if (currentChannel && firstEnvelope.bindingId !== JSON.parse(currentChannel.config_json || '{}').bindingId) throw new Error('channel_binding_changed')
+      if (currentChannel && !currentChannel.enabled) {
+        this.markInboundChannelEvents(pending.eventIds, pending.channelId, 'failed', 'channel_disabled')
+        return
+      }
       if (!this.isPendingInboundContextCurrent(pending)) {
         this.markInboundChannelEvents(
           pending.eventIds,
@@ -300,6 +327,38 @@ export class RemoteChannelService {
         conversationId: scope.id
       })
 
+      const config = currentChannel ? JSON.parse(currentChannel.config_json || '{}') : {}
+      if (mergedText && config.remoteAssistantEnabled === true && config.allowedSenderId === pending.sender
+        && !getAskUserQuestionsStore().findPendingForScope(scope.id)) {
+        const previous = this.activeTurns.get(scope.id) || Promise.resolve()
+        const turn = previous.catch(() => undefined).then(async () => {
+          if (this.stopped) return
+          if (!this.isScopeContextCurrent(scope)) throw new Error('conversation_context_stale')
+          const latestChannel = this.deps.db.getAgentChannel(pending.channelId)
+          const latestConfig = JSON.parse(latestChannel?.config_json || '{}')
+          if (!latestChannel?.enabled || latestConfig.allowedSenderId !== pending.sender
+            || latestConfig.accountId !== config.accountId) throw new Error('channel_binding_changed')
+          this.markInboundChannelEvents(pending.eventIds, pending.channelId, 'running')
+          const readyScope = this.deps.ensureCodexScope(scope)
+          const reply = await runRemoteCodexTurn({ scope: readyScope, eventIds: pending.eventIds, text: mergedText,
+            attachments: pending.attachments, channelId: pending.channelId, thread: pending.thread, sender: pending.sender }, this.deps.sendScoped)
+          if (!this.isScopeContextCurrent(scope)) throw new Error('conversation_context_stale')
+          const after = this.deps.db.getAgentChannel(pending.channelId)
+          if (!after?.enabled || JSON.parse(after.config_json || '{}').bindingId !== config.bindingId) throw new Error('channel_binding_changed')
+          for (const eventId of pending.eventIds) {
+            this.deps.db.upsertAgentChannelEvent({ eventId, channelId: pending.channelId, status: 'reply_pending',
+              payloadJson: JSON.stringify({ scopeId: scope.id, messageVisibilityEpoch: scope.messageVisibilityEpoch,
+                thread: pending.thread, reply, bindingId: config.bindingId, deliveryId: pending.eventIds[0], sender: pending.sender, accountId: config.accountId }) })
+          }
+          const delivery = await this.sendLongTextToChannel(pending.channelId, pending.thread, reply, pending.eventIds[0], config.bindingId)
+          this.markInboundChannelEvents(pending.eventIds, pending.channelId, delivery.success ? 'done' : 'failed', delivery.error)
+        })
+        this.activeTurns.set(scope.id, turn)
+        try { await turn } finally { if (this.activeTurns.get(scope.id) === turn) this.activeTurns.delete(scope.id) }
+        return
+      }
+
+      this.markInboundChannelEvents(pending.eventIds, pending.channelId, 'running')
       const inboundMessage = this.deps.createConversationMessage(scope.id, {
         role: 'user',
         content: inboundText,
@@ -360,6 +419,16 @@ export class RemoteChannelService {
         ? 'remote_inbound_flush_failed'
         : 'conversation_context_stale'
       this.markInboundChannelEvents(pending.eventIds, pending.channelId, 'failed', reason)
+      if (reason === 'remote_inbound_flush_failed') {
+        const channel = this.deps.db.getAgentChannel(pending.channelId)
+        const config = JSON.parse(channel?.config_json || '{}')
+        const envelope = JSON.parse(this.deps.db.getAgentChannelEvent(pending.eventIds[0])?.payload_json || '{}')
+        if (channel?.enabled && config.allowedSenderId === pending.sender && config.bindingId === envelope.bindingId) {
+          const notice = '这条消息没有处理完成。请在 Ready 中查看当前会话，再重新发送；没有自动重复执行。'
+          await this.sendLongTextToChannel(pending.channelId, pending.thread, notice, `${pending.eventIds[0]}:failure`, config.bindingId)
+          this.deps.recordChannelDeliveryResult(pending.channelId, { success: false, error: notice })
+        }
+      }
       logAgentMetric('remote_inbound_flush_failed', {
         channelId: pending.channelId,
         thread: pending.thread,
@@ -388,6 +457,7 @@ export class RemoteChannelService {
   ): Promise<boolean> {
     const parsed = this.parseInboundChannelCommand(inboundText)
     if (!parsed) return false
+    this.markInboundChannelEvents(pending.eventIds, pending.channelId, 'running')
 
     let scope = this.deps.ensureChannelScope(pending.channelId, pending.thread, agent, pending.sender)
     this.deps.db.upsertAgentChannelThread({
@@ -405,6 +475,10 @@ export class RemoteChannelService {
       case 'commands':
         reply = this.formatRemoteCommandHelp()
         break
+      case 'stop':
+      case 'cancel':
+        reply = await this.deps.stopScoped(scope) ? '当前任务已停止。' : '当前没有可停止的任务，或停止尚未得到确认，请在 Ready 查看状态。'
+        break
       case 'status':
         reply = await this.formatRemoteCommandStatus(scope)
         break
@@ -414,7 +488,7 @@ export class RemoteChannelService {
       case 'new':
       case 'reset':
         scope = this.startNewRemoteChannelSession(pending, agent)
-        reply = '已开启新的 Ready 远程会话。之后这条微信聊天里的消息会进入新会话，旧会话会保留。'
+        reply = '已开启新的 Ready 远程会话。之后这条聊天里的消息会进入新会话，旧会话会保留，原任务的结果仍可在 Ready 的旧会话中查看。'
         break
       default:
         reply = `暂不支持 ${commandLabel}。\n\n${this.formatRemoteCommandHelp()}`
@@ -495,6 +569,7 @@ export class RemoteChannelService {
       'Ready 远程指令',
       '/status 查看运行状态',
       '/new 开启新的 Ready 会话',
+      '/stop 停止当前任务',
       '/model status 查看当前模型',
       '/help 查看这份指令'
     ].join('\n')
@@ -559,7 +634,10 @@ export class RemoteChannelService {
     const token = this.deps.db.getSetting(
       this.getRemoteChannelSessionSettingKey(channelId, remoteThread, agent)
     )
-    return token ? `${remoteThread}#session:${token}` : remoteThread
+    const channel = this.deps.db.getAgentChannel(channelId)
+    const bindingId = channel ? JSON.parse(channel.config_json || '{}').bindingId : null
+    const boundThread = bindingId ? `${remoteThread}#binding:${bindingId}` : remoteThread
+    return token ? `${boundThread}#session:${token}` : boundThread
   }
 
   private parseChannelAttachments(raw: unknown): ChannelAttachment[] {
@@ -639,12 +717,6 @@ export class RemoteChannelService {
     return table[ext] || fallback
   }
 
-  /**
-   * Phase I（2026-07-05）—— channel_send_file 的发送面：scope 反查渠道线程，
-   * 文件打包成 ChannelAttachment 直发当前线程。真机实锚：微信里"把报告发我"
-   * 时模型没有任何发送工具，run 收口收集器又要求 present_file 证据——现在
-   * 模型有显式、即时、可回读的直达路径。目标锁死当前线程（无寻址参数）。
-   */
   async sendFileToScopeThread(
     scopeId: string,
     file: { path: string; caption?: string },
@@ -660,7 +732,13 @@ export class RemoteChannelService {
       return { success: false, error: '当前会话没有绑定远程渠道线程' }
     }
     if (!this.channelSupportsOutboundAttachments(thread.channel_id)) {
-      return { success: false, error: '当前渠道类型暂不支持出站附件（现仅微信）', channelId: thread.channel_id }
+      return { success: false, error: '当前渠道类型暂不支持发送附件', channelId: thread.channel_id }
+    }
+    const current = this.deps.db.getConversationScope(scopeId)
+    const channel = this.deps.db.getAgentChannel(thread.channel_id)
+    const bindingId = JSON.parse(channel?.config_json || '{}').bindingId
+    if (!current || !channel?.enabled || JSON.parse(current.meta_json || '{}').channelBindingId !== bindingId) {
+      return { success: false, error: '远程绑定已变更，请从新的会话发送文件' }
     }
     const name = basename(file.path)
     const ext = extname(file.path).toLowerCase()
@@ -679,6 +757,7 @@ export class RemoteChannelService {
       thread.remote_thread || 'default',
       String(file.caption || '').trim(),
       [attachment],
+      bindingId,
     )
     logAgentMetric('remote_channel_direct_send', {
       scopeId,
@@ -696,12 +775,6 @@ export class RemoteChannelService {
     }
   }
 
-  /**
-   * Phase I P0 —— ask/confirm 卡渠道转投（合同条款 1）：卡的 scope 命中
-   * agent_channel_threads 反查时，序列化成纯文本发往 (channelId, remoteThread)。
-   * 本地 renderer push 由注册点保留（双出口）；非渠道 scope 返回 false 零
-   * 行为变化；反查/发送失败只记 metric，不影响本地卡可答性（条款 5）。
-   */
   async maybeForwardAskCardToChannel(event: AskUserQuestionsCardEvent): Promise<boolean> {
     if (event.responsePolicy === 'local_renderer_only') return false
     const scopeKey = String(event.scopeId || event.sessionId || '').trim()
@@ -714,6 +787,9 @@ export class RemoteChannelService {
       thread = null
     }
     if (!thread || !thread.channel_id) return false
+    const channel = this.deps.db.getAgentChannel(thread.channel_id)
+    const scope = this.deps.db.getConversationScope(scopeKey)
+    if (!channel?.enabled || !scope || JSON.parse(scope.meta_json || '{}').channelBindingId !== JSON.parse(channel.config_json || '{}').bindingId) return false
     const text = formatAskUserQuestionsCardForChannel(event.questions)
     const delivery = await this.sendChannelReply(
       thread.channel_id,
@@ -730,12 +806,6 @@ export class RemoteChannelService {
     return delivery.success
   }
 
-  /**
-   * Phase I P0 —— 入站消息 → pending 卡答案（合同条款 3/4）。返回 true 表示
-   * 本条消息已被答案路径消费（不再派发新 run）。答案落地复用与本地 IPC /
-   * frozen-call respond 完全相同的 submit/cancel core（唯一决策机）。
-   * 生产唯一调用方是 flushInboundChannel；公开仅为行为测试直测该合同。
-   */
   async tryResolvePendingAskCardFromInbound(
     scopeId: string,
     inboundText: string,
@@ -825,11 +895,12 @@ export class RemoteChannelService {
     const normalized = text.trim()
     if (!normalized) return []
     const chunks: string[] = []
+    const characters = Array.from(normalized)
     let cursor = 0
-    while (cursor < normalized.length) {
-      const next = normalized.slice(cursor, cursor + maxChars)
+    while (cursor < characters.length) {
+      const next = characters.slice(cursor, cursor + maxChars).join('')
       chunks.push(next)
-      cursor += next.length
+      cursor += maxChars
     }
     return chunks
   }
@@ -838,11 +909,12 @@ export class RemoteChannelService {
     channelId: string,
     thread: string,
     text: string,
-    attachments: ChannelAttachment[] = []
+    attachments: ChannelAttachment[] = [],
+    expectedBindingId?: string,
   ): Promise<{ success: boolean; error?: string }> {
     const body = String(text || '').trim()
     if (body) {
-      const textResult = await this.sendLongTextToChannel(channelId, thread, body)
+      const textResult = await this.sendLongTextToChannel(channelId, thread, body, randomUUID(), expectedBindingId)
       if (!textResult.success) return textResult
     }
     if (attachments.length === 0) return { success: true }
@@ -877,15 +949,23 @@ export class RemoteChannelService {
   async sendLongTextToChannel(
     channelId: string,
     thread: string,
-    text: string
+    text: string,
+    deliveryId: string = randomUUID(),
+    expectedBindingId?: string,
   ): Promise<{ success: boolean; error?: string }> {
+    const channel = this.deps.db.getAgentChannel(channelId)
+    if (channel && !channel.enabled) return { success: false, error: '通道已停用' }
+    const bindingId = expectedBindingId ?? (channel ? JSON.parse(channel.config_json || '{}').bindingId : undefined)
+    let part = 0
     for (const chunk of this.splitLongText(text)) {
       let result: { success: boolean; error?: string }
       try {
         const response = await this.deps.sidecar.sendChannel({
           id: channelId,
           thread,
-          text: chunk
+          text: chunk,
+          deliveryId: `${deliveryId}:${part++}`,
+          expectedBindingId: bindingId,
         })
         result = normalizeChannelDeliveryResult(response, '远程 IM 文本发送失败')
       } catch (error) {

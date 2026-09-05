@@ -46,7 +46,7 @@ class FakeWechatAdapter(WechatOpenClawAdapter):
                 "ret": 0,
                 "get_updates_buf": "next-sync",
                 "msgs": [{
-                    "from_user_id": "friend@im.wechat",
+                    "from_user_id": "owner@im.wechat",
                     "client_id": "msg-1",
                     "context_token": "ctx-1",
                     "item_list": [{"type": 1, "text_item": {"text": "明天三点开会"}}],
@@ -71,7 +71,7 @@ adapter = FakeWechatAdapter("channel-wechat-openclaw-default", "wechat-openclaw"
 })
 adapter.set_event_callback(lambda event_type, payload: events.append([event_type, payload]))
 
-start = adapter.start_login(force=True)
+start = adapter.start_login("fixture-login", force=True)
 deadline = time.time() + 3
 status = {}
 while time.time() < deadline:
@@ -112,11 +112,13 @@ print(json.dumps({
   assert.deepEqual(result.probe, [true, null])
   assert.deepEqual(result.send, [true, null])
 
+  assert.equal(result.events.filter((item: unknown[]) => item[0] === 'channel.wechat-bound').length, 1)
+  result.events = result.events.filter((item: unknown[]) => item[0] === 'channel.inbound')
   assert.equal(result.events.length, 1)
   assert.equal(result.events[0][0], 'channel.inbound')
   assert.equal(result.events[0][1].channelId, 'channel-wechat-openclaw-default')
   assert.equal(result.events[0][1].source, 'wechat-openclaw')
-  assert.equal(result.events[0][1].thread, 'friend@im.wechat')
+  assert.equal(result.events[0][1].thread, 'owner@im.wechat')
   assert.equal(result.events[0][1].text, '明天三点开会')
 
   assert.ok(result.calls.some((call: { endpoint: string }) => call.endpoint.includes('get_bot_qrcode')))
@@ -155,7 +157,7 @@ class FakeWechatAdapter(WechatOpenClawAdapter):
 adapter = FakeWechatAdapter("channel-wechat-openclaw-default", "wechat-openclaw", "微信", {
     "stateDir": ${JSON.stringify(root)},
 })
-start = adapter.start_login(force=True)
+start = adapter.start_login("fixture-login", force=True)
 deadline = time.time() + 3
 status = {}
 while time.time() < deadline:

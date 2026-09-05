@@ -21,6 +21,14 @@
 
 | 评估日期 | 任务 | 文件 | 总行数 | 本次新增 | 结论 | 判断与后续动作 | 状态 |
 | --- | --- | --- | ---: | ---: | --- | --- | --- |
+| 2026-09-05 | 微信飞书远程可靠性 | `src/main/modules/agent-control/codex-runtime/codex-runtime-production-composition.ts` | 5571 | 本批净增，已检查 | 危险 | 本次只委托远程初始 head 的原子创建，新增逻辑位于独立叶子；组合根仍集中 admission/history/recovery，沿用既定拆分边界。 | 后续拆分；交付时提醒 |
+| 2026-09-05 | 微信飞书远程可靠性 | `src/main/modules/agent-control/runtime-core/runtime.ts` | 1934 | 本批净增，已检查 | 一般 | 只连接远程收发、当前准入快照和停止入口；业务判断下沉至远程服务与独立入口。 | 2026-10-05 复查远程生命周期接线 |
+| 2026-09-05 | 微信飞书远程可靠性 | `src/main/modules/claude-bridge/ipc-handler.ts` | 1331 | 本批净增，已检查 | 一般 | 仅绑定本人配对入口到既有 IPC 分组，无内联配对逻辑。 | 2026-10-05 复查分组接线 |
+| 2026-09-05 | 微信飞书远程可靠性 | `src/main/modules/migrations.ts` | 4486 | 本批净增，已检查 | 健康 | 按既有顺序添加 123 迁移；业务持久化从 DatabaseManager 迁出到远程事件仓储。 | 顺序迁移与原生门禁持续覆盖 |
+| 2026-09-05 | 微信飞书远程可靠性 | `src/preload/index.ts` | 1535 | 本批净增，已检查 | 健康 | 只增加配对请求透传，仍为声明式 API 汇总。 | IPC 对称检查持续覆盖 |
+| 2026-09-05 | 微信飞书远程可靠性 | `src/python/ready_sidecar/channels/wechat_openclaw_adapter.py` | 1165 | 本批净增，已检查 | 一般 | 同一微信协议的扫码、收信和媒体功能边界清楚；本次加身份恢复、游标提交与凭据撤销，已有 Python 行为覆盖。 | 2026-10-05 复查扫码与媒体边界 |
+| 2026-09-05 | 微信飞书远程可靠性 | `src/renderer/components/settings/RemoteIMSettingsPanel.tsx` | 1011 | 本批净增，已检查 | 一般 | 按渠道组织设置，增加本人绑定、真实连接状态和扫码取消；未扩展其他渠道。 | 2026-10-05 复查渠道面板分拆 |
+| 2026-09-05 | 微信飞书远程可靠性 | `src/renderer/types/electron.d.ts` | 3545 | 本批净增，已检查 | 健康 | 新增配对结果声明，与 Main 和 Preload 同步。 | 类型检查持续覆盖 |
 | 2026-09-05 | 历史续聊复查与包体来源交接 | `scripts/run-history-continuation-installed-proof.mjs` | 1644 | 从1776行缩减并补全旧头/重放覆盖 | 一般 | fresh-root 独立场景已拆到现有脚本子目录，复用正式发送与同一请求捕获器；入口保留资料隔离、全分母和清理。2026-10-05 复查剩余独立资料准备逻辑。 | 已排期：2026-10-05 |
 | 2026-09-05 | 空白旧头及上下文边界升级 | `src/main/modules/migrations.ts` | 4480 | 本轮增加122号迁移 | 健康 | 单一顺序迁移目录；复用同一边界定义和刷新guard，不回填旧记录，不引入第二套升级真值。 | 无需处理 |
 | 2026-09-05 | 恢复回执与当前动作一致性 | `src/shared/ipc-contracts/agent-runtime.ts` | 1406 | 边界摘要和结果关系校验 | 健康 | 单一跨进程合同聚合；同一解析器拒绝回执与当前动作身份矛盾。 | 无需处理 |

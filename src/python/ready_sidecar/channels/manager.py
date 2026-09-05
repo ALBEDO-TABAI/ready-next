@@ -24,6 +24,10 @@ class NoopAdapter(ChannelAdapter):
         return True, None
 
 
+def _retired_callback(*_):
+    raise RuntimeError("channel_adapter_retired")
+
+
 class ChannelManager:
     def __init__(self, emit_event: Callable[[str, Dict[str, Any]], None]) -> None:
         self._emit = emit_event
@@ -31,15 +35,21 @@ class ChannelManager:
         self.channels: Dict[str, ChannelConfigModel] = {}
 
     def upsert(self, channel: ChannelConfigModel) -> None:
+        if self.channels.get(channel.id) == channel and channel.id in self.adapters:
+            return
         self.channels[channel.id] = channel
         if channel.id in self.adapters:
+            self.adapters[channel.id].set_event_callback(_retired_callback)
             self.adapters[channel.id].stop()
             self.adapters.pop(channel.id, None)
         adapter = self._build_adapter(channel)
-        adapter.set_event_callback(self._emit)
+        adapter.set_event_callback(lambda kind, payload: self._emit(kind, payload) if self.adapters.get(channel.id) is adapter else _retired_callback())
         self.adapters[channel.id] = adapter
 
     def start(self, channel_id: str) -> Dict[str, Any]:
+        channel = self.channels.get(channel_id)
+        if not channel or not channel.enabled:
+            return {"success": False, "error": "channel disabled"}
         adapter = self.adapters.get(channel_id)
         if not adapter:
             return {"success": False, "error": "channel not found"}
@@ -61,8 +71,14 @@ class ChannelManager:
     def delete(self, channel_id: str) -> Dict[str, Any]:
         adapter = self.adapters.get(channel_id)
         if adapter:
+            adapter.set_event_callback(_retired_callback)
             adapter.stop()
             self.adapters.pop(channel_id, None)
+            if isinstance(adapter, WechatOpenClawAdapter) and not any(
+                isinstance(other, WechatOpenClawAdapter) and other.configured_account_id == adapter.configured_account_id
+                for other in self.adapters.values()
+            ):
+                adapter.forget_account()
         self.channels.pop(channel_id, None)
         return {"success": True}
 

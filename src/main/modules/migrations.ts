@@ -4395,6 +4395,12 @@ const migrations: Migration[] = [
         ${CODEX_PRISTINE_CONTRACT_REFRESH_GUARDS_SQL}`)
     },
   },
+  {
+    name: '123_remote_channel_durable_inbox',
+    up: (db) => {
+      db.exec('ALTER TABLE agent_channel_events ADD COLUMN payload_json TEXT')
+    },
+  },
 ]
 
 /**

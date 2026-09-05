@@ -5,8 +5,8 @@ export function normalizeChannelDeliveryResult(
   const record = response && typeof response === 'object'
     ? response as Record<string, unknown>
     : null
-  if (!record) return { success: true }
-  if (record.success === false || (record.success !== true && typeof record.error === 'string' && record.error.trim())) {
+  if (!record) return { success: false, error: fallbackError }
+  if (record.success !== true) {
     return {
       success: false,
       error: normalizeChannelDeliveryError(

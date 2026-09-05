@@ -1,3 +1,4 @@
+import { RemoteChannelEventRepository, type AgentChannelEventRecord } from './agent-control/runtime-core/remote-channel-event-repository'
 import { createRequire } from 'module'
 import { createHash } from 'crypto'
 import { resolveReadyDatabasePath } from './database-path'
@@ -415,14 +416,7 @@ export interface AgentChannelThreadRecord {
   updated_at: string
 }
 
-export interface AgentChannelEventRecord {
-  event_id: string
-  channel_id: string
-  status: string
-  error: string | null
-  created_at: string
-  updated_at: string
-}
+export type { AgentChannelEventRecord } from './agent-control/runtime-core/remote-channel-event-repository'
 
 export type ConversationSourceKind = 'local' | 'channel'
 
@@ -3139,58 +3133,21 @@ export class DatabaseManager {
     return this.getAgentChannelThread(payload.channelId, payload.remoteThread)!
   }
 
+  listPendingAgentChannelEvents(): AgentChannelEventRecord[] {
+    return this.db ? new RemoteChannelEventRepository(this.db).listPending() : []
+  }
+
   getAgentChannelEvent(eventId: string): AgentChannelEventRecord | null {
-    if (!this.db) return null
-    const row = this.db.prepare(
-      'SELECT * FROM agent_channel_events WHERE event_id = ? LIMIT 1'
-    ).get<AgentChannelEventRecord>(eventId)
-    return row ?? null
+    return this.db ? new RemoteChannelEventRepository(this.db).get(eventId) : null
   }
 
-  upsertAgentChannelEvent(payload: {
-    eventId: string
-    channelId: string
-    status: string
-    error?: string | null
-  }): AgentChannelEventRecord {
+  upsertAgentChannelEvent(payload: Parameters<RemoteChannelEventRepository['upsert']>[0]): AgentChannelEventRecord {
     if (!this.db) throw new Error('Database not available')
-    const now = new Date().toISOString()
-    const existing = this.getAgentChannelEvent(payload.eventId)
-    this.db.prepare(
-      `INSERT INTO agent_channel_events (event_id, channel_id, status, error, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?)
-       ON CONFLICT(event_id) DO UPDATE SET
-         channel_id = excluded.channel_id,
-         status = excluded.status,
-         error = excluded.error,
-         updated_at = excluded.updated_at`
-    ).run(
-      payload.eventId,
-      payload.channelId,
-      payload.status,
-      payload.error ?? null,
-      existing?.created_at ?? now,
-      now,
-    )
-    return this.getAgentChannelEvent(payload.eventId)!
+    return new RemoteChannelEventRepository(this.db).upsert(payload)
   }
 
-  /**
-   * An inbound event is removed from the sidecar queue before Ready finishes
-   * persisting it. After a process restart, a legacy `running` row therefore
-   * has no live owner and must not remain permanently in progress. Mark the
-   * unknown outcome failed so an adapter redelivery can be admitted again.
-   */
-  failRunningAgentChannelEventsOnBoot(
-    reason: string = 'app_restart_before_inbound_settlement',
-  ): number {
-    if (!this.db) return 0
-    const result = this.db.prepare(
-      `UPDATE agent_channel_events
-          SET status = 'failed', error = ?, updated_at = ?
-        WHERE status = 'running'`,
-    ).run(reason, new Date().toISOString()) as { changes?: number }
-    return Number(result.changes || 0)
+  failRunningAgentChannelEventsOnBoot(reason?: string): number {
+    return this.db ? new RemoteChannelEventRepository(this.db).failRunningOnBoot(reason) : 0
   }
 
   close(): void {

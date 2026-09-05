@@ -10,6 +10,7 @@ import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
 
 function createScopeStore(database: DatabaseManager): ConversationScopeStore {
   return new ConversationScopeStore({
+      ensureChannelAlias: () => {},
     db: database,
     emitConversationEvent() {},
     mapChannelRow(row) {

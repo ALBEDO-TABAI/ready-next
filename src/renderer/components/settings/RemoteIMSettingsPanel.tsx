@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import QRCode from 'qrcode'
 import { AlertTriangle, Bot, CheckCircle2, ChevronDown, ChevronUp, Eye, EyeOff, Loader2, MessageSquare, RefreshCcw, Send, Trash2, XCircle } from 'lucide-react'
 import {
@@ -88,6 +88,8 @@ export default function RemoteIMSettingsPanel() {
   const [cacheStats, setCacheStats] = useState<RemoteAttachmentCacheStatsData | null>(null)
   const [busyAction, setBusyAction] = useState<string | null>(null)
   const [statusText, setStatusText] = useState('')
+  const [pairingCode, setPairingCode] = useState('')
+  const busyRef = useRef(false)
 
   const [telegramToken, setTelegramToken] = useState('')
   const [feishuAppId, setFeishuAppId] = useState('')
@@ -106,18 +108,16 @@ export default function RemoteIMSettingsPanel() {
   const [showWechatAdvanced, setShowWechatAdvanced] = useState(false)
 
   const runWithBusy = useCallback(async <T,>(actionKey: string, task: () => Promise<T>): Promise<T | null> => {
+    if (busyRef.current) return null
+    busyRef.current = true
     setBusyAction(actionKey)
     try {
-      return await Promise.race([
-        task(),
-        new Promise<null>((_, reject) => {
-          setTimeout(() => reject(new Error('请求超时，请查看 sidecar 状态或稍后重试')), 20_000)
-        }),
-      ])
+      return await task()
     } catch (error) {
       setStatusText(error instanceof Error ? error.message : String(error))
       return null
     } finally {
+      busyRef.current = false
       setBusyAction((current) => (current === actionKey ? null : current))
     }
   }, [])
@@ -173,7 +173,27 @@ export default function RemoteIMSettingsPanel() {
   }, [loadChannelConfig, refreshStatus])
 
   useEffect(() => {
-    void loadChannelConfig()
+    let disposed = false
+    let refreshing = false
+    void loadChannelConfig().catch(error => setStatusText(String(error)))
+    const poll = async () => {
+      if (refreshing || !window.electronAPI?.agent) return
+      refreshing = true
+      try {
+        const [status, config] = await Promise.all([
+          window.electronAPI.agent.getRuntimeStatus(), window.electronAPI.agent.listChannels(),
+        ])
+        if (disposed) return
+        if (status.success && status.data) setRuntimeStatus(status.data as RuntimeStatusData)
+        if (config.success && config.data) setChannels(config.data as unknown as ChannelData[])
+      } catch (error) {
+        // silent-catch: refresh failures are displayed beside the connection controls.
+        if (!disposed) setStatusText(error instanceof Error ? error.message : String(error))
+      } finally { refreshing = false }
+    }
+    void poll()
+    const timer = window.setInterval(() => { void poll() }, 3000)
+    return () => { disposed = true; window.clearInterval(timer) }
   }, [loadChannelConfig])
 
   const feishuChannel = useMemo(
@@ -188,6 +208,8 @@ export default function RemoteIMSettingsPanel() {
     () => channels.find((item) => item.type === 'wechat-openclaw'),
     [channels],
   )
+  useEffect(() => { setPairingCode('') }, [feishuChannel?.config.bindingId])
+
   const telegramSecretState = telegramChannel?.secretStatus.token?.state
     || telegramChannel?.secretStatus.botToken?.state
     || 'missing'
@@ -265,7 +287,7 @@ export default function RemoteIMSettingsPanel() {
       setFeishuAppSecret('')
       setFeishuVerificationToken('')
       setFeishuEncryptKey('')
-      setStatusText('飞书已连接')
+      setStatusText('飞书配置已保存，正在建立连接。请继续绑定你本人的飞书账号。')
       await refresh()
     })
   }
@@ -290,10 +312,7 @@ export default function RemoteIMSettingsPanel() {
       enabled: options?.enabled ?? true,
       config,
     })
-    if (!save.success) {
-      setStatusText(`保存失败：${save.error || '未知错误'}`)
-      return
-    }
+    if (!save.success) throw new Error(`保存失败：${save.error || '未知错误'}`)
     if (!options?.silent) setStatusText('微信已启用')
     await refresh()
   }, [refresh, wechatBotAgent, wechatChannel?.config, wechatChannel?.id, wechatRouteTag])
@@ -321,7 +340,7 @@ export default function RemoteIMSettingsPanel() {
         setStatusText('启用失败：没有拿到二维码')
         return
       }
-      const qrImage = await QRCode.toDataURL(qrcodeUrl, { width: 240, margin: 1 })
+      const qrImage = qrcodeUrl.startsWith('data:image/') ? qrcodeUrl : await QRCode.toDataURL(qrcodeUrl, { width: 240, margin: 1 })
       setWechatQrImage(qrImage)
       setWechatLoginSessionKey(sessionKey)
       setWechatLoginStatus(String(data.status || 'waiting'))
@@ -333,8 +352,12 @@ export default function RemoteIMSettingsPanel() {
   useEffect(() => {
     if (!wechatLoginSessionKey || !window.electronAPI?.agent) return undefined
     let disposed = false
+    let polling = false
     const channelId = wechatChannel?.id || WECHAT_CHANNEL_ID
     const poll = async () => {
+      if (polling || disposed) return
+      polling = true
+      try {
       const res = await window.electronAPI.agent.getWechatLoginStatus({
         channelId,
         sessionKey: wechatLoginSessionKey,
@@ -342,6 +365,8 @@ export default function RemoteIMSettingsPanel() {
       if (disposed) return
       if (!res.success || !res.data) {
         setWechatLoginStatus('error')
+        setWechatLoginSessionKey('')
+        setWechatQrImage('')
         setStatusText(res.error || '微信绑定状态获取失败')
         return
       }
@@ -352,10 +377,16 @@ export default function RemoteIMSettingsPanel() {
       if (status === 'connected' || status === 'already_connected') {
         setWechatLoginSessionKey('')
         setWechatQrImage('')
-        await saveWechatChannel(String(data.accountId || ''))
+        await refresh()
+        setStatusText('微信已绑定，连接状态会在下方自动更新。')
       } else if (status === 'expired' || status === 'error') {
         setWechatLoginSessionKey('')
+        setWechatQrImage('')
       }
+      } catch (error) {
+        // silent-catch: QR polling errors are displayed without losing the cancellable login session.
+        if (!disposed) setStatusText(error instanceof Error ? error.message : String(error))
+      } finally { polling = false }
     }
     void poll()
     const timer = window.setInterval(() => { void poll() }, 2_000)
@@ -363,7 +394,7 @@ export default function RemoteIMSettingsPanel() {
       disposed = true
       window.clearInterval(timer)
     }
-  }, [saveWechatChannel, wechatChannel?.id, wechatLoginSessionKey])
+  }, [refresh, wechatChannel?.id, wechatLoginSessionKey])
 
   const submitWechatVerifyCode = async () => {
     if (!window.electronAPI?.agent || !wechatLoginSessionKey) return
@@ -418,7 +449,7 @@ export default function RemoteIMSettingsPanel() {
   return (
     <div className="flex flex-col" style={{ gap: 28 }}>
       <div className="text-[12px] leading-6" style={{ color: 'var(--text-muted)' }}>
-        普通消息和附件只会保存到对应会话，不会自动启动 Agent。只有指令、确认回复或你在 Ready 中明确发送时才会执行额外操作。
+        微信和飞书绑定本人后，文字任务会交给 Ready 处理并原路回复。单独发送的附件先保存到对应会话；需要处理附件时，请同时说明任务。
       </div>
       <div
         className="glass-surface-card border flex w-fit"
@@ -503,7 +534,7 @@ export default function RemoteIMSettingsPanel() {
           )}
           <div className="flex items-center flex-wrap" style={{ gap: 12 }}>
             <button
-              disabled={isBusy('telegram-connect')}
+              disabled={Boolean(busyAction)}
               onClick={() => { void connectTelegram() }}
               className="text-[13px] font-medium"
               style={primaryButtonStyle}
@@ -516,7 +547,7 @@ export default function RemoteIMSettingsPanel() {
             {telegramChannel && telegramChannel.enabled && (
               <>
                 <button
-                  disabled={isBusy(`probe:${telegramChannel.id}`)}
+                  disabled={Boolean(busyAction)}
                   onClick={() => { void sendProbe(telegramChannel.id) }}
                   className="border text-[13px]"
                   style={secondaryButtonStyle}
@@ -527,7 +558,7 @@ export default function RemoteIMSettingsPanel() {
                   </span>
                 </button>
                 <button
-                  disabled={isBusy(`disconnect:${telegramChannel.id}`)}
+                  disabled={Boolean(busyAction)}
                   onClick={() => { void disconnectChannel(telegramChannel.id) }}
                   className="border text-[13px]"
                   style={secondaryButtonStyle}
@@ -548,7 +579,7 @@ export default function RemoteIMSettingsPanel() {
           <div className="flex flex-col" style={{ gap: 8 }}>
             <div className="text-[15px] font-semibold" style={{ color: 'var(--text-title)' }}>飞书连接</div>
             <div className="text-[12px] leading-6" style={{ color: 'var(--text-muted)' }}>
-              使用 App ID / App Secret 建立长连接事件通道，不依赖公网回调。Verification Token / Encrypt Key 只在回调 URL 或消息加密场景需要。
+              在飞书开放平台创建企业自建应用，启用机器人和长连接，订阅接收消息事件并发布版本。需要接收消息、以机器人身份发消息和获取消息资源权限。填入 App ID 与 App Secret 后，再绑定你本人。
             </div>
           </div>
           <div className="grid grid-cols-2" style={{ gap: 16 }}>
@@ -618,7 +649,7 @@ export default function RemoteIMSettingsPanel() {
           )}
           <div className="flex items-center flex-wrap" style={{ gap: 12 }}>
             <button
-              disabled={isBusy('feishu-connect')}
+              disabled={Boolean(busyAction)}
               onClick={() => { void connectFeishu() }}
               className="text-[13px] font-medium"
               style={primaryButtonStyle}
@@ -631,7 +662,7 @@ export default function RemoteIMSettingsPanel() {
             {feishuChannel && feishuChannel.enabled && (
               <>
                 <button
-                  disabled={isBusy(`probe:${feishuChannel.id}`)}
+                  disabled={Boolean(busyAction)}
                   onClick={() => { void sendProbe(feishuChannel.id) }}
                   className="border text-[13px]"
                   style={secondaryButtonStyle}
@@ -642,7 +673,7 @@ export default function RemoteIMSettingsPanel() {
                   </span>
                 </button>
                 <button
-                  disabled={isBusy(`disconnect:${feishuChannel.id}`)}
+                  disabled={Boolean(busyAction)}
                   onClick={() => { void disconnectChannel(feishuChannel.id) }}
                   className="border text-[13px]"
                   style={secondaryButtonStyle}
@@ -665,6 +696,20 @@ export default function RemoteIMSettingsPanel() {
         </div>
       )}
 
+      {tab === 'feishu' && feishuChannel?.enabled && (
+        <div className="glass-surface-card border flex flex-col" style={{ ...panelCardStyle, padding: 20, gap: 12 }}>
+          <div className="text-[13px]">{feishuChannel.config.allowedSenderId ? '已绑定本人，私聊可直接发送任务；群聊请以 @ready 开头。' : '还需要绑定本人，完成后才能远程发送任务。'}</div>
+          <button className="border text-[13px] w-fit" style={secondaryButtonStyle} disabled={Boolean(busyAction)} onClick={() => {
+            void runWithBusy('feishu-pair', async () => {
+              const result = await window.electronAPI.agent.startChannelPairing(feishuChannel.id)
+              if (!result.success || !result.data) throw new Error(result.error || '生成绑定码失败')
+              setPairingCode(result.data.code)
+            })
+          }}>{feishuChannel.config.allowedSenderId ? '重新绑定本人' : '生成本人绑定码'}</button>
+          {pairingCode && <div className="text-[13px] leading-6">在飞书中私聊你的机器人，发送 <code>/bind {pairingCode}</code>。绑定码 5 分钟内有效，完成后这里会显示已绑定。</div>}
+        </div>
+      )}
+
       {tab === 'wechat' && (
         <div className="flex flex-col" style={{ padding: '4px 0 10px', gap: 24 }}>
           <div className="flex flex-col" style={{ gap: 8 }}>
@@ -678,7 +723,7 @@ export default function RemoteIMSettingsPanel() {
           </div>
           <div className="flex items-center flex-wrap" style={{ gap: 12 }}>
             <button
-              disabled={isBusy('wechat-connect')}
+              disabled={Boolean(busyAction)}
               onClick={() => { void connectWechat() }}
               className="text-[13px] font-medium"
               style={primaryButtonStyle}
@@ -691,7 +736,7 @@ export default function RemoteIMSettingsPanel() {
             {wechatChannel && wechatChannel.enabled && (
               <>
                 <button
-                  disabled={isBusy(`probe:${wechatChannel.id}`)}
+                  disabled={Boolean(busyAction)}
                   onClick={() => { void sendProbe(wechatChannel.id) }}
                   className="border text-[13px]"
                   style={secondaryButtonStyle}
@@ -702,7 +747,7 @@ export default function RemoteIMSettingsPanel() {
                   </span>
                 </button>
                 <button
-                  disabled={isBusy(`disconnect:${wechatChannel.id}`)}
+                  disabled={Boolean(busyAction)}
                   onClick={() => { void disconnectChannel(wechatChannel.id) }}
                   className="border text-[13px]"
                   style={secondaryButtonStyle}
@@ -742,7 +787,7 @@ export default function RemoteIMSettingsPanel() {
                 style={fieldStyle}
               />
               <button
-                disabled={isBusy('wechat-save')}
+                disabled={Boolean(busyAction)}
                 onClick={() => { void runWithBusy('wechat-save', () => saveWechatChannel()) }}
                 className="border text-[13px] md:col-span-2"
                 style={{ ...secondaryButtonStyle, justifySelf: 'start' }}
@@ -756,6 +801,15 @@ export default function RemoteIMSettingsPanel() {
           )}
           {wechatQrImage && (
             <div className="flex flex-col border" style={{ borderColor: 'var(--border-subtle)', borderRadius: 12, padding: 16, gap: 14, width: 286 }}>
+              <button className="border text-[12px] w-fit" style={secondaryButtonStyle} onClick={() => {
+                void runWithBusy('wechat-cancel', async () => {
+                  const result = await window.electronAPI.agent.setChannelEnabled(wechatChannel?.id || WECHAT_CHANNEL_ID, false)
+                  if (!result.success) throw new Error(result.error || '取消绑定失败')
+                  setWechatLoginSessionKey(''); setWechatQrImage(''); setWechatLoginStatus('')
+                  setStatusText('已取消绑定')
+                  await refresh()
+                })
+              }}>取消绑定</button>
               <img src={wechatQrImage} alt="微信绑定二维码" style={{ width: 240, height: 240, alignSelf: 'center' }} />
               <div className="text-[12px] text-center" style={{ color: 'var(--text-muted)', lineHeight: 1.6 }}>
                 {wechatLoginStatus === 'scanned' ? '已扫码，等待手机确认。' : '请用手机微信扫码确认绑定。'}
@@ -772,7 +826,7 @@ export default function RemoteIMSettingsPanel() {
                 style={{ ...fieldStyle, maxWidth: 220 }}
               />
               <button
-                disabled={isBusy('wechat-verify')}
+                disabled={Boolean(busyAction)}
                 onClick={() => { void submitWechatVerifyCode() }}
                 className="border text-[13px]"
                 style={secondaryButtonStyle}
@@ -797,7 +851,7 @@ export default function RemoteIMSettingsPanel() {
           </button>
         </div>
         <div className="text-[12px] leading-7" style={{ color: 'var(--text-body)' }}>
-          <div>Sidecar: {runtimeStatus?.sidecar?.status || 'unknown'}{runtimeStatus?.sidecar?.port ? ` (port ${runtimeStatus.sidecar.port})` : ''}</div>
+          <div>通讯服务：{runtimeStatus?.sidecar?.status === 'running' ? '运行中' : runtimeStatus?.sidecar?.status === 'starting' ? '正在启动' : runtimeStatus?.sidecar?.status === 'error' ? '连接异常' : '尚未启动'}</div>
           {runtimeStatus?.sidecar?.error && (
             <div style={{ color: 'var(--color-red)' }}>错误：{runtimeStatus.sidecar.error}</div>
           )}
@@ -806,7 +860,7 @@ export default function RemoteIMSettingsPanel() {
         <div className="flex flex-col" style={{ gap: 12 }}>
           {channels.map((channel) => {
             const adapter = currentAdapters.find((item) => item.id === channel.id)
-            const running = channel.enabled && (adapter?.status === 'running' || adapter?.healthy)
+            const running = channel.enabled && channel.credentialState === 'ready' && runtimeStatus?.sidecar?.status === 'running' && adapter?.status === 'running' && adapter.healthy
             const channelError = adapter?.error || channel.lastError
             const sendError = running && Boolean(channel.lastError)
             return (
@@ -821,7 +875,7 @@ export default function RemoteIMSettingsPanel() {
                     {channel.name}
                     {sendError ? (
                       <span className="inline-flex items-center gap-1.5 text-[11px]" style={{ color: 'var(--color-red)' }}>
-                        <AlertTriangle className="w-3.5 h-3.5" /> 发送异常
+                        <AlertTriangle className="w-3.5 h-3.5" /> 通讯异常
                       </span>
                     ) : running ? (
                       <span className="inline-flex items-center gap-1.5 text-[11px]" style={{ color: 'var(--color-green)' }}>
@@ -834,7 +888,7 @@ export default function RemoteIMSettingsPanel() {
                     )}
                   </div>
                   <div className="text-[11px] mt-2 leading-6" style={{ color: 'var(--text-muted)' }}>
-                    {channel.type} · {adapter?.lastBeatAt ? `最近心跳 ${new Date(adapter.lastBeatAt).toLocaleString()}` : '暂无心跳'}
+                    {channel.config.allowedSenderId ? '已绑定本人' : '尚未绑定本人'} · {adapter?.lastBeatAt ? `最近连接检查 ${new Date(adapter.lastBeatAt).toLocaleString()}` : '等待连接检查'}
                   </div>
                   {channelError && (
                     <div className="text-[11px] mt-2 leading-6" style={{ color: 'var(--color-red)' }}>
@@ -853,7 +907,11 @@ export default function RemoteIMSettingsPanel() {
                   </button>
                   <button
                     title={channel.enabled ? '停用' : '启用'}
-                    onClick={() => { void window.electronAPI.agent.setChannelEnabled(channel.id, !channel.enabled).then(() => refresh()) }}
+                    onClick={() => { void runWithBusy(`toggle:${channel.id}`, async () => {
+                      const result = await window.electronAPI.agent.setChannelEnabled(channel.id, !channel.enabled)
+                      if (!result.success) throw new Error(result.error || '连接设置未生效')
+                      await refresh()
+                    }) }}
                     className="border"
                     style={{ ...secondaryButtonStyle, padding: 8, borderRadius: 8 }}
                   >
@@ -890,14 +948,14 @@ export default function RemoteIMSettingsPanel() {
           </button>
         </div>
         <div className="text-[12px] leading-7" style={{ color: 'var(--text-body)' }}>
-          <div>总附件数：{cacheStats?.totalFiles ?? 0}</div>
-          <div>总大小：{(((cacheStats?.totalBytes ?? 0) / 1024 / 1024) || 0).toFixed(2)} MB</div>
+          <div>总附件数：{cacheStats ? cacheStats.totalFiles : '点击刷新后查看'}</div>
+          <div>总大小：{cacheStats ? `${(cacheStats.totalBytes / 1024 / 1024).toFixed(2)} MB` : '尚未统计'}</div>
         </div>
         <div className="flex items-center flex-wrap" style={{ gap: 12 }}>
           <button
             className="border text-[13px]"
             style={{ ...secondaryButtonStyle, minWidth: 120 }}
-            disabled={isBusy('clear-cache:all')}
+            disabled={Boolean(busyAction)}
             onClick={() => {
               void runWithBusy('clear-cache:all', async () => {
                 const res = await window.electronAPI.agent.clearRemoteAttachmentCache()
@@ -926,7 +984,7 @@ export default function RemoteIMSettingsPanel() {
                 <button
                   className="border text-[12px]"
                   style={secondaryButtonStyle}
-                  disabled={isBusy(`clear-cache:${item.channelId}`)}
+                  disabled={Boolean(busyAction)}
                   onClick={() => {
                     void runWithBusy(`clear-cache:${item.channelId}`, async () => {
                       const res = await window.electronAPI.agent.clearRemoteAttachmentCache(item.channelId)

@@ -911,6 +911,7 @@ interface ElectronAgentAPI {
     enabled?: boolean
     config?: Record<string, unknown>
   }) => Promise<{ success: boolean; error?: string }>
+  startChannelPairing: (id: string) => Promise<IPCResponse<{ code: string; expiresAt: string }>>
   startWechatLogin: (payload: {
     id?: string
     force?: boolean

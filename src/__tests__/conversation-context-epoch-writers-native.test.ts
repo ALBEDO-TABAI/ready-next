@@ -49,6 +49,7 @@ test('reset rejects old message/context writers while the new epoch remains writ
       mapConversationRow: (row) => store.mapConversationRow(row),
     })
     store = new ConversationScopeStore({
+      ensureChannelAlias: () => {},
       db: database,
       emitConversationEvent() {},
       mapChannelRow() { throw new Error('unexpected_channel_mapping') },

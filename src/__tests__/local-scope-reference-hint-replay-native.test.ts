@@ -84,6 +84,7 @@ function makeStore(database: DatabaseManager) {
     mapConversationRow: (row) => store.mapConversationRow(row),
   })
   store = new ConversationScopeStore({
+      ensureChannelAlias: () => {},
     db: database,
     emitConversationEvent() {},
     mapChannelRow() { throw new Error('unexpected_channel_mapping') },

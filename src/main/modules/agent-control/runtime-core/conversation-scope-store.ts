@@ -39,6 +39,7 @@ import { logAgentMetric } from '../metrics'
 import { tryParseJson } from './runtime-helpers'
 
 export interface ConversationScopeStoreDeps {
+  ensureChannelAlias: (scopeId: string) => void
   db: DatabaseManager
   /** Bound to `ProjectionSyncCoordinator.emitConversationEvent`. */
   emitConversationEvent: (payload: ConversationEventPayload) => void
@@ -191,7 +192,13 @@ export class ConversationScopeStore {
     const channelMeta = channel ? this.deps.mapChannelRow(channel) : null
     const scopedThreadKey = this.deps.getScopedRemoteThreadKey(channelId, remoteThread, agent)
     const existing = this.deps.db.findConversationScope('channel', channelId, scopedThreadKey, agent)
-    const { row } = this.deps.db.upsertConversationScope({
+    const database = this.deps.db.getRawDb()
+    if (!database) throw new Error('remote_database_unavailable')
+    const ownsTransaction = !database.inTransaction
+    if (ownsTransaction) database.exec('BEGIN IMMEDIATE')
+    let row: ReturnType<DatabaseManager['upsertConversationScope']>['row']
+    try {
+      row = this.deps.db.upsertConversationScope({
       id: existing?.id || `conv-${randomUUID()}`,
       agent,
       activeAgentId: this.deps.resolveConversationAgentId(agent),
@@ -205,13 +212,20 @@ export class ConversationScopeStore {
           : {}),
         sourceLabel: channelMeta?.name || '远程 IM',
         channelType: channelMeta?.type || 'generic-webhook',
+        channelBindingId: channelMeta?.config.bindingId,
         sender,
         remoteThread,
         channelSessionToken: this.deps.db.getSetting(
           this.deps.getRemoteChannelSessionSettingKey(channelId, remoteThread, agent)
         ) || null
       }
-    })
+      }).row
+      this.deps.ensureChannelAlias(row.id)
+      if (ownsTransaction) database.exec('COMMIT')
+    } catch (error) {
+      if (ownsTransaction && database.inTransaction) database.exec('ROLLBACK')
+      throw error
+    }
     const scope = this.mapConversationRow(row)
     // Phase 1.2 — recover any persisted lastReferenceSkill into the in-memory
     // map before the inbound message hits the orchestrator. Without this, a

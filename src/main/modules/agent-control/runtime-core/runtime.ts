@@ -227,6 +227,7 @@ export class AgentControlRuntime extends EventEmitter {
   // values and refresh them from the 3s poll loop instead. B8-D R4: the poll
   // loop lives in SidecarPollService, which holds this object by reference
   // and mutates it in place — `readonly` pins the shared identity.
+  private sidecarStartup: Promise<void> | null = null
   private readonly channelStateCache = { connected: 0, errors: 0 }
   private heartbeat: HeartbeatSnapshot = {
     sidecar: { status: 'stopped' },
@@ -262,9 +263,12 @@ export class AgentControlRuntime extends EventEmitter {
     startSidecar: () => this.startSidecar(),
     getSettingBool: (key, fallback) => this.getSettingBool(key, fallback),
     listChannels: () => this.channelConfig.listRuntimeChannels(),
+    syncChannel: (id) => this.channelConfig.syncChannel(id),
     handleInboundChannel: (payload) => this.handleInboundChannel(payload),
+    completeWechatBinding: (payload) => this.channelConfig.completeWechatBinding(payload),
   })
   private readonly conversationScopes = new ConversationScopeStore({
+    ensureChannelAlias: (scopeId) => this.codexRuntime.aliasBindingPort.ensureChannelAlias(scopeId),
     db: this.db,
     emitConversationEvent: (payload) => this.projectionSync.emitConversationEvent(payload),
     mapChannelRow: (row) => this.channelConfig.mapChannelRow(row),
@@ -298,6 +302,30 @@ export class AgentControlRuntime extends EventEmitter {
   // re-bind through this service automatically).
   private readonly remoteChannel = new RemoteChannelService({
     db: this.db,
+    stopScoped: async (scope) => {
+      if (!scope.aliasGeneration) return false
+      const snapshot = this.codexRuntime.aliasBindingPort.readLifecycleSnapshot({ aliasId: scope.id, aliasGeneration: scope.aliasGeneration })
+      if (!snapshot.activeReadyRunId || snapshot.actions.stop.availability !== 'ready') return false
+      const result = await this.codexRuntime.lifecycleAdapter.stopSession({ aliasId: scope.id,
+        aliasGeneration: scope.aliasGeneration, readyRunId: snapshot.activeReadyRunId })
+      return result.ok
+    },
+    sendScoped: (request) => {
+      const generation = request.expectedAliasGeneration
+      const head = generation ? this.codexRuntime.aliasBindingPort.readHeadActionProjection({
+        aliasId: request.scopeId, aliasGeneration: generation, workbenchMode: 'browser',
+      }) : null
+      return this.sendScoped({ ...request, actionAdmissionRef: head?.actionHeadIdentity ? {
+        headProjectionDigest: head.evidenceDigest,
+        actionProjectionVersion: head.actionProjectionVersion,
+        actionHeadIdentity: head.actionHeadIdentity,
+      } : undefined })
+    },
+    ensureCodexScope: (scope) => {
+      this.codexRuntime.aliasBindingPort.ensureChannelAlias(scope.id)
+      return this.conversationScopes.refreshScope(scope.id)
+    },
+    consumeChannelPairing: (payload) => this.channelConfig.consumeChannelPairing(payload),
     sidecar: this.sidecar,
     settingsRepository: this.settingsRepository,
     getRuntimeStatus: () => this.getRuntimeStatus(),
@@ -855,6 +883,7 @@ export class AgentControlRuntime extends EventEmitter {
 
   async stop(): Promise<void> {
     this.unregisterTaskEventProofSink()
+    this.remoteChannel.stop()
     this.codexRuntime.sealIngress('runtime_stop')
     this.browserController?.setBrowserWorkflowWriteAdmissionPort(null)
     this.browserController?.setBrowserWorkflowJournalUnitOfWork(null)
@@ -870,6 +899,13 @@ export class AgentControlRuntime extends EventEmitter {
   }
 
   async startSidecar(): Promise<void> {
+    if (this.sidecarStartup) return this.sidecarStartup
+    const pending = this.startSidecarOnce()
+    this.sidecarStartup = pending
+    try { await pending } finally { if (this.sidecarStartup === pending) this.sidecarStartup = null }
+  }
+
+  private async startSidecarOnce(): Promise<void> {
     const status = await this.sidecar.start()
     this.heartbeat.sidecar = {
       status: status.state,
@@ -881,6 +917,7 @@ export class AgentControlRuntime extends EventEmitter {
     if (status.state === 'running') {
       await this.syncDatabaseToSidecar()
       this.sidecarPoll.ensurePollLoop()
+      await this.remoteChannel.recoverPendingInbound()
     }
   }
 
@@ -1731,6 +1768,10 @@ export class AgentControlRuntime extends EventEmitter {
 
   async getWechatLoginStatus(channelId: string, sessionKey: string): Promise<Record<string, unknown>> {
     return this.channelConfig.getWechatLoginStatus(channelId, sessionKey)
+  }
+
+  startChannelPairing(id: string): { code: string; expiresAt: string } {
+    return this.channelConfig.startChannelPairing(id)
   }
 
   async submitWechatLoginVerifyCode(channelId: string, sessionKey: string, code: string): Promise<Record<string, unknown>> {

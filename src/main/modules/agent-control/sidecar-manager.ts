@@ -53,6 +53,8 @@ function hashText(value: string): string {
 
 export class SidecarManager {
   private process: ChildProcess | null = null
+  private startup: Promise<SidecarStatus> | null = null
+  private lifecycleGeneration = 0
   private status: SidecarStatus
   private host: string
   private preferredPort: number | null
@@ -111,7 +113,25 @@ export class SidecarManager {
   }
 
   async start(): Promise<SidecarStatus> {
+    if (this.startup) return this.startup
+    const pending = this.startOnce(this.lifecycleGeneration)
+    this.startup = pending
+    try { return await pending } finally { if (this.startup === pending) this.startup = null }
+  }
+
+  private async startOnce(generation: number): Promise<SidecarStatus> {
     if (this.isRunning()) return this.getStatus()
+    if (this.process && this.process.exitCode === null) {
+      try {
+        await this.heartbeat()
+        this.status.state = 'running'
+        this.status.error = null
+        return this.getStatus()
+      } catch {
+        // silent-catch: an unresponsive owned process is stopped before replacement; startup failure is returned below.
+        await this.stopProcess()
+      }
+    }
     this.status.state = 'starting'
     this.status.error = null
 
@@ -119,6 +139,7 @@ export class SidecarManager {
       this.ensureRuntimeDirs()
       const port = await this.pickFreePort()
       const python = await this.ensurePythonRuntime()
+      if (generation !== this.lifecycleGeneration) return this.getStatus()
       this.token = randomBytes(24).toString('hex')
 
       const scriptPath = join(this.sidecarPkgRoot, 'main.py')
@@ -147,7 +168,9 @@ export class SidecarManager {
       this.process.stderr?.on('data', () => {
         // Keep silent by default; status will be surfaced via health checks.
       })
+      const owner = this.process
       this.process.on('exit', (code) => {
+        if (this.process !== owner) return
         this.process = null
         this.status.state = 'stopped'
         this.status.pid = null
@@ -161,11 +184,15 @@ export class SidecarManager {
       this.status.startedAt = new Date().toISOString()
 
       await this.waitForHealth()
+      if (generation !== this.lifecycleGeneration) return this.getStatus()
       this.status.state = 'running'
       this.status.error = null
       this.startHeartbeatLoop()
       return this.getStatus()
     } catch (error) {
+      // silent-catch: callers and the settings health panel receive the persisted startup status/error.
+      if (generation !== this.lifecycleGeneration) return this.getStatus()
+      await this.stopProcess()
       this.status.state = 'error'
       this.status.error = error instanceof Error ? error.message : String(error)
       return this.getStatus()
@@ -173,11 +200,18 @@ export class SidecarManager {
   }
 
   async stop(): Promise<void> {
+    this.lifecycleGeneration += 1
+    await this.stopProcess()
+  }
+
+  private async stopProcess(): Promise<void> {
     if (this.heartbeatTimer) {
       clearInterval(this.heartbeatTimer)
       this.heartbeatTimer = null
     }
 
+    this.token = null
+    this.status.port = null
     if (!this.process) {
       this.status.state = 'stopped'
       this.status.pid = null
@@ -250,6 +284,8 @@ export class SidecarManager {
     thread?: string
     text: string
     attachments?: Array<Record<string, unknown>>
+    deliveryId?: string
+    expectedBindingId?: string
   }): Promise<Record<string, unknown>> {
     return this.request('/channels/send', {
       method: 'POST',
@@ -275,10 +311,10 @@ export class SidecarManager {
     })
   }
 
-  async startWechatLogin(channelId: string, force?: boolean): Promise<Record<string, unknown>> {
+  async startWechatLogin(channelId: string, force: boolean, sessionKey: string): Promise<Record<string, unknown>> {
     return this.request('/channels/wechat-openclaw/login/start', {
       method: 'POST',
-      body: JSON.stringify({ channel_id: channelId, force: Boolean(force) }),
+      body: JSON.stringify({ channel_id: channelId, force, session_key: sessionKey }),
     })
   }
 
@@ -304,15 +340,25 @@ export class SidecarManager {
     return events
   }
 
+  async acknowledgeEvents(ids: string[]): Promise<void> {
+    const result = await this.request('/events/ack', { method: 'POST', body: JSON.stringify({ ids }) })
+    if (result.success !== true) throw new Error('remote_event_ack_failed')
+  }
+
   private startHeartbeatLoop(): void {
     if (this.heartbeatTimer) clearInterval(this.heartbeatTimer)
     this.heartbeatTimer = setInterval(() => {
+      const owner = this.process
+      if (!owner) return
       void this.heartbeat()
         .then(() => {
+          if (this.process !== owner) return
+          this.status.error = null
           this.status.lastHeartbeatAt = new Date().toISOString()
           if (this.status.state !== 'running') this.status.state = 'running'
         })
         .catch((error) => {
+          if (this.process !== owner) return
           this.status.error = error instanceof Error ? error.message : String(error)
           if (this.status.state === 'running') this.status.state = 'error'
         })
@@ -331,7 +377,7 @@ export class SidecarManager {
         ...(init?.headers || {}),
       },
       body: init?.body,
-      signal: AbortSignal.timeout(10_000),
+      signal: AbortSignal.timeout(path === '/channels/send' ? 180_000 : 45_000),
     })
     const text = await resp.text()
     let json: Record<string, unknown> = {}
@@ -431,7 +477,8 @@ export class SidecarManager {
     try {
       await execFileAsync(
         pythonBin,
-        ['-c', SIDECAR_REQUIRED_IMPORTS.map((name) => `import ${name}`).join('; ')],
+        ['-c', [...SIDECAR_REQUIRED_IMPORTS.map((name) => `import ${name}`),
+          "import importlib.metadata; assert importlib.metadata.version('lark-oapi') == '1.7.3'"].join('; ')],
         {
           timeout: 10_000,
           env: this.getPythonRuntimeEnv(),
@@ -487,6 +534,9 @@ export class SidecarManager {
     const sslVersionText = await this.getPythonSslVersionText(pythonPath, runtimeEnv)
     if (!isSupportedReadyPythonSslVersion(sslVersionText)) {
       throw new Error(`Packaged Python runtime has unsupported sidecar OpenSSL: ${sslVersionText || 'unknown'}`)
+    }
+    if (!(await this.hasRequiredPythonModules(pythonPath))) {
+      throw new Error('安装包内的远程通讯组件缺失或版本不匹配，请更新安装包')
     }
     return pythonPath
   }

@@ -1,3 +1,4 @@
+import { ensureRemoteChannelAlias } from './remote-channel-alias'
 import { CodexBindingRepositoryError } from './codex-binding-error'
 import { createHash, randomUUID } from 'node:crypto'
 import { appendFileSync, existsSync, mkdirSync, readFileSync, realpathSync } from 'node:fs'
@@ -3327,6 +3328,10 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
   }
 
   const aliasBindingPort: CodexAliasBindingPort = {
+    ensureChannelAlias(scopeId) {
+      ensureRemoteChannelAlias({ database: input.database, repository, scopeId,
+        runtimeManifestDigest: verified.manifestDigest, protocolSchemaDigest: verified.manifest.stableV2SchemaSha256 })
+    },
     readAliasGeneration(aliasId) {
       return repository.readActiveAliasBinding(aliasId)?.aliasGeneration ?? null
     },

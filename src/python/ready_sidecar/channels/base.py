@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import os
+import uuid
+from pathlib import Path
 from datetime import datetime, timezone
 from threading import Lock
 from typing import Any, Callable, Dict, Optional
@@ -11,6 +14,19 @@ def now_iso() -> str:
 
 
 EventCallback = Callable[[str, Dict[str, Any]], None]
+
+
+def write_private_bytes(path: Path, body: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f"{path.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        with open(temporary, 'xb', opener=lambda p, flags: os.open(p, flags, 0o600)) as stream:
+            stream.write(body)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 @dataclass

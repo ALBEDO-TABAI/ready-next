@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import assert from 'node:assert/strict'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -19,6 +20,7 @@ class ChannelDatabaseFixture {
   readonly settings = new Map<string, string>()
   failNextUpsert = false
 
+  getRawDb() { return { exec() {}, inTransaction: false } }
   listAgentChannels(): AgentChannelRecord[] { return Array.from(this.rows.values()) }
   getAgentChannel(id: string): AgentChannelRecord | null { return this.rows.get(id) ?? null }
   upsertAgentChannel(input: {
@@ -81,7 +83,7 @@ function createSidecarFixture() {
     async deleteChannel() { return deleteFails ? { success: false, error: 'sidecar_delete_failed' } : { success: true } },
     async testChannel(payload: Record<string, unknown>) { upserts.push(payload); return { success: true } },
     async sendChannel() { return { success: true } },
-    async startWechatLogin() { return { success: true } },
+    async startWechatLogin(_id: string, _force: boolean, sessionKey: string): Promise<Record<string, unknown>> { return { success: true, sessionKey } },
     async getWechatLoginStatus() { return { success: true } },
     async submitWechatLoginVerifyCode() { return { success: true } },
   }
@@ -116,6 +118,135 @@ async function withVault(run: (input: {
     rmSync(root, { recursive: true, force: true })
   }
 }
+
+test('Feishu pairing binds one private sender and cannot be replayed for another sender', async () => {
+  await withVault(async ({ db, service }) => {
+    await service.upsertChannel({ id: 'feishu', type: 'feishu-app', name: 'Fixture', enabled: true,
+      config: { appId: 'fixture-app', appSecret: 'fixture-secret' } })
+    const pairing = service.startChannelPairing('feishu')
+    assert.ok(!db.getSetting('channel_pairing:feishu')!.includes(pairing.code))
+    const message = { channelId: 'feishu', thread: 'chat', sender: 'owner', text: `/bind ${pairing.code}`, meta: { chatType: 'group' } }
+    await service.consumeChannelPairing(message)
+    assert.equal(service.listChannels()[0].config.allowedSenderId, undefined)
+    await service.consumeChannelPairing({ ...message, meta: { chatType: 'p2p' } })
+    const bound = service.listChannels()[0]
+    assert.equal(bound.config.allowedSenderId, 'owner')
+    assert.equal(bound.config.remoteAssistantEnabled, true)
+    await service.consumeChannelPairing({ ...message, sender: 'stranger', meta: { chatType: 'p2p' } })
+    assert.equal(service.listChannels()[0].config.allowedSenderId, 'owner')
+    const oldPairing = service.startChannelPairing('feishu')
+    await service.upsertChannel({ id: 'feishu', type: 'feishu-app', name: 'Fixture', enabled: true,
+      config: { appId: 'different-app', appSecret: 'different-secret' } })
+    await service.consumeChannelPairing({ ...message, text: `/bind ${oldPairing.code}`, meta: { chatType: 'p2p' } })
+    assert.equal(service.listChannels()[0].config.allowedSenderId, null)
+    assert.equal(service.listChannels()[0].config.remoteAssistantEnabled, false)
+  })
+})
+
+test('a WeChat completion arriving before the QR request returns is saved without the settings page', async () => {
+  await withVault(async ({ db, sidecar, service }) => {
+    let completion: Promise<void> | undefined
+    sidecar.startWechatLogin = async (id, _force, sessionKey) => {
+      assert.equal(JSON.parse(db.getSetting(`wechat_login:${id}`)!).sessionKey, sessionKey)
+      completion = service.completeWechatBinding({ channelId: id, sessionKey, accountId: 'account', userId: 'owner' })
+      return { success: true, sessionKey }
+    }
+    const started = await service.startWechatLogin({ id: 'wechat' })
+    await completion
+    const status = await service.getWechatLoginStatus('wechat', String(started.sessionKey))
+    assert.equal(status.status, 'connected')
+    assert.equal(service.listChannels()[0].config.allowedSenderId, 'owner')
+  })
+})
+
+test('cancelling while the adapter receives a completed binding cannot re-enable it', async () => {
+  await withVault(async ({ db, sidecar, service }) => {
+    await service.startWechatLogin({ id: 'wechat' })
+    const { sessionKey } = JSON.parse(db.getSetting('wechat_login:wechat')!)
+    let release!: () => void
+    let entered!: () => void
+    const started = new Promise<void>(resolve => { entered = resolve })
+    const gate = new Promise<void>(resolve => { release = resolve })
+    const mirror = sidecar.upsertChannel
+    let paused = false
+    let adapterEnabled = false
+    sidecar.upsertChannel = async payload => {
+      adapterEnabled = Boolean(payload.enabled)
+      if (payload.enabled && !paused) { paused = true; entered(); await gate }
+      return mirror(payload)
+    }
+    const completion = service.completeWechatBinding({ channelId: 'wechat', sessionKey, accountId: 'account', userId: 'owner' })
+    await started
+    const cancelled = service.setChannelEnabled('wechat', false)
+    release()
+    await Promise.all([completion, cancelled])
+    assert.equal(service.listChannels()[0].enabled, false)
+    assert.equal(adapterEnabled, false)
+    assert.equal((await service.getWechatLoginStatus('wechat', sessionKey)).status, 'cancelled')
+  })
+})
+
+test('an adapter acknowledgement cannot erase a pending deletion', async () => {
+  await withVault(async ({ db, sidecar, service }) => {
+    await service.upsertChannel({ id: 'wechat', type: 'wechat-openclaw', name: 'Fixture', enabled: true, config: { accountId: 'account' } })
+    sidecar.setDeleteFails(true)
+    await assert.rejects(service.deleteChannel('wechat'), /sidecar_delete_failed/)
+    service.recordChannelDeliveryResult('wechat', { success: true })
+    assert.equal(db.getAgentChannel('wechat')?.last_error, 'channel_delete_pending')
+    await assert.rejects(service.setChannelEnabled('wechat', true), /正在删除/)
+    await assert.rejects(service.startWechatLogin({ id: 'wechat' }), /正在删除/)
+  })
+})
+
+test('an incomplete WeChat identity remains unbound and does not poison the durable inbox', async () => {
+  await withVault(async ({ db, service }) => {
+    const started = await service.startWechatLogin({ id: 'wechat' })
+    const sessionKey = String(started.sessionKey)
+    await service.completeWechatBinding({ channelId: 'wechat', sessionKey, accountId: 'account', userId: '' })
+    assert.equal(db.getAgentChannel('wechat')?.enabled, 0)
+    assert.equal((await service.getWechatLoginStatus('wechat', sessionKey)).status, 'error')
+    await service.completeWechatBinding({ channelId: 'wechat', sessionKey, accountId: 'account', userId: 'late-owner' })
+    assert.equal(service.listChannels()[0].config.allowedSenderId, undefined)
+  })
+})
+
+test('WeChat binding completes in Main once and ignores an old result after cancellation', async () => {
+  await withVault(async ({ db, sidecar, service }) => {
+    await service.upsertChannel({ id: 'wechat', type: 'wechat-openclaw', name: 'Fixture', enabled: false, config: {} })
+    db.setSetting('wechat_login:wechat', JSON.stringify({ sessionKey: 'fixture-session', status: 'pending' }))
+    const before = sidecar.upserts.length
+    const result = { channelId: 'wechat', sessionKey: 'fixture-session', accountId: 'fixture-account', userId: 'owner' }
+    await Promise.all([service.completeWechatBinding(result), service.completeWechatBinding(result)])
+    assert.equal(sidecar.upserts.length, before + 1)
+    assert.equal(service.listChannels()[0].config.allowedSenderId, 'owner')
+    assert.equal(service.listChannels()[0].enabled, true)
+    await service.setChannelEnabled('wechat', false)
+    await service.completeWechatBinding(result)
+    assert.equal(service.listChannels()[0].enabled, false)
+  })
+})
+
+test('a channel startup failure is returned and recorded instead of claiming connected', async () => {
+  await withVault(async ({ db, sidecar, service }) => {
+    sidecar.startChannel = async () => ({ success: false, error: 'fixture_connection_failed' })
+    await assert.rejects(service.upsertChannel({ id: 'wechat', type: 'wechat-openclaw', name: 'Fixture', enabled: true,
+      config: { accountId: 'fixture-account' } }), /fixture_connection_failed/)
+    assert.equal(db.getAgentChannel('wechat')?.last_error, 'fixture_connection_failed')
+  })
+})
+
+test('verified stored WeChat credentials restore their existing owner without accepting an unrelated account', async () => {
+  await withVault(async ({ service }) => {
+    await service.upsertChannel({ id: 'wechat', type: 'wechat-openclaw', name: 'Fixture', enabled: true,
+      config: { accountId: 'existing-account' } })
+    await service.completeWechatBinding({ channelId: 'wechat', restored: true, accountId: 'unrelated-account', userId: 'stranger' })
+    assert.equal(service.listChannels()[0].config.allowedSenderId, undefined)
+    await service.completeWechatBinding({ channelId: 'wechat', restored: true, accountId: 'existing-account', userId: 'owner', bindingId: `restored-${createHash('sha256').update('wechat:existing-account:owner').digest('hex').slice(0, 32)}` })
+    assert.equal(service.listChannels()[0].config.allowedSenderId, 'owner')
+    await service.completeWechatBinding({ channelId: 'wechat', restored: true, accountId: 'existing-account', userId: 'stranger' })
+    assert.equal(service.listChannels()[0].config.allowedSenderId, 'owner')
+  })
+})
 
 test('channel public projection never returns a secret while runtime hydration still works', async () => {
   await withVault(async ({ db, sidecar, service }) => {

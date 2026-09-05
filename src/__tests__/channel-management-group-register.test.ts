@@ -73,6 +73,7 @@ function createMockDeps(): ChannelManagementGroupDeps {
     throw new Error(`mock dep ${label} should not be called from registration test`)
   }
   return {
+    startChannelPairing: fail('startChannelPairing') as ChannelManagementGroupDeps['startChannelPairing'],
     upsertChannel: fail('upsertChannel') as ChannelManagementGroupDeps['upsertChannel'],
     testChannel: fail('testChannel') as ChannelManagementGroupDeps['testChannel'],
     startWechatLogin: fail('startWechatLogin') as ChannelManagementGroupDeps['startWechatLogin'],
@@ -95,7 +96,7 @@ test('channelManagementGroup.register wires the 8 documented channels exactly on
     expected,
     'register must subscribe to exactly the 8 channel-management channels',
   )
-  assert.equal(handleCalls.length, 8, 'each channel must be registered exactly once')
+  assert.equal(handleCalls.length, 9, 'each channel must be registered exactly once')
 
   // Spot-check the exact channel literals per the plan (V2.1k, §3 V2.1) so
   // accidental renames trip this test even if the channel count happens to
@@ -103,6 +104,7 @@ test('channelManagementGroup.register wires the 8 documented channels exactly on
   // pins the main-side literals.
   for (const required of [
     'agent:upsertChannel',
+    'agent:startChannelPairing',
     'agent:testChannel',
     'agent:startWechatLogin',
     'agent:getWechatLoginStatus',

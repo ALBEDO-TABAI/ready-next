@@ -319,13 +319,14 @@ test('remote IM automatic outbound file collection is retired', () => {
   assert.match(source, /sendFileToScopeThread/)
 })
 
-test('explicit remote IM outbound attachments remain limited to WeChat', () => {
+test('explicit remote IM outbound attachments support WeChat and Feishu', () => {
   // eslint-disable-next-line ready/no-source-grep-test -- direct send keeps its channel-type boundary.
   const source = readFileSync(new URL('../main/modules/agent-control/runtime-core/remote-channel-service.ts', import.meta.url), 'utf8')
 
   assert.match(source, /private channelSupportsOutboundAttachments\(channelId/)
   assert.match(source, /this\.channelSupportsOutboundAttachments\(thread\.channel_id\)/)
   assert.match(source, /channel\?\.type === 'wechat-openclaw'/)
+  assert.match(source, /channel\?\.type === 'feishu-app'/)
   assert.match(source, /async sendFileToScopeThread/)
 })
 

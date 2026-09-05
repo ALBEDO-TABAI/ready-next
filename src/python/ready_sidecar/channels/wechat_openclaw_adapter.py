@@ -17,7 +17,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from urllib import error as urlerror
 from urllib import parse, request
 
-from .base import ChannelAdapter, now_iso
+from .base import ChannelAdapter, now_iso, write_private_bytes
 
 
 DEFAULT_BASE_URL = "https://ilinkai.weixin.qq.com"
@@ -41,6 +41,19 @@ ITEM_TYPE_IMAGE = 2
 ITEM_TYPE_VOICE = 3
 ITEM_TYPE_FILE = 4
 ITEM_TYPE_VIDEO = 5
+
+
+def _write_private_json(path: Path, data: Any) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(path.name + "." + uuid.uuid4().hex + ".tmp")
+    try:
+        with open(temporary, "x", encoding="utf-8", opener=lambda p, flags: os.open(p, flags, 0o600)) as stream:
+            json.dump(data, stream, ensure_ascii=False)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def _safe_account_filename(account_id: str) -> str:
@@ -306,6 +319,7 @@ class WechatOpenClawAdapter(ChannelAdapter):
         self._login_lock = threading.Lock()
         self._login_sessions: Dict[str, Dict[str, Any]] = {}
         self._typing_tickets: Dict[str, str] = {}
+        self._restored_binding_id: Optional[str] = None
 
     @property
     def configured_account_id(self) -> str:
@@ -356,24 +370,22 @@ class WechatOpenClawAdapter(ChannelAdapter):
         return False, "微信尚未绑定，请在设置页启用后扫码绑定。"
 
     def start(self) -> tuple[bool, Optional[str]]:
+        if self._monitor_thread and self._monitor_thread.is_alive() and not self._stop_event.is_set():
+            return True, None
         account = self._resolve_account()
         if not account:
             self.mark_error("微信尚未绑定")
             return False, "微信尚未绑定，请先扫码绑定。"
-        try:
-            self._notify_start(account)
-        except Exception as exc:
-            self.mark_error(str(exc))
-            return False, str(exc)
-        self._stop_event.clear()
-        if not self._monitor_thread or not self._monitor_thread.is_alive():
-            self._monitor_thread = threading.Thread(target=self._monitor_loop, daemon=True, name=f"wechat-{self.channel_id}")
-            self._monitor_thread.start()
-        self.mark_running()
+        self._stop_event = threading.Event()
+        self.mark_starting()
+        self._monitor_thread = threading.Thread(target=self._monitor_loop, args=(self._stop_event,), daemon=True, name=f"wechat-{self.channel_id}")
+        self._monitor_thread.start()
         return True, None
 
     def stop(self) -> None:
         self._stop_event.set()
+        with self._login_lock:
+            self._login_sessions.clear()
         account = self._resolve_account()
         if account:
             try:
@@ -402,7 +414,6 @@ class WechatOpenClawAdapter(ChannelAdapter):
             self.beat()
             return True, None
         except Exception as exc:
-            self.mark_error(str(exc))
             return False, str(exc)
 
     def send_typing(self, thread: Optional[str], typing: bool = True) -> tuple[bool, Optional[str]]:
@@ -593,10 +604,10 @@ class WechatOpenClawAdapter(ChannelAdapter):
             "fileSizeCiphertext": _aes_ecb_padded_size(raw_size),
         }
 
-    def start_login(self, force: bool = False) -> Dict[str, Any]:
-        session_key = str(uuid.uuid4())
+    def start_login(self, session_key: str, force: bool = False) -> Dict[str, Any]:
         with self._login_lock:
             self._purge_expired_login_sessions_locked()
+            self._login_sessions.clear()
 
         try:
             response = self._post_json(
@@ -651,6 +662,7 @@ class WechatOpenClawAdapter(ChannelAdapter):
                 "message": session.get("message") or "",
                 "accountId": session.get("accountId") or "",
                 "qrcodeUrl": session.get("qrcodeUrl") or "",
+                "userId": session.get("userId") or "",
             }
 
     def submit_verify_code(self, session_key: str, code: str) -> Dict[str, Any]:
@@ -703,6 +715,9 @@ class WechatOpenClawAdapter(ChannelAdapter):
             except Exception:
                 response = {"status": "wait"}
 
+            with self._login_lock:
+                if session_key not in self._login_sessions:
+                    return
             status = str(response.get("status") or "wait")
             if status == "wait":
                 self._update_login_session(session_key, status="waiting", message="等待扫码确认。")
@@ -726,11 +741,15 @@ class WechatOpenClawAdapter(ChannelAdapter):
                         message="微信提示已绑定过，但 Ready 本地没有可用凭据，请重新启用。",
                     )
                     return
+                if self._emit:
+                    self._emit("channel.wechat-bound", {"id": session_key, "channelId": self.channel_id,
+                        "sessionKey": session_key, "accountId": account["accountId"], "userId": account.get("userId") or ""})
                 self._update_login_session(
                     session_key,
                     status="already_connected",
                     message="此微信已绑定过 Ready。",
                     accountId=account["accountId"],
+                    userId=account.get("userId") or "",
                 )
                 return
             elif status == "confirmed":
@@ -747,12 +766,19 @@ class WechatOpenClawAdapter(ChannelAdapter):
                     "userId": str(response.get("ilink_user_id") or "").strip(),
                     "savedAt": now_iso(),
                 }
-                self._save_account(account)
+                with self._login_lock:
+                    if session_key not in self._login_sessions:
+                        return
+                    self._save_account(account)
+                if self._emit:
+                    self._emit("channel.wechat-bound", {"id": session_key, "channelId": self.channel_id,
+                        "sessionKey": session_key, "accountId": account_id, "userId": account["userId"]})
                 self._update_login_session(
                     session_key,
                     status="connected",
                     message="微信已绑定。",
                     accountId=account_id,
+                    userId=account["userId"],
                 )
                 return
             time.sleep(1)
@@ -771,20 +797,26 @@ class WechatOpenClawAdapter(ChannelAdapter):
             if now - float(session.get("startedAt") or 0) > LOGIN_WAIT_SECONDS:
                 self._login_sessions.pop(key, None)
 
-    def _monitor_loop(self) -> None:
-        while not self._stop_event.is_set():
+    def _monitor_loop(self, stopped: threading.Event) -> None:
+        notified = False
+        while not stopped.is_set():
             account = self._resolve_account()
             if not account:
                 self.mark_error("微信账号凭据缺失")
                 return
             try:
-                self._poll_updates_once(account)
-                self.beat()
+                if not notified:
+                    self._notify_start(account)
+                    notified = True
+                self._poll_updates_once(account, stopped)
+                if not stopped.is_set():
+                    self.mark_running()
             except Exception as exc:
-                self.mark_error(str(exc))
-                self._stop_event.wait(5)
+                if not stopped.is_set():
+                    self.mark_error(str(exc))
+                stopped.wait(5)
 
-    def _poll_updates_once(self, account: Dict[str, str]) -> None:
+    def _poll_updates_once(self, account: Dict[str, str], stopped: Optional[threading.Event] = None) -> None:
         sync_path = self.accounts_dir / f"{_safe_account_filename(account['accountId'])}.sync.json"
         sync_buf = ""
         try:
@@ -805,31 +837,37 @@ class WechatOpenClawAdapter(ChannelAdapter):
             )
         except (TimeoutError, socket.timeout):
             return
+        if stopped is not None and stopped.is_set():
+            return
+        if int(response.get("ret") or 0) != 0:
+            raise RuntimeError(f"微信收信失败：ret={response.get('ret')}，请检查连接或重新绑定")
+        if not self.config.get("allowedSenderId") and account.get("userId") and self._emit:
+            self._restored_binding_id = "restored-" + hashlib.sha256(f"{self.channel_id}:{account['accountId']}:{account['userId']}".encode()).hexdigest()[:32]
+            self._emit("channel.wechat-restored", {"id": f"restore:{self.channel_id}:{account['accountId']}",
+                "channelId": self.channel_id, "accountId": account["accountId"], "userId": account["userId"], "restored": True, "bindingId": self._restored_binding_id})
         next_buf = response.get("get_updates_buf")
-        if isinstance(next_buf, str):
-            self.accounts_dir.mkdir(parents=True, exist_ok=True)
-            sync_path.write_text(json.dumps({"get_updates_buf": next_buf}, ensure_ascii=False), encoding="utf-8")
-
         messages = response.get("msgs")
         if not isinstance(messages, list):
-            return
+            messages = []
         context_tokens = self._load_context_tokens(account["accountId"])
         for msg in messages:
             if not isinstance(msg, dict):
                 continue
             thread = str(msg.get("from_user_id") or "").strip()
-            if not thread:
+            if not thread or (account.get("userId") and thread != account["userId"]):
                 continue
             token = str(msg.get("context_token") or "").strip()
-            if token:
+            if token and context_tokens.get(thread) != token:
                 context_tokens[thread] = token
+                self._save_context_tokens(account["accountId"], context_tokens)
             text = _extract_text(msg.get("item_list")).strip()
-            raw_id = str(msg.get("msg_id") or msg.get("client_id") or int(time.time() * 1000))
+            raw_id = str(msg.get("msg_id") or msg.get("client_id") or hashlib.sha256(json.dumps(msg, sort_keys=True).encode()).hexdigest())
             attachments = self._extract_message_attachments(account, msg.get("item_list"), raw_id)
             if not text and not attachments:
                 continue
             self._emit_message(thread, thread, text, raw_id, {"accountId": account["accountId"]}, attachments)
-        self._save_context_tokens(account["accountId"], context_tokens)
+        if isinstance(next_buf, str):
+            _write_private_json(sync_path, {"get_updates_buf": next_buf})
 
     def _extract_message_attachments(self, account: Dict[str, str], item_list: Any, raw_id: str) -> List[Dict[str, Any]]:
         if not isinstance(item_list, list):
@@ -895,7 +933,7 @@ class WechatOpenClawAdapter(ChannelAdapter):
             safe_name = _safe_filename(filename, "wechat-attachment.bin")
             self.attachment_root.mkdir(parents=True, exist_ok=True)
             target = self.attachment_root / f"{_safe_filename(fallback_id)}-{safe_name}"
-            target.write_bytes(data)
+            write_private_bytes(target, data)
             return {
                 "id": f"wx-attachment-{fallback_id[-12:]}",
                 "name": safe_name,
@@ -929,7 +967,7 @@ class WechatOpenClawAdapter(ChannelAdapter):
         meta: Dict[str, Any],
         attachments: Optional[List[Dict[str, Any]]] = None,
     ) -> None:
-        event_id = f"wx:{self.channel_id}:{raw_id}"
+        event_id = f"wx:{self.channel_id}:{meta.get('accountId', 'external')}:{raw_id}"
         self.emit_inbound({
             "id": event_id,
             "channelId": self.channel_id,
@@ -939,7 +977,7 @@ class WechatOpenClawAdapter(ChannelAdapter):
             "text": text,
             "timestamp": now_iso(),
             "idempotencyKey": event_id,
-            "meta": {"messageId": raw_id, **meta},
+            "meta": {"messageId": raw_id, **meta, "bindingId": self.config.get("bindingId") or self._restored_binding_id},
             "attachments": attachments or [],
         })
 
@@ -990,13 +1028,18 @@ class WechatOpenClawAdapter(ChannelAdapter):
         ids = [item for item in self._list_account_ids() if item != account_id]
         ids.append(account_id)
         self.state_dir.mkdir(parents=True, exist_ok=True)
-        self.account_index_path.write_text(json.dumps(ids, ensure_ascii=False, indent=2), encoding="utf-8")
         path = self.accounts_dir / f"{_safe_account_filename(account_id)}.json"
-        path.write_text(json.dumps(account, ensure_ascii=False, indent=2), encoding="utf-8")
-        try:
-            os.chmod(path, 0o600)
-        except Exception:
-            pass
+        _write_private_json(path, account)
+        _write_private_json(self.account_index_path, ids)
+
+    def forget_account(self) -> None:
+        account_id = self.configured_account_id
+        if not account_id:
+            return
+        stem = _safe_account_filename(account_id)
+        for suffix in [".json", ".sync.json", ".context-tokens.json"]:
+            (self.accounts_dir / f"{stem}{suffix}").unlink(missing_ok=True)
+        _write_private_json(self.account_index_path, [item for item in self._list_account_ids() if item != account_id])
 
     def _recent_tokens(self) -> List[str]:
         tokens: List[str] = []
@@ -1023,7 +1066,7 @@ class WechatOpenClawAdapter(ChannelAdapter):
     def _save_context_tokens(self, account_id: str, tokens: Dict[str, str]) -> None:
         self.accounts_dir.mkdir(parents=True, exist_ok=True)
         path = self.accounts_dir / f"{_safe_account_filename(account_id)}.context-tokens.json"
-        path.write_text(json.dumps(tokens, ensure_ascii=False), encoding="utf-8")
+        _write_private_json(path, tokens)
 
     def _base_info(self) -> Dict[str, str]:
         app_version = os.environ.get("READY_APP_VERSION", "0.0.0").strip() or "0.0.0"

@@ -946,6 +946,7 @@ export async function setupAgentIPC(
     channelManagementGroupDispose = null
   }
   channelManagementGroupDispose = channelManagementGroup.register(ipcMain, {
+    startChannelPairing: (id) => runtime!.startChannelPairing(id),
     upsertChannel: (payload) => runtime!.upsertChannel(payload),
     testChannel: (payload) => runtime!.testChannel(payload),
     startWechatLogin: (payload) => runtime!.startWechatLogin(payload),

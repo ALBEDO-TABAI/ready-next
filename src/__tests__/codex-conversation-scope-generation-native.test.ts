@@ -40,6 +40,7 @@ function createStore(repository: CodexBindingRepository): ConversationScopeStore
     getChatMessages: () => [],
   } as unknown as DatabaseManager
   return new ConversationScopeStore({
+      ensureChannelAlias: () => {},
     db,
     emitConversationEvent() {},
     mapChannelRow() { throw new Error('unexpected_channel_mapping') },
@@ -60,6 +61,7 @@ function createRealStore(
   repository: CodexBindingRepository,
 ): ConversationScopeStore {
   return new ConversationScopeStore({
+      ensureChannelAlias: () => {},
     db: database,
     emitConversationEvent() {},
     mapChannelRow() { throw new Error('unexpected_channel_mapping') },
@@ -148,6 +150,7 @@ test('list keeps latestAliasGeneration when the active binding is gone', async (
     getChatMessages: () => [],
   } as unknown as DatabaseManager
   const store = new ConversationScopeStore({
+      ensureChannelAlias: () => {},
     db,
     emitConversationEvent() {},
     mapChannelRow() { throw new Error('unexpected_channel_mapping') },

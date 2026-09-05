@@ -4,11 +4,10 @@ import os
 import sys
 import threading
 import time
-import uuid
-from collections import deque
 from datetime import datetime, timezone
-from threading import Lock
-from typing import Any, Deque, Dict, List, Optional
+from typing import Any, Dict, List, Optional
+from pathlib import Path
+from ready_sidecar.event_store import EventStore
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response
 from pydantic import BaseModel, Field
@@ -30,12 +29,6 @@ from ready_sidecar.channels.wechat_openclaw_adapter import WechatOpenClawAdapter
 # ---------------------------------------------------------------------------
 PARENT_PID = os.getppid()
 WATCHDOG_INTERVAL_SEC = 30
-
-# Bounded event queue: drop oldest events when full so a stalled consumer
-# can't grow memory unboundedly. Logged every EVENT_DROP_LOG_EVERY evictions.
-EVENT_QUEUE_MAXLEN = 10000
-EVENT_DROP_LOG_EVERY = 100
-
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -81,6 +74,8 @@ class ChannelSendPayload(BaseModel):
     thread: Optional[str] = None
     text: str
     attachments: List[Dict[str, Any]] = Field(default_factory=list)
+    deliveryId: Optional[str] = None
+    expectedBindingId: Optional[str] = None
 
 
 class ChannelTypingPayload(BaseModel):
@@ -91,6 +86,7 @@ class ChannelTypingPayload(BaseModel):
 
 class WechatLoginStartPayload(BaseModel):
     channel_id: str
+    session_key: str = Field(min_length=1, max_length=200)
     force: bool = False
 
 
@@ -110,42 +106,15 @@ class RuntimeState:
         self.started_at = now_iso()
         self.last_heartbeat_at: Optional[str] = None
         self.channels: Dict[str, ChannelConfig] = {}
-        self.events: Deque[Dict[str, Any]] = deque(maxlen=EVENT_QUEUE_MAXLEN)
-        self.dropped_event_count = 0
-        self.lock = Lock()
+        root = Path(os.environ.get("READY_SIDECAR_RUNTIME_ROOT") or str(Path.home() / ".ready-agent-sidecar"))
+        self.event_store = EventStore(root / "channel-events.db")
         self.channel_manager = ChannelManager(self.enqueue_event)
 
     def enqueue_event(self, event_type: str, payload: Dict[str, Any]) -> None:
-        with self.lock:
-            # When the deque is at maxlen, append() silently evicts the oldest
-            # entry. Detect that case and log periodically so a stalled puller
-            # is visible in the sidecar log.
-            at_capacity = len(self.events) == self.events.maxlen
-            self.events.append(
-                {
-                    "id": str(uuid.uuid4()),
-                    "type": event_type,
-                    "timestamp": now_iso(),
-                    "payload": payload,
-                }
-            )
-            if at_capacity:
-                self.dropped_event_count += 1
-                if self.dropped_event_count % EVENT_DROP_LOG_EVERY == 0:
-                    print(
-                        f"[sidecar] event queue at capacity, dropping oldest "
-                        f"(total dropped: {self.dropped_event_count})",
-                        flush=True,
-                    )
+        self.event_store.enqueue(event_type, payload)
 
     def pull_events(self, limit: int) -> List[Dict[str, Any]]:
-        with self.lock:
-            items: List[Dict[str, Any]] = []
-            for _ in range(max(1, limit)):
-                if not self.events:
-                    break
-                items.append(self.events.popleft())
-            return items
+        return self.event_store.pull(limit)
 
 
 state = RuntimeState()
@@ -203,11 +172,8 @@ def list_channels(_: None = Depends(check_auth)) -> Dict[str, Any]:
 def upsert_channel(channel: ChannelConfig, _: None = Depends(check_auth)) -> Dict[str, Any]:
     state.channels[channel.id] = channel
     state.channel_manager.upsert(ChannelConfigModel(**channel.model_dump()))
-    if channel.enabled:
-        state.channel_manager.start(channel.id)
-    else:
-        state.channel_manager.stop(channel.id)
-    return {"success": True, "channel": channel.model_dump()}
+    # Main owns the explicit start/stop transition after configuration is mirrored.
+    return {"success": True}
 
 
 @app.post("/channels/start")
@@ -246,7 +212,17 @@ def delete_channel(payload: Dict[str, str], _: None = Depends(check_auth)) -> Di
 
 @app.post("/channels/send")
 def send_channel(payload: ChannelSendPayload, _: None = Depends(check_auth)) -> Dict[str, Any]:
-    result = state.channel_manager.send(payload.id, payload.thread, payload.text, payload.attachments)
+    if payload.deliveryId:
+        previous = state.event_store.begin_delivery(payload.deliveryId, payload.model_dump(exclude={"deliveryId"}))
+        if previous is not None:
+            return previous
+    channel = state.channel_manager.channels.get(payload.id)
+    if not channel or not channel.enabled or (payload.expectedBindingId is not None and channel.config.get("bindingId") != payload.expectedBindingId):
+        result = {"success": False, "error": "channel_binding_changed_or_disabled"}
+    else:
+        result = state.channel_manager.send(payload.id, payload.thread, payload.text, payload.attachments)
+    if payload.deliveryId:
+        state.event_store.finish_delivery(payload.deliveryId, result)
     return result
 
 
@@ -280,9 +256,8 @@ async def feishu_callback(channel_id: str, request: Request) -> Response:
         raise HTTPException(status_code=404, detail="channel not found")
 
     adapter = state.channel_manager.adapters.get(channel_id)
-    if not isinstance(adapter, FeishuAppAdapter):
-        adapter = FeishuAppAdapter(channel.id, channel.type, channel.name, channel.config)
-        adapter.set_event_callback(state.enqueue_event)
+    if not channel.enabled or not isinstance(adapter, FeishuAppAdapter) or not adapter.verification_token:
+        raise HTTPException(status_code=403, detail="Authenticated Feishu callbacks are not configured")
 
     body = await request.body()
     status_code, headers, content = adapter.handle_callback(dict(request.headers), body)
@@ -323,7 +298,7 @@ def _get_wechat_adapter(channel_id: str) -> WechatOpenClawAdapter:
 @app.post("/channels/wechat-openclaw/login/start")
 def wechat_login_start(payload: WechatLoginStartPayload, _: None = Depends(check_auth)) -> Dict[str, Any]:
     adapter = _get_wechat_adapter(payload.channel_id)
-    return adapter.start_login(force=payload.force)
+    return adapter.start_login(payload.session_key, force=payload.force)
 
 
 @app.post("/channels/wechat-openclaw/login/status")
@@ -607,3 +582,9 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
+@app.post("/events/ack")
+def acknowledge_events(payload: Dict[str, List[str]], _: None = Depends(check_auth)) -> Dict[str, Any]:
+    state.event_store.ack(payload.get("ids", []))
+    return {"success": True}

@@ -44,12 +44,12 @@ function createHarness(options: {
     getSetting: () => '600',
     getAgentChannelEvent: () => null,
     getAgentChannelThread: () => ({ session_id: 'scope-remote' }),
-    getConversationScope: () => ({ message_visibility_epoch: epoch }),
+    getConversationScope: () => ({ id: 'scope-remote', message_visibility_epoch: epoch }),
     upsertAgentChannelEvent: (record: { eventId: string; status: string; error?: string | null }) => {
       eventStates.set(record.eventId, { status: record.status, error: record.error || null })
     },
     upsertAgentChannelThread: () => undefined,
-    getAgentChannel: () => null,
+    getAgentChannel: () => ({ id: 'channel-1', type: 'local-debug', enabled: 1, config_json: '{}' }),
     getChatMessages: () => [],
     markAgentChannelSeen: () => {
       if (options.markSeenThrows) throw new Error('seen_update_failed')
@@ -89,9 +89,9 @@ function createHarness(options: {
     text,
     attachments,
   })
-  const flush = () => (service as unknown as {
-    flushInboundChannel(key: string): Promise<void>
-  }).flushInboundChannel('channel-1::thread-1')
+  const flush = async () => {
+    for (const id of eventStates.keys()) await (service as unknown as { flushInboundChannel(key: string): Promise<void> }).flushInboundChannel(`channel-1::thread-1::${id}`)
+  }
 
   return {
     service,
