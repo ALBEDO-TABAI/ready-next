@@ -1,3 +1,4 @@
+import type { ChatGptOAuthStatus } from '../../shared/chatgpt-oauth'
 import type { BrowserDiagnosticsData } from '../modules/browser/types'
 import type { BrowserUtilityMenuRequest } from '../../shared/browser-utility-menu'
 import type { BrowserViewIntent, BrowserViewIntentAck } from '../../shared/browser-view-intent'
@@ -924,7 +925,7 @@ interface ElectronAgentAPI {
   }>>
   getWechatLoginStatus: (payload: {
     channelId: string
-    sessionKey: string
+    sessionKey?: string
   }) => Promise<IPCResponse<{
     sessionKey?: string
     qrcodeUrl?: string
@@ -3070,14 +3071,7 @@ interface SettingsTestResult {
   modelList?: string[]
 }
 
-interface ChatGptOAuthStatusData {
-  state: 'signed_out' | 'signed_in' | 'ready' | 'error'
-  connected: boolean
-  running: boolean
-  baseUrl: string
-  models: string[]
-  error?: string
-}
+
 
 type ExternalServiceKindData =
   | 'tavily'
@@ -3137,24 +3131,26 @@ interface ElectronSettingsAPI {
   testAIConnection: (
     config: AIModelConfigData
   ) => Promise<{ success: boolean; data?: SettingsTestResult; error?: string }>
+  cancelChatGptOAuth: (operationId: string) => Promise<{ success: boolean; data?: ChatGptOAuthStatus; error?: string }>
+  reopenChatGptOAuth: (operationId: string) => Promise<{ success: boolean; error?: string }>
   getChatGptOAuthStatus: () => Promise<{
     success: boolean
-    data?: ChatGptOAuthStatusData
+    data?: ChatGptOAuthStatus
     error?: string
   }>
   connectChatGptOAuth: () => Promise<{
     success: boolean
-    data?: ChatGptOAuthStatusData
+    data?: ChatGptOAuthStatus
     error?: string
   }>
   resumeChatGptOAuth: () => Promise<{
     success: boolean
-    data?: ChatGptOAuthStatusData
+    data?: ChatGptOAuthStatus
     error?: string
   }>
   disconnectChatGptOAuth: () => Promise<{
     success: boolean
-    data?: ChatGptOAuthStatusData
+    data?: ChatGptOAuthStatus
     error?: string
   }>
   listExternalServices: () => Promise<{ success: boolean; data?: PublicExternalServiceProfileData[]; error?: string }>

@@ -198,7 +198,7 @@ export const channelManagementGroup: IpcChannelGroup<ChannelManagementGroupDeps>
       try {
         const channelId = String(payload?.channelId || '')
         const sessionKey = String(payload?.sessionKey || '')
-        if (!channelId || !sessionKey) return { success: false, error: 'channelId and sessionKey are required' }
+        if (!channelId) return { success: false, error: 'channelId is required' }
         const result = await deps.getWechatLoginStatus(channelId, sessionKey)
         if (result.success === false) {
           return { success: false, error: String(result.error || 'wechat login status failed'), data: result }

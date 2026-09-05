@@ -281,3 +281,61 @@ test('connect persistence and disconnect cleanup share one lifecycle lane', asyn
     removeCount: 1,
   })
 })
+
+test('repeated authorization joins one operation and stays pending until profile persistence', async () => {
+  const h = createHarness()
+  let finishSave!: () => void
+  const saved = new Promise<void>(resolve => { finishSave = resolve })
+  let saves = 0
+  const first = h.service.connect(PROXY_API_KEY, { afterReady: async () => { saves++; await saved } })
+  const second = h.service.connect(PROXY_API_KEY)
+  assert.equal(h.service.getStatus().state, 'connecting')
+  h.resolveStart()
+  await new Promise(resolve => setImmediate(resolve))
+  assert.equal(h.counts().loginCount, 1)
+  assert.equal(saves, 1)
+  assert.equal(h.service.getStatus().state, 'connecting')
+  finishSave()
+  assert.equal((await first).state, 'ready')
+  assert.equal((await second).state, 'ready')
+})
+
+test('cancel aborts the exact login, rejects old cancellation, and permits a fresh login', async () => {
+  let aborted = false
+  const service = new ChatGptOAuthService({
+    credentialExists: () => false,
+    login: async ({ signal }) => new Promise((_, reject) => {
+      signal.addEventListener('abort', () => { aborted = true; reject(signal.reason) }, { once: true })
+    }),
+    startServer: async () => { throw new Error('must not start') },
+    removeCredential: async () => {},
+  })
+  const pending = service.connect()
+  const rejected = assert.rejects(pending, /取消/)
+  await new Promise(resolve => setImmediate(resolve))
+  const id = service.getStatus().operation!.id
+  await assert.rejects(service.cancelConnect('old'), /已更新/)
+  assert.equal(aborted, false)
+  await service.cancelConnect(id)
+  await rejected
+  assert.equal(aborted, true)
+  assert.equal(service.getStatus().operation, undefined)
+  const next = service.connect()
+  const nextRejected = assert.rejects(next, /取消/)
+  await new Promise(resolve => setImmediate(resolve))
+  assert.notEqual(service.getStatus().operation!.id, id)
+  await service.cancelConnect(service.getStatus().operation!.id)
+  await nextRejected
+})
+
+test('model discovery failure keeps the newly authorized credential for recovery', async () => {
+  const h = createHarness()
+  h.setStartError(new Error('catalog offline'))
+  h.resolveStart()
+  await assert.rejects(h.service.connect(PROXY_API_KEY), /catalog offline/)
+  assert.equal(h.service.getStatus().connected, true)
+  assert.equal(h.service.getStatus().running, false)
+  h.setStartError(null)
+  assert.equal((await h.service.ensureReady([], PROXY_API_KEY)).state, 'ready')
+  assert.equal(h.counts().loginCount, 1)
+})

@@ -205,3 +205,112 @@ test('an unexpected current-turn failure reports failure to its owner without re
   await h.restart()
   assert.equal(h.inputs.length, 1)
 })
+
+test('failed WeChat QR initialization persists an actionable terminal error', async t => {
+  if (skipIfSqliteUnavailable(t, 'wechat initialization error')) return
+  const db = new DatabaseManager(true); t.after(() => db.close())
+  const service = new ChannelConfigService({ db, sidecar: {
+    isRunning: () => true, upsertChannel: async () => ({ success: true }),
+    startWechatLogin: async () => { throw new Error('QR network unavailable') },
+  } as never, startSidecar: async () => {}, heartbeat: {} as never })
+  await assert.rejects(service.startWechatLogin({ id: 'w' }), /QR network unavailable/)
+  const state = JSON.parse(db.getSetting('wechat_login:w')!)
+  assert.equal(state.status, 'error')
+  assert.match(db.getAgentChannel('w')!.last_error!, /QR network unavailable/)
+  assert.equal((await service.getWechatLoginStatus('w', '')).status, 'error')
+})
+
+test('a second WeChat start joins the pending request and current progress survives page reentry', async t => {
+  if (skipIfSqliteUnavailable(t, 'wechat pending QR')) return
+  const db = new DatabaseManager(true); t.after(() => db.close())
+  let finish!: () => void, calls = 0
+  const gate = new Promise<void>(resolve => { finish = resolve })
+  const service = new ChannelConfigService({ db, sidecar: {
+    isRunning: () => true, upsertChannel: async () => ({ success: true }),
+    startWechatLogin: async (_id: string, _force: boolean, sessionKey: string) => {
+      calls++; await gate; return { success: true, sessionKey, status: 'waiting', qrcodeUrl: 'fixture-qr' }
+    },
+  } as never, startSidecar: async () => {}, heartbeat: {} as never })
+  const first = service.startWechatLogin({ id: 'w' })
+  const second = service.startWechatLogin({ id: 'w' })
+  await new Promise(resolve => setImmediate(resolve))
+  assert.equal(calls, 1)
+  assert.equal((await service.getWechatLoginStatus('w', '')).status, 'preparing')
+  finish()
+  assert.deepEqual(await first, await second)
+})
+
+test('cancelled WeChat QR requests cannot revive the connection when the response arrives late', async t => {
+  if (skipIfSqliteUnavailable(t, 'wechat cancelled response')) return
+  const db = new DatabaseManager(true); t.after(() => db.close())
+  let finish!: () => void
+  const gate = new Promise<void>(resolve => { finish = resolve })
+  const service = new ChannelConfigService({ db, sidecar: {
+    isRunning: () => true, upsertChannel: async () => ({ success: true }), stopChannel: async () => ({ success: true }),
+    startWechatLogin: async (_id: string, _force: boolean, sessionKey: string) => {
+      await gate; return { success: true, sessionKey, status: 'waiting', qrcodeUrl: 'fixture-qr' }
+    },
+  } as never, startSidecar: async () => {}, heartbeat: {} as never })
+  const starting = service.startWechatLogin({ id: 'w' })
+  await new Promise(resolve => setImmediate(resolve))
+  const cancelling = service.setChannelEnabled('w', false)
+  finish()
+  assert.equal((await starting).success, false)
+  await cancelling
+  assert.equal((await service.getWechatLoginStatus('w', '')).status, 'idle')
+  assert.equal(db.getAgentChannel('w')!.enabled, 0)
+})
+
+test('WeChat reports activation progress and startup failure after mobile confirmation', async t => {
+  if (skipIfSqliteUnavailable(t, 'wechat activation status')) return
+  const db = new DatabaseManager(true); t.after(() => db.close())
+  db.upsertAgentChannel({ id: 'w', type: 'wechat-openclaw', name: 'WeChat', enabled: false, configJson: '{}' })
+  db.setSetting('wechat_login:w', JSON.stringify({ status: 'pending', sessionKey: 'session' }))
+  let finish!: () => void
+  const gate = new Promise<void>(resolve => { finish = resolve })
+  const service = new ChannelConfigService({ db, sidecar: {
+    isRunning: () => true, upsertChannel: async () => ({ success: true }),
+    startChannel: async () => { await gate; throw new Error('connection start failed') },
+  } as never, startSidecar: async () => {}, heartbeat: {} as never })
+  const completing = service.completeWechatBinding({ channelId: 'w', sessionKey: 'session', accountId: 'account', userId: 'owner' })
+  const failure = assert.rejects(completing, /connection start failed/)
+  await new Promise(resolve => setImmediate(resolve))
+  assert.equal((await service.getWechatLoginStatus('w', '')).status, 'activating')
+  finish(); await failure
+  const result = await service.getWechatLoginStatus('w', '')
+  assert.equal(result.status, 'error')
+  assert.match(String(result.error), /connection start failed/)
+})
+
+test('WeChat activation interrupted by restart resumes from the stored binding', async t => {
+  if (skipIfSqliteUnavailable(t, 'wechat activation restart')) return
+  const db = new DatabaseManager(true); t.after(() => db.close())
+  db.upsertAgentChannel({ id: 'w', type: 'wechat-openclaw', name: 'WeChat', enabled: true,
+    configJson: JSON.stringify({ accountId: 'account', allowedSenderId: 'owner', bindingId: 'b' }) })
+  db.setSetting('wechat_login:w', JSON.stringify({ status: 'activating', sessionKey: 'session', bindingId: 'b' }))
+  let started = 0
+  const service = new ChannelConfigService({ db, sidecar: { isRunning: () => true,
+    upsertChannel: async () => ({ success: true }), startChannel: async () => { started++; return { success: true } },
+  } as never, startSidecar: async () => {}, heartbeat: {} as never })
+  assert.equal((await service.getWechatLoginStatus('w', '')).status, 'connected')
+  assert.equal(started, 1)
+})
+
+test('late QR polling cannot replace a committed WeChat connection with a missing-session error', async t => {
+  if (skipIfSqliteUnavailable(t, 'wechat stale polling response')) return
+  const db = new DatabaseManager(true); t.after(() => db.close())
+  db.upsertAgentChannel({ id: 'w', type: 'wechat-openclaw', name: 'WeChat', enabled: false, configJson: '{}' })
+  db.setSetting('wechat_login:w', JSON.stringify({ status: 'pending', sessionKey: 'session' }))
+  let finish!: () => void
+  const gate = new Promise<void>(resolve => { finish = resolve })
+  const service = new ChannelConfigService({ db, sidecar: { isRunning: () => true,
+    upsertChannel: async () => ({ success: true }), startChannel: async () => ({ success: true }),
+    getWechatLoginStatus: async () => { await gate; return { success: false, status: 'missing', error: 'session missing' } },
+  } as never, startSidecar: async () => {}, heartbeat: {} as never })
+  const polling = service.getWechatLoginStatus('w', 'session')
+  await service.completeWechatBinding({ channelId: 'w', sessionKey: 'session', accountId: 'account', userId: 'owner' })
+  finish()
+  assert.equal((await polling).status, 'connected')
+  assert.equal(JSON.parse(db.getSetting('wechat_login:w')!).status, 'connected')
+  assert.equal(db.getAgentChannel('w')!.last_error, null)
+})

@@ -57,7 +57,7 @@ function resolveChannelCredentialState(
 
 type WechatLoginState = {
   sessionKey: string | null
-  status: 'pending' | 'connected' | 'error'
+  status: 'pending' | 'activating' | 'connected' | 'error'
   error?: string
   accountId?: string
   userId?: string
@@ -65,6 +65,8 @@ type WechatLoginState = {
 }
 
 export class ChannelConfigService {
+  private readonly wechatActivations = new Map<string, Promise<void>>()
+  private readonly wechatLoginStarts = new Map<string, Promise<Record<string, unknown>>>()
   private readonly channelMirrors = new Map<string, Promise<unknown>>()
   private readonly mutationGenerations = new Map<string, number>()
   constructor(private readonly deps: ChannelConfigServiceDeps) {}
@@ -256,35 +258,68 @@ export class ChannelConfigService {
     }
   }
 
-  async startWechatLogin(payload: { id?: string; force?: boolean }): Promise<Record<string, unknown>> {
+  startWechatLogin(payload: { id?: string; force?: boolean }): Promise<Record<string, unknown>> {
     const id = payload.id || 'channel-wechat-openclaw-default'
-    const generation = this.nextMutationGeneration(id)
-    const existing = this.deps.db.getAgentChannel(id)
-    if (existing?.last_error === CHANNEL_DELETE_PENDING_ERROR) throw new Error('连接正在删除，请稍后再试')
-    if (existing && existing.type !== 'wechat-openclaw') throw new Error('请选择微信连接')
+    const existing = this.wechatLoginStarts.get(id)
+    if (existing) return existing
+    const pending = this.startWechatLoginOnce(id, payload)
+    this.wechatLoginStarts.set(id, pending)
+    const clear = () => { if (this.wechatLoginStarts.get(id) === pending) this.wechatLoginStarts.delete(id) }
+    void pending.then(clear, clear)
+    return pending
+  }
+
+  private async startWechatLoginOnce(id: string, payload: { force?: boolean }): Promise<Record<string, unknown>> {
     const sessionKey = randomUUID()
-    this.deps.db.upsertAgentChannel({ id, type: 'wechat-openclaw', name: existing?.name || '微信', enabled: false,
-      configJson: existing?.config_json || '{}' })
-    this.deps.db.setSetting(`wechat_login:${id}`, JSON.stringify({ sessionKey, status: 'pending' }))
-    if (!this.deps.sidecar.isRunning()) await this.deps.startSidecar()
-    return this.serializeChannelMirror(id, async () => {
-      if (this.mutationGenerations.get(id) !== generation) return { success: false, error: '绑定已取消或设置已变更' }
-      const row = this.deps.db.getAgentChannel(id)
-      if (!row) return { success: false, error: '连接已删除' }
-      const config = this.mapRuntimeChannelRow(row).config
-      delete config.defaultTarget
-      const mirrored = await this.deps.sidecar.upsertChannel({ id, type: 'wechat-openclaw', name: row.name, enabled: false, config })
-      if (mirrored.success !== true) throw new Error(String(mirrored.error || '连接设置未生效'))
-      const result = await this.deps.sidecar.startWechatLogin(id, payload.force ?? true, sessionKey)
-      if (this.readWechatLoginState(id)?.sessionKey !== sessionKey) return { success: false, error: '绑定已取消或设置已变更' }
-      return result
-    })
+    try {
+      const generation = this.nextMutationGeneration(id)
+      const existing = this.deps.db.getAgentChannel(id)
+      if (existing?.last_error === CHANNEL_DELETE_PENDING_ERROR) throw new Error('连接正在删除，请稍后再试')
+      if (existing && existing.type !== 'wechat-openclaw') throw new Error('请选择微信连接')
+      this.deps.db.upsertAgentChannel({ id, type: 'wechat-openclaw', name: existing?.name || '微信', enabled: false,
+        configJson: existing?.config_json || '{}' })
+      this.deps.db.setSetting(`wechat_login:${id}`, JSON.stringify({ sessionKey, status: 'pending' }))
+      this.deps.db.setAgentChannelError(id, null)
+      if (!this.deps.sidecar.isRunning()) await this.deps.startSidecar()
+      return await this.serializeChannelMirror(id, async () => {
+        if (this.mutationGenerations.get(id) !== generation) return { success: false, error: '绑定已取消或设置已变更' }
+        const row = this.deps.db.getAgentChannel(id)
+        if (!row) return { success: false, error: '连接已删除' }
+        const config = this.mapRuntimeChannelRow(row).config
+        delete config.defaultTarget
+        const mirrored = await this.deps.sidecar.upsertChannel({ id, type: 'wechat-openclaw', name: row.name, enabled: false, config })
+        if (mirrored.success !== true) throw new Error(String(mirrored.error || '连接设置未生效'))
+        const result = await this.deps.sidecar.startWechatLogin(id, payload.force ?? true, sessionKey)
+        if (this.readWechatLoginState(id)?.sessionKey !== sessionKey) return { success: false, error: '绑定已取消或设置已变更' }
+        if (result.success !== true) throw new Error(String(result.error || '无法生成二维码，请重试'))
+        return result
+      })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      if (this.readWechatLoginState(id)?.sessionKey === sessionKey) {
+        this.deps.db.setSetting(`wechat_login:${id}`, JSON.stringify({ sessionKey, status: 'error', error: message }))
+        this.deps.db.setAgentChannelError(id, message)
+      }
+      throw error
+    }
   }
 
   async getWechatLoginStatus(channelId: string, sessionKey: string): Promise<Record<string, unknown>> {
     const state = this.readWechatLoginState(channelId)
+    if (!sessionKey) {
+      if (!state?.sessionKey) return { success: true, status: 'idle' }
+      sessionKey = state.sessionKey
+    }
     if (state?.sessionKey !== sessionKey) return { success: false, status: 'cancelled', error: '绑定已取消或已更新' }
     if (state.status === 'error') return { ...state, success: false }
+    if (this.wechatLoginStarts.has(channelId)) return { success: true, sessionKey, status: 'preparing', message: '正在准备微信连接并获取二维码…' }
+    if (state.status === 'activating') {
+      if (!this.wechatActivations.has(channelId) && state.bindingId) {
+        await this.activateWechatBinding(channelId, state.bindingId)
+        return this.getWechatLoginStatus(channelId, sessionKey)
+      }
+      return { success: true, sessionKey, status: 'activating', message: '已确认扫码，正在启动连接…' }
+    }
     if (state.status === 'connected') {
       const row = this.deps.db.getAgentChannel(channelId)
       const config = tryParseJson<Record<string, unknown>>(row?.config_json || '{}', {})
@@ -293,15 +328,35 @@ export class ChannelConfigService {
         : { success: false, status: 'cancelled', error: '绑定已取消或已更新' }
     }
     if (!this.deps.sidecar.isRunning()) await this.deps.startSidecar()
-    const result = await this.deps.sidecar.getWechatLoginStatus(channelId, sessionKey)
+    let result: Record<string, unknown>
+    try {
+      result = await this.deps.sidecar.getWechatLoginStatus(channelId, sessionKey)
+    } catch (error) {
+      const current = this.readWechatLoginState(channelId)
+      if (current?.sessionKey !== sessionKey || current.status !== 'pending') return this.getWechatLoginStatus(channelId, sessionKey)
+      throw error
+    }
+    // The sidecar event can finish binding and replace its QR adapter while
+    // this earlier read is in flight. Only the still-pending owner may consume it.
+    const current = this.readWechatLoginState(channelId)
+    if (current?.sessionKey !== sessionKey || current.status !== 'pending') return this.getWechatLoginStatus(channelId, sessionKey)
     if (result.status === 'connected' || result.status === 'already_connected') {
       await this.completeWechatBinding({ ...result, channelId, sessionKey })
       const completed = this.readWechatLoginState(channelId)
       const row = this.deps.db.getAgentChannel(channelId)
       const config = tryParseJson<Record<string, unknown>>(row?.config_json || '{}', {})
+      if (completed?.sessionKey === sessionKey && completed.status === 'activating') return { success: true, sessionKey, status: 'activating', message: '已确认扫码，正在启动连接…' }
+      if (completed?.sessionKey === sessionKey && completed.status === 'error') return { success: false, ...completed }
       return completed?.sessionKey === sessionKey && completed.status === 'connected' && row?.enabled && config.bindingId === completed.bindingId
         ? { success: true, ...completed }
         : { success: false, status: 'cancelled', error: '绑定已取消或已更新' }
+    }
+    if (result.success === false || result.status === 'error' || result.status === 'expired') {
+      const error = String(result.error || result.message || '绑定已结束，请重新生成二维码。')
+      if (this.readWechatLoginState(channelId)?.sessionKey === sessionKey) {
+        this.deps.db.setSetting(`wechat_login:${channelId}`, JSON.stringify({ sessionKey, status: 'error', error }))
+        this.deps.db.setAgentChannelError(channelId, error)
+      }
     }
     return result
   }
@@ -346,14 +401,43 @@ export class ChannelConfigService {
       this.deps.db.upsertAgentChannel({ id, type: 'wechat-openclaw', name: row.name, enabled: true,
         configJson: JSON.stringify({ ...config, accountId, allowedSenderId: owner, bindingId, remoteAssistantEnabled: true }) })
       this.deps.db.setSetting(`wechat_login:${id}`, JSON.stringify({ sessionKey: restoring ? null : payload.sessionKey,
-        status: 'connected', accountId, userId: owner, bindingId }))
+        status: 'activating', accountId, userId: owner, bindingId }))
       raw.exec('COMMIT')
     } catch (error) {
       if (raw.inTransaction) raw.exec('ROLLBACK')
       throw error
     }
     this.nextMutationGeneration(id)
-    if (this.deps.sidecar.isRunning()) await this.syncChannel(id)
+    await this.activateWechatBinding(id, bindingId)
+  }
+
+  private activateWechatBinding(id: string, bindingId: string): Promise<void> {
+    const existing = this.wechatActivations.get(id)
+    if (existing) return existing
+    const pending = this.activateWechatBindingOnce(id, bindingId)
+    this.wechatActivations.set(id, pending)
+    const clear = () => { if (this.wechatActivations.get(id) === pending) this.wechatActivations.delete(id) }
+    void pending.then(clear, clear)
+    return pending
+  }
+
+  private async activateWechatBindingOnce(id: string, bindingId: string): Promise<void> {
+    try {
+      if (!this.deps.sidecar.isRunning()) await this.deps.startSidecar()
+      if (this.deps.sidecar.isRunning()) await this.syncChannel(id)
+      const current = this.readWechatLoginState(id)
+      if (current?.bindingId === bindingId && current.status === 'activating') {
+        this.deps.db.setSetting(`wechat_login:${id}`, JSON.stringify({ ...current, status: 'connected' }))
+      }
+    } catch (error) {
+      const current = this.readWechatLoginState(id)
+      if (current?.bindingId === bindingId && current.status === 'activating') {
+        const message = error instanceof Error ? error.message : String(error)
+        this.deps.db.setSetting(`wechat_login:${id}`, JSON.stringify({ ...current, status: 'error', error: message }))
+        this.deps.db.setAgentChannelError(id, message)
+      }
+      throw error
+    }
   }
 
   startChannelPairing(id: string): { code: string; expiresAt: string } {

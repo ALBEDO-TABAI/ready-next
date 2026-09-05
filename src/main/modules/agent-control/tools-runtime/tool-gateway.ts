@@ -215,33 +215,33 @@ export class ToolGateway {
   }
 
   private listResolvedToolDescriptors(): ToolDescriptor[] {
-    return this.listCapabilityGroups().flatMap((group) =>
-      group.toolNames.map((toolName) => {
-        const definition = this.getToolDefinition(toolName)
-        return {
-          id: toolName,
-          group: group.id,
-          description: definition?.description || group.description,
-          module: group.id,
-          executionKind: group.executionKinds[0] === 'job'
-            ? 'job'
-            : group.executionKinds[0] === 'pipeline'
-              ? 'pipeline'
-              : group.executionKinds[0] === 'interactive'
-                ? 'interactive'
-                : 'deterministic',
-          family: `${group.id}_*`,
-          domain: definition?.domain,
-          kind: definition?.kind,
-          concurrency: definition?.concurrency,
-          interruptBehavior: definition?.interruptBehavior,
-          timeoutProfile: definition?.timeoutProfile,
-          supportsTextBridge: definition?.supportsTextBridge,
-          projectionHint: definition?.projectionHint,
-          resultShape: definition?.resultShape,
-        }
-      }),
-    )
+    // Resolve one catalog snapshot. Looking up every name separately rebuilds
+    // all dynamic skill definitions for each tool and blocks status polling.
+    return this.registry.listToolDefinitions().map((definition) => {
+      const group = this.capabilityGroupMeta.get(definition.groupId)!
+      return {
+        id: definition.name,
+        group: group.id,
+        description: definition.description || group.description,
+        module: group.id,
+        executionKind: group.executionKinds[0] === 'job'
+          ? 'job'
+          : group.executionKinds[0] === 'pipeline'
+            ? 'pipeline'
+            : group.executionKinds[0] === 'interactive'
+              ? 'interactive'
+              : 'deterministic',
+        family: `${group.id}_*`,
+        domain: definition.domain,
+        kind: definition.kind,
+        concurrency: definition.concurrency,
+        interruptBehavior: definition.interruptBehavior,
+        timeoutProfile: definition.timeoutProfile,
+        supportsTextBridge: definition.supportsTextBridge,
+        projectionHint: definition.projectionHint,
+        resultShape: definition.resultShape,
+      }
+    })
   }
 
   listCapabilityGroups(): CapabilityGroupRegistryEntry[] {
@@ -342,7 +342,7 @@ export class ToolGateway {
   }
 
   count(): number {
-    return this.listResolvedToolDescriptors().length
+    return this.registry.listToolDefinitions().length
   }
 
   listToolGroups(): string[] {

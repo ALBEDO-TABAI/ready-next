@@ -17,9 +17,8 @@ test('user chat entries stay right-anchored while message text reads left-aligne
   assert.doesNotMatch(chatStyles, /\.ready-chat-user-message-content\s*\{[\s\S]*?text-align:\s*right;/)
 })
 
-test('chat messages render a subtle divider between user and agent entries', () => {
+test('chat messages keep spacing without decorative dividers between entries', () => {
   const chatMessages = readWorkspaceFile('src/renderer/components/agent/ChatMessages.tsx')
 
-  assert.match(chatMessages, /data-chat-message-divider="true"/)
-  assert.match(chatMessages, /rgba\(255,\s*255,\s*255,\s*0\.[0-9]+\)/)
+  assert.doesNotMatch(chatMessages, /data-chat-message-divider=/)
 })

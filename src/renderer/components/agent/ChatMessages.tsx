@@ -185,7 +185,7 @@ export default function ChatMessages({
       )}
 
       {/* Messages */}
-      {visibleMessages.map((msg, index) => {
+      {visibleMessages.map((msg) => {
         const boundaryMarkers = contextBoundaries.filter(
           (boundary) => boundary.previousVisibleMessageAnchor === msg.id,
         ).map((boundary) => (
@@ -214,7 +214,6 @@ export default function ChatMessages({
             </Fragment>
           )
         }
-        const showMessageDivider = index < visibleMessages.length - 1 && (msg.type === 'user' || msg.type === 'agent')
         const taskSnapshot = msg.type === 'agent' ? messageTaskSnapshots[msg.id] : null
         const toolTraceSnapshot = msg.type === 'agent' ? messageToolTraceSnapshots[msg.id] : null
         const generatedImages = generatedImagesFromArtifacts([
@@ -458,19 +457,6 @@ export default function ChatMessages({
               )}
             </div>
 
-            {showMessageDivider ? (
-              <div
-                data-chat-message-divider="true"
-                aria-hidden="true"
-                style={{
-                  height: 1,
-                  margin: '0 12px',
-                  borderRadius: 999,
-                  background: 'color-mix(in srgb, rgba(255,255,255,0.46) 42%, transparent)',
-                  opacity: 0.72,
-                }}
-              />
-            ) : null}
             {boundaryMarkers}
           </div>
         )

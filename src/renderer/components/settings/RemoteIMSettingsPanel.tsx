@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import QRCode from 'qrcode'
+import { WechatLoginControl } from './WechatLoginControl'
 import { AlertTriangle, Bot, CheckCircle2, ChevronDown, ChevronUp, Eye, EyeOff, Loader2, MessageSquare, RefreshCcw, Send, Trash2, XCircle } from 'lucide-react'
 import {
   SETTINGS_CARD_STYLE,
@@ -96,10 +96,6 @@ export default function RemoteIMSettingsPanel() {
   const [feishuAppSecret, setFeishuAppSecret] = useState('')
   const [feishuVerificationToken, setFeishuVerificationToken] = useState('')
   const [feishuEncryptKey, setFeishuEncryptKey] = useState('')
-  const [wechatLoginSessionKey, setWechatLoginSessionKey] = useState('')
-  const [wechatLoginStatus, setWechatLoginStatus] = useState('')
-  const [wechatQrImage, setWechatQrImage] = useState('')
-  const [wechatVerifyCode, setWechatVerifyCode] = useState('')
   const [wechatRouteTag, setWechatRouteTag] = useState('')
   const [wechatBotAgent, setWechatBotAgent] = useState('')
   const [showFeishuSecret, setShowFeishuSecret] = useState(false)
@@ -316,97 +312,6 @@ export default function RemoteIMSettingsPanel() {
     if (!options?.silent) setStatusText('微信已启用')
     await refresh()
   }, [refresh, wechatBotAgent, wechatChannel?.config, wechatChannel?.id, wechatRouteTag])
-
-  const connectWechat = async () => {
-    if (!window.electronAPI?.agent) return
-    setStatusText('正在生成微信绑定二维码…')
-    await runWithBusy('wechat-connect', async () => {
-      const channelId = wechatChannel?.id || WECHAT_CHANNEL_ID
-      if (wechatRouteTag.trim() || wechatBotAgent.trim()) {
-        await saveWechatChannel(undefined, { enabled: Boolean(wechatChannel?.enabled), silent: true })
-      }
-      const res = await window.electronAPI.agent.startWechatLogin({
-        id: channelId,
-        force: true,
-      })
-      if (!res.success || !res.data) {
-        setStatusText(`启用失败：${res.error || '未知错误'}`)
-        return
-      }
-      const data = res.data
-      const qrcodeUrl = String(data.qrcodeUrl || data.qrDataUrl || '')
-      const sessionKey = String(data.sessionKey || '')
-      if (!qrcodeUrl || !sessionKey) {
-        setStatusText('启用失败：没有拿到二维码')
-        return
-      }
-      const qrImage = qrcodeUrl.startsWith('data:image/') ? qrcodeUrl : await QRCode.toDataURL(qrcodeUrl, { width: 240, margin: 1 })
-      setWechatQrImage(qrImage)
-      setWechatLoginSessionKey(sessionKey)
-      setWechatLoginStatus(String(data.status || 'waiting'))
-      setWechatVerifyCode('')
-      setStatusText(String(data.message || '请用手机微信扫码绑定'))
-    })
-  }
-
-  useEffect(() => {
-    if (!wechatLoginSessionKey || !window.electronAPI?.agent) return undefined
-    let disposed = false
-    let polling = false
-    const channelId = wechatChannel?.id || WECHAT_CHANNEL_ID
-    const poll = async () => {
-      if (polling || disposed) return
-      polling = true
-      try {
-      const res = await window.electronAPI.agent.getWechatLoginStatus({
-        channelId,
-        sessionKey: wechatLoginSessionKey,
-      })
-      if (disposed) return
-      if (!res.success || !res.data) {
-        setWechatLoginStatus('error')
-        setWechatLoginSessionKey('')
-        setWechatQrImage('')
-        setStatusText(res.error || '微信绑定状态获取失败')
-        return
-      }
-      const data = res.data
-      const status = String(data.status || 'waiting')
-      setWechatLoginStatus(status)
-      if (data.message) setStatusText(String(data.message))
-      if (status === 'connected' || status === 'already_connected') {
-        setWechatLoginSessionKey('')
-        setWechatQrImage('')
-        await refresh()
-        setStatusText('微信已绑定，连接状态会在下方自动更新。')
-      } else if (status === 'expired' || status === 'error') {
-        setWechatLoginSessionKey('')
-        setWechatQrImage('')
-      }
-      } catch (error) {
-        // silent-catch: QR polling errors are displayed without losing the cancellable login session.
-        if (!disposed) setStatusText(error instanceof Error ? error.message : String(error))
-      } finally { polling = false }
-    }
-    void poll()
-    const timer = window.setInterval(() => { void poll() }, 2_000)
-    return () => {
-      disposed = true
-      window.clearInterval(timer)
-    }
-  }, [refresh, wechatChannel?.id, wechatLoginSessionKey])
-
-  const submitWechatVerifyCode = async () => {
-    if (!window.electronAPI?.agent || !wechatLoginSessionKey) return
-    await runWithBusy('wechat-verify', async () => {
-      const res = await window.electronAPI.agent.submitWechatLoginVerifyCode({
-        channelId: wechatChannel?.id || WECHAT_CHANNEL_ID,
-        sessionKey: wechatLoginSessionKey,
-        code: wechatVerifyCode,
-      })
-      setStatusText(res.success ? '已提交，继续等待微信确认' : `提交失败：${res.error || '未知错误'}`)
-    })
-  }
 
   const disconnectChannel = async (id: string) => {
     if (!window.electronAPI?.agent) return
@@ -722,17 +627,17 @@ export default function RemoteIMSettingsPanel() {
             微信通道会发送到当前绑定的微信账号本人，无需设置收件人。
           </div>
           <div className="flex items-center flex-wrap" style={{ gap: 12 }}>
-            <button
+            <WechatLoginControl
+              channelId={wechatChannel?.id || WECHAT_CHANNEL_ID}
+              enabled={Boolean(wechatChannel?.enabled)}
               disabled={Boolean(busyAction)}
-              onClick={() => { void connectWechat() }}
-              className="text-[13px] font-medium"
-              style={primaryButtonStyle}
-            >
-              <span className="inline-flex items-center gap-2">
-                {isBusy('wechat-connect') && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-                {wechatChannel?.enabled ? '重新绑定' : '启用'}
-              </span>
-            </button>
+              beforeStart={async () => {
+                if (wechatRouteTag.trim() || wechatBotAgent.trim()) {
+                  await saveWechatChannel(undefined, { enabled: Boolean(wechatChannel?.enabled), silent: true })
+                }
+              }}
+              onChanged={loadChannelConfig}
+            />
             {wechatChannel && wechatChannel.enabled && (
               <>
                 <button
@@ -799,42 +704,7 @@ export default function RemoteIMSettingsPanel() {
               </button>
             </div>
           )}
-          {wechatQrImage && (
-            <div className="flex flex-col border" style={{ borderColor: 'var(--border-subtle)', borderRadius: 12, padding: 16, gap: 14, width: 286 }}>
-              <button className="border text-[12px] w-fit" style={secondaryButtonStyle} onClick={() => {
-                void runWithBusy('wechat-cancel', async () => {
-                  const result = await window.electronAPI.agent.setChannelEnabled(wechatChannel?.id || WECHAT_CHANNEL_ID, false)
-                  if (!result.success) throw new Error(result.error || '取消绑定失败')
-                  setWechatLoginSessionKey(''); setWechatQrImage(''); setWechatLoginStatus('')
-                  setStatusText('已取消绑定')
-                  await refresh()
-                })
-              }}>取消绑定</button>
-              <img src={wechatQrImage} alt="微信绑定二维码" style={{ width: 240, height: 240, alignSelf: 'center' }} />
-              <div className="text-[12px] text-center" style={{ color: 'var(--text-muted)', lineHeight: 1.6 }}>
-                {wechatLoginStatus === 'scanned' ? '已扫码，等待手机确认。' : '请用手机微信扫码确认绑定。'}
-              </div>
-            </div>
-          )}
-          {wechatLoginStatus === 'needs_verify_code' && (
-            <div className="flex items-center" style={{ gap: 12 }}>
-              <input
-                value={wechatVerifyCode}
-                onChange={(e) => setWechatVerifyCode(e.target.value)}
-                placeholder="输入手机微信显示的数字"
-                className="border text-[13px] focus:outline-none"
-                style={{ ...fieldStyle, maxWidth: 220 }}
-              />
-              <button
-                disabled={Boolean(busyAction)}
-                onClick={() => { void submitWechatVerifyCode() }}
-                className="border text-[13px]"
-                style={secondaryButtonStyle}
-              >
-                提交
-              </button>
-            </div>
-          )}
+
         </div>
       )}
 

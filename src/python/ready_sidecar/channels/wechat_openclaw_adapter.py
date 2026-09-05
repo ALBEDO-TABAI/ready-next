@@ -383,11 +383,12 @@ class WechatOpenClawAdapter(ChannelAdapter):
         return True, None
 
     def stop(self) -> None:
+        was_running = bool(self._monitor_thread and self._monitor_thread.is_alive() and not self._stop_event.is_set())
         self._stop_event.set()
         with self._login_lock:
             self._login_sessions.clear()
         account = self._resolve_account()
-        if account:
+        if was_running and account:
             try:
                 self._notify_stop(account)
             except Exception:
@@ -712,8 +713,11 @@ class WechatOpenClawAdapter(ChannelAdapter):
                 endpoint += f"&verify_code={parse.quote(verify_code)}"
             try:
                 response = self._get_json(base_url, endpoint, timeout=QR_POLL_TIMEOUT_SECONDS)
-            except Exception:
+            except (TimeoutError, socket.timeout):
                 response = {"status": "wait"}
+            except Exception as exc:
+                self._update_login_session(session_key, status="error", message=f"无法获取扫码状态：{exc}。请重新绑定。")
+                return
 
             with self._login_lock:
                 if session_key not in self._login_sessions:
@@ -725,6 +729,9 @@ class WechatOpenClawAdapter(ChannelAdapter):
                 self._update_login_session(session_key, status="scanned", message="已扫码，等待手机确认。", verifyCode="")
             elif status == "need_verifycode":
                 self._update_login_session(session_key, status="needs_verify_code", message="请输入手机微信显示的数字。")
+            elif status == "expired":
+                self._update_login_session(session_key, status="expired", message="二维码已过期，请重新生成。")
+                return
             elif status == "verify_code_blocked":
                 self._update_login_session(session_key, status="error", message="数字多次输入错误，请重新启用。")
                 return
@@ -780,6 +787,9 @@ class WechatOpenClawAdapter(ChannelAdapter):
                     accountId=account_id,
                     userId=account["userId"],
                 )
+                return
+            else:
+                self._update_login_session(session_key, status="error", message=f"微信返回了无法识别的绑定状态（{status}），请重新绑定。")
                 return
             time.sleep(1)
 

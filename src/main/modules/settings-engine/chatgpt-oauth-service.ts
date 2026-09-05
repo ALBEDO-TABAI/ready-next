@@ -1,6 +1,6 @@
 import { existsSync } from 'node:fs'
 import { chmod, mkdir, unlink } from 'node:fs/promises'
-import { randomBytes } from 'node:crypto'
+import { randomBytes, randomUUID } from 'node:crypto'
 import type { Server } from 'node:http'
 import { dirname } from 'node:path'
 import { serve } from '@hono/node-server'
@@ -11,6 +11,7 @@ import {
 import {
   CHATGPT_OAUTH_BASE_URL,
   type ChatGptOAuthStatus,
+  type ChatGptOAuthPhase,
 } from '../../../shared/chatgpt-oauth'
 
 interface ChatGptOAuthServer {
@@ -20,8 +21,12 @@ interface ChatGptOAuthServer {
 
 export interface ChatGptOAuthServiceDeps {
   credentialExists(): boolean
-  login(): Promise<void>
-  startServer(models: string[] | undefined, proxyApiKey: string): Promise<ChatGptOAuthServer>
+  login(options: {
+    signal: AbortSignal
+    onProgress: (phase: ChatGptOAuthPhase) => void
+    onAuthorizationUrl: (url: string) => void
+  }): Promise<void>
+  startServer(models: string[] | undefined, proxyApiKey: string, signal?: AbortSignal): Promise<ChatGptOAuthServer>
   removeCredential(): Promise<void>
 }
 
@@ -47,6 +52,10 @@ export type ChatGptOAuthLifecycleScope = {
 }
 
 export class ChatGptOAuthService {
+  private connectPromise: Promise<ChatGptOAuthStatus> | null = null
+  private operation: ChatGptOAuthStatus['operation']
+  private loginController: AbortController | null = null
+  private authorizationUrl: string | null = null
   private server: ChatGptOAuthServer | null = null
   private startPromise: Promise<ChatGptOAuthStatus> | null = null
   private models: string[] = []
@@ -73,6 +82,13 @@ export class ChatGptOAuthService {
 
   getStatus(): ChatGptOAuthStatus {
     const connected = this.deps.credentialExists()
+    if (this.operation) {
+      return { state: 'connecting', connected, running: false, baseUrl: CHATGPT_OAUTH_BASE_URL,
+        models: [...this.models], operation: { ...this.operation } }
+    }
+    if (this.startPromise && !this.server) {
+      return { state: 'connecting', connected, running: false, baseUrl: CHATGPT_OAUTH_BASE_URL, models: [...this.models] }
+    }
     if (this.lastError) {
       return {
         state: 'error',
@@ -101,34 +117,91 @@ export class ChatGptOAuthService {
     }
   }
 
-  async connect(
+  connect(
     existingProxyApiKey?: string,
     hooks: ChatGptOAuthConnectHooks = {},
   ): Promise<ChatGptOAuthStatus> {
-    return this.runLifecycle(async () => {
+    if (this.connectPromise) return this.connectPromise
+    const controller = new AbortController()
+    this.loginController = controller
+    this.operation = { id: randomUUID(), phase: 'preparing', startedAt: Date.now(), canReopen: false }
+    const pending = this.runLifecycle(async () => {
       this.lastError = null
       let authorizationStarted = false
+      let authorized = false
       try {
+        controller.signal.throwIfAborted()
         const prepared = await hooks.beforeRestart?.()
+        controller.signal.throwIfAborted()
         const preparedProxyApiKey = prepared?.existingProxyApiKey ?? existingProxyApiKey
         authorizationStarted = true
         await this.stopServerUnlocked()
-        await this.deps.login()
-        const proxyApiKey = normalizeProxyApiKey(preparedProxyApiKey) || randomBytes(32).toString('base64url')
-        const status = await this.ensureReadyUnlocked([], proxyApiKey)
-        await hooks.afterReady?.(status)
-        return status
+        controller.signal.throwIfAborted()
+        await this.deps.login({
+          signal: controller.signal,
+          onProgress: phase => { if (!controller.signal.aborted) this.setPhase(phase) },
+          onAuthorizationUrl: url => {
+            if (!controller.signal.aborted && isAuthorizationUrl(url)) {
+              this.authorizationUrl = url
+              if (this.operation) this.operation.canReopen = true
+            }
+          },
+        })
+        controller.signal.throwIfAborted()
+        authorized = true
+        this.authorizationUrl = null
+        if (this.operation) this.operation.canReopen = false
+        this.proxyApiKey = normalizeProxyApiKey(preparedProxyApiKey) || randomBytes(32).toString('base64url')
+        this.setPhase('starting_service')
+        const status = await this.ensureReadyUnlocked([], this.proxyApiKey, controller.signal)
+        controller.signal.throwIfAborted()
+        this.setPhase('saving_profile')
+        await hooks.afterReady?.({ ...status, state: 'ready', running: true, operation: undefined })
+        this.operation = undefined
+        return this.getStatus()
       } catch (error) {
         if (authorizationStarted) {
           await this.stopServerUnlocked().catch(() => undefined)
-          await this.deps.removeCredential().catch(() => undefined)
+          if (!authorized || controller.signal.aborted) {
+            await this.deps.removeCredential().catch(() => undefined)
+            this.proxyApiKey = null
+          }
           this.models = []
-          this.proxyApiKey = null
-          this.lastError = error instanceof Error ? error.message : String(error)
+          this.lastError = controller.signal.aborted
+            ? '已取消登录，可以重新开始。'
+            : error instanceof Error ? error.message : String(error)
         }
-        throw error
+        throw controller.signal.aborted ? new Error('已取消登录，可以重新开始。') : error
+      } finally {
+        this.operation = undefined
+        this.authorizationUrl = null
+        this.loginController = null
       }
     })
+    this.connectPromise = pending
+    const clear = () => { if (this.connectPromise === pending) this.connectPromise = null }
+    void pending.then(clear, clear)
+    return pending
+  }
+
+  async cancelConnect(operationId: string): Promise<ChatGptOAuthStatus> {
+    if (!this.operation || this.operation.id !== operationId) throw new Error('登录操作已更新，请刷新状态。')
+    if (this.operation.phase === 'saving_profile') throw new Error('登录已完成，正在保存设置。')
+    this.setPhase('cancelling')
+    this.loginController?.abort(new Error('已取消登录'))
+    await this.connectPromise?.catch(() => undefined)
+    return this.getStatus()
+  }
+
+  async reopenAuthorization(operationId: string): Promise<void> {
+    if (this.operation?.id !== operationId || !this.authorizationUrl || this.operation.phase !== 'waiting_browser') {
+      throw new Error('授权页面已结束，请刷新状态。')
+    }
+    await openAuthorizationUrl(this.authorizationUrl)
+  }
+
+  private setPhase(phase: ChatGptOAuthPhase): void {
+    if (this.operation) this.operation.phase = phase
   }
 
   async ensureReady(
@@ -146,6 +219,7 @@ export class ChatGptOAuthService {
   private async ensureReadyUnlocked(
     savedModels: string[] = [],
     proxyApiKey?: string,
+    signal?: AbortSignal,
   ): Promise<ChatGptOAuthStatus> {
     if (this.server) return this.getStatus()
     if (this.startPromise) return this.startPromise
@@ -166,6 +240,7 @@ export class ChatGptOAuthService {
     this.startPromise = this.deps.startServer(
       models.length > 0 ? models : undefined,
       normalizedProxyApiKey,
+      signal,
     )
       .then((server) => {
         this.server = server
@@ -235,6 +310,7 @@ export class ChatGptOAuthService {
   }
 
   async stop(): Promise<void> {
+    if (this.operation?.phase !== 'saving_profile') this.loginController?.abort(new Error('已取消登录'))
     await this.runLifecycle(() => this.stopServerUnlocked())
   }
 
@@ -284,16 +360,42 @@ export class ChatGptOAuthService {
 export function createChatGptOAuthService(authFilePath: string): ChatGptOAuthService {
   return new ChatGptOAuthService({
     credentialExists: () => existsSync(authFilePath),
-    login: async () => {
+    login: async ({ signal, onProgress, onAuthorizationUrl }) => {
       await secureAuthStorage(authFilePath)
-      await runOpenAIOAuthLogin({
-        authFilePath,
-        openBrowser: true,
-        onMessage: () => undefined,
-      })
+      const loginSignal = AbortSignal.any([signal, AbortSignal.timeout(5 * 60_000)])
+      const browserController = new AbortController()
+      let browserError: Error | null = null
+      const combined = AbortSignal.any([loginSignal, browserController.signal])
+      try {
+        await runOpenAIOAuthLogin({
+          authFilePath,
+          openBrowser: false,
+          signal: combined,
+          fetch: async (input, init) => {
+            onProgress('exchanging')
+            return fetch(input, { ...init, signal: AbortSignal.any([combined, AbortSignal.timeout(30_000)]) })
+          },
+          onMessage: message => {
+            const prefix = 'OpenAI OAuth login URL: '
+            if (!message.startsWith(prefix)) return
+            const url = message.slice(prefix.length)
+            onAuthorizationUrl(url)
+            onProgress('waiting_browser')
+            void openAuthorizationUrl(url).catch(error => {
+              browserError = new Error(`无法打开授权页面：${error instanceof Error ? error.message : String(error)}`)
+              browserController.abort()
+            })
+          },
+        })
+      } catch (error) {
+        if (browserError) throw browserError
+        if (error instanceof Error && error.name === 'TimeoutError') throw new Error('确认登录的网络请求超时，请重新登录。')
+        if (loginSignal.aborted && !signal.aborted) throw new Error('登录等待超时，请重新登录。')
+        throw error
+      }
       await chmod(authFilePath, 0o600)
     },
-    startServer: async (models, proxyApiKey) => {
+    startServer: async (models, proxyApiKey, signal) => {
       await secureAuthStorage(authFilePath)
       const oauthHandler = createOpenAIOAuthFetchHandler({
         authFilePath,
@@ -313,7 +415,7 @@ export function createChatGptOAuthService(authFilePath: string): ChatGptOAuthSer
       try {
         const resolvedModels = await resolveOAuthServerModels(
           models,
-          () => loadOAuthModels(proxyApiKey),
+          () => loadOAuthModels(proxyApiKey, signal),
         )
         return {
           models: resolvedModels,
@@ -379,10 +481,10 @@ async function startAuthenticatedServer(
   })
 }
 
-async function loadOAuthModels(proxyApiKey: string): Promise<string[]> {
+async function loadOAuthModels(proxyApiKey: string, signal?: AbortSignal): Promise<string[]> {
   const response = await fetch(`${CHATGPT_OAUTH_BASE_URL}/models`, {
     headers: { Authorization: `Bearer ${proxyApiKey}` },
-    signal: AbortSignal.timeout(30_000),
+    signal: AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(30_000)]),
   })
   const payload = await response.json() as {
     data?: Array<{ id?: string }>
@@ -407,4 +509,17 @@ function closeServer(server: Server): Promise<void> {
     server.closeIdleConnections()
     server.closeAllConnections()
   })
+}
+
+function isAuthorizationUrl(value: string): boolean {
+  try {
+    const url = new URL(value)
+    return url.origin === 'https://auth.openai.com' && url.pathname === '/oauth/authorize'
+  } catch { return false }
+}
+
+async function openAuthorizationUrl(url: string): Promise<void> {
+  if (!isAuthorizationUrl(url)) throw new Error('授权页面地址无效')
+  const { shell } = await import('electron')
+  await shell.openExternal(url)
 }

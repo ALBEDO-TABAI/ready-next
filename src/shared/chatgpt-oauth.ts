@@ -18,7 +18,9 @@ export const CHATGPT_OAUTH_REASONING_EFFORTS = [
 export type ChatGptOAuthReasoningEffort =
   typeof CHATGPT_OAUTH_REASONING_EFFORTS[number]
 
-export type ChatGptOAuthState = 'signed_out' | 'signed_in' | 'ready' | 'error'
+export type ChatGptOAuthState = 'signed_out' | 'signed_in' | 'connecting' | 'ready' | 'error'
+
+export type ChatGptOAuthPhase = 'preparing' | 'waiting_browser' | 'exchanging' | 'starting_service' | 'saving_profile' | 'cancelling'
 
 export interface ChatGptOAuthStatus {
   state: ChatGptOAuthState
@@ -27,6 +29,7 @@ export interface ChatGptOAuthStatus {
   baseUrl: string
   models: string[]
   error?: string
+  operation?: { id: string; phase: ChatGptOAuthPhase; startedAt: number; canReopen: boolean }
 }
 
 export function normalizeChatGptOAuthReasoningEffort(

@@ -348,7 +348,7 @@ const agentAPI = {
   }) => invokeAgentRuntime('agent:startWechatLogin', payload),
   getWechatLoginStatus: (payload: {
     channelId: string
-    sessionKey: string
+    sessionKey?: string
   }) => invokeAgentRuntime('agent:getWechatLoginStatus', payload),
   submitWechatLoginVerifyCode: (payload: {
     channelId: string
@@ -1314,6 +1314,8 @@ const settingsAPI = {
   getAIWorkspace: () => ipcRenderer.invoke('settings:getAIWorkspace'),
   setAIWorkspace: (workspace: unknown) => ipcRenderer.invoke('settings:setAIWorkspace', workspace),
   testAIConnection: (config: unknown) => ipcRenderer.invoke('settings:testAIConnection', config),
+  cancelChatGptOAuth: (operationId: string) => ipcRenderer.invoke('settings:cancelChatGptOAuth', operationId),
+  reopenChatGptOAuth: (operationId: string) => ipcRenderer.invoke('settings:reopenChatGptOAuth', operationId),
   getChatGptOAuthStatus: () => ipcRenderer.invoke('settings:getChatGptOAuthStatus'),
   connectChatGptOAuth: () => ipcRenderer.invoke('settings:connectChatGptOAuth'),
   resumeChatGptOAuth: () => ipcRenderer.invoke('settings:resumeChatGptOAuth'),

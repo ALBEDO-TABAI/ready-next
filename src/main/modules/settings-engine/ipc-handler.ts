@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto'
 import { app, ipcMain } from 'electron'
 import { join } from 'node:path'
 import {
@@ -243,10 +244,26 @@ export function setupSettingsIPC(options?: {
     }
   })
 
+  ipcMain.handle('settings:cancelChatGptOAuth', async (_, operationId: string): Promise<SettingsIPCResponse<ChatGptOAuthStatus>> => {
+    try { return { success: true, data: await chatGptOAuth.cancelConnect(operationId) } }
+    catch (error) { return { success: false, error: error instanceof Error ? error.message : String(error) } }
+  })
+
+  ipcMain.handle('settings:reopenChatGptOAuth', async (_, operationId: string): Promise<SettingsIPCResponse> => {
+    try { await chatGptOAuth.reopenAuthorization(operationId); return { success: true } }
+    catch (error) { return { success: false, error: error instanceof Error ? error.message : String(error) } }
+  })
+
   ipcMain.handle('settings:resumeChatGptOAuth', async (): Promise<SettingsIPCResponse<ChatGptOAuthStatus>> => {
     try {
+      if (chatGptOAuth.getStatus().operation) throw new Error('登录正在进行，请继续当前授权或取消后重试。')
       const workspace = repository.getAIWorkspace()
       const profile = workspace.profiles.find((candidate) => isChatGptOAuthConfig(candidate.config))
+      if (!profile && chatGptOAuth.getStatus().connected) {
+        const status = await chatGptOAuth.ensureReady([], chatGptOAuth.readBoundProxyApiKey() || randomBytes(32).toString('base64url'),
+          readyStatus => repository.setAIWorkspace(upsertChatGptOAuthProfile(repository.getAIWorkspace(), readyStatus.models, chatGptOAuth.getProxyApiKey())))
+        return { success: true, data: status }
+      }
       if (
         !profile
         || profile.id !== CHATGPT_OAUTH_PROFILE_ID

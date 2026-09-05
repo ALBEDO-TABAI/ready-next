@@ -13,6 +13,32 @@ from ready_sidecar.channels.wechat_openclaw_adapter import WechatOpenClawAdapter
 
 
 class RemoteChannelReliabilityTests(unittest.TestCase):
+    def test_stopped_wechat_does_not_wait_for_a_remote_stop_notification(self):
+        adapter = WechatOpenClawAdapter('w', 'wechat-openclaw', 'WeChat', {})
+        adapter._resolve_account = lambda: {'accountId': 'fixture', 'token': 'fixture'}
+        calls = []
+        adapter._notify_stop = lambda _: calls.append('stop')
+        adapter.stop()
+        adapter.stop()
+        self.assertEqual(calls, [])
+
+    def test_qr_network_failure_and_expiration_are_terminal(self):
+        for result in [RuntimeError('network unavailable'), {'status': 'expired'}, {'status': 'new_unknown_status'}]:
+            with self.subTest(result=result):
+                adapter = WechatOpenClawAdapter('w', 'wechat-openclaw', 'WeChat', {})
+                adapter._login_sessions['session'] = {'startedAt': time.time(), 'qrcode': 'fixture'}
+                def fetch(*_args, **_kwargs):
+                    if isinstance(result, Exception):
+                        raise result
+                    return result
+                adapter._get_json = fetch
+                with patch('ready_sidecar.channels.wechat_openclaw_adapter.LOGIN_WAIT_SECONDS', 0.01), patch('time.sleep'):
+                    adapter._poll_login_session('session')
+                status = adapter.get_login_status('session')
+                self.assertIn(status['status'], ['error', 'expired'])
+                if isinstance(result, Exception):
+                    self.assertIn('network unavailable', status['message'])
+
     def test_wechat_reply_context_is_persisted_before_main_can_consume_the_message(self):
         with tempfile.TemporaryDirectory() as root:
             adapter = WechatOpenClawAdapter('w', 'wechat-openclaw', 'WeChat', {'stateDir': root, 'allowedSenderId': 'owner'})

@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { CAPABILITY_GROUPS } from '../shared/ai-capability-groups'
 
 import { collectAllowedToolNames } from '../main/modules/agent-control/tool-policy/execution-tool-config'
 import { ToolGateway } from '../main/modules/agent-control/tools-runtime/tool-gateway'
 import { resolveToolInputSchemaForExecution } from '../main/modules/agent-control/tools-runtime/tool-registry'
+import { ToolNameCollisionError } from '../main/modules/agent-control/tools-runtime/tool-registry-errors'
 import {
   rememberLastReferenceSkill,
   _resetLastReferenceSkillHintsForTests,
@@ -24,6 +26,54 @@ test.before(() => {
   })
 })
 test.after(() => __setScopeContextEpochDatabaseForTests(null))
+
+test('status counts and tool descriptors read each catalog once, regardless of tool count', () => {
+  const reads = new Map<string, number>()
+  const names = Array.from({ length: 200 }, (_, index) => `fixture_skill_${index}`)
+  let descriptionPrefix = 'Current'
+  const gateway = new ToolGateway({
+    __testGroupProviders: Object.fromEntries(CAPABILITY_GROUPS.map(group => [group.id, {
+      staticToolNames: group.id === 'skills' ? names : [`fixture_${group.id}`],
+      getOpenAITools: () => {
+        reads.set(group.id, (reads.get(group.id) || 0) + 1)
+        return (group.id === 'skills' ? names : [`fixture_${group.id}`]).map(name => ({
+          type: 'function', function: { name, description: `${descriptionPrefix} ${name}`, parameters: { type: 'object' } },
+        }))
+      },
+      getAnthropicTools: () => [],
+    }])),
+  })
+  const expected = names.length + CAPABILITY_GROUPS.length - 1
+  for (const read of [
+    () => assert.equal(gateway.count(), expected),
+    () => assert.equal(gateway.listTools().length, expected),
+    () => assert.equal(gateway.getTool(names[0])?.description, `Current ${names[0]}`),
+    () => assert.equal(gateway.hasTool(names[0]), true),
+    () => assert.equal(gateway.listByModule('skills').length, names.length),
+  ]) {
+    reads.clear()
+    read()
+    assert.deepEqual([...reads.values()], CAPABILITY_GROUPS.map(() => 1),
+      'a status read must not rebuild every catalog for every individual tool')
+  }
+  names.push('fixture_skill_added')
+  assert.equal(gateway.count(), expected + 1, 'later status reads must see catalog changes')
+  assert.equal(gateway.getTool('fixture_skill_added')?.description, 'Current fixture_skill_added')
+  names.pop()
+  descriptionPrefix = 'Updated'
+  assert.equal(gateway.count(), expected)
+  assert.equal(gateway.hasTool('fixture_skill_added'), false)
+  assert.equal(gateway.getTool(names[0])?.description, `Updated ${names[0]}`)
+})
+
+test('status counts and descriptors still reject tool names shared by different groups', () => {
+  const gateway = new ToolGateway({ __testGroupProviders: {
+    calendar: { staticToolNames: ['fixture_collision'] },
+    memory: { staticToolNames: ['fixture_collision'] },
+  } })
+  assert.throws(() => gateway.count(), ToolNameCollisionError)
+  assert.throws(() => gateway.listTools(), ToolNameCollisionError)
+})
 
 test('tool gateway exposes formal capability groups and resolves grouped tools', () => {
   const gateway = new ToolGateway()
