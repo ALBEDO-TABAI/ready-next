@@ -33,6 +33,7 @@ import {
   type PointerInteraction,
 } from './graph-view-model'
 import type { GraphNode, GraphQuery } from './graph-types'
+import { buildGraphTopology } from './graph-topology'
 
 export interface GraphViewProps {
   centerPath?: string
@@ -135,35 +136,25 @@ export default function GraphView({
   }, [session, viewId])
 
   useEffect(() => {
-    if (snapshot.positions.length < 2) return
+    const positions = session.getSnapshot().positions
+    if (positions.length < 2) return
     const stored = session.getViewState(viewId)
     if (stored?.userAdjusted) return
-    const next = fitGraphViewport(snapshot.positions, width, height, width >= 600 ? 64 : 30)
+    const next = fitGraphViewport(positions, width, height, width >= 600 ? 64 : 30)
     viewportRef.current = next
     setViewport(next)
     session.setViewState(viewId, { viewport: next, userAdjusted: false })
-  }, [height, session, snapshot.revision, viewId, width])
+  }, [height, session, snapshot.revision, snapshot.settled, viewId, width])
 
   const schedulePersistentViewport = useCallback((next: GraphViewport) => {
     viewportRef.current = next
     viewportSchedulerRef.current?.schedule(next)
   }, [])
 
-  const indexById = useMemo(
-    () => new Map(snapshot.graph.nodes.map((node, index) => [node.id, index] as const)),
-    [snapshot.graph.nodes],
+  const { indexById, degrees: nodeDegrees } = useMemo(
+    () => buildGraphTopology(snapshot.graph.nodes, snapshot.graph.edges),
+    [snapshot.graph.nodes, snapshot.graph.edges],
   )
-  const nodeDegrees = useMemo(() => {
-    const degrees = new Uint32Array(snapshot.graph.nodes.length)
-    for (const edge of snapshot.graph.edges) {
-      const source = indexById.get(edge.source)
-      const target = indexById.get(edge.target)
-      if (source === undefined || target === undefined) continue
-      degrees[source] += 1
-      degrees[target] += 1
-    }
-    return degrees
-  }, [indexById, snapshot.graph.edges, snapshot.graph.nodes.length])
   const relatedNodeIds = useMemo(() => {
     if (!hoveredNodeId) return null
     const related = new Set<string>([hoveredNodeId])
@@ -345,7 +336,12 @@ export default function GraphView({
       event.clientX - interaction.startClientX,
       event.clientY - interaction.startClientY,
     )
-    if (!interaction.moved && distance >= 3) interaction.moved = true
+    if (!interaction.moved && distance >= 3) {
+      interaction.moved = true
+      if (interaction.kind === 'node') {
+        session.setViewState(viewId, { viewport: viewportRef.current, userAdjusted: true })
+      }
+    }
     if (!interaction.moved) return
     if (interaction.kind === 'pan') {
       schedulePersistentViewport({

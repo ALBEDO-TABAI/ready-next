@@ -12,7 +12,7 @@ function installDom(): { dom: JSDOM; restore: () => void } {
   })
   const keys = [
     'window', 'document', 'HTMLElement', 'HTMLCanvasElement', 'Node', 'Element', 'Event',
-    'CustomEvent', 'MouseEvent', 'PointerEvent', 'MutationObserver', 'requestAnimationFrame',
+    'CustomEvent', 'MouseEvent', 'WheelEvent', 'PointerEvent', 'MutationObserver', 'requestAnimationFrame',
     'cancelAnimationFrame', 'navigator', 'localStorage', 'IS_REACT_ACT_ENVIRONMENT',
   ] as const
   const previous = new Map<string, unknown>(keys.map((key) => [key, (globalThis as unknown as Record<string, unknown>)[key]]))
@@ -26,6 +26,7 @@ function installDom(): { dom: JSDOM; restore: () => void } {
     Event: dom.window.Event,
     CustomEvent: dom.window.CustomEvent,
     MouseEvent: dom.window.MouseEvent,
+    WheelEvent: dom.window.WheelEvent,
     PointerEvent: dom.window.MouseEvent,
     MutationObserver: dom.window.MutationObserver,
     requestAnimationFrame: dom.window.requestAnimationFrame.bind(dom.window),
@@ -84,6 +85,89 @@ async function flush(delay = 0): Promise<void> {
 async function unmount(root: Root): Promise<void> {
   await act(async () => root.unmount())
 }
+
+test('settling frames fit the finished layout once and preserve a manually adjusted viewport', async () => {
+  const handle = installDom()
+  const previousWorker = globalThis.Worker
+  const workers: Array<{ onmessage: ((event: MessageEvent) => void) | null }> = []
+  Object.defineProperty(globalThis, 'Worker', {
+    configurable: true,
+    value: class {
+      onmessage = null
+      onerror = null
+      constructor() { workers.push(this) }
+      postMessage() {}
+      terminate() {}
+    },
+  })
+  try {
+    const [{ default: GraphView }, { graphSessionRegistry }, { fitGraphViewport }] = await Promise.all([
+      import('../renderer/components/graph/GraphView'),
+      import('../renderer/components/graph/graph-session'),
+      import('../renderer/components/graph/graph-canvas-renderer'),
+    ])
+    Object.defineProperty(handle.dom.window, 'electronAPI', {
+      configurable: true,
+      value: { document: { getGraph: async () => ({ success: true, data: {
+        nodes: ['a', 'b'].map((id) => ({ id, type: 'doc', label: id })), edges: [],
+      } }) } },
+    })
+    const container = handle.dom.window.document.getElementById('root')!
+    const root = createRoot(container)
+    try {
+      await act(async () => root.render(createElement(GraphView, {
+        workspaceRoot: '/graph-fit-proof', width: 640, height: 420,
+      })))
+      await flush()
+      const session = graphSessionRegistry.get({ workspaceRoot: '/graph-fit-proof', depth: 2 })
+      const initial = session.getViewState('panel')!
+      const publish = async (positions: number[], settled: boolean) => {
+        await act(async () => {
+          workers.at(-1)!.onmessage?.({ data: {
+            type: 'positions', revision: session.getSnapshot().revision,
+            positions: Float32Array.from(positions), settled,
+          } } as MessageEvent)
+          await new Promise((resolve) => setTimeout(resolve, 30))
+        })
+      }
+      await publish([-700, -300, 900, 500], false)
+      assert.deepEqual(session.getViewState('panel'), initial, 'moving frames must not pump the zoom')
+      const finished = [-600, -250, 800, 450]
+      await publish(finished, true)
+      assert.deepEqual(session.getViewState('panel')?.viewport, fitGraphViewport(Float32Array.from(finished), 640, 420, 64))
+
+      const fitted = session.getViewState('panel')!.viewport
+      const x = fitted.x + finished[0] * fitted.zoom
+      const y = fitted.y + finished[1] * fitted.zoom
+      await act(async () => {
+        const canvas = container.querySelector('canvas')!
+        canvas.dispatchEvent(new handle.dom.window.MouseEvent('pointerdown', { bubbles: true, clientX: x, clientY: y, button: 0 }))
+        canvas.dispatchEvent(new handle.dom.window.MouseEvent('pointermove', { bubbles: true, clientX: x + 40, clientY: y + 30 }))
+        canvas.dispatchEvent(new handle.dom.window.MouseEvent('pointerup', { bubbles: true, clientX: x + 40, clientY: y + 30 }))
+      })
+      assert.equal(session.getViewState('panel')?.userAdjusted, true, 'node dragging also owns the current view')
+      await publish([-650, -300, 850, 500], false)
+      await publish([-620, -270, 820, 470], true)
+      assert.deepEqual(session.getViewState('panel')?.viewport, fitted, 'node release must not jump the camera')
+
+      await act(async () => container.querySelector('canvas')!.dispatchEvent(new handle.dom.window.WheelEvent('wheel', {
+        bubbles: true, deltaX: 45, deltaY: 30,
+      })))
+      await flush(30)
+      const manual = session.getViewState('panel')!
+      assert.equal(manual.userAdjusted, true)
+      await publish([-1000, -500, 1000, 500], false)
+      await publish([-800, -400, 800, 400], true)
+      assert.deepEqual(session.getViewState('panel'), manual, 'settling must not override user movement or zoom')
+    } finally {
+      await unmount(root)
+    }
+  } finally {
+    if (previousWorker === undefined) delete (globalThis as Record<string, unknown>).Worker
+    else Object.defineProperty(globalThis, 'Worker', { configurable: true, value: previousWorker })
+    handle.restore()
+  }
+})
 
 test('document nodes reveal a content card, click through, and open the large graph workspace', async () => {
   const handle = installDom()

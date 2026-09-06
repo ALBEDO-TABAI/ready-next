@@ -1,11 +1,11 @@
 import type { GraphViewport } from './graph-interactions'
 import type { GraphData, GraphNode } from './graph-types'
+import { buildGraphTopology } from './graph-topology'
 
 export interface GraphCanvasPalette {
   background: string
   document: string
   tag: string
-  ghost: string
   label: string
   edge: string
   tagEdge: string
@@ -38,23 +38,22 @@ export function graphNodeRadius({
   nodeCount: number
   isHovered: boolean
 }): number {
-  const base = nodeType === 'doc' ? 2.6 : nodeType === 'tag' ? 2.35 : 1.9
+  const base = nodeType === 'ghost' ? 1.9 : 2.6
   const densityScale = nodeCount <= 240
     ? 1
     : clamp(1 - Math.log2(nodeCount / 240) * 0.1, 0.7, 1)
   const zoomScale = clamp(0.58 + Math.sqrt(Math.max(0.04, zoom)) * 0.42, 0.66, 1.18)
-  const degreeScale = 1 + Math.min(0.7, Math.log2(Math.max(0, degree) + 1) * 0.15)
+  const degreeScale = degree < 2 ? 1 : 1 + Math.min(1.8, Math.log2(degree + 1) * 0.32)
   const radius = clamp(base * densityScale * zoomScale * degreeScale, 1.05, 5)
   return isHovered ? Math.max(5.2, radius + 1.8) : radius
 }
 
-// Ready 设计语言：暖纸白上的墨点星野，单一品牌橘红做结构 accent（标签/悬浮），
-// 文档与连线保持暖墨灰 —— 不引入第二彩色。
+// Connection roles: quiet gray isolates, orange satellites and larger ink hubs.
+// The same relationship uses the same visual language for documents and tags.
 export const LIGHT_GRAPH_PALETTE: GraphCanvasPalette = {
   background: 'rgba(255,255,255,0)',
   document: '#6E6A61',
   tag: '#FF4B2B',
-  ghost: '#BDB9AF',
   label: '#3D3A34',
   edge: 'rgba(110, 106, 97, 0.26)',
   tagEdge: 'rgba(255, 75, 43, 0.24)',
@@ -66,7 +65,6 @@ export const DARK_GRAPH_PALETTE: GraphCanvasPalette = {
   background: 'rgba(0,0,0,0)',
   document: '#9C988E',
   tag: '#FF6345',
-  ghost: '#5E5B54',
   label: '#DDDACF',
   edge: 'rgba(196, 192, 182, 0.17)',
   tagEdge: 'rgba(255, 99, 69, 0.27)',
@@ -186,10 +184,9 @@ function edgeColor(kind: string, palette: GraphCanvasPalette): string {
   return palette.edge
 }
 
-function nodeColor(node: GraphNode, palette: GraphCanvasPalette): string {
-  if (node.type === 'tag') return palette.tag
-  if (node.type === 'ghost') return palette.ghost
-  return palette.document
+function nodeColor(degree: number, palette: GraphCanvasPalette): string {
+  if (degree === 0) return palette.document
+  return degree === 1 ? palette.tag : palette.label
 }
 
 function isVisible(x: number, y: number, width: number, height: number, margin = 24): boolean {
@@ -241,19 +238,15 @@ export function drawGraphCanvas(
     context.fillRect(0, 0, width, height)
   }
 
-  const indexById = options.indexById ?? new Map(graph.nodes.map((node, index) => [node.id, index] as const))
-  const degrees = options.degrees ?? new Uint32Array(graph.nodes.length)
-  const shouldDeriveDegrees = !options.degrees
+  const topology = options.indexById && options.degrees ? null : buildGraphTopology(graph.nodes, graph.edges)
+  const indexById = options.indexById ?? topology!.indexById
+  const degrees = options.degrees ?? topology!.degrees
   const hasHoverContext = relatedNodeIds !== null
   context.lineCap = 'round'
   for (const edge of graph.edges) {
     const source = indexById.get(edge.source)
     const target = indexById.get(edge.target)
     if (source === undefined || target === undefined) continue
-    if (shouldDeriveDegrees) {
-      degrees[source] += 1
-      degrees[target] += 1
-    }
     const sourceOffset = source * 2
     const targetOffset = target * 2
     if (targetOffset + 1 >= positions.length) continue
@@ -296,7 +289,7 @@ export function drawGraphCanvas(
     })
     const prominence = clamp(0.68 + Math.log2(degrees[index] + 1) * 0.055, 0.68, 0.92)
     context.globalAlpha = isContextVisible ? (node.type === 'ghost' ? 0.5 : prominence) : 0.16
-    context.fillStyle = nodeColor(node, palette)
+    context.fillStyle = nodeColor(degrees[index], palette)
     context.beginPath()
     context.arc(x, y, radius, 0, Math.PI * 2)
     context.fill()

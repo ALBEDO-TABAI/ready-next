@@ -3,6 +3,7 @@ import test from 'node:test'
 
 import {
   DARK_GRAPH_PALETTE,
+  LIGHT_GRAPH_PALETTE,
   drawGraphCanvas,
   graphLabelOpacity,
   graphNodeRadius,
@@ -89,7 +90,7 @@ test('large overview uses small adaptive dots while connected and hovered nodes 
 
   assert.ok(isolatedOverview >= 1.1 && isolatedOverview < 1.8)
   assert.ok(connectedOverview > isolatedOverview)
-  assert.ok(connectedOverview < 3)
+  assert.ok(connectedOverview < 5)
   assert.ok(connectedCloseUp > connectedOverview)
   assert.ok(hoveredOverview >= 5)
 })
@@ -145,6 +146,41 @@ test('canvas drawing uses the adaptive overview radius', () => {
   })
 
   assert.ok(radii.at(-1)! > overviewRadius)
+})
+
+test('connection roles distinguish hubs, satellites and isolated nodes in both themes and node types', () => {
+  for (const palette of [LIGHT_GRAPH_PALETTE, DARK_GRAPH_PALETTE]) {
+    for (const nodeType of ['doc', 'tag'] as const) {
+      const marks: Array<{ color: string; radius: number }> = []
+      let radius = 0
+      const context = {
+        canvas: { width: 0, height: 0 }, fillStyle: '',
+        setTransform() {}, clearRect() {}, fillRect() {}, beginPath() {}, moveTo() {}, lineTo() {},
+        stroke() {}, fillText() {},
+        arc(_x: number, _y: number, r: number) { radius = r },
+        fill() { marks.push({ color: this.fillStyle, radius }) },
+      } as unknown as CanvasRenderingContext2D
+      const graph = {
+        nodes: ['hub', 'leaf-a', 'leaf-b', 'leaf-c', 'leaf-d', 'isolated'].map((id) => ({ id, type: nodeType, label: id })),
+        edges: ['leaf-a', 'leaf-b', 'leaf-c', 'leaf-d'].map((target) => ({ source: 'hub', target, kind: 'wikilink' })),
+        totalDocs: 6, truncated: false,
+      }
+      // Duplicate/reversed links, self links and missing targets are not extra neighbors.
+      graph.edges.push(
+        { source: 'leaf-a', target: 'hub', kind: 'tag-of' },
+        { source: 'isolated', target: 'isolated', kind: 'wikilink' },
+        { source: 'isolated', target: 'missing', kind: 'wikilink' },
+      )
+      drawGraphCanvas(context, graph, Float32Array.from([0, 0, 100, 0, 0, 100, -100, 0, 0, -100, 200, 200]), {
+        width: 600, height: 400, pixelRatio: 1, viewport: { x: 200, y: 150, zoom: 0.35 },
+        hoveredNodeId: null, relatedNodeIds: null, palette,
+      })
+      assert.equal(marks[0].color, palette.label, 'hub uses strong neutral ink')
+      for (const mark of marks.slice(1, 5)) assert.equal(mark.color, palette.tag, 'satellites use the accent regardless of file/tag type')
+      assert.equal(marks[5].color, palette.document, 'unlinked points remain neutral')
+      assert.ok(marks[0].radius >= marks[1].radius * 1.6, 'hub is visibly larger than its satellites')
+    }
+  }
 })
 
 test('canvas keeps the hovered label when nearby labels overlap', () => {

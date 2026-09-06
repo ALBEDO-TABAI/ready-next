@@ -26,7 +26,104 @@ function makeLargeSparseGraph(nodeCount = 1700, edgeCount = 600): { nodes: Graph
   return { nodes, edges }
 }
 
+function makeMixedGraph(starSizes = [400, 40, 24, 12, 8, 6, 4], isolatedCount = 1000) {
+  const nodes: GraphNode[] = []
+  const edges: GraphEdge[] = []
+  for (const [group, size] of starSizes.entries()) {
+    const hub = `hub:${group}`
+    nodes.push({ id: hub, type: 'tag', label: hub })
+    for (let index = 0; index < size; index += 1) {
+      const id = `member:${group}:${index}`
+      nodes.push({ id, type: 'doc', label: id })
+      edges.push({ source: hub, target: id, kind: 'tag-of' })
+    }
+  }
+  for (let index = 0; index < isolatedCount; index += 1) {
+    const id = `isolated:${index}`
+    nodes.push({ id, type: 'doc', label: id })
+  }
+  return { nodes, edges }
+}
+
+function assertCohesiveField(positions: Float32Array): void {
+  const count = positions.length / 2
+  const xs = Array.from({ length: count }, (_, index) => positions[index * 2])
+  const ys = Array.from({ length: count }, (_, index) => positions[index * 2 + 1])
+  const width = Math.max(...xs) - Math.min(...xs)
+  const height = Math.max(...ys) - Math.min(...ys)
+  assert.ok(width / height > 0.8 && width / height < 1.25, `whole field should be round (${width / height})`)
+  const centerX = xs.reduce((sum, x) => sum + x, 0) / count
+  const centerY = ys.reduce((sum, y) => sum + y, 0) / count
+  const outerRadii = new Array<number>(12).fill(0)
+  for (let index = 0; index < count; index += 1) {
+    const x = xs[index] - centerX
+    const y = ys[index] - centerY
+    const sector = Math.min(11, Math.floor((Math.atan2(y, x) + Math.PI) / (Math.PI * 2) * 12))
+    outerRadii[sector] = Math.max(outerRadii[sector], Math.hypot(x, y))
+  }
+  assert.ok(Math.min(...outerRadii) / Math.max(...outerRadii) > 0.78, 'the round outline must extend in every direction, not just match width and height')
+
+  const nearest = xs.map((x, index) => Math.sqrt(Math.min(...xs.map((otherX, other) => (
+    index === other ? Infinity : (x - otherX) ** 2 + (ys[index] - ys[other]) ** 2
+  ))))).sort((a, b) => a - b)
+  const neighborDistance = nearest[Math.floor(count / 2)] * 3
+  const visited = new Set([0])
+  const queue = [0]
+  for (let head = 0; head < queue.length; head += 1) {
+    const index = queue[head]
+    for (let other = 0; other < count; other += 1) {
+      if (!visited.has(other) && Math.hypot(xs[index] - xs[other], ys[index] - ys[other]) <= neighborDistance) {
+        visited.add(other)
+        queue.push(other)
+      }
+    }
+  }
+  assert.equal(visited.size, count, `all points should share one visual field at 3x typical spacing (${neighborDistance})`)
+}
+
 describe('progressive graph layout engine', () => {
+  it('seeds a high-degree hub as a compact area instead of an oversized empty ring', () => {
+    const graph = makeMixedGraph([400], 0)
+    const positions = snapshotGraphPositions(createGraphSimulation(graph.nodes, graph.edges))
+    const radii = graph.nodes.slice(1).map((_, index) => Math.hypot(
+      positions[(index + 1) * 2] - positions[0], positions[(index + 1) * 2 + 1] - positions[1],
+    )).sort((a, b) => a - b)
+    assert.ok(radii.at(-1)! < Math.sqrt(400) * 60, `hub extent must be area based (${radii.at(-1)})`)
+    assert.ok(radii[100] < radii[399] * 0.75, 'children must occupy the interior, not a single empty ring')
+  })
+
+  it('keeps large hubs, small relationship groups and isolated nodes in one round field', () => {
+    const graph = makeMixedGraph()
+    const state = createGraphSimulation(graph.nodes, graph.edges)
+    assertCohesiveField(snapshotGraphPositions(state))
+    stepGraphSimulation(state, 360)
+    assertCohesiveField(snapshotGraphPositions(state))
+  })
+
+  it('keeps an entirely unlinked workspace in the same round field', () => {
+    const graph = makeMixedGraph([], 240)
+    const state = createGraphSimulation(graph.nodes, graph.edges)
+    stepGraphSimulation(state, 360)
+    assertCohesiveField(snapshotGraphPositions(state))
+  })
+
+  it('restores prior positions by identity when refreshed nodes arrive in a different order', () => {
+    const graph = makeMixedGraph([12, 8], 20)
+    const original = createGraphSimulation(graph.nodes, graph.edges)
+    stepGraphSimulation(original, 360)
+    const prior = new Map(graph.nodes.map((node, index) => [node.id, {
+      x: original.positions[index * 2], y: original.positions[index * 2 + 1],
+    }]))
+    const reversed = [...graph.nodes].reverse()
+    reversed.push({ id: 'new', type: 'doc', label: 'New document' })
+    const refreshed = createGraphSimulation(reversed, graph.edges, prior)
+    reversed.slice(0, -1).forEach((node, index) => {
+      assert.equal(refreshed.positions[index * 2], prior.get(node.id)!.x)
+      assert.equal(refreshed.positions[index * 2 + 1], prior.get(node.id)!.y)
+    })
+    assert.ok(refreshed.positions.every(Number.isFinite), 'new nodes receive valid positions without resetting existing nodes')
+  })
+
   it('uses smaller, steadier updates for large graphs', () => {
     assert.deepEqual(graphSimulationCadence(1700), { iterations: 1, delayMs: 10 })
     assert.deepEqual(graphSimulationCadence(600), { iterations: 2, delayMs: 10 })
@@ -149,7 +246,7 @@ describe('progressive graph layout engine', () => {
     )
   })
 
-  it('keeps disconnected relationship islands spatially separate', () => {
+  it('keeps local relationship groups recognizable inside the shared field', () => {
     const nodes: GraphNode[] = [
       { id: 'a:hub', type: 'tag', label: 'A' },
       ...Array.from({ length: 12 }, (_, index) => ({ id: `a:${index}`, type: 'doc' as const, label: `A${index}` })),
@@ -164,26 +261,16 @@ describe('progressive graph layout engine', () => {
     stepGraphSimulation(state, 240)
     const positions = snapshotGraphPositions(state)
 
-    const bounds = (prefix: string) => {
-      const members = nodes
-        .map((node, index) => ({ node, index }))
-        .filter(({ node }) => node.id.startsWith(prefix))
-      const xs = members.map(({ index }) => positions[index * 2])
-      const ys = members.map(({ index }) => positions[index * 2 + 1])
-      return {
-        minX: Math.min(...xs), maxX: Math.max(...xs),
-        minY: Math.min(...ys), maxY: Math.max(...ys),
-      }
-    }
-    const a = bounds('a:')
-    const b = bounds('b:')
-    const horizontalGap = Math.max(a.minX, b.minX) - Math.min(a.maxX, b.maxX)
-    const verticalGap = Math.max(a.minY, b.minY) - Math.min(a.maxY, b.maxY)
-
-    assert.ok(
-      horizontalGap > 36 || verticalGap > 36,
-      `disconnected islands should retain a visible gap (horizontal=${horizontalGap}, vertical=${verticalGap})`,
+    const distance = (a: number, b: number) => Math.hypot(
+      positions[a * 2] - positions[b * 2], positions[a * 2 + 1] - positions[b * 2 + 1],
     )
+    const closerToOwnHub = nodes.filter((node, index) => {
+      if (node.type === 'tag') return false
+      const ownHub = index < 13 ? 0 : 13
+      const otherHub = index < 13 ? 13 : 0
+      return distance(index, ownHub) < distance(index, otherHub)
+    }).length
+    assert.ok(closerToOwnHub >= 22, `at least 90% of leaves should remain closer to their own hub (${closerToOwnHub}/24)`)
   })
 
   it('fills free space around relationship islands before expanding isolated nodes outward', () => {
