@@ -10,9 +10,77 @@ import { captureCodexBoundaryContext, codexBeginNewContextOperationId } from '..
 import { loadSqliteAfterGuardForTest, skipIfSqliteUnavailable } from './utils/sqlite-skip'
 import { createCodexProductionPorts } from './helpers/codex-production-composition-harness'
 import { parseBeginNewContextResult } from '../shared/ipc-contracts/agent-runtime'
+import { createCodexToolFixture } from './utils/codex-tool-fixture'
 
 const at = '2026-09-04T00:00:00.000Z'
 const historicalSchema = readFileSync(new URL('./fixtures/ready-pre118-schema.sql', import.meta.url), 'utf8')
+
+test('a settled native history failure exposes recovery and rechecks its current blocker', async (t) => {
+  if (skipIfSqliteUnavailable(t, 'blocked native history recovery')) return
+  const Sqlite = loadSqliteAfterGuardForTest()
+  const db = new Sqlite(':memory:')
+  t.after(() => db.close())
+  db.exec(historicalSchema)
+  runMigrations(db as unknown as MigrationDatabase)
+  db.prepare(`INSERT INTO chat_conversations (id, agent, created_at, updated_at)
+    VALUES ('blocked-scope', 'butler', ?, ?)`).run(at, at)
+  db.prepare(`INSERT INTO chat_messages (id, conversation_id, role, content, timestamp, message_visibility_epoch)
+    VALUES ('preserved-message', 'blocked-scope', 'user', 'Earlier conversation', ?, 0)`).run(at)
+  const repository = new CodexBindingRepository(db as unknown as DatabaseConnection, {
+    runtimeManifestDigest: 'current', protocolSchemaDigest: 'current',
+  })
+  // __breaksInvariants: synthesize an already settled legacy native head
+  // without starting a sidecar; recovery uses the real repository transaction.
+  const { readyToolSurface } = createCodexToolFixture()
+  db.prepare(`INSERT INTO codex_thread_bindings
+    (thread_binding_id, ready_conversation_alias, alias_generation, ready_scope_id,
+     runtime_manifest_digest, protocol_schema_digest, revision, created_at, updated_at,
+     codex_thread_id, codex_session_id, isolated_thread_cwd, thread_started_at, thread_start_reconciled_at,
+     thread_start_reconciliation_evidence_digest, continuation_blocked_at,
+     continuation_blocked_reason, continuation_blocked_evidence_digest,
+     thread_start_reservation_set_id, thread_start_reservation_member_id, thread_start_reservation_admitted_at,
+     thread_start_request_id, tool_surface_digest, tool_surface_snapshot_digest, tool_surface_json,
+     instruction_contract_digest, codex_model_provider_id, codex_model,
+     upstream_profile_snapshot_ref, upstream_profile_snapshot_digest,
+     thread_start_reservation_released_at, thread_start_reservation_release_reason)
+    VALUES ('blocked-source', 'blocked-scope', 1, 'blocked-scope', 'current', 'current', 1, ?, ?,
+      'native-thread', 'native-session', '/tmp/ready-blocked-history', ?, ?, ?, ?, 'publication_diverged', ?,
+      'reservation', 'member', ?, 'request', ?, ?, ?,
+      'instructions', 'ready_gateway', 'model', 'profile', 'profile-digest', ?, 'settled')`)
+    .run(at, at, at, at, digestCanonicalJson('started'), at, digestCanonicalJson('unknown-native-history'), at,
+      readyToolSurface.toolSurfaceDigest, readyToolSurface.surfaceSnapshotDigest, JSON.stringify(readyToolSurface), at)
+  repository.resolveRuntimeOperationForThread = ({ operation }) => ({
+    kind: 'unverified', operation, targetManifestDigest: 'current', sources: [],
+    evidenceDigest: digestCanonicalJson('runtime-unverified'),
+  })
+  const ports = await createCodexProductionPorts({ repository, gate: { assertOpen() {} },
+    verified: { manifestDigest: 'current', manifest: { stableV2SchemaSha256: 'current' } },
+    resolveHeadContinuation: () => ({ kind: 'ready_same_thread', reason: null, evidenceDigest: 'compatible' }),
+    clearLastReferenceSkill() {}, input: {},
+  })
+  const identity = { aliasId: 'blocked-scope', aliasGeneration: 1 }
+  const surface = ports.readActionSurface(identity)
+  assert.equal(surface.state, 'active_head')
+  assert.deepEqual(surface.head?.actions.send_new_message.blockers, ['terminal_history_unknown'])
+  assert.ok(surface.beginNewContext, 'a terminal history blocker must not leave a dead-end composer')
+
+  const readLifecycle = repository.readLifecycleOperation.bind(repository)
+  repository.readLifecycleOperation = (request) => {
+    const read = readLifecycle(request)
+    return { ...read, facts: { ...read.facts, manualCompactionState: 'pending' } }
+  }
+  assert.equal(ports.readActionSurface(identity).beginNewContext, null, 'busy heads cannot be abandoned')
+  assert.throws(() => ports.aliasBindingPort.beginNewContext({ actionRef: surface.beginNewContext! }),
+    /begin_new_context_recovery_no_longer_eligible/)
+  repository.readLifecycleOperation = readLifecycle
+
+  const recovered = ports.aliasBindingPort.beginNewContext({ actionRef: surface.beginNewContext! })
+  assert.equal(recovered.aliasGeneration, 2)
+  assert.equal(db.prepare('SELECT content FROM chat_messages WHERE id = ?')
+    .get<{ content: string }>('preserved-message')?.content, 'Earlier conversation')
+  assert.equal(repository.readContextBoundaries({ scopeId: identity.aliasId, scopeEpoch: 0 }).length, 1)
+  assert.equal(ports.readActionSurface({ ...identity, aliasGeneration: 2 }).head?.actions.send_new_message.availability, 'ready')
+})
 
 test('production recovery replays after restart without clearing new context or returning an old current head', async (t) => {
   if (skipIfSqliteUnavailable(t, 'committed boundary production replay')) return

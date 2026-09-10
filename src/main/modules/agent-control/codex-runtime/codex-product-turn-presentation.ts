@@ -18,6 +18,7 @@ import { assertCodexTerminalFacts, type CodexTerminalFacts } from './codex-termi
 import { isPreparedCodexProductRun, type PreparedCodexProductRun } from './codex-product-run-preparer'
 import { projectCodexHeadActionProjection, type CodexHeadActionFacts } from './codex-action-surface'
 import { ReadyMemoryRepository } from '../ready-memory/ready-memory-repository'
+import type { CodexTurnError } from './codex-native-runtime'
 import {
   resolveExactRetryEligibility,
   exactRetrySourceFacts,
@@ -38,7 +39,11 @@ type ProductTurnActionContextReader = (readyRunId: string) => ProductTurnActionC
 
 export function codexTerminalPublicMessage(
   status: 'error' | 'cancelled' | 'interrupted',
+  nativeError?: CodexTurnError | null,
 ): string {
+  if (status === 'error' && nativeError?.codexErrorInfo === 'usageLimitExceeded') {
+    return '模型服务的使用额度已达到上限，本轮没有完成。请稍后再试，或切换可用的模型服务。'
+  }
   return status === 'error'
     ? '本轮未能完成。'
     : '本轮已停止。停止前已经完成的内容和文件状态都已保留。'

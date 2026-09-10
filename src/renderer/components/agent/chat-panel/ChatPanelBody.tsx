@@ -382,9 +382,15 @@ export function ChatPanelBody(props: ChatPanelBodyProps): React.ReactElement {
               </div>
             )}
             {beginNewContextAvailable && (
-              <div data-ready-begin-new-context="true" role="status" style={{ pointerEvents: 'auto' }}>
-                已有消息会保留；下一轮从这里重新开始，不会自动带入此前对话。
-                <button type="button" onClick={onBeginNewContext}>保留记录，开始新上下文</button>
+              <div data-ready-begin-new-context="true" role="status" style={{
+                pointerEvents: 'auto', padding: '10px 12px', borderRadius: 12,
+                background: 'var(--bg-primary)', color: 'var(--text-primary)', fontSize: 12, lineHeight: 1.6,
+              }}>
+                <p>当前会话暂时无法继续。已有消息会保留，重新开始后不会自动带入此前对话。</p>
+                <button type="button" onClick={onBeginNewContext}
+                  className="mt-2 w-full rounded-lg px-3 py-2 text-xs font-medium"
+                  style={{ background: 'var(--bg-content)', color: 'var(--text-primary)' }}
+                >保留记录，开始新上下文</button>
               </div>
             )}
             {sendConsequence && (

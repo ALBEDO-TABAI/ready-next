@@ -24,6 +24,14 @@ test('public terminal messages keep internal failure codes in diagnostics only',
   assert.doesNotMatch(message, /codex_|gateway_|protocol_|persistence_/)
 })
 
+test('native usage failures explain the account limit without exposing provider text', () => {
+  const error = { message: 'private provider diagnostics', codexErrorInfo: 'usageLimitExceeded' as const }
+  assert.match(codexTerminalPublicMessage('error', error), /额度.*稍后/)
+  assert.doesNotMatch(codexTerminalPublicMessage('error', error), /private provider/)
+  assert.equal(codexTerminalPublicMessage('interrupted', error), codexTerminalPublicMessage('interrupted'))
+  assert.equal(codexTerminalPublicMessage('error', { message: 'untrusted provider text' }), '本轮未能完成。')
+})
+
 test('product presentation reads one terminal snapshot and degrades an oversized tool result', (t) => {
   if (skipIfSqliteUnavailable(t, 'Codex product presentation database')) return
   const Database = loadSqliteAfterGuardForTest()

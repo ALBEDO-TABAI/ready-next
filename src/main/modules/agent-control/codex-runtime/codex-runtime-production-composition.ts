@@ -2097,7 +2097,9 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
         initiator: 'codex_native',
         durationMs,
         ...taskFacts,
-        finalText: codexTerminalPublicMessage(status),
+        finalText: codexTerminalPublicMessage(status, candidate.kind === 'native_terminal'
+          ? terminalReadbackThread?.turns.find((turn) => turn.id === candidate.codexTurnId)?.error
+          : null),
         contextUsage: candidate.contextUsage,
         providerDiagnostics: codexFailureDiagnostics({ error: errorCode, module: taskFacts.module }),
         now: isoNow(),
@@ -3281,11 +3283,11 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
           ? 'runtime_unsupported'
           : manualCompactionRuntime ? 'runtime_unverified' : null,
     })
-    const settledWithoutNative = ['idle_never_started', 'idle_ready_terminal_no_native'].includes(snapshot)
-      && !binding.codexThreadId && head.actions.send_new_message.availability === 'blocked'
+    const settledHeadBlocked = baseHeadFacts.continuationBlocked
+      || (!binding.codexThreadId && head.actions.send_new_message.availability === 'blocked')
     const recoveryEvidenceDigest = ['idle_never_started', 'idle_ready_terminal_no_native', 'idle_native_thread'].includes(snapshot)
       ? continuation?.kind === 'requires_new_context' ? continuation.evidenceDigest
-        : settledWithoutNative ? base.evidenceDigest : null
+        : settledHeadBlocked ? base.evidenceDigest : null
       : null
     return {
       state: 'active_head' as const,
@@ -3302,11 +3304,12 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
             consequenceDigest: digestCanonicalJson(head.actions.send_new_message.consequence),
             draftRevision: null,
           }, () => {
-            if (settledWithoutNative && continuation?.kind !== 'requires_new_context') {
+            if (settledHeadBlocked && continuation?.kind !== 'requires_new_context') {
               const current = repository.readLifecycleOperation(identity)
               const currentSnapshot = classifyLifecycleOperation(current.facts)
-              return ['idle_never_started', 'idle_ready_terminal_no_native'].includes(currentSnapshot)
-                && !current.facts.codexThreadId
+              const currentBinding = repository.readActiveAliasBinding(identity.aliasId)
+              return ['idle_never_started', 'idle_ready_terminal_no_native', 'idle_native_thread'].includes(currentSnapshot)
+                && (!current.facts.codexThreadId || currentBinding?.continuationBlockedAt)
                 ? digestCanonicalJson({ ...current, snapshot: currentSnapshot }) : null
             }
             const current = resolveHeadContinuation({
