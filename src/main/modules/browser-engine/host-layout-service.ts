@@ -48,6 +48,10 @@ export class BrowserHostLayoutService {
   }
 
   showHost(view: BrowserHostView, bounds: BrowserRect): void {
+    if (this.getHostPresentationState(view) === 'visible') {
+      this.setHostBoundsNow(view, bounds)
+      return
+    }
     if (this.getHostPresentationState(view) !== 'detached') {
       this.raiseHost(view)
     } else {

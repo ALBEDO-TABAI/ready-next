@@ -55,6 +55,8 @@ export class BrowserVisibilityRuntime {
       this.deps.log(`[browser-host][intent] hide intentId=${intent.intentId} tab=${intent.tabId} reason=${intent.reason}`)
     } else if (intent.kind === 'set-bounds') {
       this.deps.clearAgentPointer()
+      // Moving the primary surface changes geometry, not tab visibility or protection.
+      return this.deps.applyIntent(intent)
     } else if (intent.kind !== 'secondary-set-bounds') {
       return { success: false }
     }

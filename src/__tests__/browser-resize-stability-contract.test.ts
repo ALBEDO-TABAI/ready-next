@@ -23,7 +23,7 @@ test('browser host bounds do not add a second timer hop after renderer-side drag
   assert.doesNotMatch(hostLayout, /setTimeout\(\(\) => \{/)
 })
 
-test('browser bounds syncing bypasses the extra renderer rAF during active drag while preserving the scheduled path for non-drag transitions', () => {
+test('browser bounds syncing bypasses the extra renderer rAF during active resize while preserving the scheduled path for other changes', () => {
   const boundsHook = readWorkspaceFile('src/renderer/modules/browser/useBrowserViewBounds.ts')
 
   assert.match(
@@ -43,7 +43,7 @@ test('browser bounds syncing bypasses the extra renderer rAF during active drag 
   assert.match(boundsHook, /const stopDragBoundsSync = useCallback\(/)
   assert.match(boundsHook, /dragBoundsSyncRafRef\.current = window\.requestAnimationFrame\(tick\)/)
   assert.match(boundsHook, /window\.addEventListener\(PANEL_RESIZE_STATE_EVENT, handlePanelResizeState as EventListener\)/)
-  assert.match(boundsHook, /if \(panelResizeReasonRef\.current === 'drag'\) \{[\s\S]*sendBoundsImmediate\(\)/)
+  assert.match(boundsHook, /if \(panelResizingRef\.current\) \{[\s\S]*sendBoundsImmediate\(\)/)
   assert.match(boundsHook, /if \(detail\.resizing\) \{[\s\S]*panelResizingRef\.current = true[\s\S]*panelResizeReasonRef\.current = detail\.reason/)
   assert.match(boundsHook, /if \(detail\.reason === 'drag'\) \{[\s\S]*clearFrameSync\(\)[\s\S]*startDragBoundsSync\(\)[\s\S]*return/)
   assert.match(boundsHook, /panelResizingRef\.current = false[\s\S]*stopDragBoundsSync\(\)[\s\S]*void scheduleBoundsSync\('settled', \{ force: true \}\)/)

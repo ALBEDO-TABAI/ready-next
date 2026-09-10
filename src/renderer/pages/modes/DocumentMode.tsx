@@ -38,7 +38,6 @@ import { shouldHandleSelectedDocument } from '../../modules/document/documentSel
 import {
   readDocumentReadingPositionMap,
   saveDocumentReadingPosition,
-  type DocumentScrollAnchorSnapshot,
 } from '../../modules/document/documentScrollAnchor'
 import {
   captureElementScroll,
@@ -228,7 +227,7 @@ export default function DocumentMode({
 
   const splitContainerRef = useRef<HTMLDivElement>(null)
   const primarySplitPaneRef = useRef<HTMLDivElement>(null)
-  const scrollSnapshotsRef = useRef<Map<string, DocumentScrollAnchorSnapshot>>(readDocumentReadingPositionMap())
+  const [scrollSnapshots] = useState(readDocumentReadingPositionMap)
   const documentSplitRatioRef = useRef(documentSplitRatio)
   const liveDocumentSplitRatioRef = useRef(documentSplitRatio)
   const restoreDocumentLayoutFreezeRef = useRef<(() => void) | null>(null)
@@ -554,9 +553,9 @@ export default function DocumentMode({
       ? useDocTabs.getState().tabs.find((tab) => tab.id === tabId)?.content || ''
       : ''
     const snapshot = captureElementScroll(element, content, options)
-    scrollSnapshotsRef.current.set(key, snapshot)
+    scrollSnapshots.set(key, snapshot)
     saveDocumentReadingPosition(key, snapshot)
-  }, [tabIdByScrollKey])
+  }, [scrollSnapshots, tabIdByScrollKey])
 
   const captureVisibleDocumentScrollPositions = useCallback((options?: { includeAnchor?: boolean }) => {
     document.querySelectorAll<HTMLElement>('[data-ready-document-scroll-key]').forEach((scope) => {
@@ -620,7 +619,7 @@ export default function DocumentMode({
     document.querySelectorAll<HTMLElement>('[data-ready-document-scroll-key]').forEach((scope) => {
       const key = scope.dataset.readyDocumentScrollKey
       if (!key) return
-      const snapshot = scrollSnapshotsRef.current.get(key)
+      const snapshot = scrollSnapshots.get(key)
       if (!snapshot) return
       const tabId = tabIdByScrollKey.get(key)
       const content = tabId
@@ -631,11 +630,12 @@ export default function DocumentMode({
       })
     })
     return () => cleanups.forEach((cleanup) => cleanup())
-  }, [tabIdByScrollKey])
+  }, [scrollSnapshots, tabIdByScrollKey])
 
   useLayoutEffect(() => {
+    if (!isSceneVisible) return
     return restoreVisibleDocumentScrollPositions()
-  }, [activeTabId, editorMode, restoreVisibleDocumentScrollPositions, splitTabId])
+  }, [activeTabId, editorMode, isSceneVisible, restoreVisibleDocumentScrollPositions, splitTabId])
 
   const handleEditorModeChange = useCallback((nextMode: 'edit' | 'preview') => {
     if (nextMode === editorMode) return

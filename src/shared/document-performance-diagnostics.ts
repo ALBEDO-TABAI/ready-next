@@ -3,6 +3,7 @@ export type DocumentPerformanceCounter =
   | 'widgetFenceScans'
   | 'widgetStateParses'
   | 'previewParses'
+  | 'markdownParses'
   | 'previewBlockRenders'
   | 'widgetBlockRenders'
   | 'widgetCompiles'
@@ -18,6 +19,7 @@ const counterNames: DocumentPerformanceCounter[] = [
   'widgetFenceScans',
   'widgetStateParses',
   'previewParses',
+  'markdownParses',
   'previewBlockRenders',
   'widgetBlockRenders',
   'widgetCompiles',

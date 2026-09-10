@@ -46,6 +46,7 @@
     "preview": "electron-vite preview",
     "verify:document-reading": "npx tsx@^4.19.2 --test --test-concurrency=1 src/__tests__/document-book-curl-math.test.ts src/__tests__/document-book-flip-controller.test.ts src/__tests__/document-book-page-face.test.tsx src/__tests__/document-book-pagination.test.ts src/__tests__/document-book-preferences.test.ts src/__tests__/document-book-reading-position.test.ts src/__tests__/document-book-stage-interruption.test.tsx src/__tests__/document-book-tab-session.test.ts src/__tests__/document-mode-switch-reading-intent.test.tsx && npm run typecheck:web",
     "typecheck": "node scripts/run-typecheck.cjs",
+    "verify:workbench-performance": "tsx --test --test-concurrency=1 src/__tests__/workbench-switch-performance.test.ts src/__tests__/document-preview-performance-contract.test.ts",
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json --composite false --incremental --tsBuildInfoFile node_modules/.cache/tsc/node.tsbuildinfo",
     "typecheck:web": "tsc --noEmit -p tsconfig.web.json --composite false --incremental --tsBuildInfoFile node_modules/.cache/tsc/web.tsbuildinfo",
     "typecheck:clean": "rm -rf node_modules/.cache/tsc",

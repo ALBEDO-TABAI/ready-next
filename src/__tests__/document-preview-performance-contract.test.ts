@@ -1,5 +1,13 @@
 import assert from 'node:assert/strict'
 import { afterEach, test } from 'node:test'
+import { createElement } from 'react'
+import { renderToStaticMarkup } from 'react-dom/server'
+import NotePreview from '../renderer/components/document/NotePreview'
+import {
+  getDocumentPerformanceDiagnosticsSnapshot,
+  resetDocumentPerformanceDiagnostics,
+  setDocumentPerformanceDiagnosticsEnabled,
+} from '../shared/document-performance-diagnostics'
 
 import {
   __getDocumentWidgetRenderCodeCacheStatsForTests,
@@ -251,4 +259,42 @@ test('split widget retention preserves pane structure without retaining the plai
   assert.equal(hidden.splitTab, splitTab)
   assert.equal(hidden.retainActiveEditor, false)
   assert.equal(hidden.retainSplitEditor, true)
+})
+
+test('remounting an unchanged document reuses its preview computation while edits and moved paths stay fresh', () => {
+  setDocumentPerformanceDiagnosticsEnabled(true)
+  resetDocumentPerformanceDiagnostics()
+  try {
+    const props = { notePath: '/tmp/preview-cache-a/note.md', content: '# Cache\n\nA paragraph\n\n![image](image.png)' }
+    const first = renderToStaticMarkup(createElement(NotePreview, props))
+    const initialMarkdownParses = getDocumentPerformanceDiagnosticsSnapshot().counters.markdownParses
+    assert.ok(initialMarkdownParses > 0)
+    assert.equal(renderToStaticMarkup(createElement(NotePreview, props)), first)
+    assert.equal(getDocumentPerformanceDiagnosticsSnapshot().counters.previewParses, 1)
+    assert.equal(getDocumentPerformanceDiagnosticsSnapshot().counters.markdownParses, initialMarkdownParses)
+    const edited = renderToStaticMarkup(createElement(NotePreview, { ...props, content: props.content + '\n\nChanged text' }))
+    assert.match(edited, /Changed text/)
+    assert.equal(getDocumentPerformanceDiagnosticsSnapshot().counters.previewParses, 2)
+    const moved = renderToStaticMarkup(createElement(NotePreview, { ...props, notePath: '/tmp/preview-cache-b/note.md' }))
+    assert.notEqual(moved, first)
+    assert.equal(getDocumentPerformanceDiagnosticsSnapshot().counters.previewParses, 3)
+    for (let index = 0; index < 5; index += 1) {
+      renderToStaticMarkup(createElement(NotePreview, { notePath: `/tmp/preview-eviction-${index}.md`, content: `# ${index}` }))
+    }
+    renderToStaticMarkup(createElement(NotePreview, props))
+    assert.equal(getDocumentPerformanceDiagnosticsSnapshot().counters.previewParses, 9)
+  } finally {
+    setDocumentPerformanceDiagnosticsEnabled(false)
+  }
+})
+
+test('cached markdown keeps GFM output, link safety and per-document component bindings', () => {
+  const content = '# Heading\n\n- [x] Done\n\n| A | B |\n|---|---|\n| 1 | 2 |\n\n~~Deleted~~\n\n[unsafe](javascript:alert(1))\n\n<iframe src="https://example.test"></iframe>'
+  const render = (notePath: string) => renderToStaticMarkup(createElement(NotePreview, { content, notePath }))
+  const first = render('/tmp/markdown-cache-safety.md')
+  assert.equal(render('/tmp/markdown-cache-safety.md'), first)
+  assert.match(first, /type="checkbox"[^>]*checked/)
+  assert.match(first, /<table/)
+  assert.match(first, /<del>Deleted<\/del>/)
+  assert.doesNotMatch(first, /href="javascript:|<iframe/)
 })

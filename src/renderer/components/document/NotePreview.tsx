@@ -8,7 +8,7 @@ import {
   useState,
   type ReactNode,
 } from 'react'
-import ReactMarkdown, { type Components } from 'react-markdown'
+import ReactMarkdown, { type Components, type Options as MarkdownOptions } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import {
   Check,
@@ -20,7 +20,6 @@ import { openWebpageInBrowser } from '../../modules/browser/openWebpageInBrowser
 import { appendToAgentInput } from '../../modules/agent/chat-input-bridge'
 import { EBOOK_INLINE_IMAGE_TITLE, EBOOK_MARKDOWN_MARKER } from '../../../shared/ebook'
 import {
-  buildStructuredNotePreview,
   resolvePreviewReference,
   type PreviewBlock,
   type PreviewEmbed,
@@ -44,10 +43,7 @@ import {
   movePreviewBlockSource,
   replacePreviewBlockSource,
 } from '../../modules/document/previewEditOperations'
-import {
-  buildPreviewBlockRenderKeys,
-  buildPreviewBlockSourceLines,
-} from '../../modules/document/notePreviewBlockIdentity'
+import { resolveNotePreviewModel } from '../../modules/document/notePreviewModel'
 import { recordDocumentPerformanceCounter } from '../../../shared/document-performance-diagnostics'
 import MermaidPreviewBlock from './MermaidPreviewBlock'
 
@@ -526,18 +522,18 @@ function MarkdownSourceBlock({ code }: { code: string }) {
   )
 }
 
-const MARKDOWN_REMARK_PLUGINS = [remarkGfm]
-
 const MarkdownPreviewBlock = memo(function MarkdownPreviewBlock({
   markdown,
   components,
+  remarkPlugins,
 }: {
   markdown: string
   components: Components
+  remarkPlugins: MarkdownOptions['remarkPlugins']
 }) {
   recordDocumentPerformanceCounter('previewBlockRenders')
   return (
-    <ReactMarkdown remarkPlugins={MARKDOWN_REMARK_PLUGINS} components={components}>
+    <ReactMarkdown remarkPlugins={remarkPlugins} components={components}>
       {markdown}
     </ReactMarkdown>
   )
@@ -548,11 +544,13 @@ const DetailsPreviewBlock = memo(function DetailsPreviewBlock({
   markdown,
   open,
   components,
+  remarkPlugins,
 }: {
   summary: string
   markdown: string
   open: boolean
   components: Components
+  remarkPlugins: MarkdownOptions['remarkPlugins']
 }) {
   recordDocumentPerformanceCounter('previewBlockRenders')
   return (
@@ -560,7 +558,7 @@ const DetailsPreviewBlock = memo(function DetailsPreviewBlock({
       <summary className="note-preview-details-summary">{summary}</summary>
       {markdown ? (
         <div className="note-preview-details-body">
-          <MarkdownPreviewBlock markdown={markdown} components={components} />
+          <MarkdownPreviewBlock markdown={markdown} components={components} remarkPlugins={remarkPlugins} />
         </div>
       ) : null}
     </details>
@@ -587,14 +585,9 @@ function NotePreview({
       ? content.split(EBOOK_MARKDOWN_MARKER).join('').replace(/^\s*\n/, '')
       : content
   ), [content, isEbookMarkdown])
-  const preview = useMemo(() => buildStructuredNotePreview(displayContent, notePath), [displayContent, notePath])
-  const blockRenderKeys = useMemo(
-    () => buildPreviewBlockRenderKeys(displayContent, preview.blocks),
-    [displayContent, preview.blocks],
-  )
-  const blockSourceLines = useMemo(
-    () => buildPreviewBlockSourceLines(displayContent, preview.blocks),
-    [displayContent, preview.blocks],
+  const { preview, blockRenderKeys, blockSourceLines, remarkPlugins } = useMemo(
+    () => resolveNotePreviewModel(displayContent, notePath),
+    [displayContent, notePath],
   )
   // Ebook markdown strips a marker before parsing, so ranges would not line up
   // with the tab content — preview-edit stays off there.
@@ -862,7 +855,7 @@ function NotePreview({
         {preview.blocks.map((block) => {
           const renderBlockBody = (): ReactNode => {
             if (block.type === 'markdown') {
-              return <MarkdownPreviewBlock markdown={block.markdown} components={markdownComponents} />
+              return <MarkdownPreviewBlock markdown={block.markdown} components={markdownComponents} remarkPlugins={remarkPlugins} />
             }
 
             if (block.type === 'details') {
@@ -872,6 +865,7 @@ function NotePreview({
                   markdown={block.markdown}
                   open={block.open}
                   components={markdownComponents}
+                  remarkPlugins={remarkPlugins}
                 />
               )
             }

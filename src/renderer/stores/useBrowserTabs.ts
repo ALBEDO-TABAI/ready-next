@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { shallow } from 'zustand/shallow'
 import { readJsonStorage, writeJsonStorage } from '../utils/storage'
 import { isTabGroupColor, pickNextGroupColor, type TabGroup, type TabGroupColor } from '../../shared/tab-groups'
 import {
@@ -89,7 +90,7 @@ function nextGroupId(): string {
 }
 
 function sanitizeBrowserTab(tab: BrowserTab): BrowserTab {
-  return {
+  const next: BrowserTab = {
     id: String(tab.id || ''),
     url: String(tab.url || ''),
     title: String(tab.title || 'New Tab'),
@@ -106,17 +107,19 @@ function sanitizeBrowserTab(tab: BrowserTab): BrowserTab {
     error: tab.error || undefined,
     groupId: typeof tab.groupId === 'string' && tab.groupId ? tab.groupId : null,
   }
+  return shallow(tab, next) ? tab : next
 }
 
 function sanitizeTabGroup(group: TabGroup): TabGroup | null {
   const id = String(group?.id || '')
   if (!id) return null
-  return {
+  const next: TabGroup = {
     id,
     name: typeof group.name === 'string' ? group.name : '',
     color: isTabGroupColor(group.color) ? group.color : 'blue',
     collapsed: Boolean(group.collapsed),
   }
+  return shallow(group, next) ? group : next
 }
 
 function toGroupModel(tabs: BrowserTab[], tabGroups: TabGroup[]): GroupModelState {
@@ -130,9 +133,12 @@ function applyGroupModel(tabs: BrowserTab[], model: GroupModelState): { tabs: Br
   const nextTabs: BrowserTab[] = []
   for (const id of model.order) {
     const tab = byId.get(id)
-    if (tab) nextTabs.push({ ...tab, groupId: model.groupOf[id] ?? null })
+    if (tab) {
+      const groupId = model.groupOf[id] ?? null
+      nextTabs.push(tab.groupId === groupId ? tab : { ...tab, groupId })
+    }
   }
-  return { tabs: nextTabs, tabGroups: model.groups }
+  return { tabs: shallow(tabs, nextTabs) ? tabs : nextTabs, tabGroups: model.groups }
 }
 
 function sanitizeSnapshot(snapshot: BrowserTabsSnapshot): BrowserTabsSnapshot {
@@ -156,8 +162,8 @@ function sanitizeSnapshot(snapshot: BrowserTabsSnapshot): BrowserTabsSnapshot {
     : null
 
   return {
-    tabs,
-    tabGroups,
+    tabs: shallow(snapshot.tabs, tabs) ? snapshot.tabs : tabs,
+    tabGroups: shallow(snapshot.tabGroups, tabGroups) ? snapshot.tabGroups : tabGroups,
     activeTabId,
     splitTabId,
     browserSplitRatio: Math.max(20, Math.min(80, Number(snapshot.browserSplitRatio) || 50)),
@@ -202,7 +208,7 @@ function readBrowserTabsSnapshot(): BrowserTabsSnapshot {
 }
 
 const browserTabsPersistenceWriter = new BrowserTabPersistenceWriter<BrowserTabsSnapshot>({
-  write: (snapshot) => writeJsonStorage(BROWSER_TABS_SNAPSHOT_KEY, snapshot),
+  write: (snapshot) => writeJsonStorage(BROWSER_TABS_SNAPSHOT_KEY, sanitizeSnapshot(snapshot)),
   requestIdleCallback: typeof window !== 'undefined' && typeof window.requestIdleCallback === 'function'
     ? (callback, options) => window.requestIdleCallback(callback, options)
     : undefined,
@@ -212,7 +218,7 @@ const browserTabsPersistenceWriter = new BrowserTabPersistenceWriter<BrowserTabs
 })
 
 function persistBrowserTabsSnapshot(snapshot: BrowserTabsSnapshot): void {
-  browserTabsPersistenceWriter.schedule(sanitizeSnapshot(snapshot))
+  browserTabsPersistenceWriter.schedule(snapshot)
 }
 
 export function flushBrowserTabsPersistence(): void {

@@ -392,15 +392,15 @@ export function useBrowserViewBounds({
     if (!element) return
 
     const handleBoundsShift = () => {
-      if (panelResizeReasonRef.current === 'drag') {
+      if (!isActiveRef.current || !isVisibleAllowedRef.current) return
+      // ResizeObserver already runs after layout and before paint. An extra rAF
+      // leaves the native page one frame behind the animated DOM panel.
+      if (panelResizingRef.current) {
         clearFrameSync()
         void sendBoundsImmediate()
         return
       }
-      if (panelResizingRef.current && frameSyncRequestRef.current !== null) return
-      sendBounds({
-        forceExact: panelResizingRef.current,
-      })
+      sendBounds()
     }
 
     const observer = new ResizeObserver(handleBoundsShift)

@@ -11,6 +11,7 @@
 - Renderer 的通用 `*` reset 必须位于明确的 `@layer base`。禁止在层外重置通用 `margin` / `padding`；回归入口是 `scripts/check-css-cascade-layer-reset.cjs`。
 - 代码文件只要净增行数，收尾前就检查总行数。超过 1000 行按“危险 / 一般 / 健康”更新 `docs/code-health/large-file-health-log.md`：健康无需动作，一般写复查日期，危险在最终回复提醒。生成物、锁文件和 vendored 第三方文件不计，但生成器源码仍计。
 - BrowserView 是原生覆盖层，不受 DOM `z-index` 控制。任何 primary、secondary、关闭分栏或卸载转换只要让 Browser 离开可见 mode 集合，都必须先经 `hide-all` intent + 匹配 ack，再提交 DOM mode；恢复后按稳定 bounds 显示。文件打开使用同一协调入口，但只保留这段正确性等待，不串行等待 ritual 或场景滑动。
+- 点击侧栏收放与拖动时，Browser 的 ResizeObserver 在当前布局帧提交位置，不再排下一帧；重复尺寸不重发。已显示的原生页原位更新，不重复拆卸重挂；纯主页面位置更新不触发全量标签负载检查。浏览器 store 归一化必须保留未变化的标签与分组引用。回归入口：`verify:workbench-performance`。
 - 聊天输入框液态玻璃只以真实 Electron dev 为验收面；`#/liquid-test` 只用于调参。生产输入框不得加外部暗色阴影或静态截图贴片，消息末尾必须按浮层实测高度留白。
 - Agent 回复中同一 delimiter 的连续数字列表必须合并为一个语义 `<ol>/<li>`，只保留 authored start，后续编号交给浏览器；段落、嵌套和 delimiter 变化必须正常断开。运行中只显示一条“本轮用时”并保持实时走时；这两项都是 Renderer 展示，不新增任务或持久状态。
 - Windows 顶部 chrome 保留系统最小化、最大化、关闭按钮；Ready 圆点在左上，中心按 `WORKBENCH_EDGE_RAIL_SLOT_INSET_X + WORKBENCH_EDGE_RAIL_SLOT_SIZE / 2` 与左轨槽位对齐（当前 25px）。`titleBarStyle: 'hidden'` + `titleBarOverlay` 负责同层背景，Mica 只能是有普通背景 fallback 的增强。
@@ -174,6 +175,7 @@
 - PDF 通过 `local-file://` 的 HEAD/Range 响应按需读取，Renderer 只挂载当前页前后各 3 页、最多 7 页的重页树；未访问页用轻量占位，尺寸在渲染后按页校准，缩放不重渲染窗口外 slot。Board 节点连续拖动只在 DOM 快路更新，结束时一次提交文档状态；框选、缩放、箭头和滚轮连续事件按动画帧合并，取消必须恢复起始状态。
 - DOCX 读/写、XLSX 解析、EPUB 导入与 Agent/附件的 DOCX/XLSX/PDF 重文档提取只在惰性 document worker 串行执行；Main 不保留同步回退重处理。分段文本提取的 offset/limit 下推到 worker，只返回请求窗口。文本与 DOCX 保存都使用同目录原子发布，失败时不损坏原文件。
 - keep-alive 的 DocumentMode 只在可见时响应文件选择。文件树、搜索和图谱已经打开的目标不得被 DocumentMode 再次 stat/open/activity；文件涌现活动只把快照标脏，刷新经空闲合并调度且同一工作区只允许一轮生成。FileTree 的涌现上下文只订阅 group/path 等结构事实，正文、dirty 与激活时间变化不得重建调度或发查询。
+- 文档预览计算最多缓存最近 4 个路径，每份正文不超过 100 万字符，命中须同时匹配完整正文与路径；正文变化、路径变化或容量淘汰后重新计算。段落只复用 Markdown 语法树，每次仍经当前组件和 react-markdown 的 URL/HTML 安全处理。缓存不保留编辑器、媒体或 iframe 实例，隐藏场景的原有释放规则不变。阅读位置只在 DocumentMode 初始化时载入，后续渲染复用内存中的位置表；场景重新可见后，必须对重新挂载的编辑面恢复位置。
 - H1/H2 freeform 只在命中特定触发词时使用；其他 Widget 使用结构化骨架 A-G、`relation_map` 或 `process_flow`。
 - Widget 视觉唯一来源是 `src/shared/document-widget-theme.ts` 与 `document-widget-dot-charts.ts`：Ready 单橘红、mono 标签、禁饼图/彩虹/Emoji 图标；`pie` 输入渲染为合规占比形态。
 - OpenUI componentSpec、骨架编译器与 iframe 基线 CSS 都走令牌。预览/导出优先从 `skeleton_spec` 或 `component_spec` 重编译；`widget_code` 只作无法重建时的兼容回退。
