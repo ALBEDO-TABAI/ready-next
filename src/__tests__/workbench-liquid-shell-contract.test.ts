@@ -9,7 +9,8 @@ function readWorkspaceFile(path: string): string {
 }
 
 function findCssBlock(source: string, selector: string): string {
-  const start = source.indexOf(selector)
+  const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const start = source.search(new RegExp(`${escaped}(?=\\s*[,\\{])`))
   assert.notEqual(start, -1, `${selector} should exist`)
   const open = source.indexOf('{', start)
   assert.notEqual(open, -1, `${selector} should have a declaration block`)
@@ -356,15 +357,15 @@ test('liquid glass sliders preserve the groove and use lens-backed convex thumbs
   assert.doesNotMatch(documentSwitchGroove, /0\.045/)
   assert.match(appStyles, /html\[data-skin='liquid-glass'\] \.draggable-mode-switch::before\s*\{[\s\S]*?display:\s*none;/)
   assert.match(chatModeDock, /margin-bottom:\s*-12px;/)
-  // 8ab48cd7 style(ui): checkpoint liquid glass polish — 聊天 dock 槽从全透明改为自带薄雾底 + 触地投影（thumb 1.08）。
+  // 聊天 dock 外壳不再叠加第二层底色与边框，材质与输入框共用。
   assert.match(chatModeDockGroove, /--ready-workbench-slider-thumb-scale:\s*1\.08;/)
-  assert.match(chatModeDockGroove, /border-color:\s*rgba\(255, 255, 255, 0\.56\);/)
-  assert.match(chatModeDockGroove, /background:\s*rgba\(248, 250, 252, 0\.14\);/)
-  assert.match(chatModeDockGroove, /0 5px 14px rgba\(31, 36, 46, 0\.055\)/)
+  assert.match(chatModeDockGroove, /border-color:\s*transparent;/)
+  assert.match(chatModeDockGroove, /background:\s*transparent;/)
+  assert.match(chatModeDockGroove, /box-shadow:\s*none;/)
   assert.match(chatModeDockGroove, /backdrop-filter:\s*none;/)
-  assert.match(chatModeDockSurface, /background:\s*rgba\(248,\s*250,\s*252,\s*0\.56\);/)
-  assert.match(chatModeDockSurface, /inset 0 1px 0 rgba\(255,\s*255,\s*255,\s*0\.52\)/)
-  assert.match(chatModeDockProjection, /filter:\s*blur\(0\.875px\) saturate\(1\.28\) contrast\(0\.82\) brightness\(1\.08\);/)
+  assert.match(chatModeDockSurface, /background:\s*rgba\(248,\s*250,\s*252,\s*0\.32\);/)
+  assert.match(chatModeDockSurface, /inset 0 1px 0 rgba\(255,\s*255,\s*255,\s*0\.42\)/)
+  assert.match(chatModeDockProjection, /filter:\s*blur\(4\.5px\) saturate\(1\.18\) contrast\(0\.82\) brightness\(1\.04\);/)
 
   for (const darkGrooveBlock of [darkDocumentSwitchGroove, darkAppModeTabsGroove]) {
     assert.match(darkGrooveBlock, /border-color:\s*transparent;/)
@@ -372,13 +373,12 @@ test('liquid glass sliders preserve the groove and use lens-backed convex thumbs
     assert.match(darkGrooveBlock, /box-shadow:\s*var\(--workbench-rail-slot-shadow\);/)
     assert.match(darkGrooveBlock, /saturate\(100%\)/)
   }
-  // 8ab48cd7 — 暗色聊天 dock 槽同步换为自带底色 + 投影（不再全透明）。
-  assert.match(darkChatModeDockGroove, /border-color:\s*rgba\(232, 232, 232, 0\.14\);/)
-  assert.match(darkChatModeDockGroove, /background:\s*rgba\(26, 26, 26, 0\.24\);/)
-  assert.match(darkChatModeDockGroove, /0 5px 14px rgba\(0, 0, 0, 0\.18\)/)
+  assert.match(darkChatModeDockGroove, /border-color:\s*transparent;/)
+  assert.match(darkChatModeDockGroove, /background:\s*transparent;/)
+  assert.match(darkChatModeDockGroove, /box-shadow:\s*none;/)
   assert.match(darkChatModeDockSurface, /background:\s*rgba\(26,\s*26,\s*26,\s*0\.62\);/)
   assert.match(darkChatModeDockSurface, /inset 0 1px 0 rgba\(232,\s*232,\s*232,\s*0\.14\)/)
-  assert.match(darkChatModeDockProjection, /filter:\s*blur\(0\.875px\) saturate\(0\) contrast\(0\.78\) brightness\(0\.78\);/)
+  assert.match(darkChatModeDockProjection, /filter:\s*blur\(3\.5px\) saturate\(0\) contrast\(0\.78\) brightness\(0\.78\);/)
 
   for (const thumbBlock of [iconRailThumb, appModeTabsThumb]) {
     assert.match(thumbBlock, /radial-gradient\(ellipse 110% 62% at 50% -12%/)
@@ -416,7 +416,7 @@ test('liquid glass sliders preserve the groove and use lens-backed convex thumbs
 
   assert.match(iconRail, /<LiquidLens[\s\S]*className="ready-slider-thumb-lens"[\s\S]*bevel=\{4\}[\s\S]*depth=\{8\}[\s\S]*ior=\{1\.22\}[\s\S]*dome=\{0\.7\}[\s\S]*strength=\{1\.05\}[\s\S]*blur=\{0\}/)
   assert.match(modeTabs, /from '..\/ui\/liquid-glass\/LiquidBackdropProjection'/)
-  assert.match(modeTabs, /<LiquidLens[\s\S]*className="draggable-mode-tabs__surface"[\s\S]*bevel=\{2\.5\}[\s\S]*depth=\{18\.5\}[\s\S]*ior=\{1\.34\}[\s\S]*dome=\{1\.6\}[\s\S]*strength=\{2\.6\}[\s\S]*blur=\{0\.875\}[\s\S]*blurBeforeRefraction[\s\S]*backdropContent=\{\(/)
+  assert.match(modeTabs, /<LiquidLens[\s\S]*className="draggable-mode-tabs__surface"[\s\S]*bevel=\{6\}[\s\S]*depth=\{18\.5\}[\s\S]*ior=\{1\.34\}[\s\S]*dome=\{0\.65\}[\s\S]*profile="squircle"[\s\S]*strength=\{2\}[\s\S]*blur=\{3\.5\}[\s\S]*blurBeforeRefraction[\s\S]*backdropContent=\{\(/)
   assert.match(modeTabs, /<LiquidBackdropProjection[\s\S]*className="draggable-mode-tabs__projection"[\s\S]*sourceMaskRadius=\{19\}/)
   assert.match(modeTabs, /<LiquidLens[\s\S]*className="ready-slider-thumb-lens"[\s\S]*bevel=\{6\}[\s\S]*depth=\{14\}[\s\S]*ior=\{1\.3\}[\s\S]*dome=\{1\.15\}[\s\S]*strength=\{1\.42\}[\s\S]*blur=\{0\}/)
   assert.match(modeSwitch, /<LiquidLens[\s\S]*className="ready-slider-thumb-lens"[\s\S]*ior=\{1\.22\}[\s\S]*dome=\{0\.7\}[\s\S]*blur=\{0\}/)

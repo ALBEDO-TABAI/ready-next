@@ -253,12 +253,13 @@ export default function DraggableModeTabs({
         className="draggable-mode-tabs__surface"
         style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}
         radius={19}
-        bevel={2.5}
+        bevel={6}
         depth={18.5}
         ior={1.34}
-        dome={1.6}
-        strength={2.6}
-        blur={0.875}
+        dome={0.65}
+        profile="squircle"
+        strength={2}
+        blur={3.5}
         frost={0}
         blurBeforeRefraction
         saturation={1.18}

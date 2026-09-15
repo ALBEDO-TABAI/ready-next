@@ -2,6 +2,7 @@
 /* The refracting layer is a LiquidLens (canvas displacement map →
    feDisplacementMap → backdrop-filter: url()). CSS only adds the material
    veil and rim highlights; the optics live in the component. */
+html[data-skin='liquid-glass'] .ready-chat-mode-tabs-dock .draggable-mode-tabs__surface,
 .ready-liquid-composer__surface {
   position: relative;
   z-index: 0;
@@ -14,6 +15,8 @@
     inset 0 -1px 0 rgba(255, 255, 255, 0.14);
 }
 
+html[data-skin='liquid-glass'] .ready-chat-mode-tabs-dock .draggable-mode-tabs__surface::before,
+html[data-skin='liquid-glass'] .ready-chat-mode-tabs-dock .draggable-mode-tabs__surface::after,
 .ready-liquid-composer__surface::before,
 .ready-liquid-composer__surface::after {
   content: '';
@@ -22,6 +25,7 @@
   pointer-events: none;
 }
 
+html[data-skin='liquid-glass'] .ready-chat-mode-tabs-dock .draggable-mode-tabs__surface::before,
 .ready-liquid-composer__surface::before {
   inset: 0;
   z-index: 4;
@@ -31,6 +35,7 @@
     inset 0 1px 0 rgba(255, 255, 255, 0.24);
 }
 
+html[data-skin='liquid-glass'] .ready-chat-mode-tabs-dock .draggable-mode-tabs__surface::after,
 .ready-liquid-composer__surface::after {
   inset: 0;
   z-index: 5;
@@ -49,6 +54,7 @@
   z-index: 3;
 }
 
+html[data-skin='liquid-glass'] .ready-chat-mode-tabs-dock .draggable-mode-tabs__projection,
 .ready-liquid-composer__projection {
   position: absolute;
   inset: 0;
@@ -61,6 +67,7 @@
   transform: translateZ(0);
 }
 
+html[data-skin='liquid-glass'] .ready-chat-mode-tabs-dock .draggable-mode-tabs__projection::after,
 .ready-liquid-composer__projection::after {
   content: '';
   position: absolute;
@@ -93,6 +100,7 @@ html[data-theme='dark'][data-skin='liquid-glass'] .ready-liquid-composer {
   --surface-border: rgba(232, 232, 232, 0.18);
 }
 
+html[data-theme='dark'][data-skin='liquid-glass'] .ready-chat-mode-tabs-dock .draggable-mode-tabs__surface::before,
 html[data-theme='dark'][data-skin='liquid-glass'] .ready-liquid-composer__surface::before {
   border-color: rgba(232, 232, 232, 0.14);
   box-shadow:
@@ -101,6 +109,7 @@ html[data-theme='dark'][data-skin='liquid-glass'] .ready-liquid-composer__surfac
   opacity: 0.84;
 }
 
+html[data-theme='dark'][data-skin='liquid-glass'] .ready-chat-mode-tabs-dock .draggable-mode-tabs__surface,
 html[data-theme='dark'][data-skin='liquid-glass'] .ready-liquid-composer__surface {
   background: rgba(26, 26, 26, 0.62);
   box-shadow:
@@ -108,17 +117,20 @@ html[data-theme='dark'][data-skin='liquid-glass'] .ready-liquid-composer__surfac
     inset 0 -1px 0 rgba(0, 0, 0, 0.16);
 }
 
+html[data-theme='dark'][data-skin='liquid-glass'] .ready-chat-mode-tabs-dock .draggable-mode-tabs__surface::after,
 html[data-theme='dark'][data-skin='liquid-glass'] .ready-liquid-composer__surface::after {
   background:
     linear-gradient(132deg, rgba(255, 255, 255, 0.01) 0%, rgba(232, 232, 232, 0.18) 30%, rgba(255, 255, 255, 0.01) 56%, rgba(232, 232, 232, 0.12) 78%, rgba(255, 255, 255, 0.01) 100%);
   opacity: 0.18;
 }
 
+html[data-theme='dark'][data-skin='liquid-glass'] .ready-chat-mode-tabs-dock .draggable-mode-tabs__projection,
 html[data-theme='dark'][data-skin='liquid-glass'] .ready-liquid-composer__projection {
   opacity: 0.52;
   filter: blur(3.5px) saturate(0) contrast(0.78) brightness(0.78);
 }
 
+html[data-theme='dark'][data-skin='liquid-glass'] .ready-chat-mode-tabs-dock .draggable-mode-tabs__projection::after,
 html[data-theme='dark'][data-skin='liquid-glass'] .ready-liquid-composer__projection::after {
   background:
     radial-gradient(circle at 20% 18%, rgba(232, 232, 232, 0.09), transparent 28%),
@@ -249,12 +261,10 @@ html[data-theme='dark'][data-skin='liquid-glass'] .ready-liquid-card__lens::afte
 
 html[data-skin='liquid-glass'] .ready-chat-mode-tabs-dock .draggable-mode-tabs {
   --ready-workbench-slider-thumb-scale: 1.08;
-  border-color: rgba(255, 255, 255, 0.56);
-  background: rgba(248, 250, 252, 0.14);
+  border-color: transparent;
+  background: transparent;
   box-shadow:
-    0 5px 14px rgba(31, 36, 46, 0.055),
-    inset 0 1px 0 rgba(255, 255, 255, 0.44),
-    inset 0 -1px 0 rgba(87, 96, 112, 0.055);
+    none;
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
 }
@@ -265,73 +275,6 @@ html[data-skin='liquid-glass'] .ready-chat-mode-tabs-dock .draggable-mode-tabs::
 
 html[data-skin='liquid-glass'] .ready-chat-mode-tabs-dock .draggable-mode-tabs__track {
   display: none;
-}
-
-html[data-skin='liquid-glass'] .ready-chat-mode-tabs-dock .draggable-mode-tabs__surface {
-  z-index: 0;
-  overflow: hidden;
-  background: rgba(248, 250, 252, 0.56);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.52),
-    inset 0 -1px 0 rgba(255, 255, 255, 0.18);
-  transform: translateZ(0);
-}
-
-html[data-skin='liquid-glass'] .ready-chat-mode-tabs-dock .draggable-mode-tabs__surface::before,
-html[data-skin='liquid-glass'] .ready-chat-mode-tabs-dock .draggable-mode-tabs__surface::after {
-  content: '';
-  position: absolute;
-  border-radius: inherit;
-  pointer-events: none;
-}
-
-html[data-skin='liquid-glass'] .ready-chat-mode-tabs-dock .draggable-mode-tabs__surface::before {
-  inset: 0;
-  z-index: 4;
-  border: 0.5px solid rgba(255, 255, 255, 0.36);
-  box-shadow:
-    inset 0 0 0 1px rgba(255, 255, 255, 0.11),
-    inset 0 1px 0 rgba(255, 255, 255, 0.30);
-}
-
-html[data-skin='liquid-glass'] .ready-chat-mode-tabs-dock .draggable-mode-tabs__surface::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  z-index: 5;
-  padding: 1px;
-  border-radius: inherit;
-  background:
-    linear-gradient(132deg, rgba(255, 255, 255, 0.02) 0%, rgba(255, 255, 255, 0.42) 30%, rgba(255, 255, 255, 0.02) 56%, rgba(255, 255, 255, 0.28) 78%, rgba(255, 255, 255, 0.02) 100%);
-  opacity: 0.24;
-  pointer-events: none;
-  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-  -webkit-mask-composite: xor;
-  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-  mask-composite: exclude;
-}
-
-html[data-skin='liquid-glass'] .ready-chat-mode-tabs-dock .draggable-mode-tabs__projection {
-  position: absolute;
-  inset: 0;
-  z-index: 0;
-  overflow: hidden;
-  border-radius: inherit;
-  pointer-events: none;
-  opacity: 0.72;
-  filter: blur(0.875px) saturate(1.28) contrast(0.82) brightness(1.08);
-  transform: translateZ(0) scale(1.015);
-}
-
-html[data-skin='liquid-glass'] .ready-chat-mode-tabs-dock .draggable-mode-tabs__projection::after {
-  content: '';
-  position: absolute;
-  inset: -18px;
-  background:
-    radial-gradient(circle at 20% 18%, rgba(255, 255, 255, 0.48), transparent 28%),
-    radial-gradient(circle at 76% 62%, rgba(255, 255, 255, 0.30), transparent 36%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.36), rgba(248, 250, 252, 0.18));
-  pointer-events: none;
 }
 
 html[data-skin='liquid-glass'] .ready-chat-mode-tabs-dock .draggable-mode-tabs__thumb {
@@ -363,47 +306,12 @@ html[data-skin='liquid-glass'] .ready-chat-mode-tabs-dock .draggable-mode-tabs__
 }
 
 html[data-theme='dark'][data-skin='liquid-glass'] .ready-chat-mode-tabs-dock .draggable-mode-tabs {
-  border-color: rgba(232, 232, 232, 0.14);
-  background: rgba(26, 26, 26, 0.24);
+  border-color: transparent;
+  background: transparent;
   box-shadow:
-    0 5px 14px rgba(0, 0, 0, 0.18),
-    inset 0 1px 0 rgba(255, 255, 255, 0.10),
-    inset 0 -1px 0 rgba(0, 0, 0, 0.22);
+    none;
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
-}
-
-html[data-theme='dark'][data-skin='liquid-glass'] .ready-chat-mode-tabs-dock .draggable-mode-tabs__surface {
-  background: rgba(26, 26, 26, 0.62);
-  box-shadow:
-    inset 0 1px 0 rgba(232, 232, 232, 0.14),
-    inset 0 -1px 0 rgba(0, 0, 0, 0.16);
-}
-
-html[data-theme='dark'][data-skin='liquid-glass'] .ready-chat-mode-tabs-dock .draggable-mode-tabs__surface::before {
-  border-color: rgba(232, 232, 232, 0.14);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.18),
-    inset 0 -1px 0 rgba(255, 255, 255, 0.05);
-  opacity: 0.84;
-}
-
-html[data-theme='dark'][data-skin='liquid-glass'] .ready-chat-mode-tabs-dock .draggable-mode-tabs__surface::after {
-  background:
-    linear-gradient(132deg, rgba(255, 255, 255, 0.01) 0%, rgba(232, 232, 232, 0.18) 30%, rgba(255, 255, 255, 0.01) 56%, rgba(232, 232, 232, 0.12) 78%, rgba(255, 255, 255, 0.01) 100%);
-  opacity: 0.18;
-}
-
-html[data-theme='dark'][data-skin='liquid-glass'] .ready-chat-mode-tabs-dock .draggable-mode-tabs__projection {
-  opacity: 0.52;
-  filter: blur(0.875px) saturate(0) contrast(0.78) brightness(0.78);
-}
-
-html[data-theme='dark'][data-skin='liquid-glass'] .ready-chat-mode-tabs-dock .draggable-mode-tabs__projection::after {
-  background:
-    radial-gradient(circle at 20% 18%, rgba(232, 232, 232, 0.09), transparent 28%),
-    radial-gradient(circle at 76% 62%, rgba(232, 232, 232, 0.06), transparent 36%),
-    linear-gradient(180deg, rgba(46, 46, 46, 0.26), rgba(18, 18, 18, 0.44));
 }
 
 html[data-theme='dark'][data-skin='liquid-glass'] .ready-chat-mode-tabs-dock .draggable-mode-tabs__thumb {

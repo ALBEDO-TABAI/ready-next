@@ -44,3 +44,16 @@
 - 在独立资料目录运行，无真实模型请求，未修改用户会话。安装版仅核对实现，未替换或重启。
 
 证据：[测量数据](../../performance/2026-09-15-chat-glass/results.json)、[宽窄/主题验收](../../performance/2026-09-15-chat-glass/variants.json)、[修改前](../../performance/2026-09-15-chat-glass/baseline.png)、[修改后](../../performance/2026-09-15-chat-glass/final.png)、[浅色近景](../../performance/2026-09-15-chat-glass/light-scrolled.png)、[深色近景](../../performance/2026-09-15-chat-glass/dark-scrolled.png)、[多行输入](../../performance/2026-09-15-chat-glass/multiline.png)。图片来自工作台窗口内容捕获，透明底色的最终显示会受查看器背景影响；另外用原生窗口截图实际检查了系统材料与滚动。
+
+
+## 后续：上下玻璃材质一致性
+
+安装版反馈指出上方模式胶囊比输入框更亮、背景文字更碎。核对发现胶囊保留 0.875px 模糊、独立底色/高光、额外外壳描边与 1.015 倍投影放大；输入框此前已使用 4.5px 投影模糊和收敛后的白纱。两套独立材质参数发生了分歧。
+
+- 胶囊与输入框现在直接共用 surface、投影、白纱、边缘高光及深色覆盖的 CSS 声明；没有新增材质管理层。胶囊外壳改为透明，仅由镜片承担材质，去掉额外的底色、描边和外部阴影。
+- 磨砂半径保持相同像素尺度；胶囊镜片 blur 3.5px，投影浅色 blur 4.5px / 深色 3.5px，与输入框相同。胶囊的尺寸相关折射独立收敛为 bevel 6、depth 18.5、dome 0.65、strength 2，采用同一 squircle 曲线。保留 144×38 外形、模式按钮和当前选中态。
+- 真实 Electron 开发窗口的浅/深色 × 320/580px 聊天面板，共四种情况均断言两者的底色、内高光、白纱、滤镜及投影透明度一致。实际点击模式胶囊可正常往返浏览器与文档。
+- 相同 100 条消息 / 1856 个元素 / 3 秒滚动夹具，修改前后 rAF 平均均约 8.33ms、P95 均约 9.20ms，完整克隆均为 0；未重新引入滚动重建。
+- 33 项相关回归、typecheck、CSS 层检查通过，无跳过；本次调整净删除 91 行源代码/测试，涉及文件均少于 1000 行。
+
+证据：[胶囊修改前](../../performance/2026-09-15-chat-glass/capsule-before.png)、[胶囊修改后](../../performance/2026-09-15-chat-glass/capsule-after.png)、[四种场景的实际材质比较](../../performance/2026-09-15-chat-glass/capsule-parity.json)。本节记录开发验证；后续包体与覆盖安装验收单独保存在本轮本地安装记录中。
