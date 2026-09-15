@@ -121,6 +121,15 @@ function addClassNames(element: HTMLElement, className?: string) {
   className.split(/\s+/).filter(Boolean).forEach((name) => element.classList.add(name))
 }
 
+function sourceContentStyle(source: HTMLElement): string {
+  // The mask belongs to the projection, not to the message content. Observing
+  // it as a content change makes sibling lenses invalidate each other's clone.
+  return Array.from(source.style)
+    .filter((property) => !maskProperties.includes(property))
+    .map((property) => `${property}:${source.style.getPropertyValue(property)}!${source.style.getPropertyPriority(property)}`)
+    .join(';')
+}
+
 export function LiquidBackdropProjection({
   className,
   sourceSelector = DEFAULT_CHAT_SOURCE_SELECTOR,
@@ -136,84 +145,139 @@ export function LiquidBackdropProjection({
     if (!layer) return
 
     let frame = 0
-    let observer: MutationObserver | null = null
-    let resizeObserver: ResizeObserver | null = null
     let source: HTMLElement | null = null
+    let clone: HTMLElement | null = null
+    let contentDirty = true
+    let geometryDirty = true
+    let contentStyle = ''
 
-    const renderClone = () => {
+    const syncScroll = () => {
+      if (!source || !clone) return
+      // Scroll events run before paint. An extra rAF here makes the glass lag
+      // behind compositor scrolling, and rebuilding DOM forces layout again.
+      clone.scrollTop = source.scrollTop
+      clone.scrollLeft = source.scrollLeft
+    }
+
+    const renderProjection = () => {
       frame = 0
-      source = document.querySelector<HTMLElement>(sourceSelector)
+      const nextSource = document.querySelector<HTMLElement>(sourceSelector)
+      if (nextSource !== source) {
+        source?.removeEventListener('scroll', syncScroll)
+        if (source) resizeObserver?.unobserve(source)
+        observer.disconnect()
+        unregisterProjectionHole(sourceSelector, projectionId)
+        source = nextSource
+        contentDirty = geometryDirty = true
+        if (source) {
+          source.addEventListener('scroll', syncScroll, { passive: true })
+          observer.observe(source, { attributes: true, characterData: true, childList: true, subtree: true })
+          resizeObserver?.observe(source)
+          parentObserver.disconnect()
+          if (source.parentElement) parentObserver.observe(source.parentElement, { childList: true })
+        }
+      }
       if (!source || !layer.isConnected) {
         layer.replaceChildren()
+        clone = null
         unregisterProjectionHole(sourceSelector, projectionId)
         return
       }
 
-      const layerRect = layer.getBoundingClientRect()
-      const sourceRect = source.getBoundingClientRect()
-      const clone = source.cloneNode(true) as HTMLElement
-      clone.removeAttribute('id')
-      clone.removeAttribute('data-liquid-scroll-root')
-      clone.querySelectorAll('[id]').forEach((node) => node.removeAttribute('id'))
-      clone.querySelectorAll('[data-liquid-scroll-root]').forEach((node) => node.removeAttribute('data-liquid-scroll-root'))
-      clone.setAttribute('aria-hidden', 'true')
-      clone.setAttribute('inert', '')
-      addClassNames(clone, cloneClassName)
-      clearMaskStyles(clone)
-      Object.assign(clone.style, {
-        position: 'absolute',
-        left: `${sourceRect.left - layerRect.left}px`,
-        top: `${sourceRect.top - layerRect.top}px`,
-        width: `${sourceRect.width}px`,
-        height: `${sourceRect.height}px`,
-        margin: '0',
-        pointerEvents: 'none',
-      })
-      layer.replaceChildren(clone)
-      clone.scrollTop = source.scrollTop
-      clone.scrollLeft = source.scrollLeft
+      if (contentDirty || !clone) {
+        clone = source.cloneNode(true) as HTMLElement
+        clone.removeAttribute('id')
+        clone.removeAttribute('data-liquid-scroll-root')
+        clone.querySelectorAll('[id]').forEach((node) => node.removeAttribute('id'))
+        clone.querySelectorAll('[data-liquid-scroll-root]').forEach((node) => node.removeAttribute('data-liquid-scroll-root'))
+        clone.setAttribute('aria-hidden', 'true')
+        clone.setAttribute('inert', '')
+        addClassNames(clone, cloneClassName)
+        clearMaskStyles(clone)
+        layer.replaceChildren(clone)
+        contentStyle = sourceContentStyle(source)
+        contentDirty = false
+        geometryDirty = true
+      }
 
-      const holeX = Math.max(0, layerRect.left - sourceRect.left)
-      const holeY = Math.max(0, layerRect.top - sourceRect.top)
-      const holeWidth = Math.max(0, Math.min(layerRect.width, sourceRect.right - layerRect.left))
-      const holeHeight = Math.max(0, Math.min(layerRect.height, sourceRect.bottom - layerRect.top))
-      const radius = Math.min(sourceMaskRadius ?? 18, holeWidth / 2, holeHeight / 2)
-      registerProjectionHole(sourceSelector, source, projectionId, {
-        x: holeX,
-        y: holeY,
-        width: holeWidth,
-        height: holeHeight,
-        radius,
-      }, sourceRect)
+      if (geometryDirty) {
+        const layerRect = layer.getBoundingClientRect()
+        const sourceRect = source.getBoundingClientRect()
+        Object.assign(clone.style, {
+          position: 'absolute',
+          left: `${sourceRect.left - layerRect.left}px`,
+          top: `${sourceRect.top - layerRect.top}px`,
+          width: `${sourceRect.width}px`,
+          height: `${sourceRect.height}px`,
+          margin: '0',
+          pointerEvents: 'none',
+        })
+        const holeX = Math.max(0, layerRect.left - sourceRect.left)
+        const holeY = Math.max(0, layerRect.top - sourceRect.top)
+        const holeWidth = Math.max(0, Math.min(layerRect.right, sourceRect.right) - Math.max(layerRect.left, sourceRect.left))
+        const holeHeight = Math.max(0, Math.min(layerRect.bottom, sourceRect.bottom) - Math.max(layerRect.top, sourceRect.top))
+        const radius = Math.min(sourceMaskRadius ?? 18, holeWidth / 2, holeHeight / 2)
+        registerProjectionHole(sourceSelector, source, projectionId, {
+          x: holeX, y: holeY, width: holeWidth, height: holeHeight, radius,
+        }, sourceRect)
+        geometryDirty = false
+      }
+      syncScroll()
     }
 
     const schedule = () => {
-      if (!frame) frame = requestAnimationFrame(renderClone)
+      if (!frame) frame = requestAnimationFrame(renderProjection)
     }
-
-    source = document.querySelector<HTMLElement>(sourceSelector)
-    source?.addEventListener('scroll', schedule, { passive: true })
-    if (source) {
-      observer = new MutationObserver(schedule)
-      observer.observe(source, {
-        attributes: true,
-        characterData: true,
-        childList: true,
-        subtree: true,
-      })
+    const scheduleGeometry = () => {
+      geometryDirty = true
+      schedule()
     }
-    resizeObserver = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(schedule) : null
-    if (source) resizeObserver?.observe(source)
+    const observer = new window.MutationObserver((mutations) => {
+      const contentMutations = mutations.filter((mutation) => mutation.target !== source
+        || mutation.type !== 'attributes' || mutation.attributeName !== 'style'
+        || (source && sourceContentStyle(source) !== contentStyle))
+      if (contentMutations.length === 0) return
+      // Token streaming changes text nodes in place. Their child-index path is
+      // stable until a structural mutation, which rebuilds the snapshot below.
+      if (clone && !contentDirty && contentMutations.every((mutation) => mutation.type === 'characterData')) {
+        for (const { target } of contentMutations) {
+          const path: number[] = []
+          let original: Node | null = target
+          while (original && original !== source) {
+            const parent: ParentNode | null = original.parentNode
+            if (!parent) break
+            path.push(Array.prototype.indexOf.call(parent.childNodes, original))
+            original = parent
+          }
+          let mirrored: Node | undefined = clone
+          for (const index of path.reverse()) mirrored = mirrored?.childNodes[index]
+          if (original !== source || !mirrored || mirrored.nodeType !== target.nodeType) {
+            contentDirty = true
+            break
+          }
+          mirrored.textContent = target.textContent
+        }
+        if (!contentDirty) return
+      }
+      contentDirty = true
+      schedule()
+    })
+    const parentObserver = new window.MutationObserver(scheduleGeometry)
+    const resizeObserver = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(scheduleGeometry) : null
     resizeObserver?.observe(layer)
-    window.addEventListener('resize', schedule)
+    // A taller notice above the composer moves the tabs without resizing them.
+    const overlay = layer.closest('.ready-chat-composer-overlay')
+    if (overlay) resizeObserver?.observe(overlay)
+    window.addEventListener('resize', scheduleGeometry)
     schedule()
 
     return () => {
       if (frame) cancelAnimationFrame(frame)
-      source?.removeEventListener('scroll', schedule)
-      observer?.disconnect()
+      source?.removeEventListener('scroll', syncScroll)
+      observer.disconnect()
+      parentObserver.disconnect()
       resizeObserver?.disconnect()
-      window.removeEventListener('resize', schedule)
+      window.removeEventListener('resize', scheduleGeometry)
       unregisterProjectionHole(sourceSelector, projectionId)
     }
   }, [cloneClassName, projectionId, sourceMaskRadius, sourceSelector])

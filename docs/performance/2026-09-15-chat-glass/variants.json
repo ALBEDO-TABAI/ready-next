@@ -1,0 +1,142 @@
+[
+  {
+    "name": "light-narrow",
+    "theme": "light",
+    "panel": {
+      "x": 1120,
+      "y": 44,
+      "width": 320,
+      "height": 812,
+      "top": 44,
+      "right": 1440,
+      "bottom": 856,
+      "left": 1120
+    },
+    "overlay": {
+      "x": 1121,
+      "y": 620,
+      "width": 318,
+      "height": 235,
+      "top": 620,
+      "right": 1439,
+      "bottom": 855,
+      "left": 1121
+    },
+    "lastBottom": 542,
+    "lastVisible": true,
+    "spacer": 247,
+    "clonesRetained": true,
+    "scrolls": [
+      18626.5,
+      18626.5
+    ],
+    "sourceScroll": 18626.5,
+    "shadow": "rgba(255, 255, 255, 0.42) 0px 1px 0px 0px inset, rgba(255, 255, 255, 0.14) 0px -1px 0px 0px inset",
+    "textarea": "玻璃输入检查\n第二行用于检查高度变化\n第三行保持清晰可读\n第四行检查按钮位置\n第五行检查背景跟随"
+  },
+  {
+    "name": "light-wide",
+    "theme": "light",
+    "panel": {
+      "x": 860,
+      "y": 44,
+      "width": 580,
+      "height": 812,
+      "top": 44,
+      "right": 1440,
+      "bottom": 856,
+      "left": 860
+    },
+    "overlay": {
+      "x": 861,
+      "y": 620,
+      "width": 578,
+      "height": 235,
+      "top": 620,
+      "right": 1439,
+      "bottom": 855,
+      "left": 861
+    },
+    "lastBottom": 542,
+    "lastVisible": true,
+    "spacer": 247,
+    "clonesRetained": true,
+    "scrolls": [
+      13478.5,
+      13478.5
+    ],
+    "sourceScroll": 13478.5,
+    "shadow": "rgba(255, 255, 255, 0.42) 0px 1px 0px 0px inset, rgba(255, 255, 255, 0.14) 0px -1px 0px 0px inset",
+    "textarea": "玻璃输入检查\n第二行用于检查高度变化\n第三行保持清晰可读\n第四行检查按钮位置\n第五行检查背景跟随"
+  },
+  {
+    "name": "dark-wide",
+    "theme": "dark",
+    "panel": {
+      "x": 860,
+      "y": 44,
+      "width": 580,
+      "height": 812,
+      "top": 44,
+      "right": 1440,
+      "bottom": 856,
+      "left": 860
+    },
+    "overlay": {
+      "x": 861,
+      "y": 620,
+      "width": 578,
+      "height": 235,
+      "top": 620,
+      "right": 1439,
+      "bottom": 855,
+      "left": 861
+    },
+    "lastBottom": 542,
+    "lastVisible": true,
+    "spacer": 247,
+    "clonesRetained": true,
+    "scrolls": [
+      13478.5,
+      13478.5
+    ],
+    "sourceScroll": 13478.5,
+    "shadow": "rgba(232, 232, 232, 0.14) 0px 1px 0px 0px inset, rgba(0, 0, 0, 0.16) 0px -1px 0px 0px inset",
+    "textarea": "玻璃输入检查\n第二行用于检查高度变化\n第三行保持清晰可读\n第四行检查按钮位置\n第五行检查背景跟随"
+  },
+  {
+    "name": "dark-narrow",
+    "theme": "dark",
+    "panel": {
+      "x": 1120,
+      "y": 44,
+      "width": 320,
+      "height": 812,
+      "top": 44,
+      "right": 1440,
+      "bottom": 856,
+      "left": 1120
+    },
+    "overlay": {
+      "x": 1121,
+      "y": 620,
+      "width": 318,
+      "height": 235,
+      "top": 620,
+      "right": 1439,
+      "bottom": 855,
+      "left": 1121
+    },
+    "lastBottom": 542,
+    "lastVisible": true,
+    "spacer": 247,
+    "clonesRetained": true,
+    "scrolls": [
+      18626.5,
+      18626.5
+    ],
+    "sourceScroll": 18626.5,
+    "shadow": "rgba(232, 232, 232, 0.14) 0px 1px 0px 0px inset, rgba(0, 0, 0, 0.16) 0px -1px 0px 0px inset",
+    "textarea": "玻璃输入检查\n第二行用于检查高度变化\n第三行保持清晰可读\n第四行检查按钮位置\n第五行检查背景跟随"
+  }
+]

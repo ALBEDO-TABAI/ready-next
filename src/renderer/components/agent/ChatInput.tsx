@@ -709,10 +709,10 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
           bevel={22}
           depth={37}
           ior={1.34}
-          dome={5}
+          dome={2}
           // squircle=折弯集中最外缘（规格 §6.1）；观感不合意改回 'circular' 一行回退
           profile="squircle"
-          strength={6.4}
+          strength={3.2}
           blur={3.5}
           frost={0}
           blurBeforeRefraction

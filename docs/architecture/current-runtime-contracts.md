@@ -13,6 +13,7 @@
 - BrowserView 是原生覆盖层，不受 DOM `z-index` 控制。任何 primary、secondary、关闭分栏或卸载转换只要让 Browser 离开可见 mode 集合，都必须先经 `hide-all` intent + 匹配 ack，再提交 DOM mode；恢复后按稳定 bounds 显示。文件打开使用同一协调入口，但只保留这段正确性等待，不串行等待 ritual 或场景滑动。
 - 点击侧栏收放与拖动时，Browser 的 ResizeObserver 在当前布局帧提交位置，不再排下一帧；重复尺寸不重发。已显示的原生页原位更新，不重复拆卸重挂；纯主页面位置更新不触发全量标签负载检查。浏览器 store 归一化必须保留未变化的标签与分组引用。回归入口：`verify:workbench-performance`。
 - 聊天输入框液态玻璃只以真实 Electron dev 为验收面；`#/liquid-test` 只用于调参。生产输入框不得加外部暗色阴影或静态截图贴片，消息末尾必须按浮层实测高度留白。
+- 玻璃投影的滚动与逐字文本更新必须复用既有内容；只有结构或样式变化才重建投影。遮罩写入不属于聊天内容变化，尺寸与浮层高度变化只更新几何；多个玻璃面的孔洞按各自生命周期释放，来源替换时解除旧监听。行为回归：`liquid-backdrop-projection.test.tsx`；实测与材质参数见 [滚动与质感修正](../superpowers/plans/2026-09-15-liquid-glass-scroll-implementation.md)。
 - Agent 回复中同一 delimiter 的连续数字列表必须合并为一个语义 `<ol>/<li>`，只保留 authored start，后续编号交给浏览器；段落、嵌套和 delimiter 变化必须正常断开。运行中只显示一条“本轮用时”并保持实时走时；这两项都是 Renderer 展示，不新增任务或持久状态。
 - Windows 顶部 chrome 保留系统最小化、最大化、关闭按钮；Ready 圆点在左上，中心按 `WORKBENCH_EDGE_RAIL_SLOT_INSET_X + WORKBENCH_EDGE_RAIL_SLOT_SIZE / 2` 与左轨槽位对齐（当前 25px）。`titleBarStyle: 'hidden'` + `titleBarOverlay` 负责同层背景，Mica 只能是有普通背景 fallback 的增强。
 - 窗口截图必须从 Main 捕获完整 `BrowserWindow` 合成面，不得只截 Renderer DOM 而遗漏 BrowserView。PNG 的窗口主体必须完全不透明；普通 macOS 窗口补齐原生窗口按钮，只在四角外侧保留透明抗锯齿圆角；全屏/最大化不强行裁圆角。快捷键指南与实际解析器共用 `src/shared/app-shortcuts.ts` 的单一目录。

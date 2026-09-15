@@ -1,4 +1,4 @@
-/* ═══ liquid-composer.css — 聊天输入框液态玻璃（白纱/边缘高光/投影层雾化；规格 2026-06-11-electron-liquid-glass-composer.md）；由 index.css 序保拆分（2026-07-06），在 index.css 中按原段落顺序 @import，勿改导入次序。 ═══ */
+/* ═══ liquid-composer.css — 聊天输入框液态玻璃（白纱/边缘高光/投影层雾化；现行合同 current-runtime-contracts.md §1；调参与实测 2026-09-15-liquid-glass-scroll-implementation.md）；由 index.css 序保拆分（2026-07-06），在 index.css 中按原段落顺序 @import，勿改导入次序。 ═══ */
 /* The refracting layer is a LiquidLens (canvas displacement map →
    feDisplacementMap → backdrop-filter: url()). CSS only adds the material
    veil and rim highlights; the optics live in the component. */
@@ -8,7 +8,7 @@
   overflow: hidden;
   border-radius: var(--workbench-canvas-radius);
   transform: translateZ(0);
-  background: rgba(248, 250, 252, 0.44);
+  background: rgba(248, 250, 252, 0.32);
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.42),
     inset 0 -1px 0 rgba(255, 255, 255, 0.14);
@@ -37,7 +37,7 @@
   padding: 1px;
   background:
     linear-gradient(132deg, rgba(255, 255, 255, 0.02) 0%, rgba(255, 255, 255, 0.42) 30%, rgba(255, 255, 255, 0.02) 56%, rgba(255, 255, 255, 0.28) 78%, rgba(255, 255, 255, 0.02) 100%);
-  opacity: 0.24;
+  opacity: 0.38;
   -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
   -webkit-mask-composite: xor;
   mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
@@ -57,8 +57,8 @@
   border-radius: inherit;
   pointer-events: none;
   opacity: 0.72;
-  filter: blur(3.5px) saturate(1.28) contrast(0.82) brightness(1.08);
-  transform: translateZ(0) scale(1.035);
+  filter: blur(4.5px) saturate(1.18) contrast(0.82) brightness(1.04);
+  transform: translateZ(0);
 }
 
 .ready-liquid-composer__projection::after {
@@ -66,9 +66,7 @@
   position: absolute;
   inset: -18px;
   background:
-    radial-gradient(circle at 20% 18%, rgba(255, 255, 255, 0.48), transparent 28%),
-    radial-gradient(circle at 76% 62%, rgba(255, 255, 255, 0.30), transparent 36%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.36), rgba(248, 250, 252, 0.18));
+    linear-gradient(160deg, rgba(255, 255, 255, 0.20), rgba(248, 250, 252, 0.06) 52%, rgba(255, 255, 255, 0.12));
   pointer-events: none;
 }
 

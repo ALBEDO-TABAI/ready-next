@@ -1,0 +1,133 @@
+{
+  "environment": {
+    "app": "Ready 0.8.0",
+    "electron": "42.3.0",
+    "chromium": "148.0.7778.180",
+    "profile": "isolated temporary profile",
+    "sourceNodes": 1856,
+    "messageCount": 100,
+    "devicePixelRatio": 2,
+    "viewport": [
+      1440,
+      900
+    ],
+    "durationPerSampleMs": 3000
+  },
+  "measurement": "requestAnimationFrame intervals and full source clone counts in real Electron workbench; not hardware presentation FPS",
+  "baseline": {
+    "idle": {
+      "frames": 349,
+      "meanMs": 8.598567335243578,
+      "p95Ms": 14.10000000000582,
+      "over33Ms": 0,
+      "clones": 0,
+      "longTasks": 0,
+      "longTaskTotalMs": 0
+    },
+    "scroll": {
+      "frames": 120,
+      "meanMs": 25.10083333333338,
+      "p95Ms": 37.5,
+      "over33Ms": 8,
+      "clones": 230,
+      "longTasks": 1,
+      "longTaskTotalMs": 58
+    },
+    "sourceNodes": 1856,
+    "projections": 2,
+    "dpr": 2,
+    "viewport": {
+      "width": 1440,
+      "height": 900
+    },
+    "ua": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Ready/0.8.0 Chrome/148.0.7778.180 Safari/537.36"
+  },
+  "fixedBeforeMaterialTuning": {
+    "idle": {
+      "frames": 345,
+      "meanMs": 8.704637681159422,
+      "p95Ms": 16,
+      "over33Ms": 0,
+      "clones": 0,
+      "longTasks": 0,
+      "longTaskTotalMs": 0
+    },
+    "scroll": {
+      "frames": 351,
+      "meanMs": 8.556125356125358,
+      "p95Ms": 14.699999999998909,
+      "over33Ms": 0,
+      "clones": 0,
+      "longTasks": 0,
+      "longTaskTotalMs": 0
+    },
+    "sourceNodes": 1856,
+    "projections": 2,
+    "dpr": 2,
+    "viewport": {
+      "width": 1440,
+      "height": 900
+    },
+    "ua": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Ready/0.8.0 Chrome/148.0.7778.180 Safari/537.36"
+  },
+  "final": {
+    "idle": {
+      "frames": 350,
+      "meanMs": 8.628,
+      "p95Ms": 10.600000000000364,
+      "over33Ms": 1,
+      "clones": 0,
+      "longTasks": 1,
+      "longTaskTotalMs": 57
+    },
+    "scroll": {
+      "frames": 363,
+      "meanMs": 8.265013774104686,
+      "p95Ms": 11.700000000000728,
+      "over33Ms": 1,
+      "clones": 0,
+      "longTasks": 1,
+      "longTaskTotalMs": 50
+    },
+    "sourceNodes": 1856,
+    "projections": 2,
+    "dpr": 2,
+    "viewport": {
+      "width": 1440,
+      "height": 900
+    },
+    "ua": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Ready/0.8.0 Chrome/148.0.7778.180 Safari/537.36"
+  },
+  "streamingScroll": {
+    "method": "update an existing source text node every 50 ms while scrolling the same 100-message fixture",
+    "beforeTextPatch": {
+      "clones": 114,
+      "updates": 58,
+      "meanMs": 24.27016129032258,
+      "p95Ms": 50,
+      "over33Ms": 44
+    },
+    "afterTextPatch": {
+      "clones": 0,
+      "updates": 59,
+      "meanMs": 8.242857142857137,
+      "p95Ms": 10.700000000000728,
+      "over33Ms": 0
+    }
+  },
+  "scope": "Development source verified. Installed Ready 0.8.0 bundle read and confirmed to retain clone-on-scroll implementation; installed app not replaced or restarted.",
+  "validation": {
+    "targetedTests": 26,
+    "skippedTests": 0,
+    "typecheck": "passed",
+    "cssResetGate": "passed",
+    "diffCheck": "passed",
+    "liveChecks": [
+      "light/dark at 320px and 580px chat widths",
+      "five-line composer with measured spacer",
+      "authorization menu open/close with 3/2 mask holes",
+      "source and all projections share exact scroll offsets",
+      "native screenshot and scroll inspection"
+    ]
+  }
+}
