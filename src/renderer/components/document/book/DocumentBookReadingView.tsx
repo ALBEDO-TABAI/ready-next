@@ -41,6 +41,7 @@ import {
   type BookPageModel,
 } from '../../../modules/document/book/bookPagination'
 import { resolveBookGeometry } from '../../../modules/document/book/bookGeometry'
+import { BookImageContext, prepareBookImages, type BookImageSize } from '../../../modules/document/book/bookImageLayout'
 import {
   loadBookReadingPreferences,
   saveBookReadingPreferences,
@@ -141,6 +142,10 @@ export default function DocumentBookReadingView({
 
   const preview = useMemo(() => buildStructuredNotePreview(content, tab.path), [content, tab.path])
   const blocks = preview.blocks
+  const [imageAssets, setImageAssets] = useState<{
+    blocks: typeof blocks
+    sizes: Map<string, BookImageSize>
+  } | null>(null)
   const embedsById = useMemo(
     () => new Map<string, PreviewEmbed>(preview.embeds.map((embed) => [embed.id, embed])),
     [preview.embeds],
@@ -154,6 +159,13 @@ export default function DocumentBookReadingView({
     () => resolveBookGeometry(stageSize.width, stageSize.height, prefs.margin),
     [prefs.margin, stageSize],
   )
+  const imageContext = useMemo(() => ({
+    contentWidth: geometry.contentWidth,
+    contentHeight: geometry.contentHeight,
+    fontSize: prefs.fontSize,
+    notePath: tab.path,
+    sizes: imageAssets?.blocks === blocks ? imageAssets.sizes : new Map<string, BookImageSize>(),
+  }), [blocks, geometry.contentWidth, geometry.contentHeight, imageAssets, prefs.fontSize, tab.path])
   const renderPixelRatio = typeof window === 'undefined'
     ? 1
     : Math.min(2, Math.max(1, window.devicePixelRatio || 1))
@@ -431,6 +443,16 @@ export default function DocumentBookReadingView({
   // --- 测量与分页 ---
   useLayoutEffect(() => {
     if (!measurerActive || !isSceneVisible || stageSize.width === 0) return undefined
+    const flow = measurerRef.current
+    if (!flow) return undefined
+    // 离屏图片不能 lazy；取得尺寸后先让测量与显示共用的图片组件提交，再读分栏。
+    if (imageAssets?.blocks !== blocks) {
+      const controller = new AbortController()
+      void prepareBookImages(flow, controller.signal).then(sizes => {
+        if (sizes && !controller.signal.aborted) setImageAssets({ blocks, sizes })
+      })
+      return () => controller.abort()
+    }
     // 重排前捕获当前锚点（首测除外）
     const rt = runtimeRef.current
     if (restoredRef.current && rt.model) {
@@ -471,6 +493,7 @@ export default function DocumentBookReadingView({
     return undefined
   }, [
     blocks,
+    imageAssets,
     geometry.contentWidth,
     geometry.contentHeight,
     prefs.fontSize,
@@ -625,9 +648,10 @@ export default function DocumentBookReadingView({
     return `${formatPage(spread.left)}–${formatPage(spread.right)}`
   }, [spread.left, spread.right])
 
-  const ready = model !== null && stageSize.width > 0
+  const ready = model !== null && stageSize.width > 0 && imageAssets?.blocks === blocks
 
   return (
+    <BookImageContext.Provider value={imageContext}>
     <div
       ref={rootRef}
       className="document-book-reading"
@@ -714,5 +738,6 @@ export default function DocumentBookReadingView({
         </div>
       ) : null}
     </div>
+    </BookImageContext.Provider>
   )
 }

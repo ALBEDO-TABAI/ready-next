@@ -4,6 +4,8 @@
  */
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { JSDOM } from 'jsdom'
+import { prepareBookImages, resolveBookImageLayout } from '../renderer/modules/document/book/bookImageLayout'
 
 import {
   BOOK_TITLE_PAGE,
@@ -16,6 +18,53 @@ import {
 } from '../renderer/modules/document/book/bookPagination'
 
 const CONTENT_HEIGHT = 500
+
+test('图片按比例完整适配：大图独页，小图不放大，行内图预留段落间距', () => {
+  const page = { contentWidth: 380, contentHeight: 500, fontSize: 15 }
+  assert.deepEqual(resolveBookImageLayout({ width: 720, height: 1080 }, page, true), {
+    width: 500 * 720 / 1080, height: 500, fullPage: true,
+  })
+  assert.deepEqual(resolveBookImageLayout({ width: 100, height: 60 }, page, true), {
+    width: 100, height: 60, fullPage: false,
+  })
+  const inline = resolveBookImageLayout({ width: 180, height: 2200 }, page, false)
+  assert.equal(inline.fullPage, false)
+  assert.ok(inline.height + 15 * 1.6 <= 500.001)
+  assert.ok(Math.abs(inline.width / inline.height - 180 / 2200) < 1e-9)
+})
+
+test('排页等待图片完成，记录失败图片；退出时取消等待且不发布旧尺寸', async () => {
+  const dom = new JSDOM('<div><img data-book-image-src="cover"><img data-book-image-src="missing"></div>')
+  const flow = dom.window.document.querySelector('div')!
+  const images = [...flow.querySelectorAll('img')]
+  for (const image of images) Object.defineProperty(image, 'complete', { value: false })
+  let settled = false
+  const pending = prepareBookImages(flow, new AbortController().signal).then(result => { settled = true; return result })
+  await Promise.resolve()
+  assert.equal(settled, false)
+  Object.defineProperties(images[0], { naturalWidth: { value: 720 }, naturalHeight: { value: 1080 } })
+  images[0].dispatchEvent(new dom.window.Event('load'))
+  images[1].dispatchEvent(new dom.window.Event('error'))
+  assert.deepEqual([...(await pending)!], [['cover', { width: 720, height: 1080 }], ['missing', { width: 0, height: 0 }]])
+
+  const controller = new AbortController()
+  const cancelled = prepareBookImages(flow, controller.signal)
+  controller.abort()
+  assert.equal(await cancelled, null)
+  images[0].dispatchEvent(new dom.window.Event('load'))
+  dom.window.close()
+})
+
+test('无响应图片在限定时间后留出失败占位，不让整本书无限等待', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  const dom = new JSDOM('<div><img data-book-image-src="unresponsive"></div>')
+  const flow = dom.window.document.querySelector('div')!
+  Object.defineProperty(flow.querySelector('img'), 'complete', { value: false })
+  const pending = prepareBookImages(flow, new AbortController().signal)
+  t.mock.timers.tick(10_000)
+  assert.deepEqual([...(await pending)!], [['unresponsive', { width: 0, height: 0 }]])
+  dom.window.close()
+})
 
 test('buildBookPageModel：跨页块保留真实分栏列，锚点取首个非延续块', () => {
   const model = buildBookPageModel([

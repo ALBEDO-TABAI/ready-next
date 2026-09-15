@@ -15,6 +15,8 @@ import type { DocumentWidgetData } from '../../../../shared/document-widget-pars
 import { resolveDocumentWidgetRenderCode } from '../../../../shared/document-widget-render-code'
 import { openWebpageInBrowser } from '../../../modules/browser/openWebpageInBrowser'
 import { sanitizeBookWidgetStaticHtml } from '../../../modules/document/book/bookWidgetStatic'
+import DocumentBookImage from './DocumentBookImage'
+import { BookImageParagraphContext } from '../../../modules/document/book/bookImageLayout'
 
 const REMARK_PLUGINS = [remarkGfm]
 
@@ -44,7 +46,20 @@ const BOOK_MARKDOWN_COMPONENTS: Components = {
   h2: ({ children }) => <h2 className="note-preview-markdown-h2">{children}</h2>,
   h3: ({ children }) => <h3 className="note-preview-markdown-h3">{children}</h3>,
   h4: ({ children }) => <h4 className="note-preview-markdown-h4">{children}</h4>,
-  p: ({ children }) => <p className="note-preview-markdown-p">{children}</p>,
+  p: ({ children, node }) => {
+    const imagesOnly = !!node?.children.length && node.children.every(child => (
+      child.type === 'text' ? !child.value.trim() : child.type === 'element' && (
+        child.tagName === 'img' || (child.tagName === 'a' && child.children.every(item => (
+          item.type === 'element' && item.tagName === 'img'
+        )))
+      )
+    ))
+    return (
+      <BookImageParagraphContext.Provider value={imagesOnly}>
+        <p className={`note-preview-markdown-p${imagesOnly ? ' document-book-image-paragraph' : ''}`}>{children}</p>
+      </BookImageParagraphContext.Provider>
+    )
+  },
   ul: ({ children }) => <ul className="note-preview-markdown-ul">{children}</ul>,
   ol: ({ children }) => <ol className="note-preview-markdown-ol">{children}</ol>,
   li: ({ children, className }) => (
@@ -64,7 +79,7 @@ const BOOK_MARKDOWN_COMPONENTS: Components = {
       {children}
     </code>
   ),
-  img: ({ src, alt }) => <img className="document-book-md-img" src={src} alt={alt ?? ''} loading="lazy" />,
+  img: ({ src, alt }) => <DocumentBookImage src={src} alt={alt} />,
   a: ({ children, href }) => (
     <a
       className="document-book-md-link"
@@ -92,7 +107,7 @@ const BookMarkdown = memo(function BookMarkdown({ markdown }: { markdown: string
 function BookEmbedCard({ embed }: { embed: PreviewEmbed }) {
   if (embed.kind === 'image') {
     const src = embed.localPath || embed.displayUrl || embed.url
-    return <img className="document-book-md-img" src={src} alt={embed.alt || embed.title || ''} loading="lazy" />
+    return <DocumentBookImage src={src} alt={embed.alt || embed.title || ''} standalone />
   }
   return (
     <div className="document-book-embed-card">

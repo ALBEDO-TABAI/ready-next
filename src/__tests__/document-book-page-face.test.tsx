@@ -5,7 +5,49 @@ import { renderToStaticMarkup } from 'react-dom/server'
 
 import DocumentBookPageFace from '../renderer/components/document/book/DocumentBookPageFace'
 import DocumentBookBlock from '../renderer/components/document/book/DocumentBookBlock'
+import { BookImageContext } from '../renderer/modules/document/book/bookImageLayout'
 import { sanitizeBookWidgetStaticHtml } from '../renderer/modules/document/book/bookWidgetStatic'
+
+test('Markdown 内的相对图片从文档目录读取并命中同一份尺寸', () => {
+  const markup = renderToStaticMarkup(createElement(BookImageContext.Provider, {
+    value: { contentWidth: 380, contentHeight: 500, fontSize: 15, notePath: '/books/story.md', sizes: new Map([
+      ['local-file:///books/images/cover.png', { width: 500, height: 1000 }],
+    ]) },
+  }, createElement(DocumentBookBlock, {
+    block: { id: 'local', type: 'markdown', markdown: '![本地图片](images/cover.png)' },
+    embedsById: new Map(), widgetsById: new Map(),
+  })))
+  assert.match(markup, /src="local-file:\/\/\/books\/images\/cover.png"/)
+  assert.match(markup, /width:250px;height:500px/)
+})
+
+test('独立、重复与失败图片按冻结尺寸显示，不依赖显示页再次加载测量', () => {
+  const render = (block: Parameters<typeof DocumentBookBlock>[0]['block']) => renderToStaticMarkup(
+    createElement(BookImageContext.Provider, {
+      value: { contentWidth: 380, contentHeight: 500, fontSize: 15, sizes: new Map([
+        ['https://example.com/cover.png', { width: 500, height: 1000 }],
+        ['https://example.com/missing.png', { width: 0, height: 0 }],
+      ]) },
+    }, createElement(DocumentBookBlock, {
+      block,
+      embedsById: new Map([['image', { id: 'image', kind: 'image', source: 'body', url: 'https://example.com/cover.png', displayUrl: '', title: '', alt: '卷首' }]]),
+      widgetsById: new Map(),
+    })),
+  )
+  for (const block of [
+    { id: 'embed', type: 'embed' as const, embedId: 'image' },
+    { id: 'markdown', type: 'markdown' as const, markdown: '![重复](https://example.com/cover.png)\n\n后文' },
+  ]) {
+    const markup = render(block)
+    assert.match(markup, /document-book-image--page/)
+    assert.match(markup, /width:250px;height:500px/)
+    assert.match(markup, /loading="eager"/)
+  }
+  const failed = render({ id: 'failed', type: 'markdown', markdown: '![插图](https://example.com/missing.png)\n\n后文' })
+  assert.match(failed, /图片加载失败 · 插图/)
+  assert.match(failed, /后文/)
+  assert.doesNotMatch(failed, /<img/)
+})
 
 test('活动页克隆源保留左右页身份与正文，翻页背面不会失去内容宽度', () => {
   const markup = renderToStaticMarkup(createElement(DocumentBookPageFace, {
