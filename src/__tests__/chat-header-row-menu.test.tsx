@@ -21,6 +21,7 @@ function installDomGlobals(): { dom: JSDOM; restore: () => void } {
     MouseEvent: (globalThis as { MouseEvent?: typeof MouseEvent }).MouseEvent,
     Element: (globalThis as { Element?: typeof Element }).Element,
     MutationObserver: (globalThis as { MutationObserver?: typeof MutationObserver }).MutationObserver,
+    ResizeObserver: globalThis.ResizeObserver,
     requestAnimationFrame: globalThis.requestAnimationFrame,
     cancelAnimationFrame: globalThis.cancelAnimationFrame,
     getComputedStyle: globalThis.getComputedStyle,
@@ -39,6 +40,11 @@ function installDomGlobals(): { dom: JSDOM; restore: () => void } {
   setGlobal('MouseEvent', dom.window.MouseEvent)
   setGlobal('Element', dom.window.Element)
   setGlobal('MutationObserver', dom.window.MutationObserver)
+  setGlobal('ResizeObserver', class {
+    constructor(private callback: () => void) {}
+    observe(element: Element) { resizeCallbacks.set(element, this.callback) }
+    disconnect() { for (const [element, callback] of resizeCallbacks) if (callback === this.callback) resizeCallbacks.delete(element) }
+  })
   setGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => {
     cb(0)
     return 0
@@ -70,6 +76,7 @@ function installDomGlobals(): { dom: JSDOM; restore: () => void } {
   }
 }
 
+const resizeCallbacks = new Map<Element, () => void>()
 const domHandle = installDomGlobals()
 process.on('exit', () => {
   try { domHandle.restore() } catch { /* silent-catch: best-effort restore */ }
@@ -160,6 +167,45 @@ function findButtonByText(label: string): HTMLButtonElement | null {
   return Array.from(document.querySelectorAll('button'))
     .find((button) => button.textContent?.trim() === label) ?? null
 }
+
+test('both history entry points and row actions stay inside the chat pane after pane resize', () => {
+  const { container, unmount } = mountChatHeader()
+  container.dataset.chatPanelRoot = 'true'
+  let paneLeft = 704
+  const rect = (left: number, top: number, width: number, height: number) => (
+    new domHandle.dom.window.DOMRect(left, top, width, height)
+  )
+  container.getBoundingClientRect = () => rect(paneLeft, 40, 1024 - paneLeft, 700)
+  const scope = container.querySelector<HTMLButtonElement>('button[title="会话来源"]')!
+  const title = container.querySelector<HTMLButtonElement>('[data-chat-session-title] button')!
+  scope.getBoundingClientRect = () => rect(890, 48, 24, 24)
+  title.getBoundingClientRect = () => rect(paneLeft + 14, 48, 100, 24)
+  const assertContained = (menu: HTMLElement) => {
+    const left = Number.parseFloat(menu.style.left)
+    const width = Number.parseFloat(menu.style.width)
+    assert.ok(left >= paneLeft + 8, `left ${left} must stay inside pane ${paneLeft}`)
+    assert.ok(left + width <= 1016, 'menu must stay inside the pane right edge')
+    assert.ok(width > 0)
+  }
+  try {
+    for (const trigger of [scope, title]) {
+      click(trigger)
+      const history = document.querySelector('input')!.closest<HTMLElement>('.chat-header-floating-menu')!
+      assert.ok(history)
+      assertContained(history)
+      paneLeft = 784
+      flushSync(() => resizeCallbacks.get(container)?.())
+      assertContained(history)
+      const rowTrigger = document.querySelector<HTMLButtonElement>('[aria-label="更多操作"]')!
+      rowTrigger.getBoundingClientRect = () => rect(830, 180, 20, 20)
+      click(rowTrigger)
+      assertContained(findButtonByText('重命名')!.closest<HTMLElement>('.chat-header-floating-menu')!)
+      click(trigger)
+      assert.equal(document.querySelector('.chat-header-floating-menu'), null)
+      paneLeft = 704
+    }
+  } finally { unmount() }
+})
 
 test('chat header row menu stays open when the history panel scrolls and can open rename', () => {
   const { unmount } = mountChatHeader()

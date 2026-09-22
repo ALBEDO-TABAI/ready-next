@@ -13,7 +13,7 @@ import {
   buildChatHeaderFloatingMenuStyle,
   buildChatHeaderMenuItemStyle,
 } from './chatHeaderMenuStyles'
-import { subscribeWorkbenchWindowResize } from '../../modules/workbench/windowResize'
+import { getChatMenuHorizontalFrame, subscribeChatMenuLayout } from './chatMenuLayout'
 import type { LifecycleOperationProjectionV2 } from '../../../shared/ipc-contracts/agent-lifecycle-snapshot'
 
 interface ConversationChannelOption {
@@ -62,6 +62,7 @@ interface ChatHeaderProps {
 interface FloatingMenuPosition {
   left: number
   top: number
+  width: number
 }
 
 export default function ChatHeader({
@@ -104,6 +105,7 @@ export default function ChatHeader({
   const [rowMenu, setRowMenu] = useState<{ conversationId: string; title: string; position: FloatingMenuPosition } | null>(null)
   const [operationMenuPosition, setOperationMenuPosition] = useState<FloatingMenuPosition | null>(null)
   const scopeTriggerRef = useRef<HTMLButtonElement>(null)
+  const headerRef = useRef<HTMLDivElement>(null)
   const titleTriggerRef = useRef<HTMLButtonElement>(null)
   const historyMenuRef = useRef<HTMLDivElement>(null)
   const rowMenuRef = useRef<HTMLDivElement>(null)
@@ -122,13 +124,10 @@ export default function ChatHeader({
     if (!trigger || typeof window === 'undefined') return null
 
     const rect = trigger.getBoundingClientRect()
-    const viewportWidth = window.innerWidth
-    const margin = 8
     const preferredLeft = align === 'left' ? rect.left : rect.right - menuWidth
-    const left = Math.max(margin, Math.min(preferredLeft, viewportWidth - menuWidth - margin))
 
     return {
-      left: Math.round(left),
+      ...getChatMenuHorizontalFrame(headerRef.current || trigger, menuWidth, preferredLeft),
       top: Math.round(rect.bottom + 6),
     }
   }, [])
@@ -242,7 +241,7 @@ export default function ChatHeader({
           rowMenuTriggerRef.current = null
           return null
         }
-        if (position.left === current.position.left && position.top === current.position.top) {
+        if (position.left === current.position.left && position.top === current.position.top && position.width === current.position.width) {
           return current
         }
         return { ...current, position }
@@ -253,16 +252,18 @@ export default function ChatHeader({
     }
 
     syncMenuPositions()
-    const unsubscribeWindowResize = subscribeWorkbenchWindowResize(syncMenuPositions)
-    window.addEventListener('scroll', syncMenuPositions, true)
-    return () => {
-      unsubscribeWindowResize()
-      window.removeEventListener('scroll', syncMenuPositions, true)
-    }
+    return subscribeChatMenuLayout(headerRef.current, syncMenuPositions)
   }, [computeMenuPosition, computeRowMenuPosition, historyMenuAnchor, historyMenuWidth, showHistory])
 
+  const operationMenuOpen = operationMenuPosition !== null
+  useEffect(() => {
+    if (!operationMenuOpen) return
+    const sync = () => setOperationMenuPosition(computeMenuPosition(operationMenuTriggerRef.current, 176, 'right'))
+    return subscribeChatMenuLayout(headerRef.current, sync)
+  }, [computeMenuPosition, operationMenuOpen])
+
   const historyMenuStyle = {
-    ...buildChatHeaderFloatingMenuStyle(historyMenuWidth),
+    ...buildChatHeaderFloatingMenuStyle(historyMenuPosition?.width ?? historyMenuWidth),
     position: 'fixed' as const,
     top: historyMenuPosition?.top ?? 0,
     left: historyMenuPosition?.left ?? 0,
@@ -461,6 +462,7 @@ export default function ChatHeader({
   return (
     <>
       <div
+        ref={headerRef}
         className="flex items-center justify-between"
         style={{
           height: 38,
@@ -616,7 +618,7 @@ export default function ChatHeader({
           ref={operationMenuRef}
           className="chat-header-floating-menu"
           style={{
-            ...buildChatHeaderFloatingMenuStyle(176),
+            ...buildChatHeaderFloatingMenuStyle(operationMenuPosition.width),
             position: 'fixed',
             top: operationMenuPosition.top,
             left: operationMenuPosition.left,
@@ -864,7 +866,7 @@ export default function ChatHeader({
           ref={rowMenuRef}
           className="chat-header-floating-menu"
           style={{
-            ...buildChatHeaderFloatingMenuStyle(140),
+            ...buildChatHeaderFloatingMenuStyle(rowMenu.position.width),
             position: 'fixed',
             top: rowMenu.position.top,
             left: rowMenu.position.left,

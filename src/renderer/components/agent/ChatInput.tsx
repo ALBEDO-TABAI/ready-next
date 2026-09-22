@@ -8,6 +8,7 @@ import type { ChatAttachment } from '../../stores/useAgent'
 import type { ReadySkillReference } from '../../modules/agent/chat-input-bridge'
 import type { ContextUsageSnapshot } from '../../../shared/context-usage-types'
 import { chatMenuItemStyle, chatMenuSurfaceStyle } from './chatMenuStyles'
+import { getChatMenuHorizontalFrame, subscribeChatMenuLayout } from './chatMenuLayout'
 import { ContextUsageMeter } from './chat-panel/ContextUsageMeter'
 import type { ActionAuthorizationMode } from '../../../shared/action-authorization-mode'
 import {
@@ -155,16 +156,13 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
   const syncAuthorizationMenuFrame = useCallback(() => {
     const anchor = authorizationModeRef.current
     if (!anchor) return
-    const rect = anchor.getBoundingClientRect()
-    const viewportWidth = window.innerWidth || document.documentElement.clientWidth || 0
+    const shell = anchor.closest<HTMLElement>('[data-chat-composer-shell="true"]') || anchor
+    const rect = shell.getBoundingClientRect()
     const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0
     const margin = 12
-    const width = Math.max(230, Math.min(280, viewportWidth - margin * 2))
-    const left = Math.max(margin, Math.min(rect.right - width, viewportWidth - width - margin))
     setAuthorizationMenuFrame({
-      left: Math.round(left),
+      ...getChatMenuHorizontalFrame(anchor, Math.min(280, rect.width), rect.left),
       bottom: Math.max(margin, Math.round(viewportHeight - rect.top + 6)),
-      width: Math.round(width),
     })
   }, [])
 
@@ -242,12 +240,10 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
   useEffect(() => {
     if (!showAuthorizationModeSelect) return
     syncAuthorizationMenuFrame()
-    window.addEventListener('resize', syncAuthorizationMenuFrame)
-    window.addEventListener('scroll', syncAuthorizationMenuFrame, true)
-    return () => {
-      window.removeEventListener('resize', syncAuthorizationMenuFrame)
-      window.removeEventListener('scroll', syncAuthorizationMenuFrame, true)
-    }
+    return subscribeChatMenuLayout(
+      authorizationModeRef.current?.closest<HTMLElement>('[data-chat-composer-shell="true"]') ?? null,
+      syncAuthorizationMenuFrame,
+    )
   }, [showAuthorizationModeSelect, syncAuthorizationMenuFrame])
 
   // Close dropdowns when clicking outside

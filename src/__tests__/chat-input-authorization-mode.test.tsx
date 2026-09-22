@@ -24,8 +24,13 @@ test('chat input exposes and switches the three conversation authorization modes
   Object.defineProperty(globalThis, 'document', { value: dom.window.document, configurable: true })
   Object.defineProperty(globalThis, 'Node', { value: dom.window.Node, configurable: true })
   Object.defineProperty(globalThis, 'HTMLElement', { value: dom.window.HTMLElement, configurable: true })
+  const resizeCallbacks = new Map<Element, () => void>()
   Object.defineProperty(globalThis, 'ResizeObserver', {
-    value: class { observe() {} disconnect() {} },
+    value: class {
+      constructor(private callback: () => void) {}
+      observe(element: Element) { resizeCallbacks.set(element, this.callback) }
+      disconnect() { for (const [element, callback] of resizeCallbacks) if (callback === this.callback) resizeCallbacks.delete(element) }
+    },
     configurable: true,
   })
   Object.defineProperty(globalThis, 'requestAnimationFrame', {
@@ -114,6 +119,13 @@ test('chat input exposes and switches the three conversation authorization modes
       '[data-ready-action-authorization-mode="ask"]',
     )
     assert.ok(trigger)
+    const pane = dom.window.document.getElementById('root')!
+    pane.dataset.chatPanelRoot = 'true'
+    let paneLeft = 704
+    pane.getBoundingClientRect = () => new dom.window.DOMRect(paneLeft, 40, 1024 - paneLeft, 700)
+    const shell = trigger.closest<HTMLElement>('[data-chat-composer-shell="true"]')!
+    shell.getBoundingClientRect = () => new dom.window.DOMRect(paneLeft + 16, 600, 992 - paneLeft, 100)
+    trigger.parentElement!.getBoundingClientRect = () => new dom.window.DOMRect(paneLeft + 20, 660, 90, 24)
     await act(async () => trigger.click())
     const menu = dom.window.document.querySelector<HTMLElement>(
       '[data-ready-action-authorization-menu="true"]',
@@ -121,6 +133,19 @@ test('chat input exposes and switches the three conversation authorization modes
     assert.equal(menu?.parentElement, dom.window.document.body, 'the selector must escape the clipped composer surface')
     assert.equal(menu?.style.position, 'fixed')
     assert.ok(menu?.classList.contains('ready-liquid-popover'), 'the selector must use Ready liquid glass')
+    const assertContained = () => {
+      assert.ok(menu)
+      const left = Number.parseFloat(menu.style.left)
+      const width = Number.parseFloat(menu.style.width)
+      assert.ok(left >= paneLeft + 8, 'authorization menu must stay inside the chat pane')
+      assert.ok(left + width <= 1016)
+      assert.ok(width > 0)
+      assert.ok(Number.parseFloat(menu.style.bottom) >= dom.window.innerHeight - 600, 'menu opens above the composer')
+    }
+    assertContained()
+    paneLeft = 804
+    await act(async () => resizeCallbacks.get(pane)?.())
+    assertContained()
     assert.deepEqual(
       [...dom.window.document.querySelectorAll('[data-ready-action-authorization-option]')]
         .map((node) => node.getAttribute('data-ready-action-authorization-option')),
