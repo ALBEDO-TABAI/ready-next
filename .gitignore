@@ -51,6 +51,7 @@ exports/
 *.asar
 build/runtime-seeds/
 /build/codex/
+/build/release-skill-runtime/
 
 # Local scratch / generated artifacts
 /Pack-source/
