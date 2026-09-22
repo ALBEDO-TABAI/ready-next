@@ -3,7 +3,7 @@ import { join } from 'path'
 import type { SkillDefinition } from '../../../shared/skill-execution-types'
 import { type EmbeddedSkillManifest, EMBEDDED_SKILLS } from './manifest'
 import { compileSkillDefinition } from './skill-compiler'
-import { getManagedCustomSkill, listManagedCustomSkills } from './custom-skill-registry'
+import { getManagedCustomSkill, listManagedCustomSkills, type RegisteredCustomSkill } from './custom-skill-registry'
 
 export class SkillLoader {
   constructor(
@@ -26,7 +26,7 @@ export class SkillLoader {
 
   listCustomSkills(): SkillDefinition[] {
     return listManagedCustomSkills(this.customSkillsRoot).flatMap((skill) => {
-      const loaded = this.loadCustomSkill(skill.id)
+      const loaded = this.compileCustomSkill(skill)
       return loaded ? [loaded] : []
     })
   }
@@ -34,6 +34,10 @@ export class SkillLoader {
   loadCustomSkill(skillId: string): SkillDefinition | null {
     const record = getManagedCustomSkill(this.customSkillsRoot, skillId)
     if (!record) return null
+    return this.compileCustomSkill(record)
+  }
+
+  private compileCustomSkill(record: RegisteredCustomSkill): SkillDefinition | null {
     return compileSkillDefinition({
       folderPath: record.managedPath,
       source: 'custom',

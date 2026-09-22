@@ -169,3 +169,34 @@ export function findCurrentScrollElement(scope: HTMLElement): HTMLElement | null
     || candidates.find((element) => element.scrollHeight > element.clientHeight)
     || null
 }
+
+/** Capture while scrolling; departure only flushes the captured value, never hidden layout. */
+export function trackDocumentScrollPosition(
+  element: HTMLElement,
+  getContent: () => string,
+  save: (snapshot: DocumentScrollAnchorSnapshot) => void,
+): { flush: () => void; dispose: () => void } {
+  let pending: DocumentScrollAnchorSnapshot | null = null
+  let timer: number | undefined
+  const flush = () => {
+    window.clearTimeout(timer)
+    if (pending) save(pending)
+    pending = null
+  }
+  const handleScroll = () => {
+    pending = captureElementScroll(element, '', { includeAnchor: false })
+    window.clearTimeout(timer)
+    timer = window.setTimeout(() => {
+      pending = captureElementScroll(element, getContent())
+      flush()
+    }, 220)
+  }
+  element.addEventListener('scroll', handleScroll, { passive: true })
+  return {
+    flush,
+    dispose: () => {
+      element.removeEventListener('scroll', handleScroll)
+      flush()
+    },
+  }
+}

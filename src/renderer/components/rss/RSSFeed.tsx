@@ -25,6 +25,7 @@ import { useModal } from '../ui/useModal'
 import { chatMenuSurfaceStyle } from '../agent/chatMenuStyles'
 import { LiquidFloatingPanel } from '../ui/liquid-glass/LiquidFloatingPanel'
 import { isRSSFeedItemContentEqual } from '../../modules/rss/rssFeedItemEquality'
+import RSSVirtualList from './RSSVirtualList'
 
 export interface RSSItem {
   id: string
@@ -316,8 +317,6 @@ const RSSFeedItemRow = memo(function RSSFeedItemRow({
           ? 'color-mix(in srgb, var(--surface-card-bg) 16%, transparent)'
           : 'color-mix(in srgb, var(--surface-card-bg) 5%, transparent)',
         boxShadow: isSelected ? 'inset 2px 0 0 var(--color-blue)' : 'none',
-        contentVisibility: 'auto',
-        containIntrinsicSize: '84px',
       }}
     >
       <div className="rss-item-row">
@@ -1052,11 +1051,10 @@ export default function RSSFeed({
 
       {/* Item List */}
       <div
-        data-liquid-scroll-root="rss-feed-list"
-        className="rss-feed-list rss-feed-scroll flex-1 overflow-auto"
+        className="rss-feed-list flex-1 min-h-0 overflow-hidden"
         style={{ background: 'transparent' }}
       >
-        <div className="flex flex-col gap-2 px-2 py-3">
+        <div className={shouldShowBootstrapSkeleton || filteredItems.length === 0 ? 'flex flex-col gap-2 px-2 py-3' : 'h-full'}>
           {shouldShowBootstrapSkeleton ? (
             Array.from({ length: 6 }).map((_, index) => (
               <div
@@ -1110,7 +1108,8 @@ export default function RSSFeed({
               <p className="text-[13px]">暂无内容</p>
             </div>
           ) : (
-            filteredItems.map((item) => (
+            <RSSVirtualList key={`${filter}:${selectedSource || ''}`} items={filteredItems} selectedItemId={selectedItemId}>
+              {(item) => (
               <RSSFeedItemRow
                 key={item.id}
                 item={item}
@@ -1123,7 +1122,8 @@ export default function RSSFeed({
                 onDeleteItem={onDeleteItem}
                 onOpenAnalysisOutput={onOpenAnalysisOutput}
               />
-            ))
+              )}
+            </RSSVirtualList>
           )}
         </div>
       </div>

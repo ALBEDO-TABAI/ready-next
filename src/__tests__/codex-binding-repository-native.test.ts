@@ -8542,6 +8542,13 @@ test('product Retry presentation consumes the canonical current head contract de
     assert.equal(context?.headFacts.headContractBlocker, 'native_tool_definition_changed')
     const presentation = currentRepository.readProductTurnPresentation(b.runId, currentEnvironment)
     assert.equal(calls, 2)
+    const runIds = ['run-1', b.runId]
+    const individual = runIds.map((id) => currentRepository.readProductTurnPresentation(id, currentEnvironment))
+    calls = 0
+    assert.deepEqual(currentRepository.readProductTurnPresentations(runIds, currentEnvironment), individual)
+    assert.equal(calls, 1, 'one current-head decision per transactional batch, not per historical message')
+    assert.deepEqual(currentRepository.readProductTurnPresentations(runIds, currentEnvironment), individual)
+    assert.equal(calls, 2, 'the next batch must re-read the current contract')
     assert.notEqual(presentation.actionProjection.retry_failed_task.availability, 'ready')
     assert.ok(presentation.actionProjection.retry_failed_task.blockers.length > 0,
       JSON.stringify(presentation.actionProjection.retry_failed_task.blockers))

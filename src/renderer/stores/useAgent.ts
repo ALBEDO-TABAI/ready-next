@@ -62,6 +62,7 @@ import {
 import {
   applyProductTurnReceipt,
   mergeProductTurnActionProjections,
+  needsProductTurnModeRead,
   toolTraceFromProductReceipt,
 } from '../modules/agent/productTurnReceipt'
 import { shouldHydrateCodexActionSurface } from '../modules/agent/codex-action-surface-invalidation'
@@ -218,7 +219,7 @@ const lifecycleHydrationTargets = new Map<string, LifecycleHydrationTarget>()
 // follow-up carrying the highest pending target, so a newer read can never race
 // an older one and an older response can never be the last write.
 const lifecycleHydrationOwners = new Map<string, Promise<void>>()
-const lifecycleHydrationQueue = new Map<string, LifecycleHydrationTarget | null>()
+const lifecycleHydrationQueue = new Map<string, { target: LifecycleHydrationTarget | null; modeOnly: boolean }>()
 
 function higherLifecycleHydrationTarget(
   left: LifecycleHydrationTarget | null,
@@ -246,6 +247,7 @@ export function resetCodexLifecycleHydrationOwnersForTest(): void {
 async function hydrateCodexLifecycleScope(
   scope: ConversationScope,
   target?: Pick<CodexActionSurfaceInvalidation, 'aliasGeneration' | 'scopeEpoch' | 'actionProjectionSequence'>,
+  modeOnly = false,
 ): Promise<void> {
   const baseline = lifecycleHydrationFingerprint(useAgent.getState(), scope.id)
   if (!baseline) return
@@ -257,10 +259,11 @@ async function hydrateCodexLifecycleScope(
     const queuedTarget = target
       ? { ...target }
       : lifecycleHydrationTargets.get(sessionKey) ?? null
-    lifecycleHydrationQueue.set(sessionKey, higherLifecycleHydrationTarget(
-      lifecycleHydrationQueue.get(sessionKey) ?? null,
-      queuedTarget,
-    ))
+    const queued = lifecycleHydrationQueue.get(sessionKey)
+    lifecycleHydrationQueue.set(sessionKey, {
+      target: higherLifecycleHydrationTarget(queued?.target ?? null, queuedTarget),
+      modeOnly: modeOnly && (queued?.modeOnly ?? true),
+    })
     // Raise the shared version floor so an in-flight older read can no longer
     // publish. Identity is preserved when the queued target is not newer, which
     // keeps a same-or-older invalidation from cancelling the current owner.
@@ -276,14 +279,14 @@ async function hydrateCodexLifecycleScope(
   }
   const run = (async () => {
     try {
-      await runCodexLifecycleHydration(scope, target)
+      await runCodexLifecycleHydration(scope, target, modeOnly)
     } finally {
       lifecycleHydrationOwners.delete(sessionKey)
     }
     if (!lifecycleHydrationQueue.has(sessionKey)) return
-    const queued = lifecycleHydrationQueue.get(sessionKey) ?? undefined
+    const queued = lifecycleHydrationQueue.get(sessionKey)!
     lifecycleHydrationQueue.delete(sessionKey)
-    await hydrateCodexLifecycleScope(scope, queued)
+    await hydrateCodexLifecycleScope(scope, queued.target ?? undefined, queued.modeOnly)
   })()
   lifecycleHydrationOwners.set(sessionKey, run)
   await run
@@ -292,6 +295,7 @@ async function hydrateCodexLifecycleScope(
 async function runCodexLifecycleHydration(
   scope: ConversationScope,
   target?: Pick<CodexActionSurfaceInvalidation, 'aliasGeneration' | 'scopeEpoch' | 'actionProjectionSequence'>,
+  modeOnly = false,
 ): Promise<void> {
   const agent = typeof window !== 'undefined' ? window.electronAPI?.agent : null
   if (!agent) return
@@ -434,11 +438,13 @@ async function runCodexLifecycleHydration(
       message.type === 'agent' && typeof message.meta?.runId === 'string' ? [message.meta.runId] : []
     )),
   ])
+  const runIdsToRead = [...loadedRunIds].filter((runId) => !modeOnly
+    || needsProductTurnModeRead(loadedSlice.productTurnActionProjectionByRunId[runId], surfaceHead))
   let productReceipts: ProductTurnReceipt[] = []
-  if (loadedRunIds.size > 0 && agent.readProductTurnPresentations) {
+  if (runIdsToRead.length > 0 && agent.readProductTurnPresentations) {
     try {
       const receipts = await agent.readProductTurnPresentations(
-        [...loadedRunIds],
+        runIdsToRead,
         workbenchMode,
       )
       if (receipts.success && Array.isArray(receipts.data)) {
@@ -2321,7 +2327,7 @@ export function initAgentListeners(): () => void {
     const state = useAgent.getState()
     const scope = state.scopes.find((candidate) => candidate.id === state.currentScopeId)
     if (scope) {
-      void hydrateCodexLifecycleScope(scope)
+      void hydrateCodexLifecycleScope(scope, undefined, true)
     }
   })
   const offIngressAdmitted = window.electronAPI?.agent?.onIngressAdmitted?.((event) => {

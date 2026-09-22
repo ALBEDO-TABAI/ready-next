@@ -624,3 +624,13 @@
 | 2026-07-11 | Agent 根基修复 | `src/renderer/components/agent/ChatPanel.tsx` | 1129 | 净 +20 | 一般 | 本轮只解析并传递任务 owner、执行者与消息身份快照；展示逻辑留在子组件。下次增长优先迁出序列化类型和解析器。2026-08-11 复查。 | 已排期：2026-08-11 |
 | 2026-07-11 | Agent 根基修复 | `src/renderer/modules/agent/runtimeDriver.ts` | 1931 | 25 | 一般 | 本轮只把主进程给出的执行身份写入消息与任务快照；事件桥职责未扩张。下次增长优先拆出 scope-run 事件映射器。2026-08-11 复查。 | 已排期：2026-08-11 |
 | 2026-07-11 | Agent 根基修复 | `src/renderer/components/agent-system/studio/AgentSystemStudioView.tsx` | 1535 | 净 +20 | 一般 | 本轮展示代码侧 readiness，并把 RULES / FOUNDATION / 知识卡的编辑器从页面末尾移到被点击内容的原位，未复制保存逻辑。下次增长优先把 roster/detail 或内容提案区拆成纯展示子组件。2026-08-11 复查。 | 已排期：2026-08-11 |
+
+
+### 2026-09-22 四模块切换与真实长会话阻塞
+
+| 日期 | 任务 | 文件 | 行数 | 本轮变化 | 风险 | 判断与后续 | 复查 |
+| --- | --- | --- | ---: | --- | --- | --- | --- |
+| 2026-09-22 | 历史回执批读去重 | `src/main/modules/agent-control/codex-runtime/codex-binding-repository.ts` | 10655 | 净 +21 | 危险 | 原有巨型仓储集中多类生命周期；本次只合并同一读事务内的 head 读取，输出与逐条读取完全一致。后续应以现有原生合同将 product presentation 读取整体迁至同域叶子，不在此次性能修复扩展重构。 | 交付时提醒 |
+| 2026-09-22 | 批读同值及新请求重读检查 | `src/__tests__/codex-binding-repository-native.test.ts` | 9108 | 净 +7 | 一般 | 复用现有真实失败会话夹具验证批读行为，避免另造不完整 fixture。2026-10-22 复查按原生合同拆分测试夹具。 | 2026-10-22 |
+| 2026-09-22 | 纯模式刷新与完整失效分流 | `src/renderer/stores/useAgent.ts` | 2478 | 净 +6 | 危险 | 原 store 已集中多类会话职责；本次仅让既有队列携带刷新原因并消费 Main 来源阻断，未另建状态源。后续将既有 hydration 所有权整体迁出，而不是继续在根 store 堆积。 | 交付时提醒 |
+| 2026-09-22 | 模式与失效回归 | `src/__tests__/codex-action-surface-event-bridge.test.ts` | 1168 | 净 +35 | 一般 | 沿现有真实 store 与 IPC 替身验证，保留队列竞态、记忆下界和旧事件拒绝覆盖。 | 2026-10-22 |

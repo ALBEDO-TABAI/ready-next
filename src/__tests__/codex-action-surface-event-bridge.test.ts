@@ -1131,3 +1131,38 @@ test('a stale send recovers a lost generation notification through metadata with
     assert.equal(useAgent.getState().inputValue, draft)
   } finally { api.restore() }
 })
+
+test('mode-only hydration keeps immutable no-retry history but re-reads it on a new head', async () => {
+  useMode.setState({ workbenchMode: 'browser' })
+  const receipt = seedFailedB()
+  receipt.actionProjection.retry_failed_task = {
+    availability: 'not_applicable', blockers: ['resource_restatement_required'], consequence: null,
+  }
+  useAgent.setState((state) => ({ sessions: { ...state.sessions, [sessionId]: {
+    ...state.sessions[sessionId], productTurnActionProjectionByRunId: { 'run-B': receipt.actionProjection },
+  } } }))
+  let reads = 0
+  let current = surface(1)
+  const api = installSurfaceApi({
+    readCodexActionSurface: async () => ({ success: true, data: current }),
+    getConversationScopeMessages: async () => ({ success: true, data: [receipt.canonicalMessage] }),
+    readProductTurnPresentations: async () => { reads++; return { success: true, data: [receipt] } },
+  })
+  try {
+    useMode.setState({ workbenchMode: 'calendar' })
+    await flush()
+    assert.equal(reads, 0)
+    const cached = useAgent.getState().sessions[sessionId].productTurnActionProjectionByRunId['run-B']
+    assert.equal(productTurnActionProjectionMatchesContext(cached, current.head, 'calendar'), false)
+    api.memoryChanged()
+    await flush()
+    assert.equal(reads, 1, 'memory invalidation is a full read even with the same head')
+    current = surface(1, 2)
+    useMode.setState({ workbenchMode: 'document' })
+    await flush()
+    assert.equal(reads, 2, 'changed head cannot reuse the old blocking projection')
+  } finally {
+    api.restore()
+    useMode.setState({ workbenchMode: 'browser' })
+  }
+})

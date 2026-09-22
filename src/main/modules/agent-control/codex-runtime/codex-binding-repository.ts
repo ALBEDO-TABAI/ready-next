@@ -1274,6 +1274,13 @@ function processLeaseFromRow(row: ProcessLeaseDbRow): CodexProcessLeaseRow {
   }
 }
 
+type ProductTurnHeadReadSnapshot = {
+  liveTail: CodexUncommittedUserTailItem[]
+  hasHeadProduct: boolean
+  compacted: Map<string, string>
+  headFacts: CodexHeadActionFacts
+}
+
 export class CodexBindingRepository {
   private readonly toolBindings: CodexToolBindingRepository
 
@@ -3148,13 +3155,15 @@ export class CodexBindingRepository {
       throw new CodexBindingRepositoryError('active_alias_generation_mismatch')
     }
     const turns = this.db.prepare(`
-      SELECT turn.*, projection.status AS projection_status
+      SELECT turn.ready_run_id, turn.turn_start_reservation_released_at,
+             turn.product_terminal_digest, turn.host_failure_product_terminal_digest,
+             turn.interrupt_requested_at, turn.interrupt_ack_at, turn.lifecycle_action,
+             turn.codex_turn_id, turn.turn_start_reconciled_at, turn.interrupt_state_unknown_at,
+             turn.engine_terminal_recorded_at, turn.host_failure_kind, turn.host_failure_evidence_digest
         FROM codex_turn_bindings turn
-        LEFT JOIN task_projections projection
-          ON projection.task_id = turn.ready_task_id AND projection.run_id = turn.ready_run_id
        WHERE turn.thread_binding_id = ?
        ORDER BY turn.created_at ASC, turn.ready_run_id ASC
-    `).all<(TurnBindingRow & { projection_status: string | null })>(thread.thread_binding_id)
+    `).all<TurnBindingRow>(thread.thread_binding_id)
     const fences = this.db.prepare(`
       SELECT operation_kind, owner_ready_run_id, owner_manual_compaction_id
         FROM codex_thread_dispatch_fences WHERE thread_binding_id = ?
@@ -4495,11 +4504,14 @@ export class CodexBindingRepository {
       trustedWorkbenchMode: 'browser' | 'document' | 'rss' | 'calendar'
     },
   ): ProductTurnReceipt[] {
+    // One DB read transaction, one current-head read per head + trusted mode.
+    // This map never survives the batch or participates in action admission.
+    const heads = new Map<string, ProductTurnHeadReadSnapshot>()
     return readProductTurnPresentations(
       this.db,
       readyRunIds,
       currentEnvironment,
-      (runId) => this.readProductTurnActionContext(runId, currentEnvironment),
+      (runId) => this.readProductTurnActionContext(runId, currentEnvironment, heads),
     )
   }
 
@@ -4509,6 +4521,7 @@ export class CodexBindingRepository {
       requestedWorkbenchMode: 'browser' | 'document' | 'rss' | 'calendar'
       trustedWorkbenchMode: 'browser' | 'document' | 'rss' | 'calendar'
     },
+    heads = new Map<string, ProductTurnHeadReadSnapshot>(),
   ): ProductTurnActionContext | null {
     const owner = this.requireTurn(readyRunId)
     const ownerThread = this.requireThread(owner.thread_binding_id)
@@ -4525,42 +4538,50 @@ export class CodexBindingRepository {
       || digestCodexUserInput(source.ingress.canonicalCurrentInputRef.input) !== rootRef.inputDigest)) {
       throw new CodexBindingRepositoryError('retry_root_origin_invalid')
     }
-    const liveTail = this.readLiveUncommittedUserTail(head.thread_binding_id)
-    const hasHeadProduct = this.db.prepare(`SELECT 1 AS present FROM codex_turn_bindings
-      WHERE thread_binding_id = ? LIMIT 1`).get<{ present: number }>(head.thread_binding_id)
+    const workbenchMode = currentEnvironment?.trustedWorkbenchMode
+      ?? prepared.sourceTrustedEnvironmentRef.workbenchMode
+    const headKey = JSON.stringify([head.thread_binding_id, workbenchMode])
+    let snapshot = heads.get(headKey)
+    if (!snapshot) {
+      const headFacts = this.readHeadActionFacts({
+        aliasId: head.ready_conversation_alias,
+        aliasGeneration: head.alias_generation,
+        currentRuntimeManifestDigest: this.currentContract?.runtimeManifestDigest || head.runtime_manifest_digest,
+        currentProtocolSchemaDigest: this.currentContract?.protocolSchemaDigest || head.protocol_schema_digest,
+      })
+      const headContractBlocker = this.currentContract?.resolveHeadContractBlocker?.({
+        aliasId: head.ready_conversation_alias,
+        aliasGeneration: head.alias_generation,
+        scopeEpoch: headFacts.scopeEpoch,
+        workbenchMode,
+        threadBindingId: head.thread_binding_id,
+        codexThreadId: head.codex_thread_id,
+        materializationKind: head.thread_materialization_kind,
+      })
+      const acceptedHead = this.readAcceptedNativePrefixHead(head.thread_binding_id)
+      snapshot = {
+        headFacts: headContractBlocker === undefined ? headFacts : { ...headFacts, headContractBlocker },
+        liveTail: this.readLiveUncommittedUserTail(head.thread_binding_id),
+        hasHeadProduct: Boolean(this.db.prepare(`SELECT 1 AS present FROM codex_turn_bindings
+          WHERE thread_binding_id = ? LIMIT 1`).get(head.thread_binding_id)),
+        compacted: acceptedHead
+          ? readNativeCoverage(this.db, acceptedHead.coverageReceiptRef.receiptId).compacted
+          : new Map(),
+      }
+      heads.set(headKey, snapshot)
+    }
     const root = source.ingress.canonicalCurrentInputRef
-    const acceptedHead = this.readAcceptedNativePrefixHead(head.thread_binding_id)
-    const sourceRootCompacted = Boolean(acceptedHead
-      && readNativeCoverage(this.db, acceptedHead.coverageReceiptRef.receiptId).compacted.get(root.messageId)
-        === digestCodexUserInput(root.input))
-    const tailPlan = resolveExplicitRetryTailPlan(liveTail, {
+    const sourceRootCompacted = snapshot.compacted.get(root.messageId) === digestCodexUserInput(root.input)
+    const tailPlan = resolveExplicitRetryTailPlan(snapshot.liveTail, {
       originUserMessageId: root.messageId, inputDigest: digestCodexUserInput(root.input),
     })
-    const headFacts = this.readHeadActionFacts({
-      aliasId: head.ready_conversation_alias,
-      aliasGeneration: head.alias_generation,
-      currentRuntimeManifestDigest: this.currentContract?.runtimeManifestDigest || head.runtime_manifest_digest,
-      currentProtocolSchemaDigest: this.currentContract?.protocolSchemaDigest || head.protocol_schema_digest,
-    })
-    const headContractBlocker = this.currentContract?.resolveHeadContractBlocker?.({
-      aliasId: head.ready_conversation_alias,
-      aliasGeneration: head.alias_generation,
-      scopeEpoch: headFacts.scopeEpoch,
-      workbenchMode: currentEnvironment?.trustedWorkbenchMode
-        ?? prepared.sourceTrustedEnvironmentRef.workbenchMode,
-      threadBindingId: head.thread_binding_id,
-      codexThreadId: head.codex_thread_id,
-      materializationKind: head.thread_materialization_kind,
-    })
     return {
-      headFacts: headContractBlocker === undefined
-        ? headFacts
-        : { ...headFacts, headContractBlocker },
+      headFacts: snapshot.headFacts,
       sourcePrepared: source,
       sourceRootCompacted,
       exactLiveRootOnDirectSuccessor: head.history_source_thread_binding_id === owner.thread_binding_id
         && head.history_source_terminal_facts_digest === owner.terminal_facts_digest
-        && head.alias_generation === ownerThread.alias_generation + 1 && !hasHeadProduct
+        && head.alias_generation === ownerThread.alias_generation + 1 && !snapshot.hasHeadProduct
         && !this.readProductTurnSuccessorId(readyRunId)
         && tailPlan.kind === 'eligible',
     }

@@ -105,6 +105,25 @@ export function productTurnActionProjectionMatchesContext(
     || projection.currentTrustedEnvironmentRef.requestedWorkbenchMode === workbenchMode)
 }
 
+export function needsProductTurnModeRead(
+  projection: CodexProductTurnActionProjection | undefined,
+  head: CodexHeadActionProjection,
+): boolean {
+  if (!projection || !projectionMatchesHead(projection, head)
+    || projection.retryEvidenceKind !== 'complete'
+    || projection.retry_failed_task.availability !== 'not_applicable') return true
+  // These Main-issued blockers describe the immutable source turn. A mode
+  // change cannot remove them. Keep the version floor, but never authorize an
+  // action from the old mode. Other invalidations still perform a full read.
+  return !projection.retry_failed_task.blockers.some((blocker) => [
+    'same_thread_failed_turn_restatement_required',
+    'compacted_failed_turn_restatement_required',
+    'effectful_or_interactive_retry_unsupported',
+    'resource_restatement_required',
+    'current_skill_context_restatement_required',
+  ].includes(blocker))
+}
+
 export function mergeProductTurnActionProjections(input: {
   existing: Record<string, CodexProductTurnActionProjection>
   incoming: readonly CodexProductTurnActionProjection[]
