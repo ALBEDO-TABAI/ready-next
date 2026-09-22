@@ -4,7 +4,7 @@ stage: U
 date: 2026-05-20
 revision: v7
 status: pending-review
-enforce: true
+enforce: false
 prereq_audits:
   - docs/superpowers/audits/2026-05-20-ready-deep-review-and-refactor-plan.md
   - docs/superpowers/audits/2026-05-20-ready-module-runtime-map.md
@@ -15,7 +15,11 @@ codex_review:
   v4: 2026-05-20 — 4 阻断（X-1~X-4 数字一致性）+ 2 重要（X-5/X-6）+ 1 残（R-2）→ v5 处理
   v5: 2026-05-20 — 2 新发现（N-1 Phase 7 验收 10 vs 11；N-2 五处 v3 标签未升）→ v6 处理
   v6: 2026-05-20 — 4 处残留版本号（§0.3 / §13 / §14 / §15 仍标 v5/v3）→ v7 全局扫除
+documentation_status: archived-in-place
+archived_at: 2026-09-06
 ---
+
+> 原位归档（2026-09-06）：固定历史证据仍引用此路径。保留此路径不代表全文仍是当前合同；其中的状态、源码位置和待办属于原记录。现行约束见 [当前运行时合同](../../architecture/current-runtime-contracts.md)，归档去向见 [文档清单](../../documentation-inventory.md)。
 
 # Stage U — Release Readiness 实施计划 v7
 

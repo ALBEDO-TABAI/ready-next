@@ -1,9 +1,17 @@
+---
+enforce: false
+documentation_status: archived-in-place
+archived_at: 2026-09-06
+---
+
+> 原位归档（2026-09-06）：代码/检查引用：src/__tests__/skill-child-run-end-to-end.test.ts。保留此路径不代表全文仍是当前合同；其中的状态、源码位置和待办属于原记录。现行约束见 [当前运行时合同](../../architecture/current-runtime-contracts.md)，归档去向见 [文档清单](../../documentation-inventory.md)。
+
 # Skill Runtime Child-Loop Architecture Implementation Plan
 
 > **Status (2026-04-30):** Phases 1–7 of this plan landed at commit
 > `452f01a`, but landed the *shape* not the full *ownership* migration.
 > The remediation series at
-> `docs/superpowers/plans/2026-04-30-skill-runtime-child-loop-remediation.md`
+> `docs/archive/2026-09-06/docs/superpowers/plans/2026-04-30-skill-runtime-child-loop-remediation.md`
 > (commits `c58e314` → `4b7e359`, T1–T9 of meta-plan
 > `~/.claude/plans/bubbly-floating-mccarthy.md`) closed the residual
 > gaps: parent steering no longer surfaces typed VEA actions when
@@ -329,7 +337,7 @@ The close event replaces parent-loop repeated force dispatch for long skills.
 - `src/__tests__/skill-child-single-flight.test.ts`
 - `src/__tests__/skill-child-runtime-decisions.test.ts`
 - `src/__tests__/rss-visual-skill-child-run.test.ts`
-- `docs/superpowers/plans/2026-04-30-baseline-failure-triage.md`
+- `docs/archive/2026-09-06/docs/superpowers/plans/2026-04-30-baseline-failure-triage.md`
 
 ### Modify
 
@@ -375,7 +383,7 @@ The close event replaces parent-loop repeated force dispatch for long skills.
 **Goal:** Classify the existing failing test surface before architecture work starts, so new regressions are visible.
 
 **Files:**
-- Create: `docs/superpowers/plans/2026-04-30-baseline-failure-triage.md`
+- Create: `docs/archive/2026-09-06/docs/superpowers/plans/2026-04-30-baseline-failure-triage.md`
 - Read: current failing test output
 
 - [ ] Run the current targeted runtime chain.
@@ -406,7 +414,7 @@ Expected: classify every known failure into:
 - expected contract update during this route;
 - new regression candidate.
 
-- [ ] Save the classification in `docs/superpowers/plans/2026-04-30-baseline-failure-triage.md`.
+- [ ] Save the classification in `docs/archive/2026-09-06/docs/superpowers/plans/2026-04-30-baseline-failure-triage.md`.
 
 ### Phase 1: Child Run Primitives And Red Acceptance Tests
 

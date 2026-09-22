@@ -1,102 +1,41 @@
 ---
 name: ready-debug
-description: Ready 应用故障诊断技能（给 Codex / Codex / Cursor 等编码代理用）。当出现"设置丢失 / 历史空白 / scope not found / agent 无声死亡 / 采集异常"等症状时，按本技能的日志优先级、症状映射、账本巡检和 findings 模板定位根因，避免把原生依赖(ABI)问题误判成前端状态问题。
+description: 定位 Ready 的设置或历史异常、Agent 无回复和浏览器采集故障；用于可检查应用、源码和日志的排障任务。
 ---
 
-# ready-debug — Ready 应用诊断技能（v1）
+# Ready 故障排查
 
-本技能面向**外部编码代理**（Codex 自动发现；其他代理见 README.md）。用于在开发/排障环境定位 Ready 的运行时故障。核心纪律：**先看 `ready-database.log` 排除 ABI 问题，再怀疑前端状态**——原生依赖 (better-sqlite3) 的 ABI 不匹配会伪装成"设置丢失/历史空白"，最容易误判。
+用于外部编码代理排查 Ready。先确认故障来自安装版还是开发版，记录复现动作、发生时间与应用路径；按症状选择下表入口，不逐项通读所有日志。
 
-日志均在系统临时目录：macOS = `os.tmpdir()`（通常 `/var/folders/.../T/` 或 `$TMPDIR`）；Windows = `%TEMP%`。下文用 `<TMP>` 指代。数据库在 `<userData>/ready.db`（或环境变量 `READY_DB_PATH`）。
+## 范围与完成条件
 
-## 表 1 · 日志源优先级
+- 用户要求修复时，完成定位、范围内修复、对应检查和复现动作回测；不再询问“现在修还是只出报告”。只要求诊断或明确不改代码时，交付原因、证据和可执行建议。
+- 既有草稿、历史、配置和用户资料必须保留。不得把清空数据库、重置会话、开始新上下文当作默认排障步骤；需要这些动作且尚未授权时，先准备具体方案再询问。
+- 修复安装版症状时，源码测试通过只证明源码。应在用户实际使用的目标上验证；若替换安装包或重启会影响正在进行的工作且未获授权，说明剩余动作，不冒称已修好。
 
-按此顺序看，命中即停：
+## 从症状选入口
 
-| 顺序 | 日志 | 看什么 |
-|---|---|---|
-| 1 | `<TMP>/ready-database.log` | SQLite 加载/迁移错误、`NODE_MODULE_VERSION` 不匹配——**任何"数据读不出来"先查这里** |
-| 2 | `<TMP>/ready-directchat.log` | agent 决策、run 生命周期、终止路径 |
-| 3 | `<TMP>/ready-agent-metrics.log` | 结构化 metric：`context_bill`、`run_close`、`belief_card_audit` 等 |
-| 4 | `<TMP>/ready-tools.log` | 工具分发与执行、`errorKind` |
-| 5 | `<TMP>/ready-browser.log` | BrowserView / 采集 / popup |
+日志位于目标进程的 `os.tmpdir()`：macOS 通常为 `$TMPDIR`，Windows 通常为 `%TEMP%`。只提取与本次故障相关的片段，不展示凭据或无关对话。
 
-辅助：`ready-agent-sdk.log`、`ready-memory-tools.log`、`ready-search.log`、`ready-settings.log`、`ready-process-events.log`。
+| 症状 | 起点与继续核对的证据 |
+| --- | --- |
+| 设置丢失、历史空白、scope not found | `ready-database.log` 的加载/迁移错误；有数据库线索再读[存储排查](references/storage.md)，没有线索则沿当前会话与读取入口查 |
+| Agent 无回复、一直运行或完成但无反馈 | `ready-directchat.log` 的当前 run/thread/turn 身份、终态与投影；工具报错时补 `ready-tools.log` |
+| 采集结果为空、浏览器动作或弹窗异常 | `ready-browser.log` 与对应工具结果，核对真实页面、当前任务的采集结果和完成证据 |
+| 旧任务内容串入新任务 | 当前 scope、上下文代次、输入资源和历史接续证据；只读同一任务的相关日志，不因旧 metrics 中有内容就认定当前已注入 |
 
-## 表 2 · 症状 → 检查
+发现一条错误后继续核对它能否解释复现动作与相邻入口；时间接近或错误文字相似不足以证明同一根因。
 
-| 用户可见症状 | 先查 | 不要先怀疑 |
-|---|---|---|
-| 设置丢失 / 历史空白 / scope not found | `ready-database.log` 的 ABI/迁移错误（见表 4 ABI 段） | 前端状态没读出来 |
-| agent 无回复后被迫"继续"（无声死亡） | `ready-directchat.log` run 终止路径；账本 `run_meta` 卡在非终态行（表 3） | 模型不听话 |
-| 采集 0 项却判完成 / 部分失败重跑从零 | `ready-browser.log` + `collection-verdict` 判定 | 网站反爬 |
-| 后台任务完成无反馈 | `browser_tasks`/`skill_task_runs` 终态 + 事件桥是否回灌（表 3） | agent 忘了 |
-| 注入内容异常 / 旧任务串味 | `ready-agent-metrics.log` 的 `context_bill` 行看各 section 字节 | 提示词写错 |
+## 当前调用链与按需资料
 
-## 表 3 · 账本巡检 SQL 包
+Agent 当前入口是 `CodexHostOrchestrator`，终态经 `ReadyCodexLifecycleAdapter` 与 canonical closeout 收口。先追 Main 的运行与持久状态，再核对 Renderer 展示；不能只凭页面沉默判定任务死亡。
 
-连库（只读）：`sqlite3 "<userData>/ready.db"`（或 `$READY_DB_PATH`）。
+- 涉及 Agent、工具授权或历史接续，读[当前运行时合同](../../../docs/architecture/current-runtime-contracts.md) §2、§3、§5 的相关条目。
+- 涉及采集、BrowserView 或任务完成，读同一合同 §1、§6；只有对应任务确实使用某张账本时才查询。
+- 定位代码入口时用[代码地图](../../../docs/architecture/codebase-map.md)；选择验证时用[测试规约](../../../docs/superpowers/testing-conventions.md)。
 
-```sql
--- 无声死亡：卡在非终态的 run（终态应为 done/error/cancelled/preempted/...）
-SELECT run_id, task_id, status, terminal_reason, updated_at
-FROM run_meta
-WHERE status NOT IN ('done','error','cancelled','preempted','interrupted','checkpoint')
-ORDER BY updated_at DESC LIMIT 20;
+`AgentSdkRuntime`、旧 `ready-agent-sdk.log`、旧 belief metrics 与 child-loop 账本只作为历史/支撑线索；不得用它们恢复已退役主链、制造公开续跑，或覆盖当前 Codex 真值。
 
--- 三账本对同一 run 的口径是否矛盾
-SELECT rm.run_id, rm.status AS run_status, rm.task_type,
-       tp.status AS proj_status, tp.task_type AS proj_task_type
-FROM run_meta rm
-LEFT JOIN task_projections tp ON tp.run_id = rm.run_id
-ORDER BY rm.updated_at DESC LIMIT 20;
+## 交付
 
--- 后台任务终态分布
-SELECT kind, status, COUNT(*) FROM browser_tasks GROUP BY kind, status;
-SELECT skill_id, status, COUNT(*) FROM skill_task_runs GROUP BY skill_id, status;
-```
-
-## 表 4 · findings 模板 + ABI 检查 + 修复门
-
-### ABI 检查（"数据读不出来"类的首要嫌疑）
-
-```bash
-# 项目内置检查（权威）：比对 better-sqlite3 编译 ABI 与当前 Electron
-npm run native:check
-# 失败时重建：
-npm run rebuild:native   # = patch + electron-builder install-app-deps
-```
-
-历史坑：better-sqlite3 按错误的 Node ABI 编出来，Electron 主进程加载失败 → 表现为"设置丢失/历史空白"。`ready-database.log` 会出现 `NODE_MODULE_VERSION` 字样。
-
-### findings.md 五段式（产出给用户的结论）
-
-```markdown
-## 症状
-（用户可见的现象，一句话）
-
-## 可能原因
-（根因判断）
-
-## 证据
-（引用日志行号 / SQL 结果 / 错误码——必须可追溯）
-
-## 临时绕过
-（用户现在能用的 workaround，如无则写"无"）
-
-## 修复尝试
-（是否动了代码；动了什么；没动则写"仅诊断"）
-```
-
-### 修复门（硬规则）
-
-发现可修复问题时，**先问用户**：「现在修，还是只出报告？」——未经同意不改代码。仅诊断时"修复尝试"段写"仅诊断，未改代码"。
-
-## 使用流程
-
-1. 复制用户的症状描述；
-2. 按表 1 顺序读日志，表 2 锁定方向；
-3. 命中数据类症状 → 先跑 ABI 检查（表 4）；
-4. 用表 3 巡检账本；
-5. 写 findings.md（五段式）；
-6. 若要改代码，过修复门。
+用简单语言说明症状、已确认原因、修改与验证结果、仍需用户介入的真实障碍。区分已证实、推断和未验证；仅在用户需要报告或证据量较大时生成 `findings.md`，不强制五段模板。

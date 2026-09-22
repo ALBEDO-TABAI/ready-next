@@ -1,6 +1,6 @@
 # Ready 开发文档
 
-> 更新时间：2026-08-12
+> 核对日期：2026-09-06
 > 本文是开发入口，不保存阶段流水账。代码与 `package.json` 优先；详细运行时合同见 `docs/architecture/current-runtime-contracts.md`。
 
 ## 1. 先确定真值源
@@ -10,7 +10,7 @@
 1. 类型、生产调用方、数据库 schema 和 `package.json`
 2. 行为测试、专项 gate 与真实 Electron 结果
 3. `docs/architecture/current-runtime-contracts.md`
-4. 当前 `*-implementation.md` 计划
+4. `docs/README.md` 指向的现行实施合同（只按明确保留的范围使用）
 5. 审计、诊断、旧计划和 Git 历史
 
 文件名含 “final / current / snapshot” 不代表仍有效。历史审计若与 live 代码冲突，只能说明当时状态。
@@ -44,10 +44,12 @@ Renderer (React / Zustand)
 | Document | `src/renderer/pages/modes/DocumentMode.tsx`、`src/renderer/components/document/` | `src/main/modules/document-engine/` | `verify:widget-ready` |
 | RSS | `src/renderer/pages/modes/RSSMode.tsx`、`src/renderer/components/rss/` | `src/main/modules/rss-engine/` | 相关 RSS 焦点测试 |
 | Calendar | `src/renderer/pages/modes/CalendarMode.tsx`、`src/renderer/components/calendar/` | `src/main/modules/calendar-engine/` | `verify:calendar` |
-| Agent | `src/renderer/components/agent/`、`src/renderer/stores/useAgent.ts` | `src/main/modules/claude-bridge/`、`src/main/modules/agent-control/`、`src/main/modules/tools/` | `verify:stability` |
+| Agent | `src/renderer/components/agent/`、`src/renderer/stores/useAgent.ts` | `src/main/modules/claude-bridge/`、`src/main/modules/agent-control/`、`src/main/modules/tools/` | `verify:history-continuation`、`verify:stability` |
 | Skills | `src/renderer/components/layout/SkillsCenterPanel.tsx`、设置页 | `src/main/modules/skills-runtime/` | skill 对应 gate |
 | Files / Emergence | `src/renderer/components/layout/`、`src/renderer/modules/file-emergence/` | `src/main/modules/file-emergence/`、`src/main/modules/tag-forge/` | `verify:file-emergence`、`verify:tag-forge` |
 | Settings | `src/renderer/pages/Settings.tsx`、`src/renderer/stores/useSettings.ts` | `src/main/modules/settings-engine/` | `verify:native` + 设置焦点测试 |
+| 长期记忆 | `src/renderer/pages/settings/ReadyMemorySettingsPanel.tsx` | `src/main/modules/agent-control/ready-memory/` | `verify:single-ready-memory` |
+| 远程助手 | `src/renderer/components/settings/RemoteIMSettingsPanel.tsx` | `src/main/modules/agent-control/runtime-core/remote-channel-service.ts`、`src/python/ready_sidecar/channels/` | `verify:remote-im` |
 
 UI 文件定位先看 `UI_ADJUSTMENT_GUIDE.md`。
 
@@ -75,6 +77,10 @@ IPC request
 - `src/main/modules/tools/tool-executor.ts`
 
 `AgentSdkRuntime`、`ReadyAgentOrchestrator`、`direct-chat.ts`、`turn-engine.ts` 与旧 Dynamic Delivery/Boost 均不是生产入口。遇到旧文档、脚本或注释引用时，不能据此新建兼容入口。
+
+当前固定 runtime 是 0.149.0。历史操作按运行时发布证据和当前冻结合同裁决，不能仅凭版本不同要求清空会话。当前动作可用性由 Main 返回，Renderer 不从旧任务文案猜测；草稿与编辑权独立于发送是否可用。详细合同见 `docs/architecture/current-runtime-contracts.md` §2/§5。
+
+技能在进入回合前确定，`use_skill`、`use_browser` 不在当前 Codex 工具面。新手动记忆的读取与撤销也进入本轮冻结事实；旧人格、预路由和旧记忆系统不得接回。
 
 ## 5. 新功能与修改流程
 
@@ -141,6 +147,10 @@ npm run build
 ```
 
 专项 gate 必须从当前 `package.json` 选择，不从旧进展文档复制。测试边界、SQLite skip 和 verify 归属见 `docs/superpowers/testing-conventions.md`。
+
+书本阅读使用 `verify:document-reading`；文档性能与 Widget 分别使用 `verify:document-perf`、`verify:widget-ready`。`verify:remote-im-live` 会启动隔离应用与本地协议夹具，它不证明真实微信/飞书账号已连通。
+
+发行构建用 `npm run build:dist`：空配置检查、历史续聊检查、编译前源码身份冻结、构建与包体回执是一条链。`npm run build` 只编译；`build:dir` 不经过同一源码身份包装，不能替代正式发行证明。Packer 的使用与精简/完整技能运行时区别见 `Packer/README.md`。
 
 ## 8. 日志与排障
 

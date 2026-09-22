@@ -1,6 +1,6 @@
 ---
 name: image-deep-read
-description: 图像深读引擎——四层图像分析框架的第二到第四层（意图层 / 功能层 / 判断层）。在中立描述（第一层）的基础上，推断一张图"为什么这样呈现、在现实里承担什么任务、做得好不好"：从置景/道具/选角/姿态等场面调度（mise-en-scène）选择反推创作意图，用传播功能学（Jakobson）判定它的社会功能与目标受众，再以"对功能的适配度"为准绳做有据可依的质量判断与风险排查（含美妆等品类的现实合规红线）。Use when the user has an image and wants to go beyond "what's in it" to "what it's trying to do and whether it works"—interpreting creative intent, social/commercial function, target audience, and evaluating quality and risk against the image's inferred purpose. 触发短语："这张图想表达什么""为什么这么设计""它在传递什么""这张图给谁看的""这个 KV 行不行""评估一下这张广告图""分析意图/功能""这张图有什么风险""深读这张图""image intent"。即使用户只说"这张图做得好不好"，只要诉求是"有据可依地判断而非凭感觉"，就用此 skill。强制纪律：意图/功能/质量都是**推断**而非观察，每个判断都要挂上它依据的画面选择 + 置信度，并在结尾列存疑清单；判断必须相对于推断出的功能，不能用绝对美学。Do not use this for the neutral physical description itself—that is the description-layer skill image-reverse-describe, which this builds on—and do not use it to produce a quick aesthetic verdict without the evidence chain.
+description: 分析图片的创作意图、传播功能与质量适配度；用于需要画面证据支持的深读或评价，不用于纯客观描述。
 ---
 
 # Image Deep-Read（图像深读 · 意图 / 功能 / 判断层）

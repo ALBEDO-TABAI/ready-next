@@ -2,7 +2,7 @@
   "id": "image-analysis-router",
   "name": "image-analysis-router",
   "displayName": "Image Analysis Router",
-  "description": "图像分析路由方法论：17 类视觉路由（平面 / 摄影 / 绘画 / 室内 / 建筑 / 信息图 / 产品 / 漫画 / 时尚 / 雕塑 / 游戏 / 科学医学 / 字体 / 文档 / 影视 / 混合 / 通用回退）+ 批量处理 + AI 内容判定",
+  "description": "按图像类型选择专业分析方法；用于用户未指定分析框架的视觉评析或学习拆解，不用于普通截图问答。",
   "version": "0.1.0",
   "runtime": "reference",
   "execution": { "mode": "advisory" },

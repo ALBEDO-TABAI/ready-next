@@ -1,3 +1,11 @@
+---
+enforce: false
+documentation_status: archived-in-place
+archived_at: 2026-09-06
+---
+
+> 原位归档（2026-09-06）：固定历史证据仍引用此路径。保留此路径不代表全文仍是当前合同；其中的状态、源码位置和待办属于原记录。现行约束见 [当前运行时合同](../../architecture/current-runtime-contracts.md)，归档去向见 [文档清单](../../documentation-inventory.md)。
+
 # Policy: `@typescript-eslint/no-explicit-any` inside `src/__tests__/**`
 
 > Owning plan: `docs/superpowers/plans/2026-05-22-W2-lint-warning-debt-ledger-implementation.md` § W2.2

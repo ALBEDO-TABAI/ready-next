@@ -1,3 +1,11 @@
+---
+enforce: false
+documentation_status: archived-in-place
+archived_at: 2026-09-06
+---
+
+> 原位归档（2026-09-06）：代码/检查引用：src/__tests__/window-material-state-table-contract.test.ts, src/main/modules/window-material/main-window-material.ts。保留此路径不代表全文仍是当前合同；其中的状态、源码位置和待办属于原记录。现行约束见 [当前运行时合同](../../architecture/current-runtime-contracts.md)，归档去向见 [文档清单](../../documentation-inventory.md)。
+
 # Ready 真半透明液态玻璃 UI 层级与动效规格
 
 > 更新时间：2026-05-16

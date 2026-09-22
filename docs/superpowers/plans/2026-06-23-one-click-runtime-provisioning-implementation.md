@@ -3,7 +3,7 @@ title: 一键运行时配置（Python + ffmpeg + 核心依赖 自下载）实施
 date: 2026-06-23
 branch: agent-evolution/phase1
 status: implemented-pending-p3
-enforce: true
+enforce: false
 author: Claude (Opus 4.8)
 reviewers:
   - codex (2026-06-23 只读审查，提 6 点，全部采纳；据此降回 draft 并补方案)
@@ -19,7 +19,11 @@ review_log:
   - r4（2026-06-23，实现）：**P1+P2 已实现并提交**（commit `feat(skill-runtime): one-click runtime provisioning`）。文件见 §0.10。16 个行为测试（mock 下载器）+ web/node typecheck 全过。codex 对抗审查 FIX-FIRST→修复→**SHIP**：① 下载体积超限归类 integrity（非 unreachable）；② venv/依赖失败包成结构化 `runtime_setup_failed`。Claude 自审另修：tar 护栏的元数据前缀漏洞（改用 `tar -tf` 干净名做 abs/`..`，`tar -tvf` 仅取 symlink 目标）+ xattr 去隔离的 stale-path 竞态（改 rename 后同步执行）。P0 后续已由 r5 完成；当前只剩 P3 干净 mac/win 真机验收。
 gate_before_ready: P0 已完成，注册表 gate 校验真实 64-hex sha256 并拒绝未钉死哨兵值；对外声称跨平台完全就绪前，仍必须完成 P3 干净 mac/win 真机验收。
 goal: 让安装包保持瘦壳（几十 MB），用户在「设置 › 模型与运行时」点一个按钮即自下载并配好 Python + ffmpeg + 技能核心依赖，使首次跑（在线）视频分析不再卡在环境/依赖下载上；无需预装系统 Python/homebrew。
+documentation_status: archived-in-place
+archived_at: 2026-09-06
 ---
+
+> 原位归档（2026-09-06）：代码/检查引用：src/main/modules/skills-runtime/ipc-handler.ts, src/main/modules/skills-runtime/runtime-manager.ts。保留此路径不代表全文仍是当前合同；其中的状态、源码位置和待办属于原记录。现行约束见 [当前运行时合同](../../architecture/current-runtime-contracts.md)，归档去向见 [文档清单](../../documentation-inventory.md)。
 
 # 一键运行时配置 — 实施与验收计划
 

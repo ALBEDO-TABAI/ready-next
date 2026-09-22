@@ -1,6 +1,6 @@
 ---
 name: study-notes
-description: "将文章、教程、评论、新闻、故事、研究报告、框架拆解、截图或混合材料压缩成可学习的笔记，并先按内容类型选择模板再输出。Use when Codex receives source material and the user asks '帮我做笔记'、'提取重点'、'生成学习笔记'、'帮我总结'、'做个笔记'，或希望把长文、PDF摘录、网页内容、截图/OCR整理成笔记。Do not use for pure translation, direct Q&A, or raw tables/code/contracts/manuals that need specialized handling instead of forced note-taking."
+description: 将用户提供的文章、教程或混合材料整理为学习笔记；用于提炼要点和学习复盘，不用于纯翻译、直接问答或普通一句话摘要。
 ---
 
 # Study Notes
@@ -21,11 +21,12 @@ description: "将文章、教程、评论、新闻、故事、研究报告、框
 
 ## Read in order
 
-- 如果拿到了正文、OCR、标题或文件名，先跑路由脚本拿先验：
+- `scripts/` 路径从本技能目录解析，宿主提供时使用 `$CLAUDE_SKILL_DIR`，不依赖工作区当前目录。脚本只有实际可用且已授权时才运行。
+- 如果拿到了正文、OCR、标题或文件名，且脚本可执行，可跑路由脚本拿先验；否则根据实际正文选用下列参考资料，不假装已有脚本结果：
   - `python3 scripts/route_study_notes.py --prompt "<user request>" --text "<content excerpt>" --file "<name-or-path>" --hint "<ocr-or-caption>"`
   - Windows 兼容路径：`py -3 .\scripts\route_study_notes.py ...`
   - 把脚本结果当作路由先验，不要把它当成最终判断
-- 如果脚本返回 `modality_mismatch` 或 `insufficient_text`，不要继续写完整笔记
+- 如果脚本返回 `modality_mismatch` 或 `insufficient_text`，先核对实际材料；只有确实缺少可读正文时才阻断，不能仅凭关键词先验否决已有正文
 - 如果脚本 notes 出现 `length-hint mismatch`（声称长度远大于实际文本），按已提供的节选写，结尾标注"按节选整理；提供全文可做完整分层"，不要按声称长度规划分层
 - 按脚本置信度决定读哪些参考文件：
   - `confidence=high` 且人工通读后同意路由：跳过 route-matrix 和 complexity-rules（这层判断脚本已完成），直接读对应 method 文件

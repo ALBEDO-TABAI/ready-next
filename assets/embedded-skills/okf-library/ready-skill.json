@@ -2,7 +2,7 @@
   "id": "okf-library",
   "name": "okf-library",
   "displayName": "OKF Library",
-  "description": "盘点工作区内的 OKF 知识包，归并去重并沉淀进受控知识库目录",
+  "description": "盘点、去重和归并工作区中已有的多个 OKF 知识包；用于知识库治理，单批资料提炼由 okf-bundle 处理。",
   "version": "0.1.0",
   "runtime": "reference",
   "execution": { "mode": "advisory" },

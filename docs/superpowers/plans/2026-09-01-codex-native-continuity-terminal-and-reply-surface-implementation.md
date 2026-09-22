@@ -3,9 +3,13 @@ title: Codex 原生连续性、终态单线与回复呈现修复实施计划
 date: 2026-09-01
 status: proposed
 review_status: passed
-enforce: true
+enforce: false
 superseded_in_part_by: 2026-09-03-ready-history-continuation-and-composer-repair-implementation.md
+documentation_status: archived-in-place
+archived_at: 2026-09-06
 ---
+
+> 原位归档（2026-09-06）：固定历史证据仍引用此路径。保留此路径不代表全文仍是当前合同；其中的状态、源码位置和待办属于原记录。现行约束见 [当前运行时合同](../../architecture/current-runtime-contracts.md)，归档去向见 [文档清单](../../documentation-inventory.md)。
 
 # Codex 原生连续性、终态单线与回复呈现修复实施计划
 

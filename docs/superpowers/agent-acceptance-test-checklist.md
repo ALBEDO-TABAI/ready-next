@@ -1,3 +1,11 @@
+---
+enforce: false
+documentation_status: archived-in-place
+archived_at: 2026-09-06
+---
+
+> 原位归档（2026-09-06）：代码/检查引用：src/__tests__/agent-acceptance-checklist.test.ts。保留此路径不代表全文仍是当前合同；其中的状态、源码位置和待办属于原记录。现行约束见 [当前运行时合同](../architecture/current-runtime-contracts.md)，归档去向见 [文档清单](../documentation-inventory.md)。
+
 # Ready Agent 综合验收测试清单
 
 > 适用范围：人工验收 Ready 中 agent 对文档、图表、skill、浏览器、RSS、日历等模块的真实使用能力。

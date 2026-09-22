@@ -2,11 +2,15 @@
 title: P7c4 Browser Identity Policy Spike Implementation
 date: 2026-06-20
 branch: agent-evolution/phase1
-enforce: true
+enforce: false
 scope:
   - outputs/agent-audit/fix-plan/164-CONSENSUS-BROWSER-ISOLATION-SPECIALIST-PRODUCT-ROUTE.md
   - outputs/agent-audit/fix-plan/175-CONSENSUS-P8G9B-PROFESSIONAL-AGENT-DESIGNER-ROUTE.md
+documentation_status: archived-in-place
+archived_at: 2026-09-06
 ---
+
+> 原位归档（2026-09-06）：代码/检查引用：scripts/__tests__/check-p7c4-browser-identity-policy.test.cjs, scripts/check-p7c4-browser-identity-policy.cjs。保留此路径不代表全文仍是当前合同；其中的状态、源码位置和待办属于原记录。现行约束见 [当前运行时合同](../../architecture/current-runtime-contracts.md)，归档去向见 [文档清单](../../documentation-inventory.md)。
 
 # P7c4 Browser Identity Policy Spike
 

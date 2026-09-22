@@ -1,6 +1,6 @@
 ---
 name: surf-pro
-description: Run professional web research and source archiving for a user-provided search or investigation topic. Use when the user asks to search, research, collect sources, build a URL/image/text archive, track a topic long-term, or produce evidence-backed reports such as “调研…”, “搜集…”, “找相关网站/图片/案例/资料”, “建立资料库”, or “长期追踪网址清单”.
+description: 围绕专题开展网页调研并建立可追溯的本地资料库；用于多源证据归档与研究报告，不用于单次事实查询或单页阅读。
 category: analysis
 symbolName: magnifyingglass.circle.fill
 seedVersion: 1
@@ -14,13 +14,7 @@ The core principle is: **do not start by collecting random links**. Start by dec
 
 ## Trigger
 
-Use this skill when the user asks for any of the following:
-
-- “调研 / 搜集 / 查找 / 研究” a topic, industry, brand, product, style, creator, trend, platform, or cultural phenomenon.
-- “找相关网站 / 图片 / 案例 / 文章 / 报道 / 论坛 / 资料”.
-- “建立资料库 / 图文证据库 / 长期追踪网址清单 / source list”.
-- “把相关内容本地收录 / 下载图片 / 剪藏网页 / 做报告”.
-- “以后持续追踪这个方向”.
+Use this skill for a topic-level research package with traceable sources and local archiving. A single fact lookup, reading one article, or collecting a few links does not need this workflow. Include a tracking list only when the user requests ongoing source tracking; creating a list does not schedule monitoring.
 
 Examples:
 
@@ -33,7 +27,7 @@ Examples:
 
 A good Surf Pro run produces a local, auditable research package, not only a chat answer.
 
-Minimum deliverables:
+Choose deliverables that serve the requested package; scope, traceable evidence and findings are required, while image archives and tracking plans depend on the task:
 
 1. Research scope and mechanism map.
 2. Search query matrix and discovery log.
@@ -64,7 +58,7 @@ Define:
 
 ### 2. Build a mechanism map before searching
 
-Turn the topic into 5-20 mechanisms, dimensions, or evidence buckets. This prevents shallow link hoarding.
+Identify the dimensions needed to answer the research question. Let the topic and evidence determine their number; do not pad a small task to meet a quota.
 
 A mechanism can be:
 
@@ -92,7 +86,7 @@ Example for fashion styling:
 
 ### 3. Create a search-source strategy
 
-Do not use only generic web search. Combine four discovery routes:
+Choose the discovery routes needed for coverage; add another when it resolves an evidence gap:
 
 1. **Seed authority sources**: start from known authoritative sources in the domain.
    - Fashion examples: Vogue Runway, The Impression, SHOWstudio, WWD, BoF, official brand collection/lookbook/campaign pages.
@@ -161,7 +155,7 @@ A long-term URL should usually be an archive, column, brand collection path, cam
 
 Do not stop because the list “feels enough”. Stop when the stop table is satisfied.
 
-Default stop criteria: mechanisms covered; core mechanisms have A/B authority; source types are represented; local images/text are traceable; recurring URLs exist; extra rounds add mostly repeats; D sources are rejected; a teammate can continue from the package.
+Stop when the agreed questions have supporting evidence, requested archived assets are traceable, and remaining uncertainty is explicit. Require recurring URLs only for a tracking task. Expand search for a concrete unresolved question; do not add rounds once the requested coverage is satisfied.
 
 If these are not satisfied, do not call the research complete. Mark gaps explicitly.
 
@@ -212,11 +206,11 @@ Reject or downgrade:
 
 ### 10. Use browser and web tools appropriately
 
-Use browser automation when the task requires interacting with real webpages, visual inspection, scrolling, lazy-loaded images, or page screenshots. Read the `browser-v2` skill before first browser use in a task.
+Use the environment's available browser tools when the task requires interaction, visual inspection, scrolling, lazy-loaded images, or screenshots. Follow their actual instructions; do not require an unavailable `browser-v2` skill.
 
 Use WebSearch/WebFetch or local scripts when they are enough for source discovery, metadata extraction, and text clipping.
 
-For private/authenticated sources, do not use generic web fetch blindly; ask for permission and use appropriate authenticated tools if available.
+For private/authenticated sources, use available authenticated tools within the user's existing request and authorization. Ask only when access or the intended use is not yet authorized; never infer permission to publish from permission to read.
 
 ### 11. Final acceptance index
 

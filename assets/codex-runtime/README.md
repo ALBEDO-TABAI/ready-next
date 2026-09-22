@@ -1,7 +1,11 @@
-# Codex runtime source snapshot
+# Ready pinned Codex runtime
+
+Verified against the checkout on 2026-09-06: Codex 0.149.0, macOS arm64.
+The manifest and source lock are authoritative; a protocol study of a newer
+version does not upgrade this runtime.
 
 This directory pins the public Codex artifact and the protocol contracts used by
-the Ready replacement experiment. It intentionally does not contain the runtime
+the current Ready production host and the retained replacement-experiment evidence. It intentionally does not contain the runtime
 binary. Development uses the ignored path
 `build/codex/aarch64-apple-darwin/codex`; packaging may only copy a binary after
 its digest matches `source-lock.json` and `runtime-manifest.json`.
@@ -28,3 +32,14 @@ records the developer-role form; `native-protocol-capture.json` records the
 contextual-user form. Both deliberately preserve the observed failing second
 turn in which `RESOURCE_V1` remains beside `RESOURCE_V2`; this is evidence, not
 a passing fixture.
+
+Current history compatibility also uses `assets/runtime-continuity/`: source
+and target manifest evidence is evaluated per operation. The same version
+number, a newer schema, or one successful operation cannot authorize all
+continuation, fork, reseed and compaction operations.
+
+The experiment phase reports and original protocol captures remain historical
+evidence. Their recorded failures are not rewritten as passing results. Current
+product contracts and validation boundaries are documented in
+[the runtime contract](../../docs/architecture/current-runtime-contracts.md)
+and [current progress](../../PROGRESS.md).

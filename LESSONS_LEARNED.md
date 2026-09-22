@@ -1,7 +1,7 @@
 # Ready 经验文档
 
-> 更新时间：2026-07-12
-> 这里只保留跨阶段仍有效的经验。完整事故记录已归档到 `docs/archive/lessons-full-before-2026-07-12-cleanup.md`，专项证据见 `docs/diagnostics/`、`docs/performance/` 与 `docs/superpowers/audits/`。
+> 核对日期：2026-09-06
+> 这里只保留跨阶段仍有效的经验。完整事故记录已归档到 `docs/archive/lessons-full-before-2026-07-12-cleanup.md`，历史证据的原位保留与迁移去向见 `docs/documentation-inventory.md`。
 
 ## 1. 先取证，再定根因
 
@@ -64,6 +64,10 @@ legacy union、双写、兼容分支和“暂时保留”都会制造第二真�
 
 native ABI 不匹配会伪装成设置丢失、历史空白、scope not found 或前端状态异常。涉及本地持久化先跑 `npm run verify:native`；普通 Node skip 不算通过。
 
+### 3.4 历史事实不等于当前动作
+
+历史创建种类不会随一次成功重播改变，但下一轮是否还需重播必须读当前覆盖状态。升级时未知仍保持未知；新请求的严格证据要求不能反向套到旧记录并补造事实。接续、恢复和重试的每个界面与执行入口要消费同一当前资格。
+
 ## 4. Agent、工具与 Skill
 
 ### 4.1 错误回灌要结构化
@@ -76,7 +80,7 @@ typed envelope 与授权层是第一信源。一个输入可能同时命中文�
 
 ### 4.3 长任务必须有 durable handle
 
-只有 taskRunId/skillId 的空壳无法续跑。child run、detached task 或 outputDir/run-state 必须能跨刷新和重启定位；父循环不复制子循环状态机。
+历史任务需要真实句柄才能定位、读产物或精确取消；只有 taskRunId/skillId 不足以建立恢复资格。当前 Codex 不提供公开 child/detached 续跑，不能把句柄存在解释成可继续按钮。
 
 ### 4.4 模型只做语义判断
 
@@ -128,7 +132,11 @@ Mac 与 Windows 只同步源码、配置和必要资产；依赖与 native 模�
 
 DMG/安装包存在只证明产物生成。还要挂载/安装、启动、核对版本、资源与 native gate；按需 runtime 没进包体时必须如实说明置备路径。
 
-### 7.3 每个模态面都是无人值守挂点
+### 7.3 发布记录必须绑定实际源码
+
+版本号和 Git HEAD 无法区分两次不同的未提交构建。源码在编译前冻结，编译输出和最终包沿同一记录核对，复制包时转交原记录；之后修改文档或源码不能反过来给旧包补造新来源。
+
+### 7.4 每个模态面都是无人值守挂点
 
 新增确认卡、权限 sheet、文件选择器或接管横幅时，同时定义：
 

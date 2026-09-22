@@ -2,7 +2,7 @@
   "id": "okf-bundle",
   "name": "okf-bundle",
   "displayName": "OKF Bundle",
-  "description": "把指定范围的资料提炼成符合 OKF v0.1 规范的单个知识包，并登记到工作区母题索引",
+  "description": "将指定的一批资料提炼为单个 OKF 知识包；用于知识沉淀，多包盘点与合并由 okf-library 处理。",
   "version": "0.1.0",
   "runtime": "reference",
   "execution": { "mode": "advisory" },

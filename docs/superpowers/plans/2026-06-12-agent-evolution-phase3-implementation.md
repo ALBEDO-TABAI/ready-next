@@ -24,12 +24,14 @@ note: >
   typecheck，单单 ≤约 300 行 diff、单独 commit、不顺手重构。
   里程碑（00 §4）：主 agent 会提议接手；候选卡进意图流；复合任务有分派合同。
 pairs_with:
-  - docs/agent-evolution/00-路线图与目标架构总览.md（阶段三范围）
-  - docs/agent-evolution/08-缺陷解决映射与验收追踪.md（验收脊柱，工单合入后回填）
+  - docs/archive/2026-09-06/docs/agent-evolution/00-路线图与目标架构总览.md（阶段三范围）
+  - docs/archive/2026-09-06/docs/agent-evolution/08-缺陷解决映射与验收追踪.md（验收脊柱，工单合入后回填）
 related:
-  - docs/superpowers/plans/2026-06-11-agent-evolution-phase2-implementation.md（approved v7 基线；遗留轨工单定义以其为准）
+  - docs/archive/2026-09-06/docs/superpowers/plans/2026-06-11-agent-evolution-phase2-implementation.md（approved v7 基线；遗留轨工单定义以其为准）
   - docs/agent-evolution/03/04/05/09/10/11（本阶段工单的设计出处）
 ---
+
+> 2026-09-06 文档核对：本文保留当前仍使用的专项合同及原验收记录；后文的日期、阶段状态和现场缺口按原记录理解，不据此推导今天全部已验收或仍未实现。当前应用边界以 [运行时合同](../../architecture/current-runtime-contracts.md) 为准，近期状态见 [PROGRESS](../../../PROGRESS.md)。
 
 # Agent Evolution 阶段三实施子计划
 

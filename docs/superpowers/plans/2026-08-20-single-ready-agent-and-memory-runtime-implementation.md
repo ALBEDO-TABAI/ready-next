@@ -6,7 +6,7 @@ review_status: evidence_backed
 enforce: true
 depends_on:
   - docs/architecture/current-runtime-contracts.md
-  - docs/superpowers/plans/2026-08-11-ready-codex-matrix-wiring-closure-implementation.md
+  - docs/archive/2026-09-06/docs/superpowers/plans/2026-08-11-ready-codex-matrix-wiring-closure-implementation.md
 evidence_inputs:
   - path: /Applications/ChatGPT Matrix Runtime.app/Contents/Resources/codex
     codex_version: 0.148.0-alpha.15
@@ -21,6 +21,8 @@ note: >
   本合同先完成旧 Agent、专项能力和伪接线记忆面的退役，再定义 Ready 后续长期记忆的唯一实现。
   Matrix 只作为同形宿主的设计证据；Ready 不直接共享其 CODEX_HOME、数据库、凭证或后台费用。
 ---
+
+> 2026-09-06 文档核对：本文保留当前仍使用的专项合同及原验收记录；后文的日期、阶段状态和现场缺口按原记录理解，不据此推导今天全部已验收或仍未实现。当前应用边界以 [运行时合同](../../architecture/current-runtime-contracts.md) 为准，近期状态见 [PROGRESS](../../../PROGRESS.md)。
 
 # Ready 单一 Agent 与长期记忆运行时实施合同
 

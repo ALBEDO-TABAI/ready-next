@@ -7,7 +7,11 @@ enforce: false
 scope: documentation-only
 depends_on:
   - docs/superpowers/audits/2026-07-12-file-emergence-tag-forge-current-state.md
+documentation_status: archived-in-place
+archived_at: 2026-09-06
 ---
+
+> 原位归档（2026-09-06）：固定历史证据仍引用此路径。保留此路径不代表全文仍是当前合同；其中的状态、源码位置和待办属于原记录。现行约束见 [当前运行时合同](../../architecture/current-runtime-contracts.md)，归档去向见 [文档清单](../../documentation-inventory.md)。
 
 # 文件涌现持续工作预测与 Tag Forge 接入优化路线
 

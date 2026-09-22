@@ -3,7 +3,7 @@ title: Ready Durable Agent 与 Browser Runtime 目标架构
 date: 2026-07-24
 kind: target-architecture
 status: owner-approved-for-implementation
-enforce: true
+enforce: false
 owner: 白
 author: Codex
 approval:
@@ -29,7 +29,11 @@ supersedes_when_implemented:
   - 基于关键词排除能力域的主导意图路由
   - 依赖完整 SDK history 的 Browser 长任务续作
 scope: Agent kernel、意图与计划、工具运行时、上下文、续作、Browser session/target、工作账本、终态与可观测性
+documentation_status: archived-in-place
+archived_at: 2026-09-06
 ---
+
+> 原位归档（2026-09-06）：固定历史证据仍引用此路径。保留此路径不代表全文仍是当前合同；其中的状态、源码位置和待办属于原记录。现行约束见 [当前运行时合同](../../architecture/current-runtime-contracts.md)，归档去向见 [文档清单](../../documentation-inventory.md)。
 
 # Ready Durable Agent 与 Browser Runtime 目标架构
 

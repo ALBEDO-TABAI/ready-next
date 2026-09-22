@@ -12,7 +12,11 @@ requires:
   - docs/superpowers/plans/2026-07-10-agent-foundation-remediation-implementation.md（AF-0..AF-7 全绿）
 pairs_with:
   - docs/superpowers/plans/2026-07-09-boost-dynamic-workflow-implementation.md
+documentation_status: archived-in-place
+archived_at: 2026-09-06
 ---
+
+> 原位归档（2026-09-06）：固定历史证据仍引用此路径。保留此路径不代表全文仍是当前合同；其中的状态、源码位置和待办属于原记录。现行约束见 [当前运行时合同](../../architecture/current-runtime-contracts.md)，归档去向见 [文档清单](../../documentation-inventory.md)。
 
 # Dynamic Delivery v3：Agent 原生的单轮协作交付
 

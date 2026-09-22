@@ -6,7 +6,11 @@ enforce: false
 note: >
   这三项在 2026-07-03 夜间自主推进中被有意暂缓（renderer/中枢/删除类高危，
   无人值守不宜动），非遗漏。根因均已确认、修法已定，留待可监控会话按此实施。
+documentation_status: archived-in-place
+archived_at: 2026-09-06
 ---
+
+> 原位归档（2026-09-06）：代码/检查引用：scripts/__tests__/check-mandated-capability-is-live.test.cjs, scripts/check-mandated-capability-is-live.cjs。保留此路径不代表全文仍是当前合同；其中的状态、源码位置和待办属于原记录。现行约束见 [当前运行时合同](../../architecture/current-runtime-contracts.md)，归档去向见 [文档清单](../../documentation-inventory.md)。
 
 # D1 — 标签不显示（P1-b）
 

@@ -1,3 +1,11 @@
+---
+enforce: false
+documentation_status: archived-in-place
+archived_at: 2026-09-06
+---
+
+> 原位归档（2026-09-06）：固定历史证据仍引用此路径。保留此路径不代表全文仍是当前合同；其中的状态、源码位置和待办属于原记录。现行约束见 [当前运行时合同](../../architecture/current-runtime-contracts.md)，归档去向见 [文档清单](../../documentation-inventory.md)。
+
 # Skill Run Contract And Long Skill Ownership Implementation Plan
 
 > **VEA superseded by 2026-04-30 child-loop route.**
@@ -17,7 +25,7 @@
 
 **Goal:** Make recoverable long skills resume from an explicit, durable run contract instead of scattered hints, stale projections, or model-side file inspection.
 
-**Architecture:** Keep `TurnFrame` as the per-turn coordinator from `2026-04-29-skill-runtime-main-loop-consolidation-route.md`, but add a durable `SkillRunContract` as the source of truth for action input, artifact roots, liveness, progress, and resume handles. Tool results may patch the current frame, but cross-turn recovery must persist through the contract and projection/task-run state, then derive deterministic `FrameAction` input from that contract.
+**Architecture:** Keep `TurnFrame` as the per-turn coordinator from `../../archive/2026-09-06/docs/superpowers/plans/2026-04-29-skill-runtime-main-loop-consolidation-route.md`, but add a durable `SkillRunContract` as the source of truth for action input, artifact roots, liveness, progress, and resume handles. Tool results may patch the current frame, but cross-turn recovery must persist through the contract and projection/task-run state, then derive deterministic `FrameAction` input from that contract.
 
 **Tech Stack:** Electron main process, TypeScript, SQLite/better-sqlite3, embedded skill manifests, Zod tool schemas, skill primitive tools, VEA as the regression fixture.
 
@@ -28,7 +36,7 @@
 The previous route owns main-loop consolidation:
 
 ```text
-docs/superpowers/plans/2026-04-29-skill-runtime-main-loop-consolidation-route.md
+docs/archive/2026-09-06/docs/superpowers/plans/2026-04-29-skill-runtime-main-loop-consolidation-route.md
 ```
 
 Its Stage 5-7 target was:

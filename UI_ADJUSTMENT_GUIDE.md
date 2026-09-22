@@ -1,7 +1,7 @@
 # UI 调整导览
 
-> 更新时间：2026-07-12
-> 目标：先定位状态拥有者、壳层和回归入口，再修改 UI。详细视觉原则见 `PRODUCT.md`（若已纳入工作区）与对应规格，不在本文件复制阶段设计稿。
+> 核对日期：2026-09-06
+> 目标：先定位状态拥有者、壳层和回归入口，再修改 UI。详细视觉原则见 `PRODUCT.md` 与当前运行时合同，不在本文件复制历史设计稿。
 
 ## 1. 工作台壳层
 
@@ -52,6 +52,8 @@ BrowserView 是原生覆盖层。弹层、hover flyout 和模式切换问题先�
 - 编辑/预览：`src/renderer/components/document/`
 - 状态：`src/renderer/stores/useDocTabs.ts`
 - Widget 主题与结构：`src/shared/document-widget-theme.ts`、`src/shared/document-widget-skeletons.ts`
+- 书本阅读组件：`src/renderer/components/document/book/`；分页、翻页和偏好：`src/renderer/modules/document/book/`
+- 阅读样式：`src/renderer/styles/document-book.css`、`src/renderer/styles/document-book-controls.css`；验证：`npm run verify:document-reading`
 
 Widget 视觉不能在组件内另造色板；预览、导出和编辑必须从结构真值重编译。
 
@@ -80,8 +82,12 @@ Widget 视觉不能在组件内另造色板；预览、导出和编辑必须从�
 | 工具时间线 | `src/renderer/components/agent/chat-panel/task/ToolTimeline.tsx` |
 | 工具快照 | `src/renderer/components/agent/chat-panel/task-snapshot/TaskToolSnapshot.tsx` |
 | 状态 | `src/renderer/stores/useAgent.ts` |
+| 草稿与编辑/发送边界 | `src/renderer/modules/agent/composer-state.ts`、`src/renderer/components/agent/ChatInput.tsx` |
+| 上下文用量 | `src/renderer/components/agent/chat-panel/ContextUsageMeter.tsx` |
 
 任务卡和工具时间线只呈现 projection/runtime 真值，不在组件里推断完成或后台运行。输入框是底部浮层，消息列表尾部必须按实测高度留白；液态玻璃以真实 Electron 聊天记录验收。
+
+历史上下文阻断只限制发送，不锁草稿编辑。重试、停止和开始新上下文都消费 Main 当前动作；只有重置/关闭这类所有权变更短暂锁编辑。当前产品不显示 Agent 选择器或旧子任务继续按钮。
 
 ## 5. Settings
 
@@ -89,6 +95,8 @@ Widget 视觉不能在组件内另造色板；预览、导出和编辑必须从�
 - 共用组件：`src/renderer/components/settings/`
 - 共用 token：`src/renderer/components/settings/settings-theme.ts`
 - Tag Forge：`src/renderer/pages/settings/TagForgeSettingsPanel.tsx`
+- 长期记忆：`src/renderer/pages/settings/ReadyMemorySettingsPanel.tsx`（自动整理当前禁用）
+- 微信/飞书：`src/renderer/components/settings/RemoteIMSettingsPanel.tsx`
 - 状态：`src/renderer/stores/useSettings.ts`
 
 设置页左侧不堆大卡片底板；输入、按钮、只读槽优先复用共用 token。新增持久设置必须同时核对 Main、Preload、Renderer 类型和 native DB 验证。

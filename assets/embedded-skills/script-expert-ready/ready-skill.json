@@ -2,7 +2,7 @@
   "id": "script-expert-ready",
   "name": "script-expert-ready",
   "displayName": "Script Expert Ready",
-  "description": "将成熟故事转化为可拍摄执行的影视剧本、分镜方案、镜头信息卡和数字资产清单",
+  "description": "将成熟故事改编或修订为影视剧本，或从已有剧本生成分镜、镜头信息卡和资产清单；只执行用户需要的交付环节。",
   "version": "0.5.0",
   "runtime": "reference",
   "execution": { "mode": "advisory" },

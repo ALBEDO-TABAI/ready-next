@@ -3,7 +3,7 @@ title: Ready Durable Agent Runtime 重构实施计划
 date: 2026-07-24
 kind: implementation
 status: approved-for-implementation
-enforce: true
+enforce: false
 owner: 白
 author: Codex
 approval:
@@ -19,7 +19,7 @@ review:
 requires:
   - docs/superpowers/specs/2026-07-24-ready-agent-browser-target-architecture.md
   - docs/superpowers/plans/2026-07-22-agent-plan-execute-policy-hooks-and-branching-runtime-design.md
-  - docs/superpowers/plans/2026-07-23-provider-checkpoint-session-integrity-remediation-implementation.md
+  - docs/archive/2026-09-06/docs/superpowers/plans/2026-07-23-provider-checkpoint-session-integrity-remediation-implementation.md
   - docs/superpowers/testing-conventions.md
 paired_plan:
   - docs/superpowers/plans/2026-07-24-browser-unattended-research-implementation.md
@@ -29,7 +29,11 @@ adjudicates:
   - 复用 2026-07-22 ExecutionPlan 及其 attempt/call/budget/candidate/recovery ledgers；禁止新建通用 WorkItem、ToolCall 或候选双轨
   - A6 不得单独合并，必须与 Browser B6 同一 gate、同一提交边界完成
 scope: Task/Turn/Item 生命周期、IntentFrame、资源充分性、07-22 ExecutionPlan 接入、Tool Broker、Artifact/Evidence、Context Builder、Supervisor 自动恢复、统一续作、联合生产切换
+documentation_status: archived-in-place
+archived_at: 2026-09-06
 ---
+
+> 原位归档（2026-09-06）：固定历史证据仍引用此路径。保留此路径不代表全文仍是当前合同；其中的状态、源码位置和待办属于原记录。现行约束见 [当前运行时合同](../../architecture/current-runtime-contracts.md)，归档去向见 [文档清单](../../documentation-inventory.md)。
 
 # Ready Durable Agent Runtime 重构实施计划
 
@@ -792,7 +796,7 @@ A0–A5 内部可以按 fixture、lifecycle store、IntentFrame、ExecutionPlan 
 | authorization/action journal | 原样复用普通工具 allow/result/effect；不新增 `agent_tool_calls` | A4/B4 |
 
 - 07-22 与本文在 owner 明确批准合并实施前互斥：不得分别建立分支并各自建表。本文通过对抗审查只代表文档无自相矛盾，不自动取得生产开发授权。
-- `2026-07-23-provider-checkpoint-session-integrity-remediation-implementation.md` 中 P10–P15 仍是当前 live runtime 的近期收口，不因本文自动取消。
+- `../../archive/2026-09-06/docs/superpowers/plans/2026-07-23-provider-checkpoint-session-integrity-remediation-implementation.md` 中 P10–P15 仍是当前 live runtime 的近期收口，不因本文自动取消。
 - 若新 kernel 尚未开工，先完成其已授权且必要的 canonical/checkpoint 修复，避免现有用户继续踩坑。
 - 一旦 A6+B6 联合切换，新 kernel 的 terminal transaction 取代旧 run/projection/Browser child 收口；届时同步把 07-22 与本文标为 implemented-by-runtime。
 - 07-22 Browser 顺序收口中已完成的 target claim、typed checkpoint 和 takeover 证据应迁入新 Browser adapter，不复活 surface 级旧 lease。

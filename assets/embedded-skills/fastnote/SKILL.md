@@ -1,6 +1,6 @@
 ---
 name: fastnote
-description: 笔记快捷模式路由方法论。把 IM-style 混合输入（短文本 / 链接 / 图片 / 视频 / 音频 / 文件）按触发深度档位分发到合适的下游能力（剪藏 → study-notes / image-analysis-router / video-copy-analyzer / video-expert-analyzer），并落到用户指定的工作区。Use when the user uses `-/:` / `-/2:` quick-mode triggers in chat or remote IM channels, or asks you to "快速记一笔 / 深度学这条 / 把这条 IM 消息处理成笔记". Do not use for direct content generation, single-tool calls without dispatch logic, or workflow already managed by another orchestrator.
+description: 将快捷指令 -/:、-/2: 或明确的快速记笔记请求整理为工作区笔记；按材料类型和所需深度选择处理方法。
 ---
 
 # FastNote

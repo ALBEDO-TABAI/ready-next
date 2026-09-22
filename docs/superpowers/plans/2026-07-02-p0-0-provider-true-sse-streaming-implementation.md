@@ -2,13 +2,17 @@
 title: P0-0 Provider True SSE Streaming Implementation
 date: 2026-07-02
 status: implementation
-enforce: true
+enforce: false
 source:
-  - docs/superpowers/plans/2026-07-02-agent-core-experience-diagnosis.md（§4 修正版：伪流式主因）
-  - docs/superpowers/plans/2026-07-02-agent-core-experience-roadmap.md（P0-0）
+  - docs/archive/2026-09-06/docs/superpowers/plans/2026-07-02-agent-core-experience-diagnosis.md（§4 修正版：伪流式主因）
+  - docs/archive/2026-09-06/docs/superpowers/plans/2026-07-02-agent-core-experience-roadmap.md（P0-0）
   - src/main/modules/agent-control/runtime-core/agent-sdk-provider.ts
   - node_modules/@openai/agents-core/dist/types/protocol.d.ts（StreamEvent 判别联合）
+documentation_status: archived-in-place
+archived_at: 2026-09-06
 ---
+
+> 原位归档（2026-09-06）：代码/检查引用：src/__tests__/agent-sdk-provider-sse.test.ts。保留此路径不代表全文仍是当前合同；其中的状态、源码位置和待办属于原记录。现行约束见 [当前运行时合同](../../architecture/current-runtime-contracts.md)，归档去向见 [文档清单](../../documentation-inventory.md)。
 
 # P0-0：Provider 模型层真 SSE 流式
 

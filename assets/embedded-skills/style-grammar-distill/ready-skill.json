@@ -2,7 +2,7 @@
   "id": "style-grammar-distill",
   "name": "style-grammar-distill",
   "displayName": "Style Grammar Distill",
-  "description": "聚合多份图片分析报告，提炼带证据与置信度的视觉风格语法。",
+  "description": "聚合同一作者或视觉体系的多份图像分析，提炼有证据的风格规则；不用于单图评价或生成下游技能。",
   "version": "0.1.0",
   "runtime": "reference",
   "execution": { "mode": "advisory" },

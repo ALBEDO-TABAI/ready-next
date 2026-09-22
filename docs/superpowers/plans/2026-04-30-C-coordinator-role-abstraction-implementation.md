@@ -2,9 +2,13 @@
 name: C — Coordinator Role 抽象（DomainAdapter v2）
 description: v3 路线 C 阶段实施计划。把 TRIGGERS / 工具过滤 / 仲裁规则从 turn-engine + prompt-assembly 中挤出，下沉到每个 DomainAdapter 内部；新增 contributePromptFragment / arbitrateRunCapabilities / decorateUserText 三个方法；CI 强制 turn-engine 不再持有产品身份。
 status: draft
-enforce: true
-counter_proposal: 2026-04-30-skill-runtime-agent-layer-reframe.md
+enforce: false
+counter_proposal: ../../archive/2026-09-06/docs/superpowers/plans/2026-04-30-skill-runtime-agent-layer-reframe.md
+documentation_status: archived-in-place
+archived_at: 2026-09-06
 ---
+
+> 原位归档（2026-09-06）：固定历史证据仍引用此路径。保留此路径不代表全文仍是当前合同；其中的状态、源码位置和待办属于原记录。现行约束见 [当前运行时合同](../../architecture/current-runtime-contracts.md)，归档去向见 [文档清单](../../documentation-inventory.md)。
 
 # C — Coordinator Role 抽象（实施计划）
 
@@ -298,7 +302,7 @@ C 绝对不进 `skill-child-runner.ts` / `skill-child-sub-agent*.ts`（这些是
 
 **Owner**：general-purpose 1 人，0.5 天
 
-**输出文件**：`docs/superpowers/plans/2026-04-30-C-pre-flight-audit-report.md`
+**输出文件**：`docs/archive/2026-09-06/docs/superpowers/plans/2026-04-30-C-pre-flight-audit-report.md`
 
 **任务**：
 1. 跑 `git grep -nP "\.id\s*===\s*['\"](browser|document|skill|rss|calendar|feishu)['\"]" src/main/modules/agent-control/turn-engine.ts`，列出每条 hit。
@@ -519,7 +523,7 @@ C 绝对不进 `skill-child-runner.ts` / `skill-child-sub-agent*.ts`（这些是
      全部显式实现 contributePromptFragment / arbitrateRunCapabilities / decorateUserText。
    ```
 2. **`AGENTS.md`** 同步条目（CLAUDE.md §12 要求两份保持同步）。
-3. **`docs/superpowers/plans/2026-04-30-skill-runtime-agent-layer-reframe.md` §5.1 表**：把 C 行从 "3-5 天" 状态改为 `[x] completed YYYY-MM-DD`。
+3. **`docs/archive/2026-09-06/docs/superpowers/plans/2026-04-30-skill-runtime-agent-layer-reframe.md` §5.1 表**：把 C 行从 "3-5 天" 状态改为 `[x] completed YYYY-MM-DD`。
 
 **完成判据**：
 - CLAUDE.md / AGENTS.md 同步。
@@ -603,13 +607,13 @@ npm run verify:c
 - `package.json`（W6 加 verify:c）
 - `CLAUDE.md` §6.14（W7）
 - `AGENTS.md`（W7）
-- `docs/superpowers/plans/2026-04-30-skill-runtime-agent-layer-reframe.md` §5.1（W7）
+- `docs/archive/2026-09-06/docs/superpowers/plans/2026-04-30-skill-runtime-agent-layer-reframe.md` §5.1（W7）
 
 新建：
 - `scripts/__tests__/check-coordinator-isolation.test.cjs`（W6）
 - `scripts/check-coordinator-isolation.cjs`（W6）
 - `src/__tests__/coordinator-contract.test.ts`（W1）
-- `docs/superpowers/plans/2026-04-30-C-pre-flight-audit-report.md`（W0）
+- `docs/archive/2026-09-06/docs/superpowers/plans/2026-04-30-C-pre-flight-audit-report.md`（W0）
 
 ---
 
@@ -680,7 +684,7 @@ npm run verify:c
 
 ## 10. 文档维护
 
-- C 完成后更新 `2026-04-30-skill-runtime-agent-layer-reframe.md` §5.1 的 C 行状态。
+- C 完成后更新 `../../archive/2026-09-06/docs/superpowers/plans/2026-04-30-skill-runtime-agent-layer-reframe.md` §5.1 的 C 行状态。
 - 如 W2-W5 任何一个 worker 实施时发现本计划与现实不符，**优先**修计划 + 在计划里加 implementation_amendment frontmatter 字段，不就地"算了"。
 - 不复制 B 计划的 audit-patch 模式（C 第一版即定稿，因 DomainAdapter 已有底盘）。如有 codex audit 修订，append amendment block，不修主文。
 

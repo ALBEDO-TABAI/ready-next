@@ -7,9 +7,11 @@ owner: 白
 reviewed_by: Codex
 depends_on:
   - docs/architecture/current-runtime-contracts.md
-  - docs/superpowers/plans/2026-07-15-document-open-latency-implementation.md
-  - docs/superpowers/plans/2026-07-17-document-mode-performance-audit.md
+  - docs/archive/2026-09-06/docs/superpowers/plans/2026-07-15-document-open-latency-implementation.md
+  - docs/archive/2026-09-06/docs/superpowers/plans/2026-07-17-document-mode-performance-audit.md
 ---
+
+> 2026-09-06 文档核对：本文保留当前仍使用的专项合同及原验收记录；后文的日期、阶段状态和现场缺口按原记录理解，不据此推导今天全部已验收或仍未实现。当前应用边界以 [运行时合同](../../architecture/current-runtime-contracts.md) 为准，近期状态见 [PROGRESS](../../../PROGRESS.md)。
 
 # 文档模式性能与多面负载实施合同
 

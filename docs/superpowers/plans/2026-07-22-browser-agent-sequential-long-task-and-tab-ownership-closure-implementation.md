@@ -3,7 +3,7 @@ title: Browser Agent 单 Agent 长任务与标签页所有权收口实施计划
 date: 2026-07-22
 kind: implementation
 status: approved-for-implementation
-enforce: true
+enforce: false
 owner: 白
 author: Codex
 implementation_gate: approved-2026-07-22（白确认，范围=roadmap 裁决版）
@@ -11,10 +11,10 @@ scope: 单 Parent Owner、顺序 Browser 执行、物理标签页所有权、用
 blocked_followup:
   - docs/superpowers/plans/2026-07-22-agent-plan-execute-policy-hooks-and-branching-runtime-design.md
 supersedes:
-  - docs/superpowers/plans/2026-07-18-browser-agent-grounded-orchestration-and-capability-closure-implementation.md 的未通过实施门与后续追加收口
-  - docs/superpowers/plans/2026-06-04-browser-collection-subagent-implementation.md 的旧 runner 与 surface lease 实施路径
-  - docs/superpowers/plans/2026-06-04-agent-self-serve-browser-collection-implementation.md 的旧授权与站点策略实施路径
-  - docs/superpowers/plans/2026-06-04-agent-browser-visible-crawler-implementation.md 的旧双浏览器实施路径
+  - docs/archive/2026-09-06/docs/superpowers/plans/2026-07-18-browser-agent-grounded-orchestration-and-capability-closure-implementation.md 的未通过实施门与后续追加收口
+  - docs/archive/2026-09-06/docs/superpowers/plans/2026-06-04-browser-collection-subagent-implementation.md 的旧 runner 与 surface lease 实施路径
+  - docs/archive/2026-09-06/docs/superpowers/plans/2026-06-04-agent-self-serve-browser-collection-implementation.md 的旧授权与站点策略实施路径
+  - docs/archive/2026-09-06/docs/superpowers/plans/2026-06-04-agent-browser-visible-crawler-implementation.md 的旧双浏览器实施路径
 deferred_goal: 上述三份 2026-06-04 文档中的 Browser 子 Agent 功能目标没有被本计划交付；它被推迟到长任务架构与单 Agent 验收全部通过后的独立计划
 requires:
   - docs/superpowers/audits/2026-07-22-browser-agent-long-task-root-cause-and-evidence.md
@@ -27,7 +27,11 @@ review:
   adjudication: docs/superpowers/plans/2026-07-22-agent-long-task-remediation-roadmap.md
   scope_delta: S3 收缩为 S3-min（定稿见 S3 章节）；§1.5 四张持久表移交架构计划 P3、§1.5.1 请求账本移交 P1；新增 §1.8 默认路由
   approved: 2026-07-22 白确认三项决策（S3-min / §1.8 默认路由 / L-1 选项 A）
+documentation_status: archived-in-place
+archived_at: 2026-09-06
 ---
+
+> 原位归档（2026-09-06）：固定历史证据仍引用此路径。保留此路径不代表全文仍是当前合同；其中的状态、源码位置和待办属于原记录。现行约束见 [当前运行时合同](../../architecture/current-runtime-contracts.md)，归档去向见 [文档清单](../../documentation-inventory.md)。
 
 # Browser Agent 单 Agent 长任务与标签页所有权收口实施计划
 

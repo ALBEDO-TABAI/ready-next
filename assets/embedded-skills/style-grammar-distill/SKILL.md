@@ -1,6 +1,6 @@
 ---
 name: style-grammar-distill
-description: 风格语法提炼器（四层图像分析框架的上层 · Stage A）。输入同一位摄影师/美术指导（或同一视觉体系）的**多份** image-reverse-describe + image-deep-read 分析报告，通过跨报告的**共同点/不同点交叉聚合 + 抽象阶梯**，把"表面反复出现的特征"区分为四类——真实作者签名 / 条件性规则（goal→choice 映射）/ 受 brief 或类型默认驱动的噪声 / 例外——并爬到更高抽象层去找"表面差异底下的更大共性"，最终提炼出一份带覆盖度与置信度的**风格语法指引文件**，供下游 skill 生成器（Stage B）使用。Use when the user has several completed image analyses of one author/corpus and wants to distill the recurring picture-construction logic—the style grammar/visual language—rather than describe or judge any single image. 触发短语："提炼这位摄影师的风格""把这几份报告聚合成风格语法""找出他们画面搭建的共性""做一份美术指引文件""style grammar""风格提炼""Stage A""交叉聚合分析"。强制纪律：一条特征只有跨**多样**语料反复出现、且能与 brief/类型默认区分开，才算签名；表面不同时必须往上爬抽象层找更大共性，但不得爬到"他们会做图"这种无约束的空泛层；语料不够多样时必须标注污染与置信度，**宁可报告"此语料提炼不出非平庸的风格语言",也不许编造一个签名**。Do not use this on a single image (use image-deep-read), and do not use it to generate the downstream style skill itself (that is Stage B).
+description: 聚合同一作者或视觉体系的多份图像分析，提炼有证据的风格规则；不用于单图评价或生成下游技能。
 ---
 
 # Style-Grammar Distill（风格语法提炼 · Stage A）
@@ -27,7 +27,7 @@ description: 风格语法提炼器（四层图像分析框架的上层 · Stage 
 
 ## 核心方法:交叉聚合 + 抽象阶梯
 
-这是本 skill 的中枢,详见 [references/aggregation-method.md](./references/aggregation-method.md)。骨架:
+这是本 skill 的中枢,详见 [reference/aggregation-method.md](./reference/aggregation-method.md)。骨架:
 
 1. **对齐成矩阵**:行=L1–L4 各维度/子维度,列=每张图/报告,格=该报告在该维度的发现。
 2. **逐维分类**:每个维度的跨报告模式归为——**恒定** / **协变**(随 goal/brief 系统变化=条件规则)/ **自由变量**(无规律=噪声或不在意)/ **例外**(罕见的破例,最有信息量,别抹平)。
@@ -40,6 +40,6 @@ description: 风格语法提炼器（四层图像分析框架的上层 · Stage 
 
 ## 输出
 
-一份**风格语法指引文件**:签名层 / 条件规则层 / 恒定-变量-例外台账 / 每条规则服务的目标 / 置信度与覆盖度 / 污染与存疑清单。结构、字段与完整示例见 [references/grammar-schema.md](./references/grammar-schema.md)。
+一份**风格语法指引文件**:签名层 / 条件规则层 / 恒定-变量-例外台账 / 每条规则服务的目标 / 置信度与覆盖度 / 污染与存疑清单。结构、字段与完整示例见 [reference/grammar-schema.md](./reference/grammar-schema.md)。
 
-入门顺序:先读 [references/corpus-and-discipline.md](./references/corpus-and-discipline.md)(语料要求 + 纪律细节),再读 aggregation-method.md(方法),最后按 grammar-schema.md 产出。
+入门顺序:先读 [reference/corpus-and-discipline.md](./reference/corpus-and-discipline.md)(语料要求 + 纪律细节),再读 aggregation-method.md(方法),最后按 grammar-schema.md 产出。

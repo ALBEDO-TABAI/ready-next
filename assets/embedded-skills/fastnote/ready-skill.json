@@ -2,7 +2,7 @@
   "id": "fastnote",
   "name": "fastnote",
   "displayName": "FastNote",
-  "description": "笔记快捷模式路由方法论：把 IM-style 混合输入按 -/: / -/2: 触发深度档位分发到剪藏 / study-notes / image-analysis-router / video-* 并写入工作区",
+  "description": "将快捷指令 -/:、-/2: 或明确的快速记笔记请求整理为工作区笔记；按材料类型和所需深度选择处理方法。",
   "version": "0.1.0",
   "runtime": "reference",
   "execution": { "mode": "advisory" },

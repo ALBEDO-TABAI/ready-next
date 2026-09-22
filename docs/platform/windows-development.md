@@ -1,7 +1,13 @@
 # Ready Windows 开发与源码交接
 
-> 更新时间：2026-07-12
+> 核对日期：2026-09-06
 > 本文取代根目录旧的单次 Windows handoff。它不固定分支、提交或阶段；每次交接都从当前工作区重新记录基线。
+
+## 0. 当前事实与适用范围
+
+当前 `electron-builder.yml` 只声明 macOS arm64 输出，并将 `build/codex/aarch64-apple-darwin/codex` 放入包体；`assets/codex-runtime/source-lock.json` 和 `runtime-manifest.json` 也固定为 darwin/arm64。仓库中的 Windows 窗口与路径处理是已有源码基础，不是当前 Windows 发行证明。
+
+因此本文是目标平台开发与交接要求。生成 Windows 成品前，必须先补齐 Windows Codex 二进制来源、摘要、协议与连续性证据，调整资源和打包目标，再在 Windows 本机验收。不能直接给现有 macOS 配置加 `--win` 后宣称移植完成。
 
 ## 1. 完成标准
 
@@ -28,11 +34,11 @@ node -p "require('./package.json').version"
 node -p "require('./package.json').devDependencies.electron"
 ```
 
-有未提交源文件时，不要把它们默认为交接基线。先由用户决定是提交、排除还是单独说明。
+有未提交源文件时，按本次授权范围明确纳入或排除，并记录逐文件来源；不能仅用 HEAD 代表实际工作树。
 
 共享镜像只是传输面，不在其上运行 install、dev、test 或 build。一次任务只使用一个镜像，不能从 A 拉取后向 B 回传。
 
-Mac 的标准同步入口是本机 `soft-ready` 工作流；实际共享根由用户当次确认。先 dry-run，再 apply。
+本 checkout 是 `cod-ready`；不要套用写死到 `ready-cowork` 的旧同步工作流。使用本次明确的源码与目标镜像，先预览差异，再同步。
 
 ## 3. Windows intake
 
@@ -41,7 +47,7 @@ Mac 的标准同步入口是本机 `soft-ready` 工作流；实际共享根由�
 - `node_modules`、`out`、`dist`、`exports`、`coverage`、测试输出与日志
 - `.ready-data`、本机 seed、缓存和临时目录
 - `.env*`、token、Cookie、OAuth code、provider key
-- macOS `.app`、`.dmg`、`.icns` 和 native binary
+- macOS `.app`、`.dmg` 和 native binary；受版本管理的构建图标等源码资产按目标配置保留
 - Git 临时锁、worktree 内部状态
 
 复制后先核对：
@@ -76,12 +82,7 @@ npm run test
 npm run build
 ```
 
-发布或包体工作还要生成 Windows unpacked app 并 smoke：
-
-```powershell
-npx electron-builder --config electron-builder.yml --win --dir
-node scripts/run-packaged-smoke.cjs --platform win32 --port 9335 --timeout 90000 --out test-results/windows-packaged-smoke.json
-```
+Windows 包体检查必须在 §0 的目标运行时与资源合同完成之后执行。打包命令从届时的目标配置读取；`scripts/run-packaged-smoke.cjs` 可作为现有探针入口，但成功启动仍不能代替真实 Agent、文件、网络与跨进程验证。
 
 真实 UI 至少按影响范围检查：
 

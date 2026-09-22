@@ -1,6 +1,6 @@
 # Ready 当前运行时硬合同
 
-> 更新时间：2026-09-04
+> 核对日期：2026-09-06
 > 本文承接原先重复写在 `AGENTS.md` 与 `CLAUDE.md` 里的详细约束。两份根指引保留入口与红线；修改本页覆盖的模块前必须读取对应章节。
 
 代码、类型、行为测试和 CI gate 比本文更权威。若实现与本文冲突，先判断是实现回归还是文档漂移；不得为旧文档复活已退役路径。
@@ -48,10 +48,7 @@
 - 当前固定 runtime 是官方 0.149.0。deferred dynamic tools 仍保持关闭，`features.goals=false`，thread 继续使用 legacy history；不接 goal、分页历史、queue、project、revert 或 section 产品入口。`server/diagnostics` 只在用户导出现有诊断包时从当前已运行 sidecar 读取一次并写入 `state/codex-runtime.json`；不可用时照常出包，不启动、恢复或替换 sidecar，也不改变任务、计费、重试、投影或终态。
 - capability floor 的 live 权威点是 `resolveReadyToolTurnSnapshot`：它在 Codex 准入前从可信工作面、资源、技能授权与代码策略解析完整工具面和本轮 allow-set，冻结后由 thread/turn 合同与网关逐次核验。收窄只能做减法，原生 thread/turn 不得自行扩权；缺地板、空面、摘要漂移或恢复时身份不一致都必须在联网前失败。
 - 同一份冻结工具快照必须同时驱动模型可见工具、dispatch authorization 与本轮能力冲突事实。只有用户或任务意图明确请求、但最终不可见的能力进入冲突提示；默认技能目录曝光、显式 false 与被抑制的运行意图不得伪造用户请求。否定浏览器表达优先于工作流与最近意图兜底，不能继承上一轮浏览器工具面。冲突只进入本轮 instructions，必须告诉模型真实原因并禁止声称“已收到授权”或“稍后自动挂载”，不得写入原生历史。
-- `documentTargetGuard` 所需的 open/save 工具若不在模型可见面，由 executor 从注册表恢复执行并记录 `document_target_guard_tool_recovered`；提示文案必须与自动开存行为一致。
-- typed envelope refs 是权限第一信源；只有缺失时才允许文本候选兜底，并记录 `source=text_fallback`。禁止仅靠用户原文正则决定权限。
 - `run-capability-controller.resolveRunCapabilities` 与旧 SDK executor 只承担历史/支撑代码职责。不得把它们描述成 Codex live 工具面的权威裁决点。
-- 回归入口：`check-capability-gate-enforced-in-arbitration.cjs`、`capability-floors.test.ts`、`document-target-guard-selfheal.test.ts`。
 
 ## 3. Skill 标准、选择与续跑
 
@@ -69,15 +66,15 @@
 - `~/.agents/skills` 只读发现并建议导入，绝不自动导入或写回。作者侧校验使用 `npm run skills:lint <dir>`；lint ERROR 不替代导入时的安全扫描。
 - import 保持宽松：缺 id/description 时只使用既有 safeSlug 与 description 推导兜底，lint ERROR 不阻断导入；安全底线仍是 manifest 存在性、目录扫描与执行授权。
 - `skill_executions` 状态机、相关 IPC 和 workflow coordinator 已退役，不得复活。历史进度仍由 task tracker、projection 与 child/detached 账本承载；Codex 不消费这些账本来启动续跑。
-- LLM 可见 skill 工具只来自 manifest action 与 primitive；reference/advisory skill 以内联 `SKILL.md` 为主，`read_skill` 归一为 internal，reference hint 不能单独打开 primitive。Codex 的 host `developerInstructions` 只承载稳定的 Ready 运行约束，不嵌入技能正文。显式或本轮选中的技能由 Main 对技能目录与 `SKILL.md` 内容摘要做权威校验后，以 pinned app-server 原生 `skill` input 交给当前 turn；同一路径资源去重，恢复时摘要漂移必须在 turn 前失败。技能正文不是 `additionalContext`，也不得为了换技能改写既有 native thread 的根指令。点名 advisory 技能并附带文件夹时，Codex 只授权产物读写等宿主原语，不把 `skill_inspect_run_state` 等 frame 状态工具放进模型面。
+- manifest action 与 primitive 先通过 Codex 准入限制才可进入模型面；`read_skill` 归一为 internal，reference hint 不能单独打开 primitive。Codex 的 host `developerInstructions` 只承载稳定的 Ready 运行约束，不嵌入技能正文。显式或本轮选中的技能由 Main 对技能目录与 `SKILL.md` 内容摘要做权威校验后，以 pinned app-server 原生 `skill` input 交给当前 turn；同一路径资源去重，恢复时摘要漂移必须在 turn 前失败。技能正文不是 `additionalContext`，也不得为了换技能改写既有 native thread 的根指令。点名 advisory 技能并附带文件夹时，Codex 只授权产物读写等宿主原语，不把 `skill_inspect_run_state` 等 frame 状态工具放进模型面。
 - Codex 技能任务在最终授权冻结后同时冻结一份完成证明类型：纯指导走 `direct_answer`；普通执行、来源研究、文件交付、事务回读与研究文件交付分别使用各自的代码判据和预算。工具许可不是完成证明；只读/检查工具返回的路径和任务投影中的历史产物都不能证明本轮交付，只有当前写入、导出、剪藏、展示、文档保存、生成或下载动作自己的成功合同可以签发产物证明。模型轮次都比工具上限多保留一次；当持久工具额度已用完或进入最后一个模型名额时，网关仍先校验完整冻结工具面，但发往上游的请求必须移除工具并强制只生成最终答复。Provider 受控续试仍是每次请求最多 6 次，不能把任务工具预算与网络续试预算混为一谈。
 - `childRunId`、`detachedTaskId` 与 `outputDir + runStatePath` 只作为历史任务、产物读取和精确取消的身份；当前 Codex 不提供公开续跑入口。未来若重新引入续跑，必须至少持有这些真实句柄，只有 `taskRunId/skillId` 的空壳仍不得视为可续跑。
-- child-loop action 属于子循环，父循环不得强制合成 typed tool use。embedded manifest、driver 注册与静态工具名映射必须一致。
+- child-loop 的旧 manifest、driver 与账本只保留其历史/独立支撑边界，不得把一致性测试当成当前 Codex 可启动它的证据。
 
 ## 4. Provider、流式与工具错误
 
 - AI provider 能力必须由共享能力层解析；“OpenAI 兼容”不代表一定支持原生 tools、vision 或 video。通用 openai-compatible 的 `toolUseMode=auto` 必须按不支持工具收口，只有显式 `on` 或内置 provider 合同可以开放；Packer 仅可为已经真实验证过工具流的固定端点写入 `on`。
-- Codex 必须从本轮冻结的 Ready 模型预设读取推理强度、显式上下文长度和显式输出上限：推理强度进入每次原生 turn 的默认协作模式设置，上下文长度进入新 thread，输出上限进入实际上游请求；续轮与启动恢复不得改读当前设置。连接测试只在真实成功响应时把 ChatGPT OAuth 标为可用，缓存凭证或 HTTP 400 都不能冒充健康连接。普通 Provider/transport failure 只有在固定 failure-seam 规则与原生 readback 共同证明历史未分叉时才保留同一 thread；下一条普通输入继续使用它，不把失败回执当成重试指令。已证实 `publication/history divergence` 时必须退役旧 generation；只有 runtime、模型可见工具和根指令继承合同相同、且 accepted native prefix 有完整 coverage 时，才能用原生 `thread/fork` 从该前缀创建 successor；无 accepted prefix 的首轮分叉只能创建带精确安全用户尾部的 `fresh_root_with_tail`。fork/fresh-root 响应未知时不得重发；启动只能通过 list/read/resume 唯一对账，否则保持阻断并要求重置。runtime/protocol/根工具合同漂移、归档源、legacy 或任何历史身份不明时一律失败关闭；只有从未准入、无 thread/turn/fence/effect 的 pristine 旧空 head 可以在用户输入前原子刷新，其他情况不得静默创建空根。
+- Codex 必须从本轮冻结的 Ready 模型预设读取推理强度、显式上下文长度和显式输出上限：推理强度进入每次原生 turn 的默认协作模式设置，上下文长度进入新 thread，输出上限进入实际上游请求；续轮与启动恢复不得改读当前设置。连接测试只在真实成功响应时把 ChatGPT OAuth 标为可用，缓存凭证或 HTTP 400 都不能冒充健康连接。普通 Provider/transport failure 只有在固定 failure-seam 规则与原生 readback 共同证明历史未分叉时才保留同一 thread；下一条普通输入继续使用它，不把失败回执当成重试指令。已证实 `publication/history divergence` 时必须退役旧 generation；只有 runtime、模型可见工具和根指令继承合同相同、且 accepted native prefix 有完整 coverage 时，才能用原生 `thread/fork` 从该前缀创建 successor；无 accepted prefix 的首轮分叉只能创建带精确安全用户尾部的 `fresh_root_with_tail`。fork/fresh-root 响应未知时不得重发；启动只能通过 list/read/resume 唯一对账，否则保持阻断。运行时、根指令、工具或历史身份的变化统一由 §2 的当前 reducer 按具体操作判断；不得仅凭 runtime/protocol 摘要不同或 legacy 标签要求重置。未通过当前历史操作资格时不启动该操作，恢复选择仍以 Main 动作面为准；只有从未准入、无 thread/turn/fence/effect 的 pristine 旧空 head 可以在用户输入前原子刷新，其他情况不得静默创建空根。
 - OpenAI 内置预设仍以 API Key 为默认认证。`ChatGPT OAuth（实验）` 只能由用户主动连接为独立预设：授权主体是 Codex，Ready 凭证与 Codex CLI 隔离，模型服务只绑定 `127.0.0.1` 且每个请求校验随机代理口令；凭证依赖 refresh token 自动续期，已启动的本机服务随 Ready 进程保持且不因切换预设而关闭，只有显式断开才删除凭证；Provider 必须走 Ready 的无状态 Responses 适配器并在每次请求回放完整历史，不得进入官方 OpenAI 的连续响应客户端；该代理虽把流式事件体标为 `application/json`，显式 OAuth 路径仍必须按 SSE 增量消费，并在终局载荷缺少文字时用本轮增量恢复完整回答；缺凭证、口令不匹配或上游失败都必须关闭失败，不得回落到 API Key 或其他账号。
 - 固定 OAuth 预设的连接、恢复、工作区保存与断开共用同一串行边界；保存执行时必须重读最新工作区，允许普通 active profile 切换保留最新 OAuth 预设，禁止旧快照新增、复活或覆盖它。该边界处于忙状态时，任何 provider 的新 Codex 准入都必须在落消息与 run 前可重试地拒绝，原子准入还要再次核验。product turn 与未 quarantine 的 pending/unknown manual compaction 都冻结它们的 upstream profile 路由；可轮换凭证，但不得删除或改写路由。
 - OAuth 授权由 Main 持有单次操作身份、阶段与中止信号；重复授权复用同一操作，页面重入读回当前阶段，取消与重新打开授权页须核对操作身份。凭据交换与模型发现均有网络期限；预设保存完成前不得显示 ready。授权成功后模型发现失败保留凭据，通过恢复入口再次建立服务和预设，不把网络错误一概写成登录失效。
@@ -110,7 +107,7 @@
 - 原生请求 metadata 的 `forked_from_thread_id` 只在分叉线程存在，必须等于绑定中已确认的直接父线程；product、automatic compact、manual compact 三类请求都在认领和转发前消费同一绑定核验。根线程携带父线程、分叉漏传或传祖父线程均拒绝，其他未知字段仍不接纳；固定运行时合同资产与安全续接 probe 必须绑定同一清单。
 - Renderer 的事件、发送返回、hydrate 共用 action projection merge；模式不同只隐藏，不能丢掉同 head 已知的 owner/memory 版本下界。切换模式沿用最新在途 head 读取目标；发送完成回调消费返回 receipt 的 headProjectionRef.version 重新读取 Main，不能退回旧 scope generation，也不直接把引用当发送权限。两条路径保留实际发送 owner 的隔离；旧返回不会重新开放 Retry。历史映射未知不等于当前正文失败：本轮正文已通过验收仍可发布，但不追加 coverage，后续发送按 history block 处理；started legacy 的正常完成仍保留本 thread 且不补造 coverage。
 - 本地 reset owner 持有可见 epoch 的切换：其请求在途时，事件或其他回读不得抢先提交新 generation/epoch；正式成功返回仍按原 owner CAS 清空旧消息、资源与动作缓存，再从 Main 回读新 head。失败或过期返回不放宽 owner 检查，也不自动重发。
-- accepted native prefix 只由已接受的 product closeout 或已验证的原生压缩推进；每次推进只追加一条增量 coverage receipt，其 parent 必须是同 lineage 的当前最新项。assignment 只是首轮交付计划，delivery audit 只是既有 start/readback 证据的派生读取，两者都不能冒充 native 已消费。live uncommitted tail 从正式 origin 集合扣除 coverage 与用户可见的 ordinary supersession；用户看到的“前面项不带入”提示与下一次 ordinary ingress 必须消费同一 action admission ref。legacy head 不补造 coverage，需历史映射的操作一律阻断并只允许重置/关闭。
+- accepted native prefix 只由已接受的 product closeout 或已验证的原生压缩推进；每次推进只追加一条增量 coverage receipt，其 parent 必须是同 lineage 的当前最新项。assignment 只是首轮交付计划，delivery audit 只是既有 start/readback 证据的派生读取，两者都不能冒充 native 已消费。live uncommitted tail 从正式 origin 集合扣除 coverage 与用户可见的 ordinary supersession；用户看到的“前面项不带入”提示与下一次 ordinary ingress 必须消费同一 action admission ref。legacy head 不补造 coverage；依赖缺失历史映射的操作继续阻断，普通续聊与保留记录后开始新上下文分别按 §2 当前资格判断，不从缺少 coverage 推导所有动作都不可用。
 - 尚未使用的 legacy/fresh_start head 遇到运行合同漂移，只能经 `refreshPristineFreshStartHeadAtomic`：新上下文不得有产品消息、卡片、run 或效果，也不得有 native 身份、start/turn、压缩、coverage、tail 或未结交互。明确 boundary 同事务保存旧展示行身份增量，其摘要由原回执保护；空白检查忽略这些已保留行，但仍阻断未结工作和后来插入的行，不能用时间或 rowid 猜边界。仓库事务与数据库 guard 共用空白谓词；事务以 `pristine_contract_refresh` 退役旧 head，同 epoch 建立 generation + 1 并推进动作序号。boot 与 ingress preflight 是唯一写 owner，动作读取只消费结果；旧发送引用在用户/run/Provider 写入前拒绝。122 号升级只增 nullable 快照列并替换同一 guard，不回填未知旧边界。
 - 阻断但已结清且没有原生线程的 scope，沿正式 lifecycle 证据签发同一个 begin-new-context 动作；不能因为没有同线程兼容结论而遗漏恢复入口。新执行须当前签发及事务内复核；已提交操作重放则按确定性 operation/source/receipt 校验，只读返回原边界与当前动作版本，不再清提示或广播。reset/close 已淘汰的操作拒绝重放。Renderer 不把历史边界 target 当作当前 head，统一回读 action surface，晚到结果不得抢写新草稿或新动作。
 - 文件交付成功必须同时具备 staged version、confirmed export、目标目录身份与 fresh hash readback，并由 publication seal 覆盖；缺任一步都不能显示成功。暂存由 `ArtifactMaterializer` 以 `expectedVersion`、不可变 segment/manifest、同路径串行、原子 no-replace、fsync 与回读负责；重放不能重复追加或覆盖外部文件。连续 append 只写新 segment/manifest，并复用非权威的进程内哈希状态，重启后最多重建一次；导出仍流式全量复核。存储占用启动核算一次，之后按实际写入与明确 GC 增量维护；预览读取只能读取请求的有界前缀。显式 Retry 仅允许零工具、交互、资源和产物义务的任务根，不导入前一 run 的 staged source、产物回执或授权；继续编辑文件必须由新的普通用户输入重新提供并授权资源。GC 只清 verified 且无 ProductTurn/predecessor 引用的版本；没有安全对象时以 `storage_budget_exhausted` 明确失败。
@@ -193,7 +190,7 @@
 - 活动叶片只克隆当前与相邻物理页，正反面身份固定；透印只取另一面的镜像墨迹，封面不透印。等弧长切片以独立坐标共享边，禁止嵌套切片让逐帧样式向后续正文级联。根部保持贴合，纸面曲率、透印、投影和遮光在两个平放端点连续归零，动态页与静态页的端点书脊强度必须一致。落页采用不越过终点的收束轨迹，输出精确落平帧后才交接静态页。舞台透视不得短于 6000px 或单页宽 12 倍；背面以反向边界受光，不得形成切片灰带。预热只在空闲进行且必须可取消，不能改装正在翻动的页；排版或尺寸变化先撤销半页再重排。
 - 阅读背景默认跟随应用昼夜，也可保存自选颜色；颜色变化不能触发全文测量或移动阅读位置。左右纸堆按总页数及阅读进度互补变化，切口细纹沿页高竖向延伸，前页与纸堆上下齐边，圆角只放在最外侧轮廓；厚度逐帧跟随翻页且不改变正文平面，不得落页后再播放一次厚度布局动画。
 - 阅读中的 Widget 只允许静态投影：先移除脚本、事件、外部 CSS URL、fixed/sticky 和重复 id，再放入可克隆的受约束 ShadowRoot；不得创建 iframe、receiver、状态写回或把 Widget 样式泄漏到主界面。
-- reduced-motion 不启动动态叶片，直接落到同一静态分页与位置合同。阅读专项回归入口是 `npm run verify:document-reading`；同时保留 `npm run verify:document-perf` 与 `npm run verify:widget-ready`。详细设计见 `docs/superpowers/plans/2026-08-04-document-reading-mode-implementation.md`、`docs/superpowers/plans/2026-07-17-document-mode-performance-implementation.md` 与 `docs/superpowers/plans/2026-07-11-document-widget-ready-design-language-implementation.md`。
+- reduced-motion 不启动动态叶片，直接落到同一静态分页与位置合同。阅读专项回归入口是 `npm run verify:document-reading`；同时保留 `npm run verify:document-perf` 与 `npm run verify:widget-ready`。详细设计见 `docs/superpowers/plans/2026-09-05-document-reading-paper-implementation.md`、`docs/superpowers/plans/2026-08-04-document-reading-mode-implementation.md`、`docs/superpowers/plans/2026-07-17-document-mode-performance-implementation.md` 与 `docs/superpowers/plans/2026-07-11-document-widget-ready-design-language-implementation.md`。
 
 ## 8. 行动确认、知识与专项 Agent
 
@@ -206,9 +203,9 @@
 - staged 信念卡、历史人格、charter、路由索引、旧记忆与专项 Agent 蓝图都不得进入当前 Codex prompt、轮次输入、准入判断或工具面。旧 `memory_create/memory_update/memory_list_recent` 工具面必须保持退役，旧设置页和旧模型写入工具不得恢复。单一 Ready 清理迁移必须同时清空历史会话/召回派生数据、退役全部旧线程绑定，并为身份完整的原生线程写入持久清理意图；全量不兼容清理允许精确的 `cleanup` 意图穿过已被废弃的旧 Ready 栅栏、未终态回合与调用，但仍必须证明绑定已退役、意图身份一致、没有后代线程，且原生线程当前为空闲或已卸载并且没有运行中回合。普通会话归档继续执行原有严格资格，不得借此放宽。不得只隐藏列表留下可恢复旧线程。新记忆只按 `docs/superpowers/plans/2026-08-20-single-ready-agent-and-memory-runtime-implementation.md` 的独立表、冻结快照、只读检索、来源证据和费用回执接入。
 - 旧记忆生产图的数据库终态只保留新 Ready 记忆表；升级末尾必须幂等删除 `agent_memory_metadata`、`agent_memory_access_log`、`agent_triggers`、`agent_trigger_refs`、`agent_knowledge`、`user_profiles` 与 `agent_personalities`，不得删除 `agents`、conversation 或 session recall 所需表。`SessionRecallService/Facade` 仍只负责用户主动搜索并附加历史，不属于长期记忆自动注入。
 - 文件涌现继续只读 `BeliefCardStore`，其根目录固定为 `userData/belief-cards`，不得与待清理的 `userData/agent-memory` 共用生命周期。升级时先把旧目录中 `knowledge/**` 的非 routing Markdown 卡片幂等复制到独立目录；同名同内容跳过，同名异内容保留当前卡并把旧文件存入冲突档案，复制完成后才允许回收旧目录。`agents/**`、`routing-*.md`、`USER.md`、人格、规则和其他旧记忆文件不得迁入。
-- 生产 `ownerAgentId` 是从当前 scope/run 准入绑定冻结的中性宿主审计身份，不代表人格、知识或路由已注入。公开 handoff 采纳、专项 Agent 创建/改名/派生、新会话预路由和通用 continuation 入口已退役，Preload/IPC/Renderer/模型工具面均不得恢复可调用链。后继合同不是恢复旧飞轮，而是把领域方法落到技能、把知识落到按需资料：`docs/superpowers/plans/2026-08-13-codex-domain-skill-and-library-implementation.md`。在该计划落地前，本节退役边界仍全部生效。
+- 生产 `ownerAgentId` 是从当前 scope/run 准入绑定冻结的中性宿主审计身份，不代表人格、知识或路由已注入。公开 handoff 采纳、专项 Agent 创建/改名/派生、新会话预路由和通用 continuation 入口已退役，Preload/IPC/Renderer/模型工具面均不得恢复可调用链。领域方法继续通过现有技能承载；长期记忆只遵守本节的新 Ready 记忆合同。2026-08-13 领域资料库提案包含后来已退役的保留方案，归档后不再作为开工入口，也不改变本节边界。
 - 文档、RSS、日程、Tag Forge 等产品面接到 Codex 的合同见 `docs/superpowers/plans/2026-08-13-codex-workbench-surface-rewire-implementation.md`。生产入口是产品动作桥与同一冻结快照上的组合策略，不得把 DomainAdapter 调度或“已排队执行”假回执当成已接通。
-- 技能子任务、detached task 和技能产物交接是独立的真实能力；只传绑定当前任务的 `userRequestVerbatim` 原文与结构化 refs，不得借文件交接恢复 Agent owner 转移、公开 successor 或第二条模型主链。
+- 历史技能子任务、detached task 与独立 Skills Runtime 的产物交接不等于当前 Codex 已准入这些执行路径；只传绑定当前任务的 `userRequestVerbatim` 原文与结构化 refs，不得借文件交接恢复 Agent owner 转移、公开 successor 或第二条模型主链。
 - 旧自动模型维护、memory lifecycle、crystallize 与 belief-decay 启动/定时回合均已退役；它们不得创建旧记忆目录、修改信念卡、读取 provider 配置、启动 subagent 或发起模型请求。涌现候选只在 candidate 且证据不少于 3 条时投影。
 - 浏览器失败学习与 check-in 自动写卡路径已退役；`BeliefCardStore` 不得从 Agent turn 写入，只供文件涌现读取已有卡。设置页不得展示 Agent 历史资料、人格、旧用户偏好或旧记忆系统入口。新的“长期记忆”设置只管理 Ready 的四张新表：手工新增、编辑、固定、删除、重置、读取开关和本地会话贡献开关已经可用。自动整理开关当前必须显示为不可用，生产 provider 提交数必须为 0；只有上游能按稳定本地请求身份找回同一次已提交请求、且费用恢复合同完成真实验收后才可开放。
 - prepare/harvest/forming 等涌现卡必须带 evidence 与行动出口；受保护路径只显示“产物已生成（受保护路径）”。
@@ -245,5 +242,5 @@
 - 新测试默认验证真实入口的可观察行为；结构测试只用于行为无法证明的硬合同。不得用 source grep 冒充行为验证，不得用 skip 当通过。
 - SQLite、设置、搜索索引或本地持久化验收先跑 `npm run verify:native`；普通 Node 下 ABI skip 只说明该路径未覆盖。
 - 主进程启动、日志轮转、SQLite native gate 和 `better-sqlite3` 真实加载都属于验收边界。
-- Windows 必须本机重装依赖并重编 `better-sqlite3`。路径使用 `app.getPath`、`process.resourcesPath`、`path.join`、`path.delimiter`；不得带入 macOS `node_modules`、`.app`、`.dmg`、`.icns`、种子、缓存或密钥。
+- 当前 `electron-builder.yml` 与固定 Codex 资产只覆盖 macOS arm64；Windows 指引是移植准备，不能作为已发布证明。Windows 必须先提供并验证目标平台 Codex 资产，再本机重装依赖并重编 `better-sqlite3`。路径使用 `app.getPath`、`process.resourcesPath`、`path.join`、`path.delimiter`；不得带入 macOS `node_modules`、`.app`、`.dmg`、`.icns`、种子、缓存或密钥。
 - Windows 开发与回传流程见 `docs/platform/windows-development.md`；测试细则见 `docs/superpowers/testing-conventions.md`。

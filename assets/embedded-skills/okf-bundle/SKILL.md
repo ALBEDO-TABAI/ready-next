@@ -1,6 +1,6 @@
 ---
 name: okf-bundle
-description: 把"指定范围"的资料/文件提炼成一个符合 Google OKF（Open Knowledge Format v0.1）规范的知识包（knowledge bundle），并登记到工作区母题索引。当用户说"把这些资料整理成知识包/知识库"、"从这个文件夹（或这批文件/这些上传）里提取知识"、"做一个 OKF 知识包"、"沉淀这个项目积累的知识"、"把项目过程文档归档成可复用的结构化知识"、"okf bundle"、"建知识包"、"knowledge bundle"，或给出一批资料希望沉淀为可被 Agent 读取、可被检索、可被复用的结构化知识时触发——即使只说"帮我把这堆文档归档成知识库"也要用。本 skill 负责"单个范围 → 单个知识包"。若用户要盘点/合并工作区里的所有知识包、做知识库治理，请改用 okf-library。
+description: 将指定的一批资料提炼为单个 OKF 知识包；用于知识沉淀，多包盘点与合并由 okf-library 处理。
 compatibility: 需要 bash + Python 3 与 PyYAML（pip install pyyaml --break-system-packages）。
 ---
 
@@ -20,6 +20,8 @@ compatibility: 需要 bash + Python 3 与 PyYAML（pip install pyyaml --break-sy
 3. **`type` 要描述性**（`Metric`/`Playbook`/`Table`…），别一律写 `concept`。
 
 ## 工作流
+
+下文 `<skill>` 指当前技能目录，宿主提供时使用 `$CLAUDE_SKILL_DIR`；先解析实际位置再执行 `scripts/`。执行与写入仍服从本轮授权；校验脚本不可运行时说明未完成校验，不声称已通过。
 
 ### 1. 锁定范围（scope）
 把"指定范围"落实为一个明确的文件清单。来源可能是：某个目录、用户列举的文件、一个 glob、或本次上传（`/mnt/user-data/uploads`）。范围若含糊（如"项目里的资料"指向不清），先确认再开工。**来源是只读输入**，不要改动它们。

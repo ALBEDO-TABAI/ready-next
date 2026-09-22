@@ -1,3 +1,11 @@
+---
+enforce: false
+documentation_status: archived-in-place
+archived_at: 2026-09-06
+---
+
+> 原位归档（2026-09-06）：固定历史证据仍引用此路径。保留此路径不代表全文仍是当前合同；其中的状态、源码位置和待办属于原记录。现行约束见 [当前运行时合同](../../architecture/current-runtime-contracts.md)，归档去向见 [文档清单](../../documentation-inventory.md)。
+
 # Skill Runtime 遗留架构债清单（Layer 1 完成后视角）
 
 > **写作背景**：Layer 1（A1/A2/B2/B6 + 测试反模式）已 land 进 git。本文档盘点**所有剩下的**架构性问题——按"根因 / 次生债 / 盲点 / 品味债 / 优先级"五层组织。
@@ -121,7 +129,7 @@ class SystemReminderRegistry {
 2. **测试规约写入 CLAUDE.md**：禁止 source-string assertion 当行为测试用，并给替代模板。例如"两条路径行为等价" = 同输入两次调用断言输出 deep-equal；"代码不应调 X" = stub X 抛错并断言它没被调用。
 3. **加 ESLint rule**（自定义）：禁止在 `__tests__/` 文件里 `readFileSync(*.ts)` + 后续 regex match 的组合——这是 source-grep 反模式的稳定签名。
 
-> **F 阶段已收口（2026-05-01）**：已落地 `__breaksInvariants` / `__noProductionInvariantBreach` 测试 helper 标记、helper 标记 ESLint rule、source-grep 新增冻结、`docs/superpowers/testing-conventions.md` 与 CLAUDE.md / AGENTS.md §6.17。最终 gate 见 `2026-04-30-F-test-conventions-and-e2e-implementation.md`。
+> **F 阶段已收口（2026-05-01）**：已落地 `__breaksInvariants` / `__noProductionInvariantBreach` 测试 helper 标记、helper 标记 ESLint rule、source-grep 新增冻结、`docs/superpowers/testing-conventions.md` 与 CLAUDE.md / AGENTS.md §6.17。最终 gate 见 `../../archive/2026-09-06/docs/superpowers/plans/2026-04-30-F-test-conventions-and-e2e-implementation.md`。
 
 ---
 
@@ -190,7 +198,7 @@ helper 只覆盖了"渲染对用户的 message + finish 参数"。状态判定�
 
 **所属根因**：根因 1 的延伸（词汇 invariant 缺位的局部表现）。修根因 1 时一并处理。
 
-> **G 阶段已收口（2026-05-01）**：`TERMINAL_CHILD_CLOSE_STATUSES` / status helper 已集中到 `skill-child-run-types.ts`，并由 `scripts/check-child-status-vocabulary.cjs` 防止散点复发。参 `2026-04-30-G-quality-polish-and-control-surface-implementation.md`。
+> **G 阶段已收口（2026-05-01）**：`TERMINAL_CHILD_CLOSE_STATUSES` / status helper 已集中到 `skill-child-run-types.ts`，并由 `scripts/check-child-status-vocabulary.cjs` 防止散点复发。参 `../../archive/2026-09-06/docs/superpowers/plans/2026-04-30-G-quality-polish-and-control-surface-implementation.md`。
 
 ---
 
@@ -206,7 +214,7 @@ helper 只覆盖了"渲染对用户的 message + finish 参数"。状态判定�
 
 **修法方向**：让 resume 返回 `{ runHandle, freshContractFields: { childCloseEvent: null, childStatus: 'running', parentNextHint: ... } }`，turn-engine 用 spread `Object.assign(contract, freshContractFields)` 一次性更新——杜绝调用方手动赋值的可能。
 
-> **G 阶段已收口（2026-05-01）**：clean resume 现在返回 `freshContractFields`，turn-engine resume 分支整体应用该对象，H1 脚本挡住手动 `childCloseEvent` 赋值。参 `2026-04-30-G-quality-polish-and-control-surface-implementation.md`。
+> **G 阶段已收口（2026-05-01）**：clean resume 现在返回 `freshContractFields`，turn-engine resume 分支整体应用该对象，H1 脚本挡住手动 `childCloseEvent` 赋值。参 `../../archive/2026-09-06/docs/superpowers/plans/2026-04-30-G-quality-polish-and-control-surface-implementation.md`。
 
 ---
 
@@ -220,7 +228,7 @@ Layer 1 Team 1 的 fan-out 测试断言 `firstResult.closeEvent === secondResult
 
 **所属根因**：独立小问题，不归入五大根因。
 
-> **G 阶段已收口（2026-05-01）**：`SkillChildCloseEvent` 对外为 `DeepReadonly<>`，构造/解码出口统一 freeze，`close-event-immutability.test.ts` 覆盖类型层和运行时层。参 `2026-04-30-G-quality-polish-and-control-surface-implementation.md`。
+> **G 阶段已收口（2026-05-01）**：`SkillChildCloseEvent` 对外为 `DeepReadonly<>`，构造/解码出口统一 freeze，`close-event-immutability.test.ts` 覆盖类型层和运行时层。参 `../../archive/2026-09-06/docs/superpowers/plans/2026-04-30-G-quality-polish-and-control-surface-implementation.md`。
 
 ---
 
@@ -234,7 +242,7 @@ Layer 1 Team 1 的 fan-out 测试断言 `firstResult.closeEvent === secondResult
 
 **修法方向**：每个 turn 的入口处一次读所有 flag 到 immutable `TurnFeatureFlags` 对象，下游一律用对象字段而非函数。runtime hot-reload 不存在，无副作用。
 
-> **G 阶段已收口（2026-05-01）**：turn-engine 入口使用 frozen `TurnFeatureFlags` snapshot，下游 tool-executor / gateway 消费显式传入的 snapshot，`scripts/check-turn-feature-flags.cjs` 阻止中途读 env helper。参 `2026-04-30-G-quality-polish-and-control-surface-implementation.md`。
+> **G 阶段已收口（2026-05-01）**：turn-engine 入口使用 frozen `TurnFeatureFlags` snapshot，下游 tool-executor / gateway 消费显式传入的 snapshot，`scripts/check-turn-feature-flags.cjs` 阻止中途读 env helper。参 `../../archive/2026-09-06/docs/superpowers/plans/2026-04-30-G-quality-polish-and-control-surface-implementation.md`。
 
 ---
 
@@ -341,7 +349,7 @@ review 过 turn-engine 处理用户输入"继续"/"取消"，但**没审 UI 端*
 
 **严重度**：B1 级（产品体验级问题）。
 
-> **G 阶段已收口（2026-05-01）**：新增 `agent:listActiveChildRuns` / `agent:cancelChildRun` 与 Settings 调试区控制面，取消来源区分 `nlp` / `ui_button` 并进入 metric。参 `2026-04-30-G-quality-polish-and-control-surface-implementation.md`。
+> **G 阶段已收口（2026-05-01）**：新增 `agent:listActiveChildRuns` / `agent:cancelChildRun` 与 Settings 调试区控制面，取消来源区分 `nlp` / `ui_button` 并进入 metric。参 `../../archive/2026-09-06/docs/superpowers/plans/2026-04-30-G-quality-polish-and-control-surface-implementation.md`。
 
 ---
 

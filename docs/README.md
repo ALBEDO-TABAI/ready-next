@@ -1,84 +1,73 @@
-# Ready 文档导航与维护规则
+# Ready 文档导航
 
-> 更新时间：2026-08-13
+> 核对日期：2026-09-06。当前应用 0.8.0，固定 Codex runtime 0.149.0，发布配置为 macOS arm64；精确值以源码清单为准。
 
-本文是 `docs/` 的入口。代码、`package.json` 与机器校验结果始终优先于叙述性文档；如果两者冲突，应修正文档，而不是为旧文档保留兼容实现。
+从本页选择当前入口。[全量文档清单](documentation-inventory.md) 记录项目叙述文档的用途、原位置和归档去向；[本轮核对记录](maintenance/2026-09-06-documentation-refresh.md) 说明证据与检查范围。
 
-## 1. 根目录只放长期入口
+协作与技能维护：修改技能描述、参考资料或执行停点时，见 [2026-09-13 指引应用记录](maintenance/2026-09-13-skills-and-prompts-refresh.md)。
 
-- `AGENTS.md` / `CLAUDE.md`：协作方式、不可破红线、必读索引；两份正文必须同步。
-- `PROJECT_OVERVIEW.md`：产品与技术基线，不记录阶段流水账。
-- `DOCUMENTATION.md`：开发入口、变更流程和排障路径。
-- `PROGRESS.md`：当前状态看板，只保留仍有决策价值的近期信息。
-- `CHANGELOG.md`：发布记录与历史开发快照。
-- `LESSONS_LEARNED.md`：经真实故障验证、可跨阶段复用的经验。
+## 1. 当前长期入口
 
-专项导览、平台交接、模块地图和详细合同不再新增到根目录。
-
-## 2. 当前有效文档
-
-| 目的 | 文档 |
+| 需要了解 | 文档 |
 | --- | --- |
-| 当前代码入口、模块与依赖 | `docs/architecture/codebase-map.md` |
-| Agent、Browser、Skill、Widget 等运行时硬合同 | `docs/architecture/current-runtime-contracts.md` |
-| Ready 系统提示词实施审阅记录 | `docs/superpowers/specs/2026-07-15-ready-system-prompt-implementation-review.md` |
-| 长任务整治总排序与范围裁决（L-1→L0→L1→L2 唯一入口） | `docs/superpowers/plans/2026-07-22-agent-long-task-remediation-roadmap.md` |
-| Codex 实施启动 handoff（L-1 + L0 执行入口） | `docs/superpowers/plans/2026-07-22-codex-implementation-handoff.md` |
-| Provider 可靠性与确认可见性（第二批工单 P1–P6） | `docs/superpowers/plans/2026-07-22-provider-reliability-and-confirmation-visibility-implementation.md` |
-| Browser Agent 单 Agent 长任务与标签页所有权收口 | `docs/superpowers/plans/2026-07-22-browser-agent-sequential-long-task-and-tab-ownership-closure-implementation.md` |
-| Agent 长程 Plan-and-Execute、策略与分支架构 | `docs/superpowers/plans/2026-07-22-agent-plan-execute-policy-hooks-and-branching-runtime-design.md` |
-| 2026-07-22 Browser Agent 长任务根因证据 | `docs/superpowers/audits/2026-07-22-browser-agent-long-task-root-cause-and-evidence.md` |
-| ChatGPT App Agent/Browser 本地逆向证据快照 | `docs/superpowers/audits/2026-07-24-chatgpt-app-agent-browser-runtime-study.md` |
-| Ready 与 ChatGPT Agent/Browser 交叉差距审计 | `docs/superpowers/audits/2026-07-24-ready-vs-chatgpt-agent-browser-gap-audit.md` |
-| Durable Agent 与 Browser Runtime 目标架构（已确认，agent-renew 实施） | `docs/superpowers/specs/2026-07-24-ready-agent-browser-target-architecture.md` |
-| Durable Agent Runtime 重构计划（已确认，agent-renew 实施） | `docs/superpowers/plans/2026-07-24-agent-runtime-rearchitecture-implementation.md` |
-| Browser Runtime 与无人值守研究计划（已确认，agent-renew 实施） | `docs/superpowers/plans/2026-07-24-browser-unattended-research-implementation.md` |
-| Agent 模块与统一执行环境全局审计（2026-08-03 事实基线） | `docs/superpowers/audits/2026-08-03-ready-agent-module-and-unified-execution-runtime-audit.md` |
-| Agent 统一执行环境目标架构补充（已确认，合并进 07-24 架构） | `docs/superpowers/specs/2026-08-03-ready-agent-unified-execution-runtime-target-architecture-addendum.md` |
-| Agent 统一执行环境实施计划（已确认，agent-renew 实施） | `docs/superpowers/plans/2026-08-03-ready-agent-unified-execution-runtime-implementation.md` |
-| Codex 下专项能力与工作面重接线总判断 | `docs/superpowers/plans/2026-08-13-codex-capability-relight-index.md` |
-| Codex 下领域技能与资料库（专项能力后继，未开工） | `docs/superpowers/plans/2026-08-13-codex-domain-skill-and-library-implementation.md` |
-| Codex 工作面重接线（文档/RSS/日程/Tag Forge 等，已落地） | `docs/superpowers/plans/2026-08-13-codex-workbench-surface-rewire-implementation.md` |
-| Codex 内核下 Browser 接线（实施切片：执行绑定与关闭收口） | `docs/superpowers/plans/2026-08-14-codex-browser-kernel-fit-implementation.md` |
-| Codex 工作面硬化与手术式拆分（多事件结算、去全局 bind、act-tools 拆分） | `docs/superpowers/plans/2026-08-14-codex-surface-hardening-and-split-implementation.md` |
-| 架构原则的反例与自检 | `.claude/architectural-principles.md` |
-| 测试边界与 SQLite 验收 | `docs/superpowers/testing-conventions.md` |
-| UI 修改入口 | `UI_ADJUSTMENT_GUIDE.md` |
-| Windows 开发与交接 | `docs/platform/windows-development.md` |
-| Windows x64 支持方案（范围待确认） | `docs/superpowers/plans/2026-07-14-windows-x64-support-implementation.md` |
-| 大文件健康台账 | `docs/code-health/large-file-health-log.md` |
+| 产品与当前能力 | [PROJECT_OVERVIEW](../PROJECT_OVERVIEW.md) |
+| 当前进展、已实现与验收边界 | [PROGRESS](../PROGRESS.md) |
+| 开发、测试选择与排障 | [DOCUMENTATION](../DOCUMENTATION.md) |
+| 协作红线 | [AGENTS](../AGENTS.md) / [CLAUDE](../CLAUDE.md) |
+| 代码入口与状态拥有者 | [代码地图](architecture/codebase-map.md) |
+| 当前跨模块运行时约束 | [运行时合同](architecture/current-runtime-contracts.md) |
+| 产品视觉原则与 UI 定位 | [PRODUCT](../PRODUCT.md) / [UI 调整导览](../UI_ADJUSTMENT_GUIDE.md) |
+| 测试规则与真实验证链 | [测试规约](superpowers/testing-conventions.md) |
+| 发布记录、经验 | [CHANGELOG](../CHANGELOG.md) / [LESSONS_LEARNED](../LESSONS_LEARNED.md) |
+| 打包与来源记录 | [Packer](../Packer/README.md) |
+| 固定运行时资产 | [Codex runtime](../assets/codex-runtime/README.md) |
+| Windows 当前限制与移植要求 | [Windows 开发](platform/windows-development.md) |
+| 架构方法与大文件记录 | [架构原则](../.claude/architectural-principles.md) / [健康台账](code-health/large-file-health-log.md) |
 
-## 3. 目录职责
+## 2. 现行专项合同入口
 
-- `docs/architecture/`：仍在生效的跨模块边界、代码地图和维护导览。
-- `docs/superpowers/specs/`：目标设计与产品规格。只有被当前指引或实施计划引用时，才可视为当前约束。
-- `docs/superpowers/plans/`：架构级改动的实施合同与验收清单。
-- `docs/superpowers/audits/`：一次性审计、复审和证据；它们记录当时事实，不自动成为长期真值。
-- `docs/diagnostics/`、`docs/performance/`：专项调查与性能证据。
-- `docs/release/`：发布操作和发布验收材料。
-- `docs/archive/`：清扫前全文或旧主链迁移档案，必须标 `enforce: false`，仅供追溯。
-- `docs/widget-fixtures/`：Widget 测试材料，不是产品说明。
-- `outputs/`、`fix/`、`plans/`：历史工作产物。除非当前入口明确引用，不应据此推断现状。
+这些文档保留具体合同和历史验收。正文中“待开工”“当前缺口”或旧 `status` 可能属于写作当时，不能单独覆盖今日代码；当前生产边界统一见运行时合同。不同专题的通过不能相互替代。
 
-## 4. 文档状态口径
+| 专题 | 合同与验证起点 |
+| --- | --- |
+| 历史接续、草稿和新上下文恢复 | [历史与草稿](superpowers/plans/2026-09-03-ready-history-continuation-and-composer-repair-implementation.md)；`verify:history-continuation` |
+| 已有数据升级 | [升级记录](superpowers/plans/2026-09-03-ready-populated-upgrade-migration-implementation.md)；`verify:native` |
+| 微信/飞书远程助手 | [远程可靠性](superpowers/plans/2026-09-05-remote-im-reliability-implementation.md)；`verify:remote-im`，真实账号单独验收 |
+| 单一助手与新长期记忆 | [记忆合同](superpowers/plans/2026-08-20-single-ready-agent-and-memory-runtime-implementation.md)；`verify:single-ready-memory`，自动整理仍未开放 |
+| 稳定凭据 | [凭据合同](superpowers/plans/2026-08-20-stable-credential-vault-implementation.md)；凭据焦点测试与 `verify:native` |
+| 工作面接线 | [工作面合同](superpowers/plans/2026-08-13-codex-workbench-surface-rewire-implementation.md)；`verify:codex-workbench-surface` |
+| 书本阅读 | [阅读合同](superpowers/plans/2026-08-04-document-reading-mode-implementation.md) / [纸张与落页](superpowers/plans/2026-09-05-document-reading-paper-implementation.md)；`verify:document-reading` |
+| 文档性能 | [性能合同](superpowers/plans/2026-07-17-document-mode-performance-implementation.md)；`verify:document-perf` |
+| Widget | [设计语言](superpowers/plans/2026-07-11-document-widget-ready-design-language-implementation.md) / [组件基线](DOCUMENT_WIDGET_BASELINES.md) / [能力表](DOCUMENT_WIDGET_CAPABILITY_MATRIX.md) / [生成字段说明](DOCUMENT_WIDGET_OPENUI_PROMPT.md)；`verify:widget-ready` |
+| AI 图片产物 | [图片服务合同](superpowers/plans/2026-07-15-ai-image-generation-service-implementation.md)；按当前清单选择图片专项 |
 
-带 frontmatter 的文档按以下规则解释：
+仍被根指引或阶段检查保留的 Research、Provider、MCP、安全和历史账本合同：
 
-- `enforce: true`：仍是执行合同，修改对应行为时必须同步更新并跑配套校验。
-- `enforce: false`：历史、审计、反提案或只读快照，不得覆盖当前代码事实。
-- 没有 frontmatter：先看当前入口是否引用，再核对代码和日期；不能仅因文件名像“最终版”就采信。
+- [R / Research](superpowers/plans/2026-05-08-R-stage12-implementation.md)、[S / Provider](superpowers/plans/2026-05-09-S-stage13-implementation.md)、[T / MCP 与 sandbox](superpowers/plans/2026-05-09-T-stage14-implementation.md)。它们不恢复旧 Agent 循环。
+- [稳定性](superpowers/plans/2026-06-10-agent-stability-closure-implementation.md)、[历史 Phase 1](superpowers/plans/2026-06-11-agent-evolution-phase1-implementation.md)、[历史 Phase 3](superpowers/plans/2026-06-12-agent-evolution-phase3-implementation.md)。阶段检查只证明对应切片，不代表旧专项 Agent、自动学习、handoff 或公开续跑仍存在。
 
-## 5. 维护规则
+## 3. 目录与归档
 
-1. 同一事实只设一个详细真值源；其他文档用链接和短摘要，不复制整段合同。
-2. 手工模块清单不记录文件数和易变路径；需要精确结构时直接从工作区生成。
-3. `PROGRESS.md` 不保存测试流水账、长提交列表或已结束阶段全文；历史由 Git、`CHANGELOG.md` 和阶段计划承担。
-4. 旧计划和审计可以保留当时文件名，不要求伪装成现行入口；当前文档不得引用已删除路径。
-5. 版本、依赖和命令以 `package.json` 为准；日志路径以主进程实现和根指引为准。
-6. 新增长期规则时，优先配机器校验；只能靠人读的规则必须说明为什么无法自动验证。
-7. 根文档改动必须检查 `AGENTS.md` / `CLAUDE.md` 同步、相对链接、引用路径和命令是否存在。
+- `architecture/`：当前代码地图和运行时合同；其中旧 child-loop 说明已经原位归档。
+- `superpowers/plans/`：现行专项合同和必须保留原路径的历史参考；归属看全量清单及文件顶部说明。
+- `superpowers/audits/`：固定历史证据，保留原文与附属数据；[审计说明](superpowers/audits/README.md)。
+- `archive/`：迁移后的旧设计、路线图、诊断、一次性交接和此前全文备份；[归档入口](archive/README.md)。
+- `widget-fixtures/`：历史解析和视觉样例，属于测试输入，不冒充当前新建 Widget 的默认方案。
+- `code-health/`、`platform/`：按专题维护的当前记录与平台要求。
+- `maintenance/`：文档整理本身的核对和检查记录。
+- `outputs/`、`build/`、`exports/`、`Packer/output/`：本机生成物与验收产物，不是源码文档权威；本轮不清理这些目录。
+- `assets/embedded-skills/`、提示词、生成 schema、`.agents/skills/`、`.claude/skills/`：运行或协作资产，保留其消费结构，不按日期归档。
 
-## 6. 快速核对
+## 4. 状态规则
+
+1. 生产调用方、类型、清单与实际检查优先；文档漂移应修正文档，不能为旧文复活代码。
+2. `enforce: true` 的当前合同只约束明确仍生效的范围；不等于全产品已经验收。`enforce: false` 不取消现有测试或授权边界。
+3. “原位归档”仍是历史资料。固定证据为保持摘要关系可能没有新增 frontmatter，其身份由归档清单和上级说明给出；旧日期与原状态不改写。
+4. 归档不表示计划已完成，也不丢弃当时的失败、未实现项或原始来源。重启旧方案须重新检查现状。
+5. 同一事实只维护一份详细合同。其他入口给短摘要和链接，不重复复制阶段流水账。
+6. 移动前检查 Markdown、脚本、测试、生成器、固定证据和目录消费者；移动后核对链接。不可移动的证据保留原位，不改源码来迎合归档。
+
+## 5. 快速检查
 
 ```bash
 cmp <(tail -n +2 AGENTS.md) <(tail -n +2 CLAUDE.md)
@@ -87,6 +76,7 @@ npm run verify:meta-paths
 node scripts/check-testing-conventions-doc.cjs
 node scripts/check-stage-r-verify-switch.cjs
 node scripts/check-stage-t-verify-switch.cjs
+node scripts/check-plan-pairing.cjs --all
 ```
 
-文档中出现的源码路径还应逐一确认存在；不要把 source grep 当作产品行为测试。
+另检查文档内具体路径、相对链接和命令是否存在。以上是文档与结构检查，不能当成产品行为、联网或安装验收。

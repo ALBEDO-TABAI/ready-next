@@ -10,6 +10,8 @@ revision_history:
   - v2 (2026-05-09): incorporated Codex round 1 — 7 瑕疵（3 Contract Gap + 3 Major + 1 Minor）：(#1) provider-parity gate `extra` 白名单加 `model-capability-resolver`（W4.5 新建文件）；(#2) vllm patch profile 不再"占位"——改为本 stage 实装最简 matchPredicate + stream_usage default patcher（避免 W3.1 4-profile coverage gate 红）；(#3) capabilityClass 字段名统一 `supportsVision / supportsThinking / supportsLongContext`（不是 `vision / thinking / longContext`）；(#4) thinking capability 不通过 `CapabilityModeMap.capabilityModes.thinking`（`CapabilityModeMap` keys 限定为 `CapabilityGroupId`，无 `thinking`）——改为通过 `AIModelConfig.thinkingMode?: AICapabilityMode` 独立字段或读 `AIModelDef.capabilityOverrides.supportsThinking` 直返；(#5) clarification 落点真实路径 `src/main/modules/tools/skill-primitives/ask-user.ts`（实测文件名，无 `-bridge` 后缀）；(#6) migration 034/035/036 SQL DDL 用 `IF NOT EXISTS`（与 `src/main/modules/migrations.ts` 现有约定一致）；(#7) gate 总数实测 38，不是 37（公式漏算 W3.0 parity gate）
 ---
 
+> 2026-09-06 文档核对：本文保留当前仍使用的专项合同及原验收记录；后文的日期、阶段状态和现场缺口按原记录理解，不据此推导今天全部已验收或仍未实现。当前应用边界以 [运行时合同](../../architecture/current-runtime-contracts.md) 为准，近期状态见 [PROGRESS](../../../PROGRESS.md)。
+
 # Stage S (Stage 13) — 完整功能 · 实施计划
 
 ## 0. 背景

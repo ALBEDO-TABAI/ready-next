@@ -1,6 +1,6 @@
 ---
 name: ready-human-touch-ppt-skill
-description: 生成横向翻页网页 PPT（单 HTML 文件），提供两种品牌级风格：① "Ready 点阵理性"（暖纸白 + 橘红点阵字标/点阵图表/点阵场动效 + mono 标签 + 玻璃浮层，Nothing×博朗×Apple 气质）② "Human Touch 温感人文"（蛋壳白 + 水木明体 + 直角无阴影 + 琥珀点图，诗性内敛）。内置图片槽位协议（后期可让 agent 按槽位换图）与点阵风格化图表。当用户要"Ready 风 PPT"、"Human Touch 风 PPT"、"点阵 PPT"、"dot matrix deck"、"温感人文幻灯片"或指名这两种设计风格的演示文稿时使用。
+description: 制作 Ready 点阵理性或 Human Touch 温感人文风格的单 HTML 演示文稿；用于用户指定这两种风格的网页 PPT。
 ---
 
 # Ready / Human Touch 双风格网页 PPT Skill

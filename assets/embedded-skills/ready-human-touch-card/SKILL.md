@@ -1,6 +1,6 @@
 ---
 name: ready-human-touch-card-skill
-description: 生成社交信息卡图组（小红书 3:4 封面+内容页、微信公众号 21:9+1:1 封面对），提供两种品牌级风格：① "Ready 点阵理性"（暖纸白+橘红点阵字标/点阵图表/点网底+mono 标签+玻璃浮层）② "Human Touch 温感人文"（蛋壳白+水木明体+直角无阴影+琥珀点图，诗性内敛）。HTML→Playwright 逐卡出 PNG；内置图片槽位协议（后期可让 agent 按槽位换图）与 DOM 实测校验器。当用户要 Ready 风/Human Touch 风的小红书图文、信息卡、社交卡片、微信封面、点阵风卡片时使用。
+description: 制作 Ready 点阵理性或 Human Touch 温感人文风格的社交信息卡与微信封面；仅用于用户指定这两种风格的图组。
 ---
 
 # Ready / Human Touch 双风格社交信息卡 Skill

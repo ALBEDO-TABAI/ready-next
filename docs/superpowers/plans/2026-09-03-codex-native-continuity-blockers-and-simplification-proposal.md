@@ -9,7 +9,11 @@ revision: 4
 prior_reviews:
   - ../audits/2026-09-03-codex-native-continuity-proposal-independent-review.md
   - ../audits/2026-09-03-codex-native-continuity-proposal-revision-3-review.md
+documentation_status: archived-in-place
+archived_at: 2026-09-06
 ---
+
+> 原位归档（2026-09-06）：固定历史证据仍引用此路径。保留此路径不代表全文仍是当前合同；其中的状态、源码位置和待办属于原记录。现行约束见 [当前运行时合同](../../architecture/current-runtime-contracts.md)，归档去向见 [文档清单](../../documentation-inventory.md)。
 
 # Codex 原生连续性实施：阻塞根因、ChatGPT runtime 对照与修复/精简提案
 

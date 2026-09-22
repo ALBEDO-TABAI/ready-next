@@ -1,3 +1,11 @@
+---
+enforce: false
+documentation_status: archived-in-place
+archived_at: 2026-09-06
+---
+
+> 原位归档（2026-09-06）：固定历史证据仍引用此路径。保留此路径不代表全文仍是当前合同；其中的状态、源码位置和待办属于原记录。现行约束见 [当前运行时合同](../architecture/current-runtime-contracts.md)，归档去向见 [文档清单](../documentation-inventory.md)。
+
 # 2026-06-23 — VEA YouTube 下载 + Send IM 工具暴露修复，及 Windows 运行时移植指引
 
 > 作者：Claude（Opus 4.8）｜ 分支：`agent-evolution/phase1` ｜ 提交：`fix(agent): repair VEA YouTube download + Send IM tool exposure`
@@ -62,7 +70,7 @@ codex 整个 diff **没碰 Python 下载代码**，只在 TS 编排层把失败�
 - 回归测试：`agent-sdk-runtime.test.ts` 新增「exposes skill_send_im_file when the file to send is referenced as @[file.md]」。
 
 ### 2.4 codex 对/错澄清（用于校正其经验文件）
-codex 的 send-im 文档（`docs/superpowers/plans/2026-06-17-send-im-l1-and-agent-state-fix-implementation.md`、`docs/diagnostics/2026-06-17-send-im-codex-round-layered-review.md`）**方向大体正确**：它识别了暴露层 `toolCount=0`、`adjudication_degraded`(s1 overlay)、`ret=-2/-3` 微信会话三件事，并做了 `@[Send IM]@@[文件]` 进 send-im 授权。
+codex 的 send-im 文档（`docs/archive/2026-09-06/docs/superpowers/plans/2026-06-17-send-im-l1-and-agent-state-fix-implementation.md`、`docs/archive/2026-09-06/docs/diagnostics/2026-06-17-send-im-codex-round-layered-review.md`）**方向大体正确**：它识别了暴露层 `toolCount=0`、`adjudication_degraded`(s1 overlay)、`ret=-2/-3` 微信会话三件事，并做了 `@[Send IM]@@[文件]` 进 send-im 授权。
 
 **但它的暴露修复只用图片验证**（AC-1：`@[Send IM] 把这四张图发到我微信`，`.png/.jpg`）。图片**不**命中 `shouldUseLocalDocumentToolSet` 的 `.md/.txt/.docx` 文档正则，所以图片路径没暴露这个 bug。用户实际发的是 `.md` 文档 → 命中文档-工具集塌缩，这条 codex 从未覆盖。**结论：codex 的 send-im 暴露分析对图片成立、对 `@[文件.md]` 文档不成立；本轮补齐。**
 
@@ -126,5 +134,5 @@ Ready 是**瘦壳 + 本地置备的运行时**两层，运行时不在安装包�
 ## 5. 关联文件
 - 修复提交：`fix(agent): repair VEA YouTube download + Send IM tool exposure`
 - 置备机制：`src/main/modules/skills-runtime/runtime-manager.ts`（`ensurePythonVenv` ~3153 / `ensureRuntimeToolchain` ~3388 / `syncEmbeddedSkill` ~3110 / `startModelPackDownload` ~763）
-- send-im 旧诊断（本轮校正其「仅图片验证」盲点）：`docs/diagnostics/2026-06-17-send-im-codex-round-layered-review.md`、`docs/superpowers/plans/2026-06-17-send-im-l1-and-agent-state-fix-implementation.md`
+- send-im 旧诊断（本轮校正其「仅图片验证」盲点）：`docs/archive/2026-09-06/docs/diagnostics/2026-06-17-send-im-codex-round-layered-review.md`、`docs/archive/2026-09-06/docs/superpowers/plans/2026-06-17-send-im-l1-and-agent-state-fix-implementation.md`
 - 微信出站：`src/python/ready_sidecar/channels/wechat_openclaw_adapter.py`、`src/main/modules/agent-control/runtime-core/channel-delivery-result.ts`

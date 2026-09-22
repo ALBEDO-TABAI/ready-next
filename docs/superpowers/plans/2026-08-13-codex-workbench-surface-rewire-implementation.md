@@ -5,13 +5,15 @@ reviewed_at: 2026-08-14
 status: implemented
 enforce: true
 depends_on:
-  - docs/superpowers/plans/2026-08-13-codex-capability-relight-index.md
-  - docs/superpowers/plans/2026-08-11-ready-codex-matrix-wiring-closure-implementation.md
+  - docs/archive/2026-09-06/docs/superpowers/plans/2026-08-13-codex-capability-relight-index.md
+  - docs/archive/2026-09-06/docs/superpowers/plans/2026-08-11-ready-codex-matrix-wiring-closure-implementation.md
   - docs/architecture/current-runtime-contracts.md
 note: >
   目标是让现行 Codex 主链真正推动文档、RSS、日程、Widget、Tag Forge 和地图，
   不复活 DomainAdapter / turn-engine。文件涌现保持独立产品调度。
 ---
+
+> 2026-09-06 文档核对：本文保留当前仍使用的专项合同及原验收记录；后文的日期、阶段状态和现场缺口按原记录理解，不据此推导今天全部已验收或仍未实现。当前应用边界以 [运行时合同](../../architecture/current-runtime-contracts.md) 为准，近期状态见 [PROGRESS](../../../PROGRESS.md)。
 
 # Codex 工作面重接线
 
@@ -340,6 +342,6 @@ npm run typecheck
 - §6：补 RSS 后台产品动作、刷新后 readback、日程窗口和 exact effect receipt。
 - §7：补结构化 `widget_target`、anchor 绑定，以及实时证据与 Widget 写回可组合。
 - §9：补 Tag Forge 五件套在 Codex composition 生效，及 `tagForge.*` 同步动作边界。
-- `2026-08-13-codex-capability-relight-index.md` 与 `2026-08-11-ready-codex-matrix-wiring-closure-implementation.md` 只在真实 gate 通过后更新状态，不提前写成已完成。
+- `../../archive/2026-09-06/docs/superpowers/plans/2026-08-13-codex-capability-relight-index.md` 与 `../../archive/2026-09-06/docs/superpowers/plans/2026-08-11-ready-codex-matrix-wiring-closure-implementation.md` 只在真实 gate 通过后更新状态，不提前写成已完成。
 
 实施完成前，本计划只描述目标合同；当前实现仍按代码与 `current-runtime-contracts.md` 的已验证事实为准。

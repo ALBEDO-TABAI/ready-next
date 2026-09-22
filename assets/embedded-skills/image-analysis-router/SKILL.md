@@ -1,6 +1,6 @@
 ---
 name: image-analysis-router
-description: Route image-heavy requests into the correct critique workflow, then produce a targeted analysis plus study report. Use when the agent receives one or more images and the user wants structured analysis, style classification, critique, or learning notes for any visual material - posters and brand graphics, UI screenshots and app screens, photographs, paintings and illustrations, interiors, architecture and urban scenes, infographics, product design, comics, fashion, sculpture, game visuals, scientific or medical images, typography, slides and report pages, film stills, or mixed image sets. Trigger on requests such as "分析这张图", "拆一下这组海报", "看看这张摄影作品怎么学", "分析这个界面", "帮我看这页PPT", or any case where a generic image summary would be too shallow.
+description: 按图像类型选择专业分析方法；用于用户未指定分析框架的视觉评析或学习拆解，不用于普通截图问答。
 ---
 
 # Image Analysis Router
@@ -18,6 +18,8 @@ This skill expects image evidence plus a visual-analysis goal.
 
 ## Read in order
 
+Resolve `scripts/` paths from this skill's directory, using `$CLAUDE_SKILL_DIR` when the host provides it; do not rely on the workspace's current directory. Script availability does not grant execution permission.
+
 - Read [references/route-matrix.md](./references/route-matrix.md) first.
 - Read [references/output-contract.md](./references/output-contract.md) before drafting the final answer.
 - If the script or visual read indicates a batch, read [references/method-batch-handling.md](./references/method-batch-handling.md).
@@ -29,7 +31,7 @@ This skill expects image evidence plus a visual-analysis goal.
 ## Workflow
 
 1. Gather the user's goal, image count, file names, and any supplied context.
-2. If prompt text, file names, or source URLs are available, run:
+2. When the local script is available and authorized, use it for an ambiguous route; otherwise route from the visible image and user goal:
    - `python3 scripts/route_image_request.py --prompt "<user request>" --file "<name-or-path>" --hint "<ocr-or-caption>" --source-url "<url>"`
    - Windows compatible: `py .\scripts\route_image_request.py ...`
    - Add `--quiet` to suppress route_scores/focus_scores/image_routes when only the decision is needed.
@@ -37,7 +39,7 @@ This skill expects image evidence plus a visual-analysis goal.
 4. Read the script status before route selection:
    - `visual_input_missing`: if you can already see the image(s) directly in the conversation, this status is moot — pass the attachment via `--file`, note it via `--hint "image attached"`, or simply proceed with visual routing. Only when you genuinely have no image evidence: stop and ask upstream for it.
    - `visual_evidence_insufficient`: do not force a route; state what is readable and what blocks analysis. Confirm against the actual image — the script infers this from the prompt wording.
-   - `needs_clarification`: ask one clarifying question using the script's route and focus options.
+   - `needs_clarification`: check the actual image and conversation first. Ask only if missing user intent would materially change the report; a keyword-script result alone does not block the task.
    - `router_unavailable` (or the script errors): proceed with visual-only routing and note that the keyword prior was unavailable.
    - `ok`: continue.
 5. Visually inspect at least one representative image before locking the route. If visual inspection conflicts with the script, follow the image and state the override reason briefly.
@@ -71,7 +73,7 @@ If `route_confidence` or `intent_confidence` is `low`, also surface `route_confi
 
 ## Status Schema
 
-When the script returns a blocking status, return the canonical JSON object below (or the equivalent text block). Do NOT continue to a normal Analysis Report.
+When actual image inspection and context confirm a blocking status, return the canonical JSON object below (or the equivalent text block). Do not produce a normal report without the missing evidence. A script status overridden by real evidence is not a blocker.
 
 ```json
 {

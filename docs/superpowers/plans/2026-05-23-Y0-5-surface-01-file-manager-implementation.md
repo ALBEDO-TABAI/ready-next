@@ -7,7 +7,12 @@ status: draft-for-baseline
 parent_plan: 2026-05-23-Y-ready-product-completion-and-release-hardening-roadmap.md
 parent_row: §9.1 row 1
 operator_class: agent-only
+enforce: false
+documentation_status: archived-in-place
+archived_at: 2026-09-06
 ---
+
+> 原位归档（2026-09-06）：固定历史证据仍引用此路径。保留此路径不代表全文仍是当前合同；其中的状态、源码位置和待办属于原记录。现行约束见 [当前运行时合同](../../architecture/current-runtime-contracts.md)，归档去向见 [文档清单](../../documentation-inventory.md)。
 
 # Surface 01 — File manager
 

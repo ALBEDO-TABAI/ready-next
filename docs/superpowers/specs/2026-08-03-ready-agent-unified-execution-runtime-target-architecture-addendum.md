@@ -21,7 +21,11 @@ related:
   - docs/superpowers/plans/2026-08-03-ready-agent-unified-execution-runtime-implementation.md
 implementation_branch: codex/agent-renew
 implementation_worktree: /Users/user/实验田/ready-cowork-agent-renew
+documentation_status: archived-in-place
+archived_at: 2026-09-06
 ---
+
+> 原位归档（2026-09-06）：固定历史证据仍引用此路径。保留此路径不代表全文仍是当前合同；其中的状态、源码位置和待办属于原记录。现行约束见 [当前运行时合同](../../architecture/current-runtime-contracts.md)，归档去向见 [文档清单](../../documentation-inventory.md)。
 
 # Ready Agent 统一执行环境目标架构补充提案
 

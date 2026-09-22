@@ -29,11 +29,13 @@ note: >
   工单纪律：先合同测试（红）后实现（绿）；每单 ≤约 300 行 diff、10 分钟内可自验；
   不顺手重构、不碰无关文件；触碰 agent-sdk-runtime.ts 的工单全部串行。
 pairs_with:
-  - docs/superpowers/plans/2026-06-10-agent-stability-closure-roadmap.md
+  - docs/archive/2026-09-06/docs/superpowers/plans/2026-06-10-agent-stability-closure-roadmap.md
 related:
-  - docs/superpowers/plans/2026-06-09-agent-long-task-budget-resumability-implementation.md（Plan L）
-  - docs/superpowers/plans/2026-06-09-browser-observation-probe-layer-implementation.md（Plan P）
+  - docs/archive/2026-09-06/docs/superpowers/plans/2026-06-09-agent-long-task-budget-resumability-implementation.md（Plan L）
+  - docs/archive/2026-09-06/docs/superpowers/plans/2026-06-09-browser-observation-probe-layer-implementation.md（Plan P）
 ---
+
+> 2026-09-06 文档核对：本文保留当前仍使用的专项合同及原验收记录；后文的日期、阶段状态和现场缺口按原记录理解，不据此推导今天全部已验收或仍未实现。当前应用边界以 [运行时合同](../../architecture/current-runtime-contracts.md) 为准，近期状态见 [PROGRESS](../../../PROGRESS.md)。
 
 # Agent Stability Closure 实施子计划
 

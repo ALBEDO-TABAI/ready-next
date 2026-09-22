@@ -1,0 +1,93 @@
+---
+date: 2026-07-17
+enforce: false
+status: in_progress
+scope: kimi-k3-agent-specialization
+archived_at: 2026-09-06
+archive_reason: superseded-project-documentation
+---
+
+> 已归档（2026-09-06）：本文保留编写当时的设计、状态与证据，不是当前执行入口；归档不表示原计划全部实现。现行说明见 [当前运行时合同](../../../../../architecture/current-runtime-contracts.md)，去向见 [文档清单](../../../../../documentation-inventory.md)。
+
+# Kimi K3 Agent 特化实施合同
+
+## 1. 目标与假设
+
+当前目标是在 Codex 准入冻结的 provider 路由与 Ready 上游网关中保留 Kimi Coding `k3` 的思考块与签名合同，不新建第二套 Agent 路径。原 `AgentSdkRuntime -> AgentSdkTurnOrchestrator` 记载是历史实施背景，不是现行生产主链。
+
+本实施基于以下已核实事实：
+
+- 目标地址为 `https://api.kimi.com/coding`，模型 ID 为 `k3`。
+- K3 支持且只向 Ready 暴露 `low / high / max` 三档思考强度，默认 `high`。
+- K3 多轮质量依赖完整回传历史思考块；普通文字回复与工具调用回复都不能丢失思考块。
+- 从其他模型的既有会话切入 K3 不安全，必须在发出请求前拒绝并提示新建会话。
+- 本机官方 Kimi Code 0.26.0 的实现使用 Anthropic 请求时发送思考强度与 `keep: all` 等价的上下文保留合同。
+
+不在本次范围内：改造其他 Kimi/Moonshot 模型、增加自定义强度、保留旧的不完整 K3 会话、重构通用设置页。
+
+## 2. 机器可验证合同
+
+### K3-1 识别与能力
+
+仅当地址是 Kimi Coding 且模型 ID 精确为 `k3` 时启用特化：
+
+- 协议继续使用 Anthropic `/v1/messages`。
+- `supportsThinking = true`。
+- `multiTurnThinkingPolicy = echo_required`。
+- 未设置或设置了 K3 不支持的强度时归一为 `high`。
+- 非 K3 配置的能力与请求不变。
+
+### K3-2 请求
+
+K3 的阻塞请求与流式请求必须发送同一合同：
+
+- `thinking.type = enabled`。
+- `output_config.effort` 只允许 `low / high / max`。
+- `context_management.edits` 包含 `clear_thinking_20251015` 且 `keep = all`。
+- 请求头包含对应的 context-management beta；不得覆盖既有 beta。
+
+设置页的连接测试也必须使用同一请求合同，避免“测试成功、真实 Agent 失败”的分叉。
+
+### K3-3 历史闭环
+
+- Anthropic 响应中的思考块必须同时附着到普通文字输出和工具调用输出。
+- 下一轮序列化必须把思考文本及签名原样放回同一个 assistant 消息。
+- 流式与非流式路径最终形成相同的历史结构。
+- 会话快照和压缩不得剥离保留下来的 K3 身份或思考块。
+- Browser fresh verifier 的候选在 canonical closeout 接受前不得进入共享会话；接受后的最终 assistant 消息必须继承已接受 K3 回复的完整 providerData，不能用无身份纯文本替换。这不得用来恢复旧 Dynamic Delivery。
+
+### K3-4 模型切换保护
+
+- K3 产出的每个 assistant 输出携带稳定的 K3 会话身份。
+- K3 请求若看到其他模型、旧版无身份 assistant 输出，或来源不明的压缩摘要，必须在联网前停止。
+- 错误信息必须明确提示用户新建会话；不得静默清空历史或只把旧界面留着却丢弃上下文。
+
+### K3-5 设置体验
+
+- K3 配置显示“思考强度”。
+- 选项精确为 `low / high / max`，默认显示 `high`。
+- 其他 OpenAI Responses 模型继续显示既有选项，不受 K3 特化影响。
+
+## 3. 验证清单
+
+1. 行为测试：K3 能力、三档归一、非 K3 不变。
+2. 行为测试：真实 `ReadyAnthropicModel` 捕获的阻塞/流式请求体与请求头符合 K3-2。
+3. 行为测试：普通文字和工具调用的思考块均能跨轮原样回传。
+4. 行为测试：空白会话与纯 K3 会话放行；其他模型、旧版无身份历史与来源不明压缩摘要拒绝，且拒绝发生在 fetch 前。
+5. 行为测试：压缩后的纯 K3 摘要保留身份；混合或无身份历史不伪装成 K3。
+6. 行为测试：Browser fresh verifier 拒绝候选不泄漏思考历史；接受候选把 K3 providerData 附到最终共享消息，下一条真实用户轮仍通过 K3 历史检查。
+7. 运行 `npm run verify:streaming`、`npm run typecheck`，再检查改动范围与密钥痕迹。
+8. 使用用户临时提供的凭据对 `low / high / max` 以及两轮历史回传做隔离实测；凭据只进进程环境，不写文件、不进日志。联网前置不可用时不得把该项宣告通过。
+
+## 4. 完成标准
+
+只有上述合同和验证清单全部通过，且无用户密钥落盘、无无关文件被改动，才可标记完成。
+
+## 5. 复核与偏差记录（2026-07-22）
+
+真机实测（run `req-1784708095233-pl685k`）+ 逐行复核结论：
+
+- K3-3 历史闭环**实现正确**：anthropic 路径 thinking 块（含空签名）逐字回传并双附着，压缩身份检查生效；实测零 4xx。
+- 发现并已修两处规格偏差（commit `2c7293377`）：①thinking 增量不计入 delivery 无进展窗口，深思 >120s 会被误杀（新增 `reasoning_delta` 进展 + `provider_stream_first_reasoning`/`headersMs` 观测）；②输出上限落入 anthropic 4096 兜底，与 K3 官方默认 131072 严重不符（现默认 65536，override 优先）。
+- 待办（移交 2026-07-22 provider 合同 P5）：验证清单 #8 的三档/两轮回传实测仍缺凭据；生态证据显示 coding 端点上线初期可能仅支持 `max` 档（Ready 默认 high 或被服务端静默升档，是首 token 27-57s 的候选解释），实测后裁决默认档位。
+- 实测慢启动数据：首 token 54.7s、前四轮 first-delta 27-57s（07-20 基线 1-8s），供后续对比。

@@ -4,7 +4,7 @@ sequence: after M (frame update single source of truth)
 status: draft v9 (2026-05-06)
 verify_target: verify:n
 inherits: verify:m
-enforce: true
+enforce: false
 revision_history:
   - v1 (2026-05-06): initial draft.
   - v2 (2026-05-06): codex RED on v1 (7 RED + 3 YELLOW). v2 addressed
@@ -139,7 +139,11 @@ revision_history:
       [Y2 partial] regex-lite gate story tightened — only static-data ↔
       static-data checks; runtime introspection handles the registration
       shape that regex can't.
+documentation_status: archived-in-place
+archived_at: 2026-09-06
 ---
+
+> 原位归档（2026-09-06）：固定历史证据仍引用此路径。保留此路径不代表全文仍是当前合同；其中的状态、源码位置和待办属于原记录。现行约束见 [当前运行时合同](../../architecture/current-runtime-contracts.md)，归档去向见 [文档清单](../../documentation-inventory.md)。
 
 # Stage N (Stage 8) — Parent loop steps back; child loop owns long-skill execution
 

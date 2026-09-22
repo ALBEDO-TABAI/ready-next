@@ -26,6 +26,8 @@ revision_history:
   - v18 (2026-05-09): incorporated Codex round 17 — 2 Contract Gap：(R17-#1) `RequestEnvelope` 实测无 scope 字段——gate (D) 必须先要求 RequestEnvelope 扩 `scopeId?: string`，再串联 4 处接入；(R17-#2) `getToolSchemasForGroup`（OpenAI/Anthropic schema 列表）签名也要扩 `scopeId?` 参数；schema list 与 definition list 双源都过授权
 ---
 
+> 2026-09-06 文档核对：本文保留当前仍使用的专项合同及原验收记录；后文的日期、阶段状态和现场缺口按原记录理解，不据此推导今天全部已验收或仍未实现。当前应用边界以 [运行时合同](../../architecture/current-runtime-contracts.md) 为准，近期状态见 [PROGRESS](../../../PROGRESS.md)。
+
 # Stage T (Stage 14) — 深度扩展 · 实施计划
 
 ## 0. 背景

@@ -26,7 +26,7 @@ related:
   - docs/superpowers/plans/2026-07-09-boost-dynamic-workflow-implementation.md
   - docs/superpowers/plans/2026-06-11-agent-evolution-phase1-implementation.md
   - docs/superpowers/plans/2026-06-12-agent-evolution-phase3-implementation.md
-  - docs/superpowers/plans/2026-06-13-agent-evolution-phase4-implementation.md
+  - docs/archive/2026-09-06/docs/superpowers/plans/2026-06-13-agent-evolution-phase4-implementation.md
 review:
   reviewer: Claude
   date: 2026-07-22
@@ -34,7 +34,11 @@ review:
   adjudication: docs/superpowers/plans/2026-07-22-agent-long-task-remediation-roadmap.md
   scope_delta: 吸收 Browser 顺序收口计划 §1.5 四张 interaction 持久表（归入 P3）；§1.5.1 账本本就与本文 §2.2 同源，P1 为唯一建表地
   boost_note: 两份 boost 文档已在其自身 §0 取消（无代码落地）；本文 §12.4 与其无冲突，不需用户重裁
+documentation_status: archived-in-place
+archived_at: 2026-09-06
 ---
+
+> 原位归档（2026-09-06）：固定历史证据仍引用此路径。保留此路径不代表全文仍是当前合同；其中的状态、源码位置和待办属于原记录。现行约束见 [当前运行时合同](../../architecture/current-runtime-contracts.md)，归档去向见 [文档清单](../../documentation-inventory.md)。
 
 # Agent 长程 Plan-and-Execute、策略与分支运行时架构计划
 

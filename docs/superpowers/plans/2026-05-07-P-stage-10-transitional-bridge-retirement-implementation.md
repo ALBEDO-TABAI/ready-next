@@ -1,9 +1,9 @@
 ---
 stage: P (Stage 10)
 date: 2026-05-07
-enforce: true
+enforce: false
 status: approved (v8 — Codex round 8 returned READY-TO-IMPLEMENT 2026-05-07)
-predecessor: 2026-05-07-O-ui-projection-consolidation-implementation.md
+predecessor: ../../archive/2026-09-06/docs/superpowers/plans/2026-05-07-O-ui-projection-consolidation-implementation.md
 revision_history:
   - v1 (2026-05-07): initial draft
   - v2 (2026-05-07): incorporated Codex review round 1 — 11 findings addressed
@@ -13,7 +13,11 @@ revision_history:
   - v6 (2026-05-07): incorporated Codex review round 5 — 3 HIGH (9 missed test callers + private helper test-access guidance + resolvePrimitiveSkillId test path) + 2 MEDIUM (executeToolCall ToolContext callers + prepareInitialRun authorization required) + 1 LOW (§3.9 stale Unfiltered naming)
   - v7 (2026-05-07): incorporated Codex review round 6 — 1 HIGH (legacy-chain-dependent tests at `skill-inspect-run-state-vea-contract.test.ts` / `skill-primitive-continuity.test.ts` will fail after Step C) + 1 HIGH (rule 11 misclassification: executeToolCall sites are model paths, not child-internal) + 1 MEDIUM (rule 4 false-positive prescriptions for tests asserting positive skill visibility)
   - v8 (2026-05-07): incorporated Codex review round 7 — 4 narrow corrections: (a) HIGH 增 `skill-tool-gating-by-session.test.ts:192-198`；(b) HIGH 修正 `tool-policy-authorization.test.ts` 行号映射（real getPolicy legacy at 358-365, prepareInitialRun baseline at 426-440）；(c) MEDIUM `skill-execution-tools-removed.test.ts` 强制 selected auth；(d) MEDIUM `skill-internal-action-runtime.test.ts:151` allowedTypedActions 用 `skill_video_expert_ai_analyze`
+documentation_status: archived-in-place
+archived_at: 2026-09-06
 ---
+
+> 原位归档（2026-09-06）：固定历史证据仍引用此路径。保留此路径不代表全文仍是当前合同；其中的状态、源码位置和待办属于原记录。现行约束见 [当前运行时合同](../../architecture/current-runtime-contracts.md)，归档去向见 [文档清单](../../documentation-inventory.md)。
 
 # Stage 10 (P 阶段) — 删过渡桥，做最终清场
 

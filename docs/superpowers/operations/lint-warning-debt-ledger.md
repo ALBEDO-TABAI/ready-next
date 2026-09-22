@@ -1,3 +1,5 @@
+> 2026-09-06 用途核对：本表保留 lint 预算检查所消费的基线，不是今天重新扫描得到的剩余问题计数；实际结果以当前检查输出为准。
+
 # Lint warning debt ledger
 
 > Source: `npm run lint:check` on the current release source, reconciled 2026-08-18

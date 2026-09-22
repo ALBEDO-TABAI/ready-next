@@ -1,6 +1,6 @@
 ---
 name: image-reverse-describe
-description: 图像反推描述引擎——四层图像分析框架的第一层（描述层）。对任意一张图片，产出"取证优先、可逆可重建、严格中立"的专业级结构化描述：把画面沿深度轴（前/中/后景）与显著性轴（主体/陪体/环境）双轴拆解，精确到方位坐标、深度层级、占比、遮挡关系，并为每一项判断（深度/光线/色彩/材质）挂上可见视觉依据。Use when the user provides one or more images and wants a rigorous, exhaustive, reconstructable description of what is in the image and how it is spatially and physically structured—rather than a quick summary, an aesthetic verdict, or a type-specific critique. 触发短语包括："反推这张图""把这张图拆到能复现""精确描述这张图的前中后景""这张图的画面结构是什么""逐层拆解这张图""image reverse""图像反推""描述层"，或任何需要把一张图片转写成精确、可逆、有据可查的文字结构的场景。即使用户只说"详细描述一下这张图"，只要诉求是"准确丰富到可重建"而非"快速概括"，也应使用此 skill。Do not use this skill to deliver a good/bad judgment, emotional reading, or commercial-performance critique—those belong to later layers; this skill only produces the neutral evidence-based description they rest on.
+description: 将图片拆解成可据以重建的空间、构图、光色和材质描述；用于精确反推，不用于快速概括或好坏评价。
 ---
 
 # Image Reverse-Describe（图像反推描述 · 描述层）

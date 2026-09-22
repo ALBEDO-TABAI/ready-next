@@ -3,7 +3,7 @@ title: Ready Browser Runtime 与无人值守研究实施计划
 date: 2026-07-24
 kind: implementation
 status: approved-for-implementation
-enforce: true
+enforce: false
 owner: 白
 author: Codex
 approval:
@@ -28,7 +28,11 @@ adjudicates:
   - 后台指针操作必须先通过独立真实 Electron 可行性 spike；未通过不得开始 B1/B2
   - B6 不得独立合并，必须与 Agent A6 同一 gate、同一提交边界完成
 scope: Browser session/target 服务、后台动作、页签 finalize、用户接管、Browser tool actions、研究工作项、证据、恢复及真实小红书验收
+documentation_status: archived-in-place
+archived_at: 2026-09-06
 ---
+
+> 原位归档（2026-09-06）：固定历史证据仍引用此路径。保留此路径不代表全文仍是当前合同；其中的状态、源码位置和待办属于原记录。现行约束见 [当前运行时合同](../../architecture/current-runtime-contracts.md)，归档去向见 [文档清单](../../documentation-inventory.md)。
 
 # Ready Browser Runtime 与无人值守研究实施计划
 

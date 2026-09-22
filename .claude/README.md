@@ -1,19 +1,9 @@
 # .claude 目录说明
 
-> 更新时间: 2026-03-07
+> 核对日期：2026-09-06
 
-## 目录用途
-`.claude/` 用于存放多代理协作过程中的临时资料与流程文档，不作为运行时依赖。
+当前协作规则以根目录 [CLAUDE.md](../CLAUDE.md) / [AGENTS.md](../AGENTS.md) 为准；[architectural-principles.md](architectural-principles.md) 保留架构方法。这里不是应用运行时数据目录。
 
-当前结构：
-- 当前仓库内不再保留嵌套 worktree。
-- 如后续需要临时协作 worktree，应放在仓库外部或由 Git 明确管理，避免再次把 gitlink 提交进主仓库。
+旧 stage5/stage6 草稿已归档。仍被检查脚本引用的 `stage6/plan-v9.md` 保留原位，只供历史边界追溯；具体去向见 [文档清单](../docs/documentation-inventory.md)。`.claude/skills/` 保留项目协作技能，不属于本次历史叙述文档迁移。
 
-## 使用约定
-- 业务代码以主仓库 `src/` 为准。
-- `.claude/` 中的内容默认只用于协作记录、提示词、草稿和中间产物。
-- 需要长期保留的设计文档，应迁移到正式文档目录，而不是依附临时 worktree。
-
-## 清理建议
-- 定期检查是否有临时文件、缓存或误提交的嵌套仓库。
-- 避免在 `.claude/` 下创建未经 Git worktree 管理的仓库副本。
+长期合同写入 `docs/architecture/` 或现行实施计划；临时 worktree 由 Git 管理，不把嵌套仓库或运行时数据提交到本目录。

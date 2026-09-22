@@ -12,6 +12,8 @@ supersedes_after_approval:
   - 2026-09-03-codex-native-continuity-blockers-and-simplification-proposal.md 的输入锁定与动作恢复方案
 ---
 
+> 2026-09-06 文档核对：本文保留当前仍使用的专项合同及原验收记录；后文的日期、阶段状态和现场缺口按原记录理解，不据此推导今天全部已验收或仍未实现。当前应用边界以 [运行时合同](../../architecture/current-runtime-contracts.md) 为准，近期状态见 [PROGRESS](../../../PROGRESS.md)。
+
 # Ready 历史会话续聊、草稿编辑与恢复闭环修复
 
 > 本文是施工合同，不是包体通过凭证。Revision 7 的复查与根因处置见 [2026-09-05 记录](../audits/2026-09-05-history-continuation-root-cause-review.md)。源码施工已落地；安装是否通过只消费同一 DMG 的 v2 发布回执及 `outputs/history-continuation-installed/<DMG sha256>/<run>/installed-proof.json`。§2 的普查快照、§10 的阶段顺序和 §13 的开工前意见均保留为历史，不代表当前未施工，也不能代替安装证明。

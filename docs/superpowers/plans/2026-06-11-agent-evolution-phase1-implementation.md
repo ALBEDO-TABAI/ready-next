@@ -13,18 +13,20 @@ executor: Claude (Fable 5)
 reviewer: Codex（共识）+ Claude（终审）
 enforce: true
 note: >
-  本文将 agent-evolution 路线（docs/agent-evolution/00-路线图与目标架构总览.md）的阶段一
+  本文将 agent-evolution 路线（docs/archive/2026-09-06/docs/agent-evolution/00-路线图与目标架构总览.md）的阶段一
   拆为可执行工单。工单纪律沿用 stability 合同：先合同测试（红）后实现（绿）；
   每单 ≤约 300 行 diff、10 分钟内可自验；不顺手重构、不碰无关文件。
   本阶段不触碰 agent-sdk-runtime.ts 的终态路径与 run-finalizer.ts（02 篇 Q 系列属阶段二），
   与 stability 合同无同文件竞争；唯一共享文件为 tool-executor.ts（I3/T4），两轨道内部串行。
 pairs_with:
-  - docs/agent-evolution/00-路线图与目标架构总览.md（路线）
-  - docs/agent-evolution/08-缺陷解决映射与验收追踪.md（验收脊柱，工单合入后回填状态）
+  - docs/archive/2026-09-06/docs/agent-evolution/00-路线图与目标架构总览.md（路线）
+  - docs/archive/2026-09-06/docs/agent-evolution/08-缺陷解决映射与验收追踪.md（验收脊柱，工单合入后回填状态）
 related:
   - docs/superpowers/plans/2026-06-10-agent-stability-closure-implementation.md（S 系列，已合入基线）
   - docs/agent-evolution/01/05/06/07/11（本阶段工单的设计出处）
 ---
+
+> 2026-09-06 文档核对：本文保留当前仍使用的专项合同及原验收记录；后文的日期、阶段状态和现场缺口按原记录理解，不据此推导今天全部已验收或仍未实现。当前应用边界以 [运行时合同](../../architecture/current-runtime-contracts.md) 为准，近期状态见 [PROGRESS](../../../PROGRESS.md)。
 
 # Agent Evolution 阶段一实施子计划
 
@@ -181,7 +183,7 @@ related:
 
 ### EP1-G1 verify 链与文档同步
 
-- **改动文件**：`package.json`（新增 `verify:evolution-p1`：本计划全部焦点测试，**内部串接 `npm run verify:native`** 覆盖 K2/I3-2 的 SQLite 迁移；若不内联则在完成定义里单列）、`CLAUDE.md` + `AGENTS.md` §8 索引追加本合同（§12 同步纪律）、`docs/agent-evolution/08-缺陷解决映射与验收追踪.md`（本阶段行回填状态）
+- **改动文件**：`package.json`（新增 `verify:evolution-p1`：本计划全部焦点测试，**内部串接 `npm run verify:native`** 覆盖 K2/I3-2 的 SQLite 迁移；若不内联则在完成定义里单列）、`CLAUDE.md` + `AGENTS.md` §8 索引追加本合同（§12 同步纪律）、`docs/archive/2026-09-06/docs/agent-evolution/08-缺陷解决映射与验收追踪.md`（本阶段行回填状态）
 - **实施要点**：硬约束变化（确认闸门、staged 注入禁令）按 CLAUDE.md §10 同步进根目录指引 §2。
 - **验证**：`npm run verify:evolution-p1 && npm run verify:native && npm run typecheck && npm run test`（Codex 评审 P2#3：native 门补回，K2/I3-2 含 SQLite 迁移）
 - **规模**：~60 行。

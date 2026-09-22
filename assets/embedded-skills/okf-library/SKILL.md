@@ -1,6 +1,6 @@
 ---
 name: okf-library
-description: 定期盘点整个工作区里的所有 OKF 知识包（knowledge bundle）——通过母题索引（OKF-INDEX.md）+ 全盘扫描定位它们，再归并去重、重新归纳、并涌现新的跨包知识包，沉淀进一个更收拢受控（canonical）的知识库目录。当用户说"盘点一下工作区有哪些知识包"、"整理/合并现有的知识库"、"把零散的知识包归整到受控知识库"、"重新归纳整理这些 OKF 知识包"、"更新母题索引"、"看看知识库里有什么重复/冲突/缺口"、"做一次知识库治理"、"okf library"时触发——即使只说"帮我把这些知识包理一理/并一并"也要用。本 skill 负责"工作区级"的盘点与治理；若只是把某一批新资料提炼成单个知识包，请改用 okf-bundle（本 skill 在需要重新提炼某范围时会调用它）。
+description: 盘点、去重和归并工作区中已有的多个 OKF 知识包；用于知识库治理，单批资料提炼由 okf-bundle 处理。
 compatibility: 需要 bash + Python 3 与 PyYAML（pip install pyyaml --break-system-packages）。
 ---
 
@@ -23,6 +23,8 @@ compatibility: 需要 bash + Python 3 与 PyYAML（pip install pyyaml --break-sy
 - **母题索引**：默认 `<workspace-root>/OKF-INDEX.md`（大写，刻意区别于 OKF 包内保留的小写 `index.md`，不会被误认成包内目录）。
 
 ## 工作流
+
+下文 `<skill>` 指当前技能目录，宿主提供时使用 `$CLAUDE_SKILL_DIR`；先解析实际位置再执行 `scripts/`。执行与写入仍服从本轮授权；校验脚本不可运行时说明未完成校验，不声称已通过。
 
 ### 1. 定位 + 对账（locate + reconcile）
 ```bash

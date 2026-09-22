@@ -1,3 +1,11 @@
+---
+enforce: false
+documentation_status: archived-in-place
+archived_at: 2026-09-06
+---
+
+> 原位归档（2026-09-06）：固定历史证据仍引用此路径。保留此路径不代表全文仍是当前合同；其中的状态、源码位置和待办属于原记录。现行约束见 [当前运行时合同](../../architecture/current-runtime-contracts.md)，归档去向见 [文档清单](../../documentation-inventory.md)。
+
 # CC-Source 对照分析 + Ready 项目理想架构路线
 
 > **写作背景**：上一份文档（`2026-04-30-skill-runtime-residual-architectural-debt.md`）盘点了 Layer 1 完成后剩下的 26 项架构债（5 根因 + 5 次生债 + 8 盲点 + 小品味债）。本文档去 `/Users/user/Documents/实验田/CC-Source`（Claude Code 2.1.88 源码——Anthropic 自家的"标准答案"）对照，看每条根因 / 盲点在工业级 agent harness 里是怎么处理的，再翻译到 Ready 项目的形态约束下，得出"理想架构"路线。

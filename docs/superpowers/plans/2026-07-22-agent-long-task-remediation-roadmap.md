@@ -3,7 +3,7 @@ title: Working Agent 长任务与浏览器所有权整治路线图（裁决版�
 date: 2026-07-22
 kind: roadmap-adjudication
 status: approved
-enforce: true
+enforce: false
 approved_by: 白（2026-07-22，三项决策全部按推荐确认）
 owner: 白
 author: Claude
@@ -14,7 +14,11 @@ adjudicates:
 requires:
   - docs/architecture/current-runtime-contracts.md §5..§6
   - .claude/architectural-principles.md
+documentation_status: archived-in-place
+archived_at: 2026-09-06
 ---
+
+> 原位归档（2026-09-06）：固定历史证据仍引用此路径。保留此路径不代表全文仍是当前合同；其中的状态、源码位置和待办属于原记录。现行约束见 [当前运行时合同](../../architecture/current-runtime-contracts.md)，归档去向见 [文档清单](../../documentation-inventory.md)。
 
 # Working Agent 长任务与浏览器所有权整治路线图（裁决版）
 
@@ -22,7 +26,7 @@ requires:
 
 本文只做一件事：对 2026-07-22 三份文档（根因审计 + Browser 顺序收口计划 + 长任务架构计划）以及所有相邻在途车道做**跨计划排序与范围裁决**。证据链在审计文档（含其 §6 独立复核）；阶段实施细节在两份配对计划；本文不重复它们，只裁决"谁先谁后、边界在哪、冲突怎么定"。
 
-2026-07-22 用户已确认全部裁决与 §5 三项决策，本文为 approved，是跨计划排序与范围的唯一权威。配对状态：收口计划 `approved-for-implementation / enforce: true`（含 §1.8 默认路由与 S3-min 定稿）；架构计划方向已确认、唯一实施阻塞 = A1–A12。执行入口见配套 handoff：`docs/superpowers/plans/2026-07-22-codex-implementation-handoff.md`。后续任一范围变更先改本文裁决条目，再同步配对计划。
+2026-07-22 用户已确认全部裁决与 §5 三项决策，本文为 approved，是跨计划排序与范围的唯一权威。配对状态：收口计划 `approved-for-implementation / enforce: true`（含 §1.8 默认路由与 S3-min 定稿）；架构计划方向已确认、唯一实施阻塞 = A1–A12。执行入口见配套 handoff：`docs/archive/2026-09-06/docs/superpowers/plans/2026-07-22-codex-implementation-handoff.md`。后续任一范围变更先改本文裁决条目，再同步配对计划。
 
 ## 1. 事实基座（已独立复核，不再重开）
 
@@ -179,4 +183,4 @@ doc 2 S0 清单之外，以下缺口必须同批入 S0 失败测试或 L1 对应
 
 ## 7. 执行入口
 
-Codex 的启动步骤、命令、红线与汇报合同全部在配套 handoff（唯一执行入口，不在本文重复）：`docs/superpowers/plans/2026-07-22-codex-implementation-handoff.md`。
+Codex 的启动步骤、命令、红线与汇报合同全部在配套 handoff（唯一执行入口，不在本文重复）：`docs/archive/2026-09-06/docs/superpowers/plans/2026-07-22-codex-implementation-handoff.md`。

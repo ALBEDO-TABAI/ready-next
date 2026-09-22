@@ -1,3 +1,11 @@
+---
+enforce: false
+documentation_status: archived-in-place
+archived_at: 2026-09-06
+---
+
+> 原位归档（2026-09-06）：代码/检查引用：scripts/check-ledger-write-direction.cjs。保留此路径不代表全文仍是当前合同；其中的状态、源码位置和待办属于原记录。现行约束见 [当前运行时合同](../../architecture/current-runtime-contracts.md)，归档去向见 [文档清单](../../documentation-inventory.md)。
+
 # 账本所有权矩阵（EP2-T1 成文，07 §1 设计落仓）
 
 > 本表是写方向 gate（EP2-T2 `check-ledger-write-direction.cjs`）的白名单依据。

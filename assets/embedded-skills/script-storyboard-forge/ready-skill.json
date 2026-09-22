@@ -2,7 +2,7 @@
   "id": "script-storyboard-forge",
   "name": "script-storyboard-forge",
   "displayName": "Script Storyboard Forge",
-  "description": "将短视频创意、产品或主题转化为可拍摄脚本和逐镜头分镜方案。",
+  "description": "将短视频创意、产品或主题写成可拍摄脚本和逐镜头分镜；适合两分钟以内的视频，不用于单镜生成提示词或长篇剧本。",
   "version": "0.1.0",
   "runtime": "reference",
   "execution": { "mode": "advisory" },

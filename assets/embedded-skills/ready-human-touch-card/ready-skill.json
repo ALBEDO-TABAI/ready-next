@@ -2,7 +2,7 @@
   "id": "ready-human-touch-card",
   "name": "ready-human-touch-card",
   "displayName": "社交信息卡 · 双风格",
-  "description": "生成小红书 3:4 图组与微信 21:9/1:1 封面对：Ready 点阵理性 / Human Touch 温感人文 双风格，含点阵图表与图片槽位协议",
+  "description": "制作 Ready 点阵理性或 Human Touch 温感人文风格的社交信息卡与微信封面；仅用于用户指定这两种风格的图组。",
   "version": "2026.07.06",
   "runtime": "reference",
   "execution": { "mode": "advisory" },

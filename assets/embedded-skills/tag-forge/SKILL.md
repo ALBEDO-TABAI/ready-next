@@ -1,6 +1,6 @@
 ---
 name: tag-forge
-description: "图文素材 AI 阅读与收敛式打标引擎。对用户指定的 Markdown 文档或文件夹通读并提出受控内容标签，由 Ready 校验、写回和回读；只有真正存疑的新词才在 Agent 对话中集中确认。Use when 用户明确说 tag-forge，或完整技能名 Tag Forge。普通任务词只用于模型读取目录后通过 use_skill 选择，不作为代码侧别名。Do not use for 纯摘要、翻译或视频文件打标执行。"
+description: 为指定的图文文档或文件夹提出受控标签，由 Ready 校验并写回；用于素材打标与标签归一，不用于摘要、翻译或视频打标。
 ---
 
 # Tag Forge

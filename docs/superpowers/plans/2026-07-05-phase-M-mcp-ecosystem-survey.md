@@ -3,11 +3,15 @@ title: Phase M — MCP 生态扩展现状调研（只读源码勘验）
 date: 2026-07-05
 status: survey
 enforce: false
+documentation_status: archived-in-place
+archived_at: 2026-09-06
 ---
+
+> 原位归档（2026-09-06）：代码/检查引用：src/__tests__/mcp-stdio-transport.test.ts。保留此路径不代表全文仍是当前合同；其中的状态、源码位置和待办属于原记录。现行约束见 [当前运行时合同](../../architecture/current-runtime-contracts.md)，归档去向见 [文档清单](../../documentation-inventory.md)。
 
 # Phase M — MCP 生态扩展现状调研
 
-> 路线锚：`docs/superpowers/plans/2026-07-03-agent-mainline-p3-route.md`（Phase M，2026-07-04 追加）。
+> 路线锚：`docs/archive/2026-09-06/docs/superpowers/plans/2026-07-03-agent-mainline-p3-route.md`（Phase M，2026-07-04 追加）。
 > 目标：Ready 作为 **MCP client** 接入外部 MCP server，把外部工具纳入 Ready 的工具治理体系。
 > 现状锚：Stage 14（T）已落 MCP 基础与 capability 维度；"research / MCP / agent_interaction 是独立 capability 维度"是现行硬约束（证据：`src/shared/ai-capability-groups.ts:210` `id:'mcp'`、`:221` `id:'agent_interaction'`，各为独立 group）。
 

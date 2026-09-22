@@ -1,5 +1,7 @@
 # Product
 
+> 2026-09-06 核对：本文是现行产品视觉与交互目标，不是所有可访问性条目已验收的声明。当前能力与验收范围见 `PROJECT_OVERVIEW.md`、`PROGRESS.md`。
+
 ## Register
 
 product

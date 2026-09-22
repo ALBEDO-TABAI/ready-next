@@ -1,73 +1,40 @@
-# Ready 开发进展
+# Ready 当前进展
 
-> 更新时间：2026-08-12
-> 本文件只保留当前看板。完整历史见 `CHANGELOG.md`、Git 与 `docs/superpowers/plans/`；旧测试流水账不再在这里累积。
+> 核对日期：2026-09-06。源码基线为 `b3dd9f73`，本页依据当前代码、清单与已提交记录；文档核对不等于再次打包或全量真机验收。
 
 ## 1. 当前基线
 
-- 应用版本以 `package.json` 为准。
-- 技术基线：Electron 42.3、React 19、TypeScript 5.7、Vite 6、Tailwind CSS 4、SQLite/better-sqlite3。
-- Workbench mode：`browser | document | rss | calendar`。
-- Agent live 主链：`CodexHostOrchestrator -> Codex ingress/product composition -> ReadyCodexLifecycleAdapter -> canonical closeout/projection`。
-- `AgentSdkRuntime`、`ReadyAgentOrchestrator`、`direct-chat.ts`、`turn-engine.ts` 与 `skill_executions` workflow 状态机均已退役，不是待继续拆分的现行入口。
-- 当前代码与依赖地图：`docs/architecture/codebase-map.md`。
-- 当前不可破合同：`docs/architecture/current-runtime-contracts.md`。
+- 应用 0.8.0，Electron 42.3.0，固定 Codex runtime 0.149.0；版本以 `package.json` 与 `assets/codex-runtime/runtime-manifest.json` 为准。
+- 四个工作面：Browser、Document、RSS、Calendar；跨工作面的单一 Ready 助手、文件、技能、MCP、手动长期记忆和远程助手。
+- Agent 生产入口为 `CodexHostOrchestrator`，经原生回合与统一结果保存呈现。旧 SDK 模型循环、Dynamic Delivery/Boost、专项人格、旧记忆和 Agent 定时任务均已退役。
+- 当前发布配置是 macOS arm64。精简包不内置技能运行时；完整包需要单独置备并核对运行时清单。
 
-## 2. 近期已完成
+## 2. 最近已进入源码的变化
 
-### Agent 与交付
+| 变化 | 当前行为与边界 | 证据入口 |
+| --- | --- | --- |
+| 历史续聊和草稿恢复 | 统一判断旧历史可否接续；阻断时仍可编辑草稿，并按当前资格保留记录、开始新上下文。重播过的尾项不会再次带入 | `d6554bc5`；`docs/superpowers/plans/2026-09-03-ready-history-continuation-and-composer-repair-implementation.md` |
+| 已有数据升级 | 保留旧网关记录的未知字段，新请求仍要求完整证据；避免把新约束反向套到旧记录导致启动失败 | `7f6e378b`；`docs/superpowers/plans/2026-09-03-ready-populated-upgrade-migration-implementation.md` |
+| 微信/飞书远程助手 | 本人绑定后的文字任务进入当前助手；先保存再确认收信，按线程处理，未知发送结果不会自动重发 | `0d5a3223`；`docs/superpowers/plans/2026-09-05-remote-im-reliability-implementation.md` |
+| 书本阅读 | 改善纸张弯曲、透印、落页和纸堆厚度；背景可跟随主题或保存自选色，并减少翻页重复布局 | `b3dd9f73`；`docs/superpowers/plans/2026-09-05-document-reading-paper-implementation.md` |
+| 发布来源核对 | 编译前记录实际源码，打包和复制沿用同一来源记录；相同版本号不再足以证明是同一个包 | `d6554bc5`；`Packer/README.md` |
+| 单一助手与长期记忆 | 手工增删改、固定、读取与撤销已接通；自动整理暂不开放 | `src/main/modules/agent-control/ready-memory/`、`src/renderer/pages/settings/ReadyMemorySettingsPanel.tsx` |
 
-- Codex 主链已替换旧 Agent 模型循环；旧 Dynamic Delivery/Boost/worker 设置和验收入口已退役，Browser fresh verifier 保留为独立产品证据门。
-- Codex run 终态统一进入 lifecycle adapter 与 canonical closeout transaction，连续性、watchdog、no-progress 与旧 run 晚到覆盖问题建立专项合同。
-- OpenAI-compatible chat/responses 与 Anthropic provider 已进入真 SSE 路径，并保留受控降级。
-- 历史知识卡、人格、专项 Agent 与路由资料继续无损可读，但不进入当前 Codex 提示、准入、工具面或聊天 Agent 选择器；相关 `verify:evolution-*` 入口只验证历史数据兼容与退役边界。
+## 3. 验收边界
 
-### Skills 与工具面
+- 历史续聊的 2026-09-05 交付记录包含绑定具体包体的安装验收；它早于后续远程通信与阅读提交，不能证明最新整包也已验收。具体记录见 `outputs/history-delivery-20260905/acceptance.md`，属本机输出，不要求源码接收方拥有。
+- 阅读计划记录了 61 项阅读测试、原生数据库和真实 Electron 对照；固定长文夹具的性能结论不推广为所有文档、所有硬件或当前新包的结论。
+- 远程计划记录了本地协议夹具与隔离应用验收；真实微信/飞书账号、对外发送和最终安装包有各自的验收边界，以该计划末尾记录为准。
+- 本轮只更新项目文档、导航与归档。实际运行的文档检查及范围见 `docs/maintenance/2026-09-06-documentation-refresh.md`。
 
-- 历史内置 `operator` 及 soul/RULES/FOUNDATION/知识卡/路由卡种子按原数据保留，不作为当前 Codex 的可选 Agent 或提示资料。配套 embedded 技能 `social-media-ops` 作为独立 reference/advisory 技能继续可用。
-- 工具总闸门关闭时，用户明确请求的能力会得到真实阻断原因；明确开启需本机确认并只修改当前模型配置，远程会话不能代答。设置页显示 `auto` 的真实生效值，线上工具统计直接取实际请求，不再把未启用工具算进去。
-- capability floor 已由 Codex 准入工具快照 live 强制；current document 与 local resource 的读写边界分开。
-- embedded skill 改为目录扫描和 drop-in 注册，`use_skill` 负责模型侧显式激活，custom shell 需要逐技能同意。
-- Creative Production 技能组已嵌入；Tag Forge 已从只读方法论扩展为受 receipt、授权路径与索引 readback 约束的结构化能力。
-- MCP、安装命令与远程文件回传已有代码侧授权和确认入口。
+## 4. 当前未开放或不能据此宣布完成的能力
 
-### 文档、浏览器与工作台
+- 长期记忆自动整理：生产提供方明确返回不可用，不自动发起模型整理请求。
+- Windows 发行：仍缺目标平台 Codex 资产、打包和本机验证；见 `docs/platform/windows-development.md`。
+- 任意技能脚本、旧 child-loop 与公开子任务续跑：技能存在或有历史句柄不代表当前 Codex 已支持执行。
+- Agent 定时任务、旧专项 Agent 与旧人格不是待恢复入口。领域技能与资料库旧提案不能覆盖单一 Ready 与新记忆事实。
+- 更新 runtime、换模型、压缩或失败重试均有独立资格，不能把一项通过推导为其他历史操作都可用。
 
-- 文档 Widget 已统一到 Ready 令牌、结构真值、点阵图表、关系图/流程图、CSP nonce 与事件接收器。
-- 文档模式已补齐预览内编辑、未命名标签拖存、标签外观同步和顶栏导出。
-- Browser 已补浏览数据/Cookie 管理、Safe/Power 边界与竖向标签组交互；跨窗口 flyout hover 已修复。
-- 启动微入口、工作台控制区和大型 UI 文件拆分已落地。
-- 文件涌现与 Tag Forge P0-P5 已完成独立对抗复审；持久反馈、防复活、项目身份、receipt/readback、长期评估和真实 SQLite 覆盖已收口。
+## 5. 从哪里继续
 
-## 3. 0.7.1 发布
-
-`0.6.1` 之后的变化已统一收口为 `0.7.1` 发布，包括：
-
-- 工作台控制区与标签交互调整。
-- Creative Production embedded skills。
-- Browser 竖向标签 flyout 修复。
-- 文件涌现与 Tag Forge P0-P5。
-- 安装包模型接入、运行时下载续传、历史任务状态、用户偏好和文档打开性能的系统修复。
-
-当前 arm64 DMG 已完成构建、签名、挂载、全新用户启动、NovaCode 实际聊天、任务状态和文档打开验收，结果已回填 `CHANGELOG.md`。
-
-工作区中的未提交 Packer 或其他实验改动不在本看板的“已完成”口径内，除非另有完成合同和验证记录。
-
-## 4. 最近有效证据
-
-以下是对应功能 closeout 已记录的证据，不代表本次文档整理重新执行了全量产品回归：
-
-- Codex runtime：`verify:codex-runtime-source`、`verify:stability`、`verify:native` 与独立 Browser verifier 覆盖。
-- 文档 Widget：`verify:widget-ready` 与真实 Electron 亮暗主题、编辑、保存、重开验证。
-- 文件涌现 / Tag Forge：`verify:file-emergence`、`verify:tag-forge`、真实 Electron/SQLite、迁移连续性、`typecheck` 与生产构建。
-- 版本一致性：`npm run verify:version`。
-
-每次新任务仍需在当前工作区重跑与改动相称的命令，不能把这里的历史绿灯当成本轮通过。
-
-## 5. 下一步判定规则
-
-1. 先查看最新 `*-implementation.md` 和当前工作区，不从本文件猜阶段完成度。
-2. 未提交、未验证或只在审计中提出的工作不得写成“已完成”。
-3. 发布前以 `package.json`、`CHANGELOG.md`、真实包体和安装后 smoke 为准。
-4. 新的阶段细节写入对应 plan/audit；这里只更新影响全局方向的状态变化。
-5. 任何旧文档若仍把 DirectChat、TurnEngine、Design/Video mode 或 workflow coordinator 当现行入口，应视为历史材料。
+从 `docs/README.md` 选择现行合同和对应检查；所有项目叙述文档的去向见 `docs/documentation-inventory.md`。旧计划中的“待开工”“当前缺口”“已通过”只描述记录当时的状态，不能据此安排本次开发或宣布发布。

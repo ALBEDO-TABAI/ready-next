@@ -2,7 +2,7 @@
   "id": "image-reverse-describe",
   "name": "image-reverse-describe",
   "displayName": "Image Reverse Describe",
-  "description": "以可见证据为基础，对图片的空间、构图、光线、色彩和材质进行可重建描述。",
+  "description": "将图片拆解成可据以重建的空间、构图、光色和材质描述；用于精确反推，不用于快速概括或好坏评价。",
   "version": "0.1.0",
   "runtime": "reference",
   "execution": { "mode": "advisory" },

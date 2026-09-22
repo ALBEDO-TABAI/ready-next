@@ -2,8 +2,12 @@
 title: Phase I P0 — 远程确认链路（微信侧 ask/confirm 卡往返）实施合同
 date: 2026-07-05
 status: implemented
-enforce: true
+enforce: false
+documentation_status: archived-in-place
+archived_at: 2026-09-06
 ---
+
+> 原位归档（2026-09-06）：代码/检查引用：src/__tests__/remote-confirmation-codec.test.ts, src/main/modules/agent-control/runtime-core/remote-confirmation-codec.ts。保留此路径不代表全文仍是当前合同；其中的状态、源码位置和待办属于原记录。现行约束见 [当前运行时合同](../../architecture/current-runtime-contracts.md)，归档去向见 [文档清单](../../documentation-inventory.md)。
 
 > 实施记录（2026-07-05 当日）：A-G 七件全部落地。codec 7✓ + service 行为网 5✓
 > （提交/指引/取消/未命中/转投双向）+ 守卫 skip；typecheck 0；verify:stability 0；
@@ -14,7 +18,7 @@ enforce: true
 
 # Phase I P0：远程确认链路实施合同
 
-> 调研锚：`2026-07-05-phase-I-wechat-remote-parity-survey.md` 切面 2（P0，硬阻断）。
+> 调研锚：`../../archive/2026-09-06/docs/superpowers/plans/2026-07-05-phase-I-wechat-remote-parity-survey.md` 切面 2（P0，硬阻断）。
 > 现状：ask/confirm 卡机制完备（store/emitter/persistor/renderer 齐全，frozen-call 复用同一
 > 卡机制），但唯一出口是本地 renderer push（`claude-bridge/ipc-handler.ts` 注册的
 > `agent:askUserQuestions:push`），答案唯一入口是本地 IPC submit。远程 run 命中 M2/M3 或模型

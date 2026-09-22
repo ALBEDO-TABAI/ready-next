@@ -1,6 +1,14 @@
+---
+enforce: false
+documentation_status: archived-in-place
+archived_at: 2026-09-06
+---
+
+> 原位归档（2026-09-06）：代码/检查引用：scripts/check-task-card-single-source.cjs。保留此路径不代表全文仍是当前合同；其中的状态、源码位置和待办属于原记录。现行约束见 [当前运行时合同](../../docs/architecture/current-runtime-contracts.md)，归档去向见 [文档清单](../../docs/documentation-inventory.md)。
+
 # Stage 6 — Task fact ledger consolidation (Plan v9)
 
-> Predecessor: `plan-v8.md`. v9 = patch-and-reroll after Codex round-8.
+> Predecessor: `../../docs/archive/2026-09-06/.claude/stage6/plan-v8.md`. v9 = patch-and-reroll after Codex round-8.
 > v9 only restates the L6 rule's name-matching strategy + adds two unwrap arms; everything else by-reference v1..v8.
 
 ## What changed vs v8

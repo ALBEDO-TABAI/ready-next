@@ -2,8 +2,8 @@
 title: P3 启动批 — A0 turn-engine 退役盘点（证据定稿）+ B1 browser-tools 媒体下载簇拆分
 date: 2026-07-03
 status: done
-enforce: true
-parent: 2026-07-03-agent-mainline-p3-route.md
+enforce: false
+parent: ../../archive/2026-09-06/docs/superpowers/plans/2026-07-03-agent-mainline-p3-route.md
 result: >
   A0：17 导出全 prod=0 证据表定稿（本文 §A0），HCD 随 Phase A 同死。
   A1：六组全部 dead-with-engine（本文 §A1 表），A2 测试手术图定稿，三个
@@ -13,7 +13,11 @@ result: >
   验证（真实退出码）：typecheck=0、焦点 137+72+88/0 fail、
   verify:stability=0、verify:browser-reliability 113/0、silent-catch
   浏览器违规 23→18 持平（搬移 catch 按 silent-catch: 约定补注释）。
+documentation_status: archived-in-place
+archived_at: 2026-09-06
 ---
+
+> 原位归档（2026-09-06）：代码/检查引用：src/__tests__/phase-3-output-safety-net.test.ts。保留此路径不代表全文仍是当前合同；其中的状态、源码位置和待办属于原记录。现行约束见 [当前运行时合同](../../architecture/current-runtime-contracts.md)，归档去向见 [文档清单](../../documentation-inventory.md)。
 
 # A0 — turn-engine 全导出引用判定（非破坏，本文即产出）
 

@@ -1,6 +1,6 @@
 # Ready 当前代码地图
 
-> 更新时间：2026-08-12
+> 核对日期：2026-09-06
 > 本文合并并取代根目录旧的模块图、依赖图和结构快照。它只记录稳定入口，不维护容易失真的文件数量。
 
 ## 1. 运行结构
@@ -39,7 +39,7 @@ Agent、文件面板、技能中心和设置页是跨工作面的能力，不是
 
 | 目录 | 职责 |
 | --- | --- |
-| `agent-control/` | Codex 主链、会话、任务投影、工具策略，以及历史记忆/Agent 资料的本地维护 |
+| `agent-control/` | Codex 主链、会话、任务投影、工具策略、新 Ready 长期记忆与远程助手 |
 | `claude-bridge/` | Agent IPC 与 provider 宿主接线；不是旧 DirectChat 执行主链 |
 | `tools/` | 工具定义、参数校验、授权后的执行分发 |
 | `skills-runtime/` | embedded/custom skill 扫描、安装、运行与长期任务句柄 |
@@ -49,14 +49,14 @@ Agent、文件面板、技能中心和设置页是跨工作面的能力，不是
 | `calendar-engine/` | 日历事件、来源、提醒与时间解析 |
 | `file-emergence/` / `tag-forge/` | 文件涌现、项目身份、注意力信号与受控标签写入 |
 | `repositories/` / `database/` | SQLite 数据访问与持久化真值 |
-| `settings-engine/` | 设置持久化与迁移 |
+| `settings-engine/` | 设置持久化、迁移与稳定凭据库 |
 | `mcp/` | MCP 配置、连接与授权接线 |
 | `search-engine/` | 本地索引与检索 |
 
 完整目录以工作区为准：
 
 ```bash
-find src/main/modules -mindepth 1 -maxdepth 1 -type d | sort
+rg --files src/main/modules | cut -d/ -f1-4 | sort -u
 ```
 
 ## 4. Agent live 主链
@@ -93,8 +93,23 @@ claude-bridge IPC
 - `task-projection/`：任务卡与 run 元数据真值。
 - `skills/`、`child-run/`、`sub-agent/`：历史技能或子任务账本及非 Codex 支撑代码；当前 Codex 不从这些模块启动 child-loop 或公开续跑。
 - `session/`、`compaction/`、`system-reminders/`：上下文与会话生命周期。
-- `agents/`、`knowledge/`、`maintenance/`、`emergence/`：历史 Agent/知识资料的读取与本地确定性维护；不是 Codex 人格、知识注入、预路由或专项 Agent 创建入口。
+- `ready-memory/`：当前手动长期记忆、冻结快照、只读搜索与撤销；生产自动整理保持关闭。
+- `knowledge/`、`emergence/` 等剩余支撑：文件涌现读取隔离的信念卡，不恢复旧人格、预路由、自动模型维护或专项 Agent。
 - `safety/`、`quality/`：确认闸门、证据与完成判定。
+
+### 5.1 当前重点状态拥有者
+
+| 问题 | 入口 |
+| --- | --- |
+| 原生历史操作兼容性 | `src/main/modules/agent-control/codex-runtime/codex-runtime-compatibility.ts`、`assets/runtime-continuity/` |
+| 当前发送/恢复资格 | `src/main/modules/agent-control/codex-runtime/codex-action-surface.ts`、`codex-lifecycle-action-surface.ts` |
+| 上下文边界与绑定 | `src/main/modules/agent-control/codex-runtime/codex-context-boundary.ts`、`codex-binding-repository.ts` |
+| 远程收信、去重与执行 | `src/main/modules/agent-control/runtime-core/remote-channel-service.ts`、`remote-channel-event-repository.ts`、`remote-codex-turn.ts` |
+| 微信/飞书连接与持久队列 | `src/python/ready_sidecar/channels/`、`src/python/ready_sidecar/event_store.py` |
+| 稳定凭据 | `src/main/modules/settings-engine/credential-vault.ts`、`credential-vault-reconciliation.ts` |
+| 编译与包体来源 | `scripts/build-with-source-identity.cjs`、`scripts/release-package-identity.cjs`、`scripts/write-release-receipt.cjs` |
+
+表内省略目录的文件位于同一行首个文件的目录。
 
 ## 6. Renderer 入口
 

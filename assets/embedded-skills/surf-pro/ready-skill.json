@@ -2,7 +2,7 @@
   "id": "surf-pro",
   "name": "surf-pro",
   "displayName": "Surf Pro",
-  "description": "专业网页调研与本地资料归档方法论：机制拆解、多路搜索、来源分级、URL/图片/文本证据库、停止搜索判定和证据报告",
+  "description": "围绕专题开展网页调研并建立可追溯的本地资料库；用于多源证据归档与研究报告，不用于单次事实查询或单页阅读。",
   "version": "0.1.0",
   "runtime": "reference",
   "execution": { "mode": "advisory" },

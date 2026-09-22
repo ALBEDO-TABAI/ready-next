@@ -4,7 +4,7 @@ date: 2026-06-08
 status: draft-for-review
 owner: 白
 executor: Codex 起草，Claude 复审后再施工
-enforce: true
+enforce: false
 related:
   - AGENTS.md §0（开工前）
   - AGENTS.md §0.5（先合同，后代码）
@@ -21,7 +21,11 @@ references_current_ready:
   - src/main/modules/repositories/chat-repository.ts
   - src/main/modules/database.ts
   - src/preload/index.ts
+documentation_status: archived-in-place
+archived_at: 2026-09-06
 ---
+
+> 原位归档（2026-09-06）：固定历史证据仍引用此路径。保留此路径不代表全文仍是当前合同；其中的状态、源码位置和待办属于原记录。现行约束见 [当前运行时合同](../../architecture/current-runtime-contracts.md)，归档去向见 [文档清单](../../documentation-inventory.md)。
 
 # 文件涌现实施计划
 

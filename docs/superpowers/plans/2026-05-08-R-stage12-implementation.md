@@ -3,7 +3,7 @@ stage: R (Stage 12)
 date: 2026-05-08
 enforce: true
 status: approved v15 — Codex round 15 converged 2026-05-09 (15 rounds × 50 瑕疵 cleared, no Contract Gap)
-predecessor: 2026-05-07-Q-skill-resumability-triple-fence-implementation.md
+predecessor: ../../archive/2026-09-06/docs/superpowers/plans/2026-05-07-Q-skill-resumability-triple-fence-implementation.md
 roadmap: archive/2026-05-08-deerflow-borrowing-roadmap.md
 external_source: https://github.com/bytedance/deer-flow (local clone at `_research/deer-flow/`)
 revision_history:
@@ -23,6 +23,8 @@ revision_history:
   - v14 (2026-05-09): incorporated Codex round 13 — 3 瑕疵（1 Contract Gap + 2 Minor）：(R13-a) §1.1 / §3.1.9 澄清 continuation-state.ts 内有 2 处 `=== 'continuation'`：`:127` 在 normalizeTaskType 内（被 isTaskType refactor 吸收）+ `:419` 单独边界判断（保留字面量）；之前措辞误读为"仅 :419 一处"；(R13-b) W1.3 必须扩 `system-reminder-registry.ts:5-25` `ReminderTopic` union 加 `'current-date'`，否则 type 红；assembly 内可能含 Record<ReminderTopic,...> 同步加 key；(R13-c) **W2.3 重写**——ToolRegistry 实测**无 register* 公共 API**，工具走 `GROUP_TOOL_PROVIDERS` provider entry 注入；重名在 `:958-963 listToolDefinitions` 被 `if (!tools.has(name))` **静默吞掉**。改造在 listToolDefinitions 收集阶段做冲突检测，启动期由 AgentControlRuntime constructor 触发 boot invariant 抛 `ToolNameCollisionError`
   - v15 (2026-05-09): incorporated Codex round 14 — 1 瑕疵 + 2 残留澄清：(R14-a) §1.1:50 残留 "W2.3 名重检测在 register* 路径加 throw" 措辞与 R13-c 重写冲突，已改 "改造在 listToolDefinitions() 收集阶段（详见 §4.3）"；(R14-b/c) Codex 提及 "tools/tool-registry.ts 不存在 / tools/tool-gateway.ts 不存在"——本计划全文 grep 无 `src/main/modules/tools/tool-registry.ts` 或 `src/main/modules/tools/tool-gateway.ts` 形态错引；所有 tool-registry / tool-gateway 引用均带正确 `agent-control/` 前缀或上下文清晰指明 agent-control 实位（`tool-registry.ts:667/759/958` 等行号引用与 §1.1 全文一致），无需进一步修改
 ---
+
+> 2026-09-06 文档核对：本文保留当前仍使用的专项合同及原验收记录；后文的日期、阶段状态和现场缺口按原记录理解，不据此推导今天全部已验收或仍未实现。当前应用边界以 [运行时合同](../../architecture/current-runtime-contracts.md) 为准，近期状态见 [PROGRESS](../../../PROGRESS.md)。
 
 # Stage R (Stage 12) — deer-flow 借鉴 · 合同基础 · 实施计划
 

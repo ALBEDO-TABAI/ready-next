@@ -4,10 +4,14 @@ stage: V
 date: 2026-05-21
 status: implementation
 parent: 2026-05-20-U-release-readiness-implementation.md
-enforce: true
+enforce: false
 locked_at: 2026-05-21
 locked_after_codex_rounds: 10
+documentation_status: archived-in-place
+archived_at: 2026-09-06
 ---
+
+> 原位归档（2026-09-06）：代码/检查引用：scripts/check-ipc-contract.cjs, src/__tests__/chat-panel-baseline.test.ts。保留此路径不代表全文仍是当前合同；其中的状态、源码位置和待办属于原记录。现行约束见 [当前运行时合同](../../architecture/current-runtime-contracts.md)，归档去向见 [文档清单](../../documentation-inventory.md)。
 
 # Stage V — Comprehensive Plan (LOCKED v10, implementation)
 

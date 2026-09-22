@@ -5,16 +5,20 @@ status: implemented
 review_status: passed
 reviewed_at: 2026-08-21
 implemented_at: 2026-08-21
-enforce: true
+enforce: false
 depends_on:
   - docs/architecture/current-runtime-contracts.md
-  - docs/superpowers/plans/2026-08-15-ready-semantic-capability-selection-and-browser-workflow-implementation.md
+  - docs/archive/2026-09-06/docs/superpowers/plans/2026-08-15-ready-semantic-capability-selection-and-browser-workflow-implementation.md
   - docs/superpowers/audits/2026-08-15-codex-deferred-capability-p0.md
 note: >
   本计划只覆盖官方 Codex runtime 0.149.0 升级、deferred dynamic tools 的重新裁决、
   app-server 只读诊断，以及 goal / paginated history 的采用边界。
   不增加第二套模型循环、任务状态、权限、历史或恢复系统；没有证据通过的能力保持关闭。
+documentation_status: archived-in-place
+archived_at: 2026-09-06
 ---
+
+> 原位归档（2026-09-06）：固定历史证据仍引用此路径。保留此路径不代表全文仍是当前合同；其中的状态、源码位置和待办属于原记录。现行约束见 [当前运行时合同](../../architecture/current-runtime-contracts.md)，归档去向见 [文档清单](../../documentation-inventory.md)。
 
 # Ready Codex Runtime P0-P1 采用实施计划
 
