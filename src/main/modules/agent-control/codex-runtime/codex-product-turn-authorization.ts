@@ -316,7 +316,7 @@ export function hasExplicitCurrentDocumentWriteIntent(text: string): boolean {
 export function hasExplicitCurrentDocumentAccessExclusion(text: string): boolean {
   const normalized = String(text || '').trim()
   if (!normalized) return false
-  const chinese = /(?:不|不要|无需|不必|禁止|别)(?:再)?(?:查看|读取|阅读|打开|使用|参考|检索|搜索|访问|分析|总结|检查|审阅)(?:任何|所有|全部)?的?(?:本地|当前|已有|现有)的?(?:文档|文件|资料)/
+  const chinese = /(?:不需要|不用|不|不要|无需|不必|禁止|别)(?:再)?(?:查看|读取|阅读|打开|使用|参考|检索|搜索|访问|分析|总结|检查|审阅)(?:任何|所有|全部)?的?(?:(?:本地|当前|已有|现有)的?)?(?:文档|文件|资料)/
   const english = /\b(?:do\s+not|don't|never)\s+(?:read|inspect|open|use|reference|search|access|analy[sz]e|summari[sz]e|review)\s+(?:any\s+|the\s+)?(?:local|current|existing)\s+(?:document|file|material)s?\b/i
   return chinese.test(normalized) || english.test(normalized)
 }

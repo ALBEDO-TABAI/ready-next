@@ -66,8 +66,8 @@ export type CodexUpstreamProfileSnapshot = Readonly<{
   providerId: string
   model: string
   baseUrl: string
-  agentProtocol: 'openai'
-  wireApi: AIWireAPI
+  agentProtocol: 'openai' | 'anthropic'
+  wireApi: AIWireAPI | 'messages'
   reasoningEffort: AIReasoningEffort | null
   contextWindowTokens?: number
   maxOutputTokens?: number
@@ -320,10 +320,10 @@ export function createCodexUpstreamProfileSnapshot(input: {
   }
   const config = normalizeAIConfig(input.config)
   const capabilities = resolveAIConfigCapabilities(config)
-  if (!capabilities || capabilities.agentProtocol !== 'openai') {
+  if (!capabilities) {
     throw new CodexModelGatewayContractError('gateway_agent_protocol_unsupported')
   }
-  if (capabilities.wireApi !== 'responses' && capabilities.wireApi !== 'chat/completions') {
+  if (capabilities.agentProtocol !== 'anthropic' && capabilities.wireApi !== 'responses' && capabilities.wireApi !== 'chat/completions') {
     throw new CodexModelGatewayContractError('gateway_wire_api_unsupported')
   }
   if (capabilities.reasoningEffort && !capabilities.supportsThinking) {
@@ -364,13 +364,13 @@ export function createCodexUpstreamProfileSnapshot(input: {
     providerId: provider.id,
     model: config.model,
     baseUrl,
-    agentProtocol: 'openai' as const,
-    wireApi: capabilities.wireApi,
+    agentProtocol: capabilities.agentProtocol,
+    wireApi: capabilities.agentProtocol === 'anthropic' ? 'messages' as const : capabilities.wireApi!,
     reasoningEffort: capabilities.reasoningEffort || null,
     ...(config.contextWindowOverride != null ? {
       contextWindowTokens: resolveModelContextWindow(config, modelDef),
     } : {}),
-    ...(config.maxOutputTokensOverride != null ? {
+    ...(config.maxOutputTokensOverride != null || capabilities.agentProtocol === 'anthropic' ? {
       maxOutputTokens: resolveMaxOutputTokens(config),
     } : {}),
     supportsToolCalls: capabilities.supportsToolCalls,
@@ -379,9 +379,12 @@ export function createCodexUpstreamProfileSnapshot(input: {
     supportsThinking: capabilities.supportsThinking,
     multiTurnThinkingPolicy: capabilities.multiTurnThinkingPolicy,
     patchProfileId: patchProfile?.profileId || null,
-    authHeader: provider.authHeader,
-    authPrefix: provider.authPrefix,
-    extraHeaders: { ...(provider.extraHeaders || {}) },
+    authHeader: capabilities.isKimiCoding ? 'x-api-key' : provider.authHeader,
+    authPrefix: capabilities.isKimiCoding ? '' : provider.authPrefix,
+    extraHeaders: {
+      ...(capabilities.agentProtocol === 'anthropic' ? { 'anthropic-version': '2023-06-01' } : {}),
+      ...(provider.extraHeaders || {}),
+    },
     credentialReferenceId: `ai-profile:${profileId}`,
     retryPolicy: {
       owner: 'ready_gateway' as const,
@@ -658,6 +661,8 @@ export function digestReadyAdditionalContext(input: {
 }
 
 export function upstreamEndpoint(snapshot: CodexUpstreamProfileSnapshot): string {
-  const suffix = snapshot.wireApi === 'responses' ? '/responses' : '/chat/completions'
+  const suffix = snapshot.agentProtocol === 'anthropic'
+    ? (snapshot.baseUrl.endsWith('/v1') ? '/messages' : '/v1/messages')
+    : snapshot.wireApi === 'responses' ? '/responses' : '/chat/completions'
   return snapshot.baseUrl.endsWith(suffix) ? snapshot.baseUrl : `${snapshot.baseUrl}${suffix}`
 }

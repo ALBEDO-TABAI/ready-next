@@ -24,6 +24,7 @@ import {
   createCodexUpstreamProfileSnapshot,
   digestCanonicalJson,
   instructionTranscriptDigest,
+  resolveCodexNativeModelSettings,
 } from '../main/modules/agent-control/codex-runtime/codex-model-gateway-contract'
 import { verifyCodexAutomaticCompactionEvidence } from '../main/modules/agent-control/codex-runtime/codex-automatic-compaction-evidence'
 import { projectCodexHeadActionProjection } from '../main/modules/agent-control/codex-runtime/codex-action-surface'
@@ -636,7 +637,15 @@ test('pinned app-server crosses the Ready gateway for product and compaction req
     __runMigrationForTests('098_codex_manual_compaction_recovery_evidence', db as unknown as MigrationDatabase)
     __runMigrationForTests('101_codex_manual_compaction_item_identity', db as unknown as MigrationDatabase)
     __runMigrationForTests('111_codex_gateway_budget_lanes', db as unknown as MigrationDatabase)
-    const repository = new CodexBindingRepository(db as unknown as DatabaseConnection)
+    const paths = resolveCodexRuntimePaths({
+      appPath: repoRoot, resourcesPath: join(repoRoot, 'assets'), isPackaged: false,
+    })
+    const runtime = loadVerifiedCodexRuntime(paths)
+    const repository = new CodexBindingRepository(db as unknown as DatabaseConnection, {
+      runtimeManifestDigest: runtime.manifestDigest,
+      protocolSchemaDigest: 'protocol-schema-e3',
+      runtimeContinuityCatalog: { contract: 'ready_runtime_continuity_catalog_v1', targetManifestDigest: runtime.manifestDigest, transitions: [] },
+    })
     const gatewayRepository = new CodexModelGatewayRepository(
       db as unknown as DatabaseConnection,
       repository,
@@ -652,10 +661,6 @@ test('pinned app-server crosses the Ready gateway for product and compaction req
       credentials: { resolve() { return 'provider-secret-e3' } },
     })
     const gatewayAddress = await gateway.start()
-    const paths = resolveCodexRuntimePaths({
-      appPath: repoRoot, resourcesPath: join(repoRoot, 'assets'), isPackaged: false,
-    })
-    const runtime = loadVerifiedCodexRuntime(paths)
     const state = prepareCodexRuntimeState({
       userDataPath: tempRoot,
       gatewayUrl: `${gatewayAddress.url}/v1`,
@@ -831,6 +836,11 @@ test('pinned app-server crosses the Ready gateway for product and compaction req
         upstreamProfileSnapshotDigest: upstreamSnapshot.snapshotDigest,
         additionalContextDigest: digestCanonicalJson([]),
         turnContractDigest: `turn-contract-${runId}`,
+        continuationCandidate: existingThread ? {
+          model: 'ready-e0-model', threadConfig: resolveCodexNativeModelSettings(upstreamSnapshot.snapshot).threadConfig,
+          isolatedThreadCwd: runThreadCwd, cwdAvailable: true,
+          instructionContractDigest: instructionDigest, currentToolSurface: run.readyToolSurface,
+        } : null,
         messageVisibilityEpoch: 0,
         readyParentReceipt: {
           messageRole: 'user' as const,

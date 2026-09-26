@@ -1,0 +1,66 @@
+{
+  "contract": "ready_runtime_transition_proof_v1",
+  "sourceManifestDigest": "f981c518fe97286868e579afe68ff693089545041e255242335a0485a5df31fa",
+  "targetManifestDigest": "22816589f287db132fdc4e3a57b674878795fb75891d765d598b3c94e381bc79",
+  "operation": "fork_from_accepted_prefix",
+  "result": "compatible",
+  "derivation": {
+    "evidenceKind": "additive_host_provider_contract",
+    "priorTargetManifestDigest": "cda6bd5ff08247c0fd502accba2c0c0d342d5d59945d06dfb53a666bb64b636d",
+    "targetBinarySha256": "f4a74117b8142cda581c95ff753abf4508b5636d89682c1ed77e4a9249af8963",
+    "unchangedNativeManifestFields": [
+      "manifestVersion",
+      "sourceRepo",
+      "releaseTag",
+      "gitCommit",
+      "codexVersion",
+      "platform",
+      "architecture",
+      "targetTriple",
+      "releaseAssetName",
+      "releaseArchiveSha256",
+      "binarySha256",
+      "binarySizeBytes",
+      "stableSchemaSha256",
+      "stableV2SchemaSha256",
+      "experimentalSchemaSha256",
+      "experimentalV2SchemaSha256",
+      "agentMessageFinalSelectionContractDigest",
+      "historyPublicationParityContractDigest",
+      "turnInputUnionContractDigest",
+      "turnClientIdentityExtractionContractDigest",
+      "nonUserSuccessorIdentityContractDigest",
+      "startIdentityRegistryCapacity",
+      "startDeliveryResolutionContractDigest",
+      "hostFailureCloseoutContractDigest",
+      "processLeaseContractDigest",
+      "childEnvAllowlistDigest",
+      "nativeIsolationConfigContractDigest",
+      "resourceAdditionalContextContractDigest",
+      "toolBridgeContractDigest",
+      "externalReadSliceContractDigest",
+      "outboundRpcContractDigest",
+      "bindingSchemaDigest",
+      "experimentContractDigest",
+      "experimentReportSchemaDigest",
+      "exitAuthorityMatrixDigest",
+      "licenseDigest",
+      "thirdPartyNoticeDigest"
+    ],
+    "changedContractPaths": [
+      "modelGatewayContract.snapshot.allowedWireApis",
+      "modelGatewayContract.snapshot.thinkingPolicy"
+    ],
+    "regression": {
+      "command": "./node_modules/.bin/tsx --test src/__tests__/codex-provider-adapters.test.ts src/__tests__/provider-connection-test.test.ts src/__tests__/codex-provider-continuity.test.ts src/__tests__/codex-product-turn-authorization.test.ts src/__tests__/codex-model-gateway-contract.test.ts src/__tests__/codex-model-gateway-adversarial.test.ts src/__tests__/codex-model-gateway-retry.test.ts src/__tests__/codex-provider-stream-policy.test.ts src/__tests__/codex-browser-workflow-verifier.test.ts src/__tests__/ai-provider-capabilities.test.ts src/__tests__/ai-provider-workspace.test.ts src/__tests__/provider-thinking-echo-gate.test.ts src/__tests__/reasoning-effort-routing.test.ts",
+      "passed": 143,
+      "failed": 0
+    },
+    "nativeHistorySemantics": "same_pinned_binary_schema_and_isolation_config"
+  },
+  "priorNativeProof": {
+    "evidenceFile": "evidence/f981c518-fork.json",
+    "proofDigest": "d959bcedb9fab8492f7575e84ef5ee0a4f3b6b35dbe1855399dd3f7f94e46f73",
+    "targetManifestDigest": "cda6bd5ff08247c0fd502accba2c0c0d342d5d59945d06dfb53a666bb64b636d"
+  }
+}

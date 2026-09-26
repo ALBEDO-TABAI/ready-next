@@ -13,6 +13,8 @@ const EVENT_CLASSES: Readonly<Record<string, CodexProviderEventClass>> = Object.
   'response.refusal.done': 'structural',
   'response.function_call_arguments.delta': 'delta',
   'response.function_call_arguments.done': 'structural',
+  'response.reasoning_text.delta': 'delta',
+  'response.reasoning_text.done': 'structural',
   'response.reasoning_summary_part.added': 'structural',
   'response.reasoning_summary_part.done': 'structural',
   'response.reasoning_summary_text.delta': 'delta',

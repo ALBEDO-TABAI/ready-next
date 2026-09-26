@@ -266,7 +266,7 @@ function replayBufferedBody(
 
 export async function prepareCodexUpstreamStreamForControlledRetry(input: {
   body: ReadableStream<Uint8Array>
-  wireApi: 'responses' | 'chat/completions'
+  wireApi: 'responses' | 'chat/completions' | 'messages'
   snapshot: CodexUpstreamProfileSnapshot
   credential: string
   signal: AbortSignal

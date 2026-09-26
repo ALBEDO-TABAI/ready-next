@@ -50,6 +50,14 @@
         "evidence/historical-installed-sources.json"
       ],
       "reason": "source_manifest_unrecoverable"
+    },
+    {
+      "manifestDigest": "22816589f287db132fdc4e3a57b674878795fb75891d765d598b3c94e381bc79",
+      "classification": "observed_active_source",
+      "manifestFile": "manifests/0.149.0-22816589.json",
+      "evidenceFiles": [
+        "evidence/provider-adapters-22816589.json"
+      ]
     }
   ]
 }

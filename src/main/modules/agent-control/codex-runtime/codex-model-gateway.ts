@@ -39,6 +39,10 @@ import {
   CodexProviderStreamPolicy,
   CodexProviderStreamPolicyError,
 } from './codex-provider-stream-policy'
+import { createProviderMessagePhaseNormalizer } from './codex-provider-message-phase'
+import { normalizeZaiResponseEvent } from './codex-zai-responses'
+import { CodexMessagesError, messagesAsResponses, messagesHeaders, responsesRequestToMessages } from './codex-model-gateway-messages'
+import { isZaiResponsesConfig, zaiReasoningEffort } from '../../../../shared/ai-providers/zai'
 import { redactPriorReadyMemoryHistory } from './codex-memory-history-redaction'
 import type { CodexDeliveredUserTail } from './codex-turn-input-builder'
 
@@ -260,7 +264,13 @@ const NATIVE_EVENT_KEYS: Readonly<Record<string, readonly string[]>> = {
     'type', 'sequence_number', 'item_id', 'output_index', 'delta',
   ],
   'response.function_call_arguments.done': [
-    'type', 'sequence_number', 'item_id', 'output_index', 'arguments',
+    'type', 'sequence_number', 'item_id', 'output_index', 'arguments', 'name',
+  ],
+  'response.reasoning_text.delta': [
+    'type', 'sequence_number', 'item_id', 'output_index', 'content_index', 'delta',
+  ],
+  'response.reasoning_text.done': [
+    'type', 'sequence_number', 'item_id', 'output_index', 'content_index', 'text',
   ],
   'response.reasoning_summary_part.added': [
     'type', 'sequence_number', 'item_id', 'output_index', 'summary_index', 'part',
@@ -278,6 +288,7 @@ const NATIVE_EVENT_KEYS: Readonly<Record<string, readonly string[]>> = {
 }
 
 type NativeItemState = {
+  phase: string | null
   id: string
   type: string
   name: string | null
@@ -1025,10 +1036,14 @@ function validateNativeEventKeys(payload: JsonObject): void {
   if (isRecord(payload.response)) {
     assertExactKeys(
       payload.response,
-      ['id', 'model', 'status', 'output', 'usage', 'error', 'incomplete_details'],
+      ['id', 'model', 'status', 'output', 'usage', 'error', 'incomplete_details', 'object', 'created_at'],
       'gateway_response_shape_invalid',
     )
   }
+  if (isRecord(payload.response) && (
+    (payload.response.object !== undefined && payload.response.object !== 'response')
+    || (payload.response.created_at !== undefined && (!Number.isSafeInteger(payload.response.created_at) || Number(payload.response.created_at) < 0))
+  )) throw new CodexModelGatewayError('gateway_response_shape_invalid', 502)
   if (isRecord(payload.part)) {
     const partType = String(payload.part.type)
     assertExactKeys(
@@ -1147,7 +1162,7 @@ function nativeItemState(item: JsonObject): NativeItemState {
   const messageParts = new Map<number, {
     type: string; text: string; textDone: boolean; partDone: boolean; explicitPart: boolean
   }>()
-  if (item.type === 'message' && Array.isArray(item.content)) {
+  if ((item.type === 'message' || item.type === 'reasoning') && Array.isArray(item.content)) {
     item.content.forEach((part, index) => {
       if (isRecord(part)) {
         messageParts.set(index, {
@@ -1171,6 +1186,7 @@ function nativeItemState(item: JsonObject): NativeItemState {
     })
   }
   return {
+    phase: typeof item.phase === 'string' ? item.phase : null,
     id: nonEmptyString(item.id, 'gateway_response_item_id_missing'),
     type: nonEmptyString(item.type, 'gateway_response_item_type_missing'),
     name: item.type === 'function_call'
@@ -1197,6 +1213,13 @@ function assertNativeItemMatches(
   requireArgumentsMatch: boolean,
 ): void {
   const actual = nativeItemState(item)
+  if (expected.type === 'message' && expected.phase === null && actual.phase !== null) {
+    const { phase: _phase, ...withoutPhase } = item
+    if (nativeItemIdentityDigest(withoutPhase) === expected.identityDigest) {
+      expected.phase = actual.phase
+      expected.identityDigest = actual.identityDigest
+    }
+  }
   if (
     actual.id !== expected.id
     || actual.type !== expected.type
@@ -1452,7 +1475,7 @@ function validateNativeEvent(
       if (existing.type === 'function_call' && !existing.argumentsDone) {
         throw new CodexModelGatewayError('gateway_response_tool_arguments_not_done', 502)
       }
-      if (existing.type === 'message' && existing.messageParts.size > 0) {
+      if ((existing.type === 'message' || existing.type === 'reasoning') && existing.messageParts.size > 0) {
         if (!Array.isArray(payload.item.content) || payload.item.content.length !== existing.messageParts.size) {
           throw new CodexModelGatewayError('gateway_response_message_content_changed', 502)
         }
@@ -1493,13 +1516,13 @@ function validateNativeEvent(
 
   const expectedItemType = eventType.startsWith('response.function_call_arguments.')
     ? 'function_call'
-    : eventType.startsWith('response.reasoning_summary_')
+    : (eventType.startsWith('response.reasoning_summary_') || eventType.startsWith('response.reasoning_text.'))
       ? 'reasoning'
       : (
           eventType.startsWith('response.output_text.')
           || eventType.startsWith('response.refusal.')
-          || eventType.startsWith('response.content_part.')
-        ) ? 'message' : null
+          ) ? 'message'
+        : eventType.startsWith('response.content_part.') ? state.items.get(nativeOutputIndex(payload))?.type : null
   if (expectedItemType) {
     const index = nativeOutputIndex(payload)
     const item = state.items.get(index)
@@ -1513,7 +1536,7 @@ function validateNativeEvent(
       const partIndex = nativePartIndex(payload, 'content_index')
       if (
         !isRecord(payload.part)
-        || !ALLOWED_MESSAGE_CONTENT_TYPES.has(String(payload.part.type))
+        || !(item.type === 'reasoning' ? payload.part.type === 'reasoning_text' : ALLOWED_MESSAGE_CONTENT_TYPES.has(String(payload.part.type)))
       ) throw new CodexModelGatewayError('gateway_response_content_part_not_allowed', 502)
       const partValue = nativeMessagePartValue(payload.part)
       const existingPart = item.messageParts.get(partIndex)
@@ -1553,9 +1576,9 @@ function validateNativeEvent(
       }
       return
     }
-    if (eventType.startsWith('response.output_text.') || eventType.startsWith('response.refusal.')) {
+    if (eventType.startsWith('response.output_text.') || eventType.startsWith('response.refusal.') || eventType.startsWith('response.reasoning_text.')) {
       const partIndex = nativePartIndex(payload, 'content_index')
-      const partType = eventType.startsWith('response.refusal.') ? 'refusal' : 'output_text'
+      const partType = eventType.startsWith('response.refusal.') ? 'refusal' : eventType.startsWith('response.reasoning_text.') ? 'reasoning_text' : 'output_text'
       const existingPart = item.messageParts.get(partIndex)
         || {
           type: partType, text: '', textDone: false, partDone: false, explicitPart: false,
@@ -1611,7 +1634,7 @@ function validateNativeEvent(
         || typeof payload.arguments !== 'string'
         || payload.arguments !== item.arguments
       ) throw new CodexModelGatewayError('gateway_response_tool_arguments_changed', 502)
-      if (!item.name) throw new CodexModelGatewayError('gateway_response_tool_name_invalid', 502)
+      if (!item.name || (payload.name !== undefined && payload.name !== item.name)) throw new CodexModelGatewayError('gateway_response_tool_name_invalid', 502)
       assertNativeToolArgumentsSafe(
         payload.arguments,
         item.name,
@@ -1866,6 +1889,8 @@ async function streamNativeResponses(input: {
   toolArgumentValidators: ReadonlyMap<string, CodexToolArgumentValidator>
   expectedModel: string
   normalizeChatGptOAuth: boolean
+  normalizeZai: boolean
+  inferMessagePhase: boolean
   credential: string
   abort: () => void
   maxBytes: number
@@ -1876,6 +1901,7 @@ async function streamNativeResponses(input: {
   recordCompleted: (evidence: CodexModelGatewayResponseEvidence) => Promise<void>
   recordFailed: (evidence: CodexModelGatewayFailureEvidence) => void
 }): Promise<void> {
+  const normalizePhase = input.inferMessagePhase ? createProviderMessagePhaseNormalizer() : (event: JsonObject) => [event]
   const startedAtMs = Date.now()
   const decoder = new TextDecoder('utf-8', { fatal: true })
   const reader = input.body.getReader()
@@ -1930,6 +1956,7 @@ async function streamNativeResponses(input: {
   const deltaFamily = (eventType: string): string | null => {
     if (eventType === 'response.function_call_arguments.delta') return 'arguments'
     if (eventType === 'response.reasoning_summary_text.delta') return 'reasoning'
+    if (eventType === 'response.reasoning_text.delta') return 'reasoning_text'
     if (eventType === 'response.output_text.delta') return 'output_text'
     if (eventType === 'response.refusal.delta') return 'refusal'
     return null
@@ -1990,107 +2017,109 @@ async function streamNativeResponses(input: {
       for (const block of parsed.blocks) {
         const parsedEvent = nativeEventFromBlock(block)
         if (!parsedEvent) continue
-        const providerPayload = input.normalizeChatGptOAuth
+        const normalizedPayload = input.normalizeChatGptOAuth
           ? normalizeChatGptOAuthResponseEvent(
               parsedEvent.payload,
               [...state.items.values()].flatMap((item) => item.doneItem ? [item.doneItem] : []),
             )
-          : parsedEvent.payload
-        const eventType = String(parsedEvent.payload.type)
-        assertNativeProviderIdentitySafe(providerPayload, input.credential)
-        validateNativeEvent(
-          providerPayload,
-          input.allowedTools,
-          input.toolArgumentValidators,
-          state,
-          input.expectedModel,
-          input.credential,
-        )
-        try {
-          policy.acceptValidatedEvent(providerPayload)
-        } catch (error) {
-          if (error instanceof CodexProviderStreamPolicyError) {
-            throw new CodexModelGatewayError(error.code, 502)
-          }
-          throw error
-        }
-        if (
-          eventType === 'response.output_item.added'
-          && isRecord(providerPayload.item)
-          && providerPayload.item.type === 'function_call'
-        ) holdFromFunctionCall = true
-        const itemId = typeof providerPayload.item_id === 'string'
-          ? providerPayload.item_id
-          : isRecord(providerPayload.item) && typeof providerPayload.item.id === 'string'
-            ? providerPayload.item.id
-            : ''
-        if (eventType === 'response.output_item.done') {
-          flushDeltaFilters((entry) => entry.itemId === itemId)
-        } else if (eventType.endsWith('.done')) {
-          const family = eventType.replace(/\.done$/, '').replace(/^response\./, '')
-          flushDeltaFilters((entry) => (
-            entry.itemId === itemId && entry.eventType.includes(family.replace(/_done$/, ''))
-          ))
-        }
-        const family = deltaFamily(eventType)
-        let gatewayPayload = providerPayload
-        if (eventType === 'response.incomplete' && isRecord(providerPayload.response)) {
-          const incompleteDetails = providerPayload.response.incomplete_details
-          const reason = isRecord(incompleteDetails) ? incompleteDetails.reason : null
-          const response = { ...providerPayload.response }
-          delete response.incomplete_details
-          const code = reason === 'max_output_tokens'
-            ? 'gateway_upstream_output_truncated'
-            : 'gateway_upstream_output_filtered'
-          gatewayPayload = {
-            ...providerPayload,
-            type: 'response.failed',
-            response: {
-              ...response,
-              status: 'failed',
-              error: { code, message: code, type: 'gateway_error' },
-            },
-          }
-        }
-        let safePayload = redactNativeProviderEvent(
-          gatewayPayload,
-          input.credential,
-          family !== null,
-        )
-        if (family && typeof providerPayload.delta === 'string') {
-          const key = `${family}:${itemId}:${String(providerPayload.content_index ?? providerPayload.summary_index ?? 0)}`
-          let entry = deltaFilters.get(key)
-          if (!entry) {
-            const base = { ...safePayload }
-            delete base.delta
-            entry = {
-              filter: new ProviderCredentialFilter(input.credential),
-              eventType,
-              itemId,
-              base,
+          : input.normalizeZai ? normalizeZaiResponseEvent(parsedEvent.payload) : parsedEvent.payload
+        for (const providerPayload of normalizePhase(normalizedPayload)) {
+          const eventType = String(providerPayload.type)
+          assertNativeProviderIdentitySafe(providerPayload, input.credential)
+          validateNativeEvent(
+            providerPayload,
+            input.allowedTools,
+            input.toolArgumentValidators,
+            state,
+            input.expectedModel,
+            input.credential,
+          )
+          try {
+            policy.acceptValidatedEvent(providerPayload)
+          } catch (error) {
+            if (error instanceof CodexProviderStreamPolicyError) {
+              throw new CodexModelGatewayError(error.code, 502)
             }
-            deltaFilters.set(key, entry)
+            throw error
           }
-          safePayload = {
-            ...safePayload,
-            delta: sanitizeProviderText(entry.filter.push(providerPayload.delta), input.credential),
+          if (
+            eventType === 'response.output_item.added'
+            && isRecord(providerPayload.item)
+            && providerPayload.item.type === 'function_call'
+          ) holdFromFunctionCall = true
+          const itemId = typeof providerPayload.item_id === 'string'
+            ? providerPayload.item_id
+            : isRecord(providerPayload.item) && typeof providerPayload.item.id === 'string'
+              ? providerPayload.item.id
+              : ''
+          if (eventType === 'response.output_item.done') {
+            flushDeltaFilters((entry) => entry.itemId === itemId)
+          } else if (eventType.endsWith('.done')) {
+            const family = eventType.replace(/\.done$/, '').replace(/^response\./, '')
+            flushDeltaFilters((entry) => (
+              entry.itemId === itemId && entry.eventType.includes(family.replace(/_done$/, ''))
+            ))
           }
-        }
-        if (state.terminal) {
-          terminalSucceeded = safePayload.type === 'response.completed'
-          const completedPayload = terminalSucceeded || !isRecord(safePayload.response)
-            ? safePayload
-            : {
-                ...safePayload,
-                response: { ...safePayload.response, output: [] },
+          const family = deltaFamily(eventType)
+          let gatewayPayload = providerPayload
+          if (eventType === 'response.incomplete' && isRecord(providerPayload.response)) {
+            const incompleteDetails = providerPayload.response.incomplete_details
+            const reason = isRecord(incompleteDetails) ? incompleteDetails.reason : null
+            const response = { ...providerPayload.response }
+            delete response.incomplete_details
+            const code = reason === 'max_output_tokens'
+              ? 'gateway_upstream_output_truncated'
+              : 'gateway_upstream_output_filtered'
+            gatewayPayload = {
+              ...providerPayload,
+              type: 'response.failed',
+              response: {
+                ...response,
+                status: 'failed',
+                error: { code, message: code, type: 'gateway_error' },
+              },
+            }
+          }
+          let safePayload = redactNativeProviderEvent(
+            gatewayPayload,
+            input.credential,
+            family !== null,
+          )
+          if (family && typeof providerPayload.delta === 'string') {
+            const key = `${family}:${itemId}:${String(providerPayload.content_index ?? providerPayload.summary_index ?? 0)}`
+            let entry = deltaFilters.get(key)
+            if (!entry) {
+              const base = { ...safePayload }
+              delete base.delta
+              entry = {
+                filter: new ProviderCredentialFilter(input.credential),
+                eventType,
+                itemId,
+                base,
               }
-          terminalEvent = `event: ${completedPayload.type}\ndata: ${JSON.stringify(completedPayload)}\n\n`
-          terminalPayload = completedPayload
-          if (safePayload.type !== 'response.completed' && holdFromFunctionCall) {
-            heldFunctionTail.length = 0
-            holdFromFunctionCall = false
+              deltaFilters.set(key, entry)
+            }
+            safePayload = {
+              ...safePayload,
+              delta: sanitizeProviderText(entry.filter.push(providerPayload.delta), input.credential),
+            }
           }
-        } else writeSafePayload(safePayload)
+          if (state.terminal) {
+            terminalSucceeded = safePayload.type === 'response.completed'
+            const completedPayload = terminalSucceeded || !isRecord(safePayload.response)
+              ? safePayload
+              : {
+                  ...safePayload,
+                  response: { ...safePayload.response, output: [] },
+                }
+            terminalEvent = `event: ${completedPayload.type}\ndata: ${JSON.stringify(completedPayload)}\n\n`
+            terminalPayload = completedPayload
+            if (safePayload.type !== 'response.completed' && holdFromFunctionCall) {
+              heldFunctionTail.length = 0
+              holdFromFunctionCall = false
+            }
+          } else writeSafePayload(safePayload)
+        }
       }
       if (state.terminal) {
         await reader.cancel().catch(() => undefined)
@@ -2172,7 +2201,7 @@ async function streamNativeResponses(input: {
     heldFunctionTail.length = 0
     holdFromFunctionCall = false
     // silent-catch: abort upstream, persist response_failed, and emit the failed terminal; recordFailed errors still propagate.
-    const code = error instanceof CodexModelGatewayError ? error.code : 'gateway_native_stream_failed'
+    const code = error instanceof CodexModelGatewayError || error instanceof CodexMessagesError ? error.code : 'gateway_native_stream_failed'
     const snapshot = policy.snapshot()
     input.recordFailed(gatewayFailureEvidence({
       code,
@@ -2597,7 +2626,9 @@ export class CodexModelGateway {
       if (typeof credential !== 'string' || !credential) {
         throw new CodexModelGatewayError('gateway_credential_unavailable', 503)
       }
-      const upstreamBody = binding.snapshot.wireApi === 'chat/completions'
+      const upstreamBody = binding.snapshot.agentProtocol === 'anthropic'
+        ? responsesRequestToMessages(providerRequestBody, binding.snapshot)
+        : binding.snapshot.wireApi === 'chat/completions'
         ? responsesRequestToChat({
             request: providerRequestBody,
             snapshot: binding.snapshot,
@@ -2610,7 +2641,8 @@ export class CodexModelGateway {
               : {}),
             reasoning: {
               summary: 'auto',
-              ...(binding.snapshot.reasoningEffort ? { effort: binding.snapshot.reasoningEffort } : {}),
+              ...(binding.snapshot.reasoningEffort ? { effort: isZaiResponsesConfig({ ...binding.snapshot, wireApi: 'responses' })
+                ? zaiReasoningEffort(binding.snapshot.reasoningEffort) : binding.snapshot.reasoningEffort } : {}),
             },
           }
       let upstreamResponse: Response
@@ -2624,7 +2656,7 @@ export class CodexModelGateway {
             headers: {
               'content-type': 'application/json',
               accept: 'text/event-stream',
-              ...binding.snapshot.extraHeaders,
+              ...(binding.snapshot.agentProtocol === 'anthropic' ? messagesHeaders(binding.snapshot) : binding.snapshot.extraHeaders),
               [binding.snapshot.authHeader]: `${binding.snapshot.authPrefix}${credential}`,
             },
             body: upstreamBody,
@@ -2764,12 +2796,16 @@ export class CodexModelGateway {
         })
       } else {
         await streamNativeResponses({
-          body: upstreamResponseBody,
+          body: binding.snapshot.agentProtocol === 'anthropic'
+            ? messagesAsResponses(upstreamResponseBody, binding.snapshot.model, { maxBytes: this.nativeMaxBytes, maxEvents: this.nativeMaxEvents, maxItemBytes: this.nativeMaxItemBytes })
+            : upstreamResponseBody,
           response,
           allowedTools,
           toolArgumentValidators,
           expectedModel: binding.snapshot.model,
           normalizeChatGptOAuth: isChatGptOAuthResponsesSnapshot(binding.snapshot),
+          normalizeZai: binding.snapshot.wireApi === 'responses' && isZaiResponsesConfig({ ...binding.snapshot, wireApi: 'responses' }),
+          inferMessagePhase: binding.snapshot.agentProtocol === 'anthropic' || (binding.snapshot.wireApi === 'responses' && isZaiResponsesConfig({ ...binding.snapshot, wireApi: 'responses' })),
           credential,
           abort: () => abortController.abort(),
           maxBytes: this.nativeMaxBytes,

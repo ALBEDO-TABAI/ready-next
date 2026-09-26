@@ -6,6 +6,7 @@
 import type { CapabilityModeMap } from './ai-capability-groups'
 import { normalizeCapabilityModeMap } from './ai-capability-groups'
 import type { MultiTurnThinkingPolicy } from './ai-providers/types'
+import { isZaiResponsesConfig } from './ai-providers/zai'
 import {
   isKimiK3Config,
   resolveKimiK3ReasoningEffort,
@@ -588,9 +589,11 @@ export function resolveAIConfigCapabilities(
     return 'openai'
   })()
   const agentProtocol = explicitProtocol || inferredProtocol
+  const isZaiResponses = agentProtocol === 'openai' && isZaiResponsesConfig(normalizedConfig)
   const wireApi =
     agentProtocol === 'openai'
       ? normalizedConfig.wireApi ||
+        (isZaiResponses ? 'responses' : undefined) ||
         provider?.wireApi ||
         (baseUrl.includes('/codex/v1') ? 'responses' : 'chat/completions')
       : undefined
@@ -641,14 +644,14 @@ export function resolveAIConfigCapabilities(
     isKimiCoding ||
     (modelCap.supportsNativeVideo ??
       (visionDefault ? (providerCap.supportsNativeVideo ?? false) : false))
-  const thinkingDefault = isKimiK3 || isChatGptOAuth
+  const thinkingDefault = isKimiK3 || isChatGptOAuth || isZaiResponses
     ? true
     : modelCap.supportsThinking ?? providerCap.supportsThinking ?? false
   const longContextDefault =
     modelCap.supportsLongContext ??
     providerCap.supportsLongContext ??
     (modelDef?.contextWindow ?? 0) >= 128000
-  const multiTurnThinkingPolicy = isKimiK3 || isChatGptOAuth
+  const multiTurnThinkingPolicy = isKimiK3 || isChatGptOAuth || isZaiResponses || agentProtocol === 'anthropic'
     ? 'echo_required'
     : modelCap.multiTurnThinkingPolicy ?? providerCap.multiTurnThinkingPolicy ?? 'unknown'
 

@@ -27,7 +27,7 @@
   "childEnvAllowlistDigest": "9c4cd5a2d6e5d211a52a233bcf6b1f8f1cc1148ed0564fe07c54995df962486a",
   "nativeIsolationConfigContractDigest": "03ca95cca68a7ebfc6cfd0b1c3e1e4a205ace3aa61a4c7bdc3355846ddda4541",
   "resourceAdditionalContextContractDigest": "c89ef5f94ff23f51fb5f57cf32763c2d4e2bbc9b42b0245a7f95fcb75648c365",
-  "modelGatewayContractDigest": "16787011d9ea886b6a383d89a930fce398208b6d9aae6a7344948e3bbeee7e79",
+  "modelGatewayContractDigest": "282dbe5f49476484141e6523697203bc481529e7795f2930ebfb091348fb4fe7",
   "toolBridgeContractDigest": "77db879f5c613687b4a0c488fc233ea28504b0c13699df28bf2c28b3ad830228",
   "externalReadSliceContractDigest": "373b26de596c576688d78a16b066efbc92c022c6a321f30085a624640947584d",
   "outboundRpcContractDigest": "2bf9d6ba6bcfd03946a51912a80e09236af03e097974f1f4d43029f5091b349f",

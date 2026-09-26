@@ -680,7 +680,8 @@
       "credentialReferenceRequired": true,
       "allowedWireApis": [
         "responses",
-        "chat/completions"
+        "chat/completions",
+        "messages"
       ],
       "modelChangePolicy": "new_thread_required",
       "existingThreadPolicy": "model_snapshot_cwd_instructions_runtime_manifest_and_protocol_schema_must_equal_frozen_thread",
@@ -694,7 +695,7 @@
         "supportsThinking",
         "multiTurnThinkingPolicy"
       ],
-      "thinkingPolicy": "chat_requires_proven_safe_responses_allows_proven_safe_or_echo_required"
+      "thinkingPolicy": "chat_requires_proven_safe_responses_or_messages_allow_proven_safe_or_echo_required"
     },
     "proofCandidate": {
       "identityInputs": [

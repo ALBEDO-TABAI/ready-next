@@ -65,7 +65,7 @@ export function createCodexFrozenVerifierConfig(input: {
     model: input.snapshot.model,
     authMode: isChatGptOAuthSnapshot(input.snapshot) ? 'chatgpt-oauth' : 'api-key',
     agentProtocol: input.snapshot.agentProtocol,
-    wireApi: input.snapshot.wireApi,
+    wireApi: input.snapshot.wireApi === 'messages' ? undefined : input.snapshot.wireApi,
     ...(input.snapshot.reasoningEffort
       ? { reasoningEffort: input.snapshot.reasoningEffort }
       : {}),
