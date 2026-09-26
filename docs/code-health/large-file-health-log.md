@@ -641,3 +641,16 @@
 |---|---|---|---:|---:|---|---|---|
 | 2026-09-26 | Codex 供应商转换 | `src/main/modules/agent-control/codex-runtime/codex-model-gateway.ts` | 2849 | +36 | 危险 | 继续复用既有事件校验和工具准入；新增 Messages 转换、Z.ai 规范化和连接测试已放独立模块。主文件仍同时承担 HTTP 与原生流验证。 | 后续按既有协议边界拆分，交付时提醒 |
 | 2026-09-26 | 固定内核行为验收 | `src/__tests__/codex-model-gateway-sidecar.e2e.ts` | 1317 | +10 | 一般 | 补齐现行续聊准入合同，避免旧夹具在第二轮提前退出；仍单一真实 app-server 场景。 | 2026-10-26 复查场景拆分 |
+
+
+## 2026-09-26 接入模块拆分复核
+
+基线 `c16d5e13` 的接入模块已按现有职责拆分，先前该范围的大文件风险已处理。函数/类实现体逐项核对保持不变；公开入口、模型路线和历史协议不变。
+
+| 原文件 | 拆分前 | 当前 | 评级 | 归属与验证 |
+|---|---:|---:|---|---|
+| `src/main/modules/agent-control/codex-runtime/codex-model-gateway.ts` | 2849 | 681 | 健康 | 只持有监听生命周期与转发协调；请求校验、事件状态机、流交付、脱敏均移到具名模块 |
+| `src/main/modules/agent-control/codex-runtime/codex-model-gateway-chat.ts` | 1132 | 287 | 健康 | 只做请求转换；Chat 响应流独立为 728 行，跨协议凭据过滤独立为 104 行 |
+| `src/main/modules/agent-control/codex-runtime/codex-model-gateway-authority.ts` | 1029 | 113 | 健康 | 保留公开入口及宿主端口接线；同一数据库聚合的事务和查询归入 924 行 repository，未新增账本 |
+
+当前接入相关文件均少于 1000 行；协议层不反向依赖 HTTP/数据库，运行时依赖无环，已有自动检查防止重新聚合。此复核不代表其他历史大文件已完成整理。

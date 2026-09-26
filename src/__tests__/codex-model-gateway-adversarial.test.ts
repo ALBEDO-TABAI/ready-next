@@ -19,10 +19,8 @@ import {
 import {
   ReadySettingsModelGatewayCredentialStore,
 } from '../main/modules/agent-control/codex-runtime/codex-model-gateway-authority'
-import {
-  responsesRequestToChat,
-  streamChatAsResponses,
-} from '../main/modules/agent-control/codex-runtime/codex-model-gateway-chat'
+import { responsesRequestToChat } from '../main/modules/agent-control/codex-runtime/codex-model-gateway-chat'
+import { streamChatAsResponses } from '../main/modules/agent-control/codex-runtime/codex-model-gateway-chat-stream'
 import {
   CodexModelGateway,
   CodexModelGatewayError,

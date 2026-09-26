@@ -82,6 +82,22 @@ claude-bridge IPC
 
 `AgentSdkRuntime`、`ReadyAgentOrchestrator`、`direct-chat.ts`、`turn-engine.ts` 与旧 Dynamic Delivery/Boost 都不是生产入口。Codex 工具面以准入前冻结的 Ready tool snapshot 为权威，不得从旧 SDK-shaped parity 入口旁路。
 
+### 模型接入（2026-09-26 核对）
+
+以下文件均位于 `src/main/modules/agent-control/codex-runtime/`。`codex-model-gateway.ts` 保持原公开入口，只持有 HTTP 生命周期及单次请求转发顺序；不会直接承载数据库或协议状态机。
+
+| 职责 | 文件 |
+| --- | --- |
+| HTTP 读写、请求身份与冻结权限校验 | `codex-model-gateway-http.ts`、`codex-model-gateway-request.ts` |
+| 原生 Responses 事件一致性与流式交付 | `codex-model-gateway-native-validation.ts`、`codex-model-gateway-native-stream.ts` |
+| Chat 请求转换与响应流转换 | `codex-model-gateway-chat.ts`、`codex-model-gateway-chat-stream.ts` |
+| Messages、OAuth、Z.ai 及缺少消息阶段的适配 | `codex-model-gateway-messages.ts`、`codex-model-gateway-oauth.ts`、`codex-zai-responses.ts`、`codex-provider-message-phase.ts` |
+| 凭据脱敏、上游错误和超时/重试规则 | `codex-provider-credential-filter.ts`、`codex-model-gateway-provider-errors.ts`、`codex-model-gateway-policy.ts`、`codex-model-gateway-retry.ts` |
+| 数据库记录与宿主准入/凭据端口 | `codex-model-gateway-repository.ts`、`codex-model-gateway-authority.ts` |
+| 跨模块端口类型与基础校验 | `codex-model-gateway-types.ts`、`codex-model-gateway-common.ts` |
+
+协议模块不得反向加载 HTTP 服务或数据库，运行时依赖不得成环。`codex-gateway-module-boundaries.test.ts` 已加入 E3 验证入口，约束职责边界及文件规模；真实行为仍由网关、供应商、原生持久化和固定 app-server 测试验收。真实供应商候选摘要同时包含拆出的接入源文件。
+
 ## 5. Agent Control 分区
 
 在 `src/main/modules/agent-control/` 修改前，先按职责定位：

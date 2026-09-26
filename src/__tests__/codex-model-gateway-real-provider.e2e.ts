@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { readdirSync, readFileSync, statSync } from 'node:fs'
-import { relative, resolve } from 'node:path'
+import { basename, relative, resolve } from 'node:path'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
 
@@ -72,7 +72,12 @@ function readCandidateIdentity(options: { requireFrozenBoundary: boolean }): {
   const hash = createHash('sha256')
   const providerDependencyPaths = filesUnder(resolve(repositoryRoot, 'src/shared/ai-providers'))
     .map((path) => relative(repositoryRoot, path))
-  const candidatePaths = [...new Set([...E3_CANDIDATE_PATHS, ...providerDependencyPaths])].sort()
+  const gatewayDependencyPaths = filesUnder(resolve(repositoryRoot, 'src/main/modules/agent-control/codex-runtime'))
+    .filter((path) => /^codex-(?:model-gateway|provider-|zai-responses)/.test(basename(path)))
+    .map((path) => relative(repositoryRoot, path))
+  const candidatePaths = [...new Set([
+    ...E3_CANDIDATE_PATHS, ...providerDependencyPaths, ...gatewayDependencyPaths,
+  ])].sort()
   const candidatePathSet = new Set(candidatePaths)
   const dirtyPaths = [...new Set([
     ...execFileSync('git', ['diff', '--name-only', 'HEAD'], {
