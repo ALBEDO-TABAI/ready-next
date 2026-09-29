@@ -819,6 +819,7 @@ export async function setupAgentIPC(
       runtime!.readProductTurnPresentations(readyRunIds, requestedWorkbenchMode)
     ),
     getConversationScopeMessages: (scopeId) => runtime!.getConversationScopeMessages(scopeId),
+    setProjectDirectory: (scopeId, path, epoch) => runtime!.setProjectDirectory(scopeId, path, epoch),
     setActionAuthorizationMode: (scopeId, mode, expectedMessageVisibilityEpoch) => (
       runtime!.setActionAuthorizationMode(scopeId, mode, expectedMessageVisibilityEpoch)
     ),

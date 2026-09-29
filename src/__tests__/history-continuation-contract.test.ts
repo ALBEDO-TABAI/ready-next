@@ -15,6 +15,7 @@ import {
   type SameThreadContinuationCandidate,
   type StoredThreadContinuationContract,
 } from '../main/modules/agent-control/codex-runtime/codex-same-thread-continuation'
+import { digestCanonicalJson } from '../main/modules/agent-control/codex-runtime/codex-model-gateway-contract'
 import { loadRuntimeContinuityAssets } from '../main/modules/agent-control/codex-runtime/codex-runtime-continuity-assets'
 import {
   buildReadyToolSurface,
@@ -26,6 +27,9 @@ import { buildContinuationProbeInput } from '../main/modules/agent-control/codex
 import { isRetryOnlyTurn } from '../main/modules/agent-control/skills/skill-detection-inputs'
 
 const sha = (char: string) => char.repeat(64)
+const currentRuntimeManifestDigest = digestCanonicalJson(JSON.parse(readFileSync(
+  new URL('../../assets/codex-runtime/runtime-manifest.json', import.meta.url), 'utf8',
+)))
 
 test('default continuation probe is a neutral ordinary message', () => {
   const probe = buildContinuationProbeInput('browser')
@@ -50,7 +54,7 @@ test('native thread cwd accepts one physical macOS directory through a different
 test('checked-in runtime continuity assets match their canonical source manifests', () => {
   const loaded = loadRuntimeContinuityAssets({
     assetRoot: fileURLToPath(new URL('../../assets/runtime-continuity', import.meta.url)),
-    targetManifestDigest: 'cda6bd5ff08247c0fd502accba2c0c0d342d5d59945d06dfb53a666bb64b636d',
+    targetManifestDigest: currentRuntimeManifestDigest,
   })
   assert.equal(loaded.catalog.transitions.every((transition) => (
     transition.targetManifestDigest === loaded.catalog.targetManifestDigest
@@ -74,7 +78,7 @@ test('release continuity assets reject a missing published operation edge', () =
     writeFileSync(path, JSON.stringify(value, null, 2))
     assert.throws(() => loadRuntimeContinuityAssets({
       assetRoot: root,
-      targetManifestDigest: 'cda6bd5ff08247c0fd502accba2c0c0d342d5d59945d06dfb53a666bb64b636d',
+      targetManifestDigest: currentRuntimeManifestDigest,
     }), /runtime_continuity_support_edge_missing/)
   } finally {
     rmSync(root, { recursive: true, force: true })

@@ -8939,6 +8939,14 @@ test('production ingress admits a real fresh-root tail, closes it out and contin
       })
       assert.equal(preparedResult.ok, true, JSON.stringify(preparedResult).slice(0, 300))
       if (!preparedResult.ok) throw new Error(preparedResult.error)
+      const previousWrites = writes.count
+      Object.assign(scope.meta, { projectDirectory: output })
+      await assert.rejects(ports.ingressPort.persistIngressAtomic({
+        scope: scope as never, request: request as never,
+        reservation: reserved.reservation, prepared: preparedResult.dispatchContext,
+      }), /codex_project_directory_changed/)
+      assert.equal(writes.count, previousWrites, 'a changed project cannot persist a stale send')
+      Reflect.deleteProperty(scope.meta, 'projectDirectory')
       const persisted = await ports.ingressPort.persistIngressAtomic({
         scope: scope as never, request: request as never,
         reservation: reserved.reservation, prepared: preparedResult.dispatchContext,

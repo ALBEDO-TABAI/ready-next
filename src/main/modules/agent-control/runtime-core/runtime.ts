@@ -1373,6 +1373,10 @@ export class AgentControlRuntime extends EventEmitter {
     return this.conversationScopes.getConversationScopeMessages(scopeId)
   }
 
+  setProjectDirectory(scopeId: string, path: unknown, expectedMessageVisibilityEpoch: number): ConversationScope {
+    return this.conversationScopes.setProjectDirectory(scopeId, path, expectedMessageVisibilityEpoch)
+  }
+
   setActionAuthorizationMode(
     scopeId: string,
     mode: import('../../../../shared/action-authorization-mode').ActionAuthorizationMode,

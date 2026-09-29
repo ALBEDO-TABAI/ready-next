@@ -293,6 +293,8 @@ const agentAPI = {
     invokeAgentRuntime('agent:resumeSessionCandidate', payload),
   getConversationScopeMessages: (scopeId: string) =>
     invokeAgentRuntime('agent:getConversationScopeMessages', { scopeId }),
+  setProjectDirectory: (scopeId: string, path: string | null, expectedMessageVisibilityEpoch: number) =>
+    invokeAgentRuntime('agent:setProjectDirectory', { scopeId, path, expectedMessageVisibilityEpoch }),
   setActionAuthorizationMode: (
     scopeId: string,
     mode: ActionAuthorizationMode,

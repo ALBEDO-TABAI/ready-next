@@ -16,6 +16,7 @@ import type { ActionAuthorizationMode } from '../../../../shared/action-authoriz
 import type { CodexActionGate, CodexProductTurnActionProjection } from '../../../../shared/ipc-contracts/agent-runtime'
 import { toLocalFileUrl } from '../../../utils/dragDrop'
 import ChatMessages from '../ChatMessages'
+import { ProjectSelector } from '../ProjectSelector'
 import ChatInput, { type ChatInputHandle } from '../ChatInput'
 import { SoftFailureCapsule } from '../SoftFailureCapsule'
 import ChatAttachments from '../ChatAttachments'
@@ -584,7 +585,10 @@ export function ChatPanelBody(props: ChatPanelBodyProps): React.ReactElement {
 
             {bottomTaskCard}
 
-            {modeSwitcher}
+            <div className="ready-chat-composer-context-row">
+              <ProjectSelector />
+              {modeSwitcher}
+            </div>
 
             <ChatInput
               ref={chatInputRef}

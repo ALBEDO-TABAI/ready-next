@@ -49,6 +49,19 @@ test('conversation authorization mode persists in scope metadata without replaci
       readAliasGeneration: () => null,
     })
 
+    const project = store.setProjectDirectory('scope-action-mode', process.cwd(), 0)
+    assert.equal(project.meta.projectDirectory, process.cwd())
+    assert.equal(project.meta.adjacent, 'keep')
+    assert.throws(() => store.setProjectDirectory('scope-action-mode', 'relative-path', 0))
+    assert.throws(() => store.setProjectDirectory('scope-action-mode', null, 1))
+    assert.equal(store.getConversationScope('scope-action-mode')?.meta.projectDirectory, process.cwd())
+    db.createConversation('other-project-scope', 'butler', 'Other')
+    assert.equal(store.getConversationScope('other-project-scope')?.meta.projectDirectory, undefined)
+    store.setProjectDirectory('scope-action-mode', null, 0)
+    assert.equal(store.getConversationScope('scope-action-mode')?.meta.projectDirectory, null)
+    store.setProjectDirectory('scope-action-mode', process.cwd(), 0)
+    events.length = 0
+
     const updated = store.setActionAuthorizationMode('scope-action-mode', 'auto', 0)
     assert.equal(updated.meta.actionAuthorizationMode, 'auto')
     assert.equal(updated.meta.adjacent, 'keep')
@@ -70,6 +83,7 @@ test('conversation authorization mode persists in scope metadata without replaci
       reopened.getConversationScope('scope-action-mode')?.meta.actionAuthorizationMode,
       'auto',
     )
+    assert.equal(reopened.getConversationScope('scope-action-mode')?.meta.projectDirectory, process.cwd())
     db.getRawDb()?.prepare(`
       UPDATE chat_conversations
          SET message_visibility_epoch = message_visibility_epoch + 1

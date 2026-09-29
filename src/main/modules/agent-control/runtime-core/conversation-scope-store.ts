@@ -17,6 +17,7 @@
 // createConversationMessage) instead of into the runtime monolith. This batch
 // performs NO Phase C migration; it only fixes the boundary.
 import { randomUUID } from 'crypto'
+import { canonicalProjectDirectory } from '../codex-runtime/chat-project-directory'
 import {
   parseActionAuthorizationMode,
   type ActionAuthorizationMode,
@@ -80,6 +81,20 @@ export class ConversationScopeStore {
       throw new Error(`conversation_scope_closed_or_missing:${scopeId}`)
     }
     return this.deps.db.getChatMessages(scopeId).map((row) => this.mapMessageRow(row))
+  }
+
+  setProjectDirectory(scopeId: string, path: unknown, expectedMessageVisibilityEpoch: number): ConversationScope {
+    const existing = this.deps.db.getConversationScope(scopeId)
+    if (!existing || existing.source_kind !== 'local') throw new Error('只能为本地聊天选择项目')
+    const projectDirectory = canonicalProjectDirectory(path)
+    const meta = tryParseJson<Record<string, unknown>>(existing.meta_json || '{}', {})
+    const updated = this.deps.db.updateConversationScopeMeta(
+      scopeId, { ...meta, projectDirectory }, expectedMessageVisibilityEpoch,
+    )
+    if (!updated) throw new Error('聊天已发生变化，请重新选择项目')
+    const scope = this.mapConversationRow(updated)
+    this.deps.emitConversationEvent({ type: 'scope_updated', scope })
+    return scope
   }
 
   setActionAuthorizationMode(

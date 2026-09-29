@@ -1,3 +1,4 @@
+import { canonicalProjectDirectory, readProjectDirectory, withProjectDirectorySelection, projectDirectoryContext } from './chat-project-directory'
 import { ensureRemoteChannelAlias } from './remote-channel-alias'
 import { CodexBindingRepositoryError } from './codex-binding-error'
 import { createHash, randomUUID } from 'node:crypto'
@@ -305,6 +306,7 @@ type FactoryInput = {
 }
 
 type PreparedDetail = {
+  projectDirectory: string | null
   preparedAtMs: number
   executionBinding: Awaited<ReturnType<CodexRuntimeHostPort['createInitialExecutionBinding']>>
   threadBindingId: string
@@ -3676,7 +3678,9 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
             )
           }
         }
-        const currentResourceSelections = request.resources ?? []
+        const projectDirectory = readProjectDirectory(scope)
+        if (projectDirectory) canonicalProjectDirectory(projectDirectory)
+        const currentResourceSelections = withProjectDirectorySelection(request.resources ?? [], projectDirectory)
         const explicitResources = await resolveCodexExplicitResources({
           selections: currentResourceSelections,
           resolveSkill: (selection) => {
@@ -3969,6 +3973,9 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
           (candidate) => candidate.logicalResourceId === reference.logicalResourceId,
         ) === index)
         const explicitResourceInput = [
+          ...(scope.sourceKind === 'local' && 'projectDirectory' in scope.meta
+            ? [{ type: 'text' as const, text: projectDirectoryContext(projectDirectory), text_elements: [] as [] }]
+            : []),
           ...turnResources.input,
           ...(selectedSkillResources?.input ?? []),
         ].filter((entry, index, all) => all.findIndex((candidate) => (
@@ -4345,6 +4352,7 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
           } : {}),
         })
         preparedDetails.set(preparedResult.prepared.runId, {
+          projectDirectory,
           preparedAtMs: Date.now(),
           executionBinding: await boundHost.createInitialExecutionBinding({
             runId: preparedResult.prepared.runId,
@@ -4446,6 +4454,13 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
       }
       try {
         rawDb.exec('BEGIN IMMEDIATE')
+        const currentProjectScope = host.getScope(scope.id)
+        if (!currentProjectScope || readProjectDirectory(currentProjectScope) !== detail.projectDirectory) {
+          throw new PrePersistenceAdmissionError('action_projection_confirmation_required', true,
+            digestCanonicalJson({ runId: prepared.runId, stage: 'project_selection_changed' }),
+            'codex_project_directory_changed')
+        }
+        if (detail.projectDirectory) canonicalProjectDirectory(detail.projectDirectory)
         assertCodexProfileRouteCurrent({ settings: input.settings, expected: detail.upstream })
         const scopeEpoch = rawDb.prepare(`
           SELECT message_visibility_epoch

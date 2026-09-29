@@ -23,6 +23,8 @@
 
 ## 2. 会话、资源与工具面
 
+- 本地聊天的项目选择器与模块切换同处输入框上沿，模块胶囊以固定 8px 间距紧随项目胶囊，共用液态玻璃材质；整行以聊天面板右边界限位，项目名过长时压缩项目胶囊并在文字右端渐隐，短名称完整显示；支持目录菜单、原生选目录、Ready/Finder 拖入与悬停/键盘取消。Main 将真实目录保存在 scope.meta.projectDirectory，按可见 epoch 更新；新聊天不继承，远程 scope 不允许设置。它是默认文件交付位置，不能替换原生 thread 的 isolated cwd 或放宽写入权限。准备阶段通过现有 local_directory 资源与 outputContract 冻结；本轮显式目录引用优先，多目录沿用原有消歧。原子准入重读项目选择，变化则拒绝旧准备；活动轮次不消费下一轮选择。清除后每轮明确撤销历史默认路径。验收：chat-project-directory、chat-project-selector、conversation-group-register、action-authorization-mode 及 codex-binding-repository-native 的生产准入用例。
+
 - 网关历史事件保留当时的原值：记忆剥离证据产生前的成对 NULL 不得补造摘要或删除。新请求的完整证据、事件不可变和单请求单终态由同一 `CODEX_GATEWAY_EXCHANGE_GUARDS_SQL` 强制；118 重建在复制并移除旧表后安装约束，119 向已升级库补齐。历史可读不代表当前授权，仍须通过当前 binding、prepared、fence 与终态合同。
 - 会话 scope 按“来源频道 + 线程或本地 conversation + agent”隔离；工具日志只进入运行态或胶囊层，不混入正文消息。
 - 会话 scope id 是稳定产品身份；`aliasGeneration` 只表示 Codex 原生 thread incarnation，`messageVisibilityEpoch` 才表示当前可见上下文。停止、Browser verifier nonaccept 或 publication divergence 可以创建更高 alias generation，但不得仅因 generation 变化推进可见 epoch 或清除历史；下一条真实用户输入是否可用只读当前 head action projection。Renderer 不得把 active `aliasGeneration === null` 当成发送禁令。`expectedAliasGeneration` 只表示客户端最后观察到的 **active** generation；缺省时 Main 按 conversation 定位现有 active head；只有 `refreshPristineFreshStartHeadAtomic` 可在严格空白且合同漂移时创建后继，不再隐式创建或恢复缺失 head，也不得把已退役 generation 填回去冒充 expected。列表可附带 `latestAliasGeneration` 作为只读事实，不参与 CAS。用户重置必须在同一事务内推进两轴，并清除旧消息、任务投影、召回索引、附件派生和上下文提示。每个 scoped run 在 admission 时冻结可见 epoch；所有当前产品写入都必须按该 epoch 做数据库 CAS，当前列表/搜索/UI 只读与 scope 当前 epoch 相同的行，旧行只允许具名的 exact-run 恢复或审计入口读取。每条远程入站在持久保存前冻结 `scope + messageVisibilityEpoch`，冲刷前后均必须重读当前 epoch；重置或关闭还必须同步丢弃该 scope 已排队未消费的入站、关闭它的 Browser target claim，旧入站事件和旧 claim 不得跨入新 epoch。

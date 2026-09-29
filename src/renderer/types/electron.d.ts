@@ -864,6 +864,8 @@ interface ElectronAgentAPI {
   getConversationScopeMessages: (
     scopeId: string
   ) => Promise<IPCResponse<ConversationScopeMessageData[]>>
+  setProjectDirectory: (scopeId: string, path: string | null, expectedMessageVisibilityEpoch: number) =>
+    Promise<IPCResponse<ConversationScopeData>>
   setActionAuthorizationMode: (
     scopeId: string,
     mode: ActionAuthorizationModeData,

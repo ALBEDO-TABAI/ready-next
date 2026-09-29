@@ -144,6 +144,7 @@ export interface ConversationGroupDeps {
    * chat_messages stream for the scope.
    */
   getConversationScopeMessages(scopeId: string): ConversationScopeMessage[]
+  setProjectDirectory(scopeId: string, path: unknown, epoch: number): ConversationScope
   setActionAuthorizationMode(
     scopeId: string,
     mode: ActionAuthorizationMode,
@@ -188,6 +189,7 @@ const CHANNELS = [
   'agent:readProductTurnPresentations',
   'agent:getConversationScopeMessages',
   'agent:setActionAuthorizationMode',
+  'agent:setProjectDirectory',
   'agent:listScopeAttachments',
   'agent:getScopeAttachment',
   'agent:clearRemoteAttachmentCache',
@@ -324,6 +326,23 @@ export const conversationGroup: IpcChannelGroup<ConversationGroupDeps> = {
     ipcMain.handle('agent:getConversationScopeMessages', (_, payload: { scopeId: string }): IPCResponse => {
       try {
         return { success: true, data: deps.getConversationScopeMessages(payload.scopeId) }
+      } catch (error) {
+        return { success: false, error: error instanceof Error ? error.message : String(error) }
+      }
+    })
+
+    ipcMain.handle('agent:setProjectDirectory', (_, payload?: {
+      scopeId?: unknown; path?: unknown; expectedMessageVisibilityEpoch?: unknown
+    }): IPCResponse => {
+      try {
+        if (typeof payload?.scopeId !== 'string' || !payload.scopeId.trim()
+          || !Number.isSafeInteger(payload.expectedMessageVisibilityEpoch)
+          || Number(payload.expectedMessageVisibilityEpoch) < 0) {
+          throw new Error('聊天已发生变化，请重新选择项目')
+        }
+        return { success: true, data: deps.setProjectDirectory(
+          payload.scopeId, payload.path, Number(payload.expectedMessageVisibilityEpoch),
+        ) }
       } catch (error) {
         return { success: false, error: error instanceof Error ? error.message : String(error) }
       }
