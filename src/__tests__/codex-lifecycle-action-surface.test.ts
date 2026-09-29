@@ -10,7 +10,7 @@ import { digestCanonicalJson } from '../main/modules/agent-control/codex-runtime
 import { parseLifecycleOperationProjectionV2 } from '../shared/ipc-contracts/agent-lifecycle-snapshot'
 
 function projection(input: {
-  snapshot: 'idle_native_thread' | 'product_turn_interruptible' | 'product_turn_interrupt_unknown' | 'invariant_violation'
+  snapshot: 'idle_native_thread' | 'product_turn_interruptible' | 'product_turn_interrupt_unknown' | 'product_turn_engine_terminal_closeout_pending' | 'invariant_violation'
   activeReadyRunId?: string | null
   requestedAction?: 'stop' | 'reset' | 'close' | null
   legacy?: boolean
@@ -66,6 +66,20 @@ test('lifecycle V2 freezes the exact action owner instead of deriving from lates
       : null,
     'run-active',
   )
+})
+
+test('a terminal model turn still exposes stop while Ready closeout is pending', () => {
+  for (const requestedAction of [null, 'stop'] as const) {
+    const pending = projection({ snapshot: 'product_turn_engine_terminal_closeout_pending',
+      activeReadyRunId: 'run-pending', requestedAction })
+    assert.equal(pending.actions.stop.availability, 'ready')
+    assert.equal(pending.actions.stop.requestRef?.ownerKind, 'run_owner')
+    assert.equal(pending.actions.stop.requestRef?.ownerKind === 'run_owner'
+      ? pending.actions.stop.requestRef.targetReadyRunId : null, 'run-pending')
+    assert.deepEqual(parseLifecycleOperationProjectionV2(pending), pending)
+  }
+  assert.equal(projection({ snapshot: 'product_turn_engine_terminal_closeout_pending',
+    activeReadyRunId: 'run-pending', requestedAction: 'reset' }).actions.stop.availability, 'not_applicable')
 })
 
 test('interrupt uncertainty exposes only the exact requested action and legacy blocks compaction', () => {

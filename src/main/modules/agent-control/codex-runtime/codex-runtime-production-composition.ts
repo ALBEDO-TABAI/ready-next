@@ -2832,7 +2832,8 @@ export function createCodexRuntimeComposition(input: FactoryInput): CodexRuntime
       status: input.status,
       terminalReason: input.terminalReason,
       ...(input.lifecycleAction ? { lifecycleAction: input.lifecycleAction } : {}),
-      forcePublicationDiverged: input.forcePublicationDiverged === true,
+      forcePublicationDiverged: input.forcePublicationDiverged === true
+        || (input.lifecycleAction === 'stop' && candidate.engineOutcome === 'completed'),
     })
     const forkReservationSetId = terminalEvidence.history.kind === 'diverged'
       ? reserveNativeForkForDivergence(product, terminalEvidence.evidence.nativeReadback)

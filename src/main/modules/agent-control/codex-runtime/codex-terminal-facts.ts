@@ -2,6 +2,7 @@ import type { ProductTurnReceipt } from '../../../../shared/ipc-contracts/agent-
 import type { PreparedCodexProductRun } from './codex-product-run-preparer'
 import { selectCodexTerminalCandidate, type CoreTurnCandidate } from './codex-turn-collector'
 import type { CodexThread } from './codex-native-runtime'
+import { projectCodexUserInputReadback } from './codex-user-input'
 import { digestCanonicalJson, type CodexModelGatewayFailureEvidence, type CodexModelGatewayRequestKind } from './codex-model-gateway-contract'
 
 type NativeCandidate = Extract<CoreTurnCandidate, { kind: 'native_terminal' }>
@@ -205,12 +206,13 @@ const continuationSafeFailureWire = {
   responseIdentitySeen: false, partialAssistantItemSeen: false, toolCallItemSeen: false,
   eventCount: 0, wireByteCount: 0,
 } as const
+const usageLimitFailureWire = { ...continuationSafeFailureWire, causeCode: 'gateway_upstream_http_429' } as const
 
 export const CODEX_CONTINUATION_SAFE_PROBE_RECEIPT_DIGEST = digestCanonicalJson({
-  contract: 'codex_0_149_failed_user_only_continuity_probe_v1',
+  contract: 'codex_0_149_failed_user_only_continuity_probe_v2',
   runtimeVersion: '0.149.0',
   binarySha256: 'f4a74117b8142cda581c95ff753abf4508b5636d89682c1ed77e4a9249af8963',
-  runtimeManifestDigest: 'cda6bd5ff08247c0fd502accba2c0c0d342d5d59945d06dfb53a666bb64b636d',
+  runtimeManifestDigest: '22816589f287db132fdc4e3a57b674878795fb75891d765d598b3c94e381bc79',
   stableV2SchemaDigest: '38483e82eb7170aaa49861a9690734f1201249ae8207d84e3300c7a1c06412e1',
   seam: 'one_user_item_no_assistant_tool_or_compaction_suffix',
   failedUserRetention: 'prior_user_exact_once',
@@ -218,6 +220,9 @@ export const CODEX_CONTINUATION_SAFE_PROBE_RECEIPT_DIGEST = digestCanonicalJson(
   unsafeSuffixObserved: false,
   probeTransport: 'isolated_local_responses_fixture',
   wire: continuationSafeFailureWire,
+  usageLimitWire: usageLimitFailureWire,
+  usageLimitErrorInfo: 'usageLimitExceeded',
+  continuationAfterRestart: true,
 })
 
 export function buildTerminalNativeReadbackReceipt(input: {
@@ -278,10 +283,11 @@ export function resolveCodexHistoryObservation(input: {
   }
   const turn = matchingTurns[0]
   const current = input.prepared.ingress.canonicalCurrentInputRef
+  const sentInput = [...current.input, ...input.prepared.ingress.explicitResourceEnvelope.input]
   const userItems = turn.items.filter((item) => item.type === 'userMessage')
   const exactUser = userItems.filter((item) => (
     item.clientId === input.expectedClientUserMessageId
-    && digestCanonicalJson(item.content) === digestCanonicalJson(current.input)
+    && digestCanonicalJson(item.content) === digestCanonicalJson(projectCodexUserInputReadback(sentInput))
   ))
   if (userItems.length === 0 && input.candidate.engineOutcome !== 'completed') {
     return { kind: 'diverged', reason: 'missing_user_half_turn' }
@@ -319,7 +325,7 @@ export function resolveCodexHistoryObservation(input: {
       retainedFormalInputMappingDigest: digestCanonicalJson({
         originUserMessageId: current.messageId,
         clientUserMessageId: input.expectedClientUserMessageId,
-        inputDigest: digestCanonicalJson(current.input),
+        inputDigest: digestCanonicalJson(sentInput),
         acceptedItemId,
         nativeReadbackAgentItemDigest: digestCanonicalJson(selection.message),
       }),
@@ -347,11 +353,14 @@ export function resolveCodexHistoryObservation(input: {
     return { kind: 'diverged', reason: 'tool_or_compaction_suffix' }
   }
   const exchange = input.gatewayEvidence[0]
+  const failureWire = turn.error?.codexErrorInfo === 'usageLimitExceeded'
+    && exchange?.failure?.causeCode === usageLimitFailureWire.causeCode
+    ? usageLimitFailureWire : continuationSafeFailureWire
   if (input.candidate.engineOutcome !== 'failed'
     || input.gatewayEvidence.length !== 1
     || exchange.requestKind !== 'product' || exchange.responseSequence === null
     || !exchange.failure
-    || Object.entries(continuationSafeFailureWire).some(([key, value]) => (
+    || Object.entries(failureWire).some(([key, value]) => (
       exchange.failure?.[key as keyof CodexModelGatewayFailureEvidence] !== value
     ))) {
     return { kind: 'diverged', reason: 'unprobed_failure_seam' }
@@ -362,7 +371,7 @@ export function resolveCodexHistoryObservation(input: {
     retainedFormalInputMappingDigest: digestCanonicalJson({
       originUserMessageId: current.messageId,
       clientUserMessageId: input.expectedClientUserMessageId,
-      inputDigest: digestCanonicalJson(current.input),
+      inputDigest: digestCanonicalJson(sentInput),
     }),
   }
 }

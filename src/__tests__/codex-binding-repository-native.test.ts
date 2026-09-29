@@ -5247,8 +5247,7 @@ test('publication recovery only abandons calls that never reached the Ready host
       codexTurnId: 'turn-native-1',
       candidateCalls: [],
     }), {
-      kind: 'incomplete', verifiedReceiptRefs: [],
-      code: 'folder_output_intent_receipt_missing', callId: null,
+      kind: 'accepted', verifiedReceiptRefs: [], code: null, callId: null,
     })
   })
 

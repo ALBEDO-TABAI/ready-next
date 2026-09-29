@@ -21,6 +21,10 @@
 
 | 评估日期 | 任务 | 文件 | 总行数 | 本次新增 | 结论 | 判断与后续动作 | 状态 |
 | --- | --- | --- | ---: | ---: | --- | --- | --- |
+| 2026-09-29 | 项目目录收尾与停止修复 | `src/main/modules/agent-control/codex-runtime/codex-runtime-production-composition.ts` | 5590 | 净 +1 | 危险 | 仅对齐直接停止与实时 lifecycle 的隐藏回答历史规则；生产装配仍过密，后续独立拆分。 | 后续拆分；交付时提醒 |
+| 2026-09-29 | 项目目录收尾与停止修复 | `src/main/modules/agent-control/codex-runtime/codex-binding-repository.ts` | 10662 | 本修复有新增 | 危险 | 本轮仅纠正未声明文件输出时的收口条件；原有大仓库仍混合准入、交付与恢复职责，后续单独拆分。 | 后续拆分；交付时提醒 |
+| 2026-09-29 | 项目目录收尾与停止修复 | `src/__tests__/codex-browser-verifier-closeout-native.test.ts` | 1794 | 本修复有新增 | 一般 | 补完整目录准备条件，验证普通回答可收口。2026-10-29 复查按历史与复核职责拆分。 | 已排期：2026-10-29 |
+| 2026-09-29 | 额度恢复与资源输入续聊 | `src/__tests__/codex-browser-verifier-closeout-native.test.ts` | 1730 | 本修复有新增 | 一般 | 复用已有终态夹具，覆盖额度失败与资源回读后的真实持久收口。2026-10-29 复查是否按历史与复核职责拆分测试。 | 已排期：2026-10-29 |
 | 2026-09-29 | 聊天项目选择器 | `src/main/modules/agent-control/codex-runtime/codex-runtime-production-composition.ts` | 5589 | 净 +15 | 危险 | 项目选择只增加准备/准入接线；已有组合根仍混合准入、历史与恢复，后续按这些边界拆分。 | 后续拆分；交付提醒 |
 | 2026-09-29 | 聊天项目选择器 | `src/main/modules/agent-control/runtime-core/runtime.ts` | 1938 | 净 +4 | 一般 | 仅委派目录保存；2026-10-29复查宿主服务边界。 | 已排期：2026-10-29 |
 | 2026-09-29 | 聊天项目选择器 | `src/main/modules/claude-bridge/ipc-handler.ts` | 1332 | 净 +1 | 一般 | 仅依赖接线；2026-10-29复查按组注册。 | 已排期：2026-10-29 |

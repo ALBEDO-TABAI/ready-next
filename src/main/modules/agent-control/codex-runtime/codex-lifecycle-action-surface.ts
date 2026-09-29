@@ -113,6 +113,8 @@ export function projectCodexLifecycleOperationV2(
   )
   const resetCloseReady = snapshot !== 'invariant_violation' || legacyPreparedBoundary
   const stopGate = snapshot === 'product_turn_interruptible'
+    || (snapshot === 'product_turn_engine_terminal_closeout_pending'
+      && (!input.base.requestedAction || input.base.requestedAction === 'stop'))
     ? gate(input, 'stop', 'ready', [])
     : snapshot === 'product_turn_interrupt_unknown' && input.base.requestedAction === 'stop'
       ? gate(input, 'stop', 'ready', [])

@@ -78,6 +78,18 @@ export function isCodexUserInput(value: unknown): value is CodexUserInput {
   return codexUserInputSchema.safeParse(value).success
 }
 
+// Pinned 0.149.0 thread/read rebuilds UserMessage from its persisted event:
+// joined text, then grouped media. Skill/mention are not echoed in that event.
+export function projectCodexUserInputReadback(input: readonly CodexUserInput[]): CodexUserInput[] {
+  const text = input.flatMap((item) => item.type === 'text' ? [item.text] : []).join('')
+  return [
+    ...(text ? [{ type: 'text' as const, text, text_elements: [] as [] }] : []),
+    ...(['image', 'localImage', 'audio', 'localAudio'] as const).flatMap((type) => (
+      input.filter((item) => item.type === type)
+    )),
+  ]
+}
+
 export function digestCodexUserInput(input: readonly CodexUserInput[]): string {
   const normalized = input.map((item) => {
     const value = normalizeCodexUserInput(item)

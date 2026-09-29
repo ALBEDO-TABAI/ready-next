@@ -1313,6 +1313,13 @@ export class CodexBindingRepository {
       return { kind: 'accepted', verifiedReceiptRefs: [], code: null, callId: null }
     }
     const activation = readCodexFolderOutputActivation(this.db, input.readyRunId)
+    // A destination offers file delivery; it does not make every reply a file task.
+    if (activation.kind === 'pending' && !this.db.prepare(`
+      SELECT 1 FROM codex_tool_call_bindings
+       WHERE ready_run_id = ? AND tool_name = 'declare_completion_criteria' LIMIT 1
+    `).get(input.readyRunId)) {
+      return { kind: 'accepted', verifiedReceiptRefs: [], code: null, callId: null }
+    }
     if (activation.kind === 'pending'
       || activation.kind === 'no_contract'
       || activation.kind === 'selection_required') {

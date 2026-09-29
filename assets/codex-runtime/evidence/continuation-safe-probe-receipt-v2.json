@@ -1,0 +1,35 @@
+{
+  "contract": "codex_0_149_failed_user_only_continuity_probe_v2",
+  "runtimeVersion": "0.149.0",
+  "binarySha256": "f4a74117b8142cda581c95ff753abf4508b5636d89682c1ed77e4a9249af8963",
+  "runtimeManifestDigest": "22816589f287db132fdc4e3a57b674878795fb75891d765d598b3c94e381bc79",
+  "stableV2SchemaDigest": "38483e82eb7170aaa49861a9690734f1201249ae8207d84e3300c7a1c06412e1",
+  "seam": "one_user_item_no_assistant_tool_or_compaction_suffix",
+  "failedUserRetention": "prior_user_exact_once",
+  "retainedPriorUserCount": 1,
+  "unsafeSuffixObserved": false,
+  "probeTransport": "isolated_local_responses_fixture",
+  "wire": {
+    "failureClass": "provider",
+    "failureStage": "headers",
+    "causeCode": "gateway_upstream_http_400",
+    "responseIdentitySeen": false,
+    "partialAssistantItemSeen": false,
+    "toolCallItemSeen": false,
+    "eventCount": 0,
+    "wireByteCount": 0
+  },
+  "usageLimitWire": {
+    "failureClass": "provider",
+    "failureStage": "headers",
+    "causeCode": "gateway_upstream_http_429",
+    "responseIdentitySeen": false,
+    "partialAssistantItemSeen": false,
+    "toolCallItemSeen": false,
+    "eventCount": 0,
+    "wireByteCount": 0
+  },
+  "usageLimitErrorInfo": "usageLimitExceeded",
+  "continuationAfterRestart": true,
+  "receiptDigest": "6ddd39a5616091ba35eed100a52a34d100b74d84c470ae1969fe697a9e417954"
+}

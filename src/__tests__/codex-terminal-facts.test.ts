@@ -18,7 +18,7 @@ import { disabledReadyMemorySnapshot } from './utils/ready-memory-fixture'
 
 test('continuation-safe seam is pinned to the machine-readable runtime probe receipt', () => {
   const receipt = JSON.parse(readFileSync(
-    'assets/codex-runtime/evidence/continuation-safe-probe-receipt.json',
+    'assets/codex-runtime/evidence/continuation-safe-probe-receipt-v2.json',
     'utf8',
   )) as Record<string, unknown>
   const { receiptDigest, ...unsigned } = receipt
@@ -146,6 +146,59 @@ const safeGateway = [{
     elapsedMs: 16, eventCount: 0, wireByteCount: 0, causeCode: 'gateway_upstream_http_400',
   },
 }]
+
+test('quota rejection with no output retains the thread, but uncertain failures do not', () => {
+  const quotaThread = thread([userItem])
+  quotaThread.turns[0].error = { message: 'limit', codexErrorInfo: 'usageLimitExceeded' }
+  const quotaGateway = [{ ...safeGateway[0], failure: {
+    ...safeGateway[0].failure, causeCode: 'gateway_upstream_http_429',
+  } }]
+  const resolve = (nativeThread = quotaThread, gatewayEvidence = quotaGateway, currentCandidate = candidate()) => (
+    resolveCodexHistoryObservation({
+      candidate: currentCandidate, prepared, expectedClientUserMessageId: 'request-b',
+      thread: nativeThread, publicationDiverged: false, gatewayEvidence,
+    })
+  )
+  assert.equal(resolve().kind, 'continuation_safe')
+  assert.equal(resolve(thread([userItem])).kind, 'diverged')
+  assert.equal(resolve(quotaThread, []).kind, 'diverged')
+  assert.equal(resolve(quotaThread, [...quotaGateway, ...quotaGateway]).kind, 'diverged')
+  for (const field of ['responseIdentitySeen', 'partialAssistantItemSeen', 'toolCallItemSeen'] as const) {
+    assert.equal(resolve(quotaThread, [{ ...quotaGateway[0], failure: {
+      ...quotaGateway[0].failure, [field]: true,
+    } }]).kind, 'diverged')
+  }
+  assert.equal(resolve(quotaThread, quotaGateway, {
+    ...candidate(), runtimeDiagnostics: { ...candidate().runtimeDiagnostics, finalDeltaItemIds: ['partial'] },
+  }).kind, 'diverged')
+})
+
+test('completed resource input is checked against the pinned native history projection', () => {
+  const resourceInput = [
+    { type: 'text' as const, text: 'project directory', text_elements: [] as [] },
+    { type: 'mention' as const, name: 'project', path: '/tmp/project' },
+    { type: 'image' as const, url: 'data:image/png;base64,fixture', detail: null },
+  ]
+  const resourcePrepared = { ...prepared, ingress: { ...prepared.ingress,
+    explicitResourceEnvelope: { input: resourceInput, resourceRefs: [] },
+  } }
+  const accepted = { ...candidate(), engineOutcome: 'completed' as const,
+    candidateSelection: { kind: 'accepted' as const, itemId: 'answer' }, candidateText: 'done',
+  }
+  const nativeUser = { ...userItem, content: [
+    textUserInput(currentInput.text + 'project directory'), resourceInput[2],
+  ] }
+  const resolve = (content = nativeUser.content) => resolveCodexHistoryObservation({
+    candidate: accepted, prepared: resourcePrepared, expectedClientUserMessageId: 'request-b',
+    thread: { ...thread([]), turns: [{ id: 'turn-b', status: 'completed', error: null,
+      items: [{ ...nativeUser, content }, { type: 'agentMessage', id: 'answer', text: 'done', phase: 'final_answer' }],
+    }] }, publicationDiverged: false, gatewayEvidence: [],
+  })
+  assert.equal(resolve().kind, 'continuation_safe')
+  assert.equal(resolve([userItem.content[0], resourceInput[2]]).kind, 'unknown_reset_required')
+  assert.equal(resolve([nativeUser.content[0]]).kind, 'unknown_reset_required')
+  assert.equal(resolve([...nativeUser.content, textUserInput('foreign')]).kind, 'unknown_reset_required')
+})
 
 test('lossy native readback cannot erase observed wire or collector suffixes', () => {
   const resolve = (gatewayEvidence: typeof safeGateway, currentCandidate = candidate()) => (

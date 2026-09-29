@@ -22,7 +22,7 @@ import {
 import { codexBrowserVerifierFrozenIdentityDigest } from '../main/modules/agent-control/codex-runtime/codex-browser-verifier-identity'
 import { createCodexUpstreamProfileSnapshot, digestCanonicalJson } from '../main/modules/agent-control/codex-runtime/codex-model-gateway-contract'
 import type { CodexThread } from '../main/modules/agent-control/codex-runtime/codex-native-runtime'
-import type { PreparedCodexProductRun } from '../main/modules/agent-control/codex-runtime/codex-product-run-preparer'
+import { CodexProductRunPreparer, type PreparedCodexProductRun } from '../main/modules/agent-control/codex-runtime/codex-product-run-preparer'
 import { createCodexRuntimeComposition, requestCodexEngineTerminalLifecycleActionBeforeCloseout } from '../main/modules/agent-control/codex-runtime/codex-runtime-production-composition'
 import type { CodexRuntimeHostPort, ReadyClosedCodexProductRun } from '../main/modules/agent-control/codex-runtime/codex-runtime-composition'
 import type { CoreTurnCandidate } from '../main/modules/agent-control/codex-runtime/codex-turn-collector'
@@ -239,6 +239,8 @@ function prepared(runId: string, taskId: string, scopeId: string, messageId: str
 async function nativeTerminalFixture(
   t: Parameters<typeof skipIfSqliteUnavailable>[0],
   suffix: string,
+  resourceInput: PreparedCodexProductRun['ingress']['explicitResourceEnvelope']['input'] = [],
+  withOutputDirectory = false,
 ) {
   if (skipIfSqliteUnavailable(t, `codex-browser-verifier-${suffix}`)) return null
   const db = openProviderCheckpointTestDb()
@@ -263,6 +265,11 @@ async function nativeTerminalFixture(
   const codexThreadId = `thread-${suffix}`
   const codexTurnId = `turn-${suffix}`
   const run = prepared(runId, taskId, scopeId, messageId)
+  run.ingress.explicitResourceEnvelope.input = resourceInput
+  run.resourceAnchorDigest = sha256(JSON.stringify({
+    explicitResourceEnvelope: run.ingress.explicitResourceEnvelope,
+    resourceAdditionalContext: run.ingress.resourceAdditionalContext,
+  }))
   const executionBinding = providerCheckpointExecutionBinding(runId)
   const upstream = createCodexUpstreamProfileSnapshot({
     profileId: `profile-${suffix}`,
@@ -336,6 +343,33 @@ async function nativeTerminalFixture(
     currentProtocolSchemaDigest: `protocol-${suffix}`,
   }))
   if (!actionHead.actionHeadIdentity) throw new Error('fixture_action_head_missing')
+  if (withOutputDirectory) {
+    const reference = { logicalResourceId: 'local-directory:project', currentVersion: `sha256:${'a'.repeat(64)}`,
+      currentDigest: 'a'.repeat(64), supersedesVersion: null, policyEpoch: 1 }
+    const result = new CodexProductRunPreparer().prepare({
+      taskId, runId, scopeId, aliasId: scopeId, aliasGeneration: 1,
+      requestId: run.ingressBinding.requestId, taskOrigin: 'user_root', runOrigin: 'initial',
+      originUserMessageId: messageId, reservationSetId: run.ingressBinding.reservationSetId,
+      reservationEvidenceDigest: run.ingressBinding.reservationEvidenceDigest,
+      currentInput: run.ingress.canonicalCurrentInputRef.input,
+      explicitResourceEnvelope: { input: resourceInput, resourceRefs: [reference] },
+      resourceAdditionalContext: [reference],
+      actionAdmissionRef: { headProjectionDigest: actionHead.evidenceDigest,
+        actionProjectionVersion: actionHead.actionProjectionVersion, actionHeadIdentity: actionHead.actionHeadIdentity },
+      resourceAuthorities: [{ logicalResourceId: reference.logicalResourceId,
+        currentVersion: reference.currentVersion, currentDigest: reference.currentDigest,
+        policyEpoch: 1, kind: 'local_directory', name: 'project',
+        path: '/tmp/project-fixture', allowedToolNames: ['file_inventory'],
+        directoryIdentity: { device: '1', inode: '2', mode: 16877, mtimeMs: 1 } }],
+      trustedWorkbenchMode: 'browser', uncommittedTailAssignments: [], supersededUncommittedItems: [],
+      readyMemorySnapshot: run.readyMemorySnapshot, ...createCodexToolFixture(['file_inventory']),
+      authorizationOwnerId: `authorization-${runId}`, resourceOwnerId: `resource-${runId}`,
+      productBudgetSeed: { maxIterations: 8, maxToolCalls: 4, maxParallelToolGroups: 1 },
+    })
+    assert.ok(result.ok)
+    if (result.ok) Object.assign(run, result.prepared)
+    assert.ok(run.outputContract)
+  }
   const admittedRun: PreparedCodexProductRun = {
     ...run,
     ingress: {
@@ -607,6 +641,7 @@ async function productionCloseout(
   value: NonNullable<Awaited<ReturnType<typeof nativeTerminalFixture>>>,
   compacted = false,
   nativeThread = completedNativeThread(value, compacted),
+  stopAfterModelFinished = false,
 ) {
   const appPath = fileURLToPath(new URL('../..', import.meta.url))
   const userDataPath = mkdtempSync(join(tmpdir(), 'ready-codex-qc-closeout-'))
@@ -646,6 +681,8 @@ async function productionCloseout(
     runtime: { getAgentSessionCheckpointRepository: () => checkpoints },
     getScope: (scopeId: string) => scopeId === value.scopeId ? scope : null,
     getTaskProjectionStore: () => value.projections,
+    abortActiveProductRun: () => true,
+    publishCommittedTerminalEvent() {},
     async commitCodexProductTurnCloseout(input) {
       canonicalCommits += 1
       const committed = await checkpoints.commitCanonicalCoreCloseout(input)
@@ -661,6 +698,20 @@ async function productionCloseout(
   let unsubscribe = () => {}
   let timeout: ReturnType<typeof setTimeout> | undefined
   try {
+    if (stopAfterModelFinished) {
+      value.repository.recordEngineTerminalCandidate({
+        readyRunId: value.runId, codexThreadId: value.codexThreadId, codexTurnId: value.codexTurnId,
+        engineOutcome: 'completed', candidate: value.candidate, recordedAt: verifiedAt,
+      })
+      const stopped = await composition.lifecycleAdapter.stopSession({
+        aliasId: value.scopeId, aliasGeneration: 1, readyRunId: value.runId,
+      })
+      assert.equal(stopped.ok, true, JSON.stringify(stopped))
+      const facts = value.repository.readTerminalCloseoutEvidence(value.runId)?.terminalFacts
+      assert.equal(facts?.product.terminal, 'interrupted')
+      assert.notEqual(facts?.history.kind, 'continuation_safe', 'unpublished answer must not become accepted history')
+      assert.equal(canonicalCommits, 1)
+    }
     const result = await new Promise<ReadyClosedCodexProductRun>((resolve, reject) => {
       timeout = setTimeout(() => reject(new Error('production_qc_closeout_timeout')), 5_000)
       unsubscribe = composition.lifecycleAdapter.observeRunCloseout({
@@ -716,9 +767,20 @@ test('canonical transaction rejects forged same-run native owner references', as
   }
 })
 
+test('production stop settles a finished model without retaining its unpublished answer as accepted history', async (t) => {
+  const value = await nativeTerminalFixture(t, 'stop-finished-model')
+  if (!value) return
+  try {
+    const closed = await productionCloseout(value, false, completedNativeThread(value), true)
+    assert.equal(closed.result.execution.cancelled, true)
+    assert.notEqual(closed.result.execution.finalText, value.finalText)
+  } finally { value.db.close() }
+})
+
 test('production history fold consumes durable wire evidence despite lossy native readback', async (t) => {
-  for (const seam of ['safe', 'partial', 'pending'] as const) {
+  for (const seam of ['safe', 'quota', 'partial', 'pending'] as const) {
     const partial = seam === 'partial'
+    const safe = seam === 'safe' || seam === 'quota'
     const value = await nativeTerminalFixture(t, `wire-${seam}`)
     if (!value) return
     try {
@@ -761,14 +823,17 @@ test('production history fold consumes durable wire evidence despite lossy nativ
           failureStage: partial ? 'stream-after-item' as const : 'headers' as const,
           responseIdentitySeen: partial, partialAssistantItemSeen: partial, toolCallItemSeen: false,
           elapsedMs: 10, eventCount: partial ? 3 : 0, wireByteCount: partial ? 300 : 0,
-          causeCode: partial ? 'gateway_native_stream_failed' : 'gateway_upstream_http_400',
+          causeCode: partial ? 'gateway_native_stream_failed'
+            : seam === 'quota' ? 'gateway_upstream_http_429' : 'gateway_upstream_http_400',
         },
         failedAt: verifiedAt,
       }
       if (seam !== 'pending') gateway.recordResponseFailureEvidence(failureInput)
       const nativeThread = completedNativeThread(value)
       nativeThread.turns[0] = {
-        ...nativeThread.turns[0], status: 'failed', error: { message: 'fixture failure' },
+        ...nativeThread.turns[0], status: 'failed', error: { message: 'fixture failure',
+          ...(seam === 'quota' ? { codexErrorInfo: 'usageLimitExceeded' as const } : {}),
+        },
         items: [nativeThread.turns[0].items[0]],
       }
       value.repository.recordEngineTerminalCandidate({
@@ -796,9 +861,18 @@ test('production history fold consumes durable wire evidence despite lossy nativ
       } finally { value.db.exec('ROLLBACK') }
       await productionCloseout(value, false, nativeThread)
       const evidence = value.repository.readTerminalCloseoutEvidence(value.runId)
-      assert.equal(evidence?.terminalFacts.history.kind, seam === 'safe' ? 'continuation_safe' : 'diverged')
+      assert.equal(evidence?.terminalFacts.history.kind, safe ? 'continuation_safe' : 'diverged')
       assert.equal(evidence?.terminalFacts.history.evidence.filter((ref) => ref.kind === 'gateway').length, 1)
-      assert.equal(value.repository.readActiveAliasBinding(value.scopeId)?.aliasGeneration, seam === 'safe' ? 1 : 2)
+      assert.equal(value.repository.readActiveAliasBinding(value.scopeId)?.aliasGeneration, safe ? 1 : 2)
+      if (safe) {
+        assert.equal(value.repository.readActiveAliasBinding(value.scopeId)?.continuationBlockedAt, null)
+        const head = projectCodexHeadActionProjection(value.repository.readHeadActionFacts({
+          aliasId: value.scopeId, aliasGeneration: 1,
+          currentRuntimeManifestDigest: value.runtimeManifestDigest,
+          currentProtocolSchemaDigest: value.protocolSchemaDigest,
+        }))
+        assert.equal(head.actions.send_new_message.availability, 'ready')
+      }
       const frozen = digestCanonicalJson(evidence)
       if (seam === 'pending') {
         assert.throws(() => gateway.recordResponseFailureEvidence(failureInput), /gateway_response_owner_closed/)
@@ -819,6 +893,43 @@ test('production history fold consumes durable wire evidence despite lossy nativ
       value.db.close()
     }
   }
+})
+
+test('production resource closeout publishes the answer and keeps the conversation available', async (t) => {
+  const value = await nativeTerminalFixture(t, 'resource-readback', [
+    { type: 'text', text: 'project directory fixture', text_elements: [] },
+    { type: 'mention', name: 'project', path: '/tmp/project-fixture' },
+  ], true)
+  if (!value) return
+  try {
+    const nativeThread = completedNativeThread(value)
+    nativeThread.turns[0].items[0] = {
+      type: 'userMessage', id: 'item-1', clientId: value.admissionInput.turnRequestId,
+      content: [{ type: 'text', text: '查询天气project directory fixture', text_elements: [] }],
+    }
+    // Recreate a restart after the model was durably finished but publication failed.
+    value.candidate.contextState = { ...value.candidate.contextState, automaticCompactionExchanges: [] }
+    value.repository.recordEngineTerminalCandidate({
+      readyRunId: value.runId, codexThreadId: value.codexThreadId, codexTurnId: value.codexTurnId,
+      engineOutcome: 'completed', candidate: value.candidate, recordedAt: verifiedAt,
+    })
+    const closed = await productionCloseout(value, false, nativeThread)
+    assert.equal(closed.result.execution.success, true)
+    assert.equal(closed.result.execution.finalText, value.finalText)
+    assert.equal(value.repository.readTerminalCloseoutEvidence(value.runId)?.terminalFacts.history.kind, 'continuation_safe')
+    const head = value.repository.readActiveAliasBinding(value.scopeId)
+    assert.equal(head?.aliasGeneration, 1)
+    assert.equal(head?.continuationBlockedAt, null)
+    const actions = projectCodexHeadActionProjection(value.repository.readHeadActionFacts({
+      aliasId: value.scopeId, aliasGeneration: 1,
+      currentRuntimeManifestDigest: value.runtimeManifestDigest,
+      currentProtocolSchemaDigest: value.protocolSchemaDigest,
+    }))
+    assert.equal(actions.actions.send_new_message.availability, 'ready')
+    const replayed = await productionCloseout(value, false, nativeThread)
+    assert.equal(replayed.canonicalCommits, 0)
+    assert.equal(replayed.result.execution.finalText, value.finalText)
+  } finally { value.db.close() }
 })
 
 test('production QC rejection commits one coherent failure and replay retains its reason', async (t) => {
