@@ -132,9 +132,7 @@ npm run test:n:focus
 npm run test:n:gates
 npm run verify:n
 npx tsx --test src/__tests__/skill-child-run-end-to-end.test.ts
-npx tsx --test src/__tests__/skill-child-parent-force-blocked.test.ts
 npx tsx --test src/__tests__/skill-task-supervisor.test.ts
-node scripts/check-no-parent-force-for-child-loop.cjs
 node scripts/check-child-loop-terminal-boundary.cjs
 ```
 

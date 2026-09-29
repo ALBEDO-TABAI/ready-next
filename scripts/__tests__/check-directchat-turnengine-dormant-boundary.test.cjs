@@ -64,60 +64,6 @@ export class DirectChatEngine {}
   assert.ok(result.errors.some((error) => error.includes('retired_file_resurrected:src/main/modules/claude-bridge/direct-chat.ts')))
 })
 
-test('gate fails when orchestrator sends through DirectChat/domainAdapterEngine', (t) => {
-  const root = makeRoot(t)
-  write(root, 'src/main/modules/agent-control/runtime-core/orchestrator.ts', `
-export class ReadyAgentOrchestrator {
-  private readonly domainAdapterEngine
-  private readonly sdkEngine
-  constructor(domainAdapterEngine, sdkEngine) {
-    this.domainAdapterEngine = domainAdapterEngine
-    this.sdkEngine = sdkEngine
-    this.bindEngineEvents(this.sdkEngine)
-  }
-  private bindEngineEvents(engine) { return engine }
-  async send() {
-    return await this.domainAdapterEngine.sendMessage('session', 'message')
-  }
-}
-`)
-  const result = check({ root })
-  assert.equal(result.ok, false)
-  assert.ok(result.errors.some((error) => error.includes('orchestrator_missing_sdk_sendMessage')))
-  assert.ok(result.errors.some((error) => error.includes('orchestrator_calls_domain_adapter_sendMessage')))
-})
-
-test('gate fails when orchestrator forwards renderer tool-action plumbing to DirectChat', (t) => {
-  const root = makeRoot(t)
-  write(root, 'src/main/modules/agent-control/runtime-core/orchestrator.ts', `
-export class ReadyAgentOrchestrator {
-  private readonly domainAdapterEngine
-  private readonly sdkEngine
-  constructor(domainAdapterEngine, sdkEngine) {
-    this.domainAdapterEngine = domainAdapterEngine
-    this.sdkEngine = sdkEngine
-    this.bindEngineEvents(this.sdkEngine)
-  }
-  private bindEngineEvents(engine) { return engine }
-  async send() {
-    return await this.sdkEngine.sendMessage('session', 'message', 'run-1', {})
-  }
-  setRendererToolActionRequester(requester) {
-    this.domainAdapterEngine.setRendererToolActionRequester(requester)
-    this.sdkEngine.setRendererToolActionRequester(requester)
-  }
-  setCancelPendingToolActions(canceller) {
-    this.domainAdapterEngine.setCancelPendingToolActions(canceller)
-    this.sdkEngine.setCancelPendingToolActions(canceller)
-  }
-}
-`)
-  const result = check({ root })
-  assert.equal(result.ok, false)
-  assert.ok(result.errors.some((error) => error.includes('orchestrator_forwards_renderer_tool_action_requester_to_direct_chat')))
-  assert.ok(result.errors.some((error) => error.includes('orchestrator_forwards_tool_action_canceller_to_direct_chat')))
-})
-
 test('gate fails when production code imports the TurnEngine class outside DirectChat', (t) => {
   const root = makeRoot(t)
   write(root, 'src/main/modules/agent-control/runtime-core/legacy-runner.ts', `

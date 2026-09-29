@@ -23,6 +23,11 @@
 | 日期 | 文档与用途 |
 | --- | --- |
 | 2026-09-13 | [技能与提示词指引应用记录](maintenance/2026-09-13-skills-and-prompts-refresh.md) — 本项目协作规则、技能描述与执行边界的调整和验证 |
+| 2026-09-15 | [书本图片分页](superpowers/plans/2026-09-15-document-reading-images-implementation.md) — 图片尺寸、独页与后文接续合同 |
+| 2026-09-22 | [工作台性能](superpowers/plans/2026-09-22-workbench-switch-performance-implementation.md) — RSS 渲染、历史读取、技能扫描及绑定包体的验收 |
+| 2026-09-26 | [模型接入实施](superpowers/plans/2026-09-26-provider-adapters-implementation.md)、[网关分层](superpowers/plans/2026-09-26-model-gateway-modularization.md) — 当前接入与职责边界；[接入验收](superpowers/audits/2026-09-26-provider-adapters-validation.md) 及其同名 JSON 是固定证据，不能推广到未验证配置 |
+| 2026-09-29 | [聊天项目目录](superpowers/plans/2026-09-29-chat-project-selector-implementation.md) — 本地聊天默认交付目录、隔离与安装记录 |
+| 2026-09-29 | [测试清扫复核](superpowers/audits/2026-09-29-test-suite-cleanup-checklist.md)、[E6 隔离合同](superpowers/plans/2026-09-29-e6-isolated-test-identities-implementation.md) — 删除/保留决定、测试入口及正式验收边界 |
 
 ## 现行入口与维护文档
 

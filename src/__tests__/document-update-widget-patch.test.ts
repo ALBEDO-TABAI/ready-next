@@ -77,43 +77,11 @@ test('mergeRecordPatch patch === null 整段删除字段', () => {
   const result = mergeRecordPatch({ a: 1 }, null)
   assert.equal(result, undefined)
 })
-
-const EXECUTOR_PATH = resolve(
-  process.cwd(),
-  'src/main/modules/document-engine/pipeline/document-task-pipeline-executor.ts',
-)
-const PIPELINE_PATH = resolve(
-  process.cwd(),
-  'src/main/modules/document-engine/pipeline/document-task-pipeline.ts',
-)
 const ACTIONS_PATH = resolve(
   process.cwd(),
   // 2026-07-06 拆分随迁：patch 执行实现从 documentActions 门面移到 execute.ts。
   'src/renderer/modules/agent/document-actions/execute.ts',
 )
-
-test('DocumentWidgetDraft schema 新增 componentSpecPatch 字段', () => {
-  const source = readFileSync(PIPELINE_PATH, 'utf8')
-  assert.match(source, /componentSpecPatch\?: DocumentWidgetComponentSpecPatch/)
-  assert.match(source, /interface DocumentWidgetComponentSpecPatch/)
-})
-
-test('normalizePipelineWidgetDraft 识别 patch-only 草稿不走 fallback', () => {
-  const source = readFileSync(EXECUTOR_PATH, 'utf8')
-  assert.match(source, /componentSpecPatch: normalizedPatch!/)
-  assert.match(source, /hasMeaningfulPatch/)
-})
-
-test('writeDocumentWidget 透传 componentSpecPatch 到 document.updateWidget', () => {
-  const source = readFileSync(EXECUTOR_PATH, 'utf8')
-  assert.match(source, /componentSpecPatch: params\.draft\.componentSpecPatch/)
-})
-
-test('system prompt 在 update 分支引导 LLM 产出 componentSpecPatch', () => {
-  const source = readFileSync(EXECUTOR_PATH, 'utf8')
-  assert.match(source, /字段级 patch/)
-  assert.match(source, /componentSpecPatch/)
-})
 
 test('renderer update_widget action 支持 patch 分支合并既有 componentSpec', () => {
   const source = readFileSync(ACTIONS_PATH, 'utf8')

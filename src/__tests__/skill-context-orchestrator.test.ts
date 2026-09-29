@@ -36,17 +36,6 @@ function createOrchestrator() {
   })
 }
 
-test('SkillContextOrchestrator keeps tools available for explicit skill only (Phase 4: no active-execution fallback)', () => {
-  const orchestrator = createOrchestrator()
-
-  assert.equal(orchestrator.shouldKeepToolsWithVideo('使用 video copy analyzer skill', undefined), true)
-  // Phase 4: the active-execution stub branch is gone; generic text without a
-  // skill/python signal no longer keeps skill tools alive just because the
-  // session had a running execution.
-  assert.equal(orchestrator.shouldKeepToolsWithVideo('普通视频分析', 'scope-1'), false)
-  assert.equal(orchestrator.shouldKeepToolsWithVideo('普通视频分析', 'scope-2'), false)
-})
-
 test('SkillContextOrchestrator builds preferred skill tool names from explicit skills', () => {
   const orchestrator = createOrchestrator()
 
@@ -600,14 +589,4 @@ test('SkillContextOrchestrator filters out short skill tokens below length thres
 
   const matched = orchestrator.findExplicitlyRequestedSkills('rss 是一种格式')
   assert.equal(matched.length, 0)
-})
-
-test('SkillContextOrchestrator listRegisteredSkillTokens returns normalized dedup tokens ≥ 6 chars', () => {
-  const orchestrator = createOrchestrator()
-
-  const tokens = orchestrator.listRegisteredSkillTokens()
-
-  assert.ok(tokens.includes('videocopyanalyzer'))
-  assert.ok(tokens.every((token) => token.length >= 6))
-  assert.equal(tokens.length, new Set(tokens).size)
 })

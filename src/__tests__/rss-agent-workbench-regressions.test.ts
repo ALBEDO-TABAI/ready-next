@@ -59,16 +59,6 @@ test('chat composer keeps a visible shell and a primary send button after liquid
   assert.doesNotMatch(chatPanelBody, /id="chat-input-shell"/)
 })
 
-test('browser and rss share one support panel width constant to reduce mode switching jump', () => {
-  const chrome = readWorkspaceFile('src/renderer/modules/workbench/chrome.ts')
-  const browserSidePanel = readWorkspaceFile('src/renderer/components/browser/BrowserSidePanel.tsx')
-  const rssMode = readWorkspaceFile('src/renderer/pages/modes/RSSMode.tsx')
-
-  assert.match(chrome, /export const WORKBENCH_SUPPORT_PANEL_WIDTH = 300/)
-  assert.match(browserSidePanel, /WORKBENCH_SUPPORT_PANEL_WIDTH/)
-  assert.match(rssMode, /WORKBENCH_SUPPORT_PANEL_WIDTH/)
-})
-
 test('rss analysis task menu uses a solid floating surface with relaxed status rows', () => {
   const rssFeed = readWorkspaceFile('src/renderer/components/rss/RSSFeed.tsx')
 

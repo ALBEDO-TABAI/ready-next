@@ -2,8 +2,6 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import { FEISHU_TOOL_ERROR_KINDS } from '../main/modules/agent-control/contracts/error-kinds'
-import { FeishuDomainAdapter } from '../main/modules/agent-control/domain-adapters/feishu-domain-adapter'
-import { createToolExecutionOutput } from '../main/modules/agent-control/tools-runtime/tool-result-types'
 import {
   digestFeishuChannelSnapshot,
   digestFeishuReadResult,
@@ -157,40 +155,4 @@ test('Feishu error kinds map to action-oriented tool envelopes', () => {
   for (const [errorKind, envelopeKind] of expected) {
     assert.deepEqual(mapErrorKindToEnvelopeKind(errorKind), { kind: envelopeKind, mapped: true })
   }
-})
-
-test('Feishu domain adapter keeps a failed typed read blocked instead of marking it done', () => {
-  const adapter = new FeishuDomainAdapter()
-  const failureData = {
-    module: 'feishu',
-    action: 'feishu.docRead',
-    message: 'permission denied',
-    ok: false,
-    success: false,
-    errorKind: FEISHU_TOOL_ERROR_KINDS.permissionDenied.code,
-  }
-  const applied = adapter.applyResult({
-    domainState: null,
-    phase: 'tool_batch',
-    toolBatch: {
-      executedTools: [{
-        id: 'tool-1',
-        name: 'feishu_doc_read',
-        input: READ_ARGS,
-        result: createToolExecutionOutput(JSON.stringify(failureData), { data: failureData }),
-      }],
-    },
-  } as never)
-
-  const state = applied.domainState as { steps: Array<{ status: string }>; failureReason: string | null }
-  assert.equal(state.steps[0]?.status, 'error')
-  assert.match(String(state.failureReason), /feishu_permission_denied/)
-
-  const finalized = adapter.applyResult({
-    domainState: applied.domainState,
-    phase: 'no_tool_call',
-  } as never)
-  assert.equal(finalized.projection?.phase, 'blocked')
-  assert.match(String(finalized.projection?.blockedReason), /feishu_permission_denied/)
-  assert.deepEqual(finalized.projection?.resumableActions, ['retry', 'cancel'])
 })

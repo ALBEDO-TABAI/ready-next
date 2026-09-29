@@ -315,16 +315,6 @@ describe('Phase 6 child-loop helpers — real registry (stubbed driver)', () => 
     const schema = resolveToolInputSchemaForExecution('skill_video_expert_pipeline')
     assert.ok(schema, 'expected resolveToolInputSchemaForExecution to surface Zod schema')
   })
-
-  test('shouldParentForceLongSkillTool: false when childRunId set, true otherwise', () => {
-    assert.equal(shouldParentForceLongSkillTool({ skillId: 'video-expert-analyzer' }), true)
-    assert.equal(shouldParentForceLongSkillTool({
-      skillId: 'video-expert-analyzer',
-      childRunId: 'v01234567',
-    }), false)
-    assert.equal(shouldParentForceLongSkillTool(null), true)
-    assert.equal(shouldParentForceLongSkillTool({ childRunId: '' }), true)
-  })
 })
 
 // ---------------------------------------------------------------------------

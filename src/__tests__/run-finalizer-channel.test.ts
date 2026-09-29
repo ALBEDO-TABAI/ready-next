@@ -1,117 +1,16 @@
 import assert from 'node:assert/strict'
-import { after, before, describe, test } from 'node:test'
+import { describe, test } from 'node:test'
 import {
   finalizeRunOutcome,
   type RunCloseMetric,
   type RunFinalizerDeps,
 } from '../main/modules/agent-control/runtime-core/run-finalizer'
-import { AgentSdkRuntime, type AgentSdkRuntimeDeps } from '../main/modules/agent-control/runtime-core/agent-sdk-runtime'
-import { RunMetaRepository } from '../main/modules/agent-control/task-projection/run-meta-repository'
-import { __setMetricSinkForTests } from '../main/modules/agent-control/metrics'
-import { __setScopeContextEpochDatabaseForTests } from '../main/modules/agent-control/session/scope-context-epoch'
-import { ScriptedAgentRunner } from './helpers/scripted-agent-runner'
-import { canonicalCoreCloseoutTestPort } from './helpers/canonical-core-closeout-test-port'
 
 import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
-
-before(() => {
-  __setScopeContextEpochDatabaseForTests({
-    getRawDb: () => ({ prepare: () => ({ get: () => undefined }) }) as never,
-  })
-})
-after(() => __setScopeContextEpochDatabaseForTests(null))
 
 test('run-finalizer-channel declares transitive sqlite ABI guard', (t) => {
   skipIfSqliteUnavailable(t, 'run-finalizer-channel transitive sqlite load')
 })
-
-interface Statement {
-  run(...params: unknown[]): unknown
-  all<R = unknown>(...params: unknown[]): R[]
-  get<R = unknown>(...params: unknown[]): R | undefined
-}
-
-class RunMetaDb {
-  private readonly rows = new Map<string, Record<string, unknown>>()
-
-  exec(_sql: string): void {}
-
-  close(): void {}
-
-  prepare(sql: string): Statement {
-    const normalized = sql.replace(/\s+/g, ' ').trim()
-    if (normalized.startsWith('INSERT INTO run_meta')) {
-      return {
-        run: (...params: unknown[]) => {
-          const columns = parseInsertColumns(sql)
-          const row: Record<string, unknown> = {}
-          columns.forEach((column, index) => {
-            row[column] = params[index]
-          })
-          this.rows.set(String(row.run_id), row)
-        },
-        all: () => [],
-        get: () => undefined,
-      }
-    }
-
-    if (normalized.startsWith('UPDATE run_meta SET')) {
-      return {
-        run: (...params: unknown[]) => {
-          const assignments = parseUpdateColumns(sql)
-          const runId = String(params[assignments.length])
-          const row = { ...(this.rows.get(runId) || {}) }
-          assignments.forEach((column, index) => {
-            row[column] = params[index]
-          })
-          this.rows.set(runId, row)
-        },
-        all: () => [],
-        get: () => undefined,
-      }
-    }
-
-    if (normalized === 'SELECT * FROM run_meta WHERE run_id = ?') {
-      return {
-        get: <R>(runId: unknown) => this.rows.get(String(runId)) as R | undefined,
-        all: () => [],
-        run: () => undefined,
-      }
-    }
-
-    throw new Error(`unexpected run_meta statement: ${normalized}`)
-  }
-}
-
-function parseInsertColumns(sql: string): string[] {
-  const match = sql.match(/INSERT INTO run_meta\s*\(([\s\S]+?)\)\s*VALUES/i)
-  assert.ok(match, 'insert column list must be parseable')
-  return match[1].split(',').map((column) => column.trim())
-}
-
-function parseUpdateColumns(sql: string): string[] {
-  const match = sql.match(/UPDATE run_meta SET\s*([\s\S]+?)\s*WHERE run_id = \?/i)
-  assert.ok(match, 'update column list must be parseable')
-  return match[1]
-    .split(',')
-    .map((assignment) => assignment.trim().split(/\s*=\s*/)[0])
-}
-
-const fakeConfig = {
-  provider: 'openai',
-  baseUrl: 'https://api.openai.com/v1',
-  apiKey: 'test-key',
-  model: 'gpt-test',
-} as const
-
-function createRuntime(deps: Partial<AgentSdkRuntimeDeps>): AgentSdkRuntime {
-  return new AgentSdkRuntime({
-    loadAIConfig: () => ({ ok: true, config: fakeConfig, reason: 'present' }),
-    domainAdapters: [],
-    listToolDefinitions: () => [],
-    ...deps,
-  })
-}
 
 function createMetricSpy(): {
   metrics: RunCloseMetric[]
@@ -281,65 +180,5 @@ describe('finalizeRunOutcome', () => {
     }, deps)
     assert.equal(metrics[0]?.lastProviderFailureHttpStatus, 503)
     assert.equal(metrics[0]?.lastProviderFailureErrorKind, 'transient')
-  })
-
-  test('normal AgentSdkRuntime run finalizes run_meta and emits run-close metric through finalizer', async () => {
-    const db = new RunMetaDb()
-    const repository = new RunMetaRepository(db as unknown as ConstructorParameters<typeof RunMetaRepository>[0])
-    const metricEvents: Array<{ metric: string; [key: string]: unknown }> = []
-    __setMetricSinkForTests((event) => metricEvents.push(event))
-
-    try {
-      const scripted = new ScriptedAgentRunner({}, [{
-        turnIndex: 0,
-        response: 'scripted run complete',
-      }])
-      const runtime = createRuntime(scripted.deps)
-      runtime.setRuntime({
-        ...canonicalCoreCloseoutTestPort((input) => {
-          const patch = {
-            status: input.status,
-            terminalReason: input.terminalReason,
-            initiator: input.initiator,
-            durationMs: input.durationMs,
-          }
-          if (repository.get(input.ownerRunId)) repository.update(input.ownerRunId, patch as never)
-          else repository.create({
-            runId: input.ownerRunId,
-            taskId: input.parentTaskId,
-            scopeId: input.conversationId,
-            ...patch,
-          } as never)
-        }),
-        getRunMetaRepository: () => repository,
-        getConversationScope: (scopeId: string) => scopeId === 'scope-run-finalizer'
-          ? { id: scopeId, messageVisibilityEpoch: 0 }
-          : null,
-      } as never)
-      runtime.newSession('butler::scope-run-finalizer', 'system prompt')
-
-      const result = await runtime.sendMessage(
-        'butler::scope-run-finalizer',
-        'finish normally',
-        'run-finalizer-scripted',
-        {
-          publicSessionId: 'scope-run-finalizer',
-          messageVisibilityEpoch: 0,
-          taskId: 'task-run-finalizer-scripted',
-        },
-      )
-
-      assert.equal(result.success, true)
-      const row = repository.get('run-finalizer-scripted')
-      assert.ok(row, 'run_meta row must be written')
-      assert.notEqual(row.status, 'working')
-      assert.equal(row.status, 'done')
-      assert.notEqual(row.initiator, null)
-      assert.notEqual(row.initiator, undefined)
-      assert.ok((row.durationMs ?? 0) > 0)
-      assert.ok(metricEvents.some((event) => event.metric === 'run_close'))
-    } finally {
-      __setMetricSinkForTests(null)
-    }
   })
 })

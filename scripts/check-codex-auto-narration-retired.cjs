@@ -60,7 +60,8 @@ const expectedRegisterProjectionSinkIdentifiers = new Map([
 ])
 
 const expectedSendScopedIdentifiers = new Map([
-  ['src/main/modules/agent-control/runtime-core/runtime.ts', 1],
+  ['src/main/modules/agent-control/runtime-core/runtime.ts', 3],
+  ['src/main/modules/agent-control/runtime-core/remote-channel-service.ts', 2],
   ['src/main/modules/claude-bridge/ipc-handler.ts', 2],
   ['src/main/modules/claude-bridge/ipc/agent-lifecycle-group.ts', 2],
   ['src/preload/index.ts', 1],
@@ -210,6 +211,7 @@ function check(root = ROOT) {
     }
   }
   const expectedSendScopedCallsites = [
+    'src/main/modules/agent-control/runtime-core/runtime.ts',
     'src/main/modules/claude-bridge/ipc-handler.ts',
     'src/main/modules/claude-bridge/ipc/agent-lifecycle-group.ts',
     'src/renderer/stores/agent-send-orchestration.ts',

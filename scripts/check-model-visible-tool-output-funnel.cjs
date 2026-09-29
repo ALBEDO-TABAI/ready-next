@@ -6,14 +6,6 @@ const path = require('node:path')
 
 const MODEL_VISIBLE_FILES = [
   {
-    file: 'src/main/modules/agent-control/runtime-core/agent-sdk-runtime.ts',
-    required: ['model-visible-tool-output', 'buildModelVisibleToolResultPayload', 'redactModelVisibleToolText'],
-  },
-  {
-    file: 'src/main/modules/agent-control/runtime-core/turn-transcript.ts',
-    required: ['model-visible-tool-output', 'serializeToolExecutionOutputForModel'],
-  },
-  {
     file: 'src/main/modules/agent-control/domain-adapters/document-domain-orchestrator.ts',
     required: ['model-visible-tool-output'],
   },

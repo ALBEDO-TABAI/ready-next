@@ -41,10 +41,6 @@ const SEND_IM_ERROR_KIND_TARGETS = [
   'src/main/modules/tools/send-im-skill-tool.ts',
 ]
 
-const TARGET_DOCUMENT_ERROR_KIND_TARGETS = [
-  'src/main/modules/agent-control/runtime-core/agent-sdk-document-utils.ts',
-  'src/main/modules/agent-control/runtime-core/agent-sdk-tool-executor.ts',
-]
 
 const BROWSER_TOOL_ERROR_KIND_TARGETS = [
   'src/main/modules/tools/browser-failure-output.ts',
@@ -56,9 +52,6 @@ const TOOL_ADMISSION_ERROR_KIND_TARGETS = [
   // B7 拆分后 tool-runtime.ts 是门面、admission 语义随拆分移出（2026-07-05
   // 重锚）；tools-runtime 内的真消费者是 tool-registry.ts（下一行）。
   'src/main/modules/agent-control/tools-runtime/tool-registry.ts',
-  'src/main/modules/agent-control/runtime-core/agent-sdk-turn-model-loop.ts',
-  'src/main/modules/agent-control/runtime-core/agent-sdk-provider-utils.ts',
-  'src/main/modules/agent-control/runtime-core/agent-sdk-runtime-outcome-utils.ts',
   'src/main/modules/tools/tool-result-envelope.ts',
 ]
 
@@ -101,14 +94,6 @@ const REQUIRED_SEND_IM_ERROR_KINDS = [
   'intent_negated',
 ]
 
-const REQUIRED_TARGET_DOCUMENT_ERROR_KINDS = [
-  'target_document_preserved_content_missing',
-  'target_document_open_unavailable',
-  'target_document_open_failed',
-  'target_document_save_unavailable',
-  'target_document_save_failed',
-  'target_document_required',
-]
 
 const REQUIRED_BROWSER_TOOL_ERROR_KINDS = [
   'browser_tool_failed',
@@ -141,11 +126,6 @@ const REQUIRED_ACTION_CONFIRMATION_ERROR_KINDS = [
   'confirmation_expired',
 ]
 
-const REQUIRED_SPECIALIST_BLUEPRINT_ERROR_KINDS = [
-  'verbatim_source_unavailable',
-  'verbatim_mismatch',
-  'confirmed_blueprint_immutable',
-]
 
 const REQUIRED_WEB_RESEARCH_ERROR_KINDS = [
   'web_search_failed',
@@ -390,12 +370,10 @@ function assertRequiredErrorKindsRegistered(violations) {
     ...REQUIRED_PROVIDER_ERROR_KINDS,
     ...REQUIRED_DETACHED_ERROR_KINDS,
     ...REQUIRED_SEND_IM_ERROR_KINDS,
-    ...REQUIRED_TARGET_DOCUMENT_ERROR_KINDS,
     ...REQUIRED_BROWSER_TOOL_ERROR_KINDS,
     ...REQUIRED_TOOL_ADMISSION_ERROR_KINDS,
     ...REQUIRED_MCP_TOOL_ERROR_KINDS,
     ...REQUIRED_ACTION_CONFIRMATION_ERROR_KINDS,
-    ...REQUIRED_SPECIALIST_BLUEPRINT_ERROR_KINDS,
     ...REQUIRED_WEB_RESEARCH_ERROR_KINDS,
     ...REQUIRED_DYNAMIC_DELIVERY_ERROR_KINDS,
   ]) {
@@ -417,11 +395,6 @@ function assertRequiredErrorKindsRegistered(violations) {
     violations,
     'ACTION_CONFIRMATION_ERROR_KINDS',
     REQUIRED_ACTION_CONFIRMATION_ERROR_KINDS,
-  )
-  assertRequiredErrorKindFamily(
-    violations,
-    'SPECIALIST_BLUEPRINT_ERROR_KINDS',
-    REQUIRED_SPECIALIST_BLUEPRINT_ERROR_KINDS,
   )
   assertRequiredErrorKindFamily(
     violations,
@@ -580,12 +553,6 @@ function main() {
       SEND_IM_ERROR_KIND_TARGETS,
       REQUIRED_SEND_IM_ERROR_KINDS,
       'SEND_IM_ERROR_KINDS',
-    )
-    assertNoLocalErrorKindLiterals(
-      violations,
-      TARGET_DOCUMENT_ERROR_KIND_TARGETS,
-      REQUIRED_TARGET_DOCUMENT_ERROR_KINDS,
-      'TARGET_DOCUMENT_ERROR_KINDS',
     )
     assertNoBareLocalLiterals(
       violations,

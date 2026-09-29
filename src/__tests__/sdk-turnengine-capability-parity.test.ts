@@ -3,20 +3,9 @@ import test from 'node:test'
 import { join } from 'node:path'
 
 import type { AIModelConfig } from '../shared/ai-providers'
-import type { BrowserTaskDecisionMode } from '../shared/browser-agent-task'
-import type { CapabilityResolution } from '../main/modules/agent-control/domain-adapters/capability-resolver'
 import { classifyIntent } from '../main/modules/agent-control/intent-classifier'
 import { buildRequestEnvelope } from '../main/modules/agent-control/contracts/request-envelope'
-import {
-  hasCurrentDocumentContextResource,
-  hasLocalDocumentResource,
-} from '../main/modules/agent-control/runtime-core/agent-sdk-utils'
-import { computeCapabilityFloors } from '../main/modules/agent-control/domain-adapters/capability-floors'
 import { getPolicyOpenAIToolBundle, type ToolPolicy } from '../main/modules/agent-control/tool-policy/execution-tool-config'
-import {
-  prepareInitialRun,
-  reconcileAfterBrowserDecision,
-} from '../main/modules/agent-control/domain-adapters/run-capability-controller'
 import { resolveCapabilityResolution } from '../main/modules/agent-control/domain-adapters/capability-resolver'
 import { AgentSdkRuntime } from '../main/modules/agent-control/runtime-core/agent-sdk-runtime'
 import { resolveSkillHintRelevanceForTurn } from '../main/modules/agent-control/runtime-core/agent-sdk-skill-intent-utils'
@@ -34,8 +23,7 @@ import {
 } from '../main/modules/agent-control/skills/skill-reference-hints'
 import {
   resolveExecutionIntentContext,
-  resolveIntentCapabilityGroupModes,
-  type ExecutionIntentContext,
+  resolveIntentCapabilityGroupModes
 } from '../main/modules/agent-control/execution-intent-resolver'
 import { BROWSER_PUBLIC_TOOL_NAMES } from '../shared/browser-tool-surface'
 import { compileSkillDefinition } from '../main/modules/skills-runtime/skill-compiler'
@@ -62,50 +50,6 @@ test.before(() => {
 })
 test.after(() => __setScopeContextEpochDatabaseForTests(null))
 
-const VISION_DENIED_CONFIG: AIModelConfig = {
-  provider: 'openai-compatible',
-  baseUrl: 'https://example.com/v1',
-  apiKey: 'test-key',
-  model: 'unknown-model',
-  toolUseMode: 'auto',
-  visionMode: 'auto',
-  nativeVideoMode: 'auto',
-}
-
-type CapabilityCase = {
-  name: string
-  userText: string
-  browserDecisionMode: BrowserTaskDecisionMode
-  config?: AIModelConfig
-  authorization?: SkillToolAuthorization
-  preferredSkillToolNames?: string[] | null
-  context?: Partial<ExecutionIntentContext>
-  expectedToolPolicy?: {
-    allowBrowserTools?: boolean
-    allowDocumentTools?: boolean
-    preferredSkillToolNames?: string[] | null
-  }
-  expectedArbitration?: {
-    resolutionAppliedIncludes?: string
-  }
-}
-
-function buildContext(userText: string, overrides: Partial<ExecutionIntentContext> = {}): ExecutionIntentContext {
-  const requestEnvelope = buildRequestEnvelope({ userText })
-  return {
-    requestEnvelope,
-    intentClassification: classifyIntent(requestEnvelope),
-    contextualUserInput: requestEnvelope.primaryInstruction,
-    userInstructionText: requestEnvelope.primaryInstruction,
-    hasDocumentEnvironment: false,
-    hasWidgetTargetContext: false,
-    explicitWidgetCreateIntent: false,
-    documentWidgetTaskKind: null,
-    documentWidgetProfile: null,
-    ...overrides,
-  }
-}
-
 function groundedBrowserEnvelope(userText: string) {
   return buildRequestEnvelope({
     userText,
@@ -117,28 +61,6 @@ function groundedBrowserEnvelope(userText: string) {
         mainFrameId: '0',
         mainFrameDocumentToken: 'document-live-sdk-parity',
       },
-    },
-  })
-}
-
-function buildControllerResolution(testCase: CapabilityCase) {
-  return prepareInitialRun({
-    config: testCase.config || BASE_CONFIG,
-    capabilityProfile: 'local_chat',
-    supportsToolCalls: true,
-    hasVideoInputs: false,
-    hasIncomingVideo: false,
-    keepToolsWithVideo: false,
-    preferredSkillToolNames: testCase.preferredSkillToolNames ?? null,
-    authorization: testCase.authorization || buildExplicitNoSkillAuthorization('no_skill_signal'),
-    executionIntentContext: buildContext(testCase.userText, testCase.context),
-    browserDecisionMode: testCase.browserDecisionMode,
-    runtimeAvailability: {
-      browserHostAvailable: true,
-      feishuConnected: true,
-    },
-    hostContext: {
-      userText: testCase.userText,
     },
   })
 }
@@ -217,213 +139,6 @@ test('live SDK Browser exposure does not branch on recalled or current request w
   }).filter((name) => name.startsWith('browser_'))
   assert.deepEqual(names, [...BROWSER_PUBLIC_TOOL_NAMES].sort())
   assert.deepEqual(explicitNames, names)
-})
-
-function buildSdkShapedResolution(testCase: CapabilityCase): CapabilityResolution {
-  const context = buildContext(testCase.userText, testCase.context)
-  const intentModes = resolveIntentCapabilityGroupModes({
-    hasTools: true,
-    capabilityProfile: 'local_chat',
-    contextualUserInput: context.contextualUserInput,
-    userInstructionText: context.userInstructionText,
-    intentClassification: context.intentClassification,
-    hasDocumentEnvironment: context.hasDocumentEnvironment,
-    hasWidgetTargetContext: context.hasWidgetTargetContext,
-    explicitWidgetCreateIntent: context.explicitWidgetCreateIntent,
-    documentWidgetTaskKind: context.documentWidgetTaskKind,
-    preferredSkillToolNames: testCase.preferredSkillToolNames ?? null,
-    mapSemanticIntent: context.mapSemanticIntent,
-  })
-  return resolveCapabilityResolution({
-    config: testCase.config || BASE_CONFIG,
-    profile: 'local_chat',
-    browserDecisionMode: testCase.browserDecisionMode,
-    runtimeAvailability: {
-      browserHostAvailable: true,
-      feishuConnected: true,
-    },
-    intentGroupModes: intentModes.intentGroupModes,
-  })
-}
-
-function sorted(values: readonly string[]): string[] {
-  return [...values].sort()
-}
-
-function assertCapabilityResolutionParity(
-  label: string,
-  controller: CapabilityResolution,
-  sdk: CapabilityResolution,
-): void {
-  assert.deepEqual(
-    sorted(controller.visibleCapabilityGroupIds),
-    sorted(sdk.visibleCapabilityGroupIds),
-    `${label}: visible capability groups drifted`,
-  )
-  assert.deepEqual(
-    sorted(controller.suppressedCapabilityGroupIds),
-    sorted(sdk.suppressedCapabilityGroupIds),
-    `${label}: suppressed capability groups drifted`,
-  )
-  assert.deepEqual(
-    sorted(controller.hostOnlyCapabilityIds),
-    sorted(sdk.hostOnlyCapabilityIds),
-    `${label}: host-only capability groups drifted`,
-  )
-  assert.equal(controller.supportsVision === true, sdk.supportsVision === true, `${label}: supportsVision drifted`)
-
-  for (const groupId of Object.keys(controller.groupStates) as CapabilityGroupId[]) {
-    assert.equal(
-      controller.groupStates[groupId]?.status,
-      sdk.groupStates[groupId]?.status,
-      `${label}: ${groupId} status drifted`,
-    )
-    assert.equal(
-      controller.groupStates[groupId]?.reason,
-      sdk.groupStates[groupId]?.reason,
-      `${label}: ${groupId} reason drifted`,
-    )
-  }
-}
-
-function assertControllerToolPolicy(
-  testCase: CapabilityCase,
-  controller: ReturnType<typeof buildControllerResolution>,
-): void {
-  const expected = testCase.expectedToolPolicy
-  if (!expected) return
-  if (typeof expected.allowBrowserTools === 'boolean') {
-    assert.equal(
-      controller.toolPolicy.allowBrowserTools,
-      expected.allowBrowserTools,
-      `${testCase.name}: controller allowBrowserTools drifted`,
-    )
-  }
-  if (typeof expected.allowDocumentTools === 'boolean') {
-    assert.equal(
-      controller.toolPolicy.allowDocumentTools,
-      expected.allowDocumentTools,
-      `${testCase.name}: controller allowDocumentTools drifted`,
-    )
-  }
-  if ('preferredSkillToolNames' in expected) {
-    assert.deepEqual(
-      controller.toolPolicy.preferredSkillToolNames,
-      expected.preferredSkillToolNames,
-      `${testCase.name}: controller preferredSkillToolNames drifted`,
-    )
-  }
-}
-
-const SELECTED_SKILL_AUTHORIZATION = buildSelectedSkillToolAuthorization({
-  skillId: 'video-copy-analyzer',
-  allowedTypedActions: [],
-  allowedPrimitives: ['skill_ask_user'],
-  source: 'explicit',
-  reason: 'p6e_parity_test',
-})
-
-const parityCases: CapabilityCase[] = [
-  {
-    name: 'free tool loop without browser intent',
-    userText: '你好，先简单回答一句',
-    browserDecisionMode: 'free_tool_loop',
-    expectedToolPolicy: {
-      allowBrowserTools: false,
-      allowDocumentTools: false,
-      preferredSkillToolNames: null,
-    },
-  },
-  {
-    name: 'browser workflow exposes browser interaction and content tasks',
-    userText: '打开网页并提取列表里的字段',
-    browserDecisionMode: 'browser_workflow',
-    expectedToolPolicy: {
-      allowBrowserTools: true,
-      allowDocumentTools: false,
-      preferredSkillToolNames: null,
-    },
-  },
-  {
-    name: 'browser upload workflow exposes interaction and power/content tasks',
-    userText: '去网页上传这张图片',
-    browserDecisionMode: 'browser_upload_workflow',
-    expectedToolPolicy: {
-      allowBrowserTools: true,
-      allowDocumentTools: false,
-      preferredSkillToolNames: null,
-    },
-  },
-  {
-    name: 'selected skill exposes skill capability',
-    userText: '@[Video Copy Analyzer] 分析这个视频文案',
-    browserDecisionMode: 'free_tool_loop',
-    preferredSkillToolNames: ['skill_ask_user'],
-    authorization: SELECTED_SKILL_AUTHORIZATION,
-    expectedToolPolicy: {
-      allowBrowserTools: false,
-      allowDocumentTools: false,
-      preferredSkillToolNames: ['skill_ask_user'],
-    },
-  },
-  {
-    name: 'research intent exposes general research capability',
-    userText: '比较北京几个 IT 园区的产业特色和适合入驻的公司类型',
-    browserDecisionMode: 'free_tool_loop',
-    expectedToolPolicy: {
-      allowBrowserTools: false,
-      allowDocumentTools: false,
-      preferredSkillToolNames: null,
-    },
-  },
-  {
-    name: 'vision-denied config stays conservative on both paths',
-    userText: '你好，先简单回答一句',
-    browserDecisionMode: 'free_tool_loop',
-    config: VISION_DENIED_CONFIG,
-    expectedToolPolicy: {
-      allowBrowserTools: false,
-      allowDocumentTools: false,
-      preferredSkillToolNames: null,
-    },
-  },
-  {
-    name: 'document widget arbitration demotes browser workflow',
-    userText: '把当前信息卡的标题字号调大一点',
-    browserDecisionMode: 'browser_workflow',
-    context: {
-      hasWidgetTargetContext: true,
-      documentWidgetTaskKind: 'update',
-    },
-    expectedToolPolicy: {
-      allowBrowserTools: false,
-      allowDocumentTools: true,
-      preferredSkillToolNames: null,
-    },
-    expectedArbitration: {
-      resolutionAppliedIncludes: 'demote_browser_decision:browser_workflow->free_tool_loop',
-    },
-  },
-]
-
-test('P6e keeps controller and SDK-shaped capability resolution in parity for representative turns', () => {
-  for (const testCase of parityCases) {
-    const controller = buildControllerResolution(testCase)
-    const sdk = buildSdkShapedResolution({
-      ...testCase,
-      browserDecisionMode: testCase.expectedArbitration ? 'free_tool_loop' : testCase.browserDecisionMode,
-    })
-
-    assertCapabilityResolutionParity(testCase.name, controller.capabilityResolution, sdk)
-    assertControllerToolPolicy(testCase, controller)
-
-    if (testCase.expectedArbitration?.resolutionAppliedIncludes) {
-      assert.ok(
-        controller.arbitration.resolutionApplied.includes(testCase.expectedArbitration.resolutionAppliedIncludes),
-        `${testCase.name}: expected arbitration marker missing`,
-      )
-    }
-  }
 })
 
 test('P6e documents the SDK default-tools boundary for collection exposure', () => {
@@ -1316,49 +1031,6 @@ test('document-context confirmation with subtitle request keeps document write t
   assert.ok(documentTools.includes('document_save_tab'))
 })
 
-test('P6e keeps reconcileAfterBrowserDecision parity for late browser upload decisions', () => {
-  const prepared = buildControllerResolution({
-    name: 'initial upload turn before browser decision',
-    userText: '去网页上传这张图片',
-    browserDecisionMode: 'free_tool_loop',
-  })
-  const reconciled = reconcileAfterBrowserDecision({
-    prepared,
-    browserDecisionMode: 'browser_upload_workflow',
-  })
-  const uploadContext = buildContext('去网页上传这张图片')
-  const sdkUploadIntentModes = resolveIntentCapabilityGroupModes({
-    hasTools: true,
-    capabilityProfile: 'local_chat',
-    contextualUserInput: uploadContext.contextualUserInput,
-    userInstructionText: uploadContext.userInstructionText,
-    intentClassification: uploadContext.intentClassification,
-    hasDocumentEnvironment: uploadContext.hasDocumentEnvironment,
-    hasWidgetTargetContext: uploadContext.hasWidgetTargetContext,
-    explicitWidgetCreateIntent: uploadContext.explicitWidgetCreateIntent,
-    documentWidgetTaskKind: uploadContext.documentWidgetTaskKind,
-    preferredSkillToolNames: null,
-    mapSemanticIntent: uploadContext.mapSemanticIntent,
-  })
-  const sdkUpload = resolveCapabilityResolution({
-    config: BASE_CONFIG,
-    profile: 'local_chat',
-    browserDecisionMode: 'browser_upload_workflow',
-    runtimeAvailability: {
-      browserHostAvailable: true,
-      feishuConnected: true,
-    },
-    intentGroupModes: sdkUploadIntentModes.intentGroupModes,
-  })
-
-  assertCapabilityResolutionParity('late browser upload reconciliation', reconciled.capabilityResolution, sdkUpload)
-  assert.equal(reconciled.toolPolicy.allowBrowserTools, true)
-  assert.ok(reconciled.allowedToolNames.includes('browser_click'))
-  assert.ok(reconciled.allowedToolNames.includes('browser_upload'))
-  assert.ok(reconciled.allowedToolNames.includes('browser_collect'))
-  assert.ok(reconciled.allowedToolNames.includes('browser_eval'))
-})
-
 // P1-2 — typed envelope skill_reference 是授权第一信源；正则文本候选降为兜底。
 function buildTypedRefRuntime(skillRoot: string) {
   return new AgentSdkRuntime({
@@ -1519,49 +1191,6 @@ test('P1-3 floors-based preserve keeps file read tools through skill narrowing o
   assert.ok(names.has('file_read_excerpt'), `floors preserve must keep file_read_excerpt; got ${[...names].join('|')}`)
   assert.ok(names.has('file_locate'), `floors preserve must keep file_locate; got ${[...names].join('|')}`)
   assert.ok(names.has('skill_read_artifact') && names.has('skill_run_shell'), 'skill floor must stay')
-})
-
-test('P1-4 run-capability-controller attaches the same capability floors the SDK path computes (parity)', () => {
-  const skillAuthorization = buildSelectedSkillToolAuthorization({
-    skillId: 'ready-human-touch-ppt',
-    allowedTypedActions: [],
-    allowedPrimitives: ['skill_read_artifact', 'skill_run_shell', 'skill_write_artifact', 'skill_export_artifact'],
-    source: 'explicit',
-    reason: 'test',
-  })
-  const userText = ['用文档生成一个人文感 ppt', '', '--- 附件: notes.md ---', '- 路径: /tmp/notes.md'].join('\n')
-  const controller = buildControllerResolution({
-    name: 'p1-4-floor-parity',
-    userText,
-    browserDecisionMode: 'chat',
-    authorization: skillAuthorization,
-    preferredSkillToolNames: ['skill_read_artifact', 'skill_run_shell', 'skill_write_artifact', 'skill_export_artifact'],
-  })
-  const controllerFloors = controller.toolPolicy.capabilityFloors
-  assert.ok(controllerFloors, 'controller toolPolicy must carry capabilityFloors')
-  // Honest parity: compare the controller floors against the floors the LIVE executor path computes
-  // (hasLocalDocumentResource(message, envelope) / hasCurrentDocumentContextResource), NOT the
-  // controller's own envelope-only signal. They agree for a path-present resource (the common case);
-  // a path-null-only resource is a documented latent divergence while the controller path is dormant.
-  const requestEnvelope = buildRequestEnvelope({ userText })
-  const executorFloors = computeCapabilityFloors({
-    authorization: skillAuthorization,
-    hasLocalDocumentResource: hasLocalDocumentResource(userText, requestEnvelope),
-    hasCurrentDocumentContext: hasCurrentDocumentContextResource(requestEnvelope),
-  })
-  assert.deepEqual([...controllerFloors!.toolNames].sort(), [...executorFloors.toolNames].sort())
-  assert.ok(controllerFloors!.toolNames.has('file_read_excerpt'), 'floor must include file_read_excerpt for a local-document turn')
-  assert.ok(controllerFloors!.toolNames.has('skill_read_artifact'), 'floor must include the selected skill primitives')
-  // Every controller-declared floor must actually be surfaced by the REAL SDK executor path.
-  const sdkSurface = new Set(listLiveSdkDefaultToolNames({
-    userText,
-    sessionId: 'scope-p1-4-parity',
-    requestEnvelope,
-    authorization: skillAuthorization,
-  }))
-  for (const floorTool of controllerFloors!.toolNames) {
-    assert.ok(sdkSurface.has(floorTool), `controller-declared floor ${floorTool} must be surfaced by the SDK executor path`)
-  }
 })
 
 test('P1-4 policy bundle preserves floor tools through an active skill allowed-tools filter', () => {

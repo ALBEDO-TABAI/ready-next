@@ -1,6 +1,6 @@
 # UI 调整导览
 
-> 核对日期：2026-09-06
+> 核对日期：2026-09-29
 > 目标：先定位状态拥有者、壳层和回归入口，再修改 UI。详细视觉原则见 `PRODUCT.md` 与当前运行时合同，不在本文件复制历史设计稿。
 
 ## 1. 工作台壳层
@@ -60,7 +60,7 @@ Widget 视觉不能在组件内另造色板；预览、导出和编辑必须从�
 ### RSS
 
 - 页面：`src/renderer/pages/modes/RSSMode.tsx`
-- 组件：`src/renderer/components/rss/`
+- 组件：`src/renderer/components/rss/`；列表窗口与滚动容器：`RSSVirtualList.tsx`
 - 状态：`src/renderer/stores/useRSSSession.ts`
 
 ### Calendar
@@ -77,6 +77,8 @@ Widget 视觉不能在组件内另造色板；预览、导出和编辑必须从�
 | --- | --- |
 | 总面板 | `src/renderer/components/agent/ChatPanel.tsx` |
 | 主体布局 | `src/renderer/components/agent/chat-panel/ChatPanelBody.tsx` |
+| 项目目录胶囊 | `src/renderer/components/agent/ProjectSelector.tsx`；宿主为 `ChatPanelBody.tsx`，共享 `liquid-composer.css` |
+| 聊天菜单边界 | `src/renderer/components/agent/chatMenuLayout.ts`、`src/renderer/components/agent/ChatHeader.tsx` |
 | 消息列表 | `src/renderer/components/agent/ChatMessages.tsx` |
 | 任务卡 | `src/renderer/components/agent/chat-panel/task/TaskCard.tsx` |
 | 工具时间线 | `src/renderer/components/agent/chat-panel/task/ToolTimeline.tsx` |
@@ -86,6 +88,8 @@ Widget 视觉不能在组件内另造色板；预览、导出和编辑必须从�
 | 上下文用量 | `src/renderer/components/agent/chat-panel/ContextUsageMeter.tsx` |
 
 任务卡和工具时间线只呈现 projection/runtime 真值，不在组件里推断完成或后台运行。输入框是底部浮层，消息列表尾部必须按实测高度留白；液态玻璃以真实 Electron 聊天记录验收。
+
+项目目录按聊天 scope 保存，显式文件夹引用优先；项目和模式胶囊共享一行，长名称渐隐，异步选择结果必须绑定原聊天。不要把项目目录选择当作内部运行目录切换。
 
 历史上下文阻断只限制发送，不锁草稿编辑。重试、停止和开始新上下文都消费 Main 当前动作；只有重置/关闭这类所有权变更短暂锁编辑。当前产品不显示 Agent 选择器或旧子任务继续按钮。
 

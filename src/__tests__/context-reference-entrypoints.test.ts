@@ -134,7 +134,7 @@ test('reference menus expose the input-reference action and preserve close-tab',
 test('browser, draft document, calendar and skill references become identity-preserving attachments', async () => {
   const { restore } = installDom()
   try {
-    useAgent.setState({ attachments: [], filePool: [], inputValue: '' })
+    useAgent.setState({ sessions: {}, attachments: [], filePool: [], inputValue: '' })
     useWorkspace.setState({ chatPanelVisible: false })
     let focusEvents = 0
     window.addEventListener(READY_FOCUS_CHAT_INPUT_EVENT, () => {
@@ -187,7 +187,7 @@ test('browser, draft document, calendar and skill references become identity-pre
     assert.equal(attachments[3]?.skillId, 'image-analysis-router')
     assert.equal(attachments[3]?.skillFolderPath, '/skills/image-analysis-router')
   } finally {
-    useAgent.setState({ attachments: [], filePool: [], inputValue: '' })
+    useAgent.setState({ sessions: {}, attachments: [], filePool: [], inputValue: '' })
     useWorkspace.setState({ chatPanelVisible: true })
     restore()
   }
@@ -196,7 +196,7 @@ test('browser, draft document, calendar and skill references become identity-pre
 test('file and folder references become local-path agent attachments and open the chat panel', async () => {
   const { restore } = installDom()
   try {
-    useAgent.setState({ attachments: [], filePool: [], inputValue: '' })
+    useAgent.setState({ sessions: {}, attachments: [], filePool: [], inputValue: '' })
     useWorkspace.setState({ chatPanelVisible: false })
     let focusEvents = 0
     window.addEventListener(READY_FOCUS_CHAT_INPUT_EVENT, () => {
@@ -233,7 +233,7 @@ test('file and folder references become local-path agent attachments and open th
     assert.equal(attachments[1]?.isDirectory, true)
     assert.equal(attachments[1]?.type, 'other')
   } finally {
-    useAgent.setState({ attachments: [], filePool: [], inputValue: '' })
+    useAgent.setState({ sessions: {}, attachments: [], filePool: [], inputValue: '' })
     useWorkspace.setState({ chatPanelVisible: true })
     restore()
   }
@@ -242,7 +242,7 @@ test('file and folder references become local-path agent attachments and open th
 test('document quote enters both the active composer and @ reference pool as user-selected text', () => {
   const { restore } = installDom()
   try {
-    useAgent.setState({ attachments: [], filePool: [], inputValue: '' })
+    useAgent.setState({ sessions: {}, attachments: [], filePool: [], inputValue: '' })
     useWorkspace.setState({ chatPanelVisible: false })
     let focusEvents = 0
     window.addEventListener(READY_FOCUS_CHAT_INPUT_EVENT, () => {
@@ -269,7 +269,7 @@ test('document quote enters both the active composer and @ reference pool as use
     assert.equal(state.attachments[0]?.lineStart, 12)
     assert.equal(state.attachments[0]?.lineEnd, 14)
   } finally {
-    useAgent.setState({ attachments: [], filePool: [], inputValue: '' })
+    useAgent.setState({ sessions: {}, attachments: [], filePool: [], inputValue: '' })
     useWorkspace.setState({ chatPanelVisible: true })
     restore()
   }

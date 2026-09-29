@@ -34,7 +34,9 @@ test('browser mode delegates panel data and diagnostics synchronization to focus
   assert.doesNotMatch(browserMode, /onTabOpened/)
   assert.match(browserMode, /<BrowserDiagnosticsDock/)
   assert.match(browserMode, /browserDiagnostics=\{browserDiagnostics\}/)
-  assert.match(browserMode, /onRefresh=\{\(\) => void refreshAdblockState\(\)\}/)
+  // e7866bd3 — the dock's manual refresh requests diagnostics (with performance) from the focused hook.
+  assert.match(browserMode, /refreshBrowserDiagnostics,\s*\} = useBrowserDiagnosticsState\(/)
+  assert.match(browserMode, /onRefresh=\{\(\) => void refreshBrowserDiagnostics\(true\)\}/)
   assert.match(runtimeHook, /browser\?\.getTabs\(\)/)
   assert.match(runtimeHook, /setTabs\(/)
   assert.match(runtimeHook, /setActiveTabId\(/)

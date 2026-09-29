@@ -360,47 +360,6 @@ export const output = { data: { errorKind: 'file_not_found' } }
   assert.match(result.stderr, /local_error_kind_literal/)
 })
 
-test('shared enum drift gate fails when target-document errorKind is unregistered', (t) => {
-  const root = makeHarnessRoot(t)
-  writeFile(root, 'src/main/modules/agent-control/contracts/error-kinds.ts', `
-export const DETACHED_TASK_ERROR_KINDS = {
-  taskFailed: { code: 'detached_task_failed' },
-  notFound: { code: 'detached_task_not_found' },
-  forbidden: { code: 'detached_task_forbidden' },
-  runtimeUnavailable: { code: 'detached_task_runtime_unavailable' },
-  skillActionUnknown: { code: 'detached_task_skill_action_unknown' },
-  skillNotLoaded: { code: 'detached_task_skill_not_loaded' },
-  hintRequired: { code: 'detached_task_hint_required' },
-  visibilityInternal: { code: 'detached_task_visibility_internal' },
-  startFailed: { code: 'detached_task_start_failed' },
-}
-export const SEND_IM_ERROR_KINDS = {
-  blockedExternal: { code: 'blocked_external' },
-  sendFailed: { code: 'send_failed' },
-  sidecarUnavailable: { code: 'sidecar_unavailable' },
-  channelNotReady: { code: 'channel_not_ready' },
-  directoryNotSupported: { code: 'directory_not_supported' },
-  fileNotFound: { code: 'file_not_found' },
-  fileAmbiguous: { code: 'file_ambiguous' },
-  intentNegated: { code: 'intent_negated' },
-}
-`)
-  const result = runIn(root)
-  assert.equal(result.status, 1)
-  assert.match(result.stderr, /required_error_kind_unregistered/)
-})
-
-test('shared enum drift gate fails when target-document errorKind copies a registered literal', (t) => {
-  const root = makeHarnessRoot(t)
-  writeFile(root, 'src/main/modules/agent-control/runtime-core/agent-sdk-document-utils.ts', `
-import { TARGET_DOCUMENT_ERROR_KINDS } from '../contracts/error-kinds'
-export const output = { data: { errorKind: 'target_document_required' } }
-`)
-  const result = runIn(root)
-  assert.equal(result.status, 1)
-  assert.match(result.stderr, /local_error_kind_literal/)
-})
-
 test('shared enum drift gate fails when browser tool errorKind is unregistered', (t) => {
   const root = makeHarnessRoot(t)
   writeFile(root, 'src/main/modules/agent-control/contracts/error-kinds.ts', `
@@ -513,17 +472,6 @@ export const output = { data: { errorKind: 'tool_restricted_this_turn' } }
   assert.match(result.stderr, /local_error_kind_literal/)
 })
 
-test('shared enum drift gate fails when agent-sdk outcome compares copied tool admission literal', (t) => {
-  const root = makeHarnessRoot(t)
-  writeFile(root, 'src/main/modules/agent-control/runtime-core/agent-sdk-runtime-outcome-utils.ts', `
-import { TOOL_ADMISSION_ERROR_KINDS } from '../contracts/error-kinds'
-export const blocked = errorKind === 'tool_not_registered'
-`)
-  const result = runIn(root)
-  assert.equal(result.status, 1)
-  assert.match(result.stderr, /local_error_kind_literal/)
-})
-
 test('shared enum drift gate fails when tool-result-envelope copies a tool admission literal', (t) => {
   const root = makeHarnessRoot(t)
   writeFile(root, 'src/main/modules/tools/tool-result-envelope.ts', `
@@ -617,20 +565,6 @@ export const map = { denied_manual_only: 'denied_by_policy' }
   const result = runIn(root)
   assert.equal(result.status, 1)
   assert.match(result.stderr, /local_error_kind_literal/)
-})
-
-test('shared enum drift gate fails when specialist blueprint codes are registered in the wrong family', (t) => {
-  const root = makeHarnessRoot(t)
-  const registryPath = path.join(root, 'src/main/modules/agent-control/contracts/error-kinds.ts')
-  const registry = fs.readFileSync(registryPath, 'utf8')
-    .replace(
-      'export const SPECIALIST_BLUEPRINT_ERROR_KINDS =',
-      'export const COPIED_SPECIALIST_BLUEPRINT_ERROR_KINDS =',
-    )
-  fs.writeFileSync(registryPath, registry)
-  const result = runIn(root)
-  assert.equal(result.status, 1)
-  assert.match(result.stderr, /error_kind_family_missing/)
 })
 
 test('shared enum drift gate fails when web research codes are registered in the wrong family', (t) => {

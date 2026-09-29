@@ -39,6 +39,7 @@ test('browser rss and calendar shells align their left edge with the shared work
   const documentMode = readWorkspaceFile('src/renderer/pages/modes/DocumentMode.tsx')
   const markdownEditor = readWorkspaceFile('src/renderer/components/document/MarkdownEditor.tsx')
   const rssFeed = readWorkspaceFile('src/renderer/components/rss/RSSFeed.tsx')
+  const rssVirtualList = readWorkspaceFile('src/renderer/components/rss/RSSVirtualList.tsx')
   const calendarMode = readWorkspaceFile('src/renderer/pages/modes/CalendarMode.tsx')
   const calendarShell = readWorkspaceFile('src/renderer/components/calendar/CalendarWorkbenchShell.tsx')
   const workbenchTabs = readWorkspaceFile('src/renderer/components/workbench/WorkbenchProjectTabs.tsx')
@@ -60,7 +61,10 @@ test('browser rss and calendar shells align their left edge with the shared work
   assert.match(rssFeed, /content-surface-panel/)
   assert.match(rssFeed, /flex flex-col h-full/)
   assert.match(rssFeed, /className="rss-feed-toolbar flex items-center justify-between flex-shrink-0"/)
-  assert.match(rssFeed, /className="rss-feed-list rss-feed-scroll flex-1 overflow-auto/)
+  // 98c06c55 — the list frame is a fixed clip; scrolling (rss-feed-scroll) moved to the virtual list holder.
+  assert.match(rssFeed, /className="rss-feed-list flex-1 min-h-0 overflow-hidden"/)
+  assert.match(rssFeed, /<RSSVirtualList /)
+  assert.match(rssVirtualList, /data-liquid-scroll-root="rss-feed-list" className=\{`\$\{props\.className \|\| ''\} rss-feed-scroll`\}/)
   assert.match(rssFeed, /padding:\s*`0 \$\{WORKBENCH_HEADER_EDGE_X\}px 16px`/)
   assert.match(rssFeed, /padding:\s*`12px \$\{Math\.max\(WORKBENCH_HEADER_EDGE_X - 8, 12\)\}px`/)
 

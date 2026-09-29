@@ -1,73 +1,6 @@
 {
   "schemaVersion": 1,
-  "exempt": [
-    {
-      "path": "src/__tests__/ui-contracts/document-widget-authoring.test.ts",
-      "reason": "Stage 6 §0.2 bucket-B: ui-contracts drift parked; run on demand via npm run test:ui-contracts (not in verify chain). Workbench-shell-rework is the owning track.",
-      "since": "2026-05-06",
-      "owner": "stage6-ui-contracts-park"
-    },
-    {
-      "path": "src/__tests__/ui-contracts/document-widget-patch-target-resolution.test.ts",
-      "reason": "Stage 6 §0.2 bucket-B: ui-contracts drift parked; run on demand via npm run test:ui-contracts (not in verify chain). Workbench-shell-rework is the owning track.",
-      "since": "2026-05-06",
-      "owner": "stage6-ui-contracts-park"
-    },
-    {
-      "path": "src/__tests__/ui-contracts/rss-list-row-style-contract.test.ts",
-      "reason": "Stage 6 §0.2 bucket-B: ui-contracts drift parked; run on demand via npm run test:ui-contracts (not in verify chain). Workbench-shell-rework is the owning track.",
-      "since": "2026-05-06",
-      "owner": "stage6-ui-contracts-park"
-    },
-    {
-      "path": "src/__tests__/ui-contracts/ui-browser-hook-split-contract.test.ts",
-      "reason": "Stage 6 §0.2 bucket-B: ui-contracts drift parked; run on demand via npm run test:ui-contracts (not in verify chain). Workbench-shell-rework is the owning track.",
-      "since": "2026-05-06",
-      "owner": "stage6-ui-contracts-park"
-    },
-    {
-      "path": "src/__tests__/ui-contracts/ui-partial-failure-contract.test.ts",
-      "reason": "Stage 6 §0.2 bucket-B: ui-contracts drift parked; run on demand via npm run test:ui-contracts (not in verify chain). Workbench-shell-rework is the owning track.",
-      "since": "2026-05-06",
-      "owner": "stage6-ui-contracts-park"
-    },
-    {
-      "path": "src/__tests__/ui-contracts/workbench-icon-alignment-contract.test.ts",
-      "reason": "Stage 6 §0.2 bucket-B: ui-contracts drift parked; run on demand via npm run test:ui-contracts (not in verify chain). Workbench-shell-rework is the owning track.",
-      "since": "2026-05-06",
-      "owner": "stage6-ui-contracts-park"
-    },
-    {
-      "path": "src/__tests__/ui-contracts/workbench-keep-alive-contract.test.ts",
-      "reason": "Stage 6 §0.2 bucket-B: ui-contracts drift parked; run on demand via npm run test:ui-contracts (not in verify chain). Workbench-shell-rework is the owning track.",
-      "since": "2026-05-06",
-      "owner": "stage6-ui-contracts-park"
-    },
-    {
-      "path": "src/__tests__/ui-contracts/workbench-mode-and-rail-slider-contract.test.ts",
-      "reason": "Stage 6 §0.2 bucket-B: ui-contracts drift parked; run on demand via npm run test:ui-contracts (not in verify chain). Workbench-shell-rework is the owning track.",
-      "since": "2026-05-06",
-      "owner": "stage6-ui-contracts-park"
-    },
-    {
-      "path": "src/__tests__/ui-contracts/workbench-mode-switch-ritual-contract.test.ts",
-      "reason": "Stage 6 §0.2 bucket-B: ui-contracts drift parked; run on demand via npm run test:ui-contracts (not in verify chain). Workbench-shell-rework is the owning track.",
-      "since": "2026-05-06",
-      "owner": "stage6-ui-contracts-park"
-    },
-    {
-      "path": "src/__tests__/ui-contracts/workbench-shell-alignment-contract.test.ts",
-      "reason": "Stage 6 §0.2 bucket-B: ui-contracts drift parked; run on demand via npm run test:ui-contracts (not in verify chain). Workbench-shell-rework is the owning track.",
-      "since": "2026-05-06",
-      "owner": "stage6-ui-contracts-park"
-    },
-    {
-      "path": "src/__tests__/ui-contracts/workbench-slider-motion-contract.test.ts",
-      "reason": "Stage 6 §0.2 bucket-B: ui-contracts drift parked; run on demand via npm run test:ui-contracts (not in verify chain). Workbench-shell-rework is the owning track.",
-      "since": "2026-05-06",
-      "owner": "stage6-ui-contracts-park"
-    }
-  ],
+  "exempt": [],
   "c4Exempt": [
     {
       "path": "src/__tests__/frozen-directory-ref.test.ts",
@@ -94,40 +27,22 @@
       "owner": "codex-native-continuity"
     },
     {
-      "path": "src/__tests__/codex-retry-execution-authorization.test.ts",
-      "reason": "Retry execution authorization coverage exercises the pure no-expansion reducer with in-memory tool fixtures. No test path constructs a repository or opens SQLite; only the production authorization import graph triggers C4.",
-      "since": "2026-09-02",
-      "owner": "codex-native-continuity"
-    },
-    {
       "path": "src/__tests__/codex-semantic-ingress-consumers.test.ts",
       "reason": "Semantic ingress consumer coverage transforms one typed request entirely in memory. No test path constructs a repository or opens SQLite; only the production authorization import graph triggers C4.",
       "since": "2026-09-02",
       "owner": "codex-native-continuity"
     },
     {
+      "path": "src/__tests__/codex-provider-adapters.test.ts",
+      "reason": "Provider adapter coverage drives the model gateway against a loopback upstream with a substitute authority and in-memory credentials, and calls only the pure document-access intent matchers from product turn authorization. No test path constructs a repository or opens SQLite; only the production authorization import graph (profile admission -> app settings repository -> database) triggers C4.",
+      "since": "2026-09-29",
+      "owner": "codex-model-gateway"
+    },
+    {
       "path": "src/__tests__/skill-authorization-observe-commit.test.ts",
       "reason": "Skill observe and commit coverage uses a fully injected in-memory orchestrator and calls only the authorization resolver. No test path constructs a repository or opens SQLite; only the runtime import graph triggers C4.",
       "since": "2026-09-02",
       "owner": "codex-native-continuity"
-    },
-    {
-      "path": "src/__tests__/agent-sdk-post-run-abort.test.ts",
-      "reason": "The capability-selection import graph now reaches database.ts statically, but this test passed under host Node while better-sqlite3 remained on the incompatible Electron ABI; its provider and runtime collaborators are injected fakes and no SQLite path runs.",
-      "since": "2026-08-16",
-      "owner": "codex-capability-selection"
-    },
-    {
-      "path": "src/__tests__/agent-sdk-turn-closeout-checkpoint-preservation.test.ts",
-      "reason": "The capability-selection import graph now reaches database.ts statically, but this test passed under host Node while better-sqlite3 remained on the incompatible Electron ABI; its lifecycle collaborators are in-memory fakes and no SQLite path runs.",
-      "since": "2026-08-16",
-      "owner": "codex-capability-selection"
-    },
-    {
-      "path": "src/__tests__/agent-session-cursor-selfheal.test.ts",
-      "reason": "The capability-selection import graph now reaches database.ts statically, but this test passed under host Node while better-sqlite3 remained on the incompatible Electron ABI; it exercises in-memory session state and never opens SQLite.",
-      "since": "2026-08-16",
-      "owner": "codex-capability-selection"
     },
     {
       "path": "src/__tests__/browser-input-readiness.test.ts",
@@ -178,12 +93,6 @@
       "owner": "codex-capability-selection"
     },
     {
-      "path": "src/__tests__/pure-user-text-classification.test.ts",
-      "reason": "The capability-selection import graph now reaches database.ts statically, but this test passed under host Node while better-sqlite3 remained on the incompatible Electron ABI; it executes only pure text selection helpers.",
-      "since": "2026-08-16",
-      "owner": "codex-capability-selection"
-    },
-    {
       "path": "src/__tests__/skill-hint-relevance-fresh-action.test.ts",
       "reason": "The capability-selection import graph now reaches database.ts statically, but this test passed under host Node while better-sqlite3 remained on the incompatible Electron ABI; it uses synthetic hint and projection facts only.",
       "since": "2026-08-16",
@@ -208,18 +117,6 @@
       "owner": "browser-sequential-closure"
     },
     {
-      "path": "src/__tests__/browser-terminal-observation-guard.test.ts",
-      "reason": "Browser terminal-candidate coverage runs the model loop with an in-memory MemorySession, injected host evidence, and checkpoint callbacks that fail if reached unexpectedly. It never constructs a repository or opens getDatabase; only the live loop import graph reaches database.ts, so host-Node coverage must remain active.",
-      "since": "2026-07-19",
-      "owner": "browser-long-task-lifecycle"
-    },
-    {
-      "path": "src/__tests__/browser-observation-lifecycle.test.ts",
-      "reason": "Browser observation lifecycle coverage uses pure journal helpers and executeToolCall with a fully injected BrowserController. It records dispatches in memory and never opens getDatabase or a repository; only the tool-executor import graph reaches database.ts, so host-Node coverage must remain active.",
-      "since": "2026-07-19",
-      "owner": "browser-long-task-lifecycle"
-    },
-    {
       "path": "src/__tests__/browser-cdp-page-map.test.ts",
       "reason": "CDP page-map coverage uses a fully injected BrowserController and the in-memory snapshot service. It never opens getDatabase or a repository; only the browser probe import graph reaches database.ts, so host-Node coverage must remain active.",
       "since": "2026-07-19",
@@ -228,12 +125,6 @@
     {
       "path": "src/__tests__/browser-trusted-input.test.ts",
       "reason": "Trusted-input coverage invokes pure input helpers against a fully injected BrowserController and records mouse, key, and script calls in arrays. It never opens getDatabase or a repository; only browser helper imports trigger C4.",
-      "since": "2026-07-19",
-      "owner": "browser-grounded-orchestration"
-    },
-    {
-      "path": "src/__tests__/prepared-skill-resume-revalidation.test.ts",
-      "reason": "Prepared-skill resume coverage calls pure authorization and text-policy helpers with in-memory sets and maps. It never constructs the turn orchestrator, opens getDatabase, or loads better-sqlite3; the preparation import graph alone triggers C4.",
       "since": "2026-07-19",
       "owner": "browser-grounded-orchestration"
     },
@@ -266,18 +157,6 @@
       "reason": "AI workspace atomicity coverage injects a transaction-aware in-memory settings database into AppSettingsRepository and deliberately fails the second settings write to prove all keys roll back. No test path calls getDatabase or opens better-sqlite3; host-Node coverage must remain active for the exact transaction boundary.",
       "since": "2026-07-17",
       "owner": "tool-capability-consent"
-    },
-    {
-      "path": "src/__tests__/tool-capability-consent-runtime.test.ts",
-      "reason": "Tool-capability consent runtime coverage constructs AgentSdkRuntime with injected model execution, tool resolution, and settings-update fakes. The default settings repository is never called, no test path opens getDatabase or better-sqlite3, and host-Node coverage must remain active for the exact SDK conflict and confirmation wiring.",
-      "since": "2026-07-17",
-      "owner": "tool-capability-consent"
-    },
-    {
-      "path": "src/__tests__/agent-sdk-turn-input-assembly.test.ts",
-      "reason": "Ready system prompt integration assembles one turn from an injected host, session, tool definitions, and an immutable test skill catalog. It never selects a shell-enabled skill, calls getDatabase, or opens a repository; the shell-consent helper import alone makes the static graph reach database.ts, so host-Node coverage should remain active.",
-      "since": "2026-07-15",
-      "owner": "ready-system-prompt"
     },
     {
       "path": "src/__tests__/anysearch-research-tools.test.ts",
@@ -328,40 +207,16 @@
       "owner": "p1-p2-agent-adjudication"
     },
     {
-      "path": "src/__tests__/run-finalizer-adjudication.test.ts",
-      "reason": "P1/P2: tests finalizeRunOutcome with in-memory fake projection stores and run-meta maps; no test path opens better-sqlite3 or reads the real DB. Transitive runtime imports are sqlite-capable, but Host-Node coverage must stay active for adjudication assertions.",
-      "since": "2026-07-23",
-      "owner": "p1-p2-agent-adjudication"
-    },
-    {
       "path": "src/__tests__/run-finalizer-canonical-checkpoint.test.ts",
       "reason": "P1/P2: tests canonical checkpoint closeout with in-memory fake stores; no test path opens better-sqlite3 or reads the real DB. Transitive runtime imports are sqlite-capable, but Host-Node coverage must stay active for checkpoint assertions.",
       "since": "2026-07-23",
       "owner": "p1-p2-agent-adjudication"
     },
     {
-      "path": "src/__tests__/file-management-copy-contract.test.ts",
-      "reason": "P0 document-delivery support: tests only inspect file_copy schema/tool exposure and never instantiates the real DB. Transitive imports reach sqlite-capable file-management modules, but host-Node coverage must stay active for schema drift.",
-      "since": "2026-06-25",
-      "owner": "p0-document-delivery-visibility"
-    },
-    {
       "path": "src/__tests__/skill-export-artifact-contract.test.ts",
       "reason": "P0 artifact export support: tests execute filesystem-only export-artifact paths with temporary directories and fake skill roots; no test path opens better-sqlite3 or reads the real DB. Transitive imports reach sqlite-capable skill primitive barrels, but host-Node coverage must stay active for sandbox and proof contracts.",
       "since": "2026-06-25",
       "owner": "p0-document-delivery-visibility"
-    },
-    {
-      "path": "src/__tests__/orchestrator-infrastructure-timeout.test.ts",
-      "reason": "P6a: tests request-id authority on ReadyAgentOrchestrator with injected fake domain/sdk stopGeneration handlers and an in-memory activeRunIds map. Transitive imports reach sqlite-capable runtime modules, but no test path opens better-sqlite3 or reads the real DB.",
-      "since": "2026-06-20",
-      "owner": "p6a-run-continuity-hotfix"
-    },
-    {
-      "path": "src/__tests__/orchestrator-main-no-progress-guard.test.ts",
-      "reason": "P6a-R2: tests ReadyAgentOrchestrator no-progress timing with fake timers and injected stopGeneration handlers. Transitive imports reach sqlite-capable runtime modules, but no test path opens better-sqlite3 or reads the real DB.",
-      "since": "2026-06-20",
-      "owner": "p6a-r2-main-no-progress-guard"
     },
     {
       "path": "src/__tests__/migration-session-recall-agent.test.ts",
@@ -418,12 +273,6 @@
       "owner": "stage-q-pr2"
     },
     {
-      "path": "src/__tests__/restart-frame-no-stale-liveness.test.ts",
-      "reason": "Stage Q (Stage 11) PR-6: tests drive `resolveTurnFrame` directly with synthetic SkillTaskSupervisorSnapshot fixtures. No DB is touched (the supervisor snapshot is hand-built; the resolver itself does not load sqlite). Transitively imports turn-frame-resolver which type-references SkillTaskRunRepository, but the value path is never reached.",
-      "since": "2026-05-08",
-      "owner": "stage-q-pr6"
-    },
-    {
       "path": "src/__tests__/skill-task-tracker-runkind-invariant.test.ts",
       "reason": "Stage Q (Stage 11) PR-3: tests use registerSkillTaskRunRepository() to inject a fake in-memory repository before any recordSkillTaskEvent / recordSkillParentTaskLifecycleEvent call. The injected repo handles all DB-shaped operations; the real getRepositoryDatabase() path is never reached. assertSkillTaskRunInvariantConsistency is also tested with a fake getCheckEnforcedSql function.",
       "since": "2026-05-08",
@@ -442,24 +291,6 @@
       "owner": "stage5-bulk-import"
     },
     {
-      "path": "src/__tests__/capability-gate-arbitration.test.ts",
-      "reason": "tests exercise pure capability arbitration helpers with synthetic configs and fake runtime availability; transitive controller imports reach sqlite-capable modules but no test path opens better-sqlite3 or reads a repository. Verified passing on host-Node.",
-      "since": "2026-06-18",
-      "owner": "send-im-l1"
-    },
-    {
-      "path": "src/__tests__/run-capability-controller.test.ts",
-      "reason": "tests exercise prepareInitialRun/reconcileAfterBrowserDecision with synthetic envelopes and fake runtime availability; transitive controller imports reach sqlite-capable modules but no test path opens better-sqlite3 or reads a repository. Verified passing on host-Node.",
-      "since": "2026-06-18",
-      "owner": "send-im-l1"
-    },
-    {
-      "path": "src/__tests__/coordinator-contract.test.ts",
-      "reason": "transitive value-import reaches a nativeBackedModule via wrapper modules but never triggers native sqlite load in any test path (all sqlite-touching call sites use fakes/stubs); verified passing on host-Node test runs as of 2026-05-06",
-      "since": "2026-05-06",
-      "owner": "stage5-bulk-import"
-    },
-    {
       "path": "src/__tests__/database-readiness.test.ts",
       "reason": "fake-injection only; tests assertDatabaseConnectionReady / assertPrimaryDatabaseReady with synthetic DatabaseConnection — never triggers lazy require('better-sqlite3') in database.ts",
       "since": "2026-05-06",
@@ -467,18 +298,6 @@
     },
     {
       "path": "src/__tests__/detached-skill-task-tracker.test.ts",
-      "reason": "transitive value-import reaches a nativeBackedModule via wrapper modules but never triggers native sqlite load in any test path (all sqlite-touching call sites use fakes/stubs); verified passing on host-Node test runs as of 2026-05-06",
-      "since": "2026-05-06",
-      "owner": "stage5-bulk-import"
-    },
-    {
-      "path": "src/__tests__/document-domain-adapter-projection-patch.test.ts",
-      "reason": "transitive value-import reaches a nativeBackedModule via wrapper modules but never triggers native sqlite load in any test path (all sqlite-touching call sites use fakes/stubs); verified passing on host-Node test runs as of 2026-05-06",
-      "since": "2026-05-06",
-      "owner": "stage5-bulk-import"
-    },
-    {
-      "path": "src/__tests__/domain-adapter-contract.test.ts",
       "reason": "transitive value-import reaches a nativeBackedModule via wrapper modules but never triggers native sqlite load in any test path (all sqlite-touching call sites use fakes/stubs); verified passing on host-Node test runs as of 2026-05-06",
       "since": "2026-05-06",
       "owner": "stage5-bulk-import"
@@ -670,12 +489,6 @@
       "owner": "stage-m-frame"
     },
     {
-      "path": "src/__tests__/frame-resolver-seed.test.ts",
-      "reason": "Stage M frame resolver test imports agent modules that transitively reach native-backed modules but uses injected snapshots only; no test path opens better-sqlite3 under host Node",
-      "since": "2026-05-06",
-      "owner": "stage-m-frame"
-    },
-    {
       "path": "src/__tests__/read-artifact-no-fallback-empty.test.ts",
       "reason": "Stage M read-artifact fallback test imports primitive/tool modules that transitively reach native-backed modules but exercises filesystem roots only; no test path opens better-sqlite3 under host Node",
       "since": "2026-05-06",
@@ -700,25 +513,7 @@
       "owner": "stage5-bulk-import"
     },
     {
-      "path": "src/__tests__/skill-reference-output-contract.test.ts",
-      "reason": "transitive value-import reaches a nativeBackedModule via wrapper modules but never triggers native sqlite load in any test path (all sqlite-touching call sites use fakes/stubs); verified passing on host-Node test runs as of 2026-05-06",
-      "since": "2026-05-06",
-      "owner": "stage5-bulk-import"
-    },
-    {
-      "path": "src/__tests__/skill-resume-end-to-end.test.ts",
-      "reason": "transitive value-import reaches a nativeBackedModule via wrapper modules but never triggers native sqlite load in any test path (all sqlite-touching call sites use fakes/stubs); verified passing on host-Node test runs as of 2026-05-06",
-      "since": "2026-05-06",
-      "owner": "stage5-bulk-import"
-    },
-    {
       "path": "src/__tests__/skill-runtime-structured-result.test.ts",
-      "reason": "transitive value-import reaches a nativeBackedModule via wrapper modules but never triggers native sqlite load in any test path (all sqlite-touching call sites use fakes/stubs); verified passing on host-Node test runs as of 2026-05-06",
-      "since": "2026-05-06",
-      "owner": "stage5-bulk-import"
-    },
-    {
-      "path": "src/__tests__/skill-runtime-user-acceptance.test.ts",
       "reason": "transitive value-import reaches a nativeBackedModule via wrapper modules but never triggers native sqlite load in any test path (all sqlite-touching call sites use fakes/stubs); verified passing on host-Node test runs as of 2026-05-06",
       "since": "2026-05-06",
       "owner": "stage5-bulk-import"
@@ -743,12 +538,6 @@
     },
     {
       "path": "src/__tests__/skill-tools-frame-patch-delta.test.ts",
-      "reason": "transitive value-import reaches a nativeBackedModule via wrapper modules but never triggers native sqlite load in any test path (all sqlite-touching call sites use fakes/stubs); verified passing on host-Node test runs as of 2026-05-06",
-      "since": "2026-05-06",
-      "owner": "stage5-bulk-import"
-    },
-    {
-      "path": "src/__tests__/skill-turn-identity.test.ts",
       "reason": "transitive value-import reaches a nativeBackedModule via wrapper modules but never triggers native sqlite load in any test path (all sqlite-touching call sites use fakes/stubs); verified passing on host-Node test runs as of 2026-05-06",
       "since": "2026-05-06",
       "owner": "stage5-bulk-import"
@@ -796,34 +585,10 @@
       "owner": "stage5-bulk-import"
     },
     {
-      "path": "src/__tests__/turn-frame-resolver.test.ts",
-      "reason": "transitive value-import reaches a nativeBackedModule via wrapper modules but never triggers native sqlite load in any test path (all sqlite-touching call sites use fakes/stubs); verified passing on host-Node test runs as of 2026-05-06",
-      "since": "2026-05-06",
-      "owner": "stage5-bulk-import"
-    },
-    {
-      "path": "src/__tests__/turn-frame-steering-force-tool.test.ts",
-      "reason": "transitive value-import reaches a nativeBackedModule via wrapper modules but never triggers native sqlite load in any test path (all sqlite-touching call sites use fakes/stubs); verified passing on host-Node test runs as of 2026-05-06",
-      "since": "2026-05-06",
-      "owner": "stage5-bulk-import"
-    },
-    {
-      "path": "src/__tests__/turn-frame-steering.test.ts",
-      "reason": "transitive value-import reaches a nativeBackedModule via wrapper modules but never triggers native sqlite load in any test path (all sqlite-touching call sites use fakes/stubs); verified passing on host-Node test runs as of 2026-05-06",
-      "since": "2026-05-06",
-      "owner": "stage5-bulk-import"
-    },
-    {
       "path": "src/__tests__/video-expert-child-driver.test.ts",
       "reason": "transitive value-import reaches a nativeBackedModule via wrapper modules but never triggers native sqlite load in any test path (all sqlite-touching call sites use fakes/stubs); verified passing on host-Node test runs as of 2026-05-06",
       "since": "2026-05-06",
       "owner": "stage5-bulk-import"
-    },
-    {
-      "path": "src/__tests__/skill-child-budget-warning-no-suppression.test.ts",
-      "reason": "Stage N Phase 3 fence test — imports STATIC_SKILL_ACTIONS_BY_TOOL_NAME and isConfiguredChildLoopSkillAction; the latter transitively reaches runtime-manager → database via skill-compiler fallback, but the test only exercises pure helper logic on string arguments (no DB call). Verified passing on host-Node.",
-      "since": "2026-05-07",
-      "owner": "stage-n-parent-force-fence"
     },
     {
       "path": "src/__tests__/agent-sdk-runtime-capability-body.test.ts",
@@ -892,32 +657,14 @@
       "owner": "stability-baseline-restore"
     },
     {
-      "path": "src/__tests__/document-target-guard-selfheal.test.ts",
-      "reason": "W10 目标文档守卫自愈合同：以 {} host 构造 AgentSdkToolExecutor 并在 executeGuardDocumentTool 接缝打桩，自愈解析走静态注册表 provider；纯函数指令文案与 live 指引断言。无任何路径打开 better-sqlite3 或读真实数据库，仅 runtime 传递导入触发 C4 扫描器；host-Node 覆盖必须保持激活以钉住守卫死锁回归。",
-      "since": "2026-07-11",
-      "owner": "document-widget-ready-w10"
-    },
-    {
       "path": "src/__tests__/active-ai-profile-mutation-guard.test.ts",
       "reason": "Profile mutation coverage uses literal workspace objects, an injected active-profile callback, and an injected settings reader. It never constructs AppSettingsRepository or opens getDatabase; only the repository registration import reaches SQLite transitively.",
       "since": "2026-08-12",
       "owner": "codex-context-epoch-closure"
     },
     {
-      "path": "src/__tests__/agent-sdk-context-epoch.test.ts",
-      "reason": "SDK epoch coverage injects an in-memory run_meta Map, canonical closeout test port, scope reader, provider, and tool executor. No production repository or getDatabase path is called; the AgentSdkRuntime import alone reaches SQLite transitively.",
-      "since": "2026-08-12",
-      "owner": "codex-context-epoch-closure"
-    },
-    {
       "path": "src/__tests__/authorization-fact.test.ts",
       "reason": "Authorization coverage uses the in-memory fact store, a FrozenCallStore backed by a prepare/get/all fake, and an injected scope-epoch database object. It never opens the production database or loads better-sqlite3.",
-      "since": "2026-08-12",
-      "owner": "codex-context-epoch-closure"
-    },
-    {
-      "path": "src/__tests__/codex-browser-preturn-capability.test.ts",
-      "reason": "Browser preturn coverage only asks an AgentSdkRuntime with injected configuration for its deterministic tool-definition surface. It never sends a turn, dispatches a tool, constructs a repository, or opens getDatabase.",
       "since": "2026-08-12",
       "owner": "codex-context-epoch-closure"
     },
@@ -976,18 +723,6 @@
       "owner": "codex-context-epoch-closure"
     },
     {
-      "path": "src/__tests__/embedded-skill-lets-go-rss-migration.test.ts",
-      "reason": "Lets-go-rss migration coverage inspects embedded filesystem assets and deterministic migration text. It does not construct the production skill store, call getDatabase, or load better-sqlite3.",
-      "since": "2026-08-12",
-      "owner": "codex-context-epoch-closure"
-    },
-    {
-      "path": "src/__tests__/embedded-skill-video-expert-vnext-swap.test.ts",
-      "reason": "Video-expert swap coverage uses temporary files and controlled Python subprocess fixtures with fake probe and model modules. It never creates a Ready repository or opens getDatabase; the embedded-skill import graph alone reaches SQLite.",
-      "since": "2026-08-12",
-      "owner": "codex-context-epoch-closure"
-    },
-    {
       "path": "src/__tests__/lark-cli-auth-flow-authority.test.ts",
       "reason": "Lark CLI auth-flow coverage exercises argv and authorization-state decisions with injected command results and literal identities. It never invokes the production settings repository or opens SQLite.",
       "since": "2026-08-12",
@@ -1008,12 +743,6 @@
     {
       "path": "src/__tests__/ready-codex-lifecycle-adapter.test.ts",
       "reason": "Lifecycle adapter coverage uses FakeNativeRuntime and FakeLifecycleStore implementations for every read, write, interrupt, and recovery operation. No production lifecycle repository or database is constructed.",
-      "since": "2026-08-12",
-      "owner": "codex-context-epoch-closure"
-    },
-    {
-      "path": "src/__tests__/same-run-capability-composition.test.ts",
-      "reason": "Same-run capability coverage builds a hand-authored ToolBridgeRuntimeContext with in-memory definitions and authorization state. It never runs a production repository or calls getDatabase.",
       "since": "2026-08-12",
       "owner": "codex-context-epoch-closure"
     },
@@ -1042,12 +771,6 @@
       "owner": "codex-context-epoch-closure"
     },
     {
-      "path": "src/__tests__/skill-orchestrator-rearm-from-prior-tooluses.test.ts",
-      "reason": "Skill rearm coverage reconstructs prior tool-use messages in an in-memory session and injects the skill catalog. It never constructs a database-backed session or skill repository.",
-      "since": "2026-08-12",
-      "owner": "codex-context-epoch-closure"
-    },
-    {
       "path": "src/__tests__/skill-read-artifact-exact-resource.test.ts",
       "reason": "Exact-resource artifact coverage uses temporary filesystem roots and injected authorization and frame state. It reads only the named test file and never calls getDatabase or a production repository.",
       "since": "2026-08-12",
@@ -1072,12 +795,6 @@
       "owner": "codex-context-epoch-closure"
     },
     {
-      "path": "src/__tests__/skill-reference-inline-injection.test.ts",
-      "reason": "Reference inline-injection coverage combines in-memory hint records, literal SKILL.md text, and an injected context builder. No production database accessor or repository is called.",
-      "since": "2026-08-12",
-      "owner": "codex-context-epoch-closure"
-    },
-    {
       "path": "src/__tests__/skill-run-shell-required-method.test.ts",
       "reason": "Required-method shell coverage validates manifest and method gating with temporary skill files and injected execution context. It never reaches a database-backed skill execution store or opens SQLite.",
       "since": "2026-08-12",
@@ -1094,6 +811,18 @@
       "reason": "Projection sync coverage uses Map-backed TaskProjectionStore fakes, including synthetic constraint errors, and a temporary JSON continuity file. It never invokes the SQLite repository implementation.",
       "since": "2026-08-12",
       "owner": "codex-context-epoch-closure"
+    },
+    {
+      "path": "src/__tests__/browser-task-persistence.test.ts",
+      "reason": "Only reads workflow evidence through an injected FakeBrowserRepository; no real database or native binding is opened.",
+      "since": "2026-09-29",
+      "owner": "test-suite-cleanup"
+    },
+    {
+      "path": "src/__tests__/ready-tool-executor-surface.test.ts",
+      "reason": "Lists the same tool executor surface used before Codex admission with an injected skill catalog; no executor dispatch, runtime session, or real database is invoked.",
+      "since": "2026-09-29",
+      "owner": "test-suite-cleanup"
     }
   ]
 }

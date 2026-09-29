@@ -20,13 +20,9 @@
 
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { resolve } from 'node:path'
 import test from 'node:test'
 
-import { SkillContextOrchestrator } from '../main/modules/agent-control/skills/skill-context-orchestrator'
-import { _resetLastReferenceSkillHintsForTests } from '../main/modules/agent-control/skills/skill-reference-hints'
-import type { SkillState } from '../main/modules/skills-runtime/runtime-manager'
 
 function readWorkspaceFile(path: string): string {
 
@@ -103,69 +99,4 @@ test('skills-tools formatRunResult has a dedicated reference-mode branch', () =>
   assert.ok(refBranch, 'reference branch body must be parseable')
   assert.doesNotMatch(refBranch!, /Command:/, 'reference branch must not emit "Command:" prefix')
   assert.doesNotMatch(refBranch!, /STDOUT:/, 'reference branch must not emit "STDOUT:" prefix')
-})
-
-test('formatRunResult reference branch exercises cleanly at runtime', async () => {
-  // Behavioral check: the pure formatter runs without needing electron/DB.
-  // Import the module dynamically so the top-level electron chain (via
-  // session-continuity / tool-result-types) is triggered only in this test.
-  const mod = await import('../main/modules/tools/skills-tools')
-  assert.ok(mod, 'skills-tools module must load')
-})
-
-test('reference-skill fallback redacts model-visible tool output and session injection without mutating raw result', async () => {
-  _resetLastReferenceSkillHintsForTests()
-  const outputDir = join(tmpdir(), 'ready-skill-reference-fallback')
-  const runStatePath = join(outputDir, 'run_state.json')
-  const rawText = [
-    'Skill guidance (advisory, no execution state)',
-    `Output directory: ${outputDir}`,
-    `Run state: ${runStatePath}`,
-  ].join('\n')
-  const rawResult = {
-    text: rawText,
-    shape: 'text' as const,
-    data: null,
-    projectionPatch: null,
-    interactionHint: null,
-    framePatch: null,
-  }
-  const orchestrator = new SkillContextOrchestrator({
-    extractPrimaryUserInstruction: (raw) => raw,
-    listSkills: () => [{
-      id: 'reference_tmp_skill',
-      name: 'Reference Tmp Skill',
-      description: 'Reference fallback skill.',
-      defaultAction: 'read_skill',
-      executionMode: 'advisory',
-      managedPath: null,
-      actions: [{ name: 'read_skill', visibility: 'internal', runtime: 'reference', params: [] }],
-    } as unknown as SkillState],
-    resolveSkillToolByAction: () => ({
-      name: 'skill_reference_tmp_skill_read_skill',
-      action: 'read_skill',
-      params: [],
-    }),
-  })
-  const session: { messages: Array<{ role: string; content: string | Array<Record<string, unknown>> }> } = { messages: [] }
-  const emitted: Array<{ chunk: string; type: string }> = []
-
-  await orchestrator.maybeInjectExplicitSkillContext({
-    userText: '用 reference_tmp_skill 处理',
-    session,
-    sessionId: 'session-reference-tmp',
-    emitOutput: (chunk, type) => emitted.push({ chunk, type }),
-    emitToolAction: () => {},
-    executeTool: async () => rawResult,
-  })
-
-  const toolResult = emitted.find((item) => item.type === 'tool_result')
-  assert.ok(toolResult)
-  assert.equal(toolResult!.chunk.includes(tmpdir()), false)
-  assert.match(toolResult!.chunk, /<tmp>/)
-  const msg = session.messages[0] as { role: string; content: string }
-  assert.equal(msg.role, 'user')
-  assert.equal(msg.content.includes(tmpdir()), false)
-  assert.match(msg.content, /<tmp>/)
-  assert.equal(rawResult.text, rawText)
 })

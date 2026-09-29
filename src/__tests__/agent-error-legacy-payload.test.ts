@@ -29,11 +29,6 @@ test('recoverable gate is strict === true so legacy payload (undefined) routes t
   assert.match(source, /const\s+recoverable\s*=\s*data\.recoverable\s*===\s*true/)
 })
 
-test('abort early-return uses strict string equality, not truthy check', () => {
-  const source = readWorkspaceFile('src/renderer/modules/agent/runtimeDriver.ts')
-  assert.match(source, /data\.errorKind\s*===\s*['"]aborted['"]/)
-})
-
 test('scopeRunState reducer requires recoverable === true (legacy events clear softError)', () => {
   const source = readWorkspaceFile('src/renderer/modules/agent/scopeRunState.ts')
   assert.match(source, /event\.recoverable\s*===\s*true/)

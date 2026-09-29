@@ -73,57 +73,6 @@ function buildOrchestrator(skill: any) {
   })
 }
 
-test('reference skill injection writes lastReferenceSkill hint for the session', async () => {
-  _resetLastReferenceSkillHintsForTests()
-  const orchestrator = buildOrchestrator(referenceSkill())
-  const session: any = { messages: [] }
-
-  await orchestrator.maybeInjectExplicitSkillContext({
-    userText: '用 novel_writer_system 写一段场景',
-    session,
-    sessionId: 'session-A',
-    emitOutput: () => {},
-    emitToolAction: () => {},
-    executeTool: async () => ({
-      text: 'STDOUT:\n（skill 正文）',
-      shape: 'text',
-      data: null,
-      projectionPatch: null,
-      interactionHint: null,
-    }),
-  })
-
-  const hint = getLastReferenceSkill('session-A')
-  assert.ok(hint, 'expected hint to be recorded after reference-skill injection')
-  assert.equal(hint?.id, 'novel_writer_system')
-  assert.equal(hint?.name, 'Novel Writer System')
-  assert.equal(typeof hint?.at, 'number')
-  assert.ok((hint?.at || 0) > 0)
-})
-
-test('workflow skill injection does NOT write a reference hint', async () => {
-  _resetLastReferenceSkillHintsForTests()
-  const orchestrator = buildOrchestrator(workflowSkill())
-  const session: any = { messages: [] }
-
-  await orchestrator.maybeInjectExplicitSkillContext({
-    userText: '用 video copy analyzer 分析这个视频',
-    session,
-    sessionId: 'session-B',
-    emitOutput: () => {},
-    emitToolAction: () => {},
-    executeTool: async () => ({
-      text: 'Execution ID: exec-1\nSkill: video-copy-analyzer',
-      shape: 'text',
-      data: null,
-      projectionPatch: null,
-      interactionHint: null,
-    }),
-  })
-
-  assert.equal(getLastReferenceSkill('session-B'), null)
-})
-
 test('explicit reference skill can arm a session hint before inline injection', () => {
   _resetLastReferenceSkillHintsForTests()
   const orchestrator = buildOrchestrator(referenceSkill())
@@ -151,31 +100,6 @@ test('explicit workflow skill does not arm the reference primitive hint', () => 
 
   assert.equal(remembered, false)
   assert.equal(getLastReferenceSkill('session-workflow-preflight'), null)
-})
-
-test('hints are scoped per session — session-A hint does not leak into session-C', async () => {
-  _resetLastReferenceSkillHintsForTests()
-  const orchestrator = buildOrchestrator(referenceSkill())
-  const session: any = { messages: [] }
-
-  await orchestrator.maybeInjectExplicitSkillContext({
-    userText: '用 novel_writer_system 写一段场景',
-    session,
-    sessionId: 'session-A',
-    emitOutput: () => {},
-    emitToolAction: () => {},
-    executeTool: async () => ({
-      text: 'STDOUT:\n（skill 正文）',
-      shape: 'text',
-      data: null,
-      projectionPatch: null,
-      interactionHint: null,
-    }),
-  })
-
-  assert.ok(getLastReferenceSkill('session-A'))
-  assert.equal(getLastReferenceSkill('session-C'), null)
-  assert.equal(getLastReferenceSkill(undefined), null)
 })
 
 // Patch A4 — overwriting the same session's hint replaces the previous

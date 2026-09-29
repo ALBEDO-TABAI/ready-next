@@ -3,18 +3,7 @@ const { createHash } = require('node:crypto')
 const { existsSync, lstatSync, readFileSync, readdirSync, statSync } = require('node:fs')
 const { resolve } = require('node:path')
 
-const TRUSTED_GIT = Object.freeze({
-  path: '/Library/Developer/CommandLineTools/usr/bin/git',
-  sha256: '5cc7d22ef4228b5c5369f80bd16083ca4be50423bdb4c863ad559f7cc1268daf',
-})
-const TRUSTED_GIT_ENV = Object.freeze({
-  GIT_CONFIG_GLOBAL: '/dev/null',
-  GIT_CONFIG_NOSYSTEM: '1',
-  HOME: '/var/empty',
-  LANG: 'C',
-  LC_ALL: 'C',
-  PATH: '/usr/bin:/bin',
-})
+const { TRUSTED_GIT, TRUSTED_GIT_ENV } = require('./codex-runtime/live-proof-identities.cjs')
 
 const EXCLUDED_PREFIXES = [
   'build/browser-live-proof/',

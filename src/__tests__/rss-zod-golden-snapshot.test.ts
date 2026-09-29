@@ -49,7 +49,7 @@ const EXPECTED_ANTHROPIC = [
   },
   {
     name: 'rss_analyze_item',
-    description: '对指定 RSS 条目运行 copy 或 visual 分析流程。',
+    description: '启动指定 RSS 条目的 copy 或 visual 分析任务。',
     input_schema: {
       type: 'object',
       properties: {
@@ -58,6 +58,19 @@ const EXPECTED_ANTHROPIC = [
         analysisType: { type: 'string', description: 'copy 或 visual' },
       },
       required: ['analysisType'],
+    },
+  },
+  {
+    name: 'rss_get_analysis_result',
+    description: '等待 RSS 分析任务结束并返回报告路径与校验值。',
+    input_schema: {
+      type: 'object',
+      properties: {
+        jobId: { type: 'string', description: '可选，分析任务 ID' },
+        itemId: { type: 'string', description: '可选，RSS 条目 ID' },
+        analysisType: { type: 'string', description: '可选，copy 或 visual' },
+      },
+      required: [],
     },
   },
   {

@@ -1,46 +1,16 @@
-/**
- * B Phase 3 PR2 — lets-go-rss reference migration e2e smoke.
- *
- * lets-go-rss is a HYBRID migration (vs Phase 2 video-copy which removed
- * all action handlers). The 5 typed `skill_rss_*` actions stay public
- * because production callers still depend on them:
- *   - SkillsCenterPanel.tsx UI shortcut (`/skill lets-go-rss rss_update {…}`)
- *   - rss-domain-adapter.ts routing (`skill_rss_*` is in the preferred prefix list)
- *   - Slash command power users
- *
- * What changes:
- *   - `read_skill` (reference, internal) is added so the orchestrator
- *     inline-injects SKILL.md when the user mentions the skill by name —
- *     critical for the "Bot 推送规范" rules that the LLM must obey verbatim.
- *   - `defaultAction` flips from `rss_update` to `read_skill` so bare
- *     `/skill lets-go-rss` shows the docs (consistent with video-copy /
- *     video-expert reference skills) instead of running an update.
- *   - SKILL.md frontmatter gains `when-to-use` per Claude Skill protocol.
- */
+/** Bundled lets-go-rss manifest, reference document, and allowed shell wrapper contracts. */
 
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { existsSync, readFileSync } from 'node:fs'
+import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { compileSkillDefinition } from '../main/modules/skills-runtime/skill-compiler'
-import { SkillContextOrchestrator } from '../main/modules/agent-control/skills/skill-context-orchestrator'
-import {
-  _resetLastReferenceSkillHintsForTests,
-  getLastReferenceSkill,
-} from '../main/modules/agent-control/skills/skill-reference-hints'
-import { __setScopeContextEpochDatabaseForTests } from '../main/modules/agent-control/session/scope-context-epoch'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const SKILL_DIR = join(__dirname, '..', '..', 'assets', 'embedded-skills', 'lets-go-rss')
 
-test.before(() => {
-  __setScopeContextEpochDatabaseForTests({
-    getRawDb: () => ({ prepare: () => ({ get: () => undefined }) }) as never,
-  })
-})
-test.after(() => __setScopeContextEpochDatabaseForTests(null))
 
 test('manifest compiles to advisory with read_skill default + 5 retained public python actions', () => {
   const def = compileSkillDefinition({ folderPath: SKILL_DIR, source: 'embedded' })
@@ -64,12 +34,6 @@ test('manifest compiles to advisory with read_skill default + 5 retained public 
   }
 })
 
-test('skill.workflow.json is absent (lets-go-rss never had one)', () => {
-  // Sanity: lets-go-rss was already advisory before Phase 3; this test pins
-  // the contract so a future regression cannot silently re-introduce one.
-  assert.equal(existsSync(join(SKILL_DIR, 'skill.workflow.json')), false)
-})
-
 test('SKILL.md frontmatter declares name / description / when-to-use per Claude Skill protocol', () => {
   const skillMd = readFileSync(join(SKILL_DIR, 'SKILL.md'), 'utf-8')
   const frontmatterMatch = skillMd.match(/^---\n([\s\S]*?)\n---/)
@@ -86,69 +50,4 @@ test('SKILL.md uses allowlisted shell wrapper form instead of direct ./scripts i
   assert.doesNotMatch(skillMd, /(^|\s)\.\/scripts\//)
   assert.match(skillMd, /bash scripts\/run_update_cron\.sh/)
   assert.match(skillMd, /bash scripts\/run_status_push\.sh/)
-})
-
-test('orchestrator inline-injects SKILL.md, arms primitive hint, creates no skill_executions row', async () => {
-  _resetLastReferenceSkillHintsForTests()
-
-  const def = compileSkillDefinition({ folderPath: SKILL_DIR, source: 'embedded' })
-  const skillState: any = {
-    id: 'lets-go-rss',
-    name: "Let's Go RSS",
-    description: def.description,
-    defaultAction: def.defaultAction,
-    executionMode: def.executionMode,
-    managedPath: SKILL_DIR,
-    actions: def.actions.map((a) => ({
-      name: a.name,
-      visibility: a.visibility,
-      runtime: a.runtime,
-      params: a.params || [],
-    })),
-  }
-
-  const orchestrator = new SkillContextOrchestrator({
-    extractPrimaryUserInstruction: (raw) => raw,
-    listSkills: () => [skillState],
-    resolveSkillToolByAction: (skillId, actionName) => ({
-      name: actionName === 'read_skill'
-        ? 'skill_lets_go_rss_read_skill'
-        : `skill_${actionName}`,
-      action: actionName,
-      params: [],
-    }) as any,
-  })
-
-  const session: any = { messages: [] }
-  let toolCalls = 0
-  await orchestrator.maybeInjectExplicitSkillContext({
-    userText: '用 lets-go-rss 看一下今天有什么新更新',
-    session,
-    sessionId: 'test-session-letsgorss',
-    messageVisibilityEpoch: 0,
-    emitOutput: () => {},
-    emitToolAction: () => { toolCalls += 1 },
-    executeTool: async () => {
-      toolCalls += 1
-      return { text: '', shape: 'text', data: null, projectionPatch: null, interactionHint: null }
-    },
-  })
-
-  assert.equal(toolCalls, 0, 'reference defaultAction → direct read, no tool round-trip')
-  assert.equal(session.messages.length, 1, 'exactly one system-role injection')
-  const injected = session.messages[0] as { role: string; content: string }
-  assert.equal(injected.role, 'system')
-  assert.ok(injected.content.includes('已加载技能'), 'injection header present')
-  assert.ok(injected.content.includes('lets-go-rss') || injected.content.includes("Let's Go RSS"))
-  // SKILL.md body keywords — proves inlining (not truncated to header only).
-  assert.ok(
-    injected.content.includes('Bot 汇报规范') || injected.content.includes('--status'),
-    'SKILL.md body was inlined',
-  )
-
-  const hint = getLastReferenceSkill('test-session-letsgorss')
-  assert.equal(hint?.id, 'lets-go-rss', 'hint arms primitive gating for next turn')
-
-  // Phase 4: the orchestrator no longer has a listExecutions dep; no execution
-  // row is created on the reference path because that code path is gone.
 })

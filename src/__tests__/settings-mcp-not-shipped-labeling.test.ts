@@ -42,14 +42,20 @@ test('settings mcp management panel wires status, config save and reload through
 
   // Live controls with stable data attributes
   assert.match(panel, /data-mcp-control="refresh-status"/)
-  assert.match(panel, /data-mcp-control="config-editor"/)
   assert.match(panel, /data-mcp-control="save-config"/)
   assert.match(panel, /data-mcp-control="save-and-reload"/)
+
+  // Structured per-server config editor (replaced the raw JSON textarea): each
+  // server row edits the typed draft array that save sends to the preload API.
+  assert.match(panel, /aria-labelledby="mcp-config-heading"/)
+  assert.match(panel, /const \[configs, setConfigs\] = useState<ElectronMcpServerConfig\[\]>\(\[\]\)/)
+  assert.match(panel, /\{configs\.map\(\(server, index\) => \(/)
+  assert.match(panel, /onChange=\{\(event\) => updateServer\(index, \{ command: event\.target\.value \}\)\}/)
 
   // All three preload API members are consumed
   assert.match(panel, /window\.electronAPI\?\.mcp/)
   assert.match(panel, /api\.getStatus\(\)/)
-  assert.match(panel, /api\.saveConfig\(configDraft\)/)
+  assert.match(panel, /api\.saveConfig\(configs\)/)
   assert.match(panel, /api\.reload\(\)/)
 
   // Per-server status rendering (connection dot + tool count + error)
@@ -65,11 +71,12 @@ test('mcp ipc group registers status/saveConfig/reload with symmetric dispose', 
   const group = readWorkspaceFile('src/main/modules/claude-bridge/ipc/mcp-group.ts')
   assert.match(group, /ipcMain\.handle\('mcp:status'/)
   assert.match(group, /ipcMain\.handle\('mcp:saveConfig'/)
+  assert.match(group, /if \(!Array\.isArray\(payload\.servers\)\)/)
   assert.match(group, /ipcMain\.handle\('mcp:reload'/)
   assert.match(group, /removeHandler\(channel\)/)
 
   const preload = readWorkspaceFile('src/preload/index.ts')
   assert.match(preload, /getStatus: \(\) => ipcRenderer\.invoke\('mcp:status'\)/)
-  assert.match(preload, /saveConfig: \(json: string\) => ipcRenderer\.invoke\('mcp:saveConfig', \{ json \}\)/)
+  assert.match(preload, /saveConfig: \(servers: unknown\[\]\) => ipcRenderer\.invoke\('mcp:saveConfig', \{ servers \}\)/)
   assert.match(preload, /reload: \(\) => ipcRenderer\.invoke\('mcp:reload'\)/)
 })

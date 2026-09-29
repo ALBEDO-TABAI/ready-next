@@ -72,7 +72,7 @@ const RETIRED_SUBGATES = [
   // overlap-fixture-first investigation classified the conflict as APPARENT;
   // ResearchDomainAdapter swapped to the first position in
   // `src/main/modules/agent-control/domain-adapters/domain-adapter-host.ts` domainAdapters[];
-  // overlap fixtures at `src/__tests__/research-vs-map-overlap-fixtures.test.ts`
+  // Codex browser admission is covered by `src/__tests__/codex-browser-admission.test.ts`
   // prove the swap is behaviorally equivalent for the 4 representative
   // queries). Per Y plan §6.5 "Row went green via path (a)" rule, the row is
   // removed from this list — the live gate in verify:r is the proof.

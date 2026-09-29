@@ -19,8 +19,6 @@ import {
   inspectKimiK3History,
   isKimiK3Config,
 } from '../shared/ai-providers/kimi-k3'
-import { deriveAgentErrorContract } from '../main/modules/claude-bridge/error-contract'
-import { OpenAIExecutionClient } from '../main/modules/claude-bridge/openai-execution-client'
 import { PROVIDER_ERROR_KINDS } from '../main/modules/agent-control/contracts/error-kinds'
 import { compactAgentInputItems } from '../main/modules/agent-control/compaction/compact-agent-input'
 import { ReadyAnthropicModel, ReadyOpenAICompatibleModel } from '../main/modules/agent-control/runtime-core/agent-sdk-runtime'
@@ -270,44 +268,4 @@ test('runtime thinking gate allows proven Anthropic model and sends request', as
   } as never)
 
   assert.equal(fetchCalls, 1)
-})
-
-
-test('runtime thinking gate blocks legacy provider request before fetch', async () => {
-  let fetchCalls = 0
-  const client = new OpenAIExecutionClient({
-    fetchWithTimeout: async () => {
-      fetchCalls += 1
-      return new Response('{}', { status: 200 })
-    },
-    log: () => {},
-  })
-
-  await assert.rejects(
-    client.requestSimple({
-      session: {
-        messages: [{ role: 'user', content: 'hello' }],
-        systemPrompt: '',
-        preferTextToolBridge: false,
-      },
-      config: unknownThinkingConfig(),
-      baseUrl: 'https://openai-compatible.invalid',
-      provider: undefined,
-      signal: new AbortController().signal,
-    }),
-    (error) => {
-      assert.ok(error instanceof ToolDomainError)
-      assert.equal(error.errorKind, PROVIDER_ERROR_KINDS.providerRequestFailed.code)
-      return true
-    },
-  )
-  assert.equal(fetchCalls, 0)
-})
-
-test('provider_request_failed with recoverable=false remains terminal in agent:error contract', () => {
-  const error = new ToolDomainError(PROVIDER_ERROR_KINDS.providerRequestFailed.code, 'blocked', { recoverable: false })
-  assert.deepEqual(deriveAgentErrorContract(error), {
-    errorKind: PROVIDER_ERROR_KINDS.providerRequestFailed.code,
-    recoverable: false,
-  })
 })

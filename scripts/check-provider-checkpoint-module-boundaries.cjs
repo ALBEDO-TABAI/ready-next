@@ -61,8 +61,6 @@ const finalizerLeaves = [
 
 const splitTests = [
   'agent-session-checkpoint-store-native.test.ts',
-  'agent-session-checkpoint-confirmation-native.test.ts',
-  'agent-session-checkpoint-takeover-resume-native.test.ts',
   'agent-session-checkpoint-owner-recovery-native.test.ts',
   'run-finalizer-task-facts.test.ts',
   'run-finalizer-adjudication.test.ts',

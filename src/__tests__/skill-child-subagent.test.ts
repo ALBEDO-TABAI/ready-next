@@ -4,7 +4,6 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
 
-import { createSkillChildSubAgentFromPersisted } from '../main/modules/agent-control/skills/skill-child-sub-agent-factory'
 import { mapSubAgentCloseToChildClose } from '../main/modules/agent-control/skills/skill-child-sub-agent-close-mapping'
 import {
   createSkillChildSubAgent,
@@ -23,8 +22,7 @@ import type { SkillChildDriver } from '../main/modules/agent-control/skills/skil
 import type {
   SkillChildCloseEvent,
   SkillChildDriverAction,
-  SkillChildDriverState,
-  SkillChildRunPayload,
+  SkillChildDriverState
 } from '../main/modules/agent-control/skills/skill-child-run-types'
 
 async function collectRun(
@@ -400,36 +398,6 @@ test('SkillChildSubAgent.run lets a driver convert failed action results to reco
   assert.equal(childClose?.status, 'recoverable_paused')
   assert.equal(childClose?.terminalReason, 'checkpoint_background')
   assert.equal(childClose?.error?.kind, 'download_video_unavailable')
-})
-
-test('createSkillChildSubAgentFromPersisted reconstructs from durable payload', async () => {
-  const payload: SkillChildRunPayload = {
-    version: 1,
-    childRunId: 'child-persisted',
-    kind: 'skill',
-    parentScopeId: 'scope-persisted',
-    parentSessionId: 'session-persisted',
-    skillId: 'test-child-skill',
-    skillName: 'Test Child Skill',
-    requestedAction: 'video_expert_pipeline',
-    requestedInput: { url: 'https://example.com/video' },
-    singleFlightKey: 'scope:test-child-skill:video',
-    parentNextHint: 'wait_for_close_event',
-    outputDir: '/tmp/ready-child-persisted',
-    runStatePath: '/tmp/ready-child-persisted/run_state.json',
-    eventLogPath: '/tmp/ready-child-persisted/child.jsonl',
-    status: 'recoverable_paused',
-    closeEvent: null,
-  }
-  const subagent = await createSkillChildSubAgentFromPersisted({
-    payload,
-    driver: makeDriver({ plans: [makeClose({ childRunId: 'child-persisted' })] }),
-    executeAction: async () => makeResult(),
-  })
-
-  assert.equal(subagent.lifecycleId, 'child-persisted')
-  assert.equal(subagent.durableRunId, 'child-persisted')
-  assert.equal(subagent.artifactDir, '/tmp/ready-child-persisted')
 })
 
 function makeSubAgentClose(overrides: Partial<SubAgentCloseEvent> = {}): SubAgentCloseEvent {

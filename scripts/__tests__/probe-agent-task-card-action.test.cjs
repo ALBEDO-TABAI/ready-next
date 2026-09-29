@@ -24,30 +24,6 @@ function baseReport(label) {
   }
 }
 
-test('task card action probe rejects continue buttons without a resume call', async () => {
-  const { evaluateTaskCardActionEffect } = await probeModule
-  const report = evaluateTaskCardActionEffect(baseReport('继续生成报告'))
-
-  assert.equal(report.ok, false)
-  assert.equal(report.error, 'no-action-effect')
-  assert.equal(report.effect.expectation, 'api-success:resumeRun')
-})
-
-test('task card action probe accepts continue buttons with a successful resume call', async () => {
-  const { evaluateTaskCardActionEffect } = await probeModule
-  const report = baseReport('继续运行')
-  report.apiCalls.push({
-    key: 'resumeRun',
-    args: [{ scopeId: 'conv-before' }],
-    result: { success: true },
-  })
-
-  const checked = evaluateTaskCardActionEffect(report)
-
-  assert.equal(checked.ok, true)
-  assert.equal(checked.effect.expectation, 'api-success:resumeRun')
-})
-
 test('task card action probe rejects continue buttons when only task state changes', async () => {
   const { evaluateTaskCardActionEffect } = await probeModule
   const report = baseReport('继续生成报告')

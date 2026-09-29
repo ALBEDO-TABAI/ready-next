@@ -287,7 +287,7 @@ test('live executor resolution preserves the frozen surface and signs only the c
       frozenToolSurface: first.readyToolSurface,
     }),
     (error) => error instanceof CodexToolSurfaceError
-      && error.code === 'tool_surface_change_requires_new_thread',
+      && error.code === 'ready_tool_execution_contract_changed',
   )
 })
 

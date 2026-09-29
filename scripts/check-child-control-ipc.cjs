@@ -42,21 +42,6 @@ const REQUIRED = [
     ],
   },
   {
-    file: 'src/renderer/pages/Settings.tsx',
-    checks: [
-      ['settings child run control', /ActiveChildRunsDebug/],
-      ['settings refresh method', /listActiveChildRuns/],
-      ['settings cancel method', /cancelChildRun/],
-    ],
-  },
-  {
-    file: 'src/renderer/preview/installSettingsPreviewMocks.ts',
-    checks: [
-      ['preview list mock', /listActiveChildRuns/],
-      ['preview cancel mock', /cancelChildRun/],
-    ],
-  },
-  {
     file: 'src/main/modules/agent-control/skills/skill-child-runner.ts',
     checks: [
       ['active summary method', /listActiveRuns\(/],

@@ -9,7 +9,7 @@ const {
 } = require('node:fs')
 const { resolve } = require('node:path')
 
-const E6_AUTHORITY_ROOT = resolve('/tmp', `ready-codex-e6-global-lease-${process.getuid()}`)
+const { E6_AUTHORITY_ROOT } = require('./live-proof-identities.cjs')
 const LOCK_PATH = resolve(E6_AUTHORITY_ROOT, 'lease.lock')
 const HOLDER_SOURCE = [
   "process.on('SIGINT', () => {})",

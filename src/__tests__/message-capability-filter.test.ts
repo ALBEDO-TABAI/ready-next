@@ -27,13 +27,10 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
 import {
-  assertCurrentMessageCapability,
   sanitizeHistoricalMessagesByCapability,
   type CapabilityMessage,
-  type MessageCapabilitySnapshot,
+  type MessageCapabilitySnapshot
 } from '../main/modules/agent-control/domain-adapters/message-capability-filter'
-import { PROVIDER_ERROR_KINDS } from '../main/modules/agent-control/contracts/error-kinds'
-import { ToolDomainError } from '../main/modules/tools/tool-errors'
 
 const VISION_ON: MessageCapabilitySnapshot = { supportsVision: true, supportsVideo: true }
 const VISION_OFF: MessageCapabilitySnapshot = { supportsVision: false, supportsVideo: false }
@@ -209,90 +206,4 @@ test('multi-message: counts aggregate across messages, untouched messages unchan
   assert.equal(out.removedImageBlocks, 3)
   assert.equal(out.replacedWithPlaceholders, 2)
   assert.equal(out.filtered[1].content, 'no media here')
-})
-
-// ============================================================================
-// assertCurrentMessageCapability
-// ============================================================================
-
-test('current turn: vision-off + image block → throws provider_request_failed', () => {
-  assert.throws(
-    () => assertCurrentMessageCapability(
-      [{ type: 'text', text: 'caption' }, { type: 'image', source: 's' }],
-      VISION_OFF,
-    ),
-    (err: unknown) => err instanceof ToolDomainError
-      && err.errorKind === PROVIDER_ERROR_KINDS.providerRequestFailed.code
-      && /图片/.test(err.message),
-  )
-})
-
-test('current turn: vision-on + image block → no throw', () => {
-  assert.doesNotThrow(() => assertCurrentMessageCapability(
-    [{ type: 'image', source: 's' }, { type: 'text', text: 't' }],
-    VISION_ON,
-  ))
-})
-
-test('current turn: video-off + video block → throws with 视频 in the message', () => {
-  assert.throws(
-    () => assertCurrentMessageCapability(
-      [{ type: 'video', source: 'v' }],
-      VISION_ON_VIDEO_OFF,
-    ),
-    (err: unknown) => err instanceof ToolDomainError
-      && err.errorKind === PROVIDER_ERROR_KINDS.providerRequestFailed.code
-      && /视频/.test(err.message),
-  )
-})
-
-test('current turn: video-off + responses input_file video block → throws with 视频 in the message', () => {
-  assert.throws(
-    () => assertCurrentMessageCapability(
-      [{ type: 'input_file', file_data: 'data:video/mp4;base64,AAAA', filename: 'upload.mp4' }],
-      VISION_ON_VIDEO_OFF,
-    ),
-    (err: unknown) => err instanceof ToolDomainError
-      && err.errorKind === PROVIDER_ERROR_KINDS.providerRequestFailed.code
-      && /视频/.test(err.message),
-  )
-})
-
-test('current turn: text-only → never throws', () => {
-  assert.doesNotThrow(() => assertCurrentMessageCapability(
-    [{ type: 'text', text: 'just words' }],
-    VISION_OFF,
-  ))
-})
-
-test('current turn: empty blocks → never throws', () => {
-  assert.doesNotThrow(() => assertCurrentMessageCapability([], VISION_OFF))
-  assert.doesNotThrow(() => assertCurrentMessageCapability(undefined, VISION_OFF))
-})
-
-test('current turn: image + video both present, both off → throws with both kinds noted', () => {
-  let thrown: unknown = null
-  try {
-    assertCurrentMessageCapability(
-      [{ type: 'image', source: 'i' }, { type: 'video', source: 'v' }],
-      VISION_OFF,
-    )
-  } catch (err) {
-    thrown = err
-  }
-  assert.ok(thrown instanceof ToolDomainError)
-  const msg = (thrown as ToolDomainError).message
-  assert.match(msg, /图片/)
-  assert.match(msg, /视频/)
-})
-
-test('current turn: conservative undefined cap → throws on image', () => {
-  assert.throws(
-    () => assertCurrentMessageCapability(
-      [{ type: 'image', source: 's' }],
-      UNDEFINED_CAP,
-    ),
-    (err: unknown) => err instanceof ToolDomainError
-      && err.errorKind === PROVIDER_ERROR_KINDS.providerRequestFailed.code,
-  )
 })

@@ -5,14 +5,11 @@ import { BrowserTurnLease } from '../main/modules/browser-engine/agent-browser-t
 import { isAgentBrowserError } from '../main/modules/browser-engine/agent-browser-errors'
 import type { BrowserTargetClaimAcquireInput } from '../main/modules/browser-engine/browser-target-claims'
 import { executeToolCall } from '../main/modules/tools/tool-executor'
-import { finalizeRunOutcome } from '../main/modules/agent-control/runtime-core/run-finalizer'
-import { createTaskBudgetRuntime } from '../main/modules/agent-control/task-projection/run-budget-policy'
 import {
   createAgentTabUserInputTakeoverHandlers,
   isAgentNavigationEcho,
   persistAgentTabUserTakeover,
 } from '../main/modules/browser-engine/agent-tab-control-gate'
-import { setBrowserTargetClaimRunCloseoutPort } from '../main/modules/browser-engine/browser-target-claim-closeout'
 import { acquireTarget, createTargetClaimService, setTargetUserOwnedForTest, TARGET_A } from './utils/browser-target-claim-fixture'
 
 function turnTarget(patch: Partial<BrowserTargetClaimAcquireInput> = {}) {
@@ -148,68 +145,4 @@ test('S0 R8: completion criteria use the Browser workflow write boundary', async
   )
 
   assert.equal(output.data?.ok, true, 'a bound Browser Parent must not use the ordinary projection writer')
-})
-
-test('S0 R6 proof: checkpoint closeout cannot preserve a stale short-task projection over research runtime truth', async () => {
-  let projection = {
-    taskId: 'task-r6',
-    scopeId: 'scope-r6',
-    runId: 'run-r6',
-    taskType: 'short_task',
-    module: 'browser',
-  } as Record<string, unknown>
-  let runMeta: Record<string, unknown> | null = null
-  let closeTaskType: string | null = null
-  const researchBudget = createTaskBudgetRuntime('research', {
-    usage: { iterationsUsed: 34, toolCallsUsed: 37, parallelToolGroupsUsed: 0 },
-  })
-
-  setBrowserTargetClaimRunCloseoutPort(() => undefined)
-  await finalizeRunOutcome({
-    kind: 'checkpoint',
-    runId: 'run-r6',
-    taskId: 'task-r6',
-    scopeId: 'scope-r6',
-    continuationHandle: 'checkpoint-r6',
-    terminalReason: 'checkpoint_incomplete',
-    durationMs: 1,
-    toolCallsUsed: 37,
-    initiator: 'incomplete',
-    taskBudgetRuntime: researchBudget,
-    projectionPatch: {
-      status: 'recoverable_paused',
-      interactionState: 'suspended',
-      resumableActions: ['continue', 'cancel'],
-    },
-  }, {
-    runMetaRepository: {
-      get: () => runMeta,
-      create: (input) => {
-        runMeta = { ...input }
-        return input
-      },
-      update: (_runId, patch) => {
-        runMeta = { ...(runMeta || {}), ...patch }
-        return runMeta
-      },
-    },
-    taskProjectionStore: {
-      get: () => projection as never,
-      update: (_taskId, patch) => {
-        projection = { ...projection, ...patch }
-      },
-    },
-    writeProjectionTerminalPatch: (patch) => {
-      projection = { ...projection, ...(patch || {}) }
-    },
-    writeRunCloseMetric: (metric) => {
-      closeTaskType = metric.taskType ?? null
-    },
-  })
-
-  assert.equal(projection.taskType, 'research')
-  assert.equal(runMeta?.taskType, 'research')
-  assert.equal((runMeta?.budget as { maxIterations?: number } | null)?.maxIterations, 220)
-  assert.equal(closeTaskType, 'research')
-  setBrowserTargetClaimRunCloseoutPort(null)
 })

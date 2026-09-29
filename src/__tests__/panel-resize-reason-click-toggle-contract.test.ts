@@ -34,20 +34,3 @@ test('freeze-frame pipeline only runs on drag-reason panel events, eliminating s
     /const handleResizeState = \(event: Event\) => \{[\s\S]*?if \(detail\.reason !== 'drag'\) return[\s\S]*?if \(detail\.resizing\)/,
   )
 })
-
-test('browser bounds prop-watch and ResizeObserver both keep drag synced while deduping non-drag panel resize', () => {
-  const source = readWorkspaceFile('src/renderer/modules/browser/useBrowserViewBounds.ts')
-
-  assert.match(
-    source,
-    /const handleBoundsShift = \(\) => \{\s*if \(panelResizeReasonRef\.current === 'drag'\) \{[\s\S]*?clearFrameSync\(\)[\s\S]*?void sendBoundsImmediate\(\)[\s\S]*?return[\s\S]*?\}/,
-  )
-  assert.match(
-    source,
-    /if \(panelResizingRef\.current && frameSyncRequestRef\.current !== null\) return/,
-  )
-  assert.match(
-    source,
-    /if \(!isActive\) \{[\s\S]*?clearFrameSync\(\)[\s\S]*?clearSettleSyncTimeout\(\)[\s\S]*?stopDragBoundsSync\(\)[\s\S]*?return[\s\S]*?\}\s*if \(panelResizingRef\.current\) return\s*sendBounds\(\{ forceExact: true \}\)/,
-  )
-})

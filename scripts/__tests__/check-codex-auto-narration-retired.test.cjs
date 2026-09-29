@@ -41,7 +41,9 @@ function fixture() {
   for (const [rel, count] of expectedSendScopedIdentifiers) {
     const abs = path.join(root, rel)
     fs.mkdirSync(path.dirname(abs), { recursive: true })
-    const call = rel.endsWith('ipc-handler.ts')
+    const call = rel.endsWith('/runtime.ts')
+      ? 'this.sendScoped(payload)\n'
+      : rel.endsWith('ipc-handler.ts')
       ? 'runtime.sendScoped(payload)\n'
       : rel.endsWith('agent-lifecycle-group.ts')
         ? 'deps.sendScoped(payload)\n'

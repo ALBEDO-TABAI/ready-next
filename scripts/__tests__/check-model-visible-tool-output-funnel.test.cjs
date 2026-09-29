@@ -112,14 +112,3 @@ const content = this.extractSkillReferenceContent(result.text)
   assert.equal(result.ok, false)
   assert.ok(result.errors.some((error) => error.includes('raw_reference_skill_injection')))
 })
-
-test('gate fails when a required model-visible file loses the funnel import', (t) => {
-  const root = makeRoot(t)
-  writeBaseline(root)
-  write(root, 'src/main/modules/agent-control/runtime-core/turn-transcript.ts', `
-export class TurnTranscript {}
-`)
-  const result = check({ root })
-  assert.equal(result.ok, false)
-  assert.ok(result.errors.some((error) => error.includes('missing_model_visible_funnel:src/main/modules/agent-control/runtime-core/turn-transcript.ts')))
-})

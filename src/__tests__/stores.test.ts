@@ -96,107 +96,6 @@ const { useSettings } = await import('../renderer/stores/useSettings')
 const { createDefaultAIWorkspace, getActiveAIConfig } = await import('../shared/ai-providers')
 
 // ============================================================
-// Existing Type Validation Tests (preserved from original)
-// ============================================================
-
-describe('Mode Store Types', () => {
-    it('should have valid WorkbenchMode values', () => {
-        const validModes = ['browser', 'document', 'rss', 'calendar']
-        validModes.forEach(mode => {
-            assert.strictEqual(typeof mode, 'string')
-            assert.ok(mode.length > 0)
-        })
-    })
-
-    it('should have valid AppMode values', () => {
-        const validAppModes = ['workbench', 'ready']
-        validAppModes.forEach(mode => {
-            assert.strictEqual(typeof mode, 'string')
-        })
-    })
-})
-
-describe('Workspace Store Types', () => {
-    it('should validate FileItem structure', () => {
-        const fileItem = {
-            name: 'readme.md',
-            path: '/workspace/readme.md',
-            isDirectory: false,
-            size: 1024,
-            modified: new Date()
-        }
-        assert.strictEqual(typeof fileItem.name, 'string')
-        assert.strictEqual(typeof fileItem.path, 'string')
-        assert.strictEqual(typeof fileItem.isDirectory, 'boolean')
-        assert.strictEqual(typeof fileItem.size, 'number')
-    })
-
-    it('should handle directory FileItem', () => {
-        const dirItem = {
-            name: 'src',
-            path: '/workspace/src',
-            isDirectory: true,
-            size: 0,
-            modified: new Date()
-        }
-        assert.ok(dirItem.isDirectory)
-        assert.strictEqual(dirItem.size, 0)
-    })
-})
-
-describe('Agent Store Types', () => {
-    it('should validate Agent structure', () => {
-        const agent = {
-            name: 'butler',
-            status: 'idle' as const,
-            task: undefined,
-            isMock: false,
-            spawnTime: Date.now()
-        }
-        assert.strictEqual(typeof agent.name, 'string')
-        assert.strictEqual(agent.status, 'idle')
-        assert.strictEqual(typeof agent.isMock, 'boolean')
-    })
-
-    it('should validate AgentMessage structure', () => {
-        const message = {
-            id: `msg-${Date.now()}`,
-            agent: 'butler',
-            content: 'Hello, world!',
-            type: 'stdout' as const,
-            timestamp: Date.now()
-        }
-        assert.strictEqual(typeof message.id, 'string')
-        assert.ok(message.id.startsWith('msg-'))
-        assert.strictEqual(typeof message.content, 'string')
-    })
-
-    it('should handle all agent status values', () => {
-        const validStatuses = ['idle', 'working', 'done', 'error', 'timeout']
-        validStatuses.forEach(status => {
-            assert.strictEqual(typeof status, 'string')
-            assert.ok(validStatuses.includes(status))
-        })
-    })
-
-})
-
-describe('Store Utilities', () => {
-    it('should format message ID correctly', () => {
-        const id = `msg-${Date.now()}`
-        assert.ok(id.startsWith('msg-'))
-        assert.ok(id.length > 4)
-    })
-
-    it('should handle path operations', () => {
-        const path = '/workspace/src/main/index.ts'
-        const parts = path.split('/')
-        assert.strictEqual(parts[parts.length - 1], 'index.ts')
-        assert.strictEqual(parts[1], 'workspace')
-    })
-})
-
-// ============================================================
 // useMode Store Tests
 // ============================================================
 
@@ -596,14 +495,6 @@ describe('useAgent Store', () => {
         })
     })
 
-    it('should have correct default agents', () => {
-        const state = useAgent.getState()
-        assert.strictEqual(state.agents.length, 1)
-        assert.strictEqual(state.agents[0].name, 'butler')
-        assert.strictEqual(state.agents[0].displayName, 'Ready')
-        assert.strictEqual(state.currentAgent, 'butler')
-    })
-
     it('should add a message', () => {
         const msg = {
             id: 'test-msg-1',
@@ -662,40 +553,6 @@ describe('useAgent Store', () => {
         assert.strictEqual(useAgent.getState().inputValue, 'test input')
         useAgent.getState().setInputValue('')
         assert.strictEqual(useAgent.getState().inputValue, '')
-    })
-
-    it('should clear a continuation draft when the user replaces it with a fresh request', () => {
-        useAgent.getState().setComposerDraft('请重试刚才的任务，并在开始前先说明你准备怎么继续。', {
-            taskId: 'task-old',
-            detachedTaskId: 'detached-old',
-        })
-
-        useAgent.getState().setInputValue(
-            '你先看一遍，然后跟我详细讲讲第一部第三章开始的人物关系以及故事推进内容',
-            { preserveContinuationIntent: true },
-        )
-
-        assert.strictEqual(useAgent.getState().inputValue.includes('第一部第三章'), true)
-        assert.strictEqual(useAgent.getState().pendingContinuationIntent, null)
-        assert.strictEqual(useAgent.getState().pendingContinuationDraftAnchor, null)
-    })
-
-    it('should keep a continuation draft when the user appends details to it', () => {
-        useAgent.getState().setComposerDraft('请重试刚才的任务，并在开始前先说明你准备怎么继续。', {
-            taskId: 'task-old',
-            detachedTaskId: 'detached-old',
-        })
-
-        useAgent.getState().setInputValue(
-            '请重试刚才的任务，并在开始前先说明你准备怎么继续。先检查 provider 配置。',
-            { preserveContinuationIntent: true },
-        )
-
-        assert.strictEqual(useAgent.getState().pendingContinuationIntent?.taskId, 'task-old')
-        assert.strictEqual(
-            useAgent.getState().pendingContinuationDraftAnchor,
-            '请重试刚才的任务，并在开始前先说明你准备怎么继续。',
-        )
     })
 
     it('should set streaming state', () => {

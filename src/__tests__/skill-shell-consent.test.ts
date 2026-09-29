@@ -12,11 +12,6 @@ import {
   parseShellConsentMap,
   resolveSkillShellAllowed,
 } from '../main/modules/skills-runtime/skill-shell-consent'
-import {
-  skillShellConsentReminderText,
-  registerSkillShellConsentReminder,
-} from '../main/modules/agent-control/system-reminders/skill-shell-consent-reminder'
-import { createSystemReminderRegistry } from '../main/modules/agent-control/system-reminders/system-reminder-registry'
 import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
 
 test('skill-shell-consent declares transitive sqlite coverage', (t) => {
@@ -48,32 +43,4 @@ test('resolveSkillShellAllowed: declared bins are immediate while custom bundled
   assert.equal(resolveSkillShellAllowed({
     hasScripts: false, hasDeclaredBins: false, isEmbedded: true, hasConsent: true,
   }), false)
-})
-
-test('skillShellConsentReminderText: only bundled scripts require the Ready-specific toggle', () => {
-  assert.equal(
-    skillShellConsentReminderText({ skillName: 'X', hasScripts: true, isEmbedded: false, hasConsent: false })?.includes('X'),
-    true,
-  )
-  assert.match(
-    skillShellConsentReminderText({ skillName: 'X', hasScripts: true, isEmbedded: false, hasConsent: false }) || '',
-    /允许运行脚本/,
-  )
-  assert.equal(skillShellConsentReminderText({ skillName: 'X', hasScripts: false, isEmbedded: false, hasConsent: false }), null)
-  assert.equal(skillShellConsentReminderText({ skillName: 'X', hasScripts: true, isEmbedded: true, hasConsent: false }), null)
-  assert.equal(skillShellConsentReminderText({ skillName: 'X', hasScripts: true, isEmbedded: false, hasConsent: true }), null)
-})
-
-test('registerSkillShellConsentReminder: registers a reminder only when scripts + !embedded + !consent', () => {
-  const needed = createSystemReminderRegistry()
-  registerSkillShellConsentReminder(needed, { skillName: '我的技能', hasScripts: true, isEmbedded: false, hasConsent: false })
-  assert.match(needed.compose(), /我的技能/)
-
-  const embedded = createSystemReminderRegistry()
-  registerSkillShellConsentReminder(embedded, { skillName: 'X', hasScripts: true, isEmbedded: true, hasConsent: false })
-  assert.ok(!embedded.compose(), 'embedded → no reminder')
-
-  const consented = createSystemReminderRegistry()
-  registerSkillShellConsentReminder(consented, { skillName: 'X', hasScripts: true, isEmbedded: false, hasConsent: true })
-  assert.ok(!consented.compose(), 'consented → no reminder')
 })

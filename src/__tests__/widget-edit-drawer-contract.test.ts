@@ -162,13 +162,6 @@ describe('widget edit drawer contract', () => {
     assert.equal((parsed!.skeletonSpec?.props as { title?: string } | undefined)?.title, '今日总结（编辑后）')
   })
 
-  it('Tiptap drawer save drops the old componentSpec source after compiling a skeleton', () => {
-    const source = readFileSync('src/renderer/components/document/TiptapEditor.tsx', 'utf8')
-    const saveBlock = source.match(/const handleSaveEditDrawer[\s\S]*?\}, \[\]\)/)?.[0] ?? source
-    assert.match(saveBlock, /componentSpec:\s*null/)
-    assert.doesNotMatch(saveBlock, /componentSpec:\s*context\.widget\.componentSpec/)
-  })
-
   it('live Markdown editor replacement keeps the widget id and makes skeletonSpec the only editable source', () => {
     const legacyComponent = {
       component: 'info_card',

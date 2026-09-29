@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { createElement } from 'react'
 import { flushSync } from 'react-dom'
 import { createRoot } from 'react-dom/client'
@@ -100,4 +102,12 @@ test('document tab rail renders custom appearance icons and falls back to FileTe
   } finally {
     cleanup()
   }
+})
+
+test('document mode mounts the vertical document rail', () => {
+  // allow-source-grep: DocumentMode owns the native workbench composition; component renders above verify the rail behavior, while this check pins its production mount.
+  const documentMode = readFileSync(resolve(process.cwd(), 'src/renderer/pages/modes/DocumentMode.tsx'), 'utf8')
+  assert.match(documentMode, /import DocumentVerticalTabRail from ['"]\.\.\/\.\.\/components\/document\/DocumentVerticalTabRail['"]/)
+  assert.match(documentMode, /<DocumentVerticalTabRail/)
+  assert.doesNotMatch(documentMode, /<WorkbenchProjectTabs/)
 })

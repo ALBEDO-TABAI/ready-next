@@ -66,7 +66,7 @@ test('pet-facing chat hides internal skill/tool failure details from user-visibl
     },
   ])
 
-  assert.deepEqual(events.map((event) => event.id), ['useful', 'skill-read-call', 'skill-read-result'])
+  assert.deepEqual(events.map((event) => event.id), ['useful', 'skill-read-call', 'skill-read-result', 'skill-read-result-duplicate'])
   assert.equal(events.find((event) => event.id === 'skill-read-result')?.text, 'skill_read_artifact: 已读取')
   assert.equal(
     sanitizeInternalAgentDisplayText('Artifact not found: outputs', '正在继续处理'),

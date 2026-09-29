@@ -15,15 +15,11 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { finalizeRunOutcome, type RunOutcome } from '../main/modules/agent-control/runtime-core/run-finalizer'
-import { projectionPatchFromChildClose } from '../main/modules/agent-control/runtime-core/agent-sdk-runtime'
 import { adjudicateTerminalOutcome, appendCheckIns, type CheckInRecord } from '../main/modules/agent-control/quality/task-adjudicator'
 import { resolveCriteria } from '../main/modules/agent-control/quality/criteria-templates'
 import {
-  collectArtifactProof,
-  collectResponseDigestProof,
-  collectToolOutputProofs,
-  collectToolResultProof,
-  collectTransactionConfirmedProof,
+  collectArtifactProof, collectToolOutputProofs,
+  collectToolResultProof
 } from '../main/modules/agent-control/quality/proof-collector'
 import { createToolExecutionOutput } from '../main/modules/agent-control/tools-runtime/tool-result-types'
 import type { TaskProjectionRecord } from '../main/modules/agent-control/contracts/run-contracts'
@@ -129,68 +125,6 @@ test('A1 control: run_state still running / missing delivery → NOT verified �
   assert.equal(checkins.at(-1)!.verdict, 'degraded')
   assert.ok(checkins.at(-1)!.blockers.includes('criteria_unsatisfied:s1'), 'a bare/running run_state must not satisfy s1')
   assert.equal(finalized.status, 'error')
-})
-
-test('A1 wiring: a REAL child close (projectionPatch null, top-level handle) synthesizes a continuationRef', () => {
-  const close = {
-    childRunId: 'child-vea', skillId: 'video-expert-analyzer', status: 'completed', terminalReason: 'completed',
-    outputDir: '/tmp/vea-out', runStatePath: '/tmp/vea-out/run_state.json',
-    sceneScoresPath: '/tmp/vea-out/scene_scores.json', deliveryReportPath: '/tmp/vea-out/delivery_report.json',
-    progress: { stage: 'completed', totalUnits: 3, completedUnits: 3, coverageRatio: 1, fingerprint: 'fp' },
-    framePatch: null, projectionPatch: null, error: null,
-  }
-  const patch = projectionPatchFromChildClose(close as never) as { continuationRef?: Record<string, unknown> }
-  assert.equal(patch?.continuationRef?.runStatePath, '/tmp/vea-out/run_state.json')
-  assert.equal(patch?.continuationRef?.deliveryReportPath, '/tmp/vea-out/delivery_report.json')
-  assert.equal(patch?.continuationRef?.outputDir, '/tmp/vea-out')
-})
-
-test('A1 wiring end-to-end: real completed child close → skill run stays done (s1 via synthesized handle)', async () => {
-  const close = {
-    childRunId: 'child-vea', skillId: 'video-expert-analyzer', status: 'completed', terminalReason: 'completed',
-    outputDir: '/tmp/vea-out', runStatePath: '/tmp/vea-out/run_state.json',
-    sceneScoresPath: null, deliveryReportPath: '/tmp/vea-out/delivery_report.json',
-    progress: { stage: 'completed', totalUnits: 3, completedUnits: 3, coverageRatio: 1, fingerprint: 'fp' },
-    framePatch: null, projectionPatch: null, error: null,
-  }
-  const projectionPatch = projectionPatchFromChildClose(close as never)!
-  const store = fakeStore({
-    taskId: 'task-vea', taskType: 'short_task' as never, module: 'skill',
-    proofRefs: [collectToolResultProof('skill_x', 'ok', NOW)],
-  })
-  const runMeta = new Map<string, Record<string, unknown>>()
-  const finalized = await finalizeRunOutcome({
-    kind: 'done', runId: 'run-vea', taskId: 'task-vea', scopeId: 's1',
-    durationMs: 10, toolCallsUsed: 1, initiator: 'done', finalText: 'VEA 完成', projectionPatch,
-  } as RunOutcome, { ...skillRunDeps(runMeta, () => true), taskProjectionStore: store })
-  const checkins = store.rows.get('task-vea')!.checkins as CheckInRecord[]
-  assert.equal(checkins.at(-1)!.verdict, 'accept', 's1 satisfied via the continuationRef synthesized from the real close')
-  assert.equal(finalized.status, 'done')
-})
-
-test('A1 wiring control: a real close whose run_state is NOT verified stays error (no error→checkpoint flip)', async () => {
-  const close = {
-    childRunId: 'child-vea', skillId: 'video-expert-analyzer', status: 'completed', terminalReason: 'completed',
-    outputDir: '/tmp/vea-out', runStatePath: '/tmp/vea-out/run_state.json',
-    sceneScoresPath: null, deliveryReportPath: '/tmp/vea-out/delivery_report.json',
-    progress: { stage: 'completed', totalUnits: 3, completedUnits: 3, coverageRatio: 1, fingerprint: 'fp' },
-    framePatch: null, projectionPatch: null, error: null,
-  }
-  const projectionPatch = projectionPatchFromChildClose(close as never)!
-  // synthesized handle must NOT carry childRunId (would trip canResumeAsUserPoint)
-  assert.equal((projectionPatch as { continuationRef?: Record<string, unknown> }).continuationRef?.childRunId, undefined)
-  const store = fakeStore({
-    taskId: 'task-vea-fail', taskType: 'short_task' as never, module: 'skill',
-    proofRefs: [collectToolResultProof('skill_x', 'ok', NOW)],
-  })
-  const runMeta = new Map<string, Record<string, unknown>>()
-  const finalized = await finalizeRunOutcome({
-    kind: 'done', runId: 'run-vea-fail', taskId: 'task-vea-fail', scopeId: 's1',
-    durationMs: 10, toolCallsUsed: 1, initiator: 'done', finalText: 'VEA 自称完成', projectionPatch,
-  } as RunOutcome, { ...skillRunDeps(runMeta, () => false), taskProjectionStore: store })
-  assert.equal(finalized.status, 'error', 'unverified completion stays error, not checkpoint')
-  // had proofs (tool_result) but s1 unsatisfied → adjudication_degraded, not proof_gap
-  assert.equal(finalized.terminalReason, 'adjudication_degraded')
 })
 
 

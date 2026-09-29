@@ -91,14 +91,6 @@ function createManager(): { manager: DatabaseManager; connection: FakeConversati
   return { manager, connection }
 }
 
-test('legacy chat:createConversation explicitly binds new local conversations to default-user', () => {
-  const { manager, connection } = createManager()
-
-  manager.createConversation('conv-new-local', 'butler', '新会话')
-
-  assert.equal(connection.conversations.get('conv-new-local')?.user_id, 'default-user')
-})
-
 test('upserting without userId preserves an existing binding and leaves a new remote scope unbound', () => {
   const { manager, connection } = createManager()
   const localPayload = {

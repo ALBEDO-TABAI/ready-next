@@ -201,21 +201,6 @@ test('FIX 5.4 — cleanupAgentRuntime calls setReferenceHintChangeEmitter(null)'
 })
 
 // ---------------------------------------------------------------------------
-// DOC 3.2 — TOOL_CALL_TEXT_PATTERN trade-off documented
-// ---------------------------------------------------------------------------
-
-test('DOC 3.2 — TOOL_CALL_TEXT_PATTERN comment names the false-positive trade-off', () => {
-  // Screenshot-bug hotfix moved the pattern + helpers to a dedicated module
-  // (`tool-call-text-guard.ts`) to break the turn-engine ↔ turn-transcript
-  // circular dep. The doc lives there now; turn-engine.ts re-exports.
-  const guardSource = readSource(new URL('../main/modules/agent-control/tools-runtime/tool-call-text-guard.ts', import.meta.url))
-  const block = guardSource.match(/\/\*\*[\s\S]*?\*\/\s*export const TOOL_CALL_TEXT_PATTERN/)
-  assert.ok(block, 'doc block exists in tool-call-text-guard module')
-  assert.match(block![0], /Trade-off/i)
-  assert.match(block![0], /tool_call_text_intercepted/, 'metric is named so reviewers can verify the false-positive rate')
-})
-
-// ---------------------------------------------------------------------------
 // FIX bonus — _resetLastReferenceSkillHintsForTests also clears emitter
 // ---------------------------------------------------------------------------
 

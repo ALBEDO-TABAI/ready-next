@@ -37,3 +37,13 @@ test('error classifier distinguishes model timeouts, tool timeouts, and runtime 
   assert.equal(toolTimeout.kind, 'timeout_tool')
   assert.equal(toolTimeout.source, 'tool_execution')
 })
+
+test('stream-cut shapes classify as transient (single policy source)', () => {
+  assert.equal(
+    classifyExecutionError(new Error('ERR_STREAM_PREMATURE_CLOSE: Premature close')).kind,
+    'transient'
+  )
+  assert.equal(classifyExecutionError(new Error('fetch failed')).kind, 'transient')
+  assert.equal(classifyExecutionError(new Error('terminated')).kind, 'transient')
+  assert.equal(classifyExecutionError(new Error('HTTP 429 too many requests')).kind, 'rate_limit')
+})

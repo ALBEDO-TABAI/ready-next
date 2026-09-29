@@ -19,9 +19,17 @@ const { tmpdir } = require('node:os')
 const { join, resolve } = require('node:path')
 const test = require('node:test')
 
-const root = resolve(__dirname, '../..')
-const runner = resolve(root, 'scripts/run-codex-runtime-e6-live-proof.mjs')
-const userScenarioRunner = resolve(root, 'scripts/run-codex-runtime-e6-user-scenario.mjs')
+const sourceRoot = resolve(__dirname, '../..')
+const { createE6TestRuntime } = require('./helpers/e6-isolated-runtime.cjs')
+const testRuntime = createE6TestRuntime(sourceRoot)
+const root = testRuntime.root
+process.chdir(root)
+test.after(() => {
+  process.chdir(sourceRoot)
+  rmSync(testRuntime.directory, { recursive: true, force: true })
+})
+const runner = resolve(sourceRoot, 'scripts/run-codex-runtime-e6-live-proof.mjs')
+const userScenarioRunner = resolve(sourceRoot, 'scripts/run-codex-runtime-e6-user-scenario.mjs')
 const outputRoot = resolve(root, 'outputs/codex-runtime-e6')
 const e6EnvKeys = Object.keys(process.env).filter((key) => key.startsWith('READY_CODEX_E6_'))
 const {
@@ -113,7 +121,7 @@ function baseEnv(databasePath, target) {
 }
 
 function run(env) {
-  return spawnSync(process.execPath, [runner], {
+  return spawnSync(process.execPath, [...testRuntime.nodeArgs, runner], {
     cwd: root,
     env,
     encoding: 'utf8',
@@ -123,7 +131,7 @@ function run(env) {
 
 function runAsync(env) {
   return new Promise((resolveRun, rejectRun) => {
-    const child = spawn(process.execPath, [runner], {
+    const child = spawn(process.execPath, [...testRuntime.nodeArgs, runner], {
       cwd: root,
       env,
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -149,7 +157,7 @@ function runUserScenarioAsync(databasePath) {
     READY_CODEX_E6_DOCX_URL: 'https://ji3jaf9ul0l.feishu.cn/docx/GedDd3EATovEz9xILmbcCTk5n4e?from=from_copylink',
   })
   return new Promise((resolveRun, rejectRun) => {
-    const child = spawn(process.execPath, [userScenarioRunner], {
+    const child = spawn(process.execPath, [...testRuntime.nodeArgs, userScenarioRunner], {
       cwd: root,
       env,
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -235,7 +243,7 @@ test('the global E6 lease is recovered only after the exact owner dies', async (
     mkdtempSync(join(tmpdir(), 'ready-e6-ambient-a-')),
     mkdtempSync(join(tmpdir(), 'ready-e6-ambient-b-')),
   ]
-  const owner = spawn(process.execPath, ['-e', [
+  const owner = spawn(process.execPath, [...testRuntime.nodeArgs, '-e', [
     `const { acquireE6GlobalLease } = require(${JSON.stringify(modulePath)})`,
     'acquireE6GlobalLease().then((lease) => {',
     "if (!lease.acquired) process.exit(2)",
@@ -254,7 +262,7 @@ test('the global E6 lease is recovered only after the exact owner dies', async (
       owner.once('error', rejectReady)
       owner.once('exit', (code) => rejectReady(new Error(`lease owner exited ${code}`)))
     })
-    const ambientContender = spawnSync(process.execPath, ['-e', [
+    const ambientContender = spawnSync(process.execPath, [...testRuntime.nodeArgs, '-e', [
       `const { acquireE6GlobalLease, releaseE6GlobalLease } = require(${JSON.stringify(modulePath)})`,
       'acquireE6GlobalLease().then(async (lease) => {',
       "process.stdout.write(JSON.stringify({ acquired: lease.acquired, code: lease.code || null }))",
@@ -327,7 +335,7 @@ test('the global E6 lease uses an isolated group and reports unexpected helper l
   }
 })
 
-test('trusted build completes offline with isolated npm config and pinned Electron headers', {
+test('trusted build launcher uses an isolated offline fixture', {
   timeout: 300_000,
 }, async () => {
   const {
@@ -356,8 +364,15 @@ test('trusted build completes offline with isolated npm config and pinned Electr
       homePath,
       toolchainBinPath,
       processIdentityArgument: `ready-codex-e6-build-${'a'.repeat(40)}`,
+      env: { E6_FIXTURE_SECRET: 'must-not-reach-build' },
     })
     assert.deepEqual(assertTrustedBuildProvenance(root), before)
+    const launched = JSON.parse(readFileSync(join(root, 'out/launcher.json'), 'utf8'))
+    assert.equal(launched.offline, 'true')
+    assert.equal(launched.home, homePath)
+    assert.equal(launched.userConfig, join(homePath, '.npmrc'))
+    assert.equal(launched.globalConfig, join(homePath, '.npm-globalrc'))
+    assert.equal(launched.sentinel, null)
   } finally {
     await releaseE6GlobalLease(lease)
     rmSync(fixtureRoot, { recursive: true, force: true })
@@ -419,7 +434,7 @@ test('freezing Main preserves a pre-CAS detached child group for exact cleanup c
     freezeChildProcessForOwnershipCapture,
     waitForCondition,
   } = await import('../codex-runtime/live-proof-runtime.mjs')
-  const parent = spawn(process.execPath, ['-e', [
+  const parent = spawn(process.execPath, [...testRuntime.nodeArgs, '-e', [
     "const { spawn } = require('node:child_process')",
     "const child = spawn('/bin/sleep', ['30'], { detached: true, stdio: 'ignore' })",
     'process.stdout.write(`${child.pid}\\n`)',
@@ -495,7 +510,7 @@ test('a new runner with another TMPDIR recovers live detached groups and sensiti
     'process.stdout.write(`SIDECAR ${sidecar.pid}\\n`)',
     'setInterval(() => {}, 1000)',
   ].join(';')
-  const oldRunner = spawn(process.execPath, ['-e', [
+  const oldRunner = spawn(process.execPath, [...testRuntime.nodeArgs, '-e', [
     "const { spawn } = require('node:child_process')",
     `const main = spawn(${JSON.stringify(process.execPath)}, ['-e', ${JSON.stringify(mainScript)}], { detached: true, stdio: ['ignore', 'pipe', 'ignore'] })`,
     'process.stdout.write(`MAIN ${main.pid}\\n`)',
@@ -621,7 +636,7 @@ test('spawn intents recover build and Main groups before parent marker persisten
       const abandonedRoot = authorityPath(`ready-codex-e6-${proofId}`)
       rmSync(abandonedRoot, { recursive: true, force: true })
       mkdirSync(abandonedRoot, { mode: 0o700 })
-      const oldRunner = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'])
+      const oldRunner = spawn(process.execPath, [...testRuntime.nodeArgs, '-e', 'setInterval(() => {}, 1000)'])
       let orphan = null
       try {
         const owner = await waitForCondition(() => (
@@ -630,7 +645,7 @@ test('spawn intents recover build and Main groups before parent marker persisten
         const identityArgument = kind === 'build'
           ? `ready-codex-e6-build-${proofId}`
           : `--ready-e6-proof-id=${proofId}`
-        orphan = spawn(process.execPath, [
+        orphan = spawn(process.execPath, [...testRuntime.nodeArgs,
           '-e', 'setInterval(() => {}, 1000)', identityArgument,
         ], { detached: true, stdio: 'ignore' })
         await waitForCondition(() => (
@@ -691,14 +706,14 @@ test('the ordinary user-scenario runner recovers a Main spawn before parent capt
   const abandonedRoot = authorityPath(`ready-codex-e6-${proofId}`)
   rmSync(abandonedRoot, { recursive: true, force: true })
   mkdirSync(abandonedRoot, { mode: 0o700 })
-  const oldOwner = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'])
+  const oldOwner = spawn(process.execPath, [...testRuntime.nodeArgs, '-e', 'setInterval(() => {}, 1000)'])
   let orphan = null
   try {
     const owner = await waitForCondition(() => (
       captureProcessCensus().find((row) => row.pid === oldOwner.pid) || false
     ), { timeoutMs: 5_000, pollMs: 25 })
     const identityArgument = `--ready-e6-proof-id=${proofId}`
-    orphan = spawn(process.execPath, [
+    orphan = spawn(process.execPath, [...testRuntime.nodeArgs,
       '-e', 'setInterval(() => {}, 1000)', identityArgument,
     ], { detached: true, stdio: 'ignore' })
     await waitForCondition(() => (
@@ -929,7 +944,7 @@ test('a SIGKILL-abandoned markerless staging root cannot block later runners', a
     );
   `])
   const proofId = '8'.repeat(40)
-  const abandonedOwner = spawn(process.execPath, ['-e', [
+  const abandonedOwner = spawn(process.execPath, [...testRuntime.nodeArgs, '-e', [
     "const { mkdirSync } = require('node:fs')",
     `const { E6_AUTHORITY_ROOT } = require(${JSON.stringify(join(root, 'scripts/codex-runtime/e6-global-lease.cjs'))})`,
     "const { join } = require('node:path')",
@@ -1034,7 +1049,7 @@ test('a Main spawn intent recovers both pre-CAS and post-CAS sidecars after Main
     );
   `])
   const mainIdentityArgument = `--ready-e6-proof-id=${proofId}`
-  const main = spawn(process.execPath, [
+  const main = spawn(process.execPath, [...testRuntime.nodeArgs,
     '-e', 'setInterval(() => {}, 1000)', mainIdentityArgument,
   ], {
     detached: true,
@@ -1247,7 +1262,7 @@ test('post-CAS recovery rejects a live sidecar with crossed lease markers withou
       tree_zero_evidence_digest TEXT, revision INTEGER NOT NULL, spawn_intent_at TEXT NOT NULL
     );
   `])
-  const main = spawn(process.execPath, [
+  const main = spawn(process.execPath, [...testRuntime.nodeArgs,
     '-e', 'setInterval(() => {}, 1000)', mainIdentityArgument,
   ], { detached: true, stdio: 'ignore' })
   let sidecar = null
@@ -1342,7 +1357,7 @@ test('failed zero proof preserves recovery authority until the next runner can f
   const abandonedRoot = authorityPath(`ready-codex-e6-${proofId}`)
   rmSync(abandonedRoot, { recursive: true, force: true })
   mkdirSync(abandonedRoot, { mode: 0o700 })
-  const orphan = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], {
+  const orphan = spawn(process.execPath, [...testRuntime.nodeArgs, '-e', 'setInterval(() => {}, 1000)'], {
     detached: true,
     stdio: 'ignore',
   })
@@ -1476,7 +1491,7 @@ test('runtime child environment drops provider, connector, and host capability c
     NODE_TEST_CONTEXT: 'child-v8',
     SAFE_SETTING: 'kept',
   }), {
-    PATH: '/opt/homebrew/Cellar/node/26.0.0/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin',
+    PATH: testRuntime.identities.TRUSTED_RUNTIME_PATH,
     TMPDIR: '/safe/tmp',
   })
   const publicEndpoint = await assertTrustedPublicHttpsEndpoint('https://1.1.1.1/v1', {
@@ -1512,7 +1527,7 @@ test('runtime child environment drops provider, connector, and host capability c
   )
 })
 
-test('pins the complete build dependency tree, Electron payload, and sidecar Python runtime', async () => {
+test('pins the complete fixture dependency tree, Electron payload, and sidecar Python probe', async () => {
   const {
     assertTrustedBuildProvenance,
     assertTrustedBuildToolchain,
@@ -1525,17 +1540,17 @@ test('pins the complete build dependency tree, Electron payload, and sidecar Pyt
   } = await import('../codex-runtime/live-proof-runtime.mjs')
   const build = assertTrustedBuildProvenance(root)
   assert.equal(build.packageLockSha256, sha256File(resolve(root, 'package-lock.json')))
-  assert.equal(build.dependencyEntryCount, 143809)
+  assert.equal(build.dependencyEntryCount, testRuntime.identities.TRUSTED_NODE_MODULES.entryCount)
   assert.equal(build.electronExecutableSha256, sha256File(build.electronExecutablePath))
   const python = trustedSidecarPythonProvenance()
   assert.equal(python.version, 'Python 3.11.15')
-  assert.match(python.sslVersion, /^OpenSSL 3\.5\.6\b/)
-  assert.equal(python.runtimeEntryCount, 2335)
+  assert.equal(python.sslVersion, 'OpenSSL fixture')
+  assert.equal(python.runtimeEntryCount, testRuntime.identities.TRUSTED_SIDECAR_PYTHON.runtimeEntryCount)
   const sidecar = trustedSidecarEnvironmentProvenance(root)
-  assert.equal(sidecar.entryCount, 14592)
-  assert.equal(sidecar.requirementsInstallDigest, '1237553332')
+  assert.equal(sidecar.entryCount, testRuntime.identities.TRUSTED_SIDECAR_ENVIRONMENT.entryCount)
+  assert.equal(sidecar.requirementsInstallDigest, 'fixture-install')
   const electronGyp = trustedElectronGypProvenance()
-  assert.equal(electronGyp.entryCount, 131)
+  assert.equal(electronGyp.entryCount, testRuntime.identities.TRUSTED_ELECTRON_GYP.entryCount)
   const toolchainRoot = mkdtempSync(join(tmpdir(), 'ready-e6-toolchain-'))
   try {
     const binPath = join(toolchainRoot, 'bin')
@@ -1588,4 +1603,42 @@ test('dependency identity ignores only generated caches and detects dependency o
   } finally {
     rmSync(fixtureRoot, { recursive: true, force: true })
   }
+})
+
+
+test('production identities ignore fixture environment variables', () => {
+  const result = spawnSync(process.execPath, ['-e',
+    `process.stdout.write(JSON.stringify(require(${JSON.stringify(testRuntime.modulePath)})))`,
+  ], {
+    encoding: 'utf8',
+    env: { PATH: '/usr/bin:/bin', READY_CODEX_E6_IDENTITY_PROFILE: testRuntime.bootstrap, READY_CODEX_E6_AUTHORITY_ROOT: testRuntime.directory, NODE_ENV: 'test' },
+  })
+  assert.equal(result.status, 0, result.stderr)
+  assert.deepEqual(JSON.parse(result.stdout), testRuntime.production)
+  assert.notEqual(JSON.parse(result.stdout).E6_AUTHORITY_ROOT, testRuntime.identities.E6_AUTHORITY_ROOT)
+})
+
+test('isolated provenance rejects mutated fixture identities', async () => {
+  const runtime = await import('../codex-runtime/live-proof-runtime.mjs')
+  const cases = [
+    [join(root, 'package-lock.json'), () => runtime.assertTrustedBuildProvenance(root), /package_lock_identity_mismatch/],
+    [join(root, 'node_modules/fixture-package/index.js'), () => runtime.assertTrustedBuildProvenance(root), /node_modules_identity_mismatch/],
+    [join(root, testRuntime.identities.TRUSTED_ELECTRON.relativePath), () => runtime.assertTrustedBuildProvenance(root), /node_modules_identity_mismatch|electron_identity_mismatch/],
+    [join(testRuntime.identities.TRUSTED_SIDECAR_ENVIRONMENT.path, 'lib/site-packages/fixture.txt'), () => runtime.trustedSidecarEnvironmentProvenance(root), /sidecar_environment_identity_mismatch/],
+    [testRuntime.identities.TRUSTED_SQLITE3.path, () => runtime.trustedSqlite3Path(), /sqlite3_identity_mismatch/],
+  ]
+  for (const [file, verify, expected] of cases) {
+    const original = readFileSync(file)
+    try {
+      writeFileSync(file, 'tampered fixture identity')
+      assert.throws(verify, expected)
+    } finally { writeFileSync(file, original) }
+    assert.doesNotThrow(verify)
+  }
+})
+
+
+test('isolated recovery cannot read a real external CLI account', () => {
+  const { runCurrentLarkCliRead } = require('../codex-runtime/e6-user-scenario-authority.cjs')
+  assert.throws(() => runCurrentLarkCliRead(['auth', 'status', '--json', '--verify'], root), /e6_fixture_external_cli_forbidden/)
 })

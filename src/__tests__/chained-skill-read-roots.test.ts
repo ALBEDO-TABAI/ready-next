@@ -4,7 +4,6 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
 
-import { deriveChainedSkillReadRoots } from '../main/modules/agent-control/runtime-core/turn-frame-resolver'
 import { executeReadArtifact } from '../main/modules/tools/skill-primitives/read-artifact'
 import { executeWriteArtifact } from '../main/modules/tools/skill-primitives/write-artifact'
 import { collectSkillReadArtifactRoots } from '../main/modules/agent-control/tools-runtime/tool-runtime'
@@ -46,68 +45,6 @@ function lookup(selectedAsset: string, selectedArtifact: string) {
     ? { skillId, assetRoot: selectedAsset, artifactRoot: selectedArtifact }
     : null
 }
-
-test('typed sibling references plus same-task output evidence derive only bounded read roots', () => {
-  const env = fixture()
-  try {
-    const roots = deriveChainedSkillReadRoots({
-      selectedSkillId: 'selected',
-      referencedSkillNames: ['selected', 'sibling', 'non-reference'],
-      skills: [
-        { id: 'selected', managedPath: env.selectedAsset, executionMode: 'advisory' },
-        { id: 'sibling', managedPath: env.siblingAsset, runtime: 'reference' },
-        { id: 'non-reference', managedPath: join(env.root, 'skills/non-reference'), runtime: 'node' },
-        { id: 'not-mentioned', managedPath: join(env.root, 'skills/not-mentioned'), runtime: 'reference' },
-      ],
-      outputsRoot: env.outputsRoot,
-      taskProjection: {
-        recentArtifacts: [
-          { path: join(env.siblingOutput, 'prior.md'), meta: { skillId: 'sibling' } },
-          { path: join(env.external, 'private.md'), meta: { outputDir: env.external } },
-        ],
-      } as never,
-    })
-    assert.deepEqual(roots, [
-      { path: env.siblingAsset, kind: 'sibling_asset' },
-      { path: env.siblingOutput, kind: 'sibling_output' },
-    ])
-  } finally {
-    env.cleanup()
-  }
-})
-
-test('single-skill envelope without prior output is byte-shape neutral', () => {
-  assert.deepEqual(deriveChainedSkillReadRoots({
-    selectedSkillId: 'selected',
-    referencedSkillNames: ['selected'],
-    skills: [{ id: 'selected', managedPath: '/skills/selected', runtime: 'reference' }],
-    outputsRoot: '/outputs',
-    taskProjection: null,
-  }), [])
-})
-
-test('same-task output roots reject missing directories and symlink escapes before authorization', () => {
-  const env = fixture()
-  try {
-    const escaped = join(env.outputsRoot, 'escaped-output')
-    symlinkSync(env.external, escaped)
-    const roots = deriveChainedSkillReadRoots({
-      selectedSkillId: 'selected',
-      referencedSkillNames: ['selected'],
-      skills: [{ id: 'selected', managedPath: env.selectedAsset, runtime: 'reference' }],
-      outputsRoot: env.outputsRoot,
-      taskProjection: {
-        recentArtifacts: [
-          { path: join(escaped, 'private.md'), meta: { outputDir: escaped } },
-          { path: join(env.outputsRoot, 'missing', 'never.md'), meta: { outputDir: join(env.outputsRoot, 'missing') } },
-        ],
-      } as never,
-    })
-    assert.deepEqual(roots, [])
-  } finally {
-    env.cleanup()
-  }
-})
 
 test('selected skill reads sibling asset and sibling output with observable root kinds', async () => {
   const env = fixture()

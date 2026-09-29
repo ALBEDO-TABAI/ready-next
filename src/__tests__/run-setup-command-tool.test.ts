@@ -32,6 +32,7 @@ import {
 import { executeToolCall, type ToolContext } from '../main/modules/tools/tool-executor'
 import { ToolDomainError } from '../main/modules/tools/tool-errors'
 
+import { createFrozenCallAuditDb } from './helpers/frozen-call-audit-db'
 import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
 
 test('run-setup-command declares transitive sqlite ABI guard', (t) => {
@@ -99,7 +100,8 @@ test('phase 2 executes with confirmAck and reports stdout/stderr/exit code (neve
 
 test('real dispatch freezes phase 2 until the Ready confirmation card is approved', async (t) => {
   _resetAskUserQuestionsStoreForTests()
-  registerFrozenCallStore(new FrozenCallStore(null))
+  const frozenAuditDb = createFrozenCallAuditDb()
+  registerFrozenCallStore(new FrozenCallStore(frozenAuditDb))
   const dir = await mkdtemp(join(tmpdir(), 'ready-setup-confirm-'))
   const sentinel = join(dir, 'executed.txt')
   t.after(async () => {
@@ -130,6 +132,7 @@ test('real dispatch freezes phase 2 until the Ready confirmation card is approve
   assert.ok(card, 'Ready must show a confirmation card before executing the command')
   await assert.rejects(access(sentinel), 'the command must not run before confirmation')
 
+  frozenAuditDb.settleLatest('released')
   getAskUserQuestionsStore().resolve(card.cardId, {
     answers: [{ id: FROZEN_CALL_QUESTION_ID, answer: FROZEN_CALL_CONFIRM_OPTION }],
     answeredAt: Date.now(),

@@ -1711,16 +1711,24 @@ test('failed action reads retain their version floor and reject an older success
   } finally { restore() }
 })
 
-test('a late action re-read cannot overwrite a newer successful read', async () => {
+test('concurrent action re-reads share one owner and publish the queued newer surface', { timeout: 3000 }, async () => {
   seedIdleReadScope(30)
   const late = deferred<ReturnType<typeof idleReadSurface>>()
+  const started = deferred<void>()
   let reads = 0
-  const restore = installAgentApi({ readCodexActionSurface: () => ++reads === 1 ? late.promise : Promise.resolve(idleReadSurface(32)) })
+  const restore = installAgentApi({ readCodexActionSurface: () => {
+    started.resolve()
+    return ++reads === 1 ? late.promise : Promise.resolve(idleReadSurface(32))
+  } })
   try {
     const first = useAgent.getState().refreshCodexActionSurface(aliasId)
-    await useAgent.getState().refreshCodexActionSurface(aliasId)
+    await started.promise
+    const second = useAgent.getState().refreshCodexActionSurface(aliasId)
+    const third = useAgent.getState().refreshCodexActionSurface(aliasId)
+    assert.equal(reads, 1)
     late.resolve(idleReadSurface(31))
-    await first
+    await Promise.all([first, second, third])
+    assert.equal(reads, 2)
     assert.equal(useAgent.getState().sessions[sessionId].scopeHeadActionProjection?.actionProjectionVersion.actionProjectionSequence, 32)
   } finally { restore() }
 })

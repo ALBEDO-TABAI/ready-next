@@ -94,7 +94,8 @@ test('production Lark CLI dispatch keeps authorization secret in memory through 
   clearSkillTaskProjection(sessionId)
   _resetEphemeralExecutionStoreForTests()
   getAskUserQuestionsStore().clear()
-  registerFrozenCallStore(new FrozenCallStore(createFrozenCallAuditDb()))
+  const frozenAuditDb = createFrozenCallAuditDb()
+  registerFrozenCallStore(new FrozenCallStore(frozenAuditDb))
   __setMetricSinkForTests((event) => metrics.push(event))
   __setSkillsRuntimeManagerForTests({
     listSkills: () => [skill],
@@ -203,6 +204,7 @@ test('production Lark CLI dispatch keeps authorization secret in memory through 
       sessionId: confirmationCard.sessionId,
       questions: confirmationCard.questions,
     }), new RegExp(deviceSecret))
+    frozenAuditDb.settleLatest('released')
     getAskUserQuestionsStore().resolve(confirmationCard.cardId, {
       answers: [{ id: FROZEN_CALL_QUESTION_ID, answer: FROZEN_CALL_CONFIRM_OPTION }],
       answeredAt: Date.now(),

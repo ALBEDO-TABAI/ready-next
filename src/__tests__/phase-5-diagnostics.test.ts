@@ -23,7 +23,6 @@ import {
 // moved verbatim from runtime-manager.ts into the delegated PythonRuntimeProvisioner;
 // the Phase 5.2 metric emission pins follow the bodies.
 const PYTHON_RUNTIME_PROVISIONER_PATH = new URL('../main/modules/skills-runtime/python-runtime-provisioner.ts', import.meta.url)
-const CONTINUATION_STATE_PATH = new URL('../main/modules/agent-control/contracts/continuation-state.ts', import.meta.url)
 const IPC_HANDLER_PATH = new URL('../main/modules/claude-bridge/ipc-handler.ts', import.meta.url)
 const PRELOAD_PATH = new URL('../preload/index.ts', import.meta.url)
 const REFERENCE_SKILL_HINT_HOOK_PATH = new URL(
@@ -240,13 +239,6 @@ test('Phase 5.2 wiring — ensurePythonRuntimeReady emits both ready and not_rea
   // python_runtime_rebuilt was added in Phase 1.3 — pin it stays in the
   // rebuild branch so the diagnostics suite is complete.
   assert.match(source, /logAgentMetric\('python_runtime_rebuilt'/)
-})
-
-test('Phase 5.4 wiring — selectContinuationProjection emits terminal_skipped metric on drop', () => {
-  const source = readSource(CONTINUATION_STATE_PATH)
-  assert.match(source, /logAgentMetric\('continuation_projection_terminal_skipped'/)
-  // Must be guarded so empty drops don't pollute logs.
-  assert.match(source, /if \(droppedCount > 0\) \{[\s\S]*?logAgentMetric\('continuation_projection_terminal_skipped'/)
 })
 
 test('Phase 5.3 wiring — IPC handler sets emitter and pushes the right channel', () => {

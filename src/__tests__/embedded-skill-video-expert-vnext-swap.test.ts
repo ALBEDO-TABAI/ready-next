@@ -1,16 +1,4 @@
-/**
- * B Phase 3 PR1 — video-expert-analyzer vnext swap e2e smoke.
- *
- * Mirrors `embedded-skill-video-copy-migration.test.ts` (Phase 2) but
- * additionally asserts:
- *   - vnext-specific entry script & docs are in place at the expected paths
- *     after the wholesale directory swap
- *   - vnext SKILL.md fits within the existing 12K JS-string-char cap
- *     (UTF-16 code units, not raw bytes — most CJK content compresses) so
- *     the entire doc gets inlined without truncation
- *   - no `skill_executions` row gets created (Phase 2 G2-1 follow-up:
- *     direct assertion via the listExecutions stub)
- */
+/** Bundled video-expert manifest, reference document, and isolated Python execution contracts. */
 
 import assert from 'node:assert/strict'
 import test from 'node:test'
@@ -21,23 +9,11 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { compileSkillDefinition } from '../main/modules/skills-runtime/skill-compiler'
-import { SkillContextOrchestrator } from '../main/modules/agent-control/skills/skill-context-orchestrator'
-import {
-  _resetLastReferenceSkillHintsForTests,
-  getLastReferenceSkill,
-} from '../main/modules/agent-control/skills/skill-reference-hints'
-import { __setScopeContextEpochDatabaseForTests } from '../main/modules/agent-control/session/scope-context-epoch'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 // src/__tests__ → repo root → assets/embedded-skills/video-expert-analyzer
 const SKILL_DIR = join(__dirname, '..', '..', 'assets', 'embedded-skills', 'video-expert-analyzer')
 
-test.before(() => {
-  __setScopeContextEpochDatabaseForTests({
-    getRawDb: () => ({ prepare: () => ({ get: () => undefined }) }) as never,
-  })
-})
-test.after(() => __setScopeContextEpochDatabaseForTests(null))
 
 function runPythonCompile(scriptPaths: string[]): void {
   const pycachePrefix = mkdtempSync(join(tmpdir(), 'ready-pycompile-'))
@@ -99,11 +75,6 @@ test('vnext video download path supports Ready browser cookies and yt-dlp JS cha
   assert.match(source, /--remote-components/, 'yt-dlp remote challenge components must be enabled when available')
   assert.match(source, /--ffmpeg-location/, 'yt-dlp must receive an explicit FFmpeg path in desktop app environments without shell PATH')
   runPythonCompile([pipelinePath, join(SKILL_DIR, 'scripts', 'ready_compat.py')])
-})
-
-test('skill.workflow.json has been removed from disk', () => {
-  const workflowPath = join(SKILL_DIR, 'skill.workflow.json')
-  assert.equal(existsSync(workflowPath), false, 'skill.workflow.json must not exist after vnext swap')
 })
 
 test('vnext entry script and referenced docs are bundled at expected paths', () => {
@@ -849,129 +820,7 @@ test('SKILL.md frontmatter declares name / description / when-to-use per Claude 
   assert.ok(/\bwhen-to-use:/.test(frontmatter), 'when-to-use field required for Claude Skill protocol')
 })
 
-test('orchestrator inline-injects SKILL.md, arms primitive hint, creates no skill_executions row', async () => {
-  _resetLastReferenceSkillHintsForTests()
-  const skillState: any = {
-    id: 'video-expert-analyzer',
-    name: 'Video Expert Analyzer (VNext)',
-    description: '长视频深度分析。',
-    defaultAction: 'read_skill',
-    executionMode: 'advisory',
-    managedPath: SKILL_DIR,
-    actions: [
-      {
-        name: 'read_skill',
-        visibility: 'internal',
-        runtime: 'reference',
-        params: [],
-      },
-      {
-        name: 'video_expert_pipeline',
-        visibility: 'internal',
-        runtime: 'python',
-        params: [],
-      },
-    ],
-    childLoop: {
-      version: 1,
-      actions: ['video_expert_pipeline'],
-    },
-  }
-
-  // Phase 4: listExecutions dep removed from orchestrator; no execution row
-  // is created on the reference path because that code path no longer exists.
-
-  const orchestrator = new SkillContextOrchestrator({
-    extractPrimaryUserInstruction: (raw) => raw,
-    listSkills: () => [skillState],
-    resolveSkillToolByAction: (_skillId, action) => ({
-      name: action === 'video_expert_pipeline'
-        ? 'skill_video_expert_pipeline'
-        : 'skill_video_expert_analyzer_read_skill',
-      action,
-      params: [],
-    }) as any,
-  })
-
-  const session: any = { messages: [] }
-  let toolCalls = 0
-  await orchestrator.maybeInjectExplicitSkillContext({
-    userText: '用 video-expert-analyzer 深度分析这个视频 https://example.com/video.mp4',
-    session,
-    sessionId: 'test-session-vexpert',
-    messageVisibilityEpoch: 0,
-    emitOutput: () => {},
-    emitToolAction: () => { toolCalls += 1 },
-    executeTool: async () => {
-      toolCalls += 1
-      return { text: '', shape: 'text', data: null, projectionPatch: null, interactionHint: null }
-    },
-  })
-
-  assert.equal(toolCalls, 0, 'direct-read path must not perform a tool_use round-trip')
-  assert.equal(session.messages.length, 1, 'exactly one system-role injection')
-  const injected = session.messages[0] as { role: string; content: string }
-  assert.equal(injected.role, 'system')
-  assert.ok(injected.content.includes('已加载技能'), 'injection header present')
-  assert.ok(injected.content.includes('skill_video_expert_pipeline'), 'child-loop typed action is named in guidance')
-  assert.ok(injected.content.includes('不要用 skill_start_detached'), 'child-loop skill must not be steered to detached primitive')
-  assert.ok(injected.content.includes('video-expert-analyzer'), 'skill id rendered')
-  // vnext SKILL.md keywords that prove the body was inlined (not truncated out).
-  assert.ok(
-    injected.content.includes('orchestrate_vnext') || injected.content.includes('OpenClaw'),
-    'SKILL.md body was inlined',
-  )
-
-  const hint = getLastReferenceSkill('test-session-vexpert')
-  assert.equal(hint?.id, 'video-expert-analyzer', 'hint arms primitive gating for next turn')
-
-  // Phase 4: the listExecutions dep is gone; the reference path never creates
-  // an execution row (there is no such concept anymore).
-})
-
-test('vnext SKILL.md fits the existing 12K JS-char cap and is inlined without truncation', async () => {
-  _resetLastReferenceSkillHintsForTests()
+test('vnext SKILL.md fits the reference document character cap', () => {
   const rawSkillMd = readFileSync(join(SKILL_DIR, 'SKILL.md'), 'utf-8')
-  // Note: vnext SKILL.md is ~17.8 KB on disk but ~10.4K JS string chars
-  // (UTF-16 code units) because the body is predominantly CJK. JS string
-  // length — not raw bytes — is what the inline cap measures.
   assert.ok(rawSkillMd.length <= 12_000, 'vnext SKILL.md should fit under the existing 12K cap')
-
-  const skillState: any = {
-    id: 'video-expert-analyzer',
-    name: 'Video Expert Analyzer (VNext)',
-    defaultAction: 'read_skill',
-    executionMode: 'advisory',
-    managedPath: SKILL_DIR,
-    actions: [{ name: 'read_skill', visibility: 'internal', runtime: 'reference', params: [] }],
-  }
-
-  const orchestrator = new SkillContextOrchestrator({
-    extractPrimaryUserInstruction: (raw) => raw,
-    listSkills: () => [skillState],
-    resolveSkillToolByAction: () => ({
-      name: 'skill_video_expert_analyzer_read_skill',
-      action: 'read_skill',
-      params: [],
-    }) as any,
-  })
-
-  const session: any = { messages: [] }
-  await orchestrator.maybeInjectExplicitSkillContext({
-    userText: '用 video-expert-analyzer 分析视频',
-    session,
-    sessionId: 'test-session-vexpert-cap',
-    messageVisibilityEpoch: 0,
-    emitOutput: () => {},
-    emitToolAction: () => {},
-    executeTool: async () => ({ text: '', shape: 'text', data: null, projectionPatch: null, interactionHint: null }),
-  })
-
-  const injected = session.messages[0] as { role: string; content: string }
-  // Tail-of-doc keyword survives — proves the whole body was inlined,
-  // not silently truncated mid-doc.
-  assert.ok(
-    injected.content.includes('不可妥协规则') || injected.content.includes('OpenClaw'),
-    'late-doc keywords should survive inlining (no truncation)',
-  )
 })

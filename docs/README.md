@@ -1,8 +1,8 @@
 # Ready 文档导航
 
-> 核对日期：2026-09-06。当前应用 0.8.0，固定 Codex runtime 0.149.0，发布配置为 macOS arm64；精确值以源码清单为准。
+> 核对日期：2026-09-29。当前应用 0.8.0，固定 Codex runtime 0.149.0，发布配置为 macOS arm64；精确值以源码清单为准。
 
-从本页选择当前入口。[全量文档清单](documentation-inventory.md) 记录项目叙述文档的用途、原位置和归档去向；[本轮核对记录](maintenance/2026-09-06-documentation-refresh.md) 说明证据与检查范围。
+从本页选择当前入口。[全量文档清单](documentation-inventory.md) 记录项目叙述文档的用途、原位置和归档去向；[9/6 归档核对记录](maintenance/2026-09-06-documentation-refresh.md) 保留当时整理范围；9/29 的应用变化与验证边界见 [PROGRESS](../PROGRESS.md)，测试清扫见 [复核记录](superpowers/audits/2026-09-29-test-suite-cleanup-checklist.md)。
 
 协作与技能维护：修改技能描述、参考资料或执行停点时，见 [2026-09-13 指引应用记录](maintenance/2026-09-13-skills-and-prompts-refresh.md)。
 
@@ -30,13 +30,17 @@
 
 | 专题 | 合同与验证起点 |
 | --- | --- |
+| 聊天项目目录 | [项目目录合同](superpowers/plans/2026-09-29-chat-project-selector-implementation.md)；目录隔离、显式覆盖与当前安装记录 |
+| 第三方模型与网关分层 | [模型验收](superpowers/audits/2026-09-26-provider-adapters-validation.md) / [模块拆分](superpowers/plans/2026-09-26-model-gateway-modularization.md)；`verify:codex-runtime-e3` |
+| 工作台性能与长 RSS 列表 | [性能实现与验收](superpowers/plans/2026-09-22-workbench-switch-performance-implementation.md)；`verify:workbench-performance` |
+| 测试清扫与 E6 隔离回归 | [清扫结果](superpowers/audits/2026-09-29-test-suite-cleanup-checklist.md) / [E6 隔离合同](superpowers/plans/2026-09-29-e6-isolated-test-identities-implementation.md)；以测试规约和当前 npm 脚本为准 |
 | 历史接续、草稿和新上下文恢复 | [历史与草稿](superpowers/plans/2026-09-03-ready-history-continuation-and-composer-repair-implementation.md)；`verify:history-continuation` |
 | 已有数据升级 | [升级记录](superpowers/plans/2026-09-03-ready-populated-upgrade-migration-implementation.md)；`verify:native` |
 | 微信/飞书远程助手 | [远程可靠性](superpowers/plans/2026-09-05-remote-im-reliability-implementation.md)；`verify:remote-im`，真实账号单独验收 |
 | 单一助手与新长期记忆 | [记忆合同](superpowers/plans/2026-08-20-single-ready-agent-and-memory-runtime-implementation.md)；`verify:single-ready-memory`，自动整理仍未开放 |
 | 稳定凭据 | [凭据合同](superpowers/plans/2026-08-20-stable-credential-vault-implementation.md)；凭据焦点测试与 `verify:native` |
 | 工作面接线 | [工作面合同](superpowers/plans/2026-08-13-codex-workbench-surface-rewire-implementation.md)；`verify:codex-workbench-surface` |
-| 书本阅读 | [阅读合同](superpowers/plans/2026-08-04-document-reading-mode-implementation.md) / [纸张与落页](superpowers/plans/2026-09-05-document-reading-paper-implementation.md)；`verify:document-reading` |
+| 书本阅读 | [阅读合同](superpowers/plans/2026-08-04-document-reading-mode-implementation.md) / [纸张与落页](superpowers/plans/2026-09-05-document-reading-paper-implementation.md) / [图片分页](superpowers/plans/2026-09-15-document-reading-images-implementation.md)；`verify:document-reading` |
 | 文档性能 | [性能合同](superpowers/plans/2026-07-17-document-mode-performance-implementation.md)；`verify:document-perf` |
 | Widget | [设计语言](superpowers/plans/2026-07-11-document-widget-ready-design-language-implementation.md) / [组件基线](DOCUMENT_WIDGET_BASELINES.md) / [能力表](DOCUMENT_WIDGET_CAPABILITY_MATRIX.md) / [生成字段说明](DOCUMENT_WIDGET_OPENUI_PROMPT.md)；`verify:widget-ready` |
 | AI 图片产物 | [图片服务合同](superpowers/plans/2026-07-15-ai-image-generation-service-implementation.md)；按当前清单选择图片专项 |

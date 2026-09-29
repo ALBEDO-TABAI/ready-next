@@ -33,37 +33,3 @@ test('U1.3 ipc-handler: no remaining agentManager.on(output|status|error) forwar
     'AgentManager event forwards must be removed in U1.3 (SDK runtime owns these channels)',
   )
 })
-
-test('U1.3 orchestrator: bindEngineEvents only on sdkEngine, not domainAdapterEngine', () => {
-  const source = readWorkspaceFile('src/main/modules/agent-control/runtime-core/orchestrator.ts')
-  // Only sdkEngine should be bound. Phase C C3 起 DomainAdapterHost 承载
-  // 适配器与依赖接线，任何引擎/宿主都不得成为 renderer 事件发射者。
-  assert.match(
-    source,
-    /this\.bindEngineEvents\(this\.sdkEngine\)/,
-    'sdkEngine event binding must remain (single producer)',
-  )
-  assert.doesNotMatch(
-    source,
-    /this\.bindEngineEvents\(this\.domainAdapterEngine\)/,
-    'DirectChatEngine event binding must be removed in U1.3 (no dual-shape emission)',
-  )
-})
-
-test('U1.3 retirement is announced in code comments', () => {
-  const ipc = readWorkspaceFile('src/main/modules/claude-bridge/ipc-handler.ts')
-  assert.match(
-    ipc,
-    /U1\.3.*legacy AgentManager event forwards removed/i,
-    'ipc-handler must contain the U1.3 retirement note',
-  )
-  const orchestrator = readWorkspaceFile('src/main/modules/agent-control/runtime-core/orchestrator.ts')
-  // 合同随实现同步（Phase C C3，2026-07-05）：引擎退役后注释改述为
-  // "legacy engine fully out of this loop / SDK runtime is the single
-  // emission producer"——不变量（退役声明 + 单一发射者）不变，锚随行文。
-  assert.match(
-    orchestrator,
-    /U1\.3[\s\S]*Phase C C3[\s\S]*single renderer-facing emission producer/,
-    'orchestrator must contain the U1.3/Phase-C retirement note',
-  )
-})

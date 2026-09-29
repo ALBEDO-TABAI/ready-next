@@ -124,16 +124,3 @@ export class AgentControlRuntime {
   const r = runIn(root)
   assert.equal(r.status, 0, r.stdout + r.stderr)
 })
-
-test('gate fails when child runner has no scope liveness provider', (t) => {
-  const root = makeHarnessRoot(t, {
-    childRunner: `
-export class SkillChildRunner {
-  async startSkillChildRun(): Promise<void> {}
-}
-`,
-  })
-  const r = runIn(root)
-  assert.equal(r.status, 1)
-  assert.match(r.stderr, /must expose hasActiveChildRunForScope/)
-})

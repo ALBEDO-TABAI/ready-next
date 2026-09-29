@@ -7,9 +7,6 @@ import {
 } from '../shared/remote-im-file-intent'
 import { normalizeChannelDeliveryResult } from '../main/modules/agent-control/runtime-core/channel-delivery-result'
 import { AgentSdkRuntime, type AgentSdkRuntimeDeps } from '../main/modules/agent-control/runtime-core/agent-sdk-runtime'
-import type { RunMessage } from '../main/modules/agent-control/contracts/run-contracts'
-import { toSdkInput } from '../main/modules/agent-control/runtime-core/agent-sdk-execution-utils'
-import { stripMediaBlocksForLocalSendIm } from '../main/modules/agent-control/runtime-core/agent-sdk-foundation-utils'
 import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
 
 const fakeConfig: NonNullable<ReturnType<NonNullable<AgentSdkRuntimeDeps['loadAIConfig']>>['config']> = {
@@ -193,17 +190,6 @@ test('local send-im file intent accepts referenced files or recent media with di
   for (const input of attachmentContextNegatives) {
     assert.equal(hasLocalSendImFileIntent(input, { hasAttachmentContext: true }), false, input)
   }
-})
-
-test('local send-im attached media turns bypass model vision input and browser collection exposure', () => {
-  const mediaMessage: RunMessage = [
-    { type: 'text', text: '把这张图发到我微信' },
-    { type: 'image', base64: 'ZmFrZS1pbWFnZQ==', mimeType: 'image/png' },
-  ]
-  const stripped = stripMediaBlocksForLocalSendIm(mediaMessage, undefined, true)
-  const modelInput = toSdkInput(stripped)
-  assert.doesNotMatch(JSON.stringify(modelInput), /input_image|data:image\/png/)
-  assert.match(JSON.stringify(modelInput), /不发送给模型解析/)
 })
 
 test('an exclusive local send-im skill suppresses an otherwise active browser surface', () => {

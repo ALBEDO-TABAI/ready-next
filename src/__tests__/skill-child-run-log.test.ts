@@ -18,8 +18,7 @@ import {
   deriveChildRunLogPath,
   deriveLegacyChildRunLogPath,
   deriveRuntimeChildRunLogPath,
-  readChildRunLog,
-  readChildRunLogForResume,
+  readChildRunLog
 } from '../main/modules/agent-control/skills/skill-child-run-log'
 import {
   createSkillChildRunId,
@@ -163,55 +162,6 @@ test('appendChildRunEvent creates the .ready/child-runs/ parent directory', asyn
 
   // After append, parent dir must exist.
   await fs.access(path.dirname(logPath))
-})
-
-test('resume reader falls back to legacy outputDir log when runtime-root log is empty', async () => {
-  const runtimeRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'ready-child-run-runtime-'))
-  const outputDir = await makeTempOutputDir()
-  const childRunId = createSkillChildRunId('skill')
-  const runtimeLog = deriveRuntimeChildRunLogPath(runtimeRoot, childRunId)
-  const legacyLog = deriveLegacyChildRunLogPath(outputDir, childRunId)
-  await fs.mkdir(path.dirname(runtimeLog), { recursive: true })
-  await fs.writeFile(runtimeLog, '', 'utf8')
-  const legacyEvent: SkillChildRunEvent = {
-    type: 'started',
-    at: '2026-05-01T00:00:00.000Z',
-    childRunId,
-    input: { source: 'legacy' },
-  }
-  await appendChildRunEvent({ logPath: legacyLog, event: legacyEvent })
-
-  const result = await readChildRunLogForResume({ runtimeRoot, outputDir, childRunId })
-
-  assert.equal(result.logPath, legacyLog)
-  assert.deepEqual(result.events, [legacyEvent])
-})
-
-test('resume reader prefers runtime-root log over legacy when both exist', async () => {
-  const runtimeRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'ready-child-run-runtime-'))
-  const outputDir = await makeTempOutputDir()
-  const childRunId = createSkillChildRunId('skill')
-  const runtimeLog = deriveRuntimeChildRunLogPath(runtimeRoot, childRunId)
-  const legacyLog = deriveLegacyChildRunLogPath(outputDir, childRunId)
-  const runtimeEvent: SkillChildRunEvent = {
-    type: 'started',
-    at: '2026-05-01T00:00:00.000Z',
-    childRunId,
-    input: { source: 'runtime' },
-  }
-  const legacyEvent: SkillChildRunEvent = {
-    type: 'started',
-    at: '2026-05-01T00:00:01.000Z',
-    childRunId,
-    input: { source: 'legacy' },
-  }
-  await appendChildRunEvent({ logPath: runtimeLog, event: runtimeEvent })
-  await appendChildRunEvent({ logPath: legacyLog, event: legacyEvent })
-
-  const result = await readChildRunLogForResume({ runtimeRoot, outputDir, childRunId })
-
-  assert.equal(result.logPath, runtimeLog)
-  assert.deepEqual(result.events, [runtimeEvent])
 })
 
 test('child-run-log sweep deletes only runtime-root logs older than retention', async () => {

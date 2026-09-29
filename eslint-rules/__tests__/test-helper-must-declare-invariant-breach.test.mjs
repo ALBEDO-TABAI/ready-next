@@ -51,6 +51,11 @@ tester.run(
       },
       {
         filename: 'src/main/modules/agent-control/sample.ts',
+        code: 'export function __stubSampleForTest(): void {}',
+        errors: [{ messageId: 'testHelperMustDeclareInvariantBreach' }],
+      },
+      {
+        filename: 'src/main/modules/agent-control/sample.ts',
         code: [
           'export const __breaksInvariants = [] as const',
           'export function __seedSampleForTests(): void {}',

@@ -10,7 +10,7 @@ test('child control checker reports every required surface when missing', () => 
   const root = mkdtempSync(join(tmpdir(), 'ready-child-control-missing-'))
   try {
     const failures = checkChildControlIpc({ root })
-    assert.ok(failures.length >= 6)
+    assert.ok(failures.length >= 5)
     assert.ok(failures.some((failure) => failure.file === 'src/preload/index.ts'))
     assert.ok(failures.some((failure) => failure.label === 'file'))
   } finally {
@@ -18,7 +18,7 @@ test('child control checker reports every required surface when missing', () => 
   }
 })
 
-test('child control checker accepts the required IPC, preload, type, UI, and runner contracts', () => {
+test('child control checker accepts the required IPC, preload, type, and runner contracts', () => {
   const root = mkdtempSync(join(tmpdir(), 'ready-child-control-ok-'))
   try {
     write(root, 'src/main/modules/claude-bridge/ipc-handler.ts', `
@@ -53,18 +53,6 @@ test('child control checker accepts the required IPC, preload, type, UI, and run
       interface ElectronAgentAPI {
         listActiveChildRuns: () => Promise<IPCResponse<ActiveChildRunSummaryData[]>>
         cancelChildRun: (childRunId: string) => Promise<IPCResponse<unknown>>
-      }
-    `)
-    write(root, 'src/renderer/pages/Settings.tsx', `
-      function ActiveChildRunsDebug() {
-        window.electronAPI.agent.listActiveChildRuns()
-        window.electronAPI.agent.cancelChildRun('child')
-      }
-    `)
-    write(root, 'src/renderer/preview/installSettingsPreviewMocks.ts', `
-      agent: {
-        listActiveChildRuns: async () => ({ success: true, data: [] }),
-        cancelChildRun: async () => ({ success: true, data: {} }),
       }
     `)
     write(root, 'src/main/modules/agent-control/skills/skill-child-runner.ts', `

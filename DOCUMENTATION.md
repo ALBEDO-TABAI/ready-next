@@ -1,6 +1,6 @@
 # Ready 开发文档
 
-> 核对日期：2026-09-06
+> 核对日期：2026-09-29
 > 本文是开发入口，不保存阶段流水账。代码与 `package.json` 优先；详细运行时合同见 `docs/architecture/current-runtime-contracts.md`。
 
 ## 1. 先确定真值源
@@ -78,6 +78,8 @@ IPC request
 
 `AgentSdkRuntime`、`ReadyAgentOrchestrator`、`direct-chat.ts`、`turn-engine.ts` 与旧 Dynamic Delivery/Boost 均不是生产入口。遇到旧文档、脚本或注释引用时，不能据此新建兼容入口。
 
+模型接入统一通过本机网关，上游 Responses、Chat Completions、Messages 共享准入、工具校验和结果保存；连接测试复用同一路径。拆分后的接入文件见代码地图“模型接入”，实际配置验收见 `docs/superpowers/audits/2026-09-26-provider-adapters-validation.md`。
+
 当前固定 runtime 是 0.149.0。历史操作按运行时发布证据和当前冻结合同裁决，不能仅凭版本不同要求清空会话。当前动作可用性由 Main 返回，Renderer 不从旧任务文案猜测；草稿与编辑权独立于发送是否可用。详细合同见 `docs/architecture/current-runtime-contracts.md` §2/§5。
 
 技能在进入回合前确定，`use_skill`、`use_browser` 不在当前 Codex 工具面。新手动记忆的读取与撤销也进入本轮冻结事实；旧人格、预路由和旧记忆系统不得接回。
@@ -132,7 +134,8 @@ IPC request
 
 - 执行：`src/main/modules/tools/tool-executor.ts`
 - 结果形状：`src/main/modules/agent-control/tools-runtime/tool-result-types.ts`
-- Agent 错误归一：`src/main/modules/claude-bridge/error-contract.ts`
+- 当前回合终态：`src/main/modules/agent-control/codex-runtime/codex-terminal-facts.ts`
+- 上游协议错误：`src/main/modules/agent-control/codex-runtime/codex-model-gateway-provider-errors.ts`
 - 错误登记：`src/main/modules/agent-control/contracts/error-kinds.ts`
 
 ## 7. 开发与验证命令
@@ -145,6 +148,8 @@ npm run test
 npm run verify
 npm run build
 ```
+
+`npm test` 包含常规并行、技能子任务串行、性能串行和 `ui-contracts`；普通 Node 的 SQLite skip 不代替 `verify:native`。E6 脚本回归使用临时身份与资料，正式验收仍固定生产身份，不能把隔离测试通过记为真实账号验收。
 
 专项 gate 必须从当前 `package.json` 选择，不从旧进展文档复制。测试边界、SQLite skip 和 verify 归属见 `docs/superpowers/testing-conventions.md`。
 

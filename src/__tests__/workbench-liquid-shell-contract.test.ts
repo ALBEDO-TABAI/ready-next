@@ -180,123 +180,6 @@ test('Stage 1 — theme:setSkin IPC handler exists and persists skin to DB', () 
   assert.match(mainIndex, /THEME_SKIN_SETTING_KEY/)
 })
 
-test('Stage 2 — controller attaches 4 fullscreen lifecycle listeners on darwin', () => {
-  const materialModule = readWorkspaceFile('src/main/modules/window-material/main-window-material.ts')
-
-  // 4 个 macOS fullscreen 生命周期事件，每个都要挂监听。
-  // 'will-enter-full-screen' / 'will-leave-full-screen' 走 macFullscreenEmitter（Electron 34 .d.ts 没覆盖 will-* 事件，需 type cast 桥接）；
-  // 'enter-full-screen' / 'leave-full-screen' 直接走 window.on。
-  assert.match(materialModule, /\.on\(['"]will-enter-full-screen['"]/)
-  assert.match(materialModule, /\.on\(['"]enter-full-screen['"]/)
-  assert.match(materialModule, /\.on\(['"]will-leave-full-screen['"]/)
-  assert.match(materialModule, /\.on\(['"]leave-full-screen['"]/)
-
-  // 非 macOS 提前 return，避免无意义挂监听
-  assert.match(materialModule, /if \(platform !== 'darwin'\) return/)
-})
-
-test('验证 2 (2026-05-16) — controller never calls setBackgroundColor/setVibrancy after applyInitial on darwin', () => {
-  const materialModule = readWorkspaceFile('src/main/modules/window-material/main-window-material.ts')
-  const codeOnly = materialModule
-    .replace(/\/\*[\s\S]*?\*\//g, '')
-    .replace(/\/\/.*$/gm, '')
-
-  // attachLifecycle 内的 4 个 handler 都不能调 setBackgroundColor / setVibrancy。
-  // backing 完全由 DOM 层 .ready-app-bg 通过 data-native-fullscreen attr 触发的 CSS 变量级联承担。
-  const attachLifecycleMatch = codeOnly.match(/const attachLifecycle\s*=[\s\S]*?\n\s*\}\n/)
-  assert.ok(attachLifecycleMatch, 'attachLifecycle should exist')
-  const lifecycleBody = attachLifecycleMatch![0]
-  assert.doesNotMatch(lifecycleBody, /window\.setBackgroundColor/, 'lifecycle handlers must not call setBackgroundColor (validation 2)')
-  assert.doesNotMatch(lifecycleBody, /window\.setVibrancy/, 'lifecycle handlers must not call setVibrancy (validation 2)')
-  // 禁止 setTimeout / setImmediate / process.nextTick 偷偷做异步 rebuild
-  assert.doesNotMatch(lifecycleBody, /setTimeout/, 'lifecycle handlers must not schedule timers')
-  assert.doesNotMatch(lifecycleBody, /setImmediate/, 'lifecycle handlers must not use setImmediate')
-  assert.doesNotMatch(lifecycleBody, /process\.nextTick/, 'lifecycle handlers must not use process.nextTick')
-
-  // Stage 2.8 的 source-tracking 状态 (`fullscreenSource` / `wasHtmlFullscreen`) 已永久退役
-  assert.doesNotMatch(codeOnly, /fullscreenSource/, 'fullscreenSource state retired (validation 2)')
-  assert.doesNotMatch(codeOnly, /wasHtmlFullscreen/, 'wasHtmlFullscreen retired (validation 2)')
-  // 注：webContents.on('enter-html-full-screen') / leave-html-full-screen 在验证 3 重新登场作为
-  // OOPIF 路径的 IPC 兜底源（参见单独的"webContents enter/leave-html-full-screen handlers" 测试）。
-  // 它们的存在不影响"lifecycle handler 不动 bg/vibrancy"的合同——因为它们也只调
-  // notifyFullscreenChanged，不调任何 setter。
-})
-
-test('验证 2 — computeMaterial darwin branch returns frozen {transparent, under-window} only', () => {
-  const materialModule = readWorkspaceFile('src/main/modules/window-material/main-window-material.ts')
-  const codeOnly = materialModule
-    .replace(/\/\*[\s\S]*?\*\//g, '')
-    .replace(/\/\/.*$/gm, '')
-
-  // computeMaterial 的 darwin 分支必须只返回稳定值；不允许根据 skin / isFullscreen / resolvedTheme 切换
-  const computeMatch = codeOnly.match(/export function computeMaterial[\s\S]*?\n\}/)
-  assert.ok(computeMatch, 'computeMaterial should exist')
-  const computeBody = computeMatch![0]
-
-  // darwin 分支只返回 DARWIN_LIQUID_GLASS_TRANSPARENT + 'under-window'
-  const darwinBranch = computeBody.match(/if\s*\(\s*inputs\.platform\s*===\s*'darwin'\s*\)[\s\S]*?\}/)
-  assert.ok(darwinBranch, 'darwin branch should exist')
-  assert.match(darwinBranch![0], /DARWIN_LIQUID_GLASS_TRANSPARENT/)
-  assert.match(darwinBranch![0], /vibrancy:\s*'under-window'/)
-  // darwin 分支禁止读 skin / isFullscreen / resolvedTheme（差异化都退役了）
-  assert.doesNotMatch(darwinBranch![0], /inputs\.skin/, 'darwin compute must not branch on skin (validation 2)')
-  assert.doesNotMatch(darwinBranch![0], /inputs\.isFullscreen/, 'darwin compute must not branch on isFullscreen (validation 2)')
-  assert.doesNotMatch(darwinBranch![0], /inputs\.resolvedTheme/, 'darwin compute must not branch on resolvedTheme (validation 2)')
-})
-
-test('验证 2 — lifecycle handler shape: flag flip + IPC only, no sync()', () => {
-  const materialModule = readWorkspaceFile('src/main/modules/window-material/main-window-material.ts')
-
-  // will-enter: 翻 flag + 通知 renderer，不调 sync (sync 在 darwin 上是 no-op 但也不该多余调)
-  const willEnterMatch = materialModule.match(/\.on\(['"]will-enter-full-screen['"][\s\S]*?\}\)/)
-  assert.ok(willEnterMatch)
-  const willEnterBody = willEnterMatch![0]
-  assert.match(willEnterBody, /materialFullscreenState\s*=\s*true/)
-  assert.match(willEnterBody, /notifyFullscreenChanged\?\.\(true\)/)
-
-  // leave: 翻 flag + 通知，单一分支，无 skin/source 判断
-  const leaveMatch = materialModule.match(/window\.on\(['"]leave-full-screen['"][\s\S]*?\n\s*\}\)/)
-  assert.ok(leaveMatch)
-  const leaveBody = leaveMatch![0]
-  assert.match(leaveBody, /materialFullscreenState\s*=\s*false/)
-  assert.match(leaveBody, /notifyFullscreenChanged\?\.\(false\)/)
-  assert.doesNotMatch(leaveBody, /skin\s*===\s*'liquid-glass'/, 'no skin branching')
-  assert.doesNotMatch(leaveBody, /skin\s*!==\s*'liquid-glass'/, 'no skin branching')
-})
-
-test('验证 3 — webContents enter/leave-html-full-screen handlers provide OOPIF fallback IPC', () => {
-  const materialModule = readWorkspaceFile('src/main/modules/window-material/main-window-material.ts')
-
-  // OOPIF (cross-origin iframe) 路径下 BrowserWindow.leave-full-screen 不可靠 fire——
-  // webContents-level html-fullscreen 事件是 Chromium 统一出口，作为兜底。
-  // 必须查 window.isFullScreen() 而不是硬编码 true/false，正确处理 CMD+CTRL+F 嵌套 iframe 的边界 case。
-  const enterHtmlMatch = materialModule.match(/webContents\.on\(['"]enter-html-full-screen['"][\s\S]*?\}\)/)
-  assert.ok(enterHtmlMatch, 'enter-html-full-screen webContents handler must exist (OOPIF fallback)')
-  const enterHtmlBody = enterHtmlMatch![0]
-  assert.match(enterHtmlBody, /window\.isFullScreen\(\)/, 'enter-html handler must query window.isFullScreen() for authoritative state')
-  assert.match(enterHtmlBody, /notifyFullscreenChanged/, 'enter-html handler must push IPC')
-
-  const leaveHtmlMatch = materialModule.match(/webContents\.on\(['"]leave-html-full-screen['"][\s\S]*?\}\)/)
-  assert.ok(leaveHtmlMatch, 'leave-html-full-screen webContents handler must exist (OOPIF fallback)')
-  const leaveHtmlBody = leaveHtmlMatch![0]
-  assert.match(leaveHtmlBody, /window\.isFullScreen\(\)/, 'leave-html handler must query window.isFullScreen() for authoritative state')
-  assert.match(leaveHtmlBody, /notifyFullscreenChanged/, 'leave-html handler must push IPC')
-})
-
-test('Stage 2 — will-leave-full-screen handler is a deliberate no-op (do not expose transparent mid-animation)', () => {
-  const materialModule = readWorkspaceFile('src/main/modules/window-material/main-window-material.ts')
-
-  const willLeaveMatch = materialModule.match(/\.on\(['"]will-leave-full-screen['"],\s*\(\)\s*=>\s*\{([\s\S]*?)\}\)/)
-  assert.ok(willLeaveMatch, 'will-leave-full-screen handler should exist')
-  const body = willLeaveMatch![1]
-  // 不应该有任何 setVibrancy / setBackgroundColor / flag 翻转 / sync 调用
-  // OS 离场动画期间窗口必须保持不透明 backing；切换到透明会让动画露丑
-  assert.doesNotMatch(body, /setVibrancy/)
-  assert.doesNotMatch(body, /setBackgroundColor/)
-  assert.doesNotMatch(body, /materialFullscreenState\s*=/)
-  assert.doesNotMatch(body, /\bsync\(\)/)
-})
-
 test('liquid glass sliders preserve the groove and use lens-backed convex thumbs', () => {
   const sliderStyles = readWorkspaceFile('src/renderer/styles/workbench-sliders.css')
   const appStyles = readRendererStyles()
@@ -313,12 +196,17 @@ test('liquid glass sliders preserve the groove and use lens-backed convex thumbs
   const darkDocumentSwitchGroove = findCssBlock(appStyles, "html[data-theme='dark'][data-skin='liquid-glass'] .draggable-mode-switch")
   const darkDocumentSwitchThumb = findCssBlock(appStyles, "html[data-theme='dark'][data-skin='liquid-glass'] .draggable-mode-switch__thumb")
   const chatModeDock = findCssBlock(appStyles, ".ready-chat-mode-tabs-dock")
+  const chatComposerContextRow = findCssBlock(appStyles, ".ready-chat-composer-context-row")
+  const chatPanelBody = readWorkspaceFile('src/renderer/components/agent/chat-panel/ChatPanelBody.tsx')
   const chatModeDockGroove = findCssBlock(appStyles, "html[data-skin='liquid-glass'] .ready-chat-mode-tabs-dock .draggable-mode-tabs")
-  const chatModeDockSurface = findCssBlock(appStyles, "html[data-skin='liquid-glass'] .ready-chat-mode-tabs-dock .draggable-mode-tabs__surface")
-  const chatModeDockProjection = findCssBlock(appStyles, "html[data-skin='liquid-glass'] .ready-chat-mode-tabs-dock .draggable-mode-tabs__projection")
+  // 74ebfa98 — the chat dock surface/projection share one :is() rule with the project selector capsule.
+  const chatDockSurfaceSelector = ':is(.ready-chat-mode-tabs-dock .draggable-mode-tabs__surface, .ready-chat-project-surface)'
+  const chatDockProjectionSelector = ':is(.ready-chat-mode-tabs-dock .draggable-mode-tabs__projection, .ready-chat-project-projection)'
+  const chatModeDockSurface = findCssBlock(appStyles, `html[data-skin='liquid-glass'] ${chatDockSurfaceSelector}`)
+  const chatModeDockProjection = findCssBlock(appStyles, `html[data-skin='liquid-glass'] ${chatDockProjectionSelector}`)
   const darkChatModeDockGroove = findCssBlock(appStyles, "html[data-theme='dark'][data-skin='liquid-glass'] .ready-chat-mode-tabs-dock .draggable-mode-tabs")
-  const darkChatModeDockSurface = findCssBlock(appStyles, "html[data-theme='dark'][data-skin='liquid-glass'] .ready-chat-mode-tabs-dock .draggable-mode-tabs__surface")
-  const darkChatModeDockProjection = findCssBlock(appStyles, "html[data-theme='dark'][data-skin='liquid-glass'] .ready-chat-mode-tabs-dock .draggable-mode-tabs__projection")
+  const darkChatModeDockSurface = findCssBlock(appStyles, `html[data-theme='dark'][data-skin='liquid-glass'] ${chatDockSurfaceSelector}`)
+  const darkChatModeDockProjection = findCssBlock(appStyles, `html[data-theme='dark'][data-skin='liquid-glass'] ${chatDockProjectionSelector}`)
   const appModeTabsSectionStart = appStyles.indexOf('/* Draggable Mode Tabs - 4-way switch')
   assert.notEqual(appModeTabsSectionStart, -1, 'index.css should keep the draggable mode tabs section')
   const appModeTabsSection = appStyles.slice(appModeTabsSectionStart)
@@ -356,7 +244,11 @@ test('liquid glass sliders preserve the groove and use lens-backed convex thumbs
   assert.match(documentSwitchGroove, /blur\(calc\(var\(--lg-blur-soft\) \* 0\.25\)\)/)
   assert.doesNotMatch(documentSwitchGroove, /0\.045/)
   assert.match(appStyles, /html\[data-skin='liquid-glass'\] \.draggable-mode-switch::before\s*\{[\s\S]*?display:\s*none;/)
-  assert.match(chatModeDock, /margin-bottom:\s*-12px;/)
+  // 74ebfa98 — the dock now sits in the composer context row beside the project selector;
+  // the -12px overlap onto the composer moved from the dock to that shared row.
+  assert.match(chatPanelBody, /<div className="ready-chat-composer-context-row">\s*<ProjectSelector \/>\s*\{modeSwitcher\}\s*<\/div>/)
+  assert.match(chatComposerContextRow, /margin-bottom:\s*-12px;/)
+  assert.doesNotMatch(chatModeDock, /margin-bottom/)
   // 聊天 dock 外壳不再叠加第二层底色与边框，材质与输入框共用。
   assert.match(chatModeDockGroove, /--ready-workbench-slider-thumb-scale:\s*1\.08;/)
   assert.match(chatModeDockGroove, /border-color:\s*transparent;/)

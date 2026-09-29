@@ -126,7 +126,8 @@ test('sendFileToScopeThread resolves the bound thread and ships the attachment t
   const makeService = (channelType: string): RemoteChannelService => new RemoteChannelService({
     db: {
       getAgentChannelThreadBySession: () => ({ channel_id: 'chan-1', remote_thread: 'wxid_demo' }),
-      getAgentChannel: () => ({ type: channelType }),
+      getAgentChannel: () => ({ type: channelType, enabled: 1, config_json: JSON.stringify({ bindingId: 'binding-1' }) }),
+      getConversationScope: () => ({ meta_json: JSON.stringify({ channelBindingId: 'binding-1' }) }),
       getSetting: () => null,
     },
     sidecar: {
@@ -153,7 +154,7 @@ test('sendFileToScopeThread resolves the bound thread and ships the attachment t
 
     const unsupported = await makeService('generic-webhook').sendFileToScopeThread('scope-1', { path: filePath })
     assert.equal(unsupported.success, false)
-    assert.match(String(unsupported.error), /暂不支持出站附件/)
+    assert.match(String(unsupported.error), /暂不支持发送附件/)
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }

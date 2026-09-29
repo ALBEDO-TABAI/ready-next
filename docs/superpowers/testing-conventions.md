@@ -1,6 +1,6 @@
 # Ready 测试规约
 
-> 核对日期：2026-09-06。具体测试文件与执行顺序以 `package.json` 和脚本实现为准。
+> 核对日期：2026-09-29。具体测试文件与执行顺序以 `package.json` 和脚本实现为准。
 
 本规约用于 F 阶段之后的新测试和测试整改。目标是让测试证明真实行为，只有在行为边界无法直接观察时才保留结构检查，并且把破坏生产 invariant 的测试 helper 显式标出来。
 
@@ -130,10 +130,16 @@ verify -> verify:native -> verify:version -> typecheck -> silent-catch / move-on
 verify:cloud -> rebuild:native -> verify:t -> test -> verify-native-trigger
 verify:t -> verify:s -> verify:r -> 既有阶段链
 verify:s -> verify:native（除上面的前序链与本阶段检查外）
-test -> test:parallel -> test:serial-skill-child -> test:serial-performance
+test -> test:parallel -> test:serial-skill-child -> test:serial-performance -> test:ui-contracts
 ```
 
 因此 `verify:cloud` 当前也会通过 `verify:s` 进入真实 Electron native 验证；不能再声称它完全不需要 Electron。CI 环境能否运行这些工具必须实际验证。
+
+`test:ui-contracts` 已进入默认 `npm test`，不再登记“暂停维护”的覆盖豁免。`verify:native` 另外覆盖问答卡启动/会话清扫、078 本地会话绑定迁移和投影可见性所有者（含真实同步失败通知）；这些 SQLite 测试不得以普通 Node 的 skip 代替执行。
+
+`scripts/__tests__/e6-live-proof-runner-preflight.test.cjs` 在独立进程中使用临时身份、锁目录、工作区和数据库，正式校验/进程回收逻辑不替换。测试 bootstrap 只提供环境与 CLI 身份，禁止真实账户读取；正式 runner 不读取测试身份环境变量。该测试通过只证明隔离回归，不能当作真实 E6 账号验收通过。
+
+`verify:tag-forge` 默认检查仓内分发技能与相关行为，不依赖个人作者工作区。需要核对作者副本时显式运行 `node scripts/check-tag-forge-parity.cjs --author <作者目录>`；作者副本不一致仍会报错。
 
 当前产品重点切片包括 `verify:history-continuation`、`verify:single-ready-memory`、`verify:remote-im`、`verify:document-reading`、`verify:widget-ready`。`verify:remote-im-live` 使用本地协议夹具；真实账号收发与包体安装验收需要独立证据。
 

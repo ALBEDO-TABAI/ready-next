@@ -1,12 +1,6 @@
 import assert from 'node:assert/strict'
 import { afterEach, describe, it } from 'node:test'
 
-import { buildRequestEnvelope } from '../main/modules/agent-control/contracts/request-envelope'
-import {
-  resolveExecutionIntentContext,
-  resolveIntentCapabilityGroupModes,
-} from '../main/modules/agent-control/execution-intent-resolver'
-import { classifyIntent } from '../main/modules/agent-control/intent-classifier'
 import { buildComposedAgentInput } from '../renderer/modules/agent/messageComposer'
 import { buildWidgetTargetUpdatePrompt, createDocumentWidgetTargetAttachment } from '../renderer/modules/agent/widget-target-attachment'
 import { useDocTabs } from '../renderer/stores/useDocTabs'
@@ -377,42 +371,5 @@ describe('document widget target context', () => {
     assert.match(String(composed), /这是当前文档的正文内容/)
     assert.doesNotMatch(String(composed), /--- 文档内容开始 ---/)
     assert.doesNotMatch(String(composed), /## 环境信息\n- 当前模式: 文档模式/)
-  })
-
-  it('teaches the execution intent resolver to force document widget updates when the marker is present', () => {
-    const userText = [
-      '把边框去掉',
-      '',
-      '### Widget 更新上下文',
-      '- 目标 widget: stock_price_chart',
-      '- 标签页ID: doc-1',
-      '- widgetId: widget_stock_price_chart',
-      '优先使用 document_update_widget 更新现有 widget。',
-    ].join('\n')
-    const requestEnvelope = buildRequestEnvelope({ userText })
-    const context = resolveExecutionIntentContext({
-      requestEnvelope,
-      previousInputs: [],
-      intentClassification: classifyIntent(requestEnvelope),
-    })
-    const intentModes = resolveIntentCapabilityGroupModes({
-      hasTools: true,
-      capabilityProfile: 'local_chat',
-      contextualUserInput: context.contextualUserInput,
-      userInstructionText: context.userInstructionText,
-      intentClassification: context.intentClassification,
-      hasDocumentEnvironment: context.hasDocumentEnvironment,
-      hasWidgetTargetContext: context.hasWidgetTargetContext,
-      explicitWidgetCreateIntent: context.explicitWidgetCreateIntent,
-      documentWidgetTaskKind: context.documentWidgetTaskKind,
-      preferredSkillToolNames: null,
-      mapSemanticIntent: context.mapSemanticIntent,
-    })
-
-    assert.equal(context.hasWidgetTargetContext, true)
-    assert.equal(context.explicitWidgetCreateIntent, false)
-    assert.equal(context.documentWidgetTaskKind, 'update')
-    assert.equal(intentModes.allowDocumentTools, true)
-    assert.equal(intentModes.forceDocumentTool, true)
   })
 })

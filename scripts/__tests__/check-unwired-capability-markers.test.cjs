@@ -33,33 +33,12 @@ test('passes for marked dormant modules, exact intra-cluster imports, test impor
   assert.equal(result.ok, true)
 })
 
-test('packet compiler no longer requires dormant markers after the live flip', () => {
-  const root = makeRoot()
-  write(root, 'src/main/modules/agent-control/quality/packet-compiler.ts', 'export const compiler = 1\n')
-  const result = check({ root })
-  assert.equal(result.ok, true, result.errors.join('\n'))
-})
-
-test('allows production to import the live packet compiler', () => {
-  const root = makeRoot()
-  write(root, 'src/main/modules/agent-control/runtime-core/runtime.ts', 'import { compiler } from "../quality/packet-compiler"\nvoid compiler\n')
-  const result = check({ root })
-  assert.equal(result.ok, true, result.errors.join('\n'))
-})
-
 test('fails when live packet-fields is marked unwired', () => {
   const root = makeRoot()
   write(root, 'src/main/modules/agent-control/quality/packet-fields.ts', '/** P5c/C22 unwired: not in production path. */\nexport function validatePacketFields() {}\n')
   const result = check({ root })
   assert.equal(result.ok, false)
   assert.ok(result.errors.some((error) => error.includes('packet-fields.ts') && error.includes('live validation')))
-})
-
-test('retired packet-disabled doc no longer controls the live gate', () => {
-  const root = makeRoot()
-  write(root, 'docs/superpowers/plans/2026-06-20-p5c-packet-trio-disabled-implementation.md', 'packet trio docs\n')
-  const result = check({ root })
-  assert.equal(result.ok, true, result.errors.join('\n'))
 })
 
 test('fails when the P5d enforce doc omits the model-maintenance retirement status', () => {

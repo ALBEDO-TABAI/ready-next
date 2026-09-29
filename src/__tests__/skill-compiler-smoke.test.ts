@@ -1,40 +1,12 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert'
 import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs'
-import { join, dirname } from 'node:path'
+import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { fileURLToPath } from 'node:url'
 
 import { compileSkillDefinition } from '../main/modules/skills-runtime/skill-compiler'
 
-const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'assets', 'embedded-skills')
-
 describe('skill compiler smoke', () => {
-  it('compiles video-copy-analyzer as advisory hybrid (read_skill default + video_copy_analyze internal)', () => {
-    const definition = compileSkillDefinition({
-      folderPath: join(ROOT, 'video-copy-analyzer'),
-      source: 'embedded',
-    })
-
-    assert.strictEqual(definition.executionMode, 'advisory')
-    assert.strictEqual(definition.defaultAction, 'read_skill')
-    assert.strictEqual(definition.workflow, undefined)
-    assert.ok(definition.actions.some((action) => action.name === 'read_skill' && action.visibility === 'internal'))
-    assert.ok(definition.actions.some((action) => action.name === 'video_copy_analyze' && action.visibility === 'internal'))
-  })
-
-  it('keeps lets-go-rss as advisory hybrid (read_skill default + retained typed actions)', () => {
-    const definition = compileSkillDefinition({
-      folderPath: join(ROOT, 'lets-go-rss'),
-      source: 'embedded',
-    })
-
-    assert.strictEqual(definition.executionMode, 'advisory')
-    assert.strictEqual(definition.defaultAction, 'read_skill')
-    assert.strictEqual(definition.workflow, undefined)
-    assert.ok(definition.actions.some((action) => action.name === 'read_skill' && action.visibility === 'internal'))
-    assert.ok(definition.actions.some((action) => action.name === 'rss_update' && action.visibility === 'public'))
-  })
 
   it('falls back to advisory read_skill for README-only custom skills', () => {
     const dir = mkdtempSync(join(tmpdir(), 'ready-skill-readme-'))

@@ -12,9 +12,6 @@ import { copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 
-import { selectScopeTaskIndexEntries } from '../main/modules/agent-control/session/daily-task-index-builder'
-import type { TaskProjectionRecord } from '../main/modules/agent-control/contracts/run-contracts'
-import { __setMetricSinkForTests, type AgentMetricEvent } from '../main/modules/agent-control/metrics'
 
 const WRITE_DIRECTION_GATE = resolve('scripts/check-ledger-write-direction.cjs')
 
@@ -39,33 +36,6 @@ function runHarness(root: string): ReturnType<typeof spawnSync> {
     encoding: 'utf-8',
   })
 }
-
-test('malformed projection rows are skipped with a metric; healthy rows survive', () => {
-  const rows = [
-    {
-      taskId: 'task-ok', scopeId: 's1', runId: 'r1', taskType: 'short_task', module: 'chat',
-      status: 'running', interactionState: 'running', steps: [],
-      createdAt: '2026-06-12T08:00:00.000Z', updatedAt: '2026-06-12T09:00:00.000Z',
-    },
-    // identity facts missing / invalid — three malformed shapes
-    { taskId: '', status: 'running', updatedAt: '2026-06-12T09:00:00.000Z', steps: [] },
-    { taskId: 'task-no-status', status: '', updatedAt: '2026-06-12T09:00:00.000Z', steps: [] },
-    { taskId: 'task-bad-ts', status: 'running', updatedAt: 'not-a-date', steps: [] },
-  ] as unknown as TaskProjectionRecord[]
-
-  const events: AgentMetricEvent[] = []
-  __setMetricSinkForTests((event) => events.push(event))
-  try {
-    const entries = selectScopeTaskIndexEntries({ listByScope: () => rows }, 's1')
-    assert.equal(entries.length, 1, 'only the healthy row renders')
-    assert.equal(entries[0].taskId, 'task-ok')
-    const malformed = events.filter((event) => event.metric === 'ledger_malformed')
-    assert.equal(malformed.length, 3, 'one metric per sick row')
-    assert.equal((malformed[0] as unknown as { consumer: string }).consumer, 'daily_task_index')
-  } finally {
-    __setMetricSinkForTests(null)
-  }
-})
 
 test('write-direction gate runs in warning mode: exit 0, inventory listed, strict flag available', () => {
   const output = execFileSync('node', ['scripts/check-ledger-write-direction.cjs'], { encoding: 'utf-8' })

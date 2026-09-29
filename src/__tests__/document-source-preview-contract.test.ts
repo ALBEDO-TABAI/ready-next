@@ -74,10 +74,14 @@ test('document edit and preview modes share reading scroll position when remount
   assert.match(markdownEditor, /data-ready-document-scroll-key=\{documentScrollKey\}/)
 
   assert.match(documentMode, /captureVisibleDocumentScrollPositions\(\)/)
-  assert.match(documentMode, /readDocumentReadingPositionMap\(\)/)
+  // 1e9585c3 — persisted positions are read once via a lazy useState initializer.
+  assert.match(documentMode, /const \[scrollSnapshots\] = useState\(readDocumentReadingPositionMap\)/)
   assert.match(documentMode, /saveDocumentReadingPosition\(key, snapshot\)/)
   assert.match(documentMode, /document\.addEventListener\('visibilitychange', handleVisibilityChange\)/)
-  assert.match(documentMode, /element\.addEventListener\('scroll', handler, \{ passive: true \}\)/)
+  // 98c06c55 — per-element scroll listening moved into the shared scroll tracker (flushed on hide/unload).
+  assert.match(documentMode, /const tracker = trackDocumentScrollPosition\(element,/)
+  assert.match(documentMode, /pendingScrollFlushesRef\.current\.add\(tracker\.flush\)/)
+  assert.match(scrollRuntime, /element\.addEventListener\('scroll', handleScroll, \{ passive: true \}\)/)
   assert.match(documentMode, /restoreVisibleDocumentScrollPositions\(\)/)
   assert.match(documentMode, /useLayoutEffect\(\(\) => \{/)
   assert.match(documentMode, /onChange=\{handleEditorModeChange\}/)

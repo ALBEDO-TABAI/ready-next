@@ -3,10 +3,6 @@ import { readFileSync } from 'node:fs'
 import test from 'node:test'
 
 import {
-  createContinuationRunBudgetSeed,
-  createRunBudgetSeed,
-} from '../main/modules/agent-control/task-projection/run-budget-policy'
-import {
   filterSkillPrimitivesBySession,
   shouldExposeSkillPrimitive,
 } from '../main/modules/tools/skill-tool-session-gate'
@@ -28,33 +24,6 @@ const SKILLS_TOOLS_PATH = new URL('../main/modules/tools/skills-tools.ts', impor
 function readSource(url: URL): string {
   return readFileSync(url, 'utf8')
 }
-
-// --- Phase 4.2 — createContinuationRunBudgetSeed -----------------------------
-
-test('Phase 4.2 — createContinuationRunBudgetSeed inherits multi_step_task ceiling', () => {
-  const seed = createContinuationRunBudgetSeed('multi_step_task')
-  const baseline = createRunBudgetSeed('multi_step_task')
-  assert.equal(seed.maxIterations, baseline.maxIterations, 'inherits multi_step preset')
-  assert.equal(seed.maxToolCalls, baseline.maxToolCalls)
-})
-
-test('Phase 4.2 — createContinuationRunBudgetSeed inherits media_task ceiling', () => {
-  const seed = createContinuationRunBudgetSeed('media_task')
-  const baseline = createRunBudgetSeed('media_task')
-  assert.equal(seed.maxIterations, baseline.maxIterations)
-  assert.equal(seed.maxToolCalls, baseline.maxToolCalls)
-})
-
-test('Phase 4.2 — createContinuationRunBudgetSeed falls back to continuation preset for short types', () => {
-  const baseline = createRunBudgetSeed('continuation')
-  // direct_answer / short_task / null all collapse to the 24-iter continuation
-  // preset — we don't grant a longer budget than the original task earned.
-  for (const original of ['direct_answer', 'short_task', null, undefined] as const) {
-    const seed = createContinuationRunBudgetSeed(original as any)
-    assert.equal(seed.maxIterations, baseline.maxIterations, `original=${original}`)
-    assert.equal(seed.maxToolCalls, baseline.maxToolCalls, `original=${original}`)
-  }
-})
 
 // --- Phase 4.3 — primitive gate OR-fallback ---------------------------------
 

@@ -34,6 +34,7 @@ function insertPendingCard(
   conversationId: string,
   questions: Array<{ id: string; question: string; kind: 'free_text' }> = [],
 ): void {
+  if (!db.getConversationScope(conversationId)) db.createConversation(conversationId, 'butler', 'Fixture conversation')
   const askedAtMs = Date.now()
   db.addChatMessage(
     cardId,
@@ -69,6 +70,7 @@ function readCardMeta(db: DatabaseManager, cardId: string): {
 test('B.4b boot sweep without liveCardIds: every pending card flipped to cancelled(app_restart)', (t) => {
   if (skipIfSqliteUnavailable(t, 'ask-user-boot-sweep: hard restart')) return
   const db = new DatabaseManager(true)
+  t.after(() => db.close())
   insertPendingCard(db, 'auq-aaaaaaaa', 'conv-1')
   insertPendingCard(db, 'auq-bbbbbbbb', 'conv-2')
   insertPendingCard(db, 'auq-cccccccc', 'conv-1')
@@ -88,6 +90,7 @@ test('B.4b boot sweep without liveCardIds: every pending card flipped to cancell
 test('B.4b boot sweep with liveCardIds: live cards skipped, others cancelled', (t) => {
   if (skipIfSqliteUnavailable(t, 'ask-user-boot-sweep: dev reload guard')) return
   const db = new DatabaseManager(true)
+  t.after(() => db.close())
   insertPendingCard(db, 'auq-live01', 'conv-1')
   insertPendingCard(db, 'auq-live02', 'conv-1')
   insertPendingCard(db, 'auq-stale1', 'conv-2')
@@ -114,6 +117,7 @@ test('B.4b boot sweep with liveCardIds: live cards skipped, others cancelled', (
 test('B.4b boot sweep is idempotent: second call mutates 0 rows', (t) => {
   if (skipIfSqliteUnavailable(t, 'ask-user-boot-sweep: idempotent')) return
   const db = new DatabaseManager(true)
+  t.after(() => db.close())
   insertPendingCard(db, 'auq-once0001', 'conv-1')
 
   const first = db.sweepPendingAskUserQuestionsCardsOnBoot()
@@ -127,6 +131,7 @@ test('B.4b boot sweep is idempotent: second call mutates 0 rows', (t) => {
 test('B.4c session sweep: only rows for matching session flipped to cancelled(session_reset)', (t) => {
   if (skipIfSqliteUnavailable(t, 'ask-user-session-sweep: scope')) return
   const db = new DatabaseManager(true)
+  t.after(() => db.close())
   insertPendingCard(db, 'auq-sess1a', 'session-A')
   insertPendingCard(db, 'auq-sess1b', 'session-A')
   insertPendingCard(db, 'auq-sess2', 'session-B')
@@ -148,6 +153,7 @@ test('B.4c session sweep: only rows for matching session flipped to cancelled(se
 test('B.4c session sweep with no matching pending rows returns 0', (t) => {
   if (skipIfSqliteUnavailable(t, 'ask-user-session-sweep: empty')) return
   const db = new DatabaseManager(true)
+  t.after(() => db.close())
   insertPendingCard(db, 'auq-other', 'session-X')
   const mutated = db.sweepPendingAskUserQuestionsCardsBySession('session-not-present')
   assert.equal(mutated, 0)
@@ -156,6 +162,7 @@ test('B.4c session sweep with no matching pending rows returns 0', (t) => {
 test('B.4c session sweep with explicit cancelReason override', (t) => {
   if (skipIfSqliteUnavailable(t, 'ask-user-session-sweep: custom reason')) return
   const db = new DatabaseManager(true)
+  t.after(() => db.close())
   insertPendingCard(db, 'auq-x123', 'sess-K')
   db.sweepPendingAskUserQuestionsCardsBySession('sess-K', 'session_killed_by_user')
   const meta = readCardMeta(db, 'auq-x123')

@@ -1,22 +1,4 @@
-/**
- * B Phase 2 / 3 — video-copy-analyzer hybrid reference + retained internal action.
- *
- * Hybrid migration parallel to lets-go-rss (Phase 3 PR2): the manifest is now
- * `execution.mode: 'advisory'` with a `read_skill` reference action AND a
- * retained `video_copy_analyze` python action kept at `visibility: 'internal'`
- * because production code still calls it directly:
- *   - `src/main/modules/rss-engine/item-analysis-manager.ts::runCopyFlow`
- *     calls `runtime.runSkill({ skillId: 'video-copy-analyzer',
- *     action: 'video_copy_analyze', params: { input, outputDir, language } })`
- *     for every RSS item that looks like a video link.
- *
- * Why `internal` (not `public`): the action stays hidden by default, but the
- * host may expose it when the Video Copy Analyzer reference hint is armed.
- *
- * Per user steer: the test does NOT assert specific shell commands inside
- * SKILL.md — how the agent chooses to invoke bundled scripts is the model's
- * decision, not something to freeze in a contract here.
- */
+/** Bundled video-copy manifest and isolated Python execution contracts. */
 
 import assert from 'node:assert/strict'
 import test from 'node:test'
@@ -27,12 +9,6 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { compileSkillDefinition } from '../main/modules/skills-runtime/skill-compiler'
-import { SkillContextOrchestrator } from '../main/modules/agent-control/skills/skill-context-orchestrator'
-import {
-  _resetLastReferenceSkillHintsForTests,
-  getLastReferenceSkill,
-} from '../main/modules/agent-control/skills/skill-reference-hints'
-import { __setScopeContextEpochDatabaseForTests } from '../main/modules/agent-control/session/scope-context-epoch'
 import { completeVideoCopyAnalyzeResult } from '../main/modules/tools/video-copy-deliverable-postprocess'
 import { __skillsToolsInternalsForTests } from '../main/modules/tools/skills-tools'
 import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
@@ -41,28 +17,6 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 // src/__tests__ → repo root → assets/embedded-skills/video-copy-analyzer
 const SKILL_DIR = join(__dirname, '..', '..', 'assets', 'embedded-skills', 'video-copy-analyzer')
 
-test.before(() => {
-  __setScopeContextEpochDatabaseForTests({
-    getRawDb: () => ({ prepare: () => ({ get: () => undefined }) }) as never,
-  })
-})
-test.after(() => __setScopeContextEpochDatabaseForTests(null))
-
-function findPython39(): string | null {
-  const candidates = [
-    process.env.READY_TEST_PYTHON_39,
-    'python3.9',
-    'python3',
-  ].filter((item): item is string => Boolean(item))
-  for (const candidate of candidates) {
-    const probe = spawnSync(candidate, [
-      '-c',
-      'import sys; raise SystemExit(0 if sys.version_info[:2] == (3, 9) else 10)',
-    ], { encoding: 'utf-8' })
-    if (probe.status === 0) return candidate
-  }
-  return null
-}
 
 function validCopyReport(body = '叙事结构完整，传播潜力明确，可做多个方向。'): string {
   return [
@@ -283,29 +237,34 @@ test('video_copy_analyze artifact list excludes status-only output values', (t) 
   assert.equal(artifacts.some((artifact) => artifact.path === 'funasr'), false)
 })
 
-test('video_copy_analyze entry compiles under the bundled Python 3.9 runtime', (t) => {
-  const python = findPython39()
-  if (!python) {
-    t.skip('Python 3.9 is not available in this test environment')
-    return
-  }
-  const scriptPaths = [
-    join(SKILL_DIR, 'main.py'),
-    join(SKILL_DIR, 'scripts', 'ready_extract_subtitle.py'),
-    join(SKILL_DIR, 'scripts', 'transcribe_audio.py'),
-    join(SKILL_DIR, 'scripts', 'extract_subtitle.py'),
-  ]
+const entryScriptPaths = [
+  join(SKILL_DIR, 'main.py'),
+  join(SKILL_DIR, 'scripts', 'ready_extract_subtitle.py'),
+  join(SKILL_DIR, 'scripts', 'transcribe_audio.py'),
+  join(SKILL_DIR, 'scripts', 'extract_subtitle.py'),
+]
+
+test('video_copy_analyze entry keeps Python 3.9-compatible syntax', () => {
+  const parsed = spawnSync('python3', ['-c',
+    'import ast, pathlib, sys; [ast.parse(pathlib.Path(p).read_text(encoding="utf-8-sig"), filename=p, feature_version=(3, 9)) for p in sys.argv[1:]]',
+    ...entryScriptPaths,
+  ], { encoding: 'utf-8' })
+  assert.equal(parsed.status, 0, [parsed.stderr, parsed.stdout].filter(Boolean).join('\n'))
+})
+
+test('video_copy_analyze entry compiles in an explicitly supplied Python 3.9 interpreter', {
+  skip: !process.env.READY_TEST_PYTHON_39 && 'opt-in: set READY_TEST_PYTHON_39 to a Python 3.9 interpreter',
+}, () => {
+  const python = process.env.READY_TEST_PYTHON_39!
+  const version = spawnSync(python, ['-c', 'import sys; assert sys.version_info[:2] == (3, 9)'], { encoding: 'utf-8' })
+  assert.equal(version.status, 0, version.stderr || 'READY_TEST_PYTHON_39 must point to Python 3.9')
   const pycachePrefix = mkdtempSync(join(tmpdir(), 'ready-pycompile-'))
   try {
-    const compiled = spawnSync(python, ['-m', 'py_compile', ...scriptPaths], {
+    const compiled = spawnSync(python, ['-m', 'py_compile', ...entryScriptPaths], {
       encoding: 'utf-8',
       env: { ...process.env, PYTHONPYCACHEPREFIX: pycachePrefix },
     })
-    assert.equal(
-      compiled.status,
-      0,
-      [compiled.stderr, compiled.stdout].filter(Boolean).join('\n'),
-    )
+    assert.equal(compiled.status, 0, [compiled.stderr, compiled.stdout].filter(Boolean).join('\n'))
   } finally {
     rmSync(pycachePrefix, { recursive: true, force: true })
   }
@@ -805,11 +764,6 @@ test('video_copy_analyze postprocess regenerates cached deliverables older than 
   assert.match(readFileSync(structuredTranscriptPath, 'utf-8'), /新结构化文字稿按更新后的文字稿/)
 })
 
-test('skill.workflow.json has been removed from disk', () => {
-  const workflowPath = join(SKILL_DIR, 'skill.workflow.json')
-  assert.equal(existsSync(workflowPath), false, 'skill.workflow.json must not exist after migration')
-})
-
 test('SKILL.md frontmatter declares when-to-use per Claude Skill protocol', () => {
   const skillMd = readFileSync(join(SKILL_DIR, 'SKILL.md'), 'utf-8')
   const frontmatterMatch = skillMd.match(/^---\n([\s\S]*?)\n---/)
@@ -819,67 +773,4 @@ test('SKILL.md frontmatter declares when-to-use per Claude Skill protocol', () =
   assert.ok(/\bdescription:/.test(frontmatter), 'description field required')
   assert.ok(/\bwhen-to-use:/.test(frontmatter), 'when-to-use field required for Claude Skill protocol')
   assert.doesNotMatch(skillMd, /whisper/i, 'agent-injected skill instructions must not mention the retired ASR path')
-})
-
-test('orchestrator inline-injects SKILL.md and arms the primitive-gating hint', async () => {
-  _resetLastReferenceSkillHintsForTests()
-
-  const def = compileSkillDefinition({ folderPath: SKILL_DIR, source: 'embedded' })
-  const skillState: any = {
-    id: 'video-copy-analyzer',
-    name: 'Video Copy Analyzer',
-    description: def.description,
-    defaultAction: def.defaultAction,
-    executionMode: def.executionMode,
-    managedPath: SKILL_DIR,
-    actions: def.actions.map((a) => ({
-      name: a.name,
-      visibility: a.visibility,
-      runtime: a.runtime,
-      params: a.params || [],
-    })),
-  }
-
-  const orchestrator = new SkillContextOrchestrator({
-    extractPrimaryUserInstruction: (raw) => raw,
-    listSkills: () => [skillState],
-    resolveSkillToolByAction: (_skillId, actionName) => ({
-      name: actionName === 'read_skill'
-        ? 'skill_video_copy_analyzer_read_skill'
-        : `skill_video_copy_analyzer_${actionName}`,
-      action: actionName,
-      params: [],
-    }) as any,
-  })
-
-  const session: any = { messages: [] }
-  let toolCalls = 0
-  await orchestrator.maybeInjectExplicitSkillContext({
-    userText: '用 video-copy-analyzer 分析这个视频 https://example.com/video.mp4',
-    session,
-    sessionId: 'test-session-videocopy',
-    messageVisibilityEpoch: 0,
-    emitOutput: () => {},
-    emitToolAction: () => { toolCalls += 1 },
-    executeTool: async () => {
-      toolCalls += 1
-      return { text: '', shape: 'text', data: null, projectionPatch: null, interactionHint: null }
-    },
-  })
-
-  assert.equal(toolCalls, 0, 'direct-read path must not perform a tool_use round-trip')
-  assert.equal(session.messages.length, 1, 'exactly one system-role injection')
-  const injected = session.messages[0] as { role: string; content: string }
-  assert.equal(injected.role, 'system')
-  // Content should include both the skill-header guidance and a recognisable
-  // slice of the skill's own text (frontmatter keywords are fine proxies).
-  assert.ok(injected.content.includes('已加载技能'), 'injection header present')
-  assert.ok(injected.content.includes('video-copy-analyzer'), 'skill name rendered')
-  assert.ok(
-    injected.content.includes('FunASR') || injected.content.includes('视频文案'),
-    'SKILL.md body was inlined, not truncated out',
-  )
-
-  const hint = getLastReferenceSkill('test-session-videocopy')
-  assert.equal(hint?.id, 'video-copy-analyzer', 'hint arms primitive gating for next turn')
 })

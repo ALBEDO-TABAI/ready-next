@@ -1,6 +1,6 @@
 # Ready 项目说明
 
-> 核对日期：2026-09-06；依据当前工作区源码与清单，不代表重新完成安装验收。
+> 核对日期：2026-09-29；依据已提交应用源码与清单，不代表重新完成安装验收。
 
 ## 1. 产品定位
 
@@ -20,6 +20,7 @@ Workbench 只有四个 mode，代码真值在 `src/renderer/stores/useMode.ts`�
 - Agent：单一 Ready 助手、隔离会话、历史续聊、草稿保留、明确的新上下文恢复、任务结果与 Browser 独立复核。普通续聊、重试失败任务和开始新上下文是不同动作。
 - Skills：embedded/custom skill 扫描、导入和显式选择；当前 Codex 在进入回合前冻结技能与工具权限。能发现技能不代表其脚本或旧子任务执行链已接入。
 - Files：文件树、搜索、阅读进度、项目身份、文件涌现与 Tag Forge。
+- 聊天项目目录：为每个本地会话保存默认交付文件夹，本轮显式引用优先；不改变助手内部运行目录，也不自动扫描整目录。
 - Settings / Remote：AI provider、模型能力、MCP、手动长期记忆、凭据管理、微信/飞书本人绑定后的远程问答和文件回传。
 
 长期记忆支持手工增删改、固定、读取开关和本地会话贡献开关；自动整理尚未开放。旧人格、专项 Agent 与旧记忆设置已移除。Agent 定时任务和公开子任务续跑也不在当前产品入口中。
@@ -40,6 +41,8 @@ claude-bridge IPC
 ```
 
 `AgentSdkRuntime`、`ReadyAgentOrchestrator`、`direct-chat.ts` 与 `turn-engine.ts` 都不是生产入口。工具面由 Ready 在 Codex 准入前按能力、授权、资源引用和 capability floor 解析并冻结；旧 Dynamic Delivery/Boost 不得重新接回。
+
+模型统一经本机 Codex 网关连接，上游按冻结配置使用 Responses、Chat Completions 或 Anthropic Messages。设置连接测试复用该入口；协议已接入和真实供应商验收是不同状态，具体配置与限制见 `PROGRESS.md`。
 
 详细入口见 `docs/architecture/codebase-map.md`，不可破合同见 `docs/architecture/current-runtime-contracts.md`。
 

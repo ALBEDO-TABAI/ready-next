@@ -1,6 +1,6 @@
 # Ready 当前代码地图
 
-> 核对日期：2026-09-06
+> 核对日期：2026-09-29
 > 本文合并并取代根目录旧的模块图、依赖图和结构快照。它只记录稳定入口，不维护容易失真的文件数量。
 
 ## 1. 运行结构
@@ -44,7 +44,7 @@ Agent、文件面板、技能中心和设置页是跨工作面的能力，不是
 | `tools/` | 工具定义、参数校验、授权后的执行分发 |
 | `skills-runtime/` | embedded/custom skill 扫描、安装、运行与长期任务句柄 |
 | `browser-engine/` | BrowserView、标签、导航、采集、隐私、Power Browser 与后台任务 |
-| `document-engine/` | 文档读写、预览、导出、Widget 与文档任务管线 |
+| `document-engine/` | 文档读写、预览、导出与 Widget；保留的旧文档任务管线不进入 Codex 生产调度 |
 | `rss-engine/` | RSS 订阅、采集、草稿和诊断 |
 | `calendar-engine/` | 日历事件、来源、提醒与时间解析 |
 | `file-emergence/` / `tag-forge/` | 文件涌现、项目身份、注意力信号与受控标签写入 |
@@ -118,6 +118,7 @@ claude-bridge IPC
 | 问题 | 入口 |
 | --- | --- |
 | 原生历史操作兼容性 | `src/main/modules/agent-control/codex-runtime/codex-runtime-compatibility.ts`、`assets/runtime-continuity/` |
+| 本地聊天项目目录 | `src/main/modules/agent-control/codex-runtime/chat-project-directory.ts`、`src/renderer/components/agent/ProjectSelector.tsx` |
 | 当前发送/恢复资格 | `src/main/modules/agent-control/codex-runtime/codex-action-surface.ts`、`codex-lifecycle-action-surface.ts` |
 | 上下文边界与绑定 | `src/main/modules/agent-control/codex-runtime/codex-context-boundary.ts`、`codex-binding-repository.ts` |
 | 远程收信、去重与执行 | `src/main/modules/agent-control/runtime-core/remote-channel-service.ts`、`remote-channel-event-repository.ts`、`remote-codex-turn.ts` |

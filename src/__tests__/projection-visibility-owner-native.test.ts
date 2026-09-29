@@ -57,6 +57,7 @@ test('context-owned scope-run events publish once, survive alias rollover, and r
     let currentAliasGeneration: number | null = 1
     const summaries = new Map<string, ScopeRunSummary>()
     const emitted: ScopeRunEventPayload[] = []
+    const failures: Array<{ scopeId: string; taskId: string; reason: string }> = []
     const taskProjections = new TaskProjectionRepository({ getRawDb: () => db })
     const runProjection = new RunProjection({
       getScope: (scopeId) => scopeId === currentScope.id ? currentScope : null,
@@ -76,6 +77,7 @@ test('context-owned scope-run events publish once, survive alias rollover, and r
       readCommittedProductRunVisibilityIdentity: () => null,
       emit: (event, payload) => {
         if (event === 'scopeRunEvent') emitted.push(payload as ScopeRunEventPayload)
+        if (event === 'projectionSyncFailed') failures.push(payload as typeof failures[number])
       },
     })
     const base: ScopeRunEventPayload = {
@@ -158,6 +160,22 @@ test('context-owned scope-run events publish once, survive alias rollover, and r
     assert.equal(emitted.length, 3)
     assert.equal(emitted[2]?.messageVisibilityEpoch, 1)
     assert.equal(emitted[2]?.aliasGeneration, 3)
+
+    t.mock.method(taskProjections, 'get', async () => { throw new Error('fixture projection read failed') }, { times: 1 })
+    const currentEvent: ScopeRunEventPayload = {
+      ...base, messageVisibilityEpoch: 1, runId: 'sdk-run-1', taskId: 'sdk-task-1',
+      visibilityOwnerLedger: { kind: 'run_meta', id: 'sdk-run-1' },
+    }
+    coordinator.publishScopeRunEvent(currentEvent)
+    await nextTurn()
+    assert.equal(failures.length, 1)
+    assert.equal(failures[0]?.scopeId, 'scope-projection-owner')
+    assert.equal(failures[0]?.taskId, 'sdk-task-1')
+    assert.equal(failures[0]?.reason, 'fixture projection read failed')
+    coordinator.publishScopeRunEvent({ ...currentEvent, taskSummary: 'recovered after sync failure' })
+    await nextTurn()
+    assert.equal(failures.length, 1)
+    assert.equal((await taskProjections.get('sdk-task-1'))?.taskSummary, 'recovered after sync failure')
   } finally {
     db.close()
   }

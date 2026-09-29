@@ -1,24 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { getFeishuOpenAITools } from '../main/modules/tools/feishu-tools'
 import { buildToolParamSchema, normalizeOpenAIToolSchema } from '../main/modules/tools/tool-schema'
-
-test('feishu calendar create event declares attendees item schema', () => {
-  const tool = getFeishuOpenAITools().find((entry) => {
-    const fn = entry.function as { name?: string } | undefined
-    return fn?.name === 'feishu_calendar_create_event'
-  })
-
-  assert.ok(tool, 'expected feishu calendar create event tool to exist')
-
-  const fn = tool?.function as { parameters?: { properties?: Record<string, unknown> } }
-  const attendees = fn.parameters?.properties?.attendees as Record<string, unknown> | undefined
-
-  assert.ok(attendees, 'expected attendees schema to exist')
-  assert.strictEqual(attendees?.type, 'array')
-  assert.deepStrictEqual(attendees?.items, { type: 'string' })
-})
 
 test('generic openai tool normalization adds missing array items recursively', () => {
   const normalized = normalizeOpenAIToolSchema({

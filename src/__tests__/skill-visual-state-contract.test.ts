@@ -59,14 +59,6 @@ test('skill task cards can show VEA structured output paths', () => {
   assert.match(chatPanelBody, /data-session-recall-attachments/)
 })
 
-test('long running skill heartbeat can surface live run_state artifacts', () => {
-  const projection = readWorkspaceFile('src/main/modules/agent-control/skills/skill-running-projection.ts')
-
-  assert.match(projection, /run_state\.json/)
-  assert.match(projection, /recentArtifacts/)
-  assert.match(projection, /中间文件/)
-})
-
 test('skill action spawn receives the current turn agent context', () => {
   const contextBuilder = readWorkspaceFile('src/main/modules/agent-control/tools-runtime/tool-runtime-context-builder.ts')
   const toolExecutor = readWorkspaceFile('src/main/modules/tools/tool-executor.ts')

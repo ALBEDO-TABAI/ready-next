@@ -2,11 +2,9 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import {
-  buildListWidgetsUserFacingText,
   collectDocumentWidgets,
   summarizeDocumentWidgets,
-  summarizeWidgetRecord,
-  type DocumentWidgetSummary,
+  summarizeWidgetRecord
 } from '../shared/document-widget-parse'
 
 const SAMPLE = [
@@ -91,76 +89,4 @@ test('非法 component_spec 字段不会污染 summary', () => {
   ].join('\n'))
   assert.equal(summaries.length, 1)
   assert.equal(summaries[0].componentHint, null)
-})
-
-function makeSummary(index: number, title: string): DocumentWidgetSummary {
-  return {
-    id: `widget_${index.toString(16).padStart(6, '0')}`,
-    index,
-    title,
-    mode: 'static-html',
-    componentHint: null,
-    preview: `${title} preview`,
-    hasState: false,
-    hasComponentSpec: false,
-    canPatch: false,
-    canReplace: true,
-  }
-}
-
-test('buildListWidgetsUserFacingText 0 个 widget 给出新增引导', () => {
-  const text = buildListWidgetsUserFacingText({ summaries: [], tabTitle: '需求文档.md' })
-  assert.match(text, /「需求文档\.md」/)
-  assert.match(text, /暂无 widget/)
-  assert.doesNotMatch(text, /widget:/i)
-  assert.doesNotMatch(text, /已查到/)
-})
-
-test('buildListWidgetsUserFacingText 1 个 widget 给出短句', () => {
-  const text = buildListWidgetsUserFacingText({
-    summaries: [makeSummary(1, 'ready_positioning_card')],
-    tabTitle: '需求文档.md',
-  })
-  assert.match(text, /已查到「需求文档\.md」中的 1 个 widget/)
-  assert.match(text, /「ready_positioning_card」/)
-  assert.match(text, /请指出具体标题或序号/)
-  assert.ok(text.length < 120, `文案应控制在 120 字以内，当前长度 ${text.length}`)
-})
-
-test('buildListWidgetsUserFacingText 3 个 widget 罗列全部，不出现"等"', () => {
-  const text = buildListWidgetsUserFacingText({
-    summaries: [
-      makeSummary(1, 'A'),
-      makeSummary(2, 'B'),
-      makeSummary(3, 'C'),
-    ],
-    tabTitle: '需求文档.md',
-  })
-  assert.match(text, /3 个 widget/)
-  assert.match(text, /「A」、「B」、「C」/)
-  assert.doesNotMatch(text, /示例/)
-  assert.doesNotMatch(text, /等。/)
-})
-
-test('buildListWidgetsUserFacingText 6 个 widget 走"示例…等"分支且不泄漏内部字段', () => {
-  const summaries: DocumentWidgetSummary[] = []
-  for (let i = 1; i <= 6; i += 1) {
-    summaries.push(makeSummary(i, `卡片${i}`))
-  }
-  const text = buildListWidgetsUserFacingText({ summaries, tabTitle: '需求文档.md' })
-  assert.match(text, /6 个 widget/)
-  assert.match(text, /示例：「卡片1」、「卡片2」、「卡片3」 等/)
-  assert.doesNotMatch(text, /id=widget_/)
-  assert.doesNotMatch(text, /可 patch/)
-  assert.doesNotMatch(text, /```json/)
-  assert.doesNotMatch(text, /「卡片4」/)
-})
-
-test('buildListWidgetsUserFacingText 缺失 tabTitle 时降级为"当前文档"', () => {
-  const text = buildListWidgetsUserFacingText({
-    summaries: [makeSummary(1, 'only_card')],
-    tabTitle: '',
-  })
-  assert.match(text, /^已查到当前文档中的 1 个 widget/)
-  assert.doesNotMatch(text, /「」/)
 })

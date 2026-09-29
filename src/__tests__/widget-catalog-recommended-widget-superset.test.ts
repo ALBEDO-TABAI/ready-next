@@ -9,6 +9,8 @@ import {
 describe('WIDGET_COMPONENT_IDS', () => {
   it('is the single source of truth mapped from documentWidgetCatalog', () => {
     assert.equal(WIDGET_COMPONENT_IDS.length, documentWidgetCatalog.length)
+    assert.equal(new Set(WIDGET_COMPONENT_IDS).size, WIDGET_COMPONENT_IDS.length)
+    for (const entry of documentWidgetCatalog) assert.ok(entry.propsSchema)
     const catalogNames = documentWidgetCatalog.map((entry) => entry.name)
     assert.deepEqual([...WIDGET_COMPONENT_IDS], catalogNames)
   })

@@ -14,15 +14,15 @@ const {
 test('package exposes the Stage Z release-candidate gate', () => {
   const pkg = JSON.parse(readFileSync(resolve(process.cwd(), 'package.json'), 'utf8'))
   assert.equal(pkg.scripts['verify:release-candidate'], 'node scripts/run-release-candidate-verify.cjs')
-  assert.equal(pkg.scripts['verify:release-structural'], 'node scripts/run-release-structural-verify.cjs')
+  assert.equal(
+    pkg.scripts['verify:release-structural'],
+    'node scripts/run-release-structural-verify.cjs && node --test scripts/__tests__/write-release-receipt.test.cjs',
+  )
   assert.equal(
     pkg.scripts['verify:release-structural-receipt'],
     'node scripts/verify-release-structural-package.cjs --existing',
   )
-  assert.equal(
-    pkg.scripts['verify:agent-acceptance-checklist'],
-    'node --import tsx --test --test-concurrency=1 src/__tests__/agent-acceptance-checklist.test.ts',
-  )
+  assert.equal(pkg.scripts['verify:agent-acceptance-checklist'], undefined)
 })
 
 test('release-candidate never rebuilds and rechecks the same package identity after evidence', () => {

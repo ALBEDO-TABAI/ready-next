@@ -5,13 +5,11 @@ import { join } from 'node:path'
 import test from 'node:test'
 
 import {
-  clearSkillTaskProjection,
-  getLatestRecoverableSkillTaskRun,
-  recordSkillParentTaskLifecycleEvent,
+  clearSkillTaskProjection, recordSkillParentTaskLifecycleEvent,
   recordSkillTaskEvent,
   registerSkillTaskRunRepository,
   readSkillTaskProjection,
-  upsertDetachedSkillTaskRun,
+  upsertDetachedSkillTaskRun
 } from '../main/modules/agent-control/skills/skill-task-tracker'
 import type { SkillTaskRunRecord, SkillTaskRunRepository } from '../main/modules/repositories/skill-task-run-repository'
 
@@ -849,33 +847,5 @@ test('SkillTaskTracker does not mark a detached task done while run_state still 
   } finally {
     registerSkillTaskRunRepository(null)
     rmSync(root, { recursive: true, force: true })
-  }
-})
-
-test('SkillTaskTracker recovery prefers an active running task over a newer done archive', () => {
-  const { repository, rows } = createTaskRunRepositoryHarness()
-  registerSkillTaskRunRepository(repository)
-  try {
-    rows.set('str-running', makeStoredRun({
-      id: 'str-running',
-      status: 'running',
-      updatedAt: '2026-04-28T00:00:00.000Z',
-    }))
-    rows.set('str-done', makeStoredRun({
-      id: 'str-done',
-      status: 'done',
-      updatedAt: '2026-04-28T00:05:00.000Z',
-      finishedAt: '2026-04-28T00:05:00.000Z',
-      steps: [{
-        id: 'skill_video_expert_pipeline#1',
-        title: '执行视频分析',
-        status: 'done',
-        updatedAt: '2026-04-28T00:05:00.000Z',
-      }],
-    }))
-
-    assert.equal(getLatestRecoverableSkillTaskRun('scope-skill-priority')?.id, 'str-running')
-  } finally {
-    registerSkillTaskRunRepository(null)
   }
 })

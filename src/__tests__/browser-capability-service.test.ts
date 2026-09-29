@@ -129,30 +129,4 @@ describe('BrowserCapabilityService', () => {
     )
     assert.equal(calls.filter((call) => call.type === 'mouse').length, 1)
   })
-
-  it('resumes a batch download without requesting an already hashed successful URL again', async () => {
-    const { host } = createCapabilityHost()
-    const requested: string[] = []
-    ;(host as any).downloadUrlToDirectory = async ({ url, targetDir }: { url: string; targetDir: string }) => {
-      requested.push(url)
-      return { success: true, savePath: `${targetDir}/next.bin`, sha256: 'next-hash' }
-    }
-    const service = new BrowserCapabilityService(host as any)
-    const result = await service.batchDownload([
-      'https://example.com/already.bin',
-      'https://example.com/next.bin',
-    ], {
-      directory: process.cwd(),
-      resumeResults: [{
-        url: 'https://example.com/already.bin',
-        success: true,
-        path: '/tmp/already.bin',
-        sha256: 'prior-hash',
-      }],
-    })
-
-    assert.deepEqual(requested, ['https://example.com/next.bin'])
-    assert.equal(result.success, 2)
-    assert.equal(result.results.length, 2)
-  })
 })

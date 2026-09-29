@@ -2,7 +2,6 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import { verifyDeliveryCandidate } from '../main/modules/agent-control/runtime-core/dynamic-delivery/delivery-verifier'
-import { classifyDeliveryRepair } from '../main/modules/agent-control/runtime-core/dynamic-delivery/delivery-repair-policy'
 import { sealDeliveryCandidate } from '../main/modules/agent-control/runtime-core/dynamic-delivery/seal-delivery-candidate'
 
 async function candidate() {
@@ -50,27 +49,6 @@ test('fresh verifier receives the sealed post-readback criteria bundle with no t
   assert.equal(captured!.maxOutputTokens, 512)
   assert.match(String(captured!.input), /document_readback/)
   assert.match(String(captured!.input), /include risks/)
-})
-
-test('repair policy never replays external actions and only targets already verified artifacts', async () => {
-  assert.equal(classifyDeliveryRepair({
-    version: 1,
-    verdict: 'repair',
-    gaps: [{ kind: 'text', description: 'clarify' }],
-    summary: 'fix text',
-  }, new Set()), 'text_only')
-  assert.equal(classifyDeliveryRepair({
-    version: 1,
-    verdict: 'repair',
-    gaps: [{ kind: 'artifact', description: 'fix document', targetRefId: 'doc:report' }],
-    summary: 'fix artifact',
-  }, new Set(['doc:report'])), 'artifact_targeted')
-  assert.equal(classifyDeliveryRepair({
-    version: 1,
-    verdict: 'repair',
-    gaps: [{ kind: 'external_action', description: 'send again' }],
-    summary: 'unsafe',
-  }, new Set()), 'non_repairable_action')
 })
 
 test('verifier unavailability is an error and cannot fail open', async () => {

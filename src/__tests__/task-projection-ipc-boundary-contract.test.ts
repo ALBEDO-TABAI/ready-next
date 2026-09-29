@@ -16,8 +16,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import type {
-  TaskProjectionRecord as TaskProjectionRecordWire,
-  TaskProjectionChangeEvent as TaskProjectionChangeEventWire,
+  TaskProjectionRecord as TaskProjectionRecordWire
 } from '../shared/ipc-contracts/task-projection'
 
 type ExpectedRecordTopLevel = Omit<
@@ -39,28 +38,4 @@ test('U4.v2-5 listTaskProjections / getTaskProjection record top-level fields ar
   }
   assert.equal(sample.taskId, 'task-u4.v2-5')
   assert.equal(sample.status, 'completed')
-})
-
-test('U4.v2-5 taskProjectionsChanged event payload is exactly wire shape', () => {
-  const evt: TaskProjectionChangeEventWire = {
-    scopeId: 'scope-evt',
-    changedTaskIds: ['t1', 't2'],
-    reason: 'update',
-  }
-  assert.equal(evt.scopeId, 'scope-evt')
-  assert.equal(evt.reason, 'update')
-})
-
-test('U4.v2-5 wire status union remains canonical child-run status set', () => {
-  const expected: TaskProjectionRecordWire['status'][] = [
-    'queued', 'running', 'recoverable_paused', 'budget_paused', 'blocked', 'completed', 'failed', 'killed',
-  ]
-  assert.equal(expected.length, 8)
-})
-
-test('U4.v2-5 wire reason union remains canonical 4-member set', () => {
-  const reasons: TaskProjectionChangeEventWire['reason'][] = [
-    'create', 'update', 'delete', 'supersede',
-  ]
-  assert.equal(reasons.length, 4)
 })

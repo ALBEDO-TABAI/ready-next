@@ -395,51 +395,6 @@ describe('BrowserTabShellService', () => {
     assert.deepStrictEqual(detached, ['tab-1', 'tab-3'])
   })
 
-  it('shows the next tab host before detaching the previous host so tab switches do not flash a blank browser surface', () => {
-    const first = createMockView()
-    const second = createMockView()
-    const tabs = new Map([
-      ['tab-1', { id: 'tab-1', url: 'https://a.com', title: 'A', domain: 'a.com', favicon: null, owner: 'manual', required: false, activity: 'idle', lastAuditedAt: null, view: first.view }],
-      ['tab-2', { id: 'tab-2', url: 'https://b.com', title: 'B', domain: 'b.com', favicon: null, owner: 'manual', required: false, activity: 'idle', lastAuditedAt: null, view: second.view }],
-    ])
-    let activeTabId = 'tab-1'
-    const events: string[] = []
-    const service = new BrowserTabShellService({
-      tabs: tabs as any,
-      getActiveTabId: () => activeTabId,
-      setActiveTabId: (tabId) => {
-        activeTabId = tabId
-      },
-      getSplitTabId: () => null,
-      setSplitTabId: () => undefined,
-      getViewBounds: () => ({ x: 0, y: 0, width: 800, height: 600 }),
-      setViewBounds: () => undefined,
-      getSplitViewBounds: () => ({ x: 0, y: 0, width: 400, height: 600 }),
-      setSplitViewBounds: () => undefined,
-      shouldPresentHosts: () => true,
-      isAllowedUrl: () => true,
-      createTab: async () => ({ success: true, tabId: 'tab-3' }),
-      detachHost: (view) => {
-        if (view === first.view) events.push('detach-prev')
-      },
-      showHost: (view) => {
-        if (view === second.view) events.push('show-next')
-      },
-      applyBounds: (view) => {
-        if (view === second.view) events.push('apply-next')
-      },
-      hideHost: () => undefined,
-      detachPreviewView: () => undefined,
-      restoreActiveTabHost: () => undefined,
-    })
-
-    const result = service.switchTab('tab-2')
-
-    assert.strictEqual(result.success, true)
-    assert.strictEqual(activeTabId, 'tab-2')
-    assert.deepStrictEqual(events, ['show-next', 'apply-next', 'detach-prev'])
-  })
-
   it('hides only attached tab hosts when browser surfaces are globally dismissed', () => {
     const first = createMockView()
     const second = createMockView()
