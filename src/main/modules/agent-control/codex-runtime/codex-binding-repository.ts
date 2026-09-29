@@ -8209,7 +8209,7 @@ export class CodexBindingRepository {
         instructionContractDigest: row.instruction_contract_digest,
         additionalContextDigest: row.additional_context_digest,
         deliveredUserTail: input.kind === 'product'
-          ? buildCodexDeliveredUserTail(this.readProductTurnRuntime(row.ready_run_id).prepared.ingress)
+          ? buildCodexDeliveredUserTail(this.readProductTurnRuntime(row.ready_run_id).prepared.ingress, row.ready_run_id)
           : [],
         providerSnapshotJson: null,
         maxIterations: budget.maxIterations,

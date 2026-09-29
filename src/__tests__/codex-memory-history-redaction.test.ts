@@ -25,7 +25,7 @@ import {
 function redactHistory(input: Omit<Parameters<typeof redactPriorReadyMemoryHistory>[0], 'currentTurnContext'>) {
   let currentTurnContext: ReturnType<typeof currentTurnReadyAdditionalContext> | null = null
   if (input.requestKind === 'product') {
-    try { currentTurnContext = currentTurnReadyAdditionalContext(input.input, []) } catch { /* invalid boundary */ }
+    try { currentTurnContext = currentTurnReadyAdditionalContext(input.input, [], 'run-memory') } catch { /* invalid boundary */ }
   }
   return redactPriorReadyMemoryHistory({ ...input, currentTurnContext })
 }
@@ -72,7 +72,7 @@ function readyResource(logicalResourceId: string) {
     supersedesVersion: null,
     policyEpoch: 1,
   }
-  return message('developer', `<ready_resources>${JSON.stringify(reference)}</ready_resources>`)
+  return message('developer', `<ready-resource-context>${JSON.stringify({ contract: "ready_resource_context_v1", readyRunId: "run-memory", references: [reference] })}</ready-resource-context>`)
 }
 
 function explicitRetry() {
@@ -303,7 +303,7 @@ test('gateway validates original sidecar input but receipts and forwards redacte
   const oldMarker = memoryMarker('old')
   const currentMarker = memoryMarker('current')
   const earlierInput = [{ type: 'text' as const, text: 'older retained B', text_elements: [] }]
-  const tail = { contract: 'ready_uncommitted_user_tail_v1' as const, originUserMessageId: 'older-B',
+  const tail = { contract: 'ready_uncommitted_user_tail_v2' as const, readyRunId: 'run-memory', originUserMessageId: 'older-B',
     input: earlierInput, inputDigest: digestCanonicalJson(earlierInput) }
   const tailMessage = message('user', `<external_ready-uncommitted-user-tail:0>${JSON.stringify(tail)}</external_ready-uncommitted-user-tail:0>`)
   const originalInput = [
@@ -483,7 +483,7 @@ test('the shared current-context scanner retains strict current memory shape and
     [{ ...marker.item, content: [{ ...marker.item.content[0], injected: 'extra' }] }],
     [{ ...marker.item, content: [marker.item.content[0], { type: 'input_image', image_url: 'hidden' }] }],
   ]) {
-    assert.throws(() => currentTurnReadyAdditionalContext([...markers, current], []), /gateway_memory_context_invalid/)
+    assert.throws(() => currentTurnReadyAdditionalContext([...markers, current], [], 'run-memory'), /gateway_memory_context_invalid/)
     assert.equal(redactHistory({ requestKind: 'product', input: [...markers, current] }).evidence.failClosed, true)
   }
 })

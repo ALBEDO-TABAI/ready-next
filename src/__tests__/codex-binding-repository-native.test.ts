@@ -4162,7 +4162,7 @@ test('formal-origin handoff carries safe failed B and divergent C once without r
       requestDigest: 'frozen-tail-consumer-probe', receivedAt: admittedAt,
       get requestEvidence(): never { throw new Error('tail_probe_must_stop_before_receipt') },
       validate(binding) {
-        assert.deepEqual(binding.deliveredUserTail, [{ contract: 'ready_uncommitted_user_tail_v1',
+        assert.deepEqual(binding.deliveredUserTail, [{ contract: 'ready_uncommitted_user_tail_v2', readyRunId: retry.runId,
           originUserMessageId: b.ingress.canonicalCurrentInputRef.messageId,
           input: b.ingress.canonicalCurrentInputRef.input,
           inputDigest: digestCodexUserInput(b.ingress.canonicalCurrentInputRef.input) }],

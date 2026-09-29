@@ -761,8 +761,11 @@ test('chat conversion streams text and authorized tools while blocking malicious
       content: [{ type: 'input_text', text: `<external_ready_resources>${JSON.stringify(v1)}</external_ready_resources>` }],
     },
     {
-      type: 'message', role: 'user',
-      content: [{ type: 'input_text', text: `<external_ready_resources>${JSON.stringify(v2)}</external_ready_resources>` }],
+      type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'previous answer' }],
+    },
+    {
+      type: 'message', role: 'developer',
+      content: [{ type: 'input_text', text: `<ready-resource-context>${JSON.stringify({ contract: 'ready_resource_context_v1', readyRunId: 'run-1', references: [v2] })}</ready-resource-context>` }],
     },
     {
       type: 'message', role: 'user',
@@ -835,7 +838,7 @@ test('chat conversion streams text and authorized tools while blocking malicious
     assert.match(JSON.stringify(upstreamBodies[0]), /data:image\/png;base64,AAAA/)
     const developerMessages = (upstreamBodies[0]?.messages as Array<Record<string, unknown>>)
       .filter((message) => message.role === 'developer')
-    assert.equal(developerMessages.length, 2)
+    assert.equal(developerMessages.length, 3)
     assert.equal(developerMessages[0].content, 'fixed instructions')
     assert.equal(developerMessages[1].content, hostOverlay)
     assert.equal(

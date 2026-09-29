@@ -23,12 +23,14 @@ import {
 import {
   createCodexUpstreamProfileSnapshot,
   digestCanonicalJson,
+  digestReadyAdditionalContext,
   instructionTranscriptDigest,
   resolveCodexNativeModelSettings,
 } from '../main/modules/agent-control/codex-runtime/codex-model-gateway-contract'
 import { verifyCodexAutomaticCompactionEvidence } from '../main/modules/agent-control/codex-runtime/codex-automatic-compaction-evidence'
 import { projectCodexHeadActionProjection } from '../main/modules/agent-control/codex-runtime/codex-action-surface'
 import { CodexModelGateway } from '../main/modules/agent-control/codex-runtime/codex-model-gateway'
+import { CodexTurnInputBuilder } from '../main/modules/agent-control/codex-runtime/codex-turn-input-builder'
 import type { CodexNativeNotification } from '../main/modules/agent-control/codex-runtime/codex-native-runtime'
 import {
   CodexProductRunPreparer,
@@ -120,6 +122,9 @@ function prepared(
   readyToolSurface: PreparedCodexProductRun['readyToolSurface'] = createCodexToolFixture([]).readyToolSurface,
 ): PreparedCodexProductRun {
   const maxToolCalls = readyToolSurface.toolNames.length > 0 ? 4 : 0
+  const resourceRefs = ['run-first', 'run-second'].includes(runId)
+    ? [{ logicalResourceId: 'document-e3', currentVersion: 'v1', currentDigest: 'f'.repeat(64), supersedesVersion: null, policyEpoch: 1 }]
+    : []
   const result = new CodexProductRunPreparer().prepare({
     readyMemorySnapshot: disabledReadyMemorySnapshot(),
     taskId: `task-${runId}`,
@@ -130,8 +135,8 @@ function prepared(
     reservationEvidenceDigest: reservation.reservationEvidenceDigest,
     originUserMessageId: `message-${runId}`,
     currentInput: [{ type: 'text', text, text_elements: [] }],
-    explicitResourceEnvelope: { input: [], resourceRefs: [] },
-    resourceAdditionalContext: [], actionAdmissionRef,
+    explicitResourceEnvelope: { input: [], resourceRefs },
+    resourceAdditionalContext: resourceRefs, actionAdmissionRef,
     uncommittedTailAssignments: [], supersededUncommittedItems: [],
     trustedWorkbenchMode: 'browser',
     readyToolSurface,
@@ -834,7 +839,7 @@ test('pinned app-server crosses the Ready gateway for product and compaction req
         codexModel: 'ready-e0-model',
         upstreamProfileSnapshotRef: upstreamSnapshot.snapshotRef,
         upstreamProfileSnapshotDigest: upstreamSnapshot.snapshotDigest,
-        additionalContextDigest: digestCanonicalJson([]),
+        additionalContextDigest: digestReadyAdditionalContext({ resourceReferences: run.ingress.resourceAdditionalContext, explicitRetry: null }),
         turnContractDigest: `turn-contract-${runId}`,
         continuationCandidate: existingThread ? {
           model: 'ready-e0-model', threadConfig: resolveCodexNativeModelSettings(upstreamSnapshot.snapshot).threadConfig,
@@ -985,27 +990,17 @@ test('pinned app-server crosses the Ready gateway for product and compaction req
         notification.method === 'turn/completed'
         && notification.params.threadId === runThreadId
       ))
-      const started = await client.turnStart({
-        threadId: runThreadId,
-        clientUserMessageId: `client-message-${run.runId}`,
-        collaborationMode: {
-          mode: 'default',
-          settings: {
-            model: 'ready-e0-model',
-            reasoning_effort: snapshotByRun.get(run.runId)?.snapshot.reasoningEffort || null,
-            developer_instructions: null,
-          },
-        },
-        environments: [],
-        input: run.ingress.canonicalCurrentInputRef.input,
-        additionalContext: {},
-        responsesapiClientMetadata: {
-          readyRunId: run.runId,
-          toolSurfaceDigest: run.readyToolSurface.toolSurfaceDigest,
-          turnContractDigest: `turn-contract-${run.runId}`,
-          upstreamProfileSnapshotDigest: snapshotByRun.get(run.runId)?.snapshotDigest,
-        },
+      const built = new CodexTurnInputBuilder().build(run.ingress, {
+        threadId: runThreadId, turnRequestId: `client-message-${run.runId}`, readyRunId: run.runId,
+        reasoningEffort: snapshotByRun.get(run.runId)?.snapshot.reasoningEffort || null,
+        toolSurfaceDigest: run.readyToolSurface.toolSurfaceDigest,
+        turnContractDigest: `turn-contract-${run.runId}`,
+        upstreamProfileSnapshotDigest: snapshotByRun.get(run.runId)!.snapshotDigest,
+        readyMemorySnapshot: run.readyMemorySnapshot,
       })
+      assert.ok(built.ok)
+      if (!built.ok) throw new Error(built.code)
+      const started = await client.turnStart(built.params)
       const terminal = await terminalPromise
       assert.equal(terminal.method, 'turn/completed')
       if (terminal.method !== 'turn/completed') throw new Error('terminal_missing')

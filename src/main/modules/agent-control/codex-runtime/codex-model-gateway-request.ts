@@ -314,7 +314,7 @@ export function validateBinding(input: {
       || !metadata.readyRunId
     ) throw new CodexModelGatewayError('gateway_product_metadata_mismatch', 409)
     try {
-      currentTurnContext = currentTurnReadyAdditionalContext(body.input, binding.deliveredUserTail)
+      currentTurnContext = currentTurnReadyAdditionalContext(body.input, binding.deliveredUserTail, metadata.readyRunId)
     } catch {
       throw new CodexModelGatewayError('gateway_additional_context_mismatch', 409)
     }

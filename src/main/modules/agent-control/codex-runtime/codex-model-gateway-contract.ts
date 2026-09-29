@@ -209,7 +209,22 @@ function parseReadyResourcePayload(payload: string): JsonObject[] {
 function readyResourceReferencesFromText(text: string): {
   recognized: boolean
   references: JsonObject[]
+  readyRunId?: string
 } {
+  const snapshot = text.match(/^<ready-resource-context>([\s\S]*)<\/ready-resource-context>$/)
+  if (snapshot) {
+    let value: unknown
+    try { value = JSON.parse(snapshot[1]) } catch { throw new CodexModelGatewayContractError('gateway_resource_context_invalid') }
+    if (!isRecord(value) || value.contract !== 'ready_resource_context_v1'
+      || Object.keys(value).sort().join(',') !== 'contract,readyRunId,references'
+      || typeof value.readyRunId !== 'string' || !value.readyRunId
+      || !Array.isArray(value.references)) throw new CodexModelGatewayContractError('gateway_resource_context_invalid')
+    const references = value.references.map((reference) => parseReadyResourceReference(JSON.stringify(reference)))
+    if (new Set(references.map((reference) => reference.logicalResourceId)).size !== references.length) {
+      throw new CodexModelGatewayContractError('gateway_resource_context_invalid')
+    }
+    return { recognized: true, references, readyRunId: value.readyRunId }
+  }
   const application = text.match(/^<ready_resources>([\s\S]*)<\/ready_resources>$/)
   if (application) {
     return {
@@ -516,6 +531,7 @@ export function currentTurnReadyResourceReferences(input: unknown): unknown[] {
 export function currentTurnReadyAdditionalContext(
   input: unknown,
   expectedDeliveredUserTail: readonly CodexDeliveredUserTail[],
+  readyRunId: string,
 ): {
   resourceReferences: unknown[]
   explicitRetry: JsonObject | null
@@ -539,7 +555,7 @@ export function currentTurnReadyAdditionalContext(
     throw new CodexModelGatewayContractError('gateway_uncommitted_user_tail_mismatch')
   }
   const latest = new Map<string, JsonObject>()
-  collectReadyResourceReferencesFromItem(input[lastUser], latest)
+  let resourceSnapshotSeen = false
   let explicitRetry: JsonObject | null = null
   let readyMemory: ReadyMemoryPromptPayload | null = null
   let readyMemoryIndex: number | null = null
@@ -556,7 +572,8 @@ export function currentTurnReadyAdditionalContext(
       let payload: unknown
       try { payload = match ? JSON.parse(match[2]) : null }
       catch { throw new CodexModelGatewayContractError('gateway_uncommitted_user_tail_mismatch') }
-      if (!match || item.type !== 'message' || item.role !== 'user'
+      if (!match || !isRecord(payload) || payload.readyRunId !== readyRunId
+        || item.type !== 'message' || item.role !== 'user'
         || Object.keys(item).some((key) => !['type', 'id', 'role', 'content'].includes(key))
         || (item.id !== undefined && typeof item.id !== 'string')
         || !Array.isArray(item.content) || item.content.length !== 1
@@ -574,6 +591,17 @@ export function currentTurnReadyAdditionalContext(
     for (const text of texts) {
       const resources = readyResourceReferencesFromText(text)
       if (resources.recognized) {
+        // Old tags remain readable history, never authority for the current run.
+        if (resources.readyRunId !== readyRunId || resourceSnapshotSeen
+          || item.type !== 'message' || item.role !== 'developer'
+          || Object.keys(item).some((key) => !['type', 'id', 'role', 'content'].includes(key))
+          || (item.id !== undefined && typeof item.id !== 'string')
+          || !Array.isArray(item.content) || item.content.length !== 1
+          || !isRecord(item.content[0]) || item.content[0].type !== 'input_text'
+          || Object.keys(item.content[0]).some((key) => key !== 'type' && key !== 'text')) {
+          throw new CodexModelGatewayContractError('gateway_resource_context_invalid')
+        }
+        resourceSnapshotSeen = true
         for (const reference of resources.references) {
           if (!latest.has(String(reference.logicalResourceId))) {
             latest.set(String(reference.logicalResourceId), reference)

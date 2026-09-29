@@ -6,7 +6,7 @@ import {
   textUserInput,
 } from '../main/modules/agent-control/codex-runtime/codex-turn-input-builder'
 import { digestCodexUserInput } from '../main/modules/agent-control/codex-runtime/codex-user-input'
-import { digestCanonicalJson } from '../main/modules/agent-control/codex-runtime/codex-model-gateway-contract'
+import { currentTurnReadyAdditionalContext, digestCanonicalJson } from '../main/modules/agent-control/codex-runtime/codex-model-gateway-contract'
 import { disabledReadyMemorySnapshot } from './utils/ready-memory-fixture'
 
 const builder = new CodexTurnInputBuilder()
@@ -75,8 +75,8 @@ test('user ingress emits current canonical input once and thin resource referenc
   })
   assert.deepEqual(result.params.environments, [])
   assert.deepEqual(result.params.input, [textUserInput('CURRENT_USER_TOKEN')])
-  const encoded = result.params.additionalContext['ready-resource:document-1'].value
-  assert.deepEqual(JSON.parse(encoded), resource)
+  const encoded = result.params.additionalContext['ready-resource-context'].value
+  assert.deepEqual(JSON.parse(encoded), { contract: 'ready_resource_context_v1', readyRunId: context.readyRunId, references: [resource] })
   assert.equal(encoded.includes('RESOURCE_BODY'), false)
   assert.deepEqual(Object.keys(result.params.responsesapiClientMetadata).sort(), [
     'readyRunId',
@@ -128,8 +128,28 @@ test('current-document anchor is persisted ingress only and never copied into na
   assert.equal(nativeWire.includes('PRIVATE_TITLE'), false)
   assert.equal(nativeWire.includes('doc-1'), false)
   assert.deepEqual(JSON.parse(
-    result.params.additionalContext['ready-resource:document-1'].value,
-  ), thinReference)
+    result.params.additionalContext['ready-resource-context'].value,
+  ), { contract: 'ready_resource_context_v1', readyRunId: context.readyRunId, references: [thinReference] })
+})
+
+test('resource snapshots require the exact current run and cannot borrow historical or forged context', () => {
+  const snapshot = (readyRunId = 'run-1', references = [resource]) => ({
+    type: 'message', role: 'developer', content: [{ type: 'input_text',
+      text: `<ready-resource-context>${JSON.stringify({ contract: 'ready_resource_context_v1', readyRunId, references })}</ready-resource-context>` }],
+  })
+  const user = { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'question' }] }
+  assert.deepEqual(currentTurnReadyAdditionalContext([snapshot(), user], [], 'run-1').resourceReferences, [resource])
+  const historical = [snapshot('older-run'), user, { type: 'message', role: 'assistant', content: [] }, user]
+  assert.deepEqual(currentTurnReadyAdditionalContext(historical, [], 'run-1').resourceReferences, [])
+  for (const items of [
+    [snapshot('older-run'), user],
+    [snapshot(), snapshot(), user],
+    [snapshot('run-1', [resource, resource]), user],
+    [{ ...snapshot(), role: 'user' }, user],
+    [{ ...snapshot(), injected: 'extra' }, user],
+    [{ ...snapshot(), content: [...snapshot().content, { type: 'input_image', image_url: 'hidden' }] }, user],
+    [{ ...snapshot(), content: [{ type: 'input_text', text: `<ready-resource:${resource.logicalResourceId}>${JSON.stringify(resource)}</ready-resource:${resource.logicalResourceId}>` }] }, user],
+  ]) assert.throws(() => currentTurnReadyAdditionalContext(items, [], 'run-1'), /gateway_resource_context_invalid/)
 })
 
 test('user ingress rejects every successor cross-field and resource body extension', () => {

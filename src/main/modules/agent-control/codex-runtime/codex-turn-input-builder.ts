@@ -315,14 +315,15 @@ export function resourceReferenceSetsMatch(
 
 function buildResourceContext(
   references: ResourceVersionReference[],
+  readyRunId: string,
 ): Record<string, CodexAdditionalContextEntry> {
-  return Object.fromEntries(references.map((reference) => [
-    `ready-resource:${reference.logicalResourceId}`,
-    {
-      kind: 'application' as const,
-      value: JSON.stringify(reference),
-    },
-  ]))
+  // Native additionalContext is a diff: bind the complete snapshot to this run
+  // so unchanged resources are still emitted before each new user message.
+  return references.length === 0 ? {} : {
+    'ready-resource-context': { kind: 'application', value: JSON.stringify({
+      contract: 'ready_resource_context_v1', readyRunId, references,
+    }) },
+  }
 }
 
 export function buildCodexExplicitRetryContext(input: UserIngress) {
@@ -357,13 +358,14 @@ export function buildCodexExplicitRetryContext(input: UserIngress) {
 }
 
 export type CodexDeliveredUserTail = {
-  contract: 'ready_uncommitted_user_tail_v1'
+  contract: 'ready_uncommitted_user_tail_v2'
+  readyRunId: string
   originUserMessageId: string
   input: CodexUserInput[]
   inputDigest: string
 }
 
-export function buildCodexDeliveredUserTail(ingress: UserIngress): CodexDeliveredUserTail[] {
+export function buildCodexDeliveredUserTail(ingress: UserIngress, readyRunId: string): CodexDeliveredUserTail[] {
   return (ingress.uncommittedUserTail || []).filter((item) => (
     ingress.uncommittedTailAssignments?.some((assignment) => (
       assignment.originUserMessageId === item.originUserMessageId
@@ -371,7 +373,8 @@ export function buildCodexDeliveredUserTail(ingress: UserIngress): CodexDelivere
       && assignment.plan === 'deliver_untrusted_history'
     ))
   )).map((item) => ({
-    contract: 'ready_uncommitted_user_tail_v1',
+    contract: 'ready_uncommitted_user_tail_v2',
+    readyRunId,
     originUserMessageId: item.originUserMessageId,
     input: item.input,
     inputDigest: item.inputDigest,
@@ -471,8 +474,8 @@ export class CodexTurnInputBuilder {
           ...ingress.explicitResourceEnvelope.input,
         ],
         additionalContext: {
-          ...buildResourceContext(ingress.resourceAdditionalContext),
-          ...Object.fromEntries(buildCodexDeliveredUserTail(ingress).map((item, index) => [
+          ...buildResourceContext(ingress.resourceAdditionalContext, context.readyRunId),
+          ...Object.fromEntries(buildCodexDeliveredUserTail(ingress, context.readyRunId).map((item, index) => [
             `ready-uncommitted-user-tail:${index}`,
             {
               kind: 'untrusted' as const,

@@ -9,6 +9,9 @@ import { createInterface } from 'node:readline'
 import test from 'node:test'
 import { normalizeCodexTurn } from '../main/modules/agent-control/codex-runtime/codex-native-runtime'
 import { projectCodexUserInputReadback, type CodexUserInput } from '../main/modules/agent-control/codex-runtime/codex-user-input'
+import { CodexTurnInputBuilder, buildCodexDeliveredUserTail } from '../main/modules/agent-control/codex-runtime/codex-turn-input-builder'
+import { currentTurnReadyAdditionalContext, digestReadyAdditionalContext } from '../main/modules/agent-control/codex-runtime/codex-model-gateway-contract'
+import { disabledReadyMemorySnapshot } from './utils/ready-memory-fixture'
 
 test('pinned runtime retains resource inputs and quota failures across restart on the same thread', { timeout: 30_000 }, async () => {
   const manifest = JSON.parse(readFileSync('assets/codex-runtime/runtime-manifest.json', 'utf8'))
@@ -128,13 +131,43 @@ supports_websockets = false
       { type: 'image', url: `data:image/png;base64,${png}`, detail: 'original' },
     ]
     const expected: Array<{ marker: string; content: CodexUserInput[] }> = []
+    const reference = (id: string, version = 'v1') => ({ logicalResourceId: id,
+      currentVersion: version, currentDigest: version, policyEpoch: 1, supersedesVersion: null })
     for (let sequence = 1; sequence <= 6; sequence++) {
       const marker = `CURRENT_${sequence}_END`
       const input: CodexUserInput[] = [{ type: 'text', text: marker, text_elements: [] }, ...resources]
-      const startedTurn = await client.request('turn/start', { threadId, clientUserMessageId: marker, input })
+      const refs = sequence === 1 ? [reference('file'), reference('folder')]
+        : sequence === 4 ? [] : [reference('folder', sequence === 6 ? 'v2' : 'v1')]
+      const tailInput: CodexUserInput[] = [{ type: 'text', text: 'uncommitted earlier input', text_elements: [] }]
+      const tailDigest = createHash('sha256').update(JSON.stringify(tailInput)).digest('hex')
+      const ingress = {
+        kind: 'user_ingress' as const, attemptKind: 'user_ingress' as const, originUserMessageId: marker,
+        canonicalCurrentInputRef: { messageId: marker, input },
+        explicitResourceEnvelope: { input: [], resourceRefs: refs }, resourceAdditionalContext: refs,
+        actionAdmissionRef: { headProjectionDigest: 'f'.repeat(64),
+          actionProjectionVersion: { scopeEpoch: 0, headGeneration: 1, actionProjectionSequence: sequence },
+          actionHeadIdentity: { aliasId: 'scope', aliasGeneration: 1, threadBindingId: 'binding', headRevision: 1 } },
+        uncommittedUserTail: [{ originUserMessageId: 'earlier', input: tailInput, inputDigest: tailDigest,
+          policy: 'untrusted_text_history' as const }],
+        uncommittedTailAssignments: [{ originUserMessageId: 'earlier', inputDigest: tailDigest, plan: 'deliver_untrusted_history' as const }],
+        supersededUncommittedItems: [],
+      }
+      const readyRunId = `run-${sequence}`
+      const built = new CodexTurnInputBuilder().build(ingress, {
+        threadId, turnRequestId: marker, readyRunId, reasoningEffort: null,
+        toolSurfaceDigest: 'f'.repeat(64), turnContractDigest: 'a'.repeat(64),
+        upstreamProfileSnapshotDigest: 'b'.repeat(64), readyMemorySnapshot: disabledReadyMemorySnapshot(),
+      })
+      assert.ok(built.ok)
+      if (!built.ok) throw new Error(built.code)
+      const startedTurn = await client.request('turn/start', built.params)
       const completed = await client.complete(startedTurn.turn.id)
       assert.equal(completed.status, [2, 4, 5].includes(sequence) ? 'failed' : 'completed')
       if ([4, 5].includes(sequence)) assert.equal(completed.error.codexErrorInfo, 'usageLimitExceeded')
+      const currentContext = currentTurnReadyAdditionalContext(requests.at(-1)?.input,
+        buildCodexDeliveredUserTail(ingress, readyRunId), readyRunId)
+      assert.equal(digestReadyAdditionalContext(currentContext),
+        digestReadyAdditionalContext({ resourceReferences: refs, explicitRetry: null }), `turn ${sequence}`)
       expected.push({ marker, content: projectCodexUserInputReadback(input) })
       const checkReadback = async () => {
         const read = await client.request('thread/read', { threadId, includeTurns: true })

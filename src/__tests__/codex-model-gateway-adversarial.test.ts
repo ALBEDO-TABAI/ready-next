@@ -446,7 +446,7 @@ test('additionalContext digest ignores admission vs native emit order for multip
   assert.equal(digestReadyResourceReferences([]), digestCanonicalJson([]))
 })
 
-test('multi-resource application tags pass the additionalContext gate regardless of emit order', async () => {
+test('run-owned resource snapshots pass the gateway while changed or stale snapshots never reach upstream', async () => {
   let upstreamCalls = 0
   const upstream = createServer((_request, response) => {
     upstreamCalls += 1
@@ -475,20 +475,13 @@ test('multi-resource application tags pass the additionalContext gate regardless
     supersedesVersion: null,
     policyEpoch: 1,
   }
-  const tagged = (value: typeof skill) => ({
-    type: 'message',
-    role: 'developer',
-    content: [{
-      type: 'input_text',
-      text: `<ready-resource:${value.logicalResourceId}>${JSON.stringify(value)}</ready-resource:${value.logicalResourceId}>`,
-    }],
+  const snapshot = (references: typeof skill[], readyRunId = 'run-1') => ({
+    type: 'message', role: 'developer', content: [{ type: 'input_text',
+      text: `<ready-resource-context>${JSON.stringify({ contract: 'ready_resource_context_v1', readyRunId, references })}</ready-resource-context>` }],
   })
   const request = requestBody()
-  request.input = [
-    tagged(folder),
-    tagged(skill),
-    { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'use the skill on this folder' }] },
-  ]
+  request.input = [snapshot([folder, skill]),
+    { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'use the skill on this folder' }] }]
   const binding = bindRequest(request, created.snapshot)
   binding.additionalContextDigest = digestCanonicalJson([skill, folder])
   const gateway = new CodexModelGateway({
@@ -515,6 +508,16 @@ test('multi-resource application tags pass the additionalContext gate regardless
     })
     assert.notEqual(accepted.status, 409)
     assert.equal(upstreamCalls, 1)
+    for (const invalid of [snapshot([folder, skill], 'older-run'), snapshot([folder])]) {
+      request.input[0] = invalid
+      const rejected = await fetch(`${address.url}/v1/responses`, {
+        method: 'POST', headers: { authorization: 'Bearer local-token', 'content-type': 'application/json' },
+        body: JSON.stringify(request),
+      })
+      assert.equal(rejected.status, 409)
+      assert.match(await rejected.text(), /gateway_additional_context_mismatch/)
+      assert.equal(upstreamCalls, 1)
+    }
   } finally {
     await gateway.stop()
     await close(upstream)
@@ -581,7 +584,7 @@ test('explicit retry metadata is bound application context rather than developer
     instructionTranscriptDigest('fixed instructions', [overlay, retryItem, user]),
     instructionTranscriptDigest('fixed instructions', [overlay]),
   )
-  assert.deepEqual(currentTurnReadyAdditionalContext([overlay, retryItem, user], []), {
+  assert.deepEqual(currentTurnReadyAdditionalContext([overlay, retryItem, user], [], 'run-1'), {
     resourceReferences: [],
     explicitRetry: retry,
     readyMemory: null,
@@ -3434,7 +3437,7 @@ test('start and stop racing cannot resurrect a listener', async () => {
 // Native 0.149.0 emits application entries before untrusted entries, even when the
 // builder inserts the tail first. The latter therefore sits between Retry and B.
 const deliveredTailFixture = [0, 1].map((index) => ({
-  contract: 'ready_uncommitted_user_tail_v1' as const,
+  contract: 'ready_uncommitted_user_tail_v2' as const, readyRunId: 'run-1',
   originUserMessageId: `earlier-${index}`,
   input: [{ type: 'text' as const, text: `earlier user input ${index}`, text_elements: [] }],
   inputDigest: digestCanonicalJson([{ type: 'text', text: `earlier user input ${index}`, text_elements: [] }]),
@@ -3450,7 +3453,7 @@ const nativeCurrentUser = { type: 'message', role: 'user', content: [{ type: 'in
 test('current Retry context crosses only its exact frozen delivered user tail', () => {
   const parsed = currentTurnReadyAdditionalContext([
     nativeRetryMessage, ...deliveredTailFixture.map((_, index) => nativeTailMessage(index)), nativeCurrentUser,
-  ], deliveredTailFixture)
+  ], deliveredTailFixture, 'run-1')
   assert.deepEqual(parsed, { resourceReferences: [], explicitRetry: { predecessorRunId: 'current-predecessor' }, readyMemory: null, currentUserIndex: 3, readyMemoryIndex: null })
 })
 
@@ -3460,6 +3463,7 @@ test('current tail rejects changed content, digest, identity, role, key, order, 
   const mutations = [
     [], [first], [first, first, second], [second, first],
     [nativeTailMessage(0, { ...deliveredTailFixture[0], originUserMessageId: 'foreign' }), second],
+    [nativeTailMessage(0, { ...deliveredTailFixture[0], readyRunId: 'older-run' }), second],
     [nativeTailMessage(0, { ...deliveredTailFixture[0], inputDigest: 'f'.repeat(64) }), second],
     [nativeTailMessage(0, { ...deliveredTailFixture[0], input: [{ type: 'text', text: 'changed', text_elements: [] }] }), second],
     [{ ...first, role: 'developer' }, second],
@@ -3476,29 +3480,29 @@ test('current tail rejects changed content, digest, identity, role, key, order, 
   ]
   for (const tail of mutations) assert.throws(() => currentTurnReadyAdditionalContext([
     nativeRetryMessage, ...tail, nativeCurrentUser,
-  ], deliveredTailFixture), /gateway_uncommitted_user_tail_mismatch/)
-  assert.throws(() => currentTurnReadyAdditionalContext([nativeRetryMessage, first, nativeCurrentUser], []),
+  ], deliveredTailFixture, 'run-1'), /gateway_uncommitted_user_tail_mismatch/)
+  assert.throws(() => currentTurnReadyAdditionalContext([nativeRetryMessage, first, nativeCurrentUser], [], 'run-1'),
     /gateway_uncommitted_user_tail_mismatch/)
 })
 
 test('historical tails do not satisfy current expected delivery or resurrect a historical Retry receipt', () => {
   const history = [nativeRetryMessage, nativeTailMessage(0), nativeCurrentUser,
     { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'old answer' }] }]
-  assert.deepEqual(currentTurnReadyAdditionalContext([...history, nativeCurrentUser], []),
+  assert.deepEqual(currentTurnReadyAdditionalContext([...history, nativeCurrentUser], [], 'run-1'),
     { resourceReferences: [], explicitRetry: null, readyMemory: null, currentUserIndex: 4, readyMemoryIndex: null })
-  assert.throws(() => currentTurnReadyAdditionalContext([...history, nativeCurrentUser], [deliveredTailFixture[0]]),
+  assert.throws(() => currentTurnReadyAdditionalContext([...history, nativeCurrentUser], [deliveredTailFixture[0]], 'run-1'),
     /gateway_uncommitted_user_tail_mismatch/)
 })
 
 
 test('delivered tail cannot occupy the current user slot even when its preceding copy satisfies the tail count', () => {
   const first = nativeTailMessage(0)
-  assert.throws(() => currentTurnReadyAdditionalContext([nativeRetryMessage, first, first], [deliveredTailFixture[0]]),
+  assert.throws(() => currentTurnReadyAdditionalContext([nativeRetryMessage, first, first], [deliveredTailFixture[0]], 'run-1'),
     /gateway_uncommitted_user_tail_mismatch/)
-  assert.throws(() => currentTurnReadyAdditionalContext([nativeRetryMessage, first], []),
+  assert.throws(() => currentTurnReadyAdditionalContext([nativeRetryMessage, first], [], 'run-1'),
     /gateway_uncommitted_user_tail_mismatch/)
   assert.equal(currentTurnReadyAdditionalContext([nativeRetryMessage, { ...first, id: 'native-optional-id' }, nativeCurrentUser],
-    [deliveredTailFixture[0]]).explicitRetry?.predecessorRunId, 'current-predecessor')
+    [deliveredTailFixture[0]], 'run-1').explicitRetry?.predecessorRunId, 'current-predecessor')
 })
 
 test('Gateway forwards exact multi-tail Retry and rejects missing, altered and current-slot tails before receipts or upstream bytes', async () => {
