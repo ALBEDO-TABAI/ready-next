@@ -8,7 +8,7 @@ export const RSS_JUDGMENT_INSTRUCTIONS = `按用户保存的分类与精选标�
 标准是语义条件，不是关键词匹配。可以同时属于多个主题。reason 描述此资料与标准的关系，不新增资料中没有的事实。evidence 必须逐字来自本次给出的标题或正文片段。
 若 eventContext 存在且 manual=false、reused=false，同一 JSON 还必须包含 event：{"kind":"new|duplicate|progress|insufficient","eventId":null或候选ID,"factId":null或候选事实ID,"quote":原文摘句或null,"sourceRole":"direct|secondary|unknown","reason":"简短依据"}。
 判断文章的主要事件，不能只凭公司名或标题相近合并。new 为独立事件，eventId/factId 均为null；duplicate 是候选事件中同一事实的另一篇报道，必须指定事件和事实；progress 是该事件确有新增事实，指定事件，factId为null。前三者 quote 必须逐字来自本次来源标题或正文片段，不引用候选摘句冒充本文。证据不足、多件事无明确主次时用 insufficient，三个引用字段均为null。
-候选只覆盖近期有限事件，每事件最多3个事实，不代表搜索过完整历史。historical=true 是已保存的先前版本摘句，不能当作仍然有效的当前报道；用它区分全文补全后的同一事实、修订或真正新增进展，不能仅因同一文章ID就认定相同。direct 仅指原始发布方，无法判断来源角色则 unknown；一手来源并不保证事实正确。事件判断不受分类描述或分批影响。没有请求事件判断或 manual=true/reused=true 时，不返回 event。`
+候选只覆盖近期有限事件，每事件最多3个事实，不代表搜索过完整历史。historical=true 表示来源内容或归组方法已不是当前版本，摘句是历史资料，不能当作仍然有效的当前报道或已验证归属；用它区分全文补全后的同一事实、修订或真正新增进展，不能仅因同一文章ID就认定相同。direct 仅指原始发布方，无法判断来源角色则 unknown；一手来源并不保证事实正确。事件判断不受分类描述或分批影响。没有请求事件判断或 manual=true/reused=true 时，不返回 event。`
 
 export function buildRSSJudgmentInput(article: RSSArticle, definitions: RSSProcessingDefinition[], eventContext?: RSSEventContext) {
   const bodyAvailable = ['ready', 'partial'].includes(article.body.status) && article.body.markdown !== null

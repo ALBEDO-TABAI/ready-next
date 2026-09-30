@@ -136,7 +136,7 @@ export class RSSContentStore {
           COUNT(*) OVER (PARTITION BY ${bucket}) AS matching_count,SUM(i.read=0) OVER (PARTITION BY ${bucket}) AS matching_unread,
           SUM(i.starred=1) OVER (PARTITION BY ${bucket}) AS matching_starred,
           ${query.sort === 'newest' ? 'MAX' : 'MIN'}(COALESCE(i.published_at,i.first_seen_at)) OVER (PARTITION BY ${bucket}) AS display_time,
-          ROW_NUMBER() OVER (PARTITION BY ${bucket} ORDER BY ${rssEventRepresentativeOrder('ee')}) AS representative
+          ROW_NUMBER() OVER (PARTITION BY ${bucket} ORDER BY ${rssEventRepresentativeOrder('ee', 'em')}) AS representative
           FROM rss_items i LEFT JOIN rss_article_content c ON c.item_id=i.id
           LEFT JOIN rss_event_members em ON em.item_id=i.id LEFT JOIN rss_event_evidence ee ON ee.id=em.evidence_id LEFT JOIN rss_event_facts ef ON ef.id=ee.fact_id${predicate})`
         cardTotal = db.prepare(`${matches} SELECT COUNT(*) AS n FROM matches WHERE representative=1`).get<{ n: number }>(...args)!.n

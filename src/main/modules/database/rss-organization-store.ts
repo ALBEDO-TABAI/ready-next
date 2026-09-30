@@ -1,11 +1,13 @@
 import { randomUUID } from 'node:crypto'
 import { RSS_PROCESSING_METHOD, type RSSJudgment, type RSSProcessingDefinition } from '../../../shared/rss-processing'
 import { assertDatabaseConnectionReady, type DatabaseConnection } from './connection'
-import { RSSDefinitionWriteSchema, RSSDefinitionDeleteSchema, RSSMembershipWriteSchema, rssArticleRevision,
+import { RSS_EVENT_ARTICLE_REVISION_SQL } from './rss-event-store'
+import { RSSDefinitionWriteSchema, RSSDefinitionDeleteSchema, RSSMembershipWriteSchema,
   type RSSDefinition, type RSSDefinitionWrite, type RSSMembership, type RSSMembershipWrite } from '../../../shared/rss-organization'
 
-export const rssIncludedClassificationSQL = `COALESCE(m.manual_decision,CASE WHEN r.content_revision=(i.content_revision || ':' || CASE WHEN c.item_revision=i.content_revision THEN COALESCE(c.body_revision,'none') ELSE 'none' END)
-  AND r.rule_revision=d.rule_revision THEN r.decision END)=1`
+export const rssCurrentClassificationSQL = `r.content_revision=(${RSS_EVENT_ARTICLE_REVISION_SQL}) AND r.rule_revision=d.rule_revision
+  AND (r.origin='legacy' OR r.method='${RSS_PROCESSING_METHOD}')`
+export const rssIncludedClassificationSQL = `COALESCE(m.manual_decision,CASE WHEN ${rssCurrentClassificationSQL} THEN r.decision END)=1`
 
 type DefinitionRow = Omit<RSSDefinition, 'visible' | 'ruleRevision' | 'filterIds'> & { visible: number; rule_revision: number }
 
@@ -150,14 +152,14 @@ export class RSSOrganizationStore {
     const result: Record<string, RSSMembership[]> = {}
     for (let offset = 0; offset < itemIds.length; offset += 500) {
       const ids = itemIds.slice(offset, offset + 500)
-      const rows = this.db.prepare(`SELECT m.*,r.decision AS derived_decision,r.origin AS derived_origin,r.reason,r.evidence,r.content_revision,r.rule_revision,d.name,d.kind,d.rule_revision AS current_rule,i.content_revision AS current_source,
-        c.item_revision AS body_source,c.body_revision FROM rss_memberships m LEFT JOIN rss_classification_results r ON r.id=m.result_id JOIN rss_definitions d ON d.id=m.definition_id
+      const rows = this.db.prepare(`SELECT m.*,r.decision AS derived_decision,r.origin AS derived_origin,r.reason,r.evidence,r.content_revision,r.rule_revision,d.name,d.kind,d.rule_revision AS current_rule,
+        COALESCE((${rssCurrentClassificationSQL}),0) AS derived_current FROM rss_memberships m LEFT JOIN rss_classification_results r ON r.id=m.result_id JOIN rss_definitions d ON d.id=m.definition_id
         JOIN rss_items i ON i.id=m.item_id LEFT JOIN rss_article_content c ON c.item_id=i.id
         WHERE m.item_id IN (${ids.map(() => '?').join(',')}) ORDER BY d.position,d.id`).all<{
         item_id: string; definition_id: string; name: string; kind: 'topic' | 'curated'; manual_decision: number | null;
         derived_decision: number | null; derived_origin: 'legacy' | 'model' | null; reason: string | null; evidence: string | null;
         content_revision: string | null; rule_revision: number | null; current_rule: number;
-        current_source: string; body_source: string | null; body_revision: string | null;
+        derived_current: number;
       }>(...ids)
       for (const row of rows) {
         const manual = row.manual_decision !== null
@@ -166,7 +168,7 @@ export class RSSOrganizationStore {
           included: decision === 0 ? false : decision === 1 ? true : null,
           origin: manual ? 'manual' : row.derived_origin || 'unclassified', reason: manual ? '手工指定' : row.reason || '尚未归类',
           evidence: manual ? null : row.evidence,
-          stale: !manual && row.derived_decision !== null && (row.rule_revision !== row.current_rule || row.content_revision !== rssArticleRevision(row.current_source, row.body_source, row.body_revision)),
+          stale: !manual && row.derived_decision !== null && row.derived_current !== 1,
           ruleRevision: manual ? null : row.rule_revision, currentRuleRevision: row.current_rule, contentRevision: manual ? null : row.content_revision,
         })
       }

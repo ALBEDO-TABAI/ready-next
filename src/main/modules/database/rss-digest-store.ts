@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto'
 import { assertDatabaseConnectionReady, type DatabaseConnection } from './connection'
 import type { RSSContentStore } from './rss-content-store'
-import type { RSSOrganizationStore } from './rss-organization-store'
-import { RSS_EVENT_ARTICLE_REVISION_SQL } from './rss-event-store'
+import { rssCurrentClassificationSQL, type RSSOrganizationStore } from './rss-organization-store'
+import { RSS_EVENT_ARTICLE_REVISION_SQL, rssEventCurrentEvidenceSQL } from './rss-event-store'
 import { RSSDigestReadSchema, type RSSDigestReadInput, type RSSDigestReadResult, type RSSDigestHeader, type RSSDigestSource, type RSSDigestCoverageSource, type RSSDigestScheduleState, type RSSDigestSettings, type RSSDigestFetch, type RSSDigestCriteria } from '../../../shared/rss-digests'
 import { RSSQuerySchema, type RSSQueryInput } from '../../../shared/rss-workspace'
 
@@ -28,8 +28,8 @@ export class RSSDigestStore {
       LEFT JOIN rss_event_evidence ce ON ce.id=cm.evidence_id LEFT JOIN rss_event_facts cf ON cf.id=ce.fact_id LEFT JOIN rss_event_evidence e ON e.id=x.evidence_id LEFT JOIN rss_event_facts f ON f.id=e.fact_id
       WHERE x.report_id=? AND (i.id IS NULL OR x.article_revision<>(${RSS_EVENT_ARTICLE_REVISION_SQL})
         OR (x.evidence_id IS NOT NULL AND (e.id IS NULL OR e.withdrawn=1 OR f.event_id IS NOT x.event_id))
-        OR (CASE WHEN ce.withdrawn=0 AND ce.article_revision=(${RSS_EVENT_ARTICLE_REVISION_SQL}) THEN ce.fact_id END) IS NOT x.fact_id
-        OR (CASE WHEN ce.withdrawn=0 AND ce.article_revision=(${RSS_EVENT_ARTICLE_REVISION_SQL}) THEN cf.event_id END) IS NOT x.event_id) LIMIT 1`).get(row.id)
+        OR (CASE WHEN ${rssEventCurrentEvidenceSQL('cm', 'ce')} THEN ce.fact_id END) IS NOT x.fact_id
+        OR (CASE WHEN ${rssEventCurrentEvidenceSQL('cm', 'ce')} THEN cf.event_id END) IS NOT x.event_id) LIMIT 1`).get(row.id)
     const definitions = this.organization.list()
     const savedDefinitions = JSON.parse(row.definitions_json) as Array<RSSDigestCriteria & { revision: number }>
     let needsUpdate = !!missing || savedDefinitions.some((saved) => !definitions.some((current) => current.id === saved.id && current.revision === saved.revision))
@@ -112,7 +112,7 @@ export class RSSDigestStore {
         WHERE ${input.kind === 'daily' ? `EXISTS (SELECT 1 FROM rss_digest_intake intake WHERE intake.item_id=i.id AND intake.article_revision=(${RSS_EVENT_ARTICLE_REVISION_SQL}) AND intake.received_at<${input.until})` : 'i.id IN (SELECT value FROM json_each(?))'} AND NOT EXISTS
         (SELECT 1 FROM rss_memberships m JOIN rss_definitions d ON d.id=m.definition_id LEFT JOIN rss_classification_results r ON r.id=m.result_id
           WHERE m.item_id=i.id AND d.kind='curated' AND (m.manual_decision IS NOT NULL OR
-          (r.decision IN (0,1) AND r.rule_revision=d.rule_revision AND r.content_revision=(${RSS_EVENT_ARTICLE_REVISION_SQL}))))`)
+          (r.decision IN (0,1) AND ${rssCurrentClassificationSQL})))`)
         .all<{ id: string }>(...(input.kind === 'range' ? [JSON.stringify(items.map((i) => i.id))] : []))
       const failedArticles = this.db.prepare(`SELECT COUNT(DISTINCT j.item_id) AS n FROM rss_processing_jobs j JOIN rss_items i ON i.id=j.item_id
         LEFT JOIN rss_article_content c ON c.item_id=i.id WHERE j.item_id IN (SELECT value FROM json_each(?))

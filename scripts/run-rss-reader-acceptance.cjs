@@ -27,6 +27,7 @@ async function main() {
   fs.rmSync(path.join(evidence, 'result.json'), { force: true })
   let authenticatedFetches = 0
   let modelRequests = 0, holdModelResponse = false, updatedProcessingFeed = false, eventFeedVersion = 0, eventArticleChanged = false, eventArticleFailure = false
+  let holdAnalysisResponse = false, releaseAnalysisResponse = null
   const server = createServer(async (req, res) => {
     if (req.url === '/event-feed') {
       res.writeHead(200, { 'content-type': 'application/rss+xml' })
@@ -56,6 +57,7 @@ async function main() {
       const user = request.messages.find((message) => message.role === 'user')
       const userText = typeof user.content === 'string' ? user.content : user.content.map((part) => part.text || '').join('')
       if (userText.startsWith('标题:')) {
+        if (holdAnalysisResponse) await new Promise((resolve) => { releaseAnalysisResponse = resolve })
         const text = `## 一、TextContent Analysis 视角\n合成报告 ${modelRequests}，只验证保存流程。\n## 二、Viral-Abstract-Script 视角\n不评估真实模型质量。\n## 三、Brainstorming 视角\n保留原始资料。`
         res.writeHead(200, { 'content-type': 'text/event-stream' })
         res.end(`data: ${JSON.stringify({ choices: [{ index: 0, delta: { content: text }, finish_reason: null }] })}\n\ndata: ${JSON.stringify({ choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] })}\n\ndata: [DONE]\n\n`)
@@ -553,8 +555,37 @@ await (db as any).db.backup(${JSON.stringify(path.join(root, 'ready.db'))}); db.
     await page.screenshot({ path: path.join(evidence, 'digest-narrow.png') })
 
     const analysisReports = []
-    for (let index = 0; index < 2; index++) {
-      const started = await page.evaluate((targetDir) => window.electronAPI.rss.startItemAnalysis({ itemId: 'reader-1', action: 'copy', title: 'ignored', link: 'ignored', targetDir, force: true }), path.join(root, 'analysis'))
+    await page.getByRole('navigation', { name: 'RSS 内部导航' }).getByRole('button', { name: '全部动态', exact: true }).click()
+    await page.getByRole('textbox', { name: '搜索资讯', exact: true }).fill('可读资讯 01')
+    await page.getByRole('button', { name: '执行搜索', exact: true }).click()
+    await page.locator('[data-rss-item-id="reader-1"]').waitFor()
+    const startAnalysis = () => page.evaluate((targetDir) => window.electronAPI.rss.startItemAnalysis({ itemId: 'reader-1', action: 'copy', title: 'ignored', link: 'ignored', targetDir, force: true }), path.join(root, 'analysis'))
+    holdAnalysisResponse = true
+    const firstAnalysis = await startAnalysis()
+    assert.equal(firstAnalysis.success, true, firstAnalysis.error)
+    for (let attempt = 0; !releaseAnalysisResponse && attempt < 300; attempt++) await new Promise((resolve) => setTimeout(resolve, 50))
+    assert.equal(typeof releaseAnalysisResponse, 'function', 'the first analysis must remain in flight while testing the queued task')
+    const secondAnalysis = await startAnalysis()
+    assert.equal(secondAnalysis.success, true, secondAnalysis.error)
+    await page.evaluate(() => {
+      const NativeObserver = window.MutationObserver
+      window.__rssProjectionObservers = new Set()
+      window.MutationObserver = class extends NativeObserver {
+        observe(target, options) { if (target instanceof Element && target.matches('[data-liquid-scroll-root="rss-feed-list"]')) window.__rssProjectionObservers.add(this); return super.observe(target, options) }
+        disconnect() { window.__rssProjectionObservers.delete(this); return super.disconnect() }
+      }
+    })
+    await page.getByRole('button', { name: /查看分析任务/ }).click()
+    const tasks = page.locator('.rss-task-menu-panel')
+    await tasks.locator('.ready-liquid-popover__projection-clone .rss-item-row').first().waitFor({ state: 'attached' })
+    await tasks.getByTitle('暂停任务', { exact: true }).click()
+    await waitForIPC(page, (id) => window.electronAPI.rss.listItemAnalysisJobs({ itemId: 'reader-1' }).then((result) => result.data?.some((job) => job.id === id && job.status === 'paused')), secondAnalysis.data.id)
+    await page.screenshot({ path: path.join(evidence, 'analysis-paused.png') })
+    await tasks.getByTitle('继续任务', { exact: true }).click()
+    await waitForIPC(page, (id) => window.electronAPI.rss.listItemAnalysisJobs({ itemId: 'reader-1' }).then((result) => result.data?.some((job) => job.id === id && job.status === 'queued')), secondAnalysis.data.id)
+    holdAnalysisResponse = false
+    releaseAnalysisResponse()
+    for (const started of [firstAnalysis, secondAnalysis]) {
       assert.equal(started.success, true, started.error)
       await waitForIPC(page, (id) => window.electronAPI.rss.listItemAnalysisJobs({ itemId: 'reader-1' }).then((result) => result.data?.some((job) => job.id === id && ['success', 'failed'].includes(job.status))), started.data.id)
       const jobs = await page.evaluate(() => window.electronAPI.rss.listItemAnalysisJobs({ itemId: 'reader-1' }))
@@ -567,14 +598,38 @@ await (db as any).db.backup(${JSON.stringify(path.join(root, 'ready.db'))}); db.
     assert.notEqual(analysisReports[0].job.reportPath, analysisReports[1].job.reportPath)
     assert.equal(fs.readFileSync(analysisReports[0].job.reportPath, 'utf8'), analysisReports[0].text)
     fs.writeFileSync(path.join(evidence, 'analysis-report-publications.json'), JSON.stringify(analysisReports, null, 2))
+    await tasks.getByTitle('关闭', { exact: true }).click()
+    await app.evaluate(({ shell }) => { globalThis.__rssReportReveals = []; shell.showItemInFolder = (target) => { globalThis.__rssReportReveals.push(target) } })
+    const completedOutput = page.locator(`[data-rss-item-id="reader-1"] [data-rss-analysis-job-id="${secondAnalysis.data.id}"]`).and(page.getByTitle(/^已完成/))
+    await completedOutput.waitFor()
+    await completedOutput.click()
+    const revealed = await app.evaluate(async () => {
+      for (let attempt = 0; !globalThis.__rssReportReveals.length && attempt < 50; attempt++) await new Promise((resolve) => setTimeout(resolve, 20))
+      return globalThis.__rssReportReveals.at(-1)
+    })
+    assert.equal(revealed, analysisReports[1].job.reportPath, 'the real RSS button must reveal the latest saved report through the document handler')
+    await page.getByTitle('全部源', { exact: true }).click()
+    const sourcePopup = page.locator('.rss-source-menu-panel')
+    await sourcePopup.locator('.ready-liquid-popover__projection-clone .rss-item-row').first().waitFor({ state: 'attached' })
+    assert.equal(await sourcePopup.locator('[data-liquid-scroll-root="chat-messages"]').count(), 0)
+    assert.ok(await page.evaluate(() => window.__rssProjectionObservers.size > 0))
+    await page.screenshot({ path: path.join(evidence, 'rss-source-projection.png') })
+    await page.getByTitle('document', { exact: true }).click()
+    await page.waitForFunction(() => !document.querySelector('.rss-source-menu-panel') && window.__rssProjectionObservers.size === 0)
+    await page.getByTitle('rss', { exact: true }).click()
+    await page.locator('[data-rss-item-id="reader-1"]').waitFor()
 
     report = { ok: true, exactSelectionReferenceAndReveal: true, paragraphReference: true, scheduledDailyEdition: true, digestDarkAndNarrow: true, rangeBriefExportAndRegeneration: true, digestReferences: true, savedVersionRestorationWithoutModel: true, failedRefreshPreservesBody: true, automaticEventGroupingAndProgress: true, factSeenDoesNotReadAllArticles: true, manualEventSplitMoveMerge: true, groupExpansionKeepsFilter: true, automaticRefreshProcessesOnlyNewItems: true, semanticProcessingThroughLocalProvider: true, cancelProcessingKeepsCallCount: true, historicalImportNotProcessed: true, customDefinitions: true, applicationRestartPreservesDefinitions: true, manualMemberships: true, curationSeparateFromBookmarks: true, typedRSSReferences: true, staleReferenceVisible: true, saveNoteReadback: true, noteEditIndependent: true, exportAllPages: true, cancelExport: true, navigationCollapse: true, searchAndPagination: true, historyAndFavoritesPreserved: true, preferencesSurviveReload: true, longArticle: true, sourceCodeInert: true, failedSaveVisible: true, readPersisted: true, returnPreservesScroll: true, outlineNavigation: true, browserLoginReused: true, narrowNoOverflow: true }
     report.independentAnalysisReports = true
+    report.analysisPauseResumeAndReveal = true
+    report.rssFloatingSourceAndCleanup = true
   } catch (error) {
     const failedPage = app?.windows().find((entry) => entry.url().includes('/renderer/index.html'))
     if (failedPage) await failedPage.screenshot({ path: path.join(evidence, 'failure.png') }).catch(() => {})
     throw error
   } finally {
+    holdAnalysisResponse = false
+    releaseAnalysisResponse?.()
     if (app) await app.close()
     server.closeAllConnections()
     await new Promise((resolve) => server.close(resolve))

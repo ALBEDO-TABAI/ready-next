@@ -7,27 +7,33 @@ import { RSSEventDecisionSchema, RSSEventReadSchema, RSSEventMoveSchema, RSSEven
 
 export const RSS_EVENT_ARTICLE_REVISION_SQL = "i.content_revision || ':' || CASE WHEN c.item_revision=i.content_revision THEN COALESCE(c.body_revision,'none') ELSE 'none' END"
 const REVISION = RSS_EVENT_ARTICLE_REVISION_SQL
-export function rssEffectiveEventCondition(memberAlias = 'em', evidenceAlias = 'ee'): string {
-  return `${evidenceAlias}.fact_id IS NOT NULL AND ${evidenceAlias}.withdrawn=0 AND (${memberAlias}.manual=1 OR ${evidenceAlias}.article_revision=(${REVISION}))`
+export function rssEventMethodCurrentSQL(memberAlias = 'm', evidenceAlias = 'e'): string {
+  return `(${memberAlias}.manual=1 OR ${evidenceAlias}.method='${RSS_EVENT_METHOD}')`
 }
-export function rssEventRepresentativeOrder(evidence = 'e'): string {
-  return `CASE WHEN ${evidence}.article_revision=(${REVISION}) THEN 0 ELSE 1 END,
+export function rssEventCurrentEvidenceSQL(memberAlias = 'm', evidenceAlias = 'e'): string {
+  return `${evidenceAlias}.withdrawn=0 AND ${evidenceAlias}.article_revision=(${REVISION}) AND ${rssEventMethodCurrentSQL(memberAlias, evidenceAlias)}`
+}
+export function rssEffectiveEventCondition(memberAlias = 'em', evidenceAlias = 'ee'): string {
+  return `${evidenceAlias}.fact_id IS NOT NULL AND ${evidenceAlias}.withdrawn=0 AND (${memberAlias}.manual=1 OR (${evidenceAlias}.article_revision=(${REVISION}) AND ${rssEventMethodCurrentSQL(memberAlias, evidenceAlias)}))`
+}
+export function rssEventRepresentativeOrder(evidence = 'e', memberAlias = 'm'): string {
+  return `CASE WHEN ${rssEventCurrentEvidenceSQL(memberAlias, evidence)} THEN 0 ELSE 1 END,
     CASE WHEN ${evidence}.source_role='direct' THEN 0 ELSE 1 END,CASE WHEN c.status='ready' AND c.item_revision=i.content_revision THEN 0 ELSE 1 END,
     COALESCE(i.published_at,i.first_seen_at) DESC,i.id`
 }
 const JOINS = `FROM rss_event_members m JOIN rss_event_evidence e ON e.id=m.evidence_id LEFT JOIN rss_event_facts f ON f.id=e.fact_id
   JOIN rss_items i ON i.id=m.item_id LEFT JOIN rss_sources s ON s.id=i.source_id LEFT JOIN rss_article_content c ON c.item_id=i.id`
 const SELECT = `SELECT m.*,e.relation,COALESCE(m.manual_reason,e.reason) AS reason,e.fact_id,e.article_revision,e.quote,e.source_role,e.captured_at,f.event_id,f.available_at,
-  i.title,i.link,i.source_id,s.name AS source_name,i.read,i.starred,i.published_at,${REVISION} AS current_revision ${JOINS}`
+  i.title,i.link,i.source_id,s.name AS source_name,i.read,i.starred,i.published_at,${REVISION} AS current_revision,COALESCE(${rssEventMethodCurrentSQL()},0) AS current_method ${JOINS}`
 interface MemberRow {
   item_id: string; event_id: string | null; fact_id: string | null; article_revision: string; current_revision: string
   quote: string | null; source_role: RSSEventDecision['sourceRole']; relation: RSSEventMembership['relation']; manual: number
-  reason: string; revision: number; captured_at: number; available_at: number | null
+  reason: string; revision: number; captured_at: number; available_at: number | null; current_method: number
   title: string; link: string; source_id: string; source_name: string | null; read: number; starred: number; published_at: number | null
 }
 function membership(row: MemberRow): RSSEventMembership {
   return { eventId: row.event_id, factId: row.fact_id, revision: row.revision, articleRevision: row.article_revision, quote: row.quote,
-    sourceRole: row.source_role, relation: row.relation, manual: row.manual === 1, reason: row.reason, stale: row.article_revision !== row.current_revision }
+    sourceRole: row.source_role, relation: row.relation, manual: row.manual === 1, reason: row.reason, stale: row.article_revision !== row.current_revision || row.current_method !== 1 }
 }
 function member(row: MemberRow): RSSEventMember {
   return { ...membership(row), itemId: row.item_id, title: row.title, link: row.link, sourceId: row.source_id, source: row.source_name || row.source_id,
@@ -63,7 +69,7 @@ export class RSSEventStore {
     const best = this.facts(eventId, 0, 1)[0]
     if (!event || !best) throw new Error('事件不存在或已无可读依据。')
     const counts = this.db.prepare(`SELECT COUNT(*) AS memberCount,COUNT(DISTINCT i.source_id) AS sourceCount,COALESCE(SUM(i.read=0),0) AS unreadCount,
-      COALESCE(SUM(i.starred=1),0) AS starredCount,COALESCE(SUM(e.article_revision<>(${REVISION})),0) AS staleCount ${JOINS} WHERE f.event_id=? AND e.withdrawn=0`)
+      COALESCE(SUM(i.starred=1),0) AS starredCount,COALESCE(SUM(NOT (${rssEventCurrentEvidenceSQL()})),0) AS staleCount ${JOINS} WHERE f.event_id=? AND e.withdrawn=0`)
       .get<Pick<RSSEventSummary, 'memberCount' | 'sourceCount' | 'unreadCount' | 'starredCount' | 'staleCount'>>(eventId)!
     const facts = this.db.prepare('SELECT COUNT(DISTINCT f.id) AS factCount,COUNT(DISTINCT CASE WHEN f.seen_at IS NULL THEN f.id END) AS unseenFactCount,MAX(f.available_at) AS latestAt FROM rss_event_facts f JOIN rss_event_evidence e ON e.fact_id=f.id WHERE f.event_id=? AND e.withdrawn=0')
       .get<Pick<RSSEventSummary, 'factCount' | 'latestAt' | 'unseenFactCount'>>(eventId)!
@@ -73,8 +79,9 @@ export class RSSEventStore {
   private facts(eventId: string, offset: number, limit: number, preferredFact = ''): RSSEventFact[] {
     return this.db.prepare(`WITH ranked AS (SELECT f.id,f.available_at AS availableAt,f.seen_at IS NOT NULL AS seen,e.id AS evidenceId,e.item_id AS itemId,e.article_revision AS articleRevision,
       e.quote,e.title,e.source_url AS link,e.source_name AS source,e.source_role AS sourceRole,e.published_at AS publishedAt,
-      e.article_revision<>(${REVISION}) AS historical,ROW_NUMBER() OVER (PARTITION BY f.id ORDER BY ${rssEventRepresentativeOrder()},e.captured_at DESC,e.id) AS rank
+      NOT COALESCE((${rssEventCurrentEvidenceSQL()}),0) AS historical,ROW_NUMBER() OVER (PARTITION BY f.id ORDER BY ${rssEventRepresentativeOrder()},e.captured_at DESC,e.id) AS rank
       FROM rss_event_facts f JOIN rss_event_evidence e ON e.fact_id=f.id JOIN rss_items i ON i.id=e.item_id LEFT JOIN rss_article_content c ON c.item_id=i.id
+      LEFT JOIN rss_event_members m ON m.item_id=e.item_id AND m.evidence_id=e.id
       WHERE f.event_id=? AND e.withdrawn=0)
       SELECT * FROM ranked WHERE rank=1 ORDER BY CASE WHEN id=? THEN 0 ELSE 1 END,availableAt DESC,id LIMIT ? OFFSET ?`)
       .all<Omit<RSSEventFact, 'historical' | 'seen'> & { historical: number; seen: number; rank: number }>(eventId, preferredFact, limit, offset)

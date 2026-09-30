@@ -361,6 +361,7 @@ export default function RSSFeed({
   const taskMenuPanel = taskMenuOpen ? (
     <LiquidFloatingPanel
       className="rss-task-menu-panel overflow-hidden rounded-[18px]"
+      sourceSelector="[data-liquid-scroll-root='rss-feed-list']"
       radius={18}
       style={{
         ...chatMenuSurfaceStyle,
@@ -621,6 +622,7 @@ export default function RSSFeed({
             {sourceMenuOpen && (
               <LiquidFloatingPanel
                 className="rss-source-menu-panel overflow-hidden rounded-[12px]"
+                sourceSelector="[data-liquid-scroll-root='rss-feed-list']"
                 role="listbox"
                 radius={14}
                 style={{
@@ -975,6 +977,7 @@ export default function RSSFeed({
                             }}
                             className="h-7 w-7 rounded-md hover:bg-[var(--bg-hover)] transition-colors flex items-center justify-center"
                             title={analysis?.sourceWarning || progressLabel(analysis)}
+                            data-rss-analysis-job-id={analysis?.jobId}
                           >
                             <AnalysisProgressRing entry={analysis} />
                           </button>
