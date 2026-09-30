@@ -21,14 +21,18 @@ async function waitForIPC(page, predicate, argument, options = {}) {
 }
 
 async function main() {
+  const installMediaFixture = (page) => page.route('https://rss-media.invalid/*', (route) => route.fulfill({ status: 200, contentType: 'image/svg+xml',
+    body: '<svg xmlns="http://www.w3.org/2000/svg" width="320" height="180"><rect width="320" height="180" fill="#087f8c"/><path d="M130 50L210 90L130 130Z" fill="white"/></svg>' }))
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ready-rss-reader-'))
   const evidence = process.argv[2] || path.join(os.tmpdir(), `ready-rss-reader-evidence-${Date.now()}`)
   fs.mkdirSync(evidence, { recursive: true })
   fs.rmSync(path.join(evidence, 'result.json'), { force: true })
   let authenticatedFetches = 0
+  let videoFetches = 0
   let modelRequests = 0, holdModelResponse = false, updatedProcessingFeed = false, eventFeedVersion = 0, eventArticleChanged = false, eventArticleFailure = false
   let holdAnalysisResponse = false, releaseAnalysisResponse = null
   const server = createServer(async (req, res) => {
+    if (req.url === '/video.mp4') { videoFetches++; res.writeHead(404); res.end('This reference must not be downloaded automatically'); return }
     if (req.url === '/event-feed') {
       res.writeHead(200, { 'content-type': 'application/rss+xml' })
       const statements = ['Seed history only.', 'Project Delta released Version 2.', 'Project Delta released Version 2.', 'Project Delta added image editing.']
@@ -107,8 +111,8 @@ db.settings.setSetting('rss:auto_refresh_interval_ms', '0');
 const source = db.rss.addRSSSource({name:'合成验收信源',url:${JSON.stringify(base + '/feed')},enabled:false});
 for(let i=0;i<132;i++){
  const id='reader-'+i;
- db.rss.upsertRSSItems([{id,source_id:source,guid:id,title:'可读资讯 '+String(i).padStart(2,'0'),link:${JSON.stringify(base)}+'/article/'+i,summary:'来源摘要 '+i,author:'合成作者',published_at:1700000000+(i<38?1000+i:i)}]);
- if(i!==1) db.rss.content.finishLoad(db.rss.content.beginLoad(id),{status:'ready',sourceUrl:${JSON.stringify(base)}+'/article/'+i,markdown:'# 已保存正文\\n\\n## 第一节\\n\\n'+('真实保存长文。'.repeat(4500))+'\\n\\n## 最后一节\\n\\nARTICLE-END-'+i+'\\n\\n重复位置 **第二部分**\\n\\n重复位置 **第二部分**\\n\\n\`\`\`ready-widget\\n<script>window.RSS_UNTRUSTED_EXECUTED=true</script>\\n\`\`\`'});
+ db.rss.upsertRSSItems([{id,source_id:source,guid:id,title:'可读资讯 '+String(i).padStart(2,'0'),link:i===3?'https://rss-media.invalid/image.svg':${JSON.stringify(base)}+(i===2?'/video.mp4':'/article/'+i),cover_image:i===2?'https://rss-media.invalid/cover.svg':null,summary:'来源摘要 '+i,author:'合成作者',published_at:1700000000+(i<38?1000+i:i)}]);
+ if(i!==1 && i!==2 && i!==3) db.rss.content.finishLoad(db.rss.content.beginLoad(id),{status:'ready',sourceUrl:${JSON.stringify(base)}+'/article/'+i,markdown:'# 已保存正文\\n\\n## 第一节\\n\\n'+('真实保存长文。'.repeat(4500))+'\\n\\n## 最后一节\\n\\nARTICLE-END-'+i+'\\n\\n重复位置 **第二部分**\\n\\n重复位置 **第二部分**\\n\\n\`\`\`ready-widget\\n<script>window.RSS_UNTRUSTED_EXECUTED=true</script>\\n\`\`\`'});
 }
 (db as any).db.exec("CREATE TRIGGER synthetic_save_failure BEFORE UPDATE OF read,starred ON rss_items WHEN OLD.id='reader-35' BEGIN SELECT RAISE(ABORT, '合成保存失败'); END;");
 await (db as any).db.backup(${JSON.stringify(path.join(root, 'ready.db'))}); db.close();`)
@@ -126,6 +130,7 @@ await (db as any).db.backup(${JSON.stringify(path.join(root, 'ready.db'))}); db.
       await new Promise((resolve) => setTimeout(resolve, 200))
     }
     assert.ok(page, 'Ready workbench did not open')
+    await installMediaFixture(page)
     await page.getByTitle('rss', { exact: true }).click()
     await page.locator('.rss-news-card').first().waitFor()
     let navigation = page.getByRole('navigation', { name: 'RSS 内部导航' })
@@ -346,6 +351,7 @@ await (db as any).db.backup(${JSON.stringify(path.join(root, 'ready.db'))}); db.
       await new Promise((resolve) => setTimeout(resolve, 200))
     }
     assert.ok(page, 'Ready did not reopen after classification was saved')
+    await installMediaFixture(page)
     await page.getByTitle('rss', { exact: true }).click()
     navigation = page.getByRole('navigation', { name: 'RSS 内部导航' })
     editor = page.getByRole('region', { name: '栏目设置', exact: true })
@@ -618,11 +624,23 @@ await (db as any).db.backup(${JSON.stringify(path.join(root, 'ready.db'))}); db.
     await page.waitForFunction(() => !document.querySelector('.rss-source-menu-panel') && window.__rssProjectionObservers.size === 0)
     await page.getByTitle('rss', { exact: true }).click()
     await page.locator('[data-rss-item-id="reader-1"]').waitFor()
+    for (const [id, title, notice] of [['reader-2', '可读资讯 02', '视频资讯：'], ['reader-3', '可读资讯 03', '图片资讯：']]) {
+      await page.getByRole('textbox', { name: '搜索资讯', exact: true }).fill(title)
+      await page.getByRole('button', { name: '执行搜索', exact: true }).click()
+      await page.waitForFunction((itemId) => document.querySelector(`[data-rss-item-id="${itemId}"] .rss-cover-image img`)?.naturalWidth > 0, id)
+      await page.locator(`[data-rss-item-id="${id}"]`).click()
+      await page.getByText(notice, { exact: false }).waitFor()
+      await page.waitForFunction(() => document.querySelector('.rss-article-reader .rss-cover-image img')?.naturalWidth > 0)
+      await page.screenshot({ path: path.join(evidence, `${id}-media.png`) })
+      await page.getByRole('button', { name: '返回列表', exact: true }).click()
+    }
+    assert.equal(videoFetches, 0, 'reading a saved video reference must not silently download it')
 
     report = { ok: true, exactSelectionReferenceAndReveal: true, paragraphReference: true, scheduledDailyEdition: true, digestDarkAndNarrow: true, rangeBriefExportAndRegeneration: true, digestReferences: true, savedVersionRestorationWithoutModel: true, failedRefreshPreservesBody: true, automaticEventGroupingAndProgress: true, factSeenDoesNotReadAllArticles: true, manualEventSplitMoveMerge: true, groupExpansionKeepsFilter: true, automaticRefreshProcessesOnlyNewItems: true, semanticProcessingThroughLocalProvider: true, cancelProcessingKeepsCallCount: true, historicalImportNotProcessed: true, customDefinitions: true, applicationRestartPreservesDefinitions: true, manualMemberships: true, curationSeparateFromBookmarks: true, typedRSSReferences: true, staleReferenceVisible: true, saveNoteReadback: true, noteEditIndependent: true, exportAllPages: true, cancelExport: true, navigationCollapse: true, searchAndPagination: true, historyAndFavoritesPreserved: true, preferencesSurviveReload: true, longArticle: true, sourceCodeInert: true, failedSaveVisible: true, readPersisted: true, returnPreservesScroll: true, outlineNavigation: true, browserLoginReused: true, narrowNoOverflow: true }
     report.independentAnalysisReports = true
     report.analysisPauseResumeAndReveal = true
     report.rssFloatingSourceAndCleanup = true
+    report.mediaCoversAndPassiveReferences = true
   } catch (error) {
     const failedPage = app?.windows().find((entry) => entry.url().includes('/renderer/index.html'))
     if (failedPage) await failedPage.screenshot({ path: path.join(evidence, 'failure.png') }).catch(() => {})

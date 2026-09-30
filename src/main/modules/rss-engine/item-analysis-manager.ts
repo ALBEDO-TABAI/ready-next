@@ -8,6 +8,8 @@ import { RSSRepository } from '../repositories/rss-repository'
 import { atomicWriteText } from '../agent-control/atomic-write'
 import { analysisReportName, captureAnalysisReport, readAnalysisReportPage, savedAnalysisReport } from './analysis-report'
 import type { RSSReadAnalysisReportInput, RSSAnalysisReportPage } from '../../../shared/rss-analysis-report'
+import type { RSSReadAnalysisAssetsInput } from '../../../shared/rss-analysis-assets'
+import { captureAnalysisAssets, readAnalysisAssets, type AnalysisAssetPaths } from './analysis-assets'
 import {
   getSkillsRuntimeManager,
   startSkillChildRunAndWait,
@@ -15,7 +17,7 @@ import {
 } from '../skills-runtime/runtime-manager'
 import { getChildRunRetryPolicy } from '../agent-control/child-run/child-run-retry-policy'
 import { getRSSContentService } from './content-runtime'
-import { runArticleAnalysis, assertArticleAnalysisCurrent, articleAnalysisWarning, type ArticleAnalysisResult, type ArticleAnalysisDeps } from './article-analysis'
+import { runArticleAnalysis, assertArticleAnalysisCurrent, articleAnalysisWarning, type ArticleAnalysisSource, type ArticleAnalysisDeps } from './article-analysis'
 import { rssSubagentRunner } from './subagent-runner'
 import {
   BROWSER_VIDEO_FILE_EXTENSIONS,
@@ -35,6 +37,8 @@ export interface StartRSSItemAnalysisPayload {
   force?: boolean
   sourceRevision?: string
 }
+
+interface AnalysisFlowResult { source?: ArticleAnalysisSource; assets: AnalysisAssetPaths }
 
 export interface RSSItemAnalysisProgress {
   sourceWarning?: string | null
@@ -539,6 +543,10 @@ export class RSSItemAnalysisManager {
     return readAnalysisReportPage(input, (id) => this.repository.getRSSAnalysisJob(id), (job) => this.getSourceWarning(job))
   }
 
+  readAssets(input: RSSReadAnalysisAssetsInput) {
+    return readAnalysisAssets(input, (id) => this.repository.getRSSAnalysisJob(id))
+  }
+
   pauseJob(jobId: string): RSSAnalysisJob {
     this.assertInitialized()
     const job = this.repository.getRSSAnalysisJob(jobId)
@@ -654,26 +662,23 @@ export class RSSItemAnalysisManager {
         startedAt: new Date().toISOString(),
       })
 
-      let articleResult: ArticleAnalysisResult | null = null
-      if (payload.action === 'copy') {
-        articleResult = await this.runCopyFlow(jobId, payload, rootDir, outputDir)
-      } else {
-        await this.runVisualFlow(jobId, payload, rootDir, outputDir)
-      }
+      const result = payload.action === 'copy' ? await this.runCopyFlow(jobId, payload, rootDir, outputDir)
+        : await this.runVisualFlow(jobId, payload, rootDir, outputDir)
 
-      if (articleResult) assertArticleAnalysisCurrent(articleResult.source, (id) => this.repository.getContentStore().getArticle(id))
+      if (result.source) assertArticleAnalysisCurrent(result.source, (id) => this.repository.getContentStore().getArticle(id))
       const job = this.repository.getRSSAnalysisJob(jobId)
       if (!job) throw new Error('分析任务已删除，报告未发布。')
       const reportArtifact = captureAnalysisReport(job)
+      const analysisAssets = captureAnalysisAssets(job, result.assets)
       const published = this.updateJob(jobId, {
         status: 'success',
         progress: 100,
-        message: articleResult?.source.completeness === 'partial' ? '已基于部分正文完成分析' : '分析完成',
+        message: result.source?.completeness === 'partial' ? '已基于部分正文完成分析' : '分析完成',
         error: null,
         finishedAt: new Date().toISOString(),
         reportPath: join(outputDir, reportArtifact.fileName),
-        metaJson: safeJson({ ...parseMetaJson(job.meta_json), reportArtifact,
-          ...(articleResult ? { articleSource: articleResult.source } : {}) }),
+        metaJson: safeJson({ ...parseMetaJson(job.meta_json), reportArtifact, analysisAssets,
+          ...(result.source ? { articleSource: result.source } : {}) }),
       })
       if (!published) throw new Error('分析报告未能保存发布状态。')
     } catch (error) {
@@ -711,12 +716,13 @@ export class RSSItemAnalysisManager {
     payload: StartRSSItemAnalysisPayload,
     rootDir: string,
     outputDir: string,
-  ): Promise<ArticleAnalysisResult | null> {
+  ): Promise<AnalysisFlowResult> {
     const isVideo = isLikelyVideoLink(payload.link)
     if (!isVideo) {
       if (!payload.sourceRevision) throw new Error('旧网页任务未记录原文版本，请重新创建分析。')
       this.updateJob(jobId, { status: 'running_subagent', progress: 45, message: '正在读取共享原文并生成分析' })
-      return runArticleAnalysis({ itemId: payload.itemId, sourceRevision: payload.sourceRevision, outputDir }, this.articleAnalysis)
+      const article = await runArticleAnalysis({ itemId: payload.itemId, sourceRevision: payload.sourceRevision, outputDir }, this.articleAnalysis)
+      return { source: article.source, assets: { source_article: article.sourcePath } }
     }
     let extractedText = ''
     let transcriptPath: string | null = null
@@ -826,7 +832,7 @@ export class RSSItemAnalysisManager {
       progress: 98,
       message: '文案报告已生成',
     })
-    return null
+    return { assets: { corrected_transcript: correctedTranscriptPath, structured_transcript: structuredTranscriptPath, source_video: sourceVideoPath } }
   }
 
   /**
@@ -954,7 +960,7 @@ export class RSSItemAnalysisManager {
     payload: StartRSSItemAnalysisPayload,
     rootDir: string,
     outputDir: string,
-  ): Promise<void> {
+  ): Promise<AnalysisFlowResult> {
     if (!canAttemptVisualAnalysis(payload.link)) {
       throw new Error('视觉分析仅支持视频链接')
     }
@@ -1080,6 +1086,7 @@ export class RSSItemAnalysisManager {
       progress: 98,
       message: '视觉报告已生成',
     })
+    return { assets: { scene_scores: sceneScoresPath, source_video: sourceVideoPath } }
   }
 
   private updateJob(

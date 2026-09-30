@@ -1,11 +1,11 @@
 import { createHash } from 'node:crypto'
 import { readFileSync, realpathSync } from 'node:fs'
-import { dirname, join, resolve } from 'node:path'
+import { isAbsolute, join, relative, resolve } from 'node:path'
 import { z } from 'zod'
 import type { RSSAnalysisAction, RSSAnalysisJob } from '../database/records'
 import { RSSReadAnalysisReportSchema, type RSSReadAnalysisReportInput, type RSSAnalysisReportPage } from '../../../shared/rss-analysis-report'
 
-const ReportArtifact = z.object({
+export const ReportArtifact = z.object({
   jobId: z.string().min(1), fileName: z.string().min(1), sha256: z.string().regex(/^[a-f0-9]{64}$/),
   bytes: z.number().int().nonnegative(), publishedAt: z.string().datetime(),
 }).strict()
@@ -15,17 +15,30 @@ export function analysisReportName(action: RSSAnalysisAction): string {
   return action === 'copy' ? '文案分析报告.md' : '视觉分析总结.md'
 }
 
-function reportBytes(outputDir: string, action: RSSAnalysisAction): Buffer {
-  const directory = realpathSync(outputDir)
-  const path = realpathSync(join(directory, analysisReportName(action)))
-  if (dirname(path) !== directory) throw new Error('分析报告已移出任务目录。')
-  return readFileSync(path)
+export function resolveAnalysisArtifactPath(root: string, fileName: string): string {
+  const directory = realpathSync(root), path = realpathSync(resolve(directory, fileName))
+  const local = relative(directory, path)
+  if (!local || local === '..' || local.startsWith('../') || local.startsWith('..\\') || isAbsolute(local)) throw new Error('分析产物已移出任务目录。')
+  return path
+}
+
+export function captureTextArtifact(jobId: string, directory: string, path: string): RSSReportArtifact {
+  const fileName = relative(resolve(directory), resolve(path))
+  const bytes = readFileSync(resolveAnalysisArtifactPath(directory, fileName))
+  return { jobId, fileName,
+    sha256: createHash('sha256').update(bytes).digest('hex'), bytes: bytes.length, publishedAt: new Date().toISOString() }
 }
 
 export function captureAnalysisReport(job: RSSAnalysisJob): RSSReportArtifact {
-  const bytes = reportBytes(job.output_dir, job.action)
-  return { jobId: job.id, fileName: analysisReportName(job.action),
-    sha256: createHash('sha256').update(bytes).digest('hex'), bytes: bytes.length, publishedAt: new Date().toISOString() }
+  return captureTextArtifact(job.id, job.output_dir, join(job.output_dir, analysisReportName(job.action)))
+}
+
+export function readTextArtifact(directory: string, artifact: RSSReportArtifact): string {
+  const bytes = readFileSync(resolveAnalysisArtifactPath(directory, artifact.fileName))
+  if (bytes.length !== artifact.bytes || createHash('sha256').update(bytes).digest('hex') !== artifact.sha256) {
+    throw new Error('分析产物文件已变化，无法继续读取原内容。')
+  }
+  return bytes.toString('utf8')
 }
 
 export function savedAnalysisReport(job: RSSAnalysisJob): RSSReportArtifact | null {
@@ -44,11 +57,16 @@ export function readAnalysisReport(job: RSSAnalysisJob): { artifact: RSSReportAr
   if (!job.report_path || resolve(job.report_path) !== resolve(job.output_dir, artifact.fileName)) {
     throw new Error('分析报告路径与保存记录不一致。')
   }
-  const bytes = reportBytes(job.output_dir, job.action)
-  if (bytes.length !== artifact.bytes || createHash('sha256').update(bytes).digest('hex') !== artifact.sha256) {
-    throw new Error('分析报告文件已变化，无法继续读取原报告。')
-  }
-  return { artifact, text: bytes.toString('utf8') }
+  return { artifact, text: readTextArtifact(job.output_dir, artifact) }
+}
+
+export function analysisTextPage(text: string, params: { offset: number; length: number; expectedRevision?: string }, revision: string) {
+  if ((params.offset > 0 && !params.expectedRevision) || (params.expectedRevision && params.expectedRevision !== revision)) throw new Error('产物续读版本缺失或不匹配。')
+  const splitsSurrogate = (position: number) => /[\uD800-\uDBFF]/.test(text[position - 1] || '') && /[\uDC00-\uDFFF]/.test(text[position] || '')
+  if (params.offset > text.length || splitsSurrogate(params.offset)) throw new Error('产物续读位置无效。')
+  let end = Math.min(text.length, params.offset + params.length)
+  if (splitsSurrogate(end)) end--
+  return { text: text.slice(params.offset, end), offset: params.offset, totalLength: text.length, nextOffset: end < text.length ? end : null }
 }
 
 export function readAnalysisReportPage(input: RSSReadAnalysisReportInput, getJob: (id: string) => RSSAnalysisJob | null,
@@ -57,17 +75,11 @@ export function readAnalysisReportPage(input: RSSReadAnalysisReportInput, getJob
   const job = getJob(params.jobId)
   if (!job) throw new Error('分析任务已不存在。')
   const { artifact, text } = readAnalysisReport(job)
-  if ((params.offset > 0 && !params.expectedRevision) || (params.expectedRevision && params.expectedRevision !== artifact.sha256)) {
-    throw new Error('报告续读版本缺失或不匹配。')
-  }
-  const splitsSurrogate = (position: number) => /[\uD800-\uDBFF]/.test(text[position - 1] || '') && /[\uDC00-\uDFFF]/.test(text[position] || '')
-  if (params.offset > text.length || splitsSurrogate(params.offset)) throw new Error('报告续读位置无效。')
-  let end = Math.min(text.length, params.offset + params.length)
-  if (splitsSurrogate(end)) end--
+  const page = analysisTextPage(text, params, artifact.sha256)
   const current = getJob(job.id)
   if (!current || current.status !== 'success' || current.output_dir !== job.output_dir || current.report_path !== job.report_path ||
     JSON.stringify(savedAnalysisReport(current)) !== JSON.stringify(artifact)) throw new Error('分析报告已变化或删除。')
   return { jobId: job.id, itemId: job.item_id, title: job.title, sourceUrl: job.source_url,
     sourceWarning: sourceWarning(job), revision: artifact.sha256, publishedAt: artifact.publishedAt,
-    text: text.slice(params.offset, end), offset: params.offset, totalLength: text.length, nextOffset: end < text.length ? end : null }
+    ...page }
 }

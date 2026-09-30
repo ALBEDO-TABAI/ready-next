@@ -5,6 +5,25 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { MarkdownContent } from '../renderer/components/document/MarkdownContent'
 import { readSavedRSSArticle } from '../renderer/modules/rss/read-article'
 import type { RSSArticleExcerpt } from '../shared/rss-workspace'
+import RSSCoverImage from '../renderer/components/rss/RSSCoverImage'
+import { describeRSSMedia } from '../shared/rss-media'
+
+test('saved covers render passively and media descriptions keep reference and understanding separate', () => {
+  const video = describeRSSMedia('https://media.test/video.mp4', 'https://media.test/cover.png')
+  assert.equal(video.kind, 'video')
+  assert.equal(video.cover.availability, 'not_checked')
+  assert.equal(video.understanding, 'not_performed')
+  const html = renderToStaticMarkup(<RSSCoverImage link="https://media.test/video.mp4" coverImage="https://media.test/cover.png" />)
+  assert.match(html, /src="https:\/\/media.test\/cover.png"/)
+  assert.match(html, /loading="lazy"/)
+  assert.equal(renderToStaticMarkup(<RSSCoverImage link="https://media.test/video.mp4" coverImage="file:///private/local.png" />), '')
+  assert.equal(describeRSSMedia('https://media.test/primary.webp').kind, 'image')
+  assert.equal(describeRSSMedia('https://media.test/primary.webp').cover.url, 'https://media.test/primary.webp')
+  assert.equal(describeRSSMedia('javascript:alert(1)').source.url, null)
+  assert.equal(describeRSSMedia('https://media.test/news/story', '../cover.jpg').cover.url, 'https://media.test/cover.jpg')
+  assert.equal(describeRSSMedia('https://media.test/news/story', '//cdn.test/cover.jpg').cover.url, 'https://cdn.test/cover.jpg')
+  assert.equal(describeRSSMedia('https://media.test/news/story').cover.url, null)
+})
 
 test('RSS reuses document typography while source widgets, HTML and local links remain inert', () => {
   const html = renderToStaticMarkup(<MarkdownContent externalBaseUrl="https://example.test/news/a" onOpenLink={() => {}} content={[

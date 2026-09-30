@@ -11,11 +11,12 @@ import { MarkdownContent, copyTextToClipboard } from '../document/MarkdownConten
 import { readSavedRSSArticle } from '../../modules/rss/read-article'
 import { openWebpageInBrowser } from '../../modules/browser/openWebpageInBrowser'
 import { openRSSItemInBrowserTab } from '../../modules/rss/open-rss-item-in-browser'
-import { hasLikelyVideoResource } from '../../../shared/browser-tab-resource-classifier'
+import { describeRSSMedia } from '../../../shared/rss-media'
 import type { RSSArticleExcerpt } from '../../../shared/rss-workspace'
 import type { RSSItem } from './RSSFeed'
 import RssTimeHintBanner from './RssTimeHintBanner'
 import RSSSaveNoteButton from './RSSSaveNoteButton'
+import RSSCoverImage from './RSSCoverImage'
 
 interface RSSArticleReaderProps {
   reveal?: { id: string; range: RSSReadingRange }
@@ -45,7 +46,8 @@ export default function RSSArticleReader({ item, expectedRevision, reveal, onClo
   const forceReload = useRef(false)
   const [headings, setHeadings] = useState<Array<{ title: string; level: number }>>([])
   const bodyRef = useRef<HTMLDivElement>(null)
-  const video = hasLikelyVideoResource(item.link)
+  const mediaKind = describeRSSMedia(item.link, item.coverImage).kind
+  const video = mediaKind === 'video', image = mediaKind === 'image'
 
   useEffect(() => {
     const controller = new AbortController()
@@ -61,7 +63,7 @@ export default function RSSArticleReader({ item, expectedRevision, reveal, onClo
       try {
         let saved = await readSavedRSSArticle(api, item.id, controller.signal, expectedRevision)
         setContent(saved)
-        if (!expectedRevision && !video && (force || saved.body.fetching || ['missing', 'stale', 'loading'].includes(saved.body.status))) {
+        if (!expectedRevision && !video && !image && (force || saved.body.fetching || ['missing', 'stale', 'loading'].includes(saved.body.status))) {
           const fetched = await api.loadArticle({ itemId: item.id, force })
           controller.signal.throwIfAborted()
           saved = await readSavedRSSArticle(api, item.id, controller.signal, expectedRevision)
@@ -80,7 +82,7 @@ export default function RSSArticleReader({ item, expectedRevision, reveal, onClo
       }
     })()
     return () => controller.abort()
-  }, [item.id, item.revision, item.title, item.link, item.summary, reload, video, expectedRevision])
+  }, [item.id, item.revision, item.title, item.link, item.summary, reload, video, image, expectedRevision])
 
   useEffect(() => {
     if (content?.article.id === item.id && !content.article.read) void onOpened(item.id)
@@ -132,13 +134,15 @@ export default function RSSArticleReader({ item, expectedRevision, reveal, onClo
       <article className="rss-reader-content">
         <p className="rss-reader-source">{article?.source || item.source}{author && author !== (article?.source || item.source) ? ` · ${author}` : ''}{date != null ? ` · ${article?.publishedAt == null ? '收录于 ' : ''}${new Date(date).toLocaleString()}` : ''}</p>
         <h1 className="rss-reader-title">{title}</h1>
+        {(!expectedRevision || content) && <RSSCoverImage link={article?.link || item.link} coverImage={article ? article.coverImage : item.coverImage} />}
         <RssTimeHintBanner itemId={item.id} title={title} summary={article?.summary || item.summary} author={author} />
         {expectedRevision && content && <p className="rss-reader-notice" role="status">此处按引用版本阅读；获取最新内容请返回列表。</p>}
         {video && <p className="rss-reader-notice">视频资讯：下方为来源提供的文字。观看、转录和视觉分析需使用对应操作。</p>}
+        {image && <p className="rss-reader-notice">图片资讯：下方为已有文字与图片引用，尚未进行画面分析。</p>}
         <div className="rss-reader-status" role="status">
           {busy && <Loader2 size={14} className="animate-spin" />}
           <span>{content ? `${content.textKind === 'source_summary' ? '来源摘要 · ' : ''}${BODY_LABELS[content.body.status]}` : busy ? '正在读取文章' : '文章读取失败'}</span>
-          {!video && <button type="button" className="rss-reader-button" disabled={busy || !!expectedRevision} title={expectedRevision ? '刊物引用保留对应版本；可返回资讯列表获取新正文。' : undefined} onClick={() => { forceReload.current = true; setReload((value) => value + 1) }}><RefreshCw size={13} />重新获取正文</button>}
+          {!video && !image && <button type="button" className="rss-reader-button" disabled={busy || !!expectedRevision} title={expectedRevision ? '刊物引用保留对应版本；可返回资讯列表获取新正文。' : undefined} onClick={() => { forceReload.current = true; setReload((value) => value + 1) }}><RefreshCw size={13} />重新获取正文</button>}
         </div>
         {content?.body.fetching && <p className="rss-reader-notice" role="status">正在获取正文，已有内容仍可阅读。</p>}
         {content?.body.error && ['ready', 'partial'].includes(content.body.status) && <p className="rss-reader-notice" role="alert">重新获取未完成，已保留上次保存的正文。{content.body.error}</p>}

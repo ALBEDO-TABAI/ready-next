@@ -1,8 +1,11 @@
 import { z } from 'zod'
+import { describeRSSMedia } from '../../../shared/rss-media'
 import { RSSReadCatalogSchema } from '../../../shared/rss-catalog'
 import type { RSSCatalogStore } from '../database/rss-catalog-store'
 import type { RouteAttemptSnapshotEntry } from '../rss-engine/source-diagnostics'
 import { RSSReadAnalysisReportSchema, type RSSReadAnalysisReportInput, type RSSAnalysisReportPage } from '../../../shared/rss-analysis-report'
+import { RSSReadAnalysisAssetsSchema } from '../../../shared/rss-analysis-assets'
+import type { RSSItemAnalysisManager } from '../rss-engine/item-analysis-manager'
 import { RSSReadExcerptSchema } from '../../../shared/rss-excerpt'
 import { RSSDigestReadSchema } from '../../../shared/rss-digests'
 import type { RSSDigestStore } from '../database/rss-digest-store'
@@ -35,6 +38,7 @@ interface RSSToolDef {
 }
 
 interface RSSToolContext {
+  readAnalysisAssets?: RSSItemAnalysisManager['readAssets']
   getCatalog?: () => Pick<RSSCatalogStore, 'read'>
   getRouteAttempt?: (sourceId: string) => RouteAttemptSnapshotEntry | null
   readAnalysisReport?: (input: RSSReadAnalysisReportInput) => RSSAnalysisReportPage
@@ -50,6 +54,8 @@ interface RSSToolContext {
 }
 
 const RSS_TOOLS: RSSToolDef[] = [
+  { name: 'rss_read_analysis_assets', description: '检查分析任务已发布的补充产物，分段读取校正文稿、结构化转录、网页输入快照或场景评分。视频只返回本地引用及文件身份检查，不读取或理解画面；旧任务缺少身份时明确不可核验。报告正文使用 rss_read_analysis_report。',
+    action: 'rss.readAnalysisAssets', intent: 'read_rss_analysis_assets', executionKind: 'deterministic', params: zodObjectToParamList(RSS_SCHEMAS.rss_read_analysis_assets) as ToolParam[] },
   { name: 'rss_read_catalog', description: '完整分页读取已保存的来源、栏目、分析任务、历史判断和全部事件依据；来源含停用，依据含撤回与信息不足。success 不证明报告文件仍可用，须另调用 rss_read_analysis_report 核验。采集诊断是独立时点记录，不属于目录分页快照。',
     action: 'rss.readCatalog', intent: 'read_rss_catalog', executionKind: 'deterministic', params: zodObjectToParamList(RSS_SCHEMAS.rss_read_catalog) as ToolParam[] },
   { name: 'rss_read_analysis_report', description: '按任务 ID 分段读取已保存且可核验的分析报告；续读必须沿用 revision。不启动模型，不重新分析；旧报告归属不可核验时明确失败。',
@@ -183,6 +189,12 @@ export async function executeRSSTool(
   const tool = RSS_TOOLS.find((item) => item.name === toolName)
   if (!tool) return `Unknown RSS tool: ${toolName}`
 
+  if (toolName === 'rss_read_analysis_assets') {
+    if (context?.readAccessDenied || !context?.readAnalysisAssets) return toStructuredResult(tool, '当前会话未获准读取本机 RSS 资料。', { ok: false, error: 'rss_read_not_authorized' })
+    try { return toStructuredResult(tool, '只读取已发布产物或检查本地引用；状态以 data 为准，没有下载、转录或视觉理解。', { ok: true, data: context.readAnalysisAssets(RSSReadAnalysisAssetsSchema.parse(args)) }) }
+    catch (error) { return toStructuredResult(tool, '补充产物读取失败。', { ok: false, error: error instanceof Error ? error.message : String(error) }) }
+  }
+
   if (toolName === 'rss_read_catalog') {
     if (context?.readAccessDenied || !context?.getCatalog) return toStructuredResult(tool, '当前会话未获准读取本机 RSS 资料。', { ok: false, error: 'rss_read_not_authorized' })
     try {
@@ -257,7 +269,9 @@ export async function executeRSSTool(
       const citationUrl = readKind === 'rss_read_excerpt' ? rssCitationUrl({ kind: 'excerpt', read: RSSReadExcerptSchema.parse(args) }) : undefined
       const analysis = readKind === 'rss_read_article'
         ? context.getAnalysisProgress?.([String(args.itemId)])[String(args.itemId)] ?? null : undefined
-      return toStructuredResult(tool, '已读取保存的 RSS 资料；范围、正文状态及续读位置以 data 为准，analysis 为最近分析的当前状态。', { ok: true, data, ...(citationUrl ? { citationUrl } : {}), ...(referenceId ? { referenceId } : {}), ...(analysis !== undefined ? { analysis } : {}) })
+      const media = readKind === 'rss_query_items' && 'items' in data ? data.items.map((item) => ({ itemId: item.id, ...describeRSSMedia(item.link, item.coverImage) }))
+        : readKind === 'rss_read_article' && 'body' in data && 'coverImage' in data.article ? describeRSSMedia(data.article.link, data.article.coverImage) : undefined
+      return toStructuredResult(tool, '已读取保存的 RSS 资料；范围、正文状态及续读位置以 data 为准，analysis 为最近分析的当前状态。media 仅为类型提示和未核验的远端引用，不表示已理解画面。', { ok: true, data, ...(citationUrl ? { citationUrl } : {}), ...(referenceId ? { referenceId } : {}), ...(analysis !== undefined ? { analysis } : {}), ...(media ? { media } : {}) })
     } catch (error) {
       // silent-catch: the structured failed result is returned to the Agent, never treated as read success.
       return toStructuredResult(tool, 'RSS 读取未完成。', { ok: false, error: error instanceof Error ? error.message : String(error) })

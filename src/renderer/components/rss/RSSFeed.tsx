@@ -26,6 +26,7 @@ import Modal from '../ui/Modal'
 import { useModal } from '../ui/useModal'
 import { chatMenuSurfaceStyle } from '../agent/chatMenuStyles'
 import { LiquidFloatingPanel } from '../ui/liquid-glass/LiquidFloatingPanel'
+import RSSCoverImage from './RSSCoverImage'
 
 export interface RSSItem {
   event?: RSSArticleSummary['event']
@@ -956,6 +957,7 @@ export default function RSSFeed({
                             {item.summary}
                           </p>
                         ) : null}
+                        <RSSCoverImage link={item.link} coverImage={item.coverImage} compact />
                         <div
                           className="rss-item-line-fade text-[11px]"
                           style={{ color: 'var(--text-gray)' }}

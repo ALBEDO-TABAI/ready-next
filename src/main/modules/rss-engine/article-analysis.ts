@@ -13,6 +13,7 @@ export interface ArticleAnalysisSource {
 
 export interface ArticleAnalysisResult {
   source: ArticleAnalysisSource
+  sourcePath: string
 }
 
 export interface ArticleAnalysisDeps {
@@ -64,7 +65,7 @@ export async function runArticleAnalysis(
     action: 'copy', itemId: article.id, title: article.title, link: article.link,
     source, sourcePath, reportPath, generatedAt: new Date().toISOString(),
   }, null, 2), 'utf8')
-  return { source }
+  return { source, sourcePath }
 }
 
 export function articleAnalysisWarning(meta: unknown, current: RSSArticle | null): string | null {

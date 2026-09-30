@@ -684,6 +684,7 @@ async function executeToolCallInner(
 
         case 'rss':
           return executeRSSTool(toolName, args, {
+            readAnalysisAssets: (input) => getRSSItemAnalysisManager().readAssets(input),
             getCatalog: () => getDatabase().rss.catalog,
             getRouteAttempt,
             readAnalysisReport: (input) => getRSSItemAnalysisManager().readReport(input),

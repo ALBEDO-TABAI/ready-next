@@ -1,6 +1,7 @@
 import { RSSReadExcerptSchema } from '../../../../shared/rss-excerpt'
 import { RSSReadCatalogSchema } from '../../../../shared/rss-catalog'
 import { RSSReadAnalysisReportSchema } from '../../../../shared/rss-analysis-report'
+import { RSSReadAnalysisAssetsSchema } from '../../../../shared/rss-analysis-assets'
 import { RSSDigestReadSchema } from '../../../../shared/rss-digests'
 import { RSSReadReferenceSchema } from '../../../../shared/rss-reference'
 import { RSSProcessingListSchema } from '../../../../shared/rss-processing'
@@ -43,6 +44,7 @@ export const RssAnalyzeItemSchema = z.object({
 export const RssCaptureSessionSchema = z.object({})
 
 export type RssToolName =
+  | 'rss_read_analysis_assets'
   | 'rss_read_catalog'
   | 'rss_read_analysis_report'
   | 'rss_add_source'
@@ -59,6 +61,7 @@ export type RssToolName =
   | 'rss_read_events'
 
 export const RSS_SCHEMAS: Record<RssToolName, z.ZodObject<z.ZodRawShape>> = {
+  rss_read_analysis_assets: RSSReadAnalysisAssetsSchema,
   rss_read_catalog: RSSReadCatalogSchema,
   rss_read_analysis_report: RSSReadAnalysisReportSchema,
   rss_add_source: RssAddSourceSchema,

@@ -10,7 +10,7 @@ import type { RSSAnalysisAction, RSSAnalysisJob } from '../../database/records'
 //   rss:listItemAnalysisJobs     (recent jobs, optionally filtered by item)
 //   rss:pauseAnalysisJob         (pause a running / queued job by id)
 //   rss:resumeAnalysisJob        (resume a previously paused job)
-//   rss:deleteAnalysisJob        (delete one job + its output dir)
+//   rss:deleteAnalysisJob        (delete one task record; preserve its files)
 //
 // Handler bodies are lifted verbatim from `ipc-handler.ts` (V2.2c is a
 // move + thin-wrapper, same shape as V2.2a SourceGroup and V2.2b

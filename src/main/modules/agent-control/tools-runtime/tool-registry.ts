@@ -210,6 +210,7 @@ const DOCUMENT_TOOL_NAMES = [
 ]
 
 const RSS_TOOL_NAMES = [
+  'rss_read_analysis_assets',
   'rss_read_catalog',
   'rss_read_analysis_report',
   'rss_add_source',

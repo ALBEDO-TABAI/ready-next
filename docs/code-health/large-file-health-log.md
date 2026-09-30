@@ -2,6 +2,15 @@
 
 > 更新时间：2026-10-01
 
+## 2026-10-01 RSS 媒体产物读取与封面
+
+| 文件 | 当前行数 | 净增 | 判断 | 后续 |
+|---|---:|---:|---|---|
+| `src/main/modules/rss-engine/item-analysis-manager.ts` | 1116 | 7 | 一般 | 只从三条生产流程交接真实产物路径并一次发布；校验留在 analysis-assets/report，2026-11-01 复查媒体 helper 边界 |
+| `src/main/modules/tools/tool-executor.ts` | 1271 | 1 | 一般 | 只注入补充产物读取；2026-11-01 复查域路由 |
+| `src/main/modules/agent-control/tools-runtime/tool-registry.ts` | 1548 | 1 | 一般 | 只登记受控产物工具；2026-11-01 复查域注册 |
+| `src/renderer/components/rss/RSSFeed.tsx` | 1042 | 2 | 一般 | 封面独立为小组件；2026-11-01 复查既有任务菜单拆分 |
+
 ## 2026-10-01 RSS 整轮复审方法有效性与菜单背景
 
 | 文件 | 当前行数 | 净增 | 判断 | 后续 |

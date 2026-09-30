@@ -18,6 +18,11 @@ const READING_POINT = { type: 'object', properties: {
   offset: { type: 'integer', minimum: 0, maximum: 9007199254740991, description: '片段内字符位置' },
 }, required: ['run', 'offset'], additionalProperties: false }
 const EXPECTED_ANTHROPIC = [
+  { name: 'rss_read_analysis_assets', description: '检查分析任务已发布的补充产物，分段读取校正文稿、结构化转录、网页输入快照或场景评分。视频只返回本地引用及文件身份检查，不读取或理解画面；旧任务缺少身份时明确不可核验。报告正文使用 rss_read_analysis_report。', input_schema: { type: 'object', properties: {
+    jobId: { type: 'string', description: '已保存的分析任务 ID' }, offset: { type: 'number', description: '首读为 0；续读使用 nextOffset' },
+    length: { type: 'number', description: '每段字符数，最多 24000' }, expectedRevision: { type: 'string', description: '续读必须沿用首次返回的 revision' },
+    kind: { type: 'string', enum: ['list', 'corrected_transcript', 'structured_transcript', 'source_article', 'scene_scores', 'source_video'], description: 'list 检查本任务的已保存产物；其余种类读取文字或本地视频引用，不下载、不分析' },
+  }, required: ['jobId'] } },
   { name: 'rss_read_catalog', description: '完整分页读取已保存的来源、栏目、分析任务、历史判断和全部事件依据；来源含停用，依据含撤回与信息不足。success 不证明报告文件仍可用，须另调用 rss_read_analysis_report 核验。采集诊断是独立时点记录，不属于目录分页快照。', input_schema: { type: 'object', properties: {
     view: { type: 'string', enum: ['sources', 'definitions', 'analysis', 'judgments', 'evidence'], description: 'sources 全部来源含停用；definitions 栏目与规则；analysis 全部分析任务；judgments 历史分类判断；evidence 全部事件依据含撤回和信息不足' },
     itemId: { type: 'string', description: '仅 analysis、judgments、evidence 可按文章 ID 筛选' }, eventId: { type: 'string', description: '仅 evidence 可按当前事件归属筛选' },
