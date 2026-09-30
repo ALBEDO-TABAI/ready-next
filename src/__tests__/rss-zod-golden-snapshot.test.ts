@@ -13,7 +13,16 @@ import {
   getRSSOpenAITools,
 } from '../main/modules/tools/rss-tools'
 
+const READING_POINT = { type: 'object', properties: {
+  run: { type: 'integer', minimum: 0, maximum: 9007199254740991, description: '阅读文字片段的来源位置标识' },
+  offset: { type: 'integer', minimum: 0, maximum: 9007199254740991, description: '片段内字符位置' },
+}, required: ['run', 'offset'], additionalProperties: false }
 const EXPECTED_ANTHROPIC = [
+  { name: 'rss_read_excerpt', description: '读取绑定文章版本的段落或选区；范围原样沿用引用，续读不会越过选区。可用返回的 citationUrl 定位。', input_schema: { type: 'object', properties: {
+    format: { type: 'string', description: '阅读映射版本，必须原样沿用引用中的 reading-v1' }, itemId: { type: 'string', description: '已保存文章 ID' }, expectedRevision: { type: 'string', description: '引用绑定的完整文章版本' },
+    range: { type: 'object', properties: { start: READING_POINT, end: READING_POINT }, required: ['start', 'end'], additionalProperties: false, description: '引用原样携带的阅读文字范围，不从相同句子猜位置' },
+    offset: { type: 'number', description: '选区内续读位置，沿用 nextOffset' }, length: { type: 'number', description: '最多读取字符数；始终限制在选区内' },
+  }, required: ['format', 'itemId', 'expectedRevision', 'range'] } },
   { name: 'rss_read_digests', description: '分页读取已保存日报或范围简报、原文依据与采集覆盖；仅查询，不生成、不重算、不标已读。', input_schema: { type: 'object', properties: {
     view: { type: 'string', description: 'editions 刊物目录；entries 条目；sources 某条全部依据；coverage 订阅覆盖；criteria 发布时的分类与精选标准', enum: ['editions', 'entries', 'sources', 'coverage', 'criteria'] },
     reportId: { type: 'string', description: '除目录外必填，已保存刊物 ID' }, groupKey: { type: 'string', description: 'sources 视图必填，沿用条目的 groupKey' },
@@ -95,7 +104,7 @@ const EXPECTED_ANTHROPIC = [
     input_schema: { type: 'object', properties: {
       referenceId: { type: 'string', description: '本轮 RSS 资料引用的 id' },
       cursor: { type: 'string', description: '查询续页时使用返回的 nextCursor' },
-      offset: { type: 'number', description: '正文续读时使用返回的 nextOffset' },
+      offset: { type: 'number', description: '正文、选区或刊物续页时原样使用返回的 nextOffset' },
     }, required: ['referenceId'] },
   },
   {

@@ -32,6 +32,7 @@ export interface RSSItem {
   eventGroup?: RSSArticleSummary['eventGroup']
   classifications?: RSSMembership[]
   id: string
+  reveal?: { id: string; range: import('../../../shared/rss-reading').RSSReadingRange }
   pinnedRevision?: string
   revision?: string
   sourceRevision?: string

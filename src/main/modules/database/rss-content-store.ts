@@ -1,3 +1,5 @@
+import { RSSReadExcerptSchema, type RSSReadExcerptInput, type RSSSelectionExcerpt } from '../../../shared/rss-excerpt'
+import { readingExcerpt } from '../../../shared/rss-reading'
 import { rssIncludedClassificationSQL, type RSSOrganizationStore } from './rss-organization-store'
 import { rssEffectiveEventCondition, rssEventRepresentativeOrder, type RSSEventStore } from './rss-event-store'
 import { rssArticleRevision, type RSSDefinition, type RSSMembership } from '../../../shared/rss-organization'
@@ -211,6 +213,21 @@ export class RSSContentStore {
       article: metadata, body, text: text.slice(params.offset, end), textKind: markdown === null ? 'source_summary' : 'body',
       offset: params.offset, totalLength: text.length, nextOffset: end < text.length ? end : null,
     }
+  }
+
+  readExcerpt(input: RSSReadExcerptInput): RSSSelectionExcerpt {
+    const params = RSSReadExcerptSchema.parse(input)
+    const article = this.getArticle(params.itemId)
+    if (!article) throw new Error('article_not_found')
+    if (article.revision !== params.expectedRevision) throw new Error('article_changed')
+    const { body: { markdown, error: _error, ...body }, summary, classifications: _classifications, event: _event, eventGroup: _eventGroup, coverImage: _coverImage, ...metadata } = article
+    const text = readingExcerpt(markdown ?? summary, params.range)
+    if (params.offset > text.length) throw new Error('offset_out_of_range')
+    if (params.offset > 0 && /[\uD800-\uDBFF]/.test(text[params.offset - 1]) && /[\uDC00-\uDFFF]/.test(text[params.offset] || '')) throw new Error('offset_inside_surrogate')
+    let end = Math.min(text.length, params.offset + params.length)
+    if (end < text.length && /[\uD800-\uDBFF]/.test(text[end - 1]) && /[\uDC00-\uDFFF]/.test(text[end])) end++
+    return { article: metadata, body, text: text.slice(params.offset, end), textKind: 'reading_text', textSource: markdown === null ? 'source_summary' : 'body', range: params.range,
+      offset: params.offset, totalLength: text.length, nextOffset: end < text.length ? end : null }
   }
 
   beginLoad(itemId: string): RSSContentClaim | null {

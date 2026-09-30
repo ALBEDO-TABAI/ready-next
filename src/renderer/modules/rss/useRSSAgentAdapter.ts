@@ -16,6 +16,7 @@ interface UseRSSAgentAdapterParams {
   handleRefresh: () => Promise<RSSRefreshOutcome>
   handleItemClick: (item: RSSItem) => void
   setSelection: (payload: {
+    selectedExcerpt?: import('../../../shared/rss-reading').RSSReadingRange | null
     selectedItemExpectedRevision?: string | null
     selectedItemId?: string | null
     selectedItemTitle?: string | null
@@ -37,6 +38,7 @@ export function useRSSAgentAdapter(params: UseRSSAgentAdapterParams): void {
 
   useEffect(() => {
     setSelection({
+      selectedExcerpt: selectedItem?.reveal?.range || null,
       selectedItemExpectedRevision: selectedItem?.pinnedRevision || null,
       selectedItemId: selectedItem?.id ?? null,
       selectedItemTitle: selectedItem?.title ?? null,

@@ -99,6 +99,7 @@ export default function RSSMode({
 }: RSSModeProps) {
   const navigate = useNavigate()
   const { query, view, items, sources, definitions, loading, loadingMore, error, reload, loadMore, hasHydrated } = useRSSWorkspace(isActive && !isSuspended)
+  const pendingReveal = useRSSSession((state) => state.pendingReveal)
   const digestVisible = useRSSSession((state) => state.digestVisible)
   const setDigestView = useRSSSession((state) => state.setDigestView)
   const selectedSourceId = query.sourceId || null
@@ -330,16 +331,51 @@ export default function RSSMode({
   }, [loadRSSData, selectedSourceId, setQuery])
 
   const handleItemClick = useCallback((item: RSSItem) => {
+    useRSSSession.getState().cancelReveal()
     setItemStateError(null)
     setSelectedItem(item)
   }, [])
+
+  useEffect(() => {
+    if (!isActive || isSuspended || !pendingReveal) return
+    let live = true
+    const request = pendingReveal
+    const current = () => live && useRSSSession.getState().pendingReveal?.id === request.id
+    void (async () => {
+      try {
+        const reference = request.reference
+        if (reference.kind === 'digest') {
+          const result = await window.electronAPI.rss.readDigests({ view: 'entries', ...reference.read, limit: 1 })
+          if (!result.success) throw new Error(result.error || '刊物无法读取。')
+          if (!current()) return
+          setSelectedItem(null); setDigestView(true, reference.read.reportId)
+        } else {
+          const result = reference.kind === 'excerpt' ? await window.electronAPI.rss.readExcerpt({ ...reference.read, length: 1 })
+            : await window.electronAPI.rss.readArticle({ ...reference.read, length: 1 })
+          if (!result.success || !result.data) throw new Error(result.error || '引用文章无法读取。')
+          if (!current()) return
+          setDigestView(false); setShowOrganization(false)
+          handleItemClick({ ...toRSSItem(result.data.article), pinnedRevision: reference.read.expectedRevision,
+            ...(reference.kind === 'excerpt' ? { reveal: { id: request.id, range: reference.read.range } } : {}) })
+        }
+      } catch (cause) {
+        if (current()) {
+          setSelectedItem(null); setDigestView(false)
+          setStatusMessage(`引用定位失败：${cause instanceof Error && ['article_changed', 'cursor_stale'].includes(cause.message) ? '资料已变化，请重新引用。' : cause instanceof Error ? cause.message : String(cause)}`)
+        }
+      } finally { if (current()) useRSSSession.getState().finishReveal(request.id) }
+    })()
+    return () => { live = false; useRSSSession.getState().finishReveal(request.id) }
+  }, [pendingReveal?.id, isActive, isSuspended, handleItemClick, setDigestView, setQuery])
 
   const applySavedItemState = useCallback(async (itemId: string) => {
     await loadRSSData({ background: true })
     const saved = await window.electronAPI.rss.readArticle({ itemId, length: 1 })
     if (!saved.success || !saved.data) throw new Error(saved.error || '无法确认文章保存状态')
     const state = saved.data.article
-    setSelectedItem((prev) => prev?.id === itemId ? { ...prev, ...toRSSItem(state) } : prev)
+    setSelectedItem((prev) => prev?.id === itemId ? prev.pinnedRevision
+      ? { ...prev, read: state.read, starred: state.starred }
+      : { ...prev, ...toRSSItem(state) } : prev)
   }, [loadRSSData])
 
   const handleToggleStar = useCallback(async (itemId: string) => {
@@ -491,6 +527,7 @@ export default function RSSMode({
   }, [fetchAnalysisJobs, fetchAnalysisProgress, visibleItemIds])
 
   const handleClosePreview = useCallback(() => {
+    useRSSSession.getState().cancelReveal()
     setSelectedItem(null)
   }, [])
 
@@ -547,7 +584,7 @@ export default function RSSMode({
           className="workbench-canvas-shell relative flex h-full min-h-0 overflow-hidden"
           style={{ background: 'var(--workbench-module-surface-bg)' }}
         >
-          <RSSNavigation onDigests={() => { setSelectedItem(null); setShowOrganization(false); setDigestView(true) }} definitions={definitions} onManage={() => { setDigestView(false); setSelectedItem(null); setShowOrganization((value) => !value) }} onNavigate={(patch) => { setDigestView(false); setSelectedItem(null); setQuery(patch) }} />
+          <RSSNavigation onDigests={() => { useRSSSession.getState().cancelReveal(); setSelectedItem(null); setShowOrganization(false); setDigestView(true) }} definitions={definitions} onManage={() => { useRSSSession.getState().cancelReveal(); setDigestView(false); setSelectedItem(null); setShowOrganization((value) => !value) }} onNavigate={(patch) => { useRSSSession.getState().cancelReveal(); setDigestView(false); setSelectedItem(null); setQuery(patch) }} />
           {/* Keep the list mounted so returning from reading preserves scroll. */}
           <div
             className={`rss-feed-sheet content-surface-panel flex-1 overflow-hidden flex flex-col relative`}
@@ -642,6 +679,7 @@ export default function RSSMode({
           {/* Article rendering shares the document typography, without active widgets. */}
           {selectedItem && !digestVisible && (
             <RSSArticleReader
+              reveal={selectedItem.reveal}
               expectedRevision={selectedItem.pinnedRevision}
               onSelectRelated={handleItemClick}
               active={isActive && !isSuspended}

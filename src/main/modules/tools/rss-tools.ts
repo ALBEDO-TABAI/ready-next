@@ -1,7 +1,9 @@
+import { z } from 'zod'
+import { RSSReadExcerptSchema } from '../../../shared/rss-excerpt'
 import { RSSDigestReadSchema } from '../../../shared/rss-digests'
 import type { RSSDigestStore } from '../database/rss-digest-store'
-import { RSSReadReferenceSchema, type RSSReferenceResource } from '../../../shared/rss-reference'
-import { RSS_SCHEMAS } from './schemas/rss-schemas'
+import { RSSReadReferenceSchema, rssCitationUrl, type RSSReferenceResource } from '../../../shared/rss-reference'
+import { RSS_SCHEMAS, type RssToolName } from './schemas/rss-schemas'
 import { zodObjectToParamList } from './zod-param-derivation'
 import { RSSQuerySchema, RSSReadArticleSchema } from '../../../shared/rss-workspace'
 import type { RSSContentStore } from '../database/rss-content-store'
@@ -33,7 +35,7 @@ interface RSSToolContext {
   getEvents?: () => Pick<RSSEventStore, 'browse'>
   getProcessing?: () => Pick<RSSProcessingStore, 'list' | 'status'>
   hasProcessingModel?: () => boolean
-  getContent?: () => Pick<RSSContentStore, 'query' | 'readArticle'>
+  getContent?: () => Pick<RSSContentStore, 'query' | 'readArticle' | 'readExcerpt'>
   getAnalysisProgress?: (itemIds: string[]) => Record<string, RSSItemAnalysisProgress>
   references?: RSSReferenceResource[]
   readAccessDenied?: boolean
@@ -41,6 +43,8 @@ interface RSSToolContext {
 }
 
 const RSS_TOOLS: RSSToolDef[] = [
+  { name: 'rss_read_excerpt', description: '读取绑定文章版本的段落或选区；范围原样沿用引用，续读不会越过选区。可用返回的 citationUrl 定位。',
+    action: 'rss.readExcerpt', intent: 'read_rss_excerpt', executionKind: 'deterministic', params: zodObjectToParamList(RSS_SCHEMAS.rss_read_excerpt) as ToolParam[] },
   { name: 'rss_read_digests', description: '分页读取已保存日报或范围简报、原文依据与采集覆盖；仅查询，不生成、不重算、不标已读。',
     action: 'rss.readDigests', intent: 'read_rss_digests', executionKind: 'deterministic', params: zodObjectToParamList(RSS_SCHEMAS.rss_read_digests) as ToolParam[] },
   { name: 'rss_read_events', description: '分页读取已保存事件、当前报道或事实进展及历史版本依据。历史摘句不代表当前原文仍有效；只读，不重新归组。',
@@ -110,7 +114,11 @@ const RSS_TOOLS: RSSToolDef[] = [
   },
 ]
 
-function toSchemaParam(param: ToolParam): Record<string, unknown> {
+function toSchemaParam(param: ToolParam, toolName: string): Record<string, unknown> {
+  if (param.type === 'object') {
+    const { $schema: _dialect, ...shape } = z.toJSONSchema(RSS_SCHEMAS[toolName as RssToolName].shape[param.name], { io: 'input' })
+    return shape
+  }
   return {
     type: param.type,
     description: param.description,
@@ -135,7 +143,7 @@ export function getRSSAnthropicTools(): Array<Record<string, unknown>> {
     description: tool.description,
     input_schema: {
       type: 'object',
-      properties: Object.fromEntries(tool.params.map((param) => [param.name, toSchemaParam(param)])),
+      properties: Object.fromEntries(tool.params.map((param) => [param.name, toSchemaParam(param, tool.name)])),
       required: tool.params.filter((param) => param.required).map((param) => param.name),
     },
   }))
@@ -149,7 +157,7 @@ export function getRSSOpenAITools(): Array<Record<string, unknown>> {
       description: tool.description,
       parameters: {
         type: 'object',
-        properties: Object.fromEntries(tool.params.map((param) => [param.name, toSchemaParam(param)])),
+        properties: Object.fromEntries(tool.params.map((param) => [param.name, toSchemaParam(param, tool.name)])),
         required: tool.params.filter((param) => param.required).map((param) => param.name),
       },
     },
@@ -184,7 +192,7 @@ export async function executeRSSTool(
     } catch (error) { return toStructuredResult(tool, '整理状态读取失败。', { ok: false, error: error instanceof Error ? error.message : String(error) }) }
   }
 
-  if (toolName === 'rss_query_items' || toolName === 'rss_read_article' || toolName === 'rss_read_reference') {
+  if (toolName === 'rss_read_excerpt' || toolName === 'rss_query_items' || toolName === 'rss_read_article' || toolName === 'rss_read_reference') {
     if (context?.readAccessDenied || !context?.getContent) {
       return toStructuredResult(tool, '当前会话未获准读取本机 RSS 资料。', { ok: false, error: 'rss_read_not_authorized' })
     }
@@ -210,16 +218,17 @@ export async function executeRSSTool(
         } else {
           if (input.cursor !== undefined) throw new Error('rss_reference_wrong_cursor')
           args = { ...reference.read, offset: input.offset ?? reference.read.offset }
-          readKind = 'rss_read_article'
+          readKind = reference.kind === 'excerpt' ? 'rss_read_excerpt' : 'rss_read_article'
         }
       }
       const content = context.getContent()
       const data = readKind === 'rss_query_items'
         ? content.query(RSSQuerySchema.parse(args))
-        : content.readArticle(RSSReadArticleSchema.parse(args))
+        : readKind === 'rss_read_excerpt' ? content.readExcerpt(RSSReadExcerptSchema.parse(args)) : content.readArticle(RSSReadArticleSchema.parse(args))
+      const citationUrl = readKind === 'rss_read_excerpt' ? rssCitationUrl({ kind: 'excerpt', read: RSSReadExcerptSchema.parse(args) }) : undefined
       const analysis = readKind === 'rss_read_article'
         ? context.getAnalysisProgress?.([String(args.itemId)])[String(args.itemId)] ?? null : undefined
-      return toStructuredResult(tool, '已读取保存的 RSS 资料；范围、正文状态及续读位置以 data 为准，analysis 为最近分析的当前状态。', { ok: true, data, ...(referenceId ? { referenceId } : {}), ...(analysis !== undefined ? { analysis } : {}) })
+      return toStructuredResult(tool, '已读取保存的 RSS 资料；范围、正文状态及续读位置以 data 为准，analysis 为最近分析的当前状态。', { ok: true, data, ...(citationUrl ? { citationUrl } : {}), ...(referenceId ? { referenceId } : {}), ...(analysis !== undefined ? { analysis } : {}) })
     } catch (error) {
       // silent-catch: the structured failed result is returned to the Agent, never treated as read success.
       return toStructuredResult(tool, 'RSS 读取未完成。', { ok: false, error: error instanceof Error ? error.message : String(error) })

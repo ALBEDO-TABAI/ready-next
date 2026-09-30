@@ -1,3 +1,4 @@
+import { parseRSSCitationUrl, type RSSNavigableReference } from '../../../../../shared/rss-reference'
 import { useMemo } from 'react'
 
 // ---------------------------------------------------------------------------
@@ -9,9 +10,8 @@ import { useMemo } from 'react'
 // Stage V V1.2 — extracted from ChatPanel.tsx (was lines 88-98 + 173-522).
 // This module owns the pure markdown rendering pipeline used by ChatMessages
 // via ChatPanel's `renderMarkdown` callback. It has zero `useAgent` / store /
-// IPC dependencies — purely string -> ReactNode rendering. Behavior must
-// remain byte-for-byte identical to the previous inline implementation; the
-// V6 fixture (`chat-panel-baseline.test.ts`) snapshot diff must stay at 0.
+// IPC dependencies. Existing Markdown/HTTP rendering remains unchanged;
+// local RSS citations are active only through the owner-supplied callback.
 
 export interface MarkdownNode {
   type: 'text' | 'bold' | 'italic' | 'code' | 'codeblock' | 'header' | 'bullet' | 'numbered' | 'table' | 'br'
@@ -214,7 +214,11 @@ function splitBareUrl(raw: string): { href: string; trailing: string } {
   return { href: raw.slice(0, end), trailing: raw.slice(end) }
 }
 
-function externalLink(href: string, label: string, key: string): React.ReactNode {
+function externalLink(href: string, label: string, key: string, onRSSReference?: (reference: RSSNavigableReference) => void): React.ReactNode {
+  if (href.startsWith('ready-rss:')) {
+    const reference = parseRSSCitationUrl(href)
+    return reference && onRSSReference ? <button key={key} className="rss-citation-link" onClick={() => onRSSReference(reference)}>{label === href ? '查看 RSS 引用' : label}</button> : <span key={key}>{label}</span>
+  }
   return (
     <a
       key={key}
@@ -228,12 +232,12 @@ function externalLink(href: string, label: string, key: string): React.ReactNode
   )
 }
 
-/** Parse inline formatting: **bold**, *italic*, `code`, and safe http(s) links. */
-export function renderInline(text: string): React.ReactNode[] {
+/** Parse inline formatting, HTTP(S) links and validated owner-handled RSS citations. */
+export function renderInline(text: string, onRSSReference?: (reference: RSSNavigableReference) => void): React.ReactNode[] {
   const parts: React.ReactNode[] = []
   // Ordering is significant: code consumes URLs before the bare-URL branch;
   // labelled links consume their URL before that same branch.
-  const regex = /(`([^`]+)`)|(\[([^\]]+)\]\((https?:\/\/[^\s)]+)\))|(\*\*(.+?)\*\*)|(\*(.+?)\*)|(https?:\/\/[^\s<>"'`]+)/g
+  const regex = /(`([^`]+)`)|(\[([^\]]+)\]\(((?:https?|ready-rss):\/\/[^\s)]+)\))|(\*\*(.+?)\*\*)|(\*(.+?)\*)|((?:https?|ready-rss):\/\/[^\s<>"'`]+)/g
   let lastIndex = 0
   let match: RegExpExecArray | null
   let key = 0
@@ -259,8 +263,8 @@ export function renderInline(text: string): React.ReactNode[] {
         </code>
       )
     } else if (match[3]) {
-      // labelled Markdown link; regex only admits http(s)
-      parts.push(externalLink(match[5], match[4], `a-${key++}`))
+      // Labelled HTTP(S) or validated local citation link.
+      parts.push(externalLink(match[5], match[4], `a-${key++}`, onRSSReference))
     } else if (match[6]) {
       // bold
       parts.push(<strong key={`b-${key++}`}>{match[7]}</strong>)
@@ -269,7 +273,7 @@ export function renderInline(text: string): React.ReactNode[] {
       parts.push(<em key={`i-${key++}`}>{match[9]}</em>)
     } else if (match[10]) {
       const { href, trailing } = splitBareUrl(match[10])
-      parts.push(externalLink(href, href, `a-${key++}`))
+      parts.push(externalLink(href, href, `a-${key++}`, onRSSReference))
       if (trailing) parts.push(trailing)
     }
     lastIndex = match.index + match[0].length
@@ -282,7 +286,7 @@ export function renderInline(text: string): React.ReactNode[] {
   return parts.length > 0 ? parts : [text]
 }
 
-export function MarkdownContent({ content }: { content: string }) {
+export function MarkdownContent({ content, onRSSReference }: { content: string; onRSSReference?: (reference: RSSNavigableReference) => void }) {
   const nodes = useMemo(() => parseMarkdown(content), [content])
 
   // Bug fix: numbered list ordinals must reflect position *within the list*,
@@ -317,7 +321,7 @@ export function MarkdownContent({ content }: { content: string }) {
             const fontSize = node.level === 1 ? 16 : node.level === 2 ? 14.5 : 13.5
             return (
               <div key={idx} style={{ fontSize, fontWeight: 700, marginTop: 6, marginBottom: 2 }}>
-                {renderInline(node.content)}
+                {renderInline(node.content, onRSSReference)}
               </div>
             )
           }
@@ -345,7 +349,7 @@ export function MarkdownContent({ content }: { content: string }) {
             return (
               <div key={idx} style={{ display: 'flex', gap: 6, paddingLeft: 4 }}>
                 <span style={{ flexShrink: 0, color: 'var(--text-gray)' }}>&bull;</span>
-                <span>{renderInline(node.content)}</span>
+                <span>{renderInline(node.content, onRSSReference)}</span>
               </div>
             )
           case 'numbered':
@@ -361,7 +365,7 @@ export function MarkdownContent({ content }: { content: string }) {
                 >
                   {numberedOrdinals[idx]}.
                 </span>
-                <span>{renderInline(node.content)}</span>
+                <span>{renderInline(node.content, onRSSReference)}</span>
               </div>
             )
           case 'table': {
@@ -378,7 +382,7 @@ export function MarkdownContent({ content }: { content: string }) {
                           key={`h-${columnIndex}`}
                           style={{ textAlign: aligns[columnIndex] || undefined }}
                         >
-                          {renderInline(header)}
+                          {renderInline(header, onRSSReference)}
                         </th>
                       ))}
                     </tr>
@@ -391,7 +395,7 @@ export function MarkdownContent({ content }: { content: string }) {
                             key={`c-${rowIndex}-${columnIndex}`}
                             style={{ textAlign: aligns[columnIndex] || undefined }}
                           >
-                            {renderInline(row[columnIndex] || '')}
+                            {renderInline(row[columnIndex] || '', onRSSReference)}
                           </td>
                         ))}
                       </tr>
@@ -404,7 +408,7 @@ export function MarkdownContent({ content }: { content: string }) {
           case 'br':
             return <div key={idx} style={{ height: 6 }} />
           default:
-            return <div key={idx}>{renderInline(node.content)}</div>
+            return <div key={idx}>{renderInline(node.content, onRSSReference)}</div>
         }
       })}
     </div>

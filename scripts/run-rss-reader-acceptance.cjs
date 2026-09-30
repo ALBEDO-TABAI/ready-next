@@ -99,7 +99,7 @@ const source = db.rss.addRSSSource({name:'合成验收信源',url:${JSON.stringi
 for(let i=0;i<132;i++){
  const id='reader-'+i;
  db.rss.upsertRSSItems([{id,source_id:source,guid:id,title:'可读资讯 '+String(i).padStart(2,'0'),link:${JSON.stringify(base)}+'/article/'+i,summary:'来源摘要 '+i,author:'合成作者',published_at:1700000000+(i<38?1000+i:i)}]);
- if(i!==1) db.rss.content.finishLoad(db.rss.content.beginLoad(id),{status:'ready',sourceUrl:${JSON.stringify(base)}+'/article/'+i,markdown:'# 已保存正文\\n\\n## 第一节\\n\\n'+('真实保存长文。'.repeat(4500))+'\\n\\n## 最后一节\\n\\nARTICLE-END-'+i+'\\n\\n\`\`\`ready-widget\\n<script>window.RSS_UNTRUSTED_EXECUTED=true</script>\\n\`\`\`'});
+ if(i!==1) db.rss.content.finishLoad(db.rss.content.beginLoad(id),{status:'ready',sourceUrl:${JSON.stringify(base)}+'/article/'+i,markdown:'# 已保存正文\\n\\n## 第一节\\n\\n'+('真实保存长文。'.repeat(4500))+'\\n\\n## 最后一节\\n\\nARTICLE-END-'+i+'\\n\\n重复位置 **第二部分**\\n\\n重复位置 **第二部分**\\n\\n\`\`\`ready-widget\\n<script>window.RSS_UNTRUSTED_EXECUTED=true</script>\\n\`\`\`'});
 }
 (db as any).db.exec("CREATE TRIGGER synthetic_save_failure BEFORE UPDATE OF read,starred ON rss_items WHEN OLD.id='reader-35' BEGIN SELECT RAISE(ABORT, '合成保存失败'); END;");
 await (db as any).db.backup(${JSON.stringify(path.join(root, 'ready.db'))}); db.close();`)
@@ -174,6 +174,30 @@ await (db as any).db.backup(${JSON.stringify(path.join(root, 'ready.db'))}); db.
     await page.getByRole('button', { name: '可读资讯 10', exact: true }).click()
     await page.locator('.rss-article-reader').getByText('ARTICLE-END-10', { exact: true }).waitFor()
     assert.equal(await page.locator('.rss-article-reader [role=alert]').count(), 0, 'previous item failure must not contaminate this article')
+    const selectedRun = await page.evaluate(() => {
+      const nodes = [...document.querySelectorAll('.rss-reader-body [data-ready-reading-run]')].filter((node) => node.textContent === '第二部分')
+      if (nodes.length !== 2) throw new Error('Synthetic duplicate reading runs are missing')
+      const node = nodes[1], range = document.createRange()
+      range.setStart(node.firstChild, 1); range.setEnd(node.firstChild, 3)
+      const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range)
+      document.dispatchEvent(new Event('selectionchange'))
+      return node.getAttribute('data-ready-reading-run')
+    })
+    await page.getByRole('button', { name: '引用所选文字', exact: true }).click()
+    await page.locator('.chat-reference-chip').getByRole('button', { name: '可读资讯 10 · 选区 RSS 选区引用', exact: true }).click()
+    await referencePreview.getByText(/已保存正文中的选区/).waitFor()
+    assert.match(await referencePreview.innerText(), /二部/)
+    assert.doesNotMatch(await referencePreview.innerText(), /真实保存长文/)
+    await referencePreview.getByRole('button', { name: '在 RSS 中定位', exact: true }).click()
+    await page.waitForFunction((run) => {
+      const selection = window.getSelection()
+      return selection?.toString() === '二部' && selection.anchorNode?.parentElement?.getAttribute('data-ready-reading-run') === run
+    }, selectedRun)
+    await page.screenshot({ path: path.join(evidence, 'rss-selection-reveal.png') })
+    await page.getByRole('button', { name: '引用本段', exact: true }).click()
+    await page.locator('.chat-reference-chip').getByRole('button', { name: '可读资讯 10 · 段落 RSS 选区引用', exact: true }).click()
+    await referencePreview.getByText(/重复位置 第二部分/).waitFor()
+    await referencePreview.getByRole('button', { name: '关闭', exact: true }).click()
     await page.getByRole('button', { name: '引用文章', exact: true }).click()
     await page.locator('.chat-reference-chip').getByRole('button', { name: '可读资讯 10 RSS 文章引用', exact: true }).click()
     await referencePreview.getByText(/片段预览，Agent 可继续读取/).waitFor()
@@ -521,7 +545,7 @@ await (db as any).db.backup(${JSON.stringify(path.join(root, 'ready.db'))}); db.
     assert.equal(await digestPanel.evaluate((element) => element.scrollWidth > element.clientWidth), false)
     await page.screenshot({ path: path.join(evidence, 'digest-narrow.png') })
 
-    report = { ok: true, scheduledDailyEdition: true, digestDarkAndNarrow: true, rangeBriefExportAndRegeneration: true, digestReferences: true, savedVersionRestorationWithoutModel: true, failedRefreshPreservesBody: true, automaticEventGroupingAndProgress: true, factSeenDoesNotReadAllArticles: true, manualEventSplitMoveMerge: true, groupExpansionKeepsFilter: true, automaticRefreshProcessesOnlyNewItems: true, semanticProcessingThroughLocalProvider: true, cancelProcessingKeepsCallCount: true, historicalImportNotProcessed: true, customDefinitions: true, applicationRestartPreservesDefinitions: true, manualMemberships: true, curationSeparateFromBookmarks: true, typedRSSReferences: true, staleReferenceVisible: true, saveNoteReadback: true, noteEditIndependent: true, exportAllPages: true, cancelExport: true, navigationCollapse: true, searchAndPagination: true, historyAndFavoritesPreserved: true, preferencesSurviveReload: true, longArticle: true, sourceCodeInert: true, failedSaveVisible: true, readPersisted: true, returnPreservesScroll: true, outlineNavigation: true, browserLoginReused: true, narrowNoOverflow: true }
+    report = { ok: true, exactSelectionReferenceAndReveal: true, paragraphReference: true, scheduledDailyEdition: true, digestDarkAndNarrow: true, rangeBriefExportAndRegeneration: true, digestReferences: true, savedVersionRestorationWithoutModel: true, failedRefreshPreservesBody: true, automaticEventGroupingAndProgress: true, factSeenDoesNotReadAllArticles: true, manualEventSplitMoveMerge: true, groupExpansionKeepsFilter: true, automaticRefreshProcessesOnlyNewItems: true, semanticProcessingThroughLocalProvider: true, cancelProcessingKeepsCallCount: true, historicalImportNotProcessed: true, customDefinitions: true, applicationRestartPreservesDefinitions: true, manualMemberships: true, curationSeparateFromBookmarks: true, typedRSSReferences: true, staleReferenceVisible: true, saveNoteReadback: true, noteEditIndependent: true, exportAllPages: true, cancelExport: true, navigationCollapse: true, searchAndPagination: true, historyAndFavoritesPreserved: true, preferencesSurviveReload: true, longArticle: true, sourceCodeInert: true, failedSaveVisible: true, readPersisted: true, returnPreservesScroll: true, outlineNavigation: true, browserLoginReused: true, narrowNoOverflow: true }
   } catch (error) {
     const failedPage = app?.windows().find((entry) => entry.url().includes('/renderer/index.html'))
     if (failedPage) await failedPage.screenshot({ path: path.join(evidence, 'failure.png') }).catch(() => {})

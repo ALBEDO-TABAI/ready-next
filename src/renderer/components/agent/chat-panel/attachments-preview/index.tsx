@@ -141,7 +141,7 @@ export function AttachmentPreviewModal({
         </div>
 
         <div className="attachment-preview-content">
-          {preview.attachment.source === 'rss-reference' ? <RSSReferencePreview reference={preview.attachment.rssReference} /> : <>
+          {preview.attachment.source === 'rss-reference' ? <RSSReferencePreview reference={preview.attachment.rssReference} onReveal={onClose} /> : <>
           {loading && (
             <div style={{ fontSize: 12, color: 'var(--text-gray)' }}>正在读取附件内容…</div>
           )}

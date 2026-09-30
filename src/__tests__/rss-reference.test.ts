@@ -127,13 +127,14 @@ test('the real SDK request exposes the referenced read with a selected skill and
   const article = db.rss.content.getArticle('model-read')!
   const event = db.rss.events.move({ itemId: article.id, expectedArticleRevision: article.revision, expectedMembershipRevision: 0, targetEventId: null, quote: article.summary })
   const digest = db.rss.digests.generate({ kind: 'range', from: 0, until: Date.now(), timezone: 'UTC', query: {} })
-  const envelope = buildRequestEnvelope({ userText: `整理引用的资讯\n\n${formatRSSReference('Article', RSSReferenceSchema.parse({ kind: 'article', read: { itemId: article.id, expectedRevision: article.revision } }))}\n\n${formatRSSReference('Digest', { kind: 'digest', read: { reportId: digest.id, offset: 0, limit: 20 } })}` })
+  const excerpt = RSSReferenceSchema.parse({ kind: 'excerpt', read: { format: 'reading-v1', itemId: article.id, expectedRevision: article.revision, range: { start: { run: 0, offset: 0 }, end: { run: 0, offset: 5 } } } })
+  const envelope = buildRequestEnvelope({ userText: `整理引用的资讯\n\n${formatRSSReference('Article', RSSReferenceSchema.parse({ kind: 'article', read: { itemId: article.id, expectedRevision: article.revision } }))}\n\n${formatRSSReference('Digest', { kind: 'digest', read: { reportId: digest.id, offset: 0, limit: 20 } })}\n\n${formatRSSReference('Excerpt', excerpt)}` })
   const resource = rssReferencesFromEnvelope(envelope)[0]
   const requests: any[] = []
   const runtime = new AgentSdkRuntime({
     loadAIConfig: () => ({ ok: true, config, reason: 'present' }), domainAdapters: [],
     executeToolCall: async (name, args, context) => {
-      assert.ok(['rss_read_reference', 'rss_read_events', 'rss_read_digests'].includes(name))
+      assert.ok(['rss_read_excerpt', 'rss_read_reference', 'rss_read_events', 'rss_read_digests'].includes(name))
       const text = await executeRSSTool(name, args, { getDigests: () => db.rss.digests, getContent: () => db.rss.content, getEvents: () => db.rss.events, references: rssReferencesFromEnvelope(context.requestEnvelope) })
       return createToolExecutionOutput(text, { shape: 'json', data: JSON.parse(text) })
     },
@@ -141,6 +142,8 @@ test('the real SDK request exposes the referenced read with a selected skill and
       requests.push(JSON.parse(String(init.body)))
       const payload = requests.length === 1
         ? { choices: [{ message: { tool_calls: [
+          { id: 'call-excerpt', type: 'function', function: { name: 'rss_read_excerpt', arguments: JSON.stringify(excerpt.kind === 'excerpt' ? excerpt.read : {}) } },
+          { id: 'call-excerpt-reference', type: 'function', function: { name: 'rss_read_reference', arguments: JSON.stringify({ referenceId: rssReferencesFromEnvelope(envelope).find((r) => r.reference.kind === 'excerpt')!.id }) } },
           { id: 'call-reference', type: 'function', function: { name: 'rss_read_reference', arguments: JSON.stringify({ referenceId: resource.id }) } },
           { id: 'call-digest', type: 'function', function: { name: 'rss_read_digests', arguments: JSON.stringify({ view: 'entries', reportId: digest.id }) } },
           { id: 'call-digest-reference', type: 'function', function: { name: 'rss_read_reference', arguments: JSON.stringify({ referenceId: rssReferencesFromEnvelope(envelope).find((r) => r.reference.kind === 'digest')!.id }) } },
@@ -164,6 +167,9 @@ test('the real SDK request exposes the referenced read with a selected skill and
     assert.match(JSON.stringify(requests[1].messages), /rss.readEvents/)
     assert.match(JSON.stringify(requests[1].messages), /rss.readDigests/)
     assert.ok(requests[0].tools.some((tool: any) => tool.function?.name === 'rss_read_digests'))
+    assert.equal(requests[0].tools.find((tool: any) => tool.function?.name === 'rss_read_excerpt').function.parameters.properties.range.properties.start.properties.run.type, 'integer')
+    assert.match(JSON.stringify(requests[1].messages), /reading_text/)
+    assert.match(JSON.stringify(requests[1].messages), /ready-rss:/)
     assert.equal(db.rss.events.summary(event.eventId!).unseenFactCount, 1)
   } finally { db.close() }
 })

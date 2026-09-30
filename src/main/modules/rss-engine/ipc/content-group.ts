@@ -1,3 +1,4 @@
+import { RSSReadExcerptSchema } from '../../../../shared/rss-excerpt'
 import type { IpcChannelGroup } from './types'
 import type { RSSContentStore } from '../../database/rss-content-store'
 import type { RSSContentService } from '../content-service'
@@ -9,7 +10,7 @@ interface ContentGroupDeps {
   getLoader(): RSSContentService
 }
 
-const CHANNELS = ['rss:queryItems', 'rss:queryCards', 'rss:readArticle', 'rss:loadArticle', 'rss:dismissQuery'] as const
+const CHANNELS = ['rss:readExcerpt', 'rss:queryItems', 'rss:queryCards', 'rss:readArticle', 'rss:loadArticle', 'rss:dismissQuery'] as const
 
 export const contentGroup: IpcChannelGroup<ContentGroupDeps> = {
   namespace: 'rss:content',
@@ -20,6 +21,7 @@ export const contentGroup: IpcChannelGroup<ContentGroupDeps> = {
       try { return { success: true, mock: false, data: await action() } }
       catch (error) { return { success: false, mock: false, error: error instanceof Error ? error.message : String(error) } }
     }
+    ipcMain.handle('rss:readExcerpt', (_event, input: unknown) => respond(() => deps.getContent().readExcerpt(RSSReadExcerptSchema.parse(input))))
     ipcMain.handle('rss:queryItems', (_event, input: unknown) => respond(() => deps.getContent().query(RSSQuerySchema.parse(input ?? {}))))
     ipcMain.handle('rss:queryCards', (_event, input: unknown) => respond(() => deps.getContent().cards(RSSQuerySchema.parse(input ?? {}))))
     ipcMain.handle('rss:dismissQuery', (_event, input: unknown) => respond(() => deps.getContent().dismissQuery(RSSQuerySchema.parse(input))))

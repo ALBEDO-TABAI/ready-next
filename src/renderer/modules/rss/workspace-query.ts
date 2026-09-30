@@ -6,8 +6,8 @@ export function rssQueryKey(input: RSSQueryInput): string {
   return JSON.stringify(query)
 }
 
-export function toRSSItem(item: RSSArticleSummary): RSSItem {
-  return { ...item, author: item.author || '', coverImage: item.coverImage || undefined,
+export function toRSSItem(item: Omit<RSSArticleSummary, 'summary' | 'classifications' | 'coverImage'> & Partial<Pick<RSSArticleSummary, 'summary' | 'classifications' | 'coverImage'>>): RSSItem {
+  return { ...item, summary: item.summary || '', author: item.author || '', coverImage: item.coverImage || undefined,
     publishedAtMs: item.publishedAt, collectedAt: item.collectedAt,
     publishedAt: item.publishedAt === null ? '' : new Date(item.publishedAt).toLocaleString() }
 }

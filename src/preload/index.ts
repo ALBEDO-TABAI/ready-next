@@ -825,6 +825,7 @@ const boardAPI = {
 
 // RSS API
 const rssAPI = {
+  readExcerpt: (input: import('../shared/rss-excerpt').RSSReadExcerptInput) => ipcRenderer.invoke('rss:readExcerpt', input),
   readDigests: (input?: import('../shared/rss-digests').RSSDigestReadInput) => ipcRenderer.invoke('rss:readDigests', input),
   digestSettings: () => ipcRenderer.invoke('rss:digestSettings'),
   configureDigests: (input: import('../shared/rss-digests').RSSDigestSettings) => ipcRenderer.invoke('rss:configureDigests', input),

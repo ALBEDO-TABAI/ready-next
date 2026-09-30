@@ -1,3 +1,6 @@
+import RSSSelectionReferences from './RSSSelectionReferences'
+import { revealReadingRange } from '../../modules/rss/reading-selection'
+import type { RSSReadingRange } from '../../../shared/rss-reading'
 import type { RSSDefinition } from '../../../shared/rss-organization'
 import RSSMembershipEditor from './RSSMembershipEditor'
 import RSSEventPanel from './RSSEventPanel'
@@ -15,6 +18,7 @@ import RssTimeHintBanner from './RssTimeHintBanner'
 import RSSSaveNoteButton from './RSSSaveNoteButton'
 
 interface RSSArticleReaderProps {
+  reveal?: { id: string; range: RSSReadingRange }
   expectedRevision?: string
   onSelectRelated?(item: RSSItem): void
   definitions?: RSSDefinition[]
@@ -32,7 +36,7 @@ const BODY_LABELS = {
   stale: '原文已变化，正在更新正文', login_required: '需要在原网站登录', failed: '正文获取失败',
 } as const
 
-export default function RSSArticleReader({ item, expectedRevision, onClose, onOpened, onToggleStar, onBodyLoaded, notice, active = true, definitions = [], onSelectRelated }: RSSArticleReaderProps) {
+export default function RSSArticleReader({ item, expectedRevision, reveal, onClose, onOpened, onToggleStar, onBodyLoaded, notice, active = true, definitions = [], onSelectRelated }: RSSArticleReaderProps) {
   const [content, setContent] = useState<RSSArticleExcerpt | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -88,6 +92,12 @@ export default function RSSArticleReader({ item, expectedRevision, onClose, onOp
   }, [content])
 
   useEffect(() => {
+    if (!active || !reveal || !content || content.article.id !== item.id || content.article.revision !== expectedRevision || !bodyRef.current) return
+    try { revealReadingRange(bodyRef.current, reveal.range) }
+    catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) }
+  }, [active, reveal?.id, content?.article.revision, item.id, expectedRevision])
+
+  useEffect(() => {
     if (!copied) return
     const timer = setTimeout(() => setCopied(false), 1500)
     return () => clearTimeout(timer)
@@ -107,6 +117,7 @@ export default function RSSArticleReader({ item, expectedRevision, onClose, onOp
       <button type="button" className="rss-reader-button" onClick={onClose}><ArrowLeft size={16} />返回列表</button>
       <div className="rss-reader-actions">
         <RSSReferenceButton name={title} label="引用文章" disabled={busy} reference={article ? { kind: 'article', read: { itemId: article.id, expectedRevision: article.revision, offset: 0, length: 12000 } } : null} />
+        {article && <RSSSelectionReferences bodyRef={bodyRef} article={article} active={active && !busy} />}
         <RSSSaveNoteButton article={content?.article || null} disabled={busy} active={active} onError={setError} />
         <button type="button" className="rss-reader-button" title={item.starred ? '取消收藏' : '收藏文章'} aria-pressed={item.starred} onClick={() => onToggleStar(item.id)}><Star size={16} fill={item.starred ? 'currentColor' : 'none'} /></button>
         <button type="button" className="rss-reader-button" disabled={!content} onClick={() => { if (content) void copyTextToClipboard(`${title}\n来源：${article?.link || item.link}\n\n${content.text}`).then(setCopied) }}><Copy size={15} />{copied ? '已复制' : '复制内容'}</button>
@@ -122,6 +133,7 @@ export default function RSSArticleReader({ item, expectedRevision, onClose, onOp
         <p className="rss-reader-source">{article?.source || item.source}{author && author !== (article?.source || item.source) ? ` · ${author}` : ''}{date != null ? ` · ${article?.publishedAt == null ? '收录于 ' : ''}${new Date(date).toLocaleString()}` : ''}</p>
         <h1 className="rss-reader-title">{title}</h1>
         <RssTimeHintBanner itemId={item.id} title={title} summary={article?.summary || item.summary} author={author} />
+        {expectedRevision && content && <p className="rss-reader-notice" role="status">此处按引用版本阅读；获取最新内容请返回列表。</p>}
         {video && <p className="rss-reader-notice">视频资讯：下方为来源提供的文字。观看、转录和视觉分析需使用对应操作。</p>}
         <div className="rss-reader-status" role="status">
           {busy && <Loader2 size={14} className="animate-spin" />}
@@ -134,7 +146,7 @@ export default function RSSArticleReader({ item, expectedRevision, onClose, onOp
         {content && definitions.length > 0 && <RSSMembershipEditor article={content.article} definitions={definitions} active={active} />}
         {content && <RSSEventPanel article={content.article} active={active} onSelect={onSelectRelated} />}
         <div className="note-preview-body rss-reader-body" ref={bodyRef}>
-          {content && <MarkdownContent content={content.text} externalBaseUrl={content.body.sourceUrl || article?.link || item.link} onOpenLink={openLink} />}
+          {content && <MarkdownContent readingAnchors content={content.text} externalBaseUrl={content.body.sourceUrl || article?.link || item.link} onOpenLink={openLink} />}
         </div>
       </article>
     </div>

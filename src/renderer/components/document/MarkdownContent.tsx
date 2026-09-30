@@ -1,3 +1,4 @@
+import { remarkReadingAnchors } from '../../../shared/rss-reading'
 import { Children, isValidElement, useCallback, useEffect, useId, useMemo, useState, type ReactNode } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -339,11 +340,12 @@ export function createMarkdownComponents({ mode, notePath, openHref, externalBas
   }
 }
 
-export function MarkdownContent({ content, externalBaseUrl, onOpenLink }: {
+export function MarkdownContent({ content, externalBaseUrl, onOpenLink, readingAnchors = false }: {
+  readingAnchors?: boolean
   content: string
   externalBaseUrl: string
   onOpenLink: (href: string) => unknown
 }) {
   const components = useMemo(() => createMarkdownComponents({ mode: 'external', externalBaseUrl, openHref: onOpenLink }), [externalBaseUrl, onOpenLink])
-  return <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>{content}</ReactMarkdown>
+  return <ReactMarkdown remarkPlugins={readingAnchors ? [remarkGfm, remarkReadingAnchors] : [remarkGfm]} components={components}>{content}</ReactMarkdown>
 }

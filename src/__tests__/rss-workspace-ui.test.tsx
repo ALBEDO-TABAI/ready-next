@@ -1,3 +1,10 @@
+import { MarkdownContent as ChatMarkdown } from '../renderer/components/agent/chat-panel/markdown'
+import { revealRSSReference } from '../renderer/modules/rss/reveal-reference'
+import { rssCitationUrl } from '../shared/rss-reference'
+import { READY_WORKBENCH_MODE_CHANGE_EVENT } from '../renderer/modules/workbench/mode-transition'
+import { buildRSSContext } from '../renderer/modules/rss/rss-context-reference'
+import { useMode } from '../renderer/stores/useMode'
+import { parseRSSReferenceBlock } from '../shared/rss-reference'
 import RSSDigestPanel from '../renderer/components/rss/RSSDigestPanel'
 import assert from 'node:assert/strict'
 import test from 'node:test'
@@ -13,7 +20,7 @@ import type { RSSItem } from '../renderer/components/rss/RSSFeed'
 
 async function withDOM(run: (root: ReturnType<typeof createRoot>, dom: JSDOM) => Promise<void>) {
   const dom = new JSDOM('<div id="root"></div>', { url: 'http://localhost' })
-  const replacements = { window: dom.window, document: dom.window.document, navigator: dom.window.navigator, IS_REACT_ACT_ENVIRONMENT: true }
+  const replacements = { window: dom.window, CustomEvent: dom.window.CustomEvent, document: dom.window.document, navigator: dom.window.navigator, IS_REACT_ACT_ENVIRONMENT: true }
   const previous = Object.fromEntries(Object.keys(replacements).map((key) => [key, Object.getOwnPropertyDescriptor(globalThis, key)]))
   for (const [key, value] of Object.entries(replacements)) Object.defineProperty(globalThis, key, { value, configurable: true, writable: true })
   const root = createRoot(dom.window.document.getElementById('root')!)
@@ -209,4 +216,43 @@ test('digest export receipts stay with their edition and corrections refresh the
   assert.doesNotMatch(dom.window.document.body.textContent!, /A-v1.md/)
   await act(async () => { outdated = true; correction() })
   assert.match(dom.window.document.body.textContent!, /来源、标准或归属已经变化/)
+}))
+
+
+test('a revealed excerpt contributes only its bounded reference to automatic Agent context', async () => withDOM(async () => {
+  useRSSSession.getState().reset(); useMode.getState().setWorkbenchMode('rss')
+  const range = { start: { run: 0, offset: 1 }, end: { run: 0, offset: 4 } }
+  useRSSSession.getState().setSelection({ selectedItemId: 'selected', selectedItemExpectedRevision: 'v1', selectedExcerpt: range })
+  const reads: unknown[] = []
+  Object.assign(window, { electronAPI: { rss: { readExcerpt: async (input: unknown) => { reads.push(input); return { success: true, data: { article: { id: 'selected', title: 'Title' } } } },
+    readArticle: async () => { throw new Error('must not widen the selection to the whole article') }, queryItems: async () => { throw new Error('must not include the hidden list') },
+  } } })
+  const context = await buildRSSContext()
+  const parsed = parseRSSReferenceBlock(context!)!
+  assert.equal(parsed.reference.kind, 'excerpt')
+  if (parsed.reference.kind !== 'excerpt') throw new Error('wrong reference')
+  assert.deepEqual(parsed.reference.read.range, range)
+  assert.equal(reads.length, 1)
+  useRSSSession.getState().reset(); useMode.getState().setWorkbenchMode('browser')
+}))
+
+
+test('chat citation clicks enqueue the exact reference through the shared workspace transition without clearing a split', async () => withDOM(async (root, dom) => {
+  useRSSSession.getState().reset()
+  const previous = useMode.getState()
+  useMode.setState({ workbenchMode: 'browser', splitMode: 'document' })
+  const reference = { kind: 'article' as const, read: { itemId: 'source', expectedRevision: 'v1', offset: 0, length: 12000 } }
+  const requests: unknown[] = []
+  const capture = (event: Event) => requests.push((event as CustomEvent).detail)
+  window.addEventListener(READY_WORKBENCH_MODE_CHANGE_EVENT, capture)
+  try {
+    await act(async () => root.render(<ChatMarkdown content={rssCitationUrl(reference)} onRSSReference={revealRSSReference} />))
+    const button = dom.window.document.querySelector<HTMLButtonElement>('.rss-citation-link')!
+    assert.equal(button.textContent, '查看 RSS 引用')
+    await act(async () => button.click())
+    assert.deepEqual(useRSSSession.getState().pendingReveal?.reference, reference)
+    assert.deepEqual(requests, [{ mode: 'rss', placement: 'open', presentation: 'immediate' }])
+    assert.equal(useMode.getState().workbenchMode, 'browser')
+    assert.equal(useMode.getState().splitMode, 'document')
+  } finally { window.removeEventListener(READY_WORKBENCH_MODE_CHANGE_EVENT, capture); useMode.setState(previous); useRSSSession.getState().reset() }
 }))

@@ -2382,6 +2382,7 @@ interface RSSItemAnalysisProgress {
 }
 
 interface ElectronRSSAPI {
+  readExcerpt: (input: import('../../shared/rss-excerpt').RSSReadExcerptInput) => Promise<RSSResponse<import('../../shared/rss-excerpt').RSSSelectionExcerpt>>
   readDigests: (input?: import('../../shared/rss-digests').RSSDigestReadInput) => Promise<RSSResponse<import('../../shared/rss-digests').RSSDigestReadResult>>
   digestSettings: () => Promise<RSSResponse<import('../../shared/rss-digests').RSSDigestScheduleState | null>>
   configureDigests: (input: import('../../shared/rss-digests').RSSDigestSettings) => Promise<RSSResponse<import('../../shared/rss-digests').RSSDigestScheduleState>>
