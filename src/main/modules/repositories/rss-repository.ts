@@ -1,49 +1,42 @@
-import type {
-  RSSAnalysisAction,
-  RSSAnalysisJob,
-  RSSAnalysisJobStatus,
-  RSSDraftStoreSourceSummary,
-  RSSItem,
-  RSSSource,
-  RSSStats,
-} from '../database'
+import type { RSSAnalysisAction, RSSAnalysisJob, RSSAnalysisJobStatus, RSSDraftStoreSourceSummary, RSSItem, RSSSource, RSSStats } from '../database/records'
+
 import { getDatabase } from '../database'
 
 export class RSSRepository {
   getSetting(key: string): string | undefined {
-    return getDatabase().getSetting(key)
+    return getDatabase().settings.getSetting(key)
   }
 
   setSetting(key: string, value: string): void {
-    getDatabase().setSetting(key, value)
+    getDatabase().settings.setSetting(key, value)
   }
 
   getRSSSources(): RSSSource[] {
-    return getDatabase().getRSSSources()
+    return getDatabase().rss.getRSSSources()
   }
 
   addRSSSource(source: { name: string; url: string; group?: string; icon?: string; platform?: string }): string {
-    return getDatabase().addRSSSource(source)
+    return getDatabase().rss.addRSSSource(source)
   }
 
   updateRSSSourcePlatform(id: string, platform: string): void {
-    getDatabase().updateRSSSourcePlatform(id, platform)
+    getDatabase().rss.updateRSSSourcePlatform(id, platform)
   }
 
   removeRSSSource(id: string): void {
-    getDatabase().removeRSSSource(id)
+    getDatabase().rss.removeRSSSource(id)
   }
 
   getRSSItems(sourceId?: string): RSSItem[] {
-    return getDatabase().getRSSItems(sourceId)
+    return getDatabase().rss.getRSSItems(sourceId)
   }
 
   getAllRSSItems(sourceId?: string): RSSItem[] {
-    return getDatabase().getAllRSSItems(sourceId)
+    return getDatabase().rss.getAllRSSItems(sourceId)
   }
 
   getRSSItemsWithSource(sourceId?: string): Array<RSSItem & { source_name: string }> {
-    return getDatabase().getRSSItemsWithSource(sourceId)
+    return getDatabase().rss.getRSSItemsWithSource(sourceId)
   }
 
   upsertRSSItems(items: Array<{
@@ -58,59 +51,59 @@ export class RSSRepository {
     published_at?: number | null
     ai_tags?: string | null
   }>): number {
-    return getDatabase().upsertRSSItems(items)
+    return getDatabase().rss.upsertRSSItems(items)
   }
 
   markRSSRead(itemId: string): void {
-    getDatabase().markRSSRead(itemId)
+    getDatabase().rss.markRSSRead(itemId)
   }
 
   markRSSReadMany(itemIds: string[]): number {
-    return getDatabase().markRSSReadMany(itemIds)
+    return getDatabase().rss.markRSSReadMany(itemIds)
   }
 
   deleteRSSItems(itemIds: string[]): number {
-    return getDatabase().deleteRSSItems(itemIds)
+    return getDatabase().rss.deleteRSSItems(itemIds)
   }
 
   dismissRSSItemsFromInbox(itemIds: string[], preserveStarred = false): number {
-    return getDatabase().dismissRSSItemsFromInbox(itemIds, preserveStarred)
+    return getDatabase().rss.dismissRSSItemsFromInbox(itemIds, preserveStarred)
   }
 
   deleteRSSItemsBySource(sourceId: string): number {
-    return getDatabase().deleteRSSItemsBySource(sourceId)
+    return getDatabase().rss.deleteRSSItemsBySource(sourceId)
   }
 
   toggleRSSStarred(itemId: string): void {
-    getDatabase().toggleRSSStarred(itemId)
+    getDatabase().rss.toggleRSSStarred(itemId)
   }
 
   updateRSSSourceLastFetched(sourceId: string): void {
-    getDatabase().updateRSSSourceLastFetched(sourceId)
+    getDatabase().rss.updateRSSSourceLastFetched(sourceId)
   }
 
   setRSSSourceDraftSeeded(sourceId: string, seeded: boolean): void {
-    getDatabase().setRSSSourceDraftSeeded(sourceId, seeded)
+    getDatabase().rss.setRSSSourceDraftSeeded(sourceId, seeded)
   }
 
   getRSSItemsByIds(itemIds: string[]): RSSItem[] {
-    return getDatabase().getRSSItemsByIds(itemIds)
+    return getDatabase().rss.getRSSItemsByIds(itemIds)
   }
 
   getRSSDraftStoreSources(): RSSDraftStoreSourceSummary[] {
-    return getDatabase().getRSSDraftStoreSources()
+    return getDatabase().rss.getRSSDraftStoreSources()
   }
 
   clearRSSDraftStore(sourceId?: string): { deletedItems: number; resetSources: number } {
-    return getDatabase().clearRSSDraftStore(sourceId)
+    return getDatabase().rss.clearRSSDraftStore(sourceId)
   }
 
   getLatestPerSource(): RSSItem[] {
-    return getDatabase().getLatestPerSource()
+    return getDatabase().rss.getLatestPerSource()
   }
 
   getRSSStats(): RSSStats {
-    return getDatabase().getRSSStats()
+    return getDatabase().rss.getRSSStats()
   }
 
   createRSSAnalysisJob(payload: {
@@ -130,11 +123,11 @@ export class RSSRepository {
     startedAt?: string | null
     finishedAt?: string | null
   }): RSSAnalysisJob {
-    return getDatabase().createRSSAnalysisJob(payload)
+    return getDatabase().rss.createRSSAnalysisJob(payload)
   }
 
   getRSSAnalysisJob(jobId: string): RSSAnalysisJob | null {
-    return getDatabase().getRSSAnalysisJob(jobId)
+    return getDatabase().rss.getRSSAnalysisJob(jobId)
   }
 
   updateRSSAnalysisJob(
@@ -151,30 +144,30 @@ export class RSSRepository {
       outputDir: string
     }>,
   ): RSSAnalysisJob | null {
-    return getDatabase().updateRSSAnalysisJob(jobId, patch)
+    return getDatabase().rss.updateRSSAnalysisJob(jobId, patch)
   }
 
   listRSSAnalysisJobs(itemId?: string, limit = 50): RSSAnalysisJob[] {
-    return getDatabase().listRSSAnalysisJobs(itemId, limit)
+    return getDatabase().rss.listRSSAnalysisJobs(itemId, limit)
   }
 
   deleteRSSAnalysisJob(jobId: string): boolean {
-    return getDatabase().deleteRSSAnalysisJob(jobId)
+    return getDatabase().rss.deleteRSSAnalysisJob(jobId)
   }
 
   findActiveRSSAnalysisJob(itemId: string, action: RSSAnalysisAction): RSSAnalysisJob | null {
-    return getDatabase().findActiveRSSAnalysisJob(itemId, action)
+    return getDatabase().rss.findActiveRSSAnalysisJob(itemId, action)
   }
 
   getLatestRSSAnalysisByItemIds(itemIds: string[]): Record<string, RSSAnalysisJob> {
-    return getDatabase().getLatestRSSAnalysisByItemIds(itemIds)
+    return getDatabase().rss.getLatestRSSAnalysisByItemIds(itemIds)
   }
 
   markInterruptedRSSAnalysisJobs(): number {
-    return getDatabase().markInterruptedRSSAnalysisJobs()
+    return getDatabase().rss.markInterruptedRSSAnalysisJobs()
   }
 
   cleanupRSSAnalysisJobs(retentionDays: number, maxRows: number): number {
-    return getDatabase().cleanupRSSAnalysisJobs(retentionDays, maxRows)
+    return getDatabase().rss.cleanupRSSAnalysisJobs(retentionDays, maxRows)
   }
 }

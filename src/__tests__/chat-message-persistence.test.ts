@@ -20,8 +20,8 @@ describe('chat message persistence', () => {
     }
 
     try {
-      db.createConversation('conv-duplicate', 'butler', 'Duplicate message test')
-      db.addChatMessage(
+      db.chat.createConversation('conv-duplicate', 'butler', 'Duplicate message test')
+      db.chat.addChatMessage(
         'assistant-final',
         'conv-duplicate',
         'assistant',
@@ -29,7 +29,7 @@ describe('chat message persistence', () => {
         '2026-03-07T09:00:01.000Z',
         { taskSnapshot: { phase: 'responding' } },
       )
-      db.addChatMessage(
+      db.chat.addChatMessage(
         'assistant-final',
         'conv-duplicate',
         'assistant',
@@ -38,7 +38,7 @@ describe('chat message persistence', () => {
         { taskSnapshot: { phase: 'done' } },
       )
 
-      const rows = db.getChatMessages('conv-duplicate')
+      const rows = db.chat.getChatMessages('conv-duplicate')
       assert.equal(rows.length, 1)
       assert.equal(rows[0].content, '已完成')
       assert.equal(rows[0].timestamp, '2026-03-07T09:00:02.000Z')

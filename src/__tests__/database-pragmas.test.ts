@@ -1,3 +1,4 @@
+import type { DatabaseConnection } from '../main/modules/database/connection'
 /**
  * SQLite PRAGMA tuning regression. The defaults (cache_size=2000 pages,
  * journal_mode=DELETE, synchronous=FULL, mmap_size=0) cause cache miss on
@@ -7,25 +8,32 @@
  */
 
 import assert from 'node:assert/strict'
-import test from 'node:test'
+import test, { type TestContext } from 'node:test'
+import { createRequire } from 'node:module'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 
-import { applyPerformancePragmas, type DatabaseConnection } from '../main/modules/database'
+const require = createRequire(import.meta.url)
+
+import { applyPerformancePragmas } from '../main/modules/database'
 import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
 
 type SqliteCtor = new (path: string) => DatabaseConnection & {
   pragma(source: string, options?: { simple?: boolean }): unknown
 }
 
-function openInMemoryDb(): InstanceType<SqliteCtor> {
-   
+function openTestDb(t: TestContext): InstanceType<SqliteCtor> {
+  const directory = mkdtempSync(join(tmpdir(), 'ready-database-pragmas-'))
+  t.after(() => rmSync(directory, { recursive: true, force: true }))
   const mod = require('better-sqlite3') as SqliteCtor & { default?: SqliteCtor }
   const Sqlite = mod.default || mod
-  return new Sqlite(':memory:')
+  return new Sqlite(join(directory, 'synthetic.db'))
 }
 
 test('applyPerformancePragmas tunes journal/sync/cache/mmap/temp_store', (t) => {
   if (skipIfSqliteUnavailable(t, 'database-pragmas: applyPerformancePragmas')) return
-  const db = openInMemoryDb()
+  const db = openTestDb(t)
   try {
     applyPerformancePragmas(db)
 
@@ -35,10 +43,8 @@ test('applyPerformancePragmas tunes journal/sync/cache/mmap/temp_store', (t) => 
     const mmapSize = db.pragma('mmap_size', { simple: true })
     const tempStore = db.pragma('temp_store', { simple: true })
 
-    // Note: in-memory DBs cannot use WAL, so journal_mode falls back to 'memory'.
-    // On a real on-disk DB the value will be 'wal'. Accept either so the test
-    // runs deterministically across CI / dev shells without touching the
-    // filesystem.
+    // A temporary file also makes mmap_size observable; an in-memory database
+    // has no mapped file and cannot prove that setting.
     assert.ok(
       journalMode === 'wal' || journalMode === 'memory',
       `journal_mode expected 'wal' or 'memory', got ${String(journalMode)}`,

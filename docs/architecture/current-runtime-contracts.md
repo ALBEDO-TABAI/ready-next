@@ -93,6 +93,7 @@
 - 采集终态只由 `browser-engine/collection-verdict.ts` 的 `resolveCollectionVerdict()` 决定：0 条永不 completed，部分进展不清断点，整任务重试只重试失败项。
 - RSS 自动刷新由 Main 单实例调度，不依赖 RSS 页面是否打开；`rss:auto_refresh_interval_ms=0` 表示仅手动刷新。冷启动按持久化的最近一次 `fetchAll` 完成时间补跑或等待剩余间隔，设置保存后立即重新排期。手动与自动刷新必须复用同一个 `fetchAll` 入口和 `RSSUpdateLock`；自动结果通过状态查询与完成事件通知 Renderer，`success:false` 和部分源错误都必须保留为可见警告。
 - RSS 文章在统一抓取出口按平台内容编号归一后再入库；Bilibili 视频页、带追踪参数的链接和明确只指向一条视频的动态，以及 Twitter/X 同一状态的等价链接，必须得到同一文章身份。普通文章对视频或推文的引用不得改变文章身份。同标题或同发布时间不能单独作为去重依据；历史别名合并必须保留未读、收藏、收件箱可见性和分析任务关联。
+- RSS 新增与刷新产生的分类必须随文章写入，并能被分类统计与导出读回；单源刷新也执行同一关键词分类。未执行分类的刷新保留已保存分类，不以空值清除；文章更新不重置已读、收藏或收件箱可见性。验收包含真实 Electron SQLite 下的 `rss-classification-persistence.test.ts`。
 - Agent 定时任务的唯一时间与领取真值是 Main + SQLite 的 `scheduled_tasks` / `agent_schedule_occurrences`；sidecar 不再调度或镜像。每次触发先持久领取 occurrence，再按 scope 串行进入生产 Agent 主链；同一 schedule 不并发，前台运行优先，缺失 scope/Agent/workspace 时暂停或阻塞而不走兜底会话。
 - 定时任务入口仍在四模式切换器右侧，但总览、编辑和历史占用中间工作区，不增加第五种 mode。打开时持有持续 BrowserView 遮罩，关闭时释放并恢复活动页；液态玻璃投影只读取背后的工作内容节点，禁止把覆盖面自身包含进投影源。
 - 时间预览和真实调度共用结构化规则计算器，保存 IANA 时区；一次、日历和间隔任务遵守 DST、错过合并、稳定 occurrence id 与最小五分钟间隔合同。Renderer 只消费 Main readback，`onChanged` 只用于失效通知。
@@ -159,6 +160,7 @@
 
 ## 11. 测试、原生依赖与平台
 
+- 主资料库连接、迁移和关闭由 `DatabaseManager` 独占；六个产品域通过 `database/*-store.ts` 取得该管理器的当前连接，共享事务，不自行打开/关闭或缓存失效连接。总管理器不恢复产品读写方法，领域 SQL 不在 Repository 与 Store 之间重复实现。连接合同与记录类型分别来自 `database/connection.ts`、`database/records.ts`。存储边界和真实读写回归走 `npm run verify:storage`。
 - 新测试默认验证真实入口的可观察行为；结构测试只用于行为无法证明的硬合同。不得用 source grep 冒充行为验证，不得用 skip 当通过。
 - SQLite、设置、搜索索引或本地持久化验收先跑 `npm run verify:native`；普通 Node 下 ABI skip 只说明该路径未覆盖。
 - 主进程启动、日志轮转、SQLite native gate 和 `better-sqlite3` 真实加载都属于验收边界。

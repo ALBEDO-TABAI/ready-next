@@ -1,6 +1,7 @@
+import type { DatabaseConnection } from '../database/connection'
 import { randomUUID } from 'crypto'
 
-import type { DatabaseConnection } from '../database'
+
 import type {
   FileActivityEvent,
   FileActivityEventType,

@@ -206,6 +206,51 @@ test('failed fetchAll also records completion so cold start does not retry in a 
   assert.equal(completedAt.length, 1)
 })
 
+test('single-source refresh classifies incoming articles before persistence', async () => {
+  const { ipc, handleCalls } = createMockIpc()
+  let savedTags: Array<string | null | undefined> = []
+  const handle = fetchGroup.register(ipc, {
+    ...createMockDeps(),
+    getRSSSources: () => [{
+      id: 's1', name: 'Design', url: 'https://example.test/feed', platform: 'rss',
+      group_name: 'default', icon: null, last_fetched: null, fetch_interval: 60, enabled: 1, created_at: 0,
+    }],
+    persistFetchInvocation: () => undefined,
+    detectPlatform: () => 'rss',
+    resolveSourceBackend: () => 'native',
+    requiresRSSHubWarmup: () => false,
+    requiresStrictRSSHubAvailability: () => false,
+    fetchSourceWithCurrentStack: async () => ({
+      backendUsed: 'native',
+      result: { feedTitle: 'Design', platform: 'rss', items: [{
+        itemId: 'i1', title: '设计案例', link: 'https://example.test/article', description: '视觉设计',
+        pubDate: '2026-09-30T00:00:00Z', author: '', coverImage: null, metadata: {},
+      }] },
+    }),
+    classifyItem: (title, description) => {
+      assert.deepEqual([title, description], ['设计案例', '视觉设计'])
+      return '设计'
+    },
+    resolveRSSItemGuid: (item) => item.itemId,
+    getRSSItemsByIds: () => [],
+    upsertRSSItems: (items) => { savedTags = items.map((item) => item.ai_tags); return items.length },
+    updateRSSSourceLastFetched: () => undefined,
+    setRSSSourceDraftSeeded: () => undefined,
+    recordSourceRouteAttempt: () => undefined,
+    persistRouteDiagnosticsSnapshot: () => undefined,
+    getAllRSSItems: () => [],
+    generateRSSArtifacts: async () => ({}),
+  })
+  try {
+    const refresh = handleCalls.find((entry) => entry.channel === 'rss:refreshSource')!.handler
+    const result = await refresh({} as IpcMainInvokeEvent, { sourceId: 's1' }) as { success: boolean }
+    assert.equal(result.success, true)
+    assert.deepEqual(savedTags, ['设计'])
+  } finally {
+    handle.dispose()
+  }
+})
+
 test('IpcDisposeHandle.dispose removes the same 5 channels that register added', () => {
   const { ipc, removeHandlerCalls } = createMockIpc()
   const handle = fetchGroup.register(ipc, createMockDeps())

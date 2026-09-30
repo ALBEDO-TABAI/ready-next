@@ -15,15 +15,15 @@ import { getDatabase } from '../database'
 
 export class AppSettingsRepository {
   getSetting(key: string): string | undefined {
-    return getDatabase().getSetting(key)
+    return getDatabase().settings.getSetting(key)
   }
 
   setSetting(key: string, value: string): void {
-    getDatabase().setSetting(key, value)
+    getDatabase().settings.setSetting(key, value)
   }
 
   getAllSettings(): Record<string, string> {
-    return getDatabase().getAllSettings()
+    return getDatabase().settings.getAllSettings()
   }
 
   private parseJSONSetting<T>(key: string): T | null {

@@ -1,6 +1,7 @@
+import type { DatabaseConnection } from '../../database/connection'
 import { randomUUID } from 'node:crypto'
 import type { SpecialistAgentBlueprint } from '../../../../shared/agent-specialist-blueprint'
-import type { DatabaseConnection } from '../../database'
+
 import { hashSpecialistBlueprintReviewContent } from './specialist-blueprint-review-content'
 
 interface SpecialistBlueprintConfirmationStoreOptions {

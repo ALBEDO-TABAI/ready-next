@@ -1,7 +1,8 @@
+import type { DatabaseConnection, DatabaseStatement } from '../main/modules/database/connection'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import type { DatabaseConnection, DatabaseStatement } from '../main/modules/database'
+
 import {
   DOCUMENT_GRAPH_MAX_DOCUMENTS,
   queryDocumentGraph,

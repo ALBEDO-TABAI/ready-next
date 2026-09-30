@@ -1,3 +1,4 @@
+import type { DatabaseConnection } from '../main/modules/database/connection'
 import assert from 'node:assert/strict'
 import { createRequire } from 'node:module'
 import test from 'node:test'
@@ -6,7 +7,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
 
-import type { DatabaseConnection } from '../main/modules/database'
+
 import { runMigrations, type MigrationDatabase } from '../main/modules/migrations'
 import { TagForgeRepository } from '../main/modules/repositories/tag-forge-repository'
 import { SearchEngine } from '../main/modules/search-engine/indexer'

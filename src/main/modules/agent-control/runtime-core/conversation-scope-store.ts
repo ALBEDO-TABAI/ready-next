@@ -1,3 +1,4 @@
+import type { AgentChannelRecord, ChatConversationRecord, ChatMessageRecord, UpsertConversationScopeMode } from '../../database/records'
 // B8-D R4 — ConversationScopeStore: conversation-scope CRUD (list/get/
 // delete/local-scope creation), row→contract mapping, the channel-scope
 // ensure path for remote IM, scope refresh, and message append, extracted
@@ -19,13 +20,7 @@
 // createConversationMessage) instead of into the runtime monolith. This batch
 // performs NO Phase C migration; it only fixes the boundary.
 import { randomUUID } from 'crypto'
-import type {
-  AgentChannelRecord,
-  ChatConversationRecord,
-  ChatMessageRecord,
-  DatabaseManager,
-  UpsertConversationScopeMode,
-} from '../../database'
+import type { DatabaseManager } from '../../database'
 import type { MultimodalBlock } from '../contracts/run-contracts'
 import type { TaskProjectionRepository } from '../../repositories/task-projection-repository'
 import type {
@@ -70,16 +65,16 @@ export class ConversationScopeStore {
   constructor(private readonly deps: ConversationScopeStoreDeps) {}
 
   listConversationScopes(agent?: string): ConversationScope[] {
-    return this.deps.db.listConversationScopes(agent).map((row) => this.mapConversationRow(row))
+    return this.deps.db.chat.listConversationScopes(agent).map((row) => this.mapConversationRow(row))
   }
 
   getConversationScope(scopeId: string): ConversationScope | null {
-    const row = this.deps.db.getConversationScope(scopeId)
+    const row = this.deps.db.chat.getConversationScope(scopeId)
     return row ? this.mapConversationRow(row) : null
   }
 
   getConversationScopeMessages(scopeId: string): ConversationScopeMessage[] {
-    return this.deps.db.getChatMessages(scopeId).map((row) => this.mapMessageRow(row))
+    return this.deps.db.chat.getChatMessages(scopeId).map((row) => this.mapMessageRow(row))
   }
 
   deleteConversation(scopeId: string): void {
@@ -91,7 +86,7 @@ export class ConversationScopeStore {
     } catch (error) {
       console.warn('[Runtime] Failed to clear browser collection consent scope:', error)
     }
-    this.deps.db.deleteConversation(scopeId)
+    this.deps.db.chat.deleteConversation(scopeId)
   }
 
   createLocalScope(agent: string, id?: string): ConversationScope {
@@ -112,7 +107,7 @@ export class ConversationScopeStore {
     id?: string,
   ): { scope: ConversationScope; mode: UpsertConversationScopeMode } {
     const scopeId = typeof id === 'string' && id.trim() ? id.trim() : `conv-${randomUUID()}`
-    const { row, mode } = this.deps.db.upsertConversationScope({
+    const { row, mode } = this.deps.db.chat.upsertConversationScope({
       id: scopeId,
       agent,
       activeAgentId: this.deps.resolveConversationAgentId(agent),
@@ -169,11 +164,11 @@ export class ConversationScopeStore {
     agent: string,
     sender: string
   ): ConversationScope {
-    const channel = this.deps.db.getAgentChannel(channelId)
+    const channel = this.deps.db.channels.getAgentChannel(channelId)
     const channelMeta = channel ? this.deps.mapChannelRow(channel) : null
     const scopedThreadKey = this.deps.getScopedRemoteThreadKey(channelId, remoteThread, agent)
-    const existing = this.deps.db.findConversationScope('channel', channelId, scopedThreadKey, agent)
-    const { row } = this.deps.db.upsertConversationScope({
+    const existing = this.deps.db.chat.findConversationScope('channel', channelId, scopedThreadKey, agent)
+    const { row } = this.deps.db.chat.upsertConversationScope({
       id: existing?.id || `conv-${randomUUID()}`,
       agent,
       activeAgentId: this.deps.resolveConversationAgentId(agent),
@@ -189,7 +184,7 @@ export class ConversationScopeStore {
         channelType: channelMeta?.type || 'generic-webhook',
         sender,
         remoteThread,
-        channelSessionToken: this.deps.db.getSetting(
+        channelSessionToken: this.deps.db.settings.getSetting(
           this.deps.getRemoteChannelSessionSettingKey(channelId, remoteThread, agent)
         ) || null
       }
@@ -210,7 +205,7 @@ export class ConversationScopeStore {
   }
 
   refreshScope(scopeId: string): ConversationScope {
-    const row = this.deps.db.getConversationScope(scopeId)
+    const row = this.deps.db.chat.getConversationScope(scopeId)
     if (!row) throw new Error(`Conversation scope not found: ${scopeId}`)
     return this.mapConversationRow(row)
   }
@@ -225,7 +220,7 @@ export class ConversationScopeStore {
   ): ConversationScopeMessage {
     const messageId = `msg-${randomUUID()}`
     const timestamp = new Date().toISOString()
-    this.deps.db.addChatMessage(
+    this.deps.db.chat.addChatMessage(
       messageId,
       scopeId,
       payload.role,
@@ -239,7 +234,7 @@ export class ConversationScopeStore {
     if (payload.role === 'assistant') {
       this.deps.persistReferenceHintToScope(scopeId)
     }
-    return this.mapMessageRow(this.deps.db.getChatMessages(scopeId).find((row) => row.id === messageId)!)
+    return this.mapMessageRow(this.deps.db.chat.getChatMessages(scopeId).find((row) => row.id === messageId)!)
   }
 
   extractTextFromMessage(message: string | MultimodalBlock[]): string {

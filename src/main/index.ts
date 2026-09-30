@@ -123,7 +123,7 @@ type ThemeSnapshot = {
 
 function resolveStoredThemeSource(): 'light' | 'dark' | 'system' {
   try {
-    const raw = String(getDatabase().getSetting(THEME_SETTING_KEY) || '').trim().toLowerCase()
+    const raw = String(getDatabase().settings.getSetting(THEME_SETTING_KEY) || '').trim().toLowerCase()
     if (raw === 'light' || raw === 'dark' || raw === 'system') return raw
   } catch {
     // ignore persisted theme read failures
@@ -133,7 +133,7 @@ function resolveStoredThemeSource(): 'light' | 'dark' | 'system' {
 
 function resolveStoredThemeSkin(): ThemeSkin {
   try {
-    const raw = String(getDatabase().getSetting(THEME_SKIN_SETTING_KEY) || '').trim().toLowerCase()
+    const raw = String(getDatabase().settings.getSetting(THEME_SKIN_SETTING_KEY) || '').trim().toLowerCase()
     if (raw === 'liquid-glass' || raw === 'ready-glass' || raw === 'solid-green-glass' || raw === 'solid-blue-glass') return raw
   } catch {
     // ignore persisted skin read failures
@@ -617,7 +617,7 @@ function setupGlobalIPC(): void {
   })
   reminderNotifierFire = (payload) => reminderNotifier.fire(payload)
   reminderScheduler = startReminderScheduler({
-    getDb: () => getDatabase(),
+    getDb: () => getDatabase().calendar,
     now: () => Math.floor(Date.now() / 1000),
     scheduleAt: defaultScheduleAt,
     fire: (payload) => reminderNotifier.fire(payload),
@@ -636,7 +636,7 @@ function setupGlobalIPC(): void {
           // be re-polled. We narrow the row shape so the scheduler's
           // TS contract is preserved (it only needs id / sync_url /
           // sync_interval).
-          return getDatabase().getCalendarSources().map((s) => ({
+          return getDatabase().calendar.getCalendarSources().map((s) => ({
             id: s.id,
             sync_url: s.sync_url,
             sync_interval: s.sync_interval,
@@ -662,7 +662,7 @@ function setupGlobalIPC(): void {
       },
       importedEventsFor: (sourceId: string) => {
         try {
-          return getDatabase().listImportedEventsForSource(sourceId)
+          return getDatabase().calendar.listImportedEventsForSource(sourceId)
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error)
           console.warn(`[sync-scheduler] listImportedEventsForSource(${sourceId}) failed:`, message)
@@ -670,9 +670,9 @@ function setupGlobalIPC(): void {
         }
       },
       upsertImportedEvent: (sourceId, ev) =>
-        getDatabase().upsertImportedEvent(sourceId, ev),
+        getDatabase().calendar.upsertImportedEvent(sourceId, ev),
       deleteImportedEvent: (sourceId, uid) =>
-        getDatabase().deleteImportedEvent(sourceId, uid),
+        getDatabase().calendar.deleteImportedEvent(sourceId, uid),
       onSourceSynced: (result) => {
         // Telemetry hook — log line; tests rely on this not throwing.
         if (result.ok) {
@@ -777,7 +777,7 @@ function setupGlobalIPC(): void {
     const nextTheme = theme === 'dark' || theme === 'light' || theme === 'system' ? theme : 'light'
     nativeTheme.themeSource = nextTheme
     try {
-      getDatabase().setSetting(THEME_SETTING_KEY, nextTheme)
+      getDatabase().settings.setSetting(THEME_SETTING_KEY, nextTheme)
     } catch {
       // ignore persistence failures
     }
@@ -792,7 +792,7 @@ function setupGlobalIPC(): void {
   ipcMain.handle('theme:setSkin', (_event, skin: string) => {
     const nextSkin: ThemeSkin = skin === 'ready-glass' || skin === 'solid-green-glass' || skin === 'solid-blue-glass' ? skin : 'liquid-glass'
     try {
-      getDatabase().setSetting(THEME_SKIN_SETTING_KEY, nextSkin)
+      getDatabase().settings.setSetting(THEME_SKIN_SETTING_KEY, nextSkin)
     } catch {
       // ignore persistence failures
     }
@@ -1131,7 +1131,7 @@ app.whenReady().then(async () => {
     const scheduler = reminderScheduler
     const fire = reminderNotifierFire
     void recoverMissedReminders({
-      getDb: () => getDatabase(),
+      getDb: () => getDatabase().calendar,
       now: () => Math.floor(Date.now() / 1000),
       fire,
     }).then((summary) => {

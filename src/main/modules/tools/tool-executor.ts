@@ -1034,8 +1034,8 @@ async function executeToolCallInner(
           // Phase M —— agent 代装 MCP server：两阶段确认合同在工具内执行
           // （install_skill 同款范式）；命令白名单/包名校验由代码强制。
           return executeInstallMcpServer(args as Record<string, unknown>, {
-            getSetting: (key) => getDatabase().getSetting(key),
-            setSetting: (key, value) => getDatabase().setSetting(key, value),
+            getSetting: (key) => getDatabase().settings.getSetting(key),
+            setSetting: (key, value) => getDatabase().settings.setSetting(key, value),
           })
 
         case 'command_exec':

@@ -1,3 +1,4 @@
+import type { CalendarEvent } from '../main/modules/database/records'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { mkdtemp, writeFile } from 'node:fs/promises'
@@ -6,7 +7,7 @@ import { join } from 'node:path'
 
 import { FileEmergenceService, isFileEmergenceEnabled } from '../main/modules/file-emergence/service'
 import type { FileEmergenceServiceDeps } from '../main/modules/file-emergence/service'
-import type { CalendarEvent } from '../main/modules/database'
+
 import type { FileActivityEvent, FileReadingSession } from '../shared/file-emergence'
 
 const now = new Date('2026-06-08T10:00:00+08:00').getTime()

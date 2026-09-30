@@ -1,9 +1,10 @@
+import type { RSSAnalysisAction, RSSAnalysisJobStatus } from '../main/modules/database/records'
 import { describe, it } from 'node:test'
 import assert from 'node:assert'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import type { RSSAnalysisAction, RSSAnalysisJobStatus } from '../main/modules/database'
+
 import { findReusableVideoFile, isLikelyVideoLink } from '../main/modules/rss-engine/item-analysis-manager'
 import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
 

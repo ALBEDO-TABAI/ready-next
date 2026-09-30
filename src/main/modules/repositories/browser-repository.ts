@@ -1,42 +1,38 @@
-import type {
-  BrowserBookmark,
-  BrowserDownload,
-  BrowserHistoryEntry,
-  BrowserTaskRecord,
-} from '../database'
+import type { BrowserBookmark, BrowserDownload, BrowserHistoryEntry, BrowserTaskRecord } from '../database/records'
+
 import { getDatabase } from '../database'
 
 export class BrowserRepository {
   getSetting(key: string): string | undefined {
-    return getDatabase().getSetting(key)
+    return getDatabase().settings.getSetting(key)
   }
 
   setSetting(key: string, value: string): void {
-    getDatabase().setSetting(key, value)
+    getDatabase().settings.setSetting(key, value)
   }
 
   deleteSetting(key: string): void {
-    getDatabase().deleteSetting(key)
+    getDatabase().settings.deleteSetting(key)
   }
 
   getAllSettings(): Record<string, string> {
-    return getDatabase().getAllSettings()
+    return getDatabase().settings.getAllSettings()
   }
 
   addBookmark(url: string, title: string, favicon?: string): string {
-    return getDatabase().addBookmark(url, title, favicon)
+    return getDatabase().browser.addBookmark(url, title, favicon)
   }
 
   removeBookmarkByUrl(url: string): void {
-    getDatabase().removeBookmarkByUrl(url)
+    getDatabase().browser.removeBookmarkByUrl(url)
   }
 
   getBookmarks(): BrowserBookmark[] {
-    return getDatabase().getBookmarks()
+    return getDatabase().browser.getBookmarks()
   }
 
   isBookmarked(url: string): boolean {
-    return getDatabase().isBookmarked(url)
+    return getDatabase().browser.isBookmarked(url)
   }
 
   addHistoryEntry(
@@ -48,27 +44,27 @@ export class BrowserRepository {
       sessionId?: string | null
     },
   ): string {
-    return getDatabase().addHistoryEntry(url, title, metadata)
+    return getDatabase().browser.addHistoryEntry(url, title, metadata)
   }
 
   updateHistoryEntryTitle(url: string, title: string, favicon?: string | null): void {
-    getDatabase().updateHistoryEntryTitle(url, title, favicon)
+    getDatabase().browser.updateHistoryEntryTitle(url, title, favicon)
   }
 
   getHistory(limit?: number): BrowserHistoryEntry[] {
-    return getDatabase().getHistory(limit)
+    return getDatabase().browser.getHistory(limit)
   }
 
   clearHistory(sinceEpochSeconds?: number): void {
-    getDatabase().clearHistory(sinceEpochSeconds)
+    getDatabase().browser.clearHistory(sinceEpochSeconds)
   }
 
   getHistoryCount(): number {
-    return getDatabase().getHistoryCount()
+    return getDatabase().browser.getHistoryCount()
   }
 
   searchHistory(query: string): BrowserHistoryEntry[] {
-    return getDatabase().searchHistory(query)
+    return getDatabase().browser.searchHistory(query)
   }
 
   addDownload(download: {
@@ -84,11 +80,11 @@ export class BrowserRepository {
     end_time?: number | null
     can_resume?: number | boolean
   }): void {
-    getDatabase().addDownload(download)
+    getDatabase().browser.addDownload(download)
   }
 
   updateDownloadProgress(id: string, receivedBytes: number): void {
-    getDatabase().updateDownloadProgress(id, receivedBytes)
+    getDatabase().browser.updateDownloadProgress(id, receivedBytes)
   }
 
   updateDownloadState(
@@ -102,19 +98,19 @@ export class BrowserRepository {
       canResume?: number | boolean
     },
   ): void {
-    getDatabase().updateDownloadState(id, state, metadata)
+    getDatabase().browser.updateDownloadState(id, state, metadata)
   }
 
   getDownloads(): BrowserDownload[] {
-    return getDatabase().getDownloads()
+    return getDatabase().browser.getDownloads()
   }
 
   clearDownloads(sinceEpochSeconds?: number): void {
-    getDatabase().clearDownloads(sinceEpochSeconds)
+    getDatabase().browser.clearDownloads(sinceEpochSeconds)
   }
 
   getDownloadCount(): number {
-    return getDatabase().getDownloadCount()
+    return getDatabase().browser.getDownloadCount()
   }
 
   createTask(task: {
@@ -134,7 +130,7 @@ export class BrowserRepository {
     updated_at: string
     finished_at?: string | null
   }): void {
-    getDatabase().createBrowserTask(task)
+    getDatabase().browser.createBrowserTask(task)
   }
 
   updateTask(
@@ -154,14 +150,14 @@ export class BrowserRepository {
       finished_at?: string | null
     },
   ): void {
-    getDatabase().updateBrowserTask(id, updates)
+    getDatabase().browser.updateBrowserTask(id, updates)
   }
 
   getTask(id: string): BrowserTaskRecord | undefined {
-    return getDatabase().getBrowserTask(id)
+    return getDatabase().browser.getBrowserTask(id)
   }
 
   listTasks(statuses?: string[]): BrowserTaskRecord[] {
-    return getDatabase().listBrowserTasks(statuses)
+    return getDatabase().browser.listBrowserTasks(statuses)
   }
 }

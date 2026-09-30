@@ -130,24 +130,6 @@
       "owner": "p2-6-belief-archive-exclusion"
     },
     {
-      "path": "src/__tests__/browser-power-failure.test.ts",
-      "reason": "P1-A1: exercises browser_power_eval/cdp/network_trace/resource_forensics structured-failure catch branches with injected fake BrowserControllers whose executeJS/sendCdpCommand throw; no test path opens better-sqlite3 or reads the real DB. Transitive imports reach sqlite-capable browser-tools only. Host-Node coverage must stay active for the failure-classifier + target-identity assertions.",
-      "since": "2026-07-03",
-      "owner": "p1-a1-power-failure"
-    },
-    {
-      "path": "src/__tests__/browser-action-receipt.test.ts",
-      "reason": "P1-E5: exercises the post-action change-receipt shaper + browser_type integration with an injected fake BrowserController (executeJS returns canned probe/typed results); no test path opens better-sqlite3 or reads the real DB. Transitive imports reach sqlite-capable browser-tools only. Host-Node coverage must stay active for the receipt shaping assertions.",
-      "since": "2026-07-03",
-      "owner": "p1-e5-action-receipt"
-    },
-    {
-      "path": "src/__tests__/browser-pinterest-p0.test.ts",
-      "reason": "P0: tests browser_download_urls / start_task dispatch + pure pinimg helpers with injected fake BrowserControllers and a stubbed fetch; no test path opens better-sqlite3 or reads the real DB. Transitive imports reach sqlite-capable browser-tools modules only. Host-Node coverage must stay active for the pinimg/guard unit assertions.",
-      "since": "2026-06-24",
-      "owner": "p0-pinterest-collection"
-    },
-    {
       "path": "src/__tests__/run-finalizer-checkin.test.ts",
       "reason": "P1/P2: tests finalizeRunOutcome + projectionPatchFromChildClose with in-memory fake projection stores and run-meta maps; no test path opens better-sqlite3 or reads the real DB. The agent-sdk-runtime import (projectionPatchFromChildClose) is a pure function but pulls a sqlite-capable module into the transitive graph. Host-Node coverage must stay active for adjudication/proof assertions.",
       "since": "2026-06-24",
@@ -266,12 +248,6 @@
       "reason": "transitive value-import reaches a nativeBackedModule via wrapper modules but never triggers native sqlite load in any test path (all sqlite-touching call sites use fakes/stubs); verified passing on host-Node test runs as of 2026-05-06",
       "since": "2026-05-06",
       "owner": "stage5-bulk-import"
-    },
-    {
-      "path": "src/__tests__/browser-download-recent-artifacts.test.ts",
-      "reason": "tests execute browser_download_urls with a fake browser controller and mocked fetch only; transitive browser-tools imports reach sqlite-capable modules but no test path opens better-sqlite3 or reads a repository. Verified passing on host-Node.",
-      "since": "2026-06-18",
-      "owner": "send-im-l1"
     },
     {
       "path": "src/__tests__/capability-gate-arbitration.test.ts",

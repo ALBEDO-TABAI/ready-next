@@ -1,13 +1,9 @@
+import type { ChatConversationRecord, ConversationSourceKind } from '../main/modules/database/records'
+import type { DatabaseConnection, DatabaseStatement } from '../main/modules/database/connection'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import {
-  DatabaseManager,
-  type ChatConversationRecord,
-  type ConversationSourceKind,
-  type DatabaseConnection,
-  type DatabaseStatement,
-} from '../main/modules/database'
+import { ChatStore } from '../main/modules/database/chat-store'
 import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
 
 test('local conversation user binding declares transitive sqlite ABI guard', (t) => {
@@ -28,6 +24,7 @@ class FakeConversationConnection implements DatabaseConnection {
     const conversations = this.conversations
     return {
       run(...params: unknown[]) {
+        if (normalized.startsWith('INSERT INTO session_recall_metadata')) return { changes: 1 }
         if (!normalized.startsWith('INSERT INTO chat_conversations')) {
           throw new Error(`Unexpected run SQL: ${normalized}`)
         }
@@ -68,6 +65,7 @@ class FakeConversationConnection implements DatabaseConnection {
             && row.agent === agent
           )) as T | undefined
         }
+        if (normalized.startsWith('SELECT preview_text')) return undefined
         throw new Error(`Unexpected get SQL: ${normalized}`)
       },
       all<T = unknown>(): T[] {
@@ -77,18 +75,16 @@ class FakeConversationConnection implements DatabaseConnection {
   }
 }
 
-function createManager(): { manager: DatabaseManager; connection: FakeConversationConnection } {
+function createManager(): { manager: { chat: ChatStore }; connection: FakeConversationConnection } {
   const connection = new FakeConversationConnection()
-  const manager = Object.create(DatabaseManager.prototype) as DatabaseManager
-  ;(manager as unknown as { db: DatabaseConnection }).db = connection
-  ;(manager as unknown as { syncConversationRecallMetadata: () => void }).syncConversationRecallMetadata = () => {}
+  const manager = { chat: new ChatStore(() => connection) }
   return { manager, connection }
 }
 
 test('legacy chat:createConversation explicitly binds new local conversations to default-user', () => {
   const { manager, connection } = createManager()
 
-  manager.createConversation('conv-new-local', 'butler', '新会话')
+  manager.chat.createConversation('conv-new-local', 'butler', '新会话')
 
   assert.equal(connection.conversations.get('conv-new-local')?.user_id, 'default-user')
 })
@@ -105,9 +101,9 @@ test('upserting without userId preserves an existing binding and leaves a new re
     meta: {},
   }
 
-  manager.upsertConversationScope({ ...localPayload, userId: 'default-user' })
-  manager.upsertConversationScope({ ...localPayload, title: '更新标题' })
-  manager.upsertConversationScope({
+  manager.chat.upsertConversationScope({ ...localPayload, userId: 'default-user' })
+  manager.chat.upsertConversationScope({ ...localPayload, title: '更新标题' })
+  manager.chat.upsertConversationScope({
     id: 'conv-remote',
     agent: 'butler',
     title: '远程会话',

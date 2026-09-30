@@ -1,25 +1,26 @@
+import type { ChatConversationRecord, ConversationAttachmentRecord } from '../database/records'
 import { getDatabase } from '../database'
-import type { ChatConversationRecord, ConversationAttachmentRecord } from '../database'
+
 
 export class ChatRepository {
   getConversations(agent: string) {
-    return getDatabase().getConversations(agent)
+    return getDatabase().chat.getConversations(agent)
   }
 
   listRecentConversations(limit = 50): Array<ChatConversationRecord & { last_message_at?: string | null }> {
-    return getDatabase().listConversationScopes(undefined, limit)
+    return getDatabase().chat.listConversationScopes(undefined, limit)
   }
 
   getMessages(conversationId: string) {
-    return getDatabase().getChatMessages(conversationId)
+    return getDatabase().chat.getChatMessages(conversationId)
   }
 
   listConversationAttachments(conversationId: string): ConversationAttachmentRecord[] {
-    return getDatabase().listConversationAttachments(conversationId)
+    return getDatabase().chat.listConversationAttachments(conversationId)
   }
 
   deleteConversation(conversationId: string): void {
-    getDatabase().deleteConversation(conversationId)
+    getDatabase().chat.deleteConversation(conversationId)
   }
 
   saveMessage(payload: {
@@ -30,7 +31,7 @@ export class ChatRepository {
     timestamp: string
     meta?: Record<string, unknown>
   }): void {
-    getDatabase().addChatMessage(
+    getDatabase().chat.addChatMessage(
       payload.id,
       payload.conversationId,
       payload.role,
@@ -41,10 +42,10 @@ export class ChatRepository {
   }
 
   createConversation(payload: { id: string; agent: string; title: string }): void {
-    getDatabase().createConversation(payload.id, payload.agent, payload.title)
+    getDatabase().chat.createConversation(payload.id, payload.agent, payload.title)
   }
 
   updateConversationTitle(payload: { id: string; title: string }): void {
-    getDatabase().updateConversationTitle(payload.id, payload.title)
+    getDatabase().chat.updateConversationTitle(payload.id, payload.title)
   }
 }

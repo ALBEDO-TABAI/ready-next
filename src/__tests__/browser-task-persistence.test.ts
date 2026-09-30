@@ -216,7 +216,7 @@ describe('browser task persistence', () => {
   })
 
   it('does not include undefined fields in browser task update SQL', async () => {
-    const { DatabaseManager } = await import('../main/modules/database')
+    const { BrowserStore } = await import('../main/modules/database/browser-store')
     let sql = ''
     let params: unknown[] = []
     const fakeManager = {
@@ -230,7 +230,7 @@ describe('browser task persistence', () => {
       },
     }
 
-    DatabaseManager.prototype.updateBrowserTask.call(fakeManager as never, 'browser-task-1', {
+    new BrowserStore(() => fakeManager.db as never).updateBrowserTask( 'browser-task-1', {
       status: 'cancelled',
       checkpoint_json: undefined,
       result_json: undefined,
@@ -262,7 +262,7 @@ describe('browser task persistence', () => {
     }
 
     try {
-      db.createBrowserTask({
+      db.browser.createBrowserTask({
         id: 'browser-task-preserve',
         kind: 'note_collect',
         status: 'running',
@@ -280,14 +280,14 @@ describe('browser task persistence', () => {
         finished_at: null,
       })
 
-      db.updateBrowserTask('browser-task-preserve', {
+      db.browser.updateBrowserTask('browser-task-preserve', {
         status: 'cancelled',
         progress_completed: 1,
         current_label: null,
         finished_at: '2026-06-05T00:00:01.000Z',
       })
 
-      const record = db.getBrowserTask('browser-task-preserve')
+      const record = db.browser.getBrowserTask('browser-task-preserve')
       assert.ok(record)
       assert.equal(record.status, 'cancelled')
       assert.equal(record.result_json, JSON.stringify({ collected: ['https://example.com/1'] }))

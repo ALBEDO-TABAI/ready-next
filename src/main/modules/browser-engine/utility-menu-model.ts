@@ -1,4 +1,5 @@
-import type { BrowserBookmark, BrowserDownload, BrowserHistoryEntry } from '../database'
+import type { BrowserBookmark, BrowserDownload, BrowserHistoryEntry } from '../database/records'
+
 import type {
   BrowserUtilityMenuCurrentTab,
   BrowserUtilityMenuKind,

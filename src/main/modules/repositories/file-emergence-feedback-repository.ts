@@ -1,5 +1,6 @@
+import type { DatabaseConnection } from '../database/connection'
 import { randomUUID } from 'crypto'
-import type { DatabaseConnection } from '../database'
+
 
 export type FileEmergenceFeedbackAction='rename'|'not_related'|'snooze'|'hide'|'restore'
 export interface FileEmergenceFeedbackRecord{feedbackId:string;projectKey:string;action:FileEmergenceFeedbackAction;evidenceCutoff:number|null;snoozeUntil:number|null;createdAt:number}

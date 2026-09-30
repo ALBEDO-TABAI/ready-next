@@ -10,7 +10,7 @@ function readWorkspaceFile(path: string): string {
 
 test('rss draft store schema and helpers support inbox visibility plus source reset state', () => {
   const migrations = readWorkspaceFile('src/main/modules/migrations.ts')
-  const database = readWorkspaceFile('src/main/modules/database.ts')
+  const database = readWorkspaceFile('src/main/modules/database/rss-store.ts')
   const repository = readWorkspaceFile('src/main/modules/repositories/rss-repository.ts')
 
   assert.match(migrations, /inbox_visible INTEGER DEFAULT 1/)

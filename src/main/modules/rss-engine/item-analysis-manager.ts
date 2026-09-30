@@ -1,12 +1,9 @@
+import type { RSSAnalysisAction, RSSAnalysisJob, RSSAnalysisJobStatus } from '../database/records'
 import { randomUUID } from 'crypto'
 import { mkdirSync } from 'fs'
 import { readFile, readdir, stat, writeFile } from 'fs/promises'
 import { basename, dirname, join } from 'path'
-import {
-  type RSSAnalysisAction,
-  type RSSAnalysisJob,
-  type RSSAnalysisJobStatus,
-} from '../database'
+
 import { RSSRepository } from '../repositories/rss-repository'
 import {
   getSkillsRuntimeManager,

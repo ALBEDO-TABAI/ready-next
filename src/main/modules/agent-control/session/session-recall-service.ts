@@ -1,5 +1,5 @@
+import type { ChatConversationRecord, ConversationSourceKind } from '../../database/records'
 import { createHash } from 'crypto'
-import type { ChatConversationRecord, ConversationSourceKind, DatabaseManager } from '../../database'
 import type { SessionRecallCapsule, SessionRecallContextRef, SessionRecallHit, SessionRecallMatchKind, SessionRecallSessionStatus } from '../../../../shared/session-recall'
 
 interface SessionRecallMetadataRow {
@@ -58,7 +58,7 @@ const SESSION_RECALL_VECTORS_LRU_CAP = 200
 const SESSION_RECALL_VECTOR_DIMENSIONS = 256
 
 export class SessionRecallService {
-  constructor(private readonly db: SessionRecallDatabaseAdapter | DatabaseManager) {}
+  constructor(private readonly db: SessionRecallDatabaseAdapter) {}
 
   searchSessionRecall(params: {
     query?: string

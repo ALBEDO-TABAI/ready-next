@@ -1,3 +1,4 @@
+import type { CalendarEvent } from '../database/records'
 /**
  * RRULE expansion engine — main-process only.
  *
@@ -74,7 +75,7 @@ const { RRule, rrulestr } = rrulePkg as unknown as {
   rrulestr: typeof import('rrule').rrulestr
 }
 type RRule = InstanceType<typeof RRule>
-import type { CalendarEvent } from '../database'
+
 import type { Reminder } from '../../../shared/calendar-types'
 
 /**

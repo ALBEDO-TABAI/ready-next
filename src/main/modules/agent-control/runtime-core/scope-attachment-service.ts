@@ -21,7 +21,7 @@ export class ScopeAttachmentService {
 
   listScopeAttachments(scopeId: string): ConversationAttachment[] {
     return this.deps.db
-      .listConversationAttachments(scopeId)
+      .chat.listConversationAttachments(scopeId)
       .filter((item) => item.path && existsSync(item.path))
       .map((item) => ({
         attachmentId: item.attachment_id,

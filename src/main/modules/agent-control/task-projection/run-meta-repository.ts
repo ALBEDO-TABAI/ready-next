@@ -1,3 +1,4 @@
+import type { DatabaseConnection } from '../../database/connection'
 /**
  * Stage S (PR-S11 / W10.2) — RunMetaRepository.
  *
@@ -10,7 +11,7 @@
  * main-process DatabaseManager, while remaining structurally compatible with
  * better-sqlite3 in tests.
  */
-import type { DatabaseConnection } from '../../database'
+
 import type { AbortInitiator } from '../contracts/run-contracts-internal'
 import type { TaskExecutionBinding } from '../../../../shared/agent-execution-profile'
 import { assertTaskExecutionBinding } from './task-agent-binding'

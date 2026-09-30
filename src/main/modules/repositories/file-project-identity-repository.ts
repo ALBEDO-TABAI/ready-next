@@ -1,7 +1,8 @@
+import type { DatabaseConnection } from '../database/connection'
 import { randomUUID } from 'crypto'
 import { isAbsolute, relative } from 'path'
 
-import type { DatabaseConnection } from '../database'
+
 
 export type FileIdentityStatus = 'present' | 'missing' | 'deleted'
 export type ProjectIdentityStatus = 'active' | 'snoozed' | 'hidden' | 'merged'

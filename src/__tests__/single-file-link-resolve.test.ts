@@ -1,3 +1,4 @@
+import type { DatabaseConnection } from '../main/modules/database/connection'
 /**
  * perf-rescue B8 — per-file wikilink resolve regression.
  *
@@ -32,7 +33,7 @@ import { join } from 'node:path'
 import test from 'node:test'
 
 import { runMigrations, type MigrationDatabase } from '../main/modules/migrations'
-import type { DatabaseConnection } from '../main/modules/database'
+
 import { SearchRepository } from '../main/modules/search-engine/repository'
 import { SearchEngine } from '../main/modules/search-engine/indexer'
 import { SEARCH_INDEX_CONTENT_VERSION } from '../main/modules/search-engine/query'

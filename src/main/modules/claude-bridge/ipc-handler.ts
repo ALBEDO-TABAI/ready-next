@@ -399,7 +399,7 @@ function cleanupSkillSessionState(sessionId?: string, reason = 'Skill session st
     // otherwise the next renderer hydrate would resurrect a pending row whose
     // in-memory Promise is already gone.
     try {
-      const swept = getDatabase().sweepPendingAskUserQuestionsCardsBySession(sessionId, 'session_reset')
+      const swept = getDatabase().chat.sweepPendingAskUserQuestionsCardsBySession(sessionId, 'session_reset')
       if (swept > 0) {
         logAgentMetric('ask_user_questions_session_reset_swept_db', { sessionId, swept })
       }
@@ -419,7 +419,7 @@ function cancelSkillSessionPendingInteractions(sessionId?: string, reason = 'Ski
     // PR 1 B.4c — keep DB aligned with in-memory store after a session-scoped
     // interaction cancel.
     try {
-      const swept = getDatabase().sweepPendingAskUserQuestionsCardsBySession(sessionId, 'session_reset')
+      const swept = getDatabase().chat.sweepPendingAskUserQuestionsCardsBySession(sessionId, 'session_reset')
       if (swept > 0) {
         logAgentMetric('ask_user_questions_session_reset_swept_db', { sessionId, swept })
       }
@@ -455,7 +455,7 @@ function persistAskUserQuestionsCardPending(args: PersistAskUserQuestionsCardArg
   }
   const askedAt = new Date(args.askedAt).toISOString()
   const summary = `等待用户回答 ${args.questions.length} 个问题`
-  getDatabase().addChatMessage(
+  getDatabase().chat.addChatMessage(
     args.cardId,
     conversationId,
     'agent_card',
@@ -709,7 +709,7 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
       const liveCardIds = new Set(
         getAskUserQuestionsStore().list().map((entry) => entry.cardId),
       )
-      const { mutated, skippedLive } = getDatabase().sweepPendingAskUserQuestionsCardsOnBoot({ liveCardIds })
+      const { mutated, skippedLive } = getDatabase().chat.sweepPendingAskUserQuestionsCardsOnBoot({ liveCardIds })
       if (mutated > 0) {
         log(`ask_user_questions boot sweep cancelled ${mutated} stale pending card(s)`)
       }
@@ -742,13 +742,13 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
     mcpGroupDispose = null
   }
   mcpGroupDispose = mcpGroup.register(ipcMain, {
-    getDatabase: () => getDatabase(),
+    getDatabase: () => getDatabase().settings,
     log: (line) => log(line),
   })
   if (!mcpBootstrapRanForBoot) {
     mcpBootstrapRanForBoot = true
     void runMcpBoot({
-      getDatabase: () => getDatabase(),
+      getDatabase: () => getDatabase().settings,
       log: (line) => log(line),
     }).catch((bootstrapErr) => {
       log(`mcp bootstrap failed: ${bootstrapErr instanceof Error ? bootstrapErr.message : String(bootstrapErr)}`)
@@ -1038,9 +1038,9 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
   }
   beliefCardGroupDispose = beliefCardGroup.register(ipcMain, {
     getBeliefCardStore: () => runtime?.getBeliefCardStore() ?? null,
-    getKnowledgeSystemEnabled: () => isKnowledgeSystemEnabled(getDatabase()),
+    getKnowledgeSystemEnabled: () => isKnowledgeSystemEnabled(getDatabase().settings),
     setKnowledgeSystemEnabled: (enabled) => {
-      getDatabase().setSetting(KNOWLEDGE_SYSTEM_SETTING_KEY, enabled ? 'true' : 'false')
+      getDatabase().settings.setSetting(KNOWLEDGE_SYSTEM_SETTING_KEY, enabled ? 'true' : 'false')
       runtime?.applyKnowledgeSystemEnabled(enabled)
     },
     getLifecycleStatus: () => {

@@ -1,3 +1,4 @@
+import type { AgentChannelType, ChatConversationRecord, ConversationSourceKind, UpsertConversationScopeMode } from '../../database/records'
 import { app } from 'electron'
 import { EventEmitter } from 'events'
 import { randomUUID } from 'node:crypto'
@@ -14,13 +15,7 @@ import type { AskUserQuestionsCardEvent } from '../../tools/builtins/ask-user-qu
 import { registerChannelOutboundSender } from '../channel-outbound-bridge'
 import type { AgentManager } from '../../claude-bridge/agent-manager'
 import type { MultimodalBlock } from '../contracts/run-contracts'
-import {
-  getDatabase,
-  type AgentChannelType,
-  type ChatConversationRecord,
-  type ConversationSourceKind,
-  type UpsertConversationScopeMode,
-} from '../../database'
+import { getDatabase } from '../../database'
 import { ReadyAgentOrchestrator } from './orchestrator'
 import { defaultSystemPrompt } from './agent-sdk-runtime'
 import {
@@ -207,11 +202,15 @@ export class AgentControlRuntime extends EventEmitter {
       const path = join(app.getPath('userData'), 'agent-memory', relPath)
       return existsSync(path) ? readFileSync(path, 'utf8') : ''
     },
-    isKnowledgeEnabled: () => isKnowledgeSystemEnabled(this.db),
+    isKnowledgeEnabled: () => isKnowledgeSystemEnabled(this.db.settings),
     listBlueprints: () => getSpecialistBlueprintStore().list(['confirmed']),
   })
   private readonly externalMemoryProviderSlot = new ExternalMemoryProviderSlot()
-  private readonly sessionRecallService = new SessionRecallService(this.db)
+  private readonly sessionRecallService = new SessionRecallService({
+    getRawDb: () => this.db.getRawDb(),
+    getConversationScope: (id) => this.db.chat.getConversationScope(id),
+    updateConversationScopeMeta: (id, meta) => this.db.chat.updateConversationScopeMeta(id, meta),
+  })
   private readonly reflectionService = new ReflectionService({
     memoryRepository: this.memoryRepository,
     userProfileRepository: this.userProfileRepository,
@@ -304,7 +303,7 @@ export class AgentControlRuntime extends EventEmitter {
     getAgentRoster: () => this.agentRegistry.list(),
     getAgentReadiness: (agentId) => this.executionProfileResolver.resolveReadiness(agentId),
     // EP2-K6: rollback switch (single read entry in the knowledge module).
-    isKnowledgeSystemEnabled: () => isKnowledgeSystemEnabled(this.db),
+    isKnowledgeSystemEnabled: () => isKnowledgeSystemEnabled(this.db.settings),
     // P1 (2026-07-03, 7/01 reliability contract D) — active browser tab URL
     // so site cards match the current domain mid-run, not only user text.
     getActiveBrowserUrl: () => this.orchestrator.getActiveBrowserUrl(),
@@ -363,7 +362,7 @@ export class AgentControlRuntime extends EventEmitter {
   private readonly scheduleRepository = new ScheduleRepository(this.db)
   private readonly scheduleDispatchQueue = new ScheduleDispatchQueue({
     isScopeBusy: (scopeId) => {
-      const row = this.db.getConversationScope(scopeId)
+      const row = this.db.chat.getConversationScope(scopeId)
       if (!row) return false
       const scope = this.mapConversationRow(row)
       return this.orchestrator.isScopeLive(scope.agent, scope.id)
@@ -610,7 +609,7 @@ export class AgentControlRuntime extends EventEmitter {
       getPrevious: (scopeId) => this.scopeRunSummaries.get(scopeId),
       setSummary: (scopeId, summary) => {
         this.scopeRunSummaries.set(scopeId, summary)
-        this.db.updateConversationRecallTaskState(scopeId, summary.taskTitle, summary.taskSummary)
+        this.db.chat.updateConversationRecallTaskState(scopeId, summary.taskTitle, summary.taskSummary)
       },
       toChannelKey: (scope) => this.toChannelKey(scope)
     })
@@ -782,7 +781,7 @@ export class AgentControlRuntime extends EventEmitter {
         return task ? { scopeId: task.scopeId, runId: task.runId } : null
       },
       getConversation: (scopeId) => {
-        const scope = this.db.getConversationScope(scopeId)
+        const scope = this.db.chat.getConversationScope(scopeId)
         return scope ? { agent: scope.agent, handoffGeneration: scope.handoff_generation ?? 0 } : null
       },
       begin: () => rawDb.exec('BEGIN'),
@@ -790,7 +789,7 @@ export class AgentControlRuntime extends EventEmitter {
       rollback: () => rawDb.exec('ROLLBACK'),
       updateTask: (taskId, patch) => this.taskProjectionStore.update(taskId, patch as never),
       updateConversation: (scopeId, activeAgentId, handoffGeneration) => {
-        this.db.updateConversationAgentState(scopeId, activeAgentId, handoffGeneration)
+        this.db.chat.updateConversationAgentState(scopeId, activeAgentId, handoffGeneration)
       },
       onCommitted: (sessionAgentId, scopeId) => {
         setTimeout(() => { this.orchestrator.interruptForSuspend(sessionAgentId, scopeId) }, 0)
@@ -820,7 +819,7 @@ export class AgentControlRuntime extends EventEmitter {
    * maintenance_audit; unexpected errors are swallowed by the scheduler).
    */
   async runCrystallizeRoundOnce(forced: boolean): Promise<void> {
-    if (!isKnowledgeSystemEnabled(this.db)) return
+    if (!isKnowledgeSystemEnabled(this.db.settings)) return
     const store = this.getBeliefCardStore()
     if (!store) return
     const now = new Date()
@@ -867,7 +866,7 @@ export class AgentControlRuntime extends EventEmitter {
     try {
       const aiSettings = new AppSettingsRepository()
       await runMaintenanceLlmRoundTick({
-        settings: this.db,
+        settings: this.db.settings,
         store,
         loadAIConfig: () => readAIConfigDetailed(() => aiSettings.getSetting('ai_model_config')),
       })
@@ -927,7 +926,7 @@ export class AgentControlRuntime extends EventEmitter {
     // hand-edit watcher, both behind the rollback switch. Files are never
     // written here — file → DB only.
     try {
-      const knowledgeEnabled = isKnowledgeSystemEnabled(this.db)
+      const knowledgeEnabled = isKnowledgeSystemEnabled(this.db.settings)
       const rawDb = this.db.getRawDb?.()
       if (rawDb) {
         // Identity asset reconciliation (064 reserved-slug reassign → move agents/<old> to
@@ -959,8 +958,8 @@ export class AgentControlRuntime extends EventEmitter {
 
     const sidecarEnabled = this.getSettingBool('remote_channels_enabled', true)
     const autostart = this.getSettingBool('sidecar_autostart', true)
-    const bindHost = this.db.getSetting('sidecar_bind_host') || '127.0.0.1'
-    const bindPort = this.parsePortSetting(this.db.getSetting('sidecar_bind_port'))
+    const bindHost = this.db.settings.getSetting('sidecar_bind_host') || '127.0.0.1'
+    const bindPort = this.parsePortSetting(this.db.settings.getSetting('sidecar_bind_port'))
     this.sidecar.setBindConfig(bindHost, bindPort)
     if (!sidecarEnabled || !autostart) return
     await this.startSidecar()
@@ -984,7 +983,7 @@ export class AgentControlRuntime extends EventEmitter {
         continuationRef: parseRecordJson(row.continuation_ref_json),
       })),
       getScope: (scopeId) => {
-        const row = this.db.getConversationScope(scopeId)
+        const row = this.db.chat.getConversationScope(scopeId)
         return row ? this.mapConversationRow(row) : null
       },
       runTakeover: ({ taskId, scope, userRequestVerbatim, contextRefIds }) => this.runCoordinator.runScoped({
@@ -1205,7 +1204,7 @@ export class AgentControlRuntime extends EventEmitter {
   }
 
   private assertScheduleTargetAvailable(scopeId: string, agentId: string, workspaceRoots: string[]): void {
-    if (!this.db.getConversationScope(scopeId)) throw new Error('Target conversation is missing')
+    if (!this.db.chat.getConversationScope(scopeId)) throw new Error('Target conversation is missing')
     if (!this.resolveAgentExecutionReadiness(agentId).conversationReady) throw new Error('Target Agent is unavailable')
     if (workspaceRoots.some((root) => !validateWorkspaceRoot(root).ok)) {
       throw new Error('Target workspace is unavailable')
@@ -1244,7 +1243,7 @@ export class AgentControlRuntime extends EventEmitter {
   ): Promise<{ success: boolean; error?: string; errorKind?: string }> {
     return dispatchScheduledOccurrence(occurrence, {
       getSchedule: (id) => this.scheduleRepository.get(id),
-      scopeExists: (scopeId) => Boolean(this.db.getConversationScope(scopeId)),
+      scopeExists: (scopeId) => Boolean(this.db.chat.getConversationScope(scopeId)),
       agentAvailable: (agentId) => this.resolveAgentExecutionReadiness(agentId).conversationReady,
       workspaceAvailable: (root) => validateWorkspaceRoot(root).ok,
       pauseSchedule: (id) => {
@@ -1435,7 +1434,7 @@ export class AgentControlRuntime extends EventEmitter {
     const key = String(scopeId || '').trim()
     if (!key) return false
     try {
-      return Boolean(this.db.getAgentChannelThreadBySession(key))
+      return Boolean(this.db.channels.getAgentChannelThreadBySession(key))
     } catch {
       // silent-catch: 判据读取失败按未绑定处理（工具隐藏，不炸 turn 准备）
       return false
@@ -1778,7 +1777,7 @@ export class AgentControlRuntime extends EventEmitter {
     const meta = { ...(scope.meta || {}) }
     if (plan) meta.activePlan = plan
     else delete meta.activePlan
-    this.db.updateConversationScopeMeta(scopeId, meta)
+    this.db.chat.updateConversationScopeMeta(scopeId, meta)
   }
 
   getConversationScopeMessages(scopeId: string): ConversationScopeMessage[] {
@@ -1846,10 +1845,10 @@ export class AgentControlRuntime extends EventEmitter {
       scopeId: payload.scopeId,
       agent: payload.agent,
       userMessage: payload.userMessage,
-      getScope: (scopeId) => this.db.getConversationScope(scopeId),
+      getScope: (scopeId) => this.db.chat.getConversationScope(scopeId),
       createLocalScope: (agent, scopeId) => {
         const recoveredScope = this.createLocalScope(agent, scopeId)
-        const recoveredRow = this.db.getConversationScope(recoveredScope.id)
+        const recoveredRow = this.db.chat.getConversationScope(recoveredScope.id)
         if (!recoveredRow) {
           throw new Error(`Conversation scope not found after create: ${scopeId}`)
         }
@@ -1857,7 +1856,7 @@ export class AgentControlRuntime extends EventEmitter {
       },
       persistUserMessage: (scopeRow, userMessage) => {
         const scope = this.mapConversationRow(scopeRow)
-        this.db.addChatMessage(
+        this.db.chat.addChatMessage(
           userMessage.id,
           scope.id,
           'user',
@@ -2518,7 +2517,7 @@ export class AgentControlRuntime extends EventEmitter {
   }
 
   private getSettingBool(key: string, fallback: boolean): boolean {
-    const raw = this.db.getSetting(key)
+    const raw = this.db.settings.getSetting(key)
     if (!raw) return fallback
     const normalized = raw.trim().toLowerCase()
     if (normalized === 'true' || normalized === '1' || normalized === 'yes') return true
@@ -2547,7 +2546,7 @@ export class AgentControlRuntime extends EventEmitter {
     ]
     for (const key of keys) {
       try {
-        this.db.deleteSetting(key)
+        this.db.settings.deleteSetting(key)
       } catch {
         // ignore cleanup failures
       }
@@ -2563,7 +2562,7 @@ export class AgentControlRuntime extends EventEmitter {
   ): Promise<ScopeRunMemoryCapture | null> {
     try {
       // Get conversation messages
-      const messages = this.db.getChatMessages(scope.id).map((msg) => ({
+      const messages = this.db.chat.getChatMessages(scope.id).map((msg) => ({
         role: msg.role,
         content: msg.content
       }))

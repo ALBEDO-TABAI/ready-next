@@ -1,3 +1,4 @@
+import type { BrowserHistoryEntry, ChatMessageRecord } from '../database/records'
 import { basename } from 'path'
 
 import {
@@ -13,7 +14,7 @@ import type {
   FileEmergenceCandidate,
   RecentConversation,
 } from './types'
-import type { BrowserHistoryEntry, ChatMessageRecord } from '../database'
+
 import type { FileActivityEvent, FileReadingSession } from '../../../shared/file-emergence'
 
 const DAY_MS = 24 * 60 * 60 * 1000

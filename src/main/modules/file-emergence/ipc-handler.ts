@@ -1,3 +1,4 @@
+import type { DatabaseConnection } from '../database/connection'
 import { BrowserWindow, ipcMain } from 'electron'
 import { randomUUID } from 'crypto'
 import { isAbsolute, relative, resolve } from 'path'
@@ -14,7 +15,7 @@ import {
   type FileEmergenceSnapshot,
 } from '../../../shared/file-emergence'
 import { validateWorkspaceRoot } from '../../../shared/workspace-validation'
-import { getDatabase, type DatabaseConnection } from '../database'
+import { getDatabase } from '../database'
 import { AppSettingsRepository } from '../repositories/app-settings-repository'
 import { BrowserRepository } from '../repositories/browser-repository'
 import { CalendarRepository } from '../repositories/calendar-repository'

@@ -1,8 +1,9 @@
+import type { ChatConversationRecord, ConversationSourceKind } from '../main/modules/database/records'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import { SessionRecallService, type SessionRecallDatabaseAdapter } from '../main/modules/agent-control/session/session-recall-service'
-import type { ChatConversationRecord, ConversationSourceKind } from '../main/modules/database'
+
 
 interface MetadataRow {
   conversation_id: string

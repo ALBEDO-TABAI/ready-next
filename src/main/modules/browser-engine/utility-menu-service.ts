@@ -1,5 +1,6 @@
+import type { BrowserBookmark, BrowserDownload, BrowserHistoryEntry } from '../database/records'
 import { Menu, shell, type BrowserWindow, type MenuItemConstructorOptions } from 'electron'
-import type { BrowserBookmark, BrowserDownload, BrowserHistoryEntry } from '../database'
+
 import type {
   BrowserUtilityMenuCurrentTab,
   BrowserUtilityMenuRequest,

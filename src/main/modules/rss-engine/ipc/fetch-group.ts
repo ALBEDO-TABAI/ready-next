@@ -691,7 +691,7 @@ export const fetchGroup: {
           cover_image: item.coverImage || null,
           author: item.author || null,
           published_at: item.pubDate ? Math.floor(new Date(item.pubDate).getTime() / 1000) : null,
-          ai_tags: null,
+          ai_tags: deps.classifyItem(item.title, item.description),
         }))
         const candidateIds = dbItems.map((item) => item.id)
         const existingIds = new Set(deps.getRSSItemsByIds(candidateIds).map((item) => item.id))

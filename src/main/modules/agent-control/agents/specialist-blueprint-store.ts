@@ -1,8 +1,9 @@
+import type { DatabaseConnection } from '../../database/connection'
 import type {
   SpecialistAgentBlueprint,
   SpecialistBlueprintStatus,
 } from '../../../../shared/agent-specialist-blueprint'
-import type { DatabaseConnection } from '../../database'
+
 
 interface SpecialistBlueprintStoreOptions {
   getRawDb?: () => DatabaseConnection | null

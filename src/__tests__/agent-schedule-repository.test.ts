@@ -1,7 +1,8 @@
+import type { DatabaseConnection } from '../main/modules/database/connection'
 import assert from 'node:assert/strict'
 import { createRequire } from 'node:module'
 import test from 'node:test'
-import type { DatabaseConnection } from '../main/modules/database'
+
 import { __runMigrationForTests, type MigrationDatabase } from '../main/modules/migrations'
 import { ScheduleRepository } from '../main/modules/scheduled-tasks/schedule-repository'
 import { skipIfSqliteUnavailable } from './utils/sqlite-skip'

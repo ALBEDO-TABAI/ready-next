@@ -133,7 +133,7 @@ export const askUserGroup: IpcChannelGroup<AskUserGroupDeps> = {
 	      const record = deps.getAskUserQuestionsStore().get(cardId)
 	      const result = submitAskUserQuestionsAnswersCore(cardId, answers, {
 	        store: deps.getAskUserQuestionsStore(),
-	        db: deps.getDatabase(),
+	        db: deps.getDatabase().chat,
 	        logMetric: (name, payload) => deps.logAgentMetric(name, payload),
 	      })
 	      if (result.success && record?.agent && record.requestId) {
@@ -153,7 +153,7 @@ export const askUserGroup: IpcChannelGroup<AskUserGroupDeps> = {
       // same testability reasons as submit. See the test file for B.4a coverage.
       return cancelAskUserQuestionsCardCore(cardId, reason, {
         store: deps.getAskUserQuestionsStore(),
-        db: deps.getDatabase(),
+        db: deps.getDatabase().chat,
         logMetric: (name, payload) => deps.logAgentMetric(name, payload),
       })
     })
@@ -192,7 +192,7 @@ export const askUserGroup: IpcChannelGroup<AskUserGroupDeps> = {
         }],
         {
           store: deps.getAskUserQuestionsStore(),
-          db: deps.getDatabase(),
+          db: deps.getDatabase().chat,
 	          logMetric: (name, payload) => deps.logAgentMetric(name, payload),
 	        },
 	      )
@@ -208,7 +208,7 @@ export const askUserGroup: IpcChannelGroup<AskUserGroupDeps> = {
       // anymore (those count as orphaned and are sent down as 'cancelled' so
       // the renderer doesn't display them as live cards).
       try {
-        const dbPending = deps.getDatabase().listPendingAskUserQuestionsCards()
+        const dbPending = deps.getDatabase().chat.listPendingAskUserQuestionsCards()
         const store = deps.getAskUserQuestionsStore()
         const liveIds = new Set(store.list().map((entry) => entry.cardId))
         const cards = dbPending

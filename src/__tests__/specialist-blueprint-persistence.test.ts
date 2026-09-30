@@ -1,3 +1,4 @@
+import type { DatabaseConnection } from '../main/modules/database/connection'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { mkdtempSync, rmSync } from 'node:fs'
@@ -7,7 +8,7 @@ import { join } from 'node:path'
 import { SpecialistBlueprintConfirmationStore } from '../main/modules/agent-control/agents/specialist-blueprint-confirmation'
 import { SpecialistBlueprintStore } from '../main/modules/agent-control/agents/specialist-blueprint-store'
 import { runMigrations, type MigrationDatabase } from '../main/modules/migrations'
-import type { DatabaseConnection } from '../main/modules/database'
+
 import type { SpecialistAgentBlueprint, SpecialistBlueprintStatus } from '../shared/agent-specialist-blueprint'
 import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
 

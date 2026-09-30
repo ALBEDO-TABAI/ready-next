@@ -1,3 +1,4 @@
+import type { DatabaseConnection } from './connection'
 /**
  * Worker-thread side of the DB worker. Owns its own better-sqlite3 connection
  * to the same ready.db file as the main process. The main thread continues to
@@ -20,7 +21,7 @@ import { createRequire } from 'module'
 import { parentPort, workerData } from 'worker_threads'
 
 import { runMigrations } from '../migrations'
-import { applyPerformancePragmas, type DatabaseConnection } from '../database'
+import { applyPerformancePragmas } from '../database'
 import { SearchEngine, probeFts5Availability } from '../search-engine/indexer'
 import type { SearchHit } from '../search-engine/query'
 import { queryDocumentGraph, type DocumentGraphQuery } from './document-graph-query'

@@ -1,3 +1,4 @@
+import type { UpsertConversationScopeMode } from '../../database/records'
 // Stage V V2.1e — ConversationGroup channel group.
 //
 // Bundles the 8 channels that expose conversation-scope state + attachment
@@ -39,7 +40,7 @@ import type {
   ScopeRunEventPayload,
   ScopeRunSummary,
 } from '../../agent-control/contracts/types'
-import type { UpsertConversationScopeMode } from '../../database'
+
 import type { IpcChannelGroup, IpcDisposeHandle } from './types'
 
 /**

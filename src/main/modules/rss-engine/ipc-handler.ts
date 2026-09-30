@@ -1,8 +1,9 @@
+import type { RSSAnalysisAction, RSSAnalysisJob } from '../database/records'
 import { ipcMain, app } from 'electron'
 import { join } from 'path'
 import { readFile } from 'fs/promises'
 import type { BrowserController } from '../browser-engine/ipc-handler'
-import type { RSSAnalysisAction, RSSAnalysisJob } from '../database'
+
 import { AppSettingsRepository } from '../repositories/app-settings-repository'
 import { RSSRepository } from '../repositories/rss-repository'
 import {
@@ -342,7 +343,7 @@ function mapDBSourceToAPI(source: DBRSSSource): MappedRSSSource {
 }
 
 function mapDraftStoreSourceToAPI(
-  source: import('../database').RSSDraftStoreSourceSummary,
+  source: import('../database/records').RSSDraftStoreSourceSummary,
 ): MappedRSSDraftStoreSource {
   return {
     sourceId: source.source_id,
@@ -1056,7 +1057,7 @@ export function setupRSSIPC(useMock = false): void {
     getRSSRepository: () => rssRepository,
     mapSourceToAPI: (source) => mapDBSourceToAPI(source as DBRSSSource),
     mapDraftStoreSourceToAPI: (source) =>
-      mapDraftStoreSourceToAPI(source as import('../database').RSSDraftStoreSourceSummary),
+      mapDraftStoreSourceToAPI(source as import('../database/records').RSSDraftStoreSourceSummary),
     addSourceCore: (input) => runAddSourceCore(input),
     mockSources,
   })

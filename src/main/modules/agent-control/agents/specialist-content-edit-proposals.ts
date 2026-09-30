@@ -1,8 +1,9 @@
+import type { DatabaseConnection } from '../../database/connection'
 import { createHash, randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname, resolve, sep } from 'node:path'
 import { MAIN_AGENT_ID, type AgentRegistryRecord } from '../../repositories/agent-registry-repository'
-import type { DatabaseConnection } from '../../database'
+
 import type {
   AgentSystemStudioContentEditProposal,
   AgentSystemStudioContentEditProposalStatus,

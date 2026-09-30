@@ -1,6 +1,6 @@
 # Ready 当前代码地图
 
-> 更新时间：2026-07-12
+> 更新时间：2026-09-30
 > 本文合并并取代根目录旧的模块图、依赖图和结构快照。它只记录稳定入口，不维护容易失真的文件数量。
 
 ## 1. 运行结构
@@ -52,6 +52,14 @@ Agent、文件面板、技能中心和设置页是跨工作面的能力，不是
 | `settings-engine/` | 设置持久化与迁移 |
 | `mcp/` | MCP 配置、连接与授权接线 |
 | `search-engine/` | 本地索引与检索 |
+
+主资料库的连接生命周期由 `database.ts` 的 `DatabaseManager` 管理；产品读写位于
+`database/rss-store.ts`、`calendar-store.ts`、`browser-store.ts`、`chat-store.ts`、
+`settings-store.ts`、`channel-store.ts`。六个 Store 经 `manager.rss/calendar/browser/chat/settings/channels`
+共享主连接，已有 Repository 保留产品接口适配，不能再将 SQL 回填到总管理器。
+连接合同在 `database/connection.ts`，领域记录类型在 `database/records.ts`；搜索 worker 原有的独立连接边界不受此次拆分影响。
+回归入口：`npm run verify:storage`。架构与验收见
+[数据保存职责拆分](../superpowers/plans/2026-09-30-database-domain-storage-split-implementation.md)。
 
 完整目录以工作区为准：
 

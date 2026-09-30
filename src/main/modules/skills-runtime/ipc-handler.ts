@@ -267,7 +267,7 @@ export function setupSkillsIPC(): void {
 
   ipcMain.handle('runtime:getMirror', (): SkillsIPCResponse => {
     try {
-      return { success: true, data: getDatabase().getSetting('runtime_asset_mirror_base')?.trim() || '' }
+      return { success: true, data: getDatabase().settings.getSetting('runtime_asset_mirror_base')?.trim() || '' }
     } catch (error) {
       return { success: false, error: error instanceof Error ? error.message : String(error) }
     }
@@ -275,7 +275,7 @@ export function setupSkillsIPC(): void {
 
   ipcMain.handle('runtime:setMirror', (_, payload?: { mirror?: string }): SkillsIPCResponse => {
     try {
-      getDatabase().setSetting('runtime_asset_mirror_base', String(payload?.mirror ?? '').trim())
+      getDatabase().settings.setSetting('runtime_asset_mirror_base', String(payload?.mirror ?? '').trim())
       return { success: true }
     } catch (error) {
       return { success: false, error: error instanceof Error ? error.message : String(error) }

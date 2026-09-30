@@ -1,3 +1,4 @@
+import type { AgentChannelRecord, AgentChannelType } from '../../database/records'
 // B8-D R3 — ChannelConfigService: remote-IM channel config CRUD (encrypted
 // config rows mirrored to sidecar adapters while it is running), availability
 // probing, delivery-result bookkeeping, connection tests, and the WeChat
@@ -13,7 +14,7 @@
 // the runtime) because `ensureChannelScope` (conversation-scope cluster,
 // stays on the runtime) also maps channel rows.
 import { randomUUID } from 'crypto'
-import type { AgentChannelRecord, AgentChannelType, DatabaseManager } from '../../database'
+import type { DatabaseManager } from '../../database'
 import type { SidecarManager } from '../sidecar-manager'
 import type { AgentChannelConfig, ChannelAdapterType, HeartbeatSnapshot } from '../contracts/types'
 import { decryptChannelConfig, encryptChannelConfig } from '../memory/secret-storage'
@@ -36,7 +37,7 @@ export class ChannelConfigService {
   constructor(private readonly deps: ChannelConfigServiceDeps) {}
 
   listChannels(): AgentChannelConfig[] {
-    const rows = this.deps.db.listAgentChannels()
+    const rows = this.deps.db.channels.listAgentChannels()
     return rows.map((row) => this.mapChannelRow(row))
   }
 
@@ -58,7 +59,7 @@ export class ChannelConfigService {
   async upsertChannel(payload: UpsertChannelPayload): Promise<AgentChannelConfig> {
     const id = payload.id || `channel-${randomUUID()}`
     const encryptedConfig = encryptChannelConfig(payload.config || {})
-    const row = this.deps.db.upsertAgentChannel({
+    const row = this.deps.db.channels.upsertAgentChannel({
       id,
       type: payload.type as AgentChannelType,
       name: payload.name.trim() || id,
@@ -88,11 +89,11 @@ export class ChannelConfigService {
       await this.deps.sidecar.stopChannel(id).catch(() => undefined)
       await this.deps.sidecar.deleteChannel(id).catch(() => undefined)
     }
-    return this.deps.db.deleteAgentChannel(id)
+    return this.deps.db.channels.deleteAgentChannel(id)
   }
 
   async setChannelEnabled(id: string, enabled: boolean): Promise<AgentChannelConfig | null> {
-    const row = this.deps.db.setAgentChannelEnabled(id, enabled)
+    const row = this.deps.db.channels.setAgentChannelEnabled(id, enabled)
     if (!row) return null
     if (this.deps.sidecar.isRunning()) {
       await this.deps.sidecar.upsertChannel({
@@ -117,7 +118,7 @@ export class ChannelConfigService {
     if (!this.deps.sidecar.isRunning()) {
       await this.deps.startSidecar()
     }
-    const channel = this.deps.db.getAgentChannel(id)
+    const channel = this.deps.db.channels.getAgentChannel(id)
     if (!channel) return { success: false, error: `Channel not found: ${id}` }
     try {
       const response = await this.deps.sidecar.sendChannel({
@@ -139,13 +140,13 @@ export class ChannelConfigService {
     channelId: string,
     result: { success: boolean; error?: string }
   ): void {
-    if (!this.deps.db.getAgentChannel(channelId)) return
+    if (!this.deps.db.channels.getAgentChannel(channelId)) return
     if (result.success) {
-      this.deps.db.setAgentChannelError(channelId, null)
-      this.deps.db.markAgentChannelSeen(channelId)
+      this.deps.db.channels.setAgentChannelError(channelId, null)
+      this.deps.db.channels.markAgentChannelSeen(channelId)
       return
     }
-    this.deps.db.setAgentChannelError(channelId, result.error || '远程 IM 发送失败')
+    this.deps.db.channels.setAgentChannelError(channelId, result.error || '远程 IM 发送失败')
   }
 
   async testChannel(payload: UpsertChannelPayload): Promise<{ success: boolean; error?: string }> {
@@ -177,7 +178,7 @@ export class ChannelConfigService {
       await this.deps.startSidecar()
     }
     const id = payload.id || 'channel-wechat-openclaw-default'
-    const existing = this.deps.db.getAgentChannel(id)
+    const existing = this.deps.db.channels.getAgentChannel(id)
     const existingConfig = existing
       ? decryptChannelConfig(tryParseJson<Record<string, unknown>>(existing.config_json, {}))
       : {}

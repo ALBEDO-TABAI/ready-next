@@ -1,3 +1,4 @@
+import type { DatabaseConnection } from '../../database/connection'
 /**
  * Stage S (PR-S11 / W10.2) — RunFeedbackRepository.
  *
@@ -10,7 +11,7 @@
  * `updated_at` advances. CI gate `check-feedback-upsert-shape.cjs` pins
  * the `INSERT … ON CONFLICT(feedback_id) DO UPDATE` shape.
  */
-import type { DatabaseConnection } from '../../database'
+
 
 export type RunFeedbackRating = 1 | 2 | 3 | 4 | 5
 

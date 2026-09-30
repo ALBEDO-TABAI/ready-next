@@ -1,4 +1,5 @@
-import type { BrowserHistoryEntry, CalendarEvent, ChatMessageRecord } from '../database'
+import type { BrowserHistoryEntry, CalendarEvent, ChatMessageRecord } from '../database/records'
+
 import type { EventInstance, EventOverride } from '../calendar-engine/rrule-engine'
 import type {
   FileActivityEvent,

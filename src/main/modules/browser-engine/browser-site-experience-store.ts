@@ -1,5 +1,6 @@
+import type { DatabaseConnection } from '../database/connection'
 import { randomUUID } from 'crypto'
-import type { DatabaseConnection } from '../database'
+
 import { getDatabase } from '../database'
 import { isHighControlPlatformText } from '../../../shared/browser-collection-intent'
 import type {

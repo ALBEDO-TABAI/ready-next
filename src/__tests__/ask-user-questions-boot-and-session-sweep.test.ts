@@ -34,8 +34,9 @@ function insertPendingCard(
   conversationId: string,
   questions: Array<{ id: string; question: string; kind: 'free_text' }> = [],
 ): void {
+  if (!db.chat.getConversationScope(conversationId)) db.chat.createConversation(conversationId, 'assistant', 'Test conversation')
   const askedAtMs = Date.now()
-  db.addChatMessage(
+  db.chat.addChatMessage(
     cardId,
     conversationId,
     'agent_card',
@@ -56,7 +57,7 @@ function readCardMeta(db: DatabaseManager, cardId: string): {
   status?: string
   cancelReason?: string
 } | null {
-  const row = db.getChatMessageById(cardId)
+  const row = db.chat.getChatMessageById(cardId)
   if (!row || !row.meta_json) return null
   try {
     const meta = JSON.parse(row.meta_json) as { askUserQuestions?: { status?: string; cancelReason?: string } }
@@ -73,7 +74,7 @@ test('B.4b boot sweep without liveCardIds: every pending card flipped to cancell
   insertPendingCard(db, 'auq-bbbbbbbb', 'conv-2')
   insertPendingCard(db, 'auq-cccccccc', 'conv-1')
 
-  const result = db.sweepPendingAskUserQuestionsCardsOnBoot()
+  const result = db.chat.sweepPendingAskUserQuestionsCardsOnBoot()
   assert.equal(result.mutated, 3)
   assert.equal(result.skippedLive, 0)
 
@@ -94,7 +95,7 @@ test('B.4b boot sweep with liveCardIds: live cards skipped, others cancelled', (
   insertPendingCard(db, 'auq-stale2', 'conv-2')
 
   const liveCardIds = new Set(['auq-live01', 'auq-live02'])
-  const result = db.sweepPendingAskUserQuestionsCardsOnBoot({ liveCardIds })
+  const result = db.chat.sweepPendingAskUserQuestionsCardsOnBoot({ liveCardIds })
   assert.equal(result.mutated, 2, 'two stale cards cancelled')
   assert.equal(result.skippedLive, 2, 'two live cards skipped')
 
@@ -116,10 +117,10 @@ test('B.4b boot sweep is idempotent: second call mutates 0 rows', (t) => {
   const db = new DatabaseManager(true)
   insertPendingCard(db, 'auq-once0001', 'conv-1')
 
-  const first = db.sweepPendingAskUserQuestionsCardsOnBoot()
+  const first = db.chat.sweepPendingAskUserQuestionsCardsOnBoot()
   assert.equal(first.mutated, 1)
 
-  const second = db.sweepPendingAskUserQuestionsCardsOnBoot()
+  const second = db.chat.sweepPendingAskUserQuestionsCardsOnBoot()
   assert.equal(second.mutated, 0, 'no pending rows remain on second sweep')
   assert.equal(second.skippedLive, 0)
 })
@@ -131,7 +132,7 @@ test('B.4c session sweep: only rows for matching session flipped to cancelled(se
   insertPendingCard(db, 'auq-sess1b', 'session-A')
   insertPendingCard(db, 'auq-sess2', 'session-B')
 
-  const mutated = db.sweepPendingAskUserQuestionsCardsBySession('session-A')
+  const mutated = db.chat.sweepPendingAskUserQuestionsCardsBySession('session-A')
   assert.equal(mutated, 2)
 
   // session-A cards flipped
@@ -149,7 +150,7 @@ test('B.4c session sweep with no matching pending rows returns 0', (t) => {
   if (skipIfSqliteUnavailable(t, 'ask-user-session-sweep: empty')) return
   const db = new DatabaseManager(true)
   insertPendingCard(db, 'auq-other', 'session-X')
-  const mutated = db.sweepPendingAskUserQuestionsCardsBySession('session-not-present')
+  const mutated = db.chat.sweepPendingAskUserQuestionsCardsBySession('session-not-present')
   assert.equal(mutated, 0)
 })
 
@@ -157,7 +158,7 @@ test('B.4c session sweep with explicit cancelReason override', (t) => {
   if (skipIfSqliteUnavailable(t, 'ask-user-session-sweep: custom reason')) return
   const db = new DatabaseManager(true)
   insertPendingCard(db, 'auq-x123', 'sess-K')
-  db.sweepPendingAskUserQuestionsCardsBySession('sess-K', 'session_killed_by_user')
+  db.chat.sweepPendingAskUserQuestionsCardsBySession('sess-K', 'session_killed_by_user')
   const meta = readCardMeta(db, 'auq-x123')
   assert.equal(meta!.cancelReason, 'session_killed_by_user')
 })

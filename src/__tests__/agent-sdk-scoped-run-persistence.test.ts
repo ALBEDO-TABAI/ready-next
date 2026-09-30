@@ -1,3 +1,4 @@
+import type { ChatConversationRecord } from '../main/modules/database/records'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
@@ -9,7 +10,7 @@ import { syncTaskProjection } from '../main/modules/agent-control/task-projectio
 import { createToolExecutionOutput } from '../main/modules/agent-control/tools-runtime/tool-result-types'
 import type { ToolDefinition } from '../main/modules/agent-control/tools-runtime/tool-definition'
 import { TaskProjectionRepository } from '../main/modules/repositories/task-projection-repository'
-import type { ChatConversationRecord, DatabaseManager as DatabaseManagerInstance } from '../main/modules/database'
+import type { DatabaseManager as DatabaseManagerInstance } from '../main/modules/database'
 import type { ProjectionTruthSnapshot } from '../main/modules/agent-control/contracts/run-contracts'
 import type {
   ConversationScope,
@@ -85,7 +86,7 @@ test('SDK scoped run persists user message, assistant snapshot, scope run, and t
   try {
     const scopeId = 'conv-sdk-scoped-proof'
     const requestId = 'run-sdk-scoped-proof'
-    db.upsertConversationScope({
+    db.chat.upsertConversationScope({
       id: scopeId,
       agent: 'butler',
       title: 'SDK scoped proof',
@@ -101,7 +102,7 @@ test('SDK scoped run persists user message, assistant snapshot, scope run, and t
     const taskProjectionStore = new TaskProjectionRepository(db)
     const runProjection = new RunProjection({
       getScope: (id) => {
-        const row = db?.getConversationScope(id)
+        const row = db?.chat.getConversationScope(id)
         return row ? mapScope(row) : null
       },
       getPrevious: (id) => scopeSummaries.get(id),
@@ -180,8 +181,8 @@ test('SDK scoped run persists user message, assistant snapshot, scope run, and t
         timestamp: '2026-05-13T10:00:00.000Z',
         meta: { clientMessageId: 'client-sdk-scoped-proof' },
       },
-      getScope: (id) => db!.getConversationScope(id),
-      createLocalScope: (agent, id) => db!.upsertConversationScope({
+      getScope: (id) => db!.chat.getConversationScope(id),
+      createLocalScope: (agent, id) => db!.chat.upsertConversationScope({
         id,
         agent,
         title: 'SDK scoped proof',
@@ -191,7 +192,7 @@ test('SDK scoped run persists user message, assistant snapshot, scope run, and t
         meta: {},
       }).row,
       persistUserMessage: (scopeRow, userMessage) => {
-        db!.addChatMessage(
+        db!.chat.addChatMessage(
           userMessage.id,
           scopeRow.id,
           'user',
@@ -212,7 +213,7 @@ test('SDK scoped run persists user message, assistant snapshot, scope run, and t
           {
             onSuccess: async (executionResult) => {
               const finalEvent = scopeEvents.at(-1)
-              db!.addChatMessage(
+              db!.chat.addChatMessage(
                 'assistant-sdk-scoped-proof',
                 scope.id,
                 'assistant',
@@ -235,7 +236,7 @@ test('SDK scoped run persists user message, assistant snapshot, scope run, and t
     assert.equal(result.success, true)
     assert.equal(result.persistence?.message, 'persisted')
 
-    const messages = db.getChatMessages(scopeId)
+    const messages = db.chat.getChatMessages(scopeId)
     assert.equal(messages.length, 2)
     assert.equal(messages[0].role, 'user')
     assert.equal(messages[0].content, 'please prove SDK scoped persistence')
@@ -261,7 +262,8 @@ test('SDK scoped run persists user message, assistant snapshot, scope run, and t
     const projection = taskProjectionStore.get(taskId)
     assert.ok(projection)
     assert.equal(projection.scopeId, scopeId)
-    assert.equal(projection.status, 'done')
+    // Durable projection status is completed; the streamed phase above remains done.
+    assert.equal(projection.status, 'completed')
     assert.equal(projection.taskTitle, 'SDK scoped proof')
     assert.equal(projection.taskSummary, 'Projection truth came from the SDK tool bridge')
     assert.equal(projection.currentStepId, 'sdk_tool')

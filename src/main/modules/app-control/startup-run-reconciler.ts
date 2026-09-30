@@ -1,4 +1,5 @@
-import type { DatabaseConnection } from '../database'
+import type { DatabaseConnection } from '../database/connection'
+
 import { getDatabase } from '../database'
 import { canResumeAsUserPoint } from '../agent-control/contracts/resume-handle'
 import { logAgentMetric } from '../agent-control/metrics'

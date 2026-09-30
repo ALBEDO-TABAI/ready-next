@@ -1,8 +1,5 @@
-import type {
-  BrowserBookmark,
-  BrowserDownload,
-  BrowserHistoryEntry,
-} from '../database'
+import type { BrowserBookmark, BrowserDownload, BrowserHistoryEntry } from '../database/records'
+
 import { BrowserRepository } from '../repositories/browser-repository'
 
 export interface BrowserAdblockState {

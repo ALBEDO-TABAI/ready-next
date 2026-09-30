@@ -1,3 +1,4 @@
+import type { RSSAnalysisAction, RSSAnalysisJob } from '../../database/records'
 // Stage V V2.2c — rss-engine AnalysisGroup channel cluster.
 //
 // Bundles the 6 channels that drive the renderer's "analyze this RSS item"
@@ -31,7 +32,7 @@
 // overlap entirely — against the per-group-deps-as-contract intent
 // documented in `engine-deps.ts`.
 import type { IpcMain } from 'electron'
-import type { RSSAnalysisAction, RSSAnalysisJob } from '../../database'
+
 import type { RSSItemAnalysisManager } from '../item-analysis-manager'
 import type { EngineDeps } from './engine-deps'
 import type { IpcChannelGroup, IpcDisposeHandle } from './types'
