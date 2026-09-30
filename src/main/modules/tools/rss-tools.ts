@@ -1,4 +1,7 @@
 import { z } from 'zod'
+import { RSSReadCatalogSchema } from '../../../shared/rss-catalog'
+import type { RSSCatalogStore } from '../database/rss-catalog-store'
+import type { RouteAttemptSnapshotEntry } from '../rss-engine/source-diagnostics'
 import { RSSReadAnalysisReportSchema, type RSSReadAnalysisReportInput, type RSSAnalysisReportPage } from '../../../shared/rss-analysis-report'
 import { RSSReadExcerptSchema } from '../../../shared/rss-excerpt'
 import { RSSDigestReadSchema } from '../../../shared/rss-digests'
@@ -32,6 +35,8 @@ interface RSSToolDef {
 }
 
 interface RSSToolContext {
+  getCatalog?: () => Pick<RSSCatalogStore, 'read'>
+  getRouteAttempt?: (sourceId: string) => RouteAttemptSnapshotEntry | null
   readAnalysisReport?: (input: RSSReadAnalysisReportInput) => RSSAnalysisReportPage
   getDigests?: () => Pick<RSSDigestStore, 'read' | 'schedule'>
   getEvents?: () => Pick<RSSEventStore, 'browse'>
@@ -45,6 +50,8 @@ interface RSSToolContext {
 }
 
 const RSS_TOOLS: RSSToolDef[] = [
+  { name: 'rss_read_catalog', description: '完整分页读取已保存的来源、栏目、分析任务、历史判断和全部事件依据；来源含停用，依据含撤回与信息不足。success 不证明报告文件仍可用，须另调用 rss_read_analysis_report 核验。采集诊断是独立时点记录，不属于目录分页快照。',
+    action: 'rss.readCatalog', intent: 'read_rss_catalog', executionKind: 'deterministic', params: zodObjectToParamList(RSS_SCHEMAS.rss_read_catalog) as ToolParam[] },
   { name: 'rss_read_analysis_report', description: '按任务 ID 分段读取已保存且可核验的分析报告；续读必须沿用 revision。不启动模型，不重新分析；旧报告归属不可核验时明确失败。',
     action: 'rss.readAnalysisReport', intent: 'read_rss_analysis_report', executionKind: 'deterministic', params: zodObjectToParamList(RSS_SCHEMAS.rss_read_analysis_report) as ToolParam[] },
   { name: 'rss_read_excerpt', description: '读取绑定文章版本的段落或选区；范围原样沿用引用，续读不会越过选区。可用返回的 citationUrl 定位。',
@@ -175,6 +182,18 @@ export async function executeRSSTool(
 ): Promise<string> {
   const tool = RSS_TOOLS.find((item) => item.name === toolName)
   if (!tool) return `Unknown RSS tool: ${toolName}`
+
+  if (toolName === 'rss_read_catalog') {
+    if (context?.readAccessDenied || !context?.getCatalog) return toStructuredResult(tool, '当前会话未获准读取本机 RSS 资料。', { ok: false, error: 'rss_read_not_authorized' })
+    try {
+      const data = context.getCatalog().read(RSSReadCatalogSchema.parse(args))
+      const diagnostics = data.view === 'sources' ? { observedAt: new Date().toISOString(), entries: data.entries.map((source) => {
+        const attempt = context.getRouteAttempt?.(String(source.id)) ?? null
+        return { sourceId: source.id, attempt, matchesCurrentUrl: !!attempt && 'url' in source && attempt.url === source.url }
+      }) } : undefined
+      return toStructuredResult(tool, '已读取保存记录。decision 为 0 排除、1 包含、2 信息不足；manual_decision 为当前人工覆盖，null 表示未覆盖。版本匹配与当前采用分别列出；资料变化时重新开始分页，不把新页拼入旧结果。', { ok: true, data, ...(diagnostics ? { diagnostics } : {}) })
+    } catch (error) { return toStructuredResult(tool, '目录读取失败。', { ok: false, error: error instanceof Error ? error.message : String(error) }) }
+  }
 
   if (toolName === 'rss_read_analysis_report') {
     if (context?.readAccessDenied || !context?.readAnalysisReport) return toStructuredResult(tool, '当前会话未获准读取本机 RSS 资料。', { ok: false, error: 'rss_read_not_authorized' })

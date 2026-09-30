@@ -1,4 +1,5 @@
 import { RSSDigestStore } from './rss-digest-store'
+import { RSSCatalogStore } from './rss-catalog-store'
 import { RSSOrganizationStore, rssIncludedClassificationSQL } from './rss-organization-store'
 import { RSSProcessingStore } from './rss-processing-store'
 import { RSSEventStore } from './rss-event-store'
@@ -12,9 +13,11 @@ export class RSSStore {
   readonly processing: RSSProcessingStore
   readonly digests: RSSDigestStore
   readonly events: RSSEventStore
+  readonly catalog: RSSCatalogStore
 
   constructor(private readonly getConnection: () => DatabaseConnection | null) {
     this.organization = new RSSOrganizationStore(getConnection, (id) => this.content.getArticle(id)?.revision || null)
+    this.catalog = new RSSCatalogStore(getConnection, this.organization)
     this.events = new RSSEventStore(getConnection)
     this.content = new RSSContentStore(getConnection, this.organization, (id) => { this.processing.enqueueBodyChange(id); this.organization.recordDigestIntake(id) }, this.events)
     this.digests = new RSSDigestStore(getConnection, this.content, this.organization)

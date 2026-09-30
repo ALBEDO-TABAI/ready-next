@@ -2,6 +2,14 @@
 
 > 更新时间：2026-10-01
 
+## 2026-10-01 RSS 完整资料目录
+
+| 文件 | 当前行数 | 净增 | 判断 | 后续 |
+|---|---:|---:|---|---|
+| `src/main/modules/migrations.ts` | 3384 | 2 | 健康 | 只登记独立 085 迁移；职责未扩大 |
+| `src/main/modules/tools/tool-executor.ts` | 1270 | 3 | 一般 | 只注入目录读取与已有诊断；2026-11-01 复查域路由 |
+| `src/main/modules/agent-control/tools-runtime/tool-registry.ts` | 1547 | 1 | 一般 | 只登记目录读工具；2026-11-01 复查域注册 |
+
 ## 2026-10-01 RSS 分析历史与报告保存
 
 | 文件 | 当前行数 | 净增 | 判断 | 后续 |

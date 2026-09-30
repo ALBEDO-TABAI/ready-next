@@ -144,14 +144,15 @@ test('the real SDK request exposes the referenced read with a selected skill and
   const runtime = new AgentSdkRuntime({
     loadAIConfig: () => ({ ok: true, config, reason: 'present' }), domainAdapters: [],
     executeToolCall: async (name, args, context) => {
-      assert.ok(['rss_read_analysis_report', 'rss_read_excerpt', 'rss_read_reference', 'rss_read_events', 'rss_read_digests'].includes(name))
-      const text = await executeRSSTool(name, args, { readAnalysisReport: (input) => readAnalysisReportPage(input, (id) => db.rss.getRSSAnalysisJob(id), () => null), getDigests: () => db.rss.digests, getContent: () => db.rss.content, getEvents: () => db.rss.events, references: rssReferencesFromEnvelope(context.requestEnvelope) })
+      assert.ok(['rss_read_catalog', 'rss_read_analysis_report', 'rss_read_excerpt', 'rss_read_reference', 'rss_read_events', 'rss_read_digests'].includes(name))
+      const text = await executeRSSTool(name, args, { getCatalog: () => db.rss.catalog, readAnalysisReport: (input) => readAnalysisReportPage(input, (id) => db.rss.getRSSAnalysisJob(id), () => null), getDigests: () => db.rss.digests, getContent: () => db.rss.content, getEvents: () => db.rss.events, references: rssReferencesFromEnvelope(context.requestEnvelope) })
       return createToolExecutionOutput(text, { shape: 'json', data: JSON.parse(text) })
     },
     fetchWithTimeout: async (_url, init) => {
       requests.push(JSON.parse(String(init.body)))
       const payload = requests.length === 1
         ? { choices: [{ message: { tool_calls: [
+          { id: 'call-catalog', type: 'function', function: { name: 'rss_read_catalog', arguments: JSON.stringify({ view: 'sources' }) } },
           { id: 'call-analysis-report', type: 'function', function: { name: 'rss_read_analysis_report', arguments: JSON.stringify({ jobId: reportJob.id }) } },
           { id: 'call-excerpt', type: 'function', function: { name: 'rss_read_excerpt', arguments: JSON.stringify(excerpt.kind === 'excerpt' ? excerpt.read : {}) } },
           { id: 'call-excerpt-reference', type: 'function', function: { name: 'rss_read_reference', arguments: JSON.stringify({ referenceId: rssReferencesFromEnvelope(envelope).find((r) => r.reference.kind === 'excerpt')!.id }) } },
@@ -175,6 +176,8 @@ test('the real SDK request exposes the referenced read with a selected skill and
     assert.ok(requests[0].tools.some((tool: any) => tool.function?.name === 'rss_read_events'))
     assert.match(JSON.stringify(requests[1].messages), /SAVED-CONTENT-FROM-NATIVE-STORE/)
     assert.match(JSON.stringify(requests[1].messages), /VERIFIED-REPORT-FROM-SAVED-FILE/)
+    assert.match(JSON.stringify(requests[1].messages), /rss.readCatalog/)
+    assert.ok(requests[0].tools.some((tool: any) => tool.function?.name === 'rss_read_catalog'))
     assert.ok(requests[0].tools.some((tool: any) => tool.function?.name === 'rss_read_analysis_report'))
     assert.equal(db.rss.content.getArticle(article.id)!.read, false)
     assert.match(JSON.stringify(requests[1].messages), /rss.readEvents/)

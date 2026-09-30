@@ -5,7 +5,7 @@ const { spawnSync } = require('node:child_process')
 const tests = [
   'database-domain-stores', 'database-readiness', 'database-pragmas', 'database',
   'rss-classification-persistence', 'migration-076-rss-item-identity',
-  'rss-organization-store', 'rss-processing', 'rss-result-restoration', 'rss-result-migration', 'rss-events', 'rss-digests', 'rss-workspace-read-store', 'rss-content-migration', 'rss-article-analysis',
+  'rss-organization-store', 'rss-processing', 'rss-result-restoration', 'rss-result-migration', 'rss-events', 'rss-digests', 'rss-catalog', 'rss-workspace-read-store', 'rss-content-migration', 'rss-article-analysis',
   'browser-task-persistence', 'browser-privacy-service',
   'ask-user-questions-boot-and-session-sweep', 'local-conversation-user-binding',
   'agent-sdk-scoped-run-persistence', 'session-recall-agent-scope',

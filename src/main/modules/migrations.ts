@@ -1,4 +1,5 @@
 import { migrateRSSDigests, RSS_DIGEST_MIGRATION } from './rss-engine/digest-schema'
+import { migrateRSSCatalog, RSS_CATALOG_MIGRATION } from './rss-engine/catalog-schema'
 import { migrateRSSResults, RSS_RESULT_MIGRATION } from './rss-engine/result-schema'
 import { migrateRSSOrganization, RSS_ORGANIZATION_MIGRATION } from './rss-engine/organization-schema'
 import { migrateRSSProcessing, RSS_PROCESSING_MIGRATION } from './rss-engine/processing-schema'
@@ -3314,7 +3315,8 @@ const migrations: Migration[] = [
   { name: RSS_PROCESSING_MIGRATION, up: migrateRSSProcessing },
   { name: RSS_EVENT_MIGRATION, up: migrateRSSEvents },
   { name: RSS_RESULT_MIGRATION, up: migrateRSSResults },
-  { name: RSS_DIGEST_MIGRATION, up: migrateRSSDigests }
+  { name: RSS_DIGEST_MIGRATION, up: migrateRSSDigests },
+  { name: RSS_CATALOG_MIGRATION, up: migrateRSSCatalog }
 ]
 
 /**

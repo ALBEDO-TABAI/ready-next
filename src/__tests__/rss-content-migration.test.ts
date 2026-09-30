@@ -1,4 +1,6 @@
 import { migrateRSSDigests, RSS_DIGEST_MIGRATION } from '../main/modules/rss-engine/digest-schema'
+import { migrateRSSCatalog, RSS_CATALOG_MIGRATION } from '../main/modules/rss-engine/catalog-schema'
+import { RSSStore } from '../main/modules/database/rss-store'
 import { migrateRSSResults, RSS_RESULT_MIGRATION } from '../main/modules/rss-engine/result-schema'
 import { migrateRSSOrganization, RSS_ORGANIZATION_MIGRATION } from '../main/modules/rss-engine/organization-schema'
 import { migrateRSSProcessing, RSS_PROCESSING_MIGRATION } from '../main/modules/rss-engine/processing-schema'
@@ -20,14 +22,16 @@ test('RSS migration backs up existing WAL data and rolls back without losing rea
   const Sqlite = createRequire(import.meta.url)('better-sqlite3') as new (path: string) => DatabaseConnection
   const directory = mkdtempSync(join(tmpdir(), 'ready-rss-migration-'))
   const path = join(directory, 'ready.db')
-  const db = new Sqlite(path)
+  let db = new Sqlite(path)
   let snapshot: DatabaseConnection | undefined
   try {
     db.pragma?.('journal_mode = WAL')
-    for (const migration of ['001_create_rss_tables', '008_add_platform_column', '019_add_rss_draft_store_fields']) __runMigrationForTests(migration, db)
+    for (const migration of ['001_create_rss_tables', '008_add_platform_column', '010_create_rss_analysis_jobs', '019_add_rss_draft_store_fields']) __runMigrationForTests(migration, db)
     db.exec("CREATE TABLE migrations(name TEXT PRIMARY KEY); INSERT INTO migrations VALUES('078_backfill_local_conversation_default_user')")
     db.exec("INSERT INTO rss_sources(id,name,url) VALUES('source','Fixture','https://example.test/feed')")
     db.exec("INSERT INTO rss_items(id,source_id,guid,title,link,read,starred,inbox_visible) VALUES('saved','source','saved','Saved title','https://example.test/saved',1,1,0)")
+    const oldJob = new RSSStore(() => db).createRSSAnalysisJob({ id: 'retained-job', itemId: 'saved', action: 'copy', sourceUrl: 'https://example.test/saved',
+      title: 'Old report', targetDir: '/preserved', outputDir: '/preserved/report', status: 'success', progress: 100, metaJson: '{"historical":true}' })
     const backup = backupBeforeRSSMigration(db, path)
     assert.ok(backup)
     snapshot = new Sqlite(backup)
@@ -70,6 +74,19 @@ test('RSS migration backs up existing WAL data and rolls back without losing rea
     db.prepare('INSERT INTO migrations VALUES(?)').run(RSS_DIGEST_MIGRATION)
     db.exec('COMMIT')
     assert.equal(db.prepare('SELECT daily_eligible FROM rss_items').get<{ daily_eligible: number }>()!.daily_eligible, 0)
+    assert.ok(backupBeforeRSSMigration(db, path)?.includes('before-rss-085-'))
+    db.exec('CREATE TRIGGER rss_catalog_workspace_change AFTER UPDATE ON rss_workspace_state BEGIN SELECT 1; END; BEGIN')
+    assert.throws(() => migrateRSSCatalog(db), /already exists/)
+    db.exec('ROLLBACK')
+    assert.equal(db.prepare('PRAGMA table_info(rss_workspace_state)').all<{ name: string }>().some((column) => column.name === 'catalog_revision'), false)
+    assert.deepEqual(db.prepare('SELECT read,starred,inbox_visible FROM rss_items').get(), { read: 1, starred: 1, inbox_visible: 0 })
+    db.exec('DROP TRIGGER rss_catalog_workspace_change; BEGIN')
+    migrateRSSCatalog(db)
+    db.prepare('INSERT INTO migrations VALUES(?)').run(RSS_CATALOG_MIGRATION)
+    db.exec('COMMIT')
+    db.close(); db = new Sqlite(path)
+    assert.equal(new RSSStore(() => db).catalog.read({ view: 'sources' }).total, 1)
+    assert.deepEqual(new RSSStore(() => db).catalog.read({ view: 'analysis' }).entries, [oldJob])
     assert.equal(backupBeforeRSSMigration(db, path), null, 'all RSS migrations have completed')
     assert.equal(snapshot.prepare('SELECT title FROM rss_items').get<{ title: string }>()?.title, 'Saved title')
   } finally {

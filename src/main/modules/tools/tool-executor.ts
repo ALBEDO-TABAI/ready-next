@@ -6,6 +6,7 @@ import { rssReferencesFromEnvelope } from '../../../shared/rss-reference'
 
 import { BrowserController } from '../browser-engine/ipc-handler'
 import { getRSSItemAnalysisManager } from '../rss-engine/item-analysis-manager'
+import { getRouteAttempt } from '../rss-engine/source-diagnostics'
 import type { SidecarManager } from '../agent-control/sidecar-manager'
 import type { AgentControlRuntime } from '../agent-control/runtime-core/runtime'
 import {
@@ -683,6 +684,8 @@ async function executeToolCallInner(
 
         case 'rss':
           return executeRSSTool(toolName, args, {
+            getCatalog: () => getDatabase().rss.catalog,
+            getRouteAttempt,
             readAnalysisReport: (input) => getRSSItemAnalysisManager().readReport(input),
             getDigests: () => getDatabase().rss.digests,
             getEvents: () => getDatabase().rss.events,
