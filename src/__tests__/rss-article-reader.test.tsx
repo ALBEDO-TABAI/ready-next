@@ -12,7 +12,7 @@ test('saved covers render passively and media descriptions keep reference and un
   const video = describeRSSMedia('https://media.test/video.mp4', 'https://media.test/cover.png')
   assert.equal(video.kind, 'video')
   assert.equal(video.cover.availability, 'not_checked')
-  assert.equal(video.understanding, 'not_performed')
+  assert.equal(video.readPerformsMediaUnderstanding, false)
   const html = renderToStaticMarkup(<RSSCoverImage link="https://media.test/video.mp4" coverImage="https://media.test/cover.png" />)
   assert.match(html, /src="https:\/\/media.test\/cover.png"/)
   assert.match(html, /loading="lazy"/)

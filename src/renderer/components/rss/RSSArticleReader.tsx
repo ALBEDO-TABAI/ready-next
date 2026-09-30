@@ -138,7 +138,7 @@ export default function RSSArticleReader({ item, expectedRevision, reveal, onClo
         <RssTimeHintBanner itemId={item.id} title={title} summary={article?.summary || item.summary} author={author} />
         {expectedRevision && content && <p className="rss-reader-notice" role="status">此处按引用版本阅读；获取最新内容请返回列表。</p>}
         {video && <p className="rss-reader-notice">视频资讯：下方为来源提供的文字。观看、转录和视觉分析需使用对应操作。</p>}
-        {image && <p className="rss-reader-notice">图片资讯：下方为已有文字与图片引用，尚未进行画面分析。</p>}
+        {image && <p className="rss-reader-notice">图片资讯：下方为已有文字与图片引用，查看图片不会自动进行画面分析。</p>}
         <div className="rss-reader-status" role="status">
           {busy && <Loader2 size={14} className="animate-spin" />}
           <span>{content ? `${content.textKind === 'source_summary' ? '来源摘要 · ' : ''}${BODY_LABELS[content.body.status]}` : busy ? '正在读取文章' : '文章读取失败'}</span>

@@ -13,5 +13,5 @@ export function describeRSSMedia(link: string, coverImage?: string | null) {
     : /\.(?:png|jpe?g|gif|webp|avif|svg)$/i.test(new URL(url).pathname) ? 'image' : 'article'
   const cover = rssHttpReference(coverImage, url || undefined) || (kind === 'image' ? url : null)
   return { kind, classifiedBy: 'url_hint', source: { url, availability: 'not_checked' },
-    cover: { url: cover, availability: cover ? 'not_checked' : 'not_provided' }, understanding: 'not_performed' } as const
+    cover: { url: cover, availability: cover ? 'not_checked' : 'not_provided' }, readPerformsMediaUnderstanding: false } as const
 }
