@@ -26,7 +26,7 @@ interface BrowserUtilityMenuServiceHost {
   toggleAdblockDomain: (domain: string) => void
   printCurrentTab: () => void
   openExternal: (url: string) => void
-  sendToRenderer: (channel: string, data: unknown) => void
+  sendToRenderer: (channel: 'browser:bookmarksChanged' | 'browser:clipCurrentTabRequested', data: unknown) => void
 }
 
 export class BrowserUtilityMenuService {

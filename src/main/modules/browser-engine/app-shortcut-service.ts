@@ -1,8 +1,8 @@
 export class BrowserAppShortcutBridgeService {
-  private readonly sendToRenderer: (channel: string, data: unknown) => void
+  private readonly sendToRenderer: (channel: 'app:shortcut', data: unknown) => void
 
   constructor(deps: {
-    sendToRenderer: (channel: string, data: unknown) => void
+    sendToRenderer: (channel: 'app:shortcut', data: unknown) => void
   }) {
     this.sendToRenderer = deps.sendToRenderer
   }

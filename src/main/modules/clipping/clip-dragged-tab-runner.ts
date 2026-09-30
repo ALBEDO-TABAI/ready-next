@@ -139,7 +139,7 @@ export type ClipBackgroundUpdate =
   | ClipBackgroundUpdateFailed
 
 export interface ClipDraggedTabIPCController {
-  sendToRenderer(channel: string, data: unknown): void
+  sendToRenderer(channel: 'clip:backgroundUpdate' | 'clip:contentStudyUpdate', data: unknown): void
 }
 
 const HTTP_RE = /^https?:\/\//i

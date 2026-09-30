@@ -91,8 +91,8 @@ function notifyAgentRegistryChanged(): void {
   }
 }
 
-async function invokeAndNotifyAgentRegistry(channel: string, ...args: unknown[]): Promise<unknown> {
-  const result = await ipcRenderer.invoke(channel, ...args)
+async function notifyAgentRegistryAfter(request: () => Promise<unknown>): Promise<unknown> {
+  const result = await request()
   if (result && typeof result === 'object' && (result as { success?: unknown }).success === true) {
     notifyAgentRegistryChanged()
   }
@@ -144,7 +144,7 @@ const agentAPI = {
   }) =>
     ipcRenderer.invoke('agent:specialistBlueprint:requestConfirmation', payload),
   confirmSpecialistDraftCreate: (payload: { blueprintId: string; sessionId: string; runId?: string | null; tokenId: string; migrateCardRelPaths?: string[] }) =>
-    invokeAndNotifyAgentRegistry('agent:specialistBlueprint:confirmCreate', payload),
+    notifyAgentRegistryAfter(() => ipcRenderer.invoke('agent:specialistBlueprint:confirmCreate', payload)),
   rejectSpecialistBlueprint: (blueprintId: string) =>
     ipcRenderer.invoke('agent:specialistBlueprint:reject', { blueprintId }),
   expireSpecialistBlueprint: (blueprintId: string) =>
@@ -155,9 +155,9 @@ const agentAPI = {
     mergedIntoAgentId?: string | null
     migrateCardRelPaths?: string[]
   }) =>
-    invokeAndNotifyAgentRegistry('agent:registry:updateStatus', payload),
+    notifyAgentRegistryAfter(() => ipcRenderer.invoke('agent:registry:updateStatus', payload)),
   deleteRegistryAgent: (id: string) =>
-    invokeAndNotifyAgentRegistry('agent:registry:delete', { id }),
+    notifyAgentRegistryAfter(() => ipcRenderer.invoke('agent:registry:delete', { id })),
   listDerivationCandidates: () => ipcRenderer.invoke('agent:derivation:listCandidates'),
   confirmDerivation: (payload: {
     candidateRelPath: string
@@ -1391,14 +1391,14 @@ const agentPersonalityAPI = {
     personalityText: string
     tone?: string
     metaJson?: Record<string, unknown>
-  }) => invokeAndNotifyAgentRegistry('agentPersonality:create', personality),
+  }) => notifyAgentRegistryAfter(() => ipcRenderer.invoke('agentPersonality:create', personality)),
   update: (agentName: string, updates: {
     displayName?: string
     personalityText?: string
     tone?: string
     metaJson?: Record<string, unknown>
-  }) => invokeAndNotifyAgentRegistry('agentPersonality:update', agentName, updates),
-  delete: (agentName: string) => invokeAndNotifyAgentRegistry('agentPersonality:delete', agentName),
+  }) => notifyAgentRegistryAfter(() => ipcRenderer.invoke('agentPersonality:update', agentName, updates)),
+  delete: (agentName: string) => notifyAgentRegistryAfter(() => ipcRenderer.invoke('agentPersonality:delete', agentName)),
 }
 
 const toolsAPI = {

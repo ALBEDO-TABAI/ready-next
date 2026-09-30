@@ -19,7 +19,7 @@ interface BrowserPreviewServiceDeps {
   applyPreviewBounds: (view: BrowserHostView) => void
   getPreviewBounds: () => BrowserRect
   setPreviewBounds: (bounds: BrowserRect) => void
-  sendToRenderer: (channel: string, data: unknown) => void
+  sendToRenderer: (channel: 'browser:previewUpdate', data: unknown) => void
   logBrowserDiag: (message: string) => void
   bindPopup: (webContents: WebContents) => void
   installContextMenu: (webContents: WebContents) => void

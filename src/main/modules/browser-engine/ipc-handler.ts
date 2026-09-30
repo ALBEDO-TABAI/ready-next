@@ -554,7 +554,7 @@ export class BrowserController {
     this.hostLayoutService.hideHost(view)
   }
 
-  sendToRenderer(channel: string, data: unknown): void {
+  sendToRenderer(channel: 'app:shortcut' | 'board:activeBoardExternalImageAdded' | 'browser:adblockUpdate' | 'browser:agentControlChanged' | 'browser:bookmarksChanged' | 'browser:clipCurrentTabRequested' | 'browser:downloadUpdate' | 'browser:fastCardContextAction' | 'browser:leaseChanged' | 'browser:localMediaUploadStatus' | 'browser:previewUpdate' | 'browser:tabOpened' | 'browser:tabUpdate' | 'clip:backgroundUpdate' | 'clip:contentStudyUpdate', data: unknown): void {
     if (!this.mainWindow.isDestroyed()) {
       this.mainWindow.webContents.send(channel, data)
     }

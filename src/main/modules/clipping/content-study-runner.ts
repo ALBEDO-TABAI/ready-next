@@ -178,7 +178,7 @@ export async function runContentStudyBackground(
   // controller closure (a `let` would narrow to `null` after the null check).
   const capture: { final: ClipBackgroundUpdate | null } = { final: null }
   const spyController: ClipDraggedTabIPCController = {
-    sendToRenderer: (channel: string, data: unknown) => {
+    sendToRenderer: (channel, data) => {
       controller.sendToRenderer(channel, data)
       if (channel !== 'clip:backgroundUpdate') return
       const evt = data as ClipBackgroundUpdate

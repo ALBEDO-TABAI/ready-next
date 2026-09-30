@@ -1,7 +1,7 @@
 // Stage V V2.4a — search-engine SourceIndexGroup channel cluster.
 //
-// Bundles the 5 channels that drive workspace-wide indexing + per-document
-// indexing + reindex cancellation + source-type discovery:
+// Bundles the 4 channels that drive workspace-wide indexing + per-document
+// indexing + source-type discovery:
 //
 //   document:listSources         (list registered source types — synchronous
 //                                 read from the in-process engine)
@@ -11,7 +11,6 @@
 //                                 worker first → in-process fallback)
 //   document:reindexWorkspace    (file-system reindex of a workspace root,
 //                                 worker first → in-process fallback)
-//   document:cancelReindex       (abort in-flight worker reindex jobs)
 //
 // Channels use the `document:` IPC prefix because the renderer-facing
 // search surface was registered under the document namespace per the V5
@@ -70,7 +69,6 @@ const CHANNELS = [
   'document:indexDocument',
   'document:reindexAllSources',
   'document:reindexWorkspace',
-  'document:cancelReindex',
 ] as const
 
 export const sourceIndexGroup: IpcChannelGroup<SourceIndexGroupDeps> = {
@@ -208,21 +206,6 @@ export const sourceIndexGroup: IpcChannelGroup<SourceIndexGroupDeps> = {
       },
     )
 
-    // perf-rescue B6: cancel any in-flight reindex inside the db-worker. The
-    // worker tracks active reindex AbortControllers by request id and aborts
-    // them all when this command arrives. No-op if no reindex is running, so
-    // it's safe to call defensively (e.g. on workspace close / app quit).
-    ipcMain.handle(
-      'document:cancelReindex',
-      async (): Promise<SearchIPCResponse<{ cancelled: number }>> => {
-        try {
-          const cancelled = await deps.getWorkerBridge().cancelReindex()
-          return { success: true, data: { cancelled } }
-        } catch (error) {
-          return { success: false, error: error instanceof Error ? error.message : String(error) }
-        }
-      },
-    )
 
     ipcMain.handle(
       'document:indexDocument',

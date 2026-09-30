@@ -80,14 +80,7 @@ export interface WorkerDbBridge {
   }): Promise<SearchPayload>
   reindexWorkspace(opts: { root: string }): Promise<ReindexWorkspaceResult>
   reindexAllSources(opts: { root: string }): Promise<ReindexAllSourcesResult>
-  /**
-   * perf-rescue B6: cancel every in-flight reindex inside the worker. Returns
-   * the number of jobs aborted (0 if none were running). The cancelled
-   * reindexWorkspace/reindexAllSources promises will resolve with their own
-   * partial-result payload (or reject with AbortError surfaced through the
-   * structured `error.message`), depending on which boundary they were at.
-   */
-  cancelReindex(): Promise<number>
+  /** Ask the worker to abort active indexing and close; settle pending requests. */
   shutdown(): Promise<void>
   // Test-only escape hatch — never call from production code.
   __isAvailable(): boolean
@@ -228,10 +221,6 @@ export class WorkerDbBridgeImpl implements WorkerDbBridge {
 
   reindexAllSources(opts: { root: string }): Promise<ReindexAllSourcesResult> {
     return this.send<ReindexAllSourcesResult>('reindexAllSources', opts)
-  }
-
-  cancelReindex(): Promise<number> {
-    return this.send<number>('cancelReindex')
   }
 
   async shutdown(): Promise<void> {

@@ -5,7 +5,7 @@ import { BrowserDataService } from './data-service'
 
 interface BrowserDownloadServiceDeps {
   dataService: BrowserDataService
-  sendToRenderer: (channel: string, data: unknown) => void
+  sendToRenderer: (channel: 'browser:downloadUpdate', data: unknown) => void
 }
 
 export interface BrowserDownloadUrlToDirectoryPayload {

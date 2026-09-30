@@ -38,7 +38,7 @@ export interface BrowserTabMetaPayload {
 interface BrowserTabMetaServiceDeps<TTab extends BrowserTabMetaRecord> {
   tabs: Map<string, TTab>
   getActiveTabId(): string | null
-  sendToRenderer: (channel: string, data: unknown) => void
+  sendToRenderer: (channel: 'browser:tabUpdate', data: unknown) => void
 }
 
 export class BrowserTabMetaService<TTab extends BrowserTabMetaRecord> {

@@ -43,7 +43,7 @@ function extractBrowserDomain(url: string): string {
 
 interface BrowserSessionPolicyDeps {
   dataService: BrowserDataService
-  sendToRenderer: (channel: string, data: unknown) => void
+  sendToRenderer: (channel: 'browser:adblockUpdate', data: unknown) => void
   resolveOriginDomain: (webContentsId?: number) => string
   isPreviewWebContentsId: (webContentsId?: number) => boolean
   getMainWindow: () => BrowserWindow | null

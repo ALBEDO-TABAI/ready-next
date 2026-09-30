@@ -126,7 +126,7 @@ interface ReindexAllSourcesArgs { root: string }
 
 // perf-rescue B6: per-request abort controllers for in-flight reindex jobs.
 // Keyed by message id so concurrent reindexes (e.g. one workspace + one
-// shared) can be cancelled independently. `cancelReindex` aborts all entries.
+// shared) can be cancelled independently. Shutdown aborts all remaining entries.
 // We don't track other commands (search/graph) since those return in <100ms
 // and aren't worth the bookkeeping.
 const activeReindexes = new Map<number, AbortController>()
@@ -145,14 +145,6 @@ port.on('message', (raw: unknown) => {
     try { db.close() } catch { /* ignore */ }
     reply({ id: msg.id, ok: true })
     setTimeout(() => process.exit(0), 0)
-    return
-  }
-
-  if (msg.cmd === 'cancelReindex') {
-    const cancelled = activeReindexes.size
-    for (const ctrl of activeReindexes.values()) ctrl.abort()
-    activeReindexes.clear()
-    reply({ id: msg.id, ok: true, data: cancelled })
     return
   }
 
