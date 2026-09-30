@@ -153,8 +153,8 @@ export class RSSEventStore {
     return true
   }
   private createEvent(): string { const id = randomUUID(); this.db.prepare('INSERT INTO rss_events(id) VALUES (?)').run(id); return id }
-  private createFact(eventId: string, availableAt = Date.now()): string {
-    const id = randomUUID(); this.db.prepare('INSERT INTO rss_event_facts(id,event_id,available_at) VALUES (?,?,?)').run(id, eventId, availableAt); return id
+  private createFact(eventId: string, availableAt = Date.now(), originFactId?: string): string {
+    const id = randomUUID(); this.db.prepare('INSERT INTO rss_event_facts(id,event_id,available_at,origin_fact_id) VALUES (?,?,?,?)').run(id, eventId, availableAt, originFactId || id); return id
   }
   private write(itemId: string, articleRevision: string, factId: string | null, quote: string | null, role: RSSEventDecision['sourceRole'], relation: RSSEventMembership['relation'], reason: string, manual: boolean): void {
     const evidenceId = randomUUID(), material = this.material(itemId)
@@ -218,7 +218,7 @@ export class RSSEventStore {
         const others = current?.factId ? this.db.prepare('SELECT COUNT(*) AS n FROM rss_event_evidence WHERE fact_id=? AND (item_id<>? OR article_revision<>?) AND withdrawn=0').get<{ n: number }>(current.factId, params.itemId, material.revision)!.n : 0
         if (current?.factId && sameFact && !others) { factId = current.factId; this.db.prepare('UPDATE rss_event_facts SET event_id=? WHERE id=?').run(target, factId) }
         else {
-          factId = this.createFact(target, current?.factId && sameFact ? this.db.prepare('SELECT MIN(captured_at) AS available_at FROM rss_event_evidence WHERE fact_id=? AND item_id=? AND article_revision=? AND withdrawn=0').get<{ available_at: number }>(current.factId, params.itemId, material.revision)!.available_at : Date.now())
+          factId = this.createFact(target, current?.factId && sameFact ? this.db.prepare('SELECT MIN(captured_at) AS available_at FROM rss_event_evidence WHERE fact_id=? AND item_id=? AND article_revision=? AND withdrawn=0').get<{ available_at: number }>(current.factId, params.itemId, material.revision)!.available_at : Date.now(), current?.factId && sameFact ? this.db.prepare('SELECT origin_fact_id FROM rss_event_facts WHERE id=?').get<{ origin_fact_id: string }>(current.factId)!.origin_fact_id : undefined)
         }
       }
       if (current?.factId && current.factId !== factId) this.db.prepare('UPDATE rss_event_evidence SET withdrawn=1 WHERE item_id=? AND fact_id=? AND article_revision=?').run(params.itemId, current.factId, material.revision)

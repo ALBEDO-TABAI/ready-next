@@ -32,6 +32,7 @@ export interface RSSItem {
   eventGroup?: RSSArticleSummary['eventGroup']
   classifications?: RSSMembership[]
   id: string
+  pinnedRevision?: string
   revision?: string
   sourceRevision?: string
   title: string

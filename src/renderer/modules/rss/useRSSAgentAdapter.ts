@@ -16,6 +16,7 @@ interface UseRSSAgentAdapterParams {
   handleRefresh: () => Promise<RSSRefreshOutcome>
   handleItemClick: (item: RSSItem) => void
   setSelection: (payload: {
+    selectedItemExpectedRevision?: string | null
     selectedItemId?: string | null
     selectedItemTitle?: string | null
   }) => void
@@ -36,6 +37,7 @@ export function useRSSAgentAdapter(params: UseRSSAgentAdapterParams): void {
 
   useEffect(() => {
     setSelection({
+      selectedItemExpectedRevision: selectedItem?.pinnedRevision || null,
       selectedItemId: selectedItem?.id ?? null,
       selectedItemTitle: selectedItem?.title ?? null,
     })
@@ -48,7 +50,7 @@ export function useRSSAgentAdapter(params: UseRSSAgentAdapterParams): void {
         items,
         getView: () => {
           const state = useRSSSession.getState()
-          return params.isActive && state.view && rssQueryKey(state.view.query) === rssQueryKey(state.query) ? state.view : null
+          return params.isActive && !state.digestVisible && state.view && rssQueryKey(state.view.query) === rssQueryKey(state.query) ? state.view : null
         },
         selectedSource,
         selectedItem,

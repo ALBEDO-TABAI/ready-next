@@ -1,3 +1,5 @@
+import { RSSDigestReadSchema } from '../../../shared/rss-digests'
+import type { RSSDigestStore } from '../database/rss-digest-store'
 import { RSSReadReferenceSchema, type RSSReferenceResource } from '../../../shared/rss-reference'
 import { RSS_SCHEMAS } from './schemas/rss-schemas'
 import { zodObjectToParamList } from './zod-param-derivation'
@@ -27,6 +29,7 @@ interface RSSToolDef {
 }
 
 interface RSSToolContext {
+  getDigests?: () => Pick<RSSDigestStore, 'read' | 'schedule'>
   getEvents?: () => Pick<RSSEventStore, 'browse'>
   getProcessing?: () => Pick<RSSProcessingStore, 'list' | 'status'>
   hasProcessingModel?: () => boolean
@@ -38,6 +41,8 @@ interface RSSToolContext {
 }
 
 const RSS_TOOLS: RSSToolDef[] = [
+  { name: 'rss_read_digests', description: '分页读取已保存日报或范围简报、原文依据与采集覆盖；仅查询，不生成、不重算、不标已读。',
+    action: 'rss.readDigests', intent: 'read_rss_digests', executionKind: 'deterministic', params: zodObjectToParamList(RSS_SCHEMAS.rss_read_digests) as ToolParam[] },
   { name: 'rss_read_events', description: '分页读取已保存事件、当前报道或事实进展及历史版本依据。历史摘句不代表当前原文仍有效；只读，不重新归组。',
     action: 'rss.readEvents', intent: 'read_rss_events', executionKind: 'deterministic', params: zodObjectToParamList(RSS_SCHEMAS.rss_read_events) as ToolParam[] },
   {
@@ -159,6 +164,12 @@ export async function executeRSSTool(
   const tool = RSS_TOOLS.find((item) => item.name === toolName)
   if (!tool) return `Unknown RSS tool: ${toolName}`
 
+  if (toolName === 'rss_read_digests') {
+    if (context?.readAccessDenied || !context?.getDigests) return toStructuredResult(tool, '当前会话未获准读取本机 RSS 资料。', { ok: false, error: 'rss_read_not_authorized' })
+    try { return toStructuredResult(tool, '已读取保存的刊物；原文摘句和精选判断分开标识，needsUpdate 表示发布后依据变化，未修改原刊。', { ok: true, data: context.getDigests().read(RSSDigestReadSchema.parse(args)), schedule: context.getDigests().schedule() }) }
+    catch (error) { return toStructuredResult(tool, '刊物读取失败。', { ok: false, error: error instanceof Error ? error.message : String(error) }) }
+  }
+
   if (toolName === 'rss_read_events') {
     if (context?.readAccessDenied || !context?.getEvents) return toStructuredResult(tool, '当前会话未获准读取本机 RSS 资料。', { ok: false, error: 'rss_read_not_authorized' })
     try { return toStructuredResult(tool, '事件数据以 data 为准，历史依据保留对应文章版本；待更新的关联不当作已重新验证。', { ok: true, data: context.getEvents().browse(RSSReadEventsSchema.parse(args)) }) }
@@ -186,6 +197,12 @@ export async function executeRSSTool(
         if (matches.length !== 1) throw new Error('rss_reference_unavailable')
         const reference = matches[0].reference
         referenceId = input.referenceId
+        if (reference.kind === 'digest') {
+          if (input.cursor !== undefined || !context.getDigests) throw new Error('rss_reference_wrong_cursor')
+          return toStructuredResult(tool, '已读取引用绑定的刊物版本；使用 nextOffset 续读，引用来源通过 rss_read_digests 的 sources 视图读取。', {
+            ok: true, referenceId, data: context.getDigests().read({ ...reference.read, view: 'entries', offset: input.offset ?? reference.read.offset }),
+          })
+        }
         if (reference.kind === 'query') {
           if (input.offset !== undefined) throw new Error('rss_reference_wrong_cursor')
           args = { ...reference.query, cursor: input.cursor }

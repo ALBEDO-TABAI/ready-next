@@ -1,3 +1,5 @@
+import { digestGroup } from './ipc/digest-group'
+import { getRSSDigestService, generateRSSDigest } from './digest-runtime'
 import { organizationGroup } from './ipc/organization-group'
 import { processingGroup } from './ipc/processing-group'
 import { eventGroup } from './ipc/event-group'
@@ -246,6 +248,7 @@ let exportGroupDispose: IpcDisposeHandle | null = null
 let contentGroupDispose: IpcDisposeHandle | null = null
 let organizationGroupDispose: IpcDisposeHandle | null = null
 let processingGroupDispose: IpcDisposeHandle | null = null
+let digestGroupDispose: IpcDisposeHandle | null = null
 let eventGroupDispose: IpcDisposeHandle | null = null
 let workspaceFilesGroupDispose: IpcDisposeHandle | null = null
 
@@ -997,6 +1000,15 @@ async function runAddSourceCore(input: AddSourceCoreInput): Promise<AddSourceCor
 }
 
 export function setupRSSIPC(useMock = false): void {
+  digestGroupDispose?.dispose()
+  digestGroupDispose = digestGroup.register(ipcMain, { store: () => getDatabase().rss.digests, service: getRSSDigestService, generate: generateRSSDigest,
+    chooseDirectory: async (sender) => {
+      const parent = BrowserWindow.fromWebContents(sender)
+      if (!parent) throw new Error('当前窗口不可用。')
+      const result = await dialog.showOpenDialog(parent, { title: '选择刊物导出文件夹', properties: ['openDirectory', 'createDirectory'] })
+      return result.canceled ? null : result.filePaths[0] || null
+    },
+  })
   eventGroupDispose?.dispose()
   eventGroupDispose = eventGroup.register(ipcMain, { store: () => getDatabase().rss.events, notify: notifyRSSProcessing,
     notifySeen: () => { for (const window of BrowserWindow.getAllWindows()) if (!window.webContents.isDestroyed()) window.webContents.send('rss:eventSeenChanged') },

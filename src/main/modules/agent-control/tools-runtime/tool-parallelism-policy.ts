@@ -72,7 +72,7 @@ const READ_ONLY_RSS_TOOL_NAMES = new Set([
   'rss_read_article',
   'rss_read_reference',
   'rss_read_processing',
-  'rss_read_events',
+  'rss_read_digests', 'rss_read_events',
 ])
 
 const READ_ONLY_CALENDAR_TOOL_NAMES = new Set([

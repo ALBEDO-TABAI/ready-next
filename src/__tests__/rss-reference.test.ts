@@ -126,14 +126,15 @@ test('the real SDK request exposes the referenced read with a selected skill and
   db.rss.upsertRSSItems([{ id: 'model-read', source_id: source, guid: 'model-read', title: 'Model read', link: 'https://example.test/article', summary: 'SAVED-CONTENT-FROM-NATIVE-STORE' }])
   const article = db.rss.content.getArticle('model-read')!
   const event = db.rss.events.move({ itemId: article.id, expectedArticleRevision: article.revision, expectedMembershipRevision: 0, targetEventId: null, quote: article.summary })
-  const envelope = buildRequestEnvelope({ userText: `整理引用的资讯\n\n${formatRSSReference('Article', RSSReferenceSchema.parse({ kind: 'article', read: { itemId: article.id, expectedRevision: article.revision } }))}` })
+  const digest = db.rss.digests.generate({ kind: 'range', from: 0, until: Date.now(), timezone: 'UTC', query: {} })
+  const envelope = buildRequestEnvelope({ userText: `整理引用的资讯\n\n${formatRSSReference('Article', RSSReferenceSchema.parse({ kind: 'article', read: { itemId: article.id, expectedRevision: article.revision } }))}\n\n${formatRSSReference('Digest', { kind: 'digest', read: { reportId: digest.id, offset: 0, limit: 20 } })}` })
   const resource = rssReferencesFromEnvelope(envelope)[0]
   const requests: any[] = []
   const runtime = new AgentSdkRuntime({
     loadAIConfig: () => ({ ok: true, config, reason: 'present' }), domainAdapters: [],
     executeToolCall: async (name, args, context) => {
-      assert.ok(['rss_read_reference', 'rss_read_events'].includes(name))
-      const text = await executeRSSTool(name, args, { getContent: () => db.rss.content, getEvents: () => db.rss.events, references: rssReferencesFromEnvelope(context.requestEnvelope) })
+      assert.ok(['rss_read_reference', 'rss_read_events', 'rss_read_digests'].includes(name))
+      const text = await executeRSSTool(name, args, { getDigests: () => db.rss.digests, getContent: () => db.rss.content, getEvents: () => db.rss.events, references: rssReferencesFromEnvelope(context.requestEnvelope) })
       return createToolExecutionOutput(text, { shape: 'json', data: JSON.parse(text) })
     },
     fetchWithTimeout: async (_url, init) => {
@@ -141,6 +142,8 @@ test('the real SDK request exposes the referenced read with a selected skill and
       const payload = requests.length === 1
         ? { choices: [{ message: { tool_calls: [
           { id: 'call-reference', type: 'function', function: { name: 'rss_read_reference', arguments: JSON.stringify({ referenceId: resource.id }) } },
+          { id: 'call-digest', type: 'function', function: { name: 'rss_read_digests', arguments: JSON.stringify({ view: 'entries', reportId: digest.id }) } },
+          { id: 'call-digest-reference', type: 'function', function: { name: 'rss_read_reference', arguments: JSON.stringify({ referenceId: rssReferencesFromEnvelope(envelope).find((r) => r.reference.kind === 'digest')!.id }) } },
           { id: 'call-event', type: 'function', function: { name: 'rss_read_events', arguments: JSON.stringify({ view: 'facts', eventId: event.eventId }) } },
         ] }, finish_reason: 'tool_calls' }] }
         : { choices: [{ message: { content: '已读取引用中的已保存资讯。' }, finish_reason: 'stop' }] }
@@ -159,6 +162,8 @@ test('the real SDK request exposes the referenced read with a selected skill and
     assert.match(JSON.stringify(requests[1].messages), /SAVED-CONTENT-FROM-NATIVE-STORE/)
     assert.equal(db.rss.content.getArticle(article.id)!.read, false)
     assert.match(JSON.stringify(requests[1].messages), /rss.readEvents/)
+    assert.match(JSON.stringify(requests[1].messages), /rss.readDigests/)
+    assert.ok(requests[0].tools.some((tool: any) => tool.function?.name === 'rss_read_digests'))
     assert.equal(db.rss.events.summary(event.eventId!).unseenFactCount, 1)
   } finally { db.close() }
 })

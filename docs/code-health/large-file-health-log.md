@@ -2,6 +2,21 @@
 
 > 更新时间：2026-10-01
 
+## 2026-10-01 RSS 日报与范围简报
+
+| 文件 | 当前行数 | 净增 | 判断 | 后续 |
+|---|---:|---:|---|---|
+| `src/main/index.ts` | 1237 | 4 | 一般 | 绑定日报启动、恢复与退出；2026-11-01 复查生命周期组装 |
+| `src/main/modules/agent-control/tools-runtime/tool-registry.ts` | 1544 | 1 | 一般 | 只登记刊物读取；2026-11-01 复查 |
+| `src/main/modules/migrations.ts` | 3382 | 2 | 健康 | 仅登记独立 084 迁移 |
+| `src/main/modules/rss-engine/ipc-handler.ts` | 1240 | 12 | 一般 | 刊物 IPC 独立实现，宿主只接目录选择与依赖；2026-11-01 复查 |
+| `src/main/modules/tools/tool-executor.ts` | 1266 | 1 | 一般 | 注入刊物只读存储；2026-11-01 复查域路由 |
+| `src/preload/index.ts` | 1565 | 10 | 一般 | 五个 API 和一项变更通知；2026-11-01 复查分域组装 |
+| `src/renderer/components/rss/RSSFeed.tsx` | 1036 | 1 | 一般 | 仅增加明确的引用版本标识，读取仍在共享阅读器；2026-11-01 复查 |
+| `src/renderer/types/electron.d.ts` | 4005 | 6 | 健康 | 复用共享刊物合同；IPC 对账覆盖 |
+
+刊物保存、调度接入、渲染、IPC、界面分别留在小模块。没有新增聊天调度、模型复核或独立计时实现；复用既有文件独占发布与读回。
+
 ## 2026-10-01 RSS 事件与结果恢复
 
 | 文件 | 当前行数 | 净增 | 判断 | 后续 |

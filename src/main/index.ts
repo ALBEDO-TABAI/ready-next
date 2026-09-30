@@ -1,3 +1,4 @@
+import { startRSSDigests, stopRSSDigests, resumeRSSDigests } from './modules/rss-engine/digest-runtime'
 // 本文件是重模块：由 boot-entry.ts（构建入口）在 splash 可见后动态加载。
 // dotenv、userData 路径、协议注册、命令行开关等 pre-ready 配置都在 boot-entry 完成。
 import { app, shell, BrowserWindow, ipcMain, protocol, nativeImage, nativeTheme, Menu, dialog, clipboard, powerMonitor, type MenuItemConstructorOptions, type NativeImage } from 'electron'
@@ -320,6 +321,7 @@ function stopRSSAutoRefresh(): Promise<void> {
 }
 
 function runFatalProcessCleanup(): Promise<void> {
+  stopRSSDigests()
   const rssAutoRefreshStopped = Promise.all([stopRSSAutoRefresh(), stopRSSContentService(), stopRSSProcessing()])
   return runBeforeQuitCleanup({
     cleanupAgentRuntime,
@@ -590,7 +592,7 @@ function setupGlobalIPC(): void {
   setupTagForgeIPC()
   setupImageGenerationIPC()
   setupRSSIPC(RSS_USE_MOCK)
-  if (!RSS_USE_MOCK) void startRSSProcessing()
+  if (!RSS_USE_MOCK) { void startRSSProcessing(); void startRSSDigests().catch((error) => console.error('[rss-digests] startup failed', error)) }
   rssAutoRefreshScheduler = new RSSAutoRefreshScheduler({
     now: () => Date.now(),
     readIntervalMs: readRSSAutoRefreshInterval,
@@ -918,6 +920,7 @@ function setupAutoUpdater(mainWindow: BrowserWindow): void {
 // pre-ready 配置（协议注册、命令行开关、userAgent、userData）见 boot-entry.ts。
 // 本模块在 splash 可见后才被动态加载，此处 whenReady 已 resolve，回调立即执行。
 const handlePowerResume = (): void => {
+  void resumeRSSDigests().catch((error) => console.error('[rss-digests] resume failed', error))
   void reconcileAgentSchedulesOnResume().catch((error) => {
     console.warn('[scheduled-tasks] resume reconcile failed:', error)
   })
@@ -1206,6 +1209,7 @@ app.on('before-quit', (event) => {
   } catch (err) {
     console.warn('[before-quit] calendarSyncScheduler.stop threw:', err)
   }
+  stopRSSDigests()
   const rssAutoRefreshStopped = Promise.all([stopRSSAutoRefresh(), stopRSSContentService(), stopRSSProcessing()])
   void runBeforeQuitCleanup({
     cleanupAgentRuntime,

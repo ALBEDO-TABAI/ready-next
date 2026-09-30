@@ -1,3 +1,4 @@
+import { RSSDigestStore } from './rss-digest-store'
 import { RSSOrganizationStore, rssIncludedClassificationSQL } from './rss-organization-store'
 import { RSSProcessingStore } from './rss-processing-store'
 import { RSSEventStore } from './rss-event-store'
@@ -9,12 +10,14 @@ export class RSSStore {
   readonly content: RSSContentStore
   readonly organization: RSSOrganizationStore
   readonly processing: RSSProcessingStore
+  readonly digests: RSSDigestStore
   readonly events: RSSEventStore
 
   constructor(private readonly getConnection: () => DatabaseConnection | null) {
     this.organization = new RSSOrganizationStore(getConnection, (id) => this.content.getArticle(id)?.revision || null)
     this.events = new RSSEventStore(getConnection)
-    this.content = new RSSContentStore(getConnection, this.organization, (id) => this.processing.enqueueBodyChange(id), this.events)
+    this.content = new RSSContentStore(getConnection, this.organization, (id) => { this.processing.enqueueBodyChange(id); this.organization.recordDigestIntake(id) }, this.events)
+    this.digests = new RSSDigestStore(getConnection, this.content, this.organization)
     this.processing = new RSSProcessingStore(getConnection, this.content, this.organization, this.events)
   }
 
@@ -91,8 +94,8 @@ export class RSSStore {
     let inserted = 0
     const stmt = this.db.prepare(
       `INSERT INTO rss_items
-       (id, source_id, guid, title, link, summary, cover_image, author, published_at, inbox_visible)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+       (id, source_id, guid, title, link, summary, cover_image, author, published_at, inbox_visible,daily_eligible)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1,(SELECT draft_seeded FROM rss_sources WHERE id=?))
        ON CONFLICT(id) DO UPDATE SET
          source_id = excluded.source_id,
          guid = excluded.guid,
@@ -117,12 +120,16 @@ export class RSSStore {
           item.summary || null,
           item.cover_image || null,
           item.author || null,
-          item.published_at || null
+          item.published_at || null, item.source_id
         ) as { changes?: number }
         if (result.changes && result.changes > 0) inserted++
         const saved = this.db.prepare('SELECT content_revision FROM rss_items WHERE id=?').get<{ content_revision: string }>(item.id)!
         const seeded = this.db.prepare('SELECT draft_seeded FROM rss_sources WHERE id=?').get<{ draft_seeded: number }>(item.source_id)
-        if (seeded?.draft_seeded === 1 && saved.content_revision !== previous?.content_revision) this.processing.enqueue(item.id, 'automatic')
+        if (seeded?.draft_seeded === 1 && saved.content_revision !== previous?.content_revision) {
+          this.db.prepare('UPDATE rss_items SET daily_eligible=1 WHERE id=?').run(item.id)
+          this.processing.enqueue(item.id, 'automatic')
+          this.organization.recordDigestIntake(item.id)
+        }
       }
       this.db.exec('RELEASE rss_item_batch')
     }

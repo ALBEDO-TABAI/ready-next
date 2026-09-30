@@ -4,14 +4,14 @@ interface ArticleReaderAPI {
   readArticle(input: RSSReadArticleInput): Promise<{ success: boolean; data?: RSSArticleExcerpt; error?: string }>
 }
 
-export async function readSavedRSSArticle(api: ArticleReaderAPI, itemId: string, signal: AbortSignal): Promise<RSSArticleExcerpt> {
+export async function readSavedRSSArticle(api: ArticleReaderAPI, itemId: string, signal: AbortSignal, expectedRevision?: string): Promise<RSSArticleExcerpt> {
   let first: RSSArticleExcerpt | undefined
   let offset = 0
   const chunks: string[] = []
   do {
     signal.throwIfAborted()
     const result = await api.readArticle({ itemId, offset, length: 24000,
-      ...(first ? { expectedRevision: first.article.revision } : {}) })
+      ...(first || expectedRevision ? { expectedRevision: first?.article.revision || expectedRevision } : {}) })
     signal.throwIfAborted()
     if (!result.success || !result.data) throw new Error(result.error || '文章读取失败')
     first ??= result.data

@@ -78,7 +78,7 @@ export function getDocumentQuoteTooltip(attachment: ChatAttachment): string {
 }
 
 export function getAttachmentMetaSummary(attachment: ChatAttachment): string | null {
-  if (attachment.source === 'rss-reference') return attachment.rssReference?.kind === 'article' ? 'RSS 文章引用' : 'RSS 筛选结果引用'
+  if (attachment.source === 'rss-reference') return attachment.rssReference?.kind === 'article' ? 'RSS 文章引用' : attachment.rssReference?.kind === 'digest' ? 'RSS 刊物引用' : 'RSS 筛选结果引用'
   if (attachment.isDirectory) {
     return '文件夹'
   }

@@ -4,14 +4,18 @@ import { readJsonStorage, writeJsonStorage } from '../utils/storage'
 
 interface RSSSessionState {
   query: RSSQuery
+  digestVisible: boolean
+  selectedDigestId: string | null
+  setDigestView(visible: boolean, reportId?: string | null): void
   view: RSSQueryResult | null
   navigationCollapsed: boolean
+  selectedItemExpectedRevision: string | null
   selectedItemId: string | null
   selectedItemTitle: string | null
   setQuery(patch: RSSQueryInput): void
   setView(view: RSSQueryResult): void
   setNavigationCollapsed(value: boolean): void
-  setSelection(payload: { selectedItemId?: string | null; selectedItemTitle?: string | null }): void
+  setSelection(payload: { selectedItemExpectedRevision?: string | null; selectedItemId?: string | null; selectedItemTitle?: string | null }): void
   reset(): void
 }
 const KEY = 'ready-rss-workspace'
@@ -21,7 +25,10 @@ const parsed = RSSQuerySchema.safeParse(saved?.query || {})
 export const useRSSSession = create<RSSSessionState>((set, get) => ({
   query: parsed.success ? parsed.data : RSSQuerySchema.parse({}),
   view: null,
+  digestVisible: false, selectedDigestId: null,
+  setDigestView: (digestVisible, reportId) => set({ digestVisible, ...(reportId !== undefined ? { selectedDigestId: reportId } : {}) }),
   navigationCollapsed: saved?.navigationCollapsed === true,
+  selectedItemExpectedRevision: null,
   selectedItemId: null,
   selectedItemTitle: null,
   setQuery: (patch) => {
@@ -35,6 +42,7 @@ export const useRSSSession = create<RSSSessionState>((set, get) => ({
     writeJsonStorage(KEY, { query: get().query, navigationCollapsed })
   },
   setSelection: (payload) => set(payload),
-  reset: () => set({ query: RSSQuerySchema.parse({}), view: null, navigationCollapsed: false,
-    selectedItemId: null, selectedItemTitle: null }),
+  reset: () => set({ digestVisible: false, selectedDigestId: null, query: RSSQuerySchema.parse({}), view: null, navigationCollapsed: false,
+    selectedItemExpectedRevision: null,
+  selectedItemId: null, selectedItemTitle: null }),
 }))

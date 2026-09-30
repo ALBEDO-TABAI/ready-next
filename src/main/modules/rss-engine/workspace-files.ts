@@ -8,7 +8,7 @@ import { buildRSSNote } from '../../../shared/rss-note-markdown'
 import { RSSQuerySchema, RSSSaveNoteSchema, type RSSQueryInput, type RSSQueryExportResult, type RSSSaveNoteInput, type RSSNoteSaveResult } from '../../../shared/rss-workspace'
 
 /** Stage and read back once, then publish without replacing any existing file. */
-async function writeNewText(folder: string, stem: string, extension: string, text: string, assertCurrent: () => void): Promise<string> {
+export async function writeNewText(folder: string, stem: string, extension: string, text: string, assertCurrent: () => void): Promise<string> {
   const directory = await realpath(folder)
   if (!(await stat(directory)).isDirectory()) throw new Error('请选择有效的保存文件夹。')
   const base = Array.from(sanitizeNoteFileName(stem)).slice(0, 48).join('')

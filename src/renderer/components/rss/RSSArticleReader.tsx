@@ -15,6 +15,7 @@ import RssTimeHintBanner from './RssTimeHintBanner'
 import RSSSaveNoteButton from './RSSSaveNoteButton'
 
 interface RSSArticleReaderProps {
+  expectedRevision?: string
   onSelectRelated?(item: RSSItem): void
   definitions?: RSSDefinition[]
   active?: boolean
@@ -31,7 +32,7 @@ const BODY_LABELS = {
   stale: '原文已变化，正在更新正文', login_required: '需要在原网站登录', failed: '正文获取失败',
 } as const
 
-export default function RSSArticleReader({ item, onClose, onOpened, onToggleStar, onBodyLoaded, notice, active = true, definitions = [], onSelectRelated }: RSSArticleReaderProps) {
+export default function RSSArticleReader({ item, expectedRevision, onClose, onOpened, onToggleStar, onBodyLoaded, notice, active = true, definitions = [], onSelectRelated }: RSSArticleReaderProps) {
   const [content, setContent] = useState<RSSArticleExcerpt | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -54,25 +55,28 @@ export default function RSSArticleReader({ item, onClose, onOpened, onToggleStar
     setBusy(true)
     void (async () => {
       try {
-        let saved = await readSavedRSSArticle(api, item.id, controller.signal)
+        let saved = await readSavedRSSArticle(api, item.id, controller.signal, expectedRevision)
         setContent(saved)
-        if (!video && (force || saved.body.fetching || ['missing', 'stale', 'loading'].includes(saved.body.status))) {
+        if (!expectedRevision && !video && (force || saved.body.fetching || ['missing', 'stale', 'loading'].includes(saved.body.status))) {
           const fetched = await api.loadArticle({ itemId: item.id, force })
           controller.signal.throwIfAborted()
-          saved = await readSavedRSSArticle(api, item.id, controller.signal)
+          saved = await readSavedRSSArticle(api, item.id, controller.signal, expectedRevision)
           setContent(saved)
           await onBodyLoaded?.(saved.article)
           controller.signal.throwIfAborted()
           if (!fetched.success) setError(fetched.error || '正文获取失败，仍可阅读来源摘要或打开原文。')
         }
       } catch (cause) {
-        if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : String(cause))
+        if (!controller.signal.aborted) {
+          const message = cause instanceof Error ? cause.message : String(cause)
+          setError(message === 'article_changed' ? expectedRevision ? '引用文章已变化，无法打开指定版本。刊物仍保留当时的摘句。' : '文章读取期间发生变化，请重新读取。' : message)
+        }
       } finally {
         if (!controller.signal.aborted) setBusy(false)
       }
     })()
     return () => controller.abort()
-  }, [item.id, item.revision, item.title, item.link, item.summary, reload, video])
+  }, [item.id, item.revision, item.title, item.link, item.summary, reload, video, expectedRevision])
 
   useEffect(() => {
     if (content?.article.id === item.id && !content.article.read) void onOpened(item.id)
@@ -122,7 +126,7 @@ export default function RSSArticleReader({ item, onClose, onOpened, onToggleStar
         <div className="rss-reader-status" role="status">
           {busy && <Loader2 size={14} className="animate-spin" />}
           <span>{content ? `${content.textKind === 'source_summary' ? '来源摘要 · ' : ''}${BODY_LABELS[content.body.status]}` : busy ? '正在读取文章' : '文章读取失败'}</span>
-          {!video && <button type="button" className="rss-reader-button" disabled={busy} onClick={() => { forceReload.current = true; setReload((value) => value + 1) }}><RefreshCw size={13} />重新获取正文</button>}
+          {!video && <button type="button" className="rss-reader-button" disabled={busy || !!expectedRevision} title={expectedRevision ? '刊物引用保留对应版本；可返回资讯列表获取新正文。' : undefined} onClick={() => { forceReload.current = true; setReload((value) => value + 1) }}><RefreshCw size={13} />重新获取正文</button>}
         </div>
         {content?.body.fetching && <p className="rss-reader-notice" role="status">正在获取正文，已有内容仍可阅读。</p>}
         {content?.body.error && ['ready', 'partial'].includes(content.body.status) && <p className="rss-reader-notice" role="alert">重新获取未完成，已保留上次保存的正文。{content.body.error}</p>}

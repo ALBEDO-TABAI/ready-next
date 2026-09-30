@@ -79,6 +79,18 @@ export class RSSOrganizationStore {
     })
   }
 
+  recordDigestIntake(itemId: string, now = Date.now()): void {
+    const revision = this.articleRevision(itemId)
+    this.db.prepare(`INSERT OR IGNORE INTO rss_digest_intake(item_id,article_revision,received_at)
+      SELECT id,?,? FROM rss_items WHERE id=? AND daily_eligible=1`).run(revision, now, itemId)
+    this.db.prepare(`UPDATE rss_digest_intake SET available_at=? WHERE item_id=? AND article_revision=? AND available_at IS NULL AND EXISTS
+      (SELECT 1
+      FROM rss_items i LEFT JOIN rss_article_content c ON c.item_id=i.id
+      JOIN rss_memberships m ON m.item_id=i.id JOIN rss_definitions d ON d.id=m.definition_id
+      LEFT JOIN rss_classification_results r ON r.id=m.result_id
+      WHERE i.id=? AND i.daily_eligible=1 AND d.kind='curated' AND ${rssIncludedClassificationSQL})`).run(now, itemId, revision, itemId)
+  }
+
   setManual(input: RSSMembershipWrite): RSSMembership[] {
     const params = RSSMembershipWriteSchema.parse(input)
     return this.transaction(() => {
@@ -90,6 +102,7 @@ export class RSSOrganizationStore {
         this.db.prepare('DELETE FROM rss_memberships WHERE item_id=? AND definition_id=? AND result_id IS NULL').run(params.itemId, params.definitionId)
       } else this.db.prepare(`INSERT INTO rss_memberships(item_id,definition_id,manual_decision) VALUES (?,?,?)
         ON CONFLICT(item_id,definition_id) DO UPDATE SET manual_decision=excluded.manual_decision`).run(params.itemId, params.definitionId, Number(params.decision))
+      this.recordDigestIntake(params.itemId)
       return this.memberships([params.itemId])[params.itemId] || []
     })
   }
@@ -107,6 +120,7 @@ export class RSSOrganizationStore {
           decision.reason, decision.evidence, articleRevision, definitions.find((d) => d.id === decision.definitionId)!.ruleRevision)!
         this.bindResult(itemId, decision.definitionId, result.id)
       }
+      this.recordDigestIntake(itemId)
     })
   }
 

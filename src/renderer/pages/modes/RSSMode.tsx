@@ -1,3 +1,4 @@
+import RSSDigestPanel from '../../components/rss/RSSDigestPanel'
 import RSSDefinitionEditor from '../../components/rss/RSSDefinitionEditor'
 import RSSProcessingPanel from '../../components/rss/RSSProcessingPanel'
 import { useState, useEffect, useCallback, useMemo, useRef, type CSSProperties } from 'react'
@@ -98,6 +99,8 @@ export default function RSSMode({
 }: RSSModeProps) {
   const navigate = useNavigate()
   const { query, view, items, sources, definitions, loading, loadingMore, error, reload, loadMore, hasHydrated } = useRSSWorkspace(isActive && !isSuspended)
+  const digestVisible = useRSSSession((state) => state.digestVisible)
+  const setDigestView = useRSSSession((state) => state.setDigestView)
   const selectedSourceId = query.sourceId || null
   const setQuery = useRSSSession((state) => state.setQuery)
   const setSelection = useRSSSession((state) => state.setSelection)
@@ -544,13 +547,13 @@ export default function RSSMode({
           className="workbench-canvas-shell relative flex h-full min-h-0 overflow-hidden"
           style={{ background: 'var(--workbench-module-surface-bg)' }}
         >
-          <RSSNavigation definitions={definitions} onManage={() => { setSelectedItem(null); setShowOrganization((value) => !value) }} onNavigate={(patch) => { setSelectedItem(null); setQuery(patch) }} />
+          <RSSNavigation onDigests={() => { setSelectedItem(null); setShowOrganization(false); setDigestView(true) }} definitions={definitions} onManage={() => { setDigestView(false); setSelectedItem(null); setShowOrganization((value) => !value) }} onNavigate={(patch) => { setDigestView(false); setSelectedItem(null); setQuery(patch) }} />
           {/* Keep the list mounted so returning from reading preserves scroll. */}
           <div
             className={`rss-feed-sheet content-surface-panel flex-1 overflow-hidden flex flex-col relative`}
             style={{
               background: 'var(--workbench-module-surface-bg)',
-              display: selectedItem ? 'none' : undefined,
+              display: selectedItem || digestVisible ? 'none' : undefined,
             }}
           >
             {showOrganization && <RSSDefinitionEditor definitions={definitions} onClose={() => setShowOrganization(false)} onSaved={(deletedId) => {
@@ -560,7 +563,7 @@ export default function RSSMode({
             <RSSWorkspaceToolbar view={view} loading={loading} definitions={definitions} />
             <RSSProcessingPanel active={isActive && !isSuspended} />
             <RSSFeed
-              active={isActive && !isSuspended && !selectedItem}
+              active={isActive && !isSuspended && !selectedItem && !digestVisible}
               query={view?.query}
               queryRevision={view?.revision}
               items={items}
@@ -634,14 +637,17 @@ export default function RSSMode({
             />
           </div>
 
+          {digestVisible && <RSSDigestPanel active={isActive && !isSuspended} view={view} onReadArticle={(item) => { setDigestView(false); handleItemClick(item) }} />}
+
           {/* Article rendering shares the document typography, without active widgets. */}
-          {selectedItem && (
+          {selectedItem && !digestVisible && (
             <RSSArticleReader
+              expectedRevision={selectedItem.pinnedRevision}
               onSelectRelated={handleItemClick}
               active={isActive && !isSuspended}
               definitions={definitions}
               key={selectedItem.id}
-              item={items.find((item) => item.id === selectedItem.id) || selectedItem}
+              item={selectedItem.pinnedRevision ? selectedItem : items.find((item) => item.id === selectedItem.id) || selectedItem}
               onClose={handleClosePreview}
               onOpened={handleMarkItemRead}
               onBodyLoaded={handleBodyLoaded}

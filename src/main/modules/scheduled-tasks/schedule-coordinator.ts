@@ -15,6 +15,7 @@ export interface CoordinatedSchedule {
   nextRunAt: string | null
   missedPolicy: ScheduleMissedPolicy
   claimedExecutionCount: number
+  coalesceMaxDelayMs?: number | null
 }
 
 export interface CoordinatedOccurrence {
@@ -127,6 +128,7 @@ export class ScheduleCoordinator {
         now,
         recurring: schedule.spec.kind !== 'once',
         policy: schedule.missedPolicy,
+        coalesceMaxDelayMs: schedule.coalesceMaxDelayMs,
       })
       if (Number.isFinite(remainingExecutions)) {
         let queued = 0

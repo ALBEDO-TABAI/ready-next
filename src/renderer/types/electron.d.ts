@@ -2382,6 +2382,12 @@ interface RSSItemAnalysisProgress {
 }
 
 interface ElectronRSSAPI {
+  readDigests: (input?: import('../../shared/rss-digests').RSSDigestReadInput) => Promise<RSSResponse<import('../../shared/rss-digests').RSSDigestReadResult>>
+  digestSettings: () => Promise<RSSResponse<import('../../shared/rss-digests').RSSDigestScheduleState | null>>
+  configureDigests: (input: import('../../shared/rss-digests').RSSDigestSettings) => Promise<RSSResponse<import('../../shared/rss-digests').RSSDigestScheduleState>>
+  generateDigest: (input: import('../../shared/rss-digests').RSSDigestGenerateInput) => Promise<RSSResponse<import('../../shared/rss-digests').RSSDigestHeader>>
+  exportDigest: (input: { reportId: string }) => Promise<RSSResponse<{ canceled: boolean; path?: string; reportId?: string }>>
+  onDigestsChanged: (callback: () => void) => () => void
   markEventFactsSeen: (input: { factIds: string[] }) => Promise<RSSResponse<{ changed: number; seenIds: string[] }>>
   onEventSeenChanged: (callback: () => void) => () => void
   queryCards: (query?: import('../../shared/rss-workspace').RSSQueryInput) => Promise<RSSResponse<import('../../shared/rss-workspace').RSSQueryResult>>

@@ -11,7 +11,11 @@ export default function RSSReferencePreview({ reference }: { reference: unknown 
         const parsed = RSSReferenceSchema.parse(reference)
         const api = window.electronAPI.rss
         let preview: string
-        if (parsed.kind === 'article') {
+        if (parsed.kind === 'digest') {
+          const result = await api.readDigests({ view: 'entries', ...parsed.read })
+          if (!result.success || result.data?.view !== 'entries') throw new Error(result.error || '无法读取刊物')
+          preview = `${result.data.report.kind === 'daily' ? '资讯日报' : '当前范围简报'} · 第 ${result.data.report.version} 版，共 ${result.data.total} 项${result.data.report.needsUpdate ? ' · 依据已变化，保留旧刊' : ''}\n\n${result.data.entries.map((entry) => `${entry.source.title}\n原文摘句：${entry.source.quote}`).join('\n\n')}${result.data.nextOffset !== null ? '\n\nAgent 可继续读取后续条目。' : ''}`
+        } else if (parsed.kind === 'article') {
           const result = await api.readArticle(parsed.read)
           if (!result.success || !result.data) throw new Error(result.error || '无法读取文章')
           const { article, text, textKind, offset, nextOffset } = result.data

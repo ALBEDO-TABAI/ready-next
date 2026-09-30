@@ -219,6 +219,7 @@ const RSS_TOOL_NAMES = [
   'rss_read_article',
   'rss_read_reference',
   'rss_read_processing',
+  'rss_read_digests',
   'rss_read_events',
 ]
 

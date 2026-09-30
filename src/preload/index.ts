@@ -825,6 +825,16 @@ const boardAPI = {
 
 // RSS API
 const rssAPI = {
+  readDigests: (input?: import('../shared/rss-digests').RSSDigestReadInput) => ipcRenderer.invoke('rss:readDigests', input),
+  digestSettings: () => ipcRenderer.invoke('rss:digestSettings'),
+  configureDigests: (input: import('../shared/rss-digests').RSSDigestSettings) => ipcRenderer.invoke('rss:configureDigests', input),
+  generateDigest: (input: import('../shared/rss-digests').RSSDigestGenerateInput) => ipcRenderer.invoke('rss:generateDigest', input),
+  exportDigest: (input: { reportId: string }) => ipcRenderer.invoke('rss:exportDigest', input),
+  onDigestsChanged: (callback: () => void) => {
+    const handler = () => callback()
+    ipcRenderer.on('rss:digestsChanged', handler)
+    return () => ipcRenderer.removeListener('rss:digestsChanged', handler)
+  },
   markEventFactsSeen: (input: { factIds: string[] }) => ipcRenderer.invoke('rss:markEventFactsSeen', input),
   onEventSeenChanged: (callback: () => void) => {
     const handler = () => callback()

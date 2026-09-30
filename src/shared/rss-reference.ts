@@ -3,6 +3,7 @@ import { RSSQuerySchema, RSSReadArticleSchema } from './rss-workspace'
 
 /** A frozen read request, not a copy of the article or a filesystem path. */
 export const RSSReferenceSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('digest'), read: z.object({ reportId: z.string().min(1), offset: z.number().int().nonnegative().default(0), limit: z.number().int().min(1).max(50).default(20) }).strict() }).strict(),
   z.object({ kind: z.literal('article'), read: RSSReadArticleSchema.extend({ expectedRevision: z.string().min(1) }) }).strict(),
   z.object({ kind: z.literal('query'), query: RSSQuerySchema.safeExtend({ cursor: z.never().optional(), expectedRevision: z.number().int().nonnegative() }) }).strict(),
 ])

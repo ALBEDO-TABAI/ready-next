@@ -1,3 +1,4 @@
+import RSSDigestPanel from '../renderer/components/rss/RSSDigestPanel'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import React, { act } from 'react'
@@ -150,4 +151,62 @@ test('reopening saved content during a refresh waits for its receipt and display
   assert.match(dom.window.document.body.textContent!, /fixture refresh failed/)
   assert.doesNotMatch(dom.window.document.body.textContent!, /正在获取正文/)
   assert.equal(dom.window.document.querySelector<HTMLButtonElement>('.rss-reader-status button')?.disabled, false)
+}))
+
+test('a completed digest generation cannot reopen a panel the user has left', async () => withDOM(async (root, dom) => {
+  useRSSSession.getState().reset(); useRSSSession.getState().setDigestView(true)
+  let finish!: (value: unknown) => void
+  Object.assign(window, { electronAPI: { rss: {
+    readDigests: async () => ({ success: true, data: { view: 'editions', editions: [], total: 0, nextOffset: null, snapshot: 0 } }),
+    digestSettings: async () => ({ success: true, data: { enabled: true, localTime: '08:00', timezone: 'UTC', nextRunAt: null, error: null } }),
+    onDigestsChanged: () => () => {}, onOrganizationChanged: () => () => {},
+    generateDigest: () => new Promise((resolve) => { finish = resolve }),
+  } } })
+  await act(async () => root.render(<RSSDigestPanel active view={{ query: RSSQuerySchema.parse({}), revision: 1 } as never} onReadArticle={() => { throw new Error('unexpected navigation') }} />))
+  const button = [...dom.window.document.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent === '生成当前筛选范围简报')!
+  await act(async () => button.click())
+  await act(async () => { useRSSSession.getState().setDigestView(false); root.render(<p>Another surface</p>) })
+  await act(async () => finish({ success: true, data: { id: 'old-request-report' } }))
+  assert.equal(useRSSSession.getState().digestVisible, false)
+  assert.equal(useRSSSession.getState().selectedDigestId, null)
+}))
+
+test('a digest citation pins the very first full-body request and cannot silently show a newer version', async () => withDOM(async (root, dom) => {
+  const reads: Array<{ expectedRevision?: string }> = []
+  Object.assign(window, { electronAPI: { rss: {
+    onOrganizationChanged: () => () => {}, onEventSeenChanged: () => () => {},
+    readArticle: async (input: { expectedRevision?: string }) => {
+      reads.push(input)
+      return input.expectedRevision === 'v1' ? { success: false, error: 'article_changed' } : { success: true, data: { article: { id: 'a', title: 'Title', revision: 'v2', read: true }, body: { status: 'ready' }, text: 'BODY VERSION TWO', textKind: 'body', nextOffset: null } }
+    },
+  } } })
+  const item = { id: 'a', title: 'Title', link: 'https://example.test/a', revision: 'v1' } as RSSItem
+  await act(async () => root.render(<RSSArticleReader item={item} expectedRevision="v1" onClose={() => {}} onOpened={async () => {}} onToggleStar={() => {}} />))
+  assert.equal(reads[0].expectedRevision, 'v1')
+  assert.doesNotMatch(dom.window.document.body.textContent!, /BODY VERSION TWO/)
+  assert.match(dom.window.document.body.textContent!, /无法打开指定版本/)
+}))
+
+test('digest export receipts stay with their edition and corrections refresh the open header', async () => withDOM(async (root, dom) => {
+  useRSSSession.getState().reset(); useRSSSession.getState().setDigestView(true, 'A')
+  let finish!: (value: unknown) => void, correction = () => {}, outdated = false
+  const header = (id: string) => ({ id, kind: 'daily', version: id === 'A' ? 1 : 2, from: 0, until: 1000, createdAt: 1000, timezone: 'UTC', total: 0, referenceCount: 0,
+    scopeLabel: 'Saved scope', needsUpdate: outdated, coverage: { unresolvedArticles: 0, failedArticles: 0, pendingArticles: 0, missingBodies: 0, carriedOverArticles: 0 } })
+  Object.assign(window, { electronAPI: { rss: {
+    readDigests: async (input: { view?: string; reportId?: string }) => ({ success: true, data: input.view === 'entries'
+      ? { view: 'entries', report: header(input.reportId!), entries: [], total: 0, nextOffset: null }
+      : { view: 'editions', editions: [header('A'), header('B')], total: 2, nextOffset: null, snapshot: 2 } }),
+    digestSettings: async () => ({ success: true, data: { enabled: true, localTime: '08:00', timezone: 'UTC', nextRunAt: null, error: null } }),
+    onDigestsChanged: () => () => {}, onOrganizationChanged: (handler: () => void) => { correction = handler; return () => {} },
+    exportDigest: () => new Promise((resolve) => { finish = resolve }),
+  } } })
+  await act(async () => root.render(<RSSDigestPanel active view={null} onReadArticle={() => {}} />))
+  const find = (text: string) => [...dom.window.document.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent === text)!
+  await act(async () => find('导出本刊').click())
+  await act(async () => useRSSSession.getState().setDigestView(true, 'B'))
+  await act(async () => finish({ success: true, data: { canceled: false, path: '/synthetic/A-v1.md', reportId: 'A' } }))
+  assert.match(dom.window.document.querySelector('h1')!.textContent!, /第 2 版/)
+  assert.doesNotMatch(dom.window.document.body.textContent!, /A-v1.md/)
+  await act(async () => { outdated = true; correction() })
+  assert.match(dom.window.document.body.textContent!, /来源、标准或归属已经变化/)
 }))

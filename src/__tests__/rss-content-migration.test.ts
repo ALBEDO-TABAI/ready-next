@@ -1,3 +1,4 @@
+import { migrateRSSDigests, RSS_DIGEST_MIGRATION } from '../main/modules/rss-engine/digest-schema'
 import { migrateRSSResults, RSS_RESULT_MIGRATION } from '../main/modules/rss-engine/result-schema'
 import { migrateRSSOrganization, RSS_ORGANIZATION_MIGRATION } from '../main/modules/rss-engine/organization-schema'
 import { migrateRSSProcessing, RSS_PROCESSING_MIGRATION } from '../main/modules/rss-engine/processing-schema'
@@ -63,6 +64,12 @@ test('RSS migration backs up existing WAL data and rolls back without losing rea
     migrateRSSResults(db)
     db.prepare('INSERT INTO migrations VALUES(?)').run(RSS_RESULT_MIGRATION)
     db.exec('COMMIT')
+    assert.ok(backupBeforeRSSMigration(db, path)?.includes('before-rss-084-'))
+    db.exec('BEGIN')
+    migrateRSSDigests(db)
+    db.prepare('INSERT INTO migrations VALUES(?)').run(RSS_DIGEST_MIGRATION)
+    db.exec('COMMIT')
+    assert.equal(db.prepare('SELECT daily_eligible FROM rss_items').get<{ daily_eligible: number }>()!.daily_eligible, 0)
     assert.equal(backupBeforeRSSMigration(db, path), null, 'all RSS migrations have completed')
     assert.equal(snapshot.prepare('SELECT title FROM rss_items').get<{ title: string }>()?.title, 'Saved title')
   } finally {

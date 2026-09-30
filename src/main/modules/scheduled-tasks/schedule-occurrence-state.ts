@@ -50,6 +50,7 @@ export interface MissedOccurrenceDecision {
 
 export function reconcileMissedOccurrences(input: {
   dueScheduledFor: string[]
+  coalesceMaxDelayMs?: number | null
   now: string
   recurring: boolean
   policy: ScheduleMissedPolicy
@@ -74,7 +75,7 @@ export function reconcileMissedOccurrences(input: {
   }
 
   const latest = due[due.length - 1]
-  const latestIsEligible = nowMs - Date.parse(latest) <= 24 * 60 * 60 * 1000
+  const latestIsEligible = input.coalesceMaxDelayMs === null || nowMs - Date.parse(latest) <= (input.coalesceMaxDelayMs ?? 24 * 60 * 60 * 1000)
   return due.map((scheduledFor) => ({
     scheduledFor,
     status: scheduledFor === latest && latestIsEligible

@@ -1,3 +1,4 @@
+import { RSSDigestReadSchema } from '../../../../shared/rss-digests'
 import { RSSReadReferenceSchema } from '../../../../shared/rss-reference'
 import { RSSProcessingListSchema } from '../../../../shared/rss-processing'
 import { RSSReadEventsSchema } from '../../../../shared/rss-events'
@@ -48,6 +49,7 @@ export type RssToolName =
   | 'rss_read_article'
   | 'rss_read_reference'
   | 'rss_read_processing'
+  | 'rss_read_digests'
   | 'rss_read_events'
 
 export const RSS_SCHEMAS: Record<RssToolName, z.ZodObject<z.ZodRawShape>> = {
@@ -60,5 +62,6 @@ export const RSS_SCHEMAS: Record<RssToolName, z.ZodObject<z.ZodRawShape>> = {
   rss_read_article: RSSReadArticleSchema,
   rss_read_reference: RSSReadReferenceSchema,
   rss_read_processing: RSSProcessingListSchema,
+  rss_read_digests: RSSDigestReadSchema,
   rss_read_events: RSSReadEventsSchema,
 }

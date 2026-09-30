@@ -14,6 +14,11 @@ import {
 } from '../main/modules/tools/rss-tools'
 
 const EXPECTED_ANTHROPIC = [
+  { name: 'rss_read_digests', description: '分页读取已保存日报或范围简报、原文依据与采集覆盖；仅查询，不生成、不重算、不标已读。', input_schema: { type: 'object', properties: {
+    view: { type: 'string', description: 'editions 刊物目录；entries 条目；sources 某条全部依据；coverage 订阅覆盖；criteria 发布时的分类与精选标准', enum: ['editions', 'entries', 'sources', 'coverage', 'criteria'] },
+    reportId: { type: 'string', description: '除目录外必填，已保存刊物 ID' }, groupKey: { type: 'string', description: 'sources 视图必填，沿用条目的 groupKey' },
+    offset: { type: 'number', description: '续页使用返回的 nextOffset' }, limit: { type: 'number', description: '每页 1–50 条，默认 20' }, snapshot: { type: 'number', description: '刊物目录续页沿用首次返回的 snapshot' },
+  }, required: [] } },
   { name: 'rss_read_events', description: '分页读取已保存事件、当前报道或事实进展及历史版本依据。历史摘句不代表当前原文仍有效；只读，不重新归组。', input_schema: { type: 'object', properties: {
     view: { type: 'string', description: 'list 事件目录；members 当前报道；facts 包含历史依据的事实与进展', enum: ['list', 'members', 'facts'] },
     eventId: { type: 'string', description: '读取成员或事实时必填' }, search: { type: 'string', description: '仅事件目录使用，搜索已保存标题或事实摘句' },
