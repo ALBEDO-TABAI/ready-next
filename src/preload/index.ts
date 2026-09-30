@@ -534,21 +534,10 @@ const browserAPI = {
     ipcRenderer.on('browser:leaseChanged', handler)
     return () => ipcRenderer.removeListener('browser:leaseChanged', handler)
   },
-  setAdblockEnabled: (enabled: boolean, scope?: 'main' | 'preview' | 'all') =>
-    ipcRenderer.invoke('browser:setAdblockEnabled', { enabled, scope }),
+  setAdblockEnabled: (enabled: boolean) =>
+    ipcRenderer.invoke('browser:setAdblockEnabled', { enabled }),
   toggleAdblockDomain: (domain: string) => ipcRenderer.invoke('browser:toggleAdblockDomain', { domain }),
   getTabContext: (tabId?: string) => ipcRenderer.invoke('browser:getTabContext', tabId),
-  previewOpen: (payload: { url: string }) => ipcRenderer.invoke('browser:previewOpen', payload),
-  previewNavigate: (payload: { url: string }) => ipcRenderer.invoke('browser:previewNavigate', payload),
-  previewGoBack: () => ipcRenderer.invoke('browser:previewGoBack'),
-  previewGoForward: () => ipcRenderer.invoke('browser:previewGoForward'),
-  previewReload: () => ipcRenderer.invoke('browser:previewReload'),
-  previewUpdateBounds: (bounds: { x: number; y: number; width: number; height: number }) => {
-    ipcRenderer.send('browser:previewUpdateBounds', bounds)
-    return Promise.resolve({ success: true })
-  },
-  previewClose: () => ipcRenderer.invoke('browser:previewClose'),
-  previewGetState: () => ipcRenderer.invoke('browser:previewGetState'),
   p7cLiveProofStartUserViewLease: () => ipcRenderer.invoke('browser:p7cLiveProofStartUserViewLease'),
   p7cLiveProofCreateManualTab: () => ipcRenderer.invoke('browser:p7cLiveProofCreateManualTab'),
   p7cLiveProofPrepareForegroundProbe: () => ipcRenderer.invoke('browser:p7cLiveProofPrepareForegroundProbe'),
@@ -556,11 +545,6 @@ const browserAPI = {
   p7cLiveProofSendUserKey: (key?: string) => ipcRenderer.invoke('browser:p7cLiveProofSendUserKey', key),
   p7cLiveProofCheckWriteDenied: () => ipcRenderer.invoke('browser:p7cLiveProofCheckWriteDenied'),
   p7cLiveProofClear: () => ipcRenderer.invoke('browser:p7cLiveProofClear'),
-  onPreviewUpdate: (callback: (data: unknown) => void) => {
-    const handler = (_: unknown, data: unknown): void => callback(data)
-    ipcRenderer.on('browser:previewUpdate', handler)
-    return () => ipcRenderer.removeListener('browser:previewUpdate', handler)
-  },
   onTabUpdate: (callback: (data: unknown) => void) => {
     const handler = (_: unknown, data: unknown): void => callback(data)
     ipcRenderer.on('browser:tabUpdate', handler)

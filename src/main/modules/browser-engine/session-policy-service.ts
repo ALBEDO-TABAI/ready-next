@@ -45,7 +45,6 @@ interface BrowserSessionPolicyDeps {
   dataService: BrowserDataService
   sendToRenderer: (channel: 'browser:adblockUpdate', data: unknown) => void
   resolveOriginDomain: (webContentsId?: number) => string
-  isPreviewWebContentsId: (webContentsId?: number) => boolean
   getMainWindow: () => BrowserWindow | null
   /** True while an agent run holds a browser write lease（无人值守判定）。 */
   isAgentDriveActive?: () => boolean
@@ -71,13 +70,8 @@ export class BrowserSessionPolicyService {
     }
   }
 
-  setAdblockEnabled(enabled: boolean, scope: 'main' | 'preview' | 'all' = 'all'): BrowserAdblockState {
-    if (scope === 'all' || scope === 'main') {
-      this.adblockState.enabled = enabled
-    }
-    if (scope === 'all' || scope === 'preview') {
-      this.adblockState.previewEnabled = enabled
-    }
+  setAdblockEnabled(enabled: boolean): BrowserAdblockState {
+    this.adblockState.enabled = enabled
     this.adblockState.lastUpdatedAt = Math.floor(Date.now() / 1000)
     this.persistAdblockState()
     this.scheduleAdblockRendererUpdate(true)
@@ -160,7 +154,6 @@ export class BrowserSessionPolicyService {
               details.url,
               details.resourceType || '',
               this.deps.resolveOriginDomain(details.webContentsId),
-              this.deps.isPreviewWebContentsId(details.webContentsId),
             )
             if (shouldBlock) {
               this.rememberBlockedAdRequest()
@@ -231,10 +224,8 @@ export class BrowserSessionPolicyService {
     requestUrl: string,
     resourceType: string,
     originDomain: string,
-    isPreview: boolean,
   ): boolean {
     if (!this.adblockState.enabled) return false
-    if (isPreview && !this.adblockState.previewEnabled) return false
     if (resourceType === 'mainFrame') return false
     if (!/^https?:\/\//i.test(requestUrl)) return false
     const host = extractBrowserDomain(requestUrl)

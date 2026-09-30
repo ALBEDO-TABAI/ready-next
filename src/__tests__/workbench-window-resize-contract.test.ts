@@ -10,7 +10,6 @@ function readWorkspaceFile(path: string): string {
 test('workbench resize hub keeps one RAF-coalesced window listener and fans out to subscribers', () => {
   const resizeHub = readWorkspaceFile('src/renderer/modules/workbench/windowResize.ts')
   const boundsHook = readWorkspaceFile('src/renderer/modules/browser/useBrowserViewBounds.ts')
-  const hostedPreviewBoundsHook = readWorkspaceFile('src/renderer/modules/browser/useHostedPreviewBounds.ts')
   const chatHeader = readWorkspaceFile('src/renderer/components/agent/ChatHeader.tsx')
   const filesPanel = readWorkspaceFile('src/renderer/components/layout/FilesPanel.tsx')
 
@@ -22,7 +21,6 @@ test('workbench resize hub keeps one RAF-coalesced window listener and fans out 
   assert.match(resizeHub, /if \(resizeSubscribers\.size === 0\) \{[\s\S]*window\.removeEventListener\('resize', handleWindowResize\)/)
 
   assert.match(boundsHook, /subscribeWorkbenchWindowResize/)
-  assert.match(hostedPreviewBoundsHook, /subscribeWorkbenchWindowResize/)
   assert.match(chatHeader, /subscribeWorkbenchWindowResize/)
   assert.match(filesPanel, /subscribeWorkbenchWindowResize/)
 })

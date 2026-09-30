@@ -36,10 +36,11 @@ export class ClipFetchError extends Error {
 export async function fetchClipHtml(
   url: string,
   signal: AbortSignal | undefined,
+  fetchHtml: (url: string, init: RequestInit) => Promise<Response> = fetch,
 ): Promise<ClipFetchResult> {
   let response: Response
   try {
-    response = await fetch(url, {
+    response = await fetchHtml(url, {
       headers: {
         'user-agent': USER_AGENT,
         accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',

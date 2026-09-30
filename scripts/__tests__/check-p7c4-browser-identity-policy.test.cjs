@@ -32,10 +32,10 @@ function seed(root, overrides = {}) {
         evidence: "this.host.createHost('persist:browser')",
       },
       {
-        id: 'preview-view',
-        file: 'src/main/modules/browser-engine/preview-service.ts',
+        id: 'rss-article-fetch',
+        file: 'src/main/modules/rss-engine/content-runtime.ts',
         partition: 'persist:browser',
-        evidence: "this.deps.createHost('persist:browser')",
+        evidence: "session.fromPartition('persist:browser')",
       },
       {
         id: 'auth-popup',
@@ -74,7 +74,7 @@ function seed(root, overrides = {}) {
       "session.fromPartition('persist:browser')",
       '}',
     ].join('\n'),
-    'src/main/modules/browser-engine/preview-service.ts': "this.deps.createHost('persist:browser')\n",
+    'src/main/modules/rss-engine/content-runtime.ts': "session.fromPartition('persist:browser')\n",
     'src/main/modules/browser-engine/auth-popup-manager.ts': "partition: 'persist:browser'\n",
     'src/main/modules/browser-engine/session-policy-service.ts': "applyForPartition('persist:browser')\n",
     'src/main/modules/browser-engine/browser-surface-binding.ts': [
@@ -87,7 +87,7 @@ function seed(root, overrides = {}) {
       'current agent browser work is not browser identity isolation',
       'Ready keeps the current shared browser identity for now',
       'native lock overlay and supervision panel signal control ownership only',
-      'Gate proves normal tabs, agent tabs, preview, auth popup, background probe, downloads, and session policy all still use `persist:browser`.',
+      'Gate proves normal tabs, agent tabs, RSS article fetch, auth popup, background probe, downloads, and session policy all still use `persist:browser`.',
       'No production partition/profile change in this batch',
     ].join('\n'),
     'outputs/agent-audit/fix-plan/164-CONSENSUS-BROWSER-ISOLATION-SPECIALIST-PRODUCT-ROUTE.md': 'negative contract: same partition + hidden tab + overlay must fail any claim of "isolation".\n',
@@ -168,6 +168,7 @@ test('p7c4 identity gate allows explicit exclusion wording', (t) => {
     'outputs/agent-audit/fix-plan/00-ROADMAP.md': [
       'P7c4 browser identity/session policy decision spike',
       'P3c 不包含浏览器身份隔离。',
+      'P7c4 已完成锁层，但没有实现独立 BrowserView/profile/session/partition 隔离。',
       'P7c3 native lock overlay 只证明锁层可见，不证明隔离。',
     ].join('\n'),
   })

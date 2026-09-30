@@ -100,7 +100,6 @@ test('rss and calendar modes gate heavyweight work behind foreground activity wh
   const rssMode = readWorkspaceFile('src/renderer/pages/modes/RSSMode.tsx')
   const calendarMode = readWorkspaceFile('src/renderer/pages/modes/CalendarMode.tsx')
   const documentMode = readWorkspaceFile('src/renderer/pages/modes/DocumentMode.tsx')
-  const previewBrowser = readWorkspaceFile('src/renderer/components/rss/PreviewBrowser.tsx')
 
   assert.match(rssMode, /interface RSSModeProps \{[\s\S]*isActive\?: boolean[\s\S]*isMotionSettled\?: boolean[\s\S]*\}/)
   assert.match(rssMode, /export default function RSSMode\(\{[\s\S]*isActive = true,[\s\S]*isSuspended = false,[\s\S]*isMotionSettled = true,[\s\S]*\}: RSSModeProps\)/)
@@ -126,6 +125,4 @@ test('rss and calendar modes gate heavyweight work behind foreground activity wh
   assert.match(documentMode, /export default function DocumentMode\(\{[\s\S]*isActive = true,[\s\S]*isMotionSettled = true,[\s\S]*\}: DocumentModeProps\)/)
   assert.match(documentMode, /shouldHandleSelectedDocument\(\{[\s\S]*isActive,[\s\S]*selectedFile,/)
   assert.doesNotMatch(documentMode, /const \[hasActivated, setHasActivated\] = useState\(isActive\)/)
-  assert.match(previewBrowser, /export default function PreviewBrowser\(\{ item, onClose, isActive = true \}:/)
-  assert.match(previewBrowser, /if \(!isActive\) \{[\s\S]*previewClose/)
 })

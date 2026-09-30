@@ -29,7 +29,7 @@ Current identity is still shared:
 
 - normal tabs are created with `createHost('persist:browser')`;
 - agent tabs are created through the same tab lifecycle path;
-- preview views use `createHost('persist:browser')`;
+- RSS article fetch uses `session.fromPartition('persist:browser')`; the native RSS preview host was retired on 2026-09-30;
 - auth popups use `partition: 'persist:browser'`;
 - background probes use `partition: 'persist:browser'`;
 - downloads use `session.fromPartition('persist:browser')`;
@@ -76,7 +76,7 @@ Record the current shared-session evidence and keep it machine-checkable.
 
 Acceptance:
 
-- Gate proves normal tabs, agent tabs, preview, auth popup, background probe, downloads, and session policy all still use `persist:browser`.
+- Gate proves normal tabs, agent tabs, RSS article fetch, auth popup, background probe, downloads, and session policy all still use `persist:browser`.
 - Gate fails if docs claim current P7c4 isolation while source remains shared.
 
 ### WP2 · Negative Isolation Claim Gate

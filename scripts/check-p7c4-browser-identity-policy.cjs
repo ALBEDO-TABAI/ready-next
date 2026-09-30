@@ -54,7 +54,7 @@ function assertNoSharedSessionIsolationClaim(relPath, source) {
   const overclaim = lines.find((line) => {
     if (!/P7c4|agent browser|Agent browser|后台|background|native lock|锁层|overlay/i.test(line)) return false
     if (!/(isolation|isolated|independent browser|独立浏览器|独立.*身份|隔离)/i.test(line)) return false
-    if (/(not|no |cannot|must not|does not include|deferred|future|decision\/spike|fail|fails|failing|不是|不等于|不包含|不含|不证明|不得|未实现|未来|后续)/i.test(line)) return false
+    if (/(not|no |cannot|must not|does not include|deferred|future|decision\/spike|fail|fails|failing|不是|不等于|不包含|不含|不证明|不得|未实现|没有实现|未来|后续)/i.test(line)) return false
     return /(complete|done|closed|achieved|implemented|实现|完成|关闭|已完成|已实现|已经隔离)/i.test(line)
       || /(?:is|equals|=|等于|就是).*(?:isolation|isolated|隔离|独立浏览器)/i.test(line)
   })
@@ -75,8 +75,8 @@ const ipcHandler = assertIncludes('src/main/modules/browser-engine/ipc-handler.t
   "session.fromPartition('persist:browser')",
 ])
 
-assertIncludes('src/main/modules/browser-engine/preview-service.ts', [
-  "this.deps.createHost('persist:browser')",
+assertIncludes('src/main/modules/rss-engine/content-runtime.ts', [
+  "session.fromPartition('persist:browser')",
 ])
 
 assertIncludes('src/main/modules/browser-engine/auth-popup-manager.ts', [
@@ -98,7 +98,7 @@ const plan = assertIncludes('docs/superpowers/plans/2026-06-20-p7c4-browser-iden
   'current agent browser work is not browser identity isolation',
   'Ready keeps the current shared browser identity for now',
   'native lock overlay and supervision panel signal control ownership only',
-  'Gate proves normal tabs, agent tabs, preview, auth popup, background probe, downloads, and session policy all still use `persist:browser`.',
+  'Gate proves normal tabs, agent tabs, RSS article fetch, auth popup, background probe, downloads, and session policy all still use `persist:browser`.',
   'No production partition/profile change in this batch',
 ])
 

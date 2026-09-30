@@ -111,7 +111,7 @@ claude-bridge IPC
 - 文件与侧栏：`src/renderer/components/layout/`
 - Browser：`src/renderer/components/browser/`、`src/renderer/stores/useBrowserTabs.ts`
 - Document：`src/renderer/components/document/`、`src/renderer/stores/useDocTabs.ts`
-- RSS：`src/renderer/components/rss/`、`src/renderer/stores/useRSSSession.ts`
+- RSS：`src/renderer/components/rss/`、`src/renderer/stores/useRSSSession.ts`；`RSSArticleReader` 与 Document 共享 `components/document/MarkdownContent.tsx`，原生 RSS 预览宿主已退役。
 - Calendar：`src/renderer/components/calendar/`、`src/renderer/stores/useCalendarSession.ts`
 - Settings：`src/renderer/pages/Settings.tsx`、`src/renderer/components/settings/`
 - UI 调整导览：`UI_ADJUSTMENT_GUIDE.md`

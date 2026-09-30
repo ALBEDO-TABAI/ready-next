@@ -61,7 +61,6 @@ import {
   type BrowserHostView,
   type BrowserRect,
   type BrowserViewBoundsUpdate,
-  type PreviewTabState,
 } from './host-types'
 import { resolveBrowserHostKindFromConfig } from './host-kind-config'
 import { setupBrowserClipIPC } from './ipc-clip'
@@ -77,7 +76,6 @@ import { setupBrowserShellIPC } from './ipc-shell'
 import { setupBrowserSupervisionIPC } from './ipc-supervision'
 import type { BrowserLeaseSupervisionSnapshot } from './ipc-supervision'
 import { buildBrowserLeaseSupervisionSnapshot } from './browser-lease-supervision-snapshot'
-import { BrowserPreviewService } from './preview-service'
 import { BrowserPageBackgroundService } from './page-background-service'
 import { BrowserSessionPolicyService } from './session-policy-service'
 import { BrowserTabLifecycleService } from './tab-lifecycle-service'
@@ -152,7 +150,6 @@ export class BrowserController {
   tabCounter = 0
   viewBounds: BrowserRect = { x: 0, y: 0, width: 800, height: 600 }
   splitViewBounds: BrowserRect = { x: 0, y: 0, width: 800, height: 600 }
-  previewBounds: BrowserRect = { x: 0, y: 0, width: 800, height: 600 }
   private readonly frozenBoundsByTab = new Map<string, { bounds: BrowserRect; tokens: Set<string> }>()
   private readonly browserVisibilityState = new BrowserVisibilityCommandState()
   private readonly localMediaDropRuns = new Map<string, number>()
@@ -164,7 +161,6 @@ export class BrowserController {
   private readonly dataService: BrowserDataService
   private readonly downloadService: BrowserDownloadService
   private readonly diagnosticsService: BrowserDiagnosticsService
-  private readonly previewService: BrowserPreviewService
   private readonly contextMenuService: BrowserContextMenuService
   private readonly bookmarkTransferService: BrowserBookmarkTransferService
   private readonly hostLayoutService: BrowserHostLayoutService
@@ -253,29 +249,6 @@ export class BrowserController {
       log: (message) => this.logBrowserDiag(message),
     })
     this.networkObserverService = new BrowserNetworkObserverService(this.cdpSessionService)
-    this.previewService = new BrowserPreviewService({
-      useMock: this.useMock,
-      browserUserAgent: this.browserUserAgent,
-      createHost: (partition) => this.createHost(partition),
-      resetPageBackground: (view) => this.pageBackgroundService.reset(view),
-      syncPageBackground: (view) => this.pageBackgroundService.sync(view),
-      showHost: (view, bounds) => this.showHost(view, bounds),
-      hideHost: (view) => this.hideHost(view),
-      detachHost: (view) => this.detachHost(view),
-      applyPreviewBounds: (view) => this.applyPreviewBounds(view),
-      getPreviewBounds: () => this.previewBounds,
-      setPreviewBounds: (bounds) => {
-        this.previewBounds = bounds
-      },
-      sendToRenderer: (channel, data) => this.sendToRenderer(channel, data),
-      logBrowserDiag: (message) => this.logBrowserDiag(message),
-      bindPopup: (webContents) => this.popupManager.bindWindow(webContents),
-      installContextMenu: (webContents) => this.contextMenuService.install(webContents),
-      ensureDownloadSession: (targetSession) => this.downloadService.ensureRegistered(targetSession),
-      handleWindowOpen: (details, source, sourceContentsId) => this.handleWindowOpen(details, source, sourceContentsId),
-      hideActiveTab: () => this.hideActiveTabHost(),
-      restoreActiveTab: () => this.restoreActiveTabHost(),
-    })
     this.automationService = new BrowserAutomationService({
       resolveTabView: (tabId) => this.resolveTabView(tabId),
       createBrowserError: (code, message) => this.createBrowserError(code, message),
@@ -394,14 +367,12 @@ export class BrowserController {
       showHost: (view, bounds) => this.showHost(view, bounds),
       applyBounds: (view, syncMode, bounds) => this.applyBounds(view, syncMode, bounds),
       hideHost: (view) => this.hideHost(view),
-      detachPreviewView: () => this.detachPreviewView(),
       restoreActiveTabHost: () => this.restoreActiveTabHost(),
     })
     this.sessionPolicyService = new BrowserSessionPolicyService({
       dataService: this.dataService,
       sendToRenderer: (channel, data) => this.sendToRenderer(channel, data),
       resolveOriginDomain: (webContentsId) => this.resolveOriginDomainForWebContentsId(webContentsId),
-      isPreviewWebContentsId: (webContentsId) => this.previewService.matchesWebContentsId(webContentsId),
       getMainWindow: () => (this.mainWindow && !this.mainWindow.isDestroyed() ? this.mainWindow : null),
       isAgentDriveActive: () => {
         const leaseService = getBrowserWriteLeaseService()
@@ -432,7 +403,7 @@ export class BrowserController {
         await this.createTab(url)
       },
       setAdblockEnabled: (enabled) => {
-        this.sessionPolicyService.setAdblockEnabled(enabled, 'all')
+        this.sessionPolicyService.setAdblockEnabled(enabled)
       },
       toggleAdblockDomain: (domain) => {
         this.sessionPolicyService.toggleAdblockDomain(domain)
@@ -486,9 +457,6 @@ export class BrowserController {
         return tab.domain || extractBrowserDomain(tab.url)
       }
     }
-    if (this.previewService.matchesWebContentsId(webContentsId)) {
-      return extractBrowserDomain(this.previewService.getUrl())
-    }
     return ''
   }
 
@@ -498,9 +466,6 @@ export class BrowserController {
       if (tab.view?.webContents.id === webContentsId) {
         return tab.view.webContents.getURL() || tab.url
       }
-    }
-    if (this.previewService.matchesWebContentsId(webContentsId)) {
-      return this.previewService.getUrl()
     }
     return ''
   }
@@ -554,7 +519,7 @@ export class BrowserController {
     this.hostLayoutService.hideHost(view)
   }
 
-  sendToRenderer(channel: 'app:shortcut' | 'board:activeBoardExternalImageAdded' | 'browser:adblockUpdate' | 'browser:agentControlChanged' | 'browser:bookmarksChanged' | 'browser:clipCurrentTabRequested' | 'browser:downloadUpdate' | 'browser:fastCardContextAction' | 'browser:leaseChanged' | 'browser:localMediaUploadStatus' | 'browser:previewUpdate' | 'browser:tabOpened' | 'browser:tabUpdate' | 'clip:backgroundUpdate' | 'clip:contentStudyUpdate', data: unknown): void {
+  sendToRenderer(channel: 'app:shortcut' | 'board:activeBoardExternalImageAdded' | 'browser:adblockUpdate' | 'browser:agentControlChanged' | 'browser:bookmarksChanged' | 'browser:clipCurrentTabRequested' | 'browser:downloadUpdate' | 'browser:fastCardContextAction' | 'browser:leaseChanged' | 'browser:localMediaUploadStatus' | 'browser:tabOpened' | 'browser:tabUpdate' | 'clip:backgroundUpdate' | 'clip:contentStudyUpdate', data: unknown): void {
     if (!this.mainWindow.isDestroyed()) {
       this.mainWindow.webContents.send(channel, data)
     }
@@ -702,9 +667,7 @@ export class BrowserController {
     this.hostLayoutService.applyBounds(view, bounds, syncMode)
   }
 
-  applyPreviewBounds(view: BrowserHostView): void {
-    this.hostLayoutService.applyBounds(view, this.previewBounds, 'settled')
-  }
+
 
   private hideActiveTabHost(): boolean {
     if (!this.activeTabId) return false
@@ -875,8 +838,8 @@ export class BrowserController {
     return this.sessionPolicyService.getAdblockState()
   }
 
-  setAdblockEnabled(enabled: boolean, scope: 'main' | 'preview' | 'all' = 'all'): BrowserAdblockState {
-    return this.sessionPolicyService.setAdblockEnabled(enabled, scope)
+  setAdblockEnabled(enabled: boolean): BrowserAdblockState {
+    return this.sessionPolicyService.setAdblockEnabled(enabled)
   }
 
   toggleAdblockDomain(domain: string): BrowserAdblockState {
@@ -923,7 +886,6 @@ export class BrowserController {
     activeTabId: string | null
     diagnosticsLogPath: string
     recentLogs: string[]
-    preview: PreviewTabState
     currentTask: BrowserTaskDiagnosticsSnapshot | null
     pageState: BrowserPageDiagnosticsSnapshot | null
     continuity: BrowserContinuityDiagnosticsSnapshot | null
@@ -937,7 +899,6 @@ export class BrowserController {
       activeTabId: this.activeTabId,
       diagnosticsLogPath: BROWSER_DIAGNOSTICS_LOG_PATH,
       recentLogs: this.diagnosticsService.getRecentEntries(16),
-      preview: this.previewService.getState(),
       currentTask: agentSnapshot.currentTask,
       pageState: agentSnapshot.pageState,
       continuity: agentSnapshot.continuity,
@@ -1816,42 +1777,6 @@ export class BrowserController {
 
   showUtilityMenu(payload: unknown): { success: boolean } {
     return this.utilityMenuService.showMenu(payload as BrowserUtilityMenuRequest)
-  }
-
-  async previewOpen(url: string): Promise<{ success: boolean; error?: string }> {
-    return this.previewService.open(url)
-  }
-
-  async previewNavigate(url: string): Promise<{ success: boolean; error?: string }> {
-    return this.previewService.navigate(url)
-  }
-
-  previewGoBack(): { success: boolean; error?: string } {
-    return this.previewService.goBack()
-  }
-
-  previewGoForward(): { success: boolean; error?: string } {
-    return this.previewService.goForward()
-  }
-
-  previewReload(): { success: boolean; error?: string } {
-    return this.previewService.reload()
-  }
-
-  previewUpdateBounds(bounds: { x: number; y: number; width: number; height: number }): { success: boolean } {
-    return this.previewService.updateBounds(bounds)
-  }
-
-  previewClose(): { success: boolean } {
-    return this.previewService.close()
-  }
-
-  previewGetState(): PreviewTabState {
-    return this.previewService.getState()
-  }
-
-  detachPreviewView(): void {
-    this.previewService.detach()
   }
 
   // ── Programmatic API (for tool calling, not IPC) ──────────────────

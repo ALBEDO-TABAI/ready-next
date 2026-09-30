@@ -11,7 +11,15 @@ export function getRSSContentService(): RSSContentService {
     content.recoverInterruptedLoads()
     service = new RSSContentService({
       content,
-      fetchHtml: (url, signal) => fetchClipHtml(url, AbortSignal.any([signal, AbortSignal.timeout(45_000)])),
+      fetchHtml: async (url, signal) => {
+        const { session } = await import('electron')
+        const browserSession = session.fromPartition('persist:browser')
+        return fetchClipHtml(url, AbortSignal.any([signal, AbortSignal.timeout(45_000)]), (input, init) => {
+          const headers = new Headers(init.headers)
+          headers.set('user-agent', browserSession.getUserAgent())
+          return browserSession.fetch(input, { ...init, headers, credentials: 'include' })
+        })
+      },
       extractor: new ReadabilityJsdomAdapter(),
     })
   }

@@ -6,7 +6,6 @@ import type { BrowserTab } from '../../stores/useBrowserTabs'
 
 const INITIAL_ADBLOCK_STATE: AdblockState = {
   enabled: true,
-  previewEnabled: true,
   whitelistDomains: [],
   rulesVersion: 'ready-basic-ads-v1',
   networkBlockedCount: 0,
@@ -47,7 +46,7 @@ export function useBrowserDiagnosticsState({
 
   const handleToggleAdblock = useCallback(async () => {
     if (!isElectron) return
-    const result = await window.electronAPI?.browser?.setAdblockEnabled(!adblockState.enabled, 'all')
+    const result = await window.electronAPI?.browser?.setAdblockEnabled(!adblockState.enabled)
     if (result?.success && result.data) {
       setAdblockState(result.data as AdblockState)
     }

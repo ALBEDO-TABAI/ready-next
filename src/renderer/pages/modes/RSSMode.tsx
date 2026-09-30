@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useMemo, useRef, type CSSProperties }
 import { useNavigate } from 'react-router-dom'
 import { RefreshCw, AlertCircle, ExternalLink } from 'lucide-react'
 import RSSFeed from '../../components/rss/RSSFeed'
-import PreviewBrowser from '../../components/rss/PreviewBrowser'
+import RSSArticleReader from '../../components/rss/RSSArticleReader'
 import AddSourceModal from '../../components/rss/AddSourceModal'
 import RSSSettingsPanel from '../../components/rss/RSSSettingsPanel'
 import Modal from '../../components/ui/Modal'
@@ -24,10 +24,7 @@ import {
   WORKBENCH_SUPPORT_PANEL_WIDTH,
 } from '../../modules/workbench/chrome'
 import { useBrowserTabs } from '../../stores/useBrowserTabs'
-import { useMode } from '../../stores/useMode'
 import { useRSSSession } from '../../stores/useRSSSession'
-import { isWorkbenchModePairActive } from '../../modules/workbench/mode-split'
-import { openRSSItemInBrowserTab } from '../../modules/rss/open-rss-item-in-browser'
 import { getRSSAnalysisPollState, type RSSAnalysisProgressPollResult } from '../../modules/rss/analysisPollState'
 import { getRSSAddSourceStatusMessage } from '../../modules/rss/add-source-status'
 import type { RSSItem, RSSSource } from '../../components/rss/RSSFeed'
@@ -109,8 +106,6 @@ export default function RSSMode({
   const setLastAnalysis = useRSSSession((state) => state.setLastAnalysis)
   const browserTabs = useBrowserTabs((state) => state.tabs)
   const activeBrowserTabId = useBrowserTabs((state) => state.activeTabId)
-  const workbenchMode = useMode((state) => state.workbenchMode)
-  const splitMode = useMode((state) => state.splitMode)
   const selectedSource = selectedSourceId
   const [items, setItems] = useState<RSSItem[]>(() => initialWarmCache?.items || [])
   const [sources, setSources] = useState<RSSSource[]>(() => initialWarmCache?.sources || [])
@@ -130,6 +125,7 @@ export default function RSSMode({
   })
   const [newItemIds, setNewItemIds] = useState<Set<string>>(new Set())
   const [statusMessage, setStatusMessage] = useState<string | null>(null)
+  const [itemStateError, setItemStateError] = useState<{ itemId: string; action: 'read' | 'star'; message: string } | null>(null)
   const [statusAction, setStatusAction] = useState<RSSBrowserOpenActionData | null>(null)
   const [analysisBackgroundWarning, setAnalysisBackgroundWarning] = useState<string | null>(null)
   const [autoRefreshWarning, setAutoRefreshWarning] = useState<string | null>(null)
@@ -155,13 +151,6 @@ export default function RSSMode({
     const label = activeBrowserTab.title?.trim() || activeBrowserTab.domain?.trim() || activeBrowserTab.url
     return `当前页：${label}`
   }, [activeBrowserTab])
-  const shouldOpenItemsInBrowserPane = isWorkbenchModePairActive({
-    workbenchMode,
-    splitMode,
-    firstMode: 'browser',
-    secondMode: 'rss',
-  })
-
   const computeUnreadCounts = useCallback((list: RSSItem[]) => {
     const counts = new Map<string, number>()
     for (const item of list) {
@@ -500,55 +489,32 @@ export default function RSSMode({
   }, [])
 
   const handleItemClick = useCallback((item: RSSItem) => {
-    if (shouldOpenItemsInBrowserPane) {
-      setSelectedItem(null)
-      void openRSSItemInBrowserTab(item).then((opened) => {
-        if (!opened) setSelectedItem(item)
-      })
-    } else {
-      setSelectedItem(item)
-    }
-    // Mark as read locally
-    setItems((prev) => {
-      const next = prev.map((i) => (i.id === item.id ? { ...i, read: true } : i))
-      const unreadCounts = computeUnreadCounts(next)
-      setSources((prevSources) =>
-        prevSources.map((source) => ({ ...source, count: unreadCounts.get(source.id) ?? 0 })),
-      )
-      return next
-    })
-    // Remove from new items
-    setNewItemIds(prev => {
-      if (prev.has(item.id)) {
-        const next = new Set(prev)
-        next.delete(item.id)
-        return next
-      }
-      return prev
-    })
-    if (typeof window !== 'undefined' && window.electronAPI) {
-      window.electronAPI.rss.markRead(item.id)
-    }
-  }, [computeUnreadCounts, shouldOpenItemsInBrowserPane])
+    setItemStateError(null)
+    setSelectedItem(item)
+  }, [])
 
-  const handleToggleStar = useCallback((itemId: string) => {
-    setItems(prev => {
-      const current = prev.find((entry) => entry.id === itemId)
-      if (!current) return prev
-      const nextStarred = !current.starred
-      const next = prev
-        .map(i => i.id === itemId ? { ...i, starred: nextStarred } : i)
-        .filter((entry) => !(entry.id === itemId && !nextStarred && entry.inboxVisible === false))
+  const applySavedItemState = useCallback(async (itemId: string) => {
+    const saved = await window.electronAPI.rss.readArticle({ itemId, length: 1 })
+    if (!saved.success || !saved.data) throw new Error(saved.error || '无法确认文章保存状态')
+    const state = saved.data.article
+    setItems((prev) => {
+      const next = prev.map((item) => item.id === itemId ? { ...item, read: state.read, starred: state.starred, inboxVisible: state.inboxVisible } : item)
+        .filter((item) => item.inboxVisible !== false || item.starred)
       const unreadCounts = computeUnreadCounts(next)
-      setSources((prevSources) =>
-        prevSources.map((source) => ({ ...source, count: unreadCounts.get(source.id) ?? 0 })),
-      )
+      setSources((prevSources) => prevSources.map((source) => ({ ...source, count: unreadCounts.get(source.id) ?? 0 })))
       return next
     })
-    if (typeof window !== 'undefined' && window.electronAPI) {
-      window.electronAPI.rss.toggleStarred(itemId)
-    }
+    setSelectedItem((prev) => prev?.id === itemId ? { ...prev, read: state.read, starred: state.starred } : prev)
   }, [computeUnreadCounts])
+
+  const handleToggleStar = useCallback(async (itemId: string) => {
+    try {
+      const result = await window.electronAPI.rss.toggleStarred(itemId)
+      if (!result.success) throw new Error(result.error || '收藏保存失败')
+      await applySavedItemState(itemId)
+      setItemStateError((previous) => previous?.itemId === itemId && previous.action === 'star' ? null : previous)
+    } catch (cause) { setItemStateError({ itemId, action: 'star', message: cause instanceof Error ? cause.message : String(cause) }) }
+  }, [applySavedItemState])
 
   // Task 6: Manual refresh with loading state
   const handleRefresh = useCallback(async () => {
@@ -640,22 +606,15 @@ export default function RSSMode({
     setAnalysisProgressMap,
   })
 
-  const handleMarkItemRead = useCallback(
-    async (itemId: string) => {
-      const item = items.find((entry) => entry.id === itemId)
-      if (!item || item.read) return
-      setItems((prev) => {
-        const next = prev.map((entry) => (entry.id === itemId ? { ...entry, read: true } : entry))
-        const unreadCounts = computeUnreadCounts(next)
-        setSources((prevSources) =>
-          prevSources.map((source) => ({ ...source, count: unreadCounts.get(source.id) ?? 0 })),
-        )
-        return next
-      })
-      await window.electronAPI?.rss?.markRead(itemId)
-    },
-    [computeUnreadCounts, items],
-  )
+  const handleMarkItemRead = useCallback(async (itemId: string) => {
+    try {
+      const result = await window.electronAPI.rss.markRead(itemId)
+      if (!result.success) throw new Error(result.error || '已读状态保存失败')
+      await applySavedItemState(itemId)
+      setNewItemIds((prev) => { const next = new Set(prev); next.delete(itemId); return next })
+      setItemStateError((previous) => previous?.itemId === itemId && previous.action === 'read' ? null : previous)
+    } catch (cause) { setItemStateError({ itemId, action: 'read', message: cause instanceof Error ? cause.message : String(cause) }) }
+  }, [applySavedItemState])
 
   const handleClearRead = useCallback(async () => {
     const scoped = getScopedItems(items)
@@ -822,11 +781,12 @@ export default function RSSMode({
           className="workbench-canvas-shell relative flex h-full min-h-0 overflow-hidden"
           style={{ background: 'var(--workbench-module-surface-bg)' }}
         >
-          {/* Feed list keeps its full width; preview floats above it */}
+          {/* Keep the list mounted so returning from reading preserves scroll. */}
           <div
             className={`rss-feed-sheet content-surface-panel flex-1 overflow-hidden flex flex-col relative`}
             style={{
               background: 'var(--workbench-module-surface-bg)',
+              display: selectedItem ? 'none' : undefined,
             }}
           >
             <RSSFeed
@@ -859,7 +819,7 @@ export default function RSSMode({
               onDeleteAnalysisJob={handleDeleteAnalysisJob}
               settingsOpen={settingsOpen}
             />
-            {(statusMessage || backgroundWarning || statusAction) && (
+            {(statusMessage || itemStateError || backgroundWarning || statusAction) && (
               <div
                 className="glass-surface-floating absolute top-[62px] right-4 z-20 rounded-lg px-3 py-2 text-[12px]"
                 style={{
@@ -869,8 +829,8 @@ export default function RSSMode({
                   boxShadow: 'var(--shadow-sm)',
                 }}
               >
-                {statusMessage || backgroundWarning ? (
-                  <div>{statusMessage || backgroundWarning}</div>
+                {statusMessage || itemStateError || backgroundWarning ? (
+                  <div>{statusMessage || (itemStateError ? `《${items.find((item) => item.id === itemStateError.itemId)?.title || '文章'}》：${itemStateError.message}` : backgroundWarning)}</div>
                 ) : null}
                 {statusAction ? (
                   <button
@@ -900,12 +860,15 @@ export default function RSSMode({
             />
           </div>
 
-          {/* Preview Browser */}
+          {/* Article rendering shares the document typography, without active widgets. */}
           {selectedItem && (
-            <PreviewBrowser
-              item={selectedItem}
+            <RSSArticleReader
+              key={selectedItem.id}
+              item={items.find((item) => item.id === selectedItem.id) || selectedItem}
               onClose={handleClosePreview}
-              isActive={isActive}
+              onOpened={handleMarkItemRead}
+              onToggleStar={handleToggleStar}
+              notice={itemStateError?.itemId === selectedItem.id ? itemStateError.message : null}
             />
           )}
         </div>

@@ -54,7 +54,6 @@ export interface TabUpdateEvent {
 
 export interface AdblockState {
   enabled: boolean
-  previewEnabled: boolean
   whitelistDomains: string[]
   rulesVersion: string
   networkBlockedCount: number
