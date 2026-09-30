@@ -1,3 +1,5 @@
+import { formatRSSReference, RSSReferenceSchema } from '../../../shared/rss-reference'
+import { buildRSSContext } from '../rss/rss-context-reference'
 import type { ChatAttachment, ConversationScope } from './types'
 import { buildActiveDocumentContext } from './documentActions'
 import { useMode } from '../../stores/useMode'
@@ -133,6 +135,7 @@ function normalizeAttachmentSource(value: unknown): ChatAttachment['source'] {
   if (normalized === 'document-tab') return 'document-tab'
   if (normalized === 'document-quote') return 'document-quote'
   if (normalized === 'document-widget-target') return 'document-widget-target'
+  if (normalized === 'rss-reference') return 'rss-reference'
   if (normalized === 'calendar-event') return 'calendar-event'
   if (normalized === 'generated-image') return 'generated-image'
   if (normalized === 'file') return 'file'
@@ -159,6 +162,7 @@ export function extractAttachmentsFromMeta(meta?: Record<string, unknown>): Chat
         size: Number(record.size || 0),
         ext: String(record.ext || ''),
         source: normalizeAttachmentSource(record.source),
+        rssReference: RSSReferenceSchema.safeParse(record.rssReference).data,
         url: typeof record.url === 'string' ? record.url : undefined,
         title: typeof record.title === 'string' ? record.title : undefined,
         documentTitle: typeof record.documentTitle === 'string' ? record.documentTitle : undefined,
@@ -412,6 +416,7 @@ export function serializePersistedAttachments(attachments: ChatAttachment[]): Ar
       size: attachment.size,
       ext: attachment.ext,
       source: attachment.source,
+      rssReference: attachment.rssReference,
       url: attachment.url,
       title: attachment.title,
       documentTitle: attachment.documentTitle,
@@ -465,6 +470,7 @@ export async function buildComposedAgentInput(params: {
   content: string
   attachments: ChatAttachment[]
   filePool: ChatAttachment[]
+  includeRSSContext?: boolean
 }): Promise<string | MultimodalBlock[]> {
   return (await buildComposedAgentInputWithDiagnostics(params)).message
 }
@@ -482,6 +488,7 @@ export async function buildComposedAgentInputWithDiagnostics(params: {
   content: string
   attachments: ChatAttachment[]
   filePool: ChatAttachment[]
+  includeRSSContext?: boolean
 }): Promise<ComposedAgentInputResult> {
   const { content, attachments, filePool } = params
   const effectiveAttachments = filterAttachmentsForComposedAgentInput(content, attachments)
@@ -504,7 +511,17 @@ export async function buildComposedAgentInputWithDiagnostics(params: {
   }
   const activeDocContext = buildActiveDocumentContext()
   const environmentContext = buildEnvironmentContext()
-  const activeWorkbenchContext = activeDocContext || environmentContext
+  const explicitRSS = [...attachments, ...resolveReferencedFilePoolAttachments(content, filePool)].some((attachment) => attachment.source === 'rss-reference')
+  let rssContext: string | null = null
+  if (params.includeRSSContext && !explicitRSS) {
+    try { rssContext = await buildRSSContext() }
+    catch {
+      diagnostics.inputFailedCount += 1
+      diagnostics.inputFailures.push({ id: 'rss-current-view', name: '当前 RSS 文章', path: '', reason: '当前 RSS 文章无法读取，请稍后重新发送。' })
+      return { message: content, diagnostics }
+    }
+  }
+  const activeWorkbenchContext = [activeDocContext || environmentContext, rssContext].filter(Boolean).join('\n\n') || null
   const baseUserMessage = activeWorkbenchContext ? `${content}\n\n${activeWorkbenchContext}` : content
   let finalMessage: string | MultimodalBlock[] = baseUserMessage
 
@@ -585,6 +602,12 @@ export async function buildComposedAgentInputWithDiagnostics(params: {
               widgetMode: att.widgetMode,
             })}`,
           })
+          markIncluded()
+          continue
+        }
+
+        if (att.source === 'rss-reference') {
+          blocks.push({ type: 'text', text: `\n\n${formatRSSReference(att.name, RSSReferenceSchema.parse(att.rssReference))}` })
           markIncluded()
           continue
         }
@@ -818,6 +841,11 @@ export async function buildComposedAgentInputWithDiagnostics(params: {
               saveStatus: poolFile.saveStatus,
             })}`,
           )
+          continue
+        }
+
+        if (poolFile.source === 'rss-reference') {
+          finalMessage = appendTextBlock(finalMessage, `\n\n${formatRSSReference(poolFile.name, RSSReferenceSchema.parse(poolFile.rssReference))}`)
           continue
         }
 

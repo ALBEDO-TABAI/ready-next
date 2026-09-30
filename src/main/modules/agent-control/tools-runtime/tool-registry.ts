@@ -217,6 +217,7 @@ const RSS_TOOL_NAMES = [
   'rss_capture_session',
   'rss_query_items',
   'rss_read_article',
+  'rss_read_reference',
 ]
 
 const CALENDAR_TOOL_NAMES = [

@@ -75,6 +75,13 @@ await (db as any).db.backup(${JSON.stringify(path.join(root, 'ready.db'))}); db.
     await page.waitForFunction(() => document.querySelectorAll('.rss-news-card').length === 1)
     await page.getByRole('button', { name: '清除搜索', exact: true }).click()
     await page.waitForFunction(() => document.querySelectorAll('.rss-news-card').length === 50)
+    await page.getByRole('button', { name: '引用当前结果', exact: true }).click()
+    await page.locator('.chat-reference-chip').getByRole('button', { name: 'RSS 筛选结果 RSS 筛选结果引用', exact: true }).click()
+    const referencePreview = page.getByRole('dialog', { name: '附件预览', exact: true })
+    await referencePreview.getByText(/引用范围共 132 条/).waitFor()
+    assert.equal(await referencePreview.getByRole('button', { name: '在 Finder 中显示', exact: true }).count(), 0)
+    await page.screenshot({ path: path.join(evidence, 'rss-query-reference.png') })
+    await referencePreview.getByRole('button', { name: '关闭', exact: true }).click()
     // Only the native folder picker is replaced; the UI, IPC, DB and filesystem remain real.
     await app.evaluate(({ dialog }) => { dialog.showOpenDialog = async () => ({ canceled: true, filePaths: [] }) })
     await page.getByRole('button', { name: '导出当前结果（JSON）', exact: true }).click()
@@ -114,6 +121,16 @@ await (db as any).db.backup(${JSON.stringify(path.join(root, 'ready.db'))}); db.
     await page.getByText('可读资讯 10', { exact: true }).click()
     await page.locator('.rss-article-reader').getByText('ARTICLE-END-10', { exact: true }).waitFor()
     assert.equal(await page.locator('.rss-article-reader [role=alert]').count(), 0, 'previous item failure must not contaminate this article')
+    await page.getByRole('button', { name: '引用文章', exact: true }).click()
+    await page.locator('.chat-reference-chip').getByRole('button', { name: '可读资讯 10 RSS 文章引用', exact: true }).click()
+    await referencePreview.getByText(/片段预览，Agent 可继续读取/).waitFor()
+    assert.match(await referencePreview.innerText(), /可读资讯 10/)
+    await page.screenshot({ path: path.join(evidence, 'rss-article-reference.png') })
+    await referencePreview.getByRole('button', { name: '关闭', exact: true }).click()
+    await page.locator('.chat-reference-chip').getByRole('button', { name: 'RSS 筛选结果 RSS 筛选结果引用', exact: true }).click()
+    await referencePreview.getByText('引用的资料已变化，请返回 RSS 重新引用。', { exact: true }).waitFor()
+    await referencePreview.getByRole('button', { name: '关闭', exact: true }).click()
+    while (await page.locator('.chat-reference-chip button[title="移除"]').count()) await page.locator('.chat-reference-chip button[title="移除"]').first().click()
     const sourceBeforeNote = await page.evaluate(() => window.electronAPI.rss.readArticle({ itemId: 'reader-10', length: 24000 }))
     await page.getByRole('button', { name: '保存为笔记', exact: true }).click()
     await page.locator('.document-preview-surface').waitFor()
@@ -185,7 +202,7 @@ await (db as any).db.backup(${JSON.stringify(path.join(root, 'ready.db'))}); db.
     assert.equal(await page.getByRole('textbox', { name: '搜索资讯', exact: true }).inputValue(), '可读资讯 12')
     await page.waitForFunction(() => document.querySelectorAll('.rss-news-card').length === 11)
 
-    report = { ok: true, saveNoteReadback: true, noteEditIndependent: true, exportAllPages: true, cancelExport: true, navigationCollapse: true, searchAndPagination: true, historyAndFavoritesPreserved: true, preferencesSurviveReload: true, longArticle: true, sourceCodeInert: true, failedSaveVisible: true, readPersisted: true, returnPreservesScroll: true, outlineNavigation: true, browserLoginReused: true, narrowNoOverflow: true }
+    report = { ok: true, typedRSSReferences: true, staleReferenceVisible: true, saveNoteReadback: true, noteEditIndependent: true, exportAllPages: true, cancelExport: true, navigationCollapse: true, searchAndPagination: true, historyAndFavoritesPreserved: true, preferencesSurviveReload: true, longArticle: true, sourceCodeInert: true, failedSaveVisible: true, readPersisted: true, returnPreservesScroll: true, outlineNavigation: true, browserLoginReused: true, narrowNoOverflow: true }
   } finally {
     if (app) await app.close()
     server.closeAllConnections()

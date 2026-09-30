@@ -1,3 +1,4 @@
+import { rssReferencesFromEnvelope } from '../../../../shared/rss-reference'
 import type { AIModelConfig } from '../../../../shared/ai-providers'
 import type { BrowserTaskDecisionMode } from '../../../../shared/browser-agent-task'
 import type { CapabilityGroupId, CapabilityProfileId } from '../../../../shared/ai-capability-groups'
@@ -433,6 +434,7 @@ function resolveRunCapabilities(
   //   bundle 侧把地板并入 activeSkillAllowedTools 过滤集，保证技能收窄不移除地板项（parity）。
   toolPolicy.capabilityFloors = computeCapabilityFloors({
     authorization: baseParams.authorization,
+    hasRSSResource: rssReferencesFromEnvelope(baseParams.executionIntentContext.requestEnvelope).length > 0,
     hasLocalDocumentResource: envelopeHasLocalDocumentResource(baseParams.executionIntentContext.requestEnvelope),
     hasCurrentDocumentContext: envelopeHasCurrentDocumentContext(baseParams.executionIntentContext.requestEnvelope),
   })

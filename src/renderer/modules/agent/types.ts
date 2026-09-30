@@ -1,3 +1,4 @@
+import type { RSSReference } from '../../../shared/rss-reference'
 // Legacy design types (design mode removed)
 import type { ContextUsageSnapshot } from '../../../shared/context-usage-types'
 
@@ -76,8 +77,10 @@ export interface ChatAttachment {
     | 'document-quote'
     | 'document-widget-target'
     | 'calendar-event'
+    | 'rss-reference'
     | 'channel'
     | 'generated-image'
+  rssReference?: RSSReference
   browserTabId?: string
   url?: string
   title?: string

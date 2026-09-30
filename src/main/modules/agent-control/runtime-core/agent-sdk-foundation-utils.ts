@@ -15,7 +15,7 @@ import type {
   RunMessage,
   TaskBudgetRuntime
 } from '../contracts/run-contracts'
-import { TAG_FORGE_FOLDER_RUNTIME_TOOL_NAMES } from '../domain-adapters/capability-floors'
+import { TAG_FORGE_FOLDER_RUNTIME_TOOL_NAMES, RSS_RESOURCE_FLOOR_TOOL_NAMES } from '../domain-adapters/capability-floors'
 import { isRetryOnlyTurn } from '../skills/skill-detection-inputs'
 import { loadReadySystemPrompt } from '../prompt-assets/ready-system-asset'
 import type { SkillToolAuthorization } from '../skills/skill-tool-authorization'
@@ -591,9 +591,10 @@ export function restoreCheckpointToolSurface(params: {
   const requiredToolNames =
     restore.requiredToolNames.length > 0 ? restore.requiredToolNames : restore.usedToolNames
   const missingToolNames = requiredToolNames.filter((name) => !byName.has(name))
+  const controlledFolderTools = new Set([...TAG_FORGE_FOLDER_RUNTIME_TOOL_NAMES, ...RSS_RESOURCE_FLOOR_TOOL_NAMES])
   const isTagForgeFolderSurface =
-    requiredToolNames.length === TAG_FORGE_FOLDER_RUNTIME_TOOL_NAMES.length
-    && TAG_FORGE_FOLDER_RUNTIME_TOOL_NAMES.every((name) => requiredToolNames.includes(name))
+    TAG_FORGE_FOLDER_RUNTIME_TOOL_NAMES.every((name) => requiredToolNames.includes(name))
+    && requiredToolNames.every((name) => controlledFolderTools.has(name))
   return {
     toolDefinitions: isTagForgeFolderSurface
       ? requiredToolNames

@@ -70,6 +70,15 @@ const EXPECTED_ANTHROPIC = [
     },
   },
   {
+    name: 'rss_read_reference',
+    description: '读取本轮 RSS 引用：条件和版本由应用绑定，不能改写。查询按 nextCursor 续页，正文按 nextOffset 续读。旧引用已变化或删除时明确失败，不自动抓取或分析。',
+    input_schema: { type: 'object', properties: {
+      referenceId: { type: 'string', description: '本轮 RSS 资料引用的 id' },
+      cursor: { type: 'string', description: '查询续页时使用返回的 nextCursor' },
+      offset: { type: 'number', description: '正文续读时使用返回的 nextOffset' },
+    }, required: ['referenceId'] },
+  },
+  {
     name: 'rss_query_items',
     description: '查询已保存的 RSS 资讯；支持收件箱/历史底稿、筛选和连续分页，不打开界面、不抓取、不改已读。',
     input_schema: {

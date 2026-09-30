@@ -1,3 +1,4 @@
+import RSSReferenceButton from './RSSReferenceButton'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { ArrowLeft, Copy, ExternalLink, Loader2, RefreshCw, Star } from 'lucide-react'
 import { MarkdownContent, copyTextToClipboard } from '../document/MarkdownContent'
@@ -96,6 +97,7 @@ export default function RSSArticleReader({ item, onClose, onOpened, onToggleStar
     <header className="rss-reader-toolbar glass-surface-floating">
       <button type="button" className="rss-reader-button" onClick={onClose}><ArrowLeft size={16} />返回列表</button>
       <div className="rss-reader-actions">
+        <RSSReferenceButton name={title} label="引用文章" disabled={busy} reference={article ? { kind: 'article', read: { itemId: article.id, expectedRevision: article.revision, offset: 0, length: 12000 } } : null} />
         <RSSSaveNoteButton article={content?.article || null} disabled={busy} active={active} onError={setError} />
         <button type="button" className="rss-reader-button" title={item.starred ? '取消收藏' : '收藏文章'} aria-pressed={item.starred} onClick={() => onToggleStar(item.id)}><Star size={16} fill={item.starred ? 'currentColor' : 'none'} /></button>
         <button type="button" className="rss-reader-button" disabled={!content} onClick={() => { if (content) void copyTextToClipboard(`${title}\n来源：${article?.link || item.link}\n\n${content.text}`).then(setCopied) }}><Copy size={15} />{copied ? '已复制' : '复制内容'}</button>

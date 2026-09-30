@@ -1,5 +1,6 @@
+import { rssReferencesFromEnvelope } from '../../../../shared/rss-reference'
 import { appendToolCapabilityLog } from '../../tools/tool-event-log'
-import { TAG_FORGE_FOLDER_RUNTIME_TOOL_NAMES } from '../domain-adapters/capability-floors'
+import { TAG_FORGE_FOLDER_RUNTIME_TOOL_NAMES, RSS_RESOURCE_FLOOR_TOOL_NAMES } from '../domain-adapters/capability-floors'
 import type { SkillToolAuthorization } from '../skills/skill-tool-authorization'
 import type { ToolDefinition } from '../tools-runtime/tool-definition'
 import { isToolEnabledForCurrentAuthorization } from './agent-sdk-tool-executor'
@@ -38,7 +39,7 @@ export function installSameRunSkillActivation(input: {
     input.runtimeContext.authorization = authorization
     input.runtimeContext.sameRunActivatedSkillId = skillId
     if (skillId === 'tag-forge' && input.hasFolderResource) {
-      const enabled = TAG_FORGE_FOLDER_RUNTIME_TOOL_NAMES
+      const enabled = [...TAG_FORGE_FOLDER_RUNTIME_TOOL_NAMES, ...(rssReferencesFromEnvelope(input.runtimeContext.requestEnvelope).length ? RSS_RESOURCE_FLOOR_TOOL_NAMES : [])]
         .map((name) => input.definitionByName.get(name))
         .filter((definition): definition is ToolDefinition => Boolean(definition))
       const enabledNames = enabled.map((definition) => definition.name)

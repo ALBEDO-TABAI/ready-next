@@ -1,3 +1,4 @@
+import RSSReferenceButton from './RSSReferenceButton'
 import { useEffect, useState } from 'react'
 import { Search, X } from 'lucide-react'
 import { useRSSSession } from '../../stores/useRSSSession'
@@ -23,6 +24,7 @@ export default function RSSWorkspaceToolbar({ view, loading }: { view: RSSQueryR
     <select className="rss-sort-select" aria-label="资讯排序" value={query.sort} onChange={(event) => setQuery({ sort: event.target.value as 'newest' | 'oldest' })}>
       <option value="newest">最新在前</option><option value="oldest">最早在前</option>
     </select>
+    <RSSReferenceButton name="RSS 筛选结果" label="引用当前结果" disabled={loading} reference={view ? { kind: 'query', query: { ...view.query, expectedRevision: view.revision } } : null} />
     <RSSExportButton view={view} disabled={loading} />
   </header>
 }

@@ -213,6 +213,10 @@ export function ChatPanelBody(props: ChatPanelBodyProps): React.ReactElement {
   const handleAttachmentPreview = useCallback(
     async (attachment: ChatAttachment) => {
       if (!attachment.path) return
+      if (attachment.source === 'rss-reference') {
+        setActiveAttachmentPreview({ attachment, mode: 'text' })
+        return
+      }
       if (attachment.source === 'document-quote') {
         setActiveAttachmentPreview({
           attachment,

@@ -2,6 +2,17 @@
 
 > 更新时间：2026-09-30
 
+## 2026-09-30 RSS 引用与只读能力
+
+| 文件 | 当前行数 | 净增 | 判断 | 后续 |
+|---|---:|---:|---|---|
+| `src/main/modules/agent-control/runtime-core/agent-sdk-tool-executor.ts` | 1136 | 3 | 一般 | 仅消费统一 RSS 资源地板；2026-10-30 复查工具面组装 |
+| `src/main/modules/agent-control/tools-runtime/tool-registry.ts` | 1541 | 1 | 一般 | 登记单一引用读取工具；2026-10-30 复查注册表分组 |
+| `src/main/modules/tools/tool-executor.ts` | 1260 | 2 | 一般 | 将本轮结构化引用交给 RSS 处理器；2026-10-30 复查跨域接线 |
+| `src/renderer/stores/useAgent.ts` | 2115 | 1 | 一般 | 只向消息组装传本机会话事实，不放入 RSS 业务判断；2026-10-30 复查发送入口边界 |
+
+RSS 引用协议、当前视图引用和预览均留在独立小模块；删除 SDK 重复上下文标记表与空指令全文回退，避免两处解析产生不同权限事实。
+
 ## 2026-09-30 RSS 保存笔记与范围导出
 
 | 文件 | 当前行数 | 净增 | 判断 | 后续 |

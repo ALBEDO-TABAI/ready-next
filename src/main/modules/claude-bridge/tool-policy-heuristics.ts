@@ -1,4 +1,5 @@
 const CONTEXT_MARKERS = [
+  '### RSS 资料引用',
   '### 当前文档上下文',
   '### Widget 更新上下文',
   '--- 文档摘要开始 ---',
@@ -15,7 +16,8 @@ const BOOTSTRAP_HEADER_PATTERN =
 function stripTrailingContexts(raw: string): string {
   let cut = raw.length
   for (const marker of CONTEXT_MARKERS) {
-    const index = raw.indexOf(marker)
+    const afterNewline = raw.indexOf(`\n${marker}`)
+    const index = raw.startsWith(marker) ? 0 : afterNewline < 0 ? -1 : afterNewline + 1
     if (index >= 0) cut = Math.min(cut, index)
   }
   return raw.slice(0, cut).trim()
@@ -56,10 +58,10 @@ export function extractPrimaryUserInstruction(raw: string): string {
   if (!raw) return ''
 
   const stripped = stripTrailingContexts(raw)
-  if (!stripped) return raw.trim()
+  if (!stripped) return ''
 
   // Check if there's a "用户:" prefix - extract only user's input
-  const userPrefixMatch = stripped.match(/用户:\s*(.+?)(?:\n|$)/s)
+  const userPrefixMatch = stripped.match(/(?:^|\n)用户:\s*(.+?)(?:\n|$)/s)
   if (userPrefixMatch) {
     return userPrefixMatch[1].trim()
   }
@@ -123,10 +125,8 @@ export function shouldForceDocumentToolCall(userText: string): boolean {
   const widgetTaskKind = inferDocumentWidgetTaskKind(primaryInstruction)
   const normalized = userText.toLowerCase()
   const hasDocContext =
-    userText.includes('### 当前文档上下文') ||
-    userText.includes('--- 文档摘要开始 ---') ||
-    userText.includes('--- 文档内容开始 ---') ||
-    normalized.includes('current document context')
+    /(?:^|\n)(?:### 当前文档上下文|--- 文档摘要开始 ---|--- 文档内容开始 ---)(?:\r?\n|$)/.test(userText) ||
+    /(?:^|\n)(?:#+\s*)?current document context(?:\r?\n|$)/.test(normalized)
   const editIntent = /(直接|帮我|请|请你)?(修改|改写|重写|润色|整理|优化|调整|写入|追加|替换|保存|新建|编辑)|\b(edit|rewrite|refine|update|replace|append|save)\b/i
   if (hasDocContext && editIntent.test(primaryInstruction)) return true
 

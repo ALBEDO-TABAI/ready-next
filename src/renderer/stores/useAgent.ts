@@ -1406,6 +1406,7 @@ export const useAgent = create<AgentState>((set, get) => ({
     const currentAttachments = filterAttachmentsForComposedAgentInput(content, [...attachments])
     const { filePool } = get()
     const composedInput = await buildComposedAgentInputWithDiagnostics({
+      includeRSSContext: activeScope?.sourceKind === 'local',
       content,
       attachments: currentAttachments,
       filePool,

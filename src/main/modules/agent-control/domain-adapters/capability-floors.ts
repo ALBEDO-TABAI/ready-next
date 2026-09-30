@@ -3,7 +3,7 @@ import type { SkillToolAuthorization } from '../skills/skill-tool-authorization'
 /**
  * P1-3 — 能力地板（capability floors）：显式技能引用 / 本地文档资源 / 当前文档上下文产生的
  *   代码级"必在"工具集。一切收窄过滤只做减法且不得移除地板项；裁决面与管线末端据此强制
- *   `surface ⊇ floors`。纯函数、零 IO：只读取 authorization 与两个布尔信号，不碰注册表/运行时。
+ *   `surface ⊇ floors`。纯函数、零 IO：只读取 authorization 与资源布尔信号，不碰注册表/运行时。
  *   （只 import 类型，避免 domain-adapters ↔ runtime-core 运行时环依赖。）
  */
 export interface CapabilityFloors {
@@ -12,7 +12,8 @@ export interface CapabilityFloors {
   readonly reasons: ReadonlyArray<string>
 }
 
-/** 本地文档资源在场时的文档读取地板（提及≠授写：@文件只保证可读，不含任何写面）。 */
+export const RSS_RESOURCE_FLOOR_TOOL_NAMES: ReadonlyArray<string> = ['rss_query_items', 'rss_read_article', 'rss_read_reference']
+/** 本地文档资源只授读取，不包含写入。 */
 export const LOCAL_DOCUMENT_RESOURCE_FLOOR_TOOL_NAMES: ReadonlyArray<string> = ['file_locate', 'file_read_excerpt']
 export const TAG_FORGE_FOLDER_FLOOR_TOOL_NAMES: ReadonlyArray<string> = [
   'tag_forge_prepare_batch',
@@ -43,6 +44,7 @@ export function computeCapabilityFloors(params: {
   authorization: SkillToolAuthorization
   hasLocalDocumentResource: boolean
   hasCurrentDocumentContext: boolean
+  hasRSSResource?: boolean
 }): CapabilityFloors {
   const toolNames = new Set<string>()
   const reasons: string[] = []
@@ -68,6 +70,11 @@ export function computeCapabilityFloors(params: {
   if (params.hasCurrentDocumentContext) {
     for (const name of CURRENT_DOCUMENT_CONTEXT_FLOOR_TOOL_NAMES) toolNames.add(name)
     reasons.push('current_document_context')
+  }
+
+  if (params.hasRSSResource) {
+    for (const name of RSS_RESOURCE_FLOOR_TOOL_NAMES) toolNames.add(name)
+    reasons.push('rss_resource')
   }
 
   return { toolNames, reasons }

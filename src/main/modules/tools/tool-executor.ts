@@ -1,3 +1,4 @@
+import { rssReferencesFromEnvelope } from '../../../shared/rss-reference'
 /**
  * Unified tool dispatcher.
  * Routes tool calls by prefix to the appropriate executor.
@@ -683,6 +684,7 @@ async function executeToolCallInner(
             getContent: () => getDatabase().rss.content,
             getAnalysisProgress: (ids) => getRSSItemAnalysisManager().getItemProgress(ids),
             readAccessDenied: context.scope?.sourceKind !== 'local',
+            references: rssReferencesFromEnvelope(context.requestEnvelope),
             requestModuleToolAction: context.requestModuleToolAction,
           })
 

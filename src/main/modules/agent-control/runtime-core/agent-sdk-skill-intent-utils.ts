@@ -21,7 +21,7 @@ import {
 } from '../../claude-bridge/tool-policy-heuristics'
 import { PRIMITIVE_TOOL_DEFS } from '../../tools/skill-primitives/tool-defs'
 import {} from '../compaction/compact-agent-input'
-import { buildRequestEnvelope } from '../contracts/request-envelope'
+import { buildRequestEnvelope, REQUEST_CONTEXT_MARKERS } from '../contracts/request-envelope'
 import type { RunMessage } from '../contracts/run-contracts'
 import { resolveIntentCapabilityGroupModes } from '../execution-intent-resolver'
 import { classifyIntent } from '../intent-classifier'
@@ -41,7 +41,6 @@ import {
   messageToText,
   parseEnvelopeResourceReferences,
   primaryInstructionText,
-  SDK_CONTEXT_MARKERS
 } from './agent-sdk-input-context-utils'
 import { asRecord, stringField } from './agent-sdk-model-message-utils'
 
@@ -218,7 +217,7 @@ function extractRawExplicitMentionCandidate(rawUserText: string | null): string 
     .map((line) => line.trim())
     .find(
       (line) =>
-        /@\[[^\]]+\]/.test(line) && !SDK_CONTEXT_MARKERS.some((marker) => line.includes(marker))
+        /@\[[^\]]+\]/.test(line) && !REQUEST_CONTEXT_MARKERS.some((marker) => line.includes(marker))
     )
   return mentionLine || ''
 }
@@ -237,7 +236,7 @@ export function skillAuthorizationTextCandidates(message: RunMessage, envelope: 
     .filter(Boolean)
   if (envelopeCandidates.length > 0) return Array.from(new Set(envelopeCandidates))
 
-  if (rawUserText && !SDK_CONTEXT_MARKERS.some((marker) => rawUserText.includes(marker))) {
+  if (rawUserText && !REQUEST_CONTEXT_MARKERS.some((marker) => rawUserText.includes(marker))) {
     return [rawUserText.trim()]
   }
 
@@ -430,20 +429,20 @@ export function resolveSdkDefaultIntentSurface(params: {
   const envelopeRecord = asRecord(params.requestEnvelope)
   const environmentHints = asRecord(envelopeRecord?.environmentHints)
   const rawUserText = stringField(envelopeRecord, 'rawUserText') || messageToText(params.message)
+  const requestEnvelope = buildRequestEnvelope({ userText: rawUserText || userInstructionText })
   const hasWidgetTargetContext =
-    environmentHints?.hasWidgetTargetContext === true ||
+    environmentHints?.hasWidgetTargetContext === true || requestEnvelope.environmentHints.hasWidgetTargetContext ||
     envelopeRefs.resources.some(
       (resource) => resource.kind === 'widget_target' || resource.source === 'widget_target'
     )
   const hasDocumentEnvironment =
     environmentHints?.hasDocumentContext === true ||
-    rawUserText.includes('### 当前文档上下文') ||
-    rawUserText.includes('### 文档引用') ||
+    requestEnvelope.environmentHints.hasDocumentContext ||
     envelopeRefs.resources.some(
       (resource) =>
         resource.kind === 'document_context' ||
         resource.source === 'current_document' ||
-        /\.(?:md|markdown|txt|docx?)$/i.test(`${resource.path || ''}\n${resource.name || ''}`)
+        (resource.kind !== 'rss_reference' && /\.(?:md|markdown|txt|docx?)$/i.test(`${resource.path || ''}\n${resource.name || ''}`))
     )
   const explicitWidgetCreateIntent = hasExplicitDocumentWidgetCreateIntent(userInstructionText)
   const documentWidgetTaskKind =
@@ -451,7 +450,6 @@ export function resolveSdkDefaultIntentSurface(params: {
       ? 'update'
       : inferDocumentWidgetTaskKind(userInstructionText)
   const preferredSkillToolNames = resolveAuthorizationPreferredToolNames(params.authorization)
-  const requestEnvelope = buildRequestEnvelope({ userText: rawUserText || userInstructionText })
   const mapSemanticIntent = classifyMapSemanticIntentFallback(userInstructionText)
   const intentClassification = applyMapSemanticIntentToIntentClassification(
     classifyIntent(requestEnvelope),
@@ -464,9 +462,7 @@ export function resolveSdkDefaultIntentSurface(params: {
     contextualUserInput: userInstructionText,
     userInstructionText,
     intentClassification,
-    hasDocumentEnvironment:
-      hasDocumentEnvironment ||
-      (rawUserText.includes('## 环境信息') && rawUserText.includes('当前模式: 文档模式')),
+    hasDocumentEnvironment,
     hasWidgetTargetContext,
     explicitWidgetCreateIntent,
     documentWidgetTaskKind,

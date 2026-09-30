@@ -1,3 +1,4 @@
+import { rssReferencesFromEnvelope } from '../../../../shared/rss-reference'
 import { MemorySession } from '@openai/agents'
 import { randomUUID } from 'crypto'
 import {
@@ -727,6 +728,7 @@ export class AgentSdkTurnOrchestrator {
       //   floors 只含 skill/文档读取工具（永不含 browser），故补回不会撤销 S4-2 等安全收窄。
       const turnCapabilityFloors = computeCapabilityFloors({
         authorization,
+        hasRSSResource: rssReferencesFromEnvelope(effectiveExecutionOptions?.requestEnvelope).length > 0,
         hasLocalDocumentResource: hasLocalDocumentResource(
           content as RunMessage,
           effectiveExecutionOptions?.requestEnvelope

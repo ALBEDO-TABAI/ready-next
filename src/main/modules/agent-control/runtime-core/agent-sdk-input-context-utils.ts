@@ -1,20 +1,6 @@
+import { extractPureUserInput } from '../contracts/request-envelope'
 import type { RunMessage } from '../contracts/run-contracts'
 import { asRecord } from './agent-sdk-model-message-utils'
-
-export const SDK_CONTEXT_MARKERS = [
-  '## 环境信息',
-  '## 当前 Scope',
-  '## 最近会话摘要',
-  '### Widget 更新上下文',
-  '### 当前文档上下文',
-  '### 文档引用',
-  '### 浏览页面引用',
-  '### 文件夹引用',
-  '### 技能目录引用',
-  '--- 测试模式附件路径 ---',
-  '--- 引用文件:',
-  '--- 附件:'
-] as const
 
 export function messageToText(message: RunMessage): string {
   if (typeof message === 'string') return message
@@ -25,14 +11,7 @@ export function messageToText(message: RunMessage): string {
 }
 
 export function primaryInstructionText(message: RunMessage): string {
-  const text = messageToText(message)
-  let end = text.length
-  for (const marker of SDK_CONTEXT_MARKERS) {
-    const index = text.indexOf(marker)
-    if (index >= 0 && index < end) end = index
-  }
-  const primary = text.slice(0, end).trim()
-  return primary || text
+  return extractPureUserInput(messageToText(message))
 }
 
 export function normalizedReferenceName(value: string): string {
@@ -76,9 +55,9 @@ export function parseEnvelopeResourceReferences(envelope: unknown): {
   const record = asRecord(envelope)
   if (!record) return { primaryInstruction: null, resources: [] }
   const primaryInstruction =
-    typeof record.primaryInstruction === 'string' && record.primaryInstruction.trim()
+    typeof record.primaryInstruction === 'string'
       ? record.primaryInstruction.trim()
-      : typeof record.pureUserText === 'string' && record.pureUserText.trim()
+      : typeof record.pureUserText === 'string'
         ? record.pureUserText.trim()
         : typeof record.rawUserText === 'string' && record.rawUserText.trim()
           ? primaryInstructionText(record.rawUserText)

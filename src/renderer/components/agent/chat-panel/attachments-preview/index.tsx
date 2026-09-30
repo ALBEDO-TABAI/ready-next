@@ -1,3 +1,4 @@
+import RSSReferencePreview from '../../../rss/RSSReferencePreview'
 import {
   ExternalLink,
   X,
@@ -11,7 +12,8 @@ import {
   Pen,
   MessageSquareQuote,
   Folder,
-  FolderOpen
+  FolderOpen,
+  Rss
 } from 'lucide-react'
 import { useEffect } from 'react'
 import type { ChatAttachment, AttachmentPreviewState } from '../../../../stores/useAgent'
@@ -24,6 +26,7 @@ export function AttachmentIcon({ attachment, size = 16 }: { attachment: ChatAtta
   if (attachment.isDirectory) {
     return <Folder style={style} className={cls} strokeWidth={2} />
   }
+  if (attachment.source === 'rss-reference') return <Rss style={style} className={cls} strokeWidth={2} />
   if (attachment.source === 'browser-tab') {
     return <Globe style={style} className={cls} strokeWidth={2} />
   }
@@ -104,7 +107,7 @@ export function AttachmentPreviewModal({
           contrast={0.86}
         />
         <div className="attachment-preview-toolbar" aria-label="预览操作">
-            <button
+            {preview.attachment.source !== 'rss-reference' && <><button
               type="button"
               className="attachment-preview-action"
               onClick={() => {
@@ -125,7 +128,7 @@ export function AttachmentPreviewModal({
               aria-label="系统打开"
             >
               <ExternalLink aria-hidden="true" />
-            </button>
+            </button></>}
             <button
               type="button"
               className="attachment-preview-action"
@@ -138,6 +141,7 @@ export function AttachmentPreviewModal({
         </div>
 
         <div className="attachment-preview-content">
+          {preview.attachment.source === 'rss-reference' ? <RSSReferencePreview reference={preview.attachment.rssReference} /> : <>
           {loading && (
             <div style={{ fontSize: 12, color: 'var(--text-gray)' }}>正在读取附件内容…</div>
           )}
@@ -197,6 +201,7 @@ export function AttachmentPreviewModal({
               )}
             </div>
           )}
+          </>}
         </div>
       </div>
     </div>

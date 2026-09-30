@@ -1,3 +1,4 @@
+import { rssReferencesFromEnvelope } from '../../../../shared/rss-reference'
 import { tool } from '@openai/agents'
 import type { AgentInputItem, Tool as AgentSdkTool } from '@openai/agents'
 import type { RunMessage } from '../contracts/run-contracts'
@@ -13,6 +14,7 @@ import {
   computeCapabilityFloors,
   recoverAbsentFloorsFromRegistry,
   TAG_FORGE_FOLDER_RUNTIME_TOOL_NAMES,
+  RSS_RESOURCE_FLOOR_TOOL_NAMES,
 } from '../domain-adapters/capability-floors'
 import {
   isReadOnlyResearchSkillToolSet,
@@ -405,6 +407,7 @@ export class AgentSdkToolExecutor {
     //   管线末端再按地板硬补回缺席项（组不可见/意图压制也不能吃掉地板）。
     const capabilityFloors = computeCapabilityFloors({
       authorization: params.authorization,
+      hasRSSResource: rssReferencesFromEnvelope(params.requestEnvelope).length > 0,
       hasLocalDocumentResource: hasLocalDocumentResource(params.message, params.requestEnvelope),
       hasCurrentDocumentContext: hasCurrentDocumentContextResource(params.requestEnvelope)
     })
@@ -452,7 +455,7 @@ export class AgentSdkToolExecutor {
     }
     definitions = floorRecovery.definitions
     if (capabilityFloors.reasons.includes('tag_forge_folder_batch')) {
-      const tagForgeToolNames = new Set(TAG_FORGE_FOLDER_RUNTIME_TOOL_NAMES)
+      const tagForgeToolNames = new Set([...TAG_FORGE_FOLDER_RUNTIME_TOOL_NAMES, ...RSS_RESOURCE_FLOOR_TOOL_NAMES.filter((name) => capabilityFloors.toolNames.has(name))])
       definitions = definitions.filter((definition) => tagForgeToolNames.has(definition.name))
     }
     return filterToolsByVisionCapability(definitions as unknown as Array<Record<string, unknown>>, {

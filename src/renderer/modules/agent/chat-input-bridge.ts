@@ -1,3 +1,4 @@
+import { RSSReferenceSchema, rssReferencePath, type RSSReference } from '../../../shared/rss-reference'
 import { useAgent } from '../../stores/useAgent'
 import { useWorkspace } from '../../stores/useWorkspace'
 import type { ChatAttachment } from '../../stores/useAgent'
@@ -84,6 +85,15 @@ export type ReadyContextReference =
   | ReadyCalendarEventReference
   | ReadySkillReference
   | ReadyFileReference
+
+export function addRSSReferenceToAgentInput(name: string, input: RSSReference): void {
+  const reference = RSSReferenceSchema.parse(input)
+  const attachment: ChatAttachment = { id: createAttachmentId('attach-rss'), name,
+    path: rssReferencePath(reference), type: 'text', size: 0, ext: '.rss', source: 'rss-reference', rssReference: reference }
+  useWorkspace.setState({ chatPanelVisible: true })
+  useAgent.getState().addAttachments([attachment])
+  window.dispatchEvent(new CustomEvent(READY_FOCUS_CHAT_INPUT_EVENT))
+}
 
 export function appendToAgentInput(snippet: string): void {
   const trimmed = snippet.trim()

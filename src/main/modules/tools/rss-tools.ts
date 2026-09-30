@@ -1,3 +1,4 @@
+import { RSSReadReferenceSchema, type RSSReferenceResource } from '../../../shared/rss-reference'
 import { RSS_SCHEMAS } from './schemas/rss-schemas'
 import { zodObjectToParamList } from './zod-param-derivation'
 import { RSSQuerySchema, RSSReadArticleSchema } from '../../../shared/rss-workspace'
@@ -24,6 +25,7 @@ interface RSSToolDef {
 interface RSSToolContext {
   getContent?: () => Pick<RSSContentStore, 'query' | 'readArticle'>
   getAnalysisProgress?: (itemIds: string[]) => Record<string, RSSItemAnalysisProgress>
+  references?: RSSReferenceResource[]
   readAccessDenied?: boolean
   requestModuleToolAction?: (tool: string, args: Record<string, unknown>) => Promise<Record<string, unknown>>
 }
@@ -68,6 +70,12 @@ const RSS_TOOLS: RSSToolDef[] = [
     intent: 'capture_rss_session',
     executionKind: 'deterministic',
     params: zodObjectToParamList(RSS_SCHEMAS.rss_capture_session) as ToolParam[],
+  },
+  {
+    name: 'rss_read_reference',
+    description: '读取本轮 RSS 引用：条件和版本由应用绑定，不能改写。查询按 nextCursor 续页，正文按 nextOffset 续读。旧引用已变化或删除时明确失败，不自动抓取或分析。',
+    action: 'rss.readReference', intent: 'read_rss_reference', executionKind: 'deterministic',
+    params: zodObjectToParamList(RSS_SCHEMAS.rss_read_reference) as ToolParam[],
   },
   {
     name: 'rss_query_items',
@@ -137,18 +145,36 @@ export async function executeRSSTool(
   const tool = RSS_TOOLS.find((item) => item.name === toolName)
   if (!tool) return `Unknown RSS tool: ${toolName}`
 
-  if (toolName === 'rss_query_items' || toolName === 'rss_read_article') {
+  if (toolName === 'rss_query_items' || toolName === 'rss_read_article' || toolName === 'rss_read_reference') {
     if (context?.readAccessDenied || !context?.getContent) {
       return toStructuredResult(tool, '当前会话未获准读取本机 RSS 资料。', { ok: false, error: 'rss_read_not_authorized' })
     }
     try {
+      let readKind = toolName
+      let referenceId: string | undefined
+      if (toolName === 'rss_read_reference') {
+        const input = RSSReadReferenceSchema.parse(args)
+        const matches = context.references?.filter((resource) => resource.id === input.referenceId) || []
+        if (matches.length !== 1) throw new Error('rss_reference_unavailable')
+        const reference = matches[0].reference
+        referenceId = input.referenceId
+        if (reference.kind === 'query') {
+          if (input.offset !== undefined) throw new Error('rss_reference_wrong_cursor')
+          args = { ...reference.query, cursor: input.cursor }
+          readKind = 'rss_query_items'
+        } else {
+          if (input.cursor !== undefined) throw new Error('rss_reference_wrong_cursor')
+          args = { ...reference.read, offset: input.offset ?? reference.read.offset }
+          readKind = 'rss_read_article'
+        }
+      }
       const content = context.getContent()
-      const data = toolName === 'rss_query_items'
+      const data = readKind === 'rss_query_items'
         ? content.query(RSSQuerySchema.parse(args))
         : content.readArticle(RSSReadArticleSchema.parse(args))
-      const analysis = toolName === 'rss_read_article'
+      const analysis = readKind === 'rss_read_article'
         ? context.getAnalysisProgress?.([String(args.itemId)])[String(args.itemId)] ?? null : undefined
-      return toStructuredResult(tool, '已读取保存的 RSS 资料；范围、正文状态及续读位置以 data 为准，analysis 为最近分析的当前状态。', { ok: true, data, ...(analysis !== undefined ? { analysis } : {}) })
+      return toStructuredResult(tool, '已读取保存的 RSS 资料；范围、正文状态及续读位置以 data 为准，analysis 为最近分析的当前状态。', { ok: true, data, ...(referenceId ? { referenceId } : {}), ...(analysis !== undefined ? { analysis } : {}) })
     } catch (error) {
       return toStructuredResult(tool, 'RSS 读取未完成。', { ok: false, error: error instanceof Error ? error.message : String(error) })
     }
