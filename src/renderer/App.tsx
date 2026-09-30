@@ -14,14 +14,10 @@ import SkillAskUserPrompt from './components/skill/SkillAskUserPrompt'
 import SkillInlinedToast from './components/skill/SkillInlinedToast'
 import { initAgentListeners } from './stores/useAgent'
 import { usePetActivityBridge } from './modules/pet/usePetActivityBridge'
-import { fetchRSSWarmSnapshot } from './modules/rss/rssWarmLoader'
-import { primeRSSWarmCache } from './modules/rss/rssWarmCache'
 
 const LiquidTest = lazy(() => import('./LiquidTest'))
 const StartupPreview = lazy(() => import('./pages/StartupPreview'))
 
-// fire-and-forget: module-load warm cache prime; failure just means the first RSS read runs cold.
-void primeRSSWarmCache(fetchRSSWarmSnapshot).catch(() => undefined)
 
 function MainAppShell() {
   useKeyboardShortcuts()
@@ -90,10 +86,6 @@ function MainAppShell() {
     return cleanup
   }, [])
 
-  useEffect(() => {
-    // fire-and-forget: re-prime warm cache on mount; same rationale as the module-load prime above.
-    void primeRSSWarmCache(fetchRSSWarmSnapshot).catch(() => undefined)
-  }, [])
 
   return (
     <ErrorBoundary>

@@ -1,11 +1,13 @@
 import { z } from 'zod'
 
+export const RSS_SEARCH_MAX_LENGTH = 300
+
 /** All RSS readers use these scopes; library includes items dismissed from the inbox. */
 export const RSSQuerySchema = z.object({
   scope: z.enum(['inbox', 'library']).optional().default('inbox').describe('inbox 当前收件箱；library 含历史底稿'),
   filter: z.enum(['all', 'unread', 'starred']).optional().default('all').describe('all、unread 或 starred'),
   sourceId: z.string().trim().min(1).optional().describe('可选订阅源 ID'),
-  search: z.string().trim().max(300).optional().default('').describe('按字面关键词搜索，不触发网络获取'),
+  search: z.string().trim().max(RSS_SEARCH_MAX_LENGTH).optional().default('').describe('按字面关键词搜索，不触发网络获取'),
   searchIn: z.enum(['title_summary', 'body']).optional().default('title_summary').describe('title_summary 标题摘要；body 已保存正文'),
   from: z.number().int().nonnegative().optional().describe('时间范围起点，Unix 毫秒，包含'),
   until: z.number().int().nonnegative().optional().describe('时间范围终点，Unix 毫秒，不包含'),
@@ -45,6 +47,7 @@ export interface RSSQueryResult {
   query: Omit<RSSQuery, 'cursor' | 'expectedRevision'>
   revision: number
   total: number
+  unreadTotal: number
   lastFetchAt: number | null
   items: RSSArticleSummary[]
   nextCursor: string | null

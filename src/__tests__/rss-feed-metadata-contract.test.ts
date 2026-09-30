@@ -9,10 +9,10 @@ function readWorkspaceFile(path: string): string {
 }
 
 test('rss feed keeps optional author metadata between source and publish time', () => {
-  const rssWarmLoader = readWorkspaceFile('src/renderer/modules/rss/rssWarmLoader.ts')
+  const queryMapping = readWorkspaceFile('src/renderer/modules/rss/workspace-query.ts')
   const rssFeed = readWorkspaceFile('src/renderer/components/rss/RSSFeed.tsx')
 
-  assert.match(rssWarmLoader, /author:\s*item\.author \?\? ''/)
+  assert.match(queryMapping, /author: item\.author \|\| ''/)
   assert.match(rssFeed, /author:\s*string/)
   assert.match(rssFeed, /item\.author && item\.author !== item\.source/)
 })

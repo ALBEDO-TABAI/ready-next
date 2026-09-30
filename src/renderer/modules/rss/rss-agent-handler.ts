@@ -1,3 +1,6 @@
+import type { RSSRefreshOutcome } from './settings'
+import type { RSSQueryResult, RSSQueryInput, RSSArticleExcerpt, RSSReadArticleInput } from '../../../shared/rss-workspace'
+import { rssQueryKey, toRSSItem } from './workspace-query'
 import type { RSSItem } from '../../components/rss/RSSFeed'
 import type { ModuleAgentActionHandler } from '../../utils/moduleAgentBridge'
 
@@ -25,6 +28,9 @@ export interface RSSAnalysisProgressLike {
 }
 
 interface RSSApi {
+  readArticle?: (input: RSSReadArticleInput) => Promise<{ success: boolean; data?: RSSArticleExcerpt; error?: string }>
+  queryItems?: (query: RSSQueryInput) => Promise<{ success: boolean; data?: RSSQueryResult; error?: string }>
+
   addSource?: (payload: { name: string; url: string }) => Promise<{
     success?: boolean
     error?: string
@@ -48,6 +54,7 @@ interface RSSApi {
       status?: RSSAnalysisStatus
       outputDir?: string
       reportPath?: string | null
+      updatedAt?: string
     }
   }>
   getItemAnalysisProgress?: (payload: { itemIds: string[] }) => Promise<{
@@ -62,19 +69,13 @@ interface DocumentApi {
 }
 
 export interface RSSAgentHandlerDeps {
+  getView(): RSSQueryResult | null
   items: RSSItem[]
   selectedSource: string | null
   selectedItem: RSSItem | null
   loadRSSData: () => Promise<void>
-  handleRefresh: () => Promise<void>
+  handleRefresh: () => Promise<RSSRefreshOutcome>
   handleItemClick: (item: RSSItem) => void
-  setLastAnalysis: (payload: {
-    jobId?: string | null
-    itemId?: string | null
-    status?: string | null
-    reportPath?: string | null
-    manifestPath?: string | null
-  }) => void
   setAnalysisProgressMap: (
     updater: (prev: Record<string, RSSAnalysisProgressLike>) => Record<string, RSSAnalysisProgressLike>,
   ) => void
@@ -84,16 +85,19 @@ export interface RSSAgentHandlerDeps {
 }
 
 export function createRSSAgentHandler(deps: RSSAgentHandlerDeps): ModuleAgentActionHandler {
-  const resolveItem = (args: Record<string, unknown>): RSSItem | null => {
-    const itemId = String(args.itemId || '').trim()
-    const title = String(args.title || '').trim().toLowerCase()
+  const resolveItem = async (args: Record<string, unknown>): Promise<RSSItem | null> => {
+    const itemId = String(args.itemId || '').trim() || (!args.title ? deps.selectedItem?.id : '')
     if (itemId) {
-      return deps.items.find((item) => item.id === itemId) || null
+      const response = await deps.rssApi?.readArticle?.({ itemId, length: 1 })
+      if (!response?.success || !response.data) throw new Error(response?.error || '无法读取指定文章')
+      return toRSSItem(response.data.article)
     }
-    if (title) {
-      return deps.items.find((item) => item.title.toLowerCase().includes(title)) || null
-    }
-    return deps.selectedItem
+    const title = String(args.title || '').trim()
+    if (!title) return null
+    const response = await deps.rssApi?.queryItems?.({ ...deps.getView()?.query, scope: 'library', search: title, searchIn: 'title_summary', filter: 'all', limit: 2 })
+    if (!response?.success || !response.data) throw new Error(response?.error || '文章查找失败')
+    if (response.data.total > 1) throw new Error('找到多篇匹配资讯，请先查询并使用明确的文章 ID。')
+    return response.data.items[0] ? toRSSItem(response.data.items[0]) : null
   }
 
   const readAnalysisProgress = async (
@@ -112,8 +116,12 @@ export function createRSSAgentHandler(deps: RSSAgentHandlerDeps): ModuleAgentAct
 
   return async ({ action, args }) => {
     if (action === 'rss.captureSession') {
+      const view = deps.getView()
+      if (!view) return { intent: 'capture_rss_session', available: false, summary: '当前没有可读取的 RSS 视图；请用 rss_query_items 查询保存资料。' }
       const analysisResult = deps.selectedItem
         ? await deps.rssApi?.getItemAnalysisProgress?.({ itemIds: [deps.selectedItem.id] }) : undefined
+      const current = deps.getView()
+      if (!current || current.revision !== view.revision || rssQueryKey(current.query) !== rssQueryKey(view.query)) throw new Error('RSS 视图已变化，请重新读取。')
       return {
         intent: 'capture_rss_session',
         ownerResourceId: deps.selectedItem?.id || deps.selectedSource,
@@ -124,7 +132,12 @@ export function createRSSAgentHandler(deps: RSSAgentHandlerDeps): ModuleAgentAct
             : 'RSS 会话已捕获：当前未选中订阅源或条目。',
         selectedSourceId: deps.selectedSource,
         selectedItemId: deps.selectedItem?.id ?? null,
-        totalItems: deps.items.length,
+        available: true,
+        query: { ...view.query, expectedRevision: view.revision },
+        totalItems: view.total,
+        unreadItems: view.unreadTotal,
+        loadedItems: view.items.length,
+        lastFetchAt: view.lastFetchAt,
         analysis: analysisResult?.success && deps.selectedItem ? analysisResult.data?.[deps.selectedItem.id] ?? null : null,
         analysisError: deps.selectedItem && !analysisResult?.success ? '无法读取最新分析状态，请使用 rss_read_article 回查。' : null,
       }
@@ -149,15 +162,15 @@ export function createRSSAgentHandler(deps: RSSAgentHandlerDeps): ModuleAgentAct
     }
 
     if (action === 'rss.fetchUpdates') {
-      await deps.handleRefresh()
+      const outcome = await deps.handleRefresh()
       return {
+        ...outcome,
         intent: 'fetch_rss_updates',
-        summary: `RSS 更新已刷新，共加载 ${deps.items.length} 条内容。`,
       }
     }
 
     if (action === 'rss.selectItem') {
-      const item = resolveItem(args)
+      const item = await resolveItem(args)
       if (!item) throw new Error('未找到匹配的 RSS 条目')
       deps.handleItemClick(item)
       return {
@@ -168,7 +181,7 @@ export function createRSSAgentHandler(deps: RSSAgentHandlerDeps): ModuleAgentAct
     }
 
     if (action === 'rss.analyzeItem') {
-      const item = resolveItem(args)
+      const item = await resolveItem(args)
       if (!item) throw new Error('未找到可分析的 RSS 条目')
       const analysisType = String(args.analysisType || '').trim().toLowerCase()
       if (analysisType !== 'copy' && analysisType !== 'visual') {
@@ -194,13 +207,6 @@ export function createRSSAgentHandler(deps: RSSAgentHandlerDeps): ModuleAgentAct
       const initialStatus = startResult.data.status || 'queued'
       const initialOutputDir = startResult.data.outputDir || null
       const initialReportPath = startResult.data.reportPath || null
-      deps.setLastAnalysis({
-        jobId,
-        itemId: item.id,
-        status: initialStatus,
-        reportPath: initialReportPath,
-        manifestPath: initialOutputDir ? `${initialOutputDir}/manifest.json` : null,
-      })
       const currentProgress = jobId ? await readAnalysisProgress(item.id, jobId) : null
       const analysisState = currentProgress || {
         itemId: item.id,
@@ -212,15 +218,8 @@ export function createRSSAgentHandler(deps: RSSAgentHandlerDeps): ModuleAgentAct
         error: null,
         outputDir: initialOutputDir || '',
         reportPath: initialReportPath,
-        updatedAt: new Date().toISOString(),
+        updatedAt: startResult.data.updatedAt || '',
       } satisfies RSSAnalysisProgressLike
-      deps.setLastAnalysis({
-        jobId: analysisState.jobId,
-        itemId: analysisState.itemId,
-        status: analysisState.status,
-        reportPath: analysisState.reportPath,
-        manifestPath: analysisState.outputDir ? `${analysisState.outputDir}/manifest.json` : null,
-      })
       const reportPath = analysisState.reportPath || null
       const outputDir = analysisState.outputDir || null
       const failed = analysisState.status === 'failed'

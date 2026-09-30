@@ -14,6 +14,7 @@ interface RSSArticleReaderProps {
   onClose(): void
   onOpened(itemId: string): Promise<void>
   onToggleStar(itemId: string): void
+  onBodyLoaded?(article: RSSArticleExcerpt['article']): Promise<void>
   notice?: string | null
 }
 
@@ -22,18 +23,23 @@ const BODY_LABELS = {
   stale: '原文已变化，正在更新正文', login_required: '需要在原网站登录', failed: '正文获取失败',
 } as const
 
-export default function RSSArticleReader({ item, onClose, onOpened, onToggleStar, notice }: RSSArticleReaderProps) {
+export default function RSSArticleReader({ item, onClose, onOpened, onToggleStar, onBodyLoaded, notice }: RSSArticleReaderProps) {
   const [content, setContent] = useState<RSSArticleExcerpt | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
   const [reload, setReload] = useState(0)
+  const forceReload = useRef(false)
   const [headings, setHeadings] = useState<Array<{ title: string; level: number }>>([])
   const bodyRef = useRef<HTMLDivElement>(null)
   const video = hasLikelyVideoResource(item.link)
 
   useEffect(() => {
     const controller = new AbortController()
+    const force = forceReload.current
+    forceReload.current = false
+    // A query readback may acknowledge the body this reader has just loaded.
+    if (!force && item.revision && content?.article.revision === item.revision) { setBusy(false); return }
     const api = window.electronAPI.rss
     setContent(null)
     setError(null)
@@ -42,11 +48,13 @@ export default function RSSArticleReader({ item, onClose, onOpened, onToggleStar
       try {
         let saved = await readSavedRSSArticle(api, item.id, controller.signal)
         setContent(saved)
-        if (!video && (reload > 0 || ['missing', 'stale', 'loading'].includes(saved.body.status))) {
-          const fetched = await api.loadArticle({ itemId: item.id, force: reload > 0 })
+        if (!video && (force || ['missing', 'stale', 'loading'].includes(saved.body.status))) {
+          const fetched = await api.loadArticle({ itemId: item.id, force })
           controller.signal.throwIfAborted()
           saved = await readSavedRSSArticle(api, item.id, controller.signal)
           setContent(saved)
+          await onBodyLoaded?.(saved.article)
+          controller.signal.throwIfAborted()
           if (!fetched.success) setError(fetched.error || '正文获取失败，仍可阅读来源摘要或打开原文。')
         }
       } catch (cause) {
@@ -56,11 +64,11 @@ export default function RSSArticleReader({ item, onClose, onOpened, onToggleStar
       }
     })()
     return () => controller.abort()
-  }, [item.id, item.title, item.link, item.summary, reload, video])
+  }, [item.id, item.revision, item.title, item.link, item.summary, reload, video])
 
   useEffect(() => {
-    if (content?.article.id === item.id) void onOpened(item.id)
-  }, [content?.article.id, item.id, onOpened])
+    if (content?.article.id === item.id && !content.article.read) void onOpened(item.id)
+  }, [content?.article.id, content?.article.read, item.id, onOpened])
 
   useEffect(() => {
     const nodes = bodyRef.current?.querySelectorAll<HTMLElement>('[data-ready-heading-level]')
@@ -104,7 +112,7 @@ export default function RSSArticleReader({ item, onClose, onOpened, onToggleStar
         <div className="rss-reader-status" role="status">
           {busy && <Loader2 size={14} className="animate-spin" />}
           <span>{content ? `${content.textKind === 'source_summary' ? '来源摘要 · ' : ''}${BODY_LABELS[content.body.status]}` : busy ? '正在读取文章' : '文章读取失败'}</span>
-          {!video && <button type="button" className="rss-reader-button" disabled={busy} onClick={() => setReload((value) => value + 1)}><RefreshCw size={13} />重新获取正文</button>}
+          {!video && <button type="button" className="rss-reader-button" disabled={busy} onClick={() => { forceReload.current = true; setReload((value) => value + 1) }}><RefreshCw size={13} />重新获取正文</button>}
         </div>
         {(error || notice || content?.body.status === 'partial' || content?.body.status === 'login_required') && <p className="rss-reader-notice" role="alert">{error || notice || (content?.body.status === 'partial' ? '目前仅获取到部分正文，请打开原文查看完整内容。' : '请先打开原文登录，再重新获取正文。')}</p>}
         <div className="note-preview-body rss-reader-body" ref={bodyRef}>

@@ -9,7 +9,7 @@ interface ContentGroupDeps {
   getLoader(): RSSContentService
 }
 
-const CHANNELS = ['rss:queryItems', 'rss:readArticle', 'rss:loadArticle'] as const
+const CHANNELS = ['rss:queryItems', 'rss:readArticle', 'rss:loadArticle', 'rss:dismissQuery'] as const
 
 export const contentGroup: IpcChannelGroup<ContentGroupDeps> = {
   namespace: 'rss:content',
@@ -21,6 +21,7 @@ export const contentGroup: IpcChannelGroup<ContentGroupDeps> = {
       catch (error) { return { success: false, mock: false, error: error instanceof Error ? error.message : String(error) } }
     }
     ipcMain.handle('rss:queryItems', (_event, input: unknown) => respond(() => deps.getContent().query(RSSQuerySchema.parse(input ?? {}))))
+    ipcMain.handle('rss:dismissQuery', (_event, input: unknown) => respond(() => deps.getContent().dismissQuery(RSSQuerySchema.parse(input))))
     ipcMain.handle('rss:readArticle', (_event, input: unknown) => respond(() => deps.getContent().readArticle(RSSReadArticleSchema.parse(input))))
     ipcMain.handle('rss:loadArticle', (_event, input: unknown) => respond(async () => {
       const { itemId, force } = RSSLoadArticleSchema.parse(input)

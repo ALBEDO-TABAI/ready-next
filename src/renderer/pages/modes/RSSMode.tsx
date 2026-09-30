@@ -2,18 +2,21 @@ import { useState, useEffect, useCallback, useMemo, useRef, type CSSProperties }
 import { useNavigate } from 'react-router-dom'
 import { RefreshCw, AlertCircle, ExternalLink } from 'lucide-react'
 import RSSFeed from '../../components/rss/RSSFeed'
+import RSSNavigation from '../../components/rss/RSSNavigation'
+import RSSWorkspaceToolbar from '../../components/rss/RSSWorkspaceToolbar'
 import RSSArticleReader from '../../components/rss/RSSArticleReader'
 import AddSourceModal from '../../components/rss/AddSourceModal'
 import RSSSettingsPanel from '../../components/rss/RSSSettingsPanel'
 import Modal from '../../components/ui/Modal'
 import { useModal } from '../../components/ui/useModal'
 import { useRSSAgentAdapter } from '../../modules/rss/useRSSAgentAdapter'
-import { fetchRSSWarmSnapshot } from '../../modules/rss/rssWarmLoader'
-import { getRSSWarmCache, primeRSSWarmCache, setRSSWarmCache } from '../../modules/rss/rssWarmCache'
+import { useRSSWorkspace } from '../../modules/rss/useRSSWorkspace'
+import { toRSSItem } from '../../modules/rss/workspace-query'
 import {
   DEFAULT_RSS_AUTO_REFRESH_INTERVAL_MS,
   getRSSAutoRefreshWarning,
   getRSSFetchAllResultWarning,
+  getRSSRefreshOutcome,
   parseRSSAutoRefreshInterval,
   RSS_AUTO_REFRESH_INTERVAL_KEY,
 } from '../../modules/rss/settings'
@@ -86,35 +89,21 @@ interface AddSourceDraftState {
   browserPresetLabel: string | null
 }
 
-interface RSSModeSnapshot {
-  items: RSSItem[]
-  sources: RSSSource[]
-  isMock: boolean
-  fetchedAt: number
-}
-
 export default function RSSMode({
   isActive = true,
   isSuspended = false,
   isMotionSettled = true,
 }: RSSModeProps) {
   const navigate = useNavigate()
-  const initialWarmCache = useMemo(() => getRSSWarmCache(), [])
-  const selectedSourceId = useRSSSession((state) => state.selectedSourceId)
-  const setFeedSnapshot = useRSSSession((state) => state.setFeedSnapshot)
+  const { query, view, items, sources, loading, loadingMore, error, reload, loadMore, hasHydrated } = useRSSWorkspace(isActive && !isSuspended)
+  const selectedSourceId = query.sourceId || null
+  const setQuery = useRSSSession((state) => state.setQuery)
   const setSelection = useRSSSession((state) => state.setSelection)
-  const setLastAnalysis = useRSSSession((state) => state.setLastAnalysis)
   const browserTabs = useBrowserTabs((state) => state.tabs)
   const activeBrowserTabId = useBrowserTabs((state) => state.activeTabId)
   const selectedSource = selectedSourceId
-  const [items, setItems] = useState<RSSItem[]>(() => initialWarmCache?.items || [])
-  const [sources, setSources] = useState<RSSSource[]>(() => initialWarmCache?.sources || [])
   const [selectedItem, setSelectedItem] = useState<RSSItem | null>(null)
-  const [loading, setLoading] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
-  const [filter, setFilter] = useState<'all' | 'unread' | 'starred'>('all')
-  const [isMock, setIsMock] = useState(() => initialWarmCache?.isMock || false)
-  const [error, setError] = useState<string | null>(null)
   const [showAddModal, setShowAddModal] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [autoRefreshIntervalMs, setAutoRefreshIntervalMs] = useState(DEFAULT_RSS_AUTO_REFRESH_INTERVAL_MS)
@@ -123,7 +112,6 @@ export default function RSSMode({
     browserPresetName: '',
     browserPresetLabel: null,
   })
-  const [newItemIds, setNewItemIds] = useState<Set<string>>(new Set())
   const [statusMessage, setStatusMessage] = useState<string | null>(null)
   const [itemStateError, setItemStateError] = useState<{ itemId: string; action: 'read' | 'star'; message: string } | null>(null)
   const [statusAction, setStatusAction] = useState<RSSBrowserOpenActionData | null>(null)
@@ -131,10 +119,7 @@ export default function RSSMode({
   const [autoRefreshWarning, setAutoRefreshWarning] = useState<string | null>(null)
   const [analysisProgressMap, setAnalysisProgressMap] = useState<Record<string, RSSItemAnalysisProgressState>>({})
   const [analysisJobs, setAnalysisJobs] = useState<RSSAnalysisJobState[]>([])
-  const [hasHydrated, setHasHydrated] = useState(() => Boolean(initialWarmCache))
-  const previousItemIdsRef = useRef<Set<string>>(new Set(initialWarmCache?.items.map((item) => item.id) || []))
   const sourcesRef = useRef<RSSSource[]>([])
-  const becameVisibleRef = useRef(false)
   const lastModalActionKeyRef = useRef<string | null>(null)
   const suspendedRef = useRef(isSuspended)
   const pendingAutoRefreshSnapshotRef = useRef<Parameters<typeof getRSSAutoRefreshWarning>[0] | null>(null)
@@ -151,32 +136,8 @@ export default function RSSMode({
     const label = activeBrowserTab.title?.trim() || activeBrowserTab.domain?.trim() || activeBrowserTab.url
     return `当前页：${label}`
   }, [activeBrowserTab])
-  const computeUnreadCounts = useCallback((list: RSSItem[]) => {
-    const counts = new Map<string, number>()
-    for (const item of list) {
-      if (!item.read) {
-        counts.set(item.sourceId, (counts.get(item.sourceId) ?? 0) + 1)
-      }
-    }
-    return counts
-  }, [])
-
-  const getScopedItems = useCallback(
-    (list: RSSItem[]) =>
-      list.filter((item) => {
-        if (selectedSource && item.sourceId !== selectedSource) return false
-        if (filter === 'unread' && item.read) return false
-        if (filter === 'starred' && !item.starred) return false
-        return true
-      }),
-    [filter, selectedSource],
-  )
-
-  const visibleItemIds = useMemo(() => {
-    return getScopedItems(items)
-      .map((item) => item.id)
-      .slice(0, 240)
-  }, [getScopedItems, items])
+  const visibleItemIds = useMemo(() => items.map((item) => item.id), [items])
+  const loadRSSData = useCallback(async (_options?: { background?: boolean }) => { await reload() }, [reload])
 
   useEffect(() => {
     sourcesRef.current = sources
@@ -195,112 +156,6 @@ export default function RSSMode({
       cancelled = true
     }
   }, [])
-
-  const applyRSSSnapshot = useCallback((snapshot: RSSModeSnapshot) => {
-    setItems(snapshot.items)
-    setSources(snapshot.sources)
-    setIsMock(snapshot.isMock)
-    previousItemIdsRef.current = new Set(snapshot.items.map((item) => item.id))
-  }, [])
-
-  const loadRSSSnapshot = useCallback(async () => {
-    try {
-      return await fetchRSSWarmSnapshot()
-    } catch (err) {
-      throw (err instanceof Error ? err : new Error('加载 RSS 数据时发生错误'))
-    }
-  }, [])
-
-  const loadRSSData = useCallback(async (options?: { background?: boolean }) => {
-    if (!options?.background) {
-      setLoading(true)
-    }
-    setError(null)
-    try {
-      const snapshot = await loadRSSSnapshot()
-
-      if (previousItemIdsRef.current.size > 0) {
-        const freshIds = new Set<string>()
-        for (const item of snapshot.items) {
-          if (!previousItemIdsRef.current.has(item.id)) {
-            freshIds.add(item.id)
-          }
-        }
-        if (freshIds.size > 0) {
-          setNewItemIds(freshIds)
-          setTimeout(() => setNewItemIds(new Set()), 30000)
-        }
-      }
-
-      applyRSSSnapshot(snapshot)
-      setRSSWarmCache(snapshot)
-    } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : '加载 RSS 数据时发生错误'
-      console.log('RSS data load error:', err)
-      setError(errorMessage)
-      if (!options?.background) {
-        setItems([])
-        setSources([])
-      }
-    } finally {
-      if (!options?.background) {
-        setLoading(false)
-      }
-    }
-  }, [applyRSSSnapshot, loadRSSSnapshot])
-
-  const warmRefreshRSSData = useCallback(() => {
-    void loadRSSData({ background: true })
-  }, [loadRSSData])
-
-  useEffect(() => {
-    let cancelled = false
-    // fire-and-forget: warm-cache snapshot prime on mode switch; if it fails, the next loadRSSData (`warmRefreshRSSData`) refresh cycle will hydrate the panel.
-    void primeRSSWarmCache(loadRSSSnapshot)
-      .then((snapshot) => {
-        if (cancelled) return
-        applyRSSSnapshot(snapshot)
-        if (!hasHydrated) {
-          setHasHydrated(true)
-        }
-      })
-      .catch(() => undefined)
-    return () => {
-      cancelled = true
-    }
-  }, [applyRSSSnapshot, hasHydrated, loadRSSSnapshot])
-
-  useEffect(() => {
-    if (!isActive) {
-      becameVisibleRef.current = false
-      return
-    }
-
-    if (becameVisibleRef.current) return
-    becameVisibleRef.current = true
-    let cancelled = false
-
-    const syncVisibleData = async () => {
-      const cachedSnapshot = getRSSWarmCache()
-      if (cachedSnapshot) {
-        applyRSSSnapshot(cachedSnapshot)
-        if (!cancelled && !hasHydrated) {
-          setHasHydrated(true)
-        }
-        warmRefreshRSSData()
-        return
-      }
-      await loadRSSData()
-      if (!cancelled && !hasHydrated) {
-        setHasHydrated(true)
-      }
-    }
-
-    void syncVisibleData()
-    return () => {
-      cancelled = true
-    }
-  }, [applyRSSSnapshot, hasHydrated, isActive, loadRSSData])
 
   const fetchAnalysisProgress = useCallback(async (itemIds: string[]): Promise<RSSAnalysisProgressPollResult> => {
     if (!window.electronAPI?.rss?.getItemAnalysisProgress) return { ok: true, hasActiveWork: false }
@@ -387,7 +242,7 @@ export default function RSSMode({
         return
       }
       applySnapshot(snapshot)
-      void loadRSSData({ background: true })
+      void loadRSSData({ background: true }).catch(() => {})
     })
     void rss.autoRefreshStatus().then((result) => {
       if (!result.success || !result.data) return
@@ -403,7 +258,7 @@ export default function RSSMode({
     if (!pending) return
     pendingAutoRefreshSnapshotRef.current = null
     setAutoRefreshWarning(getRSSAutoRefreshWarning(pending))
-    void loadRSSData({ background: true })
+    void loadRSSData({ background: true }).catch(() => {})
   }, [isSuspended, loadRSSData])
 
   useEffect(() => {
@@ -443,25 +298,9 @@ export default function RSSMode({
     })
   }, [showConfirm, statusAction])
 
-  useEffect(() => {
-    if (!selectedItem) return
-    const stillExists = items.some((item) => item.id === selectedItem.id)
-    if (!stillExists) {
-      setSelectedItem(null)
-    }
-  }, [items, selectedItem])
-
-  useEffect(() => {
-    if (!selectedSourceId) return
-    const stillExists = sources.some((source) => source.id === selectedSourceId)
-    if (!stillExists) {
-      setSelection({ selectedSourceId: null })
-    }
-  }, [selectedSourceId, setSelection, sources])
-
   const handleSourceChange = useCallback((sourceId: string | null) => {
-    setSelection({ selectedSourceId: sourceId })
-  }, [setSelection])
+    setQuery({ sourceId: sourceId || undefined })
+  }, [setQuery])
 
   const handleAddSource = useCallback(() => {
     setAddSourceDraft({
@@ -479,14 +318,10 @@ export default function RSSMode({
       setStatusMessage(result.error ? `删除源失败：${result.error}` : '删除源失败')
       return
     }
-    // `removeRSSSource` cascades to the source's items, so drop both from
-    // local state to mirror main. The selectedSourceId effect resets the
-    // filter to 全部源 when the active source disappears, so selection needs
-    // no explicit handling here.
-    setItems((prev) => prev.filter((item) => item.sourceId !== sourceId))
-    setSources((prev) => prev.filter((source) => source.id !== sourceId))
-    setSelectedItem((prev) => (prev?.sourceId === sourceId ? null : prev))
-  }, [])
+    if (selectedSourceId === sourceId) setQuery({ sourceId: undefined })
+    setSelectedItem((prev) => prev?.sourceId === sourceId ? null : prev)
+    await loadRSSData()
+  }, [loadRSSData, selectedSourceId, setQuery])
 
   const handleItemClick = useCallback((item: RSSItem) => {
     setItemStateError(null)
@@ -494,18 +329,12 @@ export default function RSSMode({
   }, [])
 
   const applySavedItemState = useCallback(async (itemId: string) => {
+    await loadRSSData({ background: true })
     const saved = await window.electronAPI.rss.readArticle({ itemId, length: 1 })
     if (!saved.success || !saved.data) throw new Error(saved.error || '无法确认文章保存状态')
     const state = saved.data.article
-    setItems((prev) => {
-      const next = prev.map((item) => item.id === itemId ? { ...item, read: state.read, starred: state.starred, inboxVisible: state.inboxVisible } : item)
-        .filter((item) => item.inboxVisible !== false || item.starred)
-      const unreadCounts = computeUnreadCounts(next)
-      setSources((prevSources) => prevSources.map((source) => ({ ...source, count: unreadCounts.get(source.id) ?? 0 })))
-      return next
-    })
-    setSelectedItem((prev) => prev?.id === itemId ? { ...prev, read: state.read, starred: state.starred } : prev)
-  }, [computeUnreadCounts])
+    setSelectedItem((prev) => prev?.id === itemId ? { ...prev, ...toRSSItem(state) } : prev)
+  }, [loadRSSData])
 
   const handleToggleStar = useCallback(async (itemId: string) => {
     try {
@@ -516,67 +345,34 @@ export default function RSSMode({
     } catch (cause) { setItemStateError({ itemId, action: 'star', message: cause instanceof Error ? cause.message : String(cause) }) }
   }, [applySavedItemState])
 
-  // Task 6: Manual refresh with loading state
   const handleRefresh = useCallback(async () => {
-    if (refreshing) return
+    if (refreshing) return getRSSRefreshOutcome({ success: true, data: { running: true } })
     setRefreshing(true)
     setStatusAction(null)
-    let attemptedFullRefresh = false
+    const sourceId = useRSSSession.getState().query.sourceId
     try {
-      if (typeof window !== 'undefined' && window.electronAPI) {
-        const latestSelectedSourceId = useRSSSession.getState().selectedSourceId
-        const selectedSourceEntry = latestSelectedSourceId
-          ? sourcesRef.current.find((source) => source.id === latestSelectedSourceId) ?? null
-          : null
-        setStatusMessage(
-          selectedSourceEntry
-            ? `${selectedSourceEntry.name} 正在刷新…`
-            : '正在刷新全部 RSS 源…',
-        )
-
-        if (selectedSourceEntry) {
-          const result = await window.electronAPI.rss.refreshSource(selectedSourceEntry.id)
-          if (!result.success) {
-            setStatusMessage(result.error || '刷新失败')
-            setStatusAction(result.data?.browserAction || null)
-          } else if (result.data?.running) {
-            setStatusMessage(`${selectedSourceEntry.name} 正在刷新中`)
-          } else if (result.data?.errors?.length) {
-            setStatusMessage(`${selectedSourceEntry.name} 刷新完成，但存在错误：${result.data.errors[0]}`)
-            setStatusAction(result.data?.browserAction || null)
-          } else if (typeof result.data?.itemCount === 'number') {
-            const writtenLabel = typeof result.data?.fetched === 'number'
-              ? `，写入 ${result.data.fetched} 条`
-              : ''
-            setStatusMessage(`${selectedSourceEntry.name} 已刷新，共 ${result.data.itemCount} 条${writtenLabel}`)
-          } else {
-            setStatusMessage(result.data?.message || `${selectedSourceEntry.name} 已刷新`)
-          }
-        } else {
-          attemptedFullRefresh = true
-          const result = await window.electronAPI.rss.fetchAll()
-          setAutoRefreshWarning(getRSSFetchAllResultWarning(result))
-          if (!result.success) {
-            setStatusMessage(result.error || '刷新失败')
-          } else if (result.data?.running) {
-            setStatusMessage(result.data.message || 'RSS 正在刷新中')
-          } else if (result.data?.errors?.length) {
-            setStatusMessage(`刷新完成，但存在错误：${result.data.errors[0]}`)
-          } else {
-            setStatusMessage(result.data?.message || '刷新完成')
-          }
-        }
+      const label = sourcesRef.current.find((source) => source.id === sourceId)?.name || '所选订阅源'
+      setStatusMessage(sourceId ? `${label} 正在刷新…` : '正在刷新全部 RSS 源…')
+      let outcome: import('../../modules/rss/settings').RSSRefreshOutcome
+      if (sourceId) {
+        const result = await window.electronAPI.rss.refreshSource(sourceId)
+        setStatusAction(result.data?.browserAction || null)
+        outcome = getRSSRefreshOutcome(result, label)
+      } else {
+        const result = await window.electronAPI.rss.fetchAll()
+        setAutoRefreshWarning(getRSSFetchAllResultWarning(result))
+        outcome = getRSSRefreshOutcome(result)
       }
-      await loadRSSData()
-    } catch (error) {
-      const message = error instanceof Error ? error.message : '刷新失败'
-      setStatusMessage(message)
-      if (attemptedFullRefresh) {
-        setAutoRefreshWarning(`RSS 刷新失败：${message}`)
-      }
-    } finally {
-      setRefreshing(false)
-    }
+      try { await loadRSSData(); outcome.viewUpdated = true }
+      catch { outcome.viewUpdated = false; outcome.summary += '；列表暂未更新，请重新读取。' }
+      setStatusMessage(outcome.summary)
+      return outcome
+    } catch (cause) {
+      const outcome = getRSSRefreshOutcome({ success: false, error: cause instanceof Error ? cause.message : '刷新失败' })
+      setStatusMessage(outcome.summary)
+      if (!sourceId) setAutoRefreshWarning(outcome.summary)
+      return outcome
+    } finally { setRefreshing(false) }
   }, [loadRSSData, refreshing])
 
   const handleStatusAction = useCallback(async () => {
@@ -600,9 +396,8 @@ export default function RSSMode({
     loadRSSData,
     handleRefresh,
     handleItemClick,
-    setFeedSnapshot,
     setSelection,
-    setLastAnalysis,
+    isActive,
     setAnalysisProgressMap,
   })
 
@@ -611,69 +406,29 @@ export default function RSSMode({
       const result = await window.electronAPI.rss.markRead(itemId)
       if (!result.success) throw new Error(result.error || '已读状态保存失败')
       await applySavedItemState(itemId)
-      setNewItemIds((prev) => { const next = new Set(prev); next.delete(itemId); return next })
       setItemStateError((previous) => previous?.itemId === itemId && previous.action === 'read' ? null : previous)
     } catch (cause) { setItemStateError({ itemId, action: 'read', message: cause instanceof Error ? cause.message : String(cause) }) }
   }, [applySavedItemState])
 
   const handleClearRead = useCallback(async () => {
-    const scoped = getScopedItems(items)
-    const hideIds = scoped.filter((item) => !item.starred).map((item) => item.id)
-    const preservedStarredCount = scoped.length - hideIds.length
-    if (hideIds.length === 0) {
-      setStatusMessage('当前范围内没有可清空的内容')
-      return
-    }
+    if (!view) return
+    try {
+      const result = await window.electronAPI.rss.dismissQuery({ ...view.query, expectedRevision: view.revision })
+      if (!result.success || !result.data) throw new Error(result.error || '清空失败')
+      await loadRSSData()
+      setStatusMessage(`已按发起时的筛选范围移出 ${result.data.dismissed} 条内容，保留收藏与历史底稿`)
+    } catch (cause) { setStatusMessage(cause instanceof Error && cause.message === 'cursor_stale' ? '资料已更新，请重新读取后再清空。' : cause instanceof Error ? cause.message : String(cause)) }
+  }, [loadRSSData, view])
 
-    const deleteSet = new Set(hideIds)
-    setItems((prev) => {
-      const next = prev.filter((item) => !deleteSet.has(item.id))
-      const unreadCounts = computeUnreadCounts(next)
-      setSources((prevSources) =>
-        prevSources.map((source) => ({ ...source, count: unreadCounts.get(source.id) ?? 0 })),
-      )
-      return next
-    })
-    setNewItemIds((prev) => {
-      let changed = false
-      const next = new Set(prev)
-      for (const id of hideIds) {
-        if (next.delete(id)) changed = true
-      }
-      return changed ? next : prev
-    })
-    setSelectedItem((prev) => (prev && deleteSet.has(prev.id) ? null : prev))
-
-    await window.electronAPI?.rss?.deleteItems({ itemIds: scoped.map((item) => item.id), preserveStarred: true })
-    setStatusMessage(
-      preservedStarredCount > 0
-        ? `已清空 ${hideIds.length} 条内容，保留 ${preservedStarredCount} 条收藏`
-        : `已清空 ${hideIds.length} 条内容`,
-    )
-  }, [computeUnreadCounts, getScopedItems, items])
-
-  const handleDeleteItem = useCallback(
-    async (itemId: string) => {
-      const deleteSet = new Set([itemId])
-      setItems((prev) => {
-        const next = prev.filter((item) => !deleteSet.has(item.id))
-        const unreadCounts = computeUnreadCounts(next)
-        setSources((prevSources) =>
-          prevSources.map((source) => ({ ...source, count: unreadCounts.get(source.id) ?? 0 })),
-        )
-        return next
-      })
-      setNewItemIds((prev) => {
-        if (!prev.has(itemId)) return prev
-        const next = new Set(prev)
-        next.delete(itemId)
-        return next
-      })
-      setSelectedItem((prev) => (prev?.id === itemId ? null : prev))
-      await window.electronAPI?.rss?.deleteItems({ itemIds: [itemId], preserveStarred: false })
-    },
-    [computeUnreadCounts],
-  )
+  const handleDeleteItem = useCallback(async (itemId: string) => {
+    try {
+      const result = await window.electronAPI.rss.deleteItems({ itemIds: [itemId] })
+      if (!result.success) throw new Error(result.error || '移出收件箱失败')
+      await loadRSSData()
+      setStatusMessage('已移出收件箱，历史底稿仍保留')
+      setSelectedItem((prev) => prev?.id === itemId ? null : prev)
+    } catch (cause) { setStatusMessage(cause instanceof Error ? cause.message : String(cause)) }
+  }, [loadRSSData])
 
   const handleOpenAnalysisOutput = useCallback(
     async (itemId: string) => {
@@ -733,19 +488,24 @@ export default function RSSMode({
     setSelectedItem(null)
   }, [])
 
+  const handleBodyLoaded = useCallback(async (article: import('../../../shared/rss-workspace').RSSArticleExcerpt['article']) => {
+    setSelectedItem((previous) => previous?.id === article.id ? toRSSItem(article) : previous)
+    await loadRSSData({ background: true })
+  }, [loadRSSData])
+
   const handleAddSourceSuccess = useCallback((source?: AddSourceSuccessInfo) => {
     void loadRSSData().then(() => {
       if (source?.id) {
+        setQuery({ sourceId: source.id })
         setSelection({
-          selectedSourceId: source.id,
           selectedItemId: null,
           selectedItemTitle: null,
         })
       }
       const statusMessage = getRSSAddSourceStatusMessage(source)
       if (statusMessage) setStatusMessage(statusMessage)
-    })
-  }, [loadRSSData, setSelection])
+    }).catch((cause) => setStatusMessage(String(cause)))
+  }, [loadRSSData, setQuery, setSelection])
 
   // Error state
   if (error && !loading && items.length === 0) {
@@ -781,6 +541,7 @@ export default function RSSMode({
           className="workbench-canvas-shell relative flex h-full min-h-0 overflow-hidden"
           style={{ background: 'var(--workbench-module-surface-bg)' }}
         >
+          <RSSNavigation onNavigate={(patch) => { setSelectedItem(null); setQuery(patch) }} />
           {/* Keep the list mounted so returning from reading preserves scroll. */}
           <div
             className={`rss-feed-sheet content-surface-panel flex-1 overflow-hidden flex flex-col relative`}
@@ -789,20 +550,17 @@ export default function RSSMode({
               display: selectedItem ? 'none' : undefined,
             }}
           >
+            <RSSWorkspaceToolbar view={view} loading={loading} />
             <RSSFeed
+              active={isActive && !isSuspended}
               items={items}
               sources={sources}
-              filter={filter}
               selectedSource={selectedSource}
               selectedItemId={selectedItem?.id ?? null}
               loading={loading}
               refreshing={refreshing}
-              isMock={isMock}
-              hasPreview={!!selectedItem}
-              newItemIds={newItemIds}
               analysisProgressMap={analysisProgressMap}
               analysisJobs={analysisJobs}
-              onFilterChange={setFilter}
               onSourceChange={handleSourceChange}
               onItemClick={handleItemClick}
               onMarkItemRead={handleMarkItemRead}
@@ -818,6 +576,12 @@ export default function RSSMode({
               onResumeAnalysisJob={handleResumeAnalysisJob}
               onDeleteAnalysisJob={handleDeleteAnalysisJob}
               settingsOpen={settingsOpen}
+              nextPage={Boolean(view?.nextCursor)}
+              loadingMore={loadingMore}
+              queryError={error}
+              inbox={query.scope === 'inbox'}
+              onLoadMore={() => void loadMore()}
+              onReloadQuery={() => void reload().catch(() => {})}
             />
             {(statusMessage || itemStateError || backgroundWarning || statusAction) && (
               <div
@@ -867,6 +631,7 @@ export default function RSSMode({
               item={items.find((item) => item.id === selectedItem.id) || selectedItem}
               onClose={handleClosePreview}
               onOpened={handleMarkItemRead}
+              onBodyLoaded={handleBodyLoaded}
               onToggleStar={handleToggleStar}
               notice={itemStateError?.itemId === selectedItem.id ? itemStateError.message : null}
             />

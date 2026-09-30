@@ -9,11 +9,11 @@ test('a completed historical analysis renders its native source warning instead 
   const noop = () => {}
   const markup = renderToStaticMarkup(<RSSFeed
     items={[{ id: 'a', sourceId: 's', title: 'Article', source: 'Source', author: '', summary: 'Body', publishedAt: '', link: 'https://example.test/a', read: false, starred: false }]}
-    sources={[]} filter="all" selectedSource={null} selectedItemId={null} loading={false} refreshing={false}
-    isMock={false} hasPreview={false} newItemIds={new Set()} analysisJobs={[]} settingsOpen={false}
+    sources={[]} selectedSource={null} selectedItemId={null} loading={false} refreshing={false}
+    analysisJobs={[]} settingsOpen={false}
     analysisProgressMap={{ a: { itemId: 'a', jobId: 'j', action: 'copy', status: 'success', progress: 100, sourceWarning: warning,
       message: '分析完成', error: null, outputDir: '/analysis', reportPath: '/analysis/report.md', updatedAt: '' } }}
-    onFilterChange={noop} onSourceChange={noop} onItemClick={noop} onMarkItemRead={noop} onToggleStar={noop}
+    onSourceChange={noop} onItemClick={noop} onMarkItemRead={noop} onToggleStar={noop}
     onDeleteItem={noop} onOpenAnalysisOutput={noop} onRefresh={noop} onAddSource={noop} onDeleteSource={noop}
     onClearRead={noop} onOpenSettings={noop} onPauseAnalysisJob={noop} onResumeAnalysisJob={noop} onDeleteAnalysisJob={noop}
   />)

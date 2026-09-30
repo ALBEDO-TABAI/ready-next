@@ -120,23 +120,6 @@ interface DBRSSSource {
   draft_seeded?: number
 }
 
-interface MappedRSSItem {
-  id: string
-  sourceId: string
-  title: string
-  link: string
-  summary: string
-  author: string
-  source: string
-  publishedAt: string
-  inboxVisible: boolean
-  read: boolean
-  starred: boolean
-  coverImage: string | null
-  aiScore: number | null
-  aiTags: string | null
-}
-
 interface MappedRSSSource {
   id: string
   name: string
@@ -316,25 +299,6 @@ const mockItems = [
     aiTags: '科技',
   },
 ]
-
-function mapDBItemToAPI(item: DBRSSItem): MappedRSSItem {
-  return {
-    id: item.id,
-    sourceId: item.source_id,
-    title: item.title,
-    link: item.link,
-    summary: item.summary ?? '',
-    author: item.author ?? '',
-    source: item.source_name ?? '',
-    publishedAt: item.published_at ? new Date(item.published_at * 1000).toISOString() : '',
-    inboxVisible: item.inbox_visible !== 0,
-    read: item.read === 1,
-    starred: item.starred === 1,
-    coverImage: item.cover_image ?? null,
-    aiScore: item.ai_score ?? null,
-    aiTags: item.ai_tags ?? null,
-  }
-}
 
 function mapDBSourceToAPI(source: DBRSSSource): MappedRSSSource {
   return {
@@ -1075,7 +1039,7 @@ export function setupRSSIPC(useMock = false): void {
     mockSources,
   })
 
-  // Stage V V2.2b — 6 item channels (`rss:getItems`, `rss:markRead`,
+  // Item mutation channels (`rss:markRead`,
   // `rss:markReadBatch`, `rss:deleteItems`, `rss:toggleStarred`,
   // `rss:clearDraftStore`) moved into `itemGroup`. Dev-reload re-entry
   // disposes the prior handle first so listener slots stay clean — same
@@ -1087,8 +1051,6 @@ export function setupRSSIPC(useMock = false): void {
   itemGroupDispose = itemGroup.register(ipcMain, {
     useMock,
     getRSSRepository: () => rssRepository,
-    mapItemToAPI: (item) => mapDBItemToAPI(item as DBRSSItem),
-    mockItems,
   })
 
   // Stage V V2.2c — the 6 analysis channels (`rss:startItemAnalysis`,

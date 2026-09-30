@@ -239,3 +239,21 @@ test('authentication follows the main content boundary, not document length or a
     assert.equal(content.readArticle({ itemId: 'wall' }).textKind, 'source_summary')
   } finally { await service.stop(); db.close() }
 })
+
+test('query dismissal covers all pages but preserves favorites, other results, and history', (t) => {
+  if (skipIfSqliteUnavailable(t, 'RSS query dismissal')) return
+  const { db, rss, content, put } = fixture()
+  try {
+    for (let i = 0; i < 130; i++) put(`match-${i}`, '目标资讯')
+    put('outside', '范围外')
+    rss.toggleRSSStarred('match-0')
+    const first = content.query({ search: '目标', limit: 50 })
+    assert.equal(first.total, 130)
+    assert.equal(first.unreadTotal, 130)
+    assert.equal(content.dismissQuery({ ...first.query, expectedRevision: first.revision }).dismissed, 129)
+    assert.equal(content.query({ search: '目标' }).total, 1)
+    assert.equal(content.query({}).total, 2)
+    assert.equal(content.query({ scope: 'library' }).total, 131)
+    assert.throws(() => content.dismissQuery({ ...first.query, expectedRevision: first.revision }), /cursor_stale/)
+  } finally { db.close() }
+})

@@ -9,15 +9,6 @@ function readWorkspaceFile(path: string): string {
   return readFileSync(resolve(process.cwd(), path), 'utf8')
 }
 
-test('rss mode clears only inbox items while preserving starred entries and supports explicit single-item removal', () => {
-  const rssMode = readWorkspaceFile('src/renderer/pages/modes/RSSMode.tsx')
-  const rssWarmLoader = readWorkspaceFile('src/renderer/modules/rss/rssWarmLoader.ts')
-
-  assert.match(rssMode, /preserveStarred:\s*true/)
-  assert.match(rssMode, /preserveStarred:\s*false/)
-  assert.match(rssWarmLoader, /inboxVisible:\s*item\.inboxVisible \?\? true/)
-})
-
 test('settings exposes an rss draft-store management section with reset controls', () => {
   // 合同随实现同步：2026-07-05 Settings.tsx 面板拆分，RSS 底稿面板锚点移至 settings/RSSDraftStoreSettingsPanel.tsx（双文件都扫，断言不变量不动）。
   const settings = [
@@ -45,9 +36,9 @@ test('rss add-source flow exposes a glass submenu and can prefill from the activ
   assert.match(rssMode, /browserPresetUrl=/)
   assert.match(rssMode, /browserPresetName=/)
   assert.match(rssMode, /browserPresetLabel=/)
-  assert.match(rssMode, /selectedSourceId:\s*source\.id/)
+  assert.match(rssMode, /setQuery\(\{ sourceId: source\.id \}\)/)
   assert.match(rssMode, /正在刷新全部 RSS 源/)
-  assert.match(rssMode, /\$\{selectedSourceEntry\.name\} 正在刷新/)
+  assert.match(rssMode, /所选订阅源/ )
   assert.match(addSourceModal, /从当前页面带入/)
   assert.match(addSourceModal, /或者手动填写/)
   assert.match(addSourceModal, /interface AddSourceSuccessInfo/)

@@ -41,9 +41,9 @@ async function main() {
 const db = new DatabaseManager(true);
 db.settings.setSetting('rss:auto_refresh_interval_ms', '0');
 const source = db.rss.addRSSSource({name:'合成验收信源',url:${JSON.stringify(base + '/feed')},enabled:false});
-for(let i=0;i<38;i++){
+for(let i=0;i<132;i++){
  const id='reader-'+i;
- db.rss.upsertRSSItems([{id,source_id:source,guid:id,title:'可读资讯 '+String(i).padStart(2,'0'),link:${JSON.stringify(base)}+'/article/'+i,summary:'来源摘要 '+i,author:'合成作者',published_at:1700000000+i}]);
+ db.rss.upsertRSSItems([{id,source_id:source,guid:id,title:'可读资讯 '+String(i).padStart(2,'0'),link:${JSON.stringify(base)}+'/article/'+i,summary:'来源摘要 '+i,author:'合成作者',published_at:1700000000+(i<38?1000+i:i)}]);
  if(i!==1) db.rss.content.finishLoad(db.rss.content.beginLoad(id),{status:'ready',sourceUrl:${JSON.stringify(base)}+'/article/'+i,markdown:'# 已保存正文\\n\\n## 第一节\\n\\n'+('真实保存长文。'.repeat(4500))+'\\n\\n## 最后一节\\n\\nARTICLE-END-'+i+'\\n\\n\`\`\`ready-widget\\n<script>window.RSS_UNTRUSTED_EXECUTED=true</script>\\n\`\`\`'});
 }
 (db as any).db.exec("CREATE TRIGGER synthetic_save_failure BEFORE UPDATE OF read,starred ON rss_items WHEN OLD.id='reader-35' BEGIN SELECT RAISE(ABORT, '合成保存失败'); END;");
@@ -63,6 +63,28 @@ await (db as any).db.backup(${JSON.stringify(path.join(root, 'ready.db'))}); db.
     }
     assert.ok(page, 'Ready workbench did not open')
     await page.getByTitle('rss', { exact: true }).click()
+    await page.locator('.rss-news-card').first().waitFor()
+    const navigation = page.getByRole('navigation', { name: 'RSS 内部导航' })
+    const expanded = (await navigation.boundingBox()).width
+    await page.getByRole('button', { name: '收起 RSS 导航', exact: true }).click()
+    assert.ok((await navigation.boundingBox()).width < expanded)
+    await page.getByRole('textbox', { name: '搜索资讯', exact: true }).fill('可读资讯 01')
+    await page.getByRole('button', { name: '执行搜索', exact: true }).click()
+    await page.waitForFunction(() => document.querySelectorAll('.rss-news-card').length === 1)
+    await page.getByRole('button', { name: '清除搜索', exact: true }).click()
+    await page.waitForFunction(() => document.querySelectorAll('.rss-news-card').length === 50)
+    await page.getByRole('button', { name: '加载更多', exact: true }).click()
+    await page.waitForFunction(() => document.querySelectorAll('.rss-news-card').length === 100)
+    await page.getByRole('button', { name: '加载更多', exact: true }).click()
+    await page.waitForFunction(() => document.querySelectorAll('.rss-news-card').length === 132)
+    const ids = await page.locator('.rss-news-card').evaluateAll((nodes) => nodes.map((node) => node.dataset.rssItemId))
+    assert.equal(new Set(ids).size, 132)
+    assert.equal(await page.locator('.rss-news-card').evaluateAll((cards) => cards.some((card) => getComputedStyle(card).backdropFilter !== 'none' || card.querySelector('canvas'))), false)
+    await page.locator('.rss-feed-list').evaluate((element) => element.scrollTop = 0)
+    await page.screenshot({ path: path.join(evidence, 'workspace-list.png') })
+    await page.getByRole('button', { name: '展开 RSS 导航', exact: true }).click()
+    await page.screenshot({ path: path.join(evidence, 'workspace-expanded.png') })
+    await page.getByRole('button', { name: '收起 RSS 导航', exact: true }).click()
     await page.getByText('可读资讯 35', { exact: true }).click()
     await page.getByText('ARTICLE-END-35', { exact: true }).waitFor()
     await page.getByRole('alert').filter({ hasText: '合成保存失败' }).waitFor()
@@ -108,7 +130,28 @@ await (db as any).db.backup(${JSON.stringify(path.join(root, 'ready.db'))}); db.
     await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((window) => window.webContents.getURL().includes('/renderer/index.html'))?.setSize(1050, 800))
     await page.screenshot({ path: path.join(evidence, 'reader-narrow.png') })
     assert.equal(await page.locator('.rss-article-reader').evaluate((element) => element.scrollWidth > element.clientWidth), false)
-    report = { ok: true, longArticle: true, sourceCodeInert: true, failedSaveVisible: true, readPersisted: true, returnPreservesScroll: true, outlineNavigation: true, browserLoginReused: true, narrowNoOverflow: true }
+    await page.getByRole('button', { name: '返回列表', exact: true }).click()
+    await page.evaluate(() => window.electronAPI.rss.toggleStarred('reader-120'))
+    await page.getByRole('textbox', { name: '搜索资讯', exact: true }).fill('可读资讯 12')
+    await page.getByRole('button', { name: '执行搜索', exact: true }).click()
+    await page.waitForFunction(() => document.querySelectorAll('.rss-news-card').length === 11)
+    await page.getByRole('button', { name: '清空当前筛选范围中的全部内容', exact: true }).click()
+    await page.waitForFunction(() => document.querySelectorAll('.rss-news-card').length === 1)
+    await navigation.getByRole('button', { name: '历史底稿', exact: true }).click()
+    await page.waitForFunction(() => document.querySelectorAll('.rss-news-card').length === 11)
+    const history = await page.evaluate(() => window.electronAPI.rss.queryItems({ scope: 'library', search: '可读资讯 12' }))
+    assert.equal(history.data.total, 11)
+    const archived = history.data.items.filter((item) => !item.inboxVisible)
+    assert.equal(archived.length, 10)
+    assert.equal(await page.locator(`[data-rss-item-id="${archived[0].id}"] button[title="移出收件箱"]`).count(), 0)
+    await page.reload()
+    await page.getByTitle('rss', { exact: true }).click()
+    await page.getByRole('button', { name: '展开 RSS 导航', exact: true }).waitFor()
+    await page.getByRole('heading', { name: '历史底稿', exact: true }).waitFor()
+    assert.equal(await page.getByRole('textbox', { name: '搜索资讯', exact: true }).inputValue(), '可读资讯 12')
+    await page.waitForFunction(() => document.querySelectorAll('.rss-news-card').length === 11)
+
+    report = { ok: true, navigationCollapse: true, searchAndPagination: true, historyAndFavoritesPreserved: true, preferencesSurviveReload: true, longArticle: true, sourceCodeInert: true, failedSaveVisible: true, readPersisted: true, returnPreservesScroll: true, outlineNavigation: true, browserLoginReused: true, narrowNoOverflow: true }
   } finally {
     if (app) await app.close()
     server.closeAllConnections()

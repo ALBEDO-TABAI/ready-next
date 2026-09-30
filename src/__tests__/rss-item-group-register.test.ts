@@ -6,7 +6,7 @@
 // preload; this test pins the two pieces of the GROUP MECHANISM the gate
 // cannot prove on its own:
 //
-//   1. `register` registers EXACTLY the 6 channel names the group owns
+//   1. `register` registers EXACTLY the 5 channel names the group owns
 //      (no extras, no missing ones).
 //   2. The returned dispose handle calls `removeHandler` for each of those
 //      same 6 channels — so dev-reload re-registration does not leak
@@ -63,12 +63,10 @@ function createMockDeps(): ItemGroupDeps {
   return {
     useMock: false,
     getRSSRepository: fail('getRSSRepository') as ItemGroupDeps['getRSSRepository'],
-    mapItemToAPI: fail('mapItemToAPI') as ItemGroupDeps['mapItemToAPI'],
-    mockItems: [],
   }
 }
 
-test('itemGroup.register wires the 6 documented channels exactly once each', () => {
+test('itemGroup.register wires the 5 documented channels exactly once each', () => {
   const { ipc, handleCalls } = createMockIpc()
   itemGroup.register(ipc, createMockDeps())
 
@@ -77,16 +75,15 @@ test('itemGroup.register wires the 6 documented channels exactly once each', () 
   assert.deepEqual(
     registered,
     expected,
-    'register must subscribe to exactly the 6 item channels',
+    'register must subscribe to exactly the 5 item channels',
   )
-  assert.equal(handleCalls.length, 6, 'each channel must be registered exactly once')
+  assert.equal(handleCalls.length, 5, 'each channel must be registered exactly once')
 
   // Spot-check the exact channel names per the plan (V2.2b, §3 V2.2) so
   // accidental renames trip this test even if the channel count happens
-  // to still be 6. The V5 IPC contract gate catches the renderer side;
+  // to still be 5. The V5 IPC contract gate catches the renderer side;
   // this pins the main-side literals.
   for (const required of [
-    'rss:getItems',
     'rss:markRead',
     'rss:markReadBatch',
     'rss:deleteItems',

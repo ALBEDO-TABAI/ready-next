@@ -45,7 +45,7 @@ Agent、文件面板、技能中心和设置页是跨工作面的能力，不是
 | `skills-runtime/` | embedded/custom skill 扫描、安装、运行与长期任务句柄 |
 | `browser-engine/` | BrowserView、标签、导航、采集、隐私、Power Browser 与后台任务 |
 | `document-engine/` | 文档读写、预览、导出、Widget 与文档任务管线 |
-| `rss-engine/` | RSS 订阅、采集、草稿和诊断 |
+| `rss-engine/` | RSS 订阅、采集、共享查询/正文、底稿和诊断 |
 | `calendar-engine/` | 日历事件、来源、提醒与时间解析 |
 | `file-emergence/` / `tag-forge/` | 文件涌现、项目身份、注意力信号与受控标签写入 |
 | `repositories/` / `database/` | SQLite 数据访问与持久化真值 |
@@ -111,7 +111,7 @@ claude-bridge IPC
 - 文件与侧栏：`src/renderer/components/layout/`
 - Browser：`src/renderer/components/browser/`、`src/renderer/stores/useBrowserTabs.ts`
 - Document：`src/renderer/components/document/`、`src/renderer/stores/useDocTabs.ts`
-- RSS：`src/renderer/components/rss/`、`src/renderer/stores/useRSSSession.ts`；`RSSArticleReader` 与 Document 共享 `components/document/MarkdownContent.tsx`，原生 RSS 预览宿主已退役。
+- RSS：`src/renderer/components/rss/`、`src/renderer/stores/useRSSSession.ts`；列表入口为 `modules/rss/useRSSWorkspace.ts`，消费 Main 查询；`RSSArticleReader` 与 Document 共享 `components/document/MarkdownContent.tsx`，原生 RSS 预览宿主已退役。
 - Calendar：`src/renderer/components/calendar/`、`src/renderer/stores/useCalendarSession.ts`
 - Settings：`src/renderer/pages/Settings.tsx`、`src/renderer/components/settings/`
 - UI 调整导览：`UI_ADJUSTMENT_GUIDE.md`

@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict'
+import { getRSSRefreshOutcome } from '../renderer/modules/rss/settings'
+import { RSSQuerySchema } from '../shared/rss-workspace'
 import test from 'node:test'
 
 import {
@@ -21,28 +23,27 @@ const item = {
 }
 
 function createHandler(params: {
+  refresh?: ReturnType<typeof getRSSRefreshOutcome>
   startStatus?: RSSAnalysisStatus
   progress?: RSSAnalysisProgressLike | null
 }) {
-  const lastAnalysis: Array<Record<string, unknown>> = []
   let progressMap: Record<string, RSSAnalysisProgressLike> = {}
   let progressReads = 0
 
   const handler = createRSSAgentHandler({
+    getView: () => ({ query: RSSQuerySchema.parse({ search: 'test' }), revision: 7, total: 250, unreadTotal: 80, items: [], nextCursor: 'next', lastFetchAt: 1000 }),
     items: [item],
     selectedSource: 'hn',
     selectedItem: item,
     loadRSSData: async () => {},
-    handleRefresh: async () => {},
+    handleRefresh: async () => params.refresh || getRSSRefreshOutcome({ success: true }),
     handleItemClick: () => {},
-    setLastAnalysis: (payload) => {
-      lastAnalysis.push(payload)
-    },
     setAnalysisProgressMap: (updater) => {
       progressMap = updater(progressMap)
     },
     getWorkspaceRoot: () => '/workspace',
     rssApi: {
+      readArticle: async ({ itemId }) => ({ success: true, data: { article: { ...item, id: itemId, publishedAt: Date.parse(item.publishedAt), collectedAt: 1, revision: 'v1', sourceRevision: 's1', bodyStatus: 'missing', coverImage: null, inboxVisible: true }, body: { status: 'missing', revision: null, fetchedAt: null, sourceUrl: item.link, error: null }, text: '', textKind: 'source_summary', offset: 0, totalLength: 0, nextOffset: null } }),
       startItemAnalysis: async () => ({
         success: true,
         data: {
@@ -71,9 +72,6 @@ function createHandler(params: {
 
   return {
     handler,
-    get lastAnalysis() {
-      return lastAnalysis
-    },
     get progressMap() {
       return progressMap
     },
@@ -111,11 +109,6 @@ test('RSS agent analysis returns a running background job instead of waiting for
   assert.equal(result.outputDir, '/workspace/aws-four-years/analysis')
   assert.equal(result.summary, 'RSS 条目分析已启动：《Amazon Web Services - Four Years and Out》。')
   assert.deepEqual(subject.progressMap[item.id], runningProgress)
-  assert.equal(subject.lastAnalysis.at(-1)?.status, 'running_subagent')
-  assert.equal(
-    subject.lastAnalysis.at(-1)?.manifestPath,
-    '/workspace/aws-four-years/analysis/manifest.json',
-  )
 })
 
 test('RSS agent preserves source warnings instead of presenting an old report as current', async () => {
@@ -155,24 +148,24 @@ test('RSS agent analysis reports immediate failures without pretending the job s
   assert.equal(result.status, 'failed')
   assert.equal(result.error, 'AI 模型超时或返回内容不完整')
   assert.equal(result.summary, 'RSS 条目分析失败：《Amazon Web Services - Four Years and Out》。')
-  assert.equal(subject.lastAnalysis.at(-1)?.status, 'failed')
 })
 
 test('RSS agent addSource treats existing sources as a non-blocking result', async () => {
   let reloaded = false
   const handler = createRSSAgentHandler({
+    getView: () => ({ query: RSSQuerySchema.parse({ search: 'test' }), revision: 7, total: 250, unreadTotal: 80, items: [], nextCursor: 'next', lastFetchAt: 1000 }),
     items: [item],
     selectedSource: 'hn',
     selectedItem: item,
     loadRSSData: async () => {
       reloaded = true
     },
-    handleRefresh: async () => {},
+    handleRefresh: async () => getRSSRefreshOutcome({ success: true }),
     handleItemClick: () => {},
-    setLastAnalysis: () => {},
     setAnalysisProgressMap: () => {},
     getWorkspaceRoot: () => '/workspace',
     rssApi: {
+      readArticle: async ({ itemId }) => ({ success: true, data: { article: { ...item, id: itemId, publishedAt: Date.parse(item.publishedAt), collectedAt: 1, revision: 'v1', sourceRevision: 's1', bodyStatus: 'missing', coverImage: null, inboxVisible: true }, body: { status: 'missing', revision: null, fetchedAt: null, sourceUrl: item.link, error: null }, text: '', textKind: 'source_summary', offset: 0, totalLength: 0, nextOffset: null } }),
       addSource: async () => ({
         success: true,
         data: { warning: 'source_exists', itemCount: 30 },
@@ -197,11 +190,33 @@ test('RSS capture reads a completed report again after its source changes withou
   const subject = createHandler(params)
   const before = await subject.handler({ module: 'rss', action: 'rss.captureSession', args: {} }) as Record<string, unknown>
   assert.equal(before.analysis, null)
+  assert.equal(before.totalItems, 250)
+  assert.deepEqual(before.query, { ...RSSQuerySchema.parse({ search: 'test' }), expectedRevision: 7 })
   params.progress = { itemId: item.id, jobId: 'completed-job', action: 'copy', status: 'success', progress: 100,
     message: '分析完成', error: null, outputDir: '/report', reportPath: '/report/analysis.md', updatedAt: '2026-09-30',
     sourceWarning: '原文已更新或删除，此报告来自旧版本。' }
   const after = await subject.handler({ module: 'rss', action: 'rss.captureSession', args: {} }) as Record<string, unknown>
   assert.deepEqual(after.analysis, params.progress)
-  assert.equal(subject.lastAnalysis.length, 0)
   assert.equal(subject.progressReads, 2)
+})
+
+test('Agent refresh preserves Main failure, running, and partial outcomes without claiming completion', async () => {
+  for (const response of [
+    { success: false, error: 'Failed fetch' },
+    { success: true, data: { running: true } },
+    { success: true, data: { errors: ['One source failed'] } },
+  ]) {
+    const refresh = getRSSRefreshOutcome(response)
+    const subject = createHandler({ refresh })
+    const result = await subject.handler({ module: 'rss', action: 'rss.fetchUpdates', args: {} }) as Record<string, unknown>
+    assert.equal(result.status, refresh.status)
+    assert.equal(result.ok, refresh.ok)
+    assert.equal(result.summary, refresh.summary)
+  }
+})
+
+test('Agent can select an explicitly requested article beyond the loaded page', async () => {
+  const subject = createHandler({})
+  const result = await subject.handler({ module: 'rss', action: 'rss.selectItem', args: { itemId: 'outside-the-page' } }) as Record<string, unknown>
+  assert.equal(result.ownerResourceId, 'outside-the-page')
 })

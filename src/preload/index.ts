@@ -826,12 +826,12 @@ const boardAPI = {
 // RSS API
 const rssAPI = {
   queryItems: (query?: unknown) => ipcRenderer.invoke('rss:queryItems', query),
+  dismissQuery: (input: import('../shared/rss-workspace').RSSQueryInput) => ipcRenderer.invoke('rss:dismissQuery', input),
   readArticle: (input: unknown) => ipcRenderer.invoke('rss:readArticle', input),
   loadArticle: (input: unknown) => ipcRenderer.invoke('rss:loadArticle', input),
   getSources: () => ipcRenderer.invoke('rss:getSources'),
   addSource: (source: unknown) => ipcRenderer.invoke('rss:addSource', source),
   removeSource: (id: string) => ipcRenderer.invoke('rss:removeSource', id),
-  getItems: (sourceId?: string) => ipcRenderer.invoke('rss:getItems', sourceId),
   getDraftStoreSources: () => ipcRenderer.invoke('rss:getDraftStoreSources'),
   markRead: (itemId: string) => ipcRenderer.invoke('rss:markRead', itemId),
   markReadBatch: (itemIds: string[]) => ipcRenderer.invoke('rss:markReadBatch', itemIds),

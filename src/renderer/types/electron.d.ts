@@ -2321,23 +2321,6 @@ interface RSSDraftStoreSourceData {
 }
 
 /** RSS item record */
-interface RSSItemData {
-  id: string
-  sourceId: string
-  title: string
-  link: string
-  summary: string
-  author?: string
-  source?: string
-  publishedAt: string
-  inboxVisible?: boolean
-  read: boolean
-  starred: boolean
-  coverImage?: string | null
-  aiScore?: number | null
-  aiTags?: string | null
-}
-
 /** Input for adding an RSS source */
 interface RSSAddSourceInput {
   name?: string
@@ -2400,6 +2383,7 @@ interface RSSItemAnalysisProgress {
 
 interface ElectronRSSAPI {
   queryItems: (query?: import('../../shared/rss-workspace').RSSQueryInput) => Promise<RSSResponse<import('../../shared/rss-workspace').RSSQueryResult>>
+  dismissQuery: (input: import('../../shared/rss-workspace').RSSQueryInput) => Promise<RSSResponse<{ dismissed: number }>>
   readArticle: (input: import('../../shared/rss-workspace').RSSReadArticleInput) => Promise<RSSResponse<import('../../shared/rss-workspace').RSSArticleExcerpt>>
   loadArticle: (input: { itemId: string; force?: boolean }) => Promise<RSSResponse<Omit<import('../../shared/rss-workspace').RSSArticle, 'body'> & { body: Omit<import('../../shared/rss-workspace').RSSArticle['body'], 'markdown'> }>>
   getSources: () => Promise<RSSResponse<RSSSourceData[]>>
@@ -2413,7 +2397,6 @@ interface ElectronRSSAPI {
     }>
   >
   removeSource: (id: string) => Promise<RSSResponse<{ removed: boolean }>>
-  getItems: (sourceId?: string) => Promise<RSSResponse<RSSItemData[]>>
   getDraftStoreSources: () => Promise<RSSResponse<RSSDraftStoreSourceData[]>>
   markRead: (itemId: string) => Promise<RSSResponse<{ marked: boolean }>>
   markReadBatch: (itemIds: string[]) => Promise<RSSResponse<{ marked: number }>>

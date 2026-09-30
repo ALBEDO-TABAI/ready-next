@@ -1,9 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Filter,
   Star,
   Plus,
-  Sparkles,
   ChevronDown,
   ListTodo,
   RefreshCw,
@@ -27,12 +26,16 @@ import { LiquidFloatingPanel } from '../ui/liquid-glass/LiquidFloatingPanel'
 
 export interface RSSItem {
   id: string
+  revision?: string
+  sourceRevision?: string
   title: string
   source: string
   author: string
   sourceId: string
   summary: string
   publishedAt: string
+  publishedAtMs?: number | null
+  collectedAt?: number
   inboxVisible?: boolean
   read: boolean
   starred: boolean
@@ -43,7 +46,6 @@ export interface RSSItem {
 export interface RSSSource {
   id: string
   name: string
-  count: number
   platform?: string
   url?: string
 }
@@ -87,19 +89,15 @@ interface AnalysisJobItem {
 }
 
 interface RSSFeedProps {
+  active?: boolean
   items: RSSItem[]
   sources: RSSSource[]
-  filter: 'all' | 'unread' | 'starred'
   selectedSource: string | null
   selectedItemId: string | null
   loading: boolean
   refreshing: boolean
-  isMock: boolean
-  hasPreview: boolean
-  newItemIds: Set<string>
   analysisProgressMap: Record<string, ItemAnalysisProgress>
   analysisJobs: AnalysisJobItem[]
-  onFilterChange: (filter: 'all' | 'unread' | 'starred') => void
   onSourceChange: (sourceId: string | null) => void
   onItemClick: (item: RSSItem) => void
   onMarkItemRead: (itemId: string) => void
@@ -115,6 +113,12 @@ interface RSSFeedProps {
   onResumeAnalysisJob: (jobId: string) => void
   onDeleteAnalysisJob: (jobId: string) => void
   settingsOpen: boolean
+  nextPage?: boolean
+  loadingMore?: boolean
+  queryError?: string | null
+  inbox?: boolean
+  onLoadMore?: () => void
+  onReloadQuery?: () => void
 }
 
 function progressStroke(status: AnalysisStatus | undefined): string {
@@ -265,19 +269,15 @@ function AnalysisProgressRing({
 }
 
 export default function RSSFeed({
+  active = true,
   items,
   sources,
-  filter,
   selectedSource,
   selectedItemId,
   loading,
   refreshing,
-  isMock,
-  hasPreview: _hasPreview,
-  newItemIds,
   analysisProgressMap,
   analysisJobs,
-  onFilterChange,
   onSourceChange,
   onItemClick,
   onMarkItemRead,
@@ -292,7 +292,7 @@ export default function RSSFeed({
   onPauseAnalysisJob,
   onResumeAnalysisJob,
   onDeleteAnalysisJob,
-  settingsOpen,
+  settingsOpen, nextPage, loadingMore, queryError, inbox = true, onLoadMore, onReloadQuery,
 }: RSSFeedProps) {
   const [taskMenuOpen, setTaskMenuOpen] = useState(false)
   const [sourceMenuOpen, setSourceMenuOpen] = useState(false)
@@ -300,6 +300,10 @@ export default function RSSFeed({
   // so an accidental click on the row's X can't drop a feed and its articles.
   const { modalProps, showConfirm } = useModal()
   const sourceMenuRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!active) { setTaskMenuOpen(false); setSourceMenuOpen(false) }
+  }, [active])
 
   useEffect(() => {
     if (!sourceMenuOpen) return
@@ -312,16 +316,7 @@ export default function RSSFeed({
     return () => document.removeEventListener('mousedown', handler)
   }, [sourceMenuOpen])
 
-  // Apply filters
-  const filteredItems = items.filter((item) => {
-    if (selectedSource && item.sourceId !== selectedSource) return false
-    if (filter === 'unread' && item.read) return false
-    if (filter === 'starred' && !item.starred) return false
-    return true
-  })
-
   const isRefreshing = loading || refreshing
-  const unreadCount = useMemo(() => items.filter((i) => !i.read).length, [items])
   const selectedSourceEntry = useMemo(
     () => sources.find((source) => source.id === selectedSource) ?? null,
     [selectedSource, sources]
@@ -338,7 +333,6 @@ export default function RSSFeed({
     [analysisJobs]
   )
   const sourceSelectWidth = 92
-  const filterSelectWidth = 76
   const calendarPillButtonStyle = {
     padding: '4px 10px',
     borderRadius: 8,
@@ -353,7 +347,7 @@ export default function RSSFeed({
     justifyContent: 'center',
     flexShrink: 0
   } as const
-  const shouldShowBootstrapSkeleton = loading && filteredItems.length === 0
+  const shouldShowBootstrapSkeleton = loading && items.length === 0
   const taskMenuPanel = taskMenuOpen ? (
     <LiquidFloatingPanel
       className="rss-task-menu-panel overflow-hidden rounded-[18px]"
@@ -555,7 +549,7 @@ export default function RSSFeed({
 
   return (
     <div
-      className="rss-feed-surface content-surface-panel rss-workbench-surface relative flex flex-col h-full"
+      className="rss-feed-surface content-surface-panel rss-workbench-surface relative flex flex-col flex-1 min-h-0"
       style={{
         padding: '0',
         background: 'transparent',
@@ -568,42 +562,13 @@ export default function RSSFeed({
         className="rss-feed-toolbar flex items-center justify-between flex-shrink-0"
         style={{
           minHeight: 56,
-          padding: `0 ${WORKBENCH_HEADER_EDGE_X}px 16px`,
+          padding: `10px ${WORKBENCH_HEADER_EDGE_X}px`,
           background: 'transparent',
           borderBottom: '1px solid var(--border-default)'
         }}
       >
-        {/* Left: Title & Badge */}
-        <div className="flex min-w-0 items-center" style={{ gap: 12 }}>
-          <h2
-            className="whitespace-nowrap"
-            style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', lineHeight: 1 }}
-          >
-            RSS 订阅源
-          </h2>
-          {unreadCount > 0 && (
-            <span
-              className="shrink-0 rounded-full text-white"
-              style={{
-                background: 'var(--color-red)',
-                fontSize: 12,
-                fontWeight: 500,
-                padding: '2px 8px',
-                lineHeight: '16px'
-              }}
-            >
-              {unreadCount} 新
-            </span>
-          )}
-          {isMock && (
-            <span className="px-2 py-0.5 rounded-full bg-[var(--color-orange-light)] text-[var(--color-orange)] text-[12px]">
-              Mock 模式
-            </span>
-          )}
-        </div>
-
         {/* Right: Action Controls */}
-        <div className="rss-toolbar-actions flex items-center" style={{ gap: 8 }}>
+        <div className="rss-toolbar-actions flex items-center" style={{ gap: 8, flexWrap: 'wrap', width: '100%' }}>
           {/* Secondary dropdown: 全部源. Custom menu (not a native <select>)
               so each source row can carry an inline delete control — native
               <option> can't host a button. */}
@@ -622,12 +587,12 @@ export default function RSSFeed({
                 whiteSpace: 'nowrap',
                 overflow: 'hidden'
               }}
-              title={selectedSourceEntry ? selectedSourceEntry.name : '全部源'}
+              title={selectedSourceEntry ? selectedSourceEntry.name : selectedSource ? '所选信源' : '全部源'}
               aria-haspopup="listbox"
               aria-expanded={sourceMenuOpen}
             >
               <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {selectedSourceEntry ? selectedSourceEntry.name : '全部源'}
+                {selectedSourceEntry ? selectedSourceEntry.name : selectedSource ? '所选信源' : '全部源'}
               </span>
             </button>
             <ChevronDown
@@ -754,38 +719,6 @@ export default function RSSFeed({
             )}
           </div>
 
-          {/* Secondary dropdown-style: 全部/未读/收藏 */}
-          <div className="relative">
-            <select
-              value={filter}
-              onChange={(e) => onFilterChange(e.target.value as 'all' | 'unread' | 'starred')}
-              className="rss-toolbar-select appearance-none cursor-pointer transition-colors duration-150"
-              style={{
-                ...calendarPillButtonStyle,
-                padding: '4px 28px 4px 12px',
-                width: filterSelectWidth,
-                minWidth: filterSelectWidth
-              }}
-            >
-              <option value="all">全部</option>
-              <option value="unread">未读</option>
-              <option value="starred">收藏</option>
-            </select>
-            <ChevronDown
-              style={{
-                width: 14,
-                height: 14,
-                position: 'absolute',
-                right: 8,
-                top: '50%',
-                transform: 'translateY(-50%)',
-                pointerEvents: 'none',
-                color: 'var(--text-muted)'
-              }}
-              strokeWidth={2}
-            />
-          </div>
-
           <button
             type="button"
             onClick={onAddSource}
@@ -822,10 +755,10 @@ export default function RSSFeed({
             className="rss-toolbar-icon-button"
             data-tooltip={refreshLabel}
             aria-label={
-              selectedSourceEntry ? `刷新当前源：${selectedSourceEntry.name}` : '刷新全部订阅源'
+              selectedSource ? `刷新当前源：${selectedSourceEntry?.name || '所选订阅源'}` : '刷新全部订阅源'
             }
             title={
-              selectedSourceEntry ? `刷新当前源：${selectedSourceEntry.name}` : '刷新全部订阅源'
+              selectedSource ? `刷新当前源：${selectedSourceEntry?.name || '所选订阅源'}` : '刷新全部订阅源'
             }
           >
             <RefreshCw
@@ -836,6 +769,7 @@ export default function RSSFeed({
 
           <button
             onClick={onClearRead}
+            disabled={!inbox}
             className="rss-toolbar-icon-button"
             data-tooltip="清空"
             aria-label="清空当前筛选范围中的全部内容"
@@ -868,6 +802,7 @@ export default function RSSFeed({
         style={{ background: 'transparent' }}
       >
         <div className="flex flex-col gap-2 px-2 py-3">
+          {queryError && <div className="rss-query-error" role="alert">{queryError}<button type="button" onClick={onReloadQuery}>重新读取</button></div>}
           {shouldShowBootstrapSkeleton ? (
             Array.from({ length: 6 }).map((_, index) => (
               <div
@@ -915,32 +850,38 @@ export default function RSSFeed({
                 />
               </div>
             ))
-          ) : filteredItems.length === 0 ? (
+          ) : items.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-64 text-[var(--text-light)]">
               <Filter className="w-10 h-10 mb-3 opacity-50" />
-              <p className="text-[13px]">暂无内容</p>
+              <p className="text-[13px]">{queryError ? '当前范围暂时无法读取' : '暂无内容'}</p>
             </div>
           ) : (
-            filteredItems.map((item) => {
-              const isNew = newItemIds.has(item.id)
+            items.map((item, index) => {
               const isSelected = selectedItemId === item.id
               const metaText = [
                 item.source,
                 item.author && item.author !== item.source ? item.author : null,
-                item.publishedAt
+                item.publishedAt || (item.collectedAt ? `收录于 ${new Date(item.collectedAt).toLocaleString()}` : '')
               ]
                 .filter(Boolean)
                 .join('  ')
+              const dateLabel = (entry: RSSItem) => {
+                const timestamp = entry.publishedAtMs ?? entry.collectedAt
+                return timestamp == null ? '时间未提供' : new Date(timestamp).toLocaleDateString()
+              }
+              const date = dateLabel(item)
               return (
-                <button
-                  key={item.id}
+                <Fragment key={item.id}>
+                {(index === 0 || dateLabel(items[index - 1]) !== date) && <h2 className="rss-date-heading">{date}</h2>}
+                <article data-rss-item-id={item.id}
                   onClick={() => onItemClick(item)}
-                  className="w-full rounded-[12px] text-left transition-colors relative"
+                  className="rss-news-card w-full rounded-[12px] text-left transition-colors relative"
                   style={{
                     padding: `12px ${Math.max(WORKBENCH_HEADER_EDGE_X - 8, 12)}px`,
                     background: isSelected
                       ? 'color-mix(in srgb, var(--surface-card-bg) 16%, transparent)'
-                      : 'color-mix(in srgb, var(--surface-card-bg) 5%, transparent)',
+                      : 'color-mix(in srgb, var(--surface-card-bg) 22%, transparent)',
+                    border: '1px solid var(--border-default)',
                     boxShadow: isSelected ? 'inset 2px 0 0 var(--color-blue)' : 'none'
                   }}
                 >
@@ -976,7 +917,7 @@ export default function RSSFeed({
                         <div
                           className="mb-1 grid items-center gap-2"
                           style={{
-                            gridTemplateColumns: isNew ? 'minmax(0, 1fr) auto' : 'minmax(0, 1fr)'
+                            gridTemplateColumns: 'minmax(0, 1fr)'
                           }}
                         >
                           <h3
@@ -987,16 +928,9 @@ export default function RSSFeed({
                             }`}
                             title={item.title}
                           >
-                            {item.title}
+                            <button type="button" className="text-left">{item.title}</button>
                           </h3>
-                          {isNew && (
-                            <span
-                              className="flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-white text-[9px] flex-shrink-0"
-                              style={{ background: 'var(--color-red)' }}
-                            >
-                              <Sparkles className="w-2.5 h-2.5" />新
-                            </span>
-                          )}
+
                         </div>
                         {item.summary ? (
                           <p
@@ -1063,22 +997,24 @@ export default function RSSFeed({
                           fill={item.starred ? 'currentColor' : 'none'}
                         />
                       </button>
-                      <button
+                      {item.inboxVisible !== false && <button
                         onClick={(e) => {
                           e.stopPropagation()
                           onDeleteItem(item.id)
                         }}
                         className="h-7 w-7 rounded-md hover:bg-[var(--bg-hover)] transition-colors flex items-center justify-center"
-                        title="删除此条推送"
+                        title={item.starred ? "移出收件箱（收藏会继续显示）" : "移出收件箱"}
                       >
                         <X className="w-[16px] h-[16px] text-[var(--text-light)] opacity-80" />
-                      </button>
+                      </button>}
                     </div>
                   </div>
-                </button>
+                </article>
+                </Fragment>
               )
             })
           )}
+          {nextPage && <button type="button" className="rss-load-more" disabled={loading || loadingMore} onClick={onLoadMore}>{loadingMore ? '正在读取…' : '加载更多'}</button>}
         </div>
       </div>
       <Modal {...modalProps} danger confirmLabel="删除" />

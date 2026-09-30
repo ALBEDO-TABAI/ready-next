@@ -18,7 +18,7 @@
 // As groups are extracted in V2.2b … V2.2n this file grows. V2.2a added
 // the SourceGroup surface (repository + mock flag + the `addSource`
 // initial-fetch core). V2.2b adds the ItemGroup surface (item mapper +
-// mock-item fixture for `rss:getItems` mock-mode dispatch).
+// mock-item fixture for fetch diagnostics).
 import type { RSSRepository } from '../../repositories/rss-repository'
 
 /**
@@ -75,16 +75,5 @@ export interface EngineDeps {
   addSourceCore(input: AddSourceCoreInput): Promise<AddSourceCoreResult>
   /** Mock-mode payload returned by `rss:getSources` when `useMock` is true. */
   readonly mockSources: ReadonlyArray<unknown>
-  /**
-   * Map a DB item row → renderer-facing API shape. Used by `rss:getItems`.
-   * Lifted into deps so ItemGroup never imports the host's DB row types or
-   * the host's `mapDBItemToAPI` helper directly.
-   */
-  mapItemToAPI(item: unknown): unknown
-  /**
-   * Mock-mode payload returned by `rss:getItems` when `useMock` is true.
-   * Each entry MUST expose a `sourceId` so the handler can filter by source
-   * the same way the real repository query would.
-   */
   readonly mockItems: ReadonlyArray<{ sourceId: string; [key: string]: unknown }>
 }

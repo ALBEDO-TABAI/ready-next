@@ -547,7 +547,7 @@ export default function RSSSettingsPanel({
                         {sourceHealthLabel(sourceDiagnostics)}
                       </span>
                       <div className="rss-settings-source-counts">
-                        {draft?.storedCount ?? 0} 底稿 · {draft?.inboxCount ?? source.count} 收件箱
+                        {draft?.storedCount ?? 0} 底稿 · {draft?.inboxCount ?? '—'} 收件箱
                       </div>
                       <div className="rss-settings-source-actions">
                         <button

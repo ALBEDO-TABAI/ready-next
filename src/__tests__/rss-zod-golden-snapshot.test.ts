@@ -92,7 +92,7 @@ const EXPECTED_ANTHROPIC = [
   },
   {
     name: 'rss_read_article',
-    description: '按文章 ID 分段读取已保存正文和来源；沿 nextOffset 与 revision 继续读取。正文缺失会明确返回来源摘要，不冒充全文。',
+    description: '按文章 ID 分段读取已保存正文和来源，以及最近分析任务、报告路径与原文变化警告；不重新启动分析。沿 nextOffset 与 revision 续读；缺失正文明确返回来源摘要。',
     input_schema: {
       type: 'object',
       properties: {

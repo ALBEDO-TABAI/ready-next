@@ -44,6 +44,26 @@ function summary(row: ArticleRow): RSSArticleSummary {
   }
 }
 
+function queryPredicate(query: ReturnType<typeof RSSQuerySchema.parse>): { predicate: string; args: unknown[] } {
+  const where: string[] = [], args: unknown[] = []
+  if (query.scope === 'inbox') where.push('(i.inbox_visible=1 OR i.starred=1)')
+  if (query.filter === 'unread') where.push('i.read=0')
+  if (query.filter === 'starred') where.push('i.starred=1')
+  if (query.sourceId) { where.push('i.source_id=?'); args.push(query.sourceId) }
+  if (query.from !== undefined) { where.push('COALESCE(i.published_at,i.first_seen_at)*1000>=?'); args.push(query.from) }
+  if (query.until !== undefined) { where.push('COALESCE(i.published_at,i.first_seen_at)*1000<?'); args.push(query.until) }
+  if (query.search) {
+    const pattern = `%${query.search.replace(/[\\%_]/g, (value) => `\\${value}`)}%`
+    const text = query.searchIn === 'body'
+  ? "CASE WHEN c.item_revision=i.content_revision AND c.status IN ('ready','partial') THEN COALESCE(c.markdown,'') ELSE '' END"
+  : "i.title || char(10) || COALESCE(i.summary,'')"
+    where.push(`(${text}) LIKE ? ESCAPE '\\'`)
+    args.push(pattern)
+  }
+  const predicate = where.length ? ` WHERE ${where.join(' AND ')}` : ''
+  return { predicate, args }
+}
+
 export class RSSContentStore {
   constructor(private readonly getConnection: () => DatabaseConnection | null) {}
 
@@ -72,23 +92,8 @@ export class RSSContentStore {
     try {
       const revision = db.prepare('SELECT revision FROM rss_workspace_state WHERE id=1').get<{ revision: number }>()!.revision
       if (expectedRevision !== undefined && expectedRevision !== revision) throw new Error('cursor_stale')
-      const where: string[] = [], args: unknown[] = []
-      if (query.scope === 'inbox') where.push('(i.inbox_visible=1 OR i.starred=1)')
-      if (query.filter === 'unread') where.push('i.read=0')
-      if (query.filter === 'starred') where.push('i.starred=1')
-      if (query.sourceId) { where.push('i.source_id=?'); args.push(query.sourceId) }
-      if (query.from !== undefined) { where.push('COALESCE(i.published_at,i.first_seen_at)*1000>=?'); args.push(query.from) }
-      if (query.until !== undefined) { where.push('COALESCE(i.published_at,i.first_seen_at)*1000<?'); args.push(query.until) }
-      if (query.search) {
-        const pattern = `%${query.search.replace(/[\\%_]/g, (value) => `\\${value}`)}%`
-        const text = query.searchIn === 'body'
-          ? "CASE WHEN c.item_revision=i.content_revision AND c.status IN ('ready','partial') THEN COALESCE(c.markdown,'') ELSE '' END"
-          : "i.title || char(10) || COALESCE(i.summary,'')"
-        where.push(`(${text}) LIKE ? ESCAPE '\\'`)
-        args.push(pattern)
-      }
-      const predicate = where.length ? ` WHERE ${where.join(' AND ')}` : ''
-      const total = db.prepare(`SELECT COUNT(*) AS count FROM rss_items i LEFT JOIN rss_article_content c ON c.item_id=i.id${predicate}`).get<{ count: number }>(...args)!.count
+      const { predicate, args } = queryPredicate(query)
+      const total = db.prepare(`SELECT COUNT(*) AS count, COALESCE(SUM(i.read=0),0) AS unread FROM rss_items i LEFT JOIN rss_article_content c ON c.item_id=i.id${predicate}`).get<{ count: number; unread: number }>(...args)!
       const direction = query.sort === 'newest' ? 'DESC' : 'ASC'
       const rows = db.prepare(`${ARTICLE_SELECT}${predicate} ORDER BY COALESCE(i.published_at,i.first_seen_at) ${direction},i.id ${direction} LIMIT ? OFFSET ?`)
         .all<ArticleRow>(...args, query.limit, offset)
@@ -97,10 +102,29 @@ export class RSSContentStore {
         : db.prepare('SELECT MAX(last_fetched) AS time FROM rss_sources').get<{ time: number | null }>()?.time
       const nextOffset = offset + rows.length
       return {
-        query, revision, total, lastFetchAt: lastFetch == null ? null : lastFetch * 1000, items: rows.map(summary),
-        nextCursor: nextOffset < total ? Buffer.from(JSON.stringify({ offset: nextOffset, revision, query: fingerprint })).toString('base64url') : null,
+        query, revision, total: total.count, unreadTotal: total.unread, lastFetchAt: lastFetch == null ? null : lastFetch * 1000, items: rows.map(summary),
+        nextCursor: nextOffset < total.count ? Buffer.from(JSON.stringify({ offset: nextOffset, revision, query: fingerprint })).toString('base64url') : null,
       }
     } finally { db.exec('RELEASE rss_read_query') }
+  }
+
+  dismissQuery(input: RSSQueryInput): { dismissed: number } {
+    const query = RSSQuerySchema.parse(input)
+    if (query.scope !== 'inbox' || query.cursor || query.expectedRevision === undefined) throw new Error('清空操作需要当前收件箱范围及资料版本。')
+    const db = this.connection()
+    db.exec('SAVEPOINT rss_dismiss_query')
+    try {
+      this.query({ ...query, limit: 1 })
+      const { predicate, args } = queryPredicate(query)
+      const result = db.prepare(`UPDATE rss_items SET inbox_visible=0 WHERE inbox_visible=1 AND starred=0 AND id IN (
+        SELECT i.id FROM rss_items i LEFT JOIN rss_article_content c ON c.item_id=i.id${predicate}
+      )`).run(...args) as { changes: number }
+      db.exec('RELEASE rss_dismiss_query')
+      return { dismissed: result.changes }
+    } catch (error) {
+      db.exec('ROLLBACK TO rss_dismiss_query; RELEASE rss_dismiss_query')
+      throw error
+    }
   }
 
   getArticle(itemId: string): RSSArticle | null {
