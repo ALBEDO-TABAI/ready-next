@@ -18,6 +18,10 @@ const READING_POINT = { type: 'object', properties: {
   offset: { type: 'integer', minimum: 0, maximum: 9007199254740991, description: '片段内字符位置' },
 }, required: ['run', 'offset'], additionalProperties: false }
 const EXPECTED_ANTHROPIC = [
+  { name: 'rss_read_analysis_report', description: '按任务 ID 分段读取已保存且可核验的分析报告；续读必须沿用 revision。不启动模型，不重新分析；旧报告归属不可核验时明确失败。', input_schema: { type: 'object', properties: {
+    jobId: { type: 'string', description: '已保存的分析任务 ID' }, offset: { type: 'number', description: '首读为 0；续读使用 nextOffset' },
+    length: { type: 'number', description: '每段字符数，最多 24000' }, expectedRevision: { type: 'string', description: '续读必须沿用首次返回的 revision' },
+  }, required: ['jobId'] } },
   { name: 'rss_read_excerpt', description: '读取绑定文章版本的段落或选区；范围原样沿用引用，续读不会越过选区。可用返回的 citationUrl 定位。', input_schema: { type: 'object', properties: {
     format: { type: 'string', description: '阅读映射版本，必须原样沿用引用中的 reading-v1' }, itemId: { type: 'string', description: '已保存文章 ID' }, expectedRevision: { type: 'string', description: '引用绑定的完整文章版本' },
     range: { type: 'object', properties: { start: READING_POINT, end: READING_POINT }, required: ['start', 'end'], additionalProperties: false, description: '引用原样携带的阅读文字范围，不从相同句子猜位置' },

@@ -67,6 +67,7 @@ const READ_ONLY_DOCUMENT_TOOL_NAMES = new Set([
 ])
 
 const READ_ONLY_RSS_TOOL_NAMES = new Set([
+  'rss_read_analysis_report',
   'rss_capture_session',
   'rss_query_items',
   'rss_read_article',

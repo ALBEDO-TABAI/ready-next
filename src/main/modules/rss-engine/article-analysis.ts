@@ -1,6 +1,8 @@
 import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { RSSArticle } from '../../../shared/rss-workspace'
+import { atomicWriteText } from '../agent-control/atomic-write'
+import { analysisReportName } from './analysis-report'
 
 export interface ArticleAnalysisSource {
   itemId: string
@@ -11,7 +13,6 @@ export interface ArticleAnalysisSource {
 
 export interface ArticleAnalysisResult {
   source: ArticleAnalysisSource
-  reportPath: string
 }
 
 export interface ArticleAnalysisDeps {
@@ -53,17 +54,17 @@ export async function runArticleAnalysis(
   assertArticleAnalysisCurrent(source, deps.read)
   await mkdir(input.outputDir, { recursive: true })
   const sourcePath = join(input.outputDir, '网页原文.json')
-  const reportPath = join(input.outputDir, '文案分析报告.md')
+  const reportPath = join(input.outputDir, analysisReportName('copy'))
   await writeFile(sourcePath, JSON.stringify({ ...source, title: article.title, link: article.link, markdown: article.body.markdown }, null, 2), 'utf8')
-  await writeFile(reportPath, [
+  atomicWriteText(reportPath, [
     '# 文案分析报告', '', `- 标题：${article.title}`, `- 原文：${article.link}`,
     `- 来源版本：${source.revision}`, `- 分析范围：${scope}`, '', report.trim(), '',
-  ].join('\n'), 'utf8')
+  ].join('\n'))
   await writeFile(join(input.outputDir, 'manifest.json'), JSON.stringify({
     action: 'copy', itemId: article.id, title: article.title, link: article.link,
     source, sourcePath, reportPath, generatedAt: new Date().toISOString(),
   }, null, 2), 'utf8')
-  return { source, reportPath }
+  return { source }
 }
 
 export function articleAnalysisWarning(meta: unknown, current: RSSArticle | null): string | null {

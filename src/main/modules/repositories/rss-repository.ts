@@ -172,7 +172,4 @@ export class RSSRepository {
     return getDatabase().rss.markInterruptedRSSAnalysisJobs()
   }
 
-  cleanupRSSAnalysisJobs(retentionDays: number, maxRows: number): number {
-    return getDatabase().rss.cleanupRSSAnalysisJobs(retentionDays, maxRows)
-  }
 }

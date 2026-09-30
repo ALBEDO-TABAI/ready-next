@@ -472,14 +472,14 @@ export class RSSStore {
   }
 
   markInterruptedRSSAnalysisJobs(): number {
-    if (!this.db) return 0
+    if (!this.db) throw new Error('Database not available')
     const now = new Date().toISOString()
     const result = this.db.prepare(
       `UPDATE rss_analysis_jobs
        SET status = 'failed',
            progress = CASE WHEN progress > 0 THEN progress ELSE 5 END,
            error = COALESCE(error, '任务因应用重启而中断'),
-           message = COALESCE(message, '任务中断'),
+           message = '任务因应用重启而中断',
            finished_at = COALESCE(finished_at, ?),
            updated_at = ?
        WHERE status IN ('queued', 'running_script', 'running_subagent')`
@@ -487,34 +487,4 @@ export class RSSStore {
     return result.changes ?? 0
   }
 
-  cleanupRSSAnalysisJobs(retentionDays: number, maxRows: number): number {
-    if (!this.db) return 0
-    const days = Math.max(1, Math.min(365, Math.floor(retentionDays)))
-    const rowsLimit = Math.max(0, Math.floor(maxRows))
-    const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString()
-
-    let deleted = 0
-    const byAge = this.db.prepare('DELETE FROM rss_analysis_jobs WHERE updated_at < ?').run(cutoff) as {
-      changes?: number
-    }
-    deleted += byAge.changes ?? 0
-
-    if (rowsLimit > 0) {
-      const overflowRows = this.db.prepare(
-        `SELECT id FROM rss_analysis_jobs
-         ORDER BY updated_at DESC
-         LIMIT -1 OFFSET ?`
-      ).all<{ id: string }>(rowsLimit)
-      if (overflowRows.length > 0) {
-        const ids = overflowRows.map((row) => row.id)
-        const placeholders = ids.map(() => '?').join(', ')
-        const byCount = this.db.prepare(
-          `DELETE FROM rss_analysis_jobs WHERE id IN (${placeholders})`
-        ).run(...ids) as { changes?: number }
-        deleted += byCount.changes ?? 0
-      }
-    }
-
-    return deleted
-  }
 }

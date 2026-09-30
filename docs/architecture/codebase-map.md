@@ -45,7 +45,7 @@ Agent、文件面板、技能中心和设置页是跨工作面的能力，不是
 | `skills-runtime/` | embedded/custom skill 扫描、安装、运行与长期任务句柄 |
 | `browser-engine/` | BrowserView、标签、导航、采集、隐私、Power Browser 与后台任务 |
 | `document-engine/` | 文档读写、预览、导出、Widget 与文档任务管线 |
-| `rss-engine/` | RSS 订阅、采集、共享查询/正文、栏目归属、自动整理、事件、日报与底稿；任务由 `database/rss-processing-store.ts` 保存，分类结果/当前指针由 `rss-organization-store.ts` 保存，事件/事实/证据由 `rss-event-store.ts` 保存，刊期及引用快照由 `rss-digest-store.ts` 保存；选区映射由 `shared/rss-reading.ts` 同时供 Main 与共享阅读器消费 |
+| `rss-engine/` | RSS 订阅、采集、共享查询/正文、栏目归属、自动整理、事件、日报与底稿；任务由 `database/rss-processing-store.ts` 保存，分类结果/当前指针由 `rss-organization-store.ts` 保存，事件/事实/证据由 `rss-event-store.ts` 保存，刊期及引用快照由 `rss-digest-store.ts` 保存；选区映射由 `shared/rss-reading.ts` 同时供 Main 与共享阅读器消费；`analysis-report.ts` 校验独立任务报告的发布身份并提供版本绑定读取 |
 | `calendar-engine/` | 日历事件、来源、提醒与时间解析 |
 | `file-emergence/` / `tag-forge/` | 文件涌现、项目身份、注意力信号与受控标签写入 |
 | `repositories/` / `database/` | SQLite 数据访问与持久化真值 |

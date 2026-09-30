@@ -2,6 +2,15 @@
 
 > 更新时间：2026-10-01
 
+## 2026-10-01 RSS 分析历史与报告保存
+
+| 文件 | 当前行数 | 净增 | 判断 | 后续 |
+|---|---:|---:|---|---|
+| `src/main/modules/rss-engine/item-analysis-manager.ts` | 1109 | 15 | 一般 | 报告身份校验与分页留在 analysis-report；宿主只负责启动、队列与发布，2026-11-01 复查媒体 helper 边界 |
+| `src/main/modules/rss-engine/ipc-handler.ts` | 1241 | 1 | 一般 | 仅显式启动分析恢复，2026-11-01 复查组装 |
+| `src/main/modules/tools/tool-executor.ts` | 1267 | 1 | 一般 | 只注入报告读取，2026-11-01 复查域路由 |
+| `src/main/modules/agent-control/tools-runtime/tool-registry.ts` | 1546 | 1 | 一般 | 只登记报告读工具，2026-11-01 复查域注册 |
+
 ## 2026-10-01 RSS 段落引用与定位
 
 | 文件 | 当前行数 | 净增 | 判断 | 后续 |

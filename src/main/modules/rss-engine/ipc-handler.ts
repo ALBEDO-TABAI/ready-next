@@ -1042,6 +1042,7 @@ export function setupRSSIPC(useMock = false): void {
   })
   const analysisManager = getRSSItemAnalysisManager()
   if (!useMock) {
+    analysisManager.initialize()
     getRSSContentService()
     loadRouteDiagnosticsSnapshot()
     queueMicrotask(() => {

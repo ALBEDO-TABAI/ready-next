@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { RSSReadAnalysisReportSchema, type RSSReadAnalysisReportInput, type RSSAnalysisReportPage } from '../../../shared/rss-analysis-report'
 import { RSSReadExcerptSchema } from '../../../shared/rss-excerpt'
 import { RSSDigestReadSchema } from '../../../shared/rss-digests'
 import type { RSSDigestStore } from '../database/rss-digest-store'
@@ -31,6 +32,7 @@ interface RSSToolDef {
 }
 
 interface RSSToolContext {
+  readAnalysisReport?: (input: RSSReadAnalysisReportInput) => RSSAnalysisReportPage
   getDigests?: () => Pick<RSSDigestStore, 'read' | 'schedule'>
   getEvents?: () => Pick<RSSEventStore, 'browse'>
   getProcessing?: () => Pick<RSSProcessingStore, 'list' | 'status'>
@@ -43,6 +45,8 @@ interface RSSToolContext {
 }
 
 const RSS_TOOLS: RSSToolDef[] = [
+  { name: 'rss_read_analysis_report', description: '按任务 ID 分段读取已保存且可核验的分析报告；续读必须沿用 revision。不启动模型，不重新分析；旧报告归属不可核验时明确失败。',
+    action: 'rss.readAnalysisReport', intent: 'read_rss_analysis_report', executionKind: 'deterministic', params: zodObjectToParamList(RSS_SCHEMAS.rss_read_analysis_report) as ToolParam[] },
   { name: 'rss_read_excerpt', description: '读取绑定文章版本的段落或选区；范围原样沿用引用，续读不会越过选区。可用返回的 citationUrl 定位。',
     action: 'rss.readExcerpt', intent: 'read_rss_excerpt', executionKind: 'deterministic', params: zodObjectToParamList(RSS_SCHEMAS.rss_read_excerpt) as ToolParam[] },
   { name: 'rss_read_digests', description: '分页读取已保存日报或范围简报、原文依据与采集覆盖；仅查询，不生成、不重算、不标已读。',
@@ -171,6 +175,12 @@ export async function executeRSSTool(
 ): Promise<string> {
   const tool = RSS_TOOLS.find((item) => item.name === toolName)
   if (!tool) return `Unknown RSS tool: ${toolName}`
+
+  if (toolName === 'rss_read_analysis_report') {
+    if (context?.readAccessDenied || !context?.readAnalysisReport) return toStructuredResult(tool, '当前会话未获准读取本机 RSS 资料。', { ok: false, error: 'rss_read_not_authorized' })
+    try { return toStructuredResult(tool, '已读取发布时保存的分析报告；原文变化提示与报告版本独立，未重新分析。', { ok: true, data: context.readAnalysisReport(RSSReadAnalysisReportSchema.parse(args)) }) }
+    catch (error) { return toStructuredResult(tool, '分析报告读取失败。', { ok: false, error: error instanceof Error ? error.message : String(error) }) }
+  }
 
   if (toolName === 'rss_read_digests') {
     if (context?.readAccessDenied || !context?.getDigests) return toStructuredResult(tool, '当前会话未获准读取本机 RSS 资料。', { ok: false, error: 'rss_read_not_authorized' })

@@ -54,7 +54,14 @@ async function main() {
       for await (const chunk of req) chunks.push(chunk)
       const request = JSON.parse(Buffer.concat(chunks).toString('utf8'))
       const user = request.messages.find((message) => message.role === 'user')
-      const input = JSON.parse(typeof user.content === 'string' ? user.content : user.content.map((part) => part.text || '').join(''))
+      const userText = typeof user.content === 'string' ? user.content : user.content.map((part) => part.text || '').join('')
+      if (userText.startsWith('标题:')) {
+        const text = `## 一、TextContent Analysis 视角\n合成报告 ${modelRequests}，只验证保存流程。\n## 二、Viral-Abstract-Script 视角\n不评估真实模型质量。\n## 三、Brainstorming 视角\n保留原始资料。`
+        res.writeHead(200, { 'content-type': 'text/event-stream' })
+        res.end(`data: ${JSON.stringify({ choices: [{ index: 0, delta: { content: text }, finish_reason: null }] })}\n\ndata: ${JSON.stringify({ choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] })}\n\ndata: [DONE]\n\n`)
+        return
+      }
+      const input = JSON.parse(userText)
       res.writeHead(200, { 'content-type': 'text/event-stream' })
       if (holdModelResponse) { res.write(': waiting for cancellation\n\n'); return }
       let event = input.eventContext && !input.eventContext.manual && !input.eventContext.reused ? { kind: 'insufficient', eventId: null, factId: null, quote: null, sourceRole: 'unknown', reason: '合成分类验收不强行归组。' } : undefined
@@ -545,7 +552,24 @@ await (db as any).db.backup(${JSON.stringify(path.join(root, 'ready.db'))}); db.
     assert.equal(await digestPanel.evaluate((element) => element.scrollWidth > element.clientWidth), false)
     await page.screenshot({ path: path.join(evidence, 'digest-narrow.png') })
 
+    const analysisReports = []
+    for (let index = 0; index < 2; index++) {
+      const started = await page.evaluate((targetDir) => window.electronAPI.rss.startItemAnalysis({ itemId: 'reader-1', action: 'copy', title: 'ignored', link: 'ignored', targetDir, force: true }), path.join(root, 'analysis'))
+      assert.equal(started.success, true, started.error)
+      await waitForIPC(page, (id) => window.electronAPI.rss.listItemAnalysisJobs({ itemId: 'reader-1' }).then((result) => result.data?.some((job) => job.id === id && ['success', 'failed'].includes(job.status))), started.data.id)
+      const jobs = await page.evaluate(() => window.electronAPI.rss.listItemAnalysisJobs({ itemId: 'reader-1' }))
+      const job = jobs.data.find((entry) => entry.id === started.data.id)
+      assert.equal(job.status, 'success', job.error)
+      assert.equal(job.meta.reportArtifact.jobId, job.id)
+      assert.equal(require('node:crypto').createHash('sha256').update(fs.readFileSync(job.reportPath)).digest('hex'), job.meta.reportArtifact.sha256)
+      analysisReports.push({ job, text: fs.readFileSync(job.reportPath, 'utf8') })
+    }
+    assert.notEqual(analysisReports[0].job.reportPath, analysisReports[1].job.reportPath)
+    assert.equal(fs.readFileSync(analysisReports[0].job.reportPath, 'utf8'), analysisReports[0].text)
+    fs.writeFileSync(path.join(evidence, 'analysis-report-publications.json'), JSON.stringify(analysisReports, null, 2))
+
     report = { ok: true, exactSelectionReferenceAndReveal: true, paragraphReference: true, scheduledDailyEdition: true, digestDarkAndNarrow: true, rangeBriefExportAndRegeneration: true, digestReferences: true, savedVersionRestorationWithoutModel: true, failedRefreshPreservesBody: true, automaticEventGroupingAndProgress: true, factSeenDoesNotReadAllArticles: true, manualEventSplitMoveMerge: true, groupExpansionKeepsFilter: true, automaticRefreshProcessesOnlyNewItems: true, semanticProcessingThroughLocalProvider: true, cancelProcessingKeepsCallCount: true, historicalImportNotProcessed: true, customDefinitions: true, applicationRestartPreservesDefinitions: true, manualMemberships: true, curationSeparateFromBookmarks: true, typedRSSReferences: true, staleReferenceVisible: true, saveNoteReadback: true, noteEditIndependent: true, exportAllPages: true, cancelExport: true, navigationCollapse: true, searchAndPagination: true, historyAndFavoritesPreserved: true, preferencesSurviveReload: true, longArticle: true, sourceCodeInert: true, failedSaveVisible: true, readPersisted: true, returnPreservesScroll: true, outlineNavigation: true, browserLoginReused: true, narrowNoOverflow: true }
+    report.independentAnalysisReports = true
   } catch (error) {
     const failedPage = app?.windows().find((entry) => entry.url().includes('/renderer/index.html'))
     if (failedPage) await failedPage.screenshot({ path: path.join(evidence, 'failure.png') }).catch(() => {})

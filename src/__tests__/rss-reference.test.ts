@@ -4,6 +4,10 @@ import { defaultToolRegistry } from '../main/modules/agent-control/tools-runtime
 import { TAG_FORGE_FOLDER_RUNTIME_TOOL_NAMES, RSS_RESOURCE_FLOOR_TOOL_NAMES } from '../main/modules/agent-control/domain-adapters/capability-floors'
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { captureAnalysisReport, readAnalysisReportPage } from '../main/modules/rss-engine/analysis-report'
 import { formatRSSReference, RSSReferenceSchema, rssReferencesFromEnvelope } from '../shared/rss-reference'
 import { buildRequestEnvelope, envelopeHasLocalDocumentResource } from '../main/modules/agent-control/contracts/request-envelope'
 import { computeCapabilityFloors, enforceCapabilityFloors } from '../main/modules/agent-control/domain-adapters/capability-floors'
@@ -122,9 +126,15 @@ test('Tag Forge folder isolation preserves only the additional referenced RSS re
 test('the real SDK request exposes the referenced read with a selected skill and returns native saved content', async (t) => {
   if (skipIfSqliteUnavailable(t, 'RSS reference SDK delivery')) return
   const db = new DatabaseManager(true)
+  const reportDir = mkdtempSync(join(tmpdir(), 'rss-sdk-report-'))
   const source = db.rss.addRSSSource({ name: 'Fixture', url: 'https://example.test/feed' })
   db.rss.upsertRSSItems([{ id: 'model-read', source_id: source, guid: 'model-read', title: 'Model read', link: 'https://example.test/article', summary: 'SAVED-CONTENT-FROM-NATIVE-STORE' }])
   const article = db.rss.content.getArticle('model-read')!
+  const reportPath = join(reportDir, '文案分析报告.md')
+  writeFileSync(reportPath, 'VERIFIED-REPORT-FROM-SAVED-FILE')
+  const reportJob = db.rss.createRSSAnalysisJob({ id: 'sdk-report', itemId: article.id, action: 'copy', sourceUrl: article.link,
+    title: article.title, targetDir: reportDir, outputDir: reportDir, status: 'running_subagent', progress: 98 })
+  db.rss.updateRSSAnalysisJob(reportJob.id, { status: 'success', reportPath, metaJson: JSON.stringify({ reportArtifact: captureAnalysisReport(reportJob) }) })
   const event = db.rss.events.move({ itemId: article.id, expectedArticleRevision: article.revision, expectedMembershipRevision: 0, targetEventId: null, quote: article.summary })
   const digest = db.rss.digests.generate({ kind: 'range', from: 0, until: Date.now(), timezone: 'UTC', query: {} })
   const excerpt = RSSReferenceSchema.parse({ kind: 'excerpt', read: { format: 'reading-v1', itemId: article.id, expectedRevision: article.revision, range: { start: { run: 0, offset: 0 }, end: { run: 0, offset: 5 } } } })
@@ -134,14 +144,15 @@ test('the real SDK request exposes the referenced read with a selected skill and
   const runtime = new AgentSdkRuntime({
     loadAIConfig: () => ({ ok: true, config, reason: 'present' }), domainAdapters: [],
     executeToolCall: async (name, args, context) => {
-      assert.ok(['rss_read_excerpt', 'rss_read_reference', 'rss_read_events', 'rss_read_digests'].includes(name))
-      const text = await executeRSSTool(name, args, { getDigests: () => db.rss.digests, getContent: () => db.rss.content, getEvents: () => db.rss.events, references: rssReferencesFromEnvelope(context.requestEnvelope) })
+      assert.ok(['rss_read_analysis_report', 'rss_read_excerpt', 'rss_read_reference', 'rss_read_events', 'rss_read_digests'].includes(name))
+      const text = await executeRSSTool(name, args, { readAnalysisReport: (input) => readAnalysisReportPage(input, (id) => db.rss.getRSSAnalysisJob(id), () => null), getDigests: () => db.rss.digests, getContent: () => db.rss.content, getEvents: () => db.rss.events, references: rssReferencesFromEnvelope(context.requestEnvelope) })
       return createToolExecutionOutput(text, { shape: 'json', data: JSON.parse(text) })
     },
     fetchWithTimeout: async (_url, init) => {
       requests.push(JSON.parse(String(init.body)))
       const payload = requests.length === 1
         ? { choices: [{ message: { tool_calls: [
+          { id: 'call-analysis-report', type: 'function', function: { name: 'rss_read_analysis_report', arguments: JSON.stringify({ jobId: reportJob.id }) } },
           { id: 'call-excerpt', type: 'function', function: { name: 'rss_read_excerpt', arguments: JSON.stringify(excerpt.kind === 'excerpt' ? excerpt.read : {}) } },
           { id: 'call-excerpt-reference', type: 'function', function: { name: 'rss_read_reference', arguments: JSON.stringify({ referenceId: rssReferencesFromEnvelope(envelope).find((r) => r.reference.kind === 'excerpt')!.id }) } },
           { id: 'call-reference', type: 'function', function: { name: 'rss_read_reference', arguments: JSON.stringify({ referenceId: resource.id }) } },
@@ -163,6 +174,8 @@ test('the real SDK request exposes the referenced read with a selected skill and
     assert.ok(requests[0].tools.some((tool: any) => tool.function?.name === 'rss_read_reference'))
     assert.ok(requests[0].tools.some((tool: any) => tool.function?.name === 'rss_read_events'))
     assert.match(JSON.stringify(requests[1].messages), /SAVED-CONTENT-FROM-NATIVE-STORE/)
+    assert.match(JSON.stringify(requests[1].messages), /VERIFIED-REPORT-FROM-SAVED-FILE/)
+    assert.ok(requests[0].tools.some((tool: any) => tool.function?.name === 'rss_read_analysis_report'))
     assert.equal(db.rss.content.getArticle(article.id)!.read, false)
     assert.match(JSON.stringify(requests[1].messages), /rss.readEvents/)
     assert.match(JSON.stringify(requests[1].messages), /rss.readDigests/)
@@ -171,7 +184,7 @@ test('the real SDK request exposes the referenced read with a selected skill and
     assert.match(JSON.stringify(requests[1].messages), /reading_text/)
     assert.match(JSON.stringify(requests[1].messages), /ready-rss:/)
     assert.equal(db.rss.events.summary(event.eventId!).unseenFactCount, 1)
-  } finally { db.close() }
+  } finally { db.close(); rmSync(reportDir, { recursive: true, force: true }) }
 })
 
 
