@@ -3,7 +3,7 @@
 
 // Structural contract only: behavior is verified by the native storage suite.
 const assert = require('node:assert/strict')
-const { readFileSync } = require('node:fs')
+const { readFileSync, readdirSync } = require('node:fs')
 const ts = require('typescript')
 
 function parse(file) {
@@ -19,8 +19,8 @@ assert.deepEqual(
   'Product methods belong to domain stores, not the connection owner',
 )
 
-for (const name of ['rss', 'calendar', 'browser', 'chat', 'settings', 'channel']) {
-  const file = `src/main/modules/database/${name}-store.ts`
+for (const name of readdirSync('src/main/modules/database').filter((name) => name.endsWith('-store.ts'))) {
+  const file = `src/main/modules/database/${name}`
   const source = parse(file)
   function visit(node) {
     if (ts.isImportDeclaration(node)) {

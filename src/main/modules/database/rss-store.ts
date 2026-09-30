@@ -1,8 +1,13 @@
 import type { DatabaseConnection } from './connection'
+import { RSSContentStore } from './rss-content-store'
 import type { RSSSource, RSSItem, RSSDraftStoreSourceSummary, RSSStats, RSSAnalysisAction, RSSAnalysisJobStatus, RSSAnalysisJob } from './records'
 
 export class RSSStore {
-  constructor(private readonly getConnection: () => DatabaseConnection | null) {}
+  readonly content: RSSContentStore
+
+  constructor(private readonly getConnection: () => DatabaseConnection | null) {
+    this.content = new RSSContentStore(getConnection)
+  }
 
   private get db(): DatabaseConnection | null {
     return this.getConnection()

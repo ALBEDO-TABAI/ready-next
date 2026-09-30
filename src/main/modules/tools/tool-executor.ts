@@ -679,7 +679,8 @@ async function executeToolCallInner(
 
         case 'rss':
           return executeRSSTool(toolName, args, {
-            emitToolAction: context.emitToolAction,
+            getContent: () => getDatabase().rss.content,
+            readAccessDenied: context.scope?.sourceKind !== 'local',
             requestModuleToolAction: context.requestModuleToolAction,
           })
 

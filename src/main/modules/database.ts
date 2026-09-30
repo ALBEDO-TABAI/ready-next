@@ -10,6 +10,7 @@ import { ChannelStore } from './database/channel-store'
 import { createRequire } from 'module'
 import { join } from 'path'
 import { runMigrations } from './migrations'
+import { backupBeforeRSSMigration } from './database/rss-migration-backup'
 import { createRotatingLogger } from '../utils/rotating-logger'
 
 // Use CommonJS `require('electron')` rather than `import { app } from 'electron'`.
@@ -193,6 +194,9 @@ export class DatabaseManager {
     } catch (error) {
       logDatabase(`database initialization failed path=${this.dbPath} error=${error instanceof Error ? error.stack || error.message : String(error)}`)
       console.error('Database initialization failed:', error)
+      try { this.db?.close() } catch (closeError) {
+        logDatabase(`failed initialization cleanup: ${formatDatabaseError(closeError)}`)
+      }
       this.db = null
       if (error instanceof DatabaseUnavailableError) throw error
       throw new DatabaseUnavailableError(
@@ -209,6 +213,8 @@ export class DatabaseManager {
   private createTables(): void {
     if (!this.db) return
 
+    const backup = backupBeforeRSSMigration(this.db, this.dbPath)
+    if (backup) logDatabase(`RSS migration backup created: ${backup}`)
     // Run the migration system to create/update all tables and indexes
     runMigrations(this.db)
 

@@ -50,9 +50,20 @@ export function useRSSAgentAdapter(params: UseRSSAgentAdapterParams): void {
     setFeedSnapshot({
       totalItems: items.length,
       unreadItems: items.filter((item) => !item.read).length,
-      lastFetchAt: Date.now(),
     })
   }, [items, selectedItem, selectedSource, setFeedSnapshot, setSelection])
+
+  useEffect(() => {
+    const query = window.electronAPI?.rss?.queryItems
+    if (!query) return
+    let active = true
+    void query({ sourceId: selectedSource || undefined, limit: 1 }).then((result) => {
+      if (active && result.success && result.data) setFeedSnapshot({ lastFetchAt: result.data.lastFetchAt })
+    }).catch(() => {
+      // Keep the last confirmed fetch time when the read fails; selecting a row is never a fetch.
+    })
+    return () => { active = false }
+  }, [items, selectedSource, setFeedSnapshot])
 
   useEffect(() => {
     return registerModuleAgentHandler(

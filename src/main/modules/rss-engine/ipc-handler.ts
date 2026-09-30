@@ -56,6 +56,8 @@ import {
 } from './ipc/fetch-group'
 import { diagnosticsGroup } from './ipc/diagnostics-group'
 import { exportGroup } from './ipc/export-group'
+import { contentGroup } from './ipc/content-group'
+import { getRSSContentService } from './content-runtime'
 import type { AddSourceCoreInput, AddSourceCoreResult } from './ipc/engine-deps'
 import type { IpcDisposeHandle } from './ipc/types'
 import {
@@ -252,6 +254,7 @@ let diagnosticsGroupDispose: IpcDisposeHandle | null = null
  * (source / item / analysis / fetch / diagnostics / export) is now complete.
  */
 let exportGroupDispose: IpcDisposeHandle | null = null
+let contentGroupDispose: IpcDisposeHandle | null = null
 
 export function setRSSBrowserController(controller: BrowserController | null): void {
   rssBrowserController = controller
@@ -1028,8 +1031,15 @@ async function runAddSourceCore(input: AddSourceCoreInput): Promise<AddSourceCor
 }
 
 export function setupRSSIPC(useMock = false): void {
+  contentGroupDispose?.dispose()
+  contentGroupDispose = contentGroup.register(ipcMain, {
+    useMock,
+    getContent: () => rssRepository.getContentStore(),
+    getLoader: getRSSContentService,
+  })
   const analysisManager = getRSSItemAnalysisManager()
   if (!useMock) {
+    getRSSContentService()
     loadRouteDiagnosticsSnapshot()
     queueMicrotask(() => {
       if (isRSSHubRequiredForCurrentSources()) {

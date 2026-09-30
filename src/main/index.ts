@@ -60,6 +60,7 @@ import { runBeforeQuitCleanup } from './modules/process-cleanup/before-quit'
 import { closeAllBrowsers } from './modules/browser-engine/browser-cleanup'
 import { assertPrimaryDatabaseReady, getDatabase } from './modules/database'
 import { shutdownWorkerDbBridge } from './modules/database/worker-bridge'
+import { stopRSSContentService } from './modules/rss-engine/content-runtime'
 import { registerMainProcessHandlers } from './process-handlers'
 import {
   createWindowMaterialController,
@@ -318,7 +319,7 @@ function stopRSSAutoRefresh(): Promise<void> {
 }
 
 function runFatalProcessCleanup(): Promise<void> {
-  const rssAutoRefreshStopped = stopRSSAutoRefresh()
+  const rssAutoRefreshStopped = Promise.all([stopRSSAutoRefresh(), stopRSSContentService()])
   return runBeforeQuitCleanup({
     cleanupAgentRuntime,
     cleanupAgentManager: () => agentManager.cleanup(),
@@ -1202,7 +1203,7 @@ app.on('before-quit', (event) => {
   } catch (err) {
     console.warn('[before-quit] calendarSyncScheduler.stop threw:', err)
   }
-  const rssAutoRefreshStopped = stopRSSAutoRefresh()
+  const rssAutoRefreshStopped = Promise.all([stopRSSAutoRefresh(), stopRSSContentService()])
   void runBeforeQuitCleanup({
     cleanupAgentRuntime,
     cleanupAgentManager: () => agentManager.cleanup(),

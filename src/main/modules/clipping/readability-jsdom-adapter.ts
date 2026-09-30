@@ -15,6 +15,7 @@ import { Readability } from '@mozilla/readability'
 import { JSDOM } from 'jsdom'
 import TurndownService from 'turndown'
 import { gfm } from 'turndown-plugin-gfm'
+import { ClipFetchError } from './clip-fetch'
 
 import type {
   ExtractionAdapter,
@@ -57,6 +58,16 @@ export class ReadabilityJsdomAdapter implements ExtractionAdapter {
 
     const weChatArticle = extractWeChatArticle(document, dom.window.document, input.url, structuredData, metaLookup)
     if (weChatArticle) return weChatArticle
+
+    // Prefer the article itself over the surrounding page: a comment sign-in
+    // form in the same <main> does not gate an independently readable article.
+    const primary = document.querySelector('article')
+      || document.querySelector('main, [role="main"]') || document.body
+    const authenticationInPrimaryContent = Array.from(primary.querySelectorAll('form input[type="password"]'))
+      .some((field) => !field.closest('aside, header, nav, footer, [role="complementary"], [role="navigation"], [hidden], [aria-hidden="true"]'))
+    if (authenticationInPrimaryContent) {
+      throw new ClipFetchError('login_required', 'The main page content requires sign-in; no article body was obtained')
+    }
 
     let readabilityArticle: ReturnType<Readability['parse']> = null
     try {

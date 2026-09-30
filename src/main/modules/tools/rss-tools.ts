@@ -1,11 +1,14 @@
 import { RSS_SCHEMAS } from './schemas/rss-schemas'
 import { zodObjectToParamList } from './zod-param-derivation'
+import { RSSQuerySchema, RSSReadArticleSchema } from '../../../shared/rss-workspace'
+import type { RSSContentStore } from '../database/rss-content-store'
 
 interface ToolParam {
   name: string
   type: string
   description: string
   required: boolean
+  enum?: string[]
 }
 
 interface RSSToolDef {
@@ -18,7 +21,8 @@ interface RSSToolDef {
 }
 
 interface RSSToolContext {
-  emitToolAction?: (tool: string, args: Record<string, unknown>) => void
+  getContent?: () => Pick<RSSContentStore, 'query' | 'readArticle'>
+  readAccessDenied?: boolean
   requestModuleToolAction?: (tool: string, args: Record<string, unknown>) => Promise<Record<string, unknown>>
 }
 
@@ -63,23 +67,36 @@ const RSS_TOOLS: RSSToolDef[] = [
     executionKind: 'deterministic',
     params: zodObjectToParamList(RSS_SCHEMAS.rss_capture_session) as ToolParam[],
   },
+  {
+    name: 'rss_query_items',
+    description: '查询已保存的 RSS 资讯；支持收件箱/历史底稿、筛选和连续分页，不打开界面、不抓取、不改已读。',
+    action: 'rss.queryItems', intent: 'query_rss_items', executionKind: 'deterministic',
+    params: zodObjectToParamList(RSS_SCHEMAS.rss_query_items) as ToolParam[],
+  },
+  {
+    name: 'rss_read_article',
+    description: '按文章 ID 分段读取已保存正文和来源；沿 nextOffset 与 revision 继续读取。正文缺失会明确返回来源摘要，不冒充全文。',
+    action: 'rss.readArticle', intent: 'read_rss_article', executionKind: 'deterministic',
+    params: zodObjectToParamList(RSS_SCHEMAS.rss_read_article) as ToolParam[],
+  },
 ]
 
 function toSchemaParam(param: ToolParam): Record<string, unknown> {
   return {
     type: param.type,
     description: param.description,
+    ...(param.enum ? { enum: param.enum } : {}),
   }
 }
 
 function toStructuredResult(tool: RSSToolDef, message: string, extra?: Record<string, unknown>): string {
   return JSON.stringify({
+    ...(extra || {}),
     module: 'rss',
     intent: tool.intent,
     executionKind: tool.executionKind,
     action: tool.action,
     message,
-    ...(extra || {}),
   })
 }
 
@@ -118,6 +135,21 @@ export async function executeRSSTool(
   const tool = RSS_TOOLS.find((item) => item.name === toolName)
   if (!tool) return `Unknown RSS tool: ${toolName}`
 
+  if (toolName === 'rss_query_items' || toolName === 'rss_read_article') {
+    if (context?.readAccessDenied || !context?.getContent) {
+      return toStructuredResult(tool, '当前会话未获准读取本机 RSS 资料。', { ok: false, error: 'rss_read_not_authorized' })
+    }
+    try {
+      const content = context.getContent()
+      const data = toolName === 'rss_query_items'
+        ? content.query(RSSQuerySchema.parse(args))
+        : content.readArticle(RSSReadArticleSchema.parse(args))
+      return toStructuredResult(tool, '已读取保存的 RSS 资料；范围、正文状态及续读位置以 data 为准。', { ok: true, data })
+    } catch (error) {
+      return toStructuredResult(tool, 'RSS 读取未完成。', { ok: false, error: error instanceof Error ? error.message : String(error) })
+    }
+  }
+
   if (toolName === 'rss_add_source') {
     const name = String(args.name || '').trim()
     const url = String(args.url || '').trim()
@@ -132,9 +164,12 @@ export async function executeRSSTool(
   if (context?.requestModuleToolAction) {
     try {
       const payload = await context.requestModuleToolAction(tool.action, args)
+      if (payload.ok === false || payload.success === false) {
+        return toStructuredResult(tool, 'RSS 操作未完成。', { ...payload, ok: false })
+      }
       const summary = typeof payload.summary === 'string' && payload.summary.trim()
         ? payload.summary.trim()
-        : `${tool.action} 已完成。`
+        : `${tool.action} 已返回，请以状态和数据为准。`
       return toStructuredResult(tool, summary, payload)
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
@@ -145,8 +180,5 @@ export async function executeRSSTool(
     }
   }
 
-  context?.emitToolAction?.(tool.action, args)
-  return toStructuredResult(tool, `${tool.action} 已排队执行。`, {
-    ownerResourceId: typeof args.itemId === 'string' ? args.itemId : null,
-  })
+  return toStructuredResult(tool, 'RSS 界面操作通道不可用，操作尚未执行。', { ok: false, error: 'module_bridge_unavailable' })
 }

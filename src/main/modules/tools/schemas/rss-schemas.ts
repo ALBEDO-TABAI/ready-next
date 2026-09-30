@@ -1,5 +1,5 @@
 /**
- * Zod schemas for the 5 RSS domain tools (Phase 2.5 PR 3).
+ * RSS domain schemas; saved-content reads share their schema with the IPC API.
  *
  * SSOT for dispatch-time validation + LLM-facing SkillParamDefinition[] via
  * zod-param-derivation. Descriptions mirror the legacy hand-rolled params in
@@ -13,6 +13,7 @@
  */
 
 import { z } from 'zod'
+import { RSSQuerySchema, RSSReadArticleSchema } from '../../../../shared/rss-workspace'
 
 export const RssAddSourceSchema = z.object({
   name: z.string().describe('订阅源名称'),
@@ -40,6 +41,8 @@ export type RssToolName =
   | 'rss_select_item'
   | 'rss_analyze_item'
   | 'rss_capture_session'
+  | 'rss_query_items'
+  | 'rss_read_article'
 
 export const RSS_SCHEMAS: Record<RssToolName, z.ZodObject<z.ZodRawShape>> = {
   rss_add_source: RssAddSourceSchema,
@@ -47,4 +50,6 @@ export const RSS_SCHEMAS: Record<RssToolName, z.ZodObject<z.ZodRawShape>> = {
   rss_select_item: RssSelectItemSchema,
   rss_analyze_item: RssAnalyzeItemSchema,
   rss_capture_session: RssCaptureSessionSchema,
+  rss_query_items: RSSQuerySchema,
+  rss_read_article: RSSReadArticleSchema,
 }

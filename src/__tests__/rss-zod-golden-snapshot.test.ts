@@ -69,6 +69,41 @@ const EXPECTED_ANTHROPIC = [
       required: [],
     },
   },
+  {
+    name: 'rss_query_items',
+    description: '查询已保存的 RSS 资讯；支持收件箱/历史底稿、筛选和连续分页，不打开界面、不抓取、不改已读。',
+    input_schema: {
+      type: 'object',
+      properties: {
+        scope: { type: 'string', description: 'inbox 当前收件箱；library 含历史底稿', enum: ['inbox', 'library'] },
+        filter: { type: 'string', description: 'all、unread 或 starred', enum: ['all', 'unread', 'starred'] },
+        sourceId: { type: 'string', description: '可选订阅源 ID' },
+        search: { type: 'string', description: '按字面关键词搜索，不触发网络获取' },
+        searchIn: { type: 'string', description: 'title_summary 标题摘要；body 已保存正文', enum: ['title_summary', 'body'] },
+        from: { type: 'number', description: '时间范围起点，Unix 毫秒，包含' },
+        until: { type: 'number', description: '时间范围终点，Unix 毫秒，不包含' },
+        sort: { type: 'string', description: 'newest 或 oldest', enum: ['newest', 'oldest'] },
+        limit: { type: 'number', description: '每页 1–100 条，默认 50' },
+        cursor: { type: 'string', description: '上一页返回的 nextCursor；其他查询条件保持相同' },
+        expectedRevision: { type: 'number', description: '可选，固定当前界面或导出所引用的资料版本' },
+      },
+      required: [],
+    },
+  },
+  {
+    name: 'rss_read_article',
+    description: '按文章 ID 分段读取已保存正文和来源；沿 nextOffset 与 revision 继续读取。正文缺失会明确返回来源摘要，不冒充全文。',
+    input_schema: {
+      type: 'object',
+      properties: {
+        itemId: { type: 'string', description: '文章 ID' },
+        expectedRevision: { type: 'string', description: '文章版本；连续读取时沿用首次返回版本' },
+        offset: { type: 'number', description: '读取位置，使用上次返回的 nextOffset' },
+        length: { type: 'number', description: '本次最多读取字符数，默认 12000、上限 24000' },
+      },
+      required: ['itemId'],
+    },
+  },
 ]
 
 test('getRSSAnthropicTools matches the locked LLM-facing payload byte-for-byte', () => {

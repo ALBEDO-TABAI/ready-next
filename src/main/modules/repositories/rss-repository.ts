@@ -3,6 +3,10 @@ import type { RSSAnalysisAction, RSSAnalysisJob, RSSAnalysisJobStatus, RSSDraftS
 import { getDatabase } from '../database'
 
 export class RSSRepository {
+  getContentStore() {
+    return getDatabase().rss.content
+  }
+
   getSetting(key: string): string | undefined {
     return getDatabase().settings.getSetting(key)
   }

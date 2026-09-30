@@ -19,6 +19,7 @@ import {
 } from '../../shared/agent-identity'
 import type { ScheduleSpecV1 } from '../../shared/scheduled-tasks'
 import { migrateCanonicalRSSItemIdentities } from './rss-engine/item-identity-migration'
+import { migrateRSSContent, RSS_CONTENT_MIGRATION } from './rss-engine/content-schema'
 import { migrateFalseFailedDirectAnswers } from './agent-control/task-projection/direct-answer-history-migration'
 
 // Minimal interface compatible with DatabaseConnection from database.ts.
@@ -3302,7 +3303,8 @@ const migrations: Migration[] = [
           AND (user_id IS NULL OR trim(user_id) = '');
       `)
     }
-  }
+  },
+  { name: RSS_CONTENT_MIGRATION, up: migrateRSSContent }
 ]
 
 /**

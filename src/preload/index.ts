@@ -841,6 +841,9 @@ const boardAPI = {
 
 // RSS API
 const rssAPI = {
+  queryItems: (query?: unknown) => ipcRenderer.invoke('rss:queryItems', query),
+  readArticle: (input: unknown) => ipcRenderer.invoke('rss:readArticle', input),
+  loadArticle: (input: unknown) => ipcRenderer.invoke('rss:loadArticle', input),
   getSources: () => ipcRenderer.invoke('rss:getSources'),
   addSource: (source: unknown) => ipcRenderer.invoke('rss:addSource', source),
   removeSource: (id: string) => ipcRenderer.invoke('rss:removeSource', id),

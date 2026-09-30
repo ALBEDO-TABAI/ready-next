@@ -2,6 +2,20 @@
 
 > 更新时间：2026-09-30
 
+## 2026-09-30 RSS 共享内容读取基础
+
+以下仅增加入口接线/声明，新增持久化与提取逻辑分别在 `rss-content-store.ts`、`content-service.ts`、`content-schema.ts`，未继续堆入宿主。
+
+| 文件 | 当前行数 | 净增 | 判断 | 处理 |
+|---|---:|---:|---|---|
+| `src/main/index.ts` | 1230 | 1 | 一般 | 退出等待加入正文任务；2026-10-30 复查生命周期装配增长 |
+| `src/main/modules/agent-control/tools-runtime/tool-registry.ts` | 1540 | 2 | 一般 | 两个正式只读工具登记；2026-10-30 复查组定义职责 |
+| `src/main/modules/migrations.ts` | 3372 | 2 | 健康 | 只注册独立迁移函数，保持迁移顺序的单一职责 |
+| `src/main/modules/rss-engine/ipc-handler.ts` | 1240 | 10 | 一般 | 只组装 contentGroup，正文 handler 已独立；2026-10-30 复查 |
+| `src/main/modules/tools/tool-executor.ts` | 1256 | 1 | 一般 | 只传共享 reader 与会话权限事实，不在执行器实现 RSS 规则；2026-10-30 复查 |
+| `src/preload/index.ts` | 1544 | 3 | 一般 | 三个具名 API；2026-10-30 复查按域组装 |
+| `src/renderer/types/electron.d.ts` | 4021 | 3 | 健康 | 仅引用共享 RSS 类型，不另行定义正文或查询事实 |
+
 ## 2026-09-30 RSS 改版首个基础修复
 
 - `src/main/modules/database.ts`：2955 行，本轮净增 3 行，评为 **危险**。沿用多产品数据库入口过度集中的判断；本次仅接通已有 RSS 分类字段的保存，未扩展领域职责，Electron 内存库写入/读回与分类导出已验证。后续正文、分类关系、事件和日报的新增存取逻辑应放在各自 RSS 仓储模块，不继续堆入本文件；拆分须与真实数据库行为验证配对，不能为减少行数扩大本次修复。
