@@ -63,11 +63,12 @@ export class RSSProcessingService {
       if (!this.deps.hasModel()) break
       const article = this.deps.getArticle(next.itemId)
       if (!article || !store.isCurrent(next)) { store.finish(next.id, 'stale', '文章或分类标准已变化，请选择是否重新整理。', now()); continue }
-      const input = buildRSSJudgmentInput(article, next.definitions)
+      const eventContext = store.eventContext(next, now())
+      const input = buildRSSJudgmentInput(article, next.definitions, eventContext)
       let complete: (signal: AbortSignal) => Promise<string>
       try { complete = this.deps.prepare(input, next.id) }
       catch (error) { store.finish(next.id, 'failed', error instanceof Error ? error.message : String(error), now()); this.deps.notify(); continue }
-      const current = store.claim(next.id, now(), this.deps.hasModel())
+      const current = store.claim(next.id, now(), this.deps.hasModel(), eventContext)
       if (!current) {
         if (store.get(next.id)?.status !== 'queued') continue
         break

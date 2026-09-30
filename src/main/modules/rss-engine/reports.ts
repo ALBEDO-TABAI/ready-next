@@ -97,7 +97,7 @@ function renderSummaryMarkdown(
   const unread = items.filter((item) => item.read === 0).length
   const categoryCounts = new Map<string, { name: string; count: number }>()
   for (const item of items) {
-    for (const entry of item.classifications.filter((entry) => entry.included === true)) {
+    for (const entry of item.classifications.filter((entry) => entry.included === true && !entry.stale)) {
       const previous = categoryCounts.get(entry.definitionId)
       categoryCounts.set(entry.definitionId, { name: entry.name, count: (previous?.count || 0) + 1 })
     }

@@ -56,7 +56,14 @@ export class RSSContentService {
         error: error instanceof Error ? error.message : String(error),
       }
     }
-    if (!this.deps.content.finishLoad(claim, result)) throw new Error('article_changed')
+    let saved: boolean
+    try { saved = this.deps.content.finishLoad(claim, result) }
+    catch (error) {
+      // A rolled-back publication still owns its fetch claim; settle it without discarding the saved body.
+      this.deps.content.finishLoad(claim, { status: 'failed', sourceUrl: url, error: error instanceof Error ? error.message : String(error) })
+      throw error
+    }
+    if (!saved) throw new Error('article_changed')
     const article = this.deps.content.getArticle(claim.itemId)
     if (!article) throw new Error('article_not_found')
     return article

@@ -2,6 +2,20 @@
 
 > 更新时间：2026-10-01
 
+## 2026-10-01 RSS 事件与结果恢复
+
+| 文件 | 当前行数 | 净增 | 判断 | 后续 |
+|---|---:|---:|---|---|
+| `src/main/modules/agent-control/tools-runtime/tool-registry.ts` | 1543 | 1 | 一般 | 仅登记事件只读工具；2026-11-01 复查域注册 |
+| `src/main/modules/migrations.ts` | 3380 | 4 | 健康 | 登记独立 082/083，顺序与升级回滚有验证 |
+| `src/main/modules/rss-engine/ipc-handler.ts` | 1228 | 6 | 一般 | 事件分组独立实现；2026-11-01 复查组装 |
+| `src/main/modules/tools/tool-executor.ts` | 1265 | 1 | 一般 | 注入事件只读存储；2026-11-01 复查域路由 |
+| `src/preload/index.ts` | 1555 | 10 | 一般 | 事件 API 和已查看通知透传；2026-11-01 复查分域组装 |
+| `src/renderer/components/rss/RSSFeed.tsx` | 1035 | 7 | 一般 | 仅接入独立事件展开组件，事件操作仍在阅读面；2026-11-01 复查列表宿主 |
+| `src/renderer/types/electron.d.ts` | 3999 | 6 | 健康 | 引用共享事件/查询合同；IPC 对账覆盖 |
+
+事件存储、IPC、展开与纠正组件均独立；分类结果只存一份，旧自动判断字段已删除。未增加单独保存连接、模型复核循环或任务调度器。
+
 ## 2026-10-01 RSS 自动整理
 
 | 文件 | 当前行数 | 净增 | 判断 | 后续 |

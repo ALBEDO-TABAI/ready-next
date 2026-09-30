@@ -1,5 +1,7 @@
+import { migrateRSSResults, RSS_RESULT_MIGRATION } from '../main/modules/rss-engine/result-schema'
 import { migrateRSSOrganization, RSS_ORGANIZATION_MIGRATION } from '../main/modules/rss-engine/organization-schema'
 import { migrateRSSProcessing, RSS_PROCESSING_MIGRATION } from '../main/modules/rss-engine/processing-schema'
+import { migrateRSSEvents, RSS_EVENT_MIGRATION } from '../main/modules/rss-engine/event-schema'
 import assert from 'node:assert/strict'
 import { createRequire } from 'node:module'
 import { mkdtempSync, rmSync } from 'node:fs'
@@ -50,6 +52,16 @@ test('RSS migration backs up existing WAL data and rolls back without losing rea
     db.exec('BEGIN')
     migrateRSSProcessing(db)
     db.prepare('INSERT INTO migrations VALUES(?)').run(RSS_PROCESSING_MIGRATION)
+    db.exec('COMMIT')
+    assert.ok(backupBeforeRSSMigration(db, path)?.includes('before-rss-082-'))
+    db.exec('BEGIN')
+    migrateRSSEvents(db)
+    db.prepare('INSERT INTO migrations VALUES(?)').run(RSS_EVENT_MIGRATION)
+    db.exec('COMMIT')
+    assert.ok(backupBeforeRSSMigration(db, path)?.includes('before-rss-083-'))
+    db.exec('BEGIN')
+    migrateRSSResults(db)
+    db.prepare('INSERT INTO migrations VALUES(?)').run(RSS_RESULT_MIGRATION)
     db.exec('COMMIT')
     assert.equal(backupBeforeRSSMigration(db, path), null, 'all RSS migrations have completed')
     assert.equal(snapshot.prepare('SELECT title FROM rss_items').get<{ title: string }>()?.title, 'Saved title')

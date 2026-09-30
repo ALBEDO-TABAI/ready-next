@@ -1,8 +1,11 @@
 import { randomUUID } from 'node:crypto'
-import type { RSSJudgment, RSSProcessingDefinition } from '../../../shared/rss-processing'
+import { RSS_PROCESSING_METHOD, type RSSJudgment, type RSSProcessingDefinition } from '../../../shared/rss-processing'
 import { assertDatabaseConnectionReady, type DatabaseConnection } from './connection'
 import { RSSDefinitionWriteSchema, RSSDefinitionDeleteSchema, RSSMembershipWriteSchema, rssArticleRevision,
   type RSSDefinition, type RSSDefinitionWrite, type RSSMembership, type RSSMembershipWrite } from '../../../shared/rss-organization'
+
+export const rssIncludedClassificationSQL = `COALESCE(m.manual_decision,CASE WHEN r.content_revision=(i.content_revision || ':' || CASE WHEN c.item_revision=i.content_revision THEN COALESCE(c.body_revision,'none') ELSE 'none' END)
+  AND r.rule_revision=d.rule_revision THEN r.decision END)=1`
 
 type DefinitionRow = Omit<RSSDefinition, 'visible' | 'ruleRevision' | 'filterIds'> & { visible: number; rule_revision: number }
 
@@ -84,24 +87,48 @@ export class RSSOrganizationStore {
       if (!definition || !['topic', 'curated'].includes(definition.kind) || definition.ruleRevision !== params.expectedRuleRevision) throw new Error('分类标准已变化，请重新读取后归类。')
       if (params.decision === null) {
         this.db.prepare('UPDATE rss_memberships SET manual_decision=NULL WHERE item_id=? AND definition_id=?').run(params.itemId, params.definitionId)
-        this.db.prepare('DELETE FROM rss_memberships WHERE item_id=? AND definition_id=? AND derived_decision IS NULL').run(params.itemId, params.definitionId)
+        this.db.prepare('DELETE FROM rss_memberships WHERE item_id=? AND definition_id=? AND result_id IS NULL').run(params.itemId, params.definitionId)
       } else this.db.prepare(`INSERT INTO rss_memberships(item_id,definition_id,manual_decision) VALUES (?,?,?)
         ON CONFLICT(item_id,definition_id) DO UPDATE SET manual_decision=excluded.manual_decision`).run(params.itemId, params.definitionId, Number(params.decision))
       return this.memberships([params.itemId])[params.itemId] || []
     })
   }
 
-  applyDerived(itemId: string, articleRevision: string, definitions: RSSProcessingDefinition[], decisions: RSSJudgment['decisions']): void {
+  applyDerived(itemId: string, articleRevision: string, definitions: RSSProcessingDefinition[], decisions: RSSJudgment['decisions'], jobId: string): void {
     this.transaction(() => {
       if (this.articleRevision(itemId) !== articleRevision) throw new Error('文章已变化，不能保存旧归类。')
       const current = this.list()
       if (definitions.some((d) => !current.some((entry) => entry.id === d.id && entry.ruleRevision === d.ruleRevision))) throw new Error('分类标准已变化。')
       if (decisions.length !== definitions.length || new Set(decisions.map((d) => d.definitionId)).size !== definitions.length || decisions.some((d) => !definitions.some((entry) => entry.id === d.definitionId))) throw new Error('归类结果与本次标准不一致。')
-      const write = this.db.prepare(`INSERT INTO rss_memberships(item_id,definition_id,derived_decision,derived_origin,reason,evidence,content_revision,rule_revision)
-        VALUES (?,?,?,'model',?,?,?,?) ON CONFLICT(item_id,definition_id) DO UPDATE SET derived_decision=excluded.derived_decision,
-        derived_origin=excluded.derived_origin,reason=excluded.reason,evidence=excluded.evidence,content_revision=excluded.content_revision,rule_revision=excluded.rule_revision`)
-      for (const decision of decisions) write.run(itemId, decision.definitionId, decision.included === null ? 2 : Number(decision.included), decision.reason,
-        decision.evidence, articleRevision, definitions.find((d) => d.id === decision.definitionId)!.ruleRevision)
+      const save = this.db.prepare(`INSERT INTO rss_classification_results(item_id,definition_id,job_id,method,decision,origin,reason,evidence,content_revision,rule_revision)
+        VALUES (?,?,?,?,?,'model',?,?,?,?) RETURNING id`)
+      for (const decision of decisions) {
+        const result = save.get<{ id: number }>(itemId, decision.definitionId, jobId, RSS_PROCESSING_METHOD, decision.included === null ? 2 : Number(decision.included),
+          decision.reason, decision.evidence, articleRevision, definitions.find((d) => d.id === decision.definitionId)!.ruleRevision)!
+        this.bindResult(itemId, decision.definitionId, result.id)
+      }
+    })
+  }
+
+  private bindResult(itemId: string, definitionId: string, resultId: number): void {
+    this.db.prepare(`INSERT INTO rss_memberships(item_id,definition_id,result_id) VALUES (?,?,?)
+      ON CONFLICT(item_id,definition_id) DO UPDATE SET result_id=excluded.result_id WHERE result_id IS NOT excluded.result_id`).run(itemId, definitionId, resultId)
+  }
+
+  restore(itemId: string, articleRevision: string, definitions: RSSProcessingDefinition[]): boolean {
+    return this.transaction(() => {
+      if (this.articleRevision(itemId) !== articleRevision) throw new Error('文章已变化，不能恢复旧归类。')
+      const current = this.list()
+      let complete = true
+      for (const definition of definitions) {
+        if (!current.some((d) => d.id === definition.id && d.ruleRevision === definition.ruleRevision)) throw new Error('分类标准已变化。')
+        const saved = this.db.prepare(`SELECT r.id FROM rss_classification_results r JOIN rss_processing_jobs j ON j.id=r.job_id
+          WHERE r.item_id=? AND r.definition_id=? AND r.content_revision=? AND r.rule_revision=? AND r.method=? AND j.status='success'
+          ORDER BY r.id DESC LIMIT 1`).get<{ id: number }>(itemId, definition.id, articleRevision, definition.ruleRevision, RSS_PROCESSING_METHOD)
+        if (saved) this.bindResult(itemId, definition.id, saved.id)
+        else complete = false
+      }
+      return complete
     })
   }
 
@@ -109,8 +136,8 @@ export class RSSOrganizationStore {
     const result: Record<string, RSSMembership[]> = {}
     for (let offset = 0; offset < itemIds.length; offset += 500) {
       const ids = itemIds.slice(offset, offset + 500)
-      const rows = this.db.prepare(`SELECT m.*,d.name,d.kind,d.rule_revision AS current_rule,i.content_revision AS current_source,
-        c.item_revision AS body_source,c.body_revision FROM rss_memberships m JOIN rss_definitions d ON d.id=m.definition_id
+      const rows = this.db.prepare(`SELECT m.*,r.decision AS derived_decision,r.origin AS derived_origin,r.reason,r.evidence,r.content_revision,r.rule_revision,d.name,d.kind,d.rule_revision AS current_rule,i.content_revision AS current_source,
+        c.item_revision AS body_source,c.body_revision FROM rss_memberships m LEFT JOIN rss_classification_results r ON r.id=m.result_id JOIN rss_definitions d ON d.id=m.definition_id
         JOIN rss_items i ON i.id=m.item_id LEFT JOIN rss_article_content c ON c.item_id=i.id
         WHERE m.item_id IN (${ids.map(() => '?').join(',')}) ORDER BY d.position,d.id`).all<{
         item_id: string; definition_id: string; name: string; kind: 'topic' | 'curated'; manual_decision: number | null;

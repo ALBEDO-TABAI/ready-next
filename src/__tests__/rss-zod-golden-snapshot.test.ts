@@ -14,6 +14,12 @@ import {
 } from '../main/modules/tools/rss-tools'
 
 const EXPECTED_ANTHROPIC = [
+  { name: 'rss_read_events', description: '分页读取已保存事件、当前报道或事实进展及历史版本依据。历史摘句不代表当前原文仍有效；只读，不重新归组。', input_schema: { type: 'object', properties: {
+    view: { type: 'string', description: 'list 事件目录；members 当前报道；facts 包含历史依据的事实与进展', enum: ['list', 'members', 'facts'] },
+    eventId: { type: 'string', description: '读取成员或事实时必填' }, search: { type: 'string', description: '仅事件目录使用，搜索已保存标题或事实摘句' },
+    expectedRevision: { type: 'number', description: '续页使用首次返回的 revision' }, offset: { type: 'number', description: '续页使用 nextOffset' },
+    limit: { type: 'number', description: '每页 1–100 条，默认 20' },
+  }, required: [] } },
   {
     name: 'rss_read_processing', description: '读取 RSS 自动分类与精选的设置、当日调用次数及分页任务记录。仅查询，不启动、重试或取消任务。',
     input_schema: { type: 'object', properties: {
@@ -97,6 +103,7 @@ const EXPECTED_ANTHROPIC = [
         filter: { type: 'string', description: 'all、unread 或 starred', enum: ['all', 'unread', 'starred'] },
         collectionId: { type: 'string', description: '栏目定义 ID' },
         categoryId: { type: 'string', description: '主题定义 ID，与栏目及其他条件取交集' },
+        eventId: { type: 'string', description: '可选事件 ID，保留其他筛选条件' },
         sourceId: { type: 'string', description: '可选订阅源 ID' },
         search: { type: 'string', description: '按字面关键词搜索，不触发网络获取' },
         searchIn: { type: 'string', description: 'title_summary 标题摘要；body 已保存正文', enum: ['title_summary', 'body'] },

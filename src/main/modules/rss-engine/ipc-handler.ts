@@ -1,5 +1,6 @@
 import { organizationGroup } from './ipc/organization-group'
 import { processingGroup } from './ipc/processing-group'
+import { eventGroup } from './ipc/event-group'
 import { getDatabase } from '../database'
 import { getRSSProcessingService, hasRSSProcessingModel, notifyRSSProcessing } from './processing-runtime'
 import type { RSSMembership } from '../../../shared/rss-organization'
@@ -245,6 +246,7 @@ let exportGroupDispose: IpcDisposeHandle | null = null
 let contentGroupDispose: IpcDisposeHandle | null = null
 let organizationGroupDispose: IpcDisposeHandle | null = null
 let processingGroupDispose: IpcDisposeHandle | null = null
+let eventGroupDispose: IpcDisposeHandle | null = null
 let workspaceFilesGroupDispose: IpcDisposeHandle | null = null
 
 export function setRSSBrowserController(controller: BrowserController | null): void {
@@ -995,6 +997,10 @@ async function runAddSourceCore(input: AddSourceCoreInput): Promise<AddSourceCor
 }
 
 export function setupRSSIPC(useMock = false): void {
+  eventGroupDispose?.dispose()
+  eventGroupDispose = eventGroup.register(ipcMain, { store: () => getDatabase().rss.events, notify: notifyRSSProcessing,
+    notifySeen: () => { for (const window of BrowserWindow.getAllWindows()) if (!window.webContents.isDestroyed()) window.webContents.send('rss:eventSeenChanged') },
+  })
   processingGroupDispose?.dispose()
   processingGroupDispose = processingGroup.register(ipcMain, {
     store: () => getDatabase().rss.processing, service: getRSSProcessingService, hasModel: hasRSSProcessingModel, notify: notifyRSSProcessing,

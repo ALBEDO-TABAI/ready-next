@@ -15,7 +15,7 @@ export default function RSSWorkspaceToolbar({ view, loading, definitions }: { vi
   const title = collection?.name || '资讯'
   const filters = definitions.filter((entry) => collection?.filterIds.includes(entry.id) || entry.id === query.categoryId)
   return <header className="rss-workspace-heading">
-    <div className="rss-workspace-heading-title"><h1>{title}</h1><p role="status">{loading ? '正在读取…' : view ? `${view.total} 条 · ${view.unreadTotal} 条未读` : '尚未读取'}{view && view.items.length < view.total ? ` · 已显示 ${view.items.length} 条` : ''}{view?.lastFetchAt ? ` · 更新于 ${new Date(view.lastFetchAt).toLocaleTimeString()}` : ''}</p></div>
+    <div className="rss-workspace-heading-title"><h1>{title}</h1><p role="status">{loading ? '正在读取…' : view ? `${view.total} 条 · ${view.unreadTotal} 条未读` : '尚未读取'}{view?.cardTotal !== undefined && view.cardTotal !== view.total ? ` · ${view.cardTotal} 个事件或独立条目` : ''}{view && view.items.length < (view.cardTotal ?? view.total) ? ` · 已显示 ${view.items.length} ${(view.cardTotal ?? view.total) !== view.total ? '项' : '条'}` : ''}{view?.lastFetchAt ? ` · 更新于 ${new Date(view.lastFetchAt).toLocaleTimeString()}` : ''}</p></div>
     <form className="rss-search-bar glass-surface-floating" onSubmit={(event) => { event.preventDefault(); setQuery({ search }) }}>
       <select aria-label="搜索范围" value={query.searchIn} onChange={(event) => setQuery({ searchIn: event.target.value as 'title_summary' | 'body', search })}>
         <option value="title_summary">标题与摘要</option><option value="body">已保存正文</option>

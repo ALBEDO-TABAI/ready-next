@@ -2382,6 +2382,12 @@ interface RSSItemAnalysisProgress {
 }
 
 interface ElectronRSSAPI {
+  markEventFactsSeen: (input: { factIds: string[] }) => Promise<RSSResponse<{ changed: number; seenIds: string[] }>>
+  onEventSeenChanged: (callback: () => void) => () => void
+  queryCards: (query?: import('../../shared/rss-workspace').RSSQueryInput) => Promise<RSSResponse<import('../../shared/rss-workspace').RSSQueryResult>>
+  readEvents: (input?: import('../../shared/rss-events').RSSReadEventsInput) => Promise<RSSResponse<import('../../shared/rss-events').RSSReadEventsResult>>
+  moveEventMember: (input: import('../../shared/rss-events').RSSEventMoveInput) => Promise<RSSResponse<import('../../shared/rss-events').RSSEventMembership>>
+  mergeEvents: (input: import('../../shared/rss-events').RSSEventMergeInput) => Promise<RSSResponse<import('../../shared/rss-events').RSSEventSummary>>
   processingStatus: () => Promise<RSSResponse<import('../../shared/rss-processing').RSSProcessingStatus>>
   processingJobs: (input?: import('../../shared/rss-processing').RSSProcessingListInput) => Promise<RSSResponse<import('../../shared/rss-processing').RSSProcessingList>>
   configureProcessing: (input: import('../../shared/rss-processing').RSSProcessingSettings) => Promise<RSSResponse<import('../../shared/rss-processing').RSSProcessingSettings>>

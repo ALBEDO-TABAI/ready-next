@@ -560,7 +560,9 @@ export default function RSSMode({
             <RSSWorkspaceToolbar view={view} loading={loading} definitions={definitions} />
             <RSSProcessingPanel active={isActive && !isSuspended} />
             <RSSFeed
-              active={isActive && !isSuspended}
+              active={isActive && !isSuspended && !selectedItem}
+              query={view?.query}
+              queryRevision={view?.revision}
               items={items}
               sources={sources}
               selectedSource={selectedSource}
@@ -635,6 +637,7 @@ export default function RSSMode({
           {/* Article rendering shares the document typography, without active widgets. */}
           {selectedItem && (
             <RSSArticleReader
+              onSelectRelated={handleItemClick}
               active={isActive && !isSuspended}
               definitions={definitions}
               key={selectedItem.id}

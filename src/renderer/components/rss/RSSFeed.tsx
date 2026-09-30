@@ -1,4 +1,6 @@
 import type { RSSMembership } from '../../../shared/rss-organization'
+import type { RSSArticleSummary, RSSQueryInput } from '../../../shared/rss-workspace'
+import RSSGroupedReports from './RSSGroupedReports'
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Filter,
@@ -26,6 +28,8 @@ import { chatMenuSurfaceStyle } from '../agent/chatMenuStyles'
 import { LiquidFloatingPanel } from '../ui/liquid-glass/LiquidFloatingPanel'
 
 export interface RSSItem {
+  event?: RSSArticleSummary['event']
+  eventGroup?: RSSArticleSummary['eventGroup']
   classifications?: RSSMembership[]
   id: string
   revision?: string
@@ -91,6 +95,8 @@ interface AnalysisJobItem {
 }
 
 interface RSSFeedProps {
+  query?: RSSQueryInput
+  queryRevision?: number
   active?: boolean
   items: RSSItem[]
   sources: RSSSource[]
@@ -294,7 +300,7 @@ export default function RSSFeed({
   onPauseAnalysisJob,
   onResumeAnalysisJob,
   onDeleteAnalysisJob,
-  settingsOpen, nextPage, loadingMore, queryError, inbox = true, onLoadMore, onReloadQuery,
+  settingsOpen, nextPage, loadingMore, queryError, inbox = true, onLoadMore, onReloadQuery, query, queryRevision,
 }: RSSFeedProps) {
   const [taskMenuOpen, setTaskMenuOpen] = useState(false)
   const [sourceMenuOpen, setSourceMenuOpen] = useState(false)
@@ -868,12 +874,12 @@ export default function RSSFeed({
                 .filter(Boolean)
                 .join('  ')
               const dateLabel = (entry: RSSItem) => {
-                const timestamp = entry.publishedAtMs ?? entry.collectedAt
+                const timestamp = entry.eventGroup?.displayTime ?? entry.publishedAtMs ?? entry.collectedAt
                 return timestamp == null ? '时间未提供' : new Date(timestamp).toLocaleDateString()
               }
               const date = dateLabel(item)
               return (
-                <Fragment key={item.id}>
+                <Fragment key={item.eventGroup ? `event:${item.eventGroup.id}` : `article:${item.id}`}>
                 {(index === 0 || dateLabel(items[index - 1]) !== date) && <h2 className="rss-date-heading">{date}</h2>}
                 <article data-rss-item-id={item.id}
                   onClick={() => onItemClick(item)}
@@ -887,6 +893,7 @@ export default function RSSFeed({
                     boxShadow: isSelected ? 'inset 2px 0 0 var(--color-blue)' : 'none'
                   }}
                 >
+                  {item.eventGroup && (item.eventGroup.memberCount > 1 || item.eventGroup.factCount > 1 || item.eventGroup.staleCount > 0) && query && queryRevision !== undefined && <RSSGroupedReports group={item.eventGroup} query={query} revision={queryRevision} active={active} onSelect={onItemClick} />}
                   <div className="rss-item-row">
                     <div className="rss-item-main flex items-start gap-2 min-w-0">
                       <div

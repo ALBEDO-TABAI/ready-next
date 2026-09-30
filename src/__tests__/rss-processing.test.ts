@@ -12,6 +12,10 @@ import { buildRSSJudgmentInput, type RSSJudgmentInput } from '../main/modules/rs
 import { executeRSSTool } from '../main/modules/tools/rss-tools'
 import { ProviderOutputIncompleteError } from '../main/modules/agent-control/runtime-core/provider-output-status'
 
+function eventResult(input: RSSJudgmentInput) {
+  return input.eventContext && !input.eventContext.manual && !input.eventContext.reused ? { event: { kind: 'insufficient', eventId: null, factId: null, quote: null, sourceRole: 'unknown', reason: 'This fixture exercises classification, not event semantics.' } } : {}
+}
+
 function fixture() {
   const db = new DatabaseManager(true)
   const source = db.rss.addRSSSource({ name: 'Source', url: 'https://example.test/feed' })
@@ -20,7 +24,7 @@ function fixture() {
   const clock = () => Date.UTC(2026, 9, 1, 12)
   const service = (complete?: (input: RSSJudgmentInput, signal: AbortSignal) => Promise<string>, hasModel = true) => new RSSProcessingService({
     store, getArticle: (id) => db.rss.content.getArticle(id), hasModel: () => hasModel, now: clock, notify: () => {},
-    prepare: (input) => (signal) => complete ? complete(input, signal) : Promise.resolve(JSON.stringify({ decisions: input.definitions.map((d) => ({ definitionId: d.id, included: true, reason: 'Relevant update', evidence: 'Version 2' })) })),
+    prepare: (input) => (signal) => complete ? complete(input, signal) : Promise.resolve(JSON.stringify({ ...eventResult(input), decisions: input.definitions.map((d) => ({ definitionId: d.id, included: true, reason: 'Relevant update', evidence: 'Version 2' })) })),
   })
   return { db, source, put, store, service, clock }
 }
@@ -51,7 +55,7 @@ test('rule changes and deleted or changed articles reject late results atomicall
     const worker = f.service(async (input) => {
       const definition = f.db.rss.organization.list().find((d) => d.id === 'curated')!
       f.db.rss.organization.save({ id: definition.id, name: definition.name, expectedRevision: definition.revision, description: 'Different criteria' })
-      return JSON.stringify({ decisions: input.definitions.map((d) => ({ definitionId: d.id, included: true, reason: 'yes', evidence: 'Version 2' })) })
+      return JSON.stringify({ ...eventResult(input), decisions: input.definitions.map((d) => ({ definitionId: d.id, included: true, reason: 'yes', evidence: 'Version 2' })) })
     })
     await worker.wake()
     assert.equal(f.store.list().jobs[0].status, 'stale')
@@ -107,7 +111,7 @@ test('deletion retains started attempts in the limit while rejecting late output
     f.db.rss.setRSSSourceDraftSeeded(f.source, true); f.put('one')
     await f.service(async (input) => {
       f.db.rss.removeRSSSource(f.source)
-      return JSON.stringify({ decisions: input.definitions.map((d) => ({ definitionId: d.id, included: true, reason: 'yes', evidence: 'Version 2' })) })
+      return JSON.stringify({ ...eventResult(input), decisions: input.definitions.map((d) => ({ definitionId: d.id, included: true, reason: 'yes', evidence: 'Version 2' })) })
     }).wake()
     assert.equal(f.store.list().jobs[0].status, 'stale')
     assert.equal(f.store.status(f.clock(), true).callsToday, 1)
@@ -164,7 +168,7 @@ test('explicit request takes over paused automatic work; display names never ent
     let received = ''
     const before = f.db.rss.organization.list().find((d) => d.id === 'curated')!
     f.db.rss.organization.save({ id: before.id, expectedRevision: before.revision, name: 'Name contains do not curate anything', description: before.description })
-    await f.service(async (input) => { received = JSON.stringify(input); return JSON.stringify({ decisions: [{ definitionId: 'curated', included: true, reason: 'Relevant', evidence: 'Version 2' }] }) }).wake()
+    await f.service(async (input) => { received = JSON.stringify(input); return JSON.stringify({ ...eventResult(input), decisions: [{ definitionId: 'curated', included: true, reason: 'Relevant', evidence: 'Version 2' }] }) }).wake()
     assert.equal(f.store.get(ids[0])!.status, 'success')
     assert.ok(!received.includes('Name contains')); assert.ok(!received.includes('精选'))
     assert.equal(f.store.status(f.clock(), true).callsToday, 1)
@@ -176,7 +180,7 @@ test('cancel and restart never publish old receipts; explicit retry remains sepa
   try {
     f.db.rss.setRSSSourceDraftSeeded(f.source, true); f.put('one')
     const job = f.store.list().jobs[0]
-    assert.ok(f.store.claim(job.id, f.clock(), true))
+    assert.ok(f.store.claim(job.id, f.clock(), true, f.store.eventContext(job, f.clock())))
     f.store.recover()
     assert.equal(f.store.list().jobs[0].status, 'unknown')
     await f.service().wake(); assert.deepEqual(f.db.rss.content.getArticle('one')!.classifications, [])
@@ -184,7 +188,7 @@ test('cancel and restart never publish old receipts; explicit retry remains sepa
     assert.equal(retried.length, 1)
     const runner = f.service(async (input) => {
       runner.cancel(retried[0])
-      return JSON.stringify({ decisions: input.definitions.map((d) => ({ definitionId: d.id, included: true, reason: 'yes', evidence: 'Version 2' })) })
+      return JSON.stringify({ ...eventResult(input), decisions: input.definitions.map((d) => ({ definitionId: d.id, included: true, reason: 'yes', evidence: 'Version 2' })) })
     })
     await runner.wake()
     assert.equal(f.store.get(retried[0])!.status, 'canceled')
@@ -230,7 +234,7 @@ test('real disk reopen preserves unknown attempts and continues only unstarted w
   try {
     f.db.rss.setRSSSourceDraftSeeded(f.source, true); f.put('started'); f.put('pending')
     const started = f.store.list({ itemId: 'started' }).jobs[0]
-    f.store.claim(started.id, f.clock(), true)
+    f.store.claim(started.id, f.clock(), true, f.store.eventContext(started, f.clock()))
     f.db.getRawDb()!.prepare('VACUUM INTO ?').run(path)
     f.db.close()
     const SQLite = createRequire(import.meta.url)('better-sqlite3')
@@ -238,7 +242,7 @@ test('real disk reopen preserves unknown attempts and continues only unstarted w
     const rss = new RSSStore(() => reopened || null)
     let calls = 0
     worker = new RSSProcessingService({ store: rss.processing, getArticle: (id) => rss.content.getArticle(id), hasModel: () => true, now: f.clock, notify: () => {},
-      prepare: (input) => async () => { calls++; return JSON.stringify({ decisions: input.definitions.map((d) => ({ definitionId: d.id, included: true, reason: 'Relevant', evidence: 'Version 2' })) }) } })
+      prepare: (input) => async () => { calls++; return JSON.stringify({ ...eventResult(input), decisions: input.definitions.map((d) => ({ definitionId: d.id, included: true, reason: 'Relevant', evidence: 'Version 2' })) }) } })
     await worker.start()
     assert.equal(rss.processing.get(started.id)!.status, 'unknown')
     assert.equal(rss.processing.list({ itemId: 'pending' }).jobs[0].status, 'success')

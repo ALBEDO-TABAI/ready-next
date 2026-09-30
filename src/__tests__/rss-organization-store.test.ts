@@ -33,7 +33,7 @@ test('organization migration preserves all nonempty historical categories and ar
       raw.prepare('INSERT INTO rss_items(id,source_id,guid,title,link,ai_tags,read,starred,inbox_visible) VALUES (?,\'source\',?,?,?,?,1,1,0)').run(id, id, id, `https://example.test/${id}`, tag)
     }
     const before = raw.prepare('SELECT id,content_revision,read,starred,inbox_visible FROM rss_items ORDER BY id').all()
-    __runMigrationForTests('080_rss_organization', raw)
+    for (const name of __getMigrationNamesForTests().filter((name) => Number(name.slice(0, 3)) >= 80)) __runMigrationForTests(name, raw)
     let content!: RSSContentStore
     const organization = new RSSOrganizationStore(() => raw, (id) => content.getArticle(id)?.revision || null)
     content = new RSSContentStore(() => raw, organization)

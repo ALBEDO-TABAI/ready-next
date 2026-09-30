@@ -683,6 +683,7 @@ async function executeToolCallInner(
 
         case 'rss':
           return executeRSSTool(toolName, args, {
+            getEvents: () => getDatabase().rss.events,
             getProcessing: () => getDatabase().rss.processing,
             hasProcessingModel: () => isRSSModelConfigured(new AppSettingsRepository().getAIConfig()),
             getContent: () => getDatabase().rss.content,

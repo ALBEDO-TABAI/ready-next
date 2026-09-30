@@ -825,6 +825,16 @@ const boardAPI = {
 
 // RSS API
 const rssAPI = {
+  markEventFactsSeen: (input: { factIds: string[] }) => ipcRenderer.invoke('rss:markEventFactsSeen', input),
+  onEventSeenChanged: (callback: () => void) => {
+    const handler = () => callback()
+    ipcRenderer.on('rss:eventSeenChanged', handler)
+    return () => ipcRenderer.removeListener('rss:eventSeenChanged', handler)
+  },
+  queryCards: (query?: import('../shared/rss-workspace').RSSQueryInput) => ipcRenderer.invoke('rss:queryCards', query),
+  readEvents: (input?: import('../shared/rss-events').RSSReadEventsInput) => ipcRenderer.invoke('rss:readEvents', input),
+  moveEventMember: (input: import('../shared/rss-events').RSSEventMoveInput) => ipcRenderer.invoke('rss:moveEventMember', input),
+  mergeEvents: (input: import('../shared/rss-events').RSSEventMergeInput) => ipcRenderer.invoke('rss:mergeEvents', input),
   processingStatus: () => ipcRenderer.invoke('rss:processingStatus'),
   processingJobs: (input?: import('../shared/rss-processing').RSSProcessingListInput) => ipcRenderer.invoke('rss:processingJobs', input),
   configureProcessing: (input: import('../shared/rss-processing').RSSProcessingSettings) => ipcRenderer.invoke('rss:configureProcessing', input),

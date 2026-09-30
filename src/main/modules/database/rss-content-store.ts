@@ -1,4 +1,5 @@
-import type { RSSOrganizationStore } from './rss-organization-store'
+import { rssIncludedClassificationSQL, type RSSOrganizationStore } from './rss-organization-store'
+import { rssEffectiveEventCondition, rssEventRepresentativeOrder, type RSSEventStore } from './rss-event-store'
 import { rssArticleRevision, type RSSDefinition, type RSSMembership } from '../../../shared/rss-organization'
 import { createHash, randomUUID } from 'node:crypto'
 import type { DatabaseConnection } from './connection'
@@ -14,7 +15,7 @@ interface ArticleRow {
   title: string; link: string; summary: string | null; author: string | null
   published_at: number | null; first_seen_at: number; cover_image: string | null
   read: number; starred: number; inbox_visible: number
-  body_status: RSSBodyStatus | null; body_revision: string | null; markdown: string | null
+  request_id: string | null; body_status: RSSBodyStatus | null; body_revision: string | null; markdown: string | null
   body_item_revision: string | null; body_fetched_at: number | null; source_url: string | null; error: string | null
 }
 
@@ -26,11 +27,13 @@ export interface RSSContentResult {
   error?: string
 }
 
-const ARTICLE_SELECT = `SELECT i.*, s.name AS source_name,
-  c.status AS body_status,c.item_revision AS body_item_revision,c.body_revision,c.markdown,
-  c.fetched_at AS body_fetched_at,c.source_url,c.error
-  FROM rss_items i LEFT JOIN rss_sources s ON s.id=i.source_id
+const ARTICLE_COLUMNS = `i.*, s.name AS source_name,
+  c.status AS body_status,c.item_revision AS body_item_revision,c.body_revision,
+  c.fetched_at AS body_fetched_at,c.source_url,c.error,c.request_id`
+const ARTICLE_FROM = `FROM rss_items i LEFT JOIN rss_sources s ON s.id=i.source_id
   LEFT JOIN rss_article_content c ON c.item_id=i.id`
+const ARTICLE_SELECT = `SELECT ${ARTICLE_COLUMNS},c.markdown ${ARTICLE_FROM}`
+const LIST_SELECT = `SELECT ${ARTICLE_COLUMNS},NULL AS markdown ${ARTICLE_FROM}`
 const hash = (value: string) => createHash('sha256').update(value).digest('hex')
 
 function summary(row: ArticleRow, classifications: RSSMembership[]): RSSArticleSummary {
@@ -50,13 +53,14 @@ function queryPredicate(query: ReturnType<typeof RSSQuerySchema.parse>, definiti
   const where: string[] = [], args: unknown[] = []
   const collection = definitions.find((entry) => entry.id === query.collectionId)
   for (const id of [collection && ['topic', 'curated'].includes(collection.kind) ? collection.id : undefined, query.categoryId].filter(Boolean)) {
-    where.push('EXISTS (SELECT 1 FROM rss_memberships m WHERE m.item_id=i.id AND m.definition_id=? AND COALESCE(m.manual_decision,m.derived_decision)=1)')
+    where.push(`EXISTS (SELECT 1 FROM rss_memberships m LEFT JOIN rss_classification_results r ON r.id=m.result_id JOIN rss_definitions d ON d.id=m.definition_id WHERE m.item_id=i.id AND m.definition_id=? AND ${rssIncludedClassificationSQL})`)
     args.push(id)
   }
   if (query.scope === 'inbox') where.push('(i.inbox_visible=1 OR i.starred=1)')
   if (query.filter === 'unread') where.push('i.read=0')
   if (query.filter === 'starred') where.push('i.starred=1')
   if (query.sourceId) { where.push('i.source_id=?'); args.push(query.sourceId) }
+  if (query.eventId) { where.push(`EXISTS (SELECT 1 FROM rss_event_members em JOIN rss_event_evidence ee ON ee.id=em.evidence_id JOIN rss_event_facts ef ON ef.id=ee.fact_id WHERE em.item_id=i.id AND ef.event_id=? AND ${rssEffectiveEventCondition()})`); args.push(query.eventId) }
   if (query.from !== undefined) { where.push('COALESCE(i.published_at,i.first_seen_at)*1000>=?'); args.push(query.from) }
   if (query.until !== undefined) { where.push('COALESCE(i.published_at,i.first_seen_at)*1000<?'); args.push(query.until) }
   if (query.search) {
@@ -72,7 +76,7 @@ function queryPredicate(query: ReturnType<typeof RSSQuerySchema.parse>, definiti
 }
 
 export class RSSContentStore {
-  constructor(private readonly getConnection: () => DatabaseConnection | null, private readonly organization: RSSOrganizationStore, private readonly onBodySaved?: (itemId: string) => void) {}
+  constructor(private readonly getConnection: () => DatabaseConnection | null, private readonly organization: RSSOrganizationStore, private readonly onBodySaved?: (itemId: string) => void, private readonly events?: RSSEventStore) {}
 
   private connection(): DatabaseConnection {
     const db = this.getConnection()
@@ -91,12 +95,20 @@ export class RSSContentStore {
   }
 
   query(input: RSSQueryInput = {}): RSSQueryResult {
+    return this.queryWindow(input, false)
+  }
+
+  cards(input: RSSQueryInput = {}): RSSQueryResult {
+    return this.queryWindow(input, true)
+  }
+
+  private queryWindow(input: RSSQueryInput, grouped: boolean): RSSQueryResult {
     const db = this.connection()
     db.exec('SAVEPOINT rss_read_query')
     try {
       const definitions = this.organization.list()
       const { cursor, expectedRevision: requestedRevision, ...query } = this.normalizeQuery(input, definitions)
-      const fingerprint = hash(JSON.stringify(query))
+      const fingerprint = hash(JSON.stringify([grouped ? 'cards' : 'articles', query]))
       let offset = 0, expectedRevision: number | undefined = requestedRevision
       if (cursor) {
         let parsed: unknown
@@ -113,16 +125,35 @@ export class RSSContentStore {
       const { predicate, args } = queryPredicate(query, definitions)
       const total = db.prepare(`SELECT COUNT(*) AS count, COALESCE(SUM(i.read=0),0) AS unread FROM rss_items i LEFT JOIN rss_article_content c ON c.item_id=i.id${predicate}`).get<{ count: number; unread: number }>(...args)!
       const direction = query.sort === 'newest' ? 'DESC' : 'ASC'
-      const rows = db.prepare(`${ARTICLE_SELECT}${predicate} ORDER BY COALESCE(i.published_at,i.first_seen_at) ${direction},i.id ${direction} LIMIT ? OFFSET ?`)
-        .all<ArticleRow>(...args, query.limit, offset)
+      type CardRow = ArticleRow & { group_id?: string | null; matching_count?: number; matching_unread?: number; matching_starred?: number; display_time?: number }
+      let rows: CardRow[], cardTotal = total.count
+      if (grouped) {
+        const eventKey = `CASE WHEN ${rssEffectiveEventCondition()} THEN ef.event_id ELSE NULL END`
+        const bucket = `COALESCE('event:' || (${eventKey}),'article:' || i.id)`
+        const matches = `WITH matches AS (SELECT i.id,${eventKey} AS group_id,${bucket} AS bucket,
+          COUNT(*) OVER (PARTITION BY ${bucket}) AS matching_count,SUM(i.read=0) OVER (PARTITION BY ${bucket}) AS matching_unread,
+          SUM(i.starred=1) OVER (PARTITION BY ${bucket}) AS matching_starred,
+          ${query.sort === 'newest' ? 'MAX' : 'MIN'}(COALESCE(i.published_at,i.first_seen_at)) OVER (PARTITION BY ${bucket}) AS display_time,
+          ROW_NUMBER() OVER (PARTITION BY ${bucket} ORDER BY ${rssEventRepresentativeOrder('ee')}) AS representative
+          FROM rss_items i LEFT JOIN rss_article_content c ON c.item_id=i.id
+          LEFT JOIN rss_event_members em ON em.item_id=i.id LEFT JOIN rss_event_evidence ee ON ee.id=em.evidence_id LEFT JOIN rss_event_facts ef ON ef.id=ee.fact_id${predicate})`
+        cardTotal = db.prepare(`${matches} SELECT COUNT(*) AS n FROM matches WHERE representative=1`).get<{ n: number }>(...args)!.n
+        rows = db.prepare(`${matches} SELECT ${ARTICLE_COLUMNS},NULL AS markdown,matched.group_id,matched.matching_count,matched.matching_unread,matched.matching_starred,matched.display_time
+          ${ARTICLE_FROM} JOIN matches matched ON matched.id=i.id WHERE matched.representative=1
+          ORDER BY matched.display_time ${direction},matched.bucket ${direction} LIMIT ? OFFSET ?`).all<CardRow>(...args, query.limit, offset)
+      } else rows = db.prepare(`${LIST_SELECT}${predicate} ORDER BY COALESCE(i.published_at,i.first_seen_at) ${direction},i.id ${direction} LIMIT ? OFFSET ?`)
+        .all<CardRow>(...args, query.limit, offset)
       const lastFetch = query.sourceId
         ? db.prepare('SELECT last_fetched AS time FROM rss_sources WHERE id=?').get<{ time: number | null }>(query.sourceId)?.time
         : db.prepare('SELECT MAX(last_fetched) AS time FROM rss_sources').get<{ time: number | null }>()?.time
       const memberships = this.organization.memberships(rows.map((row) => row.id))
+      const events = this.events?.memberships(rows.map((row) => row.id)) || {}
       const nextOffset = offset + rows.length
       return {
-        query, definitions, revision, total: total.count, unreadTotal: total.unread, lastFetchAt: lastFetch == null ? null : lastFetch * 1000, items: rows.map((row) => summary(row, memberships[row.id] || [])),
-        nextCursor: nextOffset < total.count ? Buffer.from(JSON.stringify({ offset: nextOffset, revision, query: fingerprint })).toString('base64url') : null,
+        query, definitions, revision, total: total.count, ...(grouped ? { cardTotal } : {}), unreadTotal: total.unread, lastFetchAt: lastFetch == null ? null : lastFetch * 1000,
+        items: rows.map((row) => ({ ...summary(row, memberships[row.id] || []), ...(events[row.id] ? { event: events[row.id] } : {}),
+          ...(row.group_id && this.events ? { eventGroup: { ...this.events.summary(row.group_id), matchingCount: row.matching_count!, matchingUnread: row.matching_unread!, matchingStarred: row.matching_starred!, displayTime: row.display_time! * 1000 } } : {}) })),
+        nextCursor: nextOffset < cardTotal ? Buffer.from(JSON.stringify({ offset: nextOffset, revision, query: fingerprint })).toString('base64url') : null,
       }
     } finally { db.exec('RELEASE rss_read_query') }
   }
@@ -151,11 +182,13 @@ export class RSSContentStore {
     const row = this.connection().prepare(`${ARTICLE_SELECT} WHERE i.id=?`).get<ArticleRow>(itemId)
     if (!row) return null
     const item = summary(row, this.organization.memberships([itemId])[itemId] || [])
+    const event = this.events?.memberships([itemId])[itemId]
     const currentBody = row.body_item_revision === row.content_revision
     return {
       ...item,
+      ...(event ? { event } : {}),
       body: {
-        status: item.bodyStatus, revision: currentBody ? row.body_revision : null,
+        status: item.bodyStatus, fetching: currentBody && !!row.request_id, revision: currentBody ? row.body_revision : null,
         markdown: currentBody ? row.markdown : null, fetchedAt: row.body_fetched_at,
         sourceUrl: currentBody ? row.source_url || row.link : row.link,
         error: currentBody ? row.error : null,
@@ -185,9 +218,12 @@ export class RSSContentStore {
     const requestId = randomUUID()
     const result = db.prepare(`INSERT INTO rss_article_content(item_id,item_revision,status,request_id,source_url)
       SELECT id,content_revision,'loading',?,link FROM rss_items WHERE id=?
-      ON CONFLICT(item_id) DO UPDATE SET item_revision=excluded.item_revision,status='loading',request_id=excluded.request_id,
-        source_url=excluded.source_url,body_revision=NULL,markdown=NULL,error=NULL
-      WHERE rss_article_content.status<>'loading' OR rss_article_content.item_revision<>excluded.item_revision
+      ON CONFLICT(item_id) DO UPDATE SET item_revision=excluded.item_revision,request_id=excluded.request_id,error=NULL,
+        status=CASE WHEN rss_article_content.item_revision=excluded.item_revision AND body_revision IS NOT NULL THEN rss_article_content.status ELSE 'loading' END,
+        source_url=CASE WHEN rss_article_content.item_revision=excluded.item_revision THEN source_url ELSE excluded.source_url END,
+        body_revision=CASE WHEN rss_article_content.item_revision=excluded.item_revision THEN body_revision END,
+        markdown=CASE WHEN rss_article_content.item_revision=excluded.item_revision THEN markdown END
+      WHERE rss_article_content.request_id IS NULL OR rss_article_content.item_revision<>excluded.item_revision
       RETURNING item_revision`).get<{ item_revision: string }>(requestId, itemId)
     return result ? { itemId, itemRevision: result.item_revision, requestId } : null
   }
@@ -199,10 +235,13 @@ export class RSSContentStore {
     db.exec('SAVEPOINT rss_body_save')
     try {
       const updated = db.prepare(`UPDATE rss_article_content
-        SET status=?,markdown=?,body_revision=?,source_url=?,fetched_at=?,error=?,request_id=NULL
-        WHERE item_id=? AND item_revision=? AND request_id=? AND status='loading'
+        SET status=CASE WHEN ? IS NULL AND body_revision IS NOT NULL THEN status ELSE ? END,
+          markdown=COALESCE(?,markdown),body_revision=COALESCE(?,body_revision),
+          source_url=CASE WHEN ? IS NULL AND body_revision IS NOT NULL THEN source_url ELSE ? END,
+          fetched_at=CASE WHEN ? IS NULL AND body_revision IS NOT NULL THEN fetched_at ELSE ? END,error=?,request_id=NULL
+        WHERE item_id=? AND item_revision=? AND request_id=?
           AND EXISTS(SELECT 1 FROM rss_items WHERE id=? AND content_revision=?)`).run(
-        result.status, text, text === null ? null : hash(text), result.sourceUrl, Date.now(), result.error ?? null,
+        text, result.status, text, text === null ? null : hash(text), text, result.sourceUrl, text, Date.now(), result.error ?? (['failed', 'login_required'].includes(result.status) ? result.status : null),
         claim.itemId, claim.itemRevision, claim.requestId, claim.itemId, claim.itemRevision,
       ) as { changes: number }
       if (updated.changes === 1 && text !== null) this.onBodySaved?.(claim.itemId)
@@ -212,7 +251,7 @@ export class RSSContentStore {
   }
 
   recoverInterruptedLoads(): void {
-    this.connection().prepare(`UPDATE rss_article_content SET status='failed',request_id=NULL,error='interrupted'
-      WHERE status='loading'`).run()
+    this.connection().prepare(`UPDATE rss_article_content SET status=CASE WHEN body_revision IS NOT NULL THEN status ELSE 'failed' END,request_id=NULL,error='interrupted'
+      WHERE request_id IS NOT NULL`).run()
   }
 }

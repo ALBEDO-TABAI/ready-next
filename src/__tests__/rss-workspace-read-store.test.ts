@@ -159,8 +159,13 @@ test('article retrieval is shared, preserves the canonical body and settles befo
     assert.equal(fetches, 1)
     const pending = service.load('fetch', true)
     await service.stop()
-    assert.equal((await pending).body.status, 'failed')
-    assert.equal(content.getArticle('fetch')?.body.status, 'failed')
+    assert.equal(content.getArticle('fetch')?.body.fetching, false)
+    const after = await pending
+    assert.equal(after.body.status, 'ready')
+    assert.equal(after.body.markdown, loaded.body.markdown)
+    assert.equal(after.revision, loaded.revision)
+    assert.match(after.body.error!, /cancelled/)
+    assert.equal(content.getArticle('fetch')?.body.status, 'ready')
     await assert.rejects(service.load('fetch'), /stopped/)
   } finally { await service.stop(); db.close() }
 })

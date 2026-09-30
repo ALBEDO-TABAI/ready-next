@@ -82,6 +82,6 @@ export function generateCategoryFeeds(items: FeedItem[], sources: FeedSource[], 
   const sourcesById = new Map(sources.map((source) => [source.id, source]))
   return Object.fromEntries(definitions.filter((definition) => ['topic', 'curated'].includes(definition.kind)).map((definition) => [
     definition.id, renderFeedXml(`Ready RSS ${definition.name}`, definition.description,
-      items.filter((item) => item.classifications.some((entry) => entry.definitionId === definition.id && entry.included === true)), sourcesById),
+      items.filter((item) => item.classifications.some((entry) => entry.definitionId === definition.id && entry.included === true && !entry.stale)), sourcesById),
   ]))
 }

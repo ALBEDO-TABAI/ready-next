@@ -1,5 +1,6 @@
-import { RSSOrganizationStore } from './rss-organization-store'
+import { RSSOrganizationStore, rssIncludedClassificationSQL } from './rss-organization-store'
 import { RSSProcessingStore } from './rss-processing-store'
+import { RSSEventStore } from './rss-event-store'
 import type { DatabaseConnection } from './connection'
 import { RSSContentStore } from './rss-content-store'
 import type { RSSSource, RSSItem, RSSDraftStoreSourceSummary, RSSStats, RSSAnalysisAction, RSSAnalysisJobStatus, RSSAnalysisJob } from './records'
@@ -8,11 +9,13 @@ export class RSSStore {
   readonly content: RSSContentStore
   readonly organization: RSSOrganizationStore
   readonly processing: RSSProcessingStore
+  readonly events: RSSEventStore
 
   constructor(private readonly getConnection: () => DatabaseConnection | null) {
     this.organization = new RSSOrganizationStore(getConnection, (id) => this.content.getArticle(id)?.revision || null)
-    this.content = new RSSContentStore(getConnection, this.organization, (id) => this.processing.enqueueBodyChange(id))
-    this.processing = new RSSProcessingStore(getConnection, this.content, this.organization)
+    this.events = new RSSEventStore(getConnection)
+    this.content = new RSSContentStore(getConnection, this.organization, (id) => this.processing.enqueueBodyChange(id), this.events)
+    this.processing = new RSSProcessingStore(getConnection, this.content, this.organization, this.events)
   }
 
   private get db(): DatabaseConnection | null {
@@ -277,7 +280,9 @@ export class RSSStore {
     ).all<{ platform: string; count: number }>()
 
     const categories = this.db.prepare(`SELECT d.id,d.name,COUNT(*) AS count FROM rss_memberships m
-      JOIN rss_definitions d ON d.id=m.definition_id WHERE d.kind='topic' AND COALESCE(m.manual_decision,m.derived_decision)=1 GROUP BY d.id,d.name`)
+      JOIN rss_definitions d ON d.id=m.definition_id LEFT JOIN rss_classification_results r ON r.id=m.result_id
+      JOIN rss_items i ON i.id=m.item_id LEFT JOIN rss_article_content c ON c.item_id=i.id
+      WHERE d.kind='topic' AND ${rssIncludedClassificationSQL} GROUP BY d.id,d.name`)
       .all<{ id: string; name: string; count: number }>()
 
     const platformDistribution: Record<string, number> = {}

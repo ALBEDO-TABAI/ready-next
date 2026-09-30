@@ -29,7 +29,7 @@ export function useRSSWorkspace(active: boolean) {
     const currentRequest = () => ticket === generation.current && rssQueryKey(useRSSSession.getState().query) === key
     try {
       const [result, sourceResult] = await Promise.all([
-        readRSSWindow(window.electronAPI.rss, query, count), window.electronAPI.rss.getSources(),
+        readRSSWindow({ queryItems: window.electronAPI.rss.queryCards }, query, count), window.electronAPI.rss.getSources(),
         window.electronAPI.rss.getDefinitions().then((result) => {
           if (!result.success || !result.data) throw new Error(result.error || '栏目读取失败')
           if (currentRequest()) setDefinitions(result.data)
@@ -57,7 +57,7 @@ export function useRSSWorkspace(active: boolean) {
     setLoadingMore(true)
     setError(null)
     try {
-      const response = await window.electronAPI.rss.queryItems({ ...current.query, cursor: current.nextCursor, expectedRevision: current.revision })
+      const response = await window.electronAPI.rss.queryCards({ ...current.query, cursor: current.nextCursor, expectedRevision: current.revision })
       if (ticket !== generation.current || rssQueryKey(useRSSSession.getState().query) !== key) return
       if (!response.success || !response.data) throw new Error(response.error || '下一页读取失败')
       useRSSSession.getState().setView({ ...response.data, items: [...current.items, ...response.data.items] })
@@ -73,7 +73,10 @@ export function useRSSWorkspace(active: boolean) {
 
   useEffect(() => {
     if (!active) return
-    return window.electronAPI.rss.onOrganizationChanged(() => { void reload().catch(() => {}) })
+    const refresh = () => { void reload().catch(() => {}) }
+    const stopOrganization = window.electronAPI.rss.onOrganizationChanged(refresh)
+    const stopSeen = window.electronAPI.rss.onEventSeenChanged(refresh)
+    return () => { stopOrganization(); stopSeen() }
   }, [active, reload])
 
   return { query, view, items, sources, definitions, loading, loadingMore, error, reload, loadMore, hasHydrated: storedView !== null }

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { RSSProcessingList, RSSProcessingSettings, RSSProcessingStatus } from '../../../shared/rss-processing'
 
-const LABELS = { queued: '等待整理', running: '正在整理', success: '整理完成', failed: '结果未通过核对', unknown: '请求结果未知', canceled: '已取消', stale: '内容或标准已变化' }
+const LABELS = { queued: '等待整理', running: '正在整理', success: '该次整理完成', failed: '结果未通过核对', unknown: '请求结果未知', canceled: '已取消', stale: '内容或标准已变化' }
 export default function RSSProcessingPanel({ active, article }: { active: boolean; article?: { id: string; revision: string } }) {
   const [status, setStatus] = useState<RSSProcessingStatus | null>(null)
   const [list, setList] = useState<RSSProcessingList | null>(null)
@@ -55,6 +55,8 @@ export default function RSSProcessingPanel({ active, article }: { active: boolea
     {list && <ul>{list.jobs.map((job) => <li key={job.id}>
       {!article && <strong>{job.title}</strong>}
       <span>{job.definitions.map((definition) => definition.name).join('、')} · {LABELS[job.status]}</span>
+      {!job.inputCurrent && <small>历史版本或旧标准的记录，不代表当前结果。</small>}
+      {job.status === 'success' && job.savedDecisionCount < job.definitions.length && <small>历史分类结果不完整或不可恢复；不会自动重新付费，可选择重新整理。</small>}
       {job.message && job.message !== LABELS[job.status] && <small>{job.message}</small>}
       {['queued', 'running'].includes(job.status) && <button disabled={busy} onClick={() => void action(() => window.electronAPI.rss.cancelProcessing(job.id))}>取消</button>}
     </li>)}</ul>}

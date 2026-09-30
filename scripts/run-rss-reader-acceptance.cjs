@@ -10,14 +10,38 @@ const { createServer } = require('node:http')
 const { spawnSync } = require('node:child_process')
 const { _electron } = require('playwright')
 
+// waitForFunction treats a Promise as truthy before its IPC result resolves; poll the resolved receipt instead.
+async function waitForIPC(page, predicate, argument, options = {}) {
+  const deadline = Date.now() + (options.timeout || 15000)
+  while (Date.now() < deadline) {
+    if (await page.evaluate(predicate, argument)) return
+    await new Promise((resolve) => setTimeout(resolve, 50))
+  }
+  throw new Error('IPC condition did not become true before the deadline')
+}
+
 async function main() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ready-rss-reader-'))
   const evidence = process.argv[2] || path.join(os.tmpdir(), `ready-rss-reader-evidence-${Date.now()}`)
   fs.mkdirSync(evidence, { recursive: true })
   fs.rmSync(path.join(evidence, 'result.json'), { force: true })
   let authenticatedFetches = 0
-  let modelRequests = 0, holdModelResponse = false, updatedProcessingFeed = false
+  let modelRequests = 0, holdModelResponse = false, updatedProcessingFeed = false, eventFeedVersion = 0, eventArticleChanged = false, eventArticleFailure = false
   const server = createServer(async (req, res) => {
+    if (req.url === '/event-feed') {
+      res.writeHead(200, { 'content-type': 'application/rss+xml' })
+      const statements = ['Seed history only.', 'Project Delta released Version 2.', 'Project Delta released Version 2.', 'Project Delta added image editing.']
+      const entries = statements.slice(0, eventFeedVersion + 1).map((text, index) => `<item><guid>delta-${index}</guid><title>${index ? `Project Delta 报道 ${index}` : '事件验收历史种子'}</title><link>http://${req.headers.host}/event-article/${index}</link><description>${text}</description></item>`).join('')
+      res.end(`<rss version="2.0"><channel><title>事件验收</title><link>http://${req.headers.host}</link><description>Local fixture</description>${entries}</channel></rss>`)
+      return
+    }
+    if (req.url?.startsWith('/event-article/')) {
+      if (eventArticleFailure) { res.writeHead(503); res.end('Synthetic refresh failure'); return }
+      const statement = eventArticleChanged ? 'Updated body without a release statement.' : 'Project Delta released Version 2.'
+      res.writeHead(200, { 'content-type': 'text/html' })
+      res.end(`<html><title>Project Delta</title><body><article><h1>Project Delta</h1><p>${statement}</p><p>${'This synthetic original report provides details about the release. '.repeat(30)}</p></article></body></html>`)
+      return
+    }
     if (req.url === '/processing-feed') {
       res.writeHead(200, { 'content-type': 'application/rss+xml' })
       const article = (id, title) => `<item><guid>${id}</guid><title>${title}</title><link>http://127.0.0.1/article/${id}</link><description>Version 2 supports video editing.</description></item>`
@@ -33,7 +57,16 @@ async function main() {
       const input = JSON.parse(typeof user.content === 'string' ? user.content : user.content.map((part) => part.text || '').join(''))
       res.writeHead(200, { 'content-type': 'text/event-stream' })
       if (holdModelResponse) { res.write(': waiting for cancellation\n\n'); return }
-      const text = JSON.stringify({ decisions: input.definitions.map((definition) => ({ definitionId: definition.id, included: true, reason: '合成验收：提供的原文包含可核对内容。', evidence: input.source.text.slice(0, 32) })) })
+      let event = input.eventContext && !input.eventContext.manual && !input.eventContext.reused ? { kind: 'insufficient', eventId: null, factId: null, quote: null, sourceRole: 'unknown', reason: '合成分类验收不强行归组。' } : undefined
+      if (event && (input.source.text.includes('Project Delta released Version 2.') || input.source.text.includes('Project Delta added image editing.'))) {
+        const prior = input.eventContext.candidates.find((candidate) => candidate.facts.some((fact) => fact.quote === 'Project Delta released Version 2.'))
+        const release = prior?.facts.find((fact) => fact.quote === 'Project Delta released Version 2.')
+        const progress = input.source.text.includes('Project Delta added image editing.')
+        event = { kind: prior ? progress ? 'progress' : 'duplicate' : 'new', eventId: prior?.id || null,
+          factId: prior && !progress ? release.id : null, quote: progress ? 'Project Delta added image editing.' : 'Project Delta released Version 2.',
+          sourceRole: prior && !progress ? 'secondary' : 'direct', reason: progress ? 'A concrete subsequent development.' : 'The same original release.' }
+      }
+      const text = JSON.stringify({ ...(event ? { event } : {}), decisions: input.definitions.map((definition) => ({ definitionId: definition.id, included: true, reason: '合成验收：提供的原文包含可核对内容。', evidence: input.source.text.slice(0, 32) })) })
       res.end(`data: ${JSON.stringify({ id: 'local-rss', choices: [{ index: 0, delta: { content: text }, finish_reason: null }] })}\n\ndata: ${JSON.stringify({ id: 'local-rss', choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] })}\n\ndata: [DONE]\n\n`)
       return
     }
@@ -244,7 +277,7 @@ await (db as any).db.backup(${JSON.stringify(path.join(root, 'ready.db'))}); db.
     const bodyBeforeCategory = await page.evaluate(() => window.electronAPI.rss.readArticle({ itemId: 'reader-10', length: 1 }))
     await page.locator('.rss-membership-editor > summary').click()
     await page.getByLabel('制作方法归属', { exact: true }).selectOption('yes')
-    await page.waitForFunction((id) => window.electronAPI.rss.readArticle({ itemId: 'reader-10', length: 1 }).then((response) => response.data.article.classifications.some((entry) => entry.definitionId === id && entry.included === true)), topic.id)
+    await waitForIPC(page, (id) => window.electronAPI.rss.readArticle({ itemId: 'reader-10', length: 1 }).then((response) => response.data.article.classifications.some((entry) => entry.definitionId === id && entry.included === true)), topic.id)
     await page.getByLabel('精选归属', { exact: true }).selectOption('yes')
     await page.getByRole('button', { name: '返回列表', exact: true }).click()
     await page.locator('.rss-category-filters').getByRole('button', { name: '制作方法', exact: true }).click()
@@ -266,7 +299,7 @@ await (db as any).db.backup(${JSON.stringify(path.join(root, 'ready.db'))}); db.
     assert.equal(renamed.ruleRevision, topic.ruleRevision)
     await editor.getByLabel('描述与归类标准', { exact: true }).fill('可复用的镜头制作与工作流程。')
     await editor.getByRole('button', { name: '保存栏目', exact: true }).click()
-    await page.waitForFunction((id) => window.electronAPI.rss.getDefinitions().then((response) => response.data.find((entry) => entry.id === id).ruleRevision === 2), topic.id)
+    await waitForIPC(page, (id) => window.electronAPI.rss.getDefinitions().then((response) => response.data.find((entry) => entry.id === id).ruleRevision === 2), topic.id)
     await page.screenshot({ path: path.join(evidence, 'topic-settings.png') })
     await editor.getByRole('button', { name: '关闭栏目设置', exact: true }).click()
     await app.close()
@@ -293,10 +326,10 @@ await (db as any).db.backup(${JSON.stringify(path.join(root, 'ready.db'))}); db.
     await editor.getByLabel('选择编辑栏目', { exact: true }).selectOption(topic.id)
     await editor.getByLabel('在左侧显示', { exact: true }).uncheck()
     await editor.getByRole('button', { name: '保存栏目', exact: true }).click()
-    await page.waitForFunction((id) => window.electronAPI.rss.getDefinitions().then((response) => response.data.find((entry) => entry.id === id).visible === false), topic.id)
+    await waitForIPC(page, (id) => window.electronAPI.rss.getDefinitions().then((response) => response.data.find((entry) => entry.id === id).visible === false), topic.id)
     await navigation.getByRole('button', { name: '制作流程', exact: true }).waitFor({ state: 'hidden' })
     await editor.getByRole('button', { name: '删除分类', exact: true }).click()
-    await page.waitForFunction((id) => window.electronAPI.rss.getDefinitions().then((response) => !response.data.some((entry) => entry.id === id)), topic.id)
+    await waitForIPC(page, (id) => window.electronAPI.rss.getDefinitions().then((response) => !response.data.some((entry) => entry.id === id)), topic.id)
     await page.getByRole('heading', { name: '全部动态', exact: true }).waitFor()
     await page.waitForFunction(() => document.querySelectorAll('.rss-news-card').length === 11)
     const afterDelete = await page.evaluate(() => window.electronAPI.rss.readArticle({ itemId: 'reader-10', length: 1 }))
@@ -313,7 +346,7 @@ await (db as any).db.backup(${JSON.stringify(path.join(root, 'ready.db'))}); db.
     await globalProcessing.locator(':scope > summary').filter({ hasText: '0/88' }).waitFor()
     assert.equal(await globalProcessing.getByLabel('每日整理调用上限', { exact: true }).inputValue(), '2', 'background status must not replace an unsaved limit')
     await globalProcessing.getByRole('button', { name: '保存限额', exact: true }).click()
-    await page.waitForFunction(() => window.electronAPI.rss.processingStatus().then((result) => result.data.settings.dailyLimit === 2))
+    await waitForIPC(page, () => window.electronAPI.rss.processingStatus().then((result) => result.data.settings.dailyLimit === 2))
     await globalProcessing.locator(':scope > summary').click()
     const modelSetup = await page.evaluate((baseUrl) => window.electronAPI.settings.setAIConfig({ provider: 'openai-compatible', apiKey: 'synthetic-only', model: 'local-rss-test', baseUrl }), base + '/v1')
     assert.equal(modelSetup.success, true)
@@ -348,12 +381,109 @@ await (db as any).db.backup(${JSON.stringify(path.join(root, 'ready.db'))}); db.
     updatedProcessingFeed = true
     const refreshedSource = await page.evaluate((id) => window.electronAPI.rss.refreshSource(id), automaticSource.data.id)
     assert.equal(refreshedSource.success, true, refreshedSource.error)
-    await page.waitForFunction(() => window.electronAPI.rss.queryItems({ scope: 'library', search: '自动整理新增资讯' }).then((result) => result.data?.items[0]?.classifications.some((entry) => entry.origin === 'model' && entry.included)), undefined, { timeout: 15000 })
+    await waitForIPC(page, () => window.electronAPI.rss.queryItems({ scope: 'library', search: '自动整理新增资讯' }).then((result) => result.data?.items[0]?.classifications.some((entry) => entry.origin === 'model' && entry.included)), undefined, { timeout: 15000 })
     const historyClassification = await page.evaluate(() => window.electronAPI.rss.queryItems({ scope: 'library', search: '自动整理历史资讯' }))
     assert.deepEqual(historyClassification.data.items[0].classifications, [])
     assert.equal(modelRequests, 3)
 
-    report = { ok: true, automaticRefreshProcessesOnlyNewItems: true, semanticProcessingThroughLocalProvider: true, cancelProcessingKeepsCallCount: true, historicalImportNotProcessed: true, customDefinitions: true, applicationRestartPreservesDefinitions: true, manualMemberships: true, curationSeparateFromBookmarks: true, typedRSSReferences: true, staleReferenceVisible: true, saveNoteReadback: true, noteEditIndependent: true, exportAllPages: true, cancelExport: true, navigationCollapse: true, searchAndPagination: true, historyAndFavoritesPreserved: true, preferencesSurviveReload: true, longArticle: true, sourceCodeInert: true, failedSaveVisible: true, readPersisted: true, returnPreservesScroll: true, outlineNavigation: true, browserLoginReused: true, narrowNoOverflow: true }
+    const eventPanel = () => page.locator('.rss-event-panel')
+    await eventPanel().locator(':scope > button').click()
+    await eventPanel().getByRole('button', { name: '拆为独立事件', exact: true }).click()
+    await waitForIPC(page, () => window.electronAPI.rss.readArticle({ itemId: 'reader-10', length: 1 }).then((response) => response.data?.article.event?.manual))
+    const firstEvent = await page.evaluate(() => window.electronAPI.rss.readArticle({ itemId: 'reader-10', length: 1 }).then((response) => response.data.article.event))
+    await page.getByRole('button', { name: '返回列表', exact: true }).click()
+    await page.getByRole('textbox', { name: '搜索资讯', exact: true }).fill('可读资讯 11')
+    await page.getByRole('button', { name: '执行搜索', exact: true }).click()
+    await page.locator('[data-rss-item-id="reader-11"]').click()
+    await eventPanel().locator(':scope > button').click()
+    await eventPanel().getByLabel('搜索目标事件', { exact: true }).fill('可读资讯 10')
+    await eventPanel().getByRole('button', { name: '搜索事件', exact: true }).click()
+    await eventPanel().getByLabel('目标事件', { exact: true }).selectOption(firstEvent.eventId)
+    await eventPanel().getByLabel('并入事实方式', { exact: true }).selectOption(firstEvent.factId)
+    await eventPanel().getByRole('button', { name: '并入所选事件', exact: true }).click()
+    await waitForIPC(page, (id) => window.electronAPI.rss.readEvents({ view: 'members', eventId: id }).then((response) => response.data?.total === 2), firstEvent.eventId)
+    await page.screenshot({ path: path.join(evidence, 'event-duplicate.png') })
+    await page.getByRole('button', { name: '返回列表', exact: true }).click()
+    await page.getByRole('textbox', { name: '搜索资讯', exact: true }).fill('可读资讯 10')
+    await page.getByRole('button', { name: '执行搜索', exact: true }).click()
+    const grouped = page.locator('[data-rss-item-id="reader-10"] .rss-grouped-reports')
+    await grouped.getByRole('button', { name: /同一事件/ }).click()
+    await grouped.getByRole('button', { name: '可读资讯 10', exact: true }).waitFor()
+    assert.equal(await grouped.locator('li').count(), 1, 'expansion must retain the search filter')
+    await page.screenshot({ path: path.join(evidence, 'event-filtered-group.png') })
+    await grouped.getByRole('button', { name: '可读资讯 10', exact: true }).click()
+    if (await eventPanel().locator(':scope > button').getAttribute('aria-expanded') !== 'true') await eventPanel().locator(':scope > button').click()
+    await eventPanel().getByRole('button', { name: '拆为独立事件', exact: true }).click()
+    await waitForIPC(page, (id) => window.electronAPI.rss.readArticle({ itemId: 'reader-10', length: 1 }).then((response) => !!response.data?.article.event?.eventId && response.data.article.event.eventId !== id), firstEvent.eventId)
+    const splitEvents = await page.evaluate(async () => Promise.all(['reader-10', 'reader-11'].map(async (itemId) => ({ itemId, result: await window.electronAPI.rss.readArticle({ itemId, length: 1 }) }))))
+    fs.writeFileSync(path.join(evidence, 'event-split-readback.json'), JSON.stringify({ firstEvent, readerTitles: await page.locator('.rss-article-reader h1').allTextContents(), splitEvents }, null, 2))
+    await eventPanel().getByLabel('搜索目标事件', { exact: true }).fill('可读资讯 11')
+    await eventPanel().getByRole('button', { name: '搜索事件', exact: true }).click()
+    await eventPanel().getByLabel('目标事件', { exact: true }).selectOption(firstEvent.eventId)
+    await eventPanel().getByRole('button', { name: '合并当前整个事件', exact: true }).click()
+    await page.getByRole('dialog').getByRole('button', { name: '确定', exact: true }).click()
+    await waitForIPC(page, (id) => window.electronAPI.rss.readEvents({ view: 'members', eventId: id }).then((response) => response.data?.total === 2 && response.data?.members.every((member) => member.manual)), firstEvent.eventId)
+    const mergedFacts = await page.evaluate((id) => window.electronAPI.rss.readEvents({ view: 'facts', eventId: id }), firstEvent.eventId)
+    fs.writeFileSync(path.join(evidence, 'event-merge-readback.json'), JSON.stringify(mergedFacts, null, 2))
+    assert.equal(mergedFacts.data.total, 2, 'merging events must not silently merge distinct fact identities')
+    assert.equal(modelRequests, 3, 'manual grouping must not invoke the model')
+    const automaticEvents = await page.evaluate((url) => window.electronAPI.rss.addSource({ name: '事件验收', url }), base + '/event-feed')
+    assert.equal(automaticEvents.success, true, automaticEvents.error)
+    eventFeedVersion = 1
+    await page.evaluate((id) => window.electronAPI.rss.refreshSource(id), automaticEvents.data.id)
+    await waitForIPC(page, () => window.electronAPI.rss.queryItems({ scope: 'library', search: 'Project Delta 报道 1' }).then((response) => !!response.data?.items[0]?.event?.eventId))
+    eventFeedVersion = 2
+    await page.evaluate((id) => window.electronAPI.rss.refreshSource(id), automaticEvents.data.id)
+    await waitForIPC(page, () => window.electronAPI.rss.queryCards({ scope: 'library', search: 'Project Delta' }).then((response) => response.data?.total === 2 && response.data.cardTotal === 1))
+    await page.getByRole('button', { name: '返回列表', exact: true }).click()
+    await page.getByRole('textbox', { name: '搜索资讯', exact: true }).fill('Project Delta')
+    await page.getByRole('button', { name: '执行搜索', exact: true }).click()
+    await page.waitForFunction(() => document.querySelectorAll('.rss-news-card').length === 1)
+    await page.locator('.rss-grouped-reports').getByRole('button', { name: /同一事件/ }).click()
+    await page.locator('.rss-grouped-reports').getByRole('button', { name: 'Project Delta 报道 1', exact: true }).waitFor()
+    const beforeEventRead = await page.evaluate(() => window.electronAPI.rss.queryItems({ search: 'Project Delta' }))
+    assert.equal(beforeEventRead.data.items.filter((item) => item.read).length, 0, 'expanding a group is not reading every article')
+    const deltaEventId = beforeEventRead.data.items[0].event.eventId
+    await page.screenshot({ path: path.join(evidence, 'event-automatic-group.png') })
+    await page.locator('.rss-grouped-reports').getByRole('button', { name: 'Project Delta 报道 1', exact: true }).click()
+    await page.locator('.rss-article-reader').getByText('已保存正文', { exact: true }).waitFor()
+    await waitForIPC(page, (id) => window.electronAPI.rss.readEvents({ view: 'members', eventId: id }).then((response) => response.data?.summary.unreadCount === 1 && response.data.summary.unseenFactCount === 0), deltaEventId)
+    await waitForIPC(page, () => window.electronAPI.rss.processingStatus().then((response) => response.data?.pending === 0 && response.data.running === 0))
+    eventFeedVersion = 3
+    await page.evaluate((id) => window.electronAPI.rss.refreshSource(id), automaticEvents.data.id)
+    await waitForIPC(page, (id) => window.electronAPI.rss.readEvents({ view: 'facts', eventId: id }).then((response) => response.data?.total === 2 && response.data.summary.unseenFactCount === 1), deltaEventId)
+    await page.getByRole('button', { name: '返回列表', exact: true }).click()
+    await page.locator('.rss-grouped-reports').getByText('有 1 个新整理的事实或进展待查看', { exact: true }).waitFor()
+    await page.screenshot({ path: path.join(evidence, 'event-new-progress.png') })
+
+    const deltaItemId = beforeEventRead.data.items.find((item) => item.title === 'Project Delta 报道 1').id
+    const readDelta = () => page.evaluate((itemId) => window.electronAPI.rss.readArticle({ itemId, length: 12000 }), deltaItemId)
+    const savedA = await readDelta(), callsBeforeRevision = modelRequests
+    eventArticleChanged = true
+    assert.equal((await page.evaluate((itemId) => window.electronAPI.rss.loadArticle({ itemId, force: true }), deltaItemId)).success, true)
+    await waitForIPC(page, (itemId) => window.electronAPI.rss.readArticle({ itemId, length: 1 }).then((response) => response.data?.article.classifications.every((c) => !c.stale) && response.data.article.event?.factId === null), deltaItemId)
+    assert.equal(modelRequests, callsBeforeRevision + 1)
+    eventArticleChanged = false
+    assert.equal((await page.evaluate((itemId) => window.electronAPI.rss.loadArticle({ itemId, force: true }), deltaItemId)).success, true)
+    const restoredA = await readDelta()
+    assert.equal(restoredA.data.article.revision, savedA.data.article.revision)
+    assert.deepEqual(restoredA.data.article.classifications, savedA.data.article.classifications)
+    assert.equal(restoredA.data.article.event.factId, savedA.data.article.event.factId)
+    assert.equal(restoredA.data.article.event.stale, false)
+    assert.equal(modelRequests, callsBeforeRevision + 1, 'returning to a saved version must not invoke the model')
+    await page.locator('.rss-grouped-reports').getByRole('button', { name: 'Project Delta 报道 1', exact: true }).click()
+    await page.locator('.rss-reader-body').getByText('Project Delta released Version 2.', { exact: true }).waitFor()
+    eventArticleFailure = true
+    await page.getByRole('button', { name: '重新获取正文', exact: true }).click()
+    await page.getByText(/已保留上次保存的正文/).waitFor()
+    const preserved = await readDelta()
+    assert.equal(preserved.data.text, savedA.data.text)
+    assert.equal(preserved.data.article.revision, savedA.data.article.revision)
+    assert.equal(preserved.data.body.fetching, false)
+    assert.ok(preserved.data.body.error)
+    await page.screenshot({ path: path.join(evidence, 'body-refresh-failure-preserved.png') })
+
+    report = { ok: true, savedVersionRestorationWithoutModel: true, failedRefreshPreservesBody: true, automaticEventGroupingAndProgress: true, factSeenDoesNotReadAllArticles: true, manualEventSplitMoveMerge: true, groupExpansionKeepsFilter: true, automaticRefreshProcessesOnlyNewItems: true, semanticProcessingThroughLocalProvider: true, cancelProcessingKeepsCallCount: true, historicalImportNotProcessed: true, customDefinitions: true, applicationRestartPreservesDefinitions: true, manualMemberships: true, curationSeparateFromBookmarks: true, typedRSSReferences: true, staleReferenceVisible: true, saveNoteReadback: true, noteEditIndependent: true, exportAllPages: true, cancelExport: true, navigationCollapse: true, searchAndPagination: true, historyAndFavoritesPreserved: true, preferencesSurviveReload: true, longArticle: true, sourceCodeInert: true, failedSaveVisible: true, readPersisted: true, returnPreservesScroll: true, outlineNavigation: true, browserLoginReused: true, narrowNoOverflow: true }
   } catch (error) {
     const failedPage = app?.windows().find((entry) => entry.url().includes('/renderer/index.html'))
     if (failedPage) await failedPage.screenshot({ path: path.join(evidence, 'failure.png') }).catch(() => {})

@@ -5,6 +5,8 @@ import { RSSQuerySchema, RSSReadArticleSchema } from '../../../shared/rss-worksp
 import type { RSSContentStore } from '../database/rss-content-store'
 import type { RSSProcessingStore } from '../database/rss-processing-store'
 import { RSSProcessingListSchema } from '../../../shared/rss-processing'
+import { RSSReadEventsSchema } from '../../../shared/rss-events'
+import type { RSSEventStore } from '../database/rss-event-store'
 import type { RSSItemAnalysisProgress } from '../rss-engine/item-analysis-manager'
 
 interface ToolParam {
@@ -25,6 +27,7 @@ interface RSSToolDef {
 }
 
 interface RSSToolContext {
+  getEvents?: () => Pick<RSSEventStore, 'browse'>
   getProcessing?: () => Pick<RSSProcessingStore, 'list' | 'status'>
   hasProcessingModel?: () => boolean
   getContent?: () => Pick<RSSContentStore, 'query' | 'readArticle'>
@@ -35,6 +38,8 @@ interface RSSToolContext {
 }
 
 const RSS_TOOLS: RSSToolDef[] = [
+  { name: 'rss_read_events', description: '分页读取已保存事件、当前报道或事实进展及历史版本依据。历史摘句不代表当前原文仍有效；只读，不重新归组。',
+    action: 'rss.readEvents', intent: 'read_rss_events', executionKind: 'deterministic', params: zodObjectToParamList(RSS_SCHEMAS.rss_read_events) as ToolParam[] },
   {
     name: 'rss_read_processing', description: '读取 RSS 自动分类与精选的设置、当日调用次数及分页任务记录。仅查询，不启动、重试或取消任务。',
     action: 'rss.readProcessing', intent: 'read_rss_processing', executionKind: 'deterministic',
@@ -153,6 +158,12 @@ export async function executeRSSTool(
 ): Promise<string> {
   const tool = RSS_TOOLS.find((item) => item.name === toolName)
   if (!tool) return `Unknown RSS tool: ${toolName}`
+
+  if (toolName === 'rss_read_events') {
+    if (context?.readAccessDenied || !context?.getEvents) return toStructuredResult(tool, '当前会话未获准读取本机 RSS 资料。', { ok: false, error: 'rss_read_not_authorized' })
+    try { return toStructuredResult(tool, '事件数据以 data 为准，历史依据保留对应文章版本；待更新的关联不当作已重新验证。', { ok: true, data: context.getEvents().browse(RSSReadEventsSchema.parse(args)) }) }
+    catch (error) { return toStructuredResult(tool, '事件读取失败。', { ok: false, error: error instanceof Error ? error.message : String(error) }) }
+  }
 
   if (toolName === 'rss_read_processing') {
     if (context?.readAccessDenied || !context?.getProcessing || !context.hasProcessingModel) return toStructuredResult(tool, '当前会话未获准读取本机 RSS 资料。', { ok: false, error: 'rss_read_not_authorized' })
