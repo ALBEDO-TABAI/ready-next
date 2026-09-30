@@ -45,6 +45,7 @@ export async function copyTextToClipboard(value: string): Promise<boolean> {
     document.body.removeChild(textarea)
     return copied
   } catch {
+    // silent-catch: the caller receives false and does not report a successful copy.
     return false
   }
 }
@@ -240,7 +241,7 @@ export function createMarkdownComponents({ mode, notePath, openHref, externalBas
     try {
       const url = new URL(reference, externalBaseUrl)
       return { resolvedUrl: reference && ['http:', 'https:'].includes(url.protocol) ? url.href : '', localPath: null }
-    } catch { return { resolvedUrl: '', localPath: null } }
+    } catch { /* silent-catch: unsupported source URLs remain inert text. */ return { resolvedUrl: '', localPath: null } }
   }
   return {
     h1: ({ children }: { children?: ReactNode }) => <h1 className="note-preview-markdown-h1" data-ready-heading-level="1" data-ready-heading-title={extractMarkdownText(children)}>{children}</h1>,

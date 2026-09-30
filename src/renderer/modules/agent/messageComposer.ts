@@ -516,6 +516,7 @@ export async function buildComposedAgentInputWithDiagnostics(params: {
   if (params.includeRSSContext && !explicitRSS) {
     try { rssContext = await buildRSSContext() }
     catch {
+      // silent-catch: input failure diagnostics stop sending and preserve the user's draft.
       diagnostics.inputFailedCount += 1
       diagnostics.inputFailures.push({ id: 'rss-current-view', name: '当前 RSS 文章', path: '', reason: '当前 RSS 文章无法读取，请稍后重新发送。' })
       return { message: content, diagnostics }

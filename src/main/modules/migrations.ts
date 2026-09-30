@@ -1,3 +1,4 @@
+import { migrateRSSOrganization, RSS_ORGANIZATION_MIGRATION } from './rss-engine/organization-schema'
 /**
  * Database migration system for Ready V5.
  *
@@ -3304,7 +3305,8 @@ const migrations: Migration[] = [
       `)
     }
   },
-  { name: RSS_CONTENT_MIGRATION, up: migrateRSSContent }
+  { name: RSS_CONTENT_MIGRATION, up: migrateRSSContent },
+  { name: RSS_ORGANIZATION_MIGRATION, up: migrateRSSOrganization }
 ]
 
 /**

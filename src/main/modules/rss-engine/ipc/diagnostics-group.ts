@@ -66,7 +66,6 @@ export interface FetchInvocationSnapshot {
   sourceIds: string[]
   group: string | null
   digest: boolean | null
-  classification: 'simple' | 'none' | null
 }
 
 /** Shape returned by the host's latest-benchmark snapshot loader. */

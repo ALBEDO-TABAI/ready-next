@@ -30,12 +30,14 @@ test('a late save reload uses the current query and cannot strand its loading ow
   const requests: Array<{ query: RSSQueryInput; resolve: (value: unknown) => void }> = []
   Object.assign(window, { electronAPI: { rss: {
     getSources: async () => ({ success: true, data: [] }),
+    getDefinitions: async () => ({ success: true, data: [] }),
+    onOrganizationChanged: () => () => {},
     queryItems: (query: RSSQueryInput) => new Promise((resolve) => requests.push({ query, resolve })),
   } } })
   let state!: ReturnType<typeof useRSSWorkspace>
   function Probe() { state = useRSSWorkspace(true); return null }
   const finish = (index: number) => requests[index].resolve({ success: true, data: {
-    query: RSSQuerySchema.parse(requests[index].query), items: [], total: 0, unreadTotal: 0, revision: index + 1, lastFetchAt: null, nextCursor: null,
+    definitions: [], query: RSSQuerySchema.parse(requests[index].query), items: [], total: 0, unreadTotal: 0, revision: index + 1, lastFetchAt: null, nextCursor: null,
   } })
   await act(async () => root.render(<Probe />))
   await act(async () => finish(0))
@@ -92,7 +94,9 @@ test('an inactive RSS workspace does not query until it is shown', async () => w
   let reads = 0
   Object.assign(window, { electronAPI: { rss: {
     getSources: async () => ({ success: true, data: [] }),
-    queryItems: async (query: RSSQueryInput) => { reads += 1; return { success: true, data: { query: RSSQuerySchema.parse(query), revision: 1, items: [], total: 0, unreadTotal: 0, nextCursor: null, lastFetchAt: null } } },
+    getDefinitions: async () => ({ success: true, data: [] }),
+    onOrganizationChanged: () => () => {},
+    queryItems: async (query: RSSQueryInput) => { reads += 1; return { success: true, data: { definitions: [], query: RSSQuerySchema.parse(query), revision: 1, items: [], total: 0, unreadTotal: 0, nextCursor: null, lastFetchAt: null } } },
   } } })
   function Host({ active }: { active: boolean }) { useRSSWorkspace(active); return null }
   await act(async () => root.render(<Host active={false} />))

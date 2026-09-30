@@ -1,12 +1,15 @@
+import { RSSOrganizationStore } from './rss-organization-store'
 import type { DatabaseConnection } from './connection'
 import { RSSContentStore } from './rss-content-store'
 import type { RSSSource, RSSItem, RSSDraftStoreSourceSummary, RSSStats, RSSAnalysisAction, RSSAnalysisJobStatus, RSSAnalysisJob } from './records'
 
 export class RSSStore {
   readonly content: RSSContentStore
+  readonly organization: RSSOrganizationStore
 
   constructor(private readonly getConnection: () => DatabaseConnection | null) {
-    this.content = new RSSContentStore(getConnection)
+    this.organization = new RSSOrganizationStore(getConnection, (id) => this.content.getArticle(id)?.revision || null)
+    this.content = new RSSContentStore(getConnection, this.organization)
   }
 
   private get db(): DatabaseConnection | null {
@@ -42,55 +45,28 @@ export class RSSStore {
     this.db.prepare('DELETE FROM rss_sources WHERE id = ?').run(id)
   }
 
+  private withClassifications<T extends { id: string }>(rows: T[]): Array<T & { classifications: import('../../../shared/rss-organization').RSSMembership[] }> {
+    const memberships = this.organization.memberships(rows.map((row) => row.id))
+    return rows.map((row) => ({ ...row, classifications: memberships[row.id] || [] }))
+  }
+
   getRSSItems(sourceId?: string): RSSItem[] {
     if (!this.db) return []
-    if (sourceId) {
-      return this.db.prepare(
-        `SELECT * FROM rss_items
-         WHERE source_id = ?
-           AND (inbox_visible = 1 OR starred = 1)
-         ORDER BY COALESCE(published_at, fetched_at) DESC`
-      ).all<RSSItem>(sourceId)
-    }
-    return this.db.prepare(
-      `SELECT * FROM rss_items
-       WHERE inbox_visible = 1 OR starred = 1
-       ORDER BY COALESCE(published_at, fetched_at) DESC`
-    ).all<RSSItem>()
+    return this.withClassifications(this.db.prepare(`SELECT * FROM rss_items WHERE (inbox_visible = 1 OR starred = 1)
+      ${sourceId ? 'AND source_id=?' : ''} ORDER BY COALESCE(published_at,fetched_at) DESC`).all<RSSItem>(...(sourceId ? [sourceId] : [])))
   }
 
   getAllRSSItems(sourceId?: string): RSSItem[] {
     if (!this.db) return []
-    if (sourceId) {
-      return this.db.prepare(
-        `SELECT * FROM rss_items
-         WHERE source_id = ?
-         ORDER BY COALESCE(published_at, fetched_at) DESC`
-      ).all<RSSItem>(sourceId)
-    }
-    return this.db.prepare(
-      `SELECT * FROM rss_items
-       ORDER BY COALESCE(published_at, fetched_at) DESC`
-    ).all<RSSItem>()
+    return this.withClassifications(this.db.prepare(`SELECT * FROM rss_items ${sourceId ? 'WHERE source_id=?' : ''}
+      ORDER BY COALESCE(published_at,fetched_at) DESC`).all<RSSItem>(...(sourceId ? [sourceId] : [])))
   }
 
   getRSSItemsWithSource(sourceId?: string): Array<RSSItem & { source_name: string }> {
     if (!this.db) return []
-    if (sourceId) {
-      return this.db.prepare(
-        `SELECT i.*, s.name AS source_name FROM rss_items i
-         LEFT JOIN rss_sources s ON i.source_id = s.id
-         WHERE i.source_id = ?
-           AND (i.inbox_visible = 1 OR i.starred = 1)
-         ORDER BY COALESCE(i.published_at, i.fetched_at) DESC`
-      ).all<RSSItem & { source_name: string }>(sourceId)
-    }
-    return this.db.prepare(
-      `SELECT i.*, s.name AS source_name FROM rss_items i
-       LEFT JOIN rss_sources s ON i.source_id = s.id
-       WHERE i.inbox_visible = 1 OR i.starred = 1
-       ORDER BY COALESCE(i.published_at, i.fetched_at) DESC`
-    ).all<RSSItem & { source_name: string }>()
+    return this.withClassifications(this.db.prepare(`SELECT i.*,s.name AS source_name FROM rss_items i LEFT JOIN rss_sources s ON s.id=i.source_id
+      WHERE (i.inbox_visible = 1 OR i.starred = 1) ${sourceId ? 'AND i.source_id=?' : ''}
+      ORDER BY COALESCE(i.published_at,i.fetched_at) DESC`).all<RSSItem & { source_name: string }>(...(sourceId ? [sourceId] : [])))
   }
 
   upsertRSSItems(items: Array<{
@@ -103,14 +79,13 @@ export class RSSStore {
     cover_image?: string | null
     author?: string | null
     published_at?: number | null
-    ai_tags?: string | null
   }>): number {
     if (!this.db) throw new Error('Database not available')
     let inserted = 0
     const stmt = this.db.prepare(
       `INSERT INTO rss_items
-       (id, source_id, guid, title, link, summary, cover_image, author, published_at, ai_tags, inbox_visible)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+       (id, source_id, guid, title, link, summary, cover_image, author, published_at, inbox_visible)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
        ON CONFLICT(id) DO UPDATE SET
          source_id = excluded.source_id,
          guid = excluded.guid,
@@ -120,7 +95,6 @@ export class RSSStore {
          cover_image = excluded.cover_image,
          author = excluded.author,
          published_at = excluded.published_at,
-         ai_tags = COALESCE(excluded.ai_tags, rss_items.ai_tags),
          fetched_at = unixepoch()`
     )
     for (const item of items) {
@@ -133,8 +107,7 @@ export class RSSStore {
         item.summary || null,
         item.cover_image || null,
         item.author || null,
-        item.published_at || null,
-        item.ai_tags ?? null
+        item.published_at || null
       ) as { changes?: number }
       if (result.changes && result.changes > 0) inserted++
     }
@@ -243,12 +216,12 @@ export class RSSStore {
   getRSSItemsByIds(itemIds: string[]): RSSItem[] {
     if (!this.db || itemIds.length === 0) return []
     const placeholders = itemIds.map(() => '?').join(', ')
-    return this.db.prepare(`SELECT * FROM rss_items WHERE id IN (${placeholders})`).all<RSSItem>(...itemIds)
+    return this.withClassifications(this.db.prepare(`SELECT * FROM rss_items WHERE id IN (${placeholders})`).all<RSSItem>(...itemIds))
   }
 
   getLatestPerSource(): RSSItem[] {
     if (!this.db) return []
-    return this.db.prepare(
+    return this.withClassifications(this.db.prepare(
       `SELECT i.* FROM rss_items i
        INNER JOIN (
          SELECT source_id, MAX(COALESCE(published_at, fetched_at)) AS latest
@@ -258,7 +231,7 @@ export class RSSStore {
        ON latest_per_source.source_id = i.source_id
        AND COALESCE(i.published_at, i.fetched_at) = latest_per_source.latest
        ORDER BY i.published_at DESC`
-    ).all<RSSItem>()
+    ).all<RSSItem>())
   }
 
   getRSSStats(): RSSStats {
@@ -268,7 +241,7 @@ export class RSSStore {
         totalItems: 0,
         unreadItems: 0,
         platformDistribution: {},
-        categoryDistribution: {},
+        categories: [],
       }
     }
 
@@ -286,20 +259,13 @@ export class RSSStore {
        GROUP BY platform`
     ).all<{ platform: string; count: number }>()
 
-    const categories = this.db.prepare(
-      `SELECT COALESCE(ai_tags, '其他') AS category, COUNT(*) AS count
-       FROM rss_items
-       GROUP BY COALESCE(ai_tags, '其他')`
-    ).all<{ category: string; count: number }>()
+    const categories = this.db.prepare(`SELECT d.id,d.name,COUNT(*) AS count FROM rss_memberships m
+      JOIN rss_definitions d ON d.id=m.definition_id WHERE d.kind='topic' AND COALESCE(m.manual_decision,m.derived_decision)=1 GROUP BY d.id,d.name`)
+      .all<{ id: string; name: string; count: number }>()
 
     const platformDistribution: Record<string, number> = {}
     for (const row of platforms) {
       platformDistribution[row.platform] = row.count
-    }
-
-    const categoryDistribution: Record<string, number> = {}
-    for (const row of categories) {
-      categoryDistribution[row.category] = row.count
     }
 
     return {
@@ -307,7 +273,7 @@ export class RSSStore {
       totalItems: totals?.totalItems ?? 0,
       unreadItems: totals?.unreadItems ?? 0,
       platformDistribution,
-      categoryDistribution,
+      categories,
     }
   }
 

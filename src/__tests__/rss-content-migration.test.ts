@@ -1,3 +1,4 @@
+import { migrateRSSOrganization, RSS_ORGANIZATION_MIGRATION } from '../main/modules/rss-engine/organization-schema'
 import assert from 'node:assert/strict'
 import { createRequire } from 'node:module'
 import { mkdtempSync, rmSync } from 'node:fs'
@@ -38,7 +39,13 @@ test('RSS migration backs up existing WAL data and rolls back without losing rea
     db.prepare('INSERT INTO migrations VALUES(?)').run(RSS_CONTENT_MIGRATION)
     db.exec('COMMIT')
     assert.deepEqual(db.prepare('SELECT read,starred,inbox_visible FROM rss_items').get(), { read: 1, starred: 1, inbox_visible: 0 })
-    assert.equal(backupBeforeRSSMigration(db, path), null, 'already migrated databases are not backed up again')
+    const organizationBackup = backupBeforeRSSMigration(db, path)
+    assert.ok(organizationBackup?.includes('before-rss-080-'))
+    db.exec('BEGIN')
+    migrateRSSOrganization(db)
+    db.prepare('INSERT INTO migrations VALUES(?)').run(RSS_ORGANIZATION_MIGRATION)
+    db.exec('COMMIT')
+    assert.equal(backupBeforeRSSMigration(db, path), null, 'all RSS migrations have completed')
     assert.equal(snapshot.prepare('SELECT title FROM rss_items').get<{ title: string }>()?.title, 'Saved title')
   } finally {
     snapshot?.close()

@@ -176,6 +176,7 @@ export async function executeRSSTool(
         ? context.getAnalysisProgress?.([String(args.itemId)])[String(args.itemId)] ?? null : undefined
       return toStructuredResult(tool, '已读取保存的 RSS 资料；范围、正文状态及续读位置以 data 为准，analysis 为最近分析的当前状态。', { ok: true, data, ...(referenceId ? { referenceId } : {}), ...(analysis !== undefined ? { analysis } : {}) })
     } catch (error) {
+      // silent-catch: the structured failed result is returned to the Agent, never treated as read success.
       return toStructuredResult(tool, 'RSS 读取未完成。', { ok: false, error: error instanceof Error ? error.message : String(error) })
     }
   }

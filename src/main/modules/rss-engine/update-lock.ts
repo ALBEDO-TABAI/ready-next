@@ -7,7 +7,6 @@ export interface RSSUpdateTaskStatus {
   insertedCount: number
   errors: string[]
   digest: boolean
-  classification: 'simple' | 'none'
   message: string | null
 }
 
@@ -20,7 +19,6 @@ const initialStatus: RSSUpdateTaskStatus = {
   insertedCount: 0,
   errors: [],
   digest: false,
-  classification: 'simple',
   message: null,
 }
 
@@ -43,7 +41,7 @@ export class RSSUpdateLock {
   }
 
   async run(
-    opts: { digest: boolean; classification: 'simple' | 'none' },
+    opts: { digest: boolean },
     task: () => Promise<{
       insertedCount: number
       errors: string[]
@@ -84,7 +82,6 @@ export class RSSUpdateLock {
       insertedCount: 0,
       errors: [],
       digest: opts.digest,
-      classification: opts.classification,
       message: '正在更新 RSS 源',
     }
 
@@ -102,7 +99,6 @@ export class RSSUpdateLock {
         insertedCount: result.insertedCount,
         errors: result.errors,
         digest: opts.digest,
-        classification: opts.classification,
         message: result.message,
       }
       return {
@@ -123,7 +119,6 @@ export class RSSUpdateLock {
         insertedCount: 0,
         errors: [message],
         digest: opts.digest,
-        classification: opts.classification,
         message,
       }
       throw error

@@ -98,7 +98,6 @@ function createMockDeps(): FetchGroupDeps {
     getRouteCapabilityMatrix: fail('getRouteCapabilityMatrix') as FetchGroupDeps['getRouteCapabilityMatrix'],
     generateRSSArtifacts: fail('generateRSSArtifacts') as FetchGroupDeps['generateRSSArtifacts'],
     generateRSSBenchmarkArtifacts: fail('generateRSSBenchmarkArtifacts') as FetchGroupDeps['generateRSSBenchmarkArtifacts'],
-    classifyItem: fail('classifyItem') as FetchGroupDeps['classifyItem'],
     detectPlatform: fail('detectPlatform') as FetchGroupDeps['detectPlatform'],
     normalizeSourcePlatform: fail('normalizeSourcePlatform') as FetchGroupDeps['normalizeSourcePlatform'],
     classifyBackend: fail('classifyBackend') as FetchGroupDeps['classifyBackend'],
@@ -171,7 +170,7 @@ test('completed fetchAll records durable completion after passing through RSSUpd
     ...createMockDeps(),
     getRSSSources: () => [],
     filterSelectedSources: (sources) => sources,
-    normalizeFetchOptions: () => ({ digest: false, classification: 'simple' }),
+    normalizeFetchOptions: () => ({ digest: false }),
     persistFetchInvocation: () => undefined,
     recordFetchAllCompletedAt: (value) => completedAt.push(value),
     rssUpdateLock: new RSSUpdateLock(),
@@ -193,7 +192,7 @@ test('failed fetchAll also records completion so cold start does not retry in a 
     getRSSSources: () => {
       throw new Error('database unavailable')
     },
-    normalizeFetchOptions: () => ({ digest: false, classification: 'simple' }),
+    normalizeFetchOptions: () => ({ digest: false }),
     persistFetchInvocation: () => undefined,
     recordFetchAllCompletedAt: (value) => completedAt.push(value),
     rssUpdateLock: new RSSUpdateLock(),
@@ -206,7 +205,7 @@ test('failed fetchAll also records completion so cold start does not retry in a 
   assert.equal(completedAt.length, 1)
 })
 
-test('single-source refresh classifies incoming articles before persistence', async () => {
+test('single-source refresh saves articles without rewriting classification decisions', async () => {
   const { ipc, handleCalls } = createMockIpc()
   let savedTags: Array<string | null | undefined> = []
   const handle = fetchGroup.register(ipc, {
@@ -227,10 +226,6 @@ test('single-source refresh classifies incoming articles before persistence', as
         pubDate: '2026-09-30T00:00:00Z', author: '', coverImage: null, metadata: {},
       }] },
     }),
-    classifyItem: (title, description) => {
-      assert.deepEqual([title, description], ['设计案例', '视觉设计'])
-      return '设计'
-    },
     resolveRSSItemGuid: (item) => item.itemId,
     getRSSItemsByIds: () => [],
     upsertRSSItems: (items) => { savedTags = items.map((item) => item.ai_tags); return items.length },
@@ -245,7 +240,7 @@ test('single-source refresh classifies incoming articles before persistence', as
     const refresh = handleCalls.find((entry) => entry.channel === 'rss:refreshSource')!.handler
     const result = await refresh({} as IpcMainInvokeEvent, { sourceId: 's1' }) as { success: boolean }
     assert.equal(result.success, true)
-    assert.deepEqual(savedTags, ['设计'])
+    assert.deepEqual(savedTags, [undefined])
   } finally {
     handle.dispose()
   }

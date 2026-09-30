@@ -1,3 +1,5 @@
+import type { RSSDefinition } from '../../../shared/rss-organization'
+import RSSMembershipEditor from './RSSMembershipEditor'
 import RSSReferenceButton from './RSSReferenceButton'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { ArrowLeft, Copy, ExternalLink, Loader2, RefreshCw, Star } from 'lucide-react'
@@ -12,6 +14,7 @@ import RssTimeHintBanner from './RssTimeHintBanner'
 import RSSSaveNoteButton from './RSSSaveNoteButton'
 
 interface RSSArticleReaderProps {
+  definitions?: RSSDefinition[]
   active?: boolean
   item: RSSItem
   onClose(): void
@@ -26,7 +29,7 @@ const BODY_LABELS = {
   stale: '原文已变化，正在更新正文', login_required: '需要在原网站登录', failed: '正文获取失败',
 } as const
 
-export default function RSSArticleReader({ item, onClose, onOpened, onToggleStar, onBodyLoaded, notice, active = true }: RSSArticleReaderProps) {
+export default function RSSArticleReader({ item, onClose, onOpened, onToggleStar, onBodyLoaded, notice, active = true, definitions = [] }: RSSArticleReaderProps) {
   const [content, setContent] = useState<RSSArticleExcerpt | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -120,6 +123,7 @@ export default function RSSArticleReader({ item, onClose, onOpened, onToggleStar
           {!video && <button type="button" className="rss-reader-button" disabled={busy} onClick={() => { forceReload.current = true; setReload((value) => value + 1) }}><RefreshCw size={13} />重新获取正文</button>}
         </div>
         {(error || notice || content?.body.status === 'partial' || content?.body.status === 'login_required') && <p className="rss-reader-notice" role="alert">{error || notice || (content?.body.status === 'partial' ? '目前仅获取到部分正文，请打开原文查看完整内容。' : '请先打开原文登录，再重新获取正文。')}</p>}
+        {content && definitions.length > 0 && <RSSMembershipEditor article={content.article} definitions={definitions} active={active} />}
         <div className="note-preview-body rss-reader-body" ref={bodyRef}>
           {content && <MarkdownContent content={content.text} externalBaseUrl={content.body.sourceUrl || article?.link || item.link} onOpenLink={openLink} />}
         </div>

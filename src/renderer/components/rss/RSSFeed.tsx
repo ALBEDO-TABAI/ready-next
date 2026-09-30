@@ -1,3 +1,4 @@
+import type { RSSMembership } from '../../../shared/rss-organization'
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Filter,
@@ -25,6 +26,7 @@ import { chatMenuSurfaceStyle } from '../agent/chatMenuStyles'
 import { LiquidFloatingPanel } from '../ui/liquid-glass/LiquidFloatingPanel'
 
 export interface RSSItem {
+  classifications?: RSSMembership[]
   id: string
   revision?: string
   sourceRevision?: string
@@ -932,6 +934,9 @@ export default function RSSFeed({
                           </h3>
 
                         </div>
+                        {(item.classifications || []).some((entry) => entry.included) && <div className="rss-classification-labels">
+                          {(item.classifications || []).filter((entry) => entry.included).map((entry) => <span key={entry.definitionId} title={entry.reason}>{entry.name}{entry.stale ? ' · 需更新' : ''}</span>)}
+                        </div>}
                         {item.summary ? (
                           <p
                             className="rss-item-line-fade mb-1.5 text-[12px] text-[var(--text-muted)]"

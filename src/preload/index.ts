@@ -825,6 +825,15 @@ const boardAPI = {
 
 // RSS API
 const rssAPI = {
+  getDefinitions: () => ipcRenderer.invoke('rss:getDefinitions'),
+  saveDefinition: (input: import('../shared/rss-organization').RSSDefinitionWrite) => ipcRenderer.invoke('rss:saveDefinition', input),
+  removeDefinition: (input: { id: string; expectedRevision: number }) => ipcRenderer.invoke('rss:removeDefinition', input),
+  setMembership: (input: import('../shared/rss-organization').RSSMembershipWrite) => ipcRenderer.invoke('rss:setMembership', input),
+  onOrganizationChanged: (callback: () => void) => {
+    const handler = () => callback()
+    ipcRenderer.on('rss:organizationChanged', handler)
+    return () => ipcRenderer.removeListener('rss:organizationChanged', handler)
+  },
   saveArticleNote: (input: import('../shared/rss-workspace').RSSSaveNoteInput) => ipcRenderer.invoke('rss:saveArticleNote', input),
   exportQuery: (input: import('../shared/rss-workspace').RSSQueryInput) => ipcRenderer.invoke('rss:exportQuery', input),
   queryItems: (query?: unknown) => ipcRenderer.invoke('rss:queryItems', query),
@@ -842,7 +851,7 @@ const rssAPI = {
   toggleStarred: (itemId: string) => ipcRenderer.invoke('rss:toggleStarred', itemId),
   clearDraftStore: (payload?: { sourceId?: string }) => ipcRenderer.invoke('rss:clearDraftStore', payload),
   refreshSource: (sourceId: string) => ipcRenderer.invoke('rss:refreshSource', { sourceId }),
-  fetchAll: (options?: { digest?: boolean; classification?: 'simple' | 'none'; group?: string; sourceIds?: string[] }) =>
+  fetchAll: (options?: { digest?: boolean; group?: string; sourceIds?: string[] }) =>
     ipcRenderer.invoke('rss:fetchAll', options),
   autoRefreshStatus: () => ipcRenderer.invoke('rss:autoRefreshStatus'),
   onAutoRefreshCompleted: (callback: (snapshot: RSSAutoRefreshSnapshot) => void) => {
@@ -857,7 +866,7 @@ const rssAPI = {
     ipcRenderer.invoke('rss:benchmarkSources', options),
   repairRuntime: () => ipcRenderer.invoke('rss:repairRuntime'),
   exportOpml: () => ipcRenderer.invoke('rss:exportOpml'),
-  exportFeed: (type?: 'master' | 'tech' | 'humanities' | 'design' | 'entertainment' | 'others') =>
+  exportFeed: (type?: string) =>
     ipcRenderer.invoke('rss:exportFeed', type),
   startItemAnalysis: (payload: {
     itemId: string

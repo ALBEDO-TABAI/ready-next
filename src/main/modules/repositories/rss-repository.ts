@@ -3,6 +3,8 @@ import type { RSSAnalysisAction, RSSAnalysisJob, RSSAnalysisJobStatus, RSSDraftS
 import { getDatabase } from '../database'
 
 export class RSSRepository {
+  getOrganizationStore() { return getDatabase().rss.organization }
+
   getContentStore() {
     return getDatabase().rss.content
   }
@@ -53,7 +55,6 @@ export class RSSRepository {
     cover_image?: string | null
     author?: string | null
     published_at?: number | null
-    ai_tags?: string | null
   }>): number {
     return getDatabase().rss.upsertRSSItems(items)
   }

@@ -1,3 +1,4 @@
+import type { RSSDefinition } from '../../../shared/rss-organization'
 import RSSReferenceButton from './RSSReferenceButton'
 import { useEffect, useState } from 'react'
 import { Search, X } from 'lucide-react'
@@ -5,12 +6,14 @@ import { useRSSSession } from '../../stores/useRSSSession'
 import { RSS_SEARCH_MAX_LENGTH, type RSSQueryResult } from '../../../shared/rss-workspace'
 import RSSExportButton from './RSSExportButton'
 
-export default function RSSWorkspaceToolbar({ view, loading }: { view: RSSQueryResult | null; loading: boolean }) {
+export default function RSSWorkspaceToolbar({ view, loading, definitions }: { view: RSSQueryResult | null; loading: boolean; definitions: RSSDefinition[] }) {
   const query = useRSSSession((state) => state.query)
   const setQuery = useRSSSession((state) => state.setQuery)
   const [search, setSearch] = useState(query.search)
   useEffect(() => setSearch(query.search), [query.search])
-  const title = query.scope === 'library' ? '历史底稿' : query.filter === 'starred' ? '收藏' : query.filter === 'unread' ? '未读' : '全部动态'
+  const collection = definitions.find((entry) => entry.id === (query.collectionId || (query.scope === 'library' ? 'history' : query.filter === 'all' ? 'all' : query.filter)))
+  const title = collection?.name || '资讯'
+  const filters = definitions.filter((entry) => collection?.filterIds.includes(entry.id) || entry.id === query.categoryId)
   return <header className="rss-workspace-heading">
     <div className="rss-workspace-heading-title"><h1>{title}</h1><p role="status">{loading ? '正在读取…' : view ? `${view.total} 条 · ${view.unreadTotal} 条未读` : '尚未读取'}{view && view.items.length < view.total ? ` · 已显示 ${view.items.length} 条` : ''}{view?.lastFetchAt ? ` · 更新于 ${new Date(view.lastFetchAt).toLocaleTimeString()}` : ''}</p></div>
     <form className="rss-search-bar glass-surface-floating" onSubmit={(event) => { event.preventDefault(); setQuery({ search }) }}>
@@ -26,5 +29,9 @@ export default function RSSWorkspaceToolbar({ view, loading }: { view: RSSQueryR
     </select>
     <RSSReferenceButton name="RSS 筛选结果" label="引用当前结果" disabled={loading} reference={view ? { kind: 'query', query: { ...view.query, expectedRevision: view.revision } } : null} />
     <RSSExportButton view={view} disabled={loading} />
+    {filters.length > 0 && <div className="rss-category-filters glass-surface-floating" aria-label="分类筛选">
+      <button type="button" aria-pressed={!query.categoryId} onClick={() => setQuery({ categoryId: undefined })}>全部</button>
+      {filters.map((definition) => <button type="button" key={definition.id} title={definition.description} aria-pressed={query.categoryId === definition.id} onClick={() => setQuery({ categoryId: definition.id })}>{definition.name}</button>)}
+    </div>}
   </header>
 }

@@ -1,3 +1,4 @@
+import RSSDefinitionEditor from '../../components/rss/RSSDefinitionEditor'
 import { useState, useEffect, useCallback, useMemo, useRef, type CSSProperties } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { RefreshCw, AlertCircle, ExternalLink } from 'lucide-react'
@@ -95,13 +96,14 @@ export default function RSSMode({
   isMotionSettled = true,
 }: RSSModeProps) {
   const navigate = useNavigate()
-  const { query, view, items, sources, loading, loadingMore, error, reload, loadMore, hasHydrated } = useRSSWorkspace(isActive && !isSuspended)
+  const { query, view, items, sources, definitions, loading, loadingMore, error, reload, loadMore, hasHydrated } = useRSSWorkspace(isActive && !isSuspended)
   const selectedSourceId = query.sourceId || null
   const setQuery = useRSSSession((state) => state.setQuery)
   const setSelection = useRSSSession((state) => state.setSelection)
   const browserTabs = useBrowserTabs((state) => state.tabs)
   const activeBrowserTabId = useBrowserTabs((state) => state.activeTabId)
   const selectedSource = selectedSourceId
+  const [showOrganization, setShowOrganization] = useState(false)
   const [selectedItem, setSelectedItem] = useState<RSSItem | null>(null)
   const [refreshing, setRefreshing] = useState(false)
   const [showAddModal, setShowAddModal] = useState(false)
@@ -364,7 +366,7 @@ export default function RSSMode({
         outcome = getRSSRefreshOutcome(result)
       }
       try { await loadRSSData(); outcome.viewUpdated = true }
-      catch { outcome.viewUpdated = false; outcome.summary += '；列表暂未更新，请重新读取。' }
+      catch { /* silent-catch: refresh outcome reports that the view did not update. */ outcome.viewUpdated = false; outcome.summary += '；列表暂未更新，请重新读取。' }
       setStatusMessage(outcome.summary)
       return outcome
     } catch (cause) {
@@ -417,7 +419,7 @@ export default function RSSMode({
       if (!result.success || !result.data) throw new Error(result.error || '清空失败')
       await loadRSSData()
       setStatusMessage(`已按发起时的筛选范围移出 ${result.data.dismissed} 条内容，保留收藏与历史底稿`)
-    } catch (cause) { setStatusMessage(cause instanceof Error && cause.message === 'cursor_stale' ? '资料已更新，请重新读取后再清空。' : cause instanceof Error ? cause.message : String(cause)) }
+    } catch (cause) { /* silent-catch: the operation failure remains visible in the RSS status area. */ setStatusMessage(cause instanceof Error && cause.message === 'cursor_stale' ? '资料已更新，请重新读取后再清空。' : cause instanceof Error ? cause.message : String(cause)) }
   }, [loadRSSData, view])
 
   const handleDeleteItem = useCallback(async (itemId: string) => {
@@ -427,7 +429,7 @@ export default function RSSMode({
       await loadRSSData()
       setStatusMessage('已移出收件箱，历史底稿仍保留')
       setSelectedItem((prev) => prev?.id === itemId ? null : prev)
-    } catch (cause) { setStatusMessage(cause instanceof Error ? cause.message : String(cause)) }
+    } catch (cause) { /* silent-catch: the operation failure remains visible in the RSS status area. */ setStatusMessage(cause instanceof Error ? cause.message : String(cause)) }
   }, [loadRSSData])
 
   const handleOpenAnalysisOutput = useCallback(
@@ -541,7 +543,7 @@ export default function RSSMode({
           className="workbench-canvas-shell relative flex h-full min-h-0 overflow-hidden"
           style={{ background: 'var(--workbench-module-surface-bg)' }}
         >
-          <RSSNavigation onNavigate={(patch) => { setSelectedItem(null); setQuery(patch) }} />
+          <RSSNavigation definitions={definitions} onManage={() => { setSelectedItem(null); setShowOrganization((value) => !value) }} onNavigate={(patch) => { setSelectedItem(null); setQuery(patch) }} />
           {/* Keep the list mounted so returning from reading preserves scroll. */}
           <div
             className={`rss-feed-sheet content-surface-panel flex-1 overflow-hidden flex flex-col relative`}
@@ -550,7 +552,11 @@ export default function RSSMode({
               display: selectedItem ? 'none' : undefined,
             }}
           >
-            <RSSWorkspaceToolbar view={view} loading={loading} />
+            {showOrganization && <RSSDefinitionEditor definitions={definitions} onClose={() => setShowOrganization(false)} onSaved={(deletedId) => {
+              const current = useRSSSession.getState().query
+              if (deletedId && (current.collectionId === deletedId || current.categoryId === deletedId)) setQuery({ collectionId: undefined, categoryId: undefined, scope: 'inbox', filter: 'all' })
+            }} />}
+            <RSSWorkspaceToolbar view={view} loading={loading} definitions={definitions} />
             <RSSFeed
               active={isActive && !isSuspended}
               items={items}
@@ -628,6 +634,7 @@ export default function RSSMode({
           {selectedItem && (
             <RSSArticleReader
               active={isActive && !isSuspended}
+              definitions={definitions}
               key={selectedItem.id}
               item={items.find((item) => item.id === selectedItem.id) || selectedItem}
               onClose={handleClosePreview}

@@ -1,3 +1,5 @@
+import type { RSSOrganizationStore } from './rss-organization-store'
+import { rssArticleRevision, type RSSDefinition, type RSSMembership } from '../../../shared/rss-organization'
 import { createHash, randomUUID } from 'node:crypto'
 import type { DatabaseConnection } from './connection'
 import { assertDatabaseConnectionReady } from './connection'
@@ -31,10 +33,10 @@ const ARTICLE_SELECT = `SELECT i.*, s.name AS source_name,
   LEFT JOIN rss_article_content c ON c.item_id=i.id`
 const hash = (value: string) => createHash('sha256').update(value).digest('hex')
 
-function summary(row: ArticleRow): RSSArticleSummary {
+function summary(row: ArticleRow, classifications: RSSMembership[]): RSSArticleSummary {
   const currentBody = row.body_item_revision === row.content_revision
   return {
-    id: row.id, revision: `${row.content_revision}:${currentBody ? row.body_revision ?? 'none' : 'none'}`,
+    id: row.id, revision: rssArticleRevision(row.content_revision, row.body_item_revision, row.body_revision), classifications,
     sourceRevision: row.content_revision,
     sourceId: row.source_id, source: row.source_name || row.source_id, title: row.title, link: row.link,
     summary: row.summary || '', author: row.author, publishedAt: row.published_at === null ? null : row.published_at * 1000,
@@ -44,8 +46,13 @@ function summary(row: ArticleRow): RSSArticleSummary {
   }
 }
 
-function queryPredicate(query: ReturnType<typeof RSSQuerySchema.parse>): { predicate: string; args: unknown[] } {
+function queryPredicate(query: ReturnType<typeof RSSQuerySchema.parse>, definitions: RSSDefinition[]): { predicate: string; args: unknown[] } {
   const where: string[] = [], args: unknown[] = []
+  const collection = definitions.find((entry) => entry.id === query.collectionId)
+  for (const id of [collection && ['topic', 'curated'].includes(collection.kind) ? collection.id : undefined, query.categoryId].filter(Boolean)) {
+    where.push('EXISTS (SELECT 1 FROM rss_memberships m WHERE m.item_id=i.id AND m.definition_id=? AND COALESCE(m.manual_decision,m.derived_decision)=1)')
+    args.push(id)
+  }
   if (query.scope === 'inbox') where.push('(i.inbox_visible=1 OR i.starred=1)')
   if (query.filter === 'unread') where.push('i.read=0')
   if (query.filter === 'starred') where.push('i.starred=1')
@@ -65,7 +72,7 @@ function queryPredicate(query: ReturnType<typeof RSSQuerySchema.parse>): { predi
 }
 
 export class RSSContentStore {
-  constructor(private readonly getConnection: () => DatabaseConnection | null) {}
+  constructor(private readonly getConnection: () => DatabaseConnection | null, private readonly organization: RSSOrganizationStore) {}
 
   private connection(): DatabaseConnection {
     const db = this.getConnection()
@@ -73,26 +80,37 @@ export class RSSContentStore {
     return db
   }
 
+  private normalizeQuery(input: RSSQueryInput, definitions: RSSDefinition[]) {
+    const query = RSSQuerySchema.parse(input)
+    const collection = definitions.find((entry) => entry.id === query.collectionId)
+    if (query.collectionId && !collection) throw new Error('栏目已删除，请选择其他栏目。')
+    if (query.categoryId && !definitions.some((entry) => entry.id === query.categoryId && entry.kind === 'topic')) throw new Error('分类已删除，请选择其他分类。')
+    if (collection?.kind === 'history') query.scope = 'library'
+    if (collection?.kind === 'unread' || collection?.kind === 'starred') { query.scope = 'inbox'; query.filter = collection.kind }
+    return query
+  }
+
   query(input: RSSQueryInput = {}): RSSQueryResult {
-    const { cursor, expectedRevision: requestedRevision, ...query } = RSSQuerySchema.parse(input)
-    const fingerprint = hash(JSON.stringify(query))
-    let offset = 0, expectedRevision: number | undefined = requestedRevision
-    if (cursor) {
-      let parsed: unknown
-      try { parsed = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8')) } catch { throw new Error('invalid_cursor') }
-      const token = parsed as { offset?: number; revision?: number; query?: string } | null
-      if (!token || !Number.isSafeInteger(token.offset) || token.offset! < 0 || !Number.isSafeInteger(token.revision)) throw new Error('invalid_cursor')
-      if (token.query !== fingerprint) throw new Error('cursor_query_mismatch')
-      if (requestedRevision !== undefined && requestedRevision !== token.revision) throw new Error('cursor_stale')
-      offset = token.offset!
-      expectedRevision = token.revision
-    }
     const db = this.connection()
     db.exec('SAVEPOINT rss_read_query')
     try {
+      const definitions = this.organization.list()
+      const { cursor, expectedRevision: requestedRevision, ...query } = this.normalizeQuery(input, definitions)
+      const fingerprint = hash(JSON.stringify(query))
+      let offset = 0, expectedRevision: number | undefined = requestedRevision
+      if (cursor) {
+        let parsed: unknown
+        try { parsed = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8')) } catch { throw new Error('invalid_cursor') }
+        const token = parsed as { offset?: number; revision?: number; query?: string } | null
+        if (!token || !Number.isSafeInteger(token.offset) || token.offset! < 0 || !Number.isSafeInteger(token.revision)) throw new Error('invalid_cursor')
+        if (token.query !== fingerprint) throw new Error('cursor_query_mismatch')
+        if (requestedRevision !== undefined && requestedRevision !== token.revision) throw new Error('cursor_stale')
+        offset = token.offset!
+        expectedRevision = token.revision
+      }
       const revision = db.prepare('SELECT revision FROM rss_workspace_state WHERE id=1').get<{ revision: number }>()!.revision
       if (expectedRevision !== undefined && expectedRevision !== revision) throw new Error('cursor_stale')
-      const { predicate, args } = queryPredicate(query)
+      const { predicate, args } = queryPredicate(query, definitions)
       const total = db.prepare(`SELECT COUNT(*) AS count, COALESCE(SUM(i.read=0),0) AS unread FROM rss_items i LEFT JOIN rss_article_content c ON c.item_id=i.id${predicate}`).get<{ count: number; unread: number }>(...args)!
       const direction = query.sort === 'newest' ? 'DESC' : 'ASC'
       const rows = db.prepare(`${ARTICLE_SELECT}${predicate} ORDER BY COALESCE(i.published_at,i.first_seen_at) ${direction},i.id ${direction} LIMIT ? OFFSET ?`)
@@ -100,22 +118,24 @@ export class RSSContentStore {
       const lastFetch = query.sourceId
         ? db.prepare('SELECT last_fetched AS time FROM rss_sources WHERE id=?').get<{ time: number | null }>(query.sourceId)?.time
         : db.prepare('SELECT MAX(last_fetched) AS time FROM rss_sources').get<{ time: number | null }>()?.time
+      const memberships = this.organization.memberships(rows.map((row) => row.id))
       const nextOffset = offset + rows.length
       return {
-        query, revision, total: total.count, unreadTotal: total.unread, lastFetchAt: lastFetch == null ? null : lastFetch * 1000, items: rows.map(summary),
+        query, definitions, revision, total: total.count, unreadTotal: total.unread, lastFetchAt: lastFetch == null ? null : lastFetch * 1000, items: rows.map((row) => summary(row, memberships[row.id] || [])),
         nextCursor: nextOffset < total.count ? Buffer.from(JSON.stringify({ offset: nextOffset, revision, query: fingerprint })).toString('base64url') : null,
       }
     } finally { db.exec('RELEASE rss_read_query') }
   }
 
   dismissQuery(input: RSSQueryInput): { dismissed: number } {
-    const query = RSSQuerySchema.parse(input)
+    const definitions = this.organization.list()
+    const query = this.normalizeQuery(input, definitions)
     if (query.scope !== 'inbox' || query.cursor || query.expectedRevision === undefined) throw new Error('清空操作需要当前收件箱范围及资料版本。')
     const db = this.connection()
     db.exec('SAVEPOINT rss_dismiss_query')
     try {
       this.query({ ...query, limit: 1 })
-      const { predicate, args } = queryPredicate(query)
+      const { predicate, args } = queryPredicate(query, definitions)
       const result = db.prepare(`UPDATE rss_items SET inbox_visible=0 WHERE inbox_visible=1 AND starred=0 AND id IN (
         SELECT i.id FROM rss_items i LEFT JOIN rss_article_content c ON c.item_id=i.id${predicate}
       )`).run(...args) as { changes: number }
@@ -130,7 +150,7 @@ export class RSSContentStore {
   getArticle(itemId: string): RSSArticle | null {
     const row = this.connection().prepare(`${ARTICLE_SELECT} WHERE i.id=?`).get<ArticleRow>(itemId)
     if (!row) return null
-    const item = summary(row)
+    const item = summary(row, this.organization.memberships([itemId])[itemId] || [])
     const currentBody = row.body_item_revision === row.content_revision
     return {
       ...item,

@@ -1,15 +1,10 @@
-import { Archive, Bookmark, Inbox, Mail, PanelLeftClose, PanelLeftOpen } from 'lucide-react'
+import { PanelLeftClose, PanelLeftOpen, SlidersHorizontal } from 'lucide-react'
+import type { RSSDefinition } from '../../../shared/rss-organization'
+import { RSS_DEFINITION_ICONS } from './organization-icons'
 import { useRSSSession } from '../../stores/useRSSSession'
 import type { RSSQueryInput } from '../../../shared/rss-workspace'
 
-const entries = [
-  { id: 'all', label: '全部动态', icon: Inbox, query: { scope: 'inbox', filter: 'all' } },
-  { id: 'unread', label: '未读', icon: Mail, query: { scope: 'inbox', filter: 'unread' } },
-  { id: 'starred', label: '收藏', icon: Bookmark, query: { scope: 'inbox', filter: 'starred' } },
-  { id: 'history', label: '历史底稿', icon: Archive, query: { scope: 'library', filter: 'all' } },
-] as const
-
-export default function RSSNavigation({ onNavigate }: { onNavigate(query: RSSQueryInput): void }) {
+export default function RSSNavigation({ definitions, onNavigate, onManage }: { definitions: RSSDefinition[]; onNavigate(query: RSSQueryInput): void; onManage(): void }) {
   const query = useRSSSession((state) => state.query)
   const collapsed = useRSSSession((state) => state.navigationCollapsed)
   const setCollapsed = useRSSSession((state) => state.setNavigationCollapsed)
@@ -18,10 +13,17 @@ export default function RSSNavigation({ onNavigate }: { onNavigate(query: RSSQue
       {collapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}
       {!collapsed && <span>资讯</span>}
     </button>
-    {entries.map(({ id, icon: Icon, label, query: target }) => <button type="button" key={id} title={label} aria-label={label}
-      aria-current={query.scope === target.scope && query.filter === target.filter ? 'page' : undefined}
-      className="rss-navigation-item" onClick={() => onNavigate(target)}>
-      <Icon size={17} />{!collapsed && <span>{label}</span>}
-    </button>)}
+    {definitions.filter((entry) => entry.visible).map((definition) => {
+      const Icon = RSS_DEFINITION_ICONS[definition.icon]
+      const activeId = query.collectionId || (query.scope === 'library' ? 'history' : query.filter === 'all' ? 'all' : query.filter)
+      return <button type="button" key={definition.id} title={definition.name} aria-label={definition.name}
+        aria-current={activeId === definition.id ? 'page' : undefined} className="rss-navigation-item"
+        onClick={() => onNavigate({ collectionId: definition.id, scope: definition.kind === 'history' ? 'library' : 'inbox',
+          filter: definition.kind === 'unread' || definition.kind === 'starred' ? definition.kind : 'all', categoryId: undefined })}>
+        <Icon size={17} />{!collapsed && <span>{definition.name}</span>}
+      </button>
+    })}
+    <button type="button" className="rss-navigation-item" aria-label="管理栏目" title="管理栏目" onClick={onManage}><SlidersHorizontal size={17} />{!collapsed && <span>管理栏目</span>}</button>
+
   </nav>
 }

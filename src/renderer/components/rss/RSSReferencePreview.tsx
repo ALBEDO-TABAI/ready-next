@@ -23,6 +23,7 @@ export default function RSSReferencePreview({ reference }: { reference: unknown 
         }
         if (live) setText(preview)
       } catch (error) {
+        // silent-catch: the preview shows stale, deleted or unreadable reference state.
         const message = error instanceof Error ? error.message : String(error)
         if (live) setText(['article_changed', 'cursor_stale'].includes(message) ? '引用的资料已变化，请返回 RSS 重新引用。' : message === 'article_not_found' ? '引用的文章已删除。' : 'RSS 引用暂时无法读取，请重新引用后再试。')
       }

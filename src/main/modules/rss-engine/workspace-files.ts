@@ -72,7 +72,7 @@ export class RSSWorkspaceFiles {
     }
     const snapshot = { format: 'ready-rss-query', version: 1, capturedAt: new Date().toISOString(),
       query: { ...first.query, limit: params.limit }, revision: first.revision, total: first.total,
-      lastFetchAt: first.lastFetchAt, articles }
+      lastFetchAt: first.lastFetchAt, definitions: first.definitions, articles }
     const path = await writeNewText(folder, `RSS-当前结果-${new Date().toISOString().slice(0, 10)}`, 'json', JSON.stringify(snapshot, null, 2), assertCurrent)
     return { canceled: false, path, query: snapshot.query, revision: first.revision, total: articles.length }
   }

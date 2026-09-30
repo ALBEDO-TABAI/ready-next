@@ -1,3 +1,4 @@
+import type { RSSDefinition, RSSMembership } from './rss-organization'
 import { z } from 'zod'
 
 export const RSS_SEARCH_MAX_LENGTH = 300
@@ -6,6 +7,8 @@ export const RSS_SEARCH_MAX_LENGTH = 300
 export const RSSQuerySchema = z.object({
   scope: z.enum(['inbox', 'library']).optional().default('inbox').describe('inbox 当前收件箱；library 含历史底稿'),
   filter: z.enum(['all', 'unread', 'starred']).optional().default('all').describe('all、unread 或 starred'),
+  collectionId: z.string().min(1).optional().describe('栏目定义 ID'),
+  categoryId: z.string().min(1).optional().describe('主题定义 ID，与栏目及其他条件取交集'),
   sourceId: z.string().trim().min(1).optional().describe('可选订阅源 ID'),
   search: z.string().trim().max(RSS_SEARCH_MAX_LENGTH).optional().default('').describe('按字面关键词搜索，不触发网络获取'),
   searchIn: z.enum(['title_summary', 'body']).optional().default('title_summary').describe('title_summary 标题摘要；body 已保存正文'),
@@ -24,6 +27,7 @@ export type RSSQuery = z.output<typeof RSSQuerySchema>
 export type RSSBodyStatus = 'missing' | 'loading' | 'ready' | 'partial' | 'stale' | 'login_required' | 'failed'
 
 export interface RSSArticleSummary {
+  classifications: RSSMembership[]
   id: string
   revision: string
   sourceRevision: string
@@ -44,6 +48,7 @@ export interface RSSArticleSummary {
 }
 
 export interface RSSQueryResult {
+  definitions: RSSDefinition[]
   query: Omit<RSSQuery, 'cursor' | 'expectedRevision'>
   revision: number
   total: number

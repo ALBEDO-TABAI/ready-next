@@ -1,3 +1,4 @@
+import type { RSSMembership } from '../../../shared/rss-organization'
 import type { Reminder } from '../../../shared/calendar-types'
 export type { EventInstance, EventOverride } from '../calendar-engine/rrule-engine'
 export type { ImportedEvent } from '../calendar-engine/ics-importer'
@@ -35,7 +36,7 @@ export interface RSSItem {
   read: number
   starred: number
   ai_score: number | null
-  ai_tags: string | null
+  classifications: RSSMembership[]
 }
 
 
@@ -57,7 +58,7 @@ export interface RSSStats {
   totalItems: number
   unreadItems: number
   platformDistribution: Record<string, number>
-  categoryDistribution: Record<string, number>
+  categories: Array<{ id: string; name: string; count: number }>
 }
 
 

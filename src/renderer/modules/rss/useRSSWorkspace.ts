@@ -1,3 +1,4 @@
+import type { RSSDefinition } from '../../../shared/rss-organization'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useRSSSession } from '../../stores/useRSSSession'
 import type { RSSSource } from '../../components/rss/RSSFeed'
@@ -9,6 +10,7 @@ export function useRSSWorkspace(active: boolean) {
   const key = rssQueryKey(query)
   const view = storedView && rssQueryKey(storedView.query) === key ? storedView : null
   const items = useMemo(() => view?.items.map(toRSSItem) || [], [view])
+  const [definitions, setDefinitions] = useState<RSSDefinition[]>([])
   const [sources, setSources] = useState<RSSSource[]>([])
   const [loading, setLoading] = useState(false)
   const [loadingMore, setLoadingMore] = useState(false)
@@ -28,10 +30,15 @@ export function useRSSWorkspace(active: boolean) {
     try {
       const [result, sourceResult] = await Promise.all([
         readRSSWindow(window.electronAPI.rss, query, count), window.electronAPI.rss.getSources(),
+        window.electronAPI.rss.getDefinitions().then((result) => {
+          if (!result.success || !result.data) throw new Error(result.error || '栏目读取失败')
+          if (currentRequest()) setDefinitions(result.data)
+        }),
       ])
       if (!sourceResult.success) throw new Error(sourceResult.error || '订阅源读取失败')
       if (!currentRequest()) return
       useRSSSession.getState().setView(result)
+      setDefinitions(result.definitions)
       setSources((sourceResult.data || []).map((source) => ({ id: source.id, name: source.name, platform: source.platform, url: source.url })))
     } catch (cause) {
       if (!currentRequest()) return
@@ -64,5 +71,10 @@ export function useRSSWorkspace(active: boolean) {
     return () => { generation.current += 1 }
   }, [active, key, reload])
 
-  return { query, view, items, sources, loading, loadingMore, error, reload, loadMore, hasHydrated: storedView !== null }
+  useEffect(() => {
+    if (!active) return
+    return window.electronAPI.rss.onOrganizationChanged(() => { void reload().catch(() => {}) })
+  }, [active, reload])
+
+  return { query, view, items, sources, definitions, loading, loadingMore, error, reload, loadMore, hasHydrated: storedView !== null }
 }

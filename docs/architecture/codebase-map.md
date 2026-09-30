@@ -1,6 +1,6 @@
 # Ready 当前代码地图
 
-> 更新时间：2026-09-30
+> 更新时间：2026-10-01
 > 本文合并并取代根目录旧的模块图、依赖图和结构快照。它只记录稳定入口，不维护容易失真的文件数量。
 
 ## 1. 运行结构
@@ -28,7 +28,7 @@ Renderer (React / Zustand)
 | --- | --- | --- | --- |
 | Browser | `src/renderer/pages/modes/BrowserMode.tsx` | `src/main/modules/browser-engine/` | `npm run verify:browser-reliability` |
 | Document | `src/renderer/pages/modes/DocumentMode.tsx` | `src/main/modules/document-engine/` | `npm run verify:widget-ready` |
-| RSS | `src/renderer/pages/modes/RSSMode.tsx` | `src/main/modules/rss-engine/` | 按改动选择 RSS 焦点测试与阶段 gate |
+| RSS | `src/renderer/pages/modes/RSSMode.tsx` | `src/main/modules/rss-engine/` | `npm run verify:rss-workspace` |
 | Calendar | `src/renderer/pages/modes/CalendarMode.tsx` | `src/main/modules/calendar-engine/` | `npm run verify:calendar` |
 
 Agent、文件面板、技能中心和设置页是跨工作面的能力，不是额外的 Workbench mode。
@@ -45,7 +45,7 @@ Agent、文件面板、技能中心和设置页是跨工作面的能力，不是
 | `skills-runtime/` | embedded/custom skill 扫描、安装、运行与长期任务句柄 |
 | `browser-engine/` | BrowserView、标签、导航、采集、隐私、Power Browser 与后台任务 |
 | `document-engine/` | 文档读写、预览、导出、Widget 与文档任务管线 |
-| `rss-engine/` | RSS 订阅、采集、共享查询/正文、底稿和诊断 |
+| `rss-engine/` | RSS 订阅、采集、共享查询/正文、栏目归属、底稿和诊断 |
 | `calendar-engine/` | 日历事件、来源、提醒与时间解析 |
 | `file-emergence/` / `tag-forge/` | 文件涌现、项目身份、注意力信号与受控标签写入 |
 | `repositories/` / `database/` | SQLite 数据访问与持久化真值 |

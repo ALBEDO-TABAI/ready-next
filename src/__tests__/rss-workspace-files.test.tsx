@@ -79,6 +79,7 @@ test('current-result export includes every matching page and no unrelated or dis
     assert.equal(result.total, 134)
     const saved = JSON.parse(readFileSync(result.path, 'utf8'))
     assert.equal(saved.articles.length, 134)
+    assert.ok(saved.definitions.some((definition: { id: string }) => definition.id === 'all'))
     assert.equal(new Set(saved.articles.map((item: { id: string }) => item.id)).size, 134)
     assert.equal(saved.articles.some((item: { id: string }) => item.id === '0' || item.id === 'other'), false)
     assert.deepEqual(saved.query, query.query)

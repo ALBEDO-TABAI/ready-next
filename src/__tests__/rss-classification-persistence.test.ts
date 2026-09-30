@@ -11,23 +11,23 @@ test('RSS classification survives persistence, refresh without classification an
     const sourceId = db.rss.addRSSSource({ name: 'Test feed', url: 'https://example.test/feed' })
     const item = {
       id: 'classification-item', source_id: sourceId, guid: 'classification-item',
-      title: '设计案例', link: 'https://example.test/article', ai_tags: '设计',
+      title: '设计案例', link: 'https://example.test/article',
     }
     db.rss.upsertRSSItems([item])
-    assert.equal(db.rss.getRSSItemsByIds([item.id])[0]?.ai_tags, '设计')
+    const definition = db.rss.organization.save({ name: '设计', description: '设计案例' })
+    db.rss.organization.setManual({ itemId: item.id, expectedArticleRevision: db.rss.content.getArticle(item.id)!.revision, definitionId: definition.id, expectedRuleRevision: definition.ruleRevision, decision: true })
     db.rss.markRSSRead(item.id)
     db.rss.dismissRSSItemsFromInbox([item.id])
-    db.rss.upsertRSSItems([{ ...item, title: '更新的设计案例', ai_tags: null }])
+    db.rss.upsertRSSItems([{ ...item, title: '更新的设计案例' }])
     const [saved] = db.rss.getRSSItemsByIds([item.id])
-    assert.equal(saved?.ai_tags, '设计', 'not classifying a refresh must not erase the saved category')
+    assert.equal(saved?.classifications[0].name, '设计', 'refresh must not erase manual category membership')
     assert.equal(saved?.read, 1)
     assert.equal(saved?.inbox_visible, 0)
-    assert.equal(db.rss.getRSSStats().categoryDistribution['设计'], 1)
-    const feeds = generateCategoryFeeds(db.rss.getAllRSSItems(), db.rss.getRSSSources())
-    assert.match(feeds.design, /更新的设计案例/)
-    assert.doesNotMatch(feeds.others, /更新的设计案例/)
-    db.rss.upsertRSSItems([{ ...item, ai_tags: '科技' }])
-    assert.equal(db.rss.getRSSItemsByIds([item.id])[0]?.ai_tags, '科技')
+    assert.equal(db.rss.getRSSStats().categories.find((entry) => entry.id === definition.id)?.count, 1)
+    const feeds = generateCategoryFeeds(db.rss.getAllRSSItems(), db.rss.getRSSSources(), db.rss.organization.list())
+    assert.match(feeds[definition.id], /更新的设计案例/)
+    db.rss.organization.setManual({ itemId: item.id, expectedArticleRevision: db.rss.content.getArticle(item.id)!.revision, definitionId: definition.id, expectedRuleRevision: definition.ruleRevision, decision: false })
+    assert.equal(db.rss.getRSSItemsByIds([item.id])[0]?.classifications[0].included, false)
   } finally {
     db.close()
   }

@@ -2382,6 +2382,11 @@ interface RSSItemAnalysisProgress {
 }
 
 interface ElectronRSSAPI {
+  getDefinitions: () => Promise<RSSResponse<import('../../shared/rss-organization').RSSDefinition[]>>
+  saveDefinition: (input: import('../../shared/rss-organization').RSSDefinitionWrite) => Promise<RSSResponse<import('../../shared/rss-organization').RSSDefinition>>
+  removeDefinition: (input: { id: string; expectedRevision: number }) => Promise<RSSResponse<{ id: string }>>
+  setMembership: (input: import('../../shared/rss-organization').RSSMembershipWrite) => Promise<RSSResponse<import('../../shared/rss-organization').RSSMembership[]>>
+  onOrganizationChanged: (callback: () => void) => () => void
   saveArticleNote: (input: import('../../shared/rss-workspace').RSSSaveNoteInput) => Promise<RSSResponse<import('../../shared/rss-workspace').RSSNoteSaveResult>>
   exportQuery: (input: import('../../shared/rss-workspace').RSSQueryInput) => Promise<RSSResponse<import('../../shared/rss-workspace').RSSQueryExportResult>>
   queryItems: (query?: import('../../shared/rss-workspace').RSSQueryInput) => Promise<RSSResponse<import('../../shared/rss-workspace').RSSQueryResult>>
@@ -2414,7 +2419,6 @@ interface ElectronRSSAPI {
   ) => Promise<RSSResponse<import('../modules/rss/types').RSSRefreshSourceResultData>>
   fetchAll: (options?: {
     digest?: boolean
-    classification?: 'simple' | 'none'
     group?: string
     sourceIds?: string[]
   }) => Promise<
@@ -2436,7 +2440,7 @@ interface ElectronRSSAPI {
       totalItems: number
       unreadItems: number
       platformDistribution: Record<string, number>
-      categoryDistribution: Record<string, number>
+      categories: Array<{ id: string; name: string; count: number }>
     }>
   >
   diagnostics: () => Promise<RSSResponse<RSSDiagnosticsData>>
@@ -2449,7 +2453,7 @@ interface ElectronRSSAPI {
   >
   exportOpml: () => Promise<RSSResponse<{ path: string }>>
   exportFeed: (
-    type?: 'master' | 'tech' | 'humanities' | 'design' | 'entertainment' | 'others'
+    type?: string
   ) => Promise<RSSResponse<{ path: string }>>
   startItemAnalysis: (payload: {
     itemId: string

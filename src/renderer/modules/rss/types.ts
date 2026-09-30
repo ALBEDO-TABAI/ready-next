@@ -38,7 +38,6 @@ export interface RSSUpdateTaskStatusData {
   insertedCount: number
   errors: string[]
   digest: boolean
-  classification: 'simple' | 'none'
   message: string | null
 }
 
@@ -60,8 +59,7 @@ export interface RSSDiagnosticsData {
     sourceIds: string[]
     group: string | null
     digest: boolean | null
-    classification: 'simple' | 'none' | null
-  } | null
+    } | null
   artifacts: {
     root: string
     hasOpml: boolean

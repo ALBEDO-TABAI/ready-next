@@ -86,6 +86,8 @@ const EXPECTED_ANTHROPIC = [
       properties: {
         scope: { type: 'string', description: 'inbox 当前收件箱；library 含历史底稿', enum: ['inbox', 'library'] },
         filter: { type: 'string', description: 'all、unread 或 starred', enum: ['all', 'unread', 'starred'] },
+        collectionId: { type: 'string', description: '栏目定义 ID' },
+        categoryId: { type: 'string', description: '主题定义 ID，与栏目及其他条件取交集' },
         sourceId: { type: 'string', description: '可选订阅源 ID' },
         search: { type: 'string', description: '按字面关键词搜索，不触发网络获取' },
         searchIn: { type: 'string', description: 'title_summary 标题摘要；body 已保存正文', enum: ['title_summary', 'body'] },

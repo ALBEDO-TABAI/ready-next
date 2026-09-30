@@ -1,3 +1,5 @@
+import { organizationGroup } from './ipc/organization-group'
+import type { RSSMembership } from '../../../shared/rss-organization'
 import type { RSSAnalysisAction, RSSAnalysisJob } from '../database/records'
 import { ipcMain, app, BrowserWindow, dialog } from 'electron'
 import { join } from 'path'
@@ -14,7 +16,6 @@ import {
   type PlatformType,
 } from './scrapers/index'
 import { isLikelyStaleBilibiliResult, resolveBilibiliStaleRouteResult } from './scrapers/rsshub'
-import { classifyItem } from './classifier'
 import { rsshubManager } from './rsshub-process'
 import type { ScrapedItem, ScrapeResult } from './scrapers/base'
 import { normalizeScrapedItemIdentities } from './item-identity'
@@ -74,11 +75,9 @@ interface RSSResponse<T> {
   error?: string
 }
 
-type ClassificationMode = 'simple' | 'none'
 
 interface FetchAllOptions {
   digest?: boolean
-  classification?: ClassificationMode
   group?: string
   sourceIds?: string[]
 }
@@ -103,7 +102,7 @@ interface DBRSSItem {
   read: number
   starred: number
   ai_score: number | null
-  ai_tags: string | null
+  classifications: RSSMembership[]
   source_name?: string
 }
 
@@ -241,6 +240,7 @@ let diagnosticsGroupDispose: IpcDisposeHandle | null = null
  */
 let exportGroupDispose: IpcDisposeHandle | null = null
 let contentGroupDispose: IpcDisposeHandle | null = null
+let organizationGroupDispose: IpcDisposeHandle | null = null
 let workspaceFilesGroupDispose: IpcDisposeHandle | null = null
 
 export function setRSSBrowserController(controller: BrowserController | null): void {
@@ -298,7 +298,6 @@ const mockItems = [
     starred: false,
     coverImage: null,
     aiScore: null,
-    aiTags: '科技',
   },
 ]
 
@@ -482,19 +481,16 @@ function saveDigestSnapshot(snapshot: Record<string, string>): void {
 
 function normalizeFetchOptions(options?: FetchAllOptions): {
   digest: boolean
-  classification: ClassificationMode
   group?: string
   sourceIds?: string[]
 } {
   const digest = options?.digest === true
-  const classification: ClassificationMode = options?.classification === 'none' ? 'none' : 'simple'
   const group = options?.group?.trim()
   const sourceIds = Array.isArray(options?.sourceIds)
     ? options?.sourceIds.filter((id) => typeof id === 'string' && id.trim().length > 0)
     : undefined
   return {
     digest,
-    classification,
     group: group || undefined,
     sourceIds: sourceIds && sourceIds.length > 0 ? sourceIds : undefined,
   }
@@ -534,7 +530,6 @@ function loadFetchInvocationSnapshot(): {
   sourceIds: string[]
   group: string | null
   digest: boolean | null
-  classification: 'simple' | 'none' | null
 } | null {
   const raw = appSettingsRepository.getSetting(FETCH_INVOCATION_SNAPSHOT_KEY)
   if (!raw) return null
@@ -549,10 +544,6 @@ function loadFetchInvocationSnapshot(): {
         : [],
       group: typeof parsed.group === 'string' ? parsed.group : null,
       digest: typeof parsed.digest === 'boolean' ? parsed.digest : null,
-      classification:
-        parsed.classification === 'simple' || parsed.classification === 'none'
-          ? parsed.classification
-          : null,
     }
   } catch {
     return null
@@ -633,6 +624,7 @@ async function ensureArtifactFiles() {
   const sources = rssRepository.getRSSSources() as DBRSSSource[]
   const allItems = rssRepository.getAllRSSItems() as DBRSSItem[]
   return generateRSSArtifacts({
+    definitions: rssRepository.getOrganizationStore().list(),
     sources,
     allItems,
     insertedItems: [],
@@ -943,7 +935,6 @@ async function runAddSourceCore(input: AddSourceCoreInput): Promise<AddSourceCor
       cover_image: item.coverImage || null,
       author: item.author || null,
       published_at: item.pubDate ? Math.floor(new Date(item.pubDate).getTime() / 1000) : null,
-      ai_tags: classifyItem(item.title, item.description),
     }))
     itemCount = rssRepository.upsertRSSItems(dbItems)
     rssRepository.updateRSSSourceLastFetched(id)
@@ -1000,6 +991,13 @@ async function runAddSourceCore(input: AddSourceCoreInput): Promise<AddSourceCor
 }
 
 export function setupRSSIPC(useMock = false): void {
+  organizationGroupDispose?.dispose()
+  organizationGroupDispose = organizationGroup.register(ipcMain, {
+    getStore: () => rssRepository.getOrganizationStore(),
+    notify: () => { for (const window of BrowserWindow.getAllWindows()) {
+      try { if (!window.webContents.isDestroyed()) window.webContents.send('rss:organizationChanged') } catch { /* Window may close after saving. */ }
+    } },
+  })
   workspaceFilesGroupDispose?.dispose()
   workspaceFilesGroupDispose = workspaceFilesGroup.register(ipcMain, {
     getContent: () => rssRepository.getContentStore(),
@@ -1130,9 +1128,8 @@ export function setupRSSIPC(useMock = false): void {
     buildBrowserActionFromSource,
     buildBenchmarkSummary,
     getRouteCapabilityMatrix,
-    generateRSSArtifacts: (payload) => generateRSSArtifacts(payload),
+    generateRSSArtifacts: (payload) => generateRSSArtifacts({ ...payload, definitions: rssRepository.getOrganizationStore().list() }),
     generateRSSBenchmarkArtifacts: (payload) => generateRSSBenchmarkArtifacts(payload),
-    classifyItem,
     detectPlatform,
     normalizeSourcePlatform,
     classifyBackend,

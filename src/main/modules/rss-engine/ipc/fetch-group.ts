@@ -1,3 +1,4 @@
+import type { RSSMembership } from '../../../../shared/rss-organization'
 // Stage V V2.2d — rss-engine FetchGroup channel cluster.
 //
 // Bundles the 5 channels that drive the renderer's RSS update + diagnostic
@@ -5,7 +6,7 @@
 // path, the route benchmark, and the two read-only status / stats probes:
 //
 //   rss:fetchAll          (multi-source update under rssUpdateLock; digest
-//                          + classification + artifact regeneration; per-
+//                          + artifact regeneration; per-
 //                          source route diagnostics persisted)
 //   rss:refreshSource     (single-source incremental refresh with the same
 //                          fetch/diagnostics/artifact stack; in-flight set
@@ -62,11 +63,8 @@ import type { EngineDeps } from './engine-deps'
 import type { IpcDisposeHandle } from './types'
 
 /** Mirror of the host's `FetchAllOptions` (kept here so the group is self-describing). */
-export type ClassificationMode = 'simple' | 'none'
-
 export interface FetchAllOptions {
   digest?: boolean
-  classification?: ClassificationMode
   group?: string
   sourceIds?: string[]
 }
@@ -106,7 +104,7 @@ export interface DBRSSItemRow {
   read: number
   starred: number
   ai_score: number | null
-  ai_tags: string | null
+  classifications: RSSMembership[]
   source_name?: string
 }
 
@@ -188,7 +186,6 @@ export interface FetchGroupDeps {
   }): Promise<{ files: unknown }>
 
   // --- helpers + persistence ---
-  classifyItem(title: string, description?: string): string
   detectPlatform(url: string): PlatformType
   normalizeSourcePlatform(source: DBRSSSourceRow): PlatformType
   classifyBackend(source: DBRSSSourceRow): SourceBackend
@@ -199,7 +196,6 @@ export interface FetchGroupDeps {
   ): DBRSSSourceRow[]
   normalizeFetchOptions(options?: FetchAllOptions): {
     digest: boolean
-    classification: ClassificationMode
     group?: string
     sourceIds?: string[]
   }
@@ -326,7 +322,7 @@ export const fetchGroup: {
             totalItems: deps.mockItems.length,
             unreadItems: deps.mockItems.filter((item) => !(item as { read?: boolean }).read).length,
             platformDistribution: { rss: deps.mockSources.length },
-            categoryDistribution: { 科技: deps.mockItems.length },
+            categories: [],
           },
           true,
         )
@@ -357,7 +353,6 @@ export const fetchGroup: {
           sourceIds: normalized.sourceIds ?? [],
           group: normalized.group ?? null,
           digest: normalized.digest,
-          classification: normalized.classification,
         })
         const lockResult = await deps.rssUpdateLock.run(normalized, async () => {
           fetchAttemptStarted = true
@@ -391,7 +386,7 @@ export const fetchGroup: {
           }
 
           console.log(
-            `[rss:fetchAll] sources=${sources.length} digest=${normalized.digest} classification=${normalized.classification} rsshub=${rsshubBase || 'none'}`,
+            `[rss:fetchAll] sources=${sources.length} digest=${normalized.digest} rsshub=${rsshubBase || 'none'}`,
           )
 
           const insertedItemIds: string[] = []
@@ -460,8 +455,6 @@ export const fetchGroup: {
               cover_image: item.coverImage || null,
               author: item.author || null,
               published_at: item.pubDate ? Math.floor(new Date(item.pubDate).getTime() / 1000) : null,
-              ai_tags:
-                normalized.classification === 'simple' ? deps.classifyItem(item.title, item.description) : null,
             }))
 
             const candidateIds = dbItems.map((item) => item.id)
@@ -691,7 +684,6 @@ export const fetchGroup: {
           cover_image: item.coverImage || null,
           author: item.author || null,
           published_at: item.pubDate ? Math.floor(new Date(item.pubDate).getTime() / 1000) : null,
-          ai_tags: deps.classifyItem(item.title, item.description),
         }))
         const candidateIds = dbItems.map((item) => item.id)
         const existingIds = new Set(deps.getRSSItemsByIds(candidateIds).map((item) => item.id))
