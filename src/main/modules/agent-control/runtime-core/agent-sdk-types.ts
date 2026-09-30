@@ -103,6 +103,7 @@ export interface ReadyAgentSdkRunParams {
 
 export interface ReadyAgentSdkRunResult {
   finalText: string
+  outputIncomplete?: boolean
   iterationsUsed?: number
   usage?: {
     inputTokens: number

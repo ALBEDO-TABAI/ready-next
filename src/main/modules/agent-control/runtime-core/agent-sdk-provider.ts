@@ -1,4 +1,6 @@
 import { randomUUID } from 'crypto'
+import OpenAI from 'openai'
+import { isProviderOutputIncomplete } from './provider-output-status'
 import {
   OpenAIProvider,
   Usage,
@@ -102,6 +104,7 @@ function buildResponseDoneEvent(response: ModelResponse, fallbackId: string): St
     response: {
       id: response.responseId || fallbackId,
       requestId: response.requestId,
+      providerData: response.providerData,
       usage: {
         requests: response.usage.requests,
         inputTokens: response.usage.inputTokens,
@@ -178,7 +181,7 @@ function isLikelyStreamShapeRejection(status: number, errorBody: string): boolea
 
 export function resolveAgentSdkProvider(
   config: AIModelConfig,
-  deps: { fetchWithTimeout: NonNullable<AgentSdkRuntimeDeps['fetchWithTimeout']> }
+  deps: { fetchWithTimeout: NonNullable<AgentSdkRuntimeDeps['fetchWithTimeout']>; openAIClientMaxRetries?: number }
 ): {
   provider: ModelProvider
   model: string
@@ -205,7 +208,8 @@ export function resolveAgentSdkProvider(
   if (capabilities.agentProtocol !== 'openai') {
     throw new Error('当前 SDK 路径暂不支持该模型协议配置。')
   }
-  if (normalized.provider !== 'openai') {
+  // Our chat adapter retains finish_reason; the SDK chat adapter drops it.
+  if (normalized.provider !== 'openai' || capabilities.wireApi === 'chat/completions') {
     return {
       model: normalized.model,
       provider: new ReadyOpenAICompatibleModelProvider({
@@ -218,8 +222,11 @@ export function resolveAgentSdkProvider(
   return {
     model: normalized.model,
     provider: new OpenAIProvider({
-      apiKey: normalized.apiKey,
-      baseURL: baseURL || undefined,
+      ...(deps.openAIClientMaxRetries === undefined ? {
+        apiKey: normalized.apiKey, baseURL: baseURL || undefined,
+      } : { openAIClient: new OpenAI({
+        apiKey: normalized.apiKey, baseURL: baseURL || undefined, maxRetries: deps.openAIClientMaxRetries,
+      }) }),
       useResponses: capabilities.wireApi === 'responses',
       strictFeatureValidation: false
     })
@@ -259,21 +266,7 @@ function logProviderOutputTruncated(
   json: Record<string, unknown>,
   diagnostics: ProviderResponseDiagnostics
 ): void {
-  const choices = Array.isArray(json.choices)
-    ? (json.choices as Array<Record<string, unknown>>)
-    : []
-  const output = Array.isArray(json.output) ? (json.output as Array<Record<string, unknown>>) : []
-  const incompleteDetails =
-    json.incomplete_details && typeof json.incomplete_details === 'object'
-      ? (json.incomplete_details as Record<string, unknown>)
-      : null
-  const truncated =
-    json.stop_reason === 'max_tokens' ||
-    json.finish_reason === 'length' ||
-    choices.some((choice) => choice.finish_reason === 'length') ||
-    output.some((item) => item.finish_reason === 'length') ||
-    (json.status === 'incomplete' && incompleteDetails?.reason === 'max_output_tokens')
-  if (!truncated) return
+  if (!isProviderOutputIncomplete(json)) return
   logAgentMetric('provider_output_truncated', { ...diagnostics })
 }
 
@@ -606,8 +599,9 @@ export class ReadyOpenAICompatibleModel implements Model {
     const accumulator = new ChatCompletionsStreamAccumulator()
     const startedAt = Date.now()
     let firstDeltaSeen = false
+    let doneSeen = false
     for await (const event of parseSseStream(response.body, { signal: request.signal, label })) {
-      if (event.data === '[DONE]') break
+      if (event.data === '[DONE]') { doneSeen = true; break }
       const chunk = safeParseJsonRecord(event.data)
       if (!chunk) continue
       const streamError = providerStreamPayloadError(chunk)
@@ -625,6 +619,7 @@ export class ReadyOpenAICompatibleModel implements Model {
         yield { type: 'output_text_delta', delta: textDelta } as StreamEvent
       }
     }
+    if (!doneSeen && !accumulator.isComplete) throw new Error(`${label} 未收到结束标记（stream_incomplete）`)
     const shaped = shapeChatCompletionsModelResponse(
       accumulator.final(),
       parts.patchContext,
@@ -927,6 +922,7 @@ export class ReadyAnthropicModel implements Model {
         yield { type: 'output_text_delta', delta: textDelta } as StreamEvent
       }
     }
+    if (!accumulator.isComplete) throw new Error(`${label} 未收到结束标记（stream_incomplete）`)
     const shaped = shapeAnthropicModelResponse(
       accumulator.final(parts.responseId),
       parts.responseId,

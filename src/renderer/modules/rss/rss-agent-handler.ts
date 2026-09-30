@@ -11,6 +11,7 @@ export type RSSAnalysisStatus =
   | 'skipped'
 
 export interface RSSAnalysisProgressLike {
+  sourceWarning?: string | null
   itemId: string
   jobId: string
   action: 'copy' | 'visual'
@@ -111,6 +112,8 @@ export function createRSSAgentHandler(deps: RSSAgentHandlerDeps): ModuleAgentAct
 
   return async ({ action, args }) => {
     if (action === 'rss.captureSession') {
+      const analysisResult = deps.selectedItem
+        ? await deps.rssApi?.getItemAnalysisProgress?.({ itemIds: [deps.selectedItem.id] }) : undefined
       return {
         intent: 'capture_rss_session',
         ownerResourceId: deps.selectedItem?.id || deps.selectedSource,
@@ -122,6 +125,8 @@ export function createRSSAgentHandler(deps: RSSAgentHandlerDeps): ModuleAgentAct
         selectedSourceId: deps.selectedSource,
         selectedItemId: deps.selectedItem?.id ?? null,
         totalItems: deps.items.length,
+        analysis: analysisResult?.success && deps.selectedItem ? analysisResult.data?.[deps.selectedItem.id] ?? null : null,
+        analysisError: deps.selectedItem && !analysisResult?.success ? '无法读取最新分析状态，请使用 rss_read_article 回查。' : null,
       }
     }
 
@@ -226,11 +231,12 @@ export function createRSSAgentHandler(deps: RSSAgentHandlerDeps): ModuleAgentAct
         status: analysisState.status,
         ok: !failed,
         error: failed ? analysisState.error || 'RSS 条目分析失败' : null,
+        sourceWarning: analysisState.sourceWarning || null,
         summary: failed
           ? `RSS 条目分析失败：《${item.title}》。`
           : (
               reportPath
-                ? `RSS 条目分析完成：《${item.title}》报告已生成。`
+                ? `RSS 条目分析完成：《${item.title}》报告已生成。${analysisState.sourceWarning || ''}`
                 : `RSS 条目分析已启动：《${item.title}》。`
             ),
         artifactRefs: reportPath

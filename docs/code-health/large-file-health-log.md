@@ -2,6 +2,18 @@
 
 > 更新时间：2026-09-30
 
+## 2026-09-30 RSS 网页分析统一原文
+
+| 文件 | 当前行数 | 净增 | 判断 | 后续 |
+|---|---:|---:|---|---|
+| `src/main/modules/rss-engine/ipc-handler.ts` | 1243 | 3 | 一般 | 只传 Main 来源提示，新增业务继续留在现有分组；2026-10-30 复查 |
+| `src/main/modules/rss-engine/item-analysis-manager.ts` | 1094 | 25 | 一般 | 新网页分析与版本校验已移到 article-analysis 叶子模块，宿主只排队和发布；2026-10-30 复查媒体 helper 与队列边界 |
+| `src/main/modules/tools/tool-executor.ts` | 1258 | 2 | 一般 | 只接 RSS 状态读取，无本地重判；2026-10-30 复查 |
+| `src/renderer/components/rss/RSSFeed.tsx` | 1087 | 4 | 一般 | 仅消费来源提示；按既定 P2 将导航、资讯流、任务面板分开，2026-10-30 复查 |
+| `src/renderer/types/electron.d.ts` | 4023 | 2 | 健康 | 只声明既有分析消息的新展示字段 |
+
+RSS 模型请求改走共享 SDK 后，subagent-runner 删除专用 HTTP/解析代码，净减 139 行；旧 content-extractor 101 行已删除。没有以搬走行数为由引入第二条正文保存路径。
+
 ## 2026-09-30 RSS 共享内容读取基础
 
 以下仅增加入口接线/声明，新增持久化与提取逻辑分别在 `rss-content-store.ts`、`content-service.ts`、`content-schema.ts`，未继续堆入宿主。

@@ -482,3 +482,18 @@ test('SDK anthropic stream: mid-stream abort stops iteration without a terminal 
   assert.equal(events.length, 1)
   assert.ok(events.every((event) => event.type !== 'response_done'))
 })
+
+test('SDK stream EOF is not completion for chat, responses-created, or anthropic partial output', async () => {
+  const cases = [
+    { protocol: 'chat', chunks: [dataLine({ choices: [{ delta: { content: 'Partial' } }] })] },
+    { protocol: 'responses', chunks: [dataLine({ type: 'response.created', response: { id: 'r', status: 'in_progress' } }), dataLine({ type: 'response.output_text.delta', delta: 'Partial' })] },
+    { protocol: 'anthropic', chunks: [dataLine({ type: 'message_start', message: { id: 'm' } }), dataLine({ type: 'content_block_start', index: 0, content_block: { type: 'text', text: 'Partial' } })] },
+  ]
+  for (const entry of cases) {
+    const { fetch, captured } = makeQueuedFetch([sseResponse(entry.chunks)])
+    const deps = { config: makeConfig(entry.protocol === 'responses' ? { wireApi: 'responses' } : {}), baseUrl: 'https://example.invalid', fetchWithTimeout: fetch }
+    const model = entry.protocol === 'anthropic' ? new ReadyAnthropicModel(deps) : new ReadyOpenAICompatibleModel(deps)
+    await assert.rejects(collect(model.getStreamedResponse(makeRequest())), /stream_incomplete/)
+    assert.equal(captured.length, 1, entry.protocol)
+  }
+})

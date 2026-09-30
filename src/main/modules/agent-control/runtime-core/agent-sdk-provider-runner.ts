@@ -10,6 +10,7 @@ import {
 } from './agent-sdk-provider-request-instrumentation'
 import { extractToolCallFromStreamEvent } from './agent-sdk-provider-utils'
 import type { ReadyAgentSdkRunParams, ReadyAgentSdkRunResult } from './agent-sdk-types'
+import { isProviderOutputIncomplete } from './provider-output-status'
 
 function log(message: string): void {
   console.log(`[agent-sdk-provider] ${message}`)
@@ -29,6 +30,7 @@ export async function runWithOpenAIAgentsSdk(
   params: ReadyAgentSdkRunParams
 ): Promise<ReadyAgentSdkRunResult> {
   const requestBills: ProviderRequestBills[] = []
+  let outputIncomplete = false
   const agent = createReadyAgentForRun(params)
   const runner = new Runner({
     modelProvider: params.provider,
@@ -97,6 +99,9 @@ export async function runWithOpenAIAgentsSdk(
   try {
     try {
       for await (const event of stream) {
+        if (event.type === 'raw_model_stream_event' && event.data.type === 'response_done') {
+          outputIncomplete = isProviderOutputIncomplete(event.data.response.providerData)
+        }
         if (
           event.type === 'raw_model_stream_event' &&
           event.data.type === 'output_text_delta' &&
@@ -144,6 +149,7 @@ export async function runWithOpenAIAgentsSdk(
   const lastResponse = rawResponses[rawResponses.length - 1]
   return {
     finalText: typeof stream.finalOutput === 'string' ? stream.finalOutput : '',
+    outputIncomplete,
     iterationsUsed: rawResponses.length,
     usage: usageFromModelResponse(lastResponse),
     lastResponseId: stream.lastResponseId

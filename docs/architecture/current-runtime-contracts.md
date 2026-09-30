@@ -55,6 +55,7 @@
 - 公开网络调研统一走 `web_search_domains / web_search / web_fetch`：AnySearch、Tavily、DuckDuckGo 和 Jina 由加密的外部服务配置提供。AnySearch 垂直搜索先查询子领域参数，失败不得丢掉 domain 约束改做通用搜索；通用搜索与正文提取才允许按已启用服务显式回退。
 - openai-compatible chat/responses 与 anthropic 三条 SDK 路径都必须真 SSE：文本增量交付，工具调用和推理在流中累积，终局与阻塞路径同构整形。
 - 降级只有三类：`READY_SDK_TRUE_SSE=off` 总开关；服务返回非 SSE 时伪流式交付；仅错误体明确提及 stream 的 4xx 可单次阻塞重试。413/401/429 等语义性 4xx 必须原样冒泡。
+- 流式 EOF 本身不是成功：chat 必须有 finish_reason 或 DONE，Anthropic 必须有 message_stop，Responses 必须有完成载荷。长度截断的事实经真实 response_done 事件传递；RSS 分析拒绝不完整输出，不以报告标题形状覆盖服务端结束事实。
 - 回归入口：`npm run verify:streaming`。
 - 工具错误由 dispatch 转成结构化 `ToolExecutionOutput` 回灌模型；只有 Abort 或 host 不可用等基础设施错误可以冒泡。
 - 单个可选工具失败不能提前写死整轮 `proof_gap`；只有明确的交付失败、工具不可用或产物缺失可写终态失败类别，其余由最终证据统一裁决。`run_meta.last_message_text` 只用于诊断，禁止据此猜测“正文未送达”并补发；Renderer 只在消息正文仍为空时接收 send 返回文本，已有流式正文时不得追加。

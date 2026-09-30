@@ -2,16 +2,9 @@ import { existsSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 
-import { type AIModelConfig, getProviderDef, normalizeAIConfig, resolveAIConfigCapabilities } from '../../../shared/ai-providers'
-import { parseJsonOrEventStreamResponse } from '../openai-responses'
+import { type AIModelConfig, normalizeAIConfig } from '../../../shared/ai-providers'
+import { completeRSSModel, type RSSCompletionRequest } from './model-completion'
 import { AppSettingsRepository } from '../repositories/app-settings-repository'
-
-interface CompletionRequest {
-  system: string
-  user: string
-  maxTokens: number
-  timeoutMs?: number
-}
 
 interface CopySummaryInput {
   title: string
@@ -20,6 +13,7 @@ interface CopySummaryInput {
   publishedAt?: string
   summary?: string
   extractedText: string
+  sourceScope?: string
 }
 
 interface CopyDeliverables {
@@ -69,7 +63,10 @@ function clipText(input: string, maxChars: number): string {
 function hasCompleteCopySummaryShape(text: string): boolean {
   const normalized = text.trim()
   if (!normalized) return false
-  return REQUIRED_COPY_HEADINGS.every((heading) => normalized.includes(heading))
+  const starts = REQUIRED_COPY_HEADINGS.map((heading) => normalized.indexOf(heading))
+  return starts.every((start, index) => start >= 0
+    && (index === 0 || start > starts[index - 1])
+    && /[\p{L}\p{N}]/u.test(normalized.slice(start + REQUIRED_COPY_HEADINGS[index].length, starts[index + 1] ?? normalized.length)))
 }
 
 export function isFallbackCopySummary(text: string): boolean {
@@ -549,77 +546,6 @@ function readAIConfig(): AIModelConfig | null {
   }
 }
 
-function extractOpenAIText(payload: unknown): string {
-  if (!payload || typeof payload !== 'object') return ''
-  const choices = (payload as { choices?: Array<{ message?: { content?: unknown } }> }).choices
-  const content = choices?.[0]?.message?.content
-  if (typeof content === 'string') return content.trim()
-  if (Array.isArray(content)) {
-    const textParts = content
-      .map((part) => {
-        if (!part || typeof part !== 'object') return ''
-        return typeof (part as { text?: unknown }).text === 'string' ? (part as { text: string }).text : ''
-      })
-      .filter(Boolean)
-    return textParts.join('\n').trim()
-  }
-  return ''
-}
-
-function extractResponsesText(payload: unknown): string {
-  if (!payload || typeof payload !== 'object') return ''
-  const direct = (payload as { output_text?: unknown }).output_text
-  if (typeof direct === 'string' && direct.trim()) return direct.trim()
-  const output = Array.isArray((payload as { output?: unknown[] }).output)
-    ? (payload as { output: unknown[] }).output
-    : []
-  const chunks: string[] = []
-  for (const item of output) {
-    if (!item || typeof item !== 'object') continue
-    const record = item as Record<string, unknown>
-    if (record.type !== 'message') continue
-    const content = Array.isArray(record.content) ? record.content : []
-    for (const part of content) {
-      if (!part || typeof part !== 'object') continue
-      const block = part as Record<string, unknown>
-      if ((block.type === 'output_text' || block.type === 'text') && typeof block.text === 'string') {
-        chunks.push(block.text)
-      }
-    }
-  }
-  return chunks.join('').trim()
-}
-
-function buildAnthropicLikeHeaders(config: AIModelConfig, baseUrl: string): Record<string, string> {
-  const provider = getProviderDef(config.provider, baseUrl)
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-    'anthropic-version': '2023-06-01',
-  }
-  if ((provider?.id === 'anthropic' && !config.agentProtocol) || baseUrl.includes('api.kimi.com/coding')) {
-    headers['x-api-key'] = config.apiKey
-    return headers
-  }
-  const authHeader = provider?.authHeader || 'Authorization'
-  const authPrefix = provider?.authPrefix ?? 'Bearer '
-  headers[authHeader] = `${authPrefix}${config.apiKey}`
-  if (provider?.extraHeaders) {
-    Object.assign(headers, provider.extraHeaders)
-  }
-  return headers
-}
-
-function extractAnthropicText(payload: unknown): string {
-  if (!payload || typeof payload !== 'object') return ''
-  const content = (payload as { content?: Array<{ type?: string; text?: string }> }).content
-  if (!Array.isArray(content)) return ''
-  return content
-    .filter((part) => part?.type === 'text' && typeof part.text === 'string')
-    .map((part) => part.text?.trim() || '')
-    .filter(Boolean)
-    .join('\n')
-}
-
 export class RSSSubagentRunner {
   getVisualAnalyzerEnv(): Record<string, string> | undefined {
     const config = readAIConfig()
@@ -805,6 +731,16 @@ export class RSSSubagentRunner {
   }
 
   async summarizeCopy(input: CopySummaryInput): Promise<string> {
+    return this.summarizeCopyMaterial(input, clipText(getTranscriptPlainBody(input.extractedText), 8_000))
+  }
+
+  async summarizeArticle(input: CopySummaryInput): Promise<string> {
+    const report = await this.summarizeCopyMaterial(input, input.extractedText)
+    if (isFallbackCopySummary(report)) throw new Error('未获得有效的网页文案分析报告。')
+    return report
+  }
+
+  private async summarizeCopyMaterial(input: CopySummaryInput, sourceText: string): Promise<string> {
     const skillContract = loadVideoCopySkillContract()
     const user = [
       `标题: ${input.title}`,
@@ -812,15 +748,16 @@ export class RSSSubagentRunner {
       input.source ? `来源账号: ${input.source}` : '',
       input.publishedAt ? `发布时间: ${input.publishedAt}` : '',
       input.summary ? `原始摘要: ${clipText(input.summary, 600)}` : '',
+      input.sourceScope ? `分析范围: ${input.sourceScope}` : '',
       '',
       '正文或转录文本:',
-      clipText(getTranscriptPlainBody(input.extractedText), 8_000),
+      sourceText,
     ]
       .filter(Boolean)
       .join('\n')
 
     const system = [
-      '你是视频文案分析助手，严格对齐 video-copy-analyzer 的三维分析框架。',
+      '你是文案分析助手，严格对齐 video-copy-analyzer 的三维分析框架。',
       '只输出 Markdown；保留事实，不虚构，不擅自重写原文内容。',
       '优先做结构化分析与优化建议，不做大段改写。',
       '必须遵循 Video Copy Analyzer SKILL.md 的三维度综合分析合同。',
@@ -913,84 +850,8 @@ export class RSSSubagentRunner {
     ].join('\n')
   }
 
-  private async complete(request: CompletionRequest): Promise<string> {
-    const config = readAIConfig()
-    if (!config?.apiKey || !config.baseUrl || !config.model) return ''
-
-    const capabilities = resolveAIConfigCapabilities(config)
-    const baseUrl = capabilities?.baseUrl || config.baseUrl.replace(/\/+$/, '')
-
-    try {
-      if (capabilities?.agentProtocol === 'anthropic') {
-        const headers = buildAnthropicLikeHeaders(config, baseUrl)
-        const resp = await fetch(`${baseUrl}/v1/messages`, {
-          method: 'POST',
-          headers,
-          body: JSON.stringify({
-            model: config.model,
-            max_tokens: request.maxTokens,
-            temperature: 0.2,
-            system: request.system,
-            messages: [{ role: 'user', content: request.user }],
-          }),
-          signal: AbortSignal.timeout(request.timeoutMs || 120_000),
-        })
-        if (!resp.ok) return ''
-        const json = await resp.json()
-        return extractAnthropicText(json)
-      }
-
-      const provider = capabilities?.provider || getProviderDef(config.provider, baseUrl)
-      const headers: Record<string, string> = {
-        'Content-Type': 'application/json',
-      }
-      const authHeader = provider?.authHeader || 'Authorization'
-      const authPrefix = provider?.authPrefix ?? 'Bearer '
-      headers[authHeader] = `${authPrefix}${config.apiKey}`
-      if (provider?.extraHeaders) {
-        Object.assign(headers, provider.extraHeaders)
-      }
-
-      const wireApi = capabilities?.wireApi || config.wireApi || provider?.wireApi || (baseUrl.includes('/codex/v1') ? 'responses' : 'chat/completions')
-      if (wireApi === 'responses') {
-        const resp = await fetch(`${baseUrl}/responses`, {
-          method: 'POST',
-          headers,
-          body: JSON.stringify({
-            model: config.model,
-            instructions: request.system,
-            reasoning: { effort: capabilities?.reasoningEffort || config.reasoningEffort || provider?.defaultReasoningEffort || 'high' },
-            stream: false,
-            input: [{ role: 'user', content: [{ type: 'input_text', text: request.user }] }],
-            max_output_tokens: request.maxTokens,
-          }),
-          signal: AbortSignal.timeout(request.timeoutMs || 120_000),
-        })
-        if (!resp.ok) return ''
-        const json = await parseJsonOrEventStreamResponse(resp)
-        return extractResponsesText(json)
-      }
-
-      const resp = await fetch(`${baseUrl}/chat/completions`, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({
-          model: config.model,
-          temperature: 0.2,
-          max_tokens: request.maxTokens,
-          messages: [
-            { role: 'system', content: request.system },
-            { role: 'user', content: request.user },
-          ],
-        }),
-        signal: AbortSignal.timeout(request.timeoutMs || 120_000),
-      })
-      if (!resp.ok) return ''
-      const json = await resp.json()
-      return extractOpenAIText(json)
-    } catch {
-      return ''
-    }
+  private async complete(request: RSSCompletionRequest): Promise<string> {
+    return completeRSSModel(readAIConfig(), request)
   }
 }
 

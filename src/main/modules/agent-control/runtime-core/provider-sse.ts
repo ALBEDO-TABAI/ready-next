@@ -175,6 +175,8 @@ export class ChatCompletionsStreamAccumulator {
   private usage: Record<string, unknown> | null = null
   private finishReason: string | null = null
 
+  get isComplete(): boolean { return this.finishReason !== null }
+
   feed(chunk: Record<string, unknown>): StreamFeedResult {
     if (!this.id && typeof chunk.id === 'string' && chunk.id) this.id = chunk.id
     const usage = asRecord(chunk.usage)
@@ -248,12 +250,11 @@ export class ChatCompletionsStreamAccumulator {
 /**
  * Accumulates responses-API stream events. Text deltas surface from
  * `response.output_text.delta`; the terminal payload comes from
- * `response.completed` (event name or record.type), matching the fallback
- * ladder of `parseEventStreamPayload`: completed > last seen payload.
+ * `response.completed` (event name or record.type). A last partial payload
+ * must never stand in for the missing terminal response.
  */
 export class ResponsesStreamAccumulator {
   private completed: Record<string, unknown> | null = null
-  private lastPayload: Record<string, unknown> | null = null
 
   feed(eventName: string, data: Record<string, unknown>): StreamFeedResult {
     const type = typeof data.type === 'string' && data.type ? data.type : eventName
@@ -266,17 +267,12 @@ export class ResponsesStreamAccumulator {
       this.completed = candidate
       return {}
     }
-    this.lastPayload = candidate
     return {}
   }
 
-  get isComplete(): boolean {
-    return this.completed !== null
-  }
-
-  /** completed > last payload > null（调用方对 null 抛 stream_incomplete）。 */
+  /** Only a confirmed terminal response can be shaped as completion. */
   final(): Record<string, unknown> | null {
-    return this.completed || this.lastPayload
+    return this.completed
   }
 }
 
@@ -300,9 +296,13 @@ export class AnthropicStreamAccumulator {
   private readonly blocks = new Map<number, AnthropicBlockSlot>()
   private readonly usage: Record<string, unknown> = {}
   private stopReason: string | null = null
+  private stopped = false
+
+  get isComplete(): boolean { return this.stopped }
 
   feed(eventName: string, data: Record<string, unknown>): StreamFeedResult {
     const type = typeof data.type === 'string' && data.type ? data.type : eventName
+    if (type === 'message_stop') { this.stopped = true; return {} }
     if (type === 'message_start') {
       const message = asRecord(data.message)
       if (message) {

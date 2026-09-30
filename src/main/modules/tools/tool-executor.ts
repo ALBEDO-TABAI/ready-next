@@ -4,6 +4,7 @@
  */
 
 import { BrowserController } from '../browser-engine/ipc-handler'
+import { getRSSItemAnalysisManager } from '../rss-engine/item-analysis-manager'
 import type { SidecarManager } from '../agent-control/sidecar-manager'
 import type { AgentControlRuntime } from '../agent-control/runtime-core/runtime'
 import {
@@ -680,6 +681,7 @@ async function executeToolCallInner(
         case 'rss':
           return executeRSSTool(toolName, args, {
             getContent: () => getDatabase().rss.content,
+            getAnalysisProgress: (ids) => getRSSItemAnalysisManager().getItemProgress(ids),
             readAccessDenied: context.scope?.sourceKind !== 'local',
             requestModuleToolAction: context.requestModuleToolAction,
           })

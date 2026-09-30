@@ -58,6 +58,7 @@ type AnalysisStatus =
   | 'skipped'
 
 interface ItemAnalysisProgress {
+  sourceWarning?: string | null
   itemId: string
   jobId: string
   action: 'copy' | 'visual'
@@ -71,6 +72,7 @@ interface ItemAnalysisProgress {
 }
 
 interface AnalysisJobItem {
+  sourceWarning?: string | null
   id: string
   itemId: string
   action: 'copy' | 'visual'
@@ -186,6 +188,7 @@ function taskStageTone(status: AnalysisStatus): { color: string; background: str
 }
 
 function taskDetailText(job: AnalysisJobItem): string {
+  if (job.sourceWarning) return job.sourceWarning
   if (job.error) return compactAnalysisDetail(job.error)
 
   const message = (job.message || '').trim()
@@ -199,7 +202,7 @@ function taskDetailText(job: AnalysisJobItem): string {
 function AnalysisProgressRing({
   entry
 }: {
-  entry?: Pick<ItemAnalysisProgress, 'progress' | 'status'>
+  entry?: Pick<ItemAnalysisProgress, 'progress' | 'status' | 'sourceWarning'>
 }) {
   const value = Math.max(0, Math.min(100, entry?.progress ?? 0))
   const radius = 7
@@ -209,6 +212,7 @@ function AnalysisProgressRing({
   const running =
     status === 'queued' || status === 'running_script' || status === 'running_subagent'
 
+  if (entry?.sourceWarning) return <TriangleAlert className="h-[13px] w-[13px] text-[var(--color-orange)]" />
   if (status === 'success') {
     return (
       <div className="flex h-5 w-5 items-center justify-center pt-0.5">
@@ -483,7 +487,7 @@ export default function RSSFeed({
                           background: stageTone.background
                         }}
                       >
-                        {taskStageLabel(job.status)}
+                        {job.sourceWarning ? '完成 · 有范围提示' : taskStageLabel(job.status)}
                       </span>
                     </div>
                     {detailText ? (
@@ -1022,7 +1026,7 @@ export default function RSSFeed({
                               onOpenAnalysisOutput(item.id)
                             }}
                             className="h-7 w-7 rounded-md hover:bg-[var(--bg-hover)] transition-colors flex items-center justify-center"
-                            title={progressLabel(analysis)}
+                            title={analysis?.sourceWarning || progressLabel(analysis)}
                           >
                             <AnalysisProgressRing entry={analysis} />
                           </button>

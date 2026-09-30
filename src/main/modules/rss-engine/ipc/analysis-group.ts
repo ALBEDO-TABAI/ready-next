@@ -45,6 +45,7 @@ import type { IpcChannelGroup, IpcDisposeHandle } from './types'
  * `ipc-handler.ts`.
  */
 export interface MappedRSSAnalysisJob {
+  sourceWarning?: string | null
   id: string
   itemId: string
   action: RSSAnalysisAction

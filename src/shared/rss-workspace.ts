@@ -24,6 +24,7 @@ export type RSSBodyStatus = 'missing' | 'loading' | 'ready' | 'partial' | 'stale
 export interface RSSArticleSummary {
   id: string
   revision: string
+  sourceRevision: string
   sourceId: string
   source: string
   title: string

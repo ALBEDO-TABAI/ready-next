@@ -118,6 +118,18 @@ test('RSS agent analysis returns a running background job instead of waiting for
   )
 })
 
+test('RSS agent preserves source warnings instead of presenting an old report as current', async () => {
+  const warning = '原文已更新或删除，此报告来自旧版本。'
+  const subject = createHandler({ progress: {
+    itemId: item.id, jobId: 'job-1', action: 'copy', status: 'success', progress: 100,
+    message: '分析完成', error: null, outputDir: '/workspace/analysis', reportPath: '/workspace/analysis/report.md',
+    updatedAt: '2026-09-30T00:00:00Z', sourceWarning: warning,
+  } })
+  const result = await subject.handler({ module: 'rss', action: 'rss.analyzeItem', args: { itemId: item.id, analysisType: 'copy' } }) as Record<string, unknown>
+  assert.equal(result.sourceWarning, warning)
+  assert.ok(String(result.summary).includes(warning))
+})
+
 test('RSS agent analysis reports immediate failures without pretending the job started cleanly', async () => {
   const failedProgress: RSSAnalysisProgressLike = {
     itemId: item.id,
@@ -178,4 +190,18 @@ test('RSS agent addSource treats existing sources as a non-blocking result', asy
   assert.equal(reloaded, true)
   assert.equal(result.status, 'already_exists')
   assert.equal(result.summary, 'RSS 源已存在：Hacker News')
+})
+
+test('RSS capture reads a completed report again after its source changes without starting analysis', async () => {
+  const params: { progress: RSSAnalysisProgressLike | null } = { progress: null }
+  const subject = createHandler(params)
+  const before = await subject.handler({ module: 'rss', action: 'rss.captureSession', args: {} }) as Record<string, unknown>
+  assert.equal(before.analysis, null)
+  params.progress = { itemId: item.id, jobId: 'completed-job', action: 'copy', status: 'success', progress: 100,
+    message: '分析完成', error: null, outputDir: '/report', reportPath: '/report/analysis.md', updatedAt: '2026-09-30',
+    sourceWarning: '原文已更新或删除，此报告来自旧版本。' }
+  const after = await subject.handler({ module: 'rss', action: 'rss.captureSession', args: {} }) as Record<string, unknown>
+  assert.deepEqual(after.analysis, params.progress)
+  assert.equal(subject.lastAnalysis.length, 0)
+  assert.equal(subject.progressReads, 2)
 })

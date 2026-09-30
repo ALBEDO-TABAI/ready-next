@@ -159,6 +159,7 @@ interface MappedRSSDraftStoreSource {
 }
 
 interface MappedRSSAnalysisJob {
+  sourceWarning?: string | null
   id: string
   itemId: string
   action: RSSAnalysisAction
@@ -179,6 +180,7 @@ interface MappedRSSAnalysisJob {
 }
 
 interface RSSAnalysisProgressPayload {
+  sourceWarning?: string | null
   itemId: string
   jobId: string
   action: RSSAnalysisAction
@@ -372,6 +374,7 @@ function parseMetaJson(raw: string | null): Record<string, unknown> | null {
 
 function mapAnalysisJob(job: RSSAnalysisJob): MappedRSSAnalysisJob {
   return {
+    sourceWarning: getRSSItemAnalysisManager().getSourceWarning(job),
     id: job.id,
     itemId: job.item_id,
     action: job.action,

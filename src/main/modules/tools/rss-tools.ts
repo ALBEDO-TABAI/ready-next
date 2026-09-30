@@ -2,6 +2,7 @@ import { RSS_SCHEMAS } from './schemas/rss-schemas'
 import { zodObjectToParamList } from './zod-param-derivation'
 import { RSSQuerySchema, RSSReadArticleSchema } from '../../../shared/rss-workspace'
 import type { RSSContentStore } from '../database/rss-content-store'
+import type { RSSItemAnalysisProgress } from '../rss-engine/item-analysis-manager'
 
 interface ToolParam {
   name: string
@@ -22,6 +23,7 @@ interface RSSToolDef {
 
 interface RSSToolContext {
   getContent?: () => Pick<RSSContentStore, 'query' | 'readArticle'>
+  getAnalysisProgress?: (itemIds: string[]) => Record<string, RSSItemAnalysisProgress>
   readAccessDenied?: boolean
   requestModuleToolAction?: (tool: string, args: Record<string, unknown>) => Promise<Record<string, unknown>>
 }
@@ -75,7 +77,7 @@ const RSS_TOOLS: RSSToolDef[] = [
   },
   {
     name: 'rss_read_article',
-    description: '按文章 ID 分段读取已保存正文和来源；沿 nextOffset 与 revision 继续读取。正文缺失会明确返回来源摘要，不冒充全文。',
+    description: '按文章 ID 分段读取已保存正文和来源，以及最近分析任务、报告路径与原文变化警告；不重新启动分析。沿 nextOffset 与 revision 续读；缺失正文明确返回来源摘要。',
     action: 'rss.readArticle', intent: 'read_rss_article', executionKind: 'deterministic',
     params: zodObjectToParamList(RSS_SCHEMAS.rss_read_article) as ToolParam[],
   },
@@ -144,7 +146,9 @@ export async function executeRSSTool(
       const data = toolName === 'rss_query_items'
         ? content.query(RSSQuerySchema.parse(args))
         : content.readArticle(RSSReadArticleSchema.parse(args))
-      return toStructuredResult(tool, '已读取保存的 RSS 资料；范围、正文状态及续读位置以 data 为准。', { ok: true, data })
+      const analysis = toolName === 'rss_read_article'
+        ? context.getAnalysisProgress?.([String(args.itemId)])[String(args.itemId)] ?? null : undefined
+      return toStructuredResult(tool, '已读取保存的 RSS 资料；范围、正文状态及续读位置以 data 为准，analysis 为最近分析的当前状态。', { ok: true, data, ...(analysis !== undefined ? { analysis } : {}) })
     } catch (error) {
       return toStructuredResult(tool, 'RSS 读取未完成。', { ok: false, error: error instanceof Error ? error.message : String(error) })
     }

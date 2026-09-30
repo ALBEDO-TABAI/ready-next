@@ -2389,6 +2389,7 @@ type RSSAnalysisJobStatus =
   | 'skipped'
 
 interface RSSAnalysisJobData {
+  sourceWarning?: string | null
   id: string
   itemId: string
   action: RSSAnalysisAction
@@ -2409,6 +2410,7 @@ interface RSSAnalysisJobData {
 }
 
 interface RSSItemAnalysisProgress {
+  sourceWarning?: string | null
   itemId: string
   jobId: string
   action: RSSAnalysisAction

@@ -35,6 +35,7 @@ function summary(row: ArticleRow): RSSArticleSummary {
   const currentBody = row.body_item_revision === row.content_revision
   return {
     id: row.id, revision: `${row.content_revision}:${currentBody ? row.body_revision ?? 'none' : 'none'}`,
+    sourceRevision: row.content_revision,
     sourceId: row.source_id, source: row.source_name || row.source_id, title: row.title, link: row.link,
     summary: row.summary || '', author: row.author, publishedAt: row.published_at === null ? null : row.published_at * 1000,
     collectedAt: row.first_seen_at * 1000, coverImage: row.cover_image,

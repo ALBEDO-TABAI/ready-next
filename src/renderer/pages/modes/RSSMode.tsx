@@ -49,6 +49,7 @@ type RSSAnalysisStatus =
   | 'skipped'
 
 interface RSSItemAnalysisProgressState {
+  sourceWarning?: string | null
   itemId: string
   jobId: string
   action: 'copy' | 'visual'
@@ -62,6 +63,7 @@ interface RSSItemAnalysisProgressState {
 }
 
 interface RSSAnalysisJobState {
+  sourceWarning?: string | null
   id: string
   itemId: string
   action: 'copy' | 'visual'
@@ -352,6 +354,7 @@ export default function RSSMode({
         error: job.error ?? null,
         outputDir: job.outputDir,
         reportPath: job.reportPath,
+        sourceWarning: job.sourceWarning ?? null,
         updatedAt: job.updatedAt,
       }))
       setAnalysisJobs(jobs)
