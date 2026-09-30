@@ -3,6 +3,7 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { Check, Copy, ExternalLink, Wrench } from 'lucide-react'
 import { EBOOK_INLINE_IMAGE_TITLE } from '../../../shared/ebook'
+import { documentCodeBehavior } from '../../../shared/document-code-language'
 import { appendToAgentInput } from '../../modules/agent/chat-input-bridge'
 import { resolvePreviewReference } from './note-preview-parser'
 
@@ -49,7 +50,7 @@ export async function copyTextToClipboard(value: string): Promise<boolean> {
 }
 
 function isMermaidLanguage(className: string | undefined): boolean {
-  return /\blanguage-mermaid\b/.test(className || '')
+  return documentCodeBehavior(className) === 'mermaid'
 }
 
 function MermaidBlock({ code }: { code: string }) {
@@ -122,7 +123,7 @@ function isMermaidPreChildren(children: ReactNode): boolean {
 }
 
 function isMarkdownSourceLanguage(className?: string): boolean {
-  return /\blanguage-(md|markdown)\b/i.test(className || '')
+  return documentCodeBehavior(className) === 'markdown'
 }
 
 function getPreCodeChild(children: ReactNode): { className?: string; code: string } | null {

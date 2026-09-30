@@ -1,5 +1,5 @@
 import type { RSSAnalysisAction, RSSAnalysisJob } from '../database/records'
-import { ipcMain, app } from 'electron'
+import { ipcMain, app, BrowserWindow, dialog } from 'electron'
 import { join } from 'path'
 import { readFile } from 'fs/promises'
 import type { BrowserController } from '../browser-engine/ipc-handler'
@@ -57,6 +57,7 @@ import {
 import { diagnosticsGroup } from './ipc/diagnostics-group'
 import { exportGroup } from './ipc/export-group'
 import { contentGroup } from './ipc/content-group'
+import { workspaceFilesGroup } from './ipc/workspace-files-group'
 import { getRSSContentService } from './content-runtime'
 import type { AddSourceCoreInput, AddSourceCoreResult } from './ipc/engine-deps'
 import type { IpcDisposeHandle } from './ipc/types'
@@ -240,6 +241,7 @@ let diagnosticsGroupDispose: IpcDisposeHandle | null = null
  */
 let exportGroupDispose: IpcDisposeHandle | null = null
 let contentGroupDispose: IpcDisposeHandle | null = null
+let workspaceFilesGroupDispose: IpcDisposeHandle | null = null
 
 export function setRSSBrowserController(controller: BrowserController | null): void {
   rssBrowserController = controller
@@ -998,6 +1000,16 @@ async function runAddSourceCore(input: AddSourceCoreInput): Promise<AddSourceCor
 }
 
 export function setupRSSIPC(useMock = false): void {
+  workspaceFilesGroupDispose?.dispose()
+  workspaceFilesGroupDispose = workspaceFilesGroup.register(ipcMain, {
+    getContent: () => rssRepository.getContentStore(),
+    chooseDirectory: async (sender, title, defaultDirectory) => {
+      const parent = BrowserWindow.fromWebContents(sender)
+      if (!parent) throw new Error('当前窗口不可用。')
+      const result = await dialog.showOpenDialog(parent, { title, defaultPath: defaultDirectory || app.getPath('documents'), properties: ['openDirectory', 'createDirectory'] })
+      return result.canceled ? null : result.filePaths[0] || null
+    },
+  })
   contentGroupDispose?.dispose()
   contentGroupDispose = contentGroup.register(ipcMain, {
     useMock,

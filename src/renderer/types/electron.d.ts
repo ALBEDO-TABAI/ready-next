@@ -2382,6 +2382,8 @@ interface RSSItemAnalysisProgress {
 }
 
 interface ElectronRSSAPI {
+  saveArticleNote: (input: import('../../shared/rss-workspace').RSSSaveNoteInput) => Promise<RSSResponse<import('../../shared/rss-workspace').RSSNoteSaveResult>>
+  exportQuery: (input: import('../../shared/rss-workspace').RSSQueryInput) => Promise<RSSResponse<import('../../shared/rss-workspace').RSSQueryExportResult>>
   queryItems: (query?: import('../../shared/rss-workspace').RSSQueryInput) => Promise<RSSResponse<import('../../shared/rss-workspace').RSSQueryResult>>
   dismissQuery: (input: import('../../shared/rss-workspace').RSSQueryInput) => Promise<RSSResponse<{ dismissed: number }>>
   readArticle: (input: import('../../shared/rss-workspace').RSSReadArticleInput) => Promise<RSSResponse<import('../../shared/rss-workspace').RSSArticleExcerpt>>

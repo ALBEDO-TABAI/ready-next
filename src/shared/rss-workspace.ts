@@ -73,6 +73,11 @@ export const RSSReadArticleSchema = z.object({
 
 export const RSSLoadArticleSchema = z.object({ itemId: z.string().min(1), force: z.boolean().default(false) }).strict()
 
+export const RSSSaveNoteSchema = z.object({ itemId: z.string().min(1), expectedRevision: z.string().min(1), defaultDirectory: z.string().optional() }).strict()
+export type RSSSaveNoteInput = z.infer<typeof RSSSaveNoteSchema>
+export type RSSNoteSaveResult = { canceled: true } | { canceled: false; path: string; itemId: string; revision: string }
+export type RSSQueryExportResult = { canceled: true } | { canceled: false; path: string; query: RSSQueryResult['query']; revision: number; total: number }
+
 export type RSSReadArticleInput = z.input<typeof RSSReadArticleSchema>
 export interface RSSArticleExcerpt {
   article: Omit<RSSArticle, 'body'>

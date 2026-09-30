@@ -97,6 +97,7 @@
 - RSS 新增与刷新产生的分类必须随文章写入，并能被分类统计与导出读回；单源刷新也执行同一关键词分类。未执行分类的刷新保留已保存分类，不以空值清除；文章更新不重置已读、收藏或收件箱可见性。验收包含真实 Electron SQLite 下的 `rss-classification-persistence.test.ts`。
 - RSS 列表、计数、搜索、分页和当前范围移出以 Main 共享查询为准；Renderer 不维护另一套过滤结果。查询切换与写回按请求归属发布，旧回调不得取消新查询的完成权。当前结果清空须带资料版本，并在同一事务中保留收藏和历史底稿；完整保存资料导出仍保持原全量语义。
 - RSS 卡片统一进入只读文章阅读面，原文另走正常浏览器标签。RSS 与 Document 共用 Markdown 排版；RSS 外部模式不因来源 URL 为空而降级为可信文档，禁止来源 Widget/Mermaid、本地文件引用与脚本执行。已读和收藏必须保存后读回；保存错误按文章绑定，不把旧条目的提示带到下一篇。原生 RSS 预览宿主及其专用 IPC/广告拦截开关已退役。正文获取复用 `persist:browser` 登录身份；需要进一步交互时仍保留打开原文入口。
+- RSS 保存笔记与当前范围导出统一经 `rss-engine/workspace-files.ts`：用户选择目录，选择后与发布前核对来源/查询版本，独占创建新文件并读回，读回失败清理本次文件。笔记是带原文链接的独立可编辑副本，来源特殊代码与本地引用保持被动；导出包含所有匹配分页及已保存正文，不触发采集，保留旧全量导出语义。成功回执绑定发起时的版本/范围，后台保存不强制切换工作面。
 - RSS 已保存内容的分页查询与正文读取以 `shared/rss-workspace.ts` 和 `database/rss-content-store.ts` 为共同合同；正文获取是独立动作，查询/读取不得启动网络或修改已读。翻页和续读绑定查询/文章版本，删除后同 ID 重建也不能接收旧请求结果。正文获取按 requestId 跟踪全部尚未结束的请求，退出前先取消并等待，再关闭数据库。079 迁移在现有磁盘库上先生成包含 WAL 数据的一致备份；迁移失败保留原数据。当前新读工具只对本机已绑定 local 会话开放，未授权远程读取不得回落到界面通道。
 - Agent 定时任务的唯一时间与领取真值是 Main + SQLite 的 `scheduled_tasks` / `agent_schedule_occurrences`；sidecar 不再调度或镜像。每次触发先持久领取 occurrence，再按 scope 串行进入生产 Agent 主链；同一 schedule 不并发，前台运行优先，缺失 scope/Agent/workspace 时暂停或阻塞而不走兜底会话。
 - 定时任务入口仍在四模式切换器右侧，但总览、编辑和历史占用中间工作区，不增加第五种 mode。打开时持有持续 BrowserView 遮罩，关闭时释放并恢复活动页；液态玻璃投影只读取背后的工作内容节点，禁止把覆盖面自身包含进投影源。
@@ -113,6 +114,7 @@
 - Widget 视觉唯一来源是 `src/shared/document-widget-theme.ts` 与 `document-widget-dot-charts.ts`：Ready 单橘红、mono 标签、禁饼图/彩虹/Emoji 图标；`pie` 输入渲染为合规占比形态。
 - OpenUI componentSpec、骨架编译器与 iframe 基线 CSS 都走令牌。预览/导出优先从 `skeleton_spec` 或 `component_spec` 重编译；`widget_code` 只作无法重建时的兼容回退。
 - iframe、接收器、导出注入与宿主 bootstrap 脚本必须使用与 `index.html` CSP 完全一致的 `WIDGET_SCRIPT_NONCE`。
+- Widget 围栏与裸载荷只从真实顶层 Markdown 代码/段落识别；嵌套、缩进代码和 HTML 注释不激活。特殊代码语言由 `document-code-language.ts` 精确匹配，来源转笔记与渲染消费同一规则；不能用前缀近似匹配重新解释示例。
 - `onclick/oninput/onchange` 先由 sanitizer 改写为 `data-ready-on*`，再由 receiver 调用具名函数；静态回退与导出必须剥除事件属性。
 - “信息卡、摘要卡、对比卡、关系图、流程图、图表”必须走 `document_insert_widget`，不能用 Markdown 表格或文本替换冒充。
 - Widget 更新上下文优先于 live-info 判定；天气、新闻、股价、汇率、比分、航班、路况、空气质量和官网公告等实时问题必须进入网页查询工作流。

@@ -627,6 +627,7 @@ export default function RSSMode({
           {/* Article rendering shares the document typography, without active widgets. */}
           {selectedItem && (
             <RSSArticleReader
+              active={isActive && !isSuspended}
               key={selectedItem.id}
               item={items.find((item) => item.id === selectedItem.id) || selectedItem}
               onClose={handleClosePreview}

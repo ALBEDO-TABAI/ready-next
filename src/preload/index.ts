@@ -825,6 +825,8 @@ const boardAPI = {
 
 // RSS API
 const rssAPI = {
+  saveArticleNote: (input: import('../shared/rss-workspace').RSSSaveNoteInput) => ipcRenderer.invoke('rss:saveArticleNote', input),
+  exportQuery: (input: import('../shared/rss-workspace').RSSQueryInput) => ipcRenderer.invoke('rss:exportQuery', input),
   queryItems: (query?: unknown) => ipcRenderer.invoke('rss:queryItems', query),
   dismissQuery: (input: import('../shared/rss-workspace').RSSQueryInput) => ipcRenderer.invoke('rss:dismissQuery', input),
   readArticle: (input: unknown) => ipcRenderer.invoke('rss:readArticle', input),

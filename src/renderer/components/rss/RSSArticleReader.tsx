@@ -8,8 +8,10 @@ import { hasLikelyVideoResource } from '../../../shared/browser-tab-resource-cla
 import type { RSSArticleExcerpt } from '../../../shared/rss-workspace'
 import type { RSSItem } from './RSSFeed'
 import RssTimeHintBanner from './RssTimeHintBanner'
+import RSSSaveNoteButton from './RSSSaveNoteButton'
 
 interface RSSArticleReaderProps {
+  active?: boolean
   item: RSSItem
   onClose(): void
   onOpened(itemId: string): Promise<void>
@@ -23,7 +25,7 @@ const BODY_LABELS = {
   stale: '原文已变化，正在更新正文', login_required: '需要在原网站登录', failed: '正文获取失败',
 } as const
 
-export default function RSSArticleReader({ item, onClose, onOpened, onToggleStar, onBodyLoaded, notice }: RSSArticleReaderProps) {
+export default function RSSArticleReader({ item, onClose, onOpened, onToggleStar, onBodyLoaded, notice, active = true }: RSSArticleReaderProps) {
   const [content, setContent] = useState<RSSArticleExcerpt | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -94,6 +96,7 @@ export default function RSSArticleReader({ item, onClose, onOpened, onToggleStar
     <header className="rss-reader-toolbar glass-surface-floating">
       <button type="button" className="rss-reader-button" onClick={onClose}><ArrowLeft size={16} />返回列表</button>
       <div className="rss-reader-actions">
+        <RSSSaveNoteButton article={content?.article || null} disabled={busy} active={active} onError={setError} />
         <button type="button" className="rss-reader-button" title={item.starred ? '取消收藏' : '收藏文章'} aria-pressed={item.starred} onClick={() => onToggleStar(item.id)}><Star size={16} fill={item.starred ? 'currentColor' : 'none'} /></button>
         <button type="button" className="rss-reader-button" disabled={!content} onClick={() => { if (content) void copyTextToClipboard(`${title}\n来源：${article?.link || item.link}\n\n${content.text}`).then(setCopied) }}><Copy size={15} />{copied ? '已复制' : '复制内容'}</button>
         <button type="button" className="rss-reader-button" onClick={openOriginal}><ExternalLink size={15} />打开原文</button>

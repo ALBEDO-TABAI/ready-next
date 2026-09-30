@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Search, X } from 'lucide-react'
 import { useRSSSession } from '../../stores/useRSSSession'
 import { RSS_SEARCH_MAX_LENGTH, type RSSQueryResult } from '../../../shared/rss-workspace'
+import RSSExportButton from './RSSExportButton'
 
 export default function RSSWorkspaceToolbar({ view, loading }: { view: RSSQueryResult | null; loading: boolean }) {
   const query = useRSSSession((state) => state.query)
@@ -22,5 +23,6 @@ export default function RSSWorkspaceToolbar({ view, loading }: { view: RSSQueryR
     <select className="rss-sort-select" aria-label="资讯排序" value={query.sort} onChange={(event) => setQuery({ sort: event.target.value as 'newest' | 'oldest' })}>
       <option value="newest">最新在前</option><option value="oldest">最早在前</option>
     </select>
+    <RSSExportButton view={view} disabled={loading} />
   </header>
 }
