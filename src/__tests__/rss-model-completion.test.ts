@@ -2,7 +2,8 @@ import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
 import { once } from 'node:events'
 import test from 'node:test'
-import { completeRSSModel } from '../main/modules/rss-engine/model-completion'
+import { completeRSSModel, validateRSSModelRequest } from '../main/modules/rss-engine/model-completion'
+import { ProviderOutputIncompleteError } from '../main/modules/agent-control/runtime-core/provider-output-status'
 import type { AIModelConfig } from '../shared/ai-providers'
 
 test('RSS analysis uses the shared streaming provider with the entire source and no tools', async () => {
@@ -58,6 +59,30 @@ test('RSS missing configuration fails before a model request', async () => {
   await assert.rejects(completeRSSModel(null, { system: '', user: 'source', maxTokens: 256 }), /配置/)
 })
 
+test('RSS refuses oversized input rather than letting SDK compaction silently change the evidence', () => {
+  const config = { provider: 'openai-compatible', baseUrl: 'http://127.0.0.1:1', apiKey: 'test-key', model: 'test-model', contextWindowOverride: 4096 } as AIModelConfig
+  assert.throws(() => validateRSSModelRequest(config, { system: 'Classify.', user: '很长的原文'.repeat(5000), maxTokens: 256 }), /容量不足/)
+})
+
+test('RSS external cancellation aborts the real provider request without retry', async () => {
+  let received!: () => void, calls = 0
+  const requestReceived = new Promise<void>((resolve) => { received = resolve })
+  const server = createServer((_req, res) => { calls++; res.writeHead(200, { 'content-type': 'text/event-stream' }); res.write(': waiting\n\n'); received() }).listen(0, '127.0.0.1')
+  await once(server, 'listening')
+  try {
+    const controller = new AbortController()
+    const config = { provider: 'openai-compatible', baseUrl: `http://127.0.0.1:${(server.address() as { port: number }).port}`, apiKey: 'test-key', model: 'test-model' } as AIModelConfig
+    const pending = completeRSSModel(config, { system: 'Classify.', user: 'source', maxTokens: 256, signal: controller.signal, runId: 'rss-cancel-test' })
+    const rejection = assert.rejects(pending)
+    await requestReceived
+    controller.abort()
+    await rejection
+    assert.equal(calls, 1)
+    await assert.rejects(completeRSSModel(config, { system: '', user: '', maxTokens: 256, signal: controller.signal }))
+    assert.equal(calls, 1)
+  } finally { server.closeAllConnections(); await new Promise<void>((resolve) => server.close(() => resolve())) }
+})
+
 for (const protocol of ['chat', 'openai-chat', 'anthropic', 'responses', 'openai-responses']) for (const incomplete of ['missing-terminal', 'length']) {
   test(`RSS ${protocol} does not publish or retry a plausible report with ${incomplete}`, async () => {
     let calls = 0
@@ -86,7 +111,7 @@ for (const protocol of ['chat', 'openai-chat', 'anthropic', 'responses', 'openai
       const config = { provider: protocol.startsWith('openai-') ? 'openai' : protocol === 'anthropic' ? 'anthropic' : 'openai-compatible',
         wireApi: protocol.endsWith('responses') ? 'responses' : 'chat/completions',
         baseUrl: `http://127.0.0.1:${address.port}`, apiKey: 'test-key', model: 'test-model' } as AIModelConfig
-      await assert.rejects(completeRSSModel(config, { system: 'Analyze.', user: 'Source', maxTokens: 256 }))
+      await assert.rejects(completeRSSModel(config, { system: 'Analyze.', user: 'Source', maxTokens: 256 }), incomplete === 'length' ? ProviderOutputIncompleteError : undefined)
       assert.equal(calls, 1)
     } finally { server.closeAllConnections(); await new Promise<void>((resolve) => server.close(() => resolve())) }
   })

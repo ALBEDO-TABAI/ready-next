@@ -1,4 +1,5 @@
 import RSSDefinitionEditor from '../../components/rss/RSSDefinitionEditor'
+import RSSProcessingPanel from '../../components/rss/RSSProcessingPanel'
 import { useState, useEffect, useCallback, useMemo, useRef, type CSSProperties } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { RefreshCw, AlertCircle, ExternalLink } from 'lucide-react'
@@ -557,6 +558,7 @@ export default function RSSMode({
               if (deletedId && (current.collectionId === deletedId || current.categoryId === deletedId)) setQuery({ collectionId: undefined, categoryId: undefined, scope: 'inbox', filter: 'all' })
             }} />}
             <RSSWorkspaceToolbar view={view} loading={loading} definitions={definitions} />
+            <RSSProcessingPanel active={isActive && !isSuspended} />
             <RSSFeed
               active={isActive && !isSuspended}
               items={items}

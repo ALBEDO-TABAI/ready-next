@@ -1,4 +1,5 @@
 import { RSSReadReferenceSchema } from '../../../../shared/rss-reference'
+import { RSSProcessingListSchema } from '../../../../shared/rss-processing'
 /**
  * RSS domain schemas; saved-content reads share their schema with the IPC API.
  *
@@ -45,6 +46,7 @@ export type RssToolName =
   | 'rss_query_items'
   | 'rss_read_article'
   | 'rss_read_reference'
+  | 'rss_read_processing'
 
 export const RSS_SCHEMAS: Record<RssToolName, z.ZodObject<z.ZodRawShape>> = {
   rss_add_source: RssAddSourceSchema,
@@ -55,4 +57,5 @@ export const RSS_SCHEMAS: Record<RssToolName, z.ZodObject<z.ZodRawShape>> = {
   rss_query_items: RSSQuerySchema,
   rss_read_article: RSSReadArticleSchema,
   rss_read_reference: RSSReadReferenceSchema,
+  rss_read_processing: RSSProcessingListSchema,
 }

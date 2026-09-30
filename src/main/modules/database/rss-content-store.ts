@@ -72,7 +72,7 @@ function queryPredicate(query: ReturnType<typeof RSSQuerySchema.parse>, definiti
 }
 
 export class RSSContentStore {
-  constructor(private readonly getConnection: () => DatabaseConnection | null, private readonly organization: RSSOrganizationStore) {}
+  constructor(private readonly getConnection: () => DatabaseConnection | null, private readonly organization: RSSOrganizationStore, private readonly onBodySaved?: (itemId: string) => void) {}
 
   private connection(): DatabaseConnection {
     const db = this.getConnection()
@@ -195,14 +195,20 @@ export class RSSContentStore {
   finishLoad(claim: RSSContentClaim, result: RSSContentResult): boolean {
     const text = result.markdown ?? null
     if ((result.status === 'ready' || result.status === 'partial') && !text?.trim()) throw new Error('body_empty')
-    const updated = this.connection().prepare(`UPDATE rss_article_content
-      SET status=?,markdown=?,body_revision=?,source_url=?,fetched_at=?,error=?,request_id=NULL
-      WHERE item_id=? AND item_revision=? AND request_id=? AND status='loading'
-        AND EXISTS(SELECT 1 FROM rss_items WHERE id=? AND content_revision=?)`).run(
-      result.status, text, text === null ? null : hash(text), result.sourceUrl, Date.now(), result.error ?? null,
-      claim.itemId, claim.itemRevision, claim.requestId, claim.itemId, claim.itemRevision,
-    ) as { changes: number }
-    return updated.changes === 1
+    const db = this.connection()
+    db.exec('SAVEPOINT rss_body_save')
+    try {
+      const updated = db.prepare(`UPDATE rss_article_content
+        SET status=?,markdown=?,body_revision=?,source_url=?,fetched_at=?,error=?,request_id=NULL
+        WHERE item_id=? AND item_revision=? AND request_id=? AND status='loading'
+          AND EXISTS(SELECT 1 FROM rss_items WHERE id=? AND content_revision=?)`).run(
+        result.status, text, text === null ? null : hash(text), result.sourceUrl, Date.now(), result.error ?? null,
+        claim.itemId, claim.itemRevision, claim.requestId, claim.itemId, claim.itemRevision,
+      ) as { changes: number }
+      if (updated.changes === 1 && text !== null) this.onBodySaved?.(claim.itemId)
+      db.exec('RELEASE rss_body_save')
+      return updated.changes === 1
+    } catch (error) { db.exec('ROLLBACK TO rss_body_save; RELEASE rss_body_save'); throw error }
   }
 
   recoverInterruptedLoads(): void {

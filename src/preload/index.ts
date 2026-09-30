@@ -825,6 +825,12 @@ const boardAPI = {
 
 // RSS API
 const rssAPI = {
+  processingStatus: () => ipcRenderer.invoke('rss:processingStatus'),
+  processingJobs: (input?: import('../shared/rss-processing').RSSProcessingListInput) => ipcRenderer.invoke('rss:processingJobs', input),
+  configureProcessing: (input: import('../shared/rss-processing').RSSProcessingSettings) => ipcRenderer.invoke('rss:configureProcessing', input),
+  reprocessArticle: (input: { itemId: string; expectedArticleRevision: string }) => ipcRenderer.invoke('rss:reprocessArticle', input),
+  cancelProcessing: (id: string) => ipcRenderer.invoke('rss:cancelProcessing', id),
+  resumeProcessing: () => ipcRenderer.invoke('rss:resumeProcessing'),
   getDefinitions: () => ipcRenderer.invoke('rss:getDefinitions'),
   saveDefinition: (input: import('../shared/rss-organization').RSSDefinitionWrite) => ipcRenderer.invoke('rss:saveDefinition', input),
   removeDefinition: (input: { id: string; expectedRevision: number }) => ipcRenderer.invoke('rss:removeDefinition', input),

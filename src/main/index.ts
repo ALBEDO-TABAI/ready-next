@@ -61,6 +61,7 @@ import { closeAllBrowsers } from './modules/browser-engine/browser-cleanup'
 import { assertPrimaryDatabaseReady, getDatabase } from './modules/database'
 import { shutdownWorkerDbBridge } from './modules/database/worker-bridge'
 import { stopRSSContentService } from './modules/rss-engine/content-runtime'
+import { startRSSProcessing, stopRSSProcessing, wakeRSSProcessing } from './modules/rss-engine/processing-runtime'
 import { registerMainProcessHandlers } from './process-handlers'
 import {
   createWindowMaterialController,
@@ -319,7 +320,7 @@ function stopRSSAutoRefresh(): Promise<void> {
 }
 
 function runFatalProcessCleanup(): Promise<void> {
-  const rssAutoRefreshStopped = Promise.all([stopRSSAutoRefresh(), stopRSSContentService()])
+  const rssAutoRefreshStopped = Promise.all([stopRSSAutoRefresh(), stopRSSContentService(), stopRSSProcessing()])
   return runBeforeQuitCleanup({
     cleanupAgentRuntime,
     cleanupAgentManager: () => agentManager.cleanup(),
@@ -589,6 +590,7 @@ function setupGlobalIPC(): void {
   setupTagForgeIPC()
   setupImageGenerationIPC()
   setupRSSIPC(RSS_USE_MOCK)
+  if (!RSS_USE_MOCK) void startRSSProcessing()
   rssAutoRefreshScheduler = new RSSAutoRefreshScheduler({
     now: () => Date.now(),
     readIntervalMs: readRSSAutoRefreshInterval,
@@ -697,6 +699,7 @@ function setupGlobalIPC(): void {
     syncScheduler: calendarSyncScheduler ?? undefined,
   })
   setupSettingsIPC({
+    onModelChanged: wakeRSSProcessing,
     onSettingChanged: (key) => {
       if (key === RSS_AUTO_REFRESH_INTERVAL_KEY) {
         rssAutoRefreshScheduler?.onSettingChanged()
@@ -1203,7 +1206,7 @@ app.on('before-quit', (event) => {
   } catch (err) {
     console.warn('[before-quit] calendarSyncScheduler.stop threw:', err)
   }
-  const rssAutoRefreshStopped = Promise.all([stopRSSAutoRefresh(), stopRSSContentService()])
+  const rssAutoRefreshStopped = Promise.all([stopRSSAutoRefresh(), stopRSSContentService(), stopRSSProcessing()])
   void runBeforeQuitCleanup({
     cleanupAgentRuntime,
     cleanupAgentManager: () => agentManager.cleanup(),

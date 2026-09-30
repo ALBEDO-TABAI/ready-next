@@ -10,6 +10,29 @@ function item(id: string, scheduleId: string, scopeId: string, scheduledFor: str
   return { occurrenceId: id, scheduleId, scopeId, scheduledFor }
 }
 
+test('enqueue during an empty drain completion still runs without another timer tick', async () => {
+  const dispatched: string[] = []
+  const queue = new ScheduleDispatchQueue({ isScopeBusy: () => false,
+    dispatch: async (entry) => { dispatched.push(entry.occurrenceId) }, markSkippedCoalesced: () => {}, onDispatchError: () => {} })
+  const empty = queue.drain('rss')
+  const work = queue.enqueue(item('new', 'rss-wakeup', 'rss', '2026-10-01T00:00:00Z'))
+  await Promise.all([empty, work])
+  assert.deepEqual(dispatched, ['new']); assert.equal(queue.hasPending(), false)
+})
+
+test('moving a schedule to another scope waits without spinning and wakes when its active occurrence ends', async () => {
+  const dispatched: string[] = []
+  const queue = new ScheduleDispatchQueue({ isScopeBusy: () => false,
+    dispatch: async (entry) => { dispatched.push(entry.occurrenceId); if (entry.scopeId === 'first') await new Promise((resolve) => setTimeout(resolve, 10)) },
+    markSkippedCoalesced: () => {}, onDispatchError: () => {} })
+  const first = queue.enqueue(item('first', 'same-schedule', 'first', '2026-10-01T00:00:00Z'))
+  await queue.enqueue(item('moved', 'same-schedule', 'second', '2026-10-01T01:00:00Z'))
+  await first
+  await queue.drain('second')
+  assert.deepEqual(dispatched, ['first', 'moved'])
+  assert.equal(queue.hasPending(), false)
+})
+
 function deferred(): { promise: Promise<void>; resolve: () => void } {
   let resolve!: () => void
   const promise = new Promise<void>((done) => { resolve = done })

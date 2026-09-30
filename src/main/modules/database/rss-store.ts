@@ -1,4 +1,5 @@
 import { RSSOrganizationStore } from './rss-organization-store'
+import { RSSProcessingStore } from './rss-processing-store'
 import type { DatabaseConnection } from './connection'
 import { RSSContentStore } from './rss-content-store'
 import type { RSSSource, RSSItem, RSSDraftStoreSourceSummary, RSSStats, RSSAnalysisAction, RSSAnalysisJobStatus, RSSAnalysisJob } from './records'
@@ -6,10 +7,12 @@ import type { RSSSource, RSSItem, RSSDraftStoreSourceSummary, RSSStats, RSSAnaly
 export class RSSStore {
   readonly content: RSSContentStore
   readonly organization: RSSOrganizationStore
+  readonly processing: RSSProcessingStore
 
   constructor(private readonly getConnection: () => DatabaseConnection | null) {
     this.organization = new RSSOrganizationStore(getConnection, (id) => this.content.getArticle(id)?.revision || null)
-    this.content = new RSSContentStore(getConnection, this.organization)
+    this.content = new RSSContentStore(getConnection, this.organization, (id) => this.processing.enqueueBodyChange(id))
+    this.processing = new RSSProcessingStore(getConnection, this.content, this.organization)
   }
 
   private get db(): DatabaseConnection | null {
@@ -43,6 +46,7 @@ export class RSSStore {
     // Delete items first (cascade may not be enforced by all SQLite builds)
     this.db.prepare('DELETE FROM rss_items WHERE source_id = ?').run(id)
     this.db.prepare('DELETE FROM rss_sources WHERE id = ?').run(id)
+    this.processing.changed()
   }
 
   private withClassifications<T extends { id: string }>(rows: T[]): Array<T & { classifications: import('../../../shared/rss-organization').RSSMembership[] }> {
@@ -97,20 +101,29 @@ export class RSSStore {
          published_at = excluded.published_at,
          fetched_at = unixepoch()`
     )
-    for (const item of items) {
-      const result = stmt.run(
-        item.id,
-        item.source_id,
-        item.guid,
-        item.title,
-        item.link,
-        item.summary || null,
-        item.cover_image || null,
-        item.author || null,
-        item.published_at || null
-      ) as { changes?: number }
-      if (result.changes && result.changes > 0) inserted++
+    this.db.exec('SAVEPOINT rss_item_batch')
+    try {
+      for (const item of items) {
+        const previous = this.db.prepare('SELECT content_revision FROM rss_items WHERE id=?').get<{ content_revision: string }>(item.id)
+        const result = stmt.run(
+          item.id,
+          item.source_id,
+          item.guid,
+          item.title,
+          item.link,
+          item.summary || null,
+          item.cover_image || null,
+          item.author || null,
+          item.published_at || null
+        ) as { changes?: number }
+        if (result.changes && result.changes > 0) inserted++
+        const saved = this.db.prepare('SELECT content_revision FROM rss_items WHERE id=?').get<{ content_revision: string }>(item.id)!
+        const seeded = this.db.prepare('SELECT draft_seeded FROM rss_sources WHERE id=?').get<{ draft_seeded: number }>(item.source_id)
+        if (seeded?.draft_seeded === 1 && saved.content_revision !== previous?.content_revision) this.processing.enqueue(item.id, 'automatic')
+      }
+      this.db.exec('RELEASE rss_item_batch')
     }
+    catch (error) { this.db.exec('ROLLBACK TO rss_item_batch; RELEASE rss_item_batch'); throw error }
     return inserted
   }
 
@@ -134,6 +147,7 @@ export class RSSStore {
     const placeholders = itemIds.map(() => '?').join(', ')
     const stmt = this.db.prepare(`DELETE FROM rss_items WHERE id IN (${placeholders})`)
     const result = stmt.run(...itemIds) as { changes?: number }
+    this.processing.changed()
     return result.changes ?? 0
   }
 
@@ -154,6 +168,7 @@ export class RSSStore {
   deleteRSSItemsBySource(sourceId: string): number {
     if (!this.db) throw new Error('Database not available')
     const result = this.db.prepare('DELETE FROM rss_items WHERE source_id = ?').run(sourceId) as { changes?: number }
+    this.processing.changed()
     return result.changes ?? 0
   }
 
@@ -199,6 +214,7 @@ export class RSSStore {
     if (sourceId) {
       const deleted = this.db.prepare('DELETE FROM rss_items WHERE source_id = ?').run(sourceId) as { changes?: number }
       const reset = this.db.prepare('UPDATE rss_sources SET draft_seeded = 0 WHERE id = ?').run(sourceId) as { changes?: number }
+      this.processing.changed()
       return {
         deletedItems: deleted.changes ?? 0,
         resetSources: reset.changes ?? 0,
@@ -207,6 +223,7 @@ export class RSSStore {
 
     const deleted = this.db.prepare('DELETE FROM rss_items').run() as { changes?: number }
     const reset = this.db.prepare('UPDATE rss_sources SET draft_seeded = 0').run() as { changes?: number }
+    this.processing.changed()
     return {
       deletedItems: deleted.changes ?? 0,
       resetSources: reset.changes ?? 0,

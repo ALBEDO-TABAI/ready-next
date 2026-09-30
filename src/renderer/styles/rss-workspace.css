@@ -86,3 +86,13 @@
 .rss-membership-editor select { color: var(--text-body); background: var(--bg-secondary); border-radius: 8px; padding: 5px; }
 
 .rss-navigation-item span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rss-processing-panel { flex-shrink: 0; padding: 8px 14px; border: 1px solid var(--border-default); border-radius: 12px; background: var(--surface-toolbar-bg); font-size: 12px; max-height: 320px; overflow: auto; }
+.rss-processing-panel summary { cursor: pointer; }
+.rss-processing-panel p, .rss-processing-panel small { color: var(--text-secondary); }
+.rss-processing-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 10px; }
+.rss-processing-controls label { display: flex; align-items: center; gap: 6px; }
+.rss-processing-controls input[type="number"] { width: 78px; }
+.rss-processing-panel button { padding: 4px 8px; border-radius: 8px; border: 1px solid var(--border-default); }
+.rss-processing-panel ul { list-style: none; padding: 0; }
+.rss-processing-panel strong, .rss-processing-panel small { overflow-wrap: anywhere; }
+.rss-processing-panel li { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 6px 0; border-top: 1px solid var(--border-default); }

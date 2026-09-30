@@ -15,6 +15,15 @@ import {
 
 const EXPECTED_ANTHROPIC = [
   {
+    name: 'rss_read_processing', description: '读取 RSS 自动分类与精选的设置、当日调用次数及分页任务记录。仅查询，不启动、重试或取消任务。',
+    input_schema: { type: 'object', properties: {
+      itemId: { type: 'string', description: '可选文章 ID' },
+      offset: { type: 'number', description: '续页使用 nextOffset' },
+      limit: { type: 'number', description: '每页 1–100 条，默认 30' },
+      snapshot: { type: 'number', description: '续页沿用首次返回的 snapshot，避免新任务插入挤动分页' },
+    }, required: [] },
+  },
+  {
     name: 'rss_add_source',
     description: '添加一个 RSS 订阅源。',
     input_schema: {

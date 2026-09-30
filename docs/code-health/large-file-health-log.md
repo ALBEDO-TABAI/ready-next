@@ -2,6 +2,20 @@
 
 > 更新时间：2026-10-01
 
+## 2026-10-01 RSS 自动整理
+
+| 文件 | 当前行数 | 净增 | 判断 | 后续 |
+|---|---:|---:|---|---|
+| `src/main/index.ts` | 1233 | 3 | 一般 | 仅绑定启动、模型设置和退出等待；2026-11-01 复查生命周期接线 |
+| `src/main/modules/agent-control/tools-runtime/tool-registry.ts` | 1542 | 1 | 一般 | 登记只读整理状态工具；2026-11-01 复查域注册归属 |
+| `src/main/modules/migrations.ts` | 3376 | 2 | 健康 | 仅登记独立 081 迁移，连续编号检查覆盖 |
+| `src/main/modules/rss-engine/ipc-handler.ts` | 1222 | 8 | 一般 | 新处理分组独立实现，宿主仅组装；2026-11-01 复查 |
+| `src/main/modules/tools/tool-executor.ts` | 1264 | 4 | 一般 | 仅注入读取能力与当前模型配置检查；2026-11-01 复查 |
+| `src/preload/index.ts` | 1545 | 6 | 一般 | 六个明确调用入口；2026-11-01 复查分域组装 |
+| `src/renderer/types/electron.d.ts` | 3993 | 6 | 健康 | 引用共享整理合同，不复制字段定义 |
+
+整理任务存储、判断方法、执行、IPC 与 UI 分别放在小模块；未把分类流程放进 Agent 调度宿主或既有文案/视觉分析管理器。
+
 ## 2026-10-01 RSS 自定义栏目与分类保存
 
 | 文件 | 当前行数 | 净增 | 判断 | 后续 |

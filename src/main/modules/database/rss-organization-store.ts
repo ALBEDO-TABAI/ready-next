@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import type { RSSJudgment, RSSProcessingDefinition } from '../../../shared/rss-processing'
 import { assertDatabaseConnectionReady, type DatabaseConnection } from './connection'
 import { RSSDefinitionWriteSchema, RSSDefinitionDeleteSchema, RSSMembershipWriteSchema, rssArticleRevision,
   type RSSDefinition, type RSSDefinitionWrite, type RSSMembership, type RSSMembershipWrite } from '../../../shared/rss-organization'
@@ -87,6 +88,20 @@ export class RSSOrganizationStore {
       } else this.db.prepare(`INSERT INTO rss_memberships(item_id,definition_id,manual_decision) VALUES (?,?,?)
         ON CONFLICT(item_id,definition_id) DO UPDATE SET manual_decision=excluded.manual_decision`).run(params.itemId, params.definitionId, Number(params.decision))
       return this.memberships([params.itemId])[params.itemId] || []
+    })
+  }
+
+  applyDerived(itemId: string, articleRevision: string, definitions: RSSProcessingDefinition[], decisions: RSSJudgment['decisions']): void {
+    this.transaction(() => {
+      if (this.articleRevision(itemId) !== articleRevision) throw new Error('文章已变化，不能保存旧归类。')
+      const current = this.list()
+      if (definitions.some((d) => !current.some((entry) => entry.id === d.id && entry.ruleRevision === d.ruleRevision))) throw new Error('分类标准已变化。')
+      if (decisions.length !== definitions.length || new Set(decisions.map((d) => d.definitionId)).size !== definitions.length || decisions.some((d) => !definitions.some((entry) => entry.id === d.definitionId))) throw new Error('归类结果与本次标准不一致。')
+      const write = this.db.prepare(`INSERT INTO rss_memberships(item_id,definition_id,derived_decision,derived_origin,reason,evidence,content_revision,rule_revision)
+        VALUES (?,?,?,'model',?,?,?,?) ON CONFLICT(item_id,definition_id) DO UPDATE SET derived_decision=excluded.derived_decision,
+        derived_origin=excluded.derived_origin,reason=excluded.reason,evidence=excluded.evidence,content_revision=excluded.content_revision,rule_revision=excluded.rule_revision`)
+      for (const decision of decisions) write.run(itemId, decision.definitionId, decision.included === null ? 2 : Number(decision.included), decision.reason,
+        decision.evidence, articleRevision, definitions.find((d) => d.id === decision.definitionId)!.ruleRevision)
     })
   }
 

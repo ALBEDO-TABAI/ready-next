@@ -218,6 +218,7 @@ const RSS_TOOL_NAMES = [
   'rss_query_items',
   'rss_read_article',
   'rss_read_reference',
+  'rss_read_processing',
 ]
 
 const CALENDAR_TOOL_NAMES = [

@@ -27,7 +27,7 @@ test('organization migration preserves all nonempty historical categories and ar
   const raw = new Database(':memory:')
   raw.pragma('foreign_keys=ON')
   try {
-    for (const name of __getMigrationNamesForTests().filter((name) => !name.startsWith('080_'))) __runMigrationForTests(name, raw)
+    for (const name of __getMigrationNamesForTests().filter((name) => Number(name.slice(0, 3)) < 80)) __runMigrationForTests(name, raw)
     raw.prepare("INSERT INTO rss_sources(id,name,url,group_name) VALUES ('source','Source','https://example.test/feed','default')").run()
     for (const [id, tag] of [['design', '设计'], ['unknown', '未见过,不拆分'], ['null', null], ['other', '其他']] as const) {
       raw.prepare('INSERT INTO rss_items(id,source_id,guid,title,link,ai_tags,read,starred,inbox_visible) VALUES (?,\'source\',?,?,?,?,1,1,0)').run(id, id, id, `https://example.test/${id}`, tag)

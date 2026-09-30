@@ -12,7 +12,7 @@ export interface CapabilityFloors {
   readonly reasons: ReadonlyArray<string>
 }
 
-export const RSS_RESOURCE_FLOOR_TOOL_NAMES: ReadonlyArray<string> = ['rss_query_items', 'rss_read_article', 'rss_read_reference']
+export const RSS_RESOURCE_FLOOR_TOOL_NAMES: ReadonlyArray<string> = ['rss_query_items', 'rss_read_article', 'rss_read_reference', 'rss_read_processing']
 /** 本地文档资源只授读取，不包含写入。 */
 export const LOCAL_DOCUMENT_RESOURCE_FLOOR_TOOL_NAMES: ReadonlyArray<string> = ['file_locate', 'file_read_excerpt']
 export const TAG_FORGE_FOLDER_FLOOR_TOOL_NAMES: ReadonlyArray<string> = [

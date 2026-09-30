@@ -71,6 +71,7 @@ const READ_ONLY_RSS_TOOL_NAMES = new Set([
   'rss_query_items',
   'rss_read_article',
   'rss_read_reference',
+  'rss_read_processing',
 ])
 
 const READ_ONLY_CALENDAR_TOOL_NAMES = new Set([

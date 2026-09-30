@@ -61,7 +61,12 @@ export class ScheduleDispatchQueue {
     const existing = this.drains.get(scopeId)
     if (existing) return existing
     const drain = this.drainScope(scopeId).finally(() => {
-      if (this.drains.get(scopeId) === drain) this.drains.delete(scopeId)
+      if (this.drains.get(scopeId) === drain) {
+        this.drains.delete(scopeId)
+        if (!this.activeScopes.has(scopeId) && !this.deps.isScopeBusy(scopeId)
+          && [...this.pendingBySchedule.values()].some((item) => item.scopeId === scopeId && !this.activeBySchedule.has(item.scheduleId))) return this.startDrain(scopeId)
+      }
+      return undefined
     })
     this.drains.set(scopeId, drain)
     return drain
@@ -84,6 +89,8 @@ export class ScheduleDispatchQueue {
       } finally {
         this.activeBySchedule.delete(next.scheduleId)
         this.activeScopes.delete(scopeId)
+        const moved = this.pendingBySchedule.get(next.scheduleId)
+        if (moved && moved.scopeId !== scopeId) void this.startDrain(moved.scopeId)
       }
     }
   }

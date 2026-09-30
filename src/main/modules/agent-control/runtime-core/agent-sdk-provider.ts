@@ -1,6 +1,6 @@
 import { randomUUID } from 'crypto'
 import OpenAI from 'openai'
-import { isProviderOutputIncomplete } from './provider-output-status'
+import { isProviderOutputIncomplete, ProviderOutputIncompleteError } from './provider-output-status'
 import {
   OpenAIProvider,
   Usage,
@@ -695,6 +695,7 @@ export class ReadyOpenAICompatibleModel implements Model {
       if (!payload) continue
       const streamError = providerStreamPayloadError(payload)
       if (streamError) throw streamError
+      if (isProviderOutputIncomplete(payload.response)) throw new ProviderOutputIncompleteError()
       const { textDelta } = accumulator.feed(event.event, payload)
       if (textDelta) {
         if (!firstDeltaSeen) {

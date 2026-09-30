@@ -2382,6 +2382,12 @@ interface RSSItemAnalysisProgress {
 }
 
 interface ElectronRSSAPI {
+  processingStatus: () => Promise<RSSResponse<import('../../shared/rss-processing').RSSProcessingStatus>>
+  processingJobs: (input?: import('../../shared/rss-processing').RSSProcessingListInput) => Promise<RSSResponse<import('../../shared/rss-processing').RSSProcessingList>>
+  configureProcessing: (input: import('../../shared/rss-processing').RSSProcessingSettings) => Promise<RSSResponse<import('../../shared/rss-processing').RSSProcessingSettings>>
+  reprocessArticle: (input: { itemId: string; expectedArticleRevision: string }) => Promise<RSSResponse<{ jobIds: string[] }>>
+  cancelProcessing: (id: string) => Promise<RSSResponse<{ id: string }>>
+  resumeProcessing: () => Promise<RSSResponse<{ requested: boolean }>>
   getDefinitions: () => Promise<RSSResponse<import('../../shared/rss-organization').RSSDefinition[]>>
   saveDefinition: (input: import('../../shared/rss-organization').RSSDefinitionWrite) => Promise<RSSResponse<import('../../shared/rss-organization').RSSDefinition>>
   removeDefinition: (input: { id: string; expectedRevision: number }) => Promise<RSSResponse<{ id: string }>>

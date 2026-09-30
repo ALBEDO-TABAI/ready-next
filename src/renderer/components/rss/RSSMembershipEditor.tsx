@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import RSSProcessingPanel from './RSSProcessingPanel'
 import type { RSSArticleExcerpt } from '../../../shared/rss-workspace'
 import type { RSSDefinition, RSSMembership } from '../../../shared/rss-organization'
 
@@ -48,5 +49,6 @@ export default function RSSMembershipEditor({ article, definitions, active }: { 
       </label>
     })}
     {error && <p role="alert">{error}</p>}
+    <RSSProcessingPanel active={active} article={article} />
   </details>
 }

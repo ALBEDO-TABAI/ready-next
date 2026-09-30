@@ -80,6 +80,8 @@ import {
 import { completeTagForgeHostReview } from '../tag-forge/tag-forge-host-review'
 import { executeMcpTool } from './mcp-tools'
 import { executeRSSTool } from './rss-tools'
+import { isRSSModelConfigured } from '../rss-engine/model-completion'
+import { AppSettingsRepository } from '../repositories/app-settings-repository'
 import { executeSkillTool, findSkillToolByNameForExecution } from './skills-tools'
 import { executeSystemTool } from './system-tools'
 import { executeFeishuTool } from './feishu-tools'
@@ -681,6 +683,8 @@ async function executeToolCallInner(
 
         case 'rss':
           return executeRSSTool(toolName, args, {
+            getProcessing: () => getDatabase().rss.processing,
+            hasProcessingModel: () => isRSSModelConfigured(new AppSettingsRepository().getAIConfig()),
             getContent: () => getDatabase().rss.content,
             getAnalysisProgress: (ids) => getRSSItemAnalysisManager().getItemProgress(ids),
             readAccessDenied: context.scope?.sourceKind !== 'local',

@@ -36,7 +36,7 @@ function logSettings(msg: string) {
   try { settingsLogger.append(`[${new Date().toISOString()}] ${msg}\n`) } catch { /* ignore */ }
 }
 
-export function setupSettingsIPC(options?: { onSettingChanged?: (key: string, value: string) => void }): void {
+export function setupSettingsIPC(options?: { onSettingChanged?: (key: string, value: string) => void; onModelChanged?: () => void }): void {
   const repository = new AppSettingsRepository()
   const externalServices = new ExternalServiceStore(repository)
   setBrowserPowerGlobalModeReader(() => repository.getSetting(BROWSER_POWER_MODE_SETTING_KEY) === 'true')
@@ -123,6 +123,7 @@ export function setupSettingsIPC(options?: { onSettingChanged?: (key: string, va
   ipcMain.handle('settings:setAIConfig', (_, config: AIModelConfig): SettingsIPCResponse => {
     try {
       repository.setAIConfig(normalizeAIConfig(config))
+      options?.onModelChanged?.()
       return { success: true }
     } catch (error) {
       return { success: false, error: error instanceof Error ? error.message : String(error) }
@@ -143,6 +144,7 @@ export function setupSettingsIPC(options?: { onSettingChanged?: (key: string, va
   ipcMain.handle('settings:setAIWorkspace', (_, workspace: AIProviderWorkspace): SettingsIPCResponse => {
     try {
       repository.setAIWorkspace(normalizeAIWorkspace(workspace))
+      options?.onModelChanged?.()
       return { success: true }
     } catch (error) {
       return { success: false, error: error instanceof Error ? error.message : String(error) }

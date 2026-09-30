@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 'use strict'
-// Runs only synthetic local content and an isolated Ready profile. No model calls.
+// Runs synthetic content, a local model-protocol fixture and an isolated Ready profile. No external model calls.
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const os = require('node:os')
@@ -16,7 +16,27 @@ async function main() {
   fs.mkdirSync(evidence, { recursive: true })
   fs.rmSync(path.join(evidence, 'result.json'), { force: true })
   let authenticatedFetches = 0
-  const server = createServer((req, res) => {
+  let modelRequests = 0, holdModelResponse = false, updatedProcessingFeed = false
+  const server = createServer(async (req, res) => {
+    if (req.url === '/processing-feed') {
+      res.writeHead(200, { 'content-type': 'application/rss+xml' })
+      const article = (id, title) => `<item><guid>${id}</guid><title>${title}</title><link>http://127.0.0.1/article/${id}</link><description>Version 2 supports video editing.</description></item>`
+      res.end(`<rss version="2.0"><channel><title>自动整理验收</title><link>http://127.0.0.1</link><description>Local fixture</description>${article('processing-history', '自动整理历史资讯')}${updatedProcessingFeed ? article('processing-new', '自动整理新增资讯') : ''}</channel></rss>`)
+      return
+    }
+    if (req.url === '/v1/chat/completions') {
+      modelRequests++
+      const chunks = []
+      for await (const chunk of req) chunks.push(chunk)
+      const request = JSON.parse(Buffer.concat(chunks).toString('utf8'))
+      const user = request.messages.find((message) => message.role === 'user')
+      const input = JSON.parse(typeof user.content === 'string' ? user.content : user.content.map((part) => part.text || '').join(''))
+      res.writeHead(200, { 'content-type': 'text/event-stream' })
+      if (holdModelResponse) { res.write(': waiting for cancellation\n\n'); return }
+      const text = JSON.stringify({ decisions: input.definitions.map((definition) => ({ definitionId: definition.id, included: true, reason: '合成验收：提供的原文包含可核对内容。', evidence: input.source.text.slice(0, 32) })) })
+      res.end(`data: ${JSON.stringify({ id: 'local-rss', choices: [{ index: 0, delta: { content: text }, finish_reason: null }] })}\n\ndata: ${JSON.stringify({ id: 'local-rss', choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] })}\n\ndata: [DONE]\n\n`)
+      return
+    }
     if (req.url === '/login') {
       res.setHeader('set-cookie', 'rss_reader_test=verified; Path=/; HttpOnly; SameSite=Lax')
       res.end('<html><body>Local login complete</body></html>')
@@ -222,7 +242,7 @@ await (db as any).db.backup(${JSON.stringify(path.join(root, 'ready.db'))}); db.
     await page.getByRole('button', { name: '可读资讯 10', exact: true }).click()
     await page.locator('.rss-article-reader').getByText('ARTICLE-END-10', { exact: true }).waitFor()
     const bodyBeforeCategory = await page.evaluate(() => window.electronAPI.rss.readArticle({ itemId: 'reader-10', length: 1 }))
-    await page.locator('.rss-membership-editor summary').click()
+    await page.locator('.rss-membership-editor > summary').click()
     await page.getByLabel('制作方法归属', { exact: true }).selectOption('yes')
     await page.waitForFunction((id) => window.electronAPI.rss.readArticle({ itemId: 'reader-10', length: 1 }).then((response) => response.data.article.classifications.some((entry) => entry.definitionId === id && entry.included === true)), topic.id)
     await page.getByLabel('精选归属', { exact: true }).selectOption('yes')
@@ -284,7 +304,56 @@ await (db as any).db.backup(${JSON.stringify(path.join(root, 'ready.db'))}); db.
     assert.equal(afterDelete.data.article.classifications.some((entry) => entry.definitionId === topic.id), false)
     assert.equal(afterDelete.data.article.classifications.some((entry) => entry.definitionId === 'curated' && entry.included), true)
 
-    report = { ok: true, customDefinitions: true, applicationRestartPreservesDefinitions: true, manualMemberships: true, curationSeparateFromBookmarks: true, typedRSSReferences: true, staleReferenceVisible: true, saveNoteReadback: true, noteEditIndependent: true, exportAllPages: true, cancelExport: true, navigationCollapse: true, searchAndPagination: true, historyAndFavoritesPreserved: true, preferencesSurviveReload: true, longArticle: true, sourceCodeInert: true, failedSaveVisible: true, readPersisted: true, returnPreservesScroll: true, outlineNavigation: true, browserLoginReused: true, narrowNoOverflow: true }
+    const initialProcessing = await page.evaluate(() => window.electronAPI.rss.processingJobs())
+    assert.equal(initialProcessing.data.total, 0, 'historical fixture import must not auto-process')
+    const globalProcessing = page.locator('.rss-processing-panel').first()
+    await globalProcessing.locator(':scope > summary').click()
+    await globalProcessing.getByLabel('每日整理调用上限', { exact: true }).fill('2')
+    await page.evaluate(() => window.electronAPI.rss.configureProcessing({ enabled: true, dailyLimit: 88 }))
+    await globalProcessing.locator(':scope > summary').filter({ hasText: '0/88' }).waitFor()
+    assert.equal(await globalProcessing.getByLabel('每日整理调用上限', { exact: true }).inputValue(), '2', 'background status must not replace an unsaved limit')
+    await globalProcessing.getByRole('button', { name: '保存限额', exact: true }).click()
+    await page.waitForFunction(() => window.electronAPI.rss.processingStatus().then((result) => result.data.settings.dailyLimit === 2))
+    await globalProcessing.locator(':scope > summary').click()
+    const modelSetup = await page.evaluate((baseUrl) => window.electronAPI.settings.setAIConfig({ provider: 'openai-compatible', apiKey: 'synthetic-only', model: 'local-rss-test', baseUrl }), base + '/v1')
+    assert.equal(modelSetup.success, true)
+    await page.locator('.rss-news-card').first().click()
+    const membershipPanel = page.locator('.rss-membership-editor')
+    await membershipPanel.locator(':scope > summary').click()
+    const processingPanel = membershipPanel.locator('.rss-processing-panel')
+    await processingPanel.locator(':scope > summary').click()
+    const reprocess = processingPanel.getByRole('button', { name: '按当前标准整理本篇（使用模型）', exact: true })
+    await reprocess.click()
+    await processingPanel.locator('li').filter({ hasText: '整理完成' }).waitFor()
+    assert.equal(modelRequests, 1)
+    await page.screenshot({ path: path.join(evidence, 'processing-complete.png') })
+    holdModelResponse = true
+    await reprocess.click()
+    const runningRow = processingPanel.locator('li').filter({ hasText: '正在整理' })
+    await runningRow.waitFor()
+    const requestDeadline = Date.now() + 5000
+    while (modelRequests < 2 && Date.now() < requestDeadline) await new Promise((resolve) => setTimeout(resolve, 20))
+    assert.equal(modelRequests, 2)
+    await runningRow.getByRole('button', { name: '取消', exact: true }).click()
+    await processingPanel.getByText('已取消；已发出的调用仍计入限额。', { exact: true }).waitFor()
+    const afterCancel = await page.evaluate(() => window.electronAPI.rss.processingStatus())
+    assert.equal(afterCancel.data.callsToday, 2)
+    assert.equal(afterCancel.data.blocked, 'limit')
+    await page.screenshot({ path: path.join(evidence, 'processing-canceled.png') })
+    holdModelResponse = false
+    await page.evaluate(() => window.electronAPI.rss.configureProcessing({ enabled: true, dailyLimit: 10 }))
+    const automaticSource = await page.evaluate((url) => window.electronAPI.rss.addSource({ name: '自动整理验收', url }), base + '/processing-feed')
+    assert.equal(automaticSource.success, true, automaticSource.error)
+    assert.equal(modelRequests, 2, 'adding a feed must not process its historical import')
+    updatedProcessingFeed = true
+    const refreshedSource = await page.evaluate((id) => window.electronAPI.rss.refreshSource(id), automaticSource.data.id)
+    assert.equal(refreshedSource.success, true, refreshedSource.error)
+    await page.waitForFunction(() => window.electronAPI.rss.queryItems({ scope: 'library', search: '自动整理新增资讯' }).then((result) => result.data?.items[0]?.classifications.some((entry) => entry.origin === 'model' && entry.included)), undefined, { timeout: 15000 })
+    const historyClassification = await page.evaluate(() => window.electronAPI.rss.queryItems({ scope: 'library', search: '自动整理历史资讯' }))
+    assert.deepEqual(historyClassification.data.items[0].classifications, [])
+    assert.equal(modelRequests, 3)
+
+    report = { ok: true, automaticRefreshProcessesOnlyNewItems: true, semanticProcessingThroughLocalProvider: true, cancelProcessingKeepsCallCount: true, historicalImportNotProcessed: true, customDefinitions: true, applicationRestartPreservesDefinitions: true, manualMemberships: true, curationSeparateFromBookmarks: true, typedRSSReferences: true, staleReferenceVisible: true, saveNoteReadback: true, noteEditIndependent: true, exportAllPages: true, cancelExport: true, navigationCollapse: true, searchAndPagination: true, historyAndFavoritesPreserved: true, preferencesSurviveReload: true, longArticle: true, sourceCodeInert: true, failedSaveVisible: true, readPersisted: true, returnPreservesScroll: true, outlineNavigation: true, browserLoginReused: true, narrowNoOverflow: true }
   } catch (error) {
     const failedPage = app?.windows().find((entry) => entry.url().includes('/renderer/index.html'))
     if (failedPage) await failedPage.screenshot({ path: path.join(evidence, 'failure.png') }).catch(() => {})
